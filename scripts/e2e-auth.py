@@ -128,3 +128,49 @@ try:
     urllib.request.urlopen(req2); ok("🔒 交付包隔離", False)
 except urllib.error.HTTPError as e:
     ok("🔒 交付包隔離（403）", e.code==403)
+
+# ─── 第三段：審批三態機＋AI 導演＋回饋＋MCP ───
+# 把阿哲升組長來測裁決（超管操作）
+call("POST",admin2,"admin.setGroupRole",{"groupId":edit_group["id"],"userId":acc["user"]["id"],"role":"leader"})
+azhe3 = client(); call("POST",azhe3,"auth.login",{"email":"azhe@example.com","password":"azhe-pass-88"})
+
+sub = call("POST",azhe3,"approvals.submit",{"sceneId":s1["id"]})
+ok("送審 v1（分鏡進待審）", sub["version"]==1 and sub["status"]=="pending")
+noreason = call("POST",azhe3,"approvals.decide",{"approvalId":sub["id"],"decision":"needs_work"})
+ok("退回必附理由（被擋）", "理由" in noreason.get("__error__",""))
+dec = call("POST",azhe3,"approvals.decide",{"approvalId":sub["id"],"decision":"needs_work","reason":"光太暗，柔一點"})
+ok("退回 v1（附理由）", dec["status"]=="needs_work")
+sub2 = call("POST",azhe3,"approvals.submit",{"sceneId":s1["id"]})
+ok("重送=v2", sub2["version"]==2)
+dec2 = call("POST",azhe3,"approvals.decide",{"approvalId":sub2["id"],"decision":"approved"})
+ok("v2 通過", dec2["status"]=="approved")
+msgs2 = call("GET",azhe3,"messages.list",{"projectId":proj["id"]})
+sysmsgs = [m for m in msgs2 if m["kind"]=="system"]
+ok("審批事件進留言（系統訊息×4）", len(sysmsgs)>=4 and any("需修改" in m["body"] for m in sysmsgs) and any("已通過" in m["body"] for m in sysmsgs))
+
+sug = call("POST",azhe3,"director.suggest",{"projectId":proj["id"]})
+ok("AI 導演給 3 個 idea（含世界觀）", len(sug["suggestions"])==3 and "陳師姐" in sug["suggestions"][0]["prompt"])
+
+fb = call("POST",azhe3,"feedback.submit",{"scores":{"context":5,"cost":4,"collab":5,"ai":4,"daily":4,"usability":5},"best":"不用重複解釋背景","worst":"想要更快"})
+fbl = call("GET",admin2,"feedback.list")
+ok("回饋送出＋管理員可見", fbl[0]["userName"]=="阿哲" and fbl[0]["best"]=="不用重複解釋背景")
+
+# MCP：initialize / tools list / call
+def mcp(method, params=None, key="test-mcp-key"):
+    req = urllib.request.Request("http://localhost:3199/api/mcp", data=json.dumps({"jsonrpc":"2.0","id":1,"method":method,"params":params or {}}).encode(),
+                                 headers={"Content-Type":"application/json","x-api-key":key}, method="POST")
+    try:
+        return json.load(urllib.request.urlopen(req))
+    except urllib.error.HTTPError as e:
+        return {"http": e.code}
+ok("MCP 錯誤金鑰被擋", mcp("tools/list", key="wrong").get("http")==401)
+init = mcp("initialize")
+ok("MCP initialize", init["result"]["serverInfo"]["name"]=="ai-director-os")
+tl = mcp("tools/list")
+ok("MCP tools/list（4 工具）", len(tl["result"]["tools"])==4)
+tc = mcp("tools/call",{"name":"list_projects","arguments":{}})
+projects_via_mcp = json.loads(tc["result"]["content"][0]["text"])
+ok("MCP list_projects 可用", any(p["title"]=="見證故事測試" for p in projects_via_mcp))
+tc2 = mcp("tools/call",{"name":"get_project_context","arguments":{"projectId":proj["id"]}})
+ctx2 = json.loads(tc2["result"]["content"][0]["text"])
+ok("MCP 讀專案上下文（含世界觀）", ctx2["worldview"]["logline"].startswith("陳師姐"))

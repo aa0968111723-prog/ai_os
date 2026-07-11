@@ -4,12 +4,14 @@ import { MODELS } from "@shared/models";
 import { worldviewSchema, TONE_OPTIONS, THEME_OPTIONS, type Worldview } from "@shared/worldview";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
+import { DirectorCard } from "../components/DirectorCard";
 import { MessagePanel } from "../components/MessagePanel";
 
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
 export function ProjectPage({ id }: { id: string }) {
   const utils = trpc.useUtils();
   const project = trpc.projects.get.useQuery({ id });
+  const me = trpc.auth.me.useQuery();
   const updateWv = trpc.projects.updateWorldview.useMutation({
     onSuccess: () => utils.projects.get.invalidate({ id }),
   });
@@ -28,6 +30,8 @@ export function ProjectPage({ id }: { id: string }) {
   if (project.error || !project.data) return <p className="error">載入失敗：{project.error?.message}</p>;
 
   const p = project.data;
+  const myRole = me.data?.groups.find((g) => g.groupId === p.groupId)?.role;
+  const isLeader = myRole === "leader" || myRole === "admin";
   const wv: Worldview = worldviewSchema.parse(p.worldview ?? {});
   const model = MODELS.find((m) => m.id === modelId)!;
 
@@ -81,6 +85,9 @@ export function ProjectPage({ id }: { id: string }) {
             <p className="hint" style={{ marginTop: 10 }}>禁忌事項已內建（醫療宣稱禁語等）；進階設定之後開放。</p>
           </section>
 
+          {/* AI 導演建議 */}
+          <DirectorCard projectId={id} onUse={(text) => setPrompt(text)} />
+
           {/* 生成台 */}
           <section className="card">
             <h2>創作生成</h2>
@@ -109,7 +116,7 @@ export function ProjectPage({ id }: { id: string }) {
           </section>
 
           {/* 分鏡與交付 */}
-          <SceneList projectId={id} />
+          <SceneList projectId={id} isLeader={isLeader} />
         </div>
 
         {/* 組內留言 */}

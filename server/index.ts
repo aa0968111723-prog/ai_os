@@ -13,6 +13,7 @@ import { ensureSeed } from "./services/seed";
 import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
 import { exportProjectZip } from "./services/exporter";
+import { handleMcp } from "./services/mcp";
 import { db, schema } from "./db";
 import { eq } from "drizzle-orm";
 
@@ -52,6 +53,9 @@ app.get("/api/export/:projectId", async (req, res) => {
     if (!res.headersSent) res.status(500).json({ error: String(err) });
   }
 });
+
+// MCP 伺服器介面（設 MCP_API_KEY 啟用；供外部 AI 客戶端操作）
+app.post("/api/mcp", handleMcp);
 
 // tRPC API
 app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));

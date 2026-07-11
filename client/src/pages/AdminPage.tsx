@@ -10,6 +10,7 @@ export function AdminPage() {
   const settings = trpc.quota.getSettings.useQuery();
   const saveSettings = trpc.quota.updateSettings.useMutation({ onSuccess: () => { utils.quota.getSettings.invalidate(); utils.quota.my.invalidate(); } });
   const setGroupQuota = trpc.quota.setGroupQuota.useMutation({ onSuccess: () => { utils.admin.overview.invalidate(); utils.quota.my.invalidate(); } });
+  const feedback = trpc.feedback.list.useQuery();
 
   const [email, setEmail] = useState("");
   const [teamId, setTeamId] = useState("");
@@ -137,6 +138,24 @@ export function AdminPage() {
         </div>
         </aside>
       </div>
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <h2>回饋彙整（{feedback.data?.length ?? 0}）</h2>
+        {!feedback.data?.length && <p className="hint">還沒有回饋——夥伴用頂欄「回饋」按鈕填寫。</p>}
+        {feedback.data?.map((f) => (
+          <div key={f.id} className="gen-row" style={{ gridTemplateColumns: "auto 1fr" }}>
+            <span className="chip">{f.userName}</span>
+            <div style={{ fontSize: 13 }}>
+              <span className="mono" style={{ fontSize: 11 }}>
+                {Object.entries((f.scores as Record<string, number>) ?? {}).map(([k, v]) => `${k}:${v}`).join(" ")}
+              </span>
+              {f.best && <div>👍 {f.best}</div>}
+              {f.worst && <div>🛠 {f.worst}</div>}
+              {f.note && <div className="hint">{f.note}</div>}
+            </div>
+          </div>
+        ))}
+      </section>
     </div>
   );
 }

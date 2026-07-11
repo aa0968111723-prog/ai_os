@@ -166,6 +166,18 @@ export const approvals = pgTable("approvals", {
   decidedAt: timestamp("decided_at"),
 });
 
+/** 測試回饋（評估七項＋文字） */
+export const feedback = pgTable("feedback", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  groupId: uuid("group_id"),
+  scores: jsonb("scores").notNull().default({}),
+  best: text("best"),
+  worst: text("worst"),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const messages = pgTable("messages", {
   id: uuid("id").primaryKey().defaultRandom(),
   groupId: uuid("group_id").notNull(),
