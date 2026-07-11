@@ -1,0 +1,44 @@
+{
+  "name": "ai-director-os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI Director OS — 弘法內容創作與協作系統（釋迦牟尼佛救世基金會內部工具）",
+  "scripts": {
+    "dev": "concurrently -n server,client -c yellow,cyan \"tsx watch server/index.ts\" \"vite\"",
+    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "db:push": "drizzle-kit push",
+    "test": "echo \"(尚無測試)\" && exit 0"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.2",
+    "@trpc/client": "^11.6.0",
+    "@trpc/react-query": "^11.6.0",
+    "@trpc/server": "^11.6.0",
+    "drizzle-orm": "^0.44.5",
+    "express": "^4.21.2",
+    "pg": "^8.13.1",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "superjson": "^2.2.1",
+    "wouter": "^3.3.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.2.1",
+    "@types/react-dom": "^19.2.1",
+    "@vitejs/plugin-react": "^5.0.4",
+    "concurrently": "^9.1.0",
+    "drizzle-kit": "^0.31.4",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  },
+  "engines": { "node": ">=20" }
+}

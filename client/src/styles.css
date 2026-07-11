@@ -1,0 +1,89 @@
+/* AI Director OS — 黏土療癒設計 tokens（設計規格書 01 節） */
+:root {
+  --bg: #f4eee4; --fg: #2b2620; --card: #fbf7f0; --card2: #f7f1e8;
+  --muted: #f1eadf; --muted-fg: #877b6b; --soft: #9a8c78;
+  --primary: #c2613f; --primary-fg: #fff7f1;
+  --healing: #9e86c4; --healing-soft: #efe7f3;
+  --gold: #b58a3e; --success: #6e8b62; --danger: #c7493a;
+  --border: #e4daca; --border-soft: #eadfce;
+  --shadow: 0 6px 22px -12px rgba(86, 66, 42, 0.2), 0 1px 3px rgba(86, 66, 42, 0.07);
+  --radius: 16px;
+  --sans: "Noto Sans TC", "Inter", system-ui, -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --serif: "Noto Serif TC", Georgia, serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--sans); line-height: 1.6; -webkit-font-smoothing: antialiased;
+  background-image: radial-gradient(120% 80% at 85% -10%, rgba(224, 178, 132, 0.35), transparent 55%),
+    radial-gradient(80% 60% at 5% 5%, rgba(158, 134, 196, 0.22), transparent 52%);
+  min-height: 100vh;
+}
+.app { max-width: 1180px; margin: 0 auto; padding: 0 20px 48px; }
+
+/* 頂欄 */
+.topbar { display: flex; align-items: center; gap: 12px; padding: 12px 0; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; }
+.orb { width: 22px; height: 22px; border-radius: 50%; flex: none;
+  background: conic-gradient(from 210deg, var(--primary), var(--healing), var(--primary));
+  box-shadow: 0 0 0 3px var(--healing-soft); }
+.spacer { flex: 1; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--border);
+  background: var(--card); border-radius: 999px; font-size: 13px; box-shadow: var(--shadow); }
+.badge .mono { font-family: var(--mono); font-weight: 600; }
+.badge.mock { border-color: var(--gold); color: var(--gold); }
+
+/* 標題 */
+h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(26px, 5vw, 40px); line-height: 1.1; margin: 24px 0 6px; }
+h1 .accent { color: var(--primary); font-style: italic; }
+h2 { font-family: var(--serif); font-weight: 560; font-size: 20px; margin: 0 0 12px; }
+.sub { color: var(--muted-fg); margin: 0 0 24px; }
+
+/* 卡片與網格 */
+.card { border: 1px solid var(--border); background: var(--card); border-radius: var(--radius);
+  padding: 18px 20px; box-shadow: var(--shadow); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.proj-card { cursor: pointer; transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s; }
+.proj-card:hover { transform: translateY(-3px); box-shadow: 0 16px 38px -16px rgba(86, 66, 42, 0.28); }
+.proj-card h3 { margin: 0 0 6px; font-size: 16px; }
+.meta { font-size: 12px; color: var(--muted-fg); }
+.chip { display: inline-block; font-size: 12px; padding: 2px 10px; border: 1px solid var(--border-soft);
+  border-radius: 8px; background: var(--card2); color: var(--muted-fg); margin: 2px 4px 2px 0; }
+.chip.on { border-color: var(--primary); color: var(--primary); background: rgba(194, 97, 63, 0.07); cursor: pointer; }
+.chip.pick { cursor: pointer; }
+
+/* 表單 */
+label { display: block; font-size: 13px; color: var(--muted-fg); margin: 12px 0 4px; }
+input, textarea, select { width: 100%; font-family: var(--sans); font-size: 14px; color: var(--fg);
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; }
+textarea { resize: vertical; min-height: 72px; }
+input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+button { font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--border); background: var(--card); color: var(--fg);
+  border-radius: 999px; padding: 9px 20px; }
+button.primary { background: var(--primary); color: var(--primary-fg); border-color: transparent; box-shadow: var(--shadow); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 生成列 */
+.gen-row { display: grid; grid-template-columns: 84px 1fr auto; gap: 14px; align-items: center;
+  border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 14px; background: var(--card); margin-top: 8px; }
+.gen-thumb { width: 84px; height: 52px; border-radius: 8px; object-fit: cover; background: var(--muted); }
+.pill { font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.pill.queued, .pill.running { color: var(--gold); border: 1px solid var(--gold); }
+.pill.done { color: var(--success); border: 1px solid var(--success); }
+.pill.failed { color: var(--danger); border: 1px solid var(--danger); }
+
+/* 留言 */
+.msg { display: flex; gap: 8px; margin-top: 10px; font-size: 14px; }
+.msg .who { font-weight: 600; flex: none; }
+.msg .time { color: var(--soft); font-size: 11px; font-family: var(--mono); }
+
+/* 版面 */
+.cols { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
+@media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+.stack > * + * { margin-top: 16px; }
+.error { color: var(--danger); font-size: 13px; margin-top: 8px; }
+.hint { color: var(--soft); font-size: 12px; }
+a { color: var(--primary); }
