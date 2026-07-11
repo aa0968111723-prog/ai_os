@@ -1,16 +1,27 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
-import { getDevUser, type DevUser } from "./services/seed";
+import type { Request, Response } from "express";
+import { resolveSession, loadAuthState, type AuthState } from "./services/auth";
+import { db, schema } from "./db";
+import { eq } from "drizzle-orm";
+import { SEED_ADMIN_EMAIL } from "./services/seed";
 
 export interface Context {
-  user: DevUser;
+  auth: AuthState | null;
+  req: Request;
+  res: Response;
 }
 
-export async function createContext(_opts: CreateExpressContextOptions): Promise<Context> {
-  // 開發模式假身分（定案：登入系統最後做，先測功能）
-  const user = await getDevUser();
-  return { user };
+export async function createContext({ req, res }: CreateExpressContextOptions): Promise<Context> {
+  // AUTH_MODE=dev：跳過登入、以種子超管身分運作（開發測功能不卡登入）
+  if (process.env.AUTH_MODE === "dev") {
+    const [admin] = await db.select().from(schema.users).where(eq(schema.users.email, SEED_ADMIN_EMAIL));
+    const auth = admin ? await loadAuthState(admin.id) : null;
+    return { auth, req, res };
+  }
+  const auth = await resolveSession(req);
+  return { auth, req, res };
 }
 
 const t = initTRPC.context<Context>().create({ transformer: superjson });
@@ -18,14 +29,29 @@ const t = initTRPC.context<Context>().create({ transformer: superjson });
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
-export const memberProcedure = t.procedure.use(({ ctx, next }) => {
-  if (!ctx.user) throw new TRPCError({ code: "UNAUTHORIZED" });
-  return next({ ctx });
+/** 需登入 */
+export const authedProcedure = t.procedure.use(({ ctx, next }) => {
+  if (!ctx.auth) throw new TRPCError({ code: "UNAUTHORIZED", message: "請先登入" });
+  return next({ ctx: { ...ctx, auth: ctx.auth } });
 });
 
-export const leaderProcedure = t.procedure.use(({ ctx, next }) => {
-  if (ctx.user.role !== "leader" && ctx.user.role !== "admin") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "需要組長權限" });
+/** 需任一團隊管理權（或超管） */
+export const adminProcedure = authedProcedure.use(({ ctx, next }) => {
+  if (!ctx.auth.user.isSuperAdmin && ctx.auth.adminTeamIds.length === 0) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "需要團隊管理權限" });
   }
   return next({ ctx });
 });
+
+/** 組存取守衛：回傳使用者在該組的角色，無權限直接擋（多組隔離的核心） */
+export function requireGroup(auth: AuthState, groupId: string): "admin" | "leader" | "member" {
+  const membership = auth.groups.find((g) => g.groupId === groupId);
+  if (!membership) throw new TRPCError({ code: "FORBIDDEN", message: "你不屬於這個組" });
+  return membership.role;
+}
+
+/** 組長以上（審批用） */
+export function requireLeader(auth: AuthState, groupId: string): void {
+  const role = requireGroup(auth, groupId);
+  if (role === "member") throw new TRPCError({ code: "FORBIDDEN", message: "需要組長權限" });
+}

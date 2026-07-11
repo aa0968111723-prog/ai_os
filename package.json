@@ -17,6 +17,8 @@
     "@trpc/client": "^11.6.0",
     "@trpc/react-query": "^11.6.0",
     "@trpc/server": "^11.6.0",
+    "@types/bcryptjs": "^2.4.6",
+    "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.44.5",
     "express": "^4.21.2",
     "pg": "^8.13.1",
@@ -40,5 +42,7 @@
     "typescript": "^5.7.2",
     "vite": "^6.0.7"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

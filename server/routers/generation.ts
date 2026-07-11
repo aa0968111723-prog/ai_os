@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { router, memberProcedure } from "../trpc";
+import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { getModel, type ProjectFormat } from "../../shared/models";
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
@@ -19,20 +19,18 @@ function buildPrompt(userPrompt: string, worldview: Worldview): string {
 }
 
 export const generationRouter = router({
-  submit: memberProcedure
+  submit: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), modelId: z.string(), prompt: z.string().min(1, "請填提示詞") }))
     .mutation(async ({ ctx, input }) => {
       const model = getModel(input.modelId);
       if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "未知模型（不在註冊表）" });
 
-      const [project] = await db
-        .select()
-        .from(schema.projects)
-        .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.groupId, ctx.user.groupId)));
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId); // 多組隔離
 
       // 額度守門（先擋再扣）
-      const quotaError = await checkQuota(ctx.user.id, model.points);
+      const quotaError = await checkQuota(ctx.auth.user.id, model.points);
       if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
 
       const worldview = worldviewSchema.parse(project.worldview ?? {});
@@ -44,8 +42,8 @@ export const generationRouter = router({
         .insert(schema.generations)
         .values({
           projectId: project.id,
-          groupId: ctx.user.groupId,
-          userId: ctx.user.id,
+          groupId: project.groupId,
+          userId: ctx.auth.user.id,
           modelId: model.id,
           kind: model.kind,
           prompt: input.prompt,
@@ -53,7 +51,7 @@ export const generationRouter = router({
           pointsEst: model.points,
         })
         .returning();
-      await deduct(ctx.user.id, ctx.user.groupId, model.points, `生成 ${model.label}`, gen.id);
+      await deduct(ctx.auth.user.id, project.groupId, model.points, `生成 ${model.label}`, gen.id);
 
       try {
         const { requestId } = await falSubmit(model.id, model.kind, falInput);
@@ -65,7 +63,7 @@ export const generationRouter = router({
         return updated;
       } catch (err) {
         // 送出就失敗 → 全額退點
-        await refund(ctx.user.id, ctx.user.groupId, model.points, "生成送出失敗退回", gen.id);
+        await refund(ctx.auth.user.id, project.groupId, model.points, "生成送出失敗退回", gen.id);
         await db
           .update(schema.generations)
           .set({ status: "failed", error: String(err), pointsRefunded: model.points, updatedAt: new Date() })
@@ -75,12 +73,10 @@ export const generationRouter = router({
     }),
 
   /** 輪詢狀態（開發模式主要路徑；正式站之後補 webhook＋此輪詢當備援） */
-  status: memberProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
-    const [gen] = await db
-      .select()
-      .from(schema.generations)
-      .where(and(eq(schema.generations.id, input.id), eq(schema.generations.groupId, ctx.user.groupId)));
+  status: authedProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));
     if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
+    requireGroup(ctx.auth, gen.groupId); // 多組隔離
     if (gen.status !== "queued" && gen.status !== "running") return gen;
     if (!gen.requestId) return gen;
 
@@ -115,18 +111,21 @@ export const generationRouter = router({
     return gen;
   }),
 
-  listByProject: memberProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
+  listByProject: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+    if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+    requireGroup(ctx.auth, project.groupId);
     return db
       .select()
       .from(schema.generations)
-      .where(and(eq(schema.generations.projectId, input.projectId), eq(schema.generations.groupId, ctx.user.groupId)))
+      .where(eq(schema.generations.projectId, input.projectId))
       .orderBy(desc(schema.generations.createdAt))
       .limit(30);
   }),
 
   /** 點數總覽（頂欄徽章＋生成前提示） */
-  pointsSummary: memberProcedure.query(async ({ ctx }) => {
-    const [total, weekly] = await Promise.all([usedTotal(), usedThisWeek(ctx.user.id)]);
+  pointsSummary: authedProcedure.query(async ({ ctx }) => {
+    const [total, weekly] = await Promise.all([usedTotal(), usedThisWeek(ctx.auth.user.id)]);
     return {
       totalBudget: TOTAL_BUDGET,
       totalUsed: total,

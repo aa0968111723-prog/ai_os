@@ -1,10 +1,13 @@
-import { router, memberProcedure } from "../trpc";
+import { router } from "../trpc";
+import { authRouter } from "./auth";
+import { adminRouter } from "./admin";
 import { projectsRouter } from "./projects";
 import { generationRouter } from "./generation";
 import { messagesRouter } from "./messages";
 
 export const appRouter = router({
-  me: memberProcedure.query(({ ctx }) => ctx.user),
+  auth: authRouter,
+  admin: adminRouter,
   projects: projectsRouter,
   generation: generationRouter,
   messages: messagesRouter,

@@ -4,7 +4,7 @@ import { trpc } from "../api";
 /** 站內留言（簡化定案：8 秒輪詢刷新） */
 export function MessagePanel({ projectId }: { projectId: string }) {
   const utils = trpc.useUtils();
-  const me = trpc.me.useQuery();
+  const me = trpc.auth.me.useQuery();
   const list = trpc.messages.list.useQuery({ projectId }, { refetchInterval: 8000 });
   const post = trpc.messages.post.useMutation({
     onSuccess: () => {
@@ -21,7 +21,7 @@ export function MessagePanel({ projectId }: { projectId: string }) {
       <div>
         {list.data?.map((m) => (
           <div key={m.id} className="msg">
-            <span className="who">{m.userId === me.data?.id ? me.data.name : "夥伴"}</span>
+            <span className="who">{m.userName ?? (m.userId === me.data?.user.id ? me.data.user.name : "夥伴")}</span>
             <span style={{ flex: 1 }}>{m.body}</span>
             <span className="time">
               {new Date(m.createdAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}

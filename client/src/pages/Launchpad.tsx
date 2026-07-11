@@ -4,10 +4,10 @@ import { trpc } from "../api";
 import { PROJECT_KINDS, PLATFORMS } from "@shared/models";
 
 /** 首頁作業台：繼續你的專案＋快速開始（設計規格 F2 簡化版） */
-export function Launchpad() {
+export function Launchpad({ groupId }: { groupId: string }) {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
-  const projects = trpc.projects.list.useQuery();
+  const projects = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
   const create = trpc.projects.create.useMutation({
     onSuccess: (project) => {
       utils.projects.list.invalidate();
@@ -64,8 +64,8 @@ export function Launchpad() {
           <div style={{ marginTop: 16 }}>
             <button
               className="primary"
-              disabled={!title.trim() || create.isPending}
-              onClick={() => create.mutate({ title: title.trim(), kind, platform })}
+              disabled={!title.trim() || !groupId || create.isPending}
+              onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform })}
             >
               {create.isPending ? "建立中…" : "建立專案"}
             </button>
