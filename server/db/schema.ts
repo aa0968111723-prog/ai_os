@@ -27,6 +27,8 @@ export const groups = pgTable("groups", {
   id: uuid("id").primaryKey().defaultRandom(),
   teamId: uuid("team_id").notNull(),
   name: text("name").notNull(),
+  /** 每人每週點數上限（null＝用全域預設；0＝不限）——組長/管理員可調 */
+  weeklyPointsPerUser: integer("weekly_points_per_user"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -42,6 +44,18 @@ export const groupMembers = pgTable("group_members", {
   groupId: uuid("group_id").notNull(),
   userId: uuid("user_id").notNull(),
   role: text("role", { enum: ["leader", "member"] }).notNull().default("member"),
+  /** 個人週額度覆寫（null＝跟組；0＝不限）——組長可對個別成員調 */
+  weeklyPointsOverride: integer("weekly_points_override"),
+});
+
+/** 全域點數設定（單列 key='global'）——不寫死在程式，管理員隨時可調 */
+export const settings = pgTable("settings", {
+  key: text("key").primaryKey(),
+  /** 總預算點數（null/0＝不限） */
+  totalBudgetPoints: integer("total_budget_points"),
+  /** 預設每人每週上限（null/0＝不限） */
+  defaultWeeklyPoints: integer("default_weekly_points"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 /** 邀請制（無公開註冊）：連結用 LINE 傳即可，72 小時過期、一次性 */
@@ -94,7 +108,7 @@ export const generations = pgTable("generations", {
   prompt: text("prompt").notNull(),
   params: jsonb("params").notNull().default({}),
   status: text("status", { enum: ["queued", "running", "done", "failed"] }).notNull().default("queued"),
-  pointsEst: integer("points_est").notNull(),
+  pointsEst: integer("points_est").notNull().default(0),
   pointsActual: integer("points_actual"),
   pointsRefunded: integer("points_refunded").notNull().default(0),
   requestId: text("request_id"),
@@ -104,6 +118,7 @@ export const generations = pgTable("generations", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+/** 點數帳本 — 花費紀錄（先扣預估、失敗退回） */
 export const costLedger = pgTable("cost_ledger", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull(),

@@ -7,11 +7,25 @@ import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { AdminPage } from "./pages/AdminPage";
 
+/** 彈性點數徽章：剩餘 or 不限（組長/管理員可在團隊管理調整） */
+function PointsBadge({ groupId }: { groupId: string }) {
+  const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 20_000 });
+  if (!my.data) return null;
+  const { totalRemaining, weeklyQuota, weeklyUsed } = my.data;
+  const label = totalRemaining != null ? `剩 ${totalRemaining.toLocaleString()}` : "不限";
+  const weekly = weeklyQuota != null ? `・週 ${weeklyUsed}/${weeklyQuota}` : "";
+  return (
+    <span className="badge" title="點數額度由組長／管理員調整">
+      ◈ <span className="mono">{label}{weekly}</span>
+    </span>
+  );
+}
+
 export function App() {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   const logout = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
-  const points = trpc.generation.pointsSummary.useQuery(undefined, { refetchInterval: 15_000, enabled: !!me.data });
+  const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
   const [, navigate] = useLocation();
 
   // 組切換（多組成員）：記住上次選的組
@@ -49,12 +63,8 @@ export function App() {
           </select>
         )}
         <span className="spacer" />
-        {me.data && points.data?.mockMode && <span className="badge mock">假生成模式</span>}
-        {me.data && (
-          <span className="badge">
-            ◈ <span className="mono">{points.data ? points.data.totalRemaining.toLocaleString() : "…"}</span> 點
-          </span>
-        )}
+        {me.data && info.data?.mockMode && <span className="badge mock">假生成模式</span>}
+        {me.data && <PointsBadge groupId={activeGroupId} />}
         {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}>團隊管理</span></Link>}
         {me.data && (
           <button onClick={() => logout.mutate()} title={me.data.user.name}>

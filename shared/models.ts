@@ -1,6 +1,6 @@
 /**
  * 模型註冊表 — 「沒有模型支撐的選項不出現」原則的單一來源。
- * MVP 只接 Fal.ai（定案）；點數 1 點 ≈ NT$1，總預算 5,000 點。
+ * MVP 只接 Fal.ai（定案）；無點數限制（定案：不設虛擬點數）。
  */
 export type ModelKind = "image" | "video";
 
@@ -8,7 +8,8 @@ export interface ModelEntry {
   id: string; // fal model id（queue.fal.run 路徑）
   label: string;
   kind: ModelKind;
-  points: number; // 每次生成點數（預估=實際，MVP 簡化）
+  /** 每次生成扣點（1 點 ≈ NT$1 參考值；額度上限由管理員在系統內調整） */
+  points: number;
   input: (prompt: string, format: ProjectFormat) => Record<string, unknown>;
 }
 

@@ -4,6 +4,8 @@ import { adminRouter } from "./admin";
 import { projectsRouter } from "./projects";
 import { generationRouter } from "./generation";
 import { messagesRouter } from "./messages";
+import { scenesRouter } from "./scenes";
+import { quotaRouter } from "./quota";
 
 export const appRouter = router({
   auth: authRouter,
@@ -11,6 +13,8 @@ export const appRouter = router({
   projects: projectsRouter,
   generation: generationRouter,
   messages: messagesRouter,
+  scenes: scenesRouter,
+  quota: quotaRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -4,16 +4,18 @@
  * - 真模式走 fal queue REST（送出→輪詢），本機開發不需要 webhook（盲點掃描定案）。
  */
 import { randomUUID } from "node:crypto";
+import { proxyFetch } from "./http";
 
 const MOCK = !process.env.FAL_KEY || process.env.FAL_MOCK === "1";
-const MOCK_DELAY_MS = 8_000;
+const MOCK_DELAY_MS = Number(process.env.FAL_MOCK_DELAY_MS ?? 8000);
 
 const mockJobs = new Map<string, { doneAt: number; kind: string }>();
 
-const MOCK_RESULTS: Record<string, string> = {
-  image: "https://picsum.photos/seed/aidirector/1024/576",
-  video: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
-};
+/** 假素材由自家伺服器供應（/api/mock-asset/*）：完全離線可測、交付包也抓得到 */
+function mockResultUrl(kind: string): string {
+  const base = process.env.APP_URL?.replace(/\/$/, "") || `http://localhost:${process.env.PORT ?? 3000}`;
+  return `${base}/api/mock-asset/${kind === "video" ? "video" : "image"}`;
+}
 
 export function isMockMode(): boolean {
   return MOCK;
@@ -25,7 +27,7 @@ export async function falSubmit(modelId: string, kind: string, input: Record<str
     mockJobs.set(requestId, { doneAt: Date.now() + MOCK_DELAY_MS, kind });
     return { requestId };
   }
-  const res = await fetch(`https://queue.fal.run/${modelId}`, {
+  const res = await proxyFetch(`https://queue.fal.run/${modelId}`, {
     method: "POST",
     headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -44,19 +46,19 @@ export interface FalStatusResult {
 export async function falStatus(modelId: string, kind: string, requestId: string): Promise<FalStatusResult> {
   if (requestId.startsWith("mock_")) {
     const job = mockJobs.get(requestId);
-    if (!job) return { status: "done", resultUrl: MOCK_RESULTS[kind] ?? MOCK_RESULTS.image };
+    if (!job) return { status: "done", resultUrl: mockResultUrl(kind) };
     if (Date.now() < job.doneAt) return { status: "running" };
     mockJobs.delete(requestId);
-    return { status: "done", resultUrl: MOCK_RESULTS[job.kind] ?? MOCK_RESULTS.image };
+    return { status: "done", resultUrl: mockResultUrl(job.kind) };
   }
   const base = `https://queue.fal.run/${modelId}/requests/${requestId}`;
-  const statusRes = await fetch(`${base}/status`, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
+  const statusRes = await proxyFetch(`${base}/status`, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
   if (!statusRes.ok) return { status: "failed", error: `fal status ${statusRes.status}` };
   const s = (await statusRes.json()) as { status: string };
   if (s.status === "IN_QUEUE") return { status: "queued" };
   if (s.status === "IN_PROGRESS") return { status: "running" };
   if (s.status !== "COMPLETED") return { status: "failed", error: `fal 狀態 ${s.status}` };
-  const resultRes = await fetch(base, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
+  const resultRes = await proxyFetch(base, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
   if (!resultRes.ok) return { status: "failed", error: `fal result ${resultRes.status}` };
   const result = (await resultRes.json()) as Record<string, unknown>;
   return { status: "done", resultUrl: extractUrl(result) };

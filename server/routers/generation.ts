@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { getModel, type ProjectFormat } from "../../shared/models";
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
 import { falSubmit, falStatus, isMockMode } from "../services/fal";
-import { checkQuota, deduct, refund, usedTotal, usedThisWeek, TOTAL_BUDGET, WEEKLY_QUOTA_PER_USER } from "../services/points";
+import { checkQuota, deduct, refund } from "../services/points";
 
 /** 世界觀 → 提示詞注入（「懂我們」的 MVP 版：上下文自動帶入每次生成） */
 function buildPrompt(userPrompt: string, worldview: Worldview): string {
@@ -29,15 +29,14 @@ export const generationRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
       requireGroup(ctx.auth, project.groupId); // 多組隔離
 
-      // 額度守門（先擋再扣）
-      const quotaError = await checkQuota(ctx.auth.user.id, model.points);
+      // 彈性額度守門（個人覆寫→組→全域；空＝不限）
+      const quotaError = await checkQuota(ctx.auth.user.id, project.groupId, model.points);
       if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
 
       const worldview = worldviewSchema.parse(project.worldview ?? {});
       const fullPrompt = buildPrompt(input.prompt, worldview);
       const falInput = model.input(fullPrompt, project.format as ProjectFormat);
 
-      // 先寫單＋扣預估（claim-then-refund，healing 驗證過的模式）
       const [gen] = await db
         .insert(schema.generations)
         .values({
@@ -62,13 +61,12 @@ export const generationRouter = router({
           .returning();
         return updated;
       } catch (err) {
-        // 送出就失敗 → 全額退點
         await refund(ctx.auth.user.id, project.groupId, model.points, "生成送出失敗退回", gen.id);
         await db
           .update(schema.generations)
           .set({ status: "failed", error: String(err), pointsRefunded: model.points, updatedAt: new Date() })
           .where(eq(schema.generations.id, gen.id));
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "生成送出失敗，點數已退回" });
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "生成送出失敗，請重試" });
       }
     }),
 
@@ -123,16 +121,6 @@ export const generationRouter = router({
       .limit(30);
   }),
 
-  /** 點數總覽（頂欄徽章＋生成前提示） */
-  pointsSummary: authedProcedure.query(async ({ ctx }) => {
-    const [total, weekly] = await Promise.all([usedTotal(), usedThisWeek(ctx.auth.user.id)]);
-    return {
-      totalBudget: TOTAL_BUDGET,
-      totalUsed: total,
-      totalRemaining: Math.max(0, TOTAL_BUDGET - total),
-      weeklyQuota: WEEKLY_QUOTA_PER_USER,
-      weeklyUsed: weekly,
-      mockMode: isMockMode(),
-    };
-  }),
+  /** 系統資訊（假生成模式徽章用） */
+  info: authedProcedure.query(() => ({ mockMode: isMockMode() })),
 });

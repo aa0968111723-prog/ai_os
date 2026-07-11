@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { MODELS } from "@shared/models";
 import { worldviewSchema, TONE_OPTIONS, THEME_OPTIONS, type Worldview } from "@shared/worldview";
 import { GenerationList } from "../components/GenerationList";
+import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
 
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
@@ -19,7 +20,7 @@ export function ProjectPage({ id }: { id: string }) {
     onSuccess: () => {
       setPrompt("");
       utils.generation.listByProject.invalidate({ projectId: id });
-      utils.generation.pointsSummary.invalidate();
+      utils.quota.my.invalidate();
     },
   });
 
@@ -99,13 +100,16 @@ export function ProjectPage({ id }: { id: string }) {
                 disabled={!prompt.trim() || submit.isPending}
                 onClick={() => submit.mutate({ projectId: id, modelId, prompt: prompt.trim() })}
               >
-                {submit.isPending ? "送出中…" : `生成（預估 −${model.points} 點）`}
+                {submit.isPending ? "送出中…" : `生成（−${model.points} 點）`}
               </button>
-              <span className="hint">失敗全額退點</span>
+              <span className="hint">失敗自動退點・額度由組長調整</span>
             </div>
             {submit.error && <p className="error">{submit.error.message}</p>}
             <GenerationList projectId={id} />
           </section>
+
+          {/* 分鏡與交付 */}
+          <SceneList projectId={id} />
         </div>
 
         {/* 組內留言 */}

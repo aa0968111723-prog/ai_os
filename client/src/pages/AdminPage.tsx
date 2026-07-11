@@ -7,6 +7,9 @@ export function AdminPage() {
   const overview = trpc.admin.overview.useQuery();
   const invite = trpc.admin.invite.useMutation({ onSuccess: () => utils.admin.overview.invalidate() });
   const createGroup = trpc.admin.createGroup.useMutation({ onSuccess: () => utils.admin.overview.invalidate() });
+  const settings = trpc.quota.getSettings.useQuery();
+  const saveSettings = trpc.quota.updateSettings.useMutation({ onSuccess: () => { utils.quota.getSettings.invalidate(); utils.quota.my.invalidate(); } });
+  const setGroupQuota = trpc.quota.setGroupQuota.useMutation({ onSuccess: () => { utils.admin.overview.invalidate(); utils.quota.my.invalidate(); } });
 
   const [email, setEmail] = useState("");
   const [teamId, setTeamId] = useState("");
@@ -44,6 +47,14 @@ export function AdminPage() {
                   )}
                 </div>
               ))}
+              {team.groups.map((g) => (
+                <div key={g.id + "-quota"} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+                  <span className="hint" style={{ width: 120 }}>{g.name} 週額度</span>
+                  <input type="number" min={0} style={{ width: 120 }} placeholder="跟全域"
+                    onBlur={(e) => setGroupQuota.mutate({ groupId: g.id, weeklyPointsPerUser: e.target.value === "" ? null : Number(e.target.value) })} />
+                  <span className="hint">空=跟全域・0=不限</span>
+                </div>
+              ))}
               <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                 <input
                   placeholder="新組名稱（例：文宣組）"
@@ -64,7 +75,26 @@ export function AdminPage() {
           ))}
         </div>
 
-        <aside className="card">
+        <aside className="stack">
+        <div className="card">
+          <h2>點數與額度（彈性・隨時可調）</h2>
+          <p className="hint">空白＝不限。總預算限超管；各組週額度組長/管理員皆可調。</p>
+          <label>總預算點數（全系統）</label>
+          <input type="number" min={0} defaultValue={settings.data?.totalBudgetPoints ?? ""} placeholder="不限"
+            onBlur={(e) => saveSettings.mutate({
+              totalBudgetPoints: e.target.value === "" ? null : Number(e.target.value),
+              defaultWeeklyPoints: settings.data?.defaultWeeklyPoints ?? null,
+            })} />
+          <label>預設每人每週上限</label>
+          <input type="number" min={0} defaultValue={settings.data?.defaultWeeklyPoints ?? ""} placeholder="不限"
+            onBlur={(e) => saveSettings.mutate({
+              totalBudgetPoints: settings.data?.totalBudgetPoints ?? null,
+              defaultWeeklyPoints: e.target.value === "" ? null : Number(e.target.value),
+            })} />
+          {saveSettings.error && <p className="error">{saveSettings.error.message}</p>}
+          {saveSettings.isSuccess && <p className="hint" style={{ color: "var(--success)" }}>已儲存 ✓</p>}
+        </div>
+        <div className="card">
           <h2>邀請成員</h2>
           <label>Email</label>
           <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="partner@example.com" />
@@ -104,6 +134,7 @@ export function AdminPage() {
             </div>
           )}
           {invite.error && <p className="error">{invite.error.message}</p>}
+        </div>
         </aside>
       </div>
     </div>

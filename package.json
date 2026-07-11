@@ -17,7 +17,9 @@
     "@trpc/client": "^11.6.0",
     "@trpc/react-query": "^11.6.0",
     "@trpc/server": "^11.6.0",
+    "@types/archiver": "^8.0.0",
     "@types/bcryptjs": "^2.4.6",
+    "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.44.5",
     "express": "^4.21.2",
@@ -25,6 +27,7 @@
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "superjson": "^2.2.1",
+    "undici": "^8.7.0",
     "wouter": "^3.3.5",
     "zod": "^3.24.1"
   },

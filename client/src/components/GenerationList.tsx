@@ -10,7 +10,8 @@ function StatusPoller({ id }: { id: string }) {
       select: (data) => {
         if (data.status === "done" || data.status === "failed") {
           utils.generation.listByProject.invalidate();
-          utils.generation.pointsSummary.invalidate();
+          utils.quota.my.invalidate();
+          utils.scenes.listByProject.invalidate();
         }
         return data;
       },
@@ -27,7 +28,11 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function GenerationList({ projectId }: { projectId: string }) {
+  const utils = trpc.useUtils();
   const list = trpc.generation.listByProject.useQuery({ projectId }, { refetchInterval: 8000 });
+  const addScene = trpc.scenes.addFromGeneration.useMutation({
+    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+  });
 
   if (list.isLoading) return <p className="hint">載入中…</p>;
   if (!list.data?.length) return <p className="hint" style={{ marginTop: 12 }}>還沒有生成紀錄——上面試一次吧。</p>;
@@ -51,13 +56,19 @@ export function GenerationList({ projectId }: { projectId: string }) {
           <div>
             <div style={{ fontSize: 14 }}>{g.prompt}</div>
             <div className="meta mono" style={{ fontSize: 11 }}>
-              {g.modelId}・預估 −{g.pointsEst}
-              {g.pointsActual != null && `・實際 −${g.pointsActual}`}
-              {g.pointsRefunded > 0 && `・退回 +${g.pointsRefunded}`}
+              {g.modelId}・−{g.pointsEst} 點{g.pointsRefunded > 0 && `（已退 +${g.pointsRefunded}）`}
             </div>
             {g.error && <div className="error">{g.error}</div>}
           </div>
-          <span className={`pill ${g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+            <span className={`pill ${g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
+            {g.status === "done" && (
+              <button style={{ padding: "4px 12px", fontSize: 12 }} disabled={addScene.isPending}
+                onClick={() => addScene.mutate({ generationId: g.id })}>
+                ＋加入分鏡
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>
