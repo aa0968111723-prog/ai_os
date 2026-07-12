@@ -23,6 +23,8 @@ export function SceneList({ projectId, isLeader }: { projectId: string; isLeader
   const submitApproval = trpc.approvals.submit.useMutation({ onSuccess: invalidate });
   const decide = trpc.approvals.decide.useMutation({ onSuccess: invalidate });
   const pendingOf = (sceneId: string) => approvals.data?.find((a) => a.sceneId === sceneId && a.status === "pending");
+  // 統一小紅字：這四個 mutation 先前只有 isPending disable，失敗時畫面毫無反應（使用者以為操作成功）
+  const actionError = submitApproval.error ?? decide.error ?? move.error ?? remove.error;
 
   const list = scenes.data ?? [];
   const totalSec = list.reduce((sum, s) => sum + s.durationSec, 0);
@@ -30,6 +32,7 @@ export function SceneList({ projectId, isLeader }: { projectId: string; isLeader
   return (
     <section className="card">
       <h2>分鏡・交付</h2>
+      {actionError && <p className="error">操作失敗：{actionError.message}</p>}
       {list.length === 0 ? (
         <p className="hint">還沒有分鏡——生成完成後按「＋加入分鏡」，排好順序就能打包交付。</p>
       ) : (

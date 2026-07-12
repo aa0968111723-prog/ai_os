@@ -10,6 +10,9 @@ import { worldviewSchema } from "../../shared/worldview";
 import { getModel, endpointOf, MODELS, CATEGORIES, tierLabel, type ProjectFormat, type ModelCategory, type ModelTier } from "../../shared/models";
 import { falSubmit } from "./fal";
 import { reserveQuota, refund } from "./points";
+// 重用網頁端的注入判斷（generation.ts 不 import 本檔，無循環相依）：
+// TTS 會把注入文字唸進成品、轉錄/視覺工具會被污染輸入，不能無條件注入世界觀
+import { effectivePrompt } from "../routers/generation";
 
 const PROTOCOL_VERSION = "2024-11-05";
 
@@ -103,11 +106,14 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
     const sourceUrl = args.source_url ? String(args.source_url) : undefined;
     if (model.needs && !sourceUrl) throw new Error(`此模型需要 source_url:${model.sourceHint ?? model.needs}`);
     const wv = worldviewSchema.parse(project.worldview ?? {});
-    const prompt = `${String(args.prompt ?? "")}\n\n[專案背景] 調性：${wv.tones.join("、")}｜避免：${wv.taboos.join("；")}`;
+    const userPrompt = String(args.prompt ?? "").trim();
+    if (!userPrompt) throw new Error("prompt 不可為空");
+    // 與網頁端同一份判斷：僅適合的類別才注入世界觀（且注入內容含 styles/message，兩端一致）
+    const prompt = effectivePrompt(model, userPrompt, wv);
     const falInput = model.input(prompt, project.format as ProjectFormat, sourceUrl);
     const [gen] = await db
       .insert(schema.generations)
-      .values({ projectId: project.id, groupId: project.groupId, userId: admin.id, modelId: model.id, kind: model.kind, prompt: String(args.prompt ?? ""), sourceUrl, params: falInput, pointsEst: model.points })
+      .values({ projectId: project.id, groupId: project.groupId, userId: admin.id, modelId: model.id, kind: model.kind, prompt: userPrompt, sourceUrl, params: falInput, pointsEst: model.points })
       .returning();
     // 與網頁端一致：原子守門＋扣點（舊版直接扣、完全不檢查額度，MCP 可無限刷爆總預算）
     const quotaError = await reserveQuota(admin.id, project.groupId, model.points, `MCP 生成 ${model.label}`, gen.id);

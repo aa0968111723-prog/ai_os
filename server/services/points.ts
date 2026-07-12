@@ -32,13 +32,14 @@ export async function updateSettings(patch: Partial<PointsSettings>): Promise<Po
 
 const noLimit = (v: number | null | undefined): boolean => v == null || v <= 0;
 
+/** 週界以台北時間（UTC+8，無夏令時）計算——Railway 容器預設 UTC，用本地 getDay/setHours 會把週界推到台北週一 08:00 */
 function weekStart(): Date {
-  const now = new Date();
-  const day = now.getDay() === 0 ? 6 : now.getDay() - 1; // 週一起算
-  const start = new Date(now);
-  start.setDate(now.getDate() - day);
-  start.setHours(0, 0, 0, 0);
-  return start;
+  const TPE_OFFSET_MS = 8 * 60 * 60 * 1000;
+  const tpe = new Date(Date.now() + TPE_OFFSET_MS); // 平移後用 UTC 欄位讀出的就是台北牆鐘時間
+  const day = tpe.getUTCDay() === 0 ? 6 : tpe.getUTCDay() - 1; // 週一起算
+  tpe.setUTCDate(tpe.getUTCDate() - day);
+  tpe.setUTCHours(0, 0, 0, 0); // 台北週一 00:00
+  return new Date(tpe.getTime() - TPE_OFFSET_MS); // 平移回真正的 UTC 時刻
 }
 
 export async function usedTotal(): Promise<number> {
@@ -47,10 +48,16 @@ export async function usedTotal(): Promise<number> {
 }
 
 export async function usedThisWeek(userId: string): Promise<number> {
+  // 週歸屬：退點列跟隨其生成的建立週（coalesce 回退帳本列自身時間），
+  // 避免上週扣點、本週才失敗退點時，退點灌進新週把用量算成負值。
   const [row] = await db
     .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
     .from(schema.costLedger)
-    .where(and(eq(schema.costLedger.userId, userId), gte(schema.costLedger.createdAt, weekStart())));
+    .leftJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
+    .where(and(
+      eq(schema.costLedger.userId, userId),
+      gte(sql`coalesce(${schema.generations.createdAt}, ${schema.costLedger.createdAt})`, weekStart()),
+    ));
   return Number(row?.used ?? 0);
 }
 
@@ -121,10 +128,15 @@ export async function reserveQuota(
       }
     }
     if (quota != null) {
+      // 週歸屬同 usedThisWeek：退點跟隨生成建立週，守門與顯示口徑一致
       const [w] = await tx
         .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
         .from(schema.costLedger)
-        .where(and(eq(schema.costLedger.userId, userId), gte(schema.costLedger.createdAt, weekStart())));
+        .leftJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
+        .where(and(
+          eq(schema.costLedger.userId, userId),
+          gte(sql`coalesce(${schema.generations.createdAt}, ${schema.costLedger.createdAt})`, weekStart()),
+        ));
       const weekly = Number(w?.used ?? 0);
       if (weekly + points > quota) {
         return `本週額度不足（已用 ${weekly}／${quota} 點）——可請組長調整`;
@@ -136,7 +148,27 @@ export async function reserveQuota(
 }
 
 export async function refund(userId: string, groupId: string, points: number, reason: string, generationId?: string): Promise<void> {
-  await db.insert(schema.costLedger).values({ userId, groupId, delta: points, reason, generationId });
+  // 退點是「已扣款」後的補償：一旦寫入失敗點數即永久蒸發，故包交易＋重試 3 次。
+  // 最終仍失敗只印 CRITICAL 供人工對帳補點、不往外拋——呼叫端多在失敗收尾路徑，
+  // 再拋錯會蓋掉原始錯誤且無法自動補救。
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await db.transaction(async (tx) => {
+        await tx.insert(schema.costLedger).values({ userId, groupId, delta: points, reason, generationId });
+      });
+      return;
+    } catch (err) {
+      if (attempt === 3) {
+        console.error(
+          `[CRITICAL] 退點失敗（已重試 3 次，需人工補點）：user=${userId} group=${groupId} points=${points} gen=${generationId ?? "-"} reason=${reason}`,
+          err instanceof Error ? err.message : err,
+        );
+        return;
+      }
+      // 短暫等待再重試，讓瞬時性 DB 錯誤（連線抖動、failover）有機會恢復
+      await new Promise((r) => setTimeout(r, 500 * attempt));
+    }
+  }
 }
 
 /** 組用量彙總（組長/管理員儀表用）：每人本週＋累計 */
@@ -144,10 +176,12 @@ export async function groupUsage(groupId: string): Promise<Array<{ userId: strin
   const rows = await db
     .select({
       userId: schema.costLedger.userId,
-      weekly: sql<number>`coalesce(-sum(${schema.costLedger.delta}) filter (where ${schema.costLedger.createdAt} >= ${weekStart()}), 0)`,
+      // 週歸屬同 usedThisWeek：退點跟隨生成建立週（generations.id 為 PK，LEFT JOIN 不會 fan-out）
+      weekly: sql<number>`coalesce(-sum(${schema.costLedger.delta}) filter (where coalesce(${schema.generations.createdAt}, ${schema.costLedger.createdAt}) >= ${weekStart()}), 0)`,
       total: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)`,
     })
     .from(schema.costLedger)
+    .leftJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
     .where(eq(schema.costLedger.groupId, groupId))
     .groupBy(schema.costLedger.userId);
   return rows.map((r) => ({ userId: r.userId, weekly: Number(r.weekly), total: Number(r.total) }));

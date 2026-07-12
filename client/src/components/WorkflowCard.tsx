@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { trpc } from "../api";
 
-interface StepLog { note: string; status: "running" | "done" | "failed"; detail?: string }
+/** waiting＝輪詢逾時但後端仍在生成（≠失敗，成品稍後會出現在生成紀錄） */
+interface StepLog { note: string; status: "running" | "done" | "failed" | "waiting"; detail?: string }
 
 /** 工作流:一鍵串多個模型(每步各自扣點;逐步顯示進度) */
 export function WorkflowCard({ projectId }: { projectId: string }) {
@@ -35,13 +36,22 @@ export function WorkflowCard({ projectId }: { projectId: string }) {
           prompt: stepPrompt,
           sourceUrl: usePrev && prevUrl ? prevUrl : undefined,
         });
-        // 輪詢到完成
+        // 輪詢到完成——上限依產物類型放寬:影片常見 3-10 分鐘,固定 3 分鐘會把「仍在生成」誤報成失敗
+        const maxTries = gen.kind === "video" ? 300 : gen.kind === "audio" ? 120 : 60; // 影片 15 分、音訊 6 分、其他 3 分
         let status = gen;
-        for (let t = 0; t < 60 && (status.status === "queued" || status.status === "running"); t++) {
+        for (let t = 0; t < maxTries && (status.status === "queued" || status.status === "running"); t++) {
           await new Promise((r) => setTimeout(r, 3000));
           status = await client.generation.status.query({ id: gen.id });
         }
-        if (status.status !== "done") throw new Error(`步驟「${step.note}」失敗:${status.error ?? "逾時"}`);
+        if (status.status === "queued" || status.status === "running") {
+          // 逾時 ≠ 失敗:後端輪詢會繼續收斂這筆生成,點數不會重複扣;
+          // 標成 waiting 而非 failed,提示使用者稍後回來看生成紀錄
+          setLogs((ls) => ls.map((l, j) => (j === i ? { ...l, status: "waiting", detail: "仍在生成中——結果稍後會出現在下方生成紀錄,可稍後回來看" } : l)));
+          utils.generation.listByProject.invalidate({ projectId });
+          utils.quota.my.invalidate();
+          return;
+        }
+        if (status.status !== "done") throw new Error(`步驟「${step.note}」失敗:${status.error ?? "未知錯誤"}`);
         prevText = status.resultText ?? prevText;
         prevUrl = status.resultUrl ?? prevUrl;
         setLogs((ls) => ls.map((l, j) => (j === i ? { ...l, status: "done", detail: status.resultText?.slice(0, 60) ?? status.resultUrl ?? "" } : l)));
@@ -82,7 +92,7 @@ export function WorkflowCard({ projectId }: { projectId: string }) {
         <div style={{ marginTop: 10 }}>
           {logs.map((l, i) => (
             <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-              <span>{l.status === "done" ? "✅" : l.status === "failed" ? "❌" : "⏳"}</span>
+              <span>{l.status === "done" ? "✅" : l.status === "failed" ? "❌" : l.status === "waiting" ? "🕒" : "⏳"}</span>
               <span>{l.note}</span>
               {l.detail && <span className="mono" style={{ fontSize: 11, opacity: 0.8 }}>{l.detail}</span>}
             </div>

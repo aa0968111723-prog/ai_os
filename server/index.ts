@@ -22,6 +22,7 @@ import {
   ensureStorageDirs, tmpDir, adoptTmpFile, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, MAX_FILE_BYTES, STORAGE_ROOT,
 } from "./services/storage";
+import { markBootReady, isBootReady } from "./services/boot";
 import { db, schema } from "./db";
 import { eq, sql } from "drizzle-orm";
 
@@ -40,7 +41,12 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/ready", async (_req, res) => {
   try {
     await db.execute(sql`select 1`);
-    res.json({ ok: true, db: "connected（資料庫已接通）", mockMode: isMockMode() });
+    res.json({
+      ok: true,
+      db: "connected（資料庫已接通）",
+      boot: isBootReady() ? "ready（初始化完成）" : "initializing（建表/種子進行中，稍候自動完成）",
+      mockMode: isMockMode(),
+    });
   } catch (err) {
     console.error("[ready] DB 連線失敗：", err instanceof Error ? err.message : err);
     res.status(503).json({
@@ -125,7 +131,12 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       await cleanup(); return res.status(403).json({ error: "你不屬於這個組" });
     }
 
-    const mime = req.file.mimetype.split(";")[0].trim().toLowerCase();
+    let mime = req.file.mimetype.split(";")[0].trim().toLowerCase();
+    // 瀏覽器對 .md/.txt 等常送 application/octet-stream——改用副檔名後備判斷
+    if (mime === "application/octet-stream" || mime === "") {
+      const { mimeFromPath } = await import("./services/storage");
+      mime = mimeFromPath(req.file.originalname);
+    }
     if (!isAllowedUploadMime(mime)) {
       await cleanup();
       return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：圖片/影片/音訊/zip/文字/PDF` });
@@ -237,12 +248,13 @@ app.get("/api/selftest", async (req, res) => {
     return `總預算 ${s.totalBudgetPoints ?? "不限"}／週 ${s.defaultWeeklyPoints ?? "不限"}`;
   });
   await run("邀請機制", async () => {
-    const { createInvite } = await import("./services/auth");
+    const { createInvite, sha256 } = await import("./services/auth");
     const { token } = await createInvite({
       email: "selftest@example.com", teamId: "00000000-0000-0000-0000-000000000000",
       teamRole: "member", groupRole: "member", invitedBy: auth.user.id,
     });
-    await db.delete(schema.invites).where(eq(schema.invites.token, token));
+    // DB 存的是 token 雜湊（#45），刪除時要先雜湊原文
+    await db.delete(schema.invites).where(eq(schema.invites.token, sha256(token)));
     return "建立/銷毀 OK";
   });
   await run("生成模式", async () =>
@@ -290,12 +302,24 @@ app.listen(port, () => {
   if (isProd && process.env.AUTH_MODE === "dev") {
     console.warn("[server] ⚠⚠⚠ 正式環境偵測到 AUTH_MODE=dev（無認證後門）——已自動忽略不生效；請到 Variables 移除此變數。");
   }
-  // 背景：等 DB → 自動建表 → 模型目錄同步 → 種子/超管自救，全程不擋啟動
-  ensureSchema()
-    .then(async (ready) => {
-      if (!ready) return;
-      await syncCatalog();
-      await ensureSeed();
-    })
-    .catch((err) => console.warn("[boot] 建表/目錄/種子失敗（修好 DATABASE_URL 後 Redeploy 即可）：", err?.message ?? err));
+  // 背景初始化：失敗「不放棄」，每 60 秒自動重試到成功（健康檢查不等 DB 的原則不變）
+  // ——修掉「DB 冷啟動超過 30 秒就永久卡死、看似健康實際全壞」的舊行為。
+  let bootTries = 0;
+  const bootstrap = async (): Promise<void> => {
+    try {
+      if (await ensureSchema()) {
+        await syncCatalog();
+        await ensureSeed();
+        markBootReady();
+        console.log("[boot] ✓ 建表/目錄/種子完成，系統就緒");
+        return;
+      }
+    } catch (err) {
+      console.warn("[boot] 建表/目錄/種子失敗：", err instanceof Error ? err.message : err);
+    }
+    bootTries += 1;
+    console.warn(`[boot] 初始化未完成，60 秒後自動重試（第 ${bootTries} 次）——瀏覽器開 /api/ready 可診斷`);
+    setTimeout(() => { void bootstrap(); }, 60_000);
+  };
+  void bootstrap();
 });

@@ -197,28 +197,29 @@ export const MODELS: ModelEntry[] = [
   /* ═══ 3. 文生影片 text-to-video ═══ */
   {
     id: "fal-ai/veo3.1", label: "Veo 3.1(Google)", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 32, cost: "$0.10–0.30/秒(720p–4K)", verified: true,
+    // 為什麼:fal 影片模型按秒計費,固定扣點蓋不住長鏡頭——按秒計費模型一律以「6 秒鏡頭」估點(USD×31;區間價取中價),並在 cost 註明基準讓使用者知道超過 6 秒實際費用更高
+    points: 37, cost: "$0.10–0.30/秒(720p–4K);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "當前最強影片模型之一;物理正確、可含原生音效與對白",
     bestFor: "正式成品鏡頭、需要聲音的敘事片段",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/sora-2/text-to-video", label: "Sora 2(OpenAI)", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 16, cost: "$0.10/秒(720p)", verified: true,
+    points: 19, cost: "$0.10/秒(720p);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "細節豐富的動態場景、含音訊;敘事鏡頭語言自然",
     bestFor: "故事性片段、複雜運鏡",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/kling-video/v2.5-turbo/pro/text-to-video", label: "Kling 2.5 Turbo Pro", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 12, cost: "$0.07/秒", verified: false,
+    points: 13, cost: "$0.07/秒;按秒計費,點數為 6 秒基準", verified: false,
     strengths: "動作流暢度標竿;快節奏動態場景",
     bestFor: "人物動作、活動紀錄感鏡頭",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f), duration: "5" }),
   },
   {
     id: "fal-ai/veo3.1/fast", label: "Veo 3.1 Fast", category: "text-to-video", tier: "economy", kind: "video",
-    points: 16, cost: "$0.10/秒(720p)", verified: false,
+    points: 19, cost: "$0.10/秒(720p);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "Veo 家族的速度版;迭代快、質感仍佳",
     bestFor: "先看方向再升旗艦重生成",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
@@ -232,7 +233,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/minimax/hailuo-2.3/standard/text-to-video", label: "Hailuo 2.3 Standard", category: "text-to-video", tier: "economy", kind: "video",
-    points: 10, cost: "$0.28/6秒(768p)", verified: false,
+    points: 9, cost: "$0.28/6秒(768p);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "MiniMax;人物表演與鏡頭感佳(Pro 版 1080p 已驗證存在)",
     bestFor: "人物特寫、情緒鏡頭",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
@@ -248,7 +249,7 @@ export const MODELS: ModelEntry[] = [
   /* ═══ 4. 影片轉影片 video-to-video ═══ */
   {
     id: "fal-ai/topaz/upscale/video", label: "Topaz 影片升級", category: "video-to-video", tier: "flagship", kind: "video",
-    needs: "video", points: 8, cost: "$0.01–0.08/秒(依解析度)", verified: true,
+    needs: "video", points: 8, cost: "$0.01–0.08/秒(依解析度);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "業界標準升頻;低清舊素材救星、可倍幀",
     bestFor: "歷史開示影片修復、AI 生成影片升 4K",
     sourceHint: "要升級的影片網址",
@@ -256,7 +257,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/sync-lipsync/v2/pro", label: "Lipsync v2 Pro 對嘴", category: "video-to-video", tier: "flagship", kind: "video",
-    needs: "video", points: 12, cost: "≈$0.7–2/分", verified: true,
+    needs: "video", points: 12, cost: "≈$0.7–2/分;按影片長度計費,長片實際費用高於扣點", verified: true,
     strengths: "最新一代對嘴;把配音精準貼合人物口型",
     bestFor: "虛擬主持人、配音替換",
     sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
@@ -272,7 +273,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/sync-lipsync", label: "Lipsync 1.9 對嘴", category: "video-to-video", tier: "economy", kind: "video",
-    needs: "video", points: 8, cost: "$0.7/分", verified: true,
+    needs: "video", points: 8, cost: "$0.7/分;按影片長度計費,長片實際費用高於扣點", verified: true,
     strengths: "成熟穩定的對嘴;成本較低",
     bestFor: "一般對嘴需求",
     sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
@@ -280,7 +281,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/video-upscaler", label: "影片升頻(輕量)", category: "video-to-video", tier: "economy", kind: "video",
-    needs: "video", points: 5, cost: "$0.1/秒", verified: true,
+    needs: "video", points: 19, cost: "$0.1/秒;按秒計費,點數為 6 秒基準", verified: true,
     strengths: "輕量升頻;速度快",
     bestFor: "日常素材小幅提升畫質",
     sourceHint: "要升頻的影片網址",
@@ -288,7 +289,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/bria/video/background-removal", label: "影片去背", category: "video-to-video", tier: "economy", kind: "video",
-    needs: "video", points: 8, cost: "≈$0.1/秒", verified: false,
+    needs: "video", points: 19, cost: "≈$0.1/秒;按秒計費,點數為 6 秒基準", verified: false,
     strengths: "自動去除影片背景(綠幕效果)",
     bestFor: "人物合成到新場景",
     sourceHint: "要去背的影片網址",
@@ -296,7 +297,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/amt-interpolation", label: "補幀(流暢化)", category: "video-to-video", tier: "budget", kind: "video",
-    needs: "video", points: 2, cost: "≈$0.02/秒", verified: true,
+    needs: "video", points: 4, cost: "≈$0.02/秒;按秒計費,點數為 6 秒基準", verified: true,
     strengths: "AI 補幀讓影片更順(24→60fps)",
     bestFor: "AI 生成影片的卡頓修飾",
     sourceHint: "要補幀的影片網址",
@@ -423,7 +424,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/whisper", label: "Whisper large-v3", category: "speech-to-text", tier: "flagship", kind: "text",
-    needs: "audio", points: 2, cost: "≈$0.0008/音訊秒", verified: true,
+    needs: "audio", points: 2, cost: "≈$0.0008/音訊秒;按音訊長度計費,長錄音實際費用高於扣點", verified: true,
     strengths: "OpenAI 開源標竿;含時間戳、可分講者",
     bestFor: "帶時間軸的字幕稿",
     sourceHint: "音訊檔網址",
@@ -644,7 +645,7 @@ export interface WorkflowPreset {
   id: string;
   label: string;
   tier: ModelTier;
-  points: number; // 各步合計估點
+  points: number; // 各步合計(模組載入時由檔尾迴圈依 steps 自動加總覆寫,勿手填;字面值僅供閱讀)
   strengths: string;
   bestFor: string;
   steps: WorkflowStep[];
@@ -652,7 +653,7 @@ export interface WorkflowPreset {
 
 export const WORKFLOW_PRESETS: WorkflowPreset[] = [
   {
-    id: "wf/full-short-flagship", label: "完整短片(旗艦)", tier: "flagship", points: 38,
+    id: "wf/full-short-flagship", label: "完整短片(旗艦)", tier: "flagship", points: 40,
     strengths: "LLM 潤飾腳本 → 旗艦文生圖定調 → Veo 3.1 成片;三步到位",
     bestFor: "正式對外的 15 秒形象短片",
     steps: [
@@ -662,7 +663,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     ],
   },
   {
-    id: "wf/brand-storyboard-flagship", label: "品牌繪本(旗艦)", tier: "flagship", points: 6,
+    id: "wf/brand-storyboard-flagship", label: "品牌繪本(旗艦)", tier: "flagship", points: 7,
     strengths: "LLM 出分鏡文案 → 旗艦出圖 → 編輯統一風格",
     bestFor: "系列感的三格分鏡圖",
     steps: [
@@ -672,7 +673,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     ],
   },
   {
-    id: "wf/quote-card-flagship", label: "金句卡(旗艦)", tier: "flagship", points: 4,
+    id: "wf/quote-card-flagship", label: "金句卡(旗艦)", tier: "flagship", points: 3,
     strengths: "LLM 摘句 → Ideogram 文字卡;中文排版強",
     bestFor: "每日金句社群圖",
     steps: [
@@ -691,7 +692,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     ],
   },
   {
-    id: "wf/narrated-scene-economy", label: "有聲場景(經濟)", tier: "economy", points: 11,
+    id: "wf/narrated-scene-economy", label: "有聲場景(經濟)", tier: "economy", points: 10,
     strengths: "場景影片+中文旁白一次出;剪輯直接可用",
     bestFor: "開示引言、活動預告",
     steps: [
@@ -700,7 +701,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     ],
   },
   {
-    id: "wf/quote-card-economy", label: "金句卡(經濟)", tier: "economy", points: 3,
+    id: "wf/quote-card-economy", label: "金句卡(經濟)", tier: "economy", points: 2,
     strengths: "Flash 摘句+FLUX dev 出圖",
     bestFor: "高頻率的日更金句",
     steps: [
@@ -731,6 +732,13 @@ export const LEGACY_MODELS: ModelEntry[] = [
 
 export function getModel(id: string): ModelEntry | undefined {
   return MODELS.find((m) => m.id === id) ?? LEGACY_MODELS.find((m) => m.id === id);
+}
+
+/* 為什麼:工作流合計點數曾多條與單步實扣不符(UI 顯示夠用、中途才被額度擋下的斷鏈),
+   故模組載入時一律由單步模型註冊表推導覆寫,單步點數改動後下游(workflows API/catalog/文件)自動同步。
+   注意:必須放在 MODELS/WORKFLOW_PRESETS/LEGACY_MODELS 初始化之後,否則 getModel 會踩 const 的 TDZ。 */
+for (const w of WORKFLOW_PRESETS) {
+  w.points = w.steps.reduce((sum, st) => sum + (getModel(st.modelId)?.points ?? 0), 0);
 }
 
 export function getWorkflow(id: string): WorkflowPreset | undefined {

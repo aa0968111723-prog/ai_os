@@ -6,10 +6,33 @@ import { db, schema } from "../db";
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
 import { isMockMode } from "../services/fal";
 import { proxyFetch } from "../services/http";
+import { reserveQuota, refund } from "../services/points";
 
 export interface DirectorSuggestion {
   title: string;
   prompt: string;
+}
+
+/** LLM 回傳的執行期驗證：JSON.parse 成功但形狀不對（title 是物件、缺欄位）一樣會弄崩前端，必須 safeParse */
+const suggestionSchema = z
+  .array(z.object({ title: z.string().min(1).max(100), prompt: z.string().min(1).max(2000) }))
+  .min(1);
+
+/** 真模式每次建議固定入帳 1 點：付費 LLM 呼叫不能是不入帳、不受總預算守門的免費後門 */
+const DIRECTOR_COST_POINTS = 1;
+
+// 記憶體節流：每使用者每分鐘最多 6 次——擋連點/腳本狂刷付費 LLM。
+// 單容器部署，程序內 Map 即足夠；重啟歸零無妨（額度守門仍由 reserveQuota 兜底）。
+const SUGGEST_LIMIT_PER_MINUTE = 6;
+const SUGGEST_WINDOW_MS = 60_000;
+const suggestHits = new Map<string, number[]>();
+function overSuggestLimit(userId: string): boolean {
+  const now = Date.now();
+  const hits = (suggestHits.get(userId) ?? []).filter((t) => now - t < SUGGEST_WINDOW_MS);
+  const over = hits.length >= SUGGEST_LIMIT_PER_MINUTE;
+  if (!over) hits.push(now); // 被擋的請求不計入窗口，一分鐘後自然解封
+  suggestHits.set(userId, hits);
+  return over;
 }
 
 /** 假模式：依世界觀組出三個確定性建議（不花錢可測） */
@@ -30,12 +53,20 @@ function mockSuggestions(wv: Worldview, kind: string): DirectorSuggestion[] {
  */
 export const directorRouter = router({
   suggest: authedProcedure.input(z.object({ projectId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    // 節流放最前面：超限直接回友善訊息，連 DB 都不打，狂刷時零成本
+    if (overSuggestLimit(ctx.auth.user.id)) {
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "建議請求太頻繁（每分鐘最多 6 次），休息一下再試" });
+    }
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
     if (!project) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, project.groupId);
     const wv = worldviewSchema.parse(project.worldview ?? {});
 
     if (isMockMode()) return { suggestions: mockSuggestions(wv, project.kind), mock: true };
+
+    // 真模式先原子入帳（重用 reserveQuota：同時受週額度與總預算守門），失敗路徑再退
+    const quotaError = await reserveQuota(ctx.auth.user.id, project.groupId, DIRECTOR_COST_POINTS, "AI 導演建議");
+    if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
 
     const sys = `你是佛教基金會的影片導演助理。依專案背景給 3 個分鏡提示詞建議（繁體中文）。
 專案：${project.title}（${project.kind}，${project.format}）
@@ -51,10 +82,13 @@ export const directorRouter = router({
       if (!res.ok) throw new Error(`any-llm ${res.status}`);
       const data = (await res.json()) as { output?: string };
       const match = data.output?.match(/\[[\s\S]*\]/);
-      const suggestions = match ? (JSON.parse(match[0]) as DirectorSuggestion[]) : mockSuggestions(wv, project.kind);
-      return { suggestions: suggestions.slice(0, 3), mock: false };
+      const parsed = match ? suggestionSchema.safeParse(JSON.parse(match[0])) : null;
+      // 形狀不符：LLM 已實際計費故不退點，但回固定格式的本地建議並標記 mock，前端不會拿到壞資料
+      if (!parsed?.success) return { suggestions: mockSuggestions(wv, project.kind), mock: true };
+      return { suggestions: parsed.data.slice(0, 3), mock: false };
     } catch {
-      // LLM 失敗不擋創作：退回本地建議
+      // LLM 呼叫失敗（HTTP 錯誤/逾時/回傳非 JSON）：退點且不擋創作，退回本地建議
+      await refund(ctx.auth.user.id, project.groupId, DIRECTOR_COST_POINTS, "AI 導演建議失敗退回");
       return { suggestions: mockSuggestions(wv, project.kind), mock: true };
     }
   }),

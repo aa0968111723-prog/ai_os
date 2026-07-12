@@ -15,6 +15,16 @@ export function ProjectPage({ id }: { id: string }) {
   const project = trpc.projects.get.useQuery({ id });
   const me = trpc.auth.me.useQuery();
   const updateWv = trpc.projects.updateWorldview.useMutation({
+    // 樂觀更新：patch 先合併進本地快取，快速連點兩個 chips 時第二下才讀得到第一下的結果
+    //（否則第二下用 stale 快取算出「整條陣列」，後端合併後把第一下剛存的值蓋掉）
+    onMutate: async ({ worldview }) => {
+      await utils.projects.get.cancel({ id });
+      utils.projects.get.setData({ id }, (old) =>
+        old ? { ...old, worldview: { ...worldviewSchema.parse(old.worldview ?? {}), ...worldview } } : old,
+      );
+    },
+    // 失敗或成功都以伺服器現值對齊（失敗時等同回滾樂觀值）
+    onError: () => utils.projects.get.invalidate({ id }),
     onSuccess: () => utils.projects.get.invalidate({ id }),
   });
 

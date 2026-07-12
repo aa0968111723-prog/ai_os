@@ -14,7 +14,9 @@ const mockJobs = new Map<string, { doneAt: number; kind: OutputKind; prompt: str
 
 /** 假素材由自家伺服器供應(/api/mock-asset/*):完全離線可測、交付包也抓得到 */
 function mockResultUrl(kind: OutputKind): string {
-  const base = process.env.APP_URL?.replace(/\/$/, "") || `http://localhost:${process.env.PORT ?? 3000}`;
+  // APP_URL 沒設時退 Railway 內建的公開網域，再退 localhost——避免把 localhost 存進 DB 變永久壞連結
+  const railway = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
+  const base = process.env.APP_URL?.replace(/\/$/, "") || railway || `http://localhost:${process.env.PORT ?? 3000}`;
   const path = kind === "video" ? "video" : kind === "audio" ? "audio" : "image";
   return `${base}/api/mock-asset/${path}`;
 }
@@ -60,7 +62,10 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
   // 暫時性錯誤（429 限流、5xx、網路例外）→ 回 running 讓輪詢重試，絕不誤判失敗而退點；
   // 只有明確的終局狀態（4xx 非 429、非 COMPLETED、輸出無法解析）才回 failed。
   const isTransient = (code: number): boolean => code === 429 || code >= 500;
-  const base = `https://queue.fal.run/${endpoint}/requests/${requestId}`;
+  // fal queue 的 status/result 只認「owner/alias」兩段 app id——子路徑模型（如 fast-sdxl/image-to-image）
+  // 用全路徑會 405（實測）。送出用全路徑、查詢用兩段。
+  const appId = endpoint.split("/").slice(0, 2).join("/");
+  const base = `https://queue.fal.run/${appId}/requests/${requestId}`;
   let statusRes: Awaited<ReturnType<typeof proxyFetch>>;
   try {
     statusRes = await proxyFetch(`${base}/status`, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });

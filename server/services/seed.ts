@@ -55,22 +55,27 @@ export async function ensureSeed(): Promise<void> {
 
   // 首次啟動（空庫）：有設 SEED_ADMIN_PASSWORD 就用它，否則隨機產生並「只印一次」在啟動 log。
   const password = SEED_ADMIN_PASSWORD || randomBytes(9).toString("base64url");
-  const [admin] = await db
-    .insert(schema.users)
-    .values({ name: "Bruce（超管）", email: SEED_ADMIN_EMAIL, passwordHash: await hashPassword(password), isSuperAdmin: true })
-    .returning();
+  const passwordHash = await hashPassword(password); // bcrypt 較慢，放交易外縮短交易持鎖時間
+  // 五段 insert 包成單一交易（全有或全無）：若只寫入 users 就中斷，下次啟動 existing.length>0
+  // 會直接走 ensureSeedAdmin，團隊/組永遠不補建（invites.teamId 必填 → 超管連邀請都發不出）。
+  await db.transaction(async (tx) => {
+    const [admin] = await tx
+      .insert(schema.users)
+      .values({ name: "Bruce（超管）", email: SEED_ADMIN_EMAIL, passwordHash, isSuperAdmin: true })
+      .returning();
 
-  const [hq] = await db.insert(schema.teams).values({ name: "總會小編團隊" }).returning();
-  const [north] = await db.insert(schema.teams).values({ name: "北區工作組" }).returning();
-  await db.insert(schema.groups).values([
-    { teamId: north.id, name: "剪輯組" },
-    { teamId: hq.id, name: "動畫組" },
-    { teamId: hq.id, name: "短影音組" },
-  ]);
-  await db.insert(schema.teamMembers).values([
-    { teamId: hq.id, userId: admin.id, role: "admin" },
-    { teamId: north.id, userId: admin.id, role: "admin" },
-  ]);
+    const [hq] = await tx.insert(schema.teams).values({ name: "總會小編團隊" }).returning();
+    const [north] = await tx.insert(schema.teams).values({ name: "北區工作組" }).returning();
+    await tx.insert(schema.groups).values([
+      { teamId: north.id, name: "剪輯組" },
+      { teamId: hq.id, name: "動畫組" },
+      { teamId: hq.id, name: "短影音組" },
+    ]);
+    await tx.insert(schema.teamMembers).values([
+      { teamId: hq.id, userId: admin.id, role: "admin" },
+      { teamId: north.id, userId: admin.id, role: "admin" },
+    ]);
+  });
 
   console.log("──────────────────────────────────────────");
   console.log("[seed] 已建立：總會小編團隊（動畫組・短影音組）＋北區工作組（剪輯組）");

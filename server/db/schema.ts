@@ -66,6 +66,7 @@ export const invites = pgTable("invites", {
   teamRole: text("team_role", { enum: ["admin", "member"] }).notNull().default("member"),
   groupId: uuid("group_id"),
   groupRole: text("group_role", { enum: ["leader", "member"] }).notNull().default("member"),
+  /** 存 SHA-256 雜湊（非原文）：與 sessions.tokenHash 同級保護，DB 外洩不可直接兌換邀請 */
   token: text("token").notNull().unique(),
   invitedBy: uuid("invited_by").notNull(),
   expiresAt: timestamp("expires_at").notNull(),

@@ -35,12 +35,14 @@ export function GenerationList({ projectId }: { projectId: string }) {
   const addScene = trpc.scenes.addFromGeneration.useMutation({
     onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
   });
+  const addSceneError = addScene.error?.message;
 
   if (list.isLoading) return <p className="hint">載入中…</p>;
   if (!list.data?.length) return <p className="hint" style={{ marginTop: 12 }}>還沒有生成紀錄——上面試一次吧。</p>;
 
   return (
     <div style={{ marginTop: 14 }}>
+      {addSceneError && <p className="error">加入分鏡失敗：{addSceneError}</p>}
       {list.data.map((g) => (
         <div key={g.id} className="gen-row">
           {(g.status === "queued" || g.status === "running") && <StatusPoller id={g.id} />}

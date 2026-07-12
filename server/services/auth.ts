@@ -36,7 +36,8 @@ export function clearLoginRate(email: string): void {
 }
 
 /* ── Session ── */
-function sha256(value: string): string {
+// 匯出供邀請 token 與 index.ts 自檢共用：DB 一律存雜湊、原文只回給呼叫端組連結
+export function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
@@ -148,7 +149,8 @@ export async function createInvite(input: {
     teamRole: input.teamRole,
     groupId: input.groupId,
     groupRole: input.groupRole,
-    token,
+    // DB 只存 SHA-256（與 sessions.tokenHash 同級保護）：DB 外洩時邀請 token 不可直接兌換
+    token: sha256(token),
     invitedBy: input.invitedBy,
     expiresAt: new Date(Date.now() + 72 * 3_600_000), // 72 小時
   });
@@ -189,7 +191,8 @@ export async function acceptInvite(token: string, name: string, password: string
   const [invite] = await db
     .select()
     .from(schema.invites)
-    .where(and(eq(schema.invites.token, token), isNull(schema.invites.acceptedAt), gt(schema.invites.expiresAt, new Date())));
+    // token 欄存的是 SHA-256（見 createInvite），查詢時把使用者帶來的原文先雜湊再比對
+    .where(and(eq(schema.invites.token, sha256(token)), isNull(schema.invites.acceptedAt), gt(schema.invites.expiresAt, new Date())));
   if (!invite) throw new Error("邀請連結無效或已過期");
 
   // 安全關鍵：既有帳號「不得」透過邀請連結落地。

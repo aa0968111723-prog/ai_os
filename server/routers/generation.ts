@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -40,10 +40,51 @@ function buildPrompt(userPrompt: string, worldview: Worldview): string {
   return parts.length ? `${userPrompt}\n\n[專案背景] ${parts.join("|")}` : userPrompt;
 }
 
+/** 陳屍清掃門檻：queued/running 停滯超過 30 分鐘視為孤兒（正常影片生成也遠短於此） */
+const STALE_GENERATION_MS = 30 * 60 * 1000;
+
+/**
+ * 陳屍清掃：把 updatedAt 停滯逾門檻仍 queued/running 的生成標 failed 並退點。
+ * 為什麼掛在 listByProject 開頭：本系統無背景排程、狀態推進全靠瀏覽器輪詢——
+ * 關頁即卡 running；更糟的是「扣點後、requestId 寫入前」程序被重佈/OOM 打斷的列
+ * 永卡 queued 且 requestId=null（status 輪詢直接提前返回），點數永久蒸發。
+ * 使用者打開列表即順手回收，兩種孤兒都在此收斂到終局並退點。
+ */
+async function sweepStaleGenerations(projectId: string): Promise<void> {
+  const cutoff = new Date(Date.now() - STALE_GENERATION_MS);
+  const staleRows = await db
+    .select()
+    .from(schema.generations)
+    .where(
+      and(
+        eq(schema.generations.projectId, projectId),
+        inArray(schema.generations.status, ["queued", "running"]),
+        lt(schema.generations.updatedAt, cutoff),
+      ),
+    );
+  for (const gen of staleRows) {
+    // 沿用 status 分支的 compare-and-set：只有真正把列從 queued/running 推進成 failed
+    // 的那一次才退點——與併發輪詢（status 的 done/failed 分支）互斥，杜絕雙重退點。
+    const updatedRows = await db
+      .update(schema.generations)
+      .set({
+        status: "failed",
+        error: "生成停滯逾 30 分鐘,系統自動回收,點數已退回",
+        pointsRefunded: gen.pointsEst,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
+      .returning();
+    if (updatedRows.length === 0) continue; // 已被別的請求推進 → 不重複退點
+    await refund(gen.userId, gen.groupId, gen.pointsEst, "生成停滯自動回收退回", gen.id);
+  }
+}
+
 /** 哪些類別注入世界觀(TTS 會唸出注入文字、轉錄/視覺/訓練/影片工具不適用 → 不注入) */
 const INJECT_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video", "llm", "text-to-audio"]);
 
-function effectivePrompt(model: ModelEntry, userPrompt: string, worldview: Worldview): string {
+/** export 供 MCP 重用：注入與否的判斷必須單一來源，否則 MCP 路徑會把世界觀唸進 TTS 成品 */
+export function effectivePrompt(model: ModelEntry, userPrompt: string, worldview: Worldview): string {
   return INJECT_CATEGORIES.has(model.category) ? buildPrompt(userPrompt, worldview) : userPrompt;
 }
 
@@ -199,6 +240,10 @@ export const generationRouter = router({
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
     if (!project) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, project.groupId);
+    // 陳屍清掃：清掃失敗只記警告不擋列表（回收屬順手行為，下次打開列表會再試）
+    await sweepStaleGenerations(input.projectId).catch((err) =>
+      console.warn("[generation] 陳屍清掃失敗：", err instanceof Error ? err.message : err),
+    );
     return db
       .select()
       .from(schema.generations)

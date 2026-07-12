@@ -35,13 +35,19 @@ export function MessagePanel({ projectId }: { projectId: string }) {
           onChange={(e) => setBody(e.target.value)}
           placeholder="留言給同組夥伴…"
           onKeyDown={(e) => {
-            if (e.key === "Enter" && body.trim()) post.mutate({ projectId, body: body.trim() });
+            // 注音/拼音選字中的 Enter 是「選字」不是「送出」（isComposing 需排除）；
+            // isPending 防連按 Enter 重複送出（送出按鈕本來就有擋，這裡補齊）
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && body.trim() && !post.isPending) {
+              post.mutate({ projectId, body: body.trim() });
+            }
           }}
         />
         <button className="primary" disabled={!body.trim() || post.isPending} onClick={() => post.mutate({ projectId, body: body.trim() })}>
           送出
         </button>
       </div>
+      {/* 失敗要讓人看得到：先前送出失敗畫面毫無反應，使用者以為有送出 */}
+      {post.error && <p className="error">留言送出失敗：{post.error.message}</p>}
     </aside>
   );
 }

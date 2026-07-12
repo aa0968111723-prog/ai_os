@@ -1,5 +1,47 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { trpc } from "../api";
+
+/**
+ * 單一組的週額度輸入列。
+ * 為什麼獨立成元件：admin.overview 不含 weeklyPointsPerUser（後端不在本次可改範圍），
+ * 現值改從 quota.usage 取得（該查詢本就回傳 groupQuota，管理員/組長皆有權限）；
+ * 並且「只在真的有改時才送出」——舊版 onBlur 無條件送出，Tab 掃過空欄就把組額度誤設回「跟全域」。
+ */
+function GroupQuotaRow({ group }: { group: { id: string; name: string } }) {
+  const utils = trpc.useUtils();
+  const usage = trpc.quota.usage.useQuery({ groupId: group.id });
+  const setGroupQuota = trpc.quota.setGroupQuota.useMutation({
+    onSuccess: () => {
+      utils.quota.usage.invalidate({ groupId: group.id });
+      utils.quota.my.invalidate();
+    },
+  });
+  const current = usage.data?.groupQuota ?? null;
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+      <span className="hint" style={{ width: 120 }}>{group.name} 週額度</span>
+      {usage.isLoading ? (
+        <span className="hint">載入中…</span>
+      ) : (
+        // defaultValue 等資料到位才掛載（上方 isLoading 守門），避免綁到未載入的空值而顯示不出現值
+        <input
+          type="number"
+          min={0}
+          style={{ width: 120 }}
+          placeholder="跟全域"
+          defaultValue={current ?? ""}
+          onBlur={(e) => {
+            const next = e.target.value === "" ? null : Number(e.target.value);
+            if (next !== current) setGroupQuota.mutate({ groupId: group.id, weeklyPointsPerUser: next });
+          }}
+        />
+      )}
+      <span className="hint">空=跟全域・0=不限</span>
+      {setGroupQuota.error && <span className="error" style={{ marginTop: 0 }}>{setGroupQuota.error.message}</span>}
+      {setGroupQuota.isSuccess && !setGroupQuota.isPending && <span className="hint">已更新 ✓</span>}
+    </div>
+  );
+}
 
 /** 系統自檢卡：一鍵驗證資料庫/目錄/點數/邀請/生成模式/交付引擎 */
 function SelfTestCard() {
@@ -45,8 +87,22 @@ export function AdminPage() {
   const createGroup = trpc.admin.createGroup.useMutation({ onSuccess: () => utils.admin.overview.invalidate() });
   const settings = trpc.quota.getSettings.useQuery();
   const saveSettings = trpc.quota.updateSettings.useMutation({ onSuccess: () => { utils.quota.getSettings.invalidate(); utils.quota.my.invalidate(); } });
-  const setGroupQuota = trpc.quota.setGroupQuota.useMutation({ onSuccess: () => { utils.admin.overview.invalidate(); utils.quota.my.invalidate(); } });
   const feedback = trpc.feedback.list.useQuery();
+
+  // 全域點數兩欄用 ref 讀「畫面上的即時輸入」而非可能過期的快取——
+  // 舊版 onBlur 拿 settings.data 舊值補另一欄，連續編輯兩欄會用舊值蓋回剛存的欄位
+  const totalBudgetRef = useRef<HTMLInputElement>(null);
+  const weeklyRef = useRef<HTMLInputElement>(null);
+  const saveBudget = () => {
+    const data = settings.data;
+    if (!data || !totalBudgetRef.current || !weeklyRef.current) return;
+    const parse = (v: string) => (v === "" ? null : Number(v));
+    const totalBudgetPoints = parse(totalBudgetRef.current.value);
+    const defaultWeeklyPoints = parse(weeklyRef.current.value);
+    // 沒有變更就不送：Tab 掃過欄位不觸發無意義寫入
+    if (totalBudgetPoints === (data.totalBudgetPoints ?? null) && defaultWeeklyPoints === (data.defaultWeeklyPoints ?? null)) return;
+    saveSettings.mutate({ totalBudgetPoints, defaultWeeklyPoints });
+  };
 
   const [email, setEmail] = useState("");
   const [teamId, setTeamId] = useState("");
@@ -85,12 +141,7 @@ export function AdminPage() {
                 </div>
               ))}
               {team.groups.map((g) => (
-                <div key={g.id + "-quota"} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
-                  <span className="hint" style={{ width: 120 }}>{g.name} 週額度</span>
-                  <input type="number" min={0} style={{ width: 120 }} placeholder="跟全域"
-                    onBlur={(e) => setGroupQuota.mutate({ groupId: g.id, weeklyPointsPerUser: e.target.value === "" ? null : Number(e.target.value) })} />
-                  <span className="hint">空=跟全域・0=不限</span>
-                </div>
+                <GroupQuotaRow key={g.id + "-quota"} group={g} />
               ))}
               <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                 <input
@@ -108,6 +159,8 @@ export function AdminPage() {
                   ＋建組
                 </button>
               </div>
+              {/* 建組失敗要看得到（只顯示在正在操作的那個團隊卡） */}
+              {teamId === team.id && createGroup.error && <p className="error">建組失敗：{createGroup.error.message}</p>}
             </section>
           ))}
         </div>
@@ -117,18 +170,17 @@ export function AdminPage() {
         <div className="card">
           <h2>點數與額度（彈性・隨時可調）</h2>
           <p className="hint">空白＝不限。總預算限超管；各組週額度組長/管理員皆可調。</p>
-          <label>總預算點數（全系統）</label>
-          <input type="number" min={0} defaultValue={settings.data?.totalBudgetPoints ?? ""} placeholder="不限"
-            onBlur={(e) => saveSettings.mutate({
-              totalBudgetPoints: e.target.value === "" ? null : Number(e.target.value),
-              defaultWeeklyPoints: settings.data?.defaultWeeklyPoints ?? null,
-            })} />
-          <label>預設每人每週上限</label>
-          <input type="number" min={0} defaultValue={settings.data?.defaultWeeklyPoints ?? ""} placeholder="不限"
-            onBlur={(e) => saveSettings.mutate({
-              totalBudgetPoints: settings.data?.totalBudgetPoints ?? null,
-              defaultWeeklyPoints: e.target.value === "" ? null : Number(e.target.value),
-            })} />
+          {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值 */}
+          {settings.data ? (
+            <>
+              <label>總預算點數（全系統）</label>
+              <input ref={totalBudgetRef} type="number" min={0} defaultValue={settings.data.totalBudgetPoints ?? ""} placeholder="不限" onBlur={saveBudget} />
+              <label>預設每人每週上限</label>
+              <input ref={weeklyRef} type="number" min={0} defaultValue={settings.data.defaultWeeklyPoints ?? ""} placeholder="不限" onBlur={saveBudget} />
+            </>
+          ) : (
+            <p className="hint">設定載入中…</p>
+          )}
           {saveSettings.error && <p className="error">{saveSettings.error.message}</p>}
           {saveSettings.isSuccess && <p className="hint" style={{ color: "var(--success)" }}>已儲存 ✓</p>}
         </div>

@@ -3,6 +3,7 @@ import superjson from "superjson";
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { Request, Response } from "express";
 import { resolveSession, loadAuthState, type AuthState } from "./services/auth";
+import { isBootReady } from "./services/boot";
 import { db, schema } from "./db";
 import { eq } from "drizzle-orm";
 import { SEED_ADMIN_EMAIL } from "./services/seed";
@@ -42,6 +43,10 @@ export const publicProcedure = t.procedure;
 
 /** 需登入 */
 export const authedProcedure = t.procedure.use(({ ctx, next }) => {
+  // 開機初始化（建表/種子）完成前，回可理解的訊息而不是 relation does not exist 500
+  if (!isBootReady()) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "系統正在初始化（約一分鐘內完成），請稍候重試" });
+  }
   if (!ctx.auth) throw new TRPCError({ code: "UNAUTHORIZED", message: "請先登入" });
   return next({ ctx: { ...ctx, auth: ctx.auth } });
 });
