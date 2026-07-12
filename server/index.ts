@@ -245,7 +245,7 @@ app.get("/api/selftest", async (req, res) => {
   await run("點數設定可讀寫", async () => {
     const { getSettings } = await import("./services/points");
     const s = await getSettings();
-    return `總預算 ${s.totalBudgetPoints ?? "不限"}／週 ${s.defaultWeeklyPoints ?? "不限"}`;
+    return `總預算 ${s.totalBudgetPoints ?? "不限"}／週 ${s.defaultWeeklyPoints ?? "不限"}／日 ${s.defaultDailyPoints ?? "不限"}`;
   });
   await run("邀請機制", async () => {
     const { createInvite, sha256 } = await import("./services/auth");

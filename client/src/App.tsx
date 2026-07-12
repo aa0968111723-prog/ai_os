@@ -15,12 +15,13 @@ function PointsBadge({ groupId }: { groupId: string }) {
   const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 20_000, enabled: !!groupId });
   if (my.error) return <span className="badge" title="點數暫時讀不到，稍後會自動重試">◈ <span className="mono">—</span></span>;
   if (!my.data) return null;
-  const { totalRemaining, weeklyQuota, weeklyUsed } = my.data;
+  const { totalRemaining, weeklyQuota, weeklyUsed, dailyQuota, dailyUsed } = my.data;
   const label = totalRemaining != null ? `剩 ${totalRemaining.toLocaleString()}` : "不限";
   const weekly = weeklyQuota != null ? `・週 ${weeklyUsed}/${weeklyQuota}` : "";
+  const daily = dailyQuota != null ? `・日 ${dailyUsed}/${dailyQuota}` : "";
   return (
-    <span className="badge" title="點數額度由組長／管理員調整">
-      ◈ <span className="mono">{label}{weekly}</span>
+    <span className="badge" title="點數額度由組長／管理員調整；日上限每天重置">
+      ◈ <span className="mono">{label}{weekly}{daily}</span>
     </span>
   );
 }

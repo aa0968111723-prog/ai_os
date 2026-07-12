@@ -55,6 +55,8 @@ export const settings = pgTable("settings", {
   totalBudgetPoints: integer("total_budget_points"),
   /** 預設每人每週上限（null/0＝不限） */
   defaultWeeklyPoints: integer("default_weekly_points"),
+  /** 每人每日上限（null/0＝不限）——簡報「每人每日上限，不會有人不小心把預算爆掉」 */
+  defaultDailyPoints: integer("default_daily_points"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 

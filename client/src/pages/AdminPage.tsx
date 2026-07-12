@@ -105,15 +105,21 @@ export function AdminPage() {
   // 舊版 onBlur 拿 settings.data 舊值補另一欄，連續編輯兩欄會用舊值蓋回剛存的欄位
   const totalBudgetRef = useRef<HTMLInputElement>(null);
   const weeklyRef = useRef<HTMLInputElement>(null);
+  const dailyRef = useRef<HTMLInputElement>(null);
   const saveBudget = () => {
     const data = settings.data;
-    if (!data || !totalBudgetRef.current || !weeklyRef.current) return;
+    if (!data || !totalBudgetRef.current || !weeklyRef.current || !dailyRef.current) return;
     const parse = (v: string) => (v === "" ? null : Number(v));
     const totalBudgetPoints = parse(totalBudgetRef.current.value);
     const defaultWeeklyPoints = parse(weeklyRef.current.value);
+    const defaultDailyPoints = parse(dailyRef.current.value);
     // 沒有變更就不送：Tab 掃過欄位不觸發無意義寫入
-    if (totalBudgetPoints === (data.totalBudgetPoints ?? null) && defaultWeeklyPoints === (data.defaultWeeklyPoints ?? null)) return;
-    saveSettings.mutate({ totalBudgetPoints, defaultWeeklyPoints });
+    if (
+      totalBudgetPoints === (data.totalBudgetPoints ?? null) &&
+      defaultWeeklyPoints === (data.defaultWeeklyPoints ?? null) &&
+      defaultDailyPoints === (data.defaultDailyPoints ?? null)
+    ) return;
+    saveSettings.mutate({ totalBudgetPoints, defaultWeeklyPoints, defaultDailyPoints });
   };
 
   const [email, setEmail] = useState("");
@@ -199,6 +205,8 @@ export function AdminPage() {
               />
               <label>預設每人每週上限</label>
               <input ref={weeklyRef} type="number" min={0} defaultValue={settings.data.defaultWeeklyPoints ?? ""} placeholder="不限" onBlur={saveBudget} disabled={!isSuperAdmin} />
+              <label>每人每日上限（每天重置）</label>
+              <input ref={dailyRef} type="number" min={0} defaultValue={settings.data.defaultDailyPoints ?? ""} placeholder="不限" onBlur={saveBudget} disabled={!isSuperAdmin} />
             </>
           ) : (
             <p className="hint">設定載入中…</p>

@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
-import { getSettings, updateSettings, usedTotal, usedThisWeek, effectiveWeeklyQuota, groupUsage } from "../services/points";
+import { getSettings, updateSettings, usedTotal, usedThisWeek, usedToday, effectiveWeeklyQuota, effectiveDailyQuota, groupUsage } from "../services/points";
 
 /** 點數與額度管理（定案：不鎖死——超管調全域、管理員調組、組長調成員） */
 export const quotaRouter = router({
@@ -12,6 +12,7 @@ export const quotaRouter = router({
     const settings = await getSettings();
     const total = await usedTotal();
     const weekly = await usedThisWeek(ctx.auth.user.id);
+    const today = await usedToday(ctx.auth.user.id);
     // 只在使用者確實屬於該組時才算組額度（舊版任意 groupId 都算，洩漏他組額度設定）
     const isMember = input?.groupId ? ctx.auth.groups.some((g) => g.groupId === input.groupId) : false;
     const quota = isMember ? await effectiveWeeklyQuota(ctx.auth.user.id, input!.groupId!) : null;
@@ -21,13 +22,21 @@ export const quotaRouter = router({
       totalRemaining: settings.totalBudgetPoints != null && settings.totalBudgetPoints > 0 ? Math.max(0, settings.totalBudgetPoints - total) : null,
       weeklyQuota: quota, // null＝不限
       weeklyUsed: weekly,
+      dailyQuota: effectiveDailyQuota(settings), // null＝不限
+      dailyUsed: today,
     };
   }),
 
   /** 全域設定（超管改；管理員可看） */
   getSettings: adminProcedure.query(() => getSettings()),
   updateSettings: adminProcedure
-    .input(z.object({ totalBudgetPoints: z.number().int().min(0).nullable(), defaultWeeklyPoints: z.number().int().min(0).nullable() }))
+    .input(
+      z.object({
+        totalBudgetPoints: z.number().int().min(0).nullable(),
+        defaultWeeklyPoints: z.number().int().min(0).nullable(),
+        defaultDailyPoints: z.number().int().min(0).nullable().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
       if (!ctx.auth.user.isSuperAdmin) throw new TRPCError({ code: "FORBIDDEN", message: "只有超管能調全域預算" });
       return updateSettings(input);

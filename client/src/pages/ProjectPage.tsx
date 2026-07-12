@@ -225,6 +225,7 @@ export function ProjectPage({ id }: { id: string }) {
                     <span className="hint" style={{ marginLeft: 8 }}>
                       {quota.data.totalRemaining != null ? `目前剩 ${quota.data.totalRemaining.toLocaleString()} 點` : "額度不限"}
                       {quota.data.weeklyQuota != null ? `・本週 ${quota.data.weeklyUsed}/${quota.data.weeklyQuota}` : ""}
+                      {quota.data.dailyQuota != null ? `・今日 ${quota.data.dailyUsed}/${quota.data.dailyQuota}` : ""}
                     </span>
                   )}
                 </p>

@@ -10,15 +10,23 @@ import { db, schema } from "../db";
 export interface PointsSettings {
   totalBudgetPoints: number | null;
   defaultWeeklyPoints: number | null;
+  defaultDailyPoints: number | null;
 }
 
-/** 讀全域設定（無列則以環境預設建立：5000／300，之後全由管理員在系統內調） */
+/** 讀全域設定（無列則以環境預設建立：5000／300／不限，之後全由管理員在系統內調） */
 export async function getSettings(): Promise<PointsSettings> {
   const [row] = await db.select().from(schema.settings).where(eq(schema.settings.key, "global"));
-  if (row) return { totalBudgetPoints: row.totalBudgetPoints, defaultWeeklyPoints: row.defaultWeeklyPoints };
+  if (row) {
+    return {
+      totalBudgetPoints: row.totalBudgetPoints,
+      defaultWeeklyPoints: row.defaultWeeklyPoints,
+      defaultDailyPoints: row.defaultDailyPoints,
+    };
+  }
   const seeded = {
     totalBudgetPoints: Number(process.env.TOTAL_BUDGET_POINTS ?? 5000) || null,
     defaultWeeklyPoints: Number(process.env.WEEKLY_QUOTA_POINTS ?? 300) || null,
+    defaultDailyPoints: Number(process.env.DAILY_QUOTA_POINTS ?? 0) || null, // 預設不限日
   };
   await db.insert(schema.settings).values({ key: "global", ...seeded }).onConflictDoNothing();
   return seeded;
@@ -40,6 +48,32 @@ function weekStart(): Date {
   tpe.setUTCDate(tpe.getUTCDate() - day);
   tpe.setUTCHours(0, 0, 0, 0); // 台北週一 00:00
   return new Date(tpe.getTime() - TPE_OFFSET_MS); // 平移回真正的 UTC 時刻
+}
+
+/** 日界以台北時間（UTC+8）計算——同 weekStart 的理由，避免用 UTC 讓「今天」跳到台北早上 8 點 */
+function dayStart(): Date {
+  const TPE_OFFSET_MS = 8 * 60 * 60 * 1000;
+  const tpe = new Date(Date.now() + TPE_OFFSET_MS);
+  tpe.setUTCHours(0, 0, 0, 0); // 台北當日 00:00
+  return new Date(tpe.getTime() - TPE_OFFSET_MS);
+}
+
+/** 個人今日已用（口徑同 usedThisWeek：退點跟隨生成建立日） */
+export async function usedToday(userId: string): Promise<number> {
+  const [row] = await db
+    .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
+    .from(schema.costLedger)
+    .leftJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
+    .where(and(
+      eq(schema.costLedger.userId, userId),
+      gte(sql`coalesce(${schema.generations.createdAt}, ${schema.costLedger.createdAt})`, dayStart()),
+    ));
+  return Number(row?.used ?? 0);
+}
+
+/** 每人每日上限（v1 為全域設定；null＝不限） */
+export function effectiveDailyQuota(settings: PointsSettings): number | null {
+  return noLimit(settings.defaultDailyPoints) ? null : settings.defaultDailyPoints;
 }
 
 export async function usedTotal(): Promise<number> {
@@ -86,6 +120,11 @@ export async function checkQuota(userId: string, groupId: string, points: number
     const weekly = await usedThisWeek(userId);
     if (weekly + points > quota) return `本週額度不足（已用 ${weekly}／${quota} 點）——可請組長調整`;
   }
+  const daily = effectiveDailyQuota(settings);
+  if (daily != null) {
+    const today = await usedToday(userId);
+    if (today + points > daily) return `今天的額度用完了（已用 ${today}／${daily} 點）——明天會重置`;
+  }
   return null;
 }
 
@@ -111,6 +150,7 @@ export async function reserveQuota(
   // 這兩者是穩定的組態/成員資料，非 TOCTOU 競態目標；真正要原子的只有「帳本 SUM＋扣點列」。
   const settings = await getSettings();
   const quota = await effectiveWeeklyQuota(userId, groupId);
+  const daily = effectiveDailyQuota(settings);
   const budgetCapped = !noLimit(settings.totalBudgetPoints);
 
   return db.transaction(async (tx) => {
@@ -140,6 +180,21 @@ export async function reserveQuota(
       const weekly = Number(w?.used ?? 0);
       if (weekly + points > quota) {
         return `本週額度不足（已用 ${weekly}／${quota} 點）——可請組長調整`;
+      }
+    }
+    if (daily != null) {
+      // 日上限同樣受既有 per-user advisory lock 序列化——不必再上新鎖（避免多鎖交錯的死鎖面）
+      const [dRow] = await tx
+        .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
+        .from(schema.costLedger)
+        .leftJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
+        .where(and(
+          eq(schema.costLedger.userId, userId),
+          gte(sql`coalesce(${schema.generations.createdAt}, ${schema.costLedger.createdAt})`, dayStart()),
+        ));
+      const today = Number(dRow?.used ?? 0);
+      if (today + points > daily) {
+        return `今天的額度用完了（已用 ${today}／${daily} 點）——明天會重置`;
       }
     }
     await tx.insert(schema.costLedger).values({ userId, groupId, delta: -points, reason, generationId });
