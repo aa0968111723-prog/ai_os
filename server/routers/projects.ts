@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -10,17 +10,36 @@ import { removeStoredFile } from "../services/storage";
 export const projectsRouter = router({
   /** 列出指定組的專案（未指定 → 所有我可見的組）；隔離由 requireGroup／成員組清單保證 */
   list: authedProcedure
-    .input(z.object({ groupId: z.string().uuid().optional() }).optional())
+    .input(z.object({ groupId: z.string().uuid().optional(), includeArchived: z.boolean().optional() }).optional())
     .query(async ({ ctx, input }) => {
       const groupIds = input?.groupId
         ? [requireGroup(ctx.auth, input.groupId) && input.groupId]
         : ctx.auth.groups.map((g) => g.groupId);
       if (groupIds.length === 0) return [];
-      return db
-        .select()
-        .from(schema.projects)
-        .where(inArray(schema.projects.groupId, groupIds as string[]))
-        .orderBy(desc(schema.projects.updatedAt));
+      // 預設只列「未封存」；封存的專案從作業台隱藏（可還原），除非明確要求
+      const where = input?.includeArchived
+        ? inArray(schema.projects.groupId, groupIds as string[])
+        : and(inArray(schema.projects.groupId, groupIds as string[]), ne(schema.projects.status, "archived"));
+      return db.select().from(schema.projects).where(where).orderBy(desc(schema.projects.updatedAt));
+    }),
+
+  /** 封存/還原專案（軟刪除，可還原）：專案擁有者或組長以上可操作 */
+  setArchived: authedProcedure
+    .input(z.object({ id: z.string().uuid(), archived: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.id));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      const role = requireGroup(ctx.auth, project.groupId);
+      const isOwner = project.ownerId === ctx.auth.user.id;
+      if (!isOwner && role === "member") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "只有專案建立者或組長以上可以封存/還原" });
+      }
+      const [updated] = await db
+        .update(schema.projects)
+        .set({ status: input.archived ? "archived" : "active", updatedAt: new Date() })
+        .where(eq(schema.projects.id, input.id))
+        .returning();
+      return updated;
     }),
 
   create: authedProcedure

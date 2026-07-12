@@ -60,6 +60,9 @@ export function ProjectPage({ id }: { id: string }) {
   // 帶 groupId（本專案的組）才算得出週/日額度——不帶時 quota.my 的 weeklyQuota 恆為 null，彈窗週用量變死碼
   const quota = trpc.quota.my.useQuery({ groupId: project.data?.groupId }, { enabled: confirming && !!project.data });
   const savePrompt = trpc.prompts.save.useMutation({ onSuccess: () => utils.prompts.list.invalidate({ projectId: id }) });
+  const archiveProject = trpc.projects.setArchived.useMutation({
+    onSuccess: () => { utils.projects.get.invalidate({ id }); utils.projects.list.invalidate(); },
+  });
   const submit = trpc.generation.submit.useMutation({
     onSuccess: (_data, vars) => {
       // 成功生成的提示詞自動入庫（簡報「打過的咒語自動存起來」）
@@ -90,6 +93,9 @@ export function ProjectPage({ id }: { id: string }) {
   const isLeader = myRole === "leader" || myRole === "admin";
   const wv: Worldview = worldviewSchema.parse(p.worldview ?? {});
 
+  const isOwner = me.data?.user.id === p.ownerId;
+  const canArchive = isOwner || isLeader;
+
   const toggle = (field: "tones" | "themes", value: string) => {
     const current = wv[field];
     const next = current.includes(value) ? current.filter((x) => x !== value) : [...current, value];
@@ -99,11 +105,28 @@ export function ProjectPage({ id }: { id: string }) {
 
   return (
     <div>
-      <h1>{p.title}</h1>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+        <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <span className="chip" style={{ marginLeft: 10 }}>已封存</span>}</h1>
+        {canArchive && (
+          <button
+            style={{ padding: "4px 12px", fontSize: 12 }}
+            disabled={archiveProject.isPending}
+            onClick={() => {
+              const to = p.status === "archived";
+              if (to || window.confirm(`封存「${p.title}」？封存後會從作業台隱藏，需要時可還原（不會刪除內容）。`)) {
+                archiveProject.mutate({ id, archived: !to });
+              }
+            }}
+          >
+            {p.status === "archived" ? "還原專案" : "封存專案"}
+          </button>
+        )}
+      </div>
       <p className="sub">
         {p.format}・{p.platform}
         {wv.logline ? `・${wv.logline}` : ""}
       </p>
+      {archiveProject.error && <p className="error">{archiveProject.error.message}</p>}
 
       <div className="cols">
         <div className="stack">
