@@ -40,7 +40,8 @@ export function ProjectPage({ id }: { id: string }) {
   const toggle = (field: "tones" | "themes", value: string) => {
     const current = wv[field];
     const next = current.includes(value) ? current.filter((x) => x !== value) : [...current, value];
-    updateWv.mutate({ id, worldview: { ...wv, [field]: next } });
+    // 只送有改的欄位；伺服器與現值合併（避免整包覆蓋造成的資料遺失）
+    updateWv.mutate({ id, worldview: { [field]: next } });
   };
 
   return (
@@ -60,13 +61,13 @@ export function ProjectPage({ id }: { id: string }) {
             <input
               defaultValue={wv.logline}
               placeholder="例：陳師姐從憂鬱低谷透過印心佛法走出重生"
-              onBlur={(e) => e.target.value !== wv.logline && updateWv.mutate({ id, worldview: { ...wv, logline: e.target.value } })}
+              onBlur={(e) => e.target.value !== wv.logline && updateWv.mutate({ id, worldview: { logline: e.target.value } })}
             />
             <label>一句關鍵訊息（一片一訊息）</label>
             <input
               defaultValue={wv.message}
               placeholder="例：把心交給佛，煩惱就交給了光"
-              onBlur={(e) => e.target.value !== wv.message && updateWv.mutate({ id, worldview: { ...wv, message: e.target.value } })}
+              onBlur={(e) => e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
             />
             <label>訊息主軸</label>
             <div>
@@ -85,6 +86,7 @@ export function ProjectPage({ id }: { id: string }) {
               ))}
             </div>
             <p className="hint" style={{ marginTop: 10 }}>禁忌事項已內建（醫療宣稱禁語等）；進階設定之後開放。</p>
+            {updateWv.error && <p className="error">世界觀儲存失敗：{updateWv.error.message}</p>}
           </section>
 
           {/* AI 導演建議 */}

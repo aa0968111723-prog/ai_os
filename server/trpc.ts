@@ -14,8 +14,9 @@ export interface Context {
 }
 
 export async function createContext({ req, res }: CreateExpressContextOptions): Promise<Context> {
-  // AUTH_MODE=dev：跳過登入、以種子超管身分運作（開發測功能不卡登入）
-  if (process.env.AUTH_MODE === "dev") {
+  // AUTH_MODE=dev：跳過登入、以種子超管身分運作（開發測功能不卡登入）。
+  // 安全鎖：正式環境「絕不」允許此後門生效——否則單一環境變數即造成全站無認證、人人超管。
+  if (process.env.AUTH_MODE === "dev" && process.env.NODE_ENV !== "production") {
     const [admin] = await db.select().from(schema.users).where(eq(schema.users.email, SEED_ADMIN_EMAIL));
     const auth = admin ? await loadAuthState(admin.id) : null;
     return { auth, req, res };

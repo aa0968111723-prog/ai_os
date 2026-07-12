@@ -6,6 +6,8 @@ function StatusPoller({ id }: { id: string }) {
     { id },
     {
       refetchInterval: 4000,
+      // 切到別的分頁時也要繼續輪詢——否則使用者一離開，生成就「卡在生成中」直到切回來。
+      refetchIntervalInBackground: true,
       // 完成後刷新列表與點數
       select: (data) => {
         if (data.status === "done" || data.status === "failed") {
@@ -29,7 +31,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function GenerationList({ projectId }: { projectId: string }) {
   const utils = trpc.useUtils();
-  const list = trpc.generation.listByProject.useQuery({ projectId }, { refetchInterval: 8000 });
+  const list = trpc.generation.listByProject.useQuery({ projectId }, { refetchInterval: 8000, refetchIntervalInBackground: true });
   const addScene = trpc.scenes.addFromGeneration.useMutation({
     onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
   });

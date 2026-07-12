@@ -165,10 +165,13 @@ export function AdminPage() {
               {invite.isPending ? "建立中…" : "產生邀請連結"}
             </button>
           </div>
-          {invite.data && (
+          {invite.data && invite.data.attached && (
+            <p className="hint" style={{ marginTop: 12 }}>✓ {invite.data.message}</p>
+          )}
+          {invite.data && !invite.data.attached && invite.data.inviteUrl && (
             <div style={{ marginTop: 12 }}>
               <p className="hint">複製這個連結，用 LINE 傳給夥伴（{invite.data.expiresInHours} 小時內有效）：</p>
-              <input readOnly value={invite.data.inviteUrl || `${location.origin}${invite.data.inviteUrl}`} onFocus={(e) => e.target.select()} />
+              <input readOnly value={/^https?:\/\//.test(invite.data.inviteUrl) ? invite.data.inviteUrl : `${location.origin}${invite.data.inviteUrl}`} onFocus={(e) => e.target.select()} />
             </div>
           )}
           {invite.error && <p className="error">{invite.error.message}</p>}

@@ -170,6 +170,9 @@ if (isProd) {
 
 app.listen(port, () => {
   console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${isMockMode() ? "假生成模式" : "真實模式"}）`);
+  if (isProd && process.env.AUTH_MODE === "dev") {
+    console.warn("[server] ⚠⚠⚠ 正式環境偵測到 AUTH_MODE=dev（無認證後門）——已自動忽略不生效；請到 Variables 移除此變數。");
+  }
   // 背景：等 DB → 自動建表 → 模型目錄同步 → 種子/超管自救，全程不擋啟動
   ensureSchema()
     .then(async (ready) => {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { router, authedProcedure, adminProcedure } from "../trpc";
 import { db, schema } from "../db";
 
@@ -29,8 +29,21 @@ export const feedbackRouter = router({
       return row;
     }),
 
-  list: adminProcedure.query(async () => {
-    const rows = await db.select().from(schema.feedback).orderBy(desc(schema.feedback.createdAt)).limit(100);
+  list: adminProcedure.query(async ({ ctx }) => {
+    // 組隔離：超管看全部；一般團隊管理員只看「自己管得到的組」的回饋（舊版任何管理員看全站，跨團隊洩漏）。
+    let rows;
+    if (ctx.auth.user.isSuperAdmin) {
+      rows = await db.select().from(schema.feedback).orderBy(desc(schema.feedback.createdAt)).limit(100);
+    } else {
+      const visibleGroupIds = ctx.auth.groups.map((g) => g.groupId);
+      if (visibleGroupIds.length === 0) return [];
+      rows = await db
+        .select()
+        .from(schema.feedback)
+        .where(inArray(schema.feedback.groupId, visibleGroupIds))
+        .orderBy(desc(schema.feedback.createdAt))
+        .limit(100);
+    }
     const users = await db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users);
     return rows.map((r) => ({ ...r, userName: users.find((u) => u.id === r.userId)?.name ?? "?" }));
   }),

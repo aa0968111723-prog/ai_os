@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, adminProcedure } from "../trpc";
 import { db, schema } from "../db";
-import { createInvite } from "../services/auth";
+import { createInvite, attachExistingUser } from "../services/auth";
 
 /** 團隊管理權檢查：超管或該團隊 admin */
 function assertTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, teamId: string): void {
@@ -75,9 +75,25 @@ export const adminRouter = router({
         const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, input.groupId));
         if (!group || group.teamId !== input.teamId) throw new TRPCError({ code: "BAD_REQUEST", message: "組不屬於該團隊" });
       }
-      const { token } = await createInvite({ ...input, invitedBy: ctx.auth.user.id });
+      const email = input.email.toLowerCase().trim();
+      const [existing] = await db.select().from(schema.users).where(eq(schema.users.email, email));
+      if (existing) {
+        // 既有帳號：不發可兌換連結（那條路會被拿去免密碼接管帳號），改由管理員直接加入。
+        if (existing.isSuperAdmin && !ctx.auth.user.isSuperAdmin) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "不能邀請系統管理員加入你的團隊" });
+        }
+        await attachExistingUser({
+          userId: existing.id,
+          teamId: input.teamId,
+          teamRole: input.teamRole,
+          groupId: input.groupId,
+          groupRole: input.groupRole,
+        });
+        return { inviteUrl: null, attached: true, message: `${existing.name} 已直接加入（此 email 已有帳號，沿用原密碼登入）`, expiresInHours: 0 };
+      }
+      const { token } = await createInvite({ ...input, email, invitedBy: ctx.auth.user.id });
       const base = process.env.APP_URL ?? "";
-      return { inviteUrl: `${base}/invite/${token}`, expiresInHours: 72 };
+      return { inviteUrl: `${base}/invite/${token}`, attached: false, message: null as string | null, expiresInHours: 72 };
     }),
 
   /** 變更組內角色（組長↔組員） */

@@ -71,14 +71,18 @@ export const projectsRouter = router({
   }),
 
   updateWorldview: authedProcedure
-    .input(z.object({ id: z.string().uuid(), worldview: worldviewSchema }))
+    // partial patch：只送有改的欄位，伺服器端與現值合併。
+    // 舊版前端送整包 {...wv, field}，快速連改不同欄位時後一次會用「上一次 render 的舊 wv」覆蓋掉前一次的變更（資料遺失）。
+    .input(z.object({ id: z.string().uuid(), worldview: worldviewSchema.partial() }))
     .mutation(async ({ ctx, input }) => {
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.id));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
+      const current = worldviewSchema.parse(project.worldview ?? {});
+      const merged = worldviewSchema.parse({ ...current, ...input.worldview });
       const [updated] = await db
         .update(schema.projects)
-        .set({ worldview: input.worldview, updatedAt: new Date() })
+        .set({ worldview: merged, updatedAt: new Date() })
         .where(eq(schema.projects.id, input.id))
         .returning();
       return updated;

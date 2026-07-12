@@ -32,6 +32,16 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
   res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(zipName)}`);
 
   const archive = new ZipArchive({ zlib: { level: 6 } });
+  // archiver 對錯誤是發 'error' 事件——未監聽會變 unhandled 'error' 直接讓 Node 程序崩潰。
+  archive.on("error", (err) => {
+    console.error("[export] 打包錯誤：", err instanceof Error ? err.message : err);
+    if (!res.headersSent) res.status(500).end("打包失敗");
+    else res.destroy();
+  });
+  // 用戶端中途取消下載時，停止打包、釋放資源，別再往斷掉的連線寫。
+  res.on("close", () => {
+    if (!res.writableEnded) archive.destroy();
+  });
   archive.pipe(res);
 
   // 05_文件／腳本與鏡頭表.md（一定有）

@@ -57,15 +57,39 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
     }
     return { status: "done", resultUrl: mockResultUrl(kind) };
   }
+  // 暫時性錯誤（429 限流、5xx、網路例外）→ 回 running 讓輪詢重試，絕不誤判失敗而退點；
+  // 只有明確的終局狀態（4xx 非 429、非 COMPLETED、輸出無法解析）才回 failed。
+  const isTransient = (code: number): boolean => code === 429 || code >= 500;
   const base = `https://queue.fal.run/${endpoint}/requests/${requestId}`;
-  const statusRes = await proxyFetch(`${base}/status`, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
-  if (!statusRes.ok) return { status: "failed", error: `fal status ${statusRes.status}` };
+  let statusRes: Awaited<ReturnType<typeof proxyFetch>>;
+  try {
+    statusRes = await proxyFetch(`${base}/status`, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
+  } catch (err) {
+    console.warn("[fal] status 網路錯誤（暫時，續輪詢）：", err instanceof Error ? err.message : err);
+    return { status: "running" };
+  }
+  if (!statusRes.ok) {
+    if (isTransient(statusRes.status)) {
+      console.warn(`[fal] status ${statusRes.status}（暫時，續輪詢）`);
+      return { status: "running" };
+    }
+    return { status: "failed", error: `fal status ${statusRes.status}` };
+  }
   const s = (await statusRes.json()) as { status: string };
   if (s.status === "IN_QUEUE") return { status: "queued" };
   if (s.status === "IN_PROGRESS") return { status: "running" };
   if (s.status !== "COMPLETED") return { status: "failed", error: `fal 狀態 ${s.status}` };
-  const resultRes = await proxyFetch(base, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
-  if (!resultRes.ok) return { status: "failed", error: `fal result ${resultRes.status}` };
+  let resultRes: Awaited<ReturnType<typeof proxyFetch>>;
+  try {
+    resultRes = await proxyFetch(base, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
+  } catch (err) {
+    console.warn("[fal] result 網路錯誤（暫時，續輪詢）：", err instanceof Error ? err.message : err);
+    return { status: "running" };
+  }
+  if (!resultRes.ok) {
+    if (isTransient(resultRes.status)) return { status: "running" };
+    return { status: "failed", error: `fal result ${resultRes.status}` };
+  }
   const result = (await resultRes.json()) as Record<string, unknown>;
   const extracted = extractResult(result);
   if (!extracted.url && !extracted.text) return { status: "failed", error: "無法解析模型輸出(請回報,我們會補上這個模型的解析)" };

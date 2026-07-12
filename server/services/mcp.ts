@@ -9,6 +9,7 @@ import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { getModel, endpointOf, MODELS, CATEGORIES, tierLabel, type ProjectFormat, type ModelCategory, type ModelTier } from "../../shared/models";
 import { falSubmit } from "./fal";
+import { reserveQuota, refund } from "./points";
 
 const PROTOCOL_VERSION = "2024-11-05";
 
@@ -108,10 +109,22 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
       .insert(schema.generations)
       .values({ projectId: project.id, groupId: project.groupId, userId: admin.id, modelId: model.id, kind: model.kind, prompt: String(args.prompt ?? ""), sourceUrl, params: falInput, pointsEst: model.points })
       .returning();
-    await db.insert(schema.costLedger).values({ userId: admin.id, groupId: project.groupId, delta: -model.points, reason: `MCP 生成 ${model.label}`, generationId: gen.id });
-    const { requestId } = await falSubmit(endpointOf(model), model.kind, falInput);
-    await db.update(schema.generations).set({ requestId, status: "running" }).where(eq(schema.generations.id, gen.id));
-    return { generationId: gen.id, status: "running", points: model.points };
+    // 與網頁端一致：原子守門＋扣點（舊版直接扣、完全不檢查額度，MCP 可無限刷爆總預算）
+    const quotaError = await reserveQuota(admin.id, project.groupId, model.points, `MCP 生成 ${model.label}`, gen.id);
+    if (quotaError) {
+      await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
+      throw new Error(quotaError);
+    }
+    try {
+      const { requestId } = await falSubmit(endpointOf(model), model.kind, falInput);
+      await db.update(schema.generations).set({ requestId, status: "running" }).where(eq(schema.generations.id, gen.id));
+      return { generationId: gen.id, status: "running", points: model.points };
+    } catch (err) {
+      // fal 送出失敗：退點＋標記失敗（舊版吞掉例外還回報 running，永遠卡在假的進行中）
+      await refund(admin.id, project.groupId, model.points, "MCP 生成送出失敗退回", gen.id);
+      await db.update(schema.generations).set({ status: "failed", error: String(err), pointsRefunded: model.points }).where(eq(schema.generations.id, gen.id));
+      throw new Error(`生成送出失敗，點數已退回：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   if (name === "post_message") {

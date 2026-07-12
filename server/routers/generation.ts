@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { getModel, endpointOf, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
 import { falSubmit, falStatus, isMockMode } from "../services/fal";
-import { checkQuota, deduct, refund } from "../services/points";
+import { reserveQuota, refund } from "../services/points";
 
 /** 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成) */
 function buildPrompt(userPrompt: string, worldview: Worldview): string {
@@ -47,10 +47,6 @@ export const generationRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
       requireGroup(ctx.auth, project.groupId); // 多組隔離
 
-      // 彈性額度守門(個人覆寫→組→全域;空=不限)
-      const quotaError = await checkQuota(ctx.auth.user.id, project.groupId, model.points);
-      if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
-
       const worldview = worldviewSchema.parse(project.worldview ?? {});
       const fullPrompt = effectivePrompt(model, input.prompt, worldview);
       const falInput = model.input(fullPrompt, project.format as ProjectFormat, input.sourceUrl);
@@ -69,7 +65,13 @@ export const generationRouter = router({
           pointsEst: model.points,
         })
         .returning();
-      await deduct(ctx.auth.user.id, project.groupId, model.points, `生成 ${model.label}`, gen.id);
+
+      // 原子守門＋扣點（同一交易＋per-user 鎖，杜絕併發雙重扣款/繞過額度）
+      const quotaError = await reserveQuota(ctx.auth.user.id, project.groupId, model.points, `生成 ${model.label}`, gen.id);
+      if (quotaError) {
+        await db.delete(schema.generations).where(eq(schema.generations.id, gen.id)); // 未扣點，移除待生成列
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+      }
 
       try {
         const { requestId } = await falSubmit(endpointOf(model), model.kind, falInput);
@@ -104,7 +106,9 @@ export const generationRouter = router({
 
     const result = await falStatus(endpoint, kind, gen.requestId);
     if (result.status === "done" && (result.resultUrl || result.resultText)) {
-      const [updated] = await db
+      // Compare-and-set：只有把「仍在 queued/running」的列成功推進成 done 的那一次才算數，
+      // 併發輪詢/重試不會重複入庫（舊版每次都 update+insert asset → 重複素材、重複計費）。
+      const updatedRows = await db
         .update(schema.generations)
         .set({
           status: "done",
@@ -113,8 +117,13 @@ export const generationRouter = router({
           pointsActual: gen.pointsEst,
           updatedAt: new Date(),
         })
-        .where(eq(schema.generations.id, gen.id))
+        .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
         .returning();
+      if (updatedRows.length === 0) {
+        const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
+        return current; // 別人已推進，直接回現況
+      }
+      const [updated] = updatedRows;
       // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄
       if (result.resultUrl && (kind === "image" || kind === "video" || kind === "audio")) {
         await db.insert(schema.assets).values({
@@ -130,13 +139,19 @@ export const generationRouter = router({
       return updated;
     }
     if (result.status === "failed") {
-      await refund(gen.userId, gen.groupId, gen.pointsEst, "生成失敗退回", gen.id);
-      const [updated] = await db
+      // 同樣 compare-and-set：只有真正把列從 queued/running 轉成 failed 的那一次才退點，
+      // 避免同一筆被多次輪詢重複退款（憑空長點數）。
+      const updatedRows = await db
         .update(schema.generations)
         .set({ status: "failed", error: result.error ?? "未知錯誤", pointsRefunded: gen.pointsEst, updatedAt: new Date() })
-        .where(eq(schema.generations.id, gen.id))
+        .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
         .returning();
-      return updated;
+      if (updatedRows.length === 0) {
+        const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
+        return current;
+      }
+      await refund(gen.userId, gen.groupId, gen.pointsEst, "生成失敗退回", gen.id);
+      return updatedRows[0];
     }
     return gen;
   }),

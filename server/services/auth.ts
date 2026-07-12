@@ -155,6 +155,36 @@ export async function createInvite(input: {
   return { token };
 }
 
+/**
+ * 管理員把「已存在的帳號」直接加入團隊/組（既有成員跨團隊時用）。
+ * 不發可兌換連結、不建立 session——純粹補上成員關係，避免邀請連結被拿去接管帳號。
+ * 冪等：已在該團隊/組則略過。回傳被加入的使用者名稱供前端顯示。
+ */
+export async function attachExistingUser(input: {
+  userId: string;
+  teamId: string;
+  teamRole: "admin" | "member";
+  groupId?: string;
+  groupRole: "leader" | "member";
+}): Promise<void> {
+  const existingTeam = await db
+    .select()
+    .from(schema.teamMembers)
+    .where(and(eq(schema.teamMembers.teamId, input.teamId), eq(schema.teamMembers.userId, input.userId)));
+  if (existingTeam.length === 0) {
+    await db.insert(schema.teamMembers).values({ teamId: input.teamId, userId: input.userId, role: input.teamRole });
+  }
+  if (input.groupId) {
+    const existingGroup = await db
+      .select()
+      .from(schema.groupMembers)
+      .where(and(eq(schema.groupMembers.groupId, input.groupId), eq(schema.groupMembers.userId, input.userId)));
+    if (existingGroup.length === 0) {
+      await db.insert(schema.groupMembers).values({ groupId: input.groupId, userId: input.userId, role: input.groupRole });
+    }
+  }
+}
+
 export async function acceptInvite(token: string, name: string, password: string): Promise<{ userId: string }> {
   const [invite] = await db
     .select()
@@ -162,18 +192,19 @@ export async function acceptInvite(token: string, name: string, password: string
     .where(and(eq(schema.invites.token, token), isNull(schema.invites.acceptedAt), gt(schema.invites.expiresAt, new Date())));
   if (!invite) throw new Error("邀請連結無效或已過期");
 
-  // 同 email 已有帳號 → 附掛，不重複建
+  // 安全關鍵：既有帳號「不得」透過邀請連結落地。
+  // 舊版對既有 email 直接附掛並在 router 端發 session，等於任何拿到 token 的人
+  // 可免密碼登入成該既有帳號（含超管）→ 帳號接管／提權。既有成員要加入新團隊，
+  // 改由管理員在後台直接加入（admin.invite 對既有 email 會直接處理，不發可兌換連結）。
   const [existing] = await db.select().from(schema.users).where(eq(schema.users.email, invite.email));
-  let userId: string;
   if (existing) {
-    userId = existing.id;
-  } else {
-    const [user] = await db
-      .insert(schema.users)
-      .values({ name, email: invite.email, passwordHash: await hashPassword(password) })
-      .returning();
-    userId = user.id;
+    throw new Error("這個 email 已經有帳號了，請直接用原本的密碼登入；要加入新團隊時，請登入後由管理員把你加入。");
   }
+  const [user] = await db
+    .insert(schema.users)
+    .values({ name, email: invite.email, passwordHash: await hashPassword(password) })
+    .returning();
+  const userId = user.id;
 
   const existingTeam = await db
     .select()

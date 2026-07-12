@@ -7,17 +7,23 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { hashPassword, verifyPassword } from "./auth";
 
-/** 總管理員預設帳密(Bruce 指定;環境變數可覆蓋——上線穩定後請改用變數並更換密碼) */
+/** 總管理員 email（環境變數可覆蓋）。密碼「不再」有硬編碼預設——見下方說明。 */
 export const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "aa0968111723@gmail.com";
-export const SEED_ADMIN_PASSWORD_DEFAULT = process.env.SEED_ADMIN_PASSWORD ?? "aA@882992";
+/**
+ * 超管密碼一律來自環境變數 SEED_ADMIN_PASSWORD，原始碼不再內嵌任何密碼字串
+ * （舊版把密碼 commit 進 repo，任何讀原始碼者都能登入，且每次部署會把 DB 密碼
+ *  重設回那個公開字串——安全大洞，已移除）。
+ */
+const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD;
 
 /**
- * 超管自救路徑：SEED_ADMIN_EMAIL＋SEED_ADMIN_PASSWORD 都有設時，即使資料庫已有資料，
- * 也保證這組帳密可登入且是超管——忘記密碼＝改環境變數→Redeploy，完全不用碰資料庫。
+ * 超管自救路徑：僅在有設 SEED_ADMIN_PASSWORD 時啟用——保證該組帳密可登入且為超管
+ * （忘記密碼＝設環境變數→Redeploy，不用碰資料庫）。未設環境變數時「不」動任何既有帳號，
+ * 也絕不用公開字串重設密碼。
  */
 async function ensureSeedAdmin(): Promise<void> {
-  const password = SEED_ADMIN_PASSWORD_DEFAULT;
-  if (!password) return;
+  const password = SEED_ADMIN_PASSWORD;
+  if (!password) return; // 未設密碼變數 → 不對既有超管做任何事（避免把密碼降級回公開值）
   const [user] = await db.select().from(schema.users).where(eq(schema.users.email, SEED_ADMIN_EMAIL));
   if (!user) {
     await db.insert(schema.users).values({
@@ -47,7 +53,8 @@ export async function ensureSeed(): Promise<void> {
   const existing = await db.select().from(schema.users).limit(1);
   if (existing.length > 0) return ensureSeedAdmin();
 
-  const password = SEED_ADMIN_PASSWORD_DEFAULT || randomBytes(6).toString("hex");
+  // 首次啟動（空庫）：有設 SEED_ADMIN_PASSWORD 就用它，否則隨機產生並「只印一次」在啟動 log。
+  const password = SEED_ADMIN_PASSWORD || randomBytes(9).toString("base64url");
   const [admin] = await db
     .insert(schema.users)
     .values({ name: "Bruce（超管）", email: SEED_ADMIN_EMAIL, passwordHash: await hashPassword(password), isSuperAdmin: true })
@@ -68,6 +75,6 @@ export async function ensureSeed(): Promise<void> {
   console.log("──────────────────────────────────────────");
   console.log("[seed] 已建立：總會小編團隊（動畫組・短影音組）＋北區工作組（剪輯組）");
   console.log(`[seed] 超管登入 → email: ${SEED_ADMIN_EMAIL}  密碼: ${password}`);
-  if (!process.env.SEED_ADMIN_PASSWORD) console.log("[seed] ↑ 使用內建預設帳密——上線穩定後請設 SEED_ADMIN_PASSWORD 環境變數更換");
+  if (!process.env.SEED_ADMIN_PASSWORD) console.log("[seed] ↑ 此為隨機產生的一次性密碼（原始碼已無內建密碼）——請立刻記下，或設 SEED_ADMIN_PASSWORD 環境變數改用固定密碼");
   console.log("──────────────────────────────────────────");
 }

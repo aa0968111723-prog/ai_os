@@ -31,13 +31,27 @@ export async function ensureSchema(): Promise<boolean> {
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   const { pushSchema } = await import("drizzle-kit/api");
-  const { statementsToExecute, apply } = await pushSchema(
+  const pushed = (await pushSchema(
     schema as unknown as Record<string, unknown>,
     db as never,
-  );
+  )) as { statementsToExecute: string[]; apply: () => Promise<void>; hasDataLoss?: boolean; warnings?: string[] };
+  const { statementsToExecute, apply, hasDataLoss, warnings } = pushed;
+
+  // 資料遺失防護：pushSchema 若判定會掉資料（DROP COLUMN/TABLE、型別不相容等），
+  // 正式環境預設「不套用」——避免一次誤改 schema 就無聲清空生產資料。
+  // 確實要套用破壞性變更時，設環境變數 ALLOW_DB_DATALOSS=1 明示放行。
+  const destructive = hasDataLoss || (statementsToExecute ?? []).some((s) => /drop\s+(column|table)/i.test(s));
+  if (destructive && process.env.ALLOW_DB_DATALOSS !== "1") {
+    console.warn("[db] ⚠⚠⚠ 偵測到可能造成資料遺失的 schema 變更——已「跳過」套用以保護生產資料。");
+    (warnings ?? []).forEach((w) => console.warn("[db]   ·", w));
+    (statementsToExecute ?? []).filter((s) => /drop\s+(column|table)/i.test(s)).forEach((s) => console.warn("[db]   SQL:", s));
+    console.warn("[db]   確認無誤要套用，請設環境變數 ALLOW_DB_DATALOSS=1 後 Redeploy。其餘功能照常運作。");
+    return true;
+  }
+
   await apply();
   console.log(
-    statementsToExecute.length > 0
+    (statementsToExecute?.length ?? 0) > 0
       ? `[db] ✓ 資料表同步完成（套用 ${statementsToExecute.length} 項變更）`
       : "[db] ✓ 資料表已是最新（無變更）",
   );

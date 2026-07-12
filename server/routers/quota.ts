@@ -12,7 +12,9 @@ export const quotaRouter = router({
     const settings = await getSettings();
     const total = await usedTotal();
     const weekly = await usedThisWeek(ctx.auth.user.id);
-    const quota = input?.groupId ? await effectiveWeeklyQuota(ctx.auth.user.id, input.groupId) : null;
+    // 只在使用者確實屬於該組時才算組額度（舊版任意 groupId 都算，洩漏他組額度設定）
+    const isMember = input?.groupId ? ctx.auth.groups.some((g) => g.groupId === input.groupId) : false;
+    const quota = isMember ? await effectiveWeeklyQuota(ctx.auth.user.id, input!.groupId!) : null;
     return {
       totalBudget: settings.totalBudgetPoints, // null＝不限
       totalUsed: total,
