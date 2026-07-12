@@ -17,21 +17,28 @@ export function MessagePanel({ projectId }: { projectId: string }) {
   return (
     <aside className="card">
       <h2>組內留言</h2>
-      {list.data?.length === 0 && <p className="hint">還沒有留言。</p>}
+      {list.isLoading && <p className="hint">載入留言中…</p>}
+      {list.error && <p className="error">留言載入失敗，稍後會自動重試。</p>}
+      {!list.isLoading && list.data?.length === 0 && <p className="hint">還沒有留言——留一句給同組夥伴吧。</p>}
       <div>
-        {list.data?.map((m) => (
-          <div key={m.id} className="msg">
-            <span className="who">{m.userName ?? (m.userId === me.data?.user.id ? me.data.user.name : "夥伴")}</span>
-            <span style={{ flex: 1 }}>{m.body}</span>
-            <span className="time">
-              {new Date(m.createdAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}
-            </span>
-          </div>
-        ))}
+        {list.data?.map((m) => {
+          const mine = m.userId === me.data?.user.id;
+          return (
+            <div key={m.id} className="msg">
+              <span className="who">{m.userName ?? (mine ? me.data?.user.name : "夥伴")}{mine ? "（我）" : ""}</span>
+              <span style={{ flex: 1 }}>{m.body}</span>
+              <span className="time">
+                {new Date(m.createdAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+          );
+        })}
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
         <input
           value={body}
+          aria-label="留言給同組夥伴"
+          maxLength={2000}
           onChange={(e) => setBody(e.target.value)}
           placeholder="留言給同組夥伴…"
           onKeyDown={(e) => {
