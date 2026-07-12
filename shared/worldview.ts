@@ -30,3 +30,5 @@ export function DEFAULT_TABOOS(): string[] {
 
 export const TONE_OPTIONS = ["莊嚴", "溫暖", "真誠", "療癒", "活潑", "簡約"];
 export const THEME_OPTIONS = ["苦→修行→轉變→感恩", "禪修日常", "佛法入門", "活動紀實", "感恩分享"];
+/** 視覺風格：注入每次圖像/影片生成與 AI 導演建議，維持整支片畫風一致 */
+export const STYLE_OPTIONS = ["日系水彩", "寫實攝影", "3D 動畫", "手繪插畫", "極簡線條", "膠片質感", "水墨禪意"];

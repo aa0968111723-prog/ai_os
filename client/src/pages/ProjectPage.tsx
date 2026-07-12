@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
-import { worldviewSchema, TONE_OPTIONS, THEME_OPTIONS, type Worldview } from "@shared/worldview";
+import { worldviewSchema, TONE_OPTIONS, THEME_OPTIONS, STYLE_OPTIONS, type Worldview } from "@shared/worldview";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
 import { DirectorCard } from "../components/DirectorCard";
@@ -96,7 +96,7 @@ export function ProjectPage({ id }: { id: string }) {
   const isOwner = me.data?.user.id === p.ownerId;
   const canArchive = isOwner || isLeader;
 
-  const toggle = (field: "tones" | "themes", value: string) => {
+  const toggle = (field: "tones" | "themes" | "styles", value: string) => {
     const current = wv[field];
     const next = current.includes(value) ? current.filter((x) => x !== value) : [...current, value];
     // 只送有改的欄位；伺服器與現值合併（避免整包覆蓋造成的資料遺失）
@@ -179,6 +179,25 @@ export function ProjectPage({ id }: { id: string }) {
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle("tones", t); } }}
                   >
                     {t}
+                  </span>
+                );
+              })}
+            </div>
+            <label id="wv-styles">視覺風格（畫面一致的關鍵，生成時自動注入）</label>
+            <div role="group" aria-labelledby="wv-styles">
+              {STYLE_OPTIONS.map((s) => {
+                const on = wv.styles.includes(s);
+                return (
+                  <span
+                    key={s}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={on}
+                    className={`chip pick ${on ? "on" : ""}`}
+                    onClick={() => toggle("styles", s)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle("styles", s); } }}
+                  >
+                    {s}
                   </span>
                 );
               })}
