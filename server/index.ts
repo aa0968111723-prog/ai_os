@@ -10,12 +10,13 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "./routers";
 import { createContext } from "./trpc";
 import { ensureSeed } from "./services/seed";
+import { ensureSchema } from "./db/ensure";
 import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
 import { exportProjectZip } from "./services/exporter";
 import { handleMcp } from "./services/mcp";
 import { db, schema } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -26,6 +27,21 @@ app.use(express.json({ limit: "2mb" }));
 // 健康檢查 — 純 HTTP，不碰 DB
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, mockMode: isMockMode(), time: new Date().toISOString() });
+});
+
+// 就緒診斷 — 用瀏覽器打開就知道資料庫接通了沒（給非工程背景的自我診斷頁）
+app.get("/api/ready", async (_req, res) => {
+  try {
+    await db.execute(sql`select 1`);
+    res.json({ ok: true, db: "connected（資料庫已接通）", mockMode: isMockMode() });
+  } catch (err) {
+    console.error("[ready] DB 連線失敗：", err instanceof Error ? err.message : err);
+    res.status(503).json({
+      ok: false,
+      db: "error（資料庫未接通）",
+      hint: "到 Railway App 服務 Variables 檢查 DATABASE_URL 是否用 Add Reference 引用了 Postgres，改完按 Redeploy",
+    });
+  }
 });
 
 // 假生成素材端點（FAL 假模式用；1024×576 黏土色 PNG，離線可用）
@@ -50,7 +66,8 @@ app.get("/api/export/:projectId", async (req, res) => {
     if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
     await exportProjectZip(project.id, res);
   } catch (err) {
-    if (!res.headersSent) res.status(500).json({ error: String(err) });
+    console.error("[export]", err);
+    if (!res.headersSent) res.status(500).json({ error: "打包失敗，請稍後再試（管理員可查伺服器記錄）" });
   }
 });
 
@@ -70,6 +87,8 @@ if (isProd) {
 
 app.listen(port, () => {
   console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${isMockMode() ? "假生成模式" : "真實模式"}）`);
-  // 種子資料背景跑，不擋啟動
-  ensureSeed().catch((err) => console.warn("[seed] 略過（DB 未就緒？）", err?.message ?? err));
+  // 背景：等 DB → 自動建表（繞過 drizzle-kit CLI 非 TTY 問題）→ 種子/超管自救，全程不擋啟動
+  ensureSchema()
+    .then((ready) => (ready ? ensureSeed() : undefined))
+    .catch((err) => console.warn("[boot] 建表/種子失敗（修好 DATABASE_URL 後 Redeploy 即可）：", err?.message ?? err));
 });

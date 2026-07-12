@@ -3,14 +3,47 @@
  * 超管密碼由 SEED_ADMIN_PASSWORD 指定；未設則自動產生並印在啟動 log（只印一次）。
  */
 import { randomBytes } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
-import { hashPassword } from "./auth";
+import { hashPassword, verifyPassword } from "./auth";
 
 export const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "admin@aidirector.local";
 
+/**
+ * 超管自救路徑：SEED_ADMIN_EMAIL＋SEED_ADMIN_PASSWORD 都有設時，即使資料庫已有資料，
+ * 也保證這組帳密可登入且是超管——忘記密碼＝改環境變數→Redeploy，完全不用碰資料庫。
+ */
+async function ensureSeedAdmin(): Promise<void> {
+  const password = process.env.SEED_ADMIN_PASSWORD;
+  if (!password) return;
+  const [user] = await db.select().from(schema.users).where(eq(schema.users.email, SEED_ADMIN_EMAIL));
+  if (!user) {
+    await db.insert(schema.users).values({
+      name: "Bruce（超管）",
+      email: SEED_ADMIN_EMAIL,
+      passwordHash: await hashPassword(password),
+      isSuperAdmin: true,
+    });
+    console.log(`[seed] 已依環境變數補建超管帳號：${SEED_ADMIN_EMAIL}`);
+    return;
+  }
+  const passwordOk = await verifyPassword(password, user.passwordHash);
+  if (!passwordOk || !user.isSuperAdmin || user.status !== "active") {
+    await db
+      .update(schema.users)
+      .set({
+        passwordHash: passwordOk ? user.passwordHash : await hashPassword(password),
+        isSuperAdmin: true,
+        status: "active",
+      })
+      .where(eq(schema.users.id, user.id));
+    console.log(`[seed] 已把超管帳號對齊環境變數（密碼／權限重設）：${SEED_ADMIN_EMAIL}`);
+  }
+}
+
 export async function ensureSeed(): Promise<void> {
   const existing = await db.select().from(schema.users).limit(1);
-  if (existing.length > 0) return;
+  if (existing.length > 0) return ensureSeedAdmin();
 
   const password = process.env.SEED_ADMIN_PASSWORD ?? randomBytes(6).toString("hex");
   const [admin] = await db

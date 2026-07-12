@@ -24,7 +24,17 @@ export async function createContext({ req, res }: CreateExpressContextOptions): 
   return { auth, req, res };
 }
 
-const t = initTRPC.context<Context>().create({ transformer: superjson });
+const t = initTRPC.context<Context>().create({
+  transformer: superjson,
+  errorFormatter({ shape, error }) {
+    // 內部錯誤（如 SQL）不外洩到前台——細節進伺服器 log，畫面給友善訊息
+    if (error.code === "INTERNAL_SERVER_ERROR") {
+      console.error("[trpc]", error.cause ?? error);
+      return { ...shape, message: "系統暫時無法處理，請稍後再試（管理員可到 /api/ready 檢查資料庫連線）" };
+    }
+    return shape;
+  },
+});
 
 export const router = t.router;
 export const publicProcedure = t.procedure;
