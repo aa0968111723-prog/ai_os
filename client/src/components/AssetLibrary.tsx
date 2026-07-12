@@ -25,6 +25,7 @@ export function AssetLibrary({
   const del = trpc.projects.deleteAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
   const rename = trpc.projects.renameAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
   const toKnowledge = trpc.knowledge.addFromAsset.useMutation({ onSuccess: () => utils.knowledge.list.invalidate({ projectId }) });
+  const setLock = trpc.projects.setAssetLock.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -103,6 +104,7 @@ export function AssetLibrary({
                   {a.title}
                 </div>
                 <div className="hint" style={{ fontSize: 11 }}>
+                  {a.locked ? "🔒 鎖定 · " : ""}
                   {a.isAiGenerated ? "AI 生成" : "上傳"}
                   {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
                   {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
@@ -124,6 +126,14 @@ export function AssetLibrary({
                       加入知識庫
                     </button>
                   )}
+                  <button
+                    style={{ padding: "2px 10px", fontSize: 11, color: a.locked ? "var(--gold, #B58A3E)" : undefined }}
+                    disabled={setLock.isPending}
+                    title="固定素材（師父原音/開示/配樂）：鎖定後交付包會原封保留在 00_鎖定原素材"
+                    onClick={() => setLock.mutate({ assetId: a.id, locked: !a.locked })}
+                  >
+                    {a.locked ? "解鎖" : "🔒 鎖定"}
+                  </button>
                   <button
                     style={{ padding: "2px 10px", fontSize: 11 }}
                     disabled={del.isPending}

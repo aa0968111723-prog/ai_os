@@ -86,6 +86,21 @@ export const projectsRouter = router({
     return { ok: true };
   }),
 
+  /** 素材鎖定切換（固定素材模式：師父原音/開示/配樂設不可更動，交付包保留原素材） */
+  setAssetLock: authedProcedure
+    .input(z.object({ assetId: z.string().uuid(), locked: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
+      if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
+      requireGroup(ctx.auth, asset.groupId);
+      const [updated] = await db
+        .update(schema.assets)
+        .set({ locked: input.locked })
+        .where(eq(schema.assets.id, input.assetId))
+        .returning();
+      return updated;
+    }),
+
   /** 素材改名（整理雜亂素材用） */
   renameAsset: authedProcedure
     .input(z.object({ assetId: z.string().uuid(), title: z.string().min(1, "請填名稱").max(80) }))

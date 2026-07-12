@@ -210,6 +210,47 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
   }
 
   if (clientAbort.signal.aborted) return;
+
+  // 00_鎖定原素材：固定素材模式的原音/開示/配樂——原封保留，剪輯時圍繞它組裝、不改動
+  const lockedAssets = assets.filter((a) => a.locked);
+  let lockedIdx = 0;
+  const kindDir: Record<string, string> = { audio: "音訊", video: "影片", image: "圖像", doc: "文件" };
+  for (const asset of lockedAssets) {
+    if (clientAbort.signal.aborted) return;
+    let source: Readable;
+    try {
+      if (asset.storagePath) {
+        const abs = absPathOf(asset.storagePath);
+        await stat(abs);
+        source = createReadStream(abs);
+      } else if (asset.url && /^https?:\/\//.test(asset.url)) {
+        const fileRes = await proxyFetch(asset.url, {
+          signal: AbortSignal.any([clientAbort.signal, AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS)]),
+        });
+        if (!fileRes.ok || !fileRes.body) { void fileRes.body?.cancel().catch(() => {}); continue; }
+        source = Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream);
+      } else {
+        continue;
+      }
+    } catch (err) {
+      if (clientAbort.signal.aborted) return;
+      warnings.push(`鎖定素材「${asset.title}」讀取失敗，未入包`);
+      continue;
+    }
+    lockedIdx += 1;
+    const ext = (asset.mime && extFromMime(asset.mime)) || "";
+    const num = String(lockedIdx).padStart(2, "0");
+    try {
+      await appendAndWait(archive, source, `00_鎖定原素材/${kindDir[asset.kind] ?? "其他"}/${num}_${safeName(asset.title)}${ext}`, clientAbort.signal);
+    } catch (err) {
+      if (clientAbort.signal.aborted) return;
+      throw err;
+    }
+  }
+  if (lockedAssets.length) {
+    lines.push("", `## 鎖定原素材（不可更動 · ${lockedIdx} 件）`, "> 師父原音／開示文字／配樂等固定素材，請原封使用、只在畫面層創作。");
+  }
+
   if (warnings.length) lines.push("", ...warnings.map((w) => `> ⚠ ${w}`));
   lines.push(
     "",
@@ -223,7 +264,7 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
   if (hasSubtitle) archive.append(srt, { name: "04_字幕/字幕.srt" });
 
   archive.append(
-    `資料夾說明：01_視頻素材（依鏡號排序）／03_圖像／${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）。\n` +
+    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／03_圖像／${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）。\n` +
       "媒體檔請直接匯入剪映或 Premiere 組裝。\n" +
       (hasSubtitle ? "" : "（本片分鏡尚無配音詞，故未附字幕；用 AI 拆分鏡或在分鏡填配音詞後再打包即有字幕。）\n"),
     { name: "README.txt" },

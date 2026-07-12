@@ -152,6 +152,9 @@ export const assets = pgTable("assets", {
   sizeBytes: integer("size_bytes"),
   /** 手動上傳者（AI 生成的為 null） */
   uploadedBy: uuid("uploaded_by"),
+  /** 固定素材模式（簡報 slide 19）：師父原音／開示文字／配樂設「鎖定·不可更動」，
+   *  交付包會把鎖定素材原封保留在 00_鎖定原素材/，剪輯時圍繞它組裝、不改動 */
+  locked: boolean("locked").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
