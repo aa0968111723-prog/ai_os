@@ -17,6 +17,37 @@ function safeName(value: string): string {
   return value.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) || "未命名";
 }
 
+/** 秒數 → SRT 時間碼 HH:MM:SS,mmm */
+function srtTime(totalSec: number): string {
+  const ms = Math.round(totalSec * 1000);
+  const h = String(Math.floor(ms / 3_600_000)).padStart(2, "0");
+  const m = String(Math.floor((ms % 3_600_000) / 60_000)).padStart(2, "0");
+  const s = String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0");
+  const millis = String(ms % 1000).padStart(3, "0");
+  return `${h}:${m}:${s},${millis}`;
+}
+
+/**
+ * 從分鏡的配音詞＋秒數組出 SRT 字幕（每幕一句、依序累計時間）。
+ * 沒有配音詞的幕仍推進時間軸（保留其秒數的空檔），只有有詞的幕才產生字幕塊。
+ * 回空字串代表整片都沒有配音詞（不放空字幕檔）。
+ */
+function buildSrt(scenes: Array<{ durationSec: number; voiceover: string | null }>): string {
+  const blocks: string[] = [];
+  let t = 0;
+  let idx = 0;
+  for (const sc of scenes) {
+    const dur = sc.durationSec > 0 ? sc.durationSec : 3;
+    const text = (sc.voiceover ?? "").trim();
+    if (text) {
+      idx += 1;
+      blocks.push(`${idx}\n${srtTime(t)} --> ${srtTime(t + dur)}\n${text}`);
+    }
+    t += dur;
+  }
+  return blocks.join("\n\n");
+}
+
 // 遠端抓取守門：滴流/掛住的外部網址不能無限期卡住匯出；超大檔先用 Content-Length 擋下，不進串流
 const REMOTE_FETCH_TIMEOUT_MS = 30_000;
 const REMOTE_FILE_MAX_BYTES = 200 * 1024 * 1024;
@@ -185,8 +216,16 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
     `> 共 ${scenes.length} 鏡（影片 ${videoIdx}・圖像 ${imageIdx}${warnings.length ? `・缺漏 ${warnings.length}` : ""}）· 由 AI Director OS 產出 · ${new Date().toISOString().slice(0, 10)}`,
   );
   archive.append(lines.join("\n"), { name: "05_文件/腳本與鏡頭表.md" });
+
+  // 04_字幕：從分鏡配音詞產生 SRT（有配音詞才放）——剪映/Premiere/YouTube 皆可直接匯入
+  const srt = buildSrt(scenes);
+  const hasSubtitle = srt.length > 0;
+  if (hasSubtitle) archive.append(srt, { name: "04_字幕/字幕.srt" });
+
   archive.append(
-    "資料夾說明：01_視頻素材（依鏡號排序）／03_圖像／05_文件（腳本與鏡頭表）。\n媒體檔請直接匯入剪映或 Premiere 組裝；字幕（04_字幕）於字幕功能上線後加入。\n",
+    `資料夾說明：01_視頻素材（依鏡號排序）／03_圖像／${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）。\n` +
+      "媒體檔請直接匯入剪映或 Premiere 組裝。\n" +
+      (hasSubtitle ? "" : "（本片分鏡尚無配音詞，故未附字幕；用 AI 拆分鏡或在分鏡填配音詞後再打包即有字幕。）\n"),
     { name: "README.txt" },
   );
 
