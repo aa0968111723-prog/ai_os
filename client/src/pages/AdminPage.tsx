@@ -184,7 +184,8 @@ export function AdminPage() {
         </div>
 
         <aside className="stack">
-        <SelfTestCard />
+        {/* 系統自檢只有超管的 /api/selftest 能用——非超管按了只會 403，對他們是死功能，故只對超管顯示 */}
+        {isSuperAdmin && <SelfTestCard />}
         <div className="card">
           <h2>點數與額度（彈性・隨時可調）</h2>
           <p className="hint">空白＝不限。總預算限超管；各組週額度組長/管理員皆可調。</p>
