@@ -149,7 +149,7 @@ function MemberChip({ groupId, groupName, member, canResetPassword }: {
             <CopyButton text={tempPassword} />
           </div>
           <p className="hint" style={{ marginTop: 4 }}>
-            請把密碼傳給 {member.name} 本人，並提醒他妥善保存——之後登入都用這組密碼。
+            請把密碼傳給 {member.name} 本人；他用這組密碼登入後，可從頂欄「改密碼」換成自己的密碼。
           </p>
         </div>
       )}

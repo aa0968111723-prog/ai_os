@@ -8,6 +8,38 @@ import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { AdminPage } from "./pages/AdminPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { ModelsPage } from "./pages/ModelsPage";
+import { PasswordInput } from "./components/PasswordInput";
+
+/** 自助改密碼（拿到管理員的臨時密碼後，從這裡換成自己的）：成功後其他裝置全部登出 */
+function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
+  const [oldPw, setOldPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const change = trpc.auth.changePassword.useMutation({ onSuccess: () => setTimeout(onClose, 1800) });
+  const canSubmit = oldPw.length > 0 && newPw.length >= 8 && !change.isPending && !change.isSuccess;
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(43,38,32,0.35)", display: "grid", placeItems: "center", zIndex: 50 }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="card" style={{ width: 380, maxWidth: "92vw" }} role="dialog" aria-label="改密碼">
+        <h2 style={{ marginTop: 0 }}>改密碼</h2>
+        <form onSubmit={(e) => { e.preventDefault(); if (canSubmit) change.mutate({ oldPassword: oldPw, newPassword: newPw }); }}>
+          <label htmlFor="chpw-old">原密碼（或管理員給的臨時密碼）</label>
+          <PasswordInput id="chpw-old" value={oldPw} onChange={(e) => setOldPw(e.target.value)} autoComplete="current-password" autoFocus />
+          <label htmlFor="chpw-new">新密碼（至少 8 碼）</label>
+          <PasswordInput id="chpw-new" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoComplete="new-password" />
+          {newPw.length > 0 && newPw.length < 8 && <p className="hint">還差 {8 - newPw.length} 個字</p>}
+          <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+            <button className="primary" type="submit" disabled={!canSubmit}>{change.isPending ? "更新中…" : "更新密碼"}</button>
+            <button type="button" onClick={onClose}>取消</button>
+          </div>
+        </form>
+        {change.error && <p className="error" role="alert">{change.error.message}</p>}
+        {change.isSuccess && <p className="hint" style={{ color: "var(--success)" }} role="status">已更新 ✓——其他裝置已登出，本裝置不受影響</p>}
+      </div>
+    </div>
+  );
+}
 
 /** 彈性點數徽章：剩餘 or 不限（管理員可在團隊管理調整） */
 function PointsBadge({ groupId }: { groupId: string }) {
@@ -45,6 +77,7 @@ export function App() {
   }, [activeGroupId]);
 
   const isAdmin = !!me.data && (me.data.user.isSuperAdmin || me.data.adminTeamIds.length > 0);
+  const [showChangePw, setShowChangePw] = useState(false);
 
   return (
     <div className="app">
@@ -74,11 +107,24 @@ export function App() {
         {me.data && <Link href="/feedback"><span className="badge" style={{ cursor: "pointer" }}>回饋</span></Link>}
         {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}>團隊管理</span></Link>}
         {me.data && (
+          <span
+            className="badge"
+            style={{ cursor: "pointer" }}
+            role="button"
+            tabIndex={0}
+            onClick={() => setShowChangePw(true)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShowChangePw(true); } }}
+          >
+            改密碼
+          </span>
+        )}
+        {me.data && (
           <button onClick={() => logout.mutate()} disabled={logout.isPending} title={me.data.user.name}>
             {logout.isPending ? "登出中…" : `${me.data.user.name}・登出`}
           </button>
         )}
       </header>
+      {showChangePw && me.data && <ChangePasswordDialog onClose={() => setShowChangePw(false)} />}
 
       <Switch>
         <Route path="/invite/:token">{(params) => <AcceptInvitePage token={params.token} />}</Route>

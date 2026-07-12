@@ -5,6 +5,7 @@ import { router, publicProcedure, authedProcedure } from "../trpc";
 import { db, schema } from "../db";
 import {
   verifyPassword,
+  hashPassword,
   createSession,
   destroySession,
   setSessionCookie,
@@ -51,6 +52,30 @@ export const authRouter = router({
     clearSessionCookie(ctx.res);
     return { ok: true };
   }),
+
+  /** 自助改密碼：驗舊密碼 → 換新 → 其他裝置全部登出（本裝置換發新 session 無感續用） */
+  changePassword: authedProcedure
+    .input(z.object({ oldPassword: z.string().min(1, "請填原密碼"), newPassword: z.string().min(8, "新密碼至少 8 碼") }))
+    .mutation(async ({ ctx, input }) => {
+      // 與登入同一個限流器、不同 key：被劫持的 session 也不能拿這裡暴力試出原密碼
+      const rateKey = `chpw:${ctx.auth.user.email}`;
+      const rate = checkLoginRate(rateKey);
+      if (!rate.ok) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `嘗試太多次，請約 ${rate.retryAfterMin} 分鐘後再試` });
+      }
+      const [user] = await db.select().from(schema.users).where(eq(schema.users.id, ctx.auth.user.id));
+      if (!user || !(await verifyPassword(input.oldPassword, user.passwordHash))) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "原密碼不正確" });
+      }
+      clearLoginRate(rateKey);
+      await db.update(schema.users).set({ passwordHash: await hashPassword(input.newPassword) }).where(eq(schema.users.id, user.id));
+      // 舊 session 全部作廢（含可能外洩的），本裝置換發新的繼續用
+      await db.delete(schema.sessions).where(eq(schema.sessions.userId, user.id));
+      const token = await createSession(user.id);
+      setSessionCookie(ctx.res, token);
+      console.log(`[audit] changePassword：user=${user.id}`);
+      return { ok: true };
+    }),
 
   /** 邀請連結落地：設定姓名密碼 → 建帳號＋入團隊/組 → 自動登入 */
   acceptInvite: publicProcedure
