@@ -9,6 +9,7 @@ import { falSubmit, falStatus, isMockMode } from "../services/fal";
 import { reserveQuota, refund } from "../services/points";
 import { persistRemote, signAssetUrl } from "../services/storage";
 import { buildCharacterAnchor } from "./characters";
+import { buildSceneAnchor } from "./scenePresets";
 
 /**
  * 成品落地（背景）：fal 的 CDN 網址會過期，完成後盡快抓回 Volume 永久保存。
@@ -97,6 +98,12 @@ export function withCharacterAnchor(model: ModelEntry, prompt: string, anchor: s
   return `${prompt}\n\n[角色定裝] ${anchor}`;
 }
 
+/** 場景設定錨點（色板/光線）：同樣只注入視覺類別 */
+export function withSceneAnchor(model: ModelEntry, prompt: string, anchor: string): string {
+  if (!anchor || !CHARACTER_CATEGORIES.has(model.category)) return prompt;
+  return `${prompt}\n\n[場景設定] ${anchor}`;
+}
+
 export const generationRouter = router({
   submit: authedProcedure
     .input(
@@ -110,6 +117,8 @@ export const generationRouter = router({
         sourceAssetId: z.string().uuid().optional(),
         /** 選定的角色定裝卡：外觀錨點自動注入視覺生成,跨鏡一致 */
         characterIds: z.array(z.string().uuid()).max(6).optional(),
+        /** 選定的場景設定卡：色板/光線錨點注入,同場景光影一致 */
+        scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -134,9 +143,14 @@ export const generationRouter = router({
       }
 
       const worldview = worldviewSchema.parse(project.worldview ?? {});
-      // 角色定裝錨點（同組檢查在 buildCharacterAnchor：只撈本專案角色）→ 注入視覺生成
-      const anchor = input.characterIds?.length ? await buildCharacterAnchor(project.id, input.characterIds) : "";
-      const fullPrompt = withCharacterAnchor(model, effectivePrompt(model, input.prompt, worldview), anchor);
+      // 世界觀 → 角色定裝 → 場景設定，依序疊加注入（都只撈本專案，且只注入視覺類別）
+      const charAnchor = input.characterIds?.length ? await buildCharacterAnchor(project.id, input.characterIds) : "";
+      const sceneAnchor = input.scenePresetIds?.length ? await buildSceneAnchor(project.id, input.scenePresetIds) : "";
+      const fullPrompt = withSceneAnchor(
+        model,
+        withCharacterAnchor(model, effectivePrompt(model, input.prompt, worldview), charAnchor),
+        sceneAnchor,
+      );
       const falInput = model.input(fullPrompt, project.format as ProjectFormat, sourceUrl);
 
       const [gen] = await db

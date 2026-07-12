@@ -12,6 +12,7 @@ import { feedbackRouter } from "./feedback";
 import { modelsRouter } from "./models";
 import { knowledgeRouter } from "./knowledge";
 import { charactersRouter } from "./characters";
+import { scenePresetsRouter } from "./scenePresets";
 import { promptsRouter } from "./prompts";
 
 export const appRouter = router({
@@ -28,6 +29,7 @@ export const appRouter = router({
   feedback: feedbackRouter,
   knowledge: knowledgeRouter,
   characters: charactersRouter,
+  scenePresets: scenePresetsRouter,
   prompts: promptsRouter,
 });
 

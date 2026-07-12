@@ -206,6 +206,23 @@ export const characters = pgTable("characters", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/**
+ * 場景設定卡（提案六大核心#3「角色·場景一致性」的「場景」面）：
+ * 色板・光線建成設定庫，生成勾選時自動注入錨點——同一場景跨鏡光影一致（暖色清晨光…）。
+ */
+export const scenePresets = pgTable("scene_presets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  name: text("name").notNull(),
+  /** 色板：主色調／配色（注入視覺生成） */
+  palette: text("palette").notNull(),
+  /** 光線：光源方向／氛圍（注入視覺生成） */
+  lighting: text("lighting"),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const scenes = pgTable("scenes", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull(),

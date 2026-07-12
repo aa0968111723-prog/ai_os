@@ -11,6 +11,7 @@ import { AssetLibrary } from "../components/AssetLibrary";
 import { KnowledgeBase } from "../components/KnowledgeBase";
 import { ScriptSplitCard } from "../components/ScriptSplitCard";
 import { CharacterCards } from "../components/CharacterCards";
+import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PromptLibrary } from "../components/PromptLibrary";
 
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
@@ -40,6 +41,9 @@ export function ProjectPage({ id }: { id: string }) {
   /** 生成時要帶入的角色定裝卡（跨鏡一致） */
   const [charIds, setCharIds] = useState<string[]>([]);
   const toggleChar = (cid: string) => setCharIds((prev) => (prev.includes(cid) ? prev.filter((x) => x !== cid) : [...prev, cid]));
+  /** 生成時要帶入的場景設定卡（色板/光線一致） */
+  const [sceneIds, setSceneIds] = useState<string[]>([]);
+  const toggleScene = (sid: string) => setSceneIds((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]));
   const assets = trpc.projects.assets.useQuery({ projectId: id });
   /** 生成確認彈窗：先估點數、使用者點頭才真的送出、扣點 */
   const [confirming, setConfirming] = useState(false);
@@ -150,6 +154,9 @@ export function ProjectPage({ id }: { id: string }) {
           {/* 角色定裝卡：勾選後生成自動注入外觀錨點 */}
           <CharacterCards projectId={id} selectedIds={charIds} onToggle={toggleChar} />
 
+          {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
+          <ScenePresetCards projectId={id} selectedIds={sceneIds} onToggle={toggleScene} />
+
           {/* 素材庫：上傳參考素材（提案核心「把素材丟進去」的入口）＋生成成品自動入庫 */}
           <AssetLibrary projectId={id} onPickSource={(a) => { setSourceAsset(a); setSourceUrl(""); }} />
 
@@ -209,6 +216,7 @@ export function ProjectPage({ id }: { id: string }) {
                 <p style={{ margin: "4px 0" }}>
                   <b>{model.label}</b>・{p.format}
                   {charIds.length > 0 && <>・帶入 {charIds.length} 個角色定裝</>}
+                  {sceneIds.length > 0 && <>・{sceneIds.length} 個場景設定</>}
                 </p>
                 <p style={{ margin: "4px 0", fontSize: 13 }}>提示詞：{prompt.trim().slice(0, 80)}{prompt.trim().length > 80 ? "…" : ""}</p>
                 <p style={{ margin: "8px 0" }}>
@@ -234,6 +242,7 @@ export function ProjectPage({ id }: { id: string }) {
                         sourceAssetId: model.needs && sourceAsset ? sourceAsset.id : undefined,
                         sourceUrl: model.needs && !sourceAsset && sourceUrl.trim() ? sourceUrl.trim() : undefined,
                         characterIds: charIds.length ? charIds : undefined,
+                        scenePresetIds: sceneIds.length ? sceneIds : undefined,
                       })
                     }
                   >
