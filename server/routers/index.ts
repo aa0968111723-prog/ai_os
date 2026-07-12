@@ -9,8 +9,10 @@ import { quotaRouter } from "./quota";
 import { approvalsRouter } from "./approvals";
 import { directorRouter } from "./director";
 import { feedbackRouter } from "./feedback";
+import { modelsRouter } from "./models";
 
 export const appRouter = router({
+  models: modelsRouter,
   auth: authRouter,
   admin: adminRouter,
   projects: projectsRouter,

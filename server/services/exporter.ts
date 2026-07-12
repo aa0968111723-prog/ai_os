@@ -65,6 +65,8 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
       if (asset.kind === "video") {
         videoIdx += 1;
         archive.append(buffer, { name: `01_視頻素材/${num}_${safeName(scene.title)}.mp4` });
+      } else if (asset.kind === "audio") {
+        archive.append(buffer, { name: `02_音訊/${num}_${safeName(scene.title)}.wav` });
       } else {
         imageIdx += 1;
         archive.append(buffer, { name: `03_圖像/${num}_${safeName(scene.title)}.jpg` });

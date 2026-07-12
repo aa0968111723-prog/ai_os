@@ -1,11 +1,31 @@
+# AI Director OS — Railway 組態即程式碼(config-as-code)
+# 注意:startCommand 會覆蓋 Dockerfile 的 CMD——之前指向 node dist/index.js,
+# 導致啟動腳本(含建表)被跳過;現在建表/目錄/種子都在伺服器內部自動跑(server/db/ensure.ts),
+# start.sh 只負責開機環境自檢(log 全中文)。
+
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "node dist/index.js"
-# 健康檢查不等 DB（純 HTTP），啟動即綠燈
+startCommand = "sh /app/start.sh"
+# 健康檢查不等 DB(純 HTTP),啟動即綠燈;資料庫診斷用 /api/ready
 healthcheckPath = "/api/health"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
+restartPolicyMaxRetries = 5
+
+# ── 環境變數完整清單(在 ai_os 服務的 Variables 頁設定;秘密值絕不進 repo)──
+#
+# DATABASE_URL         【必填】按「Add Reference」選 Postgres → ${{ Postgres.DATABASE_URL }}
+# APP_URL              【必填】https://aios-production-5d43.up.railway.app(邀請連結/假素材用)
+# FAL_KEY              【真實生成才要】fal.ai/dashboard/keys 取得
+# FAL_MOCK             【測試期建議 1】=1 全站假生成不花錢;要真實生成時刪除此變數
+# SEED_ADMIN_EMAIL     【可選】總管理員 email;未設用程式內建預設(aa0968111723@gmail.com)
+# SEED_ADMIN_PASSWORD  【可選】總管理員密碼;未設用程式內建預設——上線穩定後請設定此變數換掉預設密碼
+# TOTAL_BUDGET_POINTS  【可選】首次啟動總預算種子值(預設 5000;之後在系統內調)
+# WEEKLY_QUOTA_POINTS  【可選】每人每週點數種子值(預設 300;之後在系統內調)
+# MCP_API_KEY          【可選】設定後開啟 /api/mcp,Claude 等 AI 代理可直接操作系統
+#
+# 忘記密碼自救:設 SEED_ADMIN_EMAIL+SEED_ADMIN_PASSWORD → Redeploy → 用新帳密登入。
+# 部署後驗證:瀏覽器開 /api/ready(資料庫接通?)→ 登入 → 團隊管理「跑系統自檢」。

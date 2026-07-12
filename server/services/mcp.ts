@@ -7,7 +7,7 @@ import type { Request, Response } from "express";
 import { desc, eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
-import { getModel, MODELS, type ProjectFormat } from "../../shared/models";
+import { getModel, endpointOf, MODELS, CATEGORIES, tierLabel, type ProjectFormat, type ModelCategory, type ModelTier } from "../../shared/models";
 import { falSubmit } from "./fal";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -24,11 +24,28 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
   {
-    name: "submit_generation",
-    description: `提交生成（世界觀自動注入）。可用模型：${MODELS.map((m) => m.id).join("、")}`,
+    name: "find_model",
+    description: `依需求快速找模型(11 類 × 旗艦/經濟/最低成本,共 ${MODELS.length} 個)。類別:${CATEGORIES.map((c) => `${c.id}=${c.label}`).join("、")}`,
     inputSchema: {
       type: "object",
-      properties: { projectId: { type: "string" }, modelId: { type: "string" }, prompt: { type: "string" } },
+      properties: {
+        category: { type: "string", description: "類別 id(如 text-to-image)" },
+        tier: { type: "string", enum: ["flagship", "economy", "budget"], description: "旗艦/經濟/最低成本" },
+        keyword: { type: "string", description: "關鍵字(比對名稱/特性/擅長領域)" },
+      },
+    },
+  },
+  {
+    name: "submit_generation",
+    description: "提交生成(世界觀自動注入)。先用 find_model 找合適的 modelId;需要來源的模型請帶 source_url(圖/音訊/影片網址)。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        modelId: { type: "string" },
+        prompt: { type: "string" },
+        source_url: { type: "string", description: "來源網址(圖生圖底圖/待轉錄音訊等,依模型而定)" },
+      },
       required: ["projectId", "modelId", "prompt"],
     },
   },
@@ -48,6 +65,27 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
     return rows.map((p) => ({ id: p.id, title: p.title, kind: p.kind, format: p.format, status: p.status }));
   }
 
+  if (name === "find_model") {
+    const keyword = String(args.keyword ?? "").toLowerCase();
+    const matches = MODELS.filter((m) => {
+      if (args.category && m.category !== (args.category as ModelCategory)) return false;
+      if (args.tier && m.tier !== (args.tier as ModelTier)) return false;
+      if (keyword && ![m.id, m.label, m.strengths, m.bestFor].some((s) => s.toLowerCase().includes(keyword))) return false;
+      return true;
+    });
+    return matches.slice(0, 20).map((m) => ({
+      modelId: m.id,
+      label: m.label,
+      category: m.category,
+      tier: tierLabel(m.tier),
+      points: m.points,
+      needsSource: m.needs ?? null,
+      strengths: m.strengths,
+      bestFor: m.bestFor,
+      cost: m.cost,
+    }));
+  }
+
   const projectId = String(args.projectId ?? "");
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new Error("找不到專案");
@@ -60,16 +98,18 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
 
   if (name === "submit_generation") {
     const model = getModel(String(args.modelId ?? ""));
-    if (!model) throw new Error("未知模型");
+    if (!model) throw new Error("未知模型(先用 find_model 查詢)");
+    const sourceUrl = args.source_url ? String(args.source_url) : undefined;
+    if (model.needs && !sourceUrl) throw new Error(`此模型需要 source_url:${model.sourceHint ?? model.needs}`);
     const wv = worldviewSchema.parse(project.worldview ?? {});
     const prompt = `${String(args.prompt ?? "")}\n\n[專案背景] 調性：${wv.tones.join("、")}｜避免：${wv.taboos.join("；")}`;
-    const falInput = model.input(prompt, project.format as ProjectFormat);
+    const falInput = model.input(prompt, project.format as ProjectFormat, sourceUrl);
     const [gen] = await db
       .insert(schema.generations)
-      .values({ projectId: project.id, groupId: project.groupId, userId: admin.id, modelId: model.id, kind: model.kind, prompt: String(args.prompt ?? ""), params: falInput, pointsEst: model.points })
+      .values({ projectId: project.id, groupId: project.groupId, userId: admin.id, modelId: model.id, kind: model.kind, prompt: String(args.prompt ?? ""), sourceUrl, params: falInput, pointsEst: model.points })
       .returning();
     await db.insert(schema.costLedger).values({ userId: admin.id, groupId: project.groupId, delta: -model.points, reason: `MCP 生成 ${model.label}`, generationId: gen.id });
-    const { requestId } = await falSubmit(model.id, model.kind, falInput);
+    const { requestId } = await falSubmit(endpointOf(model), model.kind, falInput);
     await db.update(schema.generations).set({ requestId, status: "running" }).where(eq(schema.generations.id, gen.id));
     return { generationId: gen.id, status: "running", points: model.points };
   }

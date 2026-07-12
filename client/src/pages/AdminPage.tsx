@@ -1,6 +1,42 @@
 import { useState } from "react";
 import { trpc } from "../api";
 
+/** 系統自檢卡：一鍵驗證資料庫/目錄/點數/邀請/生成模式/交付引擎 */
+function SelfTestCard() {
+  const [result, setResult] = useState<{ ok: boolean; checks: Array<{ name: string; ok: boolean; note: string }> } | null>(null);
+  const [running, setRunning] = useState(false);
+  const run = async () => {
+    setRunning(true);
+    try {
+      const res = await fetch("/api/selftest", { credentials: "include" });
+      setResult(await res.json());
+    } catch (err) {
+      setResult({ ok: false, checks: [{ name: "連線", ok: false, note: String(err) }] });
+    } finally {
+      setRunning(false);
+    }
+  };
+  return (
+    <div className="card">
+      <h2>系統自檢</h2>
+      <p className="hint">部署後按一下，全部 ✅ 才算就緒（資料庫/模型目錄/點數/邀請/生成/交付）。</p>
+      <button className="primary" disabled={running} onClick={run}>{running ? "檢查中…" : "跑系統自檢"}</button>
+      {result && (
+        <div style={{ marginTop: 10 }}>
+          {result.checks.map((c) => (
+            <div key={c.name} style={{ display: "flex", gap: 8, fontSize: 13, padding: "3px 0" }}>
+              <span>{c.ok ? "✅" : "❌"}</span>
+              <b style={{ minWidth: 110 }}>{c.name}</b>
+              <span className="hint">{c.note}</span>
+            </div>
+          ))}
+          <p style={{ marginTop: 6 }}>{result.ok ? "✅ 全部通過——系統就緒" : "❌ 有項目未過，把畫面截圖給智能助手"}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 管理頁（總管理/超管）：組織總覽＋邀請成員（連結用 LINE 傳） */
 export function AdminPage() {
   const utils = trpc.useUtils();
@@ -77,6 +113,7 @@ export function AdminPage() {
         </div>
 
         <aside className="stack">
+        <SelfTestCard />
         <div className="card">
           <h2>點數與額度（彈性・隨時可調）</h2>
           <p className="hint">空白＝不限。總預算限超管；各組週額度組長/管理員皆可調。</p>

@@ -57,6 +57,19 @@ export const projectsRouter = router({
     return project;
   }),
 
+  /** 專案素材庫(生成成品;供「來源輸入」挑選與素材總覽) */
+  assets: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+    if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+    requireGroup(ctx.auth, project.groupId);
+    return db
+      .select()
+      .from(schema.assets)
+      .where(eq(schema.assets.projectId, input.projectId))
+      .orderBy(desc(schema.assets.createdAt))
+      .limit(100);
+  }),
+
   updateWorldview: authedProcedure
     .input(z.object({ id: z.string().uuid(), worldview: worldviewSchema }))
     .mutation(async ({ ctx, input }) => {

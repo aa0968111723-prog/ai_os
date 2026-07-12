@@ -113,6 +113,10 @@ export const generations = pgTable("generations", {
   pointsRefunded: integer("points_refunded").notNull().default(0),
   requestId: text("request_id"),
   resultUrl: text("result_url"),
+  /** 文字型輸出(LLM/圖轉文/語音轉文字/訓練結果資訊)直接存這裡 */
+  resultText: text("result_text"),
+  /** 來源輸入(圖生圖底圖、待轉錄音訊等) */
+  sourceUrl: text("source_url"),
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -176,6 +180,22 @@ export const feedback = pgTable("feedback", {
   worst: text("worst"),
   note: text("note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** 模型目錄(啟動時從 shared/models.ts 同步;代理/報表可直接 SQL 查「哪個模型適合」) */
+export const modelCatalog = pgTable("model_catalog", {
+  id: text("id").primaryKey(),
+  endpoint: text("endpoint").notNull(),
+  category: text("category").notNull(),
+  tier: text("tier").notNull(),
+  kind: text("kind").notNull(),
+  needs: text("needs"),
+  points: integer("points").notNull(),
+  strengths: text("strengths").notNull(),
+  bestFor: text("best_for").notNull(),
+  cost: text("cost").notNull(),
+  verified: boolean("verified").notNull().default(false),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const messages = pgTable("messages", {

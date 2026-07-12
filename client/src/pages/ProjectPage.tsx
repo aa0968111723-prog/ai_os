@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { trpc } from "../api";
-import { MODELS } from "@shared/models";
 import { worldviewSchema, TONE_OPTIONS, THEME_OPTIONS, type Worldview } from "@shared/worldview";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
 import { DirectorCard } from "../components/DirectorCard";
 import { MessagePanel } from "../components/MessagePanel";
+import { ModelPicker, type PickedModel } from "../components/ModelPicker";
+import { WorkflowCard } from "../components/WorkflowCard";
 
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
 export function ProjectPage({ id }: { id: string }) {
@@ -17,7 +18,9 @@ export function ProjectPage({ id }: { id: string }) {
   });
 
   const [prompt, setPrompt] = useState("");
-  const [modelId, setModelId] = useState(MODELS[0].id);
+  const [model, setModel] = useState<PickedModel | null>(null);
+  const [sourceUrl, setSourceUrl] = useState("");
+  const assets = trpc.projects.assets.useQuery({ projectId: id });
   const submit = trpc.generation.submit.useMutation({
     onSuccess: () => {
       setPrompt("");
@@ -33,7 +36,6 @@ export function ProjectPage({ id }: { id: string }) {
   const myRole = me.data?.groups.find((g) => g.groupId === p.groupId)?.role;
   const isLeader = myRole === "leader" || myRole === "admin";
   const wv: Worldview = worldviewSchema.parse(p.worldview ?? {});
-  const model = MODELS.find((m) => m.id === modelId)!;
 
   const toggle = (field: "tones" | "themes", value: string) => {
     const current = wv[field];
@@ -88,32 +90,52 @@ export function ProjectPage({ id }: { id: string }) {
           {/* AI 導演建議 */}
           <DirectorCard projectId={id} onUse={(text) => setPrompt(text)} />
 
-          {/* 生成台 */}
+          {/* 生成台（11 類 × 旗艦/經濟/最低成本） */}
           <section className="card">
             <h2>創作生成</h2>
-            <label>提示詞（世界觀會自動帶入，不必重講背景）</label>
+            <ModelPicker onChange={setModel} />
+            {model?.needs && (
+              <>
+                <label>{model.sourceHint ?? "來源網址"}</label>
+                {(assets.data?.length ?? 0) > 0 && (
+                  <select value="" onChange={(e) => e.target.value && setSourceUrl(e.target.value)}>
+                    <option value="">從本專案素材庫選…</option>
+                    {assets.data!.map((a) => (
+                      <option key={a.id} value={a.url}>
+                        [{a.kind}] {a.title}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://…（或從上方素材庫選）" />
+              </>
+            )}
+            <label>{model?.kind === "audio" && model.needs == null ? "要唸的文字/音樂描述" : "提示詞（世界觀會自動帶入，不必重講背景）"}</label>
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂，柔和光線灑落，一炷香的靜謐" />
-            <label>模型（點數透明）</label>
-            <select value={modelId} onChange={(e) => setModelId(e.target.value)}>
-              {MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label} — {m.points} 點
-                </option>
-              ))}
-            </select>
             <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
               <button
                 className="primary"
-                disabled={!prompt.trim() || submit.isPending}
-                onClick={() => submit.mutate({ projectId: id, modelId, prompt: prompt.trim() })}
+                disabled={!prompt.trim() || !model || (model.needs != null && !sourceUrl.trim()) || submit.isPending}
+                onClick={() =>
+                  model &&
+                  submit.mutate({
+                    projectId: id,
+                    modelId: model.id,
+                    prompt: prompt.trim(),
+                    sourceUrl: model.needs && sourceUrl.trim() ? sourceUrl.trim() : undefined,
+                  })
+                }
               >
-                {submit.isPending ? "送出中…" : `生成（−${model.points} 點）`}
+                {submit.isPending ? "送出中…" : `生成（−${model?.points ?? 0} 點）`}
               </button>
               <span className="hint">失敗自動退點・額度由組長調整</span>
             </div>
             {submit.error && <p className="error">{submit.error.message}</p>}
             <GenerationList projectId={id} />
           </section>
+
+          {/* 工作流（一鍵串鏈） */}
+          <WorkflowCard projectId={id} />
 
           {/* 分鏡與交付 */}
           <SceneList projectId={id} isLeader={isLeader} />

@@ -7,14 +7,16 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { hashPassword, verifyPassword } from "./auth";
 
-export const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "admin@aidirector.local";
+/** 總管理員預設帳密(Bruce 指定;環境變數可覆蓋——上線穩定後請改用變數並更換密碼) */
+export const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "aa0968111723@gmail.com";
+export const SEED_ADMIN_PASSWORD_DEFAULT = process.env.SEED_ADMIN_PASSWORD ?? "aA@882992";
 
 /**
  * 超管自救路徑：SEED_ADMIN_EMAIL＋SEED_ADMIN_PASSWORD 都有設時，即使資料庫已有資料，
  * 也保證這組帳密可登入且是超管——忘記密碼＝改環境變數→Redeploy，完全不用碰資料庫。
  */
 async function ensureSeedAdmin(): Promise<void> {
-  const password = process.env.SEED_ADMIN_PASSWORD;
+  const password = SEED_ADMIN_PASSWORD_DEFAULT;
   if (!password) return;
   const [user] = await db.select().from(schema.users).where(eq(schema.users.email, SEED_ADMIN_EMAIL));
   if (!user) {
@@ -45,7 +47,7 @@ export async function ensureSeed(): Promise<void> {
   const existing = await db.select().from(schema.users).limit(1);
   if (existing.length > 0) return ensureSeedAdmin();
 
-  const password = process.env.SEED_ADMIN_PASSWORD ?? randomBytes(6).toString("hex");
+  const password = SEED_ADMIN_PASSWORD_DEFAULT || randomBytes(6).toString("hex");
   const [admin] = await db
     .insert(schema.users)
     .values({ name: "Bruce（超管）", email: SEED_ADMIN_EMAIL, passwordHash: await hashPassword(password), isSuperAdmin: true })
@@ -66,6 +68,6 @@ export async function ensureSeed(): Promise<void> {
   console.log("──────────────────────────────────────────");
   console.log("[seed] 已建立：總會小編團隊（動畫組・短影音組）＋北區工作組（剪輯組）");
   console.log(`[seed] 超管登入 → email: ${SEED_ADMIN_EMAIL}  密碼: ${password}`);
-  if (!process.env.SEED_ADMIN_PASSWORD) console.log("[seed] ↑ 密碼為隨機產生，只印這一次，請記下（或設 SEED_ADMIN_PASSWORD 固定）");
+  if (!process.env.SEED_ADMIN_PASSWORD) console.log("[seed] ↑ 使用內建預設帳密——上線穩定後請設 SEED_ADMIN_PASSWORD 環境變數更換");
   console.log("──────────────────────────────────────────");
 }

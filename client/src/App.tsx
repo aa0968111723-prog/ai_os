@@ -7,6 +7,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { AdminPage } from "./pages/AdminPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
+import { ModelsPage } from "./pages/ModelsPage";
 
 /** 彈性點數徽章：剩餘 or 不限（組長/管理員可在團隊管理調整） */
 function PointsBadge({ groupId }: { groupId: string }) {
@@ -66,6 +67,7 @@ export function App() {
         <span className="spacer" />
         {me.data && info.data?.mockMode && <span className="badge mock">假生成模式</span>}
         {me.data && <PointsBadge groupId={activeGroupId} />}
+        {me.data && <Link href="/models"><span className="badge" style={{ cursor: "pointer" }}>模型指南</span></Link>}
         {me.data && <Link href="/feedback"><span className="badge" style={{ cursor: "pointer" }}>回饋</span></Link>}
         {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}>團隊管理</span></Link>}
         {me.data && (
@@ -89,6 +91,7 @@ export function App() {
               </Route>
               <Route path="/admin">{isAdmin ? <AdminPage /> : <p className="error">沒有權限</p>}</Route>
               <Route path="/feedback"><FeedbackPage /></Route>
+              <Route path="/models"><ModelsPage /></Route>
               <Route path="/p/:id">{(params) => <ProjectPage id={params.id} />}</Route>
               <Route>
                 <p>

@@ -1,33 +1,35 @@
 /**
- * Fal.ai 客戶端（定案：一切以 Fal 為主，其他先不接）。
- * - 無 FAL_KEY 或 FAL_MOCK=1 → 假生成模式：不花錢即可測完整流程（開發測試優先）。
- * - 真模式走 fal queue REST（送出→輪詢），本機開發不需要 webhook（盲點掃描定案）。
+ * Fal.ai 客戶端(定案:一切以 Fal 為主,其他先不接)。
+ * - 無 FAL_KEY 或 FAL_MOCK=1 → 假生成模式:不花錢即可測完整流程(含圖/影/音/文字四種輸出)。
+ * - 真模式走 fal queue REST(送出→輪詢);多模態輸出統一由 extractResult 解析。
  */
 import { randomUUID } from "node:crypto";
 import { proxyFetch } from "./http";
+import type { OutputKind } from "../../shared/models";
 
 const MOCK = !process.env.FAL_KEY || process.env.FAL_MOCK === "1";
 const MOCK_DELAY_MS = Number(process.env.FAL_MOCK_DELAY_MS ?? 8000);
 
-const mockJobs = new Map<string, { doneAt: number; kind: string }>();
+const mockJobs = new Map<string, { doneAt: number; kind: OutputKind; prompt: string }>();
 
-/** 假素材由自家伺服器供應（/api/mock-asset/*）：完全離線可測、交付包也抓得到 */
-function mockResultUrl(kind: string): string {
+/** 假素材由自家伺服器供應(/api/mock-asset/*):完全離線可測、交付包也抓得到 */
+function mockResultUrl(kind: OutputKind): string {
   const base = process.env.APP_URL?.replace(/\/$/, "") || `http://localhost:${process.env.PORT ?? 3000}`;
-  return `${base}/api/mock-asset/${kind === "video" ? "video" : "image"}`;
+  const path = kind === "video" ? "video" : kind === "audio" ? "audio" : "image";
+  return `${base}/api/mock-asset/${path}`;
 }
 
 export function isMockMode(): boolean {
   return MOCK;
 }
 
-export async function falSubmit(modelId: string, kind: string, input: Record<string, unknown>): Promise<{ requestId: string }> {
+export async function falSubmit(endpoint: string, kind: OutputKind, input: Record<string, unknown>): Promise<{ requestId: string }> {
   if (MOCK) {
     const requestId = `mock_${randomUUID()}`;
-    mockJobs.set(requestId, { doneAt: Date.now() + MOCK_DELAY_MS, kind });
+    mockJobs.set(requestId, { doneAt: Date.now() + MOCK_DELAY_MS, kind, prompt: String(input.prompt ?? input.text ?? "") });
     return { requestId };
   }
-  const res = await proxyFetch(`https://queue.fal.run/${modelId}`, {
+  const res = await proxyFetch(`https://queue.fal.run/${endpoint}`, {
     method: "POST",
     headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -40,18 +42,22 @@ export async function falSubmit(modelId: string, kind: string, input: Record<str
 export interface FalStatusResult {
   status: "queued" | "running" | "done" | "failed";
   resultUrl?: string;
+  resultText?: string;
   error?: string;
 }
 
-export async function falStatus(modelId: string, kind: string, requestId: string): Promise<FalStatusResult> {
+export async function falStatus(endpoint: string, kind: OutputKind, requestId: string): Promise<FalStatusResult> {
   if (requestId.startsWith("mock_")) {
     const job = mockJobs.get(requestId);
-    if (!job) return { status: "done", resultUrl: mockResultUrl(kind) };
-    if (Date.now() < job.doneAt) return { status: "running" };
-    mockJobs.delete(requestId);
-    return { status: "done", resultUrl: mockResultUrl(job.kind) };
+    if (job && Date.now() < job.doneAt) return { status: "running" };
+    const prompt = job?.prompt ?? "";
+    if (job) mockJobs.delete(requestId);
+    if (kind === "text") {
+      return { status: "done", resultText: `(假生成示範)真實模式將由模型產出。你的輸入:「${prompt.slice(0, 120)}」` };
+    }
+    return { status: "done", resultUrl: mockResultUrl(kind) };
   }
-  const base = `https://queue.fal.run/${modelId}/requests/${requestId}`;
+  const base = `https://queue.fal.run/${endpoint}/requests/${requestId}`;
   const statusRes = await proxyFetch(`${base}/status`, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
   if (!statusRes.ok) return { status: "failed", error: `fal status ${statusRes.status}` };
   const s = (await statusRes.json()) as { status: string };
@@ -61,14 +67,39 @@ export async function falStatus(modelId: string, kind: string, requestId: string
   const resultRes = await proxyFetch(base, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
   if (!resultRes.ok) return { status: "failed", error: `fal result ${resultRes.status}` };
   const result = (await resultRes.json()) as Record<string, unknown>;
-  return { status: "done", resultUrl: extractUrl(result) };
+  const extracted = extractResult(result);
+  if (!extracted.url && !extracted.text) return { status: "failed", error: "無法解析模型輸出(請回報,我們會補上這個模型的解析)" };
+  return { status: "done", resultUrl: extracted.url, resultText: extracted.text };
 }
 
-/** fal 各模型輸出結構略異：images[0].url 或 video.url */
-function extractUrl(result: Record<string, unknown>): string | undefined {
+/**
+ * fal 各模型輸出結構略異,統一解析:
+ * 媒體:images[0].url / video.url / audio.url / audio_url / audio_file.url /
+ *       diffusers_lora_file.url(訓練產物)
+ * 文字:output / text / transcription.text / results(視覺任務物件)
+ */
+export function extractResult(result: Record<string, unknown>): { url?: string; text?: string } {
+  const urlOf = (v: unknown): string | undefined =>
+    v && typeof v === "object" && typeof (v as { url?: unknown }).url === "string" ? (v as { url: string }).url : undefined;
+
   const images = result.images as Array<{ url?: string }> | undefined;
-  if (images?.[0]?.url) return images[0].url;
-  const video = result.video as { url?: string } | undefined;
-  if (video?.url) return video.url;
-  return undefined;
+  if (images?.[0]?.url) return { url: images[0].url };
+  const media = urlOf(result.video) ?? urlOf(result.audio) ?? urlOf(result.audio_file) ?? urlOf(result.image);
+  if (media) return { url: media };
+  if (typeof result.audio_url === "string") return { url: result.audio_url };
+  if (typeof result.video_url === "string") return { url: result.video_url };
+  const lora = urlOf(result.diffusers_lora_file) ?? urlOf(result.lora_file);
+  if (lora) return { text: `訓練完成 ✓ LoRA 模型檔:${lora}\n(在支援 LoRA 的生成模型設定中引用此網址)`, url: undefined };
+
+  if (typeof result.output === "string" && result.output.trim()) return { text: result.output };
+  if (typeof result.text === "string" && result.text.trim()) return { text: result.text };
+  const transcription = result.transcription as { text?: string } | undefined;
+  if (transcription?.text) return { text: transcription.text };
+  if (result.results !== undefined) {
+    const r = result.results;
+    return { text: typeof r === "string" ? r : JSON.stringify(r, null, 2) };
+  }
+  const chunks = result.chunks as Array<{ text?: string }> | undefined;
+  if (chunks?.length) return { text: chunks.map((c) => c.text ?? "").join("\n") };
+  return {};
 }

@@ -45,24 +45,47 @@ export function GenerationList({ projectId }: { projectId: string }) {
           {g.resultUrl ? (
             g.kind === "video" ? (
               <video className="gen-thumb" src={g.resultUrl} controls muted />
+            ) : g.kind === "audio" ? (
+              <div className="gen-thumb" style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🔊</div>
             ) : (
               <a href={g.resultUrl} target="_blank" rel="noreferrer">
                 <img className="gen-thumb" src={g.resultUrl} alt="" />
               </a>
             )
           ) : (
-            <div className="gen-thumb" />
+            <div className="gen-thumb" style={g.kind === "text" ? { display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 } : undefined}>
+              {g.kind === "text" ? "📝" : ""}
+            </div>
           )}
           <div>
             <div style={{ fontSize: 14 }}>{g.prompt}</div>
             <div className="meta mono" style={{ fontSize: 11 }}>
               {g.modelId}・−{g.pointsEst} 點{g.pointsRefunded > 0 && `（已退 +${g.pointsRefunded}）`}
             </div>
+            {g.kind === "audio" && g.resultUrl && (
+              <audio controls src={g.resultUrl} style={{ width: "100%", maxWidth: 320, height: 32, marginTop: 6 }} />
+            )}
+            {g.resultText && (
+              <div
+                className="result-text"
+                style={{
+                  whiteSpace: "pre-wrap", fontSize: 13, background: "var(--bg, #F4EEE4)",
+                  border: "1px solid rgba(0,0,0,.08)", borderRadius: 10, padding: "8px 12px", marginTop: 6,
+                }}
+              >
+                {g.resultText}
+                <div style={{ marginTop: 6 }}>
+                  <button style={{ padding: "2px 10px", fontSize: 11 }} onClick={() => navigator.clipboard.writeText(g.resultText ?? "")}>
+                    複製文字
+                  </button>
+                </div>
+              </div>
+            )}
             {g.error && <div className="error">{g.error}</div>}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
             <span className={`pill ${g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
-            {g.status === "done" && (
+            {g.status === "done" && g.kind !== "text" && (
               <button style={{ padding: "4px 12px", fontSize: 12 }} disabled={addScene.isPending}
                 onClick={() => addScene.mutate({ generationId: g.id })}>
                 ＋加入分鏡
