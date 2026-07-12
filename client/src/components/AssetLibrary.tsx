@@ -24,6 +24,7 @@ export function AssetLibrary({
   const assets = trpc.projects.assets.useQuery({ projectId });
   const del = trpc.projects.deleteAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
   const rename = trpc.projects.renameAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
+  const toKnowledge = trpc.knowledge.addFromAsset.useMutation({ onSuccess: () => utils.knowledge.list.invalidate({ projectId }) });
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -113,6 +114,16 @@ export function AssetLibrary({
                     </button>
                   )}
                   {a.kind === "audio" && a.url && <audio controls src={a.url} style={{ height: 26, maxWidth: 150 }} />}
+                  {a.kind === "doc" && (
+                    <button
+                      style={{ padding: "2px 10px", fontSize: 11 }}
+                      disabled={toKnowledge.isPending}
+                      title="讓 AI 導演讀得懂這份文字素材"
+                      onClick={() => toKnowledge.mutate({ assetId: a.id })}
+                    >
+                      加入知識庫
+                    </button>
+                  )}
                   <button
                     style={{ padding: "2px 10px", fontSize: 11 }}
                     disabled={del.isPending}

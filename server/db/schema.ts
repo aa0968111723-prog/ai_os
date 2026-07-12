@@ -153,6 +153,25 @@ export const assets = pgTable("assets", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/**
+ * 專案知識庫（願景核心「真的懂我們素材」v1）：
+ * 開示稿／見證稿／腳本等文字素材，全文注入 AI 導演的上下文——夥伴不必每次重講背景。
+ * 內容存 DB（不是檔案），供 LLM 直接讀；長文於注入時截斷（見 knowledge router）。
+ */
+export const knowledge = pgTable("knowledge", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  /** transcript=師父開示稿・testimony=見證故事・script=腳本・note=其他筆記 */
+  kind: text("kind", { enum: ["transcript", "testimony", "script", "note"] }).notNull().default("note"),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  /** 若由上傳的文字素材自動建立，記來源 asset（供去重與回溯） */
+  sourceAssetId: uuid("source_asset_id"),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const scenes = pgTable("scenes", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull(),

@@ -8,6 +8,7 @@ import { MessagePanel } from "../components/MessagePanel";
 import { ModelPicker, type PickedModel } from "../components/ModelPicker";
 import { WorkflowCard } from "../components/WorkflowCard";
 import { AssetLibrary } from "../components/AssetLibrary";
+import { KnowledgeBase } from "../components/KnowledgeBase";
 
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
 export function ProjectPage({ id }: { id: string }) {
@@ -102,7 +103,10 @@ export function ProjectPage({ id }: { id: string }) {
             {updateWv.error && <p className="error">世界觀儲存失敗：{updateWv.error.message}</p>}
           </section>
 
-          {/* AI 導演建議 */}
+          {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}
+          <KnowledgeBase projectId={id} />
+
+          {/* AI 導演建議（會讀取上方知識庫） */}
           <DirectorCard projectId={id} onUse={(text) => setPrompt(text)} />
 
           {/* 素材庫：上傳參考素材（提案核心「把素材丟進去」的入口）＋生成成品自動入庫 */}

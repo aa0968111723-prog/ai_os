@@ -7,6 +7,7 @@ import { worldviewSchema, type Worldview } from "../../shared/worldview";
 import { isMockMode } from "../services/fal";
 import { proxyFetch } from "../services/http";
 import { reserveQuota, refund } from "../services/points";
+import { buildKnowledgeContext } from "./knowledge";
 
 export interface DirectorSuggestion {
   title: string;
@@ -62,16 +63,20 @@ export const directorRouter = router({
     requireGroup(ctx.auth, project.groupId);
     const wv = worldviewSchema.parse(project.worldview ?? {});
 
-    if (isMockMode()) return { suggestions: mockSuggestions(wv, project.kind), mock: true };
+    // 知識庫：把開示稿/見證稿/腳本全文注入——這就是「真的懂我們素材」，夥伴不必重講背景
+    const knowledge = await buildKnowledgeContext(project.id);
+
+    if (isMockMode()) return { suggestions: mockSuggestions(wv, project.kind), mock: true, usedKnowledge: !!knowledge };
 
     // 真模式先原子入帳（重用 reserveQuota：同時受週額度與總預算守門），失敗路徑再退
     const quotaError = await reserveQuota(ctx.auth.user.id, project.groupId, DIRECTOR_COST_POINTS, "AI 導演建議");
     if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
 
-    const sys = `你是佛教基金會的影片導演助理。依專案背景給 3 個分鏡提示詞建議（繁體中文）。
+    const sys = `你是佛教基金會的影片導演助理。依專案背景與素材給 3 個分鏡提示詞建議（繁體中文）。
 專案：${project.title}（${project.kind}，${project.format}）
 一句話故事：${wv.logline}｜關鍵訊息：${wv.message}｜調性：${wv.tones.join("、")}
 禁忌：${wv.taboos.join("；")}
+${knowledge ? `\n【專案素材（開示／見證／腳本，請據此發想，忠於原意）】\n${knowledge}\n` : ""}
 只回 JSON 陣列：[{"title":"...","prompt":"..."}] 共 3 筆，prompt 為可直接用於圖像/影片生成的場景描述。`;
     try {
       const res = await proxyFetch("https://fal.run/fal-ai/any-llm", {
@@ -84,12 +89,12 @@ export const directorRouter = router({
       const match = data.output?.match(/\[[\s\S]*\]/);
       const parsed = match ? suggestionSchema.safeParse(JSON.parse(match[0])) : null;
       // 形狀不符：LLM 已實際計費故不退點，但回固定格式的本地建議並標記 mock，前端不會拿到壞資料
-      if (!parsed?.success) return { suggestions: mockSuggestions(wv, project.kind), mock: true };
-      return { suggestions: parsed.data.slice(0, 3), mock: false };
+      if (!parsed?.success) return { suggestions: mockSuggestions(wv, project.kind), mock: true, usedKnowledge: !!knowledge };
+      return { suggestions: parsed.data.slice(0, 3), mock: false, usedKnowledge: !!knowledge };
     } catch {
       // LLM 呼叫失敗（HTTP 錯誤/逾時/回傳非 JSON）：退點且不擋創作，退回本地建議
       await refund(ctx.auth.user.id, project.groupId, DIRECTOR_COST_POINTS, "AI 導演建議失敗退回");
-      return { suggestions: mockSuggestions(wv, project.kind), mock: true };
+      return { suggestions: mockSuggestions(wv, project.kind), mock: true, usedKnowledge: !!knowledge };
     }
   }),
 });
