@@ -14,6 +14,7 @@ function StatusPoller({ id }: { id: string }) {
           utils.generation.listByProject.invalidate();
           utils.quota.my.invalidate();
           utils.scenes.listByProject.invalidate();
+          utils.projects.assets.invalidate(); // 生成完成會 insert 素材，素材庫/來源下拉要即時反映
         }
         return data;
       },

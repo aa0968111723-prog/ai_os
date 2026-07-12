@@ -145,11 +145,20 @@ export const knowledgeRouter = router({
     if (asset.kind !== "doc" || !asset.storagePath) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "只有文字類素材（txt/md）能加入知識庫" });
     }
-    const { readFile } = await import("node:fs/promises");
+    const { open } = await import("node:fs/promises");
     const { absPathOf } = await import("../services/storage");
     let content: string;
     try {
-      content = (await readFile(absPathOf(asset.storagePath), "utf8")).slice(0, MAX_CONTENT);
+      // 只讀前段（非整檔進記憶體）——即使有人上傳 200MB 的 .txt，也只吃 MAX_CONTENT×4 bytes。
+      // CJK 一字最多 4 bytes（UTF-8），讀 MAX_CONTENT×4 bytes 後再截到 MAX_CONTENT 字，足夠且有界。
+      const fh = await open(absPathOf(asset.storagePath), "r");
+      try {
+        const buf = Buffer.alloc(MAX_CONTENT * 4);
+        const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+        content = buf.subarray(0, bytesRead).toString("utf8").slice(0, MAX_CONTENT);
+      } finally {
+        await fh.close();
+      }
     } catch {
       throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "讀取素材內容失敗" });
     }

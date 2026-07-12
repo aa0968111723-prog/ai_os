@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -65,20 +65,28 @@ async function sweepStaleGenerations(projectId: string): Promise<void> {
       ),
     );
   for (const gen of staleRows) {
+    // 只退「確實扣過點」的孤兒：查該生成的帳本淨額，負值＝有扣過（退這個絕對值），
+    // 0＝從未扣點（如 reserveQuota 拋例外前就建了 queued 列的孤兒）——這種不退，
+    // 否則會對「沒扣過的列」憑空加點，灌負週用量、悄悄放寬總預算閘（守 fal 帳單）。
+    const [ledger] = await db
+      .select({ net: sql<number>`coalesce(sum(${schema.costLedger.delta}), 0)` })
+      .from(schema.costLedger)
+      .where(eq(schema.costLedger.generationId, gen.id));
+    const deducted = Math.max(0, -Number(ledger?.net ?? 0)); // 已扣的點數（>0 才要退）
     // 沿用 status 分支的 compare-and-set：只有真正把列從 queued/running 推進成 failed
     // 的那一次才退點——與併發輪詢（status 的 done/failed 分支）互斥，杜絕雙重退點。
     const updatedRows = await db
       .update(schema.generations)
       .set({
         status: "failed",
-        error: "生成停滯逾 30 分鐘,系統自動回收,點數已退回",
-        pointsRefunded: gen.pointsEst,
+        error: "生成停滯逾 30 分鐘,系統自動回收" + (deducted > 0 ? ",點數已退回" : ""),
+        pointsRefunded: deducted,
         updatedAt: new Date(),
       })
       .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
       .returning();
     if (updatedRows.length === 0) continue; // 已被別的請求推進 → 不重複退點
-    await refund(gen.userId, gen.groupId, gen.pointsEst, "生成停滯自動回收退回", gen.id);
+    if (deducted > 0) await refund(gen.userId, gen.groupId, deducted, "生成停滯自動回收退回", gen.id);
   }
 }
 
@@ -169,7 +177,16 @@ export const generationRouter = router({
         .returning();
 
       // 原子守門＋扣點（同一交易＋per-user 鎖，杜絕併發雙重扣款/繞過額度）
-      const quotaError = await reserveQuota(ctx.auth.user.id, project.groupId, model.points, `生成 ${model.label}`, gen.id);
+      // reserveQuota「拋例外」（連線池耗盡/逾時/序列化失敗）時也要刪掉剛建的 queued 列，
+      // 否則會留下「從未扣點」的孤兒，30 分鐘後被陳屍清掃憑空退點、灌鬆總預算閘。
+      let quotaError: string | null;
+      try {
+        quotaError = await reserveQuota(ctx.auth.user.id, project.groupId, model.points, `生成 ${model.label}`, gen.id);
+      } catch (err) {
+        await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
+        console.error("[generation] reserveQuota 例外，已移除待生成列：", err instanceof Error ? err.message : err);
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "系統忙碌，請稍後再試（未扣點）" });
+      }
       if (quotaError) {
         await db.delete(schema.generations).where(eq(schema.generations.id, gen.id)); // 未扣點，移除待生成列
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });

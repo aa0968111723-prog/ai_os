@@ -47,7 +47,8 @@ export function ProjectPage({ id }: { id: string }) {
   const assets = trpc.projects.assets.useQuery({ projectId: id });
   /** 生成確認彈窗：先估點數、使用者點頭才真的送出、扣點 */
   const [confirming, setConfirming] = useState(false);
-  const quota = trpc.quota.my.useQuery(undefined, { enabled: confirming });
+  // 帶 groupId（本專案的組）才算得出週/日額度——不帶時 quota.my 的 weeklyQuota 恆為 null，彈窗週用量變死碼
+  const quota = trpc.quota.my.useQuery({ groupId: project.data?.groupId }, { enabled: confirming && !!project.data });
   const savePrompt = trpc.prompts.save.useMutation({ onSuccess: () => utils.prompts.list.invalidate({ projectId: id }) });
   const submit = trpc.generation.submit.useMutation({
     onSuccess: (_data, vars) => {

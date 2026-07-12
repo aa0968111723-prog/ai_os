@@ -144,31 +144,40 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     const guard = await checkDiskSpace(req.file.size);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
 
+    // adoptTmpFile 已把暫存檔「移到」Volume 正式位置——之後若 DB 寫入失敗，
+    // 要刪的是這個已落地的檔（storagePath），不是原暫存路徑（已不存在）；
+    // 否則會在 Volume 留下沒有 DB 列指向的孤兒檔案，長期累積吃滿磁碟。
     const { storagePath, sizeBytes } = await adoptTmpFile(req.file.path, mime);
-    const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8"); // multer 檔名編碼修正
-    const title = String(req.body?.title ?? "").trim() || originalName || "上傳素材";
-    const [asset] = await db
-      .insert(schema.assets)
-      .values({
-        projectId: project.id,
-        groupId: project.groupId,
-        kind: kindFromMime(mime),
-        title: title.slice(0, 80),
-        url: "", // 先佔位，下一行以 id 回填服務網址
-        isAiGenerated: false,
-        storagePath, mime, sizeBytes,
-        uploadedBy: auth.user.id,
-        meta: { originalName },
-      })
-      .returning();
-    const [updated] = await db
-      .update(schema.assets)
-      .set({ url: `/api/assets/${asset.id}/file` })
-      .where(eq(schema.assets.id, asset.id))
-      .returning();
-    res.json({ ok: true, asset: updated });
+    try {
+      const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8"); // multer 檔名編碼修正
+      const title = String(req.body?.title ?? "").trim() || originalName || "上傳素材";
+      const [asset] = await db
+        .insert(schema.assets)
+        .values({
+          projectId: project.id,
+          groupId: project.groupId,
+          kind: kindFromMime(mime),
+          title: title.slice(0, 80),
+          url: "", // 先佔位，下一行以 id 回填服務網址
+          isAiGenerated: false,
+          storagePath, mime, sizeBytes,
+          uploadedBy: auth.user.id,
+          meta: { originalName },
+        })
+        .returning();
+      const [updated] = await db
+        .update(schema.assets)
+        .set({ url: `/api/assets/${asset.id}/file` })
+        .where(eq(schema.assets.id, asset.id))
+        .returning();
+      res.json({ ok: true, asset: updated });
+    } catch (dbErr) {
+      const { removeStoredFile } = await import("./services/storage");
+      await removeStoredFile(storagePath); // DB 失敗 → 清掉已落地的孤兒檔
+      throw dbErr;
+    }
   } catch (err) {
-    await cleanup();
+    await cleanup(); // req.file 若尚未 adopt（前段驗證失敗）才有東西可清
     console.error("[upload]", err);
     if (!res.headersSent) res.status(500).json({ error: "上傳失敗，請稍後再試" });
   }

@@ -227,7 +227,17 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
         const fileRes = await proxyFetch(asset.url, {
           signal: AbortSignal.any([clientAbort.signal, AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS)]),
         });
-        if (!fileRes.ok || !fileRes.body) { void fileRes.body?.cancel().catch(() => {}); continue; }
+        if (!fileRes.ok || !fileRes.body) {
+          void fileRes.body?.cancel().catch(() => {});
+          warnings.push(`鎖定素材「${asset.title}」下載失敗（HTTP ${fileRes.status}），未入包`); // 與場景素材分支一致：非 OK 要記警告
+          continue;
+        }
+        const len = Number(fileRes.headers.get("content-length") ?? 0);
+        if (len > REMOTE_FILE_MAX_BYTES) {
+          void fileRes.body.cancel().catch(() => {});
+          warnings.push(`鎖定素材「${asset.title}」過大（${Math.round(len / 1048576)}MB，上限 200MB），未入包`); // 補上與場景素材一致的大小守門
+          continue;
+        }
         source = Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream);
       } else {
         continue;

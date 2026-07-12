@@ -116,7 +116,14 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
       .values({ projectId: project.id, groupId: project.groupId, userId: admin.id, modelId: model.id, kind: model.kind, prompt: userPrompt, sourceUrl, params: falInput, pointsEst: model.points })
       .returning();
     // 與網頁端一致：原子守門＋扣點（舊版直接扣、完全不檢查額度，MCP 可無限刷爆總預算）
-    const quotaError = await reserveQuota(admin.id, project.groupId, model.points, `MCP 生成 ${model.label}`, gen.id);
+    // 拋例外也要刪孤兒列（否則被陳屍清掃憑空退點）——與網頁端同一防護
+    let quotaError: string | null;
+    try {
+      quotaError = await reserveQuota(admin.id, project.groupId, model.points, `MCP 生成 ${model.label}`, gen.id);
+    } catch (err) {
+      await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
+      throw new Error(`系統忙碌，請稍後再試（未扣點）：${err instanceof Error ? err.message : String(err)}`);
+    }
     if (quotaError) {
       await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
       throw new Error(quotaError);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -27,23 +27,29 @@ export const promptsRouter = router({
       requireGroup(ctx.auth, project.groupId);
       const text = input.text.trim();
       if (!text) return null;
-      const [existing] = await db
-        .select()
-        .from(schema.prompts)
-        .where(and(eq(schema.prompts.projectId, input.projectId), eq(schema.prompts.text, text)));
-      if (existing) {
-        const [bumped] = await db
-          .update(schema.prompts)
-          .set({ useCount: existing.useCount + 1, updatedAt: new Date() })
-          .where(eq(schema.prompts.id, existing.id))
+      // 併發自動存同一咒語會 select-then-insert 競態（重複列/漏加 useCount）。
+      // 用交易＋per-(專案,文字) advisory lock 序列化——不加唯一索引（text 可達 2000 字、
+      // 超過 btree 索引位元上限，索引建立會失敗）。
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${input.projectId}), hashtext(${text}))`);
+        const [existing] = await tx
+          .select()
+          .from(schema.prompts)
+          .where(and(eq(schema.prompts.projectId, input.projectId), eq(schema.prompts.text, text)));
+        if (existing) {
+          const [bumped] = await tx
+            .update(schema.prompts)
+            .set({ useCount: existing.useCount + 1, updatedAt: new Date() })
+            .where(eq(schema.prompts.id, existing.id))
+            .returning();
+          return bumped;
+        }
+        const [row] = await tx
+          .insert(schema.prompts)
+          .values({ projectId: project.id, groupId: project.groupId, text, createdBy: ctx.auth.user.id })
           .returning();
-        return bumped;
-      }
-      const [row] = await db
-        .insert(schema.prompts)
-        .values({ projectId: project.id, groupId: project.groupId, text, createdBy: ctx.auth.user.id })
-        .returning();
-      return row;
+        return row;
+      });
     }),
 
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {

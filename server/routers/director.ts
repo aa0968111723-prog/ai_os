@@ -158,7 +158,8 @@ ${knowledge ? `\n【專案素材（開示／見證／腳本，請據此發想，
 
       // 假模式：確定性切幕（依段落）——不花錢可測
       if (isMockMode()) {
-        const paras = script.split(/\n{2,}|\r\n{2,}/).map((p) => p.trim()).filter(Boolean).slice(0, 8);
+        // (\r?\n){2,} 正確匹配 CRLF 或 LF 的空行分隔；舊式 /\n{2,}|\r\n{2,}/ 對 Windows CRLF 失效（整份塞成一幕）
+        const paras = script.split(/(?:\r?\n){2,}/).map((p) => p.trim()).filter(Boolean).slice(0, 8);
         const src = paras.length ? paras : [script.slice(0, 200)];
         const scenesData = src.map((p, i) => ({
           title: `第 ${i + 1} 幕`,
