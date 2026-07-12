@@ -243,22 +243,29 @@ export const generationRouter = router({
         return current; // 別人已推進，直接回現況
       }
       const [updated] = updatedRows;
-      // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄
+      // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄。
+      // 素材 insert 若失敗（DB 抖動）不可讓整個 status 回應 500——生成已 done，
+      // 錯誤只記 log；素材下次輪詢會由這段重試（CAS 已把列推進成 done，此段只在該次執行，
+      // 但生成紀錄仍在，管理員可查 log 手動補；避免「成功卻回報失敗」誤導使用者重送重複扣點）。
       if (result.resultUrl && (kind === "image" || kind === "video" || kind === "audio")) {
-        const [asset] = await db
-          .insert(schema.assets)
-          .values({
-            projectId: gen.projectId,
-            groupId: gen.groupId,
-            kind,
-            title: gen.prompt.slice(0, 40),
-            url: result.resultUrl,
-            isAiGenerated: true,
-            meta: { generationId: gen.id, modelId: gen.modelId },
-          })
-          .returning();
-        // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）
-        persistGenerationResult(asset.id, gen.id, result.resultUrl);
+        try {
+          const [asset] = await db
+            .insert(schema.assets)
+            .values({
+              projectId: gen.projectId,
+              groupId: gen.groupId,
+              kind,
+              title: gen.prompt.slice(0, 40),
+              url: result.resultUrl,
+              isAiGenerated: true,
+              meta: { generationId: gen.id, modelId: gen.modelId },
+            })
+            .returning();
+          // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）
+          persistGenerationResult(asset.id, gen.id, result.resultUrl);
+        } catch (err) {
+          console.error(`[generation] 成品入素材庫失敗（生成已 done，可查 log 補）：gen=${gen.id}`, err instanceof Error ? err.message : err);
+        }
       }
       return updated;
     }

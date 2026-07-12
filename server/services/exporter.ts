@@ -276,7 +276,9 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
   archive.append(
     `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／03_圖像／${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）。\n` +
       "媒體檔請直接匯入剪映或 Premiere 組裝。\n" +
-      (hasSubtitle ? "" : "（本片分鏡尚無配音詞，故未附字幕；用 AI 拆分鏡或在分鏡填配音詞後再打包即有字幕。）\n"),
+      (hasSubtitle
+        ? "字幕.srt 的時間碼依「分鏡規劃秒數」依序累計（每幕佔其設定秒數），組裝時間軸與分鏡順序一致即可對齊；若實際剪輯調整了各幕長度，請在剪輯軟體裡微調字幕時間。\n"
+        : "（本片分鏡尚無配音詞，故未附字幕；用 AI 拆分鏡或在分鏡填配音詞後再打包即有字幕。）\n"),
     { name: "README.txt" },
   );
 
