@@ -11,8 +11,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/drizzle ./drizzle
+# db:push 用 schema 直接同步（不走 migration 檔），故只需 schema.ts＋config，不複製 drizzle/
 COPY package.json drizzle.config.ts ./
 COPY server/db/schema.ts ./server/db/schema.ts
 EXPOSE 3000
-CMD ["node", "dist/index.js"]
+# 啟動先自動建表（首次部署免手動 db:push）；DB 未就緒也不擋伺服器啟動——健康檢查照樣通、重試部署即可
+CMD ["sh", "-c", "node_modules/.bin/drizzle-kit push --force || echo '[start] db:push 略過（DB 尚未就緒，重試部署即可）'; node dist/index.js"]
