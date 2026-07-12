@@ -96,21 +96,43 @@ export function ProjectPage({ id }: { id: string }) {
               placeholder="例：把心交給佛，煩惱就交給了光"
               onBlur={(e) => e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
             />
-            <label>訊息主軸</label>
-            <div>
-              {THEME_OPTIONS.map((t) => (
-                <span key={t} className={`chip pick ${wv.themes.includes(t) ? "on" : ""}`} onClick={() => toggle("themes", t)}>
-                  {t}
-                </span>
-              ))}
+            <label id="wv-themes">訊息主軸</label>
+            <div role="group" aria-labelledby="wv-themes">
+              {THEME_OPTIONS.map((t) => {
+                const on = wv.themes.includes(t);
+                return (
+                  <span
+                    key={t}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={on}
+                    className={`chip pick ${on ? "on" : ""}`}
+                    onClick={() => toggle("themes", t)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle("themes", t); } }}
+                  >
+                    {t}
+                  </span>
+                );
+              })}
             </div>
-            <label>調性（生成時自動注入）</label>
-            <div>
-              {TONE_OPTIONS.map((t) => (
-                <span key={t} className={`chip pick ${wv.tones.includes(t) ? "on" : ""}`} onClick={() => toggle("tones", t)}>
-                  {t}
-                </span>
-              ))}
+            <label id="wv-tones">調性（生成時自動注入）</label>
+            <div role="group" aria-labelledby="wv-tones">
+              {TONE_OPTIONS.map((t) => {
+                const on = wv.tones.includes(t);
+                return (
+                  <span
+                    key={t}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={on}
+                    className={`chip pick ${on ? "on" : ""}`}
+                    onClick={() => toggle("tones", t)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle("tones", t); } }}
+                  >
+                    {t}
+                  </span>
+                );
+              })}
             </div>
             <p className="hint" style={{ marginTop: 10 }}>禁忌事項已內建（醫療宣稱禁語等）；進階設定之後開放。</p>
             {updateWv.error && <p className="error">世界觀儲存失敗：{updateWv.error.message}</p>}

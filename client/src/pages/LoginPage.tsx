@@ -47,34 +47,35 @@ export function LoginPage() {
         </div>
         <h1 style={{ margin: "8px 0 2px", fontSize: 26 }}>AI Director OS</h1>
         <p className="sub" style={{ marginBottom: 8 }}>懂我們素材的創作系統</p>
-        <div style={{ textAlign: "left" }}>
-          <label>Email</label>
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" />
-          <label>密碼</label>
+        {/* 用 <form>：瀏覽器/密碼管理器靠它辨識登入表單做自動填入；Enter 由 submit 統一處理 */}
+        <form style={{ textAlign: "left" }} onSubmit={(e) => { e.preventDefault(); doLogin(); }}>
+          <label htmlFor="login-email">Email</label>
+          <input id="login-email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" autoFocus />
+          <label htmlFor="login-pw">密碼</label>
           <input
+            id="login-pw"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-            onKeyDown={(e) => e.key === "Enter" && email && password && doLogin()}
           />
-        </div>
-        <div style={{ marginTop: 18 }}>
-          <button
-            className="primary"
-            style={{ width: "100%" }}
-            disabled={!email || !password || login.isPending}
-            onClick={doLogin}
-          >
-            {login.isPending ? "登入中…" : "登入"}
-          </button>
-        </div>
+          <div style={{ marginTop: 18 }}>
+            <button
+              className="primary"
+              type="submit"
+              style={{ width: "100%" }}
+              disabled={!email.trim() || !password || login.isPending}
+            >
+              {login.isPending ? "登入中…" : "登入"}
+            </button>
+          </div>
+        </form>
         {localError ? (
-          <p className="error">{localError}</p>
+          <p className="error" role="alert">{localError}</p>
         ) : login.error ? (
-          <p className="error">{friendlyAuthError(login.error.message)}</p>
+          <p className="error" role="alert">{friendlyAuthError(login.error.message)}</p>
         ) : null}
-        <p className="hint" style={{ marginTop: 14 }}>帳號採邀請制——請向你的組長或管理員索取邀請連結。</p>
+        <p className="hint" style={{ marginTop: 14 }}>帳號採邀請制——請向你的組長或管理員索取邀請連結。忘記密碼請找管理員重設。</p>
       </div>
     </div>
   );
