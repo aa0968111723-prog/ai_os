@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { trpc } from "../api";
 import { worldviewSchema, TONE_OPTIONS, THEME_OPTIONS, type Worldview } from "@shared/worldview";
 import { GenerationList } from "../components/GenerationList";
@@ -17,7 +18,16 @@ import { PromptLibrary } from "../components/PromptLibrary";
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
 export function ProjectPage({ id }: { id: string }) {
   const utils = trpc.useUtils();
-  const project = trpc.projects.get.useQuery({ id });
+  // 不重試 FORBIDDEN/NOT_FOUND：成員點到他組或已刪專案的舊連結時，直接顯示訊息，不要卡在「載入中…」重試
+  const project = trpc.projects.get.useQuery(
+    { id },
+    {
+      retry: (count, err) => {
+        const code = err.data?.code;
+        return code !== "FORBIDDEN" && code !== "NOT_FOUND" && count < 2;
+      },
+    },
+  );
   const me = trpc.auth.me.useQuery();
   const updateWv = trpc.projects.updateWorldview.useMutation({
     // 樂觀更新：patch 先合併進本地快取，快速連點兩個 chips 時第二下才讀得到第一下的結果
@@ -62,7 +72,18 @@ export function ProjectPage({ id }: { id: string }) {
   });
 
   if (project.isLoading) return <p className="hint">載入中…</p>;
-  if (project.error || !project.data) return <p className="error">載入失敗：{project.error?.message}</p>;
+  if (project.error || !project.data) {
+    const code = project.error?.data?.code;
+    const msg =
+      code === "FORBIDDEN" ? "這個專案不屬於你的組，看不到內容。"
+      : code === "NOT_FOUND" ? "找不到這個專案（可能已被刪除）。"
+      : `載入失敗：${project.error?.message ?? "未知錯誤"}`;
+    return (
+      <p className="error">
+        {msg} <Link href="/">回作業台</Link>
+      </p>
+    );
+  }
 
   const p = project.data;
   const myRole = me.data?.groups.find((g) => g.groupId === p.groupId)?.role;
