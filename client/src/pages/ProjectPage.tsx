@@ -9,6 +9,7 @@ import { ModelPicker, type PickedModel } from "../components/ModelPicker";
 import { WorkflowCard } from "../components/WorkflowCard";
 import { AssetLibrary } from "../components/AssetLibrary";
 import { KnowledgeBase } from "../components/KnowledgeBase";
+import { ScriptSplitCard } from "../components/ScriptSplitCard";
 
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
 export function ProjectPage({ id }: { id: string }) {
@@ -109,6 +110,9 @@ export function ProjectPage({ id }: { id: string }) {
           {/* AI 導演建議（會讀取上方知識庫） */}
           <DirectorCard projectId={id} onUse={(text) => setPrompt(text)} />
 
+          {/* AI 拆分鏡：貼腳本 → 自動建分鏡草稿 */}
+          <ScriptSplitCard projectId={id} />
+
           {/* 素材庫：上傳參考素材（提案核心「把素材丟進去」的入口）＋生成成品自動入庫 */}
           <AssetLibrary projectId={id} onPickSource={(a) => { setSourceAsset(a); setSourceUrl(""); }} />
 
@@ -177,7 +181,7 @@ export function ProjectPage({ id }: { id: string }) {
           <WorkflowCard projectId={id} />
 
           {/* 分鏡與交付 */}
-          <SceneList projectId={id} isLeader={isLeader} />
+          <SceneList projectId={id} isLeader={isLeader} onUsePrompt={(text) => setPrompt(text)} />
         </div>
 
         {/* 組內留言 */}

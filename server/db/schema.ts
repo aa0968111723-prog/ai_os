@@ -180,6 +180,10 @@ export const scenes = pgTable("scenes", {
   durationSec: integer("duration_sec").notNull().default(5),
   status: text("status").notNull().default("todo"),
   assetId: uuid("asset_id"),
+  /** 導演 AI 拆分鏡填入：這一幕的建議生成提示詞（草稿分鏡用，一鍵帶入生成台） */
+  prompt: text("prompt"),
+  /** 這一幕的配音詞／旁白（拆腳本時由 AI 分句；固定素材模式為原音逐句） */
+  voiceover: text("voiceover"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

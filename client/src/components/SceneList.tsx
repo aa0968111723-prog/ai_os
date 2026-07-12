@@ -9,7 +9,7 @@ const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
 };
 
 /** 分鏡與交付：簡易排序（↑↓）＋送審/裁決（三態機）＋打包下載 */
-export function SceneList({ projectId, isLeader }: { projectId: string; isLeader: boolean }) {
+export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: string; isLeader: boolean; onUsePrompt?: (prompt: string) => void }) {
   const utils = trpc.useUtils();
   const scenes = trpc.scenes.listByProject.useQuery({ projectId }, { refetchInterval: 10_000 });
   const approvals = trpc.approvals.listByProject.useQuery({ projectId }, { refetchInterval: 10_000 });
@@ -59,6 +59,18 @@ export function SceneList({ projectId, isLeader }: { projectId: string; isLeader
                     {SCENE_STATUS[s.status]?.label ?? s.status}
                   </span>
                 </div>
+                {/* 拆分鏡的草稿：顯示建議提示詞＋配音詞，可一鍵帶入生成台 */}
+                {s.prompt && !s.assetId && (
+                  <div style={{ fontSize: 12, marginTop: 4, background: "var(--card2)", borderRadius: 8, padding: "6px 10px" }}>
+                    <div>🎬 {s.prompt}</div>
+                    {s.voiceover && <div className="hint" style={{ marginTop: 3 }}>🎙 {s.voiceover}</div>}
+                    {onUsePrompt && (
+                      <button style={{ padding: "2px 10px", fontSize: 11, marginTop: 5 }} onClick={() => onUsePrompt(s.prompt!)}>
+                        用此提示詞生成
+                      </button>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                   {(s.status === "todo" || s.status === "review" || s.status === "needs_work") && (
                     <button style={{ padding: "3px 12px", fontSize: 12 }} disabled={submitApproval.isPending}

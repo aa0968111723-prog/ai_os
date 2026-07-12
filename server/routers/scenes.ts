@@ -23,6 +23,8 @@ export const scenesRouter = router({
         durationSec: schema.scenes.durationSec,
         status: schema.scenes.status,
         assetId: schema.scenes.assetId,
+        prompt: schema.scenes.prompt,
+        voiceover: schema.scenes.voiceover,
         assetUrl: schema.assets.url,
         assetKind: schema.assets.kind,
       })

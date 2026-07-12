@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -13,6 +13,19 @@ export interface DirectorSuggestion {
   title: string;
   prompt: string;
 }
+
+/** 拆分鏡：每一幕的結構（標題、秒數、建議提示詞、配音詞） */
+const sceneSplitSchema = z
+  .array(
+    z.object({
+      title: z.string().min(1).max(60),
+      durationSec: z.number().int().min(1).max(30).optional(),
+      prompt: z.string().min(1).max(2000),
+      voiceover: z.string().max(500).optional(),
+    }),
+  )
+  .min(1)
+  .max(12);
 
 /** LLM 回傳的執行期驗證：JSON.parse 成功但形狀不對（title 是物件、缺欄位）一樣會弄崩前端，必須 safeParse */
 const suggestionSchema = z
@@ -97,4 +110,96 @@ ${knowledge ? `\n【專案素材（開示／見證／腳本，請據此發想，
       return { suggestions: mockSuggestions(wv, project.kind), mock: true, usedKnowledge: !!knowledge };
     }
   }),
+
+  /**
+   * 導演 AI 拆分鏡（願景「貼腳本→自動建分鏡卡」）：
+   * 腳本（或知識庫的腳本）→ LLM 切成一幕一幕 → 建 scene 草稿（含建議提示詞、配音詞）。
+   * 建立的分鏡狀態為 todo、無素材，使用者可逐幕「用此提示詞生成」。
+   */
+  splitScript: authedProcedure
+    .input(z.object({ projectId: z.string().uuid(), scriptText: z.string().max(20_000).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      if (overSuggestLimit(ctx.auth.user.id)) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "請求太頻繁（每分鐘最多 6 次），休息一下再試" });
+      }
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, project.groupId);
+      const wv = worldviewSchema.parse(project.worldview ?? {});
+
+      // 腳本來源：優先參數；否則用知識庫（含腳本/開示等）——「懂我們素材」的延伸
+      const script = (input.scriptText?.trim() || (await buildKnowledgeContext(project.id))).trim();
+      if (!script) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "沒有腳本可拆——請貼上腳本，或先在知識庫加入腳本/開示稿" });
+      }
+
+      const createScenes = async (scenesData: z.infer<typeof sceneSplitSchema>) => {
+        const [{ maxOrder }] = await db
+          .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
+          .from(schema.scenes)
+          .where(eq(schema.scenes.projectId, project.id));
+        let order = Number(maxOrder);
+        const rows = await db
+          .insert(schema.scenes)
+          .values(
+            scenesData.map((s) => ({
+              projectId: project.id,
+              orderIndex: ++order,
+              title: s.title.slice(0, 60),
+              durationSec: s.durationSec ?? (project.format === "9:16" ? 4 : 5),
+              status: "todo",
+              prompt: s.prompt,
+              voiceover: s.voiceover,
+            })),
+          )
+          .returning();
+        return rows;
+      };
+
+      // 假模式：確定性切幕（依段落）——不花錢可測
+      if (isMockMode()) {
+        const paras = script.split(/\n{2,}|\r\n{2,}/).map((p) => p.trim()).filter(Boolean).slice(0, 8);
+        const src = paras.length ? paras : [script.slice(0, 200)];
+        const scenesData = src.map((p, i) => ({
+          title: `第 ${i + 1} 幕`,
+          durationSec: project.format === "9:16" ? 4 : 5,
+          prompt: `${p.slice(0, 120)}（${wv.tones.join("、") || "溫柔療癒"}調性，${wv.styles.join("、") || "日系水彩"}）`,
+          voiceover: p.slice(0, 100),
+        }));
+        const rows = await createScenes(scenesData);
+        return { scenes: rows, count: rows.length, mock: true };
+      }
+
+      const quotaError = await reserveQuota(ctx.auth.user.id, project.groupId, DIRECTOR_COST_POINTS, "AI 拆分鏡");
+      if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+
+      const sys = `你是佛教基金會的影片導演。把下面的腳本切成一幕一幕的分鏡（繁體中文），每幕給：
+title（幕名，簡短）、durationSec（秒數，3-8）、prompt（可直接用於圖像/影片生成的畫面描述，融入調性「${wv.tones.join("、")}」與視覺風格「${wv.styles.join("、")}」）、voiceover（這一幕的旁白／配音詞，取自腳本原句，忠於原意）。
+專案：${project.title}（${project.kind}，${project.format}）｜關鍵訊息：${wv.message}｜禁忌：${wv.taboos.join("；")}
+腳本：
+${script.slice(0, 12_000)}
+
+只回 JSON 陣列：[{"title":"...","durationSec":5,"prompt":"...","voiceover":"..."}]，最多 12 幕。`;
+      try {
+        const res = await proxyFetch("https://fal.run/fal-ai/any-llm", {
+          method: "POST",
+          headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "google/gemini-flash-1.5", prompt: sys }),
+        });
+        if (!res.ok) throw new Error(`any-llm ${res.status}`);
+        const data = (await res.json()) as { output?: string };
+        const match = data.output?.match(/\[[\s\S]*\]/);
+        const parsed = match ? sceneSplitSchema.safeParse(JSON.parse(match[0])) : null;
+        if (!parsed?.success) {
+          // LLM 已計費故不退點，但無法解析就不建垃圾分鏡——回明確錯誤讓使用者重試
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AI 回傳無法解析，請再試一次（點數已計）" });
+        }
+        const rows = await createScenes(parsed.data);
+        return { scenes: rows, count: rows.length, mock: false };
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        await refund(ctx.auth.user.id, project.groupId, DIRECTOR_COST_POINTS, "AI 拆分鏡失敗退回");
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "拆分鏡失敗，點數已退回，請重試" });
+      }
+    }),
 });
