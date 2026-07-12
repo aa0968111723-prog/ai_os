@@ -5,6 +5,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { PLATFORMS } from "../../shared/models";
+import { removeStoredFile } from "../services/storage";
 
 export const projectsRouter = router({
   /** 列出指定組的專案（未指定 → 所有我可見的組）；隔離由 requireGroup／成員組清單保證 */
@@ -69,6 +70,36 @@ export const projectsRouter = router({
       .orderBy(desc(schema.assets.createdAt))
       .limit(100);
   }),
+
+  /** 刪除素材（上傳者本人或組長以上）——同時清掉引用它的分鏡格與 Volume 檔案 */
+  deleteAsset: authedProcedure.input(z.object({ assetId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
+    if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
+    const role = requireGroup(ctx.auth, asset.groupId);
+    const isUploader = asset.uploadedBy === ctx.auth.user.id;
+    if (!isUploader && role === "member") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "只有上傳者本人或組長以上可以刪除素材" });
+    }
+    await db.update(schema.scenes).set({ assetId: null }).where(eq(schema.scenes.assetId, asset.id));
+    await db.delete(schema.assets).where(eq(schema.assets.id, asset.id));
+    if (asset.storagePath) await removeStoredFile(asset.storagePath);
+    return { ok: true };
+  }),
+
+  /** 素材改名（整理雜亂素材用） */
+  renameAsset: authedProcedure
+    .input(z.object({ assetId: z.string().uuid(), title: z.string().min(1, "請填名稱").max(80) }))
+    .mutation(async ({ ctx, input }) => {
+      const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
+      if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
+      requireGroup(ctx.auth, asset.groupId);
+      const [updated] = await db
+        .update(schema.assets)
+        .set({ title: input.title })
+        .where(eq(schema.assets.id, input.assetId))
+        .returning();
+      return updated;
+    }),
 
   updateWorldview: authedProcedure
     // partial patch：只送有改的欄位，伺服器端與現值合併。

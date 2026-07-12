@@ -7,6 +7,28 @@ import { getModel, endpointOf, type ProjectFormat, type ModelEntry } from "../..
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
 import { falSubmit, falStatus, isMockMode } from "../services/fal";
 import { reserveQuota, refund } from "../services/points";
+import { persistRemote, signAssetUrl } from "../services/storage";
+
+/**
+ * 成品落地（背景）：fal 的 CDN 網址會過期，完成後盡快抓回 Volume 永久保存。
+ * 失敗不影響主流程（外部網址短期內仍可用），之後輪詢會再看到未落地素材可重試。
+ */
+function persistGenerationResult(assetId: string, generationId: string, remoteUrl: string): void {
+  void (async () => {
+    const persisted = await persistRemote(remoteUrl);
+    if (!persisted) return;
+    const localUrl = `/api/assets/${assetId}/file`;
+    await db
+      .update(schema.assets)
+      .set({ storagePath: persisted.storagePath, mime: persisted.mime, sizeBytes: persisted.sizeBytes, url: localUrl })
+      .where(eq(schema.assets.id, assetId));
+    await db
+      .update(schema.generations)
+      .set({ resultUrl: localUrl, updatedAt: new Date() })
+      .where(eq(schema.generations.id, generationId));
+    console.log(`[storage] 成品已落地：asset=${assetId}（${persisted.sizeBytes}B ${persisted.mime}）`);
+  })().catch((err) => console.warn("[storage] 成品落地背景作業失敗：", err instanceof Error ? err.message : err));
+}
 
 /** 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成) */
 function buildPrompt(userPrompt: string, worldview: Worldview): string {
@@ -32,14 +54,16 @@ export const generationRouter = router({
         projectId: z.string().uuid(),
         modelId: z.string(),
         prompt: z.string().min(1, "請填提示詞"),
-        /** 來源輸入(圖生圖底圖/音訊/影片/訓練 zip 的網址;素材庫或外部 URL) */
+        /** 來源輸入(圖生圖底圖/音訊/影片/訓練 zip 的網址;外部 URL) */
         sourceUrl: z.string().url().optional(),
+        /** 素材庫來源(優先)：伺服器換成簽名短效網址,fal 才抓得到、外人不可偽造 */
+        sourceAssetId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       const model = getModel(input.modelId);
       if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "未知模型(不在註冊表)" });
-      if (model.needs && !input.sourceUrl) {
+      if (model.needs && !input.sourceUrl && !input.sourceAssetId) {
         throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
       }
 
@@ -47,9 +71,19 @@ export const generationRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
       requireGroup(ctx.auth, project.groupId); // 多組隔離
 
+      // 素材庫來源 → 簽名網址（同組檢查；本地檔或外部網址都可）
+      let sourceUrl = input.sourceUrl;
+      if (input.sourceAssetId) {
+        const [srcAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.sourceAssetId));
+        if (!srcAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到來源素材" });
+        if (srcAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "來源素材不屬於此專案的組" });
+        sourceUrl = srcAsset.storagePath ? signAssetUrl(srcAsset.id) : srcAsset.url;
+        if (!sourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "此素材沒有可用檔案" });
+      }
+
       const worldview = worldviewSchema.parse(project.worldview ?? {});
       const fullPrompt = effectivePrompt(model, input.prompt, worldview);
-      const falInput = model.input(fullPrompt, project.format as ProjectFormat, input.sourceUrl);
+      const falInput = model.input(fullPrompt, project.format as ProjectFormat, sourceUrl);
 
       const [gen] = await db
         .insert(schema.generations)
@@ -60,7 +94,7 @@ export const generationRouter = router({
           modelId: model.id,
           kind: model.kind,
           prompt: input.prompt,
-          sourceUrl: input.sourceUrl,
+          sourceUrl,
           params: falInput,
           pointsEst: model.points,
         })
@@ -126,15 +160,20 @@ export const generationRouter = router({
       const [updated] = updatedRows;
       // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄
       if (result.resultUrl && (kind === "image" || kind === "video" || kind === "audio")) {
-        await db.insert(schema.assets).values({
-          projectId: gen.projectId,
-          groupId: gen.groupId,
-          kind,
-          title: gen.prompt.slice(0, 40),
-          url: result.resultUrl,
-          isAiGenerated: true,
-          meta: { generationId: gen.id, modelId: gen.modelId },
-        });
+        const [asset] = await db
+          .insert(schema.assets)
+          .values({
+            projectId: gen.projectId,
+            groupId: gen.groupId,
+            kind,
+            title: gen.prompt.slice(0, 40),
+            url: result.resultUrl,
+            isAiGenerated: true,
+            meta: { generationId: gen.id, modelId: gen.modelId },
+          })
+          .returning();
+        // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）
+        persistGenerationResult(asset.id, gen.id, result.resultUrl);
       }
       return updated;
     }

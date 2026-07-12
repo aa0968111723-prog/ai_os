@@ -6,6 +6,8 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import multer from "multer";
+import { unlink } from "node:fs/promises";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "./routers";
 import { createContext } from "./trpc";
@@ -16,6 +18,10 @@ import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
 import { exportProjectZip } from "./services/exporter";
 import { handleMcp } from "./services/mcp";
+import {
+  ensureStorageDirs, tmpDir, adoptTmpFile, absPathOf, checkDiskSpace, verifyAssetSig,
+  isAllowedUploadMime, kindFromMime, MAX_FILE_BYTES, STORAGE_ROOT,
+} from "./services/storage";
 import { db, schema } from "./db";
 import { eq, sql } from "drizzle-orm";
 
@@ -97,6 +103,102 @@ app.get("/api/export/:projectId", async (req, res) => {
   }
 });
 
+// ── 真實儲存層：上傳素材＋檔案服務（Volume /data） ──────────────
+
+const upload = multer({
+  storage: multer.diskStorage({ destination: (_req, _file, cb) => cb(null, tmpDir()) }),
+  limits: { fileSize: MAX_FILE_BYTES, files: 1 },
+});
+
+/** 上傳素材（multipart: file + projectId [+ title]）→ 入素材庫、回傳 asset */
+app.post("/api/upload", upload.single("file"), async (req, res) => {
+  const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) { await cleanup(); return res.status(401).json({ error: "請先登入" }); }
+    if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
+
+    const projectId = String(req.body?.projectId ?? "");
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+    if (!project) { await cleanup(); return res.status(404).json({ error: "找不到專案" }); }
+    if (!auth.groups.some((g) => g.groupId === project.groupId)) {
+      await cleanup(); return res.status(403).json({ error: "你不屬於這個組" });
+    }
+
+    const mime = req.file.mimetype.split(";")[0].trim().toLowerCase();
+    if (!isAllowedUploadMime(mime)) {
+      await cleanup();
+      return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：圖片/影片/音訊/zip/文字/PDF` });
+    }
+    const guard = await checkDiskSpace(req.file.size);
+    if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
+
+    const { storagePath, sizeBytes } = await adoptTmpFile(req.file.path, mime);
+    const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8"); // multer 檔名編碼修正
+    const title = String(req.body?.title ?? "").trim() || originalName || "上傳素材";
+    const [asset] = await db
+      .insert(schema.assets)
+      .values({
+        projectId: project.id,
+        groupId: project.groupId,
+        kind: kindFromMime(mime),
+        title: title.slice(0, 80),
+        url: "", // 先佔位，下一行以 id 回填服務網址
+        isAiGenerated: false,
+        storagePath, mime, sizeBytes,
+        uploadedBy: auth.user.id,
+        meta: { originalName },
+      })
+      .returning();
+    const [updated] = await db
+      .update(schema.assets)
+      .set({ url: `/api/assets/${asset.id}/file` })
+      .where(eq(schema.assets.id, asset.id))
+      .returning();
+    res.json({ ok: true, asset: updated });
+  } catch (err) {
+    await cleanup();
+    console.error("[upload]", err);
+    if (!res.headersSent) res.status(500).json({ error: "上傳失敗，請稍後再試" });
+  }
+});
+// multer 錯誤（如超過大小上限）轉成友善中文訊息
+app.use("/api/upload", (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    const msg = err.code === "LIMIT_FILE_SIZE" ? `檔案太大（上限 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB）` : `上傳失敗：${err.code}`;
+    return res.status(413).json({ error: msg });
+  }
+  next(err);
+});
+
+/** 素材檔案服務：登入＋組隔離；或帶簽名（給 fal 抓來源輸入用，短效） */
+app.get("/api/assets/:id/file", async (req, res) => {
+  try {
+    const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, req.params.id));
+    if (!asset) return res.status(404).json({ error: "找不到素材" });
+
+    const signed = verifyAssetSig(asset.id, req.query.exp as string | undefined, req.query.sig as string | undefined);
+    if (!signed) {
+      const auth = await resolveSession(req);
+      if (!auth) return res.status(401).json({ error: "請先登入" });
+      if (!auth.groups.some((g) => g.groupId === asset.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
+    }
+
+    if (!asset.storagePath) {
+      if (asset.url && /^https?:\/\//.test(asset.url)) return res.redirect(302, asset.url); // 尚未落地→轉外部網址
+      return res.status(404).json({ error: "此素材沒有可用的檔案" });
+    }
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    // sendFile 內建 Range 支援（影片/音訊拖進度條需要）
+    res.sendFile(absPathOf(asset.storagePath), {
+      headers: { "Content-Type": asset.mime ?? "application/octet-stream" },
+    });
+  } catch (err) {
+    console.error("[assets:file]", err);
+    if (!res.headersSent) res.status(500).json({ error: "讀取素材失敗" });
+  }
+});
+
 // MCP 伺服器介面（設 MCP_API_KEY 啟用；供外部 AI 客戶端操作）
 app.post("/api/mcp", handleMcp);
 
@@ -153,6 +255,15 @@ app.get("/api/selftest", async (req, res) => {
     await archive.finalize();
     return "archiver OK";
   });
+  await run("儲存層(Volume)", async () => {
+    const { saveBuffer, removeStoredFile } = await import("./services/storage");
+    const guard = await checkDiskSpace(1024);
+    if (guard) throw new Error(guard);
+    const probe = await saveBuffer(Buffer.from("selftest"), "text/plain");
+    await removeStoredFile(probe.storagePath);
+    const volume = STORAGE_ROOT === "/data" ? "Volume /data" : `本機 ${STORAGE_ROOT}`;
+    return `${volume} 可讀寫`;
+  });
   const allOk = checks.every((c) => c.ok);
   res.status(allOk ? 200 : 500).json({ ok: allOk, mockMode: isMockMode(), checks, time: new Date().toISOString() });
 });
@@ -170,6 +281,12 @@ if (isProd) {
 
 app.listen(port, () => {
   console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${isMockMode() ? "假生成模式" : "真實模式"}）`);
+  try {
+    ensureStorageDirs();
+    console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（Railway Volume）" : "（本機模式）"}`);
+  } catch (err) {
+    console.warn("[server] 儲存目錄建立失敗（上傳/落地將不可用）：", err instanceof Error ? err.message : err);
+  }
   if (isProd && process.env.AUTH_MODE === "dev") {
     console.warn("[server] ⚠⚠⚠ 正式環境偵測到 AUTH_MODE=dev（無認證後門）——已自動忽略不生效；請到 Variables 移除此變數。");
   }

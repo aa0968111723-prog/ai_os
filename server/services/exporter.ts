@@ -3,11 +3,13 @@
  * 業界標準編號資料夾：01_視頻素材／03_圖像／05_文件（有內容才建）；不含時間軸檔。
  */
 import { ZipArchive } from "archiver";
+import { readFile } from "node:fs/promises";
 import { proxyFetch } from "./http";
 import type { Response } from "express";
 import { asc, eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
+import { absPathOf, extFromMime } from "./storage";
 
 function safeName(value: string): string {
   return value.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) || "未命名";
@@ -66,24 +68,33 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
     lines.push(
       `| ${i + 1} | ${scene.title} | ${scene.durationSec}s | ${asset?.kind ?? "—"} | ${gen?.prompt ?? "—"} | ${gen?.modelId ?? "—"} |`,
     );
-    if (!asset?.url) continue;
+    if (!asset) continue;
     try {
-      const fileRes = await proxyFetch(asset.url);
-      if (!fileRes.ok) continue;
-      const buffer = Buffer.from(await fileRes.arrayBuffer());
+      // 已落地的素材直接讀 Volume（快、不吃外網、網址過期也不怕）；否則抓外部網址
+      let buffer: Buffer;
+      if (asset.storagePath) {
+        buffer = await readFile(absPathOf(asset.storagePath));
+      } else if (asset.url && /^https?:\/\//.test(asset.url)) {
+        const fileRes = await proxyFetch(asset.url);
+        if (!fileRes.ok) continue;
+        buffer = Buffer.from(await fileRes.arrayBuffer());
+      } else {
+        continue;
+      }
       const num = String(i + 1).padStart(2, "0");
+      const extOf = (fallback: string) => (asset.mime && extFromMime(asset.mime)) || fallback;
       if (asset.kind === "video") {
         videoIdx += 1;
-        archive.append(buffer, { name: `01_視頻素材/${num}_${safeName(scene.title)}.mp4` });
+        archive.append(buffer, { name: `01_視頻素材/${num}_${safeName(scene.title)}${extOf(".mp4")}` });
       } else if (asset.kind === "audio") {
-        archive.append(buffer, { name: `02_音訊/${num}_${safeName(scene.title)}.wav` });
+        archive.append(buffer, { name: `02_音訊/${num}_${safeName(scene.title)}${extOf(".wav")}` });
       } else {
         imageIdx += 1;
-        archive.append(buffer, { name: `03_圖像/${num}_${safeName(scene.title)}.jpg` });
+        archive.append(buffer, { name: `03_圖像/${num}_${safeName(scene.title)}${extOf(".jpg")}` });
       }
     } catch (err) {
-      console.warn(`[export] 素材下載失敗 ${asset.url}:`, err instanceof Error ? err.message : err);
-      lines.push(`> ⚠ 「${scene.title}」素材下載失敗，未入包（可於系統內重新生成）`);
+      console.warn(`[export] 素材讀取失敗 ${asset.url}:`, err instanceof Error ? err.message : err);
+      lines.push(`> ⚠ 「${scene.title}」素材讀取失敗，未入包（可於系統內重新生成）`);
     }
   }
 

@@ -143,6 +143,12 @@ export const assets = pgTable("assets", {
   tags: jsonb("tags").notNull().default([]),
   isAiGenerated: boolean("is_ai_generated").notNull().default(false),
   meta: jsonb("meta").notNull().default({}),
+  /** 本地儲存相對路徑（Volume /data/assets 下；null＝僅外部網址） */
+  storagePath: text("storage_path"),
+  mime: text("mime"),
+  sizeBytes: integer("size_bytes"),
+  /** 手動上傳者（AI 生成的為 null） */
+  uploadedBy: uuid("uploaded_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

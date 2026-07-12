@@ -7,6 +7,7 @@ import { DirectorCard } from "../components/DirectorCard";
 import { MessagePanel } from "../components/MessagePanel";
 import { ModelPicker, type PickedModel } from "../components/ModelPicker";
 import { WorkflowCard } from "../components/WorkflowCard";
+import { AssetLibrary } from "../components/AssetLibrary";
 
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
 export function ProjectPage({ id }: { id: string }) {
@@ -19,6 +20,8 @@ export function ProjectPage({ id }: { id: string }) {
 
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<PickedModel | null>(null);
+  /** 來源：優先素材庫（伺服器簽名網址，永久有效）；也可貼外部網址 */
+  const [sourceAsset, setSourceAsset] = useState<{ id: string; title: string; kind: string } | null>(null);
   const [sourceUrl, setSourceUrl] = useState("");
   const assets = trpc.projects.assets.useQuery({ projectId: id });
   const submit = trpc.generation.submit.useMutation({
@@ -92,24 +95,43 @@ export function ProjectPage({ id }: { id: string }) {
           {/* AI 導演建議 */}
           <DirectorCard projectId={id} onUse={(text) => setPrompt(text)} />
 
+          {/* 素材庫：上傳參考素材（提案核心「把素材丟進去」的入口）＋生成成品自動入庫 */}
+          <AssetLibrary projectId={id} onPickSource={(a) => { setSourceAsset(a); setSourceUrl(""); }} />
+
           {/* 生成台（11 類 × 旗艦/經濟/最低成本） */}
           <section className="card">
             <h2>創作生成</h2>
             <ModelPicker onChange={setModel} />
             {model?.needs && (
               <>
-                <label>{model.sourceHint ?? "來源網址"}</label>
+                <label>{model.sourceHint ?? "來源素材"}</label>
                 {(assets.data?.length ?? 0) > 0 && (
-                  <select value="" onChange={(e) => e.target.value && setSourceUrl(e.target.value)}>
+                  <select
+                    value={sourceAsset?.id ?? ""}
+                    onChange={(e) => {
+                      const picked = assets.data!.find((a) => a.id === e.target.value);
+                      setSourceAsset(picked ? { id: picked.id, title: picked.title, kind: picked.kind } : null);
+                      if (picked) setSourceUrl("");
+                    }}
+                  >
                     <option value="">從本專案素材庫選…</option>
                     {assets.data!.map((a) => (
-                      <option key={a.id} value={a.url}>
+                      <option key={a.id} value={a.id}>
                         [{a.kind}] {a.title}
                       </option>
                     ))}
                   </select>
                 )}
-                <input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://…（或從上方素材庫選）" />
+                {sourceAsset ? (
+                  <p className="hint">
+                    來源：{sourceAsset.title}（素材庫）
+                    <button style={{ marginLeft: 8, padding: "1px 8px", fontSize: 11 }} onClick={() => setSourceAsset(null)}>
+                      改用網址
+                    </button>
+                  </p>
+                ) : (
+                  <input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://…（或從上方素材庫選）" />
+                )}
               </>
             )}
             <label>{model?.kind === "audio" && model.needs == null ? "要唸的文字/音樂描述" : "提示詞（世界觀會自動帶入，不必重講背景）"}</label>
@@ -117,14 +139,15 @@ export function ProjectPage({ id }: { id: string }) {
             <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
               <button
                 className="primary"
-                disabled={!prompt.trim() || !model || (model.needs != null && !sourceUrl.trim()) || submit.isPending}
+                disabled={!prompt.trim() || !model || (model.needs != null && !sourceAsset && !sourceUrl.trim()) || submit.isPending}
                 onClick={() =>
                   model &&
                   submit.mutate({
                     projectId: id,
                     modelId: model.id,
                     prompt: prompt.trim(),
-                    sourceUrl: model.needs && sourceUrl.trim() ? sourceUrl.trim() : undefined,
+                    sourceAssetId: model.needs && sourceAsset ? sourceAsset.id : undefined,
+                    sourceUrl: model.needs && !sourceAsset && sourceUrl.trim() ? sourceUrl.trim() : undefined,
                   })
                 }
               >
