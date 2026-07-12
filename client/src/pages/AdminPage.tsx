@@ -46,14 +46,23 @@ function GroupQuotaRow({ group }: { group: { id: string; name: string } }) {
 /** 系統自檢卡：一鍵驗證資料庫/目錄/點數/邀請/生成模式/交付引擎 */
 function SelfTestCard() {
   const [result, setResult] = useState<{ ok: boolean; checks: Array<{ name: string; ok: boolean; note: string }> } | null>(null);
+  const [errMsg, setErrMsg] = useState("");
   const [running, setRunning] = useState(false);
   const run = async () => {
     setRunning(true);
+    setErrMsg("");
+    setResult(null);
     try {
       const res = await fetch("/api/selftest", { credentials: "include" });
-      setResult(await res.json());
+      const data = await res.json().catch(() => ({}));
+      // 403（非超管）或任何非 2xx 回應沒有 checks 陣列——直接 .map 會整頁崩掉，先分流
+      if (!res.ok || !Array.isArray(data.checks)) {
+        setErrMsg(data.error ?? (res.status === 403 ? "系統自檢需要超管帳號" : `自檢失敗（HTTP ${res.status}）`));
+        return;
+      }
+      setResult(data);
     } catch (err) {
-      setResult({ ok: false, checks: [{ name: "連線", ok: false, note: String(err) }] });
+      setErrMsg(`連線失敗：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setRunning(false);
     }
@@ -63,6 +72,7 @@ function SelfTestCard() {
       <h2>系統自檢</h2>
       <p className="hint">部署後按一下，全部 ✅ 才算就緒（資料庫/模型目錄/點數/邀請/生成/交付）。</p>
       <button className="primary" disabled={running} onClick={run}>{running ? "檢查中…" : "跑系統自檢"}</button>
+      {errMsg && <p className="error" role="alert" style={{ marginTop: 10 }}>{errMsg}</p>}
       {result && (
         <div style={{ marginTop: 10 }}>
           {result.checks.map((c) => (
@@ -88,6 +98,8 @@ export function AdminPage() {
   const settings = trpc.quota.getSettings.useQuery();
   const saveSettings = trpc.quota.updateSettings.useMutation({ onSuccess: () => { utils.quota.getSettings.invalidate(); utils.quota.my.invalidate(); } });
   const feedback = trpc.feedback.list.useQuery();
+  const me = trpc.auth.me.useQuery();
+  const isSuperAdmin = !!me.data?.user.isSuperAdmin;
 
   // 全域點數兩欄用 ref 讀「畫面上的即時輸入」而非可能過期的快取——
   // 舊版 onBlur 拿 settings.data 舊值補另一欄，連續編輯兩欄會用舊值蓋回剛存的欄位
@@ -173,10 +185,20 @@ export function AdminPage() {
           {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值 */}
           {settings.data ? (
             <>
-              <label>總預算點數（全系統）</label>
-              <input ref={totalBudgetRef} type="number" min={0} defaultValue={settings.data.totalBudgetPoints ?? ""} placeholder="不限" onBlur={saveBudget} />
+              <label>總預算點數（全系統）{!isSuperAdmin && <span className="hint">・限超管調整</span>}</label>
+              {/* 非超管改總預算會被後端擋（FORBIDDEN）——直接 disable 並說明，別讓人白填才報錯 */}
+              <input
+                ref={totalBudgetRef}
+                type="number"
+                min={0}
+                defaultValue={settings.data.totalBudgetPoints ?? ""}
+                placeholder="不限"
+                onBlur={saveBudget}
+                disabled={!isSuperAdmin}
+                title={isSuperAdmin ? undefined : "只有超級管理員能調整全系統總預算"}
+              />
               <label>預設每人每週上限</label>
-              <input ref={weeklyRef} type="number" min={0} defaultValue={settings.data.defaultWeeklyPoints ?? ""} placeholder="不限" onBlur={saveBudget} />
+              <input ref={weeklyRef} type="number" min={0} defaultValue={settings.data.defaultWeeklyPoints ?? ""} placeholder="不限" onBlur={saveBudget} disabled={!isSuperAdmin} />
             </>
           ) : (
             <p className="hint">設定載入中…</p>
