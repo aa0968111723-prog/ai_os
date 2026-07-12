@@ -1,12 +1,12 @@
-# AI Director OS — Railway 部署（node:20-alpine 多段建置，沿用驗證過的模式、無 MySQL 包袱）
-FROM node:20-alpine AS builder
+# AI Director OS — Railway 部署（node:22-alpine 多段建置，沿用驗證過的模式、無 MySQL 包袱）
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/node_modules ./node_modules
