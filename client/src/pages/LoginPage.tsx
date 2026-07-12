@@ -24,7 +24,7 @@ export function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-            onKeyDown={(e) => e.key === "Enter" && email && password && login.mutate({ email, password })}
+            onKeyDown={(e) => e.key === "Enter" && email && password && !login.isPending && login.mutate({ email, password })}
           />
         </div>
         <div style={{ marginTop: 18 }}>
