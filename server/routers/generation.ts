@@ -96,7 +96,7 @@ async function sweepStaleGenerations(projectId: string): Promise<void> {
  */
 const SOURCE_INCOMPAT: Record<string, string[]> = {
   image: ["audio"],
-  audio: ["image", "video"],
+  audio: ["image"], // 影片放行：Whisper/Scribe 類轉錄端點普遍接受影片容器（自動抽音軌）
   video: ["audio"],
 };
 const SOURCE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件", zip: "zip 壓縮包" };

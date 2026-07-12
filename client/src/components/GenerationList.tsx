@@ -37,9 +37,11 @@ export function GenerationList({ projectId }: { projectId: string }) {
   const list = trpc.generation.listByProject.useQuery(
     { projectId },
     {
-      // 沒有進行中的生成就停輪詢（省 API）；新送出／重試都會 invalidate 喚醒
+      // 有進行中的生成 8 秒、閒置降到 45 秒。閒置不能完全停：後端無背景排程，生成狀態
+      // 推進全靠「任何一個開著專案頁的瀏覽器」輪詢 status——完全停輪會讓組員/MCP 送出的
+      // 生成在本分頁永不出現、也沒人推進它，30 分鐘後被陳屍清掃誤判失敗退點
       refetchInterval: (query) =>
-        query.state.data?.some((g) => g.status === "queued" || g.status === "running") ? 8000 : false,
+        query.state.data?.some((g) => g.status === "queued" || g.status === "running") ? 8000 : 45_000,
       refetchIntervalInBackground: true,
     },
   );
@@ -55,14 +57,14 @@ export function GenerationList({ projectId }: { projectId: string }) {
     },
   });
   const retry = trpc.generation.submit.useMutation({
-    onSuccess: () => {
+    // fal submit 失敗時伺服器也已寫入一筆 failed 列——成功失敗都要刷新列表與點數
+    onSettled: () => {
       utils.generation.listByProject.invalidate({ projectId });
       utils.quota.my.invalidate();
     },
   });
   const addSceneError = addScene.error?.message;
-  // 生成紀錄沒存 assetId，但素材的 url 與生成的 resultUrl 在落地前後都同步相等——以此比對「已加入」
-  const inScenes = (resultUrl: string | null) => !!resultUrl && !!scenes.data?.some((s) => s.assetUrl === resultUrl);
+  const inScenes = (genId: string) => !!scenes.data?.some((s) => s.generationId === genId);
   const copyText = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -126,7 +128,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
             <span className={`pill ${g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
             {g.status === "done" && g.kind !== "text" && (
-              inScenes(g.resultUrl) ? (
+              inScenes(g.id) ? (
                 <button style={{ padding: "4px 12px", fontSize: 12 }} disabled>已加入</button>
               ) : (
                 <button style={{ padding: "4px 12px", fontSize: 12 }} disabled={addScene.isPending}
@@ -140,7 +142,13 @@ export function GenerationList({ projectId }: { projectId: string }) {
                 onClick={() => {
                   const cost = g.pointsEst > 0 ? `會再扣 ${g.pointsEst} 點` : "會再扣點";
                   if (!window.confirm(`以相同設定重試${cost}，確定要重試嗎？`)) return;
-                  retry.mutate({ projectId, modelId: g.modelId, prompt: g.prompt, sourceUrl: g.sourceUrl ?? undefined });
+                  // 素材庫來源存的是 48 小時簽名網址——過期後原樣重送必敗。
+                  // 從網址取回 assetId 改走 sourceAssetId，讓伺服器重新簽名（順帶重過相容性守門）
+                  const assetId = g.sourceUrl?.match(/\/api\/assets\/([0-9a-f-]{36})\/file/)?.[1];
+                  retry.mutate({
+                    projectId, modelId: g.modelId, prompt: g.prompt,
+                    ...(assetId ? { sourceAssetId: assetId } : { sourceUrl: g.sourceUrl ?? undefined }),
+                  });
                 }}>
                 以相同設定重試
               </button>

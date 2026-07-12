@@ -9,6 +9,8 @@ export function MessagePanel({ projectId }: { projectId: string }) {
   const post = trpc.messages.post.useMutation({
     onSuccess: () => {
       setBody("");
+      // 自己送出視同回到底部：就算正往上翻舊留言，也要看見自己的留言已送出
+      stickToBottom.current = true;
       utils.messages.list.invalidate({ projectId });
     },
   });

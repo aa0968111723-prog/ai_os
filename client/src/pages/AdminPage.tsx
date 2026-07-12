@@ -84,10 +84,12 @@ function GroupQuotaRow({ group }: { group: { id: string; name: string } }) {
  * 為什麼獨立成元件：每位成員要有自己的 isPending/error/臨時密碼狀態，
  * 共用一個 mutation 會讓 A 成員的錯誤與密碼顯示到 B 成員旁邊。
  */
-function MemberChip({ groupId, groupName, member }: {
+function MemberChip({ groupId, groupName, member, canResetPassword }: {
   groupId: string;
   groupName: string;
   member: { id?: string; name?: string; role?: "leader" | "member" };
+  /** 後端會擋「超管/他團管理員」——注定失敗的重設鈕直接不畫，別讓管理員按了才吃 FORBIDDEN */
+  canResetPassword: boolean;
 }) {
   const utils = trpc.useUtils();
   const [tempPassword, setTempPassword] = useState("");
@@ -125,16 +127,18 @@ function MemberChip({ groupId, groupName, member }: {
         >
           移出組
         </button>
-        <button
-          style={btn}
-          disabled={pending}
-          onClick={() =>
-            window.confirm(`重設 ${member.name} 的密碼？他會立刻被登出，要用新的臨時密碼重新登入。`) &&
-            resetPassword.mutate({ userId })
-          }
-        >
-          重設密碼
-        </button>
+        {canResetPassword && (
+          <button
+            style={btn}
+            disabled={pending}
+            onClick={() =>
+              window.confirm(`重設 ${member.name} 的密碼？他會立刻被登出，要用新的臨時密碼重新登入。`) &&
+              resetPassword.mutate({ userId })
+            }
+          >
+            重設密碼
+          </button>
+        )}
       </div>
       {actionError && <p className="error">{actionError.message}</p>}
       {tempPassword && (
@@ -325,7 +329,19 @@ export function AdminPage() {
                   {g.members.length === 0 ? (
                     <span className="hint">（還沒有成員）</span>
                   ) : (
-                    g.members.map((m) => <MemberChip key={m.id} groupId={g.id} groupName={g.name} member={m} />)
+                    g.members.map((m) => (
+                      <MemberChip
+                        key={m.id}
+                        groupId={g.id}
+                        groupName={g.name}
+                        member={m}
+                        // 與後端權限階梯一致：超管重設任何人；團隊管理員不能重設超管與其他管理員（自己除外）
+                        canResetPassword={
+                          isSuperAdmin ||
+                          (!m.isSuperAdmin && (m.id === me.data?.user.id || !team.admins.some((a) => a?.id === m.id)))
+                        }
+                      />
+                    ))
                   )}
                 </div>
               ))}
@@ -376,7 +392,17 @@ export function AdminPage() {
           <label htmlFor="invite-email">Email</label>
           <input id="invite-email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="partner@example.com" />
           <label htmlFor="invite-team">團隊</label>
-          <select id="invite-team" value={selectedTeam?.id ?? ""} onChange={(e) => { setInviteTeamId(e.target.value); setGroupId(""); }}>
+          <select
+            id="invite-team"
+            value={selectedTeam?.id ?? ""}
+            onChange={(e) => {
+              // 換團隊時角色一併歸零：殘留的「組長/團隊管理員」會被靜默帶進下一筆邀請
+              setInviteTeamId(e.target.value);
+              setGroupId("");
+              setGroupRole("member");
+              setTeamRole("member");
+            }}
+          >
             {teams.map((t) => (
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
@@ -388,7 +414,15 @@ export function AdminPage() {
           </select>
           <p className="hint" style={{ margin: "4px 0 0" }}>團隊管理員能管理整個團隊的組別、成員與額度，權限較大，請謹慎授予。</p>
           <label htmlFor="invite-group">組別</label>
-          <select id="invite-group" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+          <select
+            id="invite-group"
+            value={groupId}
+            onChange={(e) => {
+              setGroupId(e.target.value);
+              // 改回「先不入組」時清掉殘留的「組長」選擇（select 只是 disabled，state 仍在）
+              if (!e.target.value) setGroupRole("member");
+            }}
+          >
             <option value="">（先不入組）</option>
             {selectedTeam?.groups.map((g) => (
               <option key={g.id} value={g.id}>{g.name}</option>

@@ -38,7 +38,12 @@ export function AssetLibrary({
 
   /** 多檔逐一上傳：一檔失敗不擋後面的檔，全部跑完再彙整成敗 */
   const doUpload = async (files: FileList | null) => {
-    if (uploading || !files?.length) return;
+    if (uploading) {
+      // 上一批還在跑時新拖入的檔案不能靜默吞掉——講清楚，免得使用者以為排進去了
+      if (files?.length) setUploadError("上一批還在上傳——請等它跑完再加新檔");
+      return;
+    }
+    if (!files?.length) return;
     const list = Array.from(files);
     setUploading(true);
     setUploadError("");

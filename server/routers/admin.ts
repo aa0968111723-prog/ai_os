@@ -26,7 +26,10 @@ export const adminRouter = router({
     const groups = await db.select().from(schema.groups);
     const teamMembers = await db.select().from(schema.teamMembers);
     const groupMembers = await db.select().from(schema.groupMembers);
-    const users = await db.select({ id: schema.users.id, name: schema.users.name, email: schema.users.email }).from(schema.users);
+    // isSuperAdmin 給前端隱藏「重設密碼」等注定被後端擋下的操作（權限判斷仍以後端為準）
+    const users = await db
+      .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, isSuperAdmin: schema.users.isSuperAdmin })
+      .from(schema.users);
 
     const visible = ctx.auth.user.isSuperAdmin ? teams : teams.filter((t) => ctx.auth.adminTeamIds.includes(t.id));
     const userOf = (id: string) => users.find((u) => u.id === id);
@@ -134,16 +137,18 @@ export const adminRouter = router({
   /** 重設成員密碼：伺服器自產臨時密碼、砍掉全部 session 強制重登。臨時密碼只在這次回應出現、不落資料庫與 log */
   resetMemberPassword: adminProcedure.input(z.object({ userId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [target] = await db.select().from(schema.users).where(eq(schema.users.id, input.userId));
-    if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這位成員" });
     if (!ctx.auth.user.isSuperAdmin) {
-      // 權限階梯：超管可重設任何人；團隊管理員只能重設「自己管的團隊」裡的一般成員
-      if (target.isSuperAdmin) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "超級管理員的密碼無法在這裡重設，請聯絡超級管理員處理" });
-      }
+      // 權限階梯：超管可重設任何人；團隊管理員只能重設「自己管的團隊」裡的一般成員。
+      // 所有拒絕情況（不存在/超管/他團管理員/不在範圍）共用同一句訊息——
+      // 不同文案會讓人拿任意 UUID 連打探出「這個 id 是不是超管/管理員」，細分原因只進伺服器 log
+      const deny = (reason: string): never => {
+        console.warn(`[audit] resetMemberPassword 拒絕：caller=${ctx.auth.user.id} target=${input.userId} reason=${reason}`);
+        throw new TRPCError({ code: "FORBIDDEN", message: "這位成員的密碼無法由你重設——請聯絡超級管理員" });
+      };
+      if (!target) deny("target 不存在");
+      if (target.isSuperAdmin) deny("target 是超管");
       const targetTeamRows = await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.userId, target.id));
-      if (target.id !== ctx.auth.user.id && targetTeamRows.some((r) => r.role === "admin")) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "其他團隊管理員的密碼請找超級管理員重設" });
-      }
+      if (target.id !== ctx.auth.user.id && targetTeamRows.some((r) => r.role === "admin")) deny("target 是團隊管理員");
       // 管理範圍：目標直接在我管的團隊（team_members），或掛在該團隊任一組（group_members）
       let inScope = targetTeamRows.some((r) => ctx.auth.adminTeamIds.includes(r.teamId));
       if (!inScope) {
@@ -156,8 +161,11 @@ export const adminRouter = router({
           inScope = targetGroups.some((g) => ctx.auth.adminTeamIds.includes(g.teamId));
         }
       }
-      if (!inScope) throw new TRPCError({ code: "FORBIDDEN", message: "只能重設自己團隊裡成員的密碼" });
+      if (!inScope) deny("target 不在管理範圍");
     }
+    if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這位成員" });
+    // 稽核：誰在什麼時候重設了誰（臨時密碼本身不落 log）
+    console.log(`[audit] resetMemberPassword：caller=${ctx.auth.user.id} target=${target.id}`);
     const tempPassword = generateTempPassword();
     await db.update(schema.users).set({ passwordHash: await hashPassword(tempPassword) }).where(eq(schema.users.id, target.id));
     // 全 session 作廢：舊登入立刻失效，只有拿到臨時密碼的本人能重新登入

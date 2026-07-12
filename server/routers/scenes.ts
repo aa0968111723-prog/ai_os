@@ -27,6 +27,8 @@ export const scenesRouter = router({
         voiceover: schema.scenes.voiceover,
         assetUrl: schema.assets.url,
         assetKind: schema.assets.kind,
+        // 來源生成 id：前端「已加入分鏡」用穩定鍵比對（assetUrl 會在成品落地時被改寫，比 URL 會誤判）
+        generationId: sql<string | null>`${schema.assets.meta} ->> 'generationId'`,
       })
       .from(schema.scenes)
       .leftJoin(schema.assets, eq(schema.scenes.assetId, schema.assets.id))
