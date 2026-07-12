@@ -187,6 +187,42 @@ export async function attachExistingUser(input: {
   }
 }
 
+/**
+ * 邀請預覽（不消耗 token）：讓落地頁在填資料前就知道「這個連結有效嗎、要加入哪個組、給誰的」。
+ * 只回可安全顯示的資訊（收件 email 是本人的、由持有 token 證明）；查不到/過期/用過都回清楚原因。
+ */
+export async function getInvitePreview(token: string): Promise<{
+  valid: boolean;
+  reason?: string;
+  email?: string;
+  teamName?: string;
+  groupName?: string;
+  teamRole?: "admin" | "member";
+  groupRole?: "leader" | "member";
+  alreadyHasAccount?: boolean;
+}> {
+  const [invite] = await db.select().from(schema.invites).where(eq(schema.invites.token, sha256(token)));
+  if (!invite) return { valid: false, reason: "邀請連結無效——請確認連結完整，或向管理員索取新連結" };
+  if (invite.acceptedAt) return { valid: false, reason: "這個邀請連結已經用過了——如果你已建立帳號，請直接登入" };
+  if (invite.expiresAt <= new Date()) return { valid: false, reason: "邀請連結已過期（超過 72 小時），請向管理員索取新連結" };
+  const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, invite.teamId));
+  let groupName: string | undefined;
+  if (invite.groupId) {
+    const [g] = await db.select().from(schema.groups).where(eq(schema.groups.id, invite.groupId));
+    groupName = g?.name;
+  }
+  const [existing] = await db.select().from(schema.users).where(eq(schema.users.email, invite.email));
+  return {
+    valid: true,
+    email: invite.email,
+    teamName: team?.name,
+    groupName,
+    teamRole: invite.teamRole,
+    groupRole: invite.groupRole,
+    alreadyHasAccount: !!existing,
+  };
+}
+
 export async function acceptInvite(token: string, name: string, password: string): Promise<{ userId: string }> {
   const [invite] = await db
     .select()

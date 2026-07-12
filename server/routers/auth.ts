@@ -13,12 +13,18 @@ import {
   checkLoginRate,
   clearLoginRate,
   acceptInvite,
+  getInvitePreview,
   loadAuthState,
 } from "../services/auth";
 
 export const authRouter = router({
   /** 目前登入狀態（未登入回 null，前端據此顯示登入頁） */
   me: publicProcedure.query(({ ctx }) => ctx.auth),
+
+  /** 邀請預覽（不消耗 token）：落地頁填資料前先確認連結有效、要加入哪個組 */
+  invitePreview: publicProcedure
+    .input(z.object({ token: z.string().min(10) }))
+    .query(async ({ input }) => getInvitePreview(input.token)),
 
   login: publicProcedure
     .input(z.object({ email: z.string().email("email 格式不對"), password: z.string().min(1, "請填密碼") }))
