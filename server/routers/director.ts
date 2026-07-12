@@ -88,7 +88,7 @@ export const directorRouter = router({
 
     const sys = `你是佛教基金會的影片導演助理。依專案背景與素材給 3 個分鏡提示詞建議（繁體中文）。
 專案：${project.title}（${project.kind}，${project.format}）
-一句話故事：${wv.logline}｜關鍵訊息：${wv.message}｜調性：${wv.tones.join("、")}
+一句話故事：${wv.logline}｜關鍵訊息：${wv.message}｜調性：${wv.tones.join("、")}${wv.themes.length ? `｜訊息主軸（敘事弧）：${wv.themes.join("、")}` : ""}
 禁忌：${wv.taboos.join("；")}
 ${knowledge ? `\n【專案素材（開示／見證／腳本，請據此發想，忠於原意）】\n${knowledge}\n` : ""}
 只回 JSON 陣列：[{"title":"...","prompt":"..."}] 共 3 筆，prompt 為可直接用於圖像/影片生成的場景描述。`;
@@ -177,7 +177,7 @@ ${knowledge ? `\n【專案素材（開示／見證／腳本，請據此發想，
 
       const sys = `你是佛教基金會的影片導演。把下面的腳本切成一幕一幕的分鏡（繁體中文），每幕給：
 title（幕名，簡短）、durationSec（秒數，3-8）、prompt（可直接用於圖像/影片生成的畫面描述，融入調性「${wv.tones.join("、")}」與視覺風格「${wv.styles.join("、")}」）、voiceover（這一幕的旁白／配音詞，取自腳本原句，忠於原意）。
-專案：${project.title}（${project.kind}，${project.format}）｜關鍵訊息：${wv.message}｜禁忌：${wv.taboos.join("；")}
+專案：${project.title}（${project.kind}，${project.format}）｜關鍵訊息：${wv.message}${wv.themes.length ? `｜訊息主軸（敘事弧，分鏡順序應呼應）：${wv.themes.join("、")}` : ""}｜禁忌：${wv.taboos.join("；")}
 腳本：
 ${script.slice(0, 12_000)}
 
