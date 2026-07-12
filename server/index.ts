@@ -234,7 +234,7 @@ app.get("/api/selftest", async (req, res) => {
       sql`select count(*)::int as n from information_schema.tables where table_schema='public'`,
     )) as unknown as { rows: Array<{ n: number }> };
     const n = result.rows?.[0]?.n ?? 0;
-    if (n < 19) throw new Error(`只有 ${n} 張表(需 ≥19)——建表未完成`);
+    if (n < 20) throw new Error(`只有 ${n} 張表(需 ≥20)——建表未完成`);
     return `${n} 張`;
   });
   await run("模型目錄", async () => {

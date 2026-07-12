@@ -11,6 +11,7 @@ import { AssetLibrary } from "../components/AssetLibrary";
 import { KnowledgeBase } from "../components/KnowledgeBase";
 import { ScriptSplitCard } from "../components/ScriptSplitCard";
 import { CharacterCards } from "../components/CharacterCards";
+import { PromptLibrary } from "../components/PromptLibrary";
 
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
 export function ProjectPage({ id }: { id: string }) {
@@ -40,9 +41,16 @@ export function ProjectPage({ id }: { id: string }) {
   const [charIds, setCharIds] = useState<string[]>([]);
   const toggleChar = (cid: string) => setCharIds((prev) => (prev.includes(cid) ? prev.filter((x) => x !== cid) : [...prev, cid]));
   const assets = trpc.projects.assets.useQuery({ projectId: id });
+  /** 生成確認彈窗：先估點數、使用者點頭才真的送出、扣點 */
+  const [confirming, setConfirming] = useState(false);
+  const quota = trpc.quota.my.useQuery(undefined, { enabled: confirming });
+  const savePrompt = trpc.prompts.save.useMutation({ onSuccess: () => utils.prompts.list.invalidate({ projectId: id }) });
   const submit = trpc.generation.submit.useMutation({
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
+      // 成功生成的提示詞自動入庫（簡報「打過的咒語自動存起來」）
+      savePrompt.mutate({ projectId: id, text: vars.prompt });
       setPrompt("");
+      setConfirming(false);
       utils.generation.listByProject.invalidate({ projectId: id });
       utils.quota.my.invalidate();
     },
@@ -165,25 +173,60 @@ export function ProjectPage({ id }: { id: string }) {
               <button
                 className="primary"
                 disabled={!prompt.trim() || !model || (model.needs != null && !sourceAsset && !sourceUrl.trim()) || submit.isPending}
-                onClick={() =>
-                  model &&
-                  submit.mutate({
-                    projectId: id,
-                    modelId: model.id,
-                    prompt: prompt.trim(),
-                    sourceAssetId: model.needs && sourceAsset ? sourceAsset.id : undefined,
-                    sourceUrl: model.needs && !sourceAsset && sourceUrl.trim() ? sourceUrl.trim() : undefined,
-                    characterIds: charIds.length ? charIds : undefined,
-                  })
-                }
+                onClick={() => setConfirming(true)}
               >
                 {submit.isPending ? "送出中…" : `生成（−${model?.points ?? 0} 點）`}
               </button>
               <span className="hint">失敗自動退點・額度由組長調整</span>
             </div>
+
+            {/* 生成前確認彈窗（簡報「花錢前先讓你看價，你點頭才做」） */}
+            {confirming && model && (
+              <div className="confirm-panel">
+                <h3 style={{ margin: "0 0 8px" }}>即將生成</h3>
+                <p style={{ margin: "4px 0" }}>
+                  <b>{model.label}</b>・{p.format}
+                  {charIds.length > 0 && <>・帶入 {charIds.length} 個角色定裝</>}
+                </p>
+                <p style={{ margin: "4px 0", fontSize: 13 }}>提示詞：{prompt.trim().slice(0, 80)}{prompt.trim().length > 80 ? "…" : ""}</p>
+                <p style={{ margin: "8px 0" }}>
+                  預估 <b style={{ color: "var(--primary)", fontSize: 18 }}>約 {model.points} 點</b>
+                  {quota.data && (
+                    <span className="hint" style={{ marginLeft: 8 }}>
+                      {quota.data.totalRemaining != null ? `目前剩 ${quota.data.totalRemaining.toLocaleString()} 點` : "額度不限"}
+                      {quota.data.weeklyQuota != null ? `・本週 ${quota.data.weeklyUsed}/${quota.data.weeklyQuota}` : ""}
+                    </span>
+                  )}
+                </p>
+                <p className="hint" style={{ fontSize: 12 }}>失敗全額退點。真實模式會實際呼叫 AI 生成。</p>
+                <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+                  <button
+                    className="primary"
+                    disabled={submit.isPending}
+                    onClick={() =>
+                      model &&
+                      submit.mutate({
+                        projectId: id,
+                        modelId: model.id,
+                        prompt: prompt.trim(),
+                        sourceAssetId: model.needs && sourceAsset ? sourceAsset.id : undefined,
+                        sourceUrl: model.needs && !sourceAsset && sourceUrl.trim() ? sourceUrl.trim() : undefined,
+                        characterIds: charIds.length ? charIds : undefined,
+                      })
+                    }
+                  >
+                    {submit.isPending ? "生成中…" : "確認生成"}
+                  </button>
+                  <button disabled={submit.isPending} onClick={() => setConfirming(false)}>再想想</button>
+                </div>
+              </div>
+            )}
             {submit.error && <p className="error">{submit.error.message}</p>}
             <GenerationList projectId={id} />
           </section>
+
+          {/* 提示詞庫：成功生成的咒語一鍵再用 */}
+          <PromptLibrary projectId={id} onUse={(text) => setPrompt(text)} />
 
           {/* 工作流（一鍵串鏈） */}
           <WorkflowCard projectId={id} />

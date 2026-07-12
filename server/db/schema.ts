@@ -173,6 +173,21 @@ export const knowledge = pgTable("knowledge", {
 });
 
 /**
+ * 提示詞庫（簡報「打過的咒語自動存起來，下次一鍵再用」）：
+ * 成功生成的提示詞自動入庫（同專案去重、記使用次數），供一鍵再生成/插入。
+ */
+export const prompts = pgTable("prompts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  text: text("text").notNull(),
+  useCount: integer("use_count").notNull().default(1),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
  * 角色定裝卡（提案六大核心#3「角色·場景一致性」）：
  * 角色外觀設定一次鎖定，生成時自動注入錨點——跨鏡頭與集數不走樣（安倢=紅傘米白外套…）。
  */

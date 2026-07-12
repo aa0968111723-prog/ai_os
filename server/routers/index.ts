@@ -12,6 +12,7 @@ import { feedbackRouter } from "./feedback";
 import { modelsRouter } from "./models";
 import { knowledgeRouter } from "./knowledge";
 import { charactersRouter } from "./characters";
+import { promptsRouter } from "./prompts";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -27,6 +28,7 @@ export const appRouter = router({
   feedback: feedbackRouter,
   knowledge: knowledgeRouter,
   characters: charactersRouter,
+  prompts: promptsRouter,
 });
 
 export type AppRouter = typeof appRouter;

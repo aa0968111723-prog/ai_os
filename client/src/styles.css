@@ -100,3 +100,8 @@ a { color: var(--primary); }
   background: var(--muted); }
 .asset-meta { padding: 8px 10px 10px; }
 .asset-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+
+/* 生成確認彈窗 */
+.confirm-panel { margin-top: 12px; border: 1.5px solid var(--primary); background: var(--card2);
+  border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); }
+.confirm-panel h3 { font-size: 15px; }
