@@ -107,7 +107,7 @@ export function App() {
                   </p>
                 )}
               </Route>
-              <Route path="/feedback"><FeedbackPage /></Route>
+              <Route path="/feedback"><FeedbackPage groupId={activeGroupId || undefined} /></Route>
               <Route path="/models"><ModelsPage /></Route>
               <Route path="/p/:id">{(params) => <ProjectPage id={params.id} />}</Route>
               <Route>

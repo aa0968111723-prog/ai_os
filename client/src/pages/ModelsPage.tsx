@@ -6,7 +6,11 @@ export function ModelsPage() {
   const categories = trpc.models.categories.useQuery();
   const [category, setCategory] = useState("text-to-image");
   const [q, setQ] = useState("");
-  const models = trpc.models.search.useQuery({ q: q || undefined, category: q ? undefined : category });
+  // keepPreviousData：搜尋逐字打時保留上一批結果，畫面不會每個字閃一次「沒有符合」
+  const models = trpc.models.search.useQuery(
+    { q: q || undefined, category: q ? undefined : category },
+    { placeholderData: (prev) => prev },
+  );
   const workflows = trpc.models.workflows.useQuery();
 
   const tierColor: Record<string, string> = {
@@ -23,19 +27,36 @@ export function ModelsPage() {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
         <input style={{ maxWidth: 260 }} value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋(例:中文、對嘴、金句)" />
         {!q &&
-          (categories.data ?? []).filter((c) => c.id !== "workflow").map((c) => (
-            <span
-              key={c.id}
-              className={`chip pick ${category === c.id ? "on" : ""}`}
-              onClick={() => setCategory(c.id)}
-              style={{ cursor: "pointer" }}
-            >
-              {c.label}
-            </span>
-          ))}
+          (categories.data ?? []).filter((c) => c.id !== "workflow").map((c) => {
+            const on = category === c.id;
+            return (
+              <span
+                key={c.id}
+                role="button"
+                tabIndex={0}
+                aria-pressed={on}
+                title={c.hint}
+                className={`chip pick ${on ? "on" : ""}`}
+                onClick={() => setCategory(c.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setCategory(c.id); }
+                }}
+                style={{ cursor: "pointer" }}
+              >
+                {c.label}
+              </span>
+            );
+          })}
       </div>
 
       <div className="stack">
+        {models.isLoading && <p className="hint">載入模型目錄中…</p>}
+        {models.isError && (
+          <p className="error">
+            模型目錄載入失敗——
+            <button style={{ padding: "2px 12px", marginLeft: 4 }} onClick={() => models.refetch()}>重試</button>
+          </p>
+        )}
         {(models.data ?? []).map((m) => (
           <section key={m.id} className="card" style={{ padding: "14px 18px" }}>
             <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -50,7 +71,9 @@ export function ModelsPage() {
             <p className="hint mono" style={{ margin: "4px 0 0", fontSize: 11 }}>{m.id}</p>
           </section>
         ))}
-        {!models.data?.length && <p className="hint">沒有符合的模型。</p>}
+        {!models.isLoading && !models.isError && !models.data?.length && (
+          <p className="hint">{q ? `沒有符合「${q}」的模型——換個關鍵字試試。` : "這個類別暫無模型。"}</p>
+        )}
       </div>
 
       {!q && (
