@@ -172,6 +172,25 @@ export const knowledge = pgTable("knowledge", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/**
+ * 角色定裝卡（提案六大核心#3「角色·場景一致性」）：
+ * 角色外觀設定一次鎖定，生成時自動注入錨點——跨鏡頭與集數不走樣（安倢=紅傘米白外套…）。
+ */
+export const characters = pgTable("characters", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  name: text("name").notNull(),
+  /** 外觀錨點：臉/髮型/服裝/配飾——這段會直接注入生成提示詞 */
+  appearance: text("appearance").notNull(),
+  /** 個性・語氣・關係・Do/Don't（供 AI 導演與腳本參考；不注入視覺生成，避免被畫出文字） */
+  notes: text("notes"),
+  /** 定裝參考圖（可選；之後圖生圖可用作底） */
+  referenceAssetId: uuid("reference_asset_id"),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const scenes = pgTable("scenes", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull(),

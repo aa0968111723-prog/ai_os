@@ -10,6 +10,7 @@ import { WorkflowCard } from "../components/WorkflowCard";
 import { AssetLibrary } from "../components/AssetLibrary";
 import { KnowledgeBase } from "../components/KnowledgeBase";
 import { ScriptSplitCard } from "../components/ScriptSplitCard";
+import { CharacterCards } from "../components/CharacterCards";
 
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
 export function ProjectPage({ id }: { id: string }) {
@@ -35,6 +36,9 @@ export function ProjectPage({ id }: { id: string }) {
   /** 來源：優先素材庫（伺服器簽名網址，永久有效）；也可貼外部網址 */
   const [sourceAsset, setSourceAsset] = useState<{ id: string; title: string; kind: string } | null>(null);
   const [sourceUrl, setSourceUrl] = useState("");
+  /** 生成時要帶入的角色定裝卡（跨鏡一致） */
+  const [charIds, setCharIds] = useState<string[]>([]);
+  const toggleChar = (cid: string) => setCharIds((prev) => (prev.includes(cid) ? prev.filter((x) => x !== cid) : [...prev, cid]));
   const assets = trpc.projects.assets.useQuery({ projectId: id });
   const submit = trpc.generation.submit.useMutation({
     onSuccess: () => {
@@ -113,6 +117,9 @@ export function ProjectPage({ id }: { id: string }) {
           {/* AI 拆分鏡：貼腳本 → 自動建分鏡草稿 */}
           <ScriptSplitCard projectId={id} />
 
+          {/* 角色定裝卡：勾選後生成自動注入外觀錨點 */}
+          <CharacterCards projectId={id} selectedIds={charIds} onToggle={toggleChar} />
+
           {/* 素材庫：上傳參考素材（提案核心「把素材丟進去」的入口）＋生成成品自動入庫 */}
           <AssetLibrary projectId={id} onPickSource={(a) => { setSourceAsset(a); setSourceUrl(""); }} />
 
@@ -166,6 +173,7 @@ export function ProjectPage({ id }: { id: string }) {
                     prompt: prompt.trim(),
                     sourceAssetId: model.needs && sourceAsset ? sourceAsset.id : undefined,
                     sourceUrl: model.needs && !sourceAsset && sourceUrl.trim() ? sourceUrl.trim() : undefined,
+                    characterIds: charIds.length ? charIds : undefined,
                   })
                 }
               >
