@@ -17,6 +17,9 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
             {suggest.data.usedKnowledge ? "✓ 已讀取專案知識庫的素材" : "（尚未加入素材知識——加了開示/腳本，建議會更貼合）"}
             {suggest.data.mock ? "・示範建議" : ""}
           </p>
+          {suggest.data.fallback && (
+            <p className="hint" style={{ fontSize: 12, color: "var(--soft)" }}>（AI 暫時沒回應，以下是通用建議）</p>
+          )}
           {suggest.data.suggestions.map((s, i) => (
             <div key={i} className="gen-row" style={{ gridTemplateColumns: "1fr auto" }}>
               <div>

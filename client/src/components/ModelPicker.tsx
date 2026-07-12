@@ -39,11 +39,13 @@ export function ModelPicker({
     { label: "💡 最低成本(試驗)", tier: "budget" },
   ];
   const cat = categories.data?.find((c) => c.id === category);
+  const loading = categories.isLoading || models.isLoading;
+  const loadError = categories.error ?? models.error;
 
   return (
     <div>
       <label>創作類別</label>
-      <select value={category} onChange={(e) => { setCategory(e.target.value); setModelId(""); }}>
+      <select value={category} disabled={categories.isLoading} onChange={(e) => { setCategory(e.target.value); setModelId(""); }}>
         {(categories.data ?? []).filter((c) => c.id !== "workflow").map((c) => (
           <option key={c.id} value={c.id}>{c.label}</option>
         ))}
@@ -51,7 +53,7 @@ export function ModelPicker({
       {cat && <p className="hint" style={{ marginTop: 4 }}>{cat.hint}</p>}
 
       <label>模型(點數透明)</label>
-      <select value={selected?.id ?? ""} onChange={(e) => setModelId(e.target.value)}>
+      <select value={selected?.id ?? ""} disabled={loading} onChange={(e) => setModelId(e.target.value)}>
         {groups.map((g) => {
           const inTier = list.filter((m) => (m as unknown as { tier: string }).tier === g.tier);
           if (!inTier.length) return null;
@@ -59,13 +61,22 @@ export function ModelPicker({
             <optgroup key={g.tier} label={g.label}>
               {inTier.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.label} — {m.points} 點{m.verified ? "" : " ⚠︎"}
+                  {m.label} — {m.points} 點{m.verified ? "" : " ⚠︎ 未驗證"}
                 </option>
               ))}
             </optgroup>
           );
         })}
       </select>
+      {loading && <p className="hint" style={{ marginTop: 4 }}>模型載入中…</p>}
+      {loadError && (
+        <p className="error">
+          模型清單載入失敗：{loadError.message}
+          <button style={{ marginLeft: 8, padding: "2px 10px", fontSize: 12 }} onClick={() => { categories.refetch(); models.refetch(); }}>
+            重試
+          </button>
+        </p>
+      )}
       {selected && (
         <p className="hint" style={{ marginTop: 4 }}>
           {selected.strengths}

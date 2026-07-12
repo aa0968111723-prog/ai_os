@@ -1,15 +1,22 @@
+import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, adminProcedure } from "../trpc";
 import { db, schema } from "../db";
-import { createInvite, attachExistingUser } from "../services/auth";
+import { createInvite, attachExistingUser, hashPassword } from "../services/auth";
 
 /** 團隊管理權檢查：超管或該團隊 admin */
 function assertTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, teamId: string): void {
   if (!auth.user.isSuperAdmin && !auth.adminTeamIds.includes(teamId)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "需要該團隊的管理權限" });
   }
+}
+
+// 臨時密碼字元集：排除 0/o/1/l/i 等易混淆字元，用 LINE 傳或口頭唸都不會抄錯
+const TEMP_PASSWORD_CHARS = "abcdefghjkmnpqrstuvwxyz23456789";
+function generateTempPassword(): string {
+  return Array.from(randomBytes(10), (b) => TEMP_PASSWORD_CHARS[b % TEMP_PASSWORD_CHARS.length]).join("");
 }
 
 export const adminRouter = router({
@@ -123,4 +130,38 @@ export const adminRouter = router({
         .where(and(eq(schema.groupMembers.groupId, input.groupId), eq(schema.groupMembers.userId, input.userId)));
       return { ok: true };
     }),
+
+  /** 重設成員密碼：伺服器自產臨時密碼、砍掉全部 session 強制重登。臨時密碼只在這次回應出現、不落資料庫與 log */
+  resetMemberPassword: adminProcedure.input(z.object({ userId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [target] = await db.select().from(schema.users).where(eq(schema.users.id, input.userId));
+    if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這位成員" });
+    if (!ctx.auth.user.isSuperAdmin) {
+      // 權限階梯：超管可重設任何人；團隊管理員只能重設「自己管的團隊」裡的一般成員
+      if (target.isSuperAdmin) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "超級管理員的密碼無法在這裡重設，請聯絡超級管理員處理" });
+      }
+      const targetTeamRows = await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.userId, target.id));
+      if (target.id !== ctx.auth.user.id && targetTeamRows.some((r) => r.role === "admin")) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "其他團隊管理員的密碼請找超級管理員重設" });
+      }
+      // 管理範圍：目標直接在我管的團隊（team_members），或掛在該團隊任一組（group_members）
+      let inScope = targetTeamRows.some((r) => ctx.auth.adminTeamIds.includes(r.teamId));
+      if (!inScope) {
+        const targetGroupRows = await db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, target.id));
+        if (targetGroupRows.length > 0) {
+          const targetGroups = await db
+            .select()
+            .from(schema.groups)
+            .where(inArray(schema.groups.id, targetGroupRows.map((r) => r.groupId)));
+          inScope = targetGroups.some((g) => ctx.auth.adminTeamIds.includes(g.teamId));
+        }
+      }
+      if (!inScope) throw new TRPCError({ code: "FORBIDDEN", message: "只能重設自己團隊裡成員的密碼" });
+    }
+    const tempPassword = generateTempPassword();
+    await db.update(schema.users).set({ passwordHash: await hashPassword(tempPassword) }).where(eq(schema.users.id, target.id));
+    // 全 session 作廢：舊登入立刻失效，只有拿到臨時密碼的本人能重新登入
+    await db.delete(schema.sessions).where(eq(schema.sessions.userId, target.id));
+    return { tempPassword };
+  }),
 });

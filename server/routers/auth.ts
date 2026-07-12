@@ -30,8 +30,9 @@ export const authRouter = router({
     .input(z.object({ email: z.string().email("email 格式不對"), password: z.string().min(1, "請填密碼") }))
     .mutation(async ({ ctx, input }) => {
       const email = input.email.toLowerCase().trim();
-      if (!checkLoginRate(email)) {
-        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "嘗試太多次，請 15 分鐘後再試" });
+      const rate = checkLoginRate(email);
+      if (!rate.ok) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `嘗試太多次，請約 ${rate.retryAfterMin} 分鐘後再試` });
       }
       const [user] = await db.select().from(schema.users).where(eq(schema.users.email, email));
       // 統一錯誤訊息：不洩漏帳號是否存在
@@ -53,7 +54,7 @@ export const authRouter = router({
 
   /** 邀請連結落地：設定姓名密碼 → 建帳號＋入團隊/組 → 自動登入 */
   acceptInvite: publicProcedure
-    .input(z.object({ token: z.string().min(10), name: z.string().min(1, "請填姓名"), password: z.string().min(8, "密碼至少 8 碼") }))
+    .input(z.object({ token: z.string().min(10), name: z.string().min(1, "請填姓名").max(40, "名字太長（最多 40 字）"), password: z.string().min(8, "密碼至少 8 碼") }))
     .mutation(async ({ ctx, input }) => {
       try {
         const { userId } = await acceptInvite(input.token, input.name.trim(), input.password);

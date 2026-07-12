@@ -90,6 +90,17 @@ async function sweepStaleGenerations(projectId: string): Promise<void> {
   }
 }
 
+/**
+ * 來源素材「明顯不相容」表（與前端來源下拉的過濾同一張表）：
+ * 寬鬆原則——只擋確定會失敗的組合，doc/zip 等不確定的放行讓模型自行判斷。
+ */
+const SOURCE_INCOMPAT: Record<string, string[]> = {
+  image: ["audio"],
+  audio: ["image", "video"],
+  video: ["audio"],
+};
+const SOURCE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件", zip: "zip 壓縮包" };
+
 /** 哪些類別注入世界觀(TTS 會唸出注入文字、轉錄/視覺/訓練/影片工具不適用 → 不注入) */
 const INJECT_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video", "llm", "text-to-audio"]);
 /** 角色定裝錨點只注入「視覺」類別（畫面要一致）；LLM/TTS 不需要外觀 */
@@ -146,6 +157,13 @@ export const generationRouter = router({
         const [srcAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.sourceAssetId));
         if (!srcAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到來源素材" });
         if (srcAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "來源素材不屬於此專案的組" });
+        // 明顯不相容的來源直接擋下，省一次白白失敗的生成
+        if (model.needs && (SOURCE_INCOMPAT[model.needs] ?? []).includes(srcAsset.kind)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `這個模型需要${SOURCE_KIND_LABEL[model.needs] ?? model.needs}來源，選到的素材是${SOURCE_KIND_LABEL[srcAsset.kind] ?? srcAsset.kind}——請換一個相容的素材`,
+          });
+        }
         sourceUrl = srcAsset.storagePath ? signAssetUrl(srcAsset.id) : srcAsset.url;
         if (!sourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "此素材沒有可用檔案" });
       }

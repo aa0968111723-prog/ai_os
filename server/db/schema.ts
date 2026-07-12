@@ -256,7 +256,7 @@ export const approvals = pgTable("approvals", {
   decidedAt: timestamp("decided_at"),
 });
 
-/** 測試回饋（評估七項＋文字） */
+/** 測試回饋（6 題評分＋優缺點/備註文字） */
 export const feedback = pgTable("feedback", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull(),

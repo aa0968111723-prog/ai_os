@@ -70,7 +70,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .gen-row { display: grid; grid-template-columns: 84px 1fr auto; gap: 14px; align-items: center;
   border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 14px; background: var(--card); margin-top: 8px; }
 .gen-thumb { width: 84px; height: 52px; border-radius: 8px; object-fit: cover; background: var(--muted); }
-.pill { font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.pill { font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+  border: 1px solid currentColor; }
 .pill.queued, .pill.running { color: var(--gold); border: 1px solid var(--gold); }
 .pill.done { color: var(--success); border: 1px solid var(--success); }
 .pill.failed { color: var(--danger); border: 1px solid var(--danger); }

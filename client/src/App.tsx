@@ -9,10 +9,10 @@ import { AdminPage } from "./pages/AdminPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { ModelsPage } from "./pages/ModelsPage";
 
-/** 彈性點數徽章：剩餘 or 不限（組長/管理員可在團隊管理調整） */
+/** 彈性點數徽章：剩餘 or 不限（管理員可在團隊管理調整） */
 function PointsBadge({ groupId }: { groupId: string }) {
   // enabled 等組別就緒才查——避免首載以 undefined 先打一輪造成「週額度閃爍」
-  const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 20_000, enabled: !!groupId });
+  const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 60_000, enabled: !!groupId });
   if (my.error) return <span className="badge" title="點數暫時讀不到，稍後會自動重試">◈ <span className="mono">—</span></span>;
   if (!my.data) return null;
   const { totalRemaining, weeklyQuota, weeklyUsed, dailyQuota, dailyUsed } = my.data;
@@ -20,7 +20,7 @@ function PointsBadge({ groupId }: { groupId: string }) {
   const weekly = weeklyQuota != null ? `・週 ${weeklyUsed}/${weeklyQuota}` : "";
   const daily = dailyQuota != null ? `・日 ${dailyUsed}/${dailyQuota}` : "";
   return (
-    <span className="badge" title="點數額度由組長／管理員調整；日上限每天重置">
+    <span className="badge" title="點數額度由管理員調整；日上限每天重置">
       ◈ <span className="mono">{label}{weekly}{daily}</span>
     </span>
   );

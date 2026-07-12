@@ -21,15 +21,17 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 
 /* ── 登入防爆破：同帳號 15 分鐘 5 次 ── */
 const attempts = new Map<string, { count: number; resetAt: number }>();
-export function checkLoginRate(email: string): boolean {
+export function checkLoginRate(email: string): { ok: boolean; retryAfterMin?: number } {
   const now = Date.now();
   const entry = attempts.get(email);
   if (!entry || now > entry.resetAt) {
     attempts.set(email, { count: 1, resetAt: now + 15 * 60_000 });
-    return true;
+    return { ok: true };
   }
   entry.count += 1;
-  return entry.count <= 5;
+  if (entry.count <= 5) return { ok: true };
+  // 無條件進位：剩 0.1 分鐘也報 1 分鐘，避免顯示「0 分鐘後再試」
+  return { ok: false, retryAfterMin: Math.ceil((entry.resetAt - now) / 60_000) };
 }
 export function clearLoginRate(email: string): void {
   attempts.delete(email);

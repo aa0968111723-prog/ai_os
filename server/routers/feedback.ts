@@ -3,15 +3,16 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { router, authedProcedure, adminProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 
-/** 評估七項的固定 key（與前端一致；擋亂送的 key，回饋彙整才不會出現無意義欄位） */
+/** 6 題評分的固定 key（與前端一致；擋亂送的 key，回饋彙整才不會出現無意義欄位） */
 const FEEDBACK_KEYS = ["context", "cost", "collab", "ai", "daily", "usability"] as const;
 
-/** 測試回饋（評估七項：規劃第 7 章）：任何成員可交，管理員彙整 */
+/** 測試回饋（6 題評分＋優缺點/備註文字）：任何成員可交，管理員彙整 */
 export const feedbackRouter = router({
   submit: authedProcedure
     .input(
       z.object({
-        // 只收認得的 key（否則彙整頁會出現亂欄位；與前端 6 項評分一致）
+        // 只收認得的 key（否則彙整頁會出現亂欄位；與前端 6 題評分一致）。
+        // Zod 3 的 record 不要求 key 齊全，所以部分評分（沒用到的功能留空）直接相容；別升 Zod 4 後忘了這裡（v4 的 record 會強制齊全）。
         scores: z.record(z.enum(FEEDBACK_KEYS), z.number().int().min(1).max(5)),
         best: z.string().max(500).optional(),
         worst: z.string().max(500).optional(),

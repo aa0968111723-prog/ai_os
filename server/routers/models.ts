@@ -54,7 +54,12 @@ export const modelsRouter = router({
       points: w.points,
       strengths: w.strengths,
       bestFor: w.bestFor,
-      steps: w.steps.map((s) => ({ modelId: s.modelId, note: s.note })),
+      steps: w.steps.map((s) => ({
+        modelId: s.modelId,
+        note: s.note,
+        promptTemplate: s.promptTemplate,
+        usePrevAsSource: s.usePrevAsSource ?? false,
+      })),
     })),
   ),
 });

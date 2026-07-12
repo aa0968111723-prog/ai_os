@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { trpc } from "../api";
 
 const ITEMS: Array<{ key: string; label: string }> = [
@@ -10,7 +11,7 @@ const ITEMS: Array<{ key: string; label: string }> = [
   { key: "usability", label: "不用教也會用" },
 ];
 
-/** 測試回饋（評估七項：第 7 項為優缺點文字） */
+/** 測試回饋（6 題評分＋優缺點/備註文字） */
 export function FeedbackPage({ groupId }: { groupId?: string }) {
   const submit = trpc.feedback.submit.useMutation();
   const [scores, setScores] = useState<Record<string, number>>({});
@@ -19,7 +20,7 @@ export function FeedbackPage({ groupId }: { groupId?: string }) {
   const [note, setNote] = useState("");
   const [justSent, setJustSent] = useState(false);
 
-  const missing = ITEMS.filter((it) => !scores[it.key]).length;
+  const rated = Object.keys(scores).length;
 
   const reset = () => {
     setScores({}); setBest(""); setWorst(""); setNote("");
@@ -32,17 +33,28 @@ export function FeedbackPage({ groupId }: { groupId?: string }) {
       <div className="card" style={{ maxWidth: 520, margin: "40px auto", textAlign: "center" }} role="status" aria-live="polite">
         <h2>收到了，感恩 🙏</h2>
         <p className="sub">你的回饋會直接影響下一版怎麼改。</p>
-        <button style={{ marginTop: 12 }} onClick={reset}>再填一份</button>
+        <div style={{ marginTop: 12, display: "flex", gap: 16, justifyContent: "center", alignItems: "center" }}>
+          <button onClick={reset}>再填一份</button>
+          <Link href="/">回作業台</Link>
+        </div>
       </div>
     );
   }
 
-  const setScore = (key: string, n: number) => setScores((prev) => ({ ...prev, [key]: n }));
+  // 再點同一分數＝取消該題（部分評分後端也收）
+  const setScore = (key: string, n: number) =>
+    setScores((prev) => {
+      if (prev[key] === n) {
+        const { [key]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [key]: n };
+    });
 
   return (
     <div style={{ maxWidth: 620, margin: "0 auto" }}>
       <h1>使用回饋</h1>
-      <p className="sub">1＝很不行、5＝很好；憑直覺填就好，兩分鐘。</p>
+      <p className="sub">1＝很不行、5＝很好；憑直覺填就好，兩分鐘。沒用到的功能可以留空，再點一次分數就能取消。</p>
       <div className="card">
         {ITEMS.map((item) => (
           <div key={item.key} style={{ marginBottom: 14 }}>
@@ -79,7 +91,7 @@ export function FeedbackPage({ groupId }: { groupId?: string }) {
         <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
           <button
             className="primary"
-            disabled={missing > 0 || submit.isPending}
+            disabled={rated === 0 || submit.isPending}
             onClick={() => {
               submit.mutate(
                 { scores, best: best.trim() || undefined, worst: worst.trim() || undefined, note: note.trim() || undefined, groupId },
@@ -89,7 +101,7 @@ export function FeedbackPage({ groupId }: { groupId?: string }) {
           >
             {submit.isPending ? "送出中…" : "送出回饋"}
           </button>
-          {missing > 0 && <span className="hint">還有 {missing} 項沒評分</span>}
+          <span className="hint">{rated === 0 ? "至少評 1 題就能送出" : "沒用到的功能可以留空"}</span>
         </div>
         {submit.error && <p className="error" role="alert">送出失敗：{submit.error.message}</p>}
       </div>

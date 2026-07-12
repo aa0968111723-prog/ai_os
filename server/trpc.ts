@@ -1,5 +1,6 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
+import { ZodError } from "zod";
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { Request, Response } from "express";
 import { resolveSession, loadAuthState, type AuthState } from "./services/auth";
@@ -33,6 +34,10 @@ const t = initTRPC.context<Context>().create({
     if (error.code === "INTERNAL_SERVER_ERROR") {
       console.error("[trpc]", error.cause ?? error);
       return { ...shape, message: "系統暫時無法處理，請稍後再試（管理員可到 /api/ready 檢查資料庫連線）" };
+    }
+    // 輸入驗證失敗時，預設 message 是整包 issues 的 JSON——改給第一條的人話訊息
+    if (error.cause instanceof ZodError) {
+      return { ...shape, message: error.cause.issues[0]?.message ?? shape.message };
     }
     return shape;
   },

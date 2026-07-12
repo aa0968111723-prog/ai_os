@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { trpc } from "../api";
+import { PasswordInput } from "../components/PasswordInput";
 
 /**
  * zod 驗證失敗時 tRPC 預設把整包 issues JSON 塞進 error.message（伺服器端 errorFormatter
@@ -23,10 +24,24 @@ function friendlyAuthError(message: string): string {
 
 export function LoginPage() {
   const utils = trpc.useUtils();
-  const login = trpc.auth.login.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
+  const pwRef = useRef<HTMLInputElement>(null);
+  const login = trpc.auth.login.useMutation({
+    onSuccess: () => utils.auth.me.invalidate(),
+    // 失敗後選取整段密碼並聚焦：使用者直接重打即可，不用先手動清空
+    onError: () => {
+      pwRef.current?.select();
+      pwRef.current?.focus();
+    },
+  });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [localError, setLocalError] = useState("");
+
+  // 一開始改字就收掉舊錯誤，避免「正在改了紅字還掛著」
+  const clearStaleError = () => {
+    if (login.error) login.reset();
+    if (localError) setLocalError("");
+  };
 
   // 送出前先在本地擋明顯的 email 格式錯誤：不必等後端 zod 回整包 JSON 錯誤
   const doLogin = () => {
@@ -50,13 +65,20 @@ export function LoginPage() {
         {/* 用 <form>：瀏覽器/密碼管理器靠它辨識登入表單做自動填入；Enter 由 submit 統一處理 */}
         <form style={{ textAlign: "left" }} onSubmit={(e) => { e.preventDefault(); doLogin(); }}>
           <label htmlFor="login-email">Email</label>
-          <input id="login-email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" autoFocus />
-          <label htmlFor="login-pw">密碼</label>
           <input
+            id="login-email"
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); clearStaleError(); }}
+            placeholder="you@example.com"
+            autoComplete="email"
+            autoFocus
+          />
+          <label htmlFor="login-pw">密碼</label>
+          <PasswordInput
             id="login-pw"
-            type="password"
+            ref={pwRef}
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => { setPassword(e.target.value); clearStaleError(); }}
             autoComplete="current-password"
           />
           <div style={{ marginTop: 18 }}>

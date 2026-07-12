@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 
-/** waiting＝輪詢逾時但後端仍在生成（≠失敗，成品稍後會出現在生成紀錄） */
-interface StepLog { note: string; status: "running" | "done" | "failed" | "waiting"; detail?: string }
+/** waiting＝輪詢逾時但後端仍在生成（≠失敗，成品稍後會出現在生成紀錄）;stopped＝使用者按停後未送出的步驟 */
+interface StepLog { note: string; status: "running" | "done" | "failed" | "waiting" | "stopped"; detail?: string }
 
 /** 工作流:一鍵串多個模型(每步各自扣點;逐步顯示進度) */
 export function WorkflowCard({ projectId }: { projectId: string }) {
@@ -12,29 +12,46 @@ export function WorkflowCard({ projectId }: { projectId: string }) {
   const [prompt, setPrompt] = useState("");
   const [logs, setLogs] = useState<StepLog[]>([]);
   const [running, setRunning] = useState(false);
+  const [stopRequested, setStopRequested] = useState(false);
+  // run 迴圈閉包讀不到最新 state,停止旗標必須走 ref
+  const stopRef = useRef(false);
 
   const wf = workflows.data?.find((w) => w.id === wfId) ?? workflows.data?.[0];
+
+  // 關閉/重整分頁會中斷還沒送出的步驟(已送出的後端會繼續),執行中先攔一下
+  useEffect(() => {
+    if (!running) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "工作流還在進行,離開會中斷尚未開始的步驟";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [running]);
 
   const run = async () => {
     if (!wf || !prompt.trim() || running) return;
     setRunning(true);
+    setStopRequested(false);
+    stopRef.current = false;
     setLogs(wf.steps.map((s) => ({ note: s.note, status: "running" as const })));
     const client = utils.client;
     let prevText = "";
     let prevUrl = "";
     try {
       for (let i = 0; i < wf.steps.length; i++) {
+        if (stopRef.current) {
+          setLogs((ls) => ls.map((l, j) => (j >= i ? { ...l, status: "stopped", detail: "未送出,不扣點" } : l)));
+          break;
+        }
         const step = wf.steps[i];
         // 模板:{prompt}=使用者輸入、{prev}=上一步文字結果
-        const stepDef = wf.steps[i];
-        const template = (workflowTemplates[wf.id]?.[i] ?? "{prompt}");
-        const stepPrompt = template.replaceAll("{prompt}", prompt.trim()).replaceAll("{prev}", prevText || prompt.trim());
-        const usePrev = workflowUsePrev[wf.id]?.[i] === true;
+        const stepPrompt = step.promptTemplate.replaceAll("{prompt}", prompt.trim()).replaceAll("{prev}", prevText || prompt.trim());
         const gen = await client.generation.submit.mutate({
           projectId,
-          modelId: stepDef.modelId,
+          modelId: step.modelId,
           prompt: stepPrompt,
-          sourceUrl: usePrev && prevUrl ? prevUrl : undefined,
+          sourceUrl: step.usePrevAsSource && prevUrl ? prevUrl : undefined,
         });
         // 輪詢到完成——上限依產物類型放寬:影片常見 3-10 分鐘,固定 3 分鐘會把「仍在生成」誤報成失敗
         const maxTries = gen.kind === "video" ? 300 : gen.kind === "audio" ? 120 : 60; // 影片 15 分、音訊 6 分、其他 3 分
@@ -83,16 +100,22 @@ export function WorkflowCard({ projectId }: { projectId: string }) {
       {wf && <p className="hint" style={{ marginTop: 4 }}>{wf.strengths}|適合:{wf.bestFor}</p>}
       <label>你的想法(一句話)</label>
       <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例:清晨禪堂中一炷香緩緩升起,傳達放下與新生" />
-      <div style={{ marginTop: 10 }}>
+      <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button className="primary" disabled={!prompt.trim() || running} onClick={run}>
           {running ? "執行中…" : `執行工作流(約 −${wf?.points ?? 0} 點)`}
         </button>
+        {running && (
+          <button disabled={stopRequested} onClick={() => { stopRef.current = true; setStopRequested(true); }}>
+            {stopRequested ? "正在生成的這一步做完就停…" : "停止後續步驟"}
+          </button>
+        )}
       </div>
+      {stopRequested && !running && <p className="hint" style={{ marginTop: 6 }}>已停止(已完成的步驟不受影響)。</p>}
       {logs.length > 0 && (
         <div style={{ marginTop: 10 }}>
           {logs.map((l, i) => (
             <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-              <span>{l.status === "done" ? "✅" : l.status === "failed" ? "❌" : l.status === "waiting" ? "🕒" : "⏳"}</span>
+              <span>{l.status === "done" ? "✅" : l.status === "failed" ? "❌" : l.status === "waiting" ? "🕒" : l.status === "stopped" ? "⏹️" : "⏳"}</span>
               <span>{l.note}</span>
               {l.detail && <span className="mono" style={{ fontSize: 11, opacity: 0.8 }}>{l.detail}</span>}
             </div>
@@ -102,35 +125,3 @@ export function WorkflowCard({ projectId }: { projectId: string }) {
     </section>
   );
 }
-
-/** 步驟提示詞模板(與 shared/models.ts 的 WORKFLOW_PRESETS 對齊;前端持模板避免後端往返) */
-const workflowTemplates: Record<string, string[]> = {
-  "wf/full-short-flagship": [
-    "把以下構想潤飾成一段 40 字內的影片畫面描述(供文生影片模型使用,繁體中文):{prompt}",
-    "{prev}",
-    "{prev}",
-  ],
-  "wf/brand-storyboard-flagship": [
-    "把主題「{prompt}」化為一句電影感畫面描述(40 字內,繁體中文)",
-    "{prev}",
-    "保持構圖不變,將整體色調調整為溫暖的琥珀色晨光",
-  ],
-  "wf/quote-card-flagship": [
-    "從以下內容擷取一句 20 字內的金句(只回金句本身):{prompt}",
-    "極簡禪意海報,溫暖米色背景,優雅繁體中文書法字:「{prev}」",
-  ],
-  "wf/full-short-economy": [
-    "把以下構想潤飾成一段 40 字內的影片畫面描述(繁體中文):{prompt}",
-    "{prev}",
-    "{prev}",
-  ],
-  "wf/narrated-scene-economy": ["{prompt}", "{prompt}"],
-  "wf/quote-card-economy": [
-    "從以下內容擷取一句 20 字內的金句(只回金句本身):{prompt}",
-    "極簡禪意海報構圖,溫暖米色背景,大面留白,主題:{prev}",
-  ],
-  "wf/draft-minimal": ["{prompt}", "{prompt}"],
-};
-const workflowUsePrev: Record<string, boolean[]> = {
-  "wf/brand-storyboard-flagship": [false, false, true],
-};

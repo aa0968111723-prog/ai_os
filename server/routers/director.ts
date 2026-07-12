@@ -79,7 +79,8 @@ export const directorRouter = router({
     // 知識庫：把開示稿/見證稿/腳本全文注入——這就是「真的懂我們素材」，夥伴不必重講背景
     const knowledge = await buildKnowledgeContext(project.id);
 
-    if (isMockMode()) return { suggestions: mockSuggestions(wv, project.kind), mock: true, usedKnowledge: !!knowledge };
+    // fallback 專指「真模式呼叫 LLM 失敗、退回罐頭建議」——前端據此提示「AI 暫時沒回應」；假模式的示範建議不算
+    if (isMockMode()) return { suggestions: mockSuggestions(wv, project.kind), mock: true, fallback: false, usedKnowledge: !!knowledge };
 
     // 真模式先原子入帳（重用 reserveQuota：同時受週額度與總預算守門），失敗路徑再退
     const quotaError = await reserveQuota(ctx.auth.user.id, project.groupId, DIRECTOR_COST_POINTS, "AI 導演建議");
@@ -102,12 +103,12 @@ ${knowledge ? `\n【專案素材（開示／見證／腳本，請據此發想，
       const match = data.output?.match(/\[[\s\S]*\]/);
       const parsed = match ? suggestionSchema.safeParse(JSON.parse(match[0])) : null;
       // 形狀不符：LLM 已實際計費故不退點，但回固定格式的本地建議並標記 mock，前端不會拿到壞資料
-      if (!parsed?.success) return { suggestions: mockSuggestions(wv, project.kind), mock: true, usedKnowledge: !!knowledge };
-      return { suggestions: parsed.data.slice(0, 3), mock: false, usedKnowledge: !!knowledge };
+      if (!parsed?.success) return { suggestions: mockSuggestions(wv, project.kind), mock: true, fallback: true, usedKnowledge: !!knowledge };
+      return { suggestions: parsed.data.slice(0, 3), mock: false, fallback: false, usedKnowledge: !!knowledge };
     } catch {
       // LLM 呼叫失敗（HTTP 錯誤/逾時/回傳非 JSON）：退點且不擋創作，退回本地建議
       await refund(ctx.auth.user.id, project.groupId, DIRECTOR_COST_POINTS, "AI 導演建議失敗退回");
-      return { suggestions: mockSuggestions(wv, project.kind), mock: true, usedKnowledge: !!knowledge };
+      return { suggestions: mockSuggestions(wv, project.kind), mock: true, fallback: true, usedKnowledge: !!knowledge };
     }
   }),
 

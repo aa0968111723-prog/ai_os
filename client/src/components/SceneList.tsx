@@ -11,6 +11,8 @@ const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
 /** 分鏡與交付：簡易排序（↑↓）＋送審/裁決（三態機）＋打包下載 */
 export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: string; isLeader: boolean; onUsePrompt?: (prompt: string) => void }) {
   const utils = trpc.useUtils();
+  // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
+  const me = trpc.auth.me.useQuery();
   const scenes = trpc.scenes.listByProject.useQuery({ projectId }, { refetchInterval: 10_000 });
   const approvals = trpc.approvals.listByProject.useQuery({ projectId }, { refetchInterval: 10_000 });
   const invalidate = () => {
@@ -41,9 +43,9 @@ export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: str
             <div key={s.id} className="gen-row">
               {s.assetUrl ? (
                 s.assetKind === "video" ? (
-                  <video className="gen-thumb" src={s.assetUrl} muted />
+                  <video className="gen-thumb" src={s.assetUrl} controls muted preload="metadata" />
                 ) : (
-                  <img className="gen-thumb" src={s.assetUrl} alt="" />
+                  <img className="gen-thumb" src={s.assetUrl} alt={s.title} />
                 )
               ) : (
                 <div className="gen-thumb" />
@@ -71,44 +73,59 @@ export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: str
                     )}
                   </div>
                 )}
-                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                  {(s.status === "todo" || s.status === "review" || s.status === "needs_work") && (
-                    <button style={{ padding: "3px 12px", fontSize: 12 }} disabled={submitApproval.isPending}
-                      onClick={() => submitApproval.mutate({ sceneId: s.id })}>
-                      送審
-                    </button>
-                  )}
-                  {isLeader && s.status === "pending" && pendingOf(s.id) && (
-                    <>
-                      <button style={{ padding: "3px 12px", fontSize: 12, color: "var(--success)", borderColor: "var(--success)" }}
-                        disabled={decide.isPending}
-                        onClick={() => decide.mutate({ approvalId: pendingOf(s.id)!.id, decision: "approved" })}>
-                        ✓ 通過
+                {!me.isLoading && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                    {/* 已通過也能重送：後端本就版本化（重送＝新版本、舊 pending 作廢），換素材後不必刪掉重建 */}
+                    {(s.status === "todo" || s.status === "review" || s.status === "needs_work" || s.status === "approved") && (
+                      <button style={{ padding: "3px 12px", fontSize: 12 }} disabled={submitApproval.isPending}
+                        onClick={() => submitApproval.mutate({ sceneId: s.id })}>
+                        {s.status === "approved" ? "重送新版審核" : "送審"}
                       </button>
-                      <button style={{ padding: "3px 12px", fontSize: 12, color: "var(--danger)", borderColor: "var(--danger)" }}
-                        disabled={decide.isPending}
-                        onClick={() => {
-                          const reason = window.prompt("退回理由（會通知提交人）：");
-                          if (reason?.trim()) decide.mutate({ approvalId: pendingOf(s.id)!.id, decision: "needs_work", reason: reason.trim() });
-                        }}>
-                        ↩ 退回
-                      </button>
-                    </>
-                  )}
-                </div>
+                    )}
+                    {isLeader && s.status === "pending" && pendingOf(s.id) && (
+                      <>
+                        <button style={{ padding: "3px 12px", fontSize: 12, color: "var(--success)", borderColor: "var(--success)" }}
+                          disabled={decide.isPending}
+                          onClick={() => decide.mutate({ approvalId: pendingOf(s.id)!.id, decision: "approved" })}>
+                          ✓ 通過
+                        </button>
+                        <button style={{ padding: "3px 12px", fontSize: 12, color: "var(--danger)", borderColor: "var(--danger)" }}
+                          disabled={decide.isPending}
+                          onClick={() => {
+                            const reason = window.prompt("退回理由（會通知提交人）：");
+                            if (!reason?.trim()) {
+                              window.alert("已取消退回（退回必須附理由）");
+                              return;
+                            }
+                            decide.mutate({ approvalId: pendingOf(s.id)!.id, decision: "needs_work", reason: reason.trim() });
+                          }}>
+                          ↩ 退回
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               <div style={{ display: "flex", gap: 4 }}>
                 <button style={{ padding: "4px 10px" }} disabled={i === 0 || move.isPending} onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}>▲</button>
                 <button style={{ padding: "4px 10px" }} disabled={i === list.length - 1 || move.isPending} onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}>▼</button>
-                <button style={{ padding: "4px 10px", color: "var(--danger)" }} disabled={remove.isPending} onClick={() => remove.mutate({ sceneId: s.id })}>✕</button>
+                <button style={{ padding: "4px 10px", color: "var(--danger)" }} disabled={remove.isPending}
+                  onClick={() => window.confirm(`刪除分鏡「${s.title}」？`) && remove.mutate({ sceneId: s.id })}>✕</button>
               </div>
             </div>
           ))}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
-            <a href={`/api/export/${projectId}`} target="_blank" rel="noreferrer">
-              <button className="primary">打包下載交付包（.zip）</button>
+            <a
+              href={`/api/export/${projectId}`}
+              download
+              style={{
+                display: "inline-block", padding: "10px 18px", borderRadius: 10, textDecoration: "none",
+                background: "var(--primary)", color: "var(--primary-fg)", boxShadow: "var(--shadow)", fontSize: 14,
+              }}
+            >
+              打包下載交付包（.zip）
             </a>
-            <span className="hint">共 {list.length} 鏡・約 {totalSec} 秒｜含素材＋腳本鏡頭表，直接進剪映/Premiere</span>
+            <span className="hint">共 {list.length} 鏡・約 {totalSec} 秒｜含素材＋腳本鏡頭表，直接進剪映/Premiere；大專案打包需要一點時間</span>
           </div>
         </>
       )}

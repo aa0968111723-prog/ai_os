@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { worldviewSchema, TONE_OPTIONS, THEME_OPTIONS, STYLE_OPTIONS, type Worldview } from "@shared/worldview";
@@ -15,6 +15,16 @@ import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PromptLibrary } from "../components/PromptLibrary";
 
+/**
+ * 來源素材「明顯不相容」過濾表（後端 generation.submit 用同一張表把關）：
+ * 寬鬆原則——只擋確定會失敗的組合，doc/zip 等不確定的保留。
+ */
+const SOURCE_INCOMPAT: Record<string, string[]> = {
+  image: ["audio"],
+  audio: ["image", "video"],
+  video: ["audio"],
+};
+
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
 export function ProjectPage({ id }: { id: string }) {
   const utils = trpc.useUtils();
@@ -29,6 +39,10 @@ export function ProjectPage({ id }: { id: string }) {
     },
   );
   const me = trpc.auth.me.useQuery();
+  /** 世界觀儲存回饋：成功後短暫顯示「已儲存 ✓」再淡出 */
+  const [wvSaved, setWvSaved] = useState<"idle" | "shown" | "fading">("idle");
+  const wvTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  useEffect(() => () => wvTimers.current.forEach(clearTimeout), []);
   const updateWv = trpc.projects.updateWorldview.useMutation({
     // 樂觀更新：patch 先合併進本地快取，快速連點兩個 chips 時第二下才讀得到第一下的結果
     //（否則第二下用 stale 快取算出「整條陣列」，後端合併後把第一下剛存的值蓋掉）
@@ -40,7 +54,12 @@ export function ProjectPage({ id }: { id: string }) {
     },
     // 失敗或成功都以伺服器現值對齊（失敗時等同回滾樂觀值）
     onError: () => utils.projects.get.invalidate({ id }),
-    onSuccess: () => utils.projects.get.invalidate({ id }),
+    onSuccess: () => {
+      utils.projects.get.invalidate({ id });
+      wvTimers.current.forEach(clearTimeout);
+      setWvSaved("shown");
+      wvTimers.current = [setTimeout(() => setWvSaved("fading"), 2000), setTimeout(() => setWvSaved("idle"), 2600)];
+    },
   });
 
   const [prompt, setPrompt] = useState("");
@@ -48,6 +67,8 @@ export function ProjectPage({ id }: { id: string }) {
   /** 來源：優先素材庫（伺服器簽名網址，永久有效）；也可貼外部網址 */
   const [sourceAsset, setSourceAsset] = useState<{ id: string; title: string; kind: string } | null>(null);
   const [sourceUrl, setSourceUrl] = useState("");
+  /** 外部網址 onBlur 預檢結果（new URL()，需 http/https）；非空時生成鈕會鎖住 */
+  const [sourceUrlError, setSourceUrlError] = useState("");
   /** 生成時要帶入的角色定裝卡（跨鏡一致） */
   const [charIds, setCharIds] = useState<string[]>([]);
   const toggleChar = (cid: string) => setCharIds((prev) => (prev.includes(cid) ? prev.filter((x) => x !== cid) : [...prev, cid]));
@@ -103,6 +124,31 @@ export function ProjectPage({ id }: { id: string }) {
     updateWv.mutate({ id, worldview: { [field]: next } });
   };
 
+  /** AI 導演「用這個」：避免默默蓋掉手打的提示詞；套用後把視線帶到生成台提示詞框 */
+  const applyDirectorPrompt = (text: string) => {
+    if (prompt.trim() && !window.confirm("要覆蓋你已輸入的提示詞嗎？")) return;
+    setPrompt(text);
+    // 等 React 畫完再捲動；focus 用 preventScroll 才不會打斷平滑捲動
+    requestAnimationFrame(() => {
+      const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
+      el?.focus({ preventScroll: true });
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
+
+  // 生成鈕鎖住時，旁邊同步顯示「為什麼」——非工程師看得懂的一句話
+  const missingSource = model != null && model.needs != null && !sourceAsset && !sourceUrl.trim();
+  const badSourceUrl = model != null && model.needs != null && !sourceAsset && sourceUrl.trim() !== "" && sourceUrlError !== "";
+  const disableReason =
+    !model ? "模型清單還在載入，稍等一下就能生成"
+    : !prompt.trim() ? "先填一句提示詞，描述想要的畫面"
+    : missingSource ? "這個模型需要來源素材——從素材庫選一個，或貼上網址"
+    : badSourceUrl ? "網址格式不對，需以 https:// 開頭"
+    : null;
+  // 來源下拉只列「明顯相容」的素材（寬鬆過濾，不確定的保留；後端 submit 有同一張表把關）
+  const needs = model?.needs;
+  const sourceOptions = (assets.data ?? []).filter((a) => !needs || !(SOURCE_INCOMPAT[needs] ?? []).includes(a.kind));
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
@@ -132,7 +178,22 @@ export function ProjectPage({ id }: { id: string }) {
         <div className="stack">
           {/* 世界觀（快速層） */}
           <section className="card">
-            <h2>世界觀（專案定盤星）</h2>
+            <h2>
+              世界觀（專案定盤星）
+              {updateWv.isPending ? (
+                <span className="hint" style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</span>
+              ) : wvSaved !== "idle" ? (
+                <span
+                  className="hint"
+                  style={{
+                    marginLeft: 8, fontSize: 13, fontWeight: 400, color: "var(--primary)",
+                    opacity: wvSaved === "fading" ? 0 : 1, transition: "opacity 0.6s",
+                  }}
+                >
+                  已儲存 ✓
+                </span>
+              ) : null}
+            </h2>
             <label>一句話故事（logline）</label>
             <input
               defaultValue={wv.logline}
@@ -202,7 +263,28 @@ export function ProjectPage({ id }: { id: string }) {
                 );
               })}
             </div>
-            <p className="hint" style={{ marginTop: 10 }}>禁忌事項已內建（醫療宣稱禁語等）；進階設定之後開放。</p>
+            {/* 進階欄位唯讀一覽：讓大家看見生成時實際會被帶入哪些設定 */}
+            <details style={{ marginTop: 10 }}>
+              <summary style={{ cursor: "pointer", fontSize: 13 }}>進階設定（唯讀）</summary>
+              <div className="hint" style={{ marginTop: 6, lineHeight: 1.9 }}>
+                <div>目標觀眾：{wv.audience.trim() || "未設定"}</div>
+                <div>視覺風格：{wv.styles.length ? wv.styles.join("、") : "未設定"}</div>
+                <div>
+                  三幕結構：
+                  {[
+                    wv.acts.hook && `鉤子「${wv.acts.hook}」`,
+                    wv.acts.turn && `轉折「${wv.acts.turn}」`,
+                    wv.acts.cta && `行動呼籲「${wv.acts.cta}」`,
+                  ].filter(Boolean).join("・") || "未設定"}
+                </div>
+                <div>人物：{wv.people.length ? wv.people.join("、") : "未設定"}</div>
+                <div>參考連結：{wv.references.length ? wv.references.join("、") : "未設定"}</div>
+                <div>禁忌事項：{wv.taboos.length ? wv.taboos.join("；") : "未設定"}</div>
+                <p className="hint" style={{ marginTop: 4, fontSize: 12 }}>
+                  視覺風格與禁忌事項會自動注入每次生成的提示詞；其他欄位供 AI 導演與團隊參考。編輯功能之後開放。
+                </p>
+              </div>
+            </details>
             {updateWv.error && <p className="error">世界觀儲存失敗：{updateWv.error.message}</p>}
           </section>
 
@@ -210,7 +292,7 @@ export function ProjectPage({ id }: { id: string }) {
           <KnowledgeBase projectId={id} />
 
           {/* AI 導演建議（會讀取上方知識庫） */}
-          <DirectorCard projectId={id} onUse={(text) => setPrompt(text)} />
+          <DirectorCard projectId={id} onUse={applyDirectorPrompt} />
 
           {/* AI 拆分鏡：貼腳本 → 自動建分鏡草稿 */}
           <ScriptSplitCard projectId={id} />
@@ -222,7 +304,11 @@ export function ProjectPage({ id }: { id: string }) {
           <ScenePresetCards projectId={id} selectedIds={sceneIds} onToggle={toggleScene} />
 
           {/* 素材庫：上傳參考素材（提案核心「把素材丟進去」的入口）＋生成成品自動入庫 */}
-          <AssetLibrary projectId={id} onPickSource={(a) => { setSourceAsset(a); setSourceUrl(""); }} />
+          <AssetLibrary
+            projectId={id}
+            selectedSourceId={sourceAsset?.id ?? null}
+            onPickSource={(a) => { setSourceAsset(a); setSourceUrl(""); setSourceUrlError(""); }}
+          />
 
           {/* 生成台（11 類 × 旗艦/經濟/最低成本） */}
           <section className="card">
@@ -231,17 +317,17 @@ export function ProjectPage({ id }: { id: string }) {
             {model?.needs && (
               <>
                 <label>{model.sourceHint ?? "來源素材"}</label>
-                {(assets.data?.length ?? 0) > 0 && (
+                {sourceOptions.length > 0 && (
                   <select
                     value={sourceAsset?.id ?? ""}
                     onChange={(e) => {
-                      const picked = assets.data!.find((a) => a.id === e.target.value);
+                      const picked = sourceOptions.find((a) => a.id === e.target.value);
                       setSourceAsset(picked ? { id: picked.id, title: picked.title, kind: picked.kind } : null);
-                      if (picked) setSourceUrl("");
+                      if (picked) { setSourceUrl(""); setSourceUrlError(""); }
                     }}
                   >
                     <option value="">從本專案素材庫選…</option>
-                    {assets.data!.map((a) => (
+                    {sourceOptions.map((a) => (
                       <option key={a.id} value={a.id}>
                         [{a.kind}] {a.title}
                       </option>
@@ -256,21 +342,39 @@ export function ProjectPage({ id }: { id: string }) {
                     </button>
                   </p>
                 ) : (
-                  <input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://…（或從上方素材庫選）" />
+                  <>
+                    <input
+                      value={sourceUrl}
+                      onChange={(e) => { setSourceUrl(e.target.value); setSourceUrlError(""); }}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        if (!v) { setSourceUrlError(""); return; }
+                        try {
+                          const u = new URL(v);
+                          setSourceUrlError(u.protocol === "http:" || u.protocol === "https:" ? "" : "網址格式不對，需以 https:// 開頭");
+                        } catch {
+                          setSourceUrlError("網址格式不對，需以 https:// 開頭");
+                        }
+                      }}
+                      placeholder="https://…（或從上方素材庫選）"
+                    />
+                    {sourceUrlError && <p className="error">{sourceUrlError}</p>}
+                  </>
                 )}
               </>
             )}
             <label>{model?.kind === "audio" && model.needs == null ? "要唸的文字/音樂描述" : "提示詞（世界觀會自動帶入，不必重講背景）"}</label>
-            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂，柔和光線灑落，一炷香的靜謐" />
+            {/* id 是「用這個」等功能捲動聚焦的錨點，別拿掉 */}
+            <textarea id="gen-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂，柔和光線灑落，一炷香的靜謐" />
             <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
               <button
                 className="primary"
-                disabled={!prompt.trim() || !model || (model.needs != null && !sourceAsset && !sourceUrl.trim()) || submit.isPending}
+                disabled={disableReason != null || submit.isPending}
                 onClick={() => setConfirming(true)}
               >
-                {submit.isPending ? "送出中…" : `生成（−${model?.points ?? 0} 點）`}
+                {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${model.points} 點）`}
               </button>
-              <span className="hint">失敗自動退點・額度由組長調整</span>
+              <span className="hint">{disableReason ?? "失敗自動退點・額度由管理員調整"}</span>
             </div>
 
             {/* 生成前確認彈窗（簡報「花錢前先讓你看價，你點頭才做」） */}
