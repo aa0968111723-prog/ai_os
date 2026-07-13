@@ -27,8 +27,125 @@ function srtTime(totalSec: number): string {
   return `${h}:${m}:${s},${millis}`;
 }
 
+// 字幕可讀性上限：每塊約 18 個全形字，中文閱讀速度上限約 7 字/秒（過長旁白要切多塊）
+const CUE_MAX_VISUAL = 18;
+
+/** 視覺寬度：全形（中文）算 1，半形（ASCII）算 0.5，貼近「每塊 ~18 全形字」的觀感 */
+function visualWidth(text: string): number {
+  let w = 0;
+  for (const ch of text) w += /[\x00-\xff]/.test(ch) ? 0.5 : 1;
+  return w;
+}
+
+/** 把過長、無標點可切的片段硬切成不超過上限的塊 */
+function hardWrap(seg: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (const ch of seg) {
+    const chW = /[\x00-\xff]/.test(ch) ? 0.5 : 1;
+    if (cur && visualWidth(cur) + chW > CUE_MAX_VISUAL) {
+      out.push(cur);
+      cur = "";
+    }
+    cur += ch;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 /**
- * 從分鏡的配音詞＋秒數組出 SRT 字幕（每幕一句、依序累計時間）。
+ * 把一幕旁白依標點（。！？，、；及換行）切成最小語意片段，再貪婪合併至每塊上限；
+ * 單一片段超長（無標點可切）時硬切。回傳可讀的字幕文字塊陣列。
+ */
+function splitSegments(voiceover: string): string[] {
+  const pieces: string[] = [];
+  let buf = "";
+  const flush = () => {
+    const s = buf.trim();
+    if (s) pieces.push(s);
+    buf = "";
+  };
+  for (const ch of voiceover) {
+    if (ch === "\n") {
+      flush();
+      continue;
+    }
+    buf += ch;
+    if ("。！？，、；".includes(ch)) flush(); // 標點留在片尾作為斷句點
+  }
+  flush();
+
+  const out: string[] = [];
+  let cur = "";
+  const push = () => {
+    if (cur) out.push(cur);
+    cur = "";
+  };
+  for (const p of pieces) {
+    if (visualWidth(p) > CUE_MAX_VISUAL) {
+      push();
+      for (const chunk of hardWrap(p)) out.push(chunk);
+      continue;
+    }
+    if (cur && visualWidth(cur) + visualWidth(p) > CUE_MAX_VISUAL) push();
+    cur += p;
+  }
+  push();
+  return out;
+}
+
+/**
+ * 把一幕旁白切成多個連號字幕塊，並在該幕時間預算 [startSec, endSec] 內
+ * 依各段字數比例分配起訖時間碼（末段對齊 endSec，避免累進誤差溢出幕邊界）。
+ * 空旁白回空陣列（該幕不產生字幕）。
+ */
+/** 每塊字幕最短顯示秒數：低於此會一閃而過、來不及讀。塊數過多時合併相鄰片段以達此下限 */
+const MIN_CUE_SEC = 0.8;
+
+/** 把片段平均併成最多 count 組（依片段數平均分桶，如 8→3 桶為 3/3/2），保證塊數不超過時間放得下的數量 */
+function mergeToCount(segs: string[], count: number): string[] {
+  if (count >= segs.length) return segs;
+  const out: string[] = [];
+  const base = Math.floor(segs.length / count);
+  let extra = segs.length % count;
+  let idx = 0;
+  for (let b = 0; b < count; b++) {
+    const take = base + (extra > 0 ? 1 : 0);
+    if (extra > 0) extra--;
+    out.push(segs.slice(idx, idx + take).join(""));
+    idx += take;
+  }
+  return out;
+}
+
+function splitCue(voiceover: string, startSec: number, endSec: number): Array<{ start: number; end: number; text: string }> {
+  const text = (voiceover ?? "").trim();
+  if (!text) return [];
+  let segments = splitSegments(text)
+    .map((s) => s.replace(/[，、；]+$/, "").trim()) // 尾端非句末標點（逗/頓/分號）去掉更乾淨
+    .filter((s) => s.length > 0);
+  if (segments.length === 0) return [];
+  // 每塊最少 MIN_CUE_SEC：把塊數上限壓到「這幕時間放得下」的數量，避免短幕多句時字幕一閃而過
+  const span0 = Math.max(endSec - startSec, 0);
+  const maxCues = Math.max(1, Math.floor(span0 / MIN_CUE_SEC));
+  if (segments.length > maxCues) segments = mergeToCount(segments, maxCues);
+
+  const totalChars = segments.reduce((n, s) => n + s.length, 0) || 1;
+  const span = Math.max(endSec - startSec, 0);
+  const cues: Array<{ start: number; end: number; text: string }> = [];
+  let t = startSec;
+  for (let i = 0; i < segments.length; i++) {
+    const isLast = i === segments.length - 1;
+    const end = isLast ? endSec : t + span * (segments[i].length / totalChars);
+    cues.push({ start: t, end, text: segments[i] });
+    t = end;
+  }
+  return cues;
+}
+
+/**
+ * 從分鏡的配音詞＋秒數組出 SRT 字幕：每幕依旁白長度切成多個連號可讀塊，
+ * 各幕時間依序累計（每幕佔其設定秒數，最少 3 秒）。
  * 沒有配音詞的幕仍推進時間軸（保留其秒數的空檔），只有有詞的幕才產生字幕塊。
  * 回空字串代表整片都沒有配音詞（不放空字幕檔）。
  */
@@ -38,12 +155,13 @@ function buildSrt(scenes: Array<{ durationSec: number; voiceover: string | null 
   let idx = 0;
   for (const sc of scenes) {
     const dur = sc.durationSec > 0 ? sc.durationSec : 3;
-    const text = (sc.voiceover ?? "").trim();
-    if (text) {
+    const start = t;
+    const end = t + dur;
+    t = end;
+    for (const cue of splitCue(sc.voiceover ?? "", start, end)) {
       idx += 1;
-      blocks.push(`${idx}\n${srtTime(t)} --> ${srtTime(t + dur)}\n${text}`);
+      blocks.push(`${idx}\n${srtTime(cue.start)} --> ${srtTime(cue.end)}\n${cue.text}`);
     }
-    t += dur;
   }
   return blocks.join("\n\n");
 }
@@ -135,21 +253,29 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
     `- 調性：${worldview.tones.join("、") || "—"}`,
     `- 禁忌事項：${worldview.taboos.join("；") || "—"}`,
     "",
-    "| 鏡號 | 場次 | 秒數 | 類型 | 提示詞 | 模型 |",
-    "|---|---|---|---|---|---|",
+    "| 鏡號 | 場次 | 秒數 | 類型 | 檔名 | 進出點時間碼 | 提示詞 | 模型 |",
+    "|---|---|---|---|---|---|---|---|",
   ];
 
   // 缺漏素材集中收集、待表格結束後再列——插在表格列中間會把 markdown 表格截斷
   const warnings: string[] = [];
   let videoIdx = 0;
   let imageIdx = 0;
+  // 鏡頭表欄位：每幕實際寫入交付包的相對檔名（下方主迴圈成功入包後回填）＋依序累計的進/出點時間碼。
+  // 時間碼與字幕同一套規則（每幕佔其設定秒數，最少 3 秒），組裝時間軸與分鏡順序一致即可對齊。
+  const writtenNames: (string | null)[] = new Array(scenes.length).fill(null);
+  let tcAcc = 0;
+  const times = scenes.map((sc) => {
+    const dur = sc.durationSec > 0 ? sc.durationSec : 3;
+    const inSec = tcAcc;
+    tcAcc += dur;
+    return { in: inSec, out: tcAcc };
+  });
+  // 序號動態補零：依總鏡數決定位數（至少 2 位），避免破百鏡在檔案總管字典序亂序。
+  const sceneNumWidth = Math.max(2, String(scenes.length).length);
   for (const [i, scene] of scenes.entries()) {
     if (clientAbort.signal.aborted) return; // 斷線後別再抓剩餘素材白做工
     const asset = assets.find((a) => a.id === scene.assetId);
-    const gen = asset ? generations.find((g) => g.id === (asset.meta as { generationId?: string })?.generationId) : undefined;
-    lines.push(
-      `| ${i + 1} | ${scene.title} | ${scene.durationSec}s | ${asset?.kind ?? "—"} | ${gen?.prompt ?? "—"} | ${gen?.modelId ?? "—"} |`,
-    );
     if (!asset) continue;
     // 來源一律以串流進 archive（不整檔進 RAM）；「取得來源」階段的失敗屬單檔容錯：跳過＋註記
     let source: Readable;
@@ -187,7 +313,7 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
       warnings.push(`「${scene.title}」素材讀取失敗，未入包（可於系統內重新生成）`);
       continue;
     }
-    const num = String(i + 1).padStart(2, "0");
+    const num = String(i + 1).padStart(sceneNumWidth, "0");
     const extOf = (fallback: string) => (asset.mime && extFromMime(asset.mime)) || fallback;
     let name: string;
     if (asset.kind === "video") {
@@ -201,6 +327,7 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
     }
     try {
       await appendAndWait(archive, source, name, clientAbort.signal);
+      writtenNames[i] = name; // 成功入包才回填鏡頭表的實際相對檔名
     } catch (err) {
       if (clientAbort.signal.aborted) return; // 斷線中止視為正常結束，不往外拋 500
       // append 之後的串流錯誤代表該 entry 半寫、zip 已不可修復——不能 continue 交付壞包，
@@ -211,9 +338,22 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
 
   if (clientAbort.signal.aborted) return;
 
+  // 鏡頭表主體：每幕一列，補上實際寫入交付包的相對檔名（缺媒體標「（無素材）」）與累計進出點時間碼。
+  for (const [i, scene] of scenes.entries()) {
+    const asset = assets.find((a) => a.id === scene.assetId);
+    const gen = asset ? generations.find((g) => g.id === (asset.meta as { generationId?: string })?.generationId) : undefined;
+    const file = writtenNames[i] ?? "（無素材）";
+    const tc = `${srtTime(times[i].in)} → ${srtTime(times[i].out)}`;
+    lines.push(
+      `| ${i + 1} | ${scene.title} | ${scene.durationSec}s | ${asset?.kind ?? "—"} | ${file} | ${tc} | ${gen?.prompt ?? "—"} | ${gen?.modelId ?? "—"} |`,
+    );
+  }
+
   // 00_鎖定原素材：固定素材模式的原音/開示/配樂——原封保留，剪輯時圍繞它組裝、不改動
   const lockedAssets = assets.filter((a) => a.locked);
   let lockedIdx = 0;
+  // 序號動態補零：與場景素材同規則（至少 2 位），破百件也維持字典序。
+  const lockedNumWidth = Math.max(2, String(lockedAssets.length).length);
   const kindDir: Record<string, string> = { audio: "音訊", video: "影片", image: "圖像", doc: "文件" };
   for (const asset of lockedAssets) {
     if (clientAbort.signal.aborted) return;
@@ -249,7 +389,7 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
     }
     lockedIdx += 1;
     const ext = (asset.mime && extFromMime(asset.mime)) || "";
-    const num = String(lockedIdx).padStart(2, "0");
+    const num = String(lockedIdx).padStart(lockedNumWidth, "0");
     try {
       await appendAndWait(archive, source, `00_鎖定原素材/${kindDir[asset.kind] ?? "其他"}/${num}_${safeName(asset.title)}${ext}`, clientAbort.signal);
     } catch (err) {

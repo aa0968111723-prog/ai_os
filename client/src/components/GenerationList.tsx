@@ -1,5 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
+
+/**
+ * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（背景分頁/未授權）建構子會丟例外，包 try 忽略。
+ * 純附加通知——不影響任何既有輪詢與顯示邏輯。
+ */
+function notifyDesktop(items: { title: string; body: string }[]): void {
+  if (items.length === 0 || typeof Notification === "undefined") return;
+  const fire = () => {
+    if (Notification.permission !== "granted") return;
+    for (const it of items) {
+      try {
+        new Notification(it.title, { body: it.body });
+      } catch {
+        /* 某些瀏覽器 constructor 受限（如需 ServiceWorker），忽略即可 */
+      }
+    }
+  };
+  if (Notification.permission === "default") {
+    Notification.requestPermission().then(fire).catch(() => {});
+  } else {
+    fire();
+  }
+}
 
 function StatusPoller({ id }: { id: string }) {
   const utils = trpc.useUtils();
@@ -45,6 +68,60 @@ export function GenerationList({ projectId }: { projectId: string }) {
       refetchIntervalInBackground: true,
     },
   );
+  // #0 完成通知：在列表層偵測某筆生成由 queued/running 轉 done/failed 的「邊緣」，
+  // 發桌面通知＋（背景分頁時）標題未讀徽章。推進已改由伺服器背景做，這裡純附加通知、不改輪詢。
+  const prevStatusRef = useRef<Map<string, string>>(new Map());
+  const unreadRef = useRef(0);
+  const baseTitleRef = useRef<string>("");
+
+  // 分頁切回前景即清除未讀徽章，還原原始標題
+  useEffect(() => {
+    const onVisible = () => {
+      if (!document.hidden && unreadRef.current > 0) {
+        unreadRef.current = 0;
+        if (baseTitleRef.current) document.title = baseTitleRef.current;
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
+  useEffect(() => {
+    const rows = list.data;
+    if (!rows) return;
+    const prev = prevStatusRef.current;
+    const isFirst = prev.size === 0; // 首輪只建基準，不通知（避免載入既有已完成列時洗一排通知）
+    const justFinished: { title: string; body: string }[] = [];
+    for (const g of rows) {
+      const before = prev.get(g.id);
+      if (!isFirst && (before === "queued" || before === "running") && (g.status === "done" || g.status === "failed")) {
+        justFinished.push({ title: g.status === "done" ? "生成完成 ✓" : "生成失敗", body: g.prompt.slice(0, 20) });
+      }
+      prev.set(g.id, g.status);
+    }
+    // 清掉已不在列表的舊 id（列表上限 30，避免 map 無限長）
+    for (const id of Array.from(prev.keys())) {
+      if (!rows.some((g) => g.id === id)) prev.delete(id);
+    }
+    if (justFinished.length === 0) return;
+    // (1) 桌面通知——聚合：一次偵測到多筆完成（如工作流一次跑完多鏡）就發「一則彙總」而非逐筆洗版
+    if (justFinished.length === 1) {
+      notifyDesktop(justFinished);
+    } else {
+      const doneN = justFinished.filter((x) => x.title.includes("完成")).length;
+      const failN = justFinished.length - doneN;
+      const head = [doneN ? `${doneN} 個生成完成 ✓` : "", failN ? `${failN} 個失敗` : ""].filter(Boolean).join("・");
+      const body = justFinished.map((x) => x.body).slice(0, 3).join("；") + (justFinished.length > 3 ? "…" : "");
+      notifyDesktop([{ title: head, body }]);
+    }
+    if (document.hidden) {
+      // (2) 背景分頁標題徽章：(N) 前綴；base 只抓一次並剝掉既有前綴，切回前景由上面的 effect 清除
+      if (!baseTitleRef.current) baseTitleRef.current = document.title.replace(/^\(\d+\)\s*/, "");
+      unreadRef.current += justFinished.length;
+      document.title = `(${unreadRef.current}) ${baseTitleRef.current}`;
+    }
+  }, [list.data]);
+
   // 與 SceneList 同 key 共用快取，不會多打 API——用來判斷成品是否已加入分鏡
   const scenes = trpc.scenes.listByProject.useQuery({ projectId });
   const [copiedId, setCopiedId] = useState<string | null>(null);

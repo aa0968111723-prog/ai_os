@@ -26,6 +26,7 @@ import {
 import { markBootReady, isBootReady } from "./services/boot";
 import { attachRealtime } from "./services/realtime";
 import { startWorkflowRunner } from "./services/workflowRunner";
+import { startGenerationRunner } from "./services/generationRunner";
 import { db, schema } from "./db";
 import { eq, sql } from "drizzle-orm";
 
@@ -422,10 +423,11 @@ const httpServer = app.listen(port, () => {
         await syncCatalog();
         await ensureSeed();
         markBootReady();
-        // DB 就緒後才啟動工作流執行器（它每 4 秒讀 workflow_runs，建表前啟動只會空轉報錯）
+        // DB 就緒後才啟動背景執行器（每數秒讀 workflow_runs/generations，建表前啟動只會空轉報錯）
         startWorkflowRunner();
+        startGenerationRunner(); // A：單張生成也改由伺服器背景推進，關頁不再卡「生成中」
         scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
-        console.log("[boot] ✓ 建表/目錄/種子完成，系統就緒（工作流執行器已啟動）");
+        console.log("[boot] ✓ 建表/目錄/種子完成，系統就緒（工作流＋單張生成執行器已啟動）");
         return;
       }
     } catch (err) {

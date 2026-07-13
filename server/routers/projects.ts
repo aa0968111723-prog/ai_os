@@ -106,6 +106,13 @@ export const projectsRouter = router({
     if (!isUploader && role === "member") {
       throw new TRPCError({ code: "FORBIDDEN", message: "只有上傳者本人或組長以上可以刪除素材" });
     }
+    // 鎖定的固定素材（師父原音/開示/配樂）不可直接刪，先解鎖再刪，避免誤刪不可回復的原始素材
+    if (asset.locked) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "這是鎖定的固定素材（師父原音/開示/配樂），請先解除鎖定再刪除",
+      });
+    }
     await db.update(schema.scenes).set({ assetId: null }).where(eq(schema.scenes.assetId, asset.id));
     await db.delete(schema.assets).where(eq(schema.assets.id, asset.id));
     if (asset.storagePath) await removeStoredFile(asset.storagePath);

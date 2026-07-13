@@ -26,6 +26,34 @@ const SOURCE_INCOMPAT: Record<string, string[]> = {
   video: ["audio"],
 };
 
+/** 平滑捲動到頁面某錨點（引導步驟／交付出口指引共用） */
+function scrollToSelector(selector: string) {
+  requestAnimationFrame(() => {
+    document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
+/** 白話小提示：術語旁的「?」小圖示，hover／點擊顯示一句人話（純前端，用原生 title＋aria-label） */
+function HelpTip({ text }: { text: string }) {
+  return (
+    <span
+      role="img"
+      tabIndex={0}
+      aria-label={text}
+      title={text}
+      style={{
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        width: 16, height: 16, marginLeft: 6, borderRadius: "50%",
+        border: "1px solid var(--primary)", color: "var(--primary)",
+        fontSize: 11, lineHeight: 1, fontWeight: 700, cursor: "help",
+        verticalAlign: "middle", userSelect: "none",
+      }}
+    >
+      ?
+    </span>
+  );
+}
+
 /** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
 export function ProjectPage({ id }: { id: string }) {
   const utils = trpc.useUtils();
@@ -85,6 +113,11 @@ export function ProjectPage({ id }: { id: string }) {
   const [sceneIds, setSceneIds] = useState<string[]>([]);
   const toggleScene = (sid: string) => setSceneIds((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]));
   const assets = trpc.projects.assets.useQuery({ projectId: id });
+  // 「從這裡開始」步驟列用：讀既有查詢判定各步是否完成（與 GenerationList／SceneList 共用快取，不額外增負擔）
+  const generations = trpc.generation.listByProject.useQuery({ projectId: id });
+  const scenes = trpc.scenes.listByProject.useQuery({ projectId: id });
+  /** 引導步驟列收合狀態（全部完成後可整條收起，不佔版面） */
+  const [onboardCollapsed, setOnboardCollapsed] = useState(false);
   /** 生成確認彈窗：先估點數、使用者點頭才真的送出、扣點 */
   const [confirming, setConfirming] = useState(false);
   // 帶 groupId（本專案的組）才算得出週/日額度——不帶時 quota.my 的 weeklyQuota 恆為 null，彈窗週用量變死碼
@@ -136,6 +169,17 @@ export function ProjectPage({ id }: { id: string }) {
 
   const isOwner = me.data?.user.id === p.ownerId;
   const canArchive = isOwner || isLeader;
+
+  // 「從這裡開始」四步：用實際 state 判定完成打勾
+  const sceneCount = scenes.data?.length ?? 0;
+  const onboardSteps = [
+    { label: "設世界觀", done: !!(wv.logline.trim() || wv.message.trim()), target: "#onboard-worldview", hint: "填一句故事或關鍵訊息" },
+    { label: "生成一鏡", done: !!generations.data?.some((g) => g.status === "done"), target: "#gen-prompt", hint: "在生成台做出第一張成品" },
+    { label: "加入分鏡", done: sceneCount > 0, target: "#onboard-delivery", hint: "把成品排進分鏡" },
+    // 第4步用「有分鏡通過審核」當完成訊號，才不會一有分鏡就跟第3步一起打勾（誤導已交付）
+    { label: "送審／打包", done: !!scenes.data?.some((s) => s.status === "approved"), target: "#onboard-delivery", hint: "送審通過後即可打包交付" },
+  ];
+  const allStepsDone = onboardSteps.every((s) => s.done);
 
   const toggle = (field: "tones" | "themes" | "styles", value: string) => {
     const current = wv[field];
@@ -229,15 +273,76 @@ export function ProjectPage({ id }: { id: string }) {
         {p.format}・{p.platform}
         {wv.logline ? `・${wv.logline}` : ""}
       </p>
+      {/* #25 常駐交付出口指引：告訴非工程師成品最後怎麼落地，點一下捲到分鏡・交付區 */}
+      <p
+        className="hint"
+        role="button"
+        tabIndex={0}
+        onClick={() => scrollToSelector("#onboard-delivery")}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); scrollToSelector("#onboard-delivery"); } }}
+        style={{ marginTop: -4, marginBottom: 10, cursor: "pointer", fontSize: 13 }}
+      >
+        做好後可打包成 zip，媒體檔直接拖進剪映／Premiere 就能剪 →
+      </p>
       {archiveProject.error && <p className="error">{archiveProject.error.message}</p>}
+
+      {/* #9 「從這裡開始」步驟列：用實際 state 判定完成打勾，點某步捲到對應區塊 */}
+      <section className="card" data-fb="從這裡開始" style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <b style={{ fontSize: 14 }}>從這裡開始</b>
+          <HelpTip text="這是製作一支片的四個步驟。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
+          <span style={{ flex: "1 1 auto" }} />
+          {allStepsDone && <span className="chip" style={{ fontSize: 12 }}>全部完成 🎉</span>}
+          <button
+            style={{ padding: "2px 10px", fontSize: 12 }}
+            onClick={() => setOnboardCollapsed((v) => !v)}
+          >
+            {onboardCollapsed ? "展開" : "收合"}
+          </button>
+        </div>
+        {!onboardCollapsed && (
+          <div style={{ display: "flex", alignItems: "stretch", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            {onboardSteps.map((s, i) => (
+              <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  onClick={() => scrollToSelector(s.target)}
+                  title={s.hint}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, textAlign: "left",
+                    padding: "8px 12px", borderRadius: 10, cursor: "pointer",
+                    border: s.done ? "1px solid var(--primary)" : "1px solid var(--border)",
+                    background: s.done ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "transparent",
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      width: 22, height: 22, borderRadius: "50%", fontSize: 12, fontWeight: 700,
+                      border: s.done ? "none" : "1px solid var(--border)",
+                      background: s.done ? "var(--primary)" : "transparent",
+                      color: s.done ? "#fff" : "inherit",
+                    }}
+                  >
+                    {s.done ? "✓" : i + 1}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: s.done ? 600 : 400 }}>{s.label}</span>
+                </button>
+                {i < onboardSteps.length - 1 && <span aria-hidden className="hint" style={{ fontSize: 14 }}>→</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="cols">
         <div className="stack">
           {/* 世界觀（快速層） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
-          <section className="card" data-fb="世界觀卡">
+          <section className="card" data-fb="世界觀卡" id="onboard-worldview">
             <h2>
               世界觀（專案定盤星）
+              <HelpTip text="這支片的固定設定，填一次，之後每次生成 AI 自動記得，不用重講背景。" />
               {updateWv.isPending ? (
                 <span className="hint" style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</span>
               ) : wvSaved !== "idle" ? (
@@ -293,7 +398,7 @@ export function ProjectPage({ id }: { id: string }) {
                 </span>
               ))}
             </div>
-            <label id="wv-tones">調性（生成時自動注入）</label>
+            <label id="wv-tones">調性（生成時自動注入）<HelpTip text="語氣與畫風，會自動加進每次生成的提示詞。" /></label>
             <div role="group" aria-labelledby="wv-tones">
               {options.isLoading && !toneOpts.length && <span className="hint">載入中…</span>}
               {toneOpts.map((t) => {
@@ -322,7 +427,7 @@ export function ProjectPage({ id }: { id: string }) {
                 </span>
               ))}
             </div>
-            <label id="wv-styles">視覺風格（畫面一致的關鍵，生成時自動注入）</label>
+            <label id="wv-styles">視覺風格（畫面一致的關鍵，生成時自動注入）<HelpTip text="語氣與畫風，會自動加進每次生成的提示詞。" /></label>
             <div role="group" aria-labelledby="wv-styles">
               {options.isLoading && !styleOpts.length && <span className="hint">載入中…</span>}
               {styleOpts.map((s) => {
@@ -387,6 +492,9 @@ export function ProjectPage({ id }: { id: string }) {
           <ScriptSplitCard projectId={id} />
 
           {/* 角色定裝卡：勾選後生成自動注入外觀錨點 */}
+          <p className="hint" style={{ margin: "0 0 6px", fontSize: 13 }}>
+            角色定裝卡<HelpTip text="角色長相鎖定，勾了跨鏡頭不走樣。" />
+          </p>
           <CharacterCards projectId={id} selectedIds={charIds} onToggle={toggleChar} />
 
           {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
@@ -530,8 +638,11 @@ export function ProjectPage({ id }: { id: string }) {
 
           {/* 分鏡與交付 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.scenes)}>
-            {/* data-fb 讓元件回饋標定「打包下載」（分鏡與交付區）；透明包裹，不影響版面 */}
-            <div data-fb="打包下載">
+            {/* data-fb 讓元件回饋標定「打包下載」（分鏡與交付區）；透明包裹，不影響版面。id 供引導步驟與交付指引捲動定位 */}
+            <div data-fb="打包下載" id="onboard-delivery">
+              <p className="hint" style={{ margin: "0 0 6px", fontSize: 13 }}>
+                分鏡・交付<HelpTip text="把成品排成一支片的順序，可送審與打包交付。" />
+              </p>
               <SceneList projectId={id} isLeader={isLeader} onUsePrompt={(text) => setPrompt(text)} />
             </div>
           </CollabZone>

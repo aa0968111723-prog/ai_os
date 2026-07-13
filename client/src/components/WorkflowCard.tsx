@@ -1,5 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
+
+/**
+ * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（未授權/背景分頁）建構子會丟例外，包 try 忽略。
+ * 純附加通知——不影響任何既有輪詢與顯示邏輯。
+ */
+function notifyDesktop(items: { title: string; body: string }[]): void {
+  if (items.length === 0 || typeof Notification === "undefined") return;
+  const fire = () => {
+    if (Notification.permission !== "granted") return;
+    for (const it of items) {
+      try {
+        new Notification(it.title, { body: it.body });
+      } catch {
+        /* 某些瀏覽器 constructor 受限，忽略即可 */
+      }
+    }
+  };
+  if (Notification.permission === "default") {
+    Notification.requestPermission().then(fire).catch(() => {});
+  } else {
+    fire();
+  }
+}
 
 /** 與伺服器 workflowRuns.steps 的 jsonb 同形狀（tRPC 端 jsonb 推導不出型別,前端自己標） */
 interface RunStep {
@@ -35,6 +58,28 @@ export function WorkflowCard({ projectId }: { projectId: string }) {
       refetchIntervalInBackground: true,
     },
   );
+  // #0 完成通知：偵測工作流 run 由 running 轉 done/failed 的「邊緣」，發一則桌面通知。
+  // 推進本就在伺服器背景做，這裡純附加通知、不改既有輪詢。
+  const prevRunStatusRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const rows = runs.data;
+    if (!rows) return;
+    const prev = prevRunStatusRef.current;
+    const isFirst = prev.size === 0; // 首輪只建基準，不通知（避免載入既有已結束 run 時洗一排通知）
+    const finished: { title: string; body: string }[] = [];
+    for (const r of rows) {
+      const before = prev.get(r.id);
+      if (!isFirst && before === "running" && (r.status === "done" || r.status === "failed")) {
+        finished.push({ title: r.status === "done" ? "工作流完成 ✓" : "工作流失敗", body: r.prompt.slice(0, 20) });
+      }
+      prev.set(r.id, r.status);
+    }
+    for (const id of Array.from(prev.keys())) {
+      if (!rows.some((r) => r.id === id)) prev.delete(id);
+    }
+    notifyDesktop(finished);
+  }, [runs.data]);
+
   const hasActive = runs.data?.some(isActiveRun) ?? false;
   // 自己發起的活躍 run：伺服器端 start 也會擋（同人同專案一次一條），這裡先把按鈕鎖起來少一次白打
   const hasMyActive = (runs.data ?? []).some((r) => isActiveRun(r) && r.userId === me.data?.user.id);
