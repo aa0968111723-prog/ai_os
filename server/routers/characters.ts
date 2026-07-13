@@ -44,6 +44,12 @@ export const charactersRouter = router({
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
+      // 跨組引用驗證：referenceAssetId 必須同組，否則能把別組定裝圖綁進本組角色（與 generationCore 對 sourceAssetId 一致）
+      if (input.referenceAssetId) {
+        const [refAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.referenceAssetId));
+        if (!refAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到參考素材" });
+        if (refAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "參考素材不屬於此專案的組" });
+      }
       const [row] = await db
         .insert(schema.characters)
         .values({
@@ -73,6 +79,12 @@ export const charactersRouter = router({
       const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, input.id));
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
+      // 跨組引用驗證：改綁 referenceAssetId 時同樣要同組（null＝清除引用，免驗）
+      if (input.referenceAssetId) {
+        const [refAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.referenceAssetId));
+        if (!refAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到參考素材" });
+        if (refAsset.groupId !== row.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "參考素材不屬於此角色的組" });
+      }
       const [updated] = await db
         .update(schema.characters)
         .set({

@@ -4,6 +4,7 @@
  * 原則：健康檢查不等 DB（healing-studio 的部署教訓）。
  */
 import express from "express";
+import helmet from "helmet";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import multer from "multer";
@@ -32,11 +33,42 @@ const app = express();
 const port = Number(process.env.PORT ?? 3000);
 const isProd = process.env.NODE_ENV === "production";
 
+// Railway 在前面終止 TLS 並轉發，信任第一層 proxy 才能取到真實 client IP（速率限制/HSTS 正確）
+app.set("trust proxy", 1);
+
+// 安全標頭（#9）：nosniff、X-Frame-Options: DENY、HSTS、Referrer-Policy 由 helmet 預設提供；
+// CSP 手動放行 SPA 與 fal 成品：React inline style 需 style 'unsafe-inline'；生成成品/截圖是
+// https/blob/data 圖片一律放行；connectSrc 要含 https:/wss: 讓 tRPC 與即時協作 WS 連得上。
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        defaultSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "blob:", "https:"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        connectSrc: ["'self'", "https:", "wss:"],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        // 移除 helmet 預設的 upgrade-insecure-requests：本地/CI 走 http localhost 時它會
+        // 把同源子資源強升為 https 而連不上，破壞既有 e2e；正式站由 Railway 提供 https。
+        upgradeInsecureRequests: null,
+      },
+    },
+    // 自家 /api/assets 圖片需被 SPA（開發時跨埠、正式時同源）載入，用 same-site 才不被 CORP 擋
+    crossOriginResourcePolicy: { policy: "same-site" },
+    hsts: { includeSubDomains: true },
+    referrerPolicy: { policy: "no-referrer" },
+  }),
+);
+
 app.use(express.json({ limit: "2mb" }));
 
 // 健康檢查 — 純 HTTP，不碰 DB
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, mockMode: isMockMode(), time: new Date().toISOString() });
+  // 只回存活狀態，不外洩生成模式等內部資訊（#26）
+  res.json({ ok: true, time: new Date().toISOString() });
 });
 
 // 就緒診斷 — 用瀏覽器打開就知道資料庫接通了沒（給非工程背景的自我診斷頁）
@@ -211,9 +243,14 @@ app.get("/api/assets/:id/file", async (req, res) => {
       return res.status(404).json({ error: "此素材沒有可用的檔案" });
     }
     res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const mime = asset.mime ?? "application/octet-stream";
+    // 圖片/影音維持 inline（縮圖與播放需要）；doc/pdf/txt 等非影音類強制下載，
+    // 避免瀏覽器內嵌渲染帶來的 XSS/內容嗅探風險（#19）
+    if (kindFromMime(mime) === "doc") res.setHeader("Content-Disposition", "attachment");
     // sendFile 內建 Range 支援（影片/音訊拖進度條需要）
     res.sendFile(absPathOf(asset.storagePath), {
-      headers: { "Content-Type": asset.mime ?? "application/octet-stream" },
+      headers: { "Content-Type": mime },
     });
   } catch (err) {
     console.error("[assets:file]", err);
@@ -333,6 +370,7 @@ app.get("/api/feedback/:id/shot", async (req, res) => {
         auth.groups.some((g) => g.groupId === report.groupId && (g.role === "leader" || g.role === "admin")));
     if (!canView) return res.status(403).json({ error: "沒有權限看這張截圖" });
     res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff"); // 截圖恆為圖片，維持 inline 但擋內容嗅探（#22）
     res.sendFile(absPathOf(report.screenshotPath), { headers: { "Content-Type": "image/png" } });
   } catch (err) {
     console.error("[feedback:shot]", err);
@@ -346,6 +384,22 @@ if (isProd) {
   const publicDir = path.join(dirname, "public");
   app.use(express.static(publicDir));
   app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+}
+
+// 回饋截圖孤兒清理排程（#6）：DB 就緒後啟動，開機延遲數分鐘先跑一次，其後每 6 小時一次。
+// 清理實作由儲存層提供；此處以動態 import 取用並全程容錯——函式缺席或執行失敗都靜默略過，
+// 背景維護工作絕不外拋、不影響服務啟動或既有流程。
+function scheduleFeedbackSweep(): void {
+  const runSweep = async (): Promise<void> => {
+    try {
+      const { sweepFeedbackShots } = await import("./services/storage");
+      await sweepFeedbackShots();
+    } catch (err) {
+      console.warn("[sweep] 回饋截圖孤兒清理略過：", err instanceof Error ? err.message : err);
+    }
+  };
+  setTimeout(() => void runSweep(), 3 * 60_000); // 開機後 3 分鐘先跑一次
+  setInterval(() => void runSweep(), 6 * 60 * 60_000); // 其後每 6 小時
 }
 
 const httpServer = app.listen(port, () => {
@@ -370,6 +424,7 @@ const httpServer = app.listen(port, () => {
         markBootReady();
         // DB 就緒後才啟動工作流執行器（它每 4 秒讀 workflow_runs，建表前啟動只會空轉報錯）
         startWorkflowRunner();
+        scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
         console.log("[boot] ✓ 建表/目錄/種子完成，系統就緒（工作流執行器已啟動）");
         return;
       }

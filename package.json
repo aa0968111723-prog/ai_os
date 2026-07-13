@@ -25,6 +25,7 @@
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.44.5",
     "express": "^4.21.2",
+    "helmet": "^8.3.0",
     "html2canvas": "^1.4.1",
     "multer": "^2.2.0",
     "pg": "^8.13.1",

@@ -3,8 +3,10 @@ import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, authedProcedure } from "../trpc";
 import { db, schema } from "../db";
+import type { Request } from "express";
 import {
   verifyPassword,
+  verifyPasswordOrDummy,
   hashPassword,
   createSession,
   destroySession,
@@ -17,6 +19,18 @@ import {
   getInvitePreview,
   loadAuthState,
 } from "../services/auth";
+
+// 取用戶端 IP 供 per-IP 限流：反代後真實 IP 在 x-forwarded-for 第一段（最靠近用戶）。
+// index.ts 不歸此次改動，故不依賴 Express trust proxy，直接由 header 解析；無 header 時退回 socket。
+function clientIp(req: Request): string | undefined {
+  const xff = req.headers["x-forwarded-for"];
+  const raw = Array.isArray(xff) ? xff[0] : xff;
+  if (raw) {
+    const first = raw.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  return req.socket?.remoteAddress ?? undefined;
+}
 
 export const authRouter = router({
   /** 目前登入狀態（未登入回 null，前端據此顯示登入頁） */
@@ -31,13 +45,14 @@ export const authRouter = router({
     .input(z.object({ email: z.string().email("email 格式不對"), password: z.string().min(1, "請填密碼") }))
     .mutation(async ({ ctx, input }) => {
       const email = input.email.toLowerCase().trim();
-      const rate = checkLoginRate(email);
+      const rate = checkLoginRate(email, clientIp(ctx.req));
       if (!rate.ok) {
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `嘗試太多次，請約 ${rate.retryAfterMin} 分鐘後再試` });
       }
       const [user] = await db.select().from(schema.users).where(eq(schema.users.email, email));
-      // 統一錯誤訊息：不洩漏帳號是否存在
-      if (!user || user.status !== "active" || !(await verifyPassword(input.password, user.passwordHash))) {
+      // 統一錯誤訊息且統一耗時：查無/停用帳號也跑一次等成本 bcrypt 比對，防帳號枚舉（時序側信道）
+      const passwordOk = await verifyPasswordOrDummy(input.password, user?.passwordHash);
+      if (!user || user.status !== "active" || !passwordOk) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "email 或密碼不正確" });
       }
       clearLoginRate(email);

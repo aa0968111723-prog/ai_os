@@ -19,19 +19,79 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
-/* ── 登入防爆破：同帳號 15 分鐘 5 次 ── */
+// 帳號枚舉防護用：模組載入時預算一個永不匹配的 dummy hash（cost 與真 hash 相同）。
+// 帳號不存在／停用時仍跑一次等成本的 bcrypt.compare，讓「帳號是否存在」無法由回應耗時推斷。
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("account-enumeration-timing-guard", 10);
+
+/**
+ * 登入專用密碼比對：帳號存在就比對真 hash；查無帳號（hash 為 null/undefined）時
+ * 改比對 dummy hash，耗時與真比對一致但必回 false。呼叫端仍要自行檢查帳號存在與狀態。
+ */
+export async function verifyPasswordOrDummy(plain: string, hash: string | null | undefined): Promise<boolean> {
+  if (!hash) {
+    await bcrypt.compare(plain, DUMMY_PASSWORD_HASH);
+    return false;
+  }
+  return bcrypt.compare(plain, hash);
+}
+
+/* ── 登入防爆破：同帳號 15 分鐘 5 次；同 IP 15 分鐘 30 次（滑動視窗） ── */
+const EMAIL_WINDOW_MS = 15 * 60_000;
+const IP_WINDOW_MS = 15 * 60_000;
+const IP_MAX = 30; // 內部工具人數少，30 次/15 分足以擋撞庫又不誤傷正常多帳號共用出口 IP
 const attempts = new Map<string, { count: number; resetAt: number }>();
-export function checkLoginRate(email: string): { ok: boolean; retryAfterMin?: number } {
+// 每 IP 保存視窗內的嘗試時間戳，實作真正的滑動視窗（過舊的時間戳會被裁掉）
+const ipHits = new Map<string, number[]>();
+
+// 定期清掃：兩個 Map 都會隨新 email／IP 無限成長，逾期項需回收。以呼叫時檢查上次清掃時間
+// 觸發（避免常駐 timer 在測試/關機時殘留），實務上每次登入嘗試都會順便維護。
+let lastSweepAt = 0;
+function sweep(now: number): void {
+  if (now - lastSweepAt < 5 * 60_000) return;
+  lastSweepAt = now;
+  for (const [key, entry] of attempts) {
+    if (now > entry.resetAt) attempts.delete(key);
+  }
+  for (const [key, times] of ipHits) {
+    const kept = times.filter((t) => now - t < IP_WINDOW_MS);
+    if (kept.length === 0) ipHits.delete(key);
+    else ipHits.set(key, kept);
+  }
+}
+
+// ip 選填：僅 login 傳入（changePassword 等已登入情境沿用單一 email/自訂 key 限流）。
+export function checkLoginRate(email: string, ip?: string): { ok: boolean; retryAfterMin?: number } {
   const now = Date.now();
+  sweep(now);
+
+  // 每帳號視窗（維持原行為與回傳語意）
+  let emailRetry = 0;
   const entry = attempts.get(email);
   if (!entry || now > entry.resetAt) {
-    attempts.set(email, { count: 1, resetAt: now + 15 * 60_000 });
-    return { ok: true };
+    attempts.set(email, { count: 1, resetAt: now + EMAIL_WINDOW_MS });
+  } else {
+    entry.count += 1;
+    // 無條件進位：剩 0.1 分鐘也報 1 分鐘，避免顯示「0 分鐘後再試」
+    if (entry.count > 5) emailRetry = Math.ceil((entry.resetAt - now) / 60_000);
   }
-  entry.count += 1;
-  if (entry.count <= 5) return { ok: true };
-  // 無條件進位：剩 0.1 分鐘也報 1 分鐘，避免顯示「0 分鐘後再試」
-  return { ok: false, retryAfterMin: Math.ceil((entry.resetAt - now) / 60_000) };
+
+  // 每 IP 滑動視窗
+  let ipRetry = 0;
+  if (ip) {
+    const hits = (ipHits.get(ip) ?? []).filter((t) => now - t < IP_WINDOW_MS);
+    if (hits.length >= IP_MAX) {
+      // 最舊的一筆滑出視窗後才會再放行
+      ipRetry = Math.ceil((hits[0] + IP_WINDOW_MS - now) / 60_000);
+    } else {
+      hits.push(now); // 未達上限才記這次嘗試，被擋時不再累積以免視窗永遠不清空
+    }
+    ipHits.set(ip, hits);
+  }
+
+  if (emailRetry > 0 || ipRetry > 0) {
+    return { ok: false, retryAfterMin: Math.max(emailRetry, ipRetry) || 1 };
+  }
+  return { ok: true };
 }
 export function clearLoginRate(email: string): void {
   attempts.delete(email);

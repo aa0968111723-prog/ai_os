@@ -5,11 +5,12 @@
  * 生成的送出/推進全部重用 generationCore 的積木（守門扣點、CAS、退點一份邏輯）。
  */
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getWorkflow } from "../../shared/models";
 import { advanceGeneration, submitGenerationCore, type GenerationRow } from "./generationCore";
+import { refund } from "./points";
 import { signAssetUrl } from "./storage";
 
 type RunRow = typeof schema.workflowRuns.$inferSelect;
@@ -25,6 +26,8 @@ interface RunStep {
 const TICK_MS = 4000;
 /** 單一 run 推進的放行門檻：逾時不砍原 promise，只讓本輪 tick 先結束去顧其他 run */
 const ADVANCE_TIMEOUT_MS = 60_000;
+/** #8 陳屍回收門檻：生成或 run 停滯逾此視為孤兒（與 routers/generation.ts 陳屍清掃同口徑，正常生成遠短於此） */
+const STALE_MS = 30 * 60 * 1000;
 
 let started = false;
 /** 本進程內推進中的 run：撈到已在推進的直接跳過——慢 run 不擋其他 run，也不會被下一輪重入雙寫 */
@@ -34,9 +37,23 @@ const inflight = new Set<string>();
 export function startWorkflowRunner(): void {
   if (started) return;
   started = true;
+  // #8 啟動時先掃一次陳屍：重佈／OOM 打斷後一開機就把凍結的點數與鎖死的 run 收斂，不等使用者觸發
+  void sweepZombies().catch((err) => console.warn("[workflow] 啟動陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err));
   setInterval(() => {
+    // 每輪先掃陳屍再推進：sweep 先於 tick 序列化，避免兩者對同一 run 併發搶寫（sweep 另有 inflight 與復查防護）。
     // 撈 runs 本身失敗（DB 抖動）也不能變成 unhandled rejection——記警告等下一輪
-    void tick().catch((err) => console.warn("[workflow] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err));
+    void (async () => {
+      try {
+        await sweepZombies();
+      } catch (err) {
+        console.warn("[workflow] 陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
+      }
+      try {
+        await tick();
+      } catch (err) {
+        console.warn("[workflow] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err);
+      }
+    })();
   }, TICK_MS);
   console.log(`[workflow] 執行器已啟動（每 ${TICK_MS / 1000} 秒推進一次）`);
 }
@@ -59,6 +76,94 @@ async function tick(): Promise<void> {
     .orderBy(asc(schema.workflowRuns.createdAt));
   // 同輪並行推進：一個卡住的 run（fal 慢回）不能擋住其他 run 的進度
   await Promise.allSettled(runs.filter((run) => !inflight.has(run.id)).map((run) => advanceWithGuard(run)));
+}
+
+/**
+ * #8 陳屍回收：無背景排程時，重佈／OOM 打斷會留下兩種孤兒——凍結點數且鎖死專案工作流。
+ * 掃 status='running' 的 run（inflight 中的交由正常路徑，不插手）：
+ *  (a) 目前步驟已有生成、卻卡 queued/running 逾 30 分鐘者：先用既有 advanceGeneration 收斂（fal 或已完成）；
+ *      仍收不動的孤兒（送出前被打斷、requestId 缺失，advanceGeneration 無從推進）→ 依帳本淨額退點並標 failed。
+ *  (b) 目前步驟無生成、且 run 逾 30 分鐘未動（重佈在寫入 generationId 前就被打斷）→ 標該步與 run failed，
+ *      並掃這條 run 所有步驟的生成把仍卡著的依帳本淨額退點（done 不動）——解凍點數、放開工作流鎖。
+ * 全程 compare-and-set＋復查最新狀態，杜絕與正常推進／使用者按停併發時的重複扣退。
+ */
+async function sweepZombies(): Promise<void> {
+  const cutoff = Date.now() - STALE_MS;
+  const runs = await db.select().from(schema.workflowRuns).where(eq(schema.workflowRuns.status, "running"));
+  for (const run of runs) {
+    if (inflight.has(run.id)) continue; // 正在推進的交給正常路徑，避免雙寫
+    try {
+      const steps = run.steps as RunStep[];
+      const step = steps[run.currentStep];
+      if (!step) continue; // 越界由正常 advanceRun 收攏，不在此處理
+      if (step.generationId) {
+        // (a) 先讓既有推進邏輯有機會收斂（fal 實際已完成/失敗時，advanceGeneration 會落 DB＋退點）
+        let gen: GenerationRow | null = null;
+        try {
+          gen = await advanceGeneration(step.generationId);
+        } catch (err) {
+          // NOT_FOUND＝佔位 id 已寫回但生成列不存在：交由正常 advanceRun 的冪等重送處理，不在此退點
+          if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
+        }
+        // 收斂後仍卡 queued/running 且逾時＝真孤兒：依帳本淨額退點標 failed，下一輪正常 settleStep 收攏 run
+        if (gen && (gen.status === "queued" || gen.status === "running") && gen.updatedAt.getTime() < cutoff) {
+          await reapStuckGeneration(gen.id);
+        }
+      } else if (run.updatedAt.getTime() < cutoff) {
+        // (b) 目前步驟無生成、run 又逾時未動：重佈在送出前打斷——收攏成 failed 並退凍結點數
+        await failStaleRun(run);
+      }
+    } catch (err) {
+      console.warn(`[workflow] 陳屍回收略過（下輪再試）：run=${run.id}`, err instanceof Error ? err.message : err);
+    }
+  }
+}
+
+/**
+ * 把單筆卡 queued/running 的生成收斂成 failed 並「依帳本淨額」退點——
+ * 行為與 routers/generation.ts 陳屍清掃一致：負淨額＝有扣過（退絕對值），0＝從未扣點（不退，免憑空加點）。
+ * compare-and-set：只有真正把列從 queued/running 推進成 failed 的那一次才退點，與正常輪詢／advanceGeneration 互斥防重複退點。
+ */
+async function reapStuckGeneration(genId: string): Promise<void> {
+  const [ledger] = await db
+    .select({ net: sql<number>`coalesce(sum(${schema.costLedger.delta}), 0)` })
+    .from(schema.costLedger)
+    .where(eq(schema.costLedger.generationId, genId));
+  const deducted = Math.max(0, -Number(ledger?.net ?? 0));
+  const updatedRows = await db
+    .update(schema.generations)
+    .set({
+      status: "failed",
+      error: "工作流生成停滯逾 30 分鐘，系統自動回收" + (deducted > 0 ? "，點數已退回" : ""),
+      pointsRefunded: deducted,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(schema.generations.id, genId), inArray(schema.generations.status, ["queued", "running"])))
+    .returning();
+  if (updatedRows.length === 0) return; // 已被別處推進到終局 → 不重複退點
+  const g = updatedRows[0];
+  if (deducted > 0) await refund(g.userId, g.groupId, deducted, "工作流生成停滯自動回收退回", genId);
+}
+
+/** (b) 收攏一條重佈打斷的陳屍 run：復查最新狀態後，退凍結點數、標步驟與 run failed（steps 單一寫者仍是本執行器） */
+async function failStaleRun(run: RunRow): Promise<void> {
+  // 送出前復查最新狀態：撈列到這裡有數秒空窗，期間若被正常推進（updatedAt 會刷新）或使用者按停即讓步，不硬收
+  const [fresh] = await db.select().from(schema.workflowRuns).where(eq(schema.workflowRuns.id, run.id));
+  if (!fresh || fresh.status !== "running" || fresh.updatedAt.getTime() >= Date.now() - STALE_MS) return;
+  if (inflight.has(run.id)) return;
+  const steps = fresh.steps as RunStep[];
+  // 依帳本淨額退點：掃全 run 的生成，仍卡 queued/running 者退凍結點數（done 由 CAS 略過，不誤退已消耗的完成步驟）
+  for (const s of steps) {
+    if (s.generationId) await reapStuckGeneration(s.generationId);
+  }
+  const idx = fresh.currentStep;
+  const step = steps[idx];
+  if (step) {
+    if (step.status === "pending" || step.status === "running") step.status = "failed";
+    step.detail = "重新部署中斷，系統自動回收";
+  }
+  markRestStopped(steps, idx);
+  await saveRun(fresh.id, { steps, status: "failed", error: "這條工作流在送出前被系統重啟打斷，已自動停止——請重新啟動一次" });
 }
 
 /** 推進一個 run，帶逾時放行：逾時只結束等待、記警告——run 留在 inflight 直到原 promise 結束，防同 run 雙寫 */

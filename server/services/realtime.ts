@@ -28,6 +28,12 @@ const MIN_CURSOR_MS = 40;
 const MIN_FOCUS_MS = 150;
 const MIN_INVALIDATE_MS = 400;
 
+/** #7 連線數上限：同一 user 單房最多 4 條、單房最多 60 條、全域最多 500 條——超出即握手後 close(4429)，
+ *  防單點多開放大 fanout／吃滿記憶體（DoS 面）。數字保守，正常協作遠低於此。 */
+const MAX_PER_USER_PER_ROOM = 4;
+const MAX_ROOM_CONNECTIONS = 60;
+const MAX_TOTAL_CONNECTIONS = 500;
+
 interface Client {
   ws: WebSocket;
   userId: string;
@@ -48,6 +54,56 @@ interface Client {
 
 /** 房間：projectId → 連線集合（同一 user 開兩個分頁＝兩個 Client，presence 去重顯示一人） */
 const rooms = new Map<string, Set<Client>>();
+
+/** #7 全域連線總數（join +1／close -1）：全域上限檢查 O(1)，不必每次遍歷所有房間累加 */
+let totalConnections = 0;
+/** 每 user 目前連線數：歸零時順手清掉其廣播節流狀態，避免 userThrottle 隨時間無限膨脹 */
+const userConnCount = new Map<string, number>();
+
+/**
+ * #7 每-user 廣播節流（跨同一 user 的多條連線聚合）：
+ * 單分頁使用者與原行為完全一致——其單一連線本就受同頻率的 per-connection 節流限制，這層永不額外命中；
+ * 只有同一人多開（多分頁）時，才把被放大的 fanout 收斂成每 user 一份，避免單人灌爆整房廣播。
+ */
+const userThrottle = new Map<string, { cursor: number; focus: number; invalidate: number }>();
+function userThrottled(userId: string, kind: "cursor" | "focus" | "invalidate", now: number, minMs: number): boolean {
+  let t = userThrottle.get(userId);
+  if (!t) {
+    t = { cursor: 0, focus: 0, invalidate: 0 };
+    userThrottle.set(userId, t);
+  }
+  if (now - t[kind] < minMs) return true;
+  t[kind] = now;
+  return false;
+}
+
+/**
+ * #20 Origin 白名單：只放行 APP_URL 對應網域與 localhost，擋跨站 WebSocket 劫持（SameSite=Lax 之外的縱深防禦）。
+ * APP_URL 未設＝開發環境，一律放行；Origin 標頭缺席（非瀏覽器客戶端）不擋——瀏覽器發起的跨站攻擊必帶 Origin。
+ * 以「網域（hostname）」比對而非完整 origin：容忍反代造成的埠／scheme 差異，不誤擋正常連線。
+ */
+function originAllowed(origin: string | undefined): boolean {
+  if (!origin) return true;
+  const appUrl = process.env.APP_URL?.trim();
+  if (!appUrl) return true;
+  let host: string;
+  try {
+    host = new URL(origin).hostname;
+  } catch {
+    return false; // Origin 非合法 URL：直接擋
+  }
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+  const allowed = new Set<string>();
+  try {
+    allowed.add(new URL(appUrl).hostname);
+  } catch {
+    /* APP_URL 壞值：忽略，僅靠 localhost 判斷 */
+  }
+  // Railway 內建網域也視為同源（fal.ts 亦以它為公開 base）：APP_URL 設成自訂網域時不誤擋平台網域
+  const railway = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
+  if (railway) allowed.add(railway.replace(/^https?:\/\//, "").replace(/\/.*$/, ""));
+  return allowed.has(host);
+}
 
 /** presence 用的去重名單（同 user 多連線只列一次） */
 function dedupeUsers(room: Set<Client>): Array<{ userId: string; name: string; color: string }> {
@@ -115,20 +171,40 @@ async function revalidate(c: Client): Promise<void> {
       c.ws.close(4403, "權限已變更");
       return;
     }
-    const [user] = await db.select({ isSuperAdmin: schema.users.isSuperAdmin }).from(schema.users).where(eq(schema.users.id, c.userId));
-    if (user?.isSuperAdmin) return;
-    const [membership] = await db
-      .select({ id: schema.groupMembers.id })
-      .from(schema.groupMembers)
-      .where(and(eq(schema.groupMembers.groupId, c.groupId), eq(schema.groupMembers.userId, c.userId)));
-    if (!membership) c.ws.close(4403, "權限已變更");
+    // #21 復用單一權限判定：loadAuthState 內含「users.status 非 active → 回 null」（被停用帳號即斷線）、
+    // 超管展開與組成員關係——不再各自查 users/groupMembers，判定口徑與 HTTP 端完全一致。
+    const auth = await loadAuthState(c.userId);
+    if (!auth) {
+      c.ws.close(4403, "權限已變更"); // 帳號被停用或已刪除
+      return;
+    }
+    if (auth.user.isSuperAdmin) return;
+    if (!auth.groups.some((g) => g.groupId === c.groupId)) c.ws.close(4403, "權限已變更");
   } catch {
     /* DB 抖動不斷線，下一輪重驗再判 */
   }
 }
 
 function join(ws: WebSocket, ctx: { projectId: string; userId: string; name: string; tokenHash: string; groupId: string }): void {
-  let room = rooms.get(ctx.projectId);
+  // 提早掛上 no-op error handler：無論是超限提早 close，或後續任何連線錯誤，都不讓它變成 unhandled
+  ws.on("error", () => {
+    /* close 事件會接手清理 */
+  });
+
+  const existing = rooms.get(ctx.projectId);
+  // #7 上限檢查（加入房間前）：全域 → 單房 → 同一 user 單房，任一超限即握手後 close(4429) 不入房。
+  let sameUser = 0;
+  if (existing) for (const c of existing) if (c.userId === ctx.userId) sameUser++;
+  if (
+    totalConnections >= MAX_TOTAL_CONNECTIONS ||
+    (existing !== undefined && existing.size >= MAX_ROOM_CONNECTIONS) ||
+    sameUser >= MAX_PER_USER_PER_ROOM
+  ) {
+    ws.close(4429, "連線數過多");
+    return;
+  }
+
+  let room = existing;
   if (!room) {
     room = new Set();
     rooms.set(ctx.projectId, room);
@@ -147,13 +223,12 @@ function join(ws: WebSocket, ctx: { projectId: string; userId: string; name: str
     lastInvalidateAt: 0,
   };
   room.add(client);
+  totalConnections += 1;
+  userConnCount.set(ctx.userId, (userConnCount.get(ctx.userId) ?? 0) + 1);
   const theRoom = room;
 
   ws.on("pong", () => {
     client.missedPongs = 0;
-  });
-  ws.on("error", () => {
-    /* close 事件會接手清理 */
   });
 
   ws.on("message", (raw) => {
@@ -166,24 +241,37 @@ function join(ws: WebSocket, ctx: { projectId: string; userId: string; name: str
       return;
     }
     const now = Date.now();
+    // 每則廣播先過 per-connection 節流（保留原有防護），再過 per-user 聚合（#7：擋同人多開的 fanout 放大）。
     if (msg.type === "cursor" && typeof msg.x === "number" && typeof msg.y === "number" && Number.isFinite(msg.x) && Number.isFinite(msg.y)) {
       if (now - client.lastCursorAt < MIN_CURSOR_MS) return;
       client.lastCursorAt = now;
+      if (userThrottled(client.userId, "cursor", now, MIN_CURSOR_MS)) return;
       broadcast(theRoom, { type: "cursor", userId: client.userId, name: client.name, color: client.color, x: msg.x, y: msg.y }, client);
     } else if (msg.type === "focus" && (msg.zone === null || typeof msg.zone === "string")) {
       if (now - client.lastFocusAt < MIN_FOCUS_MS) return;
       client.lastFocusAt = now;
-      client.zone = msg.zone;
+      client.zone = msg.zone; // zone 一律更新（供 hello 帶出既有狀態）；只有廣播受 per-user 聚合影響
+      if (userThrottled(client.userId, "focus", now, MIN_FOCUS_MS)) return;
       broadcast(theRoom, { type: "focus", userId: client.userId, zone: msg.zone }, client);
     } else if (msg.type === "invalidate") {
       if (now - client.lastInvalidateAt < MIN_INVALIDATE_MS) return;
       client.lastInvalidateAt = now;
+      if (userThrottled(client.userId, "invalidate", now, MIN_INVALIDATE_MS)) return;
       broadcast(theRoom, { type: "invalidate", userId: client.userId }, client);
     }
   });
 
   ws.on("close", () => {
     theRoom.delete(client);
+    totalConnections -= 1;
+    // 遞減該 user 連線數；歸零即清掉其廣播節流狀態，避免 userThrottle 無限膨脹
+    const remaining = (userConnCount.get(client.userId) ?? 1) - 1;
+    if (remaining <= 0) {
+      userConnCount.delete(client.userId);
+      userThrottle.delete(client.userId);
+    } else {
+      userConnCount.set(client.userId, remaining);
+    }
     if (theRoom.size === 0) {
       rooms.delete(ctx.projectId);
     } else {
@@ -219,6 +307,11 @@ export function attachRealtime(server: Server): void {
     }
     if (url.pathname !== "/ws") {
       // 本服務只有 /ws 一種 upgrade；其他路徑不接、也不能放著不管（會吊死連線）
+      socket.destroy();
+      return;
+    }
+    // #20 Origin 白名單：非白名單來源（跨站 WebSocket 劫持）握手前即斷，不進 DB 查詢
+    if (!originAllowed(req.headers.origin)) {
       socket.destroy();
       return;
     }

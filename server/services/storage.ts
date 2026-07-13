@@ -4,11 +4,12 @@
  * - 服務一律走 /api/assets/:id/file：登入＋組隔離；要給 fal 當「來源輸入」時改用 HMAC 簽名短效網址。
  * - 沒掛 Volume 時退回 ./.data（本機開發可用；正式站掛 /data）。
  */
-import { createHmac, randomUUID, createHash } from "node:crypto";
+import { createHmac, randomUUID, createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
-import { writeFile, rename, stat, unlink } from "node:fs/promises";
+import { writeFile, rename, stat, unlink, readdir } from "node:fs/promises";
 import path from "node:path";
 import { proxyFetch } from "./http";
+import { db, schema } from "../db";
 
 /** 儲存根目錄：正式站掛 Volume 在 /data；本機退回 ./.data（已入 .gitignore） */
 export const STORAGE_ROOT = process.env.ASSET_DIR ?? (existsSync("/data") ? "/data" : path.join(process.cwd(), ".data"));
@@ -103,8 +104,10 @@ function newRelPath(ext: string): string {
 
 export function absPathOf(relPath: string): string {
   // 防路徑跳脫：resolve 後必須仍在 ASSETS_DIR 內
-  const abs = path.resolve(ASSETS_DIR, relPath);
-  if (!abs.startsWith(path.resolve(ASSETS_DIR))) throw new Error("非法儲存路徑");
+  // 前綴比對補上目錄分隔符，杜絕 /data/assets-xxx 這類兄弟目錄用 startsWith 繞過
+  const base = path.resolve(ASSETS_DIR);
+  const abs = path.resolve(base, relPath);
+  if (abs !== base && !abs.startsWith(base + path.sep)) throw new Error("非法儲存路徑");
   return abs;
 }
 
@@ -149,6 +152,44 @@ export function isFeedbackShotPath(p: string): boolean {
   return /^feedback\/[0-9a-f-]{36}\.(png|jpe?g|webp)$/i.test(p);
 }
 
+/**
+ * 孤兒回饋截圖清理：掃 feedback/ 目錄，刪掉「DB 已無任何 feedbackReports 引用」
+ * 且 mtime 超過 6 小時的檔案。避免上傳成功但送出失敗（或報告被刪）留下的截圖永久佔碟。
+ * 6 小時緩衝：容忍「先上傳截圖、稍後才送出報告」的時間差，不誤刪剛上傳待引用的檔。
+ * 此函式由 index.ts 定期呼叫；找不到目錄（尚未有任何回饋）安全略過。
+ */
+export async function sweepFeedbackShots(): Promise<void> {
+  const feedbackDir = path.join(ASSETS_DIR, "feedback");
+  let names: string[];
+  try {
+    names = await readdir(feedbackDir);
+  } catch {
+    return; // 目錄不存在或不可讀：尚無回饋截圖，直接略過
+  }
+  if (names.length === 0) return;
+
+  // 取 DB 目前所有被引用的截圖相對路徑（feedback/uuid.ext）
+  const rows = await db
+    .select({ screenshotPath: schema.feedbackReports.screenshotPath })
+    .from(schema.feedbackReports);
+  const referenced = new Set<string>();
+  for (const r of rows) if (r.screenshotPath) referenced.add(r.screenshotPath);
+
+  const cutoff = Date.now() - 6 * 3600 * 1000;
+  for (const name of names) {
+    const rel = path.posix.join("feedback", name);
+    if (referenced.has(rel)) continue; // 仍被引用，保留
+    const abs = path.join(feedbackDir, name);
+    try {
+      const s = await stat(abs);
+      if (!s.isFile() || s.mtimeMs >= cutoff) continue; // 非檔案或太新（可能待送出）就跳過
+      await unlink(abs);
+    } catch (err) {
+      console.warn("[storage] 清理孤兒截圖失敗（略過）：", err instanceof Error ? err.message : err);
+    }
+  }
+}
+
 export async function removeStoredFile(relPath: string): Promise<void> {
   try {
     await unlink(absPathOf(relPath));
@@ -190,13 +231,19 @@ export async function persistRemote(url: string): Promise<{ storagePath: string;
 
 /* ── 簽名網址（給 fal 抓「來源輸入」用：短效、無需登入、外人不可偽造） ── */
 
+// 未設 ASSET_SIGN_SECRET 時，用模組載入當下產生的一次性隨機值當簽名金鑰——
+// 移除舊的 DATABASE_URL/"dev" 可預測後備（連線字串可能外洩、"dev" 更是人人可偽造）。
+// 代價：未設 env 時每次重啟金鑰會變，既有簽名網址失效（可接受，簽名網址本就短效）；
+// 正式站建議設定持久的 ASSET_SIGN_SECRET 以免重啟後在途的簽名網址全數作廢。
+const EPHEMERAL_SIGN_SECRET = randomBytes(32).toString("hex");
+
 function signSecret(): string {
-  // 穩定且不入 repo 的秘密：優先 ASSET_SIGN_SECRET，未設則由 DATABASE_URL 衍生（重啟不變）
-  const seed = process.env.ASSET_SIGN_SECRET ?? `asset-sign:${process.env.DATABASE_URL ?? "dev"}`;
+  const seed = process.env.ASSET_SIGN_SECRET ?? EPHEMERAL_SIGN_SECRET;
   return createHash("sha256").update(seed).digest("hex");
 }
 
-export function signAssetUrl(assetId: string, ttlSeconds = 48 * 3600): string {
+// 簽名網址預設短效 1 小時：足夠 fal 抓來源輸入＋排隊，又大幅縮短金鑰外洩時的可用窗口
+export function signAssetUrl(assetId: string, ttlSeconds = 3600): string {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
   const sig = createHmac("sha256", signSecret()).update(`${assetId}.${exp}`).digest("hex");
   const base = process.env.APP_URL?.replace(/\/$/, "") || `http://localhost:${process.env.PORT ?? 3000}`;

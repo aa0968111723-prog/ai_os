@@ -1,11 +1,12 @@
 /**
  * 種子資料（冪等）：超管帳號＋兩個團隊＋三個組（對應基金會現實）。
- * 超管密碼由 SEED_ADMIN_PASSWORD 指定；未設則自動產生並印在啟動 log（只印一次）。
+ * 超管密碼由 SEED_ADMIN_PASSWORD 指定；未設則自動產生一次性密碼（不印明文於 log）。
+ * 既有超管帳號的密碼永不被開機流程覆寫（UI 改過的密碼不會被 redeploy 還原）。
  */
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
-import { hashPassword, verifyPassword } from "./auth";
+import { hashPassword } from "./auth";
 
 /** 總管理員 email（環境變數可覆蓋）。密碼「不再」有硬編碼預設——見下方說明。 */
 export const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "aa0968111723@gmail.com";
@@ -17,35 +18,33 @@ export const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "aa0968111723@gm
 const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD;
 
 /**
- * 超管自救路徑：僅在有設 SEED_ADMIN_PASSWORD 時啟用——保證該組帳密可登入且為超管
- * （忘記密碼＝設環境變數→Redeploy，不用碰資料庫）。未設環境變數時「不」動任何既有帳號，
- * 也絕不用公開字串重設密碼。
+ * 開機時確保超管帳號存在且具權限——但「絕不」每輪還原密碼。
+ * - 帳號不存在：用 SEED_ADMIN_PASSWORD（未設則隨機一次性密碼）建立。
+ * - 帳號已存在：只補正 isSuperAdmin=true、status=active，「絕不」覆寫 passwordHash——
+ *   超管在 UI 改過的密碼不可被任何 redeploy 還原（舊版每輪把密碼對齊環境變數，等於
+ *   任何能改環境變數者都能強制還原超管密碼，且會抹掉使用者自訂密碼——已移除此行為）。
  */
 async function ensureSeedAdmin(): Promise<void> {
-  const password = SEED_ADMIN_PASSWORD;
-  if (!password) return; // 未設密碼變數 → 不對既有超管做任何事（避免把密碼降級回公開值）
   const [user] = await db.select().from(schema.users).where(eq(schema.users.email, SEED_ADMIN_EMAIL));
   if (!user) {
+    // DB 已有其他使用者但無超管：補建。密碼取環境變數，未設則隨機（不印明文，見下）。
+    const password = SEED_ADMIN_PASSWORD || randomBytes(9).toString("base64url");
     await db.insert(schema.users).values({
       name: "Bruce（超管）",
       email: SEED_ADMIN_EMAIL,
       passwordHash: await hashPassword(password),
       isSuperAdmin: true,
     });
-    console.log(`[seed] 已依環境變數補建超管帳號：${SEED_ADMIN_EMAIL}`);
+    console.log(`[seed] 已補建超管帳號：${SEED_ADMIN_EMAIL}（一次性密碼請洽安全通道取得，不印於 log）`);
     return;
   }
-  const passwordOk = await verifyPassword(password, user.passwordHash);
-  if (!passwordOk || !user.isSuperAdmin || user.status !== "active") {
+  // 已存在：只補正權限與狀態，永不動密碼
+  if (!user.isSuperAdmin || user.status !== "active") {
     await db
       .update(schema.users)
-      .set({
-        passwordHash: passwordOk ? user.passwordHash : await hashPassword(password),
-        isSuperAdmin: true,
-        status: "active",
-      })
+      .set({ isSuperAdmin: true, status: "active" })
       .where(eq(schema.users.id, user.id));
-    console.log(`[seed] 已把超管帳號對齊環境變數（密碼／權限重設）：${SEED_ADMIN_EMAIL}`);
+    console.log(`[seed] 已補正超管權限／狀態（未變更密碼）：${SEED_ADMIN_EMAIL}`);
   }
 }
 
@@ -79,7 +78,12 @@ export async function ensureSeed(): Promise<void> {
 
   console.log("──────────────────────────────────────────");
   console.log("[seed] 已建立：總會小編團隊（動畫組・短影音組）＋北區工作組（剪輯組）");
-  console.log(`[seed] 超管登入 → email: ${SEED_ADMIN_EMAIL}  密碼: ${password}`);
-  if (!process.env.SEED_ADMIN_PASSWORD) console.log("[seed] ↑ 此為隨機產生的一次性密碼（原始碼已無內建密碼）——請立刻記下，或設 SEED_ADMIN_PASSWORD 環境變數改用固定密碼");
+  console.log(`[seed] 超管登入 email：${SEED_ADMIN_EMAIL}`);
+  // 安全：密碼一律不印入 log（部署 log 常被多方存取）。
+  if (process.env.SEED_ADMIN_PASSWORD) {
+    console.log("[seed] 超管密碼＝環境變數 SEED_ADMIN_PASSWORD 設定值（不印於 log）");
+  } else {
+    console.log("[seed] 已產生一次性隨機超管密碼——請洽安全通道取得，並於首次登入後立即更改（不印於 log）");
+  }
   console.log("──────────────────────────────────────────");
 }

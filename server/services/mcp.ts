@@ -4,6 +4,7 @@
  * - 以超管身分執行（金鑰即權限）；工具：list_projects / get_project_context / submit_generation / post_message
  */
 import type { Request, Response } from "express";
+import { timingSafeEqual } from "node:crypto";
 import { desc, eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
@@ -151,6 +152,46 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
   throw new Error(`未知工具：${name}`);
 }
 
+/** 金鑰比對用固定時間演算法：先等長檢查（timingSafeEqual 要求等長），避免以耗時差回推金鑰（#10） */
+function keyEquals(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+// 金鑰失敗速率限制（記憶體計數，比照系統其他記憶體防線）：每 IP 每分鐘失敗達門檻即封鎖一段時間，
+// 擋暴力猜金鑰。成功即清除該 IP 計數，正常客戶端不受影響（#24）。
+const MCP_FAIL_WINDOW_MS = 60_000;
+const MCP_FAIL_MAX = 10;
+const MCP_BLOCK_MS = 5 * 60_000;
+const mcpFails = new Map<string, { count: number; windowStart: number; blockedUntil: number }>();
+
+function mcpClientIp(req: Request): string {
+  // index.ts 已設 trust proxy=1，req.ip 即真實 client IP
+  return req.ip ?? req.socket.remoteAddress ?? "unknown";
+}
+
+function mcpBlocked(ip: string): boolean {
+  const rec = mcpFails.get(ip);
+  return rec != null && rec.blockedUntil > Date.now();
+}
+
+function mcpRecordFailure(ip: string): void {
+  const now = Date.now();
+  // 順手清掉過期且未封鎖的陳舊項，避免 Map 無限膨脹被當成記憶體耗盡面
+  if (mcpFails.size > 1024) {
+    for (const [k, v] of mcpFails) {
+      if (v.blockedUntil <= now && now - v.windowStart > MCP_FAIL_WINDOW_MS) mcpFails.delete(k);
+    }
+  }
+  let rec = mcpFails.get(ip);
+  if (!rec || now - rec.windowStart > MCP_FAIL_WINDOW_MS) rec = { count: 0, windowStart: now, blockedUntil: 0 };
+  rec.count += 1;
+  if (rec.count >= MCP_FAIL_MAX) rec.blockedUntil = now + MCP_BLOCK_MS;
+  mcpFails.set(ip, rec);
+}
+
 /** JSON-RPC 處理器（掛在 POST /api/mcp） */
 export async function handleMcp(req: Request, res: Response): Promise<void> {
   const apiKey = process.env.MCP_API_KEY;
@@ -158,10 +199,18 @@ export async function handleMcp(req: Request, res: Response): Promise<void> {
     res.status(404).json({ error: "MCP 未啟用（設 MCP_API_KEY 環境變數即開）" });
     return;
   }
-  if (req.headers["x-api-key"] !== apiKey) {
+  const ip = mcpClientIp(req);
+  if (mcpBlocked(ip)) {
+    res.status(429).json({ error: "嘗試過於頻繁，請稍後再試" });
+    return;
+  }
+  const provided = req.headers["x-api-key"];
+  if (typeof provided !== "string" || !keyEquals(provided, apiKey)) {
+    mcpRecordFailure(ip);
     res.status(401).json({ error: "MCP 金鑰不正確" });
     return;
   }
+  mcpFails.delete(ip); // 驗證成功即清除該 IP 的失敗計數
   const body = req.body as { jsonrpc?: string; id?: number | string | null; method?: string; params?: Record<string, unknown> };
   const reply = (result: unknown): void => void res.json({ jsonrpc: "2.0", id: body.id ?? null, result });
   const fail = (code: number, message: string): void => void res.json({ jsonrpc: "2.0", id: body.id ?? null, error: { code, message } });

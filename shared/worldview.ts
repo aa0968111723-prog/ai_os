@@ -4,21 +4,26 @@ import { z } from "zod";
  * 世界觀（專案定盤星）— 業界 brief 驗證過的分層設計：
  * 快速層 5 欄（1 分鐘填完）＋進階層（摺疊，可後補）。
  */
+// 上限：字串欄位單值 500 字、陣列最多 30 項且逐項 100 字——世界觀整份會注入付費 LLM，無上限＝可被塞爆與注入
 export const worldviewSchema = z.object({
   // 快速層
-  logline: z.string().default(""), // 一句話故事
-  message: z.string().default(""), // 一句關鍵訊息（一片一訊息）
-  audience: z.string().default(""), // 目標觀眾
-  themes: z.array(z.string()).default([]), // 訊息主軸（苦→修行→轉變→感恩…）
-  tones: z.array(z.string()).default([]), // 調性 chips
+  logline: z.string().max(500).default(""), // 一句話故事
+  message: z.string().max(500).default(""), // 一句關鍵訊息（一片一訊息）
+  audience: z.string().max(500).default(""), // 目標觀眾
+  themes: z.array(z.string().max(100)).max(30).default([]), // 訊息主軸（苦→修行→轉變→感恩…）
+  tones: z.array(z.string().max(100)).max(30).default([]), // 調性 chips
   // 進階層（可後補）
   acts: z
-    .object({ hook: z.string().default(""), turn: z.string().default(""), cta: z.string().default("") })
+    .object({
+      hook: z.string().max(500).default(""),
+      turn: z.string().max(500).default(""),
+      cta: z.string().max(500).default(""),
+    })
     .default({ hook: "", turn: "", cta: "" }),
-  people: z.array(z.string()).default([]),
-  styles: z.array(z.string()).default([]),
-  references: z.array(z.string()).default([]), // 參考影片連結
-  taboos: z.array(z.string()).default(DEFAULT_TABOOS()), // 禁忌事項（含預設禁語）
+  people: z.array(z.string().max(100)).max(30).default([]),
+  styles: z.array(z.string().max(100)).max(30).default([]),
+  references: z.array(z.string().max(100)).max(30).default([]), // 參考影片連結
+  taboos: z.array(z.string().max(100)).max(30).default(DEFAULT_TABOOS()), // 禁忌事項（含預設禁語）
 });
 
 export type Worldview = z.infer<typeof worldviewSchema>;

@@ -24,8 +24,11 @@ export const feedbackReportsRouter = router({
         // 被點元件的可讀標籤與定位路徑（頁面級回饋時前端不傳 → null）
         targetLabel: z.string().max(200).optional(),
         targetSelector: z.string().max(1000).optional(),
-        // 點選當下的位置與視窗尺寸 {x,y,w,h,vw,vh}；寬鬆收即可，只用來還原標記框
-        targetRect: z.record(z.any()).optional(),
+        // 點選當下的位置與視窗尺寸 {x,y,w,h,vw,vh}；只用來還原標記框——收斂成固定數字欄位，擋任意物件塞入
+        targetRect: z
+          .object({ x: z.number(), y: z.number(), w: z.number(), h: z.number(), vw: z.number(), vh: z.number() })
+          .partial()
+          .optional(),
         note: z.string().min(1, "請寫一句說明").max(2000),
         // 只收本服務 /api/feedback/screenshot 產生的 feedback/ 路徑；亂填一律拒絕（擋跨組偷讀）
         screenshotPath: z.string().max(500).refine((p) => isFeedbackShotPath(p), "非法截圖路徑").optional(),
