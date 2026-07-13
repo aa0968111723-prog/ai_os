@@ -43,6 +43,7 @@ function StatusPoller({ id }: { id: string }) {
   useEffect(() => {
     if (!finished) return;
     utils.generation.listByProject.invalidate();
+    utils.generation.listByProjectPaged.invalidate();
     utils.quota.my.invalidate();
     utils.scenes.listByProject.invalidate();
     utils.projects.assets.invalidate(); // 生成完成會 insert 素材，素材庫/來源下拉要即時反映
@@ -70,6 +71,43 @@ export function GenerationList({ projectId }: { projectId: string }) {
       refetchIntervalInBackground: true,
     },
   );
+
+  // ── 篩選 / 搜尋 / 分頁 ──────────────────────────────────────────────
+  // 設計：預設（無篩選、未展開）維持既有 list（首頁 30 筆＋輪詢＋通知＋外部失效即時刷新，全不動）。
+  // 一旦使用者設篩選/搜尋或按「載入更多」，切到 listByProjectPaged 這支 keyset 分頁查詢當顯示來源。
+  const [statusFilter, setStatusFilter] = useState<"queued" | "running" | "done" | "failed" | null>(null);
+  const [kindFilter, setKindFilter] = useState<"image" | "video" | "audio" | "text" | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchInput), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+  const [expanded, setExpanded] = useState(false); // 按過「載入更多」
+  const filtering = statusFilter !== null || kindFilter !== null || debouncedSearch.trim() !== "";
+  const browsing = filtering || expanded; // 顯示來源改用分頁查詢的條件
+  const paged = trpc.generation.listByProjectPaged.useInfiniteQuery(
+    {
+      projectId,
+      status: statusFilter ?? undefined,
+      kind: kindFilter ?? undefined,
+      search: debouncedSearch.trim() || undefined,
+    },
+    {
+      enabled: browsing,
+      getNextPageParam: (last) => last.nextCursor ?? undefined,
+      // 分頁視圖也要輪詢進行中的生成（與首頁同節奏：有進行中 8 秒、否則 45 秒）
+      refetchInterval: (query) =>
+        query.state.data?.pages.some((p) => p.items.some((g) => g.status === "queued" || g.status === "running"))
+          ? 8000
+          : 45_000,
+      refetchIntervalInBackground: true,
+    },
+  );
+  const pagedRows = paged.data?.pages.flatMap((p) => p.items) ?? [];
+  // 顯示來源：瀏覽/篩選模式用分頁結果，否則沿用既有首頁 list（保留所有既有行為）
+  const rows = browsing ? pagedRows : list.data ?? [];
+
   // #0 完成通知：在列表層偵測某筆生成由 queued/running 轉 done/failed 的「邊緣」，
   // 發桌面通知＋（背景分頁時）標題未讀徽章。推進已改由伺服器背景做，這裡純附加通知、不改輪詢。
   const prevStatusRef = useRef<Map<string, string>>(new Map());
@@ -139,6 +177,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
     // fal submit 失敗時伺服器也已寫入一筆 failed 列——成功失敗都要刷新列表與點數
     onSettled: () => {
       utils.generation.listByProject.invalidate({ projectId });
+      utils.generation.listByProjectPaged.invalidate({ projectId });
       utils.quota.my.invalidate();
     },
   });
@@ -174,7 +213,64 @@ export function GenerationList({ projectId }: { projectId: string }) {
         <p className="hint" style={{ color: "var(--success)" }}>已加入分鏡 ✓（在下方分鏡・交付區）</p>
       )}
       {retry.error && <p className="error">重試失敗：{retry.error.message}</p>}
-      {list.data.map((g) => (
+      <div
+        className="gen-filters"
+        style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 10 }}
+      >
+        {([["queued", "排隊中"], ["running", "生成中"], ["done", "完成"], ["failed", "失敗"]] as const).map(([val, label]) => (
+          <button
+            key={val}
+            type="button"
+            className="gen-filter-chip"
+            aria-pressed={statusFilter === val}
+            onClick={() => setStatusFilter((cur) => (cur === val ? null : val))}
+            style={{ padding: "3px 10px", fontSize: 12, borderRadius: 999, opacity: statusFilter === val ? 1 : 0.55, fontWeight: statusFilter === val ? 600 : 400 }}
+          >
+            {label}
+          </button>
+        ))}
+        <span style={{ width: 1, height: 16, background: "rgba(0,0,0,.15)" }} aria-hidden="true" />
+        {([["image", "圖片"], ["video", "影片"], ["audio", "音訊"], ["text", "文字"]] as const).map(([val, label]) => (
+          <button
+            key={val}
+            type="button"
+            className="gen-filter-chip"
+            aria-pressed={kindFilter === val}
+            onClick={() => setKindFilter((cur) => (cur === val ? null : val))}
+            style={{ padding: "3px 10px", fontSize: 12, borderRadius: 999, opacity: kindFilter === val ? 1 : 0.55, fontWeight: kindFilter === val ? 600 : 400 }}
+          >
+            {label}
+          </button>
+        ))}
+        <input
+          type="search"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          placeholder="搜尋提示詞…"
+          aria-label="搜尋提示詞"
+          style={{ flex: "1 1 140px", minWidth: 120, padding: "4px 10px", fontSize: 12 }}
+        />
+        {browsing && (
+          <button
+            type="button"
+            onClick={() => {
+              setStatusFilter(null);
+              setKindFilter(null);
+              setSearchInput("");
+              setDebouncedSearch("");
+              setExpanded(false);
+            }}
+            style={{ padding: "3px 10px", fontSize: 12 }}
+          >
+            清除
+          </button>
+        )}
+      </div>
+      {browsing && paged.isLoading && <p className="hint" style={{ marginTop: 12 }}>載入中…</p>}
+      {browsing && !paged.isLoading && rows.length === 0 && (
+        <p className="hint" style={{ marginTop: 12 }}>沒有符合條件的生成紀錄。</p>
+      )}
+      {rows.map((g) => (
         <div key={g.id} className="gen-row">
           {(g.status === "queued" || g.status === "running") && <StatusPoller id={g.id} />}
           {g.resultUrl ? (
@@ -249,6 +345,21 @@ export function GenerationList({ projectId }: { projectId: string }) {
           </div>
         </div>
       ))}
+      {browsing
+        ? paged.hasNextPage && (
+            <div style={{ textAlign: "center", marginTop: 12 }}>
+              <button type="button" disabled={paged.isFetchingNextPage} onClick={() => paged.fetchNextPage()} style={{ padding: "6px 16px", fontSize: 13 }}>
+                {paged.isFetchingNextPage ? "載入中…" : "載入更多"}
+              </button>
+            </div>
+          )
+        : (list.data?.length ?? 0) >= 30 && (
+            <div style={{ textAlign: "center", marginTop: 12 }}>
+              <button type="button" onClick={() => setExpanded(true)} style={{ padding: "6px 16px", fontSize: 13 }}>
+                載入更多
+              </button>
+            </div>
+          )}
     </div>
   );
 }

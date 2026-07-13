@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { aliasedTable, asc, eq, sql } from "drizzle-orm";
+import { aliasedTable, and, asc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -56,9 +56,12 @@ export const scenesRouter = router({
         )`,
       })
       .from(schema.scenes)
-      .leftJoin(schema.assets, eq(schema.scenes.assetId, schema.assets.id))
-      .leftJoin(narrationAssets, eq(schema.scenes.narrationAssetId, narrationAssets.id))
-      .where(eq(schema.scenes.projectId, input.projectId))
+      // JOIN 也要排除軟刪素材：deleteAsset 刻意保留 scenes.assetId（供還原），若 join 不濾 deletedAt，
+      // 該格會繼續顯示已刪素材的縮圖/音檔——與交付包（exporter 已濾）不一致。還原後 join 自動重連。
+      .leftJoin(schema.assets, and(eq(schema.scenes.assetId, schema.assets.id), isNull(schema.assets.deletedAt)))
+      .leftJoin(narrationAssets, and(eq(schema.scenes.narrationAssetId, narrationAssets.id), isNull(narrationAssets.deletedAt)))
+      // 排除已軟刪除（回收桶）的分鏡——漏掉這個過濾會讓刪掉的分鏡繼續出現在列表
+      .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt)))
       .orderBy(asc(schema.scenes.orderIndex));
     return rows;
   }),
@@ -77,7 +80,8 @@ export const scenesRouter = router({
       const [{ maxOrder }] = await db
         .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
         .from(schema.scenes)
-        .where(eq(schema.scenes.projectId, gen.projectId));
+        // 已軟刪除的分鏡不算進最大 orderIndex（否則新格會被推到刪除格之後留洞）
+        .where(and(eq(schema.scenes.projectId, gen.projectId), isNull(schema.scenes.deletedAt)));
       const [scene] = await db
         .insert(schema.scenes)
         .values({
@@ -97,13 +101,17 @@ export const scenesRouter = router({
   move: authedProcedure
     .input(z.object({ sceneId: z.string().uuid(), direction: z.enum(["up", "down"]) }))
     .mutation(async ({ ctx, input }) => {
-      const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
       await getProjectChecked(ctx, scene.projectId);
       const all = await db
         .select()
         .from(schema.scenes)
-        .where(eq(schema.scenes.projectId, scene.projectId))
+        // 只在未刪除的分鏡之間換序——含已刪除格會算錯相鄰、把 orderIndex 交換給隱形格
+        .where(and(eq(schema.scenes.projectId, scene.projectId), isNull(schema.scenes.deletedAt)))
         .orderBy(asc(schema.scenes.orderIndex));
       const idx = all.findIndex((s) => s.id === scene.id);
       const swapWith = input.direction === "up" ? all[idx - 1] : all[idx + 1];
@@ -113,7 +121,29 @@ export const scenesRouter = router({
       return { ok: true };
     }),
 
+  /** 刪除分鏡＝軟刪除（回收桶）：保留使用者手打的 prompt／voiceover，可從回收桶還原 */
   remove: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [scene] = await db
+      .select()
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+    if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+    await getProjectChecked(ctx, scene.projectId);
+    await db.update(schema.scenes).set({ deletedAt: new Date() }).where(eq(schema.scenes.id, input.sceneId));
+    return { ok: true };
+  }),
+
+  /** 還原分鏡（回收桶 → 分鏡列）：清掉 deletedAt，接回原本引用的素材 */
+  restore: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
+    if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+    await getProjectChecked(ctx, scene.projectId);
+    await db.update(schema.scenes).set({ deletedAt: null }).where(eq(schema.scenes.id, input.sceneId));
+    return { ok: true };
+  }),
+
+  /** 永久刪除分鏡（回收桶內「永久刪除」）：真的 db.delete，不可復原 */
+  purge: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
     if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
     await getProjectChecked(ctx, scene.projectId);
@@ -132,7 +162,10 @@ export const scenesRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
       await getProjectChecked(ctx, scene.projectId);
       const patch: Partial<typeof schema.scenes.$inferInsert> = {};
@@ -148,7 +181,10 @@ export const scenesRouter = router({
   generateInto: authedProcedure
     .input(z.object({ sceneId: z.string().uuid(), modelId: z.string(), prompt: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
       await getProjectChecked(ctx, scene.projectId);
       const prompt = input.prompt ?? scene.prompt ?? "";
@@ -170,7 +206,10 @@ export const scenesRouter = router({
   generateVoiceover: authedProcedure
     .input(z.object({ sceneId: z.string().uuid(), modelId: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
       await getProjectChecked(ctx, scene.projectId);
       const prompt = scene.voiceover ?? "";
@@ -200,11 +239,11 @@ export const scenesRouter = router({
     .input(z.object({ projectId: z.string().uuid(), orderedIds: z.array(z.string().uuid()) }))
     .mutation(async ({ ctx, input }) => {
       await getProjectChecked(ctx, input.projectId);
-      // 只允許重排本專案的分鏡，避免越權改到別專案的列
+      // 只允許重排本專案「未刪除」的分鏡，避免越權改到別專案的列、也不動回收桶裡的格
       const rows = await db
         .select({ id: schema.scenes.id })
         .from(schema.scenes)
-        .where(eq(schema.scenes.projectId, input.projectId));
+        .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt)));
       const own = new Set(rows.map((r) => r.id));
       let idx = 0;
       for (const id of input.orderedIds) {

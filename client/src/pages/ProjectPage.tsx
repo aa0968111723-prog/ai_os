@@ -10,6 +10,7 @@ import { MessagePanel } from "../components/MessagePanel";
 import { ModelPicker, type PickedModel } from "../components/ModelPicker";
 import { WorkflowCard } from "../components/WorkflowCard";
 import { AssetLibrary } from "../components/AssetLibrary";
+import { RecycleBin } from "../components/RecycleBin";
 import { KnowledgeBase } from "../components/KnowledgeBase";
 import { ScriptSplitCard } from "../components/ScriptSplitCard";
 import { CharacterCards } from "../components/CharacterCards";
@@ -510,6 +511,9 @@ export function ProjectPage({ id }: { id: string }) {
               />
             </div>
           </CollabZone>
+
+          {/* 回收桶：素材／分鏡／知識的軟刪除還原（收合式，就近放在素材庫下方） */}
+          <RecycleBin projectId={id} />
 
           {/* 生成台（11 類 × 旗艦/經濟/最低成本） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>

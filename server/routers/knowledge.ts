@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -24,7 +24,8 @@ export async function buildKnowledgeContext(projectId: string): Promise<string> 
   const rows = await db
     .select()
     .from(schema.knowledge)
-    .where(eq(schema.knowledge.projectId, projectId))
+    // ★ 絕不注入已軟刪除（回收桶）的知識——刪掉的逐字稿／見證不可再餵給 AI 導演 LLM
+    .where(and(eq(schema.knowledge.projectId, projectId), isNull(schema.knowledge.deletedAt)))
     .orderBy(desc(schema.knowledge.createdAt));
   if (rows.length === 0) return "";
   const labelOf = (k: string) => KNOWLEDGE_KINDS.find((x) => x.id === k)?.label ?? k;
@@ -45,10 +46,11 @@ export const knowledgeRouter = router({
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
     if (!project) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, project.groupId);
+    // 回收桶裡的知識不列在正式清單（另走 projects.listDeleted）
     const rows = await db
       .select()
       .from(schema.knowledge)
-      .where(eq(schema.knowledge.projectId, input.projectId))
+      .where(and(eq(schema.knowledge.projectId, input.projectId), isNull(schema.knowledge.deletedAt)))
       .orderBy(desc(schema.knowledge.createdAt));
     return rows.map((r) => ({
       id: r.id,
@@ -61,9 +63,12 @@ export const knowledgeRouter = router({
     }));
   }),
 
-  /** 讀單筆全文（編輯用） */
+  /** 讀單筆全文（編輯用）：回收桶裡的視為不存在（不給編輯，先還原） */
   get: authedProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
-    const [row] = await db.select().from(schema.knowledge).where(eq(schema.knowledge.id, input.id));
+    const [row] = await db
+      .select()
+      .from(schema.knowledge)
+      .where(and(eq(schema.knowledge.id, input.id), isNull(schema.knowledge.deletedAt)));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
     return row;
@@ -130,7 +135,29 @@ export const knowledgeRouter = router({
       return updated;
     }),
 
+  /** 刪除知識＝軟刪除（回收桶）：保留逐字稿／見證全文，可還原；還原前不會注入 LLM */
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [row] = await db
+      .select()
+      .from(schema.knowledge)
+      .where(and(eq(schema.knowledge.id, input.id), isNull(schema.knowledge.deletedAt)));
+    if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    requireGroup(ctx.auth, row.groupId);
+    await db.update(schema.knowledge).set({ deletedAt: new Date() }).where(eq(schema.knowledge.id, input.id));
+    return { ok: true };
+  }),
+
+  /** 還原知識（回收桶 → 知識庫）：清掉 deletedAt，之後又會被注入 AI 導演 */
+  restore: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [row] = await db.select().from(schema.knowledge).where(eq(schema.knowledge.id, input.id));
+    if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    requireGroup(ctx.auth, row.groupId);
+    await db.update(schema.knowledge).set({ deletedAt: null }).where(eq(schema.knowledge.id, input.id));
+    return { ok: true };
+  }),
+
+  /** 永久刪除知識（回收桶內「永久刪除」）：真的 db.delete，不可復原 */
+  purge: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [row] = await db.select().from(schema.knowledge).where(eq(schema.knowledge.id, input.id));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
@@ -146,7 +173,14 @@ export const knowledgeRouter = router({
     const [dup] = await db
       .select()
       .from(schema.knowledge)
-      .where(and(eq(schema.knowledge.sourceAssetId, asset.id), eq(schema.knowledge.projectId, asset.projectId)));
+      .where(
+        and(
+          eq(schema.knowledge.sourceAssetId, asset.id),
+          eq(schema.knowledge.projectId, asset.projectId),
+          // 只認未刪除的既有筆：若前一份已丟進回收桶，這次重新加入應建一份新的活筆
+          isNull(schema.knowledge.deletedAt),
+        ),
+      );
     if (dup) return dup; // 已加過就回原筆，冪等
     if (asset.kind !== "doc" || !asset.storagePath) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "只有文字類素材（txt/md）能加入知識庫" });

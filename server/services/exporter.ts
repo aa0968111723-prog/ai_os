@@ -8,7 +8,7 @@ import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { proxyFetch } from "./http";
 import type { Response } from "express";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { absPathOf, extFromMime } from "./storage";
@@ -212,9 +212,15 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
   const scenes = await db
     .select()
     .from(schema.scenes)
-    .where(eq(schema.scenes.projectId, projectId))
+    // 已軟刪除（回收桶）的分鏡不進交付包
+    .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)))
     .orderBy(asc(schema.scenes.orderIndex));
-  const assets = await db.select().from(schema.assets).where(eq(schema.assets.projectId, projectId));
+  // ★ 金錢安全：已軟刪除（已付點數）的素材絕不入 ZIP——過濾 deletedAt。
+  // 分鏡引用的素材若已軟刪除，下方 assets.find 找不到就跳過該鏡（不整包失敗）。
+  const assets = await db
+    .select()
+    .from(schema.assets)
+    .where(and(eq(schema.assets.projectId, projectId), isNull(schema.assets.deletedAt)));
   const generations = await db.select().from(schema.generations).where(eq(schema.generations.projectId, projectId));
 
   const worldview = worldviewSchema.parse(project.worldview ?? {});

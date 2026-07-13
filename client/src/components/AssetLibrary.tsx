@@ -396,8 +396,9 @@ export function AssetLibrary({
                             <button
                               style={smallBtn}
                               disabled={del.isPending}
+                              title="刪除後會移到回收桶，可從下方「回收桶」還原（不扣點、不刪原檔）"
                               onClick={() => {
-                                if (window.confirm(`確定刪除「${a.title}」？分鏡若引用此素材會一併清空。`)) del.mutate({ assetId: a.id });
+                                if (window.confirm(`把「${a.title}」移到回收桶？分鏡引用會保留，可從回收桶還原。`)) del.mutate({ assetId: a.id });
                                 setMenuOpenId(null);
                               }}
                             >

@@ -5,7 +5,7 @@
  */
 import type { Request, Response } from "express";
 import { timingSafeEqual } from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { getModel, endpointOf, MODELS, CATEGORIES, tierLabel, type ProjectFormat, type ModelCategory, type ModelTier } from "../../shared/models";
@@ -97,7 +97,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
 
   if (name === "get_project_context") {
     const wv = worldviewSchema.parse(project.worldview ?? {});
-    const scenes = await db.select().from(schema.scenes).where(eq(schema.scenes.projectId, project.id));
+    const scenes = await db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
     return { title: project.title, kind: project.kind, format: project.format, worldview: wv, scenes: scenes.map((s) => ({ title: s.title, status: s.status })) };
   }
 

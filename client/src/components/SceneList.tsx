@@ -389,8 +389,8 @@ function SceneRow({
       <div style={{ display: "flex", gap: 4 }}>
         <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === 0 || move.isPending} aria-label="上移" onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}><Icon name="ChevronUp" size={16} /></button>
         <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
-        <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger)" }} disabled={remove.isPending} aria-label="刪除"
-          onClick={() => window.confirm(`刪除分鏡「${s.title}」？`) && remove.mutate({ sceneId: s.id })}><Icon name="X" size={16} /></button>
+        <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger)" }} disabled={remove.isPending} aria-label="刪除" title="刪除後移到回收桶，可還原（保留配音詞與提示詞）"
+          onClick={() => window.confirm(`把分鏡「${s.title}」移到回收桶？可從回收桶還原。`) && remove.mutate({ sceneId: s.id })}><Icon name="X" size={16} /></button>
       </div>
     </div>
   );

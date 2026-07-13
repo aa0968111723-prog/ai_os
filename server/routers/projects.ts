@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -270,15 +270,21 @@ export const projectsRouter = router({
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
     if (!project) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, project.groupId);
+    // 只列未進回收桶的素材（軟刪除以 deletedAt 標記；回收桶另走 listDeleted）
     return db
       .select()
       .from(schema.assets)
-      .where(eq(schema.assets.projectId, input.projectId))
+      .where(and(eq(schema.assets.projectId, input.projectId), isNull(schema.assets.deletedAt)))
       .orderBy(desc(schema.assets.createdAt))
       .limit(100);
   }),
 
-  /** 刪除素材（上傳者本人或組長以上）——同時清掉引用它的分鏡格與 Volume 檔案 */
+  /**
+   * 刪除素材＝軟刪除（丟進回收桶，可還原）。上傳者本人或組長以上可操作。
+   * ★ 金錢安全：點數＝真金——軟刪除「絕不」退點；也不刪 Volume 檔（還原要拿得回檔）。
+   * 不清 scenes.assetId／narrationAssetId：保留引用，還原後分鏡自動重新接上原素材。
+   * 過濾由各列出／匯出／注入查詢的 isNull(deletedAt) 負責，此處不動引用。
+   */
   deleteAsset: authedProcedure.input(z.object({ assetId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
     if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
@@ -294,10 +300,69 @@ export const projectsRouter = router({
         message: "這是鎖定的固定素材（師父原音/開示/配樂），請先解除鎖定再刪除",
       });
     }
-    await db.update(schema.scenes).set({ assetId: null }).where(eq(schema.scenes.assetId, asset.id));
+    await db.update(schema.assets).set({ deletedAt: new Date() }).where(eq(schema.assets.id, asset.id));
+    return { ok: true };
+  }),
+
+  /** 還原素材（回收桶 → 素材庫）：清掉 deletedAt。組員需在該組。 */
+  restoreAsset: authedProcedure.input(z.object({ assetId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
+    if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
+    requireGroup(ctx.auth, asset.groupId);
+    await db.update(schema.assets).set({ deletedAt: null }).where(eq(schema.assets.id, asset.id));
+    return { ok: true };
+  }),
+
+  /**
+   * 永久刪除素材（回收桶內「永久刪除」）：真的 db.delete＋刪 Volume 檔，不可復原。
+   * 保留鎖定守門（鎖定素材要先解鎖）。★ 金錢安全：一樣不退任何點數。
+   */
+  purgeAsset: authedProcedure.input(z.object({ assetId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
+    if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
+    const role = requireGroup(ctx.auth, asset.groupId);
+    const isUploader = asset.uploadedBy === ctx.auth.user.id;
+    if (!isUploader && role === "member") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "只有上傳者本人或組長以上可以刪除素材" });
+    }
+    if (asset.locked) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "這是鎖定的固定素材（師父原音/開示/配樂），請先解除鎖定再刪除",
+      });
+    }
     await db.delete(schema.assets).where(eq(schema.assets.id, asset.id));
     if (asset.storagePath) await removeStoredFile(asset.storagePath);
     return { ok: true };
+  }),
+
+  /** 回收桶：列出本專案已軟刪除的素材／分鏡／知識（供還原或永久刪除）。組員需在該組。 */
+  listDeleted: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+    if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+    requireGroup(ctx.auth, project.groupId);
+    const [assets, scenes, knowledge] = await Promise.all([
+      db
+        .select()
+        .from(schema.assets)
+        .where(and(eq(schema.assets.projectId, input.projectId), isNotNull(schema.assets.deletedAt)))
+        .orderBy(desc(schema.assets.deletedAt)),
+      db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.projectId, input.projectId), isNotNull(schema.scenes.deletedAt)))
+        .orderBy(desc(schema.scenes.deletedAt)),
+      db
+        .select()
+        .from(schema.knowledge)
+        .where(and(eq(schema.knowledge.projectId, input.projectId), isNotNull(schema.knowledge.deletedAt)))
+        .orderBy(desc(schema.knowledge.deletedAt)),
+    ]);
+    return {
+      assets: assets.map((a) => ({ id: a.id, title: a.title, kind: a.kind, url: a.url, deletedAt: a.deletedAt })),
+      scenes: scenes.map((s) => ({ id: s.id, title: s.title, orderIndex: s.orderIndex, deletedAt: s.deletedAt })),
+      knowledge: knowledge.map((k) => ({ id: k.id, title: k.title, kind: k.kind, chars: k.content.length, deletedAt: k.deletedAt })),
+    };
   }),
 
   /** 素材鎖定切換（固定素材模式：師父原音/開示/配樂設不可更動，交付包保留原素材） */

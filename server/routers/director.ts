@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -143,7 +143,7 @@ export const directorRouter = router({
         const [{ maxOrder }] = await db
           .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
           .from(schema.scenes)
-          .where(eq(schema.scenes.projectId, project.id));
+          .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
         let order = Number(maxOrder);
         const rows = await db
           .insert(schema.scenes)
