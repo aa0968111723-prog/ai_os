@@ -3,7 +3,7 @@
  * Railway Postgres · Drizzle（pg 方言）
  * 組織模型：超管 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
-import { pgTable, uuid, text, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 
 /* ── 認證與組織 ────────────────────────────────── */
 
@@ -120,6 +120,8 @@ export const generations = pgTable("generations", {
   pointsActual: integer("points_actual"),
   pointsRefunded: integer("points_refunded").notNull().default(0),
   requestId: text("request_id"),
+  /** 綁定的分鏡格（可為 null）：草稿分鏡「就地生成」時填入，完成後把成品回填該格 scenes.assetId */
+  sceneId: uuid("scene_id"),
   resultUrl: text("result_url"),
   /** 文字型輸出(LLM/圖轉文/語音轉文字/訓練結果資訊)直接存這裡 */
   resultText: text("result_text"),
@@ -128,7 +130,11 @@ export const generations = pgTable("generations", {
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // listByProject 對每個分鏡各跑兩支 scene_id 相關子查詢；補索引避免生成量成長後全表掃描。
+  // 非 unique（純索引，pushSchema 建索引不觸發 truncate 提問，安全）
+  sceneIdIdx: index("generations_scene_id_idx").on(t.sceneId),
+}));
 
 /** 點數帳本 — 花費紀錄（先扣預估、失敗退回） */
 export const costLedger = pgTable("cost_ledger", {

@@ -100,6 +100,8 @@ export interface SubmitCoreInput {
   scenePresetIds?: string[];
   /** 帳本理由前綴（預設「生成」；工作流帶「工作流生成」以便帳本可辨識來源） */
   reasonPrefix?: string;
+  /** 綁定的分鏡格：草稿分鏡「就地生成」時帶入，完成後把成品回填該格（沒有＝不綁定，不影響既有呼叫） */
+  sceneId?: string;
   /** 存取檢查掛點：tRPC 端帶 requireGroup（多組隔離）；伺服器內部（runner）呼叫時已在建 run 時把過關,可省略 */
   assertAccess?: (project: typeof schema.projects.$inferSelect) => void;
 }
@@ -163,6 +165,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         modelId: model.id,
         kind: model.kind,
         prompt: input.prompt,
+        sceneId: input.sceneId ?? null, // 綁定分鏡格（沒有＝null，完成後不回填）
         sourceUrl,
         params: falInput,
         pointsEst: model.points,
@@ -267,6 +270,16 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
           .returning();
         // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）
         persistGenerationResult(asset.id, gen.id, result.resultUrl);
+        // 綁定分鏡的就地生成：把成品回填該分鏡格（拆分鏡草稿→出圖 一條線）。
+        // 冪等：CAS 已保證此段每筆只跑一次；重複 advance 也只覆蓋為最新素材，無妨。
+        // 失敗不擋主流程（素材已入庫，僅回填未成，記 log 供補）。
+        if (gen.sceneId) {
+          try {
+            await db.update(schema.scenes).set({ assetId: asset.id }).where(eq(schema.scenes.id, gen.sceneId));
+          } catch (err) {
+            console.error(`[generation] 分鏡回填失敗（成品已入庫，可查 log 補）：gen=${gen.id} scene=${gen.sceneId}`, err instanceof Error ? err.message : err);
+          }
+        }
       } catch (err) {
         console.error(`[generation] 成品入素材庫失敗（生成已 done，可查 log 補）：gen=${gen.id}`, err instanceof Error ? err.message : err);
       }

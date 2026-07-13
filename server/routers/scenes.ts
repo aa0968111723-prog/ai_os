@@ -3,6 +3,7 @@ import { asc, eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
+import { submitGenerationCore } from "../services/generationCore";
 
 async function getProjectChecked(ctx: { auth: NonNullable<import("../trpc").Context["auth"]> }, projectId: string) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
@@ -29,6 +30,18 @@ export const scenesRouter = router({
         assetKind: schema.assets.kind,
         // 來源生成 id：前端「已加入分鏡」用穩定鍵比對（assetUrl 會在成品落地時被改寫，比 URL 會誤判）
         generationId: sql<string | null>`${schema.assets.meta} ->> 'generationId'`,
+        // 該格是否有進行中的就地生成（草稿→出圖進度指示）。用純量子查詢而非 join，避免同格多筆
+        // 進行中生成把分鏡列乘開成重複列；兩個子查詢用相同排序取同一筆，pendingGenId 與 status 一致。
+        pendingGenStatus: sql<"queued" | "running" | null>`(
+          select g.status from ${schema.generations} g
+          where g.scene_id = ${schema.scenes.id} and g.status in ('queued', 'running')
+          order by g.created_at desc, g.id desc limit 1
+        )`,
+        pendingGenId: sql<string | null>`(
+          select g.id from ${schema.generations} g
+          where g.scene_id = ${schema.scenes.id} and g.status in ('queued', 'running')
+          order by g.created_at desc, g.id desc limit 1
+        )`,
       })
       .from(schema.scenes)
       .leftJoin(schema.assets, eq(schema.scenes.assetId, schema.assets.id))
@@ -93,4 +106,69 @@ export const scenesRouter = router({
     await db.delete(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
     return { ok: true };
   }),
+
+  /** 就地編輯分鏡欄位（標題／秒數／旁白）：只更新有帶的欄位 */
+  update: authedProcedure
+    .input(
+      z.object({
+        sceneId: z.string().uuid(),
+        title: z.string().min(1).max(60).optional(),
+        durationSec: z.number().int().min(1).max(60).optional(),
+        voiceover: z.string().max(2000).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      await getProjectChecked(ctx, scene.projectId);
+      const patch: Partial<typeof schema.scenes.$inferInsert> = {};
+      if (input.title !== undefined) patch.title = input.title;
+      if (input.durationSec !== undefined) patch.durationSec = input.durationSec;
+      if (input.voiceover !== undefined) patch.voiceover = input.voiceover;
+      if (Object.keys(patch).length === 0) return scene; // 無欄位可更，回原狀
+      const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, input.sceneId)).returning();
+      return updated;
+    }),
+
+  /** 就地生成：以該分鏡的 prompt 送出生成並綁定該格，完成後由 advanceGeneration 回填 assetId（草稿→出圖一條線） */
+  generateInto: authedProcedure
+    .input(z.object({ sceneId: z.string().uuid(), modelId: z.string(), prompt: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      await getProjectChecked(ctx, scene.projectId);
+      const prompt = input.prompt ?? scene.prompt ?? "";
+      if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
+      // 額度／守門／失敗退點全由 submitGenerationCore 既有邏輯處理（走 effectivePrompt 世界觀注入）
+      const gen = await submitGenerationCore({
+        userId: ctx.auth.user.id,
+        projectId: scene.projectId,
+        modelId: input.modelId,
+        prompt,
+        sceneId: scene.id,
+        reasonPrefix: "分鏡生成",
+        assertAccess: (project) => requireGroup(ctx.auth, project.groupId), // 多組隔離
+      });
+      return { generationId: gen.id };
+    }),
+
+  /** 拖曳排序：依前端給的順序逐筆寫 orderIndex（保留既有 move ↑↓，不衝突） */
+  reorder: authedProcedure
+    .input(z.object({ projectId: z.string().uuid(), orderedIds: z.array(z.string().uuid()) }))
+    .mutation(async ({ ctx, input }) => {
+      await getProjectChecked(ctx, input.projectId);
+      // 只允許重排本專案的分鏡，避免越權改到別專案的列
+      const rows = await db
+        .select({ id: schema.scenes.id })
+        .from(schema.scenes)
+        .where(eq(schema.scenes.projectId, input.projectId));
+      const own = new Set(rows.map((r) => r.id));
+      let idx = 0;
+      for (const id of input.orderedIds) {
+        if (!own.has(id)) continue;
+        await db.update(schema.scenes).set({ orderIndex: idx }).where(eq(schema.scenes.id, id));
+        idx += 1;
+      }
+      return { ok: true };
+    }),
 });
