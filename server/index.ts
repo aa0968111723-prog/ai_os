@@ -40,6 +40,8 @@ app.set("trust proxy", 1);
 // 安全標頭（#9）：nosniff、X-Frame-Options: DENY、HSTS、Referrer-Policy 由 helmet 預設提供；
 // CSP 手動放行 SPA 與 fal 成品：React inline style 需 style 'unsafe-inline'；生成成品/截圖是
 // https/blob/data 圖片一律放行；connectSrc 要含 https:/wss: 讓 tRPC 與即時協作 WS 連得上。
+// mediaSrc 比照 imgSrc 放行 https（否則落回 defaultSrc 'self'）：逐鏡旁白試聽、TTS/影片成品在
+// 落地 Volume 前是跨源 fal CDN 網址，未放行會被 CSP 擋住無法播放（cycle3 旁白試聽實測踩到）。
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -47,6 +49,7 @@ app.use(
       directives: {
         defaultSrc: ["'self'"],
         imgSrc: ["'self'", "data:", "blob:", "https:"],
+        mediaSrc: ["'self'", "data:", "blob:", "https:"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         scriptSrc: ["'self'"],
         connectSrc: ["'self'", "https:", "wss:"],
