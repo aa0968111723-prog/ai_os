@@ -46,13 +46,20 @@ const t = initTRPC.context<Context>().create({
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
+/** 強制改密碼期間仍放行的 procedure（點記法完整路徑）；auth.me 是 publicProcedure 本不經此關，列入是保險 */
+const MUST_CHANGE_PW_ALLOWED = ["auth.changePassword", "auth.me", "auth.logout"];
+
 /** 需登入 */
-export const authedProcedure = t.procedure.use(({ ctx, next }) => {
+export const authedProcedure = t.procedure.use(({ ctx, path, next }) => {
   // 開機初始化（建表/種子）完成前，回可理解的訊息而不是 relation does not exist 500
   if (!isBootReady()) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "系統正在初始化（約一分鐘內完成），請稍候重試" });
   }
   if (!ctx.auth) throw new TRPCError({ code: "UNAUTHORIZED", message: "請先登入" });
+  // 強制改密碼閘門：前端對話框擋不住直接打 API 的請求，後端也要擋
+  if (ctx.auth.user.mustChangePassword && !MUST_CHANGE_PW_ALLOWED.includes(path)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "管理員重設了你的密碼——請先在頁面上設定新密碼再繼續使用" });
+  }
   return next({ ctx: { ...ctx, auth: ctx.auth } });
 });
 

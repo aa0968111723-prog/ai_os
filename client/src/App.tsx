@@ -10,19 +10,34 @@ import { FeedbackPage } from "./pages/FeedbackPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { PasswordInput } from "./components/PasswordInput";
 
-/** 自助改密碼（拿到管理員的臨時密碼後，從這裡換成自己的）：成功後其他裝置全部登出 */
-function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
+/**
+ * 自助改密碼（拿到管理員的臨時密碼後，從這裡換成自己的）：成功後其他裝置全部登出。
+ * forced：管理員重設密碼後的強制模式——不能取消、不能點背景關閉，
+ * 成功後本地先清 mustChangePassword 解除強制對話框，再 invalidate 對齊伺服器。
+ */
+function ChangePasswordDialog({ onClose, forced = false }: { onClose: () => void; forced?: boolean }) {
+  const utils = trpc.useUtils();
   const [oldPw, setOldPw] = useState("");
   const [newPw, setNewPw] = useState("");
-  const change = trpc.auth.changePassword.useMutation({ onSuccess: () => setTimeout(onClose, 1800) });
+  const change = trpc.auth.changePassword.useMutation({
+    // 先讓成功訊息停 1.8 秒再收尾——避免對話框在使用者讀到「已更新 ✓」前就消失
+    onSuccess: () =>
+      setTimeout(() => {
+        // 改密碼已成功，先本地清旗標：解除不能只靠 invalidate 的 refetch——它一失敗，強制對話框就永遠關不掉
+        utils.auth.me.setData(undefined, (old) => (old ? { ...old, user: { ...old.user, mustChangePassword: false } } : old));
+        utils.auth.me.invalidate();
+        onClose();
+      }, 1800),
+  });
   const canSubmit = oldPw.length > 0 && newPw.length >= 8 && !change.isPending && !change.isSuccess;
   return (
     <div
       style={{ position: "fixed", inset: 0, background: "rgba(43,38,32,0.35)", display: "grid", placeItems: "center", zIndex: 50 }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onClick={(e) => { if (!forced && e.target === e.currentTarget) onClose(); }}
     >
       <div className="card" style={{ width: 380, maxWidth: "92vw" }} role="dialog" aria-label="改密碼">
         <h2 style={{ marginTop: 0 }}>改密碼</h2>
+        {forced && <p className="hint">管理員重設了你的密碼——請先設定一組自己的新密碼再繼續使用</p>}
         <form onSubmit={(e) => { e.preventDefault(); if (canSubmit) change.mutate({ oldPassword: oldPw, newPassword: newPw }); }}>
           <label htmlFor="chpw-old">原密碼（或管理員給的臨時密碼）</label>
           <PasswordInput id="chpw-old" value={oldPw} onChange={(e) => setOldPw(e.target.value)} autoComplete="current-password" autoFocus />
@@ -31,7 +46,7 @@ function ChangePasswordDialog({ onClose }: { onClose: () => void }) {
           {newPw.length > 0 && newPw.length < 8 && <p className="hint">還差 {8 - newPw.length} 個字</p>}
           <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
             <button className="primary" type="submit" disabled={!canSubmit}>{change.isPending ? "更新中…" : "更新密碼"}</button>
-            <button type="button" onClick={onClose}>取消</button>
+            {!forced && <button type="button" onClick={onClose}>取消</button>}
           </div>
         </form>
         {change.error && <p className="error" role="alert">{change.error.message}</p>}
@@ -78,94 +93,104 @@ export function App() {
 
   const isAdmin = !!me.data && (me.data.user.isSuperAdmin || me.data.adminTeamIds.length > 0);
   const [showChangePw, setShowChangePw] = useState(false);
+  // 管理員重設密碼後：不論在哪個路由都用強制對話框擋住，改完密碼（auth.me 重查）才放行
+  const mustChangePw = !!me.data?.user.mustChangePassword;
 
   return (
     <div className="app">
-      <header className="topbar">
-        <Link href="/" className="brand" style={{ cursor: "pointer", textDecoration: "none", color: "inherit" }}>
-          <span className="orb" /> AI Director OS
-        </Link>
-        {me.data && groups.length > 0 && (
-          <select
-            aria-label="切換作用中的組別"
-            style={{ width: "auto", borderRadius: 999, padding: "6px 14px", fontSize: 13 }}
-            value={activeGroupId}
-            onChange={(e) => setActiveGroupId(e.target.value)}
-          >
-            {groups.map((g) => (
-              <option key={g.groupId} value={g.groupId}>
-                {g.teamName}・{g.groupName}
-                {g.role === "leader" ? "（組長）" : g.role === "admin" ? "（管理）" : ""}
-              </option>
-            ))}
-          </select>
-        )}
-        <span className="spacer" />
-        {me.data && info.data?.mockMode && <span className="badge mock">假生成模式</span>}
-        {me.data && <PointsBadge groupId={activeGroupId} />}
-        {me.data && <Link href="/models"><span className="badge" style={{ cursor: "pointer" }}>模型指南</span></Link>}
-        {me.data && <Link href="/feedback"><span className="badge" style={{ cursor: "pointer" }}>回饋</span></Link>}
-        {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}>團隊管理</span></Link>}
-        {me.data && (
-          <span
-            className="badge"
-            style={{ cursor: "pointer" }}
-            role="button"
-            tabIndex={0}
-            onClick={() => setShowChangePw(true)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShowChangePw(true); } }}
-          >
-            改密碼
-          </span>
-        )}
-        {me.data && (
-          <button onClick={() => logout.mutate()} disabled={logout.isPending} title={me.data.user.name}>
-            {logout.isPending ? "登出中…" : `${me.data.user.name}・登出`}
-          </button>
-        )}
-      </header>
-      {showChangePw && me.data && <ChangePasswordDialog onClose={() => setShowChangePw(false)} />}
-
-      <Switch>
-        <Route path="/invite/:token">{(params) => <AcceptInvitePage token={params.token} />}</Route>
-        <Route>
-          {me.isLoading ? (
-            <p className="hint">載入中…</p>
-          ) : me.error ? (
-            <p className="error">
-              系統暫時連不上（不是你被登出）——請稍候重新整理，或按{" "}
-              <button style={{ padding: "2px 12px" }} onClick={() => me.refetch()}>重試</button>
-            </p>
-          ) : !me.data ? (
-            <LoginPage />
-          ) : me.data.groups.length === 0 && !me.data.user.isSuperAdmin ? (
-            <p className="hint" style={{ marginTop: 40, fontSize: 15 }}>
-              你的帳號還沒被加進任何組別——請聯絡你的組長或管理員把你加入組，加入後重新整理就能開始創作。
-            </p>
-          ) : (
-            <Switch>
-              <Route path="/">
-                <Launchpad groupId={activeGroupId} />
-              </Route>
-              <Route path="/admin">
-                {isAdmin ? <AdminPage /> : (
-                  <p className="error">
-                    這頁需要團隊管理權限 — <Link href="/">回作業台</Link>
-                  </p>
-                )}
-              </Route>
-              <Route path="/feedback"><FeedbackPage groupId={activeGroupId || undefined} /></Route>
-              <Route path="/models"><ModelsPage /></Route>
-              <Route path="/p/:id">{(params) => <ProjectPage id={params.id} />}</Route>
-              <Route>
-                <p>
-                  找不到頁面 — <Link href="/">回作業台</Link>
-                </p>
-              </Route>
-            </Switch>
+      {/* 強制改密碼時整塊背景 inert：對話框遮罩只擋滑鼠，Tab 仍能聚焦到背景，要靠 inert 一起擋 */}
+      <div inert={mustChangePw || undefined}>
+        <header className="topbar">
+          <Link href="/" className="brand" style={{ cursor: "pointer", textDecoration: "none", color: "inherit" }}>
+            <span className="orb" /> AI Director OS
+          </Link>
+          {me.data && groups.length > 0 && (
+            <select
+              aria-label="切換作用中的組別"
+              style={{ width: "auto", borderRadius: 999, padding: "6px 14px", fontSize: 13 }}
+              value={activeGroupId}
+              onChange={(e) => setActiveGroupId(e.target.value)}
+            >
+              {groups.map((g) => (
+                <option key={g.groupId} value={g.groupId}>
+                  {g.teamName}・{g.groupName}
+                  {g.role === "leader" ? "（組長）" : g.role === "admin" ? "（管理）" : ""}
+                </option>
+              ))}
+            </select>
           )}
-        </Route>
-      </Switch>
+          <span className="spacer" />
+          {me.data && info.data?.mockMode && <span className="badge mock">假生成模式</span>}
+          {me.data && <PointsBadge groupId={activeGroupId} />}
+          {me.data && <Link href="/models"><span className="badge" style={{ cursor: "pointer" }}>模型指南</span></Link>}
+          {me.data && <Link href="/feedback"><span className="badge" style={{ cursor: "pointer" }}>回饋</span></Link>}
+          {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}>團隊管理</span></Link>}
+          {me.data && (
+            <span
+              className="badge"
+              style={{ cursor: "pointer" }}
+              role="button"
+              tabIndex={0}
+              onClick={() => setShowChangePw(true)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShowChangePw(true); } }}
+            >
+              改密碼
+            </span>
+          )}
+          {me.data && (
+            <button onClick={() => logout.mutate()} disabled={logout.isPending} title={me.data.user.name}>
+              {logout.isPending ? "登出中…" : `${me.data.user.name}・登出`}
+            </button>
+          )}
+        </header>
+
+        <Switch>
+          <Route path="/invite/:token">{(params) => <AcceptInvitePage token={params.token} />}</Route>
+          <Route>
+            {me.isLoading ? (
+              <p className="hint">載入中…</p>
+            ) : me.error ? (
+              <p className="error">
+                系統暫時連不上（不是你被登出）——請稍候重新整理，或按{" "}
+                <button style={{ padding: "2px 12px" }} onClick={() => me.refetch()}>重試</button>
+              </p>
+            ) : !me.data ? (
+              <LoginPage />
+            ) : me.data.groups.length === 0 && !me.data.user.isSuperAdmin ? (
+              <p className="hint" style={{ marginTop: 40, fontSize: 15 }}>
+                你的帳號還沒被加進任何組別——請聯絡你的組長或管理員把你加入組，加入後重新整理就能開始創作。
+              </p>
+            ) : (
+              <Switch>
+                <Route path="/">
+                  <Launchpad groupId={activeGroupId} />
+                </Route>
+                <Route path="/admin">
+                  {isAdmin ? <AdminPage /> : (
+                    <p className="error">
+                      這頁需要團隊管理權限 — <Link href="/">回作業台</Link>
+                    </p>
+                  )}
+                </Route>
+                <Route path="/feedback"><FeedbackPage groupId={activeGroupId || undefined} /></Route>
+                <Route path="/models"><ModelsPage /></Route>
+                <Route path="/p/:id">{(params) => <ProjectPage id={params.id} />}</Route>
+                <Route>
+                  <p>
+                    找不到頁面 — <Link href="/">回作業台</Link>
+                  </p>
+                </Route>
+              </Switch>
+            )}
+          </Route>
+        </Switch>
+      </div>
+
+      {mustChangePw ? (
+        <ChangePasswordDialog forced onClose={() => setShowChangePw(false)} />
+      ) : (
+        showChangePw && me.data && <ChangePasswordDialog onClose={() => setShowChangePw(false)} />
+      )}
     </div>
   );
 }

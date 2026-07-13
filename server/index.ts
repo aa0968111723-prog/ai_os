@@ -23,6 +23,8 @@ import {
   isAllowedUploadMime, kindFromMime, MAX_FILE_BYTES, STORAGE_ROOT,
 } from "./services/storage";
 import { markBootReady, isBootReady } from "./services/boot";
+import { attachRealtime } from "./services/realtime";
+import { startWorkflowRunner } from "./services/workflowRunner";
 import { db, schema } from "./db";
 import { eq, sql } from "drizzle-orm";
 
@@ -243,7 +245,7 @@ app.get("/api/selftest", async (req, res) => {
       sql`select count(*)::int as n from information_schema.tables where table_schema='public'`,
     )) as unknown as { rows: Array<{ n: number }> };
     const n = result.rows?.[0]?.n ?? 0;
-    if (n < 21) throw new Error(`只有 ${n} 張表(需 ≥21)——建表未完成`);
+    if (n < 22) throw new Error(`只有 ${n} 張表(需 ≥22)——建表未完成`);
     return `${n} 張`;
   });
   await run("模型目錄", async () => {
@@ -300,7 +302,7 @@ if (isProd) {
   app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 }
 
-app.listen(port, () => {
+const httpServer = app.listen(port, () => {
   console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${isMockMode() ? "假生成模式" : "真實模式"}）`);
   try {
     ensureStorageDirs();
@@ -320,7 +322,9 @@ app.listen(port, () => {
         await syncCatalog();
         await ensureSeed();
         markBootReady();
-        console.log("[boot] ✓ 建表/目錄/種子完成，系統就緒");
+        // DB 就緒後才啟動工作流執行器（它每 4 秒讀 workflow_runs，建表前啟動只會空轉報錯）
+        startWorkflowRunner();
+        console.log("[boot] ✓ 建表/目錄/種子完成，系統就緒（工作流執行器已啟動）");
         return;
       }
     } catch (err) {
@@ -332,3 +336,6 @@ app.listen(port, () => {
   };
   void bootstrap();
 });
+
+// 即時協作（presence/游標/編輯指示/變更同步）：WS 升級掛在同一個 http server 上
+attachRealtime(httpServer);

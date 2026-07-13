@@ -11,19 +11,48 @@ const ITEMS: Array<{ key: string; label: string }> = [
   { key: "usability", label: "不用教也會用" },
 ];
 
-/** 測試回饋（6 題評分＋優缺點/備註文字） */
+/** 測試回饋（6 題評分＋優缺點/備註文字）；一人一組一份，之前填過就預填、重送＝修改 */
 export function FeedbackPage({ groupId }: { groupId?: string }) {
-  const submit = trpc.feedback.submit.useMutation();
-  const [scores, setScores] = useState<Record<string, number>>({});
-  const [best, setBest] = useState("");
-  const [worst, setWorst] = useState("");
-  const [note, setNote] = useState("");
+  const mine = trpc.feedback.mine.useQuery({ groupId });
+
+  // 等既有回饋載入完再掛表單：預填走 useState 初始值，不用 effect 事後回填（避免表單先空白再跳成舊值）
+  if (mine.isLoading) return <p className="hint">載入中…</p>;
+  // 載入失敗不能退回空白表單：看不到既有內容就送出，upsert 會把舊回饋整份覆寫掉
+  if (mine.isError) {
+    return (
+      <p className="error">
+        回饋資料載入不了——請稍候再{" "}
+        <button style={{ padding: "2px 12px" }} onClick={() => mine.refetch()}>重試</button>
+      </p>
+    );
+  }
+  // key 綁組別：切換作用組時整份表單重掛，才不會把 A 組的草稿帶到 B 組
+  return <FeedbackForm key={groupId ?? ""} groupId={groupId} existing={mine.data ?? null} />;
+}
+
+function FeedbackForm({
+  groupId,
+  existing,
+}: {
+  groupId?: string;
+  existing: { scores: unknown; best: string | null; worst: string | null; note: string | null } | null;
+}) {
+  const utils = trpc.useUtils();
+  // 送出後刷新 mine：第一次填完，按鈕文案與提示才會切成「已填過」狀態
+  const submit = trpc.feedback.submit.useMutation({ onSuccess: () => utils.feedback.mine.invalidate() });
+  const [scores, setScores] = useState<Record<string, number>>(
+    () => (existing?.scores as Record<string, number> | undefined) ?? {},
+  );
+  const [best, setBest] = useState(existing?.best ?? "");
+  const [worst, setWorst] = useState(existing?.worst ?? "");
+  const [note, setNote] = useState(existing?.note ?? "");
   const [justSent, setJustSent] = useState(false);
 
+  const hasExisting = existing != null;
   const rated = Object.keys(scores).length;
 
-  const reset = () => {
-    setScores({}); setBest(""); setWorst(""); setNote("");
+  // 回表單修改：保留剛剛填的內容，不清空
+  const backToForm = () => {
     setJustSent(false);
     submit.reset();
   };
@@ -34,7 +63,7 @@ export function FeedbackPage({ groupId }: { groupId?: string }) {
         <h2>收到了，感恩 🙏</h2>
         <p className="sub">你的回饋會直接影響下一版怎麼改。</p>
         <div style={{ marginTop: 12, display: "flex", gap: 16, justifyContent: "center", alignItems: "center" }}>
-          <button onClick={reset}>再填一份</button>
+          <button onClick={backToForm}>再修改</button>
           <Link href="/">回作業台</Link>
         </div>
       </div>
@@ -55,6 +84,7 @@ export function FeedbackPage({ groupId }: { groupId?: string }) {
     <div style={{ maxWidth: 620, margin: "0 auto" }}>
       <h1>使用回饋</h1>
       <p className="sub">1＝很不行、5＝很好；憑直覺填就好，兩分鐘。沒用到的功能可以留空，再點一次分數就能取消。</p>
+      {hasExisting && <p className="hint">你之前填過——直接修改後重新送出即可。</p>}
       <div className="card">
         {ITEMS.map((item) => (
           <div key={item.key} style={{ marginBottom: 14 }}>
@@ -99,7 +129,7 @@ export function FeedbackPage({ groupId }: { groupId?: string }) {
               );
             }}
           >
-            {submit.isPending ? "送出中…" : "送出回饋"}
+            {submit.isPending ? "送出中…" : hasExisting ? "更新回饋" : "送出回饋"}
           </button>
           <span className="hint">{rated === 0 ? "至少評 1 題就能送出" : "沒用到的功能可以留空"}</span>
         </div>

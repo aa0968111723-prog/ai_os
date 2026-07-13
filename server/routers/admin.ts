@@ -167,7 +167,11 @@ export const adminRouter = router({
     // 稽核：誰在什麼時候重設了誰（臨時密碼本身不落 log）
     console.log(`[audit] resetMemberPassword：caller=${ctx.auth.user.id} target=${target.id}`);
     const tempPassword = generateTempPassword();
-    await db.update(schema.users).set({ passwordHash: await hashPassword(tempPassword) }).where(eq(schema.users.id, target.id));
+    // mustChangePassword：臨時密碼登入後前端強制改密碼，auth.changePassword 成功時清回 false
+    await db
+      .update(schema.users)
+      .set({ passwordHash: await hashPassword(tempPassword), mustChangePassword: true })
+      .where(eq(schema.users.id, target.id));
     // 全 session 作廢：舊登入立刻失效，只有拿到臨時密碼的本人能重新登入
     await db.delete(schema.sessions).where(eq(schema.sessions.userId, target.id));
     return { tempPassword };

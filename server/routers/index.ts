@@ -14,6 +14,7 @@ import { knowledgeRouter } from "./knowledge";
 import { charactersRouter } from "./characters";
 import { scenePresetsRouter } from "./scenePresets";
 import { promptsRouter } from "./prompts";
+import { workflowsRouter } from "./workflows";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -31,6 +32,7 @@ export const appRouter = router({
   characters: charactersRouter,
   scenePresets: scenePresetsRouter,
   prompts: promptsRouter,
+  workflows: workflowsRouter,
 });
 
 export type AppRouter = typeof appRouter;

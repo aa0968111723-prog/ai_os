@@ -68,7 +68,11 @@ export const authRouter = router({
         throw new TRPCError({ code: "UNAUTHORIZED", message: "原密碼不正確" });
       }
       clearLoginRate(rateKey);
-      await db.update(schema.users).set({ passwordHash: await hashPassword(input.newPassword) }).where(eq(schema.users.id, user.id));
+      // mustChangePassword 清回 false：管理員重設後的強制改密碼流程到此解除
+      await db
+        .update(schema.users)
+        .set({ passwordHash: await hashPassword(input.newPassword), mustChangePassword: false })
+        .where(eq(schema.users.id, user.id));
       // 舊 session 全部作廢（含可能外洩的），本裝置換發新的繼續用
       await db.delete(schema.sessions).where(eq(schema.sessions.userId, user.id));
       const token = await createSession(user.id);

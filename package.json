@@ -20,6 +20,7 @@
     "@types/archiver": "^8.0.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/multer": "^2.2.0",
+    "@types/ws": "^8.18.1",
     "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.44.5",
@@ -31,6 +32,7 @@
     "superjson": "^2.2.1",
     "undici": "^8.7.0",
     "wouter": "^3.3.5",
+    "ws": "^8.21.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

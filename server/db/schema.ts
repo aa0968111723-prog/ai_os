@@ -14,6 +14,8 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   isSuperAdmin: boolean("is_super_admin").notNull().default(false),
   status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
+  /** 管理員重設密碼後為 true：首次登入強制改密碼（changePassword 成功即清除） */
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -292,4 +294,21 @@ export const messages = pgTable("messages", {
   kind: text("kind").notNull().default("text"),
   body: text("body").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/** 工作流執行紀錄：後端執行器逐步推進（關頁不中斷）；steps 為每步狀態快照 */
+export const workflowRuns = pgTable("workflow_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  presetId: text("preset_id").notNull(),
+  prompt: text("prompt").notNull(),
+  status: text("status", { enum: ["running", "done", "failed", "stopped"] }).notNull().default("running"),
+  currentStep: integer("current_step").notNull().default(0),
+  /** 每步：{ note, status: "pending"|"running"|"done"|"failed"|"stopped", generationId?, detail? } */
+  steps: jsonb("steps").notNull(),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
