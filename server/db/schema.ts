@@ -3,7 +3,7 @@
  * Railway Postgres · Drizzle（pg 方言）
  * 組織模型：超管 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
-import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, unique } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 
 /* ── 認證與組織 ────────────────────────────────── */
 
@@ -321,24 +321,23 @@ export const workflowRuns = pgTable("workflow_runs", {
  * 首次讀取時以 shared/options 的預設 lazy-seed；(groupId,type,value) 唯一，讓 seed 冪等。
  * worldview 類（tone/theme/style）value===label（直接是注入生成的字串）；kind/platform 的 value 是穩定 id。
  */
-export const groupOptions = pgTable(
-  "group_options",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    groupId: uuid("group_id").notNull(),
-    type: text("type", { enum: ["kind", "platform", "tone", "theme", "style"] }).notNull(),
-    value: text("value").notNull(),
-    label: text("label").notNull(),
-    /** 僅 platform 用：畫面比例 16:9 / 9:16 / 1:1（生成時帶入） */
-    format: text("format"),
-    sortOrder: integer("sort_order").notNull().default(0),
-    /** 停用＝不再出現在挑選清單，但既有專案已存的值仍可顯示（不硬刪，保資料完整） */
-    active: boolean("active").notNull().default(true),
-    createdBy: uuid("created_by"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-  },
-  (t) => ({ uq: unique("group_options_group_type_value").on(t.groupId, t.type, t.value) }),
-);
+// 註：不加 (group_id,type,value) DB 層 unique constraint——drizzle-kit pushSchema 對「已有資料
+// 的表新增 unique」會觸發互動式 truncate 提問，在非 TTY 容器直接卡死開機（redeploy 才會爆）。
+// 冪等改由應用層保證：groups.optionsSeeded 旗標保證每組只 seed 一次、upsert 自行擋同名，已足夠。
+export const groupOptions = pgTable("group_options", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  type: text("type", { enum: ["kind", "platform", "tone", "theme", "style"] }).notNull(),
+  value: text("value").notNull(),
+  label: text("label").notNull(),
+  /** 僅 platform 用：畫面比例 16:9 / 9:16 / 1:1（生成時帶入） */
+  format: text("format"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  /** 停用＝不再出現在挑選清單，但既有專案已存的值仍可顯示（不硬刪，保資料完整） */
+  active: boolean("active").notNull().default(true),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
 
 /**
  * 元件級回饋（R23）：使用者點選頁面元件自動標定 → 分類 + 文字 + 可選截圖。
