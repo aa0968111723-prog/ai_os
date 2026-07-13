@@ -32,7 +32,7 @@ export function KnowledgeBase({ projectId }: { projectId: string }) {
   const totalChars = (list.data ?? []).reduce((s, r) => s + r.chars, 0);
 
   return (
-    <section className="card">
+    <section className="card" data-fb="專案知識庫">
       <h2>專案知識庫（AI 讀得懂你的素材）</h2>
       <p className="hint">
         貼上師父開示稿、見證故事、腳本——AI 導演發想時會自動讀取，你不必每次重講背景。

@@ -30,7 +30,7 @@ export function CharacterCards({
   const [notes, setNotes] = useState("");
 
   return (
-    <section className="card">
+    <section className="card" data-fb="角色定裝卡">
       <h2>角色定裝卡（跨鏡一致）</h2>
       <p className="hint">設定角色外觀一次鎖定；生成時勾選角色，AI 自動帶入外觀，跨鏡頭不走樣。</p>
 

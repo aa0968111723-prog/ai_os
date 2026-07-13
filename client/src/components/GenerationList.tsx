@@ -75,7 +75,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
   if (!list.data?.length) return <p className="hint" style={{ marginTop: 12 }}>還沒有生成紀錄——上面試一次吧。</p>;
 
   return (
-    <div style={{ marginTop: 14 }}>
+    <div style={{ marginTop: 14 }} data-fb="生成紀錄">
       {addSceneError && <p className="error">加入分鏡失敗：{addSceneError}</p>}
       {addedId && !addSceneError && (
         <p className="hint" style={{ color: "var(--success)" }}>已加入分鏡 ✓（在下方分鏡・交付區）</p>

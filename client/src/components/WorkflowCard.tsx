@@ -62,7 +62,7 @@ export function WorkflowCard({ projectId }: { projectId: string }) {
   const stop = trpc.workflows.stop.useMutation({ onSuccess: () => runs.refetch() });
 
   return (
-    <section className="card">
+    <section className="card" data-fb="工作流">
       <h2>工作流(一鍵串鏈)</h2>
       <p className="hint">選一條流程 → 填一次想法 → 由伺服器在背景執行——關掉頁面也會繼續跑,成品進下方生成紀錄。</p>
       <label>流程</label>

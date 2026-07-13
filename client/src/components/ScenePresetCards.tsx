@@ -30,7 +30,7 @@ export function ScenePresetCards({
   const [lighting, setLighting] = useState("");
 
   return (
-    <section className="card">
+    <section className="card" data-fb="場景設定卡">
       <h2>場景設定卡（色板・光線一致）</h2>
       <p className="hint">設定場景色板/光線一次鎖定；生成時勾選，AI 自動帶入，同場景跨鏡光影不跳。</p>
 

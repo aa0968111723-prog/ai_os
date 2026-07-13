@@ -51,7 +51,7 @@ export function ModelsPage() {
   );
 
   return (
-    <div>
+    <div data-fb="模型指南頁">
       <h1>模型指南</h1>
       <p className="sub">
         {MODEL_CATEGORY_COUNT} 種創作類別、共 {MODELS.length} 個模型(旗艦/經濟/最低成本三檔)。搜尋或按類別瀏覽;「適合」欄告訴你什麼時候用它。

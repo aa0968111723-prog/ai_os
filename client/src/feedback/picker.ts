@@ -14,24 +14,150 @@ export interface PickResult {
 
 const WIDGET_ATTR = "data-fb-widget";
 const PRIMARY = "#c2613f";
+const MAX_LABEL = 24;
 
 /** 該元素是否屬於回饋 widget 自身（浮動鈕、面板、選取用的 overlay 與高亮框） */
 function isOwnWidget(el: Element | null): boolean {
   return !!el && !!el.closest(`[${WIDGET_ATTR}]`);
 }
 
-/** 被點元素的可讀標籤：data-fb → aria-label → button/a 文字(≤24) → tagName */
-export function readableLabel(el: Element): string {
-  const fb = el.closest("[data-fb]")?.getAttribute("data-fb");
-  if (fb && fb.trim()) return fb.trim();
-  const aria = el.closest("[aria-label]")?.getAttribute("aria-label");
-  if (aria && aria.trim()) return aria.trim();
-  const clickable = el.closest("button, a");
-  if (clickable) {
-    const text = (clickable.textContent || "").replace(/\s+/g, " ").trim();
-    if (text) return text.length > 24 ? text.slice(0, 24) + "…" : text;
+/** 收斂空白並截到 MAX_LABEL 字（超過補「…」） */
+function clip(raw: string): string {
+  const t = raw.replace(/\s+/g, " ").trim();
+  return t.length > MAX_LABEL ? t.slice(0, MAX_LABEL) + "…" : t;
+}
+
+/** 元素的可見文字（葉節點語意）；回饋 widget 自身節點不算 */
+function visibleText(el: Element): string {
+  if (isOwnWidget(el)) return "";
+  return (el.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+/** 中文化的元素類型（都認不出身分時的最後退路，取代裸 tagName） */
+function zhTypeOf(el: Element): string {
+  const tag = el.tagName.toLowerCase();
+  const role = el.getAttribute("role");
+  if (tag === "button" || role === "button" || tag === "summary") return "按鈕";
+  if (tag === "a") return "連結";
+  if (tag === "input") {
+    const type = (el.getAttribute("type") || "text").toLowerCase();
+    if (type === "checkbox" || type === "radio") return "選項";
+    if (type === "button" || type === "submit") return "按鈕";
+    return "輸入框";
   }
-  return el.tagName.toLowerCase();
+  if (tag === "textarea") return "輸入框";
+  if (tag === "select") return "選單";
+  if (tag === "img") return "圖片";
+  return "區塊";
+}
+
+/** 表單控制項自己的標籤：placeholder → 關聯 <label>（htmlFor/id 或包裹）→ aria-label → name */
+function controlLabel(el: Element): string | null {
+  const ph = el.getAttribute("placeholder");
+  if (ph && ph.trim()) return clip(ph);
+  const id = el.getAttribute("id");
+  if (id) {
+    let assoc: Element | null = null;
+    try {
+      assoc = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+    } catch {
+      assoc = null;
+    }
+    const t = assoc ? visibleText(assoc) : "";
+    if (t) return clip(t);
+  }
+  const wrapping = el.closest("label");
+  if (wrapping) {
+    const t = visibleText(wrapping);
+    if (t) return clip(t);
+  }
+  const aria = el.getAttribute("aria-label");
+  if (aria && aria.trim()) return clip(aria);
+  const name = el.getAttribute("name");
+  if (name && name.trim()) return clip(name);
+  return null;
+}
+
+/**
+ * 精準標籤：以「元素自己的身分」為準（而非所在大卡）。依序：
+ * 可點祖先(button/a/[role=button])的可見文字 → 表單控制項 → img alt →
+ * label/標題文字 → title 屬性。都認不出回 null（交給區域名或中文化類型）。
+ */
+function preciseLabel(el: Element): string | null {
+  const clickable = el.closest("button, a, [role='button'], summary");
+  if (clickable && !isOwnWidget(clickable)) {
+    const t = visibleText(clickable);
+    if (t) return clip(t);
+    const aria = clickable.getAttribute("aria-label");
+    if (aria && aria.trim()) return clip(aria);
+    const title = clickable.getAttribute("title");
+    if (title && title.trim()) return clip(title);
+  }
+
+  const control = el.closest("input, textarea, select");
+  if (control) {
+    const l = controlLabel(control);
+    if (l) return l;
+  }
+
+  const img = el.closest("img");
+  if (img) {
+    const alt = img.getAttribute("alt");
+    if (alt && alt.trim()) return clip(alt);
+  }
+
+  const labelish = el.closest("label, h1, h2, h3, h4, h5, h6");
+  if (labelish && !isOwnWidget(labelish)) {
+    const t = visibleText(labelish);
+    if (t) return clip(t);
+  }
+
+  const titled = el.closest("[title]");
+  if (titled) {
+    const title = titled.getAttribute("title");
+    if (title && title.trim()) return clip(title);
+  }
+
+  return null;
+}
+
+/** 最近的 [data-fb] 祖先名，作為「所在區域」脈絡 */
+function regionLabel(el: Element): string | null {
+  const fb = el.closest("[data-fb]")?.getAttribute("data-fb");
+  return fb && fb.trim() ? fb.trim() : null;
+}
+
+/**
+ * 被點元素的可讀標籤（含區域脈絡）。
+ * 精準標籤優先呈現「元素自己是什麼」；若所在 [data-fb] 區域與精準標籤不同，
+ * 合成「區域 · 精準標籤」（如「世界觀卡 · 一句話故事」）。
+ * 認不出精準身分時退回區域名，再退回中文化的元素類型。
+ */
+export function readableLabel(el: Element): string {
+  const precise = preciseLabel(el);
+  const region = regionLabel(el);
+  if (precise) {
+    return region && region !== precise ? `${region} · ${precise}` : precise;
+  }
+  return region ?? zhTypeOf(el);
+}
+
+/**
+ * 讓標記更有意義：純文字節點或很小的元素，改選它最近的「互動/具名」祖先，
+ * 使高亮框與標籤貼合一個真正有身分的目標，而不是半個字或一顆小圖示。
+ * 找不到合適祖先就維持原元素。
+ */
+export function refineTarget(el: Element): Element {
+  // 元素自己就是主要的互動/媒體節點時，直接用它
+  if (el.matches("button, a, input, textarea, select, img, [role='button']")) return el;
+  const rect = el.getBoundingClientRect();
+  const tiny = rect.width < 24 || rect.height < 16;
+  const textLeaf = el.childElementCount === 0 && !!(el.textContent || "").trim();
+  if (tiny || textLeaf) {
+    const meaningful = el.closest("button, a, input, textarea, select, [role='button'], label, summary");
+    if (meaningful && !isOwnWidget(meaningful)) return meaningful;
+  }
+  return el;
 }
 
 /** 定位字串：優先 data-fb，其次一段簡易 DOM 路徑（供人日後對照，不保證唯一） */
@@ -107,7 +233,8 @@ export function pickElement(onPick: (r: PickResult) => void, onCancel: () => voi
     const el = document.elementFromPoint(x, y);
     overlay.style.pointerEvents = "auto";
     if (!el || isOwnWidget(el) || el === document.documentElement || el === document.body) return null;
-    return el;
+    // 純文字/很小的節點→貼到最近的互動或具名祖先，讓標記與高亮更有意義
+    return refineTarget(el);
   }
 
   function paint(el: Element | null) {

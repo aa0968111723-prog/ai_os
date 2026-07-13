@@ -43,7 +43,7 @@ export function ModelPicker({
   const loadError = categories.error ?? models.error;
 
   return (
-    <div>
+    <div data-fb="模型挑選">
       <label>創作類別</label>
       <select value={category} disabled={categories.isLoading} onChange={(e) => { setCategory(e.target.value); setModelId(""); }}>
         {(categories.data ?? []).filter((c) => c.id !== "workflow").map((c) => (

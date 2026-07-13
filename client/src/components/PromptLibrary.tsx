@@ -12,7 +12,7 @@ export function PromptLibrary({ projectId, onUse }: { projectId: string; onUse: 
   if (!list.data?.length) return null; // 沒有咒語就不佔版面（生成成功後自動出現）
 
   return (
-    <section className="card">
+    <section className="card" data-fb="提示詞庫">
       <h2>提示詞庫（打過的咒語，一鍵再用）</h2>
       <p className="hint">成功生成的提示詞會自動存這裡；常用的排在前面。</p>
       <div style={{ marginTop: 8 }}>

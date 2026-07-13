@@ -357,7 +357,7 @@ function FeedbackReportsSection() {
   const [statusFilter, setStatusFilter] = useState<"" | "open" | "reviewing" | "done">("");
   const reports = trpc.feedbackReports.listVisible.useQuery({ status: statusFilter || undefined });
   return (
-    <section className="card" style={{ marginTop: 16 }}>
+    <section className="card" style={{ marginTop: 16 }} data-fb="元件回饋審閱">
       <h2>元件回饋（{reports.data?.length ?? 0}）</h2>
       <p className="hint">夥伴在任何頁面用右下角「回饋」浮標標定某個元件送出的意見。</p>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
@@ -460,7 +460,7 @@ export function AdminPage() {
       <div className="cols">
         <div className="stack">
           {teams.map((team) => (
-            <section key={team.id} className="card">
+            <section key={team.id} className="card" data-fb="團隊與成員卡">
               <h2>{team.name}</h2>
               <p className="hint">管理：{team.admins.map((a) => a?.name).join("、") || "—"}</p>
               {team.groups.map((g) => (
@@ -497,7 +497,7 @@ export function AdminPage() {
         {/* 系統自檢只有超管的 /api/selftest 能用——非超管按了只會 403，對他們是死功能，故只對超管顯示 */}
         {isSuperAdmin && <SelfTestCard />}
         {isSuperAdmin && <CreateTeamCard />}
-        <div className="card">
+        <div className="card" data-fb="點數與額度卡">
           <h2>點數與額度（彈性・隨時可調）</h2>
           <p className="hint">空白＝不限。總預算限超管；各組週額度由團隊管理員在左側團隊卡調整。</p>
           {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值 */}
@@ -527,7 +527,7 @@ export function AdminPage() {
           {saveSettings.error && <p className="error">{saveSettings.error.message}</p>}
           {settingsSaved && <p className="hint" style={{ color: "var(--success)" }}>已儲存 ✓</p>}
         </div>
-        <div className="card">
+        <div className="card" data-fb="邀請成員卡">
           <h2>邀請成員</h2>
           <label htmlFor="invite-email">Email</label>
           <input id="invite-email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="partner@example.com" />

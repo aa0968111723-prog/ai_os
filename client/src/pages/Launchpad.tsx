@@ -77,7 +77,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
           </div>
         </section>
 
-        <aside className="card">
+        <aside className="card" data-fb="新專案卡">
           <h2>＋ 新專案</h2>
           {activeGroup && (
             <p className="hint" style={{ marginTop: -4 }}>

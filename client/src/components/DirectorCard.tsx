@@ -4,7 +4,7 @@ import { trpc } from "../api";
 export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (prompt: string) => void }) {
   const suggest = trpc.director.suggest.useMutation();
   return (
-    <section className="card">
+    <section className="card" data-fb="AI 導演卡">
       <h2>AI 導演建議</h2>
       <p className="hint">依世界觀＋專案知識庫給分鏡 idea——僅供參考，成品仍須組長審核。</p>
       <button className="primary" disabled={suggest.isPending} onClick={() => suggest.mutate({ projectId })}>

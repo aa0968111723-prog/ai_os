@@ -25,7 +25,7 @@ export function MessagePanel({ projectId }: { projectId: string }) {
   }, [list.data]);
 
   return (
-    <aside className="card">
+    <aside className="card" data-fb="組內留言">
       <h2>組內留言</h2>
       {list.isLoading && <p className="hint">載入留言中…</p>}
       {list.error && <p className="error">留言載入失敗，稍後會自動重試。</p>}

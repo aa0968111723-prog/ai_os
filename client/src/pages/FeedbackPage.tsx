@@ -81,7 +81,7 @@ function FeedbackForm({
     });
 
   return (
-    <div style={{ maxWidth: 620, margin: "0 auto" }}>
+    <div style={{ maxWidth: 620, margin: "0 auto" }} data-fb="使用回饋頁">
       <h1>使用回饋</h1>
       <p className="sub">1＝很不行、5＝很好；憑直覺填就好，兩分鐘。沒用到的功能可以留空，再點一次分數就能取消。</p>
       {hasExisting && <p className="hint">你之前填過——直接修改後重新送出即可。</p>}

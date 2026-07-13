@@ -18,7 +18,7 @@ export function ScriptSplitCard({ projectId }: { projectId: string }) {
   });
 
   return (
-    <section className="card">
+    <section className="card" data-fb="AI 拆分鏡">
       <h2>AI 拆分鏡（腳本 → 一幕一幕）</h2>
       <p className="hint">貼上腳本，AI 幫你切成分鏡草稿（每幕有建議畫面＋配音詞）；留空則用知識庫裡的腳本／開示稿。</p>
       {open ? (

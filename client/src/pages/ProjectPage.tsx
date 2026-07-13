@@ -406,7 +406,7 @@ export function ProjectPage({ id }: { id: string }) {
 
           {/* 生成台（11 類 × 旗艦/經濟/最低成本） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>
-          <section className="card">
+          <section className="card" data-fb="生成台">
             <h2>創作生成</h2>
             <ModelPicker onChange={setModel} />
             {model?.needs && (
