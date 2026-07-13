@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Route, Switch, Link } from "wouter";
 import { trpc } from "./api";
 import { Launchpad } from "./pages/Launchpad";
@@ -64,16 +64,59 @@ function ChangePasswordDialog({ onClose, forced = false }: { onClose: () => void
 function PointsBadge({ groupId }: { groupId: string }) {
   // enabled 等組別就緒才查——避免首載以 undefined 先打一輪造成「週額度閃爍」
   const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 60_000, enabled: !!groupId });
-  if (my.error) return <span className="badge" title="點數暫時讀不到，稍後會自動重試"><Icon name="Gem" size={14} /><span className="mono">—</span></span>;
+  if (my.error) return <span className="status-chip" title="點數暫時讀不到，稍後會自動重試"><Icon name="Gem" size={14} /><span className="mono">—</span></span>;
   if (!my.data) return null;
   const { totalRemaining, weeklyQuota, weeklyUsed, dailyQuota, dailyUsed } = my.data;
   const label = totalRemaining != null ? `剩 ${totalRemaining.toLocaleString()}` : "不限";
   const weekly = weeklyQuota != null ? `・週 ${weeklyUsed}/${weeklyQuota}` : "";
   const daily = dailyQuota != null ? `・日 ${dailyUsed}/${dailyQuota}` : "";
   return (
-    <span className="badge" title="點數額度由管理員調整；日上限每天重置">
+    <span className="status-chip" title="點數額度由管理員調整；日上限每天重置">
       <Icon name="Gem" size={14} /><span className="mono">{label}{weekly}{daily}</span>
     </span>
+  );
+}
+
+/** 使用者選單（收斂頂欄）：怎麼用／模型指南／選項／團隊管理／改密碼＋登出，收進單一下拉。
+ * CSP 下自製（無外部庫）：點外面或 Esc 關閉。 */
+function UserMenu({
+  userName, isAdmin, activeIsLeader, onChangePw, onLogout, loggingOut,
+}: {
+  userName: string; isAdmin: boolean; activeIsLeader: boolean;
+  onChangePw: () => void; onLogout: () => void; loggingOut: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  const close = () => setOpen(false);
+  return (
+    <div className="menu-wrap" ref={wrap}>
+      <button className="badge" aria-haspopup="menu" aria-expanded={open} title={userName} onClick={() => setOpen((v) => !v)}>
+        <Icon name="User" size={14} />
+        <span style={{ maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{userName}</span>
+        <Icon name="ChevronDown" size={14} />
+      </button>
+      {open && (
+        <div className="menu" role="menu">
+          <Link href="/help" className="menu-item" role="menuitem" onClick={close}><Icon name="HelpCircle" size={15} />怎麼用</Link>
+          <Link href="/models" className="menu-item" role="menuitem" onClick={close}><Icon name="Info" size={15} />模型指南</Link>
+          {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
+          {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />團隊管理</Link>}
+          <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
+          <div className="menu-sep" />
+          <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>
+            <Icon name="Undo2" size={15} />{loggingOut ? "登出中…" : "登出"}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -113,8 +156,9 @@ export function App() {
           </Link>
           {me.data && groups.length > 0 && (
             <select
+              className="group-select"
               aria-label="切換作用中的組別"
-              style={{ width: "auto", borderRadius: 999, padding: "6px 14px", fontSize: 13 }}
+              style={{ width: "auto", fontSize: 13 }}
               value={activeGroupId}
               onChange={(e) => setActiveGroupId(e.target.value)}
             >
@@ -129,27 +173,16 @@ export function App() {
           <span className="spacer" />
           {me.data && info.data?.mockMode && <span className="badge mock">假生成模式</span>}
           {me.data && <PointsBadge groupId={activeGroupId} />}
-          {activeIsLeader && <Link href="/options"><span className="badge" style={{ cursor: "pointer" }}><Icon name="Ellipsis" size={14} />選項</span></Link>}
-          {me.data && <Link href="/help"><span className="badge" style={{ cursor: "pointer" }}><Icon name="HelpCircle" size={14} />怎麼用</span></Link>}
-          {me.data && <Link href="/models"><span className="badge" style={{ cursor: "pointer" }}><Icon name="Info" size={14} />模型指南</span></Link>}
-          {/* 頂欄「回饋」入口已移除（Bruce 指定）：只留右下角浮動回饋 widget，避免兩個回饋入口混淆。/feedback 路由保留（未連結，不破壞既有問卷與 e2e）。 */}
-          {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}><Icon name="User" size={14} />團隊管理</span></Link>}
+          {/* 頂欄收斂：次要入口（怎麼用/模型指南/選項/團隊管理/改密碼）＋登出全收進使用者選單 */}
           {me.data && (
-            <span
-              className="badge"
-              style={{ cursor: "pointer" }}
-              role="button"
-              tabIndex={0}
-              onClick={() => setShowChangePw(true)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShowChangePw(true); } }}
-            >
-              改密碼
-            </span>
-          )}
-          {me.data && (
-            <button onClick={() => logout.mutate()} disabled={logout.isPending} title={me.data.user.name}>
-              {logout.isPending ? "登出中…" : `${me.data.user.name}・登出`}
-            </button>
+            <UserMenu
+              userName={me.data.user.name}
+              isAdmin={isAdmin}
+              activeIsLeader={activeIsLeader}
+              onChangePw={() => setShowChangePw(true)}
+              onLogout={() => logout.mutate()}
+              loggingOut={logout.isPending}
+            />
           )}
         </header>
 
