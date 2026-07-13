@@ -102,6 +102,8 @@ export interface SubmitCoreInput {
   reasonPrefix?: string;
   /** 綁定的分鏡格：草稿分鏡「就地生成」時帶入，完成後把成品回填該格（沒有＝不綁定，不影響既有呼叫） */
   sceneId?: string;
+  /** 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）；不帶＝visual（回填 assetId） */
+  sceneRole?: "visual" | "narration";
   /** 存取檢查掛點：tRPC 端帶 requireGroup（多組隔離）；伺服器內部（runner）呼叫時已在建 run 時把過關,可省略 */
   assertAccess?: (project: typeof schema.projects.$inferSelect) => void;
 }
@@ -166,6 +168,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         kind: model.kind,
         prompt: input.prompt,
         sceneId: input.sceneId ?? null, // 綁定分鏡格（沒有＝null，完成後不回填）
+        sceneRole: input.sceneRole ?? null, // 回填角色（沒有＝null，視為 visual）
         sourceUrl,
         params: falInput,
         pointsEst: model.points,
@@ -275,9 +278,11 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         // 失敗不擋主流程（素材已入庫，僅回填未成，記 log 供補）。
         if (gen.sceneId) {
           try {
-            await db.update(schema.scenes).set({ assetId: asset.id }).where(eq(schema.scenes.id, gen.sceneId));
+            // 角色感知回填：narration→旁白音檔欄位；其餘（visual/null）→主畫面欄位。
+            const patch = gen.sceneRole === "narration" ? { narrationAssetId: asset.id } : { assetId: asset.id };
+            await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, gen.sceneId));
           } catch (err) {
-            console.error(`[generation] 分鏡回填失敗（成品已入庫，可查 log 補）：gen=${gen.id} scene=${gen.sceneId}`, err instanceof Error ? err.message : err);
+            console.error(`[generation] 分鏡回填失敗（成品已入庫，可查 log 補）：gen=${gen.id} scene=${gen.sceneId} role=${gen.sceneRole ?? "visual"}`, err instanceof Error ? err.message : err);
           }
         }
       } catch (err) {

@@ -27,6 +27,10 @@ type Scene = {
   generationId: string | null;
   // 平行後端補上：該格若有進行中的就地生成，回 queued/running；無則 null。
   pendingGenStatus?: string | null;
+  // 旁白配音（後端補上）：已落地旁白音檔的 asset id／可播 url，與進行中配音生成狀態。
+  narrationAssetId?: string | null;
+  narrationUrl?: string | null;
+  pendingVoiceStatus?: string | null;
 };
 
 /**
@@ -177,12 +181,16 @@ function SceneRow({
   decide: ReturnType<typeof trpc.approvals.decide.useMutation>;
   pending: { id: string } | undefined;
 }) {
-  // 每格自持 update／generateInto，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
+  // 每格自持 update／generateInto／generateVoiceover，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
   const update = trpc.scenes.update.useMutation({ onSuccess: invalidate });
   const generate = trpc.scenes.generateInto.useMutation({ onSuccess: invalidate });
+  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({ onSuccess: invalidate });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
-  const rowError = update.error ?? generate.error;
+  // 配音生成中：後端背景 runner 完成後會回填 narrationAssetId，10 秒輪詢自動刷新
+  const isVoicing = s.pendingVoiceStatus === "queued" || s.pendingVoiceStatus === "running";
+  const hasVoiceover = (s.voiceover ?? "").trim() !== "";
+  const rowError = update.error ?? generate.error ?? generateVoiceover.error;
 
   return (
     <div className="gen-row" data-fb="分鏡格">
@@ -239,6 +247,40 @@ function SceneRow({
             placeholder="🎙 配音詞（可留白）"
             onCommit={(v) => update.mutate({ sceneId: s.id, voiceover: String(v) })}
           />
+          {/* 旁白配音：有配音詞才給生成鈕（中文 TTS 走後端預設，不必前端帶模型）；完成後就地試聽＋下載 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+            {hasVoiceover ? (
+              <button
+                style={{ padding: "4px 12px", fontSize: 12 }}
+                disabled={generateVoiceover.isPending || isVoicing}
+                title="用這一格的配音詞生成中文旁白，完成後自動出現試聽"
+                onClick={() => generateVoiceover.mutate({ sceneId: s.id })}
+              >
+                {isVoicing ? "配音生成中…" : s.narrationUrl ? "🔄 重生配音" : "🎙 生成配音"}
+              </button>
+            ) : (
+              <span className="hint">先填配音詞才能生成旁白</span>
+            )}
+          </div>
+          {s.narrationUrl && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+              <audio
+                controls
+                preload="none"
+                src={s.narrationUrl}
+                aria-label={`第 ${i + 1} 鏡旁白試聽`}
+                style={{ height: 32, maxWidth: "100%" }}
+              />
+              <a
+                // 同源 /api/assets/:id/file 才能讓 download 生效；只有跨源 url 時退回 url（瀏覽器會改成導航，但仍可另存）
+                href={s.narrationAssetId ? `/api/assets/${s.narrationAssetId}/file` : s.narrationUrl}
+                download
+                style={{ padding: "4px 12px", fontSize: 12, borderRadius: 8, textDecoration: "none", border: "1px solid var(--soft)", color: "var(--fg)" }}
+              >
+                ⬇ 下載旁白
+              </a>
+            </div>
+          )}
         </div>
 
         {rowError && <p className="error">存檔／生成失敗：{rowError.message}</p>}

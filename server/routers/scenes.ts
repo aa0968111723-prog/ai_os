@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { asc, eq, sql } from "drizzle-orm";
+import { aliasedTable, asc, eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { submitGenerationCore } from "../services/generationCore";
+import { getModel } from "../../shared/models";
 
 async function getProjectChecked(ctx: { auth: NonNullable<import("../trpc").Context["auth"]> }, projectId: string) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
@@ -16,6 +17,8 @@ async function getProjectChecked(ctx: { auth: NonNullable<import("../trpc").Cont
 export const scenesRouter = router({
   listByProject: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
     await getProjectChecked(ctx, input.projectId);
+    // 旁白音檔另用一次別名 join（與主畫面 assetId 的 join 分開，避免同表兩次 join 撞名）
+    const narrationAssets = aliasedTable(schema.assets, "narration_assets");
     const rows = await db
       .select({
         id: schema.scenes.id,
@@ -28,23 +31,33 @@ export const scenesRouter = router({
         voiceover: schema.scenes.voiceover,
         assetUrl: schema.assets.url,
         assetKind: schema.assets.kind,
+        // 逐鏡配音音檔網址（該格已生成的旁白）：前端播放用
+        narrationUrl: narrationAssets.url,
         // 來源生成 id：前端「已加入分鏡」用穩定鍵比對（assetUrl 會在成品落地時被改寫，比 URL 會誤判）
         generationId: sql<string | null>`${schema.assets.meta} ->> 'generationId'`,
         // 該格是否有進行中的就地生成（草稿→出圖進度指示）。用純量子查詢而非 join，避免同格多筆
         // 進行中生成把分鏡列乘開成重複列；兩個子查詢用相同排序取同一筆，pendingGenId 與 status 一致。
+        // 只看「畫面(visual)」生成——排除 narration，否則配音生成中會誤把主畫面標成生成中、鎖住重生鈕
         pendingGenStatus: sql<"queued" | "running" | null>`(
           select g.status from ${schema.generations} g
-          where g.scene_id = ${schema.scenes.id} and g.status in ('queued', 'running')
+          where g.scene_id = ${schema.scenes.id} and (g.scene_role is null or g.scene_role = 'visual') and g.status in ('queued', 'running')
           order by g.created_at desc, g.id desc limit 1
         )`,
         pendingGenId: sql<string | null>`(
           select g.id from ${schema.generations} g
-          where g.scene_id = ${schema.scenes.id} and g.status in ('queued', 'running')
+          where g.scene_id = ${schema.scenes.id} and (g.scene_role is null or g.scene_role = 'visual') and g.status in ('queued', 'running')
+          order by g.created_at desc, g.id desc limit 1
+        )`,
+        // 該格是否有進行中的「配音」生成（配音生成中指示）：獨立於主畫面生成，只看 narration 角色。
+        pendingVoiceStatus: sql<"queued" | "running" | null>`(
+          select g.status from ${schema.generations} g
+          where g.scene_id = ${schema.scenes.id} and g.scene_role = 'narration' and g.status in ('queued', 'running')
           order by g.created_at desc, g.id desc limit 1
         )`,
       })
       .from(schema.scenes)
       .leftJoin(schema.assets, eq(schema.scenes.assetId, schema.assets.id))
+      .leftJoin(narrationAssets, eq(schema.scenes.narrationAssetId, narrationAssets.id))
       .where(eq(schema.scenes.projectId, input.projectId))
       .orderBy(asc(schema.scenes.orderIndex));
     return rows;
@@ -74,6 +87,7 @@ export const scenesRouter = router({
           durationSec: gen.kind === "video" ? 5 : 3,
           status: "review",
           assetId: asset?.id,
+          prompt: gen.prompt, // 帶入原生成提示詞，讓「加入分鏡」的格子日後也能就地重生
         })
         .returning();
       return scene;
@@ -147,6 +161,35 @@ export const scenesRouter = router({
         prompt,
         sceneId: scene.id,
         reasonPrefix: "分鏡生成",
+        assertAccess: (project) => requireGroup(ctx.auth, project.groupId), // 多組隔離
+      });
+      return { generationId: gen.id };
+    }),
+
+  /** 逐鏡配音：以該分鏡的 voiceover 當提示詞送 TTS，綁 narration 角色，完成後回填 narrationAssetId */
+  generateVoiceover: authedProcedure
+    .input(z.object({ sceneId: z.string().uuid(), modelId: z.string().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      await getProjectChecked(ctx, scene.projectId);
+      const prompt = scene.voiceover ?? "";
+      if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有配音詞，請先在分鏡裡填" });
+      // 只放行音訊(TTS)模型：否則傳個圖模會扣點又把圖片塞進 narrationAssetId（audio 播不出）
+      const modelId = input.modelId ?? "fal-ai/kokoro/mandarin-chinese";
+      const model = getModel(modelId);
+      if (!model || model.kind !== "audio") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "配音需要用語音（TTS）模型" });
+      }
+      // 額度／守門／失敗退點全由 submitGenerationCore 既有邏輯處理
+      const gen = await submitGenerationCore({
+        userId: ctx.auth.user.id,
+        projectId: scene.projectId,
+        modelId,
+        prompt,
+        sceneId: scene.id,
+        sceneRole: "narration",
+        reasonPrefix: "配音生成",
         assertAccess: (project) => requireGroup(ctx.auth, project.groupId), // 多組隔離
       });
       return { generationId: gen.id };

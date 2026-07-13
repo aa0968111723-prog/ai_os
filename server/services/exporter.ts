@@ -253,8 +253,8 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
     `- 調性：${worldview.tones.join("、") || "—"}`,
     `- 禁忌事項：${worldview.taboos.join("；") || "—"}`,
     "",
-    "| 鏡號 | 場次 | 秒數 | 類型 | 檔名 | 進出點時間碼 | 提示詞 | 模型 |",
-    "|---|---|---|---|---|---|---|---|",
+    "| 鏡號 | 場次 | 秒數 | 類型 | 檔名 | 旁白音檔 | 進出點時間碼 | 提示詞 | 模型 |",
+    "|---|---|---|---|---|---|---|---|---|",
   ];
 
   // 缺漏素材集中收集、待表格結束後再列——插在表格列中間會把 markdown 表格截斷
@@ -264,6 +264,8 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
   // 鏡頭表欄位：每幕實際寫入交付包的相對檔名（下方主迴圈成功入包後回填）＋依序累計的進/出點時間碼。
   // 時間碼與字幕同一套規則（每幕佔其設定秒數，最少 3 秒），組裝時間軸與分鏡順序一致即可對齊。
   const writtenNames: (string | null)[] = new Array(scenes.length).fill(null);
+  // 逐鏡旁白音檔的實際相對檔名（成功入包後回填），供鏡頭表標明該鏡有無旁白配音。
+  const narrationNames: (string | null)[] = new Array(scenes.length).fill(null);
   let tcAcc = 0;
   const times = scenes.map((sc) => {
     const dur = sc.durationSec > 0 ? sc.durationSec : 3;
@@ -338,14 +340,70 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
 
   if (clientAbort.signal.aborted) return;
 
-  // 鏡頭表主體：每幕一列，補上實際寫入交付包的相對檔名（缺媒體標「（無素材）」）與累計進出點時間碼。
+  // 02_旁白音檔：逐鏡旁白配音（scenes.narrationAssetId 指向的 asset）。與畫面素材各自獨立——
+  // 一幕即使沒有畫面素材，只要有旁白就照樣輸出，檔名鏡號與畫面素材同一套動態補零，方便對齊字幕與畫面。
+  // 取來源方式比照場景素材：已落地讀 Volume、否則抓外網，逐檔容錯（失敗只記警告、不毀整包）。
+  for (const [i, scene] of scenes.entries()) {
+    if (clientAbort.signal.aborted) return;
+    if (!scene.narrationAssetId) continue;
+    const narr = assets.find((a) => a.id === scene.narrationAssetId);
+    if (!narr) continue;
+    let source: Readable;
+    try {
+      if (narr.storagePath) {
+        const abs = absPathOf(narr.storagePath);
+        await stat(abs);
+        source = createReadStream(abs);
+      } else if (narr.url && /^https?:\/\//.test(narr.url)) {
+        const fileRes = await proxyFetch(narr.url, {
+          signal: AbortSignal.any([clientAbort.signal, AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS)]),
+        });
+        if (!fileRes.ok || !fileRes.body) {
+          void fileRes.body?.cancel().catch(() => {});
+          console.warn(`[export] 旁白下載失敗 ${narr.url}: HTTP ${fileRes.status}`);
+          warnings.push(`「${scene.title}」旁白音檔下載失敗（HTTP ${fileRes.status}），未入包`);
+          continue;
+        }
+        const len = Number(fileRes.headers.get("content-length") ?? 0);
+        if (len > REMOTE_FILE_MAX_BYTES) {
+          void fileRes.body.cancel().catch(() => {});
+          console.warn(`[export] 旁白過大跳過 ${narr.url}: ${len} bytes`);
+          warnings.push(`「${scene.title}」旁白音檔過大（${Math.round(len / 1048576)}MB，上限 200MB），未入包`);
+          continue;
+        }
+        source = Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream);
+      } else {
+        continue;
+      }
+    } catch (err) {
+      if (clientAbort.signal.aborted) return;
+      console.warn(`[export] 旁白讀取失敗 ${narr.storagePath ?? narr.url}:`, err instanceof Error ? err.message : err);
+      warnings.push(`「${scene.title}」旁白音檔讀取失敗，未入包`);
+      continue;
+    }
+    const num = String(i + 1).padStart(sceneNumWidth, "0");
+    const ext = (narr.mime && extFromMime(narr.mime)) || ".mp3";
+    const name = `02_旁白音檔/${num}_旁白${ext}`;
+    try {
+      await appendAndWait(archive, source, name, clientAbort.signal);
+      narrationNames[i] = name; // 成功入包才回填鏡頭表
+    } catch (err) {
+      if (clientAbort.signal.aborted) return;
+      throw err;
+    }
+  }
+
+  if (clientAbort.signal.aborted) return;
+
+  // 鏡頭表主體：每幕一列，補上實際寫入交付包的相對檔名（缺媒體標「（無素材）」）、旁白音檔檔名與累計進出點時間碼。
   for (const [i, scene] of scenes.entries()) {
     const asset = assets.find((a) => a.id === scene.assetId);
     const gen = asset ? generations.find((g) => g.id === (asset.meta as { generationId?: string })?.generationId) : undefined;
     const file = writtenNames[i] ?? "（無素材）";
+    const narrationFile = narrationNames[i] ?? "（無）";
     const tc = `${srtTime(times[i].in)} → ${srtTime(times[i].out)}`;
     lines.push(
-      `| ${i + 1} | ${scene.title} | ${scene.durationSec}s | ${asset?.kind ?? "—"} | ${file} | ${tc} | ${gen?.prompt ?? "—"} | ${gen?.modelId ?? "—"} |`,
+      `| ${i + 1} | ${scene.title} | ${scene.durationSec}s | ${asset?.kind ?? "—"} | ${file} | ${narrationFile} | ${tc} | ${gen?.prompt ?? "—"} | ${gen?.modelId ?? "—"} |`,
     );
   }
 
@@ -413,9 +471,13 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
   const hasSubtitle = srt.length > 0;
   if (hasSubtitle) archive.append(srt, { name: "04_字幕/字幕.srt" });
 
+  const hasNarration = narrationNames.some((n) => n !== null);
   archive.append(
-    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／03_圖像／${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）。\n` +
+    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／${hasNarration ? "02_旁白音檔（逐鏡旁白配音）／" : ""}03_圖像／${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）。\n` +
       "媒體檔請直接匯入剪映或 Premiere 組裝。\n" +
+      (hasNarration
+        ? "02_旁白音檔＝逐鏡旁白配音，檔名鏡號對應字幕與畫面（同一套鏡號補零），在剪輯軟體裡把同鏡號的旁白音檔對齊該鏡畫面即可；05_文件的鏡頭表「旁白音檔」欄列出每鏡對應的檔名。\n"
+        : "") +
       (hasSubtitle
         ? "字幕.srt 的時間碼依「分鏡規劃秒數」依序累計（每幕佔其設定秒數），組裝時間軸與分鏡順序一致即可對齊；若實際剪輯調整了各幕長度，請在剪輯軟體裡微調字幕時間。\n"
         : "（本片分鏡尚無配音詞，故未附字幕；用 AI 拆分鏡或在分鏡填配音詞後再打包即有字幕。）\n"),

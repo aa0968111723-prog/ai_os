@@ -122,6 +122,8 @@ export const generations = pgTable("generations", {
   requestId: text("request_id"),
   /** 綁定的分鏡格（可為 null）：草稿分鏡「就地生成」時填入，完成後把成品回填該格 scenes.assetId */
   sceneId: uuid("scene_id"),
+  /** 這筆生成要回填分鏡的哪個角色："visual"＝畫面（回填 scenes.assetId）、"narration"＝旁白音檔（回填 scenes.narrationAssetId）；null＝視為 visual */
+  sceneRole: text("scene_role", { enum: ["visual", "narration"] }),
   resultUrl: text("result_url"),
   /** 文字型輸出(LLM/圖轉文/語音轉文字/訓練結果資訊)直接存這裡 */
   resultText: text("result_text"),
@@ -247,6 +249,8 @@ export const scenes = pgTable("scenes", {
   durationSec: integer("duration_sec").notNull().default(5),
   status: text("status").notNull().default("todo"),
   assetId: uuid("asset_id"),
+  /** 這一幕的旁白音檔素材（逐鏡配音；null＝尚未生成配音） */
+  narrationAssetId: uuid("narration_asset_id"),
   /** 導演 AI 拆分鏡填入：這一幕的建議生成提示詞（草稿分鏡用，一鍵帶入生成台） */
   prompt: text("prompt"),
   /** 這一幕的配音詞／旁白（拆腳本時由 AI 分句；固定素材模式為原音逐句） */
