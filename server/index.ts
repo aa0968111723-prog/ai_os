@@ -19,7 +19,7 @@ import { resolveSession } from "./services/auth";
 import { exportProjectZip } from "./services/exporter";
 import { handleMcp } from "./services/mcp";
 import {
-  ensureStorageDirs, tmpDir, adoptTmpFile, absPathOf, checkDiskSpace, verifyAssetSig,
+  ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, MAX_FILE_BYTES, STORAGE_ROOT,
 } from "./services/storage";
 import { markBootReady, isBootReady } from "./services/boot";
@@ -245,7 +245,7 @@ app.get("/api/selftest", async (req, res) => {
       sql`select count(*)::int as n from information_schema.tables where table_schema='public'`,
     )) as unknown as { rows: Array<{ n: number }> };
     const n = result.rows?.[0]?.n ?? 0;
-    if (n < 22) throw new Error(`只有 ${n} 張表(需 ≥22)——建表未完成`);
+    if (n < 24) throw new Error(`只有 ${n} 張表(需 ≥24)——建表未完成`);
     return `${n} 張`;
   });
   await run("模型目錄", async () => {
@@ -293,6 +293,52 @@ app.get("/api/selftest", async (req, res) => {
 
 // tRPC API
 app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
+
+// ── 元件級回饋截圖（R23）：上傳（登入即可）＋依報告權限服務 ──
+app.post("/api/feedback/screenshot", upload.single("file"), async (req, res) => {
+  const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) { await cleanup(); return res.status(401).json({ error: "請先登入" }); }
+    if (!req.file) return res.status(400).json({ error: "沒有收到截圖" });
+    const mime = (req.file.mimetype.split(";")[0] || "").trim().toLowerCase();
+    if (mime !== "image/png" && mime !== "image/jpeg" && mime !== "image/webp") {
+      await cleanup();
+      return res.status(415).json({ error: "截圖格式需為 png/jpeg/webp" });
+    }
+    const guard = await checkDiskSpace(req.file.size);
+    if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
+    // 存進獨立 feedback/ 目錄（非 assets 池）：路徑前綴固定，submit/serve 才能白名單驗證杜絕跨組偷讀
+    const { storagePath } = await adoptFeedbackShot(req.file.path, mime);
+    res.json({ ok: true, path: storagePath });
+  } catch (err) {
+    await cleanup();
+    res.status(500).json({ error: err instanceof Error ? err.message : "截圖上傳失敗" });
+  }
+});
+
+app.get("/api/feedback/:id/shot", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const [report] = await db.select().from(schema.feedbackReports).where(eq(schema.feedbackReports.id, req.params.id));
+    if (!report || !report.screenshotPath) return res.status(404).json({ error: "找不到截圖" });
+    // 只服務 feedback/ 目錄下的截圖——擋掉「拿別池 asset 路徑當 screenshotPath 提交後偷讀」
+    if (!isFeedbackShotPath(report.screenshotPath)) return res.status(404).json({ error: "找不到截圖" });
+    // 作者本人、報告所屬組的組長/管理員、或超管才看得到
+    const canView =
+      report.userId === auth.user.id ||
+      auth.user.isSuperAdmin ||
+      (report.groupId != null &&
+        auth.groups.some((g) => g.groupId === report.groupId && (g.role === "leader" || g.role === "admin")));
+    if (!canView) return res.status(403).json({ error: "沒有權限看這張截圖" });
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.sendFile(absPathOf(report.screenshotPath), { headers: { "Content-Type": "image/png" } });
+  } catch (err) {
+    console.error("[feedback:shot]", err);
+    if (!res.headersSent) res.status(500).json({ error: "讀取截圖失敗" });
+  }
+});
 
 // 正式環境：服務打包後的前端
 if (isProd) {

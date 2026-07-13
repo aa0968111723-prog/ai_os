@@ -6,6 +6,7 @@ import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { PLATFORMS } from "../../shared/models";
 import { removeStoredFile } from "../services/storage";
+import { getGroupOptions, ensureGroupOptions } from "../services/optionsStore";
 
 export const projectsRouter = router({
   /** 列出指定組的專案（未指定 → 所有我可見的組）；隔離由 requireGroup／成員組清單保證 */
@@ -53,8 +54,14 @@ export const projectsRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       requireGroup(ctx.auth, input.groupId);
-      const platform = PLATFORMS.find((p) => p.id === input.platform);
-      if (!platform) throw new TRPCError({ code: "BAD_REQUEST", message: "未知平台" });
+      // 平台與畫面比例查該組自訂選項（type=platform、啟用中）；kind 不硬性驗證（自由字串），直接存原值。
+      await ensureGroupOptions(input.groupId); // 保證已 seed，下面才能以「該組是否有 platform 選項」判斷
+      const platformOptions = await getGroupOptions(input.groupId, "platform");
+      const match = platformOptions.find((o) => o.value === input.platform && o.active);
+      // 該組已有 platform 選項（一定有，seed 過）→ 只認啟用中的；停用/刪除的平台一律拒絕，不再退回內建。
+      // 僅在極端「該組完全沒有 platform 選項」時才退回 shared/models 內建（理論上 seed 後不會發生）。
+      const format = match?.format ?? (platformOptions.length === 0 ? PLATFORMS.find((p) => p.id === input.platform)?.format : undefined);
+      if (!format) throw new TRPCError({ code: "BAD_REQUEST", message: "這個發布平台已停用或不存在，請重新選一個" });
       const [project] = await db
         .insert(schema.projects)
         .values({
@@ -63,7 +70,7 @@ export const projectsRouter = router({
           title: input.title,
           kind: input.kind,
           platform: input.platform,
-          format: platform.format,
+          format,
           worldview: worldviewSchema.parse({}),
         })
         .returning();

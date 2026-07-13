@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
-import { worldviewSchema, TONE_OPTIONS, THEME_OPTIONS, STYLE_OPTIONS, type Worldview } from "@shared/worldview";
+import { worldviewSchema, type Worldview } from "@shared/worldview";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
 import { DirectorCard } from "../components/DirectorCard";
@@ -43,6 +43,11 @@ export function ProjectPage({ id }: { id: string }) {
   // 專案載入成功才啟用——FORBIDDEN/NOT_FOUND 頁不必開 WS 去被伺服器拒絕（hook 仍無條件呼叫，順序穩定）
   const collab = useCollab(id, !!project.data);
   const me = trpc.auth.me.useQuery();
+  // 世界觀三組 chips（主軸／調性／視覺風格）改由本專案所屬組的自訂選項供給（組長可在「選項」頁增修）
+  const options = trpc.options.byGroup.useQuery(
+    { groupId: project.data?.groupId ?? "" },
+    { enabled: !!project.data?.groupId },
+  );
   /** 世界觀儲存回饋：成功後短暫顯示「已儲存 ✓」再淡出 */
   const [wvSaved, setWvSaved] = useState<"idle" | "shown" | "fading">("idle");
   const wvTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -120,6 +125,14 @@ export function ProjectPage({ id }: { id: string }) {
   const myRole = me.data?.groups.find((g) => g.groupId === p.groupId)?.role;
   const isLeader = myRole === "leader" || myRole === "admin";
   const wv: Worldview = worldviewSchema.parse(p.worldview ?? {});
+  // 各類型的 active 選項標籤（值＝label 字串，與世界觀寫入邏輯一致）
+  const themeOpts = (options.data ?? []).filter((o) => o.type === "theme").map((o) => o.label);
+  const toneOpts = (options.data ?? []).filter((o) => o.type === "tone").map((o) => o.label);
+  const styleOpts = (options.data ?? []).filter((o) => o.type === "style").map((o) => o.label);
+  // 已勾選但選項已被組長改名/刪除的「孤兒值」：仍在 worldview 裡且會注入生成，
+  // 必須補一顆 chip 讓使用者點得掉（否則看不到、按不掉、卻持續注入）。options 尚未載入時不算孤兒。
+  const orphansOf = (field: "themes" | "tones" | "styles", opts: string[]) =>
+    options.data ? wv[field].filter((v) => !opts.includes(v)) : [];
 
   const isOwner = me.data?.user.id === p.ownerId;
   const canArchive = isOwner || isLeader;
@@ -222,7 +235,7 @@ export function ProjectPage({ id }: { id: string }) {
         <div className="stack">
           {/* 世界觀（快速層） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
-          <section className="card">
+          <section className="card" data-fb="世界觀卡">
             <h2>
               世界觀（專案定盤星）
               {updateWv.isPending ? (
@@ -253,7 +266,8 @@ export function ProjectPage({ id }: { id: string }) {
             />
             <label id="wv-themes">訊息主軸</label>
             <div role="group" aria-labelledby="wv-themes">
-              {THEME_OPTIONS.map((t) => {
+              {options.isLoading && !themeOpts.length && <span className="hint">載入中…</span>}
+              {themeOpts.map((t) => {
                 const on = wv.themes.includes(t);
                 return (
                   <span
@@ -269,10 +283,20 @@ export function ProjectPage({ id }: { id: string }) {
                   </span>
                 );
               })}
+              {orphansOf("themes", themeOpts).map((t) => (
+                <span key={t} role="button" tabIndex={0} aria-pressed
+                  className="chip pick on" style={{ borderStyle: "dashed", opacity: 0.75 }}
+                  title="這個選項已被移出清單，點一下可從本專案移除"
+                  onClick={() => toggle("themes", t)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle("themes", t); } }}>
+                  {t} ⓘ
+                </span>
+              ))}
             </div>
             <label id="wv-tones">調性（生成時自動注入）</label>
             <div role="group" aria-labelledby="wv-tones">
-              {TONE_OPTIONS.map((t) => {
+              {options.isLoading && !toneOpts.length && <span className="hint">載入中…</span>}
+              {toneOpts.map((t) => {
                 const on = wv.tones.includes(t);
                 return (
                   <span
@@ -288,10 +312,20 @@ export function ProjectPage({ id }: { id: string }) {
                   </span>
                 );
               })}
+              {orphansOf("tones", toneOpts).map((t) => (
+                <span key={t} role="button" tabIndex={0} aria-pressed
+                  className="chip pick on" style={{ borderStyle: "dashed", opacity: 0.75 }}
+                  title="這個選項已被移出清單，點一下可從本專案移除"
+                  onClick={() => toggle("tones", t)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle("tones", t); } }}>
+                  {t} ⓘ
+                </span>
+              ))}
             </div>
             <label id="wv-styles">視覺風格（畫面一致的關鍵，生成時自動注入）</label>
             <div role="group" aria-labelledby="wv-styles">
-              {STYLE_OPTIONS.map((s) => {
+              {options.isLoading && !styleOpts.length && <span className="hint">載入中…</span>}
+              {styleOpts.map((s) => {
                 const on = wv.styles.includes(s);
                 return (
                   <span
@@ -307,6 +341,15 @@ export function ProjectPage({ id }: { id: string }) {
                   </span>
                 );
               })}
+              {orphansOf("styles", styleOpts).map((s) => (
+                <span key={s} role="button" tabIndex={0} aria-pressed
+                  className="chip pick on" style={{ borderStyle: "dashed", opacity: 0.75 }}
+                  title="這個選項已被移出清單，點一下可從本專案移除"
+                  onClick={() => toggle("styles", s)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle("styles", s); } }}>
+                  {s} ⓘ
+                </span>
+              ))}
             </div>
             {/* 進階欄位唯讀一覽：讓大家看見生成時實際會被帶入哪些設定 */}
             <details style={{ marginTop: 10 }}>
@@ -351,11 +394,14 @@ export function ProjectPage({ id }: { id: string }) {
 
           {/* 素材庫：上傳參考素材（提案核心「把素材丟進去」的入口）＋生成成品自動入庫 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.assets)}>
-            <AssetLibrary
-              projectId={id}
-              selectedSourceId={sourceAsset?.id ?? null}
-              onPickSource={(a) => { setSourceAsset(a); setSourceUrl(""); setSourceUrlError(""); }}
-            />
+            {/* data-fb 讓元件回饋標定「上傳素材」；透明包裹，不影響版面 */}
+            <div data-fb="上傳素材">
+              <AssetLibrary
+                projectId={id}
+                selectedSourceId={sourceAsset?.id ?? null}
+                onPickSource={(a) => { setSourceAsset(a); setSourceUrl(""); setSourceUrlError(""); }}
+              />
+            </div>
           </CollabZone>
 
           {/* 生成台（11 類 × 旗艦/經濟/最低成本） */}
@@ -418,6 +464,7 @@ export function ProjectPage({ id }: { id: string }) {
             <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
               <button
                 className="primary"
+                data-fb="生成按鈕"
                 disabled={disableReason != null || submit.isPending}
                 onClick={() => setConfirming(true)}
               >
@@ -483,7 +530,10 @@ export function ProjectPage({ id }: { id: string }) {
 
           {/* 分鏡與交付 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.scenes)}>
-            <SceneList projectId={id} isLeader={isLeader} onUsePrompt={(text) => setPrompt(text)} />
+            {/* data-fb 讓元件回饋標定「打包下載」（分鏡與交付區）；透明包裹，不影響版面 */}
+            <div data-fb="打包下載">
+              <SceneList projectId={id} isLeader={isLeader} onUsePrompt={(text) => setPrompt(text)} />
+            </div>
           </CollabZone>
         </div>
 

@@ -3,7 +3,7 @@
  * Railway Postgres · Drizzle（pg 方言）
  * 組織模型：超管 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
-import { pgTable, uuid, text, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, unique } from "drizzle-orm/pg-core";
 
 /* ── 認證與組織 ────────────────────────────────── */
 
@@ -31,6 +31,9 @@ export const groups = pgTable("groups", {
   name: text("name").notNull(),
   /** 每人每週點數上限（null＝用全域預設；0＝不限）——組長/管理員可調 */
   weeklyPointsPerUser: integer("weekly_points_per_user"),
+  /** 選項預設是否已 seed 過一次（R23）：seed 一次後即使組長把某類選項清空也不再復活，
+   *  否則「刪光某類型」下次讀取會被誤判未 seed 而整組還原 */
+  optionsSeeded: boolean("options_seeded").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -311,4 +314,54 @@ export const workflowRuns = pgTable("workflow_runs", {
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * 每組自訂選項（R23）：內容類型/發布平台/世界觀(調性·主軸·視覺風格)由各組組長自行增修。
+ * 首次讀取時以 shared/options 的預設 lazy-seed；(groupId,type,value) 唯一，讓 seed 冪等。
+ * worldview 類（tone/theme/style）value===label（直接是注入生成的字串）；kind/platform 的 value 是穩定 id。
+ */
+export const groupOptions = pgTable(
+  "group_options",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    groupId: uuid("group_id").notNull(),
+    type: text("type", { enum: ["kind", "platform", "tone", "theme", "style"] }).notNull(),
+    value: text("value").notNull(),
+    label: text("label").notNull(),
+    /** 僅 platform 用：畫面比例 16:9 / 9:16 / 1:1（生成時帶入） */
+    format: text("format"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /** 停用＝不再出現在挑選清單，但既有專案已存的值仍可顯示（不硬刪，保資料完整） */
+    active: boolean("active").notNull().default(true),
+    createdBy: uuid("created_by"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({ uq: unique("group_options_group_type_value").on(t.groupId, t.type, t.value) }),
+);
+
+/**
+ * 元件級回饋（R23）：使用者點選頁面元件自動標定 → 分類 + 文字 + 可選截圖。
+ * 有別於 feedback 表（定期六題滿意度問卷），這裡是「針對某頁某元件的即時回報」。
+ * pages＝可複選頁面；target*＝被點選的元件描述（page-level 回饋時為 null）。
+ */
+export const feedbackReports = pgTable("feedback_reports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  groupId: uuid("group_id"),
+  /** bug｜uiux｜feature｜stuck｜other（與 shared/options FEEDBACK_CATEGORIES 一致） */
+  category: text("category").notNull(),
+  /** 涉及頁面（單一或複選）：頁面代稱陣列，如 ["專案頁","作業台"] */
+  pages: jsonb("pages").notNull().default([]),
+  /** 被點選元件的可讀標籤（如「生成按鈕」）；不指定元件的頁面級回饋為 null */
+  targetLabel: text("target_label"),
+  /** 元件定位路徑（data-fb 或 DOM 路徑），供工程回溯 */
+  targetSelector: text("target_selector"),
+  /** 點選當下的位置與視窗尺寸 {x,y,w,h,vw,vh}，供還原標記 */
+  targetRect: jsonb("target_rect"),
+  note: text("note").notNull(),
+  /** 截圖（含標記框）落地 Volume 的相對路徑；擷取失敗或未附時為 null */
+  screenshotPath: text("screenshot_path"),
+  status: text("status", { enum: ["open", "reviewing", "done"] }).notNull().default("open"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });

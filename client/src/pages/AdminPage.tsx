@@ -1,5 +1,26 @@
 import { useRef, useState } from "react";
 import { trpc } from "../api";
+import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
+
+/** 分類配色（options.ts 只存 label，顏色在前端定，與溫暖色系一致） */
+const FEEDBACK_CATEGORY_COLOR: Record<string, string> = {
+  bug: "#c0562f",
+  uiux: "#b8862f",
+  feature: "#4f7a4f",
+  stuck: "#7a5cc0",
+  other: "#7a726a",
+};
+const FEEDBACK_CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
+  FEEDBACK_CATEGORIES.map((c) => [c.value, c.label]),
+);
+
+/** 狀態過濾 chips（全部＝空字串） */
+const FEEDBACK_STATUS_FILTERS: Array<{ value: "" | "open" | "reviewing" | "done"; label: string }> = [
+  { value: "", label: "全部" },
+  { value: "open", label: FEEDBACK_STATUS_LABEL.open },
+  { value: "reviewing", label: FEEDBACK_STATUS_LABEL.reviewing },
+  { value: "done", label: FEEDBACK_STATUS_LABEL.done },
+];
 
 /** 後端未設 APP_URL 時邀請連結是相對路徑，補上目前網域才是能直接貼給夥伴的完整連結 */
 function toFullUrl(url: string): string {
@@ -251,6 +272,125 @@ function SelfTestCard() {
   );
 }
 
+/**
+ * 單筆元件回饋列。獨立成元件：每筆有自己的狀態下拉 mutation（isPending/error），
+ * 共用一個會讓某筆的更新中/錯誤顯示到別筆旁邊。
+ */
+function ReportRow({ report }: {
+  report: {
+    id: string;
+    category: string;
+    pages: unknown; // jsonb → 用 asPages() 收斂成 string[]
+    targetLabel?: string | null;
+    note: string;
+    status: string;
+    screenshotPath?: string | null;
+    userName?: string | null;
+    groupName?: string | null;
+    createdAt: string | Date;
+  };
+}) {
+  const utils = trpc.useUtils();
+  const updateStatus = trpc.feedbackReports.updateStatus.useMutation({
+    onSuccess: () => utils.feedbackReports.listVisible.invalidate(),
+  });
+  const color = FEEDBACK_CATEGORY_COLOR[report.category] ?? "#7a726a";
+  const catLabel = FEEDBACK_CATEGORY_LABEL[report.category] ?? report.category;
+  const pages = Array.isArray(report.pages) ? (report.pages as string[]) : [];
+  return (
+    <div className="gen-row" style={{ gridTemplateColumns: "auto 1fr", alignItems: "start", marginTop: 8 }}>
+      {report.screenshotPath ? (
+        <a href={`/api/feedback/${report.id}/shot`} target="_blank" rel="noreferrer" title="點開看截圖">
+          <img
+            src={`/api/feedback/${report.id}/shot`}
+            alt="回饋截圖縮圖"
+            style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border)" }}
+          />
+        </a>
+      ) : (
+        <span
+          className="chip"
+          style={{ margin: 0, background: color, color: "#fff", alignSelf: "start" }}
+        >
+          {catLabel}
+        </span>
+      )}
+      <div style={{ fontSize: 13 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          {report.screenshotPath && (
+            <span className="chip" style={{ margin: 0, background: color, color: "#fff" }}>{catLabel}</span>
+          )}
+          {report.targetLabel && <span className="chip" style={{ margin: 0 }}>標定：{report.targetLabel}</span>}
+          <span className="hint" style={{ fontSize: 11 }}>
+            {report.userName ?? "（未知）"}
+            {report.groupName ? `・${report.groupName}` : ""}
+            ・{new Date(report.createdAt).toLocaleString("zh-TW")}
+          </span>
+        </div>
+        {pages.length > 0 && (
+          <div className="hint" style={{ marginTop: 2 }}>涉及頁面：{pages.join("、")}</div>
+        )}
+        {report.note && <div style={{ marginTop: 2 }}>{report.note}</div>}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+          <label className="hint" htmlFor={`fb-status-${report.id}`} style={{ margin: 0 }}>狀態</label>
+          <select
+            id={`fb-status-${report.id}`}
+            style={{ width: "auto", padding: "3px 10px", fontSize: 12 }}
+            value={report.status}
+            disabled={updateStatus.isPending}
+            onChange={(e) => updateStatus.mutate({ id: report.id, status: e.target.value as "open" | "reviewing" | "done" })}
+          >
+            {(["open", "reviewing", "done"] as const).map((s) => (
+              <option key={s} value={s}>{FEEDBACK_STATUS_LABEL[s]}</option>
+            ))}
+          </select>
+          {updateStatus.isPending && <span className="hint">更新中…</span>}
+          {updateStatus.error && <span className="error" style={{ marginTop: 0 }}>{updateStatus.error.message}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 元件回饋彙整（夥伴在任何頁面用浮標標定元件送出的回饋） */
+function FeedbackReportsSection() {
+  const [statusFilter, setStatusFilter] = useState<"" | "open" | "reviewing" | "done">("");
+  const reports = trpc.feedbackReports.listVisible.useQuery({ status: statusFilter || undefined });
+  return (
+    <section className="card" style={{ marginTop: 16 }}>
+      <h2>元件回饋（{reports.data?.length ?? 0}）</h2>
+      <p className="hint">夥伴在任何頁面用右下角「回饋」浮標標定某個元件送出的意見。</p>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+        {FEEDBACK_STATUS_FILTERS.map((f) => (
+          <span
+            key={f.value || "all"}
+            role="button"
+            tabIndex={0}
+            aria-pressed={statusFilter === f.value}
+            className={`chip pick ${statusFilter === f.value ? "on" : ""}`}
+            onClick={() => setStatusFilter(f.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setStatusFilter(f.value); } }}
+          >
+            {f.label}
+          </span>
+        ))}
+      </div>
+      {reports.isLoading ? (
+        <p className="hint">回饋載入中…</p>
+      ) : reports.error ? (
+        <div>
+          <p className="error">回饋載入失敗：{reports.error.message}</p>
+          <button style={{ marginTop: 8 }} onClick={() => reports.refetch()}>再試一次</button>
+        </div>
+      ) : !reports.data?.length ? (
+        <p className="hint">{statusFilter ? "這個狀態底下還沒有回饋。" : "還沒有元件回饋——夥伴用右下角「回饋」浮標送出即可。"}</p>
+      ) : (
+        reports.data.map((r) => <ReportRow key={r.id} report={r} />)
+      )}
+    </section>
+  );
+}
+
 /** 管理頁（總管理/超管）：組織總覽＋邀請成員（連結用 LINE 傳） */
 export function AdminPage() {
   const utils = trpc.useUtils();
@@ -489,6 +629,8 @@ export function AdminPage() {
           ))
         )}
       </section>
+
+      <FeedbackReportsSection />
     </div>
   );
 }

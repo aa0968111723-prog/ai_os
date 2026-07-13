@@ -9,6 +9,8 @@ import { AdminPage } from "./pages/AdminPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { PasswordInput } from "./components/PasswordInput";
+import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
+import { FeedbackWidget } from "./feedback/FeedbackWidget";
 
 /**
  * 自助改密碼（拿到管理員的臨時密碼後，從這裡換成自己的）：成功後其他裝置全部登出。
@@ -92,6 +94,9 @@ export function App() {
   }, [activeGroupId]);
 
   const isAdmin = !!me.data && (me.data.user.isSuperAdmin || me.data.adminTeamIds.length > 0);
+  // 目前作用組的角色：組長或管理員才看得到「選項」入口（自訂內容類型／平台／世界觀選項）
+  const activeGroup = groups.find((g) => g.groupId === activeGroupId);
+  const activeIsLeader = activeGroup?.role === "leader" || activeGroup?.role === "admin";
   const [showChangePw, setShowChangePw] = useState(false);
   // 管理員重設密碼後：不論在哪個路由都用強制對話框擋住，改完密碼（auth.me 重查）才放行
   const mustChangePw = !!me.data?.user.mustChangePassword;
@@ -122,6 +127,7 @@ export function App() {
           <span className="spacer" />
           {me.data && info.data?.mockMode && <span className="badge mock">假生成模式</span>}
           {me.data && <PointsBadge groupId={activeGroupId} />}
+          {activeIsLeader && <Link href="/options"><span className="badge" style={{ cursor: "pointer" }}>選項</span></Link>}
           {me.data && <Link href="/models"><span className="badge" style={{ cursor: "pointer" }}>模型指南</span></Link>}
           {me.data && <Link href="/feedback"><span className="badge" style={{ cursor: "pointer" }}>回饋</span></Link>}
           {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}>團隊管理</span></Link>}
@@ -172,6 +178,15 @@ export function App() {
                     </p>
                   )}
                 </Route>
+                <Route path="/options">
+                  {activeIsLeader ? (
+                    <GroupOptionsEditor groupId={activeGroupId} />
+                  ) : (
+                    <p className="error">
+                      這頁需要組長或管理員權限 — <Link href="/">回作業台</Link>
+                    </p>
+                  )}
+                </Route>
                 <Route path="/feedback"><FeedbackPage groupId={activeGroupId || undefined} /></Route>
                 <Route path="/models"><ModelsPage /></Route>
                 <Route path="/p/:id">{(params) => <ProjectPage id={params.id} />}</Route>
@@ -191,6 +206,9 @@ export function App() {
       ) : (
         showChangePw && me.data && <ChangePasswordDialog onClose={() => setShowChangePw(false)} />
       )}
+
+      {/* 元件級回饋浮標：登入後任何路由都掛一次；放在 inert 包裹外、與對話框同層，強制改密碼時不受影響 */}
+      {me.data && <FeedbackWidget />}
     </div>
   );
 }

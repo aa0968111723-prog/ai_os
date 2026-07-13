@@ -128,6 +128,27 @@ export async function adoptTmpFile(tmpPath: string, mime: string): Promise<{ sto
   return { storagePath: rel, sizeBytes: s.size };
 }
 
+/**
+ * 回饋截圖存獨立的 feedback/ 目錄（與 assets/ 的 YYYY/MM 分開）。
+ * 路徑前綴固定＋隨機 uuid 檔名，讓 submit 與 serve 能白名單驗證——
+ * 杜絕把任意 asset 相對路徑當 screenshotPath 提交、藉服務端跨組偷讀（IDOR）。
+ */
+export async function adoptFeedbackShot(tmpPath: string, mime: string): Promise<{ storagePath: string; sizeBytes: number }> {
+  ensureStorageDirs();
+  const ext = extFromMime(mime) ?? ".png";
+  const rel = path.posix.join("feedback", `${randomUUID()}${ext}`);
+  const abs = absPathOf(rel);
+  mkdirSync(path.dirname(abs), { recursive: true });
+  await rename(tmpPath, abs);
+  const s = await stat(abs);
+  return { storagePath: rel, sizeBytes: s.size };
+}
+
+/** 只認 feedback/ 目錄下的隨機 uuid 檔名——asset 的 YYYY/MM 路徑不符，天然擋掉跨池偷讀 */
+export function isFeedbackShotPath(p: string): boolean {
+  return /^feedback\/[0-9a-f-]{36}\.(png|jpe?g|webp)$/i.test(p);
+}
+
 export async function removeStoredFile(relPath: string): Promise<void> {
   try {
     await unlink(absPathOf(relPath));
