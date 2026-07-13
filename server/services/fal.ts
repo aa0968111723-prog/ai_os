@@ -35,6 +35,8 @@ export async function falSubmit(endpoint: string, kind: OutputKind, input: Recor
     method: "POST",
     headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    // 送出佇列近乎即時；45s 逾時把「連線掛起」轉成明確失敗（呼叫端退點＋請重試），不無限卡住 mutation
+    timeoutMs: 45_000,
   });
   if (!res.ok) throw new Error(`fal submit 失敗 ${res.status}: ${await res.text()}`);
   const data = (await res.json()) as { request_id: string };
@@ -68,7 +70,7 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
   const base = `https://queue.fal.run/${appId}/requests/${requestId}`;
   let statusRes: Awaited<ReturnType<typeof proxyFetch>>;
   try {
-    statusRes = await proxyFetch(`${base}/status`, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
+    statusRes = await proxyFetch(`${base}/status`, { headers: { Authorization: `Key ${process.env.FAL_KEY}` }, timeoutMs: 30_000 });
   } catch (err) {
     console.warn("[fal] status 網路錯誤（暫時，續輪詢）：", err instanceof Error ? err.message : err);
     return { status: "running" };
@@ -86,7 +88,7 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
   if (s.status !== "COMPLETED") return { status: "failed", error: `fal 狀態 ${s.status}` };
   let resultRes: Awaited<ReturnType<typeof proxyFetch>>;
   try {
-    resultRes = await proxyFetch(base, { headers: { Authorization: `Key ${process.env.FAL_KEY}` } });
+    resultRes = await proxyFetch(base, { headers: { Authorization: `Key ${process.env.FAL_KEY}` }, timeoutMs: 30_000 });
   } catch (err) {
     console.warn("[fal] result 網路錯誤（暫時，續輪詢）：", err instanceof Error ? err.message : err);
     return { status: "running" };

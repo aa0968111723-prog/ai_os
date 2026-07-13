@@ -11,6 +11,7 @@ export interface PickedModel {
   tierLabel: string;
   strengths: string;
   verified: boolean;
+  recommended: boolean;
 }
 
 /** 兩層模型挑選器:類別 → 模型(旗艦/經濟/最低成本分組) */
@@ -25,7 +26,10 @@ export function ModelPicker({
   const [modelId, setModelId] = useState("");
 
   const list = useMemo(() => (models.data ?? []) as PickedModel[] & typeof models.data, [models.data]);
-  const selected = (list.find((m) => m.id === modelId) ?? list[0]) as PickedModel | undefined;
+  // 預設選「本類別推薦」(已驗證的經濟日常主力);使用者手動選過(modelId 有值)則尊重其選擇,
+  // 都沒有才退回清單第一項。切換類別時上層 onChange 會重算點數,不影響金流。
+  const recommendedDefault = list.find((m) => m.recommended) ?? list[0];
+  const selected = (list.find((m) => m.id === modelId) ?? recommendedDefault) as PickedModel | undefined;
 
   useEffect(() => {
     onChange(selected ?? null);
@@ -61,7 +65,7 @@ export function ModelPicker({
             <optgroup key={g.tier} label={g.label}>
               {inTier.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.label} — {m.points} 點{m.verified ? "" : " ⚠︎ 未驗證"}
+                  {m.label} — {m.points} 點{m.recommended ? " ⭐ 推薦" : ""}{m.verified ? "" : " ⚠︎ 未驗證"}
                 </option>
               ))}
             </optgroup>
@@ -79,6 +83,7 @@ export function ModelPicker({
       )}
       {selected && (
         <p className="hint" style={{ marginTop: 4 }}>
+          {selected.recommended && <span className="chip on" style={{ marginRight: 6 }}>⭐ 推薦</span>}
           {selected.strengths}
           {!selected.verified && <span style={{ color: "var(--warning, #C08A2E)" }}>(⚠︎ 新模型 ID 待真實模式首跑確認;失敗會自動退點)</span>}
         </p>

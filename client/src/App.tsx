@@ -8,6 +8,7 @@ import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { AdminPage } from "./pages/AdminPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { ModelsPage } from "./pages/ModelsPage";
+import { HelpPage } from "./pages/HelpPage";
 import { PasswordInput } from "./components/PasswordInput";
 import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
 import { FeedbackWidget } from "./feedback/FeedbackWidget";
@@ -128,6 +129,7 @@ export function App() {
           {me.data && info.data?.mockMode && <span className="badge mock">假生成模式</span>}
           {me.data && <PointsBadge groupId={activeGroupId} />}
           {activeIsLeader && <Link href="/options"><span className="badge" style={{ cursor: "pointer" }}>選項</span></Link>}
+          {me.data && <Link href="/help"><span className="badge" style={{ cursor: "pointer" }}>怎麼用</span></Link>}
           {me.data && <Link href="/models"><span className="badge" style={{ cursor: "pointer" }}>模型指南</span></Link>}
           {me.data && <Link href="/feedback"><span className="badge" style={{ cursor: "pointer" }}>回饋</span></Link>}
           {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}>團隊管理</span></Link>}
@@ -189,6 +191,7 @@ export function App() {
                 </Route>
                 <Route path="/feedback"><FeedbackPage groupId={activeGroupId || undefined} /></Route>
                 <Route path="/models"><ModelsPage /></Route>
+                <Route path="/help"><HelpPage /></Route>
                 <Route path="/p/:id">{(params) => <ProjectPage id={params.id} />}</Route>
                 <Route>
                   <p>

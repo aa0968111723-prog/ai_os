@@ -16,6 +16,7 @@ const publicEntry = (m: (typeof MODELS)[number]) => ({
   bestFor: m.bestFor,
   cost: m.cost,
   verified: m.verified,
+  recommended: m.recommended ?? false,
 });
 
 /** 模型目錄查詢:給前端挑選器、模型指南頁與代理使用 */

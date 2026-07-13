@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
+import { getModel } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
 
 const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
@@ -325,7 +326,7 @@ function SceneRow({
           )}
         </div>
         {s.prompt && (
-          <div className="hint" style={{ marginTop: 3 }}>模型：fast-lightning-sdxl（日常主力，可到生成台換）</div>
+          <div className="hint" style={{ marginTop: 3 }}>模型：{getModel(DEFAULT_MODEL)?.label ?? DEFAULT_MODEL}（日常主力，可到生成台換）</div>
         )}
 
         {!meLoading && (

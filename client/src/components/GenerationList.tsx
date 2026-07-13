@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
+import { getModel } from "@shared/models";
 
 /**
  * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（背景分頁/未授權）建構子會丟例外，包 try 忽略。
@@ -179,7 +180,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
           <div>
             <div style={{ fontSize: 14 }}>{g.prompt}</div>
             <div className="meta mono" style={{ fontSize: 11 }}>
-              {g.modelId}・−{g.pointsEst} 點{g.pointsRefunded > 0 && `（已退 +${g.pointsRefunded}）`}
+              {getModel(g.modelId)?.label ?? g.modelId}・−{g.pointsEst} 點{g.pointsRefunded > 0 && `（已退 +${g.pointsRefunded}）`}
             </div>
             {g.kind === "audio" && g.resultUrl && (
               <audio controls src={g.resultUrl} style={{ width: "100%", maxWidth: 320, height: 32, marginTop: 6 }} />

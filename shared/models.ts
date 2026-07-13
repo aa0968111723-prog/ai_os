@@ -48,6 +48,8 @@ export interface ModelEntry {
   /** 官方約略價 */
   cost: string;
   verified: boolean;
+  /** 推薦預設:每個類別恰一個「已驗證、經濟」的日常主力;挑選器預設選它、UI 標「推薦」 */
+  recommended?: boolean;
   /** 來源輸入欄位的提示文字 */
   sourceHint?: string;
   input: (prompt: string, format: ProjectFormat, sourceUrl?: string) => Record<string, unknown>;
@@ -109,7 +111,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/flux/dev", label: "FLUX.1 [dev]", category: "text-to-image", tier: "economy", kind: "image",
-    points: 1, cost: "$0.025/MP", verified: true,
+    points: 1, cost: "$0.025/MP", verified: true, recommended: true,
     strengths: "開源界標竿;品質/成本平衡點、生態最豐(LoRA 可搭)",
     bestFor: "日常分鏡草稿、可訓練專屬風格後搭配使用",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
@@ -179,7 +181,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/flux/dev/image-to-image", label: "FLUX.1 [dev] 圖生圖", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "$0.025/MP", verified: true,
+    needs: "image", points: 1, cost: "$0.025/MP", verified: true, recommended: true,
     strengths: "以草圖/舊圖為底重繪;強度可控",
     bestFor: "草稿升級成品、風格轉換",
     sourceHint: "作為底圖的圖",
@@ -226,7 +228,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/wan/v2.2-a14b/text-to-video", label: "Wan 2.2(開源)", category: "text-to-video", tier: "economy", kind: "video",
-    points: 8, cost: "≈$0.04–0.08/支", verified: true,
+    points: 8, cost: "≈$0.04–0.08/支", verified: true, recommended: true,
     strengths: "開源 14B;性價比首選、已在站內驗證",
     bestFor: "日常分鏡影片、預算有限時的主力",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
@@ -297,7 +299,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/amt-interpolation", label: "補幀(流暢化)", category: "video-to-video", tier: "budget", kind: "video",
-    needs: "video", points: 4, cost: "≈$0.02/秒;按秒計費,點數為 6 秒基準", verified: true,
+    needs: "video", points: 4, cost: "≈$0.02/秒;按秒計費,點數為 6 秒基準", verified: true, recommended: true,
     strengths: "AI 補幀讓影片更順(24→60fps)",
     bestFor: "AI 生成影片的卡頓修飾",
     sourceHint: "要補幀的影片網址",
@@ -328,7 +330,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/any-llm#gemini-2.5-flash", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Flash", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次", verified: true,
+    points: 1, cost: "$0.01/次", verified: true, recommended: true,
     strengths: "快又便宜的日常主力",
     bestFor: "標題、短文案、日常改寫",
     input: llmInput("google/gemini-2.5-flash"),
@@ -382,7 +384,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/moondream-next", label: "Moondream Next", category: "vision", tier: "economy", kind: "text",
-    needs: "image", points: 1, cost: "≈$0.005/次", verified: true,
+    needs: "image", points: 1, cost: "≈$0.005/次", verified: true, recommended: true,
     strengths: "多任務視覺小鋼炮;描述/指認/偵測",
     bestFor: "批量素材自動標注",
     sourceHint: "要理解的圖片",
@@ -432,7 +434,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/wizper", label: "Wizper(加速 v3)", category: "speech-to-text", tier: "flagship", kind: "text",
-    needs: "audio", points: 1, cost: "≈$0.0008/音訊秒", verified: true,
+    needs: "audio", points: 1, cost: "≈$0.0008/音訊秒", verified: true, recommended: true,
     strengths: "fal 自家加速版 Whisper v3;同級品質、數倍速度",
     bestFor: "長錄音快速出稿",
     sourceHint: "音訊檔網址",
@@ -495,7 +497,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/elevenlabs/tts/turbo-v2.5", label: "ElevenLabs Turbo 2.5", category: "text-to-speech", tier: "economy", kind: "audio",
-    points: 2, cost: "$0.05/千字", verified: true,
+    points: 2, cost: "$0.05/千字", verified: true, recommended: true,
     strengths: "半價+低延遲;品質仍佳",
     bestFor: "日常影片旁白",
     input: (p) => ({ text: p }),
@@ -546,7 +548,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/minimax-music", label: "MiniMax Music", category: "text-to-audio", tier: "economy", kind: "audio",
-    points: 2, cost: "$0.03/首", verified: true,
+    points: 2, cost: "$0.03/首", verified: true, recommended: true,
     strengths: "極高性價比的完整歌曲(可含人聲)",
     bestFor: "主題曲 demo、快速配樂",
     input: (p) => ({ prompt: p }),
@@ -624,7 +626,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/flux-lora-fast-training", label: "FLUX LoRA 快速訓練", category: "training", tier: "budget", kind: "text",
-    needs: "zip", points: 65, cost: "≈$2/次", verified: true,
+    needs: "zip", points: 65, cost: "≈$2/次", verified: true, recommended: true,
     strengths: "經典入門訓練器;幾分鐘出模型",
     bestFor: "第一次嘗試訓練",
     sourceHint: "訓練圖包 zip 網址",

@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
+import { FirstRunGuide } from "../components/FirstRunGuide";
+
+/** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
+const FIRST_RUN_KEY = "aios.firstRunDismissed";
 
 function relTime(d: Date | string): string {
   const t = new Date(d).getTime();
@@ -34,6 +38,25 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<string>("");
   const [platform, setPlatform] = useState<string>("");
+  // 新手導覽：只在「這個組還沒有任何專案」且使用者沒略過（localStorage）時顯示
+  const [firstRunDismissed, setFirstRunDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(FIRST_RUN_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const dismissFirstRun = () => {
+    try {
+      localStorage.setItem(FIRST_RUN_KEY, "1");
+    } catch {
+      /* localStorage 不可用（隱私模式）時只在本次 session 記住 */
+    }
+    setFirstRunDismissed(true);
+  };
+  // 有 ≥1 個專案本身就代表「不是新手」——即使沒按過略過也不顯示導覽
+  const hasNoProjects = projects.data !== undefined && projects.data.length === 0;
+  const showFirstRun = !!groupId && hasNoProjects && !firstRunDismissed;
   // 選項載入後補上預設選擇（或目前選到的已被移除時，退回第一個）；避免 select 值對不到 option 顯示空白
   useEffect(() => {
     if (kindOptions.length && !kindOptions.some((o) => o.value === kind)) setKind(kindOptions[0].value);
@@ -51,6 +74,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
         今天想<span className="accent">創作</span>什麼？
       </h1>
       <p className="sub">接續這個組的專案，或開一個新的。</p>
+
+      {showFirstRun && <FirstRunGuide groupId={groupId} onDismiss={dismissFirstRun} />}
 
       <div className="cols">
         <section>

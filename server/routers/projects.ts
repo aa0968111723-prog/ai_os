@@ -8,6 +8,15 @@ import { PLATFORMS } from "../../shared/models";
 import { removeStoredFile } from "../services/storage";
 import { getGroupOptions, ensureGroupOptions } from "../services/optionsStore";
 
+/** 範例專案的穩定標題——同時是「去重鍵」：同組已有這個標題的專案就回傳它，絕不重建（擋連點刷爆） */
+const SAMPLE_PROJECT_TITLE = "範例專案：禪心一炷香";
+
+/**
+ * 記憶體併發鎖（同組同時只允許一個「建立範例」在跑）：去重查詢是主守門，這是雙擊競態的兜底，
+ * 避免兩個請求同時通過去重、各插一份範例。單容器部署、程序內 Set 即足夠，重啟歸零無妨。
+ */
+const sampleInFlight = new Set<string>();
+
 export const projectsRouter = router({
   /** 列出指定組的專案（未指定 → 所有我可見的組）；隔離由 requireGroup／成員組清單保證 */
   list: authedProcedure
@@ -75,6 +84,178 @@ export const projectsRouter = router({
         })
         .returning();
       return project;
+    }),
+
+  /**
+   * 建立「範例專案」——新夥伴一鍵看完整可運作範例：已填好世界觀＋3-4 格草稿分鏡（含提示詞與配音詞）
+   * ＋一張免費佔位縮圖。目的是讓沒有專案的人先看懂整條流程長什麼樣子。
+   *
+   * ★ 金錢安全（硬性約束）：這條路徑「絕不」呼叫 fal、「絕不」扣任何點數。
+   *   縮圖用自家 /api/mock-asset/image（回傳靜態 1px PNG，見 server/index.ts）當免費佔位，
+   *   分鏡皆為 todo 草稿、不觸發任何 generation；全程沒有 reserveQuota／submitGenerationCore／falSubmit。
+   *
+   * 去重（主守門）：同組已有同名範例就回傳既有那個，click-spam 只會拿到同一個，不會生一堆。
+   */
+  createSample: authedProcedure
+    .input(z.object({ groupId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      requireGroup(ctx.auth, input.groupId);
+
+      const findExisting = () =>
+        db
+          .select()
+          .from(schema.projects)
+          .where(and(eq(schema.projects.groupId, input.groupId), eq(schema.projects.title, SAMPLE_PROJECT_TITLE)))
+          .limit(1);
+
+      // 去重（主守門）：同組已建過範例 → 直接回既有那個，不重建
+      const [existing] = await findExisting();
+      if (existing) return existing;
+
+      // 併發兜底：同組同時只跑一個建立，雙擊不會產生兩個範例
+      if (sampleInFlight.has(input.groupId)) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "範例專案建立中，請稍候…" });
+      }
+      sampleInFlight.add(input.groupId);
+      try {
+        // 拿到鎖後再查一次：可能在等鎖期間已由另一個請求建好
+        const [again] = await findExisting();
+        if (again) return again;
+
+        // 內容類型／發布平台沿用該組選項（保證已 seed），取第一個啟用中的；極端無選項時退安全預設。
+        await ensureGroupOptions(input.groupId);
+        const [kindOpts, platformOpts] = await Promise.all([
+          getGroupOptions(input.groupId, "kind"),
+          getGroupOptions(input.groupId, "platform"),
+        ]);
+        const kindOpt = kindOpts.find((o) => o.active) ?? kindOpts[0];
+        const platformOpt = platformOpts.find((o) => o.active) ?? platformOpts[0];
+        const kind = kindOpt?.value ?? "見證故事";
+        const platform = platformOpt?.value ?? "youtube";
+        const format = platformOpt?.format ?? "16:9";
+
+        // 世界觀：填成完整可讀的範例（基金會語氣＋CLAUDE.md 角色定裝，忠於原設定）。
+        const worldview = worldviewSchema.parse({
+          logline: "一位訪客在晨光禪堂點起一炷香，在陪伴與整理之間，把浮躁的心慢慢交還給平靜。",
+          message: "把心交給佛，日子就有了呼吸的空隙。",
+          audience: "初次接觸禪修、想在忙碌生活裡找一點安定的年輕人與家庭。",
+          themes: ["苦→修行→轉變→感恩"],
+          tones: ["溫柔療癒", "真誠", "療癒"],
+          styles: ["日系水彩"],
+          people: [
+            "安倢：紅傘、米白外套、帆布包，無眼鏡，溫柔回望，是引路與陪伴的角色。",
+            "慕恩：戴眼鏡、米色開襟衫、背書包，安靜好奇，代表初學者的視角。",
+            "哲維：薄荷綠上衣，溫和可靠，負責遞茶與照應。",
+            "瑀晴：深綠襯衫，做事俐落，收束整理與交付。",
+          ],
+          acts: {
+            hook: "清晨禪堂前庭，安倢撐著紅傘走進柔和晨光，帆布包輕輕垂著。",
+            turn: "慕恩在書架旁翻閱善本，哲維默默遞上一杯溫茶，浮躁被慢慢安放。",
+            cta: "瑀晴把整理好的經本輕輕闔上——把心交給佛，留白處給觀眾一個字卡的位置。",
+          },
+          taboos: [
+            "不得使用「治癒／治療／療效」等醫療宣稱字眼",
+            "不影射真實人物形象",
+            "引用開示僅供建議，須組長審核後才可使用",
+            "三色光素材要合理（吊牌、小圓牌、水面反射），不可搶戲、不可誤作交通燈或 logo",
+            "AI 圖內不應有可讀文字，招牌與字卡一律後製",
+          ],
+        });
+
+        // 四筆相依 insert 包成單一交易：中途遇 DB 瞬斷會整批回滾，不留「有專案卻沒分鏡」的殘缺範例。
+        const created = await db.transaction(async (tx) => {
+        const [project] = await tx
+          .insert(schema.projects)
+          .values({
+            groupId: input.groupId,
+            ownerId: ctx.auth.user.id,
+            title: SAMPLE_PROJECT_TITLE,
+            kind,
+            platform,
+            format,
+            worldview,
+          })
+          .returning();
+
+        // 免費佔位縮圖：自家 /api/mock-asset/image（靜態 PNG）——絕不呼叫 fal、絕不扣點。
+        // base 與假模式成品 URL 同源建法（見 services/fal.ts），縮圖與下載端點都能取到。
+        const railway = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
+        const base = process.env.APP_URL?.replace(/\/$/, "") || railway || `http://localhost:${process.env.PORT ?? 3000}`;
+        const [asset] = await tx
+          .insert(schema.assets)
+          .values({
+            projectId: project.id,
+            groupId: project.groupId,
+            kind: "image",
+            title: "範例縮圖（免費佔位）",
+            url: `${base}/api/mock-asset/image`,
+            isAiGenerated: false,
+            meta: { sample: true, note: "免費佔位縮圖，未經 fal 生成、未扣點" },
+          })
+          .returning();
+
+        // 3-4 格草稿分鏡（status=todo）：各有可直接帶回生成台的 prompt 與配音詞；第一鏡掛上免費佔位縮圖。
+        const scenesData: Array<{ title: string; durationSec: number; prompt: string; voiceover: string; assetId?: string }> = [
+          {
+            title: "開場・晨光禪堂",
+            durationSec: 5,
+            prompt:
+              "日系水彩、溫柔療癒調性：清晨禪堂前庭空景，安倢撐紅傘、穿米白外套、背帆布包，自畫面左側緩步走入，柔和晨光斜射、地面薄霧，構圖大量留白；攤位吊牌上有合理的三色光小色塊點綴、不搶戲；畫面內不出現任何可讀文字。",
+            voiceover: "有些早晨，適合把腳步放慢一點。",
+            assetId: asset.id,
+          },
+          {
+            title: "相遇・書卷之緣",
+            durationSec: 4,
+            prompt:
+              "日系水彩：慕恩戴眼鏡、穿米色開襟衫、背書包，在木質書架旁安靜翻閱善本，側光溫暖、神情好奇；水面倒影帶一點三色光反射作氛圍、比例克制；無任何文字招牌。",
+            voiceover: "好奇心，是走進來的第一步。",
+          },
+          {
+            title: "陪伴・一杯溫茶",
+            durationSec: 5,
+            prompt:
+              "日系水彩、療癒氛圍：哲維穿薄荷綠上衣，雙手溫和遞上一杯冒熱氣的茶，淺景深聚焦茶杯與手，背景禪堂柔焦；暖色晨光，情緒安穩不誇張；小圓牌上的三色光僅作點綴。",
+            voiceover: "有人陪著，煩躁就慢慢安放下來。",
+          },
+          {
+            title: "收束・把心交給佛",
+            durationSec: 4,
+            prompt:
+              "日系水彩：瑀晴穿深綠襯衫，俐落地把整理好的經本輕輕闔上，蓮花與柔光意象在旁；畫面右側預留乾淨留白給後製字卡；光由暗轉亮，收束在溫柔的平靜裡，無可讀文字。",
+            voiceover: "把心交給佛，日子就有了呼吸的空隙。",
+          },
+        ];
+        await tx.insert(schema.scenes).values(
+          scenesData.map((s, i) => ({
+            projectId: project.id,
+            orderIndex: i + 1,
+            title: s.title,
+            durationSec: s.durationSec,
+            status: "todo",
+            prompt: s.prompt,
+            voiceover: s.voiceover,
+            assetId: s.assetId ?? null,
+          })),
+        );
+
+        // 一段範例見證：示範「知識庫全文注入 AI 導演」的用法——純文字，與任何生成無關、不扣點。
+        await tx.insert(schema.knowledge).values({
+          projectId: project.id,
+          groupId: project.groupId,
+          kind: "testimony",
+          title: "範例見證 · 那炷香之後",
+          content:
+            "以前總覺得日子被塞得滿滿的，連呼吸都急。第一次走進禪堂點香那天，只是安靜坐了十分鐘，卻像把心裡的結鬆開了一角。後來我才慢慢學會：忙的時候更要留一點空隙給自己——把心交給佛，不是逃避，而是先安頓，再回去面對。",
+          createdBy: ctx.auth.user.id,
+        });
+
+        return project;
+        });
+        return created;
+      } finally {
+        sampleInFlight.delete(input.groupId);
+      }
     }),
 
   get: authedProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {

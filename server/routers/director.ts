@@ -101,6 +101,7 @@ export const directorRouter = router({
         method: "POST",
         headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({ model: "google/gemini-flash-1.5", prompt: sys }),
+        timeoutMs: 60_000, // LLM 掛起→逾時走 catch 退點；不讓建議請求無限卡住
       });
       if (!res.ok) throw new Error(`any-llm ${res.status}`);
       const data = (await res.json()) as { output?: string };
@@ -195,6 +196,7 @@ ${script.slice(0, 12_000)}
           method: "POST",
           headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
           body: JSON.stringify({ model: "google/gemini-flash-1.5", prompt: sys }),
+          timeoutMs: 60_000, // 拆分鏡 LLM 掛起→逾時走 catch 退點＋請重試（實測踩過無限轉圈）
         });
         if (!res.ok) throw new Error(`any-llm ${res.status}`);
         const data = (await res.json()) as { output?: string };
