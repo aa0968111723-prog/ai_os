@@ -9,7 +9,9 @@ import { OPTION_TYPES, defaultsFor, type OptionType } from "../../shared/options
 /**
  * 每組只 seed 一次（用 groups.optionsSeeded 旗標判定，非「現存列數」）：
  * 一旦 seed 過，即使組長把某類選項全部刪光也不會復活——刪光＝刻意清空，要能維持。
- * seed 與設旗標同一交易；併發首讀靠 unique(groupId,type,value)+onConflictDoNothing 保底。
+ * group_options 沒有 DB unique constraint（開機卡死修復拿掉了），防重複全靠旗標：
+ * 交易內先「搶旗標」（conditional update），搶到的那個請求才插種子——
+ * 併發首讀時輸家的 update 會等贏家 commit、看到旗標已立即放棄，不會重複 seed。
  */
 export async function ensureGroupOptions(groupId: string): Promise<void> {
   const [group] = await db.select({ seeded: schema.groups.optionsSeeded }).from(schema.groups).where(eq(schema.groups.id, groupId));
@@ -22,8 +24,13 @@ export async function ensureGroupOptions(groupId: string): Promise<void> {
     });
   }
   await db.transaction(async (tx) => {
-    if (rows.length) await tx.insert(schema.groupOptions).values(rows).onConflictDoNothing();
-    await tx.update(schema.groups).set({ optionsSeeded: true }).where(eq(schema.groups.id, groupId));
+    const claimed = await tx
+      .update(schema.groups)
+      .set({ optionsSeeded: true })
+      .where(and(eq(schema.groups.id, groupId), eq(schema.groups.optionsSeeded, false)))
+      .returning({ id: schema.groups.id });
+    if (!claimed.length) return;
+    if (rows.length) await tx.insert(schema.groupOptions).values(rows);
   });
 }
 
