@@ -327,6 +327,22 @@ export function captureWithHighlight(
 ): Promise<Blob | null> {
   const SCALE = 0.7;
   const run = (async (): Promise<Blob | null> => {
+    // 高亮框改用「真的畫在 DOM 上的元素」讓 html2canvas 在同一次繪製中連同頁面一起拍進去，
+    // 而不是事後用 canvas 座標 strokeRect——後者座標假設(rect*scale)與 html2canvas 內部對 scroll/
+    // devicePixelRatio/裁切 的映射不一致，框會跟元件錯位（使用者回報的「偏移」）。
+    // 用 position:absolute + 文件座標(rect + scroll)：與被標元件同一座標系，html2canvas 對絕對定位元素
+    // 的渲染最穩，框與元件必定對齊（就算 html2canvas 整體有偏移，框與內容也一起偏、相對位置不變）。
+    let marker: HTMLDivElement | null = null;
+    if (rect) {
+      marker = document.createElement("div");
+      marker.setAttribute("data-fb-shot-marker", "1"); // 不用 WIDGET_ATTR：這個要被拍進去，不能被 ignoreElements 排除
+      marker.style.cssText =
+        `position:absolute;left:${rect.x + window.scrollX}px;top:${rect.y + window.scrollY}px;` +
+        `width:${rect.w}px;height:${rect.h}px;border:3px solid ${PRIMARY};border-radius:6px;` +
+        "box-sizing:border-box;pointer-events:none;z-index:2147482000;" +
+        "box-shadow:0 0 0 3px rgba(194,97,63,0.25);";
+      document.body.appendChild(marker);
+    }
     try {
       const canvas = await html2canvas(document.body, {
         x: window.scrollX,
@@ -339,17 +355,11 @@ export function captureWithHighlight(
         logging: false,
         ignoreElements: (el) => el.hasAttribute(WIDGET_ATTR),
       });
-      if (rect) {
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.strokeStyle = PRIMARY;
-          ctx.lineWidth = 3;
-          ctx.strokeRect(rect.x * SCALE, rect.y * SCALE, rect.w * SCALE, rect.h * SCALE);
-        }
-      }
       return await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), "image/png"));
     } catch {
       return null;
+    } finally {
+      if (marker) marker.remove();
     }
   })();
 

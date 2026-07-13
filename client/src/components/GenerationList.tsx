@@ -84,7 +84,8 @@ export function GenerationList({ projectId }: { projectId: string }) {
     return () => clearTimeout(t);
   }, [searchInput]);
   const [expanded, setExpanded] = useState(false); // 按過「載入更多」
-  const filtering = statusFilter !== null || kindFilter !== null || debouncedSearch.trim() !== "";
+  const [favoriteOnly, setFavoriteOnly] = useState(false); // #20 只看收藏
+  const filtering = statusFilter !== null || kindFilter !== null || debouncedSearch.trim() !== "" || favoriteOnly;
   const browsing = filtering || expanded; // 顯示來源改用分頁查詢的條件
   const paged = trpc.generation.listByProjectPaged.useInfiniteQuery(
     {
@@ -92,6 +93,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
       status: statusFilter ?? undefined,
       kind: kindFilter ?? undefined,
       search: debouncedSearch.trim() || undefined,
+      favoriteOnly: favoriteOnly || undefined,
     },
     {
       enabled: browsing,
@@ -166,6 +168,9 @@ export function GenerationList({ projectId }: { projectId: string }) {
   const scenes = trpc.scenes.listByProject.useQuery({ projectId });
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [addedId, setAddedId] = useState<string | null>(null);
+  // #20 行內重新命名：正在編輯的列 id ＋ 草稿字串
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
   const addScene = trpc.scenes.addFromGeneration.useMutation({
     onMutate: () => setAddedId(null),
     onSuccess: (_data, vars) => {
@@ -181,6 +186,23 @@ export function GenerationList({ projectId }: { projectId: string }) {
       utils.quota.my.invalidate();
     },
   });
+  // #20 命名：純 metadata，成功後同時失效首頁 list 與分頁 paged（兩種顯示來源都要更新）
+  const rename = trpc.generation.rename.useMutation({
+    onSuccess: () => {
+      utils.generation.listByProject.invalidate({ projectId });
+      utils.generation.listByProjectPaged.invalidate({ projectId });
+    },
+  });
+  // #20 收藏切換：同樣失效兩支查詢（「只看收藏」篩選結果也要即時反映）
+  const toggleFavorite = trpc.generation.toggleFavorite.useMutation({
+    onSuccess: () => {
+      utils.generation.listByProject.invalidate({ projectId });
+      utils.generation.listByProjectPaged.invalidate({ projectId });
+    },
+  });
+  const submitRename = (id: string) => {
+    rename.mutate({ generationId: id, name: renameDraft.trim() }, { onSuccess: () => setRenamingId(null) });
+  };
   const addSceneError = addScene.error?.message;
   const inScenes = (genId: string) => !!scenes.data?.some((s) => s.generationId === genId);
   const copyText = (id: string, text: string) => {
@@ -242,6 +264,17 @@ export function GenerationList({ projectId }: { projectId: string }) {
             {label}
           </button>
         ))}
+        <span style={{ width: 1, height: 16, background: "rgba(0,0,0,.15)" }} aria-hidden="true" />
+        <button
+          type="button"
+          className="gen-filter-chip"
+          aria-pressed={favoriteOnly}
+          onClick={() => setFavoriteOnly((v) => !v)}
+          style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", fontSize: 12, borderRadius: 999, opacity: favoriteOnly ? 1 : 0.55, fontWeight: favoriteOnly ? 600 : 400 }}
+        >
+          <Icon name="Star" size={12} style={favoriteOnly ? { fill: "currentColor" } : undefined} />
+          只看收藏
+        </button>
         <input
           type="search"
           value={searchInput}
@@ -258,6 +291,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
               setKindFilter(null);
               setSearchInput("");
               setDebouncedSearch("");
+              setFavoriteOnly(false);
               setExpanded(false);
             }}
             style={{ padding: "3px 10px", fontSize: 12 }}
@@ -289,6 +323,68 @@ export function GenerationList({ projectId }: { projectId: string }) {
             </div>
           )}
           <div>
+            {/* #20 名稱＋收藏列：附加在既有 prompt 顯示「之上」，下方 prompt div 原樣保留（e2e 以 prompt 文字比對） */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                aria-label={g.favorite ? "取消收藏" : "收藏"}
+                aria-pressed={!!g.favorite}
+                disabled={toggleFavorite.isPending}
+                onClick={() => toggleFavorite.mutate({ generationId: g.id, favorite: !g.favorite })}
+                style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: g.favorite ? "#E0A800" : "var(--muted-fg)" }}
+              >
+                <Icon name="Star" size={16} style={g.favorite ? { fill: "currentColor" } : undefined} />
+              </button>
+              {renamingId === g.id ? (
+                <>
+                  <input
+                    autoFocus
+                    value={renameDraft}
+                    maxLength={80}
+                    onChange={(e) => setRenameDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") submitRename(g.id);
+                      else if (e.key === "Escape") setRenamingId(null);
+                    }}
+                    placeholder="為這次生成命名…"
+                    aria-label="命名此生成"
+                    style={{ fontSize: 13, padding: "2px 8px", flex: "1 1 140px", minWidth: 100 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => submitRename(g.id)}
+                    disabled={rename.isPending}
+                    aria-label="儲存名稱"
+                    style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--success)" }}
+                  >
+                    <Icon name="Check" size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRenamingId(null)}
+                    aria-label="取消命名"
+                    style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
+                  >
+                    <Icon name="X" size={15} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  {g.name && <span style={{ fontSize: 14, fontWeight: 600 }}>{g.name}</span>}
+                  <button
+                    type="button"
+                    aria-label={g.name ? "重新命名" : "命名此生成"}
+                    onClick={() => {
+                      setRenamingId(g.id);
+                      setRenameDraft(g.name ?? "");
+                    }}
+                    style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
+                  >
+                    <Icon name="Pencil" size={14} />
+                  </button>
+                </>
+              )}
+            </div>
             <div style={{ fontSize: 14 }}>{g.prompt}</div>
             <div className="meta mono" style={{ fontSize: 11 }}>
               {getModel(g.modelId)?.label ?? g.modelId}・−{g.pointsEst} 點{g.pointsRefunded > 0 && `（已退 +${g.pointsRefunded}）`}

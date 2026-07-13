@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, notInArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -38,6 +38,50 @@ export async function buildKnowledgeContext(projectId: string): Promise<string> 
     budget -= slice.length;
   }
   return parts.join("\n\n");
+}
+
+/** 版本歷史（#29）每個 refId 保留的最近版本上限——超過就把最舊的刪掉，避免逐字稿版本無限累積撐爆 DB */
+const VERSION_KEEP = 20;
+
+/**
+ * 把知識庫某筆「當前（更新前）」的 title+content 存成一版快照（kind='knowledge'、refId=知識 id），
+ * 再修剪成此 refId 只保留最近 VERSION_KEEP 版。呼叫端負責只在「內容真的改變」時呼叫（避免灌雜訊版本）。
+ */
+async function snapshotKnowledge(
+  row: { id: string; projectId: string; groupId: string; title: string; content: string },
+  createdBy: string,
+): Promise<void> {
+  await db.insert(schema.textVersions).values({
+    projectId: row.projectId,
+    groupId: row.groupId,
+    kind: "knowledge",
+    refId: row.id,
+    title: row.title,
+    content: row.content,
+    createdBy,
+  });
+  // 修剪：撈此 refId 由新到舊的前 VERSION_KEEP 筆，其餘（較舊）刪除。
+  // 只在版本數已達上限時才刪，且 notInArray 的保留集合此時必為非空（= VERSION_KEEP 筆）。
+  const keep = await db
+    .select({ id: schema.textVersions.id })
+    .from(schema.textVersions)
+    .where(and(eq(schema.textVersions.kind, "knowledge"), eq(schema.textVersions.refId, row.id)))
+    .orderBy(desc(schema.textVersions.createdAt))
+    .limit(VERSION_KEEP);
+  if (keep.length >= VERSION_KEEP) {
+    await db
+      .delete(schema.textVersions)
+      .where(
+        and(
+          eq(schema.textVersions.kind, "knowledge"),
+          eq(schema.textVersions.refId, row.id),
+          notInArray(
+            schema.textVersions.id,
+            keep.map((k) => k.id),
+          ),
+        ),
+      );
+  }
 }
 
 export const knowledgeRouter = router({
@@ -123,6 +167,10 @@ export const knowledgeRouter = router({
       const [row] = await db.select().from(schema.knowledge).where(eq(schema.knowledge.id, input.id));
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
+      // 版本歷史（#29）：覆寫前，先把「更新前」的舊全文存成一版快照——
+      // 只在內容『真的改變』時存（只改標題／重存相同內容不灌版本），避免雜訊。
+      const contentChanges = input.content !== undefined && input.content !== row.content;
+      if (contentChanges) await snapshotKnowledge(row, ctx.auth.user.id);
       const [updated] = await db
         .update(schema.knowledge)
         .set({
@@ -131,6 +179,67 @@ export const knowledgeRouter = router({
           content: input.content ?? row.content,
         })
         .where(eq(schema.knowledge.id, input.id))
+        .returning();
+      return updated;
+    }),
+
+  /**
+   * 列出某筆知識的版本歷史（#29）：由新到舊，只回摘要（title/字數/前段預覽），不回全文（省流量）。
+   * 授權：先以 knowledge id（未軟刪除者）撈出該筆，再 requireGroup(ctx.auth, row.groupId)——
+   * 沿用 get/remove 的「查本筆 → 用它的 groupId 守衛」模式，回收桶裡的知識視為不存在。
+   */
+  listVersions: authedProcedure.input(z.object({ knowledgeId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [row] = await db
+      .select()
+      .from(schema.knowledge)
+      .where(and(eq(schema.knowledge.id, input.knowledgeId), isNull(schema.knowledge.deletedAt)));
+    if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+    requireGroup(ctx.auth, row.groupId);
+    const versions = await db
+      .select()
+      .from(schema.textVersions)
+      .where(and(eq(schema.textVersions.kind, "knowledge"), eq(schema.textVersions.refId, input.knowledgeId)))
+      .orderBy(desc(schema.textVersions.createdAt));
+    return versions.map((v) => ({
+      id: v.id,
+      title: v.title,
+      chars: v.content.length,
+      preview: v.content.slice(0, 120),
+      createdAt: v.createdAt,
+    }));
+  }),
+
+  /**
+   * 還原到某一版（#29）：先把「當前」全文再存一版快照（讓還原本身也可被再還原／反悔），
+   * 再把知識的 title/content 覆寫成該版內容。授權同 update：查本筆（未軟刪除）→ requireGroup(groupId)；
+   * 回收桶裡的知識不給還原版本（要先還原整筆）。版本必須屬於這筆知識（kind='knowledge'、refId 相符）。
+   */
+  restoreVersion: authedProcedure
+    .input(z.object({ knowledgeId: z.string().uuid(), versionId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const [row] = await db
+        .select()
+        .from(schema.knowledge)
+        .where(and(eq(schema.knowledge.id, input.knowledgeId), isNull(schema.knowledge.deletedAt)));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, row.groupId);
+      const [version] = await db
+        .select()
+        .from(schema.textVersions)
+        .where(
+          and(
+            eq(schema.textVersions.id, input.versionId),
+            eq(schema.textVersions.kind, "knowledge"),
+            eq(schema.textVersions.refId, input.knowledgeId),
+          ),
+        );
+      if (!version) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個版本" });
+      // 先把當前內容存成一版，這樣「還原」本身也可被再還原（不會弄丟現況）。
+      await snapshotKnowledge(row, ctx.auth.user.id);
+      const [updated] = await db
+        .update(schema.knowledge)
+        .set({ title: version.title ?? row.title, content: version.content })
+        .where(eq(schema.knowledge.id, input.knowledgeId))
         .returning();
       return updated;
     }),

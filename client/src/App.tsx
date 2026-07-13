@@ -132,7 +132,7 @@ export function App() {
           {activeIsLeader && <Link href="/options"><span className="badge" style={{ cursor: "pointer" }}><Icon name="Ellipsis" size={14} />選項</span></Link>}
           {me.data && <Link href="/help"><span className="badge" style={{ cursor: "pointer" }}><Icon name="HelpCircle" size={14} />怎麼用</span></Link>}
           {me.data && <Link href="/models"><span className="badge" style={{ cursor: "pointer" }}><Icon name="Info" size={14} />模型指南</span></Link>}
-          {me.data && <Link href="/feedback"><span className="badge" style={{ cursor: "pointer" }}><Icon name="MessageCircle" size={14} />回饋</span></Link>}
+          {/* 頂欄「回饋」入口已移除（Bruce 指定）：只留右下角浮動回饋 widget，避免兩個回饋入口混淆。/feedback 路由保留（未連結，不破壞既有問卷與 e2e）。 */}
           {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}><Icon name="User" size={14} />團隊管理</span></Link>}
           {me.data && (
             <span

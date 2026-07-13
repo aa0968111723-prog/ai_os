@@ -130,6 +130,10 @@ export const generations = pgTable("generations", {
   /** 來源輸入(圖生圖底圖、待轉錄音訊等) */
   sourceUrl: text("source_url"),
   error: text("error"),
+  /** 使用者為生成物取的名字（null＝用 prompt 當標題）——生成紀錄好找片（#20） */
+  name: text("name"),
+  /** 收藏標記：標星的生成物可篩「只看收藏」（#20）。nullable+default false＝pushSchema 安全、既有列回填 false */
+  favorite: boolean("favorite").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
@@ -193,6 +197,22 @@ export const knowledge = pgTable("knowledge", {
   /** 軟刪除（回收桶）：非 null＝已丟進回收桶（保留逐字稿／見證，可還原）。
    *  ★ buildKnowledgeContext 必以 isNull(deletedAt) 過濾——已刪的逐字稿絕不可再注入 AI 導演 LLM。 */
   deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * 長文版本歷史（#29）：知識庫逐字稿等長文每次更新前存一版快照，可檢視／還原。
+ * 目前 kind='knowledge'（refId=knowledge.id）；未來可擴 'worldview'。新表＝pushSchema 安全。
+ */
+export const textVersions = pgTable("text_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  kind: text("kind").notNull(),
+  refId: uuid("ref_id").notNull(),
+  title: text("title"),
+  content: text("content").notNull(),
+  createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

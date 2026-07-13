@@ -128,6 +128,8 @@ export const generationRouter = router({
         status: z.enum(["queued", "running", "done", "failed"]).optional(),
         kind: z.enum(["image", "video", "audio", "text"]).optional(),
         search: z.string().optional(),
+        /** 只看收藏（#20）：true 時只回 favorite=true 的列 */
+        favoriteOnly: z.boolean().optional(),
         limit: z.number().int().min(1).max(100).optional(),
       }),
     )
@@ -146,6 +148,7 @@ export const generationRouter = router({
       const conds: SQL[] = [eq(schema.generations.projectId, input.projectId)];
       if (input.status) conds.push(eq(schema.generations.status, input.status));
       if (input.kind) conds.push(eq(schema.generations.kind, input.kind));
+      if (input.favoriteOnly) conds.push(eq(schema.generations.favorite, true));
       const q = input.search?.trim();
       if (q) {
         // 轉義 LIKE 萬用字元，讓使用者輸入的 % _ \ 當字面比對（預設 ESCAPE '\'）
@@ -182,6 +185,41 @@ export const generationRouter = router({
       // 剝掉游標輔助欄位，items 維持原本 generation 形狀（前端不需要 cursorAt）
       const items = rows.map(({ cursorAt: _cursorAt, ...g }) => g);
       return { items, nextCursor };
+    }),
+
+  /**
+   * 命名生成物（#20）：純 metadata，不動點數/狀態。
+   * 授權與 status/其他憑 generationId 變更的 mutation 同一套：先撈該列拿 groupId，
+   * 缺列 NOT_FOUND，再 requireGroup——沒驗組就憑 id 改別組資料＝跨組漏洞。
+   * 不碰 updatedAt：那是陳屍清掃判「停滯」的時鐘，metadata 編輯不該重置它。
+   */
+  rename: authedProcedure
+    .input(z.object({ generationId: z.string().uuid(), name: z.string().max(80) }))
+    .mutation(async ({ ctx, input }) => {
+      const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.generationId));
+      if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, gen.groupId); // 多組隔離
+      const [updated] = await db
+        .update(schema.generations)
+        .set({ name: input.name })
+        .where(eq(schema.generations.id, input.generationId))
+        .returning();
+      return updated;
+    }),
+
+  /** 收藏標記切換（#20）：授權同 rename（撈列拿 groupId→requireGroup），純 metadata。 */
+  toggleFavorite: authedProcedure
+    .input(z.object({ generationId: z.string().uuid(), favorite: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.generationId));
+      if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, gen.groupId); // 多組隔離
+      const [updated] = await db
+        .update(schema.generations)
+        .set({ favorite: input.favorite })
+        .where(eq(schema.generations.id, input.generationId))
+        .returning();
+      return updated;
     }),
 
   /** 系統資訊(假生成模式徽章用) */

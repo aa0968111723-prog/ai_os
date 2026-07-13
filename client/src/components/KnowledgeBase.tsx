@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { useLocalDraft } from "../useLocalDraft";
+import { VersionHistory } from "./VersionHistory";
 
 const KINDS = [
   { id: "transcript", label: "師父開示稿" },
@@ -202,6 +203,8 @@ function KnowledgeRow({
           {(update.error || full.error) && (
             <p className="error">{update.error?.message ?? full.error?.message}</p>
           )}
+          {/* 長文版本歷史（#29）：編輯這筆時可展開檢視／還原歷次「更新前」的舊版全文 */}
+          <VersionHistory knowledgeId={k.id} projectId={projectId} />
         </div>
       </div>
     );

@@ -16,6 +16,7 @@ import { ScriptSplitCard } from "../components/ScriptSplitCard";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PromptLibrary } from "../components/PromptLibrary";
+import { TocNav } from "../components/TocNav";
 import { useCollab, CursorOverlay, CollabZone, COLLAB_ZONES } from "../realtime";
 
 /**
@@ -335,6 +336,9 @@ export function ProjectPage({ id }: { id: string }) {
         )}
       </section>
 
+      {/* #28 章節導覽：桌面左側 sticky 側欄／手機頂部可收合列（純附加，不動 .cols 版面） */}
+      <div className="toc-layout">
+      <TocNav />
       <div className="cols">
         <div className="stack">
           {/* 世界觀（快速層） */}
@@ -483,27 +487,35 @@ export function ProjectPage({ id }: { id: string }) {
           </CollabZone>
 
           {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}
-          <KnowledgeBase projectId={id} />
+          <div id="sec-knowledge">
+            <KnowledgeBase projectId={id} />
+          </div>
 
           {/* AI 導演建議（會讀取上方知識庫） */}
-          <DirectorCard projectId={id} onUse={applyDirectorPrompt} />
+          <div id="sec-director">
+            <DirectorCard projectId={id} onUse={applyDirectorPrompt} />
+          </div>
 
           {/* AI 拆分鏡：貼腳本 → 自動建分鏡草稿 */}
-          <ScriptSplitCard projectId={id} />
+          <div id="sec-split">
+            <ScriptSplitCard projectId={id} />
+          </div>
 
           {/* 角色定裝卡：勾選後生成自動注入外觀錨點 */}
-          <p className="hint" style={{ margin: "0 0 6px", fontSize: 13 }}>
+          <p id="sec-characters" className="hint" style={{ margin: "0 0 6px", fontSize: 13 }}>
             角色定裝卡<HelpTip text="角色長相鎖定，勾了跨鏡頭不走樣。" />
           </p>
           <CharacterCards projectId={id} selectedIds={charIds} onToggle={toggleChar} />
 
           {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
-          <ScenePresetCards projectId={id} selectedIds={sceneIds} onToggle={toggleScene} />
+          <div id="sec-scenes">
+            <ScenePresetCards projectId={id} selectedIds={sceneIds} onToggle={toggleScene} />
+          </div>
 
           {/* 素材庫：上傳參考素材（提案核心「把素材丟進去」的入口）＋生成成品自動入庫 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.assets)}>
             {/* data-fb 讓元件回饋標定「上傳素材」；透明包裹，不影響版面 */}
-            <div data-fb="上傳素材">
+            <div data-fb="上傳素材" id="sec-assets">
               <AssetLibrary
                 projectId={id}
                 selectedSourceId={sourceAsset?.id ?? null}
@@ -513,7 +525,9 @@ export function ProjectPage({ id }: { id: string }) {
           </CollabZone>
 
           {/* 回收桶：素材／分鏡／知識的軟刪除還原（收合式，就近放在素材庫下方） */}
-          <RecycleBin projectId={id} />
+          <div id="sec-recyclebin">
+            <RecycleBin projectId={id} />
+          </div>
 
           {/* 生成台（11 類 × 旗艦/經濟/最低成本） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>
@@ -634,10 +648,14 @@ export function ProjectPage({ id }: { id: string }) {
           </CollabZone>
 
           {/* 提示詞庫：成功生成的咒語一鍵再用 */}
-          <PromptLibrary projectId={id} onUse={(text) => setPrompt(text)} />
+          <div id="sec-prompts">
+            <PromptLibrary projectId={id} onUse={(text) => setPrompt(text)} />
+          </div>
 
           {/* 工作流（一鍵串鏈） */}
-          <WorkflowCard projectId={id} />
+          <div id="sec-workflow">
+            <WorkflowCard projectId={id} />
+          </div>
 
           {/* 分鏡與交付 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.scenes)}>
@@ -655,6 +673,7 @@ export function ProjectPage({ id }: { id: string }) {
         <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
           <MessagePanel projectId={id} />
         </CollabZone>
+      </div>
       </div>
     </div>
   );
