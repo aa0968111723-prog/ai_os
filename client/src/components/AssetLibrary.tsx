@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
+import { Icon, type IconName } from "./Icon";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -7,15 +8,15 @@ function fmtSize(bytes?: number | null): string {
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 
-const KIND_ICON: Record<string, string> = { image: "🖼", video: "🎬", audio: "🔊", doc: "📄" };
+const KIND_ICON: Record<string, IconName> = { image: "Image", video: "Clapperboard", audio: "Volume2", doc: "FileText" };
 
 /** 種類篩選 chips 的顯示順序與標籤 */
-const KIND_FILTERS: { key: string; label: string }[] = [
+const KIND_FILTERS: { key: string; label: string; icon?: IconName }[] = [
   { key: "all", label: "全部" },
-  { key: "image", label: "🖼 圖片" },
-  { key: "video", label: "🎬 影片" },
-  { key: "audio", label: "🔊 音訊" },
-  { key: "doc", label: "📄 文件" },
+  { key: "image", label: "圖片", icon: "Image" },
+  { key: "video", label: "影片", icon: "Clapperboard" },
+  { key: "audio", label: "音訊", icon: "Volume2" },
+  { key: "doc", label: "文件", icon: "FileText" },
 ];
 
 /** 哪些種類可以當生成來源（視覺素材）——來源相容濾鏡用 */
@@ -179,7 +180,11 @@ export function AssetLibrary({
       {uploadError && <p className="error">{uploadError}</p>}
 
       {assets.isLoading ? (
-        <p className="hint">載入中…</p>
+        <div className="asset-grid">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="asset-cell skeleton" style={{ height: 132 }} />
+          ))}
+        </div>
       ) : !total ? (
         <p className="hint" style={{ marginTop: 10 }}>還沒有素材——上傳參考圖、原音檔，或先生成一張。</p>
       ) : (
@@ -202,6 +207,7 @@ export function AssetLibrary({
                     onClick={() => setKindFilter(f.key)}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setKindFilter(f.key); } }}
                   >
+                    {f.icon && <Icon name={f.icon} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />}
                     {f.label} {count}
                   </span>
                 );
@@ -239,7 +245,8 @@ export function AssetLibrary({
                   onClick={() => setOnlySourceable((v) => !v)}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOnlySourceable((v) => !v); } }}
                 >
-                  {onlySourceable ? "✓ 只看可當來源的" : "只看可當來源的"}
+                  {onlySourceable && <Icon name="Check" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />}
+                  只看可當來源的
                 </span>
               )}
             </div>
@@ -296,7 +303,7 @@ export function AssetLibrary({
                         style={{ width: "100%", height: 96, objectFit: "cover", display: "block", background: "var(--muted)" }}
                       />
                     ) : (
-                      <div className="asset-icon">{KIND_ICON[a.kind] ?? "📦"}</div>
+                      <div className="asset-icon"><Icon name={KIND_ICON[a.kind] ?? "Package"} size={32} /></div>
                     )}
                     <div className="asset-meta">
                       {isEditing ? (
@@ -318,7 +325,7 @@ export function AssetLibrary({
                         </div>
                       )}
                       <div className="hint" style={{ fontSize: 11 }}>
-                        {a.locked ? "🔒 鎖定 · " : ""}
+                        {a.locked ? <><Icon name="Lock" size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />鎖定 · </> : ""}
                         {a.isAiGenerated ? "AI 生成" : "上傳"}
                         {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
@@ -337,7 +344,7 @@ export function AssetLibrary({
                             style={{ ...smallBtn, flex: "1 1 auto" }}
                             onClick={() => onPickSource({ id: a.id, title: a.title, kind: a.kind })}
                           >
-                            {isSource ? "✓ 已選為來源" : "用作來源"}
+                            {isSource ? <><Icon name="Check" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />已選為來源</> : "用作來源"}
                           </button>
                         )}
                         <button
@@ -346,10 +353,10 @@ export function AssetLibrary({
                           aria-haspopup="menu"
                           aria-expanded={menuOpen}
                           title="更多：改名／鎖定／刪除"
-                          style={{ ...smallBtn, lineHeight: 1 }}
+                          style={{ ...smallBtn, lineHeight: 1, minWidth: 40, minHeight: 40, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                           onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpen ? null : a.id); }}
                         >
-                          ⋯
+                          <Icon name="Ellipsis" size={18} />
                         </button>
                       </div>
 
@@ -373,7 +380,7 @@ export function AssetLibrary({
                             </button>
                           )}
                           <button style={smallBtn} disabled={rename.isPending} onClick={() => startRename(a.id, a.title)}>
-                            ✎ 改名
+                            <Icon name="Pencil" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />改名
                           </button>
                           <button
                             style={{ ...smallBtn, color: a.locked ? "var(--gold, #B58A3E)" : undefined }}
@@ -381,7 +388,9 @@ export function AssetLibrary({
                             title="固定素材（師父原音/開示/配樂）：鎖定後交付包會原封保留在 00_鎖定原素材"
                             onClick={() => { setLock.mutate({ assetId: a.id, locked: !a.locked }); setMenuOpenId(null); }}
                           >
-                            {a.locked ? "解鎖" : "🔒 鎖定"}
+                            {a.locked
+                              ? <><Icon name="Unlock" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />解鎖</>
+                              : <><Icon name="Lock" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />鎖定</>}
                           </button>
                           {canDelete && (
                             <button
@@ -433,9 +442,9 @@ export function AssetLibrary({
               type="button"
               aria-label="關閉大圖"
               onClick={() => setLightbox(null)}
-              style={{ position: "absolute", top: -14, right: -14, borderRadius: 999, width: 36, height: 36, padding: 0, lineHeight: 1 }}
+              style={{ position: "absolute", top: -14, right: -14, borderRadius: 999, width: 36, height: 36, padding: 0, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
             >
-              ✕
+              <Icon name="X" size={18} />
             </button>
           </div>
         </div>

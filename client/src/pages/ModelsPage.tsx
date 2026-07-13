@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
+import { Icon } from "../components/Icon";
 import { CATEGORIES, MODELS } from "@shared/models";
 
 /** 模型指南:全模型目錄總覽(副標的類別數與模型總數由 @shared/models 即時計算),挑選器的百科版 */
@@ -72,11 +73,12 @@ export function ModelsPage() {
               onClick={() => setQ("")}
               style={{
                 position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)",
+                display: "flex", alignItems: "center",
                 border: "none", background: "transparent", padding: "0 8px",
                 fontSize: 16, lineHeight: 1, color: "var(--muted-fg)",
               }}
             >
-              ×
+              <Icon name="X" size={16} />
             </button>
           )}
         </span>
@@ -125,7 +127,10 @@ export function ModelsPage() {
       </div>
 
       <div className="stack">
-        {models.isLoading && <p className="hint">載入模型目錄中…</p>}
+        {models.isLoading &&
+          Array.from({ length: 3 }).map((_, i) => (
+            <div key={`sk-${i}`} className="card skeleton" style={{ height: 96 }} aria-hidden />
+          ))}
         {models.isError && (
           <p className="error">
             模型目錄載入失敗——
@@ -139,17 +144,17 @@ export function ModelsPage() {
               <span className="pill" style={{ color: tierColor[m.tier], borderColor: tierColor[m.tier] }}>{m.tierLabel}</span>
               <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span>
               <span className="hint mono" style={{ fontSize: 11 }}>{m.cost}</span>
-              {!m.verified && <span className="hint" style={{ fontSize: 11 }}>⚠︎ 待真實模式首跑確認</span>}
+              {!m.verified && <span className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}><Icon name="TriangleAlert" size={12} />待真實模式首跑確認</span>}
             </div>
             <p style={{ margin: "6px 0 2px", fontSize: 13.5 }}>{m.strengths}</p>
             <p className="hint" style={{ margin: 0 }}>適合:{m.bestFor}{m.needs ? `|需要來源:${m.sourceHint ?? m.needs}` : ""}</p>
             <p className="hint mono" style={{ margin: "4px 0 0", fontSize: 11, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               {m.id}
               <button
-                style={{ padding: "0 10px", fontSize: 10, fontFamily: "var(--sans)" }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "0 10px", fontSize: 10, fontFamily: "var(--sans)" }}
                 onClick={() => copyModelId(m.id)}
               >
-                {copiedId === m.id ? "已複製 ✓" : "複製"}
+                {copiedId === m.id ? <><Icon name="Check" size={12} />已複製</> : "複製"}
               </button>
             </p>
           </section>

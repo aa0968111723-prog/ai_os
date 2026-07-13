@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { trpc } from "../api";
+import { Icon } from "./Icon";
 
 export interface PickedModel {
   id: string;
@@ -83,7 +84,7 @@ export function ModelPicker({
       )}
       {selected && (
         <p className="hint" style={{ marginTop: 4 }}>
-          {selected.recommended && <span className="chip on" style={{ marginRight: 6 }}>⭐ 推薦</span>}
+          {selected.recommended && <span className="chip on" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}><Icon name="Star" size={12} /> 推薦</span>}
           {selected.strengths}
           {!selected.verified && <span style={{ color: "var(--warning, #C08A2E)" }}>(⚠︎ 新模型 ID 待真實模式首跑確認;失敗會自動退點)</span>}
         </p>

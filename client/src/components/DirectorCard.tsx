@@ -1,4 +1,5 @@
 import { trpc } from "../api";
+import { Icon } from "./Icon";
 
 /** AI 導演建議（定案：建議僅供參考，成品須組長審核） */
 export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (prompt: string) => void }) {
@@ -14,7 +15,7 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
       {suggest.data && (
         <div style={{ marginTop: 12 }}>
           <p className="hint" style={{ fontSize: 12 }}>
-            {suggest.data.usedKnowledge ? "✓ 已讀取專案知識庫的素材" : "（尚未加入素材知識——加了開示/腳本，建議會更貼合）"}
+            {suggest.data.usedKnowledge ? <><Icon name="Check" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />已讀取專案知識庫的素材</> : "（尚未加入素材知識——加了開示/腳本，建議會更貼合）"}
             {suggest.data.mock ? "・示範建議" : ""}
           </p>
           {suggest.data.fallback && (

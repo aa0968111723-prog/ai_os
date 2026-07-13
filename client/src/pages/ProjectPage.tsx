@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
+import { Icon } from "../components/Icon";
 import { worldviewSchema, type Worldview } from "@shared/worldview";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
@@ -43,13 +44,11 @@ function HelpTip({ text }: { text: string }) {
       title={text}
       style={{
         display: "inline-flex", alignItems: "center", justifyContent: "center",
-        width: 16, height: 16, marginLeft: 6, borderRadius: "50%",
-        border: "1px solid var(--primary)", color: "var(--primary)",
-        fontSize: 11, lineHeight: 1, fontWeight: 700, cursor: "help",
+        marginLeft: 6, color: "var(--primary)", cursor: "help",
         verticalAlign: "middle", userSelect: "none",
       }}
     >
-      ?
+      <Icon name="HelpCircle" size={14} />
     </span>
   );
 }
@@ -282,7 +281,7 @@ export function ProjectPage({ id }: { id: string }) {
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); scrollToSelector("#onboard-delivery"); } }}
         style={{ marginTop: -4, marginBottom: 10, cursor: "pointer", fontSize: 13 }}
       >
-        做好後可打包成 zip，媒體檔直接拖進剪映／Premiere 就能剪 →
+        做好後可打包成 zip，媒體檔直接拖進剪映／Premiere 就能剪 <Icon name="ArrowRight" size={13} style={{ verticalAlign: "-2px" }} />
       </p>
       {archiveProject.error && <p className="error">{archiveProject.error.message}</p>}
 
@@ -324,11 +323,11 @@ export function ProjectPage({ id }: { id: string }) {
                       color: s.done ? "#fff" : "inherit",
                     }}
                   >
-                    {s.done ? "✓" : i + 1}
+                    {s.done ? <Icon name="Check" size={13} /> : i + 1}
                   </span>
                   <span style={{ fontSize: 13, fontWeight: s.done ? 600 : 400 }}>{s.label}</span>
                 </button>
-                {i < onboardSteps.length - 1 && <span aria-hidden className="hint" style={{ fontSize: 14 }}>→</span>}
+                {i < onboardSteps.length - 1 && <span aria-hidden className="hint" style={{ display: "inline-flex", alignItems: "center", fontSize: 14 }}><Icon name="ArrowRight" size={14} /></span>}
               </div>
             ))}
           </div>
@@ -394,7 +393,7 @@ export function ProjectPage({ id }: { id: string }) {
                   title="這個選項已被移出清單，點一下可從本專案移除"
                   onClick={() => toggle("themes", t)}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle("themes", t); } }}>
-                  {t} ⓘ
+                  {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
                 </span>
               ))}
             </div>
@@ -423,7 +422,7 @@ export function ProjectPage({ id }: { id: string }) {
                   title="這個選項已被移出清單，點一下可從本專案移除"
                   onClick={() => toggle("tones", t)}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle("tones", t); } }}>
-                  {t} ⓘ
+                  {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
                 </span>
               ))}
             </div>
@@ -452,7 +451,7 @@ export function ProjectPage({ id }: { id: string }) {
                   title="這個選項已被移出清單，點一下可從本專案移除"
                   onClick={() => toggle("styles", s)}
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle("styles", s); } }}>
-                  {s} ⓘ
+                  {s} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
                 </span>
               ))}
             </div>

@@ -12,6 +12,7 @@ import { HelpPage } from "./pages/HelpPage";
 import { PasswordInput } from "./components/PasswordInput";
 import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
 import { FeedbackWidget } from "./feedback/FeedbackWidget";
+import { Icon } from "./components/Icon";
 
 /**
  * 自助改密碼（拿到管理員的臨時密碼後，從這裡換成自己的）：成功後其他裝置全部登出。
@@ -63,7 +64,7 @@ function ChangePasswordDialog({ onClose, forced = false }: { onClose: () => void
 function PointsBadge({ groupId }: { groupId: string }) {
   // enabled 等組別就緒才查——避免首載以 undefined 先打一輪造成「週額度閃爍」
   const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 60_000, enabled: !!groupId });
-  if (my.error) return <span className="badge" title="點數暫時讀不到，稍後會自動重試">◈ <span className="mono">—</span></span>;
+  if (my.error) return <span className="badge" title="點數暫時讀不到，稍後會自動重試"><Icon name="Gem" size={14} /><span className="mono">—</span></span>;
   if (!my.data) return null;
   const { totalRemaining, weeklyQuota, weeklyUsed, dailyQuota, dailyUsed } = my.data;
   const label = totalRemaining != null ? `剩 ${totalRemaining.toLocaleString()}` : "不限";
@@ -71,7 +72,7 @@ function PointsBadge({ groupId }: { groupId: string }) {
   const daily = dailyQuota != null ? `・日 ${dailyUsed}/${dailyQuota}` : "";
   return (
     <span className="badge" title="點數額度由管理員調整；日上限每天重置">
-      ◈ <span className="mono">{label}{weekly}{daily}</span>
+      <Icon name="Gem" size={14} /><span className="mono">{label}{weekly}{daily}</span>
     </span>
   );
 }
@@ -128,11 +129,11 @@ export function App() {
           <span className="spacer" />
           {me.data && info.data?.mockMode && <span className="badge mock">假生成模式</span>}
           {me.data && <PointsBadge groupId={activeGroupId} />}
-          {activeIsLeader && <Link href="/options"><span className="badge" style={{ cursor: "pointer" }}>選項</span></Link>}
-          {me.data && <Link href="/help"><span className="badge" style={{ cursor: "pointer" }}>怎麼用</span></Link>}
-          {me.data && <Link href="/models"><span className="badge" style={{ cursor: "pointer" }}>模型指南</span></Link>}
-          {me.data && <Link href="/feedback"><span className="badge" style={{ cursor: "pointer" }}>回饋</span></Link>}
-          {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}>團隊管理</span></Link>}
+          {activeIsLeader && <Link href="/options"><span className="badge" style={{ cursor: "pointer" }}><Icon name="Ellipsis" size={14} />選項</span></Link>}
+          {me.data && <Link href="/help"><span className="badge" style={{ cursor: "pointer" }}><Icon name="HelpCircle" size={14} />怎麼用</span></Link>}
+          {me.data && <Link href="/models"><span className="badge" style={{ cursor: "pointer" }}><Icon name="Info" size={14} />模型指南</span></Link>}
+          {me.data && <Link href="/feedback"><span className="badge" style={{ cursor: "pointer" }}><Icon name="MessageCircle" size={14} />回饋</span></Link>}
+          {isAdmin && <Link href="/admin"><span className="badge" style={{ cursor: "pointer" }}><Icon name="User" size={14} />團隊管理</span></Link>}
           {me.data && (
             <span
               className="badge"

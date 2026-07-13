@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { trpc } from "../api";
+import { Icon } from "../components/Icon";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
 
 /** 分類配色（options.ts 只存 label，顏色在前端定，與溫暖色系一致） */
@@ -33,7 +34,7 @@ function CopyButton({ text }: { text: string }) {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   return (
     <button
-      style={{ padding: "3px 12px", fontSize: 12, flex: "none" }}
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 12px", fontSize: 12, flex: "none" }}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
@@ -46,7 +47,7 @@ function CopyButton({ text }: { text: string }) {
         }
       }}
     >
-      {copied ? "已複製 ✓" : "複製"}
+      {copied ? <><Icon name="Check" size={12} />已複製</> : "複製"}
     </button>
   );
 }
@@ -260,7 +261,9 @@ function SelfTestCard() {
         <div style={{ marginTop: 10 }}>
           {result.checks.map((c) => (
             <div key={c.name} style={{ display: "flex", gap: 8, fontSize: 13, padding: "3px 0" }}>
-              <span>{c.ok ? "✅" : "❌"}</span>
+              <span style={{ display: "inline-flex", alignItems: "center" }}>
+                {c.ok ? <Icon name="CheckCircle2" size={14} style={{ color: "var(--success)" }} /> : <Icon name="XCircle" size={14} style={{ color: "var(--danger)" }} />}
+              </span>
               <b style={{ minWidth: 110 }}>{c.name}</b>
               <span className="hint">{c.note}</span>
             </div>

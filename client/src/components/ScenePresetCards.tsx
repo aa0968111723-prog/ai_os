@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "../api";
+import { Icon } from "./Icon";
 
 /**
  * 場景設定卡（提案核心「場景一致性」）：
@@ -48,8 +49,8 @@ export function ScenePresetCards({
                     <input type="checkbox" checked={on} onChange={() => onToggle(s.id)} /> 生成時帶入
                   </label>
                 </div>
-                <div className="hint" style={{ fontSize: 12, marginTop: 4 }}>🎨 {s.palette}</div>
-                {s.lighting && <div className="hint" style={{ fontSize: 11, marginTop: 3 }}>💡 {s.lighting}</div>}
+                <div className="hint" style={{ fontSize: 12, marginTop: 4 }}><Icon name="Palette" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.palette}</div>
+                {s.lighting && <div className="hint" style={{ fontSize: 11, marginTop: 3 }}><Icon name="Lightbulb" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.lighting}</div>}
                 <button
                   style={{ padding: "2px 10px", fontSize: 11, marginTop: 6, color: "var(--danger)" }}
                   disabled={remove.isPending}

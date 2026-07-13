@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { Link } from "wouter";
+import { Icon } from "../components/Icon";
 
 /**
  * 怎麼用 / 常見問題：純靜態白話說明頁（無資料查詢、無新依賴）。
@@ -58,7 +59,7 @@ export function HelpPage() {
         <b>名詞小辭典</b>。
       </p>
 
-      <h2 style={{ marginTop: 8 }}>開始使用</h2>
+      <h2 style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}><Icon name="HelpCircle" size={18} />開始使用</h2>
       <div className="stack">
         <Faq q="這是什麼？能幫我做到什麼？" defaultOpen>
           <p style={{ marginTop: 0 }}>
@@ -94,7 +95,7 @@ export function HelpPage() {
         </Faq>
       </div>
 
-      <h2 style={{ marginTop: 24 }}>點數與生成</h2>
+      <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Gem" size={18} />點數與生成</h2>
       <div className="stack">
         <Faq q="「點數」是什麼？大概要生多久？">
           <ul style={{ margin: 0, paddingLeft: 22 }}>
@@ -102,7 +103,7 @@ export function HelpPage() {
               點數＝每次生成要花的額度。每個模型旁邊都標「X 點／次」，<b>送出前會先跳確認框</b>讓你看預估點數，點頭才真的扣。
             </li>
             <li>
-              額度由<b>管理員</b>設定（可設週上限、日上限，或不限）。頂欄的 ◈ 徽章隨時看得到目前剩多少。
+              額度由<b>管理員</b>設定（可設週上限、日上限，或不限）。頂欄的 <Icon name="Gem" size={13} style={{ verticalAlign: "-2px" }} /> 徽章隨時看得到目前剩多少。
             </li>
             <li>
               生成需要一點時間（圖較快、影片較久）。送出後那一格會顯示「排隊中／生成中」，好了自動變「完成」，不用一直守著。
@@ -132,7 +133,7 @@ export function HelpPage() {
         </Faq>
       </div>
 
-      <h2 style={{ marginTop: 24 }}>交付</h2>
+      <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Package" size={18} />交付</h2>
       <div className="stack">
         <Faq q="做好後怎麼交付？zip 裡面長怎樣？">
           <p style={{ marginTop: 0 }}>
@@ -162,7 +163,7 @@ export function HelpPage() {
         </Faq>
       </div>
 
-      <h2 style={{ marginTop: 24 }}>名詞小辭典</h2>
+      <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="FileText" size={18} />名詞小辭典</h2>
       <div className="card">
         <Term word="世界觀">
           這支片的固定設定（一句話故事、關鍵訊息、調性、視覺風格、禁忌）。填一次，之後每次生成自動帶入，不用重講背景。

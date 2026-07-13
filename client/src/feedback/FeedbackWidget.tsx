@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { trpc } from "../api";
 import { FEEDBACK_CATEGORIES, FEEDBACK_PAGES, type FeedbackCategory } from "@shared/options";
 import { captureWithHighlight, pickElement, type PickResult } from "./picker";
+import { Icon } from "../components/Icon";
 
 /** 目前路由對應到人看得懂的頁面名（與 FEEDBACK_PAGES 對齊；對不上就回 null） */
 function pageForPath(path: string): string | null {
@@ -93,7 +94,7 @@ export function FeedbackWidget() {
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
             <strong style={{ fontSize: 15 }}>想回報什麼？</strong>
             <button onClick={close} aria-label="關閉" style={{ padding: "2px 10px", fontSize: 13 }}>
-              ✕
+              <Icon name="X" size={14} />
             </button>
           </div>
           <p className="hint" style={{ margin: "6px 0 12px" }}>
@@ -105,10 +106,10 @@ export function FeedbackWidget() {
             style={{ width: "100%", marginBottom: 8 }}
             onClick={startPick}
           >
-            🖱 標記某個元件
+            <Icon name="MousePointer2" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />標記某個元件
           </button>
           <button role="menuitem" style={{ width: "100%" }} onClick={openPageOnly}>
-            📄 只回報這一頁
+            <Icon name="FileText" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />只回報這一頁
           </button>
         </div>
       )}
@@ -145,7 +146,7 @@ export function FeedbackWidget() {
             boxShadow: "0 10px 26px -10px rgba(86,66,42,0.5)",
           }}
         >
-          💬 回饋
+          <Icon name="MessageCircle" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />回饋
         </button>
       )}
     </div>
@@ -280,7 +281,7 @@ function ReportForm({
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
         <strong style={{ fontSize: 15 }}>填寫回饋</strong>
         <button onClick={onClose} aria-label="關閉" style={{ padding: "2px 10px", fontSize: 13 }}>
-          ✕
+          <Icon name="X" size={14} />
         </button>
       </div>
 

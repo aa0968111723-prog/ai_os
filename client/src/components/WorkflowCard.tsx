@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
+import { Icon, type IconName } from "./Icon";
 
 /**
  * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（未授權/背景分頁）建構子會丟例外，包 try 忽略。
@@ -32,7 +33,7 @@ interface RunStep {
   detail?: string;
 }
 
-const STEP_ICON: Record<RunStep["status"], string> = { done: "✅", failed: "❌", stopped: "⏹️", running: "⏳", pending: "🕓" };
+const STEP_ICON: Record<RunStep["status"], IconName> = { done: "CheckCircle2", failed: "XCircle", stopped: "CircleStop", running: "Loader", pending: "Clock" };
 const RUN_STATUS_LABEL: Record<string, string> = { running: "執行中", done: "已完成", failed: "失敗", stopped: "已停止" };
 
 /** 與伺服器 runner 相同的「活躍」語義：run 還在跑，或按停後仍有一步在生成收尾——這期間都要輪詢 */
@@ -150,7 +151,7 @@ export function WorkflowCard({ projectId }: { projectId: string }) {
             <p className="hint" style={{ margin: "4px 0" }}>想法:{r.prompt}</p>
             {steps.map((s, i) => (
               <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                <span>{STEP_ICON[s.status] ?? "🕓"}</span>
+                <span style={{ display: "inline-flex" }}><Icon name={STEP_ICON[s.status] ?? "Clock"} size={14} /></span>
                 <span>{s.note}</span>
                 {s.status === "pending" && <span className="mono" style={{ fontSize: 11, opacity: 0.8 }}>排隊中</span>}
                 {s.detail && <span className="mono" style={{ fontSize: 11, opacity: 0.8 }}>{s.detail}</span>}

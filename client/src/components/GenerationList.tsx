@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { getModel } from "@shared/models";
+import { Icon } from "./Icon";
 
 /**
  * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（背景分頁/未授權）建構子會丟例外，包 try 忽略。
@@ -149,7 +150,21 @@ export function GenerationList({ projectId }: { projectId: string }) {
     setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 2000);
   };
 
-  if (list.isLoading) return <p className="hint">載入中…</p>;
+  if (list.isLoading)
+    return (
+      <div style={{ marginTop: 14 }} aria-hidden="true">
+        {[0, 1, 2].map((k) => (
+          <div key={k} className="gen-row">
+            <div className="gen-thumb skeleton" />
+            <div>
+              <div className="skeleton" style={{ height: 14, width: k === 1 ? "55%" : "72%", marginBottom: 8 }} />
+              <div className="skeleton" style={{ height: 11, width: "40%" }} />
+            </div>
+            <div className="skeleton" style={{ height: 28, width: 64, borderRadius: 999 }} />
+          </div>
+        ))}
+      </div>
+    );
   if (!list.data?.length) return <p className="hint" style={{ marginTop: 12 }}>還沒有生成紀錄——上面試一次吧。</p>;
 
   return (
@@ -166,15 +181,15 @@ export function GenerationList({ projectId }: { projectId: string }) {
             g.kind === "video" ? (
               <video className="gen-thumb" src={g.resultUrl} controls muted />
             ) : g.kind === "audio" ? (
-              <div className="gen-thumb" style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>🔊</div>
+              <div className="gen-thumb" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted-fg)" }}><Icon name="Volume2" size={24} /></div>
             ) : (
               <a href={g.resultUrl} target="_blank" rel="noreferrer">
                 <img className="gen-thumb" src={g.resultUrl} alt={g.prompt.slice(0, 40)} />
               </a>
             )
           ) : (
-            <div className="gen-thumb" style={g.kind === "text" ? { display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 } : undefined}>
-              {g.kind === "text" ? "📝" : ""}
+            <div className="gen-thumb" style={g.kind === "text" ? { display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted-fg)" } : undefined}>
+              {g.kind === "text" ? <Icon name="FileText" size={24} /> : ""}
             </div>
           )}
           <div>
@@ -209,9 +224,9 @@ export function GenerationList({ projectId }: { projectId: string }) {
               inScenes(g.id) ? (
                 <button style={{ padding: "4px 12px", fontSize: 12 }} disabled>已加入</button>
               ) : (
-                <button style={{ padding: "4px 12px", fontSize: 12 }} disabled={addScene.isPending}
+                <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", fontSize: 12 }} disabled={addScene.isPending}
                   onClick={() => addScene.mutate({ generationId: g.id })}>
-                  ＋加入分鏡
+                  <Icon name="Plus" size={14} /> 加入分鏡
                 </button>
               )
             )}

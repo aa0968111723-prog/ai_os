@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { Icon } from "./Icon";
 
 /** 粗剪預覽播放器吃的最小分鏡形狀（來自 scenes.listByProject） */
 export type StoryboardPlayerScene = {
@@ -261,7 +262,9 @@ export function StoryboardPlayer({
         )}
         {!hasVisual && (
           <div style={{ textAlign: "center", color: "#d9cfc0", padding: 24 }}>
-            <div style={{ fontSize: 40, marginBottom: 10 }}>{kind === "audio" ? "🎵" : "🎬"}</div>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>
+              {kind === "audio" ? <Icon name="Music" size={40} /> : <Icon name="Clapperboard" size={40} />}
+            </div>
             <div style={{ fontSize: 18, fontWeight: 600, color: "#fbf7f0" }}>{scene.title}</div>
             <div className="mono" style={{ fontSize: 13, marginTop: 6, opacity: 0.8 }}>
               {kind === "audio" ? "配音／音訊鏡" : "尚無素材"}・停留 {clampDur(scene.durationSec)} 秒
@@ -306,32 +309,36 @@ export function StoryboardPlayer({
           justifyContent: "center",
         }}
       >
-        <button style={btn} onClick={restart} aria-label="重頭播" title="重頭播">
-          ↺ 重頭
+        <button style={{ ...btn, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={restart} aria-label="重頭播" title="重頭播">
+          <Icon name="RotateCcw" size={18} /> 重頭
         </button>
-        <button style={btn} onClick={goPrev} disabled={index === 0} aria-label="上一鏡" title="上一鏡（←）">
-          ⏮ 上一鏡
+        <button style={{ ...btn, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={goPrev} disabled={index === 0} aria-label="上一鏡" title="上一鏡（←）">
+          <Icon name="SkipBack" size={18} /> 上一鏡
         </button>
         <button
-          style={{ ...btn, background: "#c2613f", borderColor: "transparent", padding: "10px 22px", fontWeight: 600 }}
+          style={{ ...btn, display: "inline-flex", alignItems: "center", gap: 6, background: "#c2613f", borderColor: "transparent", padding: "10px 22px", fontWeight: 600 }}
           onClick={togglePlay}
           aria-label={playing ? "暫停" : "播放"}
           title="播放／暫停（空白鍵）"
         >
-          {playing ? "⏸ 暫停" : "▶ 播放"}
+          {playing ? (
+            <><Icon name="Pause" size={18} /> 暫停</>
+          ) : (
+            <><Icon name="Play" size={18} /> 播放</>
+          )}
         </button>
         <button
-          style={btn}
+          style={{ ...btn, display: "inline-flex", alignItems: "center", gap: 6 }}
           onClick={goNext}
           disabled={index >= total - 1}
           aria-label="下一鏡"
           title="下一鏡（→）"
         >
-          下一鏡 ⏭
+          下一鏡 <Icon name="SkipForward" size={18} />
         </button>
         {onClose && (
-          <button style={btn} onClick={onClose} aria-label="關閉" title="關閉（Esc）">
-            ✕ 關閉
+          <button style={{ ...btn, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={onClose} aria-label="關閉" title="關閉（Esc）">
+            <Icon name="X" size={18} /> 關閉
           </button>
         )}
       </div>

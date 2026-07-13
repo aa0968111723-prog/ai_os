@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
+import { Icon } from "../components/Icon";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
@@ -80,7 +81,6 @@ export function Launchpad({ groupId }: { groupId: string }) {
       <div className="cols">
         <section>
           <h2>{activeGroup ? `${activeGroup.groupName}的專案` : "專案"}</h2>
-          {projects.isLoading && <p className="hint">載入中…</p>}
           {projects.error && (
             <p className="error">
               專案清單暫時載入不了——
@@ -89,6 +89,10 @@ export function Launchpad({ groupId }: { groupId: string }) {
           )}
           {projects.data?.length === 0 && <p className="hint">還沒有專案——右邊建立第一個吧 🙌</p>}
           <div className="grid">
+            {projects.isLoading &&
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={`sk-${i}`} className="card proj-card skeleton" style={{ height: 92 }} aria-hidden />
+              ))}
             {projects.data?.map((p) => (
               <Link key={p.id} href={`/p/${p.id}`} className="card proj-card" style={{ display: "block", textDecoration: "none", color: "inherit" }}>
                 <h3>{p.title}</h3>
@@ -103,7 +107,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
         </section>
 
         <aside className="card" data-fb="新專案卡">
-          <h2>＋ 新專案</h2>
+          <h2 style={{ display: "flex", alignItems: "center", gap: 6 }}><Icon name="Plus" size={18} />新專案</h2>
           {activeGroup && (
             <p className="hint" style={{ marginTop: -4 }}>
               將建立在：{activeGroup.teamName}・{activeGroup.groupName}（頂欄可切換）

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "../api";
+import { Icon } from "./Icon";
 
 /**
  * 角色定裝卡（提案核心「角色一致性」）：
@@ -48,8 +49,8 @@ export function CharacterCards({
                     <input type="checkbox" checked={on} onChange={() => onToggle(c.id)} /> 生成時帶入
                   </label>
                 </div>
-                <div className="hint" style={{ fontSize: 12, marginTop: 4 }}>👤 {c.appearance}</div>
-                {c.notes && <div className="hint" style={{ fontSize: 11, marginTop: 3 }}>📝 {c.notes}</div>}
+                <div className="hint" style={{ fontSize: 12, marginTop: 4 }}><Icon name="User" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{c.appearance}</div>
+                {c.notes && <div className="hint" style={{ fontSize: 11, marginTop: 3 }}><Icon name="FileText" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{c.notes}</div>}
                 <button
                   style={{ padding: "2px 10px", fontSize: 11, marginTop: 6, color: "var(--danger)" }}
                   disabled={remove.isPending}

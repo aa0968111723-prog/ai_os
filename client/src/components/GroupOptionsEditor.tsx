@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trpc } from "../api";
+import { Icon } from "./Icon";
 import {
   OPTION_TYPES,
   OPTION_TYPE_META,
@@ -113,18 +114,18 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
                         title="上移"
                         disabled={busy || i === 0}
                         onClick={() => move(type, i, -1)}
-                        style={{ padding: "0 8px", fontSize: 12, lineHeight: "18px" }}
+                        style={{ padding: "0 8px", fontSize: 12, lineHeight: "18px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                       >
-                        ↑
+                        <Icon name="ChevronUp" size={14} />
                       </button>
                       <button
                         aria-label="下移"
                         title="下移"
                         disabled={busy || i === rows.length - 1}
                         onClick={() => move(type, i, 1)}
-                        style={{ padding: "0 8px", fontSize: 12, lineHeight: "18px" }}
+                        style={{ padding: "0 8px", fontSize: 12, lineHeight: "18px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                       >
-                        ↓
+                        <Icon name="ChevronDown" size={14} />
                       </button>
                     </div>
 

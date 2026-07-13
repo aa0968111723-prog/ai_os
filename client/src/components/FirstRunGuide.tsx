@@ -1,6 +1,7 @@
 import { type CSSProperties } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "../api";
+import { Icon } from "./Icon";
 
 /** 流程六步（設計規格）：建專案 → 世界觀 → 拆分鏡 → 逐格生成 → 送審 → 交付 */
 const STEPS: Array<{ n: string; label: string; hint: string }> = [
@@ -63,7 +64,7 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
               <span style={{ fontSize: 13, fontWeight: 600 }}>{s.label}</span>
             </span>
             {i < STEPS.length - 1 && (
-              <span className="hint" aria-hidden style={{ opacity: 0.55 }}>→</span>
+              <span className="hint" aria-hidden style={{ opacity: 0.55 }}><Icon name="ArrowRight" size={14} /></span>
             )}
           </div>
         ))}
@@ -72,9 +73,11 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
       <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap", alignItems: "center" }}>
         <button
           className="primary"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           disabled={!groupId || createSample.isPending}
           onClick={() => createSample.mutate({ groupId })}
         >
+          <Icon name="Sparkles" size={16} />
           {createSample.isPending ? "建立範例中…" : "建立範例專案看看"}
         </button>
         <button onClick={onDismiss}>略過</button>
