@@ -226,7 +226,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
               ) : (
                 <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", fontSize: 12 }} disabled={addScene.isPending}
                   onClick={() => addScene.mutate({ generationId: g.id })}>
-                  <Icon name="Plus" size={14} /> 加入分鏡
+                  ＋加入分鏡
                 </button>
               )
             )}

@@ -367,7 +367,7 @@ function SceneRow({
                 <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--success)", borderColor: "var(--success)" }}
                   disabled={decide.isPending}
                   onClick={() => decide.mutate({ approvalId: pending.id, decision: "approved" })}>
-                  <Icon name="Check" /> 通過
+                  ✓ 通過
                 </button>
                 <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger)", borderColor: "var(--danger)" }}
                   disabled={decide.isPending}

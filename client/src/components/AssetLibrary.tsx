@@ -325,7 +325,7 @@ export function AssetLibrary({
                         </div>
                       )}
                       <div className="hint" style={{ fontSize: 11 }}>
-                        {a.locked ? <><Icon name="Lock" size={11} style={{ verticalAlign: "-1px", marginRight: 3 }} />鎖定 · </> : ""}
+                        {a.locked ? "🔒 鎖定 · " : ""}
                         {a.isAiGenerated ? "AI 生成" : "上傳"}
                         {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}

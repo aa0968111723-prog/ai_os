@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
-import { Icon } from "../components/Icon";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
@@ -107,7 +106,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
         </section>
 
         <aside className="card" data-fb="新專案卡">
-          <h2 style={{ display: "flex", alignItems: "center", gap: 6 }}><Icon name="Plus" size={18} />新專案</h2>
+          <h2>＋ 新專案</h2>
           {activeGroup && (
             <p className="hint" style={{ marginTop: -4 }}>
               將建立在：{activeGroup.teamName}・{activeGroup.groupName}（頂欄可切換）
