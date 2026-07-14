@@ -9,7 +9,7 @@ type Action =
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
   | { type: "submit_approval"; label: string; sceneId: string };
 
-type Turn = { role: "you" | "ai"; text: string; actions?: Action[]; done?: string[] };
+type Turn = { role: "you" | "ai"; text: string; actions?: Action[] };
 
 /** 送 runAction 的乾淨 payload（去掉只給人看的 label） */
 function toPayload(a: Action) {
@@ -26,6 +26,10 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
   const utils = trpc.useUtils();
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
+  // 已執行的提議動作鍵（turnIndex:actionIndex）＋正在執行中的鍵——停用「已執行」的按鈕，避免重複點擊
+  // 重跑動作（generate 重複扣點／submit_approval 重複建版）；per-button 停用而非全域鎖住所有按鈕
+  const [executed, setExecuted] = useState<Set<string>>(new Set());
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const push = (t: Turn) => {
     setTurns((prev) => [...prev, t]);
@@ -88,20 +92,35 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
               </div>
               {t.actions && t.actions.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                  {t.actions.map((act, j) => (
-                    <ConfirmButton
-                      key={j}
-                      triggerClassName="btn-tonal btn-sm"
-                      disabled={run.isPending}
-                      title="確認執行助手提議的動作"
-                      message={act.type === "generate" ? `執行「${act.label}」？會依模型扣點。` : `執行「${act.label}」？`}
-                      confirmLabel="執行"
-                      onConfirm={() => run.mutate({ projectId, action: toPayload(act) })}
-                    >
-                      <Icon name={act.type === "generate" ? "Sparkles" : act.type === "submit_approval" ? "Check" : "Pencil"} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-                      {act.label}
-                    </ConfirmButton>
-                  ))}
+                  {t.actions.map((act, j) => {
+                    const actKey = `${i}:${j}`;
+                    const isDone = executed.has(actKey);
+                    const isRunning = pendingKey === actKey;
+                    return (
+                      <ConfirmButton
+                        key={j}
+                        triggerClassName="btn-tonal btn-sm"
+                        disabled={isDone || isRunning}
+                        title={isDone ? "此動作已執行" : "確認執行助手提議的動作"}
+                        message={act.type === "generate" ? `執行「${act.label}」？會依模型扣點。` : `執行「${act.label}」？`}
+                        confirmLabel="執行"
+                        onConfirm={async () => {
+                          setPendingKey(actKey);
+                          try {
+                            await run.mutateAsync({ projectId, action: toPayload(act) });
+                            setExecuted((prev) => new Set(prev).add(actKey));
+                          } catch {
+                            // onError 已在對話串提示；不標記為已執行，讓使用者可重試
+                          } finally {
+                            setPendingKey((k) => (k === actKey ? null : k));
+                          }
+                        }}
+                      >
+                        <Icon name={act.type === "generate" ? "Sparkles" : act.type === "submit_approval" ? "Check" : "Pencil"} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                        {isDone ? "已執行" : act.label}
+                      </ConfirmButton>
+                    );
+                  })}
                 </div>
               )}
             </div>

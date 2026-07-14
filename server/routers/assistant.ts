@@ -31,7 +31,9 @@ function overLimit(userId: string): boolean {
   const arr = (hits.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
   const over = arr.length >= LIMIT_PER_MIN;
   if (!over) arr.push(now);
-  hits.set(userId, arr);
+  // 為什麼：空陣列就刪 key，否則長跑容器的 hits Map 會隨歷史使用者無界成長（記憶體洩漏）
+  if (arr.length) hits.set(userId, arr);
+  else hits.delete(userId);
   return over;
 }
 
@@ -170,6 +172,15 @@ ${context}
       const a = input.action;
 
       if (a.type === "generate") {
+        // 綁分鏡回填前，先比照 update_scene 驗證 sceneId 歸屬（同專案、未軟刪）——否則生成完成時
+        // advanceGeneration 會以無範圍的 sceneId 把 assetId 寫進他專案／已軟刪分鏡（與姊妹分支不一致的漏檢）
+        if (a.sceneId) {
+          const [scene] = await db
+            .select({ id: schema.scenes.id })
+            .from(schema.scenes)
+            .where(and(eq(schema.scenes.id, a.sceneId), eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+          if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
+        }
         // 重用網頁端同一份守門（世界觀注入／原子扣點／失敗退點／綁分鏡回填）
         const gen = await submitGenerationCore({
           userId: ctx.auth.user.id,
@@ -190,11 +201,17 @@ ${context}
           .from(schema.scenes)
           .where(and(eq(schema.scenes.id, a.sceneId), eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
         if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
-        const patch =
-          a.field === "durationSec"
-            ? { durationSec: Math.max(1, Math.min(60, Math.round(Number(a.value)) || scene.durationSec)) }
-            : { [a.field]: a.value };
-        await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id));
+        if (a.field === "durationSec") {
+          // 為什麼：非數字（NaN）／0 舊版會靜默沿用原值卻回報「已更新」＝對使用者謊報成功；改為明確擋下
+          const n = Number(a.value);
+          if (!Number.isFinite(n)) throw new TRPCError({ code: "BAD_REQUEST", message: "秒數需為數字" });
+          await db.update(schema.scenes).set({ durationSec: Math.max(1, Math.min(60, Math.round(n))) }).where(eq(schema.scenes.id, scene.id));
+        } else {
+          // 為什麼：schema 的 min(1) 擋不掉純空白；trim 後為空就拒絕，避免標題／旁白被清成空白
+          const v = a.value.trim();
+          if (!v) throw new TRPCError({ code: "BAD_REQUEST", message: `${FIELD_LABEL[a.field]}不能是空白` });
+          await db.update(schema.scenes).set({ [a.field]: v }).where(eq(schema.scenes.id, scene.id));
+        }
         return { ok: true, kind: "update_scene" as const, message: "已更新分鏡" };
       }
 

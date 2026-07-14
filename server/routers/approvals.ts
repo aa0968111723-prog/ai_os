@@ -1,12 +1,16 @@
 import { z } from "zod";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 
 async function getScene(sceneId: string) {
-  const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, sceneId));
-  if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡" });
+  // isNull(deletedAt)：軟刪除（回收桶）的分鏡不得被送審／裁決——否則會把已刪分鏡復活進審批流程
+  const [scene] = await db
+    .select()
+    .from(schema.scenes)
+    .where(and(eq(schema.scenes.id, sceneId), isNull(schema.scenes.deletedAt)));
+  if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, scene.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND" });
   return { scene, project };
@@ -24,36 +28,40 @@ export async function submitApprovalCore(
 ) {
   const { scene, project } = await getScene(sceneId);
   assertAccess(project.groupId);
-  // 為什麼：同一分鏡任一時刻最多一筆 pending——送新版時舊 pending 一律作廢，
-  // 避免懸置的舊版事後被裁決、覆寫最新版的分鏡狀態（status 沿用既有 enum，不動 schema）
-  await db
-    .update(schema.approvals)
-    .set({ status: "needs_work", reason: "已被較新版本取代", decidedAt: new Date() })
-    .where(and(eq(schema.approvals.sceneId, scene.id), eq(schema.approvals.status, "pending")));
-  // 為什麼：版本號用單一 insert…select 原子產生（max+1 與寫入在同一條 SQL 的同一快照內），
-  // 消除「先讀 max 再 insert」的競態窗口；依決策不加唯一索引、不動 schema
-  const inserted = (await db.execute(sql`
-    insert into approvals (project_id, scene_id, version, submitted_by)
-    select ${project.id}::uuid, ${scene.id}::uuid, coalesce(max(version), 0) + 1, ${userId}::uuid
-    from approvals
-    where scene_id = ${scene.id}::uuid
-    returning id
-  `)) as unknown as { rows: Array<{ id: string }> };
-  const insertedId = inserted.rows[0]?.id;
-  // 為什麼：raw execute 回傳 snake_case 列，改用型別安全的重讀取得 camelCase 完整列給前端
-  const [approval] = insertedId
-    ? await db.select().from(schema.approvals).where(eq(schema.approvals.id, insertedId))
-    : [];
-  if (!approval) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "送審寫入失敗，請重試" });
-  await db.update(schema.scenes).set({ status: "pending" }).where(eq(schema.scenes.id, scene.id));
-  await db.insert(schema.messages).values({
-    groupId: project.groupId,
-    projectId: project.id,
-    userId,
-    kind: "system",
-    body: `📋 「${scene.title}」已送審（v${approval.version}）`,
+  return db.transaction(async (tx) => {
+    // 為什麼：以 advisory xact lock 序列化「同一分鏡」的送審（classifier 1，與 points per-user 鎖的
+    // classifier 0 不同鍵空間、不互卡；交易結束自動釋放）。單一 insert…select 的 max()+1 只在該語句
+    // 快照內原子，並不序列化「另一交易的並發語句」——READ COMMITTED 下兩並發送審會各算同一 max→插入
+    // 相同 version（重複 pending，decide 的 latest 守衛對相等版本失效→雙裁決）。上鎖後同分鏡送審全序列化。
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${scene.id}), 1)`);
+    // 同一分鏡任一時刻最多一筆 pending——送新版時舊 pending 一律作廢，避免懸置舊版事後被裁決覆寫最新狀態
+    await tx
+      .update(schema.approvals)
+      .set({ status: "needs_work", reason: "已被較新版本取代", decidedAt: new Date() })
+      .where(and(eq(schema.approvals.sceneId, scene.id), eq(schema.approvals.status, "pending")));
+    const inserted = (await tx.execute(sql`
+      insert into approvals (project_id, scene_id, version, submitted_by)
+      select ${project.id}::uuid, ${scene.id}::uuid, coalesce(max(version), 0) + 1, ${userId}::uuid
+      from approvals
+      where scene_id = ${scene.id}::uuid
+      returning id
+    `)) as unknown as { rows: Array<{ id: string }> };
+    const insertedId = inserted.rows[0]?.id;
+    // 為什麼：raw execute 回傳 snake_case 列，改用型別安全的重讀取得 camelCase 完整列給前端
+    const [approval] = insertedId
+      ? await tx.select().from(schema.approvals).where(eq(schema.approvals.id, insertedId))
+      : [];
+    if (!approval) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "送審寫入失敗，請重試" });
+    await tx.update(schema.scenes).set({ status: "pending" }).where(eq(schema.scenes.id, scene.id));
+    await tx.insert(schema.messages).values({
+      groupId: project.groupId,
+      projectId: project.id,
+      userId,
+      kind: "system",
+      body: `📋 「${scene.title}」已送審（v${approval.version}）`,
+    });
+    return approval;
   });
-  return approval;
 }
 
 /** 審批三態機（Frame.io 模式，盲點掃描定案）：pending → approved / needs_work，跟著版本走 */
@@ -85,11 +93,14 @@ export const approvalsRouter = router({
       if (input.decision === "needs_work" && !input.reason?.trim()) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "退回必須附一句理由（會通知提交人）" });
       }
+      // CAS：UPDATE 加 status='pending' 守衛——兩位組長（或雙擊／雙分頁）同時裁決時只有第一筆更到列，
+      // 其餘 returning 為空即擋下，避免 lost-update／重複系統訊息（比照 generationCore 的 inArray CAS）
       const [updated] = await db
         .update(schema.approvals)
         .set({ status: input.decision, decidedBy: ctx.auth.user.id, reason: input.reason?.trim(), decidedAt: new Date() })
-        .where(eq(schema.approvals.id, approval.id))
+        .where(and(eq(schema.approvals.id, approval.id), eq(schema.approvals.status, "pending")))
         .returning();
+      if (!updated) throw new TRPCError({ code: "BAD_REQUEST", message: "此版本已被裁決過" });
       // 為什麼：裁決生效時把同分鏡其他仍懸置的 pending（守衛保證都是舊版）一併標過期，
       // 避免它們日後被誤裁決、把分鏡狀態改回過期結果（剛裁決那筆已非 pending，不會被誤觸）
       await db
