@@ -341,6 +341,13 @@ export function ProjectPage({ id }: { id: string }) {
       <TocNav />
       <div className="cols">
         <div className="stack">
+          {/* ① 定盤：設定一次，AI 全程記得 */}
+          <div className="group-head group-1">
+            <span className="group-num">01</span>
+            <span className="group-title">定盤</span>
+            <span className="group-desc">設定一次，AI 全程記得</span>
+            <span className="group-rule" />
+          </div>
           {/* 世界觀（快速層） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
           <section className="card" data-fb="世界觀卡" id="onboard-worldview">
@@ -491,16 +498,6 @@ export function ProjectPage({ id }: { id: string }) {
             <KnowledgeBase projectId={id} />
           </div>
 
-          {/* AI 導演建議（會讀取上方知識庫） */}
-          <div id="sec-director">
-            <DirectorCard projectId={id} onUse={applyDirectorPrompt} />
-          </div>
-
-          {/* AI 拆分鏡：貼腳本 → 自動建分鏡草稿 */}
-          <div id="sec-split">
-            <ScriptSplitCard projectId={id} />
-          </div>
-
           {/* 角色定裝卡：勾選後生成自動注入外觀錨點 */}
           <p id="sec-characters" className="hint" style={{ margin: "0 0 6px", fontSize: 13 }}>
             角色定裝卡<HelpTip text="角色長相鎖定，勾了跨鏡頭不走樣。" />
@@ -524,14 +521,16 @@ export function ProjectPage({ id }: { id: string }) {
             </div>
           </CollabZone>
 
-          {/* 回收桶：素材／分鏡／知識的軟刪除還原（收合式，就近放在素材庫下方） */}
-          <div id="sec-recyclebin">
-            <RecycleBin projectId={id} />
+          {/* ② 創作：每天在這裡工作 */}
+          <div className="group-head group-2">
+            <span className="group-num">02</span>
+            <span className="group-title">創作</span>
+            <span className="group-desc">每天在這裡工作</span>
+            <span className="group-rule" />
           </div>
-
-          {/* 生成台（11 類 × 旗艦/經濟/最低成本） */}
+          {/* 生成台（11 類 × 旗艦/經濟/最低成本）＝本組主工作台 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>
-          <section className="card" data-fb="生成台">
+          <section className="card card--primary" data-fb="生成台">
             <h2>創作生成</h2>
             <ModelPicker onChange={setModel} />
             {model?.needs && (
@@ -647,6 +646,16 @@ export function ProjectPage({ id }: { id: string }) {
           </section>
           </CollabZone>
 
+          {/* AI 導演建議（會讀取上方知識庫） */}
+          <div id="sec-director">
+            <DirectorCard projectId={id} onUse={applyDirectorPrompt} />
+          </div>
+
+          {/* AI 拆分鏡：貼腳本 → 自動建分鏡草稿 */}
+          <div id="sec-split">
+            <ScriptSplitCard projectId={id} />
+          </div>
+
           {/* 提示詞庫：成功生成的咒語一鍵再用 */}
           <div id="sec-prompts">
             <PromptLibrary projectId={id} onUse={(text) => setPrompt(text)} />
@@ -657,6 +666,13 @@ export function ProjectPage({ id }: { id: string }) {
             <WorkflowCard projectId={id} />
           </div>
 
+          {/* ③ 分鏡與交付：排片、送審、打包 */}
+          <div className="group-head group-3">
+            <span className="group-num">03</span>
+            <span className="group-title">分鏡與交付</span>
+            <span className="group-desc">排片、送審、打包</span>
+            <span className="group-rule" />
+          </div>
           {/* 分鏡與交付 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.scenes)}>
             {/* data-fb 讓元件回饋標定「打包下載」（分鏡與交付區）；透明包裹，不影響版面。id 供引導步驟與交付指引捲動定位 */}
@@ -667,6 +683,11 @@ export function ProjectPage({ id }: { id: string }) {
               <SceneList projectId={id} isLeader={isLeader} onUsePrompt={(text) => setPrompt(text)} />
             </div>
           </CollabZone>
+
+          {/* 頁尾工具：回收桶（軟刪除還原，沉底不佔主流程） */}
+          <div id="sec-recyclebin" style={{ marginTop: 8 }}>
+            <RecycleBin projectId={id} />
+          </div>
         </div>
 
         {/* 組內留言 */}

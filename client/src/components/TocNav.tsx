@@ -13,18 +13,21 @@ export type TocItem = { id: string; label: string };
 /** 依頁面實際排列順序列出各區塊（label＋目標錨點 id）。
  *  onboard-worldview／gen-prompt／onboard-delivery 為既有錨點，其餘為本次新增。 */
 const DEFAULT_ITEMS: TocItem[] = [
+  // ① 定盤
   { id: "onboard-worldview", label: "世界觀" },
   { id: "sec-knowledge", label: "專案知識庫" },
-  { id: "sec-director", label: "AI 導演建議" },
-  { id: "sec-split", label: "AI 拆分鏡" },
   { id: "sec-characters", label: "角色定裝卡" },
   { id: "sec-scenes", label: "場景設定卡" },
   { id: "sec-assets", label: "素材庫" },
-  { id: "sec-recyclebin", label: "回收桶" },
+  // ② 創作
   { id: "gen-prompt", label: "創作生成" },
+  { id: "sec-director", label: "AI 導演建議" },
+  { id: "sec-split", label: "AI 拆分鏡" },
   { id: "sec-prompts", label: "提示詞庫" },
   { id: "sec-workflow", label: "工作流" },
+  // ③ 分鏡與交付
   { id: "onboard-delivery", label: "分鏡・交付" },
+  { id: "sec-recyclebin", label: "回收桶" },
 ];
 
 const MOBILE_QUERY = "(max-width: 820px)";
