@@ -11,7 +11,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
-import { falSubmit, falStatus } from "./fal";
+import { falSubmit, falStatus, isMockMode } from "./fal";
 import { reserveQuota, refund } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
 import { buildCharacterAnchor } from "../routers/characters";
@@ -187,17 +187,20 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   // 原子守門＋扣點（同一交易＋per-user 鎖，杜絕併發雙重扣款/繞過額度）
   // reserveQuota「拋例外」（連線池耗盡/逾時/序列化失敗）時也要刪掉剛建的 queued 列，
   // 否則會留下「從未扣點」的孤兒，30 分鐘後被陳屍清掃憑空退點、灌鬆總預算閘。
-  let quotaError: string | null;
-  try {
-    quotaError = await reserveQuota(input.userId, project.groupId, model.points, `${input.reasonPrefix ?? "生成"} ${model.label}`, gen.id);
-  } catch (err) {
-    await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
-    console.error("[generation] reserveQuota 例外，已移除待生成列：", err instanceof Error ? err.message : err);
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "系統忙碌，請稍後再試（未扣點）" });
-  }
-  if (quotaError) {
-    await db.delete(schema.generations).where(eq(schema.generations.id, gen.id)); // 未扣點，移除待生成列
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+  // mock 模式（無 FAL_KEY / FAL_MOCK=1）不扣點：內部測試不燒真實額度、也不被額度閘擋（正式模式照常守門）
+  if (!isMockMode()) {
+    let quotaError: string | null;
+    try {
+      quotaError = await reserveQuota(input.userId, project.groupId, model.points, `${input.reasonPrefix ?? "生成"} ${model.label}`, gen.id);
+    } catch (err) {
+      await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
+      console.error("[generation] reserveQuota 例外，已移除待生成列：", err instanceof Error ? err.message : err);
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "系統忙碌，請稍後再試（未扣點）" });
+    }
+    if (quotaError) {
+      await db.delete(schema.generations).where(eq(schema.generations.id, gen.id)); // 未扣點，移除待生成列
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+    }
   }
 
   try {

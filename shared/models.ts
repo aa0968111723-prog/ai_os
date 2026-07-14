@@ -418,8 +418,8 @@ export const MODELS: ModelEntry[] = [
   /* ═══ 7. 語音轉文字 speech-to-text ═══ */
   {
     id: "fal-ai/elevenlabs/speech-to-text", label: "ElevenLabs Scribe", category: "speech-to-text", tier: "flagship", kind: "text",
-    needs: "audio", points: 2, cost: "$0.22/小時", verified: true,
-    strengths: "商用最準梯隊;自動分講者、97+ 語言",
+    needs: "audio", points: 2, cost: "$0.22/小時", verified: true, recommended: true,
+    strengths: "商用最準梯隊;自動分講者、97+ 語言;長錄音實際費用最低",
     bestFor: "開示錄音、多人座談逐字稿",
     sourceHint: "音訊檔網址(mp3/wav/m4a)",
     input: (_p, _f, s) => ({ audio_url: s, language_code: "zho" }),
@@ -434,7 +434,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/wizper", label: "Wizper(加速 v3)", category: "speech-to-text", tier: "flagship", kind: "text",
-    needs: "audio", points: 1, cost: "≈$0.0008/音訊秒", verified: true, recommended: true,
+    needs: "audio", points: 1, cost: "≈$0.0008/音訊秒;長錄音實際費用遠高於扣點,長稿建議改用 Scribe", verified: true,
     strengths: "fal 自家加速版 Whisper v3;同級品質、數倍速度",
     bestFor: "長錄音快速出稿",
     sourceHint: "音訊檔網址",

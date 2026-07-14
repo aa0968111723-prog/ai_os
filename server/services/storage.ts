@@ -16,8 +16,8 @@ export const STORAGE_ROOT = process.env.ASSET_DIR ?? (existsSync("/data") ? "/da
 const ASSETS_DIR = path.join(STORAGE_ROOT, "assets");
 const TMP_DIR = path.join(STORAGE_ROOT, "tmp");
 
-/** 單檔上限（Volume 目前 1GB，先保守；不夠時到 Railway 調大 Volume 再放寬） */
-export const MAX_FILE_BYTES = 200 * 1024 * 1024;
+/** 單檔上限：預設 200MB（Volume 1GB 時保守）；擴 Volume 後設環境變數 ASSET_MAX_MB（如 2000）即可放寬，免改碼 */
+export const MAX_FILE_BYTES = (Number(process.env.ASSET_MAX_MB) || 200) * 1024 * 1024;
 /** 磁碟保留水位：低於此可用空間就拒收新檔，避免整站因滿碟故障 */
 const MIN_FREE_BYTES = 64 * 1024 * 1024;
 
