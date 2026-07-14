@@ -51,6 +51,26 @@ export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
     return () => mq.removeEventListener("change", sync);
   }, []);
 
+  // 捲動定位（scroll-spy）：標記目前在視窗上緣附近的區塊，讓目錄有「你在這裡」的方位感
+  const [activeId, setActiveId] = useState("");
+  useEffect(() => {
+    const els = items
+      .map((it) => document.getElementById(it.id))
+      .filter((el): el is HTMLElement => el !== null);
+    if (!els.length) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible[0]) setActiveId(visible[0].target.id);
+      },
+      { rootMargin: "0px 0px -70% 0px", threshold: 0 },
+    );
+    els.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [items]);
+
   const jump = (id: string) => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -76,7 +96,12 @@ export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
         <ul id="toc-list" className="toc-list">
           {items.map((it) => (
             <li key={it.id}>
-              <button type="button" className="toc-link" onClick={() => jump(it.id)}>
+              <button
+                type="button"
+                className="toc-link"
+                aria-current={activeId === it.id ? "true" : undefined}
+                onClick={() => jump(it.id)}
+              >
                 {it.label}
               </button>
             </li>

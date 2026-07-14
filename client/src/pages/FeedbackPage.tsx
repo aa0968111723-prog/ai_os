@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
+import { useRovingRadio } from "../components/interactions";
 
 const ITEMS: Array<{ key: string; label: string }> = [
   { key: "context", label: "AI 懂不懂我們的素材（不用重複解釋）" },
@@ -16,13 +17,27 @@ export function FeedbackPage({ groupId }: { groupId?: string }) {
   const mine = trpc.feedback.mine.useQuery({ groupId });
 
   // 等既有回饋載入完再掛表單：預填走 useState 初始值，不用 effect 事後回填（避免表單先空白再跳成舊值）
-  if (mine.isLoading) return <p className="hint">載入中…</p>;
+  if (mine.isLoading)
+    return (
+      <div style={{ maxWidth: 620, margin: "0 auto" }} role="status" aria-busy="true" aria-label="載入中">
+        <div className="skeleton" style={{ height: 34, width: "45%", margin: "24px 0 12px" }} />
+        <div className="skeleton" style={{ height: 16, width: "80%", marginBottom: 24 }} />
+        <div className="card">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} style={{ marginBottom: 16 }}>
+              <div className="skeleton" style={{ height: 14, width: "55%", marginBottom: 8 }} />
+              <div className="skeleton" style={{ height: 26 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   // 載入失敗不能退回空白表單：看不到既有內容就送出，upsert 會把舊回饋整份覆寫掉
   if (mine.isError) {
     return (
       <p className="error">
         回饋資料載入不了——請稍候再{" "}
-        <button style={{ padding: "2px 12px" }} onClick={() => mine.refetch()}>重試</button>
+        <button onClick={() => mine.refetch()}>重試</button>
       </p>
     );
   }
@@ -60,7 +75,7 @@ function FeedbackForm({
   if (submit.isSuccess && justSent) {
     return (
       <div className="card" style={{ maxWidth: 520, margin: "40px auto", textAlign: "center" }} role="status" aria-live="polite">
-        <h2>收到了，感恩 🙏</h2>
+        <h2>收到了，感恩</h2>
         <p className="sub">你的回饋會直接影響下一版怎麼改。</p>
         <div style={{ marginTop: 12, display: "flex", gap: 16, justifyContent: "center", alignItems: "center" }}>
           <button onClick={backToForm}>再修改</button>
@@ -87,30 +102,7 @@ function FeedbackForm({
       {hasExisting && <p className="hint">你之前填過——直接修改後重新送出即可。</p>}
       <div className="card">
         {ITEMS.map((item) => (
-          <div key={item.key} style={{ marginBottom: 14 }}>
-            <label id={`fb-${item.key}`} style={{ margin: "0 0 6px" }}>{item.label}</label>
-            <div role="radiogroup" aria-labelledby={`fb-${item.key}`}>
-              {[1, 2, 3, 4, 5].map((n) => {
-                const on = scores[item.key] === n;
-                return (
-                  <span
-                    key={n}
-                    role="radio"
-                    aria-checked={on}
-                    aria-label={`${n} 分`}
-                    tabIndex={0}
-                    className={`chip pick ${on ? "on" : ""}`}
-                    onClick={() => setScore(item.key, n)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setScore(item.key, n); }
-                    }}
-                  >
-                    {n}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
+          <RatingRow key={item.key} item={item} value={scores[item.key]} onSet={setScore} />
         ))}
         <label htmlFor="fb-best">最喜歡的一點</label>
         <input id="fb-best" value={best} maxLength={500} onChange={(e) => setBest(e.target.value)} placeholder="例：不用一直重打背景說明" />
@@ -133,7 +125,50 @@ function FeedbackForm({
           </button>
           <span className="hint">{rated === 0 ? "至少評 1 題就能送出" : "沒用到的功能可以留空"}</span>
         </div>
-        {submit.error && <p className="error" role="alert">送出失敗：{submit.error.message}</p>}
+        {submit.error && <p className="error" role="alert">送出失敗，請稍後再試</p>}
+      </div>
+    </div>
+  );
+}
+
+/** 單題評分列：5 顆分數 chip 以 radiogroup＋方向鍵漫遊呈現；再點同分＝取消該題 */
+function RatingRow({
+  item,
+  value,
+  onSet,
+}: {
+  item: { key: string; label: string };
+  value: number | undefined;
+  onSet: (key: string, n: number) => void;
+}) {
+  const roving = useRovingRadio(
+    ["1", "2", "3", "4", "5"],
+    value ? String(value) : "",
+    (v) => onSet(item.key, Number(v)),
+  );
+  return (
+    <div style={{ marginBottom: "var(--sp-16)" }}>
+      <label id={`fb-${item.key}`} style={{ margin: "0 0 6px" }}>{item.label}</label>
+      <div role="radiogroup" aria-labelledby={`fb-${item.key}`} {...roving.groupProps}>
+        {[1, 2, 3, 4, 5].map((n, i) => {
+          const on = value === n;
+          return (
+            <span
+              key={n}
+              role="radio"
+              aria-checked={on}
+              aria-label={`${n} 分`}
+              {...roving.itemProps(i)}
+              className={`chip pick ${on ? "on" : ""}`}
+              onClick={() => onSet(item.key, n)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSet(item.key, n); }
+              }}
+            >
+              {n}
+            </span>
+          );
+        })}
       </div>
     </div>
   );

@@ -32,6 +32,9 @@ export function MessagePanel({ projectId }: { projectId: string }) {
       {!list.isLoading && list.data?.length === 0 && <p className="hint">還沒有留言——留一句給同組夥伴吧。</p>}
       <div
         ref={listRef}
+        tabIndex={0}
+        role="log"
+        aria-label="組內留言"
         style={{ maxHeight: 360, overflowY: "auto" }}
         onScroll={() => {
           const el = listRef.current;
@@ -42,7 +45,7 @@ export function MessagePanel({ projectId }: { projectId: string }) {
           // 系統訊息（審核結果通知等）：置中淡色小字，跟夥伴的對話區隔開
           if (m.kind === "system") {
             return (
-              <div key={m.id} style={{ textAlign: "center", color: "var(--soft)", fontSize: 12, marginTop: 10 }}>
+              <div key={m.id} style={{ textAlign: "center", color: "var(--fg-secondary)", fontSize: "var(--fs-12)", marginTop: 10 }}>
                 {m.body}
               </div>
             );

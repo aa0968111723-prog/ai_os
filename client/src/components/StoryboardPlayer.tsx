@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Icon } from "./Icon";
+import { useFocusTrap } from "./interactions";
 
 /** 粗剪預覽播放器吃的最小分鏡形狀（來自 scenes.listByProject） */
 export type StoryboardPlayerScene = {
@@ -100,10 +101,8 @@ export function StoryboardPlayer({
     else v.pause();
   }, [playing, index]);
 
-  // 開啟時把焦點放到播放器，讓鍵盤操作立即可用
-  useEffect(() => {
-    stageRef.current?.focus();
-  }, []);
+  // 開啟時把焦點鎖進播放器（Tab 不外漏）＋鎖背景捲動；關閉後焦點自動還給開啟者
+  useFocusTrap(stageRef, true);
 
   // 鍵盤：空白鍵＝播放/暫停、左右鍵＝切鏡、Esc＝關閉
   useEffect(() => {
@@ -150,7 +149,7 @@ export function StoryboardPlayer({
 
   if (total === 0 || !scene) {
     return (
-      <div style={overlay} role="dialog" aria-modal="true" aria-label="粗剪預覽">
+      <div style={overlay} role="dialog" aria-modal="true" aria-label="粗剪預覽" ref={stageRef} tabIndex={-1}>
         <p style={{ color: "#fbf7f0", fontSize: 15 }}>還沒有分鏡可以預覽——先加入分鏡再回來看整支片節奏。</p>
         {onClose && (
           <button style={{ ...btn, marginTop: 16 }} onClick={onClose}>
@@ -187,11 +186,11 @@ export function StoryboardPlayer({
             flexWrap: "wrap",
           }}
         >
-          <span className="mono" style={{ color: "#e8a883", fontSize: 14 }}>
+          <span className="mono" style={{ color: "#e8a883", fontSize: "var(--fs-14)" }}>
             第 {index + 1}/{total} 鏡
           </span>
-          <span style={{ fontSize: 16, fontWeight: 600 }}>{scene.title}</span>
-          <span className="mono" style={{ marginLeft: "auto", fontSize: 12, opacity: 0.7 }}>
+          <span style={{ fontSize: "var(--fs-16)", fontWeight: 600 }}>{scene.title}</span>
+          <span className="mono" style={{ marginLeft: "auto", fontSize: "var(--fs-12)", opacity: 0.7 }}>
             {clampDur(scene.durationSec)}s・{kind ?? "無素材"}
           </span>
         </div>
@@ -212,7 +211,7 @@ export function StoryboardPlayer({
                 key={i === index ? `cur-${index}` : `seg-${i}`}
                 style={{
                   height: "100%",
-                  background: "#c2613f",
+                  background: "var(--primary)",
                   width: i < index ? "100%" : "0%",
                   animation:
                     i === index && playing && autoAdvance
@@ -279,7 +278,7 @@ export function StoryboardPlayer({
           width: "min(1000px, 94vw)",
           minHeight: 46,
           marginTop: 12,
-          borderRadius: 12,
+          borderRadius: "var(--r-12)",
           background: "rgba(20, 17, 13, 0.72)",
           color: "#fbf7f0",
           display: "flex",
@@ -287,14 +286,14 @@ export function StoryboardPlayer({
           justifyContent: "center",
           padding: "10px 18px",
           textAlign: "center",
-          fontSize: 16,
+          fontSize: "var(--fs-16)",
           lineHeight: 1.5,
         }}
       >
         {scene.voiceover ? (
           scene.voiceover
         ) : (
-          <span style={{ opacity: 0.5, fontSize: 14 }}>（此鏡無配音）</span>
+          <span style={{ opacity: 0.5, fontSize: "var(--fs-14)" }}>（此鏡無配音）</span>
         )}
       </div>
 
@@ -316,7 +315,7 @@ export function StoryboardPlayer({
           <Icon name="SkipBack" size={18} /> 上一鏡
         </button>
         <button
-          style={{ ...btn, display: "inline-flex", alignItems: "center", gap: 6, background: "#c2613f", borderColor: "transparent", padding: "10px 22px", fontWeight: 600 }}
+          style={{ ...btn, display: "inline-flex", alignItems: "center", gap: 6, background: "var(--primary-solid)", borderColor: "transparent", padding: "10px 22px", fontWeight: 600 }}
           onClick={togglePlay}
           aria-label={playing ? "暫停" : "播放"}
           title="播放／暫停（空白鍵）"

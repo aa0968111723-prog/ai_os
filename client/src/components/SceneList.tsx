@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { getModel } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
 import { Icon } from "./Icon";
+import { ConfirmButton } from "./interactions";
 
 const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
   todo: { label: "草稿", cls: "queued" },
@@ -198,18 +199,18 @@ function SceneRow({
     <div className="gen-row" data-fb="分鏡格">
       {s.assetUrl ? (
         s.assetKind === "video" ? (
-          <video className="gen-thumb" src={s.assetUrl} controls muted preload="metadata" />
+          <video className="gen-thumb" src={s.assetUrl} muted preload="metadata" />
         ) : (
           <img className="gen-thumb" src={s.assetUrl} alt={s.title} />
         )
       ) : (
         <div className="gen-thumb" style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "var(--soft)" }}>
-          {isGenerating ? "…" : "＋"}
+          {isGenerating ? <Icon name="Loader" className="spin" size={20} /> : <Icon name="Plus" size={20} />}
         </div>
       )}
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span className="mono" style={{ color: "var(--primary)", flexShrink: 0 }}>{i + 1}</span>
+          <span className="mono" style={{ color: "var(--primary-ink)", flexShrink: 0 }}>{i + 1}</span>
           <InlineEdit
             value={s.title}
             kind="text"
@@ -246,14 +247,14 @@ function SceneRow({
             kind="textarea"
             pending={update.isPending}
             ariaLabel={`第 ${i + 1} 鏡配音詞`}
-            placeholder="🎙 配音詞（可留白）"
+            placeholder="配音詞（可留白）"
             onCommit={(v) => update.mutate({ sceneId: s.id, voiceover: String(v) })}
           />
           {/* 旁白配音：有配音詞才給生成鈕（中文 TTS 走後端預設，不必前端帶模型）；完成後就地試聽＋下載 */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
             {hasVoiceover ? (
               <button
-                style={{ padding: "4px 12px", fontSize: 12 }}
+                className="btn-sm"
                 disabled={generateVoiceover.isPending || isVoicing}
                 title="用這一格的配音詞生成中文旁白，完成後自動出現試聽"
                 onClick={() => generateVoiceover.mutate({ sceneId: s.id })}
@@ -287,7 +288,8 @@ function SceneRow({
                 // 同源 /api/assets/:id/file 才能讓 download 生效；只有跨源 url 時退回 url（瀏覽器會改成導航，但仍可另存）
                 href={s.narrationAssetId ? `/api/assets/${s.narrationAssetId}/file` : s.narrationUrl}
                 download
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", fontSize: 12, borderRadius: 8, textDecoration: "none", border: "1px solid var(--soft)", color: "var(--fg)" }}
+                className="btn-tonal"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "var(--sp-4) var(--sp-12)", fontSize: "var(--fs-12)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "solid", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
               >
                 <Icon name="Download" /> 下載旁白
               </a>
@@ -295,17 +297,17 @@ function SceneRow({
           )}
         </div>
 
-        {rowError && <p className="error">存檔／生成失敗：{rowError.message}</p>}
+        {rowError && <p className="error" role="alert">存檔／生成失敗：{rowError.message}</p>}
 
         {/* 建議提示詞：拆分鏡草稿（有 prompt、還沒素材）可一鍵帶回生成台 */}
         {s.prompt && !s.assetId && (
-          <div style={{ fontSize: 12, marginTop: 6, background: "var(--card2)", borderRadius: 8, padding: "6px 10px" }}>
+          <div style={{ fontSize: "var(--fs-12)", marginTop: 6, background: "var(--card2)", borderRadius: "var(--r-8)", padding: "6px 10px" }}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
               <Icon name="Clapperboard" size={14} style={{ flexShrink: 0, marginTop: 2 }} />
               <span>{s.prompt}</span>
             </div>
             {onUsePrompt && (
-              <button style={{ padding: "2px 10px", fontSize: 11, marginTop: 5 }} onClick={() => onUsePrompt(s.prompt!)}>
+              <button style={{ padding: "2px 10px", fontSize: "var(--fs-11)", marginTop: 5 }} onClick={() => onUsePrompt(s.prompt!)}>
                 用此提示詞生成
               </button>
             )}
@@ -316,8 +318,7 @@ function SceneRow({
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
           {s.prompt ? (
             <button
-              className="primary"
-              style={{ padding: "4px 12px", fontSize: 12 }}
+              className="primary btn-sm"
               disabled={generate.isPending || isGenerating}
               title="用這一格的提示詞就地生成，完成後自動回填縮圖"
               onClick={() => generate.mutate({ sceneId: s.id, modelId: DEFAULT_MODEL })}
@@ -343,7 +344,8 @@ function SceneRow({
               // 的成品會是跨源 fal 網址，瀏覽器會忽略 download 改成導航離開 SPA。無 assetId 時退回原網址。
               href={s.assetId ? `/api/assets/${s.assetId}/file` : s.assetUrl}
               download
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", fontSize: 12, borderRadius: 8, textDecoration: "none", border: "1px solid var(--soft)", color: "var(--fg)" }}
+              className="btn-tonal"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "var(--sp-4) var(--sp-12)", fontSize: "var(--fs-12)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "solid", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
             >
               <Icon name="Download" /> 下載
             </a>
@@ -364,23 +366,21 @@ function SceneRow({
             )}
             {isLeader && s.status === "pending" && pending && (
               <>
-                <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--success)", borderColor: "var(--success)" }}
+                <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--success-ink)", borderColor: "var(--success)" }}
                   disabled={decide.isPending}
                   onClick={() => decide.mutate({ approvalId: pending.id, decision: "approved" })}>
-                  ✓ 通過
+                  <Icon name="Check" /> 通過
                 </button>
-                <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger)", borderColor: "var(--danger)" }}
+                <ConfirmButton
+                  triggerStyle={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger-ink)", borderColor: "var(--danger)" }}
                   disabled={decide.isPending}
-                  onClick={() => {
-                    const reason = window.prompt("退回理由（會通知提交人）：");
-                    if (!reason?.trim()) {
-                      window.alert("已取消退回（退回必須附理由）");
-                      return;
-                    }
-                    decide.mutate({ approvalId: pending.id, decision: "needs_work", reason: reason.trim() });
-                  }}>
+                  title="退回這一鏡"
+                  reason={{ label: "退回理由（會通知提交人）", placeholder: "說明需要修改的地方…", required: true }}
+                  confirmLabel="退回"
+                  onConfirm={(reason) => decide.mutate({ approvalId: pending.id, decision: "needs_work", reason })}
+                >
                   <Icon name="Undo2" /> 退回
-                </button>
+                </ConfirmButton>
               </>
             )}
           </div>
@@ -389,8 +389,15 @@ function SceneRow({
       <div style={{ display: "flex", gap: 4 }}>
         <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === 0 || move.isPending} aria-label="上移" onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}><Icon name="ChevronUp" size={16} /></button>
         <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
-        <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger)" }} disabled={remove.isPending} aria-label="刪除" title="刪除後移到回收桶，可還原（保留配音詞與提示詞）"
-          onClick={() => window.confirm(`把分鏡「${s.title}」移到回收桶？可從回收桶還原。`) && remove.mutate({ sceneId: s.id })}><Icon name="X" size={16} /></button>
+        <ConfirmButton
+          triggerStyle={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger)" }}
+          disabled={remove.isPending}
+          triggerAriaLabel="刪除"
+          triggerTitle="刪除後移到回收桶，可還原（保留配音詞與提示詞）"
+          message={`把分鏡「${s.title}」移到回收桶？可從回收桶還原。`}
+          confirmLabel="刪除"
+          onConfirm={() => remove.mutate({ sceneId: s.id })}
+        ><Icon name="X" size={16} /></ConfirmButton>
       </div>
     </div>
   );
@@ -426,10 +433,10 @@ export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: str
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0 }}>分鏡・交付</h2>
         {list.length > 0 && (
-          <span className="mono" style={{ fontSize: 13, color: "var(--primary)" }}>共 {list.length} 鏡・約 {totalSec} 秒</span>
+          <span className="mono" style={{ fontSize: 13, color: "var(--primary-ink)" }}>共 {list.length} 鏡・約 {totalSec} 秒</span>
         )}
       </div>
-      {actionError && <p className="error">操作失敗：{actionError.message}</p>}
+      {actionError && <p className="error" role="alert">操作失敗：{actionError.message}</p>}
       {scenes.isLoading ? (
         <div aria-hidden="true">
           {[0, 1].map((k) => (
@@ -469,15 +476,15 @@ export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: str
               href={`/api/export/${projectId}`}
               download
               style={{
-                display: "inline-block", padding: "10px 18px", borderRadius: 10, textDecoration: "none",
-                background: "var(--primary)", color: "var(--primary-fg)", boxShadow: "var(--shadow)", fontSize: 14,
+                display: "inline-block", padding: "10px 18px", borderRadius: "var(--r-12)", textDecoration: "none",
+                background: "var(--primary-solid)", color: "var(--primary-fg)", boxShadow: "var(--e2)", fontSize: "var(--fs-14)",
               }}
             >
               打包下載交付包（.zip）
             </a>
             <button
               data-fb="粗剪預覽"
-              style={{ padding: "10px 18px", fontSize: 14, borderRadius: 10 }}
+              style={{ padding: "10px 18px", fontSize: "var(--fs-14)", borderRadius: "var(--r-12)" }}
               aria-expanded={showPreview}
               onClick={() => setShowPreview((v) => !v)}
             >

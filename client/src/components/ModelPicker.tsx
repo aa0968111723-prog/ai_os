@@ -39,9 +39,9 @@ export function ModelPicker({
   }, [selected?.id]);
 
   const groups: Array<{ label: string; tier: string }> = [
-    { label: "🏆 旗艦(最新最強)", tier: "flagship" },
-    { label: "⚖️ 經濟(日常主力)", tier: "economy" },
-    { label: "💡 最低成本(試驗)", tier: "budget" },
+    { label: "旗艦(最新最強)", tier: "flagship" },
+    { label: "經濟(日常主力)", tier: "economy" },
+    { label: "最低成本(試驗)", tier: "budget" },
   ];
   const cat = categories.data?.find((c) => c.id === category);
   const loading = categories.isLoading || models.isLoading;
@@ -66,7 +66,7 @@ export function ModelPicker({
             <optgroup key={g.tier} label={g.label}>
               {inTier.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.label} — {m.points} 點{m.recommended ? " ⭐ 推薦" : ""}{m.verified ? "" : " ⚠︎ 未驗證"}
+                  {m.label} — {m.points} 點{m.recommended ? " 推薦" : ""}{m.verified ? "" : " 未驗證"}
                 </option>
               ))}
             </optgroup>
@@ -77,7 +77,7 @@ export function ModelPicker({
       {loadError && (
         <p className="error">
           模型清單載入失敗：{loadError.message}
-          <button style={{ marginLeft: 8, padding: "2px 10px", fontSize: 12 }} onClick={() => { categories.refetch(); models.refetch(); }}>
+          <button className="btn-sm" style={{ marginLeft: 8 }} onClick={() => { categories.refetch(); models.refetch(); }}>
             重試
           </button>
         </p>
@@ -86,7 +86,7 @@ export function ModelPicker({
         <p className="hint" style={{ marginTop: 4 }}>
           {selected.recommended && <span className="chip on" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}><Icon name="Star" size={12} /> 推薦</span>}
           {selected.strengths}
-          {!selected.verified && <span style={{ color: "var(--warning, #C08A2E)" }}>(⚠︎ 新模型 ID 待真實模式首跑確認;失敗會自動退點)</span>}
+          {!selected.verified && <span style={{ color: "var(--gold-ink)" }}>(⚠︎ 新模型 ID 待真實模式首跑確認;失敗會自動退點)</span>}
         </p>
       )}
     </div>

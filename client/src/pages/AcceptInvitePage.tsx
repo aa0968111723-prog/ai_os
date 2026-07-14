@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { PasswordInput } from "../components/PasswordInput";
+import { friendlyAuthError } from "./LoginPage";
 
 const TEAM_ROLE_LABEL: Record<string, string> = { admin: "團隊管理員", member: "成員" };
 const GROUP_ROLE_LABEL: Record<string, string> = { leader: "組長", member: "組員" };
@@ -29,14 +30,21 @@ export function AcceptInvitePage({ token }: { token: string }) {
     </div>
   );
 
-  if (preview.isLoading) return wrap(<p className="hint">確認邀請連結中…</p>);
+  if (preview.isLoading)
+    return wrap(
+      <div role="status" aria-label="確認邀請連結中…" style={{ display: "grid", gap: "var(--sp-12)" }}>
+        <div className="skeleton" style={{ height: 28, width: "55%" }} />
+        <div className="skeleton" style={{ height: 60 }} />
+        <div className="skeleton" style={{ height: 44 }} />
+      </div>,
+    );
 
   // 連結無效／過期／用過：清楚說明＋回登入
   if (preview.error || !preview.data?.valid) {
     return wrap(
       <>
-        <h1 style={{ fontSize: 22, marginTop: 0 }}>這個邀請不能用了</h1>
-        <p className="error" role="alert">{preview.data?.reason ?? preview.error?.message ?? "邀請連結無效"}</p>
+        <h1 style={{ fontSize: "var(--fs-24)", marginTop: 0 }}>這個邀請不能用了</h1>
+        <p className="error" role="alert">{preview.data?.reason ?? (preview.error ? friendlyAuthError(preview.error.message) : "邀請連結無效")}</p>
         <p className="hint" style={{ marginTop: 12 }}>
           已經有帳號了？<Link href="/">前往登入</Link>
         </p>
@@ -50,9 +58,9 @@ export function AcceptInvitePage({ token }: { token: string }) {
   if (d.alreadyHasAccount) {
     return wrap(
       <>
-        <h1 style={{ fontSize: 22, marginTop: 0 }}>你已經有帳號了 🙌</h1>
+        <h1 style={{ fontSize: "var(--fs-24)", marginTop: 0 }}>你已經有帳號了</h1>
         <p className="sub">{d.email} 已註冊過——請直接用原本的密碼登入；要加入新的組，登入後由管理員把你加入即可。</p>
-        <Link href="/"><button className="primary" style={{ width: "100%", marginTop: 12 }}>前往登入</button></Link>
+        <button className="primary" style={{ width: "100%", marginTop: 12 }} onClick={() => navigate("/")}>前往登入</button>
       </>,
     );
   }
@@ -62,13 +70,14 @@ export function AcceptInvitePage({ token }: { token: string }) {
   return wrap(
     <>
       {me.data && (
-        <p className="hint" style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 0, marginBottom: 14 }}>
+        <p className="hint" style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", marginTop: 0, marginBottom: "var(--sp-12)" }}>
           <span style={{ flex: 1 }}>
             你目前已登入為 <b>{me.data.user.name}</b>——完成加入後這個瀏覽器會切換成新帳號
           </span>
           <button
             type="button"
-            style={{ padding: "4px 14px", fontSize: 12, whiteSpace: "nowrap" }}
+            className="btn-ghost"
+            style={{ whiteSpace: "nowrap" }}
             onClick={() => logout.mutate()}
             disabled={logout.isPending}
           >
@@ -82,7 +91,7 @@ export function AcceptInvitePage({ token }: { token: string }) {
           if (canSubmit) accept.mutate({ token, name: name.trim(), password });
         }}
       >
-        <h1 style={{ fontSize: 24, marginTop: 0 }}>歡迎加入 🙏</h1>
+        <h1 style={{ fontSize: "var(--fs-24)", marginTop: 0 }}>歡迎加入</h1>
         <p className="sub">
           你被邀請加入 <b>{d.teamName}</b>
           {d.groupName ? <>・<b>{d.groupName}</b></> : ""}
@@ -96,12 +105,12 @@ export function AcceptInvitePage({ token }: { token: string }) {
         <PasswordInput id="inv-pw" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
         {password.length > 0 && password.length < 8 && <p className="hint">還差 {8 - password.length} 個字</p>}
 
-        <div style={{ marginTop: 18 }}>
+        <div style={{ marginTop: "var(--sp-16)" }}>
           <button className="primary" type="submit" style={{ width: "100%" }} disabled={!canSubmit}>
             {accept.isPending ? "建立中…" : "完成加入"}
           </button>
         </div>
-        {accept.error && <p className="error" role="alert">{accept.error.message}</p>}
+        {accept.error && <p className="error" role="alert">{friendlyAuthError(accept.error.message)}</p>}
       </form>
     </>,
   );

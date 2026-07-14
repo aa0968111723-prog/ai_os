@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
+import { ConfirmButton } from "./interactions";
 import {
   OPTION_TYPES,
   OPTION_TYPE_META,
@@ -55,7 +56,13 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
   if (list.isLoading) {
     return (
       <section className="card" data-fb="組選項編輯器">
-        <p className="hint">選項載入中…</p>
+        <div aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="gen-row">
+              <div className="skeleton" style={{ height: 14 }} />
+            </div>
+          ))}
+        </div>
       </section>
     );
   }
@@ -64,7 +71,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
       <section className="card" data-fb="組選項編輯器">
         <p className="error">
           選項載入失敗：{list.error.message}
-          <button style={{ marginLeft: 8, padding: "3px 12px", fontSize: 12 }} onClick={() => list.refetch()}>
+          <button style={{ marginLeft: 8, padding: "3px 12px", fontSize: "var(--fs-12)" }} onClick={() => list.refetch()}>
             重試
           </button>
         </p>
@@ -85,7 +92,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
         const rows = rowsOf(type);
         return (
           <div key={type} style={{ marginTop: 20, borderTop: "1px solid var(--border-soft)", paddingTop: 14 }}>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>{meta.label}</div>
+            <div style={{ fontWeight: 600, fontSize: "var(--fs-15)" }}>{meta.label}</div>
             <p className="hint" style={{ marginTop: 2 }}>{meta.hint}</p>
 
             {rows.length === 0 ? (
@@ -101,11 +108,10 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
                       alignItems: "center",
                       flexWrap: "wrap",
                       border: "1px solid var(--border-soft)",
-                      borderRadius: 12,
+                      borderRadius: "var(--r-12)",
                       padding: "8px 12px",
                       marginTop: 8,
                       background: o.active ? "var(--card)" : "var(--card2)",
-                      opacity: o.active ? 1 : 0.62,
                     }}
                   >
                     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
@@ -114,7 +120,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
                         title="上移"
                         disabled={busy || i === 0}
                         onClick={() => move(type, i, -1)}
-                        style={{ padding: "0 8px", fontSize: 12, lineHeight: "18px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                        style={{ padding: "0 8px", fontSize: "var(--fs-12)", lineHeight: "18px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                       >
                         <Icon name="ChevronUp" size={14} />
                       </button>
@@ -123,7 +129,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
                         title="下移"
                         disabled={busy || i === rows.length - 1}
                         onClick={() => move(type, i, 1)}
-                        style={{ padding: "0 8px", fontSize: 12, lineHeight: "18px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                        style={{ padding: "0 8px", fontSize: "var(--fs-12)", lineHeight: "18px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
                       >
                         <Icon name="ChevronDown" size={14} />
                       </button>
@@ -154,17 +160,19 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
                     <button
                       disabled={busy}
                       onClick={() => setActive.mutate({ id: o.id, active: !o.active })}
-                      style={{ padding: "3px 12px", fontSize: 12, flex: "none" }}
+                      style={{ padding: "3px 12px", fontSize: "var(--fs-12)", flex: "none" }}
                     >
                       {o.active ? "停用" : "啟用"}
                     </button>
-                    <button
+                    <ConfirmButton
+                      onConfirm={() => remove.mutate({ id: o.id })}
+                      message={`刪除選項「${o.label}」？`}
+                      confirmLabel="刪除"
                       disabled={busy}
-                      onClick={() => window.confirm(`刪除選項「${o.label}」？`) && remove.mutate({ id: o.id })}
-                      style={{ padding: "3px 12px", fontSize: 12, color: "var(--danger)", flex: "none" }}
+                      triggerStyle={{ padding: "3px 12px", fontSize: "var(--fs-12)", color: "var(--danger-ink)", flex: "none" }}
                     >
                       刪除
-                    </button>
+                    </ConfirmButton>
                   </div>
                 ))}
               </div>
@@ -260,9 +268,9 @@ function AddRow({ groupId, type, onRefresh }: { groupId: string; type: OptionTyp
         className="primary"
         disabled={!label.trim() || add.isPending}
         onClick={submit}
-        style={{ padding: "6px 16px", fontSize: 13, flex: "none" }}
+        style={{ padding: "6px 16px", fontSize: "var(--fs-13)", flex: "none", display: "inline-flex", alignItems: "center", gap: 6 }}
       >
-        {add.isPending ? "新增中…" : "＋ 新增"}
+        {add.isPending ? "新增中…" : <><Icon name="Plus" size={14} />新增</>}
       </button>
       {add.error && <span className="error" style={{ marginTop: 0 }}>新增失敗：{add.error.message}</span>}
     </div>

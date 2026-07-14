@@ -29,7 +29,7 @@ function Faq({ q, defaultOpen = false, children }: { q: string; defaultOpen?: bo
           padding: "12px 18px 16px",
           borderTop: "1px solid var(--border-soft)",
           lineHeight: 1.8,
-          fontSize: 14.5,
+          fontSize: "var(--fs-14)",
         }}
       >
         {children}
@@ -43,7 +43,7 @@ function Term({ word, children }: { word: string; children: ReactNode }) {
   return (
     <div style={{ marginBottom: 12 }}>
       <b>{word}</b>
-      <div className="hint" style={{ fontSize: 13.5, lineHeight: 1.75, marginTop: 2 }}>
+      <div className="hint" style={{ fontSize: "var(--fs-14)", lineHeight: 1.75, marginTop: 2 }}>
         {children}
       </div>
     </div>
@@ -84,7 +84,7 @@ export function HelpPage() {
             <li>
               <b>逐格生成</b>：在生成台挑模型、寫提示詞（世界觀會自動帶入），做出畫面；需要旁白就生成逐鏡配音。
             </li>
-            <li>把滿意的成品<b>加入分鏡</b>，用 ▲▼ 排好順序。</li>
+            <li>把滿意的成品<b>加入分鏡</b>，用 <Icon name="ChevronUp" size={14} style={{ verticalAlign: "-2px" }} /><Icon name="ChevronDown" size={14} style={{ verticalAlign: "-2px" }} /> 排好順序。</li>
             <li>
               <b>送審</b>給組長；通過後<b>一鍵打包成 zip</b> 交付。
             </li>

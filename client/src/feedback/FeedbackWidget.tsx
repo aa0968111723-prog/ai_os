@@ -4,6 +4,7 @@ import { trpc } from "../api";
 import { FEEDBACK_CATEGORIES, FEEDBACK_PAGES, type FeedbackCategory } from "@shared/options";
 import { captureWithHighlight, pickElement, type PickResult } from "./picker";
 import { Icon } from "../components/Icon";
+import { useRovingRadio } from "../components/interactions";
 
 /** 目前路由對應到人看得懂的頁面名（與 FEEDBACK_PAGES 對齊；對不上就回 null） */
 function pageForPath(path: string): string | null {
@@ -80,6 +81,8 @@ export function FeedbackWidget() {
     setTarget(null);
     resetForm();
     setMode("closed");
+    // 關閉後把焦點交還浮動鈕，鍵盤使用者不會被丟回文件開頭
+    (document.querySelector('[data-fb="回饋按鈕"]') as HTMLElement | null)?.focus();
   };
 
   return (
@@ -87,13 +90,14 @@ export function FeedbackWidget() {
       {mode === "menu" && (
         <div
           className="card"
-          role="menu"
+          role="group"
           aria-label="回饋選項"
-          style={{ width: 240, marginBottom: 12, padding: 14 }}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); close(); } }}
+          style={{ width: 240, marginBottom: 12, padding: "var(--sp-16)" }}
         >
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
             <strong style={{ fontSize: 15 }}>想回報什麼？</strong>
-            <button onClick={close} aria-label="關閉" style={{ padding: "2px 10px", fontSize: 13 }}>
+            <button className="btn-ghost" onClick={close} aria-label="關閉">
               <Icon name="X" size={14} />
             </button>
           </div>
@@ -102,13 +106,12 @@ export function FeedbackWidget() {
           </p>
           <button
             className="primary"
-            role="menuitem"
             style={{ width: "100%", marginBottom: 8 }}
             onClick={startPick}
           >
             <Icon name="MousePointer2" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />標記某個元件
           </button>
-          <button role="menuitem" style={{ width: "100%" }} onClick={openPageOnly}>
+          <button style={{ width: "100%" }} onClick={openPageOnly}>
             <Icon name="FileText" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />只回報這一頁
           </button>
         </div>
@@ -143,7 +146,7 @@ export function FeedbackWidget() {
             borderRadius: 999,
             padding: "11px 20px",
             fontSize: 15,
-            boxShadow: "0 10px 26px -10px rgba(86,66,42,0.5)",
+            boxShadow: "var(--e3)",
           }}
         >
           <Icon name="MessageCircle" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />回饋
@@ -183,6 +186,8 @@ function ReportForm({
   const [location] = useLocation();
   const currentPage = pageForPath(location);
   const submit = trpc.feedbackReports.submit.useMutation();
+  const categoryHint = FEEDBACK_CATEGORIES.find((c) => c.value === category)?.hint;
+  const catRoving = useRovingRadio(FEEDBACK_CATEGORIES.map((c) => c.value), category, (v) => setCategory(v as FeedbackCategory));
   const [shotUrl, setShotUrl] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -262,7 +267,6 @@ function ReportForm({
         aria-live="polite"
         style={{ width: 300, marginBottom: 12, padding: 20, textAlign: "center" }}
       >
-        <div style={{ fontSize: 22 }}>🙏</div>
         <strong style={{ fontSize: 15 }}>收到了，感恩</strong>
         <p className="hint" style={{ margin: "6px 0 0" }}>你說的會直接影響下一版怎麼改。</p>
       </div>
@@ -276,34 +280,35 @@ function ReportForm({
       className="card"
       role="dialog"
       aria-label="填寫回饋"
+      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
       style={{ width: 320, maxWidth: "92vw", marginBottom: 12, padding: 16, maxHeight: "78vh", overflowY: "auto" }}
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
         <strong style={{ fontSize: 15 }}>填寫回饋</strong>
-        <button onClick={onClose} aria-label="關閉" style={{ padding: "2px 10px", fontSize: 13 }}>
+        <button className="btn-ghost" onClick={onClose} aria-label="關閉">
           <Icon name="X" size={14} />
         </button>
       </div>
 
       {target && (
         <p className="hint" style={{ margin: "8px 0 0" }}>
-          標定：<strong style={{ color: "var(--primary)" }}>{target.targetLabel}</strong>{" "}
-          <span role="button" tabIndex={0} onClick={onRepick} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRepick(); } }} style={{ color: "var(--primary)", cursor: "pointer", textDecoration: "underline" }}>
+          標定：<strong style={{ color: "var(--primary-ink)" }}>{target.targetLabel}</strong>{" "}
+          <span role="button" tabIndex={0} onClick={onRepick} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRepick(); } }} style={{ color: "var(--primary-ink)", cursor: "pointer", textDecoration: "underline" }}>
             重選
           </span>
         </p>
       )}
 
       <label style={{ margin: "12px 0 4px" }}>這是什麼樣的回饋？</label>
-      <div role="radiogroup" aria-label="回饋分類">
-        {FEEDBACK_CATEGORIES.map((c) => {
+      <div role="radiogroup" aria-label="回饋分類" {...catRoving.groupProps}>
+        {FEEDBACK_CATEGORIES.map((c, i) => {
           const on = category === c.value;
           return (
             <span
               key={c.value}
               role="radio"
               aria-checked={on}
-              tabIndex={0}
+              {...catRoving.itemProps(i)}
               title={c.hint}
               className={`chip pick ${on ? "on" : ""}`}
               onClick={() => setCategory(c.value)}
@@ -314,6 +319,9 @@ function ReportForm({
           );
         })}
       </div>
+      {categoryHint && (
+        <p className="hint" style={{ margin: "6px 0 0" }}>{categoryHint}</p>
+      )}
 
       <label style={{ margin: "12px 0 4px" }}>涉及哪些頁面？（可複選）</label>
       <div role="group" aria-label="涉及頁面">
@@ -382,7 +390,7 @@ function ReportForm({
       </div>
       {submit.error && (
         <p className="error" role="alert">
-          送出失敗：{submit.error.message}
+          送出失敗，請稍後再試
         </p>
       )}
     </div>

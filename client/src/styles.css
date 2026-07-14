@@ -1,8 +1,11 @@
 /* AI Director OS — 設計語言 v2「monastic-calm 沉靜弘法」
  * 主張：一張近乎純白的紙，安靜浮在一片暖灰的禪地上；層次靠明度階梯、髮絲線、
  * 兩層暖陰影與字階四件事撐起，顏色是儀式而非裝潢。全站同時只允許一顆飽和赤陶發聲。
- * （由多代理 UIUX 重設計工作流整合；P0 全域地基層。既有 class 契約全部保留。） */
+ * （由多代理 UIUX 重設計工作流整合；P0 全域地基層。既有 class 契約全部保留。）
+ * v2.1 全面優化：placeholder AA、checkbox 復原原生、40px 觸控、--*-rgb 單一色源、
+ *   新增 .btn-sm/.spin/.result-text、summary/toc-current focus 與狀態。 */
 :root {
+  color-scheme: light; /* OS 深色模式下鎖定亮色控件/自動填入/捲軸，貼合暖色調 */
   /* ── 文字（--soft 僅裝飾，永不承載正文；全部校至 WCAG AA） ── */
   --fg: #2b2620;
   --fg-secondary: #6f6355;   /* meta/hint/lead/label，於卡面 ~4.6:1 過 AA */
@@ -25,17 +28,19 @@
 
   /* ── 主色三分工：品牌相／實心底／淺底文字（解 AA 與「按鈕像壞掉」） ── */
   --primary:              #c2613f; /* 品牌相：focus 環、選取邊、大字 accent（裝飾） */
+  --primary-rgb:          194 97 63; /* = --primary 通道值，供 rgb(var()/α) 半透明用；改色改這裡 */
   --primary-solid:        #b0542f; /* 實心按鈕底：白字 4.69:1 過 AA */
   --primary-solid-hover:  #9c4a28;
   --primary-solid-active: #8a4022;
   --primary-ink:          #a44b27; /* 淺底上赤陶文字/連結：5.5:1 過 AA */
   --primary-fg:           #fff7f1;
   --primary-tint:         #f6e7de; /* 選取/tonal 底 */
+  --primary-tint-hover:   #f0dccf; /* tonal hover 底 */
   --primary-border:       #e7c6b4;
 
   /* ── 點綴（克制；各守一語意，含可讀 ink 檔） ── */
-  --healing: #9e86c4; --healing-ink: #6f5a97; --healing-soft: #ece5f2;
-  --gold:    #b58a3e; --gold-ink:    #8a6620; --gold-soft:    #f3ead6;
+  --healing: #9e86c4; --healing-ink: #6f5a97; --healing-soft: #ece5f2; --healing-rgb: 158 134 196;
+  --gold:    #b58a3e; --gold-ink:    #8a6620; --gold-soft:    #f3ead6; --gold-rgb: 181 138 62;
   --success: #57764c; --success-ink: #47623d; --success-soft: #e7eee1;
   --danger:  #c7493a; --danger-ink:  #b23a2c; --danger-soft:  #f6e2de;
 
@@ -74,7 +79,7 @@ body {
   text-rendering: optimizeLegibility;
   /* 環境光降到耳語級（三色光合法時刻之一） */
   background-image: radial-gradient(120% 80% at 85% -10%, rgba(224, 178, 132, 0.16), transparent 55%),
-    radial-gradient(80% 60% at 5% 5%, rgba(158, 134, 196, 0.10), transparent 52%);
+    radial-gradient(80% 60% at 5% 5%, rgb(var(--healing-rgb) / 0.10), transparent 52%);
   background-attachment: fixed;
   min-height: 100vh;
 }
@@ -158,19 +163,21 @@ h2 { font-family: var(--sans); font-weight: 600; font-size: var(--fs-19); line-h
 
 /* 表單：輸入井（靜止內凹 → focus 浮起變亮） */
 label { display: block; font-size: 13px; color: var(--fg-secondary); margin: var(--sp-8) 0 var(--sp-4); }
-input, textarea, select { width: 100%; font-family: var(--sans); font-size: 14px; color: var(--fg);
+input:not([type="checkbox"]):not([type="radio"]), textarea, select { width: 100%; font-family: var(--sans); font-size: 14px; color: var(--fg);
   background: var(--field); border: 1px solid var(--border); border-radius: var(--r-12); padding: 10px 14px;
   box-shadow: var(--inset-well);
   transition: border-color var(--dur-base), box-shadow var(--dur-base), background var(--dur-base); }
 textarea { resize: vertical; min-height: 72px; }
-input::placeholder, textarea::placeholder { color: var(--muted-fg); opacity: 0.8; }
+input::placeholder, textarea::placeholder { color: var(--fg-secondary); }
 input:hover, textarea:hover, select:hover { border-color: var(--border-strong); }
 input:focus, textarea:focus, select:focus { background: var(--card); outline: 2px solid var(--primary); outline-offset: 1px;
-  border-color: var(--primary); box-shadow: 0 0 0 4px rgba(194, 97, 63, 0.12); }
+  border-color: var(--primary); box-shadow: 0 0 0 4px rgb(var(--primary-rgb) / 0.12); }
 /* select 自訂箭頭：去原生方硬外觀 */
 select { appearance: none; -webkit-appearance: none; padding-right: 36px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%237a6e5e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 14px center; background-size: 14px; }
+/* 勾選框/單選框：不吃輸入井外觀，改回原生尺寸＋品牌 accent 色（修「勾選框被拉成米黃長條」） */
+input[type="checkbox"], input[type="radio"] { width: auto; box-shadow: none; accent-color: var(--primary); cursor: pointer; }
 
 /* 按鈕強／中／弱三級（一區只准一顆強） */
 button { font-family: var(--sans); font-size: 14px; font-weight: 600; cursor: pointer;
@@ -183,9 +190,11 @@ button.primary { background: var(--primary-solid); color: var(--primary-fg); bor
 button.primary:hover:not(:disabled) { background: var(--primary-solid-hover); box-shadow: var(--e2); }
 button.primary:active:not(:disabled) { background: var(--primary-solid-active); }
 button.tonal, .btn-tonal { background: var(--primary-tint); color: var(--primary-ink); border-color: var(--primary-border); box-shadow: none; }
-button.tonal:hover:not(:disabled), .btn-tonal:hover:not(:disabled) { background: #f0dccf; border-color: var(--primary-border); }
+button.tonal:hover:not(:disabled), .btn-tonal:hover:not(:disabled) { background: var(--primary-tint-hover); border-color: var(--primary-border); }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--fg-secondary); padding: 4px 10px; box-shadow: none; font-weight: 500; border-radius: var(--r-8); }
 .btn-ghost:hover:not(:disabled) { background: var(--card2); color: var(--fg); }
+/* 小尺寸按鈕：列內動作/複製/次要操作共用（行動版由 button 40px 規則自動達標） */
+.btn-sm { padding: var(--sp-4) var(--sp-12); font-size: var(--fs-12); }
 button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 /* 主動作 disabled＝等待，不是壞掉（不再是褪色赤陶） */
 button.primary:disabled { opacity: 1; background: var(--muted); color: var(--muted-fg); border: 1px solid var(--border); }
@@ -201,6 +210,8 @@ button.primary:disabled { opacity: 1; background: var(--muted); color: var(--mut
 .pill.done { color: var(--success-ink); border-color: var(--success); background: var(--success-soft); }
 .pill.failed { color: var(--danger-ink); border-color: var(--danger); background: var(--danger-soft); }
 @keyframes pill-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+/* 生成結果文字面板（卡內凹陷井，暖色邊；取代散落的 --bg 巢狀填色＋冷黑邊） */
+.result-text { background: var(--field); border: 1px solid var(--border-soft); border-radius: var(--r-12); padding: var(--sp-12); }
 
 /* 留言 */
 .msg { display: flex; gap: 8px; margin-top: 10px; font-size: 14px; }
@@ -247,9 +258,9 @@ a:hover { color: var(--primary-solid-hover); }
 .upload-zone { border: 2px dashed var(--border); border-radius: 12px; padding: 18px 14px; text-align: center;
   color: var(--fg-secondary); font-size: 13px; cursor: pointer; background: var(--card2); margin: 8px 0 12px;
   transition: border-color var(--dur-base), background var(--dur-base), color var(--dur-base), box-shadow var(--dur-base); }
-.upload-zone:hover { border-color: var(--primary); background: rgba(194, 97, 63, 0.05); color: var(--primary-ink); }
-.upload-zone.drag { border-color: var(--primary); background: rgba(194, 97, 63, 0.1); color: var(--primary-ink);
-  box-shadow: inset 0 0 0 4px rgba(194, 97, 63, 0.08); }
+.upload-zone:hover { border-color: var(--primary); background: rgb(var(--primary-rgb) / 0.05); color: var(--primary-ink); }
+.upload-zone.drag { border-color: var(--primary); background: rgb(var(--primary-rgb) / 0.1); color: var(--primary-ink);
+  box-shadow: inset 0 0 0 4px rgb(var(--primary-rgb) / 0.08); }
 .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 8px; }
 .asset-cell { border: 1px solid var(--border-soft); border-radius: 12px; background: var(--card2); overflow: hidden;
   transition: border-color var(--dur-base), box-shadow var(--dur-base), transform var(--dur-base); }
@@ -261,22 +272,22 @@ a:hover { color: var(--primary-solid-hover); }
 
 /* 生成確認彈窗 */
 .confirm-panel { margin-top: 12px; border: 1.5px solid var(--primary); background: var(--card2);
-  border-radius: 14px; padding: 14px 16px; box-shadow: var(--e4); }
+  border-radius: var(--r-12); padding: 14px 16px; box-shadow: var(--e4); }
 .confirm-panel h3 { font-size: 15px; }
 
 /* 空狀態柔光（三色光合法時刻） */
 .empty-state { text-align: center; padding: var(--sp-48) var(--sp-24); border-radius: var(--radius);
-  background: radial-gradient(circle at 32% 30%, rgba(194, 97, 63, 0.10), transparent 60%),
-    radial-gradient(circle at 70% 42%, rgba(158, 134, 196, 0.10), transparent 60%),
-    radial-gradient(circle at 50% 82%, rgba(181, 138, 62, 0.08), transparent 62%); }
+  background: radial-gradient(circle at 32% 30%, rgb(var(--primary-rgb) / 0.10), transparent 60%),
+    radial-gradient(circle at 70% 42%, rgb(var(--healing-rgb) / 0.10), transparent 60%),
+    radial-gradient(circle at 50% 82%, rgb(var(--gold-rgb) / 0.08), transparent 62%); }
 .empty-state h3 { font-family: var(--serif); font-size: 18px; margin: 0 0 8px; }
 .empty-state p { color: var(--fg-secondary); }
 
 /* 鍵盤焦點可見（無障礙） */
 .chip:focus-visible, [role="button"]:focus-visible, [role="radio"]:focus-visible {
-  outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 6px;
+  outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--r-8);
 }
-button:focus-visible, a:focus-visible, select:focus-visible, .badge:focus-visible {
+button:focus-visible, a:focus-visible, select:focus-visible, .badge:focus-visible, summary:focus-visible {
   outline: 2px solid var(--primary); outline-offset: 2px;
 }
 button:focus-visible { border-radius: 999px; }
@@ -299,12 +310,12 @@ button:focus-visible { border-radius: 999px; }
   .card { padding: 16px 16px; }
   .card--primary { padding: 18px 18px; }
   .topbar { gap: 8px; row-gap: 8px; }
-  .topbar .badge, .topbar .status-chip { font-size: 12px; padding: 5px 11px; }
+  .topbar .badge, .topbar .status-chip { font-size: 12px; padding: 5px 11px; min-height: 40px; }
   .group-select { min-width: 160px; }
-  button { min-height: 34px; }
-  button.primary { min-height: 40px; }
+  button { min-height: 40px; }
   input, textarea, select { min-height: 40px; font-size: 16px; }
-  .badge[role="button"] { min-height: 32px; }
+  .chip.pick { min-height: 40px; display: inline-flex; align-items: center; }
+  .menu-item { min-height: 40px; }
   .gen-row { gap: 10px; padding: 10px 12px; }
   .group-head { margin-top: var(--sp-32); }
 }
@@ -330,6 +341,9 @@ button:focus-visible { border-radius: 999px; }
 .confirm-panel { animation: fade-rise var(--dur-base) var(--ease-out); }
 details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease-out); }
 @keyframes fade-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+/* 旋轉載入圖示（prefers-reduced-motion 區塊會自動停用） */
+.spin { animation: spin 1s linear infinite; transform-origin: center; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ─── #28 章節導覽側欄（TocNav；並行 session 既有，保留並沿用新 tokens）─── */
 .toc-layout { display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: var(--sp-16); align-items: start; }
@@ -352,6 +366,7 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
   border-radius: var(--r-8); padding: 6px 10px;
 }
 .toc-link:hover:not(:disabled) { background: var(--card2); border-color: var(--border-soft); color: var(--fg); }
+.toc-link[aria-current="true"] { color: var(--primary-ink); border-color: var(--primary-border); background: var(--primary-tint); font-weight: 600; }
 .toc-toggle:focus-visible, .toc-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--r-8); }
 
 /* 捲動落點留白 */

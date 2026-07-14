@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
+import { ConfirmButton } from "./interactions";
 
 /**
  * 場景設定卡（提案核心「場景一致性」）：
@@ -51,13 +52,15 @@ export function ScenePresetCards({
                 </div>
                 <div className="hint" style={{ fontSize: 12, marginTop: 4 }}><Icon name="Palette" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.palette}</div>
                 {s.lighting && <div className="hint" style={{ fontSize: 11, marginTop: 3 }}><Icon name="Lightbulb" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.lighting}</div>}
-                <button
-                  style={{ padding: "2px 10px", fontSize: 11, marginTop: 6, color: "var(--danger)" }}
+                <ConfirmButton
+                  triggerStyle={{ padding: "2px 10px", fontSize: 11, marginTop: 6, color: "var(--danger-ink)" }}
                   disabled={remove.isPending}
-                  onClick={() => window.confirm(`刪除場景「${s.name}」？`) && remove.mutate({ id: s.id })}
+                  onConfirm={() => remove.mutate({ id: s.id })}
+                  message={`刪除場景「${s.name}」？`}
+                  confirmLabel="刪除"
                 >
                   刪除
-                </button>
+                </ConfirmButton>
               </div>
             );
           })}
@@ -68,24 +71,24 @@ export function ScenePresetCards({
 
       {open ? (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
-          <label>場景名</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="例：城市清晨" />
-          <label>色板（主色調／配色，會注入生成）</label>
-          <textarea value={palette} onChange={(e) => setPalette(e.target.value)} rows={2} placeholder="例：暖色調、米白與淡橘、低飽和" />
-          <label>光線（選填）</label>
-          <textarea value={lighting} onChange={(e) => setLighting(e.target.value)} rows={2} placeholder="例：柔和晨光斜射、淺景深、35mm" />
+          <label htmlFor="preset-name">場景名</label>
+          <input id="preset-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：城市清晨" />
+          <label htmlFor="preset-palette">色板（主色調／配色，會注入生成）</label>
+          <textarea id="preset-palette" value={palette} onChange={(e) => setPalette(e.target.value)} rows={2} placeholder="例：暖色調、米白與淡橘、低飽和" />
+          <label htmlFor="preset-lighting">光線（選填）</label>
+          <textarea id="preset-lighting" value={lighting} onChange={(e) => setLighting(e.target.value)} rows={2} placeholder="例：柔和晨光斜射、淺景深、35mm" />
           <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
             <button className="primary" disabled={!name.trim() || !palette.trim() || add.isPending} onClick={() => add.mutate({ projectId, name: name.trim(), palette: palette.trim(), lighting: lighting.trim() || undefined })}>
               {add.isPending ? "建立中…" : "建立場景"}
             </button>
             <button onClick={() => setOpen(false)}>取消</button>
           </div>
-          {add.error && <p className="error">{add.error.message}</p>}
+          {add.error && <p className="error" role="alert">{add.error.message}</p>}
         </div>
       ) : (
-        <button style={{ marginTop: 12 }} onClick={() => setOpen(true)}>＋ 新增場景設定</button>
+        <button style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setOpen(true)}><Icon name="Plus" /> 新增場景設定</button>
       )}
-      {remove.error && <p className="error">{remove.error.message}</p>}
+      {remove.error && <p className="error" role="alert">{remove.error.message}</p>}
     </section>
   );
 }

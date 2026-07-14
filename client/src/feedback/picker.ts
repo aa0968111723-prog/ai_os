@@ -201,14 +201,14 @@ export function pickElement(onPick: (r: PickResult) => void, onCancel: () => voi
   const box = document.createElement("div");
   box.setAttribute(WIDGET_ATTR, "picker-box");
   box.style.cssText =
-    `position:fixed;pointer-events:none;z-index:2147483001;border:2px solid ${PRIMARY};` +
+    "position:fixed;pointer-events:none;z-index:2147483001;border:2px solid var(--primary);" +
     "border-radius:6px;background:rgba(194,97,63,0.08);display:none;box-shadow:0 0 0 3px rgba(194,97,63,0.15);transition:all 60ms ease;";
 
   const tag = document.createElement("div");
   tag.setAttribute(WIDGET_ATTR, "picker-tag");
   tag.style.cssText =
-    `position:fixed;pointer-events:none;z-index:2147483002;background:${PRIMARY};color:#fff7f1;` +
-    "font:600 12px/1.4 system-ui,'Noto Sans TC',sans-serif;padding:3px 9px;border-radius:8px;" +
+    "position:fixed;pointer-events:none;z-index:2147483002;background:var(--primary);color:var(--primary-fg);" +
+    "font:600 12px/1.4 var(--sans);padding:3px 9px;border-radius:8px;" +
     "max-width:60vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:none;" +
     "box-shadow:0 4px 14px -6px rgba(86,66,42,0.5);";
 
@@ -217,7 +217,7 @@ export function pickElement(onPick: (r: PickResult) => void, onCancel: () => voi
   hint.textContent = "點一下要標記的地方 · Esc 或右鍵取消";
   hint.style.cssText =
     "position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:2147483002;" +
-    "background:rgba(43,38,32,0.86);color:#fbf7f0;font:600 13px/1.4 system-ui,'Noto Sans TC',sans-serif;" +
+    "background:rgba(43,38,32,0.86);color:#fbf7f0;font:600 13px/1.4 var(--sans);" +
     "padding:7px 16px;border-radius:999px;pointer-events:none;";
 
   document.body.appendChild(overlay);

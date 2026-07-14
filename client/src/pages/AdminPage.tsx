@@ -1,15 +1,16 @@
 import { useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
+import { ConfirmButton } from "../components/interactions";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
 
-/** 分類配色（options.ts 只存 label，顏色在前端定，與溫暖色系一致） */
-const FEEDBACK_CATEGORY_COLOR: Record<string, string> = {
-  bug: "#c0562f",
-  uiux: "#b8862f",
-  feature: "#4f7a4f",
-  stuck: "#7a5cc0",
-  other: "#7a726a",
+/** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
+const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
+  bug: { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" },
+  uiux: { background: "var(--gold-soft)", color: "var(--gold-ink)", border: "1px solid var(--gold)" },
+  feature: { background: "var(--success-soft)", color: "var(--success-ink)", border: "1px solid var(--success)" },
+  stuck: { background: "var(--healing-soft)", color: "var(--healing-ink)", border: "1px solid var(--healing)" },
+  other: { background: "var(--card2)", color: "var(--fg-secondary)", border: "1px solid var(--border-soft)" },
 };
 const FEEDBACK_CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
   FEEDBACK_CATEGORIES.map((c) => [c.value, c.label]),
@@ -34,7 +35,7 @@ function CopyButton({ text }: { text: string }) {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   return (
     <button
-      style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 12px", fontSize: 12, flex: "none" }}
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 12px", fontSize: "var(--fs-12)", flex: "none" }}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
@@ -96,7 +97,7 @@ function GroupQuotaRow({ group }: { group: { id: string; name: string } }) {
       )}
       <span className="hint">空=跟全域・0=不限</span>
       {setGroupQuota.error && <span className="error" style={{ marginTop: 0 }}>{setGroupQuota.error.message}</span>}
-      {saved && <span className="hint" style={{ color: "var(--success)" }}>已儲存 ✓</span>}
+      {saved && <span className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</span>}
     </div>
   );
 }
@@ -128,7 +129,7 @@ function MemberChip({ groupId, groupName, member, canResetPassword }: {
   const isLeader = member.role === "leader";
   const pending = setRole.isPending || removeMember.isPending || resetPassword.isPending;
   const actionError = setRole.error ?? removeMember.error ?? resetPassword.error;
-  const btn = { padding: "2px 10px", fontSize: 12 } as const;
+  const btn = { padding: "2px 10px", fontSize: "var(--fs-12)" } as const;
   return (
     <div style={{ marginTop: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -139,27 +140,23 @@ function MemberChip({ groupId, groupName, member, canResetPassword }: {
         <button style={btn} disabled={pending} onClick={() => setRole.mutate({ groupId, userId, role: isLeader ? "member" : "leader" })}>
           {isLeader ? "設為組員" : "設為組長"}
         </button>
-        <button
-          style={btn}
+        <ConfirmButton
+          triggerStyle={btn}
           disabled={pending}
-          onClick={() =>
-            window.confirm(`把 ${member.name} 移出「${groupName}」？之後隨時可以再邀請回來。`) &&
-            removeMember.mutate({ groupId, userId })
-          }
+          message={`把 ${member.name} 移出「${groupName}」？之後隨時可以再邀請回來。`}
+          onConfirm={() => removeMember.mutate({ groupId, userId })}
         >
           移出組
-        </button>
+        </ConfirmButton>
         {canResetPassword && (
-          <button
-            style={btn}
+          <ConfirmButton
+            triggerStyle={btn}
             disabled={pending}
-            onClick={() =>
-              window.confirm(`重設 ${member.name} 的密碼？他會立刻被登出，要用新的臨時密碼重新登入。`) &&
-              resetPassword.mutate({ userId })
-            }
+            message={`重設 ${member.name} 的密碼？他會立刻被登出，要用新的臨時密碼重新登入。`}
+            onConfirm={() => resetPassword.mutate({ userId })}
           >
             重設密碼
-          </button>
+          </ConfirmButton>
         )}
       </div>
       {actionError && <p className="error">{actionError.message}</p>}
@@ -262,13 +259,19 @@ function SelfTestCard() {
           {result.checks.map((c) => (
             <div key={c.name} style={{ display: "flex", gap: 8, fontSize: 13, padding: "3px 0" }}>
               <span style={{ display: "inline-flex", alignItems: "center" }}>
-                {c.ok ? <Icon name="CheckCircle2" size={14} style={{ color: "var(--success)" }} /> : <Icon name="XCircle" size={14} style={{ color: "var(--danger)" }} />}
+                {c.ok ? <Icon name="CheckCircle2" size={14} style={{ color: "var(--success-ink)" }} /> : <Icon name="XCircle" size={14} style={{ color: "var(--danger-ink)" }} />}
               </span>
               <b style={{ minWidth: 110 }}>{c.name}</b>
               <span className="hint">{c.note}</span>
             </div>
           ))}
-          <p style={{ marginTop: 6 }}>{result.ok ? "✅ 全部通過——系統就緒" : "❌ 有項目未過，把畫面截圖給智能助手"}</p>
+          <p style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+            {result.ok ? (
+              <><Icon name="CheckCircle2" size={14} style={{ color: "var(--success-ink)" }} />全部通過——系統就緒</>
+            ) : (
+              <><Icon name="XCircle" size={14} style={{ color: "var(--danger-ink)" }} />有項目未過，把畫面截圖給智能助手</>
+            )}
+          </p>
         </div>
       )}
     </div>
@@ -297,7 +300,7 @@ function ReportRow({ report }: {
   const updateStatus = trpc.feedbackReports.updateStatus.useMutation({
     onSuccess: () => utils.feedbackReports.listVisible.invalidate(),
   });
-  const color = FEEDBACK_CATEGORY_COLOR[report.category] ?? "#7a726a";
+  const catStyle = FEEDBACK_CATEGORY_STYLE[report.category] ?? FEEDBACK_CATEGORY_STYLE.other;
   const catLabel = FEEDBACK_CATEGORY_LABEL[report.category] ?? report.category;
   const pages = Array.isArray(report.pages) ? (report.pages as string[]) : [];
   return (
@@ -313,7 +316,7 @@ function ReportRow({ report }: {
       ) : (
         <span
           className="chip"
-          style={{ margin: 0, background: color, color: "#fff", alignSelf: "start" }}
+          style={{ margin: 0, ...catStyle, alignSelf: "start" }}
         >
           {catLabel}
         </span>
@@ -321,7 +324,7 @@ function ReportRow({ report }: {
       <div style={{ fontSize: 13 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           {report.screenshotPath && (
-            <span className="chip" style={{ margin: 0, background: color, color: "#fff" }}>{catLabel}</span>
+            <span className="chip" style={{ margin: 0, ...catStyle }}>{catLabel}</span>
           )}
           {report.targetLabel && <span className="chip" style={{ margin: 0 }}>標定：{report.targetLabel}</span>}
           <span className="hint" style={{ fontSize: 11 }}>
@@ -338,7 +341,7 @@ function ReportRow({ report }: {
           <label className="hint" htmlFor={`fb-status-${report.id}`} style={{ margin: 0 }}>狀態</label>
           <select
             id={`fb-status-${report.id}`}
-            style={{ width: "auto", padding: "3px 10px", fontSize: 12 }}
+            style={{ width: "auto", padding: "3px 10px" }}
             value={report.status}
             disabled={updateStatus.isPending}
             onChange={(e) => updateStatus.mutate({ id: report.id, status: e.target.value as "open" | "reviewing" | "done" })}
@@ -379,14 +382,20 @@ function FeedbackReportsSection() {
         ))}
       </div>
       {reports.isLoading ? (
-        <p className="hint">回饋載入中…</p>
+        <div role="status" aria-label="回饋載入中">
+          <div className="skeleton" style={{ height: 72, marginTop: 8 }} />
+          <div className="skeleton" style={{ height: 72, marginTop: 8 }} />
+        </div>
       ) : reports.error ? (
         <div>
           <p className="error">回饋載入失敗：{reports.error.message}</p>
           <button style={{ marginTop: 8 }} onClick={() => reports.refetch()}>再試一次</button>
         </div>
       ) : !reports.data?.length ? (
-        <p className="hint">{statusFilter ? "這個狀態底下還沒有回饋。" : "還沒有元件回饋——夥伴用右下角「回饋」浮標送出即可。"}</p>
+        <div className="empty-state">
+          <h3>{statusFilter ? "這個狀態底下還沒有回饋" : "還沒有元件回饋"}</h3>
+          {!statusFilter && <p>夥伴用右下角「回饋」浮標送出即可。</p>}
+        </div>
       ) : (
         reports.data.map((r) => <ReportRow key={r.id} report={r} />)
       )}
@@ -450,7 +459,12 @@ export function AdminPage() {
     saveSettings.mutate({ totalBudgetPoints, defaultWeeklyPoints, defaultDailyPoints });
   };
 
-  if (overview.isLoading) return <p className="hint">載入中…</p>;
+  if (overview.isLoading) return (
+    <div role="status" aria-label="載入中" style={{ marginTop: 24 }}>
+      <div className="skeleton" style={{ height: 28, width: 200, marginBottom: 16 }} />
+      <div className="skeleton" style={{ height: 180 }} />
+    </div>
+  );
   if (overview.error) return <p className="error">{overview.error.message}</p>;
   const teams = overview.data ?? [];
   const selectedTeam = teams.find((t) => t.id === (inviteTeamId || teams[0]?.id));
@@ -468,7 +482,7 @@ export function AdminPage() {
               <p className="hint">管理：{team.admins.map((a) => a?.name).join("、") || "—"}</p>
               {team.groups.map((g) => (
                 <div key={g.id} style={{ marginTop: 10 }}>
-                  <b>{g.name}</b>{" "}
+                  <h3 style={{ fontSize: "var(--fs-16)", margin: "0 0 6px" }}>{g.name}</h3>
                   {g.members.length === 0 ? (
                     <span className="hint">（還沒有成員）</span>
                   ) : (
@@ -486,10 +500,8 @@ export function AdminPage() {
                       />
                     ))
                   )}
+                  <GroupQuotaRow group={g} />
                 </div>
-              ))}
-              {team.groups.map((g) => (
-                <GroupQuotaRow key={g.id + "-quota"} group={g} />
               ))}
               <CreateGroupRow teamId={team.id} />
             </section>
@@ -525,10 +537,14 @@ export function AdminPage() {
               <input id="settings-daily" ref={dailyRef} type="number" min={0} defaultValue={settings.data.defaultDailyPoints ?? ""} placeholder="不限" onBlur={saveBudget} disabled={!isSuperAdmin} />
             </>
           ) : (
-            <p className="hint">設定載入中…</p>
+            <div role="status" aria-label="設定載入中" style={{ marginTop: 12 }}>
+              <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
+              <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
+              <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
+            </div>
           )}
           {saveSettings.error && <p className="error">{saveSettings.error.message}</p>}
-          {settingsSaved && <p className="hint" style={{ color: "var(--success)" }}>已儲存 ✓</p>}
+          {settingsSaved && <p className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</p>}
         </div>
         <div className="card" data-fb="邀請成員卡">
           <h2>邀請成員</h2>
@@ -608,14 +624,20 @@ export function AdminPage() {
       <section className="card" style={{ marginTop: 16 }}>
         <h2>回饋彙整（{feedback.data?.length ?? 0}）</h2>
         {feedback.isLoading ? (
-          <p className="hint">回饋載入中…</p>
+          <div role="status" aria-label="回饋載入中">
+            <div className="skeleton" style={{ height: 60, marginTop: 8 }} />
+            <div className="skeleton" style={{ height: 60, marginTop: 8 }} />
+          </div>
         ) : feedback.error ? (
           <div>
             <p className="error">回饋載入失敗：{feedback.error.message}</p>
             <button style={{ marginTop: 8 }} onClick={() => feedback.refetch()}>再試一次</button>
           </div>
         ) : !feedback.data?.length ? (
-          <p className="hint">還沒有回饋——夥伴用頂欄「回饋」按鈕填寫。</p>
+          <div className="empty-state">
+            <h3>還沒有回饋</h3>
+            <p>夥伴用頂欄「回饋」按鈕填寫。</p>
+          </div>
         ) : (
           feedback.data.map((f) => (
             <div key={f.id} className="gen-row" style={{ gridTemplateColumns: "auto 1fr" }}>
@@ -624,8 +646,8 @@ export function AdminPage() {
                 <span className="mono" style={{ fontSize: 11 }}>
                   {Object.entries((f.scores as Record<string, number>) ?? {}).map(([k, v]) => `${k}:${v}`).join(" ")}
                 </span>
-                {f.best && <div>👍 {f.best}</div>}
-                {f.worst && <div>🛠 {f.worst}</div>}
+                {f.best && <div><span style={{ color: "var(--success-ink)", fontWeight: 600 }}>最喜歡：</span>{f.best}</div>}
+                {f.worst && <div><span style={{ color: "var(--gold-ink)", fontWeight: 600 }}>最想改：</span>{f.worst}</div>}
                 {f.note && <div className="hint">{f.note}</div>}
               </div>
             </div>

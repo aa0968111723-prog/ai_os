@@ -40,10 +40,10 @@ export function ModelsPage() {
     setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 2000);
   };
 
-  const tierColor: Record<string, string> = {
-    flagship: "var(--primary)",
-    economy: "var(--healing, #9E86C4)",
-    budget: "var(--gold, #B58A3E)",
+  const tierStyle: Record<string, { color: string; borderColor: string; background: string }> = {
+    flagship: { color: "var(--primary-ink)", borderColor: "var(--primary)", background: "var(--primary-tint)" },
+    economy: { color: "var(--healing-ink)", borderColor: "var(--healing)", background: "var(--healing-soft)" },
+    budget: { color: "var(--gold-ink)", borderColor: "var(--gold)", background: "var(--gold-soft)" },
   };
 
   const wfQ = debouncedQ.trim().toLowerCase();
@@ -58,7 +58,7 @@ export function ModelsPage() {
         {MODEL_CATEGORY_COUNT} 種創作類別、共 {MODELS.length} 個模型(旗艦/經濟/最低成本三檔)。搜尋或按類別瀏覽;「適合」欄告訴你什麼時候用它。
       </p>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: "var(--sp-16)" }}>
         <span style={{ position: "relative", display: "inline-flex", width: "100%", maxWidth: 260 }}>
           <input
             aria-label="搜尋模型"
@@ -70,12 +70,12 @@ export function ModelsPage() {
           {q && (
             <button
               aria-label="清除搜尋"
+              className="btn-ghost"
               onClick={() => setQ("")}
               style={{
                 position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)",
                 display: "flex", alignItems: "center",
-                border: "none", background: "transparent", padding: "0 8px",
-                fontSize: 16, lineHeight: 1, color: "var(--muted-fg)",
+                padding: "0 8px", fontSize: 16, lineHeight: 1,
               }}
             >
               <Icon name="X" size={16} />
@@ -83,6 +83,7 @@ export function ModelsPage() {
           )}
         </span>
         {q && <span className="hint">搜尋涵蓋全部類別</span>}
+        {!q && <span className="eyebrow cjk">類別</span>}
         {!q &&
           (categories.data ?? []).filter((c) => c.id !== "workflow").map((c) => {
             const on = category === c.id;
@@ -104,6 +105,7 @@ export function ModelsPage() {
               </span>
             );
           })}
+        <span className="eyebrow cjk">檔次</span>
         {TIERS.map((t) => {
           const on = tier === t.id;
           return (
@@ -134,24 +136,24 @@ export function ModelsPage() {
         {models.isError && (
           <p className="error">
             模型目錄載入失敗——
-            <button style={{ padding: "2px 12px", marginLeft: 4 }} onClick={() => models.refetch()}>重試</button>
+            <button style={{ padding: "4px 12px", marginLeft: 4 }} onClick={() => models.refetch()}>重試</button>
           </p>
         )}
         {(models.data ?? []).map((m) => (
           <section key={m.id} className="card" style={{ padding: "14px 18px" }}>
             <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
               <b>{m.label}</b>
-              <span className="pill" style={{ color: tierColor[m.tier], borderColor: tierColor[m.tier] }}>{m.tierLabel}</span>
+              <span className="pill" style={tierStyle[m.tier]}>{m.tierLabel}</span>
               <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span>
               <span className="hint mono" style={{ fontSize: 11 }}>{m.cost}</span>
               {!m.verified && <span className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}><Icon name="TriangleAlert" size={12} />待真實模式首跑確認</span>}
             </div>
-            <p style={{ margin: "6px 0 2px", fontSize: 13.5 }}>{m.strengths}</p>
+            <p style={{ margin: "6px 0 2px", fontSize: "var(--fs-14)" }}>{m.strengths}</p>
             <p className="hint" style={{ margin: 0 }}>適合:{m.bestFor}{m.needs ? `|需要來源:${m.sourceHint ?? m.needs}` : ""}</p>
             <p className="hint mono" style={{ margin: "4px 0 0", fontSize: 11, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               {m.id}
               <button
-                style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "0 10px", fontSize: 10, fontFamily: "var(--sans)" }}
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 12px", fontSize: "var(--fs-11)", fontFamily: "var(--sans)" }}
                 onClick={() => copyModelId(m.id)}
               >
                 {copiedId === m.id ? <><Icon name="Check" size={12} />已複製</> : "複製"}
@@ -160,13 +162,16 @@ export function ModelsPage() {
           </section>
         ))}
         {!models.isLoading && !models.isError && !models.data?.length && (
-          <p className="hint">
-            {debouncedQ
-              ? `沒有符合「${debouncedQ}」的模型——換個關鍵字試試。`
-              : tier
-                ? "這個組合暫無模型——試試取消檔次篩選。"
-                : "這個類別暫無模型。"}
-          </p>
+          <div className="empty-state">
+            <h3>沒有符合的模型</h3>
+            <p>
+              {debouncedQ
+                ? `沒有符合「${debouncedQ}」的模型——換個關鍵字試試。`
+                : tier
+                  ? "這個組合暫無模型——試試取消檔次篩選。"
+                  : "這個類別暫無模型。"}
+            </p>
+          </div>
         )}
       </div>
 
@@ -174,11 +179,17 @@ export function ModelsPage() {
         <>
           <h2 style={{ marginTop: 28 }}>工作流(一鍵串鏈)</h2>
           <p className="hint">在<Link href="/">作業台</Link>開啟專案後,於「工作流」卡使用;每步各自扣點。</p>
-          {workflows.isLoading && <p className="hint">載入中…</p>}
+          {workflows.isLoading && (
+            <div className="stack">
+              {Array.from({ length: 2 }).map((_, i) => (
+                <div key={`wf-sk-${i}`} className="card skeleton" style={{ height: 88 }} aria-hidden />
+              ))}
+            </div>
+          )}
           {workflows.isError && (
             <p className="error">
               工作流載入失敗——
-              <button style={{ padding: "2px 12px", marginLeft: 4 }} onClick={() => workflows.refetch()}>重試</button>
+              <button style={{ padding: "4px 12px", marginLeft: 4 }} onClick={() => workflows.refetch()}>重試</button>
             </p>
           )}
           <div className="stack">
@@ -186,10 +197,10 @@ export function ModelsPage() {
               <section key={w.id} className="card" style={{ padding: "14px 18px" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                   <b>{w.label}</b>
-                  <span className="pill">{w.tierLabel}</span>
+                  <span className="pill" style={tierStyle[w.tier]}>{w.tierLabel}</span>
                   <span className="mono" style={{ fontSize: 12 }}>約 {w.points} 點</span>
                 </div>
-                <p style={{ margin: "6px 0 2px", fontSize: 13.5 }}>{w.strengths}</p>
+                <p style={{ margin: "6px 0 2px", fontSize: "var(--fs-14)" }}>{w.strengths}</p>
                 <p className="hint" style={{ margin: 0 }}>
                   適合:{w.bestFor}|步驟:{w.steps.map((s) => s.note).join(" → ")}
                 </p>

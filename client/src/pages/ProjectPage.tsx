@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
+import { ConfirmButton } from "../components/interactions";
 import { worldviewSchema, type Worldview } from "@shared/worldview";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
@@ -191,6 +192,7 @@ export function ProjectPage({ id }: { id: string }) {
 
   /** AI 導演「用這個」：避免默默蓋掉手打的提示詞；套用後把視線帶到生成台提示詞框 */
   const applyDirectorPrompt = (text: string) => {
+    // 這裡刻意保留原生 confirm：只在使用者已手打提示詞時才問「要覆蓋嗎」；改成就地面板會多一層互動反而更煩
     if (prompt.trim() && !window.confirm("要覆蓋你已輸入的提示詞嗎？")) return;
     setPrompt(text);
     // 等 React 畫完再捲動；focus 用 preventScroll 才不會打斷平滑捲動
@@ -245,6 +247,7 @@ export function ProjectPage({ id }: { id: string }) {
                     display: "inline-flex", alignItems: "center", gap: 5,
                     fontSize: 12, padding: "2px 10px", borderRadius: 999,
                     border: `1px solid ${peer.color}`, color: peer.color,
+                    textShadow: "0 1px 2px var(--scrim)",
                     opacity: isMe ? 0.55 : 1,
                   }}
                 >
@@ -256,18 +259,21 @@ export function ProjectPage({ id }: { id: string }) {
           </span>
         )}
         {canArchive && (
-          <button
-            style={{ padding: "4px 12px", fontSize: 12 }}
-            disabled={archiveProject.isPending}
-            onClick={() => {
-              const to = p.status === "archived";
-              if (to || window.confirm(`封存「${p.title}」？封存後會從作業台隱藏，需要時可還原（不會刪除內容）。`)) {
-                archiveProject.mutate({ id, archived: !to });
-              }
-            }}
-          >
-            {p.status === "archived" ? "還原專案" : "封存專案"}
-          </button>
+          p.status === "archived" ? (
+            <button className="btn-sm" disabled={archiveProject.isPending} onClick={() => archiveProject.mutate({ id, archived: false })}>
+              還原專案
+            </button>
+          ) : (
+            <ConfirmButton
+              triggerClassName="btn-sm"
+              disabled={archiveProject.isPending}
+              message={`封存「${p.title}」？封存後會從作業台隱藏，需要時可還原（不會刪除內容）。`}
+              confirmLabel="封存"
+              onConfirm={() => archiveProject.mutate({ id, archived: true })}
+            >
+              封存專案
+            </ConfirmButton>
+          )
         )}
       </div>
       <p className="sub">
@@ -290,12 +296,12 @@ export function ProjectPage({ id }: { id: string }) {
       {/* #9 「從這裡開始」步驟列：用實際 state 判定完成打勾，點某步捲到對應區塊 */}
       <section className="card" data-fb="從這裡開始" style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <b style={{ fontSize: 14 }}>從這裡開始</b>
+          <h2 style={{ margin: 0 }}>從這裡開始</h2>
           <HelpTip text="這是製作一支片的四個步驟。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
           <span style={{ flex: "1 1 auto" }} />
-          {allStepsDone && <span className="chip" style={{ fontSize: 12 }}>全部完成 🎉</span>}
+          {allStepsDone && <span className="chip" style={{ fontSize: 12 }}>全部完成</span>}
           <button
-            style={{ padding: "2px 10px", fontSize: 12 }}
+            className="btn-sm"
             onClick={() => setOnboardCollapsed((v) => !v)}
           >
             {onboardCollapsed ? "展開" : "收合"}
@@ -310,9 +316,9 @@ export function ProjectPage({ id }: { id: string }) {
                   title={s.hint}
                   style={{
                     display: "flex", alignItems: "center", gap: 8, textAlign: "left",
-                    padding: "8px 12px", borderRadius: 10, cursor: "pointer",
-                    border: s.done ? "1px solid var(--primary)" : "1px solid var(--border)",
-                    background: s.done ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "transparent",
+                    padding: "8px 12px", borderRadius: "var(--r-12)", cursor: "pointer",
+                    border: s.done ? "1px solid var(--primary-border)" : "1px solid var(--border)",
+                    background: s.done ? "var(--primary-tint)" : "transparent",
                   }}
                 >
                   <span
@@ -321,8 +327,8 @@ export function ProjectPage({ id }: { id: string }) {
                       display: "inline-flex", alignItems: "center", justifyContent: "center",
                       width: 22, height: 22, borderRadius: "50%", fontSize: 12, fontWeight: 700,
                       border: s.done ? "none" : "1px solid var(--border)",
-                      background: s.done ? "var(--primary)" : "transparent",
-                      color: s.done ? "#fff" : "inherit",
+                      background: s.done ? "var(--primary-solid)" : "transparent",
+                      color: s.done ? "var(--primary-fg)" : "inherit",
                     }}
                   >
                     {s.done ? <Icon name="Check" size={13} /> : i + 1}
@@ -360,22 +366,24 @@ export function ProjectPage({ id }: { id: string }) {
                 <span
                   className="hint"
                   style={{
-                    marginLeft: 8, fontSize: 13, fontWeight: 400, color: "var(--primary)",
-                    opacity: wvSaved === "fading" ? 0 : 1, transition: "opacity 0.6s",
+                    marginLeft: 8, fontSize: 13, fontWeight: 400, color: "var(--primary-ink)",
+                    opacity: wvSaved === "fading" ? 0 : 1, transition: "opacity var(--dur-slow)",
                   }}
                 >
-                  已儲存 ✓
+                  已儲存 <Icon name="Check" size={13} />
                 </span>
               ) : null}
             </h2>
-            <label>一句話故事（logline）</label>
+            <label htmlFor="wv-logline">一句話故事（logline）</label>
             <input
+              id="wv-logline"
               defaultValue={wv.logline}
               placeholder="例：陳師姐從憂鬱低谷透過印心佛法走出重生"
               onBlur={(e) => e.target.value !== wv.logline && updateWv.mutate({ id, worldview: { logline: e.target.value } })}
             />
-            <label>一句關鍵訊息（一片一訊息）</label>
+            <label htmlFor="wv-message">一句關鍵訊息（一片一訊息）</label>
             <input
+              id="wv-message"
               defaultValue={wv.message}
               placeholder="例：把心交給佛，煩惱就交給了光"
               onBlur={(e) => e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
@@ -499,9 +507,9 @@ export function ProjectPage({ id }: { id: string }) {
           </div>
 
           {/* 角色定裝卡：勾選後生成自動注入外觀錨點 */}
-          <p id="sec-characters" className="hint" style={{ margin: "0 0 6px", fontSize: 13 }}>
+          <h2 id="sec-characters">
             角色定裝卡<HelpTip text="角色長相鎖定，勾了跨鏡頭不走樣。" />
-          </p>
+          </h2>
           <CharacterCards projectId={id} selectedIds={charIds} onToggle={toggleChar} />
 
           {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
@@ -535,9 +543,10 @@ export function ProjectPage({ id }: { id: string }) {
             <ModelPicker onChange={setModel} />
             {model?.needs && (
               <>
-                <label>{model.sourceHint ?? "來源素材"}</label>
+                <label htmlFor="gen-source">{model.sourceHint ?? "來源素材"}</label>
                 {sourceOptions.length > 0 && (
                   <select
+                    id="gen-source"
                     value={sourceAsset?.id ?? ""}
                     onChange={(e) => {
                       const picked = sourceOptions.find((a) => a.id === e.target.value);
@@ -556,7 +565,7 @@ export function ProjectPage({ id }: { id: string }) {
                 {sourceAsset ? (
                   <p className="hint">
                     來源：{sourceAsset.title}（素材庫）
-                    <button style={{ marginLeft: 8, padding: "1px 8px", fontSize: 11 }} onClick={() => setSourceAsset(null)}>
+                    <button className="btn-sm" style={{ marginLeft: 8 }} onClick={() => setSourceAsset(null)}>
                       改用網址
                     </button>
                   </p>
@@ -582,7 +591,7 @@ export function ProjectPage({ id }: { id: string }) {
                 )}
               </>
             )}
-            <label>{model?.kind === "audio" && model.needs == null ? "要唸的文字/音樂描述" : "提示詞（世界觀會自動帶入，不必重講背景）"}</label>
+            <label htmlFor="gen-prompt">{model?.kind === "audio" && model.needs == null ? "要唸的文字/音樂描述" : "提示詞（世界觀會自動帶入，不必重講背景）"}</label>
             {/* id 是「用這個」等功能捲動聚焦的錨點，別拿掉 */}
             <textarea id="gen-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂，柔和光線灑落，一炷香的靜謐" />
             <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
@@ -608,7 +617,7 @@ export function ProjectPage({ id }: { id: string }) {
                 </p>
                 <p style={{ margin: "4px 0", fontSize: 13 }}>提示詞：{prompt.trim().slice(0, 80)}{prompt.trim().length > 80 ? "…" : ""}</p>
                 <p style={{ margin: "8px 0" }}>
-                  預估 <b style={{ color: "var(--primary)", fontSize: 18 }}>約 {model.points} 點</b>
+                  預估 <b style={{ color: "var(--primary-ink)", fontSize: 18 }}>約 {model.points} 點</b>
                   {quota.data && (
                     <span className="hint" style={{ marginLeft: 8 }}>
                       {quota.data.totalRemaining != null ? `目前剩 ${quota.data.totalRemaining.toLocaleString()} 點` : "額度不限"}
@@ -677,9 +686,9 @@ export function ProjectPage({ id }: { id: string }) {
           <CollabZone {...zoneProps(COLLAB_ZONES.scenes)}>
             {/* data-fb 讓元件回饋標定「打包下載」（分鏡與交付區）；透明包裹，不影響版面。id 供引導步驟與交付指引捲動定位 */}
             <div data-fb="打包下載" id="onboard-delivery">
-              <p className="hint" style={{ margin: "0 0 6px", fontSize: 13 }}>
+              <h2>
                 分鏡・交付<HelpTip text="把成品排成一支片的順序，可送審與打包交付。" />
-              </p>
+              </h2>
               <SceneList projectId={id} isLeader={isLeader} onUsePrompt={(text) => setPrompt(text)} />
             </div>
           </CollabZone>

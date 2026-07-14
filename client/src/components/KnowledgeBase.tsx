@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { useLocalDraft } from "../useLocalDraft";
+import { Icon } from "./Icon";
+import { ConfirmButton } from "./interactions";
 import { VersionHistory } from "./VersionHistory";
 
 const KINDS = [
@@ -54,7 +56,13 @@ export function KnowledgeBase({ projectId }: { projectId: string }) {
       </p>
 
       {list.isLoading ? (
-        <p className="hint">載入中…</p>
+        <div style={{ marginTop: 8 }} aria-hidden="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="gen-row">
+              <div className="skeleton" style={{ height: 14 }} />
+            </div>
+          ))}
+        </div>
       ) : list.data && list.data.length > 0 ? (
         <div style={{ marginTop: 8 }}>
           {list.data.map((k) => (
@@ -62,21 +70,25 @@ export function KnowledgeBase({ projectId }: { projectId: string }) {
           ))}
         </div>
       ) : (
-        <p className="hint" style={{ marginTop: 8 }}>還沒有素材知識——加一份開示稿或腳本，讓 AI 真的懂這支片。</p>
+        <div className="empty-state" style={{ marginTop: 8 }}>
+          <h3>還沒有素材知識</h3>
+          <p>加一份開示稿或腳本，讓 AI 真的懂這支片。</p>
+        </div>
       )}
 
       {open ? (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
-          <label>類型</label>
-          <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
+          <label htmlFor={`kb-kind-${projectId}`}>類型</label>
+          <select id={`kb-kind-${projectId}`} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
             {KINDS.map((k) => (
               <option key={k.id} value={k.id}>{k.label}</option>
             ))}
           </select>
-          <label>標題</label>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例：2024 除夕開示・談放下" />
-          <label>內容（貼上全文）</label>
+          <label htmlFor={`kb-title-${projectId}`}>標題</label>
+          <input id={`kb-title-${projectId}`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例：2024 除夕開示・談放下" />
+          <label htmlFor={`kb-content-${projectId}`}>內容（貼上全文）</label>
           <textarea
+            id={`kb-content-${projectId}`}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             rows={6}
@@ -96,7 +108,9 @@ export function KnowledgeBase({ projectId }: { projectId: string }) {
           {add.error && <p className="error">{add.error.message}</p>}
         </div>
       ) : (
-        <button style={{ marginTop: 12 }} onClick={() => setOpen(true)}>＋ 加入素材知識</button>
+        <button style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setOpen(true)}>
+          <Icon name="Plus" size={14} />加入素材知識
+        </button>
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
     </section>
@@ -176,7 +190,7 @@ function KnowledgeRow({
                 cancelEdit();
               }
             }}
-            style={{ fontSize: 14, padding: "5px 8px" }}
+            style={{ fontSize: "var(--fs-14)", padding: "5px 8px" }}
           />
           <textarea
             value={full.isLoading && !seededRef.current ? "" : editContent}
@@ -185,18 +199,18 @@ function KnowledgeRow({
             placeholder={full.isLoading && !seededRef.current ? "載入全文中…" : "貼上全文…"}
             rows={6}
             onChange={(e) => setEditContent(e.target.value)}
-            style={{ marginTop: 6, fontSize: 13, padding: "5px 8px" }}
+            style={{ marginTop: 6, fontSize: "var(--fs-13)", padding: "5px 8px" }}
           />
           <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
             <button
               className="primary"
-              style={{ padding: "4px 14px", fontSize: 12 }}
+              style={{ padding: "4px 14px", fontSize: "var(--fs-12)" }}
               disabled={update.isPending || !editTitle.trim() || !editContent.trim() || !seededRef.current}
               onClick={save}
             >
               {update.isPending ? "儲存中…" : "儲存"}
             </button>
-            <button style={{ padding: "4px 14px", fontSize: 12 }} disabled={update.isPending} onClick={cancelEdit}>
+            <button style={{ padding: "4px 14px", fontSize: "var(--fs-12)" }} disabled={update.isPending} onClick={cancelEdit}>
               取消
             </button>
           </div>
@@ -214,20 +228,21 @@ function KnowledgeRow({
     <div className="gen-row" style={{ gridTemplateColumns: "auto 1fr auto", alignItems: "center" }}>
       <span className="chip">{KIND_LABEL[k.kind] ?? k.kind}</span>
       <div>
-        <div style={{ fontSize: 14, fontWeight: 600 }}>{k.title}</div>
-        <div className="meta" style={{ fontSize: 12 }}>{k.excerpt}{k.chars > 120 ? "…" : ""}（{k.chars.toLocaleString()} 字）</div>
+        <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>{k.title}</div>
+        <div className="meta" style={{ fontSize: "var(--fs-12)" }}>{k.excerpt}{k.chars > 120 ? "…" : ""}（{k.chars.toLocaleString()} 字）</div>
       </div>
       <div style={{ display: "flex", gap: 4 }}>
-        <button style={{ padding: "3px 12px", fontSize: 12 }} onClick={openEdit}>
+        <button style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }} onClick={openEdit}>
           編輯
         </button>
-        <button
-          style={{ padding: "3px 12px", fontSize: 12, color: "var(--danger)" }}
+        <ConfirmButton
+          onConfirm={() => remove.mutate({ id: k.id })}
+          message={`刪除知識「${k.title}」？`}
+          triggerStyle={{ padding: "3px 12px", fontSize: "var(--fs-12)", color: "var(--danger-ink)" }}
           disabled={remove.isPending}
-          onClick={() => window.confirm(`刪除知識「${k.title}」？`) && remove.mutate({ id: k.id })}
         >
           刪除
-        </button>
+        </ConfirmButton>
       </div>
     </div>
   );

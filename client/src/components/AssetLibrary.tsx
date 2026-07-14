@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
+import { ConfirmButton } from "./interactions";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -186,12 +187,15 @@ export function AssetLibrary({
           ))}
         </div>
       ) : !total ? (
-        <p className="hint" style={{ marginTop: 10 }}>還沒有素材——上傳參考圖、原音檔，或先生成一張。</p>
+        <div className="empty-state" style={{ marginTop: 10 }}>
+          <h3>還沒有素材——</h3>
+          <p>上傳參考圖、原音檔，或先生成一張。</p>
+        </div>
       ) : (
         <>
           {/* 工具列：數量統計 · 種類篩選 chips · 搜尋 · 排序 */}
           <div data-fb="素材工具列" style={{ margin: "12px 0 4px", display: "flex", flexDirection: "column", gap: 8 }}>
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+            <div role="radiogroup" aria-label="依種類篩選素材" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
               {KIND_FILTERS.map((f) => {
                 // 全部一定顯示；其餘只在該類有素材時才出現，避免點了空空的
                 const count = f.key === "all" ? total : kindCounts[f.key] ?? 0;
@@ -263,7 +267,7 @@ export function AssetLibrary({
                 tabIndex={0}
                 onClick={() => { setKindFilter("all"); setOnlySourceable(false); setSearch(""); }}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setKindFilter("all"); setOnlySourceable(false); setSearch(""); } }}
-                style={{ color: "var(--primary)", cursor: "pointer", marginLeft: 6, textDecoration: "underline" }}
+                style={{ color: "var(--primary-ink)", cursor: "pointer", marginLeft: 6, textDecoration: "underline" }}
               >
                 清除篩選
               </span>
@@ -325,7 +329,7 @@ export function AssetLibrary({
                         </div>
                       )}
                       <div className="hint" style={{ fontSize: 11 }}>
-                        {a.locked ? "🔒 鎖定 · " : ""}
+                        {a.locked ? <><Icon name="Lock" size={11} style={{ verticalAlign: "-1px", marginRight: 4, color: "var(--gold-ink)" }} />鎖定 · </> : ""}
                         {a.isAiGenerated ? "AI 生成" : "上傳"}
                         {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
@@ -365,13 +369,13 @@ export function AssetLibrary({
                           role="menu"
                           onClick={(e) => e.stopPropagation()}
                           style={{
-                            display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6, paddingTop: 6,
+                            display: "flex", flexDirection: "column", gap: 6, marginTop: 6, paddingTop: 6,
                             borderTop: "1px solid var(--border-soft)",
                           }}
                         >
                           {a.kind === "doc" && (
                             <button
-                              style={smallBtn}
+                              className="menu-item"
                               disabled={toKnowledge.isPending}
                               title="讓 AI 導演讀得懂這份文字素材"
                               onClick={() => { toKnowledge.mutate({ assetId: a.id }); setMenuOpenId(null); }}
@@ -379,11 +383,12 @@ export function AssetLibrary({
                               加入知識庫
                             </button>
                           )}
-                          <button style={smallBtn} disabled={rename.isPending} onClick={() => startRename(a.id, a.title)}>
+                          <button className="menu-item" disabled={rename.isPending} onClick={() => startRename(a.id, a.title)}>
                             <Icon name="Pencil" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />改名
                           </button>
                           <button
-                            style={{ ...smallBtn, color: a.locked ? "var(--gold, #B58A3E)" : undefined }}
+                            className="menu-item"
+                            style={a.locked ? { color: "var(--gold-ink)" } : undefined}
                             disabled={setLock.isPending}
                             title="固定素材（師父原音/開示/配樂）：鎖定後交付包會原封保留在 00_鎖定原素材"
                             onClick={() => { setLock.mutate({ assetId: a.id, locked: !a.locked }); setMenuOpenId(null); }}
@@ -393,17 +398,19 @@ export function AssetLibrary({
                               : <><Icon name="Lock" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />鎖定</>}
                           </button>
                           {canDelete && (
-                            <button
-                              style={smallBtn}
-                              disabled={del.isPending}
-                              title="刪除後會移到回收桶，可從下方「回收桶」還原（不扣點、不刪原檔）"
-                              onClick={() => {
-                                if (window.confirm(`把「${a.title}」移到回收桶？分鏡引用會保留，可從回收桶還原。`)) del.mutate({ assetId: a.id });
-                                setMenuOpenId(null);
-                              }}
-                            >
-                              刪除
-                            </button>
+                            <>
+                              <div className="menu-sep" />
+                              <ConfirmButton
+                                triggerClassName="menu-item danger"
+                                disabled={del.isPending}
+                                triggerTitle="刪除後會移到回收桶，可從下方「回收桶」還原（不扣點、不刪原檔）"
+                                message={`把「${a.title}」移到回收桶？分鏡引用會保留，可從回收桶還原。`}
+                                confirmLabel="刪除"
+                                onConfirm={() => { del.mutate({ assetId: a.id }); setMenuOpenId(null); }}
+                              >
+                                刪除
+                              </ConfirmButton>
+                            </>
                           )}
                         </div>
                       )}
@@ -427,7 +434,7 @@ export function AssetLibrary({
           data-fb="素材大圖"
           onClick={() => setLightbox(null)}
           style={{
-            position: "fixed", inset: 0, zIndex: 1000, background: "rgba(48, 34, 22, 0.72)",
+            position: "fixed", inset: 0, zIndex: 1000, background: "rgba(43, 38, 32, 0.72)",
             display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
           }}
         >
@@ -436,14 +443,14 @@ export function AssetLibrary({
               src={lightbox.url}
               alt={lightbox.title}
               onClick={(e) => e.stopPropagation()}
-              style={{ maxWidth: "92vw", maxHeight: "80vh", objectFit: "contain", borderRadius: 12, boxShadow: "var(--shadow)" }}
+              style={{ maxWidth: "92vw", maxHeight: "80vh", objectFit: "contain", borderRadius: 12, boxShadow: "var(--e4)" }}
             />
             <div style={{ color: "#fff", fontSize: 13, textAlign: "center", maxWidth: "80vw" }}>{lightbox.title}</div>
             <button
               type="button"
               aria-label="關閉大圖"
               onClick={() => setLightbox(null)}
-              style={{ position: "absolute", top: -14, right: -14, borderRadius: 999, width: 36, height: 36, padding: 0, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+              style={{ position: "absolute", top: 8, right: 8, borderRadius: 999, width: 40, height: 40, padding: 0, lineHeight: 1, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
             >
               <Icon name="X" size={18} />
             </button>

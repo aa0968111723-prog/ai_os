@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
+import { ConfirmButton } from "./interactions";
 
 /** 素材種類 → 圖示（與素材庫一致的視覺語彙） */
 const KIND_ICON: Record<string, IconName> = { image: "Image", video: "Clapperboard", audio: "Volume2", doc: "FileText" };
@@ -46,17 +47,20 @@ function DeletedRow({
           {sub ? `${sub}・` : ""}刪除於 {fmtWhen(when) || "—"}
         </div>
       </div>
-      <button style={{ padding: "2px 10px", fontSize: 11 }} disabled={busy} onClick={onRestore}>
+      <button className="btn-sm" disabled={busy} onClick={onRestore}>
         <Icon name="Undo2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />還原
       </button>
-      <button
-        style={{ padding: "2px 10px", fontSize: 11, color: "var(--danger)" }}
+      <ConfirmButton
+        triggerClassName="btn-sm"
+        triggerStyle={{ color: "var(--danger-ink)" }}
         disabled={busy}
-        title="永久刪除後無法復原"
-        onClick={onPurge}
+        triggerTitle="永久刪除後無法復原"
+        message={`永久刪除「${title}」？此動作無法復原。`}
+        confirmLabel="永久刪除"
+        onConfirm={onPurge}
       >
         永久刪除
-      </button>
+      </ConfirmButton>
     </div>
   );
 }
@@ -68,7 +72,8 @@ function DeletedRow({
 export function RecycleBin({ projectId }: { projectId: string }) {
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
-  const deleted = trpc.projects.listDeleted.useQuery({ projectId }, { enabled: open });
+  // 折疊態也先抓一次，讓收合的回收桶就能顯示「N 項可還原」的提示（避免誤刪後毫無線索）
+  const deleted = trpc.projects.listDeleted.useQuery({ projectId });
 
   // 還原／永久刪除後要刷新的快取：回收桶自己＋對應的正式清單
   const refreshAssets = () => { utils.projects.listDeleted.invalidate({ projectId }); utils.projects.assets.invalidate({ projectId }); };
@@ -93,9 +98,6 @@ export function RecycleBin({ projectId }: { projectId: string }) {
 
   const data = deleted.data;
   const total = data ? data.assets.length + data.scenes.length + data.knowledge.length : 0;
-  const confirmPurge = (label: string, run: () => void) => {
-    if (window.confirm(`永久刪除「${label}」？此動作無法復原。`)) run();
-  };
 
   return (
     <section className="card" data-fb="回收桶">
@@ -105,10 +107,10 @@ export function RecycleBin({ projectId }: { projectId: string }) {
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
         >
-          <Icon name={open ? "ChevronDown" : "ChevronRight"} size={16} />
+          <Icon name={open ? "ChevronUp" : "ChevronDown"} size={16} />
           回收桶
         </button>
-        {open && data && total > 0 && <span className="badge"><span className="mono">{total}</span> 項可還原</span>}
+        {data && total > 0 && <span className="badge"><span className="mono">{total}</span> 項可還原</span>}
         <span className="hint" style={{ flex: "1 1 auto", fontSize: 12 }}>
           刪除的素材／分鏡／知識暫存於此，可還原（不扣點）
         </span>
@@ -138,7 +140,7 @@ export function RecycleBin({ projectId }: { projectId: string }) {
                       when={a.deletedAt}
                       busy={busy}
                       onRestore={() => restoreAsset.mutate({ assetId: a.id })}
-                      onPurge={() => confirmPurge(a.title, () => purgeAsset.mutate({ assetId: a.id }))}
+                      onPurge={() => purgeAsset.mutate({ assetId: a.id })}
                     />
                   ))}
                 </div>
@@ -155,7 +157,7 @@ export function RecycleBin({ projectId }: { projectId: string }) {
                       when={s.deletedAt}
                       busy={busy}
                       onRestore={() => restoreScene.mutate({ sceneId: s.id })}
-                      onPurge={() => confirmPurge(s.title, () => purgeScene.mutate({ sceneId: s.id }))}
+                      onPurge={() => purgeScene.mutate({ sceneId: s.id })}
                     />
                   ))}
                 </div>
@@ -173,7 +175,7 @@ export function RecycleBin({ projectId }: { projectId: string }) {
                       when={k.deletedAt}
                       busy={busy}
                       onRestore={() => restoreKnowledge.mutate({ id: k.id })}
-                      onPurge={() => confirmPurge(k.title, () => purgeKnowledge.mutate({ id: k.id }))}
+                      onPurge={() => purgeKnowledge.mutate({ id: k.id })}
                     />
                   ))}
                 </div>

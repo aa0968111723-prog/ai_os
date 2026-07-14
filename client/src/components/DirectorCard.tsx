@@ -13,21 +13,21 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
       </button>
       {suggest.error && <p className="error">{suggest.error.message}</p>}
       {suggest.data && (
-        <div style={{ marginTop: 12 }}>
-          <p className="hint" style={{ fontSize: 12 }}>
+        <div style={{ marginTop: "var(--sp-12)" }}>
+          <p className="hint" style={{ fontSize: "var(--fs-12)" }}>
             {suggest.data.usedKnowledge ? <><Icon name="Check" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />已讀取專案知識庫的素材</> : "（尚未加入素材知識——加了開示/腳本，建議會更貼合）"}
             {suggest.data.mock ? "・示範建議" : ""}
           </p>
           {suggest.data.fallback && (
-            <p className="hint" style={{ fontSize: 12, color: "var(--soft)" }}>（AI 暫時沒回應，以下是通用建議）</p>
+            <p className="hint" style={{ fontSize: 12 }}>（AI 暫時沒回應，以下是通用建議）</p>
           )}
           {suggest.data.suggestions.map((s, i) => (
             <div key={i} className="gen-row" style={{ gridTemplateColumns: "1fr auto" }}>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{s.title}</div>
-                <div className="meta" style={{ fontSize: 12 }}>{s.prompt}</div>
+                <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>{s.title}</div>
+                <div className="meta" style={{ fontSize: "var(--fs-12)" }}>{s.prompt}</div>
               </div>
-              <button style={{ padding: "4px 12px", fontSize: 12 }} onClick={() => onUse(s.prompt)}>
+              <button className="btn-sm" onClick={() => onUse(s.prompt)}>
                 用這個
               </button>
             </div>

@@ -1,0 +1,251 @@
+import {
+  useEffect, useId, useRef, useState,
+  type ReactNode, type CSSProperties, type RefObject, type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
+
+/**
+ * 共用互動基元（第二輪：把原生 window.confirm/prompt/alert 與無漫遊 radiogroup
+ * 換成留在 monastic-calm 語言內、可鍵盤操作的就地元件）。CSP 下零外部依賴。
+ */
+
+/**
+ * useFocusTrap：對話框開啟時把焦點鎖在容器內、鎖背景捲動、Esc 關閉，
+ * 關閉後把焦點還給開啟者。active 為 false 時完全不介入。
+ */
+export function useFocusTrap<T extends HTMLElement>(
+  ref: RefObject<T | null>,
+  active: boolean,
+  onClose?: () => void,
+) {
+  // onClose 用 ref 存：避免父層每次 re-render 傳入新的 inline onClose 就重跑效果、把焦點搶回開頭
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!active) return;
+    const node = ref.current;
+    const opener = document.activeElement as HTMLElement | null;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusables = (): HTMLElement[] =>
+      node
+        ? Array.from(
+            node.querySelectorAll<HTMLElement>(
+              'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
+            ),
+          ).filter((el) => el.offsetParent !== null || el === document.activeElement)
+        : [];
+    // 進場把焦點移進對話框
+    (focusables()[0] ?? node)?.focus?.();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onCloseRef.current?.();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      if (items.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const idx = items.indexOf(document.activeElement as HTMLElement);
+      if (e.shiftKey) {
+        if (idx <= 0) {
+          e.preventDefault();
+          items[items.length - 1].focus();
+        }
+      } else if (idx === items.length - 1) {
+        e.preventDefault();
+        items[0].focus();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.body.style.overflow = prevOverflow;
+      opener?.focus?.();
+    };
+  }, [active, ref]);
+}
+
+/**
+ * ConfirmButton：就地確認的動作按鈕，取代 window.confirm / window.prompt。
+ * 兩段式（觸發→確認）；Esc 或點外面取消；焦點自動進出；可選 reason 文字框
+ * （取代 window.prompt 的輸入需求）。視覺沿用既有 .confirm-panel / .primary / .btn-ghost。
+ */
+export function ConfirmButton({
+  onConfirm,
+  children,
+  title,
+  message,
+  confirmLabel = "確認",
+  cancelLabel = "取消",
+  mode = "inline",
+  reason,
+  disabled,
+  triggerClassName,
+  triggerStyle,
+  triggerTitle,
+  triggerAriaLabel,
+}: {
+  onConfirm: (reason?: string) => void;
+  children: ReactNode;
+  title?: string;
+  message?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  mode?: "inline" | "panel";
+  reason?: { label?: string; placeholder?: string; required?: boolean };
+  disabled?: boolean;
+  triggerClassName?: string;
+  triggerStyle?: CSSProperties;
+  triggerTitle?: string;
+  triggerAriaLabel?: string;
+}) {
+  const [armed, setArmed] = useState(false);
+  const [reasonText, setReasonText] = useState("");
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const reasonRef = useRef<HTMLTextAreaElement>(null);
+  const reasonId = useId();
+  const usePanel = mode === "panel" || !!reason;
+
+  const cancel = () => {
+    setArmed(false);
+    setReasonText("");
+    triggerRef.current?.focus();
+  };
+  const confirm = () => {
+    if (reason?.required && !reasonText.trim()) {
+      reasonRef.current?.focus();
+      return;
+    }
+    onConfirm(reason ? reasonText.trim() : undefined);
+    setArmed(false);
+    setReasonText("");
+  };
+
+  useEffect(() => {
+    if (!armed) return;
+    (reason ? reasonRef.current : confirmRef.current)?.focus();
+    const onDoc = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) cancel();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") cancel();
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [armed]);
+
+  if (!armed) {
+    return (
+      <button
+        ref={triggerRef}
+        type="button"
+        className={triggerClassName}
+        style={triggerStyle}
+        title={triggerTitle}
+        aria-label={triggerAriaLabel}
+        disabled={disabled}
+        onClick={() => setArmed(true)}
+      >
+        {children}
+      </button>
+    );
+  }
+
+  const buttons = (
+    <>
+      <button ref={confirmRef} type="button" className="primary btn-sm" onClick={confirm}>
+        {confirmLabel}
+      </button>
+      <button type="button" className="btn-ghost btn-sm" onClick={cancel}>
+        {cancelLabel}
+      </button>
+    </>
+  );
+
+  if (usePanel) {
+    return (
+      <span ref={wrapRef} style={{ display: "block" }}>
+        <div className="confirm-panel" role="alertdialog" aria-label={title || message || "確認"}>
+          {title && <h3>{title}</h3>}
+          {message && <p className="hint" style={{ marginTop: title ? 4 : 0 }}>{message}</p>}
+          {reason && (
+            <>
+              {reason.label && <label htmlFor={reasonId}>{reason.label}</label>}
+              <textarea
+                id={reasonId}
+                ref={reasonRef}
+                value={reasonText}
+                onChange={(e) => setReasonText(e.target.value)}
+                placeholder={reason.placeholder}
+                style={{ minHeight: 60, marginTop: 6 }}
+              />
+            </>
+          )}
+          <div style={{ display: "flex", gap: "var(--sp-8)", marginTop: "var(--sp-12)" }}>{buttons}</div>
+        </div>
+      </span>
+    );
+  }
+
+  return (
+    <span
+      ref={wrapRef}
+      role="alertdialog"
+      aria-label={title || message || "確認"}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}
+    >
+      <span className="hint" style={{ margin: 0 }}>{message || title || "確定嗎？"}</span>
+      {buttons}
+    </span>
+  );
+}
+
+/**
+ * useRovingRadio：讓一組 role="radio" 支援方向鍵漫遊（左右/上下/Home/End），
+ * 只有選中項（或無選中時的第一項）進 Tab 序，其餘 tabIndex=-1。保留點擊切換／取消選取。
+ */
+export function useRovingRadio(values: string[], selected: string, onSelect: (v: string) => void) {
+  const refs = useRef<(HTMLElement | null)[]>([]);
+  const sel = values.indexOf(selected);
+  const activeIndex = sel >= 0 ? sel : 0;
+  const move = (to: number) => {
+    const n = values.length;
+    if (!n) return;
+    const idx = ((to % n) + n) % n;
+    refs.current[idx]?.focus();
+    onSelect(values[idx]);
+  };
+  const onKeyDown = (e: ReactKeyboardEvent) => {
+    const cur = refs.current.findIndex((el) => el === document.activeElement);
+    const base = cur >= 0 ? cur : activeIndex;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      move(base + 1);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      move(base - 1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      move(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      move(values.length - 1);
+    }
+  };
+  const itemProps = (index: number) => ({
+    ref: (el: HTMLElement | null) => {
+      refs.current[index] = el;
+    },
+    tabIndex: index === activeIndex ? 0 : -1,
+  });
+  return { groupProps: { onKeyDown }, itemProps };
+}

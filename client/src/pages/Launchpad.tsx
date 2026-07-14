@@ -173,7 +173,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
         {!options.isLoading && groupId && !platformOptions.length && <p className="hint">這個組還沒有發布平台選項——請組長到「選項」頁新增。</p>}
         {pickedPlatform?.format && <p className="hint">畫面格式：{pickedPlatform.format}（依平台自動帶入）</p>}
         {!groupId && <p className="hint">（要先屬於一個組才能建專案）</p>}
-        {create.error && <p className="error">{create.error.message}</p>}
+        {groupId && kindOptions.length > 0 && platformOptions.length > 0 && !title.trim() && <p className="hint">先為專案命名，就能建立專案。</p>}
+        {create.error && <p className="error" role="alert">{create.error.message}</p>}
       </section>
 
       {/* 工具列：搜尋／類型篩選／排序（有專案才顯示） */}
@@ -201,13 +202,13 @@ export function Launchpad({ groupId }: { groupId: string }) {
       )}
 
       {projects.error && (
-        <p className="error">
+        <p className="error" role="alert">
           專案清單暫時載入不了——
-          <button style={{ padding: "2px 12px", marginLeft: 4 }} onClick={() => projects.refetch()}>再試一次</button>
+          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => projects.refetch()}>再試一次</button>
         </p>
       )}
 
-      {all.length === 0 && !projects.isLoading && !projects.error && (
+      {all.length === 0 && !projects.isLoading && !projects.error && !showFirstRun && (
         <div className="empty-state">
           <h3>還沒有專案</h3>
           <p>從上面開一個新專案，把素材整理成分鏡與成品。</p>
@@ -215,7 +216,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
       )}
       {all.length > 0 && shownList.length === 0 && <p className="hint">沒有符合「{q}」的專案。</p>}
 
-      <div className="launch-grid">
+      <div className="launch-grid" aria-busy={projects.isLoading}>
         {projects.isLoading &&
           Array.from({ length: 8 }).map((_, i) => <div key={`sk-${i}`} className="launch-card skeleton" style={{ height: 176 }} aria-hidden />)}
         {shown.map((p) => (

@@ -235,16 +235,17 @@ export function CursorOverlay({ cursors }: { cursors: Map<string, CollabCursor> 
             alignItems: "flex-start",
           }}
         >
-          <svg width="14" height="18" viewBox="0 0 14 18" style={{ display: "block", filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.25))" }}>
+          <svg width="14" height="18" viewBox="0 0 14 18" style={{ display: "block", filter: "drop-shadow(0 1px 1px rgba(74,54,32,.28))" }}>
             <path d="M1 1 L1 14.5 L4.6 11.2 L7 16.5 L9.4 15.4 L7 10.2 L12 9.6 Z" fill={c.color} stroke="#fff" strokeWidth="1" />
           </svg>
           <span
             style={{
               background: c.color,
               color: "#fff",
+              textShadow: "0 1px 2px var(--scrim)",
               borderRadius: 999,
               padding: "1px 8px",
-              fontSize: 11,
+              fontSize: "var(--fs-11)",
               whiteSpace: "nowrap",
               marginTop: 12,
               marginLeft: 2,
@@ -288,6 +289,7 @@ export function CollabZone({
     >
       {first && (
         <span
+          aria-hidden
           style={{
             position: "absolute",
             top: 4,
@@ -296,7 +298,8 @@ export function CollabZone({
             pointerEvents: "none",
             background: first.color,
             color: "#fff",
-            fontSize: 11,
+            textShadow: "0 1px 2px var(--scrim)",
+            fontSize: "var(--fs-11)",
             padding: "1px 8px",
             borderRadius: 999,
             whiteSpace: "nowrap",

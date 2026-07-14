@@ -17,13 +17,14 @@ const numStyle: CSSProperties = {
   width: 22,
   height: 22,
   borderRadius: "50%",
-  background: "var(--primary)",
+  background: "var(--primary-solid)",
   color: "var(--primary-fg)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
   fontSize: 12,
   fontWeight: 700,
+  fontFamily: "var(--mono)",
   flex: "none",
 };
 
@@ -44,7 +45,7 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
   });
 
   return (
-    <div className="card" data-fb="新手導覽卡" style={{ borderColor: "var(--primary)", marginBottom: 20 }}>
+    <div className="card card--primary" data-fb="新手導覽卡" style={{ marginBottom: "var(--sp-20)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span className="orb" aria-hidden />
         <h2 style={{ margin: 0 }}>歡迎加入 · 先看一個完整範例</h2>

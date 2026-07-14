@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { getModel } from "@shared/models";
 import { Icon } from "./Icon";
+import { ConfirmButton } from "./interactions";
 
 /**
  * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（背景分頁/未授權）建構子會丟例外，包 try 忽略。
@@ -226,13 +227,19 @@ export function GenerationList({ projectId }: { projectId: string }) {
         ))}
       </div>
     );
-  if (!list.data?.length) return <p className="hint" style={{ marginTop: 12 }}>還沒有生成紀錄——上面試一次吧。</p>;
+  if (!list.data?.length)
+    return (
+      <div className="empty-state" style={{ marginTop: 12 }}>
+        <h3>還沒有生成紀錄——</h3>
+        <p>上面試一次吧。</p>
+      </div>
+    );
 
   return (
     <div style={{ marginTop: 14 }} data-fb="生成紀錄">
       {addSceneError && <p className="error">加入分鏡失敗：{addSceneError}</p>}
       {addedId && !addSceneError && (
-        <p className="hint" style={{ color: "var(--success)" }}>已加入分鏡 ✓（在下方分鏡・交付區）</p>
+        <p className="hint" style={{ color: "var(--success-ink)" }}>已加入分鏡 ✓（在下方分鏡・交付區）</p>
       )}
       {retry.error && <p className="error">重試失敗：{retry.error.message}</p>}
       <div
@@ -243,36 +250,33 @@ export function GenerationList({ projectId }: { projectId: string }) {
           <button
             key={val}
             type="button"
-            className="gen-filter-chip"
+            className={`chip pick ${statusFilter === val ? "on" : ""}`}
             aria-pressed={statusFilter === val}
             onClick={() => setStatusFilter((cur) => (cur === val ? null : val))}
-            style={{ padding: "3px 10px", fontSize: 12, borderRadius: 999, opacity: statusFilter === val ? 1 : 0.55, fontWeight: statusFilter === val ? 600 : 400 }}
           >
             {label}
           </button>
         ))}
-        <span style={{ width: 1, height: 16, background: "rgba(0,0,0,.15)" }} aria-hidden="true" />
+        <span style={{ width: 1, height: 16, background: "var(--border)" }} aria-hidden="true" />
         {([["image", "圖片"], ["video", "影片"], ["audio", "音訊"], ["text", "文字"]] as const).map(([val, label]) => (
           <button
             key={val}
             type="button"
-            className="gen-filter-chip"
+            className={`chip pick ${kindFilter === val ? "on" : ""}`}
             aria-pressed={kindFilter === val}
             onClick={() => setKindFilter((cur) => (cur === val ? null : val))}
-            style={{ padding: "3px 10px", fontSize: 12, borderRadius: 999, opacity: kindFilter === val ? 1 : 0.55, fontWeight: kindFilter === val ? 600 : 400 }}
           >
             {label}
           </button>
         ))}
-        <span style={{ width: 1, height: 16, background: "rgba(0,0,0,.15)" }} aria-hidden="true" />
+        <span style={{ width: 1, height: 16, background: "var(--border)" }} aria-hidden="true" />
         <button
           type="button"
-          className="gen-filter-chip"
+          className={`chip pick ${favoriteOnly ? "on" : ""}`}
           aria-pressed={favoriteOnly}
           onClick={() => setFavoriteOnly((v) => !v)}
-          style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 10px", fontSize: 12, borderRadius: 999, opacity: favoriteOnly ? 1 : 0.55, fontWeight: favoriteOnly ? 600 : 400 }}
         >
-          <Icon name="Star" size={12} style={favoriteOnly ? { fill: "currentColor" } : undefined} />
+          <Icon name="Star" size={12} style={{ verticalAlign: "-2px", marginRight: 4, ...(favoriteOnly ? { fill: "currentColor" } : {}) }} />
           只看收藏
         </button>
         <input
@@ -331,7 +335,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
                 aria-pressed={!!g.favorite}
                 disabled={toggleFavorite.isPending}
                 onClick={() => toggleFavorite.mutate({ generationId: g.id, favorite: !g.favorite })}
-                style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: g.favorite ? "#E0A800" : "var(--muted-fg)" }}
+                style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: g.favorite ? "var(--gold)" : "var(--muted-fg)" }}
               >
                 <Icon name="Star" size={16} style={g.favorite ? { fill: "currentColor" } : undefined} />
               </button>
@@ -395,10 +399,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
             {g.resultText && (
               <div
                 className="result-text"
-                style={{
-                  whiteSpace: "pre-wrap", fontSize: 13, background: "var(--bg, #F4EEE4)",
-                  border: "1px solid rgba(0,0,0,.08)", borderRadius: 10, padding: "8px 12px", marginTop: 6,
-                }}
+                style={{ whiteSpace: "pre-wrap", fontSize: 13, marginTop: 6 }}
               >
                 {g.resultText}
                 <div style={{ marginTop: 6 }}>
@@ -423,10 +424,12 @@ export function GenerationList({ projectId }: { projectId: string }) {
               )
             )}
             {g.status === "failed" && (
-              <button style={{ padding: "4px 12px", fontSize: 12 }} disabled={retry.isPending}
-                onClick={() => {
-                  const cost = g.pointsEst > 0 ? `會再扣 ${g.pointsEst} 點` : "會再扣點";
-                  if (!window.confirm(`以相同設定重試${cost}，確定要重試嗎？`)) return;
+              <ConfirmButton
+                triggerStyle={{ padding: "4px 12px", fontSize: 12 }}
+                disabled={retry.isPending}
+                message={`以相同設定重試${g.pointsEst > 0 ? `會再扣 ${g.pointsEst} 點` : "會再扣點"}，確定要重試嗎？`}
+                confirmLabel="重試"
+                onConfirm={() => {
                   // 素材庫來源存的是 48 小時簽名網址——過期後原樣重送必敗。
                   // 從網址取回 assetId 改走 sourceAssetId，讓伺服器重新簽名（順帶重過相容性守門）
                   const assetId = g.sourceUrl?.match(/\/api\/assets\/([0-9a-f-]{36})\/file/)?.[1];
@@ -434,9 +437,10 @@ export function GenerationList({ projectId }: { projectId: string }) {
                     projectId, modelId: g.modelId, prompt: g.prompt,
                     ...(assetId ? { sourceAssetId: assetId } : { sourceUrl: g.sourceUrl ?? undefined }),
                   });
-                }}>
+                }}
+              >
                 以相同設定重試
-              </button>
+              </ConfirmButton>
             )}
           </div>
         </div>

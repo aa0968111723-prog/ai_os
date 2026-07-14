@@ -13,6 +13,7 @@ import { PasswordInput } from "./components/PasswordInput";
 import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
 import { FeedbackWidget } from "./feedback/FeedbackWidget";
 import { Icon } from "./components/Icon";
+import { useFocusTrap } from "./components/interactions";
 
 /**
  * 自助改密碼（拿到管理員的臨時密碼後，從這裡換成自己的）：成功後其他裝置全部登出。
@@ -34,12 +35,15 @@ function ChangePasswordDialog({ onClose, forced = false }: { onClose: () => void
       }, 1800),
   });
   const canSubmit = oldPw.length > 0 && newPw.length >= 8 && !change.isPending && !change.isSuccess;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // 真模態：焦點鎖在對話框內＋鎖背景捲動＋Esc 關閉（強制模式不可關）；關閉後焦點還給開啟者
+  useFocusTrap(dialogRef, true, forced ? undefined : onClose);
   return (
     <div
-      style={{ position: "fixed", inset: 0, background: "rgba(43,38,32,0.35)", display: "grid", placeItems: "center", zIndex: 50 }}
+      style={{ position: "fixed", inset: 0, background: "var(--scrim)", display: "grid", placeItems: "center", zIndex: 50 }}
       onClick={(e) => { if (!forced && e.target === e.currentTarget) onClose(); }}
     >
-      <div className="card" style={{ width: 380, maxWidth: "92vw" }} role="dialog" aria-label="改密碼">
+      <div ref={dialogRef} className="card" style={{ width: 380, maxWidth: "92vw" }} role="dialog" aria-modal="true" aria-label="改密碼">
         <h2 style={{ marginTop: 0 }}>改密碼</h2>
         {forced && <p className="hint">管理員重設了你的密碼——請先設定一組自己的新密碼再繼續使用</p>}
         <form onSubmit={(e) => { e.preventDefault(); if (canSubmit) change.mutate({ oldPassword: oldPw, newPassword: newPw }); }}>
@@ -48,13 +52,13 @@ function ChangePasswordDialog({ onClose, forced = false }: { onClose: () => void
           <label htmlFor="chpw-new">新密碼（至少 8 碼）</label>
           <PasswordInput id="chpw-new" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoComplete="new-password" />
           {newPw.length > 0 && newPw.length < 8 && <p className="hint">還差 {8 - newPw.length} 個字</p>}
-          <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
+          <div style={{ marginTop: "var(--sp-16)", display: "flex", gap: "var(--sp-8)" }}>
             <button className="primary" type="submit" disabled={!canSubmit}>{change.isPending ? "更新中…" : "更新密碼"}</button>
             {!forced && <button type="button" onClick={onClose}>取消</button>}
           </div>
         </form>
         {change.error && <p className="error" role="alert">{change.error.message}</p>}
-        {change.isSuccess && <p className="hint" style={{ color: "var(--success)" }} role="status">已更新 ✓——其他裝置已登出，本裝置不受影響</p>}
+        {change.isSuccess && <p className="hint" style={{ color: "var(--success-ink)" }} role="status"><Icon name="Check" size={14} style={{ verticalAlign: "-2px" }} /> 已更新——其他裝置已登出，本裝置不受影響</p>}
       </div>
     </div>
   );
@@ -149,7 +153,7 @@ export function App() {
   return (
     <div className="app">
       {/* 強制改密碼時整塊背景 inert：對話框遮罩只擋滑鼠，Tab 仍能聚焦到背景，要靠 inert 一起擋 */}
-      <div inert={mustChangePw || undefined}>
+      <div inert={(mustChangePw || showChangePw) || undefined}>
         <header className="topbar">
           <Link href="/" className="brand" style={{ cursor: "pointer", textDecoration: "none", color: "inherit" }}>
             <span className="orb" /> AI Director OS
@@ -158,7 +162,7 @@ export function App() {
             <select
               className="group-select"
               aria-label="切換作用中的組別"
-              style={{ width: "auto", fontSize: 13 }}
+              style={{ width: "auto" }}
               value={activeGroupId}
               onChange={(e) => setActiveGroupId(e.target.value)}
             >
@@ -194,14 +198,15 @@ export function App() {
             ) : me.error ? (
               <p className="error">
                 系統暫時連不上（不是你被登出）——請稍候重新整理，或按{" "}
-                <button style={{ padding: "2px 12px" }} onClick={() => me.refetch()}>重試</button>
+                <button className="btn-sm" onClick={() => me.refetch()}>重試</button>
               </p>
             ) : !me.data ? (
               <LoginPage />
             ) : me.data.groups.length === 0 && !me.data.user.isSuperAdmin ? (
-              <p className="hint" style={{ marginTop: 40, fontSize: 15 }}>
-                你的帳號還沒被加進任何組別——請聯絡你的組長或管理員把你加入組，加入後重新整理就能開始創作。
-              </p>
+              <div className="empty-state" style={{ marginTop: "var(--sp-32)" }}>
+                <h3>還沒有組別</h3>
+                <p>你的帳號還沒被加進任何組別——請聯絡你的組長或管理員把你加入組，加入後重新整理就能開始創作。</p>
+              </div>
             ) : (
               <Switch>
                 <Route path="/">

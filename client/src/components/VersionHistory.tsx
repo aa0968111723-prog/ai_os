@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
+import { ConfirmButton } from "./interactions";
 
 /**
  * 長文版本歷史（#29）：知識庫長文（師父開示逐字稿／見證故事）每次「內容更新」前，
@@ -25,7 +26,8 @@ export function VersionHistory({ knowledgeId, projectId }: { knowledgeId: string
   return (
     <div style={{ marginTop: 10 }}>
       <button
-        style={{ padding: "3px 12px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}
+        className="btn-sm"
+        style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
@@ -52,10 +54,15 @@ export function VersionHistory({ knowledgeId, projectId }: { knowledgeId: string
                 return (
                   <div
                     key={v.id}
-                    className="gen-row"
-                    style={{ gridTemplateColumns: "1fr auto", alignItems: "center", gap: 8 }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "8px 0",
+                      borderTop: "1px solid var(--border-soft)",
+                    }}
                   >
-                    <div style={{ minWidth: 0 }}>
+                    <div style={{ minWidth: 0, flex: "1 1 auto" }}>
                       <div style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <span className="badge">{new Date(v.createdAt).toLocaleString("zh-Hant")}</span>
                         {v.title && <span style={{ fontWeight: 600 }}>{v.title}</span>}
@@ -73,20 +80,17 @@ export function VersionHistory({ knowledgeId, projectId }: { knowledgeId: string
                         {firstLine}
                       </div>
                     </div>
-                    <button
-                      style={{ padding: "3px 12px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 4 }}
+                    <ConfirmButton
+                      triggerClassName="btn-sm"
+                      triggerStyle={{ display: "inline-flex", alignItems: "center", gap: 4 }}
                       disabled={restore.isPending}
-                      onClick={() => {
-                        if (
-                          window.confirm("還原此版本？目前內容會先自動存成一版（可再還原），再改回這個版本。")
-                        ) {
-                          restore.mutate({ knowledgeId, versionId: v.id });
-                        }
-                      }}
+                      message="還原此版本？目前內容會先自動存成一版（可再還原），再改回這個版本。"
+                      confirmLabel="還原"
+                      onConfirm={() => restore.mutate({ knowledgeId, versionId: v.id })}
                     >
                       <Icon name="RotateCcw" size={13} />
                       還原此版本
-                    </button>
+                    </ConfirmButton>
                   </div>
                 );
               })}

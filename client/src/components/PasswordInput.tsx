@@ -11,8 +11,8 @@ export function PasswordInput({ style, ...rest }: Omit<React.ComponentProps<"inp
       <input {...rest} type={visible ? "text" : "password"} style={{ paddingRight: 62, ...style }} />
       <button
         type="button"
-        // tabIndex=-1：Tab 不停在這顆鈕（直接從密碼欄跳下一欄），滑鼠／觸控仍可點
-        tabIndex={-1}
+        className="btn-ghost"
+        // 顯示/隱藏切換可用鍵盤操作：Tab 可聚焦、Enter／Space 觸發
         aria-label={visible ? "隱藏密碼" : "顯示密碼"}
         onClick={() => setVisible((v) => !v)}
         style={{
@@ -20,10 +20,12 @@ export function PasswordInput({ style, ...rest }: Omit<React.ComponentProps<"inp
           right: 8,
           top: "50%",
           transform: "translateY(-50%)",
-          padding: "2px 10px",
+          display: "grid",
+          placeItems: "center",
+          minWidth: 40,
+          minHeight: 40,
+          padding: 0,
           fontSize: 12,
-          border: "none",
-          background: "transparent",
           color: "var(--muted-fg)",
         }}
       >
