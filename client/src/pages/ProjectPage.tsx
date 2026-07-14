@@ -18,6 +18,7 @@ import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PromptLibrary } from "../components/PromptLibrary";
 import { TocNav } from "../components/TocNav";
+import { ProjectAssistant } from "../components/ProjectAssistant";
 import { useCollab, CursorOverlay, CollabZone, COLLAB_ZONES } from "../realtime";
 
 /**
@@ -536,6 +537,7 @@ export function ProjectPage({ id }: { id: string }) {
             <span className="group-desc">每天在這裡工作</span>
             <span className="group-rule" />
           </div>
+          <ProjectAssistant projectId={id} />
           {/* 生成台（11 類 × 旗艦/經濟/最低成本）＝本組主工作台 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>
           <section className="card card--primary" data-fb="生成台">
