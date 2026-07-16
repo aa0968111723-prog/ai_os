@@ -87,7 +87,12 @@ export const generationRouter = router({
         sourceAssetId: input.sourceAssetId,
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
-        assertAccess: (project) => requireGroup(ctx.auth, project.groupId), // 多組隔離
+        assertAccess: async (project) => {
+          const role = requireGroup(ctx.auth, project.groupId); // 多組隔離
+          const { assertProjectEditable } = await import("../services/projectAcl");
+          await assertProjectEditable(ctx.auth, project); // 2.3：專案檢視者不能生成
+          return role;
+        },
       }),
     ),
 

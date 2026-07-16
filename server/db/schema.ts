@@ -388,6 +388,62 @@ export const groupOptions = pgTable("group_options", {
  * pages＝可複選頁面；target*＝被點選的元件描述（page-level 回饋時為 null）。
  */
 /**
+ * 專案級權限（需求 2.3 v1）：預設「組內全員可編輯」（無列＝editor，完全向後相容）；
+ * 組長可把個別成員明確設為 viewer（唯讀：不能生成/改分鏡/改知識庫，仍可看、留言、下載）。
+ * 組長/團隊管理員/開發者永遠可編輯（不受列影響）。新表＝pushSchema 安全。
+ */
+export const projectMembers = pgTable("project_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  role: text("role", { enum: ["editor", "viewer"] }).notNull().default("editor"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  projectIdx: index("project_members_project_idx").on(t.projectId),
+}));
+
+/**
+ * 筆記（需求 10）：會議紀錄等長文。掛組（可選掛專案）；
+ * 更新前由 notes router 存 text_versions 快照（kind='note'，refId=note id），與知識庫同一版本機制。
+ */
+export const notes = pgTable("notes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  /** 掛在某專案下（null＝組層級筆記） */
+  projectId: uuid("project_id"),
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  groupIdx: index("notes_group_idx").on(t.groupId),
+}));
+
+/**
+ * 排程（需求 10）：組行事曆項目（會議、交付死線…）。
+ * 不做 Google OAuth 雙向同步——以 /api/schedule/:groupId/calendar.ics 匯出，
+ * 使用者自行匯入/訂閱到個人 Google 日曆（零 OAuth 基建達八成價值，見優化評估報告）。
+ */
+export const scheduleItems = pgTable("schedule_items", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  /** 關聯專案（null＝組層級行程） */
+  projectId: uuid("project_id"),
+  title: text("title").notNull(),
+  startsAt: timestamp("starts_at").notNull(),
+  /** null＝無明確結束（ics 匯出時以 1 小時計） */
+  endsAt: timestamp("ends_at"),
+  /** 負責人（可選） */
+  ownerId: uuid("owner_id"),
+  note: text("note"),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  groupStartIdx: index("schedule_items_group_start_idx").on(t.groupId, t.startsAt),
+}));
+
+/**
  * 審計日誌（需求 2.2「紀錄每一個行動的每一個細節操作」）：
  * 所有登入後 mutation 由 tRPC 中介層集中寫入（見 services/audit.ts）——
  * 誰、何時、做了什麼（procedure 路徑）、對哪個組/專案、輸入摘要（已脫敏）、成功與否。

@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { and, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { router, authedProcedure, requireGroup } from "../trpc";
+import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { PLATFORMS } from "../../shared/models";
 import { removeStoredFile } from "../services/storage";
 import { getGroupOptions, ensureGroupOptions } from "../services/optionsStore";
+import { assertProjectEditable } from "../services/projectAcl";
 
 /** 範例專案的穩定標題——同時是「去重鍵」：同組已有這個標題的專案就回傳它，絕不重建（擋連點刷爆） */
 const SAMPLE_PROJECT_TITLE = "範例專案：禪心一炷香";
@@ -395,6 +396,60 @@ export const projectsRouter = router({
       return updated;
     }),
 
+  /**
+   * 專案成員與專案級角色（需求 2.3）：組成員清單＋每人的專案有效角色。
+   * canManage＝呼叫者是否可調整（組長以上）；前端據此決定顯示下拉或唯讀。
+   */
+  listMemberRoles: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+    if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+    const myRole = requireGroup(ctx.auth, project.groupId);
+    const members = await db
+      .select({ userId: schema.groupMembers.userId, groupRole: schema.groupMembers.role, name: schema.users.name })
+      .from(schema.groupMembers)
+      .leftJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
+      .where(eq(schema.groupMembers.groupId, project.groupId));
+    const overrides = await db
+      .select()
+      .from(schema.projectMembers)
+      .where(eq(schema.projectMembers.projectId, project.id));
+    const roleOf = (userId: string) => overrides.find((o) => o.userId === userId)?.role === "viewer" ? "viewer" as const : "editor" as const;
+    return {
+      canManage: myRole !== "member",
+      members: members.map((m) => ({
+        userId: m.userId,
+        name: m.name ?? "?",
+        groupRole: m.groupRole,
+        // 組長/管理員固定 editor（projectAcl 同一規則）；一般成員看 override（無列＝editor）
+        projectRole: m.groupRole !== "member" ? ("editor" as const) : roleOf(m.userId),
+      })),
+    };
+  }),
+
+  /** 設定專案級角色（需求 2.3）：組長以上；editor＝刪列回預設、viewer＝upsert 限縮列 */
+  setProjectRole: authedProcedure
+    .input(z.object({ projectId: z.string().uuid(), userId: z.string().uuid(), role: z.enum(["editor", "viewer"]) }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireLeader(ctx.auth, project.groupId);
+      // 目標必須是該組成員；組長/管理員不可被降為 viewer（projectAcl 本來就不看列，擋在這裡讓 UI 一致）
+      const [target] = await db
+        .select()
+        .from(schema.groupMembers)
+        .where(and(eq(schema.groupMembers.groupId, project.groupId), eq(schema.groupMembers.userId, input.userId)));
+      if (!target) throw new TRPCError({ code: "BAD_REQUEST", message: "對方不是此組成員" });
+      if (target.role !== "member") throw new TRPCError({ code: "BAD_REQUEST", message: "組長/管理員固定是編輯者" });
+      // 先清舊列再視需要插 viewer 列——「無列＝editor」是唯一預設語意，不留 editor 冗餘列
+      await db
+        .delete(schema.projectMembers)
+        .where(and(eq(schema.projectMembers.projectId, project.id), eq(schema.projectMembers.userId, input.userId)));
+      if (input.role === "viewer") {
+        await db.insert(schema.projectMembers).values({ projectId: project.id, userId: input.userId, role: "viewer" });
+      }
+      return { ok: true, role: input.role };
+    }),
+
   updateWorldview: authedProcedure
     // partial patch：只送有改的欄位，伺服器端與現值合併。
     // 舊版前端送整包 {...wv, field}，快速連改不同欄位時後一次會用「上一次 render 的舊 wv」覆蓋掉前一次的變更（資料遺失）。
@@ -403,6 +458,7 @@ export const projectsRouter = router({
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.id));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改世界觀
       const current = worldviewSchema.parse(project.worldview ?? {});
       const merged = worldviewSchema.parse({ ...current, ...input.worldview });
       const [updated] = await db

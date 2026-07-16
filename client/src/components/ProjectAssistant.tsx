@@ -9,7 +9,8 @@ type Action =
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
   | { type: "submit_approval"; label: string; sceneId: string }
   | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number }
-  | { type: "run_workflow"; label: string; presetId: string; prompt: string };
+  | { type: "run_workflow"; label: string; presetId: string; prompt: string }
+  | { type: "split_script"; label: string; script: string };
 
 type Turn = { role: "you" | "ai"; text: string; actions?: Action[] };
 
@@ -19,6 +20,7 @@ function toPayload(a: Action) {
   if (a.type === "update_scene") return { type: "update_scene" as const, sceneId: a.sceneId, field: a.field, value: a.value };
   if (a.type === "create_scene") return { type: "create_scene" as const, title: a.title, voiceover: a.voiceover, durationSec: a.durationSec };
   if (a.type === "run_workflow") return { type: "run_workflow" as const, presetId: a.presetId, prompt: a.prompt };
+  if (a.type === "split_script") return { type: "split_script" as const, script: a.script };
   return { type: "submit_approval" as const, sceneId: a.sceneId };
 }
 
@@ -46,7 +48,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
   });
   const run = trpc.assistant.runAction.useMutation({
     onSuccess: (r) => {
-      // 動作可能改了生成/分鏡/審批/額度——讓相關畫面重新抓（create_scene 由 scenes.invalidate 涵蓋）
+      // 動作可能改了生成/分鏡/審批/額度——讓相關畫面重新抓（create_scene、split_script 建的新分鏡由 scenes.invalidate 涵蓋）
       utils.generation.invalidate();
       utils.scenes.invalidate();
       utils.approvals.invalidate();
@@ -72,7 +74,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
         <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 專案助手
       </h2>
       <p className="hint" style={{ marginTop: -4 }}>
-        問我這個專案的進度、生成了什麼、哪些分鏡還沒審…；我也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流），你按確認才執行。每次提問約 1 點。
+        問我這個專案的進度、生成了什麼、哪些分鏡還沒審…；我也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流／貼腳本拆分鏡），你按確認才執行。每次提問約 1 點。
       </p>
 
       {turns.length > 0 && (
@@ -113,7 +115,9 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
                             ? `執行「${act.label}」？會依模型扣點。`
                             : act.type === "run_workflow"
                               ? `執行「${act.label}」？各步驟會分別扣點。`
-                              : `執行「${act.label}」？`
+                              : act.type === "split_script"
+                                ? `執行「${act.label}」？會呼叫 AI 導演拆分鏡並扣點。`
+                                : `執行「${act.label}」？`
                         }
                         confirmLabel="執行"
                         onConfirm={async () => {
@@ -134,7 +138,8 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
                               : act.type === "submit_approval" ? "Check"
                                 : act.type === "create_scene" ? "Plus"
                                   : act.type === "run_workflow" ? "Play"
-                                    : "Pencil"
+                                    : act.type === "split_script" ? "Clapperboard"
+                                      : "Pencil"
                           }
                           size={13}
                           style={{ verticalAlign: "-2px", marginRight: 4 }}

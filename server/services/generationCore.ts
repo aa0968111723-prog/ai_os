@@ -104,9 +104,10 @@ export interface SubmitCoreInput {
   sceneId?: string;
   /** 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）；不帶＝visual（回填 assetId） */
   sceneRole?: "visual" | "narration";
-  /** 存取檢查掛點：tRPC 端帶 requireGroup（多組隔離）；伺服器內部（runner）呼叫時已在建 run 時把過關,可省略。
+  /** 存取檢查掛點：tRPC 端帶 requireGroup（多組隔離；可再疊 2.3 專案級 ACL，故允許 async）；
+   *  伺服器內部（runner）呼叫時已在建 run 時把過關,可省略。
    *  回傳角色（requireGroup 本來就回）供成本審核門檻判斷組員；回 void 的舊呼叫端不受影響（不觸發門檻）。 */
-  assertAccess?: (project: typeof schema.projects.$inferSelect) => "admin" | "leader" | "member" | void;
+  assertAccess?: (project: typeof schema.projects.$inferSelect) => "admin" | "leader" | "member" | void | Promise<"admin" | "leader" | "member" | void>;
 }
 
 /** pg 唯一鍵衝突（23505）：驅動可能把原始錯誤包在 cause，兩層 code 與訊息都檢查 */
@@ -126,7 +127,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
 
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
-  const accessRole = input.assertAccess?.(project); // 多組隔離；回傳角色供成本審核門檻用
+  const accessRole = await input.assertAccess?.(project); // 多組隔離（可含專案級 ACL）；回傳角色供成本審核門檻用
 
   // 素材庫來源 → 簽名網址（同組檢查；本地檔或外部網址都可）
   let sourceUrl = input.sourceUrl;

@@ -5,11 +5,17 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { submitGenerationCore } from "../services/generationCore";
 import { getModel } from "../../shared/models";
+import { assertProjectEditable } from "../services/projectAcl";
 
-async function getProjectChecked(ctx: { auth: NonNullable<import("../trpc").Context["auth"]> }, projectId: string) {
+/**
+ * forEdit（需求 2.3 專案級權限）：分鏡的所有「寫入」mutation 走 forEdit=true——
+ * 專案檢視者（viewer）唯讀；讀取（listByProject）不變。單一守門點，避免逐 mutation 漏掛。
+ */
+async function getProjectChecked(ctx: { auth: NonNullable<import("../trpc").Context["auth"]> }, projectId: string, forEdit = false) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   requireGroup(ctx.auth, project.groupId);
+  if (forEdit) await assertProjectEditable(ctx.auth, project);
   return project;
 }
 
@@ -73,6 +79,8 @@ export const scenesRouter = router({
       const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.generationId));
       if (!gen || gen.status !== "done" || !gen.resultUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "生成尚未完成" });
       requireGroup(ctx.auth, gen.groupId);
+      // 2.3：專案檢視者不能把成品加入分鏡（內容寫入）
+      await assertProjectEditable(ctx.auth, { id: gen.projectId, groupId: gen.groupId });
       const [asset] = await db
         .select()
         .from(schema.assets)
@@ -109,7 +117,7 @@ export const scenesRouter = router({
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
-      await getProjectChecked(ctx, scene.projectId);
+      await getProjectChecked(ctx, scene.projectId, true);
       const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.generationId));
       if (!gen || gen.status !== "done") throw new TRPCError({ code: "BAD_REQUEST", message: "生成尚未完成，無法設為現用" });
       // 生成與分鏡必須同專案（requireGroup 已由 getProjectChecked 保證組隔離；這裡再擋跨專案誤指）
@@ -137,7 +145,7 @@ export const scenesRouter = router({
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
-      await getProjectChecked(ctx, scene.projectId);
+      await getProjectChecked(ctx, scene.projectId, true);
       const all = await db
         .select()
         .from(schema.scenes)
@@ -198,7 +206,7 @@ export const scenesRouter = router({
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
-      await getProjectChecked(ctx, scene.projectId);
+      await getProjectChecked(ctx, scene.projectId, true);
       const patch: Partial<typeof schema.scenes.$inferInsert> = {};
       if (input.title !== undefined) patch.title = input.title;
       if (input.durationSec !== undefined) patch.durationSec = input.durationSec;
@@ -217,7 +225,7 @@ export const scenesRouter = router({
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
-      await getProjectChecked(ctx, scene.projectId);
+      await getProjectChecked(ctx, scene.projectId, true);
       const prompt = input.prompt ?? scene.prompt ?? "";
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       // 額度／守門／失敗退點全由 submitGenerationCore 既有邏輯處理（走 effectivePrompt 世界觀注入）
@@ -242,7 +250,7 @@ export const scenesRouter = router({
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
-      await getProjectChecked(ctx, scene.projectId);
+      await getProjectChecked(ctx, scene.projectId, true);
       const prompt = scene.voiceover ?? "";
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有配音詞，請先在分鏡裡填" });
       // 只放行音訊(TTS)模型：否則傳個圖模會扣點又把圖片塞進 narrationAssetId（audio 播不出）
@@ -269,7 +277,7 @@ export const scenesRouter = router({
   reorder: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), orderedIds: z.array(z.string().uuid()) }))
     .mutation(async ({ ctx, input }) => {
-      await getProjectChecked(ctx, input.projectId);
+      await getProjectChecked(ctx, input.projectId, true);
       // 只允許重排本專案「未刪除」的分鏡，避免越權改到別專案的列、也不動回收桶裡的格
       const rows = await db
         .select({ id: schema.scenes.id })

@@ -210,6 +210,14 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
     if (!auth.groups.some((g) => g.groupId === project.groupId)) {
       await cleanup(); return res.status(403).json({ error: "你不屬於這個組" });
     }
+    // 2.3 專案級權限：檢視者不能上傳素材（內容寫入）
+    try {
+      const { assertProjectEditable } = await import("./services/projectAcl");
+      await assertProjectEditable(auth, project);
+    } catch {
+      await cleanup();
+      return res.status(403).json({ error: "你在此專案是「檢視者」（唯讀）——要上傳請組長調整專案權限" });
+    }
 
     let mime = req.file.mimetype.split(";")[0].trim().toLowerCase();
     // 瀏覽器對 .md/.txt 等常送 application/octet-stream——改用副檔名後備判斷
@@ -332,6 +340,31 @@ app.get("/api/downloads/file", async (req, res) => {
   } catch (err) {
     console.error("[downloads:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "下載失敗，請稍後再試" });
+  }
+});
+
+// 組排程 .ics 匯出（需求 10）：登入＋組隔離；下載後匯入個人 Google/Apple 日曆（不做 OAuth 雙向同步）
+app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const groupId = req.params.groupId;
+    if (!auth.groups.some((g) => g.groupId === groupId)) return res.status(403).json({ error: "你不屬於這個組" });
+    const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
+    if (!group) return res.status(404).json({ error: "找不到組" });
+    const items = await db
+      .select()
+      .from(schema.scheduleItems)
+      .where(eq(schema.scheduleItems.groupId, groupId))
+      .orderBy(asc(schema.scheduleItems.startsAt))
+      .limit(500);
+    const { buildIcs } = await import("./routers/schedule");
+    res.attachment("組排程.ics"); // RFC 5987 中文檔名
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.send(buildIcs(group.name, items));
+  } catch (err) {
+    console.error("[schedule:ics]", err);
+    if (!res.headersSent) res.status(500).json({ error: "匯出失敗，請稍後再試" });
   }
 });
 

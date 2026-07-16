@@ -19,7 +19,7 @@ export interface StartWorkflowCoreInput {
   projectId: string;
   presetId: string;
   prompt: string;
-  assertAccess: (project: typeof schema.projects.$inferSelect) => void;
+  assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
 }
 
 /**
@@ -33,7 +33,7 @@ export async function startWorkflowCore(input: StartWorkflowCoreInput) {
   if (!preset) throw new TRPCError({ code: "BAD_REQUEST", message: "未知的工作流（請重新整理頁面後再選一次）" });
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
-  input.assertAccess(project); // 多組隔離
+  await input.assertAccess(project); // 多組隔離（可含 2.3 專案級 ACL）
   // 併發守門：同人同專案一次只跑一條（check-then-insert 有極短競態視窗，
   // 但每步扣點在 runner 端有冪等防護，這裡只求把重複點擊擋成好懂的錯誤）
   const [active] = await db
@@ -79,7 +79,12 @@ export const workflowsRouter = router({
         projectId: input.projectId,
         presetId: input.presetId,
         prompt: input.prompt,
-        assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
+        assertAccess: async (p) => {
+          requireGroup(ctx.auth, p.groupId);
+          // 2.3：專案檢視者不能啟動工作流（一次多步生成＝內容寫入）
+          const { assertProjectEditable } = await import("../services/projectAcl");
+          await assertProjectEditable(ctx.auth, p);
+        },
       }),
     ),
 

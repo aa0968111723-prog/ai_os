@@ -9,12 +9,14 @@ import { isMockMode } from "../services/fal";
 import { proxyFetch } from "../services/http";
 import { reserveQuota, refund } from "../services/points";
 import { submitGenerationCore } from "../services/generationCore";
+import { assertProjectEditable } from "../services/projectAcl";
 import { submitApprovalCore } from "./approvals";
 import { startWorkflowCore } from "./workflows";
+import { splitScriptCore } from "./director";
 import { buildKnowledgeContext } from "./knowledge";
 
 /**
- * AI 專案助手（進階版）：讀專案上下文回答，並可「提議」動作（生成／新增分鏡／改分鏡／送審／跑工作流）。
+ * AI 專案助手（進階版）：讀專案上下文回答，並可「提議」動作（生成／新增分鏡／改分鏡／送審／跑工作流／拆分鏡）。
  * 安全設計：助手只「提議」，一切花點數或改資料的動作都由前端讓使用者按確認後、
  * 再走 runAction 以「登入者本人」身分執行（非自動、非超管）——AI 不會擅自動手。
  * LLM 輸出一律只帶「代號」（sceneNo／modelId／presetId），落地前全部過白名單／範圍校驗，防幻覺 id。
@@ -78,6 +80,8 @@ const proposalSchema = z.discriminatedUnion("type", [
   // durationSec 不強制整數：LLM 偶爾會回 4.5 這種值，整筆回覆因此解析失敗太傷——落地時再取整
   z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional() }),
   z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().min(1).max(2000) }),
+  // split_script 的 script＝腳本全文（要求 LLM 從使用者訊息原樣抄錄）；下限 20 擋「拆一句話」的誤提議，上限 8000 收斂成本
+  z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
 ]);
 const replySchema = z.object({ answer: z.string().min(1).max(4000), actions: z.array(proposalSchema).max(6).optional() });
 
@@ -87,7 +91,8 @@ type ResolvedAction =
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
   | { type: "submit_approval"; label: string; sceneId: string }
   | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number }
-  | { type: "run_workflow"; label: string; presetId: string; prompt: string };
+  | { type: "run_workflow"; label: string; presetId: string; prompt: string }
+  | { type: "split_script"; label: string; script: string };
 
 /** runAction 輸入：前端把已確認的動作原樣送回（型別與 ResolvedAction 對齊） */
 const actionInputSchema = z.discriminatedUnion("type", [
@@ -96,6 +101,7 @@ const actionInputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("submit_approval"), sceneId: z.string().uuid() }),
   z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional() }),
   z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().min(1).max(2000) }),
+  z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
 ]);
 
 const FIELD_LABEL: Record<string, string> = { title: "標題", voiceover: "旁白", durationSec: "秒數" };
@@ -157,6 +163,9 @@ ${sceneLines}
             const preset = getWorkflow(a.presetId);
             if (!preset) continue; // 幻覺的 presetId：不給使用者一顆註定失敗的按鈕
             out.push({ type: "run_workflow", presetId: preset.id, prompt: a.prompt, label: `執行工作流「${preset.label}」（約 ${preset.points} 點）` });
+          } else if (a.type === "split_script") {
+            // label 註明會叫 AI 導演與扣點，使用者按下前就知道這顆會花錢
+            out.push({ type: "split_script", script: a.script, label: `把腳本拆成分鏡：「${a.script.slice(0, 24)}…」（AI 導演，會扣 LLM 點數）` });
           } else {
             const scene = scenes[a.sceneNo - 1];
             if (!scene) continue;
@@ -186,7 +195,9 @@ ${sceneLines}
 - submit_approval：把某一鏡送審（sceneNo）
 - create_scene：在片尾新增一個分鏡（title 必填 80 字內；可選 voiceover 旁白、durationSec 秒數 1–60）
 - run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
+- split_script：把腳本拆成一幕幕的分鏡草稿（script＝腳本全文，從使用者訊息原樣抄錄，至少 20 字；只在使用者貼了完整腳本／逐字稿、想把它變成分鏡時才提議；會呼叫 AI 導演並扣 LLM 點數）
 分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。modelId／presetId 只能抄下方速查表的 id，不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
+一條龍引導：遇到「從腳本到成片」這類跨階段請求，按階段提議、分輪推進——本輪先提議 split_script 拆分鏡；等使用者執行完、下一輪對話在 <專案現況> 看到新分鏡後，再逐鏡提議 generate 生成畫面；畫面齊了再提議 submit_approval 送審。一次回覆最多提議 6 個動作；每個動作都要使用者按確認才會執行，不要假設前一步已完成，也不要替使用者跳過確認。
 <可用模型速查>
 ${MODEL_CHEATSHEET}
 </可用模型速查>
@@ -230,6 +241,8 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
+      // 2.3 專案級權限：檢視者（viewer）在此專案唯讀，不能執行任何助手動作；唯讀問答 ask 不擋
+      await assertProjectEditable(ctx.auth, project);
       const a = input.action;
 
       if (a.type === "generate") {
@@ -319,6 +332,17 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
         });
         return { ok: true, kind: "run_workflow" as const, runId: run.id, message: "工作流已啟動，進度見工作流卡" };
+      }
+
+      if (a.type === "split_script") {
+        // 重用 AI 導演拆分鏡核心（節流／腳本檢查／假模式／扣點退點／建 todo 分鏡，與導演卡完全同一套守門）
+        const result = await splitScriptCore({
+          userId: ctx.auth.user.id,
+          projectId: project.id,
+          scriptText: a.script,
+          assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
+        });
+        return { ok: true, kind: "split_script" as const, createdScenes: result.count, message: `已拆出 ${result.count} 個分鏡，可逐鏡生成畫面` };
       }
 
       // submit_approval：走與網頁「送審」完全相同的核心（版本號原子產生、標分鏡 pending、系統訊息）
