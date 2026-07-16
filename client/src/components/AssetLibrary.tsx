@@ -46,6 +46,16 @@ export function AssetLibrary({
   const del = trpc.projects.deleteAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
   const rename = trpc.projects.renameAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
   const toKnowledge = trpc.knowledge.addFromAsset.useMutation({ onSuccess: () => utils.knowledge.list.invalidate({ projectId }) });
+  // 圖片 AI 描述入知識庫（需求 6.2）：後端呼叫視覺模型看圖寫描述並寫入知識庫（依模型扣點）。
+  // 成功後除了 invalidate，卡片上短暫顯示成功樣式（describedId，2.5 秒後自動消失）。
+  const [describedId, setDescribedId] = useState<string | null>(null);
+  const describeImage = trpc.knowledge.describeImageAsset.useMutation({
+    onSuccess: (_data, vars) => {
+      utils.knowledge.list.invalidate({ projectId });
+      setDescribedId(vars.assetId);
+      window.setTimeout(() => setDescribedId((cur) => (cur === vars.assetId ? null : cur)), 2500);
+    },
+  });
   const setLock = trpc.projects.setAssetLock.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
   const fileInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -62,6 +72,15 @@ export function AssetLibrary({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [lightbox, setLightbox] = useState<{ url: string; title: string } | null>(null);
+  // 多選打包：勾選的素材 id 集合——有勾選時工具列出現「打包所選」，只打包這些素材的媒體檔
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const toggleSelect = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   /** 多檔逐一上傳：一檔失敗不擋後面的檔，全部跑完再彙整成敗 */
   const doUpload = async (files: FileList | null) => {
@@ -254,6 +273,31 @@ export function AssetLibrary({
                 </span>
               )}
             </div>
+            {/* 多選打包（需求 #8）：勾卡片角落的核取框，這裡出現「打包所選」——沒勾任何時不顯示打包鈕 */}
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+              <button type="button" style={smallBtn} title="全選目前顯示的素材" onClick={() => setSelected(new Set(shown.map((a) => a.id)))}>
+                全選
+              </button>
+              {selected.size > 0 && (
+                <>
+                  <button type="button" style={smallBtn} onClick={() => setSelected(new Set())}>
+                    清除
+                  </button>
+                  <a
+                    href={`/api/export/${projectId}?assetIds=${[...selected].join(",")}`}
+                    download
+                    title="只打包勾選素材的媒體檔（腳本鏡頭表、字幕與時間軸等交付文件照常附上）"
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 10px", fontSize: 11,
+                      borderRadius: 999, textDecoration: "none", background: "var(--primary-solid)", color: "var(--primary-fg)",
+                    }}
+                  >
+                    <Icon name="Package" size={13} /> 打包所選（{selected.size}）
+                  </a>
+                  <span className="hint" style={{ margin: 0, fontSize: 11 }}>已勾 {selected.size} 個</span>
+                </>
+              )}
+            </div>
             <p className="hint" style={{ margin: 0 }}>
               {filterActive ? `顯示 ${shown.length} / 共 ${total} 個素材` : `共 ${total} 個素材`}
             </p>
@@ -285,8 +329,19 @@ export function AssetLibrary({
                     key={a.id}
                     className="asset-cell"
                     data-fb="素材格"
-                    style={isSource ? { outline: "2px solid var(--primary)", outlineOffset: 2, borderRadius: 8 } : undefined}
+                    // position: relative 讓多選核取框能釘在卡片角落
+                    style={{ position: "relative", ...(isSource ? { outline: "2px solid var(--primary)", outlineOffset: 2, borderRadius: 8 } : undefined) }}
                   >
+                    {/* 多選打包核取框：釘在角落、不擋縮圖主體 */}
+                    <input
+                      type="checkbox"
+                      checked={selected.has(a.id)}
+                      aria-label={`選取素材 ${a.title}`}
+                      title="勾選後可用工具列「打包所選」只打包這些素材"
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleSelect(a.id)}
+                      style={{ position: "absolute", top: 6, left: 6, zIndex: 2, width: 16, height: 16, margin: 0, accentColor: "var(--primary)", cursor: "pointer" }}
+                    />
                     {a.kind === "image" && a.url ? (
                       <div
                         role="button"
@@ -334,6 +389,18 @@ export function AssetLibrary({
                         {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
                       </div>
+
+                      {/* AI 描述入知識庫的就地回饋：進行中轉圈／成功後短暫綠字（2.5 秒自動消失） */}
+                      {describeImage.isPending && describeImage.variables?.assetId === a.id && (
+                        <div className="hint" style={{ fontSize: 11 }}>
+                          <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />AI 描述中…
+                        </div>
+                      )}
+                      {describedId === a.id && (
+                        <div className="hint" style={{ fontSize: 11, color: "var(--success-ink)" }}>
+                          <Icon name="Check" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />已描述入知識庫
+                        </div>
+                      )}
 
                       {/* 音訊直接在格子裡試聽 */}
                       {a.kind === "audio" && a.url && (
@@ -383,6 +450,19 @@ export function AssetLibrary({
                               加入知識庫
                             </button>
                           )}
+                          {/* 圖片版「加入知識庫」（需求 6.2）：AI 看圖寫描述後寫入知識庫——就地確認以免誤扣點 */}
+                          {a.kind === "image" && (
+                            <ConfirmButton
+                              triggerClassName="menu-item"
+                              disabled={describeImage.isPending}
+                              triggerTitle="讓 AI 看圖寫描述並存進知識庫——會呼叫視覺模型，依模型扣點"
+                              message={`用 AI 描述「${a.title}」並寫入知識庫？會呼叫視覺模型，依模型扣點。`}
+                              confirmLabel="描述並寫入"
+                              onConfirm={() => { describeImage.mutate({ assetId: a.id }); setMenuOpenId(null); }}
+                            >
+                              AI 描述入知識庫
+                            </ConfirmButton>
+                          )}
                           <button className="menu-item" disabled={rename.isPending} onClick={() => startRename(a.id, a.title)}>
                             <Icon name="Pencil" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />改名
                           </button>
@@ -424,6 +504,7 @@ export function AssetLibrary({
       )}
       {del.error && <p className="error">{del.error.message}</p>}
       {rename.error && <p className="error">改名失敗：{rename.error.message}</p>}
+      {describeImage.error && <p className="error">AI 描述失敗：{describeImage.error.message}</p>}
 
       {/* 頁內大圖遮罩：點外部或 Esc 關閉 */}
       {lightbox && (

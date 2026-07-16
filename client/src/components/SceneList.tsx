@@ -16,6 +16,16 @@ const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
 // 日常主力：便宜快、剪輯人員逐格試圖首選。要換模型可到上方生成台挑（那裡有完整模型指南）。
 const DEFAULT_MODEL = "fal-ai/fast-lightning-sdxl";
 
+// 目標剪輯軟體 → 可直接匯入的時間軸/字幕格式（需求 #8）：剪映/CapCut/Premiere 吃 SRT、
+// Final Cut Pro（含剪映專業版）吃 FCPXML、DaVinci Resolve 吃 EDL。
+const EDIT_TARGETS = [
+  { key: "capcut", label: "剪映 / CapCut", format: "srt" },
+  { key: "premiere", label: "Premiere", format: "srt" },
+  { key: "fcp", label: "Final Cut Pro", format: "fcpxml" },
+  { key: "resolve", label: "DaVinci Resolve", format: "edl" },
+] as const;
+type EditTargetKey = (typeof EDIT_TARGETS)[number]["key"];
+
 type Scene = {
   id: string;
   title: string;
@@ -427,6 +437,9 @@ export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: str
   const totalSec = list.reduce((sum, s) => sum + s.durationSec, 0);
 
   const [showPreview, setShowPreview] = useState(false);
+  // 目標剪輯軟體（決定「下載時間軸/字幕」拿哪種格式）；預設剪映——組內主力剪輯軟體
+  const [editTarget, setEditTarget] = useState<EditTargetKey>("capcut");
+  const timelineFormat = EDIT_TARGETS.find((t) => t.key === editTarget)?.format ?? "srt";
 
   return (
     <section className="card" data-fb="分鏡與交付">
@@ -482,6 +495,29 @@ export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: str
             >
               打包下載交付包（.zip）
             </a>
+            {/* 單檔時間軸/字幕下載（需求 #8）：不用整包也能拿到目標剪輯軟體可直接匯入的檔 */}
+            <label style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
+              目標剪輯軟體
+              <select
+                value={editTarget}
+                aria-label="目標剪輯軟體"
+                onChange={(e) => setEditTarget(e.target.value as EditTargetKey)}
+                style={{ width: "auto", fontSize: "var(--fs-13)", padding: "6px 10px" }}
+              >
+                {EDIT_TARGETS.map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}（.{t.format}）</option>
+                ))}
+              </select>
+            </label>
+            <a
+              href={`/api/export/${projectId}/timeline?format=${timelineFormat}`}
+              download
+              className="btn-tonal"
+              title="只下載目標剪輯軟體可匯入的時間軸/字幕單檔（時間碼依分鏡秒數累計）"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "solid", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
+            >
+              <Icon name="Download" /> 下載時間軸/字幕
+            </a>
             <button
               data-fb="粗剪預覽"
               style={{ padding: "10px 18px", fontSize: "var(--fs-14)", borderRadius: "var(--r-12)" }}
@@ -500,6 +536,7 @@ export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: str
             </button>
             <span className="hint">共 {list.length} 鏡・約 {totalSec} 秒｜含素材＋腳本鏡頭表，直接進剪映/Premiere；大專案打包需要一點時間</span>
           </div>
+          <p className="hint" style={{ margin: "6px 0 0" }}>zip 交付包內也已附三種格式（交付/字幕.srt・時間軸.fcpxml・剪輯表.edl）</p>
           {showPreview && (
             <div style={{ marginTop: 14 }}>
               {/* 傳 onClose：StoryboardPlayer 是全螢幕 modal，沒接 onClose 的話 ✕鈕與 Esc 都失效→使用者被困需重載 */}
