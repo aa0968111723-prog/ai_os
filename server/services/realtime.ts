@@ -232,7 +232,7 @@ function join(ws: WebSocket, ctx: { projectId: string; userId: string; name: str
   });
 
   ws.on("message", (raw) => {
-    let msg: { type?: unknown; x?: unknown; y?: unknown; zone?: unknown };
+    let msg: { type?: unknown; x?: unknown; y?: unknown; zone?: unknown; anchor?: unknown; ax?: unknown; ay?: unknown };
     try {
       const text = String(raw);
       if (text.length > 2048) return; // 協定內全是小訊息，超長一律視為異常丟棄
@@ -246,7 +246,19 @@ function join(ws: WebSocket, ctx: { projectId: string; userId: string; name: str
       if (now - client.lastCursorAt < MIN_CURSOR_MS) return;
       client.lastCursorAt = now;
       if (userThrottled(client.userId, "cursor", now, MIN_CURSOR_MS)) return;
-      broadcast(theRoom, { type: "cursor", userId: client.userId, name: client.name, color: client.color, x: msg.x, y: msg.y }, client);
+      // x/y 為 0..1 頁面比例；anchor 為游標所在 [data-fb] 卡片代號＋卡內比例（跨版面對位用，見 client/realtime.tsx）。
+      // 全部夾制/驗證後才轉發——不信任 client（超長 anchor、超界數值一律收斂）。
+      const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
+      const anchor = typeof msg.anchor === "string" && msg.anchor.length <= 80 ? msg.anchor : null;
+      broadcast(
+        theRoom,
+        {
+          type: "cursor", userId: client.userId, name: client.name, color: client.color,
+          x: clamp01(msg.x), y: clamp01(msg.y),
+          anchor, ax: clamp01(typeof msg.ax === "number" ? msg.ax : 0), ay: clamp01(typeof msg.ay === "number" ? msg.ay : 0),
+        },
+        client,
+      );
     } else if (msg.type === "focus" && (msg.zone === null || typeof msg.zone === "string")) {
       if (now - client.lastFocusAt < MIN_FOCUS_MS) return;
       client.lastFocusAt = now;

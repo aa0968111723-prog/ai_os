@@ -24,9 +24,14 @@ export const feedbackReportsRouter = router({
         // 被點元件的可讀標籤與定位路徑（頁面級回饋時前端不傳 → null）
         targetLabel: z.string().max(200).optional(),
         targetSelector: z.string().max(1000).optional(),
-        // 點選當下的位置與視窗尺寸 {x,y,w,h,vw,vh}；只用來還原標記框——收斂成固定數字欄位，擋任意物件塞入
+        // 點選當下的位置與視窗尺寸 {x,y,w,h,vw,vh}＋相對最近 [data-fb] 卡片的比例 {rx,ry,rw,rh}
+        // （viewport 座標跨裝置不準，重播標記框以「targetSelector 卡片＋比例」優先）；
+        // 只用來還原標記框——收斂成固定數字欄位，擋任意物件塞入
         targetRect: z
-          .object({ x: z.number(), y: z.number(), w: z.number(), h: z.number(), vw: z.number(), vh: z.number() })
+          .object({
+            x: z.number(), y: z.number(), w: z.number(), h: z.number(), vw: z.number(), vh: z.number(),
+            rx: z.number(), ry: z.number(), rw: z.number(), rh: z.number(),
+          })
           .partial()
           .optional(),
         note: z.string().min(1, "請寫一句說明").max(2000),

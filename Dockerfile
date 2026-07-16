@@ -15,6 +15,9 @@ COPY --from=builder /app/dist ./dist
 COPY package.json drizzle.config.ts ./
 COPY server/db/schema.ts ./server/db/schema.ts
 COPY scripts/start.sh ./start.sh
+# 資料下載區（需求 #11）在執行期服務 docs/ 與 README 原檔——runner 也要帶著
+COPY --from=builder /app/docs ./docs
+COPY --from=builder /app/README.md ./README.md
 EXPOSE 3000
 # 啟動腳本：檢查 DATABASE_URL → 重試建表（DB 慢就緒也扛得住）→ 啟動；log 全中文可讀
 CMD ["sh", "/app/start.sh"]

@@ -13,14 +13,16 @@ export const KNOWLEDGE_KINDS = [
 
 /** 單筆知識內容上限（避免超長逐字稿撐爆 DB／注入；夠放一篇開示或短腳本） */
 const MAX_CONTENT = 40_000;
-/** 注入 AI 導演時的總字數上限（LLM 上下文成本控制；超過只取前幾份＋截斷） */
+/** 注入 AI 導演時的預設總字數上限（LLM 上下文成本控制；超過只取前幾份＋截斷） */
 const INJECT_BUDGET = 8_000;
 
 /**
- * 把專案知識庫組成一段可注入 LLM 的上下文（給 director.suggest 等重用）。
- * 依建立時間由新到舊取，總量到 INJECT_BUDGET 為止；回空字串代表沒有知識。
+ * 把專案知識庫組成一段可注入 LLM 的上下文（給 director.suggest／assistant.ask 等重用）。
+ * 依建立時間由新到舊取，總量到 budget 為止；回空字串代表沒有知識。
+ * budget 依呼叫端的模型窗口自定（6.1 上下文窗口）：目前後端 LLM（gemini flash 系）窗口極大，
+ * 上限主要是成本考量而非模型限制——助手可放寬、導演維持預設。
  */
-export async function buildKnowledgeContext(projectId: string): Promise<string> {
+export async function buildKnowledgeContext(projectId: string, budgetChars: number = INJECT_BUDGET): Promise<string> {
   const rows = await db
     .select()
     .from(schema.knowledge)
@@ -30,7 +32,7 @@ export async function buildKnowledgeContext(projectId: string): Promise<string> 
   if (rows.length === 0) return "";
   const labelOf = (k: string) => KNOWLEDGE_KINDS.find((x) => x.id === k)?.label ?? k;
   const parts: string[] = [];
-  let budget = INJECT_BUDGET;
+  let budget = Math.max(0, budgetChars);
   for (const r of rows) {
     if (budget <= 0) break;
     const slice = r.content.slice(0, budget);

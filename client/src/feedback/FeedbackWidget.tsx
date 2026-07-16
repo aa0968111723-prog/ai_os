@@ -34,9 +34,11 @@ export function FeedbackWidget() {
   // 表單欄位提升到這裡：重選元件時 ReportForm 會 remount，欄位放這才不會被清空
   const [category, setCategory] = useState<FeedbackCategory>(FEEDBACK_CATEGORIES[0].value);
   const [pages, setPages] = useState<Set<string>>(new Set());
-  const [note, setNote] = useState("");
+  // 三步引導（需求 #3）：與其一格「想說的話」，分成「哪裡有問題」＋「希望怎麼改」兩題引導著寫
+  const [problem, setProblem] = useState("");
+  const [expected, setExpected] = useState("");
   const [noShot, setNoShot] = useState(false);
-  const resetForm = () => { setCategory(FEEDBACK_CATEGORIES[0].value); setPages(new Set()); setNote(""); setNoShot(false); };
+  const resetForm = () => { setCategory(FEEDBACK_CATEGORIES[0].value); setPages(new Set()); setProblem(""); setExpected(""); setNoShot(false); };
 
   // 離開頁面/卸載時務必收掉還開著的選取 overlay，免得殘留一層攔滑鼠的透明層
   useEffect(() => () => stopRef.current?.(), []);
@@ -68,7 +70,7 @@ export function FeedbackWidget() {
       () => {
         stopRef.current = null;
         // 取消選取回到表單（若已在填）或選單——不清掉已填欄位
-        setMode(note || pages.size ? "form" : "menu");
+        setMode(problem || expected || pages.size ? "form" : "menu");
       },
     );
   };
@@ -125,8 +127,10 @@ export function FeedbackWidget() {
           setCategory={setCategory}
           pages={pages}
           togglePage={(p) => setPages((prev) => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; })}
-          note={note}
-          setNote={setNote}
+          problem={problem}
+          setProblem={setProblem}
+          expected={expected}
+          setExpected={setExpected}
           noShot={noShot}
           setNoShot={setNoShot}
           onClose={close}
@@ -156,6 +160,15 @@ export function FeedbackWidget() {
   );
 }
 
+/** 各分類的引導提問（需求 #3：引導寫出「哪裡有問題、怎麼改」，而不是面對一格空白不知從何說起） */
+const GUIDE: Record<FeedbackCategory, { problem: string; expected: string }> = {
+  bug: { problem: "你做了什麼、然後發生什麼？（按了哪裡、看到什麼錯誤或怪畫面）", expected: "你原本預期它應該怎樣？" },
+  uiux: { problem: "哪裡不好按、看不懂、位置怪或太小？", expected: "你希望它長什麼樣、或放在哪裡比較順手？" },
+  feature: { problem: "現在少了什麼，讓你在哪個環節卡住或繞路？", expected: "想要的功能大概怎麼運作？（描述理想流程即可）" },
+  stuck: { problem: "你想完成什麼、卡在哪一步？", expected: "你覺得在哪裡加個提示或入口就能自己過關？" },
+  other: { problem: "想說的話…", expected: "有什麼建議或期待？（可留空）" },
+};
+
 function ReportForm({
   target,
   groupId,
@@ -163,8 +176,10 @@ function ReportForm({
   setCategory,
   pages,
   togglePage,
-  note,
-  setNote,
+  problem,
+  setProblem,
+  expected,
+  setExpected,
   noShot,
   setNoShot,
   onClose,
@@ -176,8 +191,10 @@ function ReportForm({
   setCategory: (c: FeedbackCategory) => void;
   pages: Set<string>;
   togglePage: (p: string) => void;
-  note: string;
-  setNote: (v: string) => void;
+  problem: string;
+  setProblem: (v: string) => void;
+  expected: string;
+  setExpected: (v: string) => void;
   noShot: boolean;
   setNoShot: (v: boolean) => void;
   onClose: () => void;
@@ -241,10 +258,14 @@ function ReportForm({
           // 截圖是可選的：上傳失敗就當沒附，不擋文字回報
         }
       }
+      // 兩題引導答案組成一段結構化文字存進既有 note 欄位（不動 DB schema；審閱端直接可讀）
+      const note = expected.trim()
+        ? `【哪裡有問題】${problem.trim()}\n【希望怎麼改】${expected.trim()}`
+        : problem.trim();
       await submit.mutateAsync({
         category,
         pages: [...pages],
-        note: note.trim(),
+        note,
         targetLabel: target?.targetLabel,
         targetSelector: target?.targetSelector,
         targetRect: target?.targetRect,
@@ -273,7 +294,8 @@ function ReportForm({
     );
   }
 
-  const canSubmit = note.trim().length > 0 && !submitting;
+  const canSubmit = problem.trim().length > 0 && !submitting;
+  const guide = GUIDE[category] ?? GUIDE.other;
 
   return (
     <div
@@ -299,7 +321,7 @@ function ReportForm({
         </p>
       )}
 
-      <label style={{ margin: "12px 0 4px" }}>這是什麼樣的回饋？</label>
+      <label style={{ margin: "12px 0 4px" }}>① 這是什麼樣的回饋？</label>
       <div role="radiogroup" aria-label="回饋分類" {...catRoving.groupProps}>
         {FEEDBACK_CATEGORIES.map((c, i) => {
           const on = category === c.value;
@@ -344,15 +366,25 @@ function ReportForm({
         })}
       </div>
 
-      <label htmlFor="fb-note" style={{ margin: "12px 0 4px" }}>想說的話</label>
+      <label htmlFor="fb-problem" style={{ margin: "12px 0 4px" }}>② 哪裡有問題？</label>
       <textarea
-        id="fb-note"
-        value={note}
-        maxLength={2000}
-        onChange={(e) => setNote(e.target.value)}
-        placeholder="這裡怎麼了、你期待它怎樣、或哪裡卡住…"
-        style={{ minHeight: 84 }}
+        id="fb-problem"
+        value={problem}
+        maxLength={1200}
+        onChange={(e) => setProblem(e.target.value)}
+        placeholder={guide.problem}
+        style={{ minHeight: 72 }}
         autoFocus
+      />
+
+      <label htmlFor="fb-expected" style={{ margin: "12px 0 4px" }}>③ 希望怎麼改？<span className="hint">（選填）</span></label>
+      <textarea
+        id="fb-expected"
+        value={expected}
+        maxLength={700}
+        onChange={(e) => setExpected(e.target.value)}
+        placeholder={guide.expected}
+        style={{ minHeight: 56 }}
       />
 
       <div style={{ marginTop: 10 }}>
@@ -386,7 +418,7 @@ function ReportForm({
         <button className="primary" disabled={!canSubmit} onClick={doSubmit}>
           {submitting ? "送出中…" : "送出"}
         </button>
-        <span className="hint">{note.trim().length === 0 ? "請至少寫一句" : ""}</span>
+        <span className="hint">{problem.trim().length === 0 ? "第 ② 題至少寫一句" : ""}</span>
       </div>
       {submit.error && (
         <p className="error" role="alert">

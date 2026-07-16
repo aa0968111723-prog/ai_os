@@ -238,7 +238,7 @@ function SelfTestCard() {
       const data = await res.json().catch(() => ({}));
       // 403（非超管）或任何非 2xx 回應沒有 checks 陣列——直接 .map 會整頁崩掉，先分流
       if (!res.ok || !Array.isArray(data.checks)) {
-        setErrMsg(data.error ?? (res.status === 403 ? "系統自檢需要超管帳號" : `自檢失敗（HTTP ${res.status}）`));
+        setErrMsg(data.error ?? (res.status === 403 ? "系統自檢需要開發者帳號" : `自檢失敗（HTTP ${res.status}）`));
         return;
       }
       setResult(data);
@@ -514,11 +514,11 @@ export function AdminPage() {
         {isSuperAdmin && <CreateTeamCard />}
         <div className="card" data-fb="點數與額度卡">
           <h2>點數與額度（彈性・隨時可調）</h2>
-          <p className="hint">空白＝不限。總預算限超管；各組週額度由團隊管理員在左側團隊卡調整。</p>
+          <p className="hint">空白＝不限。總預算限開發者；各組週額度由團隊管理員在左側團隊卡調整。</p>
           {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值 */}
           {settings.data ? (
             <>
-              <label htmlFor="settings-total-budget">總預算點數（全系統）{!isSuperAdmin && <span className="hint">・限超管調整</span>}</label>
+              <label htmlFor="settings-total-budget">總預算點數（全系統）{!isSuperAdmin && <span className="hint">・限開發者調整</span>}</label>
               {/* 非超管改總預算會被後端擋（FORBIDDEN）——直接 disable 並說明，別讓人白填才報錯 */}
               <input
                 id="settings-total-budget"
@@ -529,7 +529,7 @@ export function AdminPage() {
                 placeholder="不限"
                 onBlur={saveBudget}
                 disabled={!isSuperAdmin}
-                title={isSuperAdmin ? undefined : "只有超級管理員能調整全系統總預算"}
+                title={isSuperAdmin ? undefined : "只有開發者能調整全系統總預算"}
               />
               <label htmlFor="settings-weekly">預設每人每週上限</label>
               <input id="settings-weekly" ref={weeklyRef} type="number" min={0} defaultValue={settings.data.defaultWeeklyPoints ?? ""} placeholder="不限" onBlur={saveBudget} disabled={!isSuperAdmin} />

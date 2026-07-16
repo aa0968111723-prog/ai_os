@@ -9,7 +9,12 @@ import html2canvas from "html2canvas";
 export interface PickResult {
   targetLabel: string;
   targetSelector: string;
-  targetRect: { x: number; y: number; w: number; h: number; vw: number; vh: number };
+  /**
+   * x/y/w/h＝點選當下的 viewport 座標（截圖描框用，同一瞬間必準）；vw/vh＝當時視窗尺寸。
+   * rx/ry/rw/rh＝相對最近 [data-fb] 卡片的比例（0..1）——viewport 座標換一台裝置/視窗就對不上
+   * （回饋 #5 的「位置不精準」），之後要在別的螢幕重播標記框時，用「同名卡片＋比例」重新解析才準。
+   */
+  targetRect: { x: number; y: number; w: number; h: number; vw: number; vh: number; rx?: number; ry?: number; rw?: number; rh?: number };
 }
 
 const WIDGET_ATTR = "data-fb-widget";
@@ -189,14 +194,16 @@ export function selectorOf(el: Element): string {
 }
 
 /**
- * 進入選取模式：全螢幕透明 overlay 攔滑鼠，用 elementFromPoint 找游標下元素，
- * 畫外框高亮＋浮動小標籤。點擊→onPick；Esc 或右鍵→onCancel。回傳 stop 函式（呼叫即退出）。
+ * 進入選取模式：全螢幕透明 overlay 攔指標事件，用 elementFromPoint 找指標下元素，
+ * 畫外框高亮＋浮動小標籤。滑鼠：移動預覽、點擊選取；觸控：拖曳瞄準、放開選取（Pointer Events 一套涵蓋）。
+ * Esc、右鍵或點提示列→onCancel。回傳 stop 函式（呼叫即退出）。
  */
 export function pickElement(onPick: (r: PickResult) => void, onCancel: () => void): () => void {
   const overlay = document.createElement("div");
   overlay.setAttribute(WIDGET_ATTR, "picker-overlay");
+  // touch-action:none：觸控拖曳是「瞄準」不是捲動，交給 pointermove；不設的話手機一拖就整頁捲動、根本選不到
   overlay.style.cssText =
-    "position:fixed;inset:0;z-index:2147483000;cursor:crosshair;background:rgba(43,38,32,0.04);";
+    "position:fixed;inset:0;z-index:2147483000;cursor:crosshair;background:rgba(43,38,32,0.04);touch-action:none;";
 
   const box = document.createElement("div");
   box.setAttribute(WIDGET_ATTR, "picker-box");
@@ -214,11 +221,12 @@ export function pickElement(onPick: (r: PickResult) => void, onCancel: () => voi
 
   const hint = document.createElement("div");
   hint.setAttribute(WIDGET_ATTR, "picker-hint");
-  hint.textContent = "點一下要標記的地方 · Esc 或右鍵取消";
+  // 手機沒有 Esc 也沒有右鍵——提示列本身就是取消鈕（pointer-events:auto＋自己的 click）
+  hint.textContent = "點一下要標記的地方（手機可拖曳瞄準）· Esc / 右鍵 / 點此取消";
   hint.style.cssText =
     "position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:2147483002;" +
     "background:rgba(43,38,32,0.86);color:#fbf7f0;font:600 13px/1.4 var(--sans);" +
-    "padding:7px 16px;border-radius:999px;pointer-events:none;";
+    "padding:7px 16px;border-radius:999px;pointer-events:auto;cursor:pointer;max-width:92vw;text-align:center;";
 
   document.body.appendChild(overlay);
   document.body.appendChild(box);
@@ -258,29 +266,59 @@ export function pickElement(onPick: (r: PickResult) => void, onCancel: () => voi
     tag.style.top = (above ? r.top - 24 : r.top + 4) + "px";
   }
 
-  const onMove = (e: MouseEvent) => paint(elementUnder(e.clientX, e.clientY));
+  /** 選定元素 → 組 PickResult（viewport 座標＋最近 [data-fb] 卡片的相對比例）→ 收尾回報 */
+  function finish(el: Element) {
+    const r = el.getBoundingClientRect();
+    const rect: PickResult["targetRect"] = {
+      x: r.left,
+      y: r.top,
+      w: r.width,
+      h: r.height,
+      vw: window.innerWidth,
+      vh: window.innerHeight,
+    };
+    // 相對定位補充：viewport 座標換台裝置就不準，補存「卡內比例」讓日後能在不同螢幕重解析
+    const anchorEl = el.closest("[data-fb]");
+    if (anchorEl) {
+      const a = anchorEl.getBoundingClientRect();
+      if (a.width > 0 && a.height > 0) {
+        rect.rx = (r.left - a.left) / a.width;
+        rect.ry = (r.top - a.top) / a.height;
+        rect.rw = r.width / a.width;
+        rect.rh = r.height / a.height;
+      }
+    }
+    stop();
+    onPick({ targetLabel: readableLabel(el), targetSelector: selectorOf(el), targetRect: rect });
+  }
+
+  // Pointer Events 一套涵蓋滑鼠與觸控：滑鼠移動＝預覽；觸控拖曳＝瞄準（touch-action:none 已擋捲動）
+  let lastPointerType = "mouse";
+  const onMove = (e: PointerEvent) => {
+    lastPointerType = e.pointerType || "mouse";
+    paint(elementUnder(e.clientX, e.clientY));
+  };
+  // 觸控「拖曳瞄準後放開」不會產生 click（有位移）——pointerup 是觸控唯一可靠的選取路徑；
+  // 滑鼠仍走 click（維持原互動：按下不選、放開才算一次點擊）
+  const onPointerUp = (e: PointerEvent) => {
+    if (e.pointerType === "mouse") return;
+    e.preventDefault();
+    e.stopPropagation();
+    const el = elementUnder(e.clientX, e.clientY) || current;
+    if (!el) return;
+    finish(el);
+  };
   const onClick = (e: MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const el = current || elementUnder(e.clientX, e.clientY);
     if (!el) return;
-    const r = el.getBoundingClientRect();
-    stop();
-    onPick({
-      targetLabel: readableLabel(el),
-      targetSelector: selectorOf(el),
-      targetRect: {
-        x: r.left,
-        y: r.top,
-        w: r.width,
-        h: r.height,
-        vw: window.innerWidth,
-        vh: window.innerHeight,
-      },
-    });
+    finish(el);
   };
   const onContext = (e: MouseEvent) => {
     e.preventDefault();
+    // Android 長按（觸控瞄準時容易誤觸發）也會走到這——觸控的取消交給提示列，只有滑鼠右鍵才取消
+    if (lastPointerType !== "mouse") return;
     stop();
     onCancel();
   };
@@ -291,21 +329,41 @@ export function pickElement(onPick: (r: PickResult) => void, onCancel: () => voi
       onCancel();
     }
   };
+  const onHintTap = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    stop();
+    onCancel();
+  };
 
-  overlay.addEventListener("mousemove", onMove);
+  overlay.addEventListener("pointermove", onMove);
+  overlay.addEventListener("pointerup", onPointerUp);
   overlay.addEventListener("click", onClick);
   overlay.addEventListener("contextmenu", onContext);
+  hint.addEventListener("click", onHintTap);
   window.addEventListener("keydown", onKey, true);
 
   let stopped = false;
   function stop() {
     if (stopped) return;
     stopped = true;
-    overlay.removeEventListener("mousemove", onMove);
+    overlay.removeEventListener("pointermove", onMove);
+    overlay.removeEventListener("pointerup", onPointerUp);
     overlay.removeEventListener("click", onClick);
     overlay.removeEventListener("contextmenu", onContext);
+    hint.removeEventListener("click", onHintTap);
     window.removeEventListener("keydown", onKey, true);
-    for (const node of [overlay, box, tag, hint]) node.remove();
+    for (const node of [box, tag, hint]) node.remove();
+    // 觸控 pointerup 選取後，瀏覽器接著會在同一點合成 click——若立刻移除 overlay，
+    // 這記 click 會落在底下的真按鈕上（誤觸刪除鈕等）。留一層透明 overlay 吞掉它再移除。
+    overlay.style.background = "transparent";
+    overlay.style.cursor = "";
+    const swallow = (e: Event) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    overlay.addEventListener("click", swallow, true);
+    setTimeout(() => overlay.remove(), 350);
   }
 
   return stop;

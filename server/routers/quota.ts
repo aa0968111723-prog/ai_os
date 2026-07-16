@@ -38,7 +38,7 @@ export const quotaRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.auth.user.isSuperAdmin) throw new TRPCError({ code: "FORBIDDEN", message: "只有超管能調全域預算" });
+      if (!ctx.auth.user.isSuperAdmin) throw new TRPCError({ code: "FORBIDDEN", message: "只有開發者能調全域預算" });
       return updateSettings(input);
     }),
 
