@@ -504,7 +504,7 @@ app.get("/api/selftest", async (req, res) => {
     return "建立/銷毀 OK";
   });
   await run("生成模式", async () =>
-    isMockMode() ? "假生成(免費)——填 FAL_KEY 並移除 FAL_MOCK 切真實" : "真實模式(FAL_KEY 已設)",
+    isMockMode() ? "測試模式(免費)——填 FAL_KEY 並移除 FAL_MOCK 切換正式模式" : "正式模式(FAL_KEY 已設)",
   );
   await run("儲存/交付(zip 引擎)", async () => {
     const { ZipArchive } = await import("archiver");

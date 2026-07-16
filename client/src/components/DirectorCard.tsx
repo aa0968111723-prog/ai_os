@@ -16,7 +16,7 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
         <div style={{ marginTop: "var(--sp-12)" }}>
           <p className="hint" style={{ fontSize: "var(--fs-12)" }}>
             {suggest.data.usedKnowledge ? <><Icon name="Check" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />已讀取專案知識庫的素材</> : "（尚未加入素材知識——加了開示/腳本，建議會更貼合）"}
-            {suggest.data.mock ? "・示範建議" : ""}
+            {suggest.data.mock ? "・內建參考建議" : ""}
           </p>
           {suggest.data.fallback && (
             <p className="hint" style={{ fontSize: 12 }}>（AI 暫時沒回應，以下是通用建議）</p>

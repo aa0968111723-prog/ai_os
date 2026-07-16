@@ -253,6 +253,8 @@ a:hover { color: var(--primary-solid-hover); }
 .menu-item:hover { background: var(--card2); }
 .menu-item.danger { color: var(--danger-ink); }
 .menu-sep { height: 1px; background: var(--border-soft); margin: 6px 4px; }
+/* W1 選單分組小標：非互動、僅視覺分區（說明／工作／帳號） */
+.menu-label { padding: 4px 12px 2px; font-size: 11px; color: var(--muted-fg); letter-spacing: 0.08em; user-select: none; }
 
 /* 素材庫（真實儲存層） */
 .upload-zone { border: 2px dashed var(--border); border-radius: var(--r-12); padding: 16px; text-align: center;
