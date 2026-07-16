@@ -9,6 +9,7 @@ import { AdminPage } from "./pages/AdminPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { HelpPage } from "./pages/HelpPage";
+import { DownloadsPage } from "./pages/DownloadsPage";
 import { PasswordInput } from "./components/PasswordInput";
 import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
 import { FeedbackWidget } from "./feedback/FeedbackWidget";
@@ -111,6 +112,7 @@ function UserMenu({
         <div className="menu" role="menu">
           <Link href="/help" className="menu-item" role="menuitem" onClick={close}><Icon name="HelpCircle" size={15} />怎麼用</Link>
           <Link href="/models" className="menu-item" role="menuitem" onClick={close}><Icon name="Info" size={15} />模型指南</Link>
+          <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
           {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
           {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />團隊管理</Link>}
           <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
@@ -231,6 +233,7 @@ export function App() {
                 <Route path="/feedback"><FeedbackPage groupId={activeGroupId || undefined} /></Route>
                 <Route path="/models"><ModelsPage /></Route>
                 <Route path="/help"><HelpPage /></Route>
+                <Route path="/downloads"><DownloadsPage /></Route>
                 <Route path="/p/:id">{(params) => <ProjectPage id={params.id} />}</Route>
                 <Route>
                   <p>

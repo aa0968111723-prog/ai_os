@@ -73,10 +73,10 @@ ok("文生圖 → 圖像 URL", g.get("status") == "done" and bool(g.get("resultU
 # ── 圖生圖(需要來源;用素材庫成品) ──
 assets = call("GET", admin, "projects.assets", {"projectId": pid})
 ok("素材庫有成品", len(assets) >= 1)
-src = assets[0]["url"]
 noSrc = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/nano-banana-2/edit", "prompt": "改成夕陽"})
 ok("圖生圖缺來源被擋", "__error__" in noSrc and "來源" in noSrc["__error__"])
-g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/nano-banana-2/edit", "prompt": "改成夕陽", "sourceUrl": src})
+# 素材庫成品走 sourceAssetId(與 UI 一致);sourceUrl 只收外部絕對網址(相對 /api/assets/... 會被 zod url() 擋)
+g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/nano-banana-2/edit", "prompt": "改成夕陽", "sourceAssetId": assets[0]["id"]})
 g = wait_done(admin, g["id"])
 ok("圖生圖(來源=素材庫)完成", g.get("status") == "done" and bool(g.get("resultUrl")))
 

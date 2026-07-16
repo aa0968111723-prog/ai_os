@@ -4,8 +4,8 @@
  * 斷線自動重連（2s→4s→8s→上限 10s）；斷線期間各卡片原有輪詢仍在，功能不中斷只是少了即時感。
  * 連續失敗 30 次即停止重連（伺服器長期不通時別無限打）；收到 4403（權限已變更）直接停，重連也只會再被踢。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { trpc } from "./api";
 
@@ -18,8 +18,19 @@ export interface CollabPeer {
 export interface CollabCursor {
   /** 0..1：相對主內容容器寬度的比例（兩人視窗寬度不同也對得上欄位） */
   x: number;
-  /** 以容器頂為原點的 px */
+  /**
+   * 0..1：相對主內容容器「高度」的比例。
+   * 舊版是絕對 px——手機（單欄）與桌機（雙欄）版面高度差數倍，px 會整個對不上（回饋 #5 位置不精準）。
+   */
   y: number;
+  /**
+   * 錨點定位（優先於 x/y）：游標所在最近 [data-fb] 卡片的代號＋卡內相對比例。
+   * 兩端版面不同（手機單欄 vs 桌機雙欄）時，靠「同一張卡」對位比整頁比例準得多；
+   * 對方畫面找不到同名卡片才退回 x/y 整頁比例。
+   */
+  anchor?: string | null;
+  ax?: number;
+  ay?: number;
   name: string;
   color: string;
   /** 最後更新時間；4 秒沒動靜自動移除（對方離開/切分頁時游標不要僵在畫面上） */
@@ -54,7 +65,8 @@ export function useCollab(
   self: CollabPeer | null;
   sendFocus: (zone: string | null) => void;
   containerRef: RefObject<HTMLDivElement | null>;
-  onMouseMove: (e: ReactMouseEvent<HTMLDivElement>) => void;
+  /** Pointer Events 一套涵蓋滑鼠＋觸控＋手寫筆——手機協作也能上報游標位置 */
+  onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void;
 } {
   const utils = trpc.useUtils();
   const queryClient = useQueryClient();
@@ -108,7 +120,16 @@ export function useCollab(
           if (msg.userId === selfIdRef.current) return;
           setCursors((prev) => {
             const next = new Map(prev);
-            next.set(msg.userId, { x: msg.x, y: msg.y, name: msg.name, color: msg.color, ts: Date.now() });
+            next.set(msg.userId, {
+              x: msg.x,
+              y: msg.y,
+              anchor: typeof msg.anchor === "string" ? msg.anchor : null,
+              ax: typeof msg.ax === "number" ? msg.ax : 0,
+              ay: typeof msg.ay === "number" ? msg.ay : 0,
+              name: msg.name,
+              color: msg.color,
+              ts: Date.now(),
+            });
             return next;
           });
         } else if (msg.type === "focus") {
@@ -183,7 +204,7 @@ export function useCollab(
     });
   }, [queryClient]);
 
-  const onMouseMove = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+  const onPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     const el = containerRef.current;
     const ws = wsRef.current;
     if (!el || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -191,10 +212,25 @@ export function useCollab(
     if (now - lastCursorAtRef.current < CURSOR_THROTTLE_MS) return;
     lastCursorAtRef.current = now;
     const rect = el.getBoundingClientRect();
-    if (rect.width <= 0) return;
-    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    const y = e.clientY - rect.top;
-    ws.send(JSON.stringify({ type: "cursor", x, y }));
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+    const x = clamp01((e.clientX - rect.left) / rect.width);
+    const y = clamp01((e.clientY - rect.top) / rect.height);
+    // 錨點：游標下最近的 [data-fb] 卡片＋卡內相對位置——對方版面不同（手機/桌機）也能貼到同一張卡上
+    let anchor: string | null = null;
+    let ax = 0;
+    let ay = 0;
+    const anchorEl = (e.target as Element | null)?.closest?.("[data-fb]");
+    if (anchorEl) {
+      const ar = anchorEl.getBoundingClientRect();
+      const name = anchorEl.getAttribute("data-fb");
+      if (name && ar.width > 0 && ar.height > 0) {
+        anchor = name;
+        ax = clamp01((e.clientX - ar.left) / ar.width);
+        ay = clamp01((e.clientY - ar.top) / ar.height);
+      }
+    }
+    ws.send(JSON.stringify({ type: "cursor", x, y, anchor, ax, ay }));
   }, []);
 
   const sendFocus = useCallback((zone: string | null) => {
@@ -215,45 +251,88 @@ export function useCollab(
     return out;
   }, [zoneByUser, peers]);
 
-  return { peers, cursors, focusZones, self, sendFocus, containerRef, onMouseMove };
+  return { peers, cursors, focusZones, self, sendFocus, containerRef, onPointerMove };
+}
+
+/**
+ * 把一枚游標換算成覆蓋層內的座標（px）。
+ * 有錨點且本機畫面找得到同名 [data-fb] 卡片 → 用「卡片位置＋卡內比例」（跨版面最準）；
+ * 否則退回整頁寬高比例。兩者都與捲動無關（getBoundingClientRect 差值本身已消掉 scroll）。
+ */
+function cursorPoint(c: CollabCursor, overlayRect: DOMRect): { left: number; top: number } {
+  if (c.anchor) {
+    let el: Element | null = null;
+    try {
+      el = document.querySelector(`[data-fb="${CSS.escape(c.anchor)}"]`);
+    } catch {
+      el = null;
+    }
+    if (el) {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        return {
+          left: r.left - overlayRect.left + (c.ax ?? 0) * r.width,
+          top: r.top - overlayRect.top + (c.ay ?? 0) * r.height,
+        };
+      }
+    }
+  }
+  return { left: c.x * overlayRect.width, top: c.y * overlayRect.height };
+}
+
+/** 單枚游標：座標要讀 DOM（錨點卡片位置），用 layout effect 命令式定位，不在 render 期間量測 */
+function CursorDot({ c, overlayRef }: { c: CollabCursor; overlayRef: RefObject<HTMLDivElement | null> }) {
+  const dotRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const overlay = overlayRef.current;
+    const dot = dotRef.current;
+    if (!overlay || !dot) return;
+    const p = cursorPoint(c, overlay.getBoundingClientRect());
+    dot.style.left = `${p.left}px`;
+    dot.style.top = `${p.top}px`;
+  }, [c, overlayRef]);
+  return (
+    <div
+      ref={dotRef}
+      style={{
+        position: "absolute",
+        left: 0,
+        top: 0,
+        transition: "left 0.08s linear, top 0.08s linear",
+        display: "flex",
+        alignItems: "flex-start",
+      }}
+    >
+      <svg width="14" height="18" viewBox="0 0 14 18" style={{ display: "block", filter: "drop-shadow(0 1px 1px rgba(74,54,32,.28))" }}>
+        <path d="M1 1 L1 14.5 L4.6 11.2 L7 16.5 L9.4 15.4 L7 10.2 L12 9.6 Z" fill={c.color} stroke="#fff" strokeWidth="1" />
+      </svg>
+      <span
+        style={{
+          background: c.color,
+          color: "#fff",
+          textShadow: "0 1px 2px var(--scrim)",
+          borderRadius: 999,
+          padding: "1px 8px",
+          fontSize: "var(--fs-11)",
+          whiteSpace: "nowrap",
+          marginTop: 12,
+          marginLeft: 2,
+        }}
+      >
+        {c.name}
+      </span>
+    </div>
+  );
 }
 
 /** 其他人的彩色游標覆蓋層：掛在 position:relative 的主內容容器內 */
 export function CursorOverlay({ cursors }: { cursors: Map<string, CollabCursor> }) {
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   if (cursors.size === 0) return null;
   return (
-    <div aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 40, overflow: "hidden" }}>
+    <div ref={overlayRef} aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 40, overflow: "hidden" }}>
       {[...cursors.entries()].map(([userId, c]) => (
-        <div
-          key={userId}
-          style={{
-            position: "absolute",
-            left: `${c.x * 100}%`, // 百分比＝x × 容器寬，容器縮放也不跑位
-            top: c.y,
-            transition: "left 0.08s linear, top 0.08s linear",
-            display: "flex",
-            alignItems: "flex-start",
-          }}
-        >
-          <svg width="14" height="18" viewBox="0 0 14 18" style={{ display: "block", filter: "drop-shadow(0 1px 1px rgba(74,54,32,.28))" }}>
-            <path d="M1 1 L1 14.5 L4.6 11.2 L7 16.5 L9.4 15.4 L7 10.2 L12 9.6 Z" fill={c.color} stroke="#fff" strokeWidth="1" />
-          </svg>
-          <span
-            style={{
-              background: c.color,
-              color: "#fff",
-              textShadow: "0 1px 2px var(--scrim)",
-              borderRadius: 999,
-              padding: "1px 8px",
-              fontSize: "var(--fs-11)",
-              whiteSpace: "nowrap",
-              marginTop: 12,
-              marginLeft: 2,
-            }}
-          >
-            {c.name}
-          </span>
-        </div>
+        <CursorDot key={userId} c={c} overlayRef={overlayRef} />
       ))}
     </div>
   );

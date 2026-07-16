@@ -262,13 +262,44 @@ app.get("/api/assets/:id/file", async (req, res) => {
   }
 });
 
+// ── 資料下載區（需求 #11）：docs/README 白名單清單＋下載（登入即可，全站內部文件） ──
+app.get("/api/downloads", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const { DOWNLOAD_CATEGORIES, listDownloads } = await import("./services/downloads");
+    res.json({ ok: true, categories: DOWNLOAD_CATEGORIES, items: await listDownloads() });
+  } catch (err) {
+    console.error("[downloads:list]", err);
+    if (!res.headersSent) res.status(500).json({ error: "清單讀取失敗，請稍後再試" });
+  }
+});
+app.get("/api/downloads/file", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const { resolveDownload } = await import("./services/downloads");
+    // 識別鍵必須整串等於白名單項（resolveDownload 內比對），不存在任何使用者輸入拼路徑的空間
+    const hit = resolveDownload(String(req.query.name ?? ""));
+    if (!hit) return res.status(404).json({ error: "找不到這份文件" });
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    // res.download＝attachment 下載（含中文檔名的 RFC 5987 編碼）；檔案缺席走 err 分支回 404
+    res.download(hit.absPath, hit.filename, (err) => {
+      if (err && !res.headersSent) res.status(404).json({ error: "文件暫時無法下載" });
+    });
+  } catch (err) {
+    console.error("[downloads:file]", err);
+    if (!res.headersSent) res.status(500).json({ error: "下載失敗，請稍後再試" });
+  }
+});
+
 // MCP 伺服器介面（設 MCP_API_KEY 啟用；供外部 AI 客戶端操作）
 app.post("/api/mcp", handleMcp);
 
 // 系統自檢（超管登入後用瀏覽器開，或管理頁按鈕）——部署後一鍵驗證所有子系統
 app.get("/api/selftest", async (req, res) => {
   const auth = await resolveSession(req);
-  if (!auth?.user.isSuperAdmin) return res.status(403).json({ error: "需要超管登入後使用" });
+  if (!auth?.user.isSuperAdmin) return res.status(403).json({ error: "需要開發者帳號登入後使用" });
   const checks: Array<{ name: string; ok: boolean; note: string }> = [];
   const run = async (name: string, fn: () => Promise<string>) => {
     try {

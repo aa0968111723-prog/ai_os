@@ -183,7 +183,7 @@ export function HelpPage() {
         <Term word="組長">
           管理該組的人，可審核分鏡、調整組的「選項」（自訂內容類型／平台／世界觀選項）。
         </Term>
-        <Term word="超管">系統最高權限，管理所有團隊與帳號、設定點數額度。</Term>
+        <Term word="開發者">系統最高權限（原稱「超管」），管理所有團隊與帳號、設定點數額度。</Term>
       </div>
 
       <p style={{ marginTop: 24 }}>

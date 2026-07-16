@@ -231,8 +231,8 @@ export function ProjectPage({ id }: { id: string }) {
   });
 
   return (
-    // position:relative＋ref：游標座標（x 比例/y px）與覆蓋層都以這個容器為基準
-    <div ref={collab.containerRef} onMouseMove={collab.onMouseMove} style={{ position: "relative" }}>
+    // position:relative＋ref：游標座標（x/y 比例＋[data-fb] 錨點）與覆蓋層都以這個容器為基準
+    <div ref={collab.containerRef} onPointerMove={collab.onPointerMove} style={{ position: "relative" }}>
       <CursorOverlay cursors={collab.cursors} />
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <span className="chip" style={{ marginLeft: 10 }}>已封存</span>}</h1>

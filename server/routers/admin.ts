@@ -55,7 +55,7 @@ export const adminRouter = router({
   }),
 
   createTeam: adminProcedure.input(z.object({ name: z.string().min(1) })).mutation(async ({ ctx, input }) => {
-    if (!ctx.auth.user.isSuperAdmin) throw new TRPCError({ code: "FORBIDDEN", message: "只有超管能建團隊" });
+    if (!ctx.auth.user.isSuperAdmin) throw new TRPCError({ code: "FORBIDDEN", message: "只有開發者能建團隊" });
     const [team] = await db.insert(schema.teams).values({ name: input.name.trim() }).returning();
     return team;
   }),
