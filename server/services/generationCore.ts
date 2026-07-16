@@ -104,8 +104,9 @@ export interface SubmitCoreInput {
   sceneId?: string;
   /** 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）；不帶＝visual（回填 assetId） */
   sceneRole?: "visual" | "narration";
-  /** 存取檢查掛點：tRPC 端帶 requireGroup（多組隔離）；伺服器內部（runner）呼叫時已在建 run 時把過關,可省略 */
-  assertAccess?: (project: typeof schema.projects.$inferSelect) => void;
+  /** 存取檢查掛點：tRPC 端帶 requireGroup（多組隔離）；伺服器內部（runner）呼叫時已在建 run 時把過關,可省略。
+   *  回傳角色（requireGroup 本來就回）供成本審核門檻判斷組員；回 void 的舊呼叫端不受影響（不觸發門檻）。 */
+  assertAccess?: (project: typeof schema.projects.$inferSelect) => "admin" | "leader" | "member" | void;
 }
 
 /** pg 唯一鍵衝突（23505）：驅動可能把原始錯誤包在 cause，兩層 code 與訊息都檢查 */
@@ -125,7 +126,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
 
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
-  input.assertAccess?.(project); // 多組隔離
+  const accessRole = input.assertAccess?.(project); // 多組隔離；回傳角色供成本審核門檻用
 
   // 素材庫來源 → 簽名網址（同組檢查；本地檔或外部網址都可）
   let sourceUrl = input.sourceUrl;
@@ -154,6 +155,47 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     sceneAnchor,
   );
   const falInput = model.input(fullPrompt, project.format as ProjectFormat, sourceUrl);
+
+  // 成本審核門檻（需求 2.1）：組員（member）單筆估點 ≥ 組門檻 → 先落一筆 awaiting_approval，
+  // 不扣點、不送 fal，等組長在生成紀錄核准（generation.decideCost）才走扣點＋送出。
+  // 只對「有帶 assertAccess 且角色是 member」的路徑生效：組長/管理員自送不受限；
+  // 工作流 runner（無 assertAccess）沿用啟動時的守門，不在單步重複攔（v1 範圍，見 PR 說明）。
+  if (accessRole === "member") {
+    const [grp] = await db.select().from(schema.groups).where(eq(schema.groups.id, project.groupId));
+    const threshold = grp?.approvalThresholdPoints;
+    if (threshold != null && threshold > 0 && model.points >= threshold) {
+      const [gated] = await db
+        .insert(schema.generations)
+        .values({
+          id: input.id,
+          projectId: project.id,
+          groupId: project.groupId,
+          userId: input.userId,
+          modelId: model.id,
+          kind: model.kind,
+          prompt: input.prompt,
+          sceneId: input.sceneId ?? null,
+          sceneRole: input.sceneRole ?? null,
+          sourceUrl,
+          params: falInput, // 注入完成的 fal 輸入原樣保存——核准時直接送出，不重組（世界觀/卡片以送審當下為準）
+          pointsEst: model.points,
+          status: "awaiting_approval",
+        })
+        .returning();
+      // 系統訊息通知組內（比照審批三態機）；失敗不擋主流程
+      await db
+        .insert(schema.messages)
+        .values({
+          groupId: project.groupId,
+          projectId: project.id,
+          userId: input.userId,
+          kind: "system",
+          body: `⏳ 生成待核准：${model.label}（${model.points} 點 ≥ 門檻 ${threshold} 點）——請組長到生成紀錄核准或駁回`,
+        })
+        .catch((err) => console.warn("[generation] 待核系統訊息寫入失敗：", err instanceof Error ? err.message : err));
+      return gated;
+    }
+  }
 
   let gen: GenerationRow;
   try {

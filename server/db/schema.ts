@@ -31,6 +31,8 @@ export const groups = pgTable("groups", {
   name: text("name").notNull(),
   /** 每人每週點數上限（null＝用全域預設；0＝不限）——組長/管理員可調 */
   weeklyPointsPerUser: integer("weekly_points_per_user"),
+  /** 成本審核門檻（需求 2.1）：組員單筆生成估點 ≥ 此值需組長核准才送出；null/0＝不啟用。組長/管理員可調 */
+  approvalThresholdPoints: integer("approval_threshold_points"),
   /** 選項預設是否已 seed 過一次（R23）：seed 一次後即使組長把某類選項清空也不再復活，
    *  否則「刪光某類型」下次讀取會被誤判未 seed 而整組還原 */
   optionsSeeded: boolean("options_seeded").notNull().default(false),
@@ -115,7 +117,9 @@ export const generations = pgTable("generations", {
   kind: text("kind").notNull(),
   prompt: text("prompt").notNull(),
   params: jsonb("params").notNull().default({}),
-  status: text("status", { enum: ["queued", "running", "done", "failed"] }).notNull().default("queued"),
+  /** awaiting_approval/rejected（需求 2.1 成本審核）：達組門檻的組員生成先待核，核准才扣點送 fal；
+   *  enum 只是 TS 層註記（DB 欄位為 text），pushSchema 對既有表無變更 */
+  status: text("status", { enum: ["queued", "running", "done", "failed", "awaiting_approval", "rejected"] }).notNull().default("queued"),
   pointsEst: integer("points_est").notNull().default(0),
   pointsActual: integer("points_actual"),
   pointsRefunded: integer("points_refunded").notNull().default(0),
@@ -383,6 +387,32 @@ export const groupOptions = pgTable("group_options", {
  * 有別於 feedback 表（定期六題滿意度問卷），這裡是「針對某頁某元件的即時回報」。
  * pages＝可複選頁面；target*＝被點選的元件描述（page-level 回饋時為 null）。
  */
+/**
+ * 審計日誌（需求 2.2「紀錄每一個行動的每一個細節操作」）：
+ * 所有登入後 mutation 由 tRPC 中介層集中寫入（見 services/audit.ts）——
+ * 誰、何時、做了什麼（procedure 路徑）、對哪個組/專案、輸入摘要（已脫敏）、成功與否。
+ * 新表＝pushSchema 安全；只插入不更新，量大時靠索引查詢。
+ */
+export const auditLog = pgTable("audit_log", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  actorId: uuid("actor_id").notNull(),
+  /** tRPC procedure 完整路徑，如 "generation.submit"、"scenes.update" */
+  action: text("action").notNull(),
+  /** 盡力從輸入解析的歸屬（供組層級過濾）；解析不到為 null */
+  groupId: uuid("group_id"),
+  projectId: uuid("project_id"),
+  /** 輸入摘要：密碼/token 類鍵剔除、長字串截斷、深度與鍵數上限（見 sanitizeAuditInput） */
+  input: jsonb("input").notNull().default({}),
+  ok: boolean("ok").notNull().default(true),
+  /** 失敗時的錯誤訊息（截斷） */
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  createdIdx: index("audit_log_created_idx").on(t.createdAt),
+  actorIdx: index("audit_log_actor_idx").on(t.actorId),
+  groupIdx: index("audit_log_group_idx").on(t.groupId),
+}));
+
 export const feedbackReports = pgTable("feedback_reports", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull(),

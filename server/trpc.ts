@@ -50,7 +50,7 @@ export const publicProcedure = t.procedure;
 const MUST_CHANGE_PW_ALLOWED = ["auth.changePassword", "auth.me", "auth.logout"];
 
 /** 需登入 */
-export const authedProcedure = t.procedure.use(({ ctx, path, next }) => {
+export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, getRawInput }) => {
   // 開機初始化（建表/種子）完成前，回可理解的訊息而不是 relation does not exist 500
   if (!isBootReady()) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "系統正在初始化（約一分鐘內完成），請稍候重試" });
@@ -60,7 +60,20 @@ export const authedProcedure = t.procedure.use(({ ctx, path, next }) => {
   if (ctx.auth.user.mustChangePassword && !MUST_CHANGE_PW_ALLOWED.includes(path)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "管理員重設了你的密碼——請先在頁面上設定新密碼再繼續使用" });
   }
-  return next({ ctx: { ...ctx, auth: ctx.auth } });
+  const auth = ctx.auth;
+  const result = await next({ ctx: { ...ctx, auth } });
+  // 審計（需求 2.2）：所有登入後 mutation 集中記錄——成功與失敗都記（失敗含錯誤訊息）。
+  // 放在 next() 之後：只記「真的執行過」的呼叫；query 不記（唯讀且量大）。
+  // getRawInput 是驗證前的原始輸入——sanitizeAuditInput 會脫敏截斷，壞輸入也記得下來。
+  if (type === "mutation") {
+    const raw = await getRawInput().catch(() => undefined);
+    const { recordAudit } = await import("./services/audit");
+    recordAudit(auth, path, raw, {
+      ok: result.ok,
+      error: result.ok ? undefined : (result.error instanceof Error ? result.error.message : String(result.error)),
+    });
+  }
+  return result;
 });
 
 /** 需任一團隊管理權（或超管） */
