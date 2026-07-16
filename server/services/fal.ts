@@ -14,9 +14,12 @@ const mockJobs = new Map<string, { doneAt: number; kind: OutputKind; prompt: str
 
 /** 假素材由自家伺服器供應(/api/mock-asset/*):完全離線可測、交付包也抓得到 */
 function mockResultUrl(kind: OutputKind): string {
-  // APP_URL 沒設時退 Railway 內建的公開網域，再退 localhost——避免把 localhost 存進 DB 變永久壞連結
-  const railway = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
-  const base = process.env.APP_URL?.replace(/\/$/, "") || railway || `http://localhost:${process.env.PORT ?? 3000}`;
+  // 對外 base 平台中立：APP_URL 沒設時退「平台注入的公開網域」，再退 localhost——避免把
+  // localhost 存進 DB 變永久壞連結。通用變數 PUBLIC_DOMAIN 優先，相容舊的 RAILWAY_PUBLIC_DOMAIN
+  // 後備（未設 PUBLIC_DOMAIN 時自動沿用），不再寫死任何特定平台。
+  const platformDomain = process.env.PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN;
+  const fallback = platformDomain ? `https://${platformDomain}` : "";
+  const base = process.env.APP_URL?.replace(/\/$/, "") || fallback || `http://localhost:${process.env.PORT ?? 3000}`;
   const path = kind === "video" ? "video" : kind === "audio" ? "audio" : "image";
   return `${base}/api/mock-asset/${path}`;
 }

@@ -1,4 +1,4 @@
-# AI Director OS — Railway 部署（node:22-alpine 多段建置，沿用驗證過的模式、無 MySQL 包袱）
+# AI Director OS — 容器建置（node:22-alpine 多段建置；平台中立，Zeabur/Railway 皆可直接用）
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./

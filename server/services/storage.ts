@@ -1,8 +1,8 @@
 /**
- * 真實儲存層（Railway Volume /data）：
+ * 真實儲存層（持久磁碟 /data，由部署平台的 Volume 掛載）：
  * - 上傳素材與生成成品都落地到磁碟，網址永遠有效（fal 的 CDN 網址會過期，不能當永久儲存）。
  * - 服務一律走 /api/assets/:id/file：登入＋組隔離；要給 fal 當「來源輸入」時改用 HMAC 簽名短效網址。
- * - 沒掛 Volume 時退回 ./.data（本機開發可用；正式站掛 /data）。
+ * - 沒掛 Volume 時退回 ./.data（本機開發可用；正式站務必掛 /data 或設 ASSET_DIR，否則重啟即遺失）。
  */
 import { createHmac, randomUUID, createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
@@ -89,7 +89,7 @@ export async function checkDiskSpace(incomingBytes: number): Promise<string | nu
   }
   const free = await freeBytes();
   if (free !== null && free - incomingBytes < MIN_FREE_BYTES) {
-    return "儲存空間不足——請通知管理員到 Railway 調大 aios-data Volume";
+    return "儲存空間不足——請通知管理員到 Zeabur 擴大服務的 Volume 容量（或設 ASSET_DIR 指到更大的磁碟）";
   }
   return null;
 }

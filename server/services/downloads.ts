@@ -29,6 +29,7 @@ const ENTRIES: DownloadEntry[] = [
   { file: "docs/auth-design.md", title: "登入與權限設計", category: "dev" },
   { file: "docs/優化評估報告.md", title: "網站優化評估報告（12 點需求）", category: "dev" },
   { file: "docs/維運手冊.md", title: "維運手冊（部署／備份／應變）", category: "dev" },
+  { file: "docs/Zeabur部署.md", title: "Zeabur 部署指南（環境變數／搬遷／驗收）", category: "dev" },
   { file: "docs/模型目錄.md", title: "模型目錄（全模型與點數）", category: "model" },
   { file: "docs/點數校準報告.md", title: "點數 × 官方成本校準報告", category: "model" },
   { file: "docs/隱私權政策.md", title: "隱私權政策（草稿）", category: "legal" },

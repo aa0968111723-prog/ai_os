@@ -2,7 +2,9 @@
 # 前置：FAL_MOCK=1、:3199、SEED_ADMIN_EMAIL=admin@aidirector.local、SEED_ADMIN_PASSWORD=test-admin-123、全新 DB。
 import json, time, urllib.request, urllib.parse, urllib.error
 
-BASE = "http://localhost:3199/api/trpc"
+import os as _os
+HOST = f"http://localhost:{_os.environ.get('E2E_PORT', '3199')}"  # E2E_PORT 可換埠(與研究/其他行程共存)
+BASE = f"{HOST}/api/trpc"
 
 class Client:
     def __init__(self): self.cookie = None
@@ -31,14 +33,14 @@ def call(op, opener, path, data=None):
     return body["result"]["data"]["json"]
 
 def raw_get(opener, path):
-    req = urllib.request.Request(f"http://localhost:3199{path}")
+    req = urllib.request.Request(f"{HOST}{path}")
     if opener.cookie: req.add_header("Cookie", opener.cookie)
     try:
         with opener.open(req) as r: return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
 
-ok = lambda name, cond: print(("✅" if cond else "❌"), name)
+from e2e_lib import ok  # 共用斷言:計數+結束碼(有 ❌ 即非零退出,CI 據此判紅綠)
 
 admin = client(); mem = client()
 call("POST", admin, "auth.login", {"email": "admin@aidirector.local", "password": "test-admin-123"})

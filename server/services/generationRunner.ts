@@ -8,7 +8,7 @@
  */
 import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db, schema } from "../db";
-import { advanceGeneration } from "./generationCore";
+import { advanceGeneration, sweepUnlandedAssets } from "./generationCore";
 import { refund } from "./points";
 
 const TICK_MS = 6000;
@@ -43,6 +43,14 @@ export function startGenerationRunner(): void {
           await sweepStale();
         } catch (err) {
           console.warn("[generation] 陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
+        }
+        // 落地補抓（修：persistGenerationResult 背景落地一次失敗後，素材永久指向會過期的 fal CDN）：
+        // 與陳屍掃描同節流（約 60 秒一次），重試把未落地素材抓回 Volume。失敗只記警告不擋 tick。
+        try {
+          const landed = await sweepUnlandedAssets();
+          if (landed > 0) console.log(`[generation] 落地補抓本輪完成 ${landed} 筆`);
+        } catch (err) {
+          console.warn("[generation] 落地補抓掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
         }
       }
       try {
