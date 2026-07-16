@@ -278,9 +278,119 @@ function SelfTestCard() {
   );
 }
 
-/** 審計列的 input 摘要：JSON.stringify 截 120 字灰色小字就好，不需要完整展開 */
+/**
+ * W3 操作紀錄人話化：action 代碼 → 創作者看得懂的動詞短語。
+ * 沒對到的照顯原代碼（新端點上線不會變空白）；原代碼仍以小字保留供關鍵字篩選對照。
+ */
+const AUDIT_ACTION_LABEL: Record<string, string> = {
+  // 生成與 AI
+  "generation.submit": "送出生成",
+  "generation.decideCost": "裁決待核生成",
+  "generation.rename": "命名生成成品",
+  "generation.toggleFavorite": "收藏／取消收藏生成",
+  "scenes.generateInto": "就地生成分鏡畫面",
+  "scenes.generateVoiceover": "生成分鏡配音",
+  "workflows.start": "啟動工作流",
+  "director.suggest": "AI 導演建議",
+  "director.splitScript": "AI 拆分鏡",
+  "assistant.ask": "詢問 AI 專案助手",
+  "assistant.runAction": "AI 助手執行動作",
+  "teamAssistant.ask": "詢問組彙總 AI",
+  // 分鏡與審核
+  "scenes.addFromGeneration": "把成品加入分鏡",
+  "scenes.update": "編輯分鏡",
+  "scenes.move": "調整分鏡順序",
+  "scenes.reorder": "重排分鏡",
+  "scenes.remove": "刪除分鏡（入回收桶）",
+  "scenes.restore": "還原分鏡",
+  "scenes.purge": "永久刪除分鏡",
+  "scenes.setVisualFromGeneration": "切換分鏡現用版本",
+  "approvals.submit": "送審分鏡",
+  "approvals.decide": "裁決分鏡審核",
+  // 專案與素材
+  "projects.create": "建立專案",
+  "projects.createSample": "建立範例專案",
+  "projects.update": "更新專案設定",
+  "projects.updateWorldview": "更新世界觀",
+  "projects.setArchived": "封存／還原專案",
+  "projects.setProjectRole": "調整專案權限",
+  "projects.deleteAsset": "刪除素材（入回收桶）",
+  "projects.restoreAsset": "還原素材",
+  "projects.purgeAsset": "永久刪除素材",
+  "projects.renameAsset": "素材改名",
+  "projects.setAssetLock": "鎖定／解鎖素材",
+  // 知識庫與卡片
+  "knowledge.add": "新增知識",
+  "knowledge.update": "編輯知識",
+  "knowledge.remove": "刪除知識（入回收桶）",
+  "knowledge.restore": "還原知識",
+  "knowledge.purge": "永久刪除知識",
+  "knowledge.addFromAsset": "素材轉入知識庫",
+  "knowledge.describeImageAsset": "AI 描述圖片入知識庫",
+  "characters.add": "新增角色定裝卡",
+  "characters.update": "編輯角色定裝卡",
+  "characters.remove": "刪除角色定裝卡",
+  "scenePresets.add": "新增場景設定卡",
+  "scenePresets.update": "編輯場景設定卡",
+  "scenePresets.remove": "刪除場景設定卡",
+  "prompts.save": "儲存提示詞",
+  "prompts.remove": "刪除提示詞",
+  // 團隊與帳號
+  "auth.login": "登入",
+  "auth.logout": "登出",
+  "auth.changePassword": "修改密碼",
+  "auth.acceptInvite": "接受邀請加入",
+  "admin.invite": "邀請成員",
+  "admin.removeMember": "移出成員",
+  "admin.resetPassword": "重設成員密碼",
+  "quota.setGroupQuota": "調整組額度",
+  "quota.setTotalBudget": "調整總預算",
+  "quota.setApprovalThreshold": "設定核准門檻",
+  "messages.post": "留言",
+  "notes.add": "新增筆記",
+  "notes.update": "更新筆記",
+  "notes.remove": "刪除筆記",
+  "schedule.add": "新增行程",
+  "schedule.remove": "刪除行程",
+  "feedback.submit": "送出回饋",
+  // MCP（外部 AI 客戶端）
+  "mcp.list_projects": "MCP 外部客戶端：列出專案",
+  "mcp.get_project_context": "MCP 外部客戶端：讀取專案",
+  "mcp.find_model": "MCP 外部客戶端：查模型",
+  "mcp.submit_generation": "MCP 外部客戶端：送出生成",
+  "mcp.post_message": "MCP 外部客戶端：留言",
+};
+
+/** 有意義欄位的中文標籤——uuid 類識別碼一律不顯示（創作者看不懂也用不到） */
+const AUDIT_FIELD_LABEL: Record<string, string> = {
+  title: "標題", name: "名稱", prompt: "提示詞", message: "訊息", body: "內容",
+  text: "文字", content: "內容", email: "信箱", role: "角色", decision: "裁決",
+  reason: "理由", modelId: "模型", kind: "類型", locked: "鎖定", archived: "封存",
+  favorite: "收藏", scriptText: "腳本", voiceover: "配音詞", durationSec: "秒數",
+  direction: "方向", thresholdPoints: "門檻點數", weeklyPointsPerUser: "每人週額度",
+  totalBudgetPoints: "總預算", startsAt: "開始時間",
+};
+
+const AUDIT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 審計列的 input 摘要：先試「有標籤的欄位＝人話」，一個都沒有才退回原 JSON 截 120 字 */
 function auditInputSummary(input: unknown): string {
   try {
+    if (input && typeof input === "object" && !Array.isArray(input)) {
+      const parts: string[] = [];
+      for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+        if (v == null) continue;
+        const label = AUDIT_FIELD_LABEL[k];
+        if (!label) continue;
+        if (typeof v === "string" && AUDIT_UUID_RE.test(v)) continue;
+        const sv = typeof v === "string" ? v : typeof v === "boolean" ? (v ? "是" : "否") : JSON.stringify(v);
+        parts.push(`${label}：${sv.length > 42 ? `${sv.slice(0, 42)}…` : sv}`);
+        if (parts.length >= 4) break; // 一列最多四個欄位，維持流水的可掃讀性
+      }
+      // 物件但沒有任何可讀欄位（多半只有 uuid 識別碼）：不顯示——動作的人話標籤已足夠，
+      // 硬塞一串 uuid 正是「創作者看不懂」的來源
+      return parts.join("・");
+    }
     const s = JSON.stringify(input);
     if (!s || s === "null" || s === "{}") return "";
     return s.length > 120 ? `${s.slice(0, 120)}…` : s;
@@ -336,11 +446,13 @@ function AuditLogCard() {
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <span aria-label={r.ok ? "成功" : "失敗"}>{r.ok ? "✅" : "❌"}</span>
                 <b>{r.actorName}</b>
-                <span className="mono" style={{ fontSize: 11 }}>{r.action}</span>
+                {/* 人話動作優先（W3 回饋：全是代碼看不懂）；原代碼縮成小字，篩選關鍵字仍對得上 */}
+                <span>{AUDIT_ACTION_LABEL[r.action] ?? r.action}</span>
+                {AUDIT_ACTION_LABEL[r.action] && <span className="mono hint" style={{ fontSize: 10 }}>{r.action}</span>}
                 <span className="hint" style={{ fontSize: 11 }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</span>
               </div>
               {auditInputSummary(r.input) && (
-                <div className="hint mono" style={{ fontSize: 11, marginTop: 2, overflowWrap: "anywhere" }}>
+                <div className="hint" style={{ fontSize: 11, marginTop: 2, overflowWrap: "anywhere" }}>
                   {auditInputSummary(r.input)}
                 </div>
               )}

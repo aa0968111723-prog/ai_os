@@ -28,7 +28,7 @@ export function PromptLibrary({ projectId, onUse }: { projectId: string; onUse: 
 
   return (
     <section className="card" data-fb="提示詞庫">
-      <h2>提示詞庫（打過的咒語，一鍵再用）</h2>
+      <h2>提示詞庫（用過的提示詞，一鍵再用）</h2>
       <p className="hint">成功生成的提示詞會自動存這裡；常用的排在前面。</p>
       <div style={{ marginTop: 8 }}>
         {list.data.map((p) => (

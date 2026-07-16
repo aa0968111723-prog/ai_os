@@ -41,7 +41,7 @@ export function ScriptSplitCard({ projectId }: { projectId: string }) {
       ) : (
         <button onClick={() => setOpen(true)}>貼腳本自動拆分鏡</button>
       )}
-      {split.data && <p className="hint" style={{ color: "var(--success-ink)", marginTop: 8 }}><Icon name="Check" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />已建立 {split.data.count} 幕草稿{split.data.mock ? "（示範拆分）" : ""}</p>}
+      {split.data && <p className="hint" style={{ color: "var(--success-ink)", marginTop: 8 }}><Icon name="Check" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />已建立 {split.data.count} 幕草稿{split.data.mock ? "（測試模式）" : ""}</p>}
       {split.error && <p className="error">{split.error.message}</p>}
     </section>
   );

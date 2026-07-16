@@ -90,8 +90,15 @@ ok("LLM → 文字輸出(不入素材庫)", g.get("status") == "done" and bool(g
 g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/kokoro/mandarin-chinese", "prompt": "把心安住於當下"})
 g = wait_done(admin, g["id"])
 audio_url = g.get("resultUrl") or ""
-ok("TTS → 音訊 URL", g.get("status") == "done" and "audio" in audio_url)
+# 成品落地補抓(sweepUnlandedAssets)可能已把 URL 改寫成相對路徑 /api/assets/:id/file——
+# 兩種形態都合法(時間性)，補上 HOST 才能下載；斷言改看「可定位到音訊資源」
+if audio_url.startswith("/"):
+    audio_url = HOST + audio_url
+ok("TTS → 音訊 URL", g.get("status") == "done" and ("audio" in audio_url or "/api/assets/" in audio_url))
 req = urllib.request.Request(audio_url)
+# 落地後的 /api/assets/:id/file 需要登入——帶 admin 的 session cookie（mock 端點無視多餘 header）
+if admin.cookie:
+    req.add_header("Cookie", admin.cookie)
 with urllib.request.urlopen(req) as r:
     wav = r.read()
 ok("音訊可下載且為 WAV", wav[:4] == b"RIFF")

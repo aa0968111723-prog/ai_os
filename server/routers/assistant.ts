@@ -182,7 +182,7 @@ ${sceneLines}
 
       // 假模式：回確定性的現況摘要（不花錢可測），不提議動作
       if (isMockMode()) {
-        const answer = `（示範）目前有 ${scenes.length} 個分鏡，其中待審 ${pendingCount} 個；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}。你的問題：「${input.message}」——正式模式下我會讀專案內容給你更具體的回覆與可執行的建議動作。`;
+        const answer = `（測試模式示範）目前有 ${scenes.length} 個分鏡，其中待審 ${pendingCount} 個；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}。你的問題：「${input.message}」——正式模式下我會讀專案內容給你更具體的回覆與可執行的建議動作。`;
         return { answer, actions: [] as ResolvedAction[], mock: true, fallback: false };
       }
 
