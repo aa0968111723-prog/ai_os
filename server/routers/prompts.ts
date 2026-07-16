@@ -3,6 +3,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
+import { assertProjectEditable } from "../services/projectAcl";
 
 /** 提示詞庫：成功生成的「咒語」自動入庫，一鍵再用 */
 export const promptsRouter = router({
@@ -25,6 +26,7 @@ export const promptsRouter = router({
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能寫共用提示詞庫
       const text = input.text.trim();
       if (!text) return null;
       // 併發自動存同一咒語會 select-then-insert 競態（重複列/漏加 useCount）。
@@ -56,6 +58,7 @@ export const promptsRouter = router({
     const [row] = await db.select().from(schema.prompts).where(eq(schema.prompts.id, input.id));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
+    await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3：檢視者不能刪他人咒語
     await db.delete(schema.prompts).where(eq(schema.prompts.id, input.id));
     return { ok: true };
   }),

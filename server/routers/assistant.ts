@@ -344,13 +344,28 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           userId: ctx.auth.user.id,
           projectId: project.id,
           scriptText: a.script,
-          assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
+          // editable 已在 runAction 入口擋過（line 246）；包成無回傳值配合 void 型別
+          assertAccess: (p) => {
+            requireGroup(ctx.auth, p.groupId);
+          },
         });
         return { ok: true, kind: "split_script" as const, createdScenes: result.count, message: `已拆出 ${result.count} 個分鏡，可逐鏡生成畫面` };
       }
 
-      // submit_approval：走與網頁「送審」完全相同的核心（版本號原子產生、標分鏡 pending、系統訊息）
-      await submitApprovalCore(a.sceneId, ctx.auth.user.id, (groupId) => requireGroup(ctx.auth, groupId));
+      // submit_approval：走與網頁「送審」完全相同的核心（版本號原子產生、標分鏡 pending、系統訊息）。
+      // 先比照 generate/update_scene 驗證 sceneId 屬於 input.projectId——否則守衛與審計都綁在
+      // 請求指名的專案上，實際被改動的卻是另一專案的分鏡（2.2 誤歸屬＋2.3 可被繞過）
+      {
+        const [scene] = await db
+          .select({ id: schema.scenes.id })
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.id, a.sceneId), eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+        if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
+      }
+      await submitApprovalCore(a.sceneId, ctx.auth.user.id, async (p) => {
+        requireGroup(ctx.auth, p.groupId);
+        await assertProjectEditable(ctx.auth, p); // 對分鏡的「真實」專案再驗一次 2.3（防守衛綁錯專案）
+      });
       return { ok: true, kind: "submit_approval" as const, message: "已送審，等組長裁決" };
     }),
 });

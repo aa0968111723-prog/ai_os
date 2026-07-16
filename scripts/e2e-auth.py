@@ -176,3 +176,24 @@ ok("MCP list_projects 可用", any(p["title"]=="見證故事測試" for p in pro
 tc2 = mcp("tools/call",{"name":"get_project_context","arguments":{"projectId":proj["id"]}})
 ctx2 = json.loads(tc2["result"]["content"][0]["text"])
 ok("MCP 讀專案上下文（含世界觀）", ctx2["worldview"]["logline"].startswith("陳師姐"))
+
+# P0：MCP 是最高權限介面，每次工具呼叫（成功/失敗）都要落審計——過去完全零軌跡。
+# 審計是 fire-and-forget 非同步寫入：用輪詢等落庫（最多 10 秒），不賭固定 sleep
+import time as _t
+
+def wait_audit(pred, timeout=10):
+    for _ in range(timeout * 2):
+        rows = call("GET", admin2, "audit.list", {}).get("items", [])
+        if any(pred(i) for i in rows):
+            return rows
+        _t.sleep(0.5)
+    return call("GET", admin2, "audit.list", {}).get("items", [])
+
+rows = wait_audit(lambda i: str(i.get("action", "")).startswith("mcp."))
+mcp_rows = [i for i in rows if str(i.get("action", "")).startswith("mcp.")]
+ok("MCP 呼叫落審計(mcp.* action)", len(mcp_rows) >= 2)
+ok("MCP 審計帶 projectId 歸屬", any(i.get("projectId") == proj["id"] for i in mcp_rows))
+bad = mcp("tools/call", {"name": "get_project_context", "arguments": {"projectId": "00000000-0000-0000-0000-000000000000"}})
+ok("MCP 錯誤呼叫回 JSON-RPC error", "error" in bad)
+rows2 = wait_audit(lambda i: str(i.get("action", "")).startswith("mcp.") and i.get("ok") is False)
+ok("MCP 失敗呼叫也落審計(ok=false)", any(str(i.get("action", "")).startswith("mcp.") and i.get("ok") is False for i in rows2))

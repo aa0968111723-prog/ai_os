@@ -132,4 +132,37 @@ call("POST", admin, "projects.setProjectRole", {"projectId": pid, "userId": mem_
 deny = call("POST", mem, "assistant.runAction", {"projectId": pid, "action": {"type": "create_scene", "title": "越權鏡"}})
 ok("🔒 檢視者不能跑助手動作", "檢視者" in deny.get("__error__", ""))
 
+# ── P0 ACL 批次補強：過去漏掛守衛的寫入端點，檢視者現在全擋 ──
+pv = call("GET", mem, "projects.get", {"id": pid})
+ok("projects.get 回 myProjectRole=viewer", pv.get("myProjectRole") == "viewer")
+sid_v = scenes[0]["id"]
+deny = call("POST", mem, "approvals.submit", {"sceneId": sid_v})
+ok("🔒 檢視者不能送審", "檢視者" in deny.get("__error__", ""))
+deny = call("POST", mem, "director.splitScript", {"projectId": pid, "scriptText": "第一段內容。\n\n第二段內容。"})
+ok("🔒 檢視者不能拆分鏡(不扣點)", "檢視者" in deny.get("__error__", ""))
+deny = call("POST", mem, "scenes.remove", {"sceneId": sid_v})
+ok("🔒 檢視者不能刪分鏡", "檢視者" in deny.get("__error__", ""))
+deny = call("POST", mem, "scenes.purge", {"sceneId": sid_v})
+ok("🔒 檢視者不能永久刪分鏡", "檢視者" in deny.get("__error__", ""))
+deny = call("POST", mem, "scenes.restore", {"sceneId": sid_v})
+ok("🔒 檢視者不能還原分鏡", "檢視者" in deny.get("__error__", ""))
+deny = call("POST", mem, "prompts.save", {"projectId": pid, "text": "越權咒語"})
+ok("🔒 檢視者不能存提示詞", "檢視者" in deny.get("__error__", ""))
+pr = call("POST", admin, "prompts.save", {"projectId": pid, "text": "組長的咒語"})
+deny = call("POST", mem, "prompts.remove", {"id": pr["id"]})
+ok("🔒 檢視者不能刪提示詞", "檢視者" in deny.get("__error__", ""))
+
+# ── P0 跨專案待辦彙總（Launchpad 角標＋頂欄計數的資料源）──
+call("POST", admin, "projects.setProjectRole", {"projectId": pid, "userId": mem_id, "role": "editor"})
+pv2 = call("GET", mem, "projects.get", {"id": pid})
+ok("恢復編輯者後 myProjectRole=editor", pv2.get("myProjectRole") == "editor")
+ap = call("POST", mem, "approvals.submit", {"sceneId": sid_v})
+ok("編輯者可送審", isinstance(ap, dict) and "__error__" not in ap and ap.get("status") == "pending")
+summ = call("GET", mem, "approvals.pendingSummary", {"groupId": gid})
+row = next((x for x in summ.get("projects", []) if x["projectId"] == pid), None)
+ok("pendingSummary 回本案待審計數", row is not None and row["pendingApprovals"] >= 1)
+ok("pendingSummary 組層級總數", summ.get("totalPendingApprovals", 0) >= 1)
+deny = call("GET", mem, "approvals.pendingSummary", {"groupId": "00000000-0000-0000-0000-000000000000"})
+ok("🔒 非本組不能看待辦彙總", "__error__" in deny)
+
 print("—— e2e-phase3 完成 ——")

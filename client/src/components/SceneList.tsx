@@ -15,6 +15,8 @@ const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
 
 // 日常主力：便宜快、剪輯人員逐格試圖首選。要換模型可到上方生成台挑（那裡有完整模型指南）。
 const DEFAULT_MODEL = "fal-ai/fast-lightning-sdxl";
+// 逐格配音的後端預設 TTS（scenes.generateVoiceover 未帶 modelId 時用它）——前端只拿來顯示預估點數
+const DEFAULT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
 // 目標剪輯軟體 → 可直接匯入的時間軸/字幕格式（需求 #8）：剪映/CapCut/Premiere 吃 SRT、
 // Final Cut Pro（含剪映專業版）吃 FCPXML、DaVinci Resolve 吃 EDL。
@@ -172,6 +174,7 @@ function SceneRow({
   i,
   total,
   isLeader,
+  canEdit,
   meLoading,
   onUsePrompt,
   invalidate,
@@ -185,6 +188,7 @@ function SceneRow({
   i: number;
   total: number;
   isLeader: boolean;
+  canEdit: boolean;
   meLoading: boolean;
   onUsePrompt?: (prompt: string) => void;
   invalidate: () => void;
@@ -204,6 +208,9 @@ function SceneRow({
   const isVoicing = s.pendingVoiceStatus === "queued" || s.pendingVoiceStatus === "running";
   const hasVoiceover = (s.voiceover ?? "").trim() !== "";
   const rowError = update.error ?? generate.error ?? generateVoiceover.error;
+  // 逐格生成／配音的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
+  const genPoints = getModel(DEFAULT_MODEL)?.points;
+  const ttsPoints = getModel(DEFAULT_TTS_MODEL)?.points;
 
   return (
     <div className="gen-row" data-fb="分鏡格">
@@ -224,7 +231,7 @@ function SceneRow({
           <InlineEdit
             value={s.title}
             kind="text"
-            pending={update.isPending}
+            pending={update.isPending || !canEdit}
             ariaLabel={`第 ${i + 1} 鏡標題`}
             placeholder="鏡頭標題"
             onCommit={(v) => update.mutate({ sceneId: s.id, title: String(v) })}
@@ -236,7 +243,7 @@ function SceneRow({
             <InlineEdit
               value={s.durationSec}
               kind="number"
-              pending={update.isPending}
+              pending={update.isPending || !canEdit}
               ariaLabel={`第 ${i + 1} 鏡秒數`}
               onCommit={(v) => update.mutate({ sceneId: s.id, durationSec: Number(v) })}
               style={{ width: 56, textAlign: "center" }}
@@ -255,36 +262,42 @@ function SceneRow({
           <InlineEdit
             value={s.voiceover ?? ""}
             kind="textarea"
-            pending={update.isPending}
+            pending={update.isPending || !canEdit}
             ariaLabel={`第 ${i + 1} 鏡配音詞`}
             placeholder="配音詞（可留白）"
             onCommit={(v) => update.mutate({ sceneId: s.id, voiceover: String(v) })}
           />
-          {/* 旁白配音：有配音詞才給生成鈕（中文 TTS 走後端預設，不必前端帶模型）；完成後就地試聽＋下載 */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-            {hasVoiceover ? (
-              <button
-                className="btn-sm"
-                disabled={generateVoiceover.isPending || isVoicing}
-                title="用這一格的配音詞生成中文旁白，完成後自動出現試聽"
-                onClick={() => generateVoiceover.mutate({ sceneId: s.id })}
-              >
-                {isVoicing ? (
-                  "配音生成中…"
-                ) : s.narrationUrl ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <Icon name="RotateCw" /> 重生配音
-                  </span>
+          {/* 旁白配音：有配音詞才給生成鈕（中文 TTS 走後端預設，不必前端帶模型）；完成後就地試聽＋下載。
+              扣點前先確認（顯示預估點數，兌現 HelpPage「點頭才扣」承諾）；檢視者不顯示（2.3 唯讀） */}
+          {canEdit && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+              {hasVoiceover ? (
+                isVoicing || generateVoiceover.isPending ? (
+                  <button className="btn-sm" disabled>配音生成中…</button>
                 ) : (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <Icon name="Mic" /> 生成配音
-                  </span>
-                )}
-              </button>
-            ) : (
-              <span className="hint">先填配音詞才能生成旁白</span>
-            )}
-          </div>
+                  <ConfirmButton
+                    triggerClassName="btn-sm"
+                    triggerTitle="用這一格的配音詞生成中文旁白，完成後自動出現試聽"
+                    message={`即將生成旁白配音（${getModel(DEFAULT_TTS_MODEL)?.label ?? "中文 TTS"}${ttsPoints != null ? `，約 −${ttsPoints} 點` : ""}）；失敗自動退點`}
+                    confirmLabel="確認生成"
+                    onConfirm={() => generateVoiceover.mutate({ sceneId: s.id })}
+                  >
+                    {s.narrationUrl ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <Icon name="RotateCw" /> 重生配音{ttsPoints != null ? `（約 −${ttsPoints} 點）` : ""}
+                      </span>
+                    ) : (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <Icon name="Mic" /> 生成配音{ttsPoints != null ? `（約 −${ttsPoints} 點）` : ""}
+                      </span>
+                    )}
+                  </ConfirmButton>
+                )
+              ) : (
+                <span className="hint">先填配音詞才能生成旁白</span>
+              )}
+            </div>
+          )}
           {s.narrationUrl && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
               <audio
@@ -324,27 +337,30 @@ function SceneRow({
           </div>
         )}
 
-        {/* 就地生成／重生＋單檔下載 */}
+        {/* 就地生成／重生＋單檔下載。扣點前先確認（顯示預估點數）；檢視者不顯示生成鈕（2.3 唯讀） */}
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {s.prompt ? (
-            <button
-              className="primary btn-sm"
-              disabled={generate.isPending || isGenerating}
-              title="用這一格的提示詞就地生成，完成後自動回填縮圖"
-              onClick={() => generate.mutate({ sceneId: s.id, modelId: DEFAULT_MODEL })}
-            >
-              {isGenerating ? (
-                "生成中…"
-              ) : s.assetId ? (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Icon name="RotateCw" /> 重生這一格
-                </span>
-              ) : (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Icon name="Sparkles" /> 生成這一格
-                </span>
-              )}
-            </button>
+          {!canEdit ? null : s.prompt ? (
+            isGenerating || generate.isPending ? (
+              <button className="primary btn-sm" disabled>生成中…</button>
+            ) : (
+              <ConfirmButton
+                triggerClassName="primary btn-sm"
+                triggerTitle="用這一格的提示詞就地生成，完成後自動回填縮圖"
+                message={`即將${s.assetId ? "重生" : "生成"}這一格（${getModel(DEFAULT_MODEL)?.label ?? DEFAULT_MODEL}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
+                confirmLabel="確認生成"
+                onConfirm={() => generate.mutate({ sceneId: s.id, modelId: DEFAULT_MODEL })}
+              >
+                {s.assetId ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Icon name="RotateCw" /> 重生這一格{genPoints != null ? `（約 −${genPoints} 點）` : ""}
+                  </span>
+                ) : (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Icon name="Sparkles" /> 生成這一格{genPoints != null ? `（約 −${genPoints} 點）` : ""}
+                  </span>
+                )}
+              </ConfirmButton>
+            )
           ) : (
             !s.assetId && <span className="hint">先用上方「AI 拆分鏡」給這格提示詞，就能就地生成</span>
           )}
@@ -367,8 +383,9 @@ function SceneRow({
 
         {!meLoading && (
           <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-            {/* 已通過也能重送：後端本就版本化（重送＝新版本、舊 pending 作廢），換素材後不必刪掉重建 */}
-            {(s.status === "todo" || s.status === "review" || s.status === "needs_work" || s.status === "approved") && (
+            {/* 已通過也能重送：後端本就版本化（重送＝新版本、舊 pending 作廢），換素材後不必刪掉重建。
+                檢視者不顯示（2.3：viewer 不能改分鏡審批狀態，後端 approvals.submit 也已擋） */}
+            {canEdit && (s.status === "todo" || s.status === "review" || s.status === "needs_work" || s.status === "approved") && (
               <button style={{ padding: "3px 12px", fontSize: 12 }} disabled={submitApproval.isPending}
                 onClick={() => submitApproval.mutate({ sceneId: s.id })}>
                 {s.status === "approved" ? "重送新版審核" : "送審"}
@@ -396,25 +413,28 @@ function SceneRow({
           </div>
         )}
       </div>
-      <div style={{ display: "flex", gap: 4 }}>
-        <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === 0 || move.isPending} aria-label="上移" onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}><Icon name="ChevronUp" size={16} /></button>
-        <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
-        <ConfirmButton
-          triggerStyle={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger)" }}
-          disabled={remove.isPending}
-          triggerAriaLabel="刪除"
-          triggerTitle="刪除後移到回收桶，可還原（保留配音詞與提示詞）"
-          message={`把分鏡「${s.title}」移到回收桶？可從回收桶還原。`}
-          confirmLabel="刪除"
-          onConfirm={() => remove.mutate({ sceneId: s.id })}
-        ><Icon name="X" size={16} /></ConfirmButton>
-      </div>
+      {canEdit && (
+        <div style={{ display: "flex", gap: 4 }}>
+          <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === 0 || move.isPending} aria-label="上移" onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}><Icon name="ChevronUp" size={16} /></button>
+          <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
+          <ConfirmButton
+            triggerStyle={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger)" }}
+            disabled={remove.isPending}
+            triggerAriaLabel="刪除"
+            triggerTitle="刪除後移到回收桶，可還原（保留配音詞與提示詞）"
+            message={`把分鏡「${s.title}」移到回收桶？可從回收桶還原。`}
+            confirmLabel="刪除"
+            onConfirm={() => remove.mutate({ sceneId: s.id })}
+          ><Icon name="X" size={16} /></ConfirmButton>
+        </div>
+      )}
     </div>
   );
 }
 
-/** 分鏡與交付：可編輯＋就地生成/重生＋單檔下載＋粗剪預覽＋送審/裁決（三態機）＋打包下載 */
-export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: string; isLeader: boolean; onUsePrompt?: (prompt: string) => void }) {
+/** 分鏡與交付：可編輯＋就地生成/重生＋單檔下載＋粗剪預覽＋送審/裁決（三態機）＋打包下載。
+ *  canEdit=false（2.3 檢視者）：隱藏所有寫入控制（生成/配音/送審/排序/刪除/行內編輯），瀏覽與下載照常 */
+export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: { projectId: string; isLeader: boolean; canEdit?: boolean; onUsePrompt?: (prompt: string) => void }) {
   const utils = trpc.useUtils();
   // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
   const me = trpc.auth.me.useQuery();
@@ -474,6 +494,7 @@ export function SceneList({ projectId, isLeader, onUsePrompt }: { projectId: str
               i={i}
               total={list.length}
               isLeader={isLeader}
+              canEdit={canEdit}
               meLoading={me.isLoading}
               onUsePrompt={onUsePrompt}
               invalidate={invalidate}

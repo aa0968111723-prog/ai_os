@@ -42,8 +42,9 @@ function readFileText(file: File): Promise<string> {
 /**
  * 專案知識庫（願景核心「真的懂我們素材」）：
  * 貼上開示稿／見證稿／腳本 → AI 導演發想時自動讀取，夥伴不用每次重講背景。
+ * readOnly（2.3 檢視者）：隱藏新增／編輯／刪除控制——後端本就會擋，前端不再「按了才失敗」。
  */
-export function KnowledgeBase({ projectId }: { projectId: string }) {
+export function KnowledgeBase({ projectId, readOnly = false }: { projectId: string; readOnly?: boolean }) {
   const utils = trpc.useUtils();
   const list = trpc.knowledge.list.useQuery({ projectId });
   // 新增表單的標題／內容改用本地草稿：邊打邊存 localStorage，重整／當機也不掉逐字稿。
@@ -157,7 +158,7 @@ export function KnowledgeBase({ projectId }: { projectId: string }) {
       ) : list.data && list.data.length > 0 ? (
         <div style={{ marginTop: 8 }}>
           {list.data.map((k) => (
-            <KnowledgeRow key={k.id} k={k} projectId={projectId} remove={remove} />
+            <KnowledgeRow key={k.id} k={k} projectId={projectId} remove={remove} readOnly={readOnly} />
           ))}
         </div>
       ) : (
@@ -167,7 +168,9 @@ export function KnowledgeBase({ projectId }: { projectId: string }) {
         </div>
       )}
 
-      {open ? (
+      {readOnly ? (
+        <p className="hint" style={{ marginTop: 12 }}>你在此專案是檢視者（唯讀）——知識庫可瀏覽、不能新增或修改。</p>
+      ) : open ? (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
           <label htmlFor={`kb-kind-${projectId}`}>類型</label>
           <select id={`kb-kind-${projectId}`} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
@@ -267,10 +270,12 @@ function KnowledgeRow({
   k,
   projectId,
   remove,
+  readOnly = false,
 }: {
   k: KnowledgeListItem;
   projectId: string;
   remove: ReturnType<typeof trpc.knowledge.remove.useMutation>;
+  readOnly?: boolean;
 }) {
   const utils = trpc.useUtils();
   const [editing, setEditing] = useState(false);
@@ -372,19 +377,21 @@ function KnowledgeRow({
         <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>{k.title}</div>
         <div className="meta" style={{ fontSize: "var(--fs-12)" }}>{k.excerpt}{k.chars > 120 ? "…" : ""}（{k.chars.toLocaleString()} 字）</div>
       </div>
-      <div style={{ display: "flex", gap: 4 }}>
-        <button style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }} onClick={openEdit}>
-          編輯
-        </button>
-        <ConfirmButton
-          onConfirm={() => remove.mutate({ id: k.id })}
-          message={`刪除知識「${k.title}」？`}
-          triggerStyle={{ padding: "3px 12px", fontSize: "var(--fs-12)", color: "var(--danger-ink)" }}
-          disabled={remove.isPending}
-        >
-          刪除
-        </ConfirmButton>
-      </div>
+      {!readOnly && (
+        <div style={{ display: "flex", gap: 4 }}>
+          <button style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }} onClick={openEdit}>
+            編輯
+          </button>
+          <ConfirmButton
+            onConfirm={() => remove.mutate({ id: k.id })}
+            message={`刪除知識「${k.title}」？`}
+            triggerStyle={{ padding: "3px 12px", fontSize: "var(--fs-12)", color: "var(--danger-ink)" }}
+            disabled={remove.isPending}
+          >
+            刪除
+          </ConfirmButton>
+        </div>
+      )}
     </div>
   );
 }
