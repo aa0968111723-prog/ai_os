@@ -18,7 +18,7 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  # 五套 e2e(auth/models/phase2/phase3/phase4,共 131 項):每套「全新資料庫」起跑——
+  # 六套 e2e(auth/models/phase2/phase3/phase4/messages):每套「全新資料庫」起跑——
   # 重置 schema → 重啟伺服器(開機自動建表+種子)→ 跑套件;e2e_lib 讓任何 ❌ 都以非零碼收場。
   # 環境與本機驗證口徑一致:FAL_MOCK=1(假生成不花錢)+ MOCK_BILLING=1(仍真扣點,額度護欄可驗)。
   e2e:
@@ -52,7 +52,7 @@ jobs:
       - name: 依序跑五套 e2e(每套全新 DB + 重啟伺服器)
         run: |
           set -eu
-          for suite in auth models phase2 phase3 phase4; do
+          for suite in auth models phase2 phase3 phase4 messages; do
             echo "::group::e2e-$suite"
             # 全新資料庫:掃掉上一套的所有表,開機時 ensure.ts 會重建+種子
             PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \

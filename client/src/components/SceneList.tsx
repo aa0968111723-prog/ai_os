@@ -4,6 +4,7 @@ import { getModel } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
+import { discussInMessages } from "../discuss";
 
 const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
   todo: { label: "草稿", cls: "queued" },
@@ -213,7 +214,7 @@ function SceneRow({
   const ttsPoints = getModel(DEFAULT_TTS_MODEL)?.points;
 
   return (
-    <div className="gen-row" data-fb="分鏡格">
+    <div className="gen-row" data-fb="分鏡格" id={`scene-${s.id}`}>
       {s.assetUrl ? (
         s.assetKind === "video" ? (
           <video className="gen-thumb" src={s.assetUrl} muted preload="metadata" />
@@ -382,7 +383,15 @@ function SceneRow({
         )}
 
         {!meLoading && (
-          <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+            {/* 在留言中討論：對所有人開放（含檢視者——留言是唯讀者的參與出口） */}
+            <button
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12 }}
+              title="把這一鏡帶進組內留言討論"
+              onClick={() => discussInMessages({ refType: "scene", refId: s.id, title: s.title })}
+            >
+              <Icon name="MessageCircle" size={13} /> 討論
+            </button>
             {/* 已通過也能重送：後端本就版本化（重送＝新版本、舊 pending 作廢），換素材後不必刪掉重建。
                 檢視者不顯示（2.3：viewer 不能改分鏡審批狀態，後端 approvals.submit 也已擋） */}
             {canEdit && (s.status === "todo" || s.status === "review" || s.status === "needs_work" || s.status === "approved") && (

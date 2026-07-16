@@ -339,8 +339,35 @@ export const messages = pgTable("messages", {
   userId: uuid("user_id").notNull(),
   kind: text("kind").notNull().default("text"),
   body: text("body").notNull(),
+  // 協作強化（留言 2.0）：回覆串／組長釘選／引用專案內作品（分鏡・素材・生成）／@提及
+  replyToId: uuid("reply_to_id"),
+  pinned: boolean("pinned").notNull().default(false),
+  refType: text("ref_type", { enum: ["scene", "asset", "generation"] }),
+  refId: uuid("ref_id"),
+  mentions: jsonb("mentions").$type<string[]>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/** 留言表情回應：每人對每則每種表情最多一筆（再按一次＝收回），白名單見 messages router */
+export const messageReactions = pgTable("message_reactions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  messageId: uuid("message_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  emoji: text("emoji").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  msgIdx: index("message_reactions_msg_idx").on(t.messageId),
+}));
+
+/** 留言已讀水位：每人每專案一筆 lastReadAt，未讀數＝晚於水位的他人留言數（router upsert 維護） */
+export const messageReads = pgTable("message_reads", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  lastReadAt: timestamp("last_read_at").defaultNow().notNull(),
+}, (t) => ({
+  userProjectIdx: index("message_reads_user_project_idx").on(t.userId, t.projectId),
+}));
 
 /** 工作流執行紀錄：後端執行器逐步推進（關頁不中斷）；steps 為每步狀態快照 */
 export const workflowRuns = pgTable("workflow_runs", {

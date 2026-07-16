@@ -146,6 +146,8 @@ export function ProjectPage({ id }: { id: string }) {
   const [sceneIds, setSceneIds] = useState<string[]>([]);
   const toggleScene = (sid: string) => setSceneIds((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]));
   const assets = trpc.projects.assets.useQuery({ projectId: id });
+  // 留言未讀數（餵 TocNav ⑤交付 徽章）：15 秒輪詢已夠即時，同房夥伴留言另有 WS invalidate 立即刷新
+  const unread = trpc.messages.unread.useQuery({ projectId: id }, { refetchInterval: 15000 });
   // 「從這裡開始」步驟列用：讀既有查詢判定各步是否完成（與 GenerationList／SceneList 共用快取，不額外增負擔）
   const generations = trpc.generation.listByProject.useQuery({ projectId: id });
   const scenes = trpc.scenes.listByProject.useQuery({ projectId: id });
@@ -401,9 +403,22 @@ export function ProjectPage({ id }: { id: string }) {
         )}
       </section>
 
-      {/* #28 章節導覽：桌面左側 sticky 側欄／手機頂部可收合列（純附加，不動 .cols 版面） */}
+      {/* #28 章節導覽：桌面左側 sticky 側欄／手機頂部可收合列（純附加，不動 .cols 版面）。
+          ⑤交付 帶留言未讀徽章（有人提及我時顯示 @N）——組長漏審/夥伴喊話不再無聲。 */}
       <div className="toc-layout">
-      <TocNav />
+      <TocNav
+        items={[
+          { id: "stage-plan", label: "① 企劃・定盤" },
+          { id: "stage-create", label: "② 創作・生成" },
+          { id: "stage-assets", label: "③ 素材整理" },
+          { id: "stage-review", label: "④ 分鏡與審核" },
+          {
+            id: "stage-deliver",
+            label: "⑤ 交付",
+            badge: unread.data && unread.data.count > 0 ? (unread.data.mentioned ? `@${Math.min(unread.data.count, 99)}` : String(Math.min(unread.data.count, 99))) : undefined,
+          },
+        ]}
+      />
       <div className="cols">
         <div className="stack">
           {/* ① 企劃・定盤：設定一次，AI 全程記得 */}
@@ -801,7 +816,7 @@ export function ProjectPage({ id }: { id: string }) {
 
         {/* 組內留言 */}
         <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-          <MessagePanel projectId={id} />
+          <MessagePanel projectId={id} isLeader={isLeader} />
         </CollabZone>
       </div>
       </div>

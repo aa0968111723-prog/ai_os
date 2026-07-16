@@ -386,3 +386,64 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
     transition-duration: 0.001ms !important; scroll-behavior: auto !important;
   }
 }
+
+/* ── 組內留言協作強化(快速短語/表情回應/@提及/引用卡/回覆串/釘選/未讀徽章) ── */
+.msg-block { padding: 2px 6px; border-radius: var(--r-8); }
+.msg-block.mentioned-me { background: color-mix(in srgb, var(--gold) 14%, transparent); }
+.msg .who { display: inline-flex; align-items: center; }
+mark.mention { background: color-mix(in srgb, var(--primary) 18%, transparent); color: inherit; border-radius: 4px; padding: 0 2px; font-weight: 600; }
+
+.msg-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 2px 0 0 2px; }
+.msg-action { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; padding: 2px 8px;
+  background: none; border: none; color: var(--fg-secondary); cursor: pointer; border-radius: var(--r-8); }
+.msg-action:hover { background: var(--card2); color: var(--fg); }
+.reaction-pill { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; padding: 1px 8px;
+  border: 1px solid var(--border-soft); border-radius: 999px; background: var(--card2); cursor: pointer; }
+.reaction-pill.mine { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.emoji-pop { position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 5; display: flex; gap: 2px;
+  background: var(--card); border: 1px solid var(--border-soft); border-radius: 999px; padding: 4px 6px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 12%); }
+.emoji-pop button { background: none; border: none; font-size: 17px; padding: 2px 5px; cursor: pointer; border-radius: 50%; }
+.emoji-pop button:hover { background: var(--card2); }
+
+.quick-phrases { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.quick-phrases .chip { cursor: pointer; margin: 0; border: 1px solid var(--border-soft); background: var(--card2); }
+.quick-phrases .chip:hover:not(:disabled) { border-color: var(--border-strong); }
+
+.compose-ctx { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-secondary);
+  background: var(--card2); border-radius: var(--r-8); padding: 4px 10px; margin-top: 8px; min-width: 0; }
+.compose-ctx > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.reply-quote { display: block; font-size: 11.5px; color: var(--fg-secondary); background: var(--card2);
+  border-left: 2px solid var(--border-strong); border-radius: 0 6px 6px 0; padding: 2px 8px; margin-bottom: 3px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ref-card { display: flex; align-items: center; gap: 8px; margin-top: 5px; padding: 5px 10px; max-width: 100%;
+  border: 1px solid var(--border-soft); border-radius: var(--r-8); background: var(--card2);
+  font-size: 12px; cursor: pointer; text-align: left; }
+.ref-card:disabled { cursor: default; color: var(--fg-secondary); }
+.ref-card:hover:not(:disabled) { border-color: var(--border-strong); }
+.ref-card img { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; flex: none; }
+.ref-card .ref-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ref-card .ref-go { flex: none; margin-left: auto; color: var(--primary-ink); font-weight: 600; }
+
+.pinned-bar { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.pinned-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; min-width: 0;
+  background: color-mix(in srgb, var(--gold) 12%, transparent); border: 1px solid color-mix(in srgb, var(--gold) 35%, transparent);
+  border-radius: var(--r-8); padding: 4px 10px; }
+
+.mention-pop { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 6; display: flex; flex-direction: column;
+  min-width: 180px; background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--r-8);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 14%); overflow: hidden; }
+.mention-pop button { display: flex; align-items: center; background: none; border: none; text-align: left;
+  padding: 8px 12px; font-size: 13px; cursor: pointer; }
+.mention-pop button:hover { background: var(--card2); }
+
+.toc-badge { display: inline-flex; align-items: center; justify-content: center; margin-left: 6px;
+  min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; font-weight: 700; border-radius: 999px;
+  background: var(--danger); color: #fff; line-height: 1; }
+
+/* 引用卡「查看」跳轉後的目標高亮:短暫底色脈衝,幫視線鎖定 */
+@keyframes flash-target { 0% { background: color-mix(in srgb, var(--gold) 45%, transparent); }
+  100% { background: transparent; } }
+.flash-target { animation: flash-target 2.2s ease-out; border-radius: var(--r-8); }

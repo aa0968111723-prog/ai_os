@@ -52,6 +52,9 @@ export const publicProcedure = t.procedure;
 /** 強制改密碼期間仍放行的 procedure（點記法完整路徑）；auth.me 是 publicProcedure 本不經此關，列入是保險 */
 const MUST_CHANGE_PW_ALLOWED = ["auth.changePassword", "auth.me", "auth.logout"];
 
+/** 審計豁免清單：高頻、純閱讀狀態、無安全意義的 mutation——記了只會灌爆 audit_log 稀釋真正要查的事件 */
+const AUDIT_EXEMPT = new Set(["messages.markRead"]);
+
 /** 需登入 */
 export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, getRawInput }) => {
   // 開機初始化（建表/種子）完成前，回可理解的訊息而不是 relation does not exist 500
@@ -68,7 +71,7 @@ export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, g
   // 審計（需求 2.2）：所有登入後 mutation 集中記錄——成功與失敗都記（失敗含錯誤訊息）。
   // 放在 next() 之後：只記「真的執行過」的呼叫；query 不記（唯讀且量大）。
   // getRawInput 是驗證前的原始輸入——sanitizeAuditInput 會脫敏截斷，壞輸入也記得下來。
-  if (type === "mutation") {
+  if (type === "mutation" && !AUDIT_EXEMPT.has(path)) {
     const raw = await getRawInput().catch(() => undefined);
     const { recordAudit } = await import("./services/audit");
     recordAudit(auth, path, raw, {
