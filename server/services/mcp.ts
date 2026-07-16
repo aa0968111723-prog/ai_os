@@ -11,6 +11,7 @@ import { worldviewSchema } from "../../shared/worldview";
 import { getModel, endpointOf, MODELS, CATEGORIES, tierLabel, type ProjectFormat, type ModelCategory, type ModelTier } from "../../shared/models";
 import { falSubmit } from "./fal";
 import { reserveQuota, refund } from "./points";
+import { sanitizeAuditInput } from "./audit";
 // 重用網頁端的注入判斷（generation.ts 不 import 本檔，無循環相依）：
 // TTS 會把注入文字唸進成品、轉錄/視覺工具會被污染輸入，不能無條件注入世界觀
 import { effectivePrompt } from "../routers/generation";
@@ -61,10 +62,54 @@ const TOOLS = [
   },
 ];
 
+/**
+ * MCP 工具呼叫審計（需求 2.2）：MCP 是全站權限最高的介面（單一金鑰＝超管），過去完全繞過
+ * trpc.ts 的 mutation 審計中介層——跨組花點、貼留言零軌跡。這裡比照 recordAudit：
+ * fire-and-forget、輸入脫敏、成功失敗都記；groupId/projectId 盡力從 args.projectId 反查。
+ */
+function recordMcpAudit(
+  actorId: string,
+  name: string,
+  args: Record<string, unknown>,
+  outcome: { ok: boolean; error?: string },
+): void {
+  void (async () => {
+    let groupId: string | null = null;
+    let projectId: string | null = null;
+    const pid = args.projectId;
+    if (typeof pid === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pid)) {
+      projectId = pid;
+      const [proj] = await db.select({ groupId: schema.projects.groupId }).from(schema.projects).where(eq(schema.projects.id, pid));
+      groupId = proj?.groupId ?? null;
+    }
+    await db.insert(schema.auditLog).values({
+      actorId,
+      action: `mcp.${name}`,
+      groupId,
+      projectId,
+      input: sanitizeAuditInput(args) as Record<string, unknown>,
+      ok: outcome.ok,
+      error: outcome.error ? outcome.error.slice(0, 300) : null,
+    });
+  })().catch((err) => console.warn("[mcp] 審計寫入失敗（不影響主流程）：", err instanceof Error ? err.message : err));
+}
+
 async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   const [admin] = await db.select().from(schema.users).where(eq(schema.users.isSuperAdmin, true)).limit(1);
   if (!admin) throw new Error("系統尚未初始化");
+  // 每次工具呼叫（含失敗）都落審計——與 tRPC mutation 同一口徑；讀寫工具一律記（MCP 量小、
+  // 但每筆都是超管級跨組操作，可追溯性優先於「query 不記」的省量取捨）
+  try {
+    const result = await runTool(admin, name, args);
+    recordMcpAudit(admin.id, name, args, { ok: true });
+    return result;
+  } catch (err) {
+    recordMcpAudit(admin.id, name, args, { ok: false, error: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
+}
 
+async function runTool(admin: typeof schema.users.$inferSelect, name: string, args: Record<string, unknown>): Promise<unknown> {
   if (name === "list_projects") {
     const rows = await db.select().from(schema.projects).orderBy(desc(schema.projects.updatedAt)).limit(50);
     return rows.map((p) => ({ id: p.id, title: p.title, kind: p.kind, format: p.format, status: p.status }));
@@ -94,6 +139,11 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
   const projectId = String(args.projectId ?? "");
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new Error("找不到專案");
+  // MCP 的專案 ACL（最小集）：MCP 以超管執行、無使用者級角色可查，但「寫入／扣點」不該落在
+  // 已封存的專案上——外部 AI 客戶端拿舊 projectId 對封存案生成，會造成擁有者以為停用卻持續扣點
+  if (project.status === "archived" && (name === "submit_generation" || name === "post_message")) {
+    throw new Error("此專案已封存——請先在網頁端還原專案，或改用其他專案");
+  }
 
   if (name === "get_project_context") {
     const wv = worldviewSchema.parse(project.worldview ?? {});

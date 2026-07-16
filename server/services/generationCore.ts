@@ -132,8 +132,13 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   // 素材庫來源 → 簽名網址（同組檢查；本地檔或外部網址都可）
   let sourceUrl = input.sourceUrl;
   if (input.sourceAssetId) {
-    const [srcAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.sourceAssetId));
-    if (!srcAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到來源素材" });
+    // 回收桶素材不得當付費生成來源：素材庫挑選 UI 已濾 deletedAt，但 stale 畫面／直呼 tRPC
+    // 可帶入已軟刪的 id——不擋的話會扣點且讓「已刪」內容回流到新成品
+    const [srcAsset] = await db
+      .select()
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, input.sourceAssetId), isNull(schema.assets.deletedAt)));
+    if (!srcAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到來源素材（可能已在回收桶——先還原才能當來源）" });
     if (srcAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "來源素材不屬於此專案的組" });
     // 明顯不相容的來源直接擋下，省一次白白失敗的生成
     if (model.needs && (SOURCE_INCOMPAT[model.needs] ?? []).includes(srcAsset.kind)) {

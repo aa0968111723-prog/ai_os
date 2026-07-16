@@ -64,7 +64,7 @@ const STATUS_LABEL: Record<string, string> = {
 /** 成本審核的兩個新狀態沒有專屬 .pill 配色——借語意最近的既有 class（待核准＝queued 金、已駁回＝failed 紅） */
 const STATUS_PILL_CLASS: Record<string, string> = { awaiting_approval: "queued", rejected: "failed" };
 
-export function GenerationList({ projectId }: { projectId: string }) {
+export function GenerationList({ projectId, canEdit = true }: { projectId: string; canEdit?: boolean }) {
   const utils = trpc.useUtils();
   const list = trpc.generation.listByProject.useQuery(
     { projectId },
@@ -372,19 +372,24 @@ export function GenerationList({ projectId }: { projectId: string }) {
             </div>
           )}
           <div>
-            {/* #20 名稱＋收藏列：附加在既有 prompt 顯示「之上」，下方 prompt div 原樣保留（e2e 以 prompt 文字比對） */}
+            {/* #20 名稱＋收藏列：附加在既有 prompt 顯示「之上」，下方 prompt div 原樣保留（e2e 以 prompt 文字比對）。
+                收藏/命名是全組共見 metadata——檢視者唯讀（2.3），只顯示現值不給改 */}
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                aria-label={g.favorite ? "取消收藏" : "收藏"}
-                aria-pressed={!!g.favorite}
-                disabled={toggleFavorite.isPending}
-                onClick={() => toggleFavorite.mutate({ generationId: g.id, favorite: !g.favorite })}
-                style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: g.favorite ? "var(--gold)" : "var(--muted-fg)" }}
-              >
-                <Icon name="Star" size={16} style={g.favorite ? { fill: "currentColor" } : undefined} />
-              </button>
-              {renamingId === g.id ? (
+              {canEdit ? (
+                <button
+                  type="button"
+                  aria-label={g.favorite ? "取消收藏" : "收藏"}
+                  aria-pressed={!!g.favorite}
+                  disabled={toggleFavorite.isPending}
+                  onClick={() => toggleFavorite.mutate({ generationId: g.id, favorite: !g.favorite })}
+                  style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: g.favorite ? "var(--gold)" : "var(--muted-fg)" }}
+                >
+                  <Icon name="Star" size={16} style={g.favorite ? { fill: "currentColor" } : undefined} />
+                </button>
+              ) : (
+                g.favorite && <Icon name="Star" size={16} style={{ color: "var(--gold)", fill: "currentColor" }} />
+              )}
+              {canEdit && renamingId === g.id ? (
                 <>
                   <input
                     autoFocus
@@ -420,17 +425,19 @@ export function GenerationList({ projectId }: { projectId: string }) {
               ) : (
                 <>
                   {g.name && <span style={{ fontSize: 14, fontWeight: 600 }}>{g.name}</span>}
-                  <button
-                    type="button"
-                    aria-label={g.name ? "重新命名" : "命名此生成"}
-                    onClick={() => {
-                      setRenamingId(g.id);
-                      setRenameDraft(g.name ?? "");
-                    }}
-                    style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
-                  >
-                    <Icon name="Pencil" size={14} />
-                  </button>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      aria-label={g.name ? "重新命名" : "命名此生成"}
+                      onClick={() => {
+                        setRenamingId(g.id);
+                        setRenameDraft(g.name ?? "");
+                      }}
+                      style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
+                    >
+                      <Icon name="Pencil" size={14} />
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -459,7 +466,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
             <span className={`pill ${STATUS_PILL_CLASS[g.status] ?? g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
-            {g.status === "done" && g.kind !== "text" && (
+            {canEdit && g.status === "done" && g.kind !== "text" && (
               inScenes(g.id) ? (
                 <button style={{ padding: "4px 12px", fontSize: 12 }} disabled>已加入</button>
               ) : (
@@ -470,7 +477,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
               )
             )}
             {/* 綁定分鏡的成品可一鍵回填為該格現用畫面（音訊＝旁白）——重生多次後挑最好的一版用 */}
-            {g.status === "done" && g.sceneId && (
+            {canEdit && g.status === "done" && g.sceneId && (
               <ConfirmButton
                 triggerStyle={{ padding: "4px 12px", fontSize: 12 }}
                 disabled={setVisual.isPending}

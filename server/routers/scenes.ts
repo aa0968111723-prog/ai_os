@@ -167,7 +167,7 @@ export const scenesRouter = router({
       .from(schema.scenes)
       .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
     if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
-    await getProjectChecked(ctx, scene.projectId);
+    await getProjectChecked(ctx, scene.projectId, true); // 2.3：檢視者不能刪分鏡
     await db.update(schema.scenes).set({ deletedAt: new Date() }).where(eq(schema.scenes.id, input.sceneId));
     return { ok: true };
   }),
@@ -176,7 +176,7 @@ export const scenesRouter = router({
   restore: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
     if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
-    await getProjectChecked(ctx, scene.projectId);
+    await getProjectChecked(ctx, scene.projectId, true); // 2.3：檢視者不能還原分鏡
     await db.update(schema.scenes).set({ deletedAt: null }).where(eq(schema.scenes.id, input.sceneId));
     return { ok: true };
   }),
@@ -185,7 +185,7 @@ export const scenesRouter = router({
   purge: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
     if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
-    await getProjectChecked(ctx, scene.projectId);
+    await getProjectChecked(ctx, scene.projectId, true); // 2.3：檢視者不能永久刪除分鏡（不可回復）
     await db.delete(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
     return { ok: true };
   }),

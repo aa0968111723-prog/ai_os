@@ -206,6 +206,9 @@ export function ProjectPage({ id }: { id: string }) {
 
   const isOwner = me.data?.user.id === p.ownerId;
   const canArchive = isOwner || isLeader;
+  // 2.3 前端唯讀可見性：後端守衛已全面擋 viewer，這裡讓寫入控制「事前」禁用＋常駐唯讀橫幅，
+  // 不再讓檢視者「按了才失敗」（走完看價確認流程最後一步才被擋是最傷的版本）
+  const canEdit = p.myProjectRole !== "viewer";
 
   // 「從這裡開始」四步：用實際 state 判定完成打勾
   const sceneCount = scenes.data?.length ?? 0;
@@ -223,6 +226,7 @@ export function ProjectPage({ id }: { id: string }) {
   const pendingSceneCount = scenes.data?.filter((s) => s.status === "pending").length;
 
   const toggle = (field: "tones" | "themes" | "styles", value: string) => {
+    if (!canEdit) return; // 檢視者：chips 不可切換（樂觀更新會先亮再彈回，比不動更誤導）
     const current = wv[field];
     const next = current.includes(value) ? current.filter((x) => x !== value) : [...current, value];
     // 只送有改的欄位；伺服器與現值合併（避免整包覆蓋造成的資料遺失）
@@ -249,7 +253,8 @@ export function ProjectPage({ id }: { id: string }) {
   // 已選素材與模型明顯不相容（換模型後殘留、或從素材庫直接點選）：鎖住並講清楚，不靜默清掉
   const incompatSource = !!needs && !!sourceAsset && (SOURCE_INCOMPAT[needs] ?? []).includes(sourceAsset.kind);
   const disableReason =
-    !model ? "模型清單還在載入，稍等一下就能生成"
+    !canEdit ? "你在此專案是檢視者（唯讀），不能生成——需要編輯請組長到專案權限卡調整"
+    : !model ? "模型清單還在載入，稍等一下就能生成"
     : !prompt.trim() ? "先填一句提示詞，描述想要的畫面"
     : missingSource ? "這個模型需要來源素材——從素材庫選一個，或貼上網址"
     : incompatSource ? `選到的素材是${sourceAsset.kind === "audio" ? "音訊" : sourceAsset.kind === "image" ? "圖片" : sourceAsset.kind}，這個模型不能用它——請換一個來源`
@@ -331,6 +336,21 @@ export function ProjectPage({ id }: { id: string }) {
         做好後可打包成 zip，媒體檔直接拖進剪映／Premiere 就能剪 <Icon name="ArrowRight" size={13} style={{ verticalAlign: "-2px" }} />
       </p>
       {archiveProject.error && <p className="error">{archiveProject.error.message}</p>}
+
+      {/* 2.3 唯讀橫幅：檢視者第一眼就知道自己是唯讀＋能做什麼＋找誰解鎖（不是「系統一直壞」） */}
+      {!canEdit && (
+        <div
+          className="card"
+          role="status"
+          data-fb="唯讀橫幅"
+          style={{ padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
+        >
+          <Icon name="Lock" size={15} style={{ flexShrink: 0, color: "var(--primary-ink)" }} />
+          <span style={{ fontSize: 13 }}>
+            你在此專案是<b>檢視者（唯讀）</b>——可以瀏覽、留言、下載交付；要編輯或生成，請組長到「專案權限」卡把你改成編輯者。
+          </span>
+        </div>
+      )}
 
       {/* #9 「從這裡開始」步驟列：用實際 state 判定完成打勾，點某步捲到對應區塊 */}
       <section className="card" data-fb="從這裡開始" style={{ marginBottom: 16 }}>
@@ -415,19 +435,22 @@ export function ProjectPage({ id }: { id: string }) {
                 </span>
               ) : null}
             </h2>
+            {!canEdit && <p className="hint" style={{ margin: "4px 0 0" }}>檢視者唯讀——世界觀可瀏覽、不能修改（打的字不會被儲存）。</p>}
             <label htmlFor="wv-logline">一句話故事（logline）</label>
             <input
               id="wv-logline"
               defaultValue={wv.logline}
+              readOnly={!canEdit}
               placeholder="例：陳師姐從憂鬱低谷透過印心佛法走出重生"
-              onBlur={(e) => e.target.value !== wv.logline && updateWv.mutate({ id, worldview: { logline: e.target.value } })}
+              onBlur={(e) => canEdit && e.target.value !== wv.logline && updateWv.mutate({ id, worldview: { logline: e.target.value } })}
             />
             <label htmlFor="wv-message">一句關鍵訊息（一片一訊息）</label>
             <input
               id="wv-message"
               defaultValue={wv.message}
+              readOnly={!canEdit}
               placeholder="例：把心交給佛，煩惱就交給了光"
-              onBlur={(e) => e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
+              onBlur={(e) => canEdit && e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
             />
             <label id="wv-themes">訊息主軸</label>
             <div role="group" aria-labelledby="wv-themes">
@@ -544,7 +567,7 @@ export function ProjectPage({ id }: { id: string }) {
 
           {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}
           <div id="sec-knowledge">
-            <KnowledgeBase projectId={id} />
+            <KnowledgeBase projectId={id} readOnly={!canEdit} />
           </div>
 
           {/* 角色定裝卡：勾選後生成自動注入外觀錨點 */}
@@ -696,7 +719,7 @@ export function ProjectPage({ id }: { id: string }) {
             )}
             {submitNotice && <p className="hint" role="status" style={{ marginTop: 10, color: "var(--gold-ink)" }}>{submitNotice}</p>}
             {submit.error && <p className="error">{submit.error.message}</p>}
-            <GenerationList projectId={id} />
+            <GenerationList projectId={id} canEdit={canEdit} />
           </section>
           </CollabZone>
 
@@ -762,7 +785,7 @@ export function ProjectPage({ id }: { id: string }) {
               <h2>
                 分鏡・交付<HelpTip text="把成品排成一支片的順序，可送審與打包交付。" />
               </h2>
-              <SceneList projectId={id} isLeader={isLeader} onUsePrompt={(text) => setPrompt(text)} />
+              <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} onUsePrompt={(text) => setPrompt(text)} />
             </div>
           </CollabZone>
 

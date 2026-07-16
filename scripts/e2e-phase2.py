@@ -174,4 +174,37 @@ ok("審計輸入已脫敏(無 password 鍵)", all("password" not in json.dumps(i
 denied = call("GET", mem, "audit.list", {})
 ok("🔒 組員不能看審計", "__error__" in denied)
 
+# ── P0 ACL：素材端點（改名/鎖定/刪除/還原/永久刪）對專案檢視者全擋 ──
+me2 = call("GET", mem, "auth.me")
+mem_id = me2["user"]["id"]
+if assets:
+    aid = assets[0]["id"]
+    call("POST", admin, "projects.setProjectRole", {"projectId": pid, "userId": mem_id, "role": "viewer"})
+    deny = call("POST", mem, "projects.renameAsset", {"assetId": aid, "title": "越權改名"})
+    ok("🔒 檢視者不能改素材名", "檢視者" in deny.get("__error__", ""))
+    deny = call("POST", mem, "projects.setAssetLock", {"assetId": aid, "locked": True})
+    ok("🔒 檢視者不能鎖定/解鎖素材", "檢視者" in deny.get("__error__", ""))
+    deny = call("POST", mem, "projects.deleteAsset", {"assetId": aid})
+    ok("🔒 檢視者不能刪素材", "檢視者" in deny.get("__error__", ""))
+    deny = call("POST", mem, "projects.purgeAsset", {"assetId": aid})
+    ok("🔒 檢視者不能永久刪素材", "檢視者" in deny.get("__error__", ""))
+    deny = call("POST", mem, "projects.restoreAsset", {"assetId": aid})
+    ok("🔒 檢視者不能還原素材", "檢視者" in deny.get("__error__", ""))
+    call("POST", admin, "projects.setProjectRole", {"projectId": pid, "userId": mem_id, "role": "editor"})
+else:
+    ok("素材端點 ACL(略過：無素材)", True)
+
+# ── P0 回收桶軟刪：已軟刪素材不能再當付費生成的來源 ──
+# 刪/還原用 admin：AI 生成素材的 uploadedBy 為空，組員會被「上傳者本人或組長以上」守衛擋下
+img_src = next((a for a in assets if a["kind"] == "image"), None)
+if img_src:
+    r = call("POST", admin, "projects.deleteAsset", {"assetId": img_src["id"]})
+    ok("先把圖片素材移入回收桶", r.get("ok") is True)
+    deny = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "fal-ai/nano-banana-2/edit", "prompt": "x", "sourceAssetId": img_src["id"]})
+    ok("🔒 回收桶素材不能當生成來源", "回收桶" in deny.get("__error__", ""))
+    r = call("POST", admin, "projects.restoreAsset", {"assetId": img_src["id"]})
+    ok("還原素材後回復正常", r.get("ok") is True)
+else:
+    ok("回收桶來源防護(略過：無圖片素材)", True)
+
 print("—— e2e-phase2 完成 ——")

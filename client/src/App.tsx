@@ -66,6 +66,28 @@ function ChangePasswordDialog({ onClose, forced = false }: { onClose: () => void
   );
 }
 
+/**
+ * 頂欄待辦徽章（UX 高：頂欄完全不顯示待審/待核→多專案組長必然漏審）：
+ * 作用組的「分鏡待審＋生成待核」總數；點擊回作業台（專案卡有逐案角標）。0 筆不佔版面。
+ */
+function PendingBadge({ groupId }: { groupId: string }) {
+  const summary = trpc.approvals.pendingSummary.useQuery({ groupId }, { refetchInterval: 60_000, enabled: !!groupId });
+  if (!summary.data) return null;
+  const total = summary.data.totalPendingApprovals + summary.data.totalAwaitingGenerations;
+  if (total === 0) return null;
+  return (
+    <Link
+      href="/"
+      className="status-chip"
+      style={{ textDecoration: "none", color: "var(--gold-ink)" }}
+      title={`分鏡待審 ${summary.data.totalPendingApprovals}・生成待核准 ${summary.data.totalAwaitingGenerations}——點一下回作業台，專案卡上有逐案標記`}
+    >
+      <Icon name="Bell" size={14} />
+      <span className="mono">{total}</span>
+    </Link>
+  );
+}
+
 /** 彈性點數徽章：剩餘 or 不限（管理員可在團隊管理調整） */
 function PointsBadge({ groupId }: { groupId: string }) {
   // enabled 等組別就緒才查——避免首載以 undefined 先打一輪造成「週額度閃爍」
@@ -182,6 +204,7 @@ export function App() {
           )}
           <span className="spacer" />
           {me.data && info.data?.mockMode && <span className="badge mock">假生成模式</span>}
+          {me.data && <PendingBadge groupId={activeGroupId} />}
           {me.data && <PointsBadge groupId={activeGroupId} />}
           {/* 頂欄收斂：次要入口（怎麼用/模型指南/選項/團隊管理/改密碼）＋登出全收進使用者選單 */}
           {me.data && (

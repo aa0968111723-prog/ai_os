@@ -8,6 +8,7 @@ import { isMockMode } from "../services/fal";
 import { proxyFetch } from "../services/http";
 import { ANY_LLM_MODEL } from "../services/llm";
 import { reserveQuota, refund } from "../services/points";
+import { assertProjectEditable } from "../services/projectAcl";
 import { buildKnowledgeContext } from "./knowledge";
 
 export interface DirectorSuggestion {
@@ -62,13 +63,14 @@ function mockSuggestions(wv: Worldview, kind: string): DirectorSuggestion[] {
   ];
 }
 
-/** 拆分鏡核心的輸入：userId 一律為「登入者本人」；assertAccess 由呼叫端注入 requireGroup（多組隔離不可省略） */
+/** 拆分鏡核心的輸入：userId 一律為「登入者本人」；assertAccess 由呼叫端注入 requireGroup（多組隔離不可省略）
+ *  ＋ 2.3 專案級 ACL（可 async）——檢視者不能建分鏡、不能觸發扣點 */
 export interface SplitScriptCoreInput {
   userId: string;
   projectId: string;
   /** 要拆的腳本全文；不給（或全空白）就退回知識庫（腳本／開示稿）全文 */
   scriptText?: string;
-  assertAccess: (project: typeof schema.projects.$inferSelect) => void;
+  assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
 }
 
 /**
@@ -84,7 +86,7 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
   }
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND" });
-  input.assertAccess(project);
+  await input.assertAccess(project);
   const wv = worldviewSchema.parse(project.worldview ?? {});
 
   // 腳本來源：優先參數；否則用知識庫（含腳本/開示等）——「懂我們素材」的延伸
@@ -181,6 +183,8 @@ export const directorRouter = router({
     }
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
     if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+    // 2.3 刻意豁免：suggest 是唯讀 AI 問答（不寫入任何內容），與 assistant.ask 同口徑對檢視者開放；
+    // 扣的是提問者自己的額度。會「寫入」的 splitScript 才掛 assertProjectEditable。
     requireGroup(ctx.auth, project.groupId);
     const wv = worldviewSchema.parse(project.worldview ?? {});
 
@@ -238,7 +242,12 @@ export const directorRouter = router({
         userId: ctx.auth.user.id,
         projectId: input.projectId,
         scriptText: input.scriptText,
-        assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
+        // 2.3：檢視者不能建分鏡且不能扣點——與 workflows.start／generation.submit 的注入方式一致
+        //（assistant.runAction 入口已在上游擋 editable，這裡補齊 director 直呼入口）
+        assertAccess: async (p) => {
+          requireGroup(ctx.auth, p.groupId);
+          await assertProjectEditable(ctx.auth, p);
+        },
       }),
     ),
 });

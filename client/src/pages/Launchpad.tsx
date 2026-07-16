@@ -55,6 +55,9 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   const projects = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
+  // 跨專案待辦（UX 高：首頁不顯示待審/待核→組長漏審、組員卡住）：專案卡角標用；60 秒輪詢跟上變化
+  const pendingSummary = trpc.approvals.pendingSummary.useQuery({ groupId }, { enabled: !!groupId, refetchInterval: 60_000 });
+  const pendingOf = (pid: string) => pendingSummary.data?.projects.find((x) => x.projectId === pid);
   const options = trpc.options.byGroup.useQuery({ groupId, includeInactive: true }, { enabled: !!groupId });
   const kindOptions = (options.data ?? []).filter((o) => o.type === "kind" && o.active);
   const platformOptions = (options.data ?? []).filter((o) => o.type === "platform" && o.active);
@@ -239,6 +242,25 @@ export function Launchpad({ groupId }: { groupId: string }) {
               <div className="launch-meta">
                 <span className="chip" style={{ margin: 0 }}>{kindLabelOf(p.kind)}</span>
                 <span>{p.format}</span>
+                {/* 待辦角標：分鏡待審（組長裁決）／生成待核（成本門檻攔下）——點卡片進專案就能處理 */}
+                {(() => {
+                  const pd = pendingOf(p.id);
+                  if (!pd) return null;
+                  return (
+                    <>
+                      {pd.pendingApprovals > 0 && (
+                        <span className="chip" style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有分鏡送審等組長裁決">
+                          待審 {pd.pendingApprovals}
+                        </span>
+                      )}
+                      {pd.awaitingGenerations > 0 && (
+                        <span className="chip" style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有生成被成本門檻攔下，等組長核准">
+                          待核 {pd.awaitingGenerations}
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
               <div className="launch-meta">更新於 {relTime(p.updatedAt)}</div>
             </div>

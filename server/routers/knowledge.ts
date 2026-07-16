@@ -350,8 +350,13 @@ export const knowledgeRouter = router({
 
   /** 把已上傳的文字素材（txt/md）轉成知識——去重：同 asset 只建一次 */
   addFromAsset: authedProcedure.input(z.object({ assetId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-    const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
-    if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
+    // 回收桶裡的素材視為不存在（比照 describeImageAsset）——否則已刪逐字稿可被復活成知識、
+    // 再經 buildKnowledgeContext 注入 AI 導演 LLM（schema 明文禁止「已刪的逐字稿再注入」）
+    const [asset] = await db
+      .select()
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, input.assetId), isNull(schema.assets.deletedAt)));
+    if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材（可能已在回收桶）" });
     requireGroup(ctx.auth, asset.groupId);
     await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3
     const [dup] = await db

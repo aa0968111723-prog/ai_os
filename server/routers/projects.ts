@@ -7,7 +7,7 @@ import { worldviewSchema } from "../../shared/worldview";
 import { PLATFORMS } from "../../shared/models";
 import { removeStoredFile } from "../services/storage";
 import { getGroupOptions, ensureGroupOptions } from "../services/optionsStore";
-import { assertProjectEditable } from "../services/projectAcl";
+import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
 
 /** 範例專案的穩定標題——同時是「去重鍵」：同組已有這個標題的專案就回傳它，絕不重建（擋連點刷爆） */
 const SAMPLE_PROJECT_TITLE = "範例專案：禪心一炷香";
@@ -45,6 +45,8 @@ export const projectsRouter = router({
       if (!isOwner && role === "member") {
         throw new TRPCError({ code: "FORBIDDEN", message: "只有專案建立者或組長以上可以封存/還原" });
       }
+      // 2.3：專案擁有者若被組長降為檢視者，也不能封存/還原（改變全組可見性屬寫入）
+      await assertProjectEditable(ctx.auth, project);
       const [updated] = await db
         .update(schema.projects)
         .set({ status: input.archived ? "archived" : "active", updatedAt: new Date() })
@@ -265,7 +267,10 @@ export const projectsRouter = router({
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.id));
     if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
     requireGroup(ctx.auth, project.groupId); // 多組隔離
-    return project;
+    // 2.3 前端唯讀可見性的根：呼叫者在此專案的有效角色。後端守衛已全面擋 viewer，
+    // 但前端沒這個欄位就只能「按了才失敗」——回傳角色讓寫入控制能事前 disable＋顯示唯讀橫幅
+    const myProjectRole = await getProjectRole(ctx.auth, project);
+    return { ...project, myProjectRole };
   }),
 
   /** 專案素材庫(生成成品;供「來源輸入」挑選與素材總覽) */
@@ -292,6 +297,7 @@ export const projectsRouter = router({
     const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
     if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
     const role = requireGroup(ctx.auth, asset.groupId);
+    await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3：檢視者不能刪素材
     const isUploader = asset.uploadedBy === ctx.auth.user.id;
     if (!isUploader && role === "member") {
       throw new TRPCError({ code: "FORBIDDEN", message: "只有上傳者本人或組長以上可以刪除素材" });
@@ -312,6 +318,7 @@ export const projectsRouter = router({
     const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
     if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
     requireGroup(ctx.auth, asset.groupId);
+    await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3：檢視者不能還原素材
     await db.update(schema.assets).set({ deletedAt: null }).where(eq(schema.assets.id, asset.id));
     return { ok: true };
   }),
@@ -324,6 +331,7 @@ export const projectsRouter = router({
     const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
     if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
     const role = requireGroup(ctx.auth, asset.groupId);
+    await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3：檢視者不能永久刪除素材
     const isUploader = asset.uploadedBy === ctx.auth.user.id;
     if (!isUploader && role === "member") {
       throw new TRPCError({ code: "FORBIDDEN", message: "只有上傳者本人或組長以上可以刪除素材" });
@@ -375,6 +383,7 @@ export const projectsRouter = router({
       const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
       requireGroup(ctx.auth, asset.groupId);
+      await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3：檢視者不能鎖定／解鎖
       const [updated] = await db
         .update(schema.assets)
         .set({ locked: input.locked })
@@ -390,6 +399,7 @@ export const projectsRouter = router({
       const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
       requireGroup(ctx.auth, asset.groupId);
+      await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3：檢視者不能改名
       const [updated] = await db
         .update(schema.assets)
         .set({ title: input.title })

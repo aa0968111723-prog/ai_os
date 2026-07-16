@@ -7,6 +7,7 @@ import { falSubmit, isMockMode, billingBypassed } from "../services/fal";
 import { refund, reserveQuota } from "../services/points";
 import { advanceGeneration, submitGenerationCore } from "../services/generationCore";
 import { signAssetUrl } from "../services/storage";
+import { assertProjectEditable } from "../services/projectAcl";
 import { getModel, endpointOf } from "../../shared/models";
 
 // 注入判斷的單一來源已抽到 services/generationCore（工作流執行器共用）；
@@ -210,6 +211,8 @@ export const generationRouter = router({
       const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.generationId));
       if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, gen.groupId); // 多組隔離
+      // 2.3：name 是全組共見的共用 metadata，檢視者不能改（與素材改名同口徑）
+      await assertProjectEditable(ctx.auth, { id: gen.projectId, groupId: gen.groupId });
       const [updated] = await db
         .update(schema.generations)
         .set({ name: input.name })
@@ -225,6 +228,8 @@ export const generationRouter = router({
       const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.generationId));
       if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, gen.groupId); // 多組隔離
+      // 2.3：favorite 也是共用欄位（餵給列表的 favoriteOnly 篩選），檢視者不能改
+      await assertProjectEditable(ctx.auth, { id: gen.projectId, groupId: gen.groupId });
       const [updated] = await db
         .update(schema.generations)
         .set({ favorite: input.favorite })
