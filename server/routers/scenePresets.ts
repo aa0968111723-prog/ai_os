@@ -44,6 +44,7 @@ export const scenePresetsRouter = router({
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
+      await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
       const [row] = await db
         .insert(schema.scenePresets)
         .values({
@@ -71,6 +72,7 @@ export const scenePresetsRouter = router({
       const [row] = await db.select().from(schema.scenePresets).where(eq(schema.scenePresets.id, input.id));
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
+      await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
       const [updated] = await db
         .update(schema.scenePresets)
         .set({
@@ -87,6 +89,7 @@ export const scenePresetsRouter = router({
     const [row] = await db.select().from(schema.scenePresets).where(eq(schema.scenePresets.id, input.id));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
+    await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
     await db.delete(schema.scenePresets).where(eq(schema.scenePresets.id, input.id));
     return { ok: true };
   }),

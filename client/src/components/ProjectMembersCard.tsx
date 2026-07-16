@@ -1,0 +1,60 @@
+import { trpc } from "../api";
+
+/**
+ * 專案權限卡（需求 2.3）：預設組內全員可編輯；組長可把個別成員設為「檢視者」（唯讀）。
+ * 組長/管理員固定是編輯者（不可降）——裁決與管理不能被自己鎖住。
+ * 資料與可管理與否都由 projects.listMemberRoles 回傳（後端已依身分判斷），前端不自行推權限。
+ */
+export function ProjectMembersCard({ projectId }: { projectId: string }) {
+  const utils = trpc.useUtils();
+  const roles = trpc.projects.listMemberRoles.useQuery({ projectId });
+  const setRole = trpc.projects.setProjectRole.useMutation({
+    onSuccess: () => utils.projects.listMemberRoles.invalidate({ projectId }),
+  });
+
+  if (roles.error) return null; // 讀不到（極端情況）就整卡收起，不擋工作台
+  const data = roles.data;
+
+  return (
+    <div className="card" data-fb="專案權限卡">
+      <h2>專案權限</h2>
+      <p className="hint" style={{ marginTop: 4 }}>
+        預設組內全員可編輯；把成員設為「檢視者」後，他在此專案只能瀏覽、留言與下載，不能生成或修改。
+      </p>
+      {!data ? (
+        <div role="status" aria-label="成員載入中">
+          <div className="skeleton" style={{ height: 32, marginTop: 8 }} />
+          <div className="skeleton" style={{ height: 32, marginTop: 8 }} />
+        </div>
+      ) : (
+        <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
+          {data.members.map((m) => (
+            <li key={m.userId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
+              <span style={{ flex: "1 1 auto", minWidth: 120 }}>
+                {m.name}
+                {m.groupRole !== "member" && <span className="hint">・{m.groupRole === "leader" ? "組長" : "管理"}</span>}
+              </span>
+              {m.groupRole !== "member" ? (
+                <span className="hint">固定編輯者</span>
+              ) : data.canManage ? (
+                <select
+                  aria-label={`${m.name} 的專案權限`}
+                  style={{ width: "auto" }}
+                  value={m.projectRole}
+                  disabled={setRole.isPending}
+                  onChange={(e) => setRole.mutate({ projectId, userId: m.userId, role: e.target.value as "editor" | "viewer" })}
+                >
+                  <option value="editor">編輯者</option>
+                  <option value="viewer">檢視者（唯讀）</option>
+                </select>
+              ) : (
+                <span className="hint">{m.projectRole === "viewer" ? "檢視者（唯讀）" : "編輯者"}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {setRole.error && <p className="error" role="alert">{setRole.error.message}</p>}
+    </div>
+  );
+}

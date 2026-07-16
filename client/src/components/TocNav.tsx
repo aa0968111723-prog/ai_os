@@ -2,32 +2,22 @@ import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 
 /**
- * 章節導覽（#28）：專案頁很長（十多個堆疊區塊），這是一條精簡的頁內目錄，
- * 點一下平滑捲到對應區塊。桌面固定成左側 sticky 側欄；手機（≤820px）收合成
- * 頂部可展開的一列，靜態定位不遮內容、不造成水平捲動。
+ * 章節導覽（#28／需求 6.7 階段化）：專案頁很長，這是一條精簡的頁內目錄，
+ * 項目對應五階段標頭錨點，點一下平滑捲到該階段。桌面固定成左側 sticky 側欄；
+ * 手機（≤820px）收合成頂部可展開的一列，靜態定位不遮內容、不造成水平捲動。
  *
  * 純附加元件：只負責捲動導覽，不碰任何既有區塊的行為與標記。
  */
 export type TocItem = { id: string; label: string };
 
-/** 依頁面實際排列順序列出各區塊（label＋目標錨點 id）。
- *  onboard-worldview／gen-prompt／onboard-delivery 為既有錨點，其餘為本次新增。 */
+/** 五階段靜態清單（以簡單為準，不掃 DOM）：錨點對應 ProjectPage 各階段標頭（StageHead）的 id，
+ *  順序即頁面「企劃→創作→整理→審核→交付」的一條龍敘事順序；特殊頁面可用 items props 覆蓋。 */
 const DEFAULT_ITEMS: TocItem[] = [
-  // ① 定盤
-  { id: "onboard-worldview", label: "世界觀" },
-  { id: "sec-knowledge", label: "專案知識庫" },
-  { id: "sec-characters", label: "角色定裝卡" },
-  { id: "sec-scenes", label: "場景設定卡" },
-  { id: "sec-assets", label: "素材庫" },
-  // ② 創作
-  { id: "gen-prompt", label: "創作生成" },
-  { id: "sec-director", label: "AI 導演建議" },
-  { id: "sec-split", label: "AI 拆分鏡" },
-  { id: "sec-prompts", label: "提示詞庫" },
-  { id: "sec-workflow", label: "工作流" },
-  // ③ 分鏡與交付
-  { id: "onboard-delivery", label: "分鏡・交付" },
-  { id: "sec-recyclebin", label: "回收桶" },
+  { id: "stage-plan", label: "① 企劃・定盤" },
+  { id: "stage-create", label: "② 創作・生成" },
+  { id: "stage-assets", label: "③ 素材整理" },
+  { id: "stage-review", label: "④ 分鏡與審核" },
+  { id: "stage-deliver", label: "⑤ 交付" },
 ];
 
 const MOBILE_QUERY = "(max-width: 820px)";

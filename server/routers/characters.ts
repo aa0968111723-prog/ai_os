@@ -44,6 +44,7 @@ export const charactersRouter = router({
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
+      await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
       // 跨組引用驗證：referenceAssetId 必須同組，否則能把別組定裝圖綁進本組角色（與 generationCore 對 sourceAssetId 一致）
       if (input.referenceAssetId) {
         const [refAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.referenceAssetId));
@@ -79,6 +80,7 @@ export const charactersRouter = router({
       const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, input.id));
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
+      await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
       // 跨組引用驗證：改綁 referenceAssetId 時同樣要同組（null＝清除引用，免驗）
       if (input.referenceAssetId) {
         const [refAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.referenceAssetId));
@@ -102,6 +104,7 @@ export const charactersRouter = router({
     const [row] = await db.select().from(schema.characters).where(eq(schema.characters.id, input.id));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
+    await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
     await db.delete(schema.characters).where(eq(schema.characters.id, input.id));
     return { ok: true };
   }),

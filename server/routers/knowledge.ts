@@ -8,6 +8,7 @@ import { isMockMode, extractResult } from "../services/fal";
 import { proxyFetch } from "../services/http";
 import { reserveQuota, refund } from "../services/points";
 import { signAssetUrl } from "../services/storage";
+import { assertProjectEditable } from "../services/projectAcl";
 
 export const KNOWLEDGE_KINDS = [
   { id: "transcript", label: "師父開示稿" },
@@ -200,6 +201,7 @@ export const knowledgeRouter = router({
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能寫知識庫
       // 跨組引用驗證：referenced asset 必須同組，否則能借知識庫把別組素材綁進本專案（與 generationCore 對 sourceAssetId 一致）
       if (input.sourceAssetId) {
         const [srcAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.sourceAssetId));
@@ -234,6 +236,7 @@ export const knowledgeRouter = router({
       const [row] = await db.select().from(schema.knowledge).where(eq(schema.knowledge.id, input.id));
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
+      await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
       // 版本歷史（#29）：覆寫前，先把「更新前」的舊全文存成一版快照——
       // 只在內容『真的改變』時存（只改標題／重存相同內容不灌版本），避免雜訊。
       const contentChanges = input.content !== undefined && input.content !== row.content;
@@ -290,6 +293,7 @@ export const knowledgeRouter = router({
         .where(and(eq(schema.knowledge.id, input.knowledgeId), isNull(schema.knowledge.deletedAt)));
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
+      await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3：還原版本＝內容寫入
       const [version] = await db
         .select()
         .from(schema.textVersions)
@@ -319,6 +323,7 @@ export const knowledgeRouter = router({
       .where(and(eq(schema.knowledge.id, input.id), isNull(schema.knowledge.deletedAt)));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
+    await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
     await db.update(schema.knowledge).set({ deletedAt: new Date() }).where(eq(schema.knowledge.id, input.id));
     return { ok: true };
   }),
@@ -328,6 +333,7 @@ export const knowledgeRouter = router({
     const [row] = await db.select().from(schema.knowledge).where(eq(schema.knowledge.id, input.id));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
+    await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
     await db.update(schema.knowledge).set({ deletedAt: null }).where(eq(schema.knowledge.id, input.id));
     return { ok: true };
   }),
@@ -337,6 +343,7 @@ export const knowledgeRouter = router({
     const [row] = await db.select().from(schema.knowledge).where(eq(schema.knowledge.id, input.id));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
+    await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
     await db.delete(schema.knowledge).where(eq(schema.knowledge.id, input.id));
     return { ok: true };
   }),
@@ -346,6 +353,7 @@ export const knowledgeRouter = router({
     const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
     if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
     requireGroup(ctx.auth, asset.groupId);
+    await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3
     const [dup] = await db
       .select()
       .from(schema.knowledge)
@@ -410,6 +418,7 @@ export const knowledgeRouter = router({
       .where(and(eq(schema.assets.id, input.assetId), isNull(schema.assets.deletedAt)));
     if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
     requireGroup(ctx.auth, asset.groupId); // 多組隔離：素材屬於哪組就要哪組成員才能操作
+    await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3：檢視者不能寫知識庫
     if (asset.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "只支援圖片素材" });
 
     // 防重複（冪等）：同素材已有未刪除、標題以「圖片描述」開頭的筆 → 直接回它、不再扣點。
