@@ -40,7 +40,7 @@ export async function updateSettings(patch: Partial<PointsSettings>): Promise<Po
 
 const noLimit = (v: number | null | undefined): boolean => v == null || v <= 0;
 
-/** 週界以台北時間（UTC+8，無夏令時）計算——Railway 容器預設 UTC，用本地 getDay/setHours 會把週界推到台北週一 08:00 */
+/** 週界以台北時間（UTC+8，無夏令時）計算——部署容器預設 UTC，用本地 getDay/setHours 會把週界推到台北週一 08:00 */
 function weekStart(): Date {
   const TPE_OFFSET_MS = 8 * 60 * 60 * 1000;
   const tpe = new Date(Date.now() + TPE_OFFSET_MS); // 平移後用 UTC 欄位讀出的就是台北牆鐘時間

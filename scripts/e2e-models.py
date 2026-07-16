@@ -4,8 +4,9 @@
 """
 import json, time, urllib.request, urllib.parse, urllib.error
 
-BASE = "http://localhost:3199/api/trpc"
-HOST = "http://localhost:3199"
+import os as _os
+HOST = f"http://localhost:{_os.environ.get('E2E_PORT', '3199')}"  # E2E_PORT 可換埠(與研究/其他行程共存)
+BASE = f"{HOST}/api/trpc"
 
 class Client:
     def __init__(self): self.cookie = None
@@ -39,7 +40,7 @@ def wait_done(opener, gen_id, tries=40):
         time.sleep(1)
     return {"status": "timeout"}
 
-ok = lambda name, cond: print(("✅" if cond else "❌"), name)
+from e2e_lib import ok  # 共用斷言:計數+結束碼(有 ❌ 即非零退出,CI 據此判紅綠)
 admin = Client()
 
 r = call("POST", admin, "auth.login", {"email": "admin@aidirector.local", "password": "test-admin-123"})

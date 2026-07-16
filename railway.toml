@@ -1,4 +1,5 @@
 # AI Director OS — Railway 組態即程式碼(config-as-code)
+# ※ 僅 Railway 讀取此檔;現行部署平台為 Zeabur(見 docs/Zeabur部署.md),保留作歷史參考/回滾用。
 # 注意:startCommand 會覆蓋 Dockerfile 的 CMD——之前指向 node dist/index.js,
 # 導致啟動腳本(含建表)被跳過;現在建表/目錄/種子都在伺服器內部自動跑(server/db/ensure.ts),
 # start.sh 只負責開機環境自檢(log 全中文)。

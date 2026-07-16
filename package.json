@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "db:push": "drizzle-kit push",
-    "test": "echo \"(尚無測試)\" && exit 0"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",
@@ -49,7 +50,8 @@
     "esbuild": "^0.25.0",
     "tsx": "^4.19.1",
     "typescript": "^5.7.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^4.1.10"
   },
   "engines": {
     "node": ">=20"

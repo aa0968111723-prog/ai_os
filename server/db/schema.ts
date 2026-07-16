@@ -1,6 +1,6 @@
 /**
  * AI Director OS — 資料庫 schema（單一真相來源）
- * Railway Postgres · Drizzle（pg 方言）
+ * PostgreSQL · Drizzle（pg 方言）
  * 組織模型：超管 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
 import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";

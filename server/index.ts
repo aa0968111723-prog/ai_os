@@ -35,7 +35,7 @@ const app = express();
 const port = Number(process.env.PORT ?? 3000);
 const isProd = process.env.NODE_ENV === "production";
 
-// Railway 在前面終止 TLS 並轉發，信任第一層 proxy 才能取到真實 client IP（速率限制/HSTS 正確）
+// 部署平台的反向代理（Zeabur／Railway 等）在前面終止 TLS 並轉發，信任第一層 proxy 才能取到真實 client IP（速率限制/HSTS 正確）
 app.set("trust proxy", 1);
 
 // 安全標頭（#9）：nosniff、X-Frame-Options: DENY、HSTS、Referrer-Policy 由 helmet 預設提供；
@@ -57,7 +57,7 @@ app.use(
         frameAncestors: ["'none'"],
         objectSrc: ["'none'"],
         // 移除 helmet 預設的 upgrade-insecure-requests：本地/CI 走 http localhost 時它會
-        // 把同源子資源強升為 https 而連不上，破壞既有 e2e；正式站由 Railway 提供 https。
+        // 把同源子資源強升為 https 而連不上，破壞既有 e2e；正式站由部署平台（Zeabur 等）提供 https。
         upgradeInsecureRequests: null,
       },
     },
@@ -93,7 +93,7 @@ app.get("/api/ready", async (_req, res) => {
     res.status(503).json({
       ok: false,
       db: "error（資料庫未接通）",
-      hint: "到 Railway App 服務 Variables 檢查 DATABASE_URL 是否用 Add Reference 引用了 Postgres，改完按 Redeploy",
+      hint: "到部署平台的服務 Variables 檢查 DATABASE_URL 是否正確指向 PostgreSQL（Zeabur：跨服務引用連線字串），改完重新部署",
     });
   }
 });
@@ -627,7 +627,7 @@ const httpServer = app.listen(port, () => {
   console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${isMockMode() ? "假生成模式" : "真實模式"}）`);
   try {
     ensureStorageDirs();
-    console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（Railway Volume）" : "（本機模式）"}`);
+    console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（持久 Volume）" : "（本機模式）"}`);
   } catch (err) {
     console.warn("[server] 儲存目錄建立失敗（上傳/落地將不可用）：", err instanceof Error ? err.message : err);
   }

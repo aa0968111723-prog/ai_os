@@ -78,9 +78,14 @@ function userThrottled(userId: string, kind: "cursor" | "focus" | "invalidate", 
 }
 
 /**
- * #20 Origin 白名單：只放行 APP_URL 對應網域與 localhost，擋跨站 WebSocket 劫持（SameSite=Lax 之外的縱深防禦）。
+ * #20 Origin 白名單：只放行設定的對外網域與 localhost，擋跨站 WebSocket 劫持（SameSite=Lax 之外的縱深防禦）。
+ * 白名單來源（平台中立，可多網域並存，讓「自訂網域＋平台網域」都連得上、不被誤擋）：
+ *   1. APP_URL 的網域（既有）
+ *   2. PUBLIC_DOMAIN——平台注入的公開網域；相容舊的 RAILWAY_PUBLIC_DOMAIN 後備（未設 PUBLIC_DOMAIN 時沿用）
+ *   3. ALLOWED_ORIGINS——逗號分隔的額外網域清單（自訂網域、CDN 等）
  * APP_URL 未設＝開發環境，一律放行；Origin 標頭缺席（非瀏覽器客戶端）不擋——瀏覽器發起的跨站攻擊必帶 Origin。
  * 以「網域（hostname）」比對而非完整 origin：容忍反代造成的埠／scheme 差異，不誤擋正常連線。
+ * 不設 PUBLIC_DOMAIN/ALLOWED_ORIGINS 時，行為與原本（APP_URL＋RAILWAY_PUBLIC_DOMAIN 後備）完全一致。
  */
 function originAllowed(origin: string | undefined): boolean {
   if (!origin) return true;
@@ -94,14 +99,21 @@ function originAllowed(origin: string | undefined): boolean {
   }
   if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
   const allowed = new Set<string>();
-  try {
-    allowed.add(new URL(appUrl).hostname);
-  } catch {
-    /* APP_URL 壞值：忽略，僅靠 localhost 判斷 */
-  }
-  // Railway 內建網域也視為同源（fal.ts 亦以它為公開 base）：APP_URL 設成自訂網域時不誤擋平台網域
-  const railway = process.env.RAILWAY_PUBLIC_DOMAIN?.trim();
-  if (railway) allowed.add(railway.replace(/^https?:\/\//, "").replace(/\/.*$/, ""));
+  // 把「可能帶 scheme／埠／路徑」的值統一正規化成 hostname 後加白名單；壞值逐一 try-catch 忽略，不影響其他來源。
+  const addHost = (raw: string | undefined): void => {
+    const v = raw?.trim();
+    if (!v) return;
+    try {
+      allowed.add(new URL(/^https?:\/\//.test(v) ? v : `https://${v}`).hostname);
+    } catch {
+      /* 壞值：忽略此一項 */
+    }
+  };
+  addHost(appUrl);
+  // 平台注入的公開網域（PUBLIC_DOMAIN 優先，退回既有 RAILWAY_PUBLIC_DOMAIN）：APP_URL 設成自訂網域時不誤擋平台網域
+  addHost(process.env.PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN);
+  // ALLOWED_ORIGINS：逗號分隔的多網域白名單，讓自訂網域＋平台網域＋CDN 並存時 WS 都不被擋
+  for (const item of (process.env.ALLOWED_ORIGINS ?? "").split(",")) addHost(item);
   return allowed.has(host);
 }
 

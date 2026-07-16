@@ -27,7 +27,7 @@ function isSourceable(kind: string): boolean {
 
 /**
  * 專案素材庫：上傳（拖放/點選/多檔）、預覽、改名、刪除、選為生成來源。
- * 上傳走 /api/upload（multipart）；檔案存 Railway Volume，網址永久有效。
+ * 上傳走 /api/upload（multipart）；檔案存伺服器持久 Volume，網址永久有效。
  * 工具列提供種類篩選、標題搜尋、排序（最新／名稱），三者可組合過濾。
  */
 export function AssetLibrary({

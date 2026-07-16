@@ -18,7 +18,7 @@ async function dbReady(): Promise<boolean> {
 
 export async function ensureSchema(): Promise<boolean> {
   if (!process.env.DATABASE_URL) {
-    console.warn("[db] DATABASE_URL 未設定——請在 Railway App 服務 Variables 用 Add Reference 引用 Postgres");
+    console.warn("[db] DATABASE_URL 未設定——請在部署平台的服務 Variables 設定 DATABASE_URL（Zeabur：跨服務引用 PostgreSQL 服務的連線字串）");
     return false;
   }
   for (let i = 1; i <= 10; i++) {

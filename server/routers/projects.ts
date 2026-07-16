@@ -180,8 +180,10 @@ export const projectsRouter = router({
 
         // 免費佔位縮圖：自家 /api/mock-asset/image（靜態 PNG）——絕不呼叫 fal、絕不扣點。
         // base 與假模式成品 URL 同源建法（見 services/fal.ts），縮圖與下載端點都能取到。
-        const railway = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "";
-        const base = process.env.APP_URL?.replace(/\/$/, "") || railway || `http://localhost:${process.env.PORT ?? 3000}`;
+        // 平台中立：APP_URL 未設時退平台注入的公開網域（PUBLIC_DOMAIN，相容舊的 RAILWAY_PUBLIC_DOMAIN），再退 localhost。
+        const platformDomain = process.env.PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN;
+        const fallback = platformDomain ? `https://${platformDomain}` : "";
+        const base = process.env.APP_URL?.replace(/\/$/, "") || fallback || `http://localhost:${process.env.PORT ?? 3000}`;
         const [asset] = await tx
           .insert(schema.assets)
           .values({

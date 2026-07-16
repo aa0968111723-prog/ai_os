@@ -6,6 +6,7 @@ import { db, schema } from "../db";
 import { falSubmit, isMockMode, billingBypassed } from "../services/fal";
 import { refund, reserveQuota } from "../services/points";
 import { advanceGeneration, submitGenerationCore } from "../services/generationCore";
+import { signAssetUrl } from "../services/storage";
 import { getModel, endpointOf } from "../../shared/models";
 
 // 注入判斷的單一來源已抽到 services/generationCore（工作流執行器共用）；
@@ -295,9 +296,22 @@ export const generationRouter = router({
         }
       }
 
+      // 重簽來源網址(修:送審當下對「素材庫來源」簽的網址 TTL 僅 1 小時,組長隔一小時以上才核准
+      // 圖生圖/影音等需來源的生成,fal 抓來源時網址已過期→必失敗白繞一圈。核准送出前用新 TTL 重簽,
+      // 並把 params 內任何等於舊簽名網址的值替換掉——model.input 把來源塞在模型專屬鍵,替換整串最穩)。
+      let submitParams = gen.params as Record<string, unknown>;
+      if (gen.sourceUrl) {
+        const m = gen.sourceUrl.match(/\/api\/assets\/([0-9a-f-]{36})\/file\?/i);
+        if (m) {
+          const fresh = signAssetUrl(m[1]);
+          submitParams = JSON.parse(JSON.stringify(submitParams).split(gen.sourceUrl).join(fresh)) as Record<string, unknown>;
+          await db.update(schema.generations).set({ sourceUrl: fresh }).where(eq(schema.generations.id, gen.id));
+        }
+      }
+
       try {
-        // params 存的是送審當下注入完成的 fal 輸入——核准即原樣送出
-        const { requestId } = await falSubmit(endpointOf(model), model.kind, gen.params as Record<string, unknown>);
+        // params 存的是送審當下注入完成的 fal 輸入(來源網址已於上方重簽)——核准即送出
+        const { requestId } = await falSubmit(endpointOf(model), model.kind, submitParams);
         const [updated] = await db
           .update(schema.generations)
           .set({ requestId, status: "running", updatedAt: new Date() })

@@ -11,8 +11,72 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
+      - run: npm test
       - run: npm run build
+
+  # 五套 e2e(auth/models/phase2/phase3/phase4,共 131 項):每套「全新資料庫」起跑——
+  # 重置 schema → 重啟伺服器(開機自動建表+種子)→ 跑套件;e2e_lib 讓任何 ❌ 都以非零碼收場。
+  # 環境與本機驗證口徑一致:FAL_MOCK=1(假生成不花錢)+ MOCK_BILLING=1(仍真扣點,額度護欄可驗)。
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      PORT: "3199"
+      FAL_MOCK: "1"
+      MOCK_BILLING: "1"
+      SEED_ADMIN_EMAIL: admin@aidirector.local
+      SEED_ADMIN_PASSWORD: test-admin-123
+      MCP_API_KEY: test-mcp-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install --no-audit --no-fund
+      - name: 依序跑五套 e2e(每套全新 DB + 重啟伺服器)
+        run: |
+          set -eu
+          for suite in auth models phase2 phase3 phase4; do
+            echo "::group::e2e-$suite"
+            # 全新資料庫:掃掉上一套的所有表,開機時 ensure.ts 會重建+種子
+            PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
+              -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' -q
+            # setsid:npx→tsx→node 是一串子行程,單殺 npx 會留下佔埠孤兒讓下一套 EADDRINUSE;
+            # 讓它當行程群組長,結束時對負 pid 送 TERM 整組收乾淨(本機驗證時實際踩過這雷)。
+            setsid npx tsx server/index.ts > "/tmp/server-$suite.log" 2>&1 &
+            SERVER_PID=$!
+            # 等到建表+種子完成(/api/ready 的 boot=ready),最多 90 秒
+            for i in $(seq 1 90); do
+              if curl -sf http://localhost:3199/api/ready 2>/dev/null | grep -q '"boot":"ready'; then
+                break
+              fi
+              if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+                echo "伺服器行程已死,啟動 log:"; cat "/tmp/server-$suite.log"; exit 1
+              fi
+              sleep 1
+            done
+            if ! curl -sf http://localhost:3199/api/ready | grep -q '"boot":"ready'; then
+              echo "90 秒內未就緒,啟動 log:"; cat "/tmp/server-$suite.log"; exit 1
+            fi
+            python3 "scripts/e2e-$suite.py" || { echo "套件失敗,伺服器 log:"; tail -50 "/tmp/server-$suite.log"; exit 1; }
+            # /bin/kill:sh(dash)內建 kill 吃不下負 pid;bash 可以,但外部 kill 兩者皆穩
+            /bin/kill -TERM -- "-$SERVER_PID" 2>/dev/null || true
+            wait "$SERVER_PID" 2>/dev/null || true
+            echo "::endgroup::"
+          done

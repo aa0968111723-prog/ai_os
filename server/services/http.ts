@@ -1,7 +1,7 @@
 /**
  * proxyFetch：尊重 HTTPS_PROXY/HTTP_PROXY 的 fetch（Node 原生 fetch 不吃代理環境變數）。
  * 注意：dispatcher 必須配 undici 自家的 fetch（與 Node 內建 fetch 混用會版本不相容）。
- * Railway 直連時（無代理環境變數）走 Node 原生 fetch，行為不變。
+ * 直連環境（無代理環境變數，一般部署平台皆是）走 Node 原生 fetch，行為不變。
  */
 import { fetch as undiciFetch, ProxyAgent } from "undici";
 

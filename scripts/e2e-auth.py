@@ -1,6 +1,8 @@
 import json, urllib.request, urllib.parse, urllib.error, http.cookiejar
 
-BASE = "http://localhost:3199/api/trpc"
+import os as _os
+HOST = f"http://localhost:{_os.environ.get('E2E_PORT', '3199')}"  # E2E_PORT 可換埠(與研究/其他行程共存)
+BASE = f"{HOST}/api/trpc"
 class Client:
     def __init__(self): self.cookie = None
     def open(self, req):
@@ -27,7 +29,7 @@ def call(op, opener, path, data=None):
     return body["result"]["data"]["json"]
 
 admin = client(); azhe = client()
-ok = lambda name, cond: print(("✅" if cond else "❌"), name)
+from e2e_lib import ok  # 共用斷言:計數+結束碼(有 ❌ 即非零退出,CI 據此判紅綠)
 
 r = call("POST",admin,"auth.login",{"email":"admin@aidirector.local","password":"test-admin-123"})
 ok("超管登入", r.get("user",{}).get("isSuperAdmin") is True)
@@ -110,7 +112,7 @@ lst2 = call("GET",azhe2,"scenes.listByProject",{"projectId":proj["id"]})
 ok("↑ 排序生效（晨鐘變第一）", lst2[0]["title"]=="晨鐘")
 
 # 交付包：下載 zip 驗證內容
-req = urllib.request.Request(f"http://localhost:3199/api/export/{proj['id']}")
+req = urllib.request.Request(f"{HOST}/api/export/{proj['id']}")
 req.add_header("Cookie", azhe2.cookie)
 with urllib.request.urlopen(req) as r:
     ct = r.headers.get("Content-Type"); data = r.read()
@@ -122,7 +124,7 @@ ok("交付包為 zip 且含圖像/文件/README", ct=="application/zip" and any(
 ok("鏡頭表含世界觀與兩鏡", "晨鐘" in doc and "開場" in doc and "陳師姐" in doc)
 
 # 隔離：別組成員不能下載
-req2 = urllib.request.Request(f"http://localhost:3199/api/export/{aproj['id']}")
+req2 = urllib.request.Request(f"{HOST}/api/export/{aproj['id']}")
 req2.add_header("Cookie", azhe2.cookie)
 try:
     urllib.request.urlopen(req2); ok("🔒 交付包隔離", False)
@@ -157,7 +159,7 @@ ok("回饋送出＋管理員可見", fbl[0]["userName"]=="阿哲" and fbl[0]["be
 
 # MCP：initialize / tools list / call
 def mcp(method, params=None, key="test-mcp-key"):
-    req = urllib.request.Request("http://localhost:3199/api/mcp", data=json.dumps({"jsonrpc":"2.0","id":1,"method":method,"params":params or {}}).encode(),
+    req = urllib.request.Request(f"{HOST}/api/mcp", data=json.dumps({"jsonrpc":"2.0","id":1,"method":method,"params":params or {}}).encode(),
                                  headers={"Content-Type":"application/json","x-api-key":key}, method="POST")
     try:
         return json.load(urllib.request.urlopen(req))
