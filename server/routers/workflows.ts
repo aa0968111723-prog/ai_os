@@ -13,6 +13,56 @@ interface RunStep {
   detail?: string;
 }
 
+/** 啟動核心的輸入：userId 一律為「登入者本人」；assertAccess 由呼叫端注入 requireGroup（多組隔離不可省略） */
+export interface StartWorkflowCoreInput {
+  userId: string;
+  projectId: string;
+  presetId: string;
+  prompt: string;
+  assertAccess: (project: typeof schema.projects.$inferSelect) => void;
+}
+
+/**
+ * 啟動一條工作流（自 start mutation 原樣抽出，行為不變）：
+ * presetId 白名單 → 專案存在＋組隔離 → 同人同專案單併發守門 → 建 run（實際送出由 runner 下一個 tick 接手）。
+ * 為什麼抽函式：AI 專案助手（assistant.runAction）要以登入者本人身分重用同一套守門——
+ * 邏輯若複製兩份，白名單／併發守門遲早分岔。
+ */
+export async function startWorkflowCore(input: StartWorkflowCoreInput) {
+  const preset = getWorkflow(input.presetId);
+  if (!preset) throw new TRPCError({ code: "BAD_REQUEST", message: "未知的工作流（請重新整理頁面後再選一次）" });
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+  input.assertAccess(project); // 多組隔離
+  // 併發守門：同人同專案一次只跑一條（check-then-insert 有極短競態視窗，
+  // 但每步扣點在 runner 端有冪等防護，這裡只求把重複點擊擋成好懂的錯誤）
+  const [active] = await db
+    .select({ id: schema.workflowRuns.id })
+    .from(schema.workflowRuns)
+    .where(
+      and(
+        eq(schema.workflowRuns.projectId, project.id),
+        eq(schema.workflowRuns.userId, input.userId),
+        eq(schema.workflowRuns.status, "running"),
+      ),
+    )
+    .limit(1);
+  if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "你已有一條工作流在跑——等它完成或先按停止" });
+  const steps: RunStep[] = preset.steps.map((s) => ({ note: s.note, status: "pending" }));
+  const [run] = await db
+    .insert(schema.workflowRuns)
+    .values({
+      projectId: project.id,
+      groupId: project.groupId,
+      userId: input.userId,
+      presetId: preset.id,
+      prompt: input.prompt.trim(),
+      steps,
+    })
+    .returning();
+  return run;
+}
+
 /** 工作流執行（伺服器背景推進版）：start 只建 run，實際送出由 workflowRunner 的下一個 tick 接手 */
 export const workflowsRouter = router({
   start: authedProcedure
@@ -23,40 +73,15 @@ export const workflowsRouter = router({
         prompt: z.string().min(1, "請填想法"),
       }),
     )
-    .mutation(async ({ ctx, input }) => {
-      const preset = getWorkflow(input.presetId);
-      if (!preset) throw new TRPCError({ code: "BAD_REQUEST", message: "未知的工作流（請重新整理頁面後再選一次）" });
-      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
-      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
-      requireGroup(ctx.auth, project.groupId); // 多組隔離
-      // 併發守門：同人同專案一次只跑一條（check-then-insert 有極短競態視窗，
-      // 但每步扣點在 runner 端有冪等防護，這裡只求把重複點擊擋成好懂的錯誤）
-      const [active] = await db
-        .select({ id: schema.workflowRuns.id })
-        .from(schema.workflowRuns)
-        .where(
-          and(
-            eq(schema.workflowRuns.projectId, project.id),
-            eq(schema.workflowRuns.userId, ctx.auth.user.id),
-            eq(schema.workflowRuns.status, "running"),
-          ),
-        )
-        .limit(1);
-      if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "你已有一條工作流在跑——等它完成或先按停止" });
-      const steps: RunStep[] = preset.steps.map((s) => ({ note: s.note, status: "pending" }));
-      const [run] = await db
-        .insert(schema.workflowRuns)
-        .values({
-          projectId: project.id,
-          groupId: project.groupId,
-          userId: ctx.auth.user.id,
-          presetId: preset.id,
-          prompt: input.prompt.trim(),
-          steps,
-        })
-        .returning();
-      return run;
-    }),
+    .mutation(async ({ ctx, input }) =>
+      startWorkflowCore({
+        userId: ctx.auth.user.id,
+        projectId: input.projectId,
+        presetId: input.presetId,
+        prompt: input.prompt,
+        assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
+      }),
+    ),
 
   /** 全部 running ＋ 最近 5 筆終局（各自新到舊）：running 永遠可見可停，不會被新的終局擠出清單 */
   listByProject: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {

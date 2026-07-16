@@ -1,8 +1,13 @@
 import { z } from "zod";
-import { and, desc, eq, isNull, notInArray } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, like, notInArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
+import { MODELS } from "../../shared/models";
+import { isMockMode, extractResult } from "../services/fal";
+import { proxyFetch } from "../services/http";
+import { reserveQuota, refund } from "../services/points";
+import { signAssetUrl } from "../services/storage";
 
 export const KNOWLEDGE_KINDS = [
   { id: "transcript", label: "師父開示稿" },
@@ -21,18 +26,49 @@ const INJECT_BUDGET = 8_000;
  * 依建立時間由新到舊取，總量到 budget 為止；回空字串代表沒有知識。
  * budget 依呼叫端的模型窗口自定（6.1 上下文窗口）：目前後端 LLM（gemini flash 系）窗口極大，
  * 上限主要是成本考量而非模型限制——助手可放寬、導演維持預設。
+ *
+ * 6.4 卡片↔知識庫同步：知識條目「之前」先注入角色定裝卡／場景設定卡的精簡段落——
+ * 夥伴在卡片庫維護的設定（外觀錨點、色板光線）對 AI 導演與助手同步可見，
+ * 不必再手動抄一份進知識庫；卡片字數也計入 budget（先扣卡片、剩餘額度才放知識長文）。
  */
 export async function buildKnowledgeContext(projectId: string, budgetChars: number = INJECT_BUDGET): Promise<string> {
-  const rows = await db
-    .select()
-    .from(schema.knowledge)
-    // ★ 絕不注入已軟刪除（回收桶）的知識——刪掉的逐字稿／見證不可再餵給 AI 導演 LLM
-    .where(and(eq(schema.knowledge.projectId, projectId), isNull(schema.knowledge.deletedAt)))
-    .orderBy(desc(schema.knowledge.createdAt));
-  if (rows.length === 0) return "";
+  // 三個查詢互不相依，並行省 DB 往返（知識照舊過濾軟刪除；卡片兩表沒有回收桶，全量即正確）
+  const [rows, chars, presets] = await Promise.all([
+    db
+      .select()
+      .from(schema.knowledge)
+      // ★ 絕不注入已軟刪除（回收桶）的知識——刪掉的逐字稿／見證不可再餵給 AI 導演 LLM
+      .where(and(eq(schema.knowledge.projectId, projectId), isNull(schema.knowledge.deletedAt)))
+      .orderBy(desc(schema.knowledge.createdAt)),
+    db.select().from(schema.characters).where(eq(schema.characters.projectId, projectId)).orderBy(asc(schema.characters.createdAt)),
+    db.select().from(schema.scenePresets).where(eq(schema.scenePresets.projectId, projectId)).orderBy(asc(schema.scenePresets.createdAt)),
+  ]);
+
+  // 卡片段落（6.4）：欄位各自截短（外觀 160／個性 120 字）——卡片是「設定錨點」不是長文，
+  // 截短後總量有界，因此整段完整注入、不被 budget 腰斬（斷在半張卡會餵給 LLM 誤導性的半截設定）。
+  const cardParts: string[] = [];
+  if (chars.length) {
+    const lines = chars.map(
+      (c) => `- ${c.name}：${c.appearance.slice(0, 160)}${c.notes?.trim() ? `｜個性：${c.notes.slice(0, 120)}` : ""}`,
+    );
+    cardParts.push(`【角色定裝卡】\n${lines.join("\n")}`);
+  }
+  if (presets.length) {
+    const lines = presets.map(
+      (s) => `- ${s.name}：色板 ${s.palette}${s.lighting?.trim() ? `｜光線 ${s.lighting}` : ""}`,
+    );
+    cardParts.push(`【場景設定卡】\n${lines.join("\n")}`);
+  }
+  const cardBlock = cardParts.join("\n");
+
+  if (rows.length === 0 && !cardBlock) return "";
   const labelOf = (k: string) => KNOWLEDGE_KINDS.find((x) => x.id === k)?.label ?? k;
   const parts: string[] = [];
   let budget = Math.max(0, budgetChars);
+  if (cardBlock) {
+    parts.push(cardBlock);
+    budget = Math.max(0, budget - cardBlock.length); // 卡片先佔額度，知識長文吃剩餘
+  }
   for (const r of rows) {
     if (budget <= 0) break;
     const slice = r.content.slice(0, budget);
@@ -84,6 +120,35 @@ async function snapshotKnowledge(
         ),
       );
   }
+}
+
+/* ── 6.2 圖片 → AI 描述 → 知識庫 ───────────────────────────────── */
+
+/**
+ * 視覺模型選型：取類別推薦主力（已驗證的日常款），目錄調整期退而求其次用第一個 vision——
+ * 與 assistant 的 DEFAULT_IMAGE_MODEL 同一哲學（推薦優先、永遠有 fallback），費用直接沿用目錄 points。
+ */
+const VISION_MODEL = MODELS.find((m) => m.category === "vision" && m.recommended) ?? MODELS.find((m) => m.category === "vision");
+/** 描述入庫的字數上限：8000 字足夠詳述一張圖，再長多半是模型跑火車，也避免單筆吃光注入預算 */
+const MAX_DESCRIPTION = 8_000;
+/** AI 產生的描述筆固定用這個標題開頭——防重複查詢認的就是這個前綴（與使用者手動引用同素材建的筆區分開） */
+const DESCRIBE_TITLE_PREFIX = "圖片描述";
+/** 給視覺模型的固定指令：繁中、面向影片創作的完整盤點（場景／人物／光線／氛圍／可見文字） */
+const DESCRIBE_PROMPT = "請以繁體中文詳細描述這張圖片（場景、人物、光線、氛圍、可見文字），供影片創作參考";
+
+// 記憶體節流（比照 assistant/director 的模式，但獨立計數器、不跨檔共用）：每人每分鐘 6 次，擋狂刷付費視覺模型
+const DESCRIBE_LIMIT_PER_MIN = 6;
+const DESCRIBE_WINDOW_MS = 60_000;
+const describeHits = new Map<string, number[]>();
+function describeOverLimit(userId: string): boolean {
+  const now = Date.now();
+  const arr = (describeHits.get(userId) ?? []).filter((t) => now - t < DESCRIBE_WINDOW_MS);
+  const over = arr.length >= DESCRIBE_LIMIT_PER_MIN;
+  if (!over) arr.push(now);
+  // 為什麼：空陣列就刪 key，否則長跑容器的 Map 會隨歷史使用者無界成長（記憶體洩漏）
+  if (arr.length) describeHits.set(userId, arr);
+  else describeHits.delete(userId);
+  return over;
 }
 
 export const knowledgeRouter = router({
@@ -327,5 +392,98 @@ export const knowledgeRouter = router({
       })
       .returning();
     return row;
+  }),
+
+  /**
+   * 6.2 圖片 → AI 描述 → 知識庫：用視覺模型把圖片素材「看」成中文描述存進知識庫，
+   * 之後由 buildKnowledgeContext 自動注入導演／助手——AI 真的看過我們的素材。
+   * 冪等：同素材已有未刪除的「圖片描述」筆就直接回它（重複點擊／重試不重複扣點）。
+   */
+  describeImageAsset: authedProcedure.input(z.object({ assetId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    if (describeOverLimit(ctx.auth.user.id)) {
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "描述得太頻繁（每分鐘最多 6 次），休息一下再試" });
+    }
+    // 回收桶裡的素材視為不存在——已刪的圖不該再進知識庫
+    const [asset] = await db
+      .select()
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, input.assetId), isNull(schema.assets.deletedAt)));
+    if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
+    requireGroup(ctx.auth, asset.groupId); // 多組隔離：素材屬於哪組就要哪組成員才能操作
+    if (asset.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "只支援圖片素材" });
+
+    // 防重複（冪等）：同素材已有未刪除、標題以「圖片描述」開頭的筆 → 直接回它、不再扣點。
+    // 標題前綴用來區分「AI 描述筆」與「使用者手動引用同素材建的筆」（後者不該擋 AI 描述）；
+    // 前一筆若已丟回收桶則放行重新產生（與 addFromAsset 的去重哲學一致）。
+    const [dup] = await db
+      .select()
+      .from(schema.knowledge)
+      .where(
+        and(
+          eq(schema.knowledge.sourceAssetId, asset.id),
+          isNull(schema.knowledge.deletedAt),
+          like(schema.knowledge.title, `${DESCRIBE_TITLE_PREFIX}%`),
+        ),
+      );
+    if (dup) return { id: dup.id, title: dup.title, content: dup.content };
+
+    const title = `${DESCRIBE_TITLE_PREFIX}｜${asset.title.slice(0, 60)}`;
+    let content: string;
+    if (isMockMode()) {
+      // 假模式：不扣點，用固定示範文字跑通「描述 → 入庫 → 注入」全流程（與 fal/assistant 的 mock 哲學一致）
+      content = `（示範描述）這是一張與專案相關的圖片素材：${asset.title}。正式模式會由視覺模型產生詳細中文描述。`;
+    } else {
+      if (!VISION_MODEL) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "目前沒有可用的視覺模型" });
+      const points = VISION_MODEL.points;
+      // 先扣後呼叫、失敗退回——與 assistant/generationCore 同一守門哲學（點數＝真金，不可先跑再說）
+      const quotaError = await reserveQuota(ctx.auth.user.id, asset.groupId, points, "圖片描述入知識庫");
+      if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+      // 圖片網址：本地檔 → 簽名網址（fal 要能從外部抓到圖，與 generationCore 來源素材同模式）；
+      // 純外部素材直接用其網址，但必須是 http(s) 否則模型抓不到——擋下並退點
+      const imageUrl = asset.storagePath ? signAssetUrl(asset.id) : asset.url;
+      if (!imageUrl.startsWith("http")) {
+        await refund(ctx.auth.user.id, asset.groupId, points, "圖片描述失敗退回");
+        throw new TRPCError({ code: "BAD_REQUEST", message: "這個素材沒有可存取的圖片網址" });
+      }
+      // 同步呼叫 fal（比照 assistant.ask 的 proxyFetch 寫法）。URL 不能寫死 any-llm：
+      // 目錄裡推薦的視覺模型（moondream 系）是獨立端點、any-llm 視覺款的 endpoint 是
+      // fal-ai/any-llm/vision——一律取「該模型的佇列端點」對應的 fal.run 同步路徑。
+      // body 由目錄的 entry.input() 產生（any-llm 款自帶 model+image_url、moondream 款只有
+      // prompt+image_url）——模型輸入形狀的單一真相來源在目錄，這裡不重複手拼。
+      const falUrl = `https://fal.run/${VISION_MODEL.endpoint ?? VISION_MODEL.id.split("#")[0]}`;
+      try {
+        const res = await proxyFetch(falUrl, {
+          method: "POST",
+          headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify(VISION_MODEL.input(DESCRIBE_PROMPT, "16:9", imageUrl)),
+          timeoutMs: 60_000,
+        });
+        if (!res.ok) throw new Error(`vision ${res.status}`);
+        const data = (await res.json()) as Record<string, unknown>;
+        // 各家輸出欄位不一（output／text／results…）：用生成管線同一支統一解析器，不自己再猜一次
+        const text = (extractResult(data).text ?? "").trim();
+        if (!text) throw new Error("模型沒回描述");
+        content = text.slice(0, MAX_DESCRIPTION);
+      } catch {
+        // 沒拿到描述就不收錢：退點＋人話錯誤（比照 assistant.ask 的失敗收尾）
+        await refund(ctx.auth.user.id, asset.groupId, points, "圖片描述失敗退回");
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "視覺模型暫時沒回應，請稍後再試（點數已退回）" });
+      }
+    }
+
+    // 入庫成 note：記 sourceAssetId（防重複＋回溯來源圖），之後自動被 buildKnowledgeContext 注入
+    const [row] = await db
+      .insert(schema.knowledge)
+      .values({
+        projectId: asset.projectId,
+        groupId: asset.groupId,
+        kind: "note",
+        title,
+        content,
+        sourceAssetId: asset.id,
+        createdBy: ctx.auth.user.id,
+      })
+      .returning();
+    return { id: row.id, title: row.title, content: row.content };
   }),
 });

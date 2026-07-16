@@ -1,21 +1,23 @@
 import { z } from "zod";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
-import { MODELS } from "../../shared/models";
+import { MODELS, WORKFLOW_PRESETS, getModel, getWorkflow, type ModelEntry } from "../../shared/models";
 import { isMockMode } from "../services/fal";
 import { proxyFetch } from "../services/http";
 import { reserveQuota, refund } from "../services/points";
 import { submitGenerationCore } from "../services/generationCore";
 import { submitApprovalCore } from "./approvals";
+import { startWorkflowCore } from "./workflows";
 import { buildKnowledgeContext } from "./knowledge";
 
 /**
- * AI 專案助手（進階版）：讀專案上下文回答，並可「提議」動作（生成／改分鏡／送審）。
+ * AI 專案助手（進階版）：讀專案上下文回答，並可「提議」動作（生成／新增分鏡／改分鏡／送審／跑工作流）。
  * 安全設計：助手只「提議」，一切花點數或改資料的動作都由前端讓使用者按確認後、
  * 再走 runAction 以「登入者本人」身分執行（非自動、非超管）——AI 不會擅自動手。
+ * LLM 輸出一律只帶「代號」（sceneNo／modelId／presetId），落地前全部過白名單／範圍校驗，防幻覺 id。
  */
 
 /** 問答固定 1 點（付費 LLM 呼叫；動作另計於執行時，走既有守門） */
@@ -27,6 +29,27 @@ const ASK_COST_POINTS = 1;
 const KNOWLEDGE_BUDGET = 20_000;
 /** 生成類動作的預設模型：該類別已驗證的推薦日常主力（找不到退回 flux/dev） */
 const DEFAULT_IMAGE_MODEL = MODELS.find((m) => m.category === "text-to-image" && m.recommended)?.id ?? "fal-ai/flux/dev";
+/**
+ * 助手可代選的生成模型類別（6.5）：只收「一句提示詞就能出成品」的類別——
+ * 需要來源素材的類別（圖生圖／轉錄／對嘴／訓練…）助手還沒辦法幫使用者附檔，提了也必然失敗。
+ */
+const ASSISTANT_MODEL_CATEGORIES = new Set(["text-to-image", "text-to-video", "text-to-audio", "text-to-speech", "llm"]);
+/** 白名單挑模型：LLM 提的 modelId 必須「在註冊表、不需來源素材、類別可代操」才採用，否則退回預設圖像模型（幻覺 id 不落地） */
+function pickGenerateModel(proposedId?: string): ModelEntry {
+  if (proposedId) {
+    const m = getModel(proposedId);
+    if (m && !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category)) return m;
+  }
+  // 預設模型 id 一定取自註冊表（見 DEFAULT_IMAGE_MODEL 的來源），?? MODELS[0] 只是型別防禦
+  return getModel(DEFAULT_IMAGE_MODEL) ?? MODELS[0];
+}
+/** 提示詞用「可用模型速查」：各類別 recommended 的日常主力，一行一個（上限 12 行，防提示詞隨註冊表膨脹） */
+const MODEL_CHEATSHEET = MODELS.filter((m) => m.recommended && !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category))
+  .slice(0, 12)
+  .map((m) => `- ${m.id}｜${m.label}｜${m.points} 點｜${m.bestFor}`)
+  .join("\n");
+/** 提示詞用「可用工作流速查」：LLM 只能從這裡挑 presetId（resolve／startWorkflowCore 都會再過 getWorkflow 白名單） */
+const WORKFLOW_CHEATSHEET = WORKFLOW_PRESETS.map((w) => `- ${w.id}｜${w.label}｜約 ${w.points} 點｜${w.bestFor}`).join("\n");
 
 // 記憶體節流（比照 director）：每人每分鐘 6 次，擋狂刷付費 LLM
 const LIMIT_PER_MIN = 6;
@@ -47,25 +70,32 @@ const STATUS_LABEL: Record<string, string> = {
   todo: "草稿", review: "草稿", pending: "待審", approved: "已通過", needs_work: "需修改",
 };
 
-/** LLM 提議的動作：以「分鏡編號 sceneNo」指涉，避免讓 LLM 直接吐 UUID（會幻覺） */
+/** LLM 提議的動作：一律以「代號」指涉（分鏡編號 sceneNo／註冊表 modelId／預設集 presetId），避免讓 LLM 直接吐 UUID（會幻覺） */
 const proposalSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("generate"), prompt: z.string().min(1).max(2000), sceneNo: z.number().int().positive().optional() }),
+  z.object({ type: z.literal("generate"), prompt: z.string().min(1).max(2000), sceneNo: z.number().int().positive().optional(), modelId: z.string().optional() }),
   z.object({ type: z.literal("update_scene"), sceneNo: z.number().int().positive(), field: z.enum(["title", "voiceover", "durationSec"]), value: z.string().min(1).max(500) }),
   z.object({ type: z.literal("submit_approval"), sceneNo: z.number().int().positive() }),
+  // durationSec 不強制整數：LLM 偶爾會回 4.5 這種值，整筆回覆因此解析失敗太傷——落地時再取整
+  z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional() }),
+  z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().min(1).max(2000) }),
 ]);
 const replySchema = z.object({ answer: z.string().min(1).max(4000), actions: z.array(proposalSchema).max(6).optional() });
 
-/** 前端拿到的「已解析」動作（帶真實 sceneId＋人看得懂的標籤＋預設模型），確認後原樣回送 runAction */
+/** 前端拿到的「已解析」動作（帶真實 sceneId＋人看得懂的標籤＋白名單過的模型），確認後原樣回送 runAction */
 type ResolvedAction =
   | { type: "generate"; label: string; prompt: string; modelId: string; sceneId?: string }
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
-  | { type: "submit_approval"; label: string; sceneId: string };
+  | { type: "submit_approval"; label: string; sceneId: string }
+  | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number }
+  | { type: "run_workflow"; label: string; presetId: string; prompt: string };
 
 /** runAction 輸入：前端把已確認的動作原樣送回（型別與 ResolvedAction 對齊） */
 const actionInputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("generate"), prompt: z.string().min(1).max(2000), modelId: z.string(), sceneId: z.string().uuid().optional() }),
   z.object({ type: z.literal("update_scene"), sceneId: z.string().uuid(), field: z.enum(["title", "voiceover", "durationSec"]), value: z.string().min(1).max(500) }),
   z.object({ type: z.literal("submit_approval"), sceneId: z.string().uuid() }),
+  z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional() }),
+  z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().min(1).max(2000) }),
 ]);
 
 const FIELD_LABEL: Record<string, string> = { title: "標題", voiceover: "旁白", durationSec: "秒數" };
@@ -106,20 +136,35 @@ export const assistantRouter = router({
 ${sceneLines}
 生成：完成 ${genDone}／生成中 ${genRunning}／失敗 ${genFailed}｜待審分鏡：${pendingCount}`;
 
-      /** 把 LLM 的 sceneNo 提議解析成帶 sceneId＋標籤的動作；無效的（超出範圍等）略過 */
+      /** 把 LLM 的代號提議（sceneNo／modelId／presetId）解析成可執行動作；無效代號（幻覺）一律略過或退回預設 */
       const resolve = (actions: z.infer<typeof proposalSchema>[]): ResolvedAction[] => {
         const out: ResolvedAction[] = [];
         for (const a of actions) {
-          const scene = a.type === "generate" ? (a.sceneNo ? scenes[a.sceneNo - 1] : undefined) : scenes[a.sceneNo - 1];
           if (a.type === "generate") {
-            if (a.sceneNo && !scene) continue;
-            out.push({ type: "generate", modelId: DEFAULT_IMAGE_MODEL, prompt: a.prompt, sceneId: scene?.id, label: scene ? `為第 ${a.sceneNo} 鏡「${scene.title}」生成畫面` : `生成畫面：${a.prompt.slice(0, 24)}…` });
-          } else if (!scene) {
-            continue;
-          } else if (a.type === "update_scene") {
-            out.push({ type: "update_scene", sceneId: scene.id, field: a.field, value: a.value, label: `把第 ${a.sceneNo} 鏡的${FIELD_LABEL[a.field]}改為「${a.value.slice(0, 24)}」` });
+            const scene = a.sceneNo ? scenes[a.sceneNo - 1] : undefined;
+            if (a.sceneNo && !scene) continue; // 指了不存在的鏡＝幻覺編號，整筆提議略過
+            const model = pickGenerateModel(a.modelId); // 白名單不過就退回預設圖像模型
+            out.push({
+              type: "generate", modelId: model.id, prompt: a.prompt, sceneId: scene?.id,
+              // label 註明模型與估點，讓使用者按下前就知道會用哪個模型、大約花多少
+              label: scene
+                ? `用 ${model.label} 為第 ${a.sceneNo} 鏡「${scene.title}」生成（${model.points} 點）`
+                : `用 ${model.label} 生成：${a.prompt.slice(0, 24)}…（${model.points} 點）`,
+            });
+          } else if (a.type === "create_scene") {
+            out.push({ type: "create_scene", title: a.title, voiceover: a.voiceover, durationSec: a.durationSec, label: `新增分鏡「${a.title}」` });
+          } else if (a.type === "run_workflow") {
+            const preset = getWorkflow(a.presetId);
+            if (!preset) continue; // 幻覺的 presetId：不給使用者一顆註定失敗的按鈕
+            out.push({ type: "run_workflow", presetId: preset.id, prompt: a.prompt, label: `執行工作流「${preset.label}」（約 ${preset.points} 點）` });
           } else {
-            out.push({ type: "submit_approval", sceneId: scene.id, label: `把第 ${a.sceneNo} 鏡「${scene.title}」送審` });
+            const scene = scenes[a.sceneNo - 1];
+            if (!scene) continue;
+            if (a.type === "update_scene") {
+              out.push({ type: "update_scene", sceneId: scene.id, field: a.field, value: a.value, label: `把第 ${a.sceneNo} 鏡的${FIELD_LABEL[a.field]}改為「${a.value.slice(0, 24)}」` });
+            } else {
+              out.push({ type: "submit_approval", sceneId: scene.id, label: `把第 ${a.sceneNo} 鏡「${scene.title}」送審` });
+            }
           }
         }
         return out;
@@ -136,10 +181,18 @@ ${sceneLines}
 
       const sys = `你是這支影片專案的 AI 助手，用繁體中文簡潔回答使用者關於「進度、生成、分鏡、審批、素材內容、細節」的問題。
 你也可以「提議」動作讓使用者確認後執行（你不能直接執行）。可提議的動作：
-- generate：生成一張畫面（prompt＝畫面描述；可選 sceneNo 指定回填某一鏡）
+- generate：生成素材（prompt＝描述；可選 sceneNo 指定回填某一鏡；可選 modelId 指定模型，未指定就用預設圖像模型）
 - update_scene：改某一鏡欄位（sceneNo＋field: title|voiceover|durationSec＋value）
 - submit_approval：把某一鏡送審（sceneNo）
-分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
+- create_scene：在片尾新增一個分鏡（title 必填 80 字內；可選 voiceover 旁白、durationSec 秒數 1–60）
+- run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
+分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。modelId／presetId 只能抄下方速查表的 id，不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
+<可用模型速查>
+${MODEL_CHEATSHEET}
+</可用模型速查>
+<可用工作流速查>
+${WORKFLOW_CHEATSHEET}
+</可用工作流速查>
 只回 JSON：{"answer":"回答文字","actions":[...]}。
 <專案現況>
 ${context}
@@ -180,6 +233,15 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
       const a = input.action;
 
       if (a.type === "generate") {
+        // 白名單在執行端再驗一次（payload 可由任何呼叫端組出，不能只信 ask 端 resolve 的結果）
+        const model = getModel(a.modelId);
+        if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "不認識這個模型——請重新問一次助手，讓它重新提議" });
+        if (model.needs) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `「${model.label}」需要來源素材（${model.sourceHint ?? "圖／音／影檔"}），助手還沒辦法幫你附來源——請到生成台操作` });
+        }
+        if (!ASSISTANT_MODEL_CATEGORIES.has(model.category)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `「${model.label}」不在助手可代操的類別，請到生成台操作` });
+        }
         // 綁分鏡回填前，先比照 update_scene 驗證 sceneId 歸屬（同專案、未軟刪）——否則生成完成時
         // advanceGeneration 會以無範圍的 sceneId 把 assetId 寫進他專案／已軟刪分鏡（與姊妹分支不一致的漏檢）
         if (a.sceneId) {
@@ -193,10 +255,11 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         const gen = await submitGenerationCore({
           userId: ctx.auth.user.id,
           projectId: project.id,
-          modelId: a.modelId,
+          modelId: model.id,
           prompt: a.prompt,
           sceneId: a.sceneId,
-          sceneRole: a.sceneId ? "visual" : undefined,
+          // 音訊成品（配音／配樂）回填旁白欄位而非主畫面——模型可自選後，把 mp3 塞進畫面格會讓分鏡卡顯示壞掉
+          sceneRole: a.sceneId ? (model.kind === "audio" ? "narration" : "visual") : undefined,
           reasonPrefix: "助手生成",
           assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
         });
@@ -221,6 +284,41 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           await db.update(schema.scenes).set({ [a.field]: v }).where(eq(schema.scenes.id, scene.id));
         }
         return { ok: true, kind: "update_scene" as const, message: "已更新分鏡" };
+      }
+
+      if (a.type === "create_scene") {
+        // 為什麼：schema 的 min(1) 擋不掉純空白；trim 後為空就拒絕，避免生出無名分鏡
+        const title = a.title.trim();
+        if (!title) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡標題不能是空白" });
+        // 排在片尾：取本專案「未軟刪」分鏡的最大 orderIndex＋1——軟刪格不算，否則新格會被推到回收桶格之後留洞
+        const [{ maxOrder }] = await db
+          .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+        const voiceover = a.voiceover?.trim();
+        const [scene] = await db
+          .insert(schema.scenes)
+          .values({
+            projectId: project.id,
+            orderIndex: Number(maxOrder) + 1,
+            title,
+            voiceover: voiceover || undefined, // 全空白視同沒填
+            durationSec: a.durationSec ? Math.round(a.durationSec) : undefined, // zod 已限 1–60；取整配合欄位型別，沒填走預設
+          })
+          .returning();
+        return { ok: true, kind: "create_scene" as const, sceneId: scene.id, message: "已新增分鏡" };
+      }
+
+      if (a.type === "run_workflow") {
+        // 重用網頁端工作流啟動核心（presetId 白名單、同人同專案併發守門；逐步扣點由 runner 走既有守門）
+        const run = await startWorkflowCore({
+          userId: ctx.auth.user.id,
+          projectId: project.id,
+          presetId: a.presetId,
+          prompt: a.prompt,
+          assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
+        });
+        return { ok: true, kind: "run_workflow" as const, runId: run.id, message: "工作流已啟動，進度見工作流卡" };
       }
 
       // submit_approval：走與網頁「送審」完全相同的核心（版本號原子產生、標分鏡 pending、系統訊息）
