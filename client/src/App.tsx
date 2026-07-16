@@ -117,6 +117,8 @@ function UserMenu({
           <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
           {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
           {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />團隊管理</Link>}
+          {/* 個人資料匯出（端點 /api/me/export 由後端提供）：a 標籤直下載，不經前端路由 */}
+          <a href="/api/me/export" download className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />下載我的資料</a>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
           <div className="menu-sep" />
           <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>

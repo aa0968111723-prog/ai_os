@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
@@ -95,4 +95,85 @@ export const quotaRouter = router({
       rows: usage.map((u) => ({ ...u, name: users.find((x) => x.id === u.userId)?.name ?? "?" })),
     };
   }),
+
+  /**
+   * 點數消耗監控（盲點修補：無成本異常告警）——管理儀表資料源。
+   * 口徑一律「毛消耗」＝只加總扣點列（delta<0 取絕對值），退點「不」抵銷：
+   * 監控要看的是「實際發動了多少花費」；若讓退點沖銷扣點，大量失敗重試的異常日
+   * （正是最該被看見的日子）在淨額口徑下反而近乎隱形。
+   * （額度守門的 usedThisWeek 是淨額口徑且退點跟隨生成週，兩者用途不同，屬刻意差異。）
+   * 日界採台北時區：比照 points.ts 的 TPE_OFFSET 平移法，(created_at + interval '8 hours')::date 即台北日期。
+   */
+  consumptionStats: adminProcedure
+    .input(z.object({ days: z.number().int().min(7).max(30).optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const days = input?.days ?? 14;
+
+      // 可見範圍比照 audit.list：開發者（超管）看全站；一般團隊管理員只看 admin 身分展開的組
+      let adminGroupIds: string[] | null = null; // null＝不過濾（全站）
+      if (!ctx.auth.user.isSuperAdmin) {
+        adminGroupIds = ctx.auth.groups.filter((g) => g.role === "admin").map((g) => g.groupId);
+        if (adminGroupIds.length === 0) {
+          // 沒有可管的組：回空資料（不拋錯，讓 UI 顯示「沒有可監控的組」即可）
+          return {
+            perDay: [] as Array<{ date: string; points: number }>,
+            todayPoints: 0,
+            avg7: 0,
+            alert: false,
+            byGroup: [] as Array<{ groupId: string; groupName: string; weekPoints: number }>,
+          };
+        }
+      }
+      const groupCond = adminGroupIds ? [inArray(schema.costLedger.groupId, adminGroupIds)] : [];
+
+      // 台北日界（同 points.ts dayStart 的平移法）：+8h 後用 UTC 欄位讀到的就是台北牆鐘時間
+      const TPE_OFFSET_MS = 8 * 60 * 60 * 1000;
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      const tpeToday = new Date(Date.now() + TPE_OFFSET_MS);
+      tpeToday.setUTCHours(0, 0, 0, 0); // 平移座標系裡的「台北今日 00:00」
+      // avg7 要「不含今天的前 7 個整天」——即使只畫 7 天圖也得撈滿 8 天才夠算
+      const fetchDays = Math.max(days, 8);
+      const sinceUtc = new Date(tpeToday.getTime() - (fetchDays - 1) * DAY_MS - TPE_OFFSET_MS); // 平移回真 UTC 時刻
+
+      // 逐日毛消耗：SQL 一次聚合撈回（只回有紀錄的日子，缺日在下面補 0）
+      const tpeDay = sql<string>`to_char((${schema.costLedger.createdAt} + interval '8 hours')::date, 'YYYY-MM-DD')`;
+      const gross = sql<number>`sum(case when ${schema.costLedger.delta} < 0 then -${schema.costLedger.delta} else 0 end)`;
+      const dailyRows = await db
+        .select({ date: tpeDay, points: gross })
+        .from(schema.costLedger)
+        .where(and(gte(schema.costLedger.createdAt, sinceUtc), ...groupCond))
+        .groupBy(tpeDay);
+      const byDate = new Map(dailyRows.map((r) => [r.date, Number(r.points)]));
+
+      // 補齊整段日期（含 0 消耗日），前端長條圖才不會缺格
+      const series: Array<{ date: string; points: number }> = [];
+      for (let i = fetchDays - 1; i >= 0; i--) {
+        const key = new Date(tpeToday.getTime() - i * DAY_MS).toISOString().slice(0, 10); // 平移座標系直接讀＝台北日期
+        series.push({ date: key, points: byDate.get(key) ?? 0 });
+      }
+      const todayPoints = series[series.length - 1]?.points ?? 0;
+      const avg7Raw = series.slice(-8, -1).reduce((s, d) => s + d.points, 0) / 7; // 不含今天的前 7 天平均
+      // 異常門檻：今日毛消耗 > max(50, 前 7 日均值 × 3)。50 點下限避免「均值趨近 0、今天才幾點」的假警報
+      const alert = todayPoints > Math.max(50, avg7Raw * 3);
+
+      // 各組近 7 天（含今天）毛消耗，高到低——告警時可快速定位是哪個組在燒
+      const weekSinceUtc = new Date(tpeToday.getTime() - 6 * DAY_MS - TPE_OFFSET_MS);
+      const groupRows = await db
+        .select({ groupId: schema.costLedger.groupId, groupName: schema.groups.name, weekPoints: gross })
+        .from(schema.costLedger)
+        .leftJoin(schema.groups, eq(schema.groups.id, schema.costLedger.groupId))
+        .where(and(gte(schema.costLedger.createdAt, weekSinceUtc), ...groupCond))
+        .groupBy(schema.costLedger.groupId, schema.groups.name);
+      const byGroup = groupRows
+        .map((r) => ({ groupId: r.groupId, groupName: r.groupName ?? "（已不存在的組）", weekPoints: Number(r.weekPoints) }))
+        .sort((a, b) => b.weekPoints - a.weekPoints);
+
+      return {
+        perDay: series.slice(-days),
+        todayPoints,
+        avg7: Math.round(avg7Raw * 10) / 10, // 顯示用取 1 位小數；alert 已用原始均值判定
+        alert,
+        byGroup,
+      };
+    }),
 });
