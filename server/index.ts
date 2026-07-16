@@ -24,11 +24,12 @@ import {
   isAllowedUploadMime, kindFromMime, MAX_FILE_BYTES, STORAGE_ROOT,
 } from "./services/storage";
 import { markBootReady, isBootReady } from "./services/boot";
+import { recordError, listErrors, errorCountSince } from "./services/errlog";
 import { attachRealtime } from "./services/realtime";
 import { startWorkflowRunner } from "./services/workflowRunner";
 import { startGenerationRunner } from "./services/generationRunner";
 import { db, schema } from "./db";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -84,6 +85,8 @@ app.get("/api/ready", async (_req, res) => {
       db: "connected（資料庫已接通）",
       boot: isBootReady() ? "ready（初始化完成）" : "initializing（建表/種子進行中，稍候自動完成）",
       mockMode: isMockMode(),
+      // AUTH_MODE=dev 後門警示（僅開發環境會生效，正式環境自動忽略）——讓管理員一眼看到有沒有誤留
+      authMode: process.env.AUTH_MODE === "dev" ? "dev(僅開發生效)" : "normal",
     });
   } catch (err) {
     console.error("[ready] DB 連線失敗：", err instanceof Error ? err.message : err);
@@ -151,6 +154,7 @@ app.get("/api/export/:projectId", async (req, res) => {
     await exportProjectZip(project.id, res, assetIds.length > 0 ? assetIds : undefined);
   } catch (err) {
     console.error("[export]", err);
+    recordError("export", err); // 進錯誤環形緩衝（selftest「近期錯誤」）
     if (!res.headersSent) res.status(500).json({ error: "打包失敗，請稍後再試（管理員可查伺服器記錄）" });
   }
 });
@@ -185,6 +189,7 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
     res.send(file.body);
   } catch (err) {
     console.error("[export:timeline]", err);
+    recordError("export:timeline", err);
     if (!res.headersSent) res.status(500).json({ error: "時間軸/字幕檔產生失敗，請稍後再試" });
   }
 });
@@ -267,6 +272,7 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
   } catch (err) {
     await cleanup(); // req.file 若尚未 adopt（前段驗證失敗）才有東西可清
     console.error("[upload]", err);
+    recordError("upload", err);
     if (!res.headersSent) res.status(500).json({ error: "上傳失敗，請稍後再試" });
   }
 });
@@ -321,6 +327,7 @@ app.get("/api/downloads", async (req, res) => {
     res.json({ ok: true, categories: DOWNLOAD_CATEGORIES, items: await listDownloads() });
   } catch (err) {
     console.error("[downloads:list]", err);
+    recordError("downloads:list", err);
     if (!res.headersSent) res.status(500).json({ error: "清單讀取失敗，請稍後再試" });
   }
 });
@@ -339,6 +346,7 @@ app.get("/api/downloads/file", async (req, res) => {
     });
   } catch (err) {
     console.error("[downloads:file]", err);
+    recordError("downloads:file", err);
     if (!res.headersSent) res.status(500).json({ error: "下載失敗，請稍後再試" });
   }
 });
@@ -364,7 +372,87 @@ app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
     res.send(buildIcs(group.name, items));
   } catch (err) {
     console.error("[schedule:ics]", err);
+    recordError("schedule:ics", err);
     if (!res.headersSent) res.status(500).json({ error: "匯出失敗，請稍後再試" });
+  }
+});
+
+// ── 個資自助匯出 v1（個資法「查詢／請求複本」權）：登入者一鍵下載「自己的」資料 JSON。
+// 範圍嚴格限本人：帳號基本資料（絕不含 passwordHash）、所屬組、自己的生成紀錄／留言／回饋／筆記／排程。
+// 帳號「刪除」仍需管理員操作（見維運手冊）——本端點只解決自助「攜出」，不做自助刪除。
+app.get("/api/me/export", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const uid = auth.user.id;
+    // AuthState 沒帶 createdAt，補查一次 users（只取安全欄位，密碼雜湊絕不進 payload）
+    const [me] = await db.select().from(schema.users).where(eq(schema.users.id, uid));
+    const generations = await db
+      .select({
+        id: schema.generations.id,
+        modelId: schema.generations.modelId,
+        kind: schema.generations.kind,
+        prompt: schema.generations.prompt,
+        status: schema.generations.status,
+        pointsEst: schema.generations.pointsEst,
+        pointsActual: schema.generations.pointsActual,
+        createdAt: schema.generations.createdAt,
+      })
+      .from(schema.generations)
+      .where(eq(schema.generations.userId, uid))
+      .orderBy(desc(schema.generations.createdAt))
+      .limit(1000); // 新到舊；上限防單人海量生成把回應撐爆
+    const myMessages = await db
+      .select({
+        id: schema.messages.id,
+        projectId: schema.messages.projectId,
+        body: schema.messages.body,
+        createdAt: schema.messages.createdAt,
+      })
+      .from(schema.messages)
+      .where(eq(schema.messages.userId, uid))
+      .orderBy(desc(schema.messages.createdAt))
+      .limit(1000);
+    const myFeedback = await db
+      .select()
+      .from(schema.feedback)
+      .where(eq(schema.feedback.userId, uid))
+      .orderBy(desc(schema.feedback.createdAt))
+      .limit(200);
+    const myNotes = await db
+      .select({
+        id: schema.notes.id,
+        title: schema.notes.title,
+        content: schema.notes.content,
+        updatedAt: schema.notes.updatedAt,
+      })
+      .from(schema.notes)
+      .where(eq(schema.notes.createdBy, uid))
+      .orderBy(desc(schema.notes.updatedAt))
+      .limit(200);
+    const mySchedule = await db
+      .select()
+      .from(schema.scheduleItems)
+      .where(eq(schema.scheduleItems.createdBy, uid))
+      .orderBy(desc(schema.scheduleItems.createdAt))
+      .limit(200);
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      user: { id: uid, name: auth.user.name, email: auth.user.email, createdAt: me?.createdAt ?? null },
+      groups: auth.groups,
+      generations,
+      messages: myMessages,
+      feedback: myFeedback,
+      notes: myNotes,
+      scheduleItems: mySchedule,
+    };
+    res.attachment("我的資料.json"); // RFC 5987 中文檔名下載安全
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.send(JSON.stringify(payload, null, 2));
+  } catch (err) {
+    console.error("[me:export]", err);
+    recordError("me:export", err);
+    if (!res.headersSent) res.status(500).json({ error: "個資匯出失敗，請稍後再試" });
   }
 });
 
@@ -434,6 +522,27 @@ app.get("/api/selftest", async (req, res) => {
     const volume = STORAGE_ROOT === "/data" ? "Volume /data" : `本機 ${STORAGE_ROOT}`;
     return `${volume} 可讀寫`;
   });
+  await run("近期錯誤", async () => {
+    // 錯誤環形緩衝（services/errlog）：記憶體態、重啟歸零——外接 Sentry 前的最低限度觀測。
+    // 過去 24 小時有任何 recordError 就亮紅，並列最近 3 筆讓管理員不用翻伺服器 log。
+    const n = errorCountSince(24 * 60 * 60_000);
+    if (n > 0) {
+      const recent = listErrors()
+        .slice(0, 3)
+        .map((e) => `${e.at.slice(11, 16)} ${e.scope}: ${e.message.slice(0, 80)}`)
+        .join("；");
+      throw new Error(`24 小時內 ${n} 筆——${recent}`);
+    }
+    return "無";
+  });
+  await run("認證模式", async () => {
+    // AUTH_MODE=dev 後門警示：正式環境雖會自動忽略（見 trpc.ts createContext 安全鎖），
+    // 但誤留著等於「哪天有人把 NODE_ENV 弄錯就全站無認證」——自檢頁常駐提醒。
+    if (process.env.AUTH_MODE === "dev") {
+      throw new Error("⚠ AUTH_MODE=dev 已設定（正式環境會自動忽略，但請確認不是誤留）");
+    }
+    return "正常（登入制）";
+  });
   const allOk = checks.every((c) => c.ok);
   res.status(allOk ? 200 : 500).json({ ok: allOk, mockMode: isMockMode(), checks, time: new Date().toISOString() });
 });
@@ -460,6 +569,7 @@ app.post("/api/feedback/screenshot", upload.single("file"), async (req, res) => 
     res.json({ ok: true, path: storagePath });
   } catch (err) {
     await cleanup();
+    recordError("feedback:screenshot", err);
     res.status(500).json({ error: err instanceof Error ? err.message : "截圖上傳失敗" });
   }
 });
@@ -484,6 +594,7 @@ app.get("/api/feedback/:id/shot", async (req, res) => {
     res.sendFile(absPathOf(report.screenshotPath), { headers: { "Content-Type": "image/png" } });
   } catch (err) {
     console.error("[feedback:shot]", err);
+    recordError("feedback:shot", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取截圖失敗" });
   }
 });

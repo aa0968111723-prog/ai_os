@@ -5,6 +5,7 @@ import type { CreateExpressContextOptions } from "@trpc/server/adapters/express"
 import type { Request, Response } from "express";
 import { resolveSession, loadAuthState, type AuthState } from "./services/auth";
 import { isBootReady } from "./services/boot";
+import { recordError } from "./services/errlog";
 import { db, schema } from "./db";
 import { eq } from "drizzle-orm";
 import { SEED_ADMIN_EMAIL } from "./services/seed";
@@ -33,6 +34,8 @@ const t = initTRPC.context<Context>().create({
     // 內部錯誤（如 SQL）不外洩到前台——細節進伺服器 log，畫面給友善訊息
     if (error.code === "INTERNAL_SERVER_ERROR") {
       console.error("[trpc]", error.cause ?? error);
+      // 同步進錯誤環形緩衝，讓 /api/selftest「近期錯誤」看得到（errlog 零專案相依，直接 import 不會循環）
+      recordError("trpc:" + (shape.data?.path ?? "?"), error.cause ?? error);
       return { ...shape, message: "系統暫時無法處理，請稍後再試（管理員可到 /api/ready 檢查資料庫連線）" };
     }
     // 輸入驗證失敗時，預設 message 是整包 issues 的 JSON——改給第一條的人話訊息
