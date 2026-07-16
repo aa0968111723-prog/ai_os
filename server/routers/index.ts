@@ -18,6 +18,7 @@ import { optionsRouter } from "./options";
 import { feedbackReportsRouter } from "./feedbackReports";
 import { workflowsRouter } from "./workflows";
 import { assistantRouter } from "./assistant";
+import { auditRouter } from "./audit";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -39,6 +40,7 @@ export const appRouter = router({
   options: optionsRouter,
   feedbackReports: feedbackReportsRouter,
   assistant: assistantRouter,
+  audit: auditRouter,
 });
 
 export type AppRouter = typeof appRouter;

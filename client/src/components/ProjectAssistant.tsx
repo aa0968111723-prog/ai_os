@@ -7,7 +7,9 @@ import { ConfirmButton } from "./interactions";
 type Action =
   | { type: "generate"; label: string; prompt: string; modelId: string; sceneId?: string }
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
-  | { type: "submit_approval"; label: string; sceneId: string };
+  | { type: "submit_approval"; label: string; sceneId: string }
+  | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number }
+  | { type: "run_workflow"; label: string; presetId: string; prompt: string };
 
 type Turn = { role: "you" | "ai"; text: string; actions?: Action[] };
 
@@ -15,6 +17,8 @@ type Turn = { role: "you" | "ai"; text: string; actions?: Action[] };
 function toPayload(a: Action) {
   if (a.type === "generate") return { type: "generate" as const, prompt: a.prompt, modelId: a.modelId, sceneId: a.sceneId };
   if (a.type === "update_scene") return { type: "update_scene" as const, sceneId: a.sceneId, field: a.field, value: a.value };
+  if (a.type === "create_scene") return { type: "create_scene" as const, title: a.title, voiceover: a.voiceover, durationSec: a.durationSec };
+  if (a.type === "run_workflow") return { type: "run_workflow" as const, presetId: a.presetId, prompt: a.prompt };
   return { type: "submit_approval" as const, sceneId: a.sceneId };
 }
 
@@ -42,11 +46,13 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
   });
   const run = trpc.assistant.runAction.useMutation({
     onSuccess: (r) => {
-      // 動作可能改了生成/分鏡/審批/額度——讓相關畫面重新抓
+      // 動作可能改了生成/分鏡/審批/額度——讓相關畫面重新抓（create_scene 由 scenes.invalidate 涵蓋）
       utils.generation.invalidate();
       utils.scenes.invalidate();
       utils.approvals.invalidate();
       utils.quota.invalidate();
+      // 工作流啟動後讓工作流卡立刻看到新 run（粗粒度整組 invalidate 即可，卡片自己會輪詢推進）
+      if (r.kind === "run_workflow") utils.workflows.invalidate();
       push({ role: "ai", text: `✓ ${r.message}` });
     },
     onError: (e) => push({ role: "ai", text: `動作沒成功：${e.message}` }),
@@ -66,7 +72,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
         <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 專案助手
       </h2>
       <p className="hint" style={{ marginTop: -4 }}>
-        問我這個專案的進度、生成了什麼、哪些分鏡還沒審…；我也能<b>提議動作</b>（生成／改分鏡／送審），你按確認才執行。每次提問約 1 點。
+        問我這個專案的進度、生成了什麼、哪些分鏡還沒審…；我也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流），你按確認才執行。每次提問約 1 點。
       </p>
 
       {turns.length > 0 && (
@@ -102,7 +108,13 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
                         triggerClassName="btn-tonal btn-sm"
                         disabled={isDone || isRunning}
                         title={isDone ? "此動作已執行" : "確認執行助手提議的動作"}
-                        message={act.type === "generate" ? `執行「${act.label}」？會依模型扣點。` : `執行「${act.label}」？`}
+                        message={
+                          act.type === "generate"
+                            ? `執行「${act.label}」？會依模型扣點。`
+                            : act.type === "run_workflow"
+                              ? `執行「${act.label}」？各步驟會分別扣點。`
+                              : `執行「${act.label}」？`
+                        }
                         confirmLabel="執行"
                         onConfirm={async () => {
                           setPendingKey(actKey);
@@ -116,7 +128,17 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
                           }
                         }}
                       >
-                        <Icon name={act.type === "generate" ? "Sparkles" : act.type === "submit_approval" ? "Check" : "Pencil"} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                        <Icon
+                          name={
+                            act.type === "generate" ? "Sparkles"
+                              : act.type === "submit_approval" ? "Check"
+                                : act.type === "create_scene" ? "Plus"
+                                  : act.type === "run_workflow" ? "Play"
+                                    : "Pencil"
+                          }
+                          size={13}
+                          style={{ verticalAlign: "-2px", marginRight: 4 }}
+                        />
                         {isDone ? "已執行" : act.label}
                       </ConfirmButton>
                     );

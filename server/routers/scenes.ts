@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { aliasedTable, and, asc, eq, isNull, sql } from "drizzle-orm";
+import { aliasedTable, and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -95,6 +95,37 @@ export const scenesRouter = router({
         })
         .returning();
       return scene;
+    }),
+
+  /**
+   * 版本回看（需求 #4）：把某筆「已完成」生成的成品設為分鏡現用——
+   * 同一鏡歷來生成過的版本都留在生成紀錄，這裡一鍵切回任何一版（音訊成品切旁白、圖/影切主畫面）。
+   */
+  setVisualFromGeneration: authedProcedure
+    .input(z.object({ sceneId: z.string().uuid(), generationId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
+      await getProjectChecked(ctx, scene.projectId);
+      const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.generationId));
+      if (!gen || gen.status !== "done") throw new TRPCError({ code: "BAD_REQUEST", message: "生成尚未完成，無法設為現用" });
+      // 生成與分鏡必須同專案（requireGroup 已由 getProjectChecked 保證組隔離；這裡再擋跨專案誤指）
+      if (gen.projectId !== scene.projectId) throw new TRPCError({ code: "FORBIDDEN", message: "這筆生成不屬於此專案" });
+      // 找該生成入庫的素材（比照 addFromGeneration 的 meta->>generationId；排除已回收，取最新一筆）
+      const [asset] = await db
+        .select()
+        .from(schema.assets)
+        .where(and(sql`${schema.assets.meta} ->> 'generationId' = ${gen.id}`, isNull(schema.assets.deletedAt)))
+        .orderBy(desc(schema.assets.createdAt))
+        .limit(1);
+      if (!asset) throw new TRPCError({ code: "BAD_REQUEST", message: "此生成沒有可用素材（文字輸出、或素材已在回收桶）" });
+      // 音訊成品＝旁白；圖/影＝主畫面（與 advanceGeneration 回填的角色判斷一致）
+      const patch = asset.kind === "audio" ? { narrationAssetId: asset.id } : { assetId: asset.id };
+      const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
+      return updated;
     }),
 
   /** ↑↓ 移動（與相鄰分鏡交換順序） */

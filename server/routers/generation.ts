@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { and, desc, eq, getTableColumns, ilike, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { router, authedProcedure, requireGroup } from "../trpc";
+import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
-import { isMockMode } from "../services/fal";
-import { refund } from "../services/points";
+import { falSubmit, isMockMode } from "../services/fal";
+import { refund, reserveQuota } from "../services/points";
 import { advanceGeneration, submitGenerationCore } from "../services/generationCore";
+import { getModel, endpointOf } from "../../shared/models";
 
 // 注入判斷的單一來源已抽到 services/generationCore（工作流執行器共用）；
 // 這裡 re-export 讓既有引用點（services/mcp.ts）不必改路徑
@@ -125,11 +126,14 @@ export const generationRouter = router({
         projectId: z.string().uuid(),
         /** keyset 游標：上一頁最後一列的 (createdAt ISO, id)；首頁不帶（觸發陳屍清掃） */
         cursor: z.object({ createdAt: z.string(), id: z.string().uuid() }).nullish(),
-        status: z.enum(["queued", "running", "done", "failed"]).optional(),
+        /** awaiting_approval/rejected＝成本審核門檻（需求 2.1）的兩個新狀態 */
+        status: z.enum(["queued", "running", "done", "failed", "awaiting_approval", "rejected"]).optional(),
         kind: z.enum(["image", "video", "audio", "text"]).optional(),
         search: z.string().optional(),
         /** 只看收藏（#20）：true 時只回 favorite=true 的列 */
         favoriteOnly: z.boolean().optional(),
+        /** 按分鏡聚合回看（需求 #4）：只看綁定某一鏡的生成歷史 */
+        sceneId: z.string().uuid().optional(),
         limit: z.number().int().min(1).max(100).optional(),
       }),
     )
@@ -149,6 +153,7 @@ export const generationRouter = router({
       if (input.status) conds.push(eq(schema.generations.status, input.status));
       if (input.kind) conds.push(eq(schema.generations.kind, input.kind));
       if (input.favoriteOnly) conds.push(eq(schema.generations.favorite, true));
+      if (input.sceneId) conds.push(eq(schema.generations.sceneId, input.sceneId));
       const q = input.search?.trim();
       if (q) {
         // 轉義 LIKE 萬用字元，讓使用者輸入的 % _ \ 當字面比對（預設 ESCAPE '\'）
@@ -220,6 +225,90 @@ export const generationRouter = router({
         .where(eq(schema.generations.id, input.generationId))
         .returning();
       return updated;
+    }),
+
+  /**
+   * 成本審核裁決（需求 2.1）：組長對 awaiting_approval 的生成核准或駁回。
+   * 核准＝CAS 認領 → 扣點（mock 模式跳過，與 submit 同一原則）→ 送 fal（失敗退點標 failed）。
+   * 駁回＝CAS 標 rejected（從未扣點，不需退點）。CAS 防兩位組長同時裁決造成雙扣/雙送。
+   */
+  decideCost: authedProcedure
+    .input(z.object({ id: z.string().uuid(), decision: z.enum(["approved", "rejected"]), reason: z.string().max(300).optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));
+      if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
+      requireLeader(ctx.auth, gen.groupId); // 只有組長以上能裁決成本核准
+      if (gen.status !== "awaiting_approval") throw new TRPCError({ code: "BAD_REQUEST", message: "這筆生成已處理過（或不在待核狀態）" });
+      const model = getModel(gen.modelId);
+
+      const postSystemMessage = async (body: string) => {
+        await db
+          .insert(schema.messages)
+          .values({ groupId: gen.groupId, projectId: gen.projectId, userId: ctx.auth.user.id, kind: "system", body })
+          .catch((err) => console.warn("[generation] 裁決系統訊息寫入失敗：", err instanceof Error ? err.message : err));
+      };
+
+      if (input.decision === "rejected") {
+        const reason = input.reason?.trim();
+        const [updated] = await db
+          .update(schema.generations)
+          .set({ status: "rejected", error: reason ? `組長駁回：${reason}` : "組長駁回", updatedAt: new Date() })
+          .where(and(eq(schema.generations.id, gen.id), eq(schema.generations.status, "awaiting_approval")))
+          .returning();
+        if (!updated) throw new TRPCError({ code: "BAD_REQUEST", message: "這筆生成已被其他人處理" });
+        await postSystemMessage(`⛔ 待核生成已駁回（${model?.label ?? gen.modelId}，${gen.pointsEst} 點）${reason ? `：${reason}` : ""}`);
+        return updated;
+      }
+
+      // 核准：先 CAS 認領（awaiting_approval → queued），輸家直接得知已被處理
+      const [claimed] = await db
+        .update(schema.generations)
+        .set({ status: "queued", updatedAt: new Date() })
+        .where(and(eq(schema.generations.id, gen.id), eq(schema.generations.status, "awaiting_approval")))
+        .returning();
+      if (!claimed) throw new TRPCError({ code: "BAD_REQUEST", message: "這筆生成已被其他人處理" });
+      if (!model) {
+        // 模型已從目錄移除（送審與核准間隔太久）：收斂到 failed，未扣點不退
+        await db.update(schema.generations).set({ status: "failed", error: "模型已不在目錄，無法送出", updatedAt: new Date() }).where(eq(schema.generations.id, gen.id));
+        throw new TRPCError({ code: "BAD_REQUEST", message: "此模型已不在目錄，無法核准送出" });
+      }
+
+      // 扣「提交者本人」的額度（不是核准的組長）——與 submit 同一守門；mock 模式同樣不扣（見 generationCore）
+      if (!isMockMode()) {
+        let quotaError: string | null;
+        try {
+          quotaError = await reserveQuota(gen.userId, gen.groupId, gen.pointsEst, `核准生成 ${model.label}`, gen.id);
+        } catch (err) {
+          // 扣點基礎設施故障：退回待核狀態讓組長稍後重試，不留下已認領孤兒
+          await db.update(schema.generations).set({ status: "awaiting_approval", updatedAt: new Date() }).where(eq(schema.generations.id, gen.id));
+          console.error("[generation] 核准扣點例外：", err instanceof Error ? err.message : err);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "系統忙碌，請稍後再核准一次（未扣點）" });
+        }
+        if (quotaError) {
+          await db.update(schema.generations).set({ status: "awaiting_approval", updatedAt: new Date() }).where(eq(schema.generations.id, gen.id));
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: `提交者額度不足：${quotaError}` });
+        }
+      }
+
+      try {
+        // params 存的是送審當下注入完成的 fal 輸入——核准即原樣送出
+        const { requestId } = await falSubmit(endpointOf(model), model.kind, gen.params as Record<string, unknown>);
+        const [updated] = await db
+          .update(schema.generations)
+          .set({ requestId, status: "running", updatedAt: new Date() })
+          .where(eq(schema.generations.id, gen.id))
+          .returning();
+        await postSystemMessage(`✅ 待核生成已核准並送出（${model.label}，${gen.pointsEst} 點）`);
+        return updated;
+      } catch (err) {
+        await refund(gen.userId, gen.groupId, gen.pointsEst, "核准送出失敗退回", gen.id);
+        console.error("[generation] 核准送出失敗:", err);
+        await db
+          .update(schema.generations)
+          .set({ status: "failed", error: String(err), pointsRefunded: gen.pointsEst, updatedAt: new Date() })
+          .where(eq(schema.generations.id, gen.id));
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "核准後送出失敗，點數已退回，請稍後重試" });
+      }
     }),
 
   /** 系統資訊(假生成模式徽章用) */

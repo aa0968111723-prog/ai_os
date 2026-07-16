@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
@@ -9,6 +9,60 @@ import {
   type OptionType,
   type GroupOption,
 } from "@shared/options";
+
+/**
+ * 成本審核門檻卡：組員單筆生成「預估點數」達門檻時，送出後需組長核准才會開始生成。
+ * 讀值走 quota.usage 的 approvalThreshold（本頁已由 App 守門為組長以上，有權限讀）；
+ * 儲存比照 AdminPage 點數卡的 defaultValue＋onBlur 模式：載入完成才掛輸入框
+ * （defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值），且只在真的有改時才送出。
+ */
+function ApprovalThresholdCard({ groupId }: { groupId: string }) {
+  const utils = trpc.useUtils();
+  const usage = trpc.quota.usage.useQuery({ groupId });
+  const [saved, setSaved] = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const setThreshold = trpc.quota.setApprovalThreshold.useMutation({
+    onSuccess: () => {
+      utils.quota.usage.invalidate({ groupId });
+      utils.quota.my.invalidate(); // 生成確認彈窗的門檻提醒讀 quota.my，改完即時同步
+      setSaved(true);
+      clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSaved(false), 3000);
+    },
+  });
+  const current = usage.data?.approvalThreshold ?? null;
+  return (
+    <section className="card" data-fb="成本審核門檻卡" style={{ marginBottom: 16 }}>
+      <h2>成本審核門檻</h2>
+      <p className="hint">組員單筆生成達此點數需組長核准才會送出；空白或 0＝不啟用。</p>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+        <label className="hint" htmlFor={`approval-threshold-${groupId}`} style={{ margin: 0 }}>門檻點數</label>
+        {usage.isLoading ? (
+          <span className="hint">載入中…</span>
+        ) : usage.error ? (
+          <span className="error" style={{ marginTop: 0 }}>載入失敗：{usage.error.message}</span>
+        ) : (
+          <input
+            id={`approval-threshold-${groupId}`}
+            type="number"
+            min={0}
+            style={{ width: 140 }}
+            placeholder="不啟用"
+            defaultValue={current ?? ""}
+            onBlur={(e) => {
+              // 沒有變更就不送：Tab 掃過欄位不觸發無意義寫入
+              const next = e.target.value === "" ? null : Number(e.target.value);
+              if (next !== current) setThreshold.mutate({ groupId, thresholdPoints: next });
+            }}
+          />
+        )}
+        {setThreshold.isPending && <span className="hint">儲存中…</span>}
+        {setThreshold.error && <span className="error" style={{ marginTop: 0 }}>{setThreshold.error.message}</span>}
+        {saved && <span className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</span>}
+      </div>
+    </section>
+  );
+}
 
 /**
  * 組選項編輯器（R23）：讓組長／管理員自訂「這一組」建專案與生成時可挑的選項
@@ -53,33 +107,43 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
     });
   };
 
+  // 三種狀態（載入/錯誤/正常）都把「成本審核門檻」卡固定在頂部：門檻卡有自己的查詢，
+  // 不因選項清單的狀態時有時無（避免載入完成後才彈出的跳動）
   if (list.isLoading) {
     return (
-      <section className="card" data-fb="組選項編輯器">
-        <div aria-hidden="true">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="gen-row">
-              <div className="skeleton" style={{ height: 14 }} />
-            </div>
-          ))}
-        </div>
-      </section>
+      <>
+        <ApprovalThresholdCard groupId={groupId} />
+        <section className="card" data-fb="組選項編輯器">
+          <div aria-hidden="true">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="gen-row">
+                <div className="skeleton" style={{ height: 14 }} />
+              </div>
+            ))}
+          </div>
+        </section>
+      </>
     );
   }
   if (list.error) {
     return (
-      <section className="card" data-fb="組選項編輯器">
-        <p className="error">
-          選項載入失敗：{list.error.message}
-          <button style={{ marginLeft: 8, padding: "3px 12px", fontSize: "var(--fs-12)" }} onClick={() => list.refetch()}>
-            重試
-          </button>
-        </p>
-      </section>
+      <>
+        <ApprovalThresholdCard groupId={groupId} />
+        <section className="card" data-fb="組選項編輯器">
+          <p className="error">
+            選項載入失敗：{list.error.message}
+            <button style={{ marginLeft: 8, padding: "3px 12px", fontSize: "var(--fs-12)" }} onClick={() => list.refetch()}>
+              重試
+            </button>
+          </p>
+        </section>
+      </>
     );
   }
 
   return (
+    <>
+    <ApprovalThresholdCard groupId={groupId} />
     <section className="card" data-fb="組選項編輯器">
       <h2>這一組的選項</h2>
       <p className="hint">
@@ -185,6 +249,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
 
       {actionError && <p className="error">動作沒完成：{actionError.message}</p>}
     </section>
+    </>
   );
 }
 

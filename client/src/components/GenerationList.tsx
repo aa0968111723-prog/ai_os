@@ -57,7 +57,12 @@ const STATUS_LABEL: Record<string, string> = {
   running: "生成中…",
   done: "完成 ✓",
   failed: "失敗（已退點）",
+  awaiting_approval: "⏳ 待組長核准",
+  rejected: "⛔ 已駁回",
 };
+
+/** 成本審核的兩個新狀態沒有專屬 .pill 配色——借語意最近的既有 class（待核准＝queued 金、已駁回＝failed 紅） */
+const STATUS_PILL_CLASS: Record<string, string> = { awaiting_approval: "queued", rejected: "failed" };
 
 export function GenerationList({ projectId }: { projectId: string }) {
   const utils = trpc.useUtils();
@@ -76,8 +81,12 @@ export function GenerationList({ projectId }: { projectId: string }) {
   // ── 篩選 / 搜尋 / 分頁 ──────────────────────────────────────────────
   // 設計：預設（無篩選、未展開）維持既有 list（首頁 30 筆＋輪詢＋通知＋外部失效即時刷新，全不動）。
   // 一旦使用者設篩選/搜尋或按「載入更多」，切到 listByProjectPaged 這支 keyset 分頁查詢當顯示來源。
-  const [statusFilter, setStatusFilter] = useState<"queued" | "running" | "done" | "failed" | null>(null);
+  const [statusFilter, setStatusFilter] = useState<
+    "queued" | "running" | "done" | "failed" | "awaiting_approval" | "rejected" | null
+  >(null);
   const [kindFilter, setKindFilter] = useState<"image" | "video" | "audio" | "text" | null>(null);
+  /** 分鏡篩選：選了某格分鏡就只看綁定該格的生成（帶進 listByProjectPaged 的 sceneId） */
+  const [sceneFilter, setSceneFilter] = useState<string | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   useEffect(() => {
@@ -86,13 +95,15 @@ export function GenerationList({ projectId }: { projectId: string }) {
   }, [searchInput]);
   const [expanded, setExpanded] = useState(false); // 按過「載入更多」
   const [favoriteOnly, setFavoriteOnly] = useState(false); // #20 只看收藏
-  const filtering = statusFilter !== null || kindFilter !== null || debouncedSearch.trim() !== "" || favoriteOnly;
+  const filtering =
+    statusFilter !== null || kindFilter !== null || sceneFilter !== null || debouncedSearch.trim() !== "" || favoriteOnly;
   const browsing = filtering || expanded; // 顯示來源改用分頁查詢的條件
   const paged = trpc.generation.listByProjectPaged.useInfiniteQuery(
     {
       projectId,
       status: statusFilter ?? undefined,
       kind: kindFilter ?? undefined,
+      sceneId: sceneFilter ?? undefined,
       search: debouncedSearch.trim() || undefined,
       favoriteOnly: favoriteOnly || undefined,
     },
@@ -201,6 +212,24 @@ export function GenerationList({ projectId }: { projectId: string }) {
       utils.generation.listByProjectPaged.invalidate({ projectId });
     },
   });
+  // 成本審核：與 App 同 key 共用 auth.me 快取——用該列 groupId 對出自己的組內角色，組長以上才畫核准/駁回鈕
+  const me = trpc.auth.me.useQuery();
+  const canDecide = (groupId: string) => {
+    const role = me.data?.groups.find((g) => g.groupId === groupId)?.role;
+    return role != null && role !== "member";
+  };
+  // 裁決成本審核（核准→開始生成並扣點；駁回→終局）：成功後刷新生成列表與點數
+  const decideCost = trpc.generation.decideCost.useMutation({
+    onSuccess: () => {
+      utils.generation.listByProject.invalidate({ projectId });
+      utils.generation.listByProjectPaged.invalidate({ projectId });
+      utils.quota.my.invalidate();
+    },
+  });
+  // 把某筆成品設為其綁定分鏡的現用畫面（音訊生成則設為旁白）：成功後刷新分鏡列表
+  const setVisual = trpc.scenes.setVisualFromGeneration.useMutation({
+    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+  });
   const submitRename = (id: string) => {
     rename.mutate({ generationId: id, name: renameDraft.trim() }, { onSuccess: () => setRenamingId(null) });
   };
@@ -242,11 +271,13 @@ export function GenerationList({ projectId }: { projectId: string }) {
         <p className="hint" style={{ color: "var(--success-ink)" }}>已加入分鏡 ✓（在下方分鏡・交付區）</p>
       )}
       {retry.error && <p className="error">重試失敗：{retry.error.message}</p>}
+      {decideCost.error && <p className="error">核准／駁回失敗：{decideCost.error.message}</p>}
+      {setVisual.error && <p className="error">設為分鏡現用失敗：{setVisual.error.message}</p>}
       <div
         className="gen-filters"
         style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 10 }}
       >
-        {([["queued", "排隊中"], ["running", "生成中"], ["done", "完成"], ["failed", "失敗"]] as const).map(([val, label]) => (
+        {([["queued", "排隊中"], ["running", "生成中"], ["done", "完成"], ["failed", "失敗"], ["awaiting_approval", "待核准"], ["rejected", "已駁回"]] as const).map(([val, label]) => (
           <button
             key={val}
             type="button"
@@ -279,6 +310,19 @@ export function GenerationList({ projectId }: { projectId: string }) {
           <Icon name="Star" size={12} style={{ verticalAlign: "-2px", marginRight: 4, ...(favoriteOnly ? { fill: "currentColor" } : {}) }} />
           只看收藏
         </button>
+        <span style={{ width: 1, height: 16, background: "var(--border)" }} aria-hidden="true" />
+        {/* 分鏡篩選：只看綁定某格分鏡的生成（就地生成/旁白配音都會綁 sceneId） */}
+        <select
+          aria-label="篩選分鏡"
+          value={sceneFilter ?? ""}
+          onChange={(e) => setSceneFilter(e.target.value || null)}
+          style={{ width: "auto", maxWidth: 200, padding: "4px 10px", fontSize: 12 }}
+        >
+          <option value="">全部分鏡</option>
+          {(scenes.data ?? []).map((s, i) => (
+            <option key={s.id} value={s.id}>第 {i + 1} 鏡・{s.title}</option>
+          ))}
+        </select>
         <input
           type="search"
           value={searchInput}
@@ -293,6 +337,7 @@ export function GenerationList({ projectId }: { projectId: string }) {
             onClick={() => {
               setStatusFilter(null);
               setKindFilter(null);
+              setSceneFilter(null);
               setSearchInput("");
               setDebouncedSearch("");
               setFavoriteOnly(false);
@@ -409,10 +454,11 @@ export function GenerationList({ projectId }: { projectId: string }) {
                 </div>
               </div>
             )}
-            {g.error && <div className="error">生成失敗：{g.error}</div>}
+            {/* 已駁回列的 error 欄存的是駁回理由，前綴要講對，別誤導成「生成失敗」 */}
+            {g.error && <div className="error">{g.status === "rejected" ? "駁回理由：" : "生成失敗："}{g.error}</div>}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-            <span className={`pill ${g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
+            <span className={`pill ${STATUS_PILL_CLASS[g.status] ?? g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
             {g.status === "done" && g.kind !== "text" && (
               inScenes(g.id) ? (
                 <button style={{ padding: "4px 12px", fontSize: 12 }} disabled>已加入</button>
@@ -422,6 +468,42 @@ export function GenerationList({ projectId }: { projectId: string }) {
                   ＋加入分鏡
                 </button>
               )
+            )}
+            {/* 綁定分鏡的成品可一鍵回填為該格現用畫面（音訊＝旁白）——重生多次後挑最好的一版用 */}
+            {g.status === "done" && g.sceneId && (
+              <ConfirmButton
+                triggerStyle={{ padding: "4px 12px", fontSize: 12 }}
+                disabled={setVisual.isPending}
+                message={g.kind === "audio" ? "把這筆音訊設為該分鏡的旁白？" : "把這筆成品設為該分鏡的現用畫面？"}
+                confirmLabel="設定"
+                onConfirm={() => setVisual.mutate({ sceneId: g.sceneId!, generationId: g.id })}
+              >
+                設為此鏡現用
+              </ConfirmButton>
+            )}
+            {/* 成本審核：組長以上就地裁決；駁回可附理由（會存進該列 error 欄顯示給組員） */}
+            {g.status === "awaiting_approval" && canDecide(g.groupId) && (
+              <>
+                <ConfirmButton
+                  triggerStyle={{ padding: "4px 12px", fontSize: 12, color: "var(--success-ink)", borderColor: "var(--success)" }}
+                  disabled={decideCost.isPending}
+                  message={`核准後這筆會開始生成（預估 ${g.pointsEst} 點）。`}
+                  confirmLabel="核准"
+                  onConfirm={() => decideCost.mutate({ id: g.id, decision: "approved" })}
+                >
+                  核准
+                </ConfirmButton>
+                <ConfirmButton
+                  triggerStyle={{ padding: "4px 12px", fontSize: 12, color: "var(--danger-ink)", borderColor: "var(--danger)" }}
+                  disabled={decideCost.isPending}
+                  title="駁回這筆生成"
+                  reason={{ label: "駁回理由（會顯示給組員，建議填寫）", placeholder: "說明為什麼不核准…" }}
+                  confirmLabel="駁回"
+                  onConfirm={(reason) => decideCost.mutate({ id: g.id, decision: "rejected", ...(reason ? { reason } : {}) })}
+                >
+                  駁回
+                </ConfirmButton>
+              </>
             )}
             {g.status === "failed" && (
               <ConfirmButton

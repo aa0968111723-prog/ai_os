@@ -1,6 +1,7 @@
 /**
  * 交付素材包（盲點掃描定案：不做雲端合成，交付媒體檔給剪映/Premiere 組裝）。
- * 業界標準編號資料夾：01_視頻素材／03_圖像／05_文件（有內容才建）；不含時間軸檔。
+ * 業界標準編號資料夾：01_視頻素材／03_圖像／05_文件（有內容才建）；
+ * 交付/ 另附三種剪輯軟體通用時間軸格式（需求 #8）：字幕.srt／時間軸.fcpxml／剪輯表.edl。
  */
 import { ZipArchive } from "archiver";
 import { createReadStream } from "node:fs";
@@ -144,12 +145,13 @@ function splitCue(voiceover: string, startSec: number, endSec: number): Array<{ 
 }
 
 /**
- * 從分鏡的配音詞＋秒數組出 SRT 字幕：每幕依旁白長度切成多個連號可讀塊，
+ * 從分鏡的配音詞＋秒數組出 SRT 字幕（04_字幕 用的「可讀性切塊」版）：每幕依旁白長度切成多個連號可讀塊，
  * 各幕時間依序累計（每幕佔其設定秒數，最少 3 秒）。
  * 沒有配音詞的幕仍推進時間軸（保留其秒數的空檔），只有有詞的幕才產生字幕塊。
  * 回空字串代表整片都沒有配音詞（不放空字幕檔）。
+ * ※ 與下方匯出用的 buildSrt（每鏡一塊、空詞用標題）是兩套用途：這套給觀眾看，那套給剪輯對位。
  */
-function buildSrt(scenes: Array<{ durationSec: number; voiceover: string | null }>): string {
+function buildVoiceoverSrt(scenes: Array<{ durationSec: number; voiceover: string | null }>): string {
   const blocks: string[] = [];
   let t = 0;
   let idx = 0;
@@ -164,6 +166,122 @@ function buildSrt(scenes: Array<{ durationSec: number; voiceover: string | null 
     }
   }
   return blocks.join("\n\n");
+}
+
+// ── 剪輯軟體通用時間軸格式（需求 #8）：純字串模板產生，零新依賴 ──────────
+// 三個產生器共用約定：呼叫端傳入「未軟刪、依 orderIndex 排序」的分鏡；
+// 時間軸由各鏡 durationSec 依序累加（非正數以 3 秒計，與鏡頭表時間碼同一套規則）。
+
+/** 時間軸產生器吃的最小分鏡形狀（scenes DB 列結構相容） */
+export type TimelineScene = { title: string; durationSec: number; voiceover: string | null };
+
+/** 這一鏡在時間軸上佔的秒數（與鏡頭表/字幕同規則：最少 3 秒） */
+function sceneDur(sc: { durationSec: number }): number {
+  return sc.durationSec > 0 ? sc.durationSec : 3;
+}
+
+/**
+ * SRT 字幕（剪映/CapCut/Premiere 皆可直接匯入）：每鏡一塊字幕、依 durationSec 累加時間碼，
+ * 文字用配音詞、沒填則用分鏡標題——確保每一鏡都有可對位的字幕塊（剪輯對位用途）。
+ */
+export function buildSrt(scenes: TimelineScene[]): string {
+  const blocks: string[] = [];
+  let t = 0;
+  for (const [i, sc] of scenes.entries()) {
+    const start = t;
+    const end = t + sceneDur(sc);
+    t = end;
+    const text = (sc.voiceover ?? "").trim() || sc.title;
+    blocks.push(`${i + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${text}`);
+  }
+  return blocks.length ? blocks.join("\n\n") + "\n" : "";
+}
+
+/** XML 特殊字元跳脫（&<>"'）——標題/配音詞可能含任何字元，進 XML 前一律跳脫 */
+function escXml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/**
+ * FCPXML 1.9 時間軸（Final Cut Pro／剪映專業版可讀）。
+ * 最小可用骨架：resources 一個 30fps format＋project/sequence/spine，spine 內每鏡一個 <gap> 佔位
+ * （duration 用整數秒「Ns」，30fps 下整秒必對齊影格），note 帶分鏡標題與配音詞。
+ * 重點是時間軸結構與各鏡長度可直接匯入；媒體連結、轉場等細節請匯入後在剪輯軟體內補。
+ */
+export function buildFcpxml(scenes: TimelineScene[], projectTitle: string): string {
+  const totalSec = scenes.reduce((sum, sc) => sum + sceneDur(sc), 0);
+  const gaps: string[] = [];
+  let offset = 0;
+  for (const [i, sc] of scenes.entries()) {
+    const dur = sceneDur(sc);
+    const note = (sc.voiceover ?? "").trim() ? `${sc.title}｜${(sc.voiceover ?? "").trim()}` : sc.title;
+    gaps.push(
+      `            <gap name="${escXml(`${i + 1}_${sc.title}`)}" offset="${offset}s" start="0s" duration="${dur}s">\n` +
+        `              <note>${escXml(note)}</note>\n` +
+        `            </gap>`,
+    );
+    offset += dur;
+  }
+  return [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<!DOCTYPE fcpxml>`,
+    `<!-- 最小可用骨架：每鏡一個 gap 佔位（30fps），媒體與轉場等細節請在剪輯軟體內補 -->`,
+    `<fcpxml version="1.9">`,
+    `  <resources>`,
+    `    <format id="r1" name="FFVideoFormat1080p30" frameDuration="100/3000s" width="1920" height="1080"/>`,
+    `  </resources>`,
+    `  <library>`,
+    `    <event name="${escXml(projectTitle)}">`,
+    `      <project name="${escXml(projectTitle)}">`,
+    `        <sequence format="r1" duration="${totalSec}s" tcStart="0s" tcFormat="NDF">`,
+    `          <spine>`,
+    ...(gaps.length ? [gaps.join("\n")] : []),
+    `          </spine>`,
+    `        </sequence>`,
+    `      </project>`,
+    `    </event>`,
+    `  </library>`,
+    `</fcpxml>`,
+    ``,
+  ].join("\n");
+}
+
+/** 秒數 → CMX 3600 timecode HH:MM:SS:FF（30fps 非丟格） */
+function edlTime(totalSec: number): string {
+  const fps = 30;
+  const totalFrames = Math.round(totalSec * fps);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const f = totalFrames % fps;
+  const s = Math.floor(totalFrames / fps) % 60;
+  const m = Math.floor(totalFrames / (fps * 60)) % 60;
+  const h = Math.floor(totalFrames / (fps * 3600));
+  return `${p(h)}:${p(m)}:${p(s)}:${p(f)}`;
+}
+
+/**
+ * CMX 3600 EDL 剪輯表（DaVinci Resolve／Premiere 可讀）：TITLE 行＋每鏡一行事件（V 軌、Cut），
+ * 以 30fps 換算 timecode；來源一律 AX 佔位 reel（進出點從 0 起算、長度＝該鏡秒數），
+ * COMMENT 行（* FROM CLIP NAME）放分鏡標題，匯入後逐鏡替換為實際素材即可。
+ */
+export function buildEdl(scenes: TimelineScene[], projectTitle: string): string {
+  const lines: string[] = [`TITLE: ${projectTitle.replace(/\s+/g, " ").trim() || "未命名"}`, "FCM: NON-DROP FRAME", ""];
+  let t = 0;
+  for (const [i, sc] of scenes.entries()) {
+    const dur = sceneDur(sc);
+    const num = String(i + 1).padStart(3, "0");
+    lines.push(
+      `${num}  AX       V     C        ${edlTime(0)} ${edlTime(dur)} ${edlTime(t)} ${edlTime(t + dur)}`,
+      `* FROM CLIP NAME: ${sc.title.replace(/\s+/g, " ").trim()}`,
+      "",
+    );
+    t += dur;
+  }
+  return lines.join("\n");
 }
 
 // 遠端抓取守門：滴流/掛住的外部網址不能無限期卡住匯出；超大檔先用 Content-Length 擋下，不進串流
@@ -205,7 +323,12 @@ function appendAndWait(archive: ZipArchive, source: Readable | Buffer, name: str
   });
 }
 
-export async function exportProjectZip(projectId: string, res: Response): Promise<void> {
+/**
+ * 打包交付 zip。assetIds（可選）＝素材庫多選打包：提供時媒體檔只打包這些 id 的素材
+ * （場景素材/旁白/鎖定素材皆套用同一過濾），交付文件（鏡頭表/字幕/交付格式/README）照常產出，
+ * 鏡頭表「檔名」欄如實反映未入包者為「（無素材）」。不傳＝維持既有全量打包行為。
+ */
+export async function exportProjectZip(projectId: string, res: Response, assetIds?: string[]): Promise<void> {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new Error("找不到專案");
 
@@ -222,6 +345,11 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
     .from(schema.assets)
     .where(and(eq(schema.assets.projectId, projectId), isNull(schema.assets.deletedAt)));
   const generations = await db.select().from(schema.generations).where(eq(schema.generations.projectId, projectId));
+
+  // 多選打包過濾：有給 assetIds 才啟用（空陣列視同不過濾，維持既有呼叫相容）。
+  // 只影響「媒體檔入包與否」；鏡頭表等文件仍用全量 assets 補中繼資料（類型/提示詞/模型）。
+  const packSet = assetIds && assetIds.length > 0 ? new Set(assetIds) : null;
+  const shouldPack = (id: string) => !packSet || packSet.has(id);
 
   const worldview = worldviewSchema.parse(project.worldview ?? {});
   const zipName = `${safeName(project.title)}_交付包.zip`;
@@ -284,7 +412,7 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
   for (const [i, scene] of scenes.entries()) {
     if (clientAbort.signal.aborted) return; // 斷線後別再抓剩餘素材白做工
     const asset = assets.find((a) => a.id === scene.assetId);
-    if (!asset) continue;
+    if (!asset || !shouldPack(asset.id)) continue; // 多選打包：未勾選的素材不入包（鏡頭表標「（無素材）」）
     // 來源一律以串流進 archive（不整檔進 RAM）；「取得來源」階段的失敗屬單檔容錯：跳過＋註記
     let source: Readable;
     try {
@@ -353,7 +481,7 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
     if (clientAbort.signal.aborted) return;
     if (!scene.narrationAssetId) continue;
     const narr = assets.find((a) => a.id === scene.narrationAssetId);
-    if (!narr) continue;
+    if (!narr || !shouldPack(narr.id)) continue; // 多選打包：未勾選的旁白音檔不入包
     let source: Readable;
     try {
       if (narr.storagePath) {
@@ -414,7 +542,8 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
   }
 
   // 00_鎖定原素材：固定素材模式的原音/開示/配樂——原封保留，剪輯時圍繞它組裝、不改動
-  const lockedAssets = assets.filter((a) => a.locked);
+  //（多選打包時同樣只入包被勾選者）
+  const lockedAssets = assets.filter((a) => a.locked && shouldPack(a.id));
   let lockedIdx = 0;
   // 序號動態補零：與場景素材同規則（至少 2 位），破百件也維持字典序。
   const lockedNumWidth = Math.max(2, String(lockedAssets.length).length);
@@ -473,14 +602,31 @@ export async function exportProjectZip(projectId: string, res: Response): Promis
   archive.append(lines.join("\n"), { name: "05_文件/腳本與鏡頭表.md" });
 
   // 04_字幕：從分鏡配音詞產生 SRT（有配音詞才放）——剪映/Premiere/YouTube 皆可直接匯入
-  const srt = buildSrt(scenes);
+  const srt = buildVoiceoverSrt(scenes);
   const hasSubtitle = srt.length > 0;
   if (hasSubtitle) archive.append(srt, { name: "04_字幕/字幕.srt" });
+
+  // 交付/：三種剪輯軟體通用時間軸格式（需求 #8）——一律附加（多選打包也照常）：
+  // 字幕.srt（剪映/CapCut/Premiere）、時間軸.fcpxml（Final Cut Pro/剪映專業版）、剪輯表.edl（DaVinci Resolve）。
+  // 與 04_字幕 的可讀性切塊版不同，這裡每鏡一塊、空詞用標題，供剪輯逐鏡對位；沒有分鏡時改附說明檔。
+  if (scenes.length > 0) {
+    archive.append(buildSrt(scenes), { name: "交付/字幕.srt" });
+    archive.append(buildFcpxml(scenes, project.title), { name: "交付/時間軸.fcpxml" });
+    archive.append(buildEdl(scenes, project.title), { name: "交付/剪輯表.edl" });
+  } else {
+    archive.append(
+      "本專案還沒有分鏡，無法產生時間軸/字幕檔。\n" +
+        "請先在系統內建立分鏡（AI 拆分鏡或手動新增）後再打包，即會附上：\n" +
+        "交付/字幕.srt（剪映/CapCut/Premiere）、交付/時間軸.fcpxml（Final Cut Pro/剪映專業版）、交付/剪輯表.edl（DaVinci Resolve）。\n",
+      { name: "交付/說明.txt" },
+    );
+  }
 
   const hasNarration = narrationNames.some((n) => n !== null);
   archive.append(
     `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／${hasNarration ? "02_旁白音檔（逐鏡旁白配音）／" : ""}03_圖像／${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）。\n` +
       "媒體檔請直接匯入剪映或 Premiere 組裝。\n" +
+      "交付/ 另附三種剪輯軟體通用格式：字幕.srt（剪映/CapCut/Premiere）、時間軸.fcpxml（Final Cut Pro/剪映專業版）、剪輯表.edl（DaVinci Resolve）——每鏡一塊、時間碼依分鏡規劃秒數累計，供剪輯逐鏡對位。\n" +
       (hasNarration
         ? "02_旁白音檔＝逐鏡旁白配音，檔名鏡號對應字幕與畫面（同一套鏡號補零），在剪輯軟體裡把同鏡號的旁白音檔對齊該鏡畫面即可；05_文件的鏡頭表「旁白音檔」欄列出每鏡對應的檔名。\n"
         : "") +

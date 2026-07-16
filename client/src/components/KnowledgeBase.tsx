@@ -21,6 +21,24 @@ type KnowledgeListItem = {
   excerpt: string;
 };
 
+/* ── 需求 6.3：批次匯入 txt/md 的限制 ── */
+/** 一次最多幾檔（避免一口氣灌爆後端與列表） */
+const BATCH_MAX_FILES = 30;
+/** 單檔大小上限：知識庫收的是文字稿，300KB 已是十幾萬字，超過多半是選錯檔 */
+const BATCH_MAX_FILE_BYTES = 300 * 1024;
+/** 單筆內容截斷長度：後端單筆上限 40,000 字，截前 39,000 留緩衝 */
+const BATCH_MAX_CHARS = 39_000;
+
+/** FileReader 包成 Promise，批次匯入逐檔讀文字用 */
+function readFileText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(reader.error ?? new Error("讀檔失敗"));
+    reader.readAsText(file);
+  });
+}
+
 /**
  * 專案知識庫（願景核心「真的懂我們素材」）：
  * 貼上開示稿／見證稿／腳本 → AI 導演發想時自動讀取，夥伴不用每次重講背景。
@@ -44,6 +62,79 @@ export function KnowledgeBase({ projectId }: { projectId: string }) {
 
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<(typeof KINDS)[number]["id"]>("transcript");
+
+  // ── 需求 6.3：批次匯入 txt/md ──
+  // 獨立 mutation 實例：批次成功不清單筆草稿、不關表單（那些是上面單筆 add 的 onSuccess 行為）。
+  const batchAdd = trpc.knowledge.add.useMutation();
+  const dirInputRef = useRef<HTMLInputElement | null>(null);
+  const importingRef = useRef(false); // 防重入：state 版本在 async 閉包裡會過期
+  const [importing, setImporting] = useState<{ done: number; total: number } | null>(null);
+  const [importSummary, setImportSummary] = useState<string | null>(null);
+
+  /**
+   * 批次匯入主流程：過濾副檔名 → 上限 30 檔 → 逐檔 FileReader 讀文字 →
+   * 序列化呼叫 knowledge.add（for-of await，不並發打爆後端），
+   * 完成後彙總「成功 N・跳過 M（原因）」並重抓列表。
+   */
+  const importFiles = async (fileList: FileList | null) => {
+    if (importingRef.current || !fileList || fileList.length === 0) return;
+    importingRef.current = true;
+    try {
+      const all = Array.from(fileList); // 先同步取走（呼叫端隨後會清空 input.value）
+      // 資料夾模式會夾雜圖片等其他檔：只收 .txt / .md
+      const textFiles = all.filter((f) => /\.(txt|md)$/i.test(f.name));
+      const batch = textFiles.slice(0, BATCH_MAX_FILES);
+      const reasons: string[] = [];
+      let skippedCount = all.length - batch.length;
+      if (all.length > textFiles.length) reasons.push(`非 txt/md ×${all.length - textFiles.length}`);
+      if (textFiles.length > BATCH_MAX_FILES) reasons.push(`超過一次 ${BATCH_MAX_FILES} 檔上限，後面 ${textFiles.length - BATCH_MAX_FILES} 檔請分批`);
+      if (batch.length === 0) {
+        setImportSummary(`成功 0・跳過 ${skippedCount}（${reasons.join("、") || "沒有可匯入的檔案"}）`);
+        return;
+      }
+      setImportSummary(null);
+      let ok = 0;
+      let truncated = 0;
+      let done = 0;
+      for (const f of batch) {
+        done++;
+        setImporting({ done, total: batch.length });
+        if (f.size > BATCH_MAX_FILE_BYTES) {
+          skippedCount++;
+          reasons.push(`${f.name} 超過 300KB`);
+          continue;
+        }
+        try {
+          let text = await readFileText(f);
+          if (text.length > BATCH_MAX_CHARS) {
+            // 後端單筆上限 40,000 字：超長截前 39,000 字（留緩衝），仍算成功但記入摘要
+            text = text.slice(0, BATCH_MAX_CHARS);
+            truncated++;
+          }
+          if (!text.trim()) {
+            skippedCount++;
+            reasons.push(`${f.name} 是空檔`);
+            continue;
+          }
+          const fileTitle = f.name.replace(/\.(txt|md)$/i, "").trim().slice(0, 60) || "未命名檔";
+          await batchAdd.mutateAsync({ projectId, kind: "note", title: fileTitle, content: text });
+          ok++;
+        } catch (err) {
+          skippedCount++;
+          reasons.push(`${f.name} ${err instanceof Error ? err.message : "匯入失敗"}`);
+        }
+      }
+      setImportSummary(
+        `成功 ${ok}・跳過 ${skippedCount}` +
+          (reasons.length ? `（${reasons.join("、")}）` : "") +
+          (truncated ? `；${truncated} 檔逾長，已截斷收錄前 ${BATCH_MAX_CHARS.toLocaleString()} 字` : ""),
+      );
+      if (ok > 0) utils.knowledge.list.invalidate({ projectId });
+    } finally {
+      importingRef.current = false;
+      setImporting(null);
+    }
+  };
 
   const totalChars = (list.data ?? []).reduce((s, r) => s + r.chars, 0);
 
@@ -106,6 +197,56 @@ export function KnowledgeBase({ projectId }: { projectId: string }) {
             <button onClick={() => setOpen(false)}>取消</button>
           </div>
           {add.error && <p className="error">{add.error.message}</p>}
+
+          {/* ── 需求 6.3：批次匯入 txt/md（多檔一次進知識庫；kind 一律「其他筆記」，標題取檔名） ── */}
+          <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 4 }}>
+            <label htmlFor={`kb-batch-${projectId}`}>批次匯入 txt/md（可多選，一次最多 {BATCH_MAX_FILES} 檔；標題自動取檔名）</label>
+            <input
+              id={`kb-batch-${projectId}`}
+              type="file"
+              multiple
+              accept=".txt,.md,text/plain,text/markdown"
+              disabled={!!importing}
+              onChange={(e) => {
+                void importFiles(e.currentTarget.files);
+                e.currentTarget.value = ""; // 清空讓同一批檔案可以重選（importFiles 已同步取走清單）
+              }}
+            />
+            <div style={{ marginTop: 8, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                disabled={!!importing}
+                style={{ padding: "4px 14px", fontSize: "var(--fs-12)" }}
+                onClick={() => dirInputRef.current?.click()}
+              >
+                選資料夾匯入
+              </button>
+              <span className="hint">資料夾模式部分瀏覽器（如 Safari iOS）可能不支援；不行就用上面的多檔選取。</span>
+            </div>
+            {/*
+             * 「選資料夾」變體：webkitdirectory 是非標準屬性（React 型別沒收錄），用 callback ref 補上。
+             * Safari iOS 可能不支援資料夾選取，故以上方多檔模式為主、此鈕僅為變體。
+             */}
+            <input
+              ref={(el) => {
+                dirInputRef.current = el;
+                el?.setAttribute("webkitdirectory", "");
+              }}
+              type="file"
+              multiple
+              style={{ display: "none" }}
+              onChange={(e) => {
+                void importFiles(e.currentTarget.files);
+                e.currentTarget.value = "";
+              }}
+            />
+            {importing && (
+              <p className="hint" style={{ margin: "6px 0 0", display: "flex", alignItems: "center", gap: 6 }}>
+                <Icon name="Loader" size={12} className="spin" />匯入中 {importing.done}/{importing.total}…（逐檔上傳，先別關頁面）
+              </p>
+            )}
+            {!importing && importSummary && <p className="hint" style={{ margin: "6px 0 0" }}>{importSummary}</p>}
+          </div>
         </div>
       ) : (
         <button style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setOpen(true)}>

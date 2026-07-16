@@ -16,6 +16,13 @@ export const quotaRouter = router({
     // 只在使用者確實屬於該組時才算組額度（舊版任意 groupId 都算，洩漏他組額度設定）
     const isMember = input?.groupId ? ctx.auth.groups.some((g) => g.groupId === input.groupId) : false;
     const quota = isMember ? await effectiveWeeklyQuota(ctx.auth.user.id, input!.groupId!) : null;
+    // 成本審核門檻（需求 2.1）：前端生成確認彈窗要提示「這筆需組長核准」——同樣只給本組成員看
+    let approvalThreshold: number | null = null;
+    if (isMember) {
+      const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, input!.groupId!));
+      const th = group?.approvalThresholdPoints;
+      approvalThreshold = th != null && th > 0 ? th : null;
+    }
     return {
       totalBudget: settings.totalBudgetPoints, // null＝不限
       totalUsed: total,
@@ -24,6 +31,7 @@ export const quotaRouter = router({
       weeklyUsed: weekly,
       dailyQuota: effectiveDailyQuota(settings), // null＝不限
       dailyUsed: today,
+      approvalThreshold, // null＝不啟用成本審核門檻
     };
   }),
 
@@ -51,6 +59,17 @@ export const quotaRouter = router({
       return { ok: true };
     }),
 
+  /** 成本審核門檻（需求 2.1）：組員單筆生成估點 ≥ 門檻需組長核准；0/null＝不啟用。組長以上可調 */
+  setApprovalThreshold: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), thresholdPoints: z.number().int().min(0).nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      requireLeader(ctx.auth, input.groupId);
+      // 0 一律正規化成 null（不啟用）——守門處只需判 null，不用兩套「關閉」語意
+      const value = input.thresholdPoints && input.thresholdPoints > 0 ? input.thresholdPoints : null;
+      await db.update(schema.groups).set({ approvalThresholdPoints: value }).where(eq(schema.groups.id, input.groupId));
+      return { ok: true, thresholdPoints: value };
+    }),
+
   /** 個別成員覆寫（組長對自己組員微調） */
   setMemberOverride: authedProcedure
     .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), weeklyPointsOverride: z.number().int().min(0).nullable() }))
@@ -71,6 +90,8 @@ export const quotaRouter = router({
     const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, input.groupId));
     return {
       groupQuota: group?.weeklyPointsPerUser ?? null,
+      /** 成本審核門檻（需求 2.1）：組長設定 UI 讀這裡 */
+      approvalThreshold: group?.approvalThresholdPoints ?? null,
       rows: usage.map((u) => ({ ...u, name: users.find((x) => x.id === u.userId)?.name ?? "?" })),
     };
   }),

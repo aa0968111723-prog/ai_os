@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
@@ -278,6 +278,92 @@ function SelfTestCard() {
   );
 }
 
+/** 審計列的 input 摘要：JSON.stringify 截 120 字灰色小字就好，不需要完整展開 */
+function auditInputSummary(input: unknown): string {
+  try {
+    const s = JSON.stringify(input);
+    if (!s || s === "null" || s === "{}") return "";
+    return s.length > 120 ? `${s.slice(0, 120)}…` : s;
+  } catch {
+    return ""; // 理論上不會發生（API 回來的都是可序列化資料），保險別讓一列壞資料炸整張卡
+  }
+}
+
+/**
+ * 操作紀錄（審計）卡：誰在什麼時候做了哪些敏感操作、成功與否。
+ * 管理員與開發者都看得到——後端已按呼叫者權限過濾範圍，這裡不需要 isSuperAdmin gate。
+ * keyset 分頁寫法比照 GenerationList 的 listByProjectPaged（useInfiniteQuery＋nextCursor 累積）。
+ */
+function AuditLogCard() {
+  // action 關鍵字前端 debounce 後才帶進查詢，避免每敲一鍵就打一次 API
+  const [actionInput, setActionInput] = useState("");
+  const [debouncedAction, setDebouncedAction] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedAction(actionInput), 300);
+    return () => clearTimeout(t);
+  }, [actionInput]);
+  const audit = trpc.audit.list.useInfiniteQuery(
+    { action: debouncedAction.trim() || undefined, limit: 30 },
+    { getNextPageParam: (last) => last.nextCursor ?? undefined },
+  );
+  const rows = audit.data?.pages.flatMap((p) => p.items) ?? [];
+  return (
+    <div className="card" data-fb="操作紀錄卡">
+      <h2>操作紀錄（審計）</h2>
+      <p className="hint">最近的管理／花點操作流水；能看到的範圍已按你的權限過濾。</p>
+      <input
+        type="search"
+        value={actionInput}
+        onChange={(e) => setActionInput(e.target.value)}
+        placeholder="用操作類型關鍵字篩選（如 invite）…"
+        aria-label="篩選操作類型"
+      />
+      {audit.isLoading ? (
+        <div role="status" aria-label="操作紀錄載入中">
+          <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
+          <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
+        </div>
+      ) : audit.error ? (
+        <p className="error">操作紀錄載入失敗：{audit.error.message}</p>
+      ) : rows.length === 0 ? (
+        <p className="hint" style={{ marginTop: 10 }}>
+          {debouncedAction.trim() ? "沒有符合這個關鍵字的紀錄。" : "還沒有操作紀錄。"}
+        </p>
+      ) : (
+        <>
+          {rows.map((r, i) => (
+            <div key={r.id} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", padding: "6px 0", fontSize: 13, marginTop: i === 0 ? 8 : 0 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <span aria-label={r.ok ? "成功" : "失敗"}>{r.ok ? "✅" : "❌"}</span>
+                <b>{r.actorName}</b>
+                <span className="mono" style={{ fontSize: 11 }}>{r.action}</span>
+                <span className="hint" style={{ fontSize: 11 }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</span>
+              </div>
+              {auditInputSummary(r.input) && (
+                <div className="hint mono" style={{ fontSize: 11, marginTop: 2, overflowWrap: "anywhere" }}>
+                  {auditInputSummary(r.input)}
+                </div>
+              )}
+              {r.error && (
+                <div style={{ color: "var(--danger-ink)", fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>
+                  {r.error.length > 120 ? `${r.error.slice(0, 120)}…` : r.error}
+                </div>
+              )}
+            </div>
+          ))}
+          {audit.hasNextPage && (
+            <div style={{ textAlign: "center", marginTop: 10 }}>
+              <button type="button" disabled={audit.isFetchingNextPage} onClick={() => audit.fetchNextPage()} style={{ padding: "6px 16px", fontSize: 13 }}>
+                {audit.isFetchingNextPage ? "載入中…" : "載入更多"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /**
  * 單筆元件回饋列。獨立成元件：每筆有自己的狀態下拉 mutation（isPending/error），
  * 共用一個會讓某筆的更新中/錯誤顯示到別筆旁邊。
@@ -511,6 +597,7 @@ export function AdminPage() {
         <aside className="stack">
         {/* 系統自檢只有超管的 /api/selftest 能用——非超管按了只會 403，對他們是死功能，故只對超管顯示 */}
         {isSuperAdmin && <SelfTestCard />}
+        <AuditLogCard />
         {isSuperAdmin && <CreateTeamCard />}
         <div className="card" data-fb="點數與額度卡">
           <h2>點數與額度（彈性・隨時可調）</h2>

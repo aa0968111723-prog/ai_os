@@ -17,7 +17,7 @@ import { ensureSchema } from "./db/ensure";
 import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
-import { exportProjectZip } from "./services/exporter";
+import { buildEdl, buildFcpxml, buildSrt, exportProjectZip } from "./services/exporter";
 import { handleMcp } from "./services/mcp";
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
@@ -28,7 +28,7 @@ import { attachRealtime } from "./services/realtime";
 import { startWorkflowRunner } from "./services/workflowRunner";
 import { startGenerationRunner } from "./services/generationRunner";
 import { db, schema } from "./db";
-import { eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -132,7 +132,11 @@ app.get("/api/mock-asset/:kind", (req, res) => {
   res.send(MOCK_PNG);
 });
 
-// 交付素材包下載（zip；session cookie 驗證＋組隔離）
+// 多選打包的 assetIds 逐一驗 UUID：非 UUID 一律剔除（防怪參數；剔光＝回全量打包）
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// 交付素材包下載（zip；session cookie 驗證＋組隔離）。
+// 可選 ?assetIds=id1,id2（逗號分隔）＝素材庫多選打包：媒體檔只打包這些素材，交付文件照常。
 app.get("/api/export/:projectId", async (req, res) => {
   try {
     const auth = await resolveSession(req);
@@ -140,10 +144,48 @@ app.get("/api/export/:projectId", async (req, res) => {
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
     if (!project) return res.status(404).json({ error: "找不到專案" });
     if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
-    await exportProjectZip(project.id, res);
+    const assetIds = String(req.query.assetIds ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => UUID_RE.test(s));
+    await exportProjectZip(project.id, res, assetIds.length > 0 ? assetIds : undefined);
   } catch (err) {
     console.error("[export]", err);
     if (!res.headersSent) res.status(500).json({ error: "打包失敗，請稍後再試（管理員可查伺服器記錄）" });
+  }
+});
+
+// 單檔時間軸/字幕下載（需求 #8）：?format=srt（剪映/CapCut/Premiere）｜fcpxml（Final Cut Pro/剪映專業版）｜edl（DaVinci Resolve）。
+// 登入＋組隔離比照上方交付包路由；分鏡取未軟刪、依 orderIndex 排序，時間碼依各鏡秒數累計。
+app.get("/api/export/:projectId/timeline", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
+    if (!project) return res.status(404).json({ error: "找不到專案" });
+    if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
+    const format = String(req.query.format ?? "");
+    if (format !== "srt" && format !== "fcpxml" && format !== "edl") {
+      return res.status(400).json({ error: "format 需為 srt、fcpxml 或 edl" });
+    }
+    const scenes = await db
+      .select()
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+      .orderBy(asc(schema.scenes.orderIndex));
+    const file =
+      format === "srt"
+        ? { name: "字幕.srt", mime: "text/plain; charset=utf-8", body: buildSrt(scenes) }
+        : format === "fcpxml"
+          ? { name: "時間軸.fcpxml", mime: "application/xml; charset=utf-8", body: buildFcpxml(scenes, project.title) }
+          : { name: "剪輯表.edl", mime: "text/plain; charset=utf-8", body: buildEdl(scenes, project.title) };
+    // res.attachment 以 RFC 5987（filename*=UTF-8''…）讓中文檔名下載安全；Content-Type 隨後覆寫為明確值
+    res.attachment(file.name);
+    res.setHeader("Content-Type", file.mime);
+    res.send(file.body);
+  } catch (err) {
+    console.error("[export:timeline]", err);
+    if (!res.headersSent) res.status(500).json({ error: "時間軸/字幕檔產生失敗，請稍後再試" });
   }
 });
 

@@ -123,6 +123,8 @@ export function ProjectPage({ id }: { id: string }) {
   const [onboardCollapsed, setOnboardCollapsed] = useState(false);
   /** 生成確認彈窗：先估點數、使用者點頭才真的送出、扣點 */
   const [confirming, setConfirming] = useState(false);
+  /** 送出後回饋：達成本審核門檻被攔下時顯示「已送組長核准」（一般成功維持既有安靜行為，以列表出現新列為回饋） */
+  const [submitNotice, setSubmitNotice] = useState("");
   // 帶 groupId（本專案的組）才算得出週/日額度——不帶時 quota.my 的 weeklyQuota 恆為 null，彈窗週用量變死碼
   const quota = trpc.quota.my.useQuery({ groupId: project.data?.groupId }, { enabled: confirming && !!project.data });
   const savePrompt = trpc.prompts.save.useMutation({ onSuccess: () => utils.prompts.list.invalidate({ projectId: id }) });
@@ -130,11 +132,13 @@ export function ProjectPage({ id }: { id: string }) {
     onSuccess: () => { utils.projects.get.invalidate({ id }); utils.projects.list.invalidate(); },
   });
   const submit = trpc.generation.submit.useMutation({
-    onSuccess: (_data, vars) => {
+    onSuccess: (data, vars) => {
       // 成功生成的提示詞自動入庫（簡報「打過的咒語自動存起來」）
       savePrompt.mutate({ projectId: id, text: vars.prompt });
       setPrompt("");
       setConfirming(false);
+      // 達門檻的列不會馬上開始生成——明確告知已送核准，否則使用者會以為卡住
+      setSubmitNotice(data.status === "awaiting_approval" ? "⏳ 已送組長核准——核准後才會開始生成" : "");
     },
     // fal submit 失敗時伺服器也已寫入一筆 failed 列並退點——成功失敗都要刷新列表與點數
     onSettled: () => {
@@ -601,7 +605,7 @@ export function ProjectPage({ id }: { id: string }) {
                 className="primary"
                 data-fb="生成按鈕"
                 disabled={disableReason != null || submit.isPending}
-                onClick={() => setConfirming(true)}
+                onClick={() => { setSubmitNotice(""); setConfirming(true); }}
               >
                 {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${model.points} 點）`}
               </button>
@@ -628,6 +632,15 @@ export function ProjectPage({ id }: { id: string }) {
                     </span>
                   )}
                 </p>
+                {/* 成本審核門檻提醒：組員單筆估點達組長設定的門檻→送出後要等組長核准才會開始生成 */}
+                {myRole === "member" &&
+                  quota.data?.approvalThreshold != null &&
+                  quota.data.approvalThreshold > 0 &&
+                  model.points >= quota.data.approvalThreshold && (
+                    <p style={{ margin: "4px 0", fontSize: 13, color: "var(--gold-ink)" }}>
+                      ⏳ 這筆需要組長核准後才會開始生成（{model.points} 點 ≥ 門檻 {quota.data.approvalThreshold} 點）
+                    </p>
+                  )}
                 <p className="hint" style={{ fontSize: 12 }}>失敗全額退點。真實模式會實際呼叫 AI 生成。</p>
                 <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
                   <button
@@ -652,6 +665,7 @@ export function ProjectPage({ id }: { id: string }) {
                 </div>
               </div>
             )}
+            {submitNotice && <p className="hint" role="status" style={{ marginTop: 10, color: "var(--gold-ink)" }}>{submitNotice}</p>}
             {submit.error && <p className="error">{submit.error.message}</p>}
             <GenerationList projectId={id} />
           </section>
