@@ -25,6 +25,16 @@ export function isMockMode(): boolean {
   return MOCK;
 }
 
+/**
+ * 扣點是否略過（測試債修復，見優化評估報告盲點 #3）：
+ * 預設維持既有行為——mock 模式不扣點（內部測試不燒額度）；
+ * 設 MOCK_BILLING=1 則「假生成、真扣點」：e2e 能完整驗證額度守門與帳本（auth/models 兩套的
+ * 點數斷言在此模式下恢復有效），正式模式（非 mock）永遠走扣點、不受此旗標影響。
+ */
+export function billingBypassed(): boolean {
+  return MOCK && process.env.MOCK_BILLING !== "1";
+}
+
 export async function falSubmit(endpoint: string, kind: OutputKind, input: Record<string, unknown>): Promise<{ requestId: string }> {
   if (MOCK) {
     const requestId = `mock_${randomUUID()}`;

@@ -11,7 +11,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
-import { falSubmit, falStatus, isMockMode } from "./fal";
+import { falSubmit, falStatus, billingBypassed } from "./fal";
 import { reserveQuota, refund } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
 import { buildCharacterAnchor } from "../routers/characters";
@@ -230,8 +230,9 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   // 原子守門＋扣點（同一交易＋per-user 鎖，杜絕併發雙重扣款/繞過額度）
   // reserveQuota「拋例外」（連線池耗盡/逾時/序列化失敗）時也要刪掉剛建的 queued 列，
   // 否則會留下「從未扣點」的孤兒，30 分鐘後被陳屍清掃憑空退點、灌鬆總預算閘。
-  // mock 模式（無 FAL_KEY / FAL_MOCK=1）不扣點：內部測試不燒真實額度、也不被額度閘擋（正式模式照常守門）
-  if (!isMockMode()) {
+  // mock 模式（無 FAL_KEY / FAL_MOCK=1）預設不扣點：內部測試不燒真實額度、也不被額度閘擋
+  //（正式模式照常守門；MOCK_BILLING=1 時 mock 也走扣點——e2e 驗證額度守門用，見 billingBypassed）
+  if (!billingBypassed()) {
     let quotaError: string | null;
     try {
       quotaError = await reserveQuota(input.userId, project.groupId, model.points, `${input.reasonPrefix ?? "生成"} ${model.label}`, gen.id);

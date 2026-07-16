@@ -7,6 +7,7 @@ import { worldviewSchema } from "../../shared/worldview";
 import { MODELS, WORKFLOW_PRESETS, getModel, getWorkflow, type ModelEntry } from "../../shared/models";
 import { isMockMode } from "../services/fal";
 import { proxyFetch } from "../services/http";
+import { ANY_LLM_MODEL } from "../services/llm";
 import { reserveQuota, refund } from "../services/points";
 import { submitGenerationCore } from "../services/generationCore";
 import { assertProjectEditable } from "../services/projectAcl";
@@ -214,7 +215,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         const res = await proxyFetch("https://fal.run/fal-ai/any-llm", {
           method: "POST",
           headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model: "google/gemini-flash-1.5", prompt: sys }),
+          body: JSON.stringify({ model: ANY_LLM_MODEL, prompt: sys }),
           timeoutMs: 60_000,
         });
         if (!res.ok) throw new Error(`any-llm ${res.status}`);

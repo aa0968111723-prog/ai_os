@@ -5,6 +5,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { isMockMode } from "../services/fal";
 import { proxyFetch } from "../services/http";
+import { ANY_LLM_MODEL } from "../services/llm";
 import { reserveQuota, refund } from "../services/points";
 
 /**
@@ -169,7 +170,7 @@ ${context}
         const res = await proxyFetch("https://fal.run/fal-ai/any-llm", {
           method: "POST",
           headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model: "google/gemini-flash-1.5", prompt: sys }),
+          body: JSON.stringify({ model: ANY_LLM_MODEL, prompt: sys }),
           timeoutMs: 60_000,
         });
         if (!res.ok) throw new Error(`any-llm ${res.status}`);

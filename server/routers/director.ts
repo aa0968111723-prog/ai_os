@@ -6,6 +6,7 @@ import { db, schema } from "../db";
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
 import { isMockMode } from "../services/fal";
 import { proxyFetch } from "../services/http";
+import { ANY_LLM_MODEL } from "../services/llm";
 import { reserveQuota, refund } from "../services/points";
 import { buildKnowledgeContext } from "./knowledge";
 
@@ -148,7 +149,7 @@ ${script.slice(0, 12_000)}
     const res = await proxyFetch("https://fal.run/fal-ai/any-llm", {
       method: "POST",
       headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "google/gemini-flash-1.5", prompt: sys }),
+      body: JSON.stringify({ model: ANY_LLM_MODEL, prompt: sys }),
       timeoutMs: 60_000, // 拆分鏡 LLM 掛起→逾時走 catch 退點＋請重試（實測踩過無限轉圈）
     });
     if (!res.ok) throw new Error(`any-llm ${res.status}`);
@@ -207,7 +208,7 @@ export const directorRouter = router({
       const res = await proxyFetch("https://fal.run/fal-ai/any-llm", {
         method: "POST",
         headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "google/gemini-flash-1.5", prompt: sys }),
+        body: JSON.stringify({ model: ANY_LLM_MODEL, prompt: sys }),
         timeoutMs: 60_000, // LLM 掛起→逾時走 catch 退點；不讓建議請求無限卡住
       });
       if (!res.ok) throw new Error(`any-llm ${res.status}`);

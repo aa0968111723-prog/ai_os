@@ -22,14 +22,17 @@ interface DownloadEntry {
   category: DownloadCategory;
 }
 
-/** 白名單（新文件放進 docs/ 後在此加一行即可上架；design/legal 內容備齊前分類先空著） */
+/** 白名單（新文件放進 docs/ 後在此加一行即可上架；design 內容備齊前分類先空著） */
 const ENTRIES: DownloadEntry[] = [
   { file: "README.md", title: "專案說明（README）", category: "dev" },
   { file: "docs/交接報告.md", title: "交接報告（部署／日常使用／API）", category: "dev" },
   { file: "docs/auth-design.md", title: "登入與權限設計", category: "dev" },
   { file: "docs/優化評估報告.md", title: "網站優化評估報告（12 點需求）", category: "dev" },
+  { file: "docs/維運手冊.md", title: "維運手冊（部署／備份／應變）", category: "dev" },
   { file: "docs/模型目錄.md", title: "模型目錄（全模型與點數）", category: "model" },
   { file: "docs/點數校準報告.md", title: "點數 × 官方成本校準報告", category: "model" },
+  { file: "docs/隱私權政策.md", title: "隱私權政策（草稿）", category: "legal" },
+  { file: "docs/使用條款.md", title: "使用條款（草稿）", category: "legal" },
 ];
 
 const ROOT = process.cwd();

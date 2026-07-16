@@ -365,6 +365,71 @@ function AuditLogCard() {
 }
 
 /**
+ * 點數消耗監控卡（盲點修補：無成本異常告警）。
+ * 口徑＝毛消耗：只算扣點、退點不抵銷——看「實際發動了多少花費」，失敗退點才不會把異常日洗白。
+ * alert 由後端統一判定（今日 > max(50, 前 7 日均值×3)），這裡只負責整行紅字呈現；
+ * 長條用純 div 寬度比例（零圖表依賴、零 SVG 庫），60 秒輪詢跟上突發暴衝。
+ */
+function ConsumptionMonitorCard() {
+  const stats = trpc.quota.consumptionStats.useQuery({}, { refetchInterval: 60_000 });
+  const data = stats.data;
+  // 長條相對「區間內最大值」等比縮放；max(1, ...) 避免全 0 時除以 0
+  const maxPoints = data ? Math.max(1, ...data.perDay.map((d) => d.points)) : 1;
+  return (
+    <div className="card" data-fb="點數消耗監控卡">
+      <h2>點數消耗監控</h2>
+      <p className="hint">逐日毛消耗（只算扣點、退點不抵銷）；今日暴衝會整行紅字提醒。</p>
+      {stats.isLoading ? (
+        <div role="status" aria-label="消耗統計載入中">
+          <div className="skeleton" style={{ height: 44, marginTop: 10 }} />
+          <div className="skeleton" style={{ height: 120, marginTop: 10 }} />
+        </div>
+      ) : stats.error ? (
+        <p className="error">消耗統計載入失敗：{stats.error.message}</p>
+      ) : !data || data.perDay.length === 0 ? (
+        // 後端對「無可管組」的團隊管理員回空資料——照實說明而不是留一張空圖
+        <p className="hint" style={{ marginTop: 10 }}>沒有可監控的組。</p>
+      ) : (
+        <>
+          {/* 今日大字：alert 時整行（含警語）吃紅色 */}
+          <div style={{ marginTop: 8, color: data.alert ? "var(--danger-ink)" : undefined }}>
+            <b style={{ fontSize: 24, fontFamily: "var(--mono)" }}>今日 {data.todayPoints.toLocaleString()} 點</b>
+            {data.alert ? (
+              <div role="alert" style={{ fontWeight: 600, marginTop: 2 }}>⚠ 今日消耗異常（7 日均值 {data.avg7}）</div>
+            ) : (
+              <span className="hint" style={{ marginLeft: 8 }}>7 日均值 {data.avg7}</span>
+            )}
+          </div>
+          {/* 逐日迷你長條：每列「MM/DD ▮▮▮ N」，寬度對齊區間最大值 */}
+          <div style={{ marginTop: 10 }}>
+            {data.perDay.map((d) => (
+              <div key={d.date} style={{ display: "flex", alignItems: "center", gap: 6, padding: "1px 0", fontSize: 12 }}>
+                <span className="hint" style={{ width: 38, flex: "none", fontFamily: "var(--mono)" }}>{d.date.slice(5).replace("-", "/")}</span>
+                <div style={{ flex: 1, height: 10, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
+                  <div style={{ width: `${(d.points / maxPoints) * 100}%`, height: "100%", background: "var(--primary)", borderRadius: 3 }} />
+                </div>
+                <span style={{ width: 52, flex: "none", textAlign: "right", fontFamily: "var(--mono)" }}>{d.points.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+          <h3 style={{ fontSize: "var(--fs-16)", margin: "14px 0 4px" }}>各組近 7 天</h3>
+          {data.byGroup.length === 0 ? (
+            <p className="hint" style={{ marginTop: 4 }}>近 7 天還沒有消耗紀錄。</p>
+          ) : (
+            data.byGroup.map((g, i) => (
+              <div key={g.groupId} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, padding: "4px 0", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)" }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.groupName}</span>
+                <span style={{ flex: "none", fontFamily: "var(--mono)" }}>{g.weekPoints.toLocaleString()} 點</span>
+              </div>
+            ))
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
  * 單筆元件回饋列。獨立成元件：每筆有自己的狀態下拉 mutation（isPending/error），
  * 共用一個會讓某筆的更新中/錯誤顯示到別筆旁邊。
  */
@@ -597,6 +662,7 @@ export function AdminPage() {
         <aside className="stack">
         {/* 系統自檢只有超管的 /api/selftest 能用——非超管按了只會 403，對他們是死功能，故只對超管顯示 */}
         {isSuperAdmin && <SelfTestCard />}
+        <ConsumptionMonitorCard />
         <AuditLogCard />
         {isSuperAdmin && <CreateTeamCard />}
         <div className="card" data-fb="點數與額度卡">
