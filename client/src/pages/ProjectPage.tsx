@@ -19,6 +19,7 @@ import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PromptLibrary } from "../components/PromptLibrary";
 import { TocNav } from "../components/TocNav";
 import { ProjectAssistant } from "../components/ProjectAssistant";
+import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { useCollab, CursorOverlay, CollabZone, COLLAB_ZONES } from "../realtime";
 
 /**
@@ -57,7 +58,36 @@ function HelpTip({ text }: { text: string }) {
   );
 }
 
-/** 專案工作區（F4 簡化版）：世界觀＋生成台＋留言 */
+/**
+ * 五階段標頭（需求 6.7 一條龍工作流）：沿用既有 group-head 樣式，帶錨點 id 供 TocNav 捲動定位。
+ * hint 顯示該階段進度（全用頁面既有查詢；拿不到資料就不顯示，絕不為此新增後端呼叫）。
+ */
+function StageHead({ id, num, title, desc, accent, hint }: {
+  id: string;
+  num: string;
+  title: string;
+  desc?: string;
+  accent: "group-1" | "group-2" | "group-3";
+  hint?: string;
+}) {
+  return (
+    <div
+      id={id}
+      role="heading"
+      aria-level={2}
+      className={`group-head ${accent}`}
+      style={{ scrollMarginTop: "var(--sp-16)" }}
+    >
+      <span className="group-num">{num}</span>
+      <span className="group-title">{title}</span>
+      {desc && <span className="group-desc">{desc}</span>}
+      <span className="group-rule" />
+      {hint && <span className="hint" style={{ whiteSpace: "nowrap" }}>{hint}</span>}
+    </div>
+  );
+}
+
+/** 專案工作區（需求 6.7 一條龍）：①企劃定盤→②創作生成→③素材整理→④分鏡審核→⑤交付，五階段敘事＋留言 */
 export function ProjectPage({ id }: { id: string }) {
   const utils = trpc.useUtils();
   // 不重試 FORBIDDEN/NOT_FOUND：成員點到他組或已刪專案的舊連結時，直接顯示訊息，不要卡在「載入中…」重試
@@ -187,6 +217,10 @@ export function ProjectPage({ id }: { id: string }) {
     { label: "送審／打包", done: !!scenes.data?.some((s) => s.status === "approved"), target: "#onboard-delivery", hint: "送審通過後即可打包交付" },
   ];
   const allStepsDone = onboardSteps.every((s) => s.done);
+
+  // 五階段標頭的進度 hint：全讀頁面既有查詢（generations／scenes 與上方共用快取），查詢還沒回來就不顯示
+  const doneGenCount = generations.data?.filter((g) => g.status === "done").length;
+  const pendingSceneCount = scenes.data?.filter((s) => s.status === "pending").length;
 
   const toggle = (field: "tones" | "themes" | "styles", value: string) => {
     const current = wv[field];
@@ -352,13 +386,15 @@ export function ProjectPage({ id }: { id: string }) {
       <TocNav />
       <div className="cols">
         <div className="stack">
-          {/* ① 定盤：設定一次，AI 全程記得 */}
-          <div className="group-head group-1">
-            <span className="group-num">01</span>
-            <span className="group-title">定盤</span>
-            <span className="group-desc">設定一次，AI 全程記得</span>
-            <span className="group-rule" />
-          </div>
+          {/* ① 企劃・定盤：設定一次，AI 全程記得 */}
+          <StageHead
+            id="stage-plan"
+            num="①"
+            title="企劃・定盤"
+            desc="設定一次，AI 全程記得"
+            accent="group-1"
+            hint={wv.logline.trim() ? "已定盤" : "未定盤"}
+          />
           {/* 世界觀（快速層） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
           <section className="card" data-fb="世界觀卡" id="onboard-worldview">
@@ -522,25 +558,18 @@ export function ProjectPage({ id }: { id: string }) {
             <ScenePresetCards projectId={id} selectedIds={sceneIds} onToggle={toggleScene} />
           </div>
 
-          {/* 素材庫：上傳參考素材（提案核心「把素材丟進去」的入口）＋生成成品自動入庫 */}
-          <CollabZone {...zoneProps(COLLAB_ZONES.assets)}>
-            {/* data-fb 讓元件回饋標定「上傳素材」；透明包裹，不影響版面 */}
-            <div data-fb="上傳素材" id="sec-assets">
-              <AssetLibrary
-                projectId={id}
-                selectedSourceId={sourceAsset?.id ?? null}
-                onPickSource={(a) => { setSourceAsset(a); setSourceUrl(""); setSourceUrlError(""); }}
-              />
-            </div>
-          </CollabZone>
+          {/* 專案權限卡（需求 2.3）：誰可編輯、誰唯讀——開工前定好，屬企劃定盤的一環 */}
+          <ProjectMembersCard projectId={id} />
 
-          {/* ② 創作：每天在這裡工作 */}
-          <div className="group-head group-2">
-            <span className="group-num">02</span>
-            <span className="group-title">創作</span>
-            <span className="group-desc">每天在這裡工作</span>
-            <span className="group-rule" />
-          </div>
+          {/* ② 創作・生成：每天在這裡工作 */}
+          <StageHead
+            id="stage-create"
+            num="②"
+            title="創作・生成"
+            desc="每天在這裡工作"
+            accent="group-2"
+            hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
+          />
           <ProjectAssistant projectId={id} />
           {/* 生成台（11 類 × 旗艦/經濟/最低成本）＝本組主工作台 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>
@@ -691,14 +720,42 @@ export function ProjectPage({ id }: { id: string }) {
             <WorkflowCard projectId={id} />
           </div>
 
-          {/* ③ 分鏡與交付：排片、送審、打包 */}
-          <div className="group-head group-3">
-            <span className="group-num">03</span>
-            <span className="group-title">分鏡與交付</span>
-            <span className="group-desc">排片、送審、打包</span>
-            <span className="group-rule" />
+          {/* ③ 素材整理：素材集中管理，誤刪可救回 */}
+          <StageHead
+            id="stage-assets"
+            num="③"
+            title="素材整理"
+            desc="素材集中管理，誤刪可救回"
+            accent="group-1"
+          />
+
+          {/* 素材庫：上傳參考素材（提案核心「把素材丟進去」的入口）＋生成成品自動入庫 */}
+          <CollabZone {...zoneProps(COLLAB_ZONES.assets)}>
+            {/* data-fb 讓元件回饋標定「上傳素材」；透明包裹，不影響版面 */}
+            <div data-fb="上傳素材" id="sec-assets">
+              <AssetLibrary
+                projectId={id}
+                selectedSourceId={sourceAsset?.id ?? null}
+                onPickSource={(a) => { setSourceAsset(a); setSourceUrl(""); setSourceUrlError(""); }}
+              />
+            </div>
+          </CollabZone>
+
+          {/* 回收桶：軟刪除還原（誤刪素材／分鏡可救回） */}
+          <div id="sec-recyclebin">
+            <RecycleBin projectId={id} />
           </div>
-          {/* 分鏡與交付 */}
+
+          {/* ④ 分鏡與審核：排片順序、送審與裁決 */}
+          <StageHead
+            id="stage-review"
+            num="④"
+            title="分鏡與審核"
+            desc="排片、送審"
+            accent="group-3"
+            hint={pendingSceneCount != null ? `分鏡 ${sceneCount}・待審 ${pendingSceneCount}` : undefined}
+          />
+          {/* 分鏡列表（含送審；交付打包也在分鏡卡底部） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.scenes)}>
             {/* data-fb 讓元件回饋標定「打包下載」（分鏡與交付區）；透明包裹，不影響版面。id 供引導步驟與交付指引捲動定位 */}
             <div data-fb="打包下載" id="onboard-delivery">
@@ -709,10 +766,14 @@ export function ProjectPage({ id }: { id: string }) {
             </div>
           </CollabZone>
 
-          {/* 頁尾工具：回收桶（軟刪除還原，沉底不佔主流程） */}
-          <div id="sec-recyclebin" style={{ marginTop: 8 }}>
-            <RecycleBin projectId={id} />
-          </div>
+          {/* ⑤ 交付：打包功能就在上方分鏡卡底部，不為拆而拆——僅於階段標題註明 */}
+          <StageHead
+            id="stage-deliver"
+            num="⑤"
+            title="交付"
+            desc="分鏡卡內含交付打包"
+            accent="group-3"
+          />
         </div>
 
         {/* 組內留言 */}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
+import { Icon } from "../components/Icon";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
@@ -177,6 +178,9 @@ export function Launchpad({ groupId }: { groupId: string }) {
         {create.error && <p className="error" role="alert">{create.error.message}</p>}
       </section>
 
+      {/* 組彙總 AI（需求 12 v1）：問整組狀況的唯讀彙總——沒選組就不渲染 */}
+      {groupId && <TeamAssistantCard groupId={groupId} />}
+
       {/* 工具列：搜尋／類型篩選／排序（有專案才顯示） */}
       {all.length > 0 && (
         <div className="launch-toolbar" style={{ marginBottom: 16 }}>
@@ -248,5 +252,48 @@ export function Launchpad({ groupId }: { groupId: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * 組彙總 AI 卡（需求 12 v1）：一個輸入框問「整組」狀況——後端彙總轄下各專案的
+ * 分鏡／生成／花費現況給 LLM 分析。唯讀問答，不會代替任何人執行動作。
+ */
+function TeamAssistantCard({ groupId }: { groupId: string }) {
+  const [question, setQuestion] = useState("");
+  const ask = trpc.teamAssistant.ask.useMutation();
+  const canAsk = !!question.trim() && !ask.isPending;
+  const submit = () => {
+    if (canAsk) ask.mutate({ groupId, message: question.trim() });
+  };
+  return (
+    <section className="card" data-fb="組彙總AI卡" style={{ padding: "14px 16px", marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 260px" }}>
+          <label htmlFor="ta-question" style={{ marginTop: 0 }}>組彙總 AI</label>
+          <input
+            id="ta-question"
+            value={question}
+            maxLength={500}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="問問整組狀況：哪個案子卡住了？這週花了多少點？"
+            onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          />
+        </div>
+        <button className="primary" disabled={!canAsk} onClick={submit}>
+          {ask.isPending ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--sp-8)" }}>
+              <Icon name="Loader" className="spin" />
+              詢問中…
+            </span>
+          ) : (
+            "詢問"
+          )}
+        </button>
+      </div>
+      <p className="hint" style={{ marginTop: 8 }}>每次詢問 1 點（假生成模式免費）</p>
+      {ask.error && <p className="error" role="alert">{ask.error.message}</p>}
+      {ask.data && <p style={{ whiteSpace: "pre-wrap", marginTop: 8, marginBottom: 0 }}>{ask.data.answer}</p>}
+    </section>
   );
 }

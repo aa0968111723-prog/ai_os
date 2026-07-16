@@ -329,7 +329,10 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           projectId: project.id,
           presetId: a.presetId,
           prompt: a.prompt,
-          assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
+          // 型別註記為 void 聯合（可 async），不能直接回傳 requireGroup 的角色字串——包成無回傳值
+          assertAccess: (p) => {
+            requireGroup(ctx.auth, p.groupId);
+          },
         });
         return { ok: true, kind: "run_workflow" as const, runId: run.id, message: "工作流已啟動，進度見工作流卡" };
       }
