@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
+import { discussInMessages } from "../discuss";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -327,6 +328,7 @@ export function AssetLibrary({
                 return (
                   <div
                     key={a.id}
+                    id={`asset-${a.id}`}
                     className="asset-cell"
                     data-fb="素材格"
                     // position: relative 讓多選核取框能釘在卡片角落
@@ -463,6 +465,14 @@ export function AssetLibrary({
                               AI 描述入知識庫
                             </ConfirmButton>
                           )}
+                          {/* 在留言中討論：所有人可用（含檢視者）——把這張素材帶進組內留言變成有錨點的對話 */}
+                          <button
+                            className="menu-item"
+                            title="把這張素材帶進組內留言討論"
+                            onClick={() => { discussInMessages({ refType: "asset", refId: a.id, title: a.title }); setMenuOpenId(null); }}
+                          >
+                            <Icon name="MessageCircle" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />在留言中討論
+                          </button>
                           <button className="menu-item" disabled={rename.isPending} onClick={() => startRename(a.id, a.title)}>
                             <Icon name="Pencil" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />改名
                           </button>

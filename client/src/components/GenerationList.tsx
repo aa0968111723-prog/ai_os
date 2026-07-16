@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { getModel } from "@shared/models";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
+import { discussInMessages } from "../discuss";
 
 /**
  * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（背景分頁/未授權）建構子會丟例外，包 try 忽略。
@@ -354,7 +355,7 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
         <p className="hint" style={{ marginTop: 12 }}>沒有符合條件的生成紀錄。</p>
       )}
       {rows.map((g) => (
-        <div key={g.id} className="gen-row">
+        <div key={g.id} className="gen-row" id={`generation-${g.id}`}>
           {(g.status === "queued" || g.status === "running") && <StatusPoller id={g.id} />}
           {g.resultUrl ? (
             g.kind === "video" ? (
@@ -375,6 +376,16 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
             {/* #20 名稱＋收藏列：附加在既有 prompt 顯示「之上」，下方 prompt div 原樣保留（e2e 以 prompt 文字比對）。
                 收藏/命名是全組共見 metadata——檢視者唯讀（2.3），只顯示現值不給改 */}
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
+              {/* 在留言中討論：所有人可用（含檢視者）——把這筆生成帶進組內留言變成有錨點的對話 */}
+              <button
+                type="button"
+                aria-label="在留言中討論這筆生成"
+                title="把這筆生成帶進組內留言討論"
+                onClick={() => discussInMessages({ refType: "generation", refId: g.id, title: g.name || g.prompt.slice(0, 40) })}
+                style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
+              >
+                <Icon name="MessageCircle" size={15} />
+              </button>
               {canEdit ? (
                 <button
                   type="button"

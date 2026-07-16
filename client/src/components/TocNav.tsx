@@ -8,7 +8,7 @@ import { Icon } from "./Icon";
  *
  * 純附加元件：只負責捲動導覽，不碰任何既有區塊的行為與標記。
  */
-export type TocItem = { id: string; label: string };
+export type TocItem = { id: string; label: string; badge?: string };
 
 /** 五階段靜態清單（以簡單為準，不掃 DOM）：錨點對應 ProjectPage 各階段標頭（StageHead）的 id，
  *  順序即頁面「企劃→創作→整理→審核→交付」的一條龍敘事順序；特殊頁面可用 items props 覆蓋。 */
@@ -80,6 +80,12 @@ export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
       >
         <Icon name="FileText" size={14} />
         <span>章節導覽</span>
+        {/* 收合態也看得到未讀（手機常駐收合，不能把徽章藏進清單裡） */}
+        {!open && items.some((it) => it.badge) && (
+          <span className="toc-badge" aria-label="有未讀留言">
+            {items.find((it) => it.badge)?.badge}
+          </span>
+        )}
         <Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} style={{ marginLeft: "auto" }} />
       </button>
       {open && (
@@ -93,6 +99,7 @@ export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
                 onClick={() => jump(it.id)}
               >
                 {it.label}
+                {it.badge && <span className="toc-badge" aria-label="未讀留言數">{it.badge}</span>}
               </button>
             </li>
           ))}
