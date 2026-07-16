@@ -12,7 +12,15 @@ type Action =
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
   | { type: "split_script"; label: string; script: string };
 
-type Turn = { role: "you" | "ai"; text: string; actions?: Action[] };
+type Turn = { role: "you" | "ai"; text: string; actions?: Action[]; toolsUsed?: string[] };
+
+/** 助手用過的站內工具 → 人話（透明化：讓使用者知道答案查過哪些站內資料） */
+const TOOL_LABEL: Record<string, string> = {
+  find_model: "模型目錄",
+  scenario_guide: "情境手冊",
+  list_generations: "生成紀錄",
+  list_assets: "素材庫",
+};
 
 /** 送 runAction 的乾淨 payload（去掉只給人看的 label） */
 function toPayload(a: Action) {
@@ -43,7 +51,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
   };
 
   const ask = trpc.assistant.ask.useMutation({
-    onSuccess: (r) => push({ role: "ai", text: r.answer, actions: r.actions as Action[] }),
+    onSuccess: (r) => push({ role: "ai", text: r.answer, actions: r.actions as Action[], toolsUsed: r.toolsUsed }),
     onError: (e) => push({ role: "ai", text: e.message }),
   });
   const run = trpc.assistant.runAction.useMutation({
@@ -98,6 +106,11 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
               >
                 {t.text}
               </div>
+              {t.toolsUsed && t.toolsUsed.length > 0 && (
+                <div className="hint" style={{ fontSize: "var(--fs-11)", marginTop: 3 }}>
+                  查了：{[...new Set(t.toolsUsed)].map((x) => TOOL_LABEL[x] ?? x).join("、")}
+                </div>
+              )}
               {t.actions && t.actions.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                   {t.actions.map((act, j) => {

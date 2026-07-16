@@ -46,16 +46,22 @@ admin = Client()
 r = call("POST", admin, "auth.login", {"email": "admin@aidirector.local", "password": "test-admin-123"})
 ok("超管登入", r.get("user", {}).get("isSuperAdmin") is True)
 
-# ── 模型目錄 ──
+# ── 模型目錄（2026-07 fal 生態研究批次擴充後：12 生成類＋工作流、273 模型）──
 cats = call("GET", admin, "models.categories")
-ok("11 個創作類別", len(cats) == 11)
+ok("13 個創作類別(含圖生影片/放大修復)", len(cats) == 13 and any(c["id"] == "image-to-video" for c in cats) and any(c["id"] == "restoration" for c in cats))
 allm = call("GET", admin, "models.search", {})
-ok("目錄 70 模型", len(allm) == 70)
+ok("目錄 ≥270 模型", len(allm) >= 270)
 t2i = call("GET", admin, "models.byCategory", {"category": "text-to-image"})
-ok("文生圖 7 模型(3旗艦/3經濟/1最低)",
-   len(t2i) == 7 and [m["tier"] for m in t2i].count("flagship") == 3 and [m["tier"] for m in t2i].count("budget") == 1)
+ok("文生圖 ≥25 模型且各檔位齊備",
+   len(t2i) >= 25 and [m["tier"] for m in t2i].count("flagship") >= 3 and [m["tier"] for m in t2i].count("budget") >= 1)
+i2v = call("GET", admin, "models.byCategory", {"category": "image-to-video"})
+ok("圖生影片類有模型且都要圖片來源", len(i2v) >= 10 and all(m["needs"] == "image" for m in i2v))
+rest = call("GET", admin, "models.byCategory", {"category": "restoration"})
+ok("放大修復類有模型", len(rest) >= 10)
+qwen = call("GET", admin, "models.search", {"q": "Qwen"})
+ok("中文梯隊 Qwen 已入目錄", any("qwen-image-2" in m["id"] for m in qwen))
 hit = call("GET", admin, "models.search", {"q": "中文"})
-ok("關鍵字搜尋(中文)", len(hit) >= 3)
+ok("關鍵字搜尋(中文)", len(hit) >= 10)
 wfs = call("GET", admin, "models.workflows")
 ok("7 條工作流", len(wfs) == 7)
 
@@ -76,6 +82,13 @@ assets = call("GET", admin, "projects.assets", {"projectId": pid})
 ok("素材庫有成品", len(assets) >= 1)
 noSrc = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/nano-banana-2/edit", "prompt": "改成夕陽"})
 ok("圖生圖缺來源被擋", "__error__" in noSrc and "來源" in noSrc["__error__"])
+
+# ── 一鍵功能環境（W2）：丟圖即得類免提示詞；需提示詞模型空提示仍被擋 ──
+img_a = next((a for a in assets if a["kind"] == "image"), None)
+g_oneclick = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/image-editing/photo-restoration", "prompt": "", "sourceAssetId": img_a["id"]})
+ok("一鍵修復免提示詞可送出", g_oneclick.get("status") in ("queued", "running") and "一鍵" in g_oneclick.get("prompt", ""))
+deny = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/flux/schnell", "prompt": ""})
+ok("🔒 需提示詞模型空提示被擋", "提示詞" in deny.get("__error__", ""))
 # 素材庫成品走 sourceAssetId(與 UI 一致);sourceUrl 只收外部絕對網址(相對 /api/assets/... 會被 zod url() 擋)
 g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/nano-banana-2/edit", "prompt": "改成夕陽", "sourceAssetId": assets[0]["id"]})
 g = wait_done(admin, g["id"])

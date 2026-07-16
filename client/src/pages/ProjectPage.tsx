@@ -255,7 +255,7 @@ export function ProjectPage({ id }: { id: string }) {
   const disableReason =
     !canEdit ? "你在此專案是檢視者（唯讀），不能生成——需要編輯請組長到專案權限卡調整"
     : !model ? "模型清單還在載入，稍等一下就能生成"
-    : !prompt.trim() ? "先填一句提示詞，描述想要的畫面"
+    : !prompt.trim() && model.promptUsed ? "先填一句提示詞，描述想要的畫面"
     : missingSource ? "這個模型需要來源素材——從素材庫選一個，或貼上網址"
     : incompatSource ? `選到的素材是${sourceAsset.kind === "audio" ? "音訊" : sourceAsset.kind === "image" ? "圖片" : sourceAsset.kind}，這個模型不能用它——請換一個來源`
     : badSourceUrl ? "網址格式不對，需以 https:// 開頭"
@@ -649,7 +649,13 @@ export function ProjectPage({ id }: { id: string }) {
                 )}
               </>
             )}
-            <label htmlFor="gen-prompt">{model?.kind === "audio" && model.needs == null ? "要唸的文字/音樂描述" : "提示詞（世界觀會自動帶入，不必重講背景）"}</label>
+            <label htmlFor="gen-prompt">
+              {model && !model.promptUsed
+                ? "提示詞（此模型丟來源即得，可留白）"
+                : model?.kind === "audio" && model.needs == null
+                  ? "要唸的文字/音樂描述"
+                  : "提示詞（世界觀會自動帶入，不必重講背景）"}
+            </label>
             {/* id 是「用這個」等功能捲動聚焦的錨點，別拿掉 */}
             <textarea id="gen-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂，柔和光線灑落，一炷香的靜謐" />
             <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>

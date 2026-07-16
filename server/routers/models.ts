@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { router, authedProcedure } from "../trpc";
-import { CATEGORIES, MODELS, WORKFLOW_PRESETS, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
+import { CATEGORIES, MODELS, WORKFLOW_PRESETS, tierLabel, modelUsesPrompt, type ModelCategory, type ModelTier } from "../../shared/models";
 
 const publicEntry = (m: (typeof MODELS)[number]) => ({
   id: m.id,
@@ -17,6 +17,8 @@ const publicEntry = (m: (typeof MODELS)[number]) => ({
   cost: m.cost,
   verified: m.verified,
   recommended: m.recommended ?? false,
+  // 丟圖即得類不吃 prompt——前端據此把提示詞欄改為選填，不再逼使用者為一鍵功能硬湊一句話
+  promptUsed: modelUsesPrompt(m),
 });
 
 /** 模型目錄查詢:給前端挑選器、模型指南頁與代理使用 */

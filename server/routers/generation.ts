@@ -8,7 +8,7 @@ import { refund, reserveQuota } from "../services/points";
 import { advanceGeneration, submitGenerationCore } from "../services/generationCore";
 import { signAssetUrl } from "../services/storage";
 import { assertProjectEditable } from "../services/projectAcl";
-import { getModel, endpointOf } from "../../shared/models";
+import { getModel, endpointOf, modelUsesPrompt } from "../../shared/models";
 
 // 注入判斷的單一來源已抽到 services/generationCore（工作流執行器共用）；
 // 這裡 re-export 讓既有引用點（services/mcp.ts）不必改路徑
@@ -68,7 +68,9 @@ export const generationRouter = router({
       z.object({
         projectId: z.string().uuid(),
         modelId: z.string(),
-        prompt: z.string().min(1, "請填提示詞"),
+        // 丟圖即得類（修復/去背/放大/轉錄）的 payload 不吃 prompt——允許空字串，
+        // 落庫時以模型名代位（生成紀錄/搜尋仍有可讀文字）。submitGenerationCore 不再另驗非空。
+        prompt: z.string(),
         /** 來源輸入(圖生圖底圖/音訊/影片/訓練 zip 的網址;外部 URL) */
         sourceUrl: z.string().url().optional(),
         /** 素材庫來源(優先)：伺服器換成簽名短效網址,fal 才抓得到、外人不可偽造 */
@@ -79,12 +81,19 @@ export const generationRouter = router({
         scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) =>
-      submitGenerationCore({
+    .mutation(async ({ ctx, input }) => {
+      // 提示詞守門：只有「payload 不吃 prompt」的模型允許留白（落庫以模型名代位，紀錄仍可讀可搜）；
+      // 其他模型維持原本必填——放行空字串會讓人白扣點生成空提示畫面
+      const model = getModel(input.modelId);
+      const prompt = input.prompt.trim();
+      if (!prompt && (!model || modelUsesPrompt(model))) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "請填提示詞" });
+      }
+      return submitGenerationCore({
         userId: ctx.auth.user.id,
         projectId: input.projectId,
         modelId: input.modelId,
-        prompt: input.prompt,
+        prompt: prompt || `${model?.label ?? input.modelId}（一鍵處理）`,
         sourceUrl: input.sourceUrl,
         sourceAssetId: input.sourceAssetId,
         characterIds: input.characterIds,
@@ -95,8 +104,8 @@ export const generationRouter = router({
           await assertProjectEditable(ctx.auth, project); // 2.3：專案檢視者不能生成
           return role;
         },
-      }),
-    ),
+      });
+    }),
 
   /** 輪詢狀態(開發模式主要路徑;正式站之後補 webhook+此輪詢當備援):薄殼,推進邏輯在 advanceGeneration */
   status: authedProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
