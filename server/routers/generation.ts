@@ -3,7 +3,7 @@ import { and, desc, eq, getTableColumns, ilike, inArray, lt, or, sql, type SQL }
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
-import { falSubmit, isMockMode } from "../services/fal";
+import { falSubmit, isMockMode, billingBypassed } from "../services/fal";
 import { refund, reserveQuota } from "../services/points";
 import { advanceGeneration, submitGenerationCore } from "../services/generationCore";
 import { getModel, endpointOf } from "../../shared/models";
@@ -278,8 +278,8 @@ export const generationRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "此模型已不在目錄，無法核准送出" });
       }
 
-      // 扣「提交者本人」的額度（不是核准的組長）——與 submit 同一守門；mock 模式同樣不扣（見 generationCore）
-      if (!isMockMode()) {
+      // 扣「提交者本人」的額度（不是核准的組長）——與 submit 同一守門；mock 扣點行為同 generationCore（billingBypassed）
+      if (!billingBypassed()) {
         let quotaError: string | null;
         try {
           quotaError = await reserveQuota(gen.userId, gen.groupId, gen.pointsEst, `核准生成 ${model.label}`, gen.id);
