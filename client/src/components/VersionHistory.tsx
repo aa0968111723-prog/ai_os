@@ -39,7 +39,10 @@ export function VersionHistory({ knowledgeId, projectId }: { knowledgeId: string
       {open && (
         <div style={{ marginTop: 8 }}>
           {versions.isLoading ? (
-            <p className="hint">載入版本中…</p>
+            <div aria-hidden="true">
+              <div className="skeleton" style={{ height: 14, maxWidth: 260, marginBottom: 8 }} />
+              <div className="skeleton" style={{ height: 14, maxWidth: 200 }} />
+            </div>
           ) : versions.error ? (
             <p className="error">{versions.error.message}</p>
           ) : !versions.data || versions.data.length === 0 ? (

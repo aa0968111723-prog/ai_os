@@ -37,7 +37,11 @@ export function ScenePresetCards({
       <p className="hint">設定場景色板/光線一次鎖定；生成時勾選，AI 自動帶入，同場景跨鏡光影不跳。</p>
 
       {list.isLoading ? (
-        <p className="hint">載入中…</p>
+        // 佔位高度對齊載入後的卡片網格（比照 CharacterCards）：不跳版、不被誤讀成「卡住了」
+        <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }} aria-hidden="true">
+          <div className="skeleton" style={{ height: 104 }} />
+          <div className="skeleton" style={{ height: 104 }} />
+        </div>
       ) : list.data && list.data.length > 0 ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
           {list.data.map((s) => {

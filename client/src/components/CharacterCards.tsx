@@ -91,7 +91,9 @@ export function CharacterCards({
           {add.error && <p className="error">{add.error.message}</p>}
         </div>
       ) : (
-        <button style={{ marginTop: "var(--sp-12)" }} onClick={() => setOpen(true)}>＋ 新增角色定裝</button>
+        <button style={{ marginTop: "var(--sp-12)", display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setOpen(true)}>
+          <Icon name="Plus" size={14} />新增角色定裝
+        </button>
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
     </section>

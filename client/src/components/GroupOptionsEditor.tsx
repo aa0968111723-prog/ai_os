@@ -38,7 +38,7 @@ function ApprovalThresholdCard({ groupId }: { groupId: string }) {
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
         <label className="hint" htmlFor={`approval-threshold-${groupId}`} style={{ margin: 0 }}>門檻點數</label>
         {usage.isLoading ? (
-          <span className="hint">載入中…</span>
+          <span className="skeleton" style={{ display: "inline-block", height: 40, width: 140, borderRadius: "var(--r-12)" }} aria-hidden="true" />
         ) : usage.error ? (
           <span className="error" style={{ marginTop: 0 }}>載入失敗：{usage.error.message}</span>
         ) : (

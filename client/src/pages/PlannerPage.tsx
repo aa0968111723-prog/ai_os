@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { CharCount, ConfirmButton } from "../components/interactions";
+import { useLocalDraft } from "../useLocalDraft";
 import { MentionInput, resolveMentions } from "../components/MentionInput";
 import { flashAnchor, takePlannerFocus } from "../discuss";
 
@@ -106,6 +107,12 @@ function ScheduleCard({ groupId }: { groupId: string }) {
 
   const endInvalid = !!startAt && !!endAt && new Date(endAt) < new Date(startAt);
   const canAdd = !!title.trim() && !!startAt && !endInvalid && !add.isPending;
+  // 沉默 disable 會讓人不知道卡在哪個欄位——比照生成鈕的 disableReason，在按鈕旁講人話
+  const addDisabledReason =
+    !title.trim() ? "先填標題"
+    : !startAt ? "先選開始時間"
+    : endInvalid ? "結束時間要晚於開始時間"
+    : null;
   const submit = () => {
     if (!canAdd) return;
     // @提及：從標題與備註內文反推被 @ 的同組成員
@@ -181,8 +188,10 @@ function ScheduleCard({ groupId }: { groupId: string }) {
         <button className="primary" style={{ flex: "none" }} disabled={!canAdd} onClick={submit}>
           {add.isPending ? "加入中…" : "加入"}
         </button>
+        {addDisabledReason && <span className="hint" style={{ alignSelf: "center" }}>{addDisabledReason}</span>}
       </div>
-      {endInvalid && <p className="hint" style={{ marginTop: 6 }}>結束時間要晚於開始時間</p>}
+      {/* 結束早於開始屬輸入錯誤：用 .error 樣式即時顯示，別讓人當成普通提示忽略 */}
+      {endInvalid && <p className="error" role="alert" style={{ marginTop: 6 }}>結束時間要晚於開始時間</p>}
       {add.error && <p className="error">{add.error.message}</p>}
 
       {/* 清單：依日期分組 */}
@@ -263,44 +272,46 @@ function NotesCard({ groupId }: { groupId: string }) {
   // 表單（新增／編輯共用）：editingId 有值＝編輯模式，全文以 notes.get 載入後才可改
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
+  // 標題/內容改用本地草稿（比照知識庫 useLocalDraft）：開會逐字稿可打到 4 萬字，
+  // 切組（key 重掛）、誤點返回、手機切背景被回收、當機重整——沒有草稿就是整篇無聲消失。
+  // 新增模式以組為 key、編輯模式以該筆為 key；儲存成功才清草稿。
+  const draftScope = editingId ? `note-edit-${editingId}` : `note-new-${groupId}`;
+  const [title, setTitle, clearTitleDraft] = useLocalDraft(`${draftScope}-title`, "");
+  const [content, setContent, clearContentDraft] = useLocalDraft(`${draftScope}-content`, "");
   const [projectId, setProjectId] = useState("");
-  // 全文抓回來只填一次表單，避免 refetch 覆蓋使用者正在改的字（沿用知識庫的 seeded 模式）
+  // 全文抓回來只填一次表單，避免 refetch 覆蓋使用者正在改的字（沿用知識庫的 seeded 模式）；
+  // 只填「沒有本地草稿」的欄位——上次編輯到一半離開的字比伺服器舊值更該保留
   const seededRef = useRef(false);
   const full = trpc.notes.get.useQuery({ id: editingId ?? "" }, { enabled: !!editingId });
   useEffect(() => {
     if (editingId && full.data && !seededRef.current) {
       seededRef.current = true;
-      setTitle(full.data.title);
-      setContent(full.data.content);
+      if (!title) setTitle(full.data.title);
+      if (!content) setContent(full.data.content);
       setProjectId(full.data.projectId ?? "");
     }
+    // title/content 刻意不入依賴：這個效果只在「全文剛到」時播種一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId, full.data]);
   /** 編輯模式下全文還在載入時，內容區先鎖住 */
   const contentReady = !editingId || seededRef.current;
 
+  // 關表單不清草稿：誤點「取消」還救得回來；只有儲存成功才 clear
   const closeForm = () => {
     setFormOpen(false);
     setEditingId(null);
     seededRef.current = false;
-    setTitle("");
-    setContent("");
     setProjectId("");
   };
   const openNew = () => {
     setEditingId(null);
     seededRef.current = false;
-    setTitle("");
-    setContent("");
     setProjectId("");
     setFormOpen(true);
   };
   const openEdit = (n: { id: string; title: string; projectId: string | null }) => {
     seededRef.current = false;
     setEditingId(n.id);
-    setTitle(n.title);
-    setContent("");
     setProjectId(n.projectId ?? "");
     setFormOpen(true);
   };
@@ -308,6 +319,8 @@ function NotesCard({ groupId }: { groupId: string }) {
   const add = trpc.notes.add.useMutation({
     onSuccess: () => {
       utils.notes.list.invalidate({ groupId });
+      clearTitleDraft();
+      clearContentDraft();
       closeForm();
     },
   });
@@ -315,6 +328,8 @@ function NotesCard({ groupId }: { groupId: string }) {
     onSuccess: (_row, vars) => {
       utils.notes.list.invalidate({ groupId });
       utils.notes.get.invalidate({ id: vars.id });
+      clearTitleDraft();
+      clearContentDraft();
       closeForm();
     },
   });
@@ -413,6 +428,7 @@ function NotesCard({ groupId }: { groupId: string }) {
           />
           {/* 即時字數（與知識庫同款）：maxLength 會把超長貼上靜默截尾，計數＋觸頂警示讓截斷不再無聲 */}
           {contentReady && <CharCount value={content} max={40000} />}
+          <p className="hint" style={{ marginTop: 4 }}>（編輯中的內容會自動暫存在本機——切組、重整、手機切換都不會不見）</p>
           <label htmlFor="note-project">掛在專案（選填）</label>
           <select
             id="note-project"
@@ -427,11 +443,16 @@ function NotesCard({ groupId }: { groupId: string }) {
             ))}
           </select>
           {editingId && <p className="hint" style={{ marginTop: 4 }}>內容更新會自動保留版本快照</p>}
-          <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
+          <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button className="primary" disabled={!canSave} onClick={save}>
               {saving ? "儲存中…" : "儲存"}
             </button>
             <button onClick={closeForm}>取消</button>
+            {!canSave && !saving && (
+              <span className="hint">
+                {!contentReady ? "全文載入中…" : !title.trim() ? "先填標題" : !content.trim() ? "先填內容" : ""}
+              </span>
+            )}
           </div>
           {(add.error || update.error || full.error) && (
             <p className="error">{add.error?.message ?? update.error?.message ?? full.error?.message}</p>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
-import { ConfirmButton } from "../components/interactions";
+import { ConfirmButton, HelpTip } from "../components/interactions";
 import { worldviewSchema, type Worldview } from "@shared/worldview";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
@@ -39,53 +39,7 @@ function scrollToSelector(selector: string) {
   });
 }
 
-/** 白話小提示：術語旁的「?」小圖示。桌面 hover 看 title；點擊/鍵盤展開就地氣泡——
- * 觸控裝置沒有 hover，原生 title 永遠不會出現，非技術者在手機上等於看不到整套白話說明。 */
-function HelpTip({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
-  }, [open]);
-  return (
-    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}>
-      <button
-        type="button"
-        aria-label={open ? "收合提示" : `顯示提示：${text}`}
-        aria-expanded={open}
-        title={text}
-        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        style={{
-          display: "inline-flex", alignItems: "center", justifyContent: "center",
-          marginLeft: 6, padding: 2, minHeight: 0, color: "var(--primary)", cursor: "help",
-          background: "none", border: "none", boxShadow: "none", userSelect: "none", lineHeight: 1,
-        }}
-      >
-        <Icon name="HelpCircle" size={14} />
-      </button>
-      {open && (
-        <span
-          role="status"
-          style={{
-            position: "absolute", top: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)",
-            zIndex: 45, width: "max-content", maxWidth: "min(280px, 78vw)",
-            background: "var(--popover)", border: "1px solid var(--border)", borderRadius: "var(--r-8)",
-            boxShadow: "var(--e3)", padding: "8px 12px",
-            fontSize: "var(--fs-13)", fontWeight: 400, lineHeight: 1.6, color: "var(--fg)",
-            whiteSpace: "normal", textAlign: "left",
-          }}
-        >
-          {text}
-        </span>
-      )}
-    </span>
-  );
-}
+// HelpTip 已移到 components/interactions（SceneList 等元件的標題也要用），這裡從共用處匯入
 
 /**
  * 五階段標頭（需求 6.7 一條龍工作流）：沿用既有 group-head 樣式，帶錨點 id 供 TocNav 捲動定位。
@@ -133,6 +87,10 @@ export function ProjectPage({ id }: { id: string }) {
   // 專案載入成功才啟用——FORBIDDEN/NOT_FOUND 頁不必開 WS 去被伺服器拒絕（hook 仍無條件呼叫，順序穩定）
   const collab = useCollab(id, !!project.data);
   const me = trpc.auth.me.useQuery();
+  // 示範（假生成）模式不扣點：生成鈕/確認彈窗要標「免費」，否則新手看到「−X 點」卻沒扣，
+  // 會以為沒生成成功（與 App 頂欄同 key 共用快取，不多打 API）
+  const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
+  const mockMode = !!info.data?.mockMode;
   // 世界觀三組 chips（主軸／調性／視覺風格）改由本專案所屬組的自訂選項供給（組長可在「選項」頁增修）
   const options = trpc.options.byGroup.useQuery(
     { groupId: project.data?.groupId ?? "" },
@@ -624,11 +582,11 @@ export function ProjectPage({ id }: { id: string }) {
             <KnowledgeBase projectId={id} readOnly={!canEdit} />
           </div>
 
-          {/* 角色定裝卡：勾選後生成自動注入外觀錨點 */}
-          <h2 id="sec-characters">
-            角色定裝卡<HelpTip text="角色長相鎖定，勾了跨鏡頭不走樣。" />
-          </h2>
-          <CharacterCards projectId={id} selectedIds={charIds} onToggle={toggleChar} />
+          {/* 角色定裝卡：勾選後生成自動注入外觀錨點。
+              錨點 id 掛外層 div、不再加外層 <h2>——元件自帶標題，疊兩個同字樣大標會像壞掉（比照 sec-scenes 做法） */}
+          <div id="sec-characters">
+            <CharacterCards projectId={id} selectedIds={charIds} onToggle={toggleChar} />
+          </div>
 
           {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
           <div id="sec-scenes">
@@ -713,7 +671,7 @@ export function ProjectPage({ id }: { id: string }) {
                 disabled={disableReason != null || submit.isPending}
                 onClick={() => { setSubmitNotice(""); setConfirming(true); }}
               >
-                {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${model.points} 點）`}
+                {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${model.points} 點${mockMode ? "・示範免費" : ""}）`}
               </button>
               <span className="hint">{disableReason ?? "失敗自動退點・額度由管理員調整"}</span>
             </div>
@@ -730,6 +688,7 @@ export function ProjectPage({ id }: { id: string }) {
                 <p style={{ margin: "4px 0", fontSize: 13 }}>提示詞：{prompt.trim().slice(0, 80)}{prompt.trim().length > 80 ? "…" : ""}</p>
                 <p style={{ margin: "8px 0" }}>
                   預估 <b style={{ color: "var(--primary-ink)", fontSize: 18 }}>約 {model.points} 點</b>
+                  {mockMode && <span style={{ marginLeft: 6, color: "var(--gold-ink)", fontSize: 13 }}>（示範模式・本次免費，不會扣點）</span>}
                   {quota.data && (
                     <span className="hint" style={{ marginLeft: 8 }}>
                       {quota.data.totalRemaining != null ? `目前剩 ${quota.data.totalRemaining.toLocaleString()} 點` : "額度不限"}
@@ -835,10 +794,8 @@ export function ProjectPage({ id }: { id: string }) {
           {/* 分鏡列表（含送審；交付打包也在分鏡卡底部） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.scenes)}>
             {/* data-fb 讓元件回饋標定「打包下載」（分鏡與交付區）；透明包裹，不影響版面。id 供引導步驟與交付指引捲動定位 */}
+            {/* 錨點 id 掛外層 div、不再加外層 <h2>（SceneList 卡片自帶同名標題，白話提示移進去了） */}
             <div data-fb="打包下載" id="onboard-delivery">
-              <h2>
-                分鏡・交付<HelpTip text="把成品排成一支片的順序，可送審與打包交付。" />
-              </h2>
               <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} onUsePrompt={(text) => setPrompt(text)} />
             </div>
           </CollabZone>

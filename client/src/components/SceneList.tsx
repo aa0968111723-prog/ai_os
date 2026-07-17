@@ -3,7 +3,7 @@ import { trpc } from "../api";
 import { getModel } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
 import { Icon } from "./Icon";
-import { ConfirmButton } from "./interactions";
+import { ConfirmButton, HelpTip } from "./interactions";
 import { discussInMessages } from "../discuss";
 
 const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
@@ -200,7 +200,18 @@ function SceneRow({
   pending: { id: string } | undefined;
 }) {
   // 每格自持 update／generateInto／generateVoiceover，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
-  const update = trpc.scenes.update.useMutation({ onSuccess: invalidate });
+  // 行內編輯（標題/秒數/配音詞）失焦即存但原本沒有成功回饋——比照世界觀卡「已儲存 ✓」短暫顯示 2 秒
+  const [savedFlash, setSavedFlash] = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(savedTimer.current), []);
+  const update = trpc.scenes.update.useMutation({
+    onSuccess: () => {
+      invalidate();
+      setSavedFlash(true);
+      clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSavedFlash(false), 2000);
+    },
+  });
   const generate = trpc.scenes.generateInto.useMutation({ onSuccess: invalidate });
   const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({ onSuccess: invalidate });
 
@@ -256,6 +267,13 @@ function SceneRow({
             {SCENE_STATUS[s.status]?.label ?? s.status}
           </span>
           {isGenerating && <span className="pill running">生成中…</span>}
+          {update.isPending ? (
+            <span className="hint">儲存中…</span>
+          ) : savedFlash ? (
+            <span className="hint" role="status" style={{ color: "var(--success-ink)" }}>
+              已儲存 <Icon name="Check" size={12} style={{ verticalAlign: "-1px" }} />
+            </span>
+          ) : null}
         </div>
 
         {/* 配音詞：每格皆可編輯（含空白格補詞），失焦即存 */}
@@ -427,7 +445,7 @@ function SceneRow({
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === 0 || move.isPending} aria-label="上移" onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}><Icon name="ChevronUp" size={16} /></button>
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
           <ConfirmButton
-            triggerStyle={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger)" }}
+            triggerStyle={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger-ink)" }}
             disabled={remove.isPending}
             triggerAriaLabel="刪除"
             triggerTitle="刪除後移到回收桶，可還原（保留配音詞與提示詞）"
@@ -473,7 +491,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
   return (
     <section className="card" data-fb="分鏡與交付">
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0 }}>分鏡・交付</h2>
+        <h2 style={{ margin: 0 }}>分鏡・交付<HelpTip text="把成品排成一支片的順序，可送審與打包交付。" /></h2>
         {list.length > 0 && (
           <span className="mono" style={{ fontSize: 13, color: "var(--primary-ink)" }}>共 {list.length} 鏡・約 {totalSec} 秒</span>
         )}
