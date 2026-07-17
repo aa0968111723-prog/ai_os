@@ -68,6 +68,14 @@ export function Launchpad({ groupId }: { groupId: string }) {
       navigate(`/p/${project.id}`);
     },
   });
+  // 空狀態的「建立範例專案」：與 FirstRunGuide 同一支後端（免費、可重入）——
+  // 「略過」導覽不該讓唯一的安全沙盒永久消失，一次誤點要可回復
+  const createSample = trpc.projects.createSample.useMutation({
+    onSuccess: (project) => {
+      utils.projects.list.invalidate();
+      navigate(`/p/${project.id}`);
+    },
+  });
 
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<string>("");
@@ -218,7 +226,21 @@ export function Launchpad({ groupId }: { groupId: string }) {
       {all.length === 0 && !projects.isLoading && !projects.error && !showFirstRun && (
         <div className="empty-state">
           <h3>還沒有專案</h3>
-          <p>從上面開一個新專案，把素材整理成分鏡與成品。</p>
+          <p>從上面開一個新專案，或先開個不花點數的範例看看完整長相。</p>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", marginTop: 12 }}>
+            <button
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              disabled={!groupId || createSample.isPending}
+              onClick={() => createSample.mutate({ groupId })}
+            >
+              <Icon name="Sparkles" size={15} />
+              {createSample.isPending ? "建立範例中…" : "建立範例專案看看（免費）"}
+            </button>
+            <Link href="/help" style={{ display: "inline-flex", alignItems: "center", gap: 4, alignSelf: "center" }}>
+              <Icon name="HelpCircle" size={14} />看怎麼用
+            </Link>
+          </div>
+          {createSample.error && <p className="error">{createSample.error.message}</p>}
         </div>
       )}
       {all.length > 0 && shownList.length === 0 && <p className="hint">沒有符合「{q}」的專案。</p>}

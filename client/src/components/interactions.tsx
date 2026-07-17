@@ -210,6 +210,26 @@ export function ConfirmButton({
 }
 
 /**
+ * CharCount：長文欄位的「已 N / 上限 字」即時計數。逼近上限（≥90%）轉警示色、
+ * 觸頂時明講「超出的部分不會被收錄」——搭配 maxLength 使用時，貼上長稿被截斷不再無聲。
+ */
+export function CharCount({ value, max }: { value: string; max: number }) {
+  const len = value.length;
+  const near = len >= max * 0.9;
+  const atMax = len >= max;
+  return (
+    <p
+      className="hint"
+      role={atMax ? "status" : undefined}
+      style={{ margin: "4px 0 0", textAlign: "right", ...(near ? { color: atMax ? "var(--danger-ink)" : "var(--gold-ink)" } : {}) }}
+    >
+      {len.toLocaleString()} / {max.toLocaleString()} 字
+      {atMax && "——已達上限，再貼上的內容不會被收錄；長稿請分成多份"}
+    </p>
+  );
+}
+
+/**
  * useRovingRadio：讓一組 role="radio" 支援方向鍵漫遊（左右/上下/Home/End），
  * 只有選中項（或無選中時的第一項）進 Tab 序，其餘 tabIndex=-1。保留點擊切換／取消選取。
  */

@@ -63,9 +63,9 @@ const SOURCE_INCOMPAT: Record<string, string[]> = {
 const SOURCE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件", zip: "zip 壓縮包" };
 
 /** 哪些類別注入世界觀(TTS 會唸出注入文字、轉錄/視覺/訓練/影片工具不適用 → 不注入) */
-const INJECT_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video", "llm", "text-to-audio"]);
+const INJECT_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video", "image-to-video", "llm", "text-to-audio"]);
 /** 角色定裝錨點只注入「視覺」類別（畫面要一致）；LLM/TTS 不需要外觀 */
-const CHARACTER_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video"]);
+const CHARACTER_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video", "image-to-video"]);
 
 /** export 供 MCP 重用：注入與否的判斷必須單一來源，否則 MCP 路徑會把世界觀唸進 TTS 成品 */
 export function effectivePrompt(model: ModelEntry, userPrompt: string, worldview: Worldview): string {

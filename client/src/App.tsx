@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Route, Switch, Link } from "wouter";
+import { Route, Switch, Link, useLocation } from "wouter";
 import { trpc } from "./api";
 import { Launchpad } from "./pages/Launchpad";
 import { ProjectPage } from "./pages/ProjectPage";
@@ -159,6 +159,7 @@ function UserMenu({
 
 export function App() {
   const utils = trpc.useUtils();
+  const [location, navigate] = useLocation();
   const me = trpc.auth.me.useQuery();
   const logout = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
   const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
@@ -197,7 +198,11 @@ export function App() {
               aria-label="切換作用中的組別"
               style={{ width: "auto" }}
               value={activeGroupId}
-              onChange={(e) => setActiveGroupId(e.target.value)}
+              onChange={(e) => {
+                setActiveGroupId(e.target.value);
+                // 在專案頁切組：專案屬於前一組，留在原地會出現「頂欄是 B 組、內容是 A 組」的矛盾——導回作業台對齊情境
+                if (location.startsWith("/p/")) navigate("/");
+              }}
             >
               {groups.map((g) => (
                 <option key={g.groupId} value={g.groupId}>
@@ -209,6 +214,13 @@ export function App() {
           )}
           <span className="spacer" />
           {me.data && info.data?.mockMode && <span className="badge mock">示範模式</span>}
+          {/* 常駐「怎麼用」入口：困惑當下一眼找得到說明，不必想到去點自己的名字（UX 中：可發現性） */}
+          {me.data && (
+            <Link href="/help" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="怎麼用——白話說明與常見問題">
+              <Icon name="HelpCircle" size={14} />
+              <span className="topbar-help-label">怎麼用</span>
+            </Link>
+          )}
           {me.data && <PendingBadge groupId={activeGroupId} />}
           {me.data && <PointsBadge groupId={activeGroupId} />}
           {/* 頂欄收斂：次要入口（怎麼用/模型指南/選項/團隊管理/改密碼）＋登出全收進使用者選單 */}
@@ -236,11 +248,21 @@ export function App() {
               </p>
             ) : !me.data ? (
               <LoginPage />
-            ) : me.data.groups.length === 0 && !me.data.user.isSuperAdmin ? (
-              <div className="empty-state" style={{ marginTop: "var(--sp-32)" }}>
-                <h3>還沒有組別</h3>
-                <p>你的帳號還沒被加進任何組別——請聯絡你的組長或管理員把你加入組，加入後重新整理就能開始創作。</p>
-              </div>
+            ) : me.data.groups.length === 0 && !me.data.user.isSuperAdmin && !isAdmin ? (
+              // 團隊管理員不擋（!isAdmin）：他本人就能去「團隊管理」建組，擋住反而是自相矛盾的死路。
+              // /help 保持可達——等待被加入組的空檔正是最需要說明的時候
+              <Switch>
+                <Route path="/help"><HelpPage /></Route>
+                <Route>
+                  <div className="empty-state" style={{ marginTop: "var(--sp-32)" }}>
+                    <h3>你已成功加入 ✓ 還差一步</h3>
+                    <p>
+                      帳號建立完成，只是還沒被分進任何組別。請聯絡你的組長或管理員把你加入組——加入後重新整理這一頁，就能開始創作。
+                    </p>
+                    <p className="hint">等待的時候可以先<Link href="/help">看看怎麼用</Link>，了解點數、生成與審核是怎麼運作的。</p>
+                  </div>
+                </Route>
+              </Switch>
             ) : (
               <Switch>
                 <Route path="/">
