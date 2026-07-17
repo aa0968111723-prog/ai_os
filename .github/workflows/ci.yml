@@ -20,7 +20,8 @@ jobs:
 
   # 六套 e2e(auth/models/phase2/phase3/phase4/messages):每套「全新資料庫」起跑——
   # 重置 schema → 重啟伺服器(開機自動建表+種子)→ 跑套件;e2e_lib 讓任何 ❌ 都以非零碼收場。
-  # 環境與本機驗證口徑一致:FAL_MOCK=1(假生成不花錢)+ MOCK_BILLING=1(仍真扣點,額度護欄可驗)。
+  # 環境與本機驗證口徑一致:E2E_MOCK=1(測試專用假生成,不花錢)+ MOCK_BILLING=1(仍真扣點,額度護欄可驗)。
+  # 注意:正式部署一律真實模式(示範模式已移除),E2E_MOCK 只在這裡與本機測試設定。
   e2e:
     runs-on: ubuntu-latest
     services:
@@ -37,7 +38,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
       PORT: "3199"
-      FAL_MOCK: "1"
+      E2E_MOCK: "1"
       MOCK_BILLING: "1"
       SEED_ADMIN_EMAIL: admin@aidirector.local
       SEED_ADMIN_PASSWORD: test-admin-123

@@ -46,7 +46,7 @@ export async function replyAsAssistant(opts: {
   const cleanQ = question.replace(ASSISTANT_TRIGGER, "").trim();
 
   if (isMockMode()) {
-    await insertReply(`（假模式示範）真實模式我會讀專案與知識庫後回答你的問題：「${cleanQ.slice(0, 80)}」`);
+    await insertReply(`（測試模式）正式模式我會讀專案與知識庫後回答你的問題：「${cleanQ.slice(0, 80)}」`);
     return;
   }
 

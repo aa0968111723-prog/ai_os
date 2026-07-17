@@ -87,10 +87,6 @@ export function ProjectPage({ id }: { id: string }) {
   // 專案載入成功才啟用——FORBIDDEN/NOT_FOUND 頁不必開 WS 去被伺服器拒絕（hook 仍無條件呼叫，順序穩定）
   const collab = useCollab(id, !!project.data);
   const me = trpc.auth.me.useQuery();
-  // 示範（假生成）模式不扣點：生成鈕/確認彈窗要標「免費」，否則新手看到「−X 點」卻沒扣，
-  // 會以為沒生成成功（與 App 頂欄同 key 共用快取，不多打 API）
-  const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
-  const mockMode = !!info.data?.mockMode;
   // 世界觀三組 chips（主軸／調性／視覺風格）改由本專案所屬組的自訂選項供給（組長可在「選項」頁增修）
   const options = trpc.options.byGroup.useQuery(
     { groupId: project.data?.groupId ?? "" },
@@ -671,7 +667,7 @@ export function ProjectPage({ id }: { id: string }) {
                 disabled={disableReason != null || submit.isPending}
                 onClick={() => { setSubmitNotice(""); setConfirming(true); }}
               >
-                {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${model.points} 點${mockMode ? "・示範免費" : ""}）`}
+                {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${model.points} 點）`}
               </button>
               <span className="hint">{disableReason ?? "失敗自動退點・額度由管理員調整"}</span>
             </div>
@@ -688,7 +684,6 @@ export function ProjectPage({ id }: { id: string }) {
                 <p style={{ margin: "4px 0", fontSize: 13 }}>提示詞：{prompt.trim().slice(0, 80)}{prompt.trim().length > 80 ? "…" : ""}</p>
                 <p style={{ margin: "8px 0" }}>
                   預估 <b style={{ color: "var(--primary-ink)", fontSize: 18 }}>約 {model.points} 點</b>
-                  {mockMode && <span style={{ marginLeft: 6, color: "var(--gold-ink)", fontSize: 13 }}>（示範模式・本次免費，不會扣點）</span>}
                   {quota.data && (
                     <span className="hint" style={{ marginLeft: 8 }}>
                       {quota.data.totalRemaining != null ? `目前剩 ${quota.data.totalRemaining.toLocaleString()} 點` : "額度不限"}

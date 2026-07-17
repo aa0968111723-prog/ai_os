@@ -98,7 +98,7 @@ app.get("/api/ready", async (_req, res) => {
   }
 });
 
-// 假生成素材端點（FAL 假模式用；離線可測，交付包也抓得到）
+// 佔位素材端點：專案免費佔位縮圖（projects.ts）與 e2e 測試假素材共用；離線可用，交付包也抓得到
 const MOCK_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNsm7ryPwAFmwJT2F3EYAAAAABJRU5ErkJggg==",
   "base64",
@@ -130,7 +130,7 @@ app.get("/api/mock-asset/:kind", (req, res) => {
     res.setHeader("Content-Type", "audio/wav");
     return res.send(MOCK_WAV);
   }
-  // 影片亦回傳圖片位元組（假模式重點是流程可測；正式模式為真實 mp4）
+  // 影片亦回傳圖片位元組（測試模式重點是流程可測；正式模式為真實 mp4）
   res.setHeader("Content-Type", "image/png");
   res.send(MOCK_PNG);
 });
@@ -503,9 +503,11 @@ app.get("/api/selftest", async (req, res) => {
     await db.delete(schema.invites).where(eq(schema.invites.token, sha256(token)));
     return "建立/銷毀 OK";
   });
-  await run("生成模式", async () =>
-    isMockMode() ? "示範模式(免費)——填 FAL_KEY 並移除 FAL_MOCK 切正式" : "正式模式(FAL_KEY 已設)",
-  );
+  await run("生成模式", async () => {
+    if (isMockMode()) return "E2E 測試模式(E2E_MOCK=1,僅供自動化測試——正式部署請移除)";
+    if (!process.env.FAL_KEY) throw new Error("正式模式但 FAL_KEY 未設定——媒體生成會失敗,請到部署平台 Variables 填入金鑰");
+    return "正式模式(FAL_KEY 已設)";
+  });
   await run("儲存/交付(zip 引擎)", async () => {
     const { ZipArchive } = await import("archiver");
     const archive = new ZipArchive({ zlib: { level: 1 } });
@@ -624,7 +626,8 @@ function scheduleFeedbackSweep(): void {
 }
 
 const httpServer = app.listen(port, () => {
-  console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${isMockMode() ? "示範模式" : "正式模式"}）`);
+  const falMode = isMockMode() ? "E2E 測試模式（僅供自動化測試）" : process.env.FAL_KEY ? "正式模式" : "正式模式（⚠ FAL_KEY 未設定，媒體生成會失敗）";
+  console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${falMode}）`);
   try {
     ensureStorageDirs();
     console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（持久 Volume）" : "（本機模式）"}`);

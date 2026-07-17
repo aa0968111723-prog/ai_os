@@ -213,7 +213,8 @@ export function App() {
             </select>
           )}
           <span className="spacer" />
-          {me.data && info.data?.mockMode && <span className="badge mock">示範模式</span>}
+          {/* 只在 E2E_MOCK=1（自動化測試）下出現；正式部署一律真實模式，不會再看到這顆徽章 */}
+          {me.data && info.data?.mockMode && <span className="badge mock">測試模式</span>}
           {/* 常駐「怎麼用」入口：困惑當下一眼找得到說明，不必想到去點自己的名字（UX 中：可發現性） */}
           {me.data && (
             <Link href="/help" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="怎麼用——白話說明與常見問題">

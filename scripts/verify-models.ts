@@ -13,7 +13,7 @@
  * 金錢安全設計(防呆鏈,缺一即退出):
  *   1. --probe 的 id 必須存在於 shared/models.ts 的 MODELS(白名單,擋亂打端點);
  *   2. 需要來源素材的模型(needs 有值)一律拒絕探測——請在站內以素材實測;
- *   3. 環境必須有 FAL_KEY 且未設 FAL_MOCK(isMockMode() 為 false),否則探測無意義;
+ *   3. 環境必須有 FAL_KEY 且未設 E2E_MOCK(isMockMode() 為 false),否則探測無意義;
  *   4. 沒帶 --yes 只印「估 N 點(約 NT$N)」的費用預告,絕不送出請求;
  *   5. 一次只能探測一個模型(--probe 重複即拒),絕不批次——防連環扣費;
  *   6. 本腳本不改任何檔案內容(只寫報告),verified 改 true 一律由人工確認後手動改。
@@ -114,7 +114,7 @@ function runChecklist(): void {
     "",
     "1. 先跑 `npx tsx scripts/verify-models.ts --probe \"<模型id>\"`(不加 `--yes`):只顯示估點與費用預告,**不會**呼叫 fal。",
     "2. 確認金額後補上 `--yes` 才真的送出:`npx tsx scripts/verify-models.ts --probe \"<模型id>\" --yes`。",
-    "3. 防呆鏈(缺一即退出):id 必須在 shared/models.ts 白名單;需來源素材的模型一律拒絕;環境需 FAL_KEY 且未設 FAL_MOCK;必須帶 `--yes`。",
+    "3. 防呆鏈(缺一即退出):id 必須在 shared/models.ts 白名單;需來源素材的模型一律拒絕;環境需 FAL_KEY 且未設 E2E_MOCK;必須帶 `--yes`。",
     "4. 一次只探測一個模型,絕不批次——防連環扣費。",
     "5. 探測用各類別的最小中性輸入(如「測試」「回覆:OK」),輪詢至多 120 秒;影片/音樂類較慢,逾時不代表失敗,可至 fal.ai 後台的 requests 查看。",
     "6. 探測成功後,**人工**把 shared/models.ts 該模型的 `verified` 改 `true`,再重跑本腳本與 `npx tsx scripts/gen-model-docs.ts` 同步文件(本腳本不代改程式碼)。",
@@ -164,11 +164,11 @@ async function runProbe(probeId: string, yes: boolean): Promise<void> {
     process.exit(1);
   }
 
-  // 防呆 ③:必須是真實模式(有 FAL_KEY 且未設 FAL_MOCK)——假生成模式下探測驗證不了任何事
-  if (isMockMode()) {
-    const reason = !process.env.FAL_KEY ? "環境未設定 FAL_KEY" : "環境設了 FAL_MOCK=1(假生成模式)";
-    console.error(`✗ 目前為假生成模式(${reason}),探測需要真實呼叫 fal 才有意義,已退出。`);
-    console.error("  請在有 FAL_KEY、未設 FAL_MOCK 的環境執行。");
+  // 防呆 ③:必須可真實呼叫(有 FAL_KEY 且未設 E2E_MOCK)——測試假生成模式下探測驗證不了任何事
+  if (isMockMode() || !process.env.FAL_KEY) {
+    const reason = isMockMode() ? "環境設了 E2E_MOCK=1(測試假生成模式)" : "環境未設定 FAL_KEY";
+    console.error(`✗ 無法真實探測(${reason}),探測需要真實呼叫 fal 才有意義,已退出。`);
+    console.error("  請在有 FAL_KEY、未設 E2E_MOCK 的環境執行。");
     process.exit(1);
   }
 

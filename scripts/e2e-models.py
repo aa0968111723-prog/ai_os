@@ -1,5 +1,5 @@
 """多模態模型環境 e2e:模型目錄/挑選/來源輸入/四種輸出型態/自檢端點。
-前置:伺服器跑在 :3199、FAL_MOCK=1、FAL_MOCK_DELAY_MS 低(建議 800)、
+前置:伺服器跑在 :3199、E2E_MOCK=1、E2E_MOCK_DELAY_MS 低(建議 800)、
      SEED_ADMIN_EMAIL=admin@aidirector.local SEED_ADMIN_PASSWORD=test-admin-123
 """
 import json, time, urllib.request, urllib.parse, urllib.error

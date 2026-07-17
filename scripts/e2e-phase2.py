@@ -1,6 +1,6 @@
 # Phase 2 核心批次 e2e：審計日誌(2.2)/成本審核門檻(2.1)/版本回看(#4)/
 # 卡片同步+圖片描述(6.4/6.2)/助手擴權(6.5)/交付格式(#8)。
-# 前置：FAL_MOCK=1、MCP 可不設；伺服器 :3199、SEED_ADMIN_EMAIL=admin@aidirector.local、
+# 前置：E2E_MOCK=1、MCP 可不設；伺服器 :3199、SEED_ADMIN_EMAIL=admin@aidirector.local、
 #       SEED_ADMIN_PASSWORD=test-admin-123；建議全新資料庫(冪等性未保證)。
 # 用法：python3 scripts/e2e-phase2.py
 import json, time, urllib.request, urllib.parse, urllib.error
