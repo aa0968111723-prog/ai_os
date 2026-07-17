@@ -516,17 +516,30 @@ export function AuditLogCard() {
   );
 }
 
+/** "YYYY-MM-DD"（台北日）→「週一…週日」。用 UTC 建構避開瀏覽器本地時區把日期推前/後一天 */
+function weekdayLabel(isoDate: string): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  if (!y || !m || !d) return "";
+  const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=日
+  return ["週日", "週一", "週二", "週三", "週四", "週五", "週六"][wd];
+}
+
 /**
  * 點數消耗監控卡（盲點修補：無成本異常告警）。
  * 口徑＝毛消耗：只算扣點、退點不抵銷——看「實際發動了多少花費」，失敗退點才不會把異常日洗白。
  * alert 由後端統一判定（今日 > max(50, 前 7 日均值×3)），這裡只負責整行紅字呈現；
  * 長條用純 div 寬度比例（零圖表依賴、零 SVG 庫），60 秒輪詢跟上突發暴衝。
+ * 各組可展開到「組內成員近 7 天」，組長要的細節（誰在燒點）就在這一層。
  */
-function ConsumptionMonitorCard() {
+export function ConsumptionMonitorCard() {
   const stats = trpc.quota.consumptionStats.useQuery({}, { refetchInterval: 60_000 });
   const data = stats.data;
   // 長條相對「區間內最大值」等比縮放；max(1, ...) 避免全 0 時除以 0
   const maxPoints = data ? Math.max(1, ...data.perDay.map((d) => d.points)) : 1;
+  // 峰值日：整段區間毛消耗最高的那天——標一顆點，異常查因時一眼看到「哪天最燒」
+  const peakPoints = data ? Math.max(0, ...data.perDay.map((d) => d.points)) : 0;
+  // 各組長條相對「最燒的組」等比；同樣 max(1, ...) 防除以 0
+  const maxGroupPoints = data ? Math.max(1, ...data.byGroup.map((g) => g.weekPoints)) : 1;
   return (
     <div className="card" data-fb="點數消耗監控卡">
       <h2>點數消耗監控</h2>
@@ -554,27 +567,57 @@ function ConsumptionMonitorCard() {
               <span className="hint" style={{ marginLeft: 8 }}>7 日均值 {data.avg7}</span>
             )}
           </div>
-          {/* 逐日迷你長條：每列「MM/DD ▮▮▮ N」，寬度對齊區間最大值 */}
+          {/* 逐日迷你長條：每列「MM/DD 週N ▮▮▮ N」，寬度對齊區間最大值；峰值日整列點亮＋標「峰」 */}
           <div style={{ marginTop: 10 }}>
-            {data.perDay.map((d) => (
-              <div key={d.date} style={{ display: "flex", alignItems: "center", gap: 6, padding: "1px 0", fontSize: 12 }}>
-                <span className="hint" style={{ width: 38, flex: "none", fontFamily: "var(--mono)" }}>{d.date.slice(5).replace("-", "/")}</span>
-                <div style={{ flex: 1, height: 10, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
-                  <div style={{ width: `${(d.points / maxPoints) * 100}%`, height: "100%", background: "var(--primary)", borderRadius: 3 }} />
+            {data.perDay.map((d) => {
+              const isPeak = peakPoints > 0 && d.points === peakPoints;
+              return (
+                <div key={d.date} style={{ display: "flex", alignItems: "center", gap: 6, padding: "1px 0", fontSize: 12 }}>
+                  <span className="hint" style={{ width: 38, flex: "none", fontFamily: "var(--mono)" }}>{d.date.slice(5).replace("-", "/")}</span>
+                  <span className="hint" style={{ width: 26, flex: "none", fontSize: 11 }}>{weekdayLabel(d.date)}</span>
+                  <div style={{ flex: 1, height: 10, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
+                    <div style={{ width: `${(d.points / maxPoints) * 100}%`, height: "100%", background: isPeak ? "var(--primary-strong, var(--primary))" : "var(--primary)", borderRadius: 3, opacity: isPeak ? 1 : 0.82 }} />
+                  </div>
+                  {/* 峰值標記：整段最燒的一天，查因時直接鎖定 */}
+                  <span style={{ width: 20, flex: "none", textAlign: "center", fontSize: 10, color: "var(--primary-ink)" }}>{isPeak ? "峰" : ""}</span>
+                  <span style={{ width: 52, flex: "none", textAlign: "right", fontFamily: "var(--mono)", fontWeight: isPeak ? 700 : 400 }}>{d.points.toLocaleString()}</span>
                 </div>
-                <span style={{ width: 52, flex: "none", textAlign: "right", fontFamily: "var(--mono)" }}>{d.points.toLocaleString()}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <h3 style={{ fontSize: "var(--fs-16)", margin: "14px 0 4px" }}>各組近 7 天</h3>
+          <p className="hint" style={{ margin: "0 0 6px", fontSize: 12 }}>點各組展開看「組裡誰在燒點」。</p>
           {data.byGroup.length === 0 ? (
             <p className="hint" style={{ marginTop: 4 }}>近 7 天還沒有消耗紀錄。</p>
           ) : (
             data.byGroup.map((g, i) => (
-              <div key={g.groupId} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, padding: "4px 0", borderTop: i === 0 ? "none" : "1px solid var(--border-soft)" }}>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.groupName}</span>
-                <span style={{ flex: "none", fontFamily: "var(--mono)" }}>{g.weekPoints.toLocaleString()} 點</span>
-              </div>
+              <details key={g.groupId} open={data.byGroup.length === 1} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", padding: "6px 0" }}>
+                <summary style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", listStyle: "none" }}>
+                  <Icon name="ChevronRight" size={14} className="details-caret" />
+                  <span style={{ flex: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%" }}>{g.groupName}</span>
+                  {/* 組間比較長條：相對「最燒的組」等比，一眼看出占比 */}
+                  <div style={{ flex: 1, height: 8, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
+                    <div style={{ width: `${(g.weekPoints / maxGroupPoints) * 100}%`, height: "100%", background: "var(--primary)", borderRadius: 3 }} />
+                  </div>
+                  <span style={{ flex: "none", fontFamily: "var(--mono)" }}>{g.weekPoints.toLocaleString()} 點</span>
+                </summary>
+                {/* 組內成員近 7 天毛消耗（高到低）：組長要的「細節」——誰花了多少 */}
+                <div style={{ margin: "6px 0 2px", paddingLeft: 22 }}>
+                  {g.members.length === 0 ? (
+                    <p className="hint" style={{ margin: 0, fontSize: 12 }}>這個組近 7 天沒有可歸戶的消耗。</p>
+                  ) : (
+                    g.members.map((m) => (
+                      <div key={m.userId} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "2px 0" }}>
+                        <span style={{ flex: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "40%" }}>{m.name}</span>
+                        <div style={{ flex: 1, height: 7, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
+                          <div style={{ width: `${(m.weekPoints / Math.max(1, g.weekPoints)) * 100}%`, height: "100%", background: "var(--primary)", opacity: 0.7, borderRadius: 3 }} />
+                        </div>
+                        <span style={{ flex: "none", fontFamily: "var(--mono)", color: "var(--fg-secondary)" }}>{m.weekPoints.toLocaleString()} 點</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </details>
             ))
           )}
         </>

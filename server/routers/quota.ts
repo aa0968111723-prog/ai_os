@@ -165,34 +165,37 @@ export const quotaRouter = router({
   }),
 
   /**
-   * 點數消耗監控（盲點修補：無成本異常告警）——管理儀表資料源。
+   * 點數消耗監控（盲點修補：無成本異常告警）——管理／組長儀表資料源。
    * 口徑一律「毛消耗」＝只加總扣點列（delta<0 取絕對值），退點「不」抵銷：
    * 監控要看的是「實際發動了多少花費」；若讓退點沖銷扣點，大量失敗重試的異常日
    * （正是最該被看見的日子）在淨額口徑下反而近乎隱形。
    * （額度守門的 usedThisWeek 是淨額口徑且退點跟隨生成週，兩者用途不同，屬刻意差異。）
    * 日界採台北時區：比照 points.ts 的 TPE_OFFSET 平移法，(created_at + interval '8 hours')::date 即台北日期。
+   * 可見界：比照 audit.list——開發者看全站；組長／團隊管理員看自己「非純組員」身分的組（組長也看得到）。
+   * 用 authedProcedure（非 adminProcedure）：組長沒有團隊管理權，adminProcedure 會把他擋在門外。
    */
-  consumptionStats: adminProcedure
+  consumptionStats: authedProcedure
     .input(z.object({ days: z.number().int().min(7).max(30).optional() }).optional())
     .query(async ({ ctx, input }) => {
       const days = input?.days ?? 14;
 
-      // 可見範圍比照 audit.list：開發者看全站；一般團隊管理員只看 admin 身分展開的組
-      let adminGroupIds: string[] | null = null; // null＝不過濾（全站）
+      // 可見範圍比照 audit.list：開發者看全站；組長／管理員只看自己「非純組員」（leader／admin）身分的組。
+      // loadAuthState 已把管理的團隊展開成 admin 組員資格，故這裡一律用 role !== "member" 收斂即可。
+      let visibleGroupIds: string[] | null = null; // null＝不過濾（全站，僅開發者）
       if (!ctx.auth.user.isSuperAdmin) {
-        adminGroupIds = ctx.auth.groups.filter((g) => g.role === "admin").map((g) => g.groupId);
-        if (adminGroupIds.length === 0) {
-          // 沒有可管的組：回空資料（不拋錯，讓 UI 顯示「沒有可監控的組」即可）
+        visibleGroupIds = ctx.auth.groups.filter((g) => g.role !== "member").map((g) => g.groupId);
+        if (visibleGroupIds.length === 0) {
+          // 純組員（或無可管組的管理員）：回空資料（不拋錯，讓 UI 顯示「沒有可監控的組」即可）
           return {
             perDay: [] as Array<{ date: string; points: number }>,
             todayPoints: 0,
             avg7: 0,
             alert: false,
-            byGroup: [] as Array<{ groupId: string; groupName: string; weekPoints: number }>,
+            byGroup: [] as Array<{ groupId: string; groupName: string; weekPoints: number; members: Array<{ userId: string; name: string; weekPoints: number }> }>,
           };
         }
       }
-      const groupCond = adminGroupIds ? [inArray(schema.costLedger.groupId, adminGroupIds)] : [];
+      const groupCond = visibleGroupIds ? [inArray(schema.costLedger.groupId, visibleGroupIds)] : [];
 
       // 台北日界（同 points.ts dayStart 的平移法）：+8h 後用 UTC 欄位讀到的就是台北牆鐘時間
       const TPE_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -226,14 +229,40 @@ export const quotaRouter = router({
 
       // 各組近 7 天（含今天）毛消耗，高到低——告警時可快速定位是哪個組在燒
       const weekSinceUtc = new Date(tpeToday.getTime() - 6 * DAY_MS - TPE_OFFSET_MS);
+      const weekCond = and(gte(schema.costLedger.createdAt, weekSinceUtc), ...groupCond);
       const groupRows = await db
         .select({ groupId: schema.costLedger.groupId, groupName: schema.groups.name, weekPoints: gross })
         .from(schema.costLedger)
         .leftJoin(schema.groups, eq(schema.groups.id, schema.costLedger.groupId))
-        .where(and(gte(schema.costLedger.createdAt, weekSinceUtc), ...groupCond))
+        .where(weekCond)
         .groupBy(schema.costLedger.groupId, schema.groups.name);
+
+      // 再細節一點：各組再往下拆到「成員近 7 天」毛消耗——組長要看得出是組裡「誰」在燒點，
+      // 而不只是一個組總數。與 groupRows 同時段、同可見界，前端把成員掛回各自的組即可。
+      const memberRows = await db
+        .select({ groupId: schema.costLedger.groupId, userId: schema.costLedger.userId, name: schema.users.name, weekPoints: gross })
+        .from(schema.costLedger)
+        .leftJoin(schema.users, eq(schema.users.id, schema.costLedger.userId))
+        .where(weekCond)
+        .groupBy(schema.costLedger.groupId, schema.costLedger.userId, schema.users.name);
+      // 依 groupId 收成 map：只留真的有毛消耗（>0）的成員，組內由高到低
+      const membersByGroup = new Map<string, Array<{ userId: string; name: string; weekPoints: number }>>();
+      for (const r of memberRows) {
+        const pts = Number(r.weekPoints);
+        if (pts <= 0) continue; // 只退點/淨零的成員不列（避免一排 0 稀釋重點）
+        const list = membersByGroup.get(r.groupId) ?? [];
+        list.push({ userId: r.userId, name: r.name ?? "（已離開的成員）", weekPoints: pts });
+        membersByGroup.set(r.groupId, list);
+      }
+      for (const list of membersByGroup.values()) list.sort((a, b) => b.weekPoints - a.weekPoints);
+
       const byGroup = groupRows
-        .map((r) => ({ groupId: r.groupId, groupName: r.groupName ?? "（已不存在的組）", weekPoints: Number(r.weekPoints) }))
+        .map((r) => ({
+          groupId: r.groupId,
+          groupName: r.groupName ?? "（已不存在的組）",
+          weekPoints: Number(r.weekPoints),
+          members: membersByGroup.get(r.groupId) ?? [],
+        }))
         .sort((a, b) => b.weekPoints - a.weekPoints);
 
       return {

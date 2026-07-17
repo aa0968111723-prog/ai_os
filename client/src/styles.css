@@ -350,6 +350,11 @@ button:focus-visible { border-radius: 999px; }
   animation: sk-shimmer 1.2s ease-in-out infinite; }
 @keyframes sk-shimmer { 100% { transform: translateX(100%); } }
 
+/* 消耗監控的各組展開列：藏掉原生三角、用 .details-caret 隨開合轉 90° */
+details > summary::-webkit-details-marker { display: none; }
+.details-caret { flex: none; color: var(--fg-secondary); transition: transform var(--dur-base) var(--ease-out); }
+details[open] > summary .details-caret { transform: rotate(90deg); }
+
 /* ─── 細緻進場動效（僅 opacity/transform） ─── */
 .confirm-panel { animation: fade-rise var(--dur-base) var(--ease-out); }
 details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease-out); }
