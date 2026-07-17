@@ -382,8 +382,16 @@ export const projectsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
-      requireGroup(ctx.auth, asset.groupId);
+      const role = requireGroup(ctx.auth, asset.groupId);
       await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3：檢視者不能鎖定／解鎖
+      // 解鎖＝移除刪除保護：比照 deleteAsset 限「上傳者本人或組長以上」，否則任何組員可解鎖固定素材
+      // （師父原音/開示/配樂）再刪掉——繞過整個鎖定保護。上鎖（保護）不限制。
+      if (input.locked === false) {
+        const isUploader = asset.uploadedBy === ctx.auth.user.id;
+        if (!isUploader && role === "member") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "只有上傳者本人或組長以上可以解除鎖定" });
+        }
+      }
       const [updated] = await db
         .update(schema.assets)
         .set({ locked: input.locked })
@@ -398,8 +406,15 @@ export const projectsRouter = router({
     .mutation(async ({ ctx, input }) => {
       const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });
-      requireGroup(ctx.auth, asset.groupId);
+      const role = requireGroup(ctx.auth, asset.groupId);
       await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3：檢視者不能改名
+      // 鎖定的固定素材（師父原音/開示/配樂）改名會改變交付包內容，比照刪除限「上傳者本人或組長以上」
+      if (asset.locked) {
+        const isUploader = asset.uploadedBy === ctx.auth.user.id;
+        if (!isUploader && role === "member") {
+          throw new TRPCError({ code: "FORBIDDEN", message: "鎖定的固定素材只有上傳者本人或組長以上可以改名" });
+        }
+      }
       const [updated] = await db
         .update(schema.assets)
         .set({ title: input.title })

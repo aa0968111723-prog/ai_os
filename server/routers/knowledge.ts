@@ -241,8 +241,9 @@ export const knowledgeRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const [row] = await db.select().from(schema.knowledge).where(eq(schema.knowledge.id, input.id));
-      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+      // isNull(deletedAt)：回收桶裡的知識不得被編輯／灌版本（與 get/listVersions/restoreVersion 一致）
+      const [row] = await db.select().from(schema.knowledge).where(and(eq(schema.knowledge.id, input.id), isNull(schema.knowledge.deletedAt)));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到知識（可能已刪除）" });
       requireGroup(ctx.auth, row.groupId);
       await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
       // 版本歷史（#29）：覆寫前，先把「更新前」的舊全文存成一版快照——

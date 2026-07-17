@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -34,33 +34,37 @@ export async function startWorkflowCore(input: StartWorkflowCoreInput) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   await input.assertAccess(project); // 多組隔離（可含 2.3 專案級 ACL）
-  // 併發守門：同人同專案一次只跑一條（check-then-insert 有極短競態視窗，
-  // 但每步扣點在 runner 端有冪等防護，這裡只求把重複點擊擋成好懂的錯誤）
-  const [active] = await db
-    .select({ id: schema.workflowRuns.id })
-    .from(schema.workflowRuns)
-    .where(
-      and(
-        eq(schema.workflowRuns.projectId, project.id),
-        eq(schema.workflowRuns.userId, input.userId),
-        eq(schema.workflowRuns.status, "running"),
-      ),
-    )
-    .limit(1);
-  if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "你已有一條工作流在跑——等它完成或先按停止" });
-  const steps: RunStep[] = preset.steps.map((s) => ({ note: s.note, status: "pending" }));
-  const [run] = await db
-    .insert(schema.workflowRuns)
-    .values({
-      projectId: project.id,
-      groupId: project.groupId,
-      userId: input.userId,
-      presetId: preset.id,
-      prompt: input.prompt.trim(),
-      steps,
-    })
-    .returning();
-  return run;
+  // 併發守門：同人同專案一次只跑一條。以 advisory xact lock（classifier 3，與 points=0/approvals=1/
+  // 拆分鏡=2 不撞）序列化「檢查有無在跑＋建 run」，徹底關掉 check-then-insert 的競態窗口——避免並發
+  // 雙擊建出兩條 run、雙重扣點（原本只靠 runner 端冪等兜底，這裡從源頭擋掉）。
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${project.id + ":" + input.userId}), 3)`);
+    const [active] = await tx
+      .select({ id: schema.workflowRuns.id })
+      .from(schema.workflowRuns)
+      .where(
+        and(
+          eq(schema.workflowRuns.projectId, project.id),
+          eq(schema.workflowRuns.userId, input.userId),
+          eq(schema.workflowRuns.status, "running"),
+        ),
+      )
+      .limit(1);
+    if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "你已有一條工作流在跑——等它完成或先按停止" });
+    const steps: RunStep[] = preset.steps.map((s) => ({ note: s.note, status: "pending" }));
+    const [run] = await tx
+      .insert(schema.workflowRuns)
+      .values({
+        projectId: project.id,
+        groupId: project.groupId,
+        userId: input.userId,
+        presetId: preset.id,
+        prompt: input.prompt.trim(),
+        steps,
+      })
+      .returning();
+    return run;
+  });
 }
 
 /** 工作流執行（伺服器背景推進版）：start 只建 run，實際送出由 workflowRunner 的下一個 tick 接手 */

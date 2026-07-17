@@ -9,7 +9,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { getModel, endpointOf, MODELS, CATEGORIES, tierLabel, type ProjectFormat, type ModelCategory, type ModelTier } from "../../shared/models";
-import { falSubmit } from "./fal";
+import { falSubmit, isMockMode } from "./fal";
 import { reserveQuota, refund } from "./points";
 import { sanitizeAuditInput } from "./audit";
 // 重用網頁端的注入判斷（generation.ts 不 import 本檔，無循環相依）：
@@ -167,34 +167,43 @@ async function runTool(admin: typeof schema.users.$inferSelect, name: string, ar
       .values({ projectId: project.id, groupId: project.groupId, userId: admin.id, modelId: model.id, kind: model.kind, prompt: userPrompt, sourceUrl, params: falInput, pointsEst: model.points })
       .returning();
     // 與網頁端一致：原子守門＋扣點（舊版直接扣、完全不檢查額度，MCP 可無限刷爆總預算）
-    // 拋例外也要刪孤兒列（否則被陳屍清掃憑空退點）——與網頁端同一防護
-    let quotaError: string | null;
-    try {
-      quotaError = await reserveQuota(admin.id, project.groupId, model.points, `MCP 生成 ${model.label}`, gen.id);
-    } catch (err) {
-      await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
-      throw new Error(`系統忙碌，請稍後再試（未扣點）：${err instanceof Error ? err.message : String(err)}`);
-    }
-    if (quotaError) {
-      await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
-      throw new Error(quotaError);
+    // 假生成模式（無 FAL_KEY / FAL_MOCK）不扣點——與網頁端 generationCore 同一防線，否則 MCP 在測試
+    // 模式仍寫扣點列，永久污染總預算帳本與超管額度。拋例外也要刪孤兒列（否則被陳屍清掃憑空退點）。
+    const mock = isMockMode();
+    if (!mock) {
+      let quotaError: string | null;
+      try {
+        quotaError = await reserveQuota(admin.id, project.groupId, model.points, `MCP 生成 ${model.label}`, gen.id);
+      } catch (err) {
+        await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
+        throw new Error(`系統忙碌，請稍後再試（未扣點）：${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (quotaError) {
+        await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
+        throw new Error(quotaError);
+      }
     }
     try {
       const { requestId } = await falSubmit(endpointOf(model), model.kind, falInput);
       await db.update(schema.generations).set({ requestId, status: "running" }).where(eq(schema.generations.id, gen.id));
-      return { generationId: gen.id, status: "running", points: model.points };
+      return { generationId: gen.id, status: "running", points: mock ? 0 : model.points };
     } catch (err) {
-      // fal 送出失敗：退點＋標記失敗（舊版吞掉例外還回報 running，永遠卡在假的進行中）
-      await refund(admin.id, project.groupId, model.points, "MCP 生成送出失敗退回", gen.id);
-      await db.update(schema.generations).set({ status: "failed", error: String(err), pointsRefunded: model.points }).where(eq(schema.generations.id, gen.id));
+      // fal 送出失敗：退點＋標記失敗（舊版吞掉例外還回報 running，永遠卡在假的進行中）。
+      // 假模式沒扣點就不退，避免憑空生出正向帳本列。
+      if (!mock) await refund(admin.id, project.groupId, model.points, "MCP 生成送出失敗退回", gen.id);
+      await db.update(schema.generations).set({ status: "failed", error: String(err), pointsRefunded: mock ? 0 : model.points }).where(eq(schema.generations.id, gen.id));
       throw new Error(`生成送出失敗，點數已退回：${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   if (name === "post_message") {
+    // 比照網頁端驗證 body：不可空白、限長，避免 MCP 略過前端驗證寫入空訊息或超大留言
+    const body = String(args.body ?? "").trim();
+    if (!body) throw new Error("body 不可為空");
+    if (body.length > 2000) throw new Error("留言太長（最多 2000 字）");
     const [msg] = await db
       .insert(schema.messages)
-      .values({ groupId: project.groupId, projectId: project.id, userId: admin.id, kind: "text", body: String(args.body ?? "") })
+      .values({ groupId: project.groupId, projectId: project.id, userId: admin.id, kind: "text", body })
       .returning();
     return { messageId: msg.id };
   }

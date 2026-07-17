@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { aliasedTable, and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { aliasedTable, and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -241,6 +241,18 @@ export const scenesRouter = router({
       await getProjectChecked(ctx, scene.projectId, true);
       const prompt = input.prompt ?? scene.prompt ?? "";
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
+      // 伺服器端防抖：這一格已有進行中的「畫面」生成就擋下——本鈕直接扣點、無二次確認，快速雙擊會重複送出、
+      // 重複扣點。以「進行中(queued/running)＋同格＋visual 角色」查有無在跑（catch 常見雙擊；非強一致鎖）。
+      const [pendingVisual] = await db
+        .select({ id: schema.generations.id })
+        .from(schema.generations)
+        .where(and(
+          eq(schema.generations.sceneId, scene.id),
+          sql`(${schema.generations.sceneRole} is null or ${schema.generations.sceneRole} = 'visual')`,
+          inArray(schema.generations.status, ["queued", "running"]),
+        ))
+        .limit(1);
+      if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成中，請稍候再生成" });
       // 額度／守門／失敗退點全由 submitGenerationCore 既有邏輯處理（走 effectivePrompt 世界觀注入）
       const gen = await submitGenerationCore({
         userId: ctx.auth.user.id,
@@ -266,12 +278,24 @@ export const scenesRouter = router({
       await getProjectChecked(ctx, scene.projectId, true);
       const prompt = scene.voiceover ?? "";
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有配音詞，請先在分鏡裡填" });
-      // 只放行音訊(TTS)模型：否則傳個圖模會扣點又把圖片塞進 narrationAssetId（audio 播不出）
+      // 只放行「文字轉語音(TTS)」類：text-to-audio（配樂/音效）雖同為 kind=audio，但會生出音樂而非旁白，
+      // 混入 narration 槽＝扣點又拿到錯內容，故以 category 精確把關（不能只看 kind）。
       const modelId = input.modelId ?? "fal-ai/kokoro/mandarin-chinese";
       const model = getModel(modelId);
-      if (!model || model.kind !== "audio") {
+      if (!model || model.category !== "text-to-speech") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "配音需要用語音（TTS）模型" });
       }
+      // 伺服器端防抖：同格已有進行中的「配音」生成就擋下，避免快速雙擊重複送出、重複扣點（本鈕直接扣點無二次確認）
+      const [pendingVoice] = await db
+        .select({ id: schema.generations.id })
+        .from(schema.generations)
+        .where(and(
+          eq(schema.generations.sceneId, scene.id),
+          eq(schema.generations.sceneRole, "narration"),
+          inArray(schema.generations.status, ["queued", "running"]),
+        ))
+        .limit(1);
+      if (pendingVoice) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成配音，請稍候" });
       // 額度／守門／失敗退點全由 submitGenerationCore 既有邏輯處理
       const gen = await submitGenerationCore({
         userId: ctx.auth.user.id,

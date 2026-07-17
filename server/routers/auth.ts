@@ -20,14 +20,16 @@ import {
   loadAuthState,
 } from "../services/auth";
 
-// 取用戶端 IP 供 per-IP 限流：反代後真實 IP 在 x-forwarded-for 第一段（最靠近用戶）。
-// index.ts 不歸此次改動，故不依賴 Express trust proxy，直接由 header 解析；無 header 時退回 socket。
+// 取用戶端 IP 供 per-IP 限流：反代（Railway 邊緣）把「它所見的真實用戶 IP」附加在 x-forwarded-for
+// 「最右段」；最左段是用戶端可自行偽造的（X-Forwarded-For: 假IP, 真IP）。限流必須取最右段（可信代理附加），
+// 否則攻擊者每次換一個假的最左段 IP 即可繞過每 IP 撞庫上限。無 header 時退回 socket 位址。
 function clientIp(req: Request): string | undefined {
   const xff = req.headers["x-forwarded-for"];
-  const raw = Array.isArray(xff) ? xff[0] : xff;
+  const raw = Array.isArray(xff) ? xff.join(",") : xff;
   if (raw) {
-    const first = raw.split(",")[0]?.trim();
-    if (first) return first;
+    const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last) return last;
   }
   return req.socket?.remoteAddress ?? undefined;
 }
@@ -45,7 +47,8 @@ export const authRouter = router({
     .input(z.object({ email: z.string().email("email 格式不對"), password: z.string().min(1, "請填密碼") }))
     .mutation(async ({ ctx, input }) => {
       const email = input.email.toLowerCase().trim();
-      const rate = checkLoginRate(email, clientIp(ctx.req));
+      const ip = clientIp(ctx.req);
+      const rate = checkLoginRate(email, ip);
       if (!rate.ok) {
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `嘗試太多次，請約 ${rate.retryAfterMin} 分鐘後再試` });
       }
@@ -55,7 +58,8 @@ export const authRouter = router({
       if (!user || user.status !== "active" || !passwordOk) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "email 或密碼不正確" });
       }
-      clearLoginRate(email);
+      // 成功登入把這次嘗試從「每 IP 撞庫」計數移除——否則共用出口 IP 的小團隊正常登入會把自己鎖死
+      clearLoginRate(email, ip);
       const token = await createSession(user.id);
       setSessionCookie(ctx.res, token);
       return loadAuthState(user.id);

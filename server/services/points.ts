@@ -13,6 +13,21 @@ export interface PointsSettings {
   defaultDailyPoints: number | null;
 }
 
+/**
+ * 安全解析點數環境變數：未設→用預設；設為 0→不限（noLimit 慣例）；設成非數字/負數→退回安全預設並警告。
+ * 關鍵：不可讓打錯的環境變數（如 TOTAL_BUDGET_POINTS="5,000"）靜默變成 null＝關閉金流閘（fail-open 燒錢）。
+ */
+function envPoints(name: string, fallback: number): number | null {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === "") return fallback || null; // 未設：用預設（預設 0 亦代表不限）
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    console.warn(`[points] 環境變數 ${name}="${raw}" 不是有效點數，改用安全預設 ${fallback}（不關閉額度閘）`);
+    return fallback || null;
+  }
+  return n || null; // 明確的 0 → null（不限），為既有慣例
+}
+
 /** 讀全域設定（無列則以環境預設建立：5000／300／不限，之後全由管理員在系統內調） */
 export async function getSettings(): Promise<PointsSettings> {
   const [row] = await db.select().from(schema.settings).where(eq(schema.settings.key, "global"));
@@ -24,9 +39,9 @@ export async function getSettings(): Promise<PointsSettings> {
     };
   }
   const seeded = {
-    totalBudgetPoints: Number(process.env.TOTAL_BUDGET_POINTS ?? 5000) || null,
-    defaultWeeklyPoints: Number(process.env.WEEKLY_QUOTA_POINTS ?? 300) || null,
-    defaultDailyPoints: Number(process.env.DAILY_QUOTA_POINTS ?? 0) || null, // 預設不限日
+    totalBudgetPoints: envPoints("TOTAL_BUDGET_POINTS", 5000),
+    defaultWeeklyPoints: envPoints("WEEKLY_QUOTA_POINTS", 300),
+    defaultDailyPoints: envPoints("DAILY_QUOTA_POINTS", 0), // 預設不限日
   };
   await db.insert(schema.settings).values({ key: "global", ...seeded }).onConflictDoNothing();
   return seeded;
@@ -168,13 +183,16 @@ export async function reserveQuota(
       }
     }
     if (quota != null) {
-      // 週歸屬同 usedThisWeek：退點跟隨生成建立週，守門與顯示口徑一致
+      // 週歸屬同 usedThisWeek：退點跟隨生成建立週，守門與顯示口徑一致。
+      // groupId 過濾（關鍵）：週額度是「每人每週在這一組」的上限，用量也只能算這一組——否則多組
+      // 使用者的跨組總用量會被拿去比單組上限而誤擋（在 A 組沒用完卻因 B 組的用量被擋在 A 組生成）。
       const [w] = await tx
         .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
         .from(schema.costLedger)
         .leftJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
         .where(and(
           eq(schema.costLedger.userId, userId),
+          eq(schema.costLedger.groupId, groupId),
           gte(sql`coalesce(${schema.generations.createdAt}, ${schema.costLedger.createdAt})`, weekStart()),
         ));
       const weekly = Number(w?.used ?? 0);

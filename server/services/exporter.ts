@@ -289,6 +289,21 @@ const REMOTE_FETCH_TIMEOUT_MS = 30_000;
 const REMOTE_FILE_MAX_BYTES = 200 * 1024 * 1024;
 
 /**
+ * 抓遠端素材：逾時「只涵蓋連線/首位元組」階段（防掛住、永不回應的外部網址），response headers 一到就解除。
+ * 關鍵：串流階段不再套總逾時——否則大型影片正常下載超過 30 秒會被攔腰斬斷、毀掉整份交付 ZIP。
+ * 串流階段仍受 clientAbort 控制（用戶端關閉下載即停止），大檔另有 REMOTE_FILE_MAX_BYTES 上限把關。
+ */
+async function fetchRemoteAsset(url: string, clientSignal: AbortSignal) {
+  const conn = new AbortController();
+  const timer = setTimeout(() => conn.abort(new Error("遠端連線逾時")), REMOTE_FETCH_TIMEOUT_MS);
+  try {
+    return await proxyFetch(url, { signal: AbortSignal.any([clientSignal, conn.signal]) });
+  } finally {
+    clearTimeout(timer); // headers 已到（或已失敗）→ 解除連線逾時，讓後續 body 串流不受總逾時斬斷
+  }
+}
+
+/**
  * append 並等待該 entry 寫入下游完成——archiver 內部佇列不設上限，
  * 迴圈內連發 append 會同時持有所有已排入的來源，峰值記憶體≈整包大小；
  * 逐筆等待讓背壓生效，記憶體只留單一 entry 的串流緩衝。
@@ -423,9 +438,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
         source = createReadStream(abs);
       } else if (asset.url && /^https?:\/\//.test(asset.url)) {
         // 30 秒逾時涵蓋連線與串流階段；用戶端斷線也會中止進行中的抓取
-        const fileRes = await proxyFetch(asset.url, {
-          signal: AbortSignal.any([clientAbort.signal, AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS)]),
-        });
+        const fileRes = await fetchRemoteAsset(asset.url, clientAbort.signal);
         if (!fileRes.ok || !fileRes.body) {
           void fileRes.body?.cancel().catch(() => {}); // 不讀的 body 要取消，避免連線被佔住
           console.warn(`[export] 素材下載失敗 ${asset.url}: HTTP ${fileRes.status}`);
@@ -489,9 +502,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
         await stat(abs);
         source = createReadStream(abs);
       } else if (narr.url && /^https?:\/\//.test(narr.url)) {
-        const fileRes = await proxyFetch(narr.url, {
-          signal: AbortSignal.any([clientAbort.signal, AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS)]),
-        });
+        const fileRes = await fetchRemoteAsset(narr.url, clientAbort.signal);
         if (!fileRes.ok || !fileRes.body) {
           void fileRes.body?.cancel().catch(() => {});
           console.warn(`[export] 旁白下載失敗 ${narr.url}: HTTP ${fileRes.status}`);
@@ -557,9 +568,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
         await stat(abs);
         source = createReadStream(abs);
       } else if (asset.url && /^https?:\/\//.test(asset.url)) {
-        const fileRes = await proxyFetch(asset.url, {
-          signal: AbortSignal.any([clientAbort.signal, AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS)]),
-        });
+        const fileRes = await fetchRemoteAsset(asset.url, clientAbort.signal);
         if (!fileRes.ok || !fileRes.body) {
           void fileRes.body?.cancel().catch(() => {});
           warnings.push(`鎖定素材「${asset.title}」下載失敗（HTTP ${fileRes.status}），未入包`); // 與場景素材分支一致：非 OK 要記警告

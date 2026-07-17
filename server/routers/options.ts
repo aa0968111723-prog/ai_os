@@ -159,19 +159,22 @@ export const optionsRouter = router({
     .input(z.object({ groupId: z.string().uuid(), type: optionTypeSchema, orderedIds: z.array(z.string().uuid()) }))
     .mutation(async ({ ctx, input }) => {
       requireLeader(ctx.auth, input.groupId);
-      // 逐筆寫 sortOrder；限定 groupId+type，避免跨組或跨類型被竄改
-      for (let i = 0; i < input.orderedIds.length; i++) {
-        await db
-          .update(schema.groupOptions)
-          .set({ sortOrder: i })
-          .where(
-            and(
-              eq(schema.groupOptions.id, input.orderedIds[i]),
-              eq(schema.groupOptions.groupId, input.groupId),
-              eq(schema.groupOptions.type, input.type),
-            ),
-          );
-      }
+      // 逐筆寫 sortOrder 包在單一交易：半途失敗整批回滾，避免只寫了一半→sortOrder 重複／跳號的錯亂排序。
+      // 限定 groupId+type，避免跨組或跨類型被竄改。
+      await db.transaction(async (tx) => {
+        for (let i = 0; i < input.orderedIds.length; i++) {
+          await tx
+            .update(schema.groupOptions)
+            .set({ sortOrder: i })
+            .where(
+              and(
+                eq(schema.groupOptions.id, input.orderedIds[i]),
+                eq(schema.groupOptions.groupId, input.groupId),
+                eq(schema.groupOptions.type, input.type),
+              ),
+            );
+        }
+      });
       return { ok: true as const };
     }),
 });
