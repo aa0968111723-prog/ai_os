@@ -5,7 +5,10 @@ import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } 
 import { db, schema } from "../db";
 import { FEEDBACK_CATEGORY_VALUES } from "../../shared/options";
 import { isFeedbackShotPath } from "../services/storage";
-import { runFeedbackAgentOnce } from "../services/feedbackAgent";
+import { runFeedbackAgentOnce, triageReportNow } from "../services/feedbackAgent";
+
+/** 送出後即時分診的類別：影響使用（壞掉／卡關）的先跑,不必等 3 天排程；其餘留給排程批次收尾。 */
+const INSTANT_TRIAGE_CATEGORIES = new Set(["bug", "stuck"]);
 import { isEmailConfigured } from "../services/email";
 
 /** 合法狀態（與 schema feedback_reports.status 一致）——過濾與更新共用 */
@@ -62,6 +65,11 @@ export const feedbackReportsRouter = router({
           screenshotPath: input.screenshotPath ?? null,
         })
         .returning({ id: schema.feedbackReports.id });
+      // 高影響類別（壞掉／卡關）送出當下就分診＋回覆，不必等 3 天排程。
+      // fire-and-forget：不阻塞送出回應（LLM 呼叫可能數秒）,triageReportNow 自身全程容錯。
+      if (INSTANT_TRIAGE_CATEGORIES.has(input.category)) {
+        void triageReportNow(row.id);
+      }
       return { id: row.id };
     }),
 
@@ -98,6 +106,31 @@ export const feedbackReportsRouter = router({
 
       return rows.map((r) => ({ ...r.report, userName: r.userName ?? "?", groupName: r.groupName ?? "—" }));
     }),
+
+  /**
+   * 我的回報（追蹤頁用）：目前使用者送出的所有元件回饋,新到舊,含狀態與回饋代理的分診/回覆。
+   * 讓回報者送完不斷線——看得到被處理到哪、代理回了什麼（email 常未設定或漏收,站內查最可靠）。
+   */
+  mine: authedProcedure.query(async ({ ctx }) => {
+    return db
+      .select({
+        id: schema.feedbackReports.id,
+        category: schema.feedbackReports.category,
+        pages: schema.feedbackReports.pages,
+        targetLabel: schema.feedbackReports.targetLabel,
+        note: schema.feedbackReports.note,
+        status: schema.feedbackReports.status,
+        agentReviewedAt: schema.feedbackReports.agentReviewedAt,
+        agentSeverity: schema.feedbackReports.agentSeverity,
+        agentReply: schema.feedbackReports.agentReply,
+        emailStatus: schema.feedbackReports.emailStatus,
+        createdAt: schema.feedbackReports.createdAt,
+      })
+      .from(schema.feedbackReports)
+      .where(eq(schema.feedbackReports.userId, ctx.auth.user.id))
+      .orderBy(desc(schema.feedbackReports.createdAt))
+      .limit(100);
+  }),
 
   /** 改狀態：只有審閱者（該組組長・管理員或超管）可改；純作者不能改自己回饋的狀態 */
   updateStatus: authedProcedure

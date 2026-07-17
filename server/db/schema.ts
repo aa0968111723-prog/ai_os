@@ -345,6 +345,9 @@ export const feedback = pgTable("feedback", {
   worst: text("worst"),
   note: text("note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  /** 重送＝修改（一人一組一份）。舊版靠竄改 createdAt 讓更新浮到最新，會抹掉真正建立時間；
+   * 改用獨立 updatedAt：createdAt 保留初次填答時刻，彙整/預填以 updatedAt 排序。 */
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 /** 模型目錄(啟動時從 shared/models.ts 同步;代理/報表可直接 SQL 查「哪個模型適合」) */

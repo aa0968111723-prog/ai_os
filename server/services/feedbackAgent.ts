@@ -160,6 +160,108 @@ async function triageOne(report: ReportForTriage): Promise<Triage> {
   }
 }
 
+/** feedback_reports 完整列型別（排程巡檢與即時分診共用） */
+type FeedbackReportRow = typeof schema.feedbackReports.$inferSelect;
+
+/**
+ * 分診一筆並回覆回報者：triage → 寄信 → 回填 agent* 欄位、狀態 open→reviewing。回傳是否成功寄出。
+ * guardUnreviewed=true：只在該筆仍未被分診（agentReviewedAt IS NULL）才寫回——即時分診與排程巡檢
+ * 若同時處理同一筆，後者的 UPDATE 會 no-op，不覆寫先寫回的結果。單筆硬失敗往外拋，由呼叫端記錄後略過。
+ */
+async function reviewAndReplyOne(
+  report: FeedbackReportRow,
+  opts: { guardUnreviewed?: boolean } = {},
+): Promise<{ emailed: boolean }> {
+  const triage = await triageOne(report);
+  const { subject, text } = buildReplyEmail(report, triage);
+
+  // 寄信給回報者（先查信箱；查不到或無效＝failed 落地，待補寄掃描重試）
+  let emailStatus: EmailStatus = "skipped";
+  let emailedAt: Date | null = null;
+  let emailed = false;
+  const [author] = await db
+    .select({ email: schema.users.email })
+    .from(schema.users)
+    .where(eq(schema.users.id, report.userId));
+  if (author?.email) {
+    const sent = await sendEmail({ to: author.email, subject, text });
+    emailStatus = sent.status;
+    if (sent.status === "sent") {
+      emailedAt = new Date();
+      emailed = true;
+    } else if (sent.status === "failed") {
+      console.warn(`[feedbackAgent] 回覆信寄送失敗（回饋 ${report.id}）：${sent.detail}`);
+    }
+  } else {
+    emailStatus = "failed";
+    console.warn(`[feedbackAgent] 回報者無信箱可寄（回饋 ${report.id}）`);
+  }
+
+  const where = opts.guardUnreviewed
+    ? and(eq(schema.feedbackReports.id, report.id), isNull(schema.feedbackReports.agentReviewedAt))
+    : eq(schema.feedbackReports.id, report.id);
+  await db
+    .update(schema.feedbackReports)
+    .set({
+      agentReviewedAt: new Date(),
+      agentSeverity: triage.severity,
+      agentSummary: triage.summary,
+      agentFix: triage.fix,
+      agentReply: triage.reply.trim() || text,
+      emailStatus,
+      emailedAt,
+      // 代理已接手＝進「處理中」，工程從此清單挑修復（人工可再改回/標已處理）
+      status: "reviewing",
+    })
+    .where(where);
+  return { emailed };
+}
+
+/**
+ * 補寄先前寄送失敗的回覆信（信箱機制未設定時整段略過）。
+ * 用已落地的 agentReply 重寄、不重新分診——分診結果已定,失敗的只是「送信」這一步。
+ * 舊版一旦分診過（agentReviewedAt 有值、status→reviewing）就再也撈不到,failed 的草稿永遠躺著不會補寄。
+ */
+async function resendFailedReplies(limit: number): Promise<number> {
+  if (!isEmailConfigured()) return 0;
+  const rows = await db
+    .select()
+    .from(schema.feedbackReports)
+    .where(eq(schema.feedbackReports.emailStatus, "failed"))
+    .orderBy(asc(schema.feedbackReports.createdAt))
+    .limit(limit);
+  let resent = 0;
+  for (const report of rows) {
+    try {
+      const [author] = await db
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, report.userId));
+      if (!author?.email) continue; // 仍無信箱可寄，維持 failed，待補上信箱後再重試
+      const triage: Triage = {
+        severity: report.agentSeverity ?? "medium",
+        summary: report.agentSummary ?? "",
+        fix: report.agentFix ?? "",
+        reply: report.agentReply ?? "",
+      };
+      const { subject, text } = buildReplyEmail(report, triage);
+      const sent = await sendEmail({ to: author.email, subject, text });
+      if (sent.status === "sent") {
+        await db
+          .update(schema.feedbackReports)
+          .set({ emailStatus: "sent", emailedAt: new Date() })
+          .where(eq(schema.feedbackReports.id, report.id));
+        resent += 1;
+      } else if (sent.status === "failed") {
+        console.warn(`[feedbackAgent] 補寄仍失敗（回饋 ${report.id}）：${sent.detail}`);
+      }
+    } catch (err) {
+      console.warn(`[feedbackAgent] 補寄單筆失敗（回饋 ${report.id}），略過：`, err instanceof Error ? err.message : err);
+    }
+  }
+  return resent;
+}
+
 let running = false;
 
 export interface AgentRunResult {
@@ -203,44 +305,8 @@ export async function runFeedbackAgentOnce(
     let emailedCount = 0;
     for (const report of reports) {
       try {
-        const triage = await triageOne(report);
-        const { subject, text } = buildReplyEmail(report, triage);
-
-        // 寄信給回報者（先查信箱；查不到或無效＝skipped 落地）
-        let emailStatus: EmailStatus = "skipped";
-        let emailedAt: Date | null = null;
-        const [author] = await db
-          .select({ email: schema.users.email })
-          .from(schema.users)
-          .where(eq(schema.users.id, report.userId));
-        if (author?.email) {
-          const sent = await sendEmail({ to: author.email, subject, text });
-          emailStatus = sent.status;
-          if (sent.status === "sent") {
-            emailedAt = new Date();
-            emailedCount += 1;
-          } else if (sent.status === "failed") {
-            console.warn(`[feedbackAgent] 回覆信寄送失敗（回饋 ${report.id}）：${sent.detail}`);
-          }
-        } else {
-          emailStatus = "failed";
-          console.warn(`[feedbackAgent] 回報者無信箱可寄（回饋 ${report.id}）`);
-        }
-
-        await db
-          .update(schema.feedbackReports)
-          .set({
-            agentReviewedAt: new Date(),
-            agentSeverity: triage.severity,
-            agentSummary: triage.summary,
-            agentFix: triage.fix,
-            agentReply: triage.reply.trim() || text,
-            emailStatus,
-            emailedAt,
-            // 代理已接手＝進「處理中」，工程從此清單挑修復（人工可再改回/標已處理）
-            status: "reviewing",
-          })
-          .where(eq(schema.feedbackReports.id, report.id));
+        const { emailed } = await reviewAndReplyOne(report, { guardUnreviewed: true });
+        if (emailed) emailedCount += 1;
         reviewedCount += 1;
       } catch (err) {
         // 單筆失敗不中斷整輪（下輪再巡到——agentReviewedAt 仍為 null）
@@ -248,10 +314,16 @@ export async function runFeedbackAgentOnce(
       }
     }
 
-    const note =
-      reports.length === 0
-        ? "無待處理回饋"
-        : `巡檢 ${reviewedCount}/${reports.length} 筆，寄出 ${emailedCount} 封回覆${isEmailConfigured() ? "" : "（信箱機制未設定，僅落地草稿）"}`;
+    // 補寄：分診過但寄信失敗的（含即時分診時信箱尚未設定、暫時性寄送錯誤）——用已落地的回覆重寄。
+    const resentCount = await resendFailedReplies(MAX_PER_RUN);
+    emailedCount += resentCount;
+
+    const parts: string[] = [];
+    parts.push(reports.length === 0 ? "無待處理回饋" : `巡檢 ${reviewedCount}/${reports.length} 筆`);
+    if (reports.length > 0) parts.push(`寄出 ${emailedCount - resentCount} 封回覆`);
+    if (resentCount > 0) parts.push(`補寄 ${resentCount} 封`);
+    if (!isEmailConfigured()) parts.push("信箱機制未設定，僅落地草稿");
+    const note = parts.join("，");
     if (runId) {
       await db
         .update(schema.feedbackAgentRuns)
@@ -273,6 +345,25 @@ export async function runFeedbackAgentOnce(
     return { runId, reviewedCount: 0, emailedCount: 0, status: "failed", note: msg };
   } finally {
     running = false;
+  }
+}
+
+/**
+ * 送出後即時分診一筆（需求：高影響類別不必等 3 天排程）：由 feedbackReports.submit 對 bug/stuck 類
+ * fire-and-forget 呼叫。已被排程或另一次即時分診處理過（agentReviewedAt 有值）就跳過；
+ * 寫回帶 guardUnreviewed 防與排程互相覆寫。全程容錯、絕不外拋——即時分診失敗不影響送出本身。
+ */
+export async function triageReportNow(reportId: string): Promise<void> {
+  try {
+    const [report] = await db
+      .select()
+      .from(schema.feedbackReports)
+      .where(eq(schema.feedbackReports.id, reportId));
+    if (!report || report.agentReviewedAt) return; // 找不到或已分診過
+    await reviewAndReplyOne(report, { guardUnreviewed: true });
+    console.log(`[feedbackAgent] ✓ 即時分診完成（回饋 ${reportId}）`);
+  } catch (err) {
+    console.warn(`[feedbackAgent] 即時分診略過（回饋 ${reportId}）：`, err instanceof Error ? err.message : err);
   }
 }
 

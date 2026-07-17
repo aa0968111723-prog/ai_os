@@ -7,6 +7,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { AdminPage } from "./pages/AdminPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
+import { MyReportsPage } from "./pages/MyReportsPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { HelpPage } from "./pages/HelpPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
@@ -211,6 +212,7 @@ function UserMenu({
           {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />團隊管理</Link>}
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">帳號</div>
+          <Link href="/my-reports" className="menu-item" role="menuitem" onClick={close}><Icon name="MessageCircle" size={15} />我的回報</Link>
           {/* 個人資料匯出（端點 /api/me/export 由後端提供）：a 標籤直下載，不經前端路由 */}
           <a href="/api/me/export" download className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />下載我的資料</a>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
@@ -352,6 +354,7 @@ export function App() {
                   )}
                 </Route>
                 <Route path="/feedback"><FeedbackPage groupId={activeGroupId || undefined} /></Route>
+                <Route path="/my-reports"><MyReportsPage /></Route>
                 <Route path="/models"><ModelsPage /></Route>
                 <Route path="/help"><HelpPage /></Route>
                 <Route path="/downloads"><DownloadsPage /></Route>
