@@ -104,6 +104,58 @@ function GroupQuotaRow({ group }: { group: { id: string; name: string } }) {
 }
 
 /**
+ * 單一組的「組預算」輸入列（累計上限）：超管/團隊管理員把總點數池分配給這個組。
+ * 與週額度並列在團隊卡；讀值同走 quota.usage（回傳 groupBudget/groupUsed/allocated）。
+ * 只在真的有改時才送出（同 GroupQuotaRow：避免 Tab 掃過空欄把組預算誤清成「不限」）。
+ */
+function GroupBudgetRow({ group }: { group: { id: string; name: string } }) {
+  const utils = trpc.useUtils();
+  const usage = trpc.quota.usage.useQuery({ groupId: group.id });
+  const [saved, setSaved] = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const setGroupBudget = trpc.quota.setGroupBudget.useMutation({
+    onSuccess: () => {
+      utils.quota.usage.invalidate({ groupId: group.id });
+      utils.quota.my.invalidate();
+      setSaved(true);
+      clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSaved(false), 3000);
+    },
+  });
+  const current = usage.data?.groupBudget ?? null;
+  const used = usage.data?.groupUsed ?? 0;
+  const allocated = usage.data?.allocated ?? 0;
+  const inputId = `group-budget-${group.id}`;
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+      <label className="hint" htmlFor={inputId} style={{ width: 120, margin: 0 }}>{group.name} 組預算</label>
+      {usage.isLoading ? (
+        <span className="skeleton" style={{ display: "inline-block", height: 40, width: 120, borderRadius: "var(--r-12)" }} aria-hidden="true" />
+      ) : (
+        <input
+          id={inputId}
+          type="number"
+          min={0}
+          style={{ width: 120 }}
+          placeholder="不限"
+          defaultValue={current ?? ""}
+          onBlur={(e) => {
+            const next = e.target.value === "" ? null : Number(e.target.value);
+            if (next !== current) setGroupBudget.mutate({ groupId: group.id, budgetPoints: next });
+          }}
+        />
+      )}
+      {/* 累計點數池：給超管看「這組發了多少、用了多少、組長分下去多少」——空=不限 */}
+      <span className="hint">
+        {current != null ? `已用 ${used}／${current}・已分給組員 ${allocated}` : "空=不限（累計總量）"}
+      </span>
+      {setGroupBudget.error && <span className="error" style={{ marginTop: 0 }}>{setGroupBudget.error.message}</span>}
+      {saved && <span className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</span>}
+    </div>
+  );
+}
+
+/**
  * 成員列＋管理操作（組長切換/移出組/重設密碼）。
  * 為什麼獨立成元件：每位成員要有自己的 isPending/error/臨時密碼狀態，
  * 共用一個 mutation 會讓 A 成員的錯誤與密碼顯示到 B 成員旁邊。
@@ -662,6 +714,7 @@ export function AdminPage() {
                       />
                     ))
                   )}
+                  <GroupBudgetRow group={g} />
                   <GroupQuotaRow group={g} />
                 </div>
               ))}
@@ -678,7 +731,7 @@ export function AdminPage() {
         {isSuperAdmin && <CreateTeamCard />}
         <div className="card" data-fb="點數與額度卡">
           <h2>點數與額度（彈性・隨時可調）</h2>
-          <p className="hint">空白＝不限。總預算限開發者；各組週額度由團隊管理員在左側團隊卡調整。</p>
+          <p className="hint">空白＝不限。總預算限開發者調整。分配樹：總預算 →（左側團隊卡）各組「組預算」由團隊管理員分配 →（組長在「選項」頁）再把組預算分給各組員。週/日上限是另一層速率限制，與累計預算並存。</p>
           {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值。
               三態：error（明講失敗＋重試）／data（表單）／載入中（骨架）——缺 error 分支時
               失敗會永遠停在骨架上，管理員以為還在載入而空等 */}

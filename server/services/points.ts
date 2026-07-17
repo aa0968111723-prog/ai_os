@@ -40,6 +40,18 @@ export async function updateSettings(patch: Partial<PointsSettings>): Promise<Po
 
 const noLimit = (v: number | null | undefined): boolean => v == null || v <= 0;
 
+/**
+ * 累計預算判定（純函式，守門與測試共用）：回傳 null＝通過；字串＝拒絕原因。
+ * cap 為 null 視為不限。邊界語意：used + points === cap（恰好用完）仍放行，只有 > cap 才擋。
+ * 集中在此一處，讓 checkQuota（顯示）與 reserveQuota（原子守門）訊息與邊界永遠一致。
+ */
+export function budgetReason(scope: "group" | "member", used: number, points: number, cap: number | null): string | null {
+  if (cap == null || used + points <= cap) return null;
+  return scope === "group"
+    ? `本組點數已用完（已用 ${used}／${cap} 點）——請管理員增加組預算`
+    : `你的點數已用完（已用 ${used}／${cap} 點）——可請組長增加你的分配`;
+}
+
 /** 週界以台北時間（UTC+8，無夏令時）計算——部署容器預設 UTC，用本地 getDay/setHours 會把週界推到台北週一 08:00 */
 function weekStart(): Date {
   const TPE_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -81,6 +93,39 @@ export async function usedTotal(): Promise<number> {
   return Number(row?.used ?? 0);
 }
 
+/** 組累計淨消耗（組預算守門用；退點抵銷、口徑同 usedTotal，不做週歸屬——累計上限無週界） */
+export async function usedByGroup(groupId: string): Promise<number> {
+  const [row] = await db
+    .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
+    .from(schema.costLedger)
+    .where(eq(schema.costLedger.groupId, groupId));
+  return Number(row?.used ?? 0);
+}
+
+/** 組員在某組的累計淨消耗（個人預算守門用）：一律綁 groupId，避免跨組帳本互相污染分配額 */
+export async function usedByMember(userId: string, groupId: string): Promise<number> {
+  const [row] = await db
+    .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
+    .from(schema.costLedger)
+    .where(and(eq(schema.costLedger.userId, userId), eq(schema.costLedger.groupId, groupId)));
+  return Number(row?.used ?? 0);
+}
+
+/** 組預算（累計上限；null＝不限）——超管/團隊管理員分配給組的點數池 */
+export async function groupBudget(groupId: string): Promise<number | null> {
+  const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
+  return noLimit(group?.budgetPoints) ? null : group!.budgetPoints;
+}
+
+/** 組員個人預算（累計上限；null＝不限）——組長從組預算再分配給組員 */
+export async function memberBudget(userId: string, groupId: string): Promise<number | null> {
+  const [member] = await db
+    .select()
+    .from(schema.groupMembers)
+    .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, userId)));
+  return noLimit(member?.budgetPoints) ? null : member!.budgetPoints;
+}
+
 export async function usedThisWeek(userId: string): Promise<number> {
   // 週歸屬：退點列跟隨其生成的建立週（coalesce 回退帳本列自身時間），
   // 避免上週扣點、本週才失敗退點時，退點灌進新週把用量算成負值。
@@ -114,6 +159,17 @@ export async function checkQuota(userId: string, groupId: string, points: number
   if (!noLimit(settings.totalBudgetPoints)) {
     const total = await usedTotal();
     if (total + points > settings.totalBudgetPoints!) return `總預算不足（已用 ${total}／${settings.totalBudgetPoints} 點）——請管理員調整`;
+  }
+  // 分配樹（累計上限）：組預算 → 組員個人預算。與週/日「速率上限」正交，兩套並存各自守門。
+  const gBudget = await groupBudget(groupId);
+  if (gBudget != null) {
+    const groupReason = budgetReason("group", await usedByGroup(groupId), points, gBudget);
+    if (groupReason) return groupReason;
+  }
+  const mBudget = await memberBudget(userId, groupId);
+  if (mBudget != null) {
+    const memberReason = budgetReason("member", await usedByMember(userId, groupId), points, mBudget);
+    if (memberReason) return memberReason;
   }
   const quota = await effectiveWeeklyQuota(userId, groupId);
   if (quota != null) {
@@ -152,11 +208,33 @@ export async function reserveQuota(
   const quota = await effectiveWeeklyQuota(userId, groupId);
   const daily = effectiveDailyQuota(settings);
   const budgetCapped = !noLimit(settings.totalBudgetPoints);
+  // 分配樹（累計上限）：先在交易外讀好穩定組態（同週/日額度的理由——交易內不可再借第二條連線）。
+  const gBudget = await groupBudget(groupId);
+  const mBudget = await memberBudget(userId, groupId);
 
   return db.transaction(async (tx) => {
-    // 同一使用者一律序列化（週額度）；只有在「有總預算上限」時才另上全域鎖串行化總預算，
-    // 沒設總預算就不上全域鎖 → 不同使用者可完全併行、零額外爭用。
+    // 鎖取得順序固定為 user → group → 全域總預算，全體呼叫端一致 → 無交錯死鎖。
+    // 同一使用者一律序列化（週額度／個人預算）；組預算另上 per-group 鎖（class 1，與 user 的 class 0 區隔）；
+    // 只有在「有總預算上限」時才另上全域鎖串行化總預算。沒設任何上限 → 零額外爭用。
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}), 0)`);
+    if (mBudget != null) {
+      // 個人預算：受既有 per-user 鎖序列化，不必再上新鎖。累計淨消耗（含退點抵銷）綁本組。
+      const [m] = await tx
+        .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
+        .from(schema.costLedger)
+        .where(and(eq(schema.costLedger.userId, userId), eq(schema.costLedger.groupId, groupId)));
+      const memberReason = budgetReason("member", Number(m?.used ?? 0), points, mBudget);
+      if (memberReason) return memberReason;
+    }
+    if (gBudget != null) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${groupId}), 1)`); // per-group 組預算閘（class 1）
+      const [g] = await tx
+        .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
+        .from(schema.costLedger)
+        .where(eq(schema.costLedger.groupId, groupId));
+      const groupReason = budgetReason("group", Number(g?.used ?? 0), points, gBudget);
+      if (groupReason) return groupReason;
+    }
     if (budgetCapped) {
       await tx.execute(sql`select pg_advisory_xact_lock(864205, 0)`); // 固定鍵：全域總預算閘
       const [t] = await tx
