@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-端到端測試（MCP 專區）：對真跑的伺服器逐一驗證全部 23 個 MCP 工具，以及每一道守門——
+端到端測試（MCP 專區）：對真跑的伺服器驗證全部 25 個 MCP 工具（其中 23 個逐一實跑），以及每一道守門——
 唯讀範圍（擋所有寫入、放行所有讀取）、到期／撤銷／壞金鑰一律 401、跨組隔離（別人的金鑰
 碰不到你的專案）、封存專案寫入守衛、資料庫 AI 存取等級（none/read）閘門、跨介面審計歸屬。
 
@@ -102,8 +102,9 @@ names = {t["name"] for t in d["result"]["tools"]}
 EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_generation","post_message",
     "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row",
     "list_database_files","read_database_file","plan_agent","approve_agent","stop_agent","discard_agent",
-    "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status"}
-ok("tools/list = 23 且名單完整", len(names) == 23 and EXPECTED <= names, f"{len(names)} 個")
+    "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status",
+    "list_notes","get_note"}
+ok("tools/list = 25 且名單完整", len(names) == 25 and EXPECTED <= names, f"{len(names)} 個")
 
 # ══════════ 23 工具逐一實跑（可寫金鑰）══════════
 print("\n######## 23 工具逐一實跑 ########")
