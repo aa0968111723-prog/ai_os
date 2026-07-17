@@ -9,6 +9,7 @@
 import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { advanceGeneration, sweepUnlandedAssets } from "./generationCore";
+import { sweepVoiceTranscripts } from "./voiceTranscribe";
 import { refund } from "./points";
 
 const TICK_MS = 6000;
@@ -51,6 +52,13 @@ export function startGenerationRunner(): void {
           if (landed > 0) console.log(`[generation] 落地補抓本輪完成 ${landed} 筆`);
         } catch (err) {
           console.warn("[generation] 落地補抓掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
+        }
+        // 語音留言逐字稿補抓（留言第一梯隊）：與落地補抓同節流，把待轉錄的語音留言轉成文字回填。
+        try {
+          const done = await sweepVoiceTranscripts();
+          if (done > 0) console.log(`[generation] 語音逐字稿本輪完成 ${done} 筆`);
+        } catch (err) {
+          console.warn("[generation] 語音逐字稿掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
         }
       }
       try {

@@ -816,7 +816,7 @@ export function ProjectPage({ id }: { id: string }) {
 
         {/* 組內留言 */}
         <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-          <MessagePanel projectId={id} isLeader={isLeader} />
+          <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
         </CollabZone>
       </div>
       </div>

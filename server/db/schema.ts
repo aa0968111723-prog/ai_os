@@ -345,8 +345,14 @@ export const messages = pgTable("messages", {
   refType: text("ref_type", { enum: ["scene", "asset", "generation"] }),
   refId: uuid("ref_id"),
   mentions: jsonb("mentions").$type<string[]>(),
+  // 留言第一梯隊：語音留言（kind='voice'，音檔存 ref asset，voiceStatus 轉錄狀態，body 收轉錄稿）
+  // 與 @助手回覆（kind='assistant'，body 為 LLM 回答，userId 記觸發者）。
+  voiceStatus: text("voice_status", { enum: ["pending", "done", "failed"] }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  projectIdx: index("messages_project_idx").on(t.projectId, t.createdAt),
+  voicePendingIdx: index("messages_voice_pending_idx").on(t.voiceStatus),
+}));
 
 /** 留言表情回應：每人對每則每種表情最多一筆（再按一次＝收回），白名單見 messages router */
 export const messageReactions = pgTable("message_reactions", {

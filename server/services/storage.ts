@@ -44,6 +44,8 @@ const MIME_EXT: Record<string, string> = {
   "audio/x-wav": ".wav",
   "audio/mp4": ".m4a",
   "audio/ogg": ".ogg",
+  "audio/webm": ".webm", // MediaRecorder 手機/桌面錄音的預設容器（語音留言）
+  "audio/mp3": ".mp3",
   "application/zip": ".zip",
   "text/plain": ".txt",
   "text/markdown": ".md",

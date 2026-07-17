@@ -33,6 +33,25 @@ def call(op, opener, path, data=None):
     if "error" in body: return {"__error__": body["error"]["json"]["message"]}
     return body["result"]["data"]["json"]
 
+import time
+
+def upload(opener, project_id, filename, content, content_type):
+    """multipart/form-data 上傳(urllib 手組 boundary):回傳 (status, json)"""
+    boundary = "----e2emsgboundary"
+    parts = []
+    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"projectId\"\r\n\r\n{project_id}\r\n".encode())
+    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n".encode())
+    parts.append(content)
+    parts.append(f"\r\n--{boundary}--\r\n".encode())
+    data = b"".join(parts)
+    req = urllib.request.Request(f"{HOST}/api/upload", data=data, method="POST",
+                                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    if opener.cookie: req.add_header("Cookie", opener.cookie)
+    try:
+        with opener.open(req) as r: return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        return e.code, json.load(e)
+
 from e2e_lib import ok  # 共用斷言:計數+結束碼(有 ❌ 即非零退出,CI 據此判紅綠)
 
 # ── 建置:管理員+兩位組員(甲=留言主角、乙=之後降為檢視者),一個專案、一個分鏡 ──
@@ -138,5 +157,39 @@ au = call("GET", admin, "audit.list", {"action": "messages"})
 acts = [i["action"] for i in au["items"]]
 ok("留言送出有進審計", any(x == "messages.post" for x in acts))
 ok("markRead 豁免不灌審計", not any(x == "messages.markRead" for x in acts))
+
+# ── 語音留言:上傳音檔(webm MIME 白名單)→ postVoice 建語音留言 ──
+# 極小的合法 webm 檔頭位元組(EBML 魔數);後端只認 MIME 與副檔名,不解碼內容
+webm_bytes = bytes.fromhex("1a45dfa3") + b"\x00" * 64
+st, up = upload(a, pid, "語音留言.webm", webm_bytes, "audio/webm")
+ok("音檔上傳成功(webm 進 MIME 白名單)", st == 200 and up.get("asset", {}).get("kind") == "audio")
+audio_id = up["asset"]["id"]
+vm = call("POST", a, "messages.postVoice", {"projectId": pid, "assetId": audio_id})
+ok("語音留言建立(pending)", vm.get("kind") == "voice" and vm.get("voiceStatus") == "pending")
+rows = call("GET", a, "messages.list", {"projectId": pid})
+vrow = next((r for r in rows if r["id"] == vm["id"]), None)
+ok("語音留言帶可播放網址", vrow and vrow.get("voiceUrl", "").endswith(f"/api/assets/{audio_id}/file"))
+# 拿別的(圖片)素材當語音 → 擋;拿別專案音檔 → 擋
+st2, up2 = upload(a, pid2, "他案音檔.mp3", b"ID3" + b"\x00" * 32, "audio/mpeg")
+cross = call("POST", a, "messages.postVoice", {"projectId": pid, "assetId": up2["asset"]["id"]})
+ok("🔒 不能用別專案的音檔發語音", "本專案" in cross.get("__error__", ""))
+
+# ── @助手:留言 @助手 → 背景 AI 回一則(假模式即時插入;輪詢等它出現) ──
+call("POST", a, "messages.post", {"projectId": pid, "body": "@助手 這個專案在講什麼?"})
+assistant_reply = None
+for _ in range(20):
+    rows = call("GET", a, "messages.list", {"projectId": pid})
+    assistant_reply = next((r for r in rows if r["kind"] == "assistant"), None)
+    if assistant_reply: break
+    time.sleep(0.5)
+ok("@助手 觸發 AI 回覆(kind=assistant)", assistant_reply is not None)
+ok("助手回覆有內容", bool((assistant_reply or {}).get("body", "").strip()))
+
+# ── 留言轉待辦:前端把某句留言 → schedule.add(組內成員可加) ──
+todo = call("POST", a, "schedule.add", {"groupId": gid, "projectId": pid, "title": "週五前交件(由留言轉待辦)", "startsAt": "2026-08-01T10:00:00.000Z"})
+ok("留言可轉排程待辦", bool(todo.get("id")))
+sched = call("GET", a, "schedule.list", {"groupId": gid})
+items = sched if isinstance(sched, list) else sched.get("items", [])
+ok("待辦出現在排程清單", any(i.get("title", "").startswith("週五前交件") for i in items))
 
 print("—— e2e-messages 完成 ——")
