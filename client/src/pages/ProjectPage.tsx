@@ -4,6 +4,7 @@ import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip } from "../components/interactions";
 import { worldviewSchema, type Worldview } from "@shared/worldview";
+import { getModel, estimatePoints } from "@shared/models";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
 import { DirectorCard } from "../components/DirectorCard";
@@ -447,6 +448,10 @@ export function ProjectPage({ id }: { id: string }) {
 
   // 生成鈕鎖住時，旁邊同步顯示「為什麼」——非工程師看得懂的一句話
   const needs = model?.needs;
+  // 逐次估點：按字計費的 TTS 依「要唸的文字」長度即時估，與後端扣點同一函式（shared/models）——顯示＝扣點。
+  // 其餘模型回扁平 points（行為不變）。full 找不到（理論上不會）時退回清單帶的 points。
+  const fullModel = model ? getModel(model.id) : undefined;
+  const estPoints = fullModel ? estimatePoints(fullModel, { promptChars: prompt.length }) : (model?.points ?? 0);
   const missingSource = model != null && needs != null && !sourceAsset && !sourceUrl.trim();
   const badSourceUrl = model != null && needs != null && !sourceAsset && sourceUrl.trim() !== "" && sourceUrlError !== "";
   // 已選素材與模型明顯不相容（換模型後殘留、或從素材庫直接點選）：鎖住並講清楚，不靜默清掉
@@ -960,7 +965,7 @@ export function ProjectPage({ id }: { id: string }) {
                 disabled={disableReason != null || submit.isPending}
                 onClick={() => { setSubmitNotice(""); setConfirming(true); }}
               >
-                {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${model.points} 點）`}
+                {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${estPoints} 點）`}
               </button>
               <span className="hint">{disableReason ?? "失敗自動退點・額度由管理員調整"}</span>
             </div>
@@ -987,7 +992,10 @@ export function ProjectPage({ id }: { id: string }) {
                   </p>
                 )}
                 <p style={{ margin: "8px 0" }}>
-                  預估 <b style={{ color: "var(--primary-ink)", fontSize: 18 }}>約 {model.points} 點</b>
+                  預估 <b style={{ color: "var(--primary-ink)", fontSize: 18 }}>約 {estPoints} 點</b>
+                  {fullModel && estimatePoints(fullModel, { promptChars: 2000 }) !== estimatePoints(fullModel, { promptChars: 1 }) && (
+                    <span className="hint" style={{ marginLeft: 6, fontSize: 12 }}>（依文字長度即時計費）</span>
+                  )}
                   {quota.data && (
                     <span className="hint" style={{ marginLeft: 8 }}>
                       {quota.data.totalRemaining != null ? `目前剩 ${quota.data.totalRemaining.toLocaleString()} 點` : "額度不限"}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
-import { getModel, MODELS, tierLabel } from "@shared/models";
+import { getModel, MODELS, tierLabel, estimatePoints } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
 import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip } from "./interactions";
@@ -228,7 +228,9 @@ function SceneRow({
   // 逐格生成／配音的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
   const genModel = getModel(genModelId) ?? getModel(DEFAULT_MODEL);
   const genPoints = genModel?.points;
-  const ttsPoints = getModel(DEFAULT_TTS_MODEL)?.points;
+  // 配音走按字計費的中文 TTS：估點依「這一格旁白文字」長度即時算，與後端扣點同一函式——顯示＝扣點
+  const ttsModel = getModel(DEFAULT_TTS_MODEL);
+  const ttsPoints = ttsModel ? estimatePoints(ttsModel, { promptChars: (s.voiceover ?? "").length }) : undefined;
 
   return (
     <div className="gen-row" data-fb="分鏡格" id={`scene-${s.id}`}>

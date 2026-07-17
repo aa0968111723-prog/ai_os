@@ -2456,6 +2456,45 @@ export function getModel(id: string): ModelEntry | undefined {
   return MODELS.find((m) => m.id === id) ?? LEGACY_MODELS.find((m) => m.id === id);
 }
 
+/** 匯率假設（與 scripts/audit-model-pricing.ts 一致）：1 點 ≈ NT$1、USD×31——校準與動態估點同一基準 */
+export const USD_TO_TWD = 31;
+
+/**
+ * 「按字計費」文字轉語音模型的每千字點數率（僅 text-to-speech 且「首個」報價單位為千字者）。
+ * 這類模型的計費量＝待朗讀文字長度，送出前就已知（prompt 本身即朗讀文字，TTS 不注入世界觀），
+ * 故可逐次精確估點，取代扁平 points（原本僅對「約 1000 字」一種長度才等於真實成本）。
+ * 只認「首個」報價：voice-clone 的「$1.50/次＋預覽音 $0.30/千字」首報價為 /次 → 判為 flat，不誤入動態。
+ * 模組載入時建一次快取（純衍生自 cost 字串，零額外資料源）。
+ */
+const ttsPointsPerKChar: Map<string, number> = (() => {
+  const map = new Map<string, number>();
+  for (const m of MODELS) {
+    if (m.category !== "text-to-speech") continue;
+    const first = m.cost.match(/\$\s*([0-9]+(?:\.[0-9]+)?)\s*\/\s*([^\s;,、(（]+)/); // 首個 $價/單位
+    if (first && first[2].startsWith("千字")) map.set(m.id, Number(first[1]) * USD_TO_TWD);
+  }
+  return map;
+})();
+
+/** 逐次估點的輸入脈絡（送出前已知的計費量） */
+export interface EstimateContext {
+  /** 待計費文字字元數（TTS：即 prompt 長度＝朗讀文字量） */
+  promptChars?: number;
+}
+
+/**
+ * 逐次估點：按字計費的 TTS 依實際文字長度算真實成本（下限 1 點）；其餘一律回扁平 model.points。
+ * 呼叫端（generationCore）一次算好 est 貫穿 pointsEst／審核門檻／扣點／退點，前後端共用同一函式，
+ * 確保顯示＝扣點＝退點三者永遠一致（reserve/refund 對稱）。無 promptChars 時退回扁平值（等同舊行為）。
+ */
+export function estimatePoints(model: ModelEntry, ctx?: EstimateContext): number {
+  const perK = ttsPointsPerKChar.get(model.id);
+  if (perK != null && ctx?.promptChars != null && ctx.promptChars > 0) {
+    return Math.max(1, Math.round((perK * ctx.promptChars) / 1000));
+  }
+  return model.points;
+}
+
 /* 為什麼:工作流合計點數曾多條與單步實扣不符(UI 顯示夠用、中途才被額度擋下的斷鏈),
    故模組載入時一律由單步模型註冊表推導覆寫,單步點數改動後下游(workflows API/catalog/文件)自動同步。
    注意:必須放在 MODELS/WORKFLOW_PRESETS/LEGACY_MODELS 初始化之後,否則 getModel 會踩 const 的 TDZ。 */
