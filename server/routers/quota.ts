@@ -3,7 +3,7 @@ import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
-import { getSettings, updateSettings, usedTotal, usedThisWeek, usedToday, effectiveWeeklyQuota, effectiveDailyQuota, groupUsage, usedByGroup, usedByMember, groupBudget, memberBudget } from "../services/points";
+import { getSettings, updateSettings, usedTotal, usedThisWeek, usedToday, effectiveDailyQuota, groupUsage, usedByGroup, usedByMember, loadQuotaConfig } from "../services/points";
 
 /** 團隊管理權檢查（組預算是由上往下分配的，只有團隊管理員以上能調）：開發者或該組所屬團隊的 admin */
 async function assertGroupTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, groupId: string): Promise<void> {
@@ -18,28 +18,29 @@ async function assertGroupTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adm
 export const quotaRouter = router({
   /** 我的額度＋剩餘（頂欄徽章；groupId 用當前作用組） */
   my: authedProcedure.input(z.object({ groupId: z.string().uuid().optional() }).optional()).query(async ({ ctx, input }) => {
-    const settings = await getSettings();
-    const total = await usedTotal();
-    const weekly = await usedThisWeek(ctx.auth.user.id);
-    const today = await usedToday(ctx.auth.user.id);
+    const uid = ctx.auth.user.id;
     // 只在使用者確實屬於該組時才算組額度（舊版任意 groupId 都算，洩漏他組額度設定）
     const isMember = input?.groupId ? ctx.auth.groups.some((g) => g.groupId === input.groupId) : false;
-    const quota = isMember ? await effectiveWeeklyQuota(ctx.auth.user.id, input!.groupId!) : null;
+    const gid = isMember ? input!.groupId! : null;
+    // 本組成員：一次讀齊組態（settings＋組員列＋組列，取代舊版 getSettings＋effectiveWeeklyQuota
+    // ＋memberBudget＋groupBudget＋額外 group 讀共數趟）；非成員只需全域設定（不讀他組列）。
+    const cfg = gid ? await loadQuotaConfig(uid, gid) : null;
+    const settings = cfg ? cfg.settings : await getSettings();
+    // 用量 SUM 彼此獨立、純查詢（無交易/無鎖）——這是每次頁面載入的最熱路徑，並行讀縮短延遲。
+    // member/group 累計只在真的設了對應預算上限時才查（沿用舊版「有 budget 才算 remaining」）。
+    const [total, weekly, today, memberUsed, groupUsed] = await Promise.all([
+      usedTotal(),
+      usedThisWeek(uid),
+      usedToday(uid),
+      gid && cfg?.memberBudget != null ? usedByMember(uid, gid) : Promise.resolve(0),
+      gid && cfg?.groupBudget != null ? usedByGroup(gid) : Promise.resolve(0),
+    ]);
+    const quota = cfg ? cfg.weeklyQuota : null;
     // 成本審核門檻（需求 2.1）：前端生成確認彈窗要提示「這筆需組長核准」——同樣只給本組成員看
-    let approvalThreshold: number | null = null;
+    const approvalThreshold = cfg ? cfg.approvalThreshold : null;
     // 分配樹（累計上限）：個人預算 → 組預算——只給本組成員看自己的剩餘
-    let memberBudgetRemaining: number | null = null;
-    let groupBudgetRemaining: number | null = null;
-    if (isMember) {
-      const gid = input!.groupId!;
-      const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, gid));
-      const th = group?.approvalThresholdPoints;
-      approvalThreshold = th != null && th > 0 ? th : null;
-      const mBudget = await memberBudget(ctx.auth.user.id, gid);
-      if (mBudget != null) memberBudgetRemaining = Math.max(0, mBudget - (await usedByMember(ctx.auth.user.id, gid)));
-      const gBudget = await groupBudget(gid);
-      if (gBudget != null) groupBudgetRemaining = Math.max(0, gBudget - (await usedByGroup(gid)));
-    }
+    const memberBudgetRemaining = cfg?.memberBudget != null ? Math.max(0, cfg.memberBudget - memberUsed) : null;
+    const groupBudgetRemaining = cfg?.groupBudget != null ? Math.max(0, cfg.groupBudget - groupUsed) : null;
     return {
       totalBudget: settings.totalBudgetPoints, // null＝不限
       totalUsed: total,
