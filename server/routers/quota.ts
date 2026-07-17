@@ -191,7 +191,13 @@ export const quotaRouter = router({
             todayPoints: 0,
             avg7: 0,
             alert: false,
-            byGroup: [] as Array<{ groupId: string; groupName: string; weekPoints: number; members: Array<{ userId: string; name: string; weekPoints: number }> }>,
+            byGroup: [] as Array<{
+              groupId: string;
+              groupName: string;
+              weekPoints: number;
+              members: Array<{ userId: string; name: string; weekPoints: number }>;
+              projects: Array<{ projectId: string; title: string; weekPoints: number }>;
+            }>,
           };
         }
       }
@@ -256,12 +262,33 @@ export const quotaRouter = router({
       }
       for (const list of membersByGroup.values()) list.sort((a, b) => b.weekPoints - a.weekPoints);
 
+      // 再往下一個維度：各組再拆到「專案近 7 天」毛消耗——組長要看得出組裡「哪個專案」在燒點。
+      // 走 generationId → generations.projectId → projects.title：只有生成有帳可歸的消耗會計入
+      // （手動增減等無 generationId 的列不歸專案），故專案小計可能少於組總數，屬正常。
+      const projectRows = await db
+        .select({ groupId: schema.costLedger.groupId, projectId: schema.generations.projectId, title: schema.projects.title, weekPoints: gross })
+        .from(schema.costLedger)
+        .innerJoin(schema.generations, eq(schema.generations.id, schema.costLedger.generationId))
+        .leftJoin(schema.projects, eq(schema.projects.id, schema.generations.projectId))
+        .where(weekCond)
+        .groupBy(schema.costLedger.groupId, schema.generations.projectId, schema.projects.title);
+      const projectsByGroup = new Map<string, Array<{ projectId: string; title: string; weekPoints: number }>>();
+      for (const r of projectRows) {
+        const pts = Number(r.weekPoints);
+        if (pts <= 0) continue; // 只退點/淨零的專案不列
+        const list = projectsByGroup.get(r.groupId) ?? [];
+        list.push({ projectId: r.projectId, title: r.title ?? "（已刪除的專案）", weekPoints: pts });
+        projectsByGroup.set(r.groupId, list);
+      }
+      for (const list of projectsByGroup.values()) list.sort((a, b) => b.weekPoints - a.weekPoints);
+
       const byGroup = groupRows
         .map((r) => ({
           groupId: r.groupId,
           groupName: r.groupName ?? "（已不存在的組）",
           weekPoints: Number(r.weekPoints),
           members: membersByGroup.get(r.groupId) ?? [],
+          projects: projectsByGroup.get(r.groupId) ?? [],
         }))
         .sort((a, b) => b.weekPoints - a.weekPoints);
 

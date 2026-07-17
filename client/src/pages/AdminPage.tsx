@@ -554,6 +554,19 @@ function weekdayLabel(isoDate: string): string {
   return ["週日", "週一", "週二", "週三", "週四", "週五", "週六"][wd];
 }
 
+/** 消耗監控組內細項列（成員／專案共用）：名稱＋比較長條＋點數。max＝該維度的比較基準（除以 0 防護） */
+function BreakdownRow({ label, points, max }: { label: string; points: number; max: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "2px 0" }}>
+      <span style={{ flex: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "40%" }}>{label}</span>
+      <div style={{ flex: 1, height: 7, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
+        <div style={{ width: `${(points / Math.max(1, max)) * 100}%`, height: "100%", background: "var(--primary)", opacity: 0.7, borderRadius: 3 }} />
+      </div>
+      <span style={{ flex: "none", fontFamily: "var(--mono)", color: "var(--fg-secondary)" }}>{points.toLocaleString()} 點</span>
+    </div>
+  );
+}
+
 /**
  * 點數消耗監控卡（盲點修補：無成本異常告警）。
  * 口徑＝毛消耗：只算扣點、退點不抵銷——看「實際發動了多少花費」，失敗退點才不會把異常日洗白。
@@ -631,19 +644,23 @@ export function ConsumptionMonitorCard() {
                   </div>
                   <span style={{ flex: "none", fontFamily: "var(--mono)" }}>{g.weekPoints.toLocaleString()} 點</span>
                 </summary>
-                {/* 組內成員近 7 天毛消耗（高到低）：組長要的「細節」——誰花了多少 */}
+                {/* 組內兩個維度的近 7 天毛消耗（各自高到低）：成員＝誰在燒、專案＝哪個案子在燒 */}
                 <div style={{ margin: "6px 0 2px", paddingLeft: 22 }}>
+                  <div className="hint" style={{ fontSize: 11, fontWeight: 600, margin: "2px 0" }}>各成員</div>
                   {g.members.length === 0 ? (
                     <p className="hint" style={{ margin: 0, fontSize: 12 }}>這個組近 7 天沒有可歸戶的消耗。</p>
                   ) : (
                     g.members.map((m) => (
-                      <div key={m.userId} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, padding: "2px 0" }}>
-                        <span style={{ flex: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "40%" }}>{m.name}</span>
-                        <div style={{ flex: 1, height: 7, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
-                          <div style={{ width: `${(m.weekPoints / Math.max(1, g.weekPoints)) * 100}%`, height: "100%", background: "var(--primary)", opacity: 0.7, borderRadius: 3 }} />
-                        </div>
-                        <span style={{ flex: "none", fontFamily: "var(--mono)", color: "var(--fg-secondary)" }}>{m.weekPoints.toLocaleString()} 點</span>
-                      </div>
+                      <BreakdownRow key={m.userId} label={m.name} points={m.weekPoints} max={g.weekPoints} />
+                    ))
+                  )}
+                  {/* 各專案：只計得出生成歸戶的消耗，小計可能少於組總數（手動增減不歸專案） */}
+                  <div className="hint" style={{ fontSize: 11, fontWeight: 600, margin: "8px 0 2px" }}>各專案</div>
+                  {g.projects.length === 0 ? (
+                    <p className="hint" style={{ margin: 0, fontSize: 12 }}>這個組近 7 天沒有專案生成消耗。</p>
+                  ) : (
+                    g.projects.map((p) => (
+                      <BreakdownRow key={p.projectId} label={p.title} points={p.weekPoints} max={g.projects[0].weekPoints} />
                     ))
                   )}
                 </div>
