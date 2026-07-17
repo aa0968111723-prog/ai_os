@@ -103,7 +103,8 @@ EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_
     "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row",
     "list_database_files","read_database_file","plan_agent","approve_agent","stop_agent","discard_agent",
     "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status"}
-ok("tools/list = 23 且名單完整", len(names) == 23 and EXPECTED <= names, f"{len(names)} 個")
+# 至少涵蓋這 23 個核心工具即可（>= 而非 ==：日後新增工具不該讓本斷言變脆）
+ok("tools/list 涵蓋 23 個核心工具", len(names) >= 23 and EXPECTED <= names, f"{len(names)} 個")
 
 # ══════════ 23 工具逐一實跑（可寫金鑰）══════════
 print("\n######## 23 工具逐一實跑 ########")
