@@ -62,6 +62,8 @@ export const quotaRouter = router({
         totalBudgetPoints: z.number().int().min(0).nullable(),
         defaultWeeklyPoints: z.number().int().min(0).nullable(),
         defaultDailyPoints: z.number().int().min(0).nullable().optional(),
+        /** 資料庫文件每人儲存配額 GB（null＝預設 5；0＝不限） */
+        fileQuotaGb: z.number().int().min(0).nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {

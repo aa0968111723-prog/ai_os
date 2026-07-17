@@ -21,6 +21,7 @@ import { TocNav } from "../components/TocNav";
 import { ProjectAssistant } from "../components/ProjectAssistant";
 import { AgentCard } from "../components/AgentCard";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
+import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { useCollab, CursorOverlay, CollabZone, COLLAB_ZONES } from "../realtime";
 
 /**
@@ -821,6 +822,9 @@ export function ProjectPage({ id }: { id: string }) {
           <div id="sec-knowledge">
             <KnowledgeBase projectId={id} readOnly={!canEdit} />
           </div>
+
+          {/* 專案 × 資料庫連結：自訂資料庫裡指到本專案的資料列（唯讀彙整；無連結時不顯示） */}
+          <ProjectDatabasesCard projectId={id} />
 
           {/* 素材庫（工作台一體化：從舊「③素材整理」搬進①）——上傳的檔案、生成的成品都是上下文的一部分；
               「用作來源」會自動捲到下方生成台接手 */}

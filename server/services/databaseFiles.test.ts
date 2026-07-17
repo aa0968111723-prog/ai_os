@@ -1,0 +1,124 @@
+import { describe, expect, it } from "vitest";
+import {
+  extractKindOf,
+  formatBytes,
+  htmlToText,
+  normalizeImportUrl,
+  notionPageIdFromUrl,
+  ssrfGuardError,
+  subtitleToText,
+} from "./databaseFiles";
+
+describe("htmlToText", () => {
+  it("去 script/style、保留段落、解碼實體", () => {
+    const html = `<html><head><title>t</title><style>.a{}</style></head>
+      <body><script>alert(1)</script><h1>標題</h1><p>第一段&nbsp;&amp; more</p><ul><li>甲</li><li>乙</li></ul></body></html>`;
+    const text = htmlToText(html);
+    expect(text).toContain("標題");
+    expect(text).toContain("第一段 & more");
+    expect(text).toContain("甲");
+    expect(text).not.toContain("alert");
+    expect(text).not.toContain(".a{}");
+    expect(text).not.toContain("<p>");
+  });
+});
+
+describe("subtitleToText", () => {
+  it("SRT：去序號與時間軸只留台詞", () => {
+    const srt = "1\n00:00:01,000 --> 00:00:03,000\n師父開示第一句\n\n2\n00:00:03,500 --> 00:00:05,000\n第二句";
+    expect(subtitleToText(srt)).toBe("師父開示第一句\n第二句");
+  });
+  it("VTT：去 WEBVTT 頭", () => {
+    const vtt = "WEBVTT\n\n00:01.000 --> 00:04.000\n哈囉";
+    expect(subtitleToText(vtt)).toBe("哈囉");
+  });
+});
+
+describe("extractKindOf", () => {
+  it("mime 與副檔名雙後備", () => {
+    expect(extractKindOf("text/plain", "a.txt")).toBe("text");
+    expect(extractKindOf("application/octet-stream", "逐字稿.md")).toBe("text");
+    expect(extractKindOf("application/pdf", "a.pdf")).toBe("pdf");
+    expect(extractKindOf("application/octet-stream", "a.docx")).toBe("docx");
+    expect(extractKindOf("text/html", "page")).toBe("html");
+    expect(extractKindOf("application/octet-stream", "sub.srt")).toBe("subtitle");
+    expect(extractKindOf("image/png", "a.png")).toBeNull();
+    expect(extractKindOf("video/mp4", "a.mp4")).toBeNull();
+  });
+});
+
+describe("ssrfGuardError", () => {
+  it("放行公開網址", () => {
+    expect(ssrfGuardError("https://docs.google.com/document/d/abc/edit")).toBeNull();
+    expect(ssrfGuardError("http://example.com/a.txt")).toBeNull();
+  });
+  it("擋非 http(s) 協定", () => {
+    expect(ssrfGuardError("file:///etc/passwd")).toContain("http");
+    expect(ssrfGuardError("gopher://x")).toContain("http");
+    expect(ssrfGuardError("not a url")).toContain("格式");
+  });
+  it("擋 localhost 與私有網段字面位址", () => {
+    for (const bad of [
+      "http://localhost:3000/api",
+      "http://127.0.0.1/x",
+      "http://10.1.2.3/x",
+      "http://192.168.1.1/x",
+      "http://172.16.0.1/x",
+      "http://172.31.255.255/x",
+      "http://169.254.169.254/latest/meta-data",
+      "http://100.100.1.1/x",
+      "http://0.0.0.0/x",
+      "http://[::1]/x",
+      "http://[fd00::1]/x",
+      "http://[fe80::1]/x",
+      "http://db.internal/x",
+    ]) {
+      expect(ssrfGuardError(bad), bad).toContain("內部");
+    }
+    // 邊界外的合法位址要放行（172.32 不是私有段）
+    expect(ssrfGuardError("http://172.32.0.1/x")).toBeNull();
+  });
+  it("擋非點分十進位的數字型主機名（整數/十六進位/缺段 IP 寫法）", () => {
+    expect(ssrfGuardError("http://2130706433/x")).toContain("內部");   // = 127.0.0.1 的整數寫法
+    expect(ssrfGuardError("http://0x7f000001/x")).toContain("內部");   // 十六進位
+    expect(ssrfGuardError("http://127.1/x")).toContain("內部");        // 缺段
+    expect(ssrfGuardError("http://10.0.1/x")).toContain("內部");
+  });
+});
+
+describe("normalizeImportUrl", () => {
+  it("Google 文件 → txt 匯出", () => {
+    const n = normalizeImportUrl("https://docs.google.com/document/d/1AbC_-xyz/edit?usp=sharing");
+    expect(n.kind).toBe("google-doc");
+    expect(n.fetchUrl).toBe("https://docs.google.com/document/d/1AbC_-xyz/export?format=txt");
+  });
+  it("Google 試算表 → csv 匯出；簡報 → txt 匯出", () => {
+    expect(normalizeImportUrl("https://docs.google.com/spreadsheets/d/SHEET1/edit#gid=0").fetchUrl)
+      .toBe("https://docs.google.com/spreadsheets/d/SHEET1/export?format=csv");
+    expect(normalizeImportUrl("https://docs.google.com/presentation/d/SLIDE/edit").fetchUrl)
+      .toBe("https://docs.google.com/presentation/d/SLIDE/export/txt");
+  });
+  it("雲端硬碟檔案 → uc 直載；Notion → notion；其他 → web", () => {
+    expect(normalizeImportUrl("https://drive.google.com/file/d/FILE9/view?usp=sharing").fetchUrl)
+      .toBe("https://drive.google.com/uc?export=download&id=FILE9");
+    expect(normalizeImportUrl("https://www.notion.so/team/Page-0123456789abcdef0123456789abcdef").kind).toBe("notion");
+    expect(normalizeImportUrl("https://acme.notion.site/Page-0123456789abcdef0123456789abcdef").kind).toBe("notion");
+    expect(normalizeImportUrl("https://example.com/blog").kind).toBe("web");
+  });
+});
+
+describe("notionPageIdFromUrl", () => {
+  it("路徑尾 32 碼 hex → 加連字號的 uuid", () => {
+    expect(notionPageIdFromUrl("https://www.notion.so/team/My-Page-0123456789abcdef0123456789abcdef"))
+      .toBe("01234567-89ab-cdef-0123-456789abcdef");
+    expect(notionPageIdFromUrl("https://www.notion.so/no-id-here")).toBeNull();
+  });
+});
+
+describe("formatBytes", () => {
+  it("人話容量", () => {
+    expect(formatBytes(500)).toBe("500 B");
+    expect(formatBytes(2048)).toBe("2 KB");
+    expect(formatBytes(5 * 1024 ** 3)).toBe("5.00 GB");
+  });
+});

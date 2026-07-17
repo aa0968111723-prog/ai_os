@@ -19,6 +19,7 @@ import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
 import { buildEdl, buildFcpxml, buildSrt, exportProjectZip } from "./services/exporter";
 import { handleMcp } from "./services/mcp";
+import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, MAX_FILE_BYTES, STORAGE_ROOT,
@@ -320,6 +321,113 @@ app.get("/api/assets/:id/file", async (req, res) => {
   }
 });
 
+// ── 資料庫文件（AI 可讀檔案層）：上傳＋下載（權限走 databaseAcl，配額每人 5GB 可調） ──
+
+/** 上傳文件到資料庫（multipart: file + tableId [+ name]）→ 抽純文字供 AI 讀、回傳檔案列 */
+app.post("/api/databases/upload", upload.single("file"), async (req, res) => {
+  const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) { await cleanup(); return res.status(401).json({ error: "請先登入" }); }
+    if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
+
+    const tableId = String(req.body?.tableId ?? "");
+    const [table] = await db.select().from(schema.dataTables)
+      .where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
+    const { resolveTableAccess } = await import("./services/databaseAcl");
+    const access = table ? resolveTableAccess(auth, table) : null;
+    if (!table || !access?.canRead) { await cleanup(); return res.status(404).json({ error: "找不到這個資料庫" }); }
+    if (!access.canWriteRows) { await cleanup(); return res.status(403).json({ error: "這個資料庫目前只開放管理者寫入" }); }
+
+    let mime = req.file.mimetype.split(";")[0].trim().toLowerCase();
+    if (mime === "application/octet-stream" || mime === "") {
+      const { mimeFromPath } = await import("./services/storage");
+      mime = mimeFromPath(req.file.originalname);
+    }
+    if (!isAllowedUploadMime(mime)) {
+      await cleanup();
+      return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：文字/Markdown/CSV/JSON/HTML/字幕/PDF/DOCX 與圖片/影音/zip` });
+    }
+    const guard = await checkDiskSpace(req.file.size);
+    if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
+    const { quotaGuardError, extractTextFromBuffer, MAX_EXTRACT_BYTES } = await import("./services/databaseFiles");
+    const quotaErr = await quotaGuardError(auth.user.id, req.file.size);
+    if (quotaErr) { await cleanup(); return res.status(507).json({ error: quotaErr }); }
+
+    const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8");
+    const name = (String(req.body?.name ?? "").trim() || originalName || "上傳文件").slice(0, 120);
+    // 先在暫存路徑抽文字（adopt 之後就要用正式路徑；小檔直接讀進記憶體）
+    let textContent: string | null = null;
+    if (req.file.size <= MAX_EXTRACT_BYTES) {
+      const { readFile } = await import("node:fs/promises");
+      const buf = await readFile(req.file.path);
+      textContent = await extractTextFromBuffer(mime, name, buf);
+    }
+    const { storagePath, sizeBytes } = await adoptTmpFile(req.file.path, mime);
+    try {
+      const [file] = await db.insert(schema.dataFiles).values({
+        tableId: table.id, name, mime, sizeBytes, storagePath,
+        textContent, uploadedBy: auth.user.id,
+      }).returning();
+      // REST 上傳繞過 tRPC 的 mutation 審計中介層——比照 recordMcpAudit 自行落一筆（fire-and-forget）
+      void (async () => {
+        const { sanitizeAuditInput } = await import("./services/audit");
+        await db.insert(schema.auditLog).values({
+          actorId: auth.user.id,
+          action: "databases.uploadFile",
+          groupId: table.groupId,
+          input: sanitizeAuditInput({ tableId: table.id, name, mime, sizeBytes }) as Record<string, unknown>,
+          ok: true,
+        });
+      })().catch((e) => console.warn("[databases:upload] 審計寫入失敗（不影響主流程）：", e instanceof Error ? e.message : e));
+      res.json({ ok: true, file: { id: file.id, name: file.name, readableChars: textContent?.length ?? 0 } });
+    } catch (dbErr) {
+      const { removeStoredFile } = await import("./services/storage");
+      await removeStoredFile(storagePath); // DB 失敗 → 清掉已落地的孤兒檔
+      throw dbErr;
+    }
+  } catch (err) {
+    await cleanup();
+    console.error("[databases:upload]", err);
+    recordError("databases:upload", err);
+    if (!res.headersSent) res.status(500).json({ error: "上傳失敗，請稍後再試" });
+  }
+});
+app.use("/api/databases/upload", (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    const msg = err.code === "LIMIT_FILE_SIZE" ? `檔案太大（上限 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB）` : `上傳失敗：${err.code}`;
+    return res.status(413).json({ error: msg });
+  }
+  next(err);
+});
+
+/** 資料庫文件下載：登入＋資料庫讀取權（databaseAcl）；非影音一律 attachment */
+app.get("/api/databases/files/:id/file", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, req.params.id));
+    if (!file) return res.status(404).json({ error: "找不到這份文件" });
+    const [table] = await db.select().from(schema.dataTables)
+      .where(and(eq(schema.dataTables.id, file.tableId), isNull(schema.dataTables.deletedAt)));
+    const { resolveTableAccess } = await import("./services/databaseAcl");
+    if (!table || !resolveTableAccess(auth, table).canRead) return res.status(404).json({ error: "找不到這份文件" });
+    if (!file.storagePath) {
+      // 純文字匯入（Notion/網頁）沒有原檔——給文字本體當下載內容
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}.txt`);
+      return res.send(file.textContent ?? "");
+    }
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (kindFromMime(file.mime) === "doc") res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+    res.sendFile(absPathOf(file.storagePath), { headers: { "Content-Type": file.mime } });
+  } catch (err) {
+    console.error("[databases:file]", err);
+    if (!res.headersSent) res.status(500).json({ error: "讀取文件失敗" });
+  }
+});
+
 // ── 資料下載區（需求 #11）：docs/README 白名單清單＋下載（登入即可，全站內部文件） ──
 app.get("/api/downloads", async (req, res) => {
   try {
@@ -460,6 +568,14 @@ app.get("/api/me/export", async (req, res) => {
 
 // MCP 伺服器介面（設 MCP_API_KEY 啟用；供外部 AI 客戶端操作）
 app.post("/api/mcp", handleMcp);
+
+// 資料庫對外連接（本機腳本／手機 App／其他系統）：REST API v1 + CSV 匯出 + 行事曆訂閱。
+// 認證＝個人 MCP 金鑰（x-api-key / ?key=）或 session cookie；授權沿用 databaseAcl。
+app.get("/api/v1/databases", handleV1ListDatabases);
+app.get("/api/v1/databases/:id/rows", handleV1ListRows);
+app.post("/api/v1/databases/:id/rows", handleV1AddRow);
+app.get("/api/databases/:id/rows.csv", handleCsvExport);
+app.get("/api/databases/:id/calendar.ics", handleDatabaseIcs);
 
 // 系統自檢（開發者登入後用瀏覽器開，或管理頁按鈕）——部署後一鍵驗證所有子系統
 app.get("/api/selftest", async (req, res) => {

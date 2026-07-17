@@ -14,6 +14,9 @@ import { reapStuckGeneration } from "./workflowRunner";
 import { lockSceneOrder } from "./locks";
 import { splitScriptCore } from "../routers/director";
 import { submitApprovalCore } from "../routers/approvals";
+import { loadAuthState } from "./auth";
+import { resolveAgentAccess } from "./databaseAcl";
+import { addDataRowValidated } from "./databaseCore";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -22,10 +25,14 @@ export const AGENT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
 /** 與 schema.agentRuns.steps 的 jsonb 形狀一致（規劃端 agents.ts 建立、執行端這裡推進） */
 export interface AgentStep {
-  kind: "split_script" | "create_scene" | "generate" | "voiceover" | "submit_approval";
+  kind: "split_script" | "create_scene" | "generate" | "voiceover" | "submit_approval" | "record_to_database";
   /** 人話說明（核准畫面與進度列表顯示） */
   note: string;
   status: "pending" | "running" | "done" | "failed" | "stopped";
+  /** record_to_database 用：目標資料庫 id（規劃端已對照組可寫資料庫解析，非 LLM 原始輸出） */
+  tableId?: string;
+  /** record_to_database 用：要寫入的一列資料（鍵＝欄位 key） */
+  rowData?: Record<string, unknown>;
   /** generate 用：白名單過的模型 id */
   modelId?: string;
   /** generate 用：提示詞（世界觀注入由 generationCore 做） */
@@ -383,6 +390,32 @@ async function advanceRun(run: RunRow): Promise<void> {
     }
     step.status = "done";
     step.detail = `第 ${step.sceneNo} 鏡已送審`;
+    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    return;
+  }
+
+  // 把一筆結果寫進自訂資料庫（AI 代理 × 資料庫）：以發起人身分＋AI 介面權限（agentAccess）落地。
+  // tableId 在規劃端已對照「組可寫資料庫」解析過，這裡再驗一次現況（防資料庫被刪或權限收回）。
+  if (step.kind === "record_to_database") {
+    if (!step.tableId) return failRun(run, steps, idx, "計畫沒有指定要寫入的資料庫");
+    const [table] = await db
+      .select()
+      .from(schema.dataTables)
+      .where(and(eq(schema.dataTables.id, step.tableId), isNull(schema.dataTables.deletedAt)));
+    if (!table) return failRun(run, steps, idx, "目標資料庫不存在或已刪除");
+    // 以發起人身分推導 AuthState，套 AI 介面權限（none/read 皆不可寫）——與 MCP 同一道守衛
+    const auth = await loadAuthState(run.userId);
+    if (!auth) return failRun(run, steps, idx, "發起人帳號已停用，代理無法寫入資料庫");
+    const access = resolveAgentAccess(auth, table);
+    if (!access.canWriteRows) return failRun(run, steps, idx, "沒有這個資料庫的 AI 寫入權（或其 AI 存取設為唯讀/不開放）");
+    try {
+      const row = await addDataRowValidated(table, run.userId, step.rowData ?? {});
+      step.status = "done";
+      step.detail = `已寫入「${table.name}」一列`;
+      void row;
+    } catch (err) {
+      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+    }
     await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
     return;
   }

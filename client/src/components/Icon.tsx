@@ -58,6 +58,8 @@ export type IconName =
   | "CalendarPlus"
   | "Square"
   | "Plus"
+  | "Trash2"
+  | "SlidersHorizontal"
   | "Search";
 
 /**
@@ -218,6 +220,28 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M9 14 4 9l5-5" />
       <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11" />
+    </>
+  ),
+  Trash2: (
+    <>
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" x2="10" y1="11" y2="17" />
+      <line x1="14" x2="14" y1="11" y2="17" />
+    </>
+  ),
+  SlidersHorizontal: (
+    <>
+      <line x1="21" x2="14" y1="4" y2="4" />
+      <line x1="10" x2="3" y1="4" y2="4" />
+      <line x1="21" x2="12" y1="12" y2="12" />
+      <line x1="8" x2="3" y1="12" y2="12" />
+      <line x1="21" x2="16" y1="20" y2="20" />
+      <line x1="12" x2="3" y1="20" y2="20" />
+      <line x1="14" x2="14" y1="2" y2="6" />
+      <line x1="8" x2="8" y1="10" y2="14" />
+      <line x1="16" x2="16" y1="18" y2="22" />
     </>
   ),
   ChevronUp: <path d="m18 15-6-6-6 6" />,
