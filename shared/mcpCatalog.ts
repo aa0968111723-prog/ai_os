@@ -41,6 +41,8 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "get_agent_run", title: "查代理進度", access: "read", blurb: "查一份代理計畫的每一步與執行進度。" },
   { name: "list_schedule", title: "列出行程", access: "read", blurb: "列出專案相關的行程與交付死線。" },
   { name: "add_schedule_item", title: "新增行程", access: "write", blurb: "為專案新增行程／交付死線（進組行事曆）。" },
+  { name: "list_notes", title: "列出筆記", access: "read", blurb: "列出專案相關的會議筆記／知識筆記（本專案 ＋ 組層級共用）。" },
+  { name: "get_note", title: "讀取筆記", access: "read", blurb: "讀一則筆記的全文（會議決議、待辦、匯入的知識）。" },
 ];
 
 /** 寫入類工具名集合（唯讀金鑰一律擋）——由目錄推導，單一來源不分岔。 */
