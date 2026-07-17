@@ -6,7 +6,7 @@ import { router, adminProcedure } from "../trpc";
 import { db, schema } from "../db";
 import { createInvite, attachExistingUser, hashPassword } from "../services/auth";
 
-/** 團隊管理權檢查：超管或該團隊 admin */
+/** 團隊管理權檢查：開發者或該團隊 admin */
 function assertTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, teamId: string): void {
   if (!auth.user.isSuperAdmin && !auth.adminTeamIds.includes(teamId)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "需要該團隊的管理權限" });
@@ -138,15 +138,15 @@ export const adminRouter = router({
   resetMemberPassword: adminProcedure.input(z.object({ userId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [target] = await db.select().from(schema.users).where(eq(schema.users.id, input.userId));
     if (!ctx.auth.user.isSuperAdmin) {
-      // 權限階梯：超管可重設任何人；團隊管理員只能重設「自己管的團隊」裡的一般成員。
-      // 所有拒絕情況（不存在/超管/他團管理員/不在範圍）共用同一句訊息——
-      // 不同文案會讓人拿任意 UUID 連打探出「這個 id 是不是超管/管理員」，細分原因只進伺服器 log
+      // 權限階梯：開發者可重設任何人；團隊管理員只能重設「自己管的團隊」裡的一般成員。
+      // 所有拒絕情況（不存在/開發者/他團管理員/不在範圍）共用同一句訊息——
+      // 不同文案會讓人拿任意 UUID 連打探出「這個 id 是不是開發者/管理員」，細分原因只進伺服器 log
       const deny = (reason: string): never => {
         console.warn(`[audit] resetMemberPassword 拒絕：caller=${ctx.auth.user.id} target=${input.userId} reason=${reason}`);
         throw new TRPCError({ code: "FORBIDDEN", message: "這位成員的密碼無法由你重設——請聯絡超級管理員" });
       };
       if (!target) deny("target 不存在");
-      if (target.isSuperAdmin) deny("target 是超管");
+      if (target.isSuperAdmin) deny("target 是開發者");
       const targetTeamRows = await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.userId, target.id));
       if (target.id !== ctx.auth.user.id && targetTeamRows.some((r) => r.role === "admin")) deny("target 是團隊管理員");
       // 管理範圍：目標直接在我管的團隊（team_members），或掛在該團隊任一組（group_members）

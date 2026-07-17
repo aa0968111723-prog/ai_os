@@ -5,7 +5,7 @@
  * 兩條認證路徑並存：
  *  1) 個人金鑰（本檔，推薦）：每人自助建立、可撤銷；解析成該人的 AuthState。
  *  2) 舊有共用金鑰 env MCP_API_KEY（向後相容）：對應到超級管理員身分。
- *     這是「單一金鑰＝人人超管」的舊模型，僅為不破壞既有部署／e2e 而保留；
+ *     這是「單一金鑰＝人人開發者」的舊模型，僅為不破壞既有部署／e2e 而保留；
  *     要讓夥伴各自依權限連線，請改用個人金鑰、並移除此環境變數。
  *
  * 保護等級與 sessions/invites 一致：DB 只存 SHA-256，原文只在建立當下回一次。
@@ -84,7 +84,7 @@ export async function isMcpEnabled(): Promise<boolean> {
  * 成功時 fire-and-forget 更新 lastUsedAt（純輔助資訊，失敗不影響認證）。
  */
 export async function resolveMcpIdentity(provided: string): Promise<McpIdentity | null> {
-  // 路徑 2：舊有共用金鑰 → 超管。放在最前面，維持既有部署行為不變。
+  // 路徑 2：舊有共用金鑰 → 開發者。放在最前面，維持既有部署行為不變。
   const envKey = process.env.MCP_API_KEY;
   if (envKey && envKeyMatches(provided, envKey)) {
     const [admin] = await db.select().from(schema.users).where(eq(schema.users.isSuperAdmin, true)).limit(1);

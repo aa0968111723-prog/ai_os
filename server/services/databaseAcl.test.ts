@@ -25,7 +25,7 @@ function table(over: Partial<Parameters<typeof resolveTableAccess>[1]> = {}) {
 }
 
 describe("resolveTableAccess", () => {
-  it("personal：只有本人；超管也不行", () => {
+  it("personal：只有本人；開發者也不行", () => {
     expect(resolveTableAccess(auth(), table())).toEqual({ canRead: true, canWriteRows: true, canManage: true });
     const stranger = auth({ user: { ...auth().user, id: U.other, isSuperAdmin: true } });
     expect(resolveTableAccess(stranger, table()).canRead).toBe(false);
@@ -56,7 +56,7 @@ describe("resolveTableAccess", () => {
     expect(resolveTableAccess(otherTeam, t).canRead).toBe(false);
   });
 
-  it("global：人人可讀；鎖寫時只有超管能寫；管理限超管", () => {
+  it("global：人人可讀；鎖寫時只有開發者能寫；管理限開發者", () => {
     const t = table({ scope: "global", ownerId: null, memberWritable: false, createdBy: U.other });
     expect(resolveTableAccess(auth(), t)).toEqual({ canRead: true, canWriteRows: false, canManage: false });
     const superAdmin = auth({ user: { ...auth().user, isSuperAdmin: true } });
@@ -86,7 +86,7 @@ describe("resolveAgentAccess（AI/MCP 介面權限＝本人權限 ∩ agentAcces
 });
 
 describe("canCreateIn", () => {
-  it("personal 人人可建；group/team 要是成員；global 限超管", () => {
+  it("personal 人人可建；group/team 要是成員；global 限開發者", () => {
     expect(canCreateIn(auth(), "personal")).toBeNull();
     expect(canCreateIn(auth(), "group", U.groupA)).toBeNull();
     expect(canCreateIn(auth(), "group", U.groupB)).toContain("不屬於");

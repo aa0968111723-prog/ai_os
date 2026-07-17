@@ -111,7 +111,7 @@ export async function usedByMember(userId: string, groupId: string): Promise<num
   return Number(row?.used ?? 0);
 }
 
-/** 組預算（累計上限；null＝不限）——超管/團隊管理員分配給組的點數池 */
+/** 組預算（累計上限；null＝不限）——開發者/團隊管理員分配給組的點數池 */
 export async function groupBudget(groupId: string): Promise<number | null> {
   const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
   return noLimit(group?.budgetPoints) ? null : group!.budgetPoints;

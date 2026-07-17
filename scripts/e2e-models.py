@@ -44,7 +44,7 @@ from e2e_lib import ok  # 共用斷言:計數+結束碼(有 ❌ 即非零退出,
 admin = Client()
 
 r = call("POST", admin, "auth.login", {"email": "admin@aidirector.local", "password": "test-admin-123"})
-ok("超管登入", r.get("user", {}).get("isSuperAdmin") is True)
+ok("開發者登入", r.get("user", {}).get("isSuperAdmin") is True)
 
 # ── 模型目錄 ──
 cats = call("GET", admin, "models.categories")

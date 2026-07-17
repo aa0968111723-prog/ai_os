@@ -32,7 +32,7 @@ admin = client(); azhe = client()
 from e2e_lib import ok  # 共用斷言:計數+結束碼(有 ❌ 即非零退出,CI 據此判紅綠)
 
 r = call("POST",admin,"auth.login",{"email":"admin@aidirector.local","password":"test-admin-123"})
-ok("超管登入", r.get("user",{}).get("isSuperAdmin") is True)
+ok("開發者登入", r.get("user",{}).get("isSuperAdmin") is True)
 
 teams = call("GET",admin,"admin.overview")
 north = next(t for t in teams if t["name"]=="北區工作組")
@@ -67,7 +67,7 @@ lst = call("GET",azhe,"projects.list",{})
 ok("阿哲僅見剪輯組專案", [p["title"] for p in lst]==["見證故事測試"])
 
 alst = call("GET",admin,"projects.list",{})
-ok("超管跨組看全部（2 專案）", len(alst)==2)
+ok("開發者跨組看全部（2 專案）", len(alst)==2)
 
 msg = call("POST",azhe,"messages.post",{"projectId":proj["id"],"body":"登入系統測試完成 🙏"})
 msgs = call("GET",azhe,"messages.list",{"projectId":proj["id"]})
@@ -132,7 +132,7 @@ except urllib.error.HTTPError as e:
     ok("🔒 交付包隔離（403）", e.code==403)
 
 # ─── 第三段：審批三態機＋AI 導演＋回饋＋MCP ───
-# 把阿哲升組長來測裁決（超管操作）
+# 把阿哲升組長來測裁決（開發者操作）
 call("POST",admin2,"admin.setGroupRole",{"groupId":edit_group["id"],"userId":acc["user"]["id"],"role":"leader"})
 azhe3 = client(); call("POST",azhe3,"auth.login",{"email":"azhe@example.com","password":"azhe-pass-88"})
 

@@ -1,7 +1,7 @@
 /**
- * 種子資料（冪等）：超管帳號＋兩個團隊＋三個組（對應基金會現實）。
- * 超管密碼由 SEED_ADMIN_PASSWORD 指定；未設則自動產生一次性密碼（不印明文於 log）。
- * 既有超管帳號的密碼永不被開機流程覆寫（UI 改過的密碼不會被 redeploy 還原）。
+ * 種子資料（冪等）：開發者帳號＋兩個團隊＋三個組（對應基金會現實）。
+ * 開發者密碼由 SEED_ADMIN_PASSWORD 指定；未設則自動產生一次性密碼（不印明文於 log）。
+ * 既有開發者帳號的密碼永不被開機流程覆寫（UI 改過的密碼不會被 redeploy 還原）。
  */
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
@@ -11,31 +11,31 @@ import { hashPassword } from "./auth";
 /** 總管理員 email（環境變數可覆蓋）。密碼「不再」有硬編碼預設——見下方說明。 */
 export const SEED_ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "aa0968111723@gmail.com";
 /**
- * 超管密碼一律來自環境變數 SEED_ADMIN_PASSWORD，原始碼不再內嵌任何密碼字串
+ * 開發者密碼一律來自環境變數 SEED_ADMIN_PASSWORD，原始碼不再內嵌任何密碼字串
  * （舊版把密碼 commit 進 repo，任何讀原始碼者都能登入，且每次部署會把 DB 密碼
  *  重設回那個公開字串——安全大洞，已移除）。
  */
 const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD;
 
 /**
- * 開機時確保超管帳號存在且具權限——但「絕不」每輪還原密碼。
+ * 開機時確保開發者帳號存在且具權限——但「絕不」每輪還原密碼。
  * - 帳號不存在：用 SEED_ADMIN_PASSWORD（未設則隨機一次性密碼）建立。
  * - 帳號已存在：只補正 isSuperAdmin=true、status=active，「絕不」覆寫 passwordHash——
- *   超管在 UI 改過的密碼不可被任何 redeploy 還原（舊版每輪把密碼對齊環境變數，等於
- *   任何能改環境變數者都能強制還原超管密碼，且會抹掉使用者自訂密碼——已移除此行為）。
+ *   開發者在 UI 改過的密碼不可被任何 redeploy 還原（舊版每輪把密碼對齊環境變數，等於
+ *   任何能改環境變數者都能強制還原開發者密碼，且會抹掉使用者自訂密碼——已移除此行為）。
  */
 async function ensureSeedAdmin(): Promise<void> {
   const [user] = await db.select().from(schema.users).where(eq(schema.users.email, SEED_ADMIN_EMAIL));
   if (!user) {
-    // DB 已有其他使用者但無超管：補建。密碼取環境變數，未設則隨機（不印明文，見下）。
+    // DB 已有其他使用者但無開發者：補建。密碼取環境變數，未設則隨機（不印明文，見下）。
     const password = SEED_ADMIN_PASSWORD || randomBytes(9).toString("base64url");
     await db.insert(schema.users).values({
-      name: "Bruce（超管）",
+      name: "Bruce（開發者）",
       email: SEED_ADMIN_EMAIL,
       passwordHash: await hashPassword(password),
       isSuperAdmin: true,
     });
-    console.log(`[seed] 已補建超管帳號：${SEED_ADMIN_EMAIL}（一次性密碼請洽安全通道取得，不印於 log）`);
+    console.log(`[seed] 已補建開發者帳號：${SEED_ADMIN_EMAIL}（一次性密碼請洽安全通道取得，不印於 log）`);
     return;
   }
   // 已存在：只補正權限與狀態，永不動密碼
@@ -44,7 +44,7 @@ async function ensureSeedAdmin(): Promise<void> {
       .update(schema.users)
       .set({ isSuperAdmin: true, status: "active" })
       .where(eq(schema.users.id, user.id));
-    console.log(`[seed] 已補正超管權限／狀態（未變更密碼）：${SEED_ADMIN_EMAIL}`);
+    console.log(`[seed] 已補正開發者權限／狀態（未變更密碼）：${SEED_ADMIN_EMAIL}`);
   }
 }
 
@@ -56,11 +56,11 @@ export async function ensureSeed(): Promise<void> {
   const password = SEED_ADMIN_PASSWORD || randomBytes(9).toString("base64url");
   const passwordHash = await hashPassword(password); // bcrypt 較慢，放交易外縮短交易持鎖時間
   // 五段 insert 包成單一交易（全有或全無）：若只寫入 users 就中斷，下次啟動 existing.length>0
-  // 會直接走 ensureSeedAdmin，團隊/組永遠不補建（invites.teamId 必填 → 超管連邀請都發不出）。
+  // 會直接走 ensureSeedAdmin，團隊/組永遠不補建（invites.teamId 必填 → 開發者連邀請都發不出）。
   await db.transaction(async (tx) => {
     const [admin] = await tx
       .insert(schema.users)
-      .values({ name: "Bruce（超管）", email: SEED_ADMIN_EMAIL, passwordHash, isSuperAdmin: true })
+      .values({ name: "Bruce（開發者）", email: SEED_ADMIN_EMAIL, passwordHash, isSuperAdmin: true })
       .returning();
 
     const [hq] = await tx.insert(schema.teams).values({ name: "總會小編團隊" }).returning();
@@ -78,12 +78,12 @@ export async function ensureSeed(): Promise<void> {
 
   console.log("──────────────────────────────────────────");
   console.log("[seed] 已建立：總會小編團隊（動畫組・短影音組）＋北區工作組（剪輯組）");
-  console.log(`[seed] 超管登入 email：${SEED_ADMIN_EMAIL}`);
+  console.log(`[seed] 開發者登入 email：${SEED_ADMIN_EMAIL}`);
   // 安全：密碼一律不印入 log（部署 log 常被多方存取）。
   if (process.env.SEED_ADMIN_PASSWORD) {
-    console.log("[seed] 超管密碼＝環境變數 SEED_ADMIN_PASSWORD 設定值（不印於 log）");
+    console.log("[seed] 開發者密碼＝環境變數 SEED_ADMIN_PASSWORD 設定值（不印於 log）");
   } else {
-    console.log("[seed] 已產生一次性隨機超管密碼——請洽安全通道取得，並於首次登入後立即更改（不印於 log）");
+    console.log("[seed] 已產生一次性隨機開發者密碼——請洽安全通道取得，並於首次登入後立即更改（不印於 log）");
   }
   console.log("──────────────────────────────────────────");
 }

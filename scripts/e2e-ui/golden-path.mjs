@@ -80,7 +80,7 @@ log("旁白音檔出現：", gotAudio);
 await page.locator("#onboard-delivery").scrollIntoViewIfNeeded();
 await shot(page, "07-scene-generated");
 
-// 7. 送審 → 通過（超管）
+// 7. 送審 → 通過（開發者）
 await page.locator('#onboard-delivery button:has-text("送審")').first().click();
 await page.waitForTimeout(1500);
 await page.locator('#onboard-delivery button:has-text("通過")').first().click();

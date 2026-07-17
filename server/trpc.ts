@@ -17,8 +17,8 @@ export interface Context {
 }
 
 export async function createContext({ req, res }: CreateExpressContextOptions): Promise<Context> {
-  // AUTH_MODE=dev：跳過登入、以種子超管身分運作（開發測功能不卡登入）。
-  // 安全鎖：正式環境「絕不」允許此後門生效——否則單一環境變數即造成全站無認證、人人超管。
+  // AUTH_MODE=dev：跳過登入、以種子開發者身分運作（開發測功能不卡登入）。
+  // 安全鎖：正式環境「絕不」允許此後門生效——否則單一環境變數即造成全站無認證、人人開發者。
   if (process.env.AUTH_MODE === "dev" && process.env.NODE_ENV !== "production") {
     const [admin] = await db.select().from(schema.users).where(eq(schema.users.email, SEED_ADMIN_EMAIL));
     const auth = admin ? await loadAuthState(admin.id) : null;
@@ -82,7 +82,7 @@ export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, g
   return result;
 });
 
-/** 需任一團隊管理權（或超管） */
+/** 需任一團隊管理權（或開發者） */
 export const adminProcedure = authedProcedure.use(({ ctx, next }) => {
   if (!ctx.auth.user.isSuperAdmin && ctx.auth.adminTeamIds.length === 0) {
     throw new TRPCError({ code: "FORBIDDEN", message: "需要團隊管理權限" });

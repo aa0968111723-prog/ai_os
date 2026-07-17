@@ -104,7 +104,7 @@ export const feedbackRouter = router({
     }),
 
   list: adminProcedure.query(async ({ ctx }) => {
-    // 組隔離：超管看全部；一般團隊管理員只看「自己管得到的組」的回饋（舊版任何管理員看全站，跨團隊洩漏）。
+    // 組隔離：開發者看全部；一般團隊管理員只看「自己管得到的組」的回饋（舊版任何管理員看全站，跨團隊洩漏）。
     // 送者名以 leftJoin 一次帶出（舊版撈全表使用者再逐列 .find()，M×N 掃描）。
     const base = db
       .select({ report: schema.feedback, userName: schema.users.name })

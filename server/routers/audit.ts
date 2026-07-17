@@ -5,7 +5,7 @@ import { db, schema } from "../db";
 
 /**
  * 審計日誌查詢（需求 2.2）：管理層專用。
- * 可見範圍：開發者（超管）看全部；一般團隊管理員只看「自己管的團隊底下各組」的紀錄
+ * 可見範圍：開發者看全部；一般團隊管理員只看「自己管的團隊底下各組」的紀錄
  * ——與 feedback.list 的組隔離原則一致（無 groupId 歸屬的全域動作只有開發者看得到）。
  * keyset 分頁比照 generation.listByProjectPaged（createdAt desc, id desc＋::text 保微秒）。
  */

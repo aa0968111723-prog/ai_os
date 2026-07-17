@@ -4,7 +4,7 @@
  * - 身分＝金鑰擁有者：每位夥伴帶「自己的」個人金鑰連進來，工具一律以其真實身分與權限執行——
  *   組隔離（requireGroup）、專案 ACL（assertProjectEditable）、點數額度與成本核准門檻，
  *   全部沿用網頁端同一套守衛（submit_generation 直接重用 submitGenerationCore）。
- * - 舊有共用金鑰 env MCP_API_KEY 仍可用（對應超管），僅為向後相容；見 services/mcpAuth。
+ * - 舊有共用金鑰 env MCP_API_KEY 仍可用（對應開發者），僅為向後相容；見 services/mcpAuth。
  * - 工具：list_projects / get_project_context / find_model / submit_generation / post_message
  *        ＋自訂資料庫三件組 list_databases / query_database / add_database_row（權限走 databaseAcl）
  */
@@ -101,7 +101,7 @@ const TOOLS = [
 
 /**
  * MCP 工具呼叫審計（需求 2.2）：MCP 繞過 trpc.ts 的 mutation 審計中介層，這裡自行比照 recordAudit：
- * fire-and-forget、輸入脫敏、成功失敗都記；actorId＝金鑰擁有者本人（per-user 後可追到是誰、非籠統超管）；
+ * fire-and-forget、輸入脫敏、成功失敗都記；actorId＝金鑰擁有者本人（per-user 後可追到是誰、非籠統開發者）；
  * groupId/projectId 盡力從 args.projectId 反查。
  */
 function recordMcpAudit(
@@ -146,7 +146,7 @@ async function callTool(auth: AuthState, name: string, args: Record<string, unkn
 
 async function runTool(auth: AuthState, name: string, args: Record<string, unknown>): Promise<unknown> {
   if (name === "list_projects") {
-    // per-user 隔離：只列此人有權存取的組（直接組員＋團隊管理展開＋超管展開全部，見 loadAuthState）。
+    // per-user 隔離：只列此人有權存取的組（直接組員＋團隊管理展開＋開發者展開全部，見 loadAuthState）。
     // 無任何組＝回空陣列（不外洩他組專案標題）。
     const groupIds = auth.groups.map((g) => g.groupId);
     if (groupIds.length === 0) return [];
@@ -331,7 +331,7 @@ export async function handleMcp(req: Request, res: Response): Promise<void> {
     res.status(429).json({ error: "嘗試過於頻繁，請稍後再試" });
     return;
   }
-  // 身分解析：個人金鑰→該使用者；env 共用金鑰→超管；皆不符→401（記一次失敗，擋暴力猜）
+  // 身分解析：個人金鑰→該使用者；env 共用金鑰→開發者；皆不符→401（記一次失敗，擋暴力猜）
   const provided = req.headers["x-api-key"];
   const identity = typeof provided === "string" && provided.length > 0 ? await resolveMcpIdentity(provided) : null;
   if (!identity) {

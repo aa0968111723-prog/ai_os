@@ -207,7 +207,7 @@ if img_src:
 else:
     ok("回收桶來源防護(略過：無圖片素材)", True)
 
-# ── 點數分配樹（超管→組→組員）：分配、權限、帳表口徑、審計 ──
+# ── 點數分配樹（開發者→組→組員）：分配、權限、帳表口徑、審計 ──
 # 組員不能自行分配（setMemberBudget/setGroupBudget 需組長／團隊管理員）
 deny = call("POST", mem, "quota.setMemberBudget", {"groupId": grp["id"], "userId": mem_id, "budgetPoints": 500})
 ok("🔒 組員不能分配個人預算", "__error__" in deny)

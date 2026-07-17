@@ -16,8 +16,8 @@ const STATUS_VALUES = ["open", "reviewing", "done"] as const;
 
 /**
  * 元件級回饋後端（R23）：使用者點頁面元件 → 分類＋文字（＋可選截圖）即時回報。
- * submit＝任何登入者送出；listVisible＝作者本人／該組組長・管理員／超管看得到；
- * updateStatus＝只有審閱者（組長・管理員・超管）能改狀態，純作者不行。
+ * submit＝任何登入者送出；listVisible＝作者本人／該組組長・管理員／開發者看得到；
+ * updateStatus＝只有審閱者（組長・管理員・開發者）能改狀態，純作者不行。
  */
 export const feedbackReportsRouter = router({
   submit: authedProcedure
@@ -73,11 +73,11 @@ export const feedbackReportsRouter = router({
       return { id: row.id };
     }),
 
-  /** 可見清單：作者本人／該組組長・管理員／超管；新到舊上限 200，附送者名與組名 */
+  /** 可見清單：作者本人／該組組長・管理員／開發者；新到舊上限 200，附送者名與組名 */
   listVisible: authedProcedure
     .input(z.object({ status: z.enum(STATUS_VALUES).optional() }).optional())
     .query(async ({ ctx, input }) => {
-      // 可見性：超管看全部；其餘為「自己送的」或「自己是組長/管理員的組」的回饋。
+      // 可見性：開發者看全部；其餘為「自己送的」或「自己是組長/管理員的組」的回饋。
       let visibility: SQL | undefined;
       if (!ctx.auth.user.isSuperAdmin) {
         const reviewGroupIds = ctx.auth.groups.filter((g) => g.role !== "member").map((g) => g.groupId);
@@ -132,14 +132,14 @@ export const feedbackReportsRouter = router({
       .limit(100);
   }),
 
-  /** 改狀態：只有審閱者（該組組長・管理員或超管）可改；純作者不能改自己回饋的狀態 */
+  /** 改狀態：只有審閱者（該組組長・管理員或開發者）可改；純作者不能改自己回饋的狀態 */
   updateStatus: authedProcedure
     .input(z.object({ id: z.string().uuid(), status: z.enum(STATUS_VALUES) }))
     .mutation(async ({ ctx, input }) => {
       const [report] = await db.select().from(schema.feedbackReports).where(eq(schema.feedbackReports.id, input.id));
       if (!report) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這則回饋" });
       if (!ctx.auth.user.isSuperAdmin) {
-        // 無組回饋沒有組長可審，只有超管能處理；有組則需組長/管理員（requireLeader 會擋掉純組員與非本組者）
+        // 無組回饋沒有組長可審，只有開發者能處理；有組則需組長/管理員（requireLeader 會擋掉純組員與非本組者）
         if (!report.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "只有系統管理員能處理這則回饋" });
         requireLeader(ctx.auth, report.groupId);
       }
@@ -166,7 +166,7 @@ export const feedbackReportsRouter = router({
   }),
 
   /**
-   * 立即巡檢一輪（超管手動觸發，不必等 3 天排程）：同步跑完回傳結果。
+   * 立即巡檢一輪（開發者手動觸發，不必等 3 天排程）：同步跑完回傳結果。
    * 併發時（排程正在跑）回 skipped；只有開發者可觸發，避免一般管理員狂點觸發 LLM 呼叫。
    */
   runAgentNow: adminProcedure.mutation(async ({ ctx }) => {

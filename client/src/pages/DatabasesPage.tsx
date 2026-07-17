@@ -16,7 +16,7 @@ const SCOPE_HINT: Record<string, string> = {
   personal: "只有你自己看得到",
   group: "組成員共用（組長管理）",
   team: "整個團隊共用（團隊管理員管理）",
-  global: "全站都看得到（超管管理）",
+  global: "全站都看得到（開發者管理）",
 };
 
 type TableSummary = {
