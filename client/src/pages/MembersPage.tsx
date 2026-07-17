@@ -1,8 +1,10 @@
 import { useEffect, useState, type CSSProperties } from "react";
+import { useLocation } from "wouter";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
+import { setOpenConvoHandoff } from "./MessagesPage";
 
 type Member = inferRouterOutputs<AppRouter>["directory"]["list"]["members"][number];
 
@@ -41,6 +43,9 @@ export function MembersPage() {
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [groupId, setGroupId] = useState("");
+  const [, navigate] = useLocation();
+  const me = trpc.auth.me.useQuery();
+  const myId = me.data?.user.id;
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), 300);
     return () => clearTimeout(t);
@@ -49,6 +54,14 @@ export function MembersPage() {
   const scope = trpc.directory.scope.useQuery();
   const dir = trpc.directory.list.useQuery({ q: debouncedQ.trim() || undefined, groupId: groupId || undefined });
   const members = dir.data?.members ?? [];
+
+  // 直接從通訊錄私訊：開/找對話後，用 sessionStorage 交棒對話 id 再導去訊息中心
+  const openDm = trpc.messaging.openDm.useMutation({
+    onSuccess: (r) => {
+      setOpenConvoHandoff(r.conversationId);
+      navigate("/messages");
+    },
+  });
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto" }}>
@@ -92,8 +105,15 @@ export function MembersPage() {
       ) : (
         <>
           <p className="hint" style={{ marginBottom: 8 }}>共 {members.length} 位</p>
+          {openDm.error && <p className="error" role="alert" style={{ marginBottom: 8 }}>私訊開啟失敗：{openDm.error.message}</p>}
           {members.map((m) => (
-            <MemberCard key={m.userId} m={m} />
+            <MemberCard
+              key={m.userId}
+              m={m}
+              canDm={!!myId && m.userId !== myId && !m.disabled}
+              dmPending={openDm.isPending && openDm.variables?.userId === m.userId}
+              onDm={() => openDm.mutate({ userId: m.userId })}
+            />
           ))}
         </>
       )}
@@ -101,17 +121,22 @@ export function MembersPage() {
   );
 }
 
-function MemberCard({ m }: { m: Member }) {
+function MemberCard({ m, canDm, dmPending, onDm }: { m: Member; canDm: boolean; dmPending: boolean; onDm: () => void }) {
   const isLeaderSomewhere = m.memberships.some((x) => x.role === "leader");
   return (
     <section className="card" style={{ marginBottom: 12, opacity: m.disabled ? 0.6 : 1 }}>
-      {/* 標頭：姓名＋角色徽章 */}
+      {/* 標頭：姓名＋角色徽章＋私訊 */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <b style={{ fontSize: "var(--fs-16)" }}>{m.name}</b>
         {m.isSuperAdmin && <span style={ROLE_BADGE.super}>超管</span>}
         {isLeaderSomewhere && <span style={ROLE_BADGE.leader}>組長</span>}
         {!m.isSuperAdmin && !isLeaderSomewhere && <span style={ROLE_BADGE.member}>組員</span>}
         {m.disabled && <span style={badge({ background: "var(--danger-soft, var(--card2))", color: "var(--danger-ink)", border: "1px solid var(--border-soft)" })}>已停用</span>}
+        {canDm && (
+          <button className="btn-sm" style={{ marginLeft: "auto" }} disabled={dmPending} onClick={onDm} title={`私訊 ${m.name}`}>
+            <Icon name="MessageCircle" size={13} /> {dmPending ? "開啟中…" : "私訊"}
+          </button>
+        )}
       </div>
 
       {/* Email：可直接點開寄信 */}

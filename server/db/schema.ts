@@ -726,3 +726,55 @@ export const feedbackAgentRuns = pgTable("feedback_agent_runs", {
 }, (t) => ({
   startedIdx: index("feedback_agent_runs_started_idx").on(t.startedAt),
 }));
+
+/* ── 站內私訊／群組對話（通訊錄協作）─────────────────────────
+ * 有別於 messages（掛專案的討論串，見上）：這裡是「人與人」的私訊與臨時群組，
+ * 從通訊錄發起，隊友（同團隊者）皆可用——不限組長/管理員。可選關聯某專案作為討論脈絡。
+ * 隔離：對話所屬 team_id 圈定「誰能被拉進來」；讀寫一律以「是不是這條對話的成員」為準
+ *（連開發者也不自動看得到別人的私訊——隱私優先）。訊息仍走輪詢（與 messages 一致）。 */
+
+/** 對話（dm＝一對一私訊；group＝具名群組）。lastMessageAt 供對話清單排序。 */
+export const conversations = pgTable("conversations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  kind: text("kind", { enum: ["dm", "group"] }).notNull(),
+  /** 群組標題；dm 為 null（前端顯示對方名字） */
+  title: text("title"),
+  /** dm 專用：兩人 id 排序後的穩定配對鍵（"loId:hiId"），保證一對人全域只有一條 dm；group 為 null。
+   *  唯一性由 ensure.ts 的部分唯一索引（where dm_key is not null）保底——見手寫遷移。 */
+  dmKey: text("dm_key"),
+  /** 對話所屬團隊：成員都必須屬於此團隊（通訊錄以團隊為界圈定可邀對象） */
+  teamId: uuid("team_id").notNull(),
+  /** 針對專案討論（可選）：把群組對話關聯到某專案，顯示專案標籤＋深連結；dm/未關聯為 null */
+  projectId: uuid("project_id"),
+  createdBy: uuid("created_by").notNull(),
+  /** 最後一則訊息時間（排序用；建立時＝createdAt，送訊時觸碰） */
+  lastMessageAt: timestamp("last_message_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  teamIdx: index("conversations_team_idx").on(t.teamId),
+  lastMsgIdx: index("conversations_last_msg_idx").on(t.lastMessageAt),
+}));
+
+/** 對話成員：每人每對話一列，帶已讀水位（lastReadAt）算未讀。(conversation_id,user_id) 唯一見 ensure.ts。 */
+export const conversationMembers = pgTable("conversation_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  conversationId: uuid("conversation_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  lastReadAt: timestamp("last_read_at").defaultNow().notNull(),
+  joinedAt: timestamp("joined_at").defaultNow().notNull(),
+}, (t) => ({
+  convIdx: index("conversation_members_conv_idx").on(t.conversationId),
+  userIdx: index("conversation_members_user_idx").on(t.userId),
+}));
+
+/** 對話訊息：mentions 只能提及本對話成員（validateConvMentions）。 */
+export const conversationMessages = pgTable("conversation_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  conversationId: uuid("conversation_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  body: text("body").notNull(),
+  mentions: jsonb("mentions").$type<string[]>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  convIdx: index("conversation_messages_conv_idx").on(t.conversationId, t.createdAt),
+}));

@@ -408,6 +408,10 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
 }
 
 /* ── 組內留言協作強化(快速短語/表情回應/@提及/引用卡/回覆串/釘選/未讀徽章) ── */
+/* 訊息中心對話清單項：hover 淡底、選中態由行內樣式帶 --primary-tint */
+.convo-item { transition: background 0.12s ease; }
+.convo-item:hover { background: var(--card2) !important; }
+.convo-item.active:hover { background: var(--primary-tint) !important; }
 .msg-block { padding: 2px 6px; border-radius: var(--r-8); }
 .msg-block.mentioned-me { background: color-mix(in srgb, var(--gold) 14%, transparent); }
 .msg .who { display: inline-flex; align-items: center; }

@@ -7,6 +7,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { AdminPage, AuditLogCard, ConsumptionMonitorCard } from "./pages/AdminPage";
 import { MembersPage } from "./pages/MembersPage";
+import { MessagesPage } from "./pages/MessagesPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { MyReportsPage } from "./pages/MyReportsPage";
 import { ModelsPage } from "./pages/ModelsPage";
@@ -173,6 +174,24 @@ function PointsBadge({ groupId }: { groupId: string }) {
   );
 }
 
+/** 私訊未讀徽章（頂欄）：跨所有對話的未讀總數，點擊直接進訊息中心。0 筆不佔版面。人人可見（含純組員）。 */
+function MessagesBadge() {
+  const unread = trpc.messaging.unreadTotal.useQuery(undefined, { refetchInterval: 60_000 });
+  const total = unread.data?.total ?? 0;
+  if (total === 0) return null;
+  return (
+    <Link
+      href="/messages"
+      className="status-chip"
+      style={{ color: "var(--primary-ink)", textDecoration: "none", cursor: "pointer" }}
+      title={`${total} 則未讀私訊／群組訊息——點開進訊息中心`}
+    >
+      <Icon name="MessageCircle" size={14} />
+      <span className="mono">{total > 99 ? "99+" : total}</span>
+    </Link>
+  );
+}
+
 /** 使用者選單（收斂頂欄）：怎麼用／模型指南／選項／團隊管理／改密碼＋登出，收進單一下拉。
  * CSP 下自製（無外部庫）：點外面或 Esc 關閉。 */
 function UserMenu({
@@ -207,6 +226,7 @@ function UserMenu({
           <Link href="/models" className="menu-item" role="menuitem" onClick={close}><Icon name="Info" size={15} />模型指南</Link>
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">工作</div>
+          <Link href="/messages" className="menu-item" role="menuitem" onClick={close}><Icon name="MessageCircle" size={15} />訊息</Link>
           <Link href="/planner" className="menu-item" role="menuitem" onClick={close}><Icon name="Clock" size={15} />筆記排程</Link>
           <Link href="/databases" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />資料庫</Link>
           <Link href="/mcp" className="menu-item" role="menuitem" onClick={close}><Icon name="Sparkles" size={15} />接上外部 AI</Link>
@@ -299,6 +319,7 @@ export function App() {
               <span className="topbar-help-label">怎麼用</span>
             </Link>
           )}
+          {me.data && <MessagesBadge />}
           {me.data && <PendingBadge groupId={activeGroupId} />}
           {me.data && <PointsBadge groupId={activeGroupId} />}
           {/* 頂欄收斂：次要入口（怎麼用/模型指南/選項/團隊管理/改密碼）＋登出全收進使用者選單 */}
@@ -387,6 +408,7 @@ export function App() {
                     </p>
                   )}
                 </Route>
+                <Route path="/messages"><MessagesPage groupId={activeGroupId || undefined} /></Route>
                 <Route path="/feedback"><FeedbackPage groupId={activeGroupId || undefined} /></Route>
                 <Route path="/my-reports"><MyReportsPage /></Route>
                 <Route path="/models"><ModelsPage /></Route>

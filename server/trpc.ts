@@ -53,7 +53,9 @@ export const publicProcedure = t.procedure;
 const MUST_CHANGE_PW_ALLOWED = ["auth.changePassword", "auth.me", "auth.logout"];
 
 /** 審計豁免清單：高頻、純閱讀狀態、無安全意義的 mutation——記了只會灌爆 audit_log 稀釋真正要查的事件 */
-const AUDIT_EXEMPT = new Set(["messages.markRead"]);
+// messaging.send 一併豁免：私訊/群組訊息內容屬私密（連開發者也不該從審計看到別人的對話），
+// 且聊天高頻，記了既洩私訊內容又灌爆審計。結構性動作（開私訊/建群組/加人）仍照記。
+const AUDIT_EXEMPT = new Set(["messages.markRead", "messaging.markRead", "messaging.send"]);
 
 /** 需登入 */
 export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, getRawInput }) => {

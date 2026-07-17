@@ -94,7 +94,19 @@ async function applyManualMigrations(): Promise<void> {
       create unique index if not exists feedback_user_group_uq
       on feedback (user_id, coalesce(group_id, '00000000-0000-0000-0000-000000000000'::uuid))
     `);
-    console.log("[db] ✓ 手寫遷移完成（group_options／feedback 唯一索引就緒）");
+    // 私訊去重：一對人全域只有一條 dm。dmKey＝兩人 id 排序後 "loId:hiId"，group 對話為 null 不參與。
+    // 部分唯一索引（where dm_key is not null）讓 openDm 的併發插入有 DB 保底（23505 攔截後改讀既有）。
+    // 新表無歷史資料，直接建即可（不需先去重）。
+    await db.execute(sql`
+      create unique index if not exists conversations_dm_key_uq
+      on conversations (dm_key) where dm_key is not null
+    `);
+    // 對話成員一人一列：擋 addMembers/openDm 併發重複插入同一人。
+    await db.execute(sql`
+      create unique index if not exists conversation_members_conv_user_uq
+      on conversation_members (conversation_id, user_id)
+    `);
+    console.log("[db] ✓ 手寫遷移完成（group_options／feedback／conversations 唯一索引就緒）");
   } catch (err) {
     // 不擋開機：索引缺席只是回到「應用層防重」的舊狀態,功能照常
     console.warn("[db] ⚠ 手寫遷移失敗（不影響啟動）：", err instanceof Error ? err.message : err);
