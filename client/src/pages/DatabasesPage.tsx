@@ -1,0 +1,457 @@
+import { useMemo, useState } from "react";
+import { Link } from "wouter";
+import { trpc } from "../api";
+import { Icon } from "../components/Icon";
+import { ConfirmButton } from "../components/interactions";
+import { FIELD_TYPES, newFieldKey, type DataField, type DataRowData, type DataRowValue } from "@shared/databaseFields";
+
+/**
+ * 資料庫（工作台入口）：個人→組→團隊→全站 四層範圍的自訂結構化資料。
+ * 欄位自訂、格線編輯；權限由後端 databaseAcl 決定（前端只按 access 旗標收斂 UI）。
+ * AI 也看得到：組/團隊/全站庫會進團隊助手的上下文，外部代理走 MCP 三工具。
+ */
+
+const SCOPE_LABEL: Record<string, string> = { personal: "個人", group: "組", team: "團隊", global: "全站" };
+const SCOPE_HINT: Record<string, string> = {
+  personal: "只有你自己看得到",
+  group: "組成員共用（組長管理）",
+  team: "整個團隊共用（團隊管理員管理）",
+  global: "全站都看得到（超管管理）",
+};
+
+type TableSummary = {
+  id: string;
+  scope: "personal" | "group" | "team" | "global";
+  groupId: string | null;
+  teamId: string | null;
+  name: string;
+  description: string | null;
+  fields: DataField[];
+  memberWritable: boolean;
+  rowCount: number;
+  access: { canRead: boolean; canWriteRows: boolean; canManage: boolean };
+};
+
+export function DatabasesPage({ groupId }: { groupId: string }) {
+  const list = trpc.databases.list.useQuery();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const tables = (list.data ?? []) as TableSummary[];
+  const selected = tables.find((t) => t.id === selectedId) ?? null;
+  const byScope = useMemo(() => {
+    const out: Record<string, TableSummary[]> = { personal: [], group: [], team: [], global: [] };
+    for (const t of tables) out[t.scope]?.push(t);
+    return out;
+  }, [tables]);
+
+  return (
+    <div>
+      <h1>資料庫</h1>
+      <p className="hint">
+        自訂欄位的輕量資料表：個人清單、組名單、團隊器材、全站公告都放得下。組以上範圍的資料庫，
+        團隊 AI 助手答題時看得到；外部 AI 代理（MCP）也能查詢與寫入——權限跟你在網頁上一樣。
+      </p>
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap", marginTop: 12 }}>
+        {/* 左欄：清單＋建立 */}
+        <div style={{ flex: "0 1 280px", minWidth: 240 }}>
+          <button className="primary" onClick={() => { setCreating(true); setSelectedId(null); }}>
+            <Icon name="Plus" size={14} /> 建立資料庫
+          </button>
+          {(["personal", "group", "team", "global"] as const).map((scope) =>
+            byScope[scope].length === 0 ? null : (
+              <div key={scope} style={{ marginTop: 16 }}>
+                <p className="hint" style={{ margin: "0 0 4px" }}>{SCOPE_LABEL[scope]}</p>
+                {byScope[scope].map((t) => (
+                  <button
+                    key={t.id}
+                    className="menu-item"
+                    style={{ width: "100%", textAlign: "left", ...(t.id === selectedId ? { background: "var(--bg-sunken, rgba(0,0,0,.05))", borderRadius: 8 } : {}) }}
+                    onClick={() => { setSelectedId(t.id); setCreating(false); }}
+                  >
+                    <Icon name="FileText" size={15} />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
+                    <span className="meta mono" style={{ marginLeft: "auto" }}>{t.rowCount}</span>
+                  </button>
+                ))}
+              </div>
+            ),
+          )}
+          {list.data && tables.length === 0 && !creating && (
+            <div className="empty-state" style={{ marginTop: 16 }}>
+              <h3>還沒有資料庫</h3>
+              <p>先建一個試試：比如「拍攝器材借用表」或你自己的待辦清單。</p>
+            </div>
+          )}
+        </div>
+
+        {/* 右欄：建立表單 or 選中庫的格線 */}
+        <div style={{ flex: "1 1 560px", minWidth: 320 }}>
+          {creating ? (
+            <CreateTableCard
+              groupId={groupId}
+              onDone={(id) => { setCreating(false); setSelectedId(id); }}
+              onCancel={() => setCreating(false)}
+            />
+          ) : selected ? (
+            <TableDetail key={selected.id} table={selected} onDeleted={() => setSelectedId(null)} />
+          ) : (
+            <div className="empty-state">
+              <h3>選一個資料庫</h3>
+              <p>從左邊清單選一個開始編輯，或建立新的。</p>
+            </div>
+          )}
+        </div>
+      </div>
+      <p style={{ marginTop: 24 }}><Link href="/">回作業台</Link></p>
+    </div>
+  );
+}
+
+/* ────────────────────────── 建立 ────────────────────────── */
+
+function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDone: (id: string) => void; onCancel: () => void }) {
+  const utils = trpc.useUtils();
+  const me = trpc.auth.me.useQuery();
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [scope, setScope] = useState<"personal" | "group" | "team" | "global">("personal");
+  const [memberWritable, setMemberWritable] = useState(true);
+  const [fields, setFields] = useState<DataField[]>([{ key: newFieldKey(), label: "名稱", type: "text", required: true }]);
+
+  const myGroups = me.data?.groups ?? [];
+  const activeGroup = myGroups.find((g) => g.groupId === groupId) ?? myGroups[0];
+  // 團隊清單去重（同團隊多組只列一次）
+  const myTeams = [...new Map(myGroups.map((g) => [g.teamId, { teamId: g.teamId, teamName: g.teamName }])).values()];
+  const [pickGroupId, setPickGroupId] = useState(activeGroup?.groupId ?? "");
+  const [pickTeamId, setPickTeamId] = useState(myTeams[0]?.teamId ?? "");
+  const isSuperAdmin = !!me.data?.user.isSuperAdmin;
+
+  const create = trpc.databases.create.useMutation({
+    onSuccess: (row) => { utils.databases.list.invalidate(); onDone(row.id); },
+  });
+  const canSubmit = name.trim().length > 0 && fields.length > 0 && fields.every((f) => f.label.trim()) && !create.isPending;
+
+  return (
+    <section className="card" data-fb="建立資料庫卡">
+      <h2>建立資料庫</h2>
+      <label htmlFor="db-name">名字</label>
+      <input id="db-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="例：拍攝器材借用表" autoFocus />
+      <label htmlFor="db-desc">說明（選填）</label>
+      <input id="db-desc" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} placeholder="這張表放什麼、給誰看" />
+
+      <label htmlFor="db-scope">範圍</label>
+      <select id="db-scope" value={scope} onChange={(e) => setScope(e.target.value as typeof scope)}>
+        <option value="personal">個人——{SCOPE_HINT.personal}</option>
+        {myGroups.length > 0 && <option value="group">組——{SCOPE_HINT.group}</option>}
+        {myTeams.length > 0 && <option value="team">團隊——{SCOPE_HINT.team}</option>}
+        {isSuperAdmin && <option value="global">全站——{SCOPE_HINT.global}</option>}
+      </select>
+      {scope === "group" && (
+        <select aria-label="選擇組別" value={pickGroupId} onChange={(e) => setPickGroupId(e.target.value)}>
+          {myGroups.map((g) => <option key={g.groupId} value={g.groupId}>{g.teamName}・{g.groupName}</option>)}
+        </select>
+      )}
+      {scope === "team" && (
+        <select aria-label="選擇團隊" value={pickTeamId} onChange={(e) => setPickTeamId(e.target.value)}>
+          {myTeams.map((t) => <option key={t.teamId} value={t.teamId}>{t.teamName}</option>)}
+        </select>
+      )}
+      {scope !== "personal" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+          <input type="checkbox" checked={memberWritable} onChange={(e) => setMemberWritable(e.target.checked)} style={{ width: "auto" }} />
+          成員可新增／編輯資料（關掉＝只有管理者能寫，適合公告類）
+        </label>
+      )}
+
+      <h3 style={{ marginBottom: 4 }}>欄位</h3>
+      <FieldsEditor fields={fields} onChange={setFields} />
+
+      <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
+        <button
+          className="primary"
+          disabled={!canSubmit}
+          onClick={() =>
+            create.mutate({
+              scope,
+              groupId: scope === "group" ? pickGroupId : undefined,
+              teamId: scope === "team" ? pickTeamId : undefined,
+              name: name.trim(),
+              description: description.trim() || undefined,
+              fields: fields.map((f) => ({ ...f, label: f.label.trim() })),
+              memberWritable,
+            })
+          }
+        >
+          {create.isPending ? "建立中…" : "建立"}
+        </button>
+        <button onClick={onCancel}>取消</button>
+      </div>
+      {create.error && <p className="error" role="alert">{create.error.message}</p>}
+    </section>
+  );
+}
+
+/** 欄位編輯器（建立與結構調整共用）：label/type/必填/單選選項 */
+function FieldsEditor({ fields, onChange }: { fields: DataField[]; onChange: (f: DataField[]) => void }) {
+  const set = (i: number, patch: Partial<DataField>) => onChange(fields.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  return (
+    <div>
+      {fields.map((f, i) => (
+        <div key={f.key} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+          <input aria-label={`欄位 ${i + 1} 名稱`} value={f.label} maxLength={40} placeholder="欄位名稱" style={{ flex: "1 1 120px" }} onChange={(e) => set(i, { label: e.target.value })} />
+          <select aria-label={`欄位 ${i + 1} 型別`} value={f.type} style={{ width: "auto" }} onChange={(e) => set(i, { type: e.target.value as DataField["type"], options: e.target.value === "select" ? f.options ?? ["選項一"] : undefined })}>
+            {FIELD_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
+          {f.type === "select" && (
+            <input
+              aria-label={`欄位 ${i + 1} 選項`}
+              value={(f.options ?? []).join("、")}
+              placeholder="選項用、分隔"
+              style={{ flex: "1 1 140px" }}
+              onChange={(e) => set(i, { options: e.target.value.split(/[、,]/).map((s) => s.trim()).filter(Boolean) })}
+            />
+          )}
+          <label style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+            <input type="checkbox" checked={!!f.required} onChange={(e) => set(i, { required: e.target.checked })} style={{ width: "auto" }} />必填
+          </label>
+          <button className="btn-sm" aria-label={`刪除欄位 ${f.label || i + 1}`} disabled={fields.length <= 1} onClick={() => onChange(fields.filter((_, j) => j !== i))}>
+            <Icon name="X" size={13} />
+          </button>
+        </div>
+      ))}
+      <button className="btn-sm" style={{ marginTop: 8 }} disabled={fields.length >= 30} onClick={() => onChange([...fields, { key: newFieldKey(), label: "", type: "text" }])}>
+        <Icon name="Plus" size={13} /> 加欄位
+      </button>
+    </div>
+  );
+}
+
+/* ────────────────────────── 詳頁：格線＋結構 ────────────────────────── */
+
+function TableDetail({ table, onDeleted }: { table: TableSummary; onDeleted: () => void }) {
+  const utils = trpc.useUtils();
+  const [q, setQ] = useState("");
+  const [editStructure, setEditStructure] = useState(false);
+  const rows = trpc.databases.listRows.useQuery({ tableId: table.id, q: q.trim() || undefined });
+  const invalidate = () => { utils.databases.listRows.invalidate({ tableId: table.id, q: q.trim() || undefined }); utils.databases.list.invalidate(); };
+  const addRow = trpc.databases.addRow.useMutation({ onSuccess: invalidate });
+  const updateRow = trpc.databases.updateRow.useMutation({ onSuccess: invalidate });
+  const removeRow = trpc.databases.removeRow.useMutation({ onSuccess: invalidate });
+  const removeTable = trpc.databases.remove.useMutation({ onSuccess: () => { utils.databases.list.invalidate(); onDeleted(); } });
+  const updateTable = trpc.databases.update.useMutation({ onSuccess: () => { utils.databases.list.invalidate(); setEditStructure(false); } });
+  const [draftFields, setDraftFields] = useState<DataField[]>(table.fields);
+
+  // 新列草稿
+  const emptyDraft = (): DataRowData => Object.fromEntries(table.fields.map((f) => [f.key, f.type === "checkbox" ? false : ""])) as DataRowData;
+  const [draft, setDraft] = useState<DataRowData>(emptyDraft);
+
+  const mutationError = addRow.error?.message ?? updateRow.error?.message ?? removeRow.error?.message ?? updateTable.error?.message;
+
+  return (
+    <section className="card" data-fb="資料庫詳頁卡">
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0 }}>{table.name}</h2>
+        <span className="badge">{SCOPE_LABEL[table.scope]}</span>
+        {!table.memberWritable && <span className="badge" title="只有管理者能寫入"><Icon name="Lock" size={12} /> 唯讀共享</span>}
+        <span className="spacer" />
+        {table.access.canManage && (
+          <>
+            <button className="btn-sm" onClick={() => { setDraftFields(table.fields); setEditStructure((v) => !v); }}>
+              <Icon name="Ellipsis" size={13} /> {editStructure ? "收起結構" : "調整欄位"}
+            </button>
+            <ConfirmButton
+              onConfirm={() => removeTable.mutate({ id: table.id })}
+              message={`確定要刪除資料庫「${table.name}」？（列資料會一併看不到；有需要可請工程師從資料庫還原）`}
+              triggerClassName="btn-sm"
+            >
+              <Icon name="X" size={13} /> 刪除
+            </ConfirmButton>
+          </>
+        )}
+      </div>
+      {table.description && <p className="hint" style={{ marginTop: 4 }}>{table.description}</p>}
+
+      {editStructure && table.access.canManage && (
+        <div style={{ margin: "12px 0", padding: 12, border: "1px dashed var(--border, #ccc)", borderRadius: 8 }}>
+          <FieldsEditor fields={draftFields} onChange={setDraftFields} />
+          <p className="hint" style={{ marginTop: 8 }}>移除欄位不會刪掉既有列裡的值，只是不再顯示；新增欄位對舊列顯示為空。</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="primary btn-sm" disabled={updateTable.isPending} onClick={() => updateTable.mutate({ id: table.id, fields: draftFields.map((f) => ({ ...f, label: f.label.trim() })) })}>
+              {updateTable.isPending ? "儲存中…" : "儲存欄位"}
+            </button>
+            {table.scope !== "personal" && (
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input type="checkbox" checked={table.memberWritable} onChange={(e) => updateTable.mutate({ id: table.id, memberWritable: e.target.checked })} style={{ width: "auto" }} />
+                成員可寫入
+              </label>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+        <input aria-label="搜尋資料" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋…" style={{ maxWidth: 220 }} />
+        <span className="meta">{rows.data ? `${rows.data.total.toLocaleString()} 列` : "…"}</span>
+      </div>
+
+      <div style={{ overflowX: "auto", marginTop: 8 }}>
+        <table className="data-grid" style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              {table.fields.map((f) => (
+                <th key={f.key} style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--border, #ddd)", whiteSpace: "nowrap" }}>
+                  {f.label}{f.required && <span title="必填" style={{ color: "var(--danger-ink, #a33)" }}> *</span>}
+                </th>
+              ))}
+              <th style={{ width: 40, borderBottom: "1px solid var(--border, #ddd)" }} />
+            </tr>
+          </thead>
+          <tbody>
+            {table.access.canWriteRows && (
+              <tr>
+                {table.fields.map((f) => (
+                  <td key={f.key} style={{ padding: "4px 4px" }}>
+                    <CellInput field={f} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+                  </td>
+                ))}
+                <td style={{ padding: "4px 4px" }}>
+                  <button
+                    className="btn-sm primary"
+                    title="新增這一列"
+                    disabled={addRow.isPending}
+                    onClick={() => addRow.mutate({ tableId: table.id, data: draft }, { onSuccess: () => setDraft(emptyDraft()) })}
+                  >
+                    <Icon name="Plus" size={13} />
+                  </button>
+                </td>
+              </tr>
+            )}
+            {(rows.data?.rows ?? []).map((r) => (
+              <GridRow
+                key={r.id}
+                fields={table.fields}
+                row={{ id: r.id, data: r.data as DataRowData }}
+                canWrite={table.access.canWriteRows}
+                canDelete={table.access.canManage || table.access.canWriteRows}
+                onSave={(data) => updateRow.mutate({ id: r.id, data })}
+                onDelete={() => removeRow.mutate({ id: r.id })}
+              />
+            ))}
+          </tbody>
+        </table>
+        {rows.data && rows.data.rows.length === 0 && <p className="hint" style={{ marginTop: 8 }}>{q ? "沒有符合的資料" : "還沒有資料——從上面那一列開始加"}</p>}
+      </div>
+      {mutationError && <p className="error" role="alert">{mutationError}</p>}
+    </section>
+  );
+}
+
+/** 一列（點值進入行內編輯；blur/Enter 儲存整列） */
+function GridRow({
+  fields, row, canWrite, canDelete, onSave, onDelete,
+}: {
+  fields: DataField[];
+  row: { id: string; data: DataRowData };
+  canWrite: boolean;
+  canDelete: boolean;
+  onSave: (data: DataRowData) => void;
+  onDelete: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<DataRowData>(row.data);
+  if (editing && canWrite) {
+    return (
+      <tr>
+        {fields.map((f) => (
+          <td key={f.key} style={{ padding: "4px 4px" }}>
+            <CellInput field={f} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+          </td>
+        ))}
+        <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
+          <button className="btn-sm primary" title="儲存" onClick={() => { onSave(draft); setEditing(false); }}><Icon name="Check" size={13} /></button>
+          <button className="btn-sm" title="取消" onClick={() => { setDraft(row.data); setEditing(false); }}><Icon name="X" size={13} /></button>
+        </td>
+      </tr>
+    );
+  }
+  return (
+    <tr
+      onDoubleClick={() => canWrite && setEditing(true)}
+      title={canWrite ? "雙擊編輯" : undefined}
+      style={{ cursor: canWrite ? "pointer" : "default" }}
+    >
+      {fields.map((f) => (
+        <td key={f.key} style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-soft, #eee)" }}>
+          <CellDisplay field={f} value={row.data[f.key] ?? null} />
+        </td>
+      ))}
+      <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
+        {canWrite && <button className="btn-sm" title="編輯" onClick={() => setEditing(true)}><Icon name="Ellipsis" size={13} /></button>}
+        {canDelete && (
+          <ConfirmButton onConfirm={onDelete} message="刪除這一列？" triggerClassName="btn-sm" triggerAriaLabel="刪除這一列">
+            <Icon name="X" size={13} />
+          </ConfirmButton>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function CellDisplay({ field, value }: { field: DataField; value: DataRowValue }) {
+  if (value === null || value === "") return <span className="meta">—</span>;
+  if (field.type === "checkbox") return value ? <Icon name="Check" size={14} /> : <span className="meta">—</span>;
+  if (field.type === "url") {
+    return <a href={String(value)} target="_blank" rel="noreferrer" style={{ wordBreak: "break-all" }}>{String(value).slice(0, 60)}</a>;
+  }
+  if (field.type === "user") return <UserName id={String(value)} />;
+  return <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{String(value)}</span>;
+}
+
+/** user 欄位顯示名字：成員清單可能跨組，前端只有本組成員表——查不到就顯示縮短 id */
+function UserName({ id }: { id: string }) {
+  const me = trpc.auth.me.useQuery();
+  if (me.data?.user.id === id) return <>{me.data.user.name}</>;
+  return <span className="mono" title={id}>{id.slice(0, 8)}…</span>;
+}
+
+function CellInput({ field, value, onChange }: { field: DataField; value: DataRowValue; onChange: (v: DataRowValue) => void }) {
+  const common = { "aria-label": field.label, style: { width: "100%", minWidth: 90 } as const };
+  switch (field.type) {
+    case "checkbox":
+      return <input type="checkbox" aria-label={field.label} checked={value === true} onChange={(e) => onChange(e.target.checked)} style={{ width: "auto" }} />;
+    case "number":
+      return <input type="number" {...common} value={value === null ? "" : String(value)} onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))} />;
+    case "date":
+      return <input type="date" {...common} value={typeof value === "string" ? value : ""} onChange={(e) => onChange(e.target.value || null)} />;
+    case "select":
+      return (
+        <select {...common} value={typeof value === "string" ? value : ""} onChange={(e) => onChange(e.target.value || null)}>
+          <option value="">—</option>
+          {(field.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+      );
+    case "user":
+      return <UserPicker label={field.label} value={typeof value === "string" ? value : ""} onChange={onChange} />;
+    default: // text / url
+      return <input {...common} value={typeof value === "string" ? value : ""} placeholder={field.type === "url" ? "https://…" : undefined} onChange={(e) => onChange(e.target.value)} />;
+  }
+}
+
+/** 成員挑選：下拉列出「我所有組」的成員聯集（跨範圍夠用；查無成員時退回自由填 id 的輸入框） */
+function UserPicker({ label, value, onChange }: { label: string; value: string; onChange: (v: DataRowValue) => void }) {
+  const me = trpc.auth.me.useQuery();
+  const groups = me.data?.groups ?? [];
+  // 逐組抓成員太重；v1 用第一個組的成員清單＋自己（多數表是組內用）。之後有需求再擴。
+  const firstGroup = groups[0]?.groupId ?? "";
+  const members = trpc.projects.groupMembers.useQuery({ groupId: firstGroup }, { enabled: !!firstGroup });
+  const opts = members.data ?? [];
+  const myUser = me.data?.user;
+  return (
+    <select aria-label={label} style={{ width: "100%", minWidth: 90 }} value={value} onChange={(e) => onChange(e.target.value || null)}>
+      <option value="">—</option>
+      {myUser && !opts.some((m) => m.userId === myUser.id) && <option value={myUser.id}>{myUser.name}（我）</option>}
+      {opts.map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}
+    </select>
+  );
+}

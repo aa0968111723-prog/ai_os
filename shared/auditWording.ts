@@ -103,6 +103,13 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "feedbackReports.submit": "回報問題",
   "feedbackReports.updateStatus": "更新問題回報狀態",
   "feedbackReports.runAgentNow": "手動觸發回饋代理巡檢",
+  // 自訂資料庫（個人／組／團隊／全站）
+  "databases.create": "建立資料庫",
+  "databases.update": "調整資料庫結構",
+  "databases.remove": "刪除資料庫",
+  "databases.addRow": "新增資料列",
+  "databases.updateRow": "更新資料列",
+  "databases.removeRow": "刪除資料列",
   // MCP 個人連線金鑰（自助管理）
   "mcpTokens.create": "建立 MCP 連線金鑰",
   "mcpTokens.revoke": "撤銷 MCP 連線金鑰",
@@ -112,6 +119,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "mcp.find_model": "MCP：挑選模型",
   "mcp.submit_generation": "MCP：送出生成",
   "mcp.post_message": "MCP：發佈留言",
+  "mcp.list_databases": "MCP：列出資料庫",
+  "mcp.query_database": "MCP：查詢資料庫",
+  "mcp.add_database_row": "MCP：新增資料列",
 };
 
 /** action → 人話；字典沒有的（新端點）retain 原代碼，寧可看得懂大多數也不擋新功能上線 */

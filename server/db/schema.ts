@@ -611,6 +611,54 @@ export const feedbackReports = pgTable("feedback_reports", {
  * 記這輪看了幾筆、寄出幾封信、成功與否——管理頁「回饋代理」卡以最新一列顯示狀態。
  * 只插入不更新完局後不再改（running→done/failed 於同列 update），新表＝pushSchema 安全。
  */
+/* ── 自訂資料庫（個人→組→團隊→全站 四層範圍） ─────────────
+ * 願景：一套可從「個人筆記型清單」長到「組織級結構化資料」的輕量資料庫——
+ * 欄位由使用者自訂（fields jsonb），列資料存 data_rows.data（jsonb）。
+ * 權限完全沿用既有組織模型（見 services/databaseAcl.ts）：
+ *   personal＝只有本人；group＝組成員（組長管理）；team＝團隊成員（團隊管理員管理）；
+ *   global＝全站可讀（超管管理）。memberWritable=false 時列資料只有管理者可寫。
+ * 新表＝pushSchema 安全。 */
+
+export const dataTables = pgTable("data_tables", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** 範圍：personal=個人（僅本人）、group=組、team=團隊、global=全站 */
+  scope: text("scope", { enum: ["personal", "group", "team", "global"] }).notNull(),
+  /** personal 範圍的擁有者（其他範圍為 null） */
+  ownerId: uuid("owner_id"),
+  /** group 範圍所屬組（其他範圍為 null） */
+  groupId: uuid("group_id"),
+  /** team 範圍所屬團隊（其他範圍為 null） */
+  teamId: uuid("team_id"),
+  name: text("name").notNull(),
+  description: text("description"),
+  /** 欄位定義陣列（shared/databaseFields.ts 的 DataField[]）——結構是資料不是 schema，改欄位不動 DB */
+  fields: jsonb("fields").notNull().default([]),
+  /** true＝範圍內成員都能新增/編輯列；false＝只有管理者（組長/團隊管理員/超管/建立者）能寫 */
+  memberWritable: boolean("member_writable").notNull().default(true),
+  createdBy: uuid("created_by").notNull(),
+  /** 軟刪除：整庫誤刪可救（列資料原地保留）；所有列表查詢以 isNull(deletedAt) 過濾 */
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  ownerIdx: index("data_tables_owner_idx").on(t.ownerId),
+  groupIdx: index("data_tables_group_idx").on(t.groupId),
+  teamIdx: index("data_tables_team_idx").on(t.teamId),
+}));
+
+export const dataRows = pgTable("data_rows", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tableId: uuid("table_id").notNull(),
+  /** 列資料：{ 欄位key: 值 }——值型別由欄位定義決定，寫入前經 validateRowData 清洗 */
+  data: jsonb("data").notNull().default({}),
+  createdBy: uuid("created_by").notNull(),
+  updatedBy: uuid("updated_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  tableIdx: index("data_rows_table_idx").on(t.tableId, t.createdAt),
+}));
+
 export const feedbackAgentRuns = pgTable("feedback_agent_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
   /** manual＝超管在管理頁按「立即巡檢」；scheduled＝每 3 天排程自動觸發 */
