@@ -257,7 +257,9 @@ a:hover { color: var(--primary-solid-hover); }
 .menu-item:hover { background: var(--card2); }
 .menu-item.danger { color: var(--danger-ink); }
 .menu-sep { height: 1px; background: var(--border-soft); margin: 6px 4px; }
-.menu-label { font-size: 11px; color: var(--fg-secondary); padding: 2px 10px; letter-spacing: 0.04em; user-select: none; }
+.menu-label { font-size: 11px; font-weight: 600; color: var(--fg-secondary); padding: 2px 10px; letter-spacing: 0.06em; user-select: none; }
+/* 分組標題與前一組留一點呼吸：分隔線之後緊接標題時，標題自帶上緣間距讓群組更成塊 */
+.menu-sep + .menu-label { margin-top: 2px; }
 
 /* 素材庫（真實儲存層） */
 .upload-zone { border: 2px dashed var(--border); border-radius: var(--r-12); padding: 16px; text-align: center;
@@ -334,8 +336,8 @@ button:focus-visible { border-radius: 999px; }
 /* ─── 手機（≤560px） ─── */
 @media (max-width: 560px) {
   .app { padding: 0 12px 36px; }
-  /* 頂欄空間吃緊：說明入口收成純圖示（title/aria 仍在） */
-  .topbar-help-label { display: none; }
+  /* 頂欄空間吃緊：說明與高頻工具入口都收成純圖示（title/aria 仍在） */
+  .topbar-help-label, .topbar-quick-label { display: none; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .asset-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
   .gen-row { grid-template-columns: 1fr; row-gap: 10px; align-items: stretch; }
