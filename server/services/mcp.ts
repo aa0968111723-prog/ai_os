@@ -6,9 +6,10 @@
  *   全部沿用網頁端同一套守衛（submit_generation 直接重用 submitGenerationCore）。
  * - 舊有共用金鑰 env MCP_API_KEY 仍可用（對應超管），僅為向後相容；見 services/mcpAuth。
  * - 工具：list_projects / get_project_context / find_model / submit_generation / post_message
+ *        ＋自訂資料庫三件組 list_databases / query_database / add_database_row（權限走 databaseAcl）
  */
 import type { Request, Response } from "express";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
@@ -18,6 +19,8 @@ import { submitGenerationCore } from "./generationCore";
 import { assertProjectEditable } from "./projectAcl";
 import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity } from "./mcpAuth";
+import { listVisibleTables, resolveTableAccess } from "./databaseAcl";
+import { validateRowData, type DataField } from "../../shared/databaseFields";
 import type { AuthState } from "./auth";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -63,6 +66,36 @@ const TOOLS = [
     name: "post_message",
     description: "在專案留言板發訊息",
     inputSchema: { type: "object", properties: { projectId: { type: "string" }, body: { type: "string" } }, required: ["projectId", "body"] },
+  },
+  {
+    name: "list_databases",
+    description: "列出你可存取的自訂資料庫（個人/組/團隊/全站 四層範圍），含欄位定義與列數",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "query_database",
+    description: "查詢自訂資料庫的列資料（keyword 全文粗篩、limit 上限 200）；先用 list_databases 找 tableId 與欄位定義",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tableId: { type: "string" },
+        keyword: { type: "string", description: "關鍵字（比對整列資料）" },
+        limit: { type: "number", description: "最多回幾列（預設 50，上限 200）" },
+      },
+      required: ["tableId"],
+    },
+  },
+  {
+    name: "add_database_row",
+    description: "在自訂資料庫新增一列。data 的鍵＝欄位 key（見 list_databases 回的 fields）；型別與必填由伺服器驗證",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tableId: { type: "string" },
+        data: { type: "object", description: "{ 欄位key: 值 }" },
+      },
+      required: ["tableId", "data"],
+    },
   },
 ];
 
@@ -145,6 +178,54 @@ async function runTool(auth: AuthState, name: string, args: Record<string, unkno
       bestFor: m.bestFor,
       cost: m.cost,
     }));
+  }
+
+  // ── 自訂資料庫工具（不掛專案；權限與 tRPC 同一套 databaseAcl）──
+  if (name === "list_databases") {
+    const tables = await listVisibleTables(auth);
+    return tables.map((t) => {
+      const access = resolveTableAccess(auth, t);
+      return {
+        tableId: t.id,
+        name: t.name,
+        scope: t.scope,
+        description: t.description,
+        fields: t.fields,
+        rowCount: t.rowCount,
+        canWriteRows: access.canWriteRows,
+      };
+    });
+  }
+
+  if (name === "query_database" || name === "add_database_row") {
+    const tableId = String(args.tableId ?? "");
+    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
+    if (!table) throw new Error("找不到這個資料庫");
+    const access = resolveTableAccess(auth, table);
+    // 與 tRPC 同語意：無讀取權當作不存在，不外洩個人庫/他組庫的存在性
+    if (!access.canRead) throw new Error("找不到這個資料庫");
+
+    if (name === "query_database") {
+      const conds = [eq(schema.dataRows.tableId, table.id)];
+      const keyword = String(args.keyword ?? "").trim();
+      if (keyword) conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + keyword + "%"}`);
+      const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 200);
+      const rows = await db
+        .select({ id: schema.dataRows.id, data: schema.dataRows.data, updatedAt: schema.dataRows.updatedAt })
+        .from(schema.dataRows)
+        .where(and(...conds))
+        .orderBy(desc(schema.dataRows.createdAt))
+        .limit(limit);
+      return { table: table.name, fields: table.fields, rows };
+    }
+
+    // add_database_row
+    if (!access.canWriteRows) throw new Error("這個資料庫目前只開放管理者寫入");
+    const checked = validateRowData(table.fields as DataField[], args.data ?? {});
+    if (!checked.ok) throw new Error(checked.error);
+    const [row] = await db.insert(schema.dataRows).values({ tableId: table.id, data: checked.data, createdBy: auth.user.id }).returning();
+    await db.update(schema.dataTables).set({ updatedAt: new Date() }).where(eq(schema.dataTables.id, table.id));
+    return { rowId: row.id, data: checked.data };
   }
 
   const projectId = String(args.projectId ?? "");

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -142,10 +142,50 @@ export const teamAssistantRouter = router({
         return `「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜分鏡 ${sc.total}(待審 ${pendingBy.get(p.id) ?? 0}/通過 ${sc.approved})｜生成 完成 ${g.done}/進行 ${g.running}/失敗 ${g.failed}/待核 ${g.awaiting}｜已花 ${spentBy.get(p.id) ?? 0} 點｜最後活動 ${fmtTaipei(lastActive)}`;
       });
       const hidden = totalProjects - projRows.length;
+
+      // ── 自訂資料庫注入（AI 代理系統 × 資料庫系統的內部接點）──
+      // 這個組看得到的組/團隊/全站資料庫（個人庫不進共享上下文），每庫附欄位與前幾列，
+      // 讓助手能回答「名單裡有誰」「器材借用狀況」這類結構化資料問題。上限收緊防提示詞灌爆。
+      const teamId = ctx.auth.groups.find((g) => g.groupId === input.groupId)?.teamId;
+      const DB_LIMIT = 5;
+      const DB_ROW_LIMIT = 12;
+      const dbConds = [
+        and(eq(schema.dataTables.scope, "group"), eq(schema.dataTables.groupId, input.groupId))!,
+        eq(schema.dataTables.scope, "global"),
+      ];
+      if (teamId) dbConds.push(and(eq(schema.dataTables.scope, "team"), eq(schema.dataTables.teamId, teamId))!);
+      const visibleTables = await db
+        .select()
+        .from(schema.dataTables)
+        .where(and(isNull(schema.dataTables.deletedAt), or(...dbConds)))
+        .orderBy(desc(schema.dataTables.updatedAt))
+        .limit(DB_LIMIT);
+      const dbSections: string[] = [];
+      for (const t of visibleTables) {
+        const rows = await db
+          .select({ data: schema.dataRows.data })
+          .from(schema.dataRows)
+          .where(eq(schema.dataRows.tableId, t.id))
+          .orderBy(desc(schema.dataRows.createdAt))
+          .limit(DB_ROW_LIMIT);
+        const fields = (t.fields as Array<{ key: string; label: string }>) ?? [];
+        const labelOf = new Map(fields.map((f) => [f.key, f.label]));
+        const rowLines = rows.map((r) => {
+          const entries = Object.entries((r.data ?? {}) as Record<string, unknown>)
+            .filter(([, v]) => v !== null && v !== "")
+            .map(([k, v]) => `${labelOf.get(k) ?? k}:${String(v).slice(0, 40)}`);
+          return "  - " + (entries.join("｜") || "（空列）");
+        });
+        dbSections.push(
+          `資料庫「${t.name}」（${t.scope === "group" ? "組" : t.scope === "team" ? "團隊" : "全站"}；欄位：${fields.map((f) => f.label).join("、")}）最近 ${rows.length} 列：\n${rowLines.join("\n") || "  （沒有資料）"}`,
+        );
+      }
+
       const context = [
         `各專案現況（每行一案；active 優先、依最後更新排序${hidden > 0 ? `；另有 ${hidden} 案未列` : ""}）：`,
         lines.length ? lines.join("\n") : "（本組目前沒有專案）",
         `組總計：專案 ${totalProjects} 個｜本週組花費 ${weekSpent} 點（近 7 天帳本淨額）`,
+        ...(dbSections.length ? ["", "組可見的自訂資料庫（工作台「資料庫」頁維護）：", ...dbSections] : []),
       ].join("\n");
 
       // 假模式：不扣點，回確定性摘要（可測、不花錢）

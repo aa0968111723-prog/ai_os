@@ -11,6 +11,7 @@ import { ModelsPage } from "./pages/ModelsPage";
 import { HelpPage } from "./pages/HelpPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
 import { PlannerPage } from "./pages/PlannerPage";
+import { DatabasesPage } from "./pages/DatabasesPage";
 import { PasswordInput } from "./components/PasswordInput";
 import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
 import { FeedbackWidget } from "./feedback/FeedbackWidget";
@@ -204,6 +205,7 @@ function UserMenu({
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">工作</div>
           <Link href="/planner" className="menu-item" role="menuitem" onClick={close}><Icon name="Clock" size={15} />筆記排程</Link>
+          <Link href="/databases" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />資料庫</Link>
           <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
           {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
           {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />團隊管理</Link>}
@@ -354,6 +356,7 @@ export function App() {
                 <Route path="/help"><HelpPage /></Route>
                 <Route path="/downloads"><DownloadsPage /></Route>
                 <Route path="/planner"><PlannerPage groupId={activeGroupId} /></Route>
+                <Route path="/databases"><DatabasesPage groupId={activeGroupId} /></Route>
                 <Route path="/p/:id">{(params) => <ProjectPage id={params.id} />}</Route>
                 <Route>
                   <p>
