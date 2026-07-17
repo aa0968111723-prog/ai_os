@@ -61,7 +61,14 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
       setOpen(false);
     },
   });
-  const remove = trpc.knowledge.remove.useMutation({ onSuccess: () => utils.knowledge.list.invalidate({ projectId }) });
+  const remove = trpc.knowledge.remove.useMutation({
+    onSuccess: () => {
+      utils.knowledge.list.invalidate({ projectId });
+      // 地毯實測缺陷修復：軟刪後回收桶要立即看得到（否則使用者以為救不回來）——
+      // RecycleBin 掛載時已抓過 listDeleted，不失效它就要等重整才出現
+      utils.projects.listDeleted.invalidate({ projectId });
+    },
+  });
 
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<(typeof KINDS)[number]["id"]>("transcript");
@@ -293,6 +300,9 @@ function KnowledgeRow({
   const update = trpc.knowledge.update.useMutation({
     onSuccess: () => {
       utils.knowledge.list.invalidate({ projectId });
+      // 地毯實測缺陷修復（高）：全文快取也要失效——只失效 list 時，「儲存→立刻再編輯」
+      // 會從過期的 knowledge.get 快取播種出「儲存前的舊全文」，使用者再按儲存＝靜默倒回舊版
+      utils.knowledge.get.invalidate({ id: k.id });
       // 儲存成功才清編輯草稿（閉包引用下方宣告的 clear 函式，執行時已初始化完畢）
       clearEditTitleDraft();
       clearEditContentDraft();
