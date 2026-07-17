@@ -18,6 +18,7 @@ import { optionsRouter } from "./options";
 import { feedbackReportsRouter } from "./feedbackReports";
 import { workflowsRouter } from "./workflows";
 import { assistantRouter } from "./assistant";
+import { agentsRouter } from "./agents";
 import { auditRouter } from "./audit";
 import { notesRouter } from "./notes";
 import { scheduleRouter } from "./schedule";
@@ -43,6 +44,7 @@ export const appRouter = router({
   options: optionsRouter,
   feedbackReports: feedbackReportsRouter,
   assistant: assistantRouter,
+  agents: agentsRouter,
   audit: auditRouter,
   notes: notesRouter,
   schedule: scheduleRouter,

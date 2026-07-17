@@ -1572,49 +1572,49 @@ export const MODELS: ModelEntry[] = [
      計費為 NVIDIA NIM 按 token;短任務單次成本遠低於 1 點,固定扣 1 點與原 any-llm 同口徑。 */
   {
     id: "nvidia-nim#deepseek-r1", endpoint: "nvidia-nim", label: "DeepSeek R1", category: "llm", tier: "flagship", kind: "text",
-    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false,
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
     strengths: "深度推理鏈旗艦;複雜任務拆解、長鏈邏輯最強",
     bestFor: "腳本結構規劃、需要想清楚再答的複雜任務",
     input: llmInput("deepseek-ai/deepseek-r1"),
   },
   {
     id: "nvidia-nim#llama-3.1-405b", endpoint: "nvidia-nim", label: "Llama 3.1 405B", category: "llm", tier: "flagship", kind: "text",
-    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false,
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
     strengths: "Meta 開源最大檔;寫作品質與指令遵循頂尖",
     bestFor: "正式腳本撰寫、開示摘要、長文彙整",
     input: llmInput("meta/llama-3.1-405b-instruct"),
   },
   {
     id: "nvidia-nim#nemotron-4-340b", endpoint: "nvidia-nim", label: "Nemotron-4 340B", category: "llm", tier: "flagship", kind: "text",
-    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false,
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
     strengths: "NVIDIA 自家旗艦;指令對齊佳、輸出穩定",
     bestFor: "腦力激盪、多版本文案",
     input: llmInput("nvidia/nemotron-4-340b-instruct"),
   },
   {
     id: "nvidia-nim#llama-3.1-70b", endpoint: "nvidia-nim", label: "Llama 3.1 70B", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false, recommended: true,
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false, recommended: true,
     strengths: "品質/成本平衡的日常主力(後端自動 LLM 亦預設此檔)",
     bestFor: "標題、短文案、日常改寫",
     input: llmInput("meta/llama-3.1-70b-instruct"),
   },
   {
     id: "nvidia-nim#qwen2.5-72b", endpoint: "nvidia-nim", label: "Qwen2.5 72B(中文)", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false,
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
     strengths: "阿里通義開源檔;中文語感第一梯隊、繁中穩定",
     bestFor: "中文金句、弘法文案、中文改寫潤飾",
     input: llmInput("qwen/qwen2.5-72b-instruct"),
   },
   {
     id: "nvidia-nim#mistral-large-2", endpoint: "nvidia-nim", label: "Mistral Large 2", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false,
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
     strengths: "歐系旗艦;多語能力佳、風格精煉",
     bestFor: "多語版本文案、翻譯初稿",
     input: llmInput("mistralai/mistral-large-2-instruct"),
   },
   {
     id: "nvidia-nim#llama-3.1-8b", endpoint: "nvidia-nim", label: "Llama 3.1 8B", category: "llm", tier: "budget", kind: "text",
-    points: 1, cost: "按 token(NIM);最低成本檔", verified: false,
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
     strengths: "最低成本文字生成;速度極快",
     bestFor: "大量簡單任務(標籤、分類)",
     input: llmInput("meta/llama-3.1-8b-instruct"),
@@ -2286,7 +2286,7 @@ export interface WorkflowPreset {
 
 export const WORKFLOW_PRESETS: WorkflowPreset[] = [
   {
-    id: "wf/full-short-flagship", label: "完整短片(旗艦)", tier: "flagship", points: 40,
+    id: "wf/full-short-flagship", label: "完整短片(旗艦)", tier: "flagship", points: 39,
     strengths: "LLM 潤飾腳本 → 旗艦文生圖定調 → Veo 3.1 成片;三步到位",
     bestFor: "正式對外的 15 秒形象短片",
     steps: [
@@ -2296,7 +2296,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     ],
   },
   {
-    id: "wf/brand-storyboard-flagship", label: "品牌繪本(旗艦)", tier: "flagship", points: 7,
+    id: "wf/brand-storyboard-flagship", label: "品牌繪本(旗艦)", tier: "flagship", points: 6,
     strengths: "LLM 出分鏡文案 → 旗艦出圖 → 編輯統一風格",
     bestFor: "系列感的三格分鏡圖",
     steps: [
@@ -2306,7 +2306,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     ],
   },
   {
-    id: "wf/quote-card-flagship", label: "金句卡(旗艦)", tier: "flagship", points: 3,
+    id: "wf/quote-card-flagship", label: "金句卡(旗艦)", tier: "flagship", points: 2,
     strengths: "LLM 摘句 → Ideogram 文字卡;中文排版強",
     bestFor: "每日金句社群圖",
     steps: [
@@ -2315,7 +2315,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     ],
   },
   {
-    id: "wf/full-short-economy", label: "完整短片(經濟)", tier: "economy", points: 10,
+    id: "wf/full-short-economy", label: "完整短片(經濟)", tier: "economy", points: 9,
     strengths: "同「完整短片」流程,改用經濟模型;成本 1/4",
     bestFor: "日常內部短片",
     steps: [
@@ -2334,7 +2334,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     ],
   },
   {
-    id: "wf/quote-card-economy", label: "金句卡(經濟)", tier: "economy", points: 2,
+    id: "wf/quote-card-economy", label: "金句卡(經濟)", tier: "economy", points: 1,
     strengths: "Flash 摘句+FLUX dev 出圖",
     bestFor: "高頻率的日更金句",
     steps: [

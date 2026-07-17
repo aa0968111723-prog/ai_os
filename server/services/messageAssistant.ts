@@ -1,19 +1,19 @@
 /**
  * 留言區 @助手(留言第一梯隊):在組內留言 @助手 提問,AI 讀「專案現況+近期對話+知識庫」回一則留言。
  * 與專案助手(assistant.ask)分工:那個在側欄、會提議可執行動作;這個在對話串裡、只回話(不提議動作,
- * 避免聊天流程混入需確認的花錢操作)。計費同 ask:mock 不扣、真模式扣 1 點、失敗退點。
+ * 避免聊天流程混入需確認的花錢操作)。計費同 ask:NVIDIA NIM 免費額度,0 點。
  * 設計為 fire-and-forget:messages.post 偵測到 @助手 就 void 呼叫,回覆以獨立 kind='assistant' 留言落地。
  */
 import { desc, eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { isMockMode } from "./fal";
-import { nimComplete } from "./nvidia-nim";
+import { nimComplete, NimServiceError } from "./nvidia-nim";
 import { reserveQuota, refund } from "./points";
 import { buildKnowledgeContext } from "../routers/knowledge";
 
 export const ASSISTANT_TRIGGER = "@助手";
-const ASK_COST_POINTS = 1;
+const ASK_COST_POINTS = 0; // NIM 免費額度;佈線保留供未來調價
 
 /** 觸發者身分記在 userId(留言 NOT NULL 需要);kind='assistant' 讓前端渲染成 AI 回覆 */
 export async function replyAsAssistant(opts: {
@@ -75,7 +75,7 @@ ${knowledge ? `<專案知識庫>\n${knowledge}\n</專案知識庫>\n` : ""}以�
     await insertReply(answer);
   } catch (err) {
     await refund(askerId, groupId, ASK_COST_POINTS, "留言區 @助手失敗退回");
-    await insertReply("我暫時沒回應，晚點再 @我 一次（點數已退回）。");
+    await insertReply(err instanceof NimServiceError ? err.message : "我暫時沒回應，晚點再 @我 一次。");
     console.warn("[messageAssistant] 回覆失敗：", err instanceof Error ? err.message : err);
   }
 }

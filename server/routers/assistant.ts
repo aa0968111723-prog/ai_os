@@ -7,7 +7,7 @@ import { worldviewSchema } from "../../shared/worldview";
 import { MODELS, WORKFLOW_PRESETS, getModel, getWorkflow, tierLabel, type ModelEntry } from "../../shared/models";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
-import { nimComplete } from "../services/nvidia-nim";
+import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { submitGenerationCore } from "../services/generationCore";
@@ -28,8 +28,9 @@ import { buildKnowledgeContext } from "./knowledge";
  * 工具只讀不寫、範圍鎖死在本專案，故可自動執行不需確認；寫入動作維持「提議＋使用者確認」不變。
  */
 
-/** 問答固定 1 點（付費 LLM 呼叫；含工具迴圈最多 4 次 NIM 呼叫,單次成本 $0.01 級仍在 1 點內；動作另計於執行時，走既有守門） */
-const ASK_COST_POINTS = 1;
+/** 問答 0 點（NVIDIA NIM 免費額度——LLM 文字呼叫不收費；動作另計於執行時，走既有守門）。
+ *  reserveQuota/refund 對 0 點直接放行，保留呼叫佈線讓未來調價只改這個常數。 */
+const ASK_COST_POINTS = 0;
 /** 每次提問最多幾輪工具查詢（每輪一次 LLM 呼叫；超過就強制直接回答，防打轉燒錢） */
 const MAX_TOOL_ROUNDS = 3;
 /**
@@ -44,8 +45,9 @@ const DEFAULT_IMAGE_MODEL = MODELS.find((m) => m.category === "text-to-image" &&
  * 需要來源素材的類別（圖生圖／轉錄／對嘴／訓練…）助手還沒辦法幫使用者附檔，提了也必然失敗。
  */
 const ASSISTANT_MODEL_CATEGORIES = new Set(["text-to-image", "text-to-video", "text-to-audio", "text-to-speech", "llm"]);
-/** 白名單挑模型：LLM 提的 modelId 必須「在註冊表、不需來源素材、類別可代操」才採用，否則退回預設圖像模型（幻覺 id 不落地） */
-function pickGenerateModel(proposedId?: string): ModelEntry {
+/** 白名單挑模型：LLM 提的 modelId 必須「在註冊表、不需來源素材、類別可代操」才採用，否則退回預設圖像模型（幻覺 id 不落地）。
+ *  export 給 AI 代理（agents.ts）共用——規劃與執行兩端用同一張白名單，規則不分岔。 */
+export function pickGenerateModel(proposedId?: string): ModelEntry {
   if (proposedId) {
     const m = getModel(proposedId);
     if (m && !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category)) return m;
@@ -53,8 +55,9 @@ function pickGenerateModel(proposedId?: string): ModelEntry {
   // 預設模型 id 一定取自註冊表（見 DEFAULT_IMAGE_MODEL 的來源），?? MODELS[0] 只是型別防禦
   return getModel(DEFAULT_IMAGE_MODEL) ?? MODELS[0];
 }
-/** 提示詞用「可用模型速查」：各類別 recommended 的日常主力，一行一個（上限 12 行，防提示詞隨註冊表膨脹） */
-const MODEL_CHEATSHEET = MODELS.filter((m) => m.recommended && !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category))
+/** 提示詞用「可用模型速查」：各類別 recommended 的日常主力，一行一個（上限 12 行，防提示詞隨註冊表膨脹）。
+ *  export 給 AI 代理的規劃提示詞共用。 */
+export const MODEL_CHEATSHEET = MODELS.filter((m) => m.recommended && !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category))
   .slice(0, 12)
   .map((m) => `- ${m.id}｜${m.label}｜${m.points} 點｜${m.bestFor}`)
   .join("\n");
@@ -269,7 +272,7 @@ ${sceneLines}
             out.push({ type: "run_workflow", presetId: preset.id, prompt: a.prompt, label: `執行工作流「${preset.label}」（約 ${preset.points} 點）` });
           } else if (a.type === "split_script") {
             // label 註明會叫 AI 導演與扣點，使用者按下前就知道這顆會花錢
-            out.push({ type: "split_script", script: a.script, label: `把腳本拆成分鏡：「${a.script.slice(0, 24)}…」（AI 導演，會扣 LLM 點數）` });
+            out.push({ type: "split_script", script: a.script, label: `把腳本拆成分鏡：「${a.script.slice(0, 24)}…」（AI 導演，免費）` });
           } else {
             const scene = scenes[a.sceneNo - 1];
             if (!scene) continue;
@@ -308,7 +311,7 @@ ${forceFinal
 - submit_approval：把某一鏡送審（sceneNo）
 - create_scene：在片尾新增一個分鏡（title 必填 80 字內；可選 voiceover 旁白、durationSec 秒數 1–60）
 - run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
-- split_script：把腳本拆成一幕幕的分鏡草稿（script＝腳本全文，從使用者訊息原樣抄錄，至少 20 字；只在使用者貼了完整腳本／逐字稿、想把它變成分鏡時才提議；會呼叫 AI 導演並扣 LLM 點數）
+- split_script：把腳本拆成一幕幕的分鏡草稿（script＝腳本全文，從使用者訊息原樣抄錄，至少 20 字；只在使用者貼了完整腳本／逐字稿、想把它變成分鏡時才提議；免費）
 分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。generate 的 modelId 只能填「速查表的 id」或「find_model 查到的免來源模型 id」；presetId 只能抄工作流速查表。不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
 一條龍引導：遇到「從腳本到成片」這類跨階段請求，按階段提議、分輪推進——本輪先提議 split_script 拆分鏡；等使用者執行完、下一輪對話在 <專案現況> 看到新分鏡後，再逐鏡提議 generate 生成畫面；畫面齊了再提議 submit_approval 送審。一次回覆最多提議 6 個動作；每個動作都要使用者按確認才會執行，不要假設前一步已完成，也不要替使用者跳過確認。
 <可用模型速查>
@@ -329,7 +332,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
 使用者的問題：${input.message}`;
 
       // 多步工具迴圈：每輪 LLM 回「工具呼叫」就執行並把結果附進下一輪；回「最終回答」就結束。
-      // 全程只收 ASK_COST_POINTS 1 點（工具輪的 NIM 呼叫成本在 1 點內）；任何一輪炸掉就整筆退點。
+      // NIM 免費額度：全程 0 點（ASK_COST_POINTS=0，reserveQuota/refund 皆直接放行）。
       const steps: string[] = [];
       let toolBlocks = "";
       try {
@@ -361,9 +364,11 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           }
           return { answer: parsed.data.answer, actions: resolve(parsed.data.actions ?? []), steps, mock: false, fallback: false };
         }
-      } catch {
+      } catch (err) {
         await refund(ctx.auth.user.id, project.groupId, ASK_COST_POINTS, "AI 專案助手失敗退回");
-        return { answer: "AI 助手暫時沒回應，請稍後再問一次（點數已退回）。", actions: [] as ResolvedAction[], steps, mock: false, fallback: true };
+        // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
+        const answer = err instanceof NimServiceError ? err.message : "AI 助手暫時沒回應，請稍後再問一次。";
+        return { answer, actions: [] as ResolvedAction[], steps, mock: false, fallback: true };
       }
     }),
 
