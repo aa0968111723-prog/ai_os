@@ -93,8 +93,17 @@ const WORKFLOW_CHEATSHEET = WORKFLOW_PRESETS.map((w) => `- ${w.id}｜${w.label}�
 const LIMIT_PER_MIN = 6;
 const WINDOW_MS = 60_000;
 const hits = new Map<string, number[]>();
-function overLimit(userId: string): boolean {
+// 同一題的去重鍵（SSE 串流與退回 tRPC 兩條路徑共用同一 nonce）：一題只計一次名額，
+// 避免「串流中途斷線→退回」把節流額度重複扣兩格（研究確認的邊界問題）。TTL 同節流窗，惰性清掃。
+const seenNonce = new Map<string, number>();
+export function overLimit(userId: string, dedupeKey?: string): boolean {
   const now = Date.now();
+  if (dedupeKey) {
+    for (const [k, t] of seenNonce) if (now - t > WINDOW_MS) seenNonce.delete(k);
+    // 這一題先前已計過名額（另一條路徑）→ 同題第二次直接放行，不重複計
+    if (seenNonce.has(dedupeKey)) return false;
+    seenNonce.set(dedupeKey, now);
+  }
   const arr = (hits.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
   const over = arr.length >= LIMIT_PER_MIN;
   if (!over) arr.push(now);
@@ -313,9 +322,9 @@ async function runLookupTool(
   return { step: `查了模型目錄(${kw || "全部"})`, text: searchCatalogText(kw, call.args?.category?.trim()) };
 }
 
-/** 呼叫 NVIDIA NIM 一次,回原始輸出（工具迴圈與最終回答共用） */
-async function callLlm(prompt: string): Promise<string> {
-  return nimComplete(prompt, { timeoutMs: 60_000 });
+/** 呼叫 NVIDIA NIM 一次,回原始輸出（工具迴圈與最終回答共用）；signal 讓用戶端斷線時中止在途呼叫 */
+async function callLlm(prompt: string, signal?: AbortSignal): Promise<string> {
+  return nimComplete(prompt, { timeoutMs: 60_000, signal });
 }
 
 /** 類別鍵 → 中文標籤（挑模型器分組用；找不到退回類別鍵本身） */
@@ -354,6 +363,10 @@ export interface AskCoreInput {
   message: string;
   /** 完整登入狀態（tRPC 端＝ctx.auth；SSE 端＝resolveSession）——組隔離與資料庫 ACL（listVisibleTables）都要它 */
   auth: AuthState;
+  /** 用戶端斷線訊號（SSE 端 res.on('close') → abort）：中止在途 NIM 呼叫並提早跳出工具迴圈，不再白燒免費額度 */
+  signal?: AbortSignal;
+  /** 同題去重鍵（串流與退回 tRPC 共用同一 nonce）：一題只計一次節流名額 */
+  dedupeKey?: string;
 }
 export interface AskCoreResult {
   answer: string;
@@ -376,7 +389,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
   const emit = (phase: AskStreamEvent["phase"], text: string) => {
     try { onEvent?.({ phase, text }); } catch { /* 串流端斷線不影響問答本身 */ }
   };
-  if (overLimit(input.auth.user.id)) {
+  if (overLimit(input.auth.user.id, input.dedupeKey)) {
     throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "問得太頻繁（每分鐘最多 6 次），休息一下再問" });
   }
   {
@@ -521,9 +534,12 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
       let toolBlocks = "";
       try {
         for (let round = 0; ; round++) {
+          // 用戶端已斷線（SSE close）：不再發起下一次 LLM 呼叫，提早收工不白燒免費額度。
+          // 回傳值不會被寫回（sse 對已關閉連線是 no-op），僅用來乾淨結束迴圈。
+          if (input.signal?.aborted) return { answer: "", actions: [], steps, mock: false, fallback: true };
           emit("thinking", round === 0 ? "思考中…" : "整理查到的資料，繼續思考…");
           const forceFinal = round >= MAX_TOOL_ROUNDS;
-          const raw = await callLlm(buildPrompt(toolBlocks, forceFinal));
+          const raw = await callLlm(buildPrompt(toolBlocks, forceFinal), input.signal);
           const match = raw.match(/\{[\s\S]*\}/);
           let json: unknown = null;
           try {
@@ -567,12 +583,14 @@ export const assistantRouter = router({
 
   /** 問答：讀專案現況回答，並可提議動作（僅提議，不執行）。核心與 SSE 串流路由共用 runAssistantAsk。 */
   ask: authedProcedure
-    .input(z.object({ projectId: z.string().uuid(), message: z.string().min(1).max(1000) }))
+    // nonce：串流退回此路徑時帶同一題的去重鍵，讓節流名額只計一次（可省略，省略即照舊每次計）
+    .input(z.object({ projectId: z.string().uuid(), message: z.string().min(1).max(1000), nonce: z.string().max(64).optional() }))
     .mutation(({ ctx, input }) =>
       runAssistantAsk({
         projectId: input.projectId,
         message: input.message,
         auth: ctx.auth,
+        dedupeKey: input.nonce,
       }),
     ),
 

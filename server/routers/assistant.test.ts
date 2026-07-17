@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchCatalogText, listAssistantGenerateModels, pickGenerateModel, assistantModel, sceneFillRole } from "./assistant";
+import { searchCatalogText, listAssistantGenerateModels, pickGenerateModel, assistantModel, sceneFillRole, overLimit } from "./assistant";
 import { getModel } from "../../shared/models";
 
 /** 該類別已驗證的推薦日常主力（pickGenerateModel 找不到時的退回目標） */
@@ -91,6 +91,25 @@ describe("pickGenerateModel／assistantModel 白名單守門（防幻覺 id、�
     // 但露出端／執行端都只認現役 MODELS：assistantModel 不認、pickGenerateModel 退回預設
     expect(assistantModel("fal-ai/any-llm#gpt-5")).toBeUndefined();
     expect(pickGenerateModel("fal-ai/any-llm#gpt-5").id).toBe(DEFAULT_IMAGE_MODEL);
+  });
+});
+
+describe("overLimit（節流＋同題去重）", () => {
+  it("同一 nonce（串流＋退回兩條路徑）只計一次名額，不會把一題扣成兩格", () => {
+    const uid = `dedupe-user-${Math.random().toString(36).slice(2)}`;
+    const nonce = `nonce-${Math.random().toString(36).slice(2)}`;
+    // 第一條路徑（SSE）計一格
+    expect(overLimit(uid, nonce)).toBe(false);
+    // 第二條路徑（退回 tRPC）同 nonce → 直接放行，不再計格
+    expect(overLimit(uid, nonce)).toBe(false);
+    expect(overLimit(uid, nonce)).toBe(false);
+  });
+
+  it("不同題（無 nonce 或不同 nonce）累計到每分鐘 6 次上限才擋", () => {
+    const uid = `limit-user-${Math.random().toString(36).slice(2)}`;
+    // 6 個不同題放行，第 7 個超限
+    for (let i = 0; i < 6; i++) expect(overLimit(uid, `n${i}-${uid}`)).toBe(false);
+    expect(overLimit(uid, `n6-${uid}`)).toBe(true);
   });
 });
 
