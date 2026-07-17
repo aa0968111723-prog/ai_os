@@ -119,9 +119,13 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "mcpTokens.create": "建立 MCP 連線金鑰",
   "mcpTokens.revoke": "撤銷 MCP 連線金鑰",
   // MCP（Claude 等外部代理經 API 操作）
+  "mcp.whoami": "MCP：確認連線身分",
   "mcp.list_projects": "MCP：列出專案",
   "mcp.get_project_context": "MCP：讀取專案脈絡",
   "mcp.find_model": "MCP：挑選模型",
+  "mcp.list_generations": "MCP：查生成紀錄",
+  "mcp.get_generation": "MCP：查單筆生成",
+  "mcp.list_assets": "MCP：列出素材庫",
   "mcp.submit_generation": "MCP：送出生成",
   "mcp.post_message": "MCP：發佈留言",
   "mcp.list_databases": "MCP：列出資料庫",
@@ -129,6 +133,15 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "mcp.add_database_row": "MCP：新增資料列",
   "mcp.list_database_files": "MCP：列出資料庫文件",
   "mcp.read_database_file": "MCP：讀取資料庫文件",
+  "mcp.get_project_status": "MCP：讀取專案全貌",
+  "mcp.plan_agent": "MCP：規劃 AI 代理",
+  "mcp.approve_agent": "MCP：核准並執行代理",
+  "mcp.stop_agent": "MCP：停止代理",
+  "mcp.discard_agent": "MCP：放棄代理計畫",
+  "mcp.list_agent_runs": "MCP：列出代理",
+  "mcp.get_agent_run": "MCP：查代理進度",
+  "mcp.list_schedule": "MCP：列出行程",
+  "mcp.add_schedule_item": "MCP：新增行程",
 };
 
 /** action → 人話；字典沒有的（新端點）retain 原代碼，寧可看得懂大多數也不擋新功能上線 */

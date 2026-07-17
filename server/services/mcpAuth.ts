@@ -14,6 +14,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { loadAuthState, type AuthState } from "./auth";
+import { isMcpWriteTool } from "../../shared/mcpCatalog";
 
 /** 金鑰前綴：讓人一眼認出這是 AI Director 的 MCP 金鑰（也方便日後掃描外洩） */
 export const MCP_TOKEN_PREFIX = "aidmcp_";
@@ -47,7 +48,7 @@ export function envKeyMatches(provided: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** 會「寫入／扣點」的工具（讀取類不在內）——封存專案守衛與未來擴充的單一清單 */
+/** 掛在「專案」上、會寫入／扣點的工具——封存專案守衛用（資料庫寫入不掛專案，不在此列） */
 export const MCP_WRITE_TOOLS = new Set(["submit_generation", "post_message"]);
 
 /**
@@ -61,9 +62,31 @@ export function archivedWriteReason(name: string, status: string): string | null
   return null;
 }
 
+/** 金鑰的權限範圍（目前只有唯讀與否；未來可擴專案限定等）。 */
+export interface McpScope {
+  /** true＝唯讀金鑰：只准讀取類工具（見 shared/mcpCatalog 的 access 分類） */
+  readOnly: boolean;
+}
+
+/**
+ * 唯讀金鑰守衛（純函式，供單元測試）：唯讀金鑰呼叫任何「寫入類」工具一律擋。
+ * 寫入類的判定來自 shared/mcpCatalog（單一來源；未知工具名保守視為寫入）。
+ */
+export function scopeDeniedReason(name: string, scope: McpScope): string | null {
+  if (scope.readOnly && isMcpWriteTool(name)) {
+    return "這把金鑰是「唯讀」的——不能執行寫入類工具（送生成／發留言／寫資料列）。請改用可寫入的金鑰。";
+  }
+  return null;
+}
+
+/** 金鑰是否已過期（純函式，供單元測試）：expiresAt 為 null＝永不過期。 */
+export function isTokenExpired(expiresAt: Date | null, now: Date): boolean {
+  return expiresAt != null && expiresAt.getTime() <= now.getTime();
+}
+
 export type McpIdentity =
-  | { kind: "user"; auth: AuthState; tokenId: string }
-  | { kind: "admin"; auth: AuthState };
+  | { kind: "user"; auth: AuthState; tokenId: string; scope: McpScope }
+  | { kind: "admin"; auth: AuthState; scope: McpScope };
 
 /**
  * MCP 是否已啟用：設了 env 共用金鑰，或至少有一把未撤銷的個人金鑰存在。
@@ -90,7 +113,8 @@ export async function resolveMcpIdentity(provided: string): Promise<McpIdentity 
     const [admin] = await db.select().from(schema.users).where(eq(schema.users.isSuperAdmin, true)).limit(1);
     if (!admin) return null; // 系統尚未初始化
     const auth = await loadAuthState(admin.id);
-    return auth ? { kind: "admin", auth } : null;
+    // env 共用金鑰＝超管、無範圍限制（可讀可寫）
+    return auth ? { kind: "admin", auth, scope: { readOnly: false } } : null;
   }
 
   // 路徑 1：個人金鑰。格式不符直接排除（避免拿 env 金鑰或亂碼去查表）。
@@ -100,6 +124,7 @@ export async function resolveMcpIdentity(provided: string): Promise<McpIdentity 
     .from(schema.mcpTokens)
     .where(and(eq(schema.mcpTokens.tokenHash, sha256(provided)), isNull(schema.mcpTokens.revokedAt)));
   if (!row) return null;
+  if (isTokenExpired(row.expiresAt, new Date())) return null; // 已過期＝比照撤銷，拒絕
   const auth = await loadAuthState(row.userId); // 使用者停用／不存在 → null
   if (!auth) return null;
   // lastUsedAt 更新（射後不理）：認證結果已定，這只是給使用者看的輔助欄位
@@ -108,29 +133,35 @@ export async function resolveMcpIdentity(provided: string): Promise<McpIdentity 
     .set({ lastUsedAt: new Date() })
     .where(eq(schema.mcpTokens.id, row.id))
     .catch((err) => console.warn("[mcp] lastUsedAt 更新失敗（不影響認證）：", err instanceof Error ? err.message : err));
-  return { kind: "user", auth, tokenId: row.id };
+  return { kind: "user", auth, tokenId: row.id, scope: { readOnly: row.readOnly } };
 }
 
 /* ── 自助管理（供 routers/mcpTokens 呼叫） ── */
 
 /** 建立一把新金鑰：回原文（只此一次）＋列資訊。呼叫端須先擋上限。 */
-export async function createMcpToken(userId: string, label: string): Promise<{ id: string; token: string; label: string }> {
+export async function createMcpToken(
+  userId: string,
+  label: string,
+  opts: { readOnly?: boolean; expiresAt?: Date | null } = {},
+): Promise<{ id: string; token: string; label: string; readOnly: boolean; expiresAt: Date | null }> {
   const token = newMcpTokenPlaintext();
   const [row] = await db
     .insert(schema.mcpTokens)
-    .values({ userId, tokenHash: sha256(token), label })
+    .values({ userId, tokenHash: sha256(token), label, readOnly: opts.readOnly ?? false, expiresAt: opts.expiresAt ?? null })
     .returning();
-  return { id: row.id, token, label: row.label };
+  return { id: row.id, token, label: row.label, readOnly: row.readOnly, expiresAt: row.expiresAt };
 }
 
 /** 列出某人的金鑰（不含原文與雜湊）——供管理 UI 顯示。 */
 export async function listMcpTokens(userId: string): Promise<
-  Array<{ id: string; label: string; lastUsedAt: Date | null; revokedAt: Date | null; createdAt: Date }>
+  Array<{ id: string; label: string; readOnly: boolean; expiresAt: Date | null; lastUsedAt: Date | null; revokedAt: Date | null; createdAt: Date }>
 > {
   const rows = await db
     .select({
       id: schema.mcpTokens.id,
       label: schema.mcpTokens.label,
+      readOnly: schema.mcpTokens.readOnly,
+      expiresAt: schema.mcpTokens.expiresAt,
       lastUsedAt: schema.mcpTokens.lastUsedAt,
       revokedAt: schema.mcpTokens.revokedAt,
       createdAt: schema.mcpTokens.createdAt,

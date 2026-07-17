@@ -12,6 +12,8 @@ import {
   envKeyMatches,
   looksLikeMcpToken,
   newMcpTokenPlaintext,
+  scopeDeniedReason,
+  isTokenExpired,
   MCP_TOKEN_PREFIX,
 } from "./mcpAuth";
 
@@ -59,6 +61,40 @@ describe("envKeyMatches：固定時間比對", () => {
   it("長度不同 → false（且不拋例外）", () => {
     expect(envKeyMatches("short", "a-much-longer-key")).toBe(false);
     expect(envKeyMatches("", "x")).toBe(false);
+  });
+});
+
+describe("scopeDeniedReason：唯讀金鑰守衛", () => {
+  it("唯讀金鑰 + 寫入類工具 → 擋（含 add_database_row）", () => {
+    for (const w of ["submit_generation", "post_message", "add_database_row", "plan_agent", "approve_agent", "add_schedule_item"]) {
+      expect(scopeDeniedReason(w, { readOnly: true })).toContain("唯讀");
+    }
+  });
+  it("唯讀金鑰 + 讀取類工具 → 放行（null）", () => {
+    for (const r of ["whoami", "list_projects", "get_project_context", "find_model", "list_generations", "get_generation", "list_assets", "get_project_status", "list_agent_runs", "get_agent_run", "list_schedule", "list_databases", "query_database"]) {
+      expect(scopeDeniedReason(r, { readOnly: true })).toBeNull();
+    }
+  });
+  it("可寫金鑰 → 一律放行", () => {
+    expect(scopeDeniedReason("submit_generation", { readOnly: false })).toBeNull();
+    expect(scopeDeniedReason("add_database_row", { readOnly: false })).toBeNull();
+  });
+  it("未知工具名對唯讀金鑰保守視為寫入 → 擋", () => {
+    expect(scopeDeniedReason("some_future_write_tool", { readOnly: true })).toContain("唯讀");
+  });
+});
+
+describe("isTokenExpired：到期判斷", () => {
+  const now = new Date("2026-07-17T00:00:00Z");
+  it("expiresAt 為 null → 永不過期", () => {
+    expect(isTokenExpired(null, now)).toBe(false);
+  });
+  it("到期時刻在未來 → 未過期", () => {
+    expect(isTokenExpired(new Date("2026-07-18T00:00:00Z"), now)).toBe(false);
+  });
+  it("到期時刻已過（含剛好等於現在）→ 過期", () => {
+    expect(isTokenExpired(new Date("2026-07-16T00:00:00Z"), now)).toBe(true);
+    expect(isTokenExpired(new Date("2026-07-17T00:00:00Z"), now)).toBe(true);
   });
 });
 
