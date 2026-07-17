@@ -5,7 +5,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
-import { addDataRowValidated, MAX_ROWS_PER_TABLE } from "../services/databaseCore";
+import { addDataRowValidated } from "../services/databaseCore";
 import { csvToRowObjects } from "../../shared/csv";
 import {
   extractTextFromBuffer,
@@ -264,20 +264,23 @@ export const databasesRouter = router({
       const objs = csvToRowObjects(input.csv, input.headerMap);
       if (objs.length === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可匯入的資料列（確認 CSV 有表頭列＋至少一列資料，且已對應欄位）" });
       const MAX_IMPORT = 5000;
-      const slice = objs.slice(0, MAX_IMPORT);
+      const slice = objs.slice(0, MAX_IMPORT); // 只嘗試前 MAX_IMPORT 列
       let imported = 0;
+      let attempted = 0;
       const errors: Array<{ line: number; error: string }> = [];
-      for (let i = 0; i < slice.length; i++) {
+      for (const { data, line } of slice) {
+        attempted++;
         try {
-          await addDataRowValidated(table, ctx.auth.user.id, slice[i]);
+          await addDataRowValidated(table, ctx.auth.user.id, data);
           imported++;
         } catch (err) {
-          if (errors.length < 50) errors.push({ line: i + 2, error: err instanceof Error ? err.message : "未知錯誤" }); // +2：跳過表頭列、1 起算
+          if (errors.length < 50) errors.push({ line, error: err instanceof Error ? err.message : "未知錯誤" }); // line＝CSV 實體行號
           // 達列數上限即停（addDataRowValidated 會拋保險絲訊息）
           if (err instanceof Error && err.message.includes("列上限")) break;
         }
       }
-      return { imported, failed: objs.length - imported, truncated: objs.length > MAX_IMPORT, errors };
+      // failed 只算「嘗試過但失敗」的列；被 MAX_IMPORT 截斷、從未嘗試的列另以 skipped 標示（不混入 failed 誤導）
+      return { imported, failed: attempted - imported, skipped: objs.length - attempted, truncated: objs.length > MAX_IMPORT, errors };
     }),
 
   /** 更新列：整列覆寫語意（前端送完整 data）；寫入權即可（協作表格，不限本人的列） */

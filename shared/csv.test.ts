@@ -31,13 +31,31 @@ describe("parseCsv", () => {
 });
 
 describe("csvToRowObjects", () => {
-  it("依表頭對應欄位、丟棄未對應欄、去空白、略過全空列", () => {
+  it("依表頭對應欄位、丟棄未對應欄、去空白、略過全空列、實體行號精準", () => {
     const csv = "姓名,年齡,忽略欄\r\n小美,28,x\r\n , , \r\n阿哲, 30 ,y";
     const objs = csvToRowObjects(csv, { "姓名": "name", "年齡": "age" });
-    expect(objs).toEqual([{ name: "小美", age: "28" }, { name: "阿哲", age: "30" }]);
+    // 中間有一行全空被略過，阿哲的實體行號仍是第 4 行（不因略過而錯位）
+    expect(objs).toEqual([
+      { data: { name: "小美", age: "28" }, line: 2 },
+      { data: { name: "阿哲", age: "30" }, line: 4 },
+    ]);
+  });
+  it("還原匯出時的公式中和前綴 '（round-trip 無損）", () => {
+    const objs = csvToRowObjects("備註\r\n'=SUM(A1)\r\n'普通", { "備註": "note" });
+    expect(objs.map((o) => o.data.note)).toEqual(["=SUM(A1)", "'普通"]); // 只剝公式前綴，一般 ' 保留
   });
   it("只有表頭或空回空陣列", () => {
     expect(csvToRowObjects("a,b", { a: "x" })).toEqual([]);
     expect(csvToRowObjects("", { a: "x" })).toEqual([]);
+  });
+});
+
+describe("公式注入中和", () => {
+  it("匯出對 = + - @ 開頭的儲存格加前綴 '，一般值不動", () => {
+    const csv = toCsv([["v"], ["=1+1"], ["+備註"], ["@x"], ["正常"]], { bom: false });
+    expect(csv).toBe("v\r\n'=1+1\r\n'+備註\r\n'@x\r\n正常");
+  });
+  it("可關 formulaGuard", () => {
+    expect(toCsv([["=1+1"]], { bom: false, formulaGuard: false })).toBe("=1+1");
   });
 });

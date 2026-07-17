@@ -247,6 +247,23 @@ ok("CSV 匯出（含表頭與資料）", st_csv == 200 and "text/csv" in ct_csv 
 st_csv_x, _, _ = http_get(f"/api/databases/{csv_db['id']}/rows.csv", cookie=admin.cookie)
 ok("🔒 他人個人庫 CSV 匯出被擋", st_csv_x == 404)
 
+# ── CSV 匯入勾選欄位（是/否 → boolean，round-trip）＋公式注入中和 ──
+cb_db = call("POST", azhe, "databases.create", {
+    "scope": "personal", "name": "勾選匯入測試",
+    "fields": [{"key": "task", "label": "事項", "type": "text"},
+               {"key": "done", "label": "完成", "type": "checkbox"}]})
+cb_imp = call("POST", azhe, "databases.importCsv", {
+    "tableId": cb_db["id"], "csv": "事項,完成\r\n剪片,是\r\n配音,否",
+    "headerMap": {"事項": "task", "完成": "done"}})
+ok("CSV 勾選欄位（是/否）匯入成功", cb_imp["imported"] == 2 and cb_imp["failed"] == 0)
+cb_rows = call("GET", azhe, "databases.listRows", {"tableId": cb_db["id"]})
+done_map = {r["data"]["task"]: r["data"]["done"] for r in cb_rows["rows"]}
+ok("勾選值轉成 boolean", done_map.get("剪片") is True and done_map.get("配音") is False)
+# 公式注入：text 欄存 =1+1，匯出時前綴 ' 中和
+call("POST", azhe, "databases.addRow", {"tableId": cb_db["id"], "data": {"task": "=HYPERLINK(1)"}})
+_, cb_csv, _ = http_get(f"/api/databases/{cb_db['id']}/rows.csv", cookie=azhe.cookie)
+ok("CSV 匯出中和公式注入（'=）", "'=HYPERLINK(1)" in cb_csv and "\n=HYPERLINK" not in cb_csv)
+
 
 # ── REST API v1（本機/手機/外部 HTTP 客戶端，x-api-key 認證）──
 def http_json(method, path, key=None, body=None):

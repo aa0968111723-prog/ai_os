@@ -42,6 +42,15 @@ describe("validateRowData", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain("姓名");
   });
+  it("checkbox 接受字串真假值（CSV round-trip）：是/否、true/false、1/0", () => {
+    for (const [input, expected] of [["是", true], ["否", false], ["true", true], ["1", true], ["0", false], [true, true]] as const) {
+      const r = validateRowData(fields, { name: "a", done: input });
+      expect(r.ok, `done=${input}`).toBe(true);
+      if (r.ok) expect(r.data.done).toBe(expected);
+    }
+    // 認不出的字串仍擋
+    expect(validateRowData(fields, { name: "a", done: "或許" }).ok).toBe(false);
+  });
   it("project/schedule 連結欄位驗 uuid 格式", () => {
     expect(validateRowData(fields, { name: "a", proj: "not-uuid" }).ok).toBe(false);
     expect(validateRowData(fields, { name: "a", meet: "not-uuid" }).ok).toBe(false);

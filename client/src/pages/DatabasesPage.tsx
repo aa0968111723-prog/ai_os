@@ -400,7 +400,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
 function CsvImportPanel({ table, onDone }: { table: TableSummary; onDone: () => void }) {
   const [csv, setCsv] = useState("");
   const [mapping, setMapping] = useState<Record<string, string>>({}); // 欄位 key → CSV 表頭
-  const [result, setResult] = useState<{ imported: number; failed: number; errors: Array<{ line: number; error: string }> } | null>(null);
+  const [result, setResult] = useState<{ imported: number; failed: number; skipped: number; truncated: boolean; errors: Array<{ line: number; error: string }> } | null>(null);
   const importCsv = trpc.databases.importCsv.useMutation({
     onSuccess: (r) => { setResult(r); if (r.imported > 0) onDone(); },
   });
@@ -462,6 +462,7 @@ function CsvImportPanel({ table, onDone }: { table: TableSummary; onDone: () => 
         <div style={{ marginTop: 8 }}>
           <p className="hint" style={{ color: result.imported > 0 ? "var(--success-ink)" : undefined }}>
             匯入完成：成功 {result.imported} 列{result.failed > 0 ? `、失敗 ${result.failed} 列` : ""}
+            {result.truncated ? `（超過 5000 列上限，另有 ${result.skipped} 列未處理——請分批匯入）` : ""}
           </p>
           {result.errors.length > 0 && (
             <ul style={{ margin: "4px 0", paddingLeft: 18, fontSize: 12, color: "var(--danger-ink, #a33)" }}>

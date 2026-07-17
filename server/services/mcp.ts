@@ -21,7 +21,7 @@ import { assertProjectEditable } from "./projectAcl";
 import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity } from "./mcpAuth";
 import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
-import { validateRowData, type DataField } from "../../shared/databaseFields";
+import { addDataRowValidated } from "./databaseCore";
 import type { AuthState } from "./auth";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -248,13 +248,10 @@ async function runTool(auth: AuthState, name: string, args: Record<string, unkno
       return { table: table.name, fields: table.fields, rows };
     }
 
-    // add_database_row
+    // add_database_row：走列寫入單一路徑（與 tRPC/代理/REST 一致，含 20,000 列保險絲）
     if (!access.canWriteRows) throw new Error("這個資料庫不開放 AI 寫入（管理者可在工作台「資料庫」頁調整 AI 存取等級）");
-    const checked = validateRowData(table.fields as DataField[], args.data ?? {});
-    if (!checked.ok) throw new Error(checked.error);
-    const [row] = await db.insert(schema.dataRows).values({ tableId: table.id, data: checked.data, createdBy: auth.user.id }).returning();
-    await db.update(schema.dataTables).set({ updatedAt: new Date() }).where(eq(schema.dataTables.id, table.id));
-    return { rowId: row.id, data: checked.data };
+    const row = await addDataRowValidated(table, auth.user.id, args.data ?? {});
+    return { rowId: row.id, data: row.data };
   }
 
   if (name === "list_database_files") {
