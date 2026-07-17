@@ -17,7 +17,7 @@ import { worldviewSchema } from "../../shared/worldview";
 import { getModel } from "../../shared/models";
 import { isMockMode } from "./fal";
 import { nimComplete, NimServiceError } from "./nvidia-nim";
-import { reserveQuota, refund } from "./points";
+import { reserveQuota, refund, checkQuota } from "./points";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { lockAgentApprove } from "./locks";
 import { buildKnowledgeContext } from "../routers/knowledge";
@@ -331,6 +331,15 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
   assertProjectNotArchived(project); // 專案封存後不得核准執行（否則對已停用專案持續扣點生成）
   if (run.status !== "awaiting_approval") {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫已經開始執行或已結束" });
+  }
+  // 核准前先預檢：計畫估點是否放得進發起人當前額度。過不了就別讓它跑到一半才因額度不足失敗、
+  // 白花前幾步的點（審查修復）。這是唯讀檢查（不預留、不扣點），每步生成仍有各自的 reserveQuota 硬守門；
+  // 估點是規劃時的估算，實扣以各步為準——此預檢只擋「明顯超額」的計畫，不取代逐步守門。
+  if (run.estPoints > 0) {
+    const quotaError = await checkQuota(run.userId, run.groupId, run.estPoints);
+    if (quotaError) {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: `這份計畫預估 ${run.estPoints} 點，${quotaError}——請縮小目標或請組長調整額度後重新規劃` });
+    }
   }
   const updated = await db.transaction(async (tx) => {
     await lockAgentApprove(tx, run.projectId, run.userId);
