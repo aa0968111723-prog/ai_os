@@ -24,6 +24,14 @@ describe("parseCsv", () => {
   it("空輸入回空", () => {
     expect(parseCsv("")).toEqual([]);
   });
+  it("欄位中途的裸引號視為普通字元，不吞併分隔符/換行/後續列（RFC 4180 寬容）", () => {
+    // 未加引號卻含裸引號（英吋記號、內文引號）——奇數/單一裸引號以前會讓整份剩餘塌成一格
+    expect(parseCsv('size,note\r\n24" pipe,ok\r\nnext,row')).toEqual([
+      ["size", "note"], ['24" pipe', "ok"], ["next", "row"],
+    ]);
+    // 成對的欄位中途引號同樣原樣保留（不進引號模式）
+    expect(parseCsv('a,b\r\nhe said "hi",x')).toEqual([["a", "b"], ['he said "hi"', "x"]]);
+  });
   it("round-trip：toCsv → parseCsv 還原", () => {
     const rows = [["h1", "h2"], ["含,逗號", '含"引號'], ["換\n行", "普通"]];
     expect(parseCsv(toCsv(rows))).toEqual(rows);
@@ -47,6 +55,12 @@ describe("csvToRowObjects", () => {
   it("只有表頭或空回空陣列", () => {
     expect(csvToRowObjects("a,b", { a: "x" })).toEqual([]);
     expect(csvToRowObjects("", { a: "x" })).toEqual([]);
+  });
+  it("重複表頭採第一欄（與 parseTabular 去重一致）", () => {
+    // 兩欄同名 a：第一欄值 1、第二欄值 2——取第一欄
+    expect(csvToRowObjects("a,a,b\r\n1,2,3", { a: "x", b: "y" })).toEqual([
+      { data: { x: "1", y: "3" }, line: 2 },
+    ]);
   });
 });
 
