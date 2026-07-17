@@ -4,19 +4,34 @@
  * 純函式，供伺服器匯入匯出與單元測試共用。
  */
 
-/** 序列化一格：含分隔符/引號/換行時加引號並轉義 */
-function encodeCell(value: unknown): string {
+/** 試算表公式注入起始字元（Excel/LibreOffice/Sheets 會把 = + - @ 開頭的儲存格當公式求值） */
+const FORMULA_LEAD = /^[=+\-@\t\r]/;
+
+/**
+ * 中和公式注入（匯出時用）：對危險起始字元的儲存格前綴單引號 `'`。
+ * Excel/Sheets 顯示時吃掉這個 `'` 只當純文字；我們自己的 CSV 匯入會在 csvToRowObjects 還原（見下方）。
+ * CWE-1236：共享表裡低權限成員可植入 =HYPERLINK/=cmd 之類公式，管理者匯出開檔即觸發——這裡阻斷。
+ */
+function neutralizeFormula(s: string): string {
+  return FORMULA_LEAD.test(s) ? "'" + s : s;
+}
+
+/** 序列化一格：含分隔符/引號/換行時加引號並轉義；formulaGuard 時中和公式注入 */
+function encodeCell(value: unknown, formulaGuard: boolean): string {
   if (value === null || value === undefined) return "";
   let s: string;
   if (typeof value === "boolean") s = value ? "true" : "false";
   else s = String(value);
+  if (formulaGuard) s = neutralizeFormula(s);
   if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
   return s;
 }
 
-/** 資料列（含表頭）→ CSV 文字。加 UTF-8 BOM 讓 Excel 正確辨識中文（可關）。 */
-export function toCsv(rows: Array<Array<unknown>>, opts: { bom?: boolean } = {}): string {
-  const body = rows.map((r) => r.map(encodeCell).join(",")).join("\r\n");
+/** 資料列（含表頭）→ CSV 文字。加 UTF-8 BOM 讓 Excel 正確辨識中文（可關）；
+ *  formulaGuard 預設開（匯出安全預設）——round-trip 由 csvToRowObjects 還原前綴 `'`。 */
+export function toCsv(rows: Array<Array<unknown>>, opts: { bom?: boolean; formulaGuard?: boolean } = {}): string {
+  const guard = opts.formulaGuard !== false;
+  const body = rows.map((r) => r.map((c) => encodeCell(c, guard)).join(",")).join("\r\n");
   return (opts.bom === false ? "" : "﻿") + body;
 }
 
@@ -57,9 +72,11 @@ export function parseCsv(text: string): string[][] {
 /**
  * 把「表頭 + 資料列」的 CSV 依「表頭名稱對應欄位」轉成列物件陣列。
  * headerMap：CSV 表頭字串 → 目標欄位 key（未在 map 的表頭欄一律丟棄）。
- * 回每列的 { [fieldKey]: 原始字串值 }；值的型別轉換與驗證交給呼叫端（validateRowData）。
+ * 回每列的 { data:{ [fieldKey]: 原始字串值 }, line:CSV 實體行號(1 起算) }——
+ *   line 精準對應原始 CSV 行（跳過的全空列不影響其他列的行號），供匯入錯誤回報準確定位。
+ * 值的型別轉換與驗證交給呼叫端（validateRowData）；還原匯出時中和公式所加的前綴 `'`（round-trip 無損）。
  */
-export function csvToRowObjects(text: string, headerMap: Record<string, string>): Array<Record<string, string>> {
+export function csvToRowObjects(text: string, headerMap: Record<string, string>): Array<{ data: Record<string, string>; line: number }> {
   const grid = parseCsv(text);
   if (grid.length < 2) return []; // 只有表頭或空
   const header = grid[0].map((h) => h.trim());
@@ -68,14 +85,19 @@ export function csvToRowObjects(text: string, headerMap: Record<string, string>)
     const key = headerMap[h];
     if (key) cols.push({ index: idx, key });
   });
-  const out: Array<Record<string, string>> = [];
+  const out: Array<{ data: Record<string, string>; line: number }> = [];
   for (let r = 1; r < grid.length; r++) {
-    const line = grid[r];
+    const row = grid[r];
     // 全空列略過（尾端空行常見）
-    if (line.every((c) => c.trim() === "")) continue;
-    const obj: Record<string, string> = {};
-    for (const { index, key } of cols) obj[key] = (line[index] ?? "").trim();
-    out.push(obj);
+    if (row.every((c) => c.trim() === "")) continue;
+    const data: Record<string, string> = {};
+    for (const { index, key } of cols) data[key] = unguard((row[index] ?? "").trim());
+    out.push({ data, line: r + 1 }); // grid r 為 0 起算（含表頭），實體行號＝r+1
   }
   return out;
+}
+
+/** 還原匯出時的公式中和：`'=…` → `=…`（只在 `'` 後緊接公式起始字元時剝除，避免誤傷真實資料） */
+function unguard(s: string): string {
+  return s.startsWith("'") && FORMULA_LEAD.test(s.slice(1)) ? s.slice(1) : s;
 }

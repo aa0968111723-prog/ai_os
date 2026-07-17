@@ -163,10 +163,14 @@ export async function handleDatabaseIcs(req: Request, res: Response): Promise<vo
   const dateField = fields.find((f) => f.type === "date");
   if (!dateField) return void res.status(400).json({ error: "這個資料庫沒有日期欄位，無法產生行事曆（請先加一個日期型別欄位）" });
   const titleField = fields.find((f) => f.type === "text") ?? null;
+  // orderBy 讓 2000 列上限的取樣「確定」（否則 Postgres 回列順序未定義，超量表每次訂閱看到的事件會漂移）。
+  // 註：上限套在日期過濾「之前」，含日期的列若多於 2000 仍可能被截；行事曆訂閱屬概覽用途，可接受，
+  //     要完整請用 CSV 匯出或 REST 分頁。
   const rows = await db
     .select({ id: schema.dataRows.id, data: schema.dataRows.data })
     .from(schema.dataRows)
     .where(eq(schema.dataRows.tableId, hit.table.id))
+    .orderBy(desc(schema.dataRows.createdAt))
     .limit(2000);
 
   const items = rows.flatMap((r) => {

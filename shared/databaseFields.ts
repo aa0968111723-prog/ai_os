@@ -46,6 +46,17 @@ export function newFieldKey(): string {
   return "f" + Math.random().toString(36).slice(2, 10);
 }
 
+/** 勾選欄位的寬鬆布林解析（供 CSV／外部來源）：認得常見真假字串；認不出回 null（讓呼叫端擋） */
+export function coerceBoolean(v: unknown): boolean | null {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return v === 1 ? true : v === 0 ? false : null;
+  if (typeof v !== "string") return null;
+  const s = v.trim().toLowerCase();
+  if (["true", "1", "yes", "y", "是", "✓", "v", "o"].includes(s)) return true;
+  if (["false", "0", "no", "n", "否", "✗", "x", ""].includes(s)) return false;
+  return null;
+}
+
 /**
  * 驗證欄位定義陣列：回錯誤訊息（人話），合法回 null。
  * 順帶把 label/options 去頭尾空白的責任留給呼叫端（這裡只驗不改，保持純檢查語意）。
@@ -129,8 +140,11 @@ export function validateRowData(
         break;
       }
       case "checkbox": {
-        if (typeof v !== "boolean") return { ok: false, error: `「${f.label}」要是勾選（true/false）` };
-        out[f.key] = v;
+        // 接受 boolean，也接受 CSV／外部來源常見的字串真假值（true/false、是/否、1/0、yes/no、y/n、✓）——
+        // 否則 CSV 匯入與「匯出→再匯入」round-trip（匯出把勾選寫成「是/否」）整列都會被擋。
+        const b = coerceBoolean(v);
+        if (b === null) return { ok: false, error: `「${f.label}」要是勾選（true/false、是/否、1/0）` };
+        out[f.key] = b;
         break;
       }
       case "user":
