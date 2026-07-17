@@ -337,7 +337,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
           </button>
         )}
       </div>
-      {showImport && canWrite && <CsvImportPanel table={table} onDone={() => { setShowImport(false); invalidate(); }} />}
+      {showImport && canWrite && <CsvImportPanel table={table} onImported={invalidate} />}
 
       <div style={{ overflowX: "auto", marginTop: 8 }}>
         <table className="data-grid" style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -397,12 +397,13 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
 
 /* ────────────────────────── CSV 匯入 ────────────────────────── */
 
-function CsvImportPanel({ table, onDone }: { table: TableSummary; onDone: () => void }) {
+function CsvImportPanel({ table, onImported }: { table: TableSummary; onImported: () => void }) {
   const [csv, setCsv] = useState("");
   const [mapping, setMapping] = useState<Record<string, string>>({}); // 欄位 key → CSV 表頭
   const [result, setResult] = useState<{ imported: number; failed: number; skipped: number; truncated: boolean; errors: Array<{ line: number; error: string }> } | null>(null);
   const importCsv = trpc.databases.importCsv.useMutation({
-    onSuccess: (r) => { setResult(r); if (r.imported > 0) onDone(); },
+    // 匯入後刷新格線，但「不自動關閉面板」——讓使用者看到「成功幾列、失敗哪幾行」的結果再自行收合
+    onSuccess: (r) => { setResult(r); if (r.imported > 0) onImported(); },
   });
   // 解析第一行當表頭候選（純前端粗解析，正式解析在後端）
   const firstLine = csv.split(/\r?\n/)[0] ?? "";
