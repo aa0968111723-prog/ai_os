@@ -102,8 +102,11 @@ names = {t["name"] for t in d["result"]["tools"]}
 EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_generation","post_message",
     "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row",
     "list_database_files","read_database_file","plan_agent","approve_agent","stop_agent","discard_agent",
-    "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status"}
-ok("tools/list = 23 且名單完整", len(names) == 23 and EXPECTED <= names, f"{len(names)} 個")
+    "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status",
+    "list_notes","get_note"}
+# 名單以 shared/mcpCatalog.ts 為單一真相，逐字對齊（新增/移除工具都要同步這裡）——
+# 用集合「完全相等」而非硬編數字，避免日後加工具只改一邊就漏掉、也不會再度卡在過期的數字上。
+ok("tools/list 名單與 MCP 目錄完全一致", names == EXPECTED, f"{len(names)} 個")
 
 # ══════════ 23 工具逐一實跑（可寫金鑰）══════════
 print("\n######## 23 工具逐一實跑 ########")
