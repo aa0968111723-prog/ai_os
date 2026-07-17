@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
@@ -375,7 +375,157 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
         {rows.data && rows.data.rows.length === 0 && <p className="hint" style={{ marginTop: 8 }}>{q ? "沒有符合的資料" : "還沒有資料——從上面那一列開始加"}</p>}
       </div>
       {mutationError && <p className="error" role="alert">{mutationError}</p>}
+
+      <FilesSection table={table} />
     </section>
+  );
+}
+
+/* ────────────────────────── 文件（AI 可讀檔案） ────────────────────────── */
+
+function formatBytes(n: number): string {
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}
+
+/**
+ * 文件區：檔案上傳（txt/md/csv/json/html/字幕/PDF/DOCX…）＋網址匯入（Google 公開連結、Notion）。
+ * 伺服器抽純文字後 AI 才讀得到——可讀字數顯示在每份文件旁；配額每人預設 5GB（管理員可調）。
+ */
+function FilesSection({ table }: { table: TableSummary }) {
+  const utils = trpc.useUtils();
+  const me = trpc.auth.me.useQuery();
+  const list = trpc.databases.listFiles.useQuery({ tableId: table.id });
+  const importUrl = trpc.databases.importUrl.useMutation({ onSuccess: () => { utils.databases.listFiles.invalidate({ tableId: table.id }); setUrl(""); setUrlName(""); } });
+  const refresh = trpc.databases.refreshFile.useMutation({ onSuccess: () => utils.databases.listFiles.invalidate({ tableId: table.id }) });
+  const removeFile = trpc.databases.removeFile.useMutation({ onSuccess: () => utils.databases.listFiles.invalidate({ tableId: table.id }) });
+
+  const [url, setUrl] = useState("");
+  const [urlName, setUrlName] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const preview = trpc.databases.getFileText.useQuery({ id: previewId ?? "" }, { enabled: !!previewId });
+
+  const doUpload = async (f: File) => {
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const form = new FormData();
+      form.append("file", f);
+      form.append("tableId", table.id);
+      const res = await fetch("/api/databases/upload", { method: "POST", body: form, credentials: "same-origin" });
+      const body = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !body.ok) setUploadError(body.error ?? "上傳失敗，請稍後再試");
+      else utils.databases.listFiles.invalidate({ tableId: table.id });
+    } catch {
+      setUploadError("上傳失敗（網路問題），請稍後再試");
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  };
+
+  const quota = list.data?.quota;
+  const files = list.data?.files ?? [];
+  const canWrite = table.access.canWriteRows;
+  const myId = me.data?.user.id;
+
+  return (
+    <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--border-soft, #eee)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <h3 style={{ margin: 0 }}>文件（AI 可讀）</h3>
+        {quota && (
+          <span className="meta" title="所有資料庫合計、按上傳者計；管理員可在「團隊管理→點數與額度」調整">
+            我的空間：{formatBytes(quota.usedBytes)}{quota.quotaBytes != null ? ` / ${formatBytes(quota.quotaBytes)}` : "（不限）"}
+          </span>
+        )}
+      </div>
+      <p className="hint" style={{ marginTop: 4 }}>
+        文字/Markdown/CSV/JSON/HTML/字幕/PDF/Word 上傳後自動抽成純文字——團隊 AI 助手與 MCP 代理都讀得到
+        （受上方「AI 存取」等級管控）。Google 文件請用「任何人知道連結都能檢視」的連結；Notion 需管理員設 NOTION_TOKEN，或用 Notion 匯出檔上傳。
+      </p>
+
+      {canWrite && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+          <input
+            ref={fileInput}
+            type="file"
+            aria-label="上傳文件"
+            accept=".txt,.md,.csv,.json,.html,.htm,.srt,.vtt,.pdf,.docx,.zip,image/*,video/*,audio/*"
+            style={{ width: "auto" }}
+            disabled={uploading}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f); }}
+          />
+          {uploading && <span className="meta">上傳並抽取文字中…</span>}
+        </div>
+      )}
+      {canWrite && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+          <input
+            aria-label="匯入網址"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="貼 Google 文件/試算表/雲端硬碟公開連結、Notion 頁面或網頁網址"
+            style={{ flex: "1 1 320px" }}
+          />
+          <input aria-label="匯入文件名稱" value={urlName} onChange={(e) => setUrlName(e.target.value)} placeholder="名稱（選填）" style={{ flex: "0 1 140px" }} maxLength={120} />
+          <button
+            className="btn-sm primary"
+            disabled={!url.trim() || importUrl.isPending}
+            onClick={() => importUrl.mutate({ tableId: table.id, url: url.trim(), name: urlName.trim() || undefined })}
+          >
+            {importUrl.isPending ? "匯入中…" : "從網址匯入"}
+          </button>
+        </div>
+      )}
+      {(uploadError || importUrl.error || refresh.error || removeFile.error) && (
+        <p className="error" role="alert">{uploadError ?? importUrl.error?.message ?? refresh.error?.message ?? removeFile.error?.message}</p>
+      )}
+
+      {files.length === 0 && list.data && <p className="hint" style={{ marginTop: 8 }}>還沒有文件——上傳逐字稿、腳本、名單，AI 就能引用它們回答。</p>}
+      {files.map((f) => (
+        <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderBottom: "1px solid var(--border-soft, #eee)" }}>
+          <Icon name="FileText" size={15} />
+          <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }} title={f.name}>{f.name}</span>
+          <span className="meta">{formatBytes(f.sizeBytes)}・{f.uploaderName}</span>
+          {f.readableChars > 0 ? (
+            <button className="badge" style={{ cursor: "pointer" }} title="點開預覽 AI 讀到的純文字" onClick={() => setPreviewId(previewId === f.id ? null : f.id)}>
+              AI 可讀 {f.readableChars.toLocaleString()} 字
+            </button>
+          ) : (
+            <span className="badge" title="此格式暫不支援文字抽取（僅存檔）">僅存檔</span>
+          )}
+          <span className="spacer" />
+          {f.hasFile && <a className="btn-sm" href={`/api/databases/files/${f.id}/file`} download title="下載原檔"><Icon name="Download" size={13} /></a>}
+          {canWrite && f.sourceUrl && (
+            <button className="btn-sm" title="重抓來源網址、更新內容" disabled={refresh.isPending} onClick={() => refresh.mutate({ id: f.id })}>
+              <Icon name="Undo2" size={13} />
+            </button>
+          )}
+          {(table.access.canManage || f.uploadedBy === myId) && (
+            <ConfirmButton onConfirm={() => removeFile.mutate({ id: f.id })} message={`刪除文件「${f.name}」？（原檔與 AI 可讀文字都會刪除、空間即時釋放）`} triggerClassName="btn-sm" triggerAriaLabel={`刪除文件 ${f.name}`}>
+              <Icon name="X" size={13} />
+            </ConfirmButton>
+          )}
+          {previewId === f.id && (
+            <div style={{ flexBasis: "100%", background: "var(--bg-sunken, rgba(0,0,0,.04))", borderRadius: 8, padding: 10, maxHeight: 240, overflowY: "auto" }}>
+              {preview.data ? (
+                <>
+                  <p className="meta" style={{ margin: "0 0 6px" }}>AI 讀到的純文字（前 20,000 字／共 {preview.data.totalChars.toLocaleString()} 字）：</p>
+                  <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: 13 }}>{preview.data.text}</pre>
+                </>
+              ) : (
+                <p className="meta" style={{ margin: 0 }}>載入中…</p>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

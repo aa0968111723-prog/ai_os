@@ -110,6 +110,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "databases.addRow": "新增資料列",
   "databases.updateRow": "更新資料列",
   "databases.removeRow": "刪除資料列",
+  "databases.importUrl": "從網址匯入資料庫文件",
+  "databases.refreshFile": "重新整理資料庫文件",
+  "databases.removeFile": "刪除資料庫文件",
   // MCP 個人連線金鑰（自助管理）
   "mcpTokens.create": "建立 MCP 連線金鑰",
   "mcpTokens.revoke": "撤銷 MCP 連線金鑰",
@@ -122,6 +125,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "mcp.list_databases": "MCP：列出資料庫",
   "mcp.query_database": "MCP：查詢資料庫",
   "mcp.add_database_row": "MCP：新增資料列",
+  "mcp.list_database_files": "MCP：列出資料庫文件",
+  "mcp.read_database_file": "MCP：讀取資料庫文件",
 };
 
 /** action → 人話；字典沒有的（新端點）retain 原代碼，寧可看得懂大多數也不擋新功能上線 */

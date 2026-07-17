@@ -771,6 +771,7 @@ export function AdminPage() {
   const totalBudgetRef = useRef<HTMLInputElement>(null);
   const weeklyRef = useRef<HTMLInputElement>(null);
   const dailyRef = useRef<HTMLInputElement>(null);
+  const fileQuotaRef = useRef<HTMLInputElement>(null);
   const saveBudget = () => {
     const data = settings.data;
     if (!data || !totalBudgetRef.current || !weeklyRef.current || !dailyRef.current) return;
@@ -778,13 +779,15 @@ export function AdminPage() {
     const totalBudgetPoints = parse(totalBudgetRef.current.value);
     const defaultWeeklyPoints = parse(weeklyRef.current.value);
     const defaultDailyPoints = parse(dailyRef.current.value);
+    const fileQuotaGb = fileQuotaRef.current ? parse(fileQuotaRef.current.value) : (data.fileQuotaGb ?? null);
     // 沒有變更就不送：Tab 掃過欄位不觸發無意義寫入
     if (
       totalBudgetPoints === (data.totalBudgetPoints ?? null) &&
       defaultWeeklyPoints === (data.defaultWeeklyPoints ?? null) &&
-      defaultDailyPoints === (data.defaultDailyPoints ?? null)
+      defaultDailyPoints === (data.defaultDailyPoints ?? null) &&
+      fileQuotaGb === (data.fileQuotaGb ?? null)
     ) return;
-    saveSettings.mutate({ totalBudgetPoints, defaultWeeklyPoints, defaultDailyPoints });
+    saveSettings.mutate({ totalBudgetPoints, defaultWeeklyPoints, defaultDailyPoints, fileQuotaGb });
   };
 
   if (overview.isLoading) return (
@@ -884,6 +887,8 @@ export function AdminPage() {
               <input id="settings-weekly" ref={weeklyRef} type="number" min={0} defaultValue={settings.data.defaultWeeklyPoints ?? ""} placeholder="不限" onBlur={saveBudget} disabled={!isSuperAdmin} />
               <label htmlFor="settings-daily">每人每日上限（每天重置）</label>
               <input id="settings-daily" ref={dailyRef} type="number" min={0} defaultValue={settings.data.defaultDailyPoints ?? ""} placeholder="不限" onBlur={saveBudget} disabled={!isSuperAdmin} />
+              <label htmlFor="settings-filequota">資料庫文件每人儲存配額（GB；空＝預設 5、0＝不限）</label>
+              <input id="settings-filequota" ref={fileQuotaRef} type="number" min={0} defaultValue={settings.data.fileQuotaGb ?? ""} placeholder="5" onBlur={saveBudget} disabled={!isSuperAdmin} />
             </>
           ) : (
             <div role="status" aria-label="設定載入中" style={{ marginTop: 12 }}>

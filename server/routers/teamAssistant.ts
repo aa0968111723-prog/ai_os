@@ -163,12 +163,21 @@ export const teamAssistantRouter = router({
         .limit(DB_LIMIT);
       const dbSections: string[] = [];
       for (const t of visibleTables) {
-        const rows = await db
-          .select({ data: schema.dataRows.data })
-          .from(schema.dataRows)
-          .where(eq(schema.dataRows.tableId, t.id))
-          .orderBy(desc(schema.dataRows.createdAt))
-          .limit(DB_ROW_LIMIT);
+        const [rows, files] = await Promise.all([
+          db
+            .select({ data: schema.dataRows.data })
+            .from(schema.dataRows)
+            .where(eq(schema.dataRows.tableId, t.id))
+            .orderBy(desc(schema.dataRows.createdAt))
+            .limit(DB_ROW_LIMIT),
+          // 文件層：檔名全列（AI 知道有什麼），最近兩份可讀文件各附 600 字摘錄（常見問題直接答得出）
+          db
+            .select({ name: schema.dataFiles.name, textContent: schema.dataFiles.textContent })
+            .from(schema.dataFiles)
+            .where(eq(schema.dataFiles.tableId, t.id))
+            .orderBy(desc(schema.dataFiles.createdAt))
+            .limit(10),
+        ]);
         const fields = (t.fields as Array<{ key: string; label: string }>) ?? [];
         const labelOf = new Map(fields.map((f) => [f.key, f.label]));
         const rowLines = rows.map((r) => {
@@ -177,9 +186,17 @@ export const teamAssistantRouter = router({
             .map(([k, v]) => `${labelOf.get(k) ?? k}:${String(v).slice(0, 40)}`);
           return "  - " + (entries.join("｜") || "（空列）");
         });
-        dbSections.push(
-          `資料庫「${t.name}」（${t.scope === "group" ? "組" : t.scope === "team" ? "團隊" : "全站"}；欄位：${fields.map((f) => f.label).join("、")}）最近 ${rows.length} 列：\n${rowLines.join("\n") || "  （沒有資料）"}`,
-        );
+        const fileNames = files.map((f) => f.name).join("、");
+        const excerpts = files
+          .filter((f) => f.textContent)
+          .slice(0, 2)
+          .map((f) => `  《${f.name}》摘錄：${f.textContent!.slice(0, 600).replace(/\s+/g, " ")}`);
+        dbSections.push([
+          `資料庫「${t.name}」（${t.scope === "group" ? "組" : t.scope === "team" ? "團隊" : "全站"}；欄位：${fields.map((f) => f.label).join("、")}）最近 ${rows.length} 列：`,
+          rowLines.join("\n") || "  （沒有資料）",
+          ...(files.length ? [`  附掛文件：${fileNames}`] : []),
+          ...excerpts,
+        ].join("\n"));
       }
 
       const context = [

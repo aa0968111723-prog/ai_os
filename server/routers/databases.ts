@@ -5,6 +5,20 @@ import { router, authedProcedure } from "../trpc";
 import { db, schema } from "../db";
 import { validateFields, validateRowData, type DataField } from "../../shared/databaseFields";
 import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
+import {
+  extractTextFromBuffer,
+  fetchImport,
+  fetchNotionText,
+  fileQuotaBytes,
+  htmlToText,
+  MAX_TEXT_CHARS,
+  normalizeImportUrl,
+  notionPageIdFromUrl,
+  quotaGuardError,
+  ssrfGuardError,
+  userFileUsage,
+} from "../services/databaseFiles";
+import { checkDiskSpace, removeStoredFile, saveBuffer } from "../services/storage";
 
 /**
  * 自訂資料庫（個人→組→團隊→全站）：表結構 CRUD＋列資料 CRUD。
@@ -216,6 +230,201 @@ export const databasesRouter = router({
       throw new TRPCError({ code: "FORBIDDEN", message: "只有這一列的建立者或資料庫管理者可以刪除" });
     }
     await db.delete(schema.dataRows).where(eq(schema.dataRows.id, row.id));
+    return { ok: true };
+  }),
+
+  /* ── 文件層（AI 可讀的檔案）───────────────────── */
+
+  /** 文件清單（不回全文省流量：回字數與 300 字摘錄）＋我的配額用量 */
+  listFiles: authedProcedure.input(z.object({ tableId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const { table } = await getTableChecked(ctx.auth, input.tableId);
+    const rows = await db
+      .select({
+        id: schema.dataFiles.id,
+        name: schema.dataFiles.name,
+        mime: schema.dataFiles.mime,
+        sizeBytes: schema.dataFiles.sizeBytes,
+        storagePath: schema.dataFiles.storagePath,
+        sourceUrl: schema.dataFiles.sourceUrl,
+        textContent: schema.dataFiles.textContent,
+        uploadedBy: schema.dataFiles.uploadedBy,
+        uploaderName: schema.users.name,
+        createdAt: schema.dataFiles.createdAt,
+      })
+      .from(schema.dataFiles)
+      .leftJoin(schema.users, eq(schema.users.id, schema.dataFiles.uploadedBy))
+      .where(eq(schema.dataFiles.tableId, table.id))
+      .orderBy(desc(schema.dataFiles.createdAt))
+      .limit(200);
+    const [usedBytes, quotaBytes] = await Promise.all([userFileUsage(ctx.auth.user.id), fileQuotaBytes()]);
+    return {
+      files: rows.map((f) => ({
+        id: f.id,
+        name: f.name,
+        mime: f.mime,
+        sizeBytes: f.sizeBytes,
+        hasFile: !!f.storagePath,
+        sourceUrl: f.sourceUrl,
+        readableChars: f.textContent?.length ?? 0,
+        excerpt: f.textContent ? f.textContent.slice(0, 300) : null,
+        uploadedBy: f.uploadedBy,
+        uploaderName: f.uploaderName ?? "?",
+        createdAt: f.createdAt,
+      })),
+      quota: { usedBytes, quotaBytes }, // quotaBytes null＝不限
+    };
+  }),
+
+  /** 全文讀取（前端預覽與複製用；AI 走 MCP read_database_file） */
+  getFileText: authedProcedure
+    .input(z.object({ id: z.string().uuid(), offset: z.number().int().min(0).optional() }))
+    .query(async ({ ctx, input }) => {
+      const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, input.id));
+      if (!file) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
+      await getTableChecked(ctx.auth, file.tableId); // 讀取權即可
+      const text = file.textContent ?? "";
+      const offset = input.offset ?? 0;
+      const CHUNK = 20_000;
+      return { name: file.name, totalChars: text.length, offset, text: text.slice(offset, offset + CHUNK) };
+    }),
+
+  /**
+   * 網址匯入：Google 文件/試算表/簡報/雲端硬碟公開連結、Notion（官方 API）、一般網頁。
+   * 內容抓回伺服器抽純文字（HTML 轉純文字；二進位如 PDF 落地 Volume 再抽）——AI 之後讀 textContent。
+   */
+  importUrl: authedProcedure
+    .input(z.object({
+      tableId: z.string().uuid(),
+      url: z.string().min(1).max(2000),
+      name: z.string().max(120).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { table, access } = await getTableChecked(ctx.auth, input.tableId);
+      if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
+      const ssrf = ssrfGuardError(input.url);
+      if (ssrf) throw new TRPCError({ code: "BAD_REQUEST", message: ssrf });
+      const normalized = normalizeImportUrl(input.url);
+
+      // Notion：官方 API 抽文字（不落地原檔）
+      if (normalized.kind === "notion") {
+        const pageId = notionPageIdFromUrl(input.url);
+        if (!pageId) throw new TRPCError({ code: "BAD_REQUEST", message: "看不出這個 Notion 網址的頁面 id——請貼「複製連結」取得的完整頁面網址" });
+        let text: string;
+        try {
+          text = await fetchNotionText(pageId);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Notion 匯入失敗" });
+        }
+        const sizeBytes = Buffer.byteLength(text, "utf8");
+        const quotaErr = await quotaGuardError(ctx.auth.user.id, sizeBytes);
+        if (quotaErr) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaErr });
+        const [row] = await db.insert(schema.dataFiles).values({
+          tableId: table.id,
+          name: (input.name?.trim() || "Notion 頁面").slice(0, 120),
+          mime: "text/plain",
+          sizeBytes,
+          sourceUrl: input.url,
+          textContent: text,
+          uploadedBy: ctx.auth.user.id,
+        }).returning();
+        return { id: row.id, readableChars: text.length };
+      }
+
+      // Google／一般網址：抓回內容
+      let fetched: Awaited<ReturnType<typeof fetchImport>>;
+      try {
+        fetched = await fetchImport(normalized.fetchUrl);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "抓取失敗" });
+      }
+      // 期望匯出文字（Google 文件/試算表/簡報）卻拿到 HTML＝多半是私有檔轉跳登入頁——給人話
+      if (normalized.kind.startsWith("google-") && normalized.kind !== "google-drive" && fetched.mime === "text/html") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Google 回了登入頁——請把該文件的共用設成「任何人知道連結都能檢視」再匯入",
+        });
+      }
+      const quotaErr = await quotaGuardError(ctx.auth.user.id, fetched.buf.length);
+      if (quotaErr) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaErr });
+
+      const fallbackName = decodeURIComponent(new URL(normalized.fetchUrl).pathname.split("/").filter(Boolean).pop() ?? "匯入文件");
+      const name = (input.name?.trim() || fallbackName || "匯入文件").slice(0, 120) + (normalized.suggestedExt && !/\.[a-z0-9]+$/i.test(input.name?.trim() || fallbackName) ? normalized.suggestedExt : "");
+
+      // 純網頁：不落地原檔，直接抽文字（HTML 存起來沒有重看價值）
+      if (fetched.mime === "text/html") {
+        const text = htmlToText(fetched.buf.toString("utf8")).slice(0, MAX_TEXT_CHARS);
+        if (!text) throw new TRPCError({ code: "BAD_REQUEST", message: "這個網頁抓不到可讀文字（可能是純前端渲染的頁面）——試試該平台的匯出功能後上傳" });
+        const sizeBytes = Buffer.byteLength(text, "utf8");
+        const [row] = await db.insert(schema.dataFiles).values({
+          tableId: table.id, name, mime: "text/plain", sizeBytes,
+          sourceUrl: input.url, textContent: text, uploadedBy: ctx.auth.user.id,
+        }).returning();
+        return { id: row.id, readableChars: text.length };
+      }
+
+      // 其他格式（txt/csv/pdf/docx…）：原檔落地＋抽文字
+      const disk = await checkDiskSpace(fetched.buf.length);
+      if (disk) throw new TRPCError({ code: "PRECONDITION_FAILED", message: disk });
+      const text = await extractTextFromBuffer(fetched.mime, name, fetched.buf);
+      const saved = await saveBuffer(fetched.buf, fetched.mime);
+      try {
+        const [row] = await db.insert(schema.dataFiles).values({
+          tableId: table.id, name, mime: fetched.mime, sizeBytes: saved.sizeBytes,
+          storagePath: saved.storagePath, sourceUrl: input.url, textContent: text, uploadedBy: ctx.auth.user.id,
+        }).returning();
+        return { id: row.id, readableChars: text?.length ?? 0 };
+      } catch (dbErr) {
+        await removeStoredFile(saved.storagePath); // DB 失敗清孤兒檔
+        throw dbErr;
+      }
+    }),
+
+  /** 重新整理：網址匯入的文件重抓來源、更新 textContent（來源文件改了就按這顆） */
+  refreshFile: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, input.id));
+    if (!file) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
+    if (!file.sourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "這份文件是上傳檔，沒有可重抓的來源網址" });
+    const { access } = await getTableChecked(ctx.auth, file.tableId);
+    if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
+    const ssrf = ssrfGuardError(file.sourceUrl);
+    if (ssrf) throw new TRPCError({ code: "BAD_REQUEST", message: ssrf });
+    const normalized = normalizeImportUrl(file.sourceUrl);
+    try {
+      let text: string | null;
+      let sizeBytes = file.sizeBytes;
+      if (normalized.kind === "notion") {
+        const pageId = notionPageIdFromUrl(file.sourceUrl);
+        if (!pageId) throw new Error("Notion 頁面 id 解析失敗");
+        text = await fetchNotionText(pageId);
+        sizeBytes = Buffer.byteLength(text, "utf8");
+      } else {
+        const fetched = await fetchImport(normalized.fetchUrl);
+        text = fetched.mime === "text/html"
+          ? htmlToText(fetched.buf.toString("utf8")).slice(0, MAX_TEXT_CHARS)
+          : await extractTextFromBuffer(fetched.mime, file.name, fetched.buf);
+        sizeBytes = fetched.buf.length;
+      }
+      // 配額以「增量」把關：重抓變大才需要空間
+      const delta = Math.max(0, sizeBytes - file.sizeBytes);
+      const quotaErr = delta > 0 ? await quotaGuardError(ctx.auth.user.id, delta) : null;
+      if (quotaErr) throw new Error(quotaErr);
+      await db.update(schema.dataFiles).set({ textContent: text, sizeBytes }).where(eq(schema.dataFiles.id, file.id));
+      return { ok: true, readableChars: text?.length ?? 0 };
+    } catch (err) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "重新整理失敗" });
+    }
+  }),
+
+  /** 刪文件：上傳者本人或資料庫管理者；連 Volume 原檔一併刪（配額即時釋放） */
+  removeFile: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, input.id));
+    if (!file) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
+    const { access } = await getTableChecked(ctx.auth, file.tableId);
+    if (!access.canManage && file.uploadedBy !== ctx.auth.user.id) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "只有上傳者本人或資料庫管理者可以刪除文件" });
+    }
+    await db.delete(schema.dataFiles).where(eq(schema.dataFiles.id, file.id));
+    if (file.storagePath) await removeStoredFile(file.storagePath);
     return { ok: true };
   }),
 });

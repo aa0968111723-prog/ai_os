@@ -170,8 +170,9 @@ init = mcp("initialize")
 ok("MCP initialize", init["result"]["serverInfo"]["name"]=="ai-director-os")
 tl = mcp("tools/list")
 tool_names = {t["name"] for t in tl["result"]["tools"]}
-ok("MCP tools/list（8 工具，含 find_model 與資料庫三件組）",
-   len(tl["result"]["tools"])==8 and {"find_model","list_databases","query_database","add_database_row"} <= tool_names)
+ok("MCP tools/list（10 工具，含資料庫五件組）",
+   len(tl["result"]["tools"])==10 and
+   {"find_model","list_databases","query_database","add_database_row","list_database_files","read_database_file"} <= tool_names)
 tc = mcp("tools/call",{"name":"list_projects","arguments":{}})
 projects_via_mcp = json.loads(tc["result"]["content"][0]["text"])
 ok("MCP list_projects 可用", any(p["title"]=="見證故事測試" for p in projects_via_mcp))

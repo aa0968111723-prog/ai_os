@@ -11,6 +11,8 @@ export interface PointsSettings {
   totalBudgetPoints: number | null;
   defaultWeeklyPoints: number | null;
   defaultDailyPoints: number | null;
+  /** 資料庫文件每人儲存配額 GB（null＝預設 5；0＝不限）——超管可調 */
+  fileQuotaGb: number | null;
 }
 
 /** 讀全域設定（無列則以環境預設建立：5000／300／不限，之後全由管理員在系統內調） */
@@ -21,12 +23,14 @@ export async function getSettings(): Promise<PointsSettings> {
       totalBudgetPoints: row.totalBudgetPoints,
       defaultWeeklyPoints: row.defaultWeeklyPoints,
       defaultDailyPoints: row.defaultDailyPoints,
+      fileQuotaGb: row.fileQuotaGb,
     };
   }
   const seeded = {
     totalBudgetPoints: Number(process.env.TOTAL_BUDGET_POINTS ?? 5000) || null,
     defaultWeeklyPoints: Number(process.env.WEEKLY_QUOTA_POINTS ?? 300) || null,
     defaultDailyPoints: Number(process.env.DAILY_QUOTA_POINTS ?? 0) || null, // 預設不限日
+    fileQuotaGb: null, // null＝用程式預設 5GB（見 services/databaseFiles）
   };
   await db.insert(schema.settings).values({ key: "global", ...seeded }).onConflictDoNothing();
   return seeded;
