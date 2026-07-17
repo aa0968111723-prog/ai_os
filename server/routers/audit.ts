@@ -21,7 +21,14 @@ export const auditRouter = router({
         action: z.string().max(80).optional(),
         /** 操作分類 key（見 shared/auditWording 的 AUDIT_CATEGORIES）——比關鍵字更白話的過濾 */
         category: z.string().max(40).optional(),
+        /** 依團隊過濾：看整個團隊底下各組的操作流水（分團隊） */
+        teamId: z.string().uuid().optional(),
+        /** 依組別過濾：切到單一組別（分組別） */
         groupId: z.string().uuid().optional(),
+        /** 依操作者過濾：只看某位夥伴做的事（分組員） */
+        actorId: z.string().uuid().optional(),
+        /** 依專案過濾：只看某個專案上發生的操作（分專案） */
+        projectId: z.string().uuid().optional(),
         limit: z.number().int().min(1).max(100).optional(),
       }),
     )
@@ -35,7 +42,12 @@ export const auditRouter = router({
         if (visibleGroupIds.length === 0) throw new TRPCError({ code: "FORBIDDEN", message: "需要組長或管理權限" });
         conds.push(inArray(schema.auditLog.groupId, visibleGroupIds));
       }
+      // 團隊過濾靠 join 的 groups.teamId（非 auditLog 直屬欄位）；非開發者上面已先鎖 visibleGroupIds，
+      // 這裡只是在可見範圍內再縮，不會擴權。分團隊／組別／組員／專案四維度彼此獨立、可疊加。
+      if (input.teamId) conds.push(eq(schema.groups.teamId, input.teamId));
       if (input.groupId) conds.push(eq(schema.auditLog.groupId, input.groupId));
+      if (input.actorId) conds.push(eq(schema.auditLog.actorId, input.actorId));
+      if (input.projectId) conds.push(eq(schema.auditLog.projectId, input.projectId));
       const q = input.action?.trim();
       if (q) {
         const escaped = q.replace(/[\\%_]/g, (m) => `\\${m}`);

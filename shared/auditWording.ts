@@ -40,6 +40,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "quota.setMemberBudget": "分配組員點數預算",
   "quota.setApprovalThreshold": "調整審批門檻",
   "quota.setMemberOverride": "調整個人額度",
+  "quota.setMemberDispatch": "調整組員派工權",
   // 分鏡與審批
   "scenes.addDraft": "新增分鏡草稿",
   "scenes.addFromGeneration": "把成品加入分鏡",
@@ -64,6 +65,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "agents.discard": "放棄 AI 代理計畫",
   "agents.stop": "停止 AI 代理",
   "teamAssistant.ask": "詢問團隊 AI 助手",
+  "teamAssistant.dispatch": "團隊代理派工到專案",
   "workflows.start": "啟動工作流",
   "workflows.stop": "停止工作流",
   // 知識庫與角色卡
@@ -111,7 +113,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "databases.updateRow": "更新資料列",
   "databases.removeRow": "刪除資料列",
   "databases.importUrl": "從網址匯入資料庫文件",
-  "databases.importCsv": "匯入 CSV 到資料庫",
+  "databases.importData": "匯入資料到資料庫（CSV／TSV／JSON）",
+  "databases.importCsv": "匯入 CSV 到資料庫", // 歷史動作名（併入 importData 前的日誌仍以此顯示）
   "databases.uploadFile": "上傳資料庫文件",
   "databases.refreshFile": "重新整理資料庫文件",
   "databases.removeFile": "刪除資料庫文件",

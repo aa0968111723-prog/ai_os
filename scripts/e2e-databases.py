@@ -220,13 +220,30 @@ csv_db = call("POST", azhe, "databases.create", {
     "scope": "personal", "name": "CSV 匯入測試",
     "fields": [{"key": "name", "label": "姓名", "type": "text", "required": True},
                {"key": "age", "label": "年齡", "type": "number"}]})
-imp = call("POST", azhe, "databases.importCsv", {
+imp = call("POST", azhe, "databases.importData", {
     "tableId": csv_db["id"],
-    "csv": "姓名,年齡\r\n小美,28\r\n阿哲,30\r\n壞列,不是數字",
+    "format": "csv",
+    "content": "姓名,年齡\r\n小美,28\r\n阿哲,30\r\n壞列,不是數字",
     "headerMap": {"姓名": "name", "年齡": "age"}})
 ok("CSV 匯入（2 成功 1 失敗）", imp["imported"] == 2 and imp["failed"] == 1 and len(imp["errors"]) == 1)
 csv_rows = call("GET", azhe, "databases.listRows", {"tableId": csv_db["id"]})
 ok("CSV 匯入的列可查", csv_rows["total"] == 2 and any(r["data"]["name"] == "小美" for r in csv_rows["rows"]))
+
+# ── TSV 與 JSON 匯入（多格式）──
+tsv_imp = call("POST", azhe, "databases.importData", {
+    "tableId": csv_db["id"],
+    "format": "tsv",
+    "content": "姓名\t年齡\r\n阿美\t22",
+    "headerMap": {"姓名": "name", "年齡": "age"}})
+ok("TSV 匯入成功", tsv_imp["imported"] == 1 and tsv_imp["failed"] == 0)
+json_imp = call("POST", azhe, "databases.importData", {
+    "tableId": csv_db["id"],
+    "format": "json",
+    "content": '[{"姓名":"小華","年齡":40},{"姓名":"小明","年齡":18}]',
+    "headerMap": {"姓名": "name", "年齡": "age"}})
+ok("JSON 匯入成功", json_imp["imported"] == 2 and json_imp["failed"] == 0)
+multi_rows = call("GET", azhe, "databases.listRows", {"tableId": csv_db["id"]})
+ok("多格式匯入後列數累加", multi_rows["total"] == 5)
 
 
 # ── CSV 匯出（HTTP GET，帶 cookie）──
@@ -252,8 +269,8 @@ cb_db = call("POST", azhe, "databases.create", {
     "scope": "personal", "name": "勾選匯入測試",
     "fields": [{"key": "task", "label": "事項", "type": "text"},
                {"key": "done", "label": "完成", "type": "checkbox"}]})
-cb_imp = call("POST", azhe, "databases.importCsv", {
-    "tableId": cb_db["id"], "csv": "事項,完成\r\n剪片,是\r\n配音,否",
+cb_imp = call("POST", azhe, "databases.importData", {
+    "tableId": cb_db["id"], "format": "csv", "content": "事項,完成\r\n剪片,是\r\n配音,否",
     "headerMap": {"事項": "task", "完成": "done"}})
 ok("CSV 勾選欄位（是/否）匯入成功", cb_imp["imported"] == 2 and cb_imp["failed"] == 0)
 cb_rows = call("GET", azhe, "databases.listRows", {"tableId": cb_db["id"]})

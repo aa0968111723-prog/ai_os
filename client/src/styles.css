@@ -484,3 +484,60 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 /* ── 工作台一體化：上下文摘要條——一眼看見 AI 全程共用哪些設定；chip 點了捲到對應卡 ── */
 .ctx-summary { display: flex; align-items: center; gap: 4px 6px; flex-wrap: wrap;
   font-size: var(--fs-12); color: var(--fg-secondary); margin: -4px 0 0; }
+
+/* ── 筆記排程：清單／月曆切換 段落鈕（seg）＋ 真實月曆網格 ＋ 知識地圖心智圖 ── */
+.seg { display: inline-flex; gap: 2px; padding: 2px; background: var(--muted); border-radius: 999px; }
+.seg button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent;
+  color: var(--fg-secondary); border-radius: 999px; padding: 5px 12px; font-size: var(--fs-13); font-weight: 600;
+  box-shadow: none; }
+.seg button:hover:not(:disabled) { background: var(--card2); color: var(--fg); }
+.seg button.on { background: var(--card); color: var(--fg); box-shadow: var(--e1); }
+
+/* 月曆：6×7 網格，週日起始；當日高亮、選中描邊 */
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-head { text-align: center; font-size: var(--fs-12); font-weight: 600; color: var(--fg-secondary); padding: 4px 0; }
+.cal-cell { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-height: 74px;
+  border: 1px solid var(--border-soft); border-radius: var(--r-8); background: var(--card2); padding: 5px 6px;
+  text-align: left; box-shadow: none; font-weight: 400; cursor: pointer; overflow: hidden; }
+.cal-cell:hover:not(:disabled) { border-color: var(--border-strong); background: var(--card2); }
+.cal-cell.out { background: transparent; opacity: 0.5; }
+.cal-cell.today { border-color: var(--primary-border); background: var(--primary-tint); }
+.cal-cell.sel { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.cal-daynum { font-size: var(--fs-12); font-weight: 600; color: var(--fg-secondary); }
+.cal-cell.today .cal-daynum { color: var(--primary-ink); }
+.cal-events { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cal-ev { font-size: 11px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--r-4); padding: 1px 5px; color: var(--fg); }
+.cal-ev-time { color: var(--primary-ink); font-family: var(--mono); font-weight: 600; }
+.cal-more { font-size: 11px; color: var(--fg-secondary); padding-left: 4px; }
+@media (max-width: 620px) {
+  .cal-cell { min-height: 56px; }
+  .cal-ev { font-size: 10px; }
+}
+
+/* 知識地圖（心智圖）：SVG 依容器寬縮放；節點分色（筆記藍・行程琥珀・專案赤陶・組層級灰） */
+.map-wrap { border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); overflow: hidden; }
+.map-svg { display: block; width: 100%; height: auto; }
+.map-edge { stroke: var(--border-strong); stroke-width: 1.2; }
+.map-edge.leaf { stroke: var(--border); stroke-dasharray: 3 3; }
+.map-node text { font-size: 13px; fill: var(--fg); font-family: var(--sans); pointer-events: none; }
+.map-node.group circle { fill: var(--primary-tint); stroke: var(--primary-border); stroke-width: 1.5; }
+.map-node.group text { font-weight: 700; fill: var(--primary-ink); font-size: 14px; }
+.map-node.project rect { fill: var(--card); stroke: var(--primary-border); stroke-width: 1.4; }
+.map-node.project text { fill: var(--primary-ink); font-weight: 600; }
+.map-node.bucket rect { fill: var(--card); stroke: var(--border-strong); stroke-width: 1.2; }
+.map-node.bucket text { fill: var(--fg-secondary); font-weight: 600; }
+.map-node.more rect { fill: transparent; stroke: var(--border); stroke-dasharray: 3 2; }
+.map-node.more text { fill: var(--fg-secondary); font-size: 12px; }
+.map-node.note circle { fill: var(--primary); stroke: #fff; stroke-width: 1; }
+.map-node.schedule circle { fill: var(--gold); stroke: #fff; stroke-width: 1; }
+.map-node.note text, .map-node.schedule text { font-size: 11px; fill: var(--fg-secondary); }
+.map-node.clickable:hover text { fill: var(--fg); }
+.map-node.clickable:hover circle { r: 8; }
+.map-node.project.clickable:hover rect, .map-node.more.clickable:hover rect { stroke: var(--primary); stroke-width: 1.8; }
+.map-legend { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-12); color: var(--fg-secondary); }
+.map-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
+.map-dot.note { background: var(--primary); }
+.map-dot.sched { background: var(--gold); }
+.map-dot.proj { background: var(--card); border: 1.4px solid var(--primary-border); }
+.map-dot.bucket { background: var(--card); border: 1.4px solid var(--border-strong); }
