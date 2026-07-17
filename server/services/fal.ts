@@ -70,7 +70,7 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
     const prompt = job?.prompt ?? "";
     if (job) mockJobs.delete(requestId);
     if (kind === "text") {
-      return { status: "done", resultText: `(假生成示範)真實模式將由模型產出。你的輸入:「${prompt.slice(0, 120)}」` };
+      return { status: "done", resultText: `(示範素材)正式模式將由模型實際產出。你的輸入:「${prompt.slice(0, 120)}」` };
     }
     return { status: "done", resultUrl: mockResultUrl(kind) };
   }
