@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, inArray, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
+import { assertReferenceImage } from "../services/referenceAsset";
 
 /**
  * 把選定角色組成注入生成提示詞的「定裝錨點」（給 generation 重用）。
@@ -23,9 +24,14 @@ export const charactersRouter = router({
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
     if (!project) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, project.groupId);
+    // 帶出參考圖網址（referenceUrl）：left join 素材表——素材進回收桶就回 null，卡片縮圖自動消失
     return db
-      .select()
+      .select({ ...getTableColumns(schema.characters), referenceUrl: schema.assets.url })
       .from(schema.characters)
+      .leftJoin(
+        schema.assets,
+        and(eq(schema.assets.id, schema.characters.referenceAssetId), isNull(schema.assets.deletedAt)),
+      )
       .where(eq(schema.characters.projectId, input.projectId))
       .orderBy(asc(schema.characters.createdAt));
   }),
@@ -45,12 +51,8 @@ export const charactersRouter = router({
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, project.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
-      // 跨組引用驗證：referenceAssetId 必須同組，否則能把別組定裝圖綁進本組角色（與 generationCore 對 sourceAssetId 一致）
-      if (input.referenceAssetId) {
-        const [refAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.referenceAssetId));
-        if (!refAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到參考素材" });
-        if (refAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "參考素材不屬於此專案的組" });
-      }
+      // 跨組引用驗證：referenceAssetId 必須同組且是圖片，否則能把別組定裝圖綁進本組角色
+      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, project.groupId);
       const [row] = await db
         .insert(schema.characters)
         .values({
@@ -81,12 +83,8 @@ export const charactersRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
-      // 跨組引用驗證：改綁 referenceAssetId 時同樣要同組（null＝清除引用，免驗）
-      if (input.referenceAssetId) {
-        const [refAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.referenceAssetId));
-        if (!refAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到參考素材" });
-        if (refAsset.groupId !== row.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "參考素材不屬於此角色的組" });
-      }
+      // 跨組引用驗證：改綁 referenceAssetId 時同樣要同組且是圖片（null＝清除引用，免驗）
+      if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId);
       const [updated] = await db
         .update(schema.characters)
         .set({

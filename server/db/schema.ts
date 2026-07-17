@@ -298,6 +298,8 @@ export const scenePresets = pgTable("scene_presets", {
   palette: text("palette").notNull(),
   /** 光線：光源方向／氛圍（注入視覺生成） */
   lighting: text("lighting"),
+  /** 場景參考圖（可選；上傳或從素材庫綁定，供比對與之後圖生圖用） */
+  referenceAssetId: uuid("reference_asset_id"),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
