@@ -129,10 +129,74 @@ export function humanizeAuditAction(action: string): string {
   return AUDIT_ACTION_LABELS[action] ?? action;
 }
 
+/**
+ * 操作分類（需求：可分類）。每筆操作依 action 的路由前綴（第一個「.」之前）歸到一大類，
+ * 讓組長／管理員能用「一句白話的類別」快速過濾，不必先懂 admin.invite 這種代碼。
+ * key 供前端 chip 的 value 與後端過濾用；label 是給人看的中文；prefixes 是所屬 tRPC 路由名。
+ * 順序＝畫面上類別排列順序（由帳號治理往協作、外部連線遞進）。
+ */
+export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefixes: readonly string[] }> = [
+  { key: "account", label: "帳號與團隊", prefixes: ["auth", "admin"] },
+  { key: "project", label: "專案與素材", prefixes: ["projects"] },
+  { key: "generation", label: "生成與點數", prefixes: ["generation", "quota"] },
+  { key: "storyboard", label: "分鏡與審批", prefixes: ["scenes", "approvals"] },
+  { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "teamAssistant", "workflows"] },
+  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters"] },
+  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule"] },
+  { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
+  { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
+  { key: "database", label: "自訂資料庫", prefixes: ["databases"] },
+  { key: "external", label: "外部連線（MCP）", prefixes: ["mcpTokens", "mcp"] },
+];
+
+const OTHER_CATEGORY = { key: "other", label: "其他" } as const;
+
+/** 依 action 前綴歸類；未知前綴落到「其他」而非壞掉（新路由上線也不會沒分類） */
+export function auditCategoryOf(action: string): { key: string; label: string } {
+  const prefix = action.split(".")[0];
+  const cat = AUDIT_CATEGORIES.find((c) => c.prefixes.includes(prefix));
+  return cat ? { key: cat.key, label: cat.label } : OTHER_CATEGORY;
+}
+
+/** 某分類 key 對應的所有路由前綴（後端過濾用）；未知 key 回空陣列 */
+export function auditPrefixesForCategory(key: string): readonly string[] {
+  return AUDIT_CATEGORIES.find((c) => c.key === key)?.prefixes ?? [];
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** 摘要裡值的長度上限：一行掃得完，完整內容本來就進不了審計（後端落庫前已截 200 字） */
 const VALUE_MAX = 48;
+
+/**
+ * 常見「代碼型」值 → 白話（讓不懂技術的夥伴也讀得懂）。
+ * 值先原樣比對，命中才換；沒命中就照原字串顯示（不硬翻，免得誤導）。
+ */
+const VALUE_LABELS: Record<string, string> = {
+  // 審批決定
+  approve: "通過",
+  approved: "通過",
+  reject: "退回",
+  rejected: "退回",
+  // 角色
+  admin: "管理員",
+  leader: "組長",
+  member: "組員",
+  // 問題回報類別／狀態
+  bug: "程式錯誤",
+  uiux: "介面體驗",
+  feature: "功能建議",
+  stuck: "卡關求助",
+  other: "其他",
+  open: "待處理",
+  in_progress: "處理中",
+  resolved: "已解決",
+  wontfix: "不予處理",
+};
+
+function labelValue(s: string): string {
+  return VALUE_LABELS[s] ?? s;
+}
 
 function fmtValue(v: unknown): string | null {
   if (typeof v === "boolean") return v ? "是" : "否";
@@ -140,7 +204,17 @@ function fmtValue(v: unknown): string | null {
   if (typeof v === "string") {
     if (!v.trim()) return null;
     if (UUID_RE.test(v)) return null; // uuid 對人沒資訊量，略過
-    return v.length > VALUE_MAX ? `${v.slice(0, VALUE_MAX)}…` : v;
+    const mapped = labelValue(v);
+    return mapped.length > VALUE_MAX ? `${mapped.slice(0, VALUE_MAX)}…` : mapped;
+  }
+  // 字串陣列（如世界觀 styles/tones、@提及）串成頓號清單
+  if (Array.isArray(v)) {
+    const items = v
+      .filter((x): x is string => typeof x === "string" && !!x.trim() && !UUID_RE.test(x))
+      .map(labelValue);
+    if (!items.length) return null;
+    const joined = items.join("、");
+    return joined.length > VALUE_MAX ? `${joined.slice(0, VALUE_MAX)}…` : joined;
   }
   return null;
 }
@@ -149,21 +223,35 @@ function fmtValue(v: unknown): string | null {
 const INPUT_FIELD_LABELS: Array<[key: string, label: string]> = [
   ["name", "名稱"],
   ["title", "標題"],
+  ["label", "名稱"],
   ["email", "Email"],
   ["role", "角色"],
+  ["groupRole", "組內角色"],
+  ["teamRole", "團隊角色"],
   ["decision", "決定"],
   ["status", "狀態"],
   ["reason", "理由"],
   ["note", "備註"],
+  ["comment", "說明"],
+  ["message", "訊息"],
+  ["body", "內容"],
   ["modelId", "模型"],
+  ["model", "模型"],
   ["kind", "類型"],
+  ["type", "類型"],
   ["category", "類別"],
   ["prompt", "提示詞"],
   ["text", "內容"],
   ["content", "內容"],
   ["question", "問題"],
+  ["styles", "風格"],
+  ["tones", "調性"],
+  ["mentions", "@提及"],
+  ["pages", "涉及頁面"],
   ["points", "點數"],
+  ["budgetPoints", "點數預算"],
   ["cost", "點數"],
+  ["threshold", "審批門檻"],
   ["archived", "封存"],
   ["locked", "鎖定"],
   ["pinned", "釘選"],
@@ -171,18 +259,25 @@ const INPUT_FIELD_LABELS: Array<[key: string, label: string]> = [
   ["active", "啟用"],
 ];
 
-/** 兜底用：把 JSON 裡的 uuid 縮成前 8 碼，讀者至少能對到「同一筆」而不被 36 碼淹沒 */
-function shortenUuids(json: string): string {
-  return json.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, (m) => `${m.slice(0, 8)}…`);
+const KNOWN_KEYS = new Set(INPUT_FIELD_LABELS.map(([k]) => k));
+
+/** 把巢狀的 worldview 攤平：{worldview:{styles,tones}} → 頂層加上 styles/tones，讓摘要抓得到 */
+function flattenInput(obj: Record<string, unknown>): Record<string, unknown> {
+  const wv = obj.worldview;
+  if (wv && typeof wv === "object" && !Array.isArray(wv)) {
+    return { ...obj, ...(wv as Record<string, unknown>) };
+  }
+  return obj;
 }
 
 /**
- * 輸入摘要人話化：優先抽已知鍵組成「標籤：值」清單；一個已知鍵都沒有時
- * 退回截短 JSON（uuid 縮 8 碼），確保任何輸入都至少有可讀的痕跡。
+ * 輸入摘要人話化（收合時顯示的一行）：抽已知鍵組成「標籤：值」清單。
+ * 只有 uuid／id 的操作（如刪除單一項目）回空字串——動作標題本身已說清楚，
+ * 不再塞技術代碼嚇到非技術夥伴；要追蹤 id 可展開「詳細」看。
  */
 export function summarizeAuditInput(input: unknown): string {
   if (!input || typeof input !== "object" || Array.isArray(input)) return "";
-  const obj = input as Record<string, unknown>;
+  const obj = flattenInput(input as Record<string, unknown>);
   const parts: string[] = [];
   for (const [key, label] of INPUT_FIELD_LABELS) {
     if (!(key in obj)) continue;
@@ -190,12 +285,64 @@ export function summarizeAuditInput(input: unknown): string {
     if (v != null) parts.push(`${label}：${v}`);
     if (parts.length >= 4) break; // 一行以內；再多就是雜訊
   }
-  if (parts.length) return parts.join("・");
-  try {
-    const s = shortenUuids(JSON.stringify(obj));
-    if (!s || s === "{}") return "";
+  return parts.join("・");
+}
+
+/** 詳細檢視用的一列：白話標籤＋白話值 */
+export type AuditDetailField = { label: string; value: string };
+
+/** 兜底：把 uuid 縮成前 8 碼，讀者至少能對到「同一筆」而不被 36 碼淹沒 */
+function shortenUuid(v: string): string {
+  return UUID_RE.test(v) ? `${v.slice(0, 8)}…` : v;
+}
+
+/** 把一個未知鍵的值盡量轉成可讀字串（詳細檢視用；uuid 縮 8 碼、陣列串頓號） */
+function fmtDetailValue(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "boolean") return v ? "是" : "否";
+  if (typeof v === "number") return String(v);
+  if (typeof v === "string") {
+    if (!v.trim()) return null;
+    const s = labelValue(shortenUuid(v));
     return s.length > 120 ? `${s.slice(0, 120)}…` : s;
-  } catch {
-    return "";
   }
+  if (Array.isArray(v)) {
+    const items = v.map((x) => (typeof x === "string" ? labelValue(shortenUuid(x)) : fmtDetailValue(x))).filter(Boolean);
+    return items.length ? (items.join("、").length > 120 ? `${items.join("、").slice(0, 120)}…` : items.join("、")) : null;
+  }
+  if (typeof v === "object") {
+    try {
+      const s = JSON.stringify(v).replace(/[0-9a-f-]{36}/gi, (m) => shortenUuid(m));
+      return s.length > 120 ? `${s.slice(0, 120)}…` : s;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * 詳細檢視（展開時顯示）：把整包輸入攤成「白話標籤：白話值」清單，讓非技術夥伴逐項看懂。
+ * 已知鍵用中文標籤並依顯示優先序排前面；其餘鍵原樣列在後面（uuid 縮短、代碼值翻白話）。
+ * 純顯示、不含敏感值（落庫前已脫敏）。
+ */
+export function describeAuditInput(input: unknown): AuditDetailField[] {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return [];
+  const obj = flattenInput(input as Record<string, unknown>);
+  const fields: AuditDetailField[] = [];
+  const usedKeys = new Set<string>();
+  // 先照已知鍵的優先序排
+  for (const [key, label] of INPUT_FIELD_LABELS) {
+    if (usedKeys.has(key) || !(key in obj)) continue;
+    usedKeys.add(key);
+    const v = fmtDetailValue(obj[key]);
+    if (v != null) fields.push({ label, value: v });
+  }
+  // 再補其餘未知鍵（worldview 這種容器本身略過，已攤平）
+  for (const [key, raw] of Object.entries(obj)) {
+    if (usedKeys.has(key) || KNOWN_KEYS.has(key) || key === "worldview") continue;
+    const v = fmtDetailValue(raw);
+    if (v != null) fields.push({ label: key, value: v });
+  }
+  return fields;
 }
