@@ -10,6 +10,7 @@ import { FeedbackPage } from "./pages/FeedbackPage";
 import { MyReportsPage } from "./pages/MyReportsPage";
 import { ModelsPage } from "./pages/ModelsPage";
 import { HelpPage } from "./pages/HelpPage";
+import { McpPage } from "./pages/McpPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
 import { PlannerPage } from "./pages/PlannerPage";
 import { DatabasesPage } from "./pages/DatabasesPage";
@@ -207,6 +208,7 @@ function UserMenu({
           <div className="menu-label" role="presentation">工作</div>
           <Link href="/planner" className="menu-item" role="menuitem" onClick={close}><Icon name="Clock" size={15} />筆記排程</Link>
           <Link href="/databases" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />資料庫</Link>
+          <Link href="/mcp" className="menu-item" role="menuitem" onClick={close}><Icon name="Sparkles" size={15} />接上外部 AI</Link>
           <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
           {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
           {/* 操作紀錄：組長（不含純組員）與管理員都看得到；管理員在「團隊管理」也有同一張卡 */}
@@ -324,6 +326,8 @@ export function App() {
               // /help 保持可達——等待被加入組的空檔正是最需要說明的時候
               <Switch>
                 <Route path="/help"><HelpPage /></Route>
+                {/* 金鑰管理與帳號無關組別，未分組也可先建立（連進來仍受組隔離限制） */}
+                <Route path="/mcp"><McpPage /></Route>
                 <Route>
                   <div className="empty-state" style={{ marginTop: "var(--sp-32)" }}>
                     <h3>你已成功加入 ✓ 還差一步</h3>
@@ -368,6 +372,7 @@ export function App() {
                 <Route path="/my-reports"><MyReportsPage /></Route>
                 <Route path="/models"><ModelsPage /></Route>
                 <Route path="/help"><HelpPage /></Route>
+                <Route path="/mcp"><McpPage /></Route>
                 <Route path="/downloads"><DownloadsPage /></Route>
                 <Route path="/planner"><PlannerPage groupId={activeGroupId} /></Route>
                 <Route path="/databases"><DatabasesPage groupId={activeGroupId} /></Route>
