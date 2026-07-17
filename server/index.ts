@@ -670,6 +670,43 @@ app.get("/api/selftest", async (req, res) => {
 // tRPC API
 app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
 
+// AI 專案助手「思考過程」串流（SSE）：與 tRPC assistant.ask 共用 runAssistantAsk 核心，
+// 差別是逐步把「思考中／正在查什麼／查到什麼」推給前端即時呈現，最後 done 帶最終回答＋可執行動作。
+// 前端串流失敗會自動退回 tRPC ask（見 ProjectAssistant），故此路由是加分體驗、非關鍵路徑。
+app.post("/api/assistant/ask", async (req, res) => {
+  const auth = await resolveSession(req);
+  if (!auth) return res.status(401).json({ error: "請先登入" });
+  const projectId = String(req.body?.projectId ?? "");
+  const message = String(req.body?.message ?? "").trim();
+  if (!UUID_RE.test(projectId) || !message || message.length > 1000) {
+    return res.status(400).json({ error: "參數不正確（需 projectId 與 1–1000 字的問題）" });
+  }
+  // SSE 標頭：關快取、關代理緩衝（Nginx X-Accel-Buffering），讓事件即時逐筆送達
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+  const sse = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  sse("open", { ok: true }); // 立刻開流，前端知道連上了（比等第一個 LLM 事件更即時）
+  try {
+    const { runAssistantAsk } = await import("./routers/assistant");
+    const result = await runAssistantAsk(
+      { projectId, message, userId: auth.user.id, isInGroup: (g) => auth.groups.some((x) => x.groupId === g) },
+      (e) => sse("step", e),
+    );
+    sse("done", result);
+  } catch (err) {
+    // runAssistantAsk 內部錯誤多已轉成 fallback 回答；會拋出的是節流/權限/找不到專案等守門（TRPCError 帶人話 message）
+    recordError("assistant:stream", err);
+    sse("error", { message: err instanceof Error ? err.message : "AI 助手暫時沒回應，請稍後再試" });
+  } finally {
+    res.end();
+  }
+});
+
 // ── 元件級回饋截圖（R23）：上傳（登入即可）＋依報告權限服務 ──
 app.post("/api/feedback/screenshot", upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
