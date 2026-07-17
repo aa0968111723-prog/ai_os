@@ -68,10 +68,23 @@ app.use(
     crossOriginResourcePolicy: { policy: "same-site" },
     hsts: { includeSubDomains: true },
     referrerPolicy: { policy: "no-referrer" },
+    // X-Frame-Options: DENY（與註解宣稱一致；CSP frame-ancestors 'none' 已擋，這是對舊瀏覽器的縱深防禦）
+    frameguard: { action: "deny" },
   }),
 );
 
 app.use(express.json({ limit: "2mb" }));
+
+// JSON 解析錯誤處理器：壞的 JSON body 交給 Express 預設錯誤處理器會回「整頁 HTML＋stack trace」
+// （免授權即可觸發的資訊洩漏，滲透實測確認）。這裡攔成乾淨的 JSON 回應、不外洩內部細節。
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const e = err as { type?: string } | undefined;
+  if (e && (e.type === "entity.parse.failed" || err instanceof SyntaxError)) {
+    return void res.status(400).json({ error: "請求內容不是合法的 JSON" });
+  }
+  if (e && e.type === "entity.too.large") return void res.status(413).json({ error: "請求內容過大（上限 2MB）" });
+  next(err);
+});
 
 // 健康檢查 — 純 HTTP，不碰 DB
 app.get("/api/health", (_req, res) => {

@@ -8,6 +8,7 @@
  * - 配額：每人（上傳者計）預設 5GB，settings.fileQuotaGb 可調（0＝不限）。
  */
 import { createRequire } from "node:module";
+import { lookup as dnsLookup } from "node:dns/promises";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { getSettings } from "./points";
@@ -116,10 +117,33 @@ export async function extractTextFromBuffer(mime: string, name: string, buf: Buf
 
 /* ── 網址匯入：Google／Notion／一般網頁 ─────────────── */
 
+/** 已解析出的 IP 是否落在私有/保留/loopback/link-local/中繼資料網段（v4＋v6）。 */
+export function ipIsPrivateOrReserved(ip: string): boolean {
+  const s = ip.toLowerCase().trim();
+  if (s.includes(":")) {
+    // IPv6
+    if (s === "::1" || s === "::") return true;
+    if (/^(fc|fd)/.test(s)) return true; // unique-local fc00::/7
+    if (/^fe[89ab]/.test(s)) return true; // link-local fe80::/10
+    if (s.startsWith("::ffff:")) return ipIsPrivateOrReserved(s.slice("::ffff:".length)); // v4-mapped
+    return false;
+  }
+  const m = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return (
+    a === 127 || a === 10 || a === 0 ||
+    (a === 192 && b === 168) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 169 && b === 254) || // link-local ＋雲端中繼資料 169.254.169.254
+    (a === 100 && b >= 64 && b <= 127) // CGNAT
+  );
+}
+
 /**
- * SSRF 防護：只允許 http(s)，擋 localhost 與私有網段的「字面位址」。
- * 已知限制：不做 DNS 解析比對（rebinding 不在內部工具的威脅模型；正式擴大部署時
- * 應改走出口代理白名單）。回錯誤訊息（人話）；null＝放行。
+ * SSRF 防護（字面位址層）：只允許 http(s)，擋 localhost 與私有網段的字面主機名/IP。
+ * 注意：這一層擋不了「公開 DNS 名稱解析到內網 IP」（如 nip.io）——那由下方 ssrfResolveGuard
+ * 做實際 DNS 解析後再驗證。回錯誤訊息（人話）；null＝放行。
  */
 export function ssrfGuardError(rawUrl: string): string | null {
   let u: URL;
@@ -155,6 +179,38 @@ export function ssrfGuardError(rawUrl: string): string | null {
     if (host === "::1" || host === "::" || /^(fc|fd|fe8|fe9|fea|feb)/i.test(host) || host.startsWith("::ffff:")) {
       return "不能匯入內部網址";
     }
+  }
+  return null;
+}
+
+/**
+ * SSRF 防護（DNS 解析層）：先過字面守衛，再「實際解析主機名」並驗證每一個解析出的 A/AAAA IP，
+ * 任一落在私有/保留網段即擋——關掉「公開 DNS 名稱指向內網」的繞過（如 127.0.0.1.nip.io、
+ * 169.254.169.254.nip.io，滲透實測確認可繞過字面守衛打雲端中繼資料）。fetchImport 每一跳（含重導向）
+ * 都呼叫本函式，故 30x 導向內網名稱亦被擋。回錯誤訊息；null＝放行。
+ * 註：仍有極窄的 DNS-rebinding TOCTOU（解析後到連線間 IP 變動）——完整封堵需釘住已解析 IP 連線，
+ * 此處先擋掉實務上的名稱繞過（主要威脅）。
+ */
+export async function ssrfResolveGuard(rawUrl: string): Promise<string | null> {
+  const literal = ssrfGuardError(rawUrl);
+  if (literal) return literal;
+  let host: string;
+  try {
+    host = new URL(rawUrl).hostname.replace(/^\[|\]$/g, "");
+  } catch {
+    return "網址格式不正確";
+  }
+  // 已是字面 IP 的情況，ssrfGuardError 已驗過，免再解析
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return null;
+  let addrs: Array<{ address: string }>;
+  try {
+    addrs = await dnsLookup(host, { all: true });
+  } catch {
+    return "無法解析網址主機（DNS 查詢失敗）";
+  }
+  if (!addrs.length) return "無法解析網址主機";
+  for (const a of addrs) {
+    if (ipIsPrivateOrReserved(a.address)) return "網址主機解析到內部位址——已擋下";
   }
   return null;
 }
@@ -313,7 +369,8 @@ async function readBodyCapped(res: Response, max: number): Promise<Buffer> {
 export async function fetchImport(url: string): Promise<{ buf: Buffer; mime: string; finalUrl: string }> {
   let current = url;
   for (let hop = 0; hop < 5; hop++) {
-    const guard = ssrfGuardError(current);
+    // 每一跳都做「DNS 解析後」的守衛：字面 IP＋解析出的 IP 都要非內網，擋掉 nip.io 類名稱繞過
+    const guard = await ssrfResolveGuard(current);
     if (guard) throw new Error(hop === 0 ? guard : "來源網址重導向到內部位址——已擋下");
     const res = await proxyFetch(current, { timeoutMs: 25_000, redirect: "manual" });
     if (res.status >= 300 && res.status < 400) {

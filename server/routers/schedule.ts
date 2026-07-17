@@ -52,6 +52,11 @@ export const scheduleRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const row = await getItemChecked(ctx.auth, input.id);
+      // 與 remove 同守衛：只有建立者本人或組長以上可改——否則一般組員可竄改他人（含組長）建立的組行程
+      const role = requireGroup(ctx.auth, row.groupId);
+      if (row.createdBy !== ctx.auth.user.id && role === "member") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以修改行程" });
+      }
       const patch: Partial<typeof schema.scheduleItems.$inferInsert> = {};
       if (input.title !== undefined) patch.title = input.title.trim();
       if (input.startsAt !== undefined) patch.startsAt = new Date(input.startsAt);
