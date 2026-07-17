@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
@@ -362,11 +362,46 @@ const AUDIT_CAT_STYLE: Record<string, { background: string; color: string; borde
 
 type AuditRowData = inferRouterOutputs<AppRouter>["audit"]["list"]["items"][number];
 
+/** 逐列「就地下鑽」的回呼：點歸屬即把操作紀錄縮到那位組員／那個專案／那一組（分組員・分專案・分組別） */
+type AuditDrill = {
+  actor: (id: string, name: string) => void;
+  project: (id: string, title: string) => void;
+  group: (id: string) => void;
+};
+
+/** 已套用的下鑽過濾膠囊（組員／專案）：帶 X 一點即清，清楚示意「目前縮在這個維度」 */
+const activeFilterChip: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  padding: "2px 8px",
+  fontSize: 11,
+  borderRadius: 999,
+  cursor: "pointer",
+  border: "1px solid var(--primary)",
+  background: "var(--primary-tint)",
+  color: "var(--primary-ink)",
+};
+
+/** 下鑽用的「可點歸屬」樣式：看得出可點、但安靜不搶戲（沿用 hint 色，底線示意可點） */
+const DRILL_LINK: CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  font: "inherit",
+  color: "inherit",
+  cursor: "pointer",
+  textDecoration: "underline",
+  textUnderlineOffset: 2,
+  textDecorationColor: "var(--border-soft)",
+};
+
 /**
  * 一列操作紀錄：白話標題＋分類標籤＋歸屬（組／專案）＋可展開的逐項細節。
  * 展開狀態各列獨立（每列自己 useState），不會互相牽動。
+ * 歸屬（組員／團隊・組別／專案）皆可點：一點就把整份紀錄縮到那個維度，非技術夥伴不必先懂過濾器。
  */
-function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
+function AuditLogRow({ r, first, drill }: { r: AuditRowData; first: boolean; drill: AuditDrill }) {
   const [open, setOpen] = useState(false);
   const cat = auditCategoryOf(r.action);
   const summary = summarizeAuditInput(r.input);
@@ -383,7 +418,15 @@ function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
         </span>
         {/* 分類標籤：一眼分辨這筆屬於哪一類（帳號／生成／分鏡…） */}
         <span className="pill" style={{ ...catStyle, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>{cat.label}</span>
-        <b>{r.actorName}</b>
+        {/* 操作者：點名字＝只看這位夥伴做的事（分組員） */}
+        <button
+          type="button"
+          onClick={() => drill.actor(r.actorId, r.actorName)}
+          style={{ ...DRILL_LINK, fontWeight: 700 }}
+          title={`只看 ${r.actorName} 的操作`}
+        >
+          {r.actorName}
+        </button>
         {/* 操作者角色：一眼看出是組長還是組員做的（分組員層級） */}
         {r.actorRole && (
           <span className="hint" style={{ fontSize: 11 }}>（{r.actorRole === "leader" ? "組長" : "組員"}）</span>
@@ -392,15 +435,36 @@ function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
         {!r.ok && <span style={{ color: "var(--danger-ink)", fontSize: 11, fontWeight: 600 }}>（失敗）</span>}
         <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</span>
       </div>
-      {/* 歸屬：這筆動到哪個團隊・組別／哪個專案（分團隊組別；非技術夥伴不用去對 uuid） */}
+      {/* 歸屬：這筆動到哪個團隊・組別／哪個專案（分團隊組別；非技術夥伴不用去對 uuid）。
+          兩者皆可點就地下鑽：點組別＝只看那一組、點專案＝只看那個專案。 */}
       {(r.teamName || r.groupName || r.projectTitle) && (
         <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {(r.teamName || r.groupName) && (
+          {(r.teamName || r.groupName) && r.groupId && (
+            <button
+              type="button"
+              onClick={() => drill.group(r.groupId!)}
+              style={{ ...DRILL_LINK, display: "inline-flex", alignItems: "center", gap: 3 }}
+              title="只看這一組的操作"
+            >
+              <Icon name="User" size={11} />{[r.teamName, r.groupName].filter(Boolean).join("・")}
+            </button>
+          )}
+          {/* groupId 已解析不到但仍有組名時（理論上少見）退回純文字，不硬給一個點不動的連結 */}
+          {(r.teamName || r.groupName) && !r.groupId && (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
               <Icon name="User" size={11} />{[r.teamName, r.groupName].filter(Boolean).join("・")}
             </span>
           )}
-          {r.projectTitle && <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}><Icon name="FileText" size={11} />{r.projectTitle}</span>}
+          {r.projectTitle && r.projectId && (
+            <button
+              type="button"
+              onClick={() => drill.project(r.projectId!, r.projectTitle!)}
+              style={{ ...DRILL_LINK, display: "inline-flex", alignItems: "center", gap: 3 }}
+              title="只看這個專案的操作"
+            >
+              <Icon name="FileText" size={11} />{r.projectTitle}
+            </button>
+          )}
         </div>
       )}
       {summary && (
@@ -452,9 +516,24 @@ function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
 export function AuditLogCard() {
   // 分類過濾（chip）：null＝全部
   const [category, setCategory] = useState<string | null>(null);
-  // 依組別過濾（下拉）：""＝所有可見組
+  // 四個歸屬維度的過濾（分團隊／組別／組員／專案）：""／null＝不限。
+  // 團隊、組別用下拉（來源＝可見範圍 scope）；組員、專案用逐列「就地下鑽」帶入（另存名稱只為了顯示可清除的膠囊）。
+  const [teamId, setTeamId] = useState("");
   const [groupId, setGroupId] = useState("");
+  const [actor, setActor] = useState<{ id: string; name: string } | null>(null);
+  const [project, setProject] = useState<{ id: string; title: string } | null>(null);
   const scope = trpc.directory.scope.useQuery();
+  // 可見團隊清單（去重）：給「分團隊」下拉；一個團隊時不顯示（沒得分）
+  const teams = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const g of scope.data?.groups ?? []) if (!seen.has(g.teamId)) seen.set(g.teamId, g.teamName);
+    return [...seen].map(([id, name]) => ({ id, name }));
+  }, [scope.data]);
+  // 組別下拉：選了團隊就只列該團隊的組（分組別跟著分團隊收斂，不會列出別團隊的組）
+  const groupOptions = useMemo(
+    () => (scope.data?.groups ?? []).filter((g) => !teamId || g.teamId === teamId),
+    [scope.data, teamId],
+  );
   // action 關鍵字前端 debounce 後才帶進查詢，避免每敲一鍵就打一次 API
   const [actionInput, setActionInput] = useState("");
   const [debouncedAction, setDebouncedAction] = useState("");
@@ -463,11 +542,25 @@ export function AuditLogCard() {
     return () => clearTimeout(t);
   }, [actionInput]);
   const audit = trpc.audit.list.useInfiniteQuery(
-    { action: debouncedAction.trim() || undefined, category: category ?? undefined, groupId: groupId || undefined, limit: 30 },
+    {
+      action: debouncedAction.trim() || undefined,
+      category: category ?? undefined,
+      teamId: teamId || undefined,
+      groupId: groupId || undefined,
+      actorId: actor?.id,
+      projectId: project?.id,
+      limit: 30,
+    },
     { getNextPageParam: (last) => last.nextCursor ?? undefined },
   );
   const rows = audit.data?.pages.flatMap((p) => p.items) ?? [];
-  const filtering = !!debouncedAction.trim() || !!category || !!groupId;
+  const filtering = !!debouncedAction.trim() || !!category || !!teamId || !!groupId || !!actor || !!project;
+  // 就地下鑽：點某位組員／某個專案／某一組即把整份紀錄縮到那個維度（AuditLogRow 呼叫）
+  const drill: AuditDrill = {
+    actor: (id, name) => setActor({ id, name }),
+    project: (id, title) => setProject({ id, title }),
+    group: (id) => setGroupId(id),
+  };
   const chip = (active: boolean): CSSProperties => ({
     padding: "3px 10px",
     fontSize: 12,
@@ -491,19 +584,59 @@ export function AuditLogCard() {
           </button>
         ))}
       </div>
-      {/* 依組別過濾：一個團隊/多組時，切到單一組別看那組的操作流水（分團隊組別） */}
-      {(scope.data?.groups.length ?? 0) > 1 && (
-        <select
-          value={groupId}
-          onChange={(e) => setGroupId(e.target.value)}
-          aria-label="依組別過濾操作紀錄"
-          style={{ marginBottom: 8, width: "100%" }}
-        >
-          <option value="">所有可見組別</option>
-          {scope.data?.groups.map((g) => (
-            <option key={g.groupId} value={g.groupId}>{g.teamName}・{g.groupName}</option>
-          ))}
-        </select>
+      {/* 分團隊／分組別：跨多團隊時先選團隊（下拉自動收斂到該團隊的組），再選組看那組的流水 */}
+      {((scope.data?.groups.length ?? 0) > 1 || teams.length > 1) && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+          {teams.length > 1 && (
+            <select
+              value={teamId}
+              onChange={(e) => {
+                const nextTeam = e.target.value;
+                setTeamId(nextTeam);
+                // 換團隊後，若目前選的組不屬於新團隊就清掉，避免出現「團隊 A・組別屬 B」的矛盾條件
+                if (nextTeam && groupId && !(scope.data?.groups ?? []).some((g) => g.groupId === groupId && g.teamId === nextTeam)) {
+                  setGroupId("");
+                }
+              }}
+              aria-label="依團隊過濾操作紀錄"
+              style={{ flex: "1 1 200px" }}
+            >
+              <option value="">所有可見團隊</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+          {groupOptions.length > 1 && (
+            <select
+              value={groupId}
+              onChange={(e) => setGroupId(e.target.value)}
+              aria-label="依組別過濾操作紀錄"
+              style={{ flex: "1 1 200px" }}
+            >
+              <option value="">所有可見組別</option>
+              {groupOptions.map((g) => (
+                <option key={g.groupId} value={g.groupId}>{teams.length > 1 ? g.groupName : `${g.teamName}・${g.groupName}`}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+      {/* 分組員／分專案：這兩維由逐列「就地下鑽」帶入，選定後在此顯示可清除的膠囊，一眼看出目前縮在誰／哪個專案 */}
+      {(actor || project) && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+          <span className="hint" style={{ fontSize: 11 }}>目前只看：</span>
+          {actor && (
+            <button type="button" onClick={() => setActor(null)} style={activeFilterChip} aria-label={`清除組員過濾（${actor.name}）`}>
+              <Icon name="User" size={11} />組員：{actor.name}<Icon name="X" size={11} />
+            </button>
+          )}
+          {project && (
+            <button type="button" onClick={() => setProject(null)} style={activeFilterChip} aria-label={`清除專案過濾（${project.title}）`}>
+              <Icon name="FileText" size={11} />專案：{project.title}<Icon name="X" size={11} />
+            </button>
+          )}
+        </div>
       )}
       <input
         type="search"
@@ -531,7 +664,7 @@ export function AuditLogCard() {
       ) : (
         <>
           {rows.map((r, i) => (
-            <AuditLogRow key={r.id} r={r} first={i === 0} />
+            <AuditLogRow key={r.id} r={r} first={i === 0} drill={drill} />
           ))}
           {audit.hasNextPage && (
             <div style={{ textAlign: "center", marginTop: 10 }}>
