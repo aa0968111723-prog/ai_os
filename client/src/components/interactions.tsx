@@ -2,6 +2,7 @@ import {
   useEffect, useId, useRef, useState,
   type ReactNode, type CSSProperties, type RefObject, type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
+import { Icon } from "./Icon";
 
 /**
  * 共用互動基元（第二輪：把原生 window.confirm/prompt/alert 與無漫遊 radiogroup
@@ -205,6 +206,55 @@ export function ConfirmButton({
     >
       <span className="hint" style={{ margin: 0 }}>{message || title || "確定嗎？"}</span>
       {buttons}
+    </span>
+  );
+}
+
+/** 白話小提示：術語旁的「?」小圖示。桌面 hover 看 title；點擊/鍵盤展開就地氣泡——
+ * 觸控裝置沒有 hover，原生 title 永遠不會出現。共用元件（原在 ProjectPage，
+ * 因 SceneList 等元件的標題也需要而移到這裡）。 */
+export function HelpTip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}>
+      <button
+        type="button"
+        aria-label={open ? "收合提示" : `顯示提示：${text}`}
+        aria-expanded={open}
+        title={text}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          marginLeft: 6, padding: 2, minHeight: 0, color: "var(--primary)", cursor: "help",
+          background: "none", border: "none", boxShadow: "none", userSelect: "none", lineHeight: 1,
+        }}
+      >
+        <Icon name="HelpCircle" size={14} />
+      </button>
+      {open && (
+        <span
+          role="status"
+          style={{
+            position: "absolute", top: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)",
+            zIndex: 45, width: "max-content", maxWidth: "min(280px, 78vw)",
+            background: "var(--popover)", border: "1px solid var(--border)", borderRadius: "var(--r-8)",
+            boxShadow: "var(--e3)", padding: "8px 12px",
+            fontSize: "var(--fs-13)", fontWeight: 400, lineHeight: 1.6, color: "var(--fg)",
+            whiteSpace: "normal", textAlign: "left",
+          }}
+        >
+          {text}
+        </span>
+      )}
     </span>
   );
 }

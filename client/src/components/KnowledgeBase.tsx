@@ -194,7 +194,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
           {/* 即時字數：長開示逼近 4 萬字是主要情境，不能等按下「加入」才被上限打回 */}
           <CharCount value={content} max={MAX_CONTENT_CHARS} />
           <p className="hint" style={{ marginTop: 4 }}>（草稿自動保留，重整不會不見）</p>
-          <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
+          <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button
               className="primary"
               disabled={!title.trim() || !content.trim() || add.isPending}
@@ -203,6 +203,10 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
               {add.isPending ? "加入中…" : "加入知識庫"}
             </button>
             <button onClick={() => setOpen(false)}>取消</button>
+            {/* 沉默 disable 說明：講清楚還差哪個欄位（比照生成鈕 disableReason 模式） */}
+            {!add.isPending && (!title.trim() || !content.trim()) && (
+              <span className="hint">{!title.trim() ? "先填標題" : "先貼內容"}</span>
+            )}
           </div>
           {add.error && <p className="error">{add.error.message}</p>}
 
@@ -289,26 +293,30 @@ function KnowledgeRow({
   const update = trpc.knowledge.update.useMutation({
     onSuccess: () => {
       utils.knowledge.list.invalidate({ projectId });
+      // 儲存成功才清編輯草稿（閉包引用下方宣告的 clear 函式，執行時已初始化完畢）
+      clearEditTitleDraft();
+      clearEditContentDraft();
       setEditing(false);
     },
   });
 
-  const [editTitle, setEditTitle] = useState(k.title);
-  const [editContent, setEditContent] = useState("");
-  // 全文抓回來後填入編輯框（只填一次，避免覆蓋使用者正在改的字）。
+  // 編輯中的長文也走本地草稿（與新增表單同一套）：切頁/重整/手機被回收都不掉字；儲存成功才清
+  const [editTitle, setEditTitle, clearEditTitleDraft] = useLocalDraft(`knowledge-edit-title-${k.id}`, "");
+  const [editContent, setEditContent, clearEditContentDraft] = useLocalDraft(`knowledge-edit-content-${k.id}`, "");
+  // 全文抓回來後填入編輯框（只填一次，且只填「沒有草稿」的欄位——上次改到一半的字比舊值優先）。
   const seededRef = useRef(false);
   useEffect(() => {
     if (editing && full.data && !seededRef.current) {
       seededRef.current = true;
-      setEditTitle(full.data.title);
-      setEditContent(full.data.content);
+      if (!editTitle) setEditTitle(full.data.title);
+      if (!editContent) setEditContent(full.data.content);
     }
+    // editTitle/editContent 刻意不入依賴：只在全文剛到時播種一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing, full.data]);
 
   const openEdit = () => {
     seededRef.current = false;
-    setEditTitle(k.title);
-    setEditContent("");
     setEditing(true);
   };
   const cancelEdit = () => {

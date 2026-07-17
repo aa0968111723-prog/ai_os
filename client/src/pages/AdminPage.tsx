@@ -80,7 +80,7 @@ function GroupQuotaRow({ group }: { group: { id: string; name: string } }) {
     <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
       <label className="hint" htmlFor={inputId} style={{ width: 120, margin: 0 }}>{group.name} 週額度</label>
       {usage.isLoading ? (
-        <span className="hint">載入中…</span>
+        <span className="skeleton" style={{ display: "inline-block", height: 40, width: 120, borderRadius: "var(--r-12)" }} aria-hidden="true" />
       ) : (
         // defaultValue 等資料到位才掛載（上方 isLoading 守門），避免綁到未載入的空值而顯示不出現值
         <input
@@ -141,8 +141,9 @@ function MemberChip({ groupId, groupName, member, canResetPassword }: {
         <button style={btn} disabled={pending} onClick={() => setRole.mutate({ groupId, userId, role: isLeader ? "member" : "leader" })}>
           {isLeader ? "設為組員" : "設為組長"}
         </button>
+        {/* 破壞性/次危險動作補全站慣例的 --danger-ink：掃視成員列時能一眼與「設為組長」等中性鈕區分 */}
         <ConfirmButton
-          triggerStyle={btn}
+          triggerStyle={{ ...btn, color: "var(--danger-ink)" }}
           disabled={pending}
           message={`把 ${member.name} 移出「${groupName}」？之後隨時可以再邀請回來。`}
           onConfirm={() => removeMember.mutate({ groupId, userId })}
@@ -151,7 +152,7 @@ function MemberChip({ groupId, groupName, member, canResetPassword }: {
         </ConfirmButton>
         {canResetPassword && (
           <ConfirmButton
-            triggerStyle={btn}
+            triggerStyle={{ ...btn, color: "var(--danger-ink)" }}
             disabled={pending}
             message={`重設 ${member.name} 的密碼？他會立刻被登出，要用新的臨時密碼重新登入。`}
             onConfirm={() => resetPassword.mutate({ userId })}
@@ -192,7 +193,7 @@ function CreateGroupRow({ teamId }: { teamId: string }) {
       <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
         <input aria-label="新組名稱" placeholder="新組名稱（例：文宣組）" value={name} onChange={(e) => setName(e.target.value)} />
         <button disabled={!name.trim() || createGroup.isPending} onClick={() => createGroup.mutate({ teamId, name: name.trim() })}>
-          {createGroup.isPending ? "建立中…" : "＋建組"}
+          {createGroup.isPending ? "建立中…" : <><Icon name="Plus" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />建組</>}
         </button>
       </div>
       {createGroup.error && <p className="error">建組失敗：{createGroup.error.message}</p>}
@@ -217,7 +218,7 @@ function CreateTeamCard() {
       <input id="new-team-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：影音創作團隊" />
       <div style={{ marginTop: 12 }}>
         <button className="primary" disabled={!name.trim() || createTeam.isPending} onClick={() => createTeam.mutate({ name: name.trim() })}>
-          {createTeam.isPending ? "建立中…" : "＋建立團隊"}
+          {createTeam.isPending ? "建立中…" : <><Icon name="Plus" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />建立團隊</>}
         </button>
       </div>
       {createTeam.error && <p className="error">{createTeam.error.message}</p>}
@@ -252,7 +253,7 @@ function SelfTestCard() {
   return (
     <div className="card">
       <h2>系統自檢</h2>
-      <p className="hint">部署後按一下，全部 ✅ 才算就緒（資料庫/模型目錄/點數/邀請/生成/交付）。</p>
+      <p className="hint">部署後按一下，全部通過才算就緒（資料庫/模型目錄/點數/邀請/生成/交付）。</p>
       <button className="primary" disabled={running} onClick={run}>{running ? "檢查中…" : "跑系統自檢"}</button>
       {errMsg && <p className="error" role="alert" style={{ marginTop: 10 }}>{errMsg}</p>}
       {result && (
@@ -324,7 +325,12 @@ function AuditLogCard() {
           {rows.map((r, i) => (
             <div key={r.id} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", padding: "6px 0", fontSize: 13, marginTop: i === 0 ? 8 : 0 }}>
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                <span aria-label={r.ok ? "成功" : "失敗"}>{r.ok ? "✅" : "❌"}</span>
+                {/* 與正上方系統自檢卡同源：單色 <Icon>＋語意 ink 色，不用滿彩 emoji（跨平台渲染也一致） */}
+                <span aria-label={r.ok ? "成功" : "失敗"} style={{ display: "inline-flex", alignItems: "center" }}>
+                  {r.ok
+                    ? <Icon name="CheckCircle2" size={14} style={{ color: "var(--success-ink)" }} />
+                    : <Icon name="XCircle" size={14} style={{ color: "var(--danger-ink)" }} />}
+                </span>
                 <b>{r.actorName}</b>
                 <span>{humanizeAuditAction(r.action)}</span>
                 {/* 原始代碼保留小字：篩選框吃的是代碼關鍵字，對得上才好查 */}
@@ -387,7 +393,9 @@ function ConsumptionMonitorCard() {
           <div style={{ marginTop: 8, color: data.alert ? "var(--danger-ink)" : undefined }}>
             <b style={{ fontSize: 24, fontFamily: "var(--mono)" }}>今日 {data.todayPoints.toLocaleString()} 點</b>
             {data.alert ? (
-              <div role="alert" style={{ fontWeight: 600, marginTop: 2 }}>⚠ 今日消耗異常（7 日均值 {data.avg7}）</div>
+              <div role="alert" style={{ fontWeight: 600, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                <Icon name="TriangleAlert" size={14} />今日消耗異常（7 日均值 {data.avg7}）
+              </div>
             ) : (
               <span className="hint" style={{ marginLeft: 8 }}>7 日均值 {data.avg7}</span>
             )}

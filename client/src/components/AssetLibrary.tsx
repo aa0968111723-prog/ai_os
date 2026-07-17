@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
-import { ConfirmButton } from "./interactions";
+import { ConfirmButton, useRovingRadio } from "./interactions";
 import { discussInMessages } from "../discuss";
 
 function fmtSize(bytes?: number | null): string {
@@ -180,6 +180,11 @@ export function AssetLibrary({
   const filterActive = kindFilter !== "all" || onlySourceable || search.trim() !== "";
   const smallBtn = { padding: "2px 10px", fontSize: 11 } as const;
 
+  // radiogroup 的正規鍵盤模式（roving tabindex）：方向鍵在群組內漫遊、只有選中項進 Tab 序——
+  // 之前每顆 radio 都 tabIndex=0 且方向鍵無作用，報讀器宣告「用方向鍵選擇」卻按了沒反應
+  const visibleKindFilters = KIND_FILTERS.filter((f) => f.key === "all" || (kindCounts[f.key] ?? 0) > 0);
+  const kindRoving = useRovingRadio(visibleKindFilters.map((f) => f.key), kindFilter, setKindFilter);
+
   return (
     <section className="card">
       <h2>素材庫（上傳參考素材・生成成品自動入庫）</h2>
@@ -224,18 +229,17 @@ export function AssetLibrary({
         <>
           {/* 工具列：數量統計 · 種類篩選 chips · 搜尋 · 排序 */}
           <div data-fb="素材工具列" style={{ margin: "12px 0 4px", display: "flex", flexDirection: "column", gap: 8 }}>
-            <div role="radiogroup" aria-label="依種類篩選素材" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-              {KIND_FILTERS.map((f) => {
-                // 全部一定顯示；其餘只在該類有素材時才出現，避免點了空空的
+            <div role="radiogroup" aria-label="依種類篩選素材" {...kindRoving.groupProps} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+              {/* 全部一定顯示；其餘只在該類有素材時才出現（visibleKindFilters 已過濾），避免點了空空的 */}
+              {visibleKindFilters.map((f, idx) => {
                 const count = f.key === "all" ? total : kindCounts[f.key] ?? 0;
-                if (f.key !== "all" && count === 0) return null;
                 const on = kindFilter === f.key;
                 return (
                   <span
                     key={f.key}
                     role="radio"
                     aria-checked={on}
-                    tabIndex={0}
+                    {...kindRoving.itemProps(idx)}
                     className={`chip pick ${on ? "on" : ""}`}
                     onClick={() => setKindFilter(f.key)}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setKindFilter(f.key); } }}

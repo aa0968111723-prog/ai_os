@@ -101,8 +101,15 @@ export function Launchpad({ groupId }: { groupId: string }) {
     }
     setFirstRunDismissed(true);
   };
-  const hasNoProjects = projects.data !== undefined && projects.data.length === 0;
-  const showFirstRun = !!groupId && hasNoProjects && !firstRunDismissed;
+  // 導覽門檻是「這位使用者」而非「整個組」：被邀進活躍組的新人（最常見的新人路徑）
+  // 面對的是一堆陌生人專案卡，比空組的人更需要五階段說明與免費範例沙盒。
+  // 判準＝在此組尚無自己建立的專案；已看過/略過（per 裝置記憶）就不再彈。
+  const myUserId = me.data?.user.id;
+  const hasOwnProject =
+    projects.data !== undefined && myUserId != null &&
+    projects.data.some((p) => p.ownerId === myUserId);
+  const showFirstRun =
+    !!groupId && projects.data !== undefined && myUserId != null && !hasOwnProject && !firstRunDismissed;
 
   useEffect(() => {
     if (kindOptions.length && !kindOptions.some((o) => o.value === kind)) setKind(kindOptions[0].value);

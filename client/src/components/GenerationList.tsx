@@ -58,8 +58,9 @@ const STATUS_LABEL: Record<string, string> = {
   running: "生成中…",
   done: "完成 ✓",
   failed: "失敗（已退點）",
-  awaiting_approval: "⏳ 待組長核准",
-  rejected: "⛔ 已駁回",
+  // 不用滿彩 emoji（⏳/⛔）：pill 配色已承載語意，emoji 跨平台渲染不一且違反單色圖示語彙
+  awaiting_approval: "待組長核准",
+  rejected: "已駁回",
 };
 
 /** 成本審核的兩個新狀態沒有專屬 .pill 配色——借語意最近的既有 class（待核准＝queued 金、已駁回＝failed 紅） */
@@ -502,7 +503,7 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
               ) : (
                 <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", fontSize: 12 }} disabled={addScene.isPending}
                   onClick={() => addScene.mutate({ generationId: g.id })}>
-                  ＋加入分鏡
+                  <Icon name="Plus" size={13} />加入分鏡
                 </button>
               )
             )}
