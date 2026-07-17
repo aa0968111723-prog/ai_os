@@ -58,7 +58,10 @@ export function parseDelimited(text: string, delimiter: string): string[][] {
       }
       cell += c; i++; continue;
     }
-    if (c === '"') { inQuotes = true; i++; continue; }
+    // 只有在「欄位開頭」（cell 為空）才把 " 當引號模式起點——RFC 4180 寬容解析：
+    // 欄位中途的裸引號（如 24" pipe、內文引號）視為普通字元原樣保留，
+    // 不再無條件切入引號模式而吞併後續的分隔符/換行/整條列（資料靜默錯位/遺失）。
+    if (c === '"' && cell === "") { inQuotes = true; i++; continue; }
     if (c === delimiter) { pushCell(); i++; continue; }
     if (c === "\r") { i++; continue; } // CR 併入 LF 處理
     if (c === "\n") { pushRow(); i++; continue; }
@@ -86,9 +89,11 @@ export function delimitedToRowObjects(text: string, delimiter: string, headerMap
   if (grid.length < 2) return []; // 只有表頭或空
   const header = grid[0].map((h) => h.trim());
   const cols: Array<{ index: number; key: string }> = [];
+  const takenHeaders = new Set<string>();
   header.forEach((h, idx) => {
     const key = headerMap[h];
-    if (key) cols.push({ index: idx, key });
+    // 重複表頭只採第一欄（與 shared/tabular.ts parseTabular 的去重一致；否則預覽取首欄、匯入取末欄會不一致）
+    if (key && !takenHeaders.has(h)) { cols.push({ index: idx, key }); takenHeaders.add(h); }
   });
   const out: Array<{ data: Record<string, string>; line: number }> = [];
   for (let r = 1; r < grid.length; r++) {

@@ -111,7 +111,9 @@ function parseJson(text: string): TabularParse {
     const values: Record<string, string> = {};
     for (const key of Object.keys(obj)) {
       if (!seen.has(key)) { seen.add(key); headers.push(key); }
-      values[key] = flattenJsonValue(obj[key]);
+      // 去前後空白，與分隔類（CSV/TSV 每格皆 .trim()）一致——否則同一份資料 JSON 版的
+      // " done"／"2026-01-01 " 之類尾空白值會過不了 select/date 驗證，CSV 版卻通過（格式相依的意外拒絕）。
+      values[key] = flattenJsonValue(obj[key]).trim();
     }
     records.push({ values, line: i + 1 }); // JSON 無行號，line＝第幾筆物件
   });

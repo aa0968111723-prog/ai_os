@@ -42,6 +42,19 @@ describe("validateRowData", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain("姓名");
   });
+  it("number 只收十進位字串：擋 0x/0b/0o 進位與千分位，收整數/小數/科學記號/前後空白", () => {
+    // 以前 Number("0x10")===16 會把代碼型字串靜默變成數字——現在擋掉
+    for (const bad of ["0x10", "0b10", "0o17", "1,234", "1_000", "abc", "Infinity", "NaN"]) {
+      expect(validateRowData(fields, { name: "a", age: bad }).ok, `age=${bad}`).toBe(false);
+    }
+    for (const [good, expected] of [["28", 28], [" 12 ", 12], ["-3.5", -3.5], ["1e3", 1000], [".5", 0.5]] as const) {
+      const r = validateRowData(fields, { name: "a", age: good });
+      expect(r.ok, `age=${good}`).toBe(true);
+      if (r.ok) expect(r.data.age).toBe(expected);
+    }
+    // 數字型別（非字串）照收
+    expect(validateRowData(fields, { name: "a", age: 42 }).ok).toBe(true);
+  });
   it("checkbox 接受字串真假值（CSV round-trip）：是/否、true/false、1/0", () => {
     for (const [input, expected] of [["是", true], ["否", false], ["true", true], ["1", true], ["0", false], [true, true]] as const) {
       const r = validateRowData(fields, { name: "a", done: input });
