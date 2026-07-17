@@ -9,6 +9,8 @@ const fields: DataField[] = [
   { key: "done", label: "完成", type: "checkbox" },
   { key: "link", label: "連結", type: "url" },
   { key: "owner", label: "負責人", type: "user" },
+  { key: "proj", label: "關聯專案", type: "project" },
+  { key: "meet", label: "關聯排程", type: "schedule" },
 ];
 
 describe("validateFields", () => {
@@ -31,7 +33,7 @@ describe("validateRowData", () => {
     const r = validateRowData(fields, { name: "小美", age: "28", role: "企劃", ghost: "x" });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.data).toEqual({ name: "小美", age: 28, role: "企劃", due: null, done: null, link: null, owner: null });
+      expect(r.data).toEqual({ name: "小美", age: 28, role: "企劃", due: null, done: null, link: null, owner: null, proj: null, meet: null });
       expect("ghost" in r.data).toBe(false);
     }
   });
@@ -39,6 +41,15 @@ describe("validateRowData", () => {
     const r = validateRowData(fields, { age: 1 });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain("姓名");
+  });
+  it("project/schedule 連結欄位驗 uuid 格式", () => {
+    expect(validateRowData(fields, { name: "a", proj: "not-uuid" }).ok).toBe(false);
+    expect(validateRowData(fields, { name: "a", meet: "not-uuid" }).ok).toBe(false);
+    expect(validateRowData(fields, {
+      name: "a",
+      proj: "123e4567-e89b-12d3-a456-426614174000",
+      meet: "123e4567-e89b-12d3-a456-426614174001",
+    }).ok).toBe(true);
   });
   it("select 白名單、date 格式、url 前綴、user uuid 都驗", () => {
     expect(validateRowData(fields, { name: "a", role: "老闆" }).ok).toBe(false);
