@@ -399,7 +399,13 @@ function FilesSection({ table }: { table: TableSummary }) {
   const me = trpc.auth.me.useQuery();
   const list = trpc.databases.listFiles.useQuery({ tableId: table.id });
   const importUrl = trpc.databases.importUrl.useMutation({ onSuccess: () => { utils.databases.listFiles.invalidate({ tableId: table.id }); setUrl(""); setUrlName(""); } });
-  const refresh = trpc.databases.refreshFile.useMutation({ onSuccess: () => utils.databases.listFiles.invalidate({ tableId: table.id }) });
+  const refresh = trpc.databases.refreshFile.useMutation({
+    onSuccess: (_r, vars) => {
+      utils.databases.listFiles.invalidate({ tableId: table.id });
+      // 開著的全文預覽也要跟上重抓後的內容，否則顯示過期文字
+      utils.databases.getFileText.invalidate({ id: vars.id });
+    },
+  });
   const removeFile = trpc.databases.removeFile.useMutation({ onSuccess: () => utils.databases.listFiles.invalidate({ tableId: table.id }) });
 
   const [url, setUrl] = useState("");
@@ -455,7 +461,7 @@ function FilesSection({ table }: { table: TableSummary }) {
             ref={fileInput}
             type="file"
             aria-label="上傳文件"
-            accept=".txt,.md,.csv,.json,.html,.htm,.srt,.vtt,.pdf,.docx,.zip,image/*,video/*,audio/*"
+            accept=".txt,.md,.csv,.json,.html,.htm,.srt,.vtt,.pdf,.docx,.zip,.png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.mov,.mp3,.wav,.m4a,.ogg"
             style={{ width: "auto" }}
             disabled={uploading}
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f); }}
@@ -518,6 +524,8 @@ function FilesSection({ table }: { table: TableSummary }) {
                   <p className="meta" style={{ margin: "0 0 6px" }}>AI 讀到的純文字（前 20,000 字／共 {preview.data.totalChars.toLocaleString()} 字）：</p>
                   <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: 13 }}>{preview.data.text}</pre>
                 </>
+              ) : preview.error ? (
+                <p className="error" role="alert" style={{ margin: 0 }}>預覽載入失敗：{preview.error.message}</p>
               ) : (
                 <p className="meta" style={{ margin: 0 }}>載入中…</p>
               )}

@@ -368,6 +368,17 @@ app.post("/api/databases/upload", upload.single("file"), async (req, res) => {
         tableId: table.id, name, mime, sizeBytes, storagePath,
         textContent, uploadedBy: auth.user.id,
       }).returning();
+      // REST 上傳繞過 tRPC 的 mutation 審計中介層——比照 recordMcpAudit 自行落一筆（fire-and-forget）
+      void (async () => {
+        const { sanitizeAuditInput } = await import("./services/audit");
+        await db.insert(schema.auditLog).values({
+          actorId: auth.user.id,
+          action: "databases.uploadFile",
+          groupId: table.groupId,
+          input: sanitizeAuditInput({ tableId: table.id, name, mime, sizeBytes }) as Record<string, unknown>,
+          ok: true,
+        });
+      })().catch((e) => console.warn("[databases:upload] 審計寫入失敗（不影響主流程）：", e instanceof Error ? e.message : e));
       res.json({ ok: true, file: { id: file.id, name: file.name, readableChars: textContent?.length ?? 0 } });
     } catch (dbErr) {
       const { removeStoredFile } = await import("./services/storage");

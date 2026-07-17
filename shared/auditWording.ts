@@ -111,6 +111,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "databases.updateRow": "更新資料列",
   "databases.removeRow": "刪除資料列",
   "databases.importUrl": "從網址匯入資料庫文件",
+  "databases.uploadFile": "上傳資料庫文件",
   "databases.refreshFile": "重新整理資料庫文件",
   "databases.removeFile": "刪除資料庫文件",
   // MCP 個人連線金鑰（自助管理）

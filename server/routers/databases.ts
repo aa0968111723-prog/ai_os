@@ -48,6 +48,21 @@ async function getTableChecked(auth: Parameters<typeof resolveTableAccess>[0], i
   return { table, access };
 }
 
+/**
+ * 文件存取檢查：檔案與其資料庫兩層都查。任何一層不存在或無讀取權，一律回同一句
+ * 「找不到這份文件」——不讓「檔案存在但你無權」與「根本沒這檔」的訊息差異洩漏存在性。
+ */
+async function getFileChecked(auth: Parameters<typeof resolveTableAccess>[0], fileId: string) {
+  const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, fileId));
+  if (!file) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
+  try {
+    const { table, access } = await getTableChecked(auth, file.tableId);
+    return { file, table, access };
+  } catch {
+    throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
+  }
+}
+
 export const databasesRouter = router({
   /** 我可見的全部資料庫（四層範圍一次回，前端按 scope 分區）＋每庫列數與我的權限 */
   list: authedProcedure.query(async ({ ctx }) => {
@@ -235,7 +250,7 @@ export const databasesRouter = router({
 
   /* ── 文件層（AI 可讀的檔案）───────────────────── */
 
-  /** 文件清單（不回全文省流量：回字數與 300 字摘錄）＋我的配額用量 */
+  /** 文件清單（不回全文省流量：字數與 300 字摘錄都在 SQL 端算，200 份長文不整批進記憶體）＋我的配額用量 */
   listFiles: authedProcedure.input(z.object({ tableId: z.string().uuid() })).query(async ({ ctx, input }) => {
     const { table } = await getTableChecked(ctx.auth, input.tableId);
     const rows = await db
@@ -246,7 +261,8 @@ export const databasesRouter = router({
         sizeBytes: schema.dataFiles.sizeBytes,
         storagePath: schema.dataFiles.storagePath,
         sourceUrl: schema.dataFiles.sourceUrl,
-        textContent: schema.dataFiles.textContent,
+        readableChars: sql<number>`coalesce(length(${schema.dataFiles.textContent}), 0)`,
+        excerpt: sql<string | null>`left(${schema.dataFiles.textContent}, 300)`,
         uploadedBy: schema.dataFiles.uploadedBy,
         uploaderName: schema.users.name,
         createdAt: schema.dataFiles.createdAt,
@@ -265,8 +281,8 @@ export const databasesRouter = router({
         sizeBytes: f.sizeBytes,
         hasFile: !!f.storagePath,
         sourceUrl: f.sourceUrl,
-        readableChars: f.textContent?.length ?? 0,
-        excerpt: f.textContent ? f.textContent.slice(0, 300) : null,
+        readableChars: Number(f.readableChars),
+        excerpt: f.excerpt,
         uploadedBy: f.uploadedBy,
         uploaderName: f.uploaderName ?? "?",
         createdAt: f.createdAt,
@@ -279,9 +295,7 @@ export const databasesRouter = router({
   getFileText: authedProcedure
     .input(z.object({ id: z.string().uuid(), offset: z.number().int().min(0).optional() }))
     .query(async ({ ctx, input }) => {
-      const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, input.id));
-      if (!file) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
-      await getTableChecked(ctx.auth, file.tableId); // 讀取權即可
+      const { file } = await getFileChecked(ctx.auth, input.id); // 讀取權即可
       const text = file.textContent ?? "";
       const offset = input.offset ?? 0;
       const CHUNK = 20_000;
@@ -347,7 +361,14 @@ export const databasesRouter = router({
       const quotaErr = await quotaGuardError(ctx.auth.user.id, fetched.buf.length);
       if (quotaErr) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaErr });
 
-      const fallbackName = decodeURIComponent(new URL(normalized.fetchUrl).pathname.split("/").filter(Boolean).pop() ?? "匯入文件");
+      const rawLastSegment = new URL(normalized.fetchUrl).pathname.split("/").filter(Boolean).pop() ?? "匯入文件";
+      // decodeURIComponent 對含裸 % 的路徑會拋 URIError——解不開就用原字串，不讓匯入整個 500
+      let fallbackName: string;
+      try {
+        fallbackName = decodeURIComponent(rawLastSegment);
+      } catch {
+        fallbackName = rawLastSegment;
+      }
       const name = (input.name?.trim() || fallbackName || "匯入文件").slice(0, 120) + (normalized.suggestedExt && !/\.[a-z0-9]+$/i.test(input.name?.trim() || fallbackName) ? normalized.suggestedExt : "");
 
       // 純網頁：不落地原檔，直接抽文字（HTML 存起來沒有重看價值）
@@ -379,19 +400,22 @@ export const databasesRouter = router({
       }
     }),
 
-  /** 重新整理：網址匯入的文件重抓來源、更新 textContent（來源文件改了就按這顆） */
+  /**
+   * 重新整理：網址匯入的文件重抓來源、更新 textContent（來源文件改了就按這顆）。
+   * sizeBytes 語意與 importUrl 完全一致：Notion/網頁＝文字位元數、二進位＝原檔大小；
+   * 二進位來源會重新落地新檔並刪舊檔（原檔與抽出文字同步更新，不再各說各話）。
+   */
   refreshFile: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-    const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, input.id));
-    if (!file) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
+    const { file, access } = await getFileChecked(ctx.auth, input.id);
     if (!file.sourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "這份文件是上傳檔，沒有可重抓的來源網址" });
-    const { access } = await getTableChecked(ctx.auth, file.tableId);
     if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
     const ssrf = ssrfGuardError(file.sourceUrl);
     if (ssrf) throw new TRPCError({ code: "BAD_REQUEST", message: ssrf });
     const normalized = normalizeImportUrl(file.sourceUrl);
     try {
       let text: string | null;
-      let sizeBytes = file.sizeBytes;
+      let sizeBytes: number;
+      let newStoragePath: string | null | undefined; // undefined＝不動、null/字串＝覆寫
       if (normalized.kind === "notion") {
         const pageId = notionPageIdFromUrl(file.sourceUrl);
         if (!pageId) throw new Error("Notion 頁面 id 解析失敗");
@@ -399,16 +423,33 @@ export const databasesRouter = router({
         sizeBytes = Buffer.byteLength(text, "utf8");
       } else {
         const fetched = await fetchImport(normalized.fetchUrl);
-        text = fetched.mime === "text/html"
-          ? htmlToText(fetched.buf.toString("utf8")).slice(0, MAX_TEXT_CHARS)
-          : await extractTextFromBuffer(fetched.mime, file.name, fetched.buf);
-        sizeBytes = fetched.buf.length;
+        if (fetched.mime === "text/html") {
+          text = htmlToText(fetched.buf.toString("utf8")).slice(0, MAX_TEXT_CHARS);
+          sizeBytes = Buffer.byteLength(text, "utf8"); // 與 importUrl 同口徑：網頁只算文字，不算原始 HTML
+          newStoragePath = null; // 網頁匯入不留原檔
+        } else {
+          text = await extractTextFromBuffer(fetched.mime, file.name, fetched.buf);
+          sizeBytes = fetched.buf.length;
+          const disk = await checkDiskSpace(fetched.buf.length);
+          if (disk) throw new Error(disk);
+          const saved = await saveBuffer(fetched.buf, fetched.mime);
+          newStoragePath = saved.storagePath;
+        }
       }
       // 配額以「增量」把關：重抓變大才需要空間
       const delta = Math.max(0, sizeBytes - file.sizeBytes);
       const quotaErr = delta > 0 ? await quotaGuardError(ctx.auth.user.id, delta) : null;
-      if (quotaErr) throw new Error(quotaErr);
-      await db.update(schema.dataFiles).set({ textContent: text, sizeBytes }).where(eq(schema.dataFiles.id, file.id));
+      if (quotaErr) {
+        if (typeof newStoragePath === "string") await removeStoredFile(newStoragePath); // 新檔已落地就清掉
+        throw new Error(quotaErr);
+      }
+      await db.update(schema.dataFiles)
+        .set({ textContent: text, sizeBytes, ...(newStoragePath !== undefined ? { storagePath: newStoragePath } : {}) })
+        .where(eq(schema.dataFiles.id, file.id));
+      // 換了新檔才刪舊檔（DB 已指向新檔，舊檔成孤兒）
+      if (newStoragePath !== undefined && file.storagePath && file.storagePath !== newStoragePath) {
+        await removeStoredFile(file.storagePath);
+      }
       return { ok: true, readableChars: text?.length ?? 0 };
     } catch (err) {
       throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "重新整理失敗" });
@@ -417,9 +458,7 @@ export const databasesRouter = router({
 
   /** 刪文件：上傳者本人或資料庫管理者；連 Volume 原檔一併刪（配額即時釋放） */
   removeFile: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-    const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, input.id));
-    if (!file) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
-    const { access } = await getTableChecked(ctx.auth, file.tableId);
+    const { file, access } = await getFileChecked(ctx.auth, input.id);
     if (!access.canManage && file.uploadedBy !== ctx.auth.user.id) {
       throw new TRPCError({ code: "FORBIDDEN", message: "只有上傳者本人或資料庫管理者可以刪除文件" });
     }

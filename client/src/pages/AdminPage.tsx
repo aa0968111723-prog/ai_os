@@ -779,7 +779,9 @@ export function AdminPage() {
     const totalBudgetPoints = parse(totalBudgetRef.current.value);
     const defaultWeeklyPoints = parse(weeklyRef.current.value);
     const defaultDailyPoints = parse(dailyRef.current.value);
-    const fileQuotaGb = fileQuotaRef.current ? parse(fileQuotaRef.current.value) : (data.fileQuotaGb ?? null);
+    // 配額以整數 GB 存（後端 z.int）：輸入 0.5 這類小數就四捨五入，不讓存檔卡在原始驗證錯誤
+    const rawQuota = fileQuotaRef.current ? parse(fileQuotaRef.current.value) : (data.fileQuotaGb ?? null);
+    const fileQuotaGb = rawQuota == null ? null : Math.round(rawQuota);
     // 沒有變更就不送：Tab 掃過欄位不觸發無意義寫入
     if (
       totalBudgetPoints === (data.totalBudgetPoints ?? null) &&

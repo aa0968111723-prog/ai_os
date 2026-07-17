@@ -8,7 +8,7 @@
  * - 配額：每人（上傳者計）預設 5GB，settings.fileQuotaGb 可調（0＝不限）。
  */
 import { createRequire } from "node:module";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { getSettings } from "./points";
 import { proxyFetch } from "./http";
@@ -133,8 +133,13 @@ export function ssrfGuardError(rawUrl: string): string | null {
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
     return "不能匯入內部網址";
   }
-  // IPv4 字面位址：loopback／私有網段／link-local／CGNAT／0.0.0.0
+  // 非點分十進位的「數字型主機名」（整數 IP 2130706433、十六進位 0x7f000001、缺段 127.1）——
+  // 各平台 getaddrinfo 可能把它們解成 IPv4，一律擋下（深度防禦，正常網站不會用這種主機名）
   const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!v4 && (/^\d+$/.test(host) || /^0x[0-9a-f]+$/i.test(host) || /^[\d.]+$/.test(host))) {
+    return "不能匯入內部網址";
+  }
+  // IPv4 字面位址：loopback／私有網段／link-local／CGNAT／0.0.0.0
   if (v4) {
     const [a, b] = [Number(v4[1]), Number(v4[2])];
     if (
@@ -270,17 +275,33 @@ export async function fetchNotionText(pageId: string): Promise<string> {
   return text.slice(0, MAX_TEXT_CHARS);
 }
 
-/** 抓網址內容（含逾時與大小上限）；回 buffer＋實際 content-type */
+/**
+ * 抓網址內容（含逾時與大小上限）；回 buffer＋實際 content-type。
+ * ★ 重導向「手動逐跳」跟隨（上限 5 跳）且每一跳都重跑 ssrfGuardError——
+ * 自動 follow 的話，公開網址 302 到 169.254.169.254／內網服務就繞過了入口檢查（審查確認的高風險洞）。
+ */
 export async function fetchImport(url: string): Promise<{ buf: Buffer; mime: string; finalUrl: string }> {
-  const res = await proxyFetch(url, { timeoutMs: 25_000, redirect: "follow" });
-  if (!res.ok) throw new Error(`抓取失敗（HTTP ${res.status}）——請確認連結是公開的（Google：「任何人知道連結都能檢視」）`);
-  const lenHeader = Number(res.headers.get("content-length") ?? 0);
-  if (lenHeader > MAX_IMPORT_BYTES) throw new Error(`檔案太大（上限 ${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)}MB）`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length > MAX_IMPORT_BYTES) throw new Error(`檔案太大（上限 ${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)}MB）`);
-  // Google 私有檔會 200 回登入頁 HTML——由呼叫端依 kind 判斷「期望非 HTML 卻拿到 HTML」給人話錯誤
-  const mime = (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim().toLowerCase();
-  return { buf, mime, finalUrl: res.url || url };
+  let current = url;
+  for (let hop = 0; hop < 5; hop++) {
+    const guard = ssrfGuardError(current);
+    if (guard) throw new Error(hop === 0 ? guard : "來源網址重導向到內部位址——已擋下");
+    const res = await proxyFetch(current, { timeoutMs: 25_000, redirect: "manual" });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      if (!loc) throw new Error(`抓取失敗（HTTP ${res.status}）`);
+      current = new URL(loc, current).toString(); // 相對 Location 以當前網址解析
+      continue;
+    }
+    if (!res.ok) throw new Error(`抓取失敗（HTTP ${res.status}）——請確認連結是公開的（Google：「任何人知道連結都能檢視」）`);
+    const lenHeader = Number(res.headers.get("content-length") ?? 0);
+    if (lenHeader > MAX_IMPORT_BYTES) throw new Error(`檔案太大（上限 ${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)}MB）`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_IMPORT_BYTES) throw new Error(`檔案太大（上限 ${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)}MB）`);
+    // Google 私有檔會 200 回登入頁 HTML——由呼叫端依 kind 判斷「期望非 HTML 卻拿到 HTML」給人話錯誤
+    const mime = (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim().toLowerCase();
+    return { buf, mime, finalUrl: current };
+  }
+  throw new Error("來源網址重導向次數過多（超過 5 次）");
 }
 
 /* ── 配額（每人 5GB，可調） ─────────────────────── */
@@ -292,10 +313,13 @@ export async function fileQuotaBytes(): Promise<number | null> {
 }
 
 export async function userFileUsage(userId: string): Promise<number> {
+  // 只計「資料庫還活著」的文件：庫被軟刪後文件對使用者不可達也不可刪，
+  // 再算進配額會把空間永久卡死（審查發現）；磁碟實體用量另有 checkDiskSpace 水位守門
   const [row] = await db
     .select({ used: sql<number>`coalesce(sum(${schema.dataFiles.sizeBytes}), 0)` })
     .from(schema.dataFiles)
-    .where(eq(schema.dataFiles.uploadedBy, userId));
+    .innerJoin(schema.dataTables, eq(schema.dataTables.id, schema.dataFiles.tableId))
+    .where(and(eq(schema.dataFiles.uploadedBy, userId), isNull(schema.dataTables.deletedAt)));
   return Number(row?.used ?? 0);
 }
 

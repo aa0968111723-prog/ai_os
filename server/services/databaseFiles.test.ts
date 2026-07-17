@@ -78,6 +78,12 @@ describe("ssrfGuardError", () => {
     // 邊界外的合法位址要放行（172.32 不是私有段）
     expect(ssrfGuardError("http://172.32.0.1/x")).toBeNull();
   });
+  it("擋非點分十進位的數字型主機名（整數/十六進位/缺段 IP 寫法）", () => {
+    expect(ssrfGuardError("http://2130706433/x")).toContain("內部");   // = 127.0.0.1 的整數寫法
+    expect(ssrfGuardError("http://0x7f000001/x")).toContain("內部");   // 十六進位
+    expect(ssrfGuardError("http://127.1/x")).toContain("內部");        // 缺段
+    expect(ssrfGuardError("http://10.0.1/x")).toContain("內部");
+  });
 });
 
 describe("normalizeImportUrl", () => {
