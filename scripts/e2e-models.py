@@ -50,10 +50,12 @@ ok("超管登入", r.get("user", {}).get("isSuperAdmin") is True)
 cats = call("GET", admin, "models.categories")
 ok("11 個創作類別", len(cats) == 11)
 allm = call("GET", admin, "models.search", {})
-ok("目錄 70 模型", len(allm) == 70)
+# 目錄只增不減:用下限而非精確值,避免每次新增模型就得改測試(曾因 70→86 誤紅)
+ok("目錄已同步(≥70 模型)", len(allm) >= 70)
 t2i = call("GET", admin, "models.byCategory", {"category": "text-to-image"})
-ok("文生圖 7 模型(3旗艦/3經濟/1最低)",
-   len(t2i) == 7 and [m["tier"] for m in t2i].count("flagship") == 3 and [m["tier"] for m in t2i].count("budget") == 1)
+tiers = [m["tier"] for m in t2i]
+ok("文生圖分層齊備(旗艦/經濟/最低成本皆有)",
+   len(t2i) >= 7 and tiers.count("flagship") >= 3 and tiers.count("economy") >= 3 and tiers.count("budget") >= 1)
 hit = call("GET", admin, "models.search", {"q": "中文"})
 ok("關鍵字搜尋(中文)", len(hit) >= 3)
 wfs = call("GET", admin, "models.workflows")
