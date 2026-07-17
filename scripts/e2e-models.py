@@ -91,7 +91,7 @@ g = wait_done(admin, g["id"])
 ok("圖生圖(來源=素材庫)完成", g.get("status") == "done" and bool(g.get("resultUrl")))
 
 # ── LLM(文字輸出) ──
-g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/any-llm#claude-sonnet-4.5", "prompt": "寫一句 15 字內的影片標語"})
+g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "nvidia-nim#llama-3.1-70b", "prompt": "寫一句 15 字內的影片標語"})
 g = wait_done(admin, g["id"])
 ok("LLM → 文字輸出(不入素材庫)", g.get("status") == "done" and bool(g.get("resultText")) and not g.get("resultUrl"))
 

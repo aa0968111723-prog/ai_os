@@ -8,8 +8,7 @@ import { desc, eq } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { isMockMode } from "./fal";
-import { proxyFetch } from "./http";
-import { ANY_LLM_MODEL } from "./llm";
+import { nimComplete } from "./nvidia-nim";
 import { reserveQuota, refund } from "./points";
 import { buildKnowledgeContext } from "../routers/knowledge";
 
@@ -71,15 +70,7 @@ ${knowledge ? `<專案知識庫>\n${knowledge}\n</專案知識庫>\n` : ""}以�
 夥伴 @你 的問題：${cleanQ}`;
 
   try {
-    const res = await proxyFetch("https://fal.run/fal-ai/any-llm", {
-      method: "POST",
-      headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: ANY_LLM_MODEL, prompt: sys }),
-      timeoutMs: 60_000,
-    });
-    if (!res.ok) throw new Error(`any-llm ${res.status}`);
-    const data = (await res.json()) as { output?: string };
-    const answer = (data.output ?? "").trim();
+    const answer = (await nimComplete(sys, { timeoutMs: 60_000 })).trim();
     if (!answer) throw new Error("空回覆");
     await insertReply(answer);
   } catch (err) {
