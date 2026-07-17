@@ -49,11 +49,14 @@ ok("超管登入", r.get("user", {}).get("isSuperAdmin") is True)
 # ── 模型目錄 ──
 cats = call("GET", admin, "models.categories")
 ok("11 個創作類別", len(cats) == 11)
+# 目錄會持續擴充(W2:300+ 規劃中),寫死總數會讓每次上新模型都弄壞 e2e——
+# 改驗「只增不減」下限＋每檔位齊備的結構不變量(PR #16 上 77 模型時實際踩過)
 allm = call("GET", admin, "models.search", {})
-ok("目錄 70 模型", len(allm) == 70)
+ok("目錄 ≥77 模型(只增不減)", len(allm) >= 77)
 t2i = call("GET", admin, "models.byCategory", {"category": "text-to-image"})
-ok("文生圖 7 模型(3旗艦/3經濟/1最低)",
-   len(t2i) == 7 and [m["tier"] for m in t2i].count("flagship") == 3 and [m["tier"] for m in t2i].count("budget") == 1)
+t2i_tiers = [m["tier"] for m in t2i]
+ok("文生圖每檔位齊備(旗艦≥3/經濟≥3/最低≥1)",
+   t2i_tiers.count("flagship") >= 3 and t2i_tiers.count("economy") >= 3 and t2i_tiers.count("budget") >= 1)
 hit = call("GET", admin, "models.search", {"q": "中文"})
 ok("關鍵字搜尋(中文)", len(hit) >= 3)
 wfs = call("GET", admin, "models.workflows")
