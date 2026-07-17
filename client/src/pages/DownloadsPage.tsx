@@ -30,30 +30,42 @@ function fmtSize(bytes: number): string {
 export function DownloadsPage() {
   const [data, setData] = useState<{ categories: DlCategory[]; items: DlItem[] } | null>(null);
   const [errMsg, setErrMsg] = useState("");
+  // 抓取抽成可重呼叫的 load()：清單頁在 tRPC/React Query 之外，失敗後沒有自動重抓，
+  // 一定要給「再試一次」出口——非技術者不會想到要整頁重新整理
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let alive = true;
     (async () => {
+      setErrMsg("");
       try {
         const res = await fetch("/api/downloads", { credentials: "include" });
         const j = await res.json().catch(() => ({}));
         if (!res.ok || !Array.isArray(j.items)) throw new Error(j.error ?? `HTTP ${res.status}`);
         if (alive) setData({ categories: j.categories ?? [], items: j.items });
       } catch (err) {
-        if (alive) setErrMsg(err instanceof Error ? err.message : "清單暫時讀不到，請稍後再試");
+        // 手機弱網最常見的是 fetch 直接 throw（TypeError: Failed to fetch）——一律包成人話，
+        // 原始技術訊息收進括號供回報用
+        const detail = err instanceof Error && !/fetch/i.test(err.message) ? `（${err.message}）` : "";
+        if (alive) setErrMsg(`清單暫時讀不到，請檢查網路後再試${detail}`);
       }
     })();
     return () => {
       alive = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   return (
     <div>
       <h1>資料下載區</h1>
       <p className="hint">團隊共用文件集中下載：開發筆記、模型資料、設計與法律文件。文件更新後這裡自動是最新版。</p>
 
-      {errMsg && <p className="error" role="alert">{errMsg}</p>}
+      {errMsg && (
+        <p className="error" role="alert">
+          {errMsg}——
+          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => setReloadKey((k) => k + 1)}>再試一次</button>
+        </p>
+      )}
       {!data && !errMsg && (
         <div role="status" aria-label="清單載入中">
           <div className="skeleton" style={{ height: 90, marginTop: 12 }} />

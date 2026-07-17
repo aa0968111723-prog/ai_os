@@ -46,7 +46,16 @@ export function AssetLibrary({
   const assets = trpc.projects.assets.useQuery({ projectId });
   const del = trpc.projects.deleteAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
   const rename = trpc.projects.renameAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
-  const toKnowledge = trpc.knowledge.addFromAsset.useMutation({ onSuccess: () => utils.knowledge.list.invalidate({ projectId }) });
+  // 文件「加入知識庫」：選單一點即關，回饋改在素材卡上顯示——進行中／成功綠字（2.5 秒）／失敗紅字，
+  // 比照相鄰圖片版 describeImage 的三態，不再按了零反應（使用者會以為壞掉而重按、灌出重複條目）
+  const [knowledgeAddedId, setKnowledgeAddedId] = useState<string | null>(null);
+  const toKnowledge = trpc.knowledge.addFromAsset.useMutation({
+    onSuccess: (_data, vars) => {
+      utils.knowledge.list.invalidate({ projectId });
+      setKnowledgeAddedId(vars.assetId);
+      window.setTimeout(() => setKnowledgeAddedId((cur) => (cur === vars.assetId ? null : cur)), 2500);
+    },
+  });
   // 圖片 AI 描述入知識庫（需求 6.2）：後端呼叫視覺模型看圖寫描述並寫入知識庫（依模型扣點）。
   // 成功後除了 invalidate，卡片上短暫顯示成功樣式（describedId，2.5 秒後自動消失）。
   const [describedId, setDescribedId] = useState<string | null>(null);
@@ -392,6 +401,18 @@ export function AssetLibrary({
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
                       </div>
 
+                      {/* 文件「加入知識庫」的就地回饋：進行中轉圈／成功後短暫綠字（2.5 秒自動消失） */}
+                      {toKnowledge.isPending && toKnowledge.variables?.assetId === a.id && (
+                        <div className="hint" style={{ fontSize: 11 }}>
+                          <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />加入知識庫中…
+                        </div>
+                      )}
+                      {knowledgeAddedId === a.id && (
+                        <div className="hint" style={{ fontSize: 11, color: "var(--success-ink)" }}>
+                          <Icon name="Check" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />已加入知識庫
+                        </div>
+                      )}
+
                       {/* AI 描述入知識庫的就地回饋：進行中轉圈／成功後短暫綠字（2.5 秒自動消失） */}
                       {describeImage.isPending && describeImage.variables?.assetId === a.id && (
                         <div className="hint" style={{ fontSize: 11 }}>
@@ -515,6 +536,7 @@ export function AssetLibrary({
       {del.error && <p className="error">{del.error.message}</p>}
       {rename.error && <p className="error">改名失敗：{rename.error.message}</p>}
       {describeImage.error && <p className="error">AI 描述失敗：{describeImage.error.message}</p>}
+      {toKnowledge.error && <p className="error" role="alert">加入知識庫失敗：{toKnowledge.error.message}</p>}
 
       {/* 頁內大圖遮罩：點外部或 Esc 關閉 */}
       {lightbox && (

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
-import { ConfirmButton } from "../components/interactions";
+import { CharCount, ConfirmButton } from "../components/interactions";
 import { MentionInput, resolveMentions } from "../components/MentionInput";
 import { flashAnchor, takePlannerFocus } from "../discuss";
 
@@ -411,6 +411,8 @@ function NotesCard({ groupId }: { groupId: string }) {
             style={{ minHeight: 160 }}
             onChange={(e) => setContent(e.target.value)}
           />
+          {/* 即時字數（與知識庫同款）：maxLength 會把超長貼上靜默截尾，計數＋觸頂警示讓截斷不再無聲 */}
+          {contentReady && <CharCount value={content} max={40000} />}
           <label htmlFor="note-project">掛在專案（選填）</label>
           <select
             id="note-project"

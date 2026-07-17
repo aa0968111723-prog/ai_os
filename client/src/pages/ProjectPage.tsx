@@ -39,21 +39,50 @@ function scrollToSelector(selector: string) {
   });
 }
 
-/** 白話小提示：術語旁的「?」小圖示，hover／點擊顯示一句人話（純前端，用原生 title＋aria-label） */
+/** 白話小提示：術語旁的「?」小圖示。桌面 hover 看 title；點擊/鍵盤展開就地氣泡——
+ * 觸控裝置沒有 hover，原生 title 永遠不會出現，非技術者在手機上等於看不到整套白話說明。 */
 function HelpTip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
   return (
-    <span
-      role="img"
-      tabIndex={0}
-      aria-label={text}
-      title={text}
-      style={{
-        display: "inline-flex", alignItems: "center", justifyContent: "center",
-        marginLeft: 6, color: "var(--primary)", cursor: "help",
-        verticalAlign: "middle", userSelect: "none",
-      }}
-    >
-      <Icon name="HelpCircle" size={14} />
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}>
+      <button
+        type="button"
+        aria-label={open ? "收合提示" : `顯示提示：${text}`}
+        aria-expanded={open}
+        title={text}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        style={{
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          marginLeft: 6, padding: 2, minHeight: 0, color: "var(--primary)", cursor: "help",
+          background: "none", border: "none", boxShadow: "none", userSelect: "none", lineHeight: 1,
+        }}
+      >
+        <Icon name="HelpCircle" size={14} />
+      </button>
+      {open && (
+        <span
+          role="status"
+          style={{
+            position: "absolute", top: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)",
+            zIndex: 45, width: "max-content", maxWidth: "min(280px, 78vw)",
+            background: "var(--popover)", border: "1px solid var(--border)", borderRadius: "var(--r-8)",
+            boxShadow: "var(--e3)", padding: "8px 12px",
+            fontSize: "var(--fs-13)", fontWeight: 400, lineHeight: 1.6, color: "var(--fg)",
+            whiteSpace: "normal", textAlign: "left",
+          }}
+        >
+          {text}
+        </span>
+      )}
     </span>
   );
 }
@@ -279,6 +308,16 @@ export function ProjectPage({ id }: { id: string }) {
     // position:relative＋ref：游標座標（x/y 比例＋[data-fb] 錨點）與覆蓋層都以這個容器為基準
     <div ref={collab.containerRef} onPointerMove={collab.onPointerMove} style={{ position: "relative" }}>
       <CursorOverlay cursors={collab.cursors} />
+      {/* 麵包屑：長頁面全程可及的返回入口＋標示專案所屬組（切組後留在他組專案時，一眼看出情境） */}
+      <p className="hint" style={{ margin: "14px 0 0", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <Link href="/" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <Icon name="Undo2" size={13} />回作業台
+        </Link>
+        {(() => {
+          const g = me.data?.groups.find((x) => x.groupId === p.groupId);
+          return g ? <span>・{g.teamName}・{g.groupName}</span> : null;
+        })()}
+      </p>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <span className="chip" style={{ marginLeft: 10 }}>已封存</span>}</h1>
         {collab.peers.length > 0 && (

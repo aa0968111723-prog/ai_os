@@ -110,6 +110,8 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
     },
     {
       enabled: browsing,
+      // 換篩選條件（query key 變）時沿用上一批結果當佔位，列表不整批清空跳版
+      placeholderData: (prev) => prev,
       getNextPageParam: (last) => last.nextCursor ?? undefined,
       // 分頁視圖也要輪詢進行中的生成（與首頁同節奏：有進行中 8 秒、否則 45 秒）
       refetchInterval: (query) =>
@@ -120,14 +122,20 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
     },
   );
   const pagedRows = paged.data?.pages.flatMap((p) => p.items) ?? [];
-  // 顯示來源：瀏覽/篩選模式用分頁結果，否則沿用既有首頁 list（保留所有既有行為）
-  const rows = browsing ? pagedRows : list.data ?? [];
+  // 顯示來源：瀏覽/篩選模式用分頁結果，否則沿用既有首頁 list（保留所有既有行為）。
+  // 「載入更多」剛切到分頁來源、首批還沒回來時（無篩選＝結果必是同一批的超集）先沿用首頁 30 筆，
+  // 原本畫面上的列不會整批消失再重新冒出——那看起來像資料被弄丟了
+  const rows = browsing
+    ? (pagedRows.length === 0 && paged.isLoading && !filtering ? list.data ?? [] : pagedRows)
+    : list.data ?? [];
 
   // #0 完成通知：在列表層偵測某筆生成由 queued/running 轉 done/failed 的「邊緣」，
   // 發桌面通知＋（背景分頁時）標題未讀徽章。推進已改由伺服器背景做，這裡純附加通知、不改輪詢。
   const prevStatusRef = useRef<Map<string, string>>(new Map());
   const unreadRef = useRef(0);
   const baseTitleRef = useRef<string>("");
+  // 報讀器宣告（無障礙）：狀態 pill 只是靜默換字，留在頁面上的報讀器使用者無從得知生成完成/失敗
+  const [liveMsg, setLiveMsg] = useState("");
 
   // 分頁切回前景即清除未讀徽章，還原原始標題
   useEffect(() => {
@@ -159,6 +167,8 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
       if (!rows.some((g) => g.id === id)) prev.delete(id);
     }
     if (justFinished.length === 0) return;
+    // (0) 頁內 aria-live 宣告：桌面通知需另外授權且離頁才有感，報讀器使用者靠這行才知道結果
+    setLiveMsg(justFinished.map((x) => `${x.body}：${x.title}`).join("；"));
     // (1) 桌面通知——聚合：一次偵測到多筆完成（如工作流一次跑完多鏡）就發「一則彙總」而非逐筆洗版
     if (justFinished.length === 1) {
       notifyDesktop(justFinished);
@@ -267,6 +277,8 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
 
   return (
     <div style={{ marginTop: 14 }} data-fb="生成紀錄">
+      {/* 視覺隱藏的狀態宣告區：生成由進行中轉完成/失敗時朗讀一次 */}
+      <div className="sr-only" role="status" aria-live="polite">{liveMsg}</div>
       {addSceneError && <p className="error">加入分鏡失敗：{addSceneError}</p>}
       {addedId && !addSceneError && (
         <p className="hint" style={{ color: "var(--success-ink)" }}>已加入分鏡 ✓（在下方分鏡・交付區）</p>
@@ -350,8 +362,15 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
           </button>
         )}
       </div>
-      {browsing && paged.isLoading && <p className="hint" style={{ marginTop: 12 }}>載入中…</p>}
-      {browsing && !paged.isLoading && rows.length === 0 && (
+      {/* 查詢失敗不能偽裝成「查無資料」——講清楚是伺服器/網路問題並給重試出口 */}
+      {browsing && paged.isError && (
+        <p className="error" role="alert" style={{ marginTop: 12 }}>
+          生成紀錄暫時載入不了（不是資料不見了）——
+          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => paged.refetch()}>再試一次</button>
+        </p>
+      )}
+      {browsing && paged.isLoading && rows.length === 0 && <p className="hint" style={{ marginTop: 12 }}>載入中…</p>}
+      {browsing && !paged.isLoading && !paged.isError && rows.length === 0 && (
         <p className="hint" style={{ marginTop: 12 }}>沒有符合條件的生成紀錄。</p>
       )}
       {rows.map((g) => (

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { useLocalDraft } from "../useLocalDraft";
 import { Icon } from "./Icon";
-import { ConfirmButton } from "./interactions";
+import { CharCount, ConfirmButton } from "./interactions";
 import { VersionHistory } from "./VersionHistory";
 
 const KINDS = [
@@ -28,6 +28,8 @@ const BATCH_MAX_FILES = 30;
 const BATCH_MAX_FILE_BYTES = 300 * 1024;
 /** 單筆內容截斷長度：後端單筆上限 40,000 字，截前 39,000 留緩衝 */
 const BATCH_MAX_CHARS = 39_000;
+/** 手動貼文的單筆上限（與後端 knowledge.add / notes 的 MAX_CONTENT 一致） */
+const MAX_CONTENT_CHARS = 40_000;
 
 /** FileReader 包成 Promise，批次匯入逐檔讀文字用 */
 function readFileText(file: File): Promise<string> {
@@ -186,8 +188,11 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
             value={content}
             onChange={(e) => setContent(e.target.value)}
             rows={6}
+            maxLength={MAX_CONTENT_CHARS}
             placeholder="把開示逐字稿 / 見證故事 / 腳本貼進來…"
           />
+          {/* 即時字數：長開示逼近 4 萬字是主要情境，不能等按下「加入」才被上限打回 */}
+          <CharCount value={content} max={MAX_CONTENT_CHARS} />
           <p className="hint" style={{ marginTop: 4 }}>（草稿自動保留，重整不會不見）</p>
           <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
             <button
@@ -344,9 +349,11 @@ function KnowledgeRow({
             aria-label="編輯知識內容"
             placeholder={full.isLoading && !seededRef.current ? "載入全文中…" : "貼上全文…"}
             rows={6}
+            maxLength={40_000}
             onChange={(e) => setEditContent(e.target.value)}
             style={{ marginTop: 6, fontSize: "var(--fs-13)", padding: "5px 8px" }}
           />
+          {seededRef.current && <CharCount value={editContent} max={40_000} />}
           <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
             <button
               className="primary"
