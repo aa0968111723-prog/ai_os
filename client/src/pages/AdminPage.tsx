@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
-import { humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
+import { AUDIT_CATEGORIES, auditCategoryOf, describeAuditInput, humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
 
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
@@ -346,12 +348,102 @@ function SelfTestCard() {
   );
 }
 
+/** 分類 chip 配色循環：借用設計系統既有 accent tokens，安靜不搶戲、深淺主題都過 AA */
+const AUDIT_CAT_PALETTE = [
+  { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" },
+  { background: "var(--gold-soft)", color: "var(--gold-ink)", border: "1px solid var(--gold)" },
+  { background: "var(--success-soft)", color: "var(--success-ink)", border: "1px solid var(--success)" },
+  { background: "var(--accent-soft, var(--primary-tint))", color: "var(--accent-ink, var(--primary-ink))", border: "1px solid var(--border-soft)" },
+];
+/** 分類 key → 穩定配色（照 AUDIT_CATEGORIES 順序取色，同類永遠同色，好認） */
+const AUDIT_CAT_STYLE: Record<string, { background: string; color: string; border: string }> = Object.fromEntries(
+  AUDIT_CATEGORIES.map((c, i) => [c.key, AUDIT_CAT_PALETTE[i % AUDIT_CAT_PALETTE.length]]),
+);
+
+type AuditRowData = inferRouterOutputs<AppRouter>["audit"]["list"]["items"][number];
+
+/**
+ * 一列操作紀錄：白話標題＋分類標籤＋歸屬（組／專案）＋可展開的逐項細節。
+ * 展開狀態各列獨立（每列自己 useState），不會互相牽動。
+ */
+function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
+  const [open, setOpen] = useState(false);
+  const cat = auditCategoryOf(r.action);
+  const summary = summarizeAuditInput(r.input);
+  const details = describeAuditInput(r.input);
+  const catStyle = AUDIT_CAT_STYLE[cat.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
+  return (
+    <div style={{ borderTop: first ? "none" : "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13, marginTop: first ? 8 : 0 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        {/* 成功／失敗：單色 Icon＋語意 ink 色（跨平台渲染一致，不用滿彩 emoji） */}
+        <span aria-label={r.ok ? "成功" : "失敗"} style={{ display: "inline-flex", alignItems: "center" }}>
+          {r.ok
+            ? <Icon name="CheckCircle2" size={14} style={{ color: "var(--success-ink)" }} />
+            : <Icon name="XCircle" size={14} style={{ color: "var(--danger-ink)" }} />}
+        </span>
+        {/* 分類標籤：一眼分辨這筆屬於哪一類（帳號／生成／分鏡…） */}
+        <span className="pill" style={{ ...catStyle, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>{cat.label}</span>
+        <b>{r.actorName}</b>
+        <span>{humanizeAuditAction(r.action)}</span>
+        {!r.ok && <span style={{ color: "var(--danger-ink)", fontSize: 11, fontWeight: 600 }}>（失敗）</span>}
+        <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</span>
+      </div>
+      {/* 歸屬：這筆動到哪個組／哪個專案（非技術夥伴不用去對 uuid） */}
+      {(r.groupName || r.projectTitle) && (
+        <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {r.groupName && <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}><Icon name="User" size={11} />{r.groupName}</span>}
+          {r.projectTitle && <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}><Icon name="FileText" size={11} />{r.projectTitle}</span>}
+        </div>
+      )}
+      {summary && (
+        <div className="hint" style={{ fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>{summary}</div>
+      )}
+      {r.error && (
+        <div style={{ color: "var(--danger-ink)", fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>
+          {r.error.length > 120 ? `${r.error.slice(0, 120)}…` : r.error}
+        </div>
+      )}
+      {/* 逐項細節：預設收合，需要看清楚每個欄位時才展開（含技術代碼與 id，供追查） */}
+      {details.length > 0 && (
+        <div style={{ marginTop: 4 }}>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="hint"
+            style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 4px", fontSize: 11, background: "none", border: "none", cursor: "pointer" }}
+          >
+            <Icon name={open ? "ChevronUp" : "ChevronDown"} size={12} />{open ? "收合細節" : "看細節"}
+          </button>
+          {open && (
+            <dl style={{ margin: "4px 0 0", display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", fontSize: 12 }}>
+              {details.map((f, k) => (
+                <div key={k} style={{ display: "contents" }}>
+                  <dt className="hint" style={{ whiteSpace: "nowrap" }}>{f.label}</dt>
+                  <dd style={{ margin: 0, overflowWrap: "anywhere" }}>{f.value}</dd>
+                </div>
+              ))}
+              <div style={{ display: "contents" }}>
+                <dt className="hint" style={{ whiteSpace: "nowrap" }}>操作代碼</dt>
+                <dd className="mono hint" style={{ margin: 0, fontSize: 11 }}>{r.action}</dd>
+              </div>
+            </dl>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * 操作紀錄（審計）卡：誰在什麼時候做了哪些敏感操作、成功與否。
- * 管理員與開發者都看得到——後端已按呼叫者權限過濾範圍，這裡不需要 isSuperAdmin gate。
+ * 組長以上都看得到——後端已按呼叫者權限過濾範圍（組長只看自己組），這裡不需要 isSuperAdmin gate。
+ * 提供「分類 chip＋關鍵字」雙重過濾；每列可展開看逐項白話細節。
  * keyset 分頁寫法比照 GenerationList 的 listByProjectPaged（useInfiniteQuery＋nextCursor 累積）。
  */
-function AuditLogCard() {
+export function AuditLogCard() {
+  // 分類過濾（chip）：null＝全部
+  const [category, setCategory] = useState<string | null>(null);
   // action 關鍵字前端 debounce 後才帶進查詢，避免每敲一鍵就打一次 API
   const [actionInput, setActionInput] = useState("");
   const [debouncedAction, setDebouncedAction] = useState("");
@@ -360,20 +452,40 @@ function AuditLogCard() {
     return () => clearTimeout(t);
   }, [actionInput]);
   const audit = trpc.audit.list.useInfiniteQuery(
-    { action: debouncedAction.trim() || undefined, limit: 30 },
+    { action: debouncedAction.trim() || undefined, category: category ?? undefined, limit: 30 },
     { getNextPageParam: (last) => last.nextCursor ?? undefined },
   );
   const rows = audit.data?.pages.flatMap((p) => p.items) ?? [];
+  const filtering = !!debouncedAction.trim() || !!category;
+  const chip = (active: boolean): CSSProperties => ({
+    padding: "3px 10px",
+    fontSize: 12,
+    borderRadius: 999,
+    cursor: "pointer",
+    border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
+    background: active ? "var(--primary-tint)" : "transparent",
+    color: active ? "var(--primary-ink)" : "var(--ink)",
+    fontWeight: active ? 600 : 400,
+  });
   return (
     <div className="card" data-fb="操作紀錄卡">
-      <h2>操作紀錄（審計）</h2>
-      <p className="hint">最近的管理／花點操作流水；能看到的範圍已按你的權限過濾。</p>
+      <h2>操作紀錄</h2>
+      <p className="hint">誰在什麼時候做了什麼——用白話寫給每位夥伴看。能看到的範圍已按你的權限過濾（組長看自己組）。</p>
+      {/* 分類 chip：白話分類，點一下只看那一類；不必先懂 admin.invite 這種代碼 */}
+      <div role="group" aria-label="依分類過濾" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+        <button type="button" style={chip(category === null)} aria-pressed={category === null} onClick={() => setCategory(null)}>全部</button>
+        {AUDIT_CATEGORIES.map((c) => (
+          <button key={c.key} type="button" style={chip(category === c.key)} aria-pressed={category === c.key} onClick={() => setCategory(c.key)}>
+            {c.label}
+          </button>
+        ))}
+      </div>
       <input
         type="search"
         value={actionInput}
         onChange={(e) => setActionInput(e.target.value)}
-        placeholder="用操作類型關鍵字篩選（如 invite）…"
-        aria-label="篩選操作類型"
+        placeholder="進階：再用操作代碼關鍵字細找（如 invite、generation）…"
+        aria-label="用操作代碼關鍵字篩選"
       />
       {audit.isLoading ? (
         <div role="status" aria-label="操作紀錄載入中">
@@ -384,36 +496,12 @@ function AuditLogCard() {
         <p className="error">操作紀錄載入失敗：{audit.error.message}</p>
       ) : rows.length === 0 ? (
         <p className="hint" style={{ marginTop: 10 }}>
-          {debouncedAction.trim() ? "沒有符合這個關鍵字的紀錄。" : "還沒有操作紀錄。"}
+          {filtering ? "沒有符合這個條件的紀錄。" : "還沒有操作紀錄。"}
         </p>
       ) : (
         <>
           {rows.map((r, i) => (
-            <div key={r.id} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", padding: "6px 0", fontSize: 13, marginTop: i === 0 ? 8 : 0 }}>
-              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                {/* 與正上方系統自檢卡同源：單色 <Icon>＋語意 ink 色，不用滿彩 emoji（跨平台渲染也一致） */}
-                <span aria-label={r.ok ? "成功" : "失敗"} style={{ display: "inline-flex", alignItems: "center" }}>
-                  {r.ok
-                    ? <Icon name="CheckCircle2" size={14} style={{ color: "var(--success-ink)" }} />
-                    : <Icon name="XCircle" size={14} style={{ color: "var(--danger-ink)" }} />}
-                </span>
-                <b>{r.actorName}</b>
-                <span>{humanizeAuditAction(r.action)}</span>
-                {/* 原始代碼保留小字：篩選框吃的是代碼關鍵字，對得上才好查 */}
-                <span className="mono hint" style={{ fontSize: 10 }}>{r.action}</span>
-                <span className="hint" style={{ fontSize: 11 }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</span>
-              </div>
-              {summarizeAuditInput(r.input) && (
-                <div className="hint" style={{ fontSize: 11, marginTop: 2, overflowWrap: "anywhere" }}>
-                  {summarizeAuditInput(r.input)}
-                </div>
-              )}
-              {r.error && (
-                <div style={{ color: "var(--danger-ink)", fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>
-                  {r.error.length > 120 ? `${r.error.slice(0, 120)}…` : r.error}
-                </div>
-              )}
-            </div>
+            <AuditLogRow key={r.id} r={r} first={i === 0} />
           ))}
           {audit.hasNextPage && (
             <div style={{ textAlign: "center", marginTop: 10 }}>

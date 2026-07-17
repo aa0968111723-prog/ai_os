@@ -5,7 +5,7 @@ import { Launchpad } from "./pages/Launchpad";
 import { ProjectPage } from "./pages/ProjectPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
-import { AdminPage } from "./pages/AdminPage";
+import { AdminPage, AuditLogCard } from "./pages/AdminPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { MyReportsPage } from "./pages/MyReportsPage";
 import { ModelsPage } from "./pages/ModelsPage";
@@ -209,6 +209,8 @@ function UserMenu({
           <Link href="/databases" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />資料庫</Link>
           <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
           {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
+          {/* 操作紀錄：組長（不含純組員）與管理員都看得到；管理員在「團隊管理」也有同一張卡 */}
+          {(activeIsLeader || isAdmin) && <Link href="/logs" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />操作紀錄</Link>}
           {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />團隊管理</Link>}
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">帳號</div>
@@ -347,6 +349,15 @@ export function App() {
                 <Route path="/options">
                   {activeIsLeader ? (
                     <GroupOptionsEditor groupId={activeGroupId} />
+                  ) : (
+                    <p className="error">
+                      這頁需要組長或管理員權限 — <Link href="/">回作業台</Link>
+                    </p>
+                  )}
+                </Route>
+                <Route path="/logs">
+                  {activeIsLeader || isAdmin ? (
+                    <div style={{ maxWidth: 860, margin: "0 auto" }}><AuditLogCard /></div>
                   ) : (
                     <p className="error">
                       這頁需要組長或管理員權限 — <Link href="/">回作業台</Link>
