@@ -6,7 +6,7 @@ import { db, schema } from "../db";
 import { validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
 import { addDataRowValidated } from "../services/databaseCore";
-import { csvToRowObjects } from "../../shared/csv";
+import { tabularToRowObjects, TABULAR_FORMATS, type TabularFormat } from "../../shared/tabular";
 import {
   extractTextFromBuffer,
   fetchImport,
@@ -250,21 +250,32 @@ export const databasesRouter = router({
     }),
 
   /**
-   * CSV 匯入（連接 Excel／Google 試算表／其他資料庫的匯出檔）：
-   * headerMap 把 CSV 表頭對應到欄位 key，逐列走與手動新增同一套驗證與保險絲。
-   * 部分列驗證失敗不整批中止——回「成功幾列、失敗哪幾列為什麼」，讓使用者修完再補匯入。
+   * 多格式資料匯入（連接 Excel／Google 試算表／其他資料庫或 API 的匯出檔）：
+   * 支援 CSV／TSV（另存分隔值）與 JSON（物件陣列）；headerMap 把來源表頭／key 對應到欄位 key，
+   * 逐列走與手動新增同一套驗證與保險絲。部分列驗證失敗不整批中止——回「成功幾列、失敗哪幾列為什麼」，
+   * 讓使用者修完再補匯入。（原 importCsv 已併入此路徑，format 預設 csv 相容舊呼叫。）
    */
-  importCsv: authedProcedure
+  importData: authedProcedure
     .input(z.object({
       tableId: z.string().uuid(),
-      csv: z.string().min(1).max(1_500_000), // 留餘裕給 JSON 包裝，不撞 express.json 的 2MB 上限
-      headerMap: z.record(z.string()), // CSV 表頭 → 欄位 key
+      content: z.string().min(1).max(1_500_000), // 留餘裕給 JSON 包裝，不撞 express.json 的 2MB 上限
+      format: z.enum(["csv", "tsv", "json"]).default("csv"),
+      headerMap: z.record(z.string()), // 來源表頭（CSV/TSV）或 JSON key → 欄位 key
     }))
     .mutation(async ({ ctx, input }) => {
       const { table, access } = await getTableChecked(ctx.auth, input.tableId);
       if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
-      const objs = csvToRowObjects(input.csv, input.headerMap);
-      if (objs.length === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可匯入的資料列（確認 CSV 有表頭列＋至少一列資料，且已對應欄位）" });
+      let objs: Array<{ data: Record<string, string>; line: number }>;
+      try {
+        objs = tabularToRowObjects(input.content, input.format as TabularFormat, input.headerMap);
+      } catch (err) {
+        // JSON 解析失敗等：以人話回報而非 500
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "資料解析失敗" });
+      }
+      if (objs.length === 0) {
+        const fmtLabel = TABULAR_FORMATS.find((f) => f.id === input.format)?.label ?? "資料";
+        throw new TRPCError({ code: "BAD_REQUEST", message: `沒有可匯入的資料列（確認 ${fmtLabel} 有表頭／欄位＋至少一列資料，且已對應欄位）` });
+      }
       const MAX_IMPORT = 5000;
       const slice = objs.slice(0, MAX_IMPORT); // 只嘗試前 MAX_IMPORT 列
       let imported = 0;
@@ -276,7 +287,7 @@ export const databasesRouter = router({
           await addDataRowValidated(table, ctx.auth.user.id, data);
           imported++;
         } catch (err) {
-          if (errors.length < 50) errors.push({ line, error: err instanceof Error ? err.message : "未知錯誤" }); // line＝CSV 實體行號
+          if (errors.length < 50) errors.push({ line, error: err instanceof Error ? err.message : "未知錯誤" }); // line＝實體行號（JSON＝第幾筆）
           // 達列數上限即停（addDataRowValidated 會拋保險絲訊息）
           if (err instanceof Error && err.message.includes("列上限")) break;
         }
