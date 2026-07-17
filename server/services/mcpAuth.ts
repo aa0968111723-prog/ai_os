@@ -113,7 +113,7 @@ export async function resolveMcpIdentity(provided: string): Promise<McpIdentity 
     const [admin] = await db.select().from(schema.users).where(eq(schema.users.isSuperAdmin, true)).limit(1);
     if (!admin) return null; // 系統尚未初始化
     const auth = await loadAuthState(admin.id);
-    // env 共用金鑰＝超管、無範圍限制（可讀可寫）
+    // env 共用金鑰＝開發者、無範圍限制（可讀可寫）
     return auth ? { kind: "admin", auth, scope: { readOnly: false } } : null;
   }
 
