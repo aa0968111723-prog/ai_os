@@ -95,6 +95,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "feedback.submit": "送出使用回饋",
   "feedbackReports.submit": "回報問題",
   "feedbackReports.updateStatus": "更新問題回報狀態",
+  "feedbackReports.runAgentNow": "手動觸發回饋代理巡檢",
   // MCP（Claude 等外部代理經 API 操作）
   "mcp.list_projects": "MCP：列出專案",
   "mcp.get_project_context": "MCP：讀取專案脈絡",
