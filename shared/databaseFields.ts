@@ -41,6 +41,17 @@ const KEY_RE = /^[a-z0-9_-]{1,24}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * 日期是否為真實存在的日曆日：正規表達式只驗形狀（2026-13-45 也會過），需再建構回推
+ * 確認月/日 round-trip。擋掉不存在的日期，否則後續 new Date() 會得 NaN 而被行事曆等靜默丟棄。
+ */
+export function isValidCalendarDate(s: string): boolean {
+  if (!DATE_RE.test(s)) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
 /** 產生新欄位鍵（建立欄位時前端呼叫；碰撞由 validateFields 的唯一性檢查兜底） */
 export function newFieldKey(): string {
   return "f" + Math.random().toString(36).slice(2, 10);
@@ -136,6 +147,8 @@ export function validateRowData(
       }
       case "date": {
         if (typeof v !== "string" || !DATE_RE.test(v)) return { ok: false, error: `「${f.label}」日期格式要是 YYYY-MM-DD` };
+        // 形狀對還不夠：2026-02-30／2026-13-01 這種不存在的日期要擋，否則行事曆匯出時 new Date() 會 NaN
+        if (!isValidCalendarDate(v)) return { ok: false, error: `「${f.label}」不是有效的日期（例如 2026-02-30 並不存在）` };
         out[f.key] = v;
         break;
       }

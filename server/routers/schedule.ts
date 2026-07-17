@@ -84,7 +84,9 @@ export const scheduleRouter = router({
  */
 export function buildIcs(groupName: string, items: Array<{ id: string; title: string; startsAt: Date; endsAt: Date | null; note: string | null }>): string {
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+  // 換行一律轉義：CRLF、單獨 CR、單獨 LF 都要處理——單獨 \r 若漏掉，某些 iCalendar 解析器會把它
+  // 當成行邊界，讓欄位值裡的 "\rSUMMARY:..." 被當成偽造屬性注入（ICS injection）。
+  const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",

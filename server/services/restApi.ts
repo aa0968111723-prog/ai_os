@@ -25,16 +25,19 @@ import type { DataField, DataRowData } from "../../shared/databaseFields";
  * 解析請求身分：優先個人 MCP 金鑰（x-api-key 標頭或 ?key= 查詢字串），再退回 session cookie。
  * viaToken=true 表示「AI／程式介面」——授權時套 agentAccess 收斂（金鑰不該比網頁看到更多）。
  */
-async function resolveRequester(req: Request): Promise<{ auth: AuthState; viaToken: boolean } | null> {
+async function resolveRequester(req: Request): Promise<{ auth: AuthState; viaToken: boolean; readOnly: boolean } | null> {
   const headerKey = req.headers["x-api-key"];
   const queryKey = typeof req.query.key === "string" ? req.query.key : undefined;
   const provided = (typeof headerKey === "string" && headerKey) || queryKey;
   if (provided) {
     const identity = await resolveMcpIdentity(provided);
-    return identity ? { auth: identity.auth, viaToken: true } : null;
+    // readOnly 金鑰範圍必須一路帶到寫入端點——否則唯讀金鑰能繞過 MCP 的 scopeDeniedReason
+    // 守衛，改走 REST POST /rows 寫入資料（MCP 擋、REST 卻放行的不一致提權）。
+    return identity ? { auth: identity.auth, viaToken: true, readOnly: identity.scope.readOnly } : null;
   }
   const auth = await resolveSession(req);
-  return auth ? { auth, viaToken: false } : null;
+  // session（純網頁登入）沒有唯讀概念，一律非唯讀
+  return auth ? { auth, viaToken: false, readOnly: false } : null;
 }
 
 /** 依 viaToken 選對的授權函式（程式介面套 agentAccess；網頁走純人權限） */
@@ -66,7 +69,7 @@ export async function handleV1ListDatabases(req: Request, res: Response): Promis
     if (!access.canRead) return [];
     return [{
       id: t.id, name: t.name, scope: t.scope, description: t.description,
-      fields: t.fields, rowCount: t.rowCount, canWrite: access.canWriteRows,
+      fields: t.fields, rowCount: t.rowCount, canWrite: !who.readOnly && access.canWriteRows,
     }];
   });
   res.json({ databases: out });
@@ -98,6 +101,8 @@ export async function handleV1AddRow(req: Request, res: Response): Promise<void>
   if (!who) return void res.status(401).json({ error: "需要認證：帶 x-api-key（個人 MCP 金鑰）或先登入" });
   const hit = await readableTable(who.auth, who.viaToken, req.params.id);
   if (!hit) return void res.status(404).json({ error: "找不到這個資料庫" });
+  // 唯讀金鑰一律擋寫入（與 MCP 工具端 scopeDeniedReason 同口徑）
+  if (who.readOnly) return void res.status(403).json({ error: "這把金鑰是「唯讀」的——不能新增資料列，請改用可寫入的金鑰" });
   if (!hit.access.canWriteRows) return void res.status(403).json({ error: "沒有寫入權（或此庫的 AI 存取設為唯讀）" });
   const body = req.body as { data?: unknown };
   try {

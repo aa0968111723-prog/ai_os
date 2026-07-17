@@ -241,7 +241,12 @@ export const knowledgeRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const [row] = await db.select().from(schema.knowledge).where(eq(schema.knowledge.id, input.id));
+      // 排除已軟刪（回收桶）的項目：其餘操作（get/listVersions/remove/restore/purge）都帶此濾條，
+      // update 漏帶會讓垃圾桶裡的知識仍可被編輯——補上以求一致。
+      const [row] = await db
+        .select()
+        .from(schema.knowledge)
+        .where(and(eq(schema.knowledge.id, input.id), isNull(schema.knowledge.deletedAt)));
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
       await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3

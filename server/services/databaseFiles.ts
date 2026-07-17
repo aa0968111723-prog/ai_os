@@ -280,6 +280,36 @@ export async function fetchNotionText(pageId: string): Promise<string> {
  * ★ 重導向「手動逐跳」跟隨（上限 5 跳）且每一跳都重跑 ssrfGuardError——
  * 自動 follow 的話，公開網址 302 到 169.254.169.254／內網服務就繞過了入口檢查（審查確認的高風險洞）。
  */
+/**
+ * 逐塊讀取回應主體，累計位元組超過 max 立即取消串流並丟錯。
+ * 避免 `arrayBuffer()` 在檢查大小前就把整個（可能造假 content-length 的）主體讀進記憶體。
+ */
+async function readBodyCapped(res: Response, max: number): Promise<Buffer> {
+  const tooBig = () => new Error(`檔案太大（上限 ${Math.round(max / 1024 / 1024)}MB）`);
+  const reader = res.body?.getReader?.();
+  if (!reader) {
+    // 沒有可讀串流（理論上少見）：退回 arrayBuffer，但仍在使用前檢查大小
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > max) throw tooBig();
+    return buf;
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      total += value.byteLength;
+      if (total > max) {
+        await reader.cancel().catch(() => {});
+        throw tooBig();
+      }
+      chunks.push(Buffer.from(value));
+    }
+  }
+  return Buffer.concat(chunks);
+}
+
 export async function fetchImport(url: string): Promise<{ buf: Buffer; mime: string; finalUrl: string }> {
   let current = url;
   for (let hop = 0; hop < 5; hop++) {
@@ -295,8 +325,9 @@ export async function fetchImport(url: string): Promise<{ buf: Buffer; mime: str
     if (!res.ok) throw new Error(`抓取失敗（HTTP ${res.status}）——請確認連結是公開的（Google：「任何人知道連結都能檢視」）`);
     const lenHeader = Number(res.headers.get("content-length") ?? 0);
     if (lenHeader > MAX_IMPORT_BYTES) throw new Error(`檔案太大（上限 ${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)}MB）`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_IMPORT_BYTES) throw new Error(`檔案太大（上限 ${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)}MB）`);
+    // 串流累計並在超限時「立即中止」——不能先 arrayBuffer() 全量緩衝再檢查：伺服器省略/謊報
+    // content-length 就能串數 GB 撐爆記憶體（OOM DoS，審查發現的高風險）。
+    const buf = await readBodyCapped(res, MAX_IMPORT_BYTES);
     // Google 私有檔會 200 回登入頁 HTML——由呼叫端依 kind 判斷「期望非 HTML 卻拿到 HTML」給人話錯誤
     const mime = (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim().toLowerCase();
     return { buf, mime, finalUrl: current };

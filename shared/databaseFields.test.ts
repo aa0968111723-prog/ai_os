@@ -60,6 +60,14 @@ describe("validateRowData", () => {
       meet: "123e4567-e89b-12d3-a456-426614174001",
     }).ok).toBe(true);
   });
+  it("date 擋不存在的日曆日（形狀對但日期不存在）", () => {
+    expect(validateRowData(fields, { name: "a", due: "2026-02-30" }).ok).toBe(false); // 二月無 30 日
+    expect(validateRowData(fields, { name: "a", due: "2026-13-01" }).ok).toBe(false); // 無 13 月
+    expect(validateRowData(fields, { name: "a", due: "2026-00-10" }).ok).toBe(false); // 無 0 月
+    expect(validateRowData(fields, { name: "a", due: "2026-04-31" }).ok).toBe(false); // 四月無 31 日
+    expect(validateRowData(fields, { name: "a", due: "2024-02-29" }).ok).toBe(true); // 閏年 2/29 存在
+    expect(validateRowData(fields, { name: "a", due: "2026-07-16" }).ok).toBe(true);
+  });
   it("select 白名單、date 格式、url 前綴、user uuid 都驗", () => {
     expect(validateRowData(fields, { name: "a", role: "老闆" }).ok).toBe(false);
     expect(validateRowData(fields, { name: "a", due: "2026/01/01" }).ok).toBe(false);

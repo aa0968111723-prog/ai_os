@@ -193,10 +193,12 @@ export const databasesRouter = router({
         .orderBy(desc(schema.dataRows.createdAt))
         .limit(input.limit ?? LIST_LIMIT_DEFAULT)
         .offset(input.offset ?? 0);
+      // total 要套用與列查詢相同的條件（含 q 全文粗篩），否則搜尋時分頁器會依全表列數
+      // 算出一堆空白頁（顯示「1-3 of 10000」）。
       const [{ n }] = await db
         .select({ n: sql<number>`count(*)` })
         .from(schema.dataRows)
-        .where(eq(schema.dataRows.tableId, table.id));
+        .where(and(...conds));
       return { rows, total: Number(n) };
     }),
 

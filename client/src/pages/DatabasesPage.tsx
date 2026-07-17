@@ -742,7 +742,13 @@ function CellDisplay({ field, groupId, value }: { field: DataField; groupId: str
   if (value === null || value === "") return <span className="meta">—</span>;
   if (field.type === "checkbox") return value ? <Icon name="Check" size={14} /> : <span className="meta">—</span>;
   if (field.type === "url") {
-    return <a href={String(value)} target="_blank" rel="noreferrer" style={{ wordBreak: "break-all" }}>{String(value).slice(0, 60)}</a>;
+    const raw = String(value);
+    // 只把 http(s):／mailto: 當成可點連結——資料庫可為組/團隊/全站範圍，別人能在某格塞
+    // javascript:／data: 供其他成員點擊觸發（連結注入）。非白名單協定一律純文字顯示。
+    const safe = /^(https?:|mailto:)/i.test(raw.trim());
+    return safe
+      ? <a href={raw} target="_blank" rel="noreferrer" style={{ wordBreak: "break-all" }}>{raw.slice(0, 60)}</a>
+      : <span style={{ wordBreak: "break-all" }}>{raw.slice(0, 60)}</span>;
   }
   if (field.type === "user") return <UserName id={String(value)} />;
   if (field.type === "project") return <ProjectLink id={String(value)} groupId={groupId} />;
