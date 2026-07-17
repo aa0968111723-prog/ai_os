@@ -608,7 +608,18 @@ export function AdminPage() {
       <div className="skeleton" style={{ height: 180 }} />
     </div>
   );
-  if (overview.error) return <p className="error">{overview.error.message}</p>;
+  // 總覽讀取失敗：保留頁標題與人話說明＋重試出口——整頁只剩一行原始錯誤會被當成「系統壞了」，
+  // 且唯一恢復方式變成重新整理瀏覽器（比照 Launchpad 的錯誤＋重試模式）
+  if (overview.error)
+    return (
+      <div>
+        <h1>團隊管理</h1>
+        <p className="error" role="alert">
+          管理資料暫時載入不了（{overview.error.message}）——
+          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => overview.refetch()}>再試一次</button>
+        </p>
+      </div>
+    );
   const teams = overview.data ?? [];
   const selectedTeam = teams.find((t) => t.id === (inviteTeamId || teams[0]?.id));
   const emailValid = /^\S+@\S+\.\S+$/.test(email.trim());
@@ -660,8 +671,15 @@ export function AdminPage() {
         <div className="card" data-fb="點數與額度卡">
           <h2>點數與額度（彈性・隨時可調）</h2>
           <p className="hint">空白＝不限。總預算限開發者；各組週額度由團隊管理員在左側團隊卡調整。</p>
-          {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值 */}
-          {settings.data ? (
+          {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值。
+              三態：error（明講失敗＋重試）／data（表單）／載入中（骨架）——缺 error 分支時
+              失敗會永遠停在骨架上，管理員以為還在載入而空等 */}
+          {settings.error ? (
+            <p className="error" role="alert">
+              設定暫時讀不到——
+              <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => settings.refetch()}>再試一次</button>
+            </p>
+          ) : settings.data ? (
             <>
               <label htmlFor="settings-total-budget">總預算點數（全系統）{!isSuperAdmin && <span className="hint">・限開發者調整</span>}</label>
               {/* 非超管改總預算會被後端擋（FORBIDDEN）——直接 disable 並說明，別讓人白填才報錯 */}

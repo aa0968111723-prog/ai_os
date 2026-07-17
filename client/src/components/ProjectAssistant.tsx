@@ -78,7 +78,17 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
       </p>
 
       {turns.length > 0 && (
-        <div ref={scrollRef} style={{ maxHeight: 320, overflowY: "auto", margin: "12px 0", display: "flex", flexDirection: "column", gap: 10 }}>
+        // role="log"＋aria-live：AI 回覆是非同步 push 進來的，沒有活躍區報讀器會完全靜音、
+        // 使用者按「問」後以為沒反應（比照 MessagePanel 的既有寫法）
+        <div
+          ref={scrollRef}
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-label="AI 專案助手對話"
+          tabIndex={0}
+          style={{ maxHeight: 320, overflowY: "auto", margin: "12px 0", display: "flex", flexDirection: "column", gap: 10 }}
+        >
           {turns.map((t, i) => (
             <div key={i} style={{ alignSelf: t.role === "you" ? "flex-end" : "flex-start", maxWidth: "90%" }}>
               <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 2, textAlign: t.role === "you" ? "right" : "left" }}>
@@ -158,7 +168,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
               )}
             </div>
           ))}
-          {ask.isPending && <div className="hint" style={{ fontSize: "var(--fs-13)" }}>助手思考中…</div>}
+          {ask.isPending && <div className="hint" role="status" style={{ fontSize: "var(--fs-13)" }}>助手思考中…</div>}
         </div>
       )}
 

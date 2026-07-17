@@ -1,5 +1,5 @@
 import { type CSSProperties } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 
@@ -82,6 +82,9 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
           {createSample.isPending ? "建立範例中…" : "建立範例專案看看"}
         </button>
         <button onClick={onDismiss}>略過</button>
+        <Link href="/help" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+          <Icon name="HelpCircle" size={14} />看怎麼用
+        </Link>
         {!groupId && <span className="hint">（要先屬於一個組才能建立範例）</span>}
       </div>
 

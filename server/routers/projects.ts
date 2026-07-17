@@ -199,6 +199,23 @@ export const projectsRouter = router({
           })
           .returning();
 
+        // 一筆已完成的示範生成（不呼叫 fal、0 點）：「從這裡開始」四步是線性敘事（1→2→3→4），
+        // 範例若只種分鏡不種生成，步驟列會呈現 ✓✗✓✗——新人第一眼就以為範例壞了或自己跳了步。
+        await tx.insert(schema.generations).values({
+          projectId: project.id,
+          groupId: project.groupId,
+          userId: ctx.auth.user.id,
+          modelId: "fal-ai/fast-lightning-sdxl",
+          kind: "image",
+          prompt: "（範例）日系水彩、溫柔療癒調性：清晨禪堂前庭空景，柔和晨光斜射、地面薄霧，構圖大量留白。",
+          status: "done",
+          pointsEst: 0,
+          pointsActual: 0,
+          resultUrl: `${base}/api/mock-asset/image`,
+          name: "範例成品（免費示範）",
+          params: { sample: true, note: "範例專案示範生成，未經 fal、未扣點" },
+        });
+
         // 3-4 格草稿分鏡（status=todo）：各有可直接帶回生成台的 prompt 與配音詞；第一鏡掛上免費佔位縮圖。
         const scenesData: Array<{ title: string; durationSec: number; prompt: string; voiceover: string; assetId?: string }> = [
           {
