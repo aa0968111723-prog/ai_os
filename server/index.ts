@@ -18,6 +18,7 @@ import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
 import { buildEdl, buildFcpxml, buildSrt, exportProjectZip } from "./services/exporter";
+import { renderMyDataHtml } from "./services/myDataExport";
 import { handleMcp } from "./services/mcp";
 import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
 import {
@@ -487,7 +488,9 @@ app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
   }
 });
 
-// ── 個資自助匯出 v1（個資法「查詢／請求複本」權）：登入者一鍵下載「自己的」資料 JSON。
+// ── 個資自助匯出 v1（個資法「查詢／請求複本」權）：登入者一鍵下載「自己的」資料。
+// 預設交付「創作者看得懂」的可讀 HTML（中文欄位／中文化列舉／在地化日期／表格化）；
+// ?format=json 仍提供原始 JSON（結構化、機器可讀，供資料可攜與系統匯入）。
 // 範圍嚴格限本人：帳號基本資料（絕不含 passwordHash）、所屬組、自己的生成紀錄／留言／回饋／筆記／排程。
 // 帳號「刪除」仍需管理員操作（見維運手冊）——本端點只解決自助「攜出」，不做自助刪除。
 app.get("/api/me/export", async (req, res) => {
@@ -556,9 +559,17 @@ app.get("/api/me/export", async (req, res) => {
       notes: myNotes,
       scheduleItems: mySchedule,
     };
-    res.attachment("我的資料.json"); // RFC 5987 中文檔名下載安全
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.send(JSON.stringify(payload, null, 2));
+    // 預設交付「創作者看得懂」的可讀 HTML；?format=json 仍給原始 JSON（資料可攜／系統匯入用）。
+    // 兩者皆以 attachment 下載、不在應用網域內渲染；HTML 版所有使用者欄位已於 renderMyDataHtml 內逐字跳脫。
+    if (req.query.format === "json") {
+      res.attachment("我的資料.json"); // RFC 5987 中文檔名下載安全
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.send(JSON.stringify(payload, null, 2));
+    } else {
+      res.attachment("我的資料.html");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.send(renderMyDataHtml(payload));
+    }
   } catch (err) {
     console.error("[me:export]", err);
     recordError("me:export", err);

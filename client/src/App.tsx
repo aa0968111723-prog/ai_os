@@ -210,7 +210,7 @@ function UserMenu({
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">工作</div>
           <Link href="/mcp" className="menu-item" role="menuitem" onClick={close}><Icon name="Sparkles" size={15} />接上外部 AI</Link>
-          <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
+          <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Package" size={15} />共用文件下載</Link>
           {/* 管理組：只要在任一組是組長或管理員（canSeeOrg）就顯示整段；段內各項再依細權限收放，
            * 團隊管理限管理員（isAdmin）、選項限作用組組長（activeIsLeader）。canSeeOrg 為兩者的聯集，
            * 故整段用它當閘門時，段內至少會有通訊錄／監控兩項，不會出現只有標題的空組。 */}
@@ -227,8 +227,10 @@ function UserMenu({
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">帳號</div>
           <Link href="/my-reports" className="menu-item" role="menuitem" onClick={close}><Icon name="MessageCircle" size={15} />我的回報</Link>
-          {/* 個人資料匯出（端點 /api/me/export 由後端提供）：a 標籤直下載，不經前端路由 */}
-          <a href="/api/me/export" download className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />下載我的資料</a>
+          {/* 個人資料匯出（端點 /api/me/export 由後端提供）：a 標籤直下載，不經前端路由。
+           * 文案／圖示刻意與「工作」組的「共用文件下載」明確區隔——前者是團隊共用文件、後者是「你自己的」個資可讀複本，
+           * 舊版兩者都叫「資料下載／下載我的資料」又都像下載，非技術創作者分不清（使用者回饋）。 */}
+          <a href="/api/me/export" download className="menu-item" role="menuitem" title="下載一份你個人資料的可讀備份（含生成紀錄、留言、筆記、排程；不含密碼）" onClick={close}><Icon name="Download" size={15} />匯出我的個人資料</a>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
           <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>
             <Icon name="Undo2" size={15} />{loggingOut ? "登出中…" : "登出"}
