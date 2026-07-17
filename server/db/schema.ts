@@ -60,6 +60,10 @@ export const groupMembers = pgTable("group_members", {
   /** 個人總點數預算（累計上限，非每週重置）：組長從「組預算」再分配給這位組員的點數；
    *  該組員在本組的累計淨消耗達此值即擋下。null/0＝不限（只受組/全域上限）。組長可調。nullable＝pushSchema 安全 */
   budgetPoints: integer("budget_points"),
+  /** 團隊代理派工授權（需求 12 v2）：組彙總 AI 能「提議在某專案發起代理計畫」，實際執行交回
+   *  planAgentCore（沿用該專案的 ACL/扣點/併發守門）。派工預設只開放組長以上；組長/管理員可對
+   *  個別組員把此欄設 true 授權其派工。組長以上永遠可派、不受此欄影響。null＝未授權（nullable＝pushSchema 安全） */
+  canDispatchAgent: boolean("can_dispatch_agent"),
 });
 
 /** 全域點數設定（單列 key='global'）——不寫死在程式，管理員隨時可調 */
