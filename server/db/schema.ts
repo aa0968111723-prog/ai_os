@@ -116,6 +116,12 @@ export const mcpTokens = pgTable("mcp_tokens", {
   tokenHash: text("token_hash").notNull().unique(),
   /** 給人看的用途標籤（如「Claude 桌面版」「小美的筆電」），供列表辨識與撤銷 */
   label: text("label").notNull(),
+  /** 最小權限：唯讀金鑰只准呼叫讀取類工具（列專案/讀脈絡/找模型/查生成/查資料庫），
+   *  一律擋寫入類（送生成、貼留言、寫資料列）——把金鑰交給外部自動化時可只給讀。
+   *  預設 false（可讀可寫，行為同舊金鑰）。default＝pushSchema 安全、既有列回填 false。 */
+  readOnly: boolean("read_only").notNull().default(false),
+  /** 到期時刻（null＝永不過期）：過期即驗證失敗（比照撤銷）。交出去的金鑰可設短效期自動失效。nullable＝pushSchema 安全 */
+  expiresAt: timestamp("expires_at"),
   /** 最近成功呼叫時刻（fire-and-forget 更新）：供使用者判斷哪把在用、哪把可撤 */
   lastUsedAt: timestamp("last_used_at"),
   /** 撤銷時刻（非 null＝已撤銷，驗證即拒）——不硬刪，保留既有審計列的操作者歸屬 */

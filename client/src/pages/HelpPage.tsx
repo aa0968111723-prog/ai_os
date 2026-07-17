@@ -1,7 +1,6 @@
 import { type ReactNode } from "react";
 import { Link } from "wouter";
 import { Icon } from "../components/Icon";
-import { McpTokensCard } from "../components/McpTokensCard";
 
 /**
  * 怎麼用 / 常見問題：純靜態白話說明頁（無資料查詢、無新依賴）。
@@ -190,9 +189,11 @@ export function HelpPage() {
             <b>連進來的身分就是「你」</b>——只碰得到你有份的組與專案，扣的是你的點數額度，
             一樣受審批門檻限制。每個人用<b>自己的金鑰</b>，不共用、可隨時撤銷。
           </p>
-          <p style={{ margin: 0 }}>在下方卡片建立你的金鑰，複製到 AI 客戶端的 MCP 設定即可（帶 HTTP 標頭 <code>x-api-key</code>）。</p>
+          <p style={{ margin: 0 }}>
+            到 <Link href="/mcp"><b>「接上外部 AI」專區</b></Link> 建立金鑰、複製客戶端設定、測試連線，並看可用工具與近期活動。
+            也能建「唯讀」或「會到期」的金鑰交給自動化。
+          </p>
         </Faq>
-        <McpTokensCard />
       </div>
 
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="FileText" size={18} />名詞小辭典</h2>
