@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
-import { MODELS, WORKFLOW_PRESETS, getModel, getWorkflow, tierLabel, type ModelEntry } from "../../shared/models";
+import { CATEGORIES, MODELS, WORKFLOW_PRESETS, getModel, getWorkflow, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
@@ -213,7 +213,39 @@ async function callLlm(prompt: string): Promise<string> {
   return nimComplete(prompt, { timeoutMs: 60_000 });
 }
 
+/** 類別鍵 → 中文標籤（挑模型器分組用；找不到退回類別鍵本身） */
+const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(CATEGORIES.map((c) => [c.id, c.label]));
+
+/**
+ * 助手可代操的生成模型清單（多模態：文生圖／文生影片／文生語音／文生音頻／LLM）。
+ * 與 pickGenerateModel 的白名單同源（!needs＋ASSISTANT_MODEL_CATEGORIES）——供前端讓使用者
+ * 在「執行前」自己換模型；換到的 id 送回 runAction 時仍會再過同一張白名單，不怕繞過。
+ * 純函式（不吃 ctx）故可單元測試「清單全是免來源、且涵蓋多種模態」的不變式。
+ */
+export function listAssistantGenerateModels() {
+  const tierOrder: ModelTier[] = ["flagship", "economy", "budget"];
+  return MODELS.filter((m) => !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category))
+    .sort((a, b) => a.category.localeCompare(b.category) || tierOrder.indexOf(a.tier) - tierOrder.indexOf(b.tier))
+    .map((m) => ({
+      id: m.id,
+      label: m.label,
+      category: m.category,
+      categoryLabel: CATEGORY_LABEL[m.category] ?? m.category,
+      kind: m.kind,
+      tier: m.tier,
+      tierLabel: tierLabel(m.tier),
+      points: m.points,
+      strengths: m.strengths,
+      bestFor: m.bestFor,
+      verified: m.verified,
+      recommended: m.recommended ?? false,
+    }));
+}
+
 export const assistantRouter = router({
+  /** 助手可代操的多模態生成模型（供前端「換模型」下拉；與 pickGenerateModel 白名單同源） */
+  generateModels: authedProcedure.query(() => listAssistantGenerateModels()),
+
   /** 問答：讀專案現況回答，並可提議動作（僅提議，不執行） */
   ask: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), message: z.string().min(1).max(1000) }))
