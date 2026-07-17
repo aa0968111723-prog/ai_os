@@ -50,10 +50,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm install --no-audit --no-fund
-      - name: 依序跑五套 e2e(每套全新 DB + 重啟伺服器)
+      - name: 依序跑各套 e2e(每套全新 DB + 重啟伺服器)
         run: |
           set -eu
-          for suite in auth models phase2 phase3 phase4 messages; do
+          for suite in auth models phase2 phase3 phase4 messages databases; do
             echo "::group::e2e-$suite"
             # 全新資料庫:掃掉上一套的所有表,開機時 ensure.ts 會重建+種子
             PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \

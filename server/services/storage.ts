@@ -50,6 +50,13 @@ const MIME_EXT: Record<string, string> = {
   "text/plain": ".txt",
   "text/markdown": ".md",
   "application/pdf": ".pdf",
+  // 資料庫文件層（AI 可讀）擴充：表格/結構化/網頁/字幕/Word——素材上傳同樣受惠
+  "text/csv": ".csv",
+  "application/json": ".json",
+  "text/html": ".html",
+  "text/vtt": ".vtt",
+  "application/x-subrip": ".srt",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
 };
 
 export function extFromMime(mime: string): string | undefined {

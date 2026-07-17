@@ -6,7 +6,8 @@
  *   全部沿用網頁端同一套守衛（submit_generation 直接重用 submitGenerationCore）。
  * - 舊有共用金鑰 env MCP_API_KEY 仍可用（對應超管），僅為向後相容；見 services/mcpAuth。
  * - 工具：list_projects / get_project_context / find_model / submit_generation / post_message
- *        ＋自訂資料庫三件組 list_databases / query_database / add_database_row（權限走 databaseAcl）
+ *        ＋自訂資料庫 list_databases / query_database / add_database_row（權限走 databaseAcl）
+ *        ＋文件層 list_database_files / read_database_file（AI 讀 PDF/DOCX/HTML 抽出的純文字，分頁讀取）
  */
 import type { Request, Response } from "express";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -95,6 +96,31 @@ const TOOLS = [
         data: { type: "object", description: "{ 欄位key: 值 }" },
       },
       required: ["tableId", "data"],
+    },
+  },
+  {
+    name: "list_database_files",
+    description: "列出資料庫掛的文件（上傳檔與 Google/Notion 匯入）：名稱、格式、可讀字數；keyword 可過濾內文並回匹配片段。之後用 read_database_file 讀全文",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tableId: { type: "string" },
+        keyword: { type: "string", description: "過濾內文包含此關鍵字的文件（並回匹配片段）" },
+      },
+      required: ["tableId"],
+    },
+  },
+  {
+    name: "read_database_file",
+    description: "讀取文件抽出的純文字（PDF/DOCX/HTML 已由伺服器轉純文字）。單次最多 20000 字；長文用 offset 分段讀（回應含 totalChars）",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileId: { type: "string" },
+        offset: { type: "number", description: "從第幾個字開始（預設 0）" },
+        maxChars: { type: "number", description: "本次最多回幾個字（預設 20000，上限 20000）" },
+      },
+      required: ["fileId"],
     },
   },
 ];
@@ -229,6 +255,57 @@ async function runTool(auth: AuthState, name: string, args: Record<string, unkno
     const [row] = await db.insert(schema.dataRows).values({ tableId: table.id, data: checked.data, createdBy: auth.user.id }).returning();
     await db.update(schema.dataTables).set({ updatedAt: new Date() }).where(eq(schema.dataTables.id, table.id));
     return { rowId: row.id, data: checked.data };
+  }
+
+  if (name === "list_database_files") {
+    const tableId = String(args.tableId ?? "");
+    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
+    if (!table) throw new Error("找不到這個資料庫");
+    if (!resolveAgentAccess(auth, table).canRead) throw new Error("找不到這個資料庫");
+    const files = await db
+      .select()
+      .from(schema.dataFiles)
+      .where(eq(schema.dataFiles.tableId, table.id))
+      .orderBy(desc(schema.dataFiles.createdAt))
+      .limit(200);
+    const keyword = String(args.keyword ?? "").trim().toLowerCase();
+    return files.flatMap((f) => {
+      const text = f.textContent ?? "";
+      let snippet: string | null = null;
+      if (keyword) {
+        const idx = text.toLowerCase().indexOf(keyword);
+        if (idx < 0 && !f.name.toLowerCase().includes(keyword)) return [];
+        if (idx >= 0) snippet = text.slice(Math.max(0, idx - 80), idx + 120);
+      }
+      return [{
+        fileId: f.id,
+        name: f.name,
+        mime: f.mime,
+        sizeBytes: f.sizeBytes,
+        readableChars: text.length, // 0＝此格式暫不可讀（僅存檔）
+        sourceUrl: f.sourceUrl,
+        ...(snippet ? { snippet } : {}),
+      }];
+    });
+  }
+
+  if (name === "read_database_file") {
+    const fileId = String(args.fileId ?? "");
+    const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, fileId));
+    if (!file) throw new Error("找不到這份文件");
+    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, file.tableId), isNull(schema.dataTables.deletedAt)));
+    if (!table || !resolveAgentAccess(auth, table).canRead) throw new Error("找不到這份文件");
+    const text = file.textContent ?? "";
+    if (!text) return { name: file.name, totalChars: 0, note: "此格式暫不支援文字抽取（僅存檔）——支援：txt/md/csv/json/html/srt/vtt/pdf/docx" };
+    const offset = Math.max(0, Number(args.offset) || 0);
+    const maxChars = Math.min(Math.max(Number(args.maxChars) || 20_000, 1), 20_000);
+    return {
+      name: file.name,
+      totalChars: text.length,
+      offset,
+      text: text.slice(offset, offset + maxChars),
+      hasMore: offset + maxChars < text.length,
+    };
   }
 
   const projectId = String(args.projectId ?? "");

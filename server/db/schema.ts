@@ -71,6 +71,8 @@ export const settings = pgTable("settings", {
   defaultWeeklyPoints: integer("default_weekly_points"),
   /** 每人每日上限（null/0＝不限）——簡報「每人每日上限，不會有人不小心把預算爆掉」 */
   defaultDailyPoints: integer("default_daily_points"),
+  /** 資料庫文件每人儲存配額 GB（null＝預設 5；0＝不限）。nullable 新欄＝pushSchema 安全 */
+  fileQuotaGb: integer("file_quota_gb"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -653,6 +655,32 @@ export const dataTables = pgTable("data_tables", {
   ownerIdx: index("data_tables_owner_idx").on(t.ownerId),
   groupIdx: index("data_tables_group_idx").on(t.groupId),
   teamIdx: index("data_tables_team_idx").on(t.teamId),
+}));
+
+/**
+ * 資料庫文件（AI 可讀的檔案層）：檔案上傳或網址匯入（Google 雲端/Notion 公開頁）掛在某個資料庫下。
+ * - textContent＝伺服器抽出的純文字（AI 讀這裡；null＝此格式暫不可讀，僅存檔）。
+ * - storagePath＝Volume 落地檔（null＝純文字匯入，只有 textContent）。
+ * - 配額：每人（uploadedBy 加總 sizeBytes）預設 5GB，settings.fileQuotaGb 可調。
+ * 新表＝pushSchema 安全。
+ */
+export const dataFiles = pgTable("data_files", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tableId: uuid("table_id").notNull(),
+  name: text("name").notNull(),
+  mime: text("mime").notNull(),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  /** Volume 相對路徑（null＝僅文字，無原檔） */
+  storagePath: text("storage_path"),
+  /** 網址匯入的來源（供回溯與重新整理；上傳檔為 null） */
+  sourceUrl: text("source_url"),
+  /** 抽出的可讀文字（上限見 databaseFiles.MAX_TEXT_CHARS）；null＝AI 暫不可讀 */
+  textContent: text("text_content"),
+  uploadedBy: uuid("uploaded_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  tableIdx: index("data_files_table_idx").on(t.tableId),
+  uploaderIdx: index("data_files_uploader_idx").on(t.uploadedBy),
 }));
 
 export const dataRows = pgTable("data_rows", {
