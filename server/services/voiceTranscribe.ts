@@ -15,6 +15,11 @@ const STT_MODEL_ID = "fal-ai/wizper"; // 便宜快速、中文可用;逐字稿�
 const POLL_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 3_000;
 
+// 處理中認領（單容器部署，程序內 Set 即足夠，比照 generationRunner 的 inflight 防重）：
+// 一筆轉錄可能耗時 >60s（輪詢逾時 120s），期間該列仍是 pending，下一個掃描 tick 會再撈到同一列，
+// 若不認領就會被重複送 fal＋重複扣點。認領在 sweep 內「同步」加入（任何 await 之前），確保跨 tick 不交錯。
+const inflight = new Set<string>();
+
 /** 掃一批待轉錄的語音留言並補逐字稿;回傳完成筆數。失敗只標記 failed，不擋其他。 */
 export async function sweepVoiceTranscripts(limit = 5): Promise<number> {
   const rows = await db
@@ -26,7 +31,14 @@ export async function sweepVoiceTranscripts(limit = 5): Promise<number> {
   const model = getModel(STT_MODEL_ID);
   if (!model) return 0;
 
-  const results = await Promise.allSettled(rows.map((m) => transcribeOne(m)));
+  // 只處理尚未被前一個 tick 認領的列；認領同步完成，避免重複扣點。
+  const claimable = rows.filter((m) => !inflight.has(m.id));
+  if (claimable.length === 0) return 0;
+  for (const m of claimable) inflight.add(m.id);
+
+  const results = await Promise.allSettled(
+    claimable.map((m) => transcribeOne(m).finally(() => inflight.delete(m.id))),
+  );
   return results.filter((r) => r.status === "fulfilled" && r.value).length;
 }
 

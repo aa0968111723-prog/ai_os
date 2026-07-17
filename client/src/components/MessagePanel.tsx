@@ -135,6 +135,9 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   const react = trpc.messages.react.useMutation({ onSuccess: () => utils.messages.list.invalidate({ projectId }) });
   const setPinned = trpc.messages.setPinned.useMutation({ onSuccess: () => utils.messages.list.invalidate({ projectId }) });
   const markRead = trpc.messages.markRead.useMutation({
+    // silentSync：這是每 ~30s 自動觸發的「非內容」mutation，不該經即時同步廣播失效給同房所有人
+    // （否則光開著留言面板就讓每位協作者每 30 秒重抓全部查詢）。realtime 的廣播訂閱會據此跳過。
+    meta: { silentSync: true },
     onSuccess: () => utils.messages.unread.invalidate({ projectId }),
   });
   const addSchedule = trpc.schedule.add.useMutation({ onSuccess: () => setTodoFor(null) });

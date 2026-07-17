@@ -15,6 +15,22 @@ import { buildKnowledgeContext } from "../routers/knowledge";
 export const ASSISTANT_TRIGGER = "@助手";
 const ASK_COST_POINTS = 0; // NIM 免費額度;佈線保留供未來調價
 
+// 記憶體節流（比照 assistant.ask／director.suggest）：每人每分鐘 6 次。
+// @助手 成本 0 點、reserveQuota 擋不住，且 messages.post 不擋 viewer——不限流的話任何人可連發灌爆
+// NIM 免費額度並放大負載。over 就靜默丟棄（不呼叫 NIM、不落回覆），避免對話串被「請慢一點」洗版。
+const ASSISTANT_LIMIT_PER_MIN = 6;
+const ASSISTANT_WINDOW_MS = 60_000;
+const assistantHits = new Map<string, number[]>();
+function overAssistantLimit(userId: string): boolean {
+  const now = Date.now();
+  const arr = (assistantHits.get(userId) ?? []).filter((t) => now - t < ASSISTANT_WINDOW_MS);
+  const over = arr.length >= ASSISTANT_LIMIT_PER_MIN;
+  if (!over) arr.push(now);
+  if (arr.length) assistantHits.set(userId, arr);
+  else assistantHits.delete(userId); // 空陣列刪 key，長跑容器不記憶體洩漏
+  return over;
+}
+
 /** 觸發者身分記在 userId(留言 NOT NULL 需要);kind='assistant' 讓前端渲染成 AI 回覆 */
 export async function replyAsAssistant(opts: {
   projectId: string;
@@ -23,6 +39,11 @@ export async function replyAsAssistant(opts: {
   question: string;
 }): Promise<void> {
   const { projectId, groupId, askerId, question } = opts;
+  // 限流：超過就靜默丟棄，關掉 NIM 放大／洗版兩條路徑
+  if (overAssistantLimit(askerId)) {
+    console.warn(`[messageAssistant] 觸發過於頻繁，已忽略：asker=${askerId} project=${projectId}`);
+    return;
+  }
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) return;
 

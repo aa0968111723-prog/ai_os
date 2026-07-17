@@ -1005,12 +1005,14 @@ export function ProjectPage({ id }: { id: string }) {
                   )}
                 </p>
                 {/* 成本審核門檻提醒：組員單筆估點達組長設定的門檻→送出後要等組長核准才會開始生成 */}
+                {/* 用 estPoints（實際估點/扣點值）比門檻，而非 model.points——逐字計費的 TTS 會隨提示詞長度
+                    變動，用 model.points 會與伺服器（以真估點判斷）不一致，顯示「免核准」卻被擋審，反之亦然 */}
                 {myRole === "member" &&
                   quota.data?.approvalThreshold != null &&
                   quota.data.approvalThreshold > 0 &&
-                  model.points >= quota.data.approvalThreshold && (
+                  estPoints >= quota.data.approvalThreshold && (
                     <p style={{ margin: "4px 0", fontSize: 13, color: "var(--gold-ink)" }}>
-                      ⏳ 這筆需要組長核准後才會開始生成（{model.points} 點 ≥ 門檻 {quota.data.approvalThreshold} 點）
+                      ⏳ 這筆需要組長核准後才會開始生成（{estPoints} 點 ≥ 門檻 {quota.data.approvalThreshold} 點）
                     </p>
                   )}
                 <p className="hint" style={{ fontSize: 12 }}>失敗全額退點。正式模式會實際呼叫 AI 生成。</p>
