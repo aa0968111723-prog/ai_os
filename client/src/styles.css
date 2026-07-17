@@ -473,3 +473,7 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
   padding: 8px; background: var(--card2); border-radius: var(--r-8); }
 .todo-form input[type="datetime-local"] { flex: 0 1 auto; }
 .todo-form input:not([type]) { flex: 1 1 140px; min-width: 120px; }
+
+/* ── 工作台一體化：上下文摘要條——一眼看見 AI 全程共用哪些設定；chip 點了捲到對應卡 ── */
+.ctx-summary { display: flex; align-items: center; gap: 4px 6px; flex-wrap: wrap;
+  font-size: var(--fs-12); color: var(--fg-secondary); margin: -4px 0 0; }
