@@ -102,8 +102,9 @@ names = {t["name"] for t in d["result"]["tools"]}
 EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_generation","post_message",
     "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row",
     "list_database_files","read_database_file","plan_agent","approve_agent","stop_agent","discard_agent",
-    "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status"}
-ok("tools/list = 23 且名單完整", len(names) == 23 and EXPECTED <= names, f"{len(names)} 個")
+    "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status",
+    "list_notes","get_note"}  # 筆記兩工具（calendar-mcp-knowledge-map）
+ok("tools/list = 25 且名單完整", len(names) == 25 and EXPECTED <= names, f"{len(names)} 個")
 
 # ══════════ 23 工具逐一實跑（可寫金鑰）══════════
 print("\n######## 23 工具逐一實跑 ########")
