@@ -46,6 +46,12 @@ async function ensureSeedAdmin(): Promise<void> {
       .where(eq(schema.users.id, user.id));
     console.log(`[seed] 已補正開發者權限／狀態（未變更密碼）：${SEED_ADMIN_EMAIL}`);
   }
+  // 一次性正名：舊種子把帳號名建成「Bruce（超管）」，改名後這個 DB 值不會被覆寫（seed 不動既有名稱），
+  // 導致頂欄仍顯示「超管」。只在名稱仍是舊種子預設值時就地更名，使用者自訂過的名字不動。
+  if (user.name === "Bruce（超管）") {
+    await db.update(schema.users).set({ name: "Bruce（開發者）" }).where(eq(schema.users.id, user.id));
+    console.log(`[seed] 已將開發者帳號顯示名稱由「Bruce（超管）」更名為「Bruce（開發者）」`);
+  }
 }
 
 export async function ensureSeed(): Promise<void> {
