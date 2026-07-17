@@ -44,6 +44,10 @@ export interface AgentStep {
   points?: number;
   /** 執行期：生成步驟的冪等佔位 id */
   generationId?: string;
+  /** 執行期：split_script 的失敗重試計數（防 LLM 回壞 JSON 時無限重打 NIM 燒免費額度） */
+  retries?: number;
+  /** 執行期：split_script 動手前的分鏡數快照——重啟後看數字有沒有變，判斷上一次是否其實拆成功了（冪等） */
+  scenesBefore?: number;
   detail?: string;
 }
 
@@ -189,6 +193,40 @@ async function sceneByNo(projectId: string, no: number) {
   return rows[no - 1] ?? null;
 }
 
+/** 現存分鏡數（split_script 冪等快照用） */
+async function sceneCount(projectId: string): Promise<number> {
+  const [{ n }] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.scenes)
+    .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)));
+  return Number(n);
+}
+
+/**
+ * 以「發起人當下的真實角色」執行生成守門（審查修復：成本審核門檻只對組員生效，
+ * 原版不帶 assertAccess 導致 accessRole=undefined、組員門檻整段被繞過）。
+ * 代理背景執行沒有 ctx.auth，直接查 DB 推導——與 requireGroup 的角色語義對齊：
+ * 超管/團隊管理員＝admin、組長＝leader、組員＝member；已被移出組的發起人直接擋（run 會收攏成 failed）。
+ */
+async function runnerAccessRole(userId: string, groupId: string): Promise<"admin" | "leader" | "member"> {
+  const [u] = await db.select({ isSuperAdmin: schema.users.isSuperAdmin }).from(schema.users).where(eq(schema.users.id, userId));
+  if (u?.isSuperAdmin) return "admin";
+  const [grp] = await db.select({ teamId: schema.groups.teamId }).from(schema.groups).where(eq(schema.groups.id, groupId));
+  if (grp) {
+    const [tm] = await db
+      .select({ role: schema.teamMembers.role })
+      .from(schema.teamMembers)
+      .where(and(eq(schema.teamMembers.teamId, grp.teamId), eq(schema.teamMembers.userId, userId)));
+    if (tm?.role === "admin") return "admin";
+  }
+  const [gm] = await db
+    .select({ role: schema.groupMembers.role })
+    .from(schema.groupMembers)
+    .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, userId)));
+  if (!gm) throw new TRPCError({ code: "FORBIDDEN", message: "發起人已不在此組，代理無法繼續執行" });
+  return gm.role === "leader" ? "leader" : "member";
+}
+
 /** 一步失敗的統一收攏：標步驟與 run failed（代理與工作流同語義——寧可停下讓人看，不盲目燒點數） */
 async function failRun(run: RunRow, steps: AgentStep[], idx: number, msg: string): Promise<void> {
   const step = steps[idx];
@@ -232,6 +270,13 @@ async function advanceRun(run: RunRow): Promise<void> {
     return;
   }
 
+  // 執行前再讀一次狀態（審查修復：撈列到這裡有數秒空窗）——使用者剛按停就不要再執行任何步驟：
+  // 免費步驟雖不扣點，但「按了停止還在建分鏡/送審」同樣違反使用者預期（生成路徑送出前另有一次復查）
+  {
+    const [freshNow] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
+    if (!freshNow || freshNow.status !== "running") return; // 下一輪由收停分支統一標記
+  }
+
   // ── 非生成類步驟：在 tick 內同步執行（都是快速 DB 操作或單次 LLM 呼叫） ──
   if (step.kind === "create_scene") {
     const title = (step.title ?? "").trim();
@@ -261,6 +306,23 @@ async function advanceRun(run: RunRow): Promise<void> {
   }
 
   if (step.kind === "split_script") {
+    // 冪等恢復（審查修復）：上一輪標 running＋記 scenesBefore 後程序死亡——分鏡數已增加＝
+    // 上次其實拆成功、只差沒記 done：直接收下成果前進，不重拆（防重複建幕；快照間若有人手動加格
+    // 會提前誤判「拆過了」，屬罕見雙重巧合，代價只是少拆一次、可重新規劃）
+    if (step.status === "running" && step.scenesBefore != null) {
+      const nowCount = await sceneCount(run.projectId);
+      if (nowCount > step.scenesBefore) {
+        step.status = "done";
+        step.detail = `拆出 ${nowCount - step.scenesBefore} 幕`;
+        await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+        return;
+      }
+    }
+    if (step.status !== "running" || step.scenesBefore == null) {
+      step.status = "running";
+      step.scenesBefore = await sceneCount(run.projectId);
+      await saveRun(run.id, { steps });
+    }
     try {
       const result = await splitScriptCore({
         userId: run.userId,
@@ -273,10 +335,19 @@ async function advanceRun(run: RunRow): Promise<void> {
       step.detail = `拆出 ${result.count} 幕`;
       await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
     } catch (err) {
-      // 節流（每分鐘上限）是暫時性的：不終局，下輪重試
-      if (err instanceof TRPCError && (err.code === "TOO_MANY_REQUESTS" || err.code === "INTERNAL_SERVER_ERROR")) {
-        console.warn(`[agent] 拆分鏡暫時失敗（下輪重試）：run=${run.id}`, err.message);
-        return;
+      // 本地節流（每分鐘 6 次）在打 NIM 前就擋下、零外部成本：不計次，下輪重試
+      if (err instanceof TRPCError && err.code === "TOO_MANY_REQUESTS") return;
+      // 有限重試（審查修復：原版把「已計費不退」的解析失敗當暫時性無限重試，每輪重打 NIM 燒免費額度）：
+      // INTERNAL＝LLM 回壞 JSON，重試一次＝再燒一次呼叫，上限 3；SERVICE_UNAVAILABLE＝NIM 流量/點數
+      // 上限（流量約 1 分鐘解），上限 30（每 4 秒一輪 ≈ 2 分鐘）——超限收攏成 failed，不無限打轉
+      if (err instanceof TRPCError && (err.code === "INTERNAL_SERVER_ERROR" || err.code === "SERVICE_UNAVAILABLE")) {
+        const cap = err.code === "SERVICE_UNAVAILABLE" ? 30 : 3;
+        step.retries = (step.retries ?? 0) + 1;
+        if (step.retries < cap) {
+          step.detail = `${err.message}（自動重試 ${step.retries}/${cap}）`;
+          await saveRun(run.id, { steps });
+          return;
+        }
       }
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
@@ -337,6 +408,9 @@ async function advanceRun(run: RunRow): Promise<void> {
     await saveRun(run.id, { steps });
   }
   try {
+    // 審查修復：帶入發起人「當下」的真實角色——組員的成本審核門檻（單筆估點 ≥ 門檻須組長核准）
+    // 才會對代理生成生效（原版不帶 assertAccess，accessRole=undefined，門檻整段被繞過）
+    const accessRole = await runnerAccessRole(run.userId, run.groupId);
     await submitGenerationCore({
       id: step.generationId,
       userId: run.userId,
@@ -346,7 +420,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       sceneId,
       sceneRole,
       reasonPrefix: "AI 代理",
-      // 不帶 assertAccess：run 核准時已由 tRPC 層做過組隔離＋可編輯檢查（同工作流慣例）
+      assertAccess: () => accessRole,
     });
   } catch (err) {
     if (err instanceof TRPCError && err.code === "INTERNAL_SERVER_ERROR") {

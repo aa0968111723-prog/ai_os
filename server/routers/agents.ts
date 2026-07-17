@@ -9,6 +9,7 @@ import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { assertProjectEditable } from "../services/projectAcl";
+import { lockAgentApprove } from "../services/locks";
 import { buildKnowledgeContext } from "./knowledge";
 import { pickGenerateModel, MODEL_CHEATSHEET } from "./assistant";
 import { AGENT_TTS_MODEL, type AgentStep } from "../services/agentRunner";
@@ -287,25 +288,29 @@ ${knowledgeCtx ? `<專案知識庫節錄>\n${knowledgeCtx}\n</專案知識庫節
     if (run.status !== "awaiting_approval") {
       throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫已經開始執行或已結束" });
     }
-    // 併發守門（比照工作流）：同人同專案一次只跑一個代理——check-then-set 的短競態由步驟冪等防護兜底
-    const [active] = await db
-      .select({ id: schema.agentRuns.id })
-      .from(schema.agentRuns)
-      .where(
-        and(
-          eq(schema.agentRuns.projectId, run.projectId),
-          eq(schema.agentRuns.userId, run.userId),
-          eq(schema.agentRuns.status, "running"),
-        ),
-      )
-      .limit(1);
-    if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "你已有一個代理在跑——等它完成或先停止" });
-    // CAS：只有仍在待核准的才能起跑（防雙擊/兩人同按）
-    const updated = await db
-      .update(schema.agentRuns)
-      .set({ status: "running", updatedAt: new Date() })
-      .where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "awaiting_approval")))
-      .returning();
+    // 併發守門（審查修復：check-then-set 對「兩份不同的待核准計畫同時核准」擋不住——
+    // 交易＋per-(project,user) advisory lock 把同人同專案的核准全序列化，單併發保證才成立）
+    const updated = await db.transaction(async (tx) => {
+      await lockAgentApprove(tx, run.projectId, run.userId);
+      const [active] = await tx
+        .select({ id: schema.agentRuns.id })
+        .from(schema.agentRuns)
+        .where(
+          and(
+            eq(schema.agentRuns.projectId, run.projectId),
+            eq(schema.agentRuns.userId, run.userId),
+            eq(schema.agentRuns.status, "running"),
+          ),
+        )
+        .limit(1);
+      if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "你已有一個代理在跑——等它完成或先停止" });
+      // CAS：只有仍在待核准的才能起跑（防雙擊/兩人同按）
+      return tx
+        .update(schema.agentRuns)
+        .set({ status: "running", updatedAt: new Date() })
+        .where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "awaiting_approval")))
+        .returning();
+    });
     if (updated.length === 0) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫已經開始執行或已結束" });
     return updated[0];
   }),

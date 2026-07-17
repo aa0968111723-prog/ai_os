@@ -4,6 +4,8 @@
  * - 1:approvals per-scene(routers/approvals.ts submit/decide 序列化)
  * - 2:scenes orderIndex per-project(本檔)——「讀 max→插入/互換/重排」的 read-modify-write
  *   在 READ COMMITTED 下併發會算到同一個 max、寫出重複 orderIndex(核心缺陷審查:排序不定、move 失準)。
+ * - 3:agent runs 核准 per-(project,user)(本檔)——「查活躍→CAS 起跑」的 check-then-set,
+ *   兩份不同的待核准計畫被同時核准會雙雙起跑(單併發守門失效);上鎖後同人同專案核准全序列化。
  * 交易結束自動釋放,呼叫端必須在 db.transaction 內使用。
  */
 import { sql } from "drizzle-orm";
@@ -14,4 +16,9 @@ type Executor = { execute: (query: ReturnType<typeof sql>) => Promise<unknown> }
 /** 序列化同一專案的分鏡順序寫入(建格/移動/重排);不同專案不互卡 */
 export async function lockSceneOrder(tx: Executor, projectId: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${projectId}), 2)`);
+}
+
+/** 序列化同人同專案的 AI 代理核准(agents.approve):防兩份不同計畫同時核准雙雙起跑 */
+export async function lockAgentApprove(tx: Executor, projectId: string, userId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${projectId}:${userId}`}), 3)`);
 }

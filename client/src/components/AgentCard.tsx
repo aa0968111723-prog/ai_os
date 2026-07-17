@@ -32,13 +32,33 @@ const RUN_STATUS: Record<string, { label: string; cls: string }> = {
   stopped: { label: "已停止", cls: "queued" },
 };
 
-/** 有沒有還在動的 run（活躍才輪詢；含按停後仍在收尾的步驟） */
+/** 有沒有還在動的 run（活躍才輪詢）：執行中／待核准，或按停後仍有步驟等 runner 收尾標記
+ *（審查修復：剛按停時當前步驟可能還是 pending，要等下一個 tick 才標 stopped——這段期間要繼續輪詢，
+ *  否則畫面停在舊狀態） */
 function isActive(r: { status: string; steps: unknown }): boolean {
+  const steps = r.steps as AgentStep[];
   return (
     r.status === "running" ||
     r.status === "awaiting_approval" ||
-    (r.steps as AgentStep[]).some((s) => s.status === "running")
+    (r.status === "stopped" && steps.some((s) => s.status === "running" || s.status === "pending"))
   );
+}
+
+/** 桌面通知（審查修復：比照 WorkflowCard 的 notifyDesktop——permission 還是 default 時先徵求授權，
+ *  原版從不呼叫 requestPermission，沒授權過的使用者永遠收不到通知） */
+function notifyDesktop(title: string, body: string): void {
+  if (typeof Notification === "undefined") return;
+  const fire = () => {
+    if (Notification.permission !== "granted") return;
+    try {
+      new Notification(title, { body });
+    } catch { /* 部分瀏覽器背景分頁受限，忽略 */ }
+  };
+  if (Notification.permission === "default") {
+    Notification.requestPermission().then(fire).catch(() => {});
+  } else {
+    fire();
+  }
 }
 
 const GOAL_EXAMPLES = [
@@ -47,8 +67,10 @@ const GOAL_EXAMPLES = [
   "為已有配音詞的分鏡都生成旁白，然後把第 1 鏡送審",
 ];
 
-export function AgentCard({ projectId, canEdit }: { projectId: string; canEdit: boolean }) {
+export function AgentCard({ projectId, canEdit, isLeader = false }: { projectId: string; canEdit: boolean; isLeader?: boolean }) {
   const utils = trpc.useUtils();
+  // 與 App 同 key 共用快取：核准/停止的授權是「發起人本人或組長以上」，按鈕顯示要跟伺服器規則對齊
+  const me = trpc.auth.me.useQuery();
   const [goal, setGoal] = useState("");
   const runs = trpc.agents.listByProject.useQuery(
     { projectId },
@@ -91,10 +113,8 @@ export function AgentCard({ projectId, canEdit }: { projectId: string; canEdit: 
     const isFirst = prev.size === 0;
     for (const r of rows) {
       const before = prev.get(r.id);
-      if (!isFirst && before === "running" && (r.status === "done" || r.status === "failed") && Notification.permission === "granted") {
-        try {
-          new Notification(r.status === "done" ? "AI 代理完成 ✓" : "AI 代理失敗", { body: r.goal.slice(0, 30) });
-        } catch { /* 部分瀏覽器背景分頁受限，忽略 */ }
+      if (!isFirst && before === "running" && (r.status === "done" || r.status === "failed")) {
+        notifyDesktop(r.status === "done" ? "AI 代理完成 ✓" : "AI 代理失敗", r.goal.slice(0, 30));
       }
       prev.set(r.id, r.status);
     }
@@ -157,13 +177,16 @@ export function AgentCard({ projectId, canEdit }: { projectId: string; canEdit: 
       {(runs.data ?? []).map((r) => {
         const steps = r.steps as AgentStep[];
         const st = RUN_STATUS[r.status] ?? { label: r.status, cls: "queued" };
+        // 與伺服器授權規則對齊（審查修復）：核准/放棄/停止＝發起人本人或組長以上——
+        // 一般編輯者對別人的 run 按了必然 FORBIDDEN，直接不顯示按鈕
+        const canAct = canEdit && (isLeader || r.userId === me.data?.user.id);
         return (
           <div key={r.id} style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid var(--border-soft)" }} data-fb="代理執行列">
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <strong style={{ fontSize: "var(--fs-13)" }}>目標：{r.goal.slice(0, 60)}{r.goal.length > 60 ? "…" : ""}</strong>
               <span className={`pill ${st.cls}`}>{st.label}</span>
               <span className="hint">{new Date(r.createdAt).toLocaleString("zh-TW", { hour12: false })}</span>
-              {r.status === "running" && canEdit && (
+              {r.status === "running" && canAct && (
                 <button className="btn-sm" disabled={stop.isPending} onClick={() => stop.mutate({ runId: r.id })}>
                   {stop.isPending ? "停止中…" : "停止後續步驟"}
                 </button>
@@ -186,7 +209,7 @@ export function AgentCard({ projectId, canEdit }: { projectId: string; canEdit: 
             </div>
             {r.status === "awaiting_approval" && (
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-                {canEdit ? (
+                {canAct ? (
                   <>
                     <ConfirmButton
                       triggerClassName="primary"
