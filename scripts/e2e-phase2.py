@@ -79,8 +79,8 @@ pid = proj["id"]
 g_cheap = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "fal-ai/flux/schnell", "prompt": "晨光禪堂"})
 ok("低於門檻(1 點)直接送出", g_cheap.get("status") in ("queued", "running"))
 
-g_gate = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "fal-ai/flux-2/pro", "prompt": "夕陽古寺"})
-ok("達門檻(2 點)進待核", g_gate.get("status") == "awaiting_approval")
+g_gate = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "openai/gpt-image-2", "prompt": "夕陽古寺"})
+ok("達門檻(≥門檻)進待核", g_gate.get("status") == "awaiting_approval")
 
 deny = call("POST", mem, "generation.decideCost", {"id": g_gate["id"], "decision": "approved"})
 ok("🔒 組員不能自行核准", "__error__" in deny and "組長" in deny["__error__"])
@@ -93,11 +93,11 @@ ok("核准後完成(mock)", done1.get("status") == "done" and bool(done1.get("re
 dup = call("POST", admin, "generation.decideCost", {"id": g_gate["id"], "decision": "approved"})
 ok("重複裁決被擋", "__error__" in dup)
 
-g_gate2 = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "fal-ai/flux-2/pro", "prompt": "駁回測試"})
+g_gate2 = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "openai/gpt-image-2", "prompt": "駁回測試"})
 rej = call("POST", admin, "generation.decideCost", {"id": g_gate2["id"], "decision": "rejected", "reason": "先用便宜模型試方向"})
 ok("組長駁回附理由", rej.get("status") == "rejected" and "駁回" in (rej.get("error") or ""))
 
-leader_gen = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/flux-2/pro", "prompt": "組長自送"})
+leader_gen = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "openai/gpt-image-2", "prompt": "組長自送"})
 ok("組長/管理層自送不受門檻", leader_gen.get("status") in ("queued", "running"))
 
 lst = call("GET", mem, "generation.listByProjectPaged", {"projectId": pid, "status": "rejected"})
