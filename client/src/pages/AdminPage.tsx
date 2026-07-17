@@ -834,6 +834,7 @@ export function AdminPage() {
   const [teamRole, setTeamRole] = useState<"admin" | "member">("member");
   const [groupId, setGroupId] = useState("");
   const [groupRole, setGroupRole] = useState<"leader" | "member">("member");
+  const [sendEmailInvite, setSendEmailInvite] = useState(true);
   const invite = trpc.admin.invite.useMutation({
     onSuccess: () => {
       utils.admin.overview.invalidate();
@@ -905,7 +906,7 @@ export function AdminPage() {
   return (
     <div>
       <h1>團隊管理</h1>
-      <p className="sub">團隊 → 組別 → 成員。邀請連結 72 小時內有效，用 LINE 傳給夥伴即可。</p>
+      <p className="sub">團隊 → 組別 → 成員。邀請連結 72 小時內有效，可直接寄信給對方，或複製連結用 LINE 傳。</p>
       <div className="cols">
         <div className="stack">
           {teams.map((team) => (
@@ -1037,15 +1038,20 @@ export function AdminPage() {
             <option value="leader">組長</option>
           </select>
           {!groupId && <p className="hint" style={{ margin: "4px 0 0" }}>未選組時角色不生效——選了組別才需要設定。</p>}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, cursor: "pointer" }}>
+            <input type="checkbox" checked={sendEmailInvite} onChange={(e) => setSendEmailInvite(e.target.checked)} style={{ width: "auto" }} />
+            <span>同時把邀請連結寄到這個 Email</span>
+          </label>
+          <p className="hint" style={{ margin: "4px 0 0" }}>未設定信箱機制時會自動略過寄信，改用下方連結傳給對方即可。</p>
           <div style={{ marginTop: 16 }}>
             <button
               className="primary"
               disabled={!emailValid || !selectedTeam || invite.isPending}
               onClick={() =>
-                invite.mutate({ email: email.trim(), teamId: selectedTeam!.id, teamRole, groupId: groupId || undefined, groupRole })
+                invite.mutate({ email: email.trim(), teamId: selectedTeam!.id, teamRole, groupId: groupId || undefined, groupRole, sendEmailInvite })
               }
             >
-              {invite.isPending ? "建立中…" : "產生邀請連結"}
+              {invite.isPending ? "建立中…" : sendEmailInvite ? "產生連結並寄信" : "產生邀請連結"}
             </button>
           </div>
           {invite.data && invite.data.attached && (
@@ -1053,7 +1059,18 @@ export function AdminPage() {
           )}
           {invite.data && !invite.data.attached && invite.data.inviteUrl && (
             <div style={{ marginTop: 12 }}>
-              <p className="hint">複製這個連結，用 LINE 傳給夥伴（{invite.data.expiresInHours} 小時內有效）：</p>
+              {invite.data.emailStatus === "sent" && (
+                <p className="hint" style={{ color: "var(--success-ink)", fontWeight: 600 }}>✓ 邀請信已寄出到 {email || "對方信箱"}。也可複製下方連結備用：</p>
+              )}
+              {invite.data.emailStatus === "skipped" && (
+                <p className="hint" style={{ color: "var(--gold-ink)" }}>⚠ 尚未寄信（{invite.data.emailDetail ?? "信箱機制未設定"}）。請複製下方連結傳給對方：</p>
+              )}
+              {invite.data.emailStatus === "failed" && (
+                <p className="hint" style={{ color: "var(--gold-ink)" }}>⚠ 寄信失敗（{invite.data.emailDetail ?? "未知原因"}）。請改用下方連結傳給對方：</p>
+              )}
+              {!invite.data.emailStatus && (
+                <p className="hint">複製這個連結傳給夥伴（{invite.data.expiresInHours} 小時內有效）：</p>
+              )}
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <input readOnly value={toFullUrl(invite.data.inviteUrl)} onFocus={(e) => e.target.select()} />
                 <CopyButton text={toFullUrl(invite.data.inviteUrl)} />

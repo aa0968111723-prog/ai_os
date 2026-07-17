@@ -5,6 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { router, adminProcedure } from "../trpc";
 import { db, schema } from "../db";
 import { createInvite, attachExistingUser, hashPassword } from "../services/auth";
+import { sendEmail, isEmailConfigured, type EmailStatus } from "../services/email";
 
 /** 團隊管理權檢查：開發者或該團隊 admin */
 function assertTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, teamId: string): void {
@@ -17,6 +18,36 @@ function assertTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: 
 const TEMP_PASSWORD_CHARS = "abcdefghjkmnpqrstuvwxyz23456789";
 function generateTempPassword(): string {
   return Array.from(randomBytes(10), (b) => TEMP_PASSWORD_CHARS[b % TEMP_PASSWORD_CHARS.length]).join("");
+}
+
+/** 對外絕對網址：email 裡的連結不能是相對路徑。比照 projects.ts／fal.ts 的平台中立後備。 */
+function absoluteBaseUrl(): string {
+  const platformDomain = process.env.PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN;
+  const fallback = platformDomain ? `https://${platformDomain}` : "";
+  return process.env.APP_URL?.replace(/\/$/, "") || fallback || `http://localhost:${process.env.PORT ?? 3000}`;
+}
+
+/** 最小 HTML 逸脫：團隊名／邀請人名來自 DB，放進 email HTML 前擋掉標籤注入。 */
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+/** 邀請信內容（純文字必備、HTML 選附）：連結 72 小時內有效。 */
+export function buildInviteEmail(teamName: string, inviteUrl: string, inviterName: string): { subject: string; text: string; html: string } {
+  const subject = `邀請你加入「${teamName}」`;
+  const text = [
+    `${inviterName} 邀請你加入 AI Director OS 的「${teamName}」團隊。`,
+    "",
+    "點這個連結完成加入（72 小時內有效）：",
+    inviteUrl,
+    "",
+    "如果你不認識邀請人，請忽略這封信。",
+  ].join("\n");
+  const html =
+    `<p>${escapeHtml(inviterName)} 邀請你加入 AI Director OS 的「${escapeHtml(teamName)}」團隊。</p>` +
+    `<p>點下面的連結完成加入（72 小時內有效）：<br><a href="${escapeHtml(inviteUrl)}">${escapeHtml(inviteUrl)}</a></p>` +
+    `<p style="color:#888;font-size:12px">如果你不認識邀請人，請忽略這封信。</p>`;
+  return { subject, text, html };
 }
 
 export const adminRouter = router({
@@ -68,7 +99,10 @@ export const adminRouter = router({
       return group;
     }),
 
-  /** 建邀請 → 回傳連結（用 LINE 傳給夥伴即可，72 小時內有效） */
+  /**
+   * 建邀請 → 回傳連結；若 sendEmailInvite（預設 true）且信箱機制已設定，同時把連結寄到對方 email。
+   * 連結一律回傳供複製（LINE 等其他管道後備）；email 只是額外送達方式，寄失敗不擋流程。
+   */
   invite: adminProcedure
     .input(
       z.object({
@@ -77,10 +111,14 @@ export const adminRouter = router({
         teamRole: z.enum(["admin", "member"]).default("member"),
         groupId: z.string().uuid().optional(),
         groupRole: z.enum(["leader", "member"]).default("member"),
+        // 是否同時寄邀請信給對方；未設信箱機制時後端自動略過（回 skipped）
+        sendEmailInvite: z.boolean().default(true),
       }),
     )
     .mutation(async ({ ctx, input }) => {
       assertTeamAdmin(ctx.auth, input.teamId);
+      const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, input.teamId));
+      if (!team) throw new TRPCError({ code: "NOT_FOUND", message: "團隊不存在" });
       if (input.groupId) {
         const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, input.groupId));
         if (!group || group.teamId !== input.teamId) throw new TRPCError({ code: "BAD_REQUEST", message: "組不屬於該團隊" });
@@ -99,11 +137,38 @@ export const adminRouter = router({
           groupId: input.groupId,
           groupRole: input.groupRole,
         });
-        return { inviteUrl: null, attached: true, message: `${existing.name} 已直接加入（此 email 已有帳號，沿用原密碼登入）`, expiresInHours: 0 };
+        return {
+          inviteUrl: null,
+          attached: true,
+          message: `${existing.name} 已直接加入（此 email 已有帳號，沿用原密碼登入）`,
+          expiresInHours: 0,
+          emailStatus: null as EmailStatus | null,
+          emailDetail: null as string | null,
+        };
       }
       const { token } = await createInvite({ ...input, email, invitedBy: ctx.auth.user.id });
+      // 回傳給前端複製的連結沿用原本規則（APP_URL 未設＝相對路徑，前端 toFullUrl 補上瀏覽當下的來源）。
       const base = process.env.APP_URL ?? "";
-      return { inviteUrl: `${base}/invite/${token}`, attached: false, message: null as string | null, expiresInHours: 72 };
+      const inviteUrl = `${base}/invite/${token}`;
+
+      // 寄邀請信：只有勾了且信箱機制就緒才真的送；未設定＝優雅降級（skipped），流程照走、連結照回。
+      // email 內的連結必須是絕對網址（收件端沒有「瀏覽當下的來源」可補），故用平台中立的 absoluteBaseUrl。
+      let emailStatus: EmailStatus | null = null;
+      let emailDetail: string | null = null;
+      if (input.sendEmailInvite) {
+        if (!isEmailConfigured()) {
+          emailStatus = "skipped";
+          emailDetail = "未設定信箱機制（RESEND_API_KEY／EMAIL_FROM），請改用下方連結傳給對方";
+        } else {
+          const emailUrl = `${absoluteBaseUrl()}/invite/${token}`;
+          const { subject, text, html } = buildInviteEmail(team.name, emailUrl, ctx.auth.user.name);
+          const result = await sendEmail({ to: email, subject, text, html });
+          emailStatus = result.status;
+          emailDetail = result.detail;
+        }
+      }
+
+      return { inviteUrl, attached: false, message: null as string | null, expiresInHours: 72, emailStatus, emailDetail };
     }),
 
   /** 變更組內角色（組長↔組員） */
