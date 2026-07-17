@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { and, desc, eq, getTableColumns, ilike, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import { router, authedProcedure } from "../trpc";
 import { db, schema } from "../db";
@@ -29,9 +30,9 @@ export const auditRouter = router({
       const conds: SQL[] = [];
       if (!ctx.auth.user.isSuperAdmin) {
         // 組長以上可見界：在該組是 admin 或 leader 的組（loadAuthState 已把管理的團隊展開成 admin 組員資格）。
-        // 純 member 不算——組員看不到操作紀錄（與「組長們都可以看到」的需求一致）。
+        // 純 member 不算——組員看不到操作紀錄；一個可見組都沒有就直接擋（維持「組員不能看審計」的界線）。
         const visibleGroupIds = ctx.auth.groups.filter((g) => g.role !== "member").map((g) => g.groupId);
-        if (visibleGroupIds.length === 0) return { items: [], nextCursor: null };
+        if (visibleGroupIds.length === 0) throw new TRPCError({ code: "FORBIDDEN", message: "需要組長或管理權限" });
         conds.push(inArray(schema.auditLog.groupId, visibleGroupIds));
       }
       if (input.groupId) conds.push(eq(schema.auditLog.groupId, input.groupId));
