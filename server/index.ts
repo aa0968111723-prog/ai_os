@@ -577,7 +577,7 @@ app.post("/api/v1/databases/:id/rows", handleV1AddRow);
 app.get("/api/databases/:id/rows.csv", handleCsvExport);
 app.get("/api/databases/:id/calendar.ics", handleDatabaseIcs);
 
-// 系統自檢（超管登入後用瀏覽器開，或管理頁按鈕）——部署後一鍵驗證所有子系統
+// 系統自檢（開發者登入後用瀏覽器開，或管理頁按鈕）——部署後一鍵驗證所有子系統
 app.get("/api/selftest", async (req, res) => {
   const auth = await resolveSession(req);
   if (!auth?.user.isSuperAdmin) return res.status(403).json({ error: "需要開發者帳號登入後使用" });
@@ -702,7 +702,7 @@ app.get("/api/feedback/:id/shot", async (req, res) => {
     if (!report || !report.screenshotPath) return res.status(404).json({ error: "找不到截圖" });
     // 只服務 feedback/ 目錄下的截圖——擋掉「拿別池 asset 路徑當 screenshotPath 提交後偷讀」
     if (!isFeedbackShotPath(report.screenshotPath)) return res.status(404).json({ error: "找不到截圖" });
-    // 作者本人、報告所屬組的組長/管理員、或超管才看得到
+    // 作者本人、報告所屬組的組長/管理員、或開發者才看得到
     const canView =
       report.userId === auth.user.id ||
       auth.user.isSuperAdmin ||

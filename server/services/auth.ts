@@ -145,7 +145,7 @@ export function getSessionToken(req: Request): string | undefined {
 export interface AuthState {
   /** mustChangePassword：管理員重設密碼後為 true，前端據此強制顯示改密碼對話框 */
   user: { id: string; name: string; email: string; isSuperAdmin: boolean; mustChangePassword: boolean };
-  /** 可用組（含角色）：直接組員＋團隊管理展開＋超管展開全部 */
+  /** 可用組（含角色）：直接組員＋團隊管理展開＋開發者展開全部 */
   groups: Array<{ groupId: string; groupName: string; teamId: string; teamName: string; role: "admin" | "leader" | "member" }>;
   /** 有團隊管理權的團隊 id */
   adminTeamIds: string[];
@@ -171,7 +171,7 @@ export async function loadAuthState(userId: string): Promise<AuthState | null> {
     if (!group) continue;
     map.set(group.id, { groupId: group.id, groupName: group.name, teamId: group.teamId, teamName: teamName(group.teamId), role: row.role });
   }
-  // 團隊管理（含超管）→ 該團隊所有組以 admin 身分展開
+  // 團隊管理（含開發者）→ 該團隊所有組以 admin 身分展開
   for (const group of allGroups) {
     if (adminTeamIds.includes(group.teamId)) {
       map.set(group.id, { groupId: group.id, groupName: group.name, teamId: group.teamId, teamName: teamName(group.teamId), role: "admin" });
@@ -296,7 +296,7 @@ export async function acceptInvite(token: string, name: string, password: string
 
   // 安全關鍵：既有帳號「不得」透過邀請連結落地。
   // 舊版對既有 email 直接附掛並在 router 端發 session，等於任何拿到 token 的人
-  // 可免密碼登入成該既有帳號（含超管）→ 帳號接管／提權。既有成員要加入新團隊，
+  // 可免密碼登入成該既有帳號（含開發者）→ 帳號接管／提權。既有成員要加入新團隊，
   // 改由管理員在後台直接加入（admin.invite 對既有 email 會直接處理，不發可兌換連結）。
   const [existing] = await db.select().from(schema.users).where(eq(schema.users.email, invite.email));
   if (existing) {

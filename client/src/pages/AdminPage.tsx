@@ -120,7 +120,7 @@ function GroupQuotaRow({ group }: { group: { id: string; name: string } }) {
 }
 
 /**
- * 單一組的「組預算」輸入列（累計上限）：超管/團隊管理員把總點數池分配給這個組。
+ * 單一組的「組預算」輸入列（累計上限）：開發者/團隊管理員把總點數池分配給這個組。
  * 與週額度並列在團隊卡；讀值同走 quota.usage（回傳 groupBudget/groupUsed/allocated）。
  * 只在真的有改時才送出（同 GroupQuotaRow：避免 Tab 掃過空欄把組預算誤清成「不限」）。
  */
@@ -161,7 +161,7 @@ function GroupBudgetRow({ group }: { group: { id: string; name: string } }) {
           }}
         />
       )}
-      {/* 累計點數池：給超管看「這組發了多少、用了多少、組長分下去多少」——空=不限 */}
+      {/* 累計點數池：給開發者看「這組發了多少、用了多少、組長分下去多少」——空=不限 */}
       <span className="hint">
         {current != null ? `已用 ${used}／${current}・已分給組員 ${allocated}` : "空=不限（累計總量）"}
       </span>
@@ -180,7 +180,7 @@ function MemberChip({ groupId, groupName, member, canResetPassword }: {
   groupId: string;
   groupName: string;
   member: { id?: string; name?: string; role?: "leader" | "member" };
-  /** 後端會擋「超管/他團管理員」——注定失敗的重設鈕直接不畫，別讓管理員按了才吃 FORBIDDEN */
+  /** 後端會擋「開發者/他團管理員」——注定失敗的重設鈕直接不畫，別讓管理員按了才吃 FORBIDDEN */
   canResetPassword: boolean;
 }) {
   const utils = trpc.useUtils();
@@ -269,7 +269,7 @@ function CreateGroupRow({ teamId }: { teamId: string }) {
   );
 }
 
-/** 建立團隊（超管限定；非超管不渲染這張卡，後端 createTeam 也會再擋一次） */
+/** 建立團隊（開發者限定；非開發者不渲染這張卡，後端 createTeam 也會再擋一次） */
 function CreateTeamCard() {
   const utils = trpc.useUtils();
   const [name, setName] = useState("");
@@ -306,7 +306,7 @@ function SelfTestCard() {
     try {
       const res = await fetch("/api/selftest", { credentials: "include" });
       const data = await res.json().catch(() => ({}));
-      // 403（非超管）或任何非 2xx 回應沒有 checks 陣列——直接 .map 會整頁崩掉，先分流
+      // 403（非開發者）或任何非 2xx 回應沒有 checks 陣列——直接 .map 會整頁崩掉，先分流
       if (!res.ok || !Array.isArray(data.checks)) {
         setErrMsg(data.error ?? (res.status === 403 ? "系統自檢需要開發者帳號" : `自檢失敗（HTTP ${res.status}）`));
         return;
@@ -819,7 +819,7 @@ function FeedbackAgentCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   );
 }
 
-/** 管理頁（總管理/超管）：組織總覽＋邀請成員（連結用 LINE 傳） */
+/** 管理頁（總管理/開發者）：組織總覽＋邀請成員（連結用 LINE 傳） */
 export function AdminPage() {
   const utils = trpc.useUtils();
   const overview = trpc.admin.overview.useQuery();
@@ -924,7 +924,7 @@ export function AdminPage() {
                         groupId={g.id}
                         groupName={g.name}
                         member={m}
-                        // 與後端權限階梯一致：超管重設任何人；團隊管理員不能重設超管與其他管理員（自己除外）
+                        // 與後端權限階梯一致：開發者重設任何人；團隊管理員不能重設開發者與其他管理員（自己除外）
                         canResetPassword={
                           isSuperAdmin ||
                           (!m.isSuperAdmin && (m.id === me.data?.user.id || !team.admins.some((a) => a?.id === m.id)))
@@ -942,7 +942,7 @@ export function AdminPage() {
         </div>
 
         <aside className="stack">
-        {/* 系統自檢只有超管的 /api/selftest 能用——非超管按了只會 403，對他們是死功能，故只對超管顯示 */}
+        {/* 系統自檢只有開發者的 /api/selftest 能用——非開發者按了只會 403，對他們是死功能，故只對開發者顯示 */}
         {isSuperAdmin && <SelfTestCard />}
         <ConsumptionMonitorCard />
         <AuditLogCard />
@@ -961,7 +961,7 @@ export function AdminPage() {
           ) : settings.data ? (
             <>
               <label htmlFor="settings-total-budget">總預算點數（全系統）{!isSuperAdmin && <span className="hint">・限開發者調整</span>}</label>
-              {/* 非超管改總預算會被後端擋（FORBIDDEN）——直接 disable 並說明，別讓人白填才報錯 */}
+              {/* 非開發者改總預算會被後端擋（FORBIDDEN）——直接 disable 並說明，別讓人白填才報錯 */}
               <input
                 id="settings-total-budget"
                 ref={totalBudgetRef}

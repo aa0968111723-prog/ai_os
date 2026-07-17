@@ -232,7 +232,7 @@ async function sceneCount(projectId: string): Promise<number> {
  * 以「發起人當下的真實角色」執行生成守門（審查修復：成本審核門檻只對組員生效，
  * 原版不帶 assertAccess 導致 accessRole=undefined、組員門檻整段被繞過）。
  * 代理背景執行沒有 ctx.auth，直接查 DB 推導——與 requireGroup 的角色語義對齊：
- * 超管/團隊管理員＝admin、組長＝leader、組員＝member；已被移出組的發起人直接擋（run 會收攏成 failed）。
+ * 開發者/團隊管理員＝admin、組長＝leader、組員＝member；已被移出組的發起人直接擋（run 會收攏成 failed）。
  */
 async function runnerAccessRole(userId: string, groupId: string): Promise<"admin" | "leader" | "member"> {
   const [u] = await db.select({ isSuperAdmin: schema.users.isSuperAdmin }).from(schema.users).where(eq(schema.users.id, userId));

@@ -7,7 +7,7 @@ import { auditPrefixesForCategory } from "../../shared/auditWording";
 
 /**
  * 審計日誌查詢（需求 2.2）：組長以上皆可查（組長看得到自己組的操作流水）。
- * 可見範圍：開發者（超管）看全部；團隊管理員看自己管的團隊底下各組；
+ * 可見範圍：開發者看全部；團隊管理員看自己管的團隊底下各組；
  * 組長看自己帶的組——凡在該組是 admin／leader（非純 member）都算可見。
  * 與 feedback.list 的組隔離原則一致（無 groupId 歸屬的全域動作只有開發者看得到）。
  * keyset 分頁比照 generation.listByProjectPaged（createdAt desc, id desc＋::text 保微秒）。

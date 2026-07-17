@@ -5,7 +5,7 @@ import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } 
 import { db, schema } from "../db";
 import { getSettings, updateSettings, usedTotal, usedThisWeek, usedToday, effectiveDailyQuota, groupUsage, usedByGroup, usedByMember, loadQuotaConfig } from "../services/points";
 
-/** 團隊管理權檢查（組預算是由上往下分配的，只有團隊管理員以上能調）：超管或該組所屬團隊的 admin */
+/** 團隊管理權檢查（組預算是由上往下分配的，只有團隊管理員以上能調）：開發者或該組所屬團隊的 admin */
 async function assertGroupTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, groupId: string): Promise<void> {
   const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
   if (!group) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個組" });
@@ -14,7 +14,7 @@ async function assertGroupTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adm
   }
 }
 
-/** 點數與額度管理（定案：不鎖死——超管調全域、管理員調組、組長調成員） */
+/** 點數與額度管理（定案：不鎖死——開發者調全域、管理員調組、組長調成員） */
 export const quotaRouter = router({
   /** 我的額度＋剩餘（頂欄徽章；groupId 用當前作用組） */
   my: authedProcedure.input(z.object({ groupId: z.string().uuid().optional() }).optional()).query(async ({ ctx, input }) => {
@@ -55,7 +55,7 @@ export const quotaRouter = router({
     };
   }),
 
-  /** 全域設定（超管改；管理員可看） */
+  /** 全域設定（開發者改；管理員可看） */
   getSettings: adminProcedure.query(() => getSettings()),
   updateSettings: adminProcedure
     .input(
@@ -81,7 +81,7 @@ export const quotaRouter = router({
       return { ok: true };
     }),
 
-  /** 組總預算（累計上限）：超管/團隊管理員分配給組的點數池；0 或空＝不限。組長不可調（分配是由上往下） */
+  /** 組總預算（累計上限）：開發者/團隊管理員分配給組的點數池；0 或空＝不限。組長不可調（分配是由上往下） */
   setGroupBudget: authedProcedure
     .input(z.object({ groupId: z.string().uuid(), budgetPoints: z.number().int().min(0).nullable() }))
     .mutation(async ({ ctx, input }) => {
@@ -177,7 +177,7 @@ export const quotaRouter = router({
     .query(async ({ ctx, input }) => {
       const days = input?.days ?? 14;
 
-      // 可見範圍比照 audit.list：開發者（超管）看全站；一般團隊管理員只看 admin 身分展開的組
+      // 可見範圍比照 audit.list：開發者看全站；一般團隊管理員只看 admin 身分展開的組
       let adminGroupIds: string[] | null = null; // null＝不過濾（全站）
       if (!ctx.auth.user.isSuperAdmin) {
         adminGroupIds = ctx.auth.groups.filter((g) => g.role === "admin").map((g) => g.groupId);

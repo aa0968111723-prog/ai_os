@@ -1,7 +1,7 @@
 /**
  * AI Director OS — 資料庫 schema（單一真相來源）
  * PostgreSQL · Drizzle（pg 方言）
- * 組織模型：超管 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
+ * 組織模型：開發者 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
 import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 
@@ -31,8 +31,8 @@ export const groups = pgTable("groups", {
   name: text("name").notNull(),
   /** 每人每週點數上限（null＝用全域預設；0＝不限）——組長/管理員可調 */
   weeklyPointsPerUser: integer("weekly_points_per_user"),
-  /** 組總點數預算（累計上限，非每週重置）：超管/團隊管理員「分配給這個組」的點數池；
-   *  組累計淨消耗達此值即擋下，超管到組到組員形成分配樹。null/0＝不限（只受全域/上層限制）。
+  /** 組總點數預算（累計上限，非每週重置）：開發者/團隊管理員「分配給這個組」的點數池；
+   *  組累計淨消耗達此值即擋下，開發者到組到組員形成分配樹。null/0＝不限（只受全域/上層限制）。
    *  組長/管理員可看、只有團隊管理員以上能調（點數是由上往下分配的）。nullable＝pushSchema 安全 */
   budgetPoints: integer("budget_points"),
   /** 成本審核門檻（需求 2.1）：組員單筆生成估點 ≥ 此值需組長核准才送出；null/0＝不啟用。組長/管理員可調 */
@@ -102,7 +102,7 @@ export const sessions = pgTable("sessions", {
 });
 
 /**
- * MCP 個人連線金鑰（per-user，取代「單一共用 MCP_API_KEY＝人人超管」）：
+ * MCP 個人連線金鑰（per-user，取代「單一共用 MCP_API_KEY＝人人開發者」）：
  * 每位夥伴自助建立自己的金鑰，外部 AI 客戶端（Claude 等）帶此金鑰連進來時，
  * MCP 一律以「該金鑰的擁有者」身分＋其真實權限執行——組隔離、專案 ACL、點數額度、
  * 成本核准門檻全部沿用網頁端同一套守衛（見 services/mcp.ts）。
@@ -194,7 +194,7 @@ export const costLedger = pgTable("cost_ledger", {
   // 對同一 generationId 各插一列，唯一索引會 23505 擋死退點）。開機 pushSchema 自動套用。
   userGroupIdx: index("cost_ledger_user_group_idx").on(t.userId, t.groupId), // usedByMember + reserveQuota 個人預算；user_id 前綴另供 usedToday/usedThisWeek/週日守門
   groupCreatedIdx: index("cost_ledger_group_created_idx").on(t.groupId, t.createdAt), // usedByGroup/groupUsage（group_id 前綴）＋ consumptionStats 組×日期範圍
-  createdIdx: index("cost_ledger_created_idx").on(t.createdAt), // consumptionStats 全站（超管）日期範圍掃描
+  createdIdx: index("cost_ledger_created_idx").on(t.createdAt), // consumptionStats 全站（開發者）日期範圍掃描
   generationIdx: index("cost_ledger_generation_id_idx").on(t.generationId), // 週/日/組聚合對 generations 的 LEFT JOIN 鍵；退點對帳按生成查列
 }));
 
@@ -622,7 +622,7 @@ export const feedbackReports = pgTable("feedback_reports", {
 });
 
 /**
- * 回饋代理巡檢紀錄（每 3 天一次；亦可超管手動觸發）：每次巡檢寫一列，
+ * 回饋代理巡檢紀錄（每 3 天一次；亦可開發者手動觸發）：每次巡檢寫一列，
  * 記這輪看了幾筆、寄出幾封信、成功與否——管理頁「回饋代理」卡以最新一列顯示狀態。
  * 只插入不更新完局後不再改（running→done/failed 於同列 update），新表＝pushSchema 安全。
  */
@@ -631,7 +631,7 @@ export const feedbackReports = pgTable("feedback_reports", {
  * 欄位由使用者自訂（fields jsonb），列資料存 data_rows.data（jsonb）。
  * 權限完全沿用既有組織模型（見 services/databaseAcl.ts）：
  *   personal＝只有本人；group＝組成員（組長管理）；team＝團隊成員（團隊管理員管理）；
- *   global＝全站可讀（超管管理）。memberWritable=false 時列資料只有管理者可寫。
+ *   global＝全站可讀（開發者管理）。memberWritable=false 時列資料只有管理者可寫。
  * 新表＝pushSchema 安全。 */
 
 export const dataTables = pgTable("data_tables", {
@@ -648,7 +648,7 @@ export const dataTables = pgTable("data_tables", {
   description: text("description"),
   /** 欄位定義陣列（shared/databaseFields.ts 的 DataField[]）——結構是資料不是 schema，改欄位不動 DB */
   fields: jsonb("fields").notNull().default([]),
-  /** true＝範圍內成員都能新增/編輯列；false＝只有管理者（組長/團隊管理員/超管/建立者）能寫 */
+  /** true＝範圍內成員都能新增/編輯列；false＝只有管理者（組長/團隊管理員/開發者/建立者）能寫 */
   memberWritable: boolean("member_writable").notNull().default(true),
   /** AI／MCP 存取等級（管理者可調）：none＝AI 完全看不到、read＝AI 可查不可寫、write＝AI 可查可寫。
    *  約束的是「介面」（MCP 工具與團隊助手注入），人的網頁權限不受影響；
@@ -706,7 +706,7 @@ export const dataRows = pgTable("data_rows", {
 
 export const feedbackAgentRuns = pgTable("feedback_agent_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
-  /** manual＝超管在管理頁按「立即巡檢」；scheduled＝每 3 天排程自動觸發 */
+  /** manual＝開發者在管理頁按「立即巡檢」；scheduled＝每 3 天排程自動觸發 */
   trigger: text("trigger", { enum: ["scheduled", "manual"] }).notNull().default("scheduled"),
   status: text("status", { enum: ["running", "done", "failed"] }).notNull().default("running"),
   /** 這輪分診的回饋筆數 */

@@ -1,13 +1,13 @@
 /**
  * 自訂資料庫的權限解析（權限系統接點）：完全建立在既有組織模型（AuthState）上，
- * 不另設角色——「個人→組→團隊→全站」四層範圍對應現有的 user / group / team / 超管。
+ * 不另設角色——「個人→組→團隊→全站」四層範圍對應現有的 user / group / team / 開發者。
  *
  * 權限矩陣（單一真相來源，tRPC 與 MCP 都走這裡）：
- *   personal：僅擁有者本人（讀/寫/管理）。超管也看不到——個人庫是私人空間。
+ *   personal：僅擁有者本人（讀/寫/管理）。開發者也看不到——個人庫是私人空間。
  *   group   ：組成員可讀；寫列＝memberWritable 或 組長以上；管理＝組長以上或建立者。
  *   team    ：團隊成員（該團隊任一組的成員＋團隊管理員）可讀；寫列＝memberWritable 或 團隊管理員；
- *             管理＝團隊管理員（含超管）或建立者。
- *   global  ：全站登入者可讀；寫列＝memberWritable 或 超管；管理＝超管（建立也限超管）。
+ *             管理＝團隊管理員（含開發者）或建立者。
+ *   global  ：全站登入者可讀；寫列＝memberWritable 或 開發者；管理＝開發者（建立也限開發者）。
  */
 import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "../db";
@@ -25,7 +25,7 @@ export interface DbAccess {
 
 const NONE: DbAccess = { canRead: false, canWriteRows: false, canManage: false };
 
-/** 使用者所屬團隊 id 集合（成員身分＋管理身分；超管在 loadAuthState 已展開全部） */
+/** 使用者所屬團隊 id 集合（成員身分＋管理身分；開發者在 loadAuthState 已展開全部） */
 function memberTeamIds(auth: AuthState): Set<string> {
   const ids = new Set<string>(auth.adminTeamIds);
   for (const g of auth.groups) ids.add(g.teamId);
@@ -92,7 +92,7 @@ export function resolveAgentAccess(
   };
 }
 
-/** 建立守衛：這個人能不能在該範圍建庫（global 限超管，其餘＝該範圍成員） */
+/** 建立守衛：這個人能不能在該範圍建庫（global 限開發者，其餘＝該範圍成員） */
 export function canCreateIn(auth: AuthState, scope: DataTableRow["scope"], groupId?: string | null, teamId?: string | null): string | null {
   if (scope === "personal") return null;
   if (scope === "group") {

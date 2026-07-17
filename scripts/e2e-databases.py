@@ -108,9 +108,9 @@ ok("必填缺值被擋", "__error__" in badrow)
 listed = call("GET", azhe, "databases.listRows", {"tableId": personal["id"]})
 ok("列出資料列", listed["total"] == 1 and listed["rows"][0]["data"]["task"] == "剪好開示片")
 
-# ── 個人庫隔離：超管也看不到阿哲的個人庫 ──
+# ── 個人庫隔離：開發者也看不到阿哲的個人庫 ──
 admin_list = call("GET", admin, "databases.list")
-ok("🔒 超管看不到他人個人庫", not any(t["id"] == personal["id"] for t in admin_list))
+ok("🔒 開發者看不到他人個人庫", not any(t["id"] == personal["id"] for t in admin_list))
 
 # ── 文件層：上傳純文字，抽字成功 ──
 st, up = upload_file(azhe, personal["id"], "逐字稿.txt", "師父開示：慈悲喜捨，普度眾生。", "text/plain")
@@ -200,13 +200,13 @@ cross = call("POST", azhe, "databases.create", {
     "fields": [{"key": "x", "label": "X", "type": "text"}]})
 ok("🔒 非本組不可建組庫", "__error__" in cross and "不屬於" in cross["__error__"])
 
-# ── 全站庫限超管 ──
+# ── 全站庫限開發者 ──
 glob = call("POST", azhe, "databases.create", {"scope": "global", "name": "組員建全站庫",
                                                "fields": [{"key": "x", "label": "X", "type": "text"}]})
 ok("🔒 組員不可建全站庫", "__error__" in glob and "超級管理員" in glob["__error__"])
 glob_ok = call("POST", admin, "databases.create", {"scope": "global", "name": "全站公告",
                                                    "fields": [{"key": "msg", "label": "訊息", "type": "text"}]})
-ok("超管可建全站庫", glob_ok.get("scope") == "global")
+ok("開發者可建全站庫", glob_ok.get("scope") == "global")
 
 # ── 刪文件釋放配額 ──
 before = call("GET", azhe, "databases.listFiles", {"tableId": personal["id"]})["quota"]["usedBytes"]
