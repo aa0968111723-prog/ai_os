@@ -5,7 +5,14 @@
  * 首報價非千字者維持扁平）是動態計費的核心防線。
  */
 import { describe, expect, it } from "vitest";
-import { estimatePoints, getModel } from "./models";
+import {
+  MODELS,
+  SCENARIO_GROUPS,
+  SCENARIO_RECIPES,
+  STYLE_SHOWDOWNS,
+  estimatePoints,
+  getModel,
+} from "./models";
 
 const v3 = getModel("fal-ai/elevenlabs/tts/eleven-v3")!; // $0.10/千字 → 3.1 點/千字
 const kokoro = getModel("fal-ai/kokoro/mandarin-chinese")!; // $0.02/千字 → 0.62 點/千字
@@ -44,5 +51,50 @@ describe("estimatePoints：非按字計費者一律扁平", () => {
 
   it("文生圖模型忽略 promptChars", () => {
     expect(estimatePoints(flux, { promptChars: 9999 })).toBe(flux.points);
+  });
+});
+
+/**
+ * 決策層(情境配方＋風格 PK)引用完整性:
+ * 這兩張表用字串 id 引用 MODELS,是模型指南「看情境/比風格」的資料來源。若某 id 打錯字或
+ * 指到已移除/改名的模型,指南會渲染出空白的首選卡而使用者無從察覺——這條測試把「引用必須存在」
+ * 變成編譯期之外的硬防線(id 只能指向現存的 MODELS,不含 LEGACY_MODELS)。
+ */
+describe("決策層:情境配方 & 風格 PK 引用完整性", () => {
+  const liveIds = new Set(MODELS.map((m) => m.id));
+  const groupIds = new Set(SCENARIO_GROUPS.map((g) => g.id));
+
+  it("每條情境配方:group 有效、pickIds 非空且無重複、每個 id 都指向現存模型", () => {
+    for (const r of SCENARIO_RECIPES) {
+      expect(groupIds.has(r.group), `${r.id} 的 group「${r.group}」不存在`).toBe(true);
+      expect(r.pickIds.length, `${r.id} 的 pickIds 不可為空`).toBeGreaterThan(0);
+      expect(new Set(r.pickIds).size, `${r.id} 的 pickIds 有重複`).toBe(r.pickIds.length);
+      for (const id of r.pickIds) {
+        expect(liveIds.has(id), `${r.id} 指向不存在的模型 ${id}`).toBe(true);
+      }
+    }
+  });
+
+  it("情境配方 id 全站唯一", () => {
+    const ids = SCENARIO_RECIPES.map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("每張風格 PK:axes 非空、winner/runnerUp 都指向現存模型且彼此不同", () => {
+    for (const s of STYLE_SHOWDOWNS) {
+      expect(s.axes.length, `${s.id} 的 axes 不可為空`).toBeGreaterThan(0);
+      for (const a of s.axes) {
+        expect(liveIds.has(a.winnerId), `${s.id}/${a.axis} 的首選 ${a.winnerId} 不存在`).toBe(true);
+        if (a.runnerUpId) {
+          expect(liveIds.has(a.runnerUpId), `${s.id}/${a.axis} 的次選 ${a.runnerUpId} 不存在`).toBe(true);
+          expect(a.winnerId, `${s.id}/${a.axis} 首選與次選相同`).not.toBe(a.runnerUpId);
+        }
+      }
+    }
+  });
+
+  it("風格 PK id 全站唯一", () => {
+    const ids = STYLE_SHOWDOWNS.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
