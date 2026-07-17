@@ -45,15 +45,32 @@ const DEFAULT_IMAGE_MODEL = MODELS.find((m) => m.category === "text-to-image" &&
  * 需要來源素材的類別（圖生圖／轉錄／對嘴／訓練…）助手還沒辦法幫使用者附檔，提了也必然失敗。
  */
 const ASSISTANT_MODEL_CATEGORIES = new Set(["text-to-image", "text-to-video", "text-to-audio", "text-to-speech", "llm"]);
-/** 白名單挑模型：LLM 提的 modelId 必須「在註冊表、不需來源素材、類別可代操」才採用，否則退回預設圖像模型（幻覺 id 不落地）。
+/**
+ * 助手可代操的模型：必須「在現役 MODELS、不需來源素材、類別可代操」才算數。
+ * 刻意只掃 MODELS（不用 getModel）——getModel 會一併查 LEGACY_MODELS（退役但保留供既有生成紀錄標籤），
+ * 其中的 fal-ai/any-llm#*（付費 fal LLM）與退役付費影片端點雖同類同免來源，也「不得」經助手代送
+ * （本站 LLM 一律走 NIM 免費、且這些端點已退役）。露出端（generateModels/cheatsheet/find_model）與
+ * 執行端（runAction）都用這張同源白名單，杜絕「UI 看不到、手打 payload 卻送得出」的來源集漂移。
+ */
+export function assistantModel(id?: string): ModelEntry | undefined {
+  if (!id) return undefined;
+  const m = MODELS.find((x) => x.id === id);
+  return m && !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category) ? m : undefined;
+}
+/** 白名單挑模型：LLM 提的 modelId 過不了 assistantModel（幻覺／需來源／錯類別／退役）就退回預設圖像模型。
  *  export 給 AI 代理（agents.ts）共用——規劃與執行兩端用同一張白名單，規則不分岔。 */
 export function pickGenerateModel(proposedId?: string): ModelEntry {
-  if (proposedId) {
-    const m = getModel(proposedId);
-    if (m && !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category)) return m;
-  }
   // 預設模型 id 一定取自註冊表（見 DEFAULT_IMAGE_MODEL 的來源），?? MODELS[0] 只是型別防禦
-  return getModel(DEFAULT_IMAGE_MODEL) ?? MODELS[0];
+  return assistantModel(proposedId) ?? getModel(DEFAULT_IMAGE_MODEL) ?? MODELS[0];
+}
+/**
+ * 生成成品能填進分鏡的哪個格：視覺（圖／影）→主畫面 assetId；旁白語音→旁白音檔 narrationAssetId。
+ * 配樂/音效（text-to-audio）與純文字（llm）沒有對應的分鏡格 → null（綁分鏡會落空或覆蓋旁白，故不准綁）。
+ */
+export function sceneFillRole(model: ModelEntry): "visual" | "narration" | null {
+  if (model.category === "text-to-image" || model.category === "text-to-video") return "visual";
+  if (model.category === "text-to-speech") return "narration";
+  return null;
 }
 /** 提示詞用「可用模型速查」：各類別 recommended 的日常主力，一行一個（上限 12 行，防提示詞隨註冊表膨脹）。
  *  export 給 AI 代理的規劃提示詞共用。 */
@@ -98,7 +115,9 @@ const replySchema = z.object({ answer: z.string().min(1).max(4000), actions: z.a
 
 /** 前端拿到的「已解析」動作（帶真實 sceneId＋人看得懂的標籤＋白名單過的模型），確認後原樣回送 runAction */
 type ResolvedAction =
-  | { type: "generate"; label: string; prompt: string; modelId: string; sceneId?: string }
+  // sceneNo/sceneTitle 供前端在「換模型」後就地重建按鈕/確認文字（保留「為第 N 鏡「標題」」而換上新模型與新估點）；
+  // 只給人看，toPayload 會丟掉，不進 runAction
+  | { type: "generate"; label: string; prompt: string; modelId: string; sceneId?: string; sceneNo?: number; sceneTitle?: string }
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
   | { type: "submit_approval"; label: string; sceneId: string }
   | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number }
@@ -242,20 +261,44 @@ export function listAssistantGenerateModels() {
     }));
 }
 
-export const assistantRouter = router({
-  /** 助手可代操的多模態生成模型（供前端「換模型」下拉；與 pickGenerateModel 白名單同源） */
-  generateModels: authedProcedure.query(() => listAssistantGenerateModels()),
+/** 思考過程串流事件（給前端即時呈現「AI 在想什麼」）：思考中／正在查什麼／查到什麼 */
+export type AskStreamEvent = { phase: "thinking" | "lookup" | "step"; text: string };
+export interface AskCoreInput {
+  projectId: string;
+  message: string;
+  userId: string;
+  /** 組隔離檢查（tRPC 端用 ctx.auth.groups；SSE 端用 resolveSession 的 groups）——回 false 即擋 FORBIDDEN */
+  isInGroup: (groupId: string) => boolean;
+}
+export interface AskCoreResult {
+  answer: string;
+  actions: ResolvedAction[];
+  steps: string[];
+  mock: boolean;
+  fallback: boolean;
+}
+/** 查詢工具 → 給使用者看的中文名（串流「正在查素材庫…」用） */
+const LOOKUP_LABEL: Record<string, string> = {
+  list_assets: "素材庫", read_scene: "分鏡內容", list_generations: "生成紀錄", find_model: "模型目錄",
+};
 
-  /** 問答：讀專案現況回答，並可提議動作（僅提議，不執行） */
-  ask: authedProcedure
-    .input(z.object({ projectId: z.string().uuid(), message: z.string().min(1).max(1000) }))
-    .mutation(async ({ ctx, input }) => {
-      if (overLimit(ctx.auth.user.id)) {
-        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "問得太頻繁（每分鐘最多 6 次），休息一下再問" });
-      }
+/**
+ * 專案助手問答核心（tRPC ask 與 SSE 串流路由共用）：讀專案上下文 → 多步唯讀工具迴圈 → 最終回答＋可執行動作。
+ * onEvent 逐步回報「思考過程」（讀取現況／正在查什麼／查到什麼／整理回答），讓前端可即時串流呈現全過程；
+ * 不帶 onEvent 時行為與原本 ask 完全一致（只在結束回 steps 摘要）。所有花點數/改資料仍只在 runAction，經使用者確認。
+ */
+export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStreamEvent) => void): Promise<AskCoreResult> {
+  const emit = (phase: AskStreamEvent["phase"], text: string) => {
+    try { onEvent?.({ phase, text }); } catch { /* 串流端斷線不影響問答本身 */ }
+  };
+  if (overLimit(input.userId)) {
+    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "問得太頻繁（每分鐘最多 6 次），休息一下再問" });
+  }
+  {
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
-      requireGroup(ctx.auth, project.groupId);
+      if (!input.isInGroup(project.groupId)) throw new TRPCError({ code: "FORBIDDEN", message: "你不屬於這個組" });
+      emit("thinking", "讀取專案現況與知識庫…");
       const wv = worldviewSchema.parse(project.worldview ?? {});
 
       // 現況：分鏡（依序）＋生成統計＋待審數
@@ -291,6 +334,9 @@ ${sceneLines}
             const model = pickGenerateModel(a.modelId); // 白名單不過就退回預設圖像模型
             out.push({
               type: "generate", modelId: model.id, prompt: a.prompt, sceneId: scene?.id,
+              // sceneNo/sceneTitle 讓前端換模型後仍能重建「為第 N 鏡「標題」」（label 只是預設模型的版本）
+              sceneNo: scene ? a.sceneNo : undefined,
+              sceneTitle: scene?.title,
               // label 註明模型與估點，讓使用者按下前就知道會用哪個模型、大約花多少
               label: scene
                 ? `用 ${model.label} 為第 ${a.sceneNo} 鏡「${scene.title}」生成（${model.points} 點）`
@@ -320,11 +366,12 @@ ${sceneLines}
 
       // 假模式：回確定性的現況摘要（不花錢可測），不提議動作
       if (isMockMode()) {
+        emit("thinking", "（測試模式）整理專案現況…");
         const answer = `（測試模式）目前有 ${scenes.length} 個分鏡，其中待審 ${pendingCount} 個；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}。你的問題：「${input.message}」——正式模式下我會讀專案內容（可先查素材庫／分鏡／生成紀錄／模型目錄）給你更具體的回覆與可執行的建議動作。`;
         return { answer, actions: [] as ResolvedAction[], steps: [] as string[], mock: true, fallback: false };
       }
 
-      const quotaError = await reserveQuota(ctx.auth.user.id, project.groupId, ASK_COST_POINTS, "AI 專案助手");
+      const quotaError = await reserveQuota(input.userId, project.groupId, ASK_COST_POINTS, "AI 專案助手");
       if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
 
       /** 組每輪的完整提示詞：基底任務＋工具說明＋速查＋情境手冊＋現況/知識庫＋(累積的工具結果)＋問題 */
@@ -369,6 +416,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
       let toolBlocks = "";
       try {
         for (let round = 0; ; round++) {
+          emit("thinking", round === 0 ? "思考中…" : "整理查到的資料，繼續思考…");
           const forceFinal = round >= MAX_TOOL_ROUNDS;
           const raw = await callLlm(buildPrompt(toolBlocks, forceFinal));
           const match = raw.match(/\{[\s\S]*\}/);
@@ -382,12 +430,15 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           if (json && !forceFinal) {
             const toolCall = toolCallSchema.safeParse(json);
             if (toolCall.success) {
+              emit("lookup", `正在查${LOOKUP_LABEL[toolCall.data.tool] ?? "資料"}…`);
               const r = await runLookupTool(project, scenes, toolCall.data);
               steps.push(r.step);
+              emit("step", r.step);
               toolBlocks += `\n<工具結果 tool="${toolCall.data.tool}" 第${round + 1}輪>\n${r.text}\n</工具結果>`;
               continue;
             }
           }
+          emit("thinking", "整理回答…");
           const parsed = json ? replySchema.safeParse(json) : null;
           // 解析失敗：LLM 已計費不退點，但至少把純文字當回答（不提議動作），前端不會拿到壞資料
           if (!parsed?.success) {
@@ -397,12 +448,29 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           return { answer: parsed.data.answer, actions: resolve(parsed.data.actions ?? []), steps, mock: false, fallback: false };
         }
       } catch (err) {
-        await refund(ctx.auth.user.id, project.groupId, ASK_COST_POINTS, "AI 專案助手失敗退回");
+        await refund(input.userId, project.groupId, ASK_COST_POINTS, "AI 專案助手失敗退回");
         // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
         const answer = err instanceof NimServiceError ? err.message : "AI 助手暫時沒回應，請稍後再問一次。";
         return { answer, actions: [] as ResolvedAction[], steps, mock: false, fallback: true };
       }
-    }),
+  }
+}
+
+export const assistantRouter = router({
+  /** 助手可代操的多模態生成模型（供前端「換模型」下拉；與 pickGenerateModel 白名單同源） */
+  generateModels: authedProcedure.query(() => listAssistantGenerateModels()),
+
+  /** 問答：讀專案現況回答，並可提議動作（僅提議，不執行）。核心與 SSE 串流路由共用 runAssistantAsk。 */
+  ask: authedProcedure
+    .input(z.object({ projectId: z.string().uuid(), message: z.string().min(1).max(1000) }))
+    .mutation(({ ctx, input }) =>
+      runAssistantAsk({
+        projectId: input.projectId,
+        message: input.message,
+        userId: ctx.auth.user.id,
+        isInGroup: (groupId) => ctx.auth.groups.some((g) => g.groupId === groupId),
+      }),
+    ),
 
   /** 執行一個「使用者已確認」的動作，以登入者本人身分（含組隔離與扣點守門） */
   runAction: authedProcedure
@@ -416,14 +484,29 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
       const a = input.action;
 
       if (a.type === "generate") {
-        // 白名單在執行端再驗一次（payload 可由任何呼叫端組出，不能只信 ask 端 resolve 的結果）
-        const model = getModel(a.modelId);
-        if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "不認識這個模型——請重新問一次助手，讓它重新提議" });
-        if (model.needs) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: `「${model.label}」需要來源素材（${model.sourceHint ?? "圖／音／影檔"}），助手還沒辦法幫你附來源——請到生成台操作` });
+        // 白名單在執行端再驗一次（payload 可由任何呼叫端組出，不能只信 ask 端 resolve 的結果）。
+        // 先用 getModel 分辨「錯在哪」給人話訊息，再以 assistantModel（只認現役 MODELS）擋掉退役付費端點。
+        const known = getModel(a.modelId);
+        if (!known) throw new TRPCError({ code: "BAD_REQUEST", message: "不認識這個模型——請重新問一次助手，讓它重新提議" });
+        if (known.needs) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `「${known.label}」需要來源素材（${known.sourceHint ?? "圖／音／影檔"}），助手還沒辦法幫你附來源——請到生成台操作` });
         }
-        if (!ASSISTANT_MODEL_CATEGORIES.has(model.category)) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: `「${model.label}」不在助手可代操的類別，請到生成台操作` });
+        if (!ASSISTANT_MODEL_CATEGORIES.has(known.category)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: `「${known.label}」不在助手可代操的類別，請到生成台操作` });
+        }
+        const model = assistantModel(a.modelId);
+        if (!model) {
+          // 命中 getModel 但過不了 assistantModel＝退役 LEGACY 端點（付費 any-llm／退役影片）：不得經助手代送
+          throw new TRPCError({ code: "BAD_REQUEST", message: `「${known.label}」是已退役的模型，助手不再代送——請改用目前的模型或到生成台操作` });
+        }
+        // 綁分鏡：只有能填進分鏡格的成品才准綁——文字（LLM）不會入分鏡、配樂（text-to-audio）沒有專屬槽會覆蓋旁白，
+        // 兩者綁鏡都會「回報成功卻靜默落空／覆蓋」，故明確擋下並指路，而非讓它默默扣點又不回填。
+        const role = a.sceneId ? sceneFillRole(model) : undefined;
+        if (a.sceneId && role === null) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `「${model.label}」的成品是${model.kind === "text" ? "文字" : "配樂/音效"}，不會填入分鏡，只會進生成紀錄／素材庫——請改用圖像／影片／旁白語音模型，或不要綁分鏡`,
+          });
         }
         // 綁分鏡回填前，先比照 update_scene 驗證 sceneId 歸屬（同專案、未軟刪）——否則生成完成時
         // advanceGeneration 會以無範圍的 sceneId 把 assetId 寫進他專案／已軟刪分鏡（與姊妹分支不一致的漏檢）
@@ -434,15 +517,15 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
             .where(and(eq(schema.scenes.id, a.sceneId), eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
           if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
         }
-        // 重用網頁端同一份守門（世界觀注入／原子扣點／失敗退點／綁分鏡回填）
+        // 重用網頁端同一份守門（世界觀注入／原子扣點／失敗退點／綁分鏡回填）。
+        // sceneRole 依模型類別決定：視覺（圖/影）→主畫面、旁白語音→旁白音檔（配樂/文字已在上面擋掉不會走到這）
         const gen = await submitGenerationCore({
           userId: ctx.auth.user.id,
           projectId: project.id,
           modelId: model.id,
           prompt: a.prompt,
           sceneId: a.sceneId,
-          // 音訊成品（配音／配樂）回填旁白欄位而非主畫面——模型可自選後，把 mp3 塞進畫面格會讓分鏡卡顯示壞掉
-          sceneRole: a.sceneId ? (model.kind === "audio" ? "narration" : "visual") : undefined,
+          sceneRole: role ?? undefined,
           reasonPrefix: "助手生成",
           assertAccess: (p) => requireGroup(ctx.auth, p.groupId),
         });
