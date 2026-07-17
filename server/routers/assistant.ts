@@ -309,7 +309,7 @@ ${forceFinal
 - {"tool":"list_assets","args":{"kind":"image"}}：列素材庫（kind 可省略或 image/video/audio/doc）
 - {"tool":"read_scene","args":{"sceneNo":3}}：讀某一鏡的完整內容（提示詞/旁白全文）
 - {"tool":"list_generations","args":{}}：最近 15 筆生成紀錄（模型/狀態/點數）
-- {"tool":"find_model","args":{"keyword":"中文","category":"text-to-image"}}：依需求查模型目錄（兩參數皆可省略；category 可為 text-to-image/image-to-image/text-to-video/video-to-video/llm/vision/speech-to-text/text-to-speech/text-to-audio/training）
+- {"tool":"find_model","args":{"keyword":"中文","category":"text-to-image"}}：依需求查模型目錄（兩參數皆可省略；category 可為 text-to-image/image-to-image/text-to-video/image-to-video/video-to-video/llm/vision/speech-to-text/text-to-speech/text-to-audio/training）
 能從 <專案現況>/<專案知識庫> 直接回答就不要查——每次查詢都有成本。`}
 你也可以「提議」動作讓使用者確認後執行（你不能直接執行）。可提議的動作：
 - generate：生成素材（prompt＝描述；可選 sceneNo 指定回填某一鏡；可選 modelId 指定模型，未指定就用預設圖像模型）
