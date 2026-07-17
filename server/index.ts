@@ -486,7 +486,7 @@ app.get("/api/selftest", async (req, res) => {
   await run("模型目錄", async () => {
     const rows = await db.select().from(schema.modelCatalog);
     if (rows.length < 70) throw new Error(`只有 ${rows.length} 條——啟動同步失敗?`);
-    return `${rows.length} 條(11 類)`;
+    return `${rows.length} 條(12 類)`;
   });
   await run("點數設定可讀寫", async () => {
     const { getSettings } = await import("./services/points");
