@@ -3,6 +3,36 @@ import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { DISCUSS_EVENT, jumpToRef, type DiscussRef } from "../discuss";
 
+/** 留言 @了助手就觸發 AI 回覆——與後端 messageAssistant.ASSISTANT_TRIGGER 同字串 */
+const ASSISTANT_TRIGGER = "@助手";
+
+/** 轉待辦行內表單:標題預填留言內容、選截止日 → schedule.add */
+function TodoForm({ defaultTitle, pending, error, onCancel, onSubmit }: {
+  defaultTitle: string;
+  pending: boolean;
+  error?: string;
+  onCancel: () => void;
+  onSubmit: (title: string, startsAt: string) => void;
+}) {
+  const [title, setTitle] = useState(defaultTitle);
+  const [date, setDate] = useState("");
+  return (
+    <div className="todo-form">
+      <input aria-label="待辦標題" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="待辦標題" />
+      <input aria-label="截止時間" type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} />
+      <button
+        className="primary btn-sm"
+        disabled={!title.trim() || !date || pending}
+        onClick={() => onSubmit(title.trim(), new Date(date).toISOString())}
+      >
+        建立待辦
+      </button>
+      <button className="btn-sm" onClick={onCancel}>取消</button>
+      {error && <span className="error" style={{ flexBasis: "100%" }}>{error}</span>}
+    </div>
+  );
+}
+
 /**
  * 站內留言(協作強化版)。即時性:同房夥伴的 mutation 會經 WebSocket 廣播 invalidate 立即刷新,
  * 8 秒輪詢只是不在房內/斷線時的後備。新增:
@@ -12,10 +42,21 @@ import { DISCUSS_EVENT, jumpToRef, type DiscussRef } from "../discuss";
  * - 引用作品卡(分鏡/素材/生成的「討論」鈕會把作品帶進留言,點卡片跳回原件)
  * - 回覆串(帶原句摘要)與組長釘選(決議不被洗掉)
  * - 已讀水位(視窗聚焦且看到最新留言時上報,餵 TocNav 未讀徽章)
+ * 第一梯隊再加:語音留言(錄音→上傳→背景逐字稿)、@助手參與對話、留言轉待辦、被提及桌面通知。
  */
 
 /** 快速短語:一鍵直接送出;內容貼合團隊日常(確認/隨喜/接手/請示) */
 const QUICK_PHRASES = ["收到 🙏", "隨喜讚歎 ✨", "我來處理 💪", "請組長過目 🙏"];
+
+/** 桌面通知(重用 GenerationList 同一套):未授權/背景分頁靜默略過 */
+function notifyDesktop(title: string, body: string): void {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    new Notification(title, { body });
+  } catch {
+    /* 某些瀏覽器背景分頁建構子會丟例外，忽略 */
+  }
+}
 
 /** 表情白名單:與後端 messages.react 的 enum 同步(順序即顯示順序) */
 const EMOJI = ["🙏", "❤️", "✅", "😊"] as const;
@@ -37,7 +78,7 @@ function renderBody(body: string, mentionNames: string[]) {
   );
 }
 
-export function MessagePanel({ projectId, isLeader }: { projectId: string; isLeader: boolean }) {
+export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projectId: string; groupId: string; isLeader: boolean; canEdit: boolean }) {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   const list = trpc.messages.list.useQuery({ projectId }, { refetchInterval: 8000 });
@@ -53,16 +94,28 @@ export function MessagePanel({ projectId, isLeader }: { projectId: string; isLea
       utils.messages.list.invalidate({ projectId });
     },
   });
+  const postVoice = trpc.messages.postVoice.useMutation({
+    onSuccess: () => {
+      stickToBottom.current = true;
+      utils.messages.list.invalidate({ projectId });
+    },
+  });
   const react = trpc.messages.react.useMutation({ onSuccess: () => utils.messages.list.invalidate({ projectId }) });
   const setPinned = trpc.messages.setPinned.useMutation({ onSuccess: () => utils.messages.list.invalidate({ projectId }) });
   const markRead = trpc.messages.markRead.useMutation({
     onSuccess: () => utils.messages.unread.invalidate({ projectId }),
   });
+  const addSchedule = trpc.schedule.add.useMutation({ onSuccess: () => setTodoFor(null) });
 
   const [body, setBody] = useState("");
   const [replyTo, setReplyTo] = useState<{ id: string; userName: string; snippet: string } | null>(null);
   const [pendingRef, setPendingRef] = useState<DiscussRef | null>(null);
   const [emojiPickFor, setEmojiPickFor] = useState<string | null>(null);
+  const [todoFor, setTodoFor] = useState<{ id: string; body: string } | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [voiceErr, setVoiceErr] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -104,6 +157,78 @@ export function MessagePanel({ projectId, isLeader }: { projectId: string; isLea
     window.addEventListener(DISCUSS_EVENT, onDiscuss);
     return () => window.removeEventListener(DISCUSS_EVENT, onDiscuss);
   }, []);
+
+  // 被提及/釘選/助手回覆桌面通知:記住看過的最新一則,新到的他人留言若 @我 或釘選就通知。
+  // 首次載入(seenLatest 未定)不通知——只提示「這次會話新到的」,不轟炸歷史。
+  const seenLatest = useRef<string | null>(null);
+  useEffect(() => {
+    const rows = list.data;
+    if (!rows?.length || !myId) return;
+    const newest = rows[rows.length - 1];
+    if (seenLatest.current === null) {
+      seenLatest.current = newest.id;
+      return;
+    }
+    if (seenLatest.current === newest.id) return;
+    // 找出上次看過那則之後、且非自己送出的留言,挑出「@我」或「被釘選/助手回覆」的通知
+    const seenIdx = rows.findIndex((m) => m.id === seenLatest.current);
+    const fresh = rows.slice(seenIdx + 1).filter((m) => m.userId !== myId || m.kind === "assistant");
+    seenLatest.current = newest.id;
+    if (document.visibilityState === "visible") return; // 正在看就不用桌面通知
+    for (const m of fresh) {
+      if (m.mentions?.includes(myId)) notifyDesktop(`${m.userName ?? "夥伴"} 在留言 @了你`, m.body.slice(0, 80));
+      else if (m.kind === "assistant") notifyDesktop("AI 助手回覆了留言", m.body.slice(0, 80));
+    }
+    // 只依最新一則 id 變化觸發
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.data?.length && list.data[list.data.length - 1].id, myId]);
+
+  // 錄音:MediaRecorder 收 chunks → 停止時上傳為素材 → postVoice 建語音留言(逐字稿由後端補)
+  const startRecording = async () => {
+    setVoiceErr(null);
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setVoiceErr("這個瀏覽器不支援錄音，請改用打字或上傳音檔。");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        void uploadVoice(new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" }));
+      };
+      rec.start();
+      recorderRef.current = rec;
+      setRecording(true);
+    } catch {
+      setVoiceErr("拿不到麥克風權限，請在瀏覽器允許後再試。");
+    }
+  };
+  const stopRecording = () => {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRecording(false);
+  };
+  const uploadVoice = async (blob: Blob) => {
+    try {
+      // webm 副檔名讓後端 MIME 對得上(白名單已含 audio/webm);上傳走既有 /api/upload
+      const ext = (blob.type.split("/")[1] || "webm").split(";")[0];
+      const fd = new FormData();
+      fd.append("file", blob, `語音留言.${ext}`);
+      fd.append("projectId", projectId);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      if (!res.ok) {
+        const msg = await res.json().catch(() => ({}));
+        throw new Error((msg as { error?: string }).error || `上傳失敗 ${res.status}`);
+      }
+      const data = (await res.json()) as { asset: { id: string } };
+      postVoice.mutate({ projectId, assetId: data.asset.id });
+    } catch (err) {
+      setVoiceErr(err instanceof Error ? err.message : "語音上傳失敗，請再試一次。");
+    }
+  };
 
   // @提及下拉:偵測游標前的「@字首」,顯示同組名單(點選插入)
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -198,14 +323,19 @@ export function MessagePanel({ projectId, isLeader }: { projectId: string; isLea
             );
           }
           const mine = m.userId === myId;
+          const isAssistant = m.kind === "assistant";
+          const isVoice = m.kind === "voice";
           const mentionedMe = !!myId && (m.mentions ?? []).includes(myId);
           const mentionNames = (m.mentions ?? []).map((uid) => nameById.get(uid)).filter((n): n is string => !!n);
           return (
-            <div key={m.id} className={`msg-block${mentionedMe ? " mentioned-me" : ""}`}>
+            <div key={m.id} className={`msg-block${mentionedMe ? " mentioned-me" : ""}${isAssistant ? " assistant" : ""}`}>
               <div className="msg">
                 <span className="who">
-                  {m.userName ?? (mine ? me.data?.user.name : "夥伴")}
-                  {mine ? "（我）" : ""}
+                  {isAssistant ? (
+                    <><Icon name="Sparkles" size={12} style={{ marginRight: 3, color: "var(--primary-ink)" }} />AI 助手</>
+                  ) : (
+                    <>{m.userName ?? (mine ? me.data?.user.name : "夥伴")}{mine ? "（我）" : ""}</>
+                  )}
                   {m.pinned ? <Icon name="Star" size={11} style={{ marginLeft: 4, color: "var(--gold-ink)" }} /> : null}
                 </span>
                 <span style={{ flex: 1, minWidth: 0 }}>
@@ -216,7 +346,15 @@ export function MessagePanel({ projectId, isLeader }: { projectId: string; isLea
                       {m.replyTo.userName ?? "夥伴"}:{m.replyTo.snippet}
                     </span>
                   )}
-                  <span>{renderBody(m.body, mentionNames)}</span>
+                  {/* 🎙️ 語音留言:播放器 + 逐字稿(轉錄中顯示 body 佔位字) */}
+                  {isVoice && m.voiceUrl && (
+                    <audio controls preload="none" src={m.voiceUrl} style={{ height: 32, maxWidth: "100%", display: "block", marginBottom: 4 }} aria-label="語音留言" />
+                  )}
+                  {isVoice ? (
+                    <span className={m.voiceStatus === "pending" ? "hint" : undefined}>{m.body}</span>
+                  ) : (
+                    <span>{renderBody(m.body, mentionNames)}</span>
+                  )}
                   {/* 🔗 引用作品卡:縮圖+標題,點「查看」跳回原件 */}
                   {m.refType && m.refId && (
                     <button
@@ -306,19 +444,49 @@ export function MessagePanel({ projectId, isLeader }: { projectId: string; isLea
                     <Icon name="Star" size={12} /> {m.pinned ? "取消釘選" : "釘選"}
                   </button>
                 )}
+                {/* 轉待辦:把口頭承諾變成有期限的排程項(組內任何人可加,後端 requireGroup) */}
+                <button
+                  type="button"
+                  className="msg-action"
+                  title="把這句轉成排程待辦"
+                  onClick={() => setTodoFor(todoFor?.id === m.id ? null : { id: m.id, body: m.body })}
+                >
+                  <Icon name="CalendarPlus" size={12} /> 轉待辦
+                </button>
               </div>
+              {/* 轉待辦行內表單:標題預填留言內容、選截止日 → schedule.add */}
+              {todoFor?.id === m.id && (
+                <TodoForm
+                  defaultTitle={m.body.slice(0, 120)}
+                  pending={addSchedule.isPending}
+                  error={addSchedule.error?.message}
+                  onCancel={() => setTodoFor(null)}
+                  onSubmit={(title, startsAt) => addSchedule.mutate({ groupId, projectId, title, startsAt })}
+                />
+              )}
             </div>
           );
         })}
       </div>
 
-      {/* 快速短語:一鍵送出,零打字回應 */}
+      {/* 快速短語:一鍵送出,零打字回應;末尾加「問 AI 助手」把 @助手 帶進輸入框 */}
       <div className="quick-phrases" role="group" aria-label="快速短語">
         {QUICK_PHRASES.map((q) => (
           <button key={q} type="button" className="chip" disabled={post.isPending} onClick={() => send(q)}>
             {q}
           </button>
         ))}
+        <button
+          type="button"
+          className="chip"
+          title="在留言裡問 AI 助手（讀專案與知識庫後回答）"
+          onClick={() => {
+            setBody((b) => (b.includes(ASSISTANT_TRIGGER) ? b : `${ASSISTANT_TRIGGER} ${b}`.trimEnd() + " "));
+            inputRef.current?.focus();
+          }}
+        >
+          <Icon name="Sparkles" size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />問 AI 助手
+        </button>
       </div>
 
       {/* 回覆/引用狀態列:讓人看清楚「即將送出的是什麼」,可取消 */}
@@ -373,10 +541,32 @@ export function MessagePanel({ projectId, isLeader }: { projectId: string; isLea
             ))}
           </div>
         )}
+        {/* 語音留言:editor 才有(上傳需編輯權);錄音中變成停止鈕 */}
+        {canEdit && (
+          recording ? (
+            <button className="recording" title="停止並送出語音" aria-label="停止錄音" onClick={stopRecording}>
+              <Icon name="Square" size={16} /> 停止
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label="錄語音留言"
+              title="按住說話比打字快——錄完自動附逐字稿"
+              disabled={postVoice.isPending}
+              onClick={startRecording}
+              style={{ display: "inline-flex", alignItems: "center" }}
+            >
+              <Icon name="Mic" size={16} />
+            </button>
+          )
+        )}
         <button className="primary" disabled={!body.trim() || post.isPending} onClick={() => send(body)}>
           送出
         </button>
       </div>
+      {recording && <p className="hint" role="status" style={{ color: "var(--danger-ink)" }}>● 錄音中…說完按「停止」送出</p>}
+      {postVoice.isPending && <p className="hint">語音上傳中…</p>}
+      {voiceErr && <p className="error">{voiceErr}</p>}
       {/* 失敗要讓人看得到:先前送出失敗畫面毫無反應,使用者以為有送出 */}
       {post.error && <p className="error">留言送出失敗：{post.error.message}</p>}
       {react.error && <p className="error">表情回應失敗：{react.error.message}</p>}

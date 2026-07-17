@@ -3,6 +3,7 @@ import { and, desc, eq, gt, inArray, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
+import { ASSISTANT_TRIGGER, replyAsAssistant } from "../services/messageAssistant";
 
 /**
  * 站內留言（協作強化版）。隔離：以專案的 group 為準；檢視者(viewer)也能留言——
@@ -73,6 +74,7 @@ export const messagesRouter = router({
         refType: schema.messages.refType,
         refId: schema.messages.refId,
         mentions: schema.messages.mentions,
+        voiceStatus: schema.messages.voiceStatus,
         createdAt: schema.messages.createdAt,
       })
       .from(schema.messages)
@@ -124,6 +126,8 @@ export const messagesRouter = router({
       replyTo: r.replyToId ? (replyMap.get(r.replyToId) ?? null) : null,
       reactions: reactionMap.get(r.id) ?? [],
       ref: r.refType && r.refId ? (refMap.get(`${r.refType}:${r.refId}`) ?? null) : null,
+      // 語音留言：把音檔可播放網址一併帶出（refMap 給的是縮圖用途，音訊要的是同源 file 端點）
+      voiceUrl: r.kind === "voice" && r.refType === "asset" && r.refId ? `/api/assets/${r.refId}/file` : null,
     }));
   }),
 
@@ -181,6 +185,45 @@ export const messagesRouter = router({
           refType: input.refType ?? null,
           refId: input.refId ?? null,
           mentions: mentions ?? null,
+        })
+        .returning();
+      // @助手：留言 @了助手 → 背景讓 AI 讀專案+對話+知識庫回一則(fire-and-forget，不擋送出)。
+      // 檢視者也能問(留言是唯讀者的參與出口)；扣點/退點在 replyAsAssistant 內走既有守門。
+      if (input.body.includes(ASSISTANT_TRIGGER)) {
+        void replyAsAssistant({
+          projectId: input.projectId,
+          groupId: project.groupId,
+          askerId: ctx.auth.user.id,
+          question: input.body,
+        }).catch((err) => console.warn("[messages] @助手 回覆失敗：", err instanceof Error ? err.message : err));
+      }
+      return msg;
+    }),
+
+  /** 語音留言：前端錄音上傳為素材後，用其 assetId 建立語音留言；逐字稿由背景 sweep 補上。 */
+  postVoice: authedProcedure
+    .input(z.object({ projectId: z.string().uuid(), assetId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await loadProject(input.projectId);
+      requireGroup(ctx.auth, project.groupId);
+      // 音檔素材必須屬於本專案且為音訊（擋盜用別案素材、擋把圖片當語音）
+      const [asset] = await db
+        .select()
+        .from(schema.assets)
+        .where(and(eq(schema.assets.id, input.assetId), eq(schema.assets.projectId, input.projectId)));
+      if (!asset) throw new TRPCError({ code: "BAD_REQUEST", message: "語音檔不在本專案" });
+      if (asset.kind !== "audio") throw new TRPCError({ code: "BAD_REQUEST", message: "這不是音訊檔" });
+      const [msg] = await db
+        .insert(schema.messages)
+        .values({
+          groupId: project.groupId,
+          projectId: input.projectId,
+          userId: ctx.auth.user.id,
+          kind: "voice",
+          body: "🎙️ 語音訊息（轉錄中…）",
+          refType: "asset",
+          refId: input.assetId,
+          voiceStatus: "pending",
         })
         .returning();
       return msg;
