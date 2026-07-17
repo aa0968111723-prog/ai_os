@@ -171,7 +171,26 @@ async function advanceWithGuard(run: RunRow): Promise<void> {
   ]);
 }
 
+/**
+ * 寫回 run。審查修復（stop 競態後半）：status 為終局值（done/failed）時拆兩段——
+ * steps/currentStep/error 照寫（runner 是 steps 唯一寫者），status 只在「仍是 running」時
+ * CAS 推進。原版無條件覆寫：使用者在步驟執行期間（split_script 的 LLM 呼叫可達 60 秒）按的
+ * 「停止」會被完成/失敗寫回蓋掉——stopped 是使用者的決定，runner 只能尊重不能覆寫。
+ * 兩段 UPDATE 非原子：中間死亡＝steps 已更新、status 留在 running，下一輪 tick 會自我收斂
+ * （越界→done、失敗步→重驗或重試），不會卡死。
+ */
 async function saveRun(runId: string, patch: Partial<typeof schema.agentRuns.$inferInsert>): Promise<void> {
+  const { status, ...rest } = patch;
+  if (status === "done" || status === "failed") {
+    if (Object.keys(rest).length) {
+      await db.update(schema.agentRuns).set({ ...rest, updatedAt: new Date() }).where(eq(schema.agentRuns.id, runId));
+    }
+    await db
+      .update(schema.agentRuns)
+      .set({ status, updatedAt: new Date() })
+      .where(and(eq(schema.agentRuns.id, runId), eq(schema.agentRuns.status, "running")));
+    return;
+  }
   await db.update(schema.agentRuns).set({ ...patch, updatedAt: new Date() }).where(eq(schema.agentRuns.id, runId));
 }
 
