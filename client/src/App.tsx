@@ -6,6 +6,7 @@ import { ProjectPage } from "./pages/ProjectPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 import { AdminPage, AuditLogCard, ConsumptionMonitorCard } from "./pages/AdminPage";
+import { MembersPage } from "./pages/MembersPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { MyReportsPage } from "./pages/MyReportsPage";
 import { ModelsPage } from "./pages/ModelsPage";
@@ -175,9 +176,9 @@ function PointsBadge({ groupId }: { groupId: string }) {
 /** 使用者選單（收斂頂欄）：怎麼用／模型指南／選項／團隊管理／改密碼＋登出，收進單一下拉。
  * CSP 下自製（無外部庫）：點外面或 Esc 關閉。 */
 function UserMenu({
-  userName, isAdmin, activeIsLeader, onChangePw, onLogout, loggingOut,
+  userName, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onLogout, loggingOut,
 }: {
-  userName: string; isAdmin: boolean; activeIsLeader: boolean;
+  userName: string; isAdmin: boolean; activeIsLeader: boolean; canSeeOrg: boolean;
   onChangePw: () => void; onLogout: () => void; loggingOut: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -211,8 +212,9 @@ function UserMenu({
           <Link href="/mcp" className="menu-item" role="menuitem" onClick={close}><Icon name="Sparkles" size={15} />接上外部 AI</Link>
           <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
           {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
-          {/* 監控與紀錄：點數消耗監控＋操作紀錄。組長（不含純組員）與管理員都看得到；管理員在「團隊管理」也有同兩張卡 */}
-          {(activeIsLeader || isAdmin) && <Link href="/logs" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />監控與紀錄</Link>}
+          {/* 通訊錄／監控與紀錄：在任一組是組長或管理員都看得到（跨組彙總）；管理員在「團隊管理」也有同幾張卡 */}
+          {canSeeOrg && <Link href="/members" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />通訊錄</Link>}
+          {canSeeOrg && <Link href="/logs" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />監控與紀錄</Link>}
           {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />團隊管理</Link>}
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">帳號</div>
@@ -252,6 +254,9 @@ export function App() {
   // 目前作用組的角色：組長或管理員才看得到「選項」入口（自訂內容類型／平台／世界觀選項）
   const activeGroup = groups.find((g) => g.groupId === activeGroupId);
   const activeIsLeader = activeGroup?.role === "leader" || activeGroup?.role === "admin";
+  // 通訊錄／操作紀錄：只要在「任一組」是組長或管理員就能看（跨組彙總）——比照後端 directory/audit 的可見界；
+  // 不可只看「作用中的組」的角色，否則多組組長切到自己是純組員的那一組時會被誤擋在外。
+  const canSeeOrg = isAdmin || groups.some((g) => g.role !== "member");
   const [showChangePw, setShowChangePw] = useState(false);
   // 管理員重設密碼後：不論在哪個路由都用強制對話框擋住，改完密碼（auth.me 重查）才放行
   const mustChangePw = !!me.data?.user.mustChangePassword;
@@ -302,6 +307,7 @@ export function App() {
               userName={me.data.user.name}
               isAdmin={isAdmin}
               activeIsLeader={activeIsLeader}
+              canSeeOrg={canSeeOrg}
               onChangePw={() => setShowChangePw(true)}
               onLogout={() => logout.mutate()}
               loggingOut={logout.isPending}
@@ -360,12 +366,21 @@ export function App() {
                   )}
                 </Route>
                 <Route path="/logs">
-                  {activeIsLeader || isAdmin ? (
+                  {canSeeOrg ? (
                     // 組長也看得到「點數消耗監控」：後端已按呼叫者權限把範圍收斂到自己帶的組
                     <div className="stack" style={{ maxWidth: 860, margin: "0 auto" }}>
                       <ConsumptionMonitorCard />
                       <AuditLogCard />
                     </div>
+                  ) : (
+                    <p className="error">
+                      這頁需要組長或管理員權限 — <Link href="/">回作業台</Link>
+                    </p>
+                  )}
+                </Route>
+                <Route path="/members">
+                  {canSeeOrg ? (
+                    <MembersPage />
                   ) : (
                     <p className="error">
                       這頁需要組長或管理員權限 — <Link href="/">回作業台</Link>

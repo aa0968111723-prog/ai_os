@@ -4,7 +4,7 @@
  * - 額度層級：個人覆寫 → 組設定 → 全域預設；一律空＝不限。
  * - 扣退模式不變：先扣預估、失敗全額退回（帳本可查）。
  */
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 
 export interface PointsSettings {
@@ -381,4 +381,26 @@ export async function groupUsage(groupId: string): Promise<Array<{ userId: strin
     .where(eq(schema.costLedger.groupId, groupId))
     .groupBy(schema.costLedger.userId);
   return rows.map((r) => ({ userId: r.userId, weekly: Number(r.weekly), total: Number(r.total) }));
+}
+
+/**
+ * 多組一次查（通訊錄用）：以 (groupId, userId) 分組彙總本週/累計淨消耗，避免逐組各打一次
+ * （超管一次看全站數十組時的 N+1／連線池飽和）。口徑與 groupUsage 完全一致。
+ */
+export async function groupUsageMany(
+  groupIds: string[],
+): Promise<Array<{ groupId: string; userId: string; weekly: number; total: number }>> {
+  if (groupIds.length === 0) return [];
+  const rows = await db
+    .select({
+      groupId: schema.costLedger.groupId,
+      userId: schema.costLedger.userId,
+      weekly: sql<number>`coalesce(-sum(${schema.costLedger.delta}) filter (where coalesce(${schema.generations.createdAt}, ${schema.costLedger.createdAt}) >= ${weekStart()}), 0)`,
+      total: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)`,
+    })
+    .from(schema.costLedger)
+    .leftJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
+    .where(inArray(schema.costLedger.groupId, groupIds))
+    .groupBy(schema.costLedger.groupId, schema.costLedger.userId);
+  return rows.map((r) => ({ groupId: r.groupId as string, userId: r.userId, weekly: Number(r.weekly), total: Number(r.total) }));
 }

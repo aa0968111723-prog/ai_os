@@ -384,14 +384,22 @@ function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
         {/* 分類標籤：一眼分辨這筆屬於哪一類（帳號／生成／分鏡…） */}
         <span className="pill" style={{ ...catStyle, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>{cat.label}</span>
         <b>{r.actorName}</b>
+        {/* 操作者角色：一眼看出是組長還是組員做的（分組員層級） */}
+        {r.actorRole && (
+          <span className="hint" style={{ fontSize: 11 }}>（{r.actorRole === "leader" ? "組長" : "組員"}）</span>
+        )}
         <span>{humanizeAuditAction(r.action)}</span>
         {!r.ok && <span style={{ color: "var(--danger-ink)", fontSize: 11, fontWeight: 600 }}>（失敗）</span>}
         <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</span>
       </div>
-      {/* 歸屬：這筆動到哪個組／哪個專案（非技術夥伴不用去對 uuid） */}
-      {(r.groupName || r.projectTitle) && (
+      {/* 歸屬：這筆動到哪個團隊・組別／哪個專案（分團隊組別；非技術夥伴不用去對 uuid） */}
+      {(r.teamName || r.groupName || r.projectTitle) && (
         <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {r.groupName && <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}><Icon name="User" size={11} />{r.groupName}</span>}
+          {(r.teamName || r.groupName) && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <Icon name="User" size={11} />{[r.teamName, r.groupName].filter(Boolean).join("・")}
+            </span>
+          )}
           {r.projectTitle && <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}><Icon name="FileText" size={11} />{r.projectTitle}</span>}
         </div>
       )}
@@ -444,6 +452,9 @@ function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
 export function AuditLogCard() {
   // 分類過濾（chip）：null＝全部
   const [category, setCategory] = useState<string | null>(null);
+  // 依組別過濾（下拉）：""＝所有可見組
+  const [groupId, setGroupId] = useState("");
+  const scope = trpc.directory.scope.useQuery();
   // action 關鍵字前端 debounce 後才帶進查詢，避免每敲一鍵就打一次 API
   const [actionInput, setActionInput] = useState("");
   const [debouncedAction, setDebouncedAction] = useState("");
@@ -452,11 +463,11 @@ export function AuditLogCard() {
     return () => clearTimeout(t);
   }, [actionInput]);
   const audit = trpc.audit.list.useInfiniteQuery(
-    { action: debouncedAction.trim() || undefined, category: category ?? undefined, limit: 30 },
+    { action: debouncedAction.trim() || undefined, category: category ?? undefined, groupId: groupId || undefined, limit: 30 },
     { getNextPageParam: (last) => last.nextCursor ?? undefined },
   );
   const rows = audit.data?.pages.flatMap((p) => p.items) ?? [];
-  const filtering = !!debouncedAction.trim() || !!category;
+  const filtering = !!debouncedAction.trim() || !!category || !!groupId;
   const chip = (active: boolean): CSSProperties => ({
     padding: "3px 10px",
     fontSize: 12,
@@ -480,6 +491,20 @@ export function AuditLogCard() {
           </button>
         ))}
       </div>
+      {/* 依組別過濾：一個團隊/多組時，切到單一組別看那組的操作流水（分團隊組別） */}
+      {(scope.data?.groups.length ?? 0) > 1 && (
+        <select
+          value={groupId}
+          onChange={(e) => setGroupId(e.target.value)}
+          aria-label="依組別過濾操作紀錄"
+          style={{ marginBottom: 8, width: "100%" }}
+        >
+          <option value="">所有可見組別</option>
+          {scope.data?.groups.map((g) => (
+            <option key={g.groupId} value={g.groupId}>{g.teamName}・{g.groupName}</option>
+          ))}
+        </select>
+      )}
       <input
         type="search"
         value={actionInput}
@@ -493,7 +518,12 @@ export function AuditLogCard() {
           <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
         </div>
       ) : audit.error ? (
-        <p className="error">操作紀錄載入失敗：{audit.error.message}</p>
+        // 尚無可見組別（剛建團隊、還沒建組/加人）後端回 FORBIDDEN——對管理員是空狀態而非錯誤
+        audit.error.data?.code === "FORBIDDEN" ? (
+          <p className="hint" style={{ marginTop: 10 }}>還沒有你能看到的組別紀錄。先建立組別、把夥伴加進來就會出現。</p>
+        ) : (
+          <p className="error">操作紀錄載入失敗：{audit.error.message}</p>
+        )
       ) : rows.length === 0 ? (
         <p className="hint" style={{ marginTop: 10 }}>
           {filtering ? "沒有符合這個條件的紀錄。" : "還沒有操作紀錄。"}
