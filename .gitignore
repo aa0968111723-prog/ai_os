@@ -9,3 +9,6 @@ dist/
 .data/
 __pycache__/
 e2e-ui-out/
+
+# 前端體檢工作目錄（截圖／驅動腳本／中間產物，不進 repo）
+.audit/
