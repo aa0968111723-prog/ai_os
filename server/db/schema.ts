@@ -529,5 +529,43 @@ export const feedbackReports = pgTable("feedback_reports", {
   /** 截圖（含標記框）落地 Volume 的相對路徑；擷取失敗或未附時為 null */
   screenshotPath: text("screenshot_path"),
   status: text("status", { enum: ["open", "reviewing", "done"] }).notNull().default("open"),
+  /* ── 回饋代理（每 3 天巡一次）自動分診欄位 ──
+   * 背景代理讀未處理回饋 → LLM 分診（嚴重度／一句摘要／建議修復／給使用者的回覆）→
+   * 回填以下欄位並寄信通知回報者。全部可為 null（既有列與尚未巡到的回饋維持 null，pushSchema 純新增安全）。 */
+  agentReviewedAt: timestamp("agent_reviewed_at"),
+  /** LLM 判定的嚴重度：low｜medium｜high（分診排序用；解析不出時 null） */
+  agentSeverity: text("agent_severity", { enum: ["low", "medium", "high"] }),
+  /** 一句話分診摘要（給審閱者快速掃過） */
+  agentSummary: text("agent_summary"),
+  /** 建議的修復方向／排程（工程可直接採用；「排程修復」的產出） */
+  agentFix: text("agent_fix"),
+  /** 寄給回報者的回覆內文（先落地再寄，寄信失敗也留存草稿供人工補寄） */
+  agentReply: text("agent_reply"),
+  /** 回覆信寄送狀態：sent＝已寄出、skipped＝信箱機制未設定（僅落地）、failed＝寄送失敗 */
+  emailStatus: text("email_status", { enum: ["sent", "skipped", "failed"] }),
+  /** 回覆信實際寄出時刻（skipped/failed 為 null） */
+  emailedAt: timestamp("emailed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/**
+ * 回饋代理巡檢紀錄（每 3 天一次；亦可超管手動觸發）：每次巡檢寫一列，
+ * 記這輪看了幾筆、寄出幾封信、成功與否——管理頁「回饋代理」卡以最新一列顯示狀態。
+ * 只插入不更新完局後不再改（running→done/failed 於同列 update），新表＝pushSchema 安全。
+ */
+export const feedbackAgentRuns = pgTable("feedback_agent_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** manual＝超管在管理頁按「立即巡檢」；scheduled＝每 3 天排程自動觸發 */
+  trigger: text("trigger", { enum: ["scheduled", "manual"] }).notNull().default("scheduled"),
+  status: text("status", { enum: ["running", "done", "failed"] }).notNull().default("running"),
+  /** 這輪分診的回饋筆數 */
+  reviewedCount: integer("reviewed_count").notNull().default(0),
+  /** 這輪成功寄出的回覆信封數 */
+  emailedCount: integer("emailed_count").notNull().default(0),
+  /** 收尾備註（如「無待處理回饋」）或失敗訊息 */
+  note: text("note"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  finishedAt: timestamp("finished_at"),
+}, (t) => ({
+  startedIdx: index("feedback_agent_runs_started_idx").on(t.startedAt),
+}));

@@ -17,6 +17,20 @@ const FEEDBACK_CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
   FEEDBACK_CATEGORIES.map((c) => [c.value, c.label]),
 );
 
+/** 回饋代理分診嚴重度：標籤＋配色（沿用既有 accent tokens） */
+const AGENT_SEVERITY_META: Record<string, { label: string; style: { background: string; color: string; border: string } }> = {
+  high: { label: "高", style: { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" } },
+  medium: { label: "中", style: { background: "var(--gold-soft)", color: "var(--gold-ink)", border: "1px solid var(--gold)" } },
+  low: { label: "低", style: { background: "var(--card2)", color: "var(--fg-secondary)", border: "1px solid var(--border-soft)" } },
+};
+
+/** 回覆信寄送狀態的人話標籤（回饋代理寄給回報者） */
+const EMAIL_STATUS_LABEL: Record<string, string> = {
+  sent: "已寄回覆信",
+  skipped: "回覆已草擬（信箱機制未設定）",
+  failed: "回覆信寄送失敗",
+};
+
 /** 狀態過濾 chips（全部＝空字串） */
 const FEEDBACK_STATUS_FILTERS: Array<{ value: "" | "open" | "reviewing" | "done"; label: string }> = [
   { value: "", label: "全部" },
@@ -445,6 +459,13 @@ function ReportRow({ report }: {
     userName?: string | null;
     groupName?: string | null;
     createdAt: string | Date;
+    // 回饋代理分診結果（尚未巡到時為 null）
+    agentSeverity?: string | null;
+    agentSummary?: string | null;
+    agentFix?: string | null;
+    agentReply?: string | null;
+    emailStatus?: string | null;
+    agentReviewedAt?: string | Date | null;
   };
 }) {
   const utils = trpc.useUtils();
@@ -488,6 +509,40 @@ function ReportRow({ report }: {
           <div className="hint" style={{ marginTop: 2 }}>涉及頁面：{pages.join("、")}</div>
         )}
         {report.note && <div style={{ marginTop: 2 }}>{report.note}</div>}
+        {report.agentReviewedAt && (
+          <div
+            style={{
+              marginTop: 6,
+              padding: "6px 10px",
+              borderRadius: 8,
+              background: "var(--card2)",
+              border: "1px solid var(--border-soft)",
+            }}
+          >
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <span className="chip" style={{ margin: 0, fontSize: 11 }}>🤖 回饋代理</span>
+              {report.agentSeverity && AGENT_SEVERITY_META[report.agentSeverity] && (
+                <span className="chip" style={{ margin: 0, fontSize: 11, ...AGENT_SEVERITY_META[report.agentSeverity].style }}>
+                  嚴重度：{AGENT_SEVERITY_META[report.agentSeverity].label}
+                </span>
+              )}
+              {report.emailStatus && EMAIL_STATUS_LABEL[report.emailStatus] && (
+                <span className="hint" style={{ fontSize: 11 }}>{EMAIL_STATUS_LABEL[report.emailStatus]}</span>
+              )}
+            </div>
+            {report.agentSummary && <div style={{ marginTop: 3 }}>{report.agentSummary}</div>}
+            {report.agentFix && (
+              <div className="hint" style={{ marginTop: 3 }}>
+                <span style={{ fontWeight: 600 }}>建議修復：</span>{report.agentFix}
+              </div>
+            )}
+            {report.agentReply && (
+              <div className="hint" style={{ marginTop: 3 }}>
+                <span style={{ fontWeight: 600 }}>已回覆使用者：</span>{report.agentReply}
+              </div>
+            )}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
           <label className="hint" htmlFor={`fb-status-${report.id}`} style={{ margin: 0 }}>狀態</label>
           <select
@@ -549,6 +604,76 @@ function FeedbackReportsSection() {
         </div>
       ) : (
         reports.data.map((r) => <ReportRow key={r.id} report={r} />)
+      )}
+    </section>
+  );
+}
+
+/** 台北時間（UTC+8）友善格式；容器跑 UTC，直接顯示會差 8 小時 */
+function fmtWhen(d: string | Date | null | undefined): string {
+  if (!d) return "—";
+  return new Date(d).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" });
+}
+
+/**
+ * 回饋代理卡：每 3 天自動巡一次未處理回饋，分診、排修復、寄信回覆回報者。
+ * 顯示排程週期／信箱機制狀態／最近一次巡檢結果；開發者可「立即巡檢」不必等排程。
+ */
+function FeedbackAgentCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
+  const utils = trpc.useUtils();
+  const status = trpc.feedbackReports.agentStatus.useQuery();
+  const runNow = trpc.feedbackReports.runAgentNow.useMutation({
+    onSuccess: () => {
+      utils.feedbackReports.agentStatus.invalidate();
+      utils.feedbackReports.listVisible.invalidate();
+    },
+  });
+  const last = status.data?.lastRun;
+  return (
+    <section className="card" style={{ marginTop: 16 }} data-fb="回饋代理卡">
+      <h2>回饋代理</h2>
+      <p className="hint">
+        每 3 天自動巡一次未處理的元件回饋：AI 分診嚴重度、給工程排修復方向，並寄信回覆回報者。
+      </p>
+      {status.isLoading ? (
+        <div className="skeleton" style={{ height: 48, marginTop: 8 }} />
+      ) : status.error ? (
+        <p className="error">代理狀態載入失敗：{status.error.message}</p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+          <div>
+            <span className="hint">巡檢週期：</span>每 {status.data?.intervalDays ?? 3} 天一次（伺服器背景）
+          </div>
+          <div>
+            <span className="hint">信箱回覆機制：</span>
+            {status.data?.emailConfigured
+              ? <span style={{ color: "var(--success-ink)", fontWeight: 600 }}>已設定（會實際寄出）</span>
+              : <span style={{ color: "var(--gold-ink)" }}>未設定（僅落地回覆草稿，未寄出）</span>}
+          </div>
+          <div>
+            <span className="hint">最近一次巡檢：</span>
+            {last
+              ? `${fmtWhen(last.startedAt)}・${last.status === "done" ? "完成" : last.status === "failed" ? "失敗" : "進行中"}｜分診 ${last.reviewedCount} 筆、寄出 ${last.emailedCount} 封${last.note ? `（${last.note}）` : ""}`
+              : "尚未執行過（開機後約 5 分鐘首巡）"}
+          </div>
+        </div>
+      )}
+      {isSuperAdmin && (
+        <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center" }}>
+          <button onClick={() => runNow.mutate()} disabled={runNow.isPending}>
+            {runNow.isPending ? "巡檢中…" : "立即巡檢一次"}
+          </button>
+          {runNow.data && (
+            <span className="hint">
+              {runNow.data.status === "skipped"
+                ? "已有一輪巡檢進行中"
+                : runNow.data.status === "failed"
+                  ? `失敗：${runNow.data.note}`
+                  : `完成：分診 ${runNow.data.reviewedCount} 筆、寄出 ${runNow.data.emailedCount} 封`}
+            </span>
+          )}
+          {runNow.error && <span className="error" style={{ marginTop: 0 }}>{runNow.error.message}</span>}
+        </div>
       )}
     </section>
   );
@@ -825,6 +950,8 @@ export function AdminPage() {
           ))
         )}
       </section>
+
+      <FeedbackAgentCard isSuperAdmin={isSuperAdmin} />
 
       <FeedbackReportsSection />
     </div>

@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { and, or, eq, inArray, desc, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
+import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { FEEDBACK_CATEGORY_VALUES } from "../../shared/options";
 import { isFeedbackShotPath } from "../services/storage";
+import { runFeedbackAgentOnce } from "../services/feedbackAgent";
+import { isEmailConfigured } from "../services/email";
 
 /** 合法狀態（與 schema feedback_reports.status 一致）——過濾與更新共用 */
 const STATUS_VALUES = ["open", "reviewing", "done"] as const;
@@ -111,4 +113,33 @@ export const feedbackReportsRouter = router({
       await db.update(schema.feedbackReports).set({ status: input.status }).where(eq(schema.feedbackReports.id, input.id));
       return { ok: true };
     }),
+
+  /**
+   * 回饋代理狀態（管理頁「回饋代理」卡用）：最近一次巡檢紀錄＋信箱機制是否就緒。
+   * 需團隊管理權（adminProcedure）；每 3 天自動巡一次的排程在伺服器背景，這裡只讀狀態。
+   */
+  agentStatus: adminProcedure.query(async () => {
+    const [lastRun] = await db
+      .select()
+      .from(schema.feedbackAgentRuns)
+      .orderBy(desc(schema.feedbackAgentRuns.startedAt))
+      .limit(1);
+    return {
+      // 排程固定每 3 天巡一次（見 services/feedbackAgent.ts）
+      intervalDays: 3,
+      emailConfigured: isEmailConfigured(),
+      lastRun: lastRun ?? null,
+    };
+  }),
+
+  /**
+   * 立即巡檢一輪（超管手動觸發，不必等 3 天排程）：同步跑完回傳結果。
+   * 併發時（排程正在跑）回 skipped；只有開發者可觸發，避免一般管理員狂點觸發 LLM 呼叫。
+   */
+  runAgentNow: adminProcedure.mutation(async ({ ctx }) => {
+    if (!ctx.auth.user.isSuperAdmin) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "只有開發者能手動觸發回饋代理巡檢" });
+    }
+    return runFeedbackAgentOnce({ trigger: "manual" });
+  }),
 });
