@@ -64,13 +64,21 @@ export const auditRouter = router({
           ...getTableColumns(schema.auditLog),
           cursorAt: sql<string>`${schema.auditLog.createdAt}::text`,
           actorName: schema.users.name,
-          // 歸屬名稱（「更加細節」）：讓讀者知道這筆動到哪個組／哪個專案,不必去對 uuid
+          // 歸屬名稱（「更加細節」／分團隊組別）：這筆動到哪個團隊・組別・專案,不必去對 uuid
+          teamName: schema.teams.name,
           groupName: schema.groups.name,
           projectTitle: schema.projects.title,
+          // 操作者在該組的角色（組長／組員）——「分組員」的層級標示；歸屬非組內動作時為 null。
+          // 用純量子查詢（limit 1）而非 join：group_members 沒有 (group_id,user_id) 唯一鍵，
+          // 萬一有重複列，join 會把該筆審計 fan-out 成多列；子查詢只取一列，絕不重複。
+          actorRole: sql<
+            "leader" | "member" | null
+          >`(select role from group_members where group_members.user_id = ${schema.auditLog.actorId} and group_members.group_id = ${schema.auditLog.groupId} limit 1)`,
         })
         .from(schema.auditLog)
         .leftJoin(schema.users, eq(schema.users.id, schema.auditLog.actorId))
         .leftJoin(schema.groups, eq(schema.groups.id, schema.auditLog.groupId))
+        .leftJoin(schema.teams, eq(schema.teams.id, schema.groups.teamId))
         .leftJoin(schema.projects, eq(schema.projects.id, schema.auditLog.projectId))
         .where(conds.length ? and(...conds) : undefined)
         .orderBy(desc(schema.auditLog.createdAt), desc(schema.auditLog.id))
@@ -81,11 +89,13 @@ export const auditRouter = router({
         nextCursor = { createdAt: last.cursorAt, id: last.id };
         rows.splice(pageSize);
       }
-      const items = rows.map(({ cursorAt: _c, actorName, groupName, projectTitle, ...r }) => ({
+      const items = rows.map(({ cursorAt: _c, actorName, teamName, groupName, projectTitle, actorRole, ...r }) => ({
         ...r,
         actorName: actorName ?? "?",
+        teamName: teamName ?? null,
         groupName: groupName ?? null,
         projectTitle: projectTitle ?? null,
+        actorRole: actorRole ?? null,
       }));
       return { items, nextCursor };
     }),

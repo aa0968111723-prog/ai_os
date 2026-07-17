@@ -25,6 +25,7 @@ import { scheduleRouter } from "./schedule";
 import { teamAssistantRouter } from "./teamAssistant";
 import { mcpTokensRouter } from "./mcpTokens";
 import { databasesRouter } from "./databases";
+import { directoryRouter } from "./directory";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -53,6 +54,7 @@ export const appRouter = router({
   teamAssistant: teamAssistantRouter,
   mcpTokens: mcpTokensRouter,
   databases: databasesRouter,
+  directory: directoryRouter,
 });
 
 export type AppRouter = typeof appRouter;
