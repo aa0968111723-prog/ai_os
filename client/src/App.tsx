@@ -5,7 +5,7 @@ import { Launchpad } from "./pages/Launchpad";
 import { ProjectPage } from "./pages/ProjectPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
-import { AdminPage, AuditLogCard } from "./pages/AdminPage";
+import { AdminPage, AuditLogCard, ConsumptionMonitorCard } from "./pages/AdminPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { MyReportsPage } from "./pages/MyReportsPage";
 import { ModelsPage } from "./pages/ModelsPage";
@@ -211,8 +211,8 @@ function UserMenu({
           <Link href="/mcp" className="menu-item" role="menuitem" onClick={close}><Icon name="Sparkles" size={15} />接上外部 AI</Link>
           <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
           {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
-          {/* 操作紀錄：組長（不含純組員）與管理員都看得到；管理員在「團隊管理」也有同一張卡 */}
-          {(activeIsLeader || isAdmin) && <Link href="/logs" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />操作紀錄</Link>}
+          {/* 監控與紀錄：點數消耗監控＋操作紀錄。組長（不含純組員）與管理員都看得到；管理員在「團隊管理」也有同兩張卡 */}
+          {(activeIsLeader || isAdmin) && <Link href="/logs" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />監控與紀錄</Link>}
           {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />團隊管理</Link>}
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">帳號</div>
@@ -361,7 +361,11 @@ export function App() {
                 </Route>
                 <Route path="/logs">
                   {activeIsLeader || isAdmin ? (
-                    <div style={{ maxWidth: 860, margin: "0 auto" }}><AuditLogCard /></div>
+                    // 組長也看得到「點數消耗監控」：後端已按呼叫者權限把範圍收斂到自己帶的組
+                    <div className="stack" style={{ maxWidth: 860, margin: "0 auto" }}>
+                      <ConsumptionMonitorCard />
+                      <AuditLogCard />
+                    </div>
                   ) : (
                     <p className="error">
                       這頁需要組長或管理員權限 — <Link href="/">回作業台</Link>
