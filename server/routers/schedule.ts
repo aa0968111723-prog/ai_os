@@ -22,10 +22,24 @@ async function getItemChecked(auth: Parameters<typeof requireGroup>[0], id: stri
 }
 
 export const scheduleRouter = router({
-  /** 清單：預設只回「未來與最近 24 小時內」；includePast 回全部。startsAt 升冪。 */
+  /**
+   * 清單：預設只回「未來與最近 24 小時內」；includePast 回全部。startsAt 升冪。
+   * from/to（ISO 字串，可選）：以 startsAt 界定視窗——月曆翻月／知識地圖用它把查詢綁在
+   * 可見範圍內，避免 asc+limit(300) 在忙碌組別悄悄截掉未來行程。
+   */
   list: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), includePast: z.boolean().optional() }))
-    .query(({ ctx, input }) => listScheduleForGroup(ctx.auth, input.groupId, input.includePast ?? false)),
+    .input(z.object({
+      groupId: z.string().uuid(),
+      includePast: z.boolean().optional(),
+      from: isoDate.optional(),
+      to: isoDate.optional(),
+    }))
+    .query(({ ctx, input }) =>
+      listScheduleForGroup(ctx.auth, input.groupId, input.includePast ?? false, undefined, {
+        from: input.from ? new Date(input.from) : undefined,
+        to: input.to ? new Date(input.to) : undefined,
+      }),
+    ),
 
   add: authedProcedure
     .input(z.object({
@@ -78,9 +92,35 @@ export const scheduleRouter = router({
 });
 
 /**
+ * RFC 5545 §3.1 內容行折疊：一行以 75 octet 為界，超過就插入 CRLF＋一個空格續行。
+ * 中文（CJK）在 UTF-8 是 3 bytes/字，120 字標題的 SUMMARY 行約 360 octet、500 字備註的
+ * DESCRIPTION 行約 1500 octet，遠超上限——不折疊的話 Outlook 等嚴格解析器會靜默丟棄整個事件
+ * （稽核缺陷 #3）。折疊一律以「UTF-8 位元組邊界」切，續行 byte（0b10xxxxxx）不可被切斷，
+ * 否則多位元組字被腰斬成亂碼。
+ */
+export function foldIcsLine(line: string): string {
+  const bytes = Buffer.from(line, "utf8");
+  if (bytes.length <= 75) return line;
+  const parts: string[] = [];
+  let start = 0;
+  let limit = 75; // 首行 75 octet；續行有一個前導空格，實際內容上限 74 octet（前導空格佔 1）
+  while (start < bytes.length) {
+    let end = Math.min(start + limit, bytes.length);
+    // 不切在多位元組字中間：續行 byte 形如 10xxxxxx（0x80–0xBF），往回退到字元邊界
+    if (end < bytes.length) {
+      while (end > start && (bytes[end] & 0xc0) === 0x80) end--;
+    }
+    parts.push(bytes.subarray(start, end).toString("utf8"));
+    start = end;
+    limit = 74;
+  }
+  return parts.join("\r\n ");
+}
+
+/**
  * .ics（iCalendar）內容產生：供 server/index.ts 的匯出端點使用。
  * 極簡 VCALENDAR/VEVENT：UTC 時間（Z 結尾）、UID=id@aidirector-os、無結束時間以 1 小時計;
- * 文字欄位跳脫（\ ; , 換行）。匯入 Google 日曆/Apple 行事曆皆可讀。
+ * 文字欄位跳脫（\ ; , 換行）後再逐行折疊至 75 octet。匯入 Google 日曆/Apple/Outlook 皆可讀。
  */
 export function buildIcs(groupName: string, items: Array<{ id: string; title: string; startsAt: Date; endsAt: Date | null; note: string | null }>): string {
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
@@ -109,5 +149,6 @@ export function buildIcs(groupName: string, items: Array<{ id: string; title: st
     );
   }
   lines.push("END:VCALENDAR");
-  return lines.join("\r\n");
+  // 每一行（含結構行與屬性行）都過折疊；結構行短，折疊為 no-op；長的 CJK 屬性行才真正被折。
+  return lines.map(foldIcsLine).join("\r\n");
 }

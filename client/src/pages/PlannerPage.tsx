@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
@@ -44,7 +44,14 @@ type NoteItem = {
   mentions?: string[] | null;
 };
 
-/** 「團隊／個人／專案」三種鏡頭：全組看全部、我的＝我建立或被 @、專案＝聚焦某一專案。 */
+/**
+ * 知識地圖鏡頭（三者互斥）：
+ * - all（全組）＝這個組的全部；
+ * - mine（我的）＝「我建立的」筆記／行程（createdBy＝我）；
+ * - mentioned（提及我）＝「我被 @ 提及的」筆記／行程（mentions 含我）。
+ * 「我的」與「提及我」是兩個各自獨立的述詞——被別人 @ 但非我建立的項目只會出現在「提及我」，
+ * 不會出現在「我的」（避免把兩者混為一談誤導使用者）。搭配「聚焦專案」下拉＝專案維度。
+ */
 type Lens = "all" | "mine" | "mentioned";
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -107,8 +114,9 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   const utils = trpc.useUtils();
   const [view, setView] = useState<"list" | "calendar">("list");
   const [includePast, setIncludePast] = useState(false);
-  // 清單檢視吃 includePast 開關；月曆檢視固定拉全部（含過去），才畫得出任意月份
-  const list = trpc.schedule.list.useQuery({ groupId, includePast: view === "calendar" ? true : includePast });
+  // 清單檢視吃 includePast 開關；月曆檢視改由 CalendarView 自己用「可見月份範圍」查詢，
+  // 故清單查詢只在清單檢視啟用（月曆時不必多打一次）。
+  const list = trpc.schedule.list.useQuery({ groupId, includePast }, { enabled: view === "list" });
   // 專案下拉＋列表上的專案名對照；與筆記卡同 key，react-query 只會打一次
   const projects = trpc.projects.list.useQuery({ groupId });
   const members = trpc.projects.groupMembers.useQuery({ groupId }).data ?? [];
@@ -171,12 +179,13 @@ function ScheduleCard({ groupId }: { groupId: string }) {
     <section className="card" style={{ marginTop: 16 }} data-fb="排程卡">
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0 }}>組排程</h2>
-        {/* 清單／月曆切換（真實日曆）：段落式切換鈕 */}
-        <div className="seg" role="tablist" aria-label="排程檢視" style={{ marginLeft: "auto" }}>
-          <button role="tab" aria-selected={view === "list"} className={view === "list" ? "on" : ""} onClick={() => setView("list")}>
+        {/* 清單／月曆切換（真實日曆）：段落式切換鈕。用 radiogroup/radio 語意（單選群組），
+            不用 tablist——沒有對應的 tabpanel/aria-controls，radio 才是正確的無障礙角色。 */}
+        <div className="seg" role="radiogroup" aria-label="排程檢視" style={{ marginLeft: "auto" }}>
+          <button role="radio" aria-checked={view === "list"} className={view === "list" ? "on" : ""} onClick={() => setView("list")}>
             <Icon name="FileText" size={13} /> 清單
           </button>
-          <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "on" : ""} onClick={() => setView("calendar")}>
+          <button role="radio" aria-checked={view === "calendar"} className={view === "calendar" ? "on" : ""} onClick={() => setView("calendar")}>
             <Icon name="CalendarPlus" size={13} /> 月曆
           </button>
         </div>
@@ -235,8 +244,10 @@ function ScheduleCard({ groupId }: { groupId: string }) {
       {endInvalid && <p className="error" role="alert" style={{ marginTop: 6 }}>結束時間要晚於開始時間</p>}
       {add.error && <p className="error">{add.error.message}</p>}
 
-      {/* 內容區：清單 or 月曆 */}
-      {list.isLoading ? (
+      {/* 內容區：清單 or 月曆（月曆自帶「可見月份範圍」查詢，與清單檢視解耦） */}
+      {view === "calendar" ? (
+        <CalendarView groupId={groupId} projectTitleOf={projectTitleOf} remove={remove} />
+      ) : list.isLoading ? (
         <div style={{ marginTop: 12 }} aria-hidden="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="gen-row">
@@ -246,8 +257,6 @@ function ScheduleCard({ groupId }: { groupId: string }) {
         </div>
       ) : list.error ? (
         <p className="error">{list.error.message}</p>
-      ) : view === "calendar" ? (
-        <CalendarView items={items} projectTitleOf={projectTitleOf} onDelete={(id) => remove.mutate({ id })} removing={remove.isPending} />
       ) : groups.length === 0 ? (
         <div className="empty-state" style={{ marginTop: 12 }}>
           <h3>{includePast ? "還沒有任何行程" : "接下來沒有排程"}</h3>
@@ -304,21 +313,36 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   );
 }
 
-/** 月曆檢視：真正的月份網格（週日起始），行程落在各自那天；點某天在下方展開當日行程。 */
+/** 月曆檢視：真正的月份網格（週日起始），行程落在各自那天；點某天在下方展開當日行程。
+ *  自帶「可見月份範圍」查詢——只抓網格涵蓋的日期，翻月即重查，不再全時間拉 300 筆被 asc 截斷。 */
 function CalendarView({
-  items,
+  groupId,
   projectTitleOf,
-  onDelete,
-  removing,
+  remove,
 }: {
-  items: ScheduleItem[];
+  groupId: string;
   projectTitleOf: (pid: string | null) => string | null;
-  onDelete: (id: string) => void;
-  removing: boolean;
+  remove: ReturnType<typeof trpc.schedule.remove.useMutation>;
 }) {
   const today = new Date();
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  // 網格起點（該月 1 號往前補到週日）與上界（起點 +42 天）——同時當作查詢視窗 [from, to]
+  const gridStart = useMemo(() => {
+    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const gs = new Date(first);
+    gs.setDate(1 - first.getDay());
+    return gs;
+  }, [cursor]);
+  const gridEnd = useMemo(() => {
+    const ge = new Date(gridStart);
+    ge.setDate(gridStart.getDate() + 42); // 6 週 × 7 天（上界，涵蓋尾端整天）
+    return ge;
+  }, [gridStart]);
+  // 查詢鍵是穩定的 ISO 字串（由 cursor 決定），翻月才重查、同月不抖動
+  const q = trpc.schedule.list.useQuery({ groupId, from: gridStart.toISOString(), to: gridEnd.toISOString() });
+  const items = (q.data ?? []) as ScheduleItem[];
 
   // 行程依「天」歸位（用開始時間的本地日）
   const byDay = useMemo(() => {
@@ -331,11 +355,8 @@ function CalendarView({
     return m;
   }, [items]);
 
-  // 6×7 月曆矩陣（含前後月補格）
+  // 6×7 月曆矩陣（含前後月補格），由 gridStart 展開
   const weeks = useMemo(() => {
-    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
-    const gridStart = new Date(first);
-    gridStart.setDate(1 - first.getDay());
     const out: Date[][] = [];
     for (let w = 0; w < 6; w++) {
       const row: Date[] = [];
@@ -347,7 +368,7 @@ function CalendarView({
       out.push(row);
     }
     return out;
-  }, [cursor]);
+  }, [gridStart]);
 
   const monthLabel = `${cursor.getFullYear()} 年 ${cursor.getMonth() + 1} 月`;
   const todayKey = dayKey(today);
@@ -370,6 +391,8 @@ function CalendarView({
         <button className="btn-sm btn-ghost" onClick={() => { setCursor(new Date(today.getFullYear(), today.getMonth(), 1)); setSelectedKey(null); }}>
           回本月
         </button>
+        {q.isFetching && <span className="hint" style={{ margin: 0 }}>載入中…</span>}
+        {q.error && <span className="error" style={{ margin: 0 }}>{q.error.message}</span>}
       </div>
       <div className="cal-grid">
         {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
@@ -425,11 +448,11 @@ function CalendarView({
                   {(ev.note || ev.ownerName) && <div className="meta">{[ev.ownerName, ev.note].filter(Boolean).join("・")}</div>}
                 </div>
                 <ConfirmButton
-                  onConfirm={() => onDelete(ev.id)}
+                  onConfirm={() => remove.mutate({ id: ev.id })}
                   message={`刪除行程「${ev.title}」？`}
                   triggerClassName="btn-sm"
                   triggerStyle={{ color: "var(--danger-ink)" }}
-                  disabled={removing}
+                  disabled={remove.isPending}
                 >
                   刪除
                 </ConfirmButton>
@@ -463,6 +486,8 @@ function NotesCard({ groupId }: { groupId: string }) {
   // 全文抓回來只填一次表單，避免 refetch 覆蓋使用者正在改的字（沿用知識庫的 seeded 模式）；
   // 只填「沒有本地草稿」的欄位——上次編輯到一半離開的字比伺服器舊值更該保留
   const seededRef = useRef(false);
+  // 從知識庫匯入時的提示（截斷／已達上限）——不讓匯入靜默丟字（稽核 #12）
+  const [importNotice, setImportNotice] = useState<string | null>(null);
   const full = trpc.notes.get.useQuery({ id: editingId ?? "" }, { enabled: !!editingId });
   useEffect(() => {
     if (editingId && full.data && !seededRef.current) {
@@ -483,6 +508,7 @@ function NotesCard({ groupId }: { groupId: string }) {
     setEditingId(null);
     seededRef.current = false;
     setProjectId("");
+    setImportNotice(null);
   };
   const openNew = () => {
     setEditingId(null);
@@ -613,17 +639,27 @@ function NotesCard({ groupId }: { groupId: string }) {
 
           {/* 從知識庫匯入：把某專案知識庫的一筆全文附加到內容尾端（4.4「匯入知識」） */}
           {contentReady && (
-            <KnowledgeImport
-              projects={projects.data ?? []}
-              disabled={saving}
-              onImport={(imported, kbTitle) => {
-                const block = `【知識庫：${kbTitle}】\n${imported}`;
-                const next = content.trim() ? `${content.trimEnd()}\n\n${block}` : block;
-                // 匯入可能讓內容超過 40000 字上限——與 textarea maxLength 一致，先在此截斷不靜默溢出
-                setContent(next.slice(0, 40000));
-                if (!title.trim()) setTitle(kbTitle.slice(0, 120));
-              }}
-            />
+            <>
+              <KnowledgeImport
+                projects={projects.data ?? []}
+                disabled={saving}
+                onImport={(imported, kbTitle) => {
+                  const block = `【知識庫：${kbTitle}】\n${imported}`;
+                  const base = content.trim() ? `${content.trimEnd()}\n\n${block}` : block;
+                  // 已達上限：什麼都加不進去——據實說，不要靜默 no-op（稽核 #12）
+                  if (content.length >= 40000) {
+                    setImportNotice("筆記已達 40,000 字上限，無法再匯入內容（可先精簡內容再匯入）。");
+                    return;
+                  }
+                  const next = base.slice(0, 40000);
+                  const dropped = base.length - next.length;
+                  setContent(next);
+                  if (!title.trim()) setTitle(kbTitle.slice(0, 120));
+                  setImportNotice(dropped > 0 ? `已匯入，但超過 40,000 字上限，截斷了約 ${dropped.toLocaleString()} 字。` : null);
+                }}
+              />
+              {importNotice && <p className="hint" role="status" style={{ marginTop: 4, color: "var(--gold-ink)" }}>{importNotice}</p>}
+            </>
           )}
 
           <label htmlFor="note-project">掛在專案（選填）</label>
@@ -760,15 +796,29 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
   const [, setLocation] = useLocation();
   const me = trpc.auth.me.useQuery();
   const meId = me.data?.user.id ?? "";
+  // 行程視窗：以「今天」為中心 ±1 年，一次算好（空依賴 memo）讓查詢鍵穩定、不每次 render 抖動。
+  // 避免 includePast 全時間 asc+limit(300) 在忙碌組別回「最舊 300 筆」而漏掉近期行程（稽核 #5）。
+  const schedWindow = useMemo(() => {
+    const now = new Date();
+    return {
+      from: new Date(now.getFullYear() - 1, now.getMonth(), 1).toISOString(),
+      to: new Date(now.getFullYear() + 1, now.getMonth() + 1, 0, 23, 59, 59).toISOString(),
+    };
+  }, []);
   const notes = trpc.notes.list.useQuery({ groupId });
-  const schedule = trpc.schedule.list.useQuery({ groupId, includePast: true });
+  const schedule = trpc.schedule.list.useQuery({ groupId, from: schedWindow.from, to: schedWindow.to });
   const projects = trpc.projects.list.useQuery({ groupId });
 
   const [lens, setLens] = useState<MapLens>("all");
   const [focusProject, setFocusProject] = useState(""); // ""＝全部專案
 
-  const loading = notes.isLoading || schedule.isLoading || projects.isLoading;
-  const anyError = notes.error ?? schedule.error ?? projects.error;
+  // me 一併納入 loading/error 閘門：身分載入慢／失敗時，別讓「我的／提及我」顯示成空地圖，
+  // 而與「真的沒資料」無法區分（稽核 #10）。identityMissing＝需要身分卻拿不到。
+  const loading = notes.isLoading || schedule.isLoading || projects.isLoading || me.isLoading;
+  const anyError = notes.error ?? schedule.error ?? projects.error ?? me.error;
+  const identityMissing = lens !== "all" && !meId;
+  // 資料量觸及後端上限（筆記 200／行程視窗 300）：據實提示「部分較舊項目未納入」，不讓截斷無聲。
+  const truncated = notes.data?.length === 200 || schedule.data?.length === 300;
 
   const graph = useMemo(() => {
     if (loading || anyError) return null;
@@ -811,60 +861,75 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
     return { shownBranches, hiddenBranchCount, totalNotes: noteRows.length, totalSched: schedRows.length };
   }, [loading, anyError, notes.data, schedule.data, projects.data, lens, focusProject, meId]);
 
-  // 佈局幾何（固定 viewBox，SVG 依容器寬縮放）
-  const W = 920;
-  const H = 560;
-  const cx = W / 2;
-  const cy = H / 2;
   const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
 
   const layout = useMemo(() => {
     if (!graph) return null;
     const { shownBranches } = graph;
     const B = shownBranches.length;
-    const RB = 165; // 分支節點半徑
-    const RL = 258; // 葉節點半徑
-    const nodes: Array<{ id: string; type: "group" | "project" | "bucket" | "note" | "schedule" | "more"; label: string; x: number; y: number; refId?: string; projectId?: string | null }> = [];
+    // 半徑隨分支數成長，給圓周更多空間；標題依 B 收更短——內圈膠囊才不會在分支多時互撞（稽核 #4）。
+    const RB = 150 + Math.min(B, 10) * 8; // 158..230
+    const RL = RB + 104;
+    const margin = 80; // 外圈葉標籤的留白
+    const W = 2 * (RL + margin);
+    const H = 2 * (RL + 52);
+    const cx = W / 2;
+    const cy = H / 2;
+    const branchClip = B > 8 ? 6 : B > 5 ? 9 : 12;
+    const slot = (2 * Math.PI) / B; // 每個分支「自己的」角楔（相鄰分支中心相距一個 slot）
+    type Node = { id: string; type: "group" | "project" | "bucket" | "note" | "schedule" | "more"; label: string; full: string; x: number; y: number; refId?: string; projectId?: string | null; tx?: number; ty?: number; tAnchor?: "start" | "middle" | "end"; tBaseline?: "auto" | "middle" | "hanging" };
+    const nodes: Node[] = [];
     const edges: Array<{ x1: number; y1: number; x2: number; y2: number; kind: "branch" | "leaf" }> = [];
-    nodes.push({ id: "group", type: "group", label: "本組", x: cx, y: cy });
-    if (B === 0) return { nodes, edges };
+    nodes.push({ id: "group", type: "group", label: "本組", full: "本組", x: cx, y: cy });
     shownBranches.forEach((b, i) => {
-      const a = -Math.PI / 2 + (i * 2 * Math.PI) / B;
+      const a = -Math.PI / 2 + i * slot; // 分支主軸角
       const bx = cx + RB * Math.cos(a);
       const by = cy + RB * Math.sin(a);
       edges.push({ x1: cx, y1: cy, x2: bx, y2: by, kind: "branch" });
-      nodes.push({ id: `b-${b.key}`, type: b.projectId ? "project" : "bucket", label: clip(b.label, 12), x: bx, y: by, projectId: b.projectId });
-      // 葉節點：在分支角度附近扇形展開；最多 6 片，其餘收成一顆「+N」
+      nodes.push({ id: `b-${b.key}`, type: b.projectId ? "project" : "bucket", label: clip(b.label, branchClip), full: b.label, x: bx, y: by, projectId: b.projectId });
+      // 葉節點：最多 6 片、其餘收成一顆「+N」。扇形總開角『鎖在自己的角楔內』（slot*0.82 < slot），
+      // 因此相鄰分支的葉圈永遠不會互相侵入、疊字（稽核 #1：固定 0.7π 扇形會超出角楔造成重疊）。
       const shownLeaves = b.leaves.slice(0, 6);
       const extra = b.leaves.length - shownLeaves.length;
       const total = shownLeaves.length + (extra > 0 ? 1 : 0);
-      const fan = Math.min(Math.PI * 0.7, 0.36 * Math.max(1, total)); // 扇形總開角
-      shownLeaves.forEach((leaf, j) => {
-        const off = total > 1 ? -fan / 2 + (fan * j) / (total - 1) : 0;
+      const fan = Math.min(slot * 0.82, 0.34 * Math.max(1, total));
+      const place = (idx: number, node: Omit<Node, "x" | "y">) => {
+        const off = total > 1 ? -fan / 2 + (fan * idx) / (total - 1) : 0;
         const la = a + off;
         const lx = cx + RL * Math.cos(la);
         const ly = cy + RL * Math.sin(la);
         edges.push({ x1: bx, y1: by, x2: lx, y2: ly, kind: "leaf" });
-        nodes.push({ id: leaf.id, type: leaf.kind, label: clip(leaf.label, 11), x: lx, y: ly, refId: leaf.refId });
-      });
-      if (extra > 0) {
-        const j = shownLeaves.length;
-        const off = total > 1 ? -fan / 2 + (fan * j) / (total - 1) : 0;
-        const la = a + off;
-        const lx = cx + RL * Math.cos(la);
-        const ly = cy + RL * Math.sin(la);
-        edges.push({ x1: bx, y1: by, x2: lx, y2: ly, kind: "leaf" });
-        nodes.push({ id: `more-${b.key}`, type: "more", label: `+${extra}`, x: lx, y: ly, projectId: b.projectId });
-      }
+        // 標籤沿半徑「往外」擺放並依方位對齊（右側靠左起、左側靠右收、上下置中）——
+        // 讓同分支相鄰葉的字往外流開、減少互疊，尤其正上／正下方分支（稽核 #4 標籤擁擠）。
+        const dirX = Math.cos(la);
+        const dirY = Math.sin(la);
+        const tAnchor: Node["tAnchor"] = dirX > 0.35 ? "start" : dirX < -0.35 ? "end" : "middle";
+        const tx = lx + dirX * 9 + (tAnchor === "start" ? 4 : tAnchor === "end" ? -4 : 0);
+        const ty = ly + dirY * 9 + (tAnchor === "middle" ? (dirY >= 0 ? 6 : -4) : 0);
+        const tBaseline: Node["tBaseline"] = tAnchor === "middle" ? (dirY >= 0 ? "hanging" : "auto") : "middle";
+        nodes.push({ ...node, x: lx, y: ly, tx, ty, tAnchor, tBaseline });
+      };
+      shownLeaves.forEach((leaf, j) => place(j, { id: leaf.id, type: leaf.kind, label: clip(leaf.label, 11), full: leaf.label, refId: leaf.refId }));
+      if (extra > 0) place(shownLeaves.length, { id: `more-${b.key}`, type: "more", label: `+${extra}`, full: `還有 ${extra} 筆`, projectId: b.projectId });
     });
-    return { nodes, edges };
+    return { nodes, edges, W, H };
   }, [graph]);
 
-  const clickNode = (n: { type: string; refId?: string; projectId?: string | null }) => {
+  type MapNode = { type: string; full: string; refId?: string; projectId?: string | null };
+  const clickNode = (n: MapNode) => {
     if (n.type === "note" && n.refId) flashAnchor(`note-${n.refId}`);
     else if (n.type === "schedule" && n.refId) flashAnchor(`schedule-${n.refId}`);
     else if ((n.type === "project" || n.type === "more") && n.projectId) setLocation(`/p/${n.projectId}`);
   };
+  // 節點是否可操作（可鍵盤聚焦＋點擊）：葉一律可、專案／+N 需有 projectId、組層級與中心不可。
+  const isClickable = (n: MapNode) =>
+    n.type === "note" || n.type === "schedule" || ((n.type === "project" || n.type === "more") && !!n.projectId);
+  const ariaLabelOf = (n: MapNode) =>
+    n.type === "note" ? `筆記：${n.full}（跳至上方對應筆記）`
+    : n.type === "schedule" ? `行程：${n.full}（跳至上方對應行程）`
+    : n.type === "project" ? `專案：${n.full}（開啟專案頁）`
+    : n.type === "more" ? `${n.full}（開啟專案頁）`
+    : n.full;
 
   return (
     <section className="card" style={{ marginTop: 16 }} data-fb="知識地圖卡">
@@ -875,10 +940,10 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
 
       {/* 鏡頭：全組／我的／提及我 ＋ 專案聚焦（團隊／個人／專案三個維度） */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-        <div className="seg" role="tablist" aria-label="鏡頭">
-          <button role="tab" aria-selected={lens === "all"} className={lens === "all" ? "on" : ""} onClick={() => setLens("all")}>全組</button>
-          <button role="tab" aria-selected={lens === "mine"} className={lens === "mine" ? "on" : ""} onClick={() => setLens("mine")}>我的</button>
-          <button role="tab" aria-selected={lens === "mentioned"} className={lens === "mentioned" ? "on" : ""} onClick={() => setLens("mentioned")}>提及我</button>
+        <div className="seg" role="radiogroup" aria-label="知識地圖鏡頭">
+          <button role="radio" aria-checked={lens === "all"} className={lens === "all" ? "on" : ""} onClick={() => setLens("all")}>全組</button>
+          <button role="radio" aria-checked={lens === "mine"} className={lens === "mine" ? "on" : ""} onClick={() => setLens("mine")}>我的</button>
+          <button role="radio" aria-checked={lens === "mentioned"} className={lens === "mentioned" ? "on" : ""} onClick={() => setLens("mentioned")}>提及我</button>
         </div>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <Icon name="SlidersHorizontal" size={13} style={{ color: "var(--fg-secondary)" }} />
@@ -893,6 +958,7 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
           <span className="hint" style={{ margin: 0 }}>
             筆記 {graph.totalNotes}・行程 {graph.totalSched}
             {graph.hiddenBranchCount > 0 ? `・另有 ${graph.hiddenBranchCount} 個分支未畫（過密）` : ""}
+            {truncated ? "・資料量較大，部分較舊項目未納入" : ""}
           </span>
         )}
       </div>
@@ -909,6 +975,11 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
         <div className="skeleton" style={{ height: 320, marginTop: 12, borderRadius: "var(--r-12)" }} aria-hidden="true" />
       ) : anyError ? (
         <p className="error">{anyError.message}</p>
+      ) : identityMissing ? (
+        <div className="empty-state" style={{ marginTop: 12 }}>
+          <h3>需要確認你的身分</h3>
+          <p>「{lens === "mine" ? "我的" : "提及我"}」要用你的身分來篩選，但目前拿不到——請重新整理頁面，或先把鏡頭切回「全組」。</p>
+        </div>
       ) : !graph || graph.shownBranches.length === 0 ? (
         <div className="empty-state" style={{ marginTop: 12 }}>
           <h3>這張地圖還是空的</h3>
@@ -916,14 +987,31 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
         </div>
       ) : (
         <div className="map-wrap" style={{ marginTop: 12 }}>
-          <svg viewBox={`0 0 ${W} ${H}`} className="map-svg" role="img" aria-label="知識地圖">
+          {/* role=group（非 img）讓節點留在無障礙樹裡；可操作節點各自 role=button＋可 Tab 聚焦＋Enter/Space 觸發（稽核 #6） */}
+          <svg viewBox={`0 0 ${layout?.W ?? 800} ${layout?.H ?? 640}`} className="map-svg" role="group" aria-label="知識地圖：可用 Tab 逐一聚焦節點，Enter／Space 開啟或跳至對應項目">
             {layout?.edges.map((e, i) => (
               <line key={`e-${i}`} x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2} className={`map-edge ${e.kind}`} />
             ))}
             {layout?.nodes.map((n) => {
+              const clickable = isClickable(n);
+              const a11y = clickable
+                ? {
+                    role: "button",
+                    tabIndex: 0,
+                    "aria-label": ariaLabelOf(n),
+                    onClick: () => clickNode(n),
+                    onKeyDown: (e: KeyboardEvent) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        clickNode(n);
+                      }
+                    },
+                    style: { cursor: "pointer" as const },
+                  }
+                : { "aria-hidden": true as const };
               if (n.type === "group") {
                 return (
-                  <g key={n.id} className="map-node group">
+                  <g key={n.id} className="map-node group" aria-hidden="true">
                     <circle cx={n.x} cy={n.y} r={34} />
                     <text x={n.x} y={n.y} textAnchor="middle" dominantBaseline="central">{n.label}</text>
                   </g>
@@ -931,24 +1019,18 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
               }
               if (n.type === "project" || n.type === "bucket" || n.type === "more") {
                 const w = Math.max(56, n.label.length * 13 + 22);
-                const clickable = n.type !== "bucket" && !!n.projectId;
                 return (
-                  <g
-                    key={n.id}
-                    className={`map-node ${n.type}${clickable ? " clickable" : ""}`}
-                    onClick={clickable ? () => clickNode(n) : undefined}
-                    style={clickable ? { cursor: "pointer" } : undefined}
-                  >
+                  <g key={n.id} className={`map-node ${n.type}${clickable ? " clickable" : ""}`} {...a11y}>
                     <rect x={n.x - w / 2} y={n.y - 15} width={w} height={30} rx={15} />
                     <text x={n.x} y={n.y} textAnchor="middle" dominantBaseline="central">{n.label}</text>
                   </g>
                 );
               }
-              // note / schedule 葉節點
+              // note / schedule 葉節點：標籤沿半徑往外擺、依方位對齊（見 layout 的 place）
               return (
-                <g key={n.id} className={`map-node ${n.type} clickable`} onClick={() => clickNode(n)} style={{ cursor: "pointer" }}>
+                <g key={n.id} className={`map-node ${n.type} clickable`} {...a11y}>
                   <circle cx={n.x} cy={n.y} r={6} />
-                  <text x={n.x} y={n.y - 12} textAnchor="middle">{n.label}</text>
+                  <text x={n.tx ?? n.x} y={n.ty ?? n.y - 12} textAnchor={n.tAnchor ?? "middle"} dominantBaseline={n.tBaseline ?? "auto"}>{n.label}</text>
                 </g>
               );
             })}

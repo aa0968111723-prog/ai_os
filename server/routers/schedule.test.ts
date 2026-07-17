@@ -4,9 +4,10 @@
  * 匯入 Google 日曆/Apple 行事曆的相容性正是靠這幾條規則。
  */
 import { describe, expect, it } from "vitest";
-import { buildIcs } from "./schedule";
+import { buildIcs, foldIcsLine } from "./schedule";
 
 const at = (iso: string) => new Date(iso);
+const byteLen = (s: string) => Buffer.byteLength(s, "utf8");
 
 describe("buildIcs", () => {
   it("骨架:VCALENDAR 包 VEVENT、CRLF 行尾、含日曆名稱", () => {
@@ -65,6 +66,31 @@ describe("buildIcs", () => {
     const ics = buildIcs("G", []);
     expect(ics).toContain("BEGIN:VCALENDAR");
     expect(ics).not.toContain("BEGIN:VEVENT");
+  });
+
+  it("RFC 5545 折疊：長 CJK 標題／備註每行 ≤ 75 octet，且反折疊可還原", () => {
+    const longTitle = "禪".repeat(120); // 120 CJK 字 → SUMMARY 行約 8 + 360 = 368 octet
+    const longNote = "安".repeat(500); // 500 CJK 字 → DESCRIPTION 行約 1500 octet
+    const ics = buildIcs("弘法組・北區工作組・剪輯組（管理）超長組名測試折疊行為需要更多字", [
+      { id: "11111111-2222-3333-4444-555555555555", title: longTitle, startsAt: at("2026-07-16T03:00:00Z"), endsAt: null, note: longNote },
+    ]);
+    // 每一「實體行」都不得超過 75 octet（含續行的前導空格）
+    for (const line of ics.split("\r\n")) {
+      expect(byteLen(line)).toBeLessThanOrEqual(75);
+    }
+    // 反折疊（移除 CRLF＋單一前導空格）後，長標題／備註完整重現，沒有被腰斬成亂碼
+    const unfolded = ics.replace(/\r\n /g, "");
+    expect(unfolded).toContain(`SUMMARY:${longTitle}`);
+    expect(unfolded).toContain(`DESCRIPTION:${longNote}`);
+    // 折疊不得切在多位元組字中間（還原後不含 UTF-8 替代字元 U+FFFD）
+    expect(unfolded).not.toContain("�");
+  });
+
+  it("foldIcsLine：短行不動、長行折且不切斷多位元組字", () => {
+    expect(foldIcsLine("SUMMARY:短")).toBe("SUMMARY:短"); // < 75 octet 原樣
+    const folded = foldIcsLine("DESCRIPTION:" + "字".repeat(60)); // 12 + 180 = 192 octet
+    for (const seg of folded.split("\r\n")) expect(byteLen(seg)).toBeLessThanOrEqual(75);
+    expect(folded.replace(/\r\n /g, "")).toBe("DESCRIPTION:" + "字".repeat(60));
   });
 
   it("單獨 CR（\\r）也要轉義，擋 ICS 注入", () => {
