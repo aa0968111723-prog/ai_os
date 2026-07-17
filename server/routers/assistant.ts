@@ -10,6 +10,7 @@ import { isMockMode } from "../services/fal";
 import { proxyFetch } from "../services/http";
 import { ANY_LLM_MODEL } from "../services/llm";
 import { reserveQuota, refund } from "../services/points";
+import { lockSceneOrder } from "../services/locks";
 import { submitGenerationCore } from "../services/generationCore";
 import { assertProjectEditable } from "../services/projectAcl";
 import { submitApprovalCore } from "./approvals";
@@ -444,22 +445,27 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         // 為什麼：schema 的 min(1) 擋不掉純空白；trim 後為空就拒絕，避免生出無名分鏡
         const title = a.title.trim();
         if (!title) throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡標題不能是空白" });
-        // 排在片尾：取本專案「未軟刪」分鏡的最大 orderIndex＋1——軟刪格不算，否則新格會被推到回收桶格之後留洞
-        const [{ maxOrder }] = await db
-          .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
-          .from(schema.scenes)
-          .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
         const voiceover = a.voiceover?.trim();
-        const [scene] = await db
-          .insert(schema.scenes)
-          .values({
-            projectId: project.id,
-            orderIndex: Number(maxOrder) + 1,
-            title,
-            voiceover: voiceover || undefined, // 全空白視同沒填
-            durationSec: a.durationSec ? Math.round(a.durationSec) : undefined, // zod 已限 1–60；取整配合欄位型別，沒填走預設
-          })
-          .returning();
+        // 交易＋per-project 序號鎖（與導演拆分鏡/加入分鏡同一把）：併發「讀 max→插入」不再重號
+        const scene = await db.transaction(async (tx) => {
+          await lockSceneOrder(tx, project.id);
+          // 排在片尾：取本專案「未軟刪」分鏡的最大 orderIndex＋1——軟刪格不算，否則新格會被推到回收桶格之後留洞
+          const [{ maxOrder }] = await tx
+            .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
+            .from(schema.scenes)
+            .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+          const [row] = await tx
+            .insert(schema.scenes)
+            .values({
+              projectId: project.id,
+              orderIndex: Number(maxOrder) + 1,
+              title,
+              voiceover: voiceover || undefined, // 全空白視同沒填
+              durationSec: a.durationSec ? Math.round(a.durationSec) : undefined, // zod 已限 1–60；取整配合欄位型別，沒填走預設
+            })
+            .returning();
+          return row;
+        });
         return { ok: true, kind: "create_scene" as const, sceneId: scene.id, message: "已新增分鏡" };
       }
 

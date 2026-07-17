@@ -5,6 +5,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { submitGenerationCore } from "../services/generationCore";
 import { getModel } from "../../shared/models";
+import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable } from "../services/projectAcl";
 
 /**
@@ -85,24 +86,29 @@ export const scenesRouter = router({
         .select()
         .from(schema.assets)
         .where(sql`${schema.assets.meta} ->> 'generationId' = ${gen.id}`);
-      const [{ maxOrder }] = await db
-        .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
-        .from(schema.scenes)
-        // 已軟刪除的分鏡不算進最大 orderIndex（否則新格會被推到刪除格之後留洞）
-        .where(and(eq(schema.scenes.projectId, gen.projectId), isNull(schema.scenes.deletedAt)));
-      const [scene] = await db
-        .insert(schema.scenes)
-        .values({
-          projectId: gen.projectId,
-          orderIndex: Number(maxOrder) + 1,
-          title: input.title ?? gen.prompt.slice(0, 30),
-          durationSec: gen.kind === "video" ? 5 : 3,
-          status: "review",
-          assetId: asset?.id,
-          prompt: gen.prompt, // 帶入原生成提示詞，讓「加入分鏡」的格子日後也能就地重生
-        })
-        .returning();
-      return scene;
+      // 交易＋per-project advisory lock：與拆分鏡/新增分鏡共用同一把序號鎖,
+      // 併發「讀 max→插入」不再算到同一個 max 而寫出重複 orderIndex
+      return db.transaction(async (tx) => {
+        await lockSceneOrder(tx, gen.projectId);
+        const [{ maxOrder }] = await tx
+          .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
+          .from(schema.scenes)
+          // 已軟刪除的分鏡不算進最大 orderIndex（否則新格會被推到刪除格之後留洞）
+          .where(and(eq(schema.scenes.projectId, gen.projectId), isNull(schema.scenes.deletedAt)));
+        const [scene] = await tx
+          .insert(schema.scenes)
+          .values({
+            projectId: gen.projectId,
+            orderIndex: Number(maxOrder) + 1,
+            title: input.title ?? gen.prompt.slice(0, 30),
+            durationSec: gen.kind === "video" ? 5 : 3,
+            status: "review",
+            assetId: asset?.id,
+            prompt: gen.prompt, // 帶入原生成提示詞，讓「加入分鏡」的格子日後也能就地重生
+          })
+          .returning();
+        return scene;
+      });
     }),
 
   /**
@@ -146,18 +152,25 @@ export const scenesRouter = router({
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
       await getProjectChecked(ctx, scene.projectId, true);
-      const all = await db
-        .select()
-        .from(schema.scenes)
-        // 只在未刪除的分鏡之間換序——含已刪除格會算錯相鄰、把 orderIndex 交換給隱形格
-        .where(and(eq(schema.scenes.projectId, scene.projectId), isNull(schema.scenes.deletedAt)))
-        .orderBy(asc(schema.scenes.orderIndex));
-      const idx = all.findIndex((s) => s.id === scene.id);
-      const swapWith = input.direction === "up" ? all[idx - 1] : all[idx + 1];
-      if (!swapWith) return { ok: true }; // 已在頂/底
-      await db.update(schema.scenes).set({ orderIndex: swapWith.orderIndex }).where(eq(schema.scenes.id, scene.id));
-      await db.update(schema.scenes).set({ orderIndex: scene.orderIndex }).where(eq(schema.scenes.id, swapWith.id));
-      return { ok: true };
+      // 交易＋序號鎖：兩個併發 move（雙擊↑↓／兩人同時排）各自「讀清單→互換」會用過期的
+      // orderIndex 交換出重複值；上鎖後讀與寫成對序列化,兩筆 update 也不再有半套(只換到一邊)
+      return db.transaction(async (tx) => {
+        await lockSceneOrder(tx, scene.projectId);
+        const all = await tx
+          .select()
+          .from(schema.scenes)
+          // 只在未刪除的分鏡之間換序——含已刪除格會算錯相鄰、把 orderIndex 交換給隱形格
+          .where(and(eq(schema.scenes.projectId, scene.projectId), isNull(schema.scenes.deletedAt)))
+          .orderBy(asc(schema.scenes.orderIndex));
+        const idx = all.findIndex((s) => s.id === scene.id);
+        // 以鎖內重讀的列為準（入口讀到的 scene 可能已被並發 move 換位）
+        const cur = all[idx];
+        const swapWith = input.direction === "up" ? all[idx - 1] : all[idx + 1];
+        if (!cur || !swapWith) return { ok: true }; // 已在頂/底（或已被並發刪除）
+        await tx.update(schema.scenes).set({ orderIndex: swapWith.orderIndex }).where(eq(schema.scenes.id, cur.id));
+        await tx.update(schema.scenes).set({ orderIndex: cur.orderIndex }).where(eq(schema.scenes.id, swapWith.id));
+        return { ok: true };
+      });
     }),
 
   /** 刪除分鏡＝軟刪除（回收桶）：保留使用者手打的 prompt／voiceover，可從回收桶還原 */
@@ -278,18 +291,23 @@ export const scenesRouter = router({
     .input(z.object({ projectId: z.string().uuid(), orderedIds: z.array(z.string().uuid()) }))
     .mutation(async ({ ctx, input }) => {
       await getProjectChecked(ctx, input.projectId, true);
-      // 只允許重排本專案「未刪除」的分鏡，避免越權改到別專案的列、也不動回收桶裡的格
-      const rows = await db
-        .select({ id: schema.scenes.id })
-        .from(schema.scenes)
-        .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt)));
-      const own = new Set(rows.map((r) => r.id));
-      let idx = 0;
-      for (const id of input.orderedIds) {
-        if (!own.has(id)) continue;
-        await db.update(schema.scenes).set({ orderIndex: idx }).where(eq(schema.scenes.id, id));
-        idx += 1;
-      }
-      return { ok: true };
+      // 交易＋序號鎖：逐筆寫 orderIndex 與其他建格/move 序列化——否則拖曳中另一人拆分鏡,
+      // 新格會拿到與重排結果重疊的序號;交易也保證重排不留半套
+      return db.transaction(async (tx) => {
+        await lockSceneOrder(tx, input.projectId);
+        // 只允許重排本專案「未刪除」的分鏡，避免越權改到別專案的列、也不動回收桶裡的格
+        const rows = await tx
+          .select({ id: schema.scenes.id })
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt)));
+        const own = new Set(rows.map((r) => r.id));
+        let idx = 0;
+        for (const id of input.orderedIds) {
+          if (!own.has(id)) continue;
+          await tx.update(schema.scenes).set({ orderIndex: idx }).where(eq(schema.scenes.id, id));
+          idx += 1;
+        }
+        return { ok: true };
+      });
     }),
 });

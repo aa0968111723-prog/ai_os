@@ -111,7 +111,7 @@ export interface SubmitCoreInput {
 }
 
 /** pg 唯一鍵衝突（23505）：驅動可能把原始錯誤包在 cause，兩層 code 與訊息都檢查 */
-function isUniqueViolation(err: unknown): boolean {
+export function isUniqueViolation(err: unknown): boolean {
   const codes = [(err as { code?: unknown } | null)?.code, (err as { cause?: { code?: unknown } } | null)?.cause?.code];
   if (codes.includes("23505")) return true;
   return err instanceof Error && err.message.includes("duplicate key");
