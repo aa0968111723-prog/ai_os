@@ -57,13 +57,20 @@ export type IconName =
   | "Bell"
   | "CalendarPlus"
   | "Square"
-  | "Plus";
+  | "Plus"
+  | "Search";
 
 /**
  * 每個名稱對應一組 Lucide 24x24 stroke 幾何（忠實重現原始路徑）。
  * 以片段（fragment）包裹多段路徑：靜態同層子節點不需 key，不會觸發警告。
  */
 const PATHS: Record<IconName, ReactNode> = {
+  Search: (
+    <>
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.3-4.3" />
+    </>
+  ),
   Bell: (
     <>
       <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />

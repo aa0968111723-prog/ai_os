@@ -12,7 +12,7 @@ type Action =
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
   | { type: "split_script"; label: string; script: string };
 
-type Turn = { role: "you" | "ai"; text: string; actions?: Action[] };
+type Turn = { role: "you" | "ai"; text: string; actions?: Action[]; steps?: string[] };
 
 /** 送 runAction 的乾淨 payload（去掉只給人看的 label） */
 function toPayload(a: Action) {
@@ -43,7 +43,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
   };
 
   const ask = trpc.assistant.ask.useMutation({
-    onSuccess: (r) => push({ role: "ai", text: r.answer, actions: r.actions as Action[] }),
+    onSuccess: (r) => push({ role: "ai", text: r.answer, actions: r.actions as Action[], steps: r.steps }),
     onError: (e) => push({ role: "ai", text: e.message }),
   });
   const run = trpc.assistant.runAction.useMutation({
@@ -74,7 +74,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
         <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 專案助手
       </h2>
       <p className="hint" style={{ marginTop: -4 }}>
-        問我這個專案的進度、生成了什麼、哪些分鏡還沒審…；我也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流／貼腳本拆分鏡），你按確認才執行。每次提問約 1 點。
+        問我這個專案的進度、生成了什麼、哪些分鏡還沒審、<b>該用哪個模型</b>…；回答前我會視需要查素材庫／分鏡／生成紀錄／模型目錄（唯讀，自動進行）。我也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流／貼腳本拆分鏡），你按確認才執行。每次提問約 1 點。
       </p>
 
       {turns.length > 0 && (
@@ -84,6 +84,12 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
               <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 2, textAlign: t.role === "you" ? "right" : "left" }}>
                 {t.role === "you" ? "你" : "助手"}
               </div>
+              {/* 多步工具透明化：助手回答前查了什麼(素材庫/分鏡/生成紀錄/模型目錄)一行列給使用者看 */}
+              {t.steps && t.steps.length > 0 && (
+                <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                  <Icon name="Search" size={11} />{t.steps.join("、")}
+                </div>
+              )}
               <div
                 style={{
                   background: t.role === "you" ? "var(--primary-tint)" : "var(--card2)",
