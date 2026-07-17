@@ -6,6 +6,7 @@ import { discussInMessages } from "../discuss";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
+  if (bytes < 1024) return "<1KB"; // 地毯實測外觀修復：極小檔 Math.round 歸零顯示「0KB」很怪
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }

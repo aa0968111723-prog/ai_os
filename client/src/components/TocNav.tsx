@@ -58,12 +58,26 @@ export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
       { rootMargin: "0px 0px -70% 0px", threshold: 0 },
     );
     els.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
+    // 地毯實測缺陷修復：rootMargin 要求標頭進入視窗頂部 30% 才算 active——短頁面（新專案）
+    // 最後一區永遠捲不到那裡，「③ 分鏡・交付」永遠標不亮。補「捲到底＝標最後一項」的 fallback
+    const lastId = items[items.length - 1]?.id;
+    const onScroll = () => {
+      if (lastId && window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+        setActiveId(lastId);
+      }
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", onScroll);
+    };
   }, [items]);
 
   const jump = (id: string) => {
     const el = document.getElementById(id);
     if (!el) return;
+    // 點擊即是意圖：立刻標記，不等 scroll-spy（短頁面的最後一區 observer 永遠不會標到）
+    setActiveId(id);
     el.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
     // 跳轉同步寫入 URL hash（replaceState 不塞歷史）：可分享「直達第④階段」的深連結，重整也留在原階段
     history.replaceState(null, "", `#${id}`);
