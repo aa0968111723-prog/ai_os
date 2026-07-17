@@ -186,7 +186,15 @@ export const costLedger = pgTable("cost_ledger", {
   reason: text("reason").notNull(),
   generationId: uuid("generation_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // 額度守門的 SUM 聚合都掃這張表（reserveQuota 還在持 advisory lock 的交易內掃），
+  // 且 quota.my 徽章每次頁面載入都跑——全非唯一索引（帳本是 append-only，扣點/退點/回收
+  // 對同一 generationId 各插一列，唯一索引會 23505 擋死退點）。開機 pushSchema 自動套用。
+  userGroupIdx: index("cost_ledger_user_group_idx").on(t.userId, t.groupId), // usedByMember + reserveQuota 個人預算；user_id 前綴另供 usedToday/usedThisWeek/週日守門
+  groupCreatedIdx: index("cost_ledger_group_created_idx").on(t.groupId, t.createdAt), // usedByGroup/groupUsage（group_id 前綴）＋ consumptionStats 組×日期範圍
+  createdIdx: index("cost_ledger_created_idx").on(t.createdAt), // consumptionStats 全站（超管）日期範圍掃描
+  generationIdx: index("cost_ledger_generation_id_idx").on(t.generationId), // 週/日/組聚合對 generations 的 LEFT JOIN 鍵；退點對帳按生成查列
+}));
 
 export const assets = pgTable("assets", {
   id: uuid("id").primaryKey().defaultRandom(),

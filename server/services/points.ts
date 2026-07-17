@@ -153,30 +153,82 @@ export async function effectiveWeeklyQuota(userId: string, groupId: string): Pro
   return noLimit(settings.defaultWeeklyPoints) ? null : settings.defaultWeeklyPoints;
 }
 
+/**
+ * 一次讀齊額度組態（全域設定＋組員列＋組列），純導出所有上限與門檻。
+ * 取代 getSettings／effectiveWeeklyQuota／groupBudget／memberBudget 各自重讀同幾列的冗餘往返
+ * ——舊版一趟守門最多讀 settings×2＋member×2＋group×2 共 6 次 round-trip，其實只需 3 種列。
+ * 三筆彼此獨立、在任何交易「之外」完成即釋放連線（pool max=10），與 reserveQuota 交易內
+ * 單連線序列化限制正交，不觸及其死鎖面；故可安全並行。
+ */
+export interface QuotaConfig {
+  settings: PointsSettings;
+  weeklyQuota: number | null; // 個人生效週額度（覆寫→組→全域；口徑同 effectiveWeeklyQuota）
+  dailyQuota: number | null;
+  groupBudget: number | null; // 組累計上限（null＝不限）
+  memberBudget: number | null; // 組員累計上限（null＝不限）
+  approvalThreshold: number | null; // 成本審核門檻（null＝不啟用；供 quota.my 顯示用）
+}
+
+export async function loadQuotaConfig(userId: string, groupId: string): Promise<QuotaConfig> {
+  const [settings, memberRows, groupRows] = await Promise.all([
+    getSettings(),
+    db
+      .select()
+      .from(schema.groupMembers)
+      .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, userId))),
+    db.select().from(schema.groups).where(eq(schema.groups.id, groupId)),
+  ]);
+  const member = memberRows[0];
+  const group = groupRows[0];
+  // 週額度：個人覆寫 → 組設定 → 全域預設（與 effectiveWeeklyQuota 逐級 noLimit 判定完全一致）
+  const weeklyQuota =
+    member && member.weeklyPointsOverride != null
+      ? noLimit(member.weeklyPointsOverride)
+        ? null
+        : member.weeklyPointsOverride
+      : group && group.weeklyPointsPerUser != null
+        ? noLimit(group.weeklyPointsPerUser)
+          ? null
+          : group.weeklyPointsPerUser
+        : noLimit(settings.defaultWeeklyPoints)
+          ? null
+          : settings.defaultWeeklyPoints;
+  const th = group?.approvalThresholdPoints;
+  return {
+    settings,
+    weeklyQuota,
+    dailyQuota: effectiveDailyQuota(settings),
+    groupBudget: noLimit(group?.budgetPoints) ? null : group!.budgetPoints,
+    memberBudget: noLimit(member?.budgetPoints) ? null : member!.budgetPoints,
+    approvalThreshold: th != null && th > 0 ? th : null,
+  };
+}
+
 /** 額度守門：null=可扣；字串=拒絕原因 */
 export async function checkQuota(userId: string, groupId: string, points: number): Promise<string | null> {
-  const settings = await getSettings();
+  const cfg = await loadQuotaConfig(userId, groupId); // 組態一次讀齊（取代四個各自重讀的呼叫）
+  const settings = cfg.settings;
   if (!noLimit(settings.totalBudgetPoints)) {
     const total = await usedTotal();
     if (total + points > settings.totalBudgetPoints!) return `總預算不足（已用 ${total}／${settings.totalBudgetPoints} 點）——請管理員調整`;
   }
   // 分配樹（累計上限）：組預算 → 組員個人預算。與週/日「速率上限」正交，兩套並存各自守門。
-  const gBudget = await groupBudget(groupId);
+  const gBudget = cfg.groupBudget;
   if (gBudget != null) {
     const groupReason = budgetReason("group", await usedByGroup(groupId), points, gBudget);
     if (groupReason) return groupReason;
   }
-  const mBudget = await memberBudget(userId, groupId);
+  const mBudget = cfg.memberBudget;
   if (mBudget != null) {
     const memberReason = budgetReason("member", await usedByMember(userId, groupId), points, mBudget);
     if (memberReason) return memberReason;
   }
-  const quota = await effectiveWeeklyQuota(userId, groupId);
+  const quota = cfg.weeklyQuota;
   if (quota != null) {
     const weekly = await usedThisWeek(userId);
     if (weekly + points > quota) return `本週額度不足（已用 ${weekly}／${quota} 點）——可請組長調整`;
   }
-  const daily = effectiveDailyQuota(settings);
+  const daily = cfg.dailyQuota;
   if (daily != null) {
     const today = await usedToday(userId);
     if (today + points > daily) return `今天的額度用完了（已用 ${today}／${daily} 點）——明天會重置`;
@@ -206,14 +258,16 @@ export async function reserveQuota(
   if (points <= 0) return null;
   // 關鍵：設定與額度「先在交易外」讀好——交易內不可再向連線池借第二條連線，
   // 否則交易已佔一條連線＋持有序列化鎖時再借連線，併發滿池會整池死鎖（需重啟才復原）。
-  // 這兩者是穩定的組態/成員資料，非 TOCTOU 競態目標；真正要原子的只有「帳本 SUM＋扣點列」。
-  const settings = await getSettings();
-  const quota = await effectiveWeeklyQuota(userId, groupId);
-  const daily = effectiveDailyQuota(settings);
+  // 這些是穩定的組態/成員資料，非 TOCTOU 競態目標；真正要原子的只有「帳本 SUM＋扣點列」。
+  // loadQuotaConfig 一次並行讀齊 settings＋組員列＋組列（三筆在交易前完成即釋放連線），
+  // 取代舊版依序重讀同幾列的 6 次 round-trip。
+  const cfg = await loadQuotaConfig(userId, groupId);
+  const settings = cfg.settings;
+  const quota = cfg.weeklyQuota;
+  const daily = cfg.dailyQuota;
   const budgetCapped = !noLimit(settings.totalBudgetPoints);
-  // 分配樹（累計上限）：先在交易外讀好穩定組態（同週/日額度的理由——交易內不可再借第二條連線）。
-  const gBudget = await groupBudget(groupId);
-  const mBudget = await memberBudget(userId, groupId);
+  const gBudget = cfg.groupBudget;
+  const mBudget = cfg.memberBudget;
 
   return db.transaction(async (tx) => {
     // 鎖取得順序固定為 user → group → 全域總預算，全體呼叫端一致 → 無交錯死鎖。
