@@ -7,8 +7,7 @@ import { worldviewSchema } from "../../shared/worldview";
 import { MODELS, WORKFLOW_PRESETS, getModel, getWorkflow, tierLabel, type ModelEntry } from "../../shared/models";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
-import { proxyFetch } from "../services/http";
-import { ANY_LLM_MODEL } from "../services/llm";
+import { nimComplete } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { submitGenerationCore } from "../services/generationCore";
@@ -29,13 +28,13 @@ import { buildKnowledgeContext } from "./knowledge";
  * 工具只讀不寫、範圍鎖死在本專案，故可自動執行不需確認；寫入動作維持「提議＋使用者確認」不變。
  */
 
-/** 問答固定 1 點（付費 LLM 呼叫；含工具迴圈最多 4 次 flash 呼叫,單次成本 $0.01 級仍在 1 點內；動作另計於執行時，走既有守門） */
+/** 問答固定 1 點（付費 LLM 呼叫；含工具迴圈最多 4 次 NIM 呼叫,單次成本 $0.01 級仍在 1 點內；動作另計於執行時，走既有守門） */
 const ASK_COST_POINTS = 1;
 /** 每次提問最多幾輪工具查詢（每輪一次 LLM 呼叫；超過就強制直接回答，防打轉燒錢） */
 const MAX_TOOL_ROUNDS = 3;
 /**
  * 助手注入專案知識庫的字數預算（6.1）：比導演預設 8000 寬——助手要回答「這個專案在講什麼」
- * 層級的問題，知識庫（逐字稿/見證/腳本）就是答案來源；gemini flash 窗口極大，此上限純為成本收斂。
+ * 層級的問題，知識庫（逐字稿/見證/腳本）就是答案來源；NIM llama 70B 窗口夠大，此上限純為成本收斂。
  */
 const KNOWLEDGE_BUDGET = 20_000;
 /** 生成類動作的預設模型：該類別已驗證的推薦日常主力（找不到退回 flux/dev） */
@@ -206,17 +205,9 @@ async function runLookupTool(
   return { step: `查了模型目錄(${kw || "全部"})`, text: searchCatalogText(kw, call.args?.category?.trim()) };
 }
 
-/** 呼叫 any-llm 一次,回原始輸出（工具迴圈與最終回答共用） */
+/** 呼叫 NVIDIA NIM 一次,回原始輸出（工具迴圈與最終回答共用） */
 async function callLlm(prompt: string): Promise<string> {
-  const res = await proxyFetch("https://fal.run/fal-ai/any-llm", {
-    method: "POST",
-    headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: ANY_LLM_MODEL, prompt }),
-    timeoutMs: 60_000,
-  });
-  if (!res.ok) throw new Error(`any-llm ${res.status}`);
-  const data = (await res.json()) as { output?: string };
-  return data.output ?? "";
+  return nimComplete(prompt, { timeoutMs: 60_000 });
 }
 
 export const assistantRouter = router({
@@ -338,7 +329,7 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
 使用者的問題：${input.message}`;
 
       // 多步工具迴圈：每輪 LLM 回「工具呼叫」就執行並把結果附進下一輪；回「最終回答」就結束。
-      // 全程只收 ASK_COST_POINTS 1 點（工具輪的 flash 呼叫成本在 1 點內）；任何一輪炸掉就整筆退點。
+      // 全程只收 ASK_COST_POINTS 1 點（工具輪的 NIM 呼叫成本在 1 點內）；任何一輪炸掉就整筆退點。
       const steps: string[] = [];
       let toolBlocks = "";
       try {
