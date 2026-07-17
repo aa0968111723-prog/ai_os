@@ -20,16 +20,12 @@ import {
   loadAuthState,
 } from "../services/auth";
 
-// 取用戶端 IP 供 per-IP 限流：反代後真實 IP 在 x-forwarded-for 第一段（最靠近用戶）。
-// index.ts 不歸此次改動，故不依賴 Express trust proxy，直接由 header 解析；無 header 時退回 socket。
+// 取用戶端 IP 供 per-IP 限流：用 Express（index.ts 已設 trust proxy=1）解析出的 req.ip。
+// 【安全】不可直接讀 x-forwarded-for 最左段——那是「用戶端可自填」的值，攻擊者每次請求塞一個
+// 隨機 XFF 就讓每次嘗試看起來都是新 IP，per-IP 限流形同虛設（跨帳號撞庫不受限）。trust proxy=1
+// 下的 req.ip 取的是「受信任反代填入的、最靠近伺服器的那一跳」，用戶端無法偽造。與 mcp.ts 一致。
 function clientIp(req: Request): string | undefined {
-  const xff = req.headers["x-forwarded-for"];
-  const raw = Array.isArray(xff) ? xff[0] : xff;
-  if (raw) {
-    const first = raw.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  return req.socket?.remoteAddress ?? undefined;
+  return req.ip ?? req.socket?.remoteAddress ?? undefined;
 }
 
 export const authRouter = router({
