@@ -1,10 +1,12 @@
 import { z } from "zod";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { router, authedProcedure } from "../trpc";
+import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
-import { validateFields, validateRowData, type DataField } from "../../shared/databaseFields";
+import { validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
+import { addDataRowValidated, MAX_ROWS_PER_TABLE } from "../services/databaseCore";
+import { csvToRowObjects } from "../../shared/csv";
 import {
   extractTextFromBuffer,
   fetchImport,
@@ -21,13 +23,13 @@ import {
 import { checkDiskSpace, removeStoredFile, saveBuffer } from "../services/storage";
 
 /**
- * 自訂資料庫（個人→組→團隊→全站）：表結構 CRUD＋列資料 CRUD。
+ * 自訂資料庫（個人→組→團隊→全站）：表結構 CRUD＋列資料 CRUD＋文件層＋連接（CSV/專案/排程）。
  * - 權限單一真相：services/databaseAcl（MCP 也走同一套）。
+ * - 列寫入單一路徑：services/databaseCore.addDataRowValidated（tRPC/MCP/代理/REST 共用）。
  * - 審計：mutation 由 trpc.ts 的 authedProcedure 中介層自動落 audit_log，這裡不必重複。
  * - 欄位語意驗證集中在 shared/databaseFields（前後端零漂移）。
  */
 
-const MAX_ROWS_PER_TABLE = 20_000;
 const LIST_LIMIT_DEFAULT = 200;
 
 /** zod 外形（語意驗證交給 validateFields）：unknown 進來、伺服器端把關 */
@@ -203,19 +205,79 @@ export const databasesRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { table, access } = await getTableChecked(ctx.auth, input.tableId);
       if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
-      const checked = validateRowData(table.fields as DataField[], input.data);
-      if (!checked.ok) throw new TRPCError({ code: "BAD_REQUEST", message: checked.error });
-      // 量級保險絲：單庫列數上限——超過代表用法已超出這套輕量儲存的設計目標
-      const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(schema.dataRows).where(eq(schema.dataRows.tableId, table.id));
-      if (Number(n) >= MAX_ROWS_PER_TABLE) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: `這個資料庫已達 ${MAX_ROWS_PER_TABLE.toLocaleString()} 列上限，請分庫或清理舊資料` });
+      try {
+        return await addDataRowValidated(table, ctx.auth.user.id, input.data);
+      } catch (err) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "新增失敗" });
       }
-      const [row] = await db
-        .insert(schema.dataRows)
-        .values({ tableId: table.id, data: checked.data, createdBy: ctx.auth.user.id })
-        .returning();
-      await db.update(schema.dataTables).set({ updatedAt: new Date() }).where(eq(schema.dataTables.id, table.id));
-      return row;
+    }),
+
+  /**
+   * 連結到某專案的資料列（專案 × 資料庫細部連結）：掃「這個專案所屬組」可見的資料庫中，
+   * 任一 project 型別欄位的值等於此 projectId 的列——讓專案頁一眼看到「哪些資料表提到我」
+   * （例：器材借用表裡指派給本片的器材、任務表裡本片的待辦）。
+   * 權限：需是專案所屬組成員（requireGroup）；只掃該組可見範圍的庫（不外洩他組庫）。
+   */
+  linkedToProject: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      const tables = await listVisibleTables(ctx.auth);
+      // 只看「有 project 型別欄位」的可見庫
+      const relevant = tables
+        .map((t) => ({ table: t, projectFields: (t.fields as DataField[]).filter((f) => f.type === "project") }))
+        .filter((x) => x.projectFields.length > 0);
+      if (relevant.length === 0) return [];
+      const tableIds = relevant.map((x) => x.table.id);
+      // 一次撈這些庫的全部列，JS 端過濾「任一 project 欄 === projectId」（列量受 20k/庫 保險絲約束）
+      const allRows = await db
+        .select({ id: schema.dataRows.id, tableId: schema.dataRows.tableId, data: schema.dataRows.data })
+        .from(schema.dataRows)
+        .where(inArray(schema.dataRows.tableId, tableIds));
+      const out: Array<{ tableId: string; tableName: string; fields: DataField[]; rows: Array<{ id: string; data: DataRowData }> }> = [];
+      for (const { table, projectFields } of relevant) {
+        const matched = allRows
+          .filter((r) => r.tableId === table.id)
+          .filter((r) => projectFields.some((f) => (r.data as DataRowData)?.[f.key] === input.projectId))
+          .map((r) => ({ id: r.id, data: r.data as DataRowData }));
+        if (matched.length) out.push({ tableId: table.id, tableName: table.name, fields: table.fields as DataField[], rows: matched });
+      }
+      return out;
+    }),
+
+  /**
+   * CSV 匯入（連接 Excel／Google 試算表／其他資料庫的匯出檔）：
+   * headerMap 把 CSV 表頭對應到欄位 key，逐列走與手動新增同一套驗證與保險絲。
+   * 部分列驗證失敗不整批中止——回「成功幾列、失敗哪幾列為什麼」，讓使用者修完再補匯入。
+   */
+  importCsv: authedProcedure
+    .input(z.object({
+      tableId: z.string().uuid(),
+      csv: z.string().min(1).max(1_500_000), // 留餘裕給 JSON 包裝，不撞 express.json 的 2MB 上限
+      headerMap: z.record(z.string()), // CSV 表頭 → 欄位 key
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { table, access } = await getTableChecked(ctx.auth, input.tableId);
+      if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
+      const objs = csvToRowObjects(input.csv, input.headerMap);
+      if (objs.length === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可匯入的資料列（確認 CSV 有表頭列＋至少一列資料，且已對應欄位）" });
+      const MAX_IMPORT = 5000;
+      const slice = objs.slice(0, MAX_IMPORT);
+      let imported = 0;
+      const errors: Array<{ line: number; error: string }> = [];
+      for (let i = 0; i < slice.length; i++) {
+        try {
+          await addDataRowValidated(table, ctx.auth.user.id, slice[i]);
+          imported++;
+        } catch (err) {
+          if (errors.length < 50) errors.push({ line: i + 2, error: err instanceof Error ? err.message : "未知錯誤" }); // +2：跳過表頭列、1 起算
+          // 達列數上限即停（addDataRowValidated 會拋保險絲訊息）
+          if (err instanceof Error && err.message.includes("列上限")) break;
+        }
+      }
+      return { imported, failed: objs.length - imported, truncated: objs.length > MAX_IMPORT, errors };
     }),
 
   /** 更新列：整列覆寫語意（前端送完整 data）；寫入權即可（協作表格，不限本人的列） */

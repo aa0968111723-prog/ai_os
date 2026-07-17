@@ -213,3 +213,101 @@ before = call("GET", azhe, "databases.listFiles", {"tableId": personal["id"]})["
 call("POST", azhe, "databases.removeFile", {"id": file_id})
 after = call("GET", azhe, "databases.listFiles", {"tableId": personal["id"]})["quota"]["usedBytes"]
 ok("刪文件釋放配額", after < before)
+
+
+# ── CSV 匯入（連接 Excel／其他資料庫）──
+csv_db = call("POST", azhe, "databases.create", {
+    "scope": "personal", "name": "CSV 匯入測試",
+    "fields": [{"key": "name", "label": "姓名", "type": "text", "required": True},
+               {"key": "age", "label": "年齡", "type": "number"}]})
+imp = call("POST", azhe, "databases.importCsv", {
+    "tableId": csv_db["id"],
+    "csv": "姓名,年齡\r\n小美,28\r\n阿哲,30\r\n壞列,不是數字",
+    "headerMap": {"姓名": "name", "年齡": "age"}})
+ok("CSV 匯入（2 成功 1 失敗）", imp["imported"] == 2 and imp["failed"] == 1 and len(imp["errors"]) == 1)
+csv_rows = call("GET", azhe, "databases.listRows", {"tableId": csv_db["id"]})
+ok("CSV 匯入的列可查", csv_rows["total"] == 2 and any(r["data"]["name"] == "小美" for r in csv_rows["rows"]))
+
+
+# ── CSV 匯出（HTTP GET，帶 cookie）──
+def http_get(path, cookie=None, key=None):
+    req = urllib.request.Request(f"{HOST}{path}")
+    if cookie: req.add_header("Cookie", cookie)
+    if key: req.add_header("x-api-key", key)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, r.read().decode("utf-8"), r.headers.get("Content-Type", "")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "ignore"), ""
+
+
+st_csv, csv_out, ct_csv = http_get(f"/api/databases/{csv_db['id']}/rows.csv", cookie=azhe.cookie)
+ok("CSV 匯出（含表頭與資料）", st_csv == 200 and "text/csv" in ct_csv and "姓名" in csv_out and "小美" in csv_out)
+# 別人的個人庫 CSV 匯出被擋（404 不洩漏存在性）
+st_csv_x, _, _ = http_get(f"/api/databases/{csv_db['id']}/rows.csv", cookie=admin.cookie)
+ok("🔒 他人個人庫 CSV 匯出被擋", st_csv_x == 404)
+
+
+# ── REST API v1（本機/手機/外部 HTTP 客戶端，x-api-key 認證）──
+def http_json(method, path, key=None, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"{HOST}{path}", data=data, method=method,
+                                 headers={"Content-Type": "application/json", **({"x-api-key": key} if key else {})})
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.load(e)
+        except Exception:
+            return e.code, {}
+
+
+st_unauth, _ = http_json("GET", "/api/v1/databases")
+ok("🔒 REST 無金鑰被擋（401）", st_unauth == 401)
+st_list, rest_list = http_json("GET", "/api/v1/databases", key=azhe_key)
+ok("REST 列出資料庫", st_list == 200 and any(d["id"] == csv_db["id"] for d in rest_list["databases"]))
+st_add, rest_add = http_json("POST", f"/api/v1/databases/{csv_db['id']}/rows", key=azhe_key, body={"data": {"name": "REST 小華", "age": 25}})
+ok("REST 新增一列", st_add == 200 and rest_add["data"]["name"] == "REST 小華")
+st_q, rest_q = http_json("GET", f"/api/v1/databases/{csv_db['id']}/rows?q=REST", key=azhe_key)
+ok("REST 查詢（keyword）", st_q == 200 and any(r["data"]["name"] == "REST 小華" for r in rest_q["rows"]))
+# agentAccess=none 的庫對 REST（金鑰=AI 介面）隱形
+st_none, _ = http_json("GET", f"/api/v1/databases/{none_db['id']}/rows", key=azhe_key)
+ok("🔒 REST 對 agentAccess=none 庫回 404", st_none == 404)
+
+
+# ── 行事曆訂閱（.ics；?key= 認證）──
+cal_db = call("POST", azhe, "databases.create", {
+    "scope": "personal", "name": "拍攝日程",
+    "fields": [{"key": "what", "label": "事項", "type": "text"},
+               {"key": "day", "label": "日期", "type": "date"}]})
+call("POST", azhe, "databases.addRow", {"tableId": cal_db["id"], "data": {"what": "外景拍攝", "day": "2026-08-01"}})
+st_ics, ics_out, ct_ics = http_get(f"/api/databases/{cal_db['id']}/calendar.ics?key={azhe_key}")
+ok("行事曆 .ics（VEVENT）", st_ics == 200 and "text/calendar" in ct_ics and "BEGIN:VEVENT" in ics_out and "外景拍攝" in ics_out)
+# 沒有日期欄位的庫回 400
+st_ics2, _, _ = http_get(f"/api/databases/{csv_db['id']}/calendar.ics?key={azhe_key}")
+ok("無日期欄位的庫不能訂閱行事曆", st_ics2 == 400)
+
+
+# ── AI 代理 × 資料庫：mock 計畫在有可寫庫時多一步 record_to_database ──
+# 阿哲在剪輯組建一個 AI 可寫的組資料庫，然後在剪輯組專案跑代理
+agent_db = call("POST", azhe, "databases.create", {
+    "scope": "group", "groupId": edit_group["id"], "name": "代理成果紀錄", "agentAccess": "write",
+    "fields": [{"key": "note", "label": "紀錄", "type": "text"}]})
+agent_proj = call("POST", azhe, "projects.create", {"groupId": edit_group["id"], "title": "代理資料庫測試", "kind": "witness", "platform": "shorts"})
+plan = call("POST", azhe, "agents.plan", {"projectId": agent_proj["id"], "goal": "測試把成果記進資料庫"})
+has_record_step = any(s.get("kind") == "record_to_database" and s.get("tableId") == agent_db["id"] for s in plan["steps"])
+ok("代理計畫含 record_to_database 步驟", has_record_step)
+appr = call("POST", azhe, "agents.approve", {"runId": plan["id"]})
+ok("代理計畫核准執行", appr["status"] == "running")
+
+# 等背景執行器跑完（每 4 秒一 tick；mock 生成也要幾輪）——輪詢代理成果庫出現新列
+import time
+agent_wrote = False
+for _ in range(40):
+    time.sleep(2)
+    rr = call("GET", azhe, "databases.listRows", {"tableId": agent_db["id"]})
+    if rr.get("total", 0) >= 1:
+        agent_wrote = True
+        break
+ok("AI 代理把成果寫進資料庫", agent_wrote)

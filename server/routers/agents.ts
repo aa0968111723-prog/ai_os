@@ -13,6 +13,9 @@ import { lockAgentApprove } from "../services/locks";
 import { buildKnowledgeContext } from "./knowledge";
 import { pickGenerateModel, MODEL_CHEATSHEET } from "./assistant";
 import { AGENT_TTS_MODEL, type AgentStep } from "../services/agentRunner";
+import { listVisibleTables, resolveAgentAccess } from "../services/databaseAcl";
+import type { DataField } from "../../shared/databaseFields";
+import type { AuthState } from "../services/auth";
 
 /**
  * AI 代理（代理系統核心）：一句目標 → LLM 規劃多步計畫（估點）→ 使用者核准 → 背景執行器逐步執行。
@@ -70,13 +73,60 @@ const planStepSchema = z.discriminatedUnion("kind", [
   }),
   z.object({ kind: z.literal("voiceover"), note: z.string().max(120).optional(), sceneNo: z.number().int().positive() }),
   z.object({ kind: z.literal("submit_approval"), note: z.string().max(120).optional(), sceneNo: z.number().int().positive() }),
+  z.object({
+    kind: z.literal("record_to_database"),
+    note: z.string().max(120).optional(),
+    // dbRef＝規劃上下文列出的資料庫代號（db1/db2…），落地時對照解析成真實 tableId（不收 uuid）
+    dbRef: z.string().max(16),
+    data: z.record(z.unknown()),
+  }),
 ]);
 const planSchema = z.object({ summary: z.string().min(1).max(500), steps: z.array(planStepSchema).min(1).max(MAX_PLAN_STEPS) });
 
-/** 把 LLM 計畫解析成可執行的 AgentStep[]（白名單模型、補人話 note、算估點）；回 null 表示整份不可用 */
-function resolvePlan(parsed: z.infer<typeof planSchema>): { steps: AgentStep[]; estPoints: number } {
+/** 規劃可引用的資料庫（代號→真實表）：只列此人「AI 可寫」的可見庫，避免 uuid 幻覺 */
+interface WritableDb { ref: string; id: string; name: string; fields: DataField[] }
+
+async function listAgentWritableDbs(auth: AuthState): Promise<WritableDb[]> {
+  const tables = await listVisibleTables(auth);
+  const writable = tables.filter((t) => resolveAgentAccess(auth, t).canWriteRows).slice(0, 8);
+  return writable.map((t, i) => ({ ref: `db${i + 1}`, id: t.id, name: t.name, fields: t.fields as DataField[] }));
+}
+
+/** 資料庫清單 → 規劃提示詞的速查文字（代號、名稱、欄位 key/型別） */
+function dbCheatsheet(dbs: WritableDb[]): string {
+  if (dbs.length === 0) return "（目前沒有可讓 AI 寫入的資料庫）";
+  return dbs
+    .map((d) => `${d.ref}=「${d.name}」欄位：${d.fields.map((f) => `${f.key}(${f.label}/${f.type}${f.required ? "/必填" : ""}${f.type === "select" && f.options ? "/選項:" + f.options.join("|") : ""})`).join("、")}`)
+    .join("\n");
+}
+
+/** 把 LLM 計畫解析成可執行的 AgentStep[]（白名單模型、補人話 note、算估點）。
+ *  record_to_database 的 dbRef 對照 writableDbs 解析成真實 tableId；對不到的步驟直接丟棄（不落地幻覺目標）。 */
+function resolvePlan(parsed: z.infer<typeof planSchema>, writableDbs: WritableDb[]): { steps: AgentStep[]; estPoints: number } {
   const tts = getModel(AGENT_TTS_MODEL);
-  const steps: AgentStep[] = parsed.steps.map((s) => {
+  const dbByRef = new Map(writableDbs.map((d) => [d.ref, d]));
+  const steps: AgentStep[] = parsed.steps.flatMap((s) => {
+    if (s.kind === "record_to_database") {
+      const target = dbByRef.get(s.dbRef.trim());
+      if (!target) return []; // 幻覺的資料庫代號：丟棄這一步（其餘步驟照常）
+      return [{
+        kind: "record_to_database" as const,
+        note: s.note?.trim() || `把結果寫進資料庫「${target.name}」`,
+        status: "pending" as const,
+        tableId: target.id,
+        rowData: s.data,
+        points: 0, // 寫資料庫不花點數
+      }];
+    }
+    return [resolveNonDbStep(s, tts)];
+  });
+  const estPoints = steps.reduce((sum, s) => sum + (s.points ?? 0), 0);
+  return { steps, estPoints };
+}
+
+/** 非資料庫步驟的解析（原 resolvePlan 的 map 內容，抽出以容納 flatMap 的丟棄語義） */
+function resolveNonDbStep(s: Exclude<z.infer<typeof planStepSchema>, { kind: "record_to_database" }>, tts: ReturnType<typeof getModel>): AgentStep {
+  {
     if (s.kind === "split_script") {
       return {
         kind: "split_script",
@@ -128,13 +178,12 @@ function resolvePlan(parsed: z.infer<typeof planSchema>): { steps: AgentStep[]; 
       sceneNo: s.sceneNo,
       points: 0,
     };
-  });
-  const estPoints = steps.reduce((sum, s) => sum + (s.points ?? 0), 0);
-  return { steps, estPoints };
+  }
 }
 
-/** 假模式的確定性計畫（不花錢可測）：建一格 → 生成回填 → 送審，走完代理全生命週期 */
-function mockPlan(goal: string, existingSceneCount: number): { summary: string; steps: AgentStep[]; estPoints: number } {
+/** 假模式的確定性計畫（不花錢可測）：建一格 → 生成回填 → 送審，走完代理全生命週期。
+ *  若組內有「AI 可寫」的資料庫，末尾多一步 record_to_database——讓 AI 代理×資料庫的寫入路徑也能 e2e。 */
+function mockPlan(goal: string, existingSceneCount: number, writableDbs: WritableDb[]): { summary: string; steps: AgentStep[]; estPoints: number } {
   const budget = getModel("fal-ai/fast-lightning-sdxl");
   const newNo = existingSceneCount + 1;
   const steps: AgentStep[] = [
@@ -157,8 +206,23 @@ function mockPlan(goal: string, existingSceneCount: number): { summary: string; 
     },
     { kind: "submit_approval", note: `把第 ${newNo} 鏡送審`, status: "pending", sceneNo: newNo, points: 0 },
   ];
+  // 有可寫資料庫時，示範「把成果記進資料庫」：寫進第一個 text/其次任一非必填欄位
+  const targetDb = writableDbs[0];
+  if (targetDb) {
+    const field = targetDb.fields.find((f) => f.type === "text") ?? targetDb.fields[0];
+    if (field) {
+      steps.push({
+        kind: "record_to_database",
+        note: `把目標記進資料庫「${targetDb.name}」`,
+        status: "pending",
+        tableId: targetDb.id,
+        rowData: { [field.key]: goal.slice(0, 100) },
+        points: 0,
+      });
+    }
+  }
   return {
-    summary: `（測試模式計畫）針對目標「${goal.slice(0, 40)}」：建一格分鏡 → 生成畫面回填 → 送審。`,
+    summary: `（測試模式計畫）針對目標「${goal.slice(0, 40)}」：建一格分鏡 → 生成畫面回填 → 送審${targetDb ? " → 記錄到資料庫" : ""}。`,
     steps,
     estPoints: steps.reduce((s, x) => s + (x.points ?? 0), 0),
   };
@@ -190,9 +254,12 @@ export const agentsRouter = router({
         .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
         .orderBy(asc(schema.scenes.orderIndex));
 
+      // AI 代理可寫入的資料庫（規劃可引用；用代號避免 uuid 幻覺）
+      const writableDbs = await listAgentWritableDbs(ctx.auth);
+
       // 假模式：確定性計畫（e2e 可走完整核准→執行→完成生命週期）
       if (isMockMode()) {
-        const plan = mockPlan(goal, scenes.length);
+        const plan = mockPlan(goal, scenes.length, writableDbs);
         const [run] = await db
           .insert(schema.agentRuns)
           .values({
@@ -223,6 +290,7 @@ export const agentsRouter = router({
 - {"kind":"generate","prompt":"畫面描述","sceneNo":3,"modelId":"模型id(可省=預設圖像模型)"}：生成素材；sceneNo 可省略（不回填分鏡）
 - {"kind":"voiceover","sceneNo":3}：用該鏡的配音詞生成中文旁白（該鏡必須已有配音詞，或由前面的 split_script/create_scene 步驟帶入）
 - {"kind":"submit_approval","sceneNo":3}：把該鏡送組長審核
+- {"kind":"record_to_database","dbRef":"db1","data":{"欄位key":"值"}}：把一筆結果寫進自訂資料庫（僅能用 <可寫資料庫> 列出的代號與欄位 key；沒有相關資料庫就不要用這種步驟）
 規則：
 1. sceneNo 是「執行當下」的分鏡順序編號（1 起算）——split_script 拆出的新分鏡會接在現有 ${scenes.length} 格之後，之後的步驟可以引用這些新編號。
 2. modelId 只能抄 <可用模型速查> 的 id；不確定就省略（用預設圖像模型）。優先用經濟/最低成本檔位，除非目標明說要高品質。
@@ -232,6 +300,9 @@ export const agentsRouter = router({
 <可用模型速查>
 ${MODEL_CHEATSHEET}
 </可用模型速查>
+<可寫資料庫>
+${dbCheatsheet(writableDbs)}
+</可寫資料庫>
 <專案現況>
 標題：${project.title}（${project.kind}，${project.format}）
 世界觀｜一句話：${wv.logline || "—"}｜調性：${wv.tones.join("、") || "—"}｜視覺風格：${wv.styles.join("、") || "—"}
@@ -251,7 +322,7 @@ ${knowledgeCtx ? `<專案知識庫節錄>\n${knowledgeCtx}\n</專案知識庫節
           // 一律退點會讓壞回應變成免費重刷後門；網路/逾時/壞 JSON 拋例外才走下方 catch 退點
           throw new TRPCError({ code: "BAD_REQUEST", message: "AI 這次沒排出可用的計畫——把目標講得更具體（要做什麼、幾格分鏡、什麼風格）再試一次" });
         }
-        const { steps, estPoints } = resolvePlan(parsed.data);
+        const { steps, estPoints } = resolvePlan(parsed.data, writableDbs);
         const [run] = await db
           .insert(schema.agentRuns)
           .values({

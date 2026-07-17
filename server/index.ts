@@ -19,6 +19,7 @@ import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
 import { buildEdl, buildFcpxml, buildSrt, exportProjectZip } from "./services/exporter";
 import { handleMcp } from "./services/mcp";
+import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, MAX_FILE_BYTES, STORAGE_ROOT,
@@ -567,6 +568,14 @@ app.get("/api/me/export", async (req, res) => {
 
 // MCP 伺服器介面（設 MCP_API_KEY 啟用；供外部 AI 客戶端操作）
 app.post("/api/mcp", handleMcp);
+
+// 資料庫對外連接（本機腳本／手機 App／其他系統）：REST API v1 + CSV 匯出 + 行事曆訂閱。
+// 認證＝個人 MCP 金鑰（x-api-key / ?key=）或 session cookie；授權沿用 databaseAcl。
+app.get("/api/v1/databases", handleV1ListDatabases);
+app.get("/api/v1/databases/:id/rows", handleV1ListRows);
+app.post("/api/v1/databases/:id/rows", handleV1AddRow);
+app.get("/api/databases/:id/rows.csv", handleCsvExport);
+app.get("/api/databases/:id/calendar.ics", handleDatabaseIcs);
 
 // 系統自檢（超管登入後用瀏覽器開，或管理頁按鈕）——部署後一鍵驗證所有子系統
 app.get("/api/selftest", async (req, res) => {

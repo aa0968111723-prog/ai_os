@@ -256,6 +256,8 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
   const removeTable = trpc.databases.remove.useMutation({ onSuccess: () => { utils.databases.list.invalidate(); onDeleted(); } });
   const updateTable = trpc.databases.update.useMutation({ onSuccess: () => { utils.databases.list.invalidate(); setEditStructure(false); } });
   const [draftFields, setDraftFields] = useState<DataField[]>(table.fields);
+  const [showImport, setShowImport] = useState(false);
+  const canWrite = table.access.canWriteRows;
 
   // 新列草稿
   const emptyDraft = (): DataRowData => Object.fromEntries(table.fields.map((f) => [f.key, f.type === "checkbox" ? false : ""])) as DataRowData;
@@ -321,10 +323,21 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
         <input aria-label="搜尋資料" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋…" style={{ maxWidth: 220 }} />
         <span className="meta">{rows.data ? `${rows.data.total.toLocaleString()} 列` : "…"}</span>
+        <span className="spacer" />
+        {/* 匯出 CSV（接 Excel／其他資料庫）；同源 a 標籤帶 cookie 認證 */}
+        <a className="btn-sm" href={`/api/databases/${table.id}/rows.csv`} download title="匯出成 CSV（可用 Excel/其他資料庫開啟）">
+          <Icon name="Download" size={13} /> 匯出 CSV
+        </a>
+        {canWrite && (
+          <button className="btn-sm" onClick={() => setShowImport((v) => !v)} title="從 CSV 匯入資料列（Excel/Google 試算表/其他資料庫的匯出檔）">
+            <Icon name="Plus" size={13} /> 匯入 CSV
+          </button>
+        )}
       </div>
+      {showImport && canWrite && <CsvImportPanel table={table} onDone={() => { setShowImport(false); invalidate(); }} />}
 
       <div style={{ overflowX: "auto", marginTop: 8 }}>
         <table className="data-grid" style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -377,7 +390,141 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
       {mutationError && <p className="error" role="alert">{mutationError}</p>}
 
       <FilesSection table={table} />
+      <ConnectPanel table={table} />
     </section>
+  );
+}
+
+/* ────────────────────────── CSV 匯入 ────────────────────────── */
+
+function CsvImportPanel({ table, onDone }: { table: TableSummary; onDone: () => void }) {
+  const [csv, setCsv] = useState("");
+  const [mapping, setMapping] = useState<Record<string, string>>({}); // 欄位 key → CSV 表頭
+  const [result, setResult] = useState<{ imported: number; failed: number; errors: Array<{ line: number; error: string }> } | null>(null);
+  const importCsv = trpc.databases.importCsv.useMutation({
+    onSuccess: (r) => { setResult(r); if (r.imported > 0) onDone(); },
+  });
+  // 解析第一行當表頭候選（純前端粗解析，正式解析在後端）
+  const firstLine = csv.split(/\r?\n/)[0] ?? "";
+  const headers = firstLine ? firstLine.split(",").map((h) => h.replace(/^"|"$/g, "").trim()).filter(Boolean) : [];
+  const autoMap = () => {
+    const m: Record<string, string> = {};
+    for (const f of table.fields) {
+      const hit = headers.find((h) => h === f.label || h === f.key);
+      if (hit) m[f.key] = hit;
+    }
+    setMapping(m);
+  };
+  const headerMap = Object.fromEntries(Object.entries(mapping).filter(([, h]) => h).map(([key, h]) => [h, key]));
+
+  return (
+    <div style={{ margin: "8px 0", padding: 12, border: "1px dashed var(--border, #ccc)", borderRadius: 8 }}>
+      <p className="hint" style={{ marginTop: 0 }}>
+        貼上 CSV（第一行為表頭）——Excel／Google 試算表／其他資料庫都能匯出 CSV。貼好後按「自動對應」，確認欄位對照再匯入。
+      </p>
+      <textarea
+        aria-label="CSV 內容"
+        value={csv}
+        onChange={(e) => { setCsv(e.target.value); setResult(null); }}
+        placeholder={"姓名,年齡\n小美,28\n阿哲,30"}
+        rows={5}
+        style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }}
+      />
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+        <button className="btn-sm" disabled={headers.length === 0} onClick={autoMap}>自動對應欄位</button>
+        <span className="meta">{headers.length > 0 ? `偵測到表頭：${headers.join("、")}` : "貼上 CSV 後可自動對應"}</span>
+      </div>
+      {headers.length > 0 && (
+        <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+          {table.fields.map((f) => (
+            <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span style={{ minWidth: 100 }}>{f.label}{f.required && " *"}</span>
+              <span className="meta">←</span>
+              <select value={mapping[f.key] ?? ""} onChange={(e) => setMapping((m) => ({ ...m, [f.key]: e.target.value }))} style={{ width: "auto" }}>
+                <option value="">（不匯入此欄）</option>
+                {headers.map((h) => <option key={h} value={h}>{h}</option>)}
+              </select>
+            </label>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+        <button
+          className="primary btn-sm"
+          disabled={!csv.trim() || Object.keys(headerMap).length === 0 || importCsv.isPending}
+          onClick={() => importCsv.mutate({ tableId: table.id, csv, headerMap })}
+        >
+          {importCsv.isPending ? "匯入中…" : "開始匯入"}
+        </button>
+      </div>
+      {importCsv.error && <p className="error" role="alert">{importCsv.error.message}</p>}
+      {result && (
+        <div style={{ marginTop: 8 }}>
+          <p className="hint" style={{ color: result.imported > 0 ? "var(--success-ink)" : undefined }}>
+            匯入完成：成功 {result.imported} 列{result.failed > 0 ? `、失敗 ${result.failed} 列` : ""}
+          </p>
+          {result.errors.length > 0 && (
+            <ul style={{ margin: "4px 0", paddingLeft: 18, fontSize: 12, color: "var(--danger-ink, #a33)" }}>
+              {result.errors.slice(0, 10).map((e) => <li key={e.line}>第 {e.line} 行：{e.error}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ────────────────────────── 外部連接（本機/手機/其他系統） ────────────────────────── */
+
+/**
+ * 連接面板：把這個資料庫接到本機腳本、手機 App、行事曆、其他資料庫。
+ * REST/行事曆需要「個人連線金鑰」（在「怎麼用」頁建立），面板只給網址範本＋去建立金鑰的入口。
+ */
+function ConnectPanel({ table }: { table: TableSummary }) {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const hasDate = (table.fields as DataField[]).some((f) => f.type === "date");
+  const restUrl = `${origin}/api/v1/databases/${table.id}/rows`;
+  const csvUrl = `${origin}/api/databases/${table.id}/rows.csv`;
+  const icsUrl = `${origin}/api/databases/${table.id}/calendar.ics?key=你的金鑰`;
+
+  return (
+    <details className="card card--quiet" style={{ marginTop: 16 }} data-fb="資料庫連接面板">
+      <summary>
+        <Icon name="Info" size={14} /> 連接本機／手機／其他系統
+        <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
+      </summary>
+      <div style={{ marginTop: 10, display: "grid", gap: 12, fontSize: 13 }}>
+        <p className="hint" style={{ margin: 0 }}>
+          用你的<Link href="/help">個人連線金鑰</Link>（在「怎麼用」頁建立，可隨時撤銷）就能從外部連這個資料庫，權限跟你在網頁上一樣。
+        </p>
+        <div>
+          <p style={{ margin: "0 0 4px", fontWeight: 600 }}>REST API（本機腳本／手機 App／其他資料庫 ETL）</p>
+          <pre style={{ background: "var(--bg-sunken, rgba(0,0,0,.05))", padding: 8, borderRadius: 6, overflow: "auto", margin: 0, fontSize: 12 }}>
+{`# 查詢資料列
+curl -H "x-api-key: 你的金鑰" \\
+  ${restUrl}
+
+# 新增一列
+curl -X POST -H "x-api-key: 你的金鑰" \\
+  -H "Content-Type: application/json" \\
+  -d '{"data":{"欄位key":"值"}}' \\
+  ${restUrl}`}
+          </pre>
+        </div>
+        <div>
+          <p style={{ margin: "0 0 4px", fontWeight: 600 }}>CSV（Excel／Google 試算表／其他資料庫）</p>
+          <p className="meta" style={{ margin: 0 }}>匯出：<code style={{ wordBreak: "break-all" }}>{csvUrl}</code>（上方「匯出 CSV」鈕直接下載）；匯入用上方「匯入 CSV」。</p>
+        </div>
+        <div>
+          <p style={{ margin: "0 0 4px", fontWeight: 600 }}>行事曆訂閱（手機／桌面日曆）</p>
+          {hasDate ? (
+            <p className="meta" style={{ margin: 0 }}>把這個網址加進手機日曆的「訂閱行事曆」：<code style={{ wordBreak: "break-all" }}>{icsUrl}</code>（每個有日期欄位的列變成一個事件）</p>
+          ) : (
+            <p className="meta" style={{ margin: 0 }}>這個資料庫還沒有「日期」型別欄位——加一個就能訂閱成行事曆。</p>
+          )}
+        </div>
+      </div>
+    </details>
   );
 }
 
