@@ -28,9 +28,17 @@ type TableSummary = {
   description: string | null;
   fields: DataField[];
   memberWritable: boolean;
+  agentAccess: "none" | "read" | "write";
   rowCount: number;
   access: { canRead: boolean; canWriteRows: boolean; canManage: boolean };
 };
+
+/** AI／MCP 存取等級的顯示文案（管理者在建立與詳頁都能調） */
+const AGENT_ACCESS_OPTIONS: Array<{ value: TableSummary["agentAccess"]; label: string; hint: string }> = [
+  { value: "write", label: "AI 可查可寫", hint: "團隊助手看得到；MCP 代理可查詢、可新增列（仍受本人權限限制）" },
+  { value: "read", label: "AI 唯讀", hint: "團隊助手看得到；MCP 代理只能查詢、不能寫" },
+  { value: "none", label: "不開放 AI", hint: "團隊助手與 MCP 代理完全看不到這個庫" },
+];
 
 export function DatabasesPage({ groupId }: { groupId: string }) {
   const list = trpc.databases.list.useQuery();
@@ -117,6 +125,7 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
   const [description, setDescription] = useState("");
   const [scope, setScope] = useState<"personal" | "group" | "team" | "global">("personal");
   const [memberWritable, setMemberWritable] = useState(true);
+  const [agentAccess, setAgentAccess] = useState<TableSummary["agentAccess"]>("write");
   const [fields, setFields] = useState<DataField[]>([{ key: newFieldKey(), label: "名稱", type: "text", required: true }]);
 
   const myGroups = me.data?.groups ?? [];
@@ -164,6 +173,11 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
         </label>
       )}
 
+      <label htmlFor="db-agent">AI 存取（MCP 代理與團隊助手）</label>
+      <select id="db-agent" value={agentAccess} onChange={(e) => setAgentAccess(e.target.value as TableSummary["agentAccess"])}>
+        {AGENT_ACCESS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}——{o.hint}</option>)}
+      </select>
+
       <h3 style={{ marginBottom: 4 }}>欄位</h3>
       <FieldsEditor fields={fields} onChange={setFields} />
 
@@ -180,6 +194,7 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
               description: description.trim() || undefined,
               fields: fields.map((f) => ({ ...f, label: f.label.trim() })),
               memberWritable,
+              agentAccess,
             })
           }
         >
@@ -254,6 +269,11 @@ function TableDetail({ table, onDeleted }: { table: TableSummary; onDeleted: () 
         <h2 style={{ margin: 0 }}>{table.name}</h2>
         <span className="badge">{SCOPE_LABEL[table.scope]}</span>
         {!table.memberWritable && <span className="badge" title="只有管理者能寫入"><Icon name="Lock" size={12} /> 唯讀共享</span>}
+        {table.agentAccess !== "write" && (
+          <span className="badge" title={AGENT_ACCESS_OPTIONS.find((o) => o.value === table.agentAccess)?.hint}>
+            <Icon name="Lock" size={12} /> {table.agentAccess === "none" ? "不開放 AI" : "AI 唯讀"}
+          </span>
+        )}
         <span className="spacer" />
         {table.access.canManage && (
           <>
@@ -286,6 +306,17 @@ function TableDetail({ table, onDeleted }: { table: TableSummary; onDeleted: () 
                 成員可寫入
               </label>
             )}
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              AI 存取
+              <select
+                aria-label="AI 存取等級"
+                style={{ width: "auto" }}
+                value={table.agentAccess}
+                onChange={(e) => updateTable.mutate({ id: table.id, agentAccess: e.target.value as TableSummary["agentAccess"] })}
+              >
+                {AGENT_ACCESS_OPTIONS.map((o) => <option key={o.value} value={o.value} title={o.hint}>{o.label}</option>)}
+              </select>
+            </label>
           </div>
         </div>
       )}

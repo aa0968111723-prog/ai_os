@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canCreateIn, resolveTableAccess } from "./databaseAcl";
+import { canCreateIn, resolveAgentAccess, resolveTableAccess } from "./databaseAcl";
 import type { AuthState } from "./auth";
 
 const U = {
@@ -61,6 +61,27 @@ describe("resolveTableAccess", () => {
     expect(resolveTableAccess(auth(), t)).toEqual({ canRead: true, canWriteRows: false, canManage: false });
     const superAdmin = auth({ user: { ...auth().user, isSuperAdmin: true } });
     expect(resolveTableAccess(superAdmin, t)).toEqual({ canRead: true, canWriteRows: true, canManage: true });
+  });
+});
+
+describe("resolveAgentAccess（AI/MCP 介面權限＝本人權限 ∩ agentAccess）", () => {
+  const groupTable = (agentAccess: "none" | "read" | "write") =>
+    ({ ...table({ scope: "group", ownerId: null, groupId: U.groupA, createdBy: U.other }), agentAccess });
+
+  it("write：跟本人一致，但永不可管理", () => {
+    expect(resolveAgentAccess(auth(), groupTable("write"))).toEqual({ canRead: true, canWriteRows: true, canManage: false });
+    const leader = auth({ groups: [{ ...auth().groups[0], role: "leader" }] });
+    expect(resolveAgentAccess(leader, groupTable("write")).canManage).toBe(false);
+  });
+
+  it("read：本人可寫也擋 AI 寫", () => {
+    expect(resolveAgentAccess(auth(), groupTable("read"))).toEqual({ canRead: true, canWriteRows: false, canManage: false });
+  });
+
+  it("none：AI 完全看不到；本人無權時 agentAccess 也放不寬", () => {
+    expect(resolveAgentAccess(auth(), groupTable("none")).canRead).toBe(false);
+    const outsider = auth({ groups: [{ ...auth().groups[0], groupId: U.groupB }] });
+    expect(resolveAgentAccess(outsider, groupTable("write")).canRead).toBe(false);
   });
 });
 

@@ -70,6 +70,28 @@ export function resolveTableAccess(auth: AuthState, table: Pick<DataTableRow, "s
   }
 }
 
+/**
+ * AI／MCP 介面的有效權限（MCP 工具與團隊助手注入都走這裡）：
+ * 在「使用者本人權限」上疊加資料庫的 agentAccess 等級——只會更嚴、不會放寬。
+ *   none ＝AI 完全看不到這個庫（列表也不出現）；
+ *   read ＝AI 可查、不可寫（即使本人在網頁上可寫）；
+ *   write＝跟本人權限一致。
+ * canManage 一律 false：結構調整只留給網頁端的人。
+ */
+export function resolveAgentAccess(
+  auth: AuthState,
+  table: Pick<DataTableRow, "scope" | "ownerId" | "groupId" | "teamId" | "memberWritable" | "createdBy" | "agentAccess">,
+): DbAccess {
+  const human = resolveTableAccess(auth, table);
+  const level = table.agentAccess ?? "write";
+  if (level === "none" || !human.canRead) return NONE;
+  return {
+    canRead: true,
+    canWriteRows: level === "write" && human.canWriteRows,
+    canManage: false,
+  };
+}
+
 /** 建立守衛：這個人能不能在該範圍建庫（global 限超管，其餘＝該範圍成員） */
 export function canCreateIn(auth: AuthState, scope: DataTableRow["scope"], groupId?: string | null, teamId?: string | null): string | null {
   if (scope === "personal") return null;
