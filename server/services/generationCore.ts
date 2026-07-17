@@ -358,16 +358,31 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
   if (result.status === "failed") {
     // 同樣 compare-and-set：只有真正把列從 queued/running 轉成 failed 的那一次才退點，
     // 避免同一筆被多次輪詢重複退款（憑空長點數）。
-    const updatedRows = await db
-      .update(schema.generations)
-      .set({ status: "failed", error: result.error ?? "未知錯誤", pointsRefunded: gen.pointsEst, updatedAt: new Date() })
-      .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
-      .returning();
+    // 關鍵：狀態翻轉與退點帳本列「同一交易」——舊版先 commit failed(pointsRefunded=est) 再另寫退點列，
+    // 中間當機/重部署會留下 terminal failed 列（pointsRefunded 記謊）而退點列從未寫入、且無 sweep 會再碰
+    // terminal 列 → 使用者點數永久蒸發。包進同交易後：全有或全無，中途當機整筆 rollback，
+    // 列留在 queued/running 交由 30 分 sweep 依帳本淨額安全收尾。
+    const updatedRows = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(schema.generations)
+        .set({ status: "failed", error: result.error ?? "未知錯誤", pointsRefunded: gen.pointsEst, updatedAt: new Date() })
+        .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
+        .returning();
+      if (rows.length > 0 && gen.pointsEst > 0) {
+        await tx.insert(schema.costLedger).values({
+          userId: gen.userId,
+          groupId: gen.groupId,
+          delta: gen.pointsEst,
+          reason: "生成失敗退回",
+          generationId: gen.id,
+        });
+      }
+      return rows;
+    });
     if (updatedRows.length === 0) {
       const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
       return current ?? gen;
     }
-    await refund(gen.userId, gen.groupId, gen.pointsEst, "生成失敗退回", gen.id);
     return updatedRows[0];
   }
   return gen;

@@ -380,7 +380,10 @@ export function App() {
                 <Route path="/downloads"><DownloadsPage /></Route>
                 <Route path="/planner"><PlannerPage groupId={activeGroupId} /></Route>
                 <Route path="/databases"><DatabasesPage groupId={activeGroupId} /></Route>
-                <Route path="/p/:id">{(params) => <ProjectPage id={params.id} />}</Route>
+                {/* key=id：換專案（例如頂欄待辦下拉直接跳另一案、或上一頁/下一頁）時強制重建整棵
+                    ProjectPage——否則 id prop 變了但元件不重掛，前一案的 prompt／選中模型／角色場景勾選
+                    會殘留到新案，且各卡的 localStorage 初始化只在掛載時讀一次，永遠載不到新案的存檔。 */}
+                <Route path="/p/:id">{(params) => <ProjectPage key={params.id} id={params.id} />}</Route>
                 <Route>
                   <p>
                     找不到頁面 — <Link href="/">回作業台</Link>

@@ -907,7 +907,12 @@ export function AdminPage() {
   const saveBudget = () => {
     const data = settings.data;
     if (!data || !totalBudgetRef.current || !weeklyRef.current || !dailyRef.current) return;
-    const parse = (v: string) => (v === "" ? null : Number(v));
+    // 夾成 >=0：min={0} 只約束上下鈕、擋不住手打負數／非數字；無效輸入視為「不限」(null)。
+    const parse = (v: string) => {
+      if (v === "") return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.max(0, n) : null;
+    };
     const totalBudgetPoints = parse(totalBudgetRef.current.value);
     const defaultWeeklyPoints = parse(weeklyRef.current.value);
     const defaultDailyPoints = parse(dailyRef.current.value);

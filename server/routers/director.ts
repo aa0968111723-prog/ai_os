@@ -48,7 +48,10 @@ function overSuggestLimit(userId: string): boolean {
   const hits = (suggestHits.get(userId) ?? []).filter((t) => now - t < SUGGEST_WINDOW_MS);
   const over = hits.length >= SUGGEST_LIMIT_PER_MINUTE;
   if (!over) hits.push(now); // 被擋的請求不計入窗口，一分鐘後自然解封
-  suggestHits.set(userId, hits);
+  // 窗口清空就刪 key（比照 assistant/teamAssistant/knowledge 的限流器）——否則 Map 會隨
+  // 歷史使用者無限成長，長壽容器記憶體洩漏。
+  if (hits.length) suggestHits.set(userId, hits);
+  else suggestHits.delete(userId);
   return over;
 }
 

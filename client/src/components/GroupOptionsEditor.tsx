@@ -50,8 +50,10 @@ function ApprovalThresholdCard({ groupId }: { groupId: string }) {
             placeholder="不啟用"
             defaultValue={current ?? ""}
             onBlur={(e) => {
-              // 沒有變更就不送：Tab 掃過欄位不觸發無意義寫入
-              const next = e.target.value === "" ? null : Number(e.target.value);
+              // 沒有變更就不送：Tab 掃過欄位不觸發無意義寫入。
+              // min={0} 只約束上下鈕、擋不住手打負數／非數字——這裡自行夾成 >=0 整數，避免送出無效值。
+              const raw = Number(e.target.value);
+              const next = e.target.value === "" ? null : (Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : current);
               if (next !== current) setThreshold.mutate({ groupId, thresholdPoints: next });
             }}
           />
@@ -100,7 +102,8 @@ function MemberBudgetRow({ groupId, member }: {
         placeholder="不限"
         defaultValue={current ?? ""}
         onBlur={(e) => {
-          const next = e.target.value === "" ? null : Number(e.target.value);
+          const raw = Number(e.target.value);
+          const next = e.target.value === "" ? null : (Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : current);
           if (next !== current) setMemberBudget.mutate({ groupId, userId: member.userId, budgetPoints: next });
         }}
       />
