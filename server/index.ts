@@ -504,7 +504,7 @@ app.get("/api/selftest", async (req, res) => {
     return "建立/銷毀 OK";
   });
   await run("生成模式", async () =>
-    isMockMode() ? "假生成(免費)——填 FAL_KEY 並移除 FAL_MOCK 切真實" : "真實模式(FAL_KEY 已設)",
+    isMockMode() ? "示範模式(免費)——填 FAL_KEY 並移除 FAL_MOCK 切正式" : "正式模式(FAL_KEY 已設)",
   );
   await run("儲存/交付(zip 引擎)", async () => {
     const { ZipArchive } = await import("archiver");
@@ -624,7 +624,7 @@ function scheduleFeedbackSweep(): void {
 }
 
 const httpServer = app.listen(port, () => {
-  console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${isMockMode() ? "假生成模式" : "真實模式"}）`);
+  console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${isMockMode() ? "示範模式" : "正式模式"}）`);
   try {
     ensureStorageDirs();
     console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（持久 Volume）" : "（本機模式）"}`);

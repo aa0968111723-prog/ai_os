@@ -133,16 +133,21 @@ function UserMenu({
       </button>
       {open && (
         <div className="menu" role="menu">
+          {/* 分組＋分隔線：說明／工作／帳號——9 項扁平列表太難掃（回饋 W1） */}
+          <div className="menu-label" role="presentation">說明</div>
           <Link href="/help" className="menu-item" role="menuitem" onClick={close}><Icon name="HelpCircle" size={15} />怎麼用</Link>
           <Link href="/models" className="menu-item" role="menuitem" onClick={close}><Icon name="Info" size={15} />模型指南</Link>
+          <div className="menu-sep" />
+          <div className="menu-label" role="presentation">工作</div>
           <Link href="/planner" className="menu-item" role="menuitem" onClick={close}><Icon name="Clock" size={15} />筆記排程</Link>
           <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
           {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
           {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />團隊管理</Link>}
+          <div className="menu-sep" />
+          <div className="menu-label" role="presentation">帳號</div>
           {/* 個人資料匯出（端點 /api/me/export 由後端提供）：a 標籤直下載，不經前端路由 */}
           <a href="/api/me/export" download className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />下載我的資料</a>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
-          <div className="menu-sep" />
           <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>
             <Icon name="Undo2" size={15} />{loggingOut ? "登出中…" : "登出"}
           </button>
@@ -203,7 +208,7 @@ export function App() {
             </select>
           )}
           <span className="spacer" />
-          {me.data && info.data?.mockMode && <span className="badge mock">假生成模式</span>}
+          {me.data && info.data?.mockMode && <span className="badge mock">示範模式</span>}
           {me.data && <PendingBadge groupId={activeGroupId} />}
           {me.data && <PointsBadge groupId={activeGroupId} />}
           {/* 頂欄收斂：次要入口（怎麼用/模型指南/選項/團隊管理/改密碼）＋登出全收進使用者選單 */}

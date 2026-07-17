@@ -253,6 +253,7 @@ a:hover { color: var(--primary-solid-hover); }
 .menu-item:hover { background: var(--card2); }
 .menu-item.danger { color: var(--danger-ink); }
 .menu-sep { height: 1px; background: var(--border-soft); margin: 6px 4px; }
+.menu-label { font-size: 11px; color: var(--fg-secondary); padding: 2px 10px; letter-spacing: 0.04em; user-select: none; }
 
 /* 素材庫（真實儲存層） */
 .upload-zone { border: 2px dashed var(--border); border-radius: var(--r-12); padding: 16px; text-align: center;

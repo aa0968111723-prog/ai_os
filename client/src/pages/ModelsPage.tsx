@@ -358,7 +358,7 @@ export function ModelsPage() {
               <span className="pill" style={tierStyle[m.tier]}>{m.tierLabel}</span>
               <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span>
               <span className="hint mono" style={{ fontSize: 11 }}>{m.cost}</span>
-              {!m.verified && <span className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}><Icon name="TriangleAlert" size={12} />待真實模式首跑確認</span>}
+              {!m.verified && <span className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}><Icon name="TriangleAlert" size={12} />待正式模式首跑確認</span>}
               {/* 需求 #1:勾選加入並排比較;滿 4 個時其餘停用 */}
               <label
                 className="hint"

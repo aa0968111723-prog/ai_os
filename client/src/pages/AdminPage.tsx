@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
+import { humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
 
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
@@ -278,17 +279,6 @@ function SelfTestCard() {
   );
 }
 
-/** 審計列的 input 摘要：JSON.stringify 截 120 字灰色小字就好，不需要完整展開 */
-function auditInputSummary(input: unknown): string {
-  try {
-    const s = JSON.stringify(input);
-    if (!s || s === "null" || s === "{}") return "";
-    return s.length > 120 ? `${s.slice(0, 120)}…` : s;
-  } catch {
-    return ""; // 理論上不會發生（API 回來的都是可序列化資料），保險別讓一列壞資料炸整張卡
-  }
-}
-
 /**
  * 操作紀錄（審計）卡：誰在什麼時候做了哪些敏感操作、成功與否。
  * 管理員與開發者都看得到——後端已按呼叫者權限過濾範圍，這裡不需要 isSuperAdmin gate。
@@ -336,12 +326,14 @@ function AuditLogCard() {
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <span aria-label={r.ok ? "成功" : "失敗"}>{r.ok ? "✅" : "❌"}</span>
                 <b>{r.actorName}</b>
-                <span className="mono" style={{ fontSize: 11 }}>{r.action}</span>
+                <span>{humanizeAuditAction(r.action)}</span>
+                {/* 原始代碼保留小字：篩選框吃的是代碼關鍵字，對得上才好查 */}
+                <span className="mono hint" style={{ fontSize: 10 }}>{r.action}</span>
                 <span className="hint" style={{ fontSize: 11 }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</span>
               </div>
-              {auditInputSummary(r.input) && (
-                <div className="hint mono" style={{ fontSize: 11, marginTop: 2, overflowWrap: "anywhere" }}>
-                  {auditInputSummary(r.input)}
+              {summarizeAuditInput(r.input) && (
+                <div className="hint" style={{ fontSize: 11, marginTop: 2, overflowWrap: "anywhere" }}>
+                  {summarizeAuditInput(r.input)}
                 </div>
               )}
               {r.error && (

@@ -8,9 +8,9 @@ import { CATEGORIES, MODELS, WORKFLOW_PRESETS, tierLabel } from "../shared/model
 const lines: string[] = [
   "# 模型目錄(自動生成,單一真相在 shared/models.ts)",
   "",
-  `> ${MODELS.length} 個模型 + ${WORKFLOW_PRESETS.length} 條工作流|11 類,每類 旗艦3+經濟3+最低成本1`,
+  `> ${MODELS.length} 個模型 + ${WORKFLOW_PRESETS.length} 條工作流|11 類,每類至少 旗艦3+經濟3+最低成本1`,
   "> 1 點 ≈ NT$1;「成本」為 fal 官方約略價,實際帳單以 fal.ai/pricing 為準。",
-  "> ⚠︎ = 模型 ID 依官方資料合理推定,真實模式首跑確認;失敗自動退點。",
+  "> ⚠︎ = 模型 ID 依官方資料合理推定,正式模式首跑確認;失敗自動退點。",
   "",
 ];
 

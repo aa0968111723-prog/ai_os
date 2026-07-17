@@ -708,7 +708,7 @@ export function ProjectPage({ id }: { id: string }) {
                       ⏳ 這筆需要組長核准後才會開始生成（{model.points} 點 ≥ 門檻 {quota.data.approvalThreshold} 點）
                     </p>
                   )}
-                <p className="hint" style={{ fontSize: 12 }}>失敗全額退點。真實模式會實際呼叫 AI 生成。</p>
+                <p className="hint" style={{ fontSize: 12 }}>失敗全額退點。正式模式會實際呼叫 AI 生成。</p>
                 <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
                   <button
                     className="primary"
