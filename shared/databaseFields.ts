@@ -133,7 +133,18 @@ export function validateRowData(
         break;
       }
       case "number": {
-        const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+        let n: number;
+        if (typeof v === "number") {
+          n = v;
+        } else if (typeof v === "string") {
+          // Number() 太寬鬆：Number("0x10")===16、Number("0b10")===2、Number("1_000")=NaN——
+          // 匯入代碼型字串（如產品編號 "0x10"）會被靜默變成數字 16。只收「十進位」寫法（可含正負號、
+          // 小數、科學記號、前後空白），把 0x/0b/0o 這類非十進位進位與其他非數字字面擋在外面。
+          const t = v.trim();
+          n = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t) ? Number(t) : NaN;
+        } else {
+          n = NaN;
+        }
         if (!Number.isFinite(n)) return { ok: false, error: `「${f.label}」要是數字` };
         out[f.key] = n;
         break;

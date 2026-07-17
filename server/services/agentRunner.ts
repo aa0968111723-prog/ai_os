@@ -17,6 +17,8 @@ import { submitApprovalCore } from "../routers/approvals";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
 import { addDataRowValidated } from "./databaseCore";
+import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
+import { sanitizeAuditInput } from "./audit";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -192,10 +194,15 @@ async function saveRun(runId: string, patch: Partial<typeof schema.agentRuns.$in
     if (Object.keys(rest).length) {
       await db.update(schema.agentRuns).set({ ...rest, updatedAt: new Date() }).where(eq(schema.agentRuns.id, runId));
     }
-    await db
+    const flipped = await db
       .update(schema.agentRuns)
       .set({ status, updatedAt: new Date() })
-      .where(and(eq(schema.agentRuns.id, runId), eq(schema.agentRuns.status, "running")));
+      .where(and(eq(schema.agentRuns.id, runId), eq(schema.agentRuns.status, "running")))
+      .returning({ id: schema.agentRuns.id });
+    // 只在「真的把 running 翻成終局」的那一次發完成通知（idempotent 重入或已被 stop 搶走時 flipped 為空，不重發）
+    if (flipped.length) {
+      void notifyRunFinished(runId, status).catch((err) => console.warn("[agent] 完成通知發送失敗（不影響主流程）：", err instanceof Error ? err.message : err));
+    }
     return;
   }
   await db.update(schema.agentRuns).set({ ...patch, updatedAt: new Date() }).where(eq(schema.agentRuns.id, runId));
@@ -253,11 +260,94 @@ async function runnerAccessRole(userId: string, groupId: string): Promise<"admin
   return gm.role === "leader" ? "leader" : "member";
 }
 
+/**
+ * 執行任何「新」步驟前，復驗發起人「當下」對本專案的權限（審查修復）。
+ * 核准後的背景執行可長達數十分鐘，其間發起人可能被降為檢視者／移出組／帳號停用，或專案被封存；
+ * 原本只有 record_to_database 用 loadAuthState 復驗、generate 只查組角色，其餘免費步驟甚至零復驗。
+ * 這道統一守衛把同一條界擴及所有寫入步驟，一次擋齊：
+ *  - 帳號停用 → loadAuthState 回 null（非 active 帳號）
+ *  - 移出組 → assertProjectEditable 內部 requireGroup 拋 FORBIDDEN
+ *  - 專案檢視者（viewer） → assertProjectEditable 拋 FORBIDDEN
+ *  - 專案封存 → assertProjectNotArchived 拋 BAD_REQUEST
+ * 回錯誤字串＝擋下（呼叫端 failRun 收攏成 failed）；null＝放行。
+ * 已送出的生成在 advanceRun 上方 settleGeneration 先結算，不因權限撤銷而擱置在途成品。
+ */
+async function checkRunAuthority(run: RunRow): Promise<string | null> {
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId));
+  if (!project) return "專案不存在或已刪除";
+  const auth = await loadAuthState(run.userId);
+  if (!auth) return "發起人帳號已停用，代理無法繼續執行";
+  try {
+    assertProjectNotArchived(project);
+    await assertProjectEditable(auth, project);
+  } catch (err) {
+    // FORBIDDEN（移出組／viewer）或 BAD_REQUEST（封存）都給人話原因，failRun 收攏成 failed
+    return err instanceof TRPCError ? err.message : "發起人已無此專案的編輯權，代理停止";
+  }
+  return null;
+}
+
+/**
+ * 補記一筆代理步驟審計（fire-and-forget）。背景執行器沒有 ctx.auth、繞過 tRPC 的 mutation 審計中介層，
+ * 故比照 MCP 的 recordMcpAudit 在這裡手動補記——否則核准後「代理實際做了什麼」（生成／建鏡／送審／
+ * 寫資料庫）完全不進 audit_log，組長只查得到 agents.approve 一列。action 掛在既有 "agents" 前綴下，
+ * 自動歸到操作紀錄的「AI 助手與代理」類別。
+ */
+function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, error?: string): void {
+  void db
+    .insert(schema.auditLog)
+    .values({
+      actorId: run.userId,
+      action: `agents.step.${step.kind}`,
+      groupId: run.groupId,
+      projectId: run.projectId,
+      input: sanitizeAuditInput({
+        runId: run.id,
+        stepIndex: idx,
+        note: step.note,
+        ...(step.generationId ? { generationId: step.generationId } : {}),
+        ...(step.tableId ? { tableId: step.tableId } : {}),
+        ...(step.sceneNo != null ? { sceneNo: step.sceneNo } : {}),
+      }) as Record<string, unknown>,
+      ok,
+      error: error ? error.slice(0, 300) : null,
+    })
+    .catch((err) => console.warn("[agent] 步驟審計寫入失敗（不影響主流程）：", err instanceof Error ? err.message : err));
+}
+
+/** 終局系統訊息文字（純函式，單元可測）：done/failed 各一句，供發起人與組長在專案動態流即時看到結果 */
+export function formatAgentRunMessage(goal: string, doneCount: number, total: number, status: "done" | "failed", error?: string | null): string {
+  const g = goal.length > 40 ? `${goal.slice(0, 40)}…` : goal;
+  return status === "done"
+    ? `✅ AI 代理完成「${g}」：${doneCount}/${total} 步已執行`
+    : `❌ AI 代理中止「${g}」：${error || "未知原因"}（已完成 ${doneCount}/${total} 步）`;
+}
+
+/**
+ * 代理跑到終局時發一則系統訊息到專案動態流（審查修復：代理是唯一「關頁後仍在背景跑」卻毫無完成信號的
+ * 長時操作，原本使用者只能主動輪詢 get_agent_run 才知道結果）。只在 saveRun 真的把 running→終局翻成功時
+ * 呼叫一次，故不會重複發。fire-and-forget：訊息失敗不影響 run 收尾。
+ */
+async function notifyRunFinished(runId: string, status: "done" | "failed"): Promise<void> {
+  const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, runId));
+  if (!run) return;
+  const steps = run.steps as AgentStep[];
+  const doneCount = steps.filter((s) => s.status === "done").length;
+  await db.insert(schema.messages).values({
+    groupId: run.groupId,
+    projectId: run.projectId,
+    userId: run.userId,
+    kind: "system",
+    body: formatAgentRunMessage(run.goal, doneCount, steps.length, status, run.error),
+  });
+}
+
 /** 一步失敗的統一收攏：標步驟與 run failed（代理與工作流同語義——寧可停下讓人看，不盲目燒點數） */
 async function failRun(run: RunRow, steps: AgentStep[], idx: number, msg: string): Promise<void> {
   const step = steps[idx];
   step.status = "failed";
   step.detail = msg;
+  auditAgentStep(run, step, idx, false, msg); // 失敗也入審計（可追溯代理在哪一步、為何停）
   markRestStopped(steps, idx);
   if (run.status === "running") {
     await saveRun(run.id, { steps, status: "failed", error: `步驟「${step.note}」失敗：${msg}` });
@@ -303,6 +393,13 @@ async function advanceRun(run: RunRow): Promise<void> {
     if (!freshNow || freshNow.status !== "running") return; // 下一輪由收停分支統一標記
   }
 
+  // 執行任何「新」步驟前，復驗發起人當下的專案權限（帳號停用／移出組／降為檢視者／專案封存都擋，
+  // 一次覆蓋所有步驟種類；已送出的生成已在上方 settleGeneration 先結算，不受此影響）
+  {
+    const authzError = await checkRunAuthority(run);
+    if (authzError) return failRun(run, steps, idx, authzError);
+  }
+
   // ── 非生成類步驟：在 tick 內同步執行（都是快速 DB 操作或單次 LLM 呼叫） ──
   if (step.kind === "create_scene") {
     const title = (step.title ?? "").trim();
@@ -327,6 +424,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     });
     step.status = "done";
     step.detail = `已新增「${title.slice(0, 30)}」`;
+    auditAgentStep(run, step, idx, true);
     await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
     return;
   }
@@ -340,6 +438,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       if (nowCount > step.scenesBefore) {
         step.status = "done";
         step.detail = `拆出 ${nowCount - step.scenesBefore} 幕`;
+        auditAgentStep(run, step, idx, true);
         await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
         return;
       }
@@ -359,6 +458,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       });
       step.status = "done";
       step.detail = `拆出 ${result.count} 幕`;
+      auditAgentStep(run, step, idx, true);
       await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
     } catch (err) {
       // 本地節流（每分鐘 6 次）在打 NIM 前就擋下、零外部成本：不計次，下輪重試
@@ -390,6 +490,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     }
     step.status = "done";
     step.detail = `第 ${step.sceneNo} 鏡已送審`;
+    auditAgentStep(run, step, idx, true);
     await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
     return;
   }
@@ -412,6 +513,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       const row = await addDataRowValidated(table, run.userId, step.rowData ?? {});
       step.status = "done";
       step.detail = `已寫入「${table.name}」一列`;
+      auditAgentStep(run, step, idx, true);
       void row;
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
@@ -488,6 +590,7 @@ async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, st
   if (gen.status === "done") {
     step.status = "done";
     step.detail = gen.resultText ? gen.resultText.slice(0, 60) : gen.resultUrl ?? "";
+    auditAgentStep(run, step, idx, true);
     if (run.status !== "running") {
       markRestStopped(steps, idx);
       await saveRun(run.id, { steps });
@@ -501,6 +604,7 @@ async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, st
     const msg = gen.status === "rejected" ? "組長駁回了這筆超額生成" : gen.error ?? "未知錯誤";
     step.status = "failed";
     step.detail = msg;
+    auditAgentStep(run, step, idx, false, msg);
     markRestStopped(steps, idx);
     if (run.status === "running") {
       await saveRun(run.id, { steps, status: "failed", error: `步驟「${step.note}」失敗：${msg}` });

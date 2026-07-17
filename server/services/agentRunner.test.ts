@@ -1,0 +1,38 @@
+import { describe, expect, it } from "vitest";
+import { formatAgentRunMessage } from "./agentRunner";
+
+describe("formatAgentRunMessage（代理終局系統訊息）", () => {
+  it("完成：帶勾、目標、已執行步數", () => {
+    const msg = formatAgentRunMessage("把腳本拆成分鏡並逐鏡出圖", 5, 5, "done");
+    expect(msg).toContain("✅");
+    expect(msg).toContain("把腳本拆成分鏡並逐鏡出圖");
+    expect(msg).toContain("5/5 步");
+  });
+
+  it("失敗：帶叉、錯誤原因、已完成步數（部分完成）", () => {
+    const msg = formatAgentRunMessage("為每一鏡生成畫面", 2, 6, "failed", "本週額度不足");
+    expect(msg).toContain("❌");
+    expect(msg).toContain("本週額度不足");
+    expect(msg).toContain("2/6 步");
+  });
+
+  it("失敗但沒有錯誤字串時回「未知原因」，不顯示 null/undefined", () => {
+    const msg = formatAgentRunMessage("某目標", 0, 3, "failed", null);
+    expect(msg).toContain("未知原因");
+    expect(msg).not.toContain("null");
+    expect(msg).not.toContain("undefined");
+  });
+
+  it("過長目標截斷到 40 字加省略號（系統訊息不被灌爆）", () => {
+    const longGoal = "字".repeat(80);
+    const msg = formatAgentRunMessage(longGoal, 1, 1, "done");
+    expect(msg).toContain("…");
+    // 截斷後不應包含完整 80 字
+    expect(msg).not.toContain("字".repeat(80));
+  });
+
+  it("短目標不加省略號", () => {
+    const msg = formatAgentRunMessage("短目標", 1, 1, "done");
+    expect(msg).not.toContain("…");
+  });
+});

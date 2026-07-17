@@ -9,17 +9,29 @@ import { detectFormat, inferFields, parseTabular, TABULAR_ACCEPT, TABULAR_FORMAT
 /** 匯入結果外形（importData mutation 回傳；建庫與詳頁匯入共用顯示） */
 type ImportResult = { imported: number; failed: number; skipped: number; truncated: boolean; errors: Array<{ line: number; error: string }> };
 
-/** 客端粗解析 headers＋列數（JSON 格式錯回 error 人話）；正式解析仍在後端 */
+/** 去抖：大量貼上/逐字輸入時，避免每次按鍵都同步全量 parseTabular 凍結 UI（改為停手 250ms 才解析一次） */
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(id);
+  }, [value, ms]);
+  return v;
+}
+
+/** 客端粗解析 headers＋列數（JSON 格式錯回 error 人話）；正式解析仍在後端。
+ *  內容經去抖：大檔貼上或逐字輸入時不會每次按鍵都同步解析（見 useDebounced）。 */
 function usePreview(content: string, format: TabularFormat) {
+  const debounced = useDebounced(content, 250);
   return useMemo(() => {
-    if (!content.trim()) return { headers: [] as string[], count: 0, error: null as string | null };
+    if (!debounced.trim()) return { headers: [] as string[], count: 0, error: null as string | null };
     try {
-      const p = parseTabular(content, format);
+      const p = parseTabular(debounced, format);
       return { headers: p.headers, count: p.records.length, error: null as string | null };
     } catch (e) {
       return { headers: [] as string[], count: 0, error: e instanceof Error ? e.message : "解析失敗" };
     }
-  }, [content, format]);
+  }, [debounced, format]);
 }
 
 /** 匯入結果摘要（成功/失敗/截斷＋前幾筆錯誤） */

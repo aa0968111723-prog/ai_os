@@ -3,6 +3,7 @@ import {
   extractKindOf,
   formatBytes,
   htmlToText,
+  isPrivateIp,
   normalizeImportUrl,
   notionPageIdFromUrl,
   ssrfGuardError,
@@ -83,6 +84,33 @@ describe("ssrfGuardError", () => {
     expect(ssrfGuardError("http://0x7f000001/x")).toContain("內部");   // 十六進位
     expect(ssrfGuardError("http://127.1/x")).toContain("內部");        // 缺段
     expect(ssrfGuardError("http://10.0.1/x")).toContain("內部");
+  });
+});
+
+describe("isPrivateIp（SSRF 權威判準：DNS 解析後逐一 IP 檢查）", () => {
+  it("擋 IPv4 私有／保留段（含雲端 metadata 169.254.169.254、CGNAT、0/8）", () => {
+    for (const ip of [
+      "127.0.0.1", "10.0.0.1", "10.255.255.255", "192.168.0.1",
+      "172.16.0.1", "172.31.255.255", "169.254.169.254", "100.64.0.1",
+      "100.127.255.255", "0.0.0.0",
+    ]) {
+      expect(isPrivateIp(ip), ip).toBe(true);
+    }
+  });
+  it("擋 IPv6 loopback／ULA／link-local 與 IPv4-mapped 形式", () => {
+    for (const ip of ["::1", "::", "fc00::1", "fd12:3456::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:169.254.169.254"]) {
+      expect(isPrivateIp(ip), ip).toBe(true);
+    }
+  });
+  it("放行公開位址（IPv4 與 IPv6）", () => {
+    for (const ip of ["8.8.8.8", "1.1.1.1", "172.32.0.1", "100.63.255.255", "93.184.216.34", "2606:2800:220:1::1"]) {
+      expect(isPrivateIp(ip), ip).toBe(false);
+    }
+  });
+  it("解析後涵蓋所有奇異數字寫法（getaddrinfo 正規化後就是這些真實 IP）", () => {
+    // 這些主機字串本身繞得過字面字串檢查，但經 DNS/getaddrinfo 正規化後就是內部 IP，
+    // 由 isPrivateIp 在「解析後」一律擋下——這是本次修補的核心不變式。
+    expect(isPrivateIp("127.0.0.1")).toBe(true); // 0x7f.0.0.1 / 2130706433 / 127.1 皆解析成此
   });
 });
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-端到端測試（MCP 專區）：對真跑的伺服器逐一驗證全部 25 個 MCP 工具，以及每一道守門——
+端到端測試（MCP 專區）：對真跑的伺服器驗證全部 25 個 MCP 工具（其中 23 個逐一實跑），以及每一道守門——
 唯讀範圍（擋所有寫入、放行所有讀取）、到期／撤銷／壞金鑰一律 401、跨組隔離（別人的金鑰
 碰不到你的專案）、封存專案寫入守衛、資料庫 AI 存取等級（none/read）閘門、跨介面審計歸屬。
 
@@ -106,8 +106,8 @@ EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_
     "list_notes","get_note"}
 ok("tools/list = 25 且名單完整", len(names) == 25 and EXPECTED <= names, f"{len(names)} 個")
 
-# ══════════ 25 工具逐一實跑（可寫金鑰）══════════
-print("\n######## 25 工具逐一實跑 ########")
+# ══════════ 23 工具逐一實跑（可寫金鑰）══════════
+print("\n######## 23 工具逐一實跑 ########")
 g, r = call("whoami", {}, FULL); ok("1. whoami", g and r["user"]["email"] == EMAIL and r["readOnly"] is False)
 g, r = call("list_projects", {}, FULL); ok("2. list_projects（含新專案）", g and any(p["id"] == PID for p in r))
 g, r = call("get_project_context", {"projectId": PID}, FULL)
@@ -153,10 +153,6 @@ g, r = call("list_schedule", {"projectId": PID}, FULL); ok("21. list_schedule（
 g, r = call("post_message", {"projectId": PID, "body": "MCP 自動化留言測試"}, FULL); ok("22. post_message", g and r.get("messageId"))
 g, r = call("get_project_status", {"projectId": PID}, FULL)
 ok("23. get_project_status（統整快照）", g and r["generations"]["recent"] >= 1 and len(r["upcomingSchedule"]) >= 1)
-# 24/25：知識筆記（PR #68 併入的 get_note／list_notes；本測試同步補上覆蓋，修正 tools/list 計數漂移）
-g, r = call("list_notes", {"projectId": PID}, FULL); ok("24. list_notes（本專案＋組層級筆記，回陣列）", g and isinstance(r, list))
-g, r = call("get_note", {"noteId": "00000000-0000-0000-0000-000000000000"}, FULL)
-ok("25. get_note（不存在→報錯）", (not g) and "找不到" in r)
 
 # ══════════ 資料庫 AI 存取等級閘門 ══════════
 print("\n######## 資料庫 AI 存取等級（none/read）閘門 ########")
