@@ -99,6 +99,30 @@ export const sessions = pgTable("sessions", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/**
+ * MCP 個人連線金鑰（per-user，取代「單一共用 MCP_API_KEY＝人人超管」）：
+ * 每位夥伴自助建立自己的金鑰，外部 AI 客戶端（Claude 等）帶此金鑰連進來時，
+ * MCP 一律以「該金鑰的擁有者」身分＋其真實權限執行——組隔離、專案 ACL、點數額度、
+ * 成本核准門檻全部沿用網頁端同一套守衛（見 services/mcp.ts）。
+ * 與 sessions/invites 同級保護：DB 只存 SHA-256，原文只在建立當下回一次；撤銷＝軟刪保留審計歸屬。
+ * 新表＝pushSchema 安全。
+ */
+export const mcpTokens = pgTable("mcp_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  /** SHA-256（非原文）：DB 外洩不可直接兌換金鑰 */
+  tokenHash: text("token_hash").notNull().unique(),
+  /** 給人看的用途標籤（如「Claude 桌面版」「小美的筆電」），供列表辨識與撤銷 */
+  label: text("label").notNull(),
+  /** 最近成功呼叫時刻（fire-and-forget 更新）：供使用者判斷哪把在用、哪把可撤 */
+  lastUsedAt: timestamp("last_used_at"),
+  /** 撤銷時刻（非 null＝已撤銷，驗證即拒）——不硬刪，保留既有審計列的操作者歸屬 */
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("mcp_tokens_user_idx").on(t.userId),
+}));
+
 /* ── 業務內容（全部掛 group_id 隔離） ─────────────── */
 
 export const projects = pgTable("projects", {
