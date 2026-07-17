@@ -118,6 +118,22 @@ export const quotaRouter = router({
       return { ok: true, thresholdPoints: value };
     }),
 
+  /** 團隊代理派工授權（需求 12 v2）：組長對個別組員開/關「用組彙總 AI 派工到專案」的權。
+   *  組長以上本就有派工權、不需也不受此欄影響——只對 role='member' 的成員有意義。 */
+  setMemberDispatch: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), canDispatch: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      requireLeader(ctx.auth, input.groupId);
+      const updated = await db
+        .update(schema.groupMembers)
+        // 關閉時寫 null（回到「未授權」的預設語意），開啟寫 true——與 memberCanDispatch 的判斷一致
+        .set({ canDispatchAgent: input.canDispatch ? true : null })
+        .where(and(eq(schema.groupMembers.groupId, input.groupId), eq(schema.groupMembers.userId, input.userId)))
+        .returning({ id: schema.groupMembers.id });
+      if (updated.length === 0) throw new TRPCError({ code: "NOT_FOUND", message: "這位成員不在這個組" });
+      return { ok: true, canDispatch: input.canDispatch };
+    }),
+
   /** 個別成員覆寫（組長對自己組員微調） */
   setMemberOverride: authedProcedure
     .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), weeklyPointsOverride: z.number().int().min(0).nullable() }))
@@ -149,6 +165,8 @@ export const quotaRouter = router({
         total: u?.total ?? 0, // 累計淨消耗——個人預算的分母
         weeklyOverride: m.weeklyPointsOverride ?? null, // null＝跟組
         budget: m.budgetPoints ?? null, // null＝不限（未分配個人預算）
+        // 團隊代理派工授權（組長以上本就可派，此旗標只對一般組員有意義；null/false＝未授權）
+        canDispatch: m.role !== "member" || m.canDispatchAgent === true,
       };
     });
     const allocated = rows.reduce((s, r) => s + (r.budget ?? 0), 0); // 已分配給組員的個人預算總和

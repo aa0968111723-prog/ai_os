@@ -72,7 +72,7 @@ function ApprovalThresholdCard({ groupId }: { groupId: string }) {
  */
 function MemberBudgetRow({ groupId, member }: {
   groupId: string;
-  member: { userId: string; name: string; role: "leader" | "member"; total: number; budget: number | null };
+  member: { userId: string; name: string; role: "leader" | "member"; total: number; budget: number | null; canDispatch: boolean };
 }) {
   const utils = trpc.useUtils();
   const [saved, setSaved] = useState(false);
@@ -86,13 +86,16 @@ function MemberBudgetRow({ groupId, member }: {
       savedTimer.current = setTimeout(() => setSaved(false), 3000);
     },
   });
+  // 團隊代理派工授權：組長以上本就有派工權（不顯示開關），只對一般組員開放授權切換
+  const setDispatch = trpc.quota.setMemberDispatch.useMutation({ onSuccess: () => utils.quota.usage.invalidate({ groupId }) });
   const current = member.budget;
   const inputId = `member-budget-${member.userId}`;
+  const isLeader = member.role === "leader";
   // 已用超過分配額時標紅提示（分配是累計上限，用超代表該調高或已擋下後續生成）
   const over = current != null && member.total > current;
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-      <span className="chip" style={{ margin: 0 }}>{member.name}{member.role === "leader" ? "・組長" : ""}</span>
+      <span className="chip" style={{ margin: 0 }}>{member.name}{isLeader ? "・組長" : ""}</span>
       <label className="hint" htmlFor={inputId} style={{ margin: 0 }}>分配</label>
       <input
         id={inputId}
@@ -110,8 +113,23 @@ function MemberBudgetRow({ groupId, member }: {
       <span className="hint" style={over ? { color: "var(--danger-ink)" } : undefined}>
         已用 {member.total}{current != null ? `／${current}` : "・不限"}
       </span>
-      {setMemberBudget.isPending && <span className="hint">儲存中…</span>}
-      {setMemberBudget.error && <span className="error" style={{ marginTop: 0 }}>{setMemberBudget.error.message}</span>}
+      {/* 派工權切換：組長恆有、顯示靜態標記；組員可由組長開/關「用組彙總 AI 派工到專案」 */}
+      {isLeader ? (
+        <span className="hint" title="組長以上本就有派工權">・可派工</span>
+      ) : (
+        <button
+          type="button"
+          className="btn-sm"
+          disabled={setDispatch.isPending}
+          title={member.canDispatch ? "點一下收回這位組員的團隊代理派工權" : "點一下授權這位組員用組彙總 AI 派工到專案"}
+          onClick={() => setDispatch.mutate({ groupId, userId: member.userId, canDispatch: !member.canDispatch })}
+          style={member.canDispatch ? { color: "var(--success-ink)" } : undefined}
+        >
+          派工權：{member.canDispatch ? "已開" : "關"}
+        </button>
+      )}
+      {(setMemberBudget.isPending || setDispatch.isPending) && <span className="hint">儲存中…</span>}
+      {(setMemberBudget.error || setDispatch.error) && <span className="error" style={{ marginTop: 0 }}>{(setMemberBudget.error ?? setDispatch.error)!.message}</span>}
       {saved && <span className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</span>}
     </div>
   );
