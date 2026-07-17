@@ -94,12 +94,20 @@ function PointsBadge({ groupId }: { groupId: string }) {
   const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 60_000, enabled: !!groupId });
   if (my.error) return <span className="status-chip" title="點數暫時讀不到，稍後會自動重試"><Icon name="Gem" size={14} /><span className="mono">—</span></span>;
   if (!my.data) return null;
-  const { totalRemaining, weeklyQuota, weeklyUsed, dailyQuota, dailyUsed } = my.data;
-  const label = totalRemaining != null ? `剩 ${totalRemaining.toLocaleString()}` : "不限";
+  const { totalRemaining, weeklyQuota, weeklyUsed, dailyQuota, dailyUsed, memberBudgetRemaining, groupBudgetRemaining } = my.data;
+  // 徽章主數字＝最緊的「累計剩餘」：個人分配 → 組預算 → 全域總預算（任一為 null 即該層不限）
+  const caps = [memberBudgetRemaining, groupBudgetRemaining, totalRemaining].filter((v): v is number => v != null);
+  const label = caps.length > 0 ? `剩 ${Math.min(...caps).toLocaleString()}` : "不限";
   const weekly = weeklyQuota != null ? `・週 ${weeklyUsed}/${weeklyQuota}` : "";
   const daily = dailyQuota != null ? `・日 ${dailyUsed}/${dailyQuota}` : "";
+  // 標題點明「剩」指的是哪一層，避免組長/組員把個人分配誤讀成全系統剩餘
+  const source = memberBudgetRemaining != null && memberBudgetRemaining === Math.min(...(caps.length ? caps : [Infinity]))
+    ? "你的個人分配"
+    : groupBudgetRemaining != null && groupBudgetRemaining === Math.min(...(caps.length ? caps : [Infinity]))
+    ? "本組組預算"
+    : "全系統總預算";
   return (
-    <span className="status-chip" title="點數額度由管理員調整；日上限每天重置">
+    <span className="status-chip" title={caps.length > 0 ? `顯示最緊的累計剩餘（${source}）；週/日上限每天/每週重置，由管理員與組長調整` : "點數額度由管理員調整；日上限每天重置"}>
       <Icon name="Gem" size={14} /><span className="mono">{label}{weekly}{daily}</span>
     </span>
   );

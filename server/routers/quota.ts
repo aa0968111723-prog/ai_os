@@ -3,7 +3,16 @@ import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
-import { getSettings, updateSettings, usedTotal, usedThisWeek, usedToday, effectiveWeeklyQuota, effectiveDailyQuota, groupUsage } from "../services/points";
+import { getSettings, updateSettings, usedTotal, usedThisWeek, usedToday, effectiveWeeklyQuota, effectiveDailyQuota, groupUsage, usedByGroup, usedByMember, groupBudget, memberBudget } from "../services/points";
+
+/** 團隊管理權檢查（組預算是由上往下分配的，只有團隊管理員以上能調）：超管或該組所屬團隊的 admin */
+async function assertGroupTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, groupId: string): Promise<void> {
+  const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
+  if (!group) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個組" });
+  if (!auth.user.isSuperAdmin && !auth.adminTeamIds.includes(group.teamId)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "只有團隊管理員以上能分配組預算" });
+  }
+}
 
 /** 點數與額度管理（定案：不鎖死——超管調全域、管理員調組、組長調成員） */
 export const quotaRouter = router({
@@ -18,10 +27,18 @@ export const quotaRouter = router({
     const quota = isMember ? await effectiveWeeklyQuota(ctx.auth.user.id, input!.groupId!) : null;
     // 成本審核門檻（需求 2.1）：前端生成確認彈窗要提示「這筆需組長核准」——同樣只給本組成員看
     let approvalThreshold: number | null = null;
+    // 分配樹（累計上限）：個人預算 → 組預算——只給本組成員看自己的剩餘
+    let memberBudgetRemaining: number | null = null;
+    let groupBudgetRemaining: number | null = null;
     if (isMember) {
-      const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, input!.groupId!));
+      const gid = input!.groupId!;
+      const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, gid));
       const th = group?.approvalThresholdPoints;
       approvalThreshold = th != null && th > 0 ? th : null;
+      const mBudget = await memberBudget(ctx.auth.user.id, gid);
+      if (mBudget != null) memberBudgetRemaining = Math.max(0, mBudget - (await usedByMember(ctx.auth.user.id, gid)));
+      const gBudget = await groupBudget(gid);
+      if (gBudget != null) groupBudgetRemaining = Math.max(0, gBudget - (await usedByGroup(gid)));
     }
     return {
       totalBudget: settings.totalBudgetPoints, // null＝不限
@@ -32,6 +49,8 @@ export const quotaRouter = router({
       dailyQuota: effectiveDailyQuota(settings), // null＝不限
       dailyUsed: today,
       approvalThreshold, // null＝不啟用成本審核門檻
+      memberBudgetRemaining, // null＝個人無累計上限
+      groupBudgetRemaining, // null＝組無累計上限
     };
   }),
 
@@ -59,6 +78,32 @@ export const quotaRouter = router({
       return { ok: true };
     }),
 
+  /** 組總預算（累計上限）：超管/團隊管理員分配給組的點數池；0 或空＝不限。組長不可調（分配是由上往下） */
+  setGroupBudget: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), budgetPoints: z.number().int().min(0).nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      await assertGroupTeamAdmin(ctx.auth, input.groupId);
+      // 0 一律正規化成 null（不限）——守門處只判 null，不用兩套「不限」語意
+      const value = input.budgetPoints && input.budgetPoints > 0 ? input.budgetPoints : null;
+      await db.update(schema.groups).set({ budgetPoints: value }).where(eq(schema.groups.id, input.groupId));
+      return { ok: true, budgetPoints: value };
+    }),
+
+  /** 組員個人預算（累計上限）：組長從組預算再分配給組員；0 或空＝不限。組長對自己組員調 */
+  setMemberBudget: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), budgetPoints: z.number().int().min(0).nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      requireLeader(ctx.auth, input.groupId);
+      const value = input.budgetPoints && input.budgetPoints > 0 ? input.budgetPoints : null;
+      const updated = await db
+        .update(schema.groupMembers)
+        .set({ budgetPoints: value })
+        .where(and(eq(schema.groupMembers.groupId, input.groupId), eq(schema.groupMembers.userId, input.userId)))
+        .returning({ id: schema.groupMembers.id });
+      if (updated.length === 0) throw new TRPCError({ code: "NOT_FOUND", message: "這位成員不在這個組" });
+      return { ok: true, budgetPoints: value };
+    }),
+
   /** 成本審核門檻（需求 2.1）：組員單筆生成估點 ≥ 門檻需組長核准；0/null＝不啟用。組長以上可調 */
   setApprovalThreshold: authedProcedure
     .input(z.object({ groupId: z.string().uuid(), thresholdPoints: z.number().int().min(0).nullable() }))
@@ -82,17 +127,37 @@ export const quotaRouter = router({
       return { ok: true };
     }),
 
-  /** 組用量儀表（組長/管理層） */
+  /** 組用量儀表（組長/管理層）＋點數分配狀態（組預算、各組員分配額與累計用量） */
   usage: authedProcedure.input(z.object({ groupId: z.string().uuid() })).query(async ({ ctx, input }) => {
     requireLeader(ctx.auth, input.groupId);
-    const usage = await groupUsage(input.groupId);
+    const usage = await groupUsage(input.groupId); // 只含有帳本的成員（weekly/total）
+    const usageByUser = new Map(usage.map((u) => [u.userId, u]));
     const users = await db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users);
     const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, input.groupId));
+    // 全體組員（含零用量者，才能對還沒花點的人分配預算）＋各自個人預算與角色
+    const members = await db.select().from(schema.groupMembers).where(eq(schema.groupMembers.groupId, input.groupId));
+    const rows = members.map((m) => {
+      const u = usageByUser.get(m.userId);
+      return {
+        userId: m.userId,
+        name: users.find((x) => x.id === m.userId)?.name ?? "?",
+        role: m.role,
+        weekly: u?.weekly ?? 0,
+        total: u?.total ?? 0, // 累計淨消耗——個人預算的分母
+        weeklyOverride: m.weeklyPointsOverride ?? null, // null＝跟組
+        budget: m.budgetPoints ?? null, // null＝不限（未分配個人預算）
+      };
+    });
+    const allocated = rows.reduce((s, r) => s + (r.budget ?? 0), 0); // 已分配給組員的個人預算總和
     return {
       groupQuota: group?.weeklyPointsPerUser ?? null,
       /** 成本審核門檻（需求 2.1）：組長設定 UI 讀這裡 */
       approvalThreshold: group?.approvalThresholdPoints ?? null,
-      rows: usage.map((u) => ({ ...u, name: users.find((x) => x.id === u.userId)?.name ?? "?" })),
+      /** 組預算（累計上限；null＝不限）＋組累計用量＋已分配給組員的總和——分配 UI 的「還剩多少可分」用 */
+      groupBudget: group?.budgetPoints ?? null,
+      groupUsed: await usedByGroup(input.groupId),
+      allocated,
+      rows,
     };
   }),
 

@@ -36,6 +36,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "generation.decideCost": "核決超額生成",
   "quota.updateSettings": "更新點數全域設定",
   "quota.setGroupQuota": "調整組別額度",
+  "quota.setGroupBudget": "分配組別點數預算",
+  "quota.setMemberBudget": "分配組員點數預算",
   "quota.setApprovalThreshold": "調整審批門檻",
   "quota.setMemberOverride": "調整個人額度",
   // 分鏡與審批

@@ -31,6 +31,10 @@ export const groups = pgTable("groups", {
   name: text("name").notNull(),
   /** 每人每週點數上限（null＝用全域預設；0＝不限）——組長/管理員可調 */
   weeklyPointsPerUser: integer("weekly_points_per_user"),
+  /** 組總點數預算（累計上限，非每週重置）：超管/團隊管理員「分配給這個組」的點數池；
+   *  組累計淨消耗達此值即擋下，超管到組到組員形成分配樹。null/0＝不限（只受全域/上層限制）。
+   *  組長/管理員可看、只有團隊管理員以上能調（點數是由上往下分配的）。nullable＝pushSchema 安全 */
+  budgetPoints: integer("budget_points"),
   /** 成本審核門檻（需求 2.1）：組員單筆生成估點 ≥ 此值需組長核准才送出；null/0＝不啟用。組長/管理員可調 */
   approvalThresholdPoints: integer("approval_threshold_points"),
   /** 選項預設是否已 seed 過一次（R23）：seed 一次後即使組長把某類選項清空也不再復活，
@@ -53,6 +57,9 @@ export const groupMembers = pgTable("group_members", {
   role: text("role", { enum: ["leader", "member"] }).notNull().default("member"),
   /** 個人週額度覆寫（null＝跟組；0＝不限）——組長可對個別成員調 */
   weeklyPointsOverride: integer("weekly_points_override"),
+  /** 個人總點數預算（累計上限，非每週重置）：組長從「組預算」再分配給這位組員的點數；
+   *  該組員在本組的累計淨消耗達此值即擋下。null/0＝不限（只受組/全域上限）。組長可調。nullable＝pushSchema 安全 */
+  budgetPoints: integer("budget_points"),
 });
 
 /** 全域點數設定（單列 key='global'）——不寫死在程式，管理員隨時可調 */
