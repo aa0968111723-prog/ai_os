@@ -173,7 +173,7 @@ function PointsBadge({ groupId }: { groupId: string }) {
   );
 }
 
-/** 使用者選單（收斂頂欄）：怎麼用／模型指南／選項／團隊管理／改密碼＋登出，收進單一下拉。
+/** 使用者選單（收斂頂欄）：說明／工作／管理／帳號四組收進單一下拉，管理組僅組長／管理員可見。
  * CSP 下自製（無外部庫）：點外面或 Esc 關閉。 */
 function UserMenu({
   userName, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onLogout, loggingOut,
@@ -201,21 +201,29 @@ function UserMenu({
       </button>
       {open && (
         <div className="menu" role="menu">
-          {/* 分組＋分隔線：說明／工作／帳號——9 項扁平列表太難掃（回饋 W1） */}
+          {/* 分組＋分隔線：說明／工作／管理／帳號——扁平長清單太難掃（回饋 W1）。
+           * 筆記排程／資料庫是高頻入口，已升到頂欄常駐，故不再列進「工作」；
+           * 權限限定的選項／通訊錄／監控／團隊管理獨立成「管理」組，一般組員整段不顯示。 */}
           <div className="menu-label" role="presentation">說明</div>
           <Link href="/help" className="menu-item" role="menuitem" onClick={close}><Icon name="HelpCircle" size={15} />怎麼用</Link>
           <Link href="/models" className="menu-item" role="menuitem" onClick={close}><Icon name="Info" size={15} />模型指南</Link>
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">工作</div>
-          <Link href="/planner" className="menu-item" role="menuitem" onClick={close}><Icon name="Clock" size={15} />筆記排程</Link>
-          <Link href="/databases" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />資料庫</Link>
           <Link href="/mcp" className="menu-item" role="menuitem" onClick={close}><Icon name="Sparkles" size={15} />接上外部 AI</Link>
           <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
-          {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
-          {/* 通訊錄／監控與紀錄：在任一組是組長或管理員都看得到（跨組彙總）；管理員在「團隊管理」也有同幾張卡 */}
-          {canSeeOrg && <Link href="/members" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />通訊錄</Link>}
-          {canSeeOrg && <Link href="/logs" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />監控與紀錄</Link>}
-          {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />團隊管理</Link>}
+          {/* 管理組：只要在任一組是組長或管理員（canSeeOrg）就顯示整段；段內各項再依細權限收放，
+           * 團隊管理限管理員（isAdmin）、選項限作用組組長（activeIsLeader）。canSeeOrg 為兩者的聯集，
+           * 故整段用它當閘門時，段內至少會有通訊錄／監控兩項，不會出現只有標題的空組。 */}
+          {canSeeOrg && (
+            <>
+              <div className="menu-sep" />
+              <div className="menu-label" role="presentation">管理</div>
+              {activeIsLeader && <Link href="/options" className="menu-item" role="menuitem" onClick={close}><Icon name="Ellipsis" size={15} />選項</Link>}
+              <Link href="/members" className="menu-item" role="menuitem" onClick={close}><Icon name="User" size={15} />通訊錄</Link>
+              <Link href="/logs" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />監控與紀錄</Link>
+              {isAdmin && <Link href="/admin" className="menu-item" role="menuitem" onClick={close}><Icon name="SlidersHorizontal" size={15} />團隊管理</Link>}
+            </>
+          )}
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">帳號</div>
           <Link href="/my-reports" className="menu-item" role="menuitem" onClick={close}><Icon name="MessageCircle" size={15} />我的回報</Link>
@@ -292,6 +300,20 @@ export function App() {
           <span className="spacer" />
           {/* 只在 E2E_MOCK=1（自動化測試）下出現；正式部署一律真實模式，不會再看到這顆徽章 */}
           {me.data && info.data?.mockMode && <span className="badge mock">測試模式</span>}
+          {/* 高頻入口常駐頂欄：筆記排程／資料庫是天天用的工具，從使用者選單升上來一鍵可達；
+           * 手機空間吃緊時標籤收成純圖示（topbar-quick-label），title/aria 仍保留 */}
+          {me.data && (
+            <Link href="/planner" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="筆記排程——把筆記排進待辦與行程">
+              <Icon name="Clock" size={14} />
+              <span className="topbar-quick-label">筆記排程</span>
+            </Link>
+          )}
+          {me.data && (
+            <Link href="/databases" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="資料庫——你的素材與資料集">
+              <Icon name="Package" size={14} />
+              <span className="topbar-quick-label">資料庫</span>
+            </Link>
+          )}
           {/* 常駐「怎麼用」入口：困惑當下一眼找得到說明，不必想到去點自己的名字（UX 中：可發現性） */}
           {me.data && (
             <Link href="/help" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="怎麼用——白話說明與常見問題">
@@ -301,7 +323,7 @@ export function App() {
           )}
           {me.data && <PendingBadge groupId={activeGroupId} />}
           {me.data && <PointsBadge groupId={activeGroupId} />}
-          {/* 頂欄收斂：次要入口（怎麼用/模型指南/選項/團隊管理/改密碼）＋登出全收進使用者選單 */}
+          {/* 頂欄收斂：次要入口（模型指南/接上外部 AI/資料下載/管理組/改密碼）＋登出全收進使用者選單 */}
           {me.data && (
             <UserMenu
               userName={me.data.user.name}
