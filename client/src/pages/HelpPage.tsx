@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import { Link } from "wouter";
 import { Icon } from "../components/Icon";
+import { McpTokensCard } from "../components/McpTokensCard";
 
 /**
  * 怎麼用 / 常見問題：純靜態白話說明頁（無資料查詢、無新依賴）。
@@ -158,6 +159,20 @@ export function HelpPage() {
           </p>
           <p style={{ margin: 0 }}>媒體檔直接拖進剪映或 Premiere，照鏡號順序組裝，就能對齊畫面、旁白與字幕。</p>
         </Faq>
+      </div>
+
+      <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Sparkles" size={18} />接上外部 AI（進階）</h2>
+      <div className="stack">
+        <Faq q="想讓 Claude 等外部 AI 直接操作我的專案？">
+          <p style={{ marginTop: 0 }}>
+            系統提供 <b>MCP</b>（Model Context Protocol）介面，讓外部 AI 客戶端連進來，
+            替你查專案、挑模型、送生成、貼留言。關鍵是：
+            <b>連進來的身分就是「你」</b>——只碰得到你有份的組與專案，扣的是你的點數額度，
+            一樣受審批門檻限制。每個人用<b>自己的金鑰</b>，不共用、可隨時撤銷。
+          </p>
+          <p style={{ margin: 0 }}>在下方卡片建立你的金鑰，複製到 AI 客戶端的 MCP 設定即可（帶 HTTP 標頭 <code>x-api-key</code>）。</p>
+        </Faq>
+        <McpTokensCard />
       </div>
 
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="FileText" size={18} />名詞小辭典</h2>

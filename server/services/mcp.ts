@@ -1,20 +1,24 @@
 /**
- * MCP 伺服器介面（4-1 架構定案）：讓外部 AI 客戶端（如 Claude）直接操作系統。
- * - 極簡 Streamable HTTP（無狀態 JSON-RPC POST）；設 MCP_API_KEY 才啟用。
- * - 以超管身分執行（金鑰即權限）；工具：list_projects / get_project_context / submit_generation / post_message
+ * MCP 伺服器介面（per-user 權限定案）：讓外部 AI 客戶端（如 Claude）直接操作系統。
+ * - 極簡 Streamable HTTP（無狀態 JSON-RPC POST）。
+ * - 身分＝金鑰擁有者：每位夥伴帶「自己的」個人金鑰連進來，工具一律以其真實身分與權限執行——
+ *   組隔離（requireGroup）、專案 ACL（assertProjectEditable）、點數額度與成本核准門檻，
+ *   全部沿用網頁端同一套守衛（submit_generation 直接重用 submitGenerationCore）。
+ * - 舊有共用金鑰 env MCP_API_KEY 仍可用（對應超管），僅為向後相容；見 services/mcpAuth。
+ * - 工具：list_projects / get_project_context / find_model / submit_generation / post_message
  */
 import type { Request, Response } from "express";
-import { timingSafeEqual } from "node:crypto";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
-import { getModel, endpointOf, MODELS, CATEGORIES, tierLabel, type ProjectFormat, type ModelCategory, type ModelTier } from "../../shared/models";
-import { falSubmit } from "./fal";
-import { reserveQuota, refund } from "./points";
+import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
 import { sanitizeAuditInput } from "./audit";
-// 重用網頁端的注入判斷（generation.ts 不 import 本檔，無循環相依）：
-// TTS 會把注入文字唸進成品、轉錄/視覺工具會被污染輸入，不能無條件注入世界觀
-import { effectivePrompt } from "../routers/generation";
+import { submitGenerationCore } from "./generationCore";
+import { assertProjectEditable } from "./projectAcl";
+import { requireGroup } from "../trpc";
+import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity } from "./mcpAuth";
+import type { AuthState } from "./auth";
 
 const PROTOCOL_VERSION = "2024-11-05";
 
@@ -63,9 +67,9 @@ const TOOLS = [
 ];
 
 /**
- * MCP 工具呼叫審計（需求 2.2）：MCP 是全站權限最高的介面（單一金鑰＝超管），過去完全繞過
- * trpc.ts 的 mutation 審計中介層——跨組花點、貼留言零軌跡。這裡比照 recordAudit：
- * fire-and-forget、輸入脫敏、成功失敗都記；groupId/projectId 盡力從 args.projectId 反查。
+ * MCP 工具呼叫審計（需求 2.2）：MCP 繞過 trpc.ts 的 mutation 審計中介層，這裡自行比照 recordAudit：
+ * fire-and-forget、輸入脫敏、成功失敗都記；actorId＝金鑰擁有者本人（per-user 後可追到是誰、非籠統超管）；
+ * groupId/projectId 盡力從 args.projectId 反查。
  */
 function recordMcpAudit(
   actorId: string,
@@ -94,24 +98,31 @@ function recordMcpAudit(
   })().catch((err) => console.warn("[mcp] 審計寫入失敗（不影響主流程）：", err instanceof Error ? err.message : err));
 }
 
-async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-  const [admin] = await db.select().from(schema.users).where(eq(schema.users.isSuperAdmin, true)).limit(1);
-  if (!admin) throw new Error("系統尚未初始化");
+async function callTool(auth: AuthState, name: string, args: Record<string, unknown>): Promise<unknown> {
   // 每次工具呼叫（含失敗）都落審計——與 tRPC mutation 同一口徑；讀寫工具一律記（MCP 量小、
-  // 但每筆都是超管級跨組操作，可追溯性優先於「query 不記」的省量取捨）
+  // 每筆都是跨介面操作，可追溯性優先於「query 不記」的省量取捨）。actorId＝金鑰擁有者本人。
   try {
-    const result = await runTool(admin, name, args);
-    recordMcpAudit(admin.id, name, args, { ok: true });
+    const result = await runTool(auth, name, args);
+    recordMcpAudit(auth.user.id, name, args, { ok: true });
     return result;
   } catch (err) {
-    recordMcpAudit(admin.id, name, args, { ok: false, error: err instanceof Error ? err.message : String(err) });
+    recordMcpAudit(auth.user.id, name, args, { ok: false, error: err instanceof Error ? err.message : String(err) });
     throw err;
   }
 }
 
-async function runTool(admin: typeof schema.users.$inferSelect, name: string, args: Record<string, unknown>): Promise<unknown> {
+async function runTool(auth: AuthState, name: string, args: Record<string, unknown>): Promise<unknown> {
   if (name === "list_projects") {
-    const rows = await db.select().from(schema.projects).orderBy(desc(schema.projects.updatedAt)).limit(50);
+    // per-user 隔離：只列此人有權存取的組（直接組員＋團隊管理展開＋超管展開全部，見 loadAuthState）。
+    // 無任何組＝回空陣列（不外洩他組專案標題）。
+    const groupIds = auth.groups.map((g) => g.groupId);
+    if (groupIds.length === 0) return [];
+    const rows = await db
+      .select()
+      .from(schema.projects)
+      .where(inArray(schema.projects.groupId, groupIds))
+      .orderBy(desc(schema.projects.updatedAt))
+      .limit(50);
     return rows.map((p) => ({ id: p.id, title: p.title, kind: p.kind, format: p.format, status: p.status }));
   }
 
@@ -139,11 +150,11 @@ async function runTool(admin: typeof schema.users.$inferSelect, name: string, ar
   const projectId = String(args.projectId ?? "");
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new Error("找不到專案");
-  // MCP 的專案 ACL（最小集）：MCP 以超管執行、無使用者級角色可查，但「寫入／扣點」不該落在
-  // 已封存的專案上——外部 AI 客戶端拿舊 projectId 對封存案生成，會造成擁有者以為停用卻持續扣點
-  if (project.status === "archived" && (name === "submit_generation" || name === "post_message")) {
-    throw new Error("此專案已封存——請先在網頁端還原專案，或改用其他專案");
-  }
+  // per-user 組隔離：不屬於此專案的組直接擋（requireGroup 拋 FORBIDDEN，被 callTool 落審計後回 JSON-RPC error）
+  requireGroup(auth, project.groupId);
+  // 封存專案守衛（寫入類工具才擋，讀取放行）——見 archivedWriteReason
+  const archived = archivedWriteReason(name, project.status);
+  if (archived) throw new Error(archived);
 
   if (name === "get_project_context") {
     const wv = worldviewSchema.parse(project.worldview ?? {});
@@ -152,62 +163,44 @@ async function runTool(admin: typeof schema.users.$inferSelect, name: string, ar
   }
 
   if (name === "submit_generation") {
-    const model = getModel(String(args.modelId ?? ""));
-    if (!model) throw new Error("未知模型(先用 find_model 查詢)");
-    const sourceUrl = args.source_url ? String(args.source_url) : undefined;
-    if (model.needs && !sourceUrl) throw new Error(`此模型需要 source_url:${model.sourceHint ?? model.needs}`);
-    const wv = worldviewSchema.parse(project.worldview ?? {});
     const userPrompt = String(args.prompt ?? "").trim();
     if (!userPrompt) throw new Error("prompt 不可為空");
-    // 與網頁端同一份判斷：僅適合的類別才注入世界觀（且注入內容含 styles/message，兩端一致）
-    const prompt = effectivePrompt(model, userPrompt, wv);
-    const falInput = model.input(prompt, project.format as ProjectFormat, sourceUrl);
-    const [gen] = await db
-      .insert(schema.generations)
-      .values({ projectId: project.id, groupId: project.groupId, userId: admin.id, modelId: model.id, kind: model.kind, prompt: userPrompt, sourceUrl, params: falInput, pointsEst: model.points })
-      .returning();
-    // 與網頁端一致：原子守門＋扣點（舊版直接扣、完全不檢查額度，MCP 可無限刷爆總預算）
-    // 拋例外也要刪孤兒列（否則被陳屍清掃憑空退點）——與網頁端同一防護
-    let quotaError: string | null;
-    try {
-      quotaError = await reserveQuota(admin.id, project.groupId, model.points, `MCP 生成 ${model.label}`, gen.id);
-    } catch (err) {
-      await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
-      throw new Error(`系統忙碌，請稍後再試（未扣點）：${err instanceof Error ? err.message : String(err)}`);
+    const sourceUrl = args.source_url ? String(args.source_url) : undefined;
+    // 重用網頁端同一條核心：世界觀注入、原子守門扣點、fal 送出/失敗退點，且透過 assertAccess
+    // 疊上「專案級 ACL（檢視者不能生成）」與「成本核准門檻（組員達門檻先送審）」——與網頁端行為一致。
+    // userId＝金鑰擁有者本人：扣他的額度、走他的核准門檻、審計記他，真正做到「依自己權限」。
+    const gen = await submitGenerationCore({
+      userId: auth.user.id,
+      projectId: project.id,
+      modelId: String(args.modelId ?? ""),
+      prompt: userPrompt,
+      sourceUrl,
+      reasonPrefix: "MCP 生成",
+      assertAccess: async (proj) => {
+        const role = requireGroup(auth, proj.groupId);
+        await assertProjectEditable(auth, proj); // 檢視者（唯讀）不能生成
+        return role; // 回角色供成本核准門檻判斷組員
+      },
+    });
+    // 待核准（達門檻的組員）與已送出兩種終局都據實回報，讓外部客戶端知道要等組長核准
+    if (gen.status === "awaiting_approval") {
+      return { generationId: gen.id, status: "awaiting_approval", points: gen.pointsEst, note: "已達成本門檻，等組長核准後才會送出扣點" };
     }
-    if (quotaError) {
-      await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
-      throw new Error(quotaError);
-    }
-    try {
-      const { requestId } = await falSubmit(endpointOf(model), model.kind, falInput);
-      await db.update(schema.generations).set({ requestId, status: "running" }).where(eq(schema.generations.id, gen.id));
-      return { generationId: gen.id, status: "running", points: model.points };
-    } catch (err) {
-      // fal 送出失敗：退點＋標記失敗（舊版吞掉例外還回報 running，永遠卡在假的進行中）
-      await refund(admin.id, project.groupId, model.points, "MCP 生成送出失敗退回", gen.id);
-      await db.update(schema.generations).set({ status: "failed", error: String(err), pointsRefunded: model.points }).where(eq(schema.generations.id, gen.id));
-      throw new Error(`生成送出失敗，點數已退回：${err instanceof Error ? err.message : String(err)}`);
-    }
+    return { generationId: gen.id, status: gen.status, points: gen.pointsEst };
   }
 
   if (name === "post_message") {
+    // 留言不受專案級 ACL 限制（檢視者也可留言，與網頁端一致）——組隔離已於上方 requireGroup 把關。
+    const body = String(args.body ?? "").trim();
+    if (!body) throw new Error("body 不可為空");
     const [msg] = await db
       .insert(schema.messages)
-      .values({ groupId: project.groupId, projectId: project.id, userId: admin.id, kind: "text", body: String(args.body ?? "") })
+      .values({ groupId: project.groupId, projectId: project.id, userId: auth.user.id, kind: "text", body })
       .returning();
     return { messageId: msg.id };
   }
 
   throw new Error(`未知工具：${name}`);
-}
-
-/** 金鑰比對用固定時間演算法：先等長檢查（timingSafeEqual 要求等長），避免以耗時差回推金鑰（#10） */
-function keyEquals(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
 }
 
 // 金鑰失敗速率限制（記憶體計數，比照系統其他記憶體防線）：每 IP 每分鐘失敗達門檻即封鎖一段時間，
@@ -244,9 +237,9 @@ function mcpRecordFailure(ip: string): void {
 
 /** JSON-RPC 處理器（掛在 POST /api/mcp） */
 export async function handleMcp(req: Request, res: Response): Promise<void> {
-  const apiKey = process.env.MCP_API_KEY;
-  if (!apiKey) {
-    res.status(404).json({ error: "MCP 未啟用（設 MCP_API_KEY 環境變數即開）" });
+  // 未啟用＝沒設 env 共用金鑰、也沒任何個人金鑰：回 404 不對外張揚端點（行為同舊版）
+  if (!(await isMcpEnabled())) {
+    res.status(404).json({ error: "MCP 未啟用（在「怎麼用」頁建立個人連線金鑰，或設 MCP_API_KEY 環境變數）" });
     return;
   }
   const ip = mcpClientIp(req);
@@ -254,13 +247,16 @@ export async function handleMcp(req: Request, res: Response): Promise<void> {
     res.status(429).json({ error: "嘗試過於頻繁，請稍後再試" });
     return;
   }
+  // 身分解析：個人金鑰→該使用者；env 共用金鑰→超管；皆不符→401（記一次失敗，擋暴力猜）
   const provided = req.headers["x-api-key"];
-  if (typeof provided !== "string" || !keyEquals(provided, apiKey)) {
+  const identity = typeof provided === "string" && provided.length > 0 ? await resolveMcpIdentity(provided) : null;
+  if (!identity) {
     mcpRecordFailure(ip);
-    res.status(401).json({ error: "MCP 金鑰不正確" });
+    res.status(401).json({ error: "MCP 金鑰不正確或已撤銷" });
     return;
   }
   mcpFails.delete(ip); // 驗證成功即清除該 IP 的失敗計數
+  const auth = identity.auth;
   const body = req.body as { jsonrpc?: string; id?: number | string | null; method?: string; params?: Record<string, unknown> };
   const reply = (result: unknown): void => void res.json({ jsonrpc: "2.0", id: body.id ?? null, result });
   const fail = (code: number, message: string): void => void res.json({ jsonrpc: "2.0", id: body.id ?? null, error: { code, message } });
@@ -278,13 +274,15 @@ export async function handleMcp(req: Request, res: Response): Promise<void> {
         return reply({ tools: TOOLS });
       case "tools/call": {
         const { name, arguments: args } = (body.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
-        const result = await callTool(String(name), args ?? {});
+        const result = await callTool(auth, String(name), args ?? {});
         return reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
       }
       default:
         return fail(-32601, `不支援的方法：${body.method}`);
     }
   } catch (err) {
+    // requireGroup/assertProjectEditable 拋的是 TRPCError；對外一律折成 JSON-RPC error 的人話訊息
+    if (err instanceof TRPCError) return fail(-32000, err.message);
     return fail(-32000, err instanceof Error ? err.message : String(err));
   }
 }
