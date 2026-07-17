@@ -5,7 +5,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
 import { isMockMode } from "../services/fal";
-import { nimComplete } from "../services/nvidia-nim";
+import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable } from "../services/projectAcl";
@@ -34,8 +34,9 @@ const suggestionSchema = z
   .array(z.object({ title: z.string().min(1).max(100), prompt: z.string().min(1).max(2000) }))
   .min(1);
 
-/** 真模式每次建議固定入帳 1 點：付費 LLM 呼叫不能是不入帳、不受總預算守門的免費後門 */
-const DIRECTOR_COST_POINTS = 1;
+/** 導演建議／拆分鏡 0 點（NVIDIA NIM 免費額度——LLM 文字呼叫不收費）。
+ *  reserveQuota/refund 對 0 點直接放行，保留呼叫佈線讓未來調價只改這個常數。 */
+const DIRECTOR_COST_POINTS = 0;
 
 // 記憶體節流：每使用者每分鐘最多 6 次——擋連點/腳本狂刷付費 LLM。
 // 單容器部署，程序內 Map 即足夠；重啟歸零無妨（額度守門仍由 reserveQuota 兜底）。
@@ -158,14 +159,15 @@ ${script.slice(0, 12_000)}
     const parsed = match ? sceneSplitSchema.safeParse(JSON.parse(match[0])) : null;
     if (!parsed?.success) {
       // LLM 已計費故不退點，但無法解析就不建垃圾分鏡——回明確錯誤讓使用者重試
-      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AI 回傳無法解析，請再試一次（點數已計）" });
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AI 回傳無法解析，請再試一次" });
     }
     const rows = await createScenes(parsed.data);
     return { scenes: rows, count: rows.length, mock: false };
   } catch (err) {
     if (err instanceof TRPCError) throw err;
     await refund(input.userId, project.groupId, DIRECTOR_COST_POINTS, "AI 拆分鏡失敗退回");
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "拆分鏡失敗，點數已退回，請重試" });
+    if (err instanceof NimServiceError) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "拆分鏡失敗，請重試" });
   }
 }
 
@@ -214,10 +216,14 @@ export const directorRouter = router({
       // 形狀不符：LLM 已實際計費故不退點，但回固定格式的本地建議並標記 mock，前端不會拿到壞資料
       if (!parsed?.success) return { suggestions: mockSuggestions(wv, project.kind), mock: true, fallback: true, usedKnowledge: !!knowledge };
       return { suggestions: parsed.data.slice(0, 3), mock: false, fallback: false, usedKnowledge: !!knowledge };
-    } catch {
-      // LLM 呼叫失敗（HTTP 錯誤/逾時/回傳非 JSON）：退點且不擋創作，退回本地建議
+    } catch (err) {
+      // LLM 呼叫失敗（HTTP 錯誤/逾時/回傳非 JSON）：退點且不擋創作，退回本地建議；
+      // NIM 限制錯誤（流量上限/點數用盡）把人話原因帶給前端，使用者才知道怎麼辦
       await refund(ctx.auth.user.id, project.groupId, DIRECTOR_COST_POINTS, "AI 導演建議失敗退回");
-      return { suggestions: mockSuggestions(wv, project.kind), mock: true, fallback: true, usedKnowledge: !!knowledge };
+      return {
+        suggestions: mockSuggestions(wv, project.kind), mock: true, fallback: true, usedKnowledge: !!knowledge,
+        limitNotice: err instanceof NimServiceError ? err.message : undefined,
+      };
     }
   }),
 

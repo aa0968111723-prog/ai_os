@@ -4,7 +4,7 @@ import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
 
 /**
- * AI 代理卡（代理系統前端）：一句目標 → 規劃（1 點）→ 計畫預覽（每步＋估點總額）→
+ * AI 代理卡（代理系統前端）：一句目標 → 規劃（NIM 免費）→ 計畫預覽（每步＋估點總額）→
  * 核准執行 → 伺服器背景逐步跑（關頁不中斷）→ 即時進度／可停止。
  * 通則不變：規劃前先看價、核准才開始花執行點數、每步實際扣點走各自守門（超額仍會停下等組長核准）。
  */
@@ -112,7 +112,7 @@ export function AgentCard({ projectId, canEdit }: { projectId: string; canEdit: 
         <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 代理（給我一個目標，我來排計畫執行）
       </h2>
       <p className="hint" style={{ marginTop: -4 }}>
-        用一句話說目標（例：「把腳本拆成分鏡並逐鏡出圖」）——我會讀世界觀＋知識庫排出<b>逐步計畫與估點</b>，
+        用一句話說目標（例：「把腳本拆成分鏡並逐鏡出圖」）——我會讀世界觀＋知識庫排出<b>逐步計畫與估點</b>（規劃免費），
         你<b>核准後</b>才開始執行；由伺服器背景逐步跑，關掉頁面也會繼續，隨時可停止。每步實際扣點走既有守門，超額仍會停下等組長核准。
       </p>
 
@@ -138,11 +138,11 @@ export function AgentCard({ projectId, canEdit }: { projectId: string; canEdit: 
             <ConfirmButton
               triggerClassName="primary"
               disabled={goal.trim().length < 5 || plan.isPending}
-              message="會請 AI 代理讀世界觀＋知識庫排一份逐步計畫（約扣 1 點）；計畫只規劃不執行，執行前還會再讓你看估點核准。"
+              message="會請 AI 代理讀世界觀＋知識庫排一份逐步計畫——NIM 免費額度，不扣點；計畫只規劃不執行，執行前還會再讓你看估點核准。"
               confirmLabel="開始規劃"
               onConfirm={() => plan.mutate({ projectId, goal: goal.trim() })}
             >
-              {plan.isPending ? "代理規劃中…" : "規劃計畫（約 1 點）"}
+              {plan.isPending ? "代理規劃中…" : "規劃計畫（免費）"}
             </ConfirmButton>
             {!plan.isPending && goal.trim().length > 0 && goal.trim().length < 5 && <span className="hint">目標至少 5 個字</span>}
           </div>

@@ -74,7 +74,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
         <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 專案助手
       </h2>
       <p className="hint" style={{ marginTop: -4 }}>
-        問我這個專案的進度、生成了什麼、哪些分鏡還沒審、<b>該用哪個模型</b>…；回答前我會視需要查素材庫／分鏡／生成紀錄／模型目錄（唯讀，自動進行）。我也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流／貼腳本拆分鏡），你按確認才執行。每次提問約 1 點。
+        問我這個專案的進度、生成了什麼、哪些分鏡還沒審、<b>該用哪個模型</b>…；回答前我會視需要查素材庫／分鏡／生成紀錄／模型目錄（唯讀，自動進行）。我也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流／貼腳本拆分鏡），你按確認才執行。提問由 NVIDIA NIM 免費額度驅動，不扣點。
       </p>
 
       {/* 快速提問（深度優化）：冷啟動不用想怎麼開口——點一顆帶入輸入框，按「問」才送出扣點 */}
@@ -90,7 +90,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
               key={q}
               type="button"
               className="btn-sm"
-              title="點了帶入輸入框，按「問」才送出（約 1 點）"
+              title="點了帶入輸入框，按「問」才送出（免費）"
               onClick={() => setInput(q)}
             >
               {q}
@@ -154,7 +154,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
                             : act.type === "run_workflow"
                               ? `執行「${act.label}」？各步驟會分別扣點。`
                               : act.type === "split_script"
-                                ? `執行「${act.label}」？會呼叫 AI 導演拆分鏡並扣點。`
+                                ? `執行「${act.label}」？會呼叫 AI 導演拆分鏡（免費）。`
                                 : `執行「${act.label}」？`
                         }
                         confirmLabel="執行"

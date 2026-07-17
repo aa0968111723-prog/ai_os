@@ -6,7 +6,7 @@ import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { getModel } from "../../shared/models";
 import { isMockMode } from "../services/fal";
-import { nimComplete } from "../services/nvidia-nim";
+import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { assertProjectEditable } from "../services/projectAcl";
 import { buildKnowledgeContext } from "./knowledge";
@@ -22,8 +22,8 @@ import { AGENT_TTS_MODEL, type AgentStep } from "../services/agentRunner";
  * - LLM 只輸出代號（modelId／sceneNo），落地前全部過白名單／範圍校驗，防幻覺 id。
  */
 
-/** 規劃固定 1 點（單次 LLM 呼叫；執行期各步驟另計、走各自守門） */
-const PLAN_COST_POINTS = 1;
+/** 規劃 0 點（NVIDIA NIM 免費額度——LLM 文字呼叫不收費）；執行期生成步驟另計、走各自守門 */
+const PLAN_COST_POINTS = 0;
 /** 注入規劃提示詞的知識庫預算：夠 LLM 判斷「有沒有腳本可拆」與題材，不必全文 */
 const PLAN_KNOWLEDGE_BUDGET = 6000;
 /** 單一計畫的步驟上限（防 LLM 排出巨額計畫；同時是估點總額的天然上限） */
@@ -82,7 +82,7 @@ function resolvePlan(parsed: z.infer<typeof planSchema>): { steps: AgentStep[]; 
         note: s.note?.trim() || (s.script ? "把貼上的腳本拆成分鏡草稿" : "把知識庫的腳本拆成分鏡草稿"),
         status: "pending",
         script: s.script,
-        points: 1, // splitScriptCore 內部扣的 LLM 點數
+        points: 0, // 拆分鏡是 NIM LLM 呼叫——免費
       };
     }
     if (s.kind === "create_scene") {
@@ -225,7 +225,7 @@ export const agentsRouter = router({
 規則：
 1. sceneNo 是「執行當下」的分鏡順序編號（1 起算）——split_script 拆出的新分鏡會接在現有 ${scenes.length} 格之後，之後的步驟可以引用這些新編號。
 2. modelId 只能抄 <可用模型速查> 的 id；不確定就省略（用預設圖像模型）。優先用經濟/最低成本檔位，除非目標明說要高品質。
-3. 步驟少而精（最多 ${MAX_PLAN_STEPS} 步），只排達成目標必要的步驟；每一步都會花使用者的點數，不要排「順便」的步驟。
+3. 步驟少而精（最多 ${MAX_PLAN_STEPS} 步），只排達成目標必要的步驟；生成類步驟會花使用者的點數，不要排「順便」的步驟。
 4. 目標無法用上述步驟達成（例如要剪片、要上傳檔案）時，summary 誠實說明做不到的部分，steps 只排做得到的。
 5. 只回 JSON：{"summary":"計畫一句話說明（含達成路徑與注意事項）","steps":[...]}
 <可用模型速查>
@@ -267,7 +267,9 @@ ${knowledgeCtx ? `<專案知識庫節錄>\n${knowledgeCtx}\n</專案知識庫節
       } catch (err) {
         if (err instanceof TRPCError) throw err;
         await refund(ctx.auth.user.id, project.groupId, PLAN_COST_POINTS, "AI 代理規劃失敗退回");
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AI 代理暫時沒回應，請稍後再試（點數已退回）" });
+        // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
+        if (err instanceof NimServiceError) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AI 代理暫時沒回應，請稍後再試" });
       }
     }),
 

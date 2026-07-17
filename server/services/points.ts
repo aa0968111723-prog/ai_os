@@ -201,6 +201,9 @@ export async function reserveQuota(
   reason: string,
   generationId?: string,
 ): Promise<string | null> {
+  // 0 點＝免費呼叫（NVIDIA NIM 免費額度的 LLM 類）：直接放行——
+  // 不寫 0 元帳本列（雜訊）、不進交易搶 advisory lock（省鎖競爭）、不受額度守門（免費不佔額度）
+  if (points <= 0) return null;
   // 關鍵：設定與額度「先在交易外」讀好——交易內不可再向連線池借第二條連線，
   // 否則交易已佔一條連線＋持有序列化鎖時再借連線，併發滿池會整池死鎖（需重啟才復原）。
   // 這兩者是穩定的組態/成員資料，非 TOCTOU 競態目標；真正要原子的只有「帳本 SUM＋扣點列」。
@@ -281,6 +284,8 @@ export async function reserveQuota(
 }
 
 export async function refund(userId: string, groupId: string, points: number, reason: string, generationId?: string): Promise<void> {
+  // 0 點免費呼叫本來就沒扣過（reserveQuota 直接放行），沒東西可退——直接返回，不寫 0 元帳本列
+  if (points <= 0) return;
   // 退點是「已扣款」後的補償：一旦寫入失敗點數即永久蒸發，故包交易＋重試 3 次。
   // 最終仍失敗只印 CRITICAL 供人工對帳補點、不往外拋——呼叫端多在失敗收尾路徑，
   // 再拋錯會蓋掉原始錯誤且無法自動補救。

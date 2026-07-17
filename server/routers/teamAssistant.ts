@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { isMockMode } from "../services/fal";
-import { nimComplete } from "../services/nvidia-nim";
+import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 
 /**
@@ -13,8 +13,8 @@ import { reserveQuota, refund } from "../services/points";
  * 只回答，不下放任何跨專案的執行動作（單一專案內的動作走既有 assistant.runAction）。
  */
 
-/** 問答固定 1 點（付費 LLM 呼叫）——與單專案助手同價 */
-const ASK_COST_POINTS = 1;
+/** 問答 0 點（NVIDIA NIM 免費額度）——與單專案助手同價；佈線保留供未來調價 */
+const ASK_COST_POINTS = 0;
 /** 上下文最多列幾個專案：夠組長看全貌，又不會把提示詞灌爆（超過的在上下文註明「另有 N 案未列」） */
 const PROJECT_LIMIT = 15;
 
@@ -168,9 +168,10 @@ ${context}
       try {
         const answer = (await nimComplete(sys, { timeoutMs: 60_000 })).trim().slice(0, 4000) || "我不太確定，可以換個問法再問一次。";
         return { answer, mock: false };
-      } catch {
+      } catch (err) {
         await refund(ctx.auth.user.id, input.groupId, ASK_COST_POINTS, "團隊彙總助手失敗退回");
-        return { answer: "AI 彙總助手暫時沒回應，請稍後再問一次（點數已退回）。", mock: false };
+        // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
+        return { answer: err instanceof NimServiceError ? err.message : "AI 彙總助手暫時沒回應，請稍後再問一次。", mock: false };
       }
     }),
 });

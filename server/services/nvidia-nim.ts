@@ -54,10 +54,22 @@ export interface ChatCompletionResponse {
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 }
 
+/**
+ * NIM 服務限制錯誤（人話版）：免費層有「試用點數（約 1,000 次呼叫）」與「每分鐘約 40 次」兩種上限，
+ * 打到上限時使用者該看到具體原因與解法，而不是通用的「暫時沒回應」。
+ * 呼叫端 catch 時以 instanceof 判斷：是這個類別就把 message 原樣顯示給使用者。
+ */
+export class NimServiceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NimServiceError";
+  }
+}
+
 /** 呼叫 NVIDIA NIM Chat API(OpenAI 相容);金鑰未設或 HTTP 錯誤一律拋例外,由呼叫端退點 */
 export async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompletionResponse> {
   if (!NVIDIA_NIM_API_KEY) {
-    throw new Error("NVIDIA_NIM_API_KEY 未設定");
+    throw new NimServiceError("AI 文字服務尚未設定金鑰——請管理員到 build.nvidia.com 申請（免費）並設定 NVIDIA_NIM_API_KEY");
   }
   const res = await proxyFetch(`${NVIDIA_NIM_ENDPOINT}/chat/completions`, {
     method: "POST",
@@ -72,6 +84,13 @@ export async function chatCompletion(options: ChatCompletionOptions): Promise<Ch
   });
   if (!res.ok) {
     const error = await res.text();
+    // NIM 免費層的兩種上限＋金鑰問題轉人話（讓使用者/管理員知道怎麼辦）；其他錯誤保留原文供除錯
+    if (res.status === 429) {
+      throw new NimServiceError("AI 文字服務流量達上限（NIM 免費層約每分鐘 40 次）——等一分鐘再試；常態壅塞請管理員向 NVIDIA 申請提高流量");
+    }
+    if (res.status === 401 || res.status === 402 || res.status === 403) {
+      throw new NimServiceError("NIM 金鑰無效或免費試用點數已用完——請管理員到 build.nvidia.com 檢查帳號點數、換新金鑰，或申請加值");
+    }
     throw new Error(`NVIDIA NIM API 錯誤 (${res.status}): ${error.slice(0, 300)}`);
   }
   return (await res.json()) as ChatCompletionResponse;

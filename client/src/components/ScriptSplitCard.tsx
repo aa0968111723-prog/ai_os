@@ -36,14 +36,14 @@ export function ScriptSplitCard({ projectId }: { projectId: string }) {
             <ConfirmButton
               triggerClassName="primary"
               disabled={split.isPending}
-              message={`會請 AI 導演把${script.trim() ? "貼上的腳本" : "知識庫裡的腳本／開示稿"}切成分鏡草稿，約扣 1 點。`}
+              message={`會請 AI 導演把${script.trim() ? "貼上的腳本" : "知識庫裡的腳本／開示稿"}切成分鏡草稿——NIM 免費額度，不扣點。`}
               confirmLabel="開始拆分"
               onConfirm={() => split.mutate({ projectId, scriptText: script.trim() || undefined })}
             >
               {split.isPending ? "拆分中…" : "拆成分鏡"}
             </ConfirmButton>
             <button onClick={() => setOpen(false)}>取消</button>
-            <span className="hint">每次約 1 點；下方「分鏡・交付」會出現草稿分鏡</span>
+            <span className="hint">免費（NVIDIA NIM）；下方「分鏡・交付」會出現草稿分鏡</span>
           </div>
         </>
       ) : (

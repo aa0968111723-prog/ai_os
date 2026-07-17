@@ -128,6 +128,26 @@ export function HelpPage() {
             <li>金鑰狀態可由管理員在「團隊管理→跑系統自檢」的「生成模式」項目確認。</li>
           </ul>
         </Faq>
+
+        <Faq q="AI 文字功能為什麼免費？有什麼限制？">
+          <ul style={{ margin: 0, paddingLeft: 22 }}>
+            <li>
+              <b>AI 助手、AI 導演、AI 拆分鏡、AI 代理規劃、團隊彙總、留言 @助手</b>走 NVIDIA NIM 的免費開發者方案，
+              <b>不扣站內點數</b>；圖片／影片／音訊生成仍走付費供應商、照模型標示扣點。
+            </li>
+            <li>
+              NIM 免費方案的限制：<b>試用點數制</b>（註冊約 1,000 次呼叫，商用信箱可申請至 5,000 次）、
+              流量約<b>每分鐘 40 次</b>（全站共用一把金鑰），且屬評估用途、無正式服務保證。
+            </li>
+            <li>
+              打到限制時畫面會直接告訴你原因：「流量達上限」等一分鐘就好；「試用點數用完」請管理員到
+              build.nvidia.com 檢查帳號、換新金鑰或申請加值——不影響圖片／影片生成與已有的成品。
+            </li>
+            <li className="hint" style={{ fontSize: 12 }}>
+              提醒：這些功能會把世界觀與知識庫節錄送到 NVIDIA 雲端運算——請避免在知識庫放不宜外流的個資。
+            </li>
+          </ul>
+        </Faq>
       </div>
 
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Package" size={18} />交付</h2>

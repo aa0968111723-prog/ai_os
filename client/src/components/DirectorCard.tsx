@@ -34,13 +34,13 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
         <ConfirmButton
           triggerClassName="primary"
           disabled={suggest.isPending}
-          message="會請 AI 導演讀世界觀＋知識庫給 3 個分鏡 idea，約扣 1 點。"
+          message="會請 AI 導演讀世界觀＋知識庫給 3 個分鏡 idea——NIM 免費額度，不扣點。"
           confirmLabel="開始發想"
           onConfirm={() => { setSavedIdx(new Set()); suggest.mutate({ projectId }); }}
         >
           {suggest.isPending ? "導演思考中…" : "給我 3 個分鏡 idea"}
         </ConfirmButton>
-        <span className="hint">每次約 1 點</span>
+        <span className="hint">免費（NVIDIA NIM）</span>
       </div>
       {suggest.error && <p className="error">{suggest.error.message}</p>}
       {suggest.data && (
@@ -50,7 +50,11 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
             {suggest.data.mock ? "・測試模式建議" : ""}
           </p>
           {suggest.data.fallback && (
-            <p className="hint" style={{ fontSize: 12 }}>（AI 暫時沒回應，以下是通用建議）</p>
+            <p className="hint" style={{ fontSize: 12 }}>
+              {("limitNotice" in suggest.data && suggest.data.limitNotice)
+                ? `（${suggest.data.limitNotice}——以下是通用建議）`
+                : "（AI 暫時沒回應，以下是通用建議）"}
+            </p>
           )}
           {suggest.data.suggestions.map((s, i) => {
             const saved = savedIdx.has(i);
