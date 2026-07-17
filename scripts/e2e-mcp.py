@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-端到端測試（MCP 專區）：對真跑的伺服器逐一驗證全部 23 個 MCP 工具，以及每一道守門——
+端到端測試（MCP 專區）：對真跑的伺服器逐一驗證全部 25 個 MCP 工具，以及每一道守門——
 唯讀範圍（擋所有寫入、放行所有讀取）、到期／撤銷／壞金鑰一律 401、跨組隔離（別人的金鑰
 碰不到你的專案）、封存專案寫入守衛、資料庫 AI 存取等級（none/read）閘門、跨介面審計歸屬。
 
@@ -77,6 +77,8 @@ T_B = next(g["teamId"] for g in au["groups"] if g["groupName"] == "動畫組")
 proj = admin.call("projects.create", {"groupId": G_A, "title": "MCP 完整測試片", "kind": "故事", "platform": "shorts"})
 PID = proj["id"]
 admin.call("projects.updateWorldview", {"id": PID, "worldview": {"logline": "陳師姐走出低谷的見證故事", "keyMessage": "希望", "tone": "溫暖"}})
+note = admin.call("notes.add", {"groupId": G_A, "projectId": PID, "title": "MCP 測試筆記", "content": "會議決議：驗證 list_notes／get_note 能讀回全文。"})
+NID = note["id"]
 tbl = admin.call("databases.create", {"scope": "group", "groupId": G_A, "name": "器材借用表",
     "fields": [{"key": "item", "label": "器材", "type": "text"}, {"key": "qty", "label": "數量", "type": "number"}],
     "agentAccess": "write"})
@@ -102,11 +104,11 @@ names = {t["name"] for t in d["result"]["tools"]}
 EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_generation","post_message",
     "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row",
     "list_database_files","read_database_file","plan_agent","approve_agent","stop_agent","discard_agent",
-    "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status"}
-ok("tools/list = 23 且名單完整", len(names) == 23 and EXPECTED <= names, f"{len(names)} 個")
+    "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","list_notes","get_note","get_project_status"}
+ok("tools/list = 25 且名單完整", len(names) == 25 and EXPECTED <= names, f"{len(names)} 個")
 
-# ══════════ 23 工具逐一實跑（可寫金鑰）══════════
-print("\n######## 23 工具逐一實跑 ########")
+# ══════════ 25 工具逐一實跑（可寫金鑰）══════════
+print("\n######## 25 工具逐一實跑 ########")
 g, r = call("whoami", {}, FULL); ok("1. whoami", g and r["user"]["email"] == EMAIL and r["readOnly"] is False)
 g, r = call("list_projects", {}, FULL); ok("2. list_projects（含新專案）", g and any(p["id"] == PID for p in r))
 g, r = call("get_project_context", {"projectId": PID}, FULL)
@@ -150,8 +152,11 @@ SCH = r.get("id") if g and isinstance(r, dict) else None
 ok("20. add_schedule_item", g and SCH)
 g, r = call("list_schedule", {"projectId": PID}, FULL); ok("21. list_schedule（含新行程）", g and any(i["id"] == SCH for i in r))
 g, r = call("post_message", {"projectId": PID, "body": "MCP 自動化留言測試"}, FULL); ok("22. post_message", g and r.get("messageId"))
+g, r = call("list_notes", {"projectId": PID}, FULL); ok("23. list_notes（含測試筆記）", g and any(n["id"] == NID for n in r))
+g, r = call("list_notes", {"projectId": PID, "keyword": "決議"}, FULL); ok("23b. list_notes（keyword 命中）", g and any(n["id"] == NID for n in r))
+g, r = call("get_note", {"noteId": NID}, FULL); ok("24. get_note（取回全文）", g and r.get("id") == NID and "會議決議" in r.get("content", ""))
 g, r = call("get_project_status", {"projectId": PID}, FULL)
-ok("23. get_project_status（統整快照）", g and r["generations"]["recent"] >= 1 and len(r["upcomingSchedule"]) >= 1)
+ok("25. get_project_status（統整快照）", g and r["generations"]["recent"] >= 1 and len(r["upcomingSchedule"]) >= 1)
 
 # ══════════ 資料庫 AI 存取等級閘門 ══════════
 print("\n######## 資料庫 AI 存取等級（none/read）閘門 ########")
@@ -167,6 +172,7 @@ READS = {"whoami": {}, "list_projects": {}, "get_project_context": {"projectId":
     "list_generations": {"projectId": PID}, "get_generation": {"generationId": GEN}, "list_assets": {"projectId": PID},
     "list_databases": {}, "query_database": {"tableId": TID}, "list_database_files": {"tableId": TID},
     "list_agent_runs": {"projectId": PID}, "get_agent_run": {"runId": RUN}, "list_schedule": {"projectId": PID},
+    "list_notes": {"projectId": PID}, "get_note": {"noteId": NID},
     "get_project_status": {"projectId": PID}}
 allread = all(call(n, a, RO)[0] for n, a in READS.items())
 ok(f"唯讀金鑰放行全部 {len(READS)} 個讀取工具", allread)
