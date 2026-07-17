@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
+import { MentionInput, resolveMentions } from "../components/MentionInput";
+import { flashAnchor, takePlannerFocus } from "../discuss";
 
 /**
  * 筆記排程（需求 #10）：組內共用的「排程表＋會議筆記」一頁。
@@ -20,6 +22,8 @@ type ScheduleItem = {
   note: string | null;
   ownerId: string | null;
   ownerName: string | null;
+  sourceMessageId?: string | null;
+  mentions?: string[] | null;
 };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -34,6 +38,18 @@ function fmtDateTime(d: string | Date): string {
 }
 
 export function PlannerPage({ groupId }: { groupId: string }) {
+  // 由留言的排程/筆記引用卡跳來：sessionStorage 交棒了目標 id，這裡輪詢直到該列渲染出來再高亮
+  useEffect(() => {
+    const target = takePlannerFocus();
+    if (!target) return;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      tries += 1;
+      if (flashAnchor(target) || tries > 20) window.clearInterval(timer);
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, []);
+
   if (!groupId) {
     return (
       <div>
@@ -67,6 +83,7 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   const list = trpc.schedule.list.useQuery({ groupId, includePast });
   // 專案下拉＋列表上的專案名對照；與筆記卡同 key，react-query 只會打一次
   const projects = trpc.projects.list.useQuery({ groupId });
+  const members = trpc.projects.groupMembers.useQuery({ groupId }).data ?? [];
 
   // 新增列的欄位
   const [title, setTitle] = useState("");
@@ -91,6 +108,8 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   const canAdd = !!title.trim() && !!startAt && !endInvalid && !add.isPending;
   const submit = () => {
     if (!canAdd) return;
+    // @提及：從標題與備註內文反推被 @ 的同組成員
+    const mentions = resolveMentions(`${title} ${note}`, members);
     add.mutate({
       groupId,
       projectId: projectId || undefined,
@@ -98,6 +117,7 @@ function ScheduleCard({ groupId }: { groupId: string }) {
       startsAt: new Date(startAt).toISOString(),
       endsAt: endAt ? new Date(endAt).toISOString() : undefined,
       note: note.trim() || undefined,
+      mentions: mentions.length ? mentions : undefined,
     });
   };
 
@@ -133,8 +153,9 @@ function ScheduleCard({ groupId }: { groupId: string }) {
       {/* 新增列 */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 4 }}>
         <div style={{ flex: "2 1 200px", minWidth: 160 }}>
-          <label htmlFor="sch-title">標題</label>
-          <input id="sch-title" value={title} maxLength={120} placeholder="例：週會・腳本審稿" onChange={(e) => setTitle(e.target.value)} />
+          <label htmlFor="sch-title">標題（可 @ 提及夥伴）</label>
+          <MentionInput value={title} onChange={setTitle} members={members} maxLength={120}
+            ariaLabel="排程標題" placeholder="例：週會・腳本審稿（@人 可通知）" onEnter={submit} />
         </div>
         <div style={{ flex: "1 1 185px" }}>
           <label htmlFor="sch-start">開始（必填）</label>
@@ -188,7 +209,7 @@ function ScheduleCard({ groupId }: { groupId: string }) {
               {g.items.map((ev) => {
                 const projTitle = projectTitleOf(ev.projectId);
                 return (
-                  <div key={ev.id} className="gen-row" style={{ gridTemplateColumns: "auto 1fr auto", alignItems: "center" }}>
+                  <div key={ev.id} id={`schedule-${ev.id}`} className="gen-row" style={{ gridTemplateColumns: "auto 1fr auto", alignItems: "center" }}>
                     <span className="mono" style={{ fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
                       <Icon name="Clock" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
                       {fmtTime(ev.startsAt)}
@@ -198,9 +219,16 @@ function ScheduleCard({ groupId }: { groupId: string }) {
                       <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
                         {ev.title}
                         {projTitle && <span className="chip" style={{ margin: "0 0 0 8px" }}>{projTitle}</span>}
+                        {ev.mentions?.length ? <span className="chip" style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {ev.mentions.length}</span> : null}
                       </div>
                       {(ev.note || ev.ownerName) && (
                         <div className="meta">{[ev.ownerName, ev.note].filter(Boolean).join("・")}</div>
+                      )}
+                      {/* 雙向回連：由留言轉來的排程 → 一鍵回到那個專案的留言區 */}
+                      {ev.sourceMessageId && ev.projectId && (
+                        <Link href={`/p/${ev.projectId}`} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                          <Icon name="MessageCircle" size={11} />來自留言
+                        </Link>
                       )}
                     </div>
                     <ConfirmButton
@@ -230,6 +258,7 @@ function NotesCard({ groupId }: { groupId: string }) {
   const utils = trpc.useUtils();
   const list = trpc.notes.list.useQuery({ groupId });
   const projects = trpc.projects.list.useQuery({ groupId });
+  const members = trpc.projects.groupMembers.useQuery({ groupId }).data ?? [];
 
   // 表單（新增／編輯共用）：editingId 有值＝編輯模式，全文以 notes.get 載入後才可改
   const [formOpen, setFormOpen] = useState(false);
@@ -297,7 +326,10 @@ function NotesCard({ groupId }: { groupId: string }) {
     if (!canSave) return;
     const t = title.trim();
     if (editingId) update.mutate({ id: editingId, title: t, content });
-    else add.mutate({ groupId, projectId: projectId || undefined, title: t, content });
+    else {
+      const mentions = resolveMentions(`${t} ${content}`, members);
+      add.mutate({ groupId, projectId: projectId || undefined, title: t, content, mentions: mentions.length ? mentions : undefined });
+    }
   };
 
   const projectTitleOf = (pid: string | null) => (pid ? (projects.data ?? []).find((p) => p.id === pid)?.title ?? null : null);
@@ -322,14 +354,20 @@ function NotesCard({ groupId }: { groupId: string }) {
           {list.data.map((n) => {
             const projTitle = projectTitleOf(n.projectId);
             return (
-              <div key={n.id} className="gen-row" style={{ gridTemplateColumns: "1fr auto", alignItems: "center" }}>
+              <div key={n.id} id={`note-${n.id}`} className="gen-row" style={{ gridTemplateColumns: "1fr auto", alignItems: "center" }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
                     {n.title}
                     {projTitle && <span className="chip" style={{ margin: "0 0 0 8px" }}>{projTitle}</span>}
+                    {n.mentions?.length ? <span className="chip" style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {n.mentions.length}</span> : null}
                   </div>
                   <div className="meta">{n.excerpt}{n.chars > n.excerpt.length ? "…" : ""}（{n.chars.toLocaleString()} 字）</div>
                   <div className="meta">{fmtDateTime(n.updatedAt)} 更新・{n.creatorName}</div>
+                  {n.sourceMessageId && n.projectId && (
+                    <Link href={`/p/${n.projectId}`} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                      <Icon name="MessageCircle" size={11} />來自留言
+                    </Link>
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
                   <button className="btn-sm" onClick={() => openEdit(n)}>編輯</button>
@@ -357,9 +395,13 @@ function NotesCard({ groupId }: { groupId: string }) {
 
       {formOpen ? (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
-          <label htmlFor="note-title">標題</label>
-          <input id="note-title" value={title} maxLength={120} placeholder="例：0716 週會紀錄" onChange={(e) => setTitle(e.target.value)} />
-          <label htmlFor="note-content">內容</label>
+          <label htmlFor="note-title">標題{!editingId && "（可 @ 提及夥伴）"}</label>
+          {editingId ? (
+            <input id="note-title" value={title} maxLength={120} placeholder="例：0716 週會紀錄" onChange={(e) => setTitle(e.target.value)} />
+          ) : (
+            <MentionInput value={title} onChange={setTitle} members={members} maxLength={120} ariaLabel="筆記標題" placeholder="例：0716 週會紀錄（@人 可通知）" />
+          )}
+          <label htmlFor="note-content">內容{!editingId && "（可打 @名字 提及）"}</label>
           <textarea
             id="note-content"
             value={contentReady ? content : ""}

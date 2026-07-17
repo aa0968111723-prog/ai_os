@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
-import { DISCUSS_EVENT, jumpToRef, type DiscussRef } from "../discuss";
+import { DISCUSS_EVENT, jumpToRef, setPlannerFocus, type DiscussRef } from "../discuss";
 
 /** 留言 @了助手就觸發 AI 回覆——與後端 messageAssistant.ASSISTANT_TRIGGER 同字串 */
 const ASSISTANT_TRIGGER = "@助手";
@@ -27,6 +28,28 @@ function TodoForm({ defaultTitle, pending, error, onCancel, onSubmit }: {
       >
         建立待辦
       </button>
+      <button className="btn-sm" onClick={onCancel}>取消</button>
+      {error && <span className="error" style={{ flexBasis: "100%" }}>{error}</span>}
+    </div>
+  );
+}
+
+/** 轉筆記行內表單:標題+內容(預填留言全文)→ notes.add */
+function NoteForm({ defaultTitle, defaultContent, pending, error, onCancel, onSubmit }: {
+  defaultTitle: string;
+  defaultContent: string;
+  pending: boolean;
+  error?: string;
+  onCancel: () => void;
+  onSubmit: (title: string, content: string) => void;
+}) {
+  const [title, setTitle] = useState(defaultTitle);
+  const [content, setContent] = useState(defaultContent);
+  return (
+    <div className="todo-form">
+      <input aria-label="筆記標題" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="筆記標題" />
+      <textarea aria-label="筆記內容" value={content} maxLength={5000} onChange={(e) => setContent(e.target.value)} rows={2} style={{ flexBasis: "100%" }} placeholder="筆記內容" />
+      <button className="primary btn-sm" disabled={!title.trim() || !content.trim() || pending} onClick={() => onSubmit(title.trim(), content.trim())}>存成筆記</button>
       <button className="btn-sm" onClick={onCancel}>取消</button>
       {error && <span className="error" style={{ flexBasis: "100%" }}>{error}</span>}
     </div>
@@ -61,7 +84,10 @@ function notifyDesktop(title: string, body: string): void {
 /** 表情白名單:與後端 messages.react 的 enum 同步(順序即顯示順序) */
 const EMOJI = ["🙏", "❤️", "✅", "😊"] as const;
 
-const REF_LABEL: Record<DiscussRef["refType"], string> = { scene: "分鏡", asset: "素材", generation: "生成" };
+const REF_LABEL: Record<DiscussRef["refType"], string> = { scene: "分鏡", asset: "素材", generation: "生成", note: "筆記", schedule: "排程" };
+const REF_ICON: Record<DiscussRef["refType"], "Clapperboard" | "FileText" | "Sparkles" | "Clock"> = {
+  scene: "Clapperboard", asset: "FileText", generation: "Sparkles", note: "FileText", schedule: "Clock",
+};
 
 /** 把留言內文的 @名字 標亮(只認真的被提及者名單,不誤標普通 @ 符號) */
 function renderBody(body: string, mentionNames: string[]) {
@@ -100,6 +126,12 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
       utils.messages.list.invalidate({ projectId });
     },
   });
+  const [, navigate] = useLocation();
+  // 引用排程/筆記用:本組的筆記與排程清單(picker 展開才抓)
+  const [refPickerOpen, setRefPickerOpen] = useState(false);
+  const notesQ = trpc.notes.list.useQuery({ groupId }, { enabled: refPickerOpen });
+  const scheduleQ = trpc.schedule.list.useQuery({ groupId }, { enabled: refPickerOpen });
+  const addNote = trpc.notes.add.useMutation({ onSuccess: () => { setNoteFor(null); utils.notes.list.invalidate({ groupId }); } });
   const react = trpc.messages.react.useMutation({ onSuccess: () => utils.messages.list.invalidate({ projectId }) });
   const setPinned = trpc.messages.setPinned.useMutation({ onSuccess: () => utils.messages.list.invalidate({ projectId }) });
   const markRead = trpc.messages.markRead.useMutation({
@@ -112,6 +144,7 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   const [pendingRef, setPendingRef] = useState<DiscussRef | null>(null);
   const [emojiPickFor, setEmojiPickFor] = useState<string | null>(null);
   const [todoFor, setTodoFor] = useState<{ id: string; body: string } | null>(null);
+  const [noteFor, setNoteFor] = useState<{ id: string; body: string } | null>(null);
   const [recording, setRecording] = useState(false);
   const [voiceErr, setVoiceErr] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -360,14 +393,24 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
                     <button
                       type="button"
                       className="ref-card"
-                      title={m.ref ? "跳到這個作品" : undefined}
-                      onClick={() => m.ref && jumpToRef(m.refType!, m.refId!)}
+                      title={m.ref ? "跳到這個項目" : undefined}
+                      onClick={() => {
+                        if (!m.ref) return;
+                        const t = m.refType as DiscussRef["refType"];
+                        // note/schedule 住在 /planner(另一頁):交棒 sessionStorage 再跳頁,Planner 掛載時高亮
+                        if (t === "note" || t === "schedule") {
+                          setPlannerFocus(t, m.refId!);
+                          navigate("/planner");
+                        } else {
+                          jumpToRef(t, m.refId!);
+                        }
+                      }}
                       disabled={!m.ref}
                     >
                       {m.ref?.thumb ? (
                         <img src={m.ref.thumb} alt="" loading="lazy" />
                       ) : (
-                        <Icon name={m.refType === "scene" ? "Clapperboard" : m.refType === "asset" ? "FileText" : "Sparkles"} size={14} />
+                        <Icon name={REF_ICON[m.refType as DiscussRef["refType"]]} size={14} />
                       )}
                       <span className="ref-title">
                         {REF_LABEL[m.refType as DiscussRef["refType"]]}・{m.ref ? m.ref.title : "已不存在"}
@@ -444,14 +487,23 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
                     <Icon name="Star" size={12} /> {m.pinned ? "取消釘選" : "釘選"}
                   </button>
                 )}
-                {/* 轉待辦:把口頭承諾變成有期限的排程項(組內任何人可加,後端 requireGroup) */}
+                {/* 轉待辦／轉筆記:把口頭承諾變成排程或會議紀錄(組內任何人可加,後端 requireGroup),
+                    並記 sourceMessageId 讓 Planner 反向跳回這則留言 */}
                 <button
                   type="button"
                   className="msg-action"
                   title="把這句轉成排程待辦"
-                  onClick={() => setTodoFor(todoFor?.id === m.id ? null : { id: m.id, body: m.body })}
+                  onClick={() => { setNoteFor(null); setTodoFor(todoFor?.id === m.id ? null : { id: m.id, body: m.body }); }}
                 >
                   <Icon name="CalendarPlus" size={12} /> 轉待辦
+                </button>
+                <button
+                  type="button"
+                  className="msg-action"
+                  title="把這句存成筆記/會議紀錄"
+                  onClick={() => { setTodoFor(null); setNoteFor(noteFor?.id === m.id ? null : { id: m.id, body: m.body }); }}
+                >
+                  <Icon name="FileText" size={12} /> 轉筆記
                 </button>
               </div>
               {/* 轉待辦行內表單:標題預填留言內容、選截止日 → schedule.add */}
@@ -461,7 +513,18 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
                   pending={addSchedule.isPending}
                   error={addSchedule.error?.message}
                   onCancel={() => setTodoFor(null)}
-                  onSubmit={(title, startsAt) => addSchedule.mutate({ groupId, projectId, title, startsAt })}
+                  onSubmit={(title, startsAt) => addSchedule.mutate({ groupId, projectId, title, startsAt, sourceMessageId: m.id })}
+                />
+              )}
+              {/* 轉筆記行內表單:標題預填留言前段、內容預填全文 → notes.add */}
+              {noteFor?.id === m.id && (
+                <NoteForm
+                  defaultTitle={m.body.slice(0, 40)}
+                  defaultContent={m.body}
+                  pending={addNote.isPending}
+                  error={addNote.error?.message}
+                  onCancel={() => setNoteFor(null)}
+                  onSubmit={(title, content) => addNote.mutate({ groupId, projectId, title, content, sourceMessageId: m.id })}
                 />
               )}
             </div>
@@ -487,6 +550,31 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
         >
           <Icon name="Sparkles" size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />問 AI 助手
         </button>
+        {/* 引用排程/筆記:把本組的某個排程或筆記帶進這則留言（變成可點回原件的卡片） */}
+        <span style={{ position: "relative", display: "inline-flex" }}>
+          <button type="button" className="chip" title="引用一個排程或筆記" onClick={() => setRefPickerOpen((v) => !v)}>
+            <Icon name="Clock" size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />引用排程/筆記
+          </button>
+          {refPickerOpen && (
+            <div className="mention-pop" role="listbox" aria-label="引用排程或筆記" style={{ bottom: "auto", top: "calc(100% + 6px)", maxHeight: 240, overflowY: "auto" }}>
+              {(scheduleQ.data ?? []).slice(0, 8).map((s) => (
+                <button key={`s-${s.id}`} type="button" role="option" aria-selected="false"
+                  onClick={() => { setPendingRef({ refType: "schedule", refId: s.id, title: s.title }); setRefPickerOpen(false); }}>
+                  <Icon name="Clock" size={12} style={{ marginRight: 5 }} />{s.title}
+                </button>
+              ))}
+              {(notesQ.data ?? []).slice(0, 8).map((n) => (
+                <button key={`n-${n.id}`} type="button" role="option" aria-selected="false"
+                  onClick={() => { setPendingRef({ refType: "note", refId: n.id, title: n.title }); setRefPickerOpen(false); }}>
+                  <Icon name="FileText" size={12} style={{ marginRight: 5 }} />{n.title}
+                </button>
+              ))}
+              {!scheduleQ.data?.length && !notesQ.data?.length && (
+                <span className="hint" style={{ padding: "8px 12px" }}>還沒有排程或筆記——先到「筆記排程」建立</span>
+              )}
+            </div>
+          )}
+        </span>
       </div>
 
       {/* 回覆/引用狀態列:讓人看清楚「即將送出的是什麼」,可取消 */}

@@ -342,7 +342,7 @@ export const messages = pgTable("messages", {
   // 協作強化（留言 2.0）：回覆串／組長釘選／引用專案內作品（分鏡・素材・生成）／@提及
   replyToId: uuid("reply_to_id"),
   pinned: boolean("pinned").notNull().default(false),
-  refType: text("ref_type", { enum: ["scene", "asset", "generation"] }),
+  refType: text("ref_type", { enum: ["scene", "asset", "generation", "note", "schedule"] }),
   refId: uuid("ref_id"),
   mentions: jsonb("mentions").$type<string[]>(),
   // 留言第一梯隊：語音留言（kind='voice'，音檔存 ref asset，voiceStatus 轉錄狀態，body 收轉錄稿）
@@ -447,6 +447,10 @@ export const notes = pgTable("notes", {
   title: text("title").notNull(),
   content: text("content").notNull(),
   createdBy: uuid("created_by").notNull(),
+  /** 由某則留言「轉筆記」建立時記來源留言 id，供 Planner 反向「來自留言」跳回 */
+  sourceMessageId: uuid("source_message_id"),
+  /** @提及同組成員（Planner 也能 @人；與留言 mentions 同語意） */
+  mentions: jsonb("mentions").$type<string[]>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
@@ -471,6 +475,10 @@ export const scheduleItems = pgTable("schedule_items", {
   ownerId: uuid("owner_id"),
   note: text("note"),
   createdBy: uuid("created_by").notNull(),
+  /** 由某則留言「轉待辦」建立時記來源留言 id，供 Planner 反向「來自留言」跳回 */
+  sourceMessageId: uuid("source_message_id"),
+  /** @提及同組成員（Planner 排程也能 @人） */
+  mentions: jsonb("mentions").$type<string[]>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   groupStartIdx: index("schedule_items_group_start_idx").on(t.groupId, t.startsAt),
