@@ -8,6 +8,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
+import { assertProjectNotArchived } from "./projectAcl";
 import { validateMentions } from "./mentions";
 
 export type ScheduleRow = typeof schema.scheduleItems.$inferSelect;
@@ -86,6 +87,7 @@ export async function addScheduleItemCore(input: {
   if (input.projectId) {
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
     if (!project || project.groupId !== input.groupId) throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
+    assertProjectNotArchived(project); // 封存專案不接受新排程（MCP 舊 projectId 亦擋）
   }
   if (input.sourceMessageId) {
     const [m] = await db.select({ groupId: schema.messages.groupId }).from(schema.messages).where(eq(schema.messages.id, input.sourceMessageId));
