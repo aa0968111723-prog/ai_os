@@ -83,13 +83,14 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/ready", async (_req, res) => {
   try {
     await db.execute(sql`select 1`);
+    // ★安全：本端點「未認證」即可存取（給非工程背景者自助診斷 DB 是否接通）。
+    // 只回「資料庫/初始化」這種安全的存活訊號；生成模式（mockMode）與 AUTH_MODE=dev 後門是否誤留，
+    // 屬內部組態偵察面，改到需開發者登入的 /api/selftest 呈現（見該端點「生成模式」「認證模式」兩項），
+    // 不對匿名訪客外洩。
     res.json({
       ok: true,
       db: "connected（資料庫已接通）",
       boot: isBootReady() ? "ready（初始化完成）" : "initializing（建表/種子進行中，稍候自動完成）",
-      mockMode: isMockMode(),
-      // AUTH_MODE=dev 後門警示（僅開發環境會生效，正式環境自動忽略）——讓管理員一眼看到有沒有誤留
-      authMode: process.env.AUTH_MODE === "dev" ? "dev(僅開發生效)" : "normal",
     });
   } catch (err) {
     console.error("[ready] DB 連線失敗：", err instanceof Error ? err.message : err);
@@ -201,11 +202,30 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
 
 const upload = multer({
   storage: multer.diskStorage({ destination: (_req, _file, cb) => cb(null, tmpDir()) }),
-  limits: { fileSize: MAX_FILE_BYTES, files: 1 },
+  // fileSize/files 之外再夾制 fields/parts/fieldSize：上傳路由只需 1 檔＋少數小文字欄（projectId/tableId/
+  // title/name），不設上限時 multer 的 fields/parts 預設無界，攻擊者可用「數百萬個微小文字欄」的
+  // multipart 請求在解析階段吃 CPU/記憶體（且發生在認證前）。給足正常用途又擋掉洪泛。
+  limits: { fileSize: MAX_FILE_BYTES, files: 1, fields: 8, parts: 12, fieldSize: 100 * 1024 },
 });
 
+// ★安全：在 multer「把整個上傳主體寫進磁碟」之前先擋掉未登入請求。
+// multer 是中介層、跑在路由處理器之前——若把 resolveSession 留到處理器內，未認證者仍能對每次請求
+// 把 200MB 串進 Volume 暫存目錄（寫完才回 401），並行洪泛即可塞爆磁碟（單容器/單 Volume 部署下＝全站故障）。
+// 這道前置閘門讓未帶有效 session 的請求在讀取主體前就被拒（無 cookie 時 resolveSession 不查 DB，零成本）。
+// 已認證者處理器內仍會再 resolveSession 一次取完整 AuthState（多一次帶索引的輕量查詢，可接受）。
+async function requireAuthBeforeUpload(req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) { res.status(401).json({ error: "請先登入" }); return; }
+    next();
+  } catch (err) {
+    recordError("upload:auth", err);
+    res.status(500).json({ error: "驗證失敗，請稍後再試" });
+  }
+}
+
 /** 上傳素材（multipart: file + projectId [+ title]）→ 入素材庫、回傳 asset */
-app.post("/api/upload", upload.single("file"), async (req, res) => {
+app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
     const auth = await resolveSession(req);
@@ -324,7 +344,7 @@ app.get("/api/assets/:id/file", async (req, res) => {
 // ── 資料庫文件（AI 可讀檔案層）：上傳＋下載（權限走 databaseAcl，配額每人 5GB 可調） ──
 
 /** 上傳文件到資料庫（multipart: file + tableId [+ name]）→ 抽純文字供 AI 讀、回傳檔案列 */
-app.post("/api/databases/upload", upload.single("file"), async (req, res) => {
+app.post("/api/databases/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
     const auth = await resolveSession(req);
@@ -708,7 +728,7 @@ app.post("/api/assistant/ask", async (req, res) => {
 });
 
 // ── 元件級回饋截圖（R23）：上傳（登入即可）＋依報告權限服務 ──
-app.post("/api/feedback/screenshot", upload.single("file"), async (req, res) => {
+app.post("/api/feedback/screenshot", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
     const auth = await resolveSession(req);

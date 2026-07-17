@@ -8,6 +8,7 @@
  * - 配額：每人（上傳者計）預設 5GB，settings.fileQuotaGb 可調（0＝不限）。
  */
 import { createRequire } from "node:module";
+import { lookup as dnsLookup } from "node:dns/promises";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { getSettings } from "./points";
@@ -117,9 +118,68 @@ export async function extractTextFromBuffer(mime: string, name: string, buf: Buf
 /* ── 網址匯入：Google／Notion／一般網頁 ─────────────── */
 
 /**
- * SSRF 防護：只允許 http(s)，擋 localhost 與私有網段的「字面位址」。
- * 已知限制：不做 DNS 解析比對（rebinding 不在內部工具的威脅模型；正式擴大部署時
- * 應改走出口代理白名單）。回錯誤訊息（人話）；null＝放行。
+ * 判斷一個「已解析的字面 IP」是否落在私有／保留／內部網段（IPv4 與 IPv6）。
+ * 這是 SSRF 的最終判準：主機名經 DNS 解析成 IP 後，逐一 IP 過此函式——任何一個是內部位址就擋。
+ * 因為 getaddrinfo 會把 0x7f.0.0.1／2130706433／127.1／IPv4-mapped IPv6 這類「奇異寫法」
+ * 一律正規化成真實 IP，故只要在「解析後」判斷，這些繞過字面字串檢查的編碼全部一併涵蓋。
+ */
+export function isPrivateIp(ip: string): boolean {
+  const addr = ip.toLowerCase().trim();
+  // IPv4-mapped IPv6（::ffff:a.b.c.d 或 ::ffff:hex）→ 取出內嵌 IPv4 再判
+  const mapped = addr.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (mapped) return isPrivateIp(mapped[1]);
+  if (addr.includes(":")) {
+    // IPv6：loopback(::1)／未指定(::)／ULA(fc00::/7＝fc,fd)／link-local(fe80::/10＝fe8,fe9,fea,feb)
+    if (addr === "::1" || addr === "::") return true;
+    if (/^(fc|fd)/.test(addr)) return true;
+    if (/^fe[89ab]/.test(addr)) return true;
+    return false;
+  }
+  const m = addr.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return (
+    a === 127 || a === 10 || a === 0 ||
+    (a === 192 && b === 168) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 169 && b === 254) ||       // link-local（含 AWS/GCP metadata 169.254.169.254）
+    (a === 100 && b >= 64 && b <= 127) // CGNAT 100.64.0.0/10
+  );
+}
+
+/**
+ * 主機名 → 解析成 IP 並確認「全部」都是公開位址（否則丟人話錯誤）。★這是 SSRF 的權威防線★
+ * ssrfGuardError 只擋「字面內部位址」，擋不了「一個正常主機名 DNS 解析到內網」的情形
+ * （例如 169.254.169.254.nip.io、或攻擊者自架 A 記錄指向 10.x）——那才是真正可讀取內網/雲端
+ * metadata 的 SSRF。這裡在連線前先解析並逐一 IP 檢查，把 DNS 名稱與各種數字編碼一網打盡。
+ * 殘留風險：解析與實際連線之間的 DNS rebinding（TOCTOU）——內部工具威脅模型可接受；
+ * 正式擴大部署時建議改走「出口代理白名單」徹底根除。
+ */
+export async function assertPublicHostOrError(hostname: string): Promise<string | null> {
+  // 有設出口代理（HTTPS_PROXY/HTTP_PROXY）時：真正解析與連線由「代理」執行，本機 DNS 既非權威、
+  // 也可能解不到外部名稱（直連才有本機解析）。此時把 SSRF 邊界交給出口代理，本機不重複解析以免誤擋
+  // 正常匯入；字面內部位址仍由 ssrfGuardError 快篩擋下。一般部署平台皆為直連（無此環境變數），走下方解析。
+  if (process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy) {
+    return null;
+  }
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  let addrs: Array<{ address: string }>;
+  try {
+    addrs = await dnsLookup(host, { all: true });
+  } catch {
+    return "無法解析這個網址的主機（DNS 查詢失敗）";
+  }
+  if (addrs.length === 0) return "無法解析這個網址的主機";
+  for (const { address } of addrs) {
+    if (isPrivateIp(address)) return "不能匯入內部網址";
+  }
+  return null;
+}
+
+/**
+ * SSRF 防護（字面位址快篩）：只允許 http(s)，擋 localhost 與私有網段的「字面位址」。
+ * ★ 這只是快篩；權威判準是 fetchImport 內對每一跳呼叫的 assertPublicHostOrError（DNS 解析後判 IP）。
+ * 回錯誤訊息（人話）；null＝放行（仍須通過後續 DNS 解析檢查）。
  */
 export function ssrfGuardError(rawUrl: string): string | null {
   let u: URL;
@@ -315,6 +375,16 @@ export async function fetchImport(url: string): Promise<{ buf: Buffer; mime: str
   for (let hop = 0; hop < 5; hop++) {
     const guard = ssrfGuardError(current);
     if (guard) throw new Error(hop === 0 ? guard : "來源網址重導向到內部位址——已擋下");
+    // ★ 權威 SSRF 判準：把主機名 DNS 解析成 IP，任一 IP 落在內網/保留段就擋（每一跳都重驗，
+    //   杜絕「公開網址 302 到 169.254.169.254／內網服務」與各種數字/DNS 名稱繞過字面檢查）。
+    let hostname: string;
+    try {
+      hostname = new URL(current).hostname;
+    } catch {
+      throw new Error("網址格式不正確");
+    }
+    const dnsGuard = await assertPublicHostOrError(hostname);
+    if (dnsGuard) throw new Error(hop === 0 ? dnsGuard : "來源網址重導向到內部位址——已擋下");
     const res = await proxyFetch(current, { timeoutMs: 25_000, redirect: "manual" });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
