@@ -31,9 +31,9 @@ export type SourceKind = "image" | "audio" | "video" | "zip";
 export type ProjectFormat = "16:9" | "9:16" | "1:1";
 
 export interface ModelEntry {
-  /** 目錄唯一鍵(any-llm 系列用 # 區分子型號) */
+  /** 目錄唯一鍵(nvidia-nim/any-llm 系列用 # 區分子型號) */
   id: string;
-  /** 實際 fal 佇列端點(預設同 id) */
+  /** 實際佇列端點(預設同 id;"nvidia-nim" 表示走 NVIDIA NIM 而非 fal) */
   endpoint?: string;
   label: string;
   category: ModelCategory;
@@ -80,7 +80,7 @@ export function tierLabel(tier: ModelTier): string {
 const imageSize = (f: ProjectFormat) =>
   f === "9:16" ? "portrait_16_9" : f === "1:1" ? "square_hd" : "landscape_16_9";
 const aspect = (f: ProjectFormat) => f;
-/** any-llm 系列共用 */
+/** LLM 系列共用(NVIDIA NIM 與舊 any-llm 皆為 {model, prompt} 形狀;NIM 端由 nimSubmit 轉 chat messages) */
 const llmInput = (model: string) => (prompt: string) => ({ model, prompt });
 const llmVisionInput = (model: string) => (prompt: string, _f: ProjectFormat, sourceUrl?: string) => ({
   model,
@@ -349,55 +349,57 @@ export const MODELS: ModelEntry[] = [
     input: (_p, _f, s) => ({ video_url: s }),
   },
 
-  /* ═══ 5. 大型語言模型 llm(fal any-llm,單一端點多型號) ═══ */
+  /* ═══ 5. 大型語言模型 llm(NVIDIA NIM,單一端點多型號;LLM 文字整站遷移 NIM,媒體維持 fal) ═══
+     endpoint 一律 "nvidia-nim":generationCore 據此分流到 nimSubmit/nimStatus(不走 fal 佇列)。
+     計費為 NVIDIA NIM 按 token;短任務單次成本遠低於 1 點,固定扣 1 點與原 any-llm 同口徑。 */
   {
-    id: "fal-ai/any-llm#claude-sonnet-4.5", endpoint: "fal-ai/any-llm", label: "Claude Sonnet 4.5", category: "llm", tier: "flagship", kind: "text",
-    points: 1, cost: "$0.01/次", verified: true,
-    strengths: "長文理解與寫作頂尖;中文細膩、邏輯嚴謹",
-    bestFor: "腳本撰寫、開示摘要、敏感內容分寸拿捏",
-    input: llmInput("anthropic/claude-sonnet-4.5"),
+    id: "nvidia-nim#deepseek-r1", endpoint: "nvidia-nim", label: "DeepSeek R1", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false,
+    strengths: "深度推理鏈旗艦;複雜任務拆解、長鏈邏輯最強",
+    bestFor: "腳本結構規劃、需要想清楚再答的複雜任務",
+    input: llmInput("deepseek-ai/deepseek-r1"),
   },
   {
-    id: "fal-ai/any-llm#gpt-5", endpoint: "fal-ai/any-llm", label: "GPT-5", category: "llm", tier: "flagship", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "通用推理旗艦;創意發想廣度大",
+    id: "nvidia-nim#llama-3.1-405b", endpoint: "nvidia-nim", label: "Llama 3.1 405B", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false,
+    strengths: "Meta 開源最大檔;寫作品質與指令遵循頂尖",
+    bestFor: "正式腳本撰寫、開示摘要、長文彙整",
+    input: llmInput("meta/llama-3.1-405b-instruct"),
+  },
+  {
+    id: "nvidia-nim#nemotron-4-340b", endpoint: "nvidia-nim", label: "Nemotron-4 340B", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false,
+    strengths: "NVIDIA 自家旗艦;指令對齊佳、輸出穩定",
     bestFor: "腦力激盪、多版本文案",
-    input: llmInput("openai/gpt-5"),
+    input: llmInput("nvidia/nemotron-4-340b-instruct"),
   },
   {
-    id: "fal-ai/any-llm#gemini-2.5-pro", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Pro", category: "llm", tier: "flagship", kind: "text",
-    points: 1, cost: "$0.01/次", verified: true,
-    strengths: "超長上下文;整本逐字稿一次讀",
-    bestFor: "長逐字稿整理、跨文件彙整",
-    input: llmInput("google/gemini-2.5-pro"),
-  },
-  {
-    id: "fal-ai/any-llm#gemini-2.5-flash", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Flash", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次", verified: true, recommended: true,
-    strengths: "快又便宜的日常主力",
+    id: "nvidia-nim#llama-3.1-70b", endpoint: "nvidia-nim", label: "Llama 3.1 70B", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false, recommended: true,
+    strengths: "品質/成本平衡的日常主力(後端自動 LLM 亦預設此檔)",
     bestFor: "標題、短文案、日常改寫",
-    input: llmInput("google/gemini-2.5-flash"),
+    input: llmInput("meta/llama-3.1-70b-instruct"),
   },
   {
-    id: "fal-ai/any-llm#gpt-5-mini", endpoint: "fal-ai/any-llm", label: "GPT-5 mini", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "GPT 家族輕量版;速度快",
-    bestFor: "批量小任務",
-    input: llmInput("openai/gpt-5-mini"),
+    id: "nvidia-nim#qwen2.5-72b", endpoint: "nvidia-nim", label: "Qwen2.5 72B(中文)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false,
+    strengths: "阿里通義開源檔;中文語感第一梯隊、繁中穩定",
+    bestFor: "中文金句、弘法文案、中文改寫潤飾",
+    input: llmInput("qwen/qwen2.5-72b-instruct"),
   },
   {
-    id: "fal-ai/any-llm#llama-4-maverick", endpoint: "fal-ai/any-llm", label: "Llama 4 Maverick", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "Meta 開源旗艦;多模態、開放生態",
-    bestFor: "一般寫作、開源偏好場景",
-    input: llmInput("meta-llama/llama-4-maverick"),
+    id: "nvidia-nim#mistral-large-2", endpoint: "nvidia-nim", label: "Mistral Large 2", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "按 token(NIM);短任務 <$0.01/次", verified: false,
+    strengths: "歐系旗艦;多語能力佳、風格精煉",
+    bestFor: "多語版本文案、翻譯初稿",
+    input: llmInput("mistralai/mistral-large-2-instruct"),
   },
   {
-    id: "fal-ai/any-llm#gemini-2.5-flash-lite", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Flash Lite", category: "llm", tier: "budget", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "最低成本文字生成",
+    id: "nvidia-nim#llama-3.1-8b", endpoint: "nvidia-nim", label: "Llama 3.1 8B", category: "llm", tier: "budget", kind: "text",
+    points: 1, cost: "按 token(NIM);最低成本檔", verified: false,
+    strengths: "最低成本文字生成;速度極快",
     bestFor: "大量簡單任務(標籤、分類)",
-    input: llmInput("google/gemini-2.5-flash-lite"),
+    input: llmInput("meta/llama-3.1-8b-instruct"),
   },
 
   /* ═══ 6. 圖片轉文字 vision ═══ */
@@ -719,7 +721,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     strengths: "LLM 潤飾腳本 → 旗艦文生圖定調 → Veo 3.1 成片;三步到位",
     bestFor: "正式對外的 15 秒形象短片",
     steps: [
-      { modelId: "fal-ai/any-llm#claude-sonnet-4.5", promptTemplate: "把以下構想潤飾成一段 40 字內的影片畫面描述(供文生影片模型使用,繁體中文):{prompt}", note: "腳本潤飾" },
+      { modelId: "nvidia-nim#llama-3.1-405b", promptTemplate: "把以下構想潤飾成一段 40 字內的影片畫面描述(供文生影片模型使用,繁體中文):{prompt}", note: "腳本潤飾" },
       { modelId: "fal-ai/bytedance/seedream/v4.5/text-to-image", promptTemplate: "{prev}", note: "先出定調圖" },
       { modelId: "fal-ai/veo3.1", promptTemplate: "{prev}", note: "生成成片鏡頭" },
     ],
@@ -729,7 +731,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     strengths: "LLM 出分鏡文案 → 旗艦出圖 → 編輯統一風格",
     bestFor: "系列感的三格分鏡圖",
     steps: [
-      { modelId: "fal-ai/any-llm#gemini-2.5-pro", promptTemplate: "把主題「{prompt}」化為一句電影感畫面描述(40 字內,繁體中文)", note: "分鏡文案" },
+      { modelId: "nvidia-nim#llama-3.1-405b", promptTemplate: "把主題「{prompt}」化為一句電影感畫面描述(40 字內,繁體中文)", note: "分鏡文案" },
       { modelId: "fal-ai/nano-banana-2", promptTemplate: "{prev}", note: "生成主圖" },
       { modelId: "fal-ai/nano-banana-2/edit", promptTemplate: "保持構圖不變,將整體色調調整為溫暖的琥珀色晨光", usePrevAsSource: true, note: "統一調性" },
     ],
@@ -739,7 +741,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     strengths: "LLM 摘句 → Ideogram 文字卡;中文排版強",
     bestFor: "每日金句社群圖",
     steps: [
-      { modelId: "fal-ai/any-llm#claude-sonnet-4.5", promptTemplate: "從以下內容擷取一句 20 字內的金句(只回金句本身):{prompt}", note: "摘金句" },
+      { modelId: "nvidia-nim#qwen2.5-72b", promptTemplate: "從以下內容擷取一句 20 字內的金句(只回金句本身):{prompt}", note: "摘金句" },
       { modelId: "fal-ai/ideogram/v3", promptTemplate: "極簡禪意海報,溫暖米色背景,優雅繁體中文書法字:「{prev}」", note: "生成文字卡" },
     ],
   },
@@ -748,7 +750,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     strengths: "同「完整短片」流程,改用經濟模型;成本 1/4",
     bestFor: "日常內部短片",
     steps: [
-      { modelId: "fal-ai/any-llm#gemini-2.5-flash", promptTemplate: "把以下構想潤飾成一段 40 字內的影片畫面描述(繁體中文):{prompt}", note: "腳本潤飾" },
+      { modelId: "nvidia-nim#llama-3.1-70b", promptTemplate: "把以下構想潤飾成一段 40 字內的影片畫面描述(繁體中文):{prompt}", note: "腳本潤飾" },
       { modelId: "fal-ai/flux/dev", promptTemplate: "{prev}", note: "定調圖" },
       { modelId: "fal-ai/wan/v2.2-a14b/text-to-video", promptTemplate: "{prev}", note: "成片鏡頭" },
     ],
@@ -767,7 +769,7 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     strengths: "Flash 摘句+FLUX dev 出圖",
     bestFor: "高頻率的日更金句",
     steps: [
-      { modelId: "fal-ai/any-llm#gemini-2.5-flash", promptTemplate: "從以下內容擷取一句 20 字內的金句(只回金句本身):{prompt}", note: "摘金句" },
+      { modelId: "nvidia-nim#qwen2.5-72b", promptTemplate: "從以下內容擷取一句 20 字內的金句(只回金句本身):{prompt}", note: "摘金句" },
       { modelId: "fal-ai/flux/dev", promptTemplate: "極簡禪意海報構圖,溫暖米色背景,大面留白,主題:{prev}", note: "生成底圖" },
     ],
   },
@@ -784,6 +786,50 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
 
 /** 舊版模型(既有資料相容;不出現在挑選器) */
 export const LEGACY_MODELS: ModelEntry[] = [
+  // ── fal any-llm 系列(LLM 已整站遷移 NVIDIA NIM;保留供既有生成紀錄/工作流歷史對得上標籤與點數,
+  //    在途舊生成也仍能沿 fal 佇列輪詢收尾) ──
+  {
+    id: "fal-ai/any-llm#claude-sonnet-4.5", endpoint: "fal-ai/any-llm", label: "Claude Sonnet 4.5(舊)", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "$0.01/次", verified: true,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("anthropic/claude-sonnet-4.5"),
+  },
+  {
+    id: "fal-ai/any-llm#gpt-5", endpoint: "fal-ai/any-llm", label: "GPT-5(舊)", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("openai/gpt-5"),
+  },
+  {
+    id: "fal-ai/any-llm#gemini-2.5-pro", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Pro(舊)", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "$0.01/次", verified: true,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("google/gemini-2.5-pro"),
+  },
+  {
+    id: "fal-ai/any-llm#gemini-2.5-flash", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Flash(舊)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$0.01/次", verified: true,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("google/gemini-2.5-flash"),
+  },
+  {
+    id: "fal-ai/any-llm#gpt-5-mini", endpoint: "fal-ai/any-llm", label: "GPT-5 mini(舊)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("openai/gpt-5-mini"),
+  },
+  {
+    id: "fal-ai/any-llm#llama-4-maverick", endpoint: "fal-ai/any-llm", label: "Llama 4 Maverick(舊)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("meta-llama/llama-4-maverick"),
+  },
+  {
+    id: "fal-ai/any-llm#gemini-2.5-flash-lite", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Flash Lite(舊)", category: "llm", tier: "budget", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("google/gemini-2.5-flash-lite"),
+  },
   {
     id: "fal-ai/kling-video/v2.1/standard/text-to-video", label: "影片 5 秒 · Kling 2.1(舊)", category: "text-to-video", tier: "economy", kind: "video",
     points: 12, cost: "$0.05/秒", verified: true,
@@ -815,9 +861,14 @@ export function getWorkflow(id: string): WorkflowPreset | undefined {
   return WORKFLOW_PRESETS.find((w) => w.id === id);
 }
 
-/** 佇列端點(any-llm 系列共用端點) */
+/** 佇列端點(nvidia-nim/any-llm 系列共用端點) */
 export function endpointOf(model: ModelEntry): string {
   return model.endpoint ?? model.id;
+}
+
+/** 是否走 NVIDIA NIM(LLM 文字類):generationCore 據此把送出/輪詢分流到 nimSubmit/nimStatus */
+export function isNimModel(model: ModelEntry): boolean {
+  return endpointOf(model) === "nvidia-nim";
 }
 
 /** 平台 → 格式自動帶入(夥伴不用懂比例) */

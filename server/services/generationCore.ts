@@ -9,9 +9,10 @@
 import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
-import { getModel, endpointOf, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { getModel, endpointOf, isNimModel, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
-import { falSubmit, falStatus, billingBypassed } from "./fal";
+import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
+import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { reserveQuota, refund } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
 import { buildCharacterAnchor } from "../routers/characters";
@@ -253,7 +254,11 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   }
 
   try {
-    const { requestId } = await falSubmit(endpointOf(model), model.kind, falInput);
+    // LLM 文字類分流走 NVIDIA NIM(媒體維持 fal);mock 模式一律交給 falSubmit 的假佇列——
+    // 假生成/扣點行為與其他類別完全同口徑,不因供應商分流而多一套 mock
+    const { requestId } = isNimModel(model) && !isMockMode()
+      ? nimSubmit(falInput)
+      : await falSubmit(endpointOf(model), model.kind, falInput);
     const [updated] = await db
       .update(schema.generations)
       .set({ requestId, status: "running", updatedAt: new Date() })
@@ -285,7 +290,9 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
   const endpoint = model ? endpointOf(model) : gen.modelId;
   const kind = (model?.kind ?? gen.kind) as "image" | "video" | "audio" | "text";
 
-  const result = await falStatus(endpoint, kind, gen.requestId);
+  // 依 requestId 前綴分流:nim_=NVIDIA NIM 記憶體佇列;mock_/其餘=fal(mock 前綴由 falStatus 自行處理)。
+  // 用前綴而非模型註冊表判斷——部署切換期間在途的舊 any-llm 生成仍能沿 fal 佇列收尾。
+  const result = gen.requestId.startsWith("nim_") ? nimStatus(gen.requestId) : await falStatus(endpoint, kind, gen.requestId);
   if (result.status === "done" && (result.resultUrl || result.resultText)) {
     // Compare-and-set：只有把「仍在 queued/running」的列成功推進成 done 的那一次才算數，
     // 併發輪詢/重試不會重複入庫（舊版每次都 update+insert asset → 重複素材、重複計費）。
