@@ -8,6 +8,7 @@ import { isMockMode } from "../services/fal";
 import { proxyFetch } from "../services/http";
 import { ANY_LLM_MODEL } from "../services/llm";
 import { reserveQuota, refund } from "../services/points";
+import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable } from "../services/projectAcl";
 import { buildKnowledgeContext } from "./knowledge";
 
@@ -95,28 +96,32 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "沒有腳本可拆——請貼上腳本，或先在知識庫加入腳本/開示稿" });
   }
 
-  const createScenes = async (scenesData: z.infer<typeof sceneSplitSchema>) => {
-    const [{ maxOrder }] = await db
-      .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
-      .from(schema.scenes)
-      .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-    let order = Number(maxOrder);
-    const rows = await db
-      .insert(schema.scenes)
-      .values(
-        scenesData.map((s) => ({
-          projectId: project.id,
-          orderIndex: ++order,
-          title: s.title.slice(0, 60),
-          durationSec: s.durationSec ?? (project.format === "9:16" ? 4 : 5),
-          status: "todo",
-          prompt: s.prompt,
-          voiceover: s.voiceover,
-        })),
-      )
-      .returning();
-    return rows;
-  };
+  // 交易＋per-project advisory lock：兩個併發拆分鏡（雙編輯者／導演卡與助手同時）在 READ COMMITTED
+  // 下會讀到同一個 max(orderIndex)、插出重複序號（排序不定、move 互換失準）——上鎖後同專案建格全序列化
+  const createScenes = (scenesData: z.infer<typeof sceneSplitSchema>) =>
+    db.transaction(async (tx) => {
+      await lockSceneOrder(tx, project.id);
+      const [{ maxOrder }] = await tx
+        .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+      let order = Number(maxOrder);
+      const rows = await tx
+        .insert(schema.scenes)
+        .values(
+          scenesData.map((s) => ({
+            projectId: project.id,
+            orderIndex: ++order,
+            title: s.title.slice(0, 60),
+            durationSec: s.durationSec ?? (project.format === "9:16" ? 4 : 5),
+            status: "todo",
+            prompt: s.prompt,
+            voiceover: s.voiceover,
+          })),
+        )
+        .returning();
+      return rows;
+    });
 
   // 假模式：確定性切幕（依段落）——不花錢可測
   if (isMockMode()) {

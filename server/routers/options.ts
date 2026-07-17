@@ -5,6 +5,7 @@ import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { OPTION_TYPES, PLATFORM_FORMATS, type OptionType, type GroupOption } from "../../shared/options";
 import { ensureGroupOptions, getGroupOptions } from "../services/optionsStore";
+import { isUniqueViolation } from "../services/generationCore";
 
 const optionTypeSchema = z.enum(OPTION_TYPES as [OptionType, ...OptionType[]]);
 
@@ -107,19 +108,28 @@ export const optionsRouter = router({
         value = "custom-" + Math.random().toString(36).slice(2, 8);
       }
       const maxSort = siblings.reduce((m, s) => Math.max(m, s.sortOrder), -1);
-      const [created] = await db
-        .insert(schema.groupOptions)
-        .values({
-          groupId: input.groupId,
-          type: input.type,
-          value,
-          label,
-          format,
-          sortOrder: maxSort + 1,
-          createdBy: ctx.auth.user.id,
-        })
-        .returning();
-      return projectOption(created);
+      try {
+        const [created] = await db
+          .insert(schema.groupOptions)
+          .values({
+            groupId: input.groupId,
+            type: input.type,
+            value,
+            label,
+            format,
+            sortOrder: maxSort + 1,
+            createdBy: ctx.auth.user.id,
+          })
+          .returning();
+        return projectOption(created);
+      } catch (err) {
+        // 上方 siblings.some() 只擋得住循序請求——雙擊/兩位組長同時新增同名時彼此看不到對方,
+        // 由 ensure.ts 建的 (group_id,type,value) 唯一索引兜底,23505 轉人話（與循序撞名同一句）
+        if (isUniqueViolation(err)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "已經有同名的選項了" });
+        }
+        throw err;
+      }
     }),
 
   /** 停用／啟用（軟隱藏，既有專案已存的值仍可顯示） */

@@ -137,6 +137,14 @@ const DESCRIBE_TITLE_PREFIX = "圖片描述";
 /** 給視覺模型的固定指令：繁中、面向影片創作的完整盤點（場景／人物／光線／氛圍／可見文字） */
 const DESCRIBE_PROMPT = "請以繁體中文詳細描述這張圖片（場景、人物、光線、氛圍、可見文字），供影片創作參考";
 
+/**
+ * describeImageAsset 的 per-asset 進行中去重（併發原子冪等，核心缺陷審查）：
+ * 「先查 dup 再插入」非原子——雙擊/併發兩請求都查不到彼此、各扣一次點、各建一筆重複描述。
+ * 同素材的第二個併發請求直接等第一個的 Promise 拿同一結果，零扣點零重複列。
+ * 記憶體鎖與本檔節流/realtime 同一「單容器」部署假設；完成即刪 key，不會無界成長。
+ */
+const describeInFlight = new Map<string, Promise<{ id: string; title: string; content: string }>>();
+
 // 記憶體節流（比照 assistant/director 的模式，但獨立計數器、不跨檔共用）：每人每分鐘 6 次，擋狂刷付費視覺模型
 const DESCRIBE_LIMIT_PER_MIN = 6;
 const DESCRIBE_WINDOW_MS = 60_000;
@@ -426,78 +434,91 @@ export const knowledgeRouter = router({
     await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3：檢視者不能寫知識庫
     if (asset.kind !== "image") throw new TRPCError({ code: "BAD_REQUEST", message: "只支援圖片素材" });
 
-    // 防重複（冪等）：同素材已有未刪除、標題以「圖片描述」開頭的筆 → 直接回它、不再扣點。
-    // 標題前綴用來區分「AI 描述筆」與「使用者手動引用同素材建的筆」（後者不該擋 AI 描述）；
-    // 前一筆若已丟回收桶則放行重新產生（與 addFromAsset 的去重哲學一致）。
-    const [dup] = await db
-      .select()
-      .from(schema.knowledge)
-      .where(
-        and(
-          eq(schema.knowledge.sourceAssetId, asset.id),
-          isNull(schema.knowledge.deletedAt),
-          like(schema.knowledge.title, `${DESCRIBE_TITLE_PREFIX}%`),
-        ),
-      );
-    if (dup) return { id: dup.id, title: dup.title, content: dup.content };
+    // 併發原子冪等：同素材已有進行中的描述工作 → 直接等它的結果（不扣點、不重複建筆）
+    const inflight = describeInFlight.get(asset.id);
+    if (inflight) return inflight;
+    const job = (async (): Promise<{ id: string; title: string; content: string }> => {
 
-    const title = `${DESCRIBE_TITLE_PREFIX}｜${asset.title.slice(0, 60)}`;
-    let content: string;
-    if (isMockMode()) {
-      // 假模式：不扣點，用固定示範文字跑通「描述 → 入庫 → 注入」全流程（與 fal/assistant 的 mock 哲學一致）
-      content = `（示範描述）這是一張與專案相關的圖片素材：${asset.title}。正式模式會由視覺模型產生詳細中文描述。`;
-    } else {
-      if (!VISION_MODEL) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "目前沒有可用的視覺模型" });
-      const points = VISION_MODEL.points;
-      // 先扣後呼叫、失敗退回——與 assistant/generationCore 同一守門哲學（點數＝真金，不可先跑再說）
-      const quotaError = await reserveQuota(ctx.auth.user.id, asset.groupId, points, "圖片描述入知識庫");
-      if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
-      // 圖片網址：本地檔 → 簽名網址（fal 要能從外部抓到圖，與 generationCore 來源素材同模式）；
-      // 純外部素材直接用其網址，但必須是 http(s) 否則模型抓不到——擋下並退點
-      const imageUrl = asset.storagePath ? signAssetUrl(asset.id) : asset.url;
-      if (!imageUrl.startsWith("http")) {
-        await refund(ctx.auth.user.id, asset.groupId, points, "圖片描述失敗退回");
-        throw new TRPCError({ code: "BAD_REQUEST", message: "這個素材沒有可存取的圖片網址" });
+      // 防重複（冪等）：同素材已有未刪除、標題以「圖片描述」開頭的筆 → 直接回它、不再扣點。
+      // 標題前綴用來區分「AI 描述筆」與「使用者手動引用同素材建的筆」（後者不該擋 AI 描述）；
+      // 前一筆若已丟回收桶則放行重新產生（與 addFromAsset 的去重哲學一致）。
+      const [dup] = await db
+        .select()
+        .from(schema.knowledge)
+        .where(
+          and(
+            eq(schema.knowledge.sourceAssetId, asset.id),
+            isNull(schema.knowledge.deletedAt),
+            like(schema.knowledge.title, `${DESCRIBE_TITLE_PREFIX}%`),
+          ),
+        );
+      if (dup) return { id: dup.id, title: dup.title, content: dup.content };
+
+      const title = `${DESCRIBE_TITLE_PREFIX}｜${asset.title.slice(0, 60)}`;
+      let content: string;
+      if (isMockMode()) {
+        // 假模式：不扣點，用固定示範文字跑通「描述 → 入庫 → 注入」全流程（與 fal/assistant 的 mock 哲學一致）
+        content = `（示範描述）這是一張與專案相關的圖片素材：${asset.title}。正式模式會由視覺模型產生詳細中文描述。`;
+      } else {
+        if (!VISION_MODEL) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "目前沒有可用的視覺模型" });
+        const points = VISION_MODEL.points;
+        // 先扣後呼叫、失敗退回——與 assistant/generationCore 同一守門哲學（點數＝真金，不可先跑再說）
+        const quotaError = await reserveQuota(ctx.auth.user.id, asset.groupId, points, "圖片描述入知識庫");
+        if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+        // 圖片網址：本地檔 → 簽名網址（fal 要能從外部抓到圖，與 generationCore 來源素材同模式）；
+        // 純外部素材直接用其網址，但必須是 http(s) 否則模型抓不到——擋下並退點
+        const imageUrl = asset.storagePath ? signAssetUrl(asset.id) : asset.url;
+        if (!imageUrl.startsWith("http")) {
+          await refund(ctx.auth.user.id, asset.groupId, points, "圖片描述失敗退回");
+          throw new TRPCError({ code: "BAD_REQUEST", message: "這個素材沒有可存取的圖片網址" });
+        }
+        // 同步呼叫 fal（比照 assistant.ask 的 proxyFetch 寫法）。URL 不能寫死 any-llm：
+        // 目錄裡推薦的視覺模型（moondream 系）是獨立端點、any-llm 視覺款的 endpoint 是
+        // fal-ai/any-llm/vision——一律取「該模型的佇列端點」對應的 fal.run 同步路徑。
+        // body 由目錄的 entry.input() 產生（any-llm 款自帶 model+image_url、moondream 款只有
+        // prompt+image_url）——模型輸入形狀的單一真相來源在目錄，這裡不重複手拼。
+        const falUrl = `https://fal.run/${VISION_MODEL.endpoint ?? VISION_MODEL.id.split("#")[0]}`;
+        try {
+          const res = await proxyFetch(falUrl, {
+            method: "POST",
+            headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify(VISION_MODEL.input(DESCRIBE_PROMPT, "16:9", imageUrl)),
+            timeoutMs: 60_000,
+          });
+          if (!res.ok) throw new Error(`vision ${res.status}`);
+          const data = (await res.json()) as Record<string, unknown>;
+          // 各家輸出欄位不一（output／text／results…）：用生成管線同一支統一解析器，不自己再猜一次
+          const text = (extractResult(data).text ?? "").trim();
+          if (!text) throw new Error("模型沒回描述");
+          content = text.slice(0, MAX_DESCRIPTION);
+        } catch {
+          // 沒拿到描述就不收錢：退點＋人話錯誤（比照 assistant.ask 的失敗收尾）
+          await refund(ctx.auth.user.id, asset.groupId, points, "圖片描述失敗退回");
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "視覺模型暫時沒回應，請稍後再試（點數已退回）" });
+        }
       }
-      // 同步呼叫 fal（比照 assistant.ask 的 proxyFetch 寫法）。URL 不能寫死 any-llm：
-      // 目錄裡推薦的視覺模型（moondream 系）是獨立端點、any-llm 視覺款的 endpoint 是
-      // fal-ai/any-llm/vision——一律取「該模型的佇列端點」對應的 fal.run 同步路徑。
-      // body 由目錄的 entry.input() 產生（any-llm 款自帶 model+image_url、moondream 款只有
-      // prompt+image_url）——模型輸入形狀的單一真相來源在目錄，這裡不重複手拼。
-      const falUrl = `https://fal.run/${VISION_MODEL.endpoint ?? VISION_MODEL.id.split("#")[0]}`;
-      try {
-        const res = await proxyFetch(falUrl, {
-          method: "POST",
-          headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify(VISION_MODEL.input(DESCRIBE_PROMPT, "16:9", imageUrl)),
-          timeoutMs: 60_000,
-        });
-        if (!res.ok) throw new Error(`vision ${res.status}`);
-        const data = (await res.json()) as Record<string, unknown>;
-        // 各家輸出欄位不一（output／text／results…）：用生成管線同一支統一解析器，不自己再猜一次
-        const text = (extractResult(data).text ?? "").trim();
-        if (!text) throw new Error("模型沒回描述");
-        content = text.slice(0, MAX_DESCRIPTION);
-      } catch {
-        // 沒拿到描述就不收錢：退點＋人話錯誤（比照 assistant.ask 的失敗收尾）
-        await refund(ctx.auth.user.id, asset.groupId, points, "圖片描述失敗退回");
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "視覺模型暫時沒回應，請稍後再試（點數已退回）" });
-      }
+
+      // 入庫成 note：記 sourceAssetId（防重複＋回溯來源圖），之後自動被 buildKnowledgeContext 注入
+      const [row] = await db
+        .insert(schema.knowledge)
+        .values({
+          projectId: asset.projectId,
+          groupId: asset.groupId,
+          kind: "note",
+          title,
+          content,
+          sourceAssetId: asset.id,
+          createdBy: ctx.auth.user.id,
+        })
+        .returning();
+      return { id: row.id, title: row.title, content: row.content };
+
+    })(); // 見上方 describeInFlight：dup 檢查→扣點→fal→入庫整段對同素材序列化
+    describeInFlight.set(asset.id, job);
+    try {
+      return await job;
+    } finally {
+      describeInFlight.delete(asset.id);
     }
-
-    // 入庫成 note：記 sourceAssetId（防重複＋回溯來源圖），之後自動被 buildKnowledgeContext 注入
-    const [row] = await db
-      .insert(schema.knowledge)
-      .values({
-        projectId: asset.projectId,
-        groupId: asset.groupId,
-        kind: "note",
-        title,
-        content,
-        sourceAssetId: asset.id,
-        createdBy: ctx.auth.user.id,
-      })
-      .returning();
-    return { id: row.id, title: row.title, content: row.content };
   }),
 });

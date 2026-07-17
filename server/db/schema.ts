@@ -397,9 +397,10 @@ export const workflowRuns = pgTable("workflow_runs", {
  * 首次讀取時以 shared/options 的預設 lazy-seed；(groupId,type,value) 唯一，讓 seed 冪等。
  * worldview 類（tone/theme/style）value===label（直接是注入生成的字串）；kind/platform 的 value 是穩定 id。
  */
-// 註：不加 (group_id,type,value) DB 層 unique constraint——drizzle-kit pushSchema 對「已有資料
+// 註：(group_id,type,value) 唯一索引「不在此宣告」——drizzle-kit pushSchema 對「已有資料
 // 的表新增 unique」會觸發互動式 truncate 提問，在非 TTY 容器直接卡死開機（redeploy 才會爆）。
-// 冪等改由應用層保證：groups.optionsSeeded 旗標保證每組只 seed 一次、upsert 自行擋同名，已足夠。
+// 改由 ensure.ts 的 applyManualMigrations 在開機時「先去重再 create unique index if not exists」補上；
+// 應用層另有 optionsSeeded 原子認領（optionsStore）＋ upsert 23505 攔截，雙層防重。
 export const groupOptions = pgTable("group_options", {
   id: uuid("id").primaryKey().defaultRandom(),
   groupId: uuid("group_id").notNull(),
