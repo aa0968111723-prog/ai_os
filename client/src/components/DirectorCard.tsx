@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
@@ -7,6 +8,23 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
   const utils = trpc.useUtils();
   // 會扣組共享點數——成功後刷新點數徽章，別讓頂欄顯示舊值
   const suggest = trpc.director.suggest.useMutation({ onSuccess: () => utils.quota.my.invalidate() });
+  // 工作台深度整合：建議一鍵存成③的分鏡草稿（免費、不扣點），發想直接落地
+  const [savedIdx, setSavedIdx] = useState<Set<number>>(new Set());
+  const [savingIdx, setSavingIdx] = useState<number | null>(null);
+  const addDraft = trpc.scenes.addDraft.useMutation({
+    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+  });
+  const saveAsScene = async (i: number, s: { title: string; prompt: string }) => {
+    setSavingIdx(i);
+    try {
+      await addDraft.mutateAsync({ projectId, title: s.title.slice(0, 60), prompt: s.prompt });
+      setSavedIdx((prev) => new Set(prev).add(i));
+    } catch {
+      // addDraft.error 已顯示在卡片底部；不標記已存，讓使用者可重試
+    } finally {
+      setSavingIdx((cur) => (cur === i ? null : cur));
+    }
+  };
   return (
     <section className="card" data-fb="AI 導演卡">
       <h2>AI 導演建議</h2>
@@ -18,7 +36,7 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
           disabled={suggest.isPending}
           message="會請 AI 導演讀世界觀＋知識庫給 3 個分鏡 idea，約扣 1 點。"
           confirmLabel="開始發想"
-          onConfirm={() => suggest.mutate({ projectId })}
+          onConfirm={() => { setSavedIdx(new Set()); suggest.mutate({ projectId }); }}
         >
           {suggest.isPending ? "導演思考中…" : "給我 3 個分鏡 idea"}
         </ConfirmButton>
@@ -34,17 +52,37 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
           {suggest.data.fallback && (
             <p className="hint" style={{ fontSize: 12 }}>（AI 暫時沒回應，以下是通用建議）</p>
           )}
-          {suggest.data.suggestions.map((s, i) => (
-            <div key={i} className="gen-row" style={{ gridTemplateColumns: "1fr auto" }}>
-              <div>
-                <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>{s.title}</div>
-                <div className="meta" style={{ fontSize: "var(--fs-12)" }}>{s.prompt}</div>
+          {suggest.data.suggestions.map((s, i) => {
+            const saved = savedIdx.has(i);
+            const saving = savingIdx === i;
+            return (
+              <div key={i} className="gen-row" style={{ gridTemplateColumns: "1fr auto" }}>
+                <div>
+                  <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>{s.title}</div>
+                  <div className="meta" style={{ fontSize: "var(--fs-12)" }}>{s.prompt}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  <button className="btn-sm" onClick={() => onUse(s.prompt)} title="把提示詞帶到生成台，馬上生成">
+                    用這個
+                  </button>
+                  {/* 發想直接落地：建一格帶提示詞的草稿分鏡（不扣點），之後在③就地生成 */}
+                  <button
+                    className="btn-sm"
+                    disabled={saved || saving}
+                    title="在③分鏡列表建一格帶此提示詞的草稿（不扣點），之後可就地生成"
+                    onClick={() => saveAsScene(i, s)}
+                  >
+                    {saved ? (
+                      <><Icon name="Check" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />已存分鏡</>
+                    ) : saving ? "存入中…" : (
+                      <><Icon name="Clapperboard" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />存成分鏡</>
+                    )}
+                  </button>
+                </div>
               </div>
-              <button className="btn-sm" onClick={() => onUse(s.prompt)}>
-                用這個
-              </button>
-            </div>
-          ))}
+            );
+          })}
+          {addDraft.error && <p className="error">存成分鏡失敗：{addDraft.error.message}</p>}
         </div>
       )}
     </section>

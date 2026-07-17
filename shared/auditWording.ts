@@ -39,6 +39,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "quota.setApprovalThreshold": "調整審批門檻",
   "quota.setMemberOverride": "調整個人額度",
   // 分鏡與審批
+  "scenes.addDraft": "新增分鏡草稿",
   "scenes.addFromGeneration": "把成品加入分鏡",
   "scenes.setVisualFromGeneration": "設定分鏡畫面",
   "scenes.update": "更新分鏡",

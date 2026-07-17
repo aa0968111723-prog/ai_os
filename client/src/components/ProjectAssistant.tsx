@@ -77,6 +77,28 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
         問我這個專案的進度、生成了什麼、哪些分鏡還沒審、<b>該用哪個模型</b>…；回答前我會視需要查素材庫／分鏡／生成紀錄／模型目錄（唯讀，自動進行）。我也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流／貼腳本拆分鏡），你按確認才執行。每次提問約 1 點。
       </p>
 
+      {/* 快速提問（深度優化）：冷啟動不用想怎麼開口——點一顆帶入輸入框，按「問」才送出扣點 */}
+      {turns.length === 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+          {[
+            "這個專案進度到哪？",
+            "哪些分鏡還沒過審？",
+            "依目前素材與分鏡，建議下一步做什麼？",
+            "幫我推薦適合本專案的生成模型",
+          ].map((q) => (
+            <button
+              key={q}
+              type="button"
+              className="btn-sm"
+              title="點了帶入輸入框，按「問」才送出（約 1 點）"
+              onClick={() => setInput(q)}
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+
       {turns.length > 0 && (
         // role="log"＋aria-live：AI 回覆是非同步 push 進來的，沒有活躍區報讀器會完全靜音、
         // 使用者按「問」後以為沒反應（比照 MessagePanel 的既有寫法）

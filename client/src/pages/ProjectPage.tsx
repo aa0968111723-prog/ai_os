@@ -81,6 +81,100 @@ function StageLink({ text }: { text: string }) {
 }
 
 /**
+ * 陣列欄位的就地編輯器（世界觀進階層：人物／參考連結／禁忌事項）：
+ * chips 呈現現值（點 ✕ 移除）＋行內輸入新增（Enter 送出）。
+ * 後端上限：每欄 30 項、每項 100 字（worldviewSchema），前端同步把關。
+ */
+function TokenListEditor({
+  id,
+  label,
+  values,
+  placeholder,
+  readOnly,
+  hint,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  values: string[];
+  placeholder: string;
+  readOnly: boolean;
+  hint?: string;
+  onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const v = draft.trim().slice(0, 100);
+    if (!v || values.includes(v) || values.length >= 30) return;
+    onChange([...values, v]);
+    setDraft("");
+  };
+  return (
+    <>
+      <label id={`${id}-label`}>{label}{hint && <HelpTip text={hint} />}</label>
+      <div role="group" aria-labelledby={`${id}-label`}>
+        {values.map((v) => (
+          <span key={v} className="chip" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            {v}
+            {!readOnly && (
+              <button
+                type="button"
+                aria-label={`移除「${v}」`}
+                title="移除"
+                onClick={() => onChange(values.filter((x) => x !== v))}
+                style={{ padding: 0, border: "none", background: "none", boxShadow: "none", display: "inline-flex", cursor: "pointer", color: "inherit" }}
+              >
+                <Icon name="X" size={12} />
+              </button>
+            )}
+          </span>
+        ))}
+        {values.length === 0 && readOnly && <span className="hint">未設定</span>}
+        {!readOnly && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: "4px 6px 4px 0" }}>
+            <input
+              value={draft}
+              aria-label={`新增${label}`}
+              placeholder={values.length >= 30 ? "已達 30 項上限" : placeholder}
+              maxLength={100}
+              disabled={values.length >= 30}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+              onBlur={add}
+              style={{ width: 220, maxWidth: "100%", fontSize: "var(--fs-13)", padding: "4px 10px" }}
+            />
+          </span>
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * 生成時勾選的角色/場景 id 持久化（深度優化）：原本存 useState，重整頁面默默歸零，
+ * 使用者以為還會注入定裝其實沒有。改存 localStorage（per 專案），並在清單載入後
+ * 清掉已被刪除的 id（避免送出失效引用）。
+ */
+function usePersistedIds(key: string): [string[], (updater: (prev: string[]) => string[]) => void] {
+  const [ids, setIds] = useState<string[]>(() => {
+    try {
+      const raw = window.localStorage.getItem(key);
+      const arr = raw ? (JSON.parse(raw) as unknown) : [];
+      return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  const update = (updater: (prev: string[]) => string[]) =>
+    setIds((prev) => {
+      const next = updater(prev);
+      try { window.localStorage.setItem(key, JSON.stringify(next)); } catch { /* 無痕模式等：持久化只是加分 */ }
+      return next;
+    });
+  return [ids, update];
+}
+
+/**
  * 選項就地新增（工作台一體化）：世界觀 chips 旁的「＋新增」——組長不必再繞去「選項」頁，
  * 直接在工作台加一個調性／主軸／風格選項，加完全組立即可用、並自動幫本專案勾上。
  * 後端仍走同一個 options.upsert（組長以上限定、同名防撞）。
@@ -210,11 +304,11 @@ export function ProjectPage({ id }: { id: string }) {
   const [sourceUrl, setSourceUrl] = useState("");
   /** 外部網址 onBlur 預檢結果（new URL()，需 http/https）；非空時生成鈕會鎖住 */
   const [sourceUrlError, setSourceUrlError] = useState("");
-  /** 生成時要帶入的角色定裝卡（跨鏡一致） */
-  const [charIds, setCharIds] = useState<string[]>([]);
+  /** 生成時要帶入的角色定裝卡（跨鏡一致）——持久化，重整不歸零 */
+  const [charIds, setCharIds] = usePersistedIds(`aios.pick.chars.${id}`);
   const toggleChar = (cid: string) => setCharIds((prev) => (prev.includes(cid) ? prev.filter((x) => x !== cid) : [...prev, cid]));
-  /** 生成時要帶入的場景設定卡（色板/光線一致） */
-  const [sceneIds, setSceneIds] = useState<string[]>([]);
+  /** 生成時要帶入的場景設定卡（色板/光線一致）——持久化，重整不歸零 */
+  const [sceneIds, setSceneIds] = usePersistedIds(`aios.pick.scenes.${id}`);
   const toggleScene = (sid: string) => setSceneIds((prev) => (prev.includes(sid) ? prev.filter((x) => x !== sid) : [...prev, sid]));
   const assets = trpc.projects.assets.useQuery({ projectId: id });
   // 留言未讀數（餵 TocNav ③分鏡・交付 徽章）：15 秒輪詢已夠即時，同房夥伴留言另有 WS invalidate 立即刷新
@@ -226,6 +320,26 @@ export function ProjectPage({ id }: { id: string }) {
   const knowledge = trpc.knowledge.list.useQuery({ projectId: id });
   const characters = trpc.characters.list.useQuery({ projectId: id });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId: id });
+  // 勾選持久化的清理：清單載入後移除已被刪除的角色/場景 id（沒變就不 set，避免每次 refetch 都重渲染）
+  useEffect(() => {
+    const list = characters.data;
+    if (!list) return;
+    setCharIds((prev) => {
+      const next = prev.filter((cid) => list.some((c) => c.id === cid));
+      return next.length === prev.length ? prev : next;
+    });
+    // setCharIds 是穩定的 setState 包裝，不入依賴
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characters.data]);
+  useEffect(() => {
+    const list = scenePresets.data;
+    if (!list) return;
+    setSceneIds((prev) => {
+      const next = prev.filter((sid) => list.some((s) => s.id === sid));
+      return next.length === prev.length ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenePresets.data]);
   /** 引導步驟列收合狀態（全部完成後可整條收起，不佔版面） */
   const [onboardCollapsed, setOnboardCollapsed] = useState(false);
   /** 生成確認彈窗：先估點數、使用者點頭才真的送出、扣點 */
@@ -624,25 +738,66 @@ export function ProjectPage({ id }: { id: string }) {
                 選項可直接按各列的「＋新增」加；改名／停用／排序在 <Link href="/options">選項整理頁</Link>。
               </p>
             )}
-            {/* 進階欄位唯讀一覽：讓大家看見生成時實際會被帶入哪些設定 */}
+            {/* 進階層全面可編輯（深度優化：後端 updateWorldview 早支援 partial patch，前端不再唯讀）——
+                目標觀眾/三幕結構供 AI 導演參考；禁忌事項會自動注入每次生成 */}
             <details style={{ marginTop: 10 }}>
-              <summary style={{ cursor: "pointer", fontSize: 13 }}>進階設定（唯讀）</summary>
-              <div className="hint" style={{ marginTop: 6, lineHeight: 1.9 }}>
-                <div>目標觀眾：{wv.audience.trim() || "未設定"}</div>
-                <div>視覺風格：{wv.styles.length ? wv.styles.join("、") : "未設定"}</div>
-                <div>
-                  三幕結構：
-                  {[
-                    wv.acts.hook && `鉤子「${wv.acts.hook}」`,
-                    wv.acts.turn && `轉折「${wv.acts.turn}」`,
-                    wv.acts.cta && `行動呼籲「${wv.acts.cta}」`,
-                  ].filter(Boolean).join("・") || "未設定"}
-                </div>
-                <div>人物：{wv.people.length ? wv.people.join("、") : "未設定"}</div>
-                <div>參考連結：{wv.references.length ? wv.references.join("、") : "未設定"}</div>
-                <div>禁忌事項：{wv.taboos.length ? wv.taboos.join("；") : "未設定"}</div>
-                <p className="hint" style={{ marginTop: 4, fontSize: 12 }}>
-                  視覺風格與禁忌事項會自動注入每次生成的提示詞；其他欄位供 AI 導演與團隊參考。編輯功能之後開放。
+              <summary style={{ cursor: "pointer", fontSize: 13 }}>進階設定（目標觀眾・三幕結構・人物・參考・禁忌）</summary>
+              <div style={{ marginTop: 6 }}>
+                <label htmlFor="wv-audience">目標觀眾（供 AI 導演參考）</label>
+                <input
+                  id="wv-audience"
+                  defaultValue={wv.audience}
+                  readOnly={!canEdit}
+                  placeholder="例：初次接觸禪修、想在忙碌生活裡找安定的年輕人與家庭"
+                  onBlur={(e) => canEdit && e.target.value !== wv.audience && updateWv.mutate({ id, worldview: { audience: e.target.value } })}
+                />
+                <label>三幕結構（鉤子 → 轉折 → 行動呼籲）<HelpTip text="片子的敘事骨架：開場怎麼抓住人、中段怎麼轉、結尾請觀眾做什麼。供 AI 導演發想分鏡時參考。" /></label>
+                {([
+                  ["hook", "鉤子", "例：清晨禪堂前庭，安倢撐著紅傘走進柔和晨光"],
+                  ["turn", "轉折", "例：慕恩在書架旁翻閱善本，浮躁被慢慢安放"],
+                  ["cta", "行動呼籲", "例：把心交給佛，留白處給觀眾一個字卡的位置"],
+                ] as const).map(([field, label, ph]) => (
+                  <input
+                    key={field}
+                    aria-label={`三幕結構：${label}`}
+                    defaultValue={wv.acts[field]}
+                    readOnly={!canEdit}
+                    placeholder={`${label}——${ph}`}
+                    style={{ marginTop: 6 }}
+                    onBlur={(e) =>
+                      canEdit && e.target.value !== wv.acts[field] &&
+                      // acts 是巢狀物件，partial patch 是淺合併——要送完整 acts，只改這一欄
+                      updateWv.mutate({ id, worldview: { acts: { ...wv.acts, [field]: e.target.value } } })
+                    }
+                  />
+                ))}
+                <TokenListEditor
+                  id="wv-people"
+                  label="人物（供 AI 導演參考）"
+                  values={wv.people}
+                  placeholder="例：安倢＝紅傘、米白外套（Enter 加入）"
+                  readOnly={!canEdit}
+                  onChange={(next) => updateWv.mutate({ id, worldview: { people: next } })}
+                />
+                <TokenListEditor
+                  id="wv-references"
+                  label="參考連結"
+                  values={wv.references}
+                  placeholder="貼上參考影片/文章網址（Enter 加入）"
+                  readOnly={!canEdit}
+                  onChange={(next) => updateWv.mutate({ id, worldview: { references: next } })}
+                />
+                <TokenListEditor
+                  id="wv-taboos"
+                  label="禁忌事項（自動注入每次生成）"
+                  hint="這裡的每一條都會加進生成提示詞，要求 AI 避開；刪除前請與組長確認。"
+                  values={wv.taboos}
+                  placeholder="例：不得出現可讀文字、招牌一律後製（Enter 加入）"
+                  readOnly={!canEdit}
+                  onChange={(next) => updateWv.mutate({ id, worldview: { taboos: next } })}
+                />
+                <p className="hint" style={{ marginTop: 8, fontSize: 12 }}>
+                  視覺風格與禁忌事項會自動注入每次生成的提示詞；其他欄位供 AI 導演與團隊參考。
                 </p>
               </div>
             </details>
@@ -812,6 +967,17 @@ export function ProjectPage({ id }: { id: string }) {
                   {sceneIds.length > 0 && <>・{sceneIds.length} 個場景設定</>}
                 </p>
                 <p style={{ margin: "4px 0", fontSize: 13 }}>提示詞：{prompt.trim().slice(0, 80)}{prompt.trim().length > 80 ? "…" : ""}</p>
+                {/* 注入透明化（深度優化）：花錢前看得見世界觀實際會帶進哪些東西，不再是黑盒 */}
+                {(wv.tones.length > 0 || wv.styles.length > 0 || wv.taboos.length > 0) && (
+                  <p className="hint" style={{ margin: "4px 0", fontSize: 12 }}>
+                    自動注入：
+                    {[
+                      wv.tones.length ? `調性（${wv.tones.join("、")}）` : "",
+                      wv.styles.length ? `風格（${wv.styles.join("、")}）` : "",
+                      wv.taboos.length ? `禁忌 ${wv.taboos.length} 條` : "",
+                    ].filter(Boolean).join("・")}
+                  </p>
+                )}
                 <p style={{ margin: "8px 0" }}>
                   預估 <b style={{ color: "var(--primary-ink)", fontSize: 18 }}>約 {model.points} 點</b>
                   {quota.data && (
