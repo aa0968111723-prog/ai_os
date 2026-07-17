@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
@@ -8,9 +8,11 @@ import { MentionInput, resolveMentions } from "../components/MentionInput";
 import { flashAnchor, takePlannerFocus } from "../discuss";
 
 /**
- * 筆記排程（需求 #10）：組內共用的「排程表＋會議筆記」一頁。
- * 上半是組排程（可掛專案、可匯出 .ics 到個人日曆），下半是筆記／會議紀錄
- * （內容更新由後端自動留版本快照）。groupId 由 App 頂欄的組別選單傳入。
+ * 筆記排程（需求 #10）：組內共用的「排程表＋會議筆記＋知識地圖」一頁。
+ * - 組排程：可掛專案、可匯出 .ics 到個人日曆；清單／月曆兩種檢視（真實日曆）。
+ * - 筆記／會議紀錄：內容更新由後端自動留版本快照；可「從知識庫匯入」把專案知識帶進筆記。
+ * - 知識地圖（心智圖）：把專案／筆記／行程織成一張放射圖，並可用「全組／我的／專案」三種鏡頭聚焦。
+ * groupId 由 App 頂欄的組別選單傳入。
  */
 
 /** 排程列的形狀（依 schedule.list 契約；superjson 下日期是 Date，顯示前仍防禦性包 new Date） */
@@ -23,9 +25,27 @@ type ScheduleItem = {
   note: string | null;
   ownerId: string | null;
   ownerName: string | null;
+  createdBy?: string;
   sourceMessageId?: string | null;
   mentions?: string[] | null;
 };
+
+/** 筆記清單列的形狀（依 notes.list 契約） */
+type NoteItem = {
+  id: string;
+  projectId: string | null;
+  title: string;
+  chars: number;
+  excerpt: string;
+  updatedAt: string | Date;
+  createdBy: string;
+  creatorName: string;
+  sourceMessageId?: string | null;
+  mentions?: string[] | null;
+};
+
+/** 「團隊／個人／專案」三種鏡頭：全組看全部、我的＝我建立或被 @、專案＝聚焦某一專案。 */
+type Lens = "all" | "mine" | "mentioned";
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 /** HH:mm（排程清單的時間欄） */
@@ -36,6 +56,10 @@ function fmtTime(d: string | Date): string {
 /** 日期＋時分（筆記的更新時間） */
 function fmtDateTime(d: string | Date): string {
   return `${new Date(d).toLocaleDateString("zh-TW")} ${fmtTime(d)}`;
+}
+/** 本地日期鍵 YYYY-M-D（月曆把行程歸到哪一天用；用本地時區，不用 toISOString 以免跨日偏移） */
+function dayKey(d: Date): string {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
 export function PlannerPage({ groupId }: { groupId: string }) {
@@ -65,10 +89,11 @@ export function PlannerPage({ groupId }: { groupId: string }) {
   return (
     <div>
       <h1>筆記排程</h1>
-      <p className="hint">全組共用的行程表與會議紀錄：排程可匯出到個人日曆；筆記內容更新會自動保留版本快照。</p>
+      <p className="hint">全組共用的行程表與會議紀錄：排程可切清單／月曆並匯出到個人日曆；筆記可從知識庫匯入；知識地圖把三者織成一張心智圖。</p>
       {/* key 綁組別：切換作用組時整卡重掛，表單草稿不會帶到別的組 */}
       <ScheduleCard key={`sch-${groupId}`} groupId={groupId} />
       <NotesCard key={`note-${groupId}`} groupId={groupId} />
+      <KnowledgeMapCard key={`map-${groupId}`} groupId={groupId} />
       <p style={{ marginTop: 24 }}>
         <Link href="/">回作業台</Link>
       </p>
@@ -76,12 +101,14 @@ export function PlannerPage({ groupId }: { groupId: string }) {
   );
 }
 
-/* ────────────────────────── (1) 組排程 ────────────────────────── */
+/* ────────────────────────── (1) 組排程（清單／月曆） ────────────────────────── */
 
 function ScheduleCard({ groupId }: { groupId: string }) {
   const utils = trpc.useUtils();
+  const [view, setView] = useState<"list" | "calendar">("list");
   const [includePast, setIncludePast] = useState(false);
-  const list = trpc.schedule.list.useQuery({ groupId, includePast });
+  // 清單檢視吃 includePast 開關；月曆檢視固定拉全部（含過去），才畫得出任意月份
+  const list = trpc.schedule.list.useQuery({ groupId, includePast: view === "calendar" ? true : includePast });
   // 專案下拉＋列表上的專案名對照；與筆記卡同 key，react-query 只會打一次
   const projects = trpc.projects.list.useQuery({ groupId });
   const members = trpc.projects.groupMembers.useQuery({ groupId }).data ?? [];
@@ -129,10 +156,11 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   };
 
   const projectTitleOf = (pid: string | null) => (pid ? (projects.data ?? []).find((p) => p.id === pid)?.title ?? null : null);
+  const items = (list.data ?? []) as ScheduleItem[];
 
   // 依日期分組（list 已按 startsAt 升冪，同一天必相鄰，掃一遍即可）
   const groups: Array<{ label: string; items: ScheduleItem[] }> = [];
-  for (const ev of (list.data ?? []) as ScheduleItem[]) {
+  for (const ev of items) {
     const label = new Date(ev.startsAt).toLocaleDateString("zh-TW");
     const last = groups[groups.length - 1];
     if (last && last.label === label) last.items.push(ev);
@@ -141,20 +169,33 @@ function ScheduleCard({ groupId }: { groupId: string }) {
 
   return (
     <section className="card" style={{ marginTop: 16 }} data-fb="排程卡">
-      <h2>組排程</h2>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0 }}>組排程</h2>
+        {/* 清單／月曆切換（真實日曆）：段落式切換鈕 */}
+        <div className="seg" role="tablist" aria-label="排程檢視" style={{ marginLeft: "auto" }}>
+          <button role="tab" aria-selected={view === "list"} className={view === "list" ? "on" : ""} onClick={() => setView("list")}>
+            <Icon name="FileText" size={13} /> 清單
+          </button>
+          <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "on" : ""} onClick={() => setView("calendar")}>
+            <Icon name="CalendarPlus" size={13} /> 月曆
+          </button>
+        </div>
+      </div>
       <p className="hint">拍攝、開會、上片時間都排在這裡，全組看同一份，不再翻對話記錄找時間。</p>
 
-      {/* 頂部工具列：.ics 匯出＋顯示過去行程 */}
+      {/* 頂部工具列：.ics 匯出＋（清單檢視）顯示過去行程 */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
         <a href={`/api/schedule/${groupId}/calendar.ics`} download style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <Icon name="Download" size={14} />匯出 .ics（匯入 Google 日曆）
         </a>
         <span className="hint" style={{ margin: 0 }}>下載後匯入個人日曆；內容更新請重新下載</span>
         <span className="spacer" />
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0 }} title="預設只顯示未來與最近 24 小時內的行程">
-          <input type="checkbox" checked={includePast} onChange={(e) => setIncludePast(e.target.checked)} />
-          顯示過去行程
-        </label>
+        {view === "list" && (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0 }} title="預設只顯示未來與最近 24 小時內的行程">
+            <input type="checkbox" checked={includePast} onChange={(e) => setIncludePast(e.target.checked)} />
+            顯示過去行程
+          </label>
+        )}
       </div>
 
       {/* 新增列 */}
@@ -194,7 +235,7 @@ function ScheduleCard({ groupId }: { groupId: string }) {
       {endInvalid && <p className="error" role="alert" style={{ marginTop: 6 }}>結束時間要晚於開始時間</p>}
       {add.error && <p className="error">{add.error.message}</p>}
 
-      {/* 清單：依日期分組 */}
+      {/* 內容區：清單 or 月曆 */}
       {list.isLoading ? (
         <div style={{ marginTop: 12 }} aria-hidden="true">
           {[0, 1, 2].map((i) => (
@@ -205,6 +246,8 @@ function ScheduleCard({ groupId }: { groupId: string }) {
         </div>
       ) : list.error ? (
         <p className="error">{list.error.message}</p>
+      ) : view === "calendar" ? (
+        <CalendarView items={items} projectTitleOf={projectTitleOf} onDelete={(id) => remove.mutate({ id })} removing={remove.isPending} />
       ) : groups.length === 0 ? (
         <div className="empty-state" style={{ marginTop: 12 }}>
           <h3>{includePast ? "還沒有任何行程" : "接下來沒有排程"}</h3>
@@ -261,7 +304,145 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   );
 }
 
-/* ─────────────────────── (2) 筆記・會議紀錄 ─────────────────────── */
+/** 月曆檢視：真正的月份網格（週日起始），行程落在各自那天；點某天在下方展開當日行程。 */
+function CalendarView({
+  items,
+  projectTitleOf,
+  onDelete,
+  removing,
+}: {
+  items: ScheduleItem[];
+  projectTitleOf: (pid: string | null) => string | null;
+  onDelete: (id: string) => void;
+  removing: boolean;
+}) {
+  const today = new Date();
+  const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  // 行程依「天」歸位（用開始時間的本地日）
+  const byDay = useMemo(() => {
+    const m = new Map<string, ScheduleItem[]>();
+    for (const ev of items) {
+      const k = dayKey(new Date(ev.startsAt));
+      (m.get(k) ?? m.set(k, []).get(k)!).push(ev);
+    }
+    for (const arr of m.values()) arr.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+    return m;
+  }, [items]);
+
+  // 6×7 月曆矩陣（含前後月補格）
+  const weeks = useMemo(() => {
+    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+    const gridStart = new Date(first);
+    gridStart.setDate(1 - first.getDay());
+    const out: Date[][] = [];
+    for (let w = 0; w < 6; w++) {
+      const row: Date[] = [];
+      for (let d = 0; d < 7; d++) {
+        const dt = new Date(gridStart);
+        dt.setDate(gridStart.getDate() + w * 7 + d);
+        row.push(dt);
+      }
+      out.push(row);
+    }
+    return out;
+  }, [cursor]);
+
+  const monthLabel = `${cursor.getFullYear()} 年 ${cursor.getMonth() + 1} 月`;
+  const todayKey = dayKey(today);
+  const selectedItems = selectedKey ? byDay.get(selectedKey) ?? [] : [];
+  const goMonth = (delta: number) => {
+    setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
+    setSelectedKey(null);
+  };
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <button className="btn-sm" onClick={() => goMonth(-1)} aria-label="上個月">
+          <Icon name="ChevronRight" size={14} style={{ transform: "rotate(180deg)" }} />
+        </button>
+        <strong style={{ fontSize: "var(--fs-15)" }}>{monthLabel}</strong>
+        <button className="btn-sm" onClick={() => goMonth(1)} aria-label="下個月">
+          <Icon name="ChevronRight" size={14} />
+        </button>
+        <button className="btn-sm btn-ghost" onClick={() => { setCursor(new Date(today.getFullYear(), today.getMonth(), 1)); setSelectedKey(null); }}>
+          回本月
+        </button>
+      </div>
+      <div className="cal-grid">
+        {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
+          <div key={d} className="cal-head">{d}</div>
+        ))}
+        {weeks.flat().map((dt) => {
+          const k = dayKey(dt);
+          const inMonth = dt.getMonth() === cursor.getMonth();
+          const evs = byDay.get(k) ?? [];
+          const isToday = k === todayKey;
+          const isSel = k === selectedKey;
+          return (
+            <button
+              key={k}
+              type="button"
+              className={`cal-cell${inMonth ? "" : " out"}${isToday ? " today" : ""}${isSel ? " sel" : ""}`}
+              onClick={() => setSelectedKey(evs.length ? k : null)}
+              aria-label={`${dt.getMonth() + 1}/${dt.getDate()}${evs.length ? `，${evs.length} 筆行程` : ""}`}
+            >
+              <span className="cal-daynum">{dt.getDate()}</span>
+              <span className="cal-events">
+                {evs.slice(0, 3).map((ev) => (
+                  <span key={ev.id} className="cal-ev" title={ev.title}>
+                    <span className="cal-ev-time">{fmtTime(ev.startsAt)}</span> {ev.title}
+                  </span>
+                ))}
+                {evs.length > 3 && <span className="cal-more">+{evs.length - 3}</span>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 選定某天 → 展開當日全部行程（含刪除、回連） */}
+      {selectedKey && selectedItems.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <h3 style={{ fontSize: "var(--fs-13)", color: "var(--fg-secondary)", margin: "0 0 2px" }}>
+            {new Date(selectedItems[0].startsAt).toLocaleDateString("zh-TW")}・{selectedItems.length} 筆
+          </h3>
+          {selectedItems.map((ev) => {
+            const projTitle = projectTitleOf(ev.projectId);
+            return (
+              <div key={ev.id} id={`schedule-${ev.id}`} className="gen-row" style={{ gridTemplateColumns: "auto 1fr auto", alignItems: "center" }}>
+                <span className="mono" style={{ fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
+                  <Icon name="Clock" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                  {fmtTime(ev.startsAt)}{ev.endsAt ? `–${fmtTime(ev.endsAt)}` : ""}
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
+                    {ev.title}
+                    {projTitle && <span className="chip" style={{ margin: "0 0 0 8px" }}>{projTitle}</span>}
+                  </div>
+                  {(ev.note || ev.ownerName) && <div className="meta">{[ev.ownerName, ev.note].filter(Boolean).join("・")}</div>}
+                </div>
+                <ConfirmButton
+                  onConfirm={() => onDelete(ev.id)}
+                  message={`刪除行程「${ev.title}」？`}
+                  triggerClassName="btn-sm"
+                  triggerStyle={{ color: "var(--danger-ink)" }}
+                  disabled={removing}
+                >
+                  刪除
+                </ConfirmButton>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────── (2) 筆記・會議紀錄（可從知識庫匯入） ─────────────────────── */
 
 function NotesCard({ groupId }: { groupId: string }) {
   const utils = trpc.useUtils();
@@ -352,7 +533,7 @@ function NotesCard({ groupId }: { groupId: string }) {
   return (
     <section className="card" style={{ marginTop: 16 }} data-fb="筆記卡">
       <h2>筆記・會議紀錄</h2>
-      <p className="hint">會議決議、待辦、想法都記在這裡，全組共用；內容更新會自動保留版本快照，不怕改壞。</p>
+      <p className="hint">會議決議、待辦、想法都記在這裡，全組共用；內容更新會自動保留版本快照，不怕改壞。可從專案知識庫一鍵匯入既有內容。</p>
 
       {list.isLoading ? (
         <div style={{ marginTop: 8 }} aria-hidden="true">
@@ -429,6 +610,22 @@ function NotesCard({ groupId }: { groupId: string }) {
           {/* 即時字數（與知識庫同款）：maxLength 會把超長貼上靜默截尾，計數＋觸頂警示讓截斷不再無聲 */}
           {contentReady && <CharCount value={content} max={40000} />}
           <p className="hint" style={{ marginTop: 4 }}>（編輯中的內容會自動暫存在本機——切組、重整、手機切換都不會不見）</p>
+
+          {/* 從知識庫匯入：把某專案知識庫的一筆全文附加到內容尾端（4.4「匯入知識」） */}
+          {contentReady && (
+            <KnowledgeImport
+              projects={projects.data ?? []}
+              disabled={saving}
+              onImport={(imported, kbTitle) => {
+                const block = `【知識庫：${kbTitle}】\n${imported}`;
+                const next = content.trim() ? `${content.trimEnd()}\n\n${block}` : block;
+                // 匯入可能讓內容超過 40000 字上限——與 textarea maxLength 一致，先在此截斷不靜默溢出
+                setContent(next.slice(0, 40000));
+                if (!title.trim()) setTitle(kbTitle.slice(0, 120));
+              }}
+            />
+          )}
+
           <label htmlFor="note-project">掛在專案（選填）</label>
           <select
             id="note-project"
@@ -462,6 +659,301 @@ function NotesCard({ groupId }: { groupId: string }) {
         <button style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={openNew}>
           <Icon name="Plus" size={14} />新增筆記
         </button>
+      )}
+    </section>
+  );
+}
+
+/** 從知識庫匯入：選專案 → 選一筆知識 → 把全文附加到筆記內容（用 utils.knowledge.get 取全文）。 */
+function KnowledgeImport({
+  projects,
+  disabled,
+  onImport,
+}: {
+  projects: Array<{ id: string; title: string }>;
+  disabled: boolean;
+  onImport: (content: string, title: string) => void;
+}) {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const [pid, setPid] = useState("");
+  const [kid, setKid] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const kb = trpc.knowledge.list.useQuery({ projectId: pid }, { enabled: open && !!pid });
+
+  const doImport = async () => {
+    if (!kid) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const full = await utils.knowledge.get.fetch({ id: kid });
+      onImport(full.content, full.title);
+      setKid("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "匯入失敗");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="btn-sm"
+        style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 6 }}
+        disabled={disabled || projects.length === 0}
+        title={projects.length === 0 ? "這個組還沒有專案知識庫可匯入" : undefined}
+        onClick={() => setOpen(true)}
+      >
+        <Icon name="Sparkles" size={13} />從知識庫匯入
+      </button>
+    );
+  }
+  return (
+    <div style={{ marginTop: 8, border: "1px solid var(--border-soft)", borderRadius: "var(--r-12)", padding: "var(--sp-12)", background: "var(--card2)" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Icon name="Sparkles" size={13} style={{ color: "var(--primary-ink)" }} />
+        <strong style={{ fontSize: "var(--fs-13)" }}>從知識庫匯入</strong>
+        <button type="button" className="btn-sm btn-ghost" style={{ marginLeft: "auto" }} onClick={() => setOpen(false)}>收合</button>
+      </div>
+      <p className="hint" style={{ marginTop: 4 }}>選一個專案的知識（開示稿／見證／腳本…），把全文附加到這則筆記的內容尾端。</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 6 }}>
+        <div style={{ flex: "1 1 180px" }}>
+          <label>專案</label>
+          <select value={pid} onChange={(e) => { setPid(e.target.value); setKid(""); }}>
+            <option value="">選專案…</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.title}</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ flex: "2 1 220px" }}>
+          <label>知識</label>
+          <select value={kid} disabled={!pid || kb.isLoading} onChange={(e) => setKid(e.target.value)}>
+            <option value="">{!pid ? "先選專案" : kb.isLoading ? "載入中…" : (kb.data?.length ?? 0) === 0 ? "此專案沒有知識" : "選一筆知識…"}</option>
+            {(kb.data ?? []).map((k) => (
+              <option key={k.id} value={k.id}>{k.title}（{k.chars.toLocaleString()} 字）</option>
+            ))}
+          </select>
+        </div>
+        <button type="button" className="primary btn-sm" disabled={!kid || busy || disabled} onClick={doImport}>
+          {busy ? "匯入中…" : "匯入到內容"}
+        </button>
+      </div>
+      {err && <p className="error">{err}</p>}
+    </div>
+  );
+}
+
+/* ─────────────────────── (3) 知識地圖・心智圖 ─────────────────────── */
+
+type MapLens = Lens;
+
+/**
+ * 知識地圖（心智圖）：中心＝這個組，往外一圈是「專案」與「組層級」節點，
+ * 再往外是掛在其下的筆記（藍）與行程（琥珀）。放射佈局＋可用「全組／我的／專案」聚焦。
+ * 純前端從既有 notes.list / schedule.list / projects.list 織出，不新增後端查詢。
+ */
+function KnowledgeMapCard({ groupId }: { groupId: string }) {
+  const [, setLocation] = useLocation();
+  const me = trpc.auth.me.useQuery();
+  const meId = me.data?.user.id ?? "";
+  const notes = trpc.notes.list.useQuery({ groupId });
+  const schedule = trpc.schedule.list.useQuery({ groupId, includePast: true });
+  const projects = trpc.projects.list.useQuery({ groupId });
+
+  const [lens, setLens] = useState<MapLens>("all");
+  const [focusProject, setFocusProject] = useState(""); // ""＝全部專案
+
+  const loading = notes.isLoading || schedule.isLoading || projects.isLoading;
+  const anyError = notes.error ?? schedule.error ?? projects.error;
+
+  const graph = useMemo(() => {
+    if (loading || anyError) return null;
+    const inLens = (createdBy: string | undefined, mentions: string[] | null | undefined) => {
+      if (lens === "all") return true;
+      if (lens === "mine") return createdBy === meId;
+      return Array.isArray(mentions) && mentions.includes(meId);
+    };
+    const projTitle = (pid: string | null) => (pid ? (projects.data ?? []).find((p) => p.id === pid)?.title ?? "（已移除專案）" : null);
+
+    // 依鏡頭 ＋（可選）聚焦專案過濾
+    const noteRows = ((notes.data ?? []) as NoteItem[]).filter(
+      (n) => inLens(n.createdBy, n.mentions) && (!focusProject || n.projectId === focusProject),
+    );
+    const schedRows = ((schedule.data ?? []) as ScheduleItem[]).filter(
+      (e) => inLens(e.createdBy, e.mentions) && (!focusProject || e.projectId === focusProject),
+    );
+
+    // 分支：key＝專案 id 或 "__group"（組層級／未掛專案）
+    type Leaf = { id: string; kind: "note" | "schedule"; label: string; refId: string };
+    const branches = new Map<string, { key: string; label: string; projectId: string | null; leaves: Leaf[] }>();
+    const branchOf = (pid: string | null) => {
+      const key = pid ?? "__group";
+      let b = branches.get(key);
+      if (!b) {
+        b = { key, label: pid ? projTitle(pid) ?? "專案" : "組層級", projectId: pid, leaves: [] };
+        branches.set(key, b);
+      }
+      return b;
+    };
+    for (const n of noteRows) branchOf(n.projectId).leaves.push({ id: `n-${n.id}`, kind: "note", label: n.title, refId: n.id });
+    for (const e of schedRows) branchOf(e.projectId).leaves.push({ id: `s-${e.id}`, kind: "schedule", label: e.title, refId: e.id });
+
+    const branchList = [...branches.values()].filter((b) => b.leaves.length > 0);
+    // 分支多時先排「內容多」的，最多畫 10 個分支，其餘不畫（避免過度擁擠）
+    branchList.sort((a, b) => b.leaves.length - a.leaves.length);
+    const shownBranches = branchList.slice(0, 10);
+    const hiddenBranchCount = branchList.length - shownBranches.length;
+
+    return { shownBranches, hiddenBranchCount, totalNotes: noteRows.length, totalSched: schedRows.length };
+  }, [loading, anyError, notes.data, schedule.data, projects.data, lens, focusProject, meId]);
+
+  // 佈局幾何（固定 viewBox，SVG 依容器寬縮放）
+  const W = 920;
+  const H = 560;
+  const cx = W / 2;
+  const cy = H / 2;
+  const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
+
+  const layout = useMemo(() => {
+    if (!graph) return null;
+    const { shownBranches } = graph;
+    const B = shownBranches.length;
+    const RB = 165; // 分支節點半徑
+    const RL = 258; // 葉節點半徑
+    const nodes: Array<{ id: string; type: "group" | "project" | "bucket" | "note" | "schedule" | "more"; label: string; x: number; y: number; refId?: string; projectId?: string | null }> = [];
+    const edges: Array<{ x1: number; y1: number; x2: number; y2: number; kind: "branch" | "leaf" }> = [];
+    nodes.push({ id: "group", type: "group", label: "本組", x: cx, y: cy });
+    if (B === 0) return { nodes, edges };
+    shownBranches.forEach((b, i) => {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / B;
+      const bx = cx + RB * Math.cos(a);
+      const by = cy + RB * Math.sin(a);
+      edges.push({ x1: cx, y1: cy, x2: bx, y2: by, kind: "branch" });
+      nodes.push({ id: `b-${b.key}`, type: b.projectId ? "project" : "bucket", label: clip(b.label, 12), x: bx, y: by, projectId: b.projectId });
+      // 葉節點：在分支角度附近扇形展開；最多 6 片，其餘收成一顆「+N」
+      const shownLeaves = b.leaves.slice(0, 6);
+      const extra = b.leaves.length - shownLeaves.length;
+      const total = shownLeaves.length + (extra > 0 ? 1 : 0);
+      const fan = Math.min(Math.PI * 0.7, 0.36 * Math.max(1, total)); // 扇形總開角
+      shownLeaves.forEach((leaf, j) => {
+        const off = total > 1 ? -fan / 2 + (fan * j) / (total - 1) : 0;
+        const la = a + off;
+        const lx = cx + RL * Math.cos(la);
+        const ly = cy + RL * Math.sin(la);
+        edges.push({ x1: bx, y1: by, x2: lx, y2: ly, kind: "leaf" });
+        nodes.push({ id: leaf.id, type: leaf.kind, label: clip(leaf.label, 11), x: lx, y: ly, refId: leaf.refId });
+      });
+      if (extra > 0) {
+        const j = shownLeaves.length;
+        const off = total > 1 ? -fan / 2 + (fan * j) / (total - 1) : 0;
+        const la = a + off;
+        const lx = cx + RL * Math.cos(la);
+        const ly = cy + RL * Math.sin(la);
+        edges.push({ x1: bx, y1: by, x2: lx, y2: ly, kind: "leaf" });
+        nodes.push({ id: `more-${b.key}`, type: "more", label: `+${extra}`, x: lx, y: ly, projectId: b.projectId });
+      }
+    });
+    return { nodes, edges };
+  }, [graph]);
+
+  const clickNode = (n: { type: string; refId?: string; projectId?: string | null }) => {
+    if (n.type === "note" && n.refId) flashAnchor(`note-${n.refId}`);
+    else if (n.type === "schedule" && n.refId) flashAnchor(`schedule-${n.refId}`);
+    else if ((n.type === "project" || n.type === "more") && n.projectId) setLocation(`/p/${n.projectId}`);
+  };
+
+  return (
+    <section className="card" style={{ marginTop: 16 }} data-fb="知識地圖卡">
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0 }}>知識地圖・心智圖</h2>
+      </div>
+      <p className="hint">把專案、筆記、行程織成一張放射心智圖：中心是本組，往外是專案／組層級，再往外是筆記（藍）與行程（琥珀）。點筆記／行程節點會跳到上方對應那筆，點專案節點進專案頁。</p>
+
+      {/* 鏡頭：全組／我的／提及我 ＋ 專案聚焦（團隊／個人／專案三個維度） */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+        <div className="seg" role="tablist" aria-label="鏡頭">
+          <button role="tab" aria-selected={lens === "all"} className={lens === "all" ? "on" : ""} onClick={() => setLens("all")}>全組</button>
+          <button role="tab" aria-selected={lens === "mine"} className={lens === "mine" ? "on" : ""} onClick={() => setLens("mine")}>我的</button>
+          <button role="tab" aria-selected={lens === "mentioned"} className={lens === "mentioned" ? "on" : ""} onClick={() => setLens("mentioned")}>提及我</button>
+        </div>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="SlidersHorizontal" size={13} style={{ color: "var(--fg-secondary)" }} />
+          <select value={focusProject} onChange={(e) => setFocusProject(e.target.value)} style={{ minWidth: 150 }} aria-label="聚焦專案">
+            <option value="">全部專案</option>
+            {(projects.data ?? []).map((p) => (
+              <option key={p.id} value={p.id}>{p.title}</option>
+            ))}
+          </select>
+        </div>
+        {graph && (
+          <span className="hint" style={{ margin: 0 }}>
+            筆記 {graph.totalNotes}・行程 {graph.totalSched}
+            {graph.hiddenBranchCount > 0 ? `・另有 ${graph.hiddenBranchCount} 個分支未畫（過密）` : ""}
+          </span>
+        )}
+      </div>
+
+      {/* 圖例 */}
+      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+        <span className="map-legend"><span className="map-dot note" /> 筆記</span>
+        <span className="map-legend"><span className="map-dot sched" /> 行程</span>
+        <span className="map-legend"><span className="map-dot proj" /> 專案</span>
+        <span className="map-legend"><span className="map-dot bucket" /> 組層級</span>
+      </div>
+
+      {loading ? (
+        <div className="skeleton" style={{ height: 320, marginTop: 12, borderRadius: "var(--r-12)" }} aria-hidden="true" />
+      ) : anyError ? (
+        <p className="error">{anyError.message}</p>
+      ) : !graph || graph.shownBranches.length === 0 ? (
+        <div className="empty-state" style={{ marginTop: 12 }}>
+          <h3>這張地圖還是空的</h3>
+          <p>先在上面加幾筆行程或筆記（可掛專案），這裡就會長出對應的心智圖節點。{lens !== "all" && "或把鏡頭切回「全組」。"}</p>
+        </div>
+      ) : (
+        <div className="map-wrap" style={{ marginTop: 12 }}>
+          <svg viewBox={`0 0 ${W} ${H}`} className="map-svg" role="img" aria-label="知識地圖">
+            {layout?.edges.map((e, i) => (
+              <line key={`e-${i}`} x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2} className={`map-edge ${e.kind}`} />
+            ))}
+            {layout?.nodes.map((n) => {
+              if (n.type === "group") {
+                return (
+                  <g key={n.id} className="map-node group">
+                    <circle cx={n.x} cy={n.y} r={34} />
+                    <text x={n.x} y={n.y} textAnchor="middle" dominantBaseline="central">{n.label}</text>
+                  </g>
+                );
+              }
+              if (n.type === "project" || n.type === "bucket" || n.type === "more") {
+                const w = Math.max(56, n.label.length * 13 + 22);
+                const clickable = n.type !== "bucket" && !!n.projectId;
+                return (
+                  <g
+                    key={n.id}
+                    className={`map-node ${n.type}${clickable ? " clickable" : ""}`}
+                    onClick={clickable ? () => clickNode(n) : undefined}
+                    style={clickable ? { cursor: "pointer" } : undefined}
+                  >
+                    <rect x={n.x - w / 2} y={n.y - 15} width={w} height={30} rx={15} />
+                    <text x={n.x} y={n.y} textAnchor="middle" dominantBaseline="central">{n.label}</text>
+                  </g>
+                );
+              }
+              // note / schedule 葉節點
+              return (
+                <g key={n.id} className={`map-node ${n.type} clickable`} onClick={() => clickNode(n)} style={{ cursor: "pointer" }}>
+                  <circle cx={n.x} cy={n.y} r={6} />
+                  <text x={n.x} y={n.y - 12} textAnchor="middle">{n.label}</text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
       )}
     </section>
   );

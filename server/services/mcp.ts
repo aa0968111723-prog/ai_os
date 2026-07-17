@@ -12,10 +12,11 @@
  *     自訂資料庫：list_databases / query_database / add_database_row / list_database_files / read_database_file
  *     AI 代理（重用 agentCore）：plan_agent / approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
  *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item
+ *     筆記・會議紀錄（組共用、可匯入知識庫）：list_notes / get_note
  *     統整：get_project_status（一次回分鏡＋生成＋代理＋排程＋待辦）
  */
 import type { Request, Response } from "express";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
@@ -230,6 +231,21 @@ const TOOLS = [
       },
       required: ["projectId", "title", "startsAt"],
     },
+  },
+  // ── 筆記・會議紀錄（組共用的知識筆記，可匯入知識庫）：外部 AI 可讀，閉合「知識地圖」迴路 ──
+  {
+    name: "list_notes",
+    description: "列出這個專案相關的會議筆記／知識筆記（本專案 ＋ 組層級共用）。回摘要與字數；用 get_note 讀全文。可用 limit 上限 50。",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, limit: { type: "number", description: "最多回幾筆（預設 20，上限 50）" } },
+      required: ["projectId"],
+    },
+  },
+  {
+    name: "get_note",
+    description: "讀一則筆記的全文（會議決議、待辦、由知識庫匯入的內容）。先用 list_notes 找 noteId。",
+    inputSchema: { type: "object", properties: { noteId: { type: "string" } }, required: ["noteId"] },
   },
   // ── 統整快照（把分鏡／生成／代理／排程／待辦一次給外部 AI，細部連結各子系統）──
   {
@@ -474,6 +490,22 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     };
   }
 
+  // ── 單則筆記全文（以 noteId，不掛 projectId）：先查本筆再以其 groupId 套組隔離 ──
+  if (name === "get_note") {
+    const noteId = String(args.noteId ?? "");
+    const [note] = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId));
+    if (!note) throw new Error("找不到這則筆記");
+    requireGroup(auth, note.groupId); // 組隔離：別組筆記不可讀
+    return {
+      id: note.id,
+      title: note.title,
+      content: note.content,
+      projectId: note.projectId,
+      chars: note.content.length,
+      updatedAt: note.updatedAt,
+    };
+  }
+
   // ── AI 代理生命週期（以 runId／projectId 為鍵；權限與併發全走 agentCore，與網頁端同一套）──
   if (name === "plan_agent") {
     const run = await planAgentCore({ auth, projectId: String(args.projectId ?? ""), goal: String(args.goal ?? "") });
@@ -526,12 +558,37 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     };
   }
 
-  // ── 排程與統整快照（以 projectId 為鍵，先解析專案的組再套組隔離）──
-  if (name === "list_schedule" || name === "add_schedule_item" || name === "get_project_status") {
+  // ── 排程／筆記與統整快照（以 projectId 為鍵，先解析專案的組再套組隔離）──
+  if (name === "list_schedule" || name === "add_schedule_item" || name === "list_notes" || name === "get_project_status") {
     const pid = String(args.projectId ?? "");
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
     if (!project) throw new Error("找不到專案");
     requireGroup(auth, project.groupId); // 組隔離（不屬於此組直接擋）
+
+    if (name === "list_notes") {
+      // 專案視角：只回本專案的筆記 ＋ 整組共用（未掛專案）的筆記——與 list_schedule 同一過濾哲學。
+      const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+      const rows = await db
+        .select({
+          id: schema.notes.id,
+          projectId: schema.notes.projectId,
+          title: schema.notes.title,
+          content: schema.notes.content,
+          updatedAt: schema.notes.updatedAt,
+        })
+        .from(schema.notes)
+        .where(and(eq(schema.notes.groupId, project.groupId), or(eq(schema.notes.projectId, project.id), isNull(schema.notes.projectId))))
+        .orderBy(desc(schema.notes.updatedAt))
+        .limit(limit);
+      return rows.map((n) => ({
+        id: n.id,
+        title: n.title,
+        chars: n.content.length,
+        excerpt: n.content.slice(0, 160),
+        projectScoped: n.projectId === project.id,
+        updatedAt: n.updatedAt,
+      }));
+    }
 
     if (name === "list_schedule") {
       // 專案視角的過濾在 DB 端完成（本專案 ＋ 組層級），避免 300 筆上限先被別的專案吃掉
