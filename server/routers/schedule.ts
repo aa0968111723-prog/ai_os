@@ -3,6 +3,7 @@ import { and, asc, eq, gte } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
+import { validateMentions } from "../services/mentions";
 
 /**
  * 排程（需求 10）：組行事曆（會議、交付死線…）。
@@ -39,6 +40,8 @@ export const scheduleRouter = router({
           ownerId: schema.scheduleItems.ownerId,
           ownerName: schema.users.name,
           createdBy: schema.scheduleItems.createdBy,
+          sourceMessageId: schema.scheduleItems.sourceMessageId,
+          mentions: schema.scheduleItems.mentions,
         })
         .from(schema.scheduleItems)
         .leftJoin(schema.users, eq(schema.users.id, schema.scheduleItems.ownerId))
@@ -57,6 +60,9 @@ export const scheduleRouter = router({
       endsAt: isoDate.optional(),
       note: z.string().max(500).optional(),
       ownerId: z.string().uuid().optional(),
+      // 由留言「轉待辦」建立時帶來源留言 id（供 Planner 反向跳回）；@提及同組成員
+      sourceMessageId: z.string().uuid().optional(),
+      mentions: z.array(z.string().uuid()).max(20).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       requireGroup(ctx.auth, input.groupId);
@@ -64,6 +70,11 @@ export const scheduleRouter = router({
         const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
         if (!project || project.groupId !== input.groupId) throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
       }
+      if (input.sourceMessageId) {
+        const [m] = await db.select({ groupId: schema.messages.groupId }).from(schema.messages).where(eq(schema.messages.id, input.sourceMessageId));
+        if (!m || m.groupId !== input.groupId) throw new TRPCError({ code: "BAD_REQUEST", message: "來源留言不屬於此組" });
+      }
+      const mentions = await validateMentions(input.groupId, input.mentions);
       const startsAt = new Date(input.startsAt);
       const endsAt = input.endsAt ? new Date(input.endsAt) : null;
       if (endsAt && endsAt <= startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "結束時間要在開始之後" });
@@ -78,6 +89,8 @@ export const scheduleRouter = router({
           note: input.note?.trim() || null,
           ownerId: input.ownerId ?? null,
           createdBy: ctx.auth.user.id,
+          sourceMessageId: input.sourceMessageId ?? null,
+          mentions: mentions ?? null,
         })
         .returning();
       return row;

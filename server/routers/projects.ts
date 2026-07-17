@@ -438,6 +438,17 @@ export const projectsRouter = router({
     };
   }),
 
+  /** 組成員清單（給 Planner 筆記/排程的 @提及下拉——不需專案，任何組員可讀） */
+  groupMembers: authedProcedure.input(z.object({ groupId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    requireGroup(ctx.auth, input.groupId);
+    const members = await db
+      .select({ userId: schema.groupMembers.userId, groupRole: schema.groupMembers.role, name: schema.users.name })
+      .from(schema.groupMembers)
+      .leftJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
+      .where(eq(schema.groupMembers.groupId, input.groupId));
+    return members.map((m) => ({ userId: m.userId, name: m.name ?? "?", groupRole: m.groupRole }));
+  }),
+
   /** 設定專案級角色（需求 2.3）：組長以上；editor＝刪列回預設、viewer＝upsert 限縮列 */
   setProjectRole: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), userId: z.string().uuid(), role: z.enum(["editor", "viewer"]) }))

@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { ASSISTANT_TRIGGER, replyAsAssistant } from "../services/messageAssistant";
+import { validateMentions } from "../services/mentions";
 
 /**
  * 站內留言（協作強化版）。隔離：以專案的 group 為準；檢視者(viewer)也能留言——
@@ -27,11 +28,15 @@ async function loadMessage(messageId: string) {
   return msg;
 }
 
+/** 可被留言引用的專案內物件型別 */
+const REF_TYPES = ["scene", "asset", "generation", "note", "schedule"] as const;
+type RefType = (typeof REF_TYPES)[number];
+
 /** 解析引用作品的顯示資訊（標題+縮圖）；查不到（已刪等）回 null，前端顯示「已不存在」 */
 async function resolveRefs(rows: Array<{ refType: string | null; refId: string | null }>) {
-  const byType = { scene: new Set<string>(), asset: new Set<string>(), generation: new Set<string>() };
+  const byType: Record<RefType, Set<string>> = { scene: new Set(), asset: new Set(), generation: new Set(), note: new Set(), schedule: new Set() };
   for (const r of rows) {
-    if (r.refType && r.refId && r.refType in byType) byType[r.refType as keyof typeof byType].add(r.refId);
+    if (r.refType && r.refId && r.refType in byType) byType[r.refType as RefType].add(r.refId);
   }
   const map = new Map<string, { title: string; thumb: string | null; kind: string }>();
   if (byType.scene.size) {
@@ -55,7 +60,36 @@ async function resolveRefs(rows: Array<{ refType: string | null; refId: string |
       });
     }
   }
+  if (byType.note.size) {
+    const notes = await db.select({ id: schema.notes.id, title: schema.notes.title })
+      .from(schema.notes).where(inArray(schema.notes.id, [...byType.note]));
+    for (const n of notes) map.set(`note:${n.id}`, { title: n.title, thumb: null, kind: "note" });
+  }
+  if (byType.schedule.size) {
+    const items = await db.select({ id: schema.scheduleItems.id, title: schema.scheduleItems.title, startsAt: schema.scheduleItems.startsAt })
+      .from(schema.scheduleItems).where(inArray(schema.scheduleItems.id, [...byType.schedule]));
+    for (const it of items) {
+      const when = new Date(it.startsAt).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" });
+      map.set(`schedule:${it.id}`, { title: `${it.title}（${when}）`, thumb: null, kind: "schedule" });
+    }
+  }
   return map;
+}
+
+/** 引用歸屬檢查：scene/asset/generation 必須同專案；note/schedule 必須同組（可跨專案或組層級） */
+async function refBelongs(refType: RefType, refId: string, projectId: string, groupId: string): Promise<boolean> {
+  switch (refType) {
+    case "scene":
+      return (await db.select({ id: schema.scenes.id }).from(schema.scenes).where(and(eq(schema.scenes.id, refId), eq(schema.scenes.projectId, projectId)))).length > 0;
+    case "asset":
+      return (await db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, refId), eq(schema.assets.projectId, projectId)))).length > 0;
+    case "generation":
+      return (await db.select({ id: schema.generations.id }).from(schema.generations).where(and(eq(schema.generations.id, refId), eq(schema.generations.projectId, projectId)))).length > 0;
+    case "note":
+      return (await db.select({ id: schema.notes.id }).from(schema.notes).where(and(eq(schema.notes.id, refId), eq(schema.notes.groupId, groupId)))).length > 0;
+    case "schedule":
+      return (await db.select({ id: schema.scheduleItems.id }).from(schema.scheduleItems).where(and(eq(schema.scheduleItems.id, refId), eq(schema.scheduleItems.groupId, groupId)))).length > 0;
+  }
 }
 
 export const messagesRouter = router({
@@ -137,7 +171,7 @@ export const messagesRouter = router({
         projectId: z.string().uuid(),
         body: z.string().min(1).max(2000),
         replyToId: z.string().uuid().optional(),
-        refType: z.enum(["scene", "asset", "generation"]).optional(),
+        refType: z.enum(REF_TYPES).optional(),
         refId: z.string().uuid().optional(),
         mentions: z.array(z.string().uuid()).max(20).optional(),
       }),
@@ -150,30 +184,16 @@ export const messagesRouter = router({
         const parent = await loadMessage(input.replyToId);
         if (parent.projectId !== input.projectId) throw new TRPCError({ code: "BAD_REQUEST", message: "只能回覆本專案的留言" });
       }
-      // 引用作品：refType/refId 成對，且必須屬於本專案（擋跨專案窺探）
+      // 引用作品：refType/refId 成對，且必須屬於本專案（scene/asset/generation 掛專案）
+      // 或本組（note/schedule 掛組、可跨專案）——擋跨組窺探
       if (!!input.refType !== !!input.refId) throw new TRPCError({ code: "BAD_REQUEST", message: "引用參數不完整" });
       if (input.refType && input.refId) {
-        const ok =
-          input.refType === "scene"
-            ? (await db.select({ id: schema.scenes.id }).from(schema.scenes).where(and(eq(schema.scenes.id, input.refId), eq(schema.scenes.projectId, input.projectId)))).length > 0
-            : input.refType === "asset"
-              ? (await db.select({ id: schema.assets.id }).from(schema.assets).where(and(eq(schema.assets.id, input.refId), eq(schema.assets.projectId, input.projectId)))).length > 0
-              : (await db.select({ id: schema.generations.id }).from(schema.generations).where(and(eq(schema.generations.id, input.refId), eq(schema.generations.projectId, input.projectId)))).length > 0;
-        if (!ok) throw new TRPCError({ code: "BAD_REQUEST", message: "引用的作品不在本專案" });
-      }
-      // @提及：只能提及同組成員（名單外的 id 一律拒絕，不靜默過濾——壞輸入要看得見）
-      let mentions: string[] | undefined;
-      if (input.mentions?.length) {
-        const members = await db
-          .select({ userId: schema.groupMembers.userId })
-          .from(schema.groupMembers)
-          .where(eq(schema.groupMembers.groupId, project.groupId));
-        const memberIds = new Set(members.map((m) => m.userId));
-        for (const uid of input.mentions) {
-          if (!memberIds.has(uid)) throw new TRPCError({ code: "BAD_REQUEST", message: "只能提及同組夥伴" });
+        if (!(await refBelongs(input.refType, input.refId, input.projectId, project.groupId))) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "引用的項目不在本專案／本組" });
         }
-        mentions = [...new Set(input.mentions)];
       }
+      // @提及：只能提及同組成員（共用校驗）
+      const mentions = await validateMentions(project.groupId, input.mentions);
       const [msg] = await db
         .insert(schema.messages)
         .values({

@@ -192,4 +192,42 @@ sched = call("GET", a, "schedule.list", {"groupId": gid})
 items = sched if isinstance(sched, list) else sched.get("items", [])
 ok("待辦出現在排程清單", any(i.get("title", "").startswith("週五前交件") for i in items))
 
+# ── 留言×排程筆記連動 ──
+# 留言轉筆記(帶 sourceMessageId 回連)
+src = call("POST", a, "messages.post", {"projectId": pid, "body": "決議:週五前完成第一版剪輯"})
+note = call("POST", a, "notes.add", {"groupId": gid, "projectId": pid, "title": "週會決議", "content": "週五前完成第一版剪輯", "sourceMessageId": src["id"]})
+ok("留言可轉筆記(帶來源留言)", bool(note.get("id")) and note.get("sourceMessageId") == src["id"])
+notes = call("GET", a, "notes.list", {"groupId": gid})
+nrow = next((x for x in notes if x["id"] == note["id"]), None)
+ok("筆記清單帶 sourceMessageId 回連", nrow and nrow.get("sourceMessageId") == src["id"])
+
+# 轉待辦也帶 sourceMessageId
+todo2 = call("POST", a, "schedule.add", {"groupId": gid, "projectId": pid, "title": "剪輯交件", "startsAt": "2026-08-08T10:00:00.000Z", "sourceMessageId": src["id"]})
+ok("轉待辦帶來源留言回連", todo2.get("sourceMessageId") == src["id"])
+
+# @引用筆記/排程進留言(refType note/schedule)
+mnote = call("POST", a, "messages.post", {"projectId": pid, "body": "看這份紀錄", "refType": "note", "refId": note["id"]})
+ok("留言可引用筆記", "__error__" not in mnote)
+msch = call("POST", a, "messages.post", {"projectId": pid, "body": "這個排程", "refType": "schedule", "refId": todo2["id"]})
+ok("留言可引用排程", "__error__" not in msch)
+rows = call("GET", a, "messages.list", {"projectId": pid})
+mnrow = next((r for r in rows if r["id"] == mnote["id"]), None)
+ok("引用筆記卡解析出標題", (mnrow.get("ref") or {}).get("title") == "週會決議")
+msrow = next((r for r in rows if r["id"] == msch["id"]), None)
+ok("引用排程卡解析出標題(含日期)", "剪輯交件" in ((msrow.get("ref") or {}).get("title") or ""))
+
+# 跨組防護:別組的來源留言不能接到本組筆記
+bad_src = call("POST", a, "notes.add", {"groupId": gid, "projectId": pid, "title": "壞來源", "content": "x", "sourceMessageId": "00000000-0000-4000-8000-000000000000"})
+ok("🔒 來源留言不存在被擋", "__error__" in bad_src)
+
+# Planner @人:notes.add / schedule.add 帶 mentions
+gm = call("GET", a, "projects.groupMembers", {"groupId": gid})
+ok("組成員清單可讀(供 Planner @人)", isinstance(gm, list) and any(m["userId"] == b_id for m in gm))
+nmention = call("POST", a, "notes.add", {"groupId": gid, "title": "@留言乙 請看", "content": "內文", "mentions": [b_id]})
+ok("筆記可 @提及同組夥伴", b_id in (nmention.get("mentions") or []))
+smention = call("POST", a, "schedule.add", {"groupId": gid, "title": "@留言乙 週會", "startsAt": "2026-08-09T10:00:00.000Z", "mentions": [b_id]})
+ok("排程可 @提及同組夥伴", b_id in (smention.get("mentions") or []))
+bad_m = call("POST", a, "notes.add", {"groupId": gid, "title": "壞提及", "content": "x", "mentions": ["00000000-0000-4000-8000-000000000000"]})
+ok("🔒 筆記不能提及組外的人", "同組" in bad_m.get("__error__", ""))
+
 print("—— e2e-messages 完成 ——")

@@ -3,6 +3,7 @@ import { and, desc, eq, notInArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
+import { validateMentions } from "../services/mentions";
 
 /**
  * 筆記（需求 10）：會議紀錄等長文，掛組（可選掛專案）。
@@ -67,6 +68,8 @@ export const notesRouter = router({
           updatedAt: schema.notes.updatedAt,
           createdBy: schema.notes.createdBy,
           creatorName: schema.users.name,
+          sourceMessageId: schema.notes.sourceMessageId,
+          mentions: schema.notes.mentions,
         })
         .from(schema.notes)
         .leftJoin(schema.users, eq(schema.users.id, schema.notes.createdBy))
@@ -82,6 +85,8 @@ export const notesRouter = router({
         updatedAt: r.updatedAt,
         createdBy: r.createdBy,
         creatorName: r.creatorName ?? "?",
+        sourceMessageId: r.sourceMessageId,
+        mentions: r.mentions,
       }));
     }),
 
@@ -94,6 +99,9 @@ export const notesRouter = router({
       projectId: z.string().uuid().optional(),
       title: z.string().min(1, "請填標題").max(120),
       content: z.string().min(1, "內容不可為空").max(MAX_CONTENT, `內容過長（上限 ${MAX_CONTENT} 字）`),
+      // 由留言「轉筆記」建立時帶來源留言 id（供 Planner 反向跳回）；@提及同組成員
+      sourceMessageId: z.string().uuid().optional(),
+      mentions: z.array(z.string().uuid()).max(20).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       requireGroup(ctx.auth, input.groupId);
@@ -102,6 +110,12 @@ export const notesRouter = router({
         const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
         if (!project || project.groupId !== input.groupId) throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
       }
+      // 來源留言必須屬於同組（擋把別組留言接到本組筆記）
+      if (input.sourceMessageId) {
+        const [m] = await db.select({ groupId: schema.messages.groupId }).from(schema.messages).where(eq(schema.messages.id, input.sourceMessageId));
+        if (!m || m.groupId !== input.groupId) throw new TRPCError({ code: "BAD_REQUEST", message: "來源留言不屬於此組" });
+      }
+      const mentions = await validateMentions(input.groupId, input.mentions);
       const [row] = await db
         .insert(schema.notes)
         .values({
@@ -110,6 +124,8 @@ export const notesRouter = router({
           title: input.title.trim(),
           content: input.content,
           createdBy: ctx.auth.user.id,
+          sourceMessageId: input.sourceMessageId ?? null,
+          mentions: mentions ?? null,
         })
         .returning();
       return row;

@@ -73,6 +73,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "characters.remove": "刪除角色卡",
   // 留言、筆記與其他
   "messages.post": "發佈留言",
+  "messages.postVoice": "發佈語音留言",
   "messages.react": "留言表情回應",
   "messages.setPinned": "釘選／取消釘選留言",
   "messages.markRead": "標記留言已讀",
