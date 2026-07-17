@@ -18,7 +18,7 @@ import { getModel } from "../../shared/models";
 import { isMockMode } from "./fal";
 import { nimComplete, NimServiceError } from "./nvidia-nim";
 import { reserveQuota, refund } from "./points";
-import { assertProjectEditable } from "./projectAcl";
+import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { lockAgentApprove } from "./locks";
 import { buildKnowledgeContext } from "../routers/knowledge";
 import { pickGenerateModel, MODEL_CHEATSHEET } from "../routers/assistant";
@@ -228,6 +228,7 @@ export async function planAgentCore(input: { auth: AuthState; projectId: string;
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   requireGroup(auth, project.groupId);
   await assertProjectEditable(auth, project); // 檢視者不能發起代理（執行期會寫入內容）
+  assertProjectNotArchived(project); // 封存專案不接受新代理計畫（MCP 舊 projectId 亦擋）
 
   // 傳輸無關的輸入守門（MCP plan_agent 直呼本核心，繞過 router 的 zod）：目標 5–1000 字，與 router 一致
   const goal = input.goal.trim();
@@ -327,6 +328,7 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, run.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   await assertProjectEditable(auth, project);
+  assertProjectNotArchived(project); // 專案封存後不得核准執行（否則對已停用專案持續扣點生成）
   if (run.status !== "awaiting_approval") {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫已經開始執行或已結束" });
   }
