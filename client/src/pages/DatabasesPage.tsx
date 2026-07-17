@@ -1,9 +1,43 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { FIELD_TYPES, newFieldKey, type DataField, type DataRowData, type DataRowValue } from "@shared/databaseFields";
+import { detectFormat, inferFields, parseTabular, TABULAR_ACCEPT, TABULAR_FORMATS, type TabularFormat } from "@shared/tabular";
+
+/** 匯入結果外形（importData mutation 回傳；建庫與詳頁匯入共用顯示） */
+type ImportResult = { imported: number; failed: number; skipped: number; truncated: boolean; errors: Array<{ line: number; error: string }> };
+
+/** 客端粗解析 headers＋列數（JSON 格式錯回 error 人話）；正式解析仍在後端 */
+function usePreview(content: string, format: TabularFormat) {
+  return useMemo(() => {
+    if (!content.trim()) return { headers: [] as string[], count: 0, error: null as string | null };
+    try {
+      const p = parseTabular(content, format);
+      return { headers: p.headers, count: p.records.length, error: null as string | null };
+    } catch (e) {
+      return { headers: [] as string[], count: 0, error: e instanceof Error ? e.message : "解析失敗" };
+    }
+  }, [content, format]);
+}
+
+/** 匯入結果摘要（成功/失敗/截斷＋前幾筆錯誤） */
+function ImportResultView({ result }: { result: ImportResult }) {
+  return (
+    <div style={{ marginTop: 8 }}>
+      <p className="hint" style={{ color: result.imported > 0 ? "var(--success-ink)" : undefined }}>
+        匯入完成：成功 {result.imported} 列{result.failed > 0 ? `、失敗 ${result.failed} 列` : ""}
+        {result.truncated ? `（超過 5000 列上限，另有 ${result.skipped} 列未處理——請分批匯入）` : ""}
+      </p>
+      {result.errors.length > 0 && (
+        <ul style={{ margin: "4px 0", paddingLeft: 18, fontSize: 12, color: "var(--danger-ink, #a33)" }}>
+          {result.errors.slice(0, 10).map((e) => <li key={e.line}>第 {e.line} 筆：{e.error}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 /**
  * 資料庫（工作台入口）：個人→組→團隊→全站 四層範圍的自訂結構化資料。
@@ -136,14 +170,57 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
   const [pickTeamId, setPickTeamId] = useState(myTeams[0]?.teamId ?? "");
   const isSuperAdmin = !!me.data?.user.isSuperAdmin;
 
+  // 從檔案匯入建立：套用推斷欄位後把「內容＋格式＋表頭對應」暫存，建庫成功後一併把列資料匯入
+  const [importSeed, setImportSeed] = useState<{ content: string; format: TabularFormat; headerMap: Record<string, string> } | null>(null);
+  const [finished, setFinished] = useState<{ id: string; result: ImportResult | null } | null>(null);
+  const importData = trpc.databases.importData.useMutation();
+
   const create = trpc.databases.create.useMutation({
-    onSuccess: (row) => { utils.databases.list.invalidate(); onDone(row.id); },
+    onSuccess: async (row) => {
+      utils.databases.list.invalidate();
+      // 有匯入種子＝從檔案建表：建好後把列資料灌進去，再顯示結果摘要（含失敗列）讓使用者過目
+      if (importSeed && Object.keys(importSeed.headerMap).length > 0) {
+        try {
+          const r = await importData.mutateAsync({ tableId: row.id, content: importSeed.content, format: importSeed.format, headerMap: importSeed.headerMap });
+          setFinished({ id: row.id, result: r });
+        } catch {
+          // 建庫成功但匯入失敗（如格式問題）：欄位已建好，導向詳頁可再試匯入
+          setFinished({ id: row.id, result: null });
+        }
+      } else {
+        onDone(row.id);
+      }
+    },
   });
-  const canSubmit = name.trim().length > 0 && fields.length > 0 && fields.every((f) => f.label.trim()) && !create.isPending;
+  const canSubmit = name.trim().length > 0 && fields.length > 0 && fields.every((f) => f.label.trim()) && !create.isPending && !importData.isPending;
+
+  // 建庫＋匯入完成：顯示摘要，讓使用者確認匯入結果後再進入資料庫
+  if (finished) {
+    return (
+      <section className="card" data-fb="建立資料庫完成卡">
+        <h2><Icon name="CheckCircle2" size={18} /> 資料庫「{name.trim()}」已建立</h2>
+        {finished.result ? (
+          <ImportResultView result={finished.result} />
+        ) : importSeed ? (
+          <p className="hint" style={{ color: "var(--danger-ink, #a33)" }}>欄位已建好，但列資料匯入未完成——進資料庫後可用「匯入資料」再試一次。</p>
+        ) : null}
+        <div style={{ marginTop: 12 }}>
+          <button className="primary" onClick={() => onDone(finished.id)}>開啟資料庫</button>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="card" data-fb="建立資料庫卡">
       <h2>建立資料庫</h2>
+      <ImportToCreate
+        onApply={({ fields: inferred, name: suggested, seed }) => {
+          setFields(inferred);
+          if (suggested && !name.trim()) setName(suggested);
+          setImportSeed(seed);
+        }}
+      />
       <label htmlFor="db-name">名字</label>
       <input id="db-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="例：拍攝器材借用表" autoFocus />
       <label htmlFor="db-desc">說明（選填）</label>
@@ -198,12 +275,93 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
             })
           }
         >
-          {create.isPending ? "建立中…" : "建立"}
+          {importData.isPending ? "匯入資料中…" : create.isPending ? "建立中…" : importSeed ? "建立並匯入" : "建立"}
         </button>
         <button onClick={onCancel}>取消</button>
       </div>
-      {create.error && <p className="error" role="alert">{create.error.message}</p>}
+      {importSeed && <p className="hint" style={{ marginTop: 6 }}>已備妥 {Object.keys(importSeed.headerMap).length} 欄的匯入資料——按「建立並匯入」會一併把列資料灌進新資料庫。</p>}
+      {(create.error || importData.error) && <p className="error" role="alert">{create.error?.message ?? importData.error?.message}</p>}
     </section>
+  );
+}
+
+/**
+ * 從檔案匯入建立：上傳／貼上 CSV／TSV／JSON，自動判讀格式與表頭，一鍵推斷成欄位。
+ * 只推斷「文字」欄位（先求能成表，型別建庫後再調）；套用後把內容交回上層，建庫時一併匯入列資料。
+ */
+function ImportToCreate({ onApply }: { onApply: (args: { fields: DataField[]; name: string | null; seed: { content: string; format: TabularFormat; headerMap: Record<string, string> } }) => void }) {
+  const [content, setContent] = useState("");
+  const [format, setFormat] = useState<TabularFormat>("csv");
+  const [formatTouched, setFormatTouched] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [applied, setApplied] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const { headers, count, error } = usePreview(content, format);
+
+  const setBoth = (text: string, fmt?: TabularFormat) => {
+    setContent(text);
+    setApplied(false);
+    if (fmt) { setFormat(fmt); setFormatTouched(true); }
+    else if (!formatTouched) setFormat(detectFormat(fileName, text));
+  };
+  const onFile = async (f: File) => {
+    const text = await f.text();
+    setFileName(f.name);
+    setFormatTouched(true);
+    setContent(text);
+    setFormat(detectFormat(f.name, text));
+    setApplied(false);
+    if (fileInput.current) fileInput.current.value = "";
+  };
+
+  const apply = () => {
+    const inferred = inferFields(headers);
+    const headerMap: Record<string, string> = {};
+    headers.slice(0, inferred.length).forEach((h, i) => { headerMap[h] = inferred[i].key; });
+    const suggested = fileName ? fileName.replace(/\.[^.]+$/, "").slice(0, 80) : null;
+    onApply({ fields: inferred, name: suggested, seed: { content, format, headerMap } });
+    setApplied(true);
+  };
+
+  return (
+    <details className="card card--quiet" style={{ margin: "4px 0 12px" }} data-fb="從檔案建立資料庫">
+      <summary>
+        <Icon name="Package" size={14} /> 從檔案匯入建立（CSV／TSV／JSON，自動判讀欄位）
+        <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
+      </summary>
+      <div style={{ marginTop: 10 }}>
+        <p className="hint" style={{ marginTop: 0 }}>
+          已經有資料？上傳或貼上 CSV／TSV／JSON，自動判讀出欄位——按「套用為欄位」後再按下方「建立並匯入」，一步成表並灌入列資料。
+        </p>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+          <input ref={fileInput} type="file" aria-label="選擇匯入檔" accept={TABULAR_ACCEPT} style={{ width: "auto" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }} />
+          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+            格式
+            <select aria-label="匯入格式" value={format} style={{ width: "auto" }} onChange={(e) => { setFormat(e.target.value as TabularFormat); setFormatTouched(true); setApplied(false); }}>
+              {TABULAR_FORMATS.map((f) => <option key={f.id} value={f.id} title={f.hint}>{f.label}</option>)}
+            </select>
+          </label>
+        </div>
+        <textarea
+          aria-label="匯入內容"
+          value={content}
+          onChange={(e) => setBoth(e.target.value)}
+          placeholder={format === "json" ? '[{"姓名":"小美","年齡":28}]' : format === "tsv" ? "姓名\t年齡\n小美\t28" : "姓名,年齡\n小美,28"}
+          rows={4}
+          style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }}
+        />
+        <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button className="btn-sm primary" disabled={headers.length === 0} onClick={apply}>套用為欄位（{headers.length} 欄）</button>
+          {error ? (
+            <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{error}</span>
+          ) : applied ? (
+            <span className="meta" style={{ color: "var(--success-ink)" }}>已套用 {headers.length} 欄、備妥 {count} 列——確認下方欄位與型別後建立</span>
+          ) : (
+            <span className="meta">{headers.length > 0 ? `偵測到 ${headers.length} 欄、${count} 列` : "上傳或貼上資料後可自動判讀"}</span>
+          )}
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -332,12 +490,12 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
           <Icon name="Download" size={13} /> 匯出 CSV
         </a>
         {canWrite && (
-          <button className="btn-sm" onClick={() => setShowImport((v) => !v)} title="從 CSV 匯入資料列（Excel/Google 試算表/其他資料庫的匯出檔）">
-            <Icon name="Plus" size={13} /> 匯入 CSV
+          <button className="btn-sm" onClick={() => setShowImport((v) => !v)} title="匯入資料列（CSV／TSV／JSON——Excel／Google 試算表／其他資料庫的匯出檔）">
+            <Icon name="Package" size={13} /> 匯入資料
           </button>
         )}
       </div>
-      {showImport && canWrite && <CsvImportPanel table={table} onImported={invalidate} />}
+      {showImport && canWrite && <DataImportPanel table={table} onImported={invalidate} />}
 
       <div style={{ overflowX: "auto", marginTop: 8 }}>
         <table className="data-grid" style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -395,45 +553,91 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
   );
 }
 
-/* ────────────────────────── CSV 匯入 ────────────────────────── */
+/* ────────────────────────── 多格式匯入（CSV／TSV／JSON）────────────────────────── */
 
-function CsvImportPanel({ table, onImported }: { table: TableSummary; onImported: () => void }) {
-  const [csv, setCsv] = useState("");
-  const [mapping, setMapping] = useState<Record<string, string>>({}); // 欄位 key → CSV 表頭
-  const [result, setResult] = useState<{ imported: number; failed: number; skipped: number; truncated: boolean; errors: Array<{ line: number; error: string }> } | null>(null);
-  const importCsv = trpc.databases.importCsv.useMutation({
-    // 匯入後刷新格線，但「不自動關閉面板」——讓使用者看到「成功幾列、失敗哪幾行」的結果再自行收合
+function DataImportPanel({ table, onImported }: { table: TableSummary; onImported: () => void }) {
+  const [content, setContent] = useState("");
+  const [format, setFormat] = useState<TabularFormat>("csv");
+  const [formatTouched, setFormatTouched] = useState(false); // 使用者手動選過格式就別再自動覆寫
+  const [mapping, setMapping] = useState<Record<string, string>>({}); // 欄位 key → 來源表頭
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const importData = trpc.databases.importData.useMutation({
+    // 匯入後刷新格線，但「不自動關閉面板」——讓使用者看到「成功幾列、失敗哪幾筆」的結果再自行收合
     onSuccess: (r) => { setResult(r); if (r.imported > 0) onImported(); },
   });
-  // 解析第一行當表頭候選（純前端粗解析，正式解析在後端）
-  const firstLine = csv.split(/\r?\n/)[0] ?? "";
-  const headers = firstLine ? firstLine.split(",").map((h) => h.replace(/^"|"$/g, "").trim()).filter(Boolean) : [];
-  const autoMap = () => {
-    const m: Record<string, string> = {};
-    for (const f of table.fields) {
-      const hit = headers.find((h) => h === f.label || h === f.key);
-      if (hit) m[f.key] = hit;
-    }
-    setMapping(m);
+
+  const { headers, count, error: parseError } = usePreview(content, format);
+
+  // 表頭變動時自動對應（表頭＝欄位 label 或 key 就連起來），保留使用者已手改的對應
+  useEffect(() => {
+    if (headers.length === 0) return;
+    setMapping((prev) => {
+      const next = { ...prev };
+      for (const f of table.fields) {
+        if (next[f.key]) continue; // 別覆寫使用者手選
+        const hit = headers.find((h) => h === f.label || h === f.key);
+        if (hit) next[f.key] = hit;
+      }
+      return next;
+    });
+  }, [headers, table.fields]);
+
+  const applyContent = (text: string, fmt?: TabularFormat) => {
+    setContent(text);
+    setResult(null);
+    setMapping({});
+    if (fmt) { setFormat(fmt); setFormatTouched(true); }
+    else if (!formatTouched) setFormat(detectFormat(null, text)); // 貼上內容自動嗅探格式
   };
+
+  const onFile = async (f: File) => {
+    const text = await f.text();
+    const fmt = detectFormat(f.name, text);
+    setFormatTouched(true);
+    applyContent(text, fmt);
+    if (fileInput.current) fileInput.current.value = "";
+  };
+
   const headerMap = Object.fromEntries(Object.entries(mapping).filter(([, h]) => h).map(([key, h]) => [h, key]));
+  const placeholder = format === "json" ? '[{"姓名":"小美","年齡":28},{"姓名":"阿哲","年齡":30}]' : format === "tsv" ? "姓名\t年齡\n小美\t28\n阿哲\t30" : "姓名,年齡\n小美,28\n阿哲,30";
 
   return (
     <div style={{ margin: "8px 0", padding: 12, border: "1px dashed var(--border, #ccc)", borderRadius: 8 }}>
       <p className="hint" style={{ marginTop: 0 }}>
-        貼上 CSV（第一行為表頭）——Excel／Google 試算表／其他資料庫都能匯出 CSV。貼好後按「自動對應」，確認欄位對照再匯入。
+        上傳或貼上 CSV／TSV／JSON——Excel／Google 試算表可「另存為 CSV／Tab 分隔」，其他資料庫或 API 可匯出 JSON（物件陣列）。
+        選檔會自動判斷格式並對應欄位，確認對照後匯入。
       </p>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+        <input
+          ref={fileInput}
+          type="file"
+          aria-label="選擇匯入檔"
+          accept={TABULAR_ACCEPT}
+          style={{ width: "auto" }}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }}
+        />
+        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
+          格式
+          <select aria-label="匯入格式" value={format} style={{ width: "auto" }} onChange={(e) => { setFormat(e.target.value as TabularFormat); setFormatTouched(true); setResult(null); }}>
+            {TABULAR_FORMATS.map((f) => <option key={f.id} value={f.id} title={f.hint}>{f.label}</option>)}
+          </select>
+        </label>
+      </div>
       <textarea
-        aria-label="CSV 內容"
-        value={csv}
-        onChange={(e) => { setCsv(e.target.value); setResult(null); }}
-        placeholder={"姓名,年齡\n小美,28\n阿哲,30"}
+        aria-label="匯入內容"
+        value={content}
+        onChange={(e) => applyContent(e.target.value)}
+        placeholder={placeholder}
         rows={5}
         style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }}
       />
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-        <button className="btn-sm" disabled={headers.length === 0} onClick={autoMap}>自動對應欄位</button>
-        <span className="meta">{headers.length > 0 ? `偵測到表頭：${headers.join("、")}` : "貼上 CSV 後可自動對應"}</span>
+      <div style={{ marginTop: 6 }}>
+        {parseError ? (
+          <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{parseError}</span>
+        ) : (
+          <span className="meta">{headers.length > 0 ? `偵測到 ${headers.length} 欄、${count} 列資料：${headers.join("、")}` : "上傳或貼上資料後自動對應欄位"}</span>
+        )}
       </div>
       {headers.length > 0 && (
         <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
@@ -452,26 +656,14 @@ function CsvImportPanel({ table, onImported }: { table: TableSummary; onImported
       <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
         <button
           className="primary btn-sm"
-          disabled={!csv.trim() || Object.keys(headerMap).length === 0 || importCsv.isPending}
-          onClick={() => importCsv.mutate({ tableId: table.id, csv, headerMap })}
+          disabled={!content.trim() || !!parseError || Object.keys(headerMap).length === 0 || importData.isPending}
+          onClick={() => importData.mutate({ tableId: table.id, content, format, headerMap })}
         >
-          {importCsv.isPending ? "匯入中…" : "開始匯入"}
+          {importData.isPending ? "匯入中…" : "開始匯入"}
         </button>
       </div>
-      {importCsv.error && <p className="error" role="alert">{importCsv.error.message}</p>}
-      {result && (
-        <div style={{ marginTop: 8 }}>
-          <p className="hint" style={{ color: result.imported > 0 ? "var(--success-ink)" : undefined }}>
-            匯入完成：成功 {result.imported} 列{result.failed > 0 ? `、失敗 ${result.failed} 列` : ""}
-            {result.truncated ? `（超過 5000 列上限，另有 ${result.skipped} 列未處理——請分批匯入）` : ""}
-          </p>
-          {result.errors.length > 0 && (
-            <ul style={{ margin: "4px 0", paddingLeft: 18, fontSize: 12, color: "var(--danger-ink, #a33)" }}>
-              {result.errors.slice(0, 10).map((e) => <li key={e.line}>第 {e.line} 行：{e.error}</li>)}
-            </ul>
-          )}
-        </div>
-      )}
+      {importData.error && <p className="error" role="alert">{importData.error.message}</p>}
+      {result && <ImportResultView result={result} />}
     </div>
   );
 }
