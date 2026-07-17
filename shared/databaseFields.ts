@@ -4,7 +4,7 @@
  * 語意驗證（型別、必填、選項白名單）全部集中在這裡，MCP 與 tRPC 走同一套。
  */
 
-export type DataFieldType = "text" | "number" | "select" | "date" | "checkbox" | "url" | "user";
+export type DataFieldType = "text" | "number" | "select" | "date" | "checkbox" | "url" | "user" | "project" | "schedule";
 
 export interface DataField {
   /** 穩定鍵（列資料以此為 key）：建立後不變，改 label 不影響既有資料 */
@@ -28,6 +28,9 @@ export const FIELD_TYPES: Array<{ id: DataFieldType; label: string }> = [
   { id: "checkbox", label: "勾選" },
   { id: "url", label: "網址" },
   { id: "user", label: "成員" },
+  // 系統實體連結（值＝該實體 id）：格線顯示標題並可跳轉——資料庫跟專案/排程接起來
+  { id: "project", label: "專案連結" },
+  { id: "schedule", label: "排程連結" },
 ];
 
 export const MAX_FIELDS = 30;
@@ -130,8 +133,14 @@ export function validateRowData(
         out[f.key] = v;
         break;
       }
-      case "user": {
-        if (typeof v !== "string" || !UUID_RE.test(v)) return { ok: false, error: `「${f.label}」要是成員 id` };
+      case "user":
+      case "project":
+      case "schedule": {
+        // 三種都存系統實體的 uuid；歸屬驗證交給顯示端（撈得到才顯示標題，撈不到只見縮短 id），
+        // 與 user 型別同取捨——寫入端只擋格式，避免逐列查表拖慢批次寫入
+        if (typeof v !== "string" || !UUID_RE.test(v)) {
+          return { ok: false, error: `「${f.label}」要是系統內的${f.type === "user" ? "成員" : f.type === "project" ? "專案" : "排程"} id` };
+        }
         out[f.key] = v;
         break;
       }

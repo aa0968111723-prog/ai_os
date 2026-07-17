@@ -19,7 +19,7 @@ import { submitGenerationCore } from "./generationCore";
 import { assertProjectEditable } from "./projectAcl";
 import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity } from "./mcpAuth";
-import { listVisibleTables, resolveTableAccess } from "./databaseAcl";
+import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
 import { validateRowData, type DataField } from "../../shared/databaseFields";
 import type { AuthState } from "./auth";
 
@@ -182,10 +182,12 @@ async function runTool(auth: AuthState, name: string, args: Record<string, unkno
 
   // ── 自訂資料庫工具（不掛專案；權限與 tRPC 同一套 databaseAcl）──
   if (name === "list_databases") {
+    // 以「AI 介面」的有效權限過濾：agentAccess=none 的庫連列表都不出現（MCP 權限由資料庫管理者控管）
     const tables = await listVisibleTables(auth);
-    return tables.map((t) => {
-      const access = resolveTableAccess(auth, t);
-      return {
+    return tables.flatMap((t) => {
+      const access = resolveAgentAccess(auth, t);
+      if (!access.canRead) return [];
+      return [{
         tableId: t.id,
         name: t.name,
         scope: t.scope,
@@ -193,7 +195,7 @@ async function runTool(auth: AuthState, name: string, args: Record<string, unkno
         fields: t.fields,
         rowCount: t.rowCount,
         canWriteRows: access.canWriteRows,
-      };
+      }];
     });
   }
 
@@ -201,8 +203,9 @@ async function runTool(auth: AuthState, name: string, args: Record<string, unkno
     const tableId = String(args.tableId ?? "");
     const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
     if (!table) throw new Error("找不到這個資料庫");
-    const access = resolveTableAccess(auth, table);
+    // AI 介面有效權限＝本人權限 ∩ agentAccess 等級（none 連讀都擋、read 擋寫）——
     // 與 tRPC 同語意：無讀取權當作不存在，不外洩個人庫/他組庫的存在性
+    const access = resolveAgentAccess(auth, table);
     if (!access.canRead) throw new Error("找不到這個資料庫");
 
     if (name === "query_database") {
@@ -220,7 +223,7 @@ async function runTool(auth: AuthState, name: string, args: Record<string, unkno
     }
 
     // add_database_row
-    if (!access.canWriteRows) throw new Error("這個資料庫目前只開放管理者寫入");
+    if (!access.canWriteRows) throw new Error("這個資料庫不開放 AI 寫入（管理者可在工作台「資料庫」頁調整 AI 存取等級）");
     const checked = validateRowData(table.fields as DataField[], args.data ?? {});
     if (!checked.ok) throw new Error(checked.error);
     const [row] = await db.insert(schema.dataRows).values({ tableId: table.id, data: checked.data, createdBy: auth.user.id }).returning();

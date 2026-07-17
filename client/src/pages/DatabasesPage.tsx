@@ -28,9 +28,17 @@ type TableSummary = {
   description: string | null;
   fields: DataField[];
   memberWritable: boolean;
+  agentAccess: "none" | "read" | "write";
   rowCount: number;
   access: { canRead: boolean; canWriteRows: boolean; canManage: boolean };
 };
+
+/** AI／MCP 存取等級的顯示文案（管理者在建立與詳頁都能調） */
+const AGENT_ACCESS_OPTIONS: Array<{ value: TableSummary["agentAccess"]; label: string; hint: string }> = [
+  { value: "write", label: "AI 可查可寫", hint: "團隊助手看得到；MCP 代理可查詢、可新增列（仍受本人權限限制）" },
+  { value: "read", label: "AI 唯讀", hint: "團隊助手看得到；MCP 代理只能查詢、不能寫" },
+  { value: "none", label: "不開放 AI", hint: "團隊助手與 MCP 代理完全看不到這個庫" },
+];
 
 export function DatabasesPage({ groupId }: { groupId: string }) {
   const list = trpc.databases.list.useQuery();
@@ -94,7 +102,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
               onCancel={() => setCreating(false)}
             />
           ) : selected ? (
-            <TableDetail key={selected.id} table={selected} onDeleted={() => setSelectedId(null)} />
+            <TableDetail key={selected.id} table={selected} groupId={groupId} onDeleted={() => setSelectedId(null)} />
           ) : (
             <div className="empty-state">
               <h3>選一個資料庫</h3>
@@ -117,6 +125,7 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
   const [description, setDescription] = useState("");
   const [scope, setScope] = useState<"personal" | "group" | "team" | "global">("personal");
   const [memberWritable, setMemberWritable] = useState(true);
+  const [agentAccess, setAgentAccess] = useState<TableSummary["agentAccess"]>("write");
   const [fields, setFields] = useState<DataField[]>([{ key: newFieldKey(), label: "名稱", type: "text", required: true }]);
 
   const myGroups = me.data?.groups ?? [];
@@ -164,6 +173,11 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
         </label>
       )}
 
+      <label htmlFor="db-agent">AI 存取（MCP 代理與團隊助手）</label>
+      <select id="db-agent" value={agentAccess} onChange={(e) => setAgentAccess(e.target.value as TableSummary["agentAccess"])}>
+        {AGENT_ACCESS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}——{o.hint}</option>)}
+      </select>
+
       <h3 style={{ marginBottom: 4 }}>欄位</h3>
       <FieldsEditor fields={fields} onChange={setFields} />
 
@@ -180,6 +194,7 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
               description: description.trim() || undefined,
               fields: fields.map((f) => ({ ...f, label: f.label.trim() })),
               memberWritable,
+              agentAccess,
             })
           }
         >
@@ -229,7 +244,7 @@ function FieldsEditor({ fields, onChange }: { fields: DataField[]; onChange: (f:
 
 /* ────────────────────────── 詳頁：格線＋結構 ────────────────────────── */
 
-function TableDetail({ table, onDeleted }: { table: TableSummary; onDeleted: () => void }) {
+function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; groupId: string; onDeleted: () => void }) {
   const utils = trpc.useUtils();
   const [q, setQ] = useState("");
   const [editStructure, setEditStructure] = useState(false);
@@ -254,6 +269,11 @@ function TableDetail({ table, onDeleted }: { table: TableSummary; onDeleted: () 
         <h2 style={{ margin: 0 }}>{table.name}</h2>
         <span className="badge">{SCOPE_LABEL[table.scope]}</span>
         {!table.memberWritable && <span className="badge" title="只有管理者能寫入"><Icon name="Lock" size={12} /> 唯讀共享</span>}
+        {table.agentAccess !== "write" && (
+          <span className="badge" title={AGENT_ACCESS_OPTIONS.find((o) => o.value === table.agentAccess)?.hint}>
+            <Icon name="Lock" size={12} /> {table.agentAccess === "none" ? "不開放 AI" : "AI 唯讀"}
+          </span>
+        )}
         <span className="spacer" />
         {table.access.canManage && (
           <>
@@ -286,6 +306,17 @@ function TableDetail({ table, onDeleted }: { table: TableSummary; onDeleted: () 
                 成員可寫入
               </label>
             )}
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              AI 存取
+              <select
+                aria-label="AI 存取等級"
+                style={{ width: "auto" }}
+                value={table.agentAccess}
+                onChange={(e) => updateTable.mutate({ id: table.id, agentAccess: e.target.value as TableSummary["agentAccess"] })}
+              >
+                {AGENT_ACCESS_OPTIONS.map((o) => <option key={o.value} value={o.value} title={o.hint}>{o.label}</option>)}
+              </select>
+            </label>
           </div>
         </div>
       )}
@@ -312,7 +343,7 @@ function TableDetail({ table, onDeleted }: { table: TableSummary; onDeleted: () 
               <tr>
                 {table.fields.map((f) => (
                   <td key={f.key} style={{ padding: "4px 4px" }}>
-                    <CellInput field={f} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+                    <CellInput field={f} groupId={groupId} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
                   </td>
                 ))}
                 <td style={{ padding: "4px 4px" }}>
@@ -331,6 +362,7 @@ function TableDetail({ table, onDeleted }: { table: TableSummary; onDeleted: () 
               <GridRow
                 key={r.id}
                 fields={table.fields}
+                groupId={groupId}
                 row={{ id: r.id, data: r.data as DataRowData }}
                 canWrite={table.access.canWriteRows}
                 canDelete={table.access.canManage || table.access.canWriteRows}
@@ -349,9 +381,10 @@ function TableDetail({ table, onDeleted }: { table: TableSummary; onDeleted: () 
 
 /** 一列（點值進入行內編輯；blur/Enter 儲存整列） */
 function GridRow({
-  fields, row, canWrite, canDelete, onSave, onDelete,
+  fields, groupId, row, canWrite, canDelete, onSave, onDelete,
 }: {
   fields: DataField[];
+  groupId: string;
   row: { id: string; data: DataRowData };
   canWrite: boolean;
   canDelete: boolean;
@@ -365,7 +398,7 @@ function GridRow({
       <tr>
         {fields.map((f) => (
           <td key={f.key} style={{ padding: "4px 4px" }}>
-            <CellInput field={f} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+            <CellInput field={f} groupId={groupId} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
           </td>
         ))}
         <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
@@ -383,7 +416,7 @@ function GridRow({
     >
       {fields.map((f) => (
         <td key={f.key} style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-soft, #eee)" }}>
-          <CellDisplay field={f} value={row.data[f.key] ?? null} />
+          <CellDisplay field={f} groupId={groupId} value={row.data[f.key] ?? null} />
         </td>
       ))}
       <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
@@ -398,14 +431,32 @@ function GridRow({
   );
 }
 
-function CellDisplay({ field, value }: { field: DataField; value: DataRowValue }) {
+function CellDisplay({ field, groupId, value }: { field: DataField; groupId: string; value: DataRowValue }) {
   if (value === null || value === "") return <span className="meta">—</span>;
   if (field.type === "checkbox") return value ? <Icon name="Check" size={14} /> : <span className="meta">—</span>;
   if (field.type === "url") {
     return <a href={String(value)} target="_blank" rel="noreferrer" style={{ wordBreak: "break-all" }}>{String(value).slice(0, 60)}</a>;
   }
   if (field.type === "user") return <UserName id={String(value)} />;
+  if (field.type === "project") return <ProjectLink id={String(value)} groupId={groupId} />;
+  if (field.type === "schedule") return <ScheduleLink id={String(value)} groupId={groupId} />;
   return <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{String(value)}</span>;
+}
+
+/** 專案連結欄：解析標題並直通專案頁（作用組撈不到＝別組或已刪，退回縮短 id） */
+function ProjectLink({ id, groupId }: { id: string; groupId: string }) {
+  const projects = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
+  const title = projects.data?.find((p) => p.id === id)?.title;
+  if (!title) return <span className="mono" title={id}>{id.slice(0, 8)}…</span>;
+  return <Link href={`/p/${id}`} title="開啟專案">{title}</Link>;
+}
+
+/** 排程連結欄：解析標題並直通筆記排程頁 */
+function ScheduleLink({ id, groupId }: { id: string; groupId: string }) {
+  const list = trpc.schedule.list.useQuery({ groupId, includePast: true }, { enabled: !!groupId });
+  const item = (list.data ?? []).find((s: { id: string }) => s.id === id) as { title?: string } | undefined;
+  if (!item?.title) return <span className="mono" title={id}>{id.slice(0, 8)}…</span>;
+  return <Link href="/planner" title="開啟筆記排程">{item.title}</Link>;
 }
 
 /** user 欄位顯示名字：成員清單可能跨組，前端只有本組成員表——查不到就顯示縮短 id */
@@ -415,9 +466,13 @@ function UserName({ id }: { id: string }) {
   return <span className="mono" title={id}>{id.slice(0, 8)}…</span>;
 }
 
-function CellInput({ field, value, onChange }: { field: DataField; value: DataRowValue; onChange: (v: DataRowValue) => void }) {
+function CellInput({ field, groupId, value, onChange }: { field: DataField; groupId: string; value: DataRowValue; onChange: (v: DataRowValue) => void }) {
   const common = { "aria-label": field.label, style: { width: "100%", minWidth: 90 } as const };
   switch (field.type) {
+    case "project":
+      return <ProjectPicker label={field.label} groupId={groupId} value={typeof value === "string" ? value : ""} onChange={onChange} />;
+    case "schedule":
+      return <SchedulePicker label={field.label} groupId={groupId} value={typeof value === "string" ? value : ""} onChange={onChange} />;
     case "checkbox":
       return <input type="checkbox" aria-label={field.label} checked={value === true} onChange={(e) => onChange(e.target.checked)} style={{ width: "auto" }} />;
     case "number":
@@ -436,6 +491,32 @@ function CellInput({ field, value, onChange }: { field: DataField; value: DataRo
     default: // text / url
       return <input {...common} value={typeof value === "string" ? value : ""} placeholder={field.type === "url" ? "https://…" : undefined} onChange={(e) => onChange(e.target.value)} />;
   }
+}
+
+/** 專案挑選：作用組的專案清單（值存專案 id；既有值不在清單時仍保留顯示） */
+function ProjectPicker({ label, groupId, value, onChange }: { label: string; groupId: string; value: string; onChange: (v: DataRowValue) => void }) {
+  const projects = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
+  const opts = projects.data ?? [];
+  return (
+    <select aria-label={label} style={{ width: "100%", minWidth: 90 }} value={value} onChange={(e) => onChange(e.target.value || null)}>
+      <option value="">—</option>
+      {value && !opts.some((p) => p.id === value) && <option value={value}>（別組或已刪的專案）</option>}
+      {opts.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+    </select>
+  );
+}
+
+/** 排程挑選：作用組的排程清單（含過去；值存排程 id） */
+function SchedulePicker({ label, groupId, value, onChange }: { label: string; groupId: string; value: string; onChange: (v: DataRowValue) => void }) {
+  const list = trpc.schedule.list.useQuery({ groupId, includePast: true }, { enabled: !!groupId });
+  const opts = (list.data ?? []) as Array<{ id: string; title: string; startsAt: string | Date }>;
+  return (
+    <select aria-label={label} style={{ width: "100%", minWidth: 90 }} value={value} onChange={(e) => onChange(e.target.value || null)}>
+      <option value="">—</option>
+      {value && !opts.some((s) => s.id === value) && <option value={value}>（別組或已刪的排程）</option>}
+      {opts.map((s) => <option key={s.id} value={s.id}>{new Date(s.startsAt).toLocaleDateString("zh-TW")}・{s.title}</option>)}
+    </select>
+  );
 }
 
 /** 成員挑選：下拉列出「我所有組」的成員聯集（跨範圍夠用；查無成員時退回自由填 id 的輸入框） */

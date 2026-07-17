@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -157,7 +157,8 @@ export const teamAssistantRouter = router({
       const visibleTables = await db
         .select()
         .from(schema.dataTables)
-        .where(and(isNull(schema.dataTables.deletedAt), or(...dbConds)))
+        // agentAccess='none'＝管理者不讓 AI 看這個庫——助手上下文也不注入（read/write 都可讀）
+        .where(and(isNull(schema.dataTables.deletedAt), ne(schema.dataTables.agentAccess, "none"), or(...dbConds)))
         .orderBy(desc(schema.dataTables.updatedAt))
         .limit(DB_LIMIT);
       const dbSections: string[] = [];

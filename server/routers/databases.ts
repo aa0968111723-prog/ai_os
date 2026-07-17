@@ -20,7 +20,7 @@ const LIST_LIMIT_DEFAULT = 200;
 const fieldsShape = z.array(z.object({
   key: z.string(),
   label: z.string(),
-  type: z.enum(["text", "number", "select", "date", "checkbox", "url", "user"]),
+  type: z.enum(["text", "number", "select", "date", "checkbox", "url", "user", "project", "schedule"]),
   options: z.array(z.string()).optional(),
   required: z.boolean().optional(),
 })).max(60);
@@ -47,6 +47,7 @@ export const databasesRouter = router({
       description: t.description,
       fields: t.fields as DataField[],
       memberWritable: t.memberWritable,
+      agentAccess: t.agentAccess,
       rowCount: t.rowCount,
       updatedAt: t.updatedAt,
       access: resolveTableAccess(ctx.auth, t),
@@ -67,6 +68,8 @@ export const databasesRouter = router({
       description: z.string().max(500).optional(),
       fields: fieldsShape,
       memberWritable: z.boolean().optional(),
+      /** AI／MCP 存取等級（none/read/write）——見 databaseAcl.resolveAgentAccess */
+      agentAccess: z.enum(["none", "read", "write"]).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const denied = canCreateIn(ctx.auth, input.scope, input.groupId, input.teamId);
@@ -84,6 +87,7 @@ export const databasesRouter = router({
           description: input.description?.trim() || null,
           fields: input.fields,
           memberWritable: input.memberWritable ?? true,
+          agentAccess: input.agentAccess ?? "write",
           createdBy: ctx.auth.user.id,
         })
         .returning();
@@ -98,6 +102,7 @@ export const databasesRouter = router({
       description: z.string().max(500).nullable().optional(),
       fields: fieldsShape.optional(),
       memberWritable: z.boolean().optional(),
+      agentAccess: z.enum(["none", "read", "write"]).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const { table, access } = await getTableChecked(ctx.auth, input.id);
@@ -113,6 +118,7 @@ export const databasesRouter = router({
           description: input.description === undefined ? table.description : input.description?.trim() || null,
           fields: input.fields ?? (table.fields as DataField[]),
           memberWritable: input.memberWritable ?? table.memberWritable,
+          agentAccess: input.agentAccess ?? table.agentAccess,
           updatedAt: new Date(),
         })
         .where(eq(schema.dataTables.id, table.id))

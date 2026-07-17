@@ -637,6 +637,10 @@ export const dataTables = pgTable("data_tables", {
   fields: jsonb("fields").notNull().default([]),
   /** true＝範圍內成員都能新增/編輯列；false＝只有管理者（組長/團隊管理員/超管/建立者）能寫 */
   memberWritable: boolean("member_writable").notNull().default(true),
+  /** AI／MCP 存取等級（管理者可調）：none＝AI 完全看不到、read＝AI 可查不可寫、write＝AI 可查可寫。
+   *  約束的是「介面」（MCP 工具與團隊助手注入），人的網頁權限不受影響；
+   *  實際查寫仍疊加使用者本人權限（databaseAcl），此欄只會更嚴、不會放寬。 */
+  agentAccess: text("agent_access", { enum: ["none", "read", "write"] }).notNull().default("write"),
   createdBy: uuid("created_by").notNull(),
   /** 軟刪除：整庫誤刪可救（列資料原地保留）；所有列表查詢以 isNull(deletedAt) 過濾 */
   deletedAt: timestamp("deleted_at"),
