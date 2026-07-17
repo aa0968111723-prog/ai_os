@@ -181,19 +181,25 @@ ok("MCP 讀專案上下文（含世界觀）", ctx2["worldview"]["logline"].star
 # 審計是 fire-and-forget 非同步寫入：用輪詢等落庫（最多 10 秒），不賭固定 sleep
 import time as _t
 
+# pred 收「整頁 rows」：兩筆 mcp 審計是各自 fire-and-forget，逐筆判斷會在第一筆落庫、
+# 第二筆還在路上時提前收手（CI 實際踩過：len>=2 與 projectId 斷言雙紅）——要等到完整條件成立才回傳
 def wait_audit(pred, timeout=10):
+    rows = []
     for _ in range(timeout * 2):
         rows = call("GET", admin2, "audit.list", {}).get("items", [])
-        if any(pred(i) for i in rows):
+        if pred(rows):
             return rows
         _t.sleep(0.5)
-    return call("GET", admin2, "audit.list", {}).get("items", [])
+    return rows
 
-rows = wait_audit(lambda i: str(i.get("action", "")).startswith("mcp."))
-mcp_rows = [i for i in rows if str(i.get("action", "")).startswith("mcp.")]
+def _mcp_rows(rows):
+    return [i for i in rows if str(i.get("action", "")).startswith("mcp.")]
+
+rows = wait_audit(lambda rows: len(_mcp_rows(rows)) >= 2 and any(i.get("projectId") == proj["id"] for i in _mcp_rows(rows)))
+mcp_rows = _mcp_rows(rows)
 ok("MCP 呼叫落審計(mcp.* action)", len(mcp_rows) >= 2)
 ok("MCP 審計帶 projectId 歸屬", any(i.get("projectId") == proj["id"] for i in mcp_rows))
 bad = mcp("tools/call", {"name": "get_project_context", "arguments": {"projectId": "00000000-0000-0000-0000-000000000000"}})
 ok("MCP 錯誤呼叫回 JSON-RPC error", "error" in bad)
-rows2 = wait_audit(lambda i: str(i.get("action", "")).startswith("mcp.") and i.get("ok") is False)
-ok("MCP 失敗呼叫也落審計(ok=false)", any(str(i.get("action", "")).startswith("mcp.") and i.get("ok") is False for i in rows2))
+rows2 = wait_audit(lambda rows: any(i.get("ok") is False for i in _mcp_rows(rows)))
+ok("MCP 失敗呼叫也落審計(ok=false)", any(i.get("ok") is False for i in _mcp_rows(rows2)))
