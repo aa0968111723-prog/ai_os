@@ -123,8 +123,9 @@ async function sweepZombies(): Promise<void> {
  * 把單筆卡 queued/running 的生成收斂成 failed 並「依帳本淨額」退點——
  * 行為與 routers/generation.ts 陳屍清掃一致：負淨額＝有扣過（退絕對值），0＝從未扣點（不退，免憑空加點）。
  * compare-and-set：只有真正把列從 queued/running 推進成 failed 的那一次才退點，與正常輪詢／advanceGeneration 互斥防重複退點。
+ * export 給 AI 代理執行器（agentRunner）共用同一套回收語義。
  */
-async function reapStuckGeneration(genId: string): Promise<void> {
+export async function reapStuckGeneration(genId: string): Promise<void> {
   const [ledger] = await db
     .select({ net: sql<number>`coalesce(sum(${schema.costLedger.delta}), 0)` })
     .from(schema.costLedger)

@@ -44,8 +44,9 @@ const DEFAULT_IMAGE_MODEL = MODELS.find((m) => m.category === "text-to-image" &&
  * 需要來源素材的類別（圖生圖／轉錄／對嘴／訓練…）助手還沒辦法幫使用者附檔，提了也必然失敗。
  */
 const ASSISTANT_MODEL_CATEGORIES = new Set(["text-to-image", "text-to-video", "text-to-audio", "text-to-speech", "llm"]);
-/** 白名單挑模型：LLM 提的 modelId 必須「在註冊表、不需來源素材、類別可代操」才採用，否則退回預設圖像模型（幻覺 id 不落地） */
-function pickGenerateModel(proposedId?: string): ModelEntry {
+/** 白名單挑模型：LLM 提的 modelId 必須「在註冊表、不需來源素材、類別可代操」才採用，否則退回預設圖像模型（幻覺 id 不落地）。
+ *  export 給 AI 代理（agents.ts）共用——規劃與執行兩端用同一張白名單，規則不分岔。 */
+export function pickGenerateModel(proposedId?: string): ModelEntry {
   if (proposedId) {
     const m = getModel(proposedId);
     if (m && !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category)) return m;
@@ -53,8 +54,9 @@ function pickGenerateModel(proposedId?: string): ModelEntry {
   // 預設模型 id 一定取自註冊表（見 DEFAULT_IMAGE_MODEL 的來源），?? MODELS[0] 只是型別防禦
   return getModel(DEFAULT_IMAGE_MODEL) ?? MODELS[0];
 }
-/** 提示詞用「可用模型速查」：各類別 recommended 的日常主力，一行一個（上限 12 行，防提示詞隨註冊表膨脹） */
-const MODEL_CHEATSHEET = MODELS.filter((m) => m.recommended && !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category))
+/** 提示詞用「可用模型速查」：各類別 recommended 的日常主力，一行一個（上限 12 行，防提示詞隨註冊表膨脹）。
+ *  export 給 AI 代理的規劃提示詞共用。 */
+export const MODEL_CHEATSHEET = MODELS.filter((m) => m.recommended && !m.needs && ASSISTANT_MODEL_CATEGORIES.has(m.category))
   .slice(0, 12)
   .map((m) => `- ${m.id}｜${m.label}｜${m.points} 點｜${m.bestFor}`)
   .join("\n");

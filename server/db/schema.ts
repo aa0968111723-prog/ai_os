@@ -400,6 +400,33 @@ export const workflowRuns = pgTable("workflow_runs", {
 });
 
 /**
+ * AI 代理執行紀錄（代理系統核心）：一句目標 → LLM 規劃多步計畫 → 使用者核准 → 伺服器背景逐步執行。
+ * 慣例與 workflowRuns 對齊：steps jsonb 快照、runner 是 steps 的單一寫者、停止只改 run 狀態。
+ * 與工作流的差別：步驟由 LLM 針對目標動態規劃（非固定 preset），且要「核准後」才開始花點數。
+ */
+export const agentRuns = pgTable("agent_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  /** 使用者的一句目標（例：把知識庫的腳本拆成分鏡並逐鏡出圖） */
+  goal: text("goal").notNull(),
+  /** LLM 的計畫摘要（核准畫面顯示） */
+  summary: text("summary").notNull().default(""),
+  status: text("status", { enum: ["awaiting_approval", "running", "done", "failed", "stopped", "discarded"] })
+    .notNull()
+    .default("awaiting_approval"),
+  currentStep: integer("current_step").notNull().default(0),
+  /** 每步：見 services/agentRunner 的 AgentStep（kind/note/status/估點/執行期 generationId 等） */
+  steps: jsonb("steps").notNull(),
+  /** 核准畫面顯示的估點總額；實際扣點仍由各步驟既有守門逐筆進行 */
+  estPoints: integer("est_points").notNull().default(0),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
  * 每組自訂選項（R23）：內容類型/發布平台/世界觀(調性·主軸·視覺風格)由各組組長自行增修。
  * 首次讀取時以 shared/options 的預設 lazy-seed；(groupId,type,value) 唯一，讓 seed 冪等。
  * worldview 類（tone/theme/style）value===label（直接是注入生成的字串）；kind/platform 的 value 是穩定 id。

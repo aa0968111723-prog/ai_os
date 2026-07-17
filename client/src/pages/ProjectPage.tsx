@@ -19,6 +19,7 @@ import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PromptLibrary } from "../components/PromptLibrary";
 import { TocNav } from "../components/TocNav";
 import { ProjectAssistant } from "../components/ProjectAssistant";
+import { AgentCard } from "../components/AgentCard";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { useCollab, CursorOverlay, CollabZone, COLLAB_ZONES } from "../realtime";
 
@@ -867,6 +868,9 @@ export function ProjectPage({ id }: { id: string }) {
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
+          {/* AI 代理（代理系統核心）：一句目標→計畫核准→伺服器背景逐步執行——把「發想→生成→送審」交給代理跑 */}
+          <AgentCard projectId={id} canEdit={canEdit} />
+
           {/* AI 專案助手：統一對話入口——問進度、要建議，它會提議動作（生成/建分鏡/送審/跑工作流），你確認才執行 */}
           <ProjectAssistant projectId={id} />
 
