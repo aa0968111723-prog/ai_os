@@ -477,6 +477,8 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
     utils.scenes.listByProject.invalidate({ projectId });
     utils.approvals.listByProject.invalidate({ projectId });
     utils.messages.list.invalidate({ projectId });
+    // 同類缺陷一併修：分鏡軟刪後回收桶要立即看得到（與知識庫刪除同一根因）
+    utils.projects.listDeleted.invalidate({ projectId });
   };
   const move = trpc.scenes.move.useMutation({ onSuccess: invalidate });
   const remove = trpc.scenes.remove.useMutation({ onSuccess: invalidate });

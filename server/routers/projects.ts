@@ -438,6 +438,22 @@ export const projectsRouter = router({
       .from(schema.groupMembers)
       .leftJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
       .where(eq(schema.groupMembers.groupId, project.groupId));
+    // 地毯實測缺陷修復：有效成員不只 group_members——團隊管理員（team_members.role='admin'）
+    // 在 auth 展開為各組 admin（services/auth.ts 同一規則），之前不列會出現「成員權限整卡空白、
+    // 連本人都看不到」（成員全來自團隊層級的組）。這裡補上，標為 admin（固定編輯者、不可降）。
+    const [grp] = await db.select({ teamId: schema.groups.teamId }).from(schema.groups).where(eq(schema.groups.id, project.groupId));
+    const teamAdmins = grp
+      ? await db
+          .select({ userId: schema.teamMembers.userId, name: schema.users.name })
+          .from(schema.teamMembers)
+          .leftJoin(schema.users, eq(schema.users.id, schema.teamMembers.userId))
+          .where(and(eq(schema.teamMembers.teamId, grp.teamId), eq(schema.teamMembers.role, "admin")))
+      : [];
+    const seen = new Set(members.map((m) => m.userId));
+    const effective = [
+      ...members,
+      ...teamAdmins.filter((a) => !seen.has(a.userId)).map((a) => ({ userId: a.userId, groupRole: "admin" as const, name: a.name })),
+    ];
     const overrides = await db
       .select()
       .from(schema.projectMembers)
@@ -445,7 +461,7 @@ export const projectsRouter = router({
     const roleOf = (userId: string) => overrides.find((o) => o.userId === userId)?.role === "viewer" ? "viewer" as const : "editor" as const;
     return {
       canManage: myRole !== "member",
-      members: members.map((m) => ({
+      members: effective.map((m) => ({
         userId: m.userId,
         name: m.name ?? "?",
         groupRole: m.groupRole,

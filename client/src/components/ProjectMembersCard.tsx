@@ -27,6 +27,9 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
           <div className="skeleton" style={{ height: 32, marginTop: 8 }} />
           <div className="skeleton" style={{ height: 32, marginTop: 8 }} />
         </div>
+      ) : data.members.length === 0 ? (
+        // 防禦性空狀態（正常不會出現：有效成員至少含目前使用者）——留一句話總比整卡靜默空白好
+        <p className="hint" style={{ marginTop: 8 }}>讀不到成員清單——請重新整理；若持續發生請回報管理員。</p>
       ) : (
         <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
           {data.members.map((m) => (

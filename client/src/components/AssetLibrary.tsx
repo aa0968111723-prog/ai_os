@@ -44,7 +44,13 @@ export function AssetLibrary({
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   const assets = trpc.projects.assets.useQuery({ projectId });
-  const del = trpc.projects.deleteAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
+  const del = trpc.projects.deleteAsset.useMutation({
+    onSuccess: () => {
+      utils.projects.assets.invalidate({ projectId });
+      // 同類缺陷一併修：素材軟刪後回收桶要立即看得到（與知識庫刪除同一根因）
+      utils.projects.listDeleted.invalidate({ projectId });
+    },
+  });
   const rename = trpc.projects.renameAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
   // 文件「加入知識庫」：選單一點即關，回饋改在素材卡上顯示——進行中／成功綠字（2.5 秒）／失敗紅字，
   // 比照相鄰圖片版 describeImage 的三態，不再按了零反應（使用者會以為壞掉而重按、灌出重複條目）
