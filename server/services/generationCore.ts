@@ -236,7 +236,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   // 原子守門＋扣點（同一交易＋per-user 鎖，杜絕併發雙重扣款/繞過額度）
   // reserveQuota「拋例外」（連線池耗盡/逾時/序列化失敗）時也要刪掉剛建的 queued 列，
   // 否則會留下「從未扣點」的孤兒，30 分鐘後被陳屍清掃憑空退點、灌鬆總預算閘。
-  // mock 模式（無 FAL_KEY / FAL_MOCK=1）預設不扣點：內部測試不燒真實額度、也不被額度閘擋
+  // e2e 測試模式（E2E_MOCK=1，僅供自動化測試）預設不扣點：測試不燒真實額度、也不被額度閘擋
   //（正式模式照常守門；MOCK_BILLING=1 時 mock 也走扣點——e2e 驗證額度守門用，見 billingBypassed）
   if (!billingBypassed()) {
     let quotaError: string | null;

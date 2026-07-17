@@ -1,5 +1,5 @@
 # 組內留言協作強化 e2e:回覆串/表情回應/@提及/引用作品卡/釘選/未讀水位/檢視者參與。
-# 前置:FAL_MOCK=1、:3199(可用 E2E_PORT 覆蓋)、SEED_ADMIN_EMAIL=admin@aidirector.local、
+# 前置:E2E_MOCK=1、:3199(可用 E2E_PORT 覆蓋)、SEED_ADMIN_EMAIL=admin@aidirector.local、
 #       SEED_ADMIN_PASSWORD=test-admin-123、全新 DB。
 import json, urllib.request, urllib.parse, urllib.error
 

@@ -9,10 +9,14 @@ if [ -z "$DATABASE_URL" ]; then
 else
   echo "[start] DATABASE_URL 已設定（$(echo "$DATABASE_URL" | sed 's#^.*@#***@#')）"
 fi
-if [ -z "$FAL_KEY" ] || [ "$FAL_MOCK" = "1" ]; then
-  echo "[start] Fal：假生成模式（不花錢）——要真實生成請設 FAL_KEY 並移除 FAL_MOCK"
+# 全站一律真實模式（示範模式已移除；E2E_MOCK=1 僅供自動化測試，正式部署絕不設定）
+if [ "$E2E_MOCK" = "1" ]; then
+  echo "[start] ⚠ Fal：E2E 測試模式（E2E_MOCK=1）——僅供自動化測試，正式部署請移除此變數"
+elif [ -z "$FAL_KEY" ]; then
+  echo "[start] ⚠⚠⚠ FAL_KEY 未設定！系統為真實生成模式，媒體生成將全部失敗（自動退點）"
+  echo "[start]     → 到部署平台的服務 Variables 填入 fal.ai 金鑰後重新部署"
 else
-  echo "[start] Fal：真實生成模式"
+  echo "[start] Fal：真實生成模式（FAL_KEY 已設）"
 fi
 
 exec node dist/index.js

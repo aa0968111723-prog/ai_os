@@ -1,5 +1,5 @@
 # Phase 4 基礎工程 e2e:MOCK_BILLING 扣點驗證/成本監控/錯誤觀測與 selftest/個資匯出/下載區新文件。
-# 前置:FAL_MOCK=1 **且 MOCK_BILLING=1**、:3199、SEED_ADMIN_EMAIL=admin@aidirector.local、
+# 前置:E2E_MOCK=1 **且 MOCK_BILLING=1**、:3199、SEED_ADMIN_EMAIL=admin@aidirector.local、
 #       SEED_ADMIN_PASSWORD=test-admin-123、全新 DB。
 import json, time, urllib.request, urllib.parse, urllib.error
 

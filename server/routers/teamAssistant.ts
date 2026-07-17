@@ -151,7 +151,7 @@ export const teamAssistantRouter = router({
       // 假模式：不扣點，回確定性摘要（可測、不花錢）
       if (isMockMode()) {
         const preview = lines.slice(0, 3).join("\n");
-        const answer = `（示範）本組共 ${totalProjects} 個專案${lines.length ? `：\n${preview}${lines.length > 3 ? "\n…" : ""}` : "。"}\n你的問題：「${input.message}」——正式模式會由 LLM 彙總分析。`;
+        const answer = `（測試模式）本組共 ${totalProjects} 個專案${lines.length ? `：\n${preview}${lines.length > 3 ? "\n…" : ""}` : "。"}\n你的問題：「${input.message}」——正式模式會由 LLM 彙總分析。`;
         return { answer, mock: true };
       }
 

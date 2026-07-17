@@ -32,7 +32,7 @@ npm run dev                 # server :3000 + client :5173
 
 1. Railway 新增專案 → 加 **Postgres** 服務
 2. 加 **App 服務**連此 repo（自動用 Dockerfile 建置）
-3. 環境變數：`DATABASE_URL`（引用 Postgres 服務）、`FAL_KEY`（可後補）、`FAL_MOCK=1`（測試期建議開）
+3. 環境變數：`DATABASE_URL`（引用 Postgres 服務）、`FAL_KEY`（必填——全站一律真實生成，示範模式已移除）
 4. **資料表自動建立**：容器啟動時會自動 `drizzle-kit push`（首次部署免手動）；
    若 DB 尚未就緒不會擋啟動，重試部署即可。也可自行 `DATABASE_URL=<Railway的> npm run db:push`
 

@@ -342,7 +342,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
           )}
         </button>
       </div>
-      <p className="hint" style={{ marginTop: 8 }}>每次詢問 1 點（示範模式免費）</p>
+      <p className="hint" style={{ marginTop: 8 }}>每次詢問 1 點</p>
       {ask.error && <p className="error" role="alert">{ask.error.message}</p>}
       {ask.data && <p style={{ whiteSpace: "pre-wrap", marginTop: 8, marginBottom: 0 }}>{ask.data.answer}</p>}
     </section>

@@ -20,8 +20,7 @@ restartPolicyMaxRetries = 5
 #
 # DATABASE_URL         【必填】按「Add Reference」選 Postgres → ${{ Postgres.DATABASE_URL }}
 # APP_URL              【必填】https://aios-production-5d43.up.railway.app(邀請連結/假素材用)
-# FAL_KEY              【真實生成才要】fal.ai/dashboard/keys 取得
-# FAL_MOCK             【測試期建議 1】=1 全站假生成不花錢;要真實生成時刪除此變數
+# FAL_KEY              【必填】fal.ai/dashboard/keys 取得(全站一律真實生成;沒填生成會失敗並退點)
 # SEED_ADMIN_EMAIL     【可選】總管理員 email;未設用程式內建預設(aa0968111723@gmail.com)
 # SEED_ADMIN_PASSWORD  【可選】總管理員密碼;未設用程式內建預設——上線穩定後請設定此變數換掉預設密碼
 # TOTAL_BUDGET_POINTS  【可選】首次啟動總預算種子值(預設 5000;之後在系統內調)

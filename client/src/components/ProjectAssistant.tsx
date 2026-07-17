@@ -30,8 +30,6 @@ function toPayload(a: Action) {
  */
 export function ProjectAssistant({ projectId }: { projectId: string }) {
   const utils = trpc.useUtils();
-  // 示範模式提問不扣點——說明文字要跟著標免費（與 App 頂欄同 key 共用快取）
-  const info = trpc.generation.info.useQuery();
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   // 已執行的提議動作鍵（turnIndex:actionIndex）＋正在執行中的鍵——停用「已執行」的按鈕，避免重複點擊
@@ -76,7 +74,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
         <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 專案助手
       </h2>
       <p className="hint" style={{ marginTop: -4 }}>
-        問我這個專案的進度、生成了什麼、哪些分鏡還沒審、<b>該用哪個模型</b>…；回答前我會視需要查素材庫／分鏡／生成紀錄／模型目錄（唯讀，自動進行）。我也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流／貼腳本拆分鏡），你按確認才執行。每次提問約 1 點{info.data?.mockMode ? "（示範模式免費）" : ""}。
+        問我這個專案的進度、生成了什麼、哪些分鏡還沒審、<b>該用哪個模型</b>…；回答前我會視需要查素材庫／分鏡／生成紀錄／模型目錄（唯讀，自動進行）。我也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流／貼腳本拆分鏡），你按確認才執行。每次提問約 1 點。
       </p>
 
       {turns.length > 0 && (
