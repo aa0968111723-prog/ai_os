@@ -100,13 +100,21 @@ export function overLimit(userId: string, dedupeKey?: string): boolean {
   const now = Date.now();
   if (dedupeKey) {
     for (const [k, t] of seenNonce) if (now - t > WINDOW_MS) seenNonce.delete(k);
-    // 這一題先前已計過名額（另一條路徑）→ 同題第二次直接放行，不重複計
-    if (seenNonce.has(dedupeKey)) return false;
-    seenNonce.set(dedupeKey, now);
+    // 這一題先前已「成功計過名額」（另一條路徑）→ 給「單次」免計放行（SSE 串流→退回 tRPC 的那一次）。
+    // 用過即刪：同一 nonce 第三次以後不再免計——否則客戶端固定一個 nonce 就能無限繞過節流（安全漏洞）。
+    if (seenNonce.has(dedupeKey)) {
+      seenNonce.delete(dedupeKey);
+      return false;
+    }
   }
   const arr = (hits.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
   const over = arr.length >= LIMIT_PER_MIN;
-  if (!over) arr.push(now);
+  if (!over) {
+    arr.push(now);
+    // 只有「真正計入名額」的請求才登記 nonce——被節流擋下的請求不留記號，
+    // 免得後續重試靠這個記號免計繞過（登記必須在確認未超限之後）。
+    if (dedupeKey) seenNonce.set(dedupeKey, now);
+  }
   // 為什麼：空陣列就刪 key，否則長跑容器的 hits Map 會隨歷史使用者無界成長（記憶體洩漏）
   if (arr.length) hits.set(userId, arr);
   else hits.delete(userId);

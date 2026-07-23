@@ -111,6 +111,26 @@ describe("overLimit（節流＋同題去重）", () => {
     for (let i = 0; i < 6; i++) expect(overLimit(uid, `n${i}-${uid}`)).toBe(false);
     expect(overLimit(uid, `n6-${uid}`)).toBe(true);
   });
+
+  it("超限後重用同一 nonce 不能免費繞過節流（被拒的請求不留免計記號）", () => {
+    const uid = `bypass-user-${Math.random().toString(36).slice(2)}`;
+    // 先用滿 6 格（無 nonce）
+    for (let i = 0; i < 6; i++) expect(overLimit(uid)).toBe(false);
+    const nonce = `bypass-nonce-${uid}`;
+    // 已超限：帶 nonce 也被擋，且該 nonce 不因被拒而取得免計資格
+    expect(overLimit(uid, nonce)).toBe(true);
+    expect(overLimit(uid, nonce)).toBe(true); // 重用同 nonce 仍被擋，未繞過
+  });
+
+  it("免計放行僅限單次（第三次重用同一 nonce 不再免計）", () => {
+    const uid = `single-user-${Math.random().toString(36).slice(2)}`;
+    const nonce = `single-nonce-${uid}`;
+    expect(overLimit(uid, nonce)).toBe(false); // 第一次：計一格並登記 nonce
+    expect(overLimit(uid, nonce)).toBe(false); // 第二次：免計放行（SSE→退回），用過即刪
+    // 第三次同 nonce 不再有免計資格：填滿剩餘名額後應被節流擋下
+    for (let i = 0; i < 5; i++) expect(overLimit(uid)).toBe(false); // 補到共 6 格
+    expect(overLimit(uid, nonce)).toBe(true); // 第三次重用：已無免計、且已超限 → 擋
+  });
 });
 
 describe("sceneFillRole（生成成品能填進分鏡的哪個格）", () => {
