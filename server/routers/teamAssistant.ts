@@ -304,6 +304,39 @@ export const teamAssistantRouter = router({
         .where(and(isNull(schema.dataTables.deletedAt), ne(schema.dataTables.agentAccess, "none"), or(...dbConds)))
         .orderBy(desc(schema.dataTables.updatedAt))
         .limit(DB_LIMIT);
+      // 每庫資訊量（一條聚合查詢撈齊全部庫，無 N+1）：列數＋文件的圖影音文分佈與容量——
+      // 助手能直接回答「素材庫裡有多少張圖」「哪個庫最大」這類資訊量問題。
+      const tableIds = visibleTables.map((t) => t.id);
+      const KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
+      const rowCountBy = new Map<string, number>();
+      const fileAggBy = new Map<string, Array<{ kind: string; n: number; bytes: number }>>();
+      if (tableIds.length) {
+        const kindExpr = sql<string>`case
+          when ${schema.dataFiles.mime} like 'image/%' then 'image'
+          when ${schema.dataFiles.mime} like 'video/%' then 'video'
+          when ${schema.dataFiles.mime} like 'audio/%' then 'audio'
+          else 'doc' end`;
+        const [rowAgg, fileAgg] = await Promise.all([
+          db
+            .select({ tableId: schema.dataRows.tableId, n: sql<number>`count(*)` })
+            .from(schema.dataRows)
+            .where(inArray(schema.dataRows.tableId, tableIds))
+            .groupBy(schema.dataRows.tableId),
+          db
+            .select({ tableId: schema.dataFiles.tableId, kind: kindExpr, n: sql<number>`count(*)`, bytes: sql<number>`coalesce(sum(${schema.dataFiles.sizeBytes}), 0)` })
+            .from(schema.dataFiles)
+            .where(inArray(schema.dataFiles.tableId, tableIds))
+            .groupBy(schema.dataFiles.tableId, kindExpr),
+        ]);
+        for (const r of rowAgg) rowCountBy.set(r.tableId, Number(r.n));
+        for (const f of fileAgg) {
+          const arr = fileAggBy.get(f.tableId) ?? [];
+          arr.push({ kind: f.kind, n: Number(f.n), bytes: Number(f.bytes) });
+          fileAggBy.set(f.tableId, arr);
+        }
+      }
+      const fmtMb = (n: number) => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(2)} GB` : n >= 1024 ** 2 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
+
       const dbSections: string[] = [];
       for (const t of visibleTables) {
         const [rows, files] = await Promise.all([
@@ -313,9 +346,16 @@ export const teamAssistantRouter = router({
             .where(eq(schema.dataRows.tableId, t.id))
             .orderBy(desc(schema.dataRows.createdAt))
             .limit(DB_ROW_LIMIT),
-          // 文件層：檔名全列（AI 知道有什麼），最近兩份可讀文件各附 600 字摘錄（常見問題直接答得出）
+          // 文件層：檔名全列（AI 知道有什麼；圖影帶類型與分類），最近兩份可讀文件各附 600 字摘錄，
+          // 圖影另附 AI 看圖描述——助手答得出「那張海報畫了什麼」。
           db
-            .select({ name: schema.dataFiles.name, textContent: schema.dataFiles.textContent })
+            .select({
+              name: schema.dataFiles.name,
+              mime: schema.dataFiles.mime,
+              category: schema.dataFiles.category,
+              aiDescription: schema.dataFiles.aiDescription,
+              textContent: schema.dataFiles.textContent,
+            })
             .from(schema.dataFiles)
             .where(eq(schema.dataFiles.tableId, t.id))
             .orderBy(desc(schema.dataFiles.createdAt))
@@ -329,16 +369,34 @@ export const teamAssistantRouter = router({
             .map(([k, v]) => `${labelOf.get(k) ?? k}:${String(v).slice(0, 40)}`);
           return "  - " + (entries.join("｜") || "（空列）");
         });
-        const fileNames = files.map((f) => f.name).join("、");
+        const kindOf = (mime: string) => (mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : mime.startsWith("audio/") ? "audio" : "doc");
+        const fileNames = files
+          .map((f) => {
+            const tags = [kindOf(f.mime) !== "doc" ? KIND_LABEL[kindOf(f.mime)] : null, f.category].filter(Boolean).join("・");
+            return tags ? `${f.name}（${tags}）` : f.name;
+          })
+          .join("、");
         const excerpts = files
           .filter((f) => f.textContent)
           .slice(0, 2)
           .map((f) => `  《${f.name}》摘錄：${f.textContent!.slice(0, 600).replace(/\s+/g, " ")}`);
+        const mediaNotes = files
+          .filter((f) => !f.textContent && f.aiDescription)
+          .slice(0, 3)
+          .map((f) => `  《${f.name}》AI 看圖描述：${f.aiDescription!.slice(0, 300).replace(/\s+/g, " ")}`);
+        // 資訊量一行：總列數（非只注入的 12 列）＋文件分佈與容量
+        const agg = fileAggBy.get(t.id) ?? [];
+        const totalFiles = agg.reduce((s, a) => s + a.n, 0);
+        const totalBytes = agg.reduce((s, a) => s + a.bytes, 0);
+        const kindParts = agg.filter((a) => a.n > 0).map((a) => `${KIND_LABEL[a.kind] ?? a.kind} ${a.n}`).join("、");
+        const statsLine = `  資訊量：資料 ${(rowCountBy.get(t.id) ?? 0).toLocaleString()} 列${totalFiles > 0 ? `｜文件 ${totalFiles} 份（${kindParts}）共 ${fmtMb(totalBytes)}` : "｜無附掛文件"}`;
         dbSections.push([
           `資料庫「${t.name}」（${t.scope === "group" ? "組" : t.scope === "team" ? "團隊" : "全站"}；欄位：${fields.map((f) => f.label).join("、")}）最近 ${rows.length} 列：`,
           rowLines.join("\n") || "  （沒有資料）",
+          statsLine,
           ...(files.length ? [`  附掛文件：${fileNames}`] : []),
           ...excerpts,
+          ...mediaNotes,
         ].join("\n"));
       }
 

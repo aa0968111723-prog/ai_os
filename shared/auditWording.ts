@@ -125,6 +125,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "databases.uploadFile": "上傳資料庫文件",
   "databases.refreshFile": "重新整理資料庫文件",
   "databases.removeFile": "刪除資料庫文件",
+  "databases.setFileMeta": "編輯資料庫文件分類／描述",
+  "databases.classifyFile": "AI 看圖分類資料庫圖片",
+  "databases.sendFileToProject": "把資料庫文件送進專案素材庫",
   // MCP 個人連線金鑰（自助管理）
   "mcpTokens.create": "建立 MCP 連線金鑰",
   "mcpTokens.revoke": "撤銷 MCP 連線金鑰",

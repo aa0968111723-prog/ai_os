@@ -421,17 +421,23 @@ app.use("/api/databases/upload", (err: unknown, _req: express.Request, res: expr
   next(err);
 });
 
-/** 資料庫文件下載：登入＋資料庫讀取權（databaseAcl）；非影音一律 attachment */
+/** 資料庫文件下載：登入＋資料庫讀取權（databaseAcl）；或帶 dbfile 簽名（給 fal 視覺模型抓圖，短效）；非影音一律 attachment */
 app.get("/api/databases/files/:id/file", async (req, res) => {
   try {
-    const auth = await resolveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const { verifyDbFileSig } = await import("./services/storage");
+    const signed = verifyDbFileSig(req.params.id, req.query.exp as string | undefined, req.query.sig as string | undefined);
+    if (!signed) {
+      const auth = await resolveSession(req);
+      if (!auth) return res.status(401).json({ error: "請先登入" });
+      const [fileRow] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, req.params.id));
+      if (!fileRow) return res.status(404).json({ error: "找不到這份文件" });
+      const [tableRow] = await db.select().from(schema.dataTables)
+        .where(and(eq(schema.dataTables.id, fileRow.tableId), isNull(schema.dataTables.deletedAt)));
+      const { resolveTableAccess } = await import("./services/databaseAcl");
+      if (!tableRow || !resolveTableAccess(auth, tableRow).canRead) return res.status(404).json({ error: "找不到這份文件" });
+    }
     const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, req.params.id));
     if (!file) return res.status(404).json({ error: "找不到這份文件" });
-    const [table] = await db.select().from(schema.dataTables)
-      .where(and(eq(schema.dataTables.id, file.tableId), isNull(schema.dataTables.deletedAt)));
-    const { resolveTableAccess } = await import("./services/databaseAcl");
-    if (!table || !resolveTableAccess(auth, table).canRead) return res.status(404).json({ error: "找不到這份文件" });
     if (!file.storagePath) {
       // 純文字匯入（Notion/網頁）沒有原檔——給文字本體當下載內容
       res.setHeader("X-Content-Type-Options", "nosniff");

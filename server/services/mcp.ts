@@ -9,7 +9,7 @@
  * - 工具（讀/寫分類的單一來源在 shared/mcpCatalog）：
  *     基礎：whoami / list_projects / get_project_context / find_model / submit_generation / post_message
  *     生成取回：list_generations / get_generation / list_assets（成品簽成免登入短效網址）
- *     自訂資料庫：list_databases / query_database / add_database_row / list_database_files / read_database_file
+ *     自訂資料庫：list_databases / query_database / add_database_row / list_database_files / read_database_file / get_database_stats
  *     AI 代理（重用 agentCore）：plan_agent / approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
  *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item
  *     筆記・會議紀錄（組共用、可匯入知識庫）：list_notes / get_note
@@ -23,12 +23,13 @@ import { worldviewSchema } from "../../shared/worldview";
 import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
 import { sanitizeAuditInput } from "./audit";
 import { submitGenerationCore, advanceGeneration } from "./generationCore";
-import { signAssetUrl } from "./storage";
+import { signAssetUrl, signDbFileUrl } from "./storage";
 import { assertProjectEditable } from "./projectAcl";
 import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity, scopeDeniedReason, type McpScope } from "./mcpAuth";
 import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
 import { addDataRowValidated } from "./databaseCore";
+import { formatStatsLine, mediaKindOf, tableStats } from "./databaseMedia";
 import {
   planAgentCore, approveAgentCore, discardAgentCore, stopAgentCore,
   listAgentRunsForProject, getAgentRunChecked,
@@ -149,19 +150,20 @@ const TOOLS = [
   },
   {
     name: "list_database_files",
-    description: "列出資料庫掛的文件（上傳檔與 Google/Notion 匯入）：名稱、格式、可讀字數；keyword 可過濾內文並回匹配片段。之後用 read_database_file 讀全文",
+    description: "列出資料庫掛的文件（上傳檔、Google/Notion 匯入、圖片/影音）：名稱、媒體類型、分類、AI 描述、可讀字數；keyword 過濾名稱/分類/描述/內文並回匹配片段。之後用 read_database_file 讀全文",
     inputSchema: {
       type: "object",
       properties: {
         tableId: { type: "string" },
-        keyword: { type: "string", description: "過濾內文包含此關鍵字的文件（並回匹配片段）" },
+        keyword: { type: "string", description: "過濾名稱／分類／AI 描述／內文包含此關鍵字的文件（內文命中回匹配片段）" },
+        category: { type: "string", description: "只列這個分類的文件" },
       },
       required: ["tableId"],
     },
   },
   {
     name: "read_database_file",
-    description: "讀取文件抽出的純文字（PDF/DOCX/HTML 已由伺服器轉純文字）。單次最多 20000 字；長文用 offset 分段讀（回應含 totalChars）",
+    description: "讀取文件內容：文字檔回抽出的純文字（單次最多 20000 字，長文用 offset 分段；回應含 totalChars）；圖片/影音回分類、AI 看圖描述與短效下載網址（多模態客戶端可自行抓圖）",
     inputSchema: {
       type: "object",
       properties: {
@@ -171,6 +173,11 @@ const TOOLS = [
       },
       required: ["fileId"],
     },
+  },
+  {
+    name: "get_database_stats",
+    description: "一個資料庫的資訊量統計：列數/欄數、文件數與圖影音文分佈、總容量、AI 可讀字數、已看圖描述數、分類分佈、最後活動時間。回答「這個庫有多少東西」先用這個",
+    inputSchema: { type: "object", properties: { tableId: { type: "string" } }, required: ["tableId"] },
   },
   // ── AI 代理（規劃→核准→背景執行）：讓外部 AI 驅動系統內建的多步製作代理 ──
   {
@@ -427,20 +434,26 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       .orderBy(desc(schema.dataFiles.createdAt))
       .limit(200);
     const keyword = String(args.keyword ?? "").trim().toLowerCase();
+    const categoryFilter = String(args.category ?? "").trim();
     return files.flatMap((f) => {
+      if (categoryFilter && f.category !== categoryFilter) return [];
       const text = f.textContent ?? "";
       let snippet: string | null = null;
       if (keyword) {
         const idx = text.toLowerCase().indexOf(keyword);
-        if (idx < 0 && !f.name.toLowerCase().includes(keyword)) return [];
+        const metaHit = [f.name, f.category ?? "", f.aiDescription ?? ""].some((s) => s.toLowerCase().includes(keyword));
+        if (idx < 0 && !metaHit) return [];
         if (idx >= 0) snippet = text.slice(Math.max(0, idx - 80), idx + 120);
       }
       return [{
         fileId: f.id,
         name: f.name,
         mime: f.mime,
+        kind: mediaKindOf(f.mime), // image/video/audio/doc
         sizeBytes: f.sizeBytes,
-        readableChars: text.length, // 0＝此格式暫不可讀（僅存檔）
+        readableChars: text.length, // 0＝此格式無抽出文字（圖影看 aiDescription）
+        category: f.category,
+        aiDescription: f.aiDescription ? f.aiDescription.slice(0, 300) : null,
         sourceUrl: f.sourceUrl,
         ...(snippet ? { snippet } : {}),
       }];
@@ -454,7 +467,26 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, file.tableId), isNull(schema.dataTables.deletedAt)));
     if (!table || !resolveAgentAccess(auth, table).canRead) throw new Error("找不到這份文件");
     const text = file.textContent ?? "";
-    if (!text) return { name: file.name, totalChars: 0, note: "此格式暫不支援文字抽取（僅存檔）——支援：txt/md/csv/json/html/srt/vtt/pdf/docx" };
+    if (!text) {
+      const kind = mediaKindOf(file.mime);
+      // 圖影音：回分類與 AI 描述（圖片經「AI 分類」後這裡就有內容）＋短效下載網址，
+      // 多模態客戶端可自行抓原檔看圖；沒有原檔（純文字匯入）就不給網址。
+      if (kind !== "doc") {
+        return {
+          name: file.name,
+          mime: file.mime,
+          kind,
+          totalChars: 0,
+          category: file.category,
+          aiDescription: file.aiDescription,
+          downloadUrl: file.storagePath ? signDbFileUrl(file.id) : null,
+          note: file.aiDescription
+            ? "這是媒體檔：aiDescription 是 AI 看圖產生的描述；要看原始畫面可抓 downloadUrl（1 小時內有效）"
+            : "這是媒體檔、尚未有 AI 描述——網頁端「AI 分類」可補；要看原始畫面可抓 downloadUrl（1 小時內有效）",
+        };
+      }
+      return { name: file.name, totalChars: 0, category: file.category, note: "此格式暫不支援文字抽取（僅存檔）——支援：txt/md/csv/json/html/srt/vtt/pdf/docx" };
+    }
     const offset = Math.max(0, Number(args.offset) || 0);
     const maxChars = Math.min(Math.max(Number(args.maxChars) || 20_000, 1), 20_000);
     return {
@@ -463,7 +495,17 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       offset,
       text: text.slice(offset, offset + maxChars),
       hasMore: offset + maxChars < text.length,
+      category: file.category,
     };
+  }
+
+  if (name === "get_database_stats") {
+    const tableId = String(args.tableId ?? "");
+    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
+    if (!table) throw new Error("找不到這個資料庫");
+    if (!resolveAgentAccess(auth, table).canRead) throw new Error("找不到這個資料庫");
+    const stats = await tableStats(table);
+    return { table: table.name, summary: formatStatsLine(stats), ...stats };
   }
 
   // ── 單筆生成查詢（以 generationId，不掛 projectId）：閉合「送生成→取回成品」的迴路 ──

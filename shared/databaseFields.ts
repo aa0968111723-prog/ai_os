@@ -37,6 +37,19 @@ export const MAX_FIELDS = 30;
 export const MAX_LABEL = 40;
 export const MAX_OPTIONS = 50;
 export const MAX_TEXT_VALUE = 4000;
+
+/** 文件分類標籤長度上限（資料庫文件層的 category；前後端與 AI 分類共用同一把尺） */
+export const MAX_FILE_CATEGORY = 30;
+/** 分類建議清單（datalist 提示與 AI 分類候選共用；可自由輸入不受此限） */
+export const FILE_CATEGORY_SUGGESTIONS = ["人物", "場景", "物件", "文件掃描", "圖表", "海報文宣", "截圖", "開示", "見證", "其他"];
+
+/** 文件分類正規化：去頭尾空白、截長度；空字串回 null（＝未分類） */
+export function normalizeFileCategory(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim().replace(/\s+/g, " ");
+  if (!s) return null;
+  return s.slice(0, MAX_FILE_CATEGORY);
+}
 const KEY_RE = /^[a-z0-9_-]{1,24}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
