@@ -156,7 +156,7 @@ export const optionsRouter = router({
 
   /** 重新排序（拖曳後把該組該類型的順序寫回） */
   reorder: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), type: optionTypeSchema, orderedIds: z.array(z.string().uuid()) }))
+    .input(z.object({ groupId: z.string().uuid(), type: optionTypeSchema, orderedIds: z.array(z.string().uuid()).max(200) }))
     .mutation(async ({ ctx, input }) => {
       requireLeader(ctx.auth, input.groupId);
       // 逐筆寫 sortOrder 包在單一交易：半途失敗整批回滾，避免只寫了一半→sortOrder 重複／跳號的錯亂排序。

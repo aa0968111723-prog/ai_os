@@ -100,7 +100,11 @@ async function advanceWithGuard(id: string): Promise<void> {
       // ＝fal 確認「還在跑」。刷新 updatedAt，讓 sweepStale 的 30 分門檻只砍「真的連不上/卡死」的，
       // 不誤殺合法長時間生成（LoRA 訓練常 20-50 分）。節流：只在 updatedAt 已舊於 5 分才寫，避免每 6 秒狂寫。
       // 無 requestId 的 queued 孤兒（submit 未完成）不刷新，仍由 30 分陳屍清掃回收——這是刻意的。
-      if (g && g.requestId && (g.status === "queued" || g.status === "running")) {
+      // 修 R2-ERR-001：排除 nim_ 記憶體佇列生成。NIM 狀態只存程序內 Map（nvidia-nim.ts），重啟即空，
+      // nimStatus 對未知 requestId 一律回 running → advanceGeneration 原樣回 running → 心跳每 5 分刷新 updatedAt，
+      // 讓重啟孤兒永遠逃過 30 分陳屍清掃、永卡「生成中」（連帶卡住其工作流/代理 run）。真正在跑的 NIM 60 秒內必 settle，
+      // 不需心跳保護；排除後孤兒的 updatedAt 不再被刷新，陳屍清掃與 reapStuckGeneration 即可如 nvidia-nim.ts 註解承諾收斂退點。
+      if (g && g.requestId && !g.requestId.startsWith("nim_") && (g.status === "queued" || g.status === "running")) {
         if (Date.now() - new Date(g.updatedAt).getTime() > 5 * 60_000) {
           await db
             .update(schema.generations)

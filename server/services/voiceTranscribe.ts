@@ -4,7 +4,7 @@
  * 一開機就續轉,不靠使用者停在頁面。單筆:簽來源音檔網址→送 wizper→輪詢→回填 body。
  * 計費:與假生成同政策——mock 不扣點(billingBypassed);真模式扣 1 點(wizper 便宜),失敗退點。
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, lt } from "drizzle-orm";
 import { db, schema } from "../db";
 import { signAssetUrl } from "./storage";
 import { falSubmit, falStatus, billingBypassed } from "./fal";
@@ -21,7 +21,31 @@ const POLL_INTERVAL_MS = 3_000;
 const inflight = new Set<string>();
 
 /** 掃一批待轉錄的語音留言並補逐字稿;回傳完成筆數。失敗只標記 failed，不擋其他。 */
+const STALE_RUNNING_MS = 15 * 60 * 1000; // running 陳屍門檻：正常全程 <3 分，逾此即崩潰孤兒
+
 export async function sweepVoiceTranscripts(limit = 5): Promise<number> {
+  // 先回收陳屍 running（修 R2-ERR-002）：程序在 CAS pending→running＋扣點後、寫 done/failed 前崩潰，
+  // 會留下永久 running（下方掃描只撈 pending 永不再碰）——該筆 1 點永久蒸發、逐字稿永久缺。
+  // running 且訊息建立逾 15 分（正常全程 <3 分）＝崩潰孤兒：CAS running→failed 並退回已扣點（CAS 保證只退一次）。
+  const staleCutoff = new Date(Date.now() - STALE_RUNNING_MS);
+  const stale = await db
+    .select()
+    .from(schema.messages)
+    .where(and(eq(schema.messages.voiceStatus, "running"), eq(schema.messages.refType, "asset"), lt(schema.messages.createdAt, staleCutoff)))
+    .limit(limit);
+  for (const m of stale) {
+    if (inflight.has(m.id)) continue; // 本程序正在處理的不動
+    const recovered = await db
+      .update(schema.messages)
+      .set({ voiceStatus: "failed", body: "🎙️ 語音訊息（逐字稿逾時未完成，點播放鍵聆聽）" })
+      .where(and(eq(schema.messages.id, m.id), eq(schema.messages.voiceStatus, "running")))
+      .returning({ id: schema.messages.id });
+    if (recovered.length > 0 && !billingBypassed()) {
+      const cost = getModel(STT_MODEL_ID)?.points ?? 1;
+      await refund(m.userId, m.groupId, cost, "語音逐字稿逾時自動回收退回");
+    }
+  }
+
   const rows = await db
     .select()
     .from(schema.messages)

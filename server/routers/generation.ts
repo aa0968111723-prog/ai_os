@@ -50,7 +50,7 @@ export const generationRouter = router({
       z.object({
         projectId: z.string().uuid(),
         modelId: z.string(),
-        prompt: z.string().min(1, "請填提示詞"),
+        prompt: z.string().min(1, "請填提示詞").max(8000, "提示詞過長（上限 8000 字）"),
         /** 來源輸入(圖生圖底圖/音訊/影片/訓練 zip 的網址;外部 URL) */
         sourceUrl: z.string().url().optional(),
         /** 素材庫來源(優先)：伺服器換成簽名短效網址,fal 才抓得到、外人不可偽造 */
@@ -158,7 +158,14 @@ export const generationRouter = router({
       z.object({
         projectId: z.string().uuid(),
         /** keyset 游標：上一頁最後一列的 (createdAt ISO, id)；首頁不帶（觸發陳屍清掃） */
-        cursor: z.object({ createdAt: z.string(), id: z.string().uuid() }).nullish(),
+        // 修 IN-03：cursor.createdAt 限制為 timestamptz 文字形（pg ::text 產出「2026-07-24 14:15:46.217+00」，
+        // 空格或 T 皆可、可帶微秒與時區）——否則壞游標（如 "abc"）會讓下方 ::timestamptz 轉型丟例外回 500。
+        cursor: z
+          .object({
+            createdAt: z.string().regex(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}(:?\d{2})?|Z)?$/, "游標格式不正確"),
+            id: z.string().uuid(),
+          })
+          .nullish(),
         /** awaiting_approval/rejected＝成本審核門檻（需求 2.1）的兩個新狀態 */
         status: z.enum(["queued", "running", "done", "failed", "awaiting_approval", "rejected"]).optional(),
         kind: z.enum(["image", "video", "audio", "text"]).optional(),
@@ -296,6 +303,13 @@ export const generationRouter = router({
         await postSystemMessage(`⛔ 待核生成已駁回（${model?.label ?? gen.modelId}，${gen.pointsEst} 點）${reason ? `：${reason}` : ""}`);
         return updated;
       }
+
+      // 封存守衛（修 R2-001）：封存專案不得再核准送出付費生成——decideCost 原本從不載入專案，
+      // 讓「送審後被封存」的待核生成仍會被核准、扣點、送 fal，繞過 submit/scenes/agent/schedule 全線的封存凍結。
+      // 比照 agentCore 核准鏈：核准前先讀專案並擋封存（rejected 分支不扣點、已於上方返回，不受影響）。
+      const [approveProject] = await db.select().from(schema.projects).where(eq(schema.projects.id, gen.projectId));
+      if (!approveProject) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      assertProjectNotArchived(approveProject);
 
       // 核准：先 CAS 認領（awaiting_approval → queued），輸家直接得知已被處理。
       // createdAt 一併改為核准時刻（修 cross-period-approval-bypass-rate-quota）：週/日速率額度以

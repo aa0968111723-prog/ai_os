@@ -32,6 +32,36 @@ describe("sniffMime", () => {
     expect(sniffMime(TEXT)).toBeNull();
     expect(sniffMime(Buffer.from([0xff, 0xd8]))).toBeNull();
   });
+
+  it("ISO-BMFF 依 major brand 細分：HEIC/AVIF 是圖片、QT 是影片、M4A 是音訊（修 R2-STOR-01）", () => {
+    const heic = Buffer.concat([Buffer.alloc(4), Buffer.from("ftypheic"), Buffer.alloc(8)]);
+    const heif = Buffer.concat([Buffer.alloc(4), Buffer.from("ftypmif1"), Buffer.alloc(8)]);
+    const avif = Buffer.concat([Buffer.alloc(4), Buffer.from("ftypavif"), Buffer.alloc(8)]);
+    const qt = Buffer.concat([Buffer.alloc(4), Buffer.from("ftypqt  "), Buffer.alloc(8)]);
+    const m4a = Buffer.concat([Buffer.alloc(4), Buffer.from("ftypM4A "), Buffer.alloc(8)]);
+    expect(sniffMime(heic)).toBe("image/heic");
+    expect(sniffMime(heif)).toBe("image/heic");
+    expect(sniffMime(avif)).toBe("image/avif");
+    expect(sniffMime(qt)).toBe("video/quicktime");
+    expect(sniffMime(m4a)).toBe("audio/mp4");
+    expect(sniffMime(MP4)).toBe("video/mp4"); // isom 仍是影片
+  });
+
+  it("BMP/TIFF 簽名認得（白名單有列，過去嗅探不出被誤 415）（修 R2-STOR-01）", () => {
+    const bmp = Buffer.concat([Buffer.from([0x42, 0x4d]), Buffer.alloc(14)]);
+    const tiffLE = Buffer.concat([Buffer.from([0x49, 0x49, 0x2a, 0x00]), Buffer.alloc(12)]);
+    const tiffBE = Buffer.concat([Buffer.from([0x4d, 0x4d, 0x00, 0x2a]), Buffer.alloc(12)]);
+    expect(sniffMime(bmp)).toBe("image/bmp");
+    expect(sniffMime(tiffLE)).toBe("image/tiff");
+    expect(sniffMime(tiffBE)).toBe("image/tiff");
+  });
+
+  it("iPhone HEIC 照片：宣稱 image/heic＋ftypheic 內容 → 沿用宣稱、不誤校正成 video/mp4（修 R2-STOR-01）", () => {
+    const heic = Buffer.concat([Buffer.alloc(4), Buffer.from("ftypheic"), Buffer.alloc(8)]);
+    expect(resolveUploadMime("image/heic", heic)).toEqual({ mime: "image/heic", corrected: false });
+    // SVG：XML 文字無簽名，宣稱 image/svg+xml 應放行（強制下載）
+    expect(resolveUploadMime("image/svg+xml", TEXT)).toEqual({ mime: "image/svg+xml", corrected: false });
+  });
 });
 
 describe("resolveUploadMime", () => {

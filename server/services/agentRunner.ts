@@ -15,6 +15,7 @@ import { lockSceneOrder } from "./locks";
 import { pushToUsers } from "./webPush";
 import { splitScriptCore } from "../routers/director";
 import { submitApprovalCore } from "../routers/approvals";
+import { sceneFillRole } from "../routers/assistant";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
 import { addDataRowValidated } from "./databaseCore";
@@ -553,8 +554,15 @@ async function advanceRun(run: RunRow): Promise<void> {
     if (step.sceneNo) {
       const scene = await sceneByNo(run.projectId, step.sceneNo);
       if (!scene) return failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
+      // 修 GEN-201：用與助手同源的能力判斷，別再用 kind==="audio" 粗判——text-to-audio（配樂/音效）
+      // 會被誤當旁白寫進 narrationAssetId、靜默覆蓋分鏡旁白。role===null（配樂/音效/文字）時直接收攏成
+      // failed 並指路，不得綁分鏡。
+      const role = sceneFillRole(model);
+      if (role === null) {
+        return failRun(run, steps, idx, `第 ${step.sceneNo} 鏡：${model.label} 是配樂/音效或文字模型，無法填入分鏡——請改用旁白語音模型，或這步不要綁分鏡`);
+      }
       sceneId = scene.id;
-      sceneRole = model.kind === "audio" ? "narration" : "visual";
+      sceneRole = role;
     }
     modelId = model.id;
     prompt = step.prompt;

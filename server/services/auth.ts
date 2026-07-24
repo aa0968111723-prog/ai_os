@@ -221,6 +221,17 @@ export async function resolveSession(req: Request): Promise<AuthState | null> {
   return loadAuthState(session.userId);
 }
 
+/**
+ * resolveSession ＋ 強制改密碼閘門（修 AUTH2-003）：mustChangePassword 的帳號在改密碼前一律視為未認證（回 null），
+ * 與 tRPC authedProcedure／MCP／restApi 同口徑。index.ts 的 REST 端點（上傳／下載／匯出／個資匯出等）應改用本函式，
+ * 讓臨時密碼窗口不再等於「完整讀寫窗口」。改密碼本身走 tRPC auth.changePassword（用原始 resolveSession，不受此擋）。
+ */
+export async function resolveActiveSession(req: Request): Promise<AuthState | null> {
+  const auth = await resolveSession(req);
+  if (!auth || auth.user.mustChangePassword) return null;
+  return auth;
+}
+
 /* ── 邀請 ── */
 export async function createInvite(input: {
   email: string;

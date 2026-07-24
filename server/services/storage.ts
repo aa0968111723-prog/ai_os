@@ -126,13 +126,24 @@ export function sniffMime(buf: Buffer): string | null {
   if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
   if (buf[0] === 0x89 && buf.subarray(1, 4).toString("latin1") === "PNG") return "image/png";
   if (buf.subarray(0, 4).toString("latin1") === "GIF8") return "image/gif";
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return "image/bmp"; // "BM"（修 R2-STOR-01 白名單有列卻嗅探不出→415）
+  if ((buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2a && buf[3] === 0x00) || (buf[0] === 0x4d && buf[1] === 0x4d && buf[2] === 0x00 && buf[3] === 0x2a)) return "image/tiff"; // II*\0 / MM\0*
   if (buf.subarray(0, 4).toString("latin1") === "RIFF") {
     const tag = buf.subarray(8, 12).toString("latin1");
     if (tag === "WEBP") return "image/webp";
     if (tag === "WAVE") return "audio/wav";
     return null;
   }
-  if (buf.subarray(4, 8).toString("latin1") === "ftyp") return "video/mp4"; // ISO-BMFF 家族
+  if (buf.subarray(4, 8).toString("latin1") === "ftyp") {
+    // ISO-BMFF 家族細分（修 R2-STOR-01）：HEIC/HEIF/AVIF 也是 ftyp——iPhone 相簿預設 HEIC 若一律回 video/mp4
+    // 會被存成影片、分區/副檔名全錯。讀 major brand（bytes 8-12）分流：圖片格式回圖片 MIME、其餘才是影片。
+    const brand = buf.subarray(8, 12).toString("latin1");
+    if (/^(heic|heix|heim|heis|hevc|hevx|mif1|msf1)/.test(brand)) return "image/heic"; // HEIF 影像家族
+    if (/^(avif|avis)/.test(brand)) return "image/avif";
+    if (brand === "qt  ") return "video/quicktime";
+    if (brand.startsWith("M4A")) return "audio/mp4";
+    return "video/mp4"; // isom/mp4x/M4V… 影片家族
+  }
   if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return "video/webm"; // EBML（webm/mkv）
   if (buf.subarray(0, 3).toString("latin1") === "ID3" || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) return "audio/mpeg";
   if (buf.subarray(0, 4).toString("latin1") === "OggS") return "audio/ogg";
@@ -144,6 +155,10 @@ export function sniffMime(buf: Buffer): string | null {
 /** 同一簽名家族可接受的宣稱 MIME（容器共用簽名：ftyp、PK、RIFF…） */
 const SNIFF_COMPAT: Record<string, string[]> = {
   "video/mp4": ["video/mp4", "video/quicktime", "audio/mp4"],
+  "video/quicktime": ["video/quicktime", "video/mp4"],
+  "audio/mp4": ["audio/mp4", "audio/x-m4a", "video/mp4"],
+  "image/heic": ["image/heic", "image/heif"], // HEIF 影像家族 brand 共用（mif1 等）
+  "image/avif": ["image/avif"],
   "video/webm": ["video/webm", "audio/webm"],
   "audio/wav": ["audio/wav", "audio/x-wav"],
   "audio/mpeg": ["audio/mpeg", "audio/mp3"],
@@ -161,6 +176,8 @@ const SNIFF_COMPAT: Record<string, string[]> = {
 export function resolveUploadMime(declared: string, head: Buffer): { mime: string; corrected: boolean } | null {
   const sniffed = sniffMime(head);
   if (!sniffed) {
+    // SVG 是 XML 文字、無二進位簽名——嗅探不出屬正常；一律強制下載（shouldForceAttachment）故沿用宣稱安全（修 R2-STOR-01）
+    if (declared === "image/svg+xml") return { mime: declared, corrected: false };
     if (declared.startsWith("image/")) return null;
     return { mime: declared, corrected: false };
   }
