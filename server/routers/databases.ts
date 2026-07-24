@@ -23,6 +23,7 @@ import {
   userFileUsage,
 } from "../services/databaseFiles";
 import { checkDiskSpace, copyStoredFile, kindFromMime, removeStoredFile, saveBuffer } from "../services/storage";
+import { fetchDriveFile, getNotionToken } from "../services/integrations";
 
 /**
  * 自訂資料庫（個人→組→團隊→全站）：表結構 CRUD＋列資料 CRUD＋文件層＋連接（CSV/專案/排程）。
@@ -404,13 +405,13 @@ export const databasesRouter = router({
       if (ssrf) throw new TRPCError({ code: "BAD_REQUEST", message: ssrf });
       const normalized = normalizeImportUrl(input.url);
 
-      // Notion：官方 API 抽文字（不落地原檔）
+      // Notion：官方 API 抽文字（不落地原檔）。token 優先用「操作者自己的」（整合連接頁設定）→ 站方 NOTION_TOKEN
       if (normalized.kind === "notion") {
         const pageId = notionPageIdFromUrl(input.url);
         if (!pageId) throw new TRPCError({ code: "BAD_REQUEST", message: "看不出這個 Notion 網址的頁面 id——請貼「複製連結」取得的完整頁面網址" });
         let text: string;
         try {
-          text = await fetchNotionText(pageId);
+          text = await fetchNotionText(pageId, await getNotionToken(ctx.auth.user.id));
         } catch (err) {
           throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Notion 匯入失敗" });
         }
@@ -429,18 +430,36 @@ export const databasesRouter = router({
         return { id: row.id, readableChars: text.length };
       }
 
-      // Google／一般網址：抓回內容
-      let fetched: Awaited<ReturnType<typeof fetchImport>>;
-      try {
-        fetched = await fetchImport(normalized.fetchUrl);
-      } catch (err) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "抓取失敗" });
+      // Google／一般網址：Google 連結先試「操作者自己的 Google 授權」抓私有檔（整合連接頁連結後生效），
+      // 沒連結或抓不到再退回原本的公開連結路徑——兩邊都失敗才報錯，且錯誤訊息帶清楚的下一步。
+      let fetched: { buf: Buffer; mime: string };
+      let driveNoAccess: string | null = null; // 已連結 Google 但該帳戶無此檔權限（給更準的人話）
+      let driveName: string | null = null;
+      const privateTried = normalized.kind !== "web" && !!normalized.fileId; // fileId 只在 google-* 有值
+      const priv = privateTried
+        ? await fetchDriveFile(ctx.auth.user.id, normalized.kind as "google-doc" | "google-sheet" | "google-slides" | "google-drive", normalized.fileId!)
+        : null;
+      if (priv?.ok) {
+        fetched = { buf: priv.buf, mime: priv.mime };
+        driveName = priv.name;
+      } else {
+        if (priv && !priv.ok && priv.reason === "no-access") driveNoAccess = priv.message;
+        try {
+          fetched = await fetchImport(normalized.fetchUrl);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "抓取失敗" });
+        }
       }
-      // 期望匯出文字（Google 文件/試算表/簡報）卻拿到 HTML＝多半是私有檔轉跳登入頁——給人話
-      if (normalized.kind.startsWith("google-") && normalized.kind !== "google-drive" && fetched.mime === "text/html") {
+      // 期望匯出文字（Google 文件/試算表/簡報）卻拿到 HTML＝多半是私有檔轉跳登入頁——給人話與下一步。
+      // 只在「公開退回路徑」檢查（個人授權成功抓到的內容不可能是登入頁——雲端裡真正的 HTML 檔要照常匯入）；
+      // google-drive 一般檔維持舊行為（HTML 檔轉純文字匯入），不誤殺。
+      const expectsExport = normalized.kind === "google-doc" || normalized.kind === "google-sheet" || normalized.kind === "google-slides";
+      if (expectsExport && !priv?.ok && fetched.mime === "text/html") {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Google 回了登入頁——請把該文件的共用設成「任何人知道連結都能檢視」再匯入",
+          message: driveNoAccess
+            ? `${driveNoAccess}，且檔案未開放公開存取——請在 Google 端把檔案共用給該帳戶，或把共用設成「任何人知道連結都能檢視」`
+            : "Google 回了登入頁——把該文件的共用設成「任何人知道連結都能檢視」，或到「整合連接」頁連結你的 Google 帳戶後即可匯入私有檔",
         });
       }
       const quotaErr = await quotaGuardError(ctx.auth.user.id, fetched.buf.length);
@@ -454,6 +473,8 @@ export const databasesRouter = router({
       } catch {
         fallbackName = rawLastSegment;
       }
+      // Drive API 路徑抓得到真實檔名——比網址片段（uc、export…）好得多
+      if (driveName) fallbackName = driveName;
       const name = (input.name?.trim() || fallbackName || "匯入文件").slice(0, 120) + (normalized.suggestedExt && !/\.[a-z0-9]+$/i.test(input.name?.trim() || fallbackName) ? normalized.suggestedExt : "");
 
       // 純網頁：不落地原檔，直接抽文字（HTML 存起來沒有重看價值）
@@ -504,10 +525,31 @@ export const databasesRouter = router({
       if (normalized.kind === "notion") {
         const pageId = notionPageIdFromUrl(file.sourceUrl);
         if (!pageId) throw new Error("Notion 頁面 id 解析失敗");
-        text = await fetchNotionText(pageId);
+        // token 按「重抓者」查（與配額同口徑）——不是原匯入者
+        text = await fetchNotionText(pageId, await getNotionToken(ctx.auth.user.id));
         sizeBytes = Buffer.byteLength(text, "utf8");
       } else {
-        const fetched = await fetchImport(normalized.fetchUrl);
+        // Google 來源先試重抓者自己的 Google 授權（可重抓私有檔），失敗退回公開路徑
+        let fetched: { buf: Buffer; mime: string };
+        const priv = normalized.kind !== "web" && normalized.fileId
+          ? await fetchDriveFile(ctx.auth.user.id, normalized.kind as "google-doc" | "google-sheet" | "google-slides" | "google-drive", normalized.fileId)
+          : null;
+        if (priv?.ok) {
+          fetched = { buf: priv.buf, mime: priv.mime };
+        } else {
+          fetched = await fetchImport(normalized.fetchUrl);
+        }
+        // Google 文件/試算表/簡報在「公開退回路徑」拿到 HTML＝登入頁（來源被改成私有）——
+        // 報錯而非把登入頁當內容「覆蓋掉」既有文字。個人授權成功（priv.ok）與 google-drive
+        // 一般檔（HTML 檔轉純文字是既有行為）都不在此判定內，不誤殺。
+        const expectsExport = normalized.kind === "google-doc" || normalized.kind === "google-sheet" || normalized.kind === "google-slides";
+        if (expectsExport && !priv?.ok && fetched.mime === "text/html") {
+          throw new Error(
+            priv && !priv.ok && priv.reason === "no-access"
+              ? `${priv.message}，且檔案未開放公開存取——請調整 Google 端共用設定後再重新整理`
+              : "Google 回了登入頁（來源可能已改為私有）——調整共用設定，或到「整合連接」頁連結你的 Google 帳戶後再重新整理",
+          );
+        }
         if (fetched.mime === "text/html") {
           text = htmlToText(fetched.buf.toString("utf8")).slice(0, MAX_TEXT_CHARS);
           sizeBytes = Buffer.byteLength(text, "utf8"); // 與 importUrl 同口徑：網頁只算文字，不算原始 HTML

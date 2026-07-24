@@ -414,7 +414,9 @@ export async function saveConnection(userId: string, refreshToken: string, email
   queueUserSync(userId);
 }
 
-/** 中斷連結：先嘗試刪掉專屬日曆（清乾淨對方帳戶）與撤銷 token（皆盡力而為），再刪本地紀錄 */
+/** 中斷連結：先嘗試刪掉專屬日曆（清乾淨對方帳戶）與撤銷 token（皆盡力而為），再刪本地紀錄。
+ *  ★ 同一人若還有「Google 雲端硬碟」整合連線（同一組 GCP client）——撤銷任一 refresh token
+ *  可能連帶撤銷整個授權而弄斷雲端匯入，此時跳過撤銷、只刪本地紀錄（與 integrations 對稱防護）。 */
 export async function disconnectUser(userId: string): Promise<void> {
   const [conn] = await db.select().from(schema.googleCalendarConnections).where(eq(schema.googleCalendarConnections.userId, userId));
   if (!conn) return;
@@ -422,14 +424,23 @@ export async function disconnectUser(userId: string): Promise<void> {
     try {
       if (conn.calendarId) await gapi(conn, "DELETE", `/calendars/${encodeURIComponent(conn.calendarId)}`);
     } catch { /* 授權可能已失效——本地清理照做 */ }
-    try {
-      await proxyFetch(OAUTH_REVOKE_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ token: decryptToken(conn.refreshTokenEnc) }).toString(),
-        timeoutMs: 10_000,
-      });
-    } catch { /* 同上 */ }
+    const [driveConn] = await db.select({ id: schema.userIntegrations.id })
+      .from(schema.userIntegrations)
+      .where(and(
+        eq(schema.userIntegrations.userId, userId),
+        eq(schema.userIntegrations.kind, "google-drive"),
+        eq(schema.userIntegrations.status, "active"),
+      ));
+    if (!driveConn) {
+      try {
+        await proxyFetch(OAUTH_REVOKE_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ token: decryptToken(conn.refreshTokenEnc) }).toString(),
+          timeoutMs: 10_000,
+        });
+      } catch { /* 同上 */ }
+    }
   }
   accessCache.delete(conn.id);
   await db.delete(schema.googleEventLinks).where(eq(schema.googleEventLinks.connectionId, conn.id));

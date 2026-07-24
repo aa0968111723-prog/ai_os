@@ -189,7 +189,7 @@ describe("auditCategoryOf", () => {
   it("依前綴歸類", () => {
     expect(auditCategoryOf("admin.invite").label).toBe("帳號與團隊");
     expect(auditCategoryOf("generation.submit").label).toBe("生成與點數");
-    expect(auditCategoryOf("mcp.submit_generation").label).toBe("外部 AI 連線（MCP）");
+    expect(auditCategoryOf("mcp.submit_generation").label).toBe("外部 AI 連線（MCP／整合）");
   });
 
   it("未知前綴落到「其他」", () => {

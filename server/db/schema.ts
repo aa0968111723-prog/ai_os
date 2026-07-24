@@ -664,6 +664,39 @@ export const googleCalendarConnections = pgTable("google_calendar_connections", 
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+/**
+ * 個人整合連接（每個使用者自己連自己的外部服務）：
+ * - google-drive＝Google 雲端硬碟 OAuth（scope 僅 drive.readonly，secretEnc＝refresh token）；
+ * - notion＝個人 Notion integration token（使用者在 notion.so/my-integrations 自建）；
+ * - api＝外部資料庫/API 連接（Airtable/Supabase/自建服務，secretEnc＝認證標頭值）。
+ * secretEnc 一律 AES-256-GCM 加密（iv:tag:cipher hex，金鑰見 services/integrations.ts——與 DB 分離，
+ * DB 外洩不可解密）；憑證原文永不回傳前端（meta 只存 email/workspace/末四碼等顯示用資訊）。
+ * google-drive/notion 一人一條（name=""）；api 可多條具名連線。新表＝pushSchema 安全。
+ */
+export const userIntegrations = pgTable("user_integrations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  kind: text("kind", { enum: ["google-drive", "notion", "api"] }).notNull(),
+  /** api 連接的顯示名稱（如「總會 Airtable」）；google-drive/notion 固定空字串 */
+  name: text("name").notNull().default(""),
+  /** AES-256-GCM 加密後的憑證（refresh token／integration token／API 金鑰） */
+  secretEnc: text("secret_enc").notNull(),
+  /** api 連接的基底網址：抓取時固定同主機，憑證不會被送去別的主機 */
+  baseUrl: text("base_url"),
+  /** api 連接的認證標頭名（預設 Authorization；值即 secretEnc 解密原文） */
+  authHeader: text("auth_header"),
+  /** 顯示用中繼資料（非敏感）：google email／notion workspace／金鑰末四碼 */
+  meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+  /** error＝授權失效或解密失敗（金鑰輪替），UI 引導重新連結 */
+  status: text("status", { enum: ["active", "error"] }).notNull().default("active"),
+  lastError: text("last_error"),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userKindNameIdx: uniqueIndex("user_integrations_user_kind_name_idx").on(t.userId, t.kind, t.name),
+  userIdx: index("user_integrations_user_idx").on(t.userId),
+}));
+
 /** 排程項 ↔ Google 事件對應（每條連線一份），fingerprint 記上次推送內容摘要——沒變就跳過，省 API 配額 */
 export const googleEventLinks = pgTable("google_event_links", {
   id: uuid("id").primaryKey().defaultRandom(),

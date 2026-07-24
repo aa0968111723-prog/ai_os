@@ -226,6 +226,8 @@ export interface NormalizedImport {
   kind: "google-doc" | "google-sheet" | "google-slides" | "google-drive" | "notion" | "web";
   /** 建議檔名後綴（Google 匯出時已知格式） */
   suggestedExt?: string;
+  /** Google 檔案 id（kind 為 google-* 時有值）——個人 Drive 授權路徑用它打 Drive API 抓私有檔 */
+  fileId?: string;
 }
 
 /**
@@ -245,17 +247,17 @@ export function normalizeImportUrl(rawUrl: string): NormalizedImport {
   const host = u.hostname.toLowerCase();
   if (host === "docs.google.com") {
     const doc = u.pathname.match(/^\/document\/d\/([\w-]+)/);
-    if (doc) return { fetchUrl: `https://docs.google.com/document/d/${doc[1]}/export?format=txt`, kind: "google-doc", suggestedExt: ".txt" };
+    if (doc) return { fetchUrl: `https://docs.google.com/document/d/${doc[1]}/export?format=txt`, kind: "google-doc", suggestedExt: ".txt", fileId: doc[1] };
     const sheet = u.pathname.match(/^\/spreadsheets\/d\/([\w-]+)/);
-    if (sheet) return { fetchUrl: `https://docs.google.com/spreadsheets/d/${sheet[1]}/export?format=csv`, kind: "google-sheet", suggestedExt: ".csv" };
+    if (sheet) return { fetchUrl: `https://docs.google.com/spreadsheets/d/${sheet[1]}/export?format=csv`, kind: "google-sheet", suggestedExt: ".csv", fileId: sheet[1] };
     const slides = u.pathname.match(/^\/presentation\/d\/([\w-]+)/);
-    if (slides) return { fetchUrl: `https://docs.google.com/presentation/d/${slides[1]}/export/txt`, kind: "google-slides", suggestedExt: ".txt" };
+    if (slides) return { fetchUrl: `https://docs.google.com/presentation/d/${slides[1]}/export/txt`, kind: "google-slides", suggestedExt: ".txt", fileId: slides[1] };
   }
   if (host === "drive.google.com") {
     const file = u.pathname.match(/^\/file\/d\/([\w-]+)/);
-    if (file) return { fetchUrl: `https://drive.google.com/uc?export=download&id=${file[1]}`, kind: "google-drive" };
+    if (file) return { fetchUrl: `https://drive.google.com/uc?export=download&id=${file[1]}`, kind: "google-drive", fileId: file[1] };
     const id = u.searchParams.get("id");
-    if (u.pathname === "/uc" && id) return { fetchUrl: `https://drive.google.com/uc?export=download&id=${id}`, kind: "google-drive" };
+    if (u.pathname === "/uc" && id) return { fetchUrl: `https://drive.google.com/uc?export=download&id=${id}`, kind: "google-drive", fileId: id };
   }
   if (host === "www.notion.so" || host === "notion.so" || host.endsWith(".notion.site")) {
     return { fetchUrl: rawUrl, kind: "notion" };
@@ -284,17 +286,36 @@ function notionRichText(rt: unknown): string {
 }
 
 /**
- * 走 Notion 官方 API 抓頁面純文字（需環境變數 NOTION_TOKEN，且頁面已「分享給整合」）。
- * 逐層抓 blocks（深度/數量上限防巨頁）；支援常見文字型 block，其他型別以類型名佔位。
+ * 走 Notion 官方 API 抓頁面純文字（頁面需「分享給整合」）。
+ * token 優先序：呼叫端傳入的「個人 token」（整合連接頁自助設定）→ 站方 NOTION_TOKEN；
+ * 個人 token 對此頁無權（404）且站方另有共用 token 時自動退回站方再試一次——
+ * 與 Google「個人授權失敗退回公開路徑」同口徑，設了個人 token 不會弄壞原本靠站方 token 的頁面。
  */
-export async function fetchNotionText(pageId: string): Promise<string> {
-  const token = process.env.NOTION_TOKEN;
-  if (!token) {
+export async function fetchNotionText(pageId: string, userToken?: string | null): Promise<string> {
+  const siteToken = process.env.NOTION_TOKEN;
+  const primary = userToken || siteToken;
+  if (!primary) {
     throw new Error(
-      "Notion 匯入需要管理員設定 NOTION_TOKEN（Notion「建立整合」取得金鑰，並把頁面分享給該整合）；" +
-      "或改用 Notion 的「匯出」功能下載 Markdown/CSV 後上傳。",
+      "Notion 匯入需要先設定 token：到「整合連接」頁貼上你自己的 Notion integration token" +
+      "（notion.so/my-integrations 建立整合、把頁面分享給它），或請管理員設定站方 NOTION_TOKEN；" +
+      "也可改用 Notion 的「匯出」功能下載 Markdown/CSV 後上傳。",
     );
   }
+  try {
+    return await fetchNotionTextWithToken(pageId, primary);
+  } catch (err) {
+    // 用型別判斷「頁面對此 token 無權（404）」而非比對錯誤訊息字串——訊息之後改寫/i18n 不會默默弄壞退回邏輯
+    if (err instanceof NotionPageNotFoundError && userToken && siteToken && siteToken !== userToken) {
+      return await fetchNotionTextWithToken(pageId, siteToken);
+    }
+    throw err;
+  }
+}
+
+/** Notion 頁面對此 token 不可見（HTTP 404）：專屬型別，讓「退回站方 token」的判斷不綁錯誤訊息字串 */
+export class NotionPageNotFoundError extends Error {}
+
+async function fetchNotionTextWithToken(pageId: string, token: string): Promise<string> {
   const headers = { Authorization: `Bearer ${token}`, "Notion-Version": "2022-06-28" };
   const lines: string[] = [];
   let blockCount = 0;
@@ -306,7 +327,7 @@ export async function fetchNotionText(pageId: string): Promise<string> {
       const qs = cursor ? `?start_cursor=${cursor}&page_size=100` : "?page_size=100";
       const res = await proxyFetch(`https://api.notion.com/v1/blocks/${blockId}/children${qs}`, { headers, timeoutMs: 20_000 });
       if (!res.ok) {
-        if (res.status === 404) throw new Error("Notion 找不到這個頁面——請確認頁面已「分享給整合」（Connections → 選你的整合）");
+        if (res.status === 404) throw new NotionPageNotFoundError("Notion 找不到這個頁面——請確認頁面已「分享給整合」（Connections → 選你的整合）");
         throw new Error(`Notion API 錯誤（${res.status}）`);
       }
       const data = (await res.json()) as { results?: Array<Record<string, unknown>>; has_more?: boolean; next_cursor?: string };
@@ -343,8 +364,9 @@ export async function fetchNotionText(pageId: string): Promise<string> {
 /**
  * 逐塊讀取回應主體，累計位元組超過 max 立即取消串流並丟錯。
  * 避免 `arrayBuffer()` 在檢查大小前就把整個（可能造假 content-length 的）主體讀進記憶體。
+ * （integrations 的 Drive/外部 API 抓取共用同一道上限——export 給它用）
  */
-async function readBodyCapped(res: Response, max: number): Promise<Buffer> {
+export async function readBodyCapped(res: Response, max: number): Promise<Buffer> {
   const tooBig = () => new Error(`檔案太大（上限 ${Math.round(max / 1024 / 1024)}MB）`);
   const reader = res.body?.getReader?.();
   if (!reader) {

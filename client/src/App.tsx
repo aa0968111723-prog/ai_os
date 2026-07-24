@@ -17,6 +17,7 @@ const MyReportsPage = lazy(() => import("./pages/MyReportsPage").then((m) => ({ 
 const ModelsPage = lazy(() => import("./pages/ModelsPage").then((m) => ({ default: m.ModelsPage })));
 const HelpPage = lazy(() => import("./pages/HelpPage").then((m) => ({ default: m.HelpPage })));
 const McpPage = lazy(() => import("./pages/McpPage").then((m) => ({ default: m.McpPage })));
+const IntegrationsPage = lazy(() => import("./pages/IntegrationsPage").then((m) => ({ default: m.IntegrationsPage })));
 const DownloadsPage = lazy(() => import("./pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })));
 const PlannerPage = lazy(() => import("./pages/PlannerPage").then((m) => ({ default: m.PlannerPage })));
 const DatabasesPage = lazy(() => import("./pages/DatabasesPage").then((m) => ({ default: m.DatabasesPage })));
@@ -231,6 +232,7 @@ function UserMenu({
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">工作</div>
           <Link href="/mcp" className="menu-item" role="menuitem" onClick={close}><Icon name="Sparkles" size={15} />接上外部 AI</Link>
+          <Link href="/integrations" className="menu-item" role="menuitem" onClick={close}><Icon name="Package" size={15} />整合連接</Link>
           <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Download" size={15} />資料下載</Link>
           {/* 管理組：只要在任一組是組長或管理員（canSeeOrg）就顯示整段；段內各項再依細權限收放，
            * 團隊管理限管理員（isAdmin）、選項限作用組組長（activeIsLeader）。canSeeOrg 為兩者的聯集，
@@ -393,6 +395,8 @@ export function App() {
                 <Route path="/help"><HelpPage /></Route>
                 {/* 金鑰管理與帳號無關組別，未分組也可先建立（連進來仍受組隔離限制） */}
                 <Route path="/mcp"><McpPage /></Route>
+                {/* 整合連接屬帳號層級（Google/Notion/外部 API 都綁個人）——未分組也可先設定 */}
+                <Route path="/integrations"><IntegrationsPage /></Route>
                 {/* 私訊也保持可達：還沒被分組的空檔正需要聯絡管理員／開發者（可訊界由後端守） */}
                 <Route path="/chat/:peerId">{(params) => <ChatPage peerId={params.peerId} />}</Route>
                 <Route path="/chat"><ChatPage /></Route>
@@ -455,6 +459,7 @@ export function App() {
                 <Route path="/models"><ModelsPage /></Route>
                 <Route path="/help"><HelpPage /></Route>
                 <Route path="/mcp"><McpPage /></Route>
+                <Route path="/integrations"><IntegrationsPage /></Route>
                 <Route path="/downloads"><DownloadsPage /></Route>
                 <Route path="/chat/:peerId">{(params) => <ChatPage peerId={params.peerId} />}</Route>
                 <Route path="/chat"><ChatPage /></Route>

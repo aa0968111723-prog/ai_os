@@ -142,6 +142,14 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // 分類標籤保留一次（MCP）括註，讓技術夥伴仍對得上文件用語。
   "mcpTokens.create": "建立外部 AI 連線金鑰",
   "mcpTokens.revoke": "撤銷外部 AI 連線金鑰",
+  // 個人整合連接（Google 雲端／Notion／外部資料庫）
+  "integrations.setNotion": "設定個人 Notion token",
+  "integrations.removeNotion": "移除個人 Notion token",
+  "integrations.addApi": "新增外部資料庫／API 連接",
+  "integrations.fetchApi": "從外部連接抓取資料",
+  "integrations.remove": "刪除外部資料庫／API 連接",
+  "integrations.removeGoogleDrive": "中斷 Google 雲端連結",
+  "integrations.googleDriveConnect": "連結 Google 雲端硬碟", // Express OAuth callback 手動補記
   // 跨裝置通知（subscribe/sync 實務上審計豁免——高頻例行回報＋含裝置金鑰，列入字典保底）
   "push.subscribe": "連結通知裝置",
   "push.sync": "同步通知裝置",
@@ -196,7 +204,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   { key: "database", label: "自訂資料庫", prefixes: ["databases"] },
-  { key: "external", label: "外部 AI 連線（MCP）", prefixes: ["mcpTokens", "mcp"] },
+  { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["mcpTokens", "mcp", "integrations"] },
 ];
 
 const OTHER_CATEGORY = { key: "other", label: "其他" } as const;

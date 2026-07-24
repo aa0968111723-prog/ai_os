@@ -675,6 +675,44 @@ app.get("/api/google/oauth/callback", async (req, res) => {
   }
 });
 
+// ── 個人整合連接：Google 雲端硬碟 OAuth（drive.readonly）──瀏覽器重導，走 Express；API 見 routers/integrations ──
+app.get("/api/integrations/google-drive/start", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const { isGoogleDriveConfigured, buildDriveAuthUrl } = await import("./services/integrations");
+    if (!isGoogleDriveConfigured()) return res.status(503).json({ error: "站方尚未設定 Google 整合（GOOGLE_CLIENT_ID/SECRET）" });
+    res.redirect(buildDriveAuthUrl(auth.user.id));
+  } catch (err) {
+    console.error("[integrations:gdrive:start]", err);
+    recordError("integrations:gdrive:start", err);
+    if (!res.headersSent) res.status(500).json({ error: "啟動授權失敗，請稍後再試" });
+  }
+});
+app.get("/api/integrations/google-drive/callback", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).send("請先登入後再連結 Google 雲端");
+    const { verifyIntegrationState, exchangeDriveCode, saveGoogleDrive } = await import("./services/integrations");
+    // state 驗簽＋比對登入者：防 CSRF、也防把授權綁到別人帳上
+    const state = verifyIntegrationState(String(req.query.state ?? ""));
+    if (!state || state.userId !== auth.user.id) return res.redirect("/integrations?gdrive=state_mismatch");
+    if (req.query.error) return res.redirect("/integrations?gdrive=denied"); // 使用者在 Google 畫面按了取消
+    const code = String(req.query.code ?? "");
+    if (!code) return res.redirect("/integrations?gdrive=denied");
+    const { refreshToken, email } = await exchangeDriveCode(code);
+    await saveGoogleDrive(auth.user.id, refreshToken, email);
+    // Express callback 繞過 tRPC 審計中介層——比照 MCP/上傳端點手動補記（fire-and-forget）
+    const { recordAudit } = await import("./services/audit");
+    recordAudit(auth, "integrations.googleDriveConnect", { email }, { ok: true });
+    res.redirect("/integrations?gdrive=connected");
+  } catch (err) {
+    console.error("[integrations:gdrive:callback]", err);
+    recordError("integrations:gdrive:callback", err);
+    if (!res.headersSent) res.redirect("/integrations?gdrive=failed");
+  }
+});
+
 // 組排程 .ics 匯出（需求 10 保留為後備）：登入＋組隔離；沒連結 Google 的人仍可手動匯入
 app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
   try {
