@@ -22,15 +22,20 @@ const SCENE_GEN_MODELS = MODELS.filter((m) => m.category === "text-to-image" && 
 // 逐格配音的後端預設 TTS（scenes.generateVoiceover 未帶 modelId 時用它）——前端只拿來顯示預估點數
 const DEFAULT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
-// 目標剪輯軟體 → 可直接匯入的時間軸/字幕格式（需求 #8）：剪映/CapCut/Premiere 吃 SRT、
-// Final Cut Pro（含剪映專業版）吃 FCPXML、DaVinci Resolve 吃 EDL。
+// 目標剪輯軟體 → 可直接匯入的檔案（需求 #8＋直連強化）：每套軟體列出「最能直接組好時間軸」的
+// 格式優先（Premiere 吃 xmeml 時間軸、FCP/Resolve/剪映專業版吃 fcpxml），字幕 SRT 當通用備援；
+// 剪映/CapCut 沒有時間軸匯入功能，另供「草稿包（實驗）」——解壓到草稿目錄開剪映即見排好的時間軸。
+// 交付包內的 fcpxml/xmeml 為媒體連結版（匯入即掛媒體）；這裡的單檔下載是骨架版（無媒體引用）。
 const EDIT_TARGETS = [
-  { key: "capcut", label: "剪映 / CapCut", format: "srt" },
-  { key: "premiere", label: "Premiere", format: "srt" },
-  { key: "fcp", label: "Final Cut Pro", format: "fcpxml" },
-  { key: "resolve", label: "DaVinci Resolve", format: "edl" },
+  { key: "capcut", label: "剪映 / CapCut", files: [{ format: "srt", ext: ".srt", name: "字幕/對位" }], draft: true },
+  { key: "capcutpro", label: "剪映專業版", files: [{ format: "fcpxml", ext: ".fcpxml", name: "時間軸" }, { format: "srt", ext: ".srt", name: "字幕" }], draft: true },
+  { key: "premiere", label: "Premiere Pro", files: [{ format: "xmeml", ext: ".xml", name: "時間軸" }, { format: "srt", ext: ".srt", name: "字幕" }] },
+  { key: "fcp", label: "Final Cut Pro", files: [{ format: "fcpxml", ext: ".fcpxml", name: "時間軸" }] },
+  { key: "resolve", label: "DaVinci Resolve", files: [{ format: "fcpxml", ext: ".fcpxml", name: "時間軸" }, { format: "edl", ext: ".edl", name: "剪輯表" }] },
 ] as const;
 type EditTargetKey = (typeof EDIT_TARGETS)[number]["key"];
+// 記住上次選的目標剪輯軟體（跨專案共用——同一位剪輯師用的軟體不會換來換去）
+const EDIT_TARGET_LS_KEY = "aios.edittarget";
 
 type Scene = {
   id: string;
@@ -516,9 +521,20 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
   const totalSec = list.reduce((sum, s) => sum + s.durationSec, 0);
 
   const [showPreview, setShowPreview] = useState(false);
-  // 目標剪輯軟體（決定「下載時間軸/字幕」拿哪種格式）；預設剪映——組內主力剪輯軟體
-  const [editTarget, setEditTarget] = useState<EditTargetKey>("capcut");
-  const timelineFormat = EDIT_TARGETS.find((t) => t.key === editTarget)?.format ?? "srt";
+  // 目標剪輯軟體（決定「下載時間軸/字幕」拿哪些檔）；預設剪映——組內主力剪輯軟體；記住上次選擇
+  const [editTarget, setEditTargetState] = useState<EditTargetKey>(() => {
+    try {
+      const saved = window.localStorage.getItem(EDIT_TARGET_LS_KEY);
+      return saved && EDIT_TARGETS.some((t) => t.key === saved) ? (saved as EditTargetKey) : "capcut";
+    } catch {
+      return "capcut";
+    }
+  });
+  const setEditTarget = (next: EditTargetKey) => {
+    setEditTargetState(next);
+    try { window.localStorage.setItem(EDIT_TARGET_LS_KEY, next); } catch { /* 持久化只是加分 */ }
+  };
+  const target = EDIT_TARGETS.find((t) => t.key === editTarget) ?? EDIT_TARGETS[0];
   // 逐格生成模型（深度優化：原本寫死 SDXL Lightning）——per 專案記住上次選擇；失效 id 回退預設
   const [genModelId, setGenModelIdState] = useState<string>(() => {
     try {
@@ -604,7 +620,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
             {/* QA-005：非同步 job 版打包——就地顯示進度/取消/完成下載，不再是看似卡死的同步下載 */}
             <ExportJobButton projectId={projectId} />
-            {/* 單檔時間軸/字幕下載（需求 #8）：不用整包也能拿到目標剪輯軟體可直接匯入的檔 */}
+            {/* 單檔時間軸/字幕下載（需求 #8＋直連強化）：依目標軟體列出可直接匯入的檔，各一顆下載鈕 */}
             <label style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
               目標剪輯軟體
               <select
@@ -614,19 +630,33 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
                 style={{ width: "auto", fontSize: "var(--fs-13)", padding: "6px 10px" }}
               >
                 {EDIT_TARGETS.map((t) => (
-                  <option key={t.key} value={t.key}>{t.label}（.{t.format}）</option>
+                  <option key={t.key} value={t.key}>{t.label}</option>
                 ))}
               </select>
             </label>
-            <a
-              href={`/api/export/${projectId}/timeline?format=${timelineFormat}`}
-              download
-              className="btn-tonal"
-              title="只下載目標剪輯軟體可匯入的時間軸/字幕單檔（時間碼依分鏡秒數累計）"
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "solid", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
-            >
-              <Icon name="Download" /> 下載時間軸/字幕
-            </a>
+            {target.files.map((f) => (
+              <a
+                key={f.format}
+                href={`/api/export/${projectId}/timeline?format=${f.format}`}
+                download
+                className="btn-tonal"
+                title={`下載 ${target.label} 可匯入的${f.name}單檔（時間碼依分鏡秒數累計）`}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "solid", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
+              >
+                <Icon name="Download" /> {f.name}（{f.ext}）
+              </a>
+            ))}
+            {"draft" in target && target.draft && (
+              <a
+                href={`/api/export/${projectId}/jianying`}
+                download
+                className="btn-tonal"
+                title="實驗性：剪映/CapCut 草稿資料夾（含素材與排好的時間軸）。解壓到剪映草稿目錄後打開剪映即可直接剪——目錄位置與相容版本見包內「安裝說明.txt」。"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "dashed", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
+              >
+                <Icon name="Download" /> 剪映草稿包（實驗）
+              </a>
+            )}
             <button
               data-fb="粗剪預覽"
               style={{ padding: "10px 18px", fontSize: "var(--fs-14)", borderRadius: "var(--r-12)" }}
@@ -645,7 +675,9 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
             </button>
             <span className="hint">共 {list.length} 鏡・約 {totalSec} 秒｜含素材＋腳本鏡頭表，直接進剪映/Premiere；大專案打包需要一點時間</span>
           </div>
-          <p className="hint" style={{ margin: "6px 0 0" }}>zip 交付包內也已附三種格式（交付/字幕.srt・時間軸.fcpxml・剪輯表.edl）</p>
+          <p className="hint" style={{ margin: "6px 0 0" }}>
+            zip 交付包內附「媒體連結版」時間軸（交付/時間軸.fcpxml・Premiere時間軸.xml）——解壓後匯入一個檔，粗剪含旁白自動排好；另附字幕.srt 與剪輯表.edl
+          </p>
           {showPreview && (
             <div style={{ marginTop: 14 }}>
               {/* 傳 onClose：StoryboardPlayer 是全螢幕 modal，沒接 onClose 的話 ✕鈕與 Esc 都失效→使用者被困需重載 */}
