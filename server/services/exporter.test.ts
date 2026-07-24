@@ -1,10 +1,11 @@
 /**
- * exporter.ts 時間軸格式產生器單元測試(需求 #8 交付):
- * buildSrt / buildFcpxml / buildEdl 的時間碼累加、最少 3 秒規則、跳脫與空清單行為。
- * 三者共用規則:durationSec ≤ 0 以 3 秒計;時間軸依序累加。
+ * exporter.ts 時間軸格式產生器單元測試(需求 #8 交付＋直連強化):
+ * buildSrt / buildFcpxml / buildXmeml / buildEdl 的時間碼累加、最少 3 秒規則、跳脫與空清單行為,
+ * 以及 fcpxml/xmeml 的「媒體連結版」(分鏡帶 mediaPath/narrationPath 時引用交付包內媒體)。
+ * 共用規則:durationSec ≤ 0 以 3 秒計;時間軸依序累加;30fps 影格對齊。
  */
 import { describe, expect, it } from "vitest";
-import { buildEdl, buildFcpxml, buildSrt, type TimelineScene } from "./exporter";
+import { buildEdl, buildFcpxml, buildSrt, buildXmeml, type TimelineScene } from "./exporter";
 
 const scenes: TimelineScene[] = [
   { title: "開場", durationSec: 5, voiceover: "你好,歡迎收看" },
@@ -35,17 +36,19 @@ describe("buildSrt", () => {
   });
 });
 
-describe("buildFcpxml", () => {
+describe("buildFcpxml(骨架版:無媒體路徑)", () => {
   it("結構完整:1.9 版本、30fps format、sequence 總長=各鏡和、gap offset 累加", () => {
     const xml = buildFcpxml(scenes, "測試專案");
     expect(xml).toContain(`<fcpxml version="1.9">`);
     expect(xml).toContain(`frameDuration="100/3000s"`);
-    // 5 + 3 + 1.5 = 9.5s
-    expect(xml).toContain(`<sequence format="r1" duration="9.5s"`);
+    // 5 + 3 + 1.5 = 9.5s → 影格對齊輸出 285/30s(非整秒一律 F/30s 有理數)
+    expect(xml).toContain(`<sequence format="r1" duration="285/30s"`);
     expect(xml).toContain(`offset="0s" start="0s" duration="5s"`);
     expect(xml).toContain(`offset="5s" start="0s" duration="3s"`);
-    expect(xml).toContain(`offset="8s" start="0s" duration="1.5s"`);
+    expect(xml).toContain(`offset="8s" start="0s" duration="45/30s"`);
     expect(xml).toContain(`<event name="測試專案">`);
+    // 無媒體 → 不產 asset 資源
+    expect(xml).not.toContain("<asset ");
   });
 
   it("標題/配音詞含 XML 特殊字元一律跳脫", () => {
@@ -71,19 +74,136 @@ describe("buildFcpxml", () => {
     expect(xml).toContain(`duration="0s"`);
   });
 
-  it("有 mediaFile 的鏡產出 asset/media-rep（src=封包內相對路徑）＋ asset-clip；無媒體維持 gap（QA-006）", () => {
+  it("有 mediaPath 的鏡產出 asset/media-rep（src=封包內相對 URI）＋ asset-clip；無媒體維持 gap（QA-006）", () => {
     const xml = buildFcpxml(
       [
-        { title: "開場", durationSec: 5, voiceover: null, mediaFile: "01_視頻素材/01_開場.mp4" },
-        { title: "無素材鏡", durationSec: 3, voiceover: null, mediaFile: null },
+        { title: "開場", durationSec: 5, voiceover: null, mediaPath: "01_視頻素材/01_開場.mp4", mediaKind: "video" },
+        { title: "無素材鏡", durationSec: 3, voiceover: null, mediaPath: null, mediaKind: null },
       ],
       "P",
     );
-    expect(xml).toContain(`<asset id="a1" name="01_開場.mp4" start="0s" duration="5s">`);
-    expect(xml).toContain(`<media-rep kind="original-media" src="./01_視頻素材/01_開場.mp4"/>`);
-    expect(xml).toContain(`<asset-clip ref="a1" name="1_開場" offset="0s" start="0s" duration="5s">`);
+    expect(xml).toMatch(/<asset id="a\d+" name="01_開場\.mp4" start="0s" duration="5s" hasVideo="1"/);
+    expect(xml).toContain(`<media-rep kind="original-media" src="./${encodeURIComponent("01_視頻素材")}/${encodeURIComponent("01_開場.mp4")}"/>`);
+    expect(xml).toMatch(/<asset-clip ref="a\d+" offset="0s" start="0s" duration="5s" name="1_開場">/);
     // 無媒體的鏡仍是 gap，offset 接續在前一鏡之後
     expect(xml).toContain(`<gap name="2_無素材鏡" offset="5s" start="0s" duration="3s">`);
+  });
+});
+
+// 媒體連結版共用測資:影片鏡＋圖片鏡(帶旁白)＋無素材鏡(帶旁白)
+const linkedScenes: TimelineScene[] = [
+  { title: "開場", durationSec: 5, voiceover: "第一句", mediaPath: "01_視頻素材/01_開場.mp4", mediaKind: "video", narrationPath: null },
+  { title: "轉場", durationSec: 4, voiceover: null, mediaPath: "03_圖像/02_轉場.jpg", mediaKind: "image", narrationPath: "02_旁白音檔/02_旁白.mp3" },
+  { title: "收尾", durationSec: 3, voiceover: "尾聲", mediaPath: null, mediaKind: null, narrationPath: "02_旁白音檔/03_旁白.mp3" },
+];
+
+describe("buildFcpxml(媒體連結版)", () => {
+  const xml = buildFcpxml(linkedScenes, "專案", { pathPrefix: "../" });
+
+  it("影片鏡:asset(30fps format r1、duration=該鏡秒數、只聲明視訊)＋spine asset-clip,src 為 ../ 相對 URI 且逐段 percent-encode", () => {
+    // duration 宣告該鏡秒數:省略會落 DTD 預設 0s,離線匯入（Resolve 必先離線）變成 0s 素材被 5s clip 引用
+    // 只聲明視訊（無 hasAudio）——與 xmeml 的 <media><video/></media> 一致,兩份時間軸聲音行為才相同
+    expect(xml).toMatch(/<asset id="a\d+" name="01_開場\.mp4" start="0s" duration="5s" hasVideo="1" videoSources="1" format="r1">/);
+    expect(xml).not.toMatch(/name="01_開場\.mp4"[^>]*hasAudio/);
+    expect(xml).toContain(`src="../${encodeURIComponent("01_視頻素材")}/${encodeURIComponent("01_開場.mp4")}"`);
+    expect(xml).toMatch(/<asset-clip ref="a\d+" offset="0s" start="0s" duration="5s" name="1_開場">/);
+  });
+
+  it("圖片鏡:asset duration=0s、format 用無 frameDuration 的 r2,spine 用 <video> 引用", () => {
+    expect(xml).toContain(`<format id="r2" name="FFVideoFormatRateUndefined" width="1920" height="1080"/>`);
+    expect(xml).toContain(`duration="0s" hasVideo="1" videoSources="1" format="r2"`);
+    expect(xml).toMatch(/<video ref="a\d+" offset="5s" start="0s" duration="4s" name="2_轉場">/);
+  });
+
+  it("旁白:connected clip 巢在該鏡主元素內,lane=-1、offset=0s(對齊父 clip 開頭)", () => {
+    expect(xml).toMatch(/<asset-clip ref="a\d+" lane="-1" offset="0s" duration="4s" name="2_旁白" audioRole="dialogue"\/>/);
+    // 無素材鏡:gap 佔位、旁白照樣掛在 gap 下
+    expect(xml).toMatch(/<gap name="3_收尾" offset="9s" start="0s" duration="3s">[\s\S]*?lane="-1"[\s\S]*?<\/gap>/);
+  });
+
+  it("旁白 asset 只聲明音訊(hasAudio、無 format ref),duration=該鏡秒數(離線匯入自洽)", () => {
+    expect(xml).toMatch(/<asset id="a\d+" name="02_旁白\.mp3" start="0s" duration="4s" hasAudio="1"/);
+  });
+
+  it("音訊類場景素材:掛 lane=-2 connected clip(與 lane=-1 旁白並存)", () => {
+    const withAudio = buildFcpxml(
+      [{ title: "誦經", durationSec: 4, voiceover: null, mediaPath: "02_音訊/01_誦經.wav", mediaKind: "audio", narrationPath: "02_旁白音檔/01_旁白.mp3" }],
+      "P",
+      { pathPrefix: "../" },
+    );
+    expect(withAudio).toMatch(/<asset-clip ref="a\d+" lane="-2" offset="0s" duration="4s" name="1_誦經" audioRole="effects"\/>/);
+    expect(withAudio).toMatch(/<asset-clip ref="a\d+" lane="-1" offset="0s" duration="4s" name="1_旁白" audioRole="dialogue"\/>/);
+    // 音訊素材沒有畫面 → 主元素仍是 gap
+    expect(withAudio).toContain(`<gap name="1_誦經"`);
+  });
+});
+
+describe("buildXmeml(Premiere 時間軸)", () => {
+  const xml = buildXmeml(linkedScenes, "專案", { pathPrefix: "../" });
+
+  it("xmeml v4、30fps 整數(timebase 30/ntsc FALSE)、sequence 總長=影格和", () => {
+    expect(xml).toContain(`<xmeml version="4">`);
+    expect(xml).toContain(`<rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>`);
+    // (5+4+3)*30 = 360 影格
+    expect(xml).toContain(`<duration>360</duration>`);
+  });
+
+  it("影片 clipitem:start/end 依累計影格,pathurl 為相對 URI,file 不宣告未探測的長度", () => {
+    expect(xml).toContain(`<start>0</start><end>150</end>`);
+    expect(xml).toContain(`<pathurl>../${encodeURIComponent("01_視頻素材")}/${encodeURIComponent("01_開場.mp4")}</pathurl>`);
+    const vidFile = xml.slice(xml.indexOf("01_開場.mp4"));
+    expect(vidFile.slice(0, vidFile.indexOf("</file>"))).not.toContain("<duration>");
+  });
+
+  it("圖片 clipitem:file 不帶 rate/duration,只有 media/video/samplecharacteristics", () => {
+    const imgFile = xml.slice(xml.indexOf("02_轉場.jpg"));
+    const fileEnd = imgFile.indexOf("</file>");
+    const fileBlock = imgFile.slice(0, fileEnd);
+    expect(fileBlock).toContain("<media><video><samplecharacteristics>");
+    expect(fileBlock).not.toContain("<duration>");
+    expect(fileBlock).not.toContain("<timebase>");
+  });
+
+  it("無素材鏡輸出離線佔位 clipitem(file 無 pathurl),鏡名/時間碼/備註保留", () => {
+    expect(xml).toContain(`<name>3_收尾</name>`);
+    const phFile = xml.slice(xml.indexOf(`3_收尾（無素材）`));
+    expect(phFile.slice(0, phFile.indexOf("</file>"))).not.toContain("<pathurl>");
+    // 旁白 clipitem 照常在 A1;第三鏡旁白時間碼:9s→12s = 270→360 影格
+    expect(xml).toContain(`<name>3_旁白</name>`);
+    expect(xml).toContain(`<start>270</start><end>360</end>`);
+    expect(xml).toContain(`<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>`);
+  });
+
+  it("骨架版(單檔下載,無任何媒體路徑):每鏡一個離線佔位 clipitem,不是空序列", () => {
+    const skeleton = buildXmeml(scenes, "P"); // 共用測資:三鏡皆無 mediaPath
+    expect((skeleton.match(/<clipitem /g) ?? []).length).toBe(3);
+    expect(skeleton).toContain(`<name>1_開場</name>`);
+    expect(skeleton).toContain(`<mastercomment1>你好,歡迎收看</mastercomment1>`);
+    expect(skeleton).not.toContain("<pathurl>");
+  });
+
+  it("音訊類場景素材:放 A2 軌(第二條 audio track),V 軌為離線佔位", () => {
+    const withAudio = buildXmeml(
+      [{ title: "誦經", durationSec: 4, voiceover: null, mediaPath: "02_音訊/01_誦經.wav", mediaKind: "audio", narrationPath: "02_旁白音檔/01_旁白.mp3" }],
+      "P",
+      { pathPrefix: "../" },
+    );
+    expect(withAudio).toContain(`<clipitem id="clipitem-sa1"`);
+    expect(withAudio).toContain(`<pathurl>../${encodeURIComponent("02_音訊")}/${encodeURIComponent("01_誦經.wav")}</pathurl>`);
+    // A1(旁白)與 A2(場景音訊)是兩條 track
+    expect((withAudio.match(/<track>/g) ?? []).length).toBe(3); // V1 + A1 + A2
+  });
+
+  it("標題含 XML 特殊字元一律跳脫", () => {
+    const escXml = buildXmeml([{ title: `A&B<"'>`, durationSec: 2, voiceover: null, mediaPath: "03_圖像/01_x.jpg", mediaKind: "image" }], `P&Q`);
+    expect(escXml).toContain(`<name>1_A&amp;B&lt;&quot;&apos;&gt;</name>`);
+    expect(escXml).toContain(`<name>P&amp;Q</name>`);
+  });
+
+  it("空清單仍是合法骨架(duration 0、無 clipitem)", () => {
+    const empty = buildXmeml([], "空");
+    expect(empty).toContain(`<duration>0</duration>`);
+    expect(empty).not.toContain("<clipitem");
   });
 });
 
@@ -119,11 +239,11 @@ describe("buildEdl", () => {
     expect(edl).toBe("TITLE: T\nFCM: NON-DROP FRAME\n");
   });
 
-  it("有 mediaFile 的鏡 FROM CLIP NAME 用真實檔名並附 SOURCE FILE 相對路徑（QA-006）", () => {
+  it("有 mediaPath 的鏡 FROM CLIP NAME 用真實檔名並附 SOURCE FILE 相對路徑（QA-006）", () => {
     const edl = buildEdl(
       [
-        { title: "開場", durationSec: 5, voiceover: null, mediaFile: "01_視頻素材/01_開場.mp4" },
-        { title: "無素材鏡", durationSec: 3, voiceover: null, mediaFile: null },
+        { title: "開場", durationSec: 5, voiceover: null, mediaPath: "01_視頻素材/01_開場.mp4", mediaKind: "video" },
+        { title: "無素材鏡", durationSec: 3, voiceover: null, mediaPath: null, mediaKind: null },
       ],
       "T",
     );

@@ -66,7 +66,24 @@ const STATUS_LABEL: Record<string, string> = {
 /** 成本審核的兩個新狀態沒有專屬 .pill 配色——借語意最近的既有 class（待核准＝queued 金、已駁回＝failed 紅） */
 const STATUS_PILL_CLASS: Record<string, string> = { awaiting_approval: "queued", rejected: "failed" };
 
-export function GenerationList({ projectId, canEdit = true }: { projectId: string; canEdit?: boolean }) {
+/** 「再用此設定」帶回生成台的完整設定（與 ProjectPage.applyPrompt 的 settings 同形狀） */
+export interface ReuseSettings {
+  modelId?: string | null;
+  characterIds?: string[] | null;
+  scenePresetIds?: string[] | null;
+  sourceAssetId?: string | null;
+}
+
+export function GenerationList({
+  projectId,
+  canEdit = true,
+  onReuse,
+}: {
+  projectId: string;
+  canEdit?: boolean;
+  /** 把某筆生成的完整設定（提示詞＋模型＋角色/場景卡＋來源素材）帶回生成台再生一次 */
+  onReuse?: (text: string, settings?: ReuseSettings) => void;
+}) {
   const utils = trpc.useUtils();
   const list = trpc.generation.listByProject.useQuery(
     { projectId },
@@ -190,6 +207,16 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
 
   // 與 SceneList 同 key 共用快取，不會多打 API——用來判斷成品是否已加入分鏡
   const scenes = trpc.scenes.listByProject.useQuery({ projectId });
+  // 與 ProjectPage 同 key 共用快取——把生成列存的角色/場景卡 id 翻成名字（注入透明化的回看線）
+  const characters = trpc.characters.list.useQuery({ projectId });
+  const scenePresets = trpc.scenePresets.list.useQuery({ projectId });
+  const charName = (cid: string) => characters.data?.find((c) => c.id === cid)?.name ?? "已刪除的角色";
+  const presetName = (sid: string) => scenePresets.data?.find((s) => s.id === sid)?.name ?? "已刪除的場景";
+  /** 綁定分鏡的「第 N 鏡」標籤（分鏡已刪就回 null，不畫死鏈） */
+  const sceneLabel = (sceneId: string) => {
+    const idx = scenes.data?.findIndex((s) => s.id === sceneId) ?? -1;
+    return idx >= 0 ? `第 ${idx + 1} 鏡・${scenes.data![idx].title}` : null;
+  };
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [addedId, setAddedId] = useState<string | null>(null);
   // #20 行內重新命名：正在編輯的列 id ＋ 草稿字串
@@ -202,7 +229,9 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
       utils.scenes.listByProject.invalidate({ projectId });
     },
   });
-  const retry = trpc.generation.submit.useMutation({
+  // 伺服器端完整重試：角色/場景錨點、分鏡綁定、來源重簽全由伺服器從失敗列還原——
+  // 舊做法前端只重組 prompt/model/來源，錨點默默掉光（跨鏡一致性斷裂）
+  const retry = trpc.generation.retry.useMutation({
     // fal submit 失敗時伺服器也已寫入一筆 failed 列——成功失敗都要刷新列表與點數
     onSettled: () => {
       utils.generation.listByProject.invalidate({ projectId });
@@ -476,6 +505,69 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
             <div className="meta mono" style={{ fontSize: 11 }}>
               {getModel(g.modelId)?.label ?? g.modelId}・−{g.pointsEst} 點{g.pointsRefunded > 0 && `（已退 +${g.pointsRefunded}）`}
             </div>
+            {/* 細膩連結列：這筆生成「帶了什麼、綁在哪、從哪來」一眼可回看、可點回去 */}
+            {(() => {
+              const chars = (g.characterIds as string[] | null) ?? [];
+              const presets = (g.scenePresetIds as string[] | null) ?? [];
+              const boundScene = g.sceneId ? sceneLabel(g.sceneId) : null;
+              const injected = (g.params as { prompt?: unknown } | null)?.prompt;
+              const injectedPrompt = typeof injected === "string" && injected.trim() !== g.prompt.trim() ? injected : null;
+              if (!chars.length && !presets.length && !boundScene && !g.workflowRunId && !g.agentRunId && !injectedPrompt) return null;
+              return (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", marginTop: 4 }}>
+                  {chars.length > 0 && (
+                    <span className="chip" title={chars.map(charName).join("、")}>角色 {chars.length}</span>
+                  )}
+                  {presets.length > 0 && (
+                    <span className="chip" title={presets.map(presetName).join("、")}>場景 {presets.length}</span>
+                  )}
+                  {boundScene && (
+                    <button
+                      type="button"
+                      className="chip pick"
+                      title="只看綁定這一鏡的生成"
+                      onClick={() => setSceneFilter(g.sceneId)}
+                    >
+                      {boundScene}
+                    </button>
+                  )}
+                  {g.workflowRunId && (
+                    <button
+                      type="button"
+                      className="chip pick"
+                      title="這筆是工作流跑出來的——點了捲到工作流卡"
+                      onClick={() => document.querySelector("#sec-workflow")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    >
+                      工作流
+                    </button>
+                  )}
+                  {g.agentRunId && (
+                    <button
+                      type="button"
+                      className="chip pick"
+                      title="這筆是 AI 代理跑出來的——點了捲到代理卡"
+                      onClick={() => document.querySelector("#sec-agent")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                    >
+                      AI 代理
+                    </button>
+                  )}
+                  {/* 注入透明化：世界觀/角色/場景錨點注入後「實際送給模型」的完整提示詞 */}
+                  {injectedPrompt && (
+                    <details style={{ flexBasis: "100%" }}>
+                      <summary className="hint" style={{ cursor: "pointer", fontSize: 12 }}>完整注入提示詞</summary>
+                      <div className="mono" style={{ whiteSpace: "pre-wrap", fontSize: 12, marginTop: 4, padding: "6px 8px", background: "var(--surface-2, rgba(0,0,0,0.04))", borderRadius: 6 }}>
+                        {injectedPrompt}
+                        <div style={{ marginTop: 4 }}>
+                          <button style={{ padding: "2px 10px", fontSize: 11 }} onClick={() => copyText(`inj-${g.id}`, injectedPrompt)}>
+                            {copiedId === `inj-${g.id}` ? "已複製 ✓" : "複製"}
+                          </button>
+                        </div>
+                      </div>
+                    </details>
+                  )}
+                </div>
+              );
+            })()}
             {g.kind === "audio" && g.resultUrl && (
               <audio controls src={g.resultUrl} style={{ width: "100%", maxWidth: 320, height: 32, marginTop: 6 }} />
             )}
@@ -543,24 +635,34 @@ export function GenerationList({ projectId, canEdit = true }: { projectId: strin
                 </ConfirmButton>
               </>
             )}
-            {g.status === "failed" && (
+            {g.status === "failed" && canEdit && (
               <ConfirmButton
                 triggerStyle={{ padding: "4px 12px", fontSize: 12 }}
                 disabled={retry.isPending}
-                message={`以相同設定重試${g.pointsEst > 0 ? `會再扣 ${g.pointsEst} 點` : "會再扣點"}，確定要重試嗎？`}
+                message={`以相同設定重試${g.pointsEst > 0 ? `會再扣 ${g.pointsEst} 點` : "會再扣點"}（角色/場景錨點與分鏡綁定都會保留），確定要重試嗎？`}
                 confirmLabel="重試"
-                onConfirm={() => {
-                  // 素材庫來源存的是 48 小時簽名網址——過期後原樣重送必敗。
-                  // 從網址取回 assetId 改走 sourceAssetId，讓伺服器重新簽名（順帶重過相容性守門）
-                  const assetId = g.sourceUrl?.match(/\/api\/assets\/([0-9a-f-]{36})\/file/)?.[1];
-                  retry.mutate({
-                    projectId, modelId: g.modelId, prompt: g.prompt,
-                    ...(assetId ? { sourceAssetId: assetId } : { sourceUrl: g.sourceUrl ?? undefined }),
-                  });
-                }}
+                onConfirm={() => retry.mutate({ id: g.id })}
               >
                 以相同設定重試
               </ConfirmButton>
+            )}
+            {/* 再用此設定：把這筆的完整用法（提示詞＋模型＋角色/場景卡＋來源素材）帶回生成台再生一次 */}
+            {canEdit && g.status === "done" && onReuse && (
+              <button
+                style={{ padding: "4px 12px", fontSize: 12 }}
+                title="把這筆的提示詞、模型與角色/場景勾選帶回生成台"
+                onClick={() =>
+                  onReuse(g.prompt, {
+                    modelId: g.modelId,
+                    // ?? []＝「這筆當時沒帶卡」也要如實還原（清掉現勾）——否則混入當前勾選就不是「此設定」了
+                    characterIds: (g.characterIds as string[] | null) ?? [],
+                    scenePresetIds: (g.scenePresetIds as string[] | null) ?? [],
+                    sourceAssetId: g.sourceUrl?.match(/\/api\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/file/i)?.[1] ?? null,
+                  })
+                }
+              >
+                再用此設定
+              </button>
             )}
           </div>
         </div>

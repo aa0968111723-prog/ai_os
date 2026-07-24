@@ -17,7 +17,8 @@ import { ensureSchema } from "./db/ensure";
 import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
-import { buildEdl, buildFcpxml, buildSrt, exportProjectZip } from "./services/exporter";
+import { buildEdl, buildFcpxml, buildSrt, buildXmeml, exportProjectZip, exportZipName } from "./services/exporter";
+import { exportJianyingDraftZip } from "./services/jianying";
 import { handleMcp } from "./services/mcp";
 import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
 import {
@@ -30,6 +31,7 @@ import { attachRealtime } from "./services/realtime";
 import { startWorkflowRunner } from "./services/workflowRunner";
 import { startGenerationRunner, runnerHeartbeat } from "./services/generationRunner";
 import { startAgentRunner } from "./services/agentRunner";
+import { startExportRunner } from "./services/exportRunner";
 import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
@@ -230,18 +232,54 @@ app.get("/api/export/:projectId", async (req, res) => {
       return res.status(409).json({ error: "這個專案的交付包正在打包中——請等第一份完成（大包可能需要數分鐘），不用重複點擊" });
     }
     exportsInFlight.add(flightKey);
-    await exportProjectZip(project.id, res, assetIds.length > 0 ? assetIds : undefined);
+    // 打包核心已與 Response 解耦（QA-005 job 化共用）：標頭在此設定、斷線轉成 AbortSignal
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(exportZipName(project.title))}`);
+    const clientAbort = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) clientAbort.abort();
+    });
+    await exportProjectZip(project.id, res, {
+      assetIds: assetIds.length > 0 ? assetIds : undefined,
+      signal: clientAbort.signal,
+    });
   } catch (err) {
     console.error("[export]", err);
     recordError("export", err); // 進錯誤環形緩衝（selftest「近期錯誤」）
-    if (!res.headersSent) res.status(500).json({ error: "打包失敗，請稍後再試（管理員可查伺服器記錄）" });
+    if (!res.headersSent) {
+      res.removeHeader("Content-Disposition"); // 別讓錯誤 JSON 被當成 .zip 存檔
+      res.status(500).json({ error: "打包失敗，請稍後再試（管理員可查伺服器記錄）" });
+    }
   } finally {
     if (flightKey) exportsInFlight.delete(flightKey);
   }
 });
 
-// 單檔時間軸/字幕下載（需求 #8）：?format=srt（剪映/CapCut/Premiere）｜fcpxml（Final Cut Pro/剪映專業版）｜edl（DaVinci Resolve）。
+// 匯出 job 成品下載（QA-005）：job 完成後由此取檔——登入＋組隔離，檔案從 Volume sendFile（支援 Range）
+app.get("/api/export/jobs/:jobId/download", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const [job] = await db.select().from(schema.exportJobs).where(eq(schema.exportJobs.id, req.params.jobId));
+    if (!job) return res.status(404).json({ error: "找不到這個匯出工作" });
+    if (!auth.groups.some((g) => g.groupId === job.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
+    if (job.status !== "done" || !job.storagePath) {
+      return res.status(409).json({ error: `交付包尚未就緒（目前狀態：${job.status}）`, status: job.status });
+    }
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(job.zipName ?? "交付包.zip")}`);
+    res.sendFile(absPathOf(job.storagePath));
+  } catch (err) {
+    console.error("[export-job:download]", err);
+    recordError("export-job:download", err);
+    if (!res.headersSent) res.status(500).json({ error: "下載失敗，請稍後再試" });
+  }
+});
+
+// 單檔時間軸/字幕下載（需求 #8）：?format=srt（剪映/CapCut/Premiere）｜fcpxml（Final Cut Pro/DaVinci Resolve/剪映專業版）
+// ｜xmeml（Premiere 時間軸 .xml）｜edl（DaVinci Resolve 備援）。
 // 登入＋組隔離比照上方交付包路由；分鏡取未軟刪、依 orderIndex 排序，時間碼依各鏡秒數累計。
+// 單檔下載沒有隨附媒體檔，fcpxml/xmeml 產「骨架版」（gap/空軌佔位）；要「匯入即組好粗剪」請用交付包內的媒體連結版。
 app.get("/api/export/:projectId/timeline", async (req, res) => {
   try {
     const auth = await resolveSession(req);
@@ -250,8 +288,8 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
     if (!project) return res.status(404).json({ error: "找不到專案" });
     if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
     const format = String(req.query.format ?? "");
-    if (format !== "srt" && format !== "fcpxml" && format !== "edl") {
-      return res.status(400).json({ error: "format 需為 srt、fcpxml 或 edl" });
+    if (format !== "srt" && format !== "fcpxml" && format !== "edl" && format !== "xmeml") {
+      return res.status(400).json({ error: "format 需為 srt、fcpxml、xmeml 或 edl" });
     }
     const scenes = await db
       .select()
@@ -263,7 +301,9 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
         ? { name: "字幕.srt", mime: "text/plain; charset=utf-8", body: buildSrt(scenes) }
         : format === "fcpxml"
           ? { name: "時間軸.fcpxml", mime: "application/xml; charset=utf-8", body: buildFcpxml(scenes, project.title) }
-          : { name: "剪輯表.edl", mime: "text/plain; charset=utf-8", body: buildEdl(scenes, project.title) };
+          : format === "xmeml"
+            ? { name: "Premiere時間軸.xml", mime: "application/xml; charset=utf-8", body: buildXmeml(scenes, project.title) }
+            : { name: "剪輯表.edl", mime: "text/plain; charset=utf-8", body: buildEdl(scenes, project.title) };
     // res.attachment 以 RFC 5987（filename*=UTF-8''…）讓中文檔名下載安全；Content-Type 隨後覆寫為明確值
     res.attachment(file.name);
     res.setHeader("Content-Type", file.mime);
@@ -272,6 +312,26 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
     console.error("[export:timeline]", err);
     recordError("export:timeline", err);
     if (!res.headersSent) res.status(500).json({ error: "時間軸/字幕檔產生失敗，請稍後再試" });
+  }
+});
+
+// 剪映/CapCut 草稿包下載（實驗性）：整個草稿資料夾（draft_content.json＋素材）打成 zip，
+// 解壓到剪映草稿目錄後打開剪映即見排好的時間軸。登入＋組隔離比照交付包路由。
+app.get("/api/export/:projectId/jianying", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
+    if (!project) return res.status(404).json({ error: "找不到專案" });
+    if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
+    await exportJianyingDraftZip(project.id, res);
+  } catch (err) {
+    console.error("[export:jianying]", err);
+    recordError("export:jianying", err);
+    if (!res.headersSent) {
+      res.removeHeader("Content-Disposition"); // 別讓錯誤 JSON 被當成 .zip 存檔
+      res.status(500).json({ error: "剪映草稿包產生失敗，請稍後再試（管理員可查伺服器記錄）" });
+    }
   }
 });
 
@@ -624,12 +684,13 @@ app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
     if (!auth.groups.some((g) => g.groupId === groupId)) return res.status(403).json({ error: "你不屬於這個組" });
     const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
     if (!group) return res.status(404).json({ error: "找不到組" });
+    // QA-017：行事曆訂閱是「全量」用途——上限拉高到 2000（一組行程遠低於此；防炸僅防極端）
     const items = await db
       .select()
       .from(schema.scheduleItems)
       .where(eq(schema.scheduleItems.groupId, groupId))
       .orderBy(asc(schema.scheduleItems.startsAt))
-      .limit(500);
+      .limit(2000);
     const { buildIcs } = await import("./routers/schedule");
     res.attachment("組排程.ics"); // RFC 5987 中文檔名
     res.setHeader("Content-Type", "text/calendar; charset=utf-8");
@@ -1030,6 +1091,7 @@ const httpServer = app.listen(port, () => {
         startWorkflowRunner();
         startGenerationRunner(); // A：單張生成也改由伺服器背景推進，關頁不再卡「生成中」
         startAgentRunner(); // AI 代理：核准後的計畫由伺服器背景逐步執行
+        startExportRunner(); // 交付包匯出 job（QA-005）：背景打包＋進度＋過期清理
         scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
         startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
         const { startGoogleCalendarSweep } = await import("./services/googleCalendar");

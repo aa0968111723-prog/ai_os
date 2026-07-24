@@ -13,6 +13,17 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // vendor 拆包（QA-025）：框架與資料層各自成 chunk——App 程式碼改版時，
+        // 使用者瀏覽器仍可沿用快取的 vendor chunk，不必整包重載
+        manualChunks: {
+          // react-dom 的實際入口是 react-dom/client——只列 "react-dom" 抓不到，主 chunk 會白白多 130kB
+          "vendor-react": ["react", "react-dom", "react-dom/client"],
+          "vendor-data": ["@tanstack/react-query", "@trpc/client", "@trpc/react-query", "superjson", "zod"],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

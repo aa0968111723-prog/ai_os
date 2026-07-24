@@ -62,6 +62,25 @@ export interface ModelEntry {
   input: (prompt: string, format: ProjectFormat, sourceUrl?: string) => Record<string, unknown>;
 }
 
+/**
+ * 角色卡/場景卡會被使用的視覺類別（QA-002 能力標示的單一真相來源；
+ * generationCore 的錨點注入判斷同用此集合，前後端不分岔）。
+ * 注意：目前「所有」模型都不支援把卡片參考圖當 image conditioning 送入模型——
+ * 卡片一律以「文字描述錨點」注入提示詞；非本集合的類別更是完全不使用卡片。
+ * UI 據此對使用者明確標示，不讓人誤以為定裝參考圖已送進模型（QA-002 實測踩到的誤解）。
+ */
+export const CARD_ANCHOR_CATEGORIES: ReadonlySet<ModelCategory> = new Set<ModelCategory>([
+  "text-to-image",
+  "image-to-image",
+  "text-to-video",
+  "image-to-video",
+]);
+
+/** 此類別的模型是否會使用角色卡/場景卡（以文字錨點注入提示詞） */
+export function supportsCardAnchors(category: ModelCategory): boolean {
+  return CARD_ANCHOR_CATEGORIES.has(category);
+}
+
 export const CATEGORIES: Array<{ id: ModelCategory; label: string; hint: string }> = [
   { id: "text-to-image", label: "文生圖", hint: "打字生成圖像(分鏡、場景、卡片)" },
   { id: "image-to-image", label: "圖生圖・編輯", hint: "用文字修改既有圖像(換風格、局部修改、合成)" },

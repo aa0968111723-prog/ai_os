@@ -9,8 +9,8 @@
 import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
-import { getModel, endpointOf, isNimModel, estimatePoints, type ProjectFormat, type ModelEntry } from "../../shared/models";
-import { worldviewSchema, type Worldview } from "../../shared/worldview";
+import { getModel, endpointOf, isNimModel, estimatePoints, CARD_ANCHOR_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { worldviewSchema, bilingualChips, STYLE_EN, TONE_EN, type Worldview } from "../../shared/worldview";
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { reserveQuota, refund } from "./points";
@@ -42,11 +42,14 @@ function persistGenerationResult(assetId: string, generationId: string, remoteUr
   })().catch((err) => console.warn("[storage] 成品落地背景作業失敗：", err instanceof Error ? err.message : err));
 }
 
-/** 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成) */
-function buildPrompt(userPrompt: string, worldview: Worldview): string {
+/** 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成)。
+ *  visual＝圖像/影片類別：調性與風格 chips 附英文錨點（英文語彙模型才吃得動畫風；LLM 維持純中文） */
+function buildPrompt(userPrompt: string, worldview: Worldview, visual: boolean): string {
   const parts: string[] = [];
-  if (worldview.tones.length) parts.push(`調性:${worldview.tones.join("、")}`);
-  if (worldview.styles.length) parts.push(`視覺風格:${worldview.styles.join("、")}`);
+  const tones = visual ? bilingualChips(worldview.tones, TONE_EN) : worldview.tones;
+  const styles = visual ? bilingualChips(worldview.styles, STYLE_EN) : worldview.styles;
+  if (tones.length) parts.push(`調性:${tones.join("、")}`);
+  if (styles.length) parts.push(`視覺風格:${styles.join("、")}`);
   if (worldview.message) parts.push(`核心訊息:${worldview.message}`);
   if (worldview.taboos.length) parts.push(`避免:${worldview.taboos.join(";")}`);
   return parts.length ? `${userPrompt}\n\n[專案背景] ${parts.join("|")}` : userPrompt;
@@ -65,12 +68,15 @@ const SOURCE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影
 
 /** 哪些類別注入世界觀(TTS 會唸出注入文字、轉錄/視覺/訓練/影片工具不適用 → 不注入) */
 const INJECT_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video", "image-to-video", "llm", "text-to-audio"]);
-/** 角色定裝錨點只注入「視覺」類別（畫面要一致）；LLM/TTS 不需要外觀 */
-const CHARACTER_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video", "image-to-video"]);
+/** 角色/場景錨點只注入「視覺」類別（畫面要一致）；LLM/TTS 不需要外觀。
+ *  單一真相來源在 shared/models.ts 的 CARD_ANCHOR_CATEGORIES（QA-002：UI 依同一集合對使用者標示
+ *  「此模型是否會用卡片」，前後端判斷不分岔）。 */
+const CHARACTER_CATEGORIES = CARD_ANCHOR_CATEGORIES;
 
 /** export 供 MCP 重用：注入與否的判斷必須單一來源，否則 MCP 路徑會把世界觀唸進 TTS 成品 */
 export function effectivePrompt(model: ModelEntry, userPrompt: string, worldview: Worldview): string {
-  return INJECT_CATEGORIES.has(model.category) ? buildPrompt(userPrompt, worldview) : userPrompt;
+  if (!INJECT_CATEGORIES.has(model.category)) return userPrompt;
+  return buildPrompt(userPrompt, worldview, CHARACTER_CATEGORIES.has(model.category));
 }
 
 /** 角色定裝錨點：視覺類別才注入，並前綴到（世界觀已注入的）提示詞 */
@@ -106,6 +112,10 @@ export interface SubmitCoreInput {
   sceneId?: string;
   /** 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）；不帶＝visual（回填 assetId） */
   sceneRole?: "visual" | "narration";
+  /** 來源工作流執行 id：runner 帶入，生成列落庫後可回看「這筆是哪條工作流跑出來的」 */
+  workflowRunId?: string;
+  /** 來源 AI 代理執行 id：agentRunner 帶入，同上 */
+  agentRunId?: string;
   /** 存取檢查掛點：tRPC 端帶 requireGroup（多組隔離；可再疊 2.3 專案級 ACL，故允許 async）；
    *  伺服器內部（runner）呼叫時已在建 run 時把過關,可省略。
    *  回傳角色（requireGroup 本來就回）供成本審核門檻判斷組員；回 void 的舊呼叫端不受影響（不觸發門檻）。 */
@@ -191,6 +201,10 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
             prompt: input.prompt,
             sceneId: input.sceneId ?? null,
             sceneRole: input.sceneRole ?? null,
+            characterIds: input.characterIds?.length ? input.characterIds : null,
+            scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
+            workflowRunId: input.workflowRunId ?? null,
+            agentRunId: input.agentRunId ?? null,
             sourceUrl,
             params: falInput, // 注入完成的 fal 輸入原樣保存——核准時直接送出，不重組（世界觀/卡片以送審當下為準）
             pointsEst: est,
@@ -243,6 +257,10 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         prompt: input.prompt,
         sceneId: input.sceneId ?? null, // 綁定分鏡格（沒有＝null，完成後不回填）
         sceneRole: input.sceneRole ?? null, // 回填角色（沒有＝null，視為 visual）
+        characterIds: input.characterIds?.length ? input.characterIds : null, // 帶入的定裝卡——重試/再用可還原
+        scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
+        workflowRunId: input.workflowRunId ?? null, // 來源工作流/代理（沒有＝手動生成）
+        agentRunId: input.agentRunId ?? null,
         sourceUrl,
         params: falInput,
         pointsEst: est,
