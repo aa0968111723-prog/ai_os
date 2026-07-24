@@ -9,6 +9,8 @@ import { ConfirmButton } from "../components/interactions";
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
 /** 最近開啟：點卡片時記下 id，置頂顯示（純前端 localStorage） */
 const RECENT_KEY = "aios.recentProjects";
+/** 「組代理動態」收合偏好記憶鍵（per 組；純前端 localStorage，收起省版面） */
+const RUNS_COLLAPSE_KEY = (gid: string) => `aios.teamRuns.collapsed.${gid}`;
 
 function relTime(d: Date | string): string {
   const t = new Date(d).getTime();
@@ -352,6 +354,18 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
   // 已派工的提議（key＝`訊息idx-提議idx`）→ 結果：避免重複派工、並顯示「到哪核准」
   const [dispatched, setDispatched] = useState<Record<string, DispatchResult>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  // 「組代理動態」收合：動態列多到洗掉對話、或不想看時可收起只留標題＋數量摘要（輪詢照跑不中斷）。
+  // 本卡不隨換組重掛（父層未給 key），故收合偏好用 effect 依 groupId 重讀，換組即切到該組的偏好。
+  const [runsCollapsed, setRunsCollapsed] = useState(false);
+  useEffect(() => {
+    try { setRunsCollapsed(localStorage.getItem(RUNS_COLLAPSE_KEY(groupId)) === "1"); }
+    catch { /* 無痕模式：讀不到就當展開 */ }
+  }, [groupId]);
+  const toggleRuns = () => {
+    const next = !runsCollapsed;
+    setRunsCollapsed(next);
+    try { localStorage.setItem(RUNS_COLLAPSE_KEY(groupId), next ? "1" : "0"); } catch { /* 無痕模式：持久化只是加分 */ }
+  };
   const canAsk = !!question.trim() && !ask.isPending;
   const submit = () => {
     if (!canAsk) return;
@@ -372,6 +386,8 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
   };
   const canDispatchHint = ask.data?.canDispatch ?? false;
   const runs = overview.data ?? [];
+  // 收合時仍給進度訊號：進行中（執行中／待核准）幾筆，一眼看出「有沒有在跑」不必展開
+  const activeRuns = runs.filter((r) => r.status === "running" || r.status === "awaiting_approval").length;
   return (
     <section className="card" data-fb="組彙總AI卡" style={{ padding: "14px 16px", marginBottom: 16 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -489,28 +505,48 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
         </div>
       )}
 
-      {/* 組代理動態：全組各專案的 AI 代理計畫／執行進度一站看（進行中的排前面；核准/停止到各專案頁做） */}
+      {/* 組代理動態：全組各專案的 AI 代理計畫／執行進度一站看（進行中的排前面；核准/停止到各專案頁做）。
+          標題即收合鈕：列多時可收起只留「標題＋筆數＋進行中」摘要省版面；本體用 hidden 切換恆掛 DOM，
+          aria-controls 不懸空、輪詢照跑不中斷（展開即最新）。 */}
       {runs.length > 0 && (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 10 }}>
-          <div style={{ fontSize: "var(--fs-12)", color: "var(--fg-secondary)", display: "flex", alignItems: "center", gap: 4, marginBottom: 6 }}>
-            <Icon name="Sparkles" size={12} />組代理動態
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {runs.map((r) => {
-              const st = RUN_STATUS[r.status] ?? { label: r.status };
-              return (
-                <div key={r.id} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: "var(--fs-12)", flexWrap: "wrap" }}>
-                  <span className="chip" style={{ margin: 0, color: st.color, borderColor: st.color }}>{st.label}</span>
-                  <Link href={`/p/${r.projectId}`} style={{ fontWeight: 600 }}>{r.projectTitle}</Link>
-                  <span style={{ color: "var(--fg-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }} title={r.goal}>
-                    {r.goal}
-                  </span>
-                  <span style={{ color: "var(--fg-secondary)", marginLeft: "auto" }}>
-                    {r.totalSteps > 0 ? `${r.doneSteps}/${r.totalSteps} 步` : "—"}・估 {r.estPoints} 點
-                  </span>
-                </div>
-              );
-            })}
+          <button
+            type="button"
+            onClick={toggleRuns}
+            aria-expanded={!runsCollapsed}
+            aria-controls="team-agent-runs"
+            title={runsCollapsed ? "展開組代理動態" : "收合組代理動態（省版面）"}
+            style={{
+              display: "flex", alignItems: "center", gap: 4, width: "100%",
+              background: "none", border: "none", padding: 0, cursor: "pointer",
+              fontSize: "var(--fs-12)", color: "var(--fg-secondary)",
+            }}
+          >
+            <Icon name="Sparkles" size={12} />
+            <span>組代理動態</span>
+            <span style={{ color: "var(--fg-secondary)" }}>
+              （{runs.length}{activeRuns > 0 ? `，${activeRuns} 進行中` : ""}）
+            </span>
+            <Icon name={runsCollapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ marginLeft: "auto" }} />
+          </button>
+          <div id="team-agent-runs" hidden={runsCollapsed} style={{ marginTop: 6 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {runs.map((r) => {
+                const st = RUN_STATUS[r.status] ?? { label: r.status };
+                return (
+                  <div key={r.id} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: "var(--fs-12)", flexWrap: "wrap" }}>
+                    <span className="chip" style={{ margin: 0, color: st.color, borderColor: st.color }}>{st.label}</span>
+                    <Link href={`/p/${r.projectId}`} style={{ fontWeight: 600 }}>{r.projectTitle}</Link>
+                    <span style={{ color: "var(--fg-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }} title={r.goal}>
+                      {r.goal}
+                    </span>
+                    <span style={{ color: "var(--fg-secondary)", marginLeft: "auto" }}>
+                      {r.totalSteps > 0 ? `${r.doneSteps}/${r.totalSteps} 步` : "—"}・估 {r.estPoints} 點
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
