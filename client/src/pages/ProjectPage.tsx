@@ -340,6 +340,10 @@ export function ProjectPage({ id }: { id: string }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenePresets.data]);
+  /** 外部指定模型（提示詞庫「再用」/生成紀錄「再用此設定」還原模型用）：nonce 遞增觸發 ModelPicker 套用 */
+  const [pickReq, setPickReq] = useState<{ modelId: string; nonce: number } | null>(null);
+  /** 提示詞庫「用於工作流」：把咒語帶進工作流想法框（nonce 遞增觸發 WorkflowCard 套用） */
+  const [wfPromptReq, setWfPromptReq] = useState<{ text: string; nonce: number } | null>(null);
   /** 引導步驟列收合狀態（全部完成後可整條收起，不佔版面） */
   const [onboardCollapsed, setOnboardCollapsed] = useState(false);
   /** 生成確認彈窗：先估點數、使用者點頭才真的送出、扣點 */
@@ -358,8 +362,16 @@ export function ProjectPage({ id }: { id: string }) {
   const submit = trpc.generation.submit.useMutation({
     onSuccess: (data, vars) => {
       submitRequestId.current = crypto.randomUUID();
-      // 成功生成的提示詞自動入庫（簡報「打過的咒語自動存起來」）
-      savePrompt.mutate({ projectId: id, text: vars.prompt });
+      // 成功生成的提示詞自動入庫（簡報「打過的咒語自動存起來」）——連同模型/角色/場景設定，
+      // 「再用」才能還原完整用法而不只文字（三合一）。生成台知道「完整」狀態：
+      // 沒帶卡就傳 []（明確清空舊設定），與工作流那種「只知道部分」的存法區隔
+      savePrompt.mutate({
+        projectId: id,
+        text: vars.prompt,
+        modelId: vars.modelId,
+        characterIds: vars.characterIds ?? [],
+        scenePresetIds: vars.scenePresetIds ?? [],
+      });
       setPrompt("");
       setConfirming(false);
       // 達門檻的列不會馬上開始生成——明確告知已送核准，否則使用者會以為卡住
@@ -405,12 +417,40 @@ export function ProjectPage({ id }: { id: string }) {
   // 不再讓檢視者「按了才失敗」（走完看價確認流程最後一步才被擋是最傷的版本）
   const canEdit = p.myProjectRole !== "viewer";
 
-  /** 「用這個提示詞」統一入口（AI 導演／分鏡草稿／提示詞庫「再用」）：
-   * 避免默默蓋掉手打的提示詞；套用後自動捲到生成台、聚焦提示詞框——跨卡動作由系統接手，不用自己捲 */
-  const applyPrompt = (text: string) => {
+  /** 「用這個提示詞」統一入口（AI 導演／分鏡草稿／提示詞庫「再用」／生成紀錄「再用此設定」）：
+   * 避免默默蓋掉手打的提示詞；套用後自動捲到生成台、聚焦提示詞框——跨卡動作由系統接手，不用自己捲。
+   * settings（可選）＝一併還原模型與角色/場景卡勾選：提示詞庫與生成紀錄存的是「完整用法」，不只文字。
+   * 陣列語義：[]＝明確清空現勾（如實還原「當時沒帶卡」）；null/undefined＝不知道，維持現勾不動 */
+  const applyPrompt = (
+    text: string,
+    settings?: { modelId?: string | null; characterIds?: string[] | null; scenePresetIds?: string[] | null; sourceAssetId?: string | null },
+  ) => {
     // 這裡刻意保留原生 confirm：只在使用者已手打提示詞時才問「要覆蓋嗎」；改成就地面板會多一層互動反而更煩
     if (prompt.trim() && !window.confirm("要覆蓋你已輸入的提示詞嗎？")) return;
     setPrompt(text);
+    if (settings) {
+      // 只還原「仍存在」的卡片 id（卡片可能已被刪除）；清單還沒載入就先原樣設定，載入後的清理 effect 會補剪
+      if (settings.characterIds) {
+        const list = characters.data;
+        const next = list ? settings.characterIds.filter((cid) => list.some((c) => c.id === cid)) : settings.characterIds;
+        setCharIds(() => next);
+      }
+      if (settings.scenePresetIds) {
+        const list = scenePresets.data;
+        const next = list ? settings.scenePresetIds.filter((sid) => list.some((s) => s.id === sid)) : settings.scenePresetIds;
+        setSceneIds(() => next);
+      }
+      if (settings.modelId) setPickReq((prev) => ({ modelId: settings.modelId!, nonce: (prev?.nonce ?? 0) + 1 }));
+      // 來源素材仍在庫才還原（已刪/回收桶的來源不帶，避免送出被伺服器擋）
+      if (settings.sourceAssetId) {
+        const src = assets.data?.find((a) => a.id === settings.sourceAssetId);
+        if (src) {
+          setSourceAsset({ id: src.id, title: src.title, kind: src.kind });
+          setSourceUrl("");
+          setSourceUrlError("");
+        }
+      }
+    }
     // 等 React 畫完再捲動；focus 用 preventScroll 才不會打斷平滑捲動
     requestAnimationFrame(() => {
       const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
@@ -879,14 +919,15 @@ export function ProjectPage({ id }: { id: string }) {
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
           {/* 專案 AI 代理系統（統一深度整合）：一個對話統包問答・發想・拆分鏡・下目標排計畫・查資料庫；
-              多步目標排成計畫，核准後由伺服器背景執行（可寫入 AI 可寫的資料庫）；拆分鏡草稿仍落在③分鏡列表 */}
+              多步目標排成計畫，核准後由伺服器背景執行（可寫入 AI 可寫的資料庫）；拆分鏡草稿仍落在③分鏡列表。
+              生成紀錄的「AI 代理」來源 chip 捲向卡內既有的 #sec-agent 錨點 */}
           <AiHub projectId={id} canEdit={canEdit} isLeader={isLeader} />
 
           {/* 生成台（11 類 × 旗艦/經濟/最低成本）＝日常主力工作區 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>
           <section className="card card--primary" data-fb="生成台" id="sec-studio">
             <h2>創作生成</h2>
-            <ModelPicker onChange={setModel} />
+            <ModelPicker onChange={setModel} pickRequest={pickReq} />
             {model?.needs && (
               <>
                 <label htmlFor="gen-source">{model.sourceHint ?? "來源素材"}</label>
@@ -1031,18 +1072,25 @@ export function ProjectPage({ id }: { id: string }) {
             )}
             {submitNotice && <p className="hint" role="status" style={{ marginTop: 10, color: "var(--gold-ink)" }}>{submitNotice}</p>}
             {submit.error && <p className="error">{submit.error.message}</p>}
-            <GenerationList projectId={id} canEdit={canEdit} />
+            <GenerationList projectId={id} canEdit={canEdit} onReuse={applyPrompt} />
           </section>
           </CollabZone>
 
-          {/* 工作流（一鍵串鏈） */}
+          {/* 工作流（一鍵串鏈）：沿用生成台勾選的角色/場景卡——整條串鏈的視覺步驟注入同一套錨點 */}
           <div id="sec-workflow">
-            <WorkflowCard projectId={id} />
+            <WorkflowCard projectId={id} charIds={charIds} sceneIds={sceneIds} promptRequest={wfPromptReq} />
           </div>
 
-          {/* 提示詞庫：成功生成的咒語一鍵再用（「再用」自動帶回上方生成台） */}
+          {/* 提示詞庫：成功生成的咒語一鍵再用（「再用」還原完整設定帶回生成台；「工作流」帶進想法框） */}
           <div id="sec-prompts">
-            <PromptLibrary projectId={id} onUse={applyPrompt} />
+            <PromptLibrary
+              projectId={id}
+              onUse={applyPrompt}
+              onUseForWorkflow={(text) => {
+                setWfPromptReq((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
+                scrollToSelector("#sec-workflow");
+              }}
+            />
           </div>
 
           <StageLink text="成品會自動存入素材庫；在生成紀錄按「＋加入分鏡」，就會排進下方分鏡列" />
@@ -1060,7 +1108,8 @@ export function ProjectPage({ id }: { id: string }) {
             {/* data-fb 讓元件回饋標定「打包下載」（分鏡與交付區）；透明包裹，不影響版面。id 供引導步驟與交付指引捲動定位 */}
             {/* 錨點 id 掛外層 div、不再加外層 <h2>（SceneList 卡片自帶同名標題，白話提示移進去了） */}
             <div data-fb="打包下載" id="onboard-delivery">
-              <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} onUsePrompt={applyPrompt} />
+              {/* charIds/sceneIds：逐鏡就地生成也注入生成台勾選的角色/場景錨點——逐鏡出圖與生成台出圖同一套畫風 */}
+              <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} onUsePrompt={applyPrompt} charIds={charIds} sceneIds={sceneIds} />
             </div>
           </CollabZone>
         </div>
