@@ -3,7 +3,7 @@
  * PostgreSQL · Drizzle（pg 方言）
  * 組織模型：開發者 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
-import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 /* ── 認證與組織 ────────────────────────────────── */
 
@@ -475,6 +475,36 @@ export const workflowRuns = pgTable("workflow_runs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+/**
+ * 交付包匯出 job（QA-005）：同步 ZIP 下載改為「建 job → 背景打包到 Volume → 輪詢進度 → 完成後下載」。
+ * 大包（遠端素材多）打包可達數分鐘，同步串流讓瀏覽器看似卡死、使用者重複點擊做出重複包。
+ * 新表＝pushSchema 安全；status 由 exportRunner 以 CAS 推進；cancelled 由取消 mutation 設定，
+ * runner 在進度回報時讀到即中止。done 的 zip 檔留在 Volume（storagePath），過期由 runner 定期清理。
+ */
+export const exportJobs = pgTable("export_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  /** 素材庫多選打包的素材 id 清單；null＝全量打包 */
+  assetIds: jsonb("asset_ids"),
+  status: text("status", { enum: ["queued", "running", "done", "failed", "cancelled"] }).notNull().default("queued"),
+  /** 下載時的 Content-Disposition 檔名（依專案標題產生） */
+  zipName: text("zip_name"),
+  /** 完成後 zip 在 Volume 的相對路徑（assets 樹下）；未完成/失敗為 null */
+  storagePath: text("storage_path"),
+  doneEntries: integer("done_entries").notNull().default(0),
+  totalEntries: integer("total_entries").notNull().default(0),
+  /** 已寫出位元組（bigint：多媒體大包可能超過 int4 上限 2.1GB） */
+  bytesWritten: bigint("bytes_written", { mode: "number" }).notNull().default(0),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  projectIdx: index("export_jobs_project_idx").on(t.projectId, t.createdAt),
+  statusIdx: index("export_jobs_status_idx").on(t.status, t.updatedAt),
+}));
 
 /**
  * AI 代理執行紀錄（代理系統核心）：一句目標 → LLM 規劃多步計畫 → 使用者核准 → 伺服器背景逐步執行。
