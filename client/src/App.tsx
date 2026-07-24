@@ -20,6 +20,7 @@ import { PasswordInput } from "./components/PasswordInput";
 import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
 import { FeedbackWidget } from "./feedback/FeedbackWidget";
 import { NotificationSettingsDialog, PushSubscriptionSync } from "./components/NotificationSettings";
+import { unsubscribeThisDevice } from "./push";
 import { Icon } from "./components/Icon";
 import { useFocusTrap } from "./components/interactions";
 
@@ -260,6 +261,16 @@ export function App() {
   const [location, navigate] = useLocation();
   const me = trpc.auth.me.useQuery();
   const logout = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
+  const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
+  // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/審批通知）。
+  // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到「通知設定」重新啟用。
+  const logoutWithPushCleanup = async () => {
+    try {
+      const endpoint = await unsubscribeThisDevice();
+      if (endpoint) await pushUnsubscribe.mutateAsync({ endpoint });
+    } catch { /* 推播清理失敗照樣登出 */ }
+    logout.mutate();
+  };
   const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
 
   // 組切換（多組成員）：記住上次選的組
@@ -350,7 +361,7 @@ export function App() {
               canSeeOrg={canSeeOrg}
               onChangePw={() => setShowChangePw(true)}
               onNotifSettings={() => setShowNotifSettings(true)}
-              onLogout={() => logout.mutate()}
+              onLogout={() => { void logoutWithPushCleanup(); }}
               loggingOut={logout.isPending}
             />
           )}

@@ -138,6 +138,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "mcpTokens.revoke": "撤銷 MCP 連線金鑰",
   // 跨裝置通知（subscribe 實務上審計豁免——高頻例行回報＋含裝置金鑰，列入字典保底）
   "push.subscribe": "連結通知裝置",
+  "push.sync": "同步通知裝置",
   "push.unsubscribe": "解除通知裝置",
   "push.removeDevice": "移除通知裝置",
   "push.test": "發送測試通知",

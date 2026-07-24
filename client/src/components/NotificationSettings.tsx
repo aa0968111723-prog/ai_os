@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
+import { useFocusTrap } from "./interactions";
 import {
   deviceLabel,
   getExistingSubscription,
@@ -34,6 +35,8 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  // 與 ChangePasswordDialog 同一套對話框互動：焦點鎖在框內、鎖背景捲動、Esc 關閉
+  useFocusTrap(dialogRef, true, onClose);
 
   // 打開時偵測本瀏覽器既有訂閱——「本裝置」區塊據此顯示啟用/停用
   useEffect(() => {
@@ -142,6 +145,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
             <button className="primary" onClick={enable} disabled={busy || !publicKey.data}>
               {busy ? "連結中…" : "在本裝置啟用通知"}
             </button>
+            {publicKey.error && (
+              <span className="hint">通知金鑰暫時讀不到（{publicKey.error.message}）——稍後重開這個視窗再試</span>
+            )}
             {Notification.permission === "denied" && (
               <span className="hint">通知權限目前被封鎖——請先到瀏覽器網站設定把「通知」改為允許</span>
             )}
@@ -183,18 +189,32 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
 
 /**
  * 例行訂閱同步（App 頂層掛載、零 UI）：已授權且已訂閱的裝置，每次開 App 上報一次——
- * 刷新 lastSeenAt（設定頁「最近同步」＋超額淘汰依據）、修復換帳號/金鑰輪替後的訂閱歸屬。
+ * 刷新 lastSeenAt（設定頁「最近同步」＋超額淘汰依據）、修復換帳號歸屬，並自癒金鑰輪替：
+ * 先比對本機訂閱綁的伺服器公鑰，不一致就就地換訂新金鑰（subscribeThisDevice 內建此邏輯），
+ * 再帶 oldEndpoint 讓伺服器把舊列改寫成新訂閱。走 push.sync（只更新不新增）——
+ * 在設定頁移除過的裝置不會被開 App 偷偷復活，重新連結必須回設定頁明確按「啟用」。
  */
 export function PushSubscriptionSync() {
-  const subscribe = trpc.push.subscribe.useMutation();
+  // 公鑰查詢也只在「已授權」的裝置發（enabled）——沒用推播的人不多打一條 query
+  const enabled = isPushSupported() && Notification.permission === "granted";
+  const publicKey = trpc.push.publicKey.useQuery(undefined, { staleTime: Infinity, enabled });
+  const sync = trpc.push.sync.useMutation();
   const done = useRef(false);
   useEffect(() => {
-    if (done.current || !isPushSupported() || Notification.permission !== "granted") return;
+    if (done.current || !publicKey.data) return;
     done.current = true;
-    getExistingSubscription()
-      .then((sub) => { if (sub) subscribe.mutate({ endpoint: sub.endpoint, keys: sub.keys, label: deviceLabel() }); })
-      .catch(() => {});
+    (async () => {
+      const existing = await getExistingSubscription();
+      if (!existing) return; // 這台裝置沒啟用過（或已停用）——不替使用者自作主張訂閱
+      const fresh = await subscribeThisDevice(publicKey.data.publicKey); // 金鑰相同＝原樣返回；不同＝換訂
+      sync.mutate({
+        endpoint: fresh.endpoint,
+        keys: fresh.keys,
+        label: deviceLabel(),
+        oldEndpoint: fresh.endpoint !== existing.endpoint ? existing.endpoint : undefined,
+      });
+    })().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [publicKey.data]);
   return null;
 }

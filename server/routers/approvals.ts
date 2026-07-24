@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
-import { groupLeaderIds, pushToUsers } from "../services/webPush";
+import { canAccessGroup, groupLeaderIds, pushToUsers } from "../services/webPush";
 
 async function getScene(sceneId: string) {
   // isNull(deletedAt)：軟刪除（回收桶）的分鏡不得被送審／裁決——否則會把已刪分鏡復活進審批流程
@@ -141,16 +141,21 @@ export const approvalsRouter = router({
         });
         return updated;
       });
-      // 裁決結果推播給提交人（自己裁自己送的不用通知）；失敗不擋裁決
+      // 裁決結果推播給提交人（自己裁自己送的不用通知）；失敗不擋裁決。
+      // 先驗「現在還在組裡」：submittedBy 是存好的舊 id——提交後被移出組的前成員
+      // 不該再收到組內內容（退回理由等），與其他事件「臨場重算收件人」的口徑一致。
       if (approval.submittedBy && approval.submittedBy !== ctx.auth.user.id) {
-        void pushToUsers([approval.submittedBy], {
-          title: input.decision === "approved" ? "分鏡已通過" : "分鏡需修改",
-          body: input.decision === "approved"
-            ? `「${scene.title}」v${approval.version} 已通過 ✅`
-            : `「${scene.title}」v${approval.version} 需修改：${input.reason?.trim() ?? ""}`,
-          url: `/p/${project.id}`,
-          tag: `approval-${scene.id}`,
-        }).catch((err) => console.warn("[approvals] 裁決推播失敗：", err instanceof Error ? err.message : err));
+        const submitterId = approval.submittedBy;
+        void canAccessGroup(project.groupId, submitterId)
+          .then((ok) => (ok ? pushToUsers([submitterId], {
+            title: input.decision === "approved" ? "分鏡已通過" : "分鏡需修改",
+            body: input.decision === "approved"
+              ? `「${scene.title}」v${approval.version} 已通過 ✅`
+              : `「${scene.title}」v${approval.version} 需修改：${input.reason?.trim() ?? ""}`,
+            url: `/p/${project.id}`,
+            tag: `approval-${scene.id}`,
+          }) : undefined))
+          .catch((err) => console.warn("[approvals] 裁決推播失敗：", err instanceof Error ? err.message : err));
       }
       return decided;
     }),

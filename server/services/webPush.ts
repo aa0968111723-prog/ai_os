@@ -97,6 +97,10 @@ export async function pushToUsers(userIds: string[], payload: PushPayload): Prom
           if (status === 404 || status === 410) {
             // 裝置已解除訂閱／瀏覽器回收了 endpoint——自清，設定頁不再列殭屍裝置
             await db.delete(schema.pushSubscriptions).where(eq(schema.pushSubscriptions.id, s.id)).catch(() => {});
+          } else if (status === 401 || status === 403) {
+            // VAPID 不匹配（多半是換過金鑰的舊訂閱）：不刪列——裝置下次開 App 的例行同步會以新金鑰
+            // 換訂並就地改寫這一列；一時的金鑰設錯若在這裡刪列會把可自癒的訂閱整批清光
+            console.warn(`[push] 推送被拒（status=${status}，疑為舊金鑰訂閱）——待該裝置下次開 App 由例行同步換訂`);
           } else {
             console.warn(`[push] 推送失敗（保留訂閱下次再試）：status=${status ?? "?"}`, err instanceof Error ? err.message : err);
           }
@@ -111,13 +115,53 @@ export async function pushToUsers(userIds: string[], payload: PushPayload): Prom
   }
 }
 
-/** 組長（含）以上的成員 id（審批/待核事件的收件人）；可排除觸發者本人（自己不用通知自己） */
+/**
+ * 組長（含）以上的成員 id（審批/待核事件的收件人）；可排除觸發者本人（自己不用通知自己）。
+ * 與 requireLeader 的裁決權對齊：組長列（group_members role='leader'）＋該組所屬團隊的管理員
+ * （team_members role='admin'——auth 對他們合成 'admin' 角色，同樣有裁決權；沒有組長的組
+ * 常態上正是由團隊管理員看著，漏掉他們＝待審事件推給空集合）。開發者（isSuperAdmin）刻意
+ * 不列入：他們對全站每個組都有權，逐組推播只會洗版。
+ */
 export async function groupLeaderIds(groupId: string, excludeUserId?: string): Promise<string[]> {
-  const rows = await db
-    .select({ userId: schema.groupMembers.userId })
+  const [leaders, admins] = await Promise.all([
+    db
+      .select({ userId: schema.groupMembers.userId })
+      .from(schema.groupMembers)
+      .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.role, "leader"))),
+    db
+      .select({ userId: schema.teamMembers.userId })
+      .from(schema.teamMembers)
+      .innerJoin(schema.groups, eq(schema.groups.teamId, schema.teamMembers.teamId))
+      .where(and(eq(schema.groups.id, groupId), eq(schema.teamMembers.role, "admin"))),
+  ]);
+  return [...new Set([...leaders, ...admins].map((r) => r.userId))].filter((id) => id !== excludeUserId);
+}
+
+/**
+ * 某人現在是否仍看得到這個組（組員 or 該團隊管理員 or 開發者）：
+ * 推播「存好的 userId」（如裁決通知提交人）前用這個把關——被移出組的前成員
+ * 不該再收到組內內容（退回理由等），與 App 內的可見界一致。
+ */
+export async function canAccessGroup(groupId: string, userId: string): Promise<boolean> {
+  const [member] = await db
+    .select({ id: schema.groupMembers.id })
     .from(schema.groupMembers)
-    .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.role, "leader")));
-  return rows.map((r) => r.userId).filter((id) => id !== excludeUserId);
+    .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, userId)))
+    .limit(1);
+  if (member) return true;
+  const [admin] = await db
+    .select({ id: schema.teamMembers.id })
+    .from(schema.teamMembers)
+    .innerJoin(schema.groups, eq(schema.groups.teamId, schema.teamMembers.teamId))
+    .where(and(eq(schema.groups.id, groupId), eq(schema.teamMembers.userId, userId), eq(schema.teamMembers.role, "admin")))
+    .limit(1);
+  if (admin) return true;
+  const [su] = await db
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(and(eq(schema.users.id, userId), eq(schema.users.isSuperAdmin, true)))
+    .limit(1);
+  return !!su;
 }
 
 /**
@@ -155,4 +199,38 @@ export async function saveSubscription(input: {
   await db
     .delete(schema.pushSubscriptions)
     .where(and(eq(schema.pushSubscriptions.userId, input.userId), notInArray(schema.pushSubscriptions.id, keep)));
+}
+
+/**
+ * 例行同步（App 每次載入回報）：與 saveSubscription 的關鍵差別是「只更新、不新增」——
+ * 使用者在設定頁移除過的裝置，不能因為那台裝置下次開 App 又被例行同步偷偷復活；
+ * 重新連結必須回到設定頁明確按「啟用」（走 saveSubscription）。
+ * oldEndpoint＝金鑰輪替後瀏覽器換發了新訂閱：把「舊 endpoint 那一列」就地改寫成新訂閱
+ * （保留 label／建立時間），殭屍舊列因此自癒；舊列已被移除時同樣不復活。
+ */
+export async function syncSubscription(input: {
+  userId: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  label?: string;
+  oldEndpoint?: string;
+}): Promise<void> {
+  const updated = await db
+    .update(schema.pushSubscriptions)
+    .set({
+      userId: input.userId, // 同裝置換帳號登入：訂閱歸屬跟著現在的使用者走（與 saveSubscription 同語意）
+      p256dh: input.p256dh,
+      auth: input.auth,
+      ...(input.label ? { label: input.label } : {}),
+      lastSeenAt: new Date(),
+    })
+    .where(eq(schema.pushSubscriptions.endpoint, input.endpoint))
+    .returning({ id: schema.pushSubscriptions.id });
+  if (updated.length || !input.oldEndpoint || input.oldEndpoint === input.endpoint) return;
+  // 換訂路徑：新 endpoint 沒有列 → 找舊 endpoint 的列（限本人，不奪他人訂閱）就地改寫
+  await db
+    .update(schema.pushSubscriptions)
+    .set({ endpoint: input.endpoint, p256dh: input.p256dh, auth: input.auth, lastSeenAt: new Date() })
+    .where(and(eq(schema.pushSubscriptions.endpoint, input.oldEndpoint), eq(schema.pushSubscriptions.userId, input.userId)));
 }

@@ -1,8 +1,21 @@
 import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { router, authedProcedure } from "../trpc";
 import { db, schema } from "../db";
-import { getVapidKeys, pushToUsers, saveSubscription } from "../services/webPush";
+import { getVapidKeys, pushToUsers, saveSubscription, syncSubscription } from "../services/webPush";
+import { assertPublicHostOrError, ssrfGuardError } from "../services/databaseFiles";
+
+/**
+ * SSRF 防線：endpoint 是伺服器日後要 POST 的網址——沒把關的話，任何登入者都能塞
+ * 內網位址（cloud metadata、內部服務）讓伺服器替他發請求，再用 push.test 的回傳值當探測預言機。
+ * 重用資料庫網址匯入的同一套守衛：字面快篩＋DNS 解析後逐 IP 驗公開位址。
+ */
+async function assertSafeEndpoint(endpoint: string): Promise<void> {
+  const literal = ssrfGuardError(endpoint);
+  const resolved = literal ? literal : await assertPublicHostOrError(new URL(endpoint).hostname);
+  if (literal || resolved) throw new TRPCError({ code: "BAD_REQUEST", message: "訂閱端點無效" });
+}
 
 /**
  * 跨裝置通知（Web Push）設定：使用者在「通知設定」把手機/電腦連結進來後，
@@ -29,12 +42,40 @@ export const pushRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      await assertSafeEndpoint(input.endpoint);
       await saveSubscription({
         userId: ctx.auth.user.id,
         endpoint: input.endpoint,
         p256dh: input.keys.p256dh,
         auth: input.keys.auth,
         label: input.label,
+      });
+      return { ok: true };
+    }),
+
+  /**
+   * 例行同步（App 每次載入／SW 換訂回報）：只更新既有裝置列、不新增——
+   * 在設定頁移除過的裝置不會被開 App 偷偷復活。oldEndpoint＝金鑰輪替換發新訂閱時
+   * 把舊列就地改寫（自癒殭屍訂閱）。高頻＋含裝置金鑰，審計豁免（見 trpc.ts）。
+   */
+  sync: authedProcedure
+    .input(
+      z.object({
+        endpoint: z.string().url().max(1024).refine((u) => u.startsWith("https://"), "訂閱端點必須是 https"),
+        keys: z.object({ p256dh: z.string().min(1).max(256), auth: z.string().min(1).max(256) }),
+        label: z.string().max(80).optional(),
+        oldEndpoint: z.string().url().max(1024).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await assertSafeEndpoint(input.endpoint);
+      await syncSubscription({
+        userId: ctx.auth.user.id,
+        endpoint: input.endpoint,
+        p256dh: input.keys.p256dh,
+        auth: input.keys.auth,
+        label: input.label,
+        oldEndpoint: input.oldEndpoint,
       });
       return { ok: true };
     }),

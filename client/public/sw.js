@@ -59,17 +59,21 @@ self.addEventListener("notificationclick", (event) => {
 self.addEventListener("pushsubscriptionchange", (event) => {
   const applicationServerKey =
     (event.oldSubscription && event.oldSubscription.options && event.oldSubscription.options.applicationServerKey) || undefined;
+  const oldEndpoint = (event.oldSubscription && event.oldSubscription.endpoint) || undefined;
   event.waitUntil(
     (async () => {
       try {
         const sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
         const json = sub.toJSON();
-        // tRPC 單一呼叫格式（superjson transformer：{ json: input }）；帶 cookie 走本人身分
-        await fetch("/api/trpc/push.subscribe", {
+        // 走 push.sync（只更新不新增）：帶 oldEndpoint 讓伺服器把舊列就地改寫、保留裝置標籤；
+        // 使用者移除過的裝置不會因此復活。tRPC 單一呼叫格式（superjson：{ json: input }）；帶 cookie 走本人身分
+        const input = { endpoint: sub.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth } };
+        if (oldEndpoint && oldEndpoint !== sub.endpoint) input.oldEndpoint = oldEndpoint;
+        await fetch("/api/trpc/push.sync", {
           method: "POST",
           credentials: "same-origin",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ json: { endpoint: sub.endpoint, keys: { p256dh: json.keys.p256dh, auth: json.keys.auth } } }),
+          body: JSON.stringify({ json: input }),
         });
       } catch {
         // 靜默：下次開 App 的例行同步會修復
