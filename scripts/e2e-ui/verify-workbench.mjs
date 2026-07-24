@@ -60,7 +60,7 @@ const yHub = await yOf("#sec-ai-hub");
 const yStudio = await yOf("#sec-studio");
 const yWorkflow = await yOf("#sec-workflow");
 ok("創作中心順序 AI代理系統→生成台→工作流", yHub > 0 && yHub < yStudio && yStudio < yWorkflow);
-ok("四合一分頁齊全（代理/問答/導演/拆分鏡）", (await page.locator('#sec-ai-hub [role="tab"]').count()) === 4);
+ok("統一入口：一個對話＋代理執行區", (await page.locator('#sec-ai-hub input[aria-label="問 AI 專案助手"]').count()) === 1 && (await page.locator("#sec-ai-hub #sec-agent").count()) === 1);
 
 // 生成台「帶入」chips
 await page.locator("#sec-studio").scrollIntoViewIfNeeded();

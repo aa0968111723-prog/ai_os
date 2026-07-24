@@ -389,7 +389,7 @@ function SceneRow({
               </ConfirmButton>
             )
           ) : (
-            !s.assetId && <span className="hint">先用上方「AI 拆分鏡」給這格提示詞，就能就地生成</span>
+            !s.assetId && <span className="hint">先請上方「專案 AI 代理系統」拆分鏡或發想，給這格提示詞就能就地生成</span>
           )}
           {s.assetUrl && (
             <a

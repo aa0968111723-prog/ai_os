@@ -248,7 +248,7 @@ function AddOptionChip({
 /**
  * 專案工作台（一體連貫長頁版）：三幕環環相扣——
  * ① 專案上下文（世界觀＋選項就地新增／角色・場景定裝／知識庫／素材庫／成員權限）＝AI 的共同大腦；
- * ② AI 創作中心（專案 AI 代理系統四合一：代理・問答・導演・拆分鏡→生成台→工作流→提示詞庫，發想到執行一條線）；
+ * ② AI 創作中心（專案 AI 代理系統：一個對話統包問答・發想・拆分鏡・排計畫執行・查資料庫→生成台→工作流→提示詞庫）；
  * ③ 分鏡・時間軸・交付＝成品落地。
  * 上下文餵給創作、創作的成品流進分鏡、分鏡打包交付；跨卡動作（導演建議、分鏡提示詞、選來源、
  * 「再用」）都會自動捲到接手的卡並聚焦，不再是各自獨立的功能。
@@ -870,13 +870,13 @@ export function ProjectPage({ id }: { id: string }) {
             id="stage-create"
             num="②"
             title="AI 創作中心"
-            desc="專案 AI 代理系統（四合一）＋生成・工作流一條線"
+            desc="專案 AI 代理系統＋生成・工作流一條線"
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
-          {/* 專案 AI 代理系統（四合一）：AI 代理・專案問答・導演建議・拆分鏡統一入口，分頁切換共用同一組上下文；
-              「用這個」（導演建議）仍自動帶到生成台，拆分鏡草稿仍落在③分鏡列表 */}
-          <AiHub projectId={id} canEdit={canEdit} isLeader={isLeader} onUsePrompt={applyPrompt} />
+          {/* 專案 AI 代理系統（統一深度整合）：一個對話統包問答・發想・拆分鏡・下目標排計畫・查資料庫；
+              多步目標排成計畫，核准後由伺服器背景執行（可寫入 AI 可寫的資料庫）；拆分鏡草稿仍落在③分鏡列表 */}
+          <AiHub projectId={id} canEdit={canEdit} isLeader={isLeader} />
 
           {/* 生成台（11 類 × 旗艦/經濟/最低成本）＝日常主力工作區 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>

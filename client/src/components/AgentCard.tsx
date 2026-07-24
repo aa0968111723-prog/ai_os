@@ -67,7 +67,20 @@ const GOAL_EXAMPLES = [
   "為已有配音詞的分鏡都生成旁白，然後把第 1 鏡送審",
 ];
 
-export function AgentCard({ projectId, canEdit, isLeader = false, embedded = false }: { projectId: string; canEdit: boolean; isLeader?: boolean; embedded?: boolean }) {
+export function AgentCard({
+  projectId,
+  canEdit,
+  isLeader = false,
+  embedded = false,
+  hideComposer = false,
+}: {
+  projectId: string;
+  canEdit: boolean;
+  isLeader?: boolean;
+  embedded?: boolean;
+  /** 統一入口模式：目標從上方對話下（plan_agent），這裡只留「計畫核准／進度／停止」的執行區 */
+  hideComposer?: boolean;
+}) {
   const utils = trpc.useUtils();
   // 與 App 同 key 共用快取：核准/停止的授權是「發起人本人或組長以上」，按鈕顯示要跟伺服器規則對齊
   const me = trpc.auth.me.useQuery();
@@ -134,12 +147,20 @@ export function AgentCard({ projectId, canEdit, isLeader = false, embedded = fal
           <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 代理（給我一個目標，我來排計畫執行）
         </h2>
       )}
-      <p className="hint" style={{ marginTop: embedded ? 0 : -4 }}>
-        用一句話說目標（例：「把腳本拆成分鏡並逐鏡出圖」）——我會讀世界觀＋知識庫排出<b>逐步計畫與估點</b>（規劃免費），
-        你<b>核准後</b>才開始執行；由伺服器背景逐步跑，關掉頁面也會繼續，隨時可停止。每步實際扣點走既有守門，超額仍會停下等組長核准。
-      </p>
+      {!hideComposer && (
+        <p className="hint" style={{ marginTop: embedded ? 0 : -4 }}>
+          用一句話說目標（例：「把腳本拆成分鏡並逐鏡出圖」）——我會讀世界觀＋知識庫排出<b>逐步計畫與估點</b>（規劃免費），
+          你<b>核准後</b>才開始執行；由伺服器背景逐步跑，關掉頁面也會繼續，隨時可停止。每步實際扣點走既有守門，超額仍會停下等組長核准。
+        </p>
+      )}
 
-      {canEdit ? (
+      {hideComposer ? (
+        (runs.data ?? []).length === 0 && (
+          <p className="hint">
+            還沒有代理計畫——在上方對話用一句話下目標（例：「把腳本拆成分鏡並逐鏡出圖」），我會排出逐步計畫與估點，你核准後由伺服器背景執行。
+          </p>
+        )
+      ) : canEdit ? (
         <>
           <label htmlFor={`agent-goal-${projectId}`}>你的目標（一句話）</label>
           <textarea
