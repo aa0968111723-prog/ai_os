@@ -30,7 +30,7 @@ export const quotaRouter = router({
     // member/group 累計只在真的設了對應預算上限時才查（沿用舊版「有 budget 才算 remaining」）。
     const [total, weekly, today, memberUsed, groupUsed] = await Promise.all([
       usedTotal(),
-      usedThisWeek(uid),
+      usedThisWeek(uid, gid ?? undefined), // 週用量與守門同口徑：本組成員只算本組（週額度為每組上限）
       usedToday(uid),
       gid && cfg?.memberBudget != null ? usedByMember(uid, gid) : Promise.resolve(0),
       gid && cfg?.groupBudget != null ? usedByGroup(gid) : Promise.resolve(0),
