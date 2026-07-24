@@ -94,7 +94,20 @@ async function applyManualMigrations(): Promise<void> {
       create unique index if not exists feedback_user_group_uq
       on feedback (user_id, coalesce(group_id, '00000000-0000-0000-0000-000000000000'::uuid))
     `);
-    console.log("[db] ✓ 手寫遷移完成（group_options／feedback 唯一索引就緒）");
+
+    // 生成執行器與陳屍清掃每 ~60 秒掃「in-flight（queued/running）」列——drizzle 的 index() 無法表達
+    // 「partial index（WHERE 條件）」，故手寫。部分索引只含在途列（極少），體積小、命中率高：
+    //   - generationRunner.sweepStale：WHERE status IN(queued,running) ORDER BY updated_at
+    //   - listByProject 的 in-flight 判斷與分鏡 pending 子查詢：WHERE project_id AND status IN(...)
+    await db.execute(sql`
+      create index if not exists generations_active_idx
+      on generations (updated_at) where status in ('queued','running')
+    `);
+    await db.execute(sql`
+      create index if not exists generations_project_active_idx
+      on generations (project_id, updated_at) where status in ('queued','running')
+    `);
+    console.log("[db] ✓ 手寫遷移完成（group_options／feedback 唯一索引＋generations 在途部分索引就緒）");
   } catch (err) {
     // 不擋開機：索引缺席只是回到「應用層防重」的舊狀態,功能照常
     console.warn("[db] ⚠ 手寫遷移失敗（不影響啟動）：", err instanceof Error ? err.message : err);

@@ -81,6 +81,57 @@ export function supportsCardAnchors(category: ModelCategory): boolean {
   return CARD_ANCHOR_CATEGORIES.has(category);
 }
 
+/**
+ * 有頂層 negative_prompt 欄位的模型 id（保守 allowlist）：世界觀禁忌詞對視覺類別要走 negative_prompt——
+ * 擴散模型無法靠正向提示詞「避免」某物（塞正向反而可能被畫出來，甚至把禁忌字當畫面文字渲染）。
+ * 只收「fal schema 明確有 negative_prompt」的 id（預設不在＝不送，安全）：
+ *   - 圖像：SD 系（SDXL/Kolors/Sana/Playground/AuraFlow/LoRA）——經典 negative_prompt 模型，零風險。
+ *   - 影片：wan / kling / hunyuan-video / ltx-video / pixverse / mochi / cogvideox 族——fal 文件皆有 negative_prompt。
+ * 刻意不收：FLUX/FLUX.2/Kontext、GPT-Image、Nano-Banana、Seedream、Ideogram、Recraft、Imagen4、Luma、Veo、Sora
+ *   （這些新式模型無 negative_prompt 欄位，誤送恐 422；未列＝禁忌詞單純移出正向不再污染，仍是淨改善）。
+ */
+export const NEGATIVE_PROMPT_SUPPORTED: ReadonlySet<string> = new Set<string>([
+  // 圖像（SD 系，高信心）
+  "fal-ai/fast-lightning-sdxl",
+  "fal-ai/lora",
+  "fal-ai/fast-sdxl/image-to-image",
+  "fal-ai/kolors",
+  "fal-ai/sana",
+  "fal-ai/playground-v25",
+  "fal-ai/aura-flow",
+  // 影片 text-to-video
+  "fal-ai/wan-t2v",
+  "fal-ai/wan/v2.2-a14b/text-to-video",
+  "fal-ai/wan/v2.2-a14b/text-to-video/lora",
+  "fal-ai/wan/v2.5/text-to-video",
+  "fal-ai/wan/v2.6/text-to-video",
+  "fal-ai/ltx-video",
+  "fal-ai/hunyuan-video",
+  "fal-ai/hunyuan-video-v1.5/text-to-video",
+  "fal-ai/mochi-v1",
+  "fal-ai/cogvideox-5b",
+  "fal-ai/pixverse/v5.5/text-to-video",
+  "fal-ai/pixverse/v6/text-to-video",
+  "fal-ai/kling-video/v1.6/standard/text-to-video",
+  "fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
+  "fal-ai/kling-video/v2.6/pro/text-to-video",
+  "fal-ai/kling-video/o3/pro/text-to-video",
+  // 影片 image-to-video
+  "fal-ai/wan-i2v",
+  "fal-ai/wan/v2.2-a14b/image-to-video",
+  "fal-ai/ltx-video-v095/image-to-video",
+  "fal-ai/hunyuan-video-image-to-video",
+  "fal-ai/pixverse/v5/image-to-video",
+  "fal-ai/kling-video/v2.5-turbo/pro/image-to-video",
+  "fal-ai/kling-video/v2.6/pro/image-to-video",
+  "fal-ai/kling-video/v3/pro/image-to-video",
+]);
+
+/** 此模型是否吃頂層 negative_prompt（見 NEGATIVE_PROMPT_SUPPORTED） */
+export function supportsNegativePrompt(model: ModelEntry): boolean {
+  return NEGATIVE_PROMPT_SUPPORTED.has(model.id);
+}
+
 export const CATEGORIES: Array<{ id: ModelCategory; label: string; hint: string }> = [
   { id: "text-to-image", label: "文生圖", hint: "打字生成圖像(分鏡、場景、卡片)" },
   { id: "image-to-image", label: "圖生圖・編輯", hint: "用文字修改既有圖像(換風格、局部修改、合成)" },

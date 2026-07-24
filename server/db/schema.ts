@@ -195,6 +195,10 @@ export const generations = pgTable("generations", {
   // listByProject 對每個分鏡各跑兩支 scene_id 相關子查詢；補索引避免生成量成長後全表掃描。
   // 非 unique（純索引，pushSchema 建索引不觸發 truncate 提問，安全）
   sceneIdIdx: index("generations_scene_id_idx").on(t.sceneId),
+  // 熱路徑：listByProject（WHERE project_id ORDER BY created_at DESC LIMIT 30）與 keyset 分頁——
+  // 每位開著專案的檢視者每 8 秒打一次，無此索引＝全表掃＋排序，隨檢視者數與資料量線性惡化。
+  // (project_id, created_at) 讓 Postgres 反向掃即得最新 N 筆。
+  projectCreatedIdx: index("generations_project_created_idx").on(t.projectId, t.createdAt),
 }));
 
 /** 點數帳本 — 花費紀錄（先扣預估、失敗退回） */
@@ -239,7 +243,10 @@ export const assets = pgTable("assets", {
    *  所有「列出／匯出／注入」查詢都以 isNull(deletedAt) 過濾，還原＝清回 null。 */
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // 素材庫列表／來源下拉每次以 project_id 撈（生成完成也會即時 invalidate 重打）；補索引避免全表掃。
+  projectCreatedIdx: index("assets_project_created_idx").on(t.projectId, t.createdAt),
+}));
 
 /**
  * 專案知識庫（願景核心「真的懂我們素材」v1）：
@@ -354,7 +361,10 @@ export const scenes = pgTable("scenes", {
    *  所有分鏡讀取（列表／移動／重排／匯出）都以 isNull(deletedAt) 過濾。 */
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // listByProject（WHERE project_id ORDER BY order_index）每 10 秒輪詢；補索引避免全表掃＋排序。
+  projectOrderIdx: index("scenes_project_order_idx").on(t.projectId, t.orderIndex),
+}));
 
 export const approvals = pgTable("approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
