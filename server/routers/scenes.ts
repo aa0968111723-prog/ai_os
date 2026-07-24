@@ -269,7 +269,14 @@ export const scenesRouter = router({
 
   /** 就地生成：以該分鏡的 prompt 送出生成並綁定該格，完成後由 advanceGeneration 回填 assetId（草稿→出圖一條線） */
   generateInto: authedProcedure
-    .input(z.object({ sceneId: z.string().uuid(), modelId: z.string(), prompt: z.string().optional() }))
+    .input(z.object({
+      sceneId: z.string().uuid(),
+      modelId: z.string(),
+      prompt: z.string().optional(),
+      /** 生成台勾選的角色/場景卡：就地生成也注入同一套錨點——否則逐鏡出圖與生成台出圖畫風/角色不一致 */
+      characterIds: z.array(z.string().uuid()).max(6).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
         .select()
@@ -298,6 +305,8 @@ export const scenesRouter = router({
         modelId: input.modelId,
         prompt,
         sceneId: scene.id,
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
         reasonPrefix: "分鏡生成",
         assertAccess: (project) => requireGroup(ctx.auth, project.groupId), // 多組隔離
       });
