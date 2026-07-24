@@ -120,13 +120,49 @@ async function canDmPeer(auth: AuthState, peer: { id: string; isSuperAdmin: bool
   if (peer.id === auth.user.id) return false;
   if (auth.user.isSuperAdmin || peer.isSuperAdmin) return true;
   const myGroupIds = auth.groups.map((g) => g.groupId);
-  if (myGroupIds.length === 0) return false;
-  const [row] = await db
-    .select({ id: schema.groupMembers.id })
-    .from(schema.groupMembers)
-    .where(and(eq(schema.groupMembers.userId, peer.id), inArray(schema.groupMembers.groupId, myGroupIds)))
-    .limit(1);
-  return row != null;
+  // (1) 同組夥伴
+  if (myGroupIds.length > 0) {
+    const [row] = await db
+      .select({ id: schema.groupMembers.id })
+      .from(schema.groupMembers)
+      .where(and(eq(schema.groupMembers.userId, peer.id), inArray(schema.groupMembers.groupId, myGroupIds)))
+      .limit(1);
+    if (row != null) return true;
+  }
+  // 修 R3-DM-01：團隊管理員常只在 team_members(role=admin)、未掛 group_members，舊版只查同組會讓組員收得到
+  // 卻回不了團隊管理員的私訊（單向串）。補雙向可訊界：
+  // (2) peer 是「我所屬團隊」的團隊管理員
+  const myTeamIds = [...new Set(auth.groups.map((g) => g.teamId))];
+  if (myTeamIds.length > 0) {
+    const [peerAdmin] = await db
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(and(eq(schema.teamMembers.userId, peer.id), eq(schema.teamMembers.role, "admin"), inArray(schema.teamMembers.teamId, myTeamIds)))
+      .limit(1);
+    if (peerAdmin != null) return true;
+  }
+  // (3) 我是「peer 所屬團隊」的團隊管理員（peer 的組所屬團隊，或 peer 直接掛在我管的團隊）
+  if (auth.adminTeamIds.length > 0) {
+    const [peerTeamDirect] = await db
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(and(eq(schema.teamMembers.userId, peer.id), inArray(schema.teamMembers.teamId, auth.adminTeamIds)))
+      .limit(1);
+    if (peerTeamDirect != null) return true;
+    const peerGroups = await db
+      .select({ groupId: schema.groupMembers.groupId })
+      .from(schema.groupMembers)
+      .where(eq(schema.groupMembers.userId, peer.id));
+    if (peerGroups.length > 0) {
+      const [g] = await db
+        .select({ id: schema.groups.id })
+        .from(schema.groups)
+        .where(and(inArray(schema.groups.id, peerGroups.map((r) => r.groupId)), inArray(schema.groups.teamId, auth.adminTeamIds)))
+        .limit(1);
+      if (g != null) return true;
+    }
+  }
+  return false;
 }
 
 /**
