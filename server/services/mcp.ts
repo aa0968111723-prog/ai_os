@@ -244,10 +244,14 @@ const TOOLS = [
   // ── 筆記・會議紀錄（組共用的知識筆記，可匯入知識庫）：外部 AI 可讀，閉合「知識地圖」迴路 ──
   {
     name: "list_notes",
-    description: "列出這個專案相關的會議筆記／知識筆記（本專案 ＋ 組層級共用）。回摘要與字數；用 get_note 讀全文。可用 limit 上限 50。",
+    description: "列出這個專案相關的會議筆記／知識筆記（本專案 ＋ 組層級共用），依更新時間新到舊。回摘要與字數；用 get_note 讀全文。keyword 可過濾標題／內文（讓超過 limit 的較舊筆記仍找得到）；limit 上限 50。",
     inputSchema: {
       type: "object",
-      properties: { projectId: { type: "string" }, limit: { type: "number", description: "最多回幾筆（預設 20，上限 50）" } },
+      properties: {
+        projectId: { type: "string" },
+        keyword: { type: "string", description: "過濾標題或內文包含此關鍵字的筆記（避免較舊筆記被 limit 永久蓋住）" },
+        limit: { type: "number", description: "最多回幾筆（預設 20，上限 50）" },
+      },
       required: ["projectId"],
     },
   },
@@ -702,6 +706,10 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     if (name === "list_notes") {
       // 專案視角：只回本專案的筆記 ＋ 整組共用（未掛專案）的筆記——與 list_schedule 同一過濾哲學。
       const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+      const keyword = String(args.keyword ?? "").trim();
+      // keyword：讓超過 limit 的較舊筆記仍能被外部 AI 找到（比照 list_database_files 的內文過濾）。
+      const conds = [eq(schema.notes.groupId, project.groupId), or(eq(schema.notes.projectId, project.id), isNull(schema.notes.projectId))!];
+      if (keyword) conds.push(or(sql`${schema.notes.title} ilike ${"%" + keyword + "%"}`, sql`${schema.notes.content} ilike ${"%" + keyword + "%"}`)!);
       const rows = await db
         .select({
           id: schema.notes.id,
@@ -711,7 +719,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
           updatedAt: schema.notes.updatedAt,
         })
         .from(schema.notes)
-        .where(and(eq(schema.notes.groupId, project.groupId), or(eq(schema.notes.projectId, project.id), isNull(schema.notes.projectId))))
+        .where(and(...conds))
         .orderBy(desc(schema.notes.updatedAt))
         .limit(limit);
       return rows.map((n) => ({

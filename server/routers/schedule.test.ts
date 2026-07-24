@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { buildIcs, foldIcsLine } from "./schedule";
 
 const at = (iso: string) => new Date(iso);
+const byteLen = (s: string) => Buffer.byteLength(s, "utf8");
 
 describe("buildIcs", () => {
   it("骨架:VCALENDAR 包 VEVENT、CRLF 行尾、含日曆名稱", () => {

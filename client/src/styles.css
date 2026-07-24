@@ -570,6 +570,12 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .map-node.clickable:hover text { fill: var(--fg); }
 .map-node.clickable:hover circle { r: 8; }
 .map-node.project.clickable:hover rect, .map-node.more.clickable:hover rect { stroke: var(--primary); stroke-width: 1.8; }
+/* 鍵盤聚焦（Tab 逐一走訪節點）：明確的聚焦環，SVG 內以描邊＋outline 雙保險 */
+.map-node[tabindex] { outline: none; }
+.map-node[tabindex]:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.map-node[tabindex]:focus-visible circle { stroke: var(--primary); stroke-width: 2.4; r: 8; }
+.map-node[tabindex]:focus-visible rect { stroke: var(--primary); stroke-width: 2.4; }
+.map-node[tabindex]:focus-visible text { fill: var(--fg); }
 .map-legend { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-12); color: var(--fg-secondary); }
 .map-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
 .map-dot.note { background: var(--primary); }

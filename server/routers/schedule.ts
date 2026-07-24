@@ -23,10 +23,24 @@ async function getItemChecked(auth: Parameters<typeof requireGroup>[0], id: stri
 }
 
 export const scheduleRouter = router({
-  /** 清單：預設只回「未來與最近 24 小時內」；includePast 回全部。startsAt 升冪。 */
+  /**
+   * 清單：預設只回「未來與最近 24 小時內」；includePast 回全部。startsAt 升冪。
+   * from/to（ISO 字串，可選）：以 startsAt 界定視窗——月曆翻月／知識地圖用它把查詢綁在
+   * 可見範圍內，避免 asc+limit(300) 在忙碌組別悄悄截掉未來行程。
+   */
   list: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), includePast: z.boolean().optional() }))
-    .query(({ ctx, input }) => listScheduleForGroup(ctx.auth, input.groupId, input.includePast ?? false)),
+    .input(z.object({
+      groupId: z.string().uuid(),
+      includePast: z.boolean().optional(),
+      from: isoDate.optional(),
+      to: isoDate.optional(),
+    }))
+    .query(({ ctx, input }) =>
+      listScheduleForGroup(ctx.auth, input.groupId, input.includePast ?? false, undefined, {
+        from: input.from ? new Date(input.from) : undefined,
+        to: input.to ? new Date(input.to) : undefined,
+      }),
+    ),
 
   add: authedProcedure
     .input(z.object({
