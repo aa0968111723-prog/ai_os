@@ -487,7 +487,42 @@ app.get("/api/downloads/file", async (req, res) => {
   }
 });
 
-// 組排程 .ics 匯出（需求 10）：登入＋組隔離；下載後匯入個人 Google/Apple 日曆（不做 OAuth 雙向同步）
+// ── Google 日曆直連同步（OAuth 授權碼流程）──瀏覽器重導，走 Express；API 見 routers/googleCalendar ──
+app.get("/api/google/oauth/start", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const { isGoogleCalendarConfigured, buildAuthUrl } = await import("./services/googleCalendar");
+    if (!isGoogleCalendarConfigured()) return res.status(503).json({ error: "站方尚未設定 Google 日曆整合（GOOGLE_CLIENT_ID/SECRET）" });
+    res.redirect(buildAuthUrl(auth.user.id));
+  } catch (err) {
+    console.error("[gcal:oauth:start]", err);
+    recordError("gcal:oauth:start", err);
+    if (!res.headersSent) res.status(500).json({ error: "啟動授權失敗，請稍後再試" });
+  }
+});
+app.get("/api/google/oauth/callback", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).send("請先登入後再連結 Google 日曆");
+    const { verifyState, exchangeCode, saveConnection } = await import("./services/googleCalendar");
+    // state 驗簽＋比對登入者：防 CSRF、也防把授權綁到別人帳上
+    const state = verifyState(String(req.query.state ?? ""));
+    if (!state || state.userId !== auth.user.id) return res.redirect("/planner?gcal=state_mismatch");
+    if (req.query.error) return res.redirect("/planner?gcal=denied"); // 使用者在 Google 畫面按了取消
+    const code = String(req.query.code ?? "");
+    if (!code) return res.redirect("/planner?gcal=denied");
+    const { refreshToken, email } = await exchangeCode(code);
+    await saveConnection(auth.user.id, refreshToken, email); // 落庫即觸發首輪同步
+    res.redirect("/planner?gcal=connected");
+  } catch (err) {
+    console.error("[gcal:oauth:callback]", err);
+    recordError("gcal:oauth:callback", err);
+    if (!res.headersSent) res.redirect("/planner?gcal=failed");
+  }
+});
+
+// 組排程 .ics 匯出（需求 10 保留為後備）：登入＋組隔離；沒連結 Google 的人仍可手動匯入
 app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
   try {
     const auth = await resolveSession(req);
@@ -833,6 +868,8 @@ const httpServer = app.listen(port, () => {
         startAgentRunner(); // AI 代理：核准後的計畫由伺服器背景逐步執行
         scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
         startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
+        const { startGoogleCalendarSweep } = await import("./services/googleCalendar");
+        startGoogleCalendarSweep(); // Google 日曆同步：變更即推之外的週期對帳（未設 GOOGLE_CLIENT_ID 時為 no-op）
         console.log("[boot] ✓ 建表/目錄/種子完成，系統就緒（工作流＋單張生成執行器已啟動）");
         return;
       }
