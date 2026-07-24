@@ -157,17 +157,28 @@ async function unreadBySender(userId: string): Promise<Map<string, number>> {
 /** 對話串清單：與我有往來的每位對象一列（最後一句預覽＋未讀數），新到舊 */
 export async function listDmThreads(auth: AuthState): Promise<DmThread[]> {
   const me = auth.user.id;
-  const peerExpr = sql<string>`case when ${schema.dmMessages.senderId} = ${me} then ${schema.dmMessages.recipientId} else ${schema.dmMessages.senderId} end`;
-  const rows = await db
-    .select({
-      peerId: peerExpr,
-      lastAt: sql<string>`max(${schema.dmMessages.createdAt})::text`,
-      lastBody: sql<string>`(array_agg(${schema.dmMessages.body} order by ${schema.dmMessages.createdAt} desc))[1]`,
-      lastFromMe: sql<boolean>`(array_agg(${schema.dmMessages.senderId} order by ${schema.dmMessages.createdAt} desc))[1] = ${me}`,
-    })
-    .from(schema.dmMessages)
-    .where(or(eq(schema.dmMessages.senderId, me), eq(schema.dmMessages.recipientId, me)))
-    .groupBy(peerExpr);
+  // CTE 先把「對方是誰」算成一欄再 group by 欄名——CASE 直接放 select＋group by 會因
+  // 兩處綁不同參數（$1 vs $n）被 Postgres 視為不同運算式而報錯（參數化查詢比對不了語意相等）
+  const result = await db.execute<{ peer: string; last_at: string; last_body: string; last_sender: string }>(sql`
+    with mine as (
+      select case when ${schema.dmMessages.senderId} = ${me} then ${schema.dmMessages.recipientId} else ${schema.dmMessages.senderId} end as peer,
+             ${schema.dmMessages.body} as body, ${schema.dmMessages.senderId} as sender_id, ${schema.dmMessages.createdAt} as created_at
+      from ${schema.dmMessages}
+      where ${or(eq(schema.dmMessages.senderId, me), eq(schema.dmMessages.recipientId, me))}
+    )
+    select peer,
+           max(created_at)::text as last_at,
+           (array_agg(body order by created_at desc))[1] as last_body,
+           (array_agg(sender_id order by created_at desc))[1] as last_sender
+    from mine
+    group by peer
+  `);
+  const rows = result.rows.map((r) => ({
+    peerId: r.peer,
+    lastAt: r.last_at,
+    lastBody: r.last_body,
+    lastFromMe: r.last_sender === me,
+  }));
   if (rows.length === 0) return [];
 
   const [users, unread] = await Promise.all([
