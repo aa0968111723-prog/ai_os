@@ -781,6 +781,45 @@ export const dataRows = pgTable("data_rows", {
   tableIdx: index("data_rows_table_idx").on(t.tableId, t.createdAt),
 }));
 
+/* ── Web Push 跨裝置通知 ────────────────────────── */
+
+/**
+ * Web Push 訂閱（手機＋電腦跨裝置通知）：每位使用者每個「瀏覽器裝置」一筆——
+ * 使用者在通知設定啟用後，瀏覽器發的 PushSubscription（endpoint＋加密金鑰）存這裡，
+ * 伺服器事件（審批/私訊/@提及/生成與代理完成）經 services/webPush 推到所有已連結裝置，
+ * 關頁、關瀏覽器也收得到（相對於既有的頁內桌面通知只在分頁開著時有效）。
+ * endpoint 唯一＝同裝置重複啟用是 upsert 不長重複列；推送回 404/410 即自動清掉失效列。
+ * 新表＝pushSchema 安全。
+ */
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  /** 推送服務給的裝置端點網址（capability URL，只有配對的 VAPID 私鑰能對它發推送） */
+  endpoint: text("endpoint").notNull().unique(),
+  /** 瀏覽器產生的訊息加密公鑰（P-256 ECDH）——推送內容端到端加密到該裝置 */
+  p256dh: text("p256dh").notNull(),
+  /** 瀏覽器產生的驗證密鑰 */
+  auth: text("auth").notNull(),
+  /** 裝置標籤（如「iPhone・Safari」「Windows・Chrome」）：前端從 UA 推導，設定頁列裝置清單用 */
+  label: text("label"),
+  /** 最後同步時刻：每次 App 載入時前端回報一次，供「清最舊裝置」與設定頁排序 */
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("push_subscriptions_user_idx").on(t.userId, t.lastSeenAt),
+}));
+
+/**
+ * VAPID 金鑰對（單列 key='vapid'）：未設 VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY 環境變數時
+ * 開機自動生成並存這裡——金鑰必須跨重啟穩定，否則所有既有訂閱全數失效。新表＝pushSchema 安全。
+ */
+export const webPushVapid = pgTable("web_push_vapid", {
+  key: text("key").primaryKey(),
+  publicKey: text("public_key").notNull(),
+  privateKey: text("private_key").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const feedbackAgentRuns = pgTable("feedback_agent_runs", {
   id: uuid("id").primaryKey().defaultRandom(),
   /** manual＝開發者在管理頁按「立即巡檢」；scheduled＝每 3 天排程自動觸發 */

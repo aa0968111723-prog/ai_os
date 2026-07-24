@@ -1,0 +1,14 @@
+{
+  "name": "AI Director OS",
+  "short_name": "AI Director",
+  "description": "弘法內容創作與協作系統",
+  "lang": "zh-Hant",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#e9e3d8",
+  "theme_color": "#e9e3d8",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

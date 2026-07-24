@@ -16,6 +16,7 @@ import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { reserveQuota, refund } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
 import { buildCharacterAnchor } from "../routers/characters";
+import { groupLeaderIds, pushToUsers } from "./webPush";
 import { buildSceneAnchor } from "../routers/scenePresets";
 
 export type GenerationRow = typeof schema.generations.$inferSelect;
@@ -215,6 +216,15 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           body: `⏳ 生成待核准：${model.label}（${est} 點 ≥ 門檻 ${threshold} 點）——請組長到生成紀錄核准或駁回`,
         })
         .catch((err) => console.warn("[generation] 待核系統訊息寫入失敗：", err instanceof Error ? err.message : err));
+      // 跨裝置推播給組長們：待核是「組長不在線就卡住整條產線」的事件，推到手機讓人隨時能核
+      void groupLeaderIds(project.groupId, input.userId)
+        .then((ids) => pushToUsers(ids, {
+          title: "生成待核准",
+          body: `${model.label}（${est} 點 ≥ 門檻 ${threshold} 點）——請到生成紀錄核准或駁回`,
+          url: `/p/${project.id}`,
+          tag: `gen-approve-${project.id}`,
+        }))
+        .catch((err) => console.warn("[generation] 待核推播失敗：", err instanceof Error ? err.message : err));
       return gated;
     }
   }
@@ -362,6 +372,14 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）——
     // 網路 IO 不進交易，commit 後才啟動；失敗由 sweepUnlandedAssets 定期補抓。
     if (advanced.assetId && mediaUrl) persistGenerationResult(advanced.assetId, gen.id, mediaUrl);
+    // 跨裝置推播給發起人（CAS 保證同筆只推一次）；tag 以專案聚合——工作流連跑多鏡時
+    // 後到的覆蓋先到的，手機不被逐筆洗版（頁內 GenerationList 已有逐筆彙總通知）
+    void pushToUsers([gen.userId], {
+      title: "生成完成",
+      body: `${model?.label ?? gen.modelId}：${gen.prompt.slice(0, 60)}`,
+      url: `/p/${gen.projectId}`,
+      tag: `gen-${gen.projectId}`,
+    }).catch((err) => console.warn("[generation] 完成推播失敗：", err instanceof Error ? err.message : err));
     return advanced.updated;
   }
   if (result.status === "failed") {
@@ -392,6 +410,13 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
       const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
       return current ?? gen;
     }
+    // 失敗推播（CAS 保證同筆只推一次）：tag 獨立不與「生成完成」互蓋——失敗訊號不能被後到的成功淹掉
+    void pushToUsers([gen.userId], {
+      title: "生成失敗",
+      body: `${model?.label ?? gen.modelId}：${result.error ?? "未知錯誤"}${gen.pointsEst > 0 ? "（點數已退回）" : ""}`,
+      url: `/p/${gen.projectId}`,
+      tag: `gen-failed-${gen.id}`,
+    }).catch((err) => console.warn("[generation] 失敗推播失敗：", err instanceof Error ? err.message : err));
     return updatedRows[0];
   }
   return gen;

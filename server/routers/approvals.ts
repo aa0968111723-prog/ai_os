@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
+import { groupLeaderIds, pushToUsers } from "../services/webPush";
 
 async function getScene(sceneId: string) {
   // isNull(deletedAt)：軟刪除（回收桶）的分鏡不得被送審／裁決——否則會把已刪分鏡復活進審批流程
@@ -31,7 +32,7 @@ export async function submitApprovalCore(
 ) {
   const { scene, project } = await getScene(sceneId);
   await assertAccess(project);
-  return db.transaction(async (tx) => {
+  const approval = await db.transaction(async (tx) => {
     // 為什麼：以 advisory xact lock 序列化「同一分鏡」的送審（classifier 1，與 points per-user 鎖的
     // classifier 0 不同鍵空間、不互卡；交易結束自動釋放）。單一 insert…select 的 max()+1 只在該語句
     // 快照內原子，並不序列化「另一交易的並發語句」——READ COMMITTED 下兩並發送審會各算同一 max→插入
@@ -65,6 +66,16 @@ export async function submitApprovalCore(
     });
     return approval;
   });
+  // 跨裝置推播給組長們（fire-and-forget：推播失敗不影響送審本身）；同分鏡重送以 tag 覆蓋舊通知
+  void groupLeaderIds(project.groupId, userId)
+    .then((ids) => pushToUsers(ids, {
+      title: "分鏡送審",
+      body: `「${scene.title}」已送審（v${approval.version}）——請裁決`,
+      url: `/p/${project.id}`,
+      tag: `approval-${scene.id}`,
+    }))
+    .catch((err) => console.warn("[approvals] 送審推播失敗：", err instanceof Error ? err.message : err));
+  return approval;
 }
 
 /** 審批三態機（Frame.io 模式，盲點掃描定案）：pending → approved / needs_work，跟著版本走 */
@@ -93,7 +104,7 @@ export const approvalsRouter = router({
       // decide 若不取鎖，「latest 守衛通過 → CAS」與「blanket void → 改分鏡狀態」之間 submit 可插隊——
       // 剛送出的最新 pending 會被 blanket void 誤標「已被較新版本裁決取代」、分鏡狀態被舊版裁決覆蓋。
       // 上鎖後 decide 與 submit 對同一分鏡完全序列化；交易也保證四筆寫入不留半套（CAS 後崩潰的不一致）。
-      return db.transaction(async (tx) => {
+      const decided = await db.transaction(async (tx) => {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${scene.id}), 1)`);
         // 為什麼：只允許裁決該分鏡的最新版本——防 DB 既存的多筆 pending 舊資料被裁決後覆寫最新狀態。
         // 讀取放在鎖之後，守衛與後續寫入之間不再有 submit 插隊窗口。
@@ -130,6 +141,18 @@ export const approvalsRouter = router({
         });
         return updated;
       });
+      // 裁決結果推播給提交人（自己裁自己送的不用通知）；失敗不擋裁決
+      if (approval.submittedBy && approval.submittedBy !== ctx.auth.user.id) {
+        void pushToUsers([approval.submittedBy], {
+          title: input.decision === "approved" ? "分鏡已通過" : "分鏡需修改",
+          body: input.decision === "approved"
+            ? `「${scene.title}」v${approval.version} 已通過 ✅`
+            : `「${scene.title}」v${approval.version} 需修改：${input.reason?.trim() ?? ""}`,
+          url: `/p/${project.id}`,
+          tag: `approval-${scene.id}`,
+        }).catch((err) => console.warn("[approvals] 裁決推播失敗：", err instanceof Error ? err.message : err));
+      }
+      return decided;
     }),
 
   /**
