@@ -5,7 +5,8 @@ import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
-import { AUDIT_CATEGORIES, auditCategoryOf, describeAuditInput, humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
+import { AUDIT_ACTION_LABELS, AUDIT_CATEGORIES, auditCategoryOf, describeAuditInput, groupConsecutiveAudit, humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
+import { getModel, tierLabel } from "@shared/models";
 
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
@@ -400,12 +401,15 @@ const DRILL_LINK: CSSProperties = {
  * 一列操作紀錄：白話標題＋分類標籤＋歸屬（組／專案）＋可展開的逐項細節。
  * 展開狀態各列獨立（每列自己 useState），不會互相牽動。
  * 歸屬（組員／團隊・組別／專案）皆可點：一點就把整份紀錄縮到那個維度，非技術夥伴不必先懂過濾器。
+ * repeats：連續重複的同型紀錄（groupConsecutiveAudit 併好、新在前，r＝最新一筆）——
+ * 標題列只佔一列並標「連續 N 次」，展開才逐筆列出時間與各自細節，重複操作不再洗版。
  */
-function AuditLogRow({ r, first, drill }: { r: AuditRowData; first: boolean; drill: AuditDrill }) {
+function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boolean; drill: AuditDrill; repeats?: AuditRowData[] }) {
   const [open, setOpen] = useState(false);
   const cat = auditCategoryOf(r.action);
   const summary = summarizeAuditInput(r.input);
   const details = describeAuditInput(r.input);
+  const expandable = details.length > 0 || (repeats?.length ?? 0) > 1;
   const catStyle = AUDIT_CAT_STYLE[cat.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
   return (
     <div style={{ borderTop: first ? "none" : "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13, marginTop: first ? 8 : 0 }}>
@@ -432,6 +436,16 @@ function AuditLogRow({ r, first, drill }: { r: AuditRowData; first: boolean; dri
           <span className="hint" style={{ fontSize: 11 }}>（{r.actorRole === "leader" ? "組長" : "組員"}）</span>
         )}
         <span>{humanizeAuditAction(r.action)}</span>
+        {/* 連續重複合併：同一人短時間重複做同一件事只佔一列，掛上次數徽章 */}
+        {repeats && repeats.length > 1 && (
+          <span
+            className="pill"
+            style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary)" }}
+            title={`短時間內連續 ${repeats.length} 次，展開可看每一筆`}
+          >
+            連續 {repeats.length} 次
+          </span>
+        )}
         {!r.ok && <span style={{ color: "var(--danger-ink)", fontSize: 11, fontWeight: 600 }}>（失敗）</span>}
         <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</span>
       </div>
@@ -475,8 +489,9 @@ function AuditLogRow({ r, first, drill }: { r: AuditRowData; first: boolean; dri
           {r.error.length > 120 ? `${r.error.slice(0, 120)}…` : r.error}
         </div>
       )}
-      {/* 逐項細節：預設收合，需要看清楚每個欄位時才展開（含技術代碼與 id，供追查） */}
-      {details.length > 0 && (
+      {/* 逐項細節：預設收合，需要看清楚每個欄位時才展開（含技術代碼與 id，供追查）；
+          合併列展開時改列出「每一筆」的時間與各自細節，追查不因合併而少資訊 */}
+      {expandable && (
         <div style={{ marginTop: 4 }}>
           <button
             type="button"
@@ -485,21 +500,39 @@ function AuditLogRow({ r, first, drill }: { r: AuditRowData; first: boolean; dri
             className="hint"
             style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 4px", fontSize: 11, background: "none", border: "none", cursor: "pointer" }}
           >
-            <Icon name={open ? "ChevronUp" : "ChevronDown"} size={12} />{open ? "收合細節" : "看細節"}
+            <Icon name={open ? "ChevronUp" : "ChevronDown"} size={12} />
+            {open ? "收合細節" : repeats && repeats.length > 1 ? `看每一筆（${repeats.length}）` : "看細節"}
           </button>
           {open && (
-            <dl style={{ margin: "4px 0 0", display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", fontSize: 12 }}>
-              {details.map((f, k) => (
-                <div key={k} style={{ display: "contents" }}>
-                  <dt className="hint" style={{ whiteSpace: "nowrap" }}>{f.label}</dt>
-                  <dd style={{ margin: 0, overflowWrap: "anywhere" }}>{f.value}</dd>
-                </div>
-              ))}
-              <div style={{ display: "contents" }}>
-                <dt className="hint" style={{ whiteSpace: "nowrap" }}>操作代碼</dt>
-                <dd className="mono hint" style={{ margin: 0, fontSize: 11 }}>{r.action}</dd>
+            <>
+              {repeats && repeats.length > 1 ? (
+                <ol style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 12, display: "grid", gap: 2 }}>
+                  {repeats.map((rep) => {
+                    const inline = describeAuditInput(rep.input)
+                      .map((f) => `${f.label}：${f.value}`)
+                      .join("・");
+                    return (
+                      <li key={rep.id} style={{ overflowWrap: "anywhere" }}>
+                        <span className="hint">{new Date(rep.createdAt).toLocaleString("zh-TW")}</span>
+                        {inline && <span style={{ marginLeft: 8 }}>{inline}</span>}
+                      </li>
+                    );
+                  })}
+                </ol>
+              ) : (
+                <dl style={{ margin: "4px 0 0", display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", fontSize: 12 }}>
+                  {details.map((f, k) => (
+                    <div key={k} style={{ display: "contents" }}>
+                      <dt className="hint" style={{ whiteSpace: "nowrap" }}>{f.label}</dt>
+                      <dd style={{ margin: 0, overflowWrap: "anywhere" }}>{f.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              <div className="hint" style={{ marginTop: 2, fontSize: 11 }}>
+                技術代碼（供工程追查）：<span className="mono">{r.action}</span>
               </div>
-            </dl>
+            </>
           )}
         </div>
       )}
@@ -541,9 +574,20 @@ export function AuditLogCard() {
     const t = setTimeout(() => setDebouncedAction(actionInput), 300);
     return () => clearTimeout(t);
   }, [actionInput]);
+  // 中文搜尋：關鍵字先對白話字典（中文說明＋代碼都比對），命中就翻成代碼清單精確過濾——
+  // 夥伴打「邀請」就找得到 admin.invite，不必先懂英文代碼；沒命中才退回原本的代碼模糊比對。
+  const matchedActions = useMemo(() => {
+    const q = debouncedAction.trim().toLowerCase();
+    if (!q) return null;
+    const codes = Object.entries(AUDIT_ACTION_LABELS)
+      .filter(([code, label]) => label.toLowerCase().includes(q) || code.toLowerCase().includes(q))
+      .map(([code]) => code);
+    return codes.length ? codes.slice(0, 80) : null; // 80＝後端上限；超過等於沒在過濾，截斷即可
+  }, [debouncedAction]);
   const audit = trpc.audit.list.useInfiniteQuery(
     {
-      action: debouncedAction.trim() || undefined,
+      action: matchedActions ? undefined : debouncedAction.trim() || undefined,
+      actions: matchedActions ?? undefined,
       category: category ?? undefined,
       teamId: teamId || undefined,
       groupId: groupId || undefined,
@@ -554,6 +598,8 @@ export function AuditLogCard() {
     { getNextPageParam: (last) => last.nextCursor ?? undefined },
   );
   const rows = audit.data?.pages.flatMap((p) => p.items) ?? [];
+  // 連續重複合併：同一人短時間重複同一動作（AI 代理連生 N 張、連續拖分鏡排序）併成一列
+  const grouped = useMemo(() => groupConsecutiveAudit(rows), [rows]);
   const filtering = !!debouncedAction.trim() || !!category || !!teamId || !!groupId || !!actor || !!project;
   // 就地下鑽：點某位組員／某個專案／某一組即把整份紀錄縮到那個維度（AuditLogRow 呼叫）
   const drill: AuditDrill = {
@@ -642,8 +688,8 @@ export function AuditLogCard() {
         type="search"
         value={actionInput}
         onChange={(e) => setActionInput(e.target.value)}
-        placeholder="進階：再用操作代碼關鍵字細找（如 invite、generation）…"
-        aria-label="用操作代碼關鍵字篩選"
+        placeholder="搜尋操作：打中文（如「邀請」「刪除素材」）或代碼皆可…"
+        aria-label="搜尋操作紀錄"
       />
       {audit.isLoading ? (
         <div role="status" aria-label="操作紀錄載入中">
@@ -663,8 +709,8 @@ export function AuditLogCard() {
         </p>
       ) : (
         <>
-          {rows.map((r, i) => (
-            <AuditLogRow key={r.id} r={r} first={i === 0} drill={drill} />
+          {grouped.map((g, i) => (
+            <AuditLogRow key={g[0].id} r={g[0]} repeats={g.length > 1 ? g : undefined} first={i === 0} drill={drill} />
           ))}
           {audit.hasNextPage && (
             <div style={{ textAlign: "center", marginTop: 10 }}>
@@ -672,6 +718,268 @@ export function AuditLogCard() {
                 {audit.isFetchingNextPage ? "載入中…" : "載入更多"}
               </button>
             </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════ 操作洞察卡：人員分類細節・模型使用比較・提示詞流水 ═══════════ */
+
+type InsightTab = "members" | "models" | "prompts";
+
+const INSIGHT_DAYS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 7, label: "近 7 天" },
+  { value: 30, label: "近 30 天" },
+  { value: 90, label: "近 90 天" },
+];
+
+/** 生成狀態 → 白話＋語意色（洞察卡提示詞流水用；與 VALUE_LABELS 同語） */
+const GEN_STATUS_META: Record<string, { label: string; color: string }> = {
+  done: { label: "完成", color: "var(--success-ink)" },
+  failed: { label: "失敗", color: "var(--danger-ink)" },
+  rejected: { label: "退回", color: "var(--danger-ink)" },
+  queued: { label: "排隊中", color: "var(--fg-secondary)" },
+  running: { label: "執行中", color: "var(--fg-secondary)" },
+  awaiting_approval: { label: "等待核准", color: "var(--gold-ink)" },
+};
+
+/** 成功率（生成精準度）：完成/(完成+失敗)。還沒有完結的生成時回 null（顯示 —，不好硬給 0%） */
+function successRate(done: number, failed: number): number | null {
+  const finished = done + failed;
+  return finished === 0 ? null : Math.round((done / finished) * 100);
+}
+
+/** pg 聚合欄位（max(...)::text）的時間字串 → Date：補 T 與時區冒號，Safari 的 Date 解析才吃得下 */
+function parseDbTime(s: string): Date {
+  return new Date(s.replace(" ", "T").replace(/([+-]\d\d)$/, "$1:00"));
+}
+
+/** 提示詞流水的一列：預設截兩行，點一下展開全文（300 字內；全文本來就在生成紀錄） */
+function PromptRow({ p }: { p: RecentPromptData }) {
+  const [open, setOpen] = useState(false);
+  const meta = GEN_STATUS_META[p.status] ?? { label: p.status, color: "var(--fg-secondary)" };
+  const model = getModel(p.modelId);
+  return (
+    <div style={{ borderTop: "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ color: meta.color, fontSize: 11, fontWeight: 600 }}>{meta.label}</span>
+        <b>{p.userName}</b>
+        <span className="hint" style={{ fontSize: 11 }}>{model?.label ?? p.modelId}</span>
+        {p.points > 0 && <span className="hint" style={{ fontSize: 11 }}>{p.points} 點</span>}
+        <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(p.createdAt).toLocaleString("zh-TW")}</span>
+      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={open ? "收合提示詞" : "展開完整提示詞"}
+        style={{
+          display: "block",
+          width: "100%",
+          textAlign: "left",
+          background: "none",
+          border: "none",
+          padding: 0,
+          font: "inherit",
+          cursor: "pointer",
+          marginTop: 2,
+          overflowWrap: "anywhere",
+          ...(open ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" }),
+        }}
+      >
+        {p.prompt}
+      </button>
+      <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {p.projectTitle && <span><Icon name="FileText" size={11} /> {p.projectTitle}</span>}
+        {p.error && <span style={{ color: "var(--danger-ink)" }}>{p.error.length > 80 ? `${p.error.slice(0, 80)}…` : p.error}</span>}
+      </div>
+    </div>
+  );
+}
+
+type RecentPromptData = inferRouterOutputs<AppRouter>["insights"]["recentPrompts"]["items"][number];
+
+/**
+ * 操作洞察卡（回饋：人員的分類細節、模型的操作與比較、生成精準度、提示詞）。
+ * 三個分頁共用「期間＋組別」過濾：
+ * - 人員細節：每位夥伴的操作量、失敗數、最近活動、依分類攤開的次數；點人可跳到他的提示詞。
+ * - 模型比較：各模型的生成次數、成功率（生成精準度）、點數、使用人數；點模型看它的提示詞。
+ * - 提示詞：一筆筆的生成流水（誰・模型・提示詞・結果・點數），供比較與教學。
+ * 可見範圍與操作紀錄相同（後端已收斂：組長看自己組），組員看不到這張卡的資料。
+ */
+export function InsightsCard() {
+  const [tab, setTab] = useState<InsightTab>("members");
+  const [days, setDays] = useState(30);
+  const [groupId, setGroupId] = useState("");
+  // 下鑽過濾：從「模型比較」點模型、「人員細節」點夥伴，跳到提示詞分頁時帶上
+  const [modelFilter, setModelFilter] = useState<{ id: string; label: string } | null>(null);
+  const [actorFilter, setActorFilter] = useState<{ id: string; name: string } | null>(null);
+  const scope = trpc.directory.scope.useQuery();
+  const common = { days, groupId: groupId || undefined };
+  const members = trpc.insights.actorBreakdown.useQuery(common, { enabled: tab === "members" });
+  const models = trpc.insights.modelStats.useQuery(common, { enabled: tab === "models" });
+  const prompts = trpc.insights.recentPrompts.useQuery(
+    { ...common, modelId: modelFilter?.id, actorId: actorFilter?.id, limit: 30 },
+    { enabled: tab === "prompts" },
+  );
+  const chip = (active: boolean): CSSProperties => ({
+    padding: "3px 10px",
+    fontSize: 12,
+    borderRadius: 999,
+    cursor: "pointer",
+    border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
+    background: active ? "var(--primary-tint)" : "transparent",
+    color: active ? "var(--primary-ink)" : "var(--ink)",
+    fontWeight: active ? 600 : 400,
+  });
+  const groupOptions = scope.data?.groups ?? [];
+  return (
+    <div className="card" data-fb="操作洞察卡">
+      <h2>操作洞察</h2>
+      <p className="hint">把操作紀錄整理成看得懂的統計：每位夥伴在忙哪一塊、哪個模型好用（成功率＝完成÷已完結）、大家的提示詞怎麼寫。</p>
+      {/* 分頁 chips */}
+      <div role="group" aria-label="洞察分頁" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+        <button type="button" style={chip(tab === "members")} aria-pressed={tab === "members"} onClick={() => setTab("members")}>人員細節</button>
+        <button type="button" style={chip(tab === "models")} aria-pressed={tab === "models"} onClick={() => setTab("models")}>模型比較</button>
+        <button type="button" style={chip(tab === "prompts")} aria-pressed={tab === "prompts"} onClick={() => setTab("prompts")}>提示詞</button>
+      </div>
+      {/* 期間＋組別過濾（三個分頁共用） */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+        {INSIGHT_DAYS.map((d) => (
+          <button key={d.value} type="button" style={chip(days === d.value)} aria-pressed={days === d.value} onClick={() => setDays(d.value)}>
+            {d.label}
+          </button>
+        ))}
+        {groupOptions.length > 1 && (
+          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} aria-label="依組別過濾洞察" style={{ marginLeft: "auto", maxWidth: 220 }}>
+            <option value="">所有可見組別</option>
+            {groupOptions.map((g) => (
+              <option key={g.groupId} value={g.groupId}>{g.teamName}・{g.groupName}</option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* ── 人員細節 ── */}
+      {tab === "members" && (
+        members.isLoading ? (
+          <div className="skeleton" style={{ height: 60 }} />
+        ) : members.error ? (
+          <p className="error">載入失敗：{members.error.message}</p>
+        ) : !members.data || members.data.members.length === 0 ? (
+          <p className="hint">這段期間還沒有操作。</p>
+        ) : (
+          members.data.members.map((m) => (
+            <div key={m.userId} style={{ borderTop: "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => { setActorFilter({ id: m.userId, name: m.name }); setTab("prompts"); }}
+                  style={{ ...DRILL_LINK, fontWeight: 700 }}
+                  title={`看 ${m.name} 的提示詞`}
+                >
+                  {m.name}
+                </button>
+                <span className="hint" style={{ fontSize: 12 }}>{m.total} 筆操作</span>
+                {m.fails > 0 && <span style={{ color: "var(--danger-ink)", fontSize: 12 }}>{m.fails} 筆失敗</span>}
+                <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>最近 {parseDbTime(m.lastAt).toLocaleString("zh-TW")}</span>
+              </div>
+              {/* 分類細節：這位夥伴各類操作的次數，多到少 */}
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+                {m.categories.map((c) => {
+                  const style = AUDIT_CAT_STYLE[c.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
+                  return (
+                    <span key={c.key} className="pill" style={{ ...style, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>
+                      {c.label} {c.count}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ))
+        )
+      )}
+
+      {/* ── 模型比較 ── */}
+      {tab === "models" && (
+        models.isLoading ? (
+          <div className="skeleton" style={{ height: 60 }} />
+        ) : models.error ? (
+          <p className="error">載入失敗：{models.error.message}</p>
+        ) : !models.data || models.data.models.length === 0 ? (
+          <p className="hint">這段期間還沒有生成。</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr>
+                  {["模型", "次數", "成功率", "失敗", "點數", "人數", "最近使用"].map((h) => (
+                    <th key={h} className="hint" style={{ textAlign: h === "模型" ? "left" : "right", padding: "4px 6px", fontWeight: 600, fontSize: 11, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {models.data.models.map((m) => {
+                  const model = getModel(m.modelId);
+                  const rate = successRate(m.done, m.failed);
+                  return (
+                    <tr key={`${m.modelId}:${m.kind}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
+                      <td style={{ padding: "6px" }}>
+                        <button
+                          type="button"
+                          onClick={() => { setModelFilter({ id: m.modelId, label: model?.label ?? m.modelId }); setTab("prompts"); }}
+                          style={{ ...DRILL_LINK, fontWeight: 600 }}
+                          title="看這個模型的提示詞"
+                        >
+                          {model?.label ?? m.modelId}
+                        </button>
+                        {model && <span className="hint" style={{ fontSize: 11, marginLeft: 6 }}>{tierLabel(model.tier)}</span>}
+                      </td>
+                      <td style={{ padding: "6px", textAlign: "right" }}>{m.submits}</td>
+                      <td style={{ padding: "6px", textAlign: "right", color: rate == null ? "var(--fg-secondary)" : rate >= 90 ? "var(--success-ink)" : rate < 70 ? "var(--danger-ink)" : "var(--ink)" }}>
+                        {rate == null ? "—" : `${rate}%`}
+                      </td>
+                      <td style={{ padding: "6px", textAlign: "right", color: m.failed > 0 ? "var(--danger-ink)" : "var(--fg-secondary)" }}>{m.failed}</td>
+                      <td style={{ padding: "6px", textAlign: "right" }}>{m.points}</td>
+                      <td style={{ padding: "6px", textAlign: "right" }}>{m.users}</td>
+                      <td className="hint" style={{ padding: "6px", textAlign: "right", fontSize: 11, whiteSpace: "nowrap" }}>{parseDbTime(m.lastUsedAt).toLocaleDateString("zh-TW")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="hint" style={{ fontSize: 11, marginTop: 6 }}>成功率＝完成 ÷（完成＋失敗）；排隊中／等待核准的生成不列入。點數只計完成的實花（失敗會退點）。</p>
+          </div>
+        )
+      )}
+
+      {/* ── 提示詞 ── */}
+      {tab === "prompts" && (
+        <>
+          {(modelFilter || actorFilter) && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+              <span className="hint" style={{ fontSize: 11 }}>目前只看：</span>
+              {modelFilter && (
+                <button type="button" onClick={() => setModelFilter(null)} style={activeFilterChip} aria-label={`清除模型過濾（${modelFilter.label}）`}>
+                  模型：{modelFilter.label}<Icon name="X" size={11} />
+                </button>
+              )}
+              {actorFilter && (
+                <button type="button" onClick={() => setActorFilter(null)} style={activeFilterChip} aria-label={`清除夥伴過濾（${actorFilter.name}）`}>
+                  <Icon name="User" size={11} />{actorFilter.name}<Icon name="X" size={11} />
+                </button>
+              )}
+            </div>
+          )}
+          {prompts.isLoading ? (
+            <div className="skeleton" style={{ height: 60 }} />
+          ) : prompts.error ? (
+            <p className="error">載入失敗：{prompts.error.message}</p>
+          ) : !prompts.data || prompts.data.items.length === 0 ? (
+            <p className="hint">這段期間還沒有符合條件的生成。</p>
+          ) : (
+            prompts.data.items.map((p) => <PromptRow key={p.id} p={p} />)
           )}
         </>
       )}
@@ -768,14 +1076,19 @@ export function ConsumptionMonitorCard() {
           ) : (
             data.byGroup.map((g, i) => (
               <details key={g.groupId} open={data.byGroup.length === 1} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", padding: "6px 0" }}>
-                <summary style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", listStyle: "none" }}>
-                  <Icon name="ChevronRight" size={14} className="details-caret" />
-                  <span style={{ flex: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%" }}>{g.groupName}</span>
-                  {/* 組間比較長條：相對「最燒的組」等比，一眼看出占比 */}
-                  <div style={{ flex: 1, height: 8, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
-                    <div style={{ width: `${(g.weekPoints / maxGroupPoints) * 100}%`, height: "100%", background: "var(--primary)", borderRadius: 3 }} />
+                {/* summary 本身保持預設 list-item：Safari/WebKit 一旦在 <summary> 直接下 display:flex
+                    或塞進 block 子元素，就會吃掉原生開合、點了沒反應——flex 版面改放到內層 div，
+                    點擊事件照樣冒泡到 summary 觸發開合，各家瀏覽器（含手機 Safari）都點得動。 */}
+                <summary style={{ cursor: "pointer", listStyle: "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, minHeight: 32 }}>
+                    <Icon name="ChevronRight" size={14} className="details-caret" />
+                    <span style={{ flex: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%" }}>{g.groupName}</span>
+                    {/* 組間比較長條：相對「最燒的組」等比，一眼看出占比 */}
+                    <div style={{ flex: 1, height: 8, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
+                      <div style={{ width: `${(g.weekPoints / maxGroupPoints) * 100}%`, height: "100%", background: "var(--primary)", borderRadius: 3 }} />
+                    </div>
+                    <span style={{ flex: "none", fontFamily: "var(--mono)" }}>{g.weekPoints.toLocaleString()} 點</span>
                   </div>
-                  <span style={{ flex: "none", fontFamily: "var(--mono)" }}>{g.weekPoints.toLocaleString()} 點</span>
                 </summary>
                 {/* 組內兩個維度的近 7 天毛消耗（各自高到低）：成員＝誰在燒、專案＝哪個案子在燒 */}
                 <div style={{ margin: "6px 0 2px", paddingLeft: 22 }}>
@@ -1174,6 +1487,7 @@ export function AdminPage() {
         {/* 系統自檢只有開發者的 /api/selftest 能用——非開發者按了只會 403，對他們是死功能，故只對開發者顯示 */}
         {isSuperAdmin && <SelfTestCard />}
         <ConsumptionMonitorCard />
+        <InsightsCard />
         <AuditLogCard />
         {isSuperAdmin && <CreateTeamCard />}
         <div className="card" data-fb="點數與額度卡">

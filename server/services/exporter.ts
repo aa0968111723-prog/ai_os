@@ -176,9 +176,10 @@ function buildVoiceoverSrt(scenes: Array<{ durationSec: number; voiceover: strin
 
 /**
  * 時間軸產生器吃的最小分鏡形狀（scenes DB 列結構相容）。
- * mediaPath/mediaKind/narrationPath 是「媒體連結版」時間軸的可選欄位：交付包打包時回填
- * 每鏡實際入包的 zip 內相對路徑（如 01_視頻素材/01_開場.mp4），FCPXML/Premiere XML 便能
- * 引用媒體、匯入即自動組好粗剪；不帶（單檔下載、無素材鏡）就退回純佔位骨架。
+ * mediaPath/mediaKind/narrationPath 是「媒體連結版」時間軸的可選欄位（QA-006：時間軸格式要能
+ * relink 到封包內真實媒體，不能只有 gap 佔位）：交付包打包時回填每鏡實際入包的 zip 內相對路徑
+ * （如 01_視頻素材/01_開場.mp4），FCPXML/Premiere XML 便能引用媒體、匯入即自動組好粗剪；
+ * 不帶（單檔下載、無素材鏡）就退回純佔位骨架。
  */
 export type TimelineScene = {
   title: string;
@@ -186,7 +187,7 @@ export type TimelineScene = {
   voiceover: string | null;
   /** 交付包內媒體檔相對路徑（相對 zip 根）；null/未給＝該鏡無入包素材 */
   mediaPath?: string | null;
-  /** 入包媒體類型（image 走靜態圖引用、video 走視訊剪輯、audio 不上視訊軌） */
+  /** 入包媒體類型（image 走靜態圖引用、video 走視訊剪輯、audio 掛音訊軌） */
   mediaKind?: "video" | "image" | "audio" | null;
   /** 該鏡旁白音檔的 zip 內相對路徑（02_旁白音檔/…）；null/未給＝無旁白 */
   narrationPath?: string | null;
@@ -511,8 +512,9 @@ function edlTime(totalSec: number): string {
 
 /**
  * CMX 3600 EDL 剪輯表（DaVinci Resolve／Premiere 可讀）：TITLE 行＋每鏡一行事件（V 軌、Cut），
- * 以 30fps 換算 timecode；來源一律 AX 佔位 reel（進出點從 0 起算、長度＝該鏡秒數），
- * COMMENT 行（* FROM CLIP NAME）放分鏡標題，匯入後逐鏡替換為實際素材即可。
+ * 以 30fps 換算 timecode；來源一律 AX 佔位 reel（進出點從 0 起算、長度＝該鏡秒數）。
+ * 有媒體的鏡（mediaFile 非空）：FROM CLIP NAME 用交付包內「真實檔名」、另附 SOURCE FILE 相對路徑，
+ * 匯入後可依檔名自動 relink（QA-006）；無媒體的鏡維持分鏡標題供人工替換。
  */
 export function buildEdl(scenes: TimelineScene[], projectTitle: string): string {
   const lines: string[] = [`TITLE: ${projectTitle.replace(/\s+/g, " ").trim() || "未命名"}`, "FCM: NON-DROP FRAME", ""];
@@ -520,9 +522,11 @@ export function buildEdl(scenes: TimelineScene[], projectTitle: string): string 
   for (const [i, sc] of scenes.entries()) {
     const dur = sceneDur(sc);
     const num = String(i + 1).padStart(3, "0");
+    const clipName = sc.mediaPath ? baseName(sc.mediaPath) : sc.title.replace(/\s+/g, " ").trim();
     lines.push(
       `${num}  AX       V     C        ${edlTime(0)} ${edlTime(dur)} ${edlTime(t)} ${edlTime(t + dur)}`,
-      `* FROM CLIP NAME: ${sc.title.replace(/\s+/g, " ").trim()}`,
+      `* FROM CLIP NAME: ${clipName}`,
+      ...(sc.mediaPath ? [`* SOURCE FILE: ${sc.mediaPath}`] : []),
       "",
     );
     t += dur;
@@ -896,6 +900,8 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
   // Premiere時間軸.xml（Premiere/DaVinci Resolve）、剪輯表.edl（DaVinci Resolve 備援）。
   // fcpxml/xmeml 為「媒體連結版」：引用本包內實際入包的媒體檔（相對路徑 ../），匯入即自動組好粗剪；
   // 與 04_字幕 的可讀性切塊版不同，這裡每鏡一塊、空詞用標題，供剪輯逐鏡對位；沒有分鏡時改附說明檔。
+  // QA-006：帶入各鏡「實際寫進本包」的相對檔名（writtenNames/narrationNames），
+  // FCPXML 產出 asset/media-rep、EDL 產出真實 clip 檔名——解壓後即可 relink，不再只是 gap 佔位。
   if (scenes.length > 0) {
     // 媒體連結版時間軸：把每鏡「實際入包」的媒體/旁白相對路徑補進 TimelineScene（未入包者為 null → gap 佔位）
     const timelineScenes: TimelineScene[] = scenes.map((sc, i) => ({

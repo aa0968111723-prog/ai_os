@@ -10,7 +10,7 @@ import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, estimatePoints, type ProjectFormat, type ModelEntry } from "../../shared/models";
-import { worldviewSchema, type Worldview } from "../../shared/worldview";
+import { worldviewSchema, bilingualChips, STYLE_EN, TONE_EN, type Worldview } from "../../shared/worldview";
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { reserveQuota, refund } from "./points";
@@ -41,11 +41,14 @@ function persistGenerationResult(assetId: string, generationId: string, remoteUr
   })().catch((err) => console.warn("[storage] 成品落地背景作業失敗：", err instanceof Error ? err.message : err));
 }
 
-/** 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成) */
-function buildPrompt(userPrompt: string, worldview: Worldview): string {
+/** 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成)。
+ *  visual＝圖像/影片類別：調性與風格 chips 附英文錨點（英文語彙模型才吃得動畫風；LLM 維持純中文） */
+function buildPrompt(userPrompt: string, worldview: Worldview, visual: boolean): string {
   const parts: string[] = [];
-  if (worldview.tones.length) parts.push(`調性:${worldview.tones.join("、")}`);
-  if (worldview.styles.length) parts.push(`視覺風格:${worldview.styles.join("、")}`);
+  const tones = visual ? bilingualChips(worldview.tones, TONE_EN) : worldview.tones;
+  const styles = visual ? bilingualChips(worldview.styles, STYLE_EN) : worldview.styles;
+  if (tones.length) parts.push(`調性:${tones.join("、")}`);
+  if (styles.length) parts.push(`視覺風格:${styles.join("、")}`);
   if (worldview.message) parts.push(`核心訊息:${worldview.message}`);
   if (worldview.taboos.length) parts.push(`避免:${worldview.taboos.join(";")}`);
   return parts.length ? `${userPrompt}\n\n[專案背景] ${parts.join("|")}` : userPrompt;
@@ -69,7 +72,8 @@ const CHARACTER_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-t
 
 /** export 供 MCP 重用：注入與否的判斷必須單一來源，否則 MCP 路徑會把世界觀唸進 TTS 成品 */
 export function effectivePrompt(model: ModelEntry, userPrompt: string, worldview: Worldview): string {
-  return INJECT_CATEGORIES.has(model.category) ? buildPrompt(userPrompt, worldview) : userPrompt;
+  if (!INJECT_CATEGORIES.has(model.category)) return userPrompt;
+  return buildPrompt(userPrompt, worldview, CHARACTER_CATEGORIES.has(model.category));
 }
 
 /** 角色定裝錨點：視覺類別才注入，並前綴到（世界觀已注入的）提示詞 */
@@ -105,6 +109,10 @@ export interface SubmitCoreInput {
   sceneId?: string;
   /** 要回填分鏡的哪個角色："narration"＝旁白音檔（回填 narrationAssetId）；不帶＝visual（回填 assetId） */
   sceneRole?: "visual" | "narration";
+  /** 來源工作流執行 id：runner 帶入，生成列落庫後可回看「這筆是哪條工作流跑出來的」 */
+  workflowRunId?: string;
+  /** 來源 AI 代理執行 id：agentRunner 帶入，同上 */
+  agentRunId?: string;
   /** 存取檢查掛點：tRPC 端帶 requireGroup（多組隔離；可再疊 2.3 專案級 ACL，故允許 async）；
    *  伺服器內部（runner）呼叫時已在建 run 時把過關,可省略。
    *  回傳角色（requireGroup 本來就回）供成本審核門檻判斷組員；回 void 的舊呼叫端不受影響（不觸發門檻）。 */
@@ -176,24 +184,38 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     const [grp] = await db.select().from(schema.groups).where(eq(schema.groups.id, project.groupId));
     const threshold = grp?.approvalThresholdPoints;
     if (threshold != null && threshold > 0 && est >= threshold) {
-      const [gated] = await db
-        .insert(schema.generations)
-        .values({
-          id: input.id,
-          projectId: project.id,
-          groupId: project.groupId,
-          userId: input.userId,
-          modelId: model.id,
-          kind: model.kind,
-          prompt: input.prompt,
-          sceneId: input.sceneId ?? null,
-          sceneRole: input.sceneRole ?? null,
-          sourceUrl,
-          params: falInput, // 注入完成的 fal 輸入原樣保存——核准時直接送出，不重組（世界觀/卡片以送審當下為準）
-          pointsEst: est,
-          status: "awaiting_approval",
-        })
-        .returning();
+      let gated: GenerationRow;
+      try {
+        [gated] = await db
+          .insert(schema.generations)
+          .values({
+            id: input.id,
+            projectId: project.id,
+            groupId: project.groupId,
+            userId: input.userId,
+            modelId: model.id,
+            kind: model.kind,
+            prompt: input.prompt,
+            sceneId: input.sceneId ?? null,
+            sceneRole: input.sceneRole ?? null,
+            characterIds: input.characterIds?.length ? input.characterIds : null,
+            scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
+            workflowRunId: input.workflowRunId ?? null,
+            agentRunId: input.agentRunId ?? null,
+            sourceUrl,
+            params: falInput, // 注入完成的 fal 輸入原樣保存——核准時直接送出，不重組（世界觀/卡片以送審當下為準）
+            pointsEst: est,
+            status: "awaiting_approval",
+          })
+          .returning();
+      } catch (err) {
+        // 冪等重送撞唯一鍵：前次請求已建待核列——直接回既有列，不重複落列、不重發通知
+        if (input.id && isUniqueViolation(err)) {
+          const [existing] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));
+          if (existing) return existing;
+        }
+        throw err;
+      }
       // 系統訊息通知組內（比照審批三態機）；失敗不擋主流程
       await db
         .insert(schema.messages)
@@ -223,6 +245,10 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         prompt: input.prompt,
         sceneId: input.sceneId ?? null, // 綁定分鏡格（沒有＝null，完成後不回填）
         sceneRole: input.sceneRole ?? null, // 回填角色（沒有＝null，視為 visual）
+        characterIds: input.characterIds?.length ? input.characterIds : null, // 帶入的定裝卡——重試/再用可還原
+        scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
+        workflowRunId: input.workflowRunId ?? null, // 來源工作流/代理（沒有＝手動生成）
+        agentRunId: input.agentRunId ?? null,
         sourceUrl,
         params: falInput,
         pointsEst: est,
@@ -301,59 +327,58 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
   if (result.status === "done" && (result.resultUrl || result.resultText)) {
     // Compare-and-set：只有把「仍在 queued/running」的列成功推進成 done 的那一次才算數，
     // 併發輪詢/重試不會重複入庫（舊版每次都 update+insert asset → 重複素材、重複計費）。
-    const updatedRows = await db
-      .update(schema.generations)
-      .set({
-        status: "done",
-        resultUrl: result.resultUrl,
-        resultText: result.resultText,
-        pointsActual: gen.pointsEst,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
-      .returning();
-    if (updatedRows.length === 0) {
-      const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
-      return current ?? gen; // 別人已推進，直接回現況（列必存在,回退舊快照僅是型別防禦）
-    }
-    const [updated] = updatedRows;
-    // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄。
-    // 素材 insert 若失敗（DB 抖動）不可讓整個 status 回應 500——生成已 done，
-    // 錯誤只記 log；素材下次輪詢會由這段重試（CAS 已把列推進成 done，此段只在該次執行，
-    // 但生成紀錄仍在，管理員可查 log 手動補；避免「成功卻回報失敗」誤導使用者重送重複扣點）。
-    if (result.resultUrl && (kind === "image" || kind === "video" || kind === "audio")) {
-      try {
-        const [asset] = await db
+    // 關鍵（QA-014）：done 翻轉與「成品入素材庫＋分鏡回填」同一交易——舊版先 commit done 再
+    // 另 insert asset，中間 DB 抖動會留下「done 但沒有素材」且 CAS 已過、永不補建。
+    // 包進同交易後全有或全無：asset 寫入失敗整筆 rollback，列留在 queued/running，下次輪詢重試。
+    const mediaUrl = result.resultUrl && (kind === "image" || kind === "video" || kind === "audio") ? result.resultUrl : null;
+    const mediaKind = kind === "image" || kind === "video" || kind === "audio" ? kind : null;
+    const advanced = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(schema.generations)
+        .set({
+          status: "done",
+          resultUrl: result.resultUrl,
+          resultText: result.resultText,
+          pointsActual: gen.pointsEst,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
+        .returning();
+      if (rows.length === 0) return { updated: null, assetId: null as string | null };
+      let assetId: string | null = null;
+      // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄。
+      if (mediaUrl && mediaKind) {
+        const [asset] = await tx
           .insert(schema.assets)
           .values({
             projectId: gen.projectId,
             groupId: gen.groupId,
-            kind,
+            kind: mediaKind,
             title: gen.prompt.slice(0, 40),
-            url: result.resultUrl,
+            url: mediaUrl,
             isAiGenerated: true,
             meta: { generationId: gen.id, modelId: gen.modelId },
           })
           .returning();
-        // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）
-        persistGenerationResult(asset.id, gen.id, result.resultUrl);
+        assetId = asset.id;
         // 綁定分鏡的就地生成：把成品回填該分鏡格（拆分鏡草稿→出圖 一條線）。
-        // 冪等：CAS 已保證此段每筆只跑一次；重複 advance 也只覆蓋為最新素材，無妨。
-        // 失敗不擋主流程（素材已入庫，僅回填未成，記 log 供補）。
+        // 冪等：CAS 已保證此段每筆只跑一次；同交易失敗一起 rollback。
         if (gen.sceneId) {
-          try {
-            // 角色感知回填：narration→旁白音檔欄位；其餘（visual/null）→主畫面欄位。
-            const patch = gen.sceneRole === "narration" ? { narrationAssetId: asset.id } : { assetId: asset.id };
-            await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, gen.sceneId));
-          } catch (err) {
-            console.error(`[generation] 分鏡回填失敗（成品已入庫，可查 log 補）：gen=${gen.id} scene=${gen.sceneId} role=${gen.sceneRole ?? "visual"}`, err instanceof Error ? err.message : err);
-          }
+          // 角色感知回填：narration→旁白音檔欄位；其餘（visual/null）→主畫面欄位。
+          const patch = gen.sceneRole === "narration" ? { narrationAssetId: asset.id } : { assetId: asset.id };
+          await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, gen.sceneId));
         }
-      } catch (err) {
-        console.error(`[generation] 成品入素材庫失敗（生成已 done，可查 log 補）：gen=${gen.id}`, err instanceof Error ? err.message : err);
       }
+      return { updated: rows[0], assetId };
+    });
+    if (!advanced.updated) {
+      const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
+      return current ?? gen; // 別人已推進，直接回現況（列必存在,回退舊快照僅是型別防禦）
     }
-    return updated;
+    // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）——
+    // 網路 IO 不進交易，commit 後才啟動；失敗由 sweepUnlandedAssets 定期補抓。
+    if (advanced.assetId && mediaUrl) persistGenerationResult(advanced.assetId, gen.id, mediaUrl);
+    return advanced.updated;
   }
   if (result.status === "failed") {
     // 同樣 compare-and-set：只有真正把列從 queued/running 轉成 failed 的那一次才退點，

@@ -101,6 +101,13 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
+  // 深連結（知識地圖節點等來源）：/databases?open=<id> 進頁即選定該庫。
+  // 只在掛載時讀一次——之後的選擇交回使用者操作；id 無效（無權/不存在）時 find 不到，安靜落回清單。
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (id) setSelectedId(id);
+  }, []);
+
   const tables = (list.data ?? []) as TableSummary[];
   const selected = tables.find((t) => t.id === selectedId) ?? null;
   const byScope = useMemo(() => {

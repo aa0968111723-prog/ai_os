@@ -186,6 +186,8 @@ function SceneRow({
   meLoading,
   genModelId,
   onUsePrompt,
+  charIds,
+  sceneIds,
   invalidate,
   move,
   remove,
@@ -202,6 +204,9 @@ function SceneRow({
   /** 逐格生成用的文生圖模型（分鏡卡工具列可換；預設 SDXL Lightning） */
   genModelId: string;
   onUsePrompt?: (prompt: string) => void;
+  /** 生成台勾選的角色/場景卡：就地生成也注入同一套錨點——逐鏡出圖與生成台畫風一致 */
+  charIds?: string[];
+  sceneIds?: string[];
   invalidate: () => void;
   move: ReturnType<typeof trpc.scenes.move.useMutation>;
   remove: ReturnType<typeof trpc.scenes.remove.useMutation>;
@@ -222,8 +227,15 @@ function SceneRow({
       savedTimer.current = setTimeout(() => setSavedFlash(false), 2000);
     },
   });
-  const generate = trpc.scenes.generateInto.useMutation({ onSuccess: invalidate });
-  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({ onSuccess: invalidate });
+  // 冪等鍵（QA-007）：同一格「還沒成功」的生成/配音重試沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
+  const genRequestId = useRef<string>(crypto.randomUUID());
+  const voiceRequestId = useRef<string>(crypto.randomUUID());
+  const generate = trpc.scenes.generateInto.useMutation({
+    onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
+  });
+  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({
+    onSuccess: () => { voiceRequestId.current = crypto.randomUUID(); invalidate(); },
+  });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
   // 配音生成中：後端背景 runner 完成後會回填 narrationAssetId，10 秒輪詢自動刷新
@@ -312,7 +324,7 @@ function SceneRow({
                     triggerTitle="用這一格的配音詞生成中文旁白，完成後自動出現試聽"
                     message={`即將生成旁白配音（${getModel(DEFAULT_TTS_MODEL)?.label ?? "中文 TTS"}${ttsPoints != null ? `，約 −${ttsPoints} 點` : ""}）；失敗自動退點`}
                     confirmLabel="確認生成"
-                    onConfirm={() => generateVoiceover.mutate({ sceneId: s.id })}
+                    onConfirm={() => generateVoiceover.mutate({ sceneId: s.id, clientRequestId: voiceRequestId.current })}
                   >
                     {s.narrationUrl ? (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -380,7 +392,16 @@ function SceneRow({
                 triggerTitle="用這一格的提示詞就地生成，完成後自動回填縮圖"
                 message={`即將${s.assetId ? "重生" : "生成"}這一格（${genModel?.label ?? genModelId}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
                 confirmLabel="確認生成"
-                onConfirm={() => generate.mutate({ sceneId: s.id, modelId: genModel?.id ?? DEFAULT_MODEL })}
+                onConfirm={() =>
+                  generate.mutate({
+                    sceneId: s.id,
+                    modelId: genModel?.id ?? DEFAULT_MODEL,
+                    clientRequestId: genRequestId.current,
+                    // 上限同 generation.submit（6/4）：超勾取前幾張，不讓逐格生成因此整個被 zod 擋下
+                    characterIds: charIds?.length ? charIds.slice(0, 6) : undefined,
+                    scenePresetIds: sceneIds?.length ? sceneIds.slice(0, 4) : undefined,
+                  })
+                }
               >
                 {s.assetId ? (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -394,7 +415,7 @@ function SceneRow({
               </ConfirmButton>
             )
           ) : (
-            !s.assetId && <span className="hint">先用上方「AI 拆分鏡」給這格提示詞，就能就地生成</span>
+            !s.assetId && <span className="hint">先請上方「專案 AI 代理系統」拆分鏡或發想，給這格提示詞就能就地生成</span>
           )}
           {s.assetUrl && (
             <a
@@ -474,7 +495,7 @@ function SceneRow({
 
 /** 分鏡與交付：可編輯＋就地生成/重生＋單檔下載＋粗剪預覽＋送審/裁決（三態機）＋打包下載。
  *  canEdit=false（2.3 檢視者）：隱藏所有寫入控制（生成/配音/送審/排序/刪除/行內編輯），瀏覽與下載照常 */
-export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: { projectId: string; isLeader: boolean; canEdit?: boolean; onUsePrompt?: (prompt: string) => void }) {
+export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, charIds, sceneIds }: { projectId: string; isLeader: boolean; canEdit?: boolean; onUsePrompt?: (prompt: string) => void; charIds?: string[]; sceneIds?: string[] }) {
   const utils = trpc.useUtils();
   // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
   const me = trpc.auth.me.useQuery();
@@ -585,6 +606,8 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
               meLoading={me.isLoading}
               genModelId={genModelId}
               onUsePrompt={onUsePrompt}
+              charIds={charIds}
+              sceneIds={sceneIds}
               invalidate={invalidate}
               move={move}
               remove={remove}

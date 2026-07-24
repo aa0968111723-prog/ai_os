@@ -116,6 +116,60 @@ export function mimeFromPath(p: string): string {
   return "application/octet-stream";
 }
 
+/**
+ * 檔案 signature（magic bytes）嗅探（QA-021）：只認常見二進位格式的固定簽名。
+ * 回 null＝辨識不出（文字類本無簽名；未知二進位）。ISO-BMFF（mp4/m4a/mov 同一 ftyp 家族）
+ * 一律回 video/mp4，相容性裁決在 resolveUploadMime 處理。
+ */
+export function sniffMime(buf: Buffer): string | null {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf[0] === 0x89 && buf.subarray(1, 4).toString("latin1") === "PNG") return "image/png";
+  if (buf.subarray(0, 4).toString("latin1") === "GIF8") return "image/gif";
+  if (buf.subarray(0, 4).toString("latin1") === "RIFF") {
+    const tag = buf.subarray(8, 12).toString("latin1");
+    if (tag === "WEBP") return "image/webp";
+    if (tag === "WAVE") return "audio/wav";
+    return null;
+  }
+  if (buf.subarray(4, 8).toString("latin1") === "ftyp") return "video/mp4"; // ISO-BMFF 家族
+  if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return "video/webm"; // EBML（webm/mkv）
+  if (buf.subarray(0, 3).toString("latin1") === "ID3" || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) return "audio/mpeg";
+  if (buf.subarray(0, 4).toString("latin1") === "OggS") return "audio/ogg";
+  if (buf.subarray(0, 4).toString("latin1") === "%PDF") return "application/pdf";
+  if (buf[0] === 0x50 && buf[1] === 0x4b) return "application/zip"; // zip／docx 共用 PK
+  return null;
+}
+
+/** 同一簽名家族可接受的宣稱 MIME（容器共用簽名：ftyp、PK、RIFF…） */
+const SNIFF_COMPAT: Record<string, string[]> = {
+  "video/mp4": ["video/mp4", "video/quicktime", "audio/mp4"],
+  "video/webm": ["video/webm", "audio/webm"],
+  "audio/wav": ["audio/wav", "audio/x-wav"],
+  "audio/mpeg": ["audio/mpeg", "audio/mp3"],
+  "application/zip": ["application/zip", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+};
+
+/**
+ * 上傳 MIME 與檔案內容一致性裁決（QA-021）：
+ * - 內容簽名與宣稱相容 → 沿用宣稱。
+ * - 簽名辨識出「另一種我們支援的格式」（如副檔名 .jpg、內容其實是 WebP）→ 依內容自動校正 MIME。
+ * - 宣稱是圖片但辨識不出任何已知簽名 → 拒絕（圖片簽名覆蓋完整，驗不出即內容可疑）；
+ *   影音/其他二進位辨識不出時放行沿用宣稱（簽名覆蓋不完整，避免誤殺正常檔）。
+ * 回 null＝內容與宣稱不符且無法校正（呼叫端回 415）。
+ */
+export function resolveUploadMime(declared: string, head: Buffer): { mime: string; corrected: boolean } | null {
+  const sniffed = sniffMime(head);
+  if (!sniffed) {
+    if (declared.startsWith("image/")) return null;
+    return { mime: declared, corrected: false };
+  }
+  const compat = SNIFF_COMPAT[sniffed] ?? [sniffed];
+  if (compat.includes(declared)) return { mime: declared, corrected: false };
+  if (isAllowedUploadMime(sniffed)) return { mime: sniffed, corrected: true };
+  return null;
+}
+
 /** kind 歸類（素材庫分區與交付包資料夾用） */
 export function kindFromMime(mime: string): "image" | "video" | "audio" | "doc" {
   if (mime.startsWith("image/")) return "image";
@@ -278,29 +332,55 @@ export async function removeStoredFile(relPath: string): Promise<void> {
   }
 }
 
+/** 遠端成品抓取守門（QA-018）：連線＋下載總逾時；串流階段逐塊累計大小，超上限即中止 */
+const PERSIST_FETCH_TIMEOUT_MS = 120_000;
+
 /**
  * 把外部網址（fal CDN 成品）抓回本地永久保存。
  * 回 null 表示這次沒抓成（網址仍可用一段時間，之後輪詢/補抓可重試）。
+ * 守門（QA-018）：120 秒總逾時（掛住/滴流的外部網址不能無限期佔住 runner tick）；
+ * 下載採串流累計，超過 MAX_FILE_BYTES 立即中止——不再是「整包吞進記憶體後才量大小」，
+ * 沒報 Content-Length（或謊報）的來源也無法把整個 body 灌進 RAM。
  */
 export async function persistRemote(url: string): Promise<{ storagePath: string; mime: string; sizeBytes: number } | null> {
   try {
-    const res = await proxyFetch(url);
+    const res = await proxyFetch(url, { timeoutMs: PERSIST_FETCH_TIMEOUT_MS });
     if (!res.ok) {
       console.warn(`[storage] 抓取成品失敗 ${res.status}：${url}`);
+      void res.body?.cancel().catch(() => {});
       return null;
     }
     const mime = (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim();
     const lenHeader = Number(res.headers.get("content-length") ?? 0);
+    if (lenHeader > MAX_FILE_BYTES) {
+      console.warn(`[storage] 成品超過單檔上限（Content-Length ${lenHeader}B）——沿用外部網址`);
+      void res.body?.cancel().catch(() => {});
+      return null;
+    }
     const guard = await checkDiskSpace(lenHeader || 8 * 1024 * 1024);
     if (guard) {
       console.warn(`[storage] ${guard}——成品未落地，沿用外部網址：${url}`);
+      void res.body?.cancel().catch(() => {});
       return null;
     }
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_FILE_BYTES) {
-      console.warn(`[storage] 成品超過單檔上限（${buf.length}B）——沿用外部網址`);
-      return null;
+    // 逐塊累計：邊下載邊量，超限即取消串流（防 Content-Length 缺席/謊報時記憶體被灌爆）
+    const chunks: Buffer[] = [];
+    let total = 0;
+    if (res.body) {
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_FILE_BYTES) {
+          await reader.cancel().catch(() => {});
+          console.warn(`[storage] 成品下載中超過單檔上限（>${MAX_FILE_BYTES}B）——中止並沿用外部網址`);
+          return null;
+        }
+        chunks.push(Buffer.from(value));
+      }
     }
+    const buf = Buffer.concat(chunks);
     const saved = await saveBuffer(buf, mime);
     return { ...saved, mime };
   } catch (err) {

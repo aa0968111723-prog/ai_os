@@ -7,7 +7,7 @@ import { falSubmit, isMockMode, billingBypassed } from "../services/fal";
 import { refund, reserveQuota } from "../services/points";
 import { advanceGeneration, submitGenerationCore } from "../services/generationCore";
 import { signAssetUrl } from "../services/storage";
-import { assertProjectEditable } from "../services/projectAcl";
+import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { getModel, endpointOf } from "../../shared/models";
 
 // 注入判斷的單一來源已抽到 services/generationCore（工作流執行器共用）；
@@ -77,10 +77,13 @@ export const generationRouter = router({
         characterIds: z.array(z.string().uuid()).max(6).optional(),
         /** 選定的場景設定卡：色板/光線錨點注入,同場景光影一致 */
         scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
+        /** 冪等鍵（client 產生的 UUID）：timeout 後重送同鍵回原生成列，不重複扣點 */
+        clientRequestId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) =>
       submitGenerationCore({
+        id: input.clientRequestId,
         userId: ctx.auth.user.id,
         projectId: input.projectId,
         modelId: input.modelId,
@@ -91,12 +94,53 @@ export const generationRouter = router({
         scenePresetIds: input.scenePresetIds,
         assertAccess: async (project) => {
           const role = requireGroup(ctx.auth, project.groupId); // 多組隔離
+          assertProjectNotArchived(project); // 封存專案不接受付費生成（stale UI／直呼 tRPC 也擋）
           const { assertProjectEditable } = await import("../services/projectAcl");
           await assertProjectEditable(ctx.auth, project); // 2.3：專案檢視者不能生成
           return role;
         },
       }),
     ),
+
+  /**
+   * 以相同設定重試（伺服器端完整版）：舊做法由前端拿 prompt/model/來源重組 submit，
+   * 會默默丟失角色定裝/場景設定錨點與分鏡綁定——重試出的圖跨鏡就走樣、成品也不回填分鏡。
+   * 這裡從失敗列原樣還原全部連結：characterIds/scenePresetIds/sceneId/sceneRole，
+   * 素材庫來源從網址取回 assetId 重新簽名（過期網址原樣重送必敗），世界觀以「重試當下」重新注入。
+   */
+  retry: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));
+    if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
+    requireGroup(ctx.auth, gen.groupId); // 多組隔離
+    if (gen.status !== "failed") throw new TRPCError({ code: "BAD_REQUEST", message: "只有失敗的生成可以重試" });
+    // 素材庫來源存的是短效簽名網址——取回 assetId 走 sourceAssetId 讓核心重新簽名（順帶重過相容性守門）。
+    // 嚴格 UUID 形（8-4-4-4-12）：外部網址可能剛好含 /api/assets/<36字>/file，寬鬆比對抓到
+    // 非 UUID 會讓 pg 的 uuid cast 直接 500——非 UUID 一律走 sourceUrl 原樣透傳
+    const assetId = gen.sourceUrl?.match(
+      /\/api\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/file/i,
+    )?.[1];
+    return submitGenerationCore({
+      userId: ctx.auth.user.id,
+      projectId: gen.projectId,
+      modelId: gen.modelId,
+      prompt: gen.prompt,
+      sourceAssetId: assetId,
+      sourceUrl: assetId ? undefined : gen.sourceUrl ?? undefined,
+      characterIds: (gen.characterIds as string[] | null) ?? undefined,
+      scenePresetIds: (gen.scenePresetIds as string[] | null) ?? undefined,
+      sceneId: gen.sceneId ?? undefined,
+      sceneRole: gen.sceneRole ?? undefined,
+      // 保留出處：工作流/代理步驟失敗後的重試仍能回溯原本那條 run（來源 chip 不消失）
+      workflowRunId: gen.workflowRunId ?? undefined,
+      agentRunId: gen.agentRunId ?? undefined,
+      reasonPrefix: "重試生成",
+      assertAccess: async (project) => {
+        const role = requireGroup(ctx.auth, project.groupId);
+        await assertProjectEditable(ctx.auth, project); // 2.3：專案檢視者不能生成
+        return role;
+      },
+    });
+  }),
 
   /** 輪詢狀態(開發模式主要路徑;正式站之後補 webhook+此輪詢當備援):薄殼,推進邏輯在 advanceGeneration */
   status: authedProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {

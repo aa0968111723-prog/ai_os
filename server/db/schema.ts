@@ -171,6 +171,14 @@ export const generations = pgTable("generations", {
   sceneId: uuid("scene_id"),
   /** 這筆生成要回填分鏡的哪個角色："visual"＝畫面（回填 scenes.assetId）、"narration"＝旁白音檔（回填 scenes.narrationAssetId）；null＝視為 visual */
   sceneRole: text("scene_role", { enum: ["visual", "narration"] }),
+  /** 送出時帶入的角色定裝卡 id（null＝沒帶）——重試/「再用此設定」要能還原錨點，注入不再是黑盒 */
+  characterIds: jsonb("character_ids").$type<string[]>(),
+  /** 送出時帶入的場景設定卡 id（null＝沒帶） */
+  scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
+  /** 來源工作流執行（null＝非工作流產物）：生成紀錄可回看「這筆是哪條工作流跑出來的」 */
+  workflowRunId: uuid("workflow_run_id"),
+  /** 來源 AI 代理執行（null＝非代理產物） */
+  agentRunId: uuid("agent_run_id"),
   resultUrl: text("result_url"),
   /** 文字型輸出(LLM/圖轉文/語音轉文字/訓練結果資訊)直接存這裡 */
   resultText: text("result_text"),
@@ -280,6 +288,10 @@ export const prompts = pgTable("prompts", {
   projectId: uuid("project_id").notNull(),
   groupId: uuid("group_id").notNull(),
   text: text("text").notNull(),
+  /** 最後一次用這則咒語生成時的模型/角色/場景卡（null＝純文字舊列）——「再用」還原完整設定，不只文字 */
+  modelId: text("model_id"),
+  characterIds: jsonb("character_ids").$type<string[]>(),
+  scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   useCount: integer("use_count").notNull().default(1),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -410,6 +422,34 @@ export const messages = pgTable("messages", {
   voicePendingIdx: index("messages_voice_pending_idx").on(t.voiceStatus),
 }));
 
+/**
+ * 站內私訊（通訊錄 1:1 聊天）：獨立於專案留言（messages 掛組/專案、組內可見），
+ * 私訊只有收發雙方看得到——查詢一律以「本人是 sender 或 recipient」為界，管理員也不例外。
+ * 可私訊對象＝同組夥伴（含團隊管理展開；開發者可與全站互訊），見 services/dmCore.ts。
+ * 內容不落審計明文（trpc.ts 對 dm.send 脫敏 body），維持「私」的承諾。新表＝pushSchema 安全。
+ */
+export const dmMessages = pgTable("dm_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  senderId: uuid("sender_id").notNull(),
+  recipientId: uuid("recipient_id").notNull(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  // 對話串雙向查詢：sender 前綴查「我發給某人」、recipient 前綴查「某人發給我」＋未讀計數
+  senderIdx: index("dm_messages_sender_idx").on(t.senderId, t.recipientId, t.createdAt),
+  recipientIdx: index("dm_messages_recipient_idx").on(t.recipientId, t.senderId, t.createdAt),
+}));
+
+/** 私訊已讀水位：每人對每位對話者一筆 lastReadAt，未讀數＝晚於水位的對方來訊數（dmCore upsert 維護） */
+export const dmReads = pgTable("dm_reads", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  peerId: uuid("peer_id").notNull(),
+  lastReadAt: timestamp("last_read_at").defaultNow().notNull(),
+}, (t) => ({
+  userPeerIdx: index("dm_reads_user_peer_idx").on(t.userId, t.peerId),
+}));
+
 /** 留言表情回應：每人對每則每種表情最多一筆（再按一次＝收回），白名單見 messages router */
 export const messageReactions = pgTable("message_reactions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -439,6 +479,9 @@ export const workflowRuns = pgTable("workflow_runs", {
   userId: uuid("user_id").notNull(),
   presetId: text("preset_id").notNull(),
   prompt: text("prompt").notNull(),
+  /** 啟動時沿用生成台勾選的角色/場景卡（null＝沒帶）——runner 每 tick 從 run 列重建輸入，必須落庫才能貫穿每一步 */
+  characterIds: jsonb("character_ids").$type<string[]>(),
+  scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   status: text("status", { enum: ["running", "done", "failed", "stopped"] }).notNull().default("running"),
   currentStep: integer("current_step").notNull().default(0),
   /** 每步：{ note, status: "pending"|"running"|"done"|"failed"|"stopped", generationId?, detail? } */

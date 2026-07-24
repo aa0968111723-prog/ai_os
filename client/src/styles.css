@@ -390,7 +390,7 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
 .toc-toggle:focus-visible, .toc-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--r-8); }
 
 /* 捲動落點留白 */
-#onboard-worldview, #sec-knowledge, #sec-director, #sec-split, #sec-characters,
+#onboard-worldview, #sec-knowledge, #sec-ai-hub, #sec-characters,
 #sec-scenes, #sec-assets, #sec-recyclebin, #gen-prompt, #sec-prompts,
 #sec-workflow, #onboard-delivery { scroll-margin-top: var(--sp-16); }
 
@@ -431,6 +431,30 @@ mark.mention { background: color-mix(in srgb, var(--primary) 18%, transparent); 
 .quick-phrases { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
 .quick-phrases .chip { cursor: pointer; margin: 0; border: 1px solid var(--border-soft); background: var(--card2); }
 .quick-phrases .chip:hover:not(:disabled) { border-color: var(--border-strong); }
+
+/* 自訂快速短語：chip 內含「一鍵送出」與（管理時）「移除」兩個鈕 */
+.quick-phrases .chip.custom-phrase { display: inline-flex; align-items: center; gap: 2px; padding: 0; cursor: default; }
+.custom-phrase .phrase-send { background: none; border: none; color: inherit; font: inherit;
+  cursor: pointer; padding: 4px 10px; border-radius: var(--r-8); }
+.custom-phrase.editing .phrase-send { padding-right: 4px; }
+.custom-phrase .phrase-send:hover:not(:disabled) { color: var(--fg); }
+.custom-phrase .phrase-del { display: inline-flex; align-items: center; background: none; border: none;
+  color: var(--fg-secondary); cursor: pointer; padding: 2px; margin-right: 5px; border-radius: 50%; }
+.custom-phrase .phrase-del:hover { color: var(--danger-ink); background: var(--card); }
+
+/* 自訂短語小面板：沿用 mention-pop 外框，但改成表單式（輸入框＋表情盤＋提示） */
+.phrase-editor .phrase-input { flex: 1; min-width: 0; padding: 6px 8px; font-size: 13px;
+  border: 1px solid var(--border-soft); border-radius: var(--r-8); background: var(--card2); color: var(--fg); }
+.phrase-editor .phrase-input:focus { outline: none; border-color: var(--primary-border); background: var(--card); }
+.phrase-editor > div { display: flex; }
+/* 面板落在 .mention-pop 內，其 button 規則會蓋掉 .primary 底色；在此還原「加入」鈕外觀 */
+.phrase-editor .primary { flex-shrink: 0; background: var(--primary-solid); color: var(--primary-fg);
+  border-color: transparent; box-shadow: var(--e1), inset 0 1px 0 rgba(255,255,255,.15); padding: var(--sp-4) var(--sp-12); }
+.phrase-editor .primary:hover:not(:disabled) { background: var(--primary-solid-hover); }
+.phrase-editor .primary:disabled { background: var(--muted); color: var(--muted-fg); }
+.phrase-emoji-row { flex-wrap: wrap; gap: 2px; }
+.phrase-editor .phrase-emoji-row button { display: inline-flex; width: auto; padding: 2px 4px;
+  font-size: 18px; border-radius: 50%; }
 
 .compose-ctx { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-secondary);
   background: var(--card2); border-radius: var(--r-8); padding: 4px 10px; margin-top: 8px; min-width: 0; }
@@ -516,8 +540,13 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 }
 
 /* 知識地圖（心智圖）：SVG 依容器寬縮放；節點分色（筆記藍・行程琥珀・專案赤陶・組層級灰） */
-.map-wrap { border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); overflow: hidden; }
+.map-wrap { border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); overflow: hidden; position: relative; }
 .map-svg { display: block; width: 100%; height: auto; }
+/* 畫布工具（縮放/重設）：浮在地圖右上角 */
+.map-tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 1; }
+/* 自由拖拉：節點用抓取游標；touch-action:none 讓手機也能拖節點（空白處仍可捲頁） */
+.map-node { cursor: grab; touch-action: none; }
+.map-node:active { cursor: grabbing; }
 .map-edge { stroke: var(--border-strong); stroke-width: 1.2; }
 .map-edge.leaf { stroke: var(--border); stroke-dasharray: 3 3; }
 .map-node text { font-size: 13px; fill: var(--fg); font-family: var(--sans); pointer-events: none; }
@@ -531,7 +560,13 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .map-node.more text { fill: var(--fg-secondary); font-size: 12px; }
 .map-node.note circle { fill: var(--primary); stroke: #fff; stroke-width: 1; }
 .map-node.schedule circle { fill: var(--gold); stroke: #fff; stroke-width: 1; }
-.map-node.note text, .map-node.schedule text { font-size: 11px; fill: var(--fg-secondary); }
+.map-node.knowledge circle { fill: var(--success); stroke: #fff; stroke-width: 1; }
+.map-node.agent circle { fill: #7c5cbf; stroke: #fff; stroke-width: 1; }
+.map-node.db circle { fill: #3d7f8c; stroke: #fff; stroke-width: 1; }
+.map-node.dbhub rect { fill: var(--card); stroke: #3d7f8c; stroke-width: 1.4; }
+.map-node.dbhub text { fill: #3d7f8c; font-weight: 600; }
+.map-node.dbhub.clickable:hover rect { stroke-width: 1.8; }
+.map-node.note text, .map-node.schedule text, .map-node.knowledge text, .map-node.agent text, .map-node.db text { font-size: 11px; fill: var(--fg-secondary); }
 .map-node.clickable:hover text { fill: var(--fg); }
 .map-node.clickable:hover circle { r: 8; }
 .map-node.project.clickable:hover rect, .map-node.more.clickable:hover rect { stroke: var(--primary); stroke-width: 1.8; }
@@ -539,5 +574,57 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .map-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
 .map-dot.note { background: var(--primary); }
 .map-dot.sched { background: var(--gold); }
+.map-dot.schedule { background: var(--gold); }
+.map-dot.knowledge { background: var(--success); }
+.map-dot.agent { background: #7c5cbf; }
+.map-dot.db { background: #3d7f8c; }
 .map-dot.proj { background: var(--card); border: 1.4px solid var(--primary-border); }
 .map-dot.bucket { background: var(--card); border: 1.4px solid var(--border-strong); }
+/* 圖例即開關（知識地圖）：關閉的型別壓淡；配色沿用對應 map-dot */
+.map-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-12); color: var(--fg-secondary); background: none; border: 1px solid var(--border-soft); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+.map-toggle:not(.on) { opacity: 0.4; }
+.map-toggle:not(.on) .map-dot { filter: grayscale(1); }
+/* 節點詳情面板：點節點後顯示在圖下方，含前往／關閉 */
+.map-detail { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); padding: var(--sp-12); }
+
+/* ── 站內私訊（/chat）：左欄對話串＋右欄聊天視窗；手機以 has-peer 切換單欄 ── */
+.dm-layout { display: flex; gap: var(--sp-12); align-items: stretch; height: calc(100vh - 220px); min-height: 400px; }
+.dm-list { flex: 0 0 280px; overflow-y: auto; padding: 12px; }
+.dm-item { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; background: transparent;
+  border: 0; box-shadow: none; border-radius: var(--r-8); padding: 8px 10px; cursor: pointer; }
+.dm-item:hover:not(:disabled) { background: var(--card2); border-color: transparent; }
+.dm-item.active { background: var(--primary-tint); }
+.dm-item-name { display: flex; align-items: center; gap: 6px; font-size: 14px; min-width: 0; }
+.dm-item-time { margin-left: auto; font-size: 10px; color: var(--fg-secondary); font-family: var(--mono); flex: none; }
+.dm-item-sub { font-size: 12px; color: var(--fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.dm-chip { font-size: 10px; padding: 0 6px; border-radius: 999px; background: var(--primary-tint); color: var(--primary-ink);
+  border: 1px solid var(--primary-border); flex: none; }
+.dm-unread { min-width: 18px; text-align: center; font-size: 11px; font-weight: 700; padding: 0 5px; border-radius: 999px;
+  background: var(--primary); color: #fff; flex: none; }
+.dm-thread { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 0; overflow: hidden; }
+.dm-thread.dm-empty { display: flex; }
+.dm-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); }
+.dm-back { flex: none; }
+.dm-scroll { flex: 1; overflow-y: auto; padding: 12px 14px; }
+.dm-day { text-align: center; margin: 12px 0 4px; }
+.dm-day span { font-size: 11px; color: var(--fg-secondary); background: var(--card2); border-radius: 999px; padding: 2px 10px; }
+.dm-row { display: flex; margin-top: 8px; }
+.dm-row.mine { justify-content: flex-end; }
+.dm-bubble { max-width: 78%; padding: 8px 12px; border-radius: 14px; font-size: 14px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.dm-row.mine .dm-bubble { background: var(--primary-tint); border: 1px solid var(--primary-border); border-bottom-right-radius: 4px; }
+.dm-row.theirs .dm-bubble { background: var(--card2); border: 1px solid var(--border-soft); border-bottom-left-radius: 4px; }
+.dm-time { display: inline-block; font-size: 10px; color: var(--fg-secondary); font-family: var(--mono); margin-left: 8px; vertical-align: baseline; }
+.dm-compose { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px; border-top: 1px solid var(--border-soft); }
+.dm-compose textarea { flex: 1; resize: none; margin: 0; }
+.dm-compose button { flex: none; }
+/* 頂欄私訊入口的未讀小紅點數 */
+.dm-nav-unread { min-width: 16px; text-align: center; font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 999px;
+  background: var(--primary); color: #fff; }
+@media (max-width: 720px) {
+  .dm-layout { height: calc(100vh - 190px); }
+  /* 單欄：未選對象只顯示清單；選了只顯示對話（返回鈕回清單） */
+  .dm-layout .dm-list { flex: 1; }
+  .dm-layout.has-peer .dm-list { display: none; }
+  .dm-layout:not(.has-peer) .dm-thread { display: none; }
+}
