@@ -1,22 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Route, Switch, Link, useLocation } from "wouter";
 import { trpc } from "./api";
 import { Launchpad } from "./pages/Launchpad";
 import { ProjectPage } from "./pages/ProjectPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
-import { AdminPage, AuditLogCard, ConsumptionMonitorCard } from "./pages/AdminPage";
-import { MembersPage } from "./pages/MembersPage";
-import { FeedbackPage } from "./pages/FeedbackPage";
-import { MyReportsPage } from "./pages/MyReportsPage";
-import { ModelsPage } from "./pages/ModelsPage";
-import { HelpPage } from "./pages/HelpPage";
-import { McpPage } from "./pages/McpPage";
-import { IntegrationsPage } from "./pages/IntegrationsPage";
-import { DownloadsPage } from "./pages/DownloadsPage";
-import { PlannerPage } from "./pages/PlannerPage";
-import { DatabasesPage } from "./pages/DatabasesPage";
-import { ChatPage } from "./pages/ChatPage";
+// 路由層級 code-splitting（QA-025）：管理/資料庫/排程等重頁面延遲載入——
+// 首屏（作業台/專案頁/登入）不揹整個 App 的 JS。lazy 需要 default export，用 then 轉接具名匯出。
+const AdminPage = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.AdminPage })));
+const AuditLogCard = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.AuditLogCard })));
+const ConsumptionMonitorCard = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.ConsumptionMonitorCard })));
+const InsightsCard = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.InsightsCard })));
+const MembersPage = lazy(() => import("./pages/MembersPage").then((m) => ({ default: m.MembersPage })));
+const FeedbackPage = lazy(() => import("./pages/FeedbackPage").then((m) => ({ default: m.FeedbackPage })));
+const MyReportsPage = lazy(() => import("./pages/MyReportsPage").then((m) => ({ default: m.MyReportsPage })));
+const ModelsPage = lazy(() => import("./pages/ModelsPage").then((m) => ({ default: m.ModelsPage })));
+const HelpPage = lazy(() => import("./pages/HelpPage").then((m) => ({ default: m.HelpPage })));
+const McpPage = lazy(() => import("./pages/McpPage").then((m) => ({ default: m.McpPage })));
+const IntegrationsPage = lazy(() => import("./pages/IntegrationsPage").then((m) => ({ default: m.IntegrationsPage })));
+const DownloadsPage = lazy(() => import("./pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })));
+const PlannerPage = lazy(() => import("./pages/PlannerPage").then((m) => ({ default: m.PlannerPage })));
+const DatabasesPage = lazy(() => import("./pages/DatabasesPage").then((m) => ({ default: m.DatabasesPage })));
+const ChatPage = lazy(() => import("./pages/ChatPage").then((m) => ({ default: m.ChatPage })));
 import { PasswordInput } from "./components/PasswordInput";
 import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
 import { FeedbackWidget } from "./feedback/FeedbackWidget";
@@ -354,6 +359,8 @@ export function App() {
           )}
         </header>
 
+        {/* lazy 頁面載入中的過場（QA-025 code-splitting）：整個路由樹共用一個 Suspense */}
+        <Suspense fallback={<p className="hint">載入中…</p>}>
         <Switch>
           <Route path="/invite/:token">{(params) => <AcceptInvitePage token={params.token} />}</Route>
           <Route>
@@ -414,6 +421,7 @@ export function App() {
                     // 組長也看得到「點數消耗監控」：後端已按呼叫者權限把範圍收斂到自己帶的組
                     <div className="stack" style={{ maxWidth: 860, margin: "0 auto" }}>
                       <ConsumptionMonitorCard />
+                      <InsightsCard />
                       <AuditLogCard />
                     </div>
                   ) : (
@@ -455,6 +463,7 @@ export function App() {
             )}
           </Route>
         </Switch>
+        </Suspense>
       </div>
 
       {mustChangePw ? (

@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
+import { isUniqueViolation } from "../services/generationCore";
 
 /**
  * 把選定場景組成注入生成提示詞的「場景錨點」（色板＋光線；給 generation 重用）。
@@ -45,6 +46,8 @@ export const scenePresetsRouter = router({
         palette: z.string().min(1, "請填色板").max(500),
         lighting: z.string().max(500).optional(),
         referenceAssetId: z.string().uuid().optional(),
+        /** 冪等鍵（client 產生的 UUID，當 row id 用）：timeout 後重送同鍵回原卡片，不重複建立 */
+        clientRequestId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -54,19 +57,32 @@ export const scenePresetsRouter = router({
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
       // 跨組引用驗證：referenceAssetId 必須同組且是圖片（比照 characters）
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, project.groupId);
-      const [row] = await db
-        .insert(schema.scenePresets)
-        .values({
-          projectId: project.id,
-          groupId: project.groupId,
-          name: input.name.trim(),
-          palette: input.palette.trim(),
-          lighting: input.lighting?.trim(),
-          referenceAssetId: input.referenceAssetId,
-          createdBy: ctx.auth.user.id,
-        })
-        .returning();
-      return row;
+      try {
+        const [row] = await db
+          .insert(schema.scenePresets)
+          .values({
+            id: input.clientRequestId,
+            projectId: project.id,
+            groupId: project.groupId,
+            name: input.name.trim(),
+            palette: input.palette.trim(),
+            lighting: input.lighting?.trim(),
+            referenceAssetId: input.referenceAssetId,
+            createdBy: ctx.auth.user.id,
+          })
+          .returning();
+        return row;
+      } catch (err) {
+        // 冪等重送撞唯一鍵＝前次請求已建卡（client timeout 後重試）：回既有卡，不重複建立（QA-003）
+        if (input.clientRequestId && isUniqueViolation(err)) {
+          const [existing] = await db
+            .select()
+            .from(schema.scenePresets)
+            .where(and(eq(schema.scenePresets.id, input.clientRequestId), eq(schema.scenePresets.projectId, project.id)));
+          if (existing) return existing;
+        }
+        throw err;
+      }
     }),
 
   update: authedProcedure

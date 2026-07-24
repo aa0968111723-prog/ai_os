@@ -13,6 +13,14 @@ import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
 const SAMPLE_PROJECT_TITLE = "範例專案：禪心一炷香";
 
 /**
+ * 專案負責人資格（純規則，供測試）：新負責人必須「該組成員」或「該團隊管理員」——
+ * 負責人是專案的裁決點（封存/還原等），不能移交給組外看不到專案的人。
+ */
+export function canOwnProject(groupMemberIds: readonly string[], teamAdminIds: readonly string[], userId: string): boolean {
+  return groupMemberIds.includes(userId) || teamAdminIds.includes(userId);
+}
+
+/**
  * 記憶體併發鎖（同組同時只允許一個「建立範例」在跑）：去重查詢是主守門，這是雙擊競態的兜底，
  * 避免兩個請求同時通過去重、各插一份範例。單容器部署、程序內 Set 即足夠，重啟歸零無妨。
  */
@@ -290,19 +298,29 @@ export const projectsRouter = router({
     return { ...project, myProjectRole };
   }),
 
-  /** 專案素材庫(生成成品;供「來源輸入」挑選與素材總覽) */
-  assets: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
-    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
-    if (!project) throw new TRPCError({ code: "NOT_FOUND" });
-    requireGroup(ctx.auth, project.groupId);
-    // 只列未進回收桶的素材（軟刪除以 deletedAt 標記；回收桶另走 listDeleted）
-    return db
-      .select()
-      .from(schema.assets)
-      .where(and(eq(schema.assets.projectId, input.projectId), isNull(schema.assets.deletedAt)))
-      .orderBy(desc(schema.assets.createdAt))
-      .limit(100);
-  }),
+  /** 專案素材庫(生成成品;供「來源輸入」挑選與素材總覽)。
+   *  QA-013：舊版硬上限 100 且無分頁——大量素材的專案第 101 件起永遠不可見。
+   *  改收 limit/offset（預設仍 100，回傳陣列形狀不變、既有呼叫端零改動），
+   *  前端以「載入更多」加大 limit 逐步取回全量。 */
+  assets: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      limit: z.number().int().min(1).max(500).optional(),
+      offset: z.number().int().min(0).optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, project.groupId);
+      // 只列未進回收桶的素材（軟刪除以 deletedAt 標記；回收桶另走 listDeleted）
+      return db
+        .select()
+        .from(schema.assets)
+        .where(and(eq(schema.assets.projectId, input.projectId), isNull(schema.assets.deletedAt)))
+        .orderBy(desc(schema.assets.createdAt), desc(schema.assets.id))
+        .limit(input.limit ?? 100)
+        .offset(input.offset ?? 0);
+    }),
 
   /**
    * 刪除素材＝軟刪除（丟進回收桶，可還原）。上傳者本人或組長以上可操作。
@@ -474,8 +492,16 @@ export const projectsRouter = router({
       .from(schema.projectMembers)
       .where(eq(schema.projectMembers.projectId, project.id));
     const roleOf = (userId: string) => overrides.find((o) => o.userId === userId)?.role === "viewer" ? "viewer" as const : "editor" as const;
+    // 專案負責人（ownerId）可能已離組/離站——effective 找不到就補查 users 表，前端才不會只剩一個 uuid
+    let ownerName = effective.find((m) => m.userId === project.ownerId)?.name ?? null;
+    if (!ownerName) {
+      const [ownerUser] = await db.select({ name: schema.users.name }).from(schema.users).where(eq(schema.users.id, project.ownerId));
+      ownerName = ownerUser?.name ?? null;
+    }
     return {
       canManage: myRole !== "member",
+      /** 專案負責人：名字為 null＝帳號已不存在（前端顯示「已離開」） */
+      owner: { userId: project.ownerId, name: ownerName, inGroup: effective.some((m) => m.userId === project.ownerId) },
       members: effective.map((m) => ({
         userId: m.userId,
         name: m.name ?? "?",
@@ -485,6 +511,41 @@ export const projectsRouter = router({
       })),
     };
   }),
+
+  /**
+   * 轉移專案負責人（團隊管理細節補齊）：組長以上（含團隊管理員/開發者——loadAuthState 已展開為 admin）。
+   * 新負責人必須是該組成員或該團隊管理員（canOwnProject 純規則）；負責人有封存/還原等裁決權，
+   * 人員異動（離組/交接）時由這裡把專案交接給還在組裡的人。
+   */
+  setOwner: authedProcedure
+    .input(z.object({ projectId: z.string().uuid(), userId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireLeader(ctx.auth, project.groupId);
+      if (project.ownerId === input.userId) return { ok: true, ownerId: input.userId }; // 冪等：已是負責人
+      const [grp] = await db.select({ teamId: schema.groups.teamId }).from(schema.groups).where(eq(schema.groups.id, project.groupId));
+      const [members, admins] = await Promise.all([
+        db
+          .select({ userId: schema.groupMembers.userId })
+          .from(schema.groupMembers)
+          .where(eq(schema.groupMembers.groupId, project.groupId)),
+        grp
+          ? db
+              .select({ userId: schema.teamMembers.userId })
+              .from(schema.teamMembers)
+              .where(and(eq(schema.teamMembers.teamId, grp.teamId), eq(schema.teamMembers.role, "admin")))
+          : Promise.resolve([]),
+      ]);
+      if (!canOwnProject(members.map((m) => m.userId), admins.map((a) => a.userId), input.userId)) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "新負責人必須是這個組的成員（或團隊管理員）" });
+      }
+      await db
+        .update(schema.projects)
+        .set({ ownerId: input.userId, updatedAt: new Date() })
+        .where(eq(schema.projects.id, project.id));
+      return { ok: true, ownerId: input.userId };
+    }),
 
   /** 組成員清單（給 Planner 筆記/排程的 @提及下拉——不需專案，任何組員可讀） */
   groupMembers: authedProcedure.input(z.object({ groupId: z.string().uuid() })).query(async ({ ctx, input }) => {

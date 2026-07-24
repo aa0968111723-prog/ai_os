@@ -17,19 +17,21 @@ import { ensureSchema } from "./db/ensure";
 import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
-import { buildEdl, buildFcpxml, buildSrt, exportProjectZip } from "./services/exporter";
+import { buildEdl, buildFcpxml, buildSrt, buildXmeml, exportProjectZip, exportZipName } from "./services/exporter";
+import { exportJianyingDraftZip } from "./services/jianying";
 import { handleMcp } from "./services/mcp";
 import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
-  isAllowedUploadMime, kindFromMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT,
+  isAllowedUploadMime, kindFromMime, resolveUploadMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT,
 } from "./services/storage";
 import { markBootReady, isBootReady } from "./services/boot";
 import { recordError, listErrors, errorCountSince } from "./services/errlog";
 import { attachRealtime } from "./services/realtime";
 import { startWorkflowRunner } from "./services/workflowRunner";
-import { startGenerationRunner } from "./services/generationRunner";
+import { startGenerationRunner, runnerHeartbeat } from "./services/generationRunner";
 import { startAgentRunner } from "./services/agentRunner";
+import { startExportRunner } from "./services/exportRunner";
 import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
@@ -73,33 +75,85 @@ app.use(
 
 app.use(express.json({ limit: "2mb" }));
 
+// 建置追溯（QA 版本漂移）：部署時由建置流程注入（Dockerfile ARG→ENV），
+// /api/health 露出非敏感的 build 資訊，讓正式環境可對應到唯一 Git commit。
+const BUILD_INFO = {
+  sha: process.env.BUILD_SHA || null,
+  branch: process.env.BUILD_BRANCH || null,
+  builtAt: process.env.BUILD_TIME || null,
+};
+
 // 健康檢查 — 純 HTTP，不碰 DB
 app.get("/api/health", (_req, res) => {
-  // 只回存活狀態，不外洩生成模式等內部資訊（#26）
-  res.json({ ok: true, time: new Date().toISOString() });
+  // 只回存活狀態＋建置版本（公開 repo 的 commit SHA 非敏感），不外洩生成模式等內部資訊（#26）
+  res.json({ ok: true, time: new Date().toISOString(), build: BUILD_INFO });
 });
 
-// 就緒診斷 — 用瀏覽器打開就知道資料庫接通了沒（給非工程背景的自我診斷頁）
+// 就緒診斷 — 用瀏覽器打開就知道系統就緒了沒（給非工程背景的自我診斷頁）。
+// QA-004：不能只看 DB——曾發生 ready 全綠但 storage 落到本機 fallback、runner 未啟動的假綠燈。
+// 逐一分項回報：db／boot／storage 實際寫讀／generation runner 心跳／必要 provider 設定；
+// 任一必要分項失敗即回 503。仍維持未認證可用：只回 ok/錯誤概述，不洩內部組態細節
+//（mockMode、AUTH_MODE 等偵察面仍只在需開發者登入的 /api/selftest）。
 app.get("/api/ready", async (_req, res) => {
+  const components: Record<string, { ok: boolean; note: string }> = {};
+
   try {
     await db.execute(sql`select 1`);
-    // ★安全：本端點「未認證」即可存取（給非工程背景者自助診斷 DB 是否接通）。
-    // 只回「資料庫/初始化」這種安全的存活訊號；生成模式（mockMode）與 AUTH_MODE=dev 後門是否誤留，
-    // 屬內部組態偵察面，改到需開發者登入的 /api/selftest 呈現（見該端點「生成模式」「認證模式」兩項），
-    // 不對匿名訪客外洩。
-    res.json({
-      ok: true,
-      db: "connected（資料庫已接通）",
-      boot: isBootReady() ? "ready（初始化完成）" : "initializing（建表/種子進行中，稍候自動完成）",
-    });
+    components.db = { ok: true, note: "connected（資料庫已接通）" };
   } catch (err) {
     console.error("[ready] DB 連線失敗：", err instanceof Error ? err.message : err);
-    res.status(503).json({
-      ok: false,
-      db: "error（資料庫未接通）",
-      hint: "到部署平台的服務 Variables 檢查 DATABASE_URL 是否正確指向 PostgreSQL（Zeabur：跨服務引用連線字串），改完重新部署",
-    });
+    components.db = { ok: false, note: "error（資料庫未接通）——檢查部署平台 Variables 的 DATABASE_URL" };
   }
+
+  const bootReady = isBootReady();
+  components.boot = { ok: bootReady, note: bootReady ? "ready（初始化完成）" : "initializing（建表/種子進行中，稍候自動完成）" };
+
+  // 儲存層：實際寫入＋讀回＋刪除探針，而不是只看目錄存在；
+  // 正式環境落到本機 .data fallback（Volume 沒掛上）視為未就緒——重啟即遺失素材，不能算綠燈。
+  try {
+    const { saveBuffer, removeStoredFile } = await import("./services/storage");
+    const probe = await saveBuffer(Buffer.from("ready-probe"), "text/plain");
+    await removeStoredFile(probe.storagePath);
+    const usingVolume = STORAGE_ROOT === "/data" || !!process.env.ASSET_DIR;
+    if (isProd && !usingVolume) {
+      components.storage = { ok: false, note: "fallback（正式環境未掛持久 Volume，素材重啟即遺失）——請掛 /data 或設 ASSET_DIR" };
+    } else {
+      components.storage = { ok: true, note: usingVolume ? "ok（持久 Volume 可寫讀）" : "ok（本機模式可寫讀）" };
+    }
+  } catch (err) {
+    console.error("[ready] 儲存層探針失敗：", err instanceof Error ? err.message : err);
+    components.storage = { ok: false, note: "error（儲存層無法寫入/讀取）" };
+  }
+
+  // 生成執行器心跳：boot 完成後 runner 應已啟動且近 60 秒內有 tick（tick 間隔 6 秒）
+  {
+    const hb = runnerHeartbeat();
+    if (!bootReady) {
+      components.runner = { ok: true, note: "pending（等待初始化完成後啟動）" };
+    } else if (!hb.started) {
+      components.runner = { ok: false, note: "not_started（生成執行器未啟動）" };
+    } else if (hb.lastTickAt !== null && Date.now() - hb.lastTickAt > 60_000) {
+      components.runner = { ok: false, note: "stalled（生成執行器逾 60 秒沒有心跳）" };
+    } else {
+      components.runner = { ok: true, note: "ok（生成執行器運作中）" };
+    }
+  }
+
+  // 必要 provider 設定：正式模式需要媒體生成金鑰（只回是否已設定，不洩其值/模式細節）
+  components.provider = isMockMode() || process.env.FAL_KEY
+    ? { ok: true, note: "ok（生成服務設定已就緒）" }
+    : { ok: false, note: "missing（媒體生成金鑰未設定，生成會失敗）" };
+
+  const ok = Object.values(components).every((c) => c.ok);
+  // 頂層 db/boot 維持舊版字串形狀：CI e2e 以 grep '"boot":"ready' 等就緒、
+  // e2e-phase4 驗頂層 boot 鍵，文件也教管理員看這兩個欄位——分項細節在 components。
+  res.status(ok ? 200 : 503).json({
+    ok,
+    db: components.db.ok ? "connected（資料庫已接通）" : "error（資料庫未接通）",
+    boot: bootReady ? "ready（初始化完成）" : "initializing（建表/種子進行中，稍候自動完成）",
+    components,
+    time: new Date().toISOString(),
+  });
 });
 
 // 佔位素材端點：專案免費佔位縮圖（projects.ts）與 e2e 測試假素材共用；離線可用，交付包也抓得到
@@ -142,9 +196,26 @@ app.get("/api/mock-asset/:kind", (req, res) => {
 // 多選打包的 assetIds 逐一驗 UUID：非 UUID 一律剔除（防怪參數；剔光＝回全量打包）
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** 讀檔案開頭數 bytes（上傳簽名嗅探用，QA-021）：不把整檔讀進記憶體 */
+async function readFileHead(filePath: string, bytes = 16): Promise<Buffer> {
+  const { open } = await import("node:fs/promises");
+  const fh = await open(filePath, "r");
+  try {
+    const buf = Buffer.alloc(bytes);
+    const { bytesRead } = await fh.read(buf, 0, bytes, 0);
+    return buf.subarray(0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
+
 // 交付素材包下載（zip；session cookie 驗證＋組隔離）。
 // 可選 ?assetIds=id1,id2（逗號分隔）＝素材庫多選打包：媒體檔只打包這些素材，交付文件照常。
+// QA-005（防重複）：同專案＋同選項的匯出「同時」只允許一份在打包——長時間打包期間重複點擊/重開連結
+// 會做出兩份一模一樣的 ZIP（白耗外部下載與頻寬），重複請求直接回 409 讓使用者等第一份完成。
+const exportsInFlight = new Set<string>();
 app.get("/api/export/:projectId", async (req, res) => {
+  let flightKey: string | null = null;
   try {
     const auth = await resolveSession(req);
     if (!auth) return res.status(401).json({ error: "請先登入" });
@@ -155,16 +226,60 @@ app.get("/api/export/:projectId", async (req, res) => {
       .split(",")
       .map((s) => s.trim())
       .filter((s) => UUID_RE.test(s));
-    await exportProjectZip(project.id, res, assetIds.length > 0 ? assetIds : undefined);
+    flightKey = `${project.id}|${[...assetIds].sort().join(",")}`;
+    if (exportsInFlight.has(flightKey)) {
+      flightKey = null; // 不是本請求持有的鎖，finally 不得誤釋放
+      return res.status(409).json({ error: "這個專案的交付包正在打包中——請等第一份完成（大包可能需要數分鐘），不用重複點擊" });
+    }
+    exportsInFlight.add(flightKey);
+    // 打包核心已與 Response 解耦（QA-005 job 化共用）：標頭在此設定、斷線轉成 AbortSignal
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(exportZipName(project.title))}`);
+    const clientAbort = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) clientAbort.abort();
+    });
+    await exportProjectZip(project.id, res, {
+      assetIds: assetIds.length > 0 ? assetIds : undefined,
+      signal: clientAbort.signal,
+    });
   } catch (err) {
     console.error("[export]", err);
     recordError("export", err); // 進錯誤環形緩衝（selftest「近期錯誤」）
-    if (!res.headersSent) res.status(500).json({ error: "打包失敗，請稍後再試（管理員可查伺服器記錄）" });
+    if (!res.headersSent) {
+      res.removeHeader("Content-Disposition"); // 別讓錯誤 JSON 被當成 .zip 存檔
+      res.status(500).json({ error: "打包失敗，請稍後再試（管理員可查伺服器記錄）" });
+    }
+  } finally {
+    if (flightKey) exportsInFlight.delete(flightKey);
   }
 });
 
-// 單檔時間軸/字幕下載（需求 #8）：?format=srt（剪映/CapCut/Premiere）｜fcpxml（Final Cut Pro/剪映專業版）｜edl（DaVinci Resolve）。
+// 匯出 job 成品下載（QA-005）：job 完成後由此取檔——登入＋組隔離，檔案從 Volume sendFile（支援 Range）
+app.get("/api/export/jobs/:jobId/download", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const [job] = await db.select().from(schema.exportJobs).where(eq(schema.exportJobs.id, req.params.jobId));
+    if (!job) return res.status(404).json({ error: "找不到這個匯出工作" });
+    if (!auth.groups.some((g) => g.groupId === job.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
+    if (job.status !== "done" || !job.storagePath) {
+      return res.status(409).json({ error: `交付包尚未就緒（目前狀態：${job.status}）`, status: job.status });
+    }
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(job.zipName ?? "交付包.zip")}`);
+    res.sendFile(absPathOf(job.storagePath));
+  } catch (err) {
+    console.error("[export-job:download]", err);
+    recordError("export-job:download", err);
+    if (!res.headersSent) res.status(500).json({ error: "下載失敗，請稍後再試" });
+  }
+});
+
+// 單檔時間軸/字幕下載（需求 #8）：?format=srt（剪映/CapCut/Premiere）｜fcpxml（Final Cut Pro/DaVinci Resolve/剪映專業版）
+// ｜xmeml（Premiere 時間軸 .xml）｜edl（DaVinci Resolve 備援）。
 // 登入＋組隔離比照上方交付包路由；分鏡取未軟刪、依 orderIndex 排序，時間碼依各鏡秒數累計。
+// 單檔下載沒有隨附媒體檔，fcpxml/xmeml 產「骨架版」（gap/空軌佔位）；要「匯入即組好粗剪」請用交付包內的媒體連結版。
 app.get("/api/export/:projectId/timeline", async (req, res) => {
   try {
     const auth = await resolveSession(req);
@@ -173,8 +288,8 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
     if (!project) return res.status(404).json({ error: "找不到專案" });
     if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
     const format = String(req.query.format ?? "");
-    if (format !== "srt" && format !== "fcpxml" && format !== "edl") {
-      return res.status(400).json({ error: "format 需為 srt、fcpxml 或 edl" });
+    if (format !== "srt" && format !== "fcpxml" && format !== "edl" && format !== "xmeml") {
+      return res.status(400).json({ error: "format 需為 srt、fcpxml、xmeml 或 edl" });
     }
     const scenes = await db
       .select()
@@ -186,7 +301,9 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
         ? { name: "字幕.srt", mime: "text/plain; charset=utf-8", body: buildSrt(scenes) }
         : format === "fcpxml"
           ? { name: "時間軸.fcpxml", mime: "application/xml; charset=utf-8", body: buildFcpxml(scenes, project.title) }
-          : { name: "剪輯表.edl", mime: "text/plain; charset=utf-8", body: buildEdl(scenes, project.title) };
+          : format === "xmeml"
+            ? { name: "Premiere時間軸.xml", mime: "application/xml; charset=utf-8", body: buildXmeml(scenes, project.title) }
+            : { name: "剪輯表.edl", mime: "text/plain; charset=utf-8", body: buildEdl(scenes, project.title) };
     // res.attachment 以 RFC 5987（filename*=UTF-8''…）讓中文檔名下載安全；Content-Type 隨後覆寫為明確值
     res.attachment(file.name);
     res.setHeader("Content-Type", file.mime);
@@ -195,6 +312,26 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
     console.error("[export:timeline]", err);
     recordError("export:timeline", err);
     if (!res.headersSent) res.status(500).json({ error: "時間軸/字幕檔產生失敗，請稍後再試" });
+  }
+});
+
+// 剪映/CapCut 草稿包下載（實驗性）：整個草稿資料夾（draft_content.json＋素材）打成 zip，
+// 解壓到剪映草稿目錄後打開剪映即見排好的時間軸。登入＋組隔離比照交付包路由。
+app.get("/api/export/:projectId/jianying", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
+    if (!project) return res.status(404).json({ error: "找不到專案" });
+    if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
+    await exportJianyingDraftZip(project.id, res);
+  } catch (err) {
+    console.error("[export:jianying]", err);
+    recordError("export:jianying", err);
+    if (!res.headersSent) {
+      res.removeHeader("Content-Disposition"); // 別讓錯誤 JSON 被當成 .zip 存檔
+      res.status(500).json({ error: "剪映草稿包產生失敗，請稍後再試（管理員可查伺服器記錄）" });
+    }
   }
 });
 
@@ -257,6 +394,14 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
       await cleanup();
       return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：圖片（含 HEIC）/影片/音訊/PDF/Office/文字/壓縮檔` });
     }
+    // QA-021：不只信宣稱 MIME／副檔名——讀檔頭簽名驗證；內容其實是另一種支援格式時依內容校正
+    const verdict = resolveUploadMime(mime, await readFileHead(req.file.path));
+    if (!verdict) {
+      await cleanup();
+      return res.status(415).json({ error: "檔案內容與宣稱的格式不符（無法辨識檔案簽名）——請確認檔案未損壞、副檔名正確" });
+    }
+    if (verdict.corrected) console.warn(`[upload] MIME 依檔案內容校正：${mime} → ${verdict.mime}（${req.file.originalname}）`);
+    mime = verdict.mime;
     const guard = await checkDiskSpace(req.file.size);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
 
@@ -368,6 +513,14 @@ app.post("/api/databases/upload", requireAuthBeforeUpload, upload.single("file")
       await cleanup();
       return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：圖片（含 HEIC）/影片/音訊/PDF/Word/Excel/PowerPoint/文字/字幕/壓縮檔等常見格式` });
     }
+    // QA-021：與 /api/upload 同一套檔頭簽名驗證——資料庫文件層同樣不能只信宣稱 MIME
+    const verdict = resolveUploadMime(mime, await readFileHead(req.file.path));
+    if (!verdict) {
+      await cleanup();
+      return res.status(415).json({ error: "檔案內容與宣稱的格式不符（無法辨識檔案簽名）——請確認檔案未損壞、副檔名正確" });
+    }
+    if (verdict.corrected) console.warn(`[databases:upload] MIME 依檔案內容校正：${mime} → ${verdict.mime}（${req.file.originalname}）`);
+    mime = verdict.mime;
     const guard = await checkDiskSpace(req.file.size);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
     const { quotaGuardError, extractTextFromBuffer, MAX_EXTRACT_BYTES } = await import("./services/databaseFiles");
@@ -569,12 +722,13 @@ app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
     if (!auth.groups.some((g) => g.groupId === groupId)) return res.status(403).json({ error: "你不屬於這個組" });
     const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
     if (!group) return res.status(404).json({ error: "找不到組" });
+    // QA-017：行事曆訂閱是「全量」用途——上限拉高到 2000（一組行程遠低於此；防炸僅防極端）
     const items = await db
       .select()
       .from(schema.scheduleItems)
       .where(eq(schema.scheduleItems.groupId, groupId))
       .orderBy(asc(schema.scheduleItems.startsAt))
-      .limit(500);
+      .limit(2000);
     const { buildIcs } = await import("./routers/schedule");
     res.attachment("組排程.ics"); // RFC 5987 中文檔名
     res.setHeader("Content-Type", "text/calendar; charset=utf-8");
@@ -665,8 +819,52 @@ app.get("/api/me/export", async (req, res) => {
   }
 });
 
-// MCP 伺服器介面（設 MCP_API_KEY 啟用；供外部 AI 客戶端操作）
-app.post("/api/mcp", handleMcp);
+// ── MCP transport 合約（QA-012）────────────────────────────────────────────
+// Origin 政策：無 Origin（伺服器對伺服器，如 Claude Desktop/SDK）放行；同源放行；
+// 其餘只允許白名單（MCP_ALLOWED_ORIGINS，逗號分隔）。瀏覽器跨源挾帶金鑰／DNS rebinding 明確 403。
+const MCP_ALLOWED_ORIGINS = new Set(
+  (process.env.MCP_ALLOWED_ORIGINS ?? "https://claude.ai,https://claude.com")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+function mcpOriginAllowed(req: express.Request): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    if (new URL(origin).host === req.headers.host) return true; // 同源
+  } catch {
+    return false; // Origin 不是合法 URL：一律拒絕
+  }
+  return MCP_ALLOWED_ORIGINS.has(origin);
+}
+/** 白名單內的跨源請求反射其 Origin（絕不用 wildcard 搭配 credential 類 header） */
+function setMcpCors(req: express.Request, res: express.Response): void {
+  const origin = req.headers.origin;
+  if (!origin || !mcpOriginAllowed(req)) return;
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+}
+app.options("/api/mcp", (req, res) => {
+  if (!mcpOriginAllowed(req)) return res.status(403).json({ error: "此來源（Origin）不在 MCP 允許清單——管理員可設 MCP_ALLOWED_ORIGINS" });
+  setMcpCors(req, res);
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "content-type, x-api-key, mcp-protocol-version, accept");
+  res.setHeader("Access-Control-Max-Age", "600");
+  res.status(204).end();
+});
+// MCP 伺服器介面（設 MCP_API_KEY 或個人金鑰啟用；供外部 AI 客戶端操作）
+app.post("/api/mcp", (req, res, next) => {
+  if (!mcpOriginAllowed(req)) return res.status(403).json({ error: "此來源（Origin）不在 MCP 允許清單——管理員可設 MCP_ALLOWED_ORIGINS" });
+  setMcpCors(req, res);
+  next();
+}, handleMcp);
+// 其他方法（GET/PUT/DELETE…）：本伺服器不提供 SSE stream，明確回 405 + Allow，
+// 不再落到 SPA catch-all 回 HTML 200 讓 SDK／監控誤判成功
+app.all("/api/mcp", (_req, res) => {
+  res.setHeader("Allow", "POST, OPTIONS");
+  res.status(405).json({ error: "MCP 端點僅接受 JSON-RPC POST（不提供 GET/SSE）", allow: ["POST", "OPTIONS"] });
+});
 
 // 資料庫對外連接（本機腳本／手機 App／其他系統）：REST API v1 + CSV 匯出 + 行事曆訂閱。
 // 認證＝個人 MCP 金鑰（x-api-key / ?key=）或 session cookie；授權沿用 databaseAcl。
@@ -793,7 +991,7 @@ app.post("/api/assistant/ask", async (req, res) => {
   try {
     const { runAssistantAsk } = await import("./routers/assistant");
     const result = await runAssistantAsk(
-      { projectId, message, userId: auth.user.id, isInGroup: (g) => auth.groups.some((x) => x.groupId === g) },
+      { projectId, message, auth },
       (e) => sse("step", e),
     );
     sse("done", result);
@@ -855,6 +1053,12 @@ app.get("/api/feedback/:id/shot", async (req, res) => {
   }
 });
 
+// 未知 /api/* 統一 JSON 404（QA-022）：必須放在所有 API 路由之後、SPA catch-all 之前——
+// 否則正式環境未知 API 路徑會落到 index.html 回 HTML 200，讓監控與 SDK 誤判成功。
+app.all("/api/*", (req, res) => {
+  res.status(404).json({ error: "找不到這個 API 路徑", path: req.path });
+});
+
 // 正式環境：服務打包後的前端
 if (isProd) {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -862,6 +1066,27 @@ if (isProd) {
   app.use(express.static(publicDir));
   app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 }
+
+// 統一 JSON 錯誤處理（QA-022）：body-parser 的 malformed JSON／過大請求不再回 Express 預設 HTML 錯誤頁。
+// /api/mcp 依 JSON-RPC 慣例回 -32700 Parse error envelope；其他 /api/* 回 application/json 錯誤。
+app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const e = err as { type?: string; status?: number } | null;
+  const isParse = e?.type === "entity.parse.failed" || (err instanceof SyntaxError && "body" in (err as object));
+  const isTooLarge = e?.type === "entity.too.large";
+  if (isParse || isTooLarge) {
+    if (req.path === "/api/mcp") {
+      return res.status(400).json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: isTooLarge ? "Request entity too large" : "Parse error" } });
+    }
+    return res.status(isTooLarge ? 413 : 400).json({ error: isTooLarge ? "請求本文過大（上限 2MB）" : "JSON 格式不正確" });
+  }
+  if (res.headersSent) return next(err);
+  if (req.path.startsWith("/api/")) {
+    console.error("[api]", err);
+    recordError("api:" + req.path, err);
+    return res.status(500).json({ error: "系統暫時無法處理，請稍後再試" });
+  }
+  return next(err);
+});
 
 // 回饋截圖孤兒清理排程（#6）：DB 就緒後啟動，開機延遲數分鐘先跑一次，其後每 6 小時一次。
 // 清理實作由儲存層提供；此處以動態 import 取用並全程容錯——函式缺席或執行失敗都靜默略過，
@@ -904,6 +1129,7 @@ const httpServer = app.listen(port, () => {
         startWorkflowRunner();
         startGenerationRunner(); // A：單張生成也改由伺服器背景推進，關頁不再卡「生成中」
         startAgentRunner(); // AI 代理：核准後的計畫由伺服器背景逐步執行
+        startExportRunner(); // 交付包匯出 job（QA-005）：背景打包＋進度＋過期清理
         scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
         startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
         const { startGoogleCalendarSweep } = await import("./services/googleCalendar");

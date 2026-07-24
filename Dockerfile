@@ -9,6 +9,12 @@ RUN npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# 建置追溯（/api/health 的 build 欄位）：平台建置時傳入 --build-arg BUILD_SHA=$(git rev-parse HEAD) 等；
+# 沒傳也能建（欄位為 null），但正式部署建議一律傳，讓線上行為可對應唯一 commit
+ARG BUILD_SHA=""
+ARG BUILD_BRANCH=""
+ARG BUILD_TIME=""
+ENV BUILD_SHA=$BUILD_SHA BUILD_BRANCH=$BUILD_BRANCH BUILD_TIME=$BUILD_TIME
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 # db:push 用 schema 直接同步（不走 migration 檔），故只需 schema.ts＋config，不複製 drizzle/

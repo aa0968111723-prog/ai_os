@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
 import { getModel, MODELS, tierLabel, estimatePoints } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
+import { ExportJobButton } from "./ExportJobButton";
 import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip } from "./interactions";
 import { discussInMessages } from "../discuss";
@@ -21,15 +22,20 @@ const SCENE_GEN_MODELS = MODELS.filter((m) => m.category === "text-to-image" && 
 // 逐格配音的後端預設 TTS（scenes.generateVoiceover 未帶 modelId 時用它）——前端只拿來顯示預估點數
 const DEFAULT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
-// 目標剪輯軟體 → 可直接匯入的時間軸/字幕格式（需求 #8）：剪映/CapCut/Premiere 吃 SRT、
-// Final Cut Pro（含剪映專業版）吃 FCPXML、DaVinci Resolve 吃 EDL。
+// 目標剪輯軟體 → 可直接匯入的檔案（需求 #8＋直連強化）：每套軟體列出「最能直接組好時間軸」的
+// 格式優先（Premiere 吃 xmeml 時間軸、FCP/Resolve/剪映專業版吃 fcpxml），字幕 SRT 當通用備援；
+// 剪映/CapCut 沒有時間軸匯入功能，另供「草稿包（實驗）」——解壓到草稿目錄開剪映即見排好的時間軸。
+// 交付包內的 fcpxml/xmeml 為媒體連結版（匯入即掛媒體）；這裡的單檔下載是骨架版（無媒體引用）。
 const EDIT_TARGETS = [
-  { key: "capcut", label: "剪映 / CapCut", format: "srt" },
-  { key: "premiere", label: "Premiere", format: "srt" },
-  { key: "fcp", label: "Final Cut Pro", format: "fcpxml" },
-  { key: "resolve", label: "DaVinci Resolve", format: "edl" },
+  { key: "capcut", label: "剪映 / CapCut", files: [{ format: "srt", ext: ".srt", name: "字幕/對位" }], draft: true },
+  { key: "capcutpro", label: "剪映專業版", files: [{ format: "fcpxml", ext: ".fcpxml", name: "時間軸" }, { format: "srt", ext: ".srt", name: "字幕" }], draft: true },
+  { key: "premiere", label: "Premiere Pro", files: [{ format: "xmeml", ext: ".xml", name: "時間軸" }, { format: "srt", ext: ".srt", name: "字幕" }] },
+  { key: "fcp", label: "Final Cut Pro", files: [{ format: "fcpxml", ext: ".fcpxml", name: "時間軸" }] },
+  { key: "resolve", label: "DaVinci Resolve", files: [{ format: "fcpxml", ext: ".fcpxml", name: "時間軸" }, { format: "edl", ext: ".edl", name: "剪輯表" }] },
 ] as const;
 type EditTargetKey = (typeof EDIT_TARGETS)[number]["key"];
+// 記住上次選的目標剪輯軟體（跨專案共用——同一位剪輯師用的軟體不會換來換去）
+const EDIT_TARGET_LS_KEY = "aios.edittarget";
 
 type Scene = {
   id: string;
@@ -181,6 +187,8 @@ function SceneRow({
   meLoading,
   genModelId,
   onUsePrompt,
+  charIds,
+  sceneIds,
   invalidate,
   move,
   remove,
@@ -197,6 +205,9 @@ function SceneRow({
   /** 逐格生成用的文生圖模型（分鏡卡工具列可換；預設 SDXL Lightning） */
   genModelId: string;
   onUsePrompt?: (prompt: string) => void;
+  /** 生成台勾選的角色/場景卡：就地生成也注入同一套錨點——逐鏡出圖與生成台畫風一致 */
+  charIds?: string[];
+  sceneIds?: string[];
   invalidate: () => void;
   move: ReturnType<typeof trpc.scenes.move.useMutation>;
   remove: ReturnType<typeof trpc.scenes.remove.useMutation>;
@@ -217,8 +228,15 @@ function SceneRow({
       savedTimer.current = setTimeout(() => setSavedFlash(false), 2000);
     },
   });
-  const generate = trpc.scenes.generateInto.useMutation({ onSuccess: invalidate });
-  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({ onSuccess: invalidate });
+  // 冪等鍵（QA-007）：同一格「還沒成功」的生成/配音重試沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
+  const genRequestId = useRef<string>(crypto.randomUUID());
+  const voiceRequestId = useRef<string>(crypto.randomUUID());
+  const generate = trpc.scenes.generateInto.useMutation({
+    onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
+  });
+  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({
+    onSuccess: () => { voiceRequestId.current = crypto.randomUUID(); invalidate(); },
+  });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
   // 配音生成中：後端背景 runner 完成後會回填 narrationAssetId，10 秒輪詢自動刷新
@@ -307,7 +325,7 @@ function SceneRow({
                     triggerTitle="用這一格的配音詞生成中文旁白，完成後自動出現試聽"
                     message={`即將生成旁白配音（${getModel(DEFAULT_TTS_MODEL)?.label ?? "中文 TTS"}${ttsPoints != null ? `，約 −${ttsPoints} 點` : ""}）；失敗自動退點`}
                     confirmLabel="確認生成"
-                    onConfirm={() => generateVoiceover.mutate({ sceneId: s.id })}
+                    onConfirm={() => generateVoiceover.mutate({ sceneId: s.id, clientRequestId: voiceRequestId.current })}
                   >
                     {s.narrationUrl ? (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -375,7 +393,16 @@ function SceneRow({
                 triggerTitle="用這一格的提示詞就地生成，完成後自動回填縮圖"
                 message={`即將${s.assetId ? "重生" : "生成"}這一格（${genModel?.label ?? genModelId}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
                 confirmLabel="確認生成"
-                onConfirm={() => generate.mutate({ sceneId: s.id, modelId: genModel?.id ?? DEFAULT_MODEL })}
+                onConfirm={() =>
+                  generate.mutate({
+                    sceneId: s.id,
+                    modelId: genModel?.id ?? DEFAULT_MODEL,
+                    clientRequestId: genRequestId.current,
+                    // 上限同 generation.submit（6/4）：超勾取前幾張，不讓逐格生成因此整個被 zod 擋下
+                    characterIds: charIds?.length ? charIds.slice(0, 6) : undefined,
+                    scenePresetIds: sceneIds?.length ? sceneIds.slice(0, 4) : undefined,
+                  })
+                }
               >
                 {s.assetId ? (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -389,7 +416,7 @@ function SceneRow({
               </ConfirmButton>
             )
           ) : (
-            !s.assetId && <span className="hint">先用上方「AI 拆分鏡」給這格提示詞，就能就地生成</span>
+            !s.assetId && <span className="hint">先請上方「專案 AI 代理系統」拆分鏡或發想，給這格提示詞就能就地生成</span>
           )}
           {s.assetUrl && (
             <a
@@ -469,7 +496,7 @@ function SceneRow({
 
 /** 分鏡與交付：可編輯＋就地生成/重生＋單檔下載＋粗剪預覽＋送審/裁決（三態機）＋打包下載。
  *  canEdit=false（2.3 檢視者）：隱藏所有寫入控制（生成/配音/送審/排序/刪除/行內編輯），瀏覽與下載照常 */
-export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: { projectId: string; isLeader: boolean; canEdit?: boolean; onUsePrompt?: (prompt: string) => void }) {
+export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, charIds, sceneIds }: { projectId: string; isLeader: boolean; canEdit?: boolean; onUsePrompt?: (prompt: string) => void; charIds?: string[]; sceneIds?: string[] }) {
   const utils = trpc.useUtils();
   // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
   const me = trpc.auth.me.useQuery();
@@ -494,9 +521,20 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
   const totalSec = list.reduce((sum, s) => sum + s.durationSec, 0);
 
   const [showPreview, setShowPreview] = useState(false);
-  // 目標剪輯軟體（決定「下載時間軸/字幕」拿哪種格式）；預設剪映——組內主力剪輯軟體
-  const [editTarget, setEditTarget] = useState<EditTargetKey>("capcut");
-  const timelineFormat = EDIT_TARGETS.find((t) => t.key === editTarget)?.format ?? "srt";
+  // 目標剪輯軟體（決定「下載時間軸/字幕」拿哪些檔）；預設剪映——組內主力剪輯軟體；記住上次選擇
+  const [editTarget, setEditTargetState] = useState<EditTargetKey>(() => {
+    try {
+      const saved = window.localStorage.getItem(EDIT_TARGET_LS_KEY);
+      return saved && EDIT_TARGETS.some((t) => t.key === saved) ? (saved as EditTargetKey) : "capcut";
+    } catch {
+      return "capcut";
+    }
+  });
+  const setEditTarget = (next: EditTargetKey) => {
+    setEditTargetState(next);
+    try { window.localStorage.setItem(EDIT_TARGET_LS_KEY, next); } catch { /* 持久化只是加分 */ }
+  };
+  const target = EDIT_TARGETS.find((t) => t.key === editTarget) ?? EDIT_TARGETS[0];
   // 逐格生成模型（深度優化：原本寫死 SDXL Lightning）——per 專案記住上次選擇；失效 id 回退預設
   const [genModelId, setGenModelIdState] = useState<string>(() => {
     try {
@@ -569,6 +607,8 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
               meLoading={me.isLoading}
               genModelId={genModelId}
               onUsePrompt={onUsePrompt}
+              charIds={charIds}
+              sceneIds={sceneIds}
               invalidate={invalidate}
               move={move}
               remove={remove}
@@ -578,17 +618,9 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
             />
           ))}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
-            <a
-              href={`/api/export/${projectId}`}
-              download
-              style={{
-                display: "inline-block", padding: "10px 18px", borderRadius: "var(--r-12)", textDecoration: "none",
-                background: "var(--primary-solid)", color: "var(--primary-fg)", boxShadow: "var(--e2)", fontSize: "var(--fs-14)",
-              }}
-            >
-              打包下載交付包（.zip）
-            </a>
-            {/* 單檔時間軸/字幕下載（需求 #8）：不用整包也能拿到目標剪輯軟體可直接匯入的檔 */}
+            {/* QA-005：非同步 job 版打包——就地顯示進度/取消/完成下載，不再是看似卡死的同步下載 */}
+            <ExportJobButton projectId={projectId} />
+            {/* 單檔時間軸/字幕下載（需求 #8＋直連強化）：依目標軟體列出可直接匯入的檔，各一顆下載鈕 */}
             <label style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
               目標剪輯軟體
               <select
@@ -598,19 +630,33 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
                 style={{ width: "auto", fontSize: "var(--fs-13)", padding: "6px 10px" }}
               >
                 {EDIT_TARGETS.map((t) => (
-                  <option key={t.key} value={t.key}>{t.label}（.{t.format}）</option>
+                  <option key={t.key} value={t.key}>{t.label}</option>
                 ))}
               </select>
             </label>
-            <a
-              href={`/api/export/${projectId}/timeline?format=${timelineFormat}`}
-              download
-              className="btn-tonal"
-              title="只下載目標剪輯軟體可匯入的時間軸/字幕單檔（時間碼依分鏡秒數累計）"
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "solid", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
-            >
-              <Icon name="Download" /> 下載時間軸/字幕
-            </a>
+            {target.files.map((f) => (
+              <a
+                key={f.format}
+                href={`/api/export/${projectId}/timeline?format=${f.format}`}
+                download
+                className="btn-tonal"
+                title={`下載 ${target.label} 可匯入的${f.name}單檔（時間碼依分鏡秒數累計）`}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "solid", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
+              >
+                <Icon name="Download" /> {f.name}（{f.ext}）
+              </a>
+            ))}
+            {"draft" in target && target.draft && (
+              <a
+                href={`/api/export/${projectId}/jianying`}
+                download
+                className="btn-tonal"
+                title="實驗性：剪映/CapCut 草稿資料夾（含素材與排好的時間軸）。解壓到剪映草稿目錄後打開剪映即可直接剪——目錄位置與相容版本見包內「安裝說明.txt」。"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "dashed", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
+              >
+                <Icon name="Download" /> 剪映草稿包（實驗）
+              </a>
+            )}
             <button
               data-fb="粗剪預覽"
               style={{ padding: "10px 18px", fontSize: "var(--fs-14)", borderRadius: "var(--r-12)" }}
@@ -629,7 +675,9 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
             </button>
             <span className="hint">共 {list.length} 鏡・約 {totalSec} 秒｜含素材＋腳本鏡頭表，直接進剪映/Premiere；大專案打包需要一點時間</span>
           </div>
-          <p className="hint" style={{ margin: "6px 0 0" }}>zip 交付包內也已附三種格式（交付/字幕.srt・時間軸.fcpxml・剪輯表.edl）</p>
+          <p className="hint" style={{ margin: "6px 0 0" }}>
+            zip 交付包內附「媒體連結版」時間軸（交付/時間軸.fcpxml・Premiere時間軸.xml）——解壓後匯入一個檔，粗剪含旁白自動排好；另附字幕.srt 與剪輯表.edl
+          </p>
           {showPreview && (
             <div style={{ marginTop: 14 }}>
               {/* 傳 onClose：StoryboardPlayer 是全螢幕 modal，沒接 onClose 的話 ✕鈕與 Esc 都失效→使用者被困需重載 */}

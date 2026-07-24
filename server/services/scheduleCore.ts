@@ -3,7 +3,7 @@
  * 讓 tRPC 路由與「tRPC 之外的入口」（MCP 介面）共用同一批守門（組隔離、專案／留言歸屬校驗、
  * @提及校驗、時間合法性）——與 generationCore／agentCore 同一設計理由，防護不分岔。
  */
-import { and, asc, eq, gte, isNull, or, type SQL } from "drizzle-orm";
+import { and, asc, eq, gt, gte, isNull, or, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -20,26 +20,38 @@ function parseDate(s: string, label: string): Date {
   return new Date(t);
 }
 
+/** 排程清單單頁上限：超過以 truncated 明示（QA-017：不再靜默截斷讓使用者以為只有這些） */
+const SCHEDULE_LIST_LIMIT = 300;
+
+export interface ScheduleListItem {
+  id: string; projectId: string | null; title: string; startsAt: Date; endsAt: Date | null;
+  note: string | null; ownerId: string | null; ownerName: string | null; createdBy: string;
+  sourceMessageId: string | null; mentions: string[] | null;
+}
+
 /**
  * 清單（組行事曆）：預設只回「未來與最近 24 小時內」；includePast 回全部。startsAt 升冪。
  * 帶負責人名稱（owner join）。呼叫端先 requireGroup（此處也再保險擋一次）。
+ * 回 { items, truncated }（QA-017）：多取一筆探測——超過單頁上限時 truncated=true，
+ * 呼叫端（UI/MCP）必須把「還有更多未顯示」讓使用者看見，不得默默當成全部。
  */
 export async function listScheduleForGroup(
   auth: AuthState,
   groupId: string,
   includePast = false,
   projectId?: string | null,
-): Promise<Array<{
-  id: string; projectId: string | null; title: string; startsAt: Date; endsAt: Date | null;
-  note: string | null; ownerId: string | null; ownerName: string | null; createdBy: string;
-  sourceMessageId: string | null; mentions: string[] | null;
-}>> {
+): Promise<{ items: ScheduleListItem[]; truncated: boolean }> {
   requireGroup(auth, groupId);
   const conds: SQL[] = [eq(schema.scheduleItems.groupId, groupId)];
-  if (!includePast) conds.push(gte(schema.scheduleItems.startsAt, new Date(Date.now() - 24 * 60 * 60 * 1000)));
-  // 專案視角：只回該專案的行程＋整組共用（未掛專案）的行程，避免 300 筆上限被別的專案吃掉。
+  // overlap 條件（QA-017）：不能只看 startsAt——開始超過 24 小時前、但「還沒結束」的長行程
+  //（跨日會議、多日營隊）也必須出現。判準：startsAt 在窗內，或 endsAt 還在未來（仍進行中）。
+  if (!includePast) {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    conds.push(or(gte(schema.scheduleItems.startsAt, cutoff), gt(schema.scheduleItems.endsAt, new Date()))!);
+  }
+  // 專案視角：只回該專案的行程＋整組共用（未掛專案）的行程，避免單頁上限被別的專案吃掉。
   if (projectId) conds.push(or(eq(schema.scheduleItems.projectId, projectId), isNull(schema.scheduleItems.projectId))!);
-  return db
+  const rows = await db
     .select({
       id: schema.scheduleItems.id,
       projectId: schema.scheduleItems.projectId,
@@ -57,7 +69,9 @@ export async function listScheduleForGroup(
     .leftJoin(schema.users, eq(schema.users.id, schema.scheduleItems.ownerId))
     .where(and(...conds))
     .orderBy(asc(schema.scheduleItems.startsAt))
-    .limit(300);
+    .limit(SCHEDULE_LIST_LIMIT + 1);
+  const truncated = rows.length > SCHEDULE_LIST_LIMIT;
+  return { items: truncated ? rows.slice(0, SCHEDULE_LIST_LIMIT) : rows, truncated };
 }
 
 /**

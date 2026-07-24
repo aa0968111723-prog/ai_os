@@ -3,7 +3,7 @@
  * PostgreSQL · Drizzle（pg 方言）
  * 組織模型：開發者 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
-import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 /* ── 認證與組織 ────────────────────────────────── */
 
@@ -171,6 +171,14 @@ export const generations = pgTable("generations", {
   sceneId: uuid("scene_id"),
   /** 這筆生成要回填分鏡的哪個角色："visual"＝畫面（回填 scenes.assetId）、"narration"＝旁白音檔（回填 scenes.narrationAssetId）；null＝視為 visual */
   sceneRole: text("scene_role", { enum: ["visual", "narration"] }),
+  /** 送出時帶入的角色定裝卡 id（null＝沒帶）——重試/「再用此設定」要能還原錨點，注入不再是黑盒 */
+  characterIds: jsonb("character_ids").$type<string[]>(),
+  /** 送出時帶入的場景設定卡 id（null＝沒帶） */
+  scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
+  /** 來源工作流執行（null＝非工作流產物）：生成紀錄可回看「這筆是哪條工作流跑出來的」 */
+  workflowRunId: uuid("workflow_run_id"),
+  /** 來源 AI 代理執行（null＝非代理產物） */
+  agentRunId: uuid("agent_run_id"),
   resultUrl: text("result_url"),
   /** 文字型輸出(LLM/圖轉文/語音轉文字/訓練結果資訊)直接存這裡 */
   resultText: text("result_text"),
@@ -280,6 +288,10 @@ export const prompts = pgTable("prompts", {
   projectId: uuid("project_id").notNull(),
   groupId: uuid("group_id").notNull(),
   text: text("text").notNull(),
+  /** 最後一次用這則咒語生成時的模型/角色/場景卡（null＝純文字舊列）——「再用」還原完整設定，不只文字 */
+  modelId: text("model_id"),
+  characterIds: jsonb("character_ids").$type<string[]>(),
+  scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   useCount: integer("use_count").notNull().default(1),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -467,6 +479,9 @@ export const workflowRuns = pgTable("workflow_runs", {
   userId: uuid("user_id").notNull(),
   presetId: text("preset_id").notNull(),
   prompt: text("prompt").notNull(),
+  /** 啟動時沿用生成台勾選的角色/場景卡（null＝沒帶）——runner 每 tick 從 run 列重建輸入，必須落庫才能貫穿每一步 */
+  characterIds: jsonb("character_ids").$type<string[]>(),
+  scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   status: text("status", { enum: ["running", "done", "failed", "stopped"] }).notNull().default("running"),
   currentStep: integer("current_step").notNull().default(0),
   /** 每步：{ note, status: "pending"|"running"|"done"|"failed"|"stopped", generationId?, detail? } */
@@ -475,6 +490,36 @@ export const workflowRuns = pgTable("workflow_runs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+/**
+ * 交付包匯出 job（QA-005）：同步 ZIP 下載改為「建 job → 背景打包到 Volume → 輪詢進度 → 完成後下載」。
+ * 大包（遠端素材多）打包可達數分鐘，同步串流讓瀏覽器看似卡死、使用者重複點擊做出重複包。
+ * 新表＝pushSchema 安全；status 由 exportRunner 以 CAS 推進；cancelled 由取消 mutation 設定，
+ * runner 在進度回報時讀到即中止。done 的 zip 檔留在 Volume（storagePath），過期由 runner 定期清理。
+ */
+export const exportJobs = pgTable("export_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  /** 素材庫多選打包的素材 id 清單；null＝全量打包 */
+  assetIds: jsonb("asset_ids"),
+  status: text("status", { enum: ["queued", "running", "done", "failed", "cancelled"] }).notNull().default("queued"),
+  /** 下載時的 Content-Disposition 檔名（依專案標題產生） */
+  zipName: text("zip_name"),
+  /** 完成後 zip 在 Volume 的相對路徑（assets 樹下）；未完成/失敗為 null */
+  storagePath: text("storage_path"),
+  doneEntries: integer("done_entries").notNull().default(0),
+  totalEntries: integer("total_entries").notNull().default(0),
+  /** 已寫出位元組（bigint：多媒體大包可能超過 int4 上限 2.1GB） */
+  bytesWritten: bigint("bytes_written", { mode: "number" }).notNull().default(0),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  projectIdx: index("export_jobs_project_idx").on(t.projectId, t.createdAt),
+  statusIdx: index("export_jobs_status_idx").on(t.status, t.updatedAt),
+}));
 
 /**
  * AI 代理執行紀錄（代理系統核心）：一句目標 → LLM 規劃多步計畫 → 使用者核准 → 伺服器背景逐步執行。

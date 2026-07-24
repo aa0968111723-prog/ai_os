@@ -794,7 +794,7 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
           </button>
           {refPickerOpen && (
             <div className="mention-pop" role="listbox" aria-label="引用排程或筆記" style={{ bottom: "auto", top: "calc(100% + 6px)", maxHeight: 240, overflowY: "auto" }}>
-              {(scheduleQ.data ?? []).slice(0, 8).map((s) => (
+              {(scheduleQ.data?.items ?? []).slice(0, 8).map((s) => (
                 <button key={`s-${s.id}`} type="button" role="option" aria-selected="false"
                   onClick={() => { setPendingRef({ refType: "schedule", refId: s.id, title: s.title }); setRefPickerOpen(false); }}>
                   <Icon name="Clock" size={12} style={{ marginRight: 5 }} />{s.title}
@@ -806,7 +806,7 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
                   <Icon name="FileText" size={12} style={{ marginRight: 5 }} />{n.title}
                 </button>
               ))}
-              {!scheduleQ.data?.length && !notesQ.data?.length && (
+              {!scheduleQ.data?.items.length && !notesQ.data?.length && (
                 <span className="hint" style={{ padding: "8px 12px" }}>還沒有排程或筆記——先到「筆記排程」建立</span>
               )}
             </div>

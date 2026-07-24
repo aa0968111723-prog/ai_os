@@ -180,7 +180,7 @@ export function HelpPage() {
           一句話故事、關鍵訊息、調性、畫風。填一次，之後每次生成自動帶入。
         </Step>
         <Step n={2} icon="Sparkles" title="AI 拆分鏡">
-          把腳本貼進去，系統自動切成一格一格的分鏡草稿。
+          把腳本貼給「專案 AI 代理系統」，自動切成一格一格的分鏡草稿。
         </Step>
         <Step n={3} icon="Image" title="逐格生成">
           在生成台挑模型、寫提示詞，做出畫面（圖或影片）與旁白配音。
@@ -246,11 +246,9 @@ export function HelpPage() {
           <Spot icon="Image" name="素材庫" where="專案頁">
             你上傳或生成出來的圖片、影片、音檔都收在這。生成需要來源檔時從這裡挑。
           </Spot>
-          <Spot icon="Lightbulb" name="AI 導演" where="專案頁">
-            依世界觀給你 3 個分鏡點子，一鍵帶入提示詞。<b>只供參考</b>，成品仍須組長審核。
-          </Spot>
-          <Spot icon="Sparkles" name="AI 拆分鏡" where="專案頁">
-            把整份腳本貼進去，自動切成一格一格的分鏡草稿，省去手動分鏡。
+          <Spot icon="Sparkles" name="專案 AI 代理系統" where="專案頁">
+            一個對話統包：問專案進度與資料庫內容、要分鏡點子（一鍵存成草稿；<b>只供參考</b>，成品仍須組長審核）、
+            貼腳本拆分鏡、下多步驟目標——代理排出計畫與估點，你核准後由伺服器背景逐步執行。
           </Spot>
           <Spot icon="Image" name="生成台" where="專案頁核心">
             挑模型、寫提示詞（世界觀自動帶入）、按下生成。送出前會先跳確認框給你看預估點數。
@@ -335,7 +333,7 @@ export function HelpPage() {
         <Faq q="AI 文字功能為什麼免費？有什麼限制？">
           <ul style={{ margin: 0, paddingLeft: 22 }}>
             <li>
-              <b>AI 助手、AI 導演、AI 拆分鏡、AI 代理規劃、團隊彙總、留言 @助手</b>走 NVIDIA NIM 的免費開發者方案，
+              <b>專案 AI 代理系統的文字能力（問答、發想、拆分鏡、排計畫）、團隊彙總、留言 @助手</b>走 NVIDIA NIM 的免費開發者方案，
               <b>不扣站內點數</b>；圖片／影片／音訊生成仍走付費供應商、照模型標示扣點。
             </li>
             <li>
@@ -363,12 +361,22 @@ export function HelpPage() {
             <li><b>03_圖像</b>——圖片類成品</li>
             <li><b>04_字幕</b>——字幕.srt，可直接匯入剪映／Premiere／YouTube</li>
             <li><b>05_文件</b>——腳本與鏡頭表.md（每鏡的秒數、檔名、提示詞、模型一覽）</li>
+            <li><b>交付</b>——時間軸與字幕檔：時間軸.fcpxml（Final Cut Pro／DaVinci Resolve／剪映專業版）、
+              Premiere時間軸.xml、字幕.srt、剪輯表.edl</li>
           </ul>
           <p className="hint" style={{ margin: "0 0 8px", fontSize: 13 }}>
             若專案有<b>鎖定素材</b>，會多一個 00_鎖定原素材（原封不動的原音／開示／配樂）；
-            另附 README.txt 說明資料夾結構。
+            另附 README.txt 說明資料夾結構與各軟體匯入步驟。
           </p>
-          <p style={{ margin: 0 }}>媒體檔直接拖進剪映或 Premiere，照鏡號順序組裝，就能對齊畫面、旁白與字幕。</p>
+          <p style={{ margin: "0 0 8px" }}>
+            <b>最快的組片方式</b>：解壓後直接把「交付/」裡對應你剪輯軟體的時間軸檔匯入
+            （Premiere 用 .xml、Final Cut Pro／Resolve／剪映專業版用 .fcpxml）——
+            分鏡順序、每鏡秒數與旁白音軌會自動排上時間軸，媒體以相對路徑自動掛上，離線時 relink 一次即可。
+          </p>
+          <p style={{ margin: 0 }}>
+            用剪映／CapCut 的話，另有<b>「剪映草稿包（實驗）」</b>：解壓到剪映草稿目錄，打開剪映就是排好的專案
+            （含畫面、旁白、字幕三軌；目錄位置見包內安裝說明）。也可以照舊把媒體檔拖進剪映，配合字幕.srt 逐鏡對位。
+          </p>
         </Faq>
 
         <Faq q="想讓 Claude 等外部 AI 直接操作我的專案？">

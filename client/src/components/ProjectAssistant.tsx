@@ -9,9 +9,11 @@ type Action =
   | { type: "generate"; label: string; prompt: string; modelId: string; sceneId?: string; sceneNo?: number; sceneTitle?: string }
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
   | { type: "submit_approval"; label: string; sceneId: string }
-  | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number }
+  | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number; prompt?: string }
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
-  | { type: "split_script"; label: string; script: string };
+  | { type: "split_script"; label: string; script: string }
+  // plan_agent：把目標交給 AI 代理排計畫（確認後也只排計畫——免費；執行另在代理執行區核准估點）
+  | { type: "plan_agent"; label: string; goal: string };
 
 type Turn = { role: "you" | "ai"; text: string; actions?: Action[]; steps?: string[] };
 
@@ -39,9 +41,10 @@ type GenModel = {
 function toPayload(a: Action) {
   if (a.type === "generate") return { type: "generate" as const, prompt: a.prompt, modelId: a.modelId, sceneId: a.sceneId };
   if (a.type === "update_scene") return { type: "update_scene" as const, sceneId: a.sceneId, field: a.field, value: a.value };
-  if (a.type === "create_scene") return { type: "create_scene" as const, title: a.title, voiceover: a.voiceover, durationSec: a.durationSec };
+  if (a.type === "create_scene") return { type: "create_scene" as const, title: a.title, voiceover: a.voiceover, durationSec: a.durationSec, prompt: a.prompt };
   if (a.type === "run_workflow") return { type: "run_workflow" as const, presetId: a.presetId, prompt: a.prompt };
   if (a.type === "split_script") return { type: "split_script" as const, script: a.script };
+  if (a.type === "plan_agent") return { type: "plan_agent" as const, goal: a.goal };
   return { type: "submit_approval" as const, sceneId: a.sceneId };
 }
 
@@ -79,7 +82,7 @@ function parseSse(chunk: string): { event: string; data: unknown } {
  * 思考過程：問答走 SSE 串流，把「思考中／正在查什麼／查到什麼」即時逐筆呈現；串流不可用時自動退回 tRPC 一次性問答。
  * 收起／清除：對話可整段收起（省版面、不丟執行中狀態）或一鍵清空重來；生成動作可在執行前自己換模型（多模態）。
  */
-export function ProjectAssistant({ projectId }: { projectId: string }) {
+export function ProjectAssistant({ projectId, embedded = false }: { projectId: string; embedded?: boolean }) {
   const utils = trpc.useUtils();
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -119,6 +122,8 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
       utils.quota.invalidate();
       // 工作流啟動後讓工作流卡立刻看到新 run（粗粒度整組 invalidate 即可，卡片自己會輪詢推進）
       if (r.kind === "run_workflow") utils.workflows.invalidate();
+      // 代理排完計畫：讓下方「代理執行」立刻出現待核准的計畫（統一入口的目標→計畫→核准動線）
+      if (r.kind === "plan_agent") utils.agents.invalidate();
       push({ role: "ai", text: `✓ ${r.message}` });
     },
     onError: (e) => push({ role: "ai", text: `動作沒成功：${e.message}` }),
@@ -211,40 +216,48 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
   const thinkIcon = (phase: ThinkEvent["phase"]): "Loader" | "Search" | "Check" =>
     phase === "step" ? "Check" : phase === "lookup" ? "Search" : "Loader";
 
-  return (
-    <section className="card" data-fb="AI 助手" id="sec-assistant">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-        <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 專案助手
-        </h2>
-        <div style={{ display: "flex", gap: 6 }}>
-          {turns.length > 0 && (
-            <button
-              type="button"
-              className="btn-ghost btn-sm"
-              title="清空這段對話，重新開始"
-              onClick={clear}
-              disabled={busy || pendingKey !== null}
-            >
-              <Icon name="Trash2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />清除
-            </button>
+  // 四合一（專案 AI 代理系統）分頁模式：外殼與標題由 AiHub 提供；「收起」由分頁切換取代，不再另設
+  const showCollapse = !embedded;
+  const body = (
+    <>
+      {(!embedded || turns.length > 0) && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+          {!embedded && (
+            <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
+              <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 專案助手
+            </h2>
           )}
-          <button
-            type="button"
-            className="btn-ghost btn-sm"
-            aria-expanded={!collapsed}
-            aria-controls="sec-assistant-body"
-            title={collapsed ? "展開助手" : "收起助手（省版面）"}
-            onClick={() => setCollapsed((c) => !c)}
-          >
-            <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-            {collapsed ? "展開" : "收起"}
-          </button>
+          <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+            {turns.length > 0 && (
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                title="清空這段對話，重新開始"
+                onClick={clear}
+                disabled={busy || pendingKey !== null}
+              >
+                <Icon name="Trash2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />清除
+              </button>
+            )}
+            {showCollapse && (
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                aria-expanded={!collapsed}
+                aria-controls="sec-assistant-body"
+                title={collapsed ? "展開助手" : "收起助手（省版面）"}
+                onClick={() => setCollapsed((c) => !c)}
+              >
+                <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                {collapsed ? "展開" : "收起"}
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 收起時顯示提示；本體恆掛在 DOM（用 hidden 切換）——aria-controls 不懸空，執行中/展開中的動作狀態也不會被卸載清掉 */}
-      {collapsed && (
+      {showCollapse && collapsed && (
         <p className="hint" style={{ marginTop: 8 }}>
           助手已收起{turns.length > 0 ? `（保留 ${turns.length} 則對話）` : ""}{busy ? "・仍在思考中" : ""}。點「展開」繼續。
         </p>
@@ -252,16 +265,16 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
 
       <div id="sec-assistant-body" hidden={collapsed}>
         <p className="hint" style={{ marginTop: 4 }}>
-          問我這個專案的進度、生成了什麼、哪些分鏡還沒審、<b>該用哪個模型</b>…；我會<b>邊想邊查</b>（素材庫／分鏡／生成紀錄／模型目錄，唯讀），過程即時顯示。也能<b>提議動作</b>（生成／新增分鏡／改分鏡／送審／跑工作流／貼腳本拆分鏡），你按確認才執行——生成前還能<b>自己換模型</b>（文生圖／影片／語音／音頻多模態）。提問由 NVIDIA NIM 免費額度驅動，不扣點。
+          一個對話統包：<b>問</b>（進度、還沒審的分鏡、該用哪個模型…，我會<b>邊想邊查</b>素材庫／分鏡／生成紀錄／模型目錄／<b>資料庫</b>，唯讀）、<b>發想</b>（要分鏡 idea 我直接給，並可一鍵存成草稿）、<b>拆分鏡</b>（貼腳本進來）、<b>下目標</b>（多步驟目標我會交給代理排計畫，你核准估點後由伺服器背景逐步執行）。任何花點數或改資料的動作都要你按確認；提問本身由 NVIDIA NIM 免費額度驅動，不扣點。
         </p>
 
-        {/* 快速提問：冷啟動不用想怎麼開口——點一顆帶入輸入框，按「問」才送出 */}
+        {/* 快速開場：問答／發想／下目標都從同一個入口——點一顆帶入輸入框，按「問」才送出 */}
         {turns.length === 0 && !thinking.active && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
             {[
               "這個專案進度到哪？",
-              "哪些分鏡還沒過審？",
-              "依目前素材與分鏡，建議下一步做什麼？",
+              "給我 3 個分鏡 idea",
+              "把知識庫的腳本拆成分鏡，並為每一鏡生成畫面",
               "幫我推薦適合本專案的生成模型",
             ].map((q) => (
               <button
@@ -335,7 +348,9 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
                             ? `執行「${payloadAct.label}」？各步驟會分別扣點。`
                             : payloadAct.type === "split_script"
                               ? `執行「${payloadAct.label}」？會呼叫 AI 導演拆分鏡（免費）。`
-                              : `執行「${payloadAct.label}」？`;
+                              : payloadAct.type === "plan_agent"
+                                ? `把這個目標交給 AI 代理？只會排出逐步計畫與估點（免費）——你在「代理執行」核准後才會開始花點執行。`
+                                : `執行「${payloadAct.label}」？`;
                       return (
                         <div key={j} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           {/* 換模型（多模態）：只在 generate 動作出現，執行前可改用哪個模型／模態 */}
@@ -400,7 +415,8 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
                                     : payloadAct.type === "create_scene" ? "Plus"
                                       : payloadAct.type === "run_workflow" ? "Play"
                                         : payloadAct.type === "split_script" ? "Clapperboard"
-                                          : "Pencil"
+                                          : payloadAct.type === "plan_agent" ? "Film"
+                                            : "Pencil"
                               }
                               size={13}
                               style={{ verticalAlign: "-2px", marginRight: 4 }}
@@ -451,7 +467,7 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void send(); } }}
-            placeholder="例：這個專案進度到哪？幫我把第 1 鏡送審"
+            placeholder="問進度、要 idea、貼腳本、下目標…例：把腳本拆成分鏡並逐鏡出圖"
             disabled={busy}
             style={{ flex: 1 }}
           />
@@ -460,6 +476,13 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
           </button>
         </div>
       </div>
+    </>
+  );
+
+  if (embedded) return <div data-fb="AI 助手">{body}</div>;
+  return (
+    <section className="card" data-fb="AI 助手" id="sec-assistant">
+      {body}
     </section>
   );
 }

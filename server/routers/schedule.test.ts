@@ -4,7 +4,7 @@
  * 匯入 Google 日曆/Apple 行事曆的相容性正是靠這幾條規則。
  */
 import { describe, expect, it } from "vitest";
-import { buildIcs } from "./schedule";
+import { buildIcs, foldIcsLine } from "./schedule";
 
 const at = (iso: string) => new Date(iso);
 
@@ -65,6 +65,31 @@ describe("buildIcs", () => {
     const ics = buildIcs("G", []);
     expect(ics).toContain("BEGIN:VCALENDAR");
     expect(ics).not.toContain("BEGIN:VEVENT");
+  });
+
+  it("75-octet 行折疊（RFC 5545）：中文長標題折行、每實體行 ≤75 bytes、續行以空格開頭、可還原", () => {
+    const longTitle = "領袖禪修營第三十七期籌備會議與跨組協調討論——含場地勘查、法器搬運、講師接送與齋堂人力總調度說明";
+    const ics = buildIcs("G", [
+      { id: "a", title: longTitle, startsAt: at("2026-07-16T03:00:00Z"), endsAt: null, note: null },
+    ]);
+    const physical = ics.split("\r\n");
+    for (const line of physical) {
+      expect(Buffer.byteLength(line, "utf8")).toBeLessThanOrEqual(75);
+    }
+    // 折行還原（unfold：CRLF+空格 → 接回）後 SUMMARY 內容必須與原文一致
+    const unfolded = ics.replace(/\r\n /g, "");
+    expect(unfolded).toContain(`SUMMARY:${longTitle}`);
+    // 至少有一條續行（以空格開頭）
+    expect(physical.some((l) => l.startsWith(" "))).toBe(true);
+  });
+
+  it("foldIcsLine：短行原樣返回；折行不切斷多位元組字元", () => {
+    expect(foldIcsLine("SUMMARY:short")).toBe("SUMMARY:short");
+    const folded = foldIcsLine(`SUMMARY:${"禪".repeat(60)}`);
+    for (const line of folded.split("\r\n")) {
+      expect(Buffer.byteLength(line, "utf8")).toBeLessThanOrEqual(75);
+    }
+    expect(folded.replace(/\r\n /g, "")).toBe(`SUMMARY:${"禪".repeat(60)}`);
   });
 
   it("單獨 CR（\\r）也要轉義，擋 ICS 注入", () => {

@@ -390,7 +390,7 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
 .toc-toggle:focus-visible, .toc-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--r-8); }
 
 /* 捲動落點留白 */
-#onboard-worldview, #sec-knowledge, #sec-director, #sec-split, #sec-characters,
+#onboard-worldview, #sec-knowledge, #sec-ai-hub, #sec-characters,
 #sec-scenes, #sec-assets, #sec-recyclebin, #gen-prompt, #sec-prompts,
 #sec-workflow, #onboard-delivery { scroll-margin-top: var(--sp-16); }
 
@@ -540,8 +540,13 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 }
 
 /* 知識地圖（心智圖）：SVG 依容器寬縮放；節點分色（筆記藍・行程琥珀・專案赤陶・組層級灰） */
-.map-wrap { border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); overflow: hidden; }
+.map-wrap { border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); overflow: hidden; position: relative; }
 .map-svg { display: block; width: 100%; height: auto; }
+/* 畫布工具（縮放/重設）：浮在地圖右上角 */
+.map-tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 1; }
+/* 自由拖拉：節點用抓取游標；touch-action:none 讓手機也能拖節點（空白處仍可捲頁） */
+.map-node { cursor: grab; touch-action: none; }
+.map-node:active { cursor: grabbing; }
 .map-edge { stroke: var(--border-strong); stroke-width: 1.2; }
 .map-edge.leaf { stroke: var(--border); stroke-dasharray: 3 3; }
 .map-node text { font-size: 13px; fill: var(--fg); font-family: var(--sans); pointer-events: none; }

@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { getWorkflow } from "../../shared/models";
+import { savePromptCore } from "./prompts";
 
 /** 與 services/workflowRunner 的 RunStep 同形狀（jsonb 落庫的每步快照） */
 interface RunStep {
@@ -19,6 +20,9 @@ export interface StartWorkflowCoreInput {
   projectId: string;
   presetId: string;
   prompt: string;
+  /** 沿用生成台勾選的角色定裝/場景設定卡：落庫在 run 上，runner 每步視覺生成都注入同一套錨點（跨步一致） */
+  characterIds?: string[];
+  scenePresetIds?: string[];
   assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
 }
 
@@ -60,9 +64,21 @@ export async function startWorkflowCore(input: StartWorkflowCoreInput) {
         userId: input.userId,
         presetId: preset.id,
         prompt: input.prompt.trim(),
+        characterIds: input.characterIds?.length ? input.characterIds : null,
+        scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
         steps,
       })
       .returning();
+    return run;
+  }).then(async (run) => {
+    // 三合一：工作流的「想法」也入提示詞庫（與生成台自動存同一套去重），連同這條 run 實際帶的
+    // 角色/場景錨點（modelId 不帶——工作流是多模型串鏈，沒有單一模型可記）——失敗不擋啟動主流程
+    await savePromptCore({ id: run.projectId, groupId: run.groupId }, input.userId, run.prompt, {
+      characterIds: input.characterIds,
+      scenePresetIds: input.scenePresetIds,
+    }).catch((err) =>
+      console.warn("[workflow] 想法入提示詞庫失敗（不影響執行）：", err instanceof Error ? err.message : err),
+    );
     return run;
   });
 }
@@ -75,6 +91,9 @@ export const workflowsRouter = router({
         projectId: z.string().uuid(),
         presetId: z.string(),
         prompt: z.string().min(1, "請填想法"),
+        /** 生成台勾選的角色/場景卡：整條工作流的視覺步驟都注入同一套錨點（上限與 generation.submit 同口徑） */
+        characterIds: z.array(z.string().uuid()).max(6).optional(),
+        scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) =>
@@ -83,6 +102,8 @@ export const workflowsRouter = router({
         projectId: input.projectId,
         presetId: input.presetId,
         prompt: input.prompt,
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
         assertAccess: async (p) => {
           requireGroup(ctx.auth, p.groupId);
           // 2.3：專案檢視者不能啟動工作流（一次多步生成＝內容寫入）

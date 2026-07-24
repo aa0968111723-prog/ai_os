@@ -1275,7 +1275,7 @@ function ProjectLink({ id, groupId }: { id: string; groupId: string }) {
 /** 排程連結欄：解析標題並直通筆記排程頁 */
 function ScheduleLink({ id, groupId }: { id: string; groupId: string }) {
   const list = trpc.schedule.list.useQuery({ groupId, includePast: true }, { enabled: !!groupId });
-  const item = (list.data ?? []).find((s: { id: string }) => s.id === id) as { title?: string } | undefined;
+  const item = (list.data?.items ?? []).find((s: { id: string }) => s.id === id) as { title?: string } | undefined;
   if (!item?.title) return <span className="mono" title={id}>{id.slice(0, 8)}…</span>;
   return <Link href="/planner" title="開啟筆記排程">{item.title}</Link>;
 }
@@ -1384,7 +1384,7 @@ function ProjectPicker({ label, groupId, value, onChange }: { label: string; gro
 /** 排程挑選：作用組的排程清單（含過去；值存排程 id） */
 function SchedulePicker({ label, groupId, value, onChange }: { label: string; groupId: string; value: string; onChange: (v: DataRowValue) => void }) {
   const list = trpc.schedule.list.useQuery({ groupId, includePast: true }, { enabled: !!groupId });
-  const opts = (list.data ?? []) as Array<{ id: string; title: string; startsAt: string | Date }>;
+  const opts = (list.data?.items ?? []) as Array<{ id: string; title: string; startsAt: string | Date }>;
   return (
     <select aria-label={label} style={{ width: "100%", minWidth: 90 }} value={value} onChange={(e) => onChange(e.target.value || null)}>
       <option value="">—</option>

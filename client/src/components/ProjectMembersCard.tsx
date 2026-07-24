@@ -3,6 +3,7 @@ import { trpc } from "../api";
 /**
  * 專案權限卡（需求 2.3）：預設組內全員可編輯；組長可把個別成員設為「檢視者」（唯讀）。
  * 組長/管理員固定是編輯者（不可降）——裁決與管理不能被自己鎖住。
+ * 也顯示「專案負責人」（封存/還原的裁決點），組長以上可在此轉移交接。
  * 資料與可管理與否都由 projects.listMemberRoles 回傳（後端已依身分判斷），前端不自行推權限。
  */
 export function ProjectMembersCard({ projectId, bare = false }: { projectId: string; bare?: boolean }) {
@@ -10,6 +11,12 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
   const roles = trpc.projects.listMemberRoles.useQuery({ projectId });
   const setRole = trpc.projects.setProjectRole.useMutation({
     onSuccess: () => utils.projects.listMemberRoles.invalidate({ projectId }),
+  });
+  const setOwner = trpc.projects.setOwner.useMutation({
+    onSuccess: () => {
+      utils.projects.listMemberRoles.invalidate({ projectId });
+      utils.projects.get.invalidate({ id: projectId });
+    },
   });
 
   if (roles.error) return null; // 讀不到（極端情況）就整卡收起，不擋工作台
@@ -22,6 +29,33 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
       <p className="hint" style={{ marginTop: 4 }}>
         預設組內全員可編輯；把成員設為「檢視者」後，他在此專案只能瀏覽、留言與下載，不能生成或修改。
       </p>
+      {/* 專案負責人：組長以上可轉移（人員異動交接）；一般成員唯讀顯示 */}
+      {data && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+          <span className="hint" style={{ margin: 0 }}>負責人</span>
+          {data.canManage ? (
+            <select
+              aria-label="專案負責人"
+              style={{ width: "auto" }}
+              value={data.owner.userId}
+              disabled={setOwner.isPending}
+              onChange={(e) => setOwner.mutate({ projectId, userId: e.target.value })}
+            >
+              {/* 負責人可能已離組：補一個唯讀選項顯示現況，避免下拉顯示成別人 */}
+              {!data.owner.inGroup && (
+                <option value={data.owner.userId}>{data.owner.name ? `${data.owner.name}（已離組）` : "（已離開的成員）"}</option>
+              )}
+              {data.members.map((m) => (
+                <option key={m.userId} value={m.userId}>{m.name}</option>
+              ))}
+            </select>
+          ) : (
+            <b style={{ fontSize: 13 }}>{data.owner.name ?? "（已離開的成員）"}</b>
+          )}
+          {setOwner.isPending && <span className="hint">轉移中…</span>}
+          {setOwner.error && <span className="error" style={{ marginTop: 0 }}>{setOwner.error.message}</span>}
+        </div>
+      )}
       {!data ? (
         <div role="status" aria-label="成員載入中">
           <div className="skeleton" style={{ height: 32, marginTop: 8 }} />

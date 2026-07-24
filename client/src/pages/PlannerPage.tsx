@@ -253,7 +253,9 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   };
 
   const projectTitleOf = (pid: string | null) => (pid ? (projects.data ?? []).find((p) => p.id === pid)?.title ?? null : null);
-  const items = (list.data ?? []) as ScheduleItem[];
+  const items = (list.data?.items ?? []) as ScheduleItem[];
+  // QA-017：截斷不再靜默——超過單頁上限時明確告知，避免使用者以為行程只有這些
+  const scheduleTruncated = list.data?.truncated ?? false;
 
   // 依日期分組（list 已按 startsAt 升冪，同一天必相鄰，掃一遍即可）
   const groups: Array<{ label: string; items: ScheduleItem[] }> = [];
@@ -392,6 +394,12 @@ function ScheduleCard({ groupId }: { groupId: string }) {
             </div>
           ))}
         </div>
+      )}
+      {/* QA-017：超過單頁上限時明示——不再讓使用者以為行程只有這些 */}
+      {scheduleTruncated && (
+        <p className="hint" role="alert" style={{ color: "var(--gold-ink)", marginTop: 8 }}>
+          ⚠ 行程超過單頁上限（300 筆），較晚的行程未顯示——可用專案篩選或刪除過期行程縮小範圍
+        </p>
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
     </section>
@@ -1020,14 +1028,15 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
       selection?: MapSelection;
     };
     const nodes: LayoutNode[] = [];
-    const edges: Array<{ x1: number; y1: number; x2: number; y2: number; kind: "branch" | "leaf" }> = [];
+    // 邊記「兩端節點 id」而非座標：節點被拖走時，邊在渲染期跟著節點的有效位置走
+    const edges: Array<{ from: string; to: string; kind: "branch" | "leaf" }> = [];
     nodes.push({ id: "group", type: "group", label: "本組", x: cx, y: cy });
     if (B === 0) return { nodes, edges };
     shownBranches.forEach((b, i) => {
       const a = -Math.PI / 2 + (i * 2 * Math.PI) / B;
       const bx = cx + RB * Math.cos(a);
       const by = cy + RB * Math.sin(a);
-      edges.push({ x1: cx, y1: cy, x2: bx, y2: by, kind: "branch" });
+      edges.push({ from: "group", to: `b-${b.key}`, kind: "branch" });
       // 分支節點也可點：專案分支→進專案；資料庫分支→開資料庫頁；組層級只顯示統計
       const branchNav: MapNav = b.kind === "project" && b.projectId ? { type: "project", projectId: b.projectId } : b.kind === "dbhub" ? { type: "db" } : null;
       nodes.push({
@@ -1050,12 +1059,12 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
       };
       shownLeaves.forEach((leaf, j) => {
         const { lx, ly } = leafPos(j);
-        edges.push({ x1: bx, y1: by, x2: lx, y2: ly, kind: "leaf" });
+        edges.push({ from: `b-${b.key}`, to: leaf.id, kind: "leaf" });
         nodes.push({ id: leaf.id, type: leaf.kind, label: clip(leaf.label, 11), x: lx, y: ly, selection: { label: leaf.label, sub: leaf.sub, nav: leaf.nav } });
       });
       if (extra > 0) {
         const { lx, ly } = leafPos(shownLeaves.length);
-        edges.push({ x1: bx, y1: by, x2: lx, y2: ly, kind: "leaf" });
+        edges.push({ from: `b-${b.key}`, to: `more-${b.key}`, kind: "leaf" });
         nodes.push({
           id: `more-${b.key}`,
           type: "more",
@@ -1068,6 +1077,138 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
     });
     return { nodes, edges };
   }, [graph]);
+
+  /* ── 自由拖拉（創作者可自行排版）──
+   * - 節點拖拉：存「相對自動佈局的偏移量」（不是絕對座標）——資料增減、換鏡頭後
+   *   自動佈局變了，已拖過的節點仍保持使用者給它的相對位移；per 組存 localStorage。
+   * - 畫布：空白處拖曳平移（滑鼠）、滾輪／按鈕縮放；觸控裝置保留頁面捲動，用按鈕縮放＋拖節點。
+   * - 拖完的 click 不當「選取」：以移動距離 >4px 區分拖與點。 */
+  const layoutStoreKey = `map-layout-${groupId}`;
+  const [overrides, setOverrides] = useState<Record<string, { dx: number; dy: number }>>(() => {
+    try {
+      const raw = localStorage.getItem(layoutStoreKey);
+      return raw ? (JSON.parse(raw) as Record<string, { dx: number; dy: number }>) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [view, setView] = useState({ tx: 0, ty: 0, s: 1 });
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const dragRef = useRef<
+    | { mode: "node"; id: string; startX: number; startY: number; baseDx: number; baseDy: number; moved: boolean }
+    | { mode: "pan"; startX: number; startY: number; baseTx: number; baseTy: number }
+    | null
+  >(null);
+  const suppressClickRef = useRef(false);
+
+  /** client px → viewBox 座標係數（viewBox 寬固定 W、SVG 依容器寬縮放，等比） */
+  const pxToSvg = () => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    return rect && rect.width > 0 ? W / rect.width : 1;
+  };
+  /** 存佈局到本機：只留「目前圖上存在」的節點（已刪內容的偏移不無限累積） */
+  const persistOverrides = (o: Record<string, { dx: number; dy: number }>) => {
+    const ids = new Set((layout?.nodes ?? []).map((n) => n.id));
+    const pruned: Record<string, { dx: number; dy: number }> = {};
+    for (const [k, v] of Object.entries(o)) if (ids.has(k)) pruned[k] = v;
+    try {
+      localStorage.setItem(layoutStoreKey, JSON.stringify(pruned));
+    } catch {
+      /* 無痕模式等存不了就算了：本次會話仍可拖，只是下次不記得 */
+    }
+    return pruned;
+  };
+
+  const onNodePointerDown = (id: string) => (e: React.PointerEvent<SVGGElement>) => {
+    e.stopPropagation(); // 別讓畫布把這次按下當成平移
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const cur = overrides[id] ?? { dx: 0, dy: 0 };
+    dragRef.current = { mode: "node", id, startX: e.clientX, startY: e.clientY, baseDx: cur.dx, baseDy: cur.dy, moved: false };
+  };
+  const onNodePointerMove = (e: React.PointerEvent<SVGGElement>) => {
+    const d = dragRef.current;
+    if (!d || d.mode !== "node") return;
+    if (!d.moved && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) <= 4) return;
+    d.moved = true;
+    const k = pxToSvg() / view.s; // 畫布縮放中拖動：px 位移換成世界座標要再除縮放
+    setOverrides((o) => ({ ...o, [d.id]: { dx: d.baseDx + (e.clientX - d.startX) * k, dy: d.baseDy + (e.clientY - d.startY) * k } }));
+  };
+  const onNodePointerUp = () => {
+    const d = dragRef.current;
+    if (d?.mode === "node" && d.moved) {
+      suppressClickRef.current = true;
+      setOverrides((o) => persistOverrides(o));
+    }
+    if (d?.mode === "node") dragRef.current = null;
+  };
+  /** 拖完鬆手觸發的 click 吞掉，不開詳情面板 */
+  const onNodeClick = (sel?: MapSelection | null) => () => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    setSelected(sel ?? null);
+  };
+
+  const onSvgPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if ((e.target as Element).closest?.(".map-node")) return; // 節點自己處理
+    if (e.pointerType !== "mouse") return; // 觸控時空白處保留頁面捲動
+    svgRef.current?.setPointerCapture?.(e.pointerId);
+    dragRef.current = { mode: "pan", startX: e.clientX, startY: e.clientY, baseTx: view.tx, baseTy: view.ty };
+  };
+  const onSvgPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const d = dragRef.current;
+    if (!d || d.mode !== "pan") return;
+    const k = pxToSvg();
+    setView((v) => ({ ...v, tx: d.baseTx + (e.clientX - d.startX) * k, ty: d.baseTy + (e.clientY - d.startY) * k }));
+  };
+  const onSvgPointerUp = () => {
+    if (dragRef.current?.mode === "pan") dragRef.current = null;
+  };
+
+  /** 縮放（限 0.5–2.5 倍）：以指定的 viewBox 錨點為中心，錨點在畫面上不動 */
+  const zoomAt = (px: number, py: number, factor: number) =>
+    setView((v) => {
+      const s2 = Math.min(2.5, Math.max(0.5, v.s * factor));
+      if (s2 === v.s) return v;
+      const wx = (px - v.tx) / v.s;
+      const wy = (py - v.ty) / v.s;
+      return { s: s2, tx: px - wx * s2, ty: py - wy * s2 };
+    });
+  const hasMap = !!graph && graph.shownBranches.length > 0;
+  // 滾輪縮放要 preventDefault 擋頁面捲動；React 的 onWheel 在根節點是 passive，改掛原生非 passive 監聽
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el || !hasMap) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      if (!rect.width) return;
+      const k = W / rect.width;
+      zoomAt((e.clientX - rect.left) * k, (e.clientY - rect.top) * k, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+    // zoomAt 是穩定閉包（只用 setView 函式式更新），不入依賴
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasMap]);
+
+  /** 節點的有效位置＝自動佈局＋使用者拖出的偏移 */
+  const posOf = (n: { id: string; x: number; y: number }) => {
+    const o = overrides[n.id];
+    return o ? { x: n.x + o.dx, y: n.y + o.dy } : { x: n.x, y: n.y };
+  };
+  const nodeById = useMemo(() => new Map((layout?.nodes ?? []).map((n) => [n.id, n])), [layout]);
+  const hasCustomLayout = Object.keys(overrides).length > 0;
+  const resetLayout = () => {
+    setOverrides({});
+    try {
+      localStorage.removeItem(layoutStoreKey);
+    } catch {
+      /* 同 persistOverrides：存取失敗不影響本次會話 */
+    }
+  };
+  const resetView = () => setView({ tx: 0, ty: 0, s: 1 });
 
   /** 詳情面板的「前往」：按 nav 型別跳頁或跳到上方那筆 */
   const go = (nav: MapNav) => {
@@ -1088,7 +1229,7 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
       </div>
       <p className="hint">
         本組知識族譜一張圖：中心是本組，往外是專案／組層級／資料庫分支，再往外是筆記（藍）、行程（琥珀）、知識庫（綠）、AI 代理（紫）與資料庫（青）。
-        點任一節點看詳情，一鍵跳到那筆、進專案頁或打開資料庫。
+        點任一節點看詳情，一鍵跳到那筆、進專案頁或打開資料庫。節點可以自由拖拉排版（位置記在這台裝置）；空白處拖曳平移、滾輪或右上角按鈕縮放。
       </p>
 
       {/* 鏡頭：全組／我的／提及我 ＋ 專案聚焦（團隊／個人／專案三個維度） */}
@@ -1143,41 +1284,71 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
         </div>
       ) : (
         <div className="map-wrap" style={{ marginTop: 12 }}>
-          <svg viewBox={`0 0 ${W} ${H}`} className="map-svg" role="img" aria-label="知識地圖">
-            {layout?.edges.map((e, i) => (
-              <line key={`e-${i}`} x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2} className={`map-edge ${e.kind}`} />
-            ))}
-            {layout?.nodes.map((n) => {
-              if (n.type === "group") {
+          {/* 畫布工具：縮放與重設（浮在右上角）；佈局被拖過才出現「重設佈局」 */}
+          <div className="map-tools">
+            <button type="button" className="btn-sm" onClick={() => zoomAt(W / 2, H / 2, 1.2)} aria-label="放大" title="放大">＋</button>
+            <button type="button" className="btn-sm" onClick={() => zoomAt(W / 2, H / 2, 1 / 1.2)} aria-label="縮小" title="縮小">－</button>
+            {(view.s !== 1 || view.tx !== 0 || view.ty !== 0) && (
+              <button type="button" className="btn-sm" onClick={resetView} title="回到原始平移與縮放">重設檢視</button>
+            )}
+            {hasCustomLayout && (
+              <button type="button" className="btn-sm" onClick={resetLayout} title="清除拖拉過的節點位置，回到自動佈局">重設佈局</button>
+            )}
+          </div>
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${W} ${H}`}
+            className="map-svg"
+            role="img"
+            aria-label="知識地圖"
+            onPointerDown={onSvgPointerDown}
+            onPointerMove={onSvgPointerMove}
+            onPointerUp={onSvgPointerUp}
+            onPointerCancel={onSvgPointerUp}
+          >
+            <g transform={`translate(${view.tx} ${view.ty}) scale(${view.s})`}>
+              {layout?.edges.map((e, i) => {
+                const from = nodeById.get(e.from);
+                const to = nodeById.get(e.to);
+                if (!from || !to) return null;
+                const p1 = posOf(from);
+                const p2 = posOf(to);
+                return <line key={`e-${i}`} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} className={`map-edge ${e.kind}`} />;
+              })}
+              {layout?.nodes.map((n) => {
+                const { x, y } = posOf(n);
+                const dragProps = {
+                  onPointerDown: onNodePointerDown(n.id),
+                  onPointerMove: onNodePointerMove,
+                  onPointerUp: onNodePointerUp,
+                  onPointerCancel: onNodePointerUp,
+                };
+                if (n.type === "group") {
+                  return (
+                    <g key={n.id} className="map-node group" {...dragProps}>
+                      <circle cx={x} cy={y} r={34} />
+                      <text x={x} y={y} textAnchor="middle" dominantBaseline="central">{n.label}</text>
+                    </g>
+                  );
+                }
+                if (n.type === "project" || n.type === "bucket" || n.type === "dbhub" || n.type === "more") {
+                  const w = Math.max(56, n.label.length * 13 + 22);
+                  return (
+                    <g key={n.id} className={`map-node ${n.type} clickable`} onClick={onNodeClick(n.selection)} {...dragProps}>
+                      <rect x={x - w / 2} y={y - 15} width={w} height={30} rx={15} />
+                      <text x={x} y={y} textAnchor="middle" dominantBaseline="central">{n.label}</text>
+                    </g>
+                  );
+                }
+                // note / schedule / knowledge / agent / db 葉節點
                 return (
-                  <g key={n.id} className="map-node group">
-                    <circle cx={n.x} cy={n.y} r={34} />
-                    <text x={n.x} y={n.y} textAnchor="middle" dominantBaseline="central">{n.label}</text>
+                  <g key={n.id} className={`map-node ${n.type} clickable`} onClick={onNodeClick(n.selection)} {...dragProps}>
+                    <circle cx={x} cy={y} r={6} />
+                    <text x={x} y={y - 12} textAnchor="middle">{n.label}</text>
                   </g>
                 );
-              }
-              if (n.type === "project" || n.type === "bucket" || n.type === "dbhub" || n.type === "more") {
-                const w = Math.max(56, n.label.length * 13 + 22);
-                return (
-                  <g
-                    key={n.id}
-                    className={`map-node ${n.type} clickable`}
-                    onClick={() => setSelected(n.selection ?? null)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <rect x={n.x - w / 2} y={n.y - 15} width={w} height={30} rx={15} />
-                    <text x={n.x} y={n.y} textAnchor="middle" dominantBaseline="central">{n.label}</text>
-                  </g>
-                );
-              }
-              // note / schedule / knowledge / agent / db 葉節點
-              return (
-                <g key={n.id} className={`map-node ${n.type} clickable`} onClick={() => setSelected(n.selection ?? null)} style={{ cursor: "pointer" }}>
-                  <circle cx={n.x} cy={n.y} r={6} />
-                  <text x={n.x} y={n.y - 12} textAnchor="middle">{n.label}</text>
-                </g>
-              );
-            })}
+              })}
+            </g>
           </svg>
         </div>
       )}
