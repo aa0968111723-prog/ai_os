@@ -892,7 +892,7 @@ app.post("/api/assistant/ask", async (req, res) => {
   try {
     const { runAssistantAsk } = await import("./routers/assistant");
     const result = await runAssistantAsk(
-      { projectId, message, userId: auth.user.id, isInGroup: (g) => auth.groups.some((x) => x.groupId === g) },
+      { projectId, message, auth },
       (e) => sse("step", e),
     );
     sse("done", result);
