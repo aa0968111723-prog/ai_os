@@ -38,7 +38,7 @@ const LIST_LIMIT_DEFAULT = 200;
 const fieldsShape = z.array(z.object({
   key: z.string(),
   label: z.string(),
-  type: z.enum(["text", "number", "select", "date", "checkbox", "url", "user", "project", "schedule"]),
+  type: z.enum(["text", "number", "select", "date", "checkbox", "url", "file", "user", "project", "schedule"]),
   options: z.array(z.string()).optional(),
   required: z.boolean().optional(),
 })).max(60);

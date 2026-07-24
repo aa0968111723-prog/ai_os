@@ -22,7 +22,7 @@ import { handleMcp } from "./services/mcp";
 import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
-  isAllowedUploadMime, kindFromMime, MAX_FILE_BYTES, STORAGE_ROOT,
+  isAllowedUploadMime, kindFromMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT,
 } from "./services/storage";
 import { markBootReady, isBootReady } from "./services/boot";
 import { recordError, listErrors, errorCountSince } from "./services/errlog";
@@ -255,7 +255,7 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
     }
     if (!isAllowedUploadMime(mime)) {
       await cleanup();
-      return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：圖片/影片/音訊/zip/文字/PDF` });
+      return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：圖片（含 HEIC）/影片/音訊/PDF/Office/文字/壓縮檔` });
     }
     const guard = await checkDiskSpace(req.file.size);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
@@ -328,9 +328,9 @@ app.get("/api/assets/:id/file", async (req, res) => {
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.setHeader("X-Content-Type-Options", "nosniff");
     const mime = asset.mime ?? "application/octet-stream";
-    // 圖片/影音維持 inline（縮圖與播放需要）；doc/pdf/txt 等非影音類強制下載，
+    // 圖片/影音維持 inline（縮圖與播放需要）；doc/pdf/txt 與 SVG（可含腳本）強制下載，
     // 避免瀏覽器內嵌渲染帶來的 XSS/內容嗅探風險（#19）
-    if (kindFromMime(mime) === "doc") res.setHeader("Content-Disposition", "attachment");
+    if (shouldForceAttachment(mime)) res.setHeader("Content-Disposition", "attachment");
     // sendFile 內建 Range 支援（影片/音訊拖進度條需要）
     res.sendFile(absPathOf(asset.storagePath), {
       headers: { "Content-Type": mime },
@@ -366,7 +366,7 @@ app.post("/api/databases/upload", requireAuthBeforeUpload, upload.single("file")
     }
     if (!isAllowedUploadMime(mime)) {
       await cleanup();
-      return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：文字/Markdown/CSV/JSON/HTML/字幕/PDF/DOCX 與圖片/影音/zip` });
+      return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：圖片（含 HEIC）/影片/音訊/PDF/Word/Excel/PowerPoint/文字/字幕/壓縮檔等常見格式` });
     }
     const guard = await checkDiskSpace(req.file.size);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
@@ -446,7 +446,7 @@ app.get("/api/databases/files/:id/file", async (req, res) => {
       return res.send(file.textContent ?? "");
     }
     res.setHeader("X-Content-Type-Options", "nosniff");
-    if (kindFromMime(file.mime) === "doc") res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+    if (shouldForceAttachment(file.mime)) res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
     res.sendFile(absPathOf(file.storagePath), { headers: { "Content-Type": file.mime } });
   } catch (err) {
     console.error("[databases:file]", err);
