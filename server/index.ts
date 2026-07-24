@@ -18,6 +18,7 @@ import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
 import { resolveActiveSession } from "./services/auth";
 import { buildEdl, buildFcpxml, buildSrt, buildXmeml, exportProjectZip, exportZipName } from "./services/exporter";
+import { resolutionForFormat } from "../shared/options";
 import { exportJianyingDraftZip } from "./services/jianying";
 import { handleMcp } from "./services/mcp";
 import { isMcpEnabled } from "./services/mcpAuth";
@@ -299,13 +300,16 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
       .from(schema.scenes)
       .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
       .orderBy(asc(schema.scenes.orderIndex));
+    // 修 R3-STOR2-03：單檔時間軸也要依專案比例輸出序列尺寸（與交付 ZIP 同口徑）——否則 9:16/1:1 專案的
+    // fcpxml/xmeml 序列一律 1920×1080 橫向。此端點的分鏡無 mediaPath（gap 骨架版），故只帶解析度、不帶 pathPrefix。
+    const tlOpts = resolutionForFormat(project.format);
     const file =
       format === "srt"
         ? { name: "字幕.srt", mime: "text/plain; charset=utf-8", body: buildSrt(scenes) }
         : format === "fcpxml"
-          ? { name: "時間軸.fcpxml", mime: "application/xml; charset=utf-8", body: buildFcpxml(scenes, project.title) }
+          ? { name: "時間軸.fcpxml", mime: "application/xml; charset=utf-8", body: buildFcpxml(scenes, project.title, tlOpts) }
           : format === "xmeml"
-            ? { name: "Premiere時間軸.xml", mime: "application/xml; charset=utf-8", body: buildXmeml(scenes, project.title) }
+            ? { name: "Premiere時間軸.xml", mime: "application/xml; charset=utf-8", body: buildXmeml(scenes, project.title, tlOpts) }
             : { name: "剪輯表.edl", mime: "text/plain; charset=utf-8", body: buildEdl(scenes, project.title) };
     // res.attachment 以 RFC 5987（filename*=UTF-8''…）讓中文檔名下載安全；Content-Type 隨後覆寫為明確值
     res.attachment(file.name);
@@ -405,7 +409,7 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
     }
     if (verdict.corrected) console.warn(`[upload] MIME 依檔案內容校正：${mime} → ${verdict.mime}（${req.file.originalname}）`);
     mime = verdict.mime;
-    const guard = await checkDiskSpace(req.file.size);
+    const guard = await checkDiskSpace(req.file.size, true);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
 
     // adoptTmpFile 已把暫存檔「移到」Volume 正式位置——之後若 DB 寫入失敗，
@@ -528,7 +532,7 @@ app.post("/api/dm/upload", requireAuthBeforeUpload, upload.single("file"), async
       return res.status(415).json({ error: "檔案內容與宣稱的格式不符（無法辨識檔案簽名）——請確認檔案未損壞、副檔名正確" });
     }
     mime = verdict.mime;
-    const guard = await checkDiskSpace(req.file.size);
+    const guard = await checkDiskSpace(req.file.size, true);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
 
     const { storagePath, sizeBytes } = await adoptTmpFile(req.file.path, mime);
@@ -622,7 +626,7 @@ app.post("/api/databases/upload", requireAuthBeforeUpload, upload.single("file")
     }
     if (verdict.corrected) console.warn(`[databases:upload] MIME 依檔案內容校正：${mime} → ${verdict.mime}（${req.file.originalname}）`);
     mime = verdict.mime;
-    const guard = await checkDiskSpace(req.file.size);
+    const guard = await checkDiskSpace(req.file.size, true);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
     const { quotaGuardError, extractTextFromBuffer, MAX_EXTRACT_BYTES } = await import("./services/databaseFiles");
     const quotaErr = await quotaGuardError(auth.user.id, req.file.size);
@@ -1143,15 +1147,16 @@ app.post("/api/feedback/screenshot", requireAuthBeforeUpload, upload.single("fil
       await cleanup();
       return res.status(415).json({ error: "截圖格式需為 png/jpeg/webp" });
     }
-    const guard = await checkDiskSpace(req.file.size);
+    const guard = await checkDiskSpace(req.file.size, true);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
     // 存進獨立 feedback/ 目錄（非 assets 池）：路徑前綴固定，submit/serve 才能白名單驗證杜絕跨組偷讀
     const { storagePath } = await adoptFeedbackShot(req.file.path, mime);
     res.json({ ok: true, path: storagePath });
   } catch (err) {
     await cleanup();
-    recordError("feedback:screenshot", err);
-    res.status(500).json({ error: err instanceof Error ? err.message : "截圖上傳失敗" });
+    recordError("feedback:screenshot", err); // 原始錯誤只進開發者可見的環形緩衝
+    // 修 LOG3-002：回中性訊息，別把 err.message（含伺服器絕對路徑等內部細節）回給前端
+    res.status(500).json({ error: "截圖上傳失敗，請稍後再試" });
   }
 });
 

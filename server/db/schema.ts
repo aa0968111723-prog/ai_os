@@ -195,6 +195,10 @@ export const generations = pgTable("generations", {
   // listByProject 對每個分鏡各跑兩支 scene_id 相關子查詢；補索引避免生成量成長後全表掃描。
   // 非 unique（純索引，pushSchema 建索引不觸發 truncate 提問，安全）
   sceneIdIdx: index("generations_scene_id_idx").on(t.sceneId),
+  // 修 R3-SQL-02：最熱讀取路徑是「依專案（時間序）」與「依組」過濾——原本只有 sceneId 索引，
+  // 生成量成長後 listByProject/listByProjectPaged 與跨組統計全表掃描。補複合/單欄索引（非 unique，安全）。
+  projectCreatedIdx: index("generations_project_created_idx").on(t.projectId, t.createdAt),
+  groupIdx: index("generations_group_idx").on(t.groupId),
 }));
 
 /** 點數帳本 — 花費紀錄（先扣預估、失敗退回） */
@@ -354,7 +358,10 @@ export const scenes = pgTable("scenes", {
    *  所有分鏡讀取（列表／移動／重排／匯出）都以 isNull(deletedAt) 過濾。 */
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // 修 R3-SQL-03：分鏡讀取一律「依專案（＋排序）」，原本無索引→全表掃描。補複合索引。
+  projectOrderIdx: index("scenes_project_order_idx").on(t.projectId, t.orderIndex),
+}));
 
 export const approvals = pgTable("approvals", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -367,7 +374,10 @@ export const approvals = pgTable("approvals", {
   reason: text("reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   decidedAt: timestamp("decided_at"),
-});
+}, (t) => ({
+  // 修 R3-SQL-03：審批一律「依專案（＋狀態）」查，原本無索引→全表掃描。補複合索引。
+  projectStatusIdx: index("approvals_project_status_idx").on(t.projectId, t.status),
+}));
 
 /** 測試回饋（6 題評分＋優缺點/備註文字） */
 export const feedback = pgTable("feedback", {

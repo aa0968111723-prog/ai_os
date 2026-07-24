@@ -99,7 +99,10 @@ export const quotaRouter = router({
   setGroupQuota: authedProcedure
     .input(z.object({ groupId: z.string().uuid(), weeklyPointsPerUser: z.number().int().min(0).max(1_000_000_000).nullable() }))
     .mutation(async ({ ctx, input }) => {
-      requireLeader(ctx.auth, input.groupId); // 組長或管理層
+      // 修 R3-BINV-02：改需團隊管理員以上（比照 setGroupBudget「分配由上往下」）。原本只 requireLeader，
+      // 組長可拉高全組週額度；因生效額度 fallback 為「個人覆寫→組→全域」，沒有個人 override 的組長等於
+      // 抬高自己的週上限，繞過 setMemberOverride 的自我提額防護。組長對「個別組員」的分配仍走 setMemberOverride。
+      await assertGroupTeamAdmin(ctx.auth, input.groupId);
       await db.update(schema.groups).set({ weeklyPointsPerUser: input.weeklyPointsPerUser }).where(eq(schema.groups.id, input.groupId));
       return { ok: true };
     }),

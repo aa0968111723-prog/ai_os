@@ -382,7 +382,12 @@ export const knowledgeRouter = router({
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
     await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
-    await db.delete(schema.knowledge).where(eq(schema.knowledge.id, input.id));
+    // 修 R3-KNOW-01：級聯清版本快照——update/restoreVersion 會把每次改動前的全文寫進 text_versions
+    //（kind='knowledge', refId=知識id）；purge 只刪本體會讓完整逐字稿/見證全文永久殘留，「永久刪除」名不副實。
+    await db.transaction(async (tx) => {
+      await tx.delete(schema.textVersions).where(and(eq(schema.textVersions.kind, "knowledge"), eq(schema.textVersions.refId, input.id)));
+      await tx.delete(schema.knowledge).where(eq(schema.knowledge.id, input.id));
+    });
     return { ok: true };
   }),
 

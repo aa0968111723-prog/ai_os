@@ -147,7 +147,9 @@ async function claimAndRun(): Promise<void> {
               : String(err),
         updatedAt: new Date(),
       })
-      .where(and(eq(schema.exportJobs.id, job.id), inArray(schema.exportJobs.status, ["running", "cancelled"])))
+      // 修 R3-EXPORT-01：只覆寫仍 running 的列。原本 WHERE 納入 cancelled，逾時或真實錯誤（wasCancelled=false）
+      // 與使用者取消同時發生時，會把已 cancelled 的列改寫成 failed，污染狀態語意。已終局（cancelled/done）不動。
+      .where(and(eq(schema.exportJobs.id, job.id), eq(schema.exportJobs.status, "running")))
       .catch(() => {});
     if (!wasCancelled) console.warn(`[export-job] ${timedOut ? "逾時" : "失敗"} ${job.id}：`, err instanceof Error ? err.message : err);
   } finally {

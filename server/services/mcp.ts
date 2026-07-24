@@ -320,12 +320,15 @@ function recordMcpAudit(
       const [proj] = await db.select({ groupId: schema.projects.groupId }).from(schema.projects).where(eq(schema.projects.id, pid));
       groupId = proj?.groupId ?? null;
     }
+    // 修 LOG3-001：send_dm 的 body 是私訊全文、鍵名不符 sanitizeAuditInput 的 password/token… 規則，
+    // 會被明文寫進審計日誌（繞過網頁端 dm.send 的脫敏）。承載私訊/敏感內文的工具先把 body 換成佔位符。
+    const auditArgs = name === "send_dm" && args && typeof args === "object" ? { ...args, body: "（私訊內容不落審計）" } : args;
     await db.insert(schema.auditLog).values({
       actorId,
       action: `mcp.${name}`,
       groupId,
       projectId,
-      input: sanitizeAuditInput(args) as Record<string, unknown>,
+      input: sanitizeAuditInput(auditArgs) as Record<string, unknown>,
       ok: outcome.ok,
       error: outcome.error ? outcome.error.slice(0, 300) : null,
     });

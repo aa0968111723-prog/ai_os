@@ -215,13 +215,19 @@ async function freeBytes(): Promise<number | null> {
   }
 }
 
-/** 磁碟守門：空間不足回錯誤訊息（中文、可直接顯示給使用者） */
-export async function checkDiskSpace(incomingBytes: number): Promise<string | null> {
+/**
+ * 磁碟守門：空間不足回錯誤訊息（中文、可直接顯示給使用者）。
+ * alreadyWritten（修 R3-STOR2-01）：multer diskStorage 路徑的檔案在檢查時「已寫進 tmp」，
+ * 此時 free 已反映該檔占用，正確判準是「留得住 MIN_FREE」＝free < MIN_FREE，不可再減一次 incomingBytes
+ *（否則接近滿碟時把已寫入的大小重複扣一遍、誤退 507）。尚未寫入的路徑（buffer/遠端）維持 free-incoming 預留。
+ */
+export async function checkDiskSpace(incomingBytes: number, alreadyWritten = false): Promise<string | null> {
   if (incomingBytes > MAX_FILE_BYTES) {
     return `檔案太大（上限 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB）`;
   }
   const free = await freeBytes();
-  if (free !== null && free - incomingBytes < MIN_FREE_BYTES) {
+  const projectedFree = alreadyWritten ? free : free !== null ? free - incomingBytes : null;
+  if (projectedFree !== null && projectedFree < MIN_FREE_BYTES) {
     return "儲存空間不足——請通知管理員到 Zeabur 擴大服務的 Volume 容量（或設 ASSET_DIR 指到更大的磁碟）";
   }
   return null;

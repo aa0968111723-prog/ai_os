@@ -165,10 +165,13 @@ export function validateRowData(
         break;
       }
       case "select": {
-        if (typeof v !== "string" || !(f.options ?? []).includes(v)) {
-          return { ok: false, error: `「${f.label}」只能選：${(f.options ?? []).join("、")}` };
+        // 修 R3-DVT-01：選項與輸入值都先去頭尾空白再比對——選項若含前後空白（手動或匯入建欄留下），
+        // 原本 exact includes 會讓 CSV/JSON 匯入的乾淨值永遠比對失敗。存回正規化（trim 後）的選項值。
+        const matched = typeof v === "string" ? (f.options ?? []).find((o) => o.trim() === v.trim()) : undefined;
+        if (matched === undefined) {
+          return { ok: false, error: `「${f.label}」只能選：${(f.options ?? []).map((o) => o.trim()).join("、")}` };
         }
-        out[f.key] = v;
+        out[f.key] = matched.trim();
         break;
       }
       case "date": {
