@@ -610,6 +610,28 @@ function TeamExtras({ teamId }: { teamId: string }) {
   );
 }
 
+/**
+ * 寄測試信鈕（邀請成員卡）：管理員改完信箱金鑰後一鍵驗證，不必再走一次邀請流程才發現壞掉。
+ * 結果三態：sent＝綠字確認、skipped/failed＝金色警示帶人話原因（sendEmail 已翻成人話）。
+ */
+function TestEmailButton() {
+  const test = trpc.admin.sendTestEmail.useMutation();
+  return (
+    <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <button style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }} disabled={test.isPending} onClick={() => test.mutate()}>
+        {test.isPending ? "寄送中…" : "寄測試信到我的信箱"}
+      </button>
+      {test.data &&
+        (test.data.status === "sent" ? (
+          <span className="hint" style={{ color: "var(--success-ink)" }}>✓ 已寄出——收到即代表信箱機制正常</span>
+        ) : (
+          <span className="hint" style={{ color: "var(--gold-ink)" }}>⚠ {test.data.detail}</span>
+        ))}
+      {test.error && <span className="error" style={{ marginTop: 0 }}>{test.error.message}</span>}
+    </div>
+  );
+}
+
 /** 建立團隊（開發者限定；非開發者不渲染這張卡，後端 createTeam 也會再擋一次） */
 function CreateTeamCard() {
   const utils = trpc.useUtils();
@@ -1906,6 +1928,7 @@ export function AdminPage() {
             <span>同時把邀請連結寄到這個 Email</span>
           </label>
           <p className="hint" style={{ margin: "4px 0 0" }}>未設定信箱機制時會自動略過寄信，改用下方連結傳給對方即可。</p>
+          <TestEmailButton />
           <div style={{ marginTop: 16 }}>
             <button
               className="primary"

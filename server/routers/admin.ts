@@ -356,6 +356,27 @@ export const adminRouter = router({
       return { inviteUrl, attached: false, message: null as string | null, expiresInHours: 72, emailStatus, emailDetail };
     }),
 
+  /**
+   * 寄測試信給自己：驗證信箱機制（RESEND_API_KEY／EMAIL_FROM）真的能寄出。
+   * 管理員改完環境變數後按一下即可確認，不必再走一次邀請流程才發現金鑰壞掉。
+   * 一律回 { status, detail }（人話），不拋例外——與 sendEmail 的優雅降級一致。
+   */
+  sendTestEmail: adminProcedure.mutation(async ({ ctx }) => {
+    if (!isEmailConfigured()) {
+      return { status: "skipped" as EmailStatus, detail: "尚未設定信箱機制（RESEND_API_KEY／EMAIL_FROM）——設定後再試" };
+    }
+    return sendEmail({
+      to: ctx.auth.user.email,
+      subject: "AI Director OS 測試信",
+      text: [
+        "這是一封測試信，用來確認系統的信箱機制運作正常。",
+        "",
+        "收到這封信＝設定成功，邀請信與回饋回覆信都能正常寄出。",
+        `（由 ${ctx.auth.user.name} 在「團隊管理」頁觸發）`,
+      ].join("\n"),
+    });
+  }),
+
   /** 變更組內角色（組長↔組員） */
   setGroupRole: adminProcedure
     .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), role: z.enum(["leader", "member"]) }))

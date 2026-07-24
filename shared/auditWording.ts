@@ -25,6 +25,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "projects.updateWorldview": "更新世界觀",
   "projects.setProjectRole": "調整專案成員角色",
   "projects.setOwner": "轉移專案負責人",
+  "admin.sendTestEmail": "寄信箱測試信",
   "projects.renameAsset": "重新命名素材",
   "projects.setAssetLock": "鎖定／解鎖素材",
   "projects.deleteAsset": "刪除素材（進回收桶）",
