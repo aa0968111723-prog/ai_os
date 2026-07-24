@@ -9,9 +9,10 @@ import { flashAnchor, takePlannerFocus } from "../discuss";
 
 /**
  * 筆記排程（需求 #10）：組內共用的「排程表＋會議筆記＋知識地圖」一頁。
- * - 組排程：可掛專案、可匯出 .ics 到個人日曆；清單／月曆兩種檢視（真實日曆）。
+ * - 組排程：可掛專案、可直連 Google 日曆自動同步（.ics 匯出保留為後備）；清單／月曆兩種檢視（真實日曆）。
  * - 筆記／會議紀錄：內容更新由後端自動留版本快照；可「從知識庫匯入」把專案知識帶進筆記。
- * - 知識地圖（心智圖）：把專案／筆記／行程織成一張放射圖，並可用「全組／我的／專案」三種鏡頭聚焦。
+ * - 知識地圖（知識族譜）：把專案／筆記／行程／知識庫／AI 代理／資料庫織成一張放射圖，
+ *   資料由後端 knowledgeMap.graph 一次聚合（帶組隔離與資料庫 ACL），可用鏡頭／專案／型別開關聚焦。
  * groupId 由 App 頂欄的組別選單傳入。
  */
 
@@ -89,7 +90,7 @@ export function PlannerPage({ groupId }: { groupId: string }) {
   return (
     <div>
       <h1>筆記排程</h1>
-      <p className="hint">全組共用的行程表與會議紀錄：排程可切清單／月曆並匯出到個人日曆；筆記可從知識庫匯入；知識地圖把三者織成一張心智圖。</p>
+      <p className="hint">全組共用的行程表與會議紀錄：排程可切清單／月曆並直連 Google 日曆自動同步；筆記可從知識庫匯入；知識地圖把行程、筆記、專案知識庫、AI 代理與資料庫織成一張知識族譜。</p>
       {/* key 綁組別：切換作用組時整卡重掛，表單草稿不會帶到別的組 */}
       <ScheduleCard key={`sch-${groupId}`} groupId={groupId} />
       <NotesCard key={`note-${groupId}`} groupId={groupId} />
@@ -102,6 +103,95 @@ export function PlannerPage({ groupId }: { groupId: string }) {
 }
 
 /* ────────────────────────── (1) 組排程（清單／月曆） ────────────────────────── */
+
+/**
+ * Google 日曆直連同步工具列：
+ * - 站方已設定 OAuth（configured）→ 顯示「連結 Google 日曆」；連結後排程增刪改自動推送到
+ *   個人 Google 帳戶的專屬日曆（＋每 15 分鐘背景對帳），不必再手動匯出/匯入。
+ * - 未設定 → 退回原本的 .ics 匯出（後備）。
+ * - OAuth 回跳帶 ?gcal=... 的一次性結果訊息在此顯示並清掉網址參數。
+ */
+function GoogleCalendarBar({ groupId }: { groupId: string }) {
+  const utils = trpc.useUtils();
+  const status = trpc.googleCalendar.status.useQuery();
+  const syncNow = trpc.googleCalendar.syncNow.useMutation({ onSettled: () => utils.googleCalendar.status.invalidate() });
+  const disconnect = trpc.googleCalendar.disconnect.useMutation({ onSuccess: () => utils.googleCalendar.status.invalidate() });
+  const [flash, setFlash] = useState<string | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("gcal");
+    if (!q) return;
+    setFlash(
+      q === "connected" ? "已連結 Google 日曆，首次同步進行中（幾秒內完成）"
+      : q === "denied" ? "已取消 Google 授權——隨時可以再連結"
+      : q === "state_mismatch" ? "授權連結已過期，請重新點「連結 Google 日曆」"
+      : "連結失敗，請稍後再試",
+    );
+    window.history.replaceState(null, "", window.location.pathname); // 清掉一次性參數，重新整理不再重播
+  }, []);
+
+  const icsFallback = (
+    <a href={`/api/schedule/${groupId}/calendar.ics`} download style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <Icon name="Download" size={14} />匯出 .ics
+    </a>
+  );
+
+  const st = status.data;
+  if (!st) return icsFallback; // 載入中（或查詢失敗）：先給後備匯出，不擋操作
+  if (!st.configured) {
+    return (
+      <>
+        {icsFallback}
+        <span className="hint" style={{ margin: 0 }}>下載後匯入個人日曆；內容更新請重新下載</span>
+      </>
+    );
+  }
+  if (!st.connected) {
+    return (
+      <>
+        <a href="/api/google/oauth/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="CalendarPlus" size={14} />連結 Google 日曆（自動同步）
+        </a>
+        <span className="hint" style={{ margin: 0 }}>{flash ?? "連結後排程增刪改自動出現在你的 Google 日曆，免匯出匯入"}</span>
+        {icsFallback}
+      </>
+    );
+  }
+  if (st.status === "error") {
+    return (
+      <>
+        <span className="hint" style={{ margin: 0, color: "var(--danger, #b3261e)" }} title={st.lastError ?? undefined}>
+          Google 日曆授權已失效
+        </span>
+        <a href="/api/google/oauth/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="CalendarPlus" size={14} />重新連結
+        </a>
+      </>
+    );
+  }
+  const lastSync = st.lastSyncAt ? new Date(st.lastSyncAt).toLocaleString("zh-TW") : "排入佇列中";
+  return (
+    <>
+      <span className="hint" style={{ margin: 0 }} title={`最後同步：${lastSync}${st.lastError ? `；上次錯誤：${st.lastError}` : ""}`}>
+        <Icon name="CalendarPlus" size={13} /> 已連結 Google 日曆{st.googleEmail ? `（${st.googleEmail}）` : ""}・自動同步中
+      </span>
+      {flash && <span className="hint" style={{ margin: 0 }}>{flash}</span>}
+      <button type="button" className="btn-sm" onClick={() => syncNow.mutate()} disabled={syncNow.isPending} title="平常不用按：增刪改會自動同步；這顆給想立即確認的人">
+        {syncNow.isPending ? "同步中…" : "立即同步"}
+      </button>
+      {syncNow.isError && <span className="hint" style={{ margin: 0, color: "var(--danger, #b3261e)" }}>{syncNow.error.message}</span>}
+      <ConfirmButton
+        onConfirm={() => disconnect.mutate()}
+        title="中斷 Google 日曆連結？"
+        message="會撤銷授權並移除你 Google 帳戶裡的「AI Director OS・組排程」日曆（系統內排程不受影響）。"
+        confirmLabel="中斷連結"
+        disabled={disconnect.isPending}
+        triggerClassName="btn-sm"
+      >
+        中斷連結
+      </ConfirmButton>
+    </>
+  );
+}
 
 function ScheduleCard({ groupId }: { groupId: string }) {
   const utils = trpc.useUtils();
@@ -123,6 +213,8 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   const add = trpc.schedule.add.useMutation({
     onSuccess: () => {
       utils.schedule.list.invalidate({ groupId });
+      // 知識地圖吃獨立的聚合查詢：排程增刪也要讓地圖重抓，否則節點/計數殘留舊資料
+      utils.knowledgeMap.graph.invalidate({ groupId });
       setTitle("");
       setStartAt("");
       setEndAt("");
@@ -130,7 +222,12 @@ function ScheduleCard({ groupId }: { groupId: string }) {
       setProjectId("");
     },
   });
-  const remove = trpc.schedule.remove.useMutation({ onSuccess: () => utils.schedule.list.invalidate({ groupId }) });
+  const remove = trpc.schedule.remove.useMutation({
+    onSuccess: () => {
+      utils.schedule.list.invalidate({ groupId });
+      utils.knowledgeMap.graph.invalidate({ groupId });
+    },
+  });
 
   const endInvalid = !!startAt && !!endAt && new Date(endAt) < new Date(startAt);
   const canAdd = !!title.trim() && !!startAt && !endInvalid && !add.isPending;
@@ -183,12 +280,9 @@ function ScheduleCard({ groupId }: { groupId: string }) {
       </div>
       <p className="hint">拍攝、開會、上片時間都排在這裡，全組看同一份，不再翻對話記錄找時間。</p>
 
-      {/* 頂部工具列：.ics 匯出＋（清單檢視）顯示過去行程 */}
+      {/* 頂部工具列：Google 日曆直連同步（主）＋ .ics 匯出（後備）＋（清單檢視）顯示過去行程 */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-        <a href={`/api/schedule/${groupId}/calendar.ics`} download style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <Icon name="Download" size={14} />匯出 .ics（匯入 Google 日曆）
-        </a>
-        <span className="hint" style={{ margin: 0 }}>下載後匯入個人日曆；內容更新請重新下載</span>
+        <GoogleCalendarBar groupId={groupId} />
         <span className="spacer" />
         {view === "list" && (
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0 }} title="預設只顯示未來與最近 24 小時內的行程">
@@ -500,6 +594,8 @@ function NotesCard({ groupId }: { groupId: string }) {
   const add = trpc.notes.add.useMutation({
     onSuccess: () => {
       utils.notes.list.invalidate({ groupId });
+      // 知識地圖吃獨立的聚合查詢：筆記增刪改也要讓地圖重抓，否則節點/計數殘留舊資料
+      utils.knowledgeMap.graph.invalidate({ groupId });
       clearTitleDraft();
       clearContentDraft();
       closeForm();
@@ -509,12 +605,18 @@ function NotesCard({ groupId }: { groupId: string }) {
     onSuccess: (_row, vars) => {
       utils.notes.list.invalidate({ groupId });
       utils.notes.get.invalidate({ id: vars.id });
+      utils.knowledgeMap.graph.invalidate({ groupId });
       clearTitleDraft();
       clearContentDraft();
       closeForm();
     },
   });
-  const remove = trpc.notes.remove.useMutation({ onSuccess: () => utils.notes.list.invalidate({ groupId }) });
+  const remove = trpc.notes.remove.useMutation({
+    onSuccess: () => {
+      utils.notes.list.invalidate({ groupId });
+      utils.knowledgeMap.graph.invalidate({ groupId });
+    },
+  });
 
   const saving = add.isPending || update.isPending;
   const canSave = !!title.trim() && !!content.trim() && contentReady && !saving;
@@ -747,69 +849,154 @@ function KnowledgeImport({
   );
 }
 
-/* ─────────────────────── (3) 知識地圖・心智圖 ─────────────────────── */
+/* ─────────────────────── (3) 知識地圖・心智圖（知識族譜） ─────────────────────── */
 
 type MapLens = Lens;
 
+/** 葉節點的五種型別：筆記／行程（本頁上方兩卡）＋知識庫／AI 代理（掛專案）＋資料庫（組相關） */
+type LeafKind = "note" | "schedule" | "knowledge" | "agent" | "db";
+
+/** 點節點後詳情面板的導航動作：anchor＝跳到本頁上方那筆；project＝進專案頁；db＝資料庫頁（可帶 ?open= 深連結） */
+type MapNav =
+  | { type: "anchor"; anchorId: string }
+  | { type: "project"; projectId: string }
+  | { type: "db"; tableId?: string }
+  | null;
+
+type MapLeaf = { id: string; kind: LeafKind; label: string; sub: string; nav: MapNav };
+type MapSelection = { label: string; sub: string; nav: MapNav };
+
+/** knowledgeMap.graph 的回傳形狀（superjson 下日期是 Date，顯示前仍防禦性包 new Date） */
+type MapGraphData = {
+  projects: Array<{ id: string; title: string; status: string; updatedAt: string | Date }>;
+  notes: Array<{ id: string; projectId: string | null; title: string; createdBy: string; mentions: string[] | null; updatedAt: string | Date }>;
+  schedule: Array<{ id: string; projectId: string | null; title: string; startsAt: string | Date; createdBy: string; mentions: string[] | null }>;
+  knowledge: Array<{ id: string; projectId: string; kind: string; title: string; chars: number; createdBy: string; createdAt: string | Date }>;
+  agents: Array<{ id: string; projectId: string; goal: string; status: string; estPoints: number; userId: string; updatedAt: string | Date }>;
+  databases: Array<{ id: string; scope: string; name: string; rowCount: number; agentAccess: string; createdBy: string; updatedAt: string | Date }>;
+};
+
+const KNOWLEDGE_KIND_LABEL: Record<string, string> = { transcript: "師父開示稿", testimony: "見證故事", script: "腳本", note: "其他筆記" };
+const AGENT_STATUS_LABEL: Record<string, string> = { awaiting_approval: "待核准", running: "執行中", done: "已完成", failed: "失敗", stopped: "已停止" };
+const DB_SCOPE_LABEL: Record<string, string> = { personal: "個人", group: "組", team: "團隊", global: "全站" };
+const DB_AGENT_ACCESS_LABEL: Record<string, string> = { none: "不開放 AI", read: "AI 唯讀", write: "AI 可查可寫" };
+const LEAF_TOGGLES: Array<{ kind: LeafKind; label: string }> = [
+  { kind: "note", label: "筆記" },
+  { kind: "schedule", label: "行程" },
+  { kind: "knowledge", label: "知識" },
+  { kind: "agent", label: "AI 代理" },
+  { kind: "db", label: "資料庫" },
+];
+
 /**
- * 知識地圖（心智圖）：中心＝這個組，往外一圈是「專案」與「組層級」節點，
- * 再往外是掛在其下的筆記（藍）與行程（琥珀）。放射佈局＋可用「全組／我的／專案」聚焦。
- * 純前端從既有 notes.list / schedule.list / projects.list 織出，不新增後端查詢。
+ * 知識地圖（知識族譜）：中心＝這個組，往外一圈是「專案／組層級／資料庫」分支，
+ * 再往外是掛在其下的筆記（藍）、行程（琥珀）、知識（綠）、AI 代理（紫）與資料庫（青）。
+ * 資料改吃後端聚合端點 knowledgeMap.graph（一次撈齊六類、全帶組隔離與資料庫 ACL），
+ * 前端只負責過濾（鏡頭／專案聚焦／型別開關）、佈局與導航——點節點開詳情面板，
+ * 面板可跳到本頁那筆、進專案頁或深連結開某個資料庫（/databases?open=id）。
  */
 function KnowledgeMapCard({ groupId }: { groupId: string }) {
   const [, setLocation] = useLocation();
   const me = trpc.auth.me.useQuery();
   const meId = me.data?.user.id ?? "";
-  const notes = trpc.notes.list.useQuery({ groupId });
-  const schedule = trpc.schedule.list.useQuery({ groupId, includePast: true });
-  const projects = trpc.projects.list.useQuery({ groupId });
+  const graphQ = trpc.knowledgeMap.graph.useQuery({ groupId });
 
-  const [lens, setLens] = useState<MapLens>("all");
-  const [focusProject, setFocusProject] = useState(""); // ""＝全部專案
+  const [lens, setLensRaw] = useState<MapLens>("all");
+  const [focusProject, setFocusProjectRaw] = useState(""); // ""＝全部專案
+  const [types, setTypes] = useState<Record<LeafKind, boolean>>({ note: true, schedule: true, knowledge: true, agent: true, db: true });
+  const [selected, setSelected] = useState<MapSelection | null>(null);
+  // 換鏡頭／聚焦／開關型別時把選取清掉——面板殘留上一個視角的節點會誤導
+  const setLens = (v: MapLens) => { setLensRaw(v); setSelected(null); };
+  const setFocusProject = (v: string) => { setFocusProjectRaw(v); setSelected(null); };
+  const toggleType = (k: LeafKind) => { setTypes((t) => ({ ...t, [k]: !t[k] })); setSelected(null); };
 
-  const loading = notes.isLoading || schedule.isLoading || projects.isLoading;
-  const anyError = notes.error ?? schedule.error ?? projects.error;
+  const data = graphQ.data as MapGraphData | undefined;
 
   const graph = useMemo(() => {
-    if (loading || anyError) return null;
-    const inLens = (createdBy: string | undefined, mentions: string[] | null | undefined) => {
+    if (!data) return null;
+    // 鏡頭：全組看全部；「我的」＝我建立的（各型別皆適用）；「提及我」只有筆記／行程有 @提及語意
+    const inLens = (createdBy: string, mentions?: string[] | null) => {
       if (lens === "all") return true;
       if (lens === "mine") return createdBy === meId;
       return Array.isArray(mentions) && mentions.includes(meId);
     };
-    const projTitle = (pid: string | null) => (pid ? (projects.data ?? []).find((p) => p.id === pid)?.title ?? "（已移除專案）" : null);
+    const projTitle = (pid: string | null) => (pid ? data.projects.find((p) => p.id === pid)?.title ?? "（已移除專案）" : null);
 
-    // 依鏡頭 ＋（可選）聚焦專案過濾
-    const noteRows = ((notes.data ?? []) as NoteItem[]).filter(
-      (n) => inLens(n.createdBy, n.mentions) && (!focusProject || n.projectId === focusProject),
-    );
-    const schedRows = ((schedule.data ?? []) as ScheduleItem[]).filter(
-      (e) => inLens(e.createdBy, e.mentions) && (!focusProject || e.projectId === focusProject),
-    );
+    const noteRows = data.notes.filter((n) => types.note && inLens(n.createdBy, n.mentions) && (!focusProject || n.projectId === focusProject));
+    const schedRows = data.schedule.filter((e) => types.schedule && inLens(e.createdBy, e.mentions) && (!focusProject || e.projectId === focusProject));
+    const knowRows = data.knowledge.filter((k) => types.knowledge && inLens(k.createdBy) && (!focusProject || k.projectId === focusProject));
+    const agentRows = data.agents.filter((a) => types.agent && inLens(a.userId) && (!focusProject || a.projectId === focusProject));
+    // 資料庫不掛專案：聚焦某專案時不畫（避免誤導成「這庫屬於這個專案」）
+    const dbRows = focusProject ? [] : data.databases.filter((d) => types.db && inLens(d.createdBy));
 
-    // 分支：key＝專案 id 或 "__group"（組層級／未掛專案）
-    type Leaf = { id: string; kind: "note" | "schedule"; label: string; refId: string };
-    const branches = new Map<string, { key: string; label: string; projectId: string | null; leaves: Leaf[] }>();
+    // 分支：key＝專案 id 或 "__group"（組層級／未掛專案）；資料庫獨立一支
+    const branches = new Map<string, { key: string; label: string; kind: "project" | "bucket"; projectId: string | null; leaves: MapLeaf[] }>();
     const branchOf = (pid: string | null) => {
       const key = pid ?? "__group";
       let b = branches.get(key);
       if (!b) {
-        b = { key, label: pid ? projTitle(pid) ?? "專案" : "組層級", projectId: pid, leaves: [] };
+        b = { key, label: pid ? projTitle(pid) ?? "專案" : "組層級", kind: pid ? "project" : "bucket", projectId: pid, leaves: [] };
         branches.set(key, b);
       }
       return b;
     };
-    for (const n of noteRows) branchOf(n.projectId).leaves.push({ id: `n-${n.id}`, kind: "note", label: n.title, refId: n.id });
-    for (const e of schedRows) branchOf(e.projectId).leaves.push({ id: `s-${e.id}`, kind: "schedule", label: e.title, refId: e.id });
+    // 葉順序：知識（沉澱）→ 筆記 → 行程 → 代理（動態）——同分支內按「知識脈絡」由靜到動排
+    for (const k of knowRows)
+      branchOf(k.projectId).leaves.push({
+        id: `k-${k.id}`,
+        kind: "knowledge",
+        label: k.title,
+        sub: `知識庫・${KNOWLEDGE_KIND_LABEL[k.kind] ?? k.kind}・${k.chars.toLocaleString()} 字`,
+        nav: { type: "project", projectId: k.projectId },
+      });
+    for (const n of noteRows)
+      branchOf(n.projectId).leaves.push({
+        id: `n-${n.id}`,
+        kind: "note",
+        label: n.title,
+        sub: `筆記・${fmtDateTime(n.updatedAt)} 更新`,
+        nav: { type: "anchor", anchorId: `note-${n.id}` },
+      });
+    for (const e of schedRows)
+      branchOf(e.projectId).leaves.push({
+        id: `s-${e.id}`,
+        kind: "schedule",
+        label: e.title,
+        sub: `行程・${fmtDateTime(e.startsAt)}`,
+        nav: { type: "anchor", anchorId: `schedule-${e.id}` },
+      });
+    for (const a of agentRows)
+      branchOf(a.projectId).leaves.push({
+        id: `a-${a.id}`,
+        kind: "agent",
+        label: a.goal,
+        sub: `AI 代理・${AGENT_STATUS_LABEL[a.status] ?? a.status}・估 ${a.estPoints} 點`,
+        nav: { type: "project", projectId: a.projectId },
+      });
 
-    const branchList = [...branches.values()].filter((b) => b.leaves.length > 0);
-    // 分支多時先排「內容多」的，最多畫 10 個分支，其餘不畫（避免過度擁擠）
-    branchList.sort((a, b) => b.leaves.length - a.leaves.length);
-    const shownBranches = branchList.slice(0, 10);
-    const hiddenBranchCount = branchList.length - shownBranches.length;
+    const dbLeaves: MapLeaf[] = dbRows.map((d) => ({
+      id: `d-${d.id}`,
+      kind: "db",
+      label: d.name,
+      sub: `資料庫・${DB_SCOPE_LABEL[d.scope] ?? d.scope}・${d.rowCount.toLocaleString()} 列・${DB_AGENT_ACCESS_LABEL[d.agentAccess] ?? d.agentAccess}`,
+      nav: { type: "db", tableId: d.id },
+    }));
 
-    return { shownBranches, hiddenBranchCount, totalNotes: noteRows.length, totalSched: schedRows.length };
-  }, [loading, anyError, notes.data, schedule.data, projects.data, lens, focusProject, meId]);
+    const contentBranches = [...branches.values()].filter((b) => b.leaves.length > 0);
+    // 分支多時先排「內容多」的；資料庫分支固定保留一席，其餘不畫（避免過度擁擠）
+    contentBranches.sort((a, b) => b.leaves.length - a.leaves.length);
+    const maxContent = dbLeaves.length > 0 ? 9 : 10;
+    const shownBranches: Array<{ key: string; label: string; kind: "project" | "bucket" | "dbhub"; projectId: string | null; leaves: MapLeaf[] }> =
+      contentBranches.slice(0, maxContent);
+    const hiddenBranchCount = contentBranches.length - Math.min(contentBranches.length, maxContent);
+    if (dbLeaves.length > 0) shownBranches.push({ key: "__db", label: "資料庫", kind: "dbhub", projectId: null, leaves: dbLeaves });
+
+    return {
+      shownBranches,
+      hiddenBranchCount,
+      counts: { note: noteRows.length, schedule: schedRows.length, knowledge: knowRows.length, agent: agentRows.length, db: dbRows.length },
+    };
+  }, [data, lens, focusProject, types, meId]);
 
   // 佈局幾何（固定 viewBox，SVG 依容器寬縮放）
   const W = 920;
@@ -824,7 +1011,15 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
     const B = shownBranches.length;
     const RB = 165; // 分支節點半徑
     const RL = 258; // 葉節點半徑
-    const nodes: Array<{ id: string; type: "group" | "project" | "bucket" | "note" | "schedule" | "more"; label: string; x: number; y: number; refId?: string; projectId?: string | null }> = [];
+    type LayoutNode = {
+      id: string;
+      type: "group" | "project" | "bucket" | "dbhub" | "more" | LeafKind;
+      label: string;
+      x: number;
+      y: number;
+      selection?: MapSelection;
+    };
+    const nodes: LayoutNode[] = [];
     const edges: Array<{ x1: number; y1: number; x2: number; y2: number; kind: "branch" | "leaf" }> = [];
     nodes.push({ id: "group", type: "group", label: "本組", x: cx, y: cy });
     if (B === 0) return { nodes, edges };
@@ -833,45 +1028,68 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
       const bx = cx + RB * Math.cos(a);
       const by = cy + RB * Math.sin(a);
       edges.push({ x1: cx, y1: cy, x2: bx, y2: by, kind: "branch" });
-      nodes.push({ id: `b-${b.key}`, type: b.projectId ? "project" : "bucket", label: clip(b.label, 12), x: bx, y: by, projectId: b.projectId });
+      // 分支節點也可點：專案分支→進專案；資料庫分支→開資料庫頁；組層級只顯示統計
+      const branchNav: MapNav = b.kind === "project" && b.projectId ? { type: "project", projectId: b.projectId } : b.kind === "dbhub" ? { type: "db" } : null;
+      nodes.push({
+        id: `b-${b.key}`,
+        type: b.kind,
+        label: clip(b.label, 12),
+        x: bx,
+        y: by,
+        selection: { label: b.label, sub: `${b.kind === "dbhub" ? "資料庫" : b.kind === "project" ? "專案" : "組層級"}・${b.leaves.length} 個節點`, nav: branchNav },
+      });
       // 葉節點：在分支角度附近扇形展開；最多 6 片，其餘收成一顆「+N」
       const shownLeaves = b.leaves.slice(0, 6);
       const extra = b.leaves.length - shownLeaves.length;
       const total = shownLeaves.length + (extra > 0 ? 1 : 0);
       const fan = Math.min(Math.PI * 0.7, 0.36 * Math.max(1, total)); // 扇形總開角
-      shownLeaves.forEach((leaf, j) => {
+      const leafPos = (j: number) => {
         const off = total > 1 ? -fan / 2 + (fan * j) / (total - 1) : 0;
         const la = a + off;
-        const lx = cx + RL * Math.cos(la);
-        const ly = cy + RL * Math.sin(la);
+        return { lx: cx + RL * Math.cos(la), ly: cy + RL * Math.sin(la) };
+      };
+      shownLeaves.forEach((leaf, j) => {
+        const { lx, ly } = leafPos(j);
         edges.push({ x1: bx, y1: by, x2: lx, y2: ly, kind: "leaf" });
-        nodes.push({ id: leaf.id, type: leaf.kind, label: clip(leaf.label, 11), x: lx, y: ly, refId: leaf.refId });
+        nodes.push({ id: leaf.id, type: leaf.kind, label: clip(leaf.label, 11), x: lx, y: ly, selection: { label: leaf.label, sub: leaf.sub, nav: leaf.nav } });
       });
       if (extra > 0) {
-        const j = shownLeaves.length;
-        const off = total > 1 ? -fan / 2 + (fan * j) / (total - 1) : 0;
-        const la = a + off;
-        const lx = cx + RL * Math.cos(la);
-        const ly = cy + RL * Math.sin(la);
+        const { lx, ly } = leafPos(shownLeaves.length);
         edges.push({ x1: bx, y1: by, x2: lx, y2: ly, kind: "leaf" });
-        nodes.push({ id: `more-${b.key}`, type: "more", label: `+${extra}`, x: lx, y: ly, projectId: b.projectId });
+        nodes.push({
+          id: `more-${b.key}`,
+          type: "more",
+          label: `+${extra}`,
+          x: lx,
+          y: ly,
+          selection: { label: `${b.label}：還有 ${extra} 個節點`, sub: "地圖每支最多畫 6 片葉子，其餘請進來源頁看全部", nav: branchNav },
+        });
       }
     });
     return { nodes, edges };
   }, [graph]);
 
-  const clickNode = (n: { type: string; refId?: string; projectId?: string | null }) => {
-    if (n.type === "note" && n.refId) flashAnchor(`note-${n.refId}`);
-    else if (n.type === "schedule" && n.refId) flashAnchor(`schedule-${n.refId}`);
-    else if ((n.type === "project" || n.type === "more") && n.projectId) setLocation(`/p/${n.projectId}`);
+  /** 詳情面板的「前往」：按 nav 型別跳頁或跳到上方那筆 */
+  const go = (nav: MapNav) => {
+    if (!nav) return;
+    if (nav.type === "anchor") flashAnchor(nav.anchorId);
+    else if (nav.type === "project") setLocation(`/p/${nav.projectId}`);
+    else setLocation(nav.tableId ? `/databases?open=${nav.tableId}` : "/databases");
   };
+  const navLabel = (nav: MapNav) =>
+    !nav ? null : nav.type === "anchor" ? "跳到上方那筆" : nav.type === "project" ? "開啟專案" : nav.tableId ? "開啟資料庫" : "開啟資料庫頁";
+
+  const counts = graph?.counts;
 
   return (
     <section className="card" style={{ marginTop: 16 }} data-fb="知識地圖卡">
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0 }}>知識地圖・心智圖</h2>
       </div>
-      <p className="hint">把專案、筆記、行程織成一張放射心智圖：中心是本組，往外是專案／組層級，再往外是筆記（藍）與行程（琥珀）。點筆記／行程節點會跳到上方對應那筆，點專案節點進專案頁。</p>
+      <p className="hint">
+        本組知識族譜一張圖：中心是本組，往外是專案／組層級／資料庫分支，再往外是筆記（藍）、行程（琥珀）、知識庫（綠）、AI 代理（紫）與資料庫（青）。
+        點任一節點看詳情，一鍵跳到那筆、進專案頁或打開資料庫。
+      </p>
 
       {/* 鏡頭：全組／我的／提及我 ＋ 專案聚焦（團隊／個人／專案三個維度） */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
@@ -884,35 +1102,44 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
           <Icon name="SlidersHorizontal" size={13} style={{ color: "var(--fg-secondary)" }} />
           <select value={focusProject} onChange={(e) => setFocusProject(e.target.value)} style={{ minWidth: 150 }} aria-label="聚焦專案">
             <option value="">全部專案</option>
-            {(projects.data ?? []).map((p) => (
+            {(data?.projects ?? []).map((p) => (
               <option key={p.id} value={p.id}>{p.title}</option>
             ))}
           </select>
         </div>
-        {graph && (
+        {counts && (
           <span className="hint" style={{ margin: 0 }}>
-            筆記 {graph.totalNotes}・行程 {graph.totalSched}
-            {graph.hiddenBranchCount > 0 ? `・另有 ${graph.hiddenBranchCount} 個分支未畫（過密）` : ""}
+            筆記 {counts.note}・行程 {counts.schedule}・知識 {counts.knowledge}・代理 {counts.agent}・資料庫 {counts.db}
+            {graph && graph.hiddenBranchCount > 0 ? `・另有 ${graph.hiddenBranchCount} 個分支未畫（過密）` : ""}
           </span>
         )}
       </div>
 
-      {/* 圖例 */}
-      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-        <span className="map-legend"><span className="map-dot note" /> 筆記</span>
-        <span className="map-legend"><span className="map-dot sched" /> 行程</span>
+      {/* 圖例＝型別開關：點一下顯示／隱藏該型別的葉節點 */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+        {LEAF_TOGGLES.map((t) => (
+          <button key={t.kind} type="button" className={`map-toggle${types[t.kind] ? " on" : ""}`} aria-pressed={types[t.kind]} onClick={() => toggleType(t.kind)}>
+            <span className={`map-dot ${t.kind}`} /> {t.label}
+          </button>
+        ))}
         <span className="map-legend"><span className="map-dot proj" /> 專案</span>
         <span className="map-legend"><span className="map-dot bucket" /> 組層級</span>
       </div>
+      {lens === "mentioned" && (
+        <p className="hint" style={{ marginTop: 6 }}>「提及我」只適用有 @提及 的筆記與行程；知識、代理與資料庫在此鏡頭下不顯示。</p>
+      )}
 
-      {loading ? (
+      {graphQ.isLoading ? (
         <div className="skeleton" style={{ height: 320, marginTop: 12, borderRadius: "var(--r-12)" }} aria-hidden="true" />
-      ) : anyError ? (
-        <p className="error">{anyError.message}</p>
+      ) : graphQ.error ? (
+        <p className="error">{graphQ.error.message}</p>
       ) : !graph || graph.shownBranches.length === 0 ? (
         <div className="empty-state" style={{ marginTop: 12 }}>
           <h3>這張地圖還是空的</h3>
-          <p>先在上面加幾筆行程或筆記（可掛專案），這裡就會長出對應的心智圖節點。{lens !== "all" && "或把鏡頭切回「全組」。"}</p>
+          <p>
+            先在上面加幾筆行程或筆記（可掛專案），或在專案裡累積知識庫、跑 AI 代理、建資料庫，這裡就會長出對應的族譜節點。
+            {lens !== "all" && "或把鏡頭切回「全組」。"}
+          </p>
         </div>
       ) : (
         <div className="map-wrap" style={{ marginTop: 12 }}>
@@ -929,30 +1156,45 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
                   </g>
                 );
               }
-              if (n.type === "project" || n.type === "bucket" || n.type === "more") {
+              if (n.type === "project" || n.type === "bucket" || n.type === "dbhub" || n.type === "more") {
                 const w = Math.max(56, n.label.length * 13 + 22);
-                const clickable = n.type !== "bucket" && !!n.projectId;
                 return (
                   <g
                     key={n.id}
-                    className={`map-node ${n.type}${clickable ? " clickable" : ""}`}
-                    onClick={clickable ? () => clickNode(n) : undefined}
-                    style={clickable ? { cursor: "pointer" } : undefined}
+                    className={`map-node ${n.type} clickable`}
+                    onClick={() => setSelected(n.selection ?? null)}
+                    style={{ cursor: "pointer" }}
                   >
                     <rect x={n.x - w / 2} y={n.y - 15} width={w} height={30} rx={15} />
                     <text x={n.x} y={n.y} textAnchor="middle" dominantBaseline="central">{n.label}</text>
                   </g>
                 );
               }
-              // note / schedule 葉節點
+              // note / schedule / knowledge / agent / db 葉節點
               return (
-                <g key={n.id} className={`map-node ${n.type} clickable`} onClick={() => clickNode(n)} style={{ cursor: "pointer" }}>
+                <g key={n.id} className={`map-node ${n.type} clickable`} onClick={() => setSelected(n.selection ?? null)} style={{ cursor: "pointer" }}>
                   <circle cx={n.x} cy={n.y} r={6} />
                   <text x={n.x} y={n.y - 12} textAnchor="middle">{n.label}</text>
                 </g>
               );
             })}
           </svg>
+        </div>
+      )}
+
+      {/* 節點詳情面板：點節點顯示；「前往」按 nav 型別跳頁 */}
+      {selected && (
+        <div className="map-detail" role="status">
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <strong style={{ fontSize: "var(--fs-14)", display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>{selected.label}</strong>
+            <span className="hint" style={{ margin: 0 }}>{selected.sub}</span>
+          </div>
+          {selected.nav && (
+            <button className="btn-sm primary" onClick={() => go(selected.nav)}>
+              {navLabel(selected.nav)}
+            </button>
+          )}
+          <button className="btn-sm btn-ghost" onClick={() => setSelected(null)} aria-label="關閉詳情">關閉</button>
         </div>
       )}
     </section>

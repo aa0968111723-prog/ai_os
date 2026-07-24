@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-端到端測試（MCP 專區）：對真跑的伺服器驗證全部 26 個 MCP 工具（其中 23 個逐一實跑），以及每一道守門——
+端到端測試（MCP 專區）：對真跑的伺服器驗證全部 30 個 MCP 工具（其中 23＋4 個私訊工具逐一實跑），以及每一道守門——
 唯讀範圍（擋所有寫入、放行所有讀取）、到期／撤銷／壞金鑰一律 401、跨組隔離（別人的金鑰
 碰不到你的專案）、封存專案寫入守衛、資料庫 AI 存取等級（none/read）閘門、跨介面審計歸屬。
 
@@ -103,8 +103,8 @@ EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_
     "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row",
     "list_database_files","read_database_file","get_database_stats","plan_agent","approve_agent","stop_agent","discard_agent",
     "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status",
-    "list_notes","get_note"}
-ok("tools/list = 26 且名單完整", len(names) == 26 and EXPECTED <= names, f"{len(names)} 個")
+    "list_notes","get_note","list_dm_contacts","list_dm_threads","read_dm","send_dm"}
+ok("tools/list = 30 且名單完整", len(names) == 30 and EXPECTED <= names, f"{len(names)} 個")
 
 # ══════════ 23 工具逐一實跑（可寫金鑰）══════════
 print("\n######## 23 工具逐一實跑 ########")
@@ -167,7 +167,7 @@ g, r = call("whoami", {}, RO); ok("唯讀·whoami 標記唯讀", g and r["readOn
 READS = {"whoami": {}, "list_projects": {}, "get_project_context": {"projectId": PID}, "find_model": {"keyword": "flux"},
     "list_generations": {"projectId": PID}, "get_generation": {"generationId": GEN}, "list_assets": {"projectId": PID},
     "list_databases": {}, "query_database": {"tableId": TID}, "list_database_files": {"tableId": TID},
-    "get_database_stats": {"tableId": TID},
+    "get_database_stats": {"tableId": TID}, "list_dm_contacts": {}, "list_dm_threads": {},
     "list_agent_runs": {"projectId": PID}, "get_agent_run": {"runId": RUN}, "list_schedule": {"projectId": PID},
     "get_project_status": {"projectId": PID}}
 allread = all(call(n, a, RO)[0] for n, a in READS.items())
@@ -175,7 +175,8 @@ ok(f"唯讀金鑰放行全部 {len(READS)} 個讀取工具", allread)
 WRITES = {"submit_generation": {"projectId": PID, "modelId": MODEL, "prompt": "x"}, "post_message": {"projectId": PID, "body": "x"},
     "add_database_row": {"tableId": TID, "data": {"item": "x"}}, "plan_agent": {"projectId": PID, "goal": "應被唯讀擋下"},
     "approve_agent": {"runId": RUN}, "stop_agent": {"runId": RUN}, "discard_agent": {"runId": RUN},
-    "add_schedule_item": {"projectId": PID, "title": "x", "startsAt": future}}
+    "add_schedule_item": {"projectId": PID, "title": "x", "startsAt": future},
+    "send_dm": {"peer": "x", "body": "x"}}
 allblocked = all((lambda gr: (not gr[0]) and "唯讀" in gr[1])(call(n, a, RO)) for n, a in WRITES.items())
 ok(f"唯讀金鑰擋下全部 {len(WRITES)} 個寫入工具", allblocked)
 
@@ -216,6 +217,25 @@ else:
         g, r = call(n, a, U2)
         if not ((not g) and BLOCKED(r)): isolated = False; print(f"   ⚠ 未被擋: {n} — {r}")
     ok("U2 對別組專案的 7 個讀寫工具全被擋", isolated)
+
+    # ══════════ 站內私訊工具（開發者 ↔ U2 雙向；只碰本人參與的對話）══════════
+    print("\n######## 站內私訊（MCP）########")
+    g, r = call("list_dm_contacts", {}, FULL)
+    ok("24. list_dm_contacts（開發者看得到 U2）", g and any(p["email"] == "helper_iso@example.com" for p in r), f"{len(r) if g else 0} 位")
+    g, r = call("send_dm", {"peer": "helper_iso@example.com", "body": "MCP 私訊測試：請回報進度 🙏"}, FULL)
+    ok("25. send_dm（以 Email 指定對象）", g and r.get("messageId"))
+    g, r = call("list_dm_threads", {}, U2)
+    ok("26. list_dm_threads（U2 有一串、未讀=1）", g and len(r) == 1 and r[0]["unread"] == 1 and not r[0]["lastFromMe"])
+    g, r = call("read_dm", {"peer": EMAIL, "markRead": True}, U2)
+    ok("27. read_dm（U2 讀到內容並標已讀）", g and any("請回報進度" in m["body"] for m in r["messages"]))
+    g, r = call("list_dm_threads", {}, U2)
+    ok("27b. 標已讀後未讀歸零", g and r and r[0]["unread"] == 0)
+    g, r = call("send_dm", {"peer": EMAIL, "body": "收到，進度已回報"}, U2)
+    ok("28. send_dm（U2 回訊）", g and r.get("messageId"))
+    g, r = call("read_dm", {"peer": "helper_iso@example.com"}, FULL)
+    ok("28b. 開發者讀到 U2 回訊（雙向串起）", g and any("進度已回報" in m["body"] for m in r["messages"]))
+    g, r = call("send_dm", {"peer": "no-such-user@example.com", "body": "x"}, FULL)
+    ok("🔒 私訊查無對象被擋", (not g) and "找不到" in r)
 
 # ══════════ 封存專案寫入守衛 ══════════
 print("\n######## 封存專案寫入守衛 ########")

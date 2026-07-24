@@ -57,6 +57,48 @@ const MIME_EXT: Record<string, string> = {
   "text/vtt": ".vtt",
   "application/x-subrip": ".srt",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  // 媒體格式擴充：手機相簿與各家相機/剪輯軟體的常見格式，上傳不再吃 415
+  "image/heic": ".heic",   // iPhone/iPad 相簿預設
+  "image/heif": ".heif",
+  "image/avif": ".avif",
+  "image/bmp": ".bmp",
+  "image/tiff": ".tiff",
+  "image/svg+xml": ".svg", // 可含腳本：服務端一律強制下載（shouldForceAttachment），縮圖 <img> 不受影響
+  "video/x-matroska": ".mkv",
+  "video/x-msvideo": ".avi",
+  "video/3gpp": ".3gp",    // 舊 Android 錄影
+  "video/x-m4v": ".m4v",
+  "video/mpeg": ".mpg",
+  "audio/aac": ".aac",
+  "audio/flac": ".flac",
+  "audio/x-flac": ".flac",
+  "audio/x-m4a": ".m4a",   // 不少瀏覽器對 .m4a 送這個而非 audio/mp4
+  "audio/opus": ".opus",
+  "audio/amr": ".amr",     // 手機語音備忘錄
+  // Office 與電子書（僅存檔可下載；文字抽取先支援 PDF/DOCX，試算表請另存 CSV 匯入列資料）
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+  "application/vnd.ms-excel": ".xls",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+  "application/vnd.ms-powerpoint": ".ppt",
+  "application/msword": ".doc",
+  "application/rtf": ".rtf",
+  "text/tab-separated-values": ".tsv",
+  "application/epub+zip": ".epub",
+  // 壓縮檔（僅存檔）
+  "application/x-7z-compressed": ".7z",
+  "application/vnd.rar": ".rar",
+  "application/x-rar-compressed": ".rar",
+  "application/gzip": ".gz",
+  "application/x-tar": ".tar",
+};
+
+/** 副檔名別名 → mime（mimeFromPath 後備專用；MIME_EXT 反查只認每個 mime 的「正規」副檔名） */
+const EXT_MIME_ALIASES: Record<string, string> = {
+  ".jpeg": "image/jpeg",
+  ".tif": "image/tiff",
+  ".htm": "text/html",
+  ".mpeg": "video/mpeg",
+  ".log": "text/plain",
 };
 
 export function extFromMime(mime: string): string | undefined {
@@ -69,6 +111,7 @@ export function isAllowedUploadMime(mime: string): boolean {
 
 export function mimeFromPath(p: string): string {
   const ext = path.extname(p).toLowerCase();
+  if (EXT_MIME_ALIASES[ext]) return EXT_MIME_ALIASES[ext];
   for (const [mime, e] of Object.entries(MIME_EXT)) if (e === ext) return mime;
   return "application/octet-stream";
 }
@@ -133,6 +176,16 @@ export function kindFromMime(mime: string): "image" | "video" | "audio" | "doc" 
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
   return "doc";
+}
+
+/**
+ * 服務原檔時是否強制下載（不讓瀏覽器頂層內嵌渲染）：非影音一律下載；
+ * SVG 雖歸類為圖片但可含 <script>（同源內嵌＝儲存型 XSS），也強制下載——
+ * <img> 縮圖載入不受 Content-Disposition 影響，格線/清單預覽照常。
+ */
+export function shouldForceAttachment(mime: string): boolean {
+  const m = mime.split(";")[0].trim().toLowerCase();
+  return kindFromMime(m) === "doc" || m === "image/svg+xml";
 }
 
 async function freeBytes(): Promise<number | null> {

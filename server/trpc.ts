@@ -56,7 +56,11 @@ export const publicProcedure = t.procedure;
 const MUST_CHANGE_PW_ALLOWED = ["auth.changePassword", "auth.me", "auth.logout"];
 
 /** 審計豁免清單：高頻、純閱讀狀態、無安全意義的 mutation——記了只會灌爆 audit_log 稀釋真正要查的事件 */
-const AUDIT_EXEMPT = new Set(["messages.markRead"]);
+const AUDIT_EXEMPT = new Set(["messages.markRead", "dm.markRead"]);
+
+/** 審計內文脫敏清單：私訊承諾「只有收發雙方看得到」，但操作紀錄對組長/管理員可見——
+ *  這些 mutation 照記（誰、何時、傳給誰），唯 body 以佔位符取代，不落訊息明文 */
+const AUDIT_REDACT_BODY = new Set(["dm.send"]);
 
 /** 需登入 */
 export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, getRawInput }) => {
@@ -75,7 +79,10 @@ export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, g
   // 放在 next() 之後：只記「真的執行過」的呼叫；query 不記（唯讀且量大）。
   // getRawInput 是驗證前的原始輸入——sanitizeAuditInput 會脫敏截斷，壞輸入也記得下來。
   if (type === "mutation" && !AUDIT_EXEMPT.has(path)) {
-    const raw = await getRawInput().catch(() => undefined);
+    let raw = await getRawInput().catch(() => undefined);
+    if (AUDIT_REDACT_BODY.has(path) && raw && typeof raw === "object" && "body" in raw) {
+      raw = { ...(raw as Record<string, unknown>), body: "（私訊內容不落審計）" };
+    }
     const { recordAudit } = await import("./services/audit");
     recordAudit(auth, path, raw, {
       ok: result.ok,

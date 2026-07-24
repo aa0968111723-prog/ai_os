@@ -4,11 +4,12 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { addScheduleItemCore, listScheduleForGroup } from "../services/scheduleCore";
+import { queueGroupSync } from "../services/googleCalendar";
 
 /**
  * 排程（需求 10）：組行事曆（會議、交付死線…）。
- * Google 日曆整合以 .ics 匯出達成（GET /api/schedule/:groupId/calendar.ics，見 server/index.ts）
- * ——不做 OAuth 雙向同步（成本/價值評估見優化評估報告）。
+ * Google 日曆整合＝OAuth 直連同步（services/googleCalendar：增刪改自動推送到已連結成員的
+ * 專屬 Google 日曆＋每 15 分鐘對帳）；.ics 匯出（GET /api/schedule/:groupId/calendar.ics）保留為後備。
  */
 
 /** ISO 字串 → Date（zod 驗證過再轉；壞值擋在輸入層） */
@@ -62,6 +63,7 @@ export const scheduleRouter = router({
       if (endsAt && endsAt <= startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "結束時間要在開始之後" });
       if (Object.keys(patch).length === 0) return row;
       const [updated] = await db.update(schema.scheduleItems).set(patch).where(eq(schema.scheduleItems.id, row.id)).returning();
+      queueGroupSync(row.groupId);
       return updated;
     }),
 
@@ -73,6 +75,7 @@ export const scheduleRouter = router({
       throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以刪除行程" });
     }
     await db.delete(schema.scheduleItems).where(eq(schema.scheduleItems.id, row.id));
+    queueGroupSync(row.groupId);
     return { ok: true };
   }),
 });

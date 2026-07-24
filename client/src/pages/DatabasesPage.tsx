@@ -9,6 +9,16 @@ import { detectFormat, inferFields, parseTabular, TABULAR_ACCEPT, TABULAR_FORMAT
 /** 匯入結果外形（importData mutation 回傳；建庫與詳頁匯入共用顯示） */
 type ImportResult = { imported: number; failed: number; skipped: number; truncated: boolean; errors: Array<{ line: number; error: string }> };
 
+/** 文件上傳的 accept 清單（與伺服器白名單 storage.MIME_EXT 同口徑；伺服器仍是最終把關） */
+const DB_FILE_ACCEPT = [
+  ".txt", ".md", ".csv", ".tsv", ".json", ".html", ".htm", ".srt", ".vtt",
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".rtf", ".epub",
+  ".zip", ".7z", ".rar", ".gz", ".tar",
+  ".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".heif", ".avif", ".bmp", ".tif", ".tiff", ".svg",
+  ".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi", ".3gp", ".mpg", ".mpeg",
+  ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".amr",
+].join(",");
+
 /** 去抖：大量貼上/逐字輸入時，避免每次按鍵都同步全量 parseTabular 凍結 UI（改為停手 250ms 才解析一次） */
 function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value);
@@ -90,6 +100,13 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   const list = trpc.databases.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+
+  // 深連結（知識地圖節點等來源）：/databases?open=<id> 進頁即選定該庫。
+  // 只在掛載時讀一次——之後的選擇交回使用者操作；id 無效（無權/不存在）時 find 不到，安靜落回清單。
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (id) setSelectedId(id);
+  }, []);
 
   const tables = (list.data ?? []) as TableSummary[];
   const selected = tables.find((t) => t.id === selectedId) ?? null;
@@ -344,6 +361,7 @@ function ImportToCreate({ onApply }: { onApply: (args: { fields: DataField[]; na
       <div style={{ marginTop: 10 }}>
         <p className="hint" style={{ marginTop: 0 }}>
           已經有資料？上傳或貼上 CSV／TSV／JSON，自動判讀出欄位——按「套用為欄位」後再按下方「建立並匯入」，一步成表並灌入列資料。
+          圖片／影片／PDF 等檔案不走這裡：建立後到資料庫的「文件與圖影」區上傳（支援拖放、多檔），或加「附件」欄位逐列掛檔。
         </p>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
           <input ref={fileInput} type="file" aria-label="選擇匯入檔" accept={TABULAR_ACCEPT} style={{ width: "auto" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }} />
@@ -526,7 +544,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
               <tr>
                 {table.fields.map((f) => (
                   <td key={f.key} style={{ padding: "4px 4px" }}>
-                    <CellInput field={f} groupId={groupId} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+                    <CellInput field={f} groupId={groupId} tableId={table.id} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
                   </td>
                 ))}
                 <td style={{ padding: "4px 4px" }}>
@@ -546,6 +564,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
                 key={r.id}
                 fields={table.fields}
                 groupId={groupId}
+                tableId={table.id}
                 row={{ id: r.id, data: r.data as DataRowData }}
                 canWrite={table.access.canWriteRows}
                 canDelete={table.access.canManage || table.access.canWriteRows}
@@ -872,6 +891,8 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
   const [url, setUrl] = useState("");
   const [urlName, setUrlName] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -887,23 +908,31 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
     { enabled: !!previewId && (previewFile?.readableChars ?? 0) > 0 },
   );
 
-  const doUpload = async (f: File) => {
+  // 多檔逐一上傳（伺服器單請求收一檔）：部分失敗不中止，最後彙整回報哪幾個檔為什麼失敗
+  const doUploadMany = async (picked: File[]) => {
+    if (picked.length === 0) return;
     setUploading(true);
     setUploadError(null);
-    try {
-      const form = new FormData();
-      form.append("file", f);
-      form.append("tableId", table.id);
-      const res = await fetch("/api/databases/upload", { method: "POST", body: form, credentials: "same-origin" });
-      const body = (await res.json()) as { ok?: boolean; error?: string };
-      if (!res.ok || !body.ok) setUploadError(body.error ?? "上傳失敗，請稍後再試");
-      else invalidateFiles();
-    } catch {
-      setUploadError("上傳失敗（網路問題），請稍後再試");
-    } finally {
-      setUploading(false);
-      if (fileInput.current) fileInput.current.value = "";
+    setProgress({ done: 0, total: picked.length });
+    const errors: string[] = [];
+    for (const f of picked) {
+      try {
+        const form = new FormData();
+        form.append("file", f);
+        form.append("tableId", table.id);
+        const res = await fetch("/api/databases/upload", { method: "POST", body: form, credentials: "same-origin" });
+        const body = (await res.json()) as { ok?: boolean; error?: string };
+        if (!res.ok || !body.ok) errors.push(`${f.name}：${body.error ?? "上傳失敗"}`);
+      } catch {
+        errors.push(`${f.name}：上傳失敗（網路問題）`);
+      }
+      setProgress((p) => (p ? { done: p.done + 1, total: p.total } : p));
     }
+    invalidateFiles();
+    if (errors.length > 0) setUploadError(errors.slice(0, 5).join("；") + (errors.length > 5 ? `（另有 ${errors.length - 5} 個失敗）` : ""));
+    setUploading(false);
+    setProgress(null);
+    if (fileInput.current) fileInput.current.value = "";
   };
 
   const quota = list.data?.quota;
@@ -913,7 +942,15 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
   const myId = me.data?.user.id;
 
   return (
-    <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--border-soft, #eee)" }}>
+    <div
+      style={{
+        marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--border-soft, #eee)",
+        ...(dragOver ? { outline: "2px dashed var(--accent, #4a7)", outlineOffset: -2, borderRadius: 8 } : {}),
+      }}
+      onDragOver={canWrite ? (e) => { e.preventDefault(); setDragOver(true); } : undefined}
+      onDragLeave={canWrite ? () => setDragOver(false) : undefined}
+      onDrop={canWrite ? (e) => { e.preventDefault(); setDragOver(false); void doUploadMany([...(e.dataTransfer?.files ?? [])]); } : undefined}
+    >
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <h3 style={{ margin: 0 }}>文件與圖影（AI 可讀）</h3>
         {quota && (
@@ -923,8 +960,10 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
         )}
       </div>
       <p className="hint" style={{ marginTop: 4 }}>
-        文字/Markdown/CSV/JSON/HTML/字幕/PDF/Word 自動抽成純文字；圖片可按「AI 分類」由視覺模型產生繁中描述＋自動歸類（1 點/張）——
-        團隊 AI 助手與 MCP 代理都讀得到（受上方「AI 存取」等級管控）。影片／音訊可手動分類、可預覽播放。
+        圖片（含 iPhone HEIC）、影片、音訊、PDF、Word/Excel/PowerPoint、文字/字幕/壓縮檔等常見格式都能放——
+        可一次選多個檔，或直接把檔案拖進這一區。文字/PDF/Word 自動抽成純文字；圖片可按「AI 分類」產生繁中描述＋自動歸類（1 點/張）——
+        團隊 AI 助手與 MCP 代理都讀得到（受上方「AI 存取」等級管控）。影片／音訊可手動分類、可預覽播放；
+        在欄位加「附件」型別，還能把檔案逐列掛進資料表。
         Google 文件請用「任何人知道連結都能檢視」的連結；Notion 需管理員設 NOTION_TOKEN，或用 Notion 匯出檔上傳。
       </p>
 
@@ -936,12 +975,13 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
             ref={fileInput}
             type="file"
             aria-label="上傳文件"
-            accept=".txt,.md,.csv,.json,.html,.htm,.srt,.vtt,.pdf,.docx,.zip,.png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.mov,.mp3,.wav,.m4a,.ogg"
+            accept={DB_FILE_ACCEPT}
+            multiple
             style={{ width: "auto" }}
             disabled={uploading}
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f); }}
+            onChange={(e) => { void doUploadMany([...(e.target.files ?? [])]); }}
           />
-          {uploading && <span className="meta">上傳並抽取文字中…</span>}
+          {uploading && <span className="meta">{progress && progress.total > 1 ? `上傳中（${progress.done}/${progress.total}）…` : "上傳並抽取文字中…"}</span>}
         </div>
       )}
       {canWrite && (
@@ -1086,10 +1126,11 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
 
 /** 一列（點值進入行內編輯；blur/Enter 儲存整列） */
 function GridRow({
-  fields, groupId, row, canWrite, canDelete, onSave, onDelete,
+  fields, groupId, tableId, row, canWrite, canDelete, onSave, onDelete,
 }: {
   fields: DataField[];
   groupId: string;
+  tableId: string;
   row: { id: string; data: DataRowData };
   canWrite: boolean;
   canDelete: boolean;
@@ -1103,7 +1144,7 @@ function GridRow({
       <tr>
         {fields.map((f) => (
           <td key={f.key} style={{ padding: "4px 4px" }}>
-            <CellInput field={f} groupId={groupId} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+            <CellInput field={f} groupId={groupId} tableId={tableId} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
           </td>
         ))}
         <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
@@ -1121,7 +1162,7 @@ function GridRow({
     >
       {fields.map((f) => (
         <td key={f.key} style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-soft, #eee)" }}>
-          <CellDisplay field={f} groupId={groupId} value={row.data[f.key] ?? null} />
+          <CellDisplay field={f} groupId={groupId} tableId={tableId} value={row.data[f.key] ?? null} />
         </td>
       ))}
       <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
@@ -1136,9 +1177,10 @@ function GridRow({
   );
 }
 
-function CellDisplay({ field, groupId, value }: { field: DataField; groupId: string; value: DataRowValue }) {
+function CellDisplay({ field, groupId, tableId, value }: { field: DataField; groupId: string; tableId: string; value: DataRowValue }) {
   if (value === null || value === "") return <span className="meta">—</span>;
   if (field.type === "checkbox") return value ? <Icon name="Check" size={14} /> : <span className="meta">—</span>;
+  if (field.type === "file") return <FileCell tableId={tableId} fileId={String(value)} />;
   if (field.type === "url") {
     const raw = String(value);
     // 只把 http(s):／mailto: 當成可點連結——資料庫可為組/團隊/全站範圍，別人能在某格塞
@@ -1152,6 +1194,27 @@ function CellDisplay({ field, groupId, value }: { field: DataField; groupId: str
   if (field.type === "project") return <ProjectLink id={String(value)} groupId={groupId} />;
   if (field.type === "schedule") return <ScheduleLink id={String(value)} groupId={groupId} />;
   return <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{String(value)}</span>;
+}
+
+/** 附件欄顯示：圖片給縮圖、其他給圖示＋檔名；點擊開原檔（圖影內嵌預覽、文件下載） */
+function FileCell({ tableId, fileId }: { tableId: string; fileId: string }) {
+  // 與文件區共用同一個 listFiles 查詢（react-query 以 key 去重，一表多附件格也只打一次）
+  const files = trpc.databases.listFiles.useQuery({ tableId });
+  const f = files.data?.files.find((x) => x.id === fileId);
+  if (!files.data) return <span className="meta">…</span>;
+  if (!f) return <span className="meta" title={fileId}>（文件已刪除）</span>;
+  const url = `/api/databases/files/${f.id}/file`;
+  const kindMeta = FILE_KIND_META[f.kind] ?? FILE_KIND_META.doc;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" title={`${f.name}（${formatBytes(f.sizeBytes)}）——點開檢視/下載`} style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>
+      {f.kind === "image" && f.hasFile ? (
+        <img src={url} alt={f.name} loading="lazy" style={{ height: 28, width: 36, objectFit: "cover", borderRadius: 4, flex: "0 0 auto" }} />
+      ) : (
+        <Icon name={kindMeta.icon} size={14} />
+      )}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>{f.name}</span>
+    </a>
+  );
 }
 
 /** 專案連結欄：解析標題並直通專案頁（作用組撈不到＝別組或已刪，退回縮短 id） */
@@ -1177,9 +1240,11 @@ function UserName({ id }: { id: string }) {
   return <span className="mono" title={id}>{id.slice(0, 8)}…</span>;
 }
 
-function CellInput({ field, groupId, value, onChange }: { field: DataField; groupId: string; value: DataRowValue; onChange: (v: DataRowValue) => void }) {
+function CellInput({ field, groupId, tableId, value, onChange }: { field: DataField; groupId: string; tableId: string; value: DataRowValue; onChange: (v: DataRowValue) => void }) {
   const common = { "aria-label": field.label, style: { width: "100%", minWidth: 90 } as const };
   switch (field.type) {
+    case "file":
+      return <FileCellInput label={field.label} tableId={tableId} value={typeof value === "string" ? value : ""} onChange={onChange} />;
     case "project":
       return <ProjectPicker label={field.label} groupId={groupId} value={typeof value === "string" ? value : ""} onChange={onChange} />;
     case "schedule":
@@ -1202,6 +1267,58 @@ function CellInput({ field, groupId, value, onChange }: { field: DataField; grou
     default: // text / url
       return <input {...common} value={typeof value === "string" ? value : ""} placeholder={field.type === "url" ? "https://…" : undefined} onChange={(e) => onChange(e.target.value)} />;
   }
+}
+
+/**
+ * 附件欄輸入：從本庫既有文件挑選，或按「＋」直接上傳新檔（圖片/影片/PDF/各種格式）——
+ * 檔案進文件層（data_files）、格子存文件 id，文件區與 AI 讀取同步受惠。
+ */
+function FileCellInput({ label, tableId, value, onChange }: { label: string; tableId: string; value: string; onChange: (v: DataRowValue) => void }) {
+  const utils = trpc.useUtils();
+  const files = trpc.databases.listFiles.useQuery({ tableId });
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const opts = files.data?.files ?? [];
+
+  const doUpload = async (f: File) => {
+    setUploading(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", f);
+      form.append("tableId", tableId);
+      const res = await fetch("/api/databases/upload", { method: "POST", body: form, credentials: "same-origin" });
+      const body = (await res.json()) as { ok?: boolean; file?: { id: string }; error?: string };
+      if (!res.ok || !body.ok || !body.file) {
+        setError(body.error ?? "上傳失敗，請稍後再試");
+      } else {
+        onChange(body.file.id);
+        utils.databases.listFiles.invalidate({ tableId });
+        utils.databases.stats.invalidate({ tableId });
+      }
+    } catch {
+      setError("上傳失敗（網路問題），請稍後再試");
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  return (
+    <span style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 140 }}>
+      <select aria-label={label} value={value} style={{ flex: 1, minWidth: 90 }} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">—</option>
+        {value && !opts.some((o) => o.id === value) && <option value={value}>（已刪除的文件）</option>}
+        {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </select>
+      <input ref={inputRef} type="file" aria-label={`上傳${label}`} accept={DB_FILE_ACCEPT} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f); }} />
+      <button className="btn-sm" type="button" title="上傳新檔到這一格（也會進本庫的文件區）" disabled={uploading} onClick={() => inputRef.current?.click()}>
+        {uploading ? "…" : <Icon name="Plus" size={13} />}
+      </button>
+      {error && <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{error}</span>}
+    </span>
+  );
 }
 
 /** 專案挑選：作用組的專案清單（值存專案 id；既有值不在清單時仍保留顯示） */
