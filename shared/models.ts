@@ -2471,6 +2471,421 @@ export const LEGACY_MODELS: ModelEntry[] = [
   },
 ];
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 模型指南「決策層」— 深度優化:讓創作者用「我要做什麼(情境)」或「我要什麼風格」
+ * 直接查到該用哪個模型,不必先懂 11 類 × 3 檔的分類法。
+ *   ‧ SCENARIO_RECIPES:情境配方——「什麼情節/類型 → 首選＋替代模型＋為什麼」
+ *   ‧ STYLE_SHOWDOWNS:風格 PK——「同一產出、不同風格/需求,哪個模型最強」
+ * pickIds / winnerId / runnerUpId 皆引用上方 MODELS 的 id;models.test.ts 的引用完整性
+ * 測試保證它們永遠指向現存模型(改 id 時測試會擋),文案則沿用各模型 strengths 的既有定調。
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/** 情境分組:決策層「看情境」的頂層導覽,對齊創作者的心智(先分大方向再挑情境) */
+export const SCENARIO_GROUPS = [
+  { id: "image", label: "靜態圖・字卡", hint: "海報、金句卡、分鏡圖、人像" },
+  { id: "edit", label: "改圖・去背・合成", hint: "修改既有圖、換背景、去雜物、角色一致" },
+  { id: "restore", label: "老照片・放大修復", hint: "修老照、上色、忠實放大" },
+  { id: "video", label: "動態影片", hint: "分鏡成片、對嘴、字幕、去背" },
+  { id: "audio", label: "配音・配樂・音效", hint: "逐字稿、旁白、主題曲、音效" },
+  { id: "text", label: "文字・看圖・訓練", hint: "腳本文案、OCR、專屬風格訓練" },
+] as const;
+export type ScenarioGroup = (typeof SCENARIO_GROUPS)[number]["id"];
+
+export interface ScenarioRecipe {
+  id: string;
+  group: ScenarioGroup;
+  /** 情境標題:「我要做…」的白話說法 */
+  scene: string;
+  /** 一句話說清楚這個情境是什麼、什麼時候用 */
+  intent: string;
+  /** 首選 + 替代,依序;第一個是首選(pickIds[0]) */
+  pickIds: string[];
+  /** 為什麼首選它——決定性理由(沿用該模型的既有定調) */
+  why: string;
+}
+
+/** 情境配方:每一條回答「這個情節/類型該用哪個模型」 */
+export const SCENARIO_RECIPES: ScenarioRecipe[] = [
+  /* ── 靜態圖・字卡 ── */
+  {
+    id: "sc-quote-card", group: "image", scene: "中文金句卡・書法字卡",
+    intent: "打字生成一張含中文標語的卡片,字要正、不能亂碼。",
+    pickIds: ["fal-ai/qwen-image-2/text-to-image", "fal-ai/bytedance/seedream/v4.5/text-to-image", "openai/gpt-image-2"],
+    why: "Qwen 中文渲染 SOTA、亂碼錯字率最低,繁簡書法與直排都穩——中文字卡的第一主力。",
+  },
+  {
+    id: "sc-cn-poster", group: "image", scene: "中文長版海報(密集文字)",
+    intent: "正式交付、多段中文並存的主視覺海報。",
+    pickIds: ["fal-ai/qwen-image-2/pro/text-to-image", "fal-ai/bytedance/seedream/v5/text-to-image", "fal-ai/qwen-image-max/text-to-image"],
+    why: "Qwen 2.0 Pro 是通義最高保真檔,長段中文、書法字、直排都穩,交付級版面控制最放心。",
+  },
+  {
+    id: "sc-guofeng", group: "image", scene: "國風・水墨・禪意大圖",
+    intent: "佛法/禪意題材的水墨、書法、工筆風主視覺。",
+    pickIds: ["fal-ai/hunyuan-image/v3", "fal-ai/qwen-image-2/pro/text-to-image"],
+    why: "混元中文理解與藝術表現強,國風/書法/水墨題材最對味。",
+  },
+  {
+    id: "sc-portrait", group: "image", scene: "寫實莊嚴人物寫真",
+    intent: "法師/志工的寫實人像,膚質要自然、幾乎零瑕疵。",
+    pickIds: ["fal-ai/imagen4/preview/ultra", "fal-ai/flux-pro/v1.1-ultra", "fal-ai/nano-banana-2"],
+    why: "Imagen 4 Ultra 寫實膚質與提示還原度極高、幾乎零瑕疵,交付級人物寫真首選。",
+  },
+  {
+    id: "sc-hero-visual", group: "image", scene: "高質感宣傳主視覺",
+    intent: "活動主視覺,要頂級構圖與光影質感。",
+    pickIds: ["fal-ai/flux-2/pro", "fal-ai/nano-banana-pro"],
+    why: "FLUX.2 [pro] 構圖與光影頂級、提示詞遵循極準,正式成品主視覺的天花板之一。",
+  },
+  {
+    id: "sc-design-poster", group: "image", scene: "設計感/英文排版海報",
+    intent: "以字體排版與設計感為主的海報(英文為主)。",
+    pickIds: ["fal-ai/ideogram/v3", "fal-ai/ideogram/v4", "fal-ai/recraft/v3/text-to-image"],
+    why: "Ideogram 是文字排版之王,海報級字型渲染、設計感強;中文為主請改用 Qwen。",
+  },
+  {
+    id: "sc-fast-explore", group: "image", scene: "快速大量試構圖",
+    intent: "腦力激盪期,秒級刷很多方向找感覺。",
+    pickIds: ["fal-ai/flux/schnell", "fal-ai/sana", "fal-ai/imagen4/preview/fast"],
+    why: "FLUX.1 [schnell] 1–2 秒出圖,最適合大量迭代找方向,對了再用旗艦重做。",
+  },
+  {
+    id: "sc-storyboard-draft", group: "image", scene: "日常分鏡草稿(可訓風格)",
+    intent: "量大的分鏡草圖,之後可訓練專屬風格搭配。",
+    pickIds: ["fal-ai/flux/dev", "fal-ai/flux-2"],
+    why: "FLUX.1 [dev] 品質/成本平衡、生態最豐,可再搭自家 LoRA——站內日常主力。",
+  },
+
+  /* ── 改圖・去背・合成 ── */
+  {
+    id: "sc-nl-edit", group: "edit", scene: "口語改圖・多圖合成",
+    intent: "用一句話改既有圖(換背景、加東西、把多張合成)。",
+    pickIds: ["fal-ai/nano-banana-2/edit", "fal-ai/bytedance/seedream/v4.5/edit"],
+    why: "Nano Banana 2 免遮罩自然語言編輯,最多 14 張參考合成,知道該改什麼、不該動什麼。",
+  },
+  {
+    id: "sc-text-edit", group: "edit", scene: "中文字卡改字不跑版",
+    intent: "既有卡片換字/換橫幅,中文要正、版面不亂。",
+    pickIds: ["fal-ai/qwen-image-edit-plus", "fal-ai/qwen-image-edit", "fal-ai/bytedance/seededit/v3/edit-image"],
+    why: "Qwen 編輯強化版多圖輸入、文字編輯優於基礎版,改字不跑版。",
+  },
+  {
+    id: "sc-to-ink", group: "edit", scene: "實照轉水墨/工筆莊嚴風",
+    intent: "把一張實拍照轉成水墨/工筆等風格,還能疊中文字。",
+    pickIds: ["fal-ai/qwen-image-2/edit", "fal-ai/nano-banana-2/edit"],
+    why: "Qwen 2.0 Edit 風格轉換＋物件增刪＋中文字疊加一站完成,實照轉莊嚴風最順。",
+  },
+  {
+    id: "sc-char-consistency", group: "edit", scene: "同一角色連續分鏡",
+    intent: "見證故事同一主角演到底、系列圖臉要一致。",
+    pickIds: ["fal-ai/ideogram/character", "fal-ai/flux-pro/kontext/max", "fal-ai/flux-pro/kontext"],
+    why: "Ideogram 角色一致單張參考照就能跨場景鎖同一張臉,最適合產出一整組同主角的新分鏡;要對既有構圖精修角色則用 Kontext [max]。",
+  },
+  {
+    id: "sc-bg-replace", group: "edit", scene: "換禪堂/蓮花背景(對外安心)",
+    intent: "一鍵把背景換成禪堂/晨光,對外發布要版權安全。",
+    pickIds: ["fal-ai/bria/background/replace", "fal-ai/nano-banana-2/edit"],
+    why: "Bria 以授權資料訓練、商用版權安全、結果穩定,對外發布最放心。",
+  },
+  {
+    id: "sc-cutout", group: "edit", scene: "去背成透明素材",
+    intent: "人物/結緣品摳成透明 PNG,供卡片海報排版。",
+    pickIds: ["fal-ai/bria/background/remove", "fal-ai/birefnet/v2", "fal-ai/ideogram/remove-background"],
+    why: "Bria RMBG 2.0 商用授權、邊緣髮絲細緻,去背素材品質最穩。",
+  },
+  {
+    id: "sc-declutter", group: "edit", scene: "清雜物/路人",
+    intent: "活動照去掉雜物路人,讓開示/合影畫面乾淨莊嚴。",
+    pickIds: ["fal-ai/image-editing/object-removal", "fal-ai/finegrain-eraser"],
+    why: "一鍵免畫遮罩,移除雜物後自動補背景;印刷級關鍵去物再上 Finegrain。",
+  },
+
+  /* ── 老照片・放大修復 ── */
+  {
+    id: "sc-old-photo", group: "restore", scene: "老照片修復",
+    intent: "泛黃/刮痕/殘缺的先人遺照或舊照救援。",
+    pickIds: ["fal-ai/image-editing/photo-restoration", "fal-ai/image-apps-v2/photo-restoration", "fal-ai/codeformer"],
+    why: "一鍵去刮痕污漬、去模糊、補殘缺並上色,免提示詞(中文題字修後請校對)。",
+  },
+  {
+    id: "sc-colorize", group: "restore", scene: "黑白遺照上色",
+    intent: "黑白照重獲色彩,又不能亂改細節。",
+    pickIds: ["fal-ai/ddcolor", "fal-ai/image-editing/photo-restoration"],
+    why: "DDColor 只加色不動細節、忠實低風險,中文題字安全。",
+  },
+  {
+    id: "sc-text-upscale", group: "restore", scene: "字卡/書法忠實放大",
+    intent: "含中文字/書法的字卡要放大,又不能走樣。",
+    pickIds: ["fal-ai/thera", "fal-ai/aura-sr", "fal-ai/recraft/upscale/crisp"],
+    why: "Thera 數學上無鋸齒、幾乎零幻覺,中文字不會被重繪成亂碼——含字放大首選。",
+  },
+  {
+    id: "sc-ai-upscale", group: "restore", scene: "AI 圖放大到 4K/印刷",
+    intent: "生成圖放大到印刷級,並補生細節。",
+    pickIds: ["fal-ai/clarity-upscaler", "fal-ai/topaz/upscale/image"],
+    why: "Clarity 放大同時補生細節到交付級;含中文字的圖改用 Thera 忠實放大。",
+  },
+  {
+    id: "sc-portrait-upscale", group: "restore", scene: "人像特寫極致放大",
+    intent: "法師肖像大圖輸出,臉部細節要極致。",
+    pickIds: ["clarityai/crystal-upscaler", "fal-ai/topaz/upscale/image"],
+    why: "Crystal 人像特化,皮膚紋理/虹膜/髮絲細節可到 10K。",
+  },
+  {
+    id: "sc-print-upscale", group: "restore", scene: "印刷級大尺寸放大",
+    intent: "海報/展場輸出,要自然無 AI 塑膠感。",
+    pickIds: ["fal-ai/topaz/upscale/image", "fal-ai/seedvr/upscale/image"],
+    why: "Topaz 業界標準照片級放大、自然無 AI 感,印刷首選;整批跨頁大圖用 SeedVR2 更省。",
+  },
+
+  /* ── 動態影片 ── */
+  {
+    id: "sc-animate-storyboard", group: "video", scene: "把分鏡圖變會動的鏡頭",
+    intent: "已有 FLUX/Seedream 分鏡圖,要批量動起來。",
+    pickIds: ["fal-ai/wan/v2.2-a14b/image-to-video", "fal-ai/kling-video/v2.5-turbo/pro/image-to-video"],
+    why: "Wan 2.2 圖生性價比與可控性最佳,是把分鏡圖動起來的日常主力。",
+  },
+  {
+    id: "sc-hero-shot", group: "video", scene: "對外形象片關鍵鏡頭",
+    intent: "最重要的一兩個鏡頭要電影感＋原生音效。",
+    pickIds: ["fal-ai/veo3.1/image-to-video", "fal-ai/kling-video/v2.6/pro/image-to-video"],
+    why: "Veo 3.1 圖生是物理正確＋原生音訊的質感天花板,對外形象片最關鍵的一兩個鏡頭首選;量大要控成本用 Kling 2.6 Pro。",
+  },
+  {
+    id: "sc-witness-emotion", group: "video", scene: "見證故事人物特寫",
+    intent: "主角要會演、有情緒(表情、眼神、合掌)。",
+    pickIds: ["fal-ai/minimax/hailuo-2.3/pro/image-to-video", "fal-ai/kling-video/v2.6/pro/image-to-video"],
+    why: "Hailuo 2.3 Pro 人物表演與情緒動作最自然、少鬼影變形,人像活起來最傳神;運鏡感更強用 Kling 2.6 Pro。",
+  },
+  {
+    id: "sc-zen-broll", group: "video", scene: "莊嚴療癒空景動態",
+    intent: "晨光、香煙、波光等靜謐空鏡的呼吸感動態。",
+    pickIds: ["fal-ai/luma-dream-machine/ray-2/image-to-video", "fal-ai/luma-dream-machine/ray-2-flash/image-to-video", "fal-ai/stable-video"],
+    why: "Luma Ray-2 唯美光影與自然運動,靜謐基調最契合療癒空景。",
+  },
+  {
+    id: "sc-t2v-sound", group: "video", scene: "打字直接生成短片(含聲音)",
+    intent: "沒有分鏡圖,直接一句話生一段有聲短片。",
+    pickIds: ["fal-ai/veo3.1", "fal-ai/kling-video/v2.6/pro/text-to-video", "fal-ai/wan/v2.5/text-to-video"],
+    why: "Veo 3.1 當前最強之一,物理正確、可含原生音效與對白;要開源價又帶音訊用 Wan 2.5。",
+  },
+  {
+    id: "sc-micro-motion", group: "video", scene: "佛像/海報呼吸感微動",
+    intent: "讓一張莊嚴圖有若有似無的微動,幾乎靜止但有生命感。",
+    pickIds: ["fal-ai/stable-video", "fal-ai/framepack"],
+    why: "Stable Video Diffusion 細膩可信的微動態,佛像/山水海報最合適;要長循環改用 FramePack。",
+  },
+  {
+    id: "sc-lipsync", group: "video", scene: "開示配音替換/對嘴",
+    intent: "把新配音精準貼合人物口型。",
+    pickIds: ["fal-ai/sync-lipsync/v3", "fal-ai/sync-lipsync/v2", "fal-ai/musetalk"],
+    why: "Sync-3 對嘴自然度天花板;師父影像不能失真時,改用只改嘴部的 MuseTalk 保守型。",
+  },
+  {
+    id: "sc-video-restore", group: "video", scene: "舊開示影片修復升 4K",
+    intent: "低清歷史開示影片救援、升頻補幀。",
+    pickIds: ["fal-ai/topaz/upscale/video", "fal-ai/seedvr/upscale/video"],
+    why: "Topaz 業界標準升頻、低清舊素材救星、可倍幀;整批修復先用 SeedVR2 省成本。",
+  },
+  {
+    id: "sc-subtitle", group: "video", scene: "影片自動上中文字幕",
+    intent: "開示剪輯/Shorts 要轉錄並燒錄字幕。",
+    pickIds: ["fal-ai/workflow-utilities/auto-subtitle", "veed/subtitles"],
+    why: "轉錄＋卡拉OK式逐字高亮,內建含繁中的 Noto 字型(中文首跑必驗)。",
+  },
+  {
+    id: "sc-video-bg", group: "video", scene: "影片人物去背合成",
+    intent: "把人物從影片去背,合成到禪堂/金句字卡。",
+    pickIds: ["bria/video/background-removal/v3", "fal-ai/ben/v2/video"],
+    why: "Bria VRMBG 3.0 更準、時序穩少閃爍,正式成品去背首選;日常量大先用 BEN2 省。",
+  },
+
+  /* ── 配音・配樂・音效 ── */
+  {
+    id: "sc-transcribe", group: "audio", scene: "開示錄音轉逐字稿",
+    intent: "多人座談/法會錄音轉逐字稿,要自動分講者。",
+    pickIds: ["fal-ai/elevenlabs/speech-to-text/scribe-v2", "fal-ai/elevenlabs/speech-to-text", "fal-ai/whisper"],
+    why: "Scribe v2 是最新旗艦逐字稿,可自動分離最多 32 位講者,多人法會座談逐字稿最上游首選。",
+  },
+  {
+    id: "sc-cn-narration", group: "audio", scene: "中文旁白配音",
+    intent: "見證/開示的中文旁白,要自然、有情感。",
+    pickIds: ["fal-ai/minimax/speech-2.6-hd", "fal-ai/qwen-3-tts/text-to-speech/1.7b", "fal-ai/elevenlabs/tts/eleven-v3"],
+    why: "MiniMax 2.6 HD 情感/停頓/語氣控制最完整、300+ 聲線,中文旁白首選。",
+  },
+  {
+    id: "sc-daily-tts", group: "audio", scene: "中文旁白日更量產(省)",
+    intent: "社群短影音口白要量大又省。",
+    pickIds: ["fal-ai/qwen-3-tts/text-to-speech/1.7b", "fal-ai/qwen-3-tts/text-to-speech/0.6b", "fal-ai/elevenlabs/tts/turbo-v2.5"],
+    why: "Qwen 3 TTS 韻律像真人、中文第一梯隊,日更量產划算;要再省用 0.6b 輕量版(社群短口白量身打造)。",
+  },
+  {
+    id: "sc-term-tts", group: "audio", scene: "術語密集稿・對嘴配音",
+    intent: "佛學術語多、破音字多,還要對上口型時長。",
+    pickIds: ["fal-ai/index-tts-2/text-to-speech", "fal-ai/minimax/speech-02-hd"],
+    why: "Index TTS 2.0 拼音校正破音字＋精準時長控制,WER 最低、咬字最準。",
+  },
+  {
+    id: "sc-voice-clone", group: "audio", scene: "建立會方專屬旁白聲線",
+    intent: "用 10 秒樣音複製一條固定旁白聲(需本人授權)。",
+    pickIds: ["fal-ai/minimax/voice-clone", "fal-ai/qwen-3-tts/clone-voice/1.7b"],
+    why: "MiniMax 語音克隆能建立可重複取用的專屬聲線 ID,最適合固定會方旁白聲;想更省、相似度更高可先用 Qwen 3 語音克隆試。",
+  },
+  {
+    id: "sc-theme-song", group: "audio", scene: "中文主題曲/片尾曲",
+    intent: "完整演唱的中文歌,可自動填詞或切純器樂。",
+    pickIds: ["fal-ai/minimax-music/v2.6", "fal-ai/minimax-music", "fal-ai/yue"],
+    why: "MiniMax Music 2.6 完整演唱、風格描述至 2000 字、可自動填詞、可切純器樂。",
+  },
+  {
+    id: "sc-safe-bgm", group: "audio", scene: "對外配樂(版權安全)",
+    intent: "對外發布影片要版權安心的配樂。",
+    pickIds: ["fal-ai/elevenlabs/music", "fal-ai/lyria2"],
+    why: "ElevenLabs Music 以授權資料訓練、版權安全、結構化歌曲,對外發布最放心。",
+  },
+  {
+    id: "sc-sfx", group: "audio", scene: "剪輯用音效/擬音",
+    intent: "鐘聲、木魚、翻書等單發音效,或替無聲影片補環境音。",
+    pickIds: ["fal-ai/elevenlabs/sound-effects/v2", "fal-ai/hunyuan-video-foley", "fal-ai/thinksound"],
+    why: "描述即得音效;要對畫面動作同步擬音(倒水、腳步),改用高保真的混元 Foley。",
+  },
+
+  /* ── 文字・看圖・訓練 ── */
+  {
+    id: "sc-script", group: "text", scene: "腳本結構規劃",
+    intent: "複雜腳本要先想清楚,長鏈邏輯拆解。",
+    pickIds: ["nvidia-nim#deepseek-r1", "nvidia-nim#llama-3.1-405b"],
+    why: "DeepSeek R1 深度推理鏈,複雜任務拆解、長鏈邏輯最強。",
+  },
+  {
+    id: "sc-cn-copy", group: "text", scene: "中文金句/弘法文案",
+    intent: "中文金句、文案潤飾、繁中改寫。",
+    pickIds: ["nvidia-nim#qwen2.5-72b", "nvidia-nim#llama-3.1-70b"],
+    why: "Qwen2.5 72B 中文語感第一梯隊、繁中穩定,弘法文案最對味。",
+  },
+  {
+    id: "sc-ocr", group: "text", scene: "經文/掃描稿轉文字",
+    intent: "手稿、經文、含表格的掃描件 OCR。",
+    pickIds: ["fal-ai/got-ocr/v2", "fal-ai/any-llm/vision#gemini-2.5-pro", "fal-ai/florence-2-large/ocr"],
+    why: "GOT-OCR 2.0 中文/表格/公式/複雜版面遠勝 Florence-2;手稿/難字用 Gemini 2.5 Pro 視覺補救。",
+  },
+  {
+    id: "sc-caption", group: "text", scene: "素材批量看圖生繁中描述",
+    intent: "素材庫自動建檔、批量看圖生描述。",
+    pickIds: ["fal-ai/any-llm/vision#gemini-2.5-flash", "fal-ai/any-llm/vision#gemini-2.5-pro"],
+    why: "Gemini 2.5 Flash 看圖性價比高、繁中描述自然、中文字辨識佳;要更深看圖推理升 2.5 Pro。",
+  },
+  {
+    id: "sc-train-style", group: "text", scene: "訓練本會專屬中文風格",
+    intent: "用自家素材練「風格＋中文不錯字」兼得的模型。",
+    pickIds: ["fal-ai/qwen-image-trainer", "fal-ai/qwen-image-2512-trainer", "fal-ai/z-image-trainer"],
+    why: "Qwen Image 訓練器是唯一「自家風格＋中文不錯字」兼得的路線;先驗證素材能否練出風格用通義 Z-Image 試水溫(FLUX 底模中文會錯字,不列入)。",
+  },
+  {
+    id: "sc-train-first", group: "text", scene: "第一次嘗試訓練",
+    intent: "沒訓練過,想先快速試出一個模型看看。",
+    pickIds: ["fal-ai/flux-lora-fast-training", "fal-ai/z-image-trainer"],
+    why: "FLUX LoRA 快速訓練是經典入門訓練器,幾分鐘出模型;更省先用 Z-Image 試水溫。",
+  },
+
+  /* —— W3 補遺:多代理研究＋上網驗證後補上的高價值缺口情境 —— */
+  {
+    id: "sc-real-face", group: "edit", scene: "真人講者/法師授權入畫",
+    intent: "把一張授權過的真人臉,放進生成的禪堂/海報/金句底圖(須本人授權)。",
+    pickIds: ["fal-ai/ideogram/character", "fal-ai/flux-pulid", "fal-ai/minimax/image-01/subject-reference"],
+    why: "Ideogram 角色一致用單張參考照就能跨場景鎖同一張臉,是把授權真人放進生成畫面的旗艦(提示詞英文)。",
+  },
+  {
+    id: "sc-reframe-vertical", group: "video", scene: "橫式開示轉直式 Shorts",
+    intent: "一支 16:9 開示要同時上 YouTube 與 Shorts,換比例又不裁掉法師。",
+    pickIds: ["fal-ai/wan-vace-14b/outpainting", "fal-ai/bria/expand"],
+    why: "Wan VACE 影片外擴能往上下補畫面把 16:9 轉直式、主體不裁切;靜態縮圖/首格用 Bria 擴圖。",
+  },
+  {
+    id: "sc-line-sticker", group: "image", scene: "LINE 結緣貼圖/Q 版大頭貼",
+    intent: "把志工大頭照做成貼紙風,上架 LINE 結緣貼圖。",
+    pickIds: ["fal-ai/face-to-sticker", "fal-ai/bria/background/remove", "fal-ai/nano-banana-2/edit"],
+    why: "Face to Sticker 一鍵把一張臉變 Q 版貼紙風,再去背成透明 PNG 即可上架,社群互動量產線首選。",
+  },
+  {
+    id: "sc-product-shot", group: "edit", scene: "結緣品/義賣商品情境圖",
+    intent: "佛珠、香品、書籍做成攝影棚級莊嚴擺拍圖,用於義賣頁。",
+    pickIds: ["fal-ai/bria/product-shot", "fal-ai/bria/background/replace", "pixelcut/background-removal"],
+    why: "Bria Product Shot 去背＋生成情境擺拍且版權安全,義賣/結緣頁的商品主視覺首選。",
+  },
+  {
+    id: "sc-headshot", group: "edit", scene: "統一講者/義工形象照",
+    intent: "把生活照一鍵莊重化、統一背景,做講師卡/義工證。",
+    pickIds: ["fal-ai/image-apps-v2/headshot-photo", "easel-ai/easel-avatar"],
+    why: "Headshot Photo 把生活照轉專業形象照並統一背景,免逐一重拍,講者牆/簡介卡最省事。",
+  },
+  {
+    id: "sc-panel-podcast", group: "audio", scene: "多講者座談/問答 Podcast",
+    intent: "座談、法師問答、對話式 Podcast 的多角色配音。",
+    pickIds: ["fal-ai/vibevoice/7b", "fal-ai/playai/tts/dialog", "fal-ai/dia-tts"],
+    why: "VibeVoice 7B 原生多講者長對話最自然,座談/問答式弘法音訊首選;英文情境用 PlayDialog。",
+  },
+];
+
+export interface StyleShowdownAxis {
+  /** 風格 / 需求維度 */
+  axis: string;
+  /** 這個維度的挑選重點 */
+  note: string;
+  /** 這維度最強的模型 id */
+  winnerId: string;
+  /** 次選 id(可選) */
+  runnerUpId?: string;
+}
+export interface StyleShowdown {
+  id: string;
+  title: string;
+  /** 這張 PK 表所屬的產出家族(顯示副標用;影片表刻意跨文生/圖生) */
+  category: ModelCategory;
+  subtitle: string;
+  axes: StyleShowdownAxis[];
+}
+
+/** 風格 PK:同一產出、不同風格/需求下,哪個模型最強(＋次選) */
+export const STYLE_SHOWDOWNS: StyleShowdown[] = [
+  {
+    id: "sh-image", title: "文生圖 PK:哪個風格用哪個模型", category: "text-to-image",
+    subtitle: "同樣打字出圖,依你要的風格挑首選——省的先試方向,對了再上旗艦。",
+    axes: [
+      { axis: "中文字準(金句/書法)", note: "標語要正、不能亂碼", winnerId: "fal-ai/qwen-image-2/text-to-image", runnerUpId: "fal-ai/bytedance/seedream/v4.5/text-to-image" },
+      { axis: "寫實人像/膚質", note: "法師、志工寫真", winnerId: "fal-ai/imagen4/preview/ultra", runnerUpId: "fal-ai/flux-pro/v1.1-ultra" },
+      { axis: "國風/水墨/藝術", note: "禪意、書法、工筆題材", winnerId: "fal-ai/hunyuan-image/v3", runnerUpId: "fal-ai/qwen-image-2/pro/text-to-image" },
+      { axis: "構圖/光影/質感", note: "宣傳主視覺", winnerId: "fal-ai/flux-2/pro", runnerUpId: "fal-ai/nano-banana-pro" },
+      { axis: "排版/設計/英文海報", note: "字體設計感(中文另用 Qwen)", winnerId: "fal-ai/ideogram/v3", runnerUpId: "fal-ai/ideogram/v4" },
+      { axis: "複雜指令理解", note: "多條件、敘事型畫面", winnerId: "fal-ai/nano-banana-pro", runnerUpId: "openai/gpt-image-2" },
+      { axis: "最省/秒級試方向", note: "大量刷草稿找感覺", winnerId: "fal-ai/flux/schnell", runnerUpId: "fal-ai/sana" },
+    ],
+  },
+  {
+    id: "sh-video", title: "影片 PK:哪種鏡頭用哪個模型", category: "image-to-video",
+    subtitle: "影片是成本大戶——先用最省的試節奏,關鍵鏡頭再上旗艦。",
+    axes: [
+      { axis: "分鏡圖動起來(日常主力)", note: "量大、要可控成本", winnerId: "fal-ai/wan/v2.2-a14b/image-to-video", runnerUpId: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video" },
+      { axis: "人物會演/情緒", note: "見證故事特寫", winnerId: "fal-ai/minimax/hailuo-2.3/pro/image-to-video", runnerUpId: "fal-ai/kling-video/v2.6/pro/image-to-video" },
+      { axis: "電影感運鏡/物理", note: "對外關鍵鏡頭", winnerId: "fal-ai/veo3.1", runnerUpId: "fal-ai/kling-video/o3/pro/text-to-video" },
+      { axis: "唯美療癒空鏡", note: "晨光、香煙、波光", winnerId: "fal-ai/luma-dream-machine/ray-2", runnerUpId: "fal-ai/hunyuan-video-v1.5/text-to-video" },
+      { axis: "含原生音效對白", note: "一次帶聲音出片(含對白)", winnerId: "fal-ai/veo3.1", runnerUpId: "fal-ai/pixverse/v6/text-to-video" },
+      { axis: "最省試鏡頭", note: "先看節奏再上旗艦", winnerId: "fal-ai/ltx-video", runnerUpId: "fal-ai/wan-t2v" },
+    ],
+  },
+  {
+    id: "sh-tts", title: "中文配音 PK:哪種取向用哪個模型", category: "text-to-speech",
+    subtitle: "中文旁白挑首選:要情感/要省/要咬字準/要克隆,各有主力。",
+    axes: [
+      { axis: "中文最自然/情感", note: "見證、開示旁白", winnerId: "fal-ai/minimax/speech-2.6-hd", runnerUpId: "fal-ai/minimax/speech-02-hd" },
+      { axis: "日更量產最省", note: "社群短影音口白", winnerId: "fal-ai/qwen-3-tts/text-to-speech/1.7b", runnerUpId: "fal-ai/qwen-3-tts/text-to-speech/0.6b" },
+      { axis: "咬字/術語/對嘴時長", note: "佛學術語密集稿", winnerId: "fal-ai/index-tts-2/text-to-speech", runnerUpId: "fal-ai/minimax/speech-02-hd" },
+      { axis: "專屬聲線克隆", note: "固定旁白聲(需授權)", winnerId: "fal-ai/minimax/voice-clone", runnerUpId: "fal-ai/qwen-3-tts/clone-voice/1.7b" },
+      { axis: "多人對談", note: "問答、Podcast 式", winnerId: "fal-ai/vibevoice/7b", runnerUpId: "fal-ai/dia-tts" },
+    ],
+  },
+];
+
 export function getModel(id: string): ModelEntry | undefined {
   return MODELS.find((m) => m.id === id) ?? LEGACY_MODELS.find((m) => m.id === id);
 }
