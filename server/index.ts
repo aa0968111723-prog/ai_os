@@ -70,6 +70,8 @@ app.use(
     crossOriginResourcePolicy: { policy: "same-site" },
     hsts: { includeSubDomains: true },
     referrerPolicy: { policy: "no-referrer" },
+    // X-Frame-Options: DENY（與 CSP frame-ancestors 'none' 一致；對不吃 CSP 的舊瀏覽器的縱深防禦，#74）
+    frameguard: { action: "deny" },
   }),
 );
 

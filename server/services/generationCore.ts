@@ -145,6 +145,10 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   const accessRole = await input.assertAccess?.(project); // 多組隔離（可含專案級 ACL）；回傳角色供成本審核門檻用
+  // 封存專案凍結生成：拿舊 projectId（網頁清單已濾掉封存、但 tRPC/工作流可能持舊 id）對已封存專案
+  // 生成會照樣扣組點數（滲透實測確認）。與 scheduleCore／agentCore 同一守衛、同口徑。
+  const { assertProjectNotArchived } = await import("./projectAcl");
+  assertProjectNotArchived(project);
 
   // 素材庫來源 → 簽名網址（同組檢查；本地檔或外部網址都可）
   let sourceUrl = input.sourceUrl;

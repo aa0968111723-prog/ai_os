@@ -31,6 +31,13 @@ export async function createContext({ req, res }: CreateExpressContextOptions): 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
   errorFormatter({ shape, error }) {
+    // 一律移除 stack：tRPC 在非 production 會於 data.stack 附完整堆疊（絕對路徑＋行號＋內部呼叫鏈），
+    // 對任何回錯誤的請求外洩後端結構（滲透實測確認）。不倚賴 NODE_ENV 是否正確設定，這裡主動剝除。
+    const strip = (s: typeof shape) => {
+      if (!s.data || !("stack" in s.data)) return s;
+      const { stack: _stack, ...restData } = s.data as Record<string, unknown>;
+      return { ...s, data: restData } as typeof shape;
+    };
     // 內部錯誤（如 SQL）不外洩到前台——細節進伺服器 log，畫面給友善訊息。
     // 注意（QA-001）：不得把所有 500 一律歸咎「資料庫」——provider 逾時/上游失敗走
     // SERVICE_UNAVAILABLE 等專屬 code 帶自己的訊息，這裡只兜「真正未分類」的內部錯誤，
@@ -39,13 +46,13 @@ const t = initTRPC.context<Context>().create({
       console.error("[trpc]", error.cause ?? error);
       // 同步進錯誤環形緩衝，讓 /api/selftest「近期錯誤」看得到（errlog 零專案相依，直接 import 不會循環）
       recordError("trpc:" + (shape.data?.path ?? "?"), error.cause ?? error);
-      return { ...shape, message: "系統暫時無法處理，請稍後再試（若持續發生，管理員可到 /api/ready 查看各元件狀態）" };
+      return strip({ ...shape, message: "系統暫時無法處理，請稍後再試（若持續發生，管理員可到 /api/ready 查看各元件狀態）" });
     }
     // 輸入驗證失敗時，預設 message 是整包 issues 的 JSON——改給第一條的人話訊息
     if (error.cause instanceof ZodError) {
-      return { ...shape, message: error.cause.issues[0]?.message ?? shape.message };
+      return strip({ ...shape, message: error.cause.issues[0]?.message ?? shape.message });
     }
-    return shape;
+    return strip(shape);
   },
 });
 

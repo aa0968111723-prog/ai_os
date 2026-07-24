@@ -83,11 +83,11 @@ export const quotaRouter = router({
   updateSettings: adminProcedure
     .input(
       z.object({
-        totalBudgetPoints: z.number().int().min(0).nullable(),
-        defaultWeeklyPoints: z.number().int().min(0).nullable(),
-        defaultDailyPoints: z.number().int().min(0).nullable().optional(),
+        totalBudgetPoints: z.number().int().min(0).max(1_000_000_000).nullable(),
+        defaultWeeklyPoints: z.number().int().min(0).max(1_000_000_000).nullable(),
+        defaultDailyPoints: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
         /** 資料庫文件每人儲存配額 GB（null＝預設 5；0＝不限） */
-        fileQuotaGb: z.number().int().min(0).nullable().optional(),
+        fileQuotaGb: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -97,7 +97,7 @@ export const quotaRouter = router({
 
   /** 組週額度（團隊管理/組長可調；0 或空＝不限） */
   setGroupQuota: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), weeklyPointsPerUser: z.number().int().min(0).nullable() }))
+    .input(z.object({ groupId: z.string().uuid(), weeklyPointsPerUser: z.number().int().min(0).max(1_000_000_000).nullable() }))
     .mutation(async ({ ctx, input }) => {
       requireLeader(ctx.auth, input.groupId); // 組長或管理層
       await db.update(schema.groups).set({ weeklyPointsPerUser: input.weeklyPointsPerUser }).where(eq(schema.groups.id, input.groupId));
@@ -106,7 +106,7 @@ export const quotaRouter = router({
 
   /** 組總預算（累計上限）：開發者/團隊管理員分配給組的點數池；0 或空＝不限。組長不可調（分配是由上往下） */
   setGroupBudget: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), budgetPoints: z.number().int().min(0).nullable() }))
+    .input(z.object({ groupId: z.string().uuid(), budgetPoints: z.number().int().min(0).max(1_000_000_000).nullable() }))
     .mutation(async ({ ctx, input }) => {
       await assertGroupTeamAdmin(ctx.auth, input.groupId);
       // 0 一律正規化成 null（不限）——守門處只判 null，不用兩套「不限」語意
@@ -117,7 +117,7 @@ export const quotaRouter = router({
 
   /** 組員個人預算（累計上限）：組長從組預算再分配給組員；0 或空＝不限。組長對自己組員調 */
   setMemberBudget: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), budgetPoints: z.number().int().min(0).nullable() }))
+    .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), budgetPoints: z.number().int().min(0).max(1_000_000_000).nullable() }))
     .mutation(async ({ ctx, input }) => {
       await assertCanAllocateToMember(ctx.auth, input.groupId, input.userId); // 組長對他人即可；對自己需團隊管理員以上
       const value = input.budgetPoints && input.budgetPoints > 0 ? input.budgetPoints : null;
@@ -132,7 +132,7 @@ export const quotaRouter = router({
 
   /** 成本審核門檻（需求 2.1）：組員單筆生成估點 ≥ 門檻需組長核准；0/null＝不啟用。組長以上可調 */
   setApprovalThreshold: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), thresholdPoints: z.number().int().min(0).nullable() }))
+    .input(z.object({ groupId: z.string().uuid(), thresholdPoints: z.number().int().min(0).max(1_000_000_000).nullable() }))
     .mutation(async ({ ctx, input }) => {
       requireLeader(ctx.auth, input.groupId);
       // 0 一律正規化成 null（不啟用）——守門處只需判 null，不用兩套「關閉」語意
@@ -159,7 +159,7 @@ export const quotaRouter = router({
 
   /** 個別成員覆寫（組長對自己組員微調） */
   setMemberOverride: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), weeklyPointsOverride: z.number().int().min(0).nullable() }))
+    .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), weeklyPointsOverride: z.number().int().min(0).max(1_000_000_000).nullable() }))
     .mutation(async ({ ctx, input }) => {
       await assertCanAllocateToMember(ctx.auth, input.groupId, input.userId); // 組長對他人即可；對自己需團隊管理員以上（防自抬額度）
       await db
