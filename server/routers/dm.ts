@@ -2,13 +2,16 @@ import { z } from "zod";
 import { router, authedProcedure } from "../trpc";
 import {
   DM_MAX_BODY,
+  DM_REF_TYPES,
   dmUnreadTotal,
   listDmHistory,
+  listDmMentionables,
   listDmPeers,
   listDmThreads,
   markDmRead,
   sendDm,
 } from "../services/dmCore";
+import { DM_ASSISTANT_TRIGGER, replyDmAssistant } from "../services/dmAssistant";
 
 /**
  * 站內私訊（通訊錄 1:1 聊天）。核心邏輯全在 services/dmCore（MCP 私訊工具共用同一路徑）：
@@ -27,11 +30,40 @@ export const dmRouter = router({
     .input(z.object({ peerId: z.string().uuid(), before: z.date().optional(), limit: z.number().int().min(1).max(100).optional() }))
     .query(({ ctx, input }) => listDmHistory(ctx.auth, input.peerId, { before: input.before, limit: input.limit })),
 
-  /** 送出私訊（對象界與內容長度由伺服器守） */
+  /** 可標注的物件（專案／資料庫／排程／筆記）——「標注」picker 的資料源；範圍過濾集中在伺服器 */
+  mentionables: authedProcedure.query(({ ctx }) => listDmMentionables(ctx.auth)),
+
+  /**
+   * 送出私訊（對象界／內容長度／標注／附件歸屬皆由伺服器守）。
+   * body 可為空，但需搭配附件或標注（純空訊息由 dmCore 擋）。
+   * 內文含「@助手」時，背景讓 AI 代理讀這段對話回一則（fire-and-forget，不擋送出）。
+   */
   send: authedProcedure
-    .input(z.object({ peerId: z.string().uuid(), body: z.string().min(1, "訊息不可為空").max(DM_MAX_BODY, `訊息最長 ${DM_MAX_BODY} 字`) }))
+    .input(
+      z.object({
+        peerId: z.string().uuid(),
+        body: z.string().max(DM_MAX_BODY, `訊息最長 ${DM_MAX_BODY} 字`).optional().default(""),
+        refType: z.enum(DM_REF_TYPES).optional(),
+        refId: z.string().uuid().optional(),
+        attachmentId: z.string().uuid().optional(),
+      }),
+    )
     .mutation(async ({ ctx, input }) => {
-      const { message } = await sendDm(ctx.auth, input.peerId, input.body.trim());
+      const body = input.body.trim();
+      const { message, peer } = await sendDm(ctx.auth, input.peerId, body, {
+        refType: input.refType,
+        refId: input.refId,
+        attachmentId: input.attachmentId,
+      });
+      if (body.includes(DM_ASSISTANT_TRIGGER)) {
+        void replyDmAssistant({
+          askerId: ctx.auth.user.id,
+          askerName: ctx.auth.user.name,
+          peerId: peer.userId,
+          peerName: peer.name,
+          question: body,
+        }).catch((err) => console.warn("[dm] @助手 回覆失敗：", err instanceof Error ? err.message : err));
+      }
       return { id: message.id, createdAt: message.createdAt };
     }),
 

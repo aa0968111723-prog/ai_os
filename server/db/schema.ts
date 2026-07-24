@@ -433,11 +433,42 @@ export const dmMessages = pgTable("dm_messages", {
   senderId: uuid("sender_id").notNull(),
   recipientId: uuid("recipient_id").notNull(),
   body: text("body").notNull(),
+  // 私訊 2.0：kind 區分一般訊息與 AI 代理回覆（'assistant'——@助手 觸發，sender 記提問者、雙方可見）。
+  kind: text("kind").notNull().default("text"),
+  // 標注（跨組指標）：可把「專案／資料庫／排程／筆記」帶進私訊變成可點卡片。送出時以「發訊者本人權限」
+  // 驗證可存取（dmCore.assertDmRef）；卡片只是指標，對方點擊時各目標頁再自行做存取守衛。
+  refType: text("ref_type", { enum: ["project", "database", "schedule", "note"] }),
+  refId: uuid("ref_id"),
+  // 圖／影片／檔案附件：指向 dm_attachments（上傳時建立、送訊時綁定）。允許「只有附件、body 為空」。
+  attachmentId: uuid("attachment_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   // 對話串雙向查詢：sender 前綴查「我發給某人」、recipient 前綴查「某人發給我」＋未讀計數
   senderIdx: index("dm_messages_sender_idx").on(t.senderId, t.recipientId, t.createdAt),
   recipientIdx: index("dm_messages_recipient_idx").on(t.recipientId, t.senderId, t.createdAt),
+}));
+
+/**
+ * 私訊附件（圖／影片／檔案）：獨立於專案素材（assets 掛組、組內可見）——私訊附件只有收發雙方看得到，
+ * 檔案服務端點以「本人是上傳者，或本人是所屬訊息的收訊者」為界（見 index.ts /api/dm/attachments/:id/file）。
+ * 上傳先建列（messageId 為 null＝尚未綁定），dm.send 帶 attachmentId 時才把 messageId 補上並驗擁有＋未用。
+ * 落地檔走既有 storage（storagePath）。未送出的孤兒列（挑了檔又沒送）罕見且小，暫不自動清掃。
+ */
+export const dmAttachments = pgTable("dm_attachments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** 上傳者（＝送訊者）。綁定前只有本人讀得到；綁定後所屬訊息的對方也讀得到。 */
+  ownerId: uuid("owner_id").notNull(),
+  /** 綁定到的私訊（null＝上傳後尚未送出）。 */
+  messageId: uuid("message_id"),
+  kind: text("kind").notNull(), // image | video | audio | doc（沿用 storage.kindFromMime）
+  title: text("title").notNull(),
+  storagePath: text("storage_path").notNull(),
+  mime: text("mime").notNull(),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  ownerIdx: index("dm_attachments_owner_idx").on(t.ownerId),
+  messageIdx: index("dm_attachments_message_idx").on(t.messageId),
 }));
 
 /** 私訊已讀水位：每人對每位對話者一筆 lastReadAt，未讀數＝晚於水位的對方來訊數（dmCore upsert 維護） */

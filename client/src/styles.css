@@ -618,6 +618,24 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .dm-compose { display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px; border-top: 1px solid var(--border-soft); }
 .dm-compose textarea { flex: 1; resize: none; margin: 0; }
 .dm-compose button { flex: none; }
+/* 私訊 2.0：工具列（上傳圖/影片・標注・問 AI）貼在輸入框上緣 */
+.dm-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
+.dm-tools .chip.on { background: var(--primary-tint); border-color: var(--primary-border); color: var(--primary-ink); }
+/* AI 代理回覆：靠左的專屬氣泡，與雙方對話明顯區隔 */
+.dm-row.assistant { justify-content: flex-start; }
+.dm-bubble.assistant { background: var(--primary-tint); border: 1px solid var(--primary-border); border-bottom-left-radius: 4px; }
+.dm-ai-tag { display: block; font-size: 11px; font-weight: 700; color: var(--primary-ink); margin-bottom: 3px; }
+.dm-bubble-body { display: block; }
+/* 附件：圖片縮圖、內嵌播放器 */
+.dm-attach-img { display: block; margin-bottom: 4px; }
+.dm-attach-img img { max-width: 220px; max-height: 220px; border-radius: 10px; object-fit: cover; display: block; }
+.dm-attach-media { display: block; margin-bottom: 4px; max-width: 260px; width: 100%; border-radius: 10px; }
+audio.dm-attach-media { height: 36px; }
+/* 標注 picker 的分頁列 */
+.dm-ref-pop { padding: 6px; gap: 4px; }
+.dm-ref-tabs { display: flex; gap: 4px; padding: 2px 2px 6px; border-bottom: 1px solid var(--border-soft); margin-bottom: 2px; }
+.dm-ref-tabs button { flex: 1; padding: 5px 4px; font-size: 12px; border-radius: 8px; border: 1px solid transparent; }
+.dm-ref-tabs button.on { background: var(--primary-tint); border-color: var(--primary-border); color: var(--primary-ink); font-weight: 600; }
 /* 頂欄私訊入口的未讀小紅點數 */
 .dm-nav-unread { min-width: 16px; text-align: center; font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 999px;
   background: var(--primary); color: #fff; }

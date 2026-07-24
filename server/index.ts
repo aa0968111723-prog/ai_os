@@ -486,6 +486,101 @@ app.get("/api/assets/:id/file", async (req, res) => {
   }
 });
 
+// ── 私訊附件（圖／影片／檔案）：上傳＋下載。隔離＝只有收發雙方看得到（非組隔離，見 dmAttachments） ──
+
+/** 上傳私訊附件（multipart: file + peerId）→ 落地＋建 dm_attachments 列（未綁定），回傳附件供 dm.send 帶上 */
+app.post("/api/dm/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
+  const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) { await cleanup(); return res.status(401).json({ error: "請先登入" }); }
+    if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
+
+    // 對象界：只能傳附件給「可私訊對象」（同組夥伴或開發者）——與 dm.send 同一守衛，避免對外偷傳
+    const peerId = String(req.body?.peerId ?? "");
+    try {
+      const { assertDmPeer } = await import("./services/dmCore");
+      await assertDmPeer(auth, peerId);
+    } catch {
+      await cleanup();
+      return res.status(404).json({ error: "找不到這位夥伴（只能私訊同組夥伴或開發者）" });
+    }
+
+    let mime = req.file.mimetype.split(";")[0].trim().toLowerCase();
+    if (mime === "application/octet-stream" || mime === "") {
+      const { mimeFromPath } = await import("./services/storage");
+      mime = mimeFromPath(req.file.originalname);
+    }
+    if (!isAllowedUploadMime(mime)) {
+      await cleanup();
+      return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：圖片（含 HEIC）/影片/音訊/PDF/Office/文字/壓縮檔` });
+    }
+    // 與 /api/upload 同一套檔頭簽名驗證：不只信宣稱 MIME／副檔名
+    const verdict = resolveUploadMime(mime, await readFileHead(req.file.path));
+    if (!verdict) {
+      await cleanup();
+      return res.status(415).json({ error: "檔案內容與宣稱的格式不符（無法辨識檔案簽名）——請確認檔案未損壞、副檔名正確" });
+    }
+    mime = verdict.mime;
+    const guard = await checkDiskSpace(req.file.size);
+    if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
+
+    const { storagePath, sizeBytes } = await adoptTmpFile(req.file.path, mime);
+    try {
+      const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8");
+      const title = (String(req.body?.title ?? "").trim() || originalName || "附件").slice(0, 80);
+      const [att] = await db
+        .insert(schema.dmAttachments)
+        .values({ ownerId: auth.user.id, kind: kindFromMime(mime), title, storagePath, mime, sizeBytes })
+        .returning();
+      res.json({ ok: true, attachment: { id: att.id, kind: att.kind, title: att.title, mime: att.mime, sizeBytes: att.sizeBytes, url: `/api/dm/attachments/${att.id}/file` } });
+    } catch (dbErr) {
+      const { removeStoredFile } = await import("./services/storage");
+      await removeStoredFile(storagePath);
+      throw dbErr;
+    }
+  } catch (err) {
+    await cleanup();
+    console.error("[dm:upload]", err);
+    recordError("dm:upload", err);
+    if (!res.headersSent) res.status(500).json({ error: "上傳失敗，請稍後再試" });
+  }
+});
+app.use("/api/dm/upload", (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    const msg = err.code === "LIMIT_FILE_SIZE" ? `檔案太大（上限 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB）` : `上傳失敗：${err.code}`;
+    return res.status(413).json({ error: msg });
+  }
+  next(err);
+});
+
+/** 私訊附件檔案服務：登入＋「本人是上傳者或所屬訊息的對方」才給——非組隔離，維持私訊「只有雙方看得到」 */
+app.get("/api/dm/attachments/:id/file", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const [att] = await db.select().from(schema.dmAttachments).where(eq(schema.dmAttachments.id, req.params.id));
+    if (!att) return res.status(404).json({ error: "找不到附件" });
+    let allowed = att.ownerId === auth.user.id;
+    if (!allowed && att.messageId) {
+      const [msg] = await db.select({ senderId: schema.dmMessages.senderId, recipientId: schema.dmMessages.recipientId })
+        .from(schema.dmMessages).where(eq(schema.dmMessages.id, att.messageId));
+      allowed = !!msg && (msg.senderId === auth.user.id || msg.recipientId === auth.user.id);
+    }
+    if (!allowed) return res.status(403).json({ error: "沒有權限看這個附件" });
+
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const mime = att.mime ?? "application/octet-stream";
+    // 圖片/影音維持 inline（縮圖與播放需要）；doc/pdf/txt 與 SVG 強制下載，擋內嵌渲染的 XSS/嗅探
+    if (shouldForceAttachment(mime)) res.setHeader("Content-Disposition", "attachment");
+    res.sendFile(absPathOf(att.storagePath), { headers: { "Content-Type": mime } });
+  } catch (err) {
+    console.error("[dm:attachment:file]", err);
+    if (!res.headersSent) res.status(500).json({ error: "讀取附件失敗" });
+  }
+});
+
 // ── 資料庫文件（AI 可讀檔案層）：上傳＋下載（權限走 databaseAcl，配額每人 5GB 可調） ──
 
 /** 上傳文件到資料庫（multipart: file + tableId [+ name]）→ 抽純文字供 AI 讀、回傳檔案列 */
