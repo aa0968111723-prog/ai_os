@@ -432,6 +432,30 @@ mark.mention { background: color-mix(in srgb, var(--primary) 18%, transparent); 
 .quick-phrases .chip { cursor: pointer; margin: 0; border: 1px solid var(--border-soft); background: var(--card2); }
 .quick-phrases .chip:hover:not(:disabled) { border-color: var(--border-strong); }
 
+/* 自訂快速短語：chip 內含「一鍵送出」與（管理時）「移除」兩個鈕 */
+.quick-phrases .chip.custom-phrase { display: inline-flex; align-items: center; gap: 2px; padding: 0; cursor: default; }
+.custom-phrase .phrase-send { background: none; border: none; color: inherit; font: inherit;
+  cursor: pointer; padding: 4px 10px; border-radius: var(--r-8); }
+.custom-phrase.editing .phrase-send { padding-right: 4px; }
+.custom-phrase .phrase-send:hover:not(:disabled) { color: var(--fg); }
+.custom-phrase .phrase-del { display: inline-flex; align-items: center; background: none; border: none;
+  color: var(--fg-secondary); cursor: pointer; padding: 2px; margin-right: 5px; border-radius: 50%; }
+.custom-phrase .phrase-del:hover { color: var(--danger-ink); background: var(--card); }
+
+/* 自訂短語小面板：沿用 mention-pop 外框，但改成表單式（輸入框＋表情盤＋提示） */
+.phrase-editor .phrase-input { flex: 1; min-width: 0; padding: 6px 8px; font-size: 13px;
+  border: 1px solid var(--border-soft); border-radius: var(--r-8); background: var(--card2); color: var(--fg); }
+.phrase-editor .phrase-input:focus { outline: none; border-color: var(--primary-border); background: var(--card); }
+.phrase-editor > div { display: flex; }
+/* 面板落在 .mention-pop 內，其 button 規則會蓋掉 .primary 底色；在此還原「加入」鈕外觀 */
+.phrase-editor .primary { flex-shrink: 0; background: var(--primary-solid); color: var(--primary-fg);
+  border-color: transparent; box-shadow: var(--e1), inset 0 1px 0 rgba(255,255,255,.15); padding: var(--sp-4) var(--sp-12); }
+.phrase-editor .primary:hover:not(:disabled) { background: var(--primary-solid-hover); }
+.phrase-editor .primary:disabled { background: var(--muted); color: var(--muted-fg); }
+.phrase-emoji-row { flex-wrap: wrap; gap: 2px; }
+.phrase-editor .phrase-emoji-row button { display: inline-flex; width: auto; padding: 2px 4px;
+  font-size: 18px; border-radius: 50%; }
+
 .compose-ctx { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-secondary);
   background: var(--card2); border-radius: var(--r-8); padding: 4px 10px; margin-top: 8px; min-width: 0; }
 .compose-ctx > :nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
