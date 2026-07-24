@@ -28,6 +28,7 @@ import { databasesRouter } from "./databases";
 import { directoryRouter } from "./directory";
 import { dmRouter } from "./dm";
 import { googleCalendarRouter } from "./googleCalendar";
+import { knowledgeMapRouter } from "./knowledgeMap";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -59,6 +60,7 @@ export const appRouter = router({
   directory: directoryRouter,
   dm: dmRouter,
   googleCalendar: googleCalendarRouter,
+  knowledgeMap: knowledgeMapRouter,
 });
 
 export type AppRouter = typeof appRouter;
