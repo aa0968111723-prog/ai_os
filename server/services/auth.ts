@@ -8,6 +8,15 @@ import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { db, schema } from "../db";
 
+// pg 唯一鍵衝突（23505）：驅動可能把原始錯誤包在 cause，兩層 code 與訊息都檢查。
+// 在地實作（不從 generationCore 匯入）——auth.ts 於 tRPC context 建立時極早載入，
+// 匯入 generationCore 會把整個生成／路由圖一併拉進來造成初始化循環（authedProcedure 尚未就緒）。
+function isUniqueViolation(err: unknown): boolean {
+  const codes = [(err as { code?: unknown } | null)?.code, (err as { cause?: { code?: unknown } } | null)?.cause?.code];
+  if (codes.includes("23505")) return true;
+  return err instanceof Error && err.message.includes("duplicate key");
+}
+
 const SESSION_DAYS = 30;
 const COOKIE_NAME = "aidos_session";
 
@@ -93,8 +102,18 @@ export function checkLoginRate(email: string, ip?: string): { ok: boolean; retry
   }
   return { ok: true };
 }
-export function clearLoginRate(email: string): void {
+export function clearLoginRate(email: string, ip?: string): void {
   attempts.delete(email);
+  // 成功登入不應累積到「每 IP 撞庫」計數——否則共用出口 IP 的小團隊正常登入也會把自己鎖死。
+  // 移除這次成功嘗試在 checkLoginRate 剛記下的最新一筆時間戳；失敗嘗試仍保留，維持撞庫防護。
+  if (ip) {
+    const hits = ipHits.get(ip);
+    if (hits && hits.length) {
+      hits.pop();
+      if (hits.length === 0) ipHits.delete(ip);
+      else ipHits.set(ip, hits);
+    }
+  }
 }
 
 /* ── Session ── */
@@ -120,7 +139,13 @@ export function parseCookies(req: Request): Record<string, string> {
   const out: Record<string, string> = {};
   for (const part of header.split(";")) {
     const idx = part.indexOf("=");
-    if (idx > 0) out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+    if (idx > 0) {
+      const key = part.slice(0, idx).trim();
+      const raw = part.slice(idx + 1).trim();
+      // 畸形值（如落單的 %）會讓 decodeURIComponent 丟 URIError，若不接會讓整個 createContext 500、
+      // 該瀏覽器所有 API 全掛。解碼失敗就沿用原字串（session token 為 hex、本就無需解碼）。
+      try { out[key] = decodeURIComponent(raw); } catch { out[key] = raw; }
+    }
   }
   return out;
 }
@@ -302,28 +327,29 @@ export async function acceptInvite(token: string, name: string, password: string
   if (existing) {
     throw new Error("這個 email 已經有帳號了，請直接用原本的密碼登入；要加入新團隊時，請登入後由管理員把你加入。");
   }
-  const [user] = await db
-    .insert(schema.users)
-    .values({ name, email: invite.email, passwordHash: await hashPassword(password) })
-    .returning();
-  const userId = user.id;
-
-  const existingTeam = await db
-    .select()
-    .from(schema.teamMembers)
-    .where(and(eq(schema.teamMembers.teamId, invite.teamId), eq(schema.teamMembers.userId, userId)));
-  if (existingTeam.length === 0) {
-    await db.insert(schema.teamMembers).values({ teamId: invite.teamId, userId, role: invite.teamRole });
-  }
-  if (invite.groupId) {
-    const existingGroup = await db
-      .select()
-      .from(schema.groupMembers)
-      .where(and(eq(schema.groupMembers.groupId, invite.groupId), eq(schema.groupMembers.userId, userId)));
-    if (existingGroup.length === 0) {
-      await db.insert(schema.groupMembers).values({ groupId: invite.groupId, userId, role: invite.groupRole });
+  // bcrypt 先算好再進交易，避免在交易中佔住 DB 連線做 CPU 密集雜湊
+  const passwordHash = await hashPassword(password);
+  // 建帳號＋入團隊/組＋標記邀請已用一次做完：中途任一步失敗整批回滾，不留「有帳號沒入組」的半套資料。
+  // 併發用同一 token 落地時，第二筆會撞 users.email 唯一鍵而整筆回滾，只有一筆成功。
+  return db.transaction(async (tx) => {
+    let user;
+    try {
+      [user] = await tx
+        .insert(schema.users)
+        .values({ name, email: invite.email, passwordHash })
+        .returning();
+    } catch (err) {
+      // 併發用同一 token 落地時，輸家會撞 users.email 唯一鍵。整批仍回滾（只有一筆成功），
+      // 但把原始 pg 23505 包成友善訊息，不讓 router 的泛用 catch 把原始約束錯誤（含欄位名）回給用戶端。
+      if (isUniqueViolation(err)) throw new Error("這個 email 已經有帳號了，請直接用原本的密碼登入。");
+      throw err;
     }
-  }
-  await db.update(schema.invites).set({ acceptedAt: new Date() }).where(eq(schema.invites.id, invite.id));
-  return { userId };
+    const userId = user.id;
+    await tx.insert(schema.teamMembers).values({ teamId: invite.teamId, userId, role: invite.teamRole });
+    if (invite.groupId) {
+      await tx.insert(schema.groupMembers).values({ groupId: invite.groupId, userId, role: invite.groupRole });
+    }
+    await tx.update(schema.invites).set({ acceptedAt: new Date() }).where(eq(schema.invites.id, invite.id));
+    return { userId };
+  });
 }
