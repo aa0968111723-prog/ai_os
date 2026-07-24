@@ -143,7 +143,15 @@ app.get("/api/ready", async (_req, res) => {
     : { ok: false, note: "missing（媒體生成金鑰未設定，生成會失敗）" };
 
   const ok = Object.values(components).every((c) => c.ok);
-  res.status(ok ? 200 : 503).json({ ok, components, time: new Date().toISOString() });
+  // 頂層 db/boot 維持舊版字串形狀：CI e2e 以 grep '"boot":"ready' 等就緒、
+  // e2e-phase4 驗頂層 boot 鍵，文件也教管理員看這兩個欄位——分項細節在 components。
+  res.status(ok ? 200 : 503).json({
+    ok,
+    db: components.db.ok ? "connected（資料庫已接通）" : "error（資料庫未接通）",
+    boot: bootReady ? "ready（初始化完成）" : "initializing（建表/種子進行中，稍候自動完成）",
+    components,
+    time: new Date().toISOString(),
+  });
 });
 
 // 佔位素材端點：專案免費佔位縮圖（projects.ts）與 e2e 測試假素材共用；離線可用，交付包也抓得到
