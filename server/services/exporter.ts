@@ -172,8 +172,22 @@ function buildVoiceoverSrt(scenes: Array<{ durationSec: number; voiceover: strin
 // 三個產生器共用約定：呼叫端傳入「未軟刪、依 orderIndex 排序」的分鏡；
 // 時間軸由各鏡 durationSec 依序累加（非正數以 3 秒計，與鏡頭表時間碼同一套規則）。
 
-/** 時間軸產生器吃的最小分鏡形狀（scenes DB 列結構相容） */
-export type TimelineScene = { title: string; durationSec: number; voiceover: string | null };
+/** 時間軸產生器吃的最小分鏡形狀（scenes DB 列結構相容）。
+ *  mediaFile／narrationFile＝該鏡實際寫入交付 ZIP 的相對檔名（QA-006：時間軸格式要能 relink 到
+ *  封包內真實媒體，不能只有 gap 佔位）；打包端成功入包後回填，null＝該鏡無媒體（維持 gap）。 */
+export type TimelineScene = {
+  title: string;
+  durationSec: number;
+  voiceover: string | null;
+  mediaFile?: string | null;
+  narrationFile?: string | null;
+};
+
+/** ZIP 內相對路徑 → 檔名（EDL clip name／FCPXML asset name 用） */
+function mediaBasename(relPath: string): string {
+  const idx = relPath.lastIndexOf("/");
+  return idx >= 0 ? relPath.slice(idx + 1) : relPath;
+}
 
 /** 這一鏡在時間軸上佔的秒數（與鏡頭表/字幕同規則：最少 3 秒） */
 function sceneDur(sc: { durationSec: number }): number {
@@ -209,38 +223,56 @@ function escXml(value: string): string {
 
 /**
  * FCPXML 1.9 時間軸（Final Cut Pro／剪映專業版可讀）。
- * 最小可用骨架：resources 一個 30fps format＋project/sequence/spine，spine 內每鏡一個 <gap> 佔位
- * （duration 用整數秒「Ns」，30fps 下整秒必對齊影格），note 帶分鏡標題與配音詞。
- * 重點是時間軸結構與各鏡長度可直接匯入；媒體連結、轉場等細節請匯入後在剪輯軟體內補。
+ * 有媒體的鏡（mediaFile 非空）建立 <asset>＋<media-rep>（src 用 ZIP 內相對路徑，解壓後可 relink）
+ * 並在 spine 放 <asset-clip ref>；無媒體的鏡維持 <gap> 佔位。note 帶分鏡標題與配音詞。
+ * fps/解析度目前專案未儲存媒體 metadata，仍以 1080p30 為 sequence 格式（時間以整數秒對齊影格）；
+ * 媒體實際格式由剪輯軟體匯入時自 media-rep 檔案讀取。
  */
 export function buildFcpxml(scenes: TimelineScene[], projectTitle: string): string {
   const totalSec = scenes.reduce((sum, sc) => sum + sceneDur(sc), 0);
-  const gaps: string[] = [];
+  const assets: string[] = [];
+  const spine: string[] = [];
   let offset = 0;
   for (const [i, sc] of scenes.entries()) {
     const dur = sceneDur(sc);
     const note = (sc.voiceover ?? "").trim() ? `${sc.title}｜${(sc.voiceover ?? "").trim()}` : sc.title;
-    gaps.push(
-      `            <gap name="${escXml(`${i + 1}_${sc.title}`)}" offset="${offset}s" start="0s" duration="${dur}s">\n` +
-        `              <note>${escXml(note)}</note>\n` +
-        `            </gap>`,
-    );
+    if (sc.mediaFile) {
+      const rid = `a${i + 1}`;
+      // media-rep src 用封包內相對路徑（./01_視頻素材/…）：解壓後與 fcpxml 同層，匯入即可 relink（QA-006）
+      assets.push(
+        `    <asset id="${rid}" name="${escXml(mediaBasename(sc.mediaFile))}" start="0s" duration="${dur}s">\n` +
+          `      <media-rep kind="original-media" src="${escXml(`./${sc.mediaFile}`)}"/>\n` +
+          `    </asset>`,
+      );
+      spine.push(
+        `            <asset-clip ref="${rid}" name="${escXml(`${i + 1}_${sc.title}`)}" offset="${offset}s" start="0s" duration="${dur}s">\n` +
+          `              <note>${escXml(note)}</note>\n` +
+          `            </asset-clip>`,
+      );
+    } else {
+      spine.push(
+        `            <gap name="${escXml(`${i + 1}_${sc.title}`)}" offset="${offset}s" start="0s" duration="${dur}s">\n` +
+          `              <note>${escXml(note)}</note>\n` +
+          `            </gap>`,
+      );
+    }
     offset += dur;
   }
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<!DOCTYPE fcpxml>`,
-    `<!-- 最小可用骨架：每鏡一個 gap 佔位（30fps），媒體與轉場等細節請在剪輯軟體內補 -->`,
+    `<!-- 有媒體的鏡以 asset/media-rep 連到交付包內相對路徑（解壓後可 relink）；無媒體的鏡為 gap 佔位 -->`,
     `<fcpxml version="1.9">`,
     `  <resources>`,
     `    <format id="r1" name="FFVideoFormat1080p30" frameDuration="100/3000s" width="1920" height="1080"/>`,
+    ...(assets.length ? [assets.join("\n")] : []),
     `  </resources>`,
     `  <library>`,
     `    <event name="${escXml(projectTitle)}">`,
     `      <project name="${escXml(projectTitle)}">`,
     `        <sequence format="r1" duration="${totalSec}s" tcStart="0s" tcFormat="NDF">`,
     `          <spine>`,
-    ...(gaps.length ? [gaps.join("\n")] : []),
+    ...(spine.length ? [spine.join("\n")] : []),
     `          </spine>`,
     `        </sequence>`,
     `      </project>`,
@@ -265,8 +297,9 @@ function edlTime(totalSec: number): string {
 
 /**
  * CMX 3600 EDL 剪輯表（DaVinci Resolve／Premiere 可讀）：TITLE 行＋每鏡一行事件（V 軌、Cut），
- * 以 30fps 換算 timecode；來源一律 AX 佔位 reel（進出點從 0 起算、長度＝該鏡秒數），
- * COMMENT 行（* FROM CLIP NAME）放分鏡標題，匯入後逐鏡替換為實際素材即可。
+ * 以 30fps 換算 timecode；來源一律 AX 佔位 reel（進出點從 0 起算、長度＝該鏡秒數）。
+ * 有媒體的鏡（mediaFile 非空）：FROM CLIP NAME 用交付包內「真實檔名」、另附 SOURCE FILE 相對路徑，
+ * 匯入後可依檔名自動 relink（QA-006）；無媒體的鏡維持分鏡標題供人工替換。
  */
 export function buildEdl(scenes: TimelineScene[], projectTitle: string): string {
   const lines: string[] = [`TITLE: ${projectTitle.replace(/\s+/g, " ").trim() || "未命名"}`, "FCM: NON-DROP FRAME", ""];
@@ -274,9 +307,11 @@ export function buildEdl(scenes: TimelineScene[], projectTitle: string): string 
   for (const [i, sc] of scenes.entries()) {
     const dur = sceneDur(sc);
     const num = String(i + 1).padStart(3, "0");
+    const clipName = sc.mediaFile ? mediaBasename(sc.mediaFile) : sc.title.replace(/\s+/g, " ").trim();
     lines.push(
       `${num}  AX       V     C        ${edlTime(0)} ${edlTime(dur)} ${edlTime(t)} ${edlTime(t + dur)}`,
-      `* FROM CLIP NAME: ${sc.title.replace(/\s+/g, " ").trim()}`,
+      `* FROM CLIP NAME: ${clipName}`,
+      ...(sc.mediaFile ? [`* SOURCE FILE: ${sc.mediaFile}`] : []),
       "",
     );
     t += dur;
@@ -618,10 +653,19 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
   // 交付/：三種剪輯軟體通用時間軸格式（需求 #8）——一律附加（多選打包也照常）：
   // 字幕.srt（剪映/CapCut/Premiere）、時間軸.fcpxml（Final Cut Pro/剪映專業版）、剪輯表.edl（DaVinci Resolve）。
   // 與 04_字幕 的可讀性切塊版不同，這裡每鏡一塊、空詞用標題，供剪輯逐鏡對位；沒有分鏡時改附說明檔。
+  // QA-006：帶入各鏡「實際寫進本包」的相對檔名（writtenNames/narrationNames），
+  // FCPXML 產出 asset/media-rep、EDL 產出真實 clip 檔名——解壓後即可 relink，不再只是 gap 佔位。
   if (scenes.length > 0) {
-    archive.append(buildSrt(scenes), { name: "交付/字幕.srt" });
-    archive.append(buildFcpxml(scenes, project.title), { name: "交付/時間軸.fcpxml" });
-    archive.append(buildEdl(scenes, project.title), { name: "交付/剪輯表.edl" });
+    const timelineScenes: TimelineScene[] = scenes.map((sc, i) => ({
+      title: sc.title,
+      durationSec: sc.durationSec,
+      voiceover: sc.voiceover,
+      mediaFile: writtenNames[i],
+      narrationFile: narrationNames[i],
+    }));
+    archive.append(buildSrt(timelineScenes), { name: "交付/字幕.srt" });
+    archive.append(buildFcpxml(timelineScenes, project.title), { name: "交付/時間軸.fcpxml" });
+    archive.append(buildEdl(timelineScenes, project.title), { name: "交付/剪輯表.edl" });
   } else {
     archive.append(
       "本專案還沒有分鏡，無法產生時間軸/字幕檔。\n" +

@@ -50,6 +50,11 @@ export function ScriptSplitCard({ projectId }: { projectId: string }) {
         <button onClick={() => setOpen(true)}>貼腳本自動拆分鏡</button>
       )}
       {split.data && <p className="hint" style={{ color: "var(--success-ink)", marginTop: 8 }}><Icon name="Check" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />已建立 {split.data.count} 幕草稿{split.data.mock ? "（測試模式拆分）" : ""}</p>}
+      {split.data?.truncation && (
+        <p className="hint" style={{ color: "var(--warn-ink, #b45309)", marginTop: 4 }}>
+          ⚠ 腳本共 {split.data.truncation.totalChars.toLocaleString()} 字，AI 只讀了前 {split.data.truncation.sentChars.toLocaleString()} 字（後面 {split.data.truncation.droppedChars.toLocaleString()} 字未拆入）——建議把長腳本分段、多次拆分。
+        </p>
+      )}
       {split.error && <p className="error">{split.error.message}</p>}
     </section>
   );

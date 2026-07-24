@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
@@ -19,8 +19,12 @@ export function CharacterCards({
 }) {
   const utils = trpc.useUtils();
   const list = trpc.characters.list.useQuery({ projectId });
+  // 冪等鍵（QA-003）：同一張「還沒建成功」的卡重試沿用同鍵——timeout 後再按不會建出重複卡；
+  // 成功才換新鍵（下一張卡）
+  const requestId = useRef<string>(crypto.randomUUID());
   const add = trpc.characters.add.useMutation({
     onSuccess: () => {
+      requestId.current = crypto.randomUUID();
       utils.characters.list.invalidate({ projectId });
       setName(""); setAppearance(""); setNotes(""); setRefImg(null); setOpen(false);
     },
@@ -127,7 +131,7 @@ export function CharacterCards({
           <label style={{ marginTop: 8 }}>定裝參考圖（選填：上傳或從素材庫選）</label>
           <ReferenceImagePicker projectId={projectId} value={refImg} onChange={setRefImg} disabled={add.isPending} />
           <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
-            <button className="primary" disabled={!name.trim() || !appearance.trim() || add.isPending} onClick={() => add.mutate({ projectId, name: name.trim(), appearance: appearance.trim(), notes: notes.trim() || undefined, referenceAssetId: refImg?.id })}>
+            <button className="primary" disabled={!name.trim() || !appearance.trim() || add.isPending} onClick={() => add.mutate({ projectId, name: name.trim(), appearance: appearance.trim(), notes: notes.trim() || undefined, referenceAssetId: refImg?.id, clientRequestId: requestId.current })}>
               {add.isPending ? "建立中…" : "建立角色"}
             </button>
             <button onClick={() => setOpen(false)}>取消</button>

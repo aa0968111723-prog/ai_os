@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
+import { isUniqueViolation } from "../services/generationCore";
 
 /**
  * 把選定角色組成注入生成提示詞的「定裝錨點」（給 generation 重用）。
@@ -44,6 +45,8 @@ export const charactersRouter = router({
         appearance: z.string().min(1, "請填外觀設定").max(1000),
         notes: z.string().max(1000).optional(),
         referenceAssetId: z.string().uuid().optional(),
+        /** 冪等鍵（client 產生的 UUID，當 row id 用）：timeout 後重送同鍵回原卡片，不重複建立 */
+        clientRequestId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -53,19 +56,32 @@ export const charactersRouter = router({
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
       // 跨組引用驗證：referenceAssetId 必須同組且是圖片，否則能把別組定裝圖綁進本組角色
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, project.groupId);
-      const [row] = await db
-        .insert(schema.characters)
-        .values({
-          projectId: project.id,
-          groupId: project.groupId,
-          name: input.name.trim(),
-          appearance: input.appearance.trim(),
-          notes: input.notes?.trim(),
-          referenceAssetId: input.referenceAssetId,
-          createdBy: ctx.auth.user.id,
-        })
-        .returning();
-      return row;
+      try {
+        const [row] = await db
+          .insert(schema.characters)
+          .values({
+            id: input.clientRequestId,
+            projectId: project.id,
+            groupId: project.groupId,
+            name: input.name.trim(),
+            appearance: input.appearance.trim(),
+            notes: input.notes?.trim(),
+            referenceAssetId: input.referenceAssetId,
+            createdBy: ctx.auth.user.id,
+          })
+          .returning();
+        return row;
+      } catch (err) {
+        // 冪等重送撞唯一鍵＝前次請求已建卡（client timeout 後重試）：回既有卡，不重複建立（QA-003）
+        if (input.clientRequestId && isUniqueViolation(err)) {
+          const [existing] = await db
+            .select()
+            .from(schema.characters)
+            .where(and(eq(schema.characters.id, input.clientRequestId), eq(schema.characters.projectId, project.id)));
+          if (existing) return existing;
+        }
+        throw err;
+      }
     }),
 
   update: authedProcedure
