@@ -1077,6 +1077,7 @@ app.post("/api/assistant/ask", async (req, res) => {
   if (!auth) return res.status(401).json({ error: "請先登入" });
   const projectId = String(req.body?.projectId ?? "");
   const message = String(req.body?.message ?? "").trim();
+  const nonce = typeof req.body?.nonce === "string" ? req.body.nonce.slice(0, 64) : undefined;
   if (!UUID_RE.test(projectId) || !message || message.length > 1000) {
     return res.status(400).json({ error: "參數不正確（需 projectId 與 1–1000 字的問題）" });
   }
@@ -1086,23 +1087,40 @@ app.post("/api/assistant/ask", async (req, res) => {
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders?.();
+
+  // 用戶端斷線（切分頁/導航離開/送下一題）→ 中止在途 LLM 呼叫並提早跳出工具迴圈，比照 exporter 下載路由的 clientAbort，
+  // 不再對死連線白燒 NIM 免費額度。closed 旗標同時守住 sse()/res.end() 不對已關閉/已結束的回應寫入（防 EPIPE/write-after-end）。
+  const clientAbort = new AbortController();
+  let closed = false;
+  res.on("close", () => { closed = true; if (!res.writableEnded) clientAbort.abort(); });
+  // 斷線後由 stream 非同步 emit 的 'error'（EPIPE/ERR_STREAM_DESTROYED）在此吸收成記錄，不讓它上升為未捕捉例外
+  res.on("error", (e) => recordError("assistant:stream", e));
+
   const sse = (event: string, data: unknown) => {
+    if (closed || res.writableEnded) return;
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
+  // 心跳：相鄰事件間最壞可達一次 LLM 呼叫（~60s）全靜默，每 15 秒送一則 SSE 註解行（前端天然忽略）撐過代理 idle 逾時
+  const heartbeat = setInterval(() => { if (!closed && !res.writableEnded) res.write(": ping\n\n"); }, 15_000);
+
   sse("open", { ok: true }); // 立刻開流，前端知道連上了（比等第一個 LLM 事件更即時）
   try {
     const { runAssistantAsk } = await import("./routers/assistant");
     const result = await runAssistantAsk(
-      { projectId, message, auth },
+      { projectId, message, auth, signal: clientAbort.signal, dedupeKey: nonce },
       (e) => sse("step", e),
     );
     sse("done", result);
   } catch (err) {
-    // runAssistantAsk 內部錯誤多已轉成 fallback 回答；會拋出的是節流/權限/找不到專案等守門（TRPCError 帶人話 message）
-    recordError("assistant:stream", err);
-    sse("error", { message: err instanceof Error ? err.message : "AI 助手暫時沒回應，請稍後再試" });
+    // runAssistantAsk 內部錯誤多已轉成 fallback 回答；會拋出的是節流/權限/找不到專案等守門（TRPCError 帶人話 message）。
+    // 用戶端已斷線就別再記一筆噪音錯誤。
+    if (!closed) {
+      recordError("assistant:stream", err);
+      sse("error", { message: err instanceof Error ? err.message : "AI 助手暫時沒回應，請稍後再試" });
+    }
   } finally {
-    res.end();
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
   }
 });
 

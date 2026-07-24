@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
@@ -100,6 +100,8 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
   };
   const bumpScroll = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
+  // 進行中串流的中止控制：元件卸載、切換專案、送下一題前都 abort，讓伺服器端 res.on('close') 停掉在途 LLM 呼叫（不白燒免費額度）
+  const abortRef = useRef<AbortController | null>(null);
 
   // 助手可代操的多模態生成模型（免來源），供「換模型」下拉；載入失敗就沿用助手原提議，不擋流程
   const genModels = trpc.assistant.generateModels.useQuery(undefined, { staleTime: 5 * 60_000 });
@@ -137,17 +139,19 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
 
   const busy = thinking.active || ask.isPending;
 
-  /** 串流問答：讀 SSE 逐筆更新思考過程，done 補上 AI 回覆。回傳 true＝已處理（含 error），false＝請退回 tRPC。 */
-  async function askViaStream(message: string): Promise<boolean> {
+  /** 串流問答：讀 SSE 逐筆更新思考過程，done 補上 AI 回覆。回傳 true＝已處理（含 error／主動中止），false＝請退回 tRPC。 */
+  async function askViaStream(message: string, nonce: string, signal: AbortSignal): Promise<boolean> {
     let handled = false;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
       const res = await fetch("/api/assistant/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, message }),
+        body: JSON.stringify({ projectId, message, nonce }),
+        signal,
       });
       if (!res.ok || !res.body) return false; // 串流不可用（舊瀏覽器/代理擋 SSE/驗證失敗）→ 退回 tRPC
-      const reader = res.body.getReader();
+      reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
       for (;;) {
@@ -170,25 +174,51 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
             handled = true; // 終局錯誤：已處理，不要再退回 tRPC 重跑
             push({ role: "ai", text: (data as { message?: string })?.message || "AI 助手暫時沒回應，請稍後再試" });
           }
-          // event === "open" 只是開流訊號，忽略
+          // event === "open"／": ping" 心跳只是保活訊號，parseSse 回空 event，忽略
         }
       }
       return handled;
-    } catch {
+    } catch (err) {
+      // 主動中止（卸載／切換專案／送下一題）：視為已處理，不要退回 tRPC 又跑一次
+      if (err instanceof DOMException && err.name === "AbortError") return true;
       return false; // 網路/讀取中斷 → 退回 tRPC
+    } finally {
+      reader?.cancel().catch(() => {}); // 釋放 reader lock（中止時尤其重要）
     }
   }
 
   const send = async () => {
     const m = input.trim();
     if (!m || busy) return;
+    abortRef.current?.abort(); // 保險：中止任何殘留串流（busy 守門通常已擋住並行）
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    // 同一題的去重鍵：串流與退回 tRPC 共用，讓「每分鐘 6 次」節流名額只計一次
+    const nonce = (crypto?.randomUUID?.() ?? String(Date.now() + Math.random()));
     push({ role: "you", text: m });
     setInput("");
     setThinking({ active: true, events: [] });
-    const handled = await askViaStream(m);
+    const handled = await askViaStream(m, nonce, ctrl.signal);
     setThinking({ active: false, events: [] });
-    if (!handled) ask.mutate({ projectId, message: m }); // 串流沒完成 → 一次性問答補上（免費，不重複扣點）
+    // 主動中止不退回；串流沒完成才用一次性問答補上（帶同一 nonce，不重複佔節流名額）
+    if (!handled && !ctrl.signal.aborted) ask.mutate({ projectId, message: m, nonce });
   };
+
+  // 卸載時中止在途串流；切換專案時中止並清空（避免前一專案的答案落進新專案的對話）
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
+  useEffect(() => {
+    // projectId 變更：中止舊串流並重置對話狀態（本元件在 /p/A→/p/B 只換 prop 不 remount）
+    abortRef.current?.abort();
+    setTurns([]);
+    setThinking({ active: false, events: [] });
+    setExecuted(new Set());
+    setModelOverride({});
+    setPendingKey(null);
+    setInput("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   // 一鍵清除：清對話與所有連帶暫存（已執行標記、換模型選擇），回到冷啟動可再問
   const clear = () => {
