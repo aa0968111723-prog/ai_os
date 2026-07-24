@@ -4,7 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { falSubmit, isMockMode, billingBypassed } from "../services/fal";
-import { refund, reserveQuota } from "../services/points";
+import { failStaleGenerationTx, refund, reserveQuota } from "../services/points";
 import { advanceGeneration, submitGenerationCore } from "../services/generationCore";
 import { signAssetUrl } from "../services/storage";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
@@ -37,28 +37,10 @@ async function sweepStaleGenerations(projectId: string): Promise<void> {
       ),
     );
   for (const gen of staleRows) {
-    // 只退「確實扣過點」的孤兒：查該生成的帳本淨額，負值＝有扣過（退這個絕對值），
-    // 0＝從未扣點（如 reserveQuota 拋例外前就建了 queued 列的孤兒）——這種不退，
-    // 否則會對「沒扣過的列」憑空加點，灌負週用量、悄悄放寬總預算閘（守 fal 帳單）。
-    const [ledger] = await db
-      .select({ net: sql<number>`coalesce(sum(${schema.costLedger.delta}), 0)` })
-      .from(schema.costLedger)
-      .where(eq(schema.costLedger.generationId, gen.id));
-    const deducted = Math.max(0, -Number(ledger?.net ?? 0)); // 已扣的點數（>0 才要退）
-    // 沿用 status 分支的 compare-and-set：只有真正把列從 queued/running 推進成 failed
-    // 的那一次才退點——與併發輪詢（status 的 done/failed 分支）互斥，杜絕雙重退點。
-    const updatedRows = await db
-      .update(schema.generations)
-      .set({
-        status: "failed",
-        error: "生成停滯逾 30 分鐘,系統自動回收" + (deducted > 0 ? ",點數已退回" : ""),
-        pointsRefunded: deducted,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
-      .returning();
-    if (updatedRows.length === 0) continue; // 已被別的請求推進 → 不重複退點
-    if (deducted > 0) await refund(gen.userId, gen.groupId, deducted, "生成停滯自動回收退回", gen.id);
+    // 原子＋冪等收斂：CAS→failed 與「依帳本淨額退點」同一交易（負淨額＝有扣過才退；0＝從未扣點不退，
+    // 免對沒扣過的列憑空加點灌鬆總預算閘）。同交易杜絕「狀態已 commit 但退點列從未寫入 → 點數永久蒸發」，
+    // 退點列對同一 generation 冪等防重複退。細節見 points.ts failStaleGenerationTx。
+    await failStaleGenerationTx(gen.id, "生成停滯逾 30 分鐘，系統自動回收", "生成停滯自動回收退回");
   }
 }
 
@@ -315,10 +297,14 @@ export const generationRouter = router({
         return updated;
       }
 
-      // 核准：先 CAS 認領（awaiting_approval → queued），輸家直接得知已被處理
+      // 核准：先 CAS 認領（awaiting_approval → queued），輸家直接得知已被處理。
+      // createdAt 一併改為核准時刻（修 cross-period-approval-bypass-rate-quota）：週/日速率額度以
+      // coalesce(generations.createdAt, costLedger.createdAt) 歸屬期間，若沿用送審週的 createdAt，
+      // 「上週送審、本週核准」的扣點會永久歸屬上週、逃出本週速率桶 → 多筆各看空桶全放行、繞過週/日額度。
+      // 把扣點歸屬期間對齊「實際扣點時刻」，守門檢查與扣點歸屬期間才一致。
       const [claimed] = await db
         .update(schema.generations)
-        .set({ status: "queued", updatedAt: new Date() })
+        .set({ status: "queued", updatedAt: new Date(), createdAt: new Date() })
         .where(and(eq(schema.generations.id, gen.id), eq(schema.generations.status, "awaiting_approval")))
         .returning();
       if (!claimed) throw new TRPCError({ code: "BAD_REQUEST", message: "這筆生成已被其他人處理" });

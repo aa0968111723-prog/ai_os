@@ -92,9 +92,18 @@ function extractInWorker(kind: "pdf" | "docx", buf: Buffer): Promise<string | nu
 
 /* ── 純文字抽取 ─────────────────────────────────── */
 
+/** htmlToText 單次處理上限：抽純文字供 LLM 閱讀，超大輸入截斷即可（防事件迴圈被攻擊者 HTML 卡死） */
+const HTML_TO_TEXT_MAX_CHARS = 3_000_000;
+
 /** HTML → 純文字：去 script/style/註解 → 標籤換行語意（p/br/li/tr…）→ 去標籤 → 實體解碼 → 收斂空白 */
 export function htmlToText(html: string): string {
-  let s = html
+  // DoS 防護（修 htmltotext-eventloop-dos）：(1) 先截斷超大輸入——25-30MB 的攻擊者 HTML 在請求事件迴圈上
+  // 同步處理會癱瘓整個單容器服務；抽文字給 LLM 讀，截到 3M 字已遠超任何正常文件。
+  // (2) 去標籤用 <[^<>]*> 取代原 <[^>]+>：後者對「大量 < 而無 >」的病態輸入呈 O(n²) 回溯（實測 5MB 即卡 60 秒+）；
+  //     改用 [^<>]（連 < 也排除）後，每個 < 位置的掃描一遇到下一個 < 就停、不再長距回溯，整體退化為線性。
+  //     真實 HTML 標籤內不含 <，故正常標籤照樣被去除，行為不變。
+  const src = html.length > HTML_TO_TEXT_MAX_CHARS ? html.slice(0, HTML_TO_TEXT_MAX_CHARS) : html;
+  let s = src
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -102,7 +111,7 @@ export function htmlToText(html: string): string {
   // 區塊級標籤視為換行，行內標籤視為空字串——保留段落結構讓 LLM 讀得順
   s = s.replace(/<\/(p|div|li|tr|h[1-6]|blockquote|section|article|table)>/gi, "\n");
   s = s.replace(/<(br|hr)\s*\/?>/gi, "\n");
-  s = s.replace(/<[^>]+>/g, "");
+  s = s.replace(/<[^<>]*>/g, "");
   s = s
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")

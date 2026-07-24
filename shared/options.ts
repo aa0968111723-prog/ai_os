@@ -20,6 +20,22 @@ export const OPTION_TYPE_META: Record<OptionType, { label: string; hint: string;
 /** 發布平台合法比例（自訂 platform 時限這三種，生成台才對得上） */
 export const PLATFORM_FORMATS: ProjectFormat[] = ["16:9", "9:16", "1:1"];
 
+/**
+ * 專案畫面比例 → 交付時間軸／草稿的像素解析度（短邊 1080）。
+ * FCPXML／Premiere XML／剪映草稿共用此單一來源，避免各處硬編橫向 1920×1080——
+ * 否則 9:16 直式、1:1 方形專案匯入剪輯軟體會建成橫向序列、素材被裝進錯比例框（見審計 jianying/fcpxml 兩項）。
+ */
+export function resolutionForFormat(format: string | null | undefined): { width: number; height: number } {
+  switch (format) {
+    case "9:16":
+      return { width: 1080, height: 1920 };
+    case "1:1":
+      return { width: 1080, height: 1080 };
+    default:
+      return { width: 1920, height: 1080 }; // 16:9 及未知一律橫向
+  }
+}
+
 /** 一筆選項（前後端共用；來自 DB group_options 的投影） */
 export interface GroupOption {
   id: string;

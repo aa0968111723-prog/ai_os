@@ -55,7 +55,9 @@ export const authRouter = router({
       if (!user || user.status !== "active" || !passwordOk) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "email 或密碼不正確" });
       }
-      clearLoginRate(email);
+      // 帶 IP 回收：成功登入時把 checkLoginRate 剛記下的那筆 per-IP 命中 pop 掉，維持「失敗才累積、
+      // 成功不計入 per-IP 撞庫計數」——否則共用出口 IP（同辦公室/NAT）的小團隊正常登入也會把自己鎖死。
+      clearLoginRate(email, clientIp(ctx.req));
       const token = await createSession(user.id);
       setSessionCookie(ctx.res, token);
       return loadAuthState(user.id);

@@ -15,6 +15,9 @@
  *   彼此互斥序列化(同人同專案的「核准代理」與「起跑工作流」不會交錯),屬無害的刻意共用、非撞號。
  * - 4:database row-cap per-table(本檔)——addDataRowValidated 的「count(*)→insert」read-modify-write,
  *   併發寫入近上限時兩者都讀到同一 count 而雙雙插入、突破 MAX_ROWS_PER_TABLE。
+ * - 5:export job 去重 per-(project,assetKey)(本檔 lockExportDedup)——「查進行中 job→無則建」的 check-then-insert,
+ *   雙擊/併發下兩者都讀到「無進行中」而各插一筆,產出兩份相同交付包(export-job-dedup-not-atomic);
+ *   上鎖後同專案同素材選擇的建 job 全序列化。
  * 交易結束自動釋放,呼叫端必須在 db.transaction 內使用。
  */
 import { sql } from "drizzle-orm";
@@ -35,4 +38,9 @@ export async function lockAgentApprove(tx: Executor, projectId: string, userId: 
 /** 序列化同一資料表的列數上限檢查(addDataRowValidated 的 count→insert):防併發插入突破 MAX_ROWS_PER_TABLE */
 export async function lockDatabaseRowCap(tx: Executor, tableId: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${tableId}), 4)`);
+}
+
+/** 序列化同專案同素材選擇的匯出 job 建立(exportJobs.create 的「查進行中→無則建」):防雙擊產出兩份相同交付包 */
+export async function lockExportDedup(tx: Executor, projectId: string, assetKey: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${projectId}:${assetKey}`}), 5)`);
 }

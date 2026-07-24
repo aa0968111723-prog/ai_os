@@ -10,7 +10,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getWorkflow } from "../../shared/models";
 import { advanceGeneration, submitGenerationCore, type GenerationRow } from "./generationCore";
-import { refund } from "./points";
+import { failStaleGenerationTx } from "./points";
 import { signAssetUrl } from "./storage";
 
 type RunRow = typeof schema.workflowRuns.$inferSelect;
@@ -28,8 +28,19 @@ const TICK_MS = 4000;
 const ADVANCE_TIMEOUT_MS = 60_000;
 /** #8 陳屍回收門檻：生成或 run 停滯逾此視為孤兒（與 routers/generation.ts 陳屍清掃同口徑，正常生成遠短於此） */
 const STALE_MS = 30 * 60 * 1000;
+/** 每輪最多撈幾筆活躍 run 推進（與 generationRunner 的 BATCH 同口徑）：避免活躍 run 一多就無界撈全表 */
+const BATCH = 50;
+/**
+ * 同輪推進的併發上限：advanceRun 內含交易（submitGenerationCore 取 advisory lock 扣點）＋多筆序列查詢，
+ * 一次對 BATCH 筆全開交易會瞬間耗盡 pg 連線池（通常僅 10-30 條）並餓死其他 tRPC／姊妹執行器。
+ * 分批（每批 MAX_CONCURRENT_ADVANCE 筆）序列推進，把連線佔用壓在可控範圍。
+ */
+const MAX_CONCURRENT_ADVANCE = 5;
+/** 陳屍掃描節流：不必每 4 秒全表掃，約每 40 秒（每 10 個 tick）一次即遠比「開頁才觸發」即時（與 generationRunner 同口徑） */
+const SWEEP_EVERY_TICKS = 10;
 
 let started = false;
+let tickCount = 0;
 /** 本進程內推進中的 run：撈到已在推進的直接跳過——慢 run 不擋其他 run，也不會被下一輪重入雙寫 */
 const inflight = new Set<string>();
 
@@ -43,10 +54,13 @@ export function startWorkflowRunner(): void {
     // 每輪先掃陳屍再推進：sweep 先於 tick 序列化，避免兩者對同一 run 併發搶寫（sweep 另有 inflight 與復查防護）。
     // 撈 runs 本身失敗（DB 抖動）也不能變成 unhandled rejection——記警告等下一輪
     void (async () => {
-      try {
-        await sweepZombies();
-      } catch (err) {
-        console.warn("[workflow] 陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
+      tickCount += 1;
+      if (tickCount % SWEEP_EVERY_TICKS === 0) {
+        try {
+          await sweepZombies();
+        } catch (err) {
+          console.warn("[workflow] 陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
+        }
       }
       try {
         await tick();
@@ -73,9 +87,14 @@ async function tick(): Promise<void> {
         ),
       ),
     )
-    .orderBy(asc(schema.workflowRuns.createdAt));
-  // 同輪並行推進：一個卡住的 run（fal 慢回）不能擋住其他 run 的進度
-  await Promise.allSettled(runs.filter((run) => !inflight.has(run.id)).map((run) => advanceWithGuard(run)));
+    .orderBy(asc(schema.workflowRuns.createdAt))
+    .limit(BATCH); // 活躍 run 一多也只推進最舊 BATCH 筆，其餘下輪再推——杜絕無界撈全表
+  // 同輪推進但限併發：分批（每批 MAX_CONCURRENT_ADVANCE 筆）序列跑，避免一次對整批 run 全開交易耗盡連線池。
+  // 一個卡住的 run（fal 慢回）有 ADVANCE_TIMEOUT_MS 放行，不擋同批其他 run 太久。
+  const pending = runs.filter((run) => !inflight.has(run.id));
+  for (let i = 0; i < pending.length; i += MAX_CONCURRENT_ADVANCE) {
+    await Promise.allSettled(pending.slice(i, i + MAX_CONCURRENT_ADVANCE).map((run) => advanceWithGuard(run)));
+  }
 }
 
 /**
@@ -89,7 +108,12 @@ async function tick(): Promise<void> {
  */
 async function sweepZombies(): Promise<void> {
   const cutoff = Date.now() - STALE_MS;
-  const runs = await db.select().from(schema.workflowRuns).where(eq(schema.workflowRuns.status, "running"));
+  const runs = await db
+    .select()
+    .from(schema.workflowRuns)
+    .where(eq(schema.workflowRuns.status, "running"))
+    .orderBy(asc(schema.workflowRuns.updatedAt))
+    .limit(BATCH); // 陳屍掃描也設上限：running run 一多不無界撈全表
   for (const run of runs) {
     if (inflight.has(run.id)) continue; // 正在推進的交給正常路徑，避免雙寫
     try {
@@ -126,24 +150,8 @@ async function sweepZombies(): Promise<void> {
  * export 給 AI 代理執行器（agentRunner）共用同一套回收語義。
  */
 export async function reapStuckGeneration(genId: string): Promise<void> {
-  const [ledger] = await db
-    .select({ net: sql<number>`coalesce(sum(${schema.costLedger.delta}), 0)` })
-    .from(schema.costLedger)
-    .where(eq(schema.costLedger.generationId, genId));
-  const deducted = Math.max(0, -Number(ledger?.net ?? 0));
-  const updatedRows = await db
-    .update(schema.generations)
-    .set({
-      status: "failed",
-      error: "工作流生成停滯逾 30 分鐘，系統自動回收" + (deducted > 0 ? "，點數已退回" : ""),
-      pointsRefunded: deducted,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(schema.generations.id, genId), inArray(schema.generations.status, ["queued", "running"])))
-    .returning();
-  if (updatedRows.length === 0) return; // 已被別處推進到終局 → 不重複退點
-  const g = updatedRows[0];
-  if (deducted > 0) await refund(g.userId, g.groupId, deducted, "工作流生成停滯自動回收退回", genId);
+  // 原子＋冪等收斂：CAS→failed 與依帳本淨額退點同一交易，中途當機整筆 rollback，杜絕點數永久蒸發（見 points.ts）
+  await failStaleGenerationTx(genId, "工作流生成停滯逾 30 分鐘，系統自動回收", "工作流生成停滯自動回收退回");
 }
 
 /** (b) 收攏一條重佈打斷的陳屍 run：復查最新狀態後，退凍結點數、標步驟與 run failed（steps 單一寫者仍是本執行器） */

@@ -9,7 +9,7 @@ import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable } from "../services/projectAcl";
-import { buildKnowledgeContext } from "./knowledge";
+import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 
 export interface DirectorSuggestion {
   title: string;
@@ -101,8 +101,17 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
   await input.assertAccess(project);
   const wv = worldviewSchema.parse(project.worldview ?? {});
 
-  // 腳本來源：優先參數；否則用知識庫（含腳本/開示等）——「懂我們素材」的延伸
-  const script = (input.scriptText?.trim() || (await buildKnowledgeContext(project.id))).trim();
+  // 腳本來源：優先參數；否則用知識庫（含腳本/開示等）——「懂我們素材」的延伸。
+  // 從知識庫取時一併拿截斷中繼：知識庫在 INJECT_BUDGET(8k) 處就先被截，尾段鏡頭會消失，須透明回報。
+  let script: string;
+  let knowledgeMeta: Awaited<ReturnType<typeof buildKnowledgeContextWithMeta>> | null = null;
+  const pasted = input.scriptText?.trim();
+  if (pasted) {
+    script = pasted;
+  } else {
+    knowledgeMeta = await buildKnowledgeContextWithMeta(project.id);
+    script = knowledgeMeta.text.trim();
+  }
   if (!script) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "沒有腳本可拆——請貼上腳本，或先在知識庫加入腳本/開示稿" });
   }
@@ -152,11 +161,21 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
   const quotaError = await reserveQuota(input.userId, project.groupId, DIRECTOR_COST_POINTS, "AI 拆分鏡");
   if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
 
-  // 截斷透明化（QA-016）：輸入上限 20k、實際送模型 12k——超過的部分要讓使用者「看得到」，
-  // 不能靜默丟尾段（尾段的鏡頭會憑空消失，使用者只會以為 AI 漏拆）。
+  // 截斷透明化（QA-016 ＋ knowledge-split-silent-truncation）：兩段截斷都要讓使用者「看得到」，
+  // 不能靜默丟尾段（尾段的鏡頭會憑空消失，使用者只會以為 AI 漏拆）：
+  //  (1) 送模型上限 12k：script 超過即截。
+  //  (2) 知識庫來源已先在 8k(INJECT_BUDGET) 被截——此時 script.length≈8k < 12k，(1) 永遠測不到，
+  //      故改以「知識庫長文全量」為總量，把知識層截掉的部分一併算進 droppedChars。
+  const sourceTotal = knowledgeMeta ? knowledgeMeta.totalContentChars : script.length;
+  const sentChars = Math.min(script.length, SCRIPT_MODEL_BUDGET);
   const truncation =
-    script.length > SCRIPT_MODEL_BUDGET
-      ? { totalChars: script.length, sentChars: SCRIPT_MODEL_BUDGET, droppedChars: script.length - SCRIPT_MODEL_BUDGET }
+    sourceTotal > sentChars
+      ? {
+          totalChars: sourceTotal,
+          sentChars,
+          droppedChars: sourceTotal - sentChars,
+          source: knowledgeMeta ? ("knowledge" as const) : ("script" as const),
+        }
       : null;
 
   // 注入防護：腳本（使用者貼上或知識庫）與 worldview 皆為外部素材，用 <素材> 標籤圈起並聲明「非指令」，

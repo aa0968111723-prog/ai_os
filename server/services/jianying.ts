@@ -23,6 +23,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { absPathOf, extFromMime } from "./storage";
 import { appendAndWait, capRemoteBytes, fetchRemoteAsset, REMOTE_FILE_MAX_BYTES, safeName, sceneDur, splitCue } from "./exporter";
+import { resolutionForFormat } from "../../shared/options";
 import { JY_CONTENT_TEMPLATE, JY_META_TEMPLATE } from "./jianyingTemplate";
 
 /** 剪映官方「草稿資料夾根目錄」佔位符——固定魔法字串，多個獨立開源專案一字不差交叉證實 */
@@ -88,10 +89,18 @@ const defaultClip = (transformY = 0.0) => ({
  * 軌道：video（畫面主軌，圖片/影片混排）＋audio（旁白）＋text（字幕，配音詞依可讀性切塊、
  * 與 SRT 同一套規則）——render_index 依軌道匯出序，全部比照 pyJianYingDraft 的輸出慣例。
  */
-export function buildJianyingDraftContent(scenes: JyScene[], draftName: string): { content: string; durationUs: number } {
+export function buildJianyingDraftContent(
+  scenes: JyScene[],
+  draftName: string,
+  format?: string,
+): { content: string; durationUs: number } {
   const content = structuredClone(JY_CONTENT_TEMPLATE) as unknown as Record<string, any>;
   content.id = randomUUID().toUpperCase();
   content.name = draftName;
+  // 畫布依專案比例（修 jianying-canvas-hardcoded-landscape）：模板為橫向 1920×1080，
+  // 直式(9:16)/方形(1:1)專案若沿用，剪映開啟後畫面方向全錯（直式被上下黑邊）。
+  const res = resolutionForFormat(format);
+  content.canvas_config = { ...(content.canvas_config ?? {}), width: res.width, height: res.height };
 
   const videos: unknown[] = [];
   const audios: unknown[] = [];
@@ -422,7 +431,7 @@ export async function exportJianyingDraftZip(projectId: string, res: Response): 
 
   if (clientAbort.signal.aborted) return;
 
-  const { content, durationUs } = buildJianyingDraftContent(jyScenes, draftName);
+  const { content, durationUs } = buildJianyingDraftContent(jyScenes, draftName, project.format);
   archive.append(content, { name: `${draftName}/draft_content.json` });
   archive.append(content, { name: `${draftName}/draft_info.json` }); // CapCut Mac 版的內容檔名
   archive.append(buildJianyingMetaInfo(draftName, durationUs), { name: `${draftName}/draft_meta_info.json` });
