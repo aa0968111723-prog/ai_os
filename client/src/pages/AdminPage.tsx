@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
@@ -172,63 +172,187 @@ function GroupBudgetRow({ group }: { group: { id: string; name: string } }) {
   );
 }
 
+/** 相對時間（比照通訊錄的 relTime；成員「最近登入」與專案「最近更新」用） */
+function relTime(d: string | Date | null | undefined): string {
+  if (!d) return "—";
+  const t = new Date(d).getTime();
+  if (Number.isNaN(t)) return "—";
+  const mins = Math.max(1, Math.round((Date.now() - t) / 60000));
+  if (mins < 60) return `${mins} 分鐘前`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} 小時前`;
+  const days = Math.round(hours / 24);
+  return days < 30 ? `${days} 天前` : new Date(d).toLocaleDateString("zh-TW");
+}
+
+type GroupDetail = inferRouterOutputs<AppRouter>["admin"]["groupDetail"];
+type GroupDetailMember = GroupDetail["members"][number];
+
+/** 角色徽章（與通訊錄同語彙：超管／組長／組員） */
+const ROLE_BADGE_STYLE: Record<"super" | "leader" | "member", CSSProperties> = {
+  super: { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" },
+  leader: { background: "var(--gold-soft)", color: "var(--gold-ink)", border: "1px solid var(--gold)" },
+  member: { background: "var(--card2)", color: "var(--fg-secondary)", border: "1px solid var(--border-soft)" },
+};
+function RoleBadge({ kind, children }: { kind: "super" | "leader" | "member"; children: string }) {
+  return (
+    <span className="pill" style={{ ...ROLE_BADGE_STYLE[kind], fontSize: 11, padding: "1px 8px", borderRadius: 999, whiteSpace: "nowrap" }}>
+      {children}
+    </span>
+  );
+}
+
 /**
- * 成員列＋管理操作（組長切換/移出組/重設密碼）。
+ * 單一成員的數值欄（個人預算／週額度覆寫共用）：只在真的有改時才送出
+ * （同 GroupQuotaRow 的教訓——onBlur 無條件送出會讓 Tab 掃過空欄誤清設定）。
+ */
+function MemberNumberField({ label, current, placeholder, hint, width = 88, onSave, saving, error }: {
+  label: string;
+  current: number | null;
+  placeholder: string;
+  hint?: string;
+  width?: number;
+  onSave: (next: number | null) => void;
+  saving: boolean;
+  error?: string | null;
+}) {
+  return (
+    <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0, fontSize: 12 }}>
+      {label}
+      <input
+        type="number"
+        min={0}
+        style={{ width, padding: "3px 8px", fontSize: 12 }}
+        placeholder={placeholder}
+        defaultValue={current ?? ""}
+        disabled={saving}
+        title={hint}
+        onBlur={(e) => {
+          const next = e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0);
+          if (next !== current) onSave(next);
+        }}
+      />
+      {error && <span className="error" style={{ marginTop: 0, fontSize: 11 }}>{error}</span>}
+    </label>
+  );
+}
+
+/**
+ * 成員細節列（團隊管理細節補齊）：一列看完一位夥伴——
+ * 角色徽章＋Email＋最近登入＋本週/累計點數，加上就地可調的個人預算、週額度覆寫、派工授權，
+ * 以及既有管理操作（組長切換/移出組/重設密碼）。
  * 為什麼獨立成元件：每位成員要有自己的 isPending/error/臨時密碼狀態，
  * 共用一個 mutation 會讓 A 成員的錯誤與密碼顯示到 B 成員旁邊。
  */
-function MemberChip({ groupId, groupName, member, canResetPassword }: {
+function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf }: {
   groupId: string;
   groupName: string;
-  member: { id?: string; name?: string; role?: "leader" | "member" };
+  member: GroupDetailMember;
   /** 後端會擋「開發者/他團管理員」——注定失敗的重設鈕直接不畫，別讓管理員按了才吃 FORBIDDEN */
   canResetPassword: boolean;
+  isSelf: boolean;
 }) {
   const utils = trpc.useUtils();
   const [tempPassword, setTempPassword] = useState("");
-  const setRole = trpc.admin.setGroupRole.useMutation({ onSuccess: () => utils.admin.overview.invalidate() });
-  const removeMember = trpc.admin.removeFromGroup.useMutation({ onSuccess: () => utils.admin.overview.invalidate() });
+  const invalidate = () => {
+    utils.admin.overview.invalidate();
+    utils.admin.groupDetail.invalidate({ groupId });
+    utils.quota.usage.invalidate({ groupId });
+  };
+  const setRole = trpc.admin.setGroupRole.useMutation({ onSuccess: invalidate });
+  const removeMember = trpc.admin.removeFromGroup.useMutation({ onSuccess: invalidate });
   const resetPassword = trpc.admin.resetMemberPassword.useMutation({
     onSuccess: (data) => {
       setTempPassword(data.tempPassword);
-      utils.admin.overview.invalidate();
+      invalidate();
     },
   });
-  const userId = member.id;
-  if (!userId) return null;
+  const setBudget = trpc.quota.setMemberBudget.useMutation({ onSuccess: invalidate });
+  const setOverride = trpc.quota.setMemberOverride.useMutation({ onSuccess: invalidate });
+  const setDispatch = trpc.quota.setMemberDispatch.useMutation({ onSuccess: invalidate });
+  const userId = member.userId;
   const isLeader = member.role === "leader";
   const pending = setRole.isPending || removeMember.isPending || resetPassword.isPending;
-  const actionError = setRole.error ?? removeMember.error ?? resetPassword.error;
+  const actionError = setRole.error ?? removeMember.error ?? resetPassword.error ?? setDispatch.error;
   const btn = { padding: "2px 10px", fontSize: "var(--fs-12)" } as const;
   return (
-    <div style={{ marginTop: 6 }}>
+    <div style={{ borderTop: "1px solid var(--border-soft)", padding: "8px 0" }}>
+      {/* 第一列：身分與管理操作 */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <span className="chip" style={{ margin: 0 }}>
-          {member.name}
-          {isLeader ? "・組長" : ""}
-        </span>
-        <button style={btn} disabled={pending} onClick={() => setRole.mutate({ groupId, userId, role: isLeader ? "member" : "leader" })}>
-          {isLeader ? "設為組員" : "設為組長"}
-        </button>
-        {/* 破壞性/次危險動作補全站慣例的 --danger-ink：掃視成員列時能一眼與「設為組長」等中性鈕區分 */}
-        <ConfirmButton
-          triggerStyle={{ ...btn, color: "var(--danger-ink)" }}
-          disabled={pending}
-          message={`把 ${member.name} 移出「${groupName}」？之後隨時可以再邀請回來。`}
-          onConfirm={() => removeMember.mutate({ groupId, userId })}
-        >
-          移出組
-        </ConfirmButton>
-        {canResetPassword && (
+        <b style={{ fontSize: 13 }}>{member.name}</b>
+        {member.isSuperAdmin && <RoleBadge kind="super">超管</RoleBadge>}
+        <RoleBadge kind={isLeader ? "leader" : "member"}>{isLeader ? "組長" : "組員"}</RoleBadge>
+        {member.disabled && (
+          <span className="pill" style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, color: "var(--danger-ink)", border: "1px solid var(--border-soft)" }}>已停用</span>
+        )}
+        <a className="hint" href={`mailto:${member.email}`} style={{ fontSize: 12, color: "inherit", overflowWrap: "anywhere" }}>{member.email}</a>
+        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+          <button style={btn} disabled={pending} onClick={() => setRole.mutate({ groupId, userId, role: isLeader ? "member" : "leader" })}>
+            {isLeader ? "設為組員" : "設為組長"}
+          </button>
+          {/* 破壞性/次危險動作補全站慣例的 --danger-ink：掃視成員列時能一眼與「設為組長」等中性鈕區分 */}
           <ConfirmButton
             triggerStyle={{ ...btn, color: "var(--danger-ink)" }}
             disabled={pending}
-            message={`重設 ${member.name} 的密碼？他會立刻被登出，要用新的臨時密碼重新登入。`}
-            onConfirm={() => resetPassword.mutate({ userId })}
+            message={`把 ${member.name} 移出「${groupName}」？之後隨時可以再邀請回來。`}
+            onConfirm={() => removeMember.mutate({ groupId, userId })}
           >
-            重設密碼
+            移出組
           </ConfirmButton>
+          {canResetPassword && (
+            <ConfirmButton
+              triggerStyle={{ ...btn, color: "var(--danger-ink)" }}
+              disabled={pending}
+              message={`重設 ${member.name} 的密碼？他會立刻被登出，要用新的臨時密碼重新登入。`}
+              onConfirm={() => resetPassword.mutate({ userId })}
+            >
+              重設密碼
+            </ConfirmButton>
+          )}
+        </span>
+      </div>
+      {/* 第二列：活動與點數近況 */}
+      <div className="hint" style={{ fontSize: 11, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+          <Icon name="Clock" size={11} />最近登入 {relTime(member.lastLoginAt)}
+        </span>
+        <span>本週 {member.weekly.toLocaleString()} 點・累計 {member.total.toLocaleString()} 點{member.budget != null && `（個人預算 ${member.budget.toLocaleString()}）`}</span>
+      </div>
+      {/* 第三列：就地可調的個人額度（比照組長「選項」頁同一套 quota mutation） */}
+      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+        <MemberNumberField
+          label="個人預算"
+          current={member.budget}
+          placeholder="不限"
+          hint="從組預算再分配給這位成員的累計上限；空＝不限"
+          onSave={(next) => setBudget.mutate({ groupId, userId, budgetPoints: next })}
+          saving={setBudget.isPending}
+          error={setBudget.error?.message ?? null}
+        />
+        <MemberNumberField
+          label="週額度"
+          current={member.weeklyOverride}
+          placeholder="跟組"
+          hint="個人每週點數覆寫；空＝跟組設定、0＝不限"
+          onSave={(next) => setOverride.mutate({ groupId, userId, weeklyPointsOverride: next })}
+          saving={setOverride.isPending}
+          error={setOverride.error?.message ?? null}
+        />
+        {member.role === "member" ? (
+          <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0, fontSize: 12, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              style={{ width: "auto" }}
+              checked={member.canDispatch}
+              disabled={setDispatch.isPending}
+              onChange={(e) => setDispatch.mutate({ groupId, userId, canDispatch: e.target.checked })}
+            />
+            可派工 AI 代理
+          </label>
+        ) : (
+          <span className="hint" style={{ fontSize: 11 }}>組長以上恆可派工 AI 代理</span>
         )}
+        {isSelf && <span className="hint" style={{ fontSize: 11 }}>（我）</span>}
       </div>
       {actionError && <p className="error">{actionError.message}</p>}
       {tempPassword && (
@@ -266,6 +390,222 @@ function CreateGroupRow({ teamId }: { teamId: string }) {
         </button>
       </div>
       {createGroup.error && <p className="error">建組失敗：{createGroup.error.message}</p>}
+    </>
+  );
+}
+
+/** AI／MCP 存取等級的人話標籤（資料庫清單用；與資料庫頁同語意） */
+const AGENT_ACCESS_LABEL: Record<string, string> = {
+  none: "AI 不可見",
+  read: "AI 唯讀",
+  write: "AI 可讀寫",
+};
+
+/** 資料庫清單（組資料庫／團隊資料庫共用）：名稱＋列/文件/欄位數＋寫入與 AI 存取設定＋建立者 */
+function DatabaseList({ databases }: { databases: GroupDetail["databases"] }) {
+  if (databases.length === 0) {
+    return <p className="hint" style={{ margin: "6px 0 0", fontSize: 12 }}>還沒有這個範圍的資料庫——到「資料庫」頁即可建立。</p>;
+  }
+  return (
+    <div style={{ marginTop: 4 }}>
+      {databases.map((d) => (
+        <div key={d.id} style={{ borderTop: "1px solid var(--border-soft)", padding: "6px 0", fontSize: 12 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <Icon name="Database" size={12} />
+            <b>{d.name}</b>
+            <span className="hint">{d.rowCount} 列・{d.fileCount} 份文件・{d.fieldCount} 個欄位</span>
+            <span className="hint" style={{ marginLeft: "auto", fontSize: 11 }}>更新 {relTime(d.updatedAt)}</span>
+          </div>
+          <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <span>{d.memberWritable ? "成員可寫" : "僅管理者可寫"}</span>
+            <span>{AGENT_ACCESS_LABEL[d.agentAccess] ?? d.agentAccess}</span>
+            <span>建立者 {d.creatorName}</span>
+            {d.description && <span style={{ overflowWrap: "anywhere" }}>{d.description}</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 專案狀態白話標籤（active 之外目前只有 archived） */
+const PROJECT_STATUS_LABEL: Record<string, string> = { active: "進行中", archived: "已封存" };
+
+/**
+ * 專案列＋負責人轉移。獨立成元件：每個專案要有自己的 mutation 狀態，
+ * 共用會讓 A 專案的錯誤顯示到 B 專案旁邊。
+ */
+function ProjectOwnerRow({ groupId, project, members }: {
+  groupId: string;
+  project: GroupDetail["projects"][number];
+  members: GroupDetail["members"];
+}) {
+  const utils = trpc.useUtils();
+  const setOwner = trpc.projects.setOwner.useMutation({
+    onSuccess: () => utils.admin.groupDetail.invalidate({ groupId }),
+  });
+  // 負責人可能已離組（不在成員列）：補一個唯讀選項顯示現況，避免下拉顯示成別人
+  const ownerInList = members.some((m) => m.userId === project.owner.userId);
+  return (
+    <div style={{ borderTop: "1px solid var(--border-soft)", padding: "6px 0", fontSize: 12 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <Icon name="FileText" size={12} />
+        <b style={{ overflowWrap: "anywhere" }}>{project.title}</b>
+        {project.status !== "active" && (
+          <span className="pill" style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, background: "var(--card2)", color: "var(--fg-secondary)", border: "1px solid var(--border-soft)" }}>
+            {PROJECT_STATUS_LABEL[project.status] ?? project.status}
+          </span>
+        )}
+        <span className="hint" style={{ fontSize: 11 }}>{project.kind}・{project.platform}</span>
+        <span className="hint" style={{ marginLeft: "auto", fontSize: 11 }}>更新 {relTime(project.updatedAt)}</span>
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
+        <label className="hint" htmlFor={`project-owner-${project.id}`} style={{ margin: 0, fontSize: 12 }}>負責人</label>
+        <select
+          id={`project-owner-${project.id}`}
+          style={{ width: "auto", padding: "3px 10px", fontSize: 12 }}
+          value={project.owner.userId}
+          disabled={setOwner.isPending}
+          onChange={(e) => setOwner.mutate({ projectId: project.id, userId: e.target.value })}
+        >
+          {!ownerInList && (
+            <option value={project.owner.userId}>
+              {project.owner.name ? `${project.owner.name}（已離組）` : "（已離開的成員）"}
+            </option>
+          )}
+          {members.map((m) => (
+            <option key={m.userId} value={m.userId}>{m.name}{m.role === "leader" ? "・組長" : ""}</option>
+          ))}
+        </select>
+        {setOwner.isPending && <span className="hint" style={{ fontSize: 11 }}>轉移中…</span>}
+        {setOwner.error && <span className="error" style={{ marginTop: 0, fontSize: 11 }}>{setOwner.error.message}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** 收合小節的共用樣式（成員之下的專案／資料庫細節；預設收合、summary 帶數量） */
+function DetailBlock({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+  return (
+    <details style={{ marginTop: 8 }}>
+      <summary style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", listStyle: "none" }}>
+        <Icon name="ChevronRight" size={14} className="details-caret" />
+        <b>{title}</b>
+        <span className="hint" style={{ fontSize: 12 }}>（{count}）</span>
+      </summary>
+      {children}
+    </details>
+  );
+}
+
+/**
+ * 組區塊（團隊管理細節補齊的主體）：組長組員的完整細節列、專案與負責人、這一組自己的資料庫，
+ * 加上既有的組預算/週額度列。資料來自 admin.groupDetail（一組一查，後端已按團隊管理權過濾）。
+ */
+function GroupSection({ group, teamAdmins, isSuperAdmin, meId }: {
+  group: { id: string; name: string };
+  teamAdmins: Array<{ id?: string } | undefined>;
+  isSuperAdmin: boolean;
+  meId: string | undefined;
+}) {
+  const detail = trpc.admin.groupDetail.useQuery({ groupId: group.id });
+  return (
+    <div style={{ marginTop: 14, paddingTop: 4 }}>
+      <h3 style={{ fontSize: "var(--fs-16)", margin: "0 0 2px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {group.name}
+        {detail.data && (
+          <span className="hint" style={{ fontSize: 12, fontWeight: 400 }}>
+            {detail.data.members.length} 位成員
+            {detail.data.members.some((m) => m.role === "leader")
+              ? `・組長：${detail.data.members.filter((m) => m.role === "leader").map((m) => m.name).join("、")}`
+              : "・尚未指定組長"}
+          </span>
+        )}
+      </h3>
+      {detail.isLoading ? (
+        <div role="status" aria-label="組詳情載入中">
+          <div className="skeleton" style={{ height: 48, marginTop: 8 }} />
+        </div>
+      ) : detail.error ? (
+        <p className="error">
+          組詳情載入失敗：{detail.error.message}
+          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => detail.refetch()}>再試一次</button>
+        </p>
+      ) : detail.data ? (
+        <>
+          {detail.data.members.length === 0 ? (
+            <p className="hint" style={{ margin: "4px 0 0" }}>（還沒有成員——用右側「邀請成員」把夥伴加進來）</p>
+          ) : (
+            detail.data.members.map((m) => (
+              <MemberDetailRow
+                key={m.userId}
+                groupId={group.id}
+                groupName={group.name}
+                member={m}
+                isSelf={m.userId === meId}
+                // 與後端權限階梯一致：開發者重設任何人；團隊管理員不能重設開發者與其他管理員（自己除外）
+                canResetPassword={
+                  isSuperAdmin ||
+                  (!m.isSuperAdmin && (m.userId === meId || !teamAdmins.some((a) => a?.id === m.userId)))
+                }
+              />
+            ))
+          )}
+          <GroupBudgetRow group={group} />
+          <GroupQuotaRow group={group} />
+          <DetailBlock title="專案與負責人" count={detail.data.projects.length}>
+            {detail.data.projects.length === 0 ? (
+              <p className="hint" style={{ margin: "6px 0 0", fontSize: 12 }}>這個組還沒有專案。</p>
+            ) : (
+              <>
+                <p className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>負責人＝專案的裁決點（可封存/還原）。人員異動時在這裡把專案交接給還在組裡的人。</p>
+                {detail.data.projects.map((p) => (
+                  <ProjectOwnerRow key={p.id} groupId={group.id} project={p} members={detail.data.members} />
+                ))}
+              </>
+            )}
+          </DetailBlock>
+          <DetailBlock title="組資料庫" count={detail.data.databases.length}>
+            <p className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>
+              這一組自己的資料庫（組範圍）。各成員的「個人資料庫」是私人空間、只有本人看得到，這裡不列。
+            </p>
+            <DatabaseList databases={detail.data.databases} />
+          </DetailBlock>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 團隊層細節（admin.teamDetail）：已入團但「還沒進任何組」的成員（舊版總覽的隱形人）
+ * ＋團隊範圍的資料庫。
+ */
+function TeamExtras({ teamId }: { teamId: string }) {
+  const detail = trpc.admin.teamDetail.useQuery({ teamId });
+  if (detail.isLoading || detail.error || !detail.data) return null; // 團隊層附加資訊——載不到不擋整卡（組區塊自己會報錯）
+  const unassigned = detail.data.members.filter((m) => !m.inAnyGroup && m.role !== "admin");
+  return (
+    <>
+      {unassigned.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <p className="hint" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>已入團、尚未分組（{unassigned.length}）</p>
+          <p className="hint" style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用右側「邀請成員」輸入同一個 Email 並選好組別即可入組。</p>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {unassigned.map((m) => (
+              <span key={m.userId} className="chip" style={{ margin: 0, opacity: m.disabled ? 0.6 : 1 }} title={m.email}>
+                {m.name}{m.disabled ? "・已停用" : ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {detail.data.databases.length > 0 && (
+        <DetailBlock title="團隊資料庫" count={detail.data.databases.length}>
+          <p className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>團隊範圍的資料庫：整個團隊各組都能讀。</p>
+          <DatabaseList databases={detail.data.databases} />
+        </DetailBlock>
+      )}
     </>
   );
 }
@@ -1442,36 +1782,22 @@ export function AdminPage() {
   return (
     <div>
       <h1>團隊管理</h1>
-      <p className="sub">團隊 → 組別 → 成員。邀請連結 72 小時內有效，可直接寄信給對方，或複製連結用 LINE 傳。</p>
+      <p className="sub">團隊 → 組別 → 成員。每個組的組長組員細節（點數・額度・派工・最近登入）、專案負責人交接、各組自己的資料庫都在這裡管理。邀請連結 72 小時內有效，可直接寄信給對方，或複製連結用 LINE 傳。</p>
       <div className="cols">
         <div className="stack">
           {teams.map((team) => (
             <section key={team.id} className="card" data-fb="團隊與成員卡">
               <h2>{team.name}</h2>
               <p className="hint">管理：{team.admins.map((a) => a?.name).join("、") || "—"}</p>
+              <TeamExtras teamId={team.id} />
               {team.groups.map((g) => (
-                <div key={g.id} style={{ marginTop: 10 }}>
-                  <h3 style={{ fontSize: "var(--fs-16)", margin: "0 0 6px" }}>{g.name}</h3>
-                  {g.members.length === 0 ? (
-                    <span className="hint">（還沒有成員）</span>
-                  ) : (
-                    g.members.map((m) => (
-                      <MemberChip
-                        key={m.id}
-                        groupId={g.id}
-                        groupName={g.name}
-                        member={m}
-                        // 與後端權限階梯一致：開發者重設任何人；團隊管理員不能重設開發者與其他管理員（自己除外）
-                        canResetPassword={
-                          isSuperAdmin ||
-                          (!m.isSuperAdmin && (m.id === me.data?.user.id || !team.admins.some((a) => a?.id === m.id)))
-                        }
-                      />
-                    ))
-                  )}
-                  <GroupBudgetRow group={g} />
-                  <GroupQuotaRow group={g} />
-                </div>
+                <GroupSection
+                  key={g.id}
+                  group={g}
+                  teamAdmins={team.admins}
+                  isSuperAdmin={isSuperAdmin}
+                  meId={me.data?.user.id}
+                />
               ))}
               <CreateGroupRow teamId={team.id} />
             </section>
