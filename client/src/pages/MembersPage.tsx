@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
+import { Link } from "wouter";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
@@ -48,12 +49,13 @@ export function MembersPage() {
 
   const scope = trpc.directory.scope.useQuery();
   const dir = trpc.directory.list.useQuery({ q: debouncedQ.trim() || undefined, groupId: groupId || undefined });
+  const me = trpc.auth.me.useQuery(); // 自己的卡不顯示「私訊」（不能私訊自己）
   const members = dir.data?.members ?? [];
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto" }}>
       <h1>通訊錄</h1>
-      <p className="sub">團隊裡有哪些夥伴、各自帶哪些組、花了多少點、最近在不在——一頁看清楚。能看到的範圍已按你的權限過濾（組長看自己組）。</p>
+      <p className="sub">團隊裡有哪些夥伴、各自帶哪些組、花了多少點、最近在不在——一頁看清楚。點「私訊」可直接在站內一對一聊天。能看到的範圍已按你的權限過濾（組長看自己組）。</p>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <input
@@ -93,7 +95,7 @@ export function MembersPage() {
         <>
           <p className="hint" style={{ marginBottom: 8 }}>共 {members.length} 位</p>
           {members.map((m) => (
-            <MemberCard key={m.userId} m={m} />
+            <MemberCard key={m.userId} m={m} isSelf={m.userId === me.data?.user.id} />
           ))}
         </>
       )}
@@ -101,17 +103,28 @@ export function MembersPage() {
   );
 }
 
-function MemberCard({ m }: { m: Member }) {
+function MemberCard({ m, isSelf }: { m: Member; isSelf: boolean }) {
   const isLeaderSomewhere = m.memberships.some((x) => x.role === "leader");
   return (
     <section className="card" style={{ marginBottom: 12, opacity: m.disabled ? 0.6 : 1 }}>
-      {/* 標頭：姓名＋角色徽章 */}
+      {/* 標頭：姓名＋角色徽章；右端「私訊」直達站內聊天（停用帳號收不到訊息，不給入口） */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <b style={{ fontSize: "var(--fs-16)" }}>{m.name}</b>
         {m.isSuperAdmin && <span style={ROLE_BADGE.super}>超管</span>}
         {isLeaderSomewhere && <span style={ROLE_BADGE.leader}>組長</span>}
         {!m.isSuperAdmin && !isLeaderSomewhere && <span style={ROLE_BADGE.member}>組員</span>}
         {m.disabled && <span style={badge({ background: "var(--danger-soft, var(--card2))", color: "var(--danger-ink)", border: "1px solid var(--border-soft)" })}>已停用</span>}
+        {isSelf && <span style={ROLE_BADGE.member}>我</span>}
+        {!isSelf && !m.disabled && (
+          <Link
+            href={`/chat/${m.userId}`}
+            className="btn-tonal btn-sm"
+            style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4, textDecoration: "none" }}
+            title={`私訊 ${m.name}——站內一對一聊天`}
+          >
+            <Icon name="MessageCircle" size={13} />私訊
+          </Link>
+        )}
       </div>
 
       {/* Email：可直接點開寄信 */}

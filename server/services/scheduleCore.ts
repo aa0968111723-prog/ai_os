@@ -10,6 +10,7 @@ import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import { assertProjectNotArchived } from "./projectAcl";
 import { validateMentions } from "./mentions";
+import { queueGroupSync } from "./googleCalendar";
 
 export type ScheduleRow = typeof schema.scheduleItems.$inferSelect;
 
@@ -113,5 +114,6 @@ export async function addScheduleItemCore(input: {
       mentions: mentions ?? null,
     })
     .returning();
+  queueGroupSync(input.groupId); // Google 日曆直連同步：把該組已連結成員的個人日曆排進推送佇列（fire-and-forget）
   return row;
 }

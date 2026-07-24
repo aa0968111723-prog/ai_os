@@ -34,6 +34,7 @@ const ENTRIES: DownloadEntry[] = [
   { file: "docs/fal生態研究.md", title: "fal.ai 全生態模型研究（15 類 371 模型）", category: "model" },
   { file: "docs/維運手冊.md", title: "維運手冊（部署／備份／應變）", category: "dev" },
   { file: "docs/Zeabur部署.md", title: "Zeabur 部署指南（環境變數／搬遷／驗收）", category: "dev" },
+  { file: "docs/Google日曆同步.md", title: "Google 日曆直連同步（設定與運作）", category: "dev" },
   { file: "docs/模型目錄.md", title: "模型目錄（全模型與點數）", category: "model" },
   { file: "docs/點數校準報告.md", title: "點數 × 官方成本校準報告", category: "model" },
   { file: "docs/隱私權政策.md", title: "隱私權政策（草稿）", category: "legal" },
