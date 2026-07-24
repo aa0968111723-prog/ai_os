@@ -44,7 +44,9 @@ export function AssetLibrary({
 }) {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
-  const assets = trpc.projects.assets.useQuery({ projectId });
+  // QA-013：素材上限不再硬卡 100——預設載 100，「載入更多」逐次加大 limit 取回全部
+  const [assetLimit, setAssetLimit] = useState(100);
+  const assets = trpc.projects.assets.useQuery({ projectId, limit: assetLimit });
   const del = trpc.projects.deleteAsset.useMutation({
     onSuccess: () => {
       utils.projects.assets.invalidate({ projectId });
@@ -540,6 +542,14 @@ export function AssetLibrary({
                   </div>
                 );
               })}
+            </div>
+          )}
+          {/* QA-013：拿滿本頁 limit 代表可能還有更舊的素材——提供載入更多，不再靜默截在 100 */}
+          {(allAssets?.length ?? 0) >= assetLimit && (
+            <div style={{ marginTop: 10, textAlign: "center" }}>
+              <button type="button" onClick={() => setAssetLimit((l) => l + 100)} disabled={assets.isFetching}>
+                {assets.isFetching ? "載入中…" : `載入更多素材（已顯示 ${allAssets?.length ?? 0} 個）`}
+              </button>
             </div>
           )}
         </>
