@@ -410,6 +410,34 @@ export const messages = pgTable("messages", {
   voicePendingIdx: index("messages_voice_pending_idx").on(t.voiceStatus),
 }));
 
+/**
+ * 站內私訊（通訊錄 1:1 聊天）：獨立於專案留言（messages 掛組/專案、組內可見），
+ * 私訊只有收發雙方看得到——查詢一律以「本人是 sender 或 recipient」為界，管理員也不例外。
+ * 可私訊對象＝同組夥伴（含團隊管理展開；開發者可與全站互訊），見 services/dmCore.ts。
+ * 內容不落審計明文（trpc.ts 對 dm.send 脫敏 body），維持「私」的承諾。新表＝pushSchema 安全。
+ */
+export const dmMessages = pgTable("dm_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  senderId: uuid("sender_id").notNull(),
+  recipientId: uuid("recipient_id").notNull(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  // 對話串雙向查詢：sender 前綴查「我發給某人」、recipient 前綴查「某人發給我」＋未讀計數
+  senderIdx: index("dm_messages_sender_idx").on(t.senderId, t.recipientId, t.createdAt),
+  recipientIdx: index("dm_messages_recipient_idx").on(t.recipientId, t.senderId, t.createdAt),
+}));
+
+/** 私訊已讀水位：每人對每位對話者一筆 lastReadAt，未讀數＝晚於水位的對方來訊數（dmCore upsert 維護） */
+export const dmReads = pgTable("dm_reads", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  peerId: uuid("peer_id").notNull(),
+  lastReadAt: timestamp("last_read_at").defaultNow().notNull(),
+}, (t) => ({
+  userPeerIdx: index("dm_reads_user_peer_idx").on(t.userId, t.peerId),
+}));
+
 /** 留言表情回應：每人對每則每種表情最多一筆（再按一次＝收回），白名單見 messages router */
 export const messageReactions = pgTable("message_reactions", {
   id: uuid("id").primaryKey().defaultRandom(),
