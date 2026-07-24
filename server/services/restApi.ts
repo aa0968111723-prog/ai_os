@@ -189,7 +189,8 @@ export async function handleDatabaseIcs(req: Request, res: Response): Promise<vo
     if (Number.isNaN(startsAt.getTime())) return [];
     const title = (titleField && typeof data[titleField.key] === "string" && data[titleField.key]) || `${hit.table.name}`;
     const note = fields
-      .filter((f) => f.key !== dateField.key && f.key !== titleField?.key)
+      // 附件欄的值是文件 uuid——日曆描述裡是純噪音，略過
+      .filter((f) => f.key !== dateField.key && f.key !== titleField?.key && f.type !== "file")
       .map((f) => { const v = data[f.key]; return v !== null && v !== undefined && v !== "" ? `${f.label}: ${f.type === "checkbox" ? (v ? "是" : "否") : v}` : null; })
       .filter(Boolean)
       .join("\n");

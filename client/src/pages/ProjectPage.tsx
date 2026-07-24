@@ -352,8 +352,12 @@ export function ProjectPage({ id }: { id: string }) {
   const archiveProject = trpc.projects.setArchived.useMutation({
     onSuccess: () => { utils.projects.get.invalidate({ id }); utils.projects.list.invalidate(); },
   });
+  // 冪等鍵（QA-007）：同一次「還沒成功」的生成重試沿用同鍵——timeout 後再按不會重複扣點/重複生成；
+  // 成功才換新鍵（下一次生成）
+  const submitRequestId = useRef<string>(crypto.randomUUID());
   const submit = trpc.generation.submit.useMutation({
     onSuccess: (data, vars) => {
+      submitRequestId.current = crypto.randomUUID();
       // 成功生成的提示詞自動入庫（簡報「打過的咒語自動存起來」）
       savePrompt.mutate({ projectId: id, text: vars.prompt });
       setPrompt("");
@@ -1015,6 +1019,7 @@ export function ProjectPage({ id }: { id: string }) {
                         sourceUrl: model.needs && !sourceAsset && sourceUrl.trim() ? sourceUrl.trim() : undefined,
                         characterIds: charIds.length ? charIds : undefined,
                         scenePresetIds: sceneIds.length ? sceneIds : undefined,
+                        clientRequestId: submitRequestId.current,
                       })
                     }
                   >

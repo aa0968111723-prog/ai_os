@@ -104,6 +104,9 @@ export function ConfirmButton({
 }) {
   const [armed, setArmed] = useState(false);
   const [reasonText, setReasonText] = useState("");
+  // QA-024：必填理由留空按確認時，除了 refocus 還要「看得見」的 inline 錯誤——
+  // 舊版只默默把焦點移回文字框，使用者以為按鈕壞掉
+  const [reasonError, setReasonError] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
@@ -114,16 +117,19 @@ export function ConfirmButton({
   const cancel = () => {
     setArmed(false);
     setReasonText("");
+    setReasonError(false);
     triggerRef.current?.focus();
   };
   const confirm = () => {
     if (reason?.required && !reasonText.trim()) {
+      setReasonError(true);
       reasonRef.current?.focus();
       return;
     }
     onConfirm(reason ? reasonText.trim() : undefined);
     setArmed(false);
     setReasonText("");
+    setReasonError(false);
   };
 
   useEffect(() => {
@@ -185,10 +191,19 @@ export function ConfirmButton({
                 id={reasonId}
                 ref={reasonRef}
                 value={reasonText}
-                onChange={(e) => setReasonText(e.target.value)}
+                onChange={(e) => {
+                  setReasonText(e.target.value);
+                  if (reasonError && e.target.value.trim()) setReasonError(false);
+                }}
                 placeholder={reason.placeholder}
-                style={{ minHeight: 60, marginTop: 6 }}
+                aria-invalid={reasonError || undefined}
+                style={{ minHeight: 60, marginTop: 6, ...(reasonError ? { borderColor: "var(--danger-ink, #b91c1c)" } : {}) }}
               />
+              {reasonError && (
+                <p className="error" role="alert" style={{ marginTop: 4 }}>
+                  請填寫理由後再送出（此欄必填）
+                </p>
+              )}
             </>
           )}
           <div style={{ display: "flex", gap: "var(--sp-8)", marginTop: "var(--sp-12)" }}>{buttons}</div>

@@ -724,7 +724,12 @@ export const assistantRouter = router({
             requireGroup(ctx.auth, p.groupId);
           },
         });
-        return { ok: true, kind: "split_script" as const, createdScenes: result.count, message: `已拆出 ${result.count} 個分鏡，可逐鏡生成畫面` };
+        // 截斷透明化（QA-016，自舊拆分鏡卡搬入統一入口）：長腳本被截時要讓使用者「看得到」，
+        // 不能靜默丟尾段——否則尾段鏡頭憑空消失，只會以為 AI 漏拆
+        const truncNote = result.truncation
+          ? `。⚠ 腳本共 ${result.truncation.totalChars.toLocaleString()} 字，AI 只讀了前 ${result.truncation.sentChars.toLocaleString()} 字（後面 ${result.truncation.droppedChars.toLocaleString()} 字未拆入）——建議把長腳本分段、多次拆分`
+          : "";
+        return { ok: true, kind: "split_script" as const, createdScenes: result.count, message: `已拆出 ${result.count} 個分鏡，可逐鏡生成畫面${truncNote}` };
       }
 
       // submit_approval：走與網頁「送審」完全相同的核心（版本號原子產生、標分鏡 pending、系統訊息）。
