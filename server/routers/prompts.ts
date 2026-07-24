@@ -12,6 +12,24 @@ export interface PromptSettings {
   scenePresetIds?: string[];
 }
 
+/** 落庫時要更新的欄位子集 */
+type PromptPatch = Partial<{ modelId: string | null; characterIds: string[] | null; scenePresetIds: string[] | null }>;
+
+/**
+ * 三態卡片語義 → DB patch（純函式，供 savePromptCore 使用並可單測）：
+ *   undefined＝呼叫端不知道（如工作流只知道文字）→ 不放進 patch，保留既有值；
+ *   []＝呼叫端明確知道「這次沒帶卡」（生成台送 vars.xxx ?? []）→ 存 []，「再用」據此清空現勾；
+ *   [a,b]＝存這些卡，「再用」還原它們。
+ * 關鍵：不可把 [] 收斂成 null——收斂後與 legacy「純文字舊列」不可分，「再用」就永遠清不掉殘留勾選。
+ */
+export function buildPromptPatch(settings: PromptSettings): PromptPatch {
+  const patch: PromptPatch = {};
+  if (settings.modelId !== undefined) patch.modelId = settings.modelId || null; // 空字串一併收斂成 null（避免 getModel("") 空 chip）
+  if (settings.characterIds !== undefined) patch.characterIds = settings.characterIds;
+  if (settings.scenePresetIds !== undefined) patch.scenePresetIds = settings.scenePresetIds;
+  return patch;
+}
+
 /**
  * 存/去重核心（自 save mutation 抽出，行為不變）：同專案同文字已存在則使用次數 +1，
  * 並以「最近一次」的模型/角色/場景設定覆蓋（再用還原的是最新用法）。
@@ -31,13 +49,8 @@ export async function savePromptCore(
   // 超過 btree 索引位元上限，索引建立會失敗）。
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${project.id}), hashtext(${text}))`);
-    // 非破壞式 latest-wins：只覆蓋呼叫端「有提供」的欄位（undefined＝不知道，別動既有值）。
-    // 不然工作流啟動（只知道文字）會把生成台剛存好的模型/角色/場景設定整組洗成 null——
-    // 「再用還原完整設定」被「用於工作流」默默毀掉。
-    const patch: Partial<{ modelId: string | null; characterIds: string[] | null; scenePresetIds: string[] | null }> = {};
-    if (settings.modelId !== undefined) patch.modelId = settings.modelId ?? null;
-    if (settings.characterIds !== undefined) patch.characterIds = settings.characterIds?.length ? settings.characterIds : null;
-    if (settings.scenePresetIds !== undefined) patch.scenePresetIds = settings.scenePresetIds?.length ? settings.scenePresetIds : null;
+    // 非破壞式 latest-wins＋三態卡片語義（見 buildPromptPatch）
+    const patch = buildPromptPatch(settings);
     const [existing] = await tx
       .select()
       .from(schema.prompts)

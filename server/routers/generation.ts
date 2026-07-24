@@ -136,6 +136,7 @@ export const generationRouter = router({
       reasonPrefix: "重試生成",
       assertAccess: async (project) => {
         const role = requireGroup(ctx.auth, project.groupId);
+        assertProjectNotArchived(project); // 封存專案不接受付費生成——與 submit 同口徑（重試＝發起新付費工作）
         await assertProjectEditable(ctx.auth, project); // 2.3：專案檢視者不能生成
         return role;
       },
