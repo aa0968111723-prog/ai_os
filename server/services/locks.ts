@@ -9,8 +9,10 @@
  *     (approvals 從不在持有此鎖時呼叫 reserveQuota,故無交叉取得的死鎖面。)
  * - 2:scenes orderIndex per-project(本檔)——「讀 max→插入/互換/重排」的 read-modify-write
  *   在 READ COMMITTED 下併發會算到同一個 max、寫出重複 orderIndex(核心缺陷審查:排序不定、move 失準)。
- * - 3:agent runs 核准 per-(project,user)(本檔)——「查活躍→CAS 起跑」的 check-then-set,
+ * - 3:agent runs 核准 per-(project,user)(本檔 lockAgentApprove)——「查活躍→CAS 起跑」的 check-then-set,
  *   兩份不同的待核准計畫被同時核准會雙雙起跑(單併發守門失效);上鎖後同人同專案核准全序列化。
+ *   ＋workflow 起跑 per-(project,user)(routers/workflows.ts 內聯,同 project:user 鍵)——同 class 同鍵形狀,
+ *   彼此互斥序列化(同人同專案的「核准代理」與「起跑工作流」不會交錯),屬無害的刻意共用、非撞號。
  * - 4:database row-cap per-table(本檔)——addDataRowValidated 的「count(*)→insert」read-modify-write,
  *   併發寫入近上限時兩者都讀到同一 count 而雙雙插入、突破 MAX_ROWS_PER_TABLE。
  * 交易結束自動釋放,呼叫端必須在 db.transaction 內使用。

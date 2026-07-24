@@ -27,7 +27,10 @@ async function assertCanAllocateToMember(
   targetUserId: string,
 ): Promise<void> {
   requireLeader(auth, groupId); // 需組長以上，且確認呼叫者屬於這個組
-  if (targetUserId !== auth.user.id) return; // 對其他組員：組長權限即可
+  // 大小寫無關比對（安全關鍵）：z.string().uuid() 接受大寫 UUID，而 Postgres uuid 比較大小寫無關，
+  // 故大寫版的自己 id 仍會 UPDATE 到自己那列。若在此用大小寫敏感的 !== 比，攻擊者把自己 id 轉大寫即可
+  // 讓「!==」成立而跳過下方團隊管理員閘門，達成自我提額。一律正規化成小寫再比。
+  if (targetUserId.toLowerCase() !== auth.user.id.toLowerCase()) return; // 對其他組員：組長權限即可
   const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
   if (!auth.user.isSuperAdmin && !(group && auth.adminTeamIds.includes(group.teamId))) {
     throw new TRPCError({ code: "FORBIDDEN", message: "不能調整自己的額度／預算——請由團隊管理員以上調整（分配是由上往下）" });
