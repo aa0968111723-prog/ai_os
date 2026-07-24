@@ -109,9 +109,14 @@ function stateSig(payload: string): string {
   return createHmac("sha256", stateKey()).update(payload).digest("hex");
 }
 
-export function signIntegrationState(userId: string): string {
-  const payload = Buffer.from(`${userId}|${Date.now() + 10 * 60_000}`).toString("base64url");
+/** 以明確到期時刻簽發 state（可測接縫：讓測試造出「簽章正確但已過期」的樣本驗 TTL） */
+export function signIntegrationStateAt(userId: string, expiresAtMs: number): string {
+  const payload = Buffer.from(`${userId}|${expiresAtMs}`).toString("base64url");
   return `${payload}.${stateSig(payload)}`;
+}
+
+export function signIntegrationState(userId: string): string {
+  return signIntegrationStateAt(userId, Date.now() + 10 * 60_000);
 }
 
 export function verifyIntegrationState(state: string): { userId: string } | null {

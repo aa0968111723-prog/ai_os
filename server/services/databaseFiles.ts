@@ -304,13 +304,16 @@ export async function fetchNotionText(pageId: string, userToken?: string | null)
   try {
     return await fetchNotionTextWithToken(pageId, primary);
   } catch (err) {
-    const pageNotFound = err instanceof Error && err.message.includes("找不到這個頁面");
-    if (pageNotFound && userToken && siteToken && siteToken !== userToken) {
+    // 用型別判斷「頁面對此 token 無權（404）」而非比對錯誤訊息字串——訊息之後改寫/i18n 不會默默弄壞退回邏輯
+    if (err instanceof NotionPageNotFoundError && userToken && siteToken && siteToken !== userToken) {
       return await fetchNotionTextWithToken(pageId, siteToken);
     }
     throw err;
   }
 }
+
+/** Notion 頁面對此 token 不可見（HTTP 404）：專屬型別，讓「退回站方 token」的判斷不綁錯誤訊息字串 */
+export class NotionPageNotFoundError extends Error {}
 
 async function fetchNotionTextWithToken(pageId: string, token: string): Promise<string> {
   const headers = { Authorization: `Bearer ${token}`, "Notion-Version": "2022-06-28" };
@@ -324,7 +327,7 @@ async function fetchNotionTextWithToken(pageId: string, token: string): Promise<
       const qs = cursor ? `?start_cursor=${cursor}&page_size=100` : "?page_size=100";
       const res = await proxyFetch(`https://api.notion.com/v1/blocks/${blockId}/children${qs}`, { headers, timeoutMs: 20_000 });
       if (!res.ok) {
-        if (res.status === 404) throw new Error("Notion 找不到這個頁面——請確認頁面已「分享給整合」（Connections → 選你的整合）");
+        if (res.status === 404) throw new NotionPageNotFoundError("Notion 找不到這個頁面——請確認頁面已「分享給整合」（Connections → 選你的整合）");
         throw new Error(`Notion API 錯誤（${res.status}）`);
       }
       const data = (await res.json()) as { results?: Array<Record<string, unknown>>; has_more?: boolean; next_cursor?: string };

@@ -39,6 +39,11 @@ export function IntegrationsPage() {
         憑證以 AES-256 加密存放、永遠不會回顯；只有你本人用得到，隨時可以移除。
       </p>
       {flash && <p className="hint" style={{ color: "var(--success-ink)" }}>{flash}</p>}
+      {list.error && (
+        <p className="error" role="alert">
+          載入整合設定失敗：{list.error.message}　<button className="btn-sm" onClick={() => list.refetch()}>重試</button>
+        </p>
+      )}
       {remove.error && <p className="error" role="alert">{remove.error.message}</p>}
 
       {/* ── Google 雲端硬碟 ── */}
@@ -79,7 +84,7 @@ export function IntegrationsPage() {
       <NotionCard data={d?.notion ?? null} />
 
       {/* ── 外部資料庫/API ── */}
-      <ApiConnectionsCard apis={d?.apis ?? []} onRemove={(id) => remove.mutate({ id })} removing={remove.isPending} />
+      <ApiConnectionsCard apis={d?.apis ?? []} onRemove={(id) => remove.mutate({ id })} removingId={remove.isPending ? remove.variables?.id ?? null : null} />
 
       <p style={{ marginTop: 24 }}><Link href="/databases">去資料庫用用看 →</Link>　<Link href="/">回作業台</Link></p>
     </div>
@@ -166,10 +171,10 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
   );
 }
 
-function ApiConnectionsCard({ apis, onRemove, removing }: {
+function ApiConnectionsCard({ apis, onRemove, removingId }: {
   apis: Array<{ id: string; name: string; baseUrl: string; authHeader: string; last4: string | null; status: string; lastError: string | null; lastUsedAt: string | Date | null }>;
   onRemove: (id: string) => void;
-  removing: boolean;
+  removingId: string | null;
 }) {
   const utils = trpc.useUtils();
   const [adding, setAdding] = useState(false);
@@ -223,14 +228,14 @@ function ApiConnectionsCard({ apis, onRemove, removing }: {
               style={{ width: 180 }}
               onChange={(e) => { testPath.current[c.id] = e.target.value; }}
             />
-            <button className="btn-sm" disabled={fetchApi.isPending} onClick={() => test(c.id)}>
-              {fetchApi.isPending ? "抓取中…" : "測試抓取"}
+            <button className="btn-sm" disabled={fetchApi.isPending && fetchApi.variables?.id === c.id} onClick={() => test(c.id)}>
+              {fetchApi.isPending && fetchApi.variables?.id === c.id ? "抓取中…" : "測試抓取"}
             </button>
             <ConfirmButton
               onConfirm={() => onRemove(c.id)}
               message={`刪除連接「${c.name}」？（已加密的金鑰會一併刪除）`}
               triggerClassName="btn-sm"
-              disabled={removing}
+              disabled={removingId === c.id}
               triggerAriaLabel={`刪除連接 ${c.name}`}
             >
               <Icon name="X" size={13} />

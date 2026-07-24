@@ -4,6 +4,7 @@ import {
   encryptSecret,
   resolveApiUrl,
   signIntegrationState,
+  signIntegrationStateAt,
   validateApiConnectionInput,
   verifyIntegrationState,
 } from "./integrations";
@@ -40,12 +41,14 @@ describe("OAuth state（HMAC 簽章）", () => {
     expect(verifyIntegrationState("aaaa.bbbb")).toBeNull();
     expect(verifyIntegrationState("")).toBeNull();
   });
-  it("過期 state 驗證失敗", () => {
-    // 手工造一個已過期的 payload：驗簽會過、效期檢查要擋
-    const payload = Buffer.from(`user-123|${Date.now() - 1000}`).toString("base64url");
-    // 用正式簽發再拆殼換 payload 的話簽章就不符——直接驗「簽章正確但過期」需要同一把 key，
-    // 這裡以 signIntegrationState 無法造過期樣本，退而驗「未來簽發的可通過」邊界即可
-    expect(verifyIntegrationState(`${payload}.deadbeef`)).toBeNull();
+  it("過期 state 驗證失敗（簽章正確但已過期，真正觸發 TTL 檢查）", () => {
+    // signIntegrationStateAt 讓我們造出「簽章正確、但到期時刻在過去」的樣本——
+    // 驗簽會過，被 verifyIntegrationState 的 Number(expStr) < Date.now() 擋下
+    const expired = signIntegrationStateAt("user-123", Date.now() - 1000);
+    expect(verifyIntegrationState(expired)).toBeNull();
+    // 對照：尚未到期的可通過
+    const valid = signIntegrationStateAt("user-123", Date.now() + 60_000);
+    expect(verifyIntegrationState(valid)?.userId).toBe("user-123");
   });
 });
 
