@@ -9,9 +9,10 @@
 import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
-import { getModel, endpointOf, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { getModel, endpointOf, isNimModel, estimatePoints, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { worldviewSchema, type Worldview } from "../../shared/worldview";
-import { falSubmit, falStatus, billingBypassed } from "./fal";
+import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
+import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { reserveQuota, refund } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
 import { buildCharacterAnchor } from "../routers/characters";
@@ -125,6 +126,11 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
   }
 
+  // 逐次估點：按字計費的 TTS 依實際朗讀文字長度算真實成本；其餘＝扁平 model.points（行為不變）。
+  // 一次算好貫穿下面所有站（審核門檻／pointsEst／扣點／送出失敗退點），確保三者永遠一致。
+  // TTS 不注入世界觀（見 effectivePrompt），故 input.prompt 即送 fal 的計費文字。
+  const est = estimatePoints(model, { promptChars: input.prompt.length });
+
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   const accessRole = await input.assertAccess?.(project); // 多組隔離（可含專案級 ACL）；回傳角色供成本審核門檻用
@@ -169,7 +175,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   if (accessRole === "member") {
     const [grp] = await db.select().from(schema.groups).where(eq(schema.groups.id, project.groupId));
     const threshold = grp?.approvalThresholdPoints;
-    if (threshold != null && threshold > 0 && model.points >= threshold) {
+    if (threshold != null && threshold > 0 && est >= threshold) {
       const [gated] = await db
         .insert(schema.generations)
         .values({
@@ -184,7 +190,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           sceneRole: input.sceneRole ?? null,
           sourceUrl,
           params: falInput, // 注入完成的 fal 輸入原樣保存——核准時直接送出，不重組（世界觀/卡片以送審當下為準）
-          pointsEst: model.points,
+          pointsEst: est,
           status: "awaiting_approval",
         })
         .returning();
@@ -196,7 +202,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           projectId: project.id,
           userId: input.userId,
           kind: "system",
-          body: `⏳ 生成待核准：${model.label}（${model.points} 點 ≥ 門檻 ${threshold} 點）——請組長到生成紀錄核准或駁回`,
+          body: `⏳ 生成待核准：${model.label}（${est} 點 ≥ 門檻 ${threshold} 點）——請組長到生成紀錄核准或駁回`,
         })
         .catch((err) => console.warn("[generation] 待核系統訊息寫入失敗：", err instanceof Error ? err.message : err));
       return gated;
@@ -219,7 +225,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         sceneRole: input.sceneRole ?? null, // 回填角色（沒有＝null，視為 visual）
         sourceUrl,
         params: falInput,
-        pointsEst: model.points,
+        pointsEst: est,
       })
       .returning();
   } catch (err) {
@@ -235,12 +241,12 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   // 原子守門＋扣點（同一交易＋per-user 鎖，杜絕併發雙重扣款/繞過額度）
   // reserveQuota「拋例外」（連線池耗盡/逾時/序列化失敗）時也要刪掉剛建的 queued 列，
   // 否則會留下「從未扣點」的孤兒，30 分鐘後被陳屍清掃憑空退點、灌鬆總預算閘。
-  // mock 模式（無 FAL_KEY / FAL_MOCK=1）預設不扣點：內部測試不燒真實額度、也不被額度閘擋
+  // e2e 測試模式（E2E_MOCK=1，僅供自動化測試）預設不扣點：測試不燒真實額度、也不被額度閘擋
   //（正式模式照常守門；MOCK_BILLING=1 時 mock 也走扣點——e2e 驗證額度守門用，見 billingBypassed）
   if (!billingBypassed()) {
     let quotaError: string | null;
     try {
-      quotaError = await reserveQuota(input.userId, project.groupId, model.points, `${input.reasonPrefix ?? "生成"} ${model.label}`, gen.id);
+      quotaError = await reserveQuota(input.userId, project.groupId, est, `${input.reasonPrefix ?? "生成"} ${model.label}`, gen.id);
     } catch (err) {
       await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
       console.error("[generation] reserveQuota 例外，已移除待生成列：", err instanceof Error ? err.message : err);
@@ -253,7 +259,11 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   }
 
   try {
-    const { requestId } = await falSubmit(endpointOf(model), model.kind, falInput);
+    // LLM 文字類分流走 NVIDIA NIM(媒體維持 fal);mock 模式一律交給 falSubmit 的假佇列——
+    // 假生成/扣點行為與其他類別完全同口徑,不因供應商分流而多一套 mock
+    const { requestId } = isNimModel(model) && !isMockMode()
+      ? nimSubmit(falInput)
+      : await falSubmit(endpointOf(model), model.kind, falInput);
     const [updated] = await db
       .update(schema.generations)
       .set({ requestId, status: "running", updatedAt: new Date() })
@@ -261,11 +271,11 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       .returning();
     return updated;
   } catch (err) {
-    await refund(input.userId, project.groupId, model.points, "生成送出失敗退回", gen.id);
+    await refund(input.userId, project.groupId, est, "生成送出失敗退回", gen.id);
     console.error("[generation] submit 失敗:", err);
     await db
       .update(schema.generations)
-      .set({ status: "failed", error: String(err), pointsRefunded: model.points, updatedAt: new Date() })
+      .set({ status: "failed", error: String(err), pointsRefunded: est, updatedAt: new Date() })
       .where(eq(schema.generations.id, gen.id));
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "生成送出失敗,點數已退回,請重試" });
   }
@@ -285,7 +295,9 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
   const endpoint = model ? endpointOf(model) : gen.modelId;
   const kind = (model?.kind ?? gen.kind) as "image" | "video" | "audio" | "text";
 
-  const result = await falStatus(endpoint, kind, gen.requestId);
+  // 依 requestId 前綴分流:nim_=NVIDIA NIM 記憶體佇列;mock_/其餘=fal(mock 前綴由 falStatus 自行處理)。
+  // 用前綴而非模型註冊表判斷——部署切換期間在途的舊 any-llm 生成仍能沿 fal 佇列收尾。
+  const result = gen.requestId.startsWith("nim_") ? nimStatus(gen.requestId) : await falStatus(endpoint, kind, gen.requestId);
   if (result.status === "done" && (result.resultUrl || result.resultText)) {
     // Compare-and-set：只有把「仍在 queued/running」的列成功推進成 done 的那一次才算數，
     // 併發輪詢/重試不會重複入庫（舊版每次都 update+insert asset → 重複素材、重複計費）。
@@ -346,16 +358,31 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
   if (result.status === "failed") {
     // 同樣 compare-and-set：只有真正把列從 queued/running 轉成 failed 的那一次才退點，
     // 避免同一筆被多次輪詢重複退款（憑空長點數）。
-    const updatedRows = await db
-      .update(schema.generations)
-      .set({ status: "failed", error: result.error ?? "未知錯誤", pointsRefunded: gen.pointsEst, updatedAt: new Date() })
-      .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
-      .returning();
+    // 關鍵：狀態翻轉與退點帳本列「同一交易」——舊版先 commit failed(pointsRefunded=est) 再另寫退點列，
+    // 中間當機/重部署會留下 terminal failed 列（pointsRefunded 記謊）而退點列從未寫入、且無 sweep 會再碰
+    // terminal 列 → 使用者點數永久蒸發。包進同交易後：全有或全無，中途當機整筆 rollback，
+    // 列留在 queued/running 交由 30 分 sweep 依帳本淨額安全收尾。
+    const updatedRows = await db.transaction(async (tx) => {
+      const rows = await tx
+        .update(schema.generations)
+        .set({ status: "failed", error: result.error ?? "未知錯誤", pointsRefunded: gen.pointsEst, updatedAt: new Date() })
+        .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
+        .returning();
+      if (rows.length > 0 && gen.pointsEst > 0) {
+        await tx.insert(schema.costLedger).values({
+          userId: gen.userId,
+          groupId: gen.groupId,
+          delta: gen.pointsEst,
+          reason: "生成失敗退回",
+          generationId: gen.id,
+        });
+      }
+      return rows;
+    });
     if (updatedRows.length === 0) {
       const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
       return current ?? gen;
     }
-    await refund(gen.userId, gen.groupId, gen.pointsEst, "生成失敗退回", gen.id);
     return updatedRows[0];
   }
   return gen;

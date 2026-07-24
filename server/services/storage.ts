@@ -50,6 +50,13 @@ const MIME_EXT: Record<string, string> = {
   "text/plain": ".txt",
   "text/markdown": ".md",
   "application/pdf": ".pdf",
+  // 資料庫文件層（AI 可讀）擴充：表格/結構化/網頁/字幕/Word——素材上傳同樣受惠
+  "text/csv": ".csv",
+  "application/json": ".json",
+  "text/html": ".html",
+  "text/vtt": ".vtt",
+  "application/x-subrip": ".srt",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
 };
 
 export function extFromMime(mime: string): string | undefined {
@@ -120,6 +127,24 @@ export async function saveBuffer(buf: Buffer, mime: string): Promise<{ storagePa
   mkdirSync(path.dirname(abs), { recursive: true });
   await writeFile(abs, buf);
   return { storagePath: rel, sizeBytes: buf.length };
+}
+
+/**
+ * 複製一份既有的落地檔到新位置（資料庫文件「送進專案素材庫」用）：
+ * 素材與資料庫文件的生命週期各自獨立（任一邊刪除不影響另一邊），所以是實體複製、不是共用路徑。
+ * fs.copyFile 走檔案系統層複製，大影片也不進 Node 記憶體。
+ */
+export async function copyStoredFile(relPath: string, mime: string): Promise<{ storagePath: string; sizeBytes: number }> {
+  ensureStorageDirs();
+  const srcAbs = absPathOf(relPath);
+  // path.extname 回空字串（不是 undefined），?? 接不到——用 || 落到 .bin
+  const rel = newRelPath(extFromMime(mime) ?? (path.extname(relPath) || ".bin"));
+  const abs = absPathOf(rel);
+  mkdirSync(path.dirname(abs), { recursive: true });
+  const { copyFile } = await import("node:fs/promises");
+  await copyFile(srcAbs, abs);
+  const s = await stat(abs);
+  return { storagePath: rel, sizeBytes: s.size };
 }
 
 /** 把 multer 收到的暫存檔移進正式位置（避免大檔在記憶體複製） */
@@ -258,5 +283,22 @@ export function verifyAssetSig(assetId: string, exp: string | undefined, sig: st
   if (!Number.isFinite(expNum) || expNum < Math.floor(Date.now() / 1000)) return false;
   const expect = createHmac("sha256", signSecret()).update(`${assetId}.${expNum}`).digest("hex");
   // 長度一致時用逐字比較即可（sig 是 hex、非機密洩漏面）
+  return sig.length === expect.length && createHash("sha256").update(sig).digest("hex") === createHash("sha256").update(expect).digest("hex");
+}
+
+/* ── 資料庫文件簽名網址（給 fal vision 抓圖用；HMAC 前綴 dbfile. 與素材簽名分域，不可互換） ── */
+
+export function signDbFileUrl(fileId: string, ttlSeconds = 3600): string {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const sig = createHmac("sha256", signSecret()).update(`dbfile.${fileId}.${exp}`).digest("hex");
+  const base = process.env.APP_URL?.replace(/\/$/, "") || `http://localhost:${process.env.PORT ?? 3000}`;
+  return `${base}/api/databases/files/${fileId}/file?exp=${exp}&sig=${sig}`;
+}
+
+export function verifyDbFileSig(fileId: string, exp: string | undefined, sig: string | undefined): boolean {
+  if (!exp || !sig) return false;
+  const expNum = Number(exp);
+  if (!Number.isFinite(expNum) || expNum < Math.floor(Date.now() / 1000)) return false;
+  const expect = createHmac("sha256", signSecret()).update(`dbfile.${fileId}.${expNum}`).digest("hex");
   return sig.length === expect.length && createHash("sha256").update(sig).digest("hex") === createHash("sha256").update(expect).digest("hex");
 }

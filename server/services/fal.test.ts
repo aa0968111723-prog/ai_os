@@ -1,7 +1,7 @@
 /**
  * fal.ts 純函式單元測試:
  * - extractResult:各模型輸出結構的解析分支全覆蓋(媒體/文字/LoRA/退路)與優先序。
- * - isMockMode / billingBypassed:MOCK 與 MOCK_BILLING 的真值表。
+ * - isMockMode / billingBypassed:E2E_MOCK 與 MOCK_BILLING 的真值表(mock 僅供 e2e,正式一律真實模式)。
  *   注意 MOCK 是 import 時算好的常數 → 每個案例都要 vi.resetModules + 動態 import 重新載入。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -90,39 +90,46 @@ describe("isMockMode / billingBypassed 真值表(重載模組驗 import 時常�
     vi.unstubAllEnvs();
   });
 
-  async function load(env: { FAL_KEY?: string; FAL_MOCK?: string; MOCK_BILLING?: string }) {
+  async function load(env: { FAL_KEY?: string; E2E_MOCK?: string; FAL_MOCK?: string; MOCK_BILLING?: string }) {
     vi.stubEnv("FAL_KEY", env.FAL_KEY);
+    vi.stubEnv("E2E_MOCK", env.E2E_MOCK);
     vi.stubEnv("FAL_MOCK", env.FAL_MOCK);
     vi.stubEnv("MOCK_BILLING", env.MOCK_BILLING);
     return await import("./fal");
   }
 
-  it("無 FAL_KEY → mock;未設 MOCK_BILLING → 不扣點", async () => {
+  it("無 FAL_KEY 也不再退示範模式 → 一律真實模式、永遠扣點", async () => {
     const m = await load({});
-    expect(m.isMockMode()).toBe(true);
-    expect(m.billingBypassed()).toBe(true);
-  });
-
-  it("無 FAL_KEY + MOCK_BILLING=1 → 假生成、真扣點(e2e 驗額度用)", async () => {
-    const m = await load({ MOCK_BILLING: "1" });
-    expect(m.isMockMode()).toBe(true);
-    expect(m.billingBypassed()).toBe(false);
-  });
-
-  it("有 FAL_KEY 且未開 FAL_MOCK → 真模式,永遠扣點", async () => {
-    const m = await load({ FAL_KEY: "key_test" });
     expect(m.isMockMode()).toBe(false);
     expect(m.billingBypassed()).toBe(false);
   });
 
-  it("有 FAL_KEY 但 FAL_MOCK=1 → 仍是 mock;MOCK_BILLING 決定扣不扣", async () => {
-    const a = await load({ FAL_KEY: "key_test", FAL_MOCK: "1" });
-    expect(a.isMockMode()).toBe(true);
-    expect(a.billingBypassed()).toBe(true);
+  it("真實模式缺 FAL_KEY → falSubmit 回明確錯誤(呼叫端退點),不靜默假生成", async () => {
+    const m = await load({});
+    await expect(m.falSubmit("fal-ai/fast-sdxl", "image", { prompt: "test" })).rejects.toThrow("FAL_KEY 未設定");
+  });
 
-    vi.resetModules();
-    const b = await load({ FAL_KEY: "key_test", FAL_MOCK: "1", MOCK_BILLING: "1" });
-    expect(b.isMockMode()).toBe(true);
-    expect(b.billingBypassed()).toBe(false);
+  it("舊旗標 FAL_MOCK=1 已失效 → 仍是真實模式", async () => {
+    const m = await load({ FAL_KEY: "key_test", FAL_MOCK: "1" });
+    expect(m.isMockMode()).toBe(false);
+    expect(m.billingBypassed()).toBe(false);
+  });
+
+  it("E2E_MOCK=1(僅測試)→ mock;未設 MOCK_BILLING → 不扣點", async () => {
+    const m = await load({ E2E_MOCK: "1" });
+    expect(m.isMockMode()).toBe(true);
+    expect(m.billingBypassed()).toBe(true);
+  });
+
+  it("E2E_MOCK=1 + MOCK_BILLING=1 → 假生成、真扣點(e2e 驗額度用)", async () => {
+    const m = await load({ E2E_MOCK: "1", MOCK_BILLING: "1" });
+    expect(m.isMockMode()).toBe(true);
+    expect(m.billingBypassed()).toBe(false);
+  });
+
+  it("有 FAL_KEY 且未設 E2E_MOCK → 真實模式,永遠扣點", async () => {
+    const m = await load({ FAL_KEY: "key_test" });
+    expect(m.isMockMode()).toBe(false);
+    expect(m.billingBypassed()).toBe(false);
   });
 });

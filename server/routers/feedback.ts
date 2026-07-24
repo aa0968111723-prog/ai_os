@@ -3,6 +3,7 @@ import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import type { AuthState } from "../services/auth";
 import { router, authedProcedure, adminProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
+import { isUniqueViolation } from "../services/generationCore";
 
 /** 6 題評分的固定 key（與前端一致；擋亂送的 key，回饋彙整才不會出現無意義欄位） */
 const FEEDBACK_KEYS = ["context", "cost", "collab", "ai", "daily", "usability"] as const;
@@ -37,46 +38,55 @@ export const feedbackRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const groupId = resolveGroupId(ctx.auth, input.groupId);
-      // upsert 用「查後改寫」而非 ON CONFLICT：feedback 表沒有 (userId, groupId) 唯一鍵（schema 由中央管理）。
-      // 舊資料可能已有重複列，挑最新一列改，保證 mine 讀到的就是被更新的那份。
-      const [existing] = await db
-        .select({ id: schema.feedback.id })
-        .from(schema.feedback)
-        .where(ownFeedbackWhere(ctx.auth.user.id, groupId))
-        .orderBy(desc(schema.feedback.createdAt))
-        .limit(1);
-      if (existing) {
-        // 只更新最新一列還不夠：歷史重複列要一併清掉，否則管理端彙整會同時看到新舊兩份互相矛盾
+
+      // 「一人一組一份」的欄位值（更新與插入共用）。空欄位明確寫 null——undefined 在 drizzle 是
+      // 「不更新」，清空的欄位會殘留舊值。
+      const values = {
+        scores: input.scores,
+        best: input.best ?? null,
+        worst: input.worst ?? null,
+        note: input.note ?? null,
+      };
+
+      // 就地更新既有那份（含清掉歷史重複列——ensure.ts 已建 (user_id,group_id) 唯一索引後不會再產生，
+      // 但既有資料在下次開機去重前仍可能有，一併收掉）。createdAt 保留初次填答時刻，只刷新 updatedAt。
+      const updateOwn = async () => {
+        const [existing] = await db
+          .select({ id: schema.feedback.id })
+          .from(schema.feedback)
+          .where(ownFeedbackWhere(ctx.auth.user.id, groupId))
+          .orderBy(desc(schema.feedback.updatedAt))
+          .limit(1);
+        if (!existing) return null;
         await db
           .delete(schema.feedback)
           .where(and(ownFeedbackWhere(ctx.auth.user.id, groupId), ne(schema.feedback.id, existing.id)));
         const [row] = await db
           .update(schema.feedback)
-          .set({
-            scores: input.scores,
-            // 空欄位要明確寫 null（undefined 在 drizzle 是「不更新」，清空的欄位會殘留舊值）
-            best: input.best ?? null,
-            worst: input.worst ?? null,
-            note: input.note ?? null,
-            // 沒有 updatedAt 欄；管理端彙整以 createdAt 排序，更新時刷新才能浮到最新
-            createdAt: new Date(),
-          })
+          .set({ ...values, updatedAt: new Date() })
           .where(eq(schema.feedback.id, existing.id))
           .returning();
         return row;
+      };
+
+      const updated = await updateOwn();
+      if (updated) return updated;
+
+      // 沒有既有那份就插入。併發首送（兩個分頁/雙擊）會撞唯一索引——由 23505 兜底：撞到就代表另一
+      // 請求剛插好，改走更新即可，使用者不會看到錯誤，也不會產生第二份。
+      try {
+        const [row] = await db
+          .insert(schema.feedback)
+          .values({ userId: ctx.auth.user.id, groupId, ...values })
+          .returning();
+        return row;
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          const row = await updateOwn();
+          if (row) return row;
+        }
+        throw err;
       }
-      const [row] = await db
-        .insert(schema.feedback)
-        .values({
-          userId: ctx.auth.user.id,
-          groupId,
-          scores: input.scores,
-          best: input.best,
-          worst: input.worst,
-          note: input.note,
-        })
-        .returning();
-      return row;
     }),
 
   /** 目前使用者在該組已交過的回饋（沒有則 null）；前端進頁預填用 */
@@ -88,27 +98,33 @@ export const feedbackRouter = router({
         .select()
         .from(schema.feedback)
         .where(ownFeedbackWhere(ctx.auth.user.id, groupId))
-        .orderBy(desc(schema.feedback.createdAt))
+        .orderBy(desc(schema.feedback.updatedAt))
         .limit(1);
       return row ?? null;
     }),
 
   list: adminProcedure.query(async ({ ctx }) => {
-    // 組隔離：超管看全部；一般團隊管理員只看「自己管得到的組」的回饋（舊版任何管理員看全站，跨團隊洩漏）。
+    // 組隔離：開發者看全部；一般團隊管理員只看「自己管得到的組」的回饋（舊版任何管理員看全站，跨團隊洩漏）。
+    // 送者名以 leftJoin 一次帶出（舊版撈全表使用者再逐列 .find()，M×N 掃描）。
+    const base = db
+      .select({ report: schema.feedback, userName: schema.users.name })
+      .from(schema.feedback)
+      .leftJoin(schema.users, eq(schema.users.id, schema.feedback.userId));
     let rows;
     if (ctx.auth.user.isSuperAdmin) {
-      rows = await db.select().from(schema.feedback).orderBy(desc(schema.feedback.createdAt)).limit(100);
+      rows = await base.orderBy(desc(schema.feedback.updatedAt)).limit(100);
     } else {
-      const visibleGroupIds = ctx.auth.groups.map((g) => g.groupId);
+      // 只看「自己管得到的組」——loadAuthState 已把管理的團隊展開成 admin 組員資格，故 role !== "member"
+      // 即等於「組長／團隊管理員／開發者」。舊版用 .map 涵蓋全部組（含純組員身分的他團組別），
+      // 會讓「A 團隊管理員兼 B 團隊純組員」讀到 B 團隊那組的回饋（跨團隊洩漏）。
+      // 與 audit.ts／feedbackReports.ts／quota.ts 的可見界完全一致（單一口徑）。
+      const visibleGroupIds = ctx.auth.groups.filter((g) => g.role !== "member").map((g) => g.groupId);
       if (visibleGroupIds.length === 0) return [];
-      rows = await db
-        .select()
-        .from(schema.feedback)
+      rows = await base
         .where(inArray(schema.feedback.groupId, visibleGroupIds))
-        .orderBy(desc(schema.feedback.createdAt))
+        .orderBy(desc(schema.feedback.updatedAt))
         .limit(100);
     }
-    const users = await db.select({ id: schema.users.id, name: schema.users.name }).from(schema.users);
-    return rows.map((r) => ({ ...r, userName: users.find((u) => u.id === r.userId)?.name ?? "?" }));
+    return rows.map((r) => ({ ...r.report, userName: r.userName ?? "?" }));
   }),
 });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
+import { ConfirmButton } from "./interactions";
 
 /**
  * 導演 AI 拆分鏡（願景「貼腳本→自動建分鏡卡」）：
@@ -30,18 +31,25 @@ export function ScriptSplitCard({ projectId }: { projectId: string }) {
             rows={6}
             placeholder="把腳本貼進來…（一段一幕最理想；留空則用知識庫）"
           />
-          <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center" }}>
-            <button className="primary" disabled={split.isPending} onClick={() => split.mutate({ projectId, scriptText: script.trim() || undefined })}>
+          <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            {/* 通則「確認/揭示才扣點」：拆分鏡會呼叫 AI 導演並扣共享點數，先看價再執行 */}
+            <ConfirmButton
+              triggerClassName="primary"
+              disabled={split.isPending}
+              message={`會請 AI 導演把${script.trim() ? "貼上的腳本" : "知識庫裡的腳本／開示稿"}切成分鏡草稿——NIM 免費額度，不扣點。`}
+              confirmLabel="開始拆分"
+              onConfirm={() => split.mutate({ projectId, scriptText: script.trim() || undefined })}
+            >
               {split.isPending ? "拆分中…" : "拆成分鏡"}
-            </button>
+            </ConfirmButton>
             <button onClick={() => setOpen(false)}>取消</button>
-            <span className="hint">下方「分鏡・交付」會出現草稿分鏡</span>
+            <span className="hint">免費（NVIDIA NIM）；下方「分鏡・交付」會出現草稿分鏡</span>
           </div>
         </>
       ) : (
         <button onClick={() => setOpen(true)}>貼腳本自動拆分鏡</button>
       )}
-      {split.data && <p className="hint" style={{ color: "var(--success-ink)", marginTop: 8 }}><Icon name="Check" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />已建立 {split.data.count} 幕草稿{split.data.mock ? "（示範拆分）" : ""}</p>}
+      {split.data && <p className="hint" style={{ color: "var(--success-ink)", marginTop: 8 }}><Icon name="Check" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />已建立 {split.data.count} 幕草稿{split.data.mock ? "（測試模式拆分）" : ""}</p>}
       {split.error && <p className="error">{split.error.message}</p>}
     </section>
   );

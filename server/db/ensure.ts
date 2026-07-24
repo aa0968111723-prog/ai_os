@@ -79,7 +79,22 @@ async function applyManualMigrations(): Promise<void> {
       create unique index if not exists group_options_group_type_value_uq
       on group_options (group_id, type, value)
     `);
-    console.log("[db] ✓ 手寫遷移完成（group_options 唯一索引就緒）");
+
+    // feedback (user_id, group_id) 唯一：滿意度問卷「一人一組一份」。舊版 upsert 走「查後改＋刪重複列」，
+    // 併發送出會各插一列（無 DB 約束擋不住）。先去重（保留最新一筆——與 mine 讀取一致），
+    // 再建唯一索引；group_id 可為 null（無組成員也一人一份），以 coalesce 收斂 NULL 使其參與唯一性。
+    // 此後 router 的 23505 攔截才真正有 DB 保底。
+    await db.execute(sql`
+      delete from feedback a using feedback b
+      where a.user_id = b.user_id
+        and a.group_id is not distinct from b.group_id
+        and (a.created_at, a.id::text) < (b.created_at, b.id::text)
+    `);
+    await db.execute(sql`
+      create unique index if not exists feedback_user_group_uq
+      on feedback (user_id, coalesce(group_id, '00000000-0000-0000-0000-000000000000'::uuid))
+    `);
+    console.log("[db] ✓ 手寫遷移完成（group_options／feedback 唯一索引就緒）");
   } catch (err) {
     // 不擋開機：索引缺席只是回到「應用層防重」的舊狀態,功能照常
     console.warn("[db] ⚠ 手寫遷移失敗（不影響啟動）：", err instanceof Error ? err.message : err);

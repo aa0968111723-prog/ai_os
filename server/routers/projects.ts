@@ -199,6 +199,23 @@ export const projectsRouter = router({
           })
           .returning();
 
+        // 一筆已完成的示範生成（不呼叫 fal、0 點）：「從這裡開始」四步是線性敘事（1→2→3→4），
+        // 範例若只種分鏡不種生成，步驟列會呈現 ✓✗✓✗——新人第一眼就以為範例壞了或自己跳了步。
+        await tx.insert(schema.generations).values({
+          projectId: project.id,
+          groupId: project.groupId,
+          userId: ctx.auth.user.id,
+          modelId: "fal-ai/fast-lightning-sdxl",
+          kind: "image",
+          prompt: "（範例）日系水彩、溫柔療癒調性：清晨禪堂前庭空景，柔和晨光斜射、地面薄霧，構圖大量留白。",
+          status: "done",
+          pointsEst: 0,
+          pointsActual: 0,
+          resultUrl: `${base}/api/mock-asset/image`,
+          name: "範例成品（免費示範）",
+          params: { sample: true, note: "範例專案示範生成，未經 fal、未扣點" },
+        });
+
         // 3-4 格草稿分鏡（status=todo）：各有可直接帶回生成台的 prompt 與配音詞；第一鏡掛上免費佔位縮圖。
         const scenesData: Array<{ title: string; durationSec: number; prompt: string; voiceover: string; assetId?: string }> = [
           {
@@ -436,6 +453,22 @@ export const projectsRouter = router({
       .from(schema.groupMembers)
       .leftJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
       .where(eq(schema.groupMembers.groupId, project.groupId));
+    // 地毯實測缺陷修復：有效成員不只 group_members——團隊管理員（team_members.role='admin'）
+    // 在 auth 展開為各組 admin（services/auth.ts 同一規則），之前不列會出現「成員權限整卡空白、
+    // 連本人都看不到」（成員全來自團隊層級的組）。這裡補上，標為 admin（固定編輯者、不可降）。
+    const [grp] = await db.select({ teamId: schema.groups.teamId }).from(schema.groups).where(eq(schema.groups.id, project.groupId));
+    const teamAdmins = grp
+      ? await db
+          .select({ userId: schema.teamMembers.userId, name: schema.users.name })
+          .from(schema.teamMembers)
+          .leftJoin(schema.users, eq(schema.users.id, schema.teamMembers.userId))
+          .where(and(eq(schema.teamMembers.teamId, grp.teamId), eq(schema.teamMembers.role, "admin")))
+      : [];
+    const seen = new Set(members.map((m) => m.userId));
+    const effective = [
+      ...members,
+      ...teamAdmins.filter((a) => !seen.has(a.userId)).map((a) => ({ userId: a.userId, groupRole: "admin" as const, name: a.name })),
+    ];
     const overrides = await db
       .select()
       .from(schema.projectMembers)
@@ -443,7 +476,7 @@ export const projectsRouter = router({
     const roleOf = (userId: string) => overrides.find((o) => o.userId === userId)?.role === "viewer" ? "viewer" as const : "editor" as const;
     return {
       canManage: myRole !== "member",
-      members: members.map((m) => ({
+      members: effective.map((m) => ({
         userId: m.userId,
         name: m.name ?? "?",
         groupRole: m.groupRole,

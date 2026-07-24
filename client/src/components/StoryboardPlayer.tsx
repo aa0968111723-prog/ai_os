@@ -151,13 +151,18 @@ export function StoryboardPlayer({
   // 鍵盤：空白鍵＝播放/暫停、左右鍵＝切鏡、Esc＝關閉
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "Space" || e.key === " ") {
+      // 焦點在控件上時空白鍵不攔：要能勾「自動換鏡」核取方塊、啟動所聚焦的按鈕
+      //（全域無條件 preventDefault 會讓純鍵盤使用者永遠按不動這些控件，違反 WCAG 2.1.1）；
+      // Esc 永遠放行（焦點鎖常駐在按鈕上）、方向鍵只讓給文字輸入類控件
+      const target = e.target as HTMLElement | null;
+      const onControl = !!target?.closest("input, textarea, select, button, a");
+      if ((e.code === "Space" || e.key === " ") && !onControl) {
         e.preventDefault();
         togglePlay();
-      } else if (e.key === "ArrowRight") {
+      } else if (e.key === "ArrowRight" && !target?.closest("input, textarea, select")) {
         e.preventDefault();
         goNext();
-      } else if (e.key === "ArrowLeft") {
+      } else if (e.key === "ArrowLeft" && !target?.closest("input, textarea, select")) {
         e.preventDefault();
         goPrev();
       } else if (e.key === "Escape" && onClose) {
@@ -168,6 +173,9 @@ export function StoryboardPlayer({
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePlay, goNext, goPrev, onClose]);
 
+  // 可捲動遮罩：矮螢幕（橫向手機/放大字級）總高超過視窗時，內容要捲得到、關閉鈕不能被擠出畫面外。
+  // 置中改由內層 wrapper 的 margin:auto 達成——overflow 容器用 justify-content:center 會把
+  // 超出的上緣裁到捲不到。
   const overlay: CSSProperties = {
     position: "fixed",
     inset: 0,
@@ -176,9 +184,9 @@ export function StoryboardPlayer({
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    justifyContent: "center",
     padding: "20px",
     boxSizing: "border-box",
+    overflowY: "auto",
   };
   const btn: CSSProperties = {
     background: "rgba(251, 247, 240, 0.12)",
@@ -193,7 +201,7 @@ export function StoryboardPlayer({
 
   if (total === 0 || !scene) {
     return (
-      <div style={overlay} role="dialog" aria-modal="true" aria-label="粗剪預覽" ref={stageRef} tabIndex={-1}>
+      <div style={{ ...overlay, justifyContent: "center" }} role="dialog" aria-modal="true" aria-label="粗剪預覽" ref={stageRef} tabIndex={-1}>
         <p style={{ color: "#fbf7f0", fontSize: 15 }}>還沒有分鏡可以預覽——先加入分鏡再回來看整支片節奏。</p>
         {onClose && (
           <button style={{ ...btn, marginTop: 16 }} onClick={onClose}>
@@ -225,7 +233,24 @@ export function StoryboardPlayer({
       aria-label="粗剪預覽播放器"
       ref={stageRef}
       tabIndex={-1}
+      // 觸控退路：點暗背景即關（手機沒有 Esc 鍵；控制列的關閉鈕在矮螢幕可能被擠到捲動範圍外）
+      onClick={(e) => { if (e.target === e.currentTarget && onClose) onClose(); }}
     >
+      {/* 常駐關閉鈕：釘在視窗右上角（fixed 不隨遮罩內容捲動），任何螢幕高度都搆得到 */}
+      {onClose && (
+        <button
+          style={{ ...btn, position: "fixed", top: 14, right: 14, zIndex: 5, display: "inline-flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, padding: 0 }}
+          onClick={onClose}
+          aria-label="關閉預覽"
+          title="關閉（Esc）"
+        >
+          <Icon name="X" size={18} />
+        </button>
+      )}
+      <div
+        style={{ margin: "auto", width: "100%", display: "flex", flexDirection: "column", alignItems: "center" }}
+        onClick={(e) => { if (e.target === e.currentTarget && onClose) onClose(); }}
+      >
       <style>{`
         @keyframes sbp-fade { from { opacity: 0; } to { opacity: 1; } }
         @keyframes sbp-kenburns { from { transform: scale(1); } to { transform: scale(1.06); } }
@@ -443,6 +468,7 @@ export function StoryboardPlayer({
           />
           同步播旁白／音訊
         </label>
+      </div>
       </div>
     </div>
   );

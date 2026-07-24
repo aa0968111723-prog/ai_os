@@ -19,6 +19,7 @@ import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
 import { buildEdl, buildFcpxml, buildSrt, exportProjectZip } from "./services/exporter";
 import { handleMcp } from "./services/mcp";
+import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, MAX_FILE_BYTES, STORAGE_ROOT,
@@ -28,6 +29,8 @@ import { recordError, listErrors, errorCountSince } from "./services/errlog";
 import { attachRealtime } from "./services/realtime";
 import { startWorkflowRunner } from "./services/workflowRunner";
 import { startGenerationRunner } from "./services/generationRunner";
+import { startAgentRunner } from "./services/agentRunner";
+import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 
@@ -80,13 +83,14 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/ready", async (_req, res) => {
   try {
     await db.execute(sql`select 1`);
+    // ★安全：本端點「未認證」即可存取（給非工程背景者自助診斷 DB 是否接通）。
+    // 只回「資料庫/初始化」這種安全的存活訊號；生成模式（mockMode）與 AUTH_MODE=dev 後門是否誤留，
+    // 屬內部組態偵察面，改到需開發者登入的 /api/selftest 呈現（見該端點「生成模式」「認證模式」兩項），
+    // 不對匿名訪客外洩。
     res.json({
       ok: true,
       db: "connected（資料庫已接通）",
       boot: isBootReady() ? "ready（初始化完成）" : "initializing（建表/種子進行中，稍候自動完成）",
-      mockMode: isMockMode(),
-      // AUTH_MODE=dev 後門警示（僅開發環境會生效，正式環境自動忽略）——讓管理員一眼看到有沒有誤留
-      authMode: process.env.AUTH_MODE === "dev" ? "dev(僅開發生效)" : "normal",
     });
   } catch (err) {
     console.error("[ready] DB 連線失敗：", err instanceof Error ? err.message : err);
@@ -98,7 +102,7 @@ app.get("/api/ready", async (_req, res) => {
   }
 });
 
-// 假生成素材端點（FAL 假模式用；離線可測，交付包也抓得到）
+// 佔位素材端點：專案免費佔位縮圖（projects.ts）與 e2e 測試假素材共用；離線可用，交付包也抓得到
 const MOCK_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNsm7ryPwAFmwJT2F3EYAAAAABJRU5ErkJggg==",
   "base64",
@@ -130,7 +134,7 @@ app.get("/api/mock-asset/:kind", (req, res) => {
     res.setHeader("Content-Type", "audio/wav");
     return res.send(MOCK_WAV);
   }
-  // 影片亦回傳圖片位元組（假模式重點是流程可測；正式模式為真實 mp4）
+  // 影片亦回傳圖片位元組（測試模式重點是流程可測；正式模式為真實 mp4）
   res.setHeader("Content-Type", "image/png");
   res.send(MOCK_PNG);
 });
@@ -198,11 +202,30 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
 
 const upload = multer({
   storage: multer.diskStorage({ destination: (_req, _file, cb) => cb(null, tmpDir()) }),
-  limits: { fileSize: MAX_FILE_BYTES, files: 1 },
+  // fileSize/files 之外再夾制 fields/parts/fieldSize：上傳路由只需 1 檔＋少數小文字欄（projectId/tableId/
+  // title/name），不設上限時 multer 的 fields/parts 預設無界，攻擊者可用「數百萬個微小文字欄」的
+  // multipart 請求在解析階段吃 CPU/記憶體（且發生在認證前）。給足正常用途又擋掉洪泛。
+  limits: { fileSize: MAX_FILE_BYTES, files: 1, fields: 8, parts: 12, fieldSize: 100 * 1024 },
 });
 
+// ★安全：在 multer「把整個上傳主體寫進磁碟」之前先擋掉未登入請求。
+// multer 是中介層、跑在路由處理器之前——若把 resolveSession 留到處理器內，未認證者仍能對每次請求
+// 把 200MB 串進 Volume 暫存目錄（寫完才回 401），並行洪泛即可塞爆磁碟（單容器/單 Volume 部署下＝全站故障）。
+// 這道前置閘門讓未帶有效 session 的請求在讀取主體前就被拒（無 cookie 時 resolveSession 不查 DB，零成本）。
+// 已認證者處理器內仍會再 resolveSession 一次取完整 AuthState（多一次帶索引的輕量查詢，可接受）。
+async function requireAuthBeforeUpload(req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) { res.status(401).json({ error: "請先登入" }); return; }
+    next();
+  } catch (err) {
+    recordError("upload:auth", err);
+    res.status(500).json({ error: "驗證失敗，請稍後再試" });
+  }
+}
+
 /** 上傳素材（multipart: file + projectId [+ title]）→ 入素材庫、回傳 asset */
-app.post("/api/upload", upload.single("file"), async (req, res) => {
+app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
     const auth = await resolveSession(req);
@@ -315,6 +338,119 @@ app.get("/api/assets/:id/file", async (req, res) => {
   } catch (err) {
     console.error("[assets:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取素材失敗" });
+  }
+});
+
+// ── 資料庫文件（AI 可讀檔案層）：上傳＋下載（權限走 databaseAcl，配額每人 5GB 可調） ──
+
+/** 上傳文件到資料庫（multipart: file + tableId [+ name]）→ 抽純文字供 AI 讀、回傳檔案列 */
+app.post("/api/databases/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
+  const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) { await cleanup(); return res.status(401).json({ error: "請先登入" }); }
+    if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
+
+    const tableId = String(req.body?.tableId ?? "");
+    const [table] = await db.select().from(schema.dataTables)
+      .where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
+    const { resolveTableAccess } = await import("./services/databaseAcl");
+    const access = table ? resolveTableAccess(auth, table) : null;
+    if (!table || !access?.canRead) { await cleanup(); return res.status(404).json({ error: "找不到這個資料庫" }); }
+    if (!access.canWriteRows) { await cleanup(); return res.status(403).json({ error: "這個資料庫目前只開放管理者寫入" }); }
+
+    let mime = req.file.mimetype.split(";")[0].trim().toLowerCase();
+    if (mime === "application/octet-stream" || mime === "") {
+      const { mimeFromPath } = await import("./services/storage");
+      mime = mimeFromPath(req.file.originalname);
+    }
+    if (!isAllowedUploadMime(mime)) {
+      await cleanup();
+      return res.status(415).json({ error: `不支援的檔案格式（${mime}）——支援：文字/Markdown/CSV/JSON/HTML/字幕/PDF/DOCX 與圖片/影音/zip` });
+    }
+    const guard = await checkDiskSpace(req.file.size);
+    if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
+    const { quotaGuardError, extractTextFromBuffer, MAX_EXTRACT_BYTES } = await import("./services/databaseFiles");
+    const quotaErr = await quotaGuardError(auth.user.id, req.file.size);
+    if (quotaErr) { await cleanup(); return res.status(507).json({ error: quotaErr }); }
+
+    const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8");
+    const name = (String(req.body?.name ?? "").trim() || originalName || "上傳文件").slice(0, 120);
+    // 先在暫存路徑抽文字（adopt 之後就要用正式路徑；小檔直接讀進記憶體）
+    let textContent: string | null = null;
+    if (req.file.size <= MAX_EXTRACT_BYTES) {
+      const { readFile } = await import("node:fs/promises");
+      const buf = await readFile(req.file.path);
+      textContent = await extractTextFromBuffer(mime, name, buf);
+    }
+    const { storagePath, sizeBytes } = await adoptTmpFile(req.file.path, mime);
+    try {
+      const [file] = await db.insert(schema.dataFiles).values({
+        tableId: table.id, name, mime, sizeBytes, storagePath,
+        textContent, uploadedBy: auth.user.id,
+      }).returning();
+      // REST 上傳繞過 tRPC 的 mutation 審計中介層——比照 recordMcpAudit 自行落一筆（fire-and-forget）
+      void (async () => {
+        const { sanitizeAuditInput } = await import("./services/audit");
+        await db.insert(schema.auditLog).values({
+          actorId: auth.user.id,
+          action: "databases.uploadFile",
+          groupId: table.groupId,
+          input: sanitizeAuditInput({ tableId: table.id, name, mime, sizeBytes }) as Record<string, unknown>,
+          ok: true,
+        });
+      })().catch((e) => console.warn("[databases:upload] 審計寫入失敗（不影響主流程）：", e instanceof Error ? e.message : e));
+      res.json({ ok: true, file: { id: file.id, name: file.name, readableChars: textContent?.length ?? 0 } });
+    } catch (dbErr) {
+      const { removeStoredFile } = await import("./services/storage");
+      await removeStoredFile(storagePath); // DB 失敗 → 清掉已落地的孤兒檔
+      throw dbErr;
+    }
+  } catch (err) {
+    await cleanup();
+    console.error("[databases:upload]", err);
+    recordError("databases:upload", err);
+    if (!res.headersSent) res.status(500).json({ error: "上傳失敗，請稍後再試" });
+  }
+});
+app.use("/api/databases/upload", (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    const msg = err.code === "LIMIT_FILE_SIZE" ? `檔案太大（上限 ${Math.round(MAX_FILE_BYTES / 1024 / 1024)}MB）` : `上傳失敗：${err.code}`;
+    return res.status(413).json({ error: msg });
+  }
+  next(err);
+});
+
+/** 資料庫文件下載：登入＋資料庫讀取權（databaseAcl）；或帶 dbfile 簽名（給 fal 視覺模型抓圖，短效）；非影音一律 attachment */
+app.get("/api/databases/files/:id/file", async (req, res) => {
+  try {
+    const { verifyDbFileSig } = await import("./services/storage");
+    const signed = verifyDbFileSig(req.params.id, req.query.exp as string | undefined, req.query.sig as string | undefined);
+    if (!signed) {
+      const auth = await resolveSession(req);
+      if (!auth) return res.status(401).json({ error: "請先登入" });
+      const [fileRow] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, req.params.id));
+      if (!fileRow) return res.status(404).json({ error: "找不到這份文件" });
+      const [tableRow] = await db.select().from(schema.dataTables)
+        .where(and(eq(schema.dataTables.id, fileRow.tableId), isNull(schema.dataTables.deletedAt)));
+      const { resolveTableAccess } = await import("./services/databaseAcl");
+      if (!tableRow || !resolveTableAccess(auth, tableRow).canRead) return res.status(404).json({ error: "找不到這份文件" });
+    }
+    const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, req.params.id));
+    if (!file) return res.status(404).json({ error: "找不到這份文件" });
+    if (!file.storagePath) {
+      // 純文字匯入（Notion/網頁）沒有原檔——給文字本體當下載內容
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}.txt`);
+      return res.send(file.textContent ?? "");
+    }
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (kindFromMime(file.mime) === "doc") res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
+    res.sendFile(absPathOf(file.storagePath), { headers: { "Content-Type": file.mime } });
+  } catch (err) {
+    console.error("[databases:file]", err);
+    if (!res.headersSent) res.status(500).json({ error: "讀取文件失敗" });
   }
 });
 
@@ -459,7 +595,15 @@ app.get("/api/me/export", async (req, res) => {
 // MCP 伺服器介面（設 MCP_API_KEY 啟用；供外部 AI 客戶端操作）
 app.post("/api/mcp", handleMcp);
 
-// 系統自檢（超管登入後用瀏覽器開，或管理頁按鈕）——部署後一鍵驗證所有子系統
+// 資料庫對外連接（本機腳本／手機 App／其他系統）：REST API v1 + CSV 匯出 + 行事曆訂閱。
+// 認證＝個人 MCP 金鑰（x-api-key / ?key=）或 session cookie；授權沿用 databaseAcl。
+app.get("/api/v1/databases", handleV1ListDatabases);
+app.get("/api/v1/databases/:id/rows", handleV1ListRows);
+app.post("/api/v1/databases/:id/rows", handleV1AddRow);
+app.get("/api/databases/:id/rows.csv", handleCsvExport);
+app.get("/api/databases/:id/calendar.ics", handleDatabaseIcs);
+
+// 系統自檢（開發者登入後用瀏覽器開，或管理頁按鈕）——部署後一鍵驗證所有子系統
 app.get("/api/selftest", async (req, res) => {
   const auth = await resolveSession(req);
   if (!auth?.user.isSuperAdmin) return res.status(403).json({ error: "需要開發者帳號登入後使用" });
@@ -503,9 +647,11 @@ app.get("/api/selftest", async (req, res) => {
     await db.delete(schema.invites).where(eq(schema.invites.token, sha256(token)));
     return "建立/銷毀 OK";
   });
-  await run("生成模式", async () =>
-    isMockMode() ? "示範模式(免費)——填 FAL_KEY 並移除 FAL_MOCK 切正式" : "正式模式(FAL_KEY 已設)",
-  );
+  await run("生成模式", async () => {
+    if (isMockMode()) return "E2E 測試模式(E2E_MOCK=1,僅供自動化測試——正式部署請移除)";
+    if (!process.env.FAL_KEY) throw new Error("正式模式但 FAL_KEY 未設定——媒體生成會失敗,請到部署平台 Variables 填入金鑰");
+    return "正式模式(FAL_KEY 已設)";
+  });
   await run("儲存/交付(zip 引擎)", async () => {
     const { ZipArchive } = await import("archiver");
     const archive = new ZipArchive({ zlib: { level: 1 } });
@@ -550,8 +696,45 @@ app.get("/api/selftest", async (req, res) => {
 // tRPC API
 app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
 
+// AI 專案助手「思考過程」串流（SSE）：與 tRPC assistant.ask 共用 runAssistantAsk 核心，
+// 差別是逐步把「思考中／正在查什麼／查到什麼」推給前端即時呈現，最後 done 帶最終回答＋可執行動作。
+// 前端串流失敗會自動退回 tRPC ask（見 ProjectAssistant），故此路由是加分體驗、非關鍵路徑。
+app.post("/api/assistant/ask", async (req, res) => {
+  const auth = await resolveSession(req);
+  if (!auth) return res.status(401).json({ error: "請先登入" });
+  const projectId = String(req.body?.projectId ?? "");
+  const message = String(req.body?.message ?? "").trim();
+  if (!UUID_RE.test(projectId) || !message || message.length > 1000) {
+    return res.status(400).json({ error: "參數不正確（需 projectId 與 1–1000 字的問題）" });
+  }
+  // SSE 標頭：關快取、關代理緩衝（Nginx X-Accel-Buffering），讓事件即時逐筆送達
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+  const sse = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  sse("open", { ok: true }); // 立刻開流，前端知道連上了（比等第一個 LLM 事件更即時）
+  try {
+    const { runAssistantAsk } = await import("./routers/assistant");
+    const result = await runAssistantAsk(
+      { projectId, message, userId: auth.user.id, isInGroup: (g) => auth.groups.some((x) => x.groupId === g) },
+      (e) => sse("step", e),
+    );
+    sse("done", result);
+  } catch (err) {
+    // runAssistantAsk 內部錯誤多已轉成 fallback 回答；會拋出的是節流/權限/找不到專案等守門（TRPCError 帶人話 message）
+    recordError("assistant:stream", err);
+    sse("error", { message: err instanceof Error ? err.message : "AI 助手暫時沒回應，請稍後再試" });
+  } finally {
+    res.end();
+  }
+});
+
 // ── 元件級回饋截圖（R23）：上傳（登入即可）＋依報告權限服務 ──
-app.post("/api/feedback/screenshot", upload.single("file"), async (req, res) => {
+app.post("/api/feedback/screenshot", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
     const auth = await resolveSession(req);
@@ -582,7 +765,7 @@ app.get("/api/feedback/:id/shot", async (req, res) => {
     if (!report || !report.screenshotPath) return res.status(404).json({ error: "找不到截圖" });
     // 只服務 feedback/ 目錄下的截圖——擋掉「拿別池 asset 路徑當 screenshotPath 提交後偷讀」
     if (!isFeedbackShotPath(report.screenshotPath)) return res.status(404).json({ error: "找不到截圖" });
-    // 作者本人、報告所屬組的組長/管理員、或超管才看得到
+    // 作者本人、報告所屬組的組長/管理員、或開發者才看得到
     const canView =
       report.userId === auth.user.id ||
       auth.user.isSuperAdmin ||
@@ -624,7 +807,8 @@ function scheduleFeedbackSweep(): void {
 }
 
 const httpServer = app.listen(port, () => {
-  console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${isMockMode() ? "示範模式" : "正式模式"}）`);
+  const falMode = isMockMode() ? "E2E 測試模式（僅供自動化測試）" : process.env.FAL_KEY ? "正式模式" : "正式模式（⚠ FAL_KEY 未設定，媒體生成會失敗）";
+  console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${falMode}）`);
   try {
     ensureStorageDirs();
     console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（持久 Volume）" : "（本機模式）"}`);
@@ -646,7 +830,9 @@ const httpServer = app.listen(port, () => {
         // DB 就緒後才啟動背景執行器（每數秒讀 workflow_runs/generations，建表前啟動只會空轉報錯）
         startWorkflowRunner();
         startGenerationRunner(); // A：單張生成也改由伺服器背景推進，關頁不再卡「生成中」
+        startAgentRunner(); // AI 代理：核准後的計畫由伺服器背景逐步執行
         scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
+        startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
         console.log("[boot] ✓ 建表/目錄/種子完成，系統就緒（工作流＋單張生成執行器已啟動）");
         return;
       }

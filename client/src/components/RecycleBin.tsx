@@ -23,7 +23,8 @@ function DeletedRow({
   when,
   onRestore,
   onPurge,
-  busy,
+  restoring,
+  purging,
 }: {
   icon: IconName;
   title: string;
@@ -31,8 +32,11 @@ function DeletedRow({
   when: Date | string | null;
   onRestore: () => void;
   onPurge: () => void;
-  busy: boolean;
+  /** 這一列自己的還原/刪除進行中——只鎖本列並顯示進度，其他列照常可按（連續救回多項不必整桶等待） */
+  restoring: boolean;
+  purging: boolean;
 }) {
+  const rowBusy = restoring || purging;
   return (
     <div
       style={{
@@ -47,19 +51,23 @@ function DeletedRow({
           {sub ? `${sub}・` : ""}刪除於 {fmtWhen(when) || "—"}
         </div>
       </div>
-      <button className="btn-sm" disabled={busy} onClick={onRestore}>
-        <Icon name="Undo2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />還原
+      <button className="btn-sm" disabled={rowBusy} onClick={onRestore}>
+        {restoring ? (
+          <><Icon name="Loader" className="spin" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />還原中…</>
+        ) : (
+          <><Icon name="Undo2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />還原</>
+        )}
       </button>
       <ConfirmButton
         triggerClassName="btn-sm"
         triggerStyle={{ color: "var(--danger-ink)" }}
-        disabled={busy}
+        disabled={rowBusy}
         triggerTitle="永久刪除後無法復原"
         message={`永久刪除「${title}」？此動作無法復原。`}
         confirmLabel="永久刪除"
         onConfirm={onPurge}
       >
-        永久刪除
+        {purging ? "刪除中…" : "永久刪除"}
       </ConfirmButton>
     </div>
   );
@@ -87,10 +95,6 @@ export function RecycleBin({ projectId }: { projectId: string }) {
   const restoreKnowledge = trpc.knowledge.restore.useMutation({ onSuccess: refreshKnowledge });
   const purgeKnowledge = trpc.knowledge.purge.useMutation({ onSuccess: refreshKnowledge });
 
-  const busy =
-    restoreAsset.isPending || purgeAsset.isPending ||
-    restoreScene.isPending || purgeScene.isPending ||
-    restoreKnowledge.isPending || purgeKnowledge.isPending;
   const err =
     restoreAsset.error ?? purgeAsset.error ??
     restoreScene.error ?? purgeScene.error ??
@@ -119,7 +123,16 @@ export function RecycleBin({ projectId }: { projectId: string }) {
       {open && (
         <div style={{ marginTop: 12 }}>
           {deleted.isLoading ? (
-            <p className="hint">載入中…</p>
+            // 與全站主清單一致的骨架微光（一行灰字容易被誤讀成「卡住了」，且載入後高度跳動）
+            <div aria-hidden="true">
+              {[0, 1].map((i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid var(--border-soft)" }}>
+                  <div className="skeleton" style={{ width: 16, height: 16, borderRadius: 4 }} />
+                  <div className="skeleton" style={{ height: 13, flex: "1 1 auto", maxWidth: i === 0 ? 220 : 170 }} />
+                  <div className="skeleton" style={{ height: 26, width: 64, borderRadius: 999 }} />
+                </div>
+              ))}
+            </div>
           ) : deleted.error ? (
             <p className="error">載入回收桶失敗：{deleted.error.message}</p>
           ) : total === 0 ? (
@@ -138,7 +151,8 @@ export function RecycleBin({ projectId }: { projectId: string }) {
                       title={a.title}
                       sub={a.kind}
                       when={a.deletedAt}
-                      busy={busy}
+                      restoring={restoreAsset.isPending && restoreAsset.variables?.assetId === a.id}
+                      purging={purgeAsset.isPending && purgeAsset.variables?.assetId === a.id}
                       onRestore={() => restoreAsset.mutate({ assetId: a.id })}
                       onPurge={() => purgeAsset.mutate({ assetId: a.id })}
                     />
@@ -155,7 +169,8 @@ export function RecycleBin({ projectId }: { projectId: string }) {
                       icon="Clapperboard"
                       title={s.title}
                       when={s.deletedAt}
-                      busy={busy}
+                      restoring={restoreScene.isPending && restoreScene.variables?.sceneId === s.id}
+                      purging={purgeScene.isPending && purgeScene.variables?.sceneId === s.id}
                       onRestore={() => restoreScene.mutate({ sceneId: s.id })}
                       onPurge={() => purgeScene.mutate({ sceneId: s.id })}
                     />
@@ -173,7 +188,8 @@ export function RecycleBin({ projectId }: { projectId: string }) {
                       title={k.title}
                       sub={`${KNOWLEDGE_LABEL[k.kind] ?? k.kind}・${k.chars} 字`}
                       when={k.deletedAt}
-                      busy={busy}
+                      restoring={restoreKnowledge.isPending && restoreKnowledge.variables?.id === k.id}
+                      purging={purgeKnowledge.isPending && purgeKnowledge.variables?.id === k.id}
                       onRestore={() => restoreKnowledge.mutate({ id: k.id })}
                       onPurge={() => purgeKnowledge.mutate({ id: k.id })}
                     />

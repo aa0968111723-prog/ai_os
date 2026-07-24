@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { inferRouterOutputs } from "@trpc/server";
 import { useLocation } from "wouter";
 import { trpc } from "../api";
+import type { AppRouter } from "../../../server/routers";
 import { Icon } from "./Icon";
 import { DISCUSS_EVENT, jumpToRef, setPlannerFocus, type DiscussRef } from "../discuss";
+import { escapeRegExp, parseMentionedNames } from "@shared/mentions";
+
+/** 單則留言(含回覆摘要／表情彙總／引用卡）——由 messages.list 推得,列元件與父層共用同一形狀 */
+type MessageRowData = inferRouterOutputs<AppRouter>["messages"]["list"][number];
 
 /** 留言 @了助手就觸發 AI 回覆——與後端 messageAssistant.ASSISTANT_TRIGGER 同字串 */
 const ASSISTANT_TRIGGER = "@助手";
@@ -93,7 +99,8 @@ const REF_ICON: Record<DiscussRef["refType"], "Clapperboard" | "FileText" | "Spa
 function renderBody(body: string, mentionNames: string[]) {
   if (!mentionNames.length) return body;
   // 名字可能含正則特殊字元,逐一跳脫;長名優先比對避免「阿明」吃掉「阿明師兄」
-  const escaped = [...mentionNames].sort((a, b) => b.length - a.length).map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  // (跳脫與長名優先皆與送出端 parseMentionedNames 共用同一套規則,標亮與實際提及一致)
+  const escaped = [...mentionNames].sort((a, b) => b.length - a.length).map(escapeRegExp);
   const parts = body.split(new RegExp(`(@(?:${escaped.join("|")}))`, "g"));
   return parts.map((part, idx) =>
     part.startsWith("@") && mentionNames.includes(part.slice(1)) ? (
@@ -103,6 +110,236 @@ function renderBody(body: string, mentionNames: string[]) {
     ),
   );
 }
+
+/**
+ * 單則留言列(memo 化)。留言區每 8 秒輪詢一次、且同房夥伴任何 mutation 都會廣播 invalidate 重抓;
+ * react-query 的 structural sharing 讓「內容沒變的留言」跨重抓維持同一個物件參照,配上 memo,
+ * 未變動的列就整棵子樹跳過重繪(含 renderBody 的正則建置),只有真正新增/變動的列才重算。
+ * 父層傳入的 callback 皆為穩定參照(useCallback + 穩定的 mutate),開關狀態以布林傳入,memo 才生效。
+ */
+const MessageRow = memo(function MessageRow({
+  m,
+  myId,
+  myName,
+  nameById,
+  isLeader,
+  emojiOpen,
+  todoOpen,
+  noteOpen,
+  reactPending,
+  setPinnedPending,
+  addSchedulePending,
+  addScheduleError,
+  addNotePending,
+  addNoteError,
+  onReact,
+  onToggleEmoji,
+  onReply,
+  onTogglePin,
+  onToggleTodo,
+  onToggleNote,
+  onSubmitTodo,
+  onCancelTodo,
+  onSubmitNote,
+  onCancelNote,
+  onJumpRef,
+}: {
+  m: MessageRowData;
+  myId: string | undefined;
+  myName: string | undefined;
+  nameById: Map<string, string>;
+  isLeader: boolean;
+  emojiOpen: boolean;
+  todoOpen: boolean;
+  noteOpen: boolean;
+  reactPending: boolean;
+  setPinnedPending: boolean;
+  addSchedulePending: boolean;
+  addScheduleError?: string;
+  addNotePending: boolean;
+  addNoteError?: string;
+  onReact: (messageId: string, emoji: (typeof EMOJI)[number]) => void;
+  onToggleEmoji: (messageId: string) => void;
+  onReply: (messageId: string, userName: string, snippet: string) => void;
+  onTogglePin: (messageId: string, pinned: boolean) => void;
+  onToggleTodo: (messageId: string) => void;
+  onToggleNote: (messageId: string) => void;
+  onSubmitTodo: (messageId: string, title: string, startsAt: string) => void;
+  onCancelTodo: () => void;
+  onSubmitNote: (messageId: string, title: string, content: string) => void;
+  onCancelNote: () => void;
+  onJumpRef: (refType: DiscussRef["refType"], refId: string) => void;
+}) {
+  // 系統訊息(審核結果通知等):置中淡色小字,跟夥伴的對話區隔開
+  if (m.kind === "system") {
+    return (
+      <div style={{ textAlign: "center", color: "var(--fg-secondary)", fontSize: "var(--fs-12)", marginTop: 10 }}>
+        {m.body}
+      </div>
+    );
+  }
+  const mine = m.userId === myId;
+  const isAssistant = m.kind === "assistant";
+  const isVoice = m.kind === "voice";
+  const mentionedMe = !!myId && (m.mentions ?? []).includes(myId);
+  const mentionNames = (m.mentions ?? []).map((uid) => nameById.get(uid)).filter((n): n is string => !!n);
+  return (
+    <div className={`msg-block${mentionedMe ? " mentioned-me" : ""}${isAssistant ? " assistant" : ""}`}>
+      <div className="msg">
+        <span className="who">
+          {isAssistant ? (
+            <><Icon name="Sparkles" size={12} style={{ marginRight: 3, color: "var(--primary-ink)" }} />AI 助手</>
+          ) : (
+            <>{m.userName ?? (mine ? myName : "夥伴")}{mine ? "（我）" : ""}</>
+          )}
+          {m.pinned ? <Icon name="Star" size={11} style={{ marginLeft: 4, color: "var(--gold-ink)" }} /> : null}
+        </span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          {/* ↩ 回覆引用:原句摘要 */}
+          {m.replyTo && (
+            <span className="reply-quote">
+              <Icon name="Undo2" size={11} style={{ marginRight: 4, verticalAlign: "-1px" }} />
+              {m.replyTo.userName ?? "夥伴"}:{m.replyTo.snippet}
+            </span>
+          )}
+          {/* 🎙️ 語音留言:播放器 + 逐字稿(轉錄中顯示 body 佔位字) */}
+          {isVoice && m.voiceUrl && (
+            <audio controls preload="none" src={m.voiceUrl} style={{ height: 32, maxWidth: "100%", display: "block", marginBottom: 4 }} aria-label="語音留言" />
+          )}
+          {isVoice ? (
+            <span className={m.voiceStatus === "pending" ? "hint" : undefined}>{m.body}</span>
+          ) : (
+            <span>{renderBody(m.body, mentionNames)}</span>
+          )}
+          {/* 🔗 引用作品卡:縮圖+標題,點「查看」跳回原件 */}
+          {m.refType && m.refId && (
+            <button
+              type="button"
+              className="ref-card"
+              title={m.ref ? "跳到這個項目" : undefined}
+              onClick={() => {
+                if (!m.ref) return;
+                onJumpRef(m.refType as DiscussRef["refType"], m.refId!);
+              }}
+              disabled={!m.ref}
+            >
+              {m.ref?.thumb ? (
+                <img src={m.ref.thumb} alt="" loading="lazy" />
+              ) : (
+                <Icon name={REF_ICON[m.refType as DiscussRef["refType"]]} size={14} />
+              )}
+              <span className="ref-title">
+                {REF_LABEL[m.refType as DiscussRef["refType"]]}・{m.ref ? m.ref.title : "已不存在"}
+              </span>
+              {m.ref && <span className="ref-go">查看</span>}
+            </button>
+          )}
+        </span>
+        <span className="time">
+          {new Date(m.createdAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}
+        </span>
+      </div>
+      {/* 表情回應+動作列:輕量、貼在留言下緣 */}
+      <div className="msg-tools">
+        {m.reactions.map((r) => (
+          <button
+            key={r.emoji}
+            type="button"
+            className={`reaction-pill${r.mine ? " mine" : ""}`}
+            title={r.mine ? "再按一次收回" : "我也回應"}
+            disabled={reactPending}
+            onClick={() => onReact(m.id, r.emoji as (typeof EMOJI)[number])}
+          >
+            {r.emoji} {r.count}
+          </button>
+        ))}
+        <div style={{ position: "relative", display: "inline-flex" }}>
+          <button
+            type="button"
+            className="msg-action"
+            aria-label="加表情回應"
+            title="表情回應"
+            onClick={() => onToggleEmoji(m.id)}
+          >
+            <Icon name="Plus" size={12} />
+          </button>
+          {emojiOpen && (
+            <div className="emoji-pop" role="menu">
+              {EMOJI.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  disabled={reactPending}
+                  onClick={() => onReact(m.id, e)}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          className="msg-action"
+          title="回覆這一則"
+          onClick={() => onReply(m.id, m.userName ?? "夥伴", m.body.slice(0, 40))}
+        >
+          <Icon name="Undo2" size={12} /> 回覆
+        </button>
+        {isLeader && (
+          <button
+            type="button"
+            className="msg-action"
+            title={m.pinned ? "取消釘選" : "釘選(固定在頂部)"}
+            disabled={setPinnedPending}
+            onClick={() => onTogglePin(m.id, !m.pinned)}
+          >
+            <Icon name="Star" size={12} /> {m.pinned ? "取消釘選" : "釘選"}
+          </button>
+        )}
+        {/* 轉待辦／轉筆記:把口頭承諾變成排程或會議紀錄(組內任何人可加,後端 requireGroup),
+            並記 sourceMessageId 讓 Planner 反向跳回這則留言 */}
+        <button
+          type="button"
+          className="msg-action"
+          title="把這句轉成排程待辦"
+          onClick={() => onToggleTodo(m.id)}
+        >
+          <Icon name="CalendarPlus" size={12} /> 轉待辦
+        </button>
+        <button
+          type="button"
+          className="msg-action"
+          title="把這句存成筆記/會議紀錄"
+          onClick={() => onToggleNote(m.id)}
+        >
+          <Icon name="FileText" size={12} /> 轉筆記
+        </button>
+      </div>
+      {/* 轉待辦行內表單:標題預填留言內容、選截止日 → schedule.add */}
+      {todoOpen && (
+        <TodoForm
+          defaultTitle={m.body.slice(0, 120)}
+          pending={addSchedulePending}
+          error={addScheduleError}
+          onCancel={onCancelTodo}
+          onSubmit={(title, startsAt) => onSubmitTodo(m.id, title, startsAt)}
+        />
+      )}
+      {/* 轉筆記行內表單:標題預填留言前段、內容預填全文 → notes.add */}
+      {noteOpen && (
+        <NoteForm
+          defaultTitle={m.body.slice(0, 40)}
+          defaultContent={m.body}
+          pending={addNotePending}
+          error={addNoteError}
+          onCancel={onCancelNote}
+          onSubmit={(title, content) => onSubmitNote(m.id, title, content)}
+        />
+      )}
+    </div>
+  );
+});
 
 export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projectId: string; groupId: string; isLeader: boolean; canEdit: boolean }) {
   const utils = trpc.useUtils();
@@ -135,6 +372,9 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   const react = trpc.messages.react.useMutation({ onSuccess: () => utils.messages.list.invalidate({ projectId }) });
   const setPinned = trpc.messages.setPinned.useMutation({ onSuccess: () => utils.messages.list.invalidate({ projectId }) });
   const markRead = trpc.messages.markRead.useMutation({
+    // silentSync：這是每 ~30s 自動觸發的「非內容」mutation，不該經即時同步廣播失效給同房所有人
+    // （否則光開著留言面板就讓每位協作者每 30 秒重抓全部查詢）。realtime 的廣播訂閱會據此跳過。
+    meta: { silentSync: true },
     onSuccess: () => utils.messages.unread.invalidate({ projectId }),
   });
   const addSchedule = trpc.schedule.add.useMutation({ onSuccess: () => setTodoFor(null) });
@@ -143,8 +383,9 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   const [replyTo, setReplyTo] = useState<{ id: string; userName: string; snippet: string } | null>(null);
   const [pendingRef, setPendingRef] = useState<DiscussRef | null>(null);
   const [emojiPickFor, setEmojiPickFor] = useState<string | null>(null);
-  const [todoFor, setTodoFor] = useState<{ id: string; body: string } | null>(null);
-  const [noteFor, setNoteFor] = useState<{ id: string; body: string } | null>(null);
+  // todo/note 行內表單只需記「開在哪一則」的 id;預填內容直接讀該列的 m.body,不必另存
+  const [todoFor, setTodoFor] = useState<string | null>(null);
+  const [noteFor, setNoteFor] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [voiceErr, setVoiceErr] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -286,10 +527,11 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   const send = (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || post.isPending) return;
-    // 提及=內文仍出現「@名字」的同組成員(打了又刪掉的不算)
-    const mentions = (roles.data?.members ?? [])
-      .filter((m) => trimmed.includes(`@${m.name}`))
-      .map((m) => m.userId);
+    // 提及=內文仍出現「@名字」的同組成員(打了又刪掉的不算)。
+    // 用與留言區高亮相同的長名優先比對(parseMentionedNames):避免「@阿明師兄」誤把「阿明」也提及。
+    const allMembers = roles.data?.members ?? [];
+    const mentionedNames = new Set(parseMentionedNames(trimmed, allMembers.map((m) => m.name)));
+    const mentions = allMembers.filter((m) => mentionedNames.has(m.name)).map((m) => m.userId);
     post.mutate({
       projectId,
       body: trimmed,
@@ -301,6 +543,63 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   };
 
   const pinnedMsgs = (list.data ?? []).filter((m) => m.pinned);
+
+  // 傳給 memo 化留言列的穩定 callback:react-query 的 mutate 本身跨 render 穩定,
+  // 這些 useCallback 依賴的又都是 mutate/穩定值,所以 callback 參照不變,memo 才擋得住無謂重繪。
+  const reactMutate = react.mutate;
+  const setPinnedMutate = setPinned.mutate;
+  const addScheduleMutate = addSchedule.mutate;
+  const addNoteMutate = addNote.mutate;
+  const onReact = useCallback(
+    (messageId: string, emoji: (typeof EMOJI)[number]) => {
+      reactMutate({ messageId, emoji });
+      setEmojiPickFor(null);
+    },
+    [reactMutate],
+  );
+  const onToggleEmoji = useCallback((messageId: string) => {
+    setEmojiPickFor((prev) => (prev === messageId ? null : messageId));
+  }, []);
+  const onReply = useCallback((messageId: string, userName: string, snippet: string) => {
+    setReplyTo({ id: messageId, userName, snippet });
+    inputRef.current?.focus();
+  }, []);
+  const onTogglePin = useCallback(
+    (messageId: string, pinned: boolean) => setPinnedMutate({ messageId, pinned }),
+    [setPinnedMutate],
+  );
+  const onToggleTodo = useCallback((messageId: string) => {
+    setNoteFor(null);
+    setTodoFor((prev) => (prev === messageId ? null : messageId));
+  }, []);
+  const onToggleNote = useCallback((messageId: string) => {
+    setTodoFor(null);
+    setNoteFor((prev) => (prev === messageId ? null : messageId));
+  }, []);
+  const onCancelTodo = useCallback(() => setTodoFor(null), []);
+  const onCancelNote = useCallback(() => setNoteFor(null), []);
+  const onSubmitTodo = useCallback(
+    (messageId: string, title: string, startsAt: string) =>
+      addScheduleMutate({ groupId, projectId, title, startsAt, sourceMessageId: messageId }),
+    [addScheduleMutate, groupId, projectId],
+  );
+  const onSubmitNote = useCallback(
+    (messageId: string, title: string, content: string) =>
+      addNoteMutate({ groupId, projectId, title, content, sourceMessageId: messageId }),
+    [addNoteMutate, groupId, projectId],
+  );
+  const onJumpRef = useCallback(
+    (refType: DiscussRef["refType"], refId: string) => {
+      // note/schedule 住在 /planner(另一頁):交棒 sessionStorage 再跳頁,Planner 掛載時高亮
+      if (refType === "note" || refType === "schedule") {
+        setPlannerFocus(refType, refId);
+        navigate("/planner");
+      } else {
+        jumpToRef(refType, refId);
+      }
+    },
+    [navigate],
+  );
 
   return (
     <aside className="card" data-fb="組內留言" ref={panelRef}>
@@ -346,190 +645,36 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
           if (el) stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
       >
-        {list.data?.map((m) => {
-          // 系統訊息(審核結果通知等):置中淡色小字,跟夥伴的對話區隔開
-          if (m.kind === "system") {
-            return (
-              <div key={m.id} style={{ textAlign: "center", color: "var(--fg-secondary)", fontSize: "var(--fs-12)", marginTop: 10 }}>
-                {m.body}
-              </div>
-            );
-          }
-          const mine = m.userId === myId;
-          const isAssistant = m.kind === "assistant";
-          const isVoice = m.kind === "voice";
-          const mentionedMe = !!myId && (m.mentions ?? []).includes(myId);
-          const mentionNames = (m.mentions ?? []).map((uid) => nameById.get(uid)).filter((n): n is string => !!n);
-          return (
-            <div key={m.id} className={`msg-block${mentionedMe ? " mentioned-me" : ""}${isAssistant ? " assistant" : ""}`}>
-              <div className="msg">
-                <span className="who">
-                  {isAssistant ? (
-                    <><Icon name="Sparkles" size={12} style={{ marginRight: 3, color: "var(--primary-ink)" }} />AI 助手</>
-                  ) : (
-                    <>{m.userName ?? (mine ? me.data?.user.name : "夥伴")}{mine ? "（我）" : ""}</>
-                  )}
-                  {m.pinned ? <Icon name="Star" size={11} style={{ marginLeft: 4, color: "var(--gold-ink)" }} /> : null}
-                </span>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  {/* ↩ 回覆引用:原句摘要 */}
-                  {m.replyTo && (
-                    <span className="reply-quote">
-                      <Icon name="Undo2" size={11} style={{ marginRight: 4, verticalAlign: "-1px" }} />
-                      {m.replyTo.userName ?? "夥伴"}:{m.replyTo.snippet}
-                    </span>
-                  )}
-                  {/* 🎙️ 語音留言:播放器 + 逐字稿(轉錄中顯示 body 佔位字) */}
-                  {isVoice && m.voiceUrl && (
-                    <audio controls preload="none" src={m.voiceUrl} style={{ height: 32, maxWidth: "100%", display: "block", marginBottom: 4 }} aria-label="語音留言" />
-                  )}
-                  {isVoice ? (
-                    <span className={m.voiceStatus === "pending" ? "hint" : undefined}>{m.body}</span>
-                  ) : (
-                    <span>{renderBody(m.body, mentionNames)}</span>
-                  )}
-                  {/* 🔗 引用作品卡:縮圖+標題,點「查看」跳回原件 */}
-                  {m.refType && m.refId && (
-                    <button
-                      type="button"
-                      className="ref-card"
-                      title={m.ref ? "跳到這個項目" : undefined}
-                      onClick={() => {
-                        if (!m.ref) return;
-                        const t = m.refType as DiscussRef["refType"];
-                        // note/schedule 住在 /planner(另一頁):交棒 sessionStorage 再跳頁,Planner 掛載時高亮
-                        if (t === "note" || t === "schedule") {
-                          setPlannerFocus(t, m.refId!);
-                          navigate("/planner");
-                        } else {
-                          jumpToRef(t, m.refId!);
-                        }
-                      }}
-                      disabled={!m.ref}
-                    >
-                      {m.ref?.thumb ? (
-                        <img src={m.ref.thumb} alt="" loading="lazy" />
-                      ) : (
-                        <Icon name={REF_ICON[m.refType as DiscussRef["refType"]]} size={14} />
-                      )}
-                      <span className="ref-title">
-                        {REF_LABEL[m.refType as DiscussRef["refType"]]}・{m.ref ? m.ref.title : "已不存在"}
-                      </span>
-                      {m.ref && <span className="ref-go">查看</span>}
-                    </button>
-                  )}
-                </span>
-                <span className="time">
-                  {new Date(m.createdAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}
-                </span>
-              </div>
-              {/* 表情回應+動作列:輕量、貼在留言下緣 */}
-              <div className="msg-tools">
-                {m.reactions.map((r) => (
-                  <button
-                    key={r.emoji}
-                    type="button"
-                    className={`reaction-pill${r.mine ? " mine" : ""}`}
-                    title={r.mine ? "再按一次收回" : "我也回應"}
-                    disabled={react.isPending}
-                    onClick={() => react.mutate({ messageId: m.id, emoji: r.emoji as (typeof EMOJI)[number] })}
-                  >
-                    {r.emoji} {r.count}
-                  </button>
-                ))}
-                <div style={{ position: "relative", display: "inline-flex" }}>
-                  <button
-                    type="button"
-                    className="msg-action"
-                    aria-label="加表情回應"
-                    title="表情回應"
-                    onClick={() => setEmojiPickFor(emojiPickFor === m.id ? null : m.id)}
-                  >
-                    <Icon name="Plus" size={12} />
-                  </button>
-                  {emojiPickFor === m.id && (
-                    <div className="emoji-pop" role="menu">
-                      {EMOJI.map((e) => (
-                        <button
-                          key={e}
-                          type="button"
-                          disabled={react.isPending}
-                          onClick={() => {
-                            react.mutate({ messageId: m.id, emoji: e });
-                            setEmojiPickFor(null);
-                          }}
-                        >
-                          {e}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="msg-action"
-                  title="回覆這一則"
-                  onClick={() => {
-                    setReplyTo({ id: m.id, userName: m.userName ?? "夥伴", snippet: m.body.slice(0, 40) });
-                    inputRef.current?.focus();
-                  }}
-                >
-                  <Icon name="Undo2" size={12} /> 回覆
-                </button>
-                {isLeader && (
-                  <button
-                    type="button"
-                    className="msg-action"
-                    title={m.pinned ? "取消釘選" : "釘選(固定在頂部)"}
-                    disabled={setPinned.isPending}
-                    onClick={() => setPinned.mutate({ messageId: m.id, pinned: !m.pinned })}
-                  >
-                    <Icon name="Star" size={12} /> {m.pinned ? "取消釘選" : "釘選"}
-                  </button>
-                )}
-                {/* 轉待辦／轉筆記:把口頭承諾變成排程或會議紀錄(組內任何人可加,後端 requireGroup),
-                    並記 sourceMessageId 讓 Planner 反向跳回這則留言 */}
-                <button
-                  type="button"
-                  className="msg-action"
-                  title="把這句轉成排程待辦"
-                  onClick={() => { setNoteFor(null); setTodoFor(todoFor?.id === m.id ? null : { id: m.id, body: m.body }); }}
-                >
-                  <Icon name="CalendarPlus" size={12} /> 轉待辦
-                </button>
-                <button
-                  type="button"
-                  className="msg-action"
-                  title="把這句存成筆記/會議紀錄"
-                  onClick={() => { setTodoFor(null); setNoteFor(noteFor?.id === m.id ? null : { id: m.id, body: m.body }); }}
-                >
-                  <Icon name="FileText" size={12} /> 轉筆記
-                </button>
-              </div>
-              {/* 轉待辦行內表單:標題預填留言內容、選截止日 → schedule.add */}
-              {todoFor?.id === m.id && (
-                <TodoForm
-                  defaultTitle={m.body.slice(0, 120)}
-                  pending={addSchedule.isPending}
-                  error={addSchedule.error?.message}
-                  onCancel={() => setTodoFor(null)}
-                  onSubmit={(title, startsAt) => addSchedule.mutate({ groupId, projectId, title, startsAt, sourceMessageId: m.id })}
-                />
-              )}
-              {/* 轉筆記行內表單:標題預填留言前段、內容預填全文 → notes.add */}
-              {noteFor?.id === m.id && (
-                <NoteForm
-                  defaultTitle={m.body.slice(0, 40)}
-                  defaultContent={m.body}
-                  pending={addNote.isPending}
-                  error={addNote.error?.message}
-                  onCancel={() => setNoteFor(null)}
-                  onSubmit={(title, content) => addNote.mutate({ groupId, projectId, title, content, sourceMessageId: m.id })}
-                />
-              )}
-            </div>
-          );
-        })}
+        {list.data?.map((m) => (
+          <MessageRow
+            key={m.id}
+            m={m}
+            myId={myId}
+            myName={me.data?.user.name}
+            nameById={nameById}
+            isLeader={isLeader}
+            emojiOpen={emojiPickFor === m.id}
+            todoOpen={todoFor === m.id}
+            noteOpen={noteFor === m.id}
+            reactPending={react.isPending}
+            setPinnedPending={setPinned.isPending}
+            addSchedulePending={addSchedule.isPending}
+            addScheduleError={addSchedule.error?.message}
+            addNotePending={addNote.isPending}
+            addNoteError={addNote.error?.message}
+            onReact={onReact}
+            onToggleEmoji={onToggleEmoji}
+            onReply={onReply}
+            onTogglePin={onTogglePin}
+            onToggleTodo={onToggleTodo}
+            onToggleNote={onToggleNote}
+            onSubmitTodo={onSubmitTodo}
+            onCancelTodo={onCancelTodo}
+            onSubmitNote={onSubmitNote}
+            onCancelNote={onCancelNote}
+            onJumpRef={onJumpRef}
+          />
+        ))}
       </div>
 
       {/* 快速短語:一鍵送出,零打字回應;末尾加「問 AI 助手」把 @助手 帶進輸入框 */}

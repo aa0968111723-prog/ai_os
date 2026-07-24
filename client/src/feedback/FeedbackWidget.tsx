@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { FEEDBACK_CATEGORIES, FEEDBACK_PAGES, type FeedbackCategory } from "@shared/options";
 import { captureWithHighlight, pickElement, type PickResult } from "./picker";
@@ -290,6 +290,9 @@ function ReportForm({
       >
         <strong style={{ fontSize: 15 }}>收到了，感恩</strong>
         <p className="hint" style={{ margin: "6px 0 0" }}>你說的會直接影響下一版怎麼改。</p>
+        <Link href="/my-reports" onClick={onClose} style={{ display: "inline-block", marginTop: 10, fontSize: 13 }}>
+          查看我的回報
+        </Link>
       </div>
     );
   }

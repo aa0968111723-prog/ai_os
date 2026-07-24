@@ -1,5 +1,5 @@
 # Phase 3 e2e：專案級權限(2.3)/筆記排程+.ics(10)/團隊彙總代理(12)/助手拆分鏡動作鏈(6.6)。
-# 前置：FAL_MOCK=1、:3199、SEED_ADMIN_EMAIL=admin@aidirector.local、SEED_ADMIN_PASSWORD=test-admin-123、全新 DB。
+# 前置：E2E_MOCK=1、:3199、SEED_ADMIN_EMAIL=admin@aidirector.local、SEED_ADMIN_PASSWORD=test-admin-123、全新 DB。
 import json, time, urllib.request, urllib.parse, urllib.error
 
 import os as _os

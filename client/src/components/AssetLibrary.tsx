@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
-import { ConfirmButton } from "./interactions";
+import { ConfirmButton, useRovingRadio } from "./interactions";
 import { discussInMessages } from "../discuss";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
+  if (bytes < 1024) return "<1KB"; // 地毯實測外觀修復：極小檔 Math.round 歸零顯示「0KB」很怪
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)}KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
@@ -44,9 +45,24 @@ export function AssetLibrary({
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   const assets = trpc.projects.assets.useQuery({ projectId });
-  const del = trpc.projects.deleteAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
+  const del = trpc.projects.deleteAsset.useMutation({
+    onSuccess: () => {
+      utils.projects.assets.invalidate({ projectId });
+      // 同類缺陷一併修：素材軟刪後回收桶要立即看得到（與知識庫刪除同一根因）
+      utils.projects.listDeleted.invalidate({ projectId });
+    },
+  });
   const rename = trpc.projects.renameAsset.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
-  const toKnowledge = trpc.knowledge.addFromAsset.useMutation({ onSuccess: () => utils.knowledge.list.invalidate({ projectId }) });
+  // 文件「加入知識庫」：選單一點即關，回饋改在素材卡上顯示——進行中／成功綠字（2.5 秒）／失敗紅字，
+  // 比照相鄰圖片版 describeImage 的三態，不再按了零反應（使用者會以為壞掉而重按、灌出重複條目）
+  const [knowledgeAddedId, setKnowledgeAddedId] = useState<string | null>(null);
+  const toKnowledge = trpc.knowledge.addFromAsset.useMutation({
+    onSuccess: (_data, vars) => {
+      utils.knowledge.list.invalidate({ projectId });
+      setKnowledgeAddedId(vars.assetId);
+      window.setTimeout(() => setKnowledgeAddedId((cur) => (cur === vars.assetId ? null : cur)), 2500);
+    },
+  });
   // 圖片 AI 描述入知識庫（需求 6.2）：後端呼叫視覺模型看圖寫描述並寫入知識庫（依模型扣點）。
   // 成功後除了 invalidate，卡片上短暫顯示成功樣式（describedId，2.5 秒後自動消失）。
   const [describedId, setDescribedId] = useState<string | null>(null);
@@ -171,6 +187,11 @@ export function AssetLibrary({
   const filterActive = kindFilter !== "all" || onlySourceable || search.trim() !== "";
   const smallBtn = { padding: "2px 10px", fontSize: 11 } as const;
 
+  // radiogroup 的正規鍵盤模式（roving tabindex）：方向鍵在群組內漫遊、只有選中項進 Tab 序——
+  // 之前每顆 radio 都 tabIndex=0 且方向鍵無作用，報讀器宣告「用方向鍵選擇」卻按了沒反應
+  const visibleKindFilters = KIND_FILTERS.filter((f) => f.key === "all" || (kindCounts[f.key] ?? 0) > 0);
+  const kindRoving = useRovingRadio(visibleKindFilters.map((f) => f.key), kindFilter, setKindFilter);
+
   return (
     <section className="card">
       <h2>素材庫（上傳參考素材・生成成品自動入庫）</h2>
@@ -215,18 +236,17 @@ export function AssetLibrary({
         <>
           {/* 工具列：數量統計 · 種類篩選 chips · 搜尋 · 排序 */}
           <div data-fb="素材工具列" style={{ margin: "12px 0 4px", display: "flex", flexDirection: "column", gap: 8 }}>
-            <div role="radiogroup" aria-label="依種類篩選素材" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-              {KIND_FILTERS.map((f) => {
-                // 全部一定顯示；其餘只在該類有素材時才出現，避免點了空空的
+            <div role="radiogroup" aria-label="依種類篩選素材" {...kindRoving.groupProps} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+              {/* 全部一定顯示；其餘只在該類有素材時才出現（visibleKindFilters 已過濾），避免點了空空的 */}
+              {visibleKindFilters.map((f, idx) => {
                 const count = f.key === "all" ? total : kindCounts[f.key] ?? 0;
-                if (f.key !== "all" && count === 0) return null;
                 const on = kindFilter === f.key;
                 return (
                   <span
                     key={f.key}
                     role="radio"
                     aria-checked={on}
-                    tabIndex={0}
+                    {...kindRoving.itemProps(idx)}
                     className={`chip pick ${on ? "on" : ""}`}
                     onClick={() => setKindFilter(f.key)}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setKindFilter(f.key); } }}
@@ -392,6 +412,18 @@ export function AssetLibrary({
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
                       </div>
 
+                      {/* 文件「加入知識庫」的就地回饋：進行中轉圈／成功後短暫綠字（2.5 秒自動消失） */}
+                      {toKnowledge.isPending && toKnowledge.variables?.assetId === a.id && (
+                        <div className="hint" style={{ fontSize: 11 }}>
+                          <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />加入知識庫中…
+                        </div>
+                      )}
+                      {knowledgeAddedId === a.id && (
+                        <div className="hint" style={{ fontSize: 11, color: "var(--success-ink)" }}>
+                          <Icon name="Check" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />已加入知識庫
+                        </div>
+                      )}
+
                       {/* AI 描述入知識庫的就地回饋：進行中轉圈／成功後短暫綠字（2.5 秒自動消失） */}
                       {describeImage.isPending && describeImage.variables?.assetId === a.id && (
                         <div className="hint" style={{ fontSize: 11 }}>
@@ -515,6 +547,7 @@ export function AssetLibrary({
       {del.error && <p className="error">{del.error.message}</p>}
       {rename.error && <p className="error">改名失敗：{rename.error.message}</p>}
       {describeImage.error && <p className="error">AI 描述失敗：{describeImage.error.message}</p>}
+      {toKnowledge.error && <p className="error" role="alert">加入知識庫失敗：{toKnowledge.error.message}</p>}
 
       {/* 頁內大圖遮罩：點外部或 Esc 關閉 */}
       {lightbox && (

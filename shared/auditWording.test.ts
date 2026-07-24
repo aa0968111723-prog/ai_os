@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { AUDIT_ACTION_LABELS, humanizeAuditAction, summarizeAuditInput } from "./auditWording";
+import {
+  AUDIT_ACTION_LABELS,
+  AUDIT_CATEGORIES,
+  auditCategoryOf,
+  auditPrefixesForCategory,
+  describeAuditInput,
+  humanizeAuditAction,
+  summarizeAuditInput,
+} from "./auditWording";
 
 describe("humanizeAuditAction", () => {
   it("已知 action 翻成人話", () => {
@@ -50,15 +58,79 @@ describe("summarizeAuditInput", () => {
     expect(s).toBe(`提示詞：${"甲".repeat(48)}…`);
   });
 
-  it("沒有已知鍵時退回截短 JSON,uuid 縮 8 碼", () => {
-    const s = summarizeAuditInput({ sceneId: "3fa2aaaa-1111-2222-3333-444455556666", foo: 1 });
-    expect(s).toContain("3fa2aaaa…");
-    expect(s).not.toContain("444455556666");
+  it("只有 uuid／id 時回空字串（動作標題已說清楚,不塞技術代碼）", () => {
+    expect(summarizeAuditInput({ id: "3fa2aaaa-1111-2222-3333-444455556666" })).toBe("");
+    expect(summarizeAuditInput({ sceneId: "3fa2aaaa-1111-2222-3333-444455556666" })).toBe("");
+  });
+
+  it("字串陣列串成頓號清單（如世界觀風格）", () => {
+    const s = summarizeAuditInput({ worldview: { styles: ["日系水彩", "膠片質感"] } });
+    expect(s).toBe("風格：日系水彩、膠片質感");
+  });
+
+  it("代碼型值翻白話（角色/決定/類別）", () => {
+    expect(summarizeAuditInput({ role: "leader" })).toBe("角色：組長");
+    expect(summarizeAuditInput({ decision: "approve" })).toBe("決定：通過");
+    expect(summarizeAuditInput({ category: "bug" })).toBe("類別：程式錯誤");
   });
 
   it("空物件/非物件回空字串", () => {
     expect(summarizeAuditInput({})).toBe("");
     expect(summarizeAuditInput(null)).toBe("");
     expect(summarizeAuditInput("x")).toBe("");
+  });
+});
+
+describe("describeAuditInput", () => {
+  it("攤成白話標籤清單,已知鍵在前、未知鍵在後（uuid 縮 8 碼）", () => {
+    const fields = describeAuditInput({
+      name: "禪堂空景",
+      sceneId: "3fa2aaaa-1111-2222-3333-444455556666",
+      foo: 1,
+    });
+    expect(fields[0]).toEqual({ label: "名稱", value: "禪堂空景" });
+    const scene = fields.find((f) => f.label === "sceneId");
+    expect(scene?.value).toBe("3fa2aaaa…");
+    expect(fields).toContainEqual({ label: "foo", value: "1" });
+  });
+
+  it("攤平巢狀 worldview 並翻白話值", () => {
+    const fields = describeAuditInput({ worldview: { styles: ["日系水彩", "膠片質感"], tones: ["療癒"] } });
+    expect(fields).toContainEqual({ label: "風格", value: "日系水彩、膠片質感" });
+    expect(fields).toContainEqual({ label: "調性", value: "療癒" });
+    // 容器本身不重複列出
+    expect(fields.some((f) => f.label === "worldview")).toBe(false);
+  });
+
+  it("非物件回空陣列", () => {
+    expect(describeAuditInput(null)).toEqual([]);
+    expect(describeAuditInput("x")).toEqual([]);
+  });
+});
+
+describe("auditCategoryOf", () => {
+  it("依前綴歸類", () => {
+    expect(auditCategoryOf("admin.invite").label).toBe("帳號與團隊");
+    expect(auditCategoryOf("generation.submit").label).toBe("生成與點數");
+    expect(auditCategoryOf("mcp.submit_generation").label).toBe("外部連線（MCP）");
+  });
+
+  it("未知前綴落到「其他」", () => {
+    expect(auditCategoryOf("future.newThing")).toEqual({ key: "other", label: "其他" });
+  });
+
+  it("每個 action 都歸得到非「其他」分類（分類前綴涵蓋所有路由）", () => {
+    const uncategorized = Object.keys(AUDIT_ACTION_LABELS).filter((a) => auditCategoryOf(a).key === "other");
+    expect(uncategorized).toEqual([]);
+  });
+
+  it("auditPrefixesForCategory 回該類前綴,未知 key 回空", () => {
+    expect(auditPrefixesForCategory("account")).toContain("admin");
+    expect(auditPrefixesForCategory("nope")).toEqual([]);
+  });
+
+  it("分類 key 不重複", () => {
+    const keys = AUDIT_CATEGORIES.map((c) => c.key);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

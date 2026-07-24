@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
-import { getModel } from "@shared/models";
+import { getModel, MODELS, tierLabel, estimatePoints } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
 import { Icon } from "./Icon";
-import { ConfirmButton } from "./interactions";
+import { ConfirmButton, HelpTip } from "./interactions";
 import { discussInMessages } from "../discuss";
 
 const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
@@ -14,8 +14,10 @@ const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
   approved: { label: "已通過", cls: "done" },
 };
 
-// 日常主力：便宜快、剪輯人員逐格試圖首選。要換模型可到上方生成台挑（那裡有完整模型指南）。
+// 逐格生成的預設模型：便宜快、剪輯人員逐格試圖首選；深度優化後可在分鏡卡就地換文生圖模型。
 const DEFAULT_MODEL = "fal-ai/fast-lightning-sdxl";
+// 逐格可選的文生圖模型（不需來源素材的 text-to-image；與生成台同一份目錄）
+const SCENE_GEN_MODELS = MODELS.filter((m) => m.category === "text-to-image" && !m.needs);
 // 逐格配音的後端預設 TTS（scenes.generateVoiceover 未帶 modelId 時用它）——前端只拿來顯示預估點數
 const DEFAULT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
@@ -177,6 +179,7 @@ function SceneRow({
   isLeader,
   canEdit,
   meLoading,
+  genModelId,
   onUsePrompt,
   invalidate,
   move,
@@ -191,6 +194,8 @@ function SceneRow({
   isLeader: boolean;
   canEdit: boolean;
   meLoading: boolean;
+  /** 逐格生成用的文生圖模型（分鏡卡工具列可換；預設 SDXL Lightning） */
+  genModelId: string;
   onUsePrompt?: (prompt: string) => void;
   invalidate: () => void;
   move: ReturnType<typeof trpc.scenes.move.useMutation>;
@@ -200,7 +205,18 @@ function SceneRow({
   pending: { id: string } | undefined;
 }) {
   // 每格自持 update／generateInto／generateVoiceover，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
-  const update = trpc.scenes.update.useMutation({ onSuccess: invalidate });
+  // 行內編輯（標題/秒數/配音詞）失焦即存但原本沒有成功回饋——比照世界觀卡「已儲存 ✓」短暫顯示 2 秒
+  const [savedFlash, setSavedFlash] = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(savedTimer.current), []);
+  const update = trpc.scenes.update.useMutation({
+    onSuccess: () => {
+      invalidate();
+      setSavedFlash(true);
+      clearTimeout(savedTimer.current);
+      savedTimer.current = setTimeout(() => setSavedFlash(false), 2000);
+    },
+  });
   const generate = trpc.scenes.generateInto.useMutation({ onSuccess: invalidate });
   const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({ onSuccess: invalidate });
 
@@ -210,8 +226,11 @@ function SceneRow({
   const hasVoiceover = (s.voiceover ?? "").trim() !== "";
   const rowError = update.error ?? generate.error ?? generateVoiceover.error;
   // 逐格生成／配音的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
-  const genPoints = getModel(DEFAULT_MODEL)?.points;
-  const ttsPoints = getModel(DEFAULT_TTS_MODEL)?.points;
+  const genModel = getModel(genModelId) ?? getModel(DEFAULT_MODEL);
+  const genPoints = genModel?.points;
+  // 配音走按字計費的中文 TTS：估點依「這一格旁白文字」長度即時算，與後端扣點同一函式——顯示＝扣點
+  const ttsModel = getModel(DEFAULT_TTS_MODEL);
+  const ttsPoints = ttsModel ? estimatePoints(ttsModel, { promptChars: (s.voiceover ?? "").length }) : undefined;
 
   return (
     <div className="gen-row" data-fb="分鏡格" id={`scene-${s.id}`}>
@@ -256,6 +275,13 @@ function SceneRow({
             {SCENE_STATUS[s.status]?.label ?? s.status}
           </span>
           {isGenerating && <span className="pill running">生成中…</span>}
+          {update.isPending ? (
+            <span className="hint">儲存中…</span>
+          ) : savedFlash ? (
+            <span className="hint" role="status" style={{ color: "var(--success-ink)" }}>
+              已儲存 <Icon name="Check" size={12} style={{ verticalAlign: "-1px" }} />
+            </span>
+          ) : null}
         </div>
 
         {/* 配音詞：每格皆可編輯（含空白格補詞），失焦即存 */}
@@ -347,9 +373,9 @@ function SceneRow({
               <ConfirmButton
                 triggerClassName="primary btn-sm"
                 triggerTitle="用這一格的提示詞就地生成，完成後自動回填縮圖"
-                message={`即將${s.assetId ? "重生" : "生成"}這一格（${getModel(DEFAULT_MODEL)?.label ?? DEFAULT_MODEL}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
+                message={`即將${s.assetId ? "重生" : "生成"}這一格（${genModel?.label ?? genModelId}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
                 confirmLabel="確認生成"
-                onConfirm={() => generate.mutate({ sceneId: s.id, modelId: DEFAULT_MODEL })}
+                onConfirm={() => generate.mutate({ sceneId: s.id, modelId: genModel?.id ?? DEFAULT_MODEL })}
               >
                 {s.assetId ? (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -379,7 +405,7 @@ function SceneRow({
           )}
         </div>
         {s.prompt && (
-          <div className="hint" style={{ marginTop: 3 }}>模型：{getModel(DEFAULT_MODEL)?.label ?? DEFAULT_MODEL}（日常主力，可到生成台換）</div>
+          <div className="hint" style={{ marginTop: 3 }}>模型：{genModel?.label ?? genModelId}（可在上方「逐格生成模型」換）</div>
         )}
 
         {!meLoading && (
@@ -427,7 +453,7 @@ function SceneRow({
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === 0 || move.isPending} aria-label="上移" onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}><Icon name="ChevronUp" size={16} /></button>
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
           <ConfirmButton
-            triggerStyle={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger)" }}
+            triggerStyle={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger-ink)" }}
             disabled={remove.isPending}
             triggerAriaLabel="刪除"
             triggerTitle="刪除後移到回收桶，可還原（保留配音詞與提示詞）"
@@ -453,6 +479,8 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
     utils.scenes.listByProject.invalidate({ projectId });
     utils.approvals.listByProject.invalidate({ projectId });
     utils.messages.list.invalidate({ projectId });
+    // 同類缺陷一併修：分鏡軟刪後回收桶要立即看得到（與知識庫刪除同一根因）
+    utils.projects.listDeleted.invalidate({ projectId });
   };
   const move = trpc.scenes.move.useMutation({ onSuccess: invalidate });
   const remove = trpc.scenes.remove.useMutation({ onSuccess: invalidate });
@@ -469,16 +497,50 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
   // 目標剪輯軟體（決定「下載時間軸/字幕」拿哪種格式）；預設剪映——組內主力剪輯軟體
   const [editTarget, setEditTarget] = useState<EditTargetKey>("capcut");
   const timelineFormat = EDIT_TARGETS.find((t) => t.key === editTarget)?.format ?? "srt";
+  // 逐格生成模型（深度優化：原本寫死 SDXL Lightning）——per 專案記住上次選擇；失效 id 回退預設
+  const [genModelId, setGenModelIdState] = useState<string>(() => {
+    try {
+      const saved = window.localStorage.getItem(`aios.scenegen.${projectId}`);
+      return saved && SCENE_GEN_MODELS.some((m) => m.id === saved) ? saved : DEFAULT_MODEL;
+    } catch {
+      return DEFAULT_MODEL;
+    }
+  });
+  const setGenModelId = (next: string) => {
+    setGenModelIdState(next);
+    try { window.localStorage.setItem(`aios.scenegen.${projectId}`, next); } catch { /* 持久化只是加分 */ }
+  };
 
   return (
     <section className="card" data-fb="分鏡與交付">
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0 }}>分鏡・交付</h2>
+        <h2 style={{ margin: 0 }}>分鏡・交付<HelpTip text="把成品排成一支片的順序，可送審與打包交付。" /></h2>
         {list.length > 0 && (
           <span className="mono" style={{ fontSize: 13, color: "var(--primary-ink)" }}>共 {list.length} 鏡・約 {totalSec} 秒</span>
         )}
       </div>
       {actionError && <p className="error" role="alert">操作失敗：{actionError.message}</p>}
+      {/* 逐格生成模型（深度優化）：分鏡卡就地換文生圖模型，每格「生成這一格/重生」都用它；預估點數即時跟著變 */}
+      {canEdit && list.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+          <label htmlFor={`scene-gen-model-${projectId}`} style={{ margin: 0, fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
+            逐格生成模型
+            <HelpTip text="每一格「生成這一格／重生」用的文生圖模型。便宜的適合快速試構圖，旗艦的適合定稿。" />
+          </label>
+          <select
+            id={`scene-gen-model-${projectId}`}
+            value={genModelId}
+            onChange={(e) => setGenModelId(e.target.value)}
+            style={{ width: "auto", fontSize: "var(--fs-13)", padding: "6px 10px" }}
+          >
+            {SCENE_GEN_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {tierLabel(m.tier)}・{m.label} — {m.points} 點
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {scenes.isLoading ? (
         <div aria-hidden="true">
           {[0, 1].map((k) => (
@@ -505,6 +567,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt }: 
               isLeader={isLeader}
               canEdit={canEdit}
               meLoading={me.isLoading}
+              genModelId={genModelId}
               onUsePrompt={onUsePrompt}
               invalidate={invalidate}
               move={move}

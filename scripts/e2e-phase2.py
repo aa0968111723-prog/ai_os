@@ -1,6 +1,6 @@
 # Phase 2 核心批次 e2e：審計日誌(2.2)/成本審核門檻(2.1)/版本回看(#4)/
 # 卡片同步+圖片描述(6.4/6.2)/助手擴權(6.5)/交付格式(#8)。
-# 前置：FAL_MOCK=1、MCP 可不設；伺服器 :3199、SEED_ADMIN_EMAIL=admin@aidirector.local、
+# 前置：E2E_MOCK=1、MCP 可不設；伺服器 :3199、SEED_ADMIN_EMAIL=admin@aidirector.local、
 #       SEED_ADMIN_PASSWORD=test-admin-123；建議全新資料庫(冪等性未保證)。
 # 用法：python3 scripts/e2e-phase2.py
 import json, time, urllib.request, urllib.parse, urllib.error
@@ -79,8 +79,8 @@ pid = proj["id"]
 g_cheap = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "fal-ai/flux/schnell", "prompt": "晨光禪堂"})
 ok("低於門檻(1 點)直接送出", g_cheap.get("status") in ("queued", "running"))
 
-g_gate = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "fal-ai/flux-2/pro", "prompt": "夕陽古寺"})
-ok("達門檻(2 點)進待核", g_gate.get("status") == "awaiting_approval")
+g_gate = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "openai/gpt-image-2", "prompt": "夕陽古寺"})
+ok("達門檻(≥門檻)進待核", g_gate.get("status") == "awaiting_approval")
 
 deny = call("POST", mem, "generation.decideCost", {"id": g_gate["id"], "decision": "approved"})
 ok("🔒 組員不能自行核准", "__error__" in deny and "組長" in deny["__error__"])
@@ -93,11 +93,11 @@ ok("核准後完成(mock)", done1.get("status") == "done" and bool(done1.get("re
 dup = call("POST", admin, "generation.decideCost", {"id": g_gate["id"], "decision": "approved"})
 ok("重複裁決被擋", "__error__" in dup)
 
-g_gate2 = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "fal-ai/flux-2/pro", "prompt": "駁回測試"})
+g_gate2 = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "openai/gpt-image-2", "prompt": "駁回測試"})
 rej = call("POST", admin, "generation.decideCost", {"id": g_gate2["id"], "decision": "rejected", "reason": "先用便宜模型試方向"})
 ok("組長駁回附理由", rej.get("status") == "rejected" and "駁回" in (rej.get("error") or ""))
 
-leader_gen = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/flux-2/pro", "prompt": "組長自送"})
+leader_gen = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "openai/gpt-image-2", "prompt": "組長自送"})
 ok("組長/管理層自送不受門檻", leader_gen.get("status") in ("queued", "running"))
 
 lst = call("GET", mem, "generation.listByProjectPaged", {"projectId": pid, "status": "rejected"})
@@ -206,5 +206,54 @@ if img_src:
     ok("還原素材後回復正常", r.get("ok") is True)
 else:
     ok("回收桶來源防護(略過：無圖片素材)", True)
+
+# ── 點數分配樹（開發者→組→組員）：分配、權限、帳表口徑、審計 ──
+# 組員不能自行分配（setMemberBudget/setGroupBudget 需組長／團隊管理員）
+deny = call("POST", mem, "quota.setMemberBudget", {"groupId": grp["id"], "userId": mem_id, "budgetPoints": 500})
+ok("🔒 組員不能分配個人預算", "__error__" in deny)
+deny = call("POST", mem, "quota.setGroupBudget", {"groupId": grp["id"], "budgetPoints": 1000})
+ok("🔒 組員不能調組預算", "__error__" in deny)
+
+# 團隊管理員把組預算分配給組，組長再把個人預算分配給組員
+rgb = call("POST", admin, "quota.setGroupBudget", {"groupId": grp["id"], "budgetPoints": 1000})
+ok("團隊管理員分配組預算=1000", rgb.get("ok") is True and rgb.get("budgetPoints") == 1000)
+rmb = call("POST", admin, "quota.setMemberBudget", {"groupId": grp["id"], "userId": mem_id, "budgetPoints": 300})
+ok("組長分配組員個人預算=300", rmb.get("ok") is True and rmb.get("budgetPoints") == 300)
+
+# quota.usage 反映分配樹：組預算、已分配總和、每位組員(含零用量者)的 budget/role/total
+usage2 = call("GET", admin, "quota.usage", {"groupId": grp["id"]})
+ok("usage 回組預算", usage2.get("groupBudget") == 1000)
+ok("usage 回已分配總和", usage2.get("allocated") == 300)
+mem_row = next((x for x in usage2["rows"] if x["userId"] == mem_id), None)
+ok("usage 列出組員含個人預算與角色", mem_row is not None and mem_row["budget"] == 300 and mem_row["role"] == "member")
+
+# quota.my 給組員看自己的個人分配剩餘（300 − 已用；不限層回 None）
+my2 = call("GET", mem, "quota.my", {"groupId": grp["id"]})
+ok("quota.my 回個人分配剩餘", isinstance(my2.get("memberBudgetRemaining"), int) and my2["memberBudgetRemaining"] <= 300)
+
+# 實際守門（原子閘）：把個人預算設成「剛好等於已用」→ 剩 0 → 下一筆生成被擋下。
+# 僅在有扣點（CI 的 MOCK_BILLING=1 或正式模式）時可驗；E2E_MOCK 預設略過扣點時 total=0，優雅跳過。
+used_now = mem_row["total"]
+if used_now > 0:
+    call("POST", admin, "quota.setMemberBudget", {"groupId": grp["id"], "userId": mem_id, "budgetPoints": used_now})
+    blocked = call("POST", mem, "generation.submit", {"projectId": pid, "modelId": "fal-ai/flux/schnell", "prompt": "超出個人分配"})
+    ok("個人預算用盡 → 生成被原子閘擋下", "__error__" in blocked and "點數已用完" in blocked["__error__"])
+else:
+    ok("個人預算守門(略過：此環境未扣點)", True)
+
+# 0＝不限（正規化成 null）；分配給非本組成員 → 擋下
+r0 = call("POST", admin, "quota.setMemberBudget", {"groupId": grp["id"], "userId": mem_id, "budgetPoints": 0})
+ok("個人預算 0 正規化為不限", r0.get("budgetPoints") is None)
+deny = call("POST", admin, "quota.setMemberBudget", {"groupId": grp["id"], "userId": "00000000-0000-0000-0000-000000000000", "budgetPoints": 50})
+ok("🔒 分配給非本組成員被擋", "__error__" in deny)
+
+# 審計記到兩個分配動作
+au4 = call("GET", admin, "audit.list", {"action": "setGroupBudget"})
+ok("審計記到組預算分配", any(i["action"] == "quota.setGroupBudget" for i in au4["items"]))
+au5 = call("GET", admin, "audit.list", {"action": "setMemberBudget"})
+ok("審計記到組員預算分配", any(i["action"] == "quota.setMemberBudget" for i in au5["items"]))
+
+# 收尾：組預算回不限，不留狀態影響其他假設
+call("POST", admin, "quota.setGroupBudget", {"groupId": grp["id"], "budgetPoints": 0})
 
 print("—— e2e-phase2 完成 ——")

@@ -198,6 +198,9 @@ export function useCollab(
   useEffect(() => {
     return queryClient.getMutationCache().subscribe((event) => {
       if (event.type === "updated" && event.action.type === "success") {
+        // 跳過標記 meta.silentSync 的「非內容」mutation（如每 ~30s 的 markRead）：這些不代表內容變更，
+        // 廣播失效只會讓同房協作者無謂地週期性重抓全部查詢。
+        if (event.mutation?.options?.meta?.silentSync) return;
         const ws = wsRef.current;
         if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "invalidate" }));
       }

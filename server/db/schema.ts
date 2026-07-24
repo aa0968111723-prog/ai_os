@@ -1,7 +1,7 @@
 /**
  * AI Director OS — 資料庫 schema（單一真相來源）
  * PostgreSQL · Drizzle（pg 方言）
- * 組織模型：超管 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
+ * 組織模型：開發者 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
 import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 
@@ -31,6 +31,10 @@ export const groups = pgTable("groups", {
   name: text("name").notNull(),
   /** 每人每週點數上限（null＝用全域預設；0＝不限）——組長/管理員可調 */
   weeklyPointsPerUser: integer("weekly_points_per_user"),
+  /** 組總點數預算（累計上限，非每週重置）：開發者/團隊管理員「分配給這個組」的點數池；
+   *  組累計淨消耗達此值即擋下，開發者到組到組員形成分配樹。null/0＝不限（只受全域/上層限制）。
+   *  組長/管理員可看、只有團隊管理員以上能調（點數是由上往下分配的）。nullable＝pushSchema 安全 */
+  budgetPoints: integer("budget_points"),
   /** 成本審核門檻（需求 2.1）：組員單筆生成估點 ≥ 此值需組長核准才送出；null/0＝不啟用。組長/管理員可調 */
   approvalThresholdPoints: integer("approval_threshold_points"),
   /** 選項預設是否已 seed 過一次（R23）：seed 一次後即使組長把某類選項清空也不再復活，
@@ -53,6 +57,13 @@ export const groupMembers = pgTable("group_members", {
   role: text("role", { enum: ["leader", "member"] }).notNull().default("member"),
   /** 個人週額度覆寫（null＝跟組；0＝不限）——組長可對個別成員調 */
   weeklyPointsOverride: integer("weekly_points_override"),
+  /** 個人總點數預算（累計上限，非每週重置）：組長從「組預算」再分配給這位組員的點數；
+   *  該組員在本組的累計淨消耗達此值即擋下。null/0＝不限（只受組/全域上限）。組長可調。nullable＝pushSchema 安全 */
+  budgetPoints: integer("budget_points"),
+  /** 團隊代理派工授權（需求 12 v2）：組彙總 AI 能「提議在某專案發起代理計畫」，實際執行交回
+   *  planAgentCore（沿用該專案的 ACL/扣點/併發守門）。派工預設只開放組長以上；組長/管理員可對
+   *  個別組員把此欄設 true 授權其派工。組長以上永遠可派、不受此欄影響。null＝未授權（nullable＝pushSchema 安全） */
+  canDispatchAgent: boolean("can_dispatch_agent"),
 });
 
 /** 全域點數設定（單列 key='global'）——不寫死在程式，管理員隨時可調 */
@@ -64,6 +75,8 @@ export const settings = pgTable("settings", {
   defaultWeeklyPoints: integer("default_weekly_points"),
   /** 每人每日上限（null/0＝不限）——簡報「每人每日上限，不會有人不小心把預算爆掉」 */
   defaultDailyPoints: integer("default_daily_points"),
+  /** 資料庫文件每人儲存配額 GB（null＝預設 5；0＝不限）。nullable 新欄＝pushSchema 安全 */
+  fileQuotaGb: integer("file_quota_gb"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
@@ -91,6 +104,36 @@ export const sessions = pgTable("sessions", {
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/**
+ * MCP 個人連線金鑰（per-user，取代「單一共用 MCP_API_KEY＝人人開發者」）：
+ * 每位夥伴自助建立自己的金鑰，外部 AI 客戶端（Claude 等）帶此金鑰連進來時，
+ * MCP 一律以「該金鑰的擁有者」身分＋其真實權限執行——組隔離、專案 ACL、點數額度、
+ * 成本核准門檻全部沿用網頁端同一套守衛（見 services/mcp.ts）。
+ * 與 sessions/invites 同級保護：DB 只存 SHA-256，原文只在建立當下回一次；撤銷＝軟刪保留審計歸屬。
+ * 新表＝pushSchema 安全。
+ */
+export const mcpTokens = pgTable("mcp_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  /** SHA-256（非原文）：DB 外洩不可直接兌換金鑰 */
+  tokenHash: text("token_hash").notNull().unique(),
+  /** 給人看的用途標籤（如「Claude 桌面版」「小美的筆電」），供列表辨識與撤銷 */
+  label: text("label").notNull(),
+  /** 最小權限：唯讀金鑰只准呼叫讀取類工具（列專案/讀脈絡/找模型/查生成/查資料庫），
+   *  一律擋寫入類（送生成、貼留言、寫資料列）——把金鑰交給外部自動化時可只給讀。
+   *  預設 false（可讀可寫，行為同舊金鑰）。default＝pushSchema 安全、既有列回填 false。 */
+  readOnly: boolean("read_only").notNull().default(false),
+  /** 到期時刻（null＝永不過期）：過期即驗證失敗（比照撤銷）。交出去的金鑰可設短效期自動失效。nullable＝pushSchema 安全 */
+  expiresAt: timestamp("expires_at"),
+  /** 最近成功呼叫時刻（fire-and-forget 更新）：供使用者判斷哪把在用、哪把可撤 */
+  lastUsedAt: timestamp("last_used_at"),
+  /** 撤銷時刻（非 null＝已撤銷，驗證即拒）——不硬刪，保留既有審計列的操作者歸屬 */
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("mcp_tokens_user_idx").on(t.userId),
+}));
 
 /* ── 業務內容（全部掛 group_id 隔離） ─────────────── */
 
@@ -155,7 +198,15 @@ export const costLedger = pgTable("cost_ledger", {
   reason: text("reason").notNull(),
   generationId: uuid("generation_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // 額度守門的 SUM 聚合都掃這張表（reserveQuota 還在持 advisory lock 的交易內掃），
+  // 且 quota.my 徽章每次頁面載入都跑——全非唯一索引（帳本是 append-only，扣點/退點/回收
+  // 對同一 generationId 各插一列，唯一索引會 23505 擋死退點）。開機 pushSchema 自動套用。
+  userGroupIdx: index("cost_ledger_user_group_idx").on(t.userId, t.groupId), // usedByMember + reserveQuota 個人預算；user_id 前綴另供 usedToday/usedThisWeek/週日守門
+  groupCreatedIdx: index("cost_ledger_group_created_idx").on(t.groupId, t.createdAt), // usedByGroup/groupUsage（group_id 前綴）＋ consumptionStats 組×日期範圍
+  createdIdx: index("cost_ledger_created_idx").on(t.createdAt), // consumptionStats 全站（開發者）日期範圍掃描
+  generationIdx: index("cost_ledger_generation_id_idx").on(t.generationId), // 週/日/組聚合對 generations 的 LEFT JOIN 鍵；退點對帳按生成查列
+}));
 
 export const assets = pgTable("assets", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -267,6 +318,8 @@ export const scenePresets = pgTable("scene_presets", {
   palette: text("palette").notNull(),
   /** 光線：光源方向／氛圍（注入視覺生成） */
   lighting: text("lighting"),
+  /** 場景參考圖（可選；上傳或從素材庫綁定，供比對與之後圖生圖用） */
+  referenceAssetId: uuid("reference_asset_id"),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -314,6 +367,9 @@ export const feedback = pgTable("feedback", {
   worst: text("worst"),
   note: text("note"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  /** 重送＝修改（一人一組一份）。舊版靠竄改 createdAt 讓更新浮到最新，會抹掉真正建立時間；
+   * 改用獨立 updatedAt：createdAt 保留初次填答時刻，彙整/預填以 updatedAt 排序。 */
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 /** 模型目錄(啟動時從 shared/models.ts 同步;代理/報表可直接 SQL 查「哪個模型適合」) */
@@ -387,6 +443,33 @@ export const workflowRuns = pgTable("workflow_runs", {
   currentStep: integer("current_step").notNull().default(0),
   /** 每步：{ note, status: "pending"|"running"|"done"|"failed"|"stopped", generationId?, detail? } */
   steps: jsonb("steps").notNull(),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+/**
+ * AI 代理執行紀錄（代理系統核心）：一句目標 → LLM 規劃多步計畫 → 使用者核准 → 伺服器背景逐步執行。
+ * 慣例與 workflowRuns 對齊：steps jsonb 快照、runner 是 steps 的單一寫者、停止只改 run 狀態。
+ * 與工作流的差別：步驟由 LLM 針對目標動態規劃（非固定 preset），且要「核准後」才開始花點數。
+ */
+export const agentRuns = pgTable("agent_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  /** 使用者的一句目標（例：把知識庫的腳本拆成分鏡並逐鏡出圖） */
+  goal: text("goal").notNull(),
+  /** LLM 的計畫摘要（核准畫面顯示） */
+  summary: text("summary").notNull().default(""),
+  status: text("status", { enum: ["awaiting_approval", "running", "done", "failed", "stopped", "discarded"] })
+    .notNull()
+    .default("awaiting_approval"),
+  currentStep: integer("current_step").notNull().default(0),
+  /** 每步：見 services/agentRunner 的 AgentStep（kind/note/status/估點/執行期 generationId 等） */
+  steps: jsonb("steps").notNull(),
+  /** 核准畫面顯示的估點總額；實際扣點仍由各步驟既有守門逐筆進行 */
+  estPoints: integer("est_points").notNull().default(0),
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -529,5 +612,126 @@ export const feedbackReports = pgTable("feedback_reports", {
   /** 截圖（含標記框）落地 Volume 的相對路徑；擷取失敗或未附時為 null */
   screenshotPath: text("screenshot_path"),
   status: text("status", { enum: ["open", "reviewing", "done"] }).notNull().default("open"),
+  /* ── 回饋代理（每 3 天巡一次）自動分診欄位 ──
+   * 背景代理讀未處理回饋 → LLM 分診（嚴重度／一句摘要／建議修復／給使用者的回覆）→
+   * 回填以下欄位並寄信通知回報者。全部可為 null（既有列與尚未巡到的回饋維持 null，pushSchema 純新增安全）。 */
+  agentReviewedAt: timestamp("agent_reviewed_at"),
+  /** LLM 判定的嚴重度：low｜medium｜high（分診排序用；解析不出時 null） */
+  agentSeverity: text("agent_severity", { enum: ["low", "medium", "high"] }),
+  /** 一句話分診摘要（給審閱者快速掃過） */
+  agentSummary: text("agent_summary"),
+  /** 建議的修復方向／排程（工程可直接採用；「排程修復」的產出） */
+  agentFix: text("agent_fix"),
+  /** 寄給回報者的回覆內文（先落地再寄，寄信失敗也留存草稿供人工補寄） */
+  agentReply: text("agent_reply"),
+  /** 回覆信寄送狀態：sent＝已寄出、skipped＝信箱機制未設定（僅落地）、failed＝寄送失敗 */
+  emailStatus: text("email_status", { enum: ["sent", "skipped", "failed"] }),
+  /** 回覆信實際寄出時刻（skipped/failed 為 null） */
+  emailedAt: timestamp("emailed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/**
+ * 回饋代理巡檢紀錄（每 3 天一次；亦可開發者手動觸發）：每次巡檢寫一列，
+ * 記這輪看了幾筆、寄出幾封信、成功與否——管理頁「回饋代理」卡以最新一列顯示狀態。
+ * 只插入不更新完局後不再改（running→done/failed 於同列 update），新表＝pushSchema 安全。
+ */
+/* ── 自訂資料庫（個人→組→團隊→全站 四層範圍） ─────────────
+ * 願景：一套可從「個人筆記型清單」長到「組織級結構化資料」的輕量資料庫——
+ * 欄位由使用者自訂（fields jsonb），列資料存 data_rows.data（jsonb）。
+ * 權限完全沿用既有組織模型（見 services/databaseAcl.ts）：
+ *   personal＝只有本人；group＝組成員（組長管理）；team＝團隊成員（團隊管理員管理）；
+ *   global＝全站可讀（開發者管理）。memberWritable=false 時列資料只有管理者可寫。
+ * 新表＝pushSchema 安全。 */
+
+export const dataTables = pgTable("data_tables", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** 範圍：personal=個人（僅本人）、group=組、team=團隊、global=全站 */
+  scope: text("scope", { enum: ["personal", "group", "team", "global"] }).notNull(),
+  /** personal 範圍的擁有者（其他範圍為 null） */
+  ownerId: uuid("owner_id"),
+  /** group 範圍所屬組（其他範圍為 null） */
+  groupId: uuid("group_id"),
+  /** team 範圍所屬團隊（其他範圍為 null） */
+  teamId: uuid("team_id"),
+  name: text("name").notNull(),
+  description: text("description"),
+  /** 欄位定義陣列（shared/databaseFields.ts 的 DataField[]）——結構是資料不是 schema，改欄位不動 DB */
+  fields: jsonb("fields").notNull().default([]),
+  /** true＝範圍內成員都能新增/編輯列；false＝只有管理者（組長/團隊管理員/開發者/建立者）能寫 */
+  memberWritable: boolean("member_writable").notNull().default(true),
+  /** AI／MCP 存取等級（管理者可調）：none＝AI 完全看不到、read＝AI 可查不可寫、write＝AI 可查可寫。
+   *  約束的是「介面」（MCP 工具與團隊助手注入），人的網頁權限不受影響；
+   *  實際查寫仍疊加使用者本人權限（databaseAcl），此欄只會更嚴、不會放寬。 */
+  agentAccess: text("agent_access", { enum: ["none", "read", "write"] }).notNull().default("write"),
+  createdBy: uuid("created_by").notNull(),
+  /** 軟刪除：整庫誤刪可救（列資料原地保留）；所有列表查詢以 isNull(deletedAt) 過濾 */
+  deletedAt: timestamp("deleted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  ownerIdx: index("data_tables_owner_idx").on(t.ownerId),
+  groupIdx: index("data_tables_group_idx").on(t.groupId),
+  teamIdx: index("data_tables_team_idx").on(t.teamId),
+}));
+
+/**
+ * 資料庫文件（AI 可讀的檔案層）：檔案上傳或網址匯入（Google 雲端/Notion 公開頁）掛在某個資料庫下。
+ * - textContent＝伺服器抽出的純文字（AI 讀這裡；null＝此格式暫不可讀，僅存檔）。
+ * - storagePath＝Volume 落地檔（null＝純文字匯入，只有 textContent）。
+ * - 配額：每人（uploadedBy 加總 sizeBytes）預設 5GB，settings.fileQuotaGb 可調。
+ * 新表＝pushSchema 安全。
+ */
+export const dataFiles = pgTable("data_files", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tableId: uuid("table_id").notNull(),
+  name: text("name").notNull(),
+  mime: text("mime").notNull(),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  /** Volume 相對路徑（null＝僅文字，無原檔） */
+  storagePath: text("storage_path"),
+  /** 網址匯入的來源（供回溯與重新整理；上傳檔為 null） */
+  sourceUrl: text("source_url"),
+  /** 抽出的可讀文字（上限見 databaseFiles.MAX_TEXT_CHARS）；null＝AI 暫不可讀 */
+  textContent: text("text_content"),
+  /** 分類標籤（圖影與一般文件皆可）：人工可改、圖片可由 AI 自動分類填入。nullable＝pushSchema 安全 */
+  category: text("category"),
+  /** AI 看圖描述（vision 模型產生的繁中描述）：圖影檔的「AI 可讀」內容，
+   *  團隊助手與 MCP 代理引用這裡回答「這張圖是什麼」。nullable＝pushSchema 安全 */
+  aiDescription: text("ai_description"),
+  uploadedBy: uuid("uploaded_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  tableIdx: index("data_files_table_idx").on(t.tableId),
+  uploaderIdx: index("data_files_uploader_idx").on(t.uploadedBy),
+}));
+
+export const dataRows = pgTable("data_rows", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tableId: uuid("table_id").notNull(),
+  /** 列資料：{ 欄位key: 值 }——值型別由欄位定義決定，寫入前經 validateRowData 清洗 */
+  data: jsonb("data").notNull().default({}),
+  createdBy: uuid("created_by").notNull(),
+  updatedBy: uuid("updated_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  tableIdx: index("data_rows_table_idx").on(t.tableId, t.createdAt),
+}));
+
+export const feedbackAgentRuns = pgTable("feedback_agent_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** manual＝開發者在管理頁按「立即巡檢」；scheduled＝每 3 天排程自動觸發 */
+  trigger: text("trigger", { enum: ["scheduled", "manual"] }).notNull().default("scheduled"),
+  status: text("status", { enum: ["running", "done", "failed"] }).notNull().default("running"),
+  /** 這輪分診的回饋筆數 */
+  reviewedCount: integer("reviewed_count").notNull().default(0),
+  /** 這輪成功寄出的回覆信封數 */
+  emailedCount: integer("emailed_count").notNull().default(0),
+  /** 收尾備註（如「無待處理回饋」）或失敗訊息 */
+  note: text("note"),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  finishedAt: timestamp("finished_at"),
+}, (t) => ({
+  startedIdx: index("feedback_agent_runs_started_idx").on(t.startedAt),
+}));

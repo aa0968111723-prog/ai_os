@@ -241,9 +241,13 @@ export const knowledgeRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // isNull(deletedAt)：回收桶裡的知識不得被編輯／灌版本（與 get/listVersions/restoreVersion 一致）
-      const [row] = await db.select().from(schema.knowledge).where(and(eq(schema.knowledge.id, input.id), isNull(schema.knowledge.deletedAt)));
-      if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到知識（可能已刪除）" });
+      // 排除已軟刪（回收桶）的項目：其餘操作（get/listVersions/remove/restore/purge）都帶此濾條，
+      // update 漏帶會讓垃圾桶裡的知識仍可被編輯——補上以求一致。
+      const [row] = await db
+        .select()
+        .from(schema.knowledge)
+        .where(and(eq(schema.knowledge.id, input.id), isNull(schema.knowledge.deletedAt)));
+      if (!row) throw new TRPCError({ code: "NOT_FOUND" });
       requireGroup(ctx.auth, row.groupId);
       await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
       // 版本歷史（#29）：覆寫前，先把「更新前」的舊全文存成一版快照——
@@ -459,7 +463,7 @@ export const knowledgeRouter = router({
       let content: string;
       if (isMockMode()) {
         // 假模式：不扣點，用固定示範文字跑通「描述 → 入庫 → 注入」全流程（與 fal/assistant 的 mock 哲學一致）
-        content = `（示範描述）這是一張與專案相關的圖片素材：${asset.title}。正式模式會由視覺模型產生詳細中文描述。`;
+        content = `（測試模式描述）這是一張與專案相關的圖片素材：${asset.title}。正式模式會由視覺模型產生詳細中文描述。`;
       } else {
         if (!VISION_MODEL) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "目前沒有可用的視覺模型" });
         const points = VISION_MODEL.points;

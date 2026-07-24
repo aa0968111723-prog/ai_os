@@ -50,9 +50,9 @@ export const SCENARIO_PLAYBOOK: ScenarioEntry[] = [
   {
     id: "transcribe",
     title: "開示錄音轉逐字稿/可剪輯大綱",
-    recommend: "ElevenLabs Scribe(關鍵詞強化版可餵佛學術語)→ Gemini 2.5 Pro 一次讀完出大綱與金句",
+    recommend: "ElevenLabs Scribe(關鍵詞強化版可餵佛學術語)→ Llama 3.1 405B(NIM)讀稿出大綱與金句",
     tip: "一小時開示轉錄約 1 點級;多數引擎預設吐簡體且佛學名詞會誤字,出稿後要人工校對一遍",
-    modelIds: ["fal-ai/elevenlabs/speech-to-text", "fal-ai/elevenlabs/speech-to-text#keyterms", "fal-ai/any-llm#gemini-2.5-pro"],
+    modelIds: ["fal-ai/elevenlabs/speech-to-text", "fal-ai/elevenlabs/speech-to-text#keyterms", "nvidia-nim#llama-3.1-405b"],
   },
   {
     id: "narration",
@@ -99,9 +99,9 @@ export const SCENARIO_PLAYBOOK: ScenarioEntry[] = [
   {
     id: "multilingual",
     title: "中文開示做成英/日語版(保留影像只改口型)",
-    recommend: "Claude 翻譯(保留佛教語感)→ ElevenLabs Multilingual v2 配外語音 → Lipsync 對嘴",
+    recommend: "Mistral Large 2(NIM)翻譯(多語強)→ ElevenLabs Multilingual v2 配外語音 → Lipsync 對嘴",
     tip: "倫理紅線:只限「本人影像+本人授權配音」,不得假冒發言;近景正式片用 Lipsync v2 Pro($5/分)",
-    modelIds: ["fal-ai/any-llm#claude-sonnet-4.5", "fal-ai/elevenlabs/tts/multilingual-v2", "fal-ai/sync-lipsync", "fal-ai/sync-lipsync/v2/pro"],
+    modelIds: ["nvidia-nim#mistral-large-2", "fal-ai/elevenlabs/tts/multilingual-v2", "fal-ai/sync-lipsync", "fal-ai/sync-lipsync/v2/pro"],
   },
   {
     id: "bg-removal",
@@ -141,9 +141,9 @@ export const SCENARIO_PLAYBOOK: ScenarioEntry[] = [
   {
     id: "copywriting",
     title: "腳本/分鏡/金句文案/翻譯",
-    recommend: "日常預設 Gemini 2.5 Flash;正式稿與敏感/教義分寸審閱 Claude Sonnet 4.5;長逐字稿一次讀 Gemini 2.5 Pro",
-    tip: "「1 點/次」對短提示成立,讀整份長逐字稿建議走 Gemini Pro 並留意點數",
-    modelIds: ["fal-ai/any-llm#gemini-2.5-flash", "fal-ai/any-llm#claude-sonnet-4.5", "fal-ai/any-llm#gemini-2.5-pro"],
+    recommend: "日常預設 Llama 3.1 70B(NIM);中文金句/弘法文案用 Qwen2.5 72B;正式長稿與複雜任務用 Llama 3.1 405B",
+    tip: "LLM 已整站走 NVIDIA NIM 按 token 計費,「1 點/次」對短提示成立;讀整份長逐字稿留意點數",
+    modelIds: ["nvidia-nim#llama-3.1-70b", "nvidia-nim#qwen2.5-72b", "nvidia-nim#llama-3.1-405b"],
   },
   {
     id: "asset-catalog",
@@ -170,7 +170,7 @@ export const PLAYBOOK_PRINCIPLES = [
   "角色一致:一次性故事用參考圖;跨影片鏡頭先出圖再生影片;長期反覆用才訓練 LoRA",
 ];
 
-/** 注入 LLM 提示詞的濃縮文字版(約 3–4KB;gemini flash 窗口下成本可忽略) */
+/** 注入 LLM 提示詞的濃縮文字版(約 3–4KB;NIM llama 70B 窗口下成本可忽略) */
 export function scenarioPlaybookText(): string {
   const entries = SCENARIO_PLAYBOOK.map(
     (s) => `- ${s.title}:${s.recommend}。${s.tip}${s.modelIds.length ? `(目錄模型:${s.modelIds.join("、")})` : ""}`,

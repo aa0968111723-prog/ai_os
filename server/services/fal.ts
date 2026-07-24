@@ -1,18 +1,20 @@
 /**
  * Fal.ai 客戶端(定案:一切以 Fal 為主,其他先不接)。
- * - 無 FAL_KEY 或 FAL_MOCK=1 → 假生成模式:不花錢即可測完整流程(含圖/影/音/文字四種輸出)。
- * - 真模式走 fal queue REST(送出→輪詢);多模態輸出統一由 extractResult 解析。
+ * - 全站一律真實模式:走 fal queue REST(送出→輪詢);多模態輸出統一由 extractResult 解析。
+ *   FAL_KEY 未設定不再自動退「示範模式」——生成會回明確錯誤(呼叫端自動退點)。
+ * - E2E_MOCK=1 是「僅供自動化測試」的假生成旗標(CI 六套 e2e 用,不花錢即可測完整流程);
+ *   正式部署絕不設定。舊的 FAL_MOCK 旗標已移除、不再生效。
  */
 import { randomUUID } from "node:crypto";
 import { proxyFetch } from "./http";
 import type { OutputKind } from "../../shared/models";
 
-const MOCK = !process.env.FAL_KEY || process.env.FAL_MOCK === "1";
-const MOCK_DELAY_MS = Number(process.env.FAL_MOCK_DELAY_MS ?? 8000);
+const MOCK = process.env.E2E_MOCK === "1";
+const MOCK_DELAY_MS = Number(process.env.E2E_MOCK_DELAY_MS ?? 8000);
 
 const mockJobs = new Map<string, { doneAt: number; kind: OutputKind; prompt: string }>();
 
-/** 假素材由自家伺服器供應(/api/mock-asset/*):完全離線可測、交付包也抓得到 */
+/** 測試假素材由自家伺服器供應(/api/mock-asset/*):e2e 完全離線可測、交付包也抓得到 */
 function mockResultUrl(kind: OutputKind): string {
   // 對外 base 平台中立：APP_URL 沒設時退「平台注入的公開網域」，再退 localhost——避免把
   // localhost 存進 DB 變永久壞連結。通用變數 PUBLIC_DOMAIN 優先，相容舊的 RAILWAY_PUBLIC_DOMAIN
@@ -29,10 +31,10 @@ export function isMockMode(): boolean {
 }
 
 /**
- * 扣點是否略過（測試債修復，見優化評估報告盲點 #3）：
- * 預設維持既有行為——mock 模式不扣點（內部測試不燒額度）；
- * 設 MOCK_BILLING=1 則「假生成、真扣點」：e2e 能完整驗證額度守門與帳本（auth/models 兩套的
- * 點數斷言在此模式下恢復有效），正式模式（非 mock）永遠走扣點、不受此旗標影響。
+ * 扣點是否略過（僅 e2e 測試模式適用）：
+ * E2E_MOCK=1 預設不扣點（自動化測試不燒額度）；
+ * 加設 MOCK_BILLING=1 則「假生成、真扣點」：e2e 能完整驗證額度守門與帳本（auth/models 兩套的
+ * 點數斷言在此模式下恢復有效）。正式模式（真實模式）永遠走扣點、不受這兩個旗標影響。
  */
 export function billingBypassed(): boolean {
   return MOCK && process.env.MOCK_BILLING !== "1";
@@ -43,6 +45,10 @@ export async function falSubmit(endpoint: string, kind: OutputKind, input: Recor
     const requestId = `mock_${randomUUID()}`;
     mockJobs.set(requestId, { doneAt: Date.now() + MOCK_DELAY_MS, kind, prompt: String(input.prompt ?? input.text ?? "") });
     return { requestId };
+  }
+  // 真實模式缺金鑰＝明確失敗（呼叫端自動退點），不再靜默退示範模式
+  if (!process.env.FAL_KEY) {
+    throw new Error("FAL_KEY 未設定：請到部署平台的服務 Variables 填入 fal.ai 金鑰後重新部署");
   }
   const res = await proxyFetch(`https://queue.fal.run/${endpoint}`, {
     method: "POST",
@@ -70,7 +76,7 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
     const prompt = job?.prompt ?? "";
     if (job) mockJobs.delete(requestId);
     if (kind === "text") {
-      return { status: "done", resultText: `(示範素材)正式模式將由模型實際產出。你的輸入:「${prompt.slice(0, 120)}」` };
+      return { status: "done", resultText: `(測試假素材)正式模式將由模型實際產出。你的輸入:「${prompt.slice(0, 120)}」` };
     }
     return { status: "done", resultUrl: mockResultUrl(kind) };
   }

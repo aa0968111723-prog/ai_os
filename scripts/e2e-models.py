@@ -1,5 +1,5 @@
 """多模態模型環境 e2e:模型目錄/挑選/來源輸入/四種輸出型態/自檢端點。
-前置:伺服器跑在 :3199、FAL_MOCK=1、FAL_MOCK_DELAY_MS 低(建議 800)、
+前置:伺服器跑在 :3199、E2E_MOCK=1、E2E_MOCK_DELAY_MS 低(建議 800)、
      SEED_ADMIN_EMAIL=admin@aidirector.local SEED_ADMIN_PASSWORD=test-admin-123
 """
 import json, time, urllib.request, urllib.parse, urllib.error
@@ -44,7 +44,7 @@ from e2e_lib import ok  # 共用斷言:計數+結束碼(有 ❌ 即非零退出,
 admin = Client()
 
 r = call("POST", admin, "auth.login", {"email": "admin@aidirector.local", "password": "test-admin-123"})
-ok("超管登入", r.get("user", {}).get("isSuperAdmin") is True)
+ok("開發者登入", r.get("user", {}).get("isSuperAdmin") is True)
 
 # ── 模型目錄 ──
 cats = call("GET", admin, "models.categories")
@@ -91,7 +91,7 @@ g = wait_done(admin, g["id"])
 ok("圖生圖(來源=素材庫)完成", g.get("status") == "done" and bool(g.get("resultUrl")))
 
 # ── LLM(文字輸出) ──
-g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/any-llm#claude-sonnet-4.5", "prompt": "寫一句 15 字內的影片標語"})
+g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "nvidia-nim#llama-3.1-70b", "prompt": "寫一句 15 字內的影片標語"})
 g = wait_done(admin, g["id"])
 ok("LLM → 文字輸出(不入素材庫)", g.get("status") == "done" and bool(g.get("resultText")) and not g.get("resultUrl"))
 

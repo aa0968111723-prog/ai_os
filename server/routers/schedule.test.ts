@@ -66,4 +66,20 @@ describe("buildIcs", () => {
     expect(ics).toContain("BEGIN:VCALENDAR");
     expect(ics).not.toContain("BEGIN:VEVENT");
   });
+
+  it("單獨 CR（\\r）也要轉義，擋 ICS 注入", () => {
+    const ics = buildIcs("G", [
+      {
+        id: "11111111-2222-3333-4444-555555555555",
+        title: "正常\rSUMMARY:偽造\rDTSTART:20200101T000000Z",
+        startsAt: at("2026-07-16T03:00:00Z"),
+        endsAt: null,
+        note: null,
+      },
+    ]);
+    // 偽造屬性不得成為獨立的一行（前面沒有換行邊界）——CR 已被轉成字面 \n
+    expect(ics).not.toMatch(/\r\nSUMMARY:偽造/);
+    expect(ics).not.toMatch(/\r\nDTSTART:20200101T000000Z/);
+    expect(ics).toContain("SUMMARY:正常\\nSUMMARY:偽造\\nDTSTART:20200101T000000Z");
+  });
 });

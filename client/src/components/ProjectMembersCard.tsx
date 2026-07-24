@@ -5,7 +5,7 @@ import { trpc } from "../api";
  * 組長/管理員固定是編輯者（不可降）——裁決與管理不能被自己鎖住。
  * 資料與可管理與否都由 projects.listMemberRoles 回傳（後端已依身分判斷），前端不自行推權限。
  */
-export function ProjectMembersCard({ projectId }: { projectId: string }) {
+export function ProjectMembersCard({ projectId, bare = false }: { projectId: string; bare?: boolean }) {
   const utils = trpc.useUtils();
   const roles = trpc.projects.listMemberRoles.useQuery({ projectId });
   const setRole = trpc.projects.setProjectRole.useMutation({
@@ -16,8 +16,9 @@ export function ProjectMembersCard({ projectId }: { projectId: string }) {
   const data = roles.data;
 
   return (
-    <div className="card" data-fb="專案權限卡">
-      <h2>專案權限</h2>
+    // bare：外層已有收合容器（工作台的 details）自帶標題時，不再包 .card 也不重複大標
+    <div className={bare ? undefined : "card"} data-fb="專案權限卡">
+      {!bare && <h2>專案權限</h2>}
       <p className="hint" style={{ marginTop: 4 }}>
         預設組內全員可編輯；把成員設為「檢視者」後，他在此專案只能瀏覽、留言與下載，不能生成或修改。
       </p>
@@ -26,6 +27,9 @@ export function ProjectMembersCard({ projectId }: { projectId: string }) {
           <div className="skeleton" style={{ height: 32, marginTop: 8 }} />
           <div className="skeleton" style={{ height: 32, marginTop: 8 }} />
         </div>
+      ) : data.members.length === 0 ? (
+        // 防禦性空狀態（正常不會出現：有效成員至少含目前使用者）——留一句話總比整卡靜默空白好
+        <p className="hint" style={{ marginTop: 8 }}>讀不到成員清單——請重新整理；若持續發生請回報管理員。</p>
       ) : (
         <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
           {data.members.map((m) => (

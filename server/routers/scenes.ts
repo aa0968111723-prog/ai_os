@@ -112,6 +112,44 @@ export const scenesRouter = router({
     }),
 
   /**
+   * 直接建一格草稿分鏡（工作台深度整合：AI 導演建議「存成分鏡」直落③）：
+   * 帶建議提示詞的空白格，之後可就地生成。插入走與拆分鏡相同的交易＋per-project 序號鎖。
+   */
+  addDraft: authedProcedure
+    .input(
+      z.object({
+        projectId: z.string().uuid(),
+        title: z.string().min(1).max(60),
+        prompt: z.string().max(2000).optional(),
+        voiceover: z.string().max(500).optional(),
+        durationSec: z.number().int().min(1).max(60).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const project = await getProjectChecked(ctx, input.projectId, true);
+      return db.transaction(async (tx) => {
+        await lockSceneOrder(tx, project.id);
+        const [{ maxOrder }] = await tx
+          .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+        const [scene] = await tx
+          .insert(schema.scenes)
+          .values({
+            projectId: project.id,
+            orderIndex: Number(maxOrder) + 1,
+            title: input.title,
+            durationSec: input.durationSec ?? (project.format === "9:16" ? 4 : 5),
+            status: "todo",
+            prompt: input.prompt,
+            voiceover: input.voiceover,
+          })
+          .returning();
+        return scene;
+      });
+    }),
+
+  /**
    * 版本回看（需求 #4）：把某筆「已完成」生成的成品設為分鏡現用——
    * 同一鏡歷來生成過的版本都留在生成紀錄，這裡一鍵切回任何一版（音訊成品切旁白、圖/影切主畫面）。
    */

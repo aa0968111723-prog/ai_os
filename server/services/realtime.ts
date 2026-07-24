@@ -143,7 +143,7 @@ function broadcast(room: Set<Client>, msg: unknown, except?: Client): void {
 }
 
 /**
- * upgrade 階段驗證：session cookie → 使用者 → 專案存在且屬於使用者的組（超管放行）。
+ * upgrade 階段驗證：session cookie → 使用者 → 專案存在且屬於使用者的組（開發者放行）。
  * 任一步不合法回 null（呼叫端直接 socket.destroy()，不進 WS 握手）。
  */
 async function authorize(
@@ -184,7 +184,7 @@ async function revalidate(c: Client): Promise<void> {
       return;
     }
     // #21 復用單一權限判定：loadAuthState 內含「users.status 非 active → 回 null」（被停用帳號即斷線）、
-    // 超管展開與組成員關係——不再各自查 users/groupMembers，判定口徑與 HTTP 端完全一致。
+    // 開發者展開與組成員關係——不再各自查 users/groupMembers，判定口徑與 HTTP 端完全一致。
     const auth = await loadAuthState(c.userId);
     if (!auth) {
       c.ws.close(4403, "權限已變更"); // 帳號被停用或已刪除

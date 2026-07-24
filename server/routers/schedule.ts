@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { and, asc, eq, gte } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
-import { validateMentions } from "../services/mentions";
+import { addScheduleItemCore, listScheduleForGroup } from "../services/scheduleCore";
 
 /**
  * 排程（需求 10）：組行事曆（會議、交付死線…）。
@@ -25,31 +25,7 @@ export const scheduleRouter = router({
   /** 清單：預設只回「未來與最近 24 小時內」；includePast 回全部。startsAt 升冪。 */
   list: authedProcedure
     .input(z.object({ groupId: z.string().uuid(), includePast: z.boolean().optional() }))
-    .query(async ({ ctx, input }) => {
-      requireGroup(ctx.auth, input.groupId);
-      const conds = [eq(schema.scheduleItems.groupId, input.groupId)];
-      if (!input.includePast) conds.push(gte(schema.scheduleItems.startsAt, new Date(Date.now() - 24 * 60 * 60 * 1000)));
-      const rows = await db
-        .select({
-          id: schema.scheduleItems.id,
-          projectId: schema.scheduleItems.projectId,
-          title: schema.scheduleItems.title,
-          startsAt: schema.scheduleItems.startsAt,
-          endsAt: schema.scheduleItems.endsAt,
-          note: schema.scheduleItems.note,
-          ownerId: schema.scheduleItems.ownerId,
-          ownerName: schema.users.name,
-          createdBy: schema.scheduleItems.createdBy,
-          sourceMessageId: schema.scheduleItems.sourceMessageId,
-          mentions: schema.scheduleItems.mentions,
-        })
-        .from(schema.scheduleItems)
-        .leftJoin(schema.users, eq(schema.users.id, schema.scheduleItems.ownerId))
-        .where(and(...conds))
-        .orderBy(asc(schema.scheduleItems.startsAt))
-        .limit(300);
-      return rows;
-    }),
+    .query(({ ctx, input }) => listScheduleForGroup(ctx.auth, input.groupId, input.includePast ?? false)),
 
   add: authedProcedure
     .input(z.object({
@@ -64,37 +40,7 @@ export const scheduleRouter = router({
       sourceMessageId: z.string().uuid().optional(),
       mentions: z.array(z.string().uuid()).max(20).optional(),
     }))
-    .mutation(async ({ ctx, input }) => {
-      requireGroup(ctx.auth, input.groupId);
-      if (input.projectId) {
-        const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
-        if (!project || project.groupId !== input.groupId) throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
-      }
-      if (input.sourceMessageId) {
-        const [m] = await db.select({ groupId: schema.messages.groupId }).from(schema.messages).where(eq(schema.messages.id, input.sourceMessageId));
-        if (!m || m.groupId !== input.groupId) throw new TRPCError({ code: "BAD_REQUEST", message: "來源留言不屬於此組" });
-      }
-      const mentions = await validateMentions(input.groupId, input.mentions);
-      const startsAt = new Date(input.startsAt);
-      const endsAt = input.endsAt ? new Date(input.endsAt) : null;
-      if (endsAt && endsAt <= startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "結束時間要在開始之後" });
-      const [row] = await db
-        .insert(schema.scheduleItems)
-        .values({
-          groupId: input.groupId,
-          projectId: input.projectId ?? null,
-          title: input.title.trim(),
-          startsAt,
-          endsAt,
-          note: input.note?.trim() || null,
-          ownerId: input.ownerId ?? null,
-          createdBy: ctx.auth.user.id,
-          sourceMessageId: input.sourceMessageId ?? null,
-          mentions: mentions ?? null,
-        })
-        .returning();
-      return row;
-    }),
+    .mutation(({ ctx, input }) => addScheduleItemCore({ auth: ctx.auth, ...input })),
 
   update: authedProcedure
     .input(z.object({
@@ -138,7 +84,9 @@ export const scheduleRouter = router({
  */
 export function buildIcs(groupName: string, items: Array<{ id: string; title: string; startsAt: Date; endsAt: Date | null; note: string | null }>): string {
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-  const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+  // 換行一律轉義：CRLF、單獨 CR、單獨 LF 都要處理——單獨 \r 若漏掉，某些 iCalendar 解析器會把它
+  // 當成行邊界，讓欄位值裡的 "\rSUMMARY:..." 被當成偽造屬性注入（ICS injection）。
+  const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",

@@ -20,18 +20,15 @@ import {
   loadAuthState,
 } from "../services/auth";
 
-// 取用戶端 IP 供 per-IP 限流：反代（Railway 邊緣）把「它所見的真實用戶 IP」附加在 x-forwarded-for
-// 「最右段」；最左段是用戶端可自行偽造的（X-Forwarded-For: 假IP, 真IP）。限流必須取最右段（可信代理附加），
-// 否則攻擊者每次換一個假的最左段 IP 即可繞過每 IP 撞庫上限。無 header 時退回 socket 位址。
+// 取用戶端 IP 供 per-IP 限流。★安全：一律走 Express 的 req.ip。
+// index.ts 已設 `app.set("trust proxy", 1)`，Express 會信任「最靠近本機的 1 層反代」並取
+// X-Forwarded-For 中由該可信反代附加的那一段＝真實 client IP（見 mcp.ts 的失敗鎖定同口徑）。
+// 舊版自行解析 XFF「最左段」是攻擊者可控值：平台反代會把真實 IP「附加在右側」，故
+//   `X-Forwarded-For: 1.2.3.4`（偽造）到站後變成 `1.2.3.4, <真實IP>`，取最左＝拿到攻擊者
+// 自選的 1.2.3.4，等於每次請求都換一個「新 IP」，per-IP 滑動視窗（30 次/15 分）永遠不觸發，
+// 撞庫防線形同虛設；反之鎖定某受害 IP 也能惡意灌爆其額度做定向 DoS。改用 req.ip 杜絕此類偽造。
 function clientIp(req: Request): string | undefined {
-  const xff = req.headers["x-forwarded-for"];
-  const raw = Array.isArray(xff) ? xff.join(",") : xff;
-  if (raw) {
-    const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
-    const last = parts[parts.length - 1];
-    if (last) return last;
-  }
-  return req.socket?.remoteAddress ?? undefined;
+  return req.ip ?? req.socket?.remoteAddress ?? undefined;
 }
 
 export const authRouter = router({
@@ -47,8 +44,7 @@ export const authRouter = router({
     .input(z.object({ email: z.string().email("email 格式不對"), password: z.string().min(1, "請填密碼") }))
     .mutation(async ({ ctx, input }) => {
       const email = input.email.toLowerCase().trim();
-      const ip = clientIp(ctx.req);
-      const rate = checkLoginRate(email, ip);
+      const rate = checkLoginRate(email, clientIp(ctx.req));
       if (!rate.ok) {
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `嘗試太多次，請約 ${rate.retryAfterMin} 分鐘後再試` });
       }
@@ -58,8 +54,7 @@ export const authRouter = router({
       if (!user || user.status !== "active" || !passwordOk) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "email 或密碼不正確" });
       }
-      // 成功登入把這次嘗試從「每 IP 撞庫」計數移除——否則共用出口 IP 的小團隊正常登入會把自己鎖死
-      clearLoginRate(email, ip);
+      clearLoginRate(email);
       const token = await createSession(user.id);
       setSessionCookie(ctx.res, token);
       return loadAuthState(user.id);

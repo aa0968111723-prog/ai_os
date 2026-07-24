@@ -3,8 +3,9 @@
  * 12 類,每類至少 旗艦3＋經濟3＋最低成本1;2026-07 依《fal生態研究》修 6 項現值錯誤並補中文命脈梯隊
  * (Qwen Image 2.0/Pro、GPT Image 2、Kolors、Qwen Edit Plus、Qwen 3 TTS、Qwen 訓練器)。
  * W2 全量擴充:納入研究清單 300+ 條目並新增「圖生影片」類別(分鏡圖成片的結構性缺口);
- * 3D(OutputKind 不支援)、多來源輸入(首尾影格/參考圖組/姿勢轉移,待 needs 陣列化)與
- * LoRA 推論端點(待 LoRA 資產機制)依產品建議 #2/#14/#15 另案,未收錄。
+ * 單來源 LoRA 推論端點已補(flux/flux-2/wan/SDXL,來源欄=LoRA 檔網址)。
+ * 3D(OutputKind 不支援)、多來源輸入(首尾影格/參考圖組/姿勢轉移/kontext+qwen-edit LoRA 編輯,
+ * 待 needs 陣列化)與完整 LoRA 資產機制依產品建議 #2/#14/#15 另案,未收錄。
  * 啟動時同步進 model_catalog 資料表供代理查詢。
  * 定案:只接 Fal.ai;1 點 ≈ NT$1(USD×31 估);cost 為官方約略價,實際帳單以 fal 計價頁為準。
  * verified=true 表示模型頁面於 2026-07 逐一查證過;false 為合理推測 ID,真實模式首跑需確認
@@ -35,9 +36,9 @@ export type SourceKind = "image" | "audio" | "video" | "zip";
 export type ProjectFormat = "16:9" | "9:16" | "1:1";
 
 export interface ModelEntry {
-  /** 目錄唯一鍵(any-llm 系列用 # 區分子型號) */
+  /** 目錄唯一鍵(nvidia-nim/any-llm 系列用 # 區分子型號) */
   id: string;
-  /** 實際 fal 佇列端點(預設同 id) */
+  /** 實際佇列端點(預設同 id;"nvidia-nim" 表示走 NVIDIA NIM 而非 fal) */
   endpoint?: string;
   label: string;
   category: ModelCategory;
@@ -85,7 +86,7 @@ export function tierLabel(tier: ModelTier): string {
 const imageSize = (f: ProjectFormat) =>
   f === "9:16" ? "portrait_16_9" : f === "1:1" ? "square_hd" : "landscape_16_9";
 const aspect = (f: ProjectFormat) => f;
-/** any-llm 系列共用 */
+/** LLM 系列共用(NVIDIA NIM 與舊 any-llm 皆為 {model, prompt} 形狀;NIM 端由 nimSubmit 轉 chat messages) */
 const llmInput = (model: string) => (prompt: string) => ({ model, prompt });
 const llmVisionInput = (model: string) => (prompt: string, _f: ProjectFormat, sourceUrl?: string) => ({
   model,
@@ -99,28 +100,28 @@ export const MODELS: ModelEntry[] = [
     // 目錄錯誤修正(fal生態研究 #9):官方模型頁 URL 為 flux-2-pro(連字號),原 flux-2/pro 斜線寫法查無佐證
     // ——id 保留舊值讓既有生成紀錄對得上,實際呼叫走 endpoint;首跑仍需確認,故 verified 維持 false
     id: "fal-ai/flux-2/pro", endpoint: "fal-ai/flux-2-pro", label: "FLUX.2 [pro]", category: "text-to-image", tier: "flagship", kind: "image",
-    points: 2, cost: "$0.03/MP", verified: false,
+    points: 1, cost: "$0.03/MP", verified: false,
     strengths: "Black Forest Labs 最新旗艦;構圖與光影頂級、提示詞遵循極準",
     bestFor: "正式成品分鏡、需要高質感的宣傳主視覺",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
   },
   {
     id: "fal-ai/qwen-image-2/pro/text-to-image", label: "Qwen Image 2.0 Pro", category: "text-to-image", tier: "flagship", kind: "image",
-    points: 3, cost: "$0.075/張(原生 2K)", verified: false,
+    points: 2, cost: "$0.075/張(原生 2K)", verified: false,
     strengths: "阿里通義最高保真檔;中文渲染上限最高之一,長段中文、書法字、直排都穩",
     bestFor: "正式交付的中文長版海報、書法字與密集中文並存的主視覺",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
   },
   {
     id: "openai/gpt-image-2", label: "GPT Image 2(OpenAI)", category: "text-to-image", tier: "flagship", kind: "image",
-    points: 4, cost: "$0.01–0.41/張(依畫質/解析度)", verified: false,
+    points: 5, cost: "$0.158/張(fal 預設 high 1080p;medium≈$0.04、4k high≈$0.40);點數以預設 high 檔估", verified: false,
     strengths: "fal 官方夥伴端點;跨拉丁與 CJK 字元級文字準確、複雜指令理解強",
     bestFor: "要求文字逐字精準的對外物料、中英並存的字卡",
     input: (p, f) => ({ prompt: p, image_size: f === "9:16" ? "1024x1536" : f === "1:1" ? "1024x1024" : "1536x1024" }),
   },
   {
     id: "fal-ai/bytedance/seedream/v4.5/text-to-image", label: "Seedream 4.5", category: "text-to-image", tier: "flagship", kind: "image",
-    points: 2, cost: "$0.04/張", verified: true,
+    points: 1, cost: "$0.04/張", verified: true,
     strengths: "字節旗艦;深度思考式提示理解、原生 14 語文字渲染、密集版面控制",
     bestFor: "含中文字的畫面(標題卡、海報)、多元素構圖",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
@@ -155,7 +156,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/qwen-image-2/text-to-image", label: "Qwen Image 2.0", category: "text-to-image", tier: "economy", kind: "image",
-    points: 2, cost: "$0.035/張(原生 2K)", verified: false,
+    points: 1, cost: "$0.035/張(原生 2K)", verified: false,
     strengths: "中文文字渲染 SOTA(多篇獨立評測認證);專業排版、海報/資訊圖,亂碼錯字率最低",
     bestFor: "繁/簡中文金句卡、密集中文海報——中文字卡的第一主力",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
@@ -208,21 +209,21 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/ideogram/v4", label: "Ideogram v4", category: "text-to-image", tier: "flagship", kind: "image",
-    points: 2, cost: "約 $0.04–0.10/張(依 Turbo/Quality)", verified: false,
+    points: 1, cost: "$0.015/MP(Balanced 預設;Turbo $0.0075、Quality $0.025);約 1MP≈$0.015、1080p(~2MP)≈$0.03", verified: false,
     strengths: "排版龍頭新版;維持字型排版優勢並拉近寫實度",
     bestFor: "精緻英文海報、設計感社群圖(中文勿當主力)",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/recraft/v3/text-to-image", label: "Recraft V3", category: "text-to-image", tier: "economy", kind: "image",
-    points: 2, cost: "$0.04/張(向量 $0.08)", verified: false,
+    points: 1, cost: "$0.04/張(向量 $0.08)", verified: false,
     strengths: "設計導向;長段文字、向量 SVG、品牌風格一致批量產",
     bestFor: "可無限放大的字標/logo、印刷向量海報",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
   },
   {
     id: "fal-ai/recraft/v4.1/text-to-image", label: "Recraft V4.1", category: "text-to-image", tier: "economy", kind: "image",
-    points: 2, cost: "$0.04/張(Pro $0.25)", verified: false,
+    points: 1, cost: "$0.04/張(Pro $0.25)", verified: false,
     strengths: "Recraft 新版;提示控制更準、構圖乾淨,品牌/編輯設計取向",
     bestFor: "品牌系統化活動主視覺、編輯風排版物料",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
@@ -230,21 +231,21 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:端點 🔸推定,首跑確認
     id: "fal-ai/nano-banana-pro", label: "Nano Banana Pro(Google)", category: "text-to-image", tier: "flagship", kind: "image",
-    points: 5, cost: "$0.15/張(4K 加倍)", verified: false,
+    points: 5, cost: "$0.15/張(4K 加倍)", verified: true,
     strengths: "Gemini 3 Pro Image;高階推理、細節與指令遵循更強、可 4K",
     bestFor: "最考驗理解力的敘事主視覺、4K 正式成品",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/imagen4/preview/ultra", label: "Google Imagen 4 Ultra", category: "text-to-image", tier: "flagship", kind: "image",
-    points: 2, cost: "$0.06/張", verified: false,
+    points: 2, cost: "$0.06/張", verified: true,
     strengths: "Google 旗艦;寫實膚質、提示還原度極高、幾乎零瑕疵",
     bestFor: "交付級莊嚴人物寫真、療癒風景空鏡",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/imagen4/preview/fast", label: "Google Imagen 4 Fast", category: "text-to-image", tier: "economy", kind: "image",
-    points: 1, cost: "$0.02/張", verified: false,
+    points: 1, cost: "$0.02/張", verified: true,
     strengths: "Imagen 4 速度檔;約 2.7 秒出圖、品質仍佳",
     bestFor: "日常寫實草稿、快速刷療癒風景",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
@@ -252,7 +253,7 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:端點 🔸推定、價格待確認,首跑校準
     id: "fal-ai/qwen-image-max/text-to-image", label: "Qwen Image Max", category: "text-to-image", tier: "flagship", kind: "image",
-    points: 2, cost: "約 $0.06–0.10/張(待確認)", verified: false,
+    points: 2, cost: "$0.075/張", verified: true,
     strengths: "通義頂配檔;質感構圖再拉高,中文渲染頂級",
     bestFor: "最講究的中文設計成品,Pro 不夠時的天花板",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
@@ -260,14 +261,14 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:❓待確認——fal 是否上架與 slug 均未證實,首跑必查
     id: "fal-ai/hunyuan-image/v3", label: "Hunyuan Image 3.0(騰訊混元)", category: "text-to-image", tier: "flagship", kind: "image",
-    points: 2, cost: "約 $0.05–0.10/張(待確認)", verified: false,
+    points: 2, cost: "$0.10/百萬像素(1MP 約一張，按輸出解析度計費)", verified: true,
     strengths: "騰訊混元;中文理解與藝術表現強,國風/書法/水墨題材佳",
     bestFor: "國風禪意大圖、中文文化語境主視覺",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
   },
   {
     id: "fal-ai/sana", label: "Sana(NVIDIA)", category: "text-to-image", tier: "budget", kind: "image",
-    points: 1, cost: "約 $0.001–0.006/張(按算秒)", verified: false,
+    points: 1, cost: "$0.001/MP(每張約 1MP=$0.001;按百萬像素計費)", verified: true,
     strengths: "高效模型;不到 1 秒出 4K、文圖對齊佳",
     bestFor: "大量 4K 佔位圖、極速刷背景/材質",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
@@ -281,23 +282,50 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/luma-photon", label: "Luma Photon", category: "text-to-image", tier: "economy", kind: "image",
-    points: 1, cost: "約 $0.01–0.03/張(Flash 更省)", verified: false,
+    points: 1, cost: "$0.019/MP(標準;Flash 版 $0.005/MP 更省)", verified: true,
     strengths: "Luma 視覺模型;創意、可個人化、理解力強",
     bestFor: "創意概念圖、風格化敘事主視覺",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/aura-flow", label: "AuraFlow v0.3", category: "text-to-image", tier: "budget", kind: "image",
-    points: 1, cost: "約 $0.005–0.01/張", verified: false,
+    points: 1, cost: "$0.028/MP(每張約 1MP=$0.028)", verified: false,
     strengths: "開源 flow 架構;語義精準但較慢(50 步)",
     bestFor: "研究性/開源偏好的出圖,優先度低",
     input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
+  },
+  /* —— LoRA 推論(W2 打磨,研究表「必補」):來源欄=訓練成果 LoRA 檔網址,打通訓練器斷鏈;
+        完整 LoRA 資產機制(自動轉存/步數鎖)仍屬產品建議 #2 另案 —— */
+  {
+    id: "fal-ai/flux-lora", label: "FLUX.1 掛 LoRA 生圖", category: "text-to-image", tier: "economy", kind: "image",
+    needs: "zip", points: 1, cost: "$0.035/MP", verified: true,
+    strengths: "掛載訓練成果生圖的標準端點;fast-training/人像/turbo/krea 成果都在這用",
+    bestFor: "用自家風格 LoRA 出圖(提示詞須含觸發詞)",
+    sourceHint: "訓練成果 LoRA 檔網址(.safetensors)",
+    input: (p, f, s) => ({ prompt: p, image_size: imageSize(f), loras: [{ path: s, scale: 1 }] }),
+  },
+  {
+    id: "fal-ai/flux-2/lora", label: "FLUX.2 掛 LoRA 生圖", category: "text-to-image", tier: "economy", kind: "image",
+    needs: "zip", points: 1, cost: "$0.021/MP(LoRA 逾 2GB 有 50%/GB 加價)", verified: true,
+    strengths: "FLUX.2 訓練成果的生成端點;可同時疊多顆 LoRA",
+    bestFor: "旗艦品質+自家風格的日常出圖(提示詞含觸發詞)",
+    sourceHint: "訓練成果 LoRA 檔網址(.safetensors)",
+    input: (p, f, s) => ({ prompt: p, image_size: imageSize(f), loras: [{ path: s, scale: 1 }] }),
+  },
+  {
+    id: "fal-ai/lora", label: "SDXL 掛社群 LoRA", category: "text-to-image", tier: "budget", kind: "image",
+    needs: "zip", points: 1, cost: "按算力秒計(未查到明細)", verified: false,
+    strengths: "掛任意社群 SDXL/SD1.5 LoRA;零訓練成本試風格的後門",
+    bestFor: "試水墨/佛畫/蓮花裝飾等現成風格(品質低於 FLUX 系)",
+    sourceHint: "社群 LoRA 檔網址(civitai/HF 的 .safetensors)",
+    // 端點需指定底模 model_name,先鎖 SDXL base;首跑確認
+    input: (p, f, s) => ({ model_name: "stabilityai/stable-diffusion-xl-base-1.0", prompt: p, image_size: imageSize(f), loras: [{ path: s, scale: 1 }] }),
   },
 
   /* ═══ 2. 圖生圖・編輯 image-to-image ═══ */
   {
     id: "fal-ai/nano-banana-2/edit", label: "Nano Banana 2 Edit", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 3, cost: "$0.08/張(1K)", verified: true,
+    needs: "image", points: 2, cost: "$0.08/張(1K)", verified: true,
     strengths: "免遮罩自然語言編輯;最多 14 張參考圖合成、知道該改什麼不該動什麼",
     bestFor: "「把背景換成禪堂」這類口語修改、多圖合成",
     sourceHint: "要編輯的圖(素材庫或網址)",
@@ -305,7 +333,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/flux-2/pro/edit", label: "FLUX.2 [pro] Edit", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 2, cost: "$0.03/MP", verified: false,
+    needs: "image", points: 1, cost: "$0.03/首MP,之後 $0.015/MP", verified: true,
     strengths: "生產級編輯;最多 9 張參考圖、構圖一致性佳",
     bestFor: "正式成品的精修、系列圖風格統一",
     sourceHint: "要編輯的圖",
@@ -313,15 +341,23 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/bytedance/seedream/v4.5/edit", label: "Seedream 4.5 Edit", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 2, cost: "$0.04/張", verified: false,
+    needs: "image", points: 1, cost: "$0.04/張", verified: true,
     strengths: "生成+編輯一體架構;中文指令理解佳",
     bestFor: "中文指令修改、文字元素調整",
     sourceHint: "要編輯的圖",
     input: (p, _f, s) => ({ prompt: p, image_urls: [s] }),
   },
   {
+    id: "fal-ai/flux-kontext/dev", label: "FLUX.1 Kontext [dev]", category: "image-to-image", tier: "economy", kind: "image",
+    needs: "image", points: 1, cost: "$0.025/MP", verified: true,
+    strengths: "Kontext 開源檔;指令式編輯、可搭 LoRA,成本最低的 Kontext",
+    bestFor: "日常量大的指令修圖、自家 LoRA 編輯基底",
+    sourceHint: "要編輯的圖",
+    input: (p, _f, s) => ({ prompt: p, image_url: s }),
+  },
+  {
     id: "fal-ai/flux-pro/kontext", label: "FLUX.1 Kontext [pro]", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "$0.04/張", verified: true,
+    needs: "image", points: 1, cost: "$0.04/張", verified: true,
     strengths: "局部編輯與整景轉換兼顧;角色一致性迭代編輯",
     bestFor: "同角色連續分鏡、逐步修圖",
     sourceHint: "要編輯的圖",
@@ -329,7 +365,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/qwen-image-edit", label: "Qwen Image Edit", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "≈$0.02/張", verified: false,
+    needs: "image", points: 1, cost: "≈$0.03/張(按百萬像素計費 $0.03/MP,基準1MP)", verified: true,
     strengths: "阿里通義;複雜中文文字渲染與精準編輯",
     bestFor: "中文標題卡修字、低成本批量修改",
     sourceHint: "要編輯的圖",
@@ -337,7 +373,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/qwen-image-edit-plus", label: "Qwen Image Edit Plus", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "≈$0.03/張", verified: false,
+    needs: "image", points: 1, cost: "≈$0.03/張", verified: true,
     strengths: "Qwen 編輯強化版;多圖輸入、文字編輯優於基礎版(改字不跑版)",
     bestFor: "同人物換背景且中文橫幅要正確、批量換卡片文字",
     sourceHint: "要編輯的圖",
@@ -362,7 +398,7 @@ export const MODELS: ModelEntry[] = [
   /* —— W2 全量擴充(fal生態研究):以下 image-to-image 新增(含編輯/打光/去背/擴圖/修復) —— */
   {
     id: "fal-ai/flux-pro/kontext/max", label: "FLUX.1 Kontext [max]", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 3, cost: "$0.08/張", verified: false,
+    needs: "image", points: 2, cost: "$0.08/張", verified: true,
     strengths: "Kontext 頂規;提示遵循與排版更強、角色一致性最高",
     bestFor: "正式對外成品的角色一致編輯、系列海報收尾",
     sourceHint: "要編輯的圖",
@@ -371,7 +407,7 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:另有別名 fal-ai/gemini-3-pro-image-preview/edit,首跑確認
     id: "fal-ai/nano-banana-pro/edit", label: "Nano Banana Pro Edit(Google)", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 5, cost: "$0.15/張(1K)", verified: false,
+    needs: "image", points: 5, cost: "$0.15/張(1K)", verified: true,
     strengths: "品質天花板之一;多模態推理讀懂意圖、複雜指令一次到位",
     bestFor: "最高規成品的關鍵一張、複雜多條件修改",
     sourceHint: "要編輯的圖",
@@ -380,7 +416,7 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:端點 🔸推定,首跑確認
     id: "fal-ai/nano-banana/edit", label: "Nano Banana Edit(v1)", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "約 $0.04/張", verified: false,
+    needs: "image", points: 1, cost: "約 $0.04/張", verified: true,
     strengths: "初代 Nano Banana 編輯;口語指令、速度快、成本低於 v2",
     bestFor: "日常量大的口語小改(換底色、去雜物)",
     sourceHint: "要編輯的圖",
@@ -389,7 +425,7 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:端點 🔸推定,首跑確認
     id: "fal-ai/bytedance/seedream/v4/edit", label: "Seedream 4.0 Edit", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "約 $0.03/張", verified: false,
+    needs: "image", points: 1, cost: "約 $0.03/張", verified: true,
     strengths: "Seedream 前代編輯;能力接近 4.5、單價更親民,中文文字編輯佳",
     bestFor: "量大預算敏感的中文卡片修改",
     sourceHint: "要編輯的圖",
@@ -407,7 +443,7 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:同排另列 fal-ai/qwen-image-edit-2511,擇一收錄;首跑確認
     id: "fal-ai/qwen-image-2/edit", label: "Qwen Image 2.0 Edit", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "$0.035/張", verified: false,
+    needs: "image", points: 1, cost: "$0.035/張", verified: true,
     strengths: "Qwen 最新編輯;風格轉換+物件增刪+中文字疊加一站完成",
     bestFor: "實照轉水墨/工筆莊嚴風、疊中文字",
     sourceHint: "要編輯的圖",
@@ -415,7 +451,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "openai/gpt-image-2/edit", label: "GPT Image 2 Edit(OpenAI)", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "$0.009–0.034/張(依品質/解析度)", verified: false,
+    needs: "image", points: 5, cost: "約 $0.158/張(1080p·high 品質，fal 預設 high;4K $0.401、1024² $0.211;另計 token 費)", verified: true,
     strengths: "GPT 影像編輯;指令理解好、只動要動的、單價極低",
     bestFor: "大量社群素材的日常小修、複雜多步指令",
     sourceHint: "要編輯的圖",
@@ -424,7 +460,7 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:端點 🔸推定;同線另有 /edit(需遮罩)與 /replace-background,先收 remix
     id: "fal-ai/ideogram/v3/remix", label: "Ideogram V3 Remix", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "約 $0.03–0.09/張", verified: false,
+    needs: "image", points: 2, cost: "約 $0.03–0.09/張", verified: true,
     strengths: "排版之王的編輯線;保留字體設計感換風格/底圖/配色",
     bestFor: "金句海報保留排版重出變體",
     sourceHint: "要重混的圖",
@@ -433,7 +469,7 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:端點 🔸推定(亦有 fal-ai/flux-pro/v1/redux),首跑確認;端點不吃 prompt
     id: "fal-ai/flux/dev/redux", label: "FLUX.1 Redux(變體)", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "$0.025/MP", verified: false,
+    needs: "image", points: 1, cost: "$0.025/MP", verified: true,
     strengths: "餵一張圖產同調變體;不改內容、只要「像這張」的量產",
     bestFor: "滿意的莊嚴風格圖量產同風格系列卡",
     sourceHint: "要生成變體的參考圖",
@@ -441,7 +477,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/iclight-v2", label: "IC-Light V2(重新打光)", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "約 $0.03–0.05/張", verified: false,
+    needs: "image", points: 3, cost: "$0.1/MP（每百萬像素，按輸出尺寸計費）", verified: true,
     strengths: "文字條件式重新打光+換背景;可指定光源方向強度",
     bestFor: "把雜亂光線照片統一成莊嚴光感、合成後補光",
     sourceHint: "要重新打光的圖",
@@ -450,7 +486,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 參數名以 fal 文件為準:背景描述常用 bg_prompt,首跑確認
     id: "fal-ai/bria/background/replace", label: "Bria 換背景", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "約 $0.04/張", verified: false,
+    needs: "image", points: 1, cost: "約 $0.04/張", verified: true,
     strengths: "文字描述換背景;授權資料訓練、商用版權安全、結果穩定",
     bestFor: "一鍵換成禪堂/蓮花/晨光背景,對外發布安心",
     sourceHint: "要換背景的圖",
@@ -458,7 +494,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/bria/background/remove", label: "Bria RMBG 2.0 去背", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "$0.018/張", verified: false,
+    needs: "image", points: 1, cost: "$0.018/張", verified: true,
     strengths: "去背出透明 PNG;商用授權、邊緣髮絲細緻",
     bestFor: "人物/結緣品去背成素材,供卡片海報排版",
     sourceHint: "要去背的圖",
@@ -467,7 +503,7 @@ export const MODELS: ModelEntry[] = [
   {
     // fal Bria expand 可能另需 original_image_size/location 參數,首跑校準
     id: "fal-ai/bria/expand", label: "Bria Expand(生成式擴圖)", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "$0.023/次", verified: false,
+    needs: "image", points: 1, cost: "$0.023/次", verified: true,
     strengths: "往畫面外補內容轉比例;授權安全的 outpainting",
     bestFor: "直式照擴 16:9 上 YouTube、老照片補天補地",
     sourceHint: "要擴圖的圖",
@@ -475,7 +511,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/image-editing/object-removal", label: "物件移除 Object Removal", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "約 $0.02–0.04/張", verified: false,
+    needs: "image", points: 1, cost: "$0.04/張", verified: false,
     strengths: "移除雜物/路人並自動補背景;一鍵免畫遮罩",
     bestFor: "活動照清雜物、讓開示/合影畫面乾淨莊嚴",
     sourceHint: "要清雜物的圖",
@@ -484,7 +520,7 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:端點 🔸推定;同排 genfill 需遮罩未收。參數名可能為 scene_description,首跑確認
     id: "fal-ai/bria/product-shot", label: "Bria Product Shot(情境商品圖)", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "約 $0.04–0.08/張", verified: false,
+    needs: "image", points: 1, cost: "$0.04/張", verified: true,
     strengths: "去背+生成攝影棚級情境擺拍;版權安全",
     bestFor: "佛珠/香品/書籍生成莊嚴擺拍圖用於義賣頁",
     sourceHint: "商品/結緣品照片",
@@ -493,7 +529,7 @@ export const MODELS: ModelEntry[] = [
   {
     // fal生態研究:端點待確認(🔸推定);同排 fal-ai/gfpgan 亦待確認,先收 CodeFormer
     id: "fal-ai/codeformer", label: "臉部修復 CodeFormer", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "約 $0.002–0.01/張", verified: false,
+    needs: "image", points: 1, cost: "$0.0021/百萬像素(每張約 $0.002,<1點)", verified: true,
     strengths: "修復模糊/老舊照片的臉部細節與清晰度",
     bestFor: "早年開示低清老照片修臉,救回紀念影片素材",
     sourceHint: "要修復的老照片",
@@ -503,7 +539,7 @@ export const MODELS: ModelEntry[] = [
   /* ── W2 全量擴充:放大與修復(fal生態研究 §480–505) ── */
   {
     id: "fal-ai/image-editing/photo-restoration", label: "老照片修復(一鍵)", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 1, cost: "$0.04/張", verified: false,
+    needs: "image", points: 1, cost: "$0.04/張", verified: true,
     strengths: "一鍵修老照:去刮痕污漬、去模糊、補殘缺並上色;免提示詞",
     bestFor: "泛黃老照、先人遺照救援(中文題字修後請校對)",
     sourceHint: "要修復的老照片",
@@ -512,7 +548,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 價格文件查不到,推估按張計(1–3 點),首跑校準
     id: "fal-ai/image-apps-v2/photo-restoration", label: "老照片修復(Gemini 版)", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "查不到精確價(推估按張計)", verified: false,
+    needs: "image", points: 1, cost: "$0.04/張", verified: false,
     strengths: "Gemini 路線修復;破損缺角重建力更強(生成式,中文題字風險高)",
     bestFor: "image-editing 版修不好時的第二選擇",
     sourceHint: "要修復的老照片",
@@ -520,7 +556,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/esrgan", label: "Real-ESRGAN 放大", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "$0.000575/計算秒(每張<1點)", verified: false,
+    needs: "image", points: 1, cost: "$0.00111/計算秒(每張<1點)", verified: true,
     strengths: "經典 4x 放大;face_enhance 可順帶 GFPGAN 修臉,全站最便宜之一",
     bestFor: "大量舊素材粗放大+修臉的省錢首選",
     sourceHint: "要放大的圖",
@@ -528,7 +564,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/ddcolor", label: "DDColor 上色", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "$0.001/MP", verified: false,
+    needs: "image", points: 1, cost: "$0.001/MP", verified: true,
     strengths: "黑白照上色專用;只加色不動細節,忠實低風險",
     bestFor: "黑白遺照/老照重獲色彩;中文題字安全",
     sourceHint: "要上色的黑白照片",
@@ -536,7 +572,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/clarity-upscaler", label: "Clarity 創意放大", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 8, cost: "$0.03/MP(放大到 4K 約 $0.24/張)", verified: false,
+    needs: "image", points: 1, cost: "$0.03/MP(放大到 4K 約 $0.24/張)", verified: true,
     strengths: "社群最紅創意放大;放大同時補生細節到交付級",
     bestFor: "AI 圖放大 4K/印刷;含中文字的圖建議改用 Thera 忠實放大",
     sourceHint: "要放大的圖",
@@ -545,7 +581,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/topaz/upscale/image", label: "Topaz 影像放大", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 2, cost: "按 MP 分級,約 $0.05/24MP 起", verified: false,
+    needs: "image", points: 2, cost: "按輸出解析度分級:≤24MP $0.08/張、≤48MP $0.16/張、≤96MP $0.32/張,最高 512MP $1.36/張(基準 24MP $0.08)", verified: true,
     strengths: "業界標準照片級放大;自然無 AI 塑膠感,印刷首選",
     bestFor: "海報、展場輸出等印刷級大尺寸放大",
     sourceHint: "要放大的圖",
@@ -587,7 +623,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/seedvr/upscale/image", label: "SeedVR2 影像放大", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "$0.001/MP(seamless 版 $0.0025/MP)", verified: false,
+    needs: "image", points: 1, cost: "$0.001/MP(seamless 版 $0.0025/MP)", verified: true,
     strengths: "可到 10K 超大輸出、極便宜;風格偏乾淨略帶 AI 感",
     bestFor: "展場大圖、印刷跨頁的省錢放大;精細中文字搭 Thera",
     sourceHint: "要放大的圖",
@@ -595,7 +631,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "clarityai/crystal-upscaler", label: "Crystal 人像放大", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 4, cost: "$0.016/MP(4K 約 4 點)", verified: false,
+    needs: "image", points: 1, cost: "$0.016/MP(4K 約 4 點)", verified: true,
     strengths: "人像特化放大;皮膚紋理、虹膜、髮絲細節,可到 10K",
     bestFor: "法師人像特寫、肖像大圖輸出的極致臉部品質",
     sourceHint: "人像照片",
@@ -603,7 +639,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/recraft/upscale/crisp", label: "Recraft 清晰化放大", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "$0.004/張", verified: false,
+    needs: "image", points: 1, cost: "$0.004/張", verified: true,
     strengths: "非生成清晰化;邊緣乾淨臉更利,近乎免費",
     bestFor: "交付前最後銳化;中文字卡安全",
     sourceHint: "要銳化的圖",
@@ -611,7 +647,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/recraft/upscale/creative", label: "Recraft 創意放大", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 8, cost: "$0.25/張", verified: false,
+    needs: "image", points: 8, cost: "$0.25/張", verified: true,
     strengths: "生成式創意放大;大幅補細節、品質高但單價貴",
     bestFor: "要印大圖的主視覺;含中文字有改字風險不建議",
     sourceHint: "要放大的主視覺",
@@ -619,7 +655,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/swin2sr", label: "Swin2SR 去壓縮放大", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "$0.025/MP", verified: false,
+    needs: "image", points: 1, cost: "$0.025/MP", verified: true,
     strengths: "Transformer 忠實放大;擅長去除 JPEG 壓縮假影",
     bestFor: "被通訊軟體多次轉傳壓爛的低清舊圖救援",
     sourceHint: "壓縮失真的舊圖",
@@ -627,7 +663,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/drct-super-resolution", label: "DRCT 超解析", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "$0.0045/MP", verified: false,
+    needs: "image", points: 1, cost: "$0.0045/MP", verified: true,
     strengths: "較新的 Transformer 忠實放大;性價比佳,中文字安全",
     bestFor: "便宜忠實放大的 A/B 比較備選",
     sourceHint: "要放大的圖",
@@ -643,7 +679,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/mix-dehaze-net", label: "Mix-Dehaze 去霧", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "$0.025/MP", verified: false,
+    needs: "image", points: 1, cost: "$0.025/MP", verified: true,
     strengths: "去霧/去朦朧;提升發灰、低對比舊掃描的通透度",
     bestFor: "修復管線前處理:先去霧再放大修復",
     sourceHint: "發灰起霧的舊照/掃描",
@@ -668,7 +704,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/ideogram/remove-background", label: "Ideogram 去背", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "$0.01/張", verified: false,
+    needs: "image", points: 1, cost: "$0.01/張", verified: true,
     strengths: "固定一口價的簡單可靠去背;最好估點數",
     bestFor: "批次摳「弘法素材貼紙庫」的一鍵工具",
     sourceHint: "要去背的圖",
@@ -692,7 +728,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/ben/v2/image", label: "BEN v2 去背", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "$0.025/MP", verified: false,
+    needs: "image", points: 1, cost: "$0.025/MP", verified: true,
     strengths: "新世代快速高品質去背(Background Erase Network)",
     bestFor: "求快的日常去背;小圖便宜、大圖按 MP 較貴",
     sourceHint: "要去背的圖",
@@ -701,7 +737,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 文件檔位/價格未定(「建議實測後再定位」),暫列經濟檔
     id: "smoretalk-ai/rembg-enhance", label: "Rembg Enhance 去背", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "查不到(建議實測後定位)", verified: false,
+    needs: "image", points: 1, cost: "$0.006/張", verified: true,
     strengths: "rembg+ViTMatte 邊緣強化;2D/3D 圖形與照片優化",
     bestFor: "AI 插畫/佛像圖去背,邊緣更柔和",
     sourceHint: "要去背的圖",
@@ -709,7 +745,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/ideogram/v3/replace-background", label: "Ideogram v3 換背景", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 1, cost: "$0.03–0.09/張(依速度檔)", verified: false,
+    needs: "image", points: 2, cost: "$0.03–0.09/張(依速度檔)", verified: true,
     strengths: "Ideogram 生態的一步換背景;TURBO 檔便宜",
     bestFor: "字卡出圖後統一視覺的換背景(提示詞英文)",
     sourceHint: "要換背景的圖",
@@ -718,7 +754,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 文件價格未查到、優先序低,暫列經濟檔
     id: "fal-ai/image-editing/background-change", label: "換背景(image-editing)", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "查不到精確價", verified: false,
+    needs: "image", points: 1, cost: "$0.04/張", verified: false,
     strengths: "fal 官方 image-editing 套件的生成式換背景",
     bestFor: "一步換背景備選;與口語編輯模型重疊",
     sourceHint: "要換背景的圖",
@@ -727,7 +763,7 @@ export const MODELS: ModelEntry[] = [
   /* ── W2 全量擴充:一致性/特殊工具(fal生態研究 §577–648;真人臉照一律需本人授權,產品建議 #12) ── */
   {
     id: "fal-ai/ideogram/character", label: "Ideogram 角色一致", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 3, cost: "$0.10(turbo)–0.20(quality)/張", verified: false,
+    needs: "image", points: 3, cost: "$0.10(turbo)–0.20(quality)/張", verified: true,
     strengths: "單張參考照→跨提示詞、跨場景同一張臉;寫實角色一致旗艦",
     bestFor: "見證故事分鏡:同一主角演到底(提示詞英文)",
     sourceHint: "主角清晰照片一張",
@@ -735,7 +771,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/instant-character", label: "Instant Character 角色一致", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 3, cost: "$0.10/MP", verified: false,
+    needs: "image", points: 3, cost: "$0.10/MP", verified: true,
     strengths: "單張參考圖出新姿勢新場景;寫實與插畫/動畫皆可",
     bestFor: "繪本、吉祥物系列圖的角色一致",
     sourceHint: "角色設定圖一張",
@@ -744,7 +780,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 文件價格未查到;參數偏工程,採端點預設
     id: "fal-ai/flux-pulid", label: "PuLID FLUX 人臉鎖定", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 3, cost: "官方價未查到", verified: false,
+    needs: "image", points: 1, cost: "$0.0333/MP", verified: true,
     strengths: "FLUX 底免訓練人臉鎖定;一張臉照+提示詞進任何場景",
     bestFor: "把授權過的講者臉放進生成場景(提示詞英文)",
     sourceHint: "人臉清晰照(需本人授權)",
@@ -761,7 +797,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/photomaker", label: "PhotoMaker 人像生成", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "$0.001/算秒(每張約 1–3 美分)", verified: false,
+    needs: "image", points: 1, cost: "$0.001/算秒(每張約 1–3 美分)", verified: true,
     strengths: "參考照學臉生成;最便宜的「把某人畫進畫面」",
     bestFor: "人物紀念圖草稿(SDXL 世代質感有限)",
     sourceHint: "人物照片(需授權)",
@@ -779,7 +815,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 官方畫廊 LoRA 端點(LoRA 已內建於端點,非外掛資產);價格未查到
     id: "fal-ai/qwen-image-edit-plus-lora-gallery/next-scene", label: "Next-Scene 分鏡推進", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "查不到精確價", verified: false,
+    needs: "image", points: 1, cost: "$0.035/MP", verified: true,
     strengths: "「下一幕」專用 LoRA;角色與場景自動延續推進劇情",
     bestFor: "敘事故事板連續推鏡;中文指令可用",
     sourceHint: "目前分鏡畫面",
@@ -788,7 +824,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 文件價格未查到,首跑校準
     id: "fal-ai/minimax/image-01/subject-reference", label: "MiniMax 人物參考出圖", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "查不到(低成本)", verified: false,
+    needs: "image", points: 1, cost: "$0.01/張", verified: true,
     strengths: "單張臉照鎖定的圖像生成;參數少上手快",
     bestFor: "低成本把人物放進海報/金句卡底圖",
     sourceHint: "人物臉部照片(需授權)",
@@ -806,7 +842,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 參數名 face_image_0 依 fal 文件慣例推定,首跑確認;雙人版需第二張臉(多來源,#15 另案)
     id: "easel-ai/easel-avatar", label: "Easel Avatar 人物場景", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "查不到精確價", verified: false,
+    needs: "image", points: 2, cost: "$0.05/次", verified: true,
     strengths: "自拍照+提示詞生成人物場景;免訓練保臉",
     bestFor: "志工形象照、單人合成場景",
     sourceHint: "本人自拍照(需授權)",
@@ -815,7 +851,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 文件價格未查到,首跑校準
     id: "fal-ai/image-apps-v2/headshot-photo", label: "專業形象照生成", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "查不到精確價", verified: false,
+    needs: "image", points: 1, cost: "$0.04/張", verified: true,
     strengths: "生活照→專業形象照,可換背景一鍵莊重化",
     bestFor: "講師簡介、義工證、講者卡的統一形象照",
     sourceHint: "本人生活照",
@@ -823,7 +859,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/finegrain-eraser", label: "Finegrain 精修去物", category: "image-to-image", tier: "flagship", kind: "image",
-    needs: "image", points: 6, cost: "$0.18–0.36/次(bbox/mask 模式 $0.04 起)", verified: false,
+    needs: "image", points: 6, cost: "$0.18/次(prompt 模式);bbox/mask 模式 $0.04/次", verified: true,
     strengths: "高品質物件移除(prompt 模式);邊緣乾淨的精修版",
     bestFor: "印刷級海報的關鍵去物",
     sourceHint: "要精修的圖",
@@ -832,7 +868,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 文件價格未查到;輸出為 SVG 檔(以 image 型態承載)
     id: "fal-ai/recraft/vectorize", label: "Recraft 向量化(SVG)", category: "image-to-image", tier: "economy", kind: "image",
-    needs: "image", points: 2, cost: "查不到精確價", verified: false,
+    needs: "image", points: 1, cost: "$0.01/張", verified: true,
     strengths: "點陣圖→SVG 向量化(Recraft 引擎)",
     bestFor: "圖示/標誌/裝飾轉 SVG,放大印刷不失真",
     sourceHint: "要向量化的圖",
@@ -841,7 +877,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 輸出為 SVG 檔(以 image 型態承載)
     id: "fal-ai/image2svg", label: "Image2SVG 向量化", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "$0.005/張", verified: false,
+    needs: "image", points: 1, cost: "$0.005/張", verified: true,
     strengths: "最便宜的圖轉 SVG",
     bestFor: "簡單圖形/剪影/單色圖示批量向量化",
     sourceHint: "要向量化的簡單圖形",
@@ -852,49 +888,49 @@ export const MODELS: ModelEntry[] = [
   {
     id: "fal-ai/veo3.1", label: "Veo 3.1(Google)", category: "text-to-video", tier: "flagship", kind: "video",
     // 為什麼:fal 影片模型按秒計費,固定扣點蓋不住長鏡頭——按秒計費模型一律以「6 秒鏡頭」估點(USD×31;區間價取中價),並在 cost 註明基準讓使用者知道超過 6 秒實際費用更高
-    points: 37, cost: "$0.10–0.30/秒(720p–4K);按秒計費,點數為 6 秒基準", verified: true,
+    points: 31, cost: "$0.20/秒(720p/1080p 無音)、$0.40/秒(含音)、4k $0.40–0.60;按秒計費,點數為 5 秒基準", verified: true,
     strengths: "當前最強影片模型之一;物理正確、可含原生音效與對白",
     bestFor: "正式成品鏡頭、需要聲音的敘事片段",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/sora-2/text-to-video", label: "Sora 2(OpenAI)", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 19, cost: "$0.10/秒(720p);按秒計費,點數為 6 秒基準", verified: true,
+    points: 16, cost: "$0.10/秒(720p);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "細節豐富的動態場景、含音訊;敘事鏡頭語言自然",
     bestFor: "故事性片段、複雜運鏡",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/kling-video/v2.5-turbo/pro/text-to-video", label: "Kling 2.5 Turbo Pro", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 13, cost: "$0.07/秒;按秒計費,點數為 6 秒基準", verified: false,
+    points: 11, cost: "$0.07/秒;按秒計費,點數為 6 秒基準", verified: false,
     strengths: "動作流暢度標竿;快節奏動態場景",
     bestFor: "人物動作、活動紀錄感鏡頭",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f), duration: "5" }),
   },
   {
     id: "fal-ai/veo3.1/fast", label: "Veo 3.1 Fast", category: "text-to-video", tier: "economy", kind: "video",
-    points: 19, cost: "$0.10/秒(720p);按秒計費,點數為 6 秒基準", verified: false,
+    points: 16, cost: "$0.10/秒(無音)、$0.15/秒(含音,720p/1080p);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Veo 家族的速度版;迭代快、質感仍佳",
     bestFor: "先看方向再升旗艦重生成",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/wan/v2.2-a14b/text-to-video", label: "Wan 2.2(開源)", category: "text-to-video", tier: "economy", kind: "video",
-    points: 8, cost: "≈$0.04–0.08/支", verified: true, recommended: true,
+    points: 12, cost: "$0.08/秒(720p)、$0.06/秒(580p)、$0.04/秒(480p);按秒計費(16fps基準)", verified: true, recommended: true,
     strengths: "開源 14B;性價比首選、已在站內驗證",
     bestFor: "日常分鏡影片、預算有限時的主力",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/minimax/hailuo-2.3/standard/text-to-video", label: "Hailuo 2.3 Standard", category: "text-to-video", tier: "economy", kind: "video",
-    points: 9, cost: "$0.28/6秒(768p);按秒計費,點數為 6 秒基準", verified: false,
+    points: 9, cost: "$0.28/6秒(768p,單支固定價)", verified: true,
     strengths: "MiniMax;人物表演與鏡頭感佳(Pro 版 1080p 已驗證存在)",
     bestFor: "人物特寫、情緒鏡頭",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/ltx-video", label: "LTX Video(開源)", category: "text-to-video", tier: "budget", kind: "video",
-    points: 3, cost: "$0.04–0.2/支", verified: true,
+    points: 1, cost: "$0.02/支(固定價)", verified: true,
     strengths: "最低成本影片;秒級生成(新版 LTX-2.3 支援 4K+原生音訊)",
     bestFor: "動態預覽、試鏡頭節奏",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
@@ -902,14 +938,14 @@ export const MODELS: ModelEntry[] = [
   /* —— W2 全量擴充(fal生態研究):以下 text-to-video 新增;音訊開關型定價以「關音訊」為基準計點 —— */
   {
     id: "fal-ai/veo2", label: "Veo 2(Google)", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 58, cost: "≈$1.25–2.50/5秒 + $0.25/追加秒(來源不一,以 fal 頁為準)", verified: false,
+    points: 58, cost: "$2.50/5秒(720p)+$0.50/追加秒;按秒計費", verified: true,
     strengths: "前代 Google 旗艦;寫實穩、運鏡電影感,無原生音效",
     bestFor: "相容舊專案;新案建議用 Veo 3.1",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/kling-video/v2.6/pro/text-to-video", label: "Kling 2.6 Pro", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 13, cost: "$0.07/秒(無音)、$0.14/秒(含音);按秒計費,點數為 6 秒基準", verified: false,
+    points: 11, cost: "$0.07/秒(無音)、$0.14/秒(含音);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Kling 最新旗艦;動作流暢標竿、新增原生音效,5/10 秒可選",
     bestFor: "人物動作、法會活動動態鏡頭",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f), duration: "5" }),
@@ -917,35 +953,35 @@ export const MODELS: ModelEntry[] = [
   {
     // slug 推定(fal生態研究:2026 新版 O3,slug 待現場確認),真實模式首跑需確認
     id: "fal-ai/kling-video/o3/pro/text-to-video", label: "Kling 3.0/O3 Pro", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 52, cost: "約$0.168–0.392/秒(依 standard/pro 與語音);按秒計費,點數為 6 秒基準", verified: false,
+    points: 17, cost: "$0.112/秒(無音)、$0.14/秒(含音);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Kling 最頂級電影感新世代;含語音控制,單價最高",
     bestFor: "最高規對外成片、電影級運鏡表演",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f), duration: "5" }),
   },
   {
     id: "fal-ai/minimax/hailuo-2.3/pro/text-to-video", label: "Hailuo 2.3 Pro", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 15, cost: "$0.49/支(1080p)", verified: false,
+    points: 15, cost: "$0.49/支(1080p)", verified: true,
     strengths: "人物表演與情緒張力最強;比 Veo/Kling 更會演",
     bestFor: "見證故事人物特寫、情緒鏡頭",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/luma-dream-machine/ray-2", label: "Luma Ray 2", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 16, cost: "$0.5/5秒", verified: false,
+    points: 16, cost: "$0.5/5秒", verified: true,
     strengths: "運鏡優雅、光影細膩、物理順;意境系旗艦",
     bestFor: "莊嚴療癒的抽象空鏡、電影感慢運鏡",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/bytedance/seedance/v1/pro/text-to-video", label: "Seedance 1.0 Pro(字節)", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 19, cost: "≈$0.62/支(1080p 5秒)", verified: false,
+    points: 19, cost: "≈$0.62/支(1080p 5秒)", verified: true,
     strengths: "寫實質感與運鏡一致性極佳、指令遵循準(1080p)",
     bestFor: "寫實空鏡與敘事鏡頭的成片首選",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/bytedance/seedance/v1.5/pro/text-to-video", label: "Seedance 1.5 Pro(字節)", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 8, cost: "$0.26/支(720p 5秒,含音)", verified: false,
+    points: 8, cost: "$0.26/支(720p 5秒,含音)", verified: true,
     strengths: "寫實再進化、新增原生音訊;有聲寫實裡極具競爭力",
     bestFor: "要寫實又一次帶環境音的成片",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
@@ -953,28 +989,29 @@ export const MODELS: ModelEntry[] = [
   {
     // slug 推定(fal生態研究:2026 上半年新上線,細節與價格待現場確認);暫依 Seedance 1.0 Pro 估點
     id: "bytedance/seedance-2.0/text-to-video", label: "Seedance 2.0(字節)", category: "text-to-video", tier: "flagship", kind: "video",
-    points: 19, cost: "新上線,價格以 fal 現場為準(暫依 1.0 Pro 估點)", verified: false,
+    points: 47, cost: "720p $0.3034/秒、1080p $0.682/秒(標準檔,含音免費);Fast 720p $0.2419/秒;按秒計費,點數為 6 秒基準", verified: true,
     strengths: "字節最新世代旗艦;寫實與可控性再升級",
     bestFor: "最高規寫實成片;先小量試跑再定主力",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
+    // 點數以「無音」中價計(0.03+0.05)/2,與 Kling 2.6 等音訊開關型一致;開音訊實際費用較高
     id: "fal-ai/veo3.1/lite", label: "Veo 3.1 Lite(Google)", category: "text-to-video", tier: "economy", kind: "video",
-    points: 10, cost: "720p $0.03–0.05/秒、1080p $0.05–0.08/秒(含音較高);按秒計費,點數為 6 秒基準", verified: false,
+    points: 5, cost: "720p $0.03/秒(無音)–$0.05(含音)、1080p $0.05–0.08/秒;按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Veo 質感的超低價版;含音只要 $0.05/秒",
     bestFor: "量產日常 B-roll、空鏡、活動預告",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/minimax/hailuo-02/standard/text-to-video", label: "Hailuo 02 Standard", category: "text-to-video", tier: "economy", kind: "video",
-    points: 8, cost: "$0.045/秒(768p;Pro 1080p $0.08/秒);按秒計費,點數為 6 秒基準", verified: false,
+    points: 7, cost: "$0.045/秒(768p;Pro 1080p $0.08/秒);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "物理與指令遵循好;按秒計費透明",
     bestFor: "中等預算的日常敘事鏡頭",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/minimax/video-01-director", label: "Video-01 Director(Hailuo 01)", category: "text-to-video", tier: "economy", kind: "video",
-    points: 16, cost: "$0.5/支", verified: false,
+    points: 16, cost: "$0.5/支", verified: true,
     strengths: "導演式運鏡指令(推軌、環繞、俯仰)直覺好控",
     bestFor: "精準指定運鏡的鏡頭(如環繞佛像)",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
@@ -982,7 +1019,7 @@ export const MODELS: ModelEntry[] = [
   {
     // slug 推定(fal生態研究:以 fal 現場 slug 為準),真實模式首跑需確認
     id: "fal-ai/wan/v2.5/text-to-video", label: "Wan 2.5(開源)", category: "text-to-video", tier: "economy", kind: "video",
-    points: 9, cost: "≈$0.05/秒;按秒計費,點數為 6 秒基準", verified: false,
+    points: 8, cost: "480p $0.05/秒、720p $0.10/秒、1080p $0.15/秒(預設 1080p);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Wan 新一代;畫質提升並加入原生音訊,仍親民價",
     bestFor: "開源價又要帶音效的療癒 B-roll",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
@@ -990,42 +1027,42 @@ export const MODELS: ModelEntry[] = [
   {
     // slug 推定(fal生態研究:2026 新版,slug 待確認;2.7 約 $0.10/秒同級)
     id: "fal-ai/wan/v2.6/text-to-video", label: "Wan 2.6(開源)", category: "text-to-video", tier: "economy", kind: "video",
-    points: 23, cost: "$0.10/秒(720p)、$0.15/秒(1080p);按秒計費,點數為 6 秒基準", verified: false,
+    points: 16, cost: "$0.10/秒(720p)、$0.15/秒(1080p);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Wan 最新多模態世代;音畫一體、開源質感天花板",
     bestFor: "正式一點又要控成本的敘事片",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/hunyuan-video-v1.5/text-to-video", label: "Hunyuan Video 1.5(騰訊)", category: "text-to-video", tier: "economy", kind: "video",
-    points: 14, cost: "$0.075/秒;按秒計費,點數為 6 秒基準", verified: false,
+    points: 12, cost: "$0.075/秒;按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Hunyuan 升級版;畫質與時序穩定度提升",
     bestFor: "莊嚴療癒風的空景與慢運鏡",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/pika/v2.2/text-to-video", label: "Pika 2.2", category: "text-to-video", tier: "economy", kind: "video",
-    points: 10, cost: "$0.2/5秒(720p)、$0.45/5秒(1080p)", verified: false,
+    points: 10, cost: "$0.2/5秒(720p)、$0.45/5秒(1080p)", verified: true,
     strengths: "創意特效與關鍵影格過渡;風格化強",
     bestFor: "活潑轉場、片頭特效、社群短片",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/luma-dream-machine/ray-2-flash", label: "Luma Ray 2 Flash", category: "text-to-video", tier: "economy", kind: "video",
-    points: 6, cost: "$0.2/支", verified: false,
+    points: 6, cost: "$0.2/支", verified: true,
     strengths: "Ray 2 的平價版;保留 Luma 柔順運鏡美感",
     bestFor: "意境空鏡的日常主力、快迭代",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/bytedance/seedance/v1/lite/text-to-video", label: "Seedance 1.0 Lite(字節)", category: "text-to-video", tier: "economy", kind: "video",
-    points: 6, cost: "$0.18/支(720p 5秒)", verified: false,
+    points: 6, cost: "$0.18/支(720p 5秒)", verified: true,
     strengths: "Seedance 720p 經濟版;寫實傾向、每支超划算",
     bestFor: "寫實敘事鏡頭的量產與草稿",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/pixverse/v5.5/text-to-video", label: "PixVerse v5.5", category: "text-to-video", tier: "economy", kind: "video",
-    points: 9, cost: "$0.15(360/540p)–$0.40(1080p)/5秒;含音 +$0.05", verified: false,
+    points: 9, cost: "$0.15(360/540p)–$0.40(1080p)/5秒;含音 +$0.05", verified: true,
     strengths: "多解析度分層、內建特效模板、直式友善",
     bestFor: "9:16 動態背景、金句卡動態化",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
@@ -1033,14 +1070,14 @@ export const MODELS: ModelEntry[] = [
   {
     // slug 推定(fal生態研究:2026 新版,子路徑待確認),真實模式首跑需確認
     id: "fal-ai/pixverse/v6/text-to-video", label: "PixVerse V6", category: "text-to-video", tier: "economy", kind: "video",
-    points: 17, cost: "$0.090/秒(無音)、$0.115/秒(含音,1080p);按秒計費,點數為 6 秒基準", verified: false,
+    points: 14, cost: "$0.090/秒(無音)、$0.115/秒(含音,1080p);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "音畫一次生成(配樂+音效+對白同提示);1080p",
     bestFor: "一鍵出有背景音樂的直式短片、預告",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/kling-video/v1.6/standard/text-to-video", label: "Kling 1.6 Standard", category: "text-to-video", tier: "budget", kind: "video",
-    points: 8, cost: "$0.045/秒(standard;pro $0.095/秒);按秒計費,點數為 6 秒基準", verified: false,
+    points: 9, cost: "$0.056/秒(standard;pro 約 $0.095/秒);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Kling 舊世代低價版;動態仍可用",
     bestFor: "試鏡頭、抓動作節奏的草稿",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f), duration: "5" }),
@@ -1048,37 +1085,46 @@ export const MODELS: ModelEntry[] = [
   {
     // 另有子型號 slug fal-ai/wan/v2.1/1.3b/text-to-video(fal生態研究)
     id: "fal-ai/wan-t2v", label: "Wan 2.1(開源)", category: "text-to-video", tier: "budget", kind: "video",
-    points: 6, cost: "$0.2/支(1.3B 480p);wan-pro 版 $0.8/5秒", verified: false,
+    points: 6, cost: "$0.2/支(1.3B 480p);wan-pro 版 $0.8/5秒", verified: true,
     strengths: "前代開源輕量版極省;品質基本堪用",
     bestFor: "最省的開源試鏡頭、既有 2.1 LoRA",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/hunyuan-video", label: "Hunyuan Video(騰訊開源)", category: "text-to-video", tier: "budget", kind: "video",
-    points: 12, cost: "$0.40/支", verified: false,
+    points: 12, cost: "$0.40/支", verified: true,
     strengths: "騰訊開源大模型;動態自然、開源生態豐",
     bestFor: "日常空鏡、抽象動態;自訓 LoRA 底模",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/mochi-v1", label: "Mochi 1(Genmo 開源)", category: "text-to-video", tier: "budget", kind: "video",
-    points: 12, cost: "$0.4/支", verified: false,
+    points: 12, cost: "$0.4/支", verified: true,
     strengths: "開源、動態流暢、寫實傾向;按支平價",
     bestFor: "寫實空鏡試做;優先序在 Wan/LTX 之後",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
     id: "fal-ai/cogvideox-5b", label: "CogVideoX-5B(智譜開源)", category: "text-to-video", tier: "budget", kind: "video",
-    points: 6, cost: "$0.2/支", verified: false,
+    points: 6, cost: "$0.2/支", verified: true,
     strengths: "開源老將,按支超低價;品質基礎但穩定",
     bestFor: "教學練習、海量試驗、佔位動態",
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
+  },
+  {
+    // LoRA 推論(W2 打磨,研究表「必補」):wan-22 系訓練成果的使用處;來源欄=LoRA 檔網址
+    id: "fal-ai/wan/v2.2-a14b/text-to-video/lora", label: "Wan 2.2 掛 LoRA 成片", category: "text-to-video", tier: "economy", kind: "video",
+    needs: "zip", points: 16, cost: "$0.1/秒(Wan 2.2 掛 LoRA;基底 480p $0.04、580p $0.06、720p $0.08/秒);按秒計費,點數為 6 秒基準", verified: false,
+    strengths: "Wan 2.2 訓練成果的文生影端點;與站內主力工作流同底模",
+    bestFor: "用自家影像風 LoRA 出片(提示詞含觸發詞)",
+    sourceHint: "訓練成果 LoRA 檔網址(.safetensors)",
+    input: (p, f, s) => ({ prompt: p, aspect_ratio: aspect(f), loras: [{ path: s, scale: 1 }] }),
   },
 
   /* ═══ 3b. 圖生影片 image-to-video(W2 新類別:分鏡圖成片的結構性缺口,產品建議 #1) ═══ */
   {
     id: "fal-ai/kling-video/v2.6/pro/image-to-video", label: "Kling 2.6 Pro(圖生)", category: "image-to-video", tier: "flagship", kind: "video",
-    needs: "image", points: 13, cost: "$0.07/秒(關音訊)、$0.14/秒(開音訊);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "image", points: 11, cost: "$0.07/秒(關音訊)、$0.14/秒(開音訊);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "i2v 動作流暢與運鏡頂級;原生音效/人聲支援中英",
     bestFor: "分鏡圖轉電影感鏡頭、對外形象片",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1086,7 +1132,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/kling-video/v2.5-turbo/pro/image-to-video", label: "Kling 2.5 Turbo Pro(圖生)", category: "image-to-video", tier: "flagship", kind: "video",
-    needs: "image", points: 13, cost: "$0.07/秒(5秒$0.35);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "image", points: 11, cost: "$0.07/秒(5秒$0.35);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "動作自然度/成本甜蜜點;人物走動、衣物飄動穩",
     bestFor: "大量把分鏡圖動起來又要專業感",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1095,7 +1141,7 @@ export const MODELS: ModelEntry[] = [
   {
     // slug 推定(fal生態研究:另有 v3 turbo/pro、v3/4k 變體),真實模式首跑需確認
     id: "fal-ai/kling-video/v3/pro/image-to-video", label: "Kling v3 Pro(圖生)", category: "image-to-video", tier: "flagship", kind: "video",
-    needs: "image", points: 21, cost: "約$0.112/秒(關音訊)起、$0.168/秒(開);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "image", points: 17, cost: "約$0.112/秒(關音訊)起、$0.168/秒(開);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Kling 最新世代;頂規運鏡與物理一致性,含音訊",
     bestFor: "對外主視覺的象徵性長鏡頭,精用",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1103,7 +1149,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/veo3.1/image-to-video", label: "Veo 3.1 圖生(Google)", category: "image-to-video", tier: "flagship", kind: "video",
-    needs: "image", points: 74, cost: "$0.30/秒(720p)、$0.50/秒(1080p);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "image", points: 31, cost: "$0.20/秒(720p/1080p 無音)、$0.40/秒(含音)、4k $0.40–0.60;按秒計費,點數為 5 秒基準", verified: false,
     strengths: "物理正確+原生音訊的質感天花板;成本高",
     bestFor: "對外形象片最關鍵的一兩個鏡頭",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1111,7 +1157,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/veo2/image-to-video", label: "Veo 2 圖生(Google)", category: "image-to-video", tier: "flagship", kind: "video",
-    needs: "image", points: 39, cost: "$1.25/5秒 + $0.25/追加秒", verified: false,
+    needs: "image", points: 39, cost: "$2.50/5秒 + $0.50/追加秒", verified: true,
     strengths: "Veo 前代 i2v;質感佳、成本略低於 3.1",
     bestFor: "Google 系質感、預算比 3.1 寬鬆時",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1119,7 +1165,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/minimax/hailuo-2.3/pro/image-to-video", label: "Hailuo 2.3 Pro(圖生)", category: "image-to-video", tier: "flagship", kind: "video",
-    needs: "image", points: 15, cost: "$0.49/支(1080p,約6秒)", verified: false,
+    needs: "image", points: 15, cost: "$0.49/支(1080p,約6秒)", verified: true,
     strengths: "人物表演與情緒動作最自然;少鬼影變形",
     bestFor: "人像照活起來:表情、眼神、合掌",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1127,7 +1173,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/bytedance/seedance/v1.5/pro/image-to-video", label: "Seedance 1.5 Pro 圖生(字節)", category: "image-to-video", tier: "flagship", kind: "video",
-    needs: "image", points: 8, cost: "≈$0.26/支(720p 5秒,含音;1080p 更高)", verified: false,
+    needs: "image", points: 8, cost: "≈$0.26/支(720p 5秒,含音;1080p 更高)", verified: true,
     strengths: "多鏡頭敘事一致性強;支援原生音訊",
     bestFor: "一張圖延展成有分鏡感的連貫段落",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1135,7 +1181,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/luma-dream-machine/ray-2/image-to-video", label: "Luma Ray-2(圖生)", category: "image-to-video", tier: "flagship", kind: "video",
-    needs: "image", points: 16, cost: "$0.50/支", verified: false,
+    needs: "image", points: 16, cost: "$0.50/支", verified: true,
     strengths: "唯美光影氛圍與自然運動;靜謐基調最契合",
     bestFor: "莊嚴療癒空景動態:晨光、香煙、波光",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1144,7 +1190,7 @@ export const MODELS: ModelEntry[] = [
   {
     // slug 推定(fal生態研究:新款,價格以 Wan 2.5 級距參考;doc 原文即無 fal-ai 前綴),真實模式首跑需確認
     id: "wan/v2.6/image-to-video", label: "Wan 2.6 圖生(開源)", category: "image-to-video", tier: "flagship", kind: "video",
-    needs: "image", points: 9, cost: "約$0.05/秒(Wan 2.5 級距參考);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "image", points: 8, cost: "約$0.05/秒(Wan 2.5 級距參考);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "Wan 最新世代;HD、最長約15秒、原生音訊",
     bestFor: "較長單鏡頭又要開源可控成本",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1152,7 +1198,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/wan/v2.2-a14b/image-to-video", label: "Wan 2.2 圖生(開源)", category: "image-to-video", tier: "economy", kind: "video",
-    needs: "image", points: 11, cost: "480p $0.04/秒–720p $0.08/秒;按秒計費,點數為 6 秒基準", verified: false, recommended: true,
+    needs: "image", points: 6, cost: "480p $0.04/秒–720p $0.08/秒;按秒計費,點數為 6 秒基準", verified: true, recommended: true,
     strengths: "開源 14B 的 i2v 版;性價比與可控性最佳的日常主力",
     bestFor: "把 FLUX/Seedream 分鏡圖批量動起來",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1210,7 +1256,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 端點待確認(fal生態研究 ❓:id 與精確單價未經 fal 官方頁佐證),真實模式首跑需確認
     id: "fal-ai/runway-gen3/turbo/image-to-video", label: "Runway Gen-3 Turbo(圖生)", category: "image-to-video", tier: "economy", kind: "video",
-    needs: "image", points: 14, cost: "約$0.05–0.10/秒(依版本);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "image", points: 12, cost: "約$0.05–0.10/秒(依版本);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "Runway 系運鏡語言成熟;快速原型",
     bestFor: "分鏡圖轉有導演感鏡頭的原型",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1223,6 +1269,15 @@ export const MODELS: ModelEntry[] = [
     bestFor: "固定價、單支計費的簡單需求",
     sourceHint: "作為首格的圖(素材庫或網址)",
     input: (p, _f, s) => ({ prompt: p, image_url: s }),
+  },
+  {
+    // 參數名依 fal 慣例推定(subject_reference),首跑確認;真人臉照需本人授權(產品建議 #12)
+    id: "fal-ai/minimax/video-01-subject-reference", label: "Video-01 人物參考成片(MiniMax)", category: "image-to-video", tier: "economy", kind: "video",
+    needs: "image", points: 16, cost: "$0.50/支", verified: false,
+    strengths: "單張臉照鎖定人物的影片生成;跨鏡頭同一張臉",
+    bestFor: "見證故事的主角一致成片(需本人授權)",
+    sourceHint: "人物臉部照片(需授權)",
+    input: (p, _f, s) => ({ prompt: p, subject_reference_image_url: s }),
   },
   {
     id: "fal-ai/wan-i2v", label: "Wan 2.1 圖生(開源)", category: "image-to-video", tier: "economy", kind: "video",
@@ -1242,7 +1297,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/framepack", label: "FramePack 長片圖生(開源)", category: "image-to-video", tier: "budget", kind: "video",
-    needs: "image", points: 6, cost: "$0.0333/秒(可到約180幀);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "image", points: 5, cost: "$0.0333/秒(可到約180幀);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "自迴歸長片 i2v;超過一般 5–6 秒上限仍極省",
     bestFor: "莊嚴圖延展成較長療癒空景循環",
     sourceHint: "作為首格的圖(素材庫或網址)",
@@ -1269,7 +1324,7 @@ export const MODELS: ModelEntry[] = [
   /* ═══ 4. 影片轉影片 video-to-video ═══ */
   {
     id: "fal-ai/topaz/upscale/video", label: "Topaz 影片升級", category: "video-to-video", tier: "flagship", kind: "video",
-    needs: "video", points: 8, cost: "$0.01–0.08/秒(依解析度);按秒計費,點數為 6 秒基準", verified: true,
+    needs: "video", points: 7, cost: "$0.01–0.08/秒(依解析度);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "業界標準升頻;低清舊素材救星、可倍幀",
     bestFor: "歷史開示影片修復、AI 生成影片升 4K",
     sourceHint: "要升級的影片網址",
@@ -1278,23 +1333,32 @@ export const MODELS: ModelEntry[] = [
   {
     // 目錄錯誤修正(fal生態研究 #9):實際定價 $5/分,原標 $0.7–2/分嚴重低估
     id: "fal-ai/sync-lipsync/v2/pro", label: "Lipsync v2 Pro 對嘴", category: "video-to-video", tier: "flagship", kind: "video",
-    needs: "video", points: 16, cost: "$5/分;按影片長度計費,點數為 6 秒基準,長片實際費用高於扣點", verified: true,
+    needs: "video", points: 155, cost: "$5/分;按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高", verified: true,
     strengths: "最新一代對嘴;把配音精準貼合人物口型",
     bestFor: "虛擬主持人、配音替換",
     sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
     input: (p, _f, s) => ({ video_url: s, audio_url: p.trim() }),
   },
   {
+    // 現值更新(W2 打磨):研究表為 ≈$0.10/秒(720p 2x、1080p 4x),原標 $0.5–1/支 查無佐證
     id: "fal-ai/luma-dream-machine/ray-2/modify", label: "Ray-2 Modify 重繪", category: "video-to-video", tier: "flagship", kind: "video",
-    needs: "video", points: 30, cost: "≈$0.5–1/支", verified: false,
+    needs: "video", points: 16, cost: "≈$0.10/秒(720p 2x、1080p 4x);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "整段影片風格轉換/元素替換",
     bestFor: "把實拍轉動畫風、統一系列視覺",
     sourceHint: "要重繪的影片網址",
     input: (p, _f, s) => ({ video_url: s, prompt: p }),
   },
   {
+    id: "fal-ai/luma-dream-machine/ray-2-flash/modify", label: "Ray-2 Flash Modify 重繪", category: "video-to-video", tier: "economy", kind: "video",
+    needs: "video", points: 8, cost: "約$0.05/秒級(低於旗艦 Modify);按秒計費,點數為 6 秒基準", verified: false,
+    strengths: "Modify 的速度版;先快速試風格方向再上旗艦",
+    bestFor: "風格轉換的低成本試跑、量產統一調性",
+    sourceHint: "要重繪的影片網址",
+    input: (p, _f, s) => ({ video_url: s, prompt: p }),
+  },
+  {
     id: "fal-ai/sync-lipsync", label: "Lipsync 1.9 對嘴", category: "video-to-video", tier: "economy", kind: "video",
-    needs: "video", points: 8, cost: "$0.7/分;按影片長度計費,長片實際費用高於扣點", verified: true,
+    needs: "video", points: 22, cost: "$0.7/分;按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高", verified: true,
     strengths: "成熟穩定的對嘴;成本較低",
     bestFor: "一般對嘴需求",
     sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
@@ -1302,16 +1366,17 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/video-upscaler", label: "影片升頻(輕量)", category: "video-to-video", tier: "economy", kind: "video",
-    needs: "video", points: 19, cost: "$0.1/秒;按秒計費,點數為 6 秒基準", verified: true,
+    needs: "video", points: 16, cost: "$0.1/秒;按秒計費,點數為 6 秒基準", verified: true,
     strengths: "輕量升頻;速度快",
     bestFor: "日常素材小幅提升畫質",
     sourceHint: "要升頻的影片網址",
     input: (_p, _f, s) => ({ video_url: s }),
   },
   {
-    // 目錄錯誤修正(fal生態研究 #9):命名空間已遷移到 bria/*,且單價下修一個量級
+    // 目錄錯誤修正(fal生態研究 #9):命名空間已遷移到 bria/*
+    // 現值更新(W2 打磨):研究表為 ≈$0.1/秒(🔸推定,高於 BEN2/realtime 版);原 $0.01/秒 查無佐證
     id: "fal-ai/bria/video/background-removal", endpoint: "bria/video/background-removal", label: "影片去背", category: "video-to-video", tier: "economy", kind: "video",
-    needs: "video", points: 2, cost: "≈$0.01/秒;按秒計費,點數為 6 秒基準", verified: false,
+    needs: "video", points: 16, cost: "≈$0.1/秒(推定,以 fal 現場為準);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "自動去除影片背景(綠幕效果)",
     bestFor: "人物合成到新場景",
     sourceHint: "要去背的影片網址",
@@ -1329,7 +1394,7 @@ export const MODELS: ModelEntry[] = [
   /* —— W2 全量擴充(fal生態研究):以下 video-to-video 新增(對嘴/去背/放大/風格轉換) —— */
   {
     id: "fal-ai/sync-lipsync/v3", label: "Sync-3 對嘴(新旗艦)", category: "video-to-video", tier: "flagship", kind: "video",
-    needs: "video", points: 16, cost: "約$5+/分(略高於 v2);按影片長度計費,點數為 6 秒基準,長片實際費用高於扣點", verified: false,
+    needs: "video", points: 155, cost: "約$5+/分(略高於 v2,以 fal 現場為準);按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高", verified: false,
     strengths: "sync.so 最新一代;對嘴自然度天花板",
     bestFor: "對外正式的多語開示對嘴",
     sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
@@ -1337,7 +1402,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/sync-lipsync/v2", label: "Lipsync v2 對嘴(標準)", category: "video-to-video", tier: "flagship", kind: "video",
-    needs: "video", points: 9, cost: "$3/分;按影片長度計費,點數為 6 秒基準,長片實際費用高於扣點", verified: false,
+    needs: "video", points: 93, cost: "$3/分;按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高", verified: false,
     strengths: "新一代對嘴標準版;品質接近 Pro 省 4 成",
     bestFor: "多語版開示的日常出片",
     sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
@@ -1371,15 +1436,16 @@ export const MODELS: ModelEntry[] = [
   {
     // 依 ×0.1×31 規則為 1 點,但比照既有對嘴條目(0.7/分→8點)保守上調防長片低估
     id: "veed/lipsync", label: "VEED 對嘴", category: "video-to-video", tier: "economy", kind: "video",
-    needs: "video", points: 2, cost: "$0.4/分;按影片長度計費,點數為 6 秒基準,長片實際費用高於扣點", verified: false,
+    needs: "video", points: 12, cost: "$0.4/分;按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高", verified: false,
     strengths: "商用對嘴,便宜穩定;1.9 與 Sync 標準間的性價比",
     bestFor: "量大時的中階對嘴",
     sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
     input: (p, _f, s) => ({ video_url: s, audio_url: p.trim() }),
   },
   {
+    // 現值更新(W2 打磨):採研究「去背/分割」表的精確價($0.015–0.0225/30幀),與 fast/綠幕姊妹條目同基準
     id: "veed/video-background-removal", label: "VEED 影片去背(商用)", category: "video-to-video", tier: "economy", kind: "video",
-    needs: "video", points: 19, cost: "依時長計費(約$0.1/秒級);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "video", points: 4, cost: "$0.015–0.0225/30幀(30fps≈每秒);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "商用等級去背,穩定",
     bestFor: "對外正式合成的穩定去背",
     sourceHint: "要去背的影片網址",
@@ -1388,7 +1454,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 端點分 dev/fast/pro 三檔,此為基底 slug;點數取 $0.05–0.15/秒中價
     id: "decart/lucy-edit", label: "Lucy Edit 文字改影片", category: "video-to-video", tier: "economy", kind: "video",
-    needs: "video", points: 19, cost: "約$0.05–0.15/秒(dev/fast/pro 三檔);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "video", points: 16, cost: "約$0.05–0.15/秒(dev/fast/pro 三檔);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "文字指令換裝/換物/風格;保留身份與動作",
     bestFor: "口語修改:換服裝、換背景成佛堂",
     sourceHint: "要修改的影片網址",
@@ -1397,7 +1463,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 價格依 Wan 秒計費級距估(≈$0.04–0.08/秒取中價)
     id: "fal-ai/wan-vace-14b/outpainting", label: "Wan VACE 影片外擴", category: "video-to-video", tier: "economy", kind: "video",
-    needs: "video", points: 11, cost: "依 Wan 秒計費(≈$0.04–0.08/秒);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "video", points: 9, cost: "依 Wan 秒計費(≈$0.04–0.08/秒);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "補出畫面外內容、改變畫幅比例",
     bestFor: "舊 4:3 開示外擴 16:9、直橫式互轉",
     sourceHint: "要外擴的影片網址",
@@ -1494,111 +1560,64 @@ export const MODELS: ModelEntry[] = [
   {
     // 去浮水印/台標僅限自有素材(產品建議 #12,UI 需明示)
     id: "fal-ai/bria/video/eraser", label: "Bria 影片去物件", category: "video-to-video", tier: "flagship", kind: "video",
-    needs: "video", points: 26, cost: "$0.14/秒(限 5 秒/次);按秒計費,點數為 6 秒基準", verified: false,
+    needs: "video", points: 22, cost: "$0.14/秒(限 5 秒/次);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "文字描述移除影片中物件/日期戳(逐幀 inpaint)",
     bestFor: "短片段去雜物去台標;限自有素材",
     sourceHint: "要清理的影片網址(5 秒內)",
     input: (p, _f, s) => ({ prompt: p, video_url: s }),
   },
 
-  /* ═══ 5. 大型語言模型 llm(fal any-llm,單一端點多型號) ═══ */
+  /* ═══ 5. 大型語言模型 llm(NVIDIA NIM,單一端點多型號;LLM 文字整站遷移 NIM,媒體維持 fal) ═══
+     endpoint 一律 "nvidia-nim":generationCore 據此分流到 nimSubmit/nimStatus(不走 fal 佇列)。
+     計費為 NVIDIA NIM 按 token;短任務單次成本遠低於 1 點,固定扣 1 點與原 any-llm 同口徑。 */
   {
-    id: "fal-ai/any-llm#claude-sonnet-4.5", endpoint: "fal-ai/any-llm", label: "Claude Sonnet 4.5", category: "llm", tier: "flagship", kind: "text",
-    points: 1, cost: "$0.01/次", verified: true,
-    strengths: "長文理解與寫作頂尖;中文細膩、邏輯嚴謹",
-    bestFor: "腳本撰寫、開示摘要、敏感內容分寸拿捏",
-    input: llmInput("anthropic/claude-sonnet-4.5"),
+    id: "nvidia-nim#deepseek-r1", endpoint: "nvidia-nim", label: "DeepSeek R1", category: "llm", tier: "flagship", kind: "text",
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
+    strengths: "深度推理鏈旗艦;複雜任務拆解、長鏈邏輯最強",
+    bestFor: "腳本結構規劃、需要想清楚再答的複雜任務",
+    input: llmInput("deepseek-ai/deepseek-r1"),
   },
   {
-    id: "fal-ai/any-llm#gpt-5", endpoint: "fal-ai/any-llm", label: "GPT-5", category: "llm", tier: "flagship", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "通用推理旗艦;創意發想廣度大",
+    id: "nvidia-nim#llama-3.1-405b", endpoint: "nvidia-nim", label: "Llama 3.1 405B", category: "llm", tier: "flagship", kind: "text",
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
+    strengths: "Meta 開源最大檔;寫作品質與指令遵循頂尖",
+    bestFor: "正式腳本撰寫、開示摘要、長文彙整",
+    input: llmInput("meta/llama-3.1-405b-instruct"),
+  },
+  {
+    id: "nvidia-nim#nemotron-4-340b", endpoint: "nvidia-nim", label: "Nemotron-4 340B", category: "llm", tier: "flagship", kind: "text",
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
+    strengths: "NVIDIA 自家旗艦;指令對齊佳、輸出穩定",
     bestFor: "腦力激盪、多版本文案",
-    input: llmInput("openai/gpt-5"),
+    input: llmInput("nvidia/nemotron-4-340b-instruct"),
   },
   {
-    id: "fal-ai/any-llm#gemini-2.5-pro", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Pro", category: "llm", tier: "flagship", kind: "text",
-    points: 1, cost: "$0.01/次", verified: true,
-    strengths: "超長上下文;整本逐字稿一次讀",
-    bestFor: "長逐字稿整理、跨文件彙整",
-    input: llmInput("google/gemini-2.5-pro"),
-  },
-  {
-    id: "fal-ai/any-llm#gemini-2.5-flash", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Flash", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次", verified: true, recommended: true,
-    strengths: "快又便宜的日常主力",
+    id: "nvidia-nim#llama-3.1-70b", endpoint: "nvidia-nim", label: "Llama 3.1 70B", category: "llm", tier: "economy", kind: "text",
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false, recommended: true,
+    strengths: "品質/成本平衡的日常主力(後端自動 LLM 亦預設此檔)",
     bestFor: "標題、短文案、日常改寫",
-    input: llmInput("google/gemini-2.5-flash"),
+    input: llmInput("meta/llama-3.1-70b-instruct"),
   },
   {
-    id: "fal-ai/any-llm#gpt-5-mini", endpoint: "fal-ai/any-llm", label: "GPT-5 mini", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "GPT 家族輕量版;速度快",
-    bestFor: "批量小任務",
-    input: llmInput("openai/gpt-5-mini"),
-  },
-  {
-    id: "fal-ai/any-llm#llama-4-maverick", endpoint: "fal-ai/any-llm", label: "Llama 4 Maverick", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "Meta 開源旗艦;多模態、開放生態",
-    bestFor: "一般寫作、開源偏好場景",
-    input: llmInput("meta-llama/llama-4-maverick"),
-  },
-  {
-    id: "fal-ai/any-llm#gemini-2.5-flash-lite", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Flash Lite", category: "llm", tier: "budget", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "最低成本文字生成",
-    bestFor: "大量簡單任務(標籤、分類)",
-    input: llmInput("google/gemini-2.5-flash-lite"),
-  },
-  /* —— W2 全量擴充(fal生態研究):以下 llm 新增;any-llm 型號依當期策展清單,🔸推定首跑確認 —— */
-  {
-    // 型號推定(fal生態研究 🔸):依 fal 當期策展清單,未親驗
-    id: "fal-ai/any-llm#claude-opus-4.5", endpoint: "fal-ai/any-llm", label: "Claude Opus 4.5", category: "llm", tier: "flagship", kind: "text",
-    points: 2, cost: "premium 層按 token(家族最貴);長稿實際費用顯著超出扣點,慎用於長文", verified: false,
-    strengths: "最深推理與長篇寫作;分寸與結構最穩",
-    bestFor: "整場開示深度整編、弘法出版稿",
-    input: llmInput("anthropic/claude-opus-4.5"),
-  },
-  {
-    // 型號推定(fal生態研究 🔸):依當期清單,未親驗
-    id: "fal-ai/any-llm#llama-4-scout", endpoint: "fal-ai/any-llm", label: "Llama 4 Scout", category: "llm", tier: "budget", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "Llama 4 輕量版;長上下文、更省",
-    bestFor: "成本敏感的長文批處理",
-    input: llmInput("meta-llama/llama-4-scout"),
-  },
-  {
-    // 型號推定(fal生態研究 🔸):deepseek-r1 已見於 fal vision 清單,文字端未親驗
-    id: "fal-ai/any-llm#deepseek-r1", endpoint: "fal-ai/any-llm", label: "DeepSeek R1(推理)", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次(推理多耗輸出 token)", verified: false,
-    strengths: "開源推理模型;逐步拆解結構化強、極便宜",
-    bestFor: "開示拆分鏡大綱(提示指定繁體)",
-    input: llmInput("deepseek/deepseek-r1"),
-  },
-  {
-    // 型號推定(fal生態研究 🔸):deepseek-chat/v3 依當期清單,未親驗
-    id: "fal-ai/any-llm#deepseek-v3", endpoint: "fal-ai/any-llm", label: "DeepSeek V3", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "非推理版;通用寫作便宜快",
-    bestFor: "日常中文改寫、摘要(指定繁體)",
-    input: llmInput("deepseek/deepseek-chat"),
-  },
-  {
-    // 型號推定(fal生態研究 🔸):qwen 系型號依當期清單,未親驗
-    id: "fal-ai/any-llm#qwen2.5-72b", endpoint: "fal-ai/any-llm", label: "Qwen(通義千問)", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次", verified: false,
-    strengths: "開源中文最強梯隊;繁體與傳統用語掌握佳",
-    bestFor: "中文寫作、多語字幕翻譯省成本",
+    id: "nvidia-nim#qwen2.5-72b", endpoint: "nvidia-nim", label: "Qwen2.5 72B(中文)", category: "llm", tier: "economy", kind: "text",
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
+    strengths: "阿里通義開源檔;中文語感第一梯隊、繁中穩定",
+    bestFor: "中文金句、弘法文案、中文改寫潤飾",
     input: llmInput("qwen/qwen2.5-72b-instruct"),
   },
   {
-    // 型號推定(fal生態研究 🔸):claude-haiku-4.5 或 claude-3-5-haiku,依當期清單
-    id: "fal-ai/any-llm#claude-haiku-4.5", endpoint: "fal-ai/any-llm", label: "Claude Haiku 4.5", category: "llm", tier: "economy", kind: "text",
-    points: 1, cost: "$0.01/次(Claude 家族最低)", verified: false,
-    strengths: "最快最省的 Claude;保留穩重語域分寸",
-    bestFor: "批量金句、短標題、字卡文案",
-    input: llmInput("anthropic/claude-haiku-4.5"),
+    id: "nvidia-nim#mistral-large-2", endpoint: "nvidia-nim", label: "Mistral Large 2", category: "llm", tier: "economy", kind: "text",
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
+    strengths: "歐系旗艦;多語能力佳、風格精煉",
+    bestFor: "多語版本文案、翻譯初稿",
+    input: llmInput("mistralai/mistral-large-2-instruct"),
+  },
+  {
+    id: "nvidia-nim#llama-3.1-8b", endpoint: "nvidia-nim", label: "Llama 3.1 8B", category: "llm", tier: "budget", kind: "text",
+    points: 0, cost: "免費(NVIDIA NIM 免費額度)", verified: false,
+    strengths: "最低成本文字生成;速度極快",
+    bestFor: "大量簡單任務(標籤、分類)",
+    input: llmInput("meta/llama-3.1-8b-instruct"),
   },
 
   /* ═══ 6. 圖片轉文字 vision ═══ */
@@ -1697,7 +1716,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/wizper", label: "Wizper(加速 v3)", category: "speech-to-text", tier: "flagship", kind: "text",
-    needs: "audio", points: 1, cost: "≈$0.0008/音訊秒;長錄音實際費用遠高於扣點,長稿建議改用 Scribe", verified: true,
+    needs: "audio", points: 1, cost: "≈$0.0008/運算秒(推定,官方未單列);長錄音實際費用遠高於扣點,長稿建議改用 Scribe", verified: true,
     strengths: "fal 自家加速版 Whisper v3;同級品質、數倍速度",
     bestFor: "長錄音快速出稿",
     sourceHint: "音訊檔網址",
@@ -1720,8 +1739,9 @@ export const MODELS: ModelEntry[] = [
     input: (_p, _f, s) => ({ audio_url: s, task: "transcribe", language: "zh", chunk_level: "word" }),
   },
   {
-    id: "fal-ai/elevenlabs/speech-to-text#keyterms", endpoint: "fal-ai/elevenlabs/speech-to-text", label: "Scribe 關鍵詞強化", category: "speech-to-text", tier: "economy", kind: "text",
-    needs: "audio", points: 2, cost: "$0.22/小時+", verified: false,
+    // 現值更新(W2 打磨):keyterms 為 Scribe v2 功能,端點改指 v2;價格依研究 #9 重查為 $0.008/分
+    id: "fal-ai/elevenlabs/speech-to-text#keyterms", endpoint: "fal-ai/elevenlabs/speech-to-text/scribe-v2", label: "Scribe 關鍵詞強化", category: "speech-to-text", tier: "economy", kind: "text",
+    needs: "audio", points: 2, cost: "$0.008/分(≈$0.48/小時)", verified: false,
     strengths: "提示專有名詞(佛學術語)提升辨識",
     bestFor: "術語密集的開示(提示詞欄填術語、逗號分隔)",
     sourceHint: "音訊檔網址",
@@ -1729,7 +1749,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/wizper#draft", endpoint: "fal-ai/wizper", label: "Wizper 快速草稿", category: "speech-to-text", tier: "budget", kind: "text",
-    needs: "audio", points: 1, cost: "≈$0.0008/音訊秒", verified: true,
+    needs: "audio", points: 1, cost: "≈$0.0008/運算秒(推定,官方未單列)", verified: true,
     strengths: "最快最省的初稿",
     bestFor: "先看內容再決定精修",
     sourceHint: "音訊檔網址",
@@ -1800,7 +1820,8 @@ export const MODELS: ModelEntry[] = [
     input: (p) => ({ text: p }),
   },
   {
-    id: "fal-ai/qwen-3-tts/text-to-speech/1.7b", label: "Qwen 3 TTS(中文)", category: "text-to-speech", tier: "economy", kind: "audio",
+    // 檔位修正(W2 打磨):研究表列旗艦(產品建議 #3 的「經濟主力」指性價比,非檔位)
+    id: "fal-ai/qwen-3-tts/text-to-speech/1.7b", label: "Qwen 3 TTS(中文)", category: "text-to-speech", tier: "flagship", kind: "audio",
     points: 3, cost: "$0.09/千字", verified: false,
     strengths: "阿里通義原生中文 TTS;韻律與句讀像真人,中文第一梯隊、比 MiniMax 更省",
     bestFor: "中文旁白日更量產、金句語音、見證旁白",
@@ -1844,7 +1865,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/index-tts-2/text-to-speech", label: "Index TTS 2.0(中文可控)", category: "text-to-speech", tier: "flagship", kind: "audio",
-    points: 4, cost: "$0.002/秒(≈$0.12/分),按秒計費", verified: false,
+    points: 1, cost: "$0.002/秒(≈$0.12/分),按秒計費", verified: false,
     strengths: "拼音校正破音字+精準時長控制;WER 最低、咬字最準",
     bestFor: "影片對嘴配音、佛學術語密集稿",
     input: (p) => ({ text: p }),
@@ -1944,29 +1965,30 @@ export const MODELS: ModelEntry[] = [
     input: (p) => ({ prompt: p }),
   },
   {
+    // 現值更新(W2 打磨):研究表為 約$0.80/分(≈25點/分);原 $0.15 下限查無佐證,偏低 -39 校準到位
     id: "fal-ai/elevenlabs/music", label: "ElevenLabs Music", category: "text-to-audio", tier: "flagship", kind: "audio",
-    points: 5, cost: "$0.15–0.80/分", verified: false,
+    points: 74, cost: "約 $0.80/分(近期降價中,以 fal 現場為準);點數以 3 分鐘估,較長樂曲實際費用更高", verified: false,
     strengths: "授權資料訓練(版權安全);結構化歌曲",
     bestFor: "對外發布影片的配樂(版權安心)",
     input: (p) => ({ prompt: p }),
   },
   {
     id: "fal-ai/stable-audio-25/text-to-audio", label: "Stable Audio 2.5", category: "text-to-audio", tier: "flagship", kind: "audio",
-    points: 7, cost: "$0.20/次", verified: false,
+    points: 6, cost: "$0.20/次", verified: false,
     strengths: "長度與參數控制精細;音樂+音效兼修",
     bestFor: "指定長度的配樂段落",
     input: (p) => ({ prompt: p, seconds_total: 30 }),
   },
   {
     id: "fal-ai/minimax-music", label: "MiniMax Music", category: "text-to-audio", tier: "economy", kind: "audio",
-    points: 2, cost: "$0.03/首", verified: true, recommended: true,
+    points: 1, cost: "$0.03/首", verified: true, recommended: true,
     strengths: "極高性價比的完整歌曲(可含人聲)",
     bestFor: "主題曲 demo、快速配樂",
     input: (p) => ({ prompt: p }),
   },
   {
     id: "fal-ai/elevenlabs/sound-effects/v2", label: "ElevenLabs 音效 v2", category: "text-to-audio", tier: "economy", kind: "audio",
-    points: 2, cost: "≈$0.01/次", verified: true,
+    points: 1, cost: "≈$0.01/次", verified: true,
     strengths: "描述即得音效(鐘聲、翻書、腳步)",
     bestFor: "剪輯用單發音效",
     input: (p) => ({ text: p }),
@@ -1980,7 +2002,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/ace-step", label: "ACE-Step(開源)", category: "text-to-audio", tier: "budget", kind: "audio",
-    points: 1, cost: "$0.0002/秒", verified: true,
+    points: 1, cost: "$0.0002/秒(另有 $0.005/秒 來源,以首帳單為準)", verified: true,
     strengths: "全站最低成本音樂生成",
     bestFor: "氛圍底噪、練習用",
     input: (p) => ({ prompt: p }),
@@ -2043,7 +2065,7 @@ export const MODELS: ModelEntry[] = [
   {
     // 價格推定(fal生態研究 🔸):$0.05/秒未親驗,整首成本偏高
     id: "fal-ai/yue", label: "YuE(開源演唱)", category: "text-to-audio", tier: "economy", kind: "audio",
-    points: 5, cost: "$0.05/秒(推定);整首實際費用可能高於扣點,審慎使用", verified: false,
+    points: 8, cost: "$0.05/秒(推定);整首實際費用可能高於扣點,審慎使用", verified: false,
     strengths: "開源歌詞轉歌;中英雙語演唱、結構完整但較慢",
     bestFor: "開源可控的中文主題曲備援",
     input: (p) => ({ prompt: p }),
@@ -2077,8 +2099,9 @@ export const MODELS: ModelEntry[] = [
 
   /* ═══ 10. 訓練 training(LoRA;來源=素材 zip 網址,提示詞=觸發詞) ═══ */
   {
+    // 現值更新(W2 打磨):研究表明言「目錄現標 $6.4/千步已過時」,實為 $0.008/步
     id: "fal-ai/flux-2-trainer", label: "FLUX.2 訓練器", category: "training", tier: "flagship", kind: "text",
-    needs: "zip", points: 200, cost: "$6.4/千步", verified: true,
+    needs: "zip", points: 248, cost: "$8/千步(V2 版 $5/千步)", verified: true,
     strengths: "最新 FLUX.2 基底;風格/人物/主題客製",
     bestFor: "打造「本會專屬視覺風格」模型",
     sourceHint: "訓練圖包 zip 網址(10–30 張圖)",
@@ -2093,8 +2116,9 @@ export const MODELS: ModelEntry[] = [
     input: (p, _f, s) => ({ images_data_url: s, trigger_word: p.trim() || "EDIT" }),
   },
   {
+    // 現值更新(W2 打磨):研究表明言「目錄現標 $4 已過時」,實為 $2.5/千步
     id: "fal-ai/flux-kontext-trainer", label: "Kontext 訓練器", category: "training", tier: "flagship", kind: "text",
-    needs: "zip", points: 130, cost: "≈$4/次", verified: true,
+    needs: "zip", points: 78, cost: "$2.5/千步(最低 500 步 $1.25)", verified: true,
     strengths: "Kontext 基底;角色一致性微調",
     bestFor: "固定講者/吉祥物的一致形象",
     sourceHint: "角色圖包 zip 網址",
@@ -2126,7 +2150,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/flux-krea-trainer", label: "Krea 訓練器", category: "training", tier: "economy", kind: "text",
-    needs: "zip", points: 65, cost: "$2/次", verified: true,
+    needs: "zip", points: 62, cost: "$2/次", verified: true,
     strengths: "美感取向的 Krea 基底",
     bestFor: "唯美系視覺風格",
     sourceHint: "訓練圖包 zip 網址",
@@ -2134,7 +2158,7 @@ export const MODELS: ModelEntry[] = [
   },
   {
     id: "fal-ai/flux-lora-fast-training", label: "FLUX LoRA 快速訓練", category: "training", tier: "budget", kind: "text",
-    needs: "zip", points: 65, cost: "≈$2/次", verified: true, recommended: true,
+    needs: "zip", points: 62, cost: "≈$2/次", verified: true, recommended: true,
     strengths: "經典入門訓練器;幾分鐘出模型",
     bestFor: "第一次嘗試訓練",
     sourceHint: "訓練圖包 zip 網址",
@@ -2262,40 +2286,40 @@ export interface WorkflowPreset {
 
 export const WORKFLOW_PRESETS: WorkflowPreset[] = [
   {
-    id: "wf/full-short-flagship", label: "完整短片(旗艦)", tier: "flagship", points: 40,
+    id: "wf/full-short-flagship", label: "完整短片(旗艦)", tier: "flagship", points: 39,
     strengths: "LLM 潤飾腳本 → 旗艦文生圖定調 → Veo 3.1 成片;三步到位",
     bestFor: "正式對外的 15 秒形象短片",
     steps: [
-      { modelId: "fal-ai/any-llm#claude-sonnet-4.5", promptTemplate: "把以下構想潤飾成一段 40 字內的影片畫面描述(供文生影片模型使用,繁體中文):{prompt}", note: "腳本潤飾" },
+      { modelId: "nvidia-nim#llama-3.1-405b", promptTemplate: "把以下構想潤飾成一段 40 字內的影片畫面描述(供文生影片模型使用,繁體中文):{prompt}", note: "腳本潤飾" },
       { modelId: "fal-ai/bytedance/seedream/v4.5/text-to-image", promptTemplate: "{prev}", note: "先出定調圖" },
       { modelId: "fal-ai/veo3.1", promptTemplate: "{prev}", note: "生成成片鏡頭" },
     ],
   },
   {
-    id: "wf/brand-storyboard-flagship", label: "品牌繪本(旗艦)", tier: "flagship", points: 7,
+    id: "wf/brand-storyboard-flagship", label: "品牌繪本(旗艦)", tier: "flagship", points: 6,
     strengths: "LLM 出分鏡文案 → 旗艦出圖 → 編輯統一風格",
     bestFor: "系列感的三格分鏡圖",
     steps: [
-      { modelId: "fal-ai/any-llm#gemini-2.5-pro", promptTemplate: "把主題「{prompt}」化為一句電影感畫面描述(40 字內,繁體中文)", note: "分鏡文案" },
+      { modelId: "nvidia-nim#llama-3.1-405b", promptTemplate: "把主題「{prompt}」化為一句電影感畫面描述(40 字內,繁體中文)", note: "分鏡文案" },
       { modelId: "fal-ai/nano-banana-2", promptTemplate: "{prev}", note: "生成主圖" },
       { modelId: "fal-ai/nano-banana-2/edit", promptTemplate: "保持構圖不變,將整體色調調整為溫暖的琥珀色晨光", usePrevAsSource: true, note: "統一調性" },
     ],
   },
   {
-    id: "wf/quote-card-flagship", label: "金句卡(旗艦)", tier: "flagship", points: 3,
+    id: "wf/quote-card-flagship", label: "金句卡(旗艦)", tier: "flagship", points: 2,
     strengths: "LLM 摘句 → Ideogram 文字卡;中文排版強",
     bestFor: "每日金句社群圖",
     steps: [
-      { modelId: "fal-ai/any-llm#claude-sonnet-4.5", promptTemplate: "從以下內容擷取一句 20 字內的金句(只回金句本身):{prompt}", note: "摘金句" },
+      { modelId: "nvidia-nim#qwen2.5-72b", promptTemplate: "從以下內容擷取一句 20 字內的金句(只回金句本身):{prompt}", note: "摘金句" },
       { modelId: "fal-ai/ideogram/v3", promptTemplate: "極簡禪意海報,溫暖米色背景,優雅繁體中文書法字:「{prev}」", note: "生成文字卡" },
     ],
   },
   {
-    id: "wf/full-short-economy", label: "完整短片(經濟)", tier: "economy", points: 10,
+    id: "wf/full-short-economy", label: "完整短片(經濟)", tier: "economy", points: 9,
     strengths: "同「完整短片」流程,改用經濟模型;成本 1/4",
     bestFor: "日常內部短片",
     steps: [
-      { modelId: "fal-ai/any-llm#gemini-2.5-flash", promptTemplate: "把以下構想潤飾成一段 40 字內的影片畫面描述(繁體中文):{prompt}", note: "腳本潤飾" },
+      { modelId: "nvidia-nim#llama-3.1-70b", promptTemplate: "把以下構想潤飾成一段 40 字內的影片畫面描述(繁體中文):{prompt}", note: "腳本潤飾" },
       { modelId: "fal-ai/flux/dev", promptTemplate: "{prev}", note: "定調圖" },
       { modelId: "fal-ai/wan/v2.2-a14b/text-to-video", promptTemplate: "{prev}", note: "成片鏡頭" },
     ],
@@ -2310,11 +2334,11 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
     ],
   },
   {
-    id: "wf/quote-card-economy", label: "金句卡(經濟)", tier: "economy", points: 2,
+    id: "wf/quote-card-economy", label: "金句卡(經濟)", tier: "economy", points: 1,
     strengths: "Flash 摘句+FLUX dev 出圖",
     bestFor: "高頻率的日更金句",
     steps: [
-      { modelId: "fal-ai/any-llm#gemini-2.5-flash", promptTemplate: "從以下內容擷取一句 20 字內的金句(只回金句本身):{prompt}", note: "摘金句" },
+      { modelId: "nvidia-nim#qwen2.5-72b", promptTemplate: "從以下內容擷取一句 20 字內的金句(只回金句本身):{prompt}", note: "摘金句" },
       { modelId: "fal-ai/flux/dev", promptTemplate: "極簡禪意海報構圖,溫暖米色背景,大面留白,主題:{prev}", note: "生成底圖" },
     ],
   },
@@ -2331,6 +2355,87 @@ export const WORKFLOW_PRESETS: WorkflowPreset[] = [
 
 /** 舊版模型(既有資料相容;不出現在挑選器) */
 export const LEGACY_MODELS: ModelEntry[] = [
+  // ── fal any-llm 系列(LLM 已整站遷移 NVIDIA NIM;保留供既有生成紀錄/工作流歷史對得上標籤與點數,
+  //    在途舊生成也仍能沿 fal 佇列輪詢收尾) ──
+  {
+    id: "fal-ai/any-llm#claude-sonnet-4.5", endpoint: "fal-ai/any-llm", label: "Claude Sonnet 4.5(舊)", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "$0.01/次", verified: true,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("anthropic/claude-sonnet-4.5"),
+  },
+  {
+    id: "fal-ai/any-llm#gpt-5", endpoint: "fal-ai/any-llm", label: "GPT-5(舊)", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("openai/gpt-5"),
+  },
+  {
+    id: "fal-ai/any-llm#gemini-2.5-pro", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Pro(舊)", category: "llm", tier: "flagship", kind: "text",
+    points: 1, cost: "$0.01/次", verified: true,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("google/gemini-2.5-pro"),
+  },
+  {
+    id: "fal-ai/any-llm#gemini-2.5-flash", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Flash(舊)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$0.01/次", verified: true,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("google/gemini-2.5-flash"),
+  },
+  {
+    id: "fal-ai/any-llm#gpt-5-mini", endpoint: "fal-ai/any-llm", label: "GPT-5 mini(舊)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("openai/gpt-5-mini"),
+  },
+  {
+    id: "fal-ai/any-llm#llama-4-maverick", endpoint: "fal-ai/any-llm", label: "Llama 4 Maverick(舊)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("meta-llama/llama-4-maverick"),
+  },
+  {
+    id: "fal-ai/any-llm#gemini-2.5-flash-lite", endpoint: "fal-ai/any-llm", label: "Gemini 2.5 Flash Lite(舊)", category: "llm", tier: "budget", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("google/gemini-2.5-flash-lite"),
+  },
+  // W2 擴充期短暫上架的 any-llm 型號(未曾驗證):LLM 整站遷移 NIM 後一併移入舊版目錄
+  {
+    id: "fal-ai/any-llm#claude-opus-4.5", endpoint: "fal-ai/any-llm", label: "Claude Opus 4.5(舊)", category: "llm", tier: "flagship", kind: "text",
+    points: 2, cost: "premium 層按 token", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("anthropic/claude-opus-4.5"),
+  },
+  {
+    id: "fal-ai/any-llm#llama-4-scout", endpoint: "fal-ai/any-llm", label: "Llama 4 Scout(舊)", category: "llm", tier: "budget", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("meta-llama/llama-4-scout"),
+  },
+  {
+    id: "fal-ai/any-llm#deepseek-r1", endpoint: "fal-ai/any-llm", label: "DeepSeek R1(fal 舊)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項(NIM 版見 nvidia-nim#deepseek-r1)", bestFor: "既有紀錄相容",
+    input: llmInput("deepseek/deepseek-r1"),
+  },
+  {
+    id: "fal-ai/any-llm#deepseek-v3", endpoint: "fal-ai/any-llm", label: "DeepSeek V3(舊)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("deepseek/deepseek-chat"),
+  },
+  {
+    id: "fal-ai/any-llm#qwen2.5-72b", endpoint: "fal-ai/any-llm", label: "Qwen(通義千問)(fal 舊)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項(NIM 版見 nvidia-nim#qwen2.5-72b)", bestFor: "既有紀錄相容",
+    input: llmInput("qwen/qwen2.5-72b-instruct"),
+  },
+  {
+    id: "fal-ai/any-llm#claude-haiku-4.5", endpoint: "fal-ai/any-llm", label: "Claude Haiku 4.5(舊)", category: "llm", tier: "economy", kind: "text",
+    points: 1, cost: "$0.01/次", verified: false,
+    strengths: "舊版目錄項", bestFor: "既有紀錄相容",
+    input: llmInput("anthropic/claude-haiku-4.5"),
+  },
   {
     id: "fal-ai/kling-video/v2.1/standard/text-to-video", label: "影片 5 秒 · Kling 2.1(舊)", category: "text-to-video", tier: "economy", kind: "video",
     points: 12, cost: "$0.05/秒", verified: true,
@@ -2351,6 +2456,45 @@ export function getModel(id: string): ModelEntry | undefined {
   return MODELS.find((m) => m.id === id) ?? LEGACY_MODELS.find((m) => m.id === id);
 }
 
+/** 匯率假設（與 scripts/audit-model-pricing.ts 一致）：1 點 ≈ NT$1、USD×31——校準與動態估點同一基準 */
+export const USD_TO_TWD = 31;
+
+/**
+ * 「按字計費」文字轉語音模型的每千字點數率（僅 text-to-speech 且「首個」報價單位為千字者）。
+ * 這類模型的計費量＝待朗讀文字長度，送出前就已知（prompt 本身即朗讀文字，TTS 不注入世界觀），
+ * 故可逐次精確估點，取代扁平 points（原本僅對「約 1000 字」一種長度才等於真實成本）。
+ * 只認「首個」報價：voice-clone 的「$1.50/次＋預覽音 $0.30/千字」首報價為 /次 → 判為 flat，不誤入動態。
+ * 模組載入時建一次快取（純衍生自 cost 字串，零額外資料源）。
+ */
+const ttsPointsPerKChar: Map<string, number> = (() => {
+  const map = new Map<string, number>();
+  for (const m of MODELS) {
+    if (m.category !== "text-to-speech") continue;
+    const first = m.cost.match(/\$\s*([0-9]+(?:\.[0-9]+)?)\s*\/\s*([^\s;,、(（]+)/); // 首個 $價/單位
+    if (first && first[2].startsWith("千字")) map.set(m.id, Number(first[1]) * USD_TO_TWD);
+  }
+  return map;
+})();
+
+/** 逐次估點的輸入脈絡（送出前已知的計費量） */
+export interface EstimateContext {
+  /** 待計費文字字元數（TTS：即 prompt 長度＝朗讀文字量） */
+  promptChars?: number;
+}
+
+/**
+ * 逐次估點：按字計費的 TTS 依實際文字長度算真實成本（下限 1 點）；其餘一律回扁平 model.points。
+ * 呼叫端（generationCore）一次算好 est 貫穿 pointsEst／審核門檻／扣點／退點，前後端共用同一函式，
+ * 確保顯示＝扣點＝退點三者永遠一致（reserve/refund 對稱）。無 promptChars 時退回扁平值（等同舊行為）。
+ */
+export function estimatePoints(model: ModelEntry, ctx?: EstimateContext): number {
+  const perK = ttsPointsPerKChar.get(model.id);
+  if (perK != null && ctx?.promptChars != null && ctx.promptChars > 0) {
+    return Math.max(1, Math.round((perK * ctx.promptChars) / 1000));
+  }
+  return model.points;
+}
+
 /* 為什麼:工作流合計點數曾多條與單步實扣不符(UI 顯示夠用、中途才被額度擋下的斷鏈),
    故模組載入時一律由單步模型註冊表推導覆寫,單步點數改動後下游(workflows API/catalog/文件)自動同步。
    注意:必須放在 MODELS/WORKFLOW_PRESETS/LEGACY_MODELS 初始化之後,否則 getModel 會踩 const 的 TDZ。 */
@@ -2362,9 +2506,14 @@ export function getWorkflow(id: string): WorkflowPreset | undefined {
   return WORKFLOW_PRESETS.find((w) => w.id === id);
 }
 
-/** 佇列端點(any-llm 系列共用端點) */
+/** 佇列端點(nvidia-nim/any-llm 系列共用端點) */
 export function endpointOf(model: ModelEntry): string {
   return model.endpoint ?? model.id;
+}
+
+/** 是否走 NVIDIA NIM(LLM 文字類):generationCore 據此把送出/輪詢分流到 nimSubmit/nimStatus */
+export function isNimModel(model: ModelEntry): boolean {
+  return endpointOf(model) === "nvidia-nim";
 }
 
 /** 平台 → 格式自動帶入(夥伴不用懂比例) */

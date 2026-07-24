@@ -85,8 +85,12 @@ body {
 }
 .app { max-width: 1180px; margin: 0 auto; padding: 0 20px 48px; }
 
-/* 頂欄 */
-.topbar { display: flex; align-items: center; gap: 12px; padding: 12px 0; flex-wrap: wrap; }
+/* 頂欄：sticky 常駐——長頁（近 800 行的專案頁）捲到深處仍能回作業台/切組/看點數
+ * 半透明底＋模糊：與 body 的環境光漸層在頁頂不打架、捲動時又能遮住底下內容 */
+.topbar { display: flex; align-items: center; gap: 12px; padding: 12px 0; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 30;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-16); letter-spacing: -0.01em; }
 .orb { width: 22px; height: 22px; border-radius: 50%; flex: none;
   background: conic-gradient(from 210deg, var(--primary), var(--gold), var(--healing), var(--primary));
@@ -253,7 +257,9 @@ a:hover { color: var(--primary-solid-hover); }
 .menu-item:hover { background: var(--card2); }
 .menu-item.danger { color: var(--danger-ink); }
 .menu-sep { height: 1px; background: var(--border-soft); margin: 6px 4px; }
-.menu-label { font-size: 11px; color: var(--fg-secondary); padding: 2px 10px; letter-spacing: 0.04em; user-select: none; }
+.menu-label { font-size: 11px; font-weight: 600; color: var(--fg-secondary); padding: 2px 10px; letter-spacing: 0.06em; user-select: none; }
+/* 分組標題與前一組留一點呼吸：分隔線之後緊接標題時，標題自帶上緣間距讓群組更成塊 */
+.menu-sep + .menu-label { margin-top: 2px; }
 
 /* 素材庫（真實儲存層） */
 .upload-zone { border: 2px dashed var(--border); border-radius: var(--r-12); padding: 16px; text-align: center;
@@ -310,7 +316,9 @@ button:focus-visible { border-radius: 999px; }
   h1 { margin-top: 18px; }
   .card { padding: 16px 16px; }
   .card--primary { padding: 18px 18px; }
-  .topbar { gap: 8px; row-gap: 8px; }
+  /* 手機頂欄會換行、高度不定，sticky 會吃掉太多視高且與章節導覽列互搶——退回 static，
+   * 返回動線交給專案頁麵包屑；章節導覽列（.toc-rail）才是手機的常駐 sticky */
+  .topbar { gap: 8px; row-gap: 8px; position: static; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
   .topbar .badge, .topbar .status-chip { font-size: 12px; padding: 5px 11px; min-height: 40px; }
   .group-select { min-width: 160px; }
   button { min-height: 40px; }
@@ -321,9 +329,15 @@ button:focus-visible { border-radius: 999px; }
   .group-head { margin-top: var(--sp-32); }
 }
 
+/* 視覺隱藏但報讀器可讀（生成完成/失敗的 aria-live 宣告等） */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
 /* ─── 手機（≤560px） ─── */
 @media (max-width: 560px) {
   .app { padding: 0 12px 36px; }
+  /* 頂欄空間吃緊：說明與高頻工具入口都收成純圖示（title/aria 仍在） */
+  .topbar-help-label, .topbar-quick-label { display: none; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .asset-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
   .gen-row { grid-template-columns: 1fr; row-gap: 10px; align-items: stretch; }
@@ -337,6 +351,11 @@ button:focus-visible { border-radius: 999px; }
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
   animation: sk-shimmer 1.2s ease-in-out infinite; }
 @keyframes sk-shimmer { 100% { transform: translateX(100%); } }
+
+/* 消耗監控的各組展開列：藏掉原生三角、用 .details-caret 隨開合轉 90° */
+details > summary::-webkit-details-marker { display: none; }
+.details-caret { flex: none; color: var(--fg-secondary); transition: transform var(--dur-base) var(--ease-out); }
+details[open] > summary .details-caret { transform: rotate(90deg); }
 
 /* ─── 細緻進場動效（僅 opacity/transform） ─── */
 .confirm-panel { animation: fade-rise var(--dur-base) var(--ease-out); }
@@ -376,8 +395,10 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
 #sec-workflow, #onboard-delivery { scroll-margin-top: var(--sp-16); }
 
 @media (max-width: 820px) {
-  .toc-layout { grid-template-columns: 1fr; }
-  .toc-rail { position: static; max-height: none; overflow: visible; }
+  /* 手機改 block（單欄 grid 會把 rail 關進只有自身高的格子，sticky 沒有活動空間）；
+   * 收合列 sticky 釘在頂欄下方——捲進 ③④⑤ 階段仍能隨時展開跳章節，不必長捲回頁首 */
+  .toc-layout { display: block; }
+  .toc-rail { position: sticky; top: var(--sp-8); z-index: 25; max-height: none; overflow: visible; margin-bottom: var(--sp-16); }
 }
 
 /* 動態偏好：使用者要求減少動效時關閉過場與動畫 */
@@ -459,3 +480,64 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
   padding: 8px; background: var(--card2); border-radius: var(--r-8); }
 .todo-form input[type="datetime-local"] { flex: 0 1 auto; }
 .todo-form input:not([type]) { flex: 1 1 140px; min-width: 120px; }
+
+/* ── 工作台一體化：上下文摘要條——一眼看見 AI 全程共用哪些設定；chip 點了捲到對應卡 ── */
+.ctx-summary { display: flex; align-items: center; gap: 4px 6px; flex-wrap: wrap;
+  font-size: var(--fs-12); color: var(--fg-secondary); margin: -4px 0 0; }
+
+/* ── 筆記排程：清單／月曆切換 段落鈕（seg）＋ 真實月曆網格 ＋ 知識地圖心智圖 ── */
+.seg { display: inline-flex; gap: 2px; padding: 2px; background: var(--muted); border-radius: 999px; }
+.seg button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent;
+  color: var(--fg-secondary); border-radius: 999px; padding: 5px 12px; font-size: var(--fs-13); font-weight: 600;
+  box-shadow: none; }
+.seg button:hover:not(:disabled) { background: var(--card2); color: var(--fg); }
+.seg button.on { background: var(--card); color: var(--fg); box-shadow: var(--e1); }
+
+/* 月曆：6×7 網格，週日起始；當日高亮、選中描邊 */
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-head { text-align: center; font-size: var(--fs-12); font-weight: 600; color: var(--fg-secondary); padding: 4px 0; }
+.cal-cell { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-height: 74px;
+  border: 1px solid var(--border-soft); border-radius: var(--r-8); background: var(--card2); padding: 5px 6px;
+  text-align: left; box-shadow: none; font-weight: 400; cursor: pointer; overflow: hidden; }
+.cal-cell:hover:not(:disabled) { border-color: var(--border-strong); background: var(--card2); }
+.cal-cell.out { background: transparent; opacity: 0.5; }
+.cal-cell.today { border-color: var(--primary-border); background: var(--primary-tint); }
+.cal-cell.sel { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+.cal-daynum { font-size: var(--fs-12); font-weight: 600; color: var(--fg-secondary); }
+.cal-cell.today .cal-daynum { color: var(--primary-ink); }
+.cal-events { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cal-ev { font-size: 11px; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--card); border: 1px solid var(--border-soft); border-radius: var(--r-4); padding: 1px 5px; color: var(--fg); }
+.cal-ev-time { color: var(--primary-ink); font-family: var(--mono); font-weight: 600; }
+.cal-more { font-size: 11px; color: var(--fg-secondary); padding-left: 4px; }
+@media (max-width: 620px) {
+  .cal-cell { min-height: 56px; }
+  .cal-ev { font-size: 10px; }
+}
+
+/* 知識地圖（心智圖）：SVG 依容器寬縮放；節點分色（筆記藍・行程琥珀・專案赤陶・組層級灰） */
+.map-wrap { border: 1px solid var(--border-soft); border-radius: var(--r-12); background: var(--card2); overflow: hidden; }
+.map-svg { display: block; width: 100%; height: auto; }
+.map-edge { stroke: var(--border-strong); stroke-width: 1.2; }
+.map-edge.leaf { stroke: var(--border); stroke-dasharray: 3 3; }
+.map-node text { font-size: 13px; fill: var(--fg); font-family: var(--sans); pointer-events: none; }
+.map-node.group circle { fill: var(--primary-tint); stroke: var(--primary-border); stroke-width: 1.5; }
+.map-node.group text { font-weight: 700; fill: var(--primary-ink); font-size: 14px; }
+.map-node.project rect { fill: var(--card); stroke: var(--primary-border); stroke-width: 1.4; }
+.map-node.project text { fill: var(--primary-ink); font-weight: 600; }
+.map-node.bucket rect { fill: var(--card); stroke: var(--border-strong); stroke-width: 1.2; }
+.map-node.bucket text { fill: var(--fg-secondary); font-weight: 600; }
+.map-node.more rect { fill: transparent; stroke: var(--border); stroke-dasharray: 3 2; }
+.map-node.more text { fill: var(--fg-secondary); font-size: 12px; }
+.map-node.note circle { fill: var(--primary); stroke: #fff; stroke-width: 1; }
+.map-node.schedule circle { fill: var(--gold); stroke: #fff; stroke-width: 1; }
+.map-node.note text, .map-node.schedule text { font-size: 11px; fill: var(--fg-secondary); }
+.map-node.clickable:hover text { fill: var(--fg); }
+.map-node.clickable:hover circle { r: 8; }
+.map-node.project.clickable:hover rect, .map-node.more.clickable:hover rect { stroke: var(--primary); stroke-width: 1.8; }
+.map-legend { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-12); color: var(--fg-secondary); }
+.map-dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
+.map-dot.note { background: var(--primary); }
+.map-dot.sched { background: var(--gold); }
+.map-dot.proj { background: var(--card); border: 1.4px solid var(--primary-border); }
+.map-dot.bucket { background: var(--card); border: 1.4px solid var(--border-strong); }

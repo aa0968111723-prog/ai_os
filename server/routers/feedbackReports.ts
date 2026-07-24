@@ -1,18 +1,23 @@
 import { z } from "zod";
 import { and, or, eq, inArray, desc, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
+import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { FEEDBACK_CATEGORY_VALUES } from "../../shared/options";
 import { isFeedbackShotPath } from "../services/storage";
+import { runFeedbackAgentOnce, triageReportNow } from "../services/feedbackAgent";
+
+/** 送出後即時分診的類別：影響使用（壞掉／卡關）的先跑,不必等 3 天排程；其餘留給排程批次收尾。 */
+const INSTANT_TRIAGE_CATEGORIES = new Set(["bug", "stuck"]);
+import { isEmailConfigured } from "../services/email";
 
 /** 合法狀態（與 schema feedback_reports.status 一致）——過濾與更新共用 */
 const STATUS_VALUES = ["open", "reviewing", "done"] as const;
 
 /**
  * 元件級回饋後端（R23）：使用者點頁面元件 → 分類＋文字（＋可選截圖）即時回報。
- * submit＝任何登入者送出；listVisible＝作者本人／該組組長・管理員／超管看得到；
- * updateStatus＝只有審閱者（組長・管理員・超管）能改狀態，純作者不行。
+ * submit＝任何登入者送出；listVisible＝作者本人／該組組長・管理員／開發者看得到；
+ * updateStatus＝只有審閱者（組長・管理員・開發者）能改狀態，純作者不行。
  */
 export const feedbackReportsRouter = router({
   submit: authedProcedure
@@ -60,14 +65,19 @@ export const feedbackReportsRouter = router({
           screenshotPath: input.screenshotPath ?? null,
         })
         .returning({ id: schema.feedbackReports.id });
+      // 高影響類別（壞掉／卡關）送出當下就分診＋回覆，不必等 3 天排程。
+      // fire-and-forget：不阻塞送出回應（LLM 呼叫可能數秒）,triageReportNow 自身全程容錯。
+      if (INSTANT_TRIAGE_CATEGORIES.has(input.category)) {
+        void triageReportNow(row.id);
+      }
       return { id: row.id };
     }),
 
-  /** 可見清單：作者本人／該組組長・管理員／超管；新到舊上限 200，附送者名與組名 */
+  /** 可見清單：作者本人／該組組長・管理員／開發者；新到舊上限 200，附送者名與組名 */
   listVisible: authedProcedure
     .input(z.object({ status: z.enum(STATUS_VALUES).optional() }).optional())
     .query(async ({ ctx, input }) => {
-      // 可見性：超管看全部；其餘為「自己送的」或「自己是組長/管理員的組」的回饋。
+      // 可見性：開發者看全部；其餘為「自己送的」或「自己是組長/管理員的組」的回饋。
       let visibility: SQL | undefined;
       if (!ctx.auth.user.isSuperAdmin) {
         const reviewGroupIds = ctx.auth.groups.filter((g) => g.role !== "member").map((g) => g.groupId);
@@ -97,18 +107,72 @@ export const feedbackReportsRouter = router({
       return rows.map((r) => ({ ...r.report, userName: r.userName ?? "?", groupName: r.groupName ?? "—" }));
     }),
 
-  /** 改狀態：只有審閱者（該組組長・管理員或超管）可改；純作者不能改自己回饋的狀態 */
+  /**
+   * 我的回報（追蹤頁用）：目前使用者送出的所有元件回饋,新到舊,含狀態與回饋代理的分診/回覆。
+   * 讓回報者送完不斷線——看得到被處理到哪、代理回了什麼（email 常未設定或漏收,站內查最可靠）。
+   */
+  mine: authedProcedure.query(async ({ ctx }) => {
+    return db
+      .select({
+        id: schema.feedbackReports.id,
+        category: schema.feedbackReports.category,
+        pages: schema.feedbackReports.pages,
+        targetLabel: schema.feedbackReports.targetLabel,
+        note: schema.feedbackReports.note,
+        status: schema.feedbackReports.status,
+        agentReviewedAt: schema.feedbackReports.agentReviewedAt,
+        agentSeverity: schema.feedbackReports.agentSeverity,
+        agentReply: schema.feedbackReports.agentReply,
+        emailStatus: schema.feedbackReports.emailStatus,
+        createdAt: schema.feedbackReports.createdAt,
+      })
+      .from(schema.feedbackReports)
+      .where(eq(schema.feedbackReports.userId, ctx.auth.user.id))
+      .orderBy(desc(schema.feedbackReports.createdAt))
+      .limit(100);
+  }),
+
+  /** 改狀態：只有審閱者（該組組長・管理員或開發者）可改；純作者不能改自己回饋的狀態 */
   updateStatus: authedProcedure
     .input(z.object({ id: z.string().uuid(), status: z.enum(STATUS_VALUES) }))
     .mutation(async ({ ctx, input }) => {
       const [report] = await db.select().from(schema.feedbackReports).where(eq(schema.feedbackReports.id, input.id));
       if (!report) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這則回饋" });
       if (!ctx.auth.user.isSuperAdmin) {
-        // 無組回饋沒有組長可審，只有超管能處理；有組則需組長/管理員（requireLeader 會擋掉純組員與非本組者）
+        // 無組回饋沒有組長可審，只有開發者能處理；有組則需組長/管理員（requireLeader 會擋掉純組員與非本組者）
         if (!report.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "只有系統管理員能處理這則回饋" });
         requireLeader(ctx.auth, report.groupId);
       }
       await db.update(schema.feedbackReports).set({ status: input.status }).where(eq(schema.feedbackReports.id, input.id));
       return { ok: true };
     }),
+
+  /**
+   * 回饋代理狀態（管理頁「回饋代理」卡用）：最近一次巡檢紀錄＋信箱機制是否就緒。
+   * 需團隊管理權（adminProcedure）；每 3 天自動巡一次的排程在伺服器背景，這裡只讀狀態。
+   */
+  agentStatus: adminProcedure.query(async () => {
+    const [lastRun] = await db
+      .select()
+      .from(schema.feedbackAgentRuns)
+      .orderBy(desc(schema.feedbackAgentRuns.startedAt))
+      .limit(1);
+    return {
+      // 排程固定每 3 天巡一次（見 services/feedbackAgent.ts）
+      intervalDays: 3,
+      emailConfigured: isEmailConfigured(),
+      lastRun: lastRun ?? null,
+    };
+  }),
+
+  /**
+   * 立即巡檢一輪（開發者手動觸發，不必等 3 天排程）：同步跑完回傳結果。
+   * 併發時（排程正在跑）回 skipped；只有開發者可觸發，避免一般管理員狂點觸發 LLM 呼叫。
+   */
+  runAgentNow: adminProcedure.mutation(async ({ ctx }) => {
+    if (!ctx.auth.user.isSuperAdmin) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "只有開發者能手動觸發回饋代理巡檢" });
+    }
+    return runFeedbackAgentOnce({ trigger: "manual" });
+  }),
 });

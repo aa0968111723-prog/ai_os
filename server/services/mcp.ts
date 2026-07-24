@@ -1,24 +1,51 @@
 /**
- * MCP 伺服器介面（4-1 架構定案）：讓外部 AI 客戶端（如 Claude）直接操作系統。
- * - 極簡 Streamable HTTP（無狀態 JSON-RPC POST）；設 MCP_API_KEY 才啟用。
- * - 以超管身分執行（金鑰即權限）；工具：list_projects / get_project_context / submit_generation / post_message
+ * MCP 伺服器介面（per-user 權限定案）：讓外部 AI 客戶端（如 Claude）直接操作系統。
+ * - 極簡 Streamable HTTP（無狀態 JSON-RPC POST）。
+ * - 身分＝金鑰擁有者：每位夥伴帶「自己的」個人金鑰連進來，工具一律以其真實身分與權限執行——
+ *   組隔離（requireGroup）、專案 ACL（assertProjectEditable）、點數額度與成本核准門檻，
+ *   全部沿用網頁端同一套守衛（submit_generation 直接重用 submitGenerationCore）。
+ * - 金鑰可設「唯讀」與「到期」（見 services/mcpAuth）：唯讀金鑰經 scopeDeniedReason 擋所有寫入類工具。
+ * - 舊有共用金鑰 env MCP_API_KEY 仍可用（對應開發者），僅為向後相容；見 services/mcpAuth。
+ * - 工具（讀/寫分類的單一來源在 shared/mcpCatalog）：
+ *     基礎：whoami / list_projects / get_project_context / find_model / submit_generation / post_message
+ *     生成取回：list_generations / get_generation / list_assets（成品簽成免登入短效網址）
+ *     自訂資料庫：list_databases / query_database / add_database_row / list_database_files / read_database_file / get_database_stats
+ *     AI 代理（重用 agentCore）：plan_agent / approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
+ *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item
+ *     筆記・會議紀錄（組共用、可匯入知識庫）：list_notes / get_note
+ *     統整：get_project_status（一次回分鏡＋生成＋代理＋排程＋待辦）
  */
 import type { Request, Response } from "express";
-import { timingSafeEqual } from "node:crypto";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
-import { getModel, endpointOf, MODELS, CATEGORIES, tierLabel, type ProjectFormat, type ModelCategory, type ModelTier } from "../../shared/models";
-import { falSubmit, isMockMode } from "./fal";
-import { reserveQuota, refund } from "./points";
+import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
 import { sanitizeAuditInput } from "./audit";
-// 重用網頁端的注入判斷（generation.ts 不 import 本檔，無循環相依）：
-// TTS 會把注入文字唸進成品、轉錄/視覺工具會被污染輸入，不能無條件注入世界觀
-import { effectivePrompt } from "../routers/generation";
+import { submitGenerationCore, advanceGeneration } from "./generationCore";
+import { signAssetUrl, signDbFileUrl } from "./storage";
+import { assertProjectEditable } from "./projectAcl";
+import { requireGroup } from "../trpc";
+import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity, scopeDeniedReason, type McpScope } from "./mcpAuth";
+import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
+import { addDataRowValidated } from "./databaseCore";
+import { formatStatsLine, mediaKindOf, tableStats } from "./databaseMedia";
+import {
+  planAgentCore, approveAgentCore, discardAgentCore, stopAgentCore,
+  listAgentRunsForProject, getAgentRunChecked,
+} from "./agentCore";
+import { addScheduleItemCore, listScheduleForGroup } from "./scheduleCore";
+import type { AgentStep } from "./agentRunner";
+import type { AuthState } from "./auth";
 
 const PROTOCOL_VERSION = "2024-11-05";
 
 const TOOLS = [
+  {
+    name: "whoami",
+    description: "確認這把金鑰的身分與權限：回你的名稱、所屬組別與角色、以及此金鑰是否唯讀。可用來測試連線是否成功。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
   {
     name: "list_projects",
     description: "列出所有專案（標題、類型、格式、狀態）",
@@ -60,12 +87,185 @@ const TOOLS = [
     description: "在專案留言板發訊息",
     inputSchema: { type: "object", properties: { projectId: { type: "string" }, body: { type: "string" } }, required: ["projectId", "body"] },
   },
+  {
+    name: "list_generations",
+    description: "列出某專案的生成紀錄與狀態（queued/running/done/failed/awaiting_approval/rejected）。送出生成後用這個追進度、取回成品網址。可用 status 篩選、limit 上限 50。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        status: { type: "string", enum: ["queued", "running", "done", "failed", "awaiting_approval", "rejected"] },
+        limit: { type: "number", description: "最多回幾筆（預設 20，上限 50）" },
+      },
+      required: ["projectId"],
+    },
+  },
+  {
+    name: "get_generation",
+    description: "查一筆生成的最新狀態並取回成品（resultUrl 圖/影/音的免登入下載網址、resultText 文字）。會主動推進 fal 狀態，適合輪詢到 done/failed。",
+    inputSchema: { type: "object", properties: { generationId: { type: "string" } }, required: ["generationId"] },
+  },
+  {
+    name: "list_assets",
+    description: "列出專案素材庫（AI 成品與上傳素材）：id／類型／標題／是否 AI 生成／可直接下載的網址。可用 kind 篩選、limit 上限 50。成品也可回頭當生成來源（submit_generation 的 source_url）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        kind: { type: "string", enum: ["image", "video", "audio", "text", "doc"] },
+        limit: { type: "number", description: "最多回幾筆（預設 20，上限 50）" },
+      },
+      required: ["projectId"],
+    },
+  },
+  {
+    name: "list_databases",
+    description: "列出你可存取的自訂資料庫（個人/組/團隊/全站 四層範圍），含欄位定義與列數",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "query_database",
+    description: "查詢自訂資料庫的列資料（keyword 全文粗篩、limit 上限 200）；先用 list_databases 找 tableId 與欄位定義",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tableId: { type: "string" },
+        keyword: { type: "string", description: "關鍵字（比對整列資料）" },
+        limit: { type: "number", description: "最多回幾列（預設 50，上限 200）" },
+      },
+      required: ["tableId"],
+    },
+  },
+  {
+    name: "add_database_row",
+    description: "在自訂資料庫新增一列。data 的鍵＝欄位 key（見 list_databases 回的 fields）；型別與必填由伺服器驗證",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tableId: { type: "string" },
+        data: { type: "object", description: "{ 欄位key: 值 }" },
+      },
+      required: ["tableId", "data"],
+    },
+  },
+  {
+    name: "list_database_files",
+    description: "列出資料庫掛的文件（上傳檔、Google/Notion 匯入、圖片/影音）：名稱、媒體類型、分類、AI 描述、可讀字數；keyword 過濾名稱/分類/描述/內文並回匹配片段。之後用 read_database_file 讀全文",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tableId: { type: "string" },
+        keyword: { type: "string", description: "過濾名稱／分類／AI 描述／內文包含此關鍵字的文件（內文命中回匹配片段）" },
+        category: { type: "string", description: "只列這個分類的文件" },
+      },
+      required: ["tableId"],
+    },
+  },
+  {
+    name: "read_database_file",
+    description: "讀取文件內容：文字檔回抽出的純文字（單次最多 20000 字，長文用 offset 分段；回應含 totalChars）；圖片/影音回分類、AI 看圖描述與短效下載網址（多模態客戶端可自行抓圖）",
+    inputSchema: {
+      type: "object",
+      properties: {
+        fileId: { type: "string" },
+        offset: { type: "number", description: "從第幾個字開始（預設 0）" },
+        maxChars: { type: "number", description: "本次最多回幾個字（預設 20000，上限 20000）" },
+      },
+      required: ["fileId"],
+    },
+  },
+  {
+    name: "get_database_stats",
+    description: "一個資料庫的資訊量統計：列數/欄數、文件數與圖影音文分佈、總容量、AI 可讀字數、已看圖描述數、分類分佈、最後活動時間。回答「這個庫有多少東西」先用這個",
+    inputSchema: { type: "object", properties: { tableId: { type: "string" } }, required: ["tableId"] },
+  },
+  // ── AI 代理（規劃→核准→背景執行）：讓外部 AI 驅動系統內建的多步製作代理 ──
+  {
+    name: "plan_agent",
+    description: "請系統內建的 AI 代理針對一句目標排一份「可背景逐步執行」的多步製作計畫（拆分鏡／建鏡／生成／配音／送審）。只規劃、不執行，也不扣執行點數；回 runId 與每步估點，之後用 approve_agent 才開始。",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, goal: { type: "string", description: "一句目標，至少 5 字（例：把知識庫腳本拆成分鏡並逐鏡出圖）" } },
+      required: ["projectId", "goal"],
+    },
+  },
+  {
+    name: "approve_agent",
+    description: "核准一份代理計畫並開始背景逐步執行（此刻起才依各步驟扣點；超額生成仍會停下等組長核准）。只有發起人或組長以上可核准。",
+    inputSchema: { type: "object", properties: { runId: { type: "string" } }, required: ["runId"] },
+  },
+  {
+    name: "stop_agent",
+    description: "停止一個執行中的代理（正在生成的那一步會自然完成，後續步驟不再執行、不扣點）。",
+    inputSchema: { type: "object", properties: { runId: { type: "string" } }, required: ["runId"] },
+  },
+  {
+    name: "discard_agent",
+    description: "放棄一份「尚未核准」的代理計畫（不扣點）。",
+    inputSchema: { type: "object", properties: { runId: { type: "string" } }, required: ["runId"] },
+  },
+  {
+    name: "list_agent_runs",
+    description: "列出專案的代理計畫與執行狀態（待核准／執行中＋最近終局）。",
+    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+  },
+  {
+    name: "get_agent_run",
+    description: "查一份代理計畫的每一步與進度（每步 kind／說明／狀態／估點／關聯生成 id）。用來追 approve 後的執行進度。",
+    inputSchema: { type: "object", properties: { runId: { type: "string" } }, required: ["runId"] },
+  },
+  // ── 專案排程（組行事曆／交付死線）：外部 AI 可讀可寫，與專案綁定 ──
+  {
+    name: "list_schedule",
+    description: "列出這個專案相關的行程與交付死線（本專案 ＋ 組層級）。預設只回未來與近 24 小時；includePast 回全部。",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, includePast: { type: "boolean" } },
+      required: ["projectId"],
+    },
+  },
+  {
+    name: "add_schedule_item",
+    description: "為專案新增一筆行程／交付死線（會出現在組行事曆與該專案）。startsAt／endsAt 為 ISO 8601 時間字串。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        title: { type: "string" },
+        startsAt: { type: "string", description: "ISO 8601，如 2026-08-01T09:00:00+08:00" },
+        endsAt: { type: "string", description: "ISO 8601（可省；須晚於 startsAt）" },
+        note: { type: "string" },
+      },
+      required: ["projectId", "title", "startsAt"],
+    },
+  },
+  // ── 筆記・會議紀錄（組共用的知識筆記，可匯入知識庫）：外部 AI 可讀，閉合「知識地圖」迴路 ──
+  {
+    name: "list_notes",
+    description: "列出這個專案相關的會議筆記／知識筆記（本專案 ＋ 組層級共用）。回摘要與字數；用 get_note 讀全文。可用 limit 上限 50。",
+    inputSchema: {
+      type: "object",
+      properties: { projectId: { type: "string" }, limit: { type: "number", description: "最多回幾筆（預設 20，上限 50）" } },
+      required: ["projectId"],
+    },
+  },
+  {
+    name: "get_note",
+    description: "讀一則筆記的全文（會議決議、待辦、由知識庫匯入的內容）。先用 list_notes 找 noteId。",
+    inputSchema: { type: "object", properties: { noteId: { type: "string" } }, required: ["noteId"] },
+  },
+  // ── 統整快照（把分鏡／生成／代理／排程／待辦一次給外部 AI，細部連結各子系統）──
+  {
+    name: "get_project_status",
+    description: "一次取回專案全貌：分鏡進度、近期生成狀態、進行中的 AI 代理、即將到來的行程、以及待處理事項。外部 AI 規劃下一步前先讀這個。",
+    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+  },
 ];
 
 /**
- * MCP 工具呼叫審計（需求 2.2）：MCP 是全站權限最高的介面（單一金鑰＝超管），過去完全繞過
- * trpc.ts 的 mutation 審計中介層——跨組花點、貼留言零軌跡。這裡比照 recordAudit：
- * fire-and-forget、輸入脫敏、成功失敗都記；groupId/projectId 盡力從 args.projectId 反查。
+ * MCP 工具呼叫審計（需求 2.2）：MCP 繞過 trpc.ts 的 mutation 審計中介層，這裡自行比照 recordAudit：
+ * fire-and-forget、輸入脫敏、成功失敗都記；actorId＝金鑰擁有者本人（per-user 後可追到是誰、非籠統開發者）；
+ * groupId/projectId 盡力從 args.projectId 反查。
  */
 function recordMcpAudit(
   actorId: string,
@@ -94,24 +294,62 @@ function recordMcpAudit(
   })().catch((err) => console.warn("[mcp] 審計寫入失敗（不影響主流程）：", err instanceof Error ? err.message : err));
 }
 
-async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-  const [admin] = await db.select().from(schema.users).where(eq(schema.users.isSuperAdmin, true)).limit(1);
-  if (!admin) throw new Error("系統尚未初始化");
+/**
+ * 生成／素材網址 → 外部 AI 客戶端可「直接 GET」的網址：
+ * - 已落地（/api/assets/:id/file，需授權）：用 signAssetUrl 簽成自帶簽章的短效絕對網址，
+ *   外部客戶端沒有登入 cookie 也抓得到（/api/assets 路由接受 exp+sig 簽章免登入）。
+ * - 未落地（fal CDN 的 http 網址）：本就是可直接抓的絕對網址，原樣返回。
+ * 不簽的話外部客戶端只會拿到需登入的相對路徑、一律 401——等於成品拿不回，迴路仍不通。
+ */
+function externalAssetUrl(url: string | null): string | null {
+  if (!url) return url;
+  const m = url.match(/^\/api\/assets\/([0-9a-f-]{36})\/file/i);
+  if (m) return signAssetUrl(m[1]);
+  return url;
+}
+
+async function callTool(auth: AuthState, scope: McpScope, name: string, args: Record<string, unknown>): Promise<unknown> {
   // 每次工具呼叫（含失敗）都落審計——與 tRPC mutation 同一口徑；讀寫工具一律記（MCP 量小、
-  // 但每筆都是超管級跨組操作，可追溯性優先於「query 不記」的省量取捨）
+  // 每筆都是跨介面操作，可追溯性優先於「query 不記」的省量取捨）。actorId＝金鑰擁有者本人。
   try {
-    const result = await runTool(admin, name, args);
-    recordMcpAudit(admin.id, name, args, { ok: true });
+    const result = await runTool(auth, scope, name, args);
+    recordMcpAudit(auth.user.id, name, args, { ok: true });
     return result;
   } catch (err) {
-    recordMcpAudit(admin.id, name, args, { ok: false, error: err instanceof Error ? err.message : String(err) });
+    recordMcpAudit(auth.user.id, name, args, { ok: false, error: err instanceof Error ? err.message : String(err) });
     throw err;
   }
 }
 
-async function runTool(admin: typeof schema.users.$inferSelect, name: string, args: Record<string, unknown>): Promise<unknown> {
+async function runTool(auth: AuthState, scope: McpScope, name: string, args: Record<string, unknown>): Promise<unknown> {
+  // 唯讀金鑰守衛：最前面就擋掉寫入類工具（送生成／留言／寫資料列），連 DB 都不必碰。
+  // 被擋也會被 callTool 落審計（ok=false），可追溯「唯讀金鑰嘗試寫入」。
+  const scopeDenied = scopeDeniedReason(name, scope);
+  if (scopeDenied) throw new Error(scopeDenied);
+
+  if (name === "whoami") {
+    // 確認身分與權限（測試連線用）：外部客戶端一眼看出「我以誰的身分連進來、能做什麼」。
+    return {
+      user: { name: auth.user.name, email: auth.user.email, isSuperAdmin: auth.user.isSuperAdmin },
+      groups: auth.groups.map((g) => ({ team: g.teamName, group: g.groupName, role: g.role })),
+      readOnly: scope.readOnly,
+      note: scope.readOnly
+        ? "這把金鑰是唯讀的：只能讀取，不能送生成／發留言／寫資料列。"
+        : "這把金鑰可讀可寫，操作一律以你本人的身分與權限執行。",
+    };
+  }
+
   if (name === "list_projects") {
-    const rows = await db.select().from(schema.projects).orderBy(desc(schema.projects.updatedAt)).limit(50);
+    // per-user 隔離：只列此人有權存取的組（直接組員＋團隊管理展開＋開發者展開全部，見 loadAuthState）。
+    // 無任何組＝回空陣列（不外洩他組專案標題）。
+    const groupIds = auth.groups.map((g) => g.groupId);
+    if (groupIds.length === 0) return [];
+    const rows = await db
+      .select()
+      .from(schema.projects)
+      .where(inArray(schema.projects.groupId, groupIds))
+      .orderBy(desc(schema.projects.updatedAt))
+      .limit(50);
     return rows.map((p) => ({ id: p.id, title: p.title, kind: p.kind, format: p.format, status: p.status }));
   }
 
@@ -136,14 +374,317 @@ async function runTool(admin: typeof schema.users.$inferSelect, name: string, ar
     }));
   }
 
+  // ── 自訂資料庫工具（不掛專案；權限與 tRPC 同一套 databaseAcl）──
+  if (name === "list_databases") {
+    // 以「AI 介面」的有效權限過濾：agentAccess=none 的庫連列表都不出現（MCP 權限由資料庫管理者控管）
+    const tables = await listVisibleTables(auth);
+    return tables.flatMap((t) => {
+      const access = resolveAgentAccess(auth, t);
+      if (!access.canRead) return [];
+      return [{
+        tableId: t.id,
+        name: t.name,
+        scope: t.scope,
+        description: t.description,
+        fields: t.fields,
+        rowCount: t.rowCount,
+        canWriteRows: access.canWriteRows,
+      }];
+    });
+  }
+
+  if (name === "query_database" || name === "add_database_row") {
+    const tableId = String(args.tableId ?? "");
+    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
+    if (!table) throw new Error("找不到這個資料庫");
+    // AI 介面有效權限＝本人權限 ∩ agentAccess 等級（none 連讀都擋、read 擋寫）——
+    // 與 tRPC 同語意：無讀取權當作不存在，不外洩個人庫/他組庫的存在性
+    const access = resolveAgentAccess(auth, table);
+    if (!access.canRead) throw new Error("找不到這個資料庫");
+
+    if (name === "query_database") {
+      const conds = [eq(schema.dataRows.tableId, table.id)];
+      const keyword = String(args.keyword ?? "").trim();
+      if (keyword) conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + keyword + "%"}`);
+      const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 200);
+      const rows = await db
+        .select({ id: schema.dataRows.id, data: schema.dataRows.data, updatedAt: schema.dataRows.updatedAt })
+        .from(schema.dataRows)
+        .where(and(...conds))
+        .orderBy(desc(schema.dataRows.createdAt))
+        .limit(limit);
+      return { table: table.name, fields: table.fields, rows };
+    }
+
+    // add_database_row：走列寫入單一路徑（與 tRPC/代理/REST 一致，含 20,000 列保險絲）
+    if (!access.canWriteRows) throw new Error("這個資料庫不開放 AI 寫入（管理者可在工作台「資料庫」頁調整 AI 存取等級）");
+    const row = await addDataRowValidated(table, auth.user.id, args.data ?? {});
+    return { rowId: row.id, data: row.data };
+  }
+
+  if (name === "list_database_files") {
+    const tableId = String(args.tableId ?? "");
+    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
+    if (!table) throw new Error("找不到這個資料庫");
+    if (!resolveAgentAccess(auth, table).canRead) throw new Error("找不到這個資料庫");
+    const files = await db
+      .select()
+      .from(schema.dataFiles)
+      .where(eq(schema.dataFiles.tableId, table.id))
+      .orderBy(desc(schema.dataFiles.createdAt))
+      .limit(200);
+    const keyword = String(args.keyword ?? "").trim().toLowerCase();
+    const categoryFilter = String(args.category ?? "").trim();
+    return files.flatMap((f) => {
+      if (categoryFilter && f.category !== categoryFilter) return [];
+      const text = f.textContent ?? "";
+      let snippet: string | null = null;
+      if (keyword) {
+        const idx = text.toLowerCase().indexOf(keyword);
+        const metaHit = [f.name, f.category ?? "", f.aiDescription ?? ""].some((s) => s.toLowerCase().includes(keyword));
+        if (idx < 0 && !metaHit) return [];
+        if (idx >= 0) snippet = text.slice(Math.max(0, idx - 80), idx + 120);
+      }
+      return [{
+        fileId: f.id,
+        name: f.name,
+        mime: f.mime,
+        kind: mediaKindOf(f.mime), // image/video/audio/doc
+        sizeBytes: f.sizeBytes,
+        readableChars: text.length, // 0＝此格式無抽出文字（圖影看 aiDescription）
+        category: f.category,
+        aiDescription: f.aiDescription ? f.aiDescription.slice(0, 300) : null,
+        sourceUrl: f.sourceUrl,
+        ...(snippet ? { snippet } : {}),
+      }];
+    });
+  }
+
+  if (name === "read_database_file") {
+    const fileId = String(args.fileId ?? "");
+    const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, fileId));
+    if (!file) throw new Error("找不到這份文件");
+    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, file.tableId), isNull(schema.dataTables.deletedAt)));
+    if (!table || !resolveAgentAccess(auth, table).canRead) throw new Error("找不到這份文件");
+    const text = file.textContent ?? "";
+    if (!text) {
+      const kind = mediaKindOf(file.mime);
+      // 圖影音：回分類與 AI 描述（圖片經「AI 分類」後這裡就有內容）＋短效下載網址，
+      // 多模態客戶端可自行抓原檔看圖；沒有原檔（純文字匯入）就不給網址。
+      if (kind !== "doc") {
+        return {
+          name: file.name,
+          mime: file.mime,
+          kind,
+          totalChars: 0,
+          category: file.category,
+          aiDescription: file.aiDescription,
+          downloadUrl: file.storagePath ? signDbFileUrl(file.id) : null,
+          note: file.aiDescription
+            ? "這是媒體檔：aiDescription 是 AI 看圖產生的描述；要看原始畫面可抓 downloadUrl（1 小時內有效）"
+            : "這是媒體檔、尚未有 AI 描述——網頁端「AI 分類」可補；要看原始畫面可抓 downloadUrl（1 小時內有效）",
+        };
+      }
+      return { name: file.name, totalChars: 0, category: file.category, note: "此格式暫不支援文字抽取（僅存檔）——支援：txt/md/csv/json/html/srt/vtt/pdf/docx" };
+    }
+    const offset = Math.max(0, Number(args.offset) || 0);
+    const maxChars = Math.min(Math.max(Number(args.maxChars) || 20_000, 1), 20_000);
+    return {
+      name: file.name,
+      totalChars: text.length,
+      offset,
+      text: text.slice(offset, offset + maxChars),
+      hasMore: offset + maxChars < text.length,
+      category: file.category,
+    };
+  }
+
+  if (name === "get_database_stats") {
+    const tableId = String(args.tableId ?? "");
+    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
+    if (!table) throw new Error("找不到這個資料庫");
+    if (!resolveAgentAccess(auth, table).canRead) throw new Error("找不到這個資料庫");
+    const stats = await tableStats(table);
+    return { table: table.name, summary: formatStatsLine(stats), ...stats };
+  }
+
+  // ── 單筆生成查詢（以 generationId，不掛 projectId）：閉合「送生成→取回成品」的迴路 ──
+  if (name === "get_generation") {
+    const genId = String(args.generationId ?? "");
+    const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, genId));
+    if (!gen) throw new Error("找不到這筆生成");
+    requireGroup(auth, gen.groupId); // 組隔離：別組的生成不可查／不可推進
+    // 主動推進 fal 狀態（與網頁端 status 同一條 advanceGeneration）：讓外部客戶端輪詢即可推到 done，
+    // 不必等有人開著網頁輪詢。推進失敗（fal 抖動）不擋讀取，回現況即可，下次再查會再推。
+    const fresh = await advanceGeneration(gen.id).catch(() => gen);
+    return {
+      id: fresh.id,
+      projectId: fresh.projectId,
+      modelId: fresh.modelId,
+      kind: fresh.kind,
+      status: fresh.status,
+      prompt: fresh.prompt,
+      resultUrl: externalAssetUrl(fresh.resultUrl), // 落地成品簽成免登入短效網址，外部客戶端才抓得到
+      resultText: fresh.resultText,
+      points: fresh.pointsEst,
+      error: fresh.error,
+      createdAt: fresh.createdAt,
+    };
+  }
+
+  // ── 單則筆記全文（以 noteId，不掛 projectId）：先查本筆再以其 groupId 套組隔離 ──
+  if (name === "get_note") {
+    const noteId = String(args.noteId ?? "");
+    const [note] = await db.select().from(schema.notes).where(eq(schema.notes.id, noteId));
+    if (!note) throw new Error("找不到這則筆記");
+    requireGroup(auth, note.groupId); // 組隔離：別組筆記不可讀
+    return {
+      id: note.id,
+      title: note.title,
+      content: note.content,
+      projectId: note.projectId,
+      chars: note.content.length,
+      updatedAt: note.updatedAt,
+    };
+  }
+
+  // ── AI 代理生命週期（以 runId／projectId 為鍵；權限與併發全走 agentCore，與網頁端同一套）──
+  if (name === "plan_agent") {
+    const run = await planAgentCore({ auth, projectId: String(args.projectId ?? ""), goal: String(args.goal ?? "") });
+    return {
+      runId: run.id,
+      status: run.status,
+      summary: run.summary,
+      estPoints: run.estPoints,
+      steps: (run.steps as AgentStep[]).map((s) => ({ kind: s.kind, note: s.note, points: s.points ?? 0 })),
+      note: "計畫已排好但尚未執行——用 approve_agent 核准後才會開始扣點執行，或用 discard_agent 放棄。",
+    };
+  }
+  if (name === "approve_agent") {
+    const run = await approveAgentCore({ auth, runId: String(args.runId ?? "") });
+    return { runId: run.id, status: run.status, note: "已核准，背景執行器會逐步執行；用 get_agent_run 追進度、stop_agent 中止。" };
+  }
+  if (name === "stop_agent") {
+    const run = await stopAgentCore({ auth, runId: String(args.runId ?? "") });
+    return { runId: run.id, status: run.status };
+  }
+  if (name === "discard_agent") {
+    const run = await discardAgentCore({ auth, runId: String(args.runId ?? "") });
+    return { runId: run.id, status: run.status };
+  }
+  if (name === "list_agent_runs") {
+    const runs = await listAgentRunsForProject(auth, String(args.projectId ?? ""));
+    return runs.map((r) => ({
+      runId: r.id,
+      goal: r.goal,
+      status: r.status,
+      estPoints: r.estPoints,
+      currentStep: r.currentStep,
+      stepCount: (r.steps as AgentStep[]).length,
+      createdAt: r.createdAt,
+    }));
+  }
+  if (name === "get_agent_run") {
+    const r = await getAgentRunChecked(auth, String(args.runId ?? ""));
+    return {
+      runId: r.id,
+      goal: r.goal,
+      summary: r.summary,
+      status: r.status,
+      estPoints: r.estPoints,
+      currentStep: r.currentStep,
+      error: r.error,
+      steps: (r.steps as AgentStep[]).map((s) => ({ kind: s.kind, note: s.note, status: s.status, points: s.points ?? 0, generationId: s.generationId ?? null, detail: s.detail ?? null })),
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    };
+  }
+
+  // ── 排程／筆記與統整快照（以 projectId 為鍵，先解析專案的組再套組隔離）──
+  if (name === "list_schedule" || name === "add_schedule_item" || name === "list_notes" || name === "get_project_status") {
+    const pid = String(args.projectId ?? "");
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
+    if (!project) throw new Error("找不到專案");
+    requireGroup(auth, project.groupId); // 組隔離（不屬於此組直接擋）
+
+    if (name === "list_notes") {
+      // 專案視角：只回本專案的筆記 ＋ 整組共用（未掛專案）的筆記——與 list_schedule 同一過濾哲學。
+      const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+      const rows = await db
+        .select({
+          id: schema.notes.id,
+          projectId: schema.notes.projectId,
+          title: schema.notes.title,
+          content: schema.notes.content,
+          updatedAt: schema.notes.updatedAt,
+        })
+        .from(schema.notes)
+        .where(and(eq(schema.notes.groupId, project.groupId), or(eq(schema.notes.projectId, project.id), isNull(schema.notes.projectId))))
+        .orderBy(desc(schema.notes.updatedAt))
+        .limit(limit);
+      return rows.map((n) => ({
+        id: n.id,
+        title: n.title,
+        chars: n.content.length,
+        excerpt: n.content.slice(0, 160),
+        projectScoped: n.projectId === project.id,
+        updatedAt: n.updatedAt,
+      }));
+    }
+
+    if (name === "list_schedule") {
+      // 專案視角的過濾在 DB 端完成（本專案 ＋ 組層級），避免 300 筆上限先被別的專案吃掉
+      const items = await listScheduleForGroup(auth, project.groupId, Boolean(args.includePast), project.id);
+      return items
+        .map((i) => ({ id: i.id, title: i.title, startsAt: i.startsAt, endsAt: i.endsAt, note: i.note, owner: i.ownerName, projectScoped: i.projectId === project.id }));
+    }
+
+    if (name === "add_schedule_item") {
+      const row = await addScheduleItemCore({
+        auth,
+        groupId: project.groupId,
+        projectId: project.id,
+        title: String(args.title ?? ""),
+        startsAt: String(args.startsAt ?? ""),
+        endsAt: args.endsAt ? String(args.endsAt) : null,
+        note: args.note ? String(args.note) : null,
+      });
+      return { id: row.id, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt };
+    }
+
+    // get_project_status：把各子系統一次統整給外部 AI（細部連結分鏡／生成／代理／排程／待辦）
+    const scenes = await db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+    const gens = await db.select().from(schema.generations).where(eq(schema.generations.projectId, project.id)).orderBy(desc(schema.generations.createdAt)).limit(50);
+    const runs = await listAgentRunsForProject(auth, project.id);
+    const sched = await listScheduleForGroup(auth, project.groupId, false, project.id);
+    const now = new Date();
+    const tally = (arr: string[]) => arr.reduce<Record<string, number>>((m, k) => ((m[k] = (m[k] ?? 0) + 1), m), {});
+    return {
+      project: { title: project.title, kind: project.kind, format: project.format, status: project.status },
+      scenes: { total: scenes.length, byStatus: tally(scenes.map((s) => s.status)) },
+      generations: {
+        recent: gens.length,
+        byStatus: tally(gens.map((g) => g.status)),
+        awaitingApproval: gens.filter((g) => g.status === "awaiting_approval").length,
+      },
+      agentRuns: runs
+        .filter((r) => r.status === "awaiting_approval" || r.status === "running")
+        .map((r) => ({ runId: r.id, goal: r.goal, status: r.status, currentStep: r.currentStep, stepCount: (r.steps as AgentStep[]).length })),
+      upcomingSchedule: sched
+        .filter((i) => i.startsAt >= now)
+        .slice(0, 5)
+        .map((i) => ({ title: i.title, startsAt: i.startsAt, projectScoped: i.projectId === project.id })),
+    };
+  }
+
   const projectId = String(args.projectId ?? "");
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new Error("找不到專案");
-  // MCP 的專案 ACL（最小集）：MCP 以超管執行、無使用者級角色可查，但「寫入／扣點」不該落在
-  // 已封存的專案上——外部 AI 客戶端拿舊 projectId 對封存案生成，會造成擁有者以為停用卻持續扣點
-  if (project.status === "archived" && (name === "submit_generation" || name === "post_message")) {
-    throw new Error("此專案已封存——請先在網頁端還原專案，或改用其他專案");
-  }
+  // per-user 組隔離：不屬於此專案的組直接擋（requireGroup 拋 FORBIDDEN，被 callTool 落審計後回 JSON-RPC error）
+  requireGroup(auth, project.groupId);
+  // 封存專案守衛（寫入類工具才擋，讀取放行）——見 archivedWriteReason
+  const archived = archivedWriteReason(name, project.status);
+  if (archived) throw new Error(archived);
 
   if (name === "get_project_context") {
     const wv = worldviewSchema.parse(project.worldview ?? {});
@@ -151,72 +692,93 @@ async function runTool(admin: typeof schema.users.$inferSelect, name: string, ar
     return { title: project.title, kind: project.kind, format: project.format, worldview: wv, scenes: scenes.map((s) => ({ title: s.title, status: s.status })) };
   }
 
+  if (name === "list_generations") {
+    // 讀取類：組隔離已於上方 requireGroup 把關（封存專案的生成仍可讀，故不套 archived 守衛）。
+    const conds = [eq(schema.generations.projectId, project.id)];
+    const status = args.status ? String(args.status) : "";
+    if (status) conds.push(eq(schema.generations.status, status as typeof schema.generations.$inferSelect.status));
+    const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+    const rows = await db
+      .select()
+      .from(schema.generations)
+      .where(and(...conds))
+      .orderBy(desc(schema.generations.createdAt))
+      .limit(limit);
+    return rows.map((g) => ({
+      id: g.id,
+      modelId: g.modelId,
+      kind: g.kind,
+      status: g.status,
+      prompt: g.prompt.length > 80 ? g.prompt.slice(0, 80) + "…" : g.prompt,
+      resultUrl: externalAssetUrl(g.resultUrl), // 落地成品簽成免登入短效網址，外部客戶端才抓得到
+      resultText: g.resultText,
+      points: g.pointsEst,
+      createdAt: g.createdAt,
+    }));
+  }
+
+  if (name === "list_assets") {
+    // 讀取類：組隔離已於上方 requireGroup 把關。素材庫成品／上傳素材，回可直接下載的網址。
+    const conds = [eq(schema.assets.projectId, project.id), isNull(schema.assets.deletedAt)]; // 回收桶素材不外洩
+    const kind = args.kind ? String(args.kind) : "";
+    if (kind) conds.push(eq(schema.assets.kind, kind));
+    const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+    const rows = await db
+      .select()
+      .from(schema.assets)
+      .where(and(...conds))
+      .orderBy(desc(schema.assets.createdAt))
+      .limit(limit);
+    return rows.map((a) => ({
+      id: a.id,
+      kind: a.kind,
+      title: a.title,
+      isAiGenerated: a.isAiGenerated,
+      // 本地落地素材簽成免登入短效網址；純外部網址原樣返回
+      url: a.storagePath ? signAssetUrl(a.id) : a.url,
+      createdAt: a.createdAt,
+    }));
+  }
+
   if (name === "submit_generation") {
-    const model = getModel(String(args.modelId ?? ""));
-    if (!model) throw new Error("未知模型(先用 find_model 查詢)");
-    const sourceUrl = args.source_url ? String(args.source_url) : undefined;
-    if (model.needs && !sourceUrl) throw new Error(`此模型需要 source_url:${model.sourceHint ?? model.needs}`);
-    const wv = worldviewSchema.parse(project.worldview ?? {});
     const userPrompt = String(args.prompt ?? "").trim();
     if (!userPrompt) throw new Error("prompt 不可為空");
-    // 與網頁端同一份判斷：僅適合的類別才注入世界觀（且注入內容含 styles/message，兩端一致）
-    const prompt = effectivePrompt(model, userPrompt, wv);
-    const falInput = model.input(prompt, project.format as ProjectFormat, sourceUrl);
-    const [gen] = await db
-      .insert(schema.generations)
-      .values({ projectId: project.id, groupId: project.groupId, userId: admin.id, modelId: model.id, kind: model.kind, prompt: userPrompt, sourceUrl, params: falInput, pointsEst: model.points })
-      .returning();
-    // 與網頁端一致：原子守門＋扣點（舊版直接扣、完全不檢查額度，MCP 可無限刷爆總預算）
-    // 假生成模式（無 FAL_KEY / FAL_MOCK）不扣點——與網頁端 generationCore 同一防線，否則 MCP 在測試
-    // 模式仍寫扣點列，永久污染總預算帳本與超管額度。拋例外也要刪孤兒列（否則被陳屍清掃憑空退點）。
-    const mock = isMockMode();
-    if (!mock) {
-      let quotaError: string | null;
-      try {
-        quotaError = await reserveQuota(admin.id, project.groupId, model.points, `MCP 生成 ${model.label}`, gen.id);
-      } catch (err) {
-        await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
-        throw new Error(`系統忙碌，請稍後再試（未扣點）：${err instanceof Error ? err.message : String(err)}`);
-      }
-      if (quotaError) {
-        await db.delete(schema.generations).where(eq(schema.generations.id, gen.id));
-        throw new Error(quotaError);
-      }
+    const sourceUrl = args.source_url ? String(args.source_url) : undefined;
+    // 重用網頁端同一條核心：世界觀注入、原子守門扣點、fal 送出/失敗退點，且透過 assertAccess
+    // 疊上「專案級 ACL（檢視者不能生成）」與「成本核准門檻（組員達門檻先送審）」——與網頁端行為一致。
+    // userId＝金鑰擁有者本人：扣他的額度、走他的核准門檻、審計記他，真正做到「依自己權限」。
+    const gen = await submitGenerationCore({
+      userId: auth.user.id,
+      projectId: project.id,
+      modelId: String(args.modelId ?? ""),
+      prompt: userPrompt,
+      sourceUrl,
+      reasonPrefix: "MCP 生成",
+      assertAccess: async (proj) => {
+        const role = requireGroup(auth, proj.groupId);
+        await assertProjectEditable(auth, proj); // 檢視者（唯讀）不能生成
+        return role; // 回角色供成本核准門檻判斷組員
+      },
+    });
+    // 待核准（達門檻的組員）與已送出兩種終局都據實回報，讓外部客戶端知道要等組長核准
+    if (gen.status === "awaiting_approval") {
+      return { generationId: gen.id, status: "awaiting_approval", points: gen.pointsEst, note: "已達成本門檻，等組長核准後才會送出扣點" };
     }
-    try {
-      const { requestId } = await falSubmit(endpointOf(model), model.kind, falInput);
-      await db.update(schema.generations).set({ requestId, status: "running" }).where(eq(schema.generations.id, gen.id));
-      return { generationId: gen.id, status: "running", points: mock ? 0 : model.points };
-    } catch (err) {
-      // fal 送出失敗：退點＋標記失敗（舊版吞掉例外還回報 running，永遠卡在假的進行中）。
-      // 假模式沒扣點就不退，避免憑空生出正向帳本列。
-      if (!mock) await refund(admin.id, project.groupId, model.points, "MCP 生成送出失敗退回", gen.id);
-      await db.update(schema.generations).set({ status: "failed", error: String(err), pointsRefunded: mock ? 0 : model.points }).where(eq(schema.generations.id, gen.id));
-      throw new Error(`生成送出失敗，點數已退回：${err instanceof Error ? err.message : String(err)}`);
-    }
+    return { generationId: gen.id, status: gen.status, points: gen.pointsEst };
   }
 
   if (name === "post_message") {
-    // 比照網頁端驗證 body：不可空白、限長，避免 MCP 略過前端驗證寫入空訊息或超大留言
+    // 留言不受專案級 ACL 限制（檢視者也可留言，與網頁端一致）——組隔離已於上方 requireGroup 把關。
     const body = String(args.body ?? "").trim();
     if (!body) throw new Error("body 不可為空");
-    if (body.length > 2000) throw new Error("留言太長（最多 2000 字）");
     const [msg] = await db
       .insert(schema.messages)
-      .values({ groupId: project.groupId, projectId: project.id, userId: admin.id, kind: "text", body })
+      .values({ groupId: project.groupId, projectId: project.id, userId: auth.user.id, kind: "text", body })
       .returning();
     return { messageId: msg.id };
   }
 
   throw new Error(`未知工具：${name}`);
-}
-
-/** 金鑰比對用固定時間演算法：先等長檢查（timingSafeEqual 要求等長），避免以耗時差回推金鑰（#10） */
-function keyEquals(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
 }
 
 // 金鑰失敗速率限制（記憶體計數，比照系統其他記憶體防線）：每 IP 每分鐘失敗達門檻即封鎖一段時間，
@@ -253,9 +815,9 @@ function mcpRecordFailure(ip: string): void {
 
 /** JSON-RPC 處理器（掛在 POST /api/mcp） */
 export async function handleMcp(req: Request, res: Response): Promise<void> {
-  const apiKey = process.env.MCP_API_KEY;
-  if (!apiKey) {
-    res.status(404).json({ error: "MCP 未啟用（設 MCP_API_KEY 環境變數即開）" });
+  // 未啟用＝沒設 env 共用金鑰、也沒任何個人金鑰：回 404 不對外張揚端點（行為同舊版）
+  if (!(await isMcpEnabled())) {
+    res.status(404).json({ error: "MCP 未啟用（在「怎麼用」頁建立個人連線金鑰，或設 MCP_API_KEY 環境變數）" });
     return;
   }
   const ip = mcpClientIp(req);
@@ -263,13 +825,16 @@ export async function handleMcp(req: Request, res: Response): Promise<void> {
     res.status(429).json({ error: "嘗試過於頻繁，請稍後再試" });
     return;
   }
+  // 身分解析：個人金鑰→該使用者；env 共用金鑰→開發者；皆不符→401（記一次失敗，擋暴力猜）
   const provided = req.headers["x-api-key"];
-  if (typeof provided !== "string" || !keyEquals(provided, apiKey)) {
+  const identity = typeof provided === "string" && provided.length > 0 ? await resolveMcpIdentity(provided) : null;
+  if (!identity) {
     mcpRecordFailure(ip);
-    res.status(401).json({ error: "MCP 金鑰不正確" });
+    res.status(401).json({ error: "MCP 金鑰不正確或已撤銷" });
     return;
   }
   mcpFails.delete(ip); // 驗證成功即清除該 IP 的失敗計數
+  const auth = identity.auth;
   const body = req.body as { jsonrpc?: string; id?: number | string | null; method?: string; params?: Record<string, unknown> };
   const reply = (result: unknown): void => void res.json({ jsonrpc: "2.0", id: body.id ?? null, result });
   const fail = (code: number, message: string): void => void res.json({ jsonrpc: "2.0", id: body.id ?? null, error: { code, message } });
@@ -287,13 +852,15 @@ export async function handleMcp(req: Request, res: Response): Promise<void> {
         return reply({ tools: TOOLS });
       case "tools/call": {
         const { name, arguments: args } = (body.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
-        const result = await callTool(String(name), args ?? {});
+        const result = await callTool(auth, identity.scope, String(name), args ?? {});
         return reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
       }
       default:
         return fail(-32601, `不支援的方法：${body.method}`);
     }
   } catch (err) {
+    // requireGroup/assertProjectEditable 拋的是 TRPCError；對外一律折成 JSON-RPC error 的人話訊息
+    if (err instanceof TRPCError) return fail(-32000, err.message);
     return fail(-32000, err instanceof Error ? err.message : String(err));
   }
 }

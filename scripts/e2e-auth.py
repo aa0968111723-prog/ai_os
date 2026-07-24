@@ -32,7 +32,7 @@ admin = client(); azhe = client()
 from e2e_lib import ok  # 共用斷言:計數+結束碼(有 ❌ 即非零退出,CI 據此判紅綠)
 
 r = call("POST",admin,"auth.login",{"email":"admin@aidirector.local","password":"test-admin-123"})
-ok("超管登入", r.get("user",{}).get("isSuperAdmin") is True)
+ok("開發者登入", r.get("user",{}).get("isSuperAdmin") is True)
 
 teams = call("GET",admin,"admin.overview")
 north = next(t for t in teams if t["name"]=="北區工作組")
@@ -67,7 +67,7 @@ lst = call("GET",azhe,"projects.list",{})
 ok("阿哲僅見剪輯組專案", [p["title"] for p in lst]==["見證故事測試"])
 
 alst = call("GET",admin,"projects.list",{})
-ok("超管跨組看全部（2 專案）", len(alst)==2)
+ok("開發者跨組看全部（2 專案）", len(alst)==2)
 
 msg = call("POST",azhe,"messages.post",{"projectId":proj["id"],"body":"登入系統測試完成 🙏"})
 msgs = call("GET",azhe,"messages.list",{"projectId":proj["id"]})
@@ -132,7 +132,7 @@ except urllib.error.HTTPError as e:
     ok("🔒 交付包隔離（403）", e.code==403)
 
 # ─── 第三段：審批三態機＋AI 導演＋回饋＋MCP ───
-# 把阿哲升組長來測裁決（超管操作）
+# 把阿哲升組長來測裁決（開發者操作）
 call("POST",admin2,"admin.setGroupRole",{"groupId":edit_group["id"],"userId":acc["user"]["id"],"role":"leader"})
 azhe3 = client(); call("POST",azhe3,"auth.login",{"email":"azhe@example.com","password":"azhe-pass-88"})
 
@@ -169,7 +169,14 @@ ok("MCP 錯誤金鑰被擋", mcp("tools/list", key="wrong").get("http")==401)
 init = mcp("initialize")
 ok("MCP initialize", init["result"]["serverInfo"]["name"]=="ai-director-os")
 tl = mcp("tools/list")
-ok("MCP tools/list（5 工具，含 find_model）", len(tl["result"]["tools"])==5)
+tool_names = {t["name"] for t in tl["result"]["tools"]}
+ok("MCP tools/list（完整工具集：基礎＋生成取回＋資料庫＋代理＋排程＋統整）",
+   len(tl["result"]["tools"]) >= 23 and
+   {"whoami","list_projects","get_project_context","submit_generation","post_message",
+    "find_model","list_generations","get_generation","list_assets",
+    "list_databases","query_database","add_database_row","list_database_files","read_database_file",
+    "plan_agent","approve_agent","stop_agent","discard_agent","list_agent_runs","get_agent_run",
+    "list_schedule","add_schedule_item","get_project_status"} <= tool_names)
 tc = mcp("tools/call",{"name":"list_projects","arguments":{}})
 projects_via_mcp = json.loads(tc["result"]["content"][0]["text"])
 ok("MCP list_projects 可用", any(p["title"]=="見證故事測試" for p in projects_via_mcp))
@@ -181,19 +188,25 @@ ok("MCP 讀專案上下文（含世界觀）", ctx2["worldview"]["logline"].star
 # 審計是 fire-and-forget 非同步寫入：用輪詢等落庫（最多 10 秒），不賭固定 sleep
 import time as _t
 
+# pred 收「整頁 rows」：兩筆 mcp 審計是各自 fire-and-forget，逐筆判斷會在第一筆落庫、
+# 第二筆還在路上時提前收手（CI 實際踩過：len>=2 與 projectId 斷言雙紅）——要等到完整條件成立才回傳
 def wait_audit(pred, timeout=10):
+    rows = []
     for _ in range(timeout * 2):
         rows = call("GET", admin2, "audit.list", {}).get("items", [])
-        if any(pred(i) for i in rows):
+        if pred(rows):
             return rows
         _t.sleep(0.5)
-    return call("GET", admin2, "audit.list", {}).get("items", [])
+    return rows
 
-rows = wait_audit(lambda i: str(i.get("action", "")).startswith("mcp."))
-mcp_rows = [i for i in rows if str(i.get("action", "")).startswith("mcp.")]
+def _mcp_rows(rows):
+    return [i for i in rows if str(i.get("action", "")).startswith("mcp.")]
+
+rows = wait_audit(lambda rows: len(_mcp_rows(rows)) >= 2 and any(i.get("projectId") == proj["id"] for i in _mcp_rows(rows)))
+mcp_rows = _mcp_rows(rows)
 ok("MCP 呼叫落審計(mcp.* action)", len(mcp_rows) >= 2)
 ok("MCP 審計帶 projectId 歸屬", any(i.get("projectId") == proj["id"] for i in mcp_rows))
 bad = mcp("tools/call", {"name": "get_project_context", "arguments": {"projectId": "00000000-0000-0000-0000-000000000000"}})
 ok("MCP 錯誤呼叫回 JSON-RPC error", "error" in bad)
-rows2 = wait_audit(lambda i: str(i.get("action", "")).startswith("mcp.") and i.get("ok") is False)
-ok("MCP 失敗呼叫也落審計(ok=false)", any(str(i.get("action", "")).startswith("mcp.") and i.get("ok") is False for i in rows2))
+rows2 = wait_audit(lambda rows: any(i.get("ok") is False for i in _mcp_rows(rows)))
+ok("MCP 失敗呼叫也落審計(ok=false)", any(i.get("ok") is False for i in _mcp_rows(rows2)))

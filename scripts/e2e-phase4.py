@@ -1,5 +1,5 @@
 # Phase 4 基礎工程 e2e:MOCK_BILLING 扣點驗證/成本監控/錯誤觀測與 selftest/個資匯出/下載區新文件。
-# 前置:FAL_MOCK=1 **且 MOCK_BILLING=1**、:3199、SEED_ADMIN_EMAIL=admin@aidirector.local、
+# 前置:E2E_MOCK=1 **且 MOCK_BILLING=1**、:3199、SEED_ADMIN_EMAIL=admin@aidirector.local、
 #       SEED_ADMIN_PASSWORD=test-admin-123、全新 DB。
 import json, time, urllib.request, urllib.parse, urllib.error
 
@@ -72,7 +72,10 @@ ok("selftest 含「近期錯誤」", any("近期錯誤" in n for n in names))
 ok("selftest 含「認證模式」", any("認證模式" in n for n in names))
 code, body = raw_get(admin, "/api/ready")
 ready = json.loads(body)
-ok("/api/ready 帶 authMode", "authMode" in ready)
+# 安全（資安稽核）：/api/ready 未認證即可存取，只回存活訊號（ok/db/boot），
+# 不外洩內部組態（mockMode／authMode 後門偵察面）——那兩項改到需開發者登入的 /api/selftest（見上方「認證模式」）。
+ok("/api/ready 回存活訊號 boot", "boot" in ready)
+ok("/api/ready 不外洩 authMode／mockMode", "authMode" not in ready and "mockMode" not in ready)
 
 # ── 個資自助匯出 ──
 code, body = raw_get(admin, "/api/me/export")
