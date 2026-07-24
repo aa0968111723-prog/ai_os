@@ -55,8 +55,9 @@ export const publicProcedure = t.procedure;
 /** 強制改密碼期間仍放行的 procedure（點記法完整路徑）；auth.me 是 publicProcedure 本不經此關，列入是保險 */
 const MUST_CHANGE_PW_ALLOWED = ["auth.changePassword", "auth.me", "auth.logout"];
 
-/** 審計豁免清單：高頻、純閱讀狀態、無安全意義的 mutation——記了只會灌爆 audit_log 稀釋真正要查的事件 */
-const AUDIT_EXEMPT = new Set(["messages.markRead", "dm.markRead"]);
+/** 審計豁免清單：高頻、純閱讀狀態、無安全意義的 mutation——記了只會灌爆 audit_log 稀釋真正要查的事件。
+ *  push.subscribe 另有隱私因素：App 每次載入回報一次（高頻），且輸入含裝置推送加密金鑰，不落審計明文 */
+const AUDIT_EXEMPT = new Set(["messages.markRead", "dm.markRead", "push.subscribe", "push.sync"]);
 
 /** 審計內文脫敏清單：私訊承諾「只有收發雙方看得到」，但操作紀錄對組長/管理員可見——
  *  這些 mutation 照記（誰、何時、傳給誰），唯 body 以佔位符取代，不落訊息明文 */

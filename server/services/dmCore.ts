@@ -10,6 +10,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import { listVisibleTables, resolveTableAccess } from "./databaseAcl";
+import { pushToUsers } from "./webPush";
 
 /** 單則私訊長度上限（與專案留言一致） */
 export const DM_MAX_BODY = 2000;
@@ -211,6 +212,14 @@ export async function sendDm(auth: AuthState, peerId: string, body: string, opts
     .returning();
   // 綁定附件到這則訊息（一附件一訊息；綁定後對方才讀得到檔案）
   if (att) await db.update(schema.dmAttachments).set({ messageId: msg.id }).where(eq(schema.dmAttachments.id, att.id));
+  // 跨裝置推播給收件人（fire-and-forget）：內文帶預覽（純附件／標注訊息以佔位字，與對話串預覽同口徑）；
+  // 同一發訊人以 tag 覆蓋舊通知，連發多句不洗版。點開直達聊天頁。
+  void pushToUsers([peer.id], {
+    title: `${auth.user.name} 傳來私訊`,
+    body: dmThreadPreview({ body, hasAttachment: !!att, refType: opts.refType ?? null }),
+    url: "/chat",
+    tag: `dm-${auth.user.id}`,
+  }).catch((err) => console.warn("[dm] 私訊推播失敗：", err instanceof Error ? err.message : err));
   return { message: msg, peer: { userId: peer.id, name: peer.name } };
 }
 

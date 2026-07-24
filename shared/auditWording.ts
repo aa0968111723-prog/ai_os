@@ -142,6 +142,12 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // 分類標籤保留一次（MCP）括註，讓技術夥伴仍對得上文件用語。
   "mcpTokens.create": "建立外部 AI 連線金鑰",
   "mcpTokens.revoke": "撤銷外部 AI 連線金鑰",
+  // 跨裝置通知（subscribe/sync 實務上審計豁免——高頻例行回報＋含裝置金鑰，列入字典保底）
+  "push.subscribe": "連結通知裝置",
+  "push.sync": "同步通知裝置",
+  "push.unsubscribe": "解除通知裝置",
+  "push.removeDevice": "移除通知裝置",
+  "push.test": "發送測試通知",
   // MCP（Claude 等外部代理經 API 操作）
   "mcp.whoami": "外部 AI：確認連線身分",
   "mcp.list_projects": "外部 AI：列出專案",
@@ -186,7 +192,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "storyboard", label: "分鏡與審批", prefixes: ["scenes", "approvals"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "teamAssistant", "workflows"] },
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters"] },
-  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "dm", "googleCalendar"] },
+  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "dm", "googleCalendar", "push"] },
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   { key: "database", label: "自訂資料庫", prefixes: ["databases"] },

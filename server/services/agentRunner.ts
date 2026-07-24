@@ -12,6 +12,7 @@ import { getModel } from "../../shared/models";
 import { advanceGeneration, submitGenerationCore, type GenerationRow } from "./generationCore";
 import { reapStuckGeneration } from "./workflowRunner";
 import { lockSceneOrder } from "./locks";
+import { pushToUsers } from "./webPush";
 import { splitScriptCore } from "../routers/director";
 import { submitApprovalCore } from "../routers/approvals";
 import { loadAuthState } from "./auth";
@@ -333,13 +334,21 @@ async function notifyRunFinished(runId: string, status: "done" | "failed"): Prom
   if (!run) return;
   const steps = run.steps as AgentStep[];
   const doneCount = steps.filter((s) => s.status === "done").length;
+  const body = formatAgentRunMessage(run.goal, doneCount, steps.length, status, run.error);
   await db.insert(schema.messages).values({
     groupId: run.groupId,
     projectId: run.projectId,
     userId: run.userId,
     kind: "system",
-    body: formatAgentRunMessage(run.goal, doneCount, steps.length, status, run.error),
+    body,
   });
+  // 跨裝置推播給發起人：代理是關頁後仍在背景跑的長時操作，推播讓手機也收得到完成/中止信號
+  void pushToUsers([run.userId], {
+    title: status === "done" ? "AI 代理完成" : "AI 代理中止",
+    body,
+    url: `/p/${run.projectId}`,
+    tag: `agent-${runId}`,
+  }).catch((err) => console.warn("[agent] 完成推播失敗：", err instanceof Error ? err.message : err));
 }
 
 /** 一步失敗的統一收攏：標步驟與 run failed（代理與工作流同語義——寧可停下讓人看，不盲目燒點數） */

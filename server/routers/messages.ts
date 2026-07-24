@@ -5,6 +5,8 @@ import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { ASSISTANT_TRIGGER, replyAsAssistant } from "../services/messageAssistant";
 import { validateMentions } from "../services/mentions";
+import { pushToUsers } from "../services/webPush";
+import { dmSnippet } from "../services/dmCore";
 
 /**
  * 站內留言（協作強化版）。隔離：以專案的 group 為準；檢視者(viewer)也能留言——
@@ -207,6 +209,17 @@ export const messagesRouter = router({
           mentions: mentions ?? null,
         })
         .returning();
+      // @提及跨裝置推播（fire-and-forget）：被提及者關頁也收得到——補齊 MessagePanel 桌面通知
+      // 「分頁開著才有效」的缺口。內文帶預覽截斷，點開直達該專案。
+      const mentionTargets = (mentions ?? []).filter((id) => id !== ctx.auth.user.id);
+      if (mentionTargets.length) {
+        void pushToUsers(mentionTargets, {
+          title: `${ctx.auth.user.name} 在「${project.title}」提及你`,
+          body: dmSnippet(input.body),
+          url: `/p/${project.id}`,
+          tag: `mention-${msg.id}`,
+        }).catch((err) => console.warn("[messages] @提及推播失敗：", err instanceof Error ? err.message : err));
+      }
       // @助手：留言 @了助手 → 背景讓 AI 讀專案+對話+知識庫回一則(fire-and-forget，不擋送出)。
       // 檢視者也能問(留言是唯讀者的參與出口)；扣點/退點在 replyAsAssistant 內走既有守門。
       if (input.body.includes(ASSISTANT_TRIGGER)) {
