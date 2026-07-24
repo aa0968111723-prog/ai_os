@@ -9,6 +9,7 @@ import { and, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
+import { listVisibleTables, resolveTableAccess } from "./databaseAcl";
 import { pushToUsers } from "./webPush";
 
 /** 單則私訊長度上限（與專案留言一致） */
@@ -16,6 +17,25 @@ export const DM_MAX_BODY = 2000;
 
 /** 對話串預覽的內文截斷長度 */
 export const DM_SNIPPET_CHARS = 80;
+
+/** 可被私訊「標注」的物件型別（與 schema.dmMessages.refType enum 同步） */
+export const DM_REF_TYPES = ["project", "database", "schedule", "note"] as const;
+export type DmRefType = (typeof DM_REF_TYPES)[number];
+
+/** 標注卡的顯示標籤（前端渲染與對話串預覽共用） */
+export const DM_REF_LABEL: Record<DmRefType, string> = { project: "專案", database: "資料庫", schedule: "排程", note: "筆記" };
+
+/**
+ * 純函式：算出對話串最後一句的預覽字。有內文＝截斷內文；只有附件／標注時給對應佔位字。
+ * 附件與標注的私訊可能 body 為空——預覽不能空白，否則清單看起來像壞掉。
+ */
+export function dmThreadPreview(input: { body: string; hasAttachment: boolean; refType: string | null }): string {
+  const flat = input.body.replace(/\s+/g, " ").trim();
+  if (flat) return dmSnippet(input.body);
+  if (input.hasAttachment) return "📎 附件";
+  if (input.refType && input.refType in DM_REF_LABEL) return `🔗 ${DM_REF_LABEL[input.refType as DmRefType]}`;
+  return "";
+}
 
 /** 純函式：兩人是否有共同組（可私訊判定的核心；開發者另有全站豁免） */
 export function sharesAnyGroup(myGroupIds: readonly string[], peerGroupIds: readonly string[]): boolean {
@@ -121,22 +141,183 @@ export async function assertDmPeer(auth: AuthState, peerId: string) {
   return peer;
 }
 
-/** 送出私訊（呼叫端先驗長度；這裡守對象界） */
-export async function sendDm(auth: AuthState, peerId: string, body: string) {
+/**
+ * 標注守衛：以「發訊者本人權限」驗證可存取被標注的物件，查無／不可存取一律拋錯。
+ * 卡片只是指標——對方點擊時各目標頁自行做存取守衛，所以這裡只擋「發訊者標注自己看不到的東西」。
+ */
+export async function assertDmRef(auth: AuthState, refType: DmRefType, refId: string): Promise<void> {
+  const myGroupIds = auth.groups.map((g) => g.groupId);
+  const deny = () => new TRPCError({ code: "BAD_REQUEST", message: "找不到可標注的項目（只能標注你看得到的專案／資料庫／排程／筆記）" });
+  if (refType === "project") {
+    const [p] = await db.select({ groupId: schema.projects.groupId }).from(schema.projects).where(eq(schema.projects.id, refId));
+    if (!p || !(auth.user.isSuperAdmin || myGroupIds.includes(p.groupId))) throw deny();
+    return;
+  }
+  if (refType === "note") {
+    const [n] = await db.select({ groupId: schema.notes.groupId }).from(schema.notes).where(eq(schema.notes.id, refId));
+    if (!n || !(auth.user.isSuperAdmin || myGroupIds.includes(n.groupId))) throw deny();
+    return;
+  }
+  if (refType === "schedule") {
+    const [s] = await db.select({ groupId: schema.scheduleItems.groupId }).from(schema.scheduleItems).where(eq(schema.scheduleItems.id, refId));
+    if (!s || !(auth.user.isSuperAdmin || myGroupIds.includes(s.groupId))) throw deny();
+    return;
+  }
+  // database：四層範圍以 databaseAcl 判可讀（開發者也看不到別人的個人庫，與網頁一致）
+  const [t] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, refId), isNull(schema.dataTables.deletedAt)));
+  if (!t || !resolveTableAccess(auth, t).canRead) throw deny();
+}
+
+/**
+ * 附件守衛：附件必須存在、屬於本人、且尚未綁定其他訊息（一附件一訊息，擋盜用他人附件）。
+ * 回傳附件列供 sendDm 綁定 messageId。
+ */
+export async function assertDmAttachment(auth: AuthState, attachmentId: string) {
+  const [att] = await db.select().from(schema.dmAttachments).where(eq(schema.dmAttachments.id, attachmentId));
+  if (!att || att.ownerId !== auth.user.id) throw new TRPCError({ code: "BAD_REQUEST", message: "找不到這個附件（或不是你上傳的）" });
+  if (att.messageId) throw new TRPCError({ code: "BAD_REQUEST", message: "這個附件已附在其他訊息上" });
+  return att;
+}
+
+export interface DmSendOptions {
+  /** AI 代理回覆以此標記（'assistant'）；一般訊息省略＝'text' */
+  kind?: "text" | "assistant";
+  refType?: DmRefType;
+  refId?: string;
+  attachmentId?: string;
+}
+
+/**
+ * 送出私訊（呼叫端先驗長度；這裡守對象界＋標注／附件歸屬）。
+ * body 可為空，但「空 body 又無附件無標注」不成訊息（呼叫端與這裡雙擋）。
+ */
+export async function sendDm(auth: AuthState, peerId: string, body: string, opts: DmSendOptions = {}) {
   const peer = await assertDmPeer(auth, peerId);
+  if (!!opts.refType !== !!opts.refId) throw new TRPCError({ code: "BAD_REQUEST", message: "標注參數不完整" });
+  if (opts.refType && opts.refId) await assertDmRef(auth, opts.refType, opts.refId);
+  const att = opts.attachmentId ? await assertDmAttachment(auth, opts.attachmentId) : null;
+  if (!body.trim() && !att && !opts.refType) throw new TRPCError({ code: "BAD_REQUEST", message: "訊息不可為空" });
+
   const [msg] = await db
     .insert(schema.dmMessages)
-    .values({ senderId: auth.user.id, recipientId: peer.id, body })
+    .values({
+      senderId: auth.user.id,
+      recipientId: peer.id,
+      body,
+      kind: opts.kind ?? "text",
+      refType: opts.refType ?? null,
+      refId: opts.refId ?? null,
+      attachmentId: att?.id ?? null,
+    })
     .returning();
-  // 跨裝置推播給收件人（fire-and-forget）：內文只帶預覽截斷（與對話串預覽同口徑）；
+  // 綁定附件到這則訊息（一附件一訊息；綁定後對方才讀得到檔案）
+  if (att) await db.update(schema.dmAttachments).set({ messageId: msg.id }).where(eq(schema.dmAttachments.id, att.id));
+  // 跨裝置推播給收件人（fire-and-forget）：內文帶預覽（純附件／標注訊息以佔位字，與對話串預覽同口徑）；
   // 同一發訊人以 tag 覆蓋舊通知，連發多句不洗版。點開直達聊天頁。
   void pushToUsers([peer.id], {
     title: `${auth.user.name} 傳來私訊`,
-    body: dmSnippet(body),
+    body: dmThreadPreview({ body, hasAttachment: !!att, refType: opts.refType ?? null }),
     url: "/chat",
     tag: `dm-${auth.user.id}`,
   }).catch((err) => console.warn("[dm] 私訊推播失敗：", err instanceof Error ? err.message : err));
   return { message: msg, peer: { userId: peer.id, name: peer.name } };
+}
+
+/** 可被標注的物件清單（私訊「標注」picker 的資料源；集中在伺服器做存取範圍過濾） */
+export interface DmMentionables {
+  projects: Array<{ id: string; title: string }>;
+  databases: Array<{ id: string; name: string }>;
+  schedules: Array<{ id: string; title: string; startsAt: Date }>;
+  notes: Array<{ id: string; title: string }>;
+}
+
+export async function listDmMentionables(auth: AuthState): Promise<DmMentionables> {
+  const groupIds = auth.groups.map((g) => g.groupId);
+  const [projects, tables, schedules, notes] = await Promise.all([
+    groupIds.length
+      ? db.select({ id: schema.projects.id, title: schema.projects.title })
+          .from(schema.projects)
+          .where(and(inArray(schema.projects.groupId, groupIds), sql`${schema.projects.status} <> 'archived'`))
+          .orderBy(desc(schema.projects.updatedAt)).limit(50)
+      : Promise.resolve([] as Array<{ id: string; title: string }>),
+    listVisibleTablesLite(auth),
+    groupIds.length
+      ? db.select({ id: schema.scheduleItems.id, title: schema.scheduleItems.title, startsAt: schema.scheduleItems.startsAt })
+          .from(schema.scheduleItems)
+          .where(inArray(schema.scheduleItems.groupId, groupIds))
+          .orderBy(desc(schema.scheduleItems.startsAt)).limit(50)
+      : Promise.resolve([] as Array<{ id: string; title: string; startsAt: Date }>),
+    groupIds.length
+      ? db.select({ id: schema.notes.id, title: schema.notes.title })
+          .from(schema.notes)
+          .where(inArray(schema.notes.groupId, groupIds))
+          .orderBy(desc(schema.notes.updatedAt)).limit(50)
+      : Promise.resolve([] as Array<{ id: string; title: string }>),
+  ]);
+  return { projects, databases: tables, schedules, notes };
+}
+
+/** 資料庫清單（僅 id/name，供 picker）——沿用 databaseAcl 的四層可見範圍，避免與 listVisibleTables 邏輯分岔 */
+async function listVisibleTablesLite(auth: AuthState): Promise<Array<{ id: string; name: string }>> {
+  const tables = await listVisibleTables(auth);
+  return tables.slice(0, 50).map((t) => ({ id: t.id, name: t.name }));
+}
+
+export interface DmRefInfo {
+  refType: DmRefType;
+  refId: string;
+  title: string;
+  /** 前端導頁提示：project→/project/:id、database→/databases、schedule/note→/planner */
+  route: string;
+}
+
+/**
+ * 批次解析標注卡的顯示標題（查不到＝已刪，回 title「已不存在」讓前端顯示灰卡）。
+ * 標題對「收發雙方」都顯示——這是「標注／分享指標」的用意；能不能真的打開由目標頁自守。
+ */
+export async function resolveDmRefs(rows: Array<{ refType: string | null; refId: string | null }>): Promise<Map<string, DmRefInfo>> {
+  const byType: Record<DmRefType, Set<string>> = { project: new Set(), database: new Set(), schedule: new Set(), note: new Set() };
+  for (const r of rows) if (r.refType && r.refId && r.refType in byType) byType[r.refType as DmRefType].add(r.refId);
+  const map = new Map<string, DmRefInfo>();
+  const put = (type: DmRefType, id: string, title: string, route: string) => map.set(`${type}:${id}`, { refType: type, refId: id, title, route });
+  if (byType.project.size) {
+    const rowsP = await db.select({ id: schema.projects.id, title: schema.projects.title }).from(schema.projects).where(inArray(schema.projects.id, [...byType.project]));
+    for (const p of rowsP) put("project", p.id, p.title, `/project/${p.id}`);
+  }
+  if (byType.database.size) {
+    const rowsD = await db.select({ id: schema.dataTables.id, name: schema.dataTables.name, deletedAt: schema.dataTables.deletedAt }).from(schema.dataTables).where(inArray(schema.dataTables.id, [...byType.database]));
+    for (const d of rowsD) if (!d.deletedAt) put("database", d.id, d.name, `/databases`);
+  }
+  if (byType.schedule.size) {
+    const rowsS = await db.select({ id: schema.scheduleItems.id, title: schema.scheduleItems.title, startsAt: schema.scheduleItems.startsAt }).from(schema.scheduleItems).where(inArray(schema.scheduleItems.id, [...byType.schedule]));
+    for (const s of rowsS) {
+      const when = new Date(s.startsAt).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" });
+      put("schedule", s.id, `${s.title}（${when}）`, `/planner`);
+    }
+  }
+  if (byType.note.size) {
+    const rowsN = await db.select({ id: schema.notes.id, title: schema.notes.title }).from(schema.notes).where(inArray(schema.notes.id, [...byType.note]));
+    for (const n of rowsN) put("note", n.id, n.title, `/planner`);
+  }
+  return map;
+}
+
+export interface DmAttachmentInfo {
+  id: string;
+  kind: string;
+  title: string;
+  mime: string;
+  sizeBytes: number;
+  /** 檔案服務網址（同源、需登入且為收發雙方之一） */
+  url: string;
+}
+
+/** 批次解析附件顯示資訊（給歷史訊息渲染縮圖／播放器／下載連結） */
+export async function resolveDmAttachments(ids: string[]): Promise<Map<string, DmAttachmentInfo>> {
+  const uniq = [...new Set(ids)];
+  if (!uniq.length) return new Map();
+  const rows = await db.select().from(schema.dmAttachments).where(inArray(schema.dmAttachments.id, uniq));
+  return new Map(rows.map((a) => [a.id, { id: a.id, kind: a.kind, title: a.title, mime: a.mime, sizeBytes: a.sizeBytes, url: `/api/dm/attachments/${a.id}/file` }]));
 }
 
 export interface DmThread {
@@ -168,24 +349,28 @@ export async function listDmThreads(auth: AuthState): Promise<DmThread[]> {
   const me = auth.user.id;
   // CTE 先把「對方是誰」算成一欄再 group by 欄名——CASE 直接放 select＋group by 會因
   // 兩處綁不同參數（$1 vs $n）被 Postgres 視為不同運算式而報錯（參數化查詢比對不了語意相等）
-  const result = await db.execute<{ peer: string; last_at: string; last_body: string; last_sender: string }>(sql`
+  // 附件／標注訊息的 body 可能為空，一併帶出 last_attach／last_ref 以合成不空白的預覽字。
+  const result = await db.execute<{ peer: string; last_at: string; last_body: string; last_sender: string; last_attach: string | null; last_ref: string | null }>(sql`
     with mine as (
       select case when ${schema.dmMessages.senderId} = ${me} then ${schema.dmMessages.recipientId} else ${schema.dmMessages.senderId} end as peer,
-             ${schema.dmMessages.body} as body, ${schema.dmMessages.senderId} as sender_id, ${schema.dmMessages.createdAt} as created_at
+             ${schema.dmMessages.body} as body, ${schema.dmMessages.senderId} as sender_id, ${schema.dmMessages.createdAt} as created_at,
+             ${schema.dmMessages.attachmentId} as attachment_id, ${schema.dmMessages.refType} as ref_type
       from ${schema.dmMessages}
       where ${or(eq(schema.dmMessages.senderId, me), eq(schema.dmMessages.recipientId, me))}
     )
     select peer,
            max(created_at)::text as last_at,
            (array_agg(body order by created_at desc))[1] as last_body,
-           (array_agg(sender_id order by created_at desc))[1] as last_sender
+           (array_agg(sender_id order by created_at desc))[1] as last_sender,
+           (array_agg(attachment_id order by created_at desc))[1] as last_attach,
+           (array_agg(ref_type order by created_at desc))[1] as last_ref
     from mine
     group by peer
   `);
   const rows = result.rows.map((r) => ({
     peerId: r.peer,
     lastAt: r.last_at,
-    lastBody: r.last_body,
+    lastBody: dmThreadPreview({ body: r.last_body, hasAttachment: !!r.last_attach, refType: r.last_ref }),
     lastFromMe: r.last_sender === me,
   }));
   if (rows.length === 0) return [];
@@ -205,7 +390,7 @@ export async function listDmThreads(auth: AuthState): Promise<DmThread[]> {
         peerId: r.peerId,
         peerName: u?.name ?? "（已移除的帳號）",
         peerEmail: u?.email ?? "",
-        lastBody: dmSnippet(r.lastBody),
+        lastBody: r.lastBody, // 已在 rows 映射時經 dmThreadPreview（含截斷／附件標注佔位）
         lastFromMe: r.lastFromMe,
         lastAt: new Date(r.lastAt),
         unread: unread.get(r.peerId) ?? 0,
@@ -226,6 +411,10 @@ export interface DmHistoryItem {
   id: string;
   fromMe: boolean;
   body: string;
+  /** 'text'＝一般、'assistant'＝AI 代理回覆（前端渲染成 AI 氣泡） */
+  kind: string;
+  ref: DmRefInfo | null;
+  attachment: DmAttachmentInfo | null;
   createdAt: Date;
 }
 
@@ -262,9 +451,22 @@ export async function listDmHistory(
     .limit(limit + 1);
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit).reverse();
+  // 批次解析這一頁的標注卡與附件（各一次查詢，無 N+1）
+  const [refMap, attMap] = await Promise.all([
+    resolveDmRefs(page),
+    resolveDmAttachments(page.map((m) => m.attachmentId).filter((v): v is string => !!v)),
+  ]);
   return {
     peer: { userId: peer.id, name: peer.name, email: peer.email },
-    items: page.map((m) => ({ id: m.id, fromMe: m.senderId === me, body: m.body, createdAt: m.createdAt })),
+    items: page.map((m) => ({
+      id: m.id,
+      fromMe: m.senderId === me,
+      body: m.body,
+      kind: m.kind,
+      ref: m.refType && m.refId ? (refMap.get(`${m.refType}:${m.refId}`) ?? { refType: m.refType as DmRefType, refId: m.refId, title: "已不存在", route: "" }) : null,
+      attachment: m.attachmentId ? (attMap.get(m.attachmentId) ?? null) : null,
+      createdAt: m.createdAt,
+    })),
     hasMore,
   };
 }

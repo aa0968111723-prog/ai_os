@@ -631,7 +631,12 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     if (args.markRead === true) await markDmRead(auth, peer.userId);
     return {
       peer: { userId: peer.userId, name: peer.name, email: peer.email },
-      messages: items.map((m) => ({ from: m.fromMe ? "我" : peer.name, body: m.body, at: m.createdAt })),
+      messages: items.map((m) => ({
+        from: m.kind === "assistant" ? "AI 助手" : m.fromMe ? "我" : peer.name,
+        // body 可能為空（純附件／標注訊息）——補上可讀提示，讓外部 AI 摘要不遺漏
+        body: [m.body, m.attachment ? `[附件：${m.attachment.title}]` : "", m.ref ? `[標注${m.ref.title ? "：" + m.ref.title : ""}]` : ""].filter(Boolean).join(" ").trim(),
+        at: m.createdAt,
+      })),
     };
   }
 

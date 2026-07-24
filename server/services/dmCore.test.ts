@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dmSnippet, sharesAnyGroup } from "./dmCore";
+import { dmSnippet, dmThreadPreview, sharesAnyGroup } from "./dmCore";
 
 describe("sharesAnyGroup（可私訊判定核心）", () => {
   it("有交集＝可訊", () => {
@@ -31,5 +31,26 @@ describe("dmSnippet（對話串預覽截斷）", () => {
   it("恰好等於上限不截斷", () => {
     const exact = "a".repeat(80);
     expect(dmSnippet(exact)).toBe(exact);
+  });
+});
+
+describe("dmThreadPreview（對話串最後一句預覽合成）", () => {
+  it("有內文＝截斷內文（不受附件／標注影響）", () => {
+    expect(dmThreadPreview({ body: "晚點交給你", hasAttachment: true, refType: "project" })).toBe("晚點交給你");
+  });
+  it("空內文＋有附件＝附件佔位字", () => {
+    expect(dmThreadPreview({ body: "", hasAttachment: true, refType: null })).toBe("📎 附件");
+    expect(dmThreadPreview({ body: "   ", hasAttachment: true, refType: null })).toBe("📎 附件");
+  });
+  it("空內文＋只有標注＝標注佔位字（帶型別中文）", () => {
+    expect(dmThreadPreview({ body: "", hasAttachment: false, refType: "database" })).toBe("🔗 資料庫");
+    expect(dmThreadPreview({ body: "", hasAttachment: false, refType: "note" })).toBe("🔗 筆記");
+  });
+  it("附件優先於標注（同時存在時顯示附件）", () => {
+    expect(dmThreadPreview({ body: "", hasAttachment: true, refType: "schedule" })).toBe("📎 附件");
+  });
+  it("未知 refType 不誤標（回空字串）", () => {
+    expect(dmThreadPreview({ body: "", hasAttachment: false, refType: "bogus" })).toBe("");
+    expect(dmThreadPreview({ body: "", hasAttachment: false, refType: null })).toBe("");
   });
 });
