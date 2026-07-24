@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
+import { ExportJobButton } from "./ExportJobButton";
 import { ConfirmButton, useRovingRadio } from "./interactions";
 import { discussInMessages } from "../discuss";
 
@@ -44,7 +45,9 @@ export function AssetLibrary({
 }) {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
-  const assets = trpc.projects.assets.useQuery({ projectId });
+  // QA-013：素材上限不再硬卡 100——預設載 100，「載入更多」逐次加大 limit 取回全部
+  const [assetLimit, setAssetLimit] = useState(100);
+  const assets = trpc.projects.assets.useQuery({ projectId, limit: assetLimit });
   const del = trpc.projects.deleteAsset.useMutation({
     onSuccess: () => {
       utils.projects.assets.invalidate({ projectId });
@@ -304,17 +307,8 @@ export function AssetLibrary({
                   <button type="button" style={smallBtn} onClick={() => setSelected(new Set())}>
                     清除
                   </button>
-                  <a
-                    href={`/api/export/${projectId}?assetIds=${[...selected].join(",")}`}
-                    download
-                    title="只打包勾選素材的媒體檔（腳本鏡頭表、字幕與時間軸等交付文件照常附上）"
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 10px", fontSize: 11,
-                      borderRadius: 999, textDecoration: "none", background: "var(--primary-solid)", color: "var(--primary-fg)",
-                    }}
-                  >
-                    <Icon name="Package" size={13} /> 打包所選（{selected.size}）
-                  </a>
+                  {/* QA-005：多選打包也走非同步 job——進度/取消/完成下載就地顯示 */}
+                  <ExportJobButton projectId={projectId} assetIds={[...selected]} idleLabel={`打包所選（${selected.size}）`} triggerClassName="primary btn-sm" />
                   <span className="hint" style={{ margin: 0, fontSize: 11 }}>已勾 {selected.size} 個</span>
                 </>
               )}
@@ -540,6 +534,14 @@ export function AssetLibrary({
                   </div>
                 );
               })}
+            </div>
+          )}
+          {/* QA-013：拿滿本頁 limit 代表可能還有更舊的素材——提供載入更多，不再靜默截在 100 */}
+          {(allAssets?.length ?? 0) >= assetLimit && (
+            <div style={{ marginTop: 10, textAlign: "center" }}>
+              <button type="button" onClick={() => setAssetLimit((l) => l + 100)} disabled={assets.isFetching}>
+                {assets.isFetching ? "載入中…" : `載入更多素材（已顯示 ${allAssets?.length ?? 0} 個）`}
+              </button>
             </div>
           )}
         </>

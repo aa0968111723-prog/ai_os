@@ -1,5 +1,5 @@
-// AI 代理系統實機驗證（mock 模式）：目標 → 規劃 → 計畫核准畫面 → 執行 → 背景逐步完成 →
-// 分鏡出現、成品回填、送審成功；另驗放棄與檢視者唯讀不受影響。
+// 專案 AI 代理系統實機驗證（mock 模式）：統一對話入口下目標 → 代理提議排計畫 → 排出計畫（待核准）→
+// 核准執行 → 背景逐步完成 → 分鏡出現、成品回填、送審成功；另驗放棄流程。
 import { chromium } from "playwright";
 
 const BASE = process.env.E2E_UI_BASE || "http://127.0.0.1:3210";
@@ -16,21 +16,27 @@ await page.fill("#login-pw", "test12345");
 await page.click("button[type=submit]");
 await page.waitForTimeout(1800);
 await page.goto(`${BASE}/p/${PROJ}`);
-await page.waitForSelector("#sec-agent", { timeout: 20000 });
+await page.waitForSelector("#sec-ai-hub", { timeout: 20000 });
 
-// ── 1. 代理卡存在於 ② 創作中心頂部 ──
-ok("AI 代理卡存在", (await page.locator("#sec-agent").count()) === 1);
-const yAgent = (await page.locator("#sec-agent").boundingBox())?.y ?? -1;
-const yAssistant = (await page.locator("#sec-assistant").boundingBox())?.y ?? -1;
-ok("代理卡在 AI 助手之前", yAgent > 0 && yAgent < yAssistant);
-ok("有範例目標 chips", (await page.locator('#sec-agent button:has-text("把知識庫的腳本拆成分鏡")').count()) === 1);
+/** 統一入口下目標：對話送出 → 等「讓 AI 代理排計畫」提議 → 確認（mock 模式提議是確定性的） */
+async function planViaChat(goal) {
+  await page.locator("#sec-ai-hub").scrollIntoViewIfNeeded();
+  await page.fill('input[aria-label="問 AI 專案助手"]', goal);
+  await page.locator('#sec-assistant button.primary:has-text("問")').click();
+  await page.locator('#sec-assistant button:has-text("讓 AI 代理排計畫")').last().click({ timeout: 30000 });
+  await page.locator('.confirm-panel button:has-text("執行")').first().click();
+  await page.waitForTimeout(2500);
+}
 
-// ── 2. 規劃 ──
+// ── 1. 統一入口存在：一個對話＋代理執行區（不再是四張卡/分頁） ──
+ok("專案 AI 代理系統存在", (await page.locator("#sec-ai-hub").count()) === 1);
+ok("統一對話輸入存在", (await page.locator('#sec-assistant input[aria-label="問 AI 專案助手"]').count()) === 1);
+ok("代理執行區存在", (await page.locator("#sec-agent").count()) === 1);
+ok("快速開場含下目標例句", (await page.locator('#sec-assistant button:has-text("把知識庫的腳本拆成分鏡")').count()) === 1);
+
+// ── 2. 對話下目標 → 代理排出計畫（待核准） ──
 const sceneCountBefore = await page.locator("#onboard-delivery .gen-row").count();
-await page.fill(`#agent-goal-${PROJ}`, "清晨禪堂一炷香的開場鏡頭");
-await page.locator('#sec-agent button:has-text("規劃計畫")').click();
-await page.locator('.confirm-panel button:has-text("開始規劃"), #sec-agent button:has-text("開始規劃")').first().click();
-await page.waitForTimeout(2500);
+await planViaChat("清晨禪堂一炷香的開場鏡頭");
 ok("計畫出現（待你核准）", (await page.locator('#sec-agent .pill:has-text("待你核准")').count()) >= 1);
 ok("計畫含三步（建鏡/生成/送審）", (await page.locator('#sec-agent :text("新增分鏡")').count()) >= 1 && (await page.locator('#sec-agent :text("送審")').count()) >= 1);
 ok("顯示估點", (await page.locator('#sec-agent button:has-text("執行計畫（預估")').count()) === 1);
@@ -62,11 +68,7 @@ await page.locator("#onboard-delivery").scrollIntoViewIfNeeded();
 await page.screenshot({ path: SHOT("3-scenes"), fullPage: false });
 
 // ── 5. 放棄計畫流程 ──
-await page.locator("#sec-agent").scrollIntoViewIfNeeded();
-await page.fill(`#agent-goal-${PROJ}`, "測試放棄用的第二份計畫");
-await page.locator('#sec-agent button:has-text("規劃計畫")').click();
-await page.locator('.confirm-panel button:has-text("開始規劃"), #sec-agent button:has-text("開始規劃")').first().click();
-await page.waitForTimeout(2500);
+await planViaChat("測試放棄用的第二份計畫");
 const discardBtn = page.locator('#sec-agent button:has-text("放棄這份計畫")').first();
 ok("第二份計畫可放棄", (await discardBtn.count()) === 1);
 await discardBtn.click();

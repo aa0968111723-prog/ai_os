@@ -1,23 +1,32 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Route, Switch, Link, useLocation } from "wouter";
 import { trpc } from "./api";
 import { Launchpad } from "./pages/Launchpad";
 import { ProjectPage } from "./pages/ProjectPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
-import { AdminPage, AuditLogCard, ConsumptionMonitorCard } from "./pages/AdminPage";
-import { MembersPage } from "./pages/MembersPage";
-import { FeedbackPage } from "./pages/FeedbackPage";
-import { MyReportsPage } from "./pages/MyReportsPage";
-import { ModelsPage } from "./pages/ModelsPage";
-import { HelpPage } from "./pages/HelpPage";
-import { McpPage } from "./pages/McpPage";
-import { DownloadsPage } from "./pages/DownloadsPage";
-import { PlannerPage } from "./pages/PlannerPage";
-import { DatabasesPage } from "./pages/DatabasesPage";
+// 路由層級 code-splitting（QA-025）：管理/資料庫/排程等重頁面延遲載入——
+// 首屏（作業台/專案頁/登入）不揹整個 App 的 JS。lazy 需要 default export，用 then 轉接具名匯出。
+const AdminPage = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.AdminPage })));
+const AuditLogCard = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.AuditLogCard })));
+const ConsumptionMonitorCard = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.ConsumptionMonitorCard })));
+const InsightsCard = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.InsightsCard })));
+const MembersPage = lazy(() => import("./pages/MembersPage").then((m) => ({ default: m.MembersPage })));
+const FeedbackPage = lazy(() => import("./pages/FeedbackPage").then((m) => ({ default: m.FeedbackPage })));
+const MyReportsPage = lazy(() => import("./pages/MyReportsPage").then((m) => ({ default: m.MyReportsPage })));
+const ModelsPage = lazy(() => import("./pages/ModelsPage").then((m) => ({ default: m.ModelsPage })));
+const HelpPage = lazy(() => import("./pages/HelpPage").then((m) => ({ default: m.HelpPage })));
+const McpPage = lazy(() => import("./pages/McpPage").then((m) => ({ default: m.McpPage })));
+const IntegrationsPage = lazy(() => import("./pages/IntegrationsPage").then((m) => ({ default: m.IntegrationsPage })));
+const DownloadsPage = lazy(() => import("./pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })));
+const PlannerPage = lazy(() => import("./pages/PlannerPage").then((m) => ({ default: m.PlannerPage })));
+const DatabasesPage = lazy(() => import("./pages/DatabasesPage").then((m) => ({ default: m.DatabasesPage })));
+const ChatPage = lazy(() => import("./pages/ChatPage").then((m) => ({ default: m.ChatPage })));
 import { PasswordInput } from "./components/PasswordInput";
 import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
 import { FeedbackWidget } from "./feedback/FeedbackWidget";
+import { NotificationSettingsDialog, PushSubscriptionSync } from "./components/NotificationSettings";
+import { unsubscribeThisDevice } from "./push";
 import { Icon } from "./components/Icon";
 import { useFocusTrap } from "./components/interactions";
 
@@ -148,6 +157,19 @@ function PendingBadge({ groupId }: { groupId: string }) {
   );
 }
 
+/** 頂欄私訊入口：常駐圖示＋未讀數輪詢（30 秒）；0 未讀只顯示入口不顯示數字 */
+function DmNavBadge() {
+  const unread = trpc.dm.unread.useQuery(undefined, { refetchInterval: 30_000 });
+  const n = unread.data?.total ?? 0;
+  return (
+    <Link href="/chat" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="私訊——與同組夥伴一對一聊天">
+      <Icon name="MessageCircle" size={14} />
+      <span className="topbar-quick-label">私訊</span>
+      {n > 0 && <span className="dm-nav-unread" aria-label={`${n} 則未讀私訊`}>{n > 99 ? "99+" : n}</span>}
+    </Link>
+  );
+}
+
 /** 彈性點數徽章：剩餘 or 不限（管理員可在團隊管理調整） */
 function PointsBadge({ groupId }: { groupId: string }) {
   // enabled 等組別就緒才查——避免首載以 undefined 先打一輪造成「週額度閃爍」
@@ -176,10 +198,10 @@ function PointsBadge({ groupId }: { groupId: string }) {
 /** 使用者選單（收斂頂欄）：說明／工作／管理／帳號四組收進單一下拉，管理組僅組長／管理員可見。
  * CSP 下自製（無外部庫）：點外面或 Esc 關閉。 */
 function UserMenu({
-  userName, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onLogout, loggingOut,
+  userName, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, loggingOut,
 }: {
   userName: string; isAdmin: boolean; activeIsLeader: boolean; canSeeOrg: boolean;
-  onChangePw: () => void; onLogout: () => void; loggingOut: boolean;
+  onChangePw: () => void; onNotifSettings: () => void; onLogout: () => void; loggingOut: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -210,7 +232,8 @@ function UserMenu({
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">工作</div>
           <Link href="/mcp" className="menu-item" role="menuitem" onClick={close}><Icon name="Sparkles" size={15} />接上外部 AI</Link>
-          <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="Package" size={15} />共用文件下載</Link>
+          <Link href="/integrations" className="menu-item" role="menuitem" onClick={close}><Icon name="Package" size={15} />整合連接</Link>
+          <Link href="/downloads" className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />共用文件下載</Link>
           {/* 管理組：只要在任一組是組長或管理員（canSeeOrg）就顯示整段；段內各項再依細權限收放，
            * 團隊管理限管理員（isAdmin）、選項限作用組組長（activeIsLeader）。canSeeOrg 為兩者的聯集，
            * 故整段用它當閘門時，段內至少會有通訊錄／監控兩項，不會出現只有標題的空組。 */}
@@ -231,6 +254,7 @@ function UserMenu({
            * 文案／圖示刻意與「工作」組的「共用文件下載」明確區隔——前者是團隊共用文件、後者是「你自己的」個資可讀複本，
            * 舊版兩者都叫「資料下載／下載我的資料」又都像下載，非技術創作者分不清（使用者回饋）。 */}
           <a href="/api/me/export" download className="menu-item" role="menuitem" title="下載一份你個人資料的可讀備份（含生成紀錄、留言、筆記、排程；不含密碼）" onClick={close}><Icon name="Download" size={15} />匯出我的個人資料</a>
+          <button className="menu-item" role="menuitem" onClick={() => { close(); onNotifSettings(); }}><Icon name="Bell" size={15} />通知設定</button>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
           <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>
             <Icon name="Undo2" size={15} />{loggingOut ? "登出中…" : "登出"}
@@ -246,6 +270,16 @@ export function App() {
   const [location, navigate] = useLocation();
   const me = trpc.auth.me.useQuery();
   const logout = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
+  const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
+  // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/審批通知）。
+  // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到「通知設定」重新啟用。
+  const logoutWithPushCleanup = async () => {
+    try {
+      const endpoint = await unsubscribeThisDevice();
+      if (endpoint) await pushUnsubscribe.mutateAsync({ endpoint });
+    } catch { /* 推播清理失敗照樣登出 */ }
+    logout.mutate();
+  };
   const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
 
   // 組切換（多組成員）：記住上次選的組
@@ -268,13 +302,14 @@ export function App() {
   // 不可只看「作用中的組」的角色，否則多組組長切到自己是純組員的那一組時會被誤擋在外。
   const canSeeOrg = isAdmin || groups.some((g) => g.role !== "member");
   const [showChangePw, setShowChangePw] = useState(false);
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
   // 管理員重設密碼後：不論在哪個路由都用強制對話框擋住，改完密碼（auth.me 重查）才放行
   const mustChangePw = !!me.data?.user.mustChangePassword;
 
   return (
     <div className="app">
       {/* 強制改密碼時整塊背景 inert：對話框遮罩只擋滑鼠，Tab 仍能聚焦到背景，要靠 inert 一起擋 */}
-      <div inert={(mustChangePw || showChangePw) || undefined}>
+      <div inert={(mustChangePw || showChangePw || showNotifSettings) || undefined}>
         <header className="topbar">
           <Link href="/" className="brand" style={{ cursor: "pointer", textDecoration: "none", color: "inherit" }}>
             <span className="orb" /> AI Director OS
@@ -304,6 +339,7 @@ export function App() {
           {me.data && info.data?.mockMode && <span className="badge mock">測試模式</span>}
           {/* 高頻入口常駐頂欄：筆記排程／資料庫是天天用的工具，從使用者選單升上來一鍵可達；
            * 手機空間吃緊時標籤收成純圖示（topbar-quick-label），title/aria 仍保留 */}
+          {me.data && <DmNavBadge />}
           {me.data && (
             <Link href="/planner" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="筆記排程——把筆記排進待辦與行程">
               <Icon name="Clock" size={14} />
@@ -333,12 +369,15 @@ export function App() {
               activeIsLeader={activeIsLeader}
               canSeeOrg={canSeeOrg}
               onChangePw={() => setShowChangePw(true)}
-              onLogout={() => logout.mutate()}
+              onNotifSettings={() => setShowNotifSettings(true)}
+              onLogout={() => { void logoutWithPushCleanup(); }}
               loggingOut={logout.isPending}
             />
           )}
         </header>
 
+        {/* lazy 頁面載入中的過場（QA-025 code-splitting）：整個路由樹共用一個 Suspense */}
+        <Suspense fallback={<p className="hint">載入中…</p>}>
         <Switch>
           <Route path="/invite/:token">{(params) => <AcceptInvitePage token={params.token} />}</Route>
           <Route>
@@ -358,6 +397,11 @@ export function App() {
                 <Route path="/help"><HelpPage /></Route>
                 {/* 金鑰管理與帳號無關組別，未分組也可先建立（連進來仍受組隔離限制） */}
                 <Route path="/mcp"><McpPage /></Route>
+                {/* 整合連接屬帳號層級（Google/Notion/外部 API 都綁個人）——未分組也可先設定 */}
+                <Route path="/integrations"><IntegrationsPage /></Route>
+                {/* 私訊也保持可達：還沒被分組的空檔正需要聯絡管理員／開發者（可訊界由後端守） */}
+                <Route path="/chat/:peerId">{(params) => <ChatPage peerId={params.peerId} />}</Route>
+                <Route path="/chat"><ChatPage /></Route>
                 <Route>
                   <div className="empty-state" style={{ marginTop: "var(--sp-32)" }}>
                     <h3>你已成功加入 ✓ 還差一步</h3>
@@ -394,6 +438,7 @@ export function App() {
                     // 組長也看得到「點數消耗監控」：後端已按呼叫者權限把範圍收斂到自己帶的組
                     <div className="stack" style={{ maxWidth: 860, margin: "0 auto" }}>
                       <ConsumptionMonitorCard />
+                      <InsightsCard />
                       <AuditLogCard />
                     </div>
                   ) : (
@@ -416,7 +461,10 @@ export function App() {
                 <Route path="/models"><ModelsPage /></Route>
                 <Route path="/help"><HelpPage /></Route>
                 <Route path="/mcp"><McpPage /></Route>
+                <Route path="/integrations"><IntegrationsPage /></Route>
                 <Route path="/downloads"><DownloadsPage /></Route>
+                <Route path="/chat/:peerId">{(params) => <ChatPage peerId={params.peerId} />}</Route>
+                <Route path="/chat"><ChatPage /></Route>
                 <Route path="/planner"><PlannerPage groupId={activeGroupId} /></Route>
                 <Route path="/databases"><DatabasesPage groupId={activeGroupId} /></Route>
                 {/* key=id：換專案（例如頂欄待辦下拉直接跳另一案、或上一頁/下一頁）時強制重建整棵
@@ -432,6 +480,7 @@ export function App() {
             )}
           </Route>
         </Switch>
+        </Suspense>
       </div>
 
       {mustChangePw ? (
@@ -439,6 +488,11 @@ export function App() {
       ) : (
         showChangePw && me.data && <ChangePasswordDialog onClose={() => setShowChangePw(false)} />
       )}
+
+      {!mustChangePw && showNotifSettings && me.data && <NotificationSettingsDialog onClose={() => setShowNotifSettings(false)} />}
+
+      {/* 例行推播訂閱同步（零 UI）：已啟用通知的裝置每次開 App 回報一次，刷新裝置清單的「最近同步」 */}
+      {me.data && <PushSubscriptionSync />}
 
       {/* 元件級回饋浮標：登入後任何路由都掛一次；放在 inert 包裹外、與對話框同層，強制改密碼時不受影響 */}
       {me.data && <FeedbackWidget />}

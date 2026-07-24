@@ -114,7 +114,11 @@ export const feedbackRouter = router({
     if (ctx.auth.user.isSuperAdmin) {
       rows = await base.orderBy(desc(schema.feedback.updatedAt)).limit(100);
     } else {
-      const visibleGroupIds = ctx.auth.groups.map((g) => g.groupId);
+      // 只看「自己管得到的組」——loadAuthState 已把管理的團隊展開成 admin 組員資格，故 role !== "member"
+      // 即等於「組長／團隊管理員／開發者」。舊版用 .map 涵蓋全部組（含純組員身分的他團組別），
+      // 會讓「A 團隊管理員兼 B 團隊純組員」讀到 B 團隊那組的回饋（跨團隊洩漏）。
+      // 與 audit.ts／feedbackReports.ts／quota.ts 的可見界完全一致（單一口徑）。
+      const visibleGroupIds = ctx.auth.groups.filter((g) => g.role !== "member").map((g) => g.groupId);
       if (visibleGroupIds.length === 0) return [];
       rows = await base
         .where(inArray(schema.feedback.groupId, visibleGroupIds))

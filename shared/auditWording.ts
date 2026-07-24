@@ -24,6 +24,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "projects.setArchived": "封存／解封專案",
   "projects.updateWorldview": "更新世界觀",
   "projects.setProjectRole": "調整專案成員角色",
+  "projects.setOwner": "轉移專案負責人",
+  "admin.sendTestEmail": "寄信箱測試信",
   "projects.renameAsset": "重新命名素材",
   "projects.setAssetLock": "鎖定／解鎖素材",
   "projects.deleteAsset": "刪除素材（進回收桶）",
@@ -31,6 +33,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "projects.purgeAsset": "永久刪除素材",
   // 生成與點數
   "generation.submit": "送出生成",
+  "generation.retry": "重試失敗的生成",
   "generation.rename": "重新命名成品",
   "generation.toggleFavorite": "收藏／取消收藏成品",
   "generation.decideCost": "核決超額生成",
@@ -64,6 +67,13 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "agents.approve": "核准 AI 代理計畫",
   "agents.discard": "放棄 AI 代理計畫",
   "agents.stop": "停止 AI 代理",
+  // 代理背景執行的每一步（背景執行器補記，繞過 tRPC 中介層——代理實際做了什麼的追溯來源）
+  "agents.step.generate": "AI 代理：生成素材",
+  "agents.step.voiceover": "AI 代理：生成旁白配音",
+  "agents.step.create_scene": "AI 代理：新增分鏡",
+  "agents.step.split_script": "AI 代理：拆分鏡",
+  "agents.step.submit_approval": "AI 代理：送審分鏡",
+  "agents.step.record_to_database": "AI 代理：寫入資料庫",
   "teamAssistant.ask": "詢問團隊 AI 助手",
   "teamAssistant.dispatch": "團隊代理派工到專案",
   "workflows.start": "啟動工作流",
@@ -86,12 +96,19 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "messages.react": "留言表情回應",
   "messages.setPinned": "釘選／取消釘選留言",
   "messages.markRead": "標記留言已讀",
+  // 站內私訊（內容不落審計明文，只記「私訊了誰」；markRead 實務上審計豁免，列入字典保底）
+  "dm.send": "發送私訊",
+  "dm.markRead": "標記私訊已讀",
   "notes.add": "新增會議筆記",
   "notes.update": "更新會議筆記",
   "notes.remove": "刪除會議筆記",
   "schedule.add": "新增排程",
   "schedule.update": "更新排程",
   "schedule.remove": "刪除排程",
+  "exportJobs.create": "建立交付包匯出",
+  "exportJobs.cancel": "取消交付包匯出",
+  "googleCalendar.syncNow": "手動同步 Google 日曆",
+  "googleCalendar.disconnect": "中斷 Google 日曆連結",
   "prompts.save": "儲存提示詞",
   "prompts.remove": "刪除提示詞",
   "scenePresets.add": "新增分鏡預設",
@@ -118,33 +135,51 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "databases.uploadFile": "上傳資料庫文件",
   "databases.refreshFile": "重新整理資料庫文件",
   "databases.removeFile": "刪除資料庫文件",
-  // MCP 個人連線金鑰（自助管理）
-  "mcpTokens.create": "建立 MCP 連線金鑰",
-  "mcpTokens.revoke": "撤銷 MCP 連線金鑰",
+  "databases.setFileMeta": "編輯資料庫文件分類／描述",
+  "databases.classifyFile": "AI 看圖分類資料庫圖片",
+  "databases.sendFileToProject": "把資料庫文件送進專案素材庫",
+  // MCP 個人連線金鑰（自助管理）。「MCP」對非技術夥伴是黑話——一律寫成「外部 AI」，
+  // 分類標籤保留一次（MCP）括註，讓技術夥伴仍對得上文件用語。
+  "mcpTokens.create": "建立外部 AI 連線金鑰",
+  "mcpTokens.revoke": "撤銷外部 AI 連線金鑰",
+  // 個人整合連接（Google 雲端／Notion／外部資料庫）
+  "integrations.setNotion": "設定個人 Notion token",
+  "integrations.removeNotion": "移除個人 Notion token",
+  "integrations.addApi": "新增外部資料庫／API 連接",
+  "integrations.fetchApi": "從外部連接抓取資料",
+  "integrations.remove": "刪除外部資料庫／API 連接",
+  "integrations.removeGoogleDrive": "中斷 Google 雲端連結",
+  "integrations.googleDriveConnect": "連結 Google 雲端硬碟", // Express OAuth callback 手動補記
+  // 跨裝置通知（subscribe/sync 實務上審計豁免——高頻例行回報＋含裝置金鑰，列入字典保底）
+  "push.subscribe": "連結通知裝置",
+  "push.sync": "同步通知裝置",
+  "push.unsubscribe": "解除通知裝置",
+  "push.removeDevice": "移除通知裝置",
+  "push.test": "發送測試通知",
   // MCP（Claude 等外部代理經 API 操作）
-  "mcp.whoami": "MCP：確認連線身分",
-  "mcp.list_projects": "MCP：列出專案",
-  "mcp.get_project_context": "MCP：讀取專案脈絡",
-  "mcp.find_model": "MCP：挑選模型",
-  "mcp.list_generations": "MCP：查生成紀錄",
-  "mcp.get_generation": "MCP：查單筆生成",
-  "mcp.list_assets": "MCP：列出素材庫",
-  "mcp.submit_generation": "MCP：送出生成",
-  "mcp.post_message": "MCP：發佈留言",
-  "mcp.list_databases": "MCP：列出資料庫",
-  "mcp.query_database": "MCP：查詢資料庫",
-  "mcp.add_database_row": "MCP：新增資料列",
-  "mcp.list_database_files": "MCP：列出資料庫文件",
-  "mcp.read_database_file": "MCP：讀取資料庫文件",
-  "mcp.get_project_status": "MCP：讀取專案全貌",
-  "mcp.plan_agent": "MCP：規劃 AI 代理",
-  "mcp.approve_agent": "MCP：核准並執行代理",
-  "mcp.stop_agent": "MCP：停止代理",
-  "mcp.discard_agent": "MCP：放棄代理計畫",
-  "mcp.list_agent_runs": "MCP：列出代理",
-  "mcp.get_agent_run": "MCP：查代理進度",
-  "mcp.list_schedule": "MCP：列出行程",
-  "mcp.add_schedule_item": "MCP：新增行程",
+  "mcp.whoami": "外部 AI：確認連線身分",
+  "mcp.list_projects": "外部 AI：列出專案",
+  "mcp.get_project_context": "外部 AI：讀取專案脈絡",
+  "mcp.find_model": "外部 AI：挑選模型",
+  "mcp.list_generations": "外部 AI：查生成紀錄",
+  "mcp.get_generation": "外部 AI：查單筆生成",
+  "mcp.list_assets": "外部 AI：列出素材庫",
+  "mcp.submit_generation": "外部 AI：送出生成",
+  "mcp.post_message": "外部 AI：發佈留言",
+  "mcp.list_databases": "外部 AI：列出資料庫",
+  "mcp.query_database": "外部 AI：查詢資料庫",
+  "mcp.add_database_row": "外部 AI：新增資料列",
+  "mcp.list_database_files": "外部 AI：列出資料庫文件",
+  "mcp.read_database_file": "外部 AI：讀取資料庫文件",
+  "mcp.get_project_status": "外部 AI：讀取專案全貌",
+  "mcp.plan_agent": "外部 AI：規劃 AI 代理",
+  "mcp.approve_agent": "外部 AI：核准並執行代理",
+  "mcp.stop_agent": "外部 AI：停止代理",
+  "mcp.discard_agent": "外部 AI：放棄代理計畫",
+  "mcp.list_agent_runs": "外部 AI：列出代理",
+  "mcp.get_agent_run": "外部 AI：查代理進度",
+  "mcp.list_schedule": "外部 AI：列出行程",
+  "mcp.add_schedule_item": "外部 AI：新增行程",
 };
 
 /** action → 人話；字典沒有的（新端點）retain 原代碼，寧可看得懂大多數也不擋新功能上線 */
@@ -160,16 +195,16 @@ export function humanizeAuditAction(action: string): string {
  */
 export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefixes: readonly string[] }> = [
   { key: "account", label: "帳號與團隊", prefixes: ["auth", "admin"] },
-  { key: "project", label: "專案與素材", prefixes: ["projects"] },
+  { key: "project", label: "專案與素材", prefixes: ["projects", "exportJobs"] },
   { key: "generation", label: "生成與點數", prefixes: ["generation", "quota"] },
   { key: "storyboard", label: "分鏡與審批", prefixes: ["scenes", "approvals"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "teamAssistant", "workflows"] },
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters"] },
-  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule"] },
+  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "dm", "googleCalendar", "push"] },
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   { key: "database", label: "自訂資料庫", prefixes: ["databases"] },
-  { key: "external", label: "外部連線（MCP）", prefixes: ["mcpTokens", "mcp"] },
+  { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["mcpTokens", "mcp", "integrations"] },
 ];
 
 const OTHER_CATEGORY = { key: "other", label: "其他" } as const;
@@ -201,10 +236,57 @@ const VALUE_LABELS: Record<string, string> = {
   approved: "通過",
   reject: "退回",
   rejected: "退回",
-  // 角色
+  needs_work: "需修改",
+  // 角色與權限
   admin: "管理員",
   leader: "組長",
   member: "組員",
+  editor: "可編輯",
+  viewer: "僅檢視",
+  none: "無",
+  read: "唯讀",
+  write: "可寫入",
+  // 可見範圍（資料庫／選項）
+  personal: "個人",
+  group: "組別",
+  team: "團隊",
+  global: "全站",
+  // 模型等級（與 shared/models 的 tierLabel 同語）
+  flagship: "旗艦",
+  economy: "經濟",
+  budget: "最低成本",
+  // 生成輸出型態／資料庫欄位型別
+  image: "圖片",
+  video: "影片",
+  audio: "聲音",
+  text: "文字",
+  number: "數字",
+  select: "下拉選項",
+  date: "日期",
+  checkbox: "勾選",
+  url: "網址",
+  file: "檔案",
+  user: "成員",
+  project: "專案",
+  schedule: "行程",
+  // 匯入格式
+  csv: "CSV",
+  tsv: "TSV",
+  json: "JSON",
+  // 代理／生成進度
+  queued: "排隊中",
+  running: "執行中",
+  done: "已完成",
+  failed: "失敗",
+  awaiting_approval: "等待核准",
+  // 知識庫條目類型（與 KnowledgeBase 的 KINDS 同語）
+  transcript: "師父開示稿",
+  testimony: "見證故事",
+  script: "腳本",
+  note: "其他筆記",
+  // 分鏡移動方向
+  up: "往上",
+  down: "往下",
   // 問題回報類別／狀態
   bug: "程式錯誤",
   uiux: "介面體驗",
@@ -267,14 +349,46 @@ const INPUT_FIELD_LABELS: Array<[key: string, label: string]> = [
   ["text", "內容"],
   ["content", "內容"],
   ["question", "問題"],
+  ["answer", "回覆"],
+  ["description", "描述"],
+  ["aiDescription", "AI 描述"],
+  ["keyword", "關鍵字"],
+  ["search", "關鍵字"],
+  ["q", "關鍵字"],
+  ["url", "網址"],
+  ["sourceUrl", "來源網址"],
+  ["voiceover", "旁白"],
+  ["durationSec", "秒數"],
+  ["sceneNo", "分鏡編號"],
+  ["appearance", "外觀"],
+  ["lighting", "光線"],
+  ["palette", "色調"],
   ["styles", "風格"],
   ["tones", "調性"],
+  ["scope", "範圍"],
+  ["visibility", "可見範圍"],
+  ["format", "格式"],
+  ["platform", "平台"],
   ["mentions", "@提及"],
   ["pages", "涉及頁面"],
+  ["best", "最滿意"],
+  ["worst", "最需改進"],
+  ["direction", "方向"],
   ["points", "點數"],
   ["budgetPoints", "點數預算"],
+  ["totalBudgetPoints", "總預算點數"],
+  ["defaultDailyPoints", "每日預設點數"],
+  ["defaultWeeklyPoints", "每週預設點數"],
+  ["fileQuotaGb", "檔案空間上限（GB）"],
+  ["expiresInDays", "效期（天）"],
   ["cost", "點數"],
   ["threshold", "審批門檻"],
+  ["agentAccess", "代理權限"],
+  ["memberWritable", "組員可編輯"],
+  ["readOnly", "唯讀"],
+  ["required", "必填"],
+  ["sendEmailInvite", "寄送邀請信"],
+  ["targetLabel", "對象"],
   ["archived", "封存"],
   ["locked", "鎖定"],
   ["pinned", "釘選"],
@@ -313,6 +427,53 @@ export function summarizeAuditInput(input: unknown): string {
 
 /** 詳細檢視用的一列：白話標籤＋白話值 */
 export type AuditDetailField = { label: string; value: string };
+
+/**
+ * id 類鍵 → 白話標籤（詳細檢視用）。摘要會略過 uuid，但展開詳細時仍要能追查
+ * 「動到哪一筆」——與其露出 sceneId 這種英文代碼，標成「分鏡」＋縮短的編號更好讀。
+ */
+const ID_KEY_LABELS: Record<string, string> = {
+  id: "編號",
+  projectId: "專案",
+  groupId: "組別",
+  teamId: "團隊",
+  sceneId: "分鏡",
+  assetId: "素材",
+  sourceAssetId: "來源素材",
+  referenceAssetId: "參考素材",
+  generationId: "生成成品",
+  messageId: "留言",
+  sourceMessageId: "來源留言",
+  replyToId: "回覆的留言",
+  tableId: "資料庫",
+  databaseId: "資料庫",
+  rowId: "資料列",
+  fileId: "文件",
+  userId: "成員",
+  memberId: "成員",
+  actorId: "操作者",
+  ownerId: "擁有者",
+  targetUserId: "對象成員",
+  toUserId: "收件成員",
+  peerId: "對象成員",
+  noteId: "筆記",
+  entryId: "知識庫條目",
+  characterId: "角色卡",
+  presetId: "分鏡預設",
+  scenePresetIds: "分鏡預設",
+  runId: "代理任務",
+  itemId: "項目",
+  optionId: "選項",
+  promptId: "提示詞",
+  tokenId: "金鑰",
+  refId: "關聯項目",
+  modelId: "模型",
+};
+
+/** 未知鍵的顯示標籤：id 類鍵翻白話，其餘保留原鍵名（不硬翻，免得誤導） */
+function labelForUnknownKey(key: string): string {
+  return ID_KEY_LABELS[key] ?? key;
+}
 
 /** 兜底：把 uuid 縮成前 8 碼，讀者至少能對到「同一筆」而不被 36 碼淹沒 */
 function shortenUuid(v: string): string {
@@ -361,11 +522,53 @@ export function describeAuditInput(input: unknown): AuditDetailField[] {
     const v = fmtDetailValue(obj[key]);
     if (v != null) fields.push({ label, value: v });
   }
-  // 再補其餘未知鍵（worldview 這種容器本身略過，已攤平）
+  // 再補其餘未知鍵（worldview 這種容器本身略過，已攤平）；id 類鍵翻成白話標籤
   for (const [key, raw] of Object.entries(obj)) {
     if (usedKeys.has(key) || KNOWN_KEYS.has(key) || key === "worldview") continue;
     const v = fmtDetailValue(raw);
-    if (v != null) fields.push({ label: key, value: v });
+    if (v != null) fields.push({ label: labelForUnknownKey(key), value: v });
   }
   return fields;
+}
+
+/* ═══════════════ 連續重複紀錄合併 ═══════════════ */
+
+/** groupConsecutiveAudit 需要的最小欄位（audit.list 回傳列的子集） */
+export type AuditGroupableRow = {
+  actorId: string;
+  action: string;
+  ok: boolean;
+  error: string | null;
+  groupId: string | null;
+  projectId: string | null;
+  createdAt: string | Date;
+  input: unknown;
+};
+
+/** 兩筆之間可視為「連續」的最大時間差：超過就分段，避免早上與下午的同型操作被硬併成一團 */
+const GROUP_GAP_MS = 30 * 60 * 1000;
+
+/**
+ * 把「同一人、同一動作、同一結果、同一歸屬、摘要相同」且時間相近的連續紀錄併成一組，
+ * 讓「AI 代理連生 10 張圖」「連續拖 15 次分鏡排序」不再洗版整頁（回饋：重複的要收斂）。
+ * 輸入須為 createdAt 由新到舊排序（audit.list 的自然順序）；輸出為組的陣列，各組同樣新在前。
+ * 摘要不同（如兩次更新分鏡改了不同欄位）就不併——資訊量不同的列各自保留。
+ */
+export function groupConsecutiveAudit<T extends AuditGroupableRow>(rows: T[]): T[][] {
+  const groups: T[][] = [];
+  let lastSig: string | null = null;
+  for (const r of rows) {
+    const sig = [r.actorId, r.action, r.ok, r.error ?? "", r.groupId ?? "", r.projectId ?? "", summarizeAuditInput(r.input)].join("\u0000");
+    const cur = groups[groups.length - 1];
+    const prev = cur?.[cur.length - 1];
+    const closeEnough =
+      prev != null && new Date(prev.createdAt).getTime() - new Date(r.createdAt).getTime() <= GROUP_GAP_MS;
+    if (cur && lastSig === sig && closeEnough) {
+      cur.push(r);
+    } else {
+      groups.push([r]);
+      lastSig = sig;
+    }
+  }
+  return groups;
 }

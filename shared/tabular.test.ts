@@ -52,6 +52,10 @@ describe("parseTabular — JSON", () => {
     const p = parseTabular('[{"a":1}, 5, "x", {"a":2}]', "json");
     expect(p.records.map((r) => r.values.a)).toEqual(["1", "2"]);
   });
+  it("值去前後空白（與 CSV/TSV 一致，避免同資料換格式就驗證失敗）", () => {
+    const p = parseTabular('[{"status":" done ","d":"2026-01-01 "}]', "json");
+    expect(p.records[0].values).toEqual({ status: "done", d: "2026-01-01" });
+  });
   it("格式不正確或空陣列拋人話錯誤", () => {
     expect(() => parseTabular("{ not json", "json")).toThrow(/JSON 格式不正確/);
     expect(() => parseTabular("[]", "json")).toThrow(/物件陣列/);

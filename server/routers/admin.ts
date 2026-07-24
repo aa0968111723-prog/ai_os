@@ -1,11 +1,13 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, adminProcedure } from "../trpc";
 import { db, schema } from "../db";
 import { createInvite, attachExistingUser, hashPassword } from "../services/auth";
+import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 import { sendEmail, isEmailConfigured, type EmailStatus } from "../services/email";
+import { groupUsage } from "../services/points";
 
 /** 團隊管理權檢查：開發者或該團隊 admin */
 function assertTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, teamId: string): void {
@@ -50,6 +52,47 @@ export function buildInviteEmail(teamName: string, inviteUrl: string, inviterNam
   return { subject, text, html };
 }
 
+/**
+ * 資料庫清單附細節（groupDetail / teamDetail 共用）：列數、文件數、建立者名字。
+ * 只給團隊管理員以上的「管理視角」用——個人（personal）範圍永不經過這裡（私人空間，開發者也看不到）。
+ */
+async function describeTables(tables: Array<typeof schema.dataTables.$inferSelect>) {
+  if (tables.length === 0) return [];
+  const tableIds = tables.map((t) => t.id);
+  const creatorIds = [...new Set(tables.map((t) => t.createdBy))];
+  const [rowCounts, fileCounts, creators] = await Promise.all([
+    db
+      .select({ tableId: schema.dataRows.tableId, n: sql<number>`count(*)` })
+      .from(schema.dataRows)
+      .where(inArray(schema.dataRows.tableId, tableIds))
+      .groupBy(schema.dataRows.tableId),
+    db
+      .select({ tableId: schema.dataFiles.tableId, n: sql<number>`count(*)` })
+      .from(schema.dataFiles)
+      .where(inArray(schema.dataFiles.tableId, tableIds))
+      .groupBy(schema.dataFiles.tableId),
+    db
+      .select({ id: schema.users.id, name: schema.users.name })
+      .from(schema.users)
+      .where(inArray(schema.users.id, creatorIds)),
+  ]);
+  const rowsBy = new Map(rowCounts.map((c) => [c.tableId, Number(c.n)]));
+  const filesBy = new Map(fileCounts.map((c) => [c.tableId, Number(c.n)]));
+  const nameBy = new Map(creators.map((u) => [u.id, u.name]));
+  return tables.map((t) => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    rowCount: rowsBy.get(t.id) ?? 0,
+    fileCount: filesBy.get(t.id) ?? 0,
+    fieldCount: Array.isArray(t.fields) ? (t.fields as unknown[]).length : 0,
+    memberWritable: t.memberWritable,
+    agentAccess: t.agentAccess,
+    creatorName: nameBy.get(t.createdBy) ?? "（已離開的成員）",
+    updatedAt: t.updatedAt,
+  }));
+}
+
 export const adminRouter = router({
   /** 組織總覽：團隊 → 組 → 成員（只回傳有管理權的團隊） */
   overview: adminProcedure.query(async ({ ctx }) => {
@@ -83,6 +126,149 @@ export const adminRouter = router({
             .filter((m) => m.id),
         })),
     }));
+  }),
+
+  /**
+   * 組詳情（團隊管理細節補齊）：這一組的組長組員完整資料（Email/點數/額度/派工/最近登入）、
+   * 專案清單（含「專案負責人」）、以及這一組自己的資料庫（組範圍 data_tables）。
+   * 權限：開發者或該組所屬團隊的管理員（與 overview 同一把尺）。
+   */
+  groupDetail: adminProcedure.input(z.object({ groupId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, input.groupId));
+    if (!group) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個組" });
+    assertTeamAdmin(ctx.auth, group.teamId);
+
+    const memberRows = await db
+      .select({
+        userId: schema.groupMembers.userId,
+        role: schema.groupMembers.role,
+        weeklyOverride: schema.groupMembers.weeklyPointsOverride,
+        budget: schema.groupMembers.budgetPoints,
+        canDispatchAgent: schema.groupMembers.canDispatchAgent,
+        name: schema.users.name,
+        email: schema.users.email,
+        status: schema.users.status,
+        isSuperAdmin: schema.users.isSuperAdmin,
+      })
+      .from(schema.groupMembers)
+      .leftJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
+      .where(eq(schema.groupMembers.groupId, input.groupId));
+    const userIds = memberRows.map((m) => m.userId);
+
+    const [usage, logins, projectRows, tableRows] = await Promise.all([
+      groupUsage(input.groupId), // 各成員本週/累計淨消耗（有帳本者；無帳本補 0）
+      userIds.length
+        ? db
+            .select({ userId: schema.sessions.userId, lastLoginAt: sql<string | null>`max(${schema.sessions.createdAt})::text` })
+            .from(schema.sessions)
+            .where(inArray(schema.sessions.userId, userIds))
+            .groupBy(schema.sessions.userId)
+        : Promise.resolve([]),
+      db
+        .select({
+          id: schema.projects.id,
+          title: schema.projects.title,
+          kind: schema.projects.kind,
+          platform: schema.projects.platform,
+          status: schema.projects.status,
+          updatedAt: schema.projects.updatedAt,
+          ownerId: schema.projects.ownerId,
+          ownerName: schema.users.name,
+        })
+        .from(schema.projects)
+        .leftJoin(schema.users, eq(schema.users.id, schema.projects.ownerId))
+        .where(eq(schema.projects.groupId, input.groupId))
+        .orderBy(desc(schema.projects.updatedAt)),
+      db
+        .select()
+        .from(schema.dataTables)
+        .where(and(eq(schema.dataTables.scope, "group"), eq(schema.dataTables.groupId, input.groupId), isNull(schema.dataTables.deletedAt)))
+        .orderBy(desc(schema.dataTables.updatedAt)),
+    ]);
+    const usageBy = new Map(usage.map((u) => [u.userId, u]));
+    const loginBy = new Map(logins.map((l) => [l.userId, l.lastLoginAt]));
+
+    return {
+      group: { id: group.id, name: group.name, createdAt: group.createdAt },
+      // 組長排前、再組員，同角色按名字——「這一組誰帶、誰在裡面」一眼分明
+      members: memberRows
+        .map((m) => ({
+          userId: m.userId,
+          name: m.name ?? "?",
+          email: m.email ?? "",
+          role: m.role,
+          isSuperAdmin: m.isSuperAdmin ?? false,
+          disabled: m.status === "disabled",
+          weekly: usageBy.get(m.userId)?.weekly ?? 0,
+          total: usageBy.get(m.userId)?.total ?? 0,
+          weeklyOverride: m.weeklyOverride ?? null, // null＝跟組
+          budget: m.budget ?? null, // null＝不限（未分配個人預算）
+          canDispatch: m.role !== "member" || m.canDispatchAgent === true,
+          lastLoginAt: loginBy.get(m.userId) ?? null,
+        }))
+        .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name, "zh-Hant") : a.role === "leader" ? -1 : 1)),
+      projects: projectRows.map((p) => ({
+        id: p.id,
+        title: p.title,
+        kind: p.kind,
+        platform: p.platform,
+        status: p.status,
+        updatedAt: p.updatedAt,
+        owner: { userId: p.ownerId, name: p.ownerName }, // name null＝負責人帳號已不存在
+      })),
+      databases: await describeTables(tableRows),
+    };
+  }),
+
+  /**
+   * 團隊詳情（團隊管理細節補齊）：團隊層的成員清單（含「已入團但還沒進任何組」的人——
+   * 舊版總覽只列管理員，這些人完全隱形）＋團隊範圍的資料庫。
+   */
+  teamDetail: adminProcedure.input(z.object({ teamId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    assertTeamAdmin(ctx.auth, input.teamId);
+    const [team] = await db.select().from(schema.teams).where(eq(schema.teams.id, input.teamId));
+    if (!team) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個團隊" });
+
+    const [memberRows, teamGroups, tableRows] = await Promise.all([
+      db
+        .select({
+          userId: schema.teamMembers.userId,
+          role: schema.teamMembers.role,
+          name: schema.users.name,
+          email: schema.users.email,
+          status: schema.users.status,
+        })
+        .from(schema.teamMembers)
+        .leftJoin(schema.users, eq(schema.users.id, schema.teamMembers.userId))
+        .where(eq(schema.teamMembers.teamId, input.teamId)),
+      db.select({ id: schema.groups.id }).from(schema.groups).where(eq(schema.groups.teamId, input.teamId)),
+      db
+        .select()
+        .from(schema.dataTables)
+        .where(and(eq(schema.dataTables.scope, "team"), eq(schema.dataTables.teamId, input.teamId), isNull(schema.dataTables.deletedAt)))
+        .orderBy(desc(schema.dataTables.updatedAt)),
+    ]);
+    const groupIds = teamGroups.map((g) => g.id);
+    const grouped = groupIds.length
+      ? await db
+          .select({ userId: schema.groupMembers.userId })
+          .from(schema.groupMembers)
+          .where(inArray(schema.groupMembers.groupId, groupIds))
+      : [];
+    const inAnyGroup = new Set(grouped.map((r) => r.userId));
+
+    return {
+      team: { id: team.id, name: team.name, createdAt: team.createdAt },
+      members: memberRows.map((m) => ({
+        userId: m.userId,
+        name: m.name ?? "?",
+        email: m.email ?? "",
+        role: m.role, // admin＝團隊管理員
+        disabled: m.status === "disabled",
+        inAnyGroup: inAnyGroup.has(m.userId), // false＝已入團但未分組（總覽的隱形人）
+      })),
+      databases: await describeTables(tableRows),
+    };
   }),
 
   createTeam: adminProcedure.input(z.object({ name: z.string().min(1) })).mutation(async ({ ctx, input }) => {
@@ -171,6 +357,27 @@ export const adminRouter = router({
       return { inviteUrl, attached: false, message: null as string | null, expiresInHours: 72, emailStatus, emailDetail };
     }),
 
+  /**
+   * 寄測試信給自己：驗證信箱機制（RESEND_API_KEY／EMAIL_FROM）真的能寄出。
+   * 管理員改完環境變數後按一下即可確認，不必再走一次邀請流程才發現金鑰壞掉。
+   * 一律回 { status, detail }（人話），不拋例外——與 sendEmail 的優雅降級一致。
+   */
+  sendTestEmail: adminProcedure.mutation(async ({ ctx }) => {
+    if (!isEmailConfigured()) {
+      return { status: "skipped" as EmailStatus, detail: "尚未設定信箱機制（RESEND_API_KEY／EMAIL_FROM）——設定後再試" };
+    }
+    return sendEmail({
+      to: ctx.auth.user.email,
+      subject: "AI Director OS 測試信",
+      text: [
+        "這是一封測試信，用來確認系統的信箱機制運作正常。",
+        "",
+        "收到這封信＝設定成功，邀請信與回饋回覆信都能正常寄出。",
+        `（由 ${ctx.auth.user.name} 在「團隊管理」頁觸發）`,
+      ].join("\n"),
+    });
+  }),
+
   /** 變更組內角色（組長↔組員） */
   setGroupRole: adminProcedure
     .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), role: z.enum(["leader", "member"]) }))
@@ -239,6 +446,10 @@ export const adminRouter = router({
       .where(eq(schema.users.id, target.id));
     // 全 session 作廢：舊登入立刻失效，只有拿到臨時密碼的本人能重新登入
     await db.delete(schema.sessions).where(eq(schema.sessions.userId, target.id));
+    // MCP 個人金鑰一併撤銷（安全關鍵）：金鑰是不經 tRPC 閘門的另一套長效憑證，只砍 session 的話
+    // 被盜／既存金鑰在密碼重設後仍能以受害者身分讀寫全系統（MCP／REST），帳號鎖定形同虛設。
+    const revokedTokens = await revokeAllUserMcpTokens(target.id);
+    if (revokedTokens > 0) console.log(`[audit] resetMemberPassword 一併撤銷 ${revokedTokens} 把 MCP 金鑰：target=${target.id}`);
     return { tempPassword };
   }),
 });

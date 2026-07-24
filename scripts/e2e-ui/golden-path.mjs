@@ -50,13 +50,22 @@ await page.waitForTimeout(1200);
 await shot(page, "05-knowledge");
 log("腳本已入知識庫");
 
-// 5. AI 拆分鏡（留空用知識庫）
-await page.locator('button:has-text("貼腳本自動拆分鏡")').click();
-await page.getByRole("button", { name: "拆成分鏡", exact: true }).click();
-await page.locator('button:has-text("開始拆分")').click();
-await page.waitForSelector('text=已建立', { timeout: 30000 });
+// 5. 拆分鏡（統一入口）：對話下目標 → 代理提議排計畫 → 排出計畫 → 核准執行（拆分鏡步驟由代理背景跑）
+await page.locator("#sec-ai-hub").scrollIntoViewIfNeeded();
+await page.fill('input[aria-label="問 AI 專案助手"]', "把知識庫的腳本拆成分鏡");
+await page.locator('#sec-assistant button:has-text("問")').click();
+await page.locator('#sec-assistant button:has-text("讓 AI 代理排計畫")').first().click({ timeout: 90000 });
+await page.locator('.confirm-panel button:has-text("執行")').first().click();
+await page.waitForSelector('#sec-agent .pill:has-text("待你核准")', { timeout: 30000 });
+await page.locator('#sec-agent button:has-text("執行計畫（預估")').click();
+await page.locator('#sec-agent button:has-text("執行"):not(:has-text("計畫"))').first().click();
+let splitDone = false;
+for (let i = 0; i < 25; i++) {
+  await page.waitForTimeout(3000);
+  if ((await page.locator('#sec-agent .pill:has-text("已完成")').count()) >= 1) { splitDone = true; break; }
+}
 await shot(page, "06-split");
-log("拆分鏡完成");
+log("拆分鏡（代理計畫）完成：", splitDone);
 
 // 6. 逐格生成第 1 格 ＋ 配音
 await page.locator("#onboard-delivery").scrollIntoViewIfNeeded();
@@ -108,12 +117,13 @@ const srtText = await srtRes.text();
 fs.writeFileSync(`${DIR}/timeline.srt`, srtText);
 log("srt 下載：", srtRes.status(), srtText.length, "chars");
 
-// 10. AI 代理一輪
-await page.locator("#sec-agent").scrollIntoViewIfNeeded();
-await page.fill(`#agent-goal-${pid}`, "為片尾補一格感恩收尾鏡並生成畫面");
-await page.locator('#sec-agent button:has-text("規劃計畫")').click();
-await page.locator('button:has-text("開始規劃")').click();
-await page.waitForSelector('#sec-agent .pill:has-text("待你核准")', { timeout: 20000 });
+// 10. 代理一輪（統一入口）：對話下目標 → 排計畫 → 核准執行
+await page.locator("#sec-ai-hub").scrollIntoViewIfNeeded();
+await page.fill('input[aria-label="問 AI 專案助手"]', "為片尾補一格感恩收尾鏡並生成畫面");
+await page.locator('#sec-assistant button:has-text("問")').click();
+await page.locator('#sec-assistant button:has-text("讓 AI 代理排計畫")').first().click({ timeout: 90000 });
+await page.locator('.confirm-panel button:has-text("執行")').first().click();
+await page.waitForSelector('#sec-agent .pill:has-text("待你核准")', { timeout: 30000 });
 await shot(page, "10-agent-plan");
 await page.locator('#sec-agent button:has-text("執行計畫（預估")').click();
 await page.locator('#sec-agent button:has-text("執行"):not(:has-text("計畫"))').first().click();

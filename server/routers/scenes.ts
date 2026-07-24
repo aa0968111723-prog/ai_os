@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { aliasedTable, and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { aliasedTable, and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { submitGenerationCore } from "../services/generationCore";
 import { getModel } from "../../shared/models";
 import { lockSceneOrder } from "../services/locks";
-import { assertProjectEditable } from "../services/projectAcl";
+import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 
 /**
  * forEdit（需求 2.3 專案級權限）：分鏡的所有「寫入」mutation 走 forEdit=true——
@@ -269,23 +269,48 @@ export const scenesRouter = router({
 
   /** 就地生成：以該分鏡的 prompt 送出生成並綁定該格，完成後由 advanceGeneration 回填 assetId（草稿→出圖一條線） */
   generateInto: authedProcedure
-    .input(z.object({ sceneId: z.string().uuid(), modelId: z.string(), prompt: z.string().optional() }))
+    .input(z.object({
+      sceneId: z.string().uuid(),
+      modelId: z.string(),
+      prompt: z.string().optional(),
+      /** 冪等鍵：timeout 重送同鍵回原列，不重複扣點 */
+      clientRequestId: z.string().uuid().optional(),
+      /** 生成台勾選的角色/場景卡：就地生成也注入同一套錨點——否則逐鏡出圖與生成台出圖畫風/角色不一致 */
+      characterIds: z.array(z.string().uuid()).max(6).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
         .select()
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
-      await getProjectChecked(ctx, scene.projectId, true);
+      const project = await getProjectChecked(ctx, scene.projectId, true);
+      assertProjectNotArchived(project); // 封存專案不接受付費生成
       const prompt = input.prompt ?? scene.prompt ?? "";
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
+      // 伺服器端防抖：這一格已有進行中的「畫面」生成就擋下——本鈕直接扣點、無二次確認，快速雙擊會重複送出、
+      // 重複扣點。以「進行中(queued/running)＋同格＋visual 角色」查有無在跑（catch 常見雙擊；非強一致鎖）。
+      const [pendingVisual] = await db
+        .select({ id: schema.generations.id })
+        .from(schema.generations)
+        .where(and(
+          eq(schema.generations.sceneId, scene.id),
+          sql`(${schema.generations.sceneRole} is null or ${schema.generations.sceneRole} = 'visual')`,
+          inArray(schema.generations.status, ["queued", "running"]),
+        ))
+        .limit(1);
+      if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成中，請稍候再生成" });
       // 額度／守門／失敗退點全由 submitGenerationCore 既有邏輯處理（走 effectivePrompt 世界觀注入）
       const gen = await submitGenerationCore({
+        id: input.clientRequestId, // 冪等鍵：timeout 重送同鍵回原列，不重複扣點
         userId: ctx.auth.user.id,
         projectId: scene.projectId,
         modelId: input.modelId,
         prompt,
         sceneId: scene.id,
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
         reasonPrefix: "分鏡生成",
         assertAccess: (project) => requireGroup(ctx.auth, project.groupId), // 多組隔離
       });
@@ -294,24 +319,38 @@ export const scenesRouter = router({
 
   /** 逐鏡配音：以該分鏡的 voiceover 當提示詞送 TTS，綁 narration 角色，完成後回填 narrationAssetId */
   generateVoiceover: authedProcedure
-    .input(z.object({ sceneId: z.string().uuid(), modelId: z.string().optional() }))
+    .input(z.object({ sceneId: z.string().uuid(), modelId: z.string().optional(), clientRequestId: z.string().uuid().optional() }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
         .select()
         .from(schema.scenes)
         .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
-      await getProjectChecked(ctx, scene.projectId, true);
+      const project = await getProjectChecked(ctx, scene.projectId, true);
+      assertProjectNotArchived(project); // 封存專案不接受付費生成
       const prompt = scene.voiceover ?? "";
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有配音詞，請先在分鏡裡填" });
-      // 只放行音訊(TTS)模型：否則傳個圖模會扣點又把圖片塞進 narrationAssetId（audio 播不出）
+      // 只放行「文字轉語音(TTS)」類：text-to-audio（配樂/音效）雖同為 kind=audio，但會生出音樂而非旁白，
+      // 混入 narration 槽＝扣點又拿到錯內容，故以 category 精確把關（不能只看 kind）。
       const modelId = input.modelId ?? "fal-ai/kokoro/mandarin-chinese";
       const model = getModel(modelId);
-      if (!model || model.kind !== "audio") {
+      if (!model || model.category !== "text-to-speech") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "配音需要用語音（TTS）模型" });
       }
+      // 伺服器端防抖：同格已有進行中的「配音」生成就擋下，避免快速雙擊重複送出、重複扣點（本鈕直接扣點無二次確認）
+      const [pendingVoice] = await db
+        .select({ id: schema.generations.id })
+        .from(schema.generations)
+        .where(and(
+          eq(schema.generations.sceneId, scene.id),
+          eq(schema.generations.sceneRole, "narration"),
+          inArray(schema.generations.status, ["queued", "running"]),
+        ))
+        .limit(1);
+      if (pendingVoice) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成配音，請稍候" });
       // 額度／守門／失敗退點全由 submitGenerationCore 既有邏輯處理
       const gen = await submitGenerationCore({
+        id: input.clientRequestId, // 冪等鍵：timeout 重送同鍵回原列，不重複扣點
         userId: ctx.auth.user.id,
         projectId: scene.projectId,
         modelId,
@@ -331,18 +370,31 @@ export const scenesRouter = router({
       await getProjectChecked(ctx, input.projectId, true);
       // 交易＋序號鎖：逐筆寫 orderIndex 與其他建格/move 序列化——否則拖曳中另一人拆分鏡,
       // 新格會拿到與重排結果重疊的序號;交易也保證重排不留半套
+      // 重複 id 直接拒絕：重複代表前端狀態已壞，寫入會產生跳號/覆蓋，不能默默吞掉
+      if (new Set(input.orderedIds).size !== input.orderedIds.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "排序清單有重複的分鏡，請重新整理後再拖曳" });
+      }
       return db.transaction(async (tx) => {
         await lockSceneOrder(tx, input.projectId);
         // 只允許重排本專案「未刪除」的分鏡，避免越權改到別專案的列、也不動回收桶裡的格
         const rows = await tx
           .select({ id: schema.scenes.id })
           .from(schema.scenes)
-          .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt)));
+          .where(and(eq(schema.scenes.projectId, input.projectId), isNull(schema.scenes.deletedAt)))
+          .orderBy(asc(schema.scenes.orderIndex));
         const own = new Set(rows.map((r) => r.id));
+        const listed = new Set(input.orderedIds);
         let idx = 0;
         for (const id of input.orderedIds) {
           if (!own.has(id)) continue;
           await tx.update(schema.scenes).set({ orderIndex: idx }).where(eq(schema.scenes.id, id));
+          idx += 1;
+        }
+        // 清單漏掉的既有分鏡（併發新增/前端 stale）：依原相對順序補到尾端重新編號，
+        // 不讓它們保留舊 orderIndex 與新序號重疊（QA-020）
+        for (const row of rows) {
+          if (listed.has(row.id)) continue;
+          await tx.update(schema.scenes).set({ orderIndex: idx }).where(eq(schema.scenes.id, row.id));
           idx += 1;
         }
         return { ok: true };

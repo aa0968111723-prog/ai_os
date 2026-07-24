@@ -8,6 +8,7 @@
 import { eq, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { validateRowData, type DataField } from "../../shared/databaseFields";
+import { lockDatabaseRowCap } from "./locks";
 
 export const MAX_ROWS_PER_TABLE = 20_000;
 
@@ -22,17 +23,23 @@ export async function addDataRowValidated(
 ): Promise<DataRowRow> {
   const checked = validateRowData(table.fields as DataField[], rawData);
   if (!checked.ok) throw new Error(checked.error);
-  const [{ n }] = await db
-    .select({ n: sql<number>`count(*)` })
-    .from(schema.dataRows)
-    .where(eq(schema.dataRows.tableId, table.id));
-  if (Number(n) >= MAX_ROWS_PER_TABLE) {
-    throw new Error(`這個資料庫已達 ${MAX_ROWS_PER_TABLE.toLocaleString()} 列上限，請分庫或清理舊資料`);
-  }
-  const [row] = await db
-    .insert(schema.dataRows)
-    .values({ tableId: table.id, data: checked.data, createdBy: userId })
-    .returning();
-  await db.update(schema.dataTables).set({ updatedAt: new Date() }).where(eq(schema.dataTables.id, table.id));
-  return row;
+  // 「count→insert」在交易＋per-table advisory lock 內原子完成：否則併發寫入近上限時兩個請求都讀到
+  // 同一 count 而雙雙插入，突破 MAX_ROWS_PER_TABLE（tRPC／MCP／REST／AI 代理都可同時打同一表）。
+  // 全程用同一條連線（tx），不向連線池借第二條，無 points.ts 註明的滿池死鎖面。
+  return db.transaction(async (tx) => {
+    await lockDatabaseRowCap(tx, table.id);
+    const [{ n }] = await tx
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.dataRows)
+      .where(eq(schema.dataRows.tableId, table.id));
+    if (Number(n) >= MAX_ROWS_PER_TABLE) {
+      throw new Error(`這個資料庫已達 ${MAX_ROWS_PER_TABLE.toLocaleString()} 列上限，請分庫或清理舊資料`);
+    }
+    const [row] = await tx
+      .insert(schema.dataRows)
+      .values({ tableId: table.id, data: checked.data, createdBy: userId })
+      .returning();
+    await tx.update(schema.dataTables).set({ updatedAt: new Date() }).where(eq(schema.dataTables.id, table.id));
+    return row;
+  });
 }

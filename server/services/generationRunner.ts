@@ -26,6 +26,13 @@ let started = false;
 /** 本進程內推進中的生成 id：撈到已在推進的直接跳過——慢生成不擋其他，也不會被下一輪重入雙寫 */
 const inflight = new Set<string>();
 let tickCount = 0;
+/** 最近一次 tick 完成時間（/api/ready 的 runner 心跳分項用；null＝尚未啟動或未跑過） */
+let lastTickAt: number | null = null;
+
+/** 執行器心跳（/api/ready 分項健檢用）：started＋最近 tick 時間，判斷背景推進是否活著 */
+export function runnerHeartbeat(): { started: boolean; lastTickAt: number | null } {
+  return { started, lastTickAt };
+}
 
 /** 啟動執行器（server/index.ts 開機時呼叫一次；重複呼叫無效果） */
 export function startGenerationRunner(): void {
@@ -63,6 +70,7 @@ export function startGenerationRunner(): void {
       }
       try {
         await tick();
+        lastTickAt = Date.now();
       } catch (err) {
         console.warn("[generation] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err);
       }

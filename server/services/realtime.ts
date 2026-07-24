@@ -272,10 +272,14 @@ function join(ws: WebSocket, ctx: { projectId: string; userId: string; name: str
         client,
       );
     } else if (msg.type === "focus" && (msg.zone === null || typeof msg.zone === "string")) {
-      if (now - client.lastFocusAt < MIN_FOCUS_MS) return;
+      // zone「改變」（進入新區塊／離開）是有意義的離散事件，一律更新並廣播，不受節流丟棄——否則
+      // 快速在兩個編輯區之間移動時，第二個 focus 被節流吃掉，協作者的編輯指示卡在舊區塊或整個消失。
+      // 只有「同一區塊的重複 focus」才受節流（純冗餘、無新資訊）。
+      const changed = client.zone !== msg.zone;
+      if (!changed && now - client.lastFocusAt < MIN_FOCUS_MS) return;
       client.lastFocusAt = now;
-      client.zone = msg.zone; // zone 一律更新（供 hello 帶出既有狀態）；只有廣播受 per-user 聚合影響
-      if (userThrottled(client.userId, "focus", now, MIN_FOCUS_MS)) return;
+      client.zone = msg.zone; // zone 一律更新（供 hello 帶出既有狀態）
+      if (!changed && userThrottled(client.userId, "focus", now, MIN_FOCUS_MS)) return;
       broadcast(theRoom, { type: "focus", userId: client.userId, zone: msg.zone }, client);
     } else if (msg.type === "invalidate") {
       if (now - client.lastInvalidateAt < MIN_INVALIDATE_MS) return;

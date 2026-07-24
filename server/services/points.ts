@@ -130,15 +130,18 @@ export async function memberBudget(userId: string, groupId: string): Promise<num
   return noLimit(member?.budgetPoints) ? null : member!.budgetPoints;
 }
 
-export async function usedThisWeek(userId: string): Promise<number> {
+export async function usedThisWeek(userId: string, groupId?: string): Promise<number> {
   // 週歸屬：退點列跟隨其生成的建立週（coalesce 回退帳本列自身時間），
   // 避免上週扣點、本週才失敗退點時，退點灌進新週把用量算成負值。
+  // groupId（給定時）：週額度是「每人每週在這一組」的上限（effectiveWeeklyQuota 可依組/組員覆寫），
+  // 用量也只能算這一組——否則多組使用者的跨組總用量會被拿去比單組上限而誤擋，且守門與顯示口徑須一致。
   const [row] = await db
     .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
     .from(schema.costLedger)
     .leftJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
     .where(and(
       eq(schema.costLedger.userId, userId),
+      groupId ? eq(schema.costLedger.groupId, groupId) : undefined,
       gte(sql`coalesce(${schema.generations.createdAt}, ${schema.costLedger.createdAt})`, weekStart()),
     ));
   return Number(row?.used ?? 0);
@@ -229,7 +232,7 @@ export async function checkQuota(userId: string, groupId: string, points: number
   }
   const quota = cfg.weeklyQuota;
   if (quota != null) {
-    const weekly = await usedThisWeek(userId);
+    const weekly = await usedThisWeek(userId, groupId); // 週額度是每人每週在這一組的上限——用量只算本組
     if (weekly + points > quota) return `本週額度不足（已用 ${weekly}／${quota} 點）——可請組長調整`;
   }
   const daily = cfg.dailyQuota;
@@ -307,13 +310,16 @@ export async function reserveQuota(
       }
     }
     if (quota != null) {
-      // 週歸屬同 usedThisWeek：退點跟隨生成建立週，守門與顯示口徑一致
+      // 週歸屬同 usedThisWeek：退點跟隨生成建立週，守門與顯示口徑一致。
+      // groupId 過濾（關鍵）：週額度是「每人每週在這一組」的上限，用量也只能算這一組——否則多組
+      // 使用者的跨組總用量會被拿去比單組上限而誤擋（在 A 組沒用完卻因 B 組的用量被擋在 A 組生成）。
       const [w] = await tx
         .select({ used: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
         .from(schema.costLedger)
         .leftJoin(schema.generations, eq(schema.costLedger.generationId, schema.generations.id))
         .where(and(
           eq(schema.costLedger.userId, userId),
+          eq(schema.costLedger.groupId, groupId),
           gte(sql`coalesce(${schema.generations.createdAt}, ${schema.costLedger.createdAt})`, weekStart()),
         ));
       const weekly = Number(w?.used ?? 0);
