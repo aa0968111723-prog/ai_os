@@ -7,7 +7,7 @@ import { falSubmit, isMockMode, billingBypassed } from "../services/fal";
 import { refund, reserveQuota } from "../services/points";
 import { advanceGeneration, submitGenerationCore } from "../services/generationCore";
 import { signAssetUrl } from "../services/storage";
-import { assertProjectEditable } from "../services/projectAcl";
+import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { getModel, endpointOf } from "../../shared/models";
 
 // 注入判斷的單一來源已抽到 services/generationCore（工作流執行器共用）；
@@ -77,10 +77,13 @@ export const generationRouter = router({
         characterIds: z.array(z.string().uuid()).max(6).optional(),
         /** 選定的場景設定卡：色板/光線錨點注入,同場景光影一致 */
         scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
+        /** 冪等鍵（client 產生的 UUID）：timeout 後重送同鍵回原生成列，不重複扣點 */
+        clientRequestId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) =>
       submitGenerationCore({
+        id: input.clientRequestId,
         userId: ctx.auth.user.id,
         projectId: input.projectId,
         modelId: input.modelId,
@@ -91,6 +94,7 @@ export const generationRouter = router({
         scenePresetIds: input.scenePresetIds,
         assertAccess: async (project) => {
           const role = requireGroup(ctx.auth, project.groupId); // 多組隔離
+          assertProjectNotArchived(project); // 封存專案不接受付費生成（stale UI／直呼 tRPC 也擋）
           const { assertProjectEditable } = await import("../services/projectAcl");
           await assertProjectEditable(ctx.auth, project); // 2.3：專案檢視者不能生成
           return role;
