@@ -13,6 +13,7 @@
  *     AI 代理（重用 agentCore）：plan_agent / approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
  *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item
  *     筆記・會議紀錄（組共用、可匯入知識庫）：list_notes / get_note
+ *     站內私訊（只碰本人參與的對話）：list_dm_contacts / list_dm_threads / read_dm / send_dm
  *     統整：get_project_status（一次回分鏡＋生成＋代理＋排程＋待辦）
  */
 import type { Request, Response } from "express";
@@ -35,6 +36,7 @@ import {
   listAgentRunsForProject, getAgentRunChecked,
 } from "./agentCore";
 import { addScheduleItemCore, listScheduleForGroup } from "./scheduleCore";
+import { DM_MAX_BODY, listDmPeers, listDmThreads, listDmHistory, markDmRead, resolveDmPeerRef, sendDm } from "./dmCore";
 import type { AgentStep } from "./agentRunner";
 import type { AuthState } from "./auth";
 
@@ -253,6 +255,42 @@ const TOOLS = [
     name: "get_note",
     description: "讀一則筆記的全文（會議決議、待辦、由知識庫匯入的內容）。先用 list_notes 找 noteId。",
     inputSchema: { type: "object", properties: { noteId: { type: "string" } }, required: ["noteId"] },
+  },
+  // ── 站內私訊（通訊錄 1:1 聊天）：只讀寫「金鑰擁有者本人」參與的對話，別人的私訊碰不到 ──
+  {
+    name: "list_dm_contacts",
+    description: "列出你可以私訊的夥伴（同組夥伴＋開發者）：userId、姓名、Email、共同組別。private message 前先用這個找對象。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "list_dm_threads",
+    description: "列出你的私訊對話串：每位往來對象的最後一句預覽、時間與未讀數。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "read_dm",
+    description: "讀你與某位夥伴的私訊往來（舊到新；只讀得到你自己參與的對話）。peer 可用 userId 或 Email。markRead=true 順便把該對話標為已讀。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        peer: { type: "string", description: "對方的 userId 或 Email（先用 list_dm_contacts 查）" },
+        limit: { type: "number", description: "最多回幾則（預設 30，上限 100）" },
+        markRead: { type: "boolean", description: "true＝讀完標已讀（預設 false，僅查看不動未讀數）" },
+      },
+      required: ["peer"],
+    },
+  },
+  {
+    name: "send_dm",
+    description: "以你的身分私訊一位夥伴（同組夥伴或開發者；對方在網站頂欄「私訊」看到）。peer 可用 userId 或 Email。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        peer: { type: "string", description: "對方的 userId 或 Email（先用 list_dm_contacts 查）" },
+        body: { type: "string", description: "訊息內容（最長 2000 字）" },
+      },
+      required: ["peer", "body"],
+    },
   },
   // ── 統整快照（把分鏡／生成／代理／排程／待辦一次給外部 AI，細部連結各子系統）──
   {
@@ -545,6 +583,55 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       projectId: note.projectId,
       chars: note.content.length,
       updatedAt: note.updatedAt,
+    };
+  }
+
+  // ── 站內私訊（重用 dmCore，與網頁端同一守衛）：只碰金鑰擁有者本人參與的對話 ──
+  if (name === "list_dm_contacts") {
+    const peers = await listDmPeers(auth);
+    return peers.map((p) => ({
+      userId: p.userId,
+      name: p.name,
+      email: p.email,
+      isSuperAdmin: p.isSuperAdmin,
+      sharedGroups: p.sharedGroups,
+    }));
+  }
+
+  if (name === "list_dm_threads") {
+    const threads = await listDmThreads(auth);
+    return threads.map((t) => ({
+      peerId: t.peerId,
+      peerName: t.peerName,
+      peerEmail: t.peerEmail,
+      lastMessage: t.lastBody,
+      lastFromMe: t.lastFromMe,
+      lastAt: t.lastAt,
+      unread: t.unread,
+    }));
+  }
+
+  if (name === "read_dm" || name === "send_dm") {
+    const ref = String(args.peer ?? "").trim();
+    if (!ref) throw new Error("peer 不可為空（userId 或 Email，先用 list_dm_contacts 查）");
+    const peer = await resolveDmPeerRef(auth, ref);
+    if (!peer) throw new Error("找不到這位夥伴——只能私訊同組夥伴或開發者（用 list_dm_contacts 看可私訊的名單）");
+
+    if (name === "send_dm") {
+      const body = String(args.body ?? "").trim();
+      if (!body) throw new Error("body 不可為空");
+      if (body.length > DM_MAX_BODY) throw new Error(`訊息最長 ${DM_MAX_BODY} 字`);
+      const { message } = await sendDm(auth, peer.userId, body);
+      return { messageId: message.id, to: peer.name, sentAt: message.createdAt };
+    }
+
+    // read_dm：預設不動未讀數（markRead=true 才標已讀）——外部 AI 幫忙摘要不應吃掉本人的未讀提示
+    const limit = Math.min(Math.max(Number(args.limit) || 30, 1), 100);
+    const { items } = await listDmHistory(auth, peer.userId, { limit });
+    if (args.markRead === true) await markDmRead(auth, peer.userId);
+    return {
+      peer: { userId: peer.userId, name: peer.name, email: peer.email },
+      messages: items.map((m) => ({ from: m.fromMe ? "我" : peer.name, body: m.body, at: m.createdAt })),
     };
   }
 

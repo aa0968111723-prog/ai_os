@@ -93,30 +93,42 @@ export function McpPage() {
     (t) => !t.revokedAt && (!t.expiresAt || new Date(t.expiresAt).getTime() > Date.now()),
   ).length;
 
-  // Claude Desktop（及相容客戶端）的 mcpServers 設定：帶剛建立的金鑰
+  // Claude Desktop（及相容客戶端）的 mcpServers 設定：帶剛建立的金鑰。
+  // "type": "http" 不可省——缺了部分客戶端（Claude Desktop 新版設定格式）無法辨識傳輸方式（QA-012）。
   const clientConfig = JSON.stringify(
-    { mcpServers: { "ai-director": { url: endpoint, headers: { "x-api-key": fresh?.token ?? "你的金鑰" } } } },
+    { mcpServers: { "ai-director": { type: "http", url: endpoint, headers: { "x-api-key": fresh?.token ?? "你的金鑰" } } } },
     null, 2,
   );
 
-  // 測試連線：用剛建立的金鑰打一次 whoami，證明「連得上、身分正確」
+  // 測試連線（QA-012）：走完整 MCP 握手 initialize → notifications/initialized → tools/list，
+  // 再 tools/call whoami 驗身分——只打單一 tools/call 驗不到「客戶端實際連線時會走」的握手路徑。
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [testing, setTesting] = useState(false);
   const testConnection = async () => {
     if (!fresh) return;
     setTesting(true);
     setTestResult(null);
-    try {
+    const rpc = async (payload: Record<string, unknown>) => {
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-api-key": fresh.token },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "whoami", arguments: {} } }),
+        headers: { "content-type": "application/json", accept: "application/json", "x-api-key": fresh.token },
+        body: JSON.stringify({ jsonrpc: "2.0", ...payload }),
       });
+      if (res.status === 202 || res.status === 204) return null; // notification 無回應本文
       const j = await res.json();
-      if (j.error) { setTestResult({ ok: false, text: j.error.message ?? "連線失敗" }); return; }
-      const who = JSON.parse(j.result.content[0].text);
+      if (j.error) throw new Error(j.error.message ?? "連線失敗");
+      return j.result;
+    };
+    try {
+      const init = await rpc({ id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "ai-director-web", version: "0.1.0" } } });
+      if (!init?.serverInfo) throw new Error("initialize 未回 serverInfo——握手失敗");
+      await rpc({ method: "notifications/initialized" });
+      const toolsRes = await rpc({ id: 2, method: "tools/list" });
+      const toolCount = Array.isArray(toolsRes?.tools) ? toolsRes.tools.length : 0;
+      const callRes = await rpc({ id: 3, method: "tools/call", params: { name: "whoami", arguments: {} } });
+      const who = JSON.parse(callRes.content[0].text);
       const groups = (who.groups ?? []).map((g: { group: string }) => g.group).join("、") || "（尚未分組）";
-      setTestResult({ ok: true, text: `已連線為「${who.user.name}」・組別：${groups}・${who.readOnly ? "唯讀" : "可讀可寫"}` });
+      setTestResult({ ok: true, text: `握手成功（${toolCount} 個工具）・已連線為「${who.user.name}」・組別：${groups}・${who.readOnly ? "唯讀" : "可讀可寫"}` });
     } catch (e) {
       setTestResult({ ok: false, text: e instanceof Error ? e.message : "連線失敗" });
     } finally {

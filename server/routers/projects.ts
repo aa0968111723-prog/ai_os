@@ -290,19 +290,29 @@ export const projectsRouter = router({
     return { ...project, myProjectRole };
   }),
 
-  /** 專案素材庫(生成成品;供「來源輸入」挑選與素材總覽) */
-  assets: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
-    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
-    if (!project) throw new TRPCError({ code: "NOT_FOUND" });
-    requireGroup(ctx.auth, project.groupId);
-    // 只列未進回收桶的素材（軟刪除以 deletedAt 標記；回收桶另走 listDeleted）
-    return db
-      .select()
-      .from(schema.assets)
-      .where(and(eq(schema.assets.projectId, input.projectId), isNull(schema.assets.deletedAt)))
-      .orderBy(desc(schema.assets.createdAt))
-      .limit(100);
-  }),
+  /** 專案素材庫(生成成品;供「來源輸入」挑選與素材總覽)。
+   *  QA-013：舊版硬上限 100 且無分頁——大量素材的專案第 101 件起永遠不可見。
+   *  改收 limit/offset（預設仍 100，回傳陣列形狀不變、既有呼叫端零改動），
+   *  前端以「載入更多」加大 limit 逐步取回全量。 */
+  assets: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      limit: z.number().int().min(1).max(500).optional(),
+      offset: z.number().int().min(0).optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, project.groupId);
+      // 只列未進回收桶的素材（軟刪除以 deletedAt 標記；回收桶另走 listDeleted）
+      return db
+        .select()
+        .from(schema.assets)
+        .where(and(eq(schema.assets.projectId, input.projectId), isNull(schema.assets.deletedAt)))
+        .orderBy(desc(schema.assets.createdAt), desc(schema.assets.id))
+        .limit(input.limit ?? 100)
+        .offset(input.offset ?? 0);
+    }),
 
   /**
    * 刪除素材＝軟刪除（丟進回收桶，可還原）。上傳者本人或組長以上可操作。

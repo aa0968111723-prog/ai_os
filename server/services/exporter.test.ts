@@ -70,6 +70,21 @@ describe("buildFcpxml", () => {
     expect(xml).not.toContain("<gap");
     expect(xml).toContain(`duration="0s"`);
   });
+
+  it("有 mediaFile 的鏡產出 asset/media-rep（src=封包內相對路徑）＋ asset-clip；無媒體維持 gap（QA-006）", () => {
+    const xml = buildFcpxml(
+      [
+        { title: "開場", durationSec: 5, voiceover: null, mediaFile: "01_視頻素材/01_開場.mp4" },
+        { title: "無素材鏡", durationSec: 3, voiceover: null, mediaFile: null },
+      ],
+      "P",
+    );
+    expect(xml).toContain(`<asset id="a1" name="01_開場.mp4" start="0s" duration="5s">`);
+    expect(xml).toContain(`<media-rep kind="original-media" src="./01_視頻素材/01_開場.mp4"/>`);
+    expect(xml).toContain(`<asset-clip ref="a1" name="1_開場" offset="0s" start="0s" duration="5s">`);
+    // 無媒體的鏡仍是 gap，offset 接續在前一鏡之後
+    expect(xml).toContain(`<gap name="2_無素材鏡" offset="5s" start="0s" duration="3s">`);
+  });
 });
 
 describe("buildEdl", () => {
@@ -102,5 +117,20 @@ describe("buildEdl", () => {
   it("空清單只有表頭", () => {
     const edl = buildEdl([], "T");
     expect(edl).toBe("TITLE: T\nFCM: NON-DROP FRAME\n");
+  });
+
+  it("有 mediaFile 的鏡 FROM CLIP NAME 用真實檔名並附 SOURCE FILE 相對路徑（QA-006）", () => {
+    const edl = buildEdl(
+      [
+        { title: "開場", durationSec: 5, voiceover: null, mediaFile: "01_視頻素材/01_開場.mp4" },
+        { title: "無素材鏡", durationSec: 3, voiceover: null, mediaFile: null },
+      ],
+      "T",
+    );
+    expect(edl).toContain("* FROM CLIP NAME: 01_開場.mp4");
+    expect(edl).toContain("* SOURCE FILE: 01_視頻素材/01_開場.mp4");
+    // 無媒體的鏡維持標題、不出 SOURCE FILE
+    expect(edl).toContain("* FROM CLIP NAME: 無素材鏡");
+    expect(edl.split("SOURCE FILE").length - 1).toBe(1);
   });
 });

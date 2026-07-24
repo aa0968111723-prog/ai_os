@@ -222,8 +222,15 @@ function SceneRow({
       savedTimer.current = setTimeout(() => setSavedFlash(false), 2000);
     },
   });
-  const generate = trpc.scenes.generateInto.useMutation({ onSuccess: invalidate });
-  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({ onSuccess: invalidate });
+  // 冪等鍵（QA-007）：同一格「還沒成功」的生成/配音重試沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
+  const genRequestId = useRef<string>(crypto.randomUUID());
+  const voiceRequestId = useRef<string>(crypto.randomUUID());
+  const generate = trpc.scenes.generateInto.useMutation({
+    onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
+  });
+  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({
+    onSuccess: () => { voiceRequestId.current = crypto.randomUUID(); invalidate(); },
+  });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
   // 配音生成中：後端背景 runner 完成後會回填 narrationAssetId，10 秒輪詢自動刷新
@@ -312,7 +319,7 @@ function SceneRow({
                     triggerTitle="用這一格的配音詞生成中文旁白，完成後自動出現試聽"
                     message={`即將生成旁白配音（${getModel(DEFAULT_TTS_MODEL)?.label ?? "中文 TTS"}${ttsPoints != null ? `，約 −${ttsPoints} 點` : ""}）；失敗自動退點`}
                     confirmLabel="確認生成"
-                    onConfirm={() => generateVoiceover.mutate({ sceneId: s.id })}
+                    onConfirm={() => generateVoiceover.mutate({ sceneId: s.id, clientRequestId: voiceRequestId.current })}
                   >
                     {s.narrationUrl ? (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -384,6 +391,7 @@ function SceneRow({
                   generate.mutate({
                     sceneId: s.id,
                     modelId: genModel?.id ?? DEFAULT_MODEL,
+                    clientRequestId: genRequestId.current,
                     // 上限同 generation.submit（6/4）：超勾取前幾張，不讓逐格生成因此整個被 zod 擋下
                     characterIds: charIds?.length ? charIds.slice(0, 6) : undefined,
                     scenePresetIds: sceneIds?.length ? sceneIds.slice(0, 4) : undefined,
@@ -402,7 +410,7 @@ function SceneRow({
               </ConfirmButton>
             )
           ) : (
-            !s.assetId && <span className="hint">先用上方「AI 拆分鏡」給這格提示詞，就能就地生成</span>
+            !s.assetId && <span className="hint">先請上方「專案 AI 代理系統」拆分鏡或發想，給這格提示詞就能就地生成</span>
           )}
           {s.assetUrl && (
             <a

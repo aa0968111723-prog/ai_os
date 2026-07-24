@@ -54,14 +54,13 @@ ok("新選項出現在 chips 列", await newChip.isVisible());
 ok("新選項自動勾上（.on）", ((await newChip.getAttribute("class")) ?? "").includes("on"));
 await page.screenshot({ path: SHOT("2-worldview"), fullPage: false });
 
-// ── ② 創作中心順序：助手 → 導演 → 拆分鏡 → 生成台 → 工作流 ──
+// ── ② 創作中心順序：專案 AI 代理系統（四合一）→ 生成台 → 工作流 ──
 const yOf = async (sel) => (await page.locator(sel).boundingBox())?.y ?? -1;
-const yAssistant = await yOf("#sec-assistant");
-const yDirector = await yOf("#sec-director");
-const ySplit = await yOf("#sec-split");
+const yHub = await yOf("#sec-ai-hub");
 const yStudio = await yOf("#sec-studio");
 const yWorkflow = await yOf("#sec-workflow");
-ok("創作中心順序 助手→導演→拆分鏡→生成台→工作流", yAssistant < yDirector && yDirector < ySplit && ySplit < yStudio && yStudio < yWorkflow);
+ok("創作中心順序 AI代理系統→生成台→工作流", yHub > 0 && yHub < yStudio && yStudio < yWorkflow);
+ok("統一入口：一個對話＋代理執行區", (await page.locator('#sec-ai-hub input[aria-label="問 AI 專案助手"]').count()) === 1 && (await page.locator("#sec-ai-hub #sec-agent").count()) === 1);
 
 // 生成台「帶入」chips
 await page.locator("#sec-studio").scrollIntoViewIfNeeded();
