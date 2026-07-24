@@ -6,6 +6,7 @@ import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
 import { AUDIT_ACTION_LABELS, AUDIT_CATEGORIES, auditCategoryOf, describeAuditInput, groupConsecutiveAudit, humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
+import { getModel, tierLabel } from "@shared/models";
 
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
@@ -724,6 +725,268 @@ export function AuditLogCard() {
   );
 }
 
+/* ═══════════ 操作洞察卡：人員分類細節・模型使用比較・提示詞流水 ═══════════ */
+
+type InsightTab = "members" | "models" | "prompts";
+
+const INSIGHT_DAYS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 7, label: "近 7 天" },
+  { value: 30, label: "近 30 天" },
+  { value: 90, label: "近 90 天" },
+];
+
+/** 生成狀態 → 白話＋語意色（洞察卡提示詞流水用；與 VALUE_LABELS 同語） */
+const GEN_STATUS_META: Record<string, { label: string; color: string }> = {
+  done: { label: "完成", color: "var(--success-ink)" },
+  failed: { label: "失敗", color: "var(--danger-ink)" },
+  rejected: { label: "退回", color: "var(--danger-ink)" },
+  queued: { label: "排隊中", color: "var(--fg-secondary)" },
+  running: { label: "執行中", color: "var(--fg-secondary)" },
+  awaiting_approval: { label: "等待核准", color: "var(--gold-ink)" },
+};
+
+/** 成功率（生成精準度）：完成/(完成+失敗)。還沒有完結的生成時回 null（顯示 —，不好硬給 0%） */
+function successRate(done: number, failed: number): number | null {
+  const finished = done + failed;
+  return finished === 0 ? null : Math.round((done / finished) * 100);
+}
+
+/** pg 聚合欄位（max(...)::text）的時間字串 → Date：補 T 與時區冒號，Safari 的 Date 解析才吃得下 */
+function parseDbTime(s: string): Date {
+  return new Date(s.replace(" ", "T").replace(/([+-]\d\d)$/, "$1:00"));
+}
+
+/** 提示詞流水的一列：預設截兩行，點一下展開全文（300 字內；全文本來就在生成紀錄） */
+function PromptRow({ p }: { p: RecentPromptData }) {
+  const [open, setOpen] = useState(false);
+  const meta = GEN_STATUS_META[p.status] ?? { label: p.status, color: "var(--fg-secondary)" };
+  const model = getModel(p.modelId);
+  return (
+    <div style={{ borderTop: "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ color: meta.color, fontSize: 11, fontWeight: 600 }}>{meta.label}</span>
+        <b>{p.userName}</b>
+        <span className="hint" style={{ fontSize: 11 }}>{model?.label ?? p.modelId}</span>
+        {p.points > 0 && <span className="hint" style={{ fontSize: 11 }}>{p.points} 點</span>}
+        <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(p.createdAt).toLocaleString("zh-TW")}</span>
+      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={open ? "收合提示詞" : "展開完整提示詞"}
+        style={{
+          display: "block",
+          width: "100%",
+          textAlign: "left",
+          background: "none",
+          border: "none",
+          padding: 0,
+          font: "inherit",
+          cursor: "pointer",
+          marginTop: 2,
+          overflowWrap: "anywhere",
+          ...(open ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" }),
+        }}
+      >
+        {p.prompt}
+      </button>
+      <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {p.projectTitle && <span><Icon name="FileText" size={11} /> {p.projectTitle}</span>}
+        {p.error && <span style={{ color: "var(--danger-ink)" }}>{p.error.length > 80 ? `${p.error.slice(0, 80)}…` : p.error}</span>}
+      </div>
+    </div>
+  );
+}
+
+type RecentPromptData = inferRouterOutputs<AppRouter>["insights"]["recentPrompts"]["items"][number];
+
+/**
+ * 操作洞察卡（回饋：人員的分類細節、模型的操作與比較、生成精準度、提示詞）。
+ * 三個分頁共用「期間＋組別」過濾：
+ * - 人員細節：每位夥伴的操作量、失敗數、最近活動、依分類攤開的次數；點人可跳到他的提示詞。
+ * - 模型比較：各模型的生成次數、成功率（生成精準度）、點數、使用人數；點模型看它的提示詞。
+ * - 提示詞：一筆筆的生成流水（誰・模型・提示詞・結果・點數），供比較與教學。
+ * 可見範圍與操作紀錄相同（後端已收斂：組長看自己組），組員看不到這張卡的資料。
+ */
+export function InsightsCard() {
+  const [tab, setTab] = useState<InsightTab>("members");
+  const [days, setDays] = useState(30);
+  const [groupId, setGroupId] = useState("");
+  // 下鑽過濾：從「模型比較」點模型、「人員細節」點夥伴，跳到提示詞分頁時帶上
+  const [modelFilter, setModelFilter] = useState<{ id: string; label: string } | null>(null);
+  const [actorFilter, setActorFilter] = useState<{ id: string; name: string } | null>(null);
+  const scope = trpc.directory.scope.useQuery();
+  const common = { days, groupId: groupId || undefined };
+  const members = trpc.insights.actorBreakdown.useQuery(common, { enabled: tab === "members" });
+  const models = trpc.insights.modelStats.useQuery(common, { enabled: tab === "models" });
+  const prompts = trpc.insights.recentPrompts.useQuery(
+    { ...common, modelId: modelFilter?.id, actorId: actorFilter?.id, limit: 30 },
+    { enabled: tab === "prompts" },
+  );
+  const chip = (active: boolean): CSSProperties => ({
+    padding: "3px 10px",
+    fontSize: 12,
+    borderRadius: 999,
+    cursor: "pointer",
+    border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
+    background: active ? "var(--primary-tint)" : "transparent",
+    color: active ? "var(--primary-ink)" : "var(--ink)",
+    fontWeight: active ? 600 : 400,
+  });
+  const groupOptions = scope.data?.groups ?? [];
+  return (
+    <div className="card" data-fb="操作洞察卡">
+      <h2>操作洞察</h2>
+      <p className="hint">把操作紀錄整理成看得懂的統計：每位夥伴在忙哪一塊、哪個模型好用（成功率＝完成÷已完結）、大家的提示詞怎麼寫。</p>
+      {/* 分頁 chips */}
+      <div role="group" aria-label="洞察分頁" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+        <button type="button" style={chip(tab === "members")} aria-pressed={tab === "members"} onClick={() => setTab("members")}>人員細節</button>
+        <button type="button" style={chip(tab === "models")} aria-pressed={tab === "models"} onClick={() => setTab("models")}>模型比較</button>
+        <button type="button" style={chip(tab === "prompts")} aria-pressed={tab === "prompts"} onClick={() => setTab("prompts")}>提示詞</button>
+      </div>
+      {/* 期間＋組別過濾（三個分頁共用） */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+        {INSIGHT_DAYS.map((d) => (
+          <button key={d.value} type="button" style={chip(days === d.value)} aria-pressed={days === d.value} onClick={() => setDays(d.value)}>
+            {d.label}
+          </button>
+        ))}
+        {groupOptions.length > 1 && (
+          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} aria-label="依組別過濾洞察" style={{ marginLeft: "auto", maxWidth: 220 }}>
+            <option value="">所有可見組別</option>
+            {groupOptions.map((g) => (
+              <option key={g.groupId} value={g.groupId}>{g.teamName}・{g.groupName}</option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* ── 人員細節 ── */}
+      {tab === "members" && (
+        members.isLoading ? (
+          <div className="skeleton" style={{ height: 60 }} />
+        ) : members.error ? (
+          <p className="error">載入失敗：{members.error.message}</p>
+        ) : !members.data || members.data.members.length === 0 ? (
+          <p className="hint">這段期間還沒有操作。</p>
+        ) : (
+          members.data.members.map((m) => (
+            <div key={m.userId} style={{ borderTop: "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => { setActorFilter({ id: m.userId, name: m.name }); setTab("prompts"); }}
+                  style={{ ...DRILL_LINK, fontWeight: 700 }}
+                  title={`看 ${m.name} 的提示詞`}
+                >
+                  {m.name}
+                </button>
+                <span className="hint" style={{ fontSize: 12 }}>{m.total} 筆操作</span>
+                {m.fails > 0 && <span style={{ color: "var(--danger-ink)", fontSize: 12 }}>{m.fails} 筆失敗</span>}
+                <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>最近 {parseDbTime(m.lastAt).toLocaleString("zh-TW")}</span>
+              </div>
+              {/* 分類細節：這位夥伴各類操作的次數，多到少 */}
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+                {m.categories.map((c) => {
+                  const style = AUDIT_CAT_STYLE[c.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
+                  return (
+                    <span key={c.key} className="pill" style={{ ...style, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>
+                      {c.label} {c.count}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ))
+        )
+      )}
+
+      {/* ── 模型比較 ── */}
+      {tab === "models" && (
+        models.isLoading ? (
+          <div className="skeleton" style={{ height: 60 }} />
+        ) : models.error ? (
+          <p className="error">載入失敗：{models.error.message}</p>
+        ) : !models.data || models.data.models.length === 0 ? (
+          <p className="hint">這段期間還沒有生成。</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr>
+                  {["模型", "次數", "成功率", "失敗", "點數", "人數", "最近使用"].map((h) => (
+                    <th key={h} className="hint" style={{ textAlign: h === "模型" ? "left" : "right", padding: "4px 6px", fontWeight: 600, fontSize: 11, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {models.data.models.map((m) => {
+                  const model = getModel(m.modelId);
+                  const rate = successRate(m.done, m.failed);
+                  return (
+                    <tr key={`${m.modelId}:${m.kind}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
+                      <td style={{ padding: "6px" }}>
+                        <button
+                          type="button"
+                          onClick={() => { setModelFilter({ id: m.modelId, label: model?.label ?? m.modelId }); setTab("prompts"); }}
+                          style={{ ...DRILL_LINK, fontWeight: 600 }}
+                          title="看這個模型的提示詞"
+                        >
+                          {model?.label ?? m.modelId}
+                        </button>
+                        {model && <span className="hint" style={{ fontSize: 11, marginLeft: 6 }}>{tierLabel(model.tier)}</span>}
+                      </td>
+                      <td style={{ padding: "6px", textAlign: "right" }}>{m.submits}</td>
+                      <td style={{ padding: "6px", textAlign: "right", color: rate == null ? "var(--fg-secondary)" : rate >= 90 ? "var(--success-ink)" : rate < 70 ? "var(--danger-ink)" : "var(--ink)" }}>
+                        {rate == null ? "—" : `${rate}%`}
+                      </td>
+                      <td style={{ padding: "6px", textAlign: "right", color: m.failed > 0 ? "var(--danger-ink)" : "var(--fg-secondary)" }}>{m.failed}</td>
+                      <td style={{ padding: "6px", textAlign: "right" }}>{m.points}</td>
+                      <td style={{ padding: "6px", textAlign: "right" }}>{m.users}</td>
+                      <td className="hint" style={{ padding: "6px", textAlign: "right", fontSize: 11, whiteSpace: "nowrap" }}>{parseDbTime(m.lastUsedAt).toLocaleDateString("zh-TW")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="hint" style={{ fontSize: 11, marginTop: 6 }}>成功率＝完成 ÷（完成＋失敗）；排隊中／等待核准的生成不列入。點數只計完成的實花（失敗會退點）。</p>
+          </div>
+        )
+      )}
+
+      {/* ── 提示詞 ── */}
+      {tab === "prompts" && (
+        <>
+          {(modelFilter || actorFilter) && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+              <span className="hint" style={{ fontSize: 11 }}>目前只看：</span>
+              {modelFilter && (
+                <button type="button" onClick={() => setModelFilter(null)} style={activeFilterChip} aria-label={`清除模型過濾（${modelFilter.label}）`}>
+                  模型：{modelFilter.label}<Icon name="X" size={11} />
+                </button>
+              )}
+              {actorFilter && (
+                <button type="button" onClick={() => setActorFilter(null)} style={activeFilterChip} aria-label={`清除夥伴過濾（${actorFilter.name}）`}>
+                  <Icon name="User" size={11} />{actorFilter.name}<Icon name="X" size={11} />
+                </button>
+              )}
+            </div>
+          )}
+          {prompts.isLoading ? (
+            <div className="skeleton" style={{ height: 60 }} />
+          ) : prompts.error ? (
+            <p className="error">載入失敗：{prompts.error.message}</p>
+          ) : !prompts.data || prompts.data.items.length === 0 ? (
+            <p className="hint">這段期間還沒有符合條件的生成。</p>
+          ) : (
+            prompts.data.items.map((p) => <PromptRow key={p.id} p={p} />)
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /** "YYYY-MM-DD"（台北日）→「週一…週日」。用 UTC 建構避開瀏覽器本地時區把日期推前/後一天 */
 function weekdayLabel(isoDate: string): string {
   const [y, m, d] = isoDate.split("-").map(Number);
@@ -1219,6 +1482,7 @@ export function AdminPage() {
         {/* 系統自檢只有開發者的 /api/selftest 能用——非開發者按了只會 403，對他們是死功能，故只對開發者顯示 */}
         {isSuperAdmin && <SelfTestCard />}
         <ConsumptionMonitorCard />
+        <InsightsCard />
         <AuditLogCard />
         {isSuperAdmin && <CreateTeamCard />}
         <div className="card" data-fb="點數與額度卡">

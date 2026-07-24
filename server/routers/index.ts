@@ -20,6 +20,7 @@ import { workflowsRouter } from "./workflows";
 import { assistantRouter } from "./assistant";
 import { agentsRouter } from "./agents";
 import { auditRouter } from "./audit";
+import { insightsRouter } from "./insights";
 import { notesRouter } from "./notes";
 import { scheduleRouter } from "./schedule";
 import { teamAssistantRouter } from "./teamAssistant";
@@ -52,6 +53,7 @@ export const appRouter = router({
   assistant: assistantRouter,
   agents: agentsRouter,
   audit: auditRouter,
+  insights: insightsRouter,
   notes: notesRouter,
   schedule: scheduleRouter,
   teamAssistant: teamAssistantRouter,
