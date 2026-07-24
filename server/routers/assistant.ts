@@ -156,7 +156,7 @@ const COERCED_ACTION_ANSWER: Record<string, string> = {
   update_scene: "我幫你準備了分鏡修改，確認下方就套用。",
   submit_approval: "我幫你準備了送審動作，確認下方就送出。",
 };
-function coerceActionToolCall(json: unknown): z.infer<typeof replySchema> | null {
+export function coerceActionToolCall(json: unknown): z.infer<typeof replySchema> | null {
   if (!json || typeof json !== "object") return null;
   const o = json as Record<string, unknown>;
   const name = typeof o.tool === "string" ? o.tool : typeof o.action === "string" ? o.action : typeof o.type === "string" ? o.type : null;
