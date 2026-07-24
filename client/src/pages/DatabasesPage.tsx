@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
-import { Icon } from "../components/Icon";
+import { Icon, type IconName } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
-import { FIELD_TYPES, newFieldKey, type DataField, type DataRowData, type DataRowValue } from "@shared/databaseFields";
+import { FIELD_TYPES, FILE_CATEGORY_SUGGESTIONS, MAX_FILE_CATEGORY, newFieldKey, type DataField, type DataRowData, type DataRowValue } from "@shared/databaseFields";
 import { detectFormat, inferFields, parseTabular, TABULAR_ACCEPT, TABULAR_FORMATS, type TabularFormat } from "@shared/tabular";
 
 /** 匯入結果外形（importData mutation 回傳；建庫與詳頁匯入共用顯示） */
@@ -559,7 +559,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
       </div>
       {mutationError && <p className="error" role="alert">{mutationError}</p>}
 
-      <FilesSection table={table} />
+      <FilesSection table={table} groupId={groupId} />
       <ConnectPanel table={table} />
     </section>
   );
@@ -743,23 +743,131 @@ function formatBytes(n: number): string {
   return `${n} B`;
 }
 
+/** 媒體類型的顯示標籤與圖示（listFiles 回的 kind） */
+const FILE_KIND_META: Record<string, { label: string; icon: IconName }> = {
+  image: { label: "圖片", icon: "Image" },
+  video: { label: "影片", icon: "Film" },
+  audio: { label: "音訊", icon: "Mic" },
+  doc: { label: "文件", icon: "FileText" },
+};
+
 /**
- * 文件區：檔案上傳（txt/md/csv/json/html/字幕/PDF/DOCX…）＋網址匯入（Google 公開連結、Notion）。
- * 伺服器抽純文字後 AI 才讀得到——可讀字數顯示在每份文件旁；配額每人預設 5GB（管理員可調）。
+ * 資訊量面板：列數／文件數／圖影音文分佈／容量／AI 可讀字數／分類分佈。
+ * 分類 chips 可點＝過濾下方文件清單（onPickCategory）。
  */
-function FilesSection({ table }: { table: TableSummary }) {
+function StatsStrip({ tableId, category, onPickCategory }: { tableId: string; category: string | null; onPickCategory: (c: string | null) => void }) {
+  const stats = trpc.databases.stats.useQuery({ tableId });
+  const s = stats.data;
+  if (!s) return null;
+  const kinds = s.files.byKind.filter((k) => k.count > 0);
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "8px 0", padding: "8px 10px", background: "var(--bg-sunken, rgba(0,0,0,.04))", borderRadius: 8 }} data-fb="資料庫資訊量面板">
+      <Icon name="Info" size={14} />
+      <span className="meta">資訊量：資料 {s.rowCount.toLocaleString()} 列（{s.fieldCount} 欄）</span>
+      <span className="meta">・文件 {s.files.count} 份{s.files.count > 0 ? `（${kinds.map((k) => `${FILE_KIND_META[k.kind]?.label ?? k.kind} ${k.count}`).join("、")}）共 ${formatBytes(s.files.totalBytes)}` : ""}</span>
+      {s.files.readableChars > 0 && <span className="meta">・AI 可讀 {s.files.readableChars.toLocaleString()} 字</span>}
+      {s.files.describedCount > 0 && <span className="meta">・已看圖描述 {s.files.describedCount} 份</span>}
+      {s.categories.length > 0 && (
+        <span style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="meta">・分類：</span>
+          {s.categories.map((c) => (
+            <button
+              key={c.category}
+              className="badge"
+              style={{ cursor: "pointer", ...(category === c.category ? { outline: "2px solid var(--accent, #4a7)", outlineOffset: 1 } : {}) }}
+              title={category === c.category ? "取消過濾" : `只看「${c.category}」的文件`}
+              onClick={() => onPickCategory(category === c.category ? null : c.category)}
+            >
+              {c.category} {c.count}
+            </button>
+          ))}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** 分類編輯（datalist 提示建議與既有分類；空白＝清除分類） */
+function CategoryEditor({ fileId, tableId, initial, existing, onDone }: { fileId: string; tableId: string; initial: string | null; existing: string[]; onDone: () => void }) {
+  const utils = trpc.useUtils();
+  const [value, setValue] = useState(initial ?? "");
+  const setMeta = trpc.databases.setFileMeta.useMutation({
+    onSuccess: () => {
+      utils.databases.listFiles.invalidate({ tableId });
+      utils.databases.stats.invalidate({ tableId });
+      onDone();
+    },
+  });
+  const suggestions = [...new Set([...existing, ...FILE_CATEGORY_SUGGESTIONS])];
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+      <input
+        aria-label="分類"
+        value={value}
+        maxLength={MAX_FILE_CATEGORY}
+        list={`cat-suggest-${fileId}`}
+        placeholder="分類（空白＝清除）"
+        style={{ width: 130 }}
+        autoFocus
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") setMeta.mutate({ id: fileId, category: value.trim() || null }); if (e.key === "Escape") onDone(); }}
+      />
+      <datalist id={`cat-suggest-${fileId}`}>
+        {suggestions.map((c) => <option key={c} value={c} />)}
+      </datalist>
+      <button className="btn-sm primary" title="儲存分類" disabled={setMeta.isPending} onClick={() => setMeta.mutate({ id: fileId, category: value.trim() || null })}>
+        <Icon name="Check" size={13} />
+      </button>
+      <button className="btn-sm" title="取消" onClick={onDone}><Icon name="X" size={13} /></button>
+    </span>
+  );
+}
+
+/** 送到專案素材庫：挑專案→確認（實體複製一份，兩邊獨立） */
+function SendToProject({ fileId, groupId, onDone }: { fileId: string; groupId: string; onDone: (msg: string) => void }) {
+  const projects = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
+  const [projectId, setProjectId] = useState("");
+  const send = trpc.databases.sendFileToProject.useMutation({
+    onSuccess: (r) => onDone(`已把「${r.title}」送進專案「${r.projectTitle}」的素材庫`),
+  });
+  const opts = (projects.data ?? []).filter((p) => p.status !== "archived");
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+      <select aria-label="選擇專案" value={projectId} style={{ width: "auto", maxWidth: 200 }} onChange={(e) => setProjectId(e.target.value)}>
+        <option value="">選專案…</option>
+        {opts.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+      </select>
+      <button className="btn-sm primary" disabled={!projectId || send.isPending} onClick={() => send.mutate({ fileId, projectId })}>
+        {send.isPending ? "送出中…" : "送出"}
+      </button>
+      {send.error && <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{send.error.message}</span>}
+    </span>
+  );
+}
+
+/**
+ * 文件區：檔案上傳（文字/PDF/Word/圖片/影音…）＋網址匯入（Google 公開連結、Notion）。
+ * 文字檔伺服器抽純文字、圖片可「AI 分類」產生繁中描述＋分類標籤——AI 助手與 MCP 代理都讀得到；
+ * 圖影有縮圖與播放預覽、可分類過濾、可送進專案素材庫。配額每人預設 5GB（管理員可調）。
+ */
+function FilesSection({ table, groupId }: { table: TableSummary; groupId: string }) {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   const list = trpc.databases.listFiles.useQuery({ tableId: table.id });
-  const importUrl = trpc.databases.importUrl.useMutation({ onSuccess: () => { utils.databases.listFiles.invalidate({ tableId: table.id }); setUrl(""); setUrlName(""); } });
+  const invalidateFiles = () => {
+    utils.databases.listFiles.invalidate({ tableId: table.id });
+    utils.databases.stats.invalidate({ tableId: table.id });
+  };
+  const importUrl = trpc.databases.importUrl.useMutation({ onSuccess: () => { invalidateFiles(); setUrl(""); setUrlName(""); } });
   const refresh = trpc.databases.refreshFile.useMutation({
     onSuccess: (_r, vars) => {
-      utils.databases.listFiles.invalidate({ tableId: table.id });
+      invalidateFiles();
       // 開著的全文預覽也要跟上重抓後的內容，否則顯示過期文字
       utils.databases.getFileText.invalidate({ id: vars.id });
     },
   });
-  const removeFile = trpc.databases.removeFile.useMutation({ onSuccess: () => utils.databases.listFiles.invalidate({ tableId: table.id }) });
+  const removeFile = trpc.databases.removeFile.useMutation({ onSuccess: invalidateFiles });
+  const classify = trpc.databases.classifyFile.useMutation({ onSuccess: invalidateFiles });
 
   const [url, setUrl] = useState("");
   const [urlName, setUrlName] = useState("");
@@ -767,7 +875,17 @@ function FilesSection({ table }: { table: TableSummary }) {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
-  const preview = trpc.databases.getFileText.useQuery({ id: previewId ?? "" }, { enabled: !!previewId });
+  const [editCatId, setEditCatId] = useState<string | null>(null);
+  const [sendToId, setSendToId] = useState<string | null>(null);
+  const [sentMsg, setSentMsg] = useState<string | null>(null);
+  const [catFilter, setCatFilter] = useState<string | null>(null);
+  const allFiles = list.data?.files ?? [];
+  const previewFile = allFiles.find((f) => f.id === previewId) ?? null;
+  // 文字預覽只對「有抽出文字」的文件發查詢；圖影預覽是媒體本身＋AI 描述，不打 getFileText
+  const preview = trpc.databases.getFileText.useQuery(
+    { id: previewId ?? "" },
+    { enabled: !!previewId && (previewFile?.readableChars ?? 0) > 0 },
+  );
 
   const doUpload = async (f: File) => {
     setUploading(true);
@@ -779,7 +897,7 @@ function FilesSection({ table }: { table: TableSummary }) {
       const res = await fetch("/api/databases/upload", { method: "POST", body: form, credentials: "same-origin" });
       const body = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) setUploadError(body.error ?? "上傳失敗，請稍後再試");
-      else utils.databases.listFiles.invalidate({ tableId: table.id });
+      else invalidateFiles();
     } catch {
       setUploadError("上傳失敗（網路問題），請稍後再試");
     } finally {
@@ -789,14 +907,15 @@ function FilesSection({ table }: { table: TableSummary }) {
   };
 
   const quota = list.data?.quota;
-  const files = list.data?.files ?? [];
+  const files = catFilter ? allFiles.filter((f) => f.category === catFilter) : allFiles;
+  const existingCategories = [...new Set(allFiles.map((f) => f.category).filter((c): c is string => !!c))];
   const canWrite = table.access.canWriteRows;
   const myId = me.data?.user.id;
 
   return (
     <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--border-soft, #eee)" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <h3 style={{ margin: 0 }}>文件（AI 可讀）</h3>
+        <h3 style={{ margin: 0 }}>文件與圖影（AI 可讀）</h3>
         {quota && (
           <span className="meta" title="所有資料庫合計、按上傳者計；管理員可在「團隊管理→點數與額度」調整">
             我的空間：{formatBytes(quota.usedBytes)}{quota.quotaBytes != null ? ` / ${formatBytes(quota.quotaBytes)}` : "（不限）"}
@@ -804,9 +923,12 @@ function FilesSection({ table }: { table: TableSummary }) {
         )}
       </div>
       <p className="hint" style={{ marginTop: 4 }}>
-        文字/Markdown/CSV/JSON/HTML/字幕/PDF/Word 上傳後自動抽成純文字——團隊 AI 助手與 MCP 代理都讀得到
-        （受上方「AI 存取」等級管控）。Google 文件請用「任何人知道連結都能檢視」的連結；Notion 需管理員設 NOTION_TOKEN，或用 Notion 匯出檔上傳。
+        文字/Markdown/CSV/JSON/HTML/字幕/PDF/Word 自動抽成純文字；圖片可按「AI 分類」由視覺模型產生繁中描述＋自動歸類（1 點/張）——
+        團隊 AI 助手與 MCP 代理都讀得到（受上方「AI 存取」等級管控）。影片／音訊可手動分類、可預覽播放。
+        Google 文件請用「任何人知道連結都能檢視」的連結；Notion 需管理員設 NOTION_TOKEN，或用 Notion 匯出檔上傳。
       </p>
+
+      <StatsStrip tableId={table.id} category={catFilter} onPickCategory={setCatFilter} />
 
       {canWrite && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
@@ -841,25 +963,73 @@ function FilesSection({ table }: { table: TableSummary }) {
           </button>
         </div>
       )}
-      {(uploadError || importUrl.error || refresh.error || removeFile.error) && (
-        <p className="error" role="alert">{uploadError ?? importUrl.error?.message ?? refresh.error?.message ?? removeFile.error?.message}</p>
+      {(uploadError || importUrl.error || refresh.error || removeFile.error || classify.error) && (
+        <p className="error" role="alert">{uploadError ?? importUrl.error?.message ?? refresh.error?.message ?? removeFile.error?.message ?? classify.error?.message}</p>
       )}
+      {sentMsg && <p className="hint" style={{ color: "var(--success-ink)" }}>{sentMsg}</p>}
 
-      {files.length === 0 && list.data && <p className="hint" style={{ marginTop: 8 }}>還沒有文件——上傳逐字稿、腳本、名單，AI 就能引用它們回答。</p>}
-      {files.map((f) => (
+      {allFiles.length === 0 && list.data && <p className="hint" style={{ marginTop: 8 }}>還沒有文件——上傳逐字稿、腳本、名單或劇照，AI 就能引用它們回答。</p>}
+      {catFilter && <p className="meta" style={{ margin: "6px 0 0" }}>只顯示分類「{catFilter}」的 {files.length} 份文件——<button className="btn-sm" onClick={() => setCatFilter(null)}>顯示全部</button></p>}
+      {files.map((f) => {
+        const kindMeta = FILE_KIND_META[f.kind] ?? FILE_KIND_META.doc;
+        const fileUrl = `/api/databases/files/${f.id}/file`;
+        const isMedia = f.kind !== "doc";
+        return (
         <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderBottom: "1px solid var(--border-soft, #eee)" }}>
-          <Icon name="FileText" size={15} />
-          <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }} title={f.name}>{f.name}</span>
+          {f.kind === "image" && f.hasFile ? (
+            <img
+              src={fileUrl}
+              alt={f.name}
+              loading="lazy"
+              style={{ height: 36, width: 48, objectFit: "cover", borderRadius: 6, cursor: "pointer", flex: "0 0 auto" }}
+              onClick={() => setPreviewId(previewId === f.id ? null : f.id)}
+            />
+          ) : (
+            <Icon name={kindMeta.icon} size={15} />
+          )}
+          <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }} title={f.name}>{f.name}</span>
           <span className="meta">{formatBytes(f.sizeBytes)}・{f.uploaderName}</span>
+          {isMedia && <span className="badge">{kindMeta.label}</span>}
+          {f.category && <span className="badge" title="分類">{f.category}</span>}
           {f.readableChars > 0 ? (
             <button className="badge" style={{ cursor: "pointer" }} title="點開預覽 AI 讀到的純文字" onClick={() => setPreviewId(previewId === f.id ? null : f.id)}>
               AI 可讀 {f.readableChars.toLocaleString()} 字
             </button>
+          ) : f.aiDescription ? (
+            <button className="badge" style={{ cursor: "pointer" }} title="AI 已看圖——點開看描述" onClick={() => setPreviewId(previewId === f.id ? null : f.id)}>
+              AI 已看圖
+            </button>
+          ) : isMedia ? (
+            <button className="badge" style={{ cursor: "pointer" }} title="預覽" onClick={() => setPreviewId(previewId === f.id ? null : f.id)}>預覽</button>
           ) : (
             <span className="badge" title="此格式暫不支援文字抽取（僅存檔）">僅存檔</span>
           )}
           <span className="spacer" />
-          {f.hasFile && <a className="btn-sm" href={`/api/databases/files/${f.id}/file`} download title="下載原檔"><Icon name="Download" size={13} /></a>}
+          {canWrite && f.kind === "image" && f.hasFile && (
+            <button
+              className="btn-sm"
+              title="AI 看圖：產生繁中描述並自動分類（1 點/張；點數走你的額度）"
+              disabled={classify.isPending}
+              onClick={() => classify.mutate({ id: f.id })}
+            >
+              <Icon name="Sparkles" size={13} /> {classify.isPending && classify.variables?.id === f.id ? "分類中…" : "AI 分類"}
+            </button>
+          )}
+          {canWrite && (editCatId === f.id ? (
+            <CategoryEditor fileId={f.id} tableId={table.id} initial={f.category} existing={existingCategories} onDone={() => setEditCatId(null)} />
+          ) : (
+            <button className="btn-sm" title="編輯分類" onClick={() => { setEditCatId(f.id); setSendToId(null); }}>
+              <Icon name="Tag" size={13} />
+            </button>
+          ))}
+          {f.hasFile && (sendToId === f.id ? (
+            <SendToProject fileId={f.id} groupId={groupId} onDone={(msg) => { setSendToId(null); setSentMsg(msg); }} />
+          ) : (
+            <button className="btn-sm" title="送到專案素材庫（複製一份，分鏡與生成即可取用）" onClick={() => { setSendToId(f.id); setEditCatId(null); setSentMsg(null); }}>
+              <Icon name="Package" size={13} />
+            </button>
+          ))}
+          {f.hasFile && <a className="btn-sm" href={fileUrl} download title="下載原檔"><Icon name="Download" size={13} /></a>}
           {canWrite && f.sourceUrl && (
             <button className="btn-sm" title="重抓來源網址、更新內容" disabled={refresh.isPending} onClick={() => refresh.mutate({ id: f.id })}>
               <Icon name="Undo2" size={13} />
@@ -871,21 +1041,45 @@ function FilesSection({ table }: { table: TableSummary }) {
             </ConfirmButton>
           )}
           {previewId === f.id && (
-            <div style={{ flexBasis: "100%", background: "var(--bg-sunken, rgba(0,0,0,.04))", borderRadius: 8, padding: 10, maxHeight: 240, overflowY: "auto" }}>
-              {preview.data ? (
+            <div style={{ flexBasis: "100%", background: "var(--bg-sunken, rgba(0,0,0,.04))", borderRadius: 8, padding: 10, maxHeight: isMedia ? 420 : 240, overflowY: "auto" }}>
+              {f.kind === "image" && f.hasFile && (
+                <img src={fileUrl} alt={f.name} style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, display: "block", marginBottom: 8 }} />
+              )}
+              {f.kind === "video" && f.hasFile && (
+                <video src={fileUrl} controls preload="metadata" style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, display: "block", marginBottom: 8 }} />
+              )}
+              {f.kind === "audio" && f.hasFile && (
+                <audio src={fileUrl} controls preload="metadata" style={{ width: "100%", marginBottom: 8 }} />
+              )}
+              {isMedia && (
+                f.aiDescription ? (
+                  <>
+                    <p className="meta" style={{ margin: "0 0 4px" }}>AI 看圖描述{f.category ? `（分類：${f.category}）` : ""}——AI 助手與 MCP 代理讀這段回答圖影問題：</p>
+                    <p style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>{f.aiDescription}</p>
+                  </>
+                ) : (
+                  <p className="meta" style={{ margin: 0 }}>
+                    {f.kind === "image" ? "尚未有 AI 描述——按「AI 分類」讓視覺模型看圖產生描述與分類，AI 助手就答得出這張圖的內容。" : "影片／音訊可用「編輯分類」手動歸類；描述可之後補。"}
+                  </p>
+                )
+              )}
+              {!isMedia && (preview.data ? (
                 <>
                   <p className="meta" style={{ margin: "0 0 6px" }}>AI 讀到的純文字（前 20,000 字／共 {preview.data.totalChars.toLocaleString()} 字）：</p>
                   <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: 13 }}>{preview.data.text}</pre>
                 </>
               ) : preview.error ? (
                 <p className="error" role="alert" style={{ margin: 0 }}>預覽載入失敗：{preview.error.message}</p>
-              ) : (
+              ) : (f.readableChars > 0 ? (
                 <p className="meta" style={{ margin: 0 }}>載入中…</p>
-              )}
+              ) : (
+                <p className="meta" style={{ margin: 0 }}>此格式暫不支援文字抽取（僅存檔）。</p>
+              )))}
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

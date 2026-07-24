@@ -60,7 +60,9 @@ export type IconName =
   | "Plus"
   | "Trash2"
   | "SlidersHorizontal"
-  | "Search";
+  | "Search"
+  | "Tag"
+  | "Film";
 
 /**
  * 每個名稱對應一組 Lucide 24x24 stroke 幾何（忠實重現原始路徑）。
@@ -376,6 +378,24 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M5 12h14" />
       <path d="M12 5v14" />
+    </>
+  ),
+  Tag: (
+    <>
+      <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
+      <circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
+    </>
+  ),
+  Film: (
+    <>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M7 3v18" />
+      <path d="M3 7.5h4" />
+      <path d="M3 12h18" />
+      <path d="M3 16.5h4" />
+      <path d="M17 3v18" />
+      <path d="M21 7.5h-4" />
+      <path d="M21 16.5h-4" />
     </>
   ),
 };

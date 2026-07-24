@@ -694,6 +694,11 @@ export const dataFiles = pgTable("data_files", {
   sourceUrl: text("source_url"),
   /** 抽出的可讀文字（上限見 databaseFiles.MAX_TEXT_CHARS）；null＝AI 暫不可讀 */
   textContent: text("text_content"),
+  /** 分類標籤（圖影與一般文件皆可）：人工可改、圖片可由 AI 自動分類填入。nullable＝pushSchema 安全 */
+  category: text("category"),
+  /** AI 看圖描述（vision 模型產生的繁中描述）：圖影檔的「AI 可讀」內容，
+   *  團隊助手與 MCP 代理引用這裡回答「這張圖是什麼」。nullable＝pushSchema 安全 */
+  aiDescription: text("ai_description"),
   uploadedBy: uuid("uploaded_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({

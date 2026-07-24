@@ -3,9 +3,11 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
-import { validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
+import { MAX_FILE_CATEGORY, normalizeFileCategory, validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
 import { addDataRowValidated } from "../services/databaseCore";
+import { classifyDatabaseFile, mediaKindOf, tableStats } from "../services/databaseMedia";
+import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { tabularToRowObjects, TABULAR_FORMATS, type TabularFormat } from "../../shared/tabular";
 import {
   extractTextFromBuffer,
@@ -20,7 +22,7 @@ import {
   ssrfGuardError,
   userFileUsage,
 } from "../services/databaseFiles";
-import { checkDiskSpace, removeStoredFile, saveBuffer } from "../services/storage";
+import { checkDiskSpace, copyStoredFile, kindFromMime, removeStoredFile, saveBuffer } from "../services/storage";
 
 /**
  * 自訂資料庫（個人→組→團隊→全站）：表結構 CRUD＋列資料 CRUD＋文件層＋連接（CSV/專案/排程）。
@@ -341,6 +343,8 @@ export const databasesRouter = router({
         sourceUrl: schema.dataFiles.sourceUrl,
         readableChars: sql<number>`coalesce(length(${schema.dataFiles.textContent}), 0)`,
         excerpt: sql<string | null>`left(${schema.dataFiles.textContent}, 300)`,
+        category: schema.dataFiles.category,
+        aiDescription: schema.dataFiles.aiDescription,
         uploadedBy: schema.dataFiles.uploadedBy,
         uploaderName: schema.users.name,
         createdAt: schema.dataFiles.createdAt,
@@ -356,11 +360,14 @@ export const databasesRouter = router({
         id: f.id,
         name: f.name,
         mime: f.mime,
+        kind: mediaKindOf(f.mime),
         sizeBytes: f.sizeBytes,
         hasFile: !!f.storagePath,
         sourceUrl: f.sourceUrl,
         readableChars: Number(f.readableChars),
         excerpt: f.excerpt,
+        category: f.category,
+        aiDescription: f.aiDescription,
         uploadedBy: f.uploadedBy,
         uploaderName: f.uploaderName ?? "?",
         createdAt: f.createdAt,
@@ -544,4 +551,92 @@ export const databasesRouter = router({
     if (file.storagePath) await removeStoredFile(file.storagePath);
     return { ok: true };
   }),
+
+  /* ── 圖影分類與資訊量 ───────────────────────── */
+
+  /** 手動分類／描述編輯（圖影與一般文件皆可）：category 空字串＝清除分類 */
+  setFileMeta: authedProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+      category: z.string().max(MAX_FILE_CATEGORY).nullable().optional(),
+      aiDescription: z.string().max(2000).nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { file, access } = await getFileChecked(ctx.auth, input.id);
+      if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
+      const patch: Partial<{ category: string | null; aiDescription: string | null }> = {};
+      if (input.category !== undefined) patch.category = normalizeFileCategory(input.category);
+      if (input.aiDescription !== undefined) patch.aiDescription = input.aiDescription?.trim() || null;
+      if (Object.keys(patch).length === 0) return { ok: true, category: file.category, aiDescription: file.aiDescription };
+      const [updated] = await db.update(schema.dataFiles).set(patch).where(eq(schema.dataFiles.id, file.id)).returning();
+      return { ok: true, category: updated.category, aiDescription: updated.aiDescription };
+    }),
+
+  /**
+   * AI 看圖分類（圖片限定）：視覺模型產生繁中描述＋自動歸類——圖影從「僅存檔」變 AI 可讀可答。
+   * 計費走點數守門（預設 1 點；E2E_MOCK 不扣點回確定性結果）。
+   */
+  classifyFile: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const { file, table, access } = await getFileChecked(ctx.auth, input.id);
+    if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
+    try {
+      return await classifyDatabaseFile(ctx.auth, file, table);
+    } catch (err) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "看圖分類失敗" });
+    }
+  }),
+
+  /** 資訊量統計：列數／文件數／圖影音文分佈／容量／AI 可讀字數／分類分佈（讀取權即可） */
+  stats: authedProcedure.input(z.object({ tableId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const { table } = await getTableChecked(ctx.auth, input.tableId);
+    return tableStats(table);
+  }),
+
+  /**
+   * 把資料庫文件送進專案素材庫（資料庫 × 專案系統的檔案級串接）：
+   * 實體複製一份到素材儲存（兩邊生命週期獨立，任一邊刪除不影響另一邊），
+   * 分類帶進素材 tags、來源記在 meta 供回溯。權限＝文件讀取權 ＋ 專案可編輯（組隔離＋2.3 檢視者擋）。
+   */
+  sendFileToProject: authedProcedure
+    .input(z.object({ fileId: z.string().uuid(), projectId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { file } = await getFileChecked(ctx.auth, input.fileId);
+      if (!file.storagePath) throw new TRPCError({ code: "BAD_REQUEST", message: "這份文件沒有原始檔案（純文字匯入）——素材庫收的是實體檔" });
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      assertProjectNotArchived(project);
+      await assertProjectEditable(ctx.auth, project);
+      const disk = await checkDiskSpace(file.sizeBytes);
+      if (disk) throw new TRPCError({ code: "PRECONDITION_FAILED", message: disk });
+      const copied = await copyStoredFile(file.storagePath, file.mime);
+      try {
+        const [asset] = await db
+          .insert(schema.assets)
+          .values({
+            projectId: project.id,
+            groupId: project.groupId,
+            kind: kindFromMime(file.mime),
+            title: file.name.slice(0, 80),
+            url: "", // 佔位，下一步以 id 回填服務網址（與 /api/upload 同手法）
+            tags: file.category ? [file.category] : [],
+            isAiGenerated: false,
+            storagePath: copied.storagePath,
+            mime: file.mime,
+            sizeBytes: copied.sizeBytes,
+            uploadedBy: ctx.auth.user.id,
+            meta: { fromDatabaseFileId: file.id, ...(file.aiDescription ? { aiDescription: file.aiDescription } : {}) },
+          })
+          .returning();
+        const [updated] = await db
+          .update(schema.assets)
+          .set({ url: `/api/assets/${asset.id}/file` })
+          .where(eq(schema.assets.id, asset.id))
+          .returning();
+        return { assetId: updated.id, title: updated.title, projectTitle: project.title };
+      } catch (dbErr) {
+        await removeStoredFile(copied.storagePath); // DB 失敗清孤兒複本
+        throw dbErr;
+      }
+    }),
 });
