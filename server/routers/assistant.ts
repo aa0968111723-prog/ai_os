@@ -195,8 +195,8 @@ function assistantDbCheatsheet(dbs: ReadableDb[]): string {
     .join("\n");
 }
 
-/** 一列資料 → 給 LLM 的一行摘要（欄位 key:值；長值截斷，防灌爆提示詞） */
-function rowLine(fields: DataField[], data: Record<string, unknown>): string {
+/** 一列資料 → 給 LLM 的一行摘要（欄位 key:值；長值截斷，防灌爆提示詞）。export 供 teamAssistant 的 query_database 工具重用同一格式。 */
+export function rowLine(fields: DataField[], data: Record<string, unknown>): string {
   return fields
     .slice(0, 8)
     .map((f) => {

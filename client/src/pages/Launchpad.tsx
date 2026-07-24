@@ -319,27 +319,59 @@ const TEAM_QUICK_QS = [
   "依目前狀況，哪個專案該優先推進？",
 ];
 
+/** 對話訊息（前端狀態；assistant 訊息帶當輪的查證步驟與派工提議） */
+type ChatMsg = { role: "user" | "assistant"; text: string; steps?: string[]; dispatches?: Dispatch[] };
+
+/** 代理狀態 → 中文標籤與強調色（與後端 AGENT_RUN_STATUS_LABEL 對齊） */
+const RUN_STATUS: Record<string, { label: string; color?: string }> = {
+  awaiting_approval: { label: "待核准", color: "var(--gold-ink)" },
+  running: { label: "執行中", color: "var(--primary-ink)" },
+  done: { label: "完成", color: "var(--success-ink)" },
+  failed: { label: "失敗", color: "var(--danger-ink)" },
+  stopped: { label: "已停止" },
+};
+
 /**
- * 組彙總 AI 卡（需求 12 v2）：一個輸入框問「整組」狀況——後端彙總轄下各專案的分鏡／生成／花費現況，
- * LLM 可先用唯讀工具鑽進特定專案查證再分析；具派工權者（組長以上或被授權組員）還能收到「發起專案
- * 代理計畫」的提議，按確認後在該專案建立一份待核准計畫（仍需在該專案核准才會花點）。唯讀彙總本身不改資料。
+ * 組彙總 AI 卡（需求 12 v3 一體化）：可追問的多輪對話問「整組」狀況——後端彙總轄下各專案現況，
+ * LLM 可先用唯讀工具鑽進特定專案、自訂資料庫、模型目錄或「全組代理動態」查證再分析；具派工權者
+ * （組長以上或被授權組員）還能收到「發起專案代理計畫」的提議，按確認後在該專案建立一份待核准計畫
+ * （仍需在該專案核准才會花點）。卡片下方另有「組代理動態」總覽：派工出去的計畫跑到哪一站看清。
+ * 對話只存前端狀態（重整即清空）；唯讀彙總本身不改資料。
  */
 function TeamAssistantCard({ groupId }: { groupId: string }) {
   const utils = trpc.useUtils();
   const [question, setQuestion] = useState("");
+  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const ask = trpc.teamAssistant.ask.useMutation();
   const dispatch = trpc.teamAssistant.dispatch.useMutation();
-  // 已派工的提議 index → 結果（避免重複派工、並顯示「到哪核准」）
-  const [dispatched, setDispatched] = useState<Record<number, DispatchResult>>({});
-  const [pendingIdx, setPendingIdx] = useState<number | null>(null);
+  // 全組代理動態：有進行中（執行中/待核准）的就 8 秒輪詢，全都終局就停（省流量）
+  const overview = trpc.teamAssistant.agentOverview.useQuery(
+    { groupId },
+    { refetchInterval: (q) => (q.state.data?.some((r) => r.status === "running" || r.status === "awaiting_approval") ? 8000 : false) },
+  );
+  // 已派工的提議（key＝`訊息idx-提議idx`）→ 結果：避免重複派工、並顯示「到哪核准」
+  const [dispatched, setDispatched] = useState<Record<string, DispatchResult>>({});
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
   const canAsk = !!question.trim() && !ask.isPending;
   const submit = () => {
     if (!canAsk) return;
-    setDispatched({}); // 新問題：清掉上一輪的派工結果
-    ask.mutate({ groupId, message: question.trim() });
+    const q = question.trim();
+    // 追問脈絡：帶最近 6 則（後端再收緊）；先推使用者訊息讓對話即時出現
+    const history = msgs.slice(-6).map((m) => ({ role: m.role, text: m.text }));
+    setMsgs((prev) => [...prev, { role: "user", text: q }]);
+    setQuestion("");
+    ask.mutate(
+      { groupId, message: q, history },
+      {
+        onSuccess: (d) => {
+          setMsgs((prev) => [...prev, { role: "assistant", text: d.answer, steps: d.steps, dispatches: d.dispatches as Dispatch[] }]);
+          if ((d.dispatches?.length ?? 0) > 0) overview.refetch(); // 可能馬上派工——動態卡別等輪詢
+        },
+      },
+    );
   };
-  const dispatches = (ask.data?.dispatches ?? []) as Dispatch[];
-  const steps = ask.data?.steps ?? [];
+  const canDispatchHint = ask.data?.canDispatch ?? false;
+  const runs = overview.data ?? [];
   return (
     <section className="card" data-fb="組彙總AI卡" style={{ padding: "14px 16px", marginBottom: 16 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -350,7 +382,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
             value={question}
             maxLength={500}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="問問整組狀況：哪個案子卡住了？這週花了多少點？"
+            placeholder={msgs.length ? "接著追問…（記得上下文）" : "問問整組狀況：哪個案子卡住了？這週花了多少點？"}
             onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
           />
         </div>
@@ -361,13 +393,13 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
               詢問中…
             </span>
           ) : (
-            "詢問"
+            msgs.length ? "追問" : "詢問"
           )}
         </button>
       </div>
 
       {/* 快速提問：冷啟動不用想怎麼開口——點一顆帶入輸入框，按「詢問」才送出 */}
-      {!ask.data && !ask.isPending && (
+      {msgs.length === 0 && !ask.isPending && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
           {TEAM_QUICK_QS.map((q) => (
             <button key={q} type="button" className="btn-sm" title="點了帶入輸入框，按「詢問」才送出（免費）" onClick={() => setQuestion(q)}>
@@ -377,58 +409,109 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
         </div>
       )}
 
-      <p className="hint" style={{ marginTop: 8 }}>免費・唯讀彙總{ask.data?.canDispatch ? "，可提議在專案發起代理計畫（需該專案核准才花點）" : ""}。</p>
+      <p className="hint" style={{ marginTop: 8 }}>
+        免費・唯讀彙總，可追問、可查證專案／資料庫／代理動態{canDispatchHint ? "，並可提議在專案發起代理計畫（需該專案核准才花點）" : ""}。
+        {msgs.length > 0 && (
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            style={{ marginLeft: 8 }}
+            onClick={() => { setMsgs([]); setDispatched({}); ask.reset(); }}
+          >
+            清除對話
+          </button>
+        )}
+      </p>
       {ask.error && <p className="error" role="alert">{ask.error.message}</p>}
 
-      {/* 多步工具透明化：助手回答前查了什麼一行列給使用者看 */}
-      {steps.length > 0 && (
-        <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
-          <Icon name="Search" size={11} />{steps.join("、")}
+      {/* 對話串：使用者問題＋助手回答（含當輪查證步驟與派工提議）；長對話卡片內捲動 */}
+      {msgs.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8, maxHeight: 380, overflowY: "auto" }} aria-live="polite">
+          {msgs.map((m, mi) =>
+            m.role === "user" ? (
+              <p key={mi} style={{ margin: 0, fontWeight: 600 }}>{m.text}</p>
+            ) : (
+              <div key={mi}>
+                {/* 多步工具透明化：助手回答前查了什麼一行列給使用者看 */}
+                {(m.steps?.length ?? 0) > 0 && (
+                  <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                    <Icon name="Search" size={11} />{m.steps!.join("、")}
+                  </div>
+                )}
+                <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{m.text}</p>
+                {/* 派工提議：具派工權時才會有；每筆按確認後於該專案建立待核准計畫 */}
+                {(m.dispatches?.length ?? 0) > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                    {m.dispatches!.map((d, i) => {
+                      const key = `${mi}-${i}`;
+                      const done = dispatched[key];
+                      return (
+                        <div key={key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {done ? (
+                            <div className="hint" style={{ color: "var(--success-ink)" }}>
+                              ✓ 已在「{d.projectTitle}」建立代理計畫（估 {done.estPoints} 點）：{done.summary}
+                              <Link href={`/p/${d.projectId}`} style={{ marginLeft: 6 }}>到專案核准 →</Link>
+                            </div>
+                          ) : (
+                            <ConfirmButton
+                              triggerClassName="btn-tonal btn-sm"
+                              disabled={pendingKey === key}
+                              title="在該專案建立一份待核准的代理計畫（核准後才花點）"
+                              message={`在「${d.projectTitle}」發起代理計畫：${d.goal}？\n會建立一份待核准計畫，仍需到該專案核准才會開始執行、花點。`}
+                              confirmLabel="發起計畫"
+                              onConfirm={async () => {
+                                setPendingKey(key);
+                                try {
+                                  const r = await dispatch.mutateAsync({ groupId, projectId: d.projectId, goal: d.goal });
+                                  setDispatched((prev) => ({ ...prev, [key]: r }));
+                                  utils.projects.invalidate(); // 專案卡上的代理狀態可能變動
+                                  overview.refetch(); // 動態卡立刻長出這份待核准計畫
+                                } catch {
+                                  /* dispatch.error 已在下方顯示；不標記為已派工，讓使用者可重試 */
+                                } finally {
+                                  setPendingKey((k) => (k === key ? null : k));
+                                }
+                              }}
+                            >
+                              <Icon name="Play" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                              {d.label}
+                            </ConfirmButton>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ),
+          )}
+          {dispatch.error && <p className="error" role="alert" style={{ marginBottom: 0 }}>{dispatch.error.message}</p>}
         </div>
       )}
 
-      {ask.data && <p style={{ whiteSpace: "pre-wrap", marginTop: 8, marginBottom: 0 }} aria-live="polite">{ask.data.answer}</p>}
-
-      {/* 派工提議：具派工權時才會有；每筆按確認後於該專案建立待核准計畫 */}
-      {dispatches.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-          {dispatches.map((d, i) => {
-            const done = dispatched[i];
-            return (
-              <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {done ? (
-                  <div className="hint" style={{ color: "var(--success-ink)" }}>
-                    ✓ 已在「{d.projectTitle}」建立代理計畫（估 {done.estPoints} 點）：{done.summary}
-                    <Link href={`/p/${d.projectId}`} style={{ marginLeft: 6 }}>到專案核准 →</Link>
-                  </div>
-                ) : (
-                  <ConfirmButton
-                    triggerClassName="btn-tonal btn-sm"
-                    disabled={pendingIdx === i}
-                    title="在該專案建立一份待核准的代理計畫（核准後才花點）"
-                    message={`在「${d.projectTitle}」發起代理計畫：${d.goal}？\n會建立一份待核准計畫，仍需到該專案核准才會開始執行、花點。`}
-                    confirmLabel="發起計畫"
-                    onConfirm={async () => {
-                      setPendingIdx(i);
-                      try {
-                        const r = await dispatch.mutateAsync({ groupId, projectId: d.projectId, goal: d.goal });
-                        setDispatched((prev) => ({ ...prev, [i]: r }));
-                        utils.projects.invalidate(); // 專案卡上的代理狀態可能變動
-                      } catch {
-                        /* dispatch.error 已在下方顯示；不標記為已派工，讓使用者可重試 */
-                      } finally {
-                        setPendingIdx((k) => (k === i ? null : k));
-                      }
-                    }}
-                  >
-                    <Icon name="Play" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-                    {d.label}
-                  </ConfirmButton>
-                )}
-              </div>
-            );
-          })}
-          {dispatch.error && <p className="error" role="alert" style={{ marginBottom: 0 }}>{dispatch.error.message}</p>}
+      {/* 組代理動態：全組各專案的 AI 代理計畫／執行進度一站看（進行中的排前面；核准/停止到各專案頁做） */}
+      {runs.length > 0 && (
+        <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 10 }}>
+          <div style={{ fontSize: "var(--fs-12)", color: "var(--fg-secondary)", display: "flex", alignItems: "center", gap: 4, marginBottom: 6 }}>
+            <Icon name="Sparkles" size={12} />組代理動態
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {runs.map((r) => {
+              const st = RUN_STATUS[r.status] ?? { label: r.status };
+              return (
+                <div key={r.id} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: "var(--fs-12)", flexWrap: "wrap" }}>
+                  <span className="chip" style={{ margin: 0, color: st.color, borderColor: st.color }}>{st.label}</span>
+                  <Link href={`/p/${r.projectId}`} style={{ fontWeight: 600 }}>{r.projectTitle}</Link>
+                  <span style={{ color: "var(--fg-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }} title={r.goal}>
+                    {r.goal}
+                  </span>
+                  <span style={{ color: "var(--fg-secondary)", marginLeft: "auto" }}>
+                    {r.totalSteps > 0 ? `${r.doneSteps}/${r.totalSteps} 步` : "—"}・估 {r.estPoints} 點
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </section>
