@@ -136,6 +136,14 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // MCP 個人連線金鑰（自助管理）
   "mcpTokens.create": "建立 MCP 連線金鑰",
   "mcpTokens.revoke": "撤銷 MCP 連線金鑰",
+  // 個人整合連接（Google 雲端／Notion／外部資料庫）
+  "integrations.setNotion": "設定個人 Notion token",
+  "integrations.removeNotion": "移除個人 Notion token",
+  "integrations.addApi": "新增外部資料庫／API 連接",
+  "integrations.fetchApi": "從外部連接抓取資料",
+  "integrations.remove": "刪除外部資料庫／API 連接",
+  "integrations.removeGoogleDrive": "中斷 Google 雲端連結",
+  "integrations.googleDriveConnect": "連結 Google 雲端硬碟", // Express OAuth callback 手動補記
   // MCP（Claude 等外部代理經 API 操作）
   "mcp.whoami": "MCP：確認連線身分",
   "mcp.list_projects": "MCP：列出專案",
@@ -184,7 +192,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   { key: "database", label: "自訂資料庫", prefixes: ["databases"] },
-  { key: "external", label: "外部連線（MCP）", prefixes: ["mcpTokens", "mcp"] },
+  { key: "external", label: "外部連線（MCP／整合）", prefixes: ["mcpTokens", "mcp", "integrations"] },
 ];
 
 const OTHER_CATEGORY = { key: "other", label: "其他" } as const;

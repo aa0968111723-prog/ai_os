@@ -28,6 +28,7 @@ import { databasesRouter } from "./databases";
 import { directoryRouter } from "./directory";
 import { dmRouter } from "./dm";
 import { googleCalendarRouter } from "./googleCalendar";
+import { integrationsRouter } from "./integrations";
 import { knowledgeMapRouter } from "./knowledgeMap";
 
 export const appRouter = router({
@@ -60,6 +61,7 @@ export const appRouter = router({
   directory: directoryRouter,
   dm: dmRouter,
   googleCalendar: googleCalendarRouter,
+  integrations: integrationsRouter,
   knowledgeMap: knowledgeMapRouter,
 });
 

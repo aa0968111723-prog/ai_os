@@ -1,0 +1,578 @@
+/**
+ * 個人整合連接：讓每個使用者「自己連自己的」外部服務——
+ * - Google 雲端硬碟（OAuth 2.0，scope 僅 drive.readonly）：匯入自己雲端裡的私有文件/試算表/簡報/檔案；
+ * - Notion（個人 integration token，notion.so/my-integrations 自建）：匯入自己分享給整合的頁面；
+ * - 外部資料庫/API（Airtable/Supabase/自建服務…）：存一條「基底網址＋認證標頭」的具名連接，匯入時代為抓取。
+ *
+ * 資安設計（沿用 googleCalendar 與全站稽核確立的慣例）：
+ * - 憑證屬「需重放」型→ AES-256-GCM 加密落庫（iv:tag:cipher hex），非雜湊；原文永不回傳前端。
+ * - 加密金鑰種子：INTEGRATION_TOKEN_SECRET → 退回 Volume 持久檔 .integration-key（首次自動產生、0600）。
+ *   金鑰與資料庫分離（DB 外洩不可解密）；嚴禁開機隨機（重啟即全部解不開）與可預測後備（審計慣例）。
+ *   加密與 state 簽章用「不同分域前綴」派生，跨用途金鑰不可互換（比照 storage 的 dbfile. 分域）。
+ * - OAuth state＝HMAC 簽章＋10 分鐘效期＋timingSafeEqual＋callback 比對登入者（三重繫結防 CSRF/跨帳綁定）。
+ * - 外部 API 抓取：https 限定、固定同源（憑證絕不送去 baseUrl 以外的主機）、不跟隨重導向、
+ *   SSRF 守衛（字面快篩＋DNS 權威判準）與 25MB/25s 上限全沿用 databaseFiles。
+ * - google-drive 的 invalid_grant → 連線標記 error 引導重連（不對死憑證重打）。
+ */
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { and, eq } from "drizzle-orm";
+import { db, schema } from "../db";
+import { proxyFetch } from "./http";
+import { STORAGE_ROOT } from "./storage";
+import { assertPublicHostOrError, MAX_IMPORT_BYTES, readBodyCapped, ssrfGuardError } from "./databaseFiles";
+
+const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const OAUTH_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
+const DRIVE_API = "https://www.googleapis.com/drive/v3";
+/** 最小權限：只讀雲端硬碟（不能改不能刪）；openid email 用來顯示連結的是哪個帳號 */
+const DRIVE_SCOPES = "openid email https://www.googleapis.com/auth/drive.readonly";
+/** 每人 api 連接上限（防塞爆；正常用途遠用不滿） */
+export const MAX_API_CONNECTIONS = 10;
+/** 外部 API 回傳內容的字數上限：與 databases.importData 的 content 上限同口徑 */
+export const MAX_API_CONTENT_CHARS = 1_400_000;
+
+export type IntegrationRow = typeof schema.userIntegrations.$inferSelect;
+
+/* ────────────────────────── 金鑰與加解密 ────────────────────────── */
+
+let cachedSeed: string | null = null;
+
+/**
+ * 金鑰種子解析：INTEGRATION_TOKEN_SECRET（可獨立輪替）→ Volume 持久檔（首次自動產生）。
+ * 兩者皆「持久」——at-rest 加密的 token 必須重啟後仍可解（與簽名網址的開機隨機語意不同）。
+ */
+function keySeed(): string {
+  if (process.env.INTEGRATION_TOKEN_SECRET) return process.env.INTEGRATION_TOKEN_SECRET;
+  if (cachedSeed) return cachedSeed;
+  const file = path.join(STORAGE_ROOT, ".integration-key");
+  try {
+    if (existsSync(file)) {
+      const s = readFileSync(file, "utf8").trim();
+      if (s.length >= 32) {
+        cachedSeed = s;
+        return s;
+      }
+    }
+    const fresh = randomBytes(32).toString("hex");
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, fresh, { mode: 0o600 });
+    cachedSeed = fresh;
+    return fresh;
+  } catch (err) {
+    // Volume 不可寫（極端情況）：明確拋錯而非退到不持久的值——寧可功能不可用，不可存了之後解不開
+    throw new Error(`整合金鑰初始化失敗（無法寫入 ${file}）：${err instanceof Error ? err.message : err}——請設定環境變數 INTEGRATION_TOKEN_SECRET`);
+  }
+}
+
+/** 分域派生：加密與 state 簽章各自一把，跨用途不可互換 */
+function encKey(): Buffer {
+  return createHash("sha256").update(`integrations-token:${keySeed()}`).digest();
+}
+function stateKey(): Buffer {
+  return createHash("sha256").update(`integrations-state:${keySeed()}`).digest();
+}
+
+export function encryptSecret(plain: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", encKey(), iv);
+  const enc = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  return `${iv.toString("hex")}:${cipher.getAuthTag().toString("hex")}:${enc.toString("hex")}`;
+}
+
+export function decryptSecret(stored: string): string {
+  const [ivHex, tagHex, dataHex] = stored.split(":");
+  if (!ivHex || !tagHex || !dataHex) throw new Error("憑證格式不正確");
+  const decipher = createDecipheriv("aes-256-gcm", encKey(), Buffer.from(ivHex, "hex"));
+  decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+  return Buffer.concat([decipher.update(Buffer.from(dataHex, "hex")), decipher.final()]).toString("utf8");
+}
+
+/** 解密（含失效標記）：金鑰輪替/檔案遺失導致解不開時，把連線標記 error 引導使用者重新連結 */
+async function decryptOrMarkError(row: IntegrationRow): Promise<string | null> {
+  try {
+    return decryptSecret(row.secretEnc);
+  } catch {
+    await db.update(schema.userIntegrations)
+      .set({ status: "error", lastError: "憑證解密失敗（伺服器金鑰可能已輪替）——請重新連結/重新輸入" })
+      .where(eq(schema.userIntegrations.id, row.id))
+      .catch(() => {});
+    return null;
+  }
+}
+
+/* ────────────────────────── OAuth state（HMAC 簽章） ────────────────────────── */
+
+function stateSig(payload: string): string {
+  return createHmac("sha256", stateKey()).update(payload).digest("hex");
+}
+
+export function signIntegrationState(userId: string): string {
+  const payload = Buffer.from(`${userId}|${Date.now() + 10 * 60_000}`).toString("base64url");
+  return `${payload}.${stateSig(payload)}`;
+}
+
+export function verifyIntegrationState(state: string): { userId: string } | null {
+  const [payload, sig] = state.split(".");
+  if (!payload || !sig) return null;
+  const expect = stateSig(payload);
+  const a = Buffer.from(sig, "utf8");
+  const b = Buffer.from(expect, "utf8");
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  const [userId, expStr] = Buffer.from(payload, "base64url").toString("utf8").split("|");
+  if (!userId || !expStr || Number(expStr) < Date.now()) return null;
+  return { userId };
+}
+
+/* ────────────────────────── Google 雲端硬碟（OAuth drive.readonly） ────────────────────────── */
+
+/** 與日曆同一組 GCP 憑證（GOOGLE_CLIENT_ID/SECRET）；但獨立連線、獨立 scope——不動既有日曆授權 */
+export function isGoogleDriveConfigured(): boolean {
+  return !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+}
+
+/** callback 路徑與日曆不同——需在 GCP console 另外註冊這個 redirect URI */
+export function driveRedirectUri(): string {
+  const base = process.env.APP_URL?.replace(/\/$/, "") || `http://localhost:${process.env.PORT ?? 3000}`;
+  return `${base}/api/integrations/google-drive/callback`;
+}
+
+export function buildDriveAuthUrl(userId: string): string {
+  const q = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+    redirect_uri: driveRedirectUri(),
+    response_type: "code",
+    scope: DRIVE_SCOPES,
+    access_type: "offline",
+    prompt: "consent", // 重複授權時 Google 預設不再發 refresh token——強制 consent 確保拿得到
+    state: signIntegrationState(userId),
+  });
+  return `${OAUTH_AUTH_URL}?${q}`;
+}
+
+async function tokenRequest(params: Record<string, string>): Promise<Record<string, unknown>> {
+  const res = await proxyFetch(OAUTH_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params).toString(),
+    timeoutMs: 15_000,
+  });
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    const err = new Error(`Google OAuth ${res.status}：${String(json.error ?? "")} ${String(json.error_description ?? "")}`.trim());
+    (err as Error & { oauthError?: string }).oauthError = String(json.error ?? "");
+    throw err;
+  }
+  return json;
+}
+
+/** 授權碼換 token（email 直解 id_token payload——token 來自 Google TLS 直連，毋須再驗簽） */
+export async function exchangeDriveCode(code: string): Promise<{ refreshToken: string; email: string | null }> {
+  const json = await tokenRequest({
+    code,
+    client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+    client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+    redirect_uri: driveRedirectUri(),
+    grant_type: "authorization_code",
+  });
+  const refreshToken = typeof json.refresh_token === "string" ? json.refresh_token : "";
+  if (!refreshToken) throw new Error("Google 未回發 refresh token——請在授權畫面允許離線存取後重試");
+  let email: string | null = null;
+  if (typeof json.id_token === "string") {
+    try {
+      const payload = JSON.parse(Buffer.from(json.id_token.split(".")[1] ?? "", "base64url").toString("utf8"));
+      if (typeof payload.email === "string") email = payload.email;
+    } catch { /* email 僅供顯示，解不出就留空 */ }
+  }
+  return { refreshToken, email };
+}
+
+async function findIntegration(userId: string, kind: "google-drive" | "notion"): Promise<IntegrationRow | null> {
+  const [row] = await db.select().from(schema.userIntegrations)
+    .where(and(eq(schema.userIntegrations.userId, userId), eq(schema.userIntegrations.kind, kind)));
+  return row ?? null;
+}
+
+/** 完成 OAuth 後落庫（重複連結＝覆蓋） */
+export async function saveGoogleDrive(userId: string, refreshToken: string, email: string | null): Promise<void> {
+  const secretEnc = encryptSecret(refreshToken);
+  const existing = await findIntegration(userId, "google-drive");
+  if (existing) {
+    driveAccessCache.delete(existing.id);
+    await db.update(schema.userIntegrations)
+      .set({ secretEnc, meta: { email }, status: "active", lastError: null })
+      .where(eq(schema.userIntegrations.id, existing.id));
+  } else {
+    await db.insert(schema.userIntegrations).values({ userId, kind: "google-drive", secretEnc, meta: { email } });
+  }
+}
+
+/** access token 短快取（效期約 1 小時，留 5 分鐘邊際）；單容器記憶體 Map（全站慣例） */
+const driveAccessCache = new Map<string, { token: string; expiresAt: number }>();
+
+async function driveAccessToken(row: IntegrationRow): Promise<string> {
+  const hit = driveAccessCache.get(row.id);
+  if (hit && hit.expiresAt > Date.now()) return hit.token;
+  const refreshToken = await decryptOrMarkError(row);
+  if (!refreshToken) throw new Error("Google 雲端連結需要重新設定——請到「整合連接」頁重新連結");
+  try {
+    const json = await tokenRequest({
+      refresh_token: refreshToken,
+      client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+      client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      grant_type: "refresh_token",
+    });
+    const token = String(json.access_token ?? "");
+    if (!token) throw new Error("Google 未回發 access token");
+    const ttl = Math.max(60, Number(json.expires_in ?? 3600) - 300) * 1000;
+    driveAccessCache.set(row.id, { token, expiresAt: Date.now() + ttl });
+    return token;
+  } catch (err) {
+    if ((err as Error & { oauthError?: string }).oauthError === "invalid_grant") {
+      await db.update(schema.userIntegrations)
+        .set({ status: "error", lastError: "Google 授權已失效（可能已在 Google 帳戶端撤銷）——請重新連結" })
+        .where(eq(schema.userIntegrations.id, row.id));
+    }
+    throw err;
+  }
+}
+
+export type DriveFetchResult =
+  | { ok: true; buf: Buffer; mime: string; name: string | null }
+  | { ok: false; reason: "not-connected" | "no-access" | "error"; message: string };
+
+/**
+ * 用「使用者自己的」Google 授權抓私有檔。normalizeImportUrl 解析出的 kind+fileId 進來：
+ * - google-doc/sheet/slides 走 Drive export（txt/csv/txt——與公開匯出同格式，後續抽取邏輯不變）；
+ * - google-drive 一般檔案先查中繼資料（名稱/大小預檢）再 alt=media 下載。
+ * 找不到/無權限回 no-access（呼叫端退回公開路徑或給人話）；未連結回 not-connected。
+ */
+export async function fetchDriveFile(
+  userId: string,
+  kind: "google-doc" | "google-sheet" | "google-slides" | "google-drive",
+  fileId: string,
+): Promise<DriveFetchResult> {
+  if (!isGoogleDriveConfigured()) return { ok: false, reason: "not-connected", message: "站方尚未設定 Google 整合" };
+  const row = await findIntegration(userId, "google-drive");
+  if (!row || row.status !== "active") return { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
+  try {
+    const token = await driveAccessToken(row);
+    const headers = { Authorization: `Bearer ${token}` };
+    const id = encodeURIComponent(fileId);
+    let url: string;
+    let mimeFallback: string;
+    let name: string | null = null;
+    if (kind === "google-drive") {
+      const metaRes = await proxyFetch(`${DRIVE_API}/files/${id}?fields=name,mimeType,size&supportsAllDrives=true`, { headers, timeoutMs: 15_000 });
+      if (metaRes.status === 404 || metaRes.status === 403) {
+        return { ok: false, reason: "no-access", message: `你的 Google 帳戶${row.meta?.email ? `（${row.meta.email}）` : ""}沒有這個檔案的存取權` };
+      }
+      if (!metaRes.ok) throw new Error(`Google Drive 中繼資料查詢失敗（HTTP ${metaRes.status}）`);
+      const meta = (await metaRes.json()) as { name?: string; mimeType?: string; size?: string };
+      const size = Number(meta.size ?? 0);
+      if (size > MAX_IMPORT_BYTES) return { ok: false, reason: "error", message: `檔案太大（上限 ${Math.round(MAX_IMPORT_BYTES / 1024 / 1024)}MB）` };
+      name = meta.name ?? null;
+      mimeFallback = meta.mimeType ?? "application/octet-stream";
+      url = `${DRIVE_API}/files/${id}?alt=media&supportsAllDrives=true`;
+    } else {
+      const exportMime = kind === "google-sheet" ? "text/csv" : "text/plain";
+      mimeFallback = exportMime;
+      url = `${DRIVE_API}/files/${id}/export?mimeType=${encodeURIComponent(exportMime)}&supportsAllDrives=true`;
+    }
+    const res = await proxyFetch(url, { headers, timeoutMs: 25_000 });
+    if (res.status === 404 || res.status === 403) {
+      return { ok: false, reason: "no-access", message: `你的 Google 帳戶${row.meta?.email ? `（${row.meta.email}）` : ""}沒有這個檔案的存取權` };
+    }
+    if (!res.ok) throw new Error(`Google Drive 讀取失敗（HTTP ${res.status}）`);
+    const buf = await readBodyCapped(res, MAX_IMPORT_BYTES);
+    const mime = (res.headers.get("content-type") ?? mimeFallback).split(";")[0].trim().toLowerCase();
+    void db.update(schema.userIntegrations).set({ lastUsedAt: new Date(), lastError: null })
+      .where(eq(schema.userIntegrations.id, row.id)).catch(() => {});
+    return { ok: true, buf, mime, name };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Google Drive 讀取失敗";
+    void db.update(schema.userIntegrations).set({ lastError: message })
+      .where(and(eq(schema.userIntegrations.id, row.id), eq(schema.userIntegrations.status, "active"))).catch(() => {});
+    return { ok: false, reason: "error", message };
+  }
+}
+
+/** 中斷 Google 雲端連結：盡力撤銷 token 再刪本地紀錄。
+ *  ★ 例外：同一人若還有「Google 日曆」連線（同一組 GCP client）——Google 撤銷任一 refresh token
+ *  可能連帶撤銷該 user×client 的整個授權，把日曆同步一起弄斷；此時只刪本地紀錄、不打撤銷端點
+ *  （本地憑證已刪即不可再用；要徹底撤銷可到 Google 帳戶安全設定移除授權）。 */
+async function disconnectGoogleDrive(row: IntegrationRow): Promise<void> {
+  driveAccessCache.delete(row.id);
+  const [calendarConn] = await db.select({ id: schema.googleCalendarConnections.id })
+    .from(schema.googleCalendarConnections)
+    .where(and(eq(schema.googleCalendarConnections.userId, row.userId), eq(schema.googleCalendarConnections.status, "active")));
+  if (calendarConn) return;
+  try {
+    const refreshToken = decryptSecret(row.secretEnc);
+    await proxyFetch(OAUTH_REVOKE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: refreshToken }).toString(),
+      timeoutMs: 10_000,
+    });
+  } catch { /* 授權可能已失效——本地清理照做 */ }
+}
+
+/* ────────────────────────── Notion（個人 integration token） ────────────────────────── */
+
+/** 儲存前先打 Notion API 驗證 token 有效，順手取 workspace 名稱供列表顯示 */
+export async function setNotionIntegration(userId: string, token: string): Promise<{ workspace: string | null }> {
+  const trimmed = token.trim();
+  if (!trimmed || trimmed.length > 300) throw new Error("Notion token 格式不正確");
+  if (!/^[\x21-\x7E]+$/.test(trimmed)) throw new Error("Notion token 含不可見字元——請重新複製貼上");
+  const res = await proxyFetch("https://api.notion.com/v1/users/me", {
+    headers: { Authorization: `Bearer ${trimmed}`, "Notion-Version": "2022-06-28" },
+    timeoutMs: 15_000,
+  });
+  if (res.status === 401) throw new Error("Notion 不認得這個 token——請到 notion.so/my-integrations 確認整合的 Internal Integration Secret");
+  if (!res.ok) throw new Error(`Notion 驗證失敗（HTTP ${res.status}）——請稍後再試`);
+  const me = (await res.json().catch(() => ({}))) as { name?: string; bot?: { workspace_name?: string } };
+  const workspace = me.bot?.workspace_name ?? me.name ?? null;
+  const secretEnc = encryptSecret(trimmed);
+  const meta = { workspace, last4: trimmed.slice(-4) };
+  const existing = await findIntegration(userId, "notion");
+  if (existing) {
+    await db.update(schema.userIntegrations)
+      .set({ secretEnc, meta, status: "active", lastError: null })
+      .where(eq(schema.userIntegrations.id, existing.id));
+  } else {
+    await db.insert(schema.userIntegrations).values({ userId, kind: "notion", secretEnc, meta });
+  }
+  return { workspace };
+}
+
+/** 取使用者自己的 Notion token（無連線/解密失敗回 null——呼叫端退回站方 NOTION_TOKEN） */
+export async function getNotionToken(userId: string): Promise<string | null> {
+  const row = await findIntegration(userId, "notion");
+  if (!row || row.status !== "active") return null;
+  return decryptOrMarkError(row);
+}
+
+/* ────────────────────────── 外部資料庫/API 連接 ────────────────────────── */
+
+const HEADER_NAME_RE = /^[A-Za-z0-9-]{1,64}$/;
+/** 這些標頭交給 fetch 自己管——使用者覆寫只會壞事或繞驗證 */
+const FORBIDDEN_HEADERS = new Set(["host", "content-length", "transfer-encoding", "connection", "cookie"]);
+
+/** 建立連接時的輸入驗證（純函式，可測）：回錯誤訊息（人話）；null＝合法 */
+export function validateApiConnectionInput(input: { name: string; baseUrl: string; headerName?: string; secret: string }): string | null {
+  const name = input.name.trim();
+  if (!name || name.length > 60) return "請幫連接取個名字（60 字內）";
+  let u: URL;
+  try {
+    u = new URL(input.baseUrl);
+  } catch {
+    return "基底網址格式不正確（要含 https:// 開頭）";
+  }
+  if (u.protocol !== "https:") return "基底網址必須是 https://——憑證不能走明文傳輸";
+  const ssrf = ssrfGuardError(input.baseUrl);
+  if (ssrf) return ssrf;
+  const header = (input.headerName ?? "Authorization").trim();
+  if (!HEADER_NAME_RE.test(header)) return "標頭名稱只能是英數字與連字號（1–64 字）";
+  if (FORBIDDEN_HEADERS.has(header.toLowerCase())) return `不能用「${header}」當認證標頭`;
+  const secret = input.secret;
+  if (!secret || secret.length > 2000) return "請貼上 API 金鑰（2000 字內）";
+  // 標頭值限可列印 ASCII：擋換行（標頭注入）與不可見字元
+  if (!/^[\x20-\x7E]+$/.test(secret)) return "API 金鑰只能含可列印英數符號（不可有換行或全形字元）";
+  return null;
+}
+
+export async function addApiConnection(
+  userId: string,
+  input: { name: string; baseUrl: string; headerName?: string; secret: string },
+): Promise<{ id: string }> {
+  const invalid = validateApiConnectionInput(input);
+  if (invalid) throw new Error(invalid);
+  const name = input.name.trim();
+  const existing = await db.select({ id: schema.userIntegrations.id, name: schema.userIntegrations.name })
+    .from(schema.userIntegrations)
+    .where(and(eq(schema.userIntegrations.userId, userId), eq(schema.userIntegrations.kind, "api")));
+  if (existing.length >= MAX_API_CONNECTIONS) throw new Error(`外部連接太多（上限 ${MAX_API_CONNECTIONS} 條）——先刪掉不用的`);
+  if (existing.some((r) => r.name === name)) throw new Error(`已有叫「${name}」的連接——換個名字，或先刪掉舊的`);
+  try {
+    const [row] = await db.insert(schema.userIntegrations).values({
+      userId,
+      kind: "api",
+      name,
+      secretEnc: encryptSecret(input.secret),
+      baseUrl: input.baseUrl.replace(/\/$/, ""),
+      authHeader: (input.headerName ?? "Authorization").trim(),
+      meta: { last4: input.secret.slice(-4) },
+    }).returning();
+    return { id: row.id };
+  } catch (err) {
+    // 併發撞唯一索引（同名同時建）：轉人話，不外洩原始約束錯誤（比照 acceptInvite 慣例）
+    if (err instanceof Error && /unique|duplicate/i.test(err.message)) {
+      throw new Error(`已有叫「${name}」的連接——換個名字，或先刪掉舊的`);
+    }
+    throw err;
+  }
+}
+
+/**
+ * 解析抓取網址（純函式，可測）：path 可為空（用 baseUrl 本身）、相對路徑、查詢字串或完整網址，
+ * 但最終網址必須與 baseUrl「同源」——憑證只送去使用者當初登記的主機，杜絕
+ * 「path 塞 //evil.com/x 或絕對網址」把金鑰騙去別的主機。
+ */
+export function resolveApiUrl(baseUrl: string, rawPath: string): string {
+  const base = new URL(baseUrl);
+  const path_ = rawPath.trim();
+  let target: URL;
+  if (!path_) {
+    target = base;
+  } else if (path_.startsWith("?")) {
+    target = new URL(base.toString());
+    target.search = path_;
+  } else {
+    // new URL 對 "//host/x"、"https://host/x" 都會換主機——靠下方同源比對一體擋掉
+    target = new URL(path_, base.toString().endsWith("/") ? base.toString() : base.toString() + "/");
+  }
+  if (target.origin !== base.origin) {
+    throw new Error("抓取路徑只能在連接的基底網址底下——憑證不會送去其他主機");
+  }
+  if (target.protocol !== "https:") throw new Error("只支援 https 網址");
+  return target.toString();
+}
+
+/** 每人每分鐘的外部抓取節流（單容器記憶體 Map，全站慣例） */
+const apiFetchWindow = new Map<string, { count: number; resetAt: number }>();
+const API_FETCH_PER_MINUTE = 20;
+
+export async function fetchApiConnection(
+  userId: string,
+  connectionId: string,
+  rawPath: string,
+): Promise<{ status: number; mime: string; content: string; truncated: boolean }> {
+  const now = Date.now();
+  const win = apiFetchWindow.get(userId);
+  if (!win || win.resetAt < now) {
+    apiFetchWindow.set(userId, { count: 1, resetAt: now + 60_000 });
+  } else if (win.count >= API_FETCH_PER_MINUTE) {
+    throw new Error("外部抓取太頻繁——請一分鐘後再試");
+  } else {
+    win.count += 1;
+  }
+
+  const [row] = await db.select().from(schema.userIntegrations)
+    .where(and(
+      eq(schema.userIntegrations.id, connectionId),
+      eq(schema.userIntegrations.userId, userId),
+      eq(schema.userIntegrations.kind, "api"),
+    ));
+  // 查無＝不存在或不是你的——同一句話，不洩漏存在性（全站慣例）
+  if (!row || !row.baseUrl) throw new Error("找不到這條外部連接");
+  const secret = await decryptOrMarkError(row);
+  if (!secret) throw new Error("這條連接的憑證需要重新設定——請刪除後重新建立");
+
+  const url = resolveApiUrl(row.baseUrl, rawPath);
+  const ssrf = ssrfGuardError(url);
+  if (ssrf) throw new Error(ssrf);
+  const dns = await assertPublicHostOrError(new URL(url).hostname);
+  if (dns) throw new Error(dns);
+
+  const markError = (msg: string) =>
+    db.update(schema.userIntegrations).set({ lastError: msg })
+      .where(eq(schema.userIntegrations.id, row.id)).catch(() => {});
+
+  let res: Response;
+  try {
+    res = await proxyFetch(url, {
+      headers: {
+        [row.authHeader || "Authorization"]: secret,
+        Accept: "application/json, text/csv, text/tab-separated-values, text/plain;q=0.9, */*;q=0.5",
+      },
+      timeoutMs: 25_000,
+      redirect: "manual", // 不跟隨：302 換主機會把憑證外送、換路徑也可能繞過同源檢查
+    });
+  } catch (err) {
+    const msg = `連線失敗：${err instanceof Error ? err.message : "網路錯誤"}`;
+    void markError(msg);
+    throw new Error(msg);
+  }
+  if (res.status >= 300 && res.status < 400) {
+    const msg = "外部 API 回應重導向——為避免憑證外流不跟隨重導向，請改用最終網址當基底";
+    void markError(msg);
+    throw new Error(msg);
+  }
+  const buf = await readBodyCapped(res, MAX_IMPORT_BYTES);
+  const text = buf.toString("utf8");
+  if (!res.ok) {
+    const msg = `外部 API 回應 HTTP ${res.status}${text ? `：${text.slice(0, 200)}` : ""}`;
+    void markError(msg);
+    throw new Error(msg);
+  }
+  void db.update(schema.userIntegrations).set({ lastUsedAt: new Date(), lastError: null })
+    .where(eq(schema.userIntegrations.id, row.id)).catch(() => {});
+  const mime = (res.headers.get("content-type") ?? "text/plain").split(";")[0].trim().toLowerCase();
+  return {
+    status: res.status,
+    mime,
+    content: text.slice(0, MAX_API_CONTENT_CHARS),
+    truncated: text.length > MAX_API_CONTENT_CHARS,
+  };
+}
+
+/* ────────────────────────── 列表與移除（router 用） ────────────────────────── */
+
+/** 我的整合清單（絕不回憑證原文/密文——只給顯示用中繼資料） */
+export async function listIntegrations(userId: string): Promise<{
+  googleDrive: { configured: boolean; connected: boolean; email: string | null; status: string | null; lastError: string | null };
+  notion: { connected: boolean; workspace: string | null; last4: string | null; status: string | null; lastError: string | null; siteTokenAvailable: boolean };
+  apis: Array<{ id: string; name: string; baseUrl: string; authHeader: string; last4: string | null; status: string; lastError: string | null; lastUsedAt: Date | null; createdAt: Date }>;
+}> {
+  const rows = await db.select().from(schema.userIntegrations).where(eq(schema.userIntegrations.userId, userId));
+  const drive = rows.find((r) => r.kind === "google-drive") ?? null;
+  const notion = rows.find((r) => r.kind === "notion") ?? null;
+  return {
+    googleDrive: {
+      configured: isGoogleDriveConfigured(),
+      connected: !!drive,
+      email: typeof drive?.meta?.email === "string" ? drive.meta.email : null,
+      status: drive?.status ?? null,
+      lastError: drive?.lastError ?? null,
+    },
+    notion: {
+      connected: !!notion,
+      workspace: typeof notion?.meta?.workspace === "string" ? notion.meta.workspace : null,
+      last4: typeof notion?.meta?.last4 === "string" ? notion.meta.last4 : null,
+      status: notion?.status ?? null,
+      lastError: notion?.lastError ?? null,
+      siteTokenAvailable: !!process.env.NOTION_TOKEN,
+    },
+    apis: rows.filter((r) => r.kind === "api").map((r) => ({
+      id: r.id,
+      name: r.name,
+      baseUrl: r.baseUrl ?? "",
+      authHeader: r.authHeader ?? "Authorization",
+      last4: typeof r.meta?.last4 === "string" ? r.meta.last4 : null,
+      status: r.status,
+      lastError: r.lastError,
+      lastUsedAt: r.lastUsedAt,
+      createdAt: r.createdAt,
+    })),
+  };
+}
+
+/** 移除連線（只能移自己的）：google-drive 先盡力撤銷 token */
+export async function removeIntegration(userId: string, id: string): Promise<void> {
+  const [row] = await db.select().from(schema.userIntegrations)
+    .where(and(eq(schema.userIntegrations.id, id), eq(schema.userIntegrations.userId, userId)));
+  if (!row) throw new Error("找不到這條連接");
+  if (row.kind === "google-drive") await disconnectGoogleDrive(row);
+  await db.delete(schema.userIntegrations).where(eq(schema.userIntegrations.id, row.id));
+}
+
+/** kind 專屬移除（google-drive/notion 一人一條、前端不經手 id）；冪等——沒有連線也算成功 */
+export async function removeIntegrationByKind(userId: string, kind: "google-drive" | "notion"): Promise<void> {
+  const row = await findIntegration(userId, kind);
+  if (!row) return;
+  if (row.kind === "google-drive") await disconnectGoogleDrive(row);
+  await db.delete(schema.userIntegrations).where(eq(schema.userIntegrations.id, row.id));
+}

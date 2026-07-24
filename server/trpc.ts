@@ -59,6 +59,9 @@ const AUDIT_EXEMPT = new Set(["messages.markRead", "dm.markRead"]);
  *  這些 mutation 照記（誰、何時、傳給誰），唯 body 以佔位符取代，不落訊息明文 */
 const AUDIT_REDACT_BODY = new Set(["dm.send"]);
 
+/** 外部抓取的 path 可能被使用者塞查詢字串金鑰（?api_key=…）——動作照記，唯 path 以佔位符取代 */
+const AUDIT_REDACT_PATH = new Set(["integrations.fetchApi"]);
+
 /** 需登入 */
 export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, getRawInput }) => {
   // 開機初始化（建表/種子）完成前，回可理解的訊息而不是 relation does not exist 500
@@ -79,6 +82,9 @@ export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, g
     let raw = await getRawInput().catch(() => undefined);
     if (AUDIT_REDACT_BODY.has(path) && raw && typeof raw === "object" && "body" in raw) {
       raw = { ...(raw as Record<string, unknown>), body: "（私訊內容不落審計）" };
+    }
+    if (AUDIT_REDACT_PATH.has(path) && raw && typeof raw === "object" && "path" in raw) {
+      raw = { ...(raw as Record<string, unknown>), path: "（抓取路徑不落審計——可能含查詢字串金鑰）" };
     }
     const { recordAudit } = await import("./services/audit");
     recordAudit(auth, path, raw, {
