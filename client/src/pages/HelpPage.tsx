@@ -206,7 +206,7 @@ export function HelpPage() {
           <Spot icon="Gem" name="剩餘點數" where="頂欄">
             這顆鑽石徽章隨時顯示你還能生多少。滑上去看週／日上限與是哪一層額度最緊。
           </Spot>
-          <Spot icon="Bell" name="待辦鈴鐺" where="頂欄・組長才有">
+          <Spot icon="Bell" name="待辦鈴鐺" where="頂欄・有待辦才出現">
             有幾筆分鏡等你審、幾格生成待核准。點開直接跳到那個專案。沒待辦就不出現。
           </Spot>
           <Spot icon="Clock" name="筆記排程" where="頂欄">
@@ -216,8 +216,12 @@ export function HelpPage() {
             你自己的表格與資料集（例：器材借用表、拍攝清單）。可上傳文件給 AI 讀。
           </Spot>
           <Spot icon="User" name="你的名字（選單）" where="頂欄右上">
-            點開有：模型指南、接上外部 AI、資料下載、我的回報、改密碼、登出。
+            點開有：模型指南、接上外部 AI、資料下載、我的回報、通知設定、改密碼、登出。
             組長／管理員還會多出<b>管理</b>那一組。多個組的話，左邊還有切換組別的選單。
+          </Spot>
+          <Spot icon="Bell" name="通知設定" where="你的名字選單裡">
+            把手機和電腦連結進來，分鏡審批、私訊、@提及、生成完成會直接推到裝置上——
+            <b>關掉網頁也收得到</b>。手機（iPhone 要先「加入主畫面」）和電腦各啟用一次，兩邊就都會響。
           </Spot>
         </MapGroup>
 
