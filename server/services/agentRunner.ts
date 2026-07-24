@@ -573,6 +573,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       prompt,
       sceneId,
       sceneRole,
+      agentRunId: run.id, // 生成列回連本次代理執行——生成紀錄可回看「這筆是代理跑出來的」
       reasonPrefix: "AI 代理",
       assertAccess: () => accessRole,
     });

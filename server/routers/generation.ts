@@ -102,6 +102,46 @@ export const generationRouter = router({
       }),
     ),
 
+  /**
+   * 以相同設定重試（伺服器端完整版）：舊做法由前端拿 prompt/model/來源重組 submit，
+   * 會默默丟失角色定裝/場景設定錨點與分鏡綁定——重試出的圖跨鏡就走樣、成品也不回填分鏡。
+   * 這裡從失敗列原樣還原全部連結：characterIds/scenePresetIds/sceneId/sceneRole，
+   * 素材庫來源從網址取回 assetId 重新簽名（過期網址原樣重送必敗），世界觀以「重試當下」重新注入。
+   */
+  retry: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));
+    if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
+    requireGroup(ctx.auth, gen.groupId); // 多組隔離
+    if (gen.status !== "failed") throw new TRPCError({ code: "BAD_REQUEST", message: "只有失敗的生成可以重試" });
+    // 素材庫來源存的是短效簽名網址——取回 assetId 走 sourceAssetId 讓核心重新簽名（順帶重過相容性守門）。
+    // 嚴格 UUID 形（8-4-4-4-12）：外部網址可能剛好含 /api/assets/<36字>/file，寬鬆比對抓到
+    // 非 UUID 會讓 pg 的 uuid cast 直接 500——非 UUID 一律走 sourceUrl 原樣透傳
+    const assetId = gen.sourceUrl?.match(
+      /\/api\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/file/i,
+    )?.[1];
+    return submitGenerationCore({
+      userId: ctx.auth.user.id,
+      projectId: gen.projectId,
+      modelId: gen.modelId,
+      prompt: gen.prompt,
+      sourceAssetId: assetId,
+      sourceUrl: assetId ? undefined : gen.sourceUrl ?? undefined,
+      characterIds: (gen.characterIds as string[] | null) ?? undefined,
+      scenePresetIds: (gen.scenePresetIds as string[] | null) ?? undefined,
+      sceneId: gen.sceneId ?? undefined,
+      sceneRole: gen.sceneRole ?? undefined,
+      // 保留出處：工作流/代理步驟失敗後的重試仍能回溯原本那條 run（來源 chip 不消失）
+      workflowRunId: gen.workflowRunId ?? undefined,
+      agentRunId: gen.agentRunId ?? undefined,
+      reasonPrefix: "重試生成",
+      assertAccess: async (project) => {
+        const role = requireGroup(ctx.auth, project.groupId);
+        await assertProjectEditable(ctx.auth, project); // 2.3：專案檢視者不能生成
+        return role;
+      },
+    });
+  }),
+
   /** 輪詢狀態(開發模式主要路徑;正式站之後補 webhook+此輪詢當備援):薄殼,推進邏輯在 advanceGeneration */
   status: authedProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
     const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));

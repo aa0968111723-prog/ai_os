@@ -31,6 +31,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "projects.purgeAsset": "永久刪除素材",
   // 生成與點數
   "generation.submit": "送出生成",
+  "generation.retry": "重試失敗的生成",
   "generation.rename": "重新命名成品",
   "generation.toggleFavorite": "收藏／取消收藏成品",
   "generation.decideCost": "核決超額生成",

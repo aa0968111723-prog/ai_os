@@ -10,6 +10,7 @@ import { AcceptInvitePage } from "./pages/AcceptInvitePage";
 const AdminPage = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.AdminPage })));
 const AuditLogCard = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.AuditLogCard })));
 const ConsumptionMonitorCard = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.ConsumptionMonitorCard })));
+const InsightsCard = lazy(() => import("./pages/AdminPage").then((m) => ({ default: m.InsightsCard })));
 const MembersPage = lazy(() => import("./pages/MembersPage").then((m) => ({ default: m.MembersPage })));
 const FeedbackPage = lazy(() => import("./pages/FeedbackPage").then((m) => ({ default: m.FeedbackPage })));
 const MyReportsPage = lazy(() => import("./pages/MyReportsPage").then((m) => ({ default: m.MyReportsPage })));
@@ -416,6 +417,7 @@ export function App() {
                     // 組長也看得到「點數消耗監控」：後端已按呼叫者權限把範圍收斂到自己帶的組
                     <div className="stack" style={{ maxWidth: 860, margin: "0 auto" }}>
                       <ConsumptionMonitorCard />
+                      <InsightsCard />
                       <AuditLogCard />
                     </div>
                   ) : (
