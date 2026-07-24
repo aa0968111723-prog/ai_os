@@ -22,7 +22,7 @@ import type { Response } from "express";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { absPathOf, extFromMime } from "./storage";
-import { appendAndWait, fetchRemoteAsset, safeName, sceneDur, splitCue } from "./exporter";
+import { appendAndWait, capRemoteBytes, fetchRemoteAsset, REMOTE_FILE_MAX_BYTES, safeName, sceneDur, splitCue } from "./exporter";
 import { JY_CONTENT_TEMPLATE, JY_META_TEMPLATE } from "./jianyingTemplate";
 
 /** 剪映官方「草稿資料夾根目錄」佔位符——固定魔法字串，多個獨立開源專案一字不差交叉證實 */
@@ -317,8 +317,12 @@ export async function exportJianyingDraftZip(projectId: string, res: Response): 
   const archive = new ZipArchive({ zlib: { level: 6 } });
   archive.on("error", (err) => {
     console.error("[export:jianying] 打包錯誤：", err instanceof Error ? err.message : err);
-    if (!res.headersSent) res.status(500).end("打包失敗");
-    else res.destroy();
+    if (!res.headersSent) {
+      // 標頭還沒 flush 就失敗：先撤掉 zip/attachment 標頭再回錯，否則瀏覽器把錯誤內文存成壞掉的 .zip
+      res.removeHeader("Content-Disposition");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.status(500).end("打包失敗");
+    } else res.destroy();
   });
   const clientAbort = new AbortController();
   res.on("close", () => {
@@ -344,11 +348,12 @@ export async function exportJianyingDraftZip(projectId: string, res: Response): 
           return null;
         }
         const len = Number(fileRes.headers.get("content-length") ?? 0);
-        if (len > 200 * 1024 * 1024) {
+        if (len > REMOTE_FILE_MAX_BYTES) {
           void fileRes.body.cancel().catch(() => {});
           return null;
         }
-        return Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream);
+        // 標頭層守門擋不住 chunked/謊報長度的回應——串流階段由 capRemoteBytes 計數，超限即斷
+        return capRemoteBytes(Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream));
       }
       return null;
     } catch {
@@ -367,7 +372,11 @@ export async function exportJianyingDraftZip(projectId: string, res: Response): 
     const asset = assets.find((a) => a.id === scene.assetId);
     if (asset && (asset.kind === "video" || asset.kind === "image")) {
       const source = await openSource(asset);
-      if (clientAbort.signal.aborted) return;
+      // openSource 中途斷線時 stat 不可取消、仍可能回已開檔的串流——先 destroy 再收工，別漏 fd
+      if (clientAbort.signal.aborted) {
+        source?.destroy();
+        return;
+      }
       if (source) {
         const ext = (asset.mime && extFromMime(asset.mime)) || (asset.kind === "video" ? ".mp4" : ".jpg");
         const fileName = `${num}_${safeName(scene.title)}${ext}`;
@@ -385,7 +394,10 @@ export async function exportJianyingDraftZip(projectId: string, res: Response): 
       const narr = assets.find((a) => a.id === scene.narrationAssetId);
       if (narr) {
         const source = await openSource(narr);
-        if (clientAbort.signal.aborted) return;
+        if (clientAbort.signal.aborted) {
+          source?.destroy();
+          return;
+        }
         if (source) {
           const ext = (narr.mime && extFromMime(narr.mime)) || ".mp3";
           const fileName = `${num}_旁白${ext}`;

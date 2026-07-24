@@ -103,8 +103,21 @@ describe("buildFcpxml(媒體連結版)", () => {
     expect(xml).toMatch(/<gap name="3_收尾" offset="9s" start="0s" duration="3s">[\s\S]*?lane="-1"[\s\S]*?<\/gap>/);
   });
 
-  it("旁白 asset 只聲明音訊(hasAudio、無 format ref)", () => {
-    expect(xml).toMatch(/<asset id="a\d+" name="02_旁白\.mp3" start="0s" duration="4s" hasAudio="1"/);
+  it("旁白 asset 只聲明音訊(hasAudio、無 format ref),且不宣告未探測的媒體長度", () => {
+    expect(xml).toMatch(/<asset id="a\d+" name="02_旁白\.mp3" start="0s" hasAudio="1"/);
+    expect(xml).not.toMatch(/name="02_旁白\.mp3"[^>]*duration=/);
+  });
+
+  it("音訊類場景素材:掛 lane=-2 connected clip(與 lane=-1 旁白並存)", () => {
+    const withAudio = buildFcpxml(
+      [{ title: "誦經", durationSec: 4, voiceover: null, mediaPath: "02_音訊/01_誦經.wav", mediaKind: "audio", narrationPath: "02_旁白音檔/01_旁白.mp3" }],
+      "P",
+      { pathPrefix: "../" },
+    );
+    expect(withAudio).toMatch(/<asset-clip ref="a\d+" lane="-2" offset="0s" duration="4s" name="1_誦經" audioRole="effects"\/>/);
+    expect(withAudio).toMatch(/<asset-clip ref="a\d+" lane="-1" offset="0s" duration="4s" name="1_旁白" audioRole="dialogue"\/>/);
+    // 音訊素材沒有畫面 → 主元素仍是 gap
+    expect(withAudio).toContain(`<gap name="1_誦經"`);
   });
 });
 
@@ -118,9 +131,11 @@ describe("buildXmeml(Premiere 時間軸)", () => {
     expect(xml).toContain(`<duration>360</duration>`);
   });
 
-  it("影片 clipitem:start/end 依累計影格,file 帶 rate+duration,pathurl 為相對 URI", () => {
+  it("影片 clipitem:start/end 依累計影格,pathurl 為相對 URI,file 不宣告未探測的長度", () => {
     expect(xml).toContain(`<start>0</start><end>150</end>`);
     expect(xml).toContain(`<pathurl>../${encodeURIComponent("01_視頻素材")}/${encodeURIComponent("01_開場.mp4")}</pathurl>`);
+    const vidFile = xml.slice(xml.indexOf("01_開場.mp4"));
+    expect(vidFile.slice(0, vidFile.indexOf("</file>"))).not.toContain("<duration>");
   });
 
   it("圖片 clipitem:file 不帶 rate/duration,只有 media/video/samplecharacteristics", () => {
@@ -132,12 +147,34 @@ describe("buildXmeml(Premiere 時間軸)", () => {
     expect(fileBlock).not.toContain("<timebase>");
   });
 
-  it("無素材鏡不產 video clipitem(時間軸留空),但旁白 clipitem 照常在 A1", () => {
-    expect(xml).not.toContain("3_收尾"); // 無素材鏡在 V 軌沒有 clipitem
+  it("無素材鏡輸出離線佔位 clipitem(file 無 pathurl),鏡名/時間碼/備註保留", () => {
+    expect(xml).toContain(`<name>3_收尾</name>`);
+    const phFile = xml.slice(xml.indexOf(`3_收尾（無素材）`));
+    expect(phFile.slice(0, phFile.indexOf("</file>"))).not.toContain("<pathurl>");
+    // 旁白 clipitem 照常在 A1;第三鏡旁白時間碼:9s→12s = 270→360 影格
     expect(xml).toContain(`<name>3_旁白</name>`);
-    // 第三鏡旁白時間碼:9s→12s = 270→360 影格
     expect(xml).toContain(`<start>270</start><end>360</end>`);
     expect(xml).toContain(`<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>`);
+  });
+
+  it("骨架版(單檔下載,無任何媒體路徑):每鏡一個離線佔位 clipitem,不是空序列", () => {
+    const skeleton = buildXmeml(scenes, "P"); // 共用測資:三鏡皆無 mediaPath
+    expect((skeleton.match(/<clipitem /g) ?? []).length).toBe(3);
+    expect(skeleton).toContain(`<name>1_開場</name>`);
+    expect(skeleton).toContain(`<mastercomment1>你好,歡迎收看</mastercomment1>`);
+    expect(skeleton).not.toContain("<pathurl>");
+  });
+
+  it("音訊類場景素材:放 A2 軌(第二條 audio track),V 軌為離線佔位", () => {
+    const withAudio = buildXmeml(
+      [{ title: "誦經", durationSec: 4, voiceover: null, mediaPath: "02_音訊/01_誦經.wav", mediaKind: "audio", narrationPath: "02_旁白音檔/01_旁白.mp3" }],
+      "P",
+      { pathPrefix: "../" },
+    );
+    expect(withAudio).toContain(`<clipitem id="clipitem-sa1"`);
+    expect(withAudio).toContain(`<pathurl>../${encodeURIComponent("02_音訊")}/${encodeURIComponent("01_誦經.wav")}</pathurl>`);
+    // A1(旁白)與 A2(場景音訊)是兩條 track
+    expect((withAudio.match(/<track>/g) ?? []).length).toBe(3); // V1 + A1 + A2
   });
 
   it("標題含 XML 特殊字元一律跳脫", () => {

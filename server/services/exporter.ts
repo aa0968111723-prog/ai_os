@@ -6,7 +6,7 @@
 import { ZipArchive } from "archiver";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 import { proxyFetch } from "./http";
 import type { Response } from "express";
 import { and, asc, eq, isNull } from "drizzle-orm";
@@ -15,7 +15,9 @@ import { worldviewSchema } from "../../shared/worldview";
 import { absPathOf, extFromMime } from "./storage";
 
 export function safeName(value: string): string {
-  return value.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) || "未命名";
+  // 控制字元一併置換：進 zip entry 名會讓部分解壓工具出錯，經 escXml 進 XML 則是 1.0 非法字元
+  // eslint-disable-next-line no-control-regex
+  return value.replace(/[\\/:*?"<>|\s\x00-\x1f\x7f]+/g, "_").slice(0, 40) || "未命名";
 }
 
 /** 秒數 → SRT 時間碼 HH:MM:SS,mmm */
@@ -212,14 +214,21 @@ export function buildSrt(scenes: TimelineScene[]): string {
   return blocks.length ? blocks.join("\n\n") + "\n" : "";
 }
 
-/** XML 特殊字元跳脫（&<>"'）——標題/配音詞可能含任何字元，進 XML 前一律跳脫 */
+/**
+ * XML 特殊字元跳脫（&<>"'）——標題/配音詞可能含任何字元，進 XML 前一律跳脫。
+ * 控制字元直接剔除：是 XML 1.0 非法字元（跳脫也救不了），留著會讓 Premiere/FCP 整檔拒讀。
+ */
 function escXml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+  return (
+    value
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;")
+  );
 }
 
 /**
@@ -276,21 +285,33 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
     const note = (sc.voiceover ?? "").trim() ? `${sc.title}｜${(sc.voiceover ?? "").trim()}` : sc.title;
     const clipName = escXml(`${i + 1}_${sc.title}`);
 
-    // 旁白 connected clip：掛在該鏡主元素（asset-clip/video/gap）之下、lane -1（主故事線下方音訊），
-    // offset 以父元素 local timeline 計（父 start=0s → offset=0s 對齊該鏡開頭）
-    let narrationXml = "";
-    if (sc.narrationPath) {
+    // 音訊 asset（旁白與音訊類場景素材共用）：不宣告 duration——實際音長未探測，亂宣告會在
+    // relink 後造成源範圍越界；檔案在場時 FCP 直接讀實長（Apple 文件：屬性省略即由媒體檔推導）
+    const audioAsset = (path: string) => {
       assetSeq += 1;
-      const nid = `a${assetSeq}`;
+      const id = `a${assetSeq}`;
       resources.push(
-        `    <asset id="${nid}" name="${escXml(baseName(sc.narrationPath))}" start="0s" duration="${dur}" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">\n` +
-          `      <media-rep kind="original-media" src="${escXml(relUri(prefix, sc.narrationPath))}"/>\n` +
+        `    <asset id="${id}" name="${escXml(baseName(path))}" start="0s" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">\n` +
+          `      <media-rep kind="original-media" src="${escXml(relUri(prefix, path))}"/>\n` +
           `    </asset>`,
       );
-      narrationXml = `\n              <asset-clip ref="${nid}" lane="-1" offset="0s" duration="${dur}" name="${escXml(`${i + 1}_旁白`)}" audioRole="dialogue"/>`;
+      return id;
+    };
+
+    // 旁白 connected clip：掛在該鏡主元素（asset-clip/video/gap）之下、lane -1（主故事線下方音訊），
+    // offset 以父元素 local timeline 計（父 start=0s → offset=0s 對齊該鏡開頭）
+    let connectedXml = "";
+    if (sc.narrationPath) {
+      const nid = audioAsset(sc.narrationPath);
+      connectedXml += `\n              <asset-clip ref="${nid}" lane="-1" offset="0s" duration="${dur}" name="${escXml(`${i + 1}_旁白`)}" audioRole="dialogue"/>`;
+    }
+    // 音訊類場景素材（02_音訊/）：一樣要上時間軸——掛 lane -2，與旁白（lane -1）並存不打架
+    if (sc.mediaPath && sc.mediaKind === "audio") {
+      const sid = audioAsset(sc.mediaPath);
+      connectedXml += `\n              <asset-clip ref="${sid}" lane="-2" offset="0s" duration="${dur}" name="${clipName}" audioRole="effects"/>`;
     }
 
-    const inner = `\n              <note>${escXml(note)}</note>${narrationXml}\n            `;
+    const inner = `\n              <note>${escXml(note)}</note>${connectedXml}\n            `;
     if (sc.mediaPath && sc.mediaKind === "image") {
       assetSeq += 1;
       const aid = `a${assetSeq}`;
@@ -305,14 +326,15 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
     } else if (sc.mediaPath && sc.mediaKind === "video") {
       assetSeq += 1;
       const aid = `a${assetSeq}`;
+      // 影片 asset 同樣不宣告 duration（實長未探測）；asset-clip 端明確給時間軸長度即可
       resources.push(
-        `    <asset id="${aid}" name="${escXml(baseName(sc.mediaPath))}" start="0s" duration="${dur}" hasVideo="1" hasAudio="1" format="r1" audioSources="1" audioChannels="2" audioRate="48000">\n` +
+        `    <asset id="${aid}" name="${escXml(baseName(sc.mediaPath))}" start="0s" hasVideo="1" hasAudio="1" format="r1" audioSources="1" audioChannels="2" audioRate="48000">\n` +
           `      <media-rep kind="original-media" src="${escXml(relUri(prefix, sc.mediaPath))}"/>\n` +
           `    </asset>`,
       );
       spineItems.push(`            <asset-clip ref="${aid}" offset="${offset}" start="0s" duration="${dur}" name="${clipName}">${inner}</asset-clip>`);
     } else {
-      // 無畫面素材（或素材是音訊）：gap 佔位保住時間軸節奏；旁白仍掛 gap 下照常出聲
+      // 無畫面素材（或素材是音訊）：gap 佔位保住時間軸節奏；旁白/音訊素材仍掛 gap 下照常出聲
       spineItems.push(`            <gap name="${clipName}" offset="${offset}" start="0s" duration="${dur}">${inner}</gap>`);
     }
   }
@@ -346,77 +368,99 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
  * Premiere Pro 可匯入的 Final Cut Pro 7 XML（xmeml v4；DaVinci Resolve 亦可讀）。
  * 媒體連結版：V1 軌每鏡一個 clipitem，<file><pathurl> 用相對 URI 指向交付包內媒體——
  * Premiere 匯入時若依原資料夾結構解壓可直接掛上；找不到則進離線剪輯，用「連結媒體」
- * 指向解壓資料夾即可按檔名一次全部 relink。旁白音檔放 A1 軌、時間碼與該鏡對齊。
- * 無媒體的鏡不產 clipitem（Premiere 沒有 gap 元素，時間軸上自然留空），
+ * 指向解壓資料夾即可按檔名一次全部 relink。旁白音檔放 A1 軌、音訊類場景素材放 A2 軌。
+ * 無媒體的鏡輸出「離線佔位 clipitem」（file 只有名稱、無 pathurl＝離線素材）——鏡名、
+ * 時間碼與配音詞備註都保留，骨架版（單檔下載）匯入後也看得到完整片架構，不會是空序列。
+ * file 一律不宣告我們沒探測過的媒體長度（比照 OTIO「不知道就不編」），檔案在場時由 NLE 讀實長。
  * 時間一律 30fps 整數影格（timebase 30、NTSC FALSE），邊界用累計影格差，無縫不重疊。
  */
 export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: TimelineFileOpts = {}): string {
   const prefix = opts.pathPrefix ?? "./";
   const rate = `<rate><timebase>${TIMELINE_FPS}</timebase><ntsc>FALSE</ntsc></rate>`;
   const videoItems: string[] = [];
-  const audioItems: string[] = [];
+  const audioItems: string[] = []; // A1：旁白
+  const audioItems2: string[] = []; // A2：音訊類場景素材
   let fileSeq = 0;
   let cumSec = 0;
   let startF = 0;
+  // 音訊 clipitem 模板（A1 旁白/A2 場景音訊共用）：file 帶 pathurl、不帶 duration
+  const audioClip = (idPrefix: string, i: number, name: string, path: string, startF: number, endF: number) => {
+    fileSeq += 1;
+    const durF = endF - startF;
+    return [
+      `          <clipitem id="${idPrefix}${i + 1}" premiereChannelType="mono">`,
+      `            <name>${escXml(name)}</name>`,
+      `            <enabled>TRUE</enabled>`,
+      `            <duration>${durF}</duration>`,
+      `            ${rate}`,
+      `            <start>${startF}</start><end>${endF}</end>`,
+      `            <in>0</in><out>${durF}</out>`,
+      `            <file id="file-${fileSeq}">`,
+      `              <name>${escXml(baseName(path))}</name>`,
+      `              <pathurl>${escXml(relUri(prefix, path))}</pathurl>`,
+      `              ${rate}`,
+      `              <media><audio><channelcount>1</channelcount></audio></media>`,
+      `            </file>`,
+      `            <sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>`,
+      `          </clipitem>`,
+    ].join("\n");
+  };
   for (const [i, sc] of scenes.entries()) {
     cumSec += sceneDur(sc);
     const endF = Math.round(cumSec * TIMELINE_FPS);
     const durF = endF - startF;
     const label = `${i + 1}_${sc.title}`;
 
-    if (sc.mediaPath && (sc.mediaKind === "video" || sc.mediaKind === "image")) {
-      fileSeq += 1;
-      const fid = `file-${fileSeq}`;
-      // 靜態圖的 file 不帶 rate/duration（Premiere 視為無限長靜態素材、長度由 start/end 決定），
-      // 但要有 media/video/samplecharacteristics 讓離線時也能判定為視覺素材；影片 file 帶 rate＋長度
-      const fileBody =
-        sc.mediaKind === "video"
-          ? `              ${rate}\n              <duration>${durF}</duration>\n              <media><video/></media>`
-          : `              <media><video><samplecharacteristics><width>1920</width><height>1080</height></samplecharacteristics></video></media>`;
-      videoItems.push(
-        [
-          `          <clipitem id="clipitem-v${i + 1}">`,
-          `            <name>${escXml(label)}</name>`,
-          `            <enabled>TRUE</enabled>`,
-          `            <duration>${durF}</duration>`,
-          `            ${rate}`,
-          `            <start>${startF}</start><end>${endF}</end>`,
-          `            <in>0</in><out>${durF}</out>`,
-          `            <file id="${fid}">`,
-          `              <name>${escXml(baseName(sc.mediaPath))}</name>`,
-          `              <pathurl>${escXml(relUri(prefix, sc.mediaPath))}</pathurl>`,
-          fileBody,
-          `            </file>`,
-          `            <comments><mastercomment1>${escXml((sc.voiceover ?? "").trim() || sc.title)}</mastercomment1></comments>`,
-          `          </clipitem>`,
-        ].join("\n"),
-      );
+    fileSeq += 1;
+    const fid = `file-${fileSeq}`;
+    let fileXml: string;
+    if (sc.mediaPath && sc.mediaKind === "video") {
+      // 影片 file：帶 rate 與 pathurl，不帶 duration（實長未探測，在場時 Premiere 自己讀）
+      fileXml = [
+        `            <file id="${fid}">`,
+        `              <name>${escXml(baseName(sc.mediaPath))}</name>`,
+        `              <pathurl>${escXml(relUri(prefix, sc.mediaPath))}</pathurl>`,
+        `              ${rate}`,
+        `              <media><video/></media>`,
+        `            </file>`,
+      ].join("\n");
+    } else if (sc.mediaPath && sc.mediaKind === "image") {
+      // 靜態圖 file：不帶 rate/duration（Premiere 視為無限長靜態素材、長度由 start/end 決定）
+      fileXml = [
+        `            <file id="${fid}">`,
+        `              <name>${escXml(baseName(sc.mediaPath))}</name>`,
+        `              <pathurl>${escXml(relUri(prefix, sc.mediaPath))}</pathurl>`,
+        `              <media><video><samplecharacteristics><width>1920</width><height>1080</height></samplecharacteristics></video></media>`,
+        `            </file>`,
+      ].join("\n");
+    } else {
+      // 無畫面素材（或素材是音訊）：離線佔位 file（無 pathurl）——保住鏡位與節奏，佔位自帶時長
+      fileXml = [
+        `            <file id="${fid}">`,
+        `              <name>${escXml(`${label}（無素材）`)}</name>`,
+        `              ${rate}`,
+        `              <duration>${durF}</duration>`,
+        `              <media><video/></media>`,
+        `            </file>`,
+      ].join("\n");
     }
+    videoItems.push(
+      [
+        `          <clipitem id="clipitem-v${i + 1}">`,
+        `            <name>${escXml(label)}</name>`,
+        `            <enabled>TRUE</enabled>`,
+        `            <duration>${durF}</duration>`,
+        `            ${rate}`,
+        `            <start>${startF}</start><end>${endF}</end>`,
+        `            <in>0</in><out>${durF}</out>`,
+        fileXml,
+        `            <comments><mastercomment1>${escXml((sc.voiceover ?? "").trim() || sc.title)}</mastercomment1></comments>`,
+        `          </clipitem>`,
+      ].join("\n"),
+    );
 
-    if (sc.narrationPath) {
-      fileSeq += 1;
-      const fid = `file-${fileSeq}`;
-      audioItems.push(
-        [
-          `          <clipitem id="clipitem-a${i + 1}" premiereChannelType="mono">`,
-          `            <name>${escXml(`${i + 1}_旁白`)}</name>`,
-          `            <enabled>TRUE</enabled>`,
-          `            <duration>${durF}</duration>`,
-          `            ${rate}`,
-          `            <start>${startF}</start><end>${endF}</end>`,
-          `            <in>0</in><out>${durF}</out>`,
-          `            <file id="${fid}">`,
-          `              <name>${escXml(baseName(sc.narrationPath))}</name>`,
-          `              <pathurl>${escXml(relUri(prefix, sc.narrationPath))}</pathurl>`,
-          `              ${rate}`,
-          `              <duration>${durF}</duration>`,
-          `              <media><audio><channelcount>1</channelcount></audio></media>`,
-          `            </file>`,
-          `            <sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>`,
-          `          </clipitem>`,
-        ].join("\n"),
-      );
-    }
+    if (sc.narrationPath) audioItems.push(audioClip("clipitem-a", i, `${i + 1}_旁白`, sc.narrationPath, startF, endF));
+    if (sc.mediaPath && sc.mediaKind === "audio") audioItems2.push(audioClip("clipitem-sa", i, label, sc.mediaPath, startF, endF));
     startF = endF;
   }
   const totalF = startF;
@@ -443,6 +487,8 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
     ...(audioItems.length ? [audioItems.join("\n")] : []),
     `          <enabled>TRUE</enabled><locked>FALSE</locked>`,
     `        </track>`,
+    // A2：音訊類場景素材（有才輸出第二條音軌）
+    ...(audioItems2.length ? [[`        <track>`, audioItems2.join("\n"), `          <enabled>TRUE</enabled><locked>FALSE</locked>`, `        </track>`].join("\n")] : []),
     `      </audio>`,
     `    </media>`,
     `  </sequence>`,
@@ -486,7 +532,7 @@ export function buildEdl(scenes: TimelineScene[], projectTitle: string): string 
 
 // 遠端抓取守門：滴流/掛住的外部網址不能無限期卡住匯出；超大檔先用 Content-Length 擋下，不進串流
 const REMOTE_FETCH_TIMEOUT_MS = 30_000;
-const REMOTE_FILE_MAX_BYTES = 200 * 1024 * 1024;
+export const REMOTE_FILE_MAX_BYTES = 200 * 1024 * 1024;
 
 /**
  * 抓遠端素材：逾時「只涵蓋連線/首位元組」階段（防掛住、永不回應的外部網址），response headers 一到就解除。
@@ -501,6 +547,25 @@ export async function fetchRemoteAsset(url: string, clientSignal: AbortSignal) {
   } finally {
     clearTimeout(timer); // headers 已到（或已失敗）→ 解除連線逾時，讓後續 body 串流不受總逾時斬斷
   }
+}
+
+/**
+ * 遠端串流的「實際」大小上限：Content-Length 守門擋不住 chunked/謊報長度的回應，
+ * 串流階段逐塊計數、超過 REMOTE_FILE_MAX_BYTES 即以錯誤中止（appendAndWait 的錯誤路徑會收尾）。
+ * 回傳包好的串流；外層（cap）被 destroy 時連帶關掉底層來源，不佔連線。
+ */
+export function capRemoteBytes(source: Readable): Readable {
+  let seen = 0;
+  const cap = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      seen += chunk.length;
+      if (seen > REMOTE_FILE_MAX_BYTES) return cb(new Error(`遠端素材超過大小上限（${Math.round(REMOTE_FILE_MAX_BYTES / 1048576)}MB）`));
+      cb(null, chunk);
+    },
+  });
+  source.on("error", (err) => cap.destroy(err)); // 上游錯誤要傳遞，別讓 cap 掛著
+  cap.on("close", () => source.destroy());
+  return source.pipe(cap);
 }
 
 /**
@@ -576,8 +641,12 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
   // archiver 對錯誤是發 'error' 事件——未監聽會變 unhandled 'error' 直接讓 Node 程序崩潰。
   archive.on("error", (err) => {
     console.error("[export] 打包錯誤：", err instanceof Error ? err.message : err);
-    if (!res.headersSent) res.status(500).end("打包失敗");
-    else res.destroy();
+    if (!res.headersSent) {
+      // 標頭還沒 flush 就失敗：先撤掉 zip/attachment 標頭再回錯，否則瀏覽器把錯誤內文存成壞掉的 .zip
+      res.removeHeader("Content-Disposition");
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.status(500).end("打包失敗");
+    } else res.destroy();
   });
   // 用戶端中途取消下載時，停止打包、釋放資源，別再往斷掉的連線寫。
   // 必須用 archive.abort() 而非 destroy()：abort 才會殺掉內部佇列並收尾（_queue.kill + _shutdown），
@@ -654,7 +723,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
           warnings.push(`「${scene.title}」素材過大（${Math.round(len / 1048576)}MB，上限 200MB），未入包`);
           continue;
         }
-        source = Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream);
+        source = capRemoteBytes(Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream));
       } else {
         continue;
       }
@@ -723,7 +792,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
           warnings.push(`「${scene.title}」旁白音檔過大（${Math.round(len / 1048576)}MB，上限 200MB），未入包`);
           continue;
         }
-        source = Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream);
+        source = capRemoteBytes(Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream));
       } else {
         continue;
       }
@@ -787,7 +856,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
           warnings.push(`鎖定素材「${asset.title}」過大（${Math.round(len / 1048576)}MB，上限 200MB），未入包`); // 補上與場景素材一致的大小守門
           continue;
         }
-        source = Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream);
+        source = capRemoteBytes(Readable.fromWeb(fileRes.body as unknown as import("node:stream/web").ReadableStream));
       } else {
         continue;
       }
@@ -860,7 +929,8 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
       "【最快組片方式：匯入一個檔，粗剪自動排好】\n" +
       "本包內的時間軸檔已「連結媒體」：先把整個 zip 解壓（保持資料夾結構不動），再依你的剪輯軟體匯入對應檔案，\n" +
       "分鏡順序、每鏡秒數與旁白音軌會自動排上時間軸：\n" +
-      "・Premiere Pro：檔案→匯入→選「交付/Premiere時間軸.xml」。若素材顯示離線，對專案面板剪輯按右鍵→連結媒體→指向解壓資料夾，會按檔名一次全部接回。\n" +
+      "・Premiere Pro：檔案→匯入→選「交付/Premiere時間軸.xml」——時間軸（鏡位/秒數/旁白軌/備註）即建好；素材通常會先顯示離線\n" +
+      "　（Premiere 只認絕對路徑，而這包不知道你會解壓到哪），對專案面板任一剪輯按右鍵→連結媒體→Locate 指向解壓資料夾，會按檔名一次全部接回。\n" +
       "・Final Cut Pro／剪映專業版：匯入「交付/時間軸.fcpxml」。顯示離線時同樣 relink 到解壓資料夾即可。\n" +
       "・DaVinci Resolve：檔案→匯入→時間軸→選「交付/時間軸.fcpxml」（建議）或「交付/剪輯表.edl」（備援，需手動掛媒體）。\n" +
       "　（Resolve 不會自動解析相對路徑——匯入時跳出詢問就指向解壓資料夾，或先把解壓資料夾拖進媒體池再匯入時間軸。）\n" +

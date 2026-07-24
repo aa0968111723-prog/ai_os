@@ -160,7 +160,10 @@ app.get("/api/export/:projectId", async (req, res) => {
   } catch (err) {
     console.error("[export]", err);
     recordError("export", err); // 進錯誤環形緩衝（selftest「近期錯誤」）
-    if (!res.headersSent) res.status(500).json({ error: "打包失敗，請稍後再試（管理員可查伺服器記錄）" });
+    if (!res.headersSent) {
+      res.removeHeader("Content-Disposition"); // 別讓錯誤 JSON 被當成 .zip 存檔
+      res.status(500).json({ error: "打包失敗，請稍後再試（管理員可查伺服器記錄）" });
+    }
   }
 });
 
@@ -216,7 +219,10 @@ app.get("/api/export/:projectId/jianying", async (req, res) => {
   } catch (err) {
     console.error("[export:jianying]", err);
     recordError("export:jianying", err);
-    if (!res.headersSent) res.status(500).json({ error: "剪映草稿包產生失敗，請稍後再試（管理員可查伺服器記錄）" });
+    if (!res.headersSent) {
+      res.removeHeader("Content-Disposition"); // 別讓錯誤 JSON 被當成 .zip 存檔
+      res.status(500).json({ error: "剪映草稿包產生失敗，請稍後再試（管理員可查伺服器記錄）" });
+    }
   }
 });
 
