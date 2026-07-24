@@ -31,6 +31,7 @@ import { dmRouter } from "./dm";
 import { googleCalendarRouter } from "./googleCalendar";
 import { integrationsRouter } from "./integrations";
 import { knowledgeMapRouter } from "./knowledgeMap";
+import { pushRouter } from "./push";
 import { exportJobsRouter } from "./exportJobs";
 
 export const appRouter = router({
@@ -66,6 +67,7 @@ export const appRouter = router({
   googleCalendar: googleCalendarRouter,
   integrations: integrationsRouter,
   knowledgeMap: knowledgeMapRouter,
+  push: pushRouter,
   exportJobs: exportJobsRouter,
 });
 

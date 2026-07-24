@@ -25,6 +25,8 @@ const ChatPage = lazy(() => import("./pages/ChatPage").then((m) => ({ default: m
 import { PasswordInput } from "./components/PasswordInput";
 import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
 import { FeedbackWidget } from "./feedback/FeedbackWidget";
+import { NotificationSettingsDialog, PushSubscriptionSync } from "./components/NotificationSettings";
+import { unsubscribeThisDevice } from "./push";
 import { Icon } from "./components/Icon";
 import { useFocusTrap } from "./components/interactions";
 
@@ -196,10 +198,10 @@ function PointsBadge({ groupId }: { groupId: string }) {
 /** 使用者選單（收斂頂欄）：說明／工作／管理／帳號四組收進單一下拉，管理組僅組長／管理員可見。
  * CSP 下自製（無外部庫）：點外面或 Esc 關閉。 */
 function UserMenu({
-  userName, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onLogout, loggingOut,
+  userName, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, loggingOut,
 }: {
   userName: string; isAdmin: boolean; activeIsLeader: boolean; canSeeOrg: boolean;
-  onChangePw: () => void; onLogout: () => void; loggingOut: boolean;
+  onChangePw: () => void; onNotifSettings: () => void; onLogout: () => void; loggingOut: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -250,6 +252,7 @@ function UserMenu({
           <Link href="/my-reports" className="menu-item" role="menuitem" onClick={close}><Icon name="MessageCircle" size={15} />我的回報</Link>
           {/* 個人資料匯出（端點 /api/me/export 由後端提供）：a 標籤直下載，不經前端路由 */}
           <a href="/api/me/export" download className="menu-item" role="menuitem" onClick={close}><Icon name="FileText" size={15} />下載我的資料</a>
+          <button className="menu-item" role="menuitem" onClick={() => { close(); onNotifSettings(); }}><Icon name="Bell" size={15} />通知設定</button>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
           <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>
             <Icon name="Undo2" size={15} />{loggingOut ? "登出中…" : "登出"}
@@ -265,6 +268,16 @@ export function App() {
   const [location, navigate] = useLocation();
   const me = trpc.auth.me.useQuery();
   const logout = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
+  const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
+  // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/審批通知）。
+  // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到「通知設定」重新啟用。
+  const logoutWithPushCleanup = async () => {
+    try {
+      const endpoint = await unsubscribeThisDevice();
+      if (endpoint) await pushUnsubscribe.mutateAsync({ endpoint });
+    } catch { /* 推播清理失敗照樣登出 */ }
+    logout.mutate();
+  };
   const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
 
   // 組切換（多組成員）：記住上次選的組
@@ -287,13 +300,14 @@ export function App() {
   // 不可只看「作用中的組」的角色，否則多組組長切到自己是純組員的那一組時會被誤擋在外。
   const canSeeOrg = isAdmin || groups.some((g) => g.role !== "member");
   const [showChangePw, setShowChangePw] = useState(false);
+  const [showNotifSettings, setShowNotifSettings] = useState(false);
   // 管理員重設密碼後：不論在哪個路由都用強制對話框擋住，改完密碼（auth.me 重查）才放行
   const mustChangePw = !!me.data?.user.mustChangePassword;
 
   return (
     <div className="app">
       {/* 強制改密碼時整塊背景 inert：對話框遮罩只擋滑鼠，Tab 仍能聚焦到背景，要靠 inert 一起擋 */}
-      <div inert={(mustChangePw || showChangePw) || undefined}>
+      <div inert={(mustChangePw || showChangePw || showNotifSettings) || undefined}>
         <header className="topbar">
           <Link href="/" className="brand" style={{ cursor: "pointer", textDecoration: "none", color: "inherit" }}>
             <span className="orb" /> AI Director OS
@@ -353,7 +367,8 @@ export function App() {
               activeIsLeader={activeIsLeader}
               canSeeOrg={canSeeOrg}
               onChangePw={() => setShowChangePw(true)}
-              onLogout={() => logout.mutate()}
+              onNotifSettings={() => setShowNotifSettings(true)}
+              onLogout={() => { void logoutWithPushCleanup(); }}
               loggingOut={logout.isPending}
             />
           )}
@@ -471,6 +486,11 @@ export function App() {
       ) : (
         showChangePw && me.data && <ChangePasswordDialog onClose={() => setShowChangePw(false)} />
       )}
+
+      {!mustChangePw && showNotifSettings && me.data && <NotificationSettingsDialog onClose={() => setShowNotifSettings(false)} />}
+
+      {/* 例行推播訂閱同步（零 UI）：已啟用通知的裝置每次開 App 回報一次，刷新裝置清單的「最近同步」 */}
+      {me.data && <PushSubscriptionSync />}
 
       {/* 元件級回饋浮標：登入後任何路由都掛一次；放在 inert 包裹外、與對話框同層，強制改密碼時不受影響 */}
       {me.data && <FeedbackWidget />}
