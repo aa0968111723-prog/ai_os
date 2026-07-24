@@ -11,6 +11,7 @@ const fields: DataField[] = [
   { key: "owner", label: "負責人", type: "user" },
   { key: "proj", label: "關聯專案", type: "project" },
   { key: "meet", label: "關聯排程", type: "schedule" },
+  { key: "att", label: "附件", type: "file" },
 ];
 
 describe("validateFields", () => {
@@ -33,7 +34,7 @@ describe("validateRowData", () => {
     const r = validateRowData(fields, { name: "小美", age: "28", role: "企劃", ghost: "x" });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.data).toEqual({ name: "小美", age: 28, role: "企劃", due: null, done: null, link: null, owner: null, proj: null, meet: null });
+      expect(r.data).toEqual({ name: "小美", age: 28, role: "企劃", due: null, done: null, link: null, owner: null, proj: null, meet: null, att: null });
       expect("ghost" in r.data).toBe(false);
     }
   });
@@ -64,14 +65,21 @@ describe("validateRowData", () => {
     // 認不出的字串仍擋
     expect(validateRowData(fields, { name: "a", done: "或許" }).ok).toBe(false);
   });
-  it("project/schedule 連結欄位驗 uuid 格式", () => {
+  it("project/schedule/file 連結欄位驗 uuid 格式", () => {
     expect(validateRowData(fields, { name: "a", proj: "not-uuid" }).ok).toBe(false);
     expect(validateRowData(fields, { name: "a", meet: "not-uuid" }).ok).toBe(false);
+    expect(validateRowData(fields, { name: "a", att: "not-uuid" }).ok).toBe(false);
     expect(validateRowData(fields, {
       name: "a",
       proj: "123e4567-e89b-12d3-a456-426614174000",
       meet: "123e4567-e89b-12d3-a456-426614174001",
+      att: "123e4567-e89b-12d3-a456-426614174002",
     }).ok).toBe(true);
+  });
+  it("附件欄錯誤訊息講「文件」", () => {
+    const r = validateRowData(fields, { name: "a", att: "x" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toContain("文件");
   });
   it("date 擋不存在的日曆日（形狀對但日期不存在）", () => {
     expect(validateRowData(fields, { name: "a", due: "2026-02-30" }).ok).toBe(false); // 二月無 30 日
