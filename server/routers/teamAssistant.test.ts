@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dispatchAllowed, resolveDispatches } from "./teamAssistant";
+import { buildHistoryBlock, countDoneSteps, dispatchAllowed, formatAgentRunLine, resolveDispatches } from "./teamAssistant";
 
 /** 迷你專案列（只需 id/title，resolveDispatches 泛型只吃這兩欄） */
 const proj = (id: string, title: string) => ({ id, title });
@@ -72,5 +72,99 @@ describe("resolveDispatches（LLM 代號派工 → 可執行提議）", () => {
     expect(out[0].label).toContain("…");
     // goal 本身保留全文（送 dispatch 用），只有 label 截斷
     expect(out[0].goal).toBe(longGoal);
+  });
+});
+
+describe("buildHistoryBlock（追問脈絡 → 提示詞區塊）", () => {
+  it("沒有歷史（undefined／空陣列）回空字串——提示詞一字不多佔", () => {
+    expect(buildHistoryBlock(undefined)).toBe("");
+    expect(buildHistoryBlock([])).toBe("");
+  });
+
+  it("角色轉中文前綴、順序保留、外層包 <先前對話> 標籤", () => {
+    const block = buildHistoryBlock([
+      { role: "user", text: "哪個案子卡住了？" },
+      { role: "assistant", text: "「招生短片」有 3 鏡待審。" },
+    ]);
+    expect(block).toContain("<先前對話>");
+    expect(block).toContain("</先前對話>");
+    expect(block.indexOf("使用者：哪個案子卡住了？")).toBeLessThan(block.indexOf("助手：「招生短片」有 3 鏡待審。"));
+  });
+
+  it("超過 6 輪只取最後 6 輪（最舊的被丟掉）", () => {
+    const history = Array.from({ length: 8 }, (_, i) => ({ role: "user" as const, text: `第${i + 1}問` }));
+    const block = buildHistoryBlock(history);
+    expect(block).not.toContain("第1問");
+    expect(block).not.toContain("第2問");
+    expect(block).toContain("第3問");
+    expect(block).toContain("第8問");
+  });
+
+  it("單則截到 400 字並壓縮連續空白（防提示詞灌爆）", () => {
+    const block = buildHistoryBlock([{ role: "user", text: `${"長".repeat(500)}\n\n  尾巴` }]);
+    const line = block.split("\n").find((l) => l.startsWith("使用者："))!;
+    expect(line.length).toBeLessThanOrEqual("使用者：".length + 400);
+    expect(block).not.toContain("\n\n  尾巴"); // 空白已壓縮
+  });
+
+  it("全空白的列剔除；全部剔光時回空字串（不留空殼標籤）", () => {
+    expect(buildHistoryBlock([{ role: "user", text: "   " }])).toBe("");
+    const block = buildHistoryBlock([
+      { role: "user", text: "  " },
+      { role: "assistant", text: "有內容" },
+    ]);
+    expect(block).toContain("助手：有內容");
+    expect(block).not.toContain("使用者：");
+  });
+});
+
+describe("countDoneSteps（steps jsonb 防禦解析）", () => {
+  it("非陣列（null／物件／字串）一律回 0，不炸", () => {
+    expect(countDoneSteps(null)).toBe(0);
+    expect(countDoneSteps(undefined)).toBe(0);
+    expect(countDoneSteps({})).toBe(0);
+    expect(countDoneSteps("bad")).toBe(0);
+  });
+
+  it("只數 done；pending/running/failed、缺 status 或 null 列都不計", () => {
+    expect(
+      countDoneSteps([
+        { status: "done" },
+        { status: "running" },
+        { status: "pending" },
+        { status: "done" },
+        { note: "沒有 status" },
+        null,
+      ]),
+    ).toBe(2);
+  });
+});
+
+describe("formatAgentRunLine（代理動態一行摘要）", () => {
+  const base = { projectTitle: "招生短片", goal: "把腳本拆成分鏡並逐鏡出圖", status: "running", doneSteps: 2, totalSteps: 5, estPoints: 12 };
+
+  it("含專案名、狀態中文、進度與估點", () => {
+    const line = formatAgentRunLine(base);
+    expect(line).toContain("「招生短片」");
+    expect(line).toContain("執行中");
+    expect(line).toContain("2/5 步");
+    expect(line).toContain("12 點");
+    expect(line).toContain("把腳本拆成分鏡並逐鏡出圖");
+  });
+
+  it("未知狀態原樣輸出（新增狀態時顯示不壞掉）", () => {
+    expect(formatAgentRunLine({ ...base, status: "mystery" })).toContain("mystery");
+  });
+
+  it("目標超過 40 字截斷加省略號", () => {
+    const line = formatAgentRunLine({ ...base, goal: "目".repeat(60) });
+    expect(line).toContain("…");
+    expect(line).not.toContain("目".repeat(41));
+  });
+
+  it("0 步計畫（壞資料防禦）進度顯示 —，不出現 0/0", () => {
+    const line = formatAgentRunLine({ ...base, doneSteps: 0, totalSteps: 0 });
+    expect(line).toContain("進度 —");
+    expect(line).not.toContain("0/0");
   });
 });
