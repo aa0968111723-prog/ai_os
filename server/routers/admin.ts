@@ -5,6 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { router, adminProcedure } from "../trpc";
 import { db, schema } from "../db";
 import { createInvite, attachExistingUser, hashPassword } from "../services/auth";
+import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 import { sendEmail, isEmailConfigured, type EmailStatus } from "../services/email";
 import { groupUsage } from "../services/points";
 
@@ -445,6 +446,10 @@ export const adminRouter = router({
       .where(eq(schema.users.id, target.id));
     // 全 session 作廢：舊登入立刻失效，只有拿到臨時密碼的本人能重新登入
     await db.delete(schema.sessions).where(eq(schema.sessions.userId, target.id));
+    // MCP 個人金鑰一併撤銷（安全關鍵）：金鑰是不經 tRPC 閘門的另一套長效憑證，只砍 session 的話
+    // 被盜／既存金鑰在密碼重設後仍能以受害者身分讀寫全系統（MCP／REST），帳號鎖定形同虛設。
+    const revokedTokens = await revokeAllUserMcpTokens(target.id);
+    if (revokedTokens > 0) console.log(`[audit] resetMemberPassword 一併撤銷 ${revokedTokens} 把 MCP 金鑰：target=${target.id}`);
     return { tempPassword };
   }),
 });

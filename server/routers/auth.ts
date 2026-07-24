@@ -19,6 +19,7 @@ import {
   getInvitePreview,
   loadAuthState,
 } from "../services/auth";
+import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 
 // 取用戶端 IP 供 per-IP 限流。★安全：一律走 Express 的 req.ip。
 // index.ts 已設 `app.set("trust proxy", 1)`，Express 會信任「最靠近本機的 1 層反代」並取
@@ -89,6 +90,10 @@ export const authRouter = router({
         .where(eq(schema.users.id, user.id));
       // 舊 session 全部作廢（含可能外洩的），本裝置換發新的繼續用
       await db.delete(schema.sessions).where(eq(schema.sessions.userId, user.id));
+      // MCP 個人金鑰一併撤銷：改密碼＝舊憑證全作廢，金鑰是不經 tRPC 閘門的另一套長效憑證，
+      // 只砍 session 而留著金鑰，等於改密碼後外洩金鑰仍能以本人身分讀寫（MCP／REST）。
+      const revokedTokens = await revokeAllUserMcpTokens(user.id);
+      if (revokedTokens > 0) console.log(`[audit] changePassword 一併撤銷 ${revokedTokens} 把 MCP 金鑰：user=${user.id}`);
       const token = await createSession(user.id);
       setSessionCookie(ctx.res, token);
       console.log(`[audit] changePassword：user=${user.id}`);
