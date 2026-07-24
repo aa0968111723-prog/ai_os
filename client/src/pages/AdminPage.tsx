@@ -1076,14 +1076,19 @@ export function ConsumptionMonitorCard() {
           ) : (
             data.byGroup.map((g, i) => (
               <details key={g.groupId} open={data.byGroup.length === 1} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", padding: "6px 0" }}>
-                <summary style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", listStyle: "none" }}>
-                  <Icon name="ChevronRight" size={14} className="details-caret" />
-                  <span style={{ flex: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%" }}>{g.groupName}</span>
-                  {/* 組間比較長條：相對「最燒的組」等比，一眼看出占比 */}
-                  <div style={{ flex: 1, height: 8, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
-                    <div style={{ width: `${(g.weekPoints / maxGroupPoints) * 100}%`, height: "100%", background: "var(--primary)", borderRadius: 3 }} />
+                {/* summary 本身保持預設 list-item：Safari/WebKit 一旦在 <summary> 直接下 display:flex
+                    或塞進 block 子元素，就會吃掉原生開合、點了沒反應——flex 版面改放到內層 div，
+                    點擊事件照樣冒泡到 summary 觸發開合，各家瀏覽器（含手機 Safari）都點得動。 */}
+                <summary style={{ cursor: "pointer", listStyle: "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, minHeight: 32 }}>
+                    <Icon name="ChevronRight" size={14} className="details-caret" />
+                    <span style={{ flex: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%" }}>{g.groupName}</span>
+                    {/* 組間比較長條：相對「最燒的組」等比，一眼看出占比 */}
+                    <div style={{ flex: 1, height: 8, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
+                      <div style={{ width: `${(g.weekPoints / maxGroupPoints) * 100}%`, height: "100%", background: "var(--primary)", borderRadius: 3 }} />
+                    </div>
+                    <span style={{ flex: "none", fontFamily: "var(--mono)" }}>{g.weekPoints.toLocaleString()} 點</span>
                   </div>
-                  <span style={{ flex: "none", fontFamily: "var(--mono)" }}>{g.weekPoints.toLocaleString()} 點</span>
                 </summary>
                 {/* 組內兩個維度的近 7 天毛消耗（各自高到低）：成員＝誰在燒、專案＝哪個案子在燒 */}
                 <div style={{ margin: "6px 0 2px", paddingLeft: 22 }}>
