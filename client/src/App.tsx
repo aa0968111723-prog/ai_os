@@ -5,7 +5,7 @@ import { Launchpad } from "./pages/Launchpad";
 import { ProjectPage } from "./pages/ProjectPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage";
-import { AdminPage, AuditLogCard, ConsumptionMonitorCard } from "./pages/AdminPage";
+import { AdminPage, AuditLogCard, ConsumptionMonitorCard, InsightsCard } from "./pages/AdminPage";
 import { MembersPage } from "./pages/MembersPage";
 import { FeedbackPage } from "./pages/FeedbackPage";
 import { MyReportsPage } from "./pages/MyReportsPage";
@@ -410,6 +410,7 @@ export function App() {
                     // 組長也看得到「點數消耗監控」：後端已按呼叫者權限把範圍收斂到自己帶的組
                     <div className="stack" style={{ maxWidth: 860, margin: "0 auto" }}>
                       <ConsumptionMonitorCard />
+                      <InsightsCard />
                       <AuditLogCard />
                     </div>
                   ) : (
