@@ -15,6 +15,7 @@ import { McpPage } from "./pages/McpPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
 import { PlannerPage } from "./pages/PlannerPage";
 import { DatabasesPage } from "./pages/DatabasesPage";
+import { ChatPage } from "./pages/ChatPage";
 import { PasswordInput } from "./components/PasswordInput";
 import { GroupOptionsEditor } from "./components/GroupOptionsEditor";
 import { FeedbackWidget } from "./feedback/FeedbackWidget";
@@ -145,6 +146,19 @@ function PendingBadge({ groupId }: { groupId: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** 頂欄私訊入口：常駐圖示＋未讀數輪詢（30 秒）；0 未讀只顯示入口不顯示數字 */
+function DmNavBadge() {
+  const unread = trpc.dm.unread.useQuery(undefined, { refetchInterval: 30_000 });
+  const n = unread.data?.total ?? 0;
+  return (
+    <Link href="/chat" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="私訊——與同組夥伴一對一聊天">
+      <Icon name="MessageCircle" size={14} />
+      <span className="topbar-quick-label">私訊</span>
+      {n > 0 && <span className="dm-nav-unread" aria-label={`${n} 則未讀私訊`}>{n > 99 ? "99+" : n}</span>}
+    </Link>
   );
 }
 
@@ -302,6 +316,7 @@ export function App() {
           {me.data && info.data?.mockMode && <span className="badge mock">測試模式</span>}
           {/* 高頻入口常駐頂欄：筆記排程／資料庫是天天用的工具，從使用者選單升上來一鍵可達；
            * 手機空間吃緊時標籤收成純圖示（topbar-quick-label），title/aria 仍保留 */}
+          {me.data && <DmNavBadge />}
           {me.data && (
             <Link href="/planner" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="筆記排程——把筆記排進待辦與行程">
               <Icon name="Clock" size={14} />
@@ -356,6 +371,9 @@ export function App() {
                 <Route path="/help"><HelpPage /></Route>
                 {/* 金鑰管理與帳號無關組別，未分組也可先建立（連進來仍受組隔離限制） */}
                 <Route path="/mcp"><McpPage /></Route>
+                {/* 私訊也保持可達：還沒被分組的空檔正需要聯絡管理員／開發者（可訊界由後端守） */}
+                <Route path="/chat/:peerId">{(params) => <ChatPage peerId={params.peerId} />}</Route>
+                <Route path="/chat"><ChatPage /></Route>
                 <Route>
                   <div className="empty-state" style={{ marginTop: "var(--sp-32)" }}>
                     <h3>你已成功加入 ✓ 還差一步</h3>
@@ -415,6 +433,8 @@ export function App() {
                 <Route path="/help"><HelpPage /></Route>
                 <Route path="/mcp"><McpPage /></Route>
                 <Route path="/downloads"><DownloadsPage /></Route>
+                <Route path="/chat/:peerId">{(params) => <ChatPage peerId={params.peerId} />}</Route>
+                <Route path="/chat"><ChatPage /></Route>
                 <Route path="/planner"><PlannerPage groupId={activeGroupId} /></Route>
                 <Route path="/databases"><DatabasesPage groupId={activeGroupId} /></Route>
                 {/* key=id：換專案（例如頂欄待辦下拉直接跳另一案、或上一頁/下一頁）時強制重建整棵

@@ -93,6 +93,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "messages.react": "留言表情回應",
   "messages.setPinned": "釘選／取消釘選留言",
   "messages.markRead": "標記留言已讀",
+  // 站內私訊（內容不落審計明文，只記「私訊了誰」；markRead 實務上審計豁免，列入字典保底）
+  "dm.send": "發送私訊",
+  "dm.markRead": "標記私訊已讀",
   "notes.add": "新增會議筆記",
   "notes.update": "更新會議筆記",
   "notes.remove": "刪除會議筆記",
@@ -177,7 +180,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "storyboard", label: "分鏡與審批", prefixes: ["scenes", "approvals"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "teamAssistant", "workflows"] },
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters"] },
-  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "googleCalendar"] },
+  { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "dm", "googleCalendar"] },
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   { key: "database", label: "自訂資料庫", prefixes: ["databases"] },

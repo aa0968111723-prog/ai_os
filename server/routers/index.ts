@@ -26,6 +26,7 @@ import { teamAssistantRouter } from "./teamAssistant";
 import { mcpTokensRouter } from "./mcpTokens";
 import { databasesRouter } from "./databases";
 import { directoryRouter } from "./directory";
+import { dmRouter } from "./dm";
 import { googleCalendarRouter } from "./googleCalendar";
 
 export const appRouter = router({
@@ -56,6 +57,7 @@ export const appRouter = router({
   mcpTokens: mcpTokensRouter,
   databases: databasesRouter,
   directory: directoryRouter,
+  dm: dmRouter,
   googleCalendar: googleCalendarRouter,
 });
 
