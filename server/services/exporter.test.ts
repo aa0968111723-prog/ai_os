@@ -1,10 +1,11 @@
 /**
- * exporter.ts 時間軸格式產生器單元測試(需求 #8 交付):
- * buildSrt / buildFcpxml / buildEdl 的時間碼累加、最少 3 秒規則、跳脫與空清單行為。
- * 三者共用規則:durationSec ≤ 0 以 3 秒計;時間軸依序累加。
+ * exporter.ts 時間軸格式產生器單元測試(需求 #8 交付＋直連強化):
+ * buildSrt / buildFcpxml / buildXmeml / buildEdl 的時間碼累加、最少 3 秒規則、跳脫與空清單行為,
+ * 以及 fcpxml/xmeml 的「媒體連結版」(分鏡帶 mediaPath/narrationPath 時引用交付包內媒體)。
+ * 共用規則:durationSec ≤ 0 以 3 秒計;時間軸依序累加;30fps 影格對齊。
  */
 import { describe, expect, it } from "vitest";
-import { buildEdl, buildFcpxml, buildSrt, type TimelineScene } from "./exporter";
+import { buildEdl, buildFcpxml, buildSrt, buildXmeml, type TimelineScene } from "./exporter";
 
 const scenes: TimelineScene[] = [
   { title: "開場", durationSec: 5, voiceover: "你好,歡迎收看" },
@@ -35,17 +36,19 @@ describe("buildSrt", () => {
   });
 });
 
-describe("buildFcpxml", () => {
+describe("buildFcpxml(骨架版:無媒體路徑)", () => {
   it("結構完整:1.9 版本、30fps format、sequence 總長=各鏡和、gap offset 累加", () => {
     const xml = buildFcpxml(scenes, "測試專案");
     expect(xml).toContain(`<fcpxml version="1.9">`);
     expect(xml).toContain(`frameDuration="100/3000s"`);
-    // 5 + 3 + 1.5 = 9.5s
-    expect(xml).toContain(`<sequence format="r1" duration="9.5s"`);
+    // 5 + 3 + 1.5 = 9.5s → 影格對齊輸出 285/30s(非整秒一律 F/30s 有理數)
+    expect(xml).toContain(`<sequence format="r1" duration="285/30s"`);
     expect(xml).toContain(`offset="0s" start="0s" duration="5s"`);
     expect(xml).toContain(`offset="5s" start="0s" duration="3s"`);
-    expect(xml).toContain(`offset="8s" start="0s" duration="1.5s"`);
+    expect(xml).toContain(`offset="8s" start="0s" duration="45/30s"`);
     expect(xml).toContain(`<event name="測試專案">`);
+    // 無媒體 → 不產 asset 資源
+    expect(xml).not.toContain("<asset ");
   });
 
   it("標題/配音詞含 XML 特殊字元一律跳脫", () => {
@@ -69,6 +72,84 @@ describe("buildFcpxml", () => {
     expect(xml).toContain("<spine>");
     expect(xml).not.toContain("<gap");
     expect(xml).toContain(`duration="0s"`);
+  });
+});
+
+// 媒體連結版共用測資:影片鏡＋圖片鏡(帶旁白)＋無素材鏡(帶旁白)
+const linkedScenes: TimelineScene[] = [
+  { title: "開場", durationSec: 5, voiceover: "第一句", mediaPath: "01_視頻素材/01_開場.mp4", mediaKind: "video", narrationPath: null },
+  { title: "轉場", durationSec: 4, voiceover: null, mediaPath: "03_圖像/02_轉場.jpg", mediaKind: "image", narrationPath: "02_旁白音檔/02_旁白.mp3" },
+  { title: "收尾", durationSec: 3, voiceover: "尾聲", mediaPath: null, mediaKind: null, narrationPath: "02_旁白音檔/03_旁白.mp3" },
+];
+
+describe("buildFcpxml(媒體連結版)", () => {
+  const xml = buildFcpxml(linkedScenes, "專案", { pathPrefix: "../" });
+
+  it("影片鏡:asset(30fps format r1)＋spine asset-clip,src 為 ../ 相對 URI 且逐段 percent-encode", () => {
+    expect(xml).toContain(`hasVideo="1" hasAudio="1" format="r1"`);
+    expect(xml).toContain(`src="../${encodeURIComponent("01_視頻素材")}/${encodeURIComponent("01_開場.mp4")}"`);
+    expect(xml).toMatch(/<asset-clip ref="a\d+" offset="0s" start="0s" duration="5s" name="1_開場">/);
+  });
+
+  it("圖片鏡:asset duration=0s、format 用無 frameDuration 的 r2,spine 用 <video> 引用", () => {
+    expect(xml).toContain(`<format id="r2" name="FFVideoFormatRateUndefined" width="1920" height="1080"/>`);
+    expect(xml).toContain(`duration="0s" hasVideo="1" videoSources="1" format="r2"`);
+    expect(xml).toMatch(/<video ref="a\d+" offset="5s" start="0s" duration="4s" name="2_轉場">/);
+  });
+
+  it("旁白:connected clip 巢在該鏡主元素內,lane=-1、offset=0s(對齊父 clip 開頭)", () => {
+    expect(xml).toMatch(/<asset-clip ref="a\d+" lane="-1" offset="0s" duration="4s" name="2_旁白" audioRole="dialogue"\/>/);
+    // 無素材鏡:gap 佔位、旁白照樣掛在 gap 下
+    expect(xml).toMatch(/<gap name="3_收尾" offset="9s" start="0s" duration="3s">[\s\S]*?lane="-1"[\s\S]*?<\/gap>/);
+  });
+
+  it("旁白 asset 只聲明音訊(hasAudio、無 format ref)", () => {
+    expect(xml).toMatch(/<asset id="a\d+" name="02_旁白\.mp3" start="0s" duration="4s" hasAudio="1"/);
+  });
+});
+
+describe("buildXmeml(Premiere 時間軸)", () => {
+  const xml = buildXmeml(linkedScenes, "專案", { pathPrefix: "../" });
+
+  it("xmeml v4、30fps 整數(timebase 30/ntsc FALSE)、sequence 總長=影格和", () => {
+    expect(xml).toContain(`<xmeml version="4">`);
+    expect(xml).toContain(`<rate><timebase>30</timebase><ntsc>FALSE</ntsc></rate>`);
+    // (5+4+3)*30 = 360 影格
+    expect(xml).toContain(`<duration>360</duration>`);
+  });
+
+  it("影片 clipitem:start/end 依累計影格,file 帶 rate+duration,pathurl 為相對 URI", () => {
+    expect(xml).toContain(`<start>0</start><end>150</end>`);
+    expect(xml).toContain(`<pathurl>../${encodeURIComponent("01_視頻素材")}/${encodeURIComponent("01_開場.mp4")}</pathurl>`);
+  });
+
+  it("圖片 clipitem:file 不帶 rate/duration,只有 media/video/samplecharacteristics", () => {
+    const imgFile = xml.slice(xml.indexOf("02_轉場.jpg"));
+    const fileEnd = imgFile.indexOf("</file>");
+    const fileBlock = imgFile.slice(0, fileEnd);
+    expect(fileBlock).toContain("<media><video><samplecharacteristics>");
+    expect(fileBlock).not.toContain("<duration>");
+    expect(fileBlock).not.toContain("<timebase>");
+  });
+
+  it("無素材鏡不產 video clipitem(時間軸留空),但旁白 clipitem 照常在 A1", () => {
+    expect(xml).not.toContain("3_收尾"); // 無素材鏡在 V 軌沒有 clipitem
+    expect(xml).toContain(`<name>3_旁白</name>`);
+    // 第三鏡旁白時間碼:9s→12s = 270→360 影格
+    expect(xml).toContain(`<start>270</start><end>360</end>`);
+    expect(xml).toContain(`<sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>`);
+  });
+
+  it("標題含 XML 特殊字元一律跳脫", () => {
+    const escXml = buildXmeml([{ title: `A&B<"'>`, durationSec: 2, voiceover: null, mediaPath: "03_圖像/01_x.jpg", mediaKind: "image" }], `P&Q`);
+    expect(escXml).toContain(`<name>1_A&amp;B&lt;&quot;&apos;&gt;</name>`);
+    expect(escXml).toContain(`<name>P&amp;Q</name>`);
+  });
+
+  it("空清單仍是合法骨架(duration 0、無 clipitem)", () => {
+    const empty = buildXmeml([], "空");
+    expect(empty).toContain(`<duration>0</duration>`);
+    expect(empty).not.toContain("<clipitem");
   });
 });
 

@@ -363,12 +363,22 @@ export function HelpPage() {
             <li><b>03_圖像</b>——圖片類成品</li>
             <li><b>04_字幕</b>——字幕.srt，可直接匯入剪映／Premiere／YouTube</li>
             <li><b>05_文件</b>——腳本與鏡頭表.md（每鏡的秒數、檔名、提示詞、模型一覽）</li>
+            <li><b>交付</b>——時間軸與字幕檔：時間軸.fcpxml（Final Cut Pro／DaVinci Resolve／剪映專業版）、
+              Premiere時間軸.xml、字幕.srt、剪輯表.edl</li>
           </ul>
           <p className="hint" style={{ margin: "0 0 8px", fontSize: 13 }}>
             若專案有<b>鎖定素材</b>，會多一個 00_鎖定原素材（原封不動的原音／開示／配樂）；
-            另附 README.txt 說明資料夾結構。
+            另附 README.txt 說明資料夾結構與各軟體匯入步驟。
           </p>
-          <p style={{ margin: 0 }}>媒體檔直接拖進剪映或 Premiere，照鏡號順序組裝，就能對齊畫面、旁白與字幕。</p>
+          <p style={{ margin: "0 0 8px" }}>
+            <b>最快的組片方式</b>：解壓後直接把「交付/」裡對應你剪輯軟體的時間軸檔匯入
+            （Premiere 用 .xml、Final Cut Pro／Resolve／剪映專業版用 .fcpxml）——
+            分鏡順序、每鏡秒數與旁白音軌會自動排上時間軸，媒體以相對路徑自動掛上，離線時 relink 一次即可。
+          </p>
+          <p style={{ margin: 0 }}>
+            用剪映／CapCut 的話，另有<b>「剪映草稿包（實驗）」</b>：解壓到剪映草稿目錄，打開剪映就是排好的專案
+            （含畫面、旁白、字幕三軌；目錄位置見包內安裝說明）。也可以照舊把媒體檔拖進剪映，配合字幕.srt 逐鏡對位。
+          </p>
         </Faq>
 
         <Faq q="想讓 Claude 等外部 AI 直接操作我的專案？">

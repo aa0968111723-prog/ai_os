@@ -14,7 +14,7 @@ import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { absPathOf, extFromMime } from "./storage";
 
-function safeName(value: string): string {
+export function safeName(value: string): string {
   return value.replace(/[\\/:*?"<>|\s]+/g, "_").slice(0, 40) || "未命名";
 }
 
@@ -119,7 +119,7 @@ function mergeToCount(segs: string[], count: number): string[] {
   return out;
 }
 
-function splitCue(voiceover: string, startSec: number, endSec: number): Array<{ start: number; end: number; text: string }> {
+export function splitCue(voiceover: string, startSec: number, endSec: number): Array<{ start: number; end: number; text: string }> {
   const text = (voiceover ?? "").trim();
   if (!text) return [];
   let segments = splitSegments(text)
@@ -169,14 +169,29 @@ function buildVoiceoverSrt(scenes: Array<{ durationSec: number; voiceover: strin
 }
 
 // ── 剪輯軟體通用時間軸格式（需求 #8）：純字串模板產生，零新依賴 ──────────
-// 三個產生器共用約定：呼叫端傳入「未軟刪、依 orderIndex 排序」的分鏡；
+// 產生器共用約定：呼叫端傳入「未軟刪、依 orderIndex 排序」的分鏡；
 // 時間軸由各鏡 durationSec 依序累加（非正數以 3 秒計，與鏡頭表時間碼同一套規則）。
 
-/** 時間軸產生器吃的最小分鏡形狀（scenes DB 列結構相容） */
-export type TimelineScene = { title: string; durationSec: number; voiceover: string | null };
+/**
+ * 時間軸產生器吃的最小分鏡形狀（scenes DB 列結構相容）。
+ * mediaPath/mediaKind/narrationPath 是「媒體連結版」時間軸的可選欄位：交付包打包時回填
+ * 每鏡實際入包的 zip 內相對路徑（如 01_視頻素材/01_開場.mp4），FCPXML/Premiere XML 便能
+ * 引用媒體、匯入即自動組好粗剪；不帶（單檔下載、無素材鏡）就退回純佔位骨架。
+ */
+export type TimelineScene = {
+  title: string;
+  durationSec: number;
+  voiceover: string | null;
+  /** 交付包內媒體檔相對路徑（相對 zip 根）；null/未給＝該鏡無入包素材 */
+  mediaPath?: string | null;
+  /** 入包媒體類型（image 走靜態圖引用、video 走視訊剪輯、audio 不上視訊軌） */
+  mediaKind?: "video" | "image" | "audio" | null;
+  /** 該鏡旁白音檔的 zip 內相對路徑（02_旁白音檔/…）；null/未給＝無旁白 */
+  narrationPath?: string | null;
+};
 
 /** 這一鏡在時間軸上佔的秒數（與鏡頭表/字幕同規則：最少 3 秒） */
-function sceneDur(sc: { durationSec: number }): number {
+export function sceneDur(sc: { durationSec: number }): number {
   return sc.durationSec > 0 ? sc.durationSec : 3;
 }
 
@@ -208,45 +223,230 @@ function escXml(value: string): string {
 }
 
 /**
- * FCPXML 1.9 時間軸（Final Cut Pro／剪映專業版可讀）。
- * 最小可用骨架：resources 一個 30fps format＋project/sequence/spine，spine 內每鏡一個 <gap> 佔位
- * （duration 用整數秒「Ns」，30fps 下整秒必對齊影格），note 帶分鏡標題與配音詞。
- * 重點是時間軸結構與各鏡長度可直接匯入；媒體連結、轉場等細節請匯入後在剪輯軟體內補。
+ * zip 內相對路徑 → 相對 URI（FCPXML media-rep src／Premiere pathurl 用）：
+ * 逐段 percent-encode（中文檔名、# ? 等 URI 保留字全編碼），斜線保留當分隔。
+ * pathPrefix 讓時間軸檔放在子資料夾（交付/）時能用 ../ 指回媒體資料夾。
  */
-export function buildFcpxml(scenes: TimelineScene[], projectTitle: string): string {
-  const totalSec = scenes.reduce((sum, sc) => sum + sceneDur(sc), 0);
-  const gaps: string[] = [];
-  let offset = 0;
+function relUri(pathPrefix: string, zipRelPath: string): string {
+  return pathPrefix + zipRelPath.split("/").map(encodeURIComponent).join("/");
+}
+
+/** 媒體連結版產生器的共用選項：時間軸檔相對媒體資料夾的位置前綴（預設同層 ./） */
+export type TimelineFileOpts = { pathPrefix?: string };
+
+// 時間軸統一 30fps：FCPXML 時間值必須對齊影格，秒數換成影格數再輸出
+const TIMELINE_FPS = 30;
+
+/** 秒 → FCPXML 時間值：整秒輸出「Ns」（可讀），非整秒輸出影格有理數「F/30s」（保證影格對齊） */
+function fcpTime(sec: number): string {
+  const frames = Math.round(sec * TIMELINE_FPS);
+  return frames % TIMELINE_FPS === 0 ? `${frames / TIMELINE_FPS}s` : `${frames}/${TIMELINE_FPS}s`;
+}
+
+/** zip 相對路徑取檔名（asset 顯示名用） */
+function baseName(zipRelPath: string): string {
+  const i = zipRelPath.lastIndexOf("/");
+  return i >= 0 ? zipRelPath.slice(i + 1) : zipRelPath;
+}
+
+/**
+ * FCPXML 1.9 時間軸（Final Cut Pro／DaVinci Resolve／剪映專業版可讀）。
+ * 媒體連結版（需求：匯入即自動組好粗剪）：分鏡帶 mediaPath 時，resources 產 <asset>＋<media-rep>
+ * 以「相對 URI」引用交付包內媒體（解壓後同資料夾結構即自動掛上；找不到媒體則匯入為離線剪輯，
+ * 可在剪輯軟體內一次 relink 整個資料夾）。影片鏡用 <asset-clip>、圖片鏡用 <video>（靜態圖 asset
+ * duration=0s、時長由時間軸決定）；旁白音檔以 lane="-1" connected clip 掛在該鏡主剪輯下。
+ * 沒帶 mediaPath 的鏡維持 <gap> 佔位（單檔下載＝全片骨架，行為與舊版相容），note 帶標題與配音詞。
+ * 時間值一律影格對齊（30fps；非整秒輸出 F/30s 有理數），offset 用累計影格差杜絕浮點漂移。
+ */
+export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts: TimelineFileOpts = {}): string {
+  const prefix = opts.pathPrefix ?? "./";
+  const resources: string[] = [];
+  const spineItems: string[] = [];
+  let assetSeq = 0;
+  // 累計影格：每鏡邊界先換成影格再回秒差，相鄰鏡頭必然無縫、無重疊
+  let cumSec = 0;
+  let cumFrames = 0;
   for (const [i, sc] of scenes.entries()) {
-    const dur = sceneDur(sc);
+    cumSec += sceneDur(sc);
+    const endFrames = Math.round(cumSec * TIMELINE_FPS);
+    const offset = fcpTime(cumFrames / TIMELINE_FPS);
+    const dur = fcpTime((endFrames - cumFrames) / TIMELINE_FPS);
+    cumFrames = endFrames;
+
     const note = (sc.voiceover ?? "").trim() ? `${sc.title}｜${(sc.voiceover ?? "").trim()}` : sc.title;
-    gaps.push(
-      `            <gap name="${escXml(`${i + 1}_${sc.title}`)}" offset="${offset}s" start="0s" duration="${dur}s">\n` +
-        `              <note>${escXml(note)}</note>\n` +
-        `            </gap>`,
-    );
-    offset += dur;
+    const clipName = escXml(`${i + 1}_${sc.title}`);
+
+    // 旁白 connected clip：掛在該鏡主元素（asset-clip/video/gap）之下、lane -1（主故事線下方音訊），
+    // offset 以父元素 local timeline 計（父 start=0s → offset=0s 對齊該鏡開頭）
+    let narrationXml = "";
+    if (sc.narrationPath) {
+      assetSeq += 1;
+      const nid = `a${assetSeq}`;
+      resources.push(
+        `    <asset id="${nid}" name="${escXml(baseName(sc.narrationPath))}" start="0s" duration="${dur}" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">\n` +
+          `      <media-rep kind="original-media" src="${escXml(relUri(prefix, sc.narrationPath))}"/>\n` +
+          `    </asset>`,
+      );
+      narrationXml = `\n              <asset-clip ref="${nid}" lane="-1" offset="0s" duration="${dur}" name="${escXml(`${i + 1}_旁白`)}" audioRole="dialogue"/>`;
+    }
+
+    const inner = `\n              <note>${escXml(note)}</note>${narrationXml}\n            `;
+    if (sc.mediaPath && sc.mediaKind === "image") {
+      assetSeq += 1;
+      const aid = `a${assetSeq}`;
+      // 靜態圖：asset duration=0s（無限長）、format 用無 frameDuration 的 r2，spine 以 <video> 引用
+      //（FCP 對靜態圖的慣例；用 asset-clip 引用 0s 素材會出錯）
+      resources.push(
+        `    <asset id="${aid}" name="${escXml(baseName(sc.mediaPath))}" start="0s" duration="0s" hasVideo="1" videoSources="1" format="r2">\n` +
+          `      <media-rep kind="original-media" src="${escXml(relUri(prefix, sc.mediaPath))}"/>\n` +
+          `    </asset>`,
+      );
+      spineItems.push(`            <video ref="${aid}" offset="${offset}" start="0s" duration="${dur}" name="${clipName}">${inner}</video>`);
+    } else if (sc.mediaPath && sc.mediaKind === "video") {
+      assetSeq += 1;
+      const aid = `a${assetSeq}`;
+      resources.push(
+        `    <asset id="${aid}" name="${escXml(baseName(sc.mediaPath))}" start="0s" duration="${dur}" hasVideo="1" hasAudio="1" format="r1" audioSources="1" audioChannels="2" audioRate="48000">\n` +
+          `      <media-rep kind="original-media" src="${escXml(relUri(prefix, sc.mediaPath))}"/>\n` +
+          `    </asset>`,
+      );
+      spineItems.push(`            <asset-clip ref="${aid}" offset="${offset}" start="0s" duration="${dur}" name="${clipName}">${inner}</asset-clip>`);
+    } else {
+      // 無畫面素材（或素材是音訊）：gap 佔位保住時間軸節奏；旁白仍掛 gap 下照常出聲
+      spineItems.push(`            <gap name="${clipName}" offset="${offset}" start="0s" duration="${dur}">${inner}</gap>`);
+    }
   }
+  // 註：不寫 <!DOCTYPE>——FCP 自家匯出亦不含；version 1.9 是 FCP/DaVinci Resolve（≤1.10）/剪映專業版的最大公約數
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<!DOCTYPE fcpxml>`,
-    `<!-- 最小可用骨架：每鏡一個 gap 佔位（30fps），媒體與轉場等細節請在剪輯軟體內補 -->`,
+    `<!-- 由 AI Director OS 產出：解壓交付包後直接匯入本檔，媒體以相對路徑自動掛上；顯示離線時對整個解壓資料夾 relink 一次即可 -->`,
     `<fcpxml version="1.9">`,
     `  <resources>`,
     `    <format id="r1" name="FFVideoFormat1080p30" frameDuration="100/3000s" width="1920" height="1080"/>`,
+    `    <format id="r2" name="FFVideoFormatRateUndefined" width="1920" height="1080"/>`,
+    ...resources,
     `  </resources>`,
     `  <library>`,
     `    <event name="${escXml(projectTitle)}">`,
     `      <project name="${escXml(projectTitle)}">`,
-    `        <sequence format="r1" duration="${totalSec}s" tcStart="0s" tcFormat="NDF">`,
+    `        <sequence format="r1" duration="${fcpTime(cumFrames / TIMELINE_FPS)}" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">`,
     `          <spine>`,
-    ...(gaps.length ? [gaps.join("\n")] : []),
+    ...(spineItems.length ? [spineItems.join("\n")] : []),
     `          </spine>`,
     `        </sequence>`,
     `      </project>`,
     `    </event>`,
     `  </library>`,
     `</fcpxml>`,
+    ``,
+  ].join("\n");
+}
+
+/**
+ * Premiere Pro 可匯入的 Final Cut Pro 7 XML（xmeml v4；DaVinci Resolve 亦可讀）。
+ * 媒體連結版：V1 軌每鏡一個 clipitem，<file><pathurl> 用相對 URI 指向交付包內媒體——
+ * Premiere 匯入時若依原資料夾結構解壓可直接掛上；找不到則進離線剪輯，用「連結媒體」
+ * 指向解壓資料夾即可按檔名一次全部 relink。旁白音檔放 A1 軌、時間碼與該鏡對齊。
+ * 無媒體的鏡不產 clipitem（Premiere 沒有 gap 元素，時間軸上自然留空），
+ * 時間一律 30fps 整數影格（timebase 30、NTSC FALSE），邊界用累計影格差，無縫不重疊。
+ */
+export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: TimelineFileOpts = {}): string {
+  const prefix = opts.pathPrefix ?? "./";
+  const rate = `<rate><timebase>${TIMELINE_FPS}</timebase><ntsc>FALSE</ntsc></rate>`;
+  const videoItems: string[] = [];
+  const audioItems: string[] = [];
+  let fileSeq = 0;
+  let cumSec = 0;
+  let startF = 0;
+  for (const [i, sc] of scenes.entries()) {
+    cumSec += sceneDur(sc);
+    const endF = Math.round(cumSec * TIMELINE_FPS);
+    const durF = endF - startF;
+    const label = `${i + 1}_${sc.title}`;
+
+    if (sc.mediaPath && (sc.mediaKind === "video" || sc.mediaKind === "image")) {
+      fileSeq += 1;
+      const fid = `file-${fileSeq}`;
+      // 靜態圖的 file 不帶 rate/duration（Premiere 視為無限長靜態素材、長度由 start/end 決定），
+      // 但要有 media/video/samplecharacteristics 讓離線時也能判定為視覺素材；影片 file 帶 rate＋長度
+      const fileBody =
+        sc.mediaKind === "video"
+          ? `              ${rate}\n              <duration>${durF}</duration>\n              <media><video/></media>`
+          : `              <media><video><samplecharacteristics><width>1920</width><height>1080</height></samplecharacteristics></video></media>`;
+      videoItems.push(
+        [
+          `          <clipitem id="clipitem-v${i + 1}">`,
+          `            <name>${escXml(label)}</name>`,
+          `            <enabled>TRUE</enabled>`,
+          `            <duration>${durF}</duration>`,
+          `            ${rate}`,
+          `            <start>${startF}</start><end>${endF}</end>`,
+          `            <in>0</in><out>${durF}</out>`,
+          `            <file id="${fid}">`,
+          `              <name>${escXml(baseName(sc.mediaPath))}</name>`,
+          `              <pathurl>${escXml(relUri(prefix, sc.mediaPath))}</pathurl>`,
+          fileBody,
+          `            </file>`,
+          `            <comments><mastercomment1>${escXml((sc.voiceover ?? "").trim() || sc.title)}</mastercomment1></comments>`,
+          `          </clipitem>`,
+        ].join("\n"),
+      );
+    }
+
+    if (sc.narrationPath) {
+      fileSeq += 1;
+      const fid = `file-${fileSeq}`;
+      audioItems.push(
+        [
+          `          <clipitem id="clipitem-a${i + 1}" premiereChannelType="mono">`,
+          `            <name>${escXml(`${i + 1}_旁白`)}</name>`,
+          `            <enabled>TRUE</enabled>`,
+          `            <duration>${durF}</duration>`,
+          `            ${rate}`,
+          `            <start>${startF}</start><end>${endF}</end>`,
+          `            <in>0</in><out>${durF}</out>`,
+          `            <file id="${fid}">`,
+          `              <name>${escXml(baseName(sc.narrationPath))}</name>`,
+          `              <pathurl>${escXml(relUri(prefix, sc.narrationPath))}</pathurl>`,
+          `              ${rate}`,
+          `              <duration>${durF}</duration>`,
+          `              <media><audio><channelcount>1</channelcount></audio></media>`,
+          `            </file>`,
+          `            <sourcetrack><mediatype>audio</mediatype><trackindex>1</trackindex></sourcetrack>`,
+          `          </clipitem>`,
+        ].join("\n"),
+      );
+    }
+    startF = endF;
+  }
+  const totalF = startF;
+  return [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<!DOCTYPE xmeml>`,
+    `<!-- 由 AI Director OS 產出：Premiere「檔案→匯入」本檔即建好時間軸；媒體離線時用「連結媒體」指向解壓資料夾一次 relink -->`,
+    `<xmeml version="4">`,
+    `  <sequence id="sequence-1">`,
+    `    <name>${escXml(projectTitle)}</name>`,
+    `    <duration>${totalF}</duration>`,
+    `    ${rate}`,
+    `    <media>`,
+    `      <video>`,
+    `        <format><samplecharacteristics>${rate}<width>1920</width><height>1080</height><anamorphic>FALSE</anamorphic><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></format>`,
+    `        <track>`,
+    ...(videoItems.length ? [videoItems.join("\n")] : []),
+    `          <enabled>TRUE</enabled><locked>FALSE</locked>`,
+    `        </track>`,
+    `      </video>`,
+    `      <audio>`,
+    `        <format><samplecharacteristics><depth>16</depth><samplerate>48000</samplerate></samplecharacteristics></format>`,
+    `        <track>`,
+    ...(audioItems.length ? [audioItems.join("\n")] : []),
+    `          <enabled>TRUE</enabled><locked>FALSE</locked>`,
+    `        </track>`,
+    `      </audio>`,
+    `    </media>`,
+    `  </sequence>`,
+    `</xmeml>`,
     ``,
   ].join("\n");
 }
@@ -293,7 +493,7 @@ const REMOTE_FILE_MAX_BYTES = 200 * 1024 * 1024;
  * 關鍵：串流階段不再套總逾時——否則大型影片正常下載超過 30 秒會被攔腰斬斷、毀掉整份交付 ZIP。
  * 串流階段仍受 clientAbort 控制（用戶端關閉下載即停止），大檔另有 REMOTE_FILE_MAX_BYTES 上限把關。
  */
-async function fetchRemoteAsset(url: string, clientSignal: AbortSignal) {
+export async function fetchRemoteAsset(url: string, clientSignal: AbortSignal) {
   const conn = new AbortController();
   const timer = setTimeout(() => conn.abort(new Error("遠端連線逾時")), REMOTE_FETCH_TIMEOUT_MS);
   try {
@@ -309,7 +509,7 @@ async function fetchRemoteAsset(url: string, clientSignal: AbortSignal) {
  * 逐筆等待讓背壓生效，記憶體只留單一 entry 的串流緩衝。
  * 用戶端斷線（signal 中止）時 abort 後 'entry' 永不觸發，必須靠 abort 監聽讓 promise 收尾。
  */
-function appendAndWait(archive: ZipArchive, source: Readable | Buffer, name: string, signal: AbortSignal): Promise<void> {
+export function appendAndWait(archive: ZipArchive, source: Readable | Buffer, name: string, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const off = () => {
       archive.off("entry", onEntry);
@@ -413,6 +613,8 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
   // 鏡頭表欄位：每幕實際寫入交付包的相對檔名（下方主迴圈成功入包後回填）＋依序累計的進/出點時間碼。
   // 時間碼與字幕同一套規則（每幕佔其設定秒數，最少 3 秒），組裝時間軸與分鏡順序一致即可對齊。
   const writtenNames: (string | null)[] = new Array(scenes.length).fill(null);
+  // 每幕入包媒體的類型（video/image/audio）——媒體連結版時間軸（fcpxml/xmeml）要知道用哪種元素引用
+  const writtenKinds: ("video" | "image" | "audio" | null)[] = new Array(scenes.length).fill(null);
   // 逐鏡旁白音檔的實際相對檔名（成功入包後回填），供鏡頭表標明該鏡有無旁白配音。
   const narrationNames: (string | null)[] = new Array(scenes.length).fill(null);
   let tcAcc = 0;
@@ -465,18 +667,23 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
     const num = String(i + 1).padStart(sceneNumWidth, "0");
     const extOf = (fallback: string) => (asset.mime && extFromMime(asset.mime)) || fallback;
     let name: string;
+    let kind: "video" | "image" | "audio";
     if (asset.kind === "video") {
       videoIdx += 1;
+      kind = "video";
       name = `01_視頻素材/${num}_${safeName(scene.title)}${extOf(".mp4")}`;
     } else if (asset.kind === "audio") {
+      kind = "audio";
       name = `02_音訊/${num}_${safeName(scene.title)}${extOf(".wav")}`;
     } else {
       imageIdx += 1;
+      kind = "image";
       name = `03_圖像/${num}_${safeName(scene.title)}${extOf(".jpg")}`;
     }
     try {
       await appendAndWait(archive, source, name, clientAbort.signal);
       writtenNames[i] = name; // 成功入包才回填鏡頭表的實際相對檔名
+      writtenKinds[i] = kind;
     } catch (err) {
       if (clientAbort.signal.aborted) return; // 斷線中止視為正常結束，不往外拋 500
       // append 之後的串流錯誤代表該 entry 半寫、zip 已不可修復——不能 continue 交付壞包，
@@ -615,29 +822,56 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
   const hasSubtitle = srt.length > 0;
   if (hasSubtitle) archive.append(srt, { name: "04_字幕/字幕.srt" });
 
-  // 交付/：三種剪輯軟體通用時間軸格式（需求 #8）——一律附加（多選打包也照常）：
-  // 字幕.srt（剪映/CapCut/Premiere）、時間軸.fcpxml（Final Cut Pro/剪映專業版）、剪輯表.edl（DaVinci Resolve）。
+  // 交付/：剪輯軟體通用時間軸格式（需求 #8）——一律附加（多選打包也照常）：
+  // 字幕.srt（剪映/CapCut/Premiere）、時間軸.fcpxml（Final Cut Pro/DaVinci Resolve/剪映專業版）、
+  // Premiere時間軸.xml（Premiere/DaVinci Resolve）、剪輯表.edl（DaVinci Resolve 備援）。
+  // fcpxml/xmeml 為「媒體連結版」：引用本包內實際入包的媒體檔（相對路徑 ../），匯入即自動組好粗剪；
   // 與 04_字幕 的可讀性切塊版不同，這裡每鏡一塊、空詞用標題，供剪輯逐鏡對位；沒有分鏡時改附說明檔。
   if (scenes.length > 0) {
-    archive.append(buildSrt(scenes), { name: "交付/字幕.srt" });
-    archive.append(buildFcpxml(scenes, project.title), { name: "交付/時間軸.fcpxml" });
-    archive.append(buildEdl(scenes, project.title), { name: "交付/剪輯表.edl" });
+    // 媒體連結版時間軸：把每鏡「實際入包」的媒體/旁白相對路徑補進 TimelineScene（未入包者為 null → gap 佔位）
+    const timelineScenes: TimelineScene[] = scenes.map((sc, i) => ({
+      title: sc.title,
+      durationSec: sc.durationSec,
+      voiceover: sc.voiceover,
+      mediaPath: writtenNames[i],
+      mediaKind: writtenKinds[i],
+      narrationPath: narrationNames[i],
+    }));
+    // 時間軸檔在 交付/ 子資料夾內，相對媒體資料夾要往上一層
+    const opts = { pathPrefix: "../" };
+    archive.append(buildSrt(timelineScenes), { name: "交付/字幕.srt" });
+    archive.append(buildFcpxml(timelineScenes, project.title, opts), { name: "交付/時間軸.fcpxml" });
+    archive.append(buildXmeml(timelineScenes, project.title, opts), { name: "交付/Premiere時間軸.xml" });
+    archive.append(buildEdl(timelineScenes, project.title), { name: "交付/剪輯表.edl" });
   } else {
     archive.append(
       "本專案還沒有分鏡，無法產生時間軸/字幕檔。\n" +
         "請先在系統內建立分鏡（AI 拆分鏡或手動新增）後再打包，即會附上：\n" +
-        "交付/字幕.srt（剪映/CapCut/Premiere）、交付/時間軸.fcpxml（Final Cut Pro/剪映專業版）、交付/剪輯表.edl（DaVinci Resolve）。\n",
+        "交付/字幕.srt（剪映/CapCut/Premiere）、交付/時間軸.fcpxml（Final Cut Pro/DaVinci Resolve/剪映專業版）、\n" +
+        "交付/Premiere時間軸.xml（Premiere）、交付/剪輯表.edl（DaVinci Resolve）。\n",
       { name: "交付/說明.txt" },
     );
   }
 
   const hasNarration = narrationNames.some((n) => n !== null);
   archive.append(
-    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／${hasNarration ? "02_旁白音檔（逐鏡旁白配音）／" : ""}03_圖像／${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）。\n` +
-      "媒體檔請直接匯入剪映或 Premiere 組裝。\n" +
-      "交付/ 另附三種剪輯軟體通用格式：字幕.srt（剪映/CapCut/Premiere）、時間軸.fcpxml（Final Cut Pro/剪映專業版）、剪輯表.edl（DaVinci Resolve）——每鏡一塊、時間碼依分鏡規劃秒數累計，供剪輯逐鏡對位。\n" +
+    `資料夾說明：${lockedAssets.length ? "00_鎖定原素材（不可更動的原音/開示/配樂，原封使用）／" : ""}01_視頻素材（依鏡號排序）／${hasNarration ? "02_旁白音檔（逐鏡旁白配音）／" : ""}03_圖像／${hasSubtitle ? "04_字幕（字幕.srt，可匯入剪映/Premiere/YouTube）／" : ""}05_文件（腳本與鏡頭表）／交付（時間軸與字幕檔）。\n` +
+      "\n" +
+      "【最快組片方式：匯入一個檔，粗剪自動排好】\n" +
+      "本包內的時間軸檔已「連結媒體」：先把整個 zip 解壓（保持資料夾結構不動），再依你的剪輯軟體匯入對應檔案，\n" +
+      "分鏡順序、每鏡秒數與旁白音軌會自動排上時間軸：\n" +
+      "・Premiere Pro：檔案→匯入→選「交付/Premiere時間軸.xml」。若素材顯示離線，對專案面板剪輯按右鍵→連結媒體→指向解壓資料夾，會按檔名一次全部接回。\n" +
+      "・Final Cut Pro／剪映專業版：匯入「交付/時間軸.fcpxml」。顯示離線時同樣 relink 到解壓資料夾即可。\n" +
+      "・DaVinci Resolve：檔案→匯入→時間軸→選「交付/時間軸.fcpxml」（建議）或「交付/剪輯表.edl」（備援，需手動掛媒體）。\n" +
+      "　（Resolve 不會自動解析相對路徑——匯入時跳出詢問就指向解壓資料夾，或先把解壓資料夾拖進媒體池再匯入時間軸。）\n" +
+      "・剪映/CapCut（手機或桌面）：目前無時間軸匯入功能——請把 01_視頻素材/03_圖像依鏡號拖入，再匯入「交付/字幕.srt」對位（每鏡一塊字幕＝一鏡的進出點）。\n" +
+      "\n" +
+      "交付/ 內各檔用途：字幕.srt（剪映/CapCut/Premiere；每鏡一塊供對位）、時間軸.fcpxml（FCP/Resolve/剪映專業版；已連結媒體）、\n" +
+      "Premiere時間軸.xml（Premiere；已連結媒體）、剪輯表.edl（Resolve 備援）。時間碼皆依分鏡規劃秒數累計（30fps）。\n" +
+      "注意：時間軸引用的是「這一包內」的媒體相對路徑，解壓後請勿改資料夾名稱或搬動檔案再匯入。\n" +
+      "\n" +
       (hasNarration
-        ? "02_旁白音檔＝逐鏡旁白配音，檔名鏡號對應字幕與畫面（同一套鏡號補零），在剪輯軟體裡把同鏡號的旁白音檔對齊該鏡畫面即可；05_文件的鏡頭表「旁白音檔」欄列出每鏡對應的檔名。\n"
+        ? "02_旁白音檔＝逐鏡旁白配音，檔名鏡號對應字幕與畫面（同一套鏡號補零）；fcpxml/Premiere XML 已把旁白排在音軌對齊各鏡，手動組裝時把同鏡號旁白對齊該鏡畫面即可；05_文件的鏡頭表「旁白音檔」欄列出每鏡對應的檔名。\n"
         : "") +
       (hasSubtitle
         ? "字幕.srt 的時間碼依「分鏡規劃秒數」依序累計（每幕佔其設定秒數），組裝時間軸與分鏡順序一致即可對齊；若實際剪輯調整了各幕長度，請在剪輯軟體裡微調字幕時間。\n"

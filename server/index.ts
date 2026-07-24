@@ -17,7 +17,8 @@ import { ensureSchema } from "./db/ensure";
 import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
-import { buildEdl, buildFcpxml, buildSrt, exportProjectZip } from "./services/exporter";
+import { buildEdl, buildFcpxml, buildSrt, buildXmeml, exportProjectZip } from "./services/exporter";
+import { exportJianyingDraftZip } from "./services/jianying";
 import { handleMcp } from "./services/mcp";
 import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
 import {
@@ -163,8 +164,10 @@ app.get("/api/export/:projectId", async (req, res) => {
   }
 });
 
-// 單檔時間軸/字幕下載（需求 #8）：?format=srt（剪映/CapCut/Premiere）｜fcpxml（Final Cut Pro/剪映專業版）｜edl（DaVinci Resolve）。
+// 單檔時間軸/字幕下載（需求 #8）：?format=srt（剪映/CapCut/Premiere）｜fcpxml（Final Cut Pro/DaVinci Resolve/剪映專業版）
+// ｜xmeml（Premiere 時間軸 .xml）｜edl（DaVinci Resolve 備援）。
 // 登入＋組隔離比照上方交付包路由；分鏡取未軟刪、依 orderIndex 排序，時間碼依各鏡秒數累計。
+// 單檔下載沒有隨附媒體檔，fcpxml/xmeml 產「骨架版」（gap/空軌佔位）；要「匯入即組好粗剪」請用交付包內的媒體連結版。
 app.get("/api/export/:projectId/timeline", async (req, res) => {
   try {
     const auth = await resolveSession(req);
@@ -173,8 +176,8 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
     if (!project) return res.status(404).json({ error: "找不到專案" });
     if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
     const format = String(req.query.format ?? "");
-    if (format !== "srt" && format !== "fcpxml" && format !== "edl") {
-      return res.status(400).json({ error: "format 需為 srt、fcpxml 或 edl" });
+    if (format !== "srt" && format !== "fcpxml" && format !== "edl" && format !== "xmeml") {
+      return res.status(400).json({ error: "format 需為 srt、fcpxml、xmeml 或 edl" });
     }
     const scenes = await db
       .select()
@@ -186,7 +189,9 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
         ? { name: "字幕.srt", mime: "text/plain; charset=utf-8", body: buildSrt(scenes) }
         : format === "fcpxml"
           ? { name: "時間軸.fcpxml", mime: "application/xml; charset=utf-8", body: buildFcpxml(scenes, project.title) }
-          : { name: "剪輯表.edl", mime: "text/plain; charset=utf-8", body: buildEdl(scenes, project.title) };
+          : format === "xmeml"
+            ? { name: "Premiere時間軸.xml", mime: "application/xml; charset=utf-8", body: buildXmeml(scenes, project.title) }
+            : { name: "剪輯表.edl", mime: "text/plain; charset=utf-8", body: buildEdl(scenes, project.title) };
     // res.attachment 以 RFC 5987（filename*=UTF-8''…）讓中文檔名下載安全；Content-Type 隨後覆寫為明確值
     res.attachment(file.name);
     res.setHeader("Content-Type", file.mime);
@@ -195,6 +200,23 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
     console.error("[export:timeline]", err);
     recordError("export:timeline", err);
     if (!res.headersSent) res.status(500).json({ error: "時間軸/字幕檔產生失敗，請稍後再試" });
+  }
+});
+
+// 剪映/CapCut 草稿包下載（實驗性）：整個草稿資料夾（draft_content.json＋素材）打成 zip，
+// 解壓到剪映草稿目錄後打開剪映即見排好的時間軸。登入＋組隔離比照交付包路由。
+app.get("/api/export/:projectId/jianying", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
+    if (!project) return res.status(404).json({ error: "找不到專案" });
+    if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
+    await exportJianyingDraftZip(project.id, res);
+  } catch (err) {
+    console.error("[export:jianying]", err);
+    recordError("export:jianying", err);
+    if (!res.headersSent) res.status(500).json({ error: "剪映草稿包產生失敗，請稍後再試（管理員可查伺服器記錄）" });
   }
 });
 
