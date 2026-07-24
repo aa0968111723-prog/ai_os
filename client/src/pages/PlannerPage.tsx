@@ -213,6 +213,8 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   const add = trpc.schedule.add.useMutation({
     onSuccess: () => {
       utils.schedule.list.invalidate({ groupId });
+      // 知識地圖吃獨立的聚合查詢：排程增刪也要讓地圖重抓，否則節點/計數殘留舊資料
+      utils.knowledgeMap.graph.invalidate({ groupId });
       setTitle("");
       setStartAt("");
       setEndAt("");
@@ -220,7 +222,12 @@ function ScheduleCard({ groupId }: { groupId: string }) {
       setProjectId("");
     },
   });
-  const remove = trpc.schedule.remove.useMutation({ onSuccess: () => utils.schedule.list.invalidate({ groupId }) });
+  const remove = trpc.schedule.remove.useMutation({
+    onSuccess: () => {
+      utils.schedule.list.invalidate({ groupId });
+      utils.knowledgeMap.graph.invalidate({ groupId });
+    },
+  });
 
   const endInvalid = !!startAt && !!endAt && new Date(endAt) < new Date(startAt);
   const canAdd = !!title.trim() && !!startAt && !endInvalid && !add.isPending;
@@ -587,6 +594,8 @@ function NotesCard({ groupId }: { groupId: string }) {
   const add = trpc.notes.add.useMutation({
     onSuccess: () => {
       utils.notes.list.invalidate({ groupId });
+      // 知識地圖吃獨立的聚合查詢：筆記增刪改也要讓地圖重抓，否則節點/計數殘留舊資料
+      utils.knowledgeMap.graph.invalidate({ groupId });
       clearTitleDraft();
       clearContentDraft();
       closeForm();
@@ -596,12 +605,18 @@ function NotesCard({ groupId }: { groupId: string }) {
     onSuccess: (_row, vars) => {
       utils.notes.list.invalidate({ groupId });
       utils.notes.get.invalidate({ id: vars.id });
+      utils.knowledgeMap.graph.invalidate({ groupId });
       clearTitleDraft();
       clearContentDraft();
       closeForm();
     },
   });
-  const remove = trpc.notes.remove.useMutation({ onSuccess: () => utils.notes.list.invalidate({ groupId }) });
+  const remove = trpc.notes.remove.useMutation({
+    onSuccess: () => {
+      utils.notes.list.invalidate({ groupId });
+      utils.knowledgeMap.graph.invalidate({ groupId });
+    },
+  });
 
   const saving = add.isPending || update.isPending;
   const canSave = !!title.trim() && !!content.trim() && contentReady && !saving;
