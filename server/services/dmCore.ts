@@ -473,14 +473,16 @@ export async function listDmHistory(
 
 /** 已讀水位上報（與 messages.markRead 同語意的 upsert；高頻、無安全意義，審計豁免見 trpc.ts） */
 export async function markDmRead(auth: AuthState, peerId: string): Promise<void> {
-  const updated = await db
-    .update(schema.dmReads)
-    .set({ lastReadAt: new Date() })
-    .where(and(eq(schema.dmReads.userId, auth.user.id), eq(schema.dmReads.peerId, peerId)))
-    .returning();
-  if (updated.length === 0) {
-    await db.insert(schema.dmReads).values({ userId: auth.user.id, peerId });
-  }
+  // 修 R2-CONC-01/R2-02：原「update→0 則 insert」在併發首次標記下兩者都讀到 0、雙雙 insert，
+  // 產生同 (user,peer) 重複已讀列；unreadBySender 的 LEFT JOIN 對重複列扇出，未讀數被永久成倍放大。
+  // 依賴 dm_reads(user_id,peer_id) 唯一索引（ensure.ts 手寫遷移）＋ onConflictDoUpdate 原子 upsert 根治。
+  await db
+    .insert(schema.dmReads)
+    .values({ userId: auth.user.id, peerId, lastReadAt: new Date() })
+    .onConflictDoUpdate({
+      target: [schema.dmReads.userId, schema.dmReads.peerId],
+      set: { lastReadAt: new Date() },
+    });
 }
 
 /**

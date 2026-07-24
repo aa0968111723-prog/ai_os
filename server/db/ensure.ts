@@ -94,7 +94,30 @@ async function applyManualMigrations(): Promise<void> {
       create unique index if not exists feedback_user_group_uq
       on feedback (user_id, coalesce(group_id, '00000000-0000-0000-0000-000000000000'::uuid))
     `);
-    console.log("[db] ✓ 手寫遷移完成（group_options／feedback 唯一索引就緒）");
+
+    // 已讀水位／表情回應唯一約束（修 R2-CONC-01/R2-02/R2-03）：這三處原本走「查後寫（update→0 則 insert／
+    // delete→0 則 insert）」，併發首次寫入各插一列重複列——已讀列重複會讓未讀數的 LEFT JOIN 扇出永久翻倍、
+    // 表情列重複會灌大計數。先去重（保留最新一筆）再建唯一索引，router 端已改 onConflict，此後有 DB 保底。
+    await db.execute(sql`
+      delete from dm_reads a using dm_reads b
+      where a.user_id = b.user_id and a.peer_id = b.peer_id
+        and (a.last_read_at, a.id::text) < (b.last_read_at, b.id::text)
+    `);
+    await db.execute(sql`create unique index if not exists dm_reads_user_peer_uq on dm_reads (user_id, peer_id)`);
+    await db.execute(sql`
+      delete from message_reads a using message_reads b
+      where a.user_id = b.user_id and a.project_id = b.project_id
+        and (a.last_read_at, a.id::text) < (b.last_read_at, b.id::text)
+    `);
+    await db.execute(sql`create unique index if not exists message_reads_user_project_uq on message_reads (user_id, project_id)`);
+    await db.execute(sql`
+      delete from message_reactions a using message_reactions b
+      where a.message_id = b.message_id and a.user_id = b.user_id and a.emoji = b.emoji
+        and (a.created_at, a.id::text) < (b.created_at, b.id::text)
+    `);
+    await db.execute(sql`create unique index if not exists message_reactions_msg_user_emoji_uq on message_reactions (message_id, user_id, emoji)`);
+
+    console.log("[db] ✓ 手寫遷移完成（group_options／feedback／dm_reads／message_reads／message_reactions 唯一索引就緒）");
   } catch (err) {
     // 不擋開機：索引缺席只是回到「應用層防重」的舊狀態,功能照常
     console.warn("[db] ⚠ 手寫遷移失敗（不影響啟動）：", err instanceof Error ? err.message : err);

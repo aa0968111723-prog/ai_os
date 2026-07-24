@@ -865,6 +865,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     // 留言不受專案級 ACL 限制（檢視者也可留言，與網頁端一致）——組隔離已於上方 requireGroup 把關。
     const body = String(args.body ?? "").trim();
     if (!body) throw new Error("body 不可為空");
+    if (body.length > 2000) throw new Error("訊息最長 2000 字"); // 修 IN-01：與網頁端同上限，別讓 MCP 繞過
     const [msg] = await db
       .insert(schema.messages)
       .values({ groupId: project.groupId, projectId: project.id, userId: auth.user.id, kind: "text", body })
