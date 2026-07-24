@@ -253,7 +253,9 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   };
 
   const projectTitleOf = (pid: string | null) => (pid ? (projects.data ?? []).find((p) => p.id === pid)?.title ?? null : null);
-  const items = (list.data ?? []) as ScheduleItem[];
+  const items = (list.data?.items ?? []) as ScheduleItem[];
+  // QA-017：截斷不再靜默——超過單頁上限時明確告知，避免使用者以為行程只有這些
+  const scheduleTruncated = list.data?.truncated ?? false;
 
   // 依日期分組（list 已按 startsAt 升冪，同一天必相鄰，掃一遍即可）
   const groups: Array<{ label: string; items: ScheduleItem[] }> = [];
@@ -392,6 +394,12 @@ function ScheduleCard({ groupId }: { groupId: string }) {
             </div>
           ))}
         </div>
+      )}
+      {/* QA-017：超過單頁上限時明示——不再讓使用者以為行程只有這些 */}
+      {scheduleTruncated && (
+        <p className="hint" role="alert" style={{ color: "var(--gold-ink)", marginTop: 8 }}>
+          ⚠ 行程超過單頁上限（300 筆），較晚的行程未顯示——可用專案篩選或刪除過期行程縮小範圍
+        </p>
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
     </section>
