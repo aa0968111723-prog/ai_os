@@ -19,6 +19,8 @@ export const auditRouter = router({
         cursor: z.object({ createdAt: z.string(), id: z.string().uuid() }).nullish(),
         /** action 關鍵字（如 "generation"、"scenes.update"）——ilike 模糊比對 */
         action: z.string().max(80).optional(),
+        /** action 代碼清單（精確比對）：前端把中文關鍵字翻成命中的代碼後帶入，讓夥伴能用中文搜尋 */
+        actions: z.array(z.string().max(80)).max(80).optional(),
         /** 操作分類 key（見 shared/auditWording 的 AUDIT_CATEGORIES）——比關鍵字更白話的過濾 */
         category: z.string().max(40).optional(),
         /** 依團隊過濾：看整個團隊底下各組的操作流水（分團隊） */
@@ -53,6 +55,8 @@ export const auditRouter = router({
         const escaped = q.replace(/[\\%_]/g, (m) => `\\${m}`);
         conds.push(ilike(schema.auditLog.action, `%${escaped}%`));
       }
+      // 中文搜尋走這條：前端用 AUDIT_ACTION_LABELS 把「邀請」翻成 ["admin.invite", "auth.acceptInvite"] 帶入
+      if (input.actions?.length) conds.push(inArray(schema.auditLog.action, input.actions));
       // 分類過濾：把該類的路由前綴展開成 OR 的「action LIKE 'prefix.%'」——未知 key 不套用
       if (input.category) {
         const prefixes = auditPrefixesForCategory(input.category);
