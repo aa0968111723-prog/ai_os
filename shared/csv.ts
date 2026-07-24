@@ -36,11 +36,11 @@ export function toCsv(rows: Array<Array<unknown>>, opts: { bom?: boolean; formul
 }
 
 /**
- * 解析 CSV 文字 → 二維字串陣列（含表頭列）。狀態機逐字掃描：
- * 正確處理引號欄位內的逗號/換行、"" 轉義、CRLF 與 LF 混用、結尾無換行、去 UTF-8 BOM。
- * 空輸入回空陣列。
+ * 解析「分隔符分隔」的表格文字 → 二維字串陣列（含表頭列）。狀態機逐字掃描：
+ * 正確處理引號欄位內的分隔符/換行、"" 轉義、CRLF 與 LF 混用、結尾無換行、去 UTF-8 BOM。
+ * 空輸入回空陣列。delimiter＝","→CSV、"\t"→TSV（同一套引號規則，接 Excel/試算表另存的 TSV）。
  */
-export function parseCsv(text: string): string[][] {
+export function parseDelimited(text: string, delimiter: string): string[][] {
   const s = text.replace(/^﻿/, "");
   const rows: string[][] = [];
   let row: string[] = [];
@@ -58,8 +58,11 @@ export function parseCsv(text: string): string[][] {
       }
       cell += c; i++; continue;
     }
-    if (c === '"') { inQuotes = true; i++; continue; }
-    if (c === ",") { pushCell(); i++; continue; }
+    // 只有在「欄位開頭」（cell 為空）才把 " 當引號模式起點——RFC 4180 寬容解析：
+    // 欄位中途的裸引號（如 24" pipe、內文引號）視為普通字元原樣保留，
+    // 不再無條件切入引號模式而吞併後續的分隔符/換行/整條列（資料靜默錯位/遺失）。
+    if (c === '"' && cell === "") { inQuotes = true; i++; continue; }
+    if (c === delimiter) { pushCell(); i++; continue; }
     if (c === "\r") { i++; continue; } // CR 併入 LF 處理
     if (c === "\n") { pushRow(); i++; continue; }
     cell += c; i++;
@@ -69,6 +72,11 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
+/** 解析 CSV（逗號分隔）→ 二維字串陣列。見 parseDelimited。 */
+export function parseCsv(text: string): string[][] {
+  return parseDelimited(text, ",");
+}
+
 /**
  * 把「表頭 + 資料列」的 CSV 依「表頭名稱對應欄位」轉成列物件陣列。
  * headerMap：CSV 表頭字串 → 目標欄位 key（未在 map 的表頭欄一律丟棄）。
@@ -76,14 +84,16 @@ export function parseCsv(text: string): string[][] {
  *   line 精準對應原始 CSV 行（跳過的全空列不影響其他列的行號），供匯入錯誤回報準確定位。
  * 值的型別轉換與驗證交給呼叫端（validateRowData）；還原匯出時中和公式所加的前綴 `'`（round-trip 無損）。
  */
-export function csvToRowObjects(text: string, headerMap: Record<string, string>): Array<{ data: Record<string, string>; line: number }> {
-  const grid = parseCsv(text);
+export function delimitedToRowObjects(text: string, delimiter: string, headerMap: Record<string, string>): Array<{ data: Record<string, string>; line: number }> {
+  const grid = parseDelimited(text, delimiter);
   if (grid.length < 2) return []; // 只有表頭或空
   const header = grid[0].map((h) => h.trim());
   const cols: Array<{ index: number; key: string }> = [];
+  const takenHeaders = new Set<string>();
   header.forEach((h, idx) => {
     const key = headerMap[h];
-    if (key) cols.push({ index: idx, key });
+    // 重複表頭只採第一欄（與 shared/tabular.ts parseTabular 的去重一致；否則預覽取首欄、匯入取末欄會不一致）
+    if (key && !takenHeaders.has(h)) { cols.push({ index: idx, key }); takenHeaders.add(h); }
   });
   const out: Array<{ data: Record<string, string>; line: number }> = [];
   for (let r = 1; r < grid.length; r++) {
@@ -97,7 +107,12 @@ export function csvToRowObjects(text: string, headerMap: Record<string, string>)
   return out;
 }
 
+/** CSV（逗號分隔）表頭 → 欄位對應 → 列物件陣列。見 delimitedToRowObjects。 */
+export function csvToRowObjects(text: string, headerMap: Record<string, string>): Array<{ data: Record<string, string>; line: number }> {
+  return delimitedToRowObjects(text, ",", headerMap);
+}
+
 /** 還原匯出時的公式中和：`'=…` → `=…`（只在 `'` 後緊接公式起始字元時剝除，避免誤傷真實資料） */
-function unguard(s: string): string {
+export function unguard(s: string): string {
   return s.startsWith("'") && FORMULA_LEAD.test(s.slice(1)) ? s.slice(1) : s;
 }

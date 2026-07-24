@@ -9,10 +9,11 @@
  * - 工具（讀/寫分類的單一來源在 shared/mcpCatalog）：
  *     基礎：whoami / list_projects / get_project_context / find_model / submit_generation / post_message
  *     生成取回：list_generations / get_generation / list_assets（成品簽成免登入短效網址）
- *     自訂資料庫：list_databases / query_database / add_database_row / list_database_files / read_database_file
+ *     自訂資料庫：list_databases / query_database / add_database_row / list_database_files / read_database_file / get_database_stats
  *     AI 代理（重用 agentCore）：plan_agent / approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
  *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item
  *     筆記・會議紀錄（組共用、可匯入知識庫）：list_notes / get_note
+ *     站內私訊（只碰本人參與的對話）：list_dm_contacts / list_dm_threads / read_dm / send_dm
  *     統整：get_project_status（一次回分鏡＋生成＋代理＋排程＋待辦）
  */
 import type { Request, Response } from "express";
@@ -23,17 +24,19 @@ import { worldviewSchema } from "../../shared/worldview";
 import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
 import { sanitizeAuditInput } from "./audit";
 import { submitGenerationCore, advanceGeneration } from "./generationCore";
-import { signAssetUrl } from "./storage";
+import { signAssetUrl, signDbFileUrl } from "./storage";
 import { assertProjectEditable } from "./projectAcl";
 import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity, scopeDeniedReason, type McpScope } from "./mcpAuth";
 import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
 import { addDataRowValidated } from "./databaseCore";
+import { formatStatsLine, mediaKindOf, tableStats } from "./databaseMedia";
 import {
   planAgentCore, approveAgentCore, discardAgentCore, stopAgentCore,
   listAgentRunsForProject, getAgentRunChecked,
 } from "./agentCore";
 import { addScheduleItemCore, listScheduleForGroup } from "./scheduleCore";
+import { DM_MAX_BODY, listDmPeers, listDmThreads, listDmHistory, markDmRead, resolveDmPeerRef, sendDm } from "./dmCore";
 import type { AgentStep } from "./agentRunner";
 import type { AuthState } from "./auth";
 
@@ -149,19 +152,20 @@ const TOOLS = [
   },
   {
     name: "list_database_files",
-    description: "列出資料庫掛的文件（上傳檔與 Google/Notion 匯入）：名稱、格式、可讀字數；keyword 可過濾內文並回匹配片段。之後用 read_database_file 讀全文",
+    description: "列出資料庫掛的文件（上傳檔、Google/Notion 匯入、圖片/影音）：名稱、媒體類型、分類、AI 描述、可讀字數；keyword 過濾名稱/分類/描述/內文並回匹配片段。之後用 read_database_file 讀全文",
     inputSchema: {
       type: "object",
       properties: {
         tableId: { type: "string" },
-        keyword: { type: "string", description: "過濾內文包含此關鍵字的文件（並回匹配片段）" },
+        keyword: { type: "string", description: "過濾名稱／分類／AI 描述／內文包含此關鍵字的文件（內文命中回匹配片段）" },
+        category: { type: "string", description: "只列這個分類的文件" },
       },
       required: ["tableId"],
     },
   },
   {
     name: "read_database_file",
-    description: "讀取文件抽出的純文字（PDF/DOCX/HTML 已由伺服器轉純文字）。單次最多 20000 字；長文用 offset 分段讀（回應含 totalChars）",
+    description: "讀取文件內容：文字檔回抽出的純文字（單次最多 20000 字，長文用 offset 分段；回應含 totalChars）；圖片/影音回分類、AI 看圖描述與短效下載網址（多模態客戶端可自行抓圖）",
     inputSchema: {
       type: "object",
       properties: {
@@ -171,6 +175,11 @@ const TOOLS = [
       },
       required: ["fileId"],
     },
+  },
+  {
+    name: "get_database_stats",
+    description: "一個資料庫的資訊量統計：列數/欄數、文件數與圖影音文分佈、總容量、AI 可讀字數、已看圖描述數、分類分佈、最後活動時間。回答「這個庫有多少東西」先用這個",
+    inputSchema: { type: "object", properties: { tableId: { type: "string" } }, required: ["tableId"] },
   },
   // ── AI 代理（規劃→核准→背景執行）：讓外部 AI 驅動系統內建的多步製作代理 ──
   {
@@ -250,6 +259,42 @@ const TOOLS = [
     name: "get_note",
     description: "讀一則筆記的全文（會議決議、待辦、由知識庫匯入的內容）。先用 list_notes 找 noteId。",
     inputSchema: { type: "object", properties: { noteId: { type: "string" } }, required: ["noteId"] },
+  },
+  // ── 站內私訊（通訊錄 1:1 聊天）：只讀寫「金鑰擁有者本人」參與的對話，別人的私訊碰不到 ──
+  {
+    name: "list_dm_contacts",
+    description: "列出你可以私訊的夥伴（同組夥伴＋開發者）：userId、姓名、Email、共同組別。private message 前先用這個找對象。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "list_dm_threads",
+    description: "列出你的私訊對話串：每位往來對象的最後一句預覽、時間與未讀數。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "read_dm",
+    description: "讀你與某位夥伴的私訊往來（舊到新；只讀得到你自己參與的對話）。peer 可用 userId 或 Email。markRead=true 順便把該對話標為已讀。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        peer: { type: "string", description: "對方的 userId 或 Email（先用 list_dm_contacts 查）" },
+        limit: { type: "number", description: "最多回幾則（預設 30，上限 100）" },
+        markRead: { type: "boolean", description: "true＝讀完標已讀（預設 false，僅查看不動未讀數）" },
+      },
+      required: ["peer"],
+    },
+  },
+  {
+    name: "send_dm",
+    description: "以你的身分私訊一位夥伴（同組夥伴或開發者；對方在網站頂欄「私訊」看到）。peer 可用 userId 或 Email。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        peer: { type: "string", description: "對方的 userId 或 Email（先用 list_dm_contacts 查）" },
+        body: { type: "string", description: "訊息內容（最長 2000 字）" },
+      },
+      required: ["peer", "body"],
+    },
   },
   // ── 統整快照（把分鏡／生成／代理／排程／待辦一次給外部 AI，細部連結各子系統）──
   {
@@ -431,20 +476,26 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       .orderBy(desc(schema.dataFiles.createdAt))
       .limit(200);
     const keyword = String(args.keyword ?? "").trim().toLowerCase();
+    const categoryFilter = String(args.category ?? "").trim();
     return files.flatMap((f) => {
+      if (categoryFilter && f.category !== categoryFilter) return [];
       const text = f.textContent ?? "";
       let snippet: string | null = null;
       if (keyword) {
         const idx = text.toLowerCase().indexOf(keyword);
-        if (idx < 0 && !f.name.toLowerCase().includes(keyword)) return [];
+        const metaHit = [f.name, f.category ?? "", f.aiDescription ?? ""].some((s) => s.toLowerCase().includes(keyword));
+        if (idx < 0 && !metaHit) return [];
         if (idx >= 0) snippet = text.slice(Math.max(0, idx - 80), idx + 120);
       }
       return [{
         fileId: f.id,
         name: f.name,
         mime: f.mime,
+        kind: mediaKindOf(f.mime), // image/video/audio/doc
         sizeBytes: f.sizeBytes,
-        readableChars: text.length, // 0＝此格式暫不可讀（僅存檔）
+        readableChars: text.length, // 0＝此格式無抽出文字（圖影看 aiDescription）
+        category: f.category,
+        aiDescription: f.aiDescription ? f.aiDescription.slice(0, 300) : null,
         sourceUrl: f.sourceUrl,
         ...(snippet ? { snippet } : {}),
       }];
@@ -458,7 +509,26 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, file.tableId), isNull(schema.dataTables.deletedAt)));
     if (!table || !resolveAgentAccess(auth, table).canRead) throw new Error("找不到這份文件");
     const text = file.textContent ?? "";
-    if (!text) return { name: file.name, totalChars: 0, note: "此格式暫不支援文字抽取（僅存檔）——支援：txt/md/csv/json/html/srt/vtt/pdf/docx" };
+    if (!text) {
+      const kind = mediaKindOf(file.mime);
+      // 圖影音：回分類與 AI 描述（圖片經「AI 分類」後這裡就有內容）＋短效下載網址，
+      // 多模態客戶端可自行抓原檔看圖；沒有原檔（純文字匯入）就不給網址。
+      if (kind !== "doc") {
+        return {
+          name: file.name,
+          mime: file.mime,
+          kind,
+          totalChars: 0,
+          category: file.category,
+          aiDescription: file.aiDescription,
+          downloadUrl: file.storagePath ? signDbFileUrl(file.id) : null,
+          note: file.aiDescription
+            ? "這是媒體檔：aiDescription 是 AI 看圖產生的描述；要看原始畫面可抓 downloadUrl（1 小時內有效）"
+            : "這是媒體檔、尚未有 AI 描述——網頁端「AI 分類」可補；要看原始畫面可抓 downloadUrl（1 小時內有效）",
+        };
+      }
+      return { name: file.name, totalChars: 0, category: file.category, note: "此格式暫不支援文字抽取（僅存檔）——支援：txt/md/csv/json/html/srt/vtt/pdf/docx" };
+    }
     const offset = Math.max(0, Number(args.offset) || 0);
     const maxChars = Math.min(Math.max(Number(args.maxChars) || 20_000, 1), 20_000);
     return {
@@ -467,7 +537,17 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       offset,
       text: text.slice(offset, offset + maxChars),
       hasMore: offset + maxChars < text.length,
+      category: file.category,
     };
+  }
+
+  if (name === "get_database_stats") {
+    const tableId = String(args.tableId ?? "");
+    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
+    if (!table) throw new Error("找不到這個資料庫");
+    if (!resolveAgentAccess(auth, table).canRead) throw new Error("找不到這個資料庫");
+    const stats = await tableStats(table);
+    return { table: table.name, summary: formatStatsLine(stats), ...stats };
   }
 
   // ── 單筆生成查詢（以 generationId，不掛 projectId）：閉合「送生成→取回成品」的迴路 ──
@@ -507,6 +587,60 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       projectId: note.projectId,
       chars: note.content.length,
       updatedAt: note.updatedAt,
+    };
+  }
+
+  // ── 站內私訊（重用 dmCore，與網頁端同一守衛）：只碰金鑰擁有者本人參與的對話 ──
+  if (name === "list_dm_contacts") {
+    const peers = await listDmPeers(auth);
+    return peers.map((p) => ({
+      userId: p.userId,
+      name: p.name,
+      email: p.email,
+      isSuperAdmin: p.isSuperAdmin,
+      sharedGroups: p.sharedGroups,
+    }));
+  }
+
+  if (name === "list_dm_threads") {
+    const threads = await listDmThreads(auth);
+    return threads.map((t) => ({
+      peerId: t.peerId,
+      peerName: t.peerName,
+      peerEmail: t.peerEmail,
+      lastMessage: t.lastBody,
+      lastFromMe: t.lastFromMe,
+      lastAt: t.lastAt,
+      unread: t.unread,
+    }));
+  }
+
+  if (name === "read_dm" || name === "send_dm") {
+    const ref = String(args.peer ?? "").trim();
+    if (!ref) throw new Error("peer 不可為空（userId 或 Email，先用 list_dm_contacts 查）");
+    const peer = await resolveDmPeerRef(auth, ref);
+    if (!peer) throw new Error("找不到這位夥伴——只能私訊同組夥伴或開發者（用 list_dm_contacts 看可私訊的名單）");
+
+    if (name === "send_dm") {
+      const body = String(args.body ?? "").trim();
+      if (!body) throw new Error("body 不可為空");
+      if (body.length > DM_MAX_BODY) throw new Error(`訊息最長 ${DM_MAX_BODY} 字`);
+      const { message } = await sendDm(auth, peer.userId, body);
+      return { messageId: message.id, to: peer.name, sentAt: message.createdAt };
+    }
+
+    // read_dm：預設不動未讀數（markRead=true 才標已讀）——外部 AI 幫忙摘要不應吃掉本人的未讀提示
+    const limit = Math.min(Math.max(Number(args.limit) || 30, 1), 100);
+    const { items } = await listDmHistory(auth, peer.userId, { limit });
+    if (args.markRead === true) await markDmRead(auth, peer.userId);
+    return {
+      peer: { userId: peer.userId, name: peer.name, email: peer.email },
+      messages: items.map((m) => ({
+        from: m.kind === "assistant" ? "AI 助手" : m.fromMe ? "我" : peer.name,
+        // body 可能為空（純附件／標注訊息）——補上可讀提示，讓外部 AI 摘要不遺漏
+        body: [m.body, m.attachment ? `[附件：${m.attachment.title}]` : "", m.ref ? `[標注${m.ref.title ? "：" + m.ref.title : ""}]` : ""].filter(Boolean).join(" ").trim(),
+        at: m.createdAt,
+      })),
     };
   }
 
@@ -599,10 +733,12 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     }
 
     if (name === "list_schedule") {
-      // 專案視角的過濾在 DB 端完成（本專案 ＋ 組層級），避免 300 筆上限先被別的專案吃掉
-      const items = await listScheduleForGroup(auth, project.groupId, Boolean(args.includePast), project.id);
-      return items
+      // 專案視角的過濾在 DB 端完成（本專案 ＋ 組層級），避免單頁上限先被別的專案吃掉
+      const { items, truncated } = await listScheduleForGroup(auth, project.groupId, Boolean(args.includePast), project.id);
+      const rows = items
         .map((i) => ({ id: i.id, title: i.title, startsAt: i.startsAt, endsAt: i.endsAt, note: i.note, owner: i.ownerName, projectScoped: i.projectId === project.id }));
+      // QA-017：截斷要讓外部 AI 看得見，不能默默當成全部
+      return truncated ? { items: rows, truncated: true, note: "行程超過單頁上限，僅列出最早的一頁" } : rows;
     }
 
     if (name === "add_schedule_item") {
@@ -622,7 +758,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const scenes = await db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
     const gens = await db.select().from(schema.generations).where(eq(schema.generations.projectId, project.id)).orderBy(desc(schema.generations.createdAt)).limit(50);
     const runs = await listAgentRunsForProject(auth, project.id);
-    const sched = await listScheduleForGroup(auth, project.groupId, false, project.id);
+    const { items: sched } = await listScheduleForGroup(auth, project.groupId, false, project.id);
     const now = new Date();
     const tally = (arr: string[]) => arr.reduce<Record<string, number>>((m, k) => ((m[k] = (m[k] ?? 0) + 1), m), {});
     return {

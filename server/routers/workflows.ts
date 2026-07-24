@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { getWorkflow } from "../../shared/models";
+import { savePromptCore } from "./prompts";
 
 /** 與 services/workflowRunner 的 RunStep 同形狀（jsonb 落庫的每步快照） */
 interface RunStep {
@@ -19,6 +20,9 @@ export interface StartWorkflowCoreInput {
   projectId: string;
   presetId: string;
   prompt: string;
+  /** 沿用生成台勾選的角色定裝/場景設定卡：落庫在 run 上，runner 每步視覺生成都注入同一套錨點（跨步一致） */
+  characterIds?: string[];
+  scenePresetIds?: string[];
   assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
 }
 
@@ -34,33 +38,49 @@ export async function startWorkflowCore(input: StartWorkflowCoreInput) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   await input.assertAccess(project); // 多組隔離（可含 2.3 專案級 ACL）
-  // 併發守門：同人同專案一次只跑一條（check-then-insert 有極短競態視窗，
-  // 但每步扣點在 runner 端有冪等防護，這裡只求把重複點擊擋成好懂的錯誤）
-  const [active] = await db
-    .select({ id: schema.workflowRuns.id })
-    .from(schema.workflowRuns)
-    .where(
-      and(
-        eq(schema.workflowRuns.projectId, project.id),
-        eq(schema.workflowRuns.userId, input.userId),
-        eq(schema.workflowRuns.status, "running"),
-      ),
-    )
-    .limit(1);
-  if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "你已有一條工作流在跑——等它完成或先按停止" });
-  const steps: RunStep[] = preset.steps.map((s) => ({ note: s.note, status: "pending" }));
-  const [run] = await db
-    .insert(schema.workflowRuns)
-    .values({
-      projectId: project.id,
-      groupId: project.groupId,
-      userId: input.userId,
-      presetId: preset.id,
-      prompt: input.prompt.trim(),
-      steps,
-    })
-    .returning();
-  return run;
+  // 併發守門：同人同專案一次只跑一條。以 advisory xact lock（classifier 3，與 points=0/approvals=1/
+  // 拆分鏡=2 不撞）序列化「檢查有無在跑＋建 run」，徹底關掉 check-then-insert 的競態窗口——避免並發
+  // 雙擊建出兩條 run、雙重扣點（原本只靠 runner 端冪等兜底，這裡從源頭擋掉）。
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${project.id + ":" + input.userId}), 3)`);
+    const [active] = await tx
+      .select({ id: schema.workflowRuns.id })
+      .from(schema.workflowRuns)
+      .where(
+        and(
+          eq(schema.workflowRuns.projectId, project.id),
+          eq(schema.workflowRuns.userId, input.userId),
+          eq(schema.workflowRuns.status, "running"),
+        ),
+      )
+      .limit(1);
+    if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "你已有一條工作流在跑——等它完成或先按停止" });
+    const steps: RunStep[] = preset.steps.map((s) => ({ note: s.note, status: "pending" }));
+    const [run] = await tx
+      .insert(schema.workflowRuns)
+      .values({
+        projectId: project.id,
+        groupId: project.groupId,
+        userId: input.userId,
+        presetId: preset.id,
+        prompt: input.prompt.trim(),
+        characterIds: input.characterIds?.length ? input.characterIds : null,
+        scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
+        steps,
+      })
+      .returning();
+    return run;
+  }).then(async (run) => {
+    // 三合一：工作流的「想法」也入提示詞庫（與生成台自動存同一套去重），連同這條 run 實際帶的
+    // 角色/場景錨點（modelId 不帶——工作流是多模型串鏈，沒有單一模型可記）——失敗不擋啟動主流程
+    await savePromptCore({ id: run.projectId, groupId: run.groupId }, input.userId, run.prompt, {
+      characterIds: input.characterIds,
+      scenePresetIds: input.scenePresetIds,
+    }).catch((err) =>
+      console.warn("[workflow] 想法入提示詞庫失敗（不影響執行）：", err instanceof Error ? err.message : err),
+    );
+    return run;
+  });
 }
 
 /** 工作流執行（伺服器背景推進版）：start 只建 run，實際送出由 workflowRunner 的下一個 tick 接手 */
@@ -71,6 +91,9 @@ export const workflowsRouter = router({
         projectId: z.string().uuid(),
         presetId: z.string(),
         prompt: z.string().min(1, "請填想法"),
+        /** 生成台勾選的角色/場景卡：整條工作流的視覺步驟都注入同一套錨點（上限與 generation.submit 同口徑） */
+        characterIds: z.array(z.string().uuid()).max(6).optional(),
+        scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) =>
@@ -79,6 +102,8 @@ export const workflowsRouter = router({
         projectId: input.projectId,
         presetId: input.presetId,
         prompt: input.prompt,
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
         assertAccess: async (p) => {
           requireGroup(ctx.auth, p.groupId);
           // 2.3：專案檢視者不能啟動工作流（一次多步生成＝內容寫入）

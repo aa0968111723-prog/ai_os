@@ -47,6 +47,8 @@ export interface ChatCompletionOptions {
   maxTokens?: number;
   /** 逾時上限;LLM 掛起→逾時走呼叫端 catch 退點(比照原 any-llm 呼叫的 60s) */
   timeoutMs?: number;
+  /** 呼叫端中止訊號(如 SSE 用戶端斷線):與 timeoutMs 由 proxyFetch 以 AbortSignal.any 合成,斷線即取消在途 HTTP */
+  signal?: AbortSignal;
 }
 
 export interface ChatCompletionResponse {
@@ -81,6 +83,7 @@ export async function chatCompletion(options: ChatCompletionOptions): Promise<Ch
       max_tokens: options.maxTokens ?? 2048,
     }),
     timeoutMs: options.timeoutMs ?? 60_000,
+    signal: options.signal,
   });
   if (!res.ok) {
     const error = await res.text();
@@ -102,7 +105,7 @@ export async function chatCompletion(options: ChatCompletionOptions): Promise<Ch
  */
 export async function nimComplete(
   prompt: string,
-  opts?: { model?: string; temperature?: number; maxTokens?: number; timeoutMs?: number },
+  opts?: { model?: string; temperature?: number; maxTokens?: number; timeoutMs?: number; signal?: AbortSignal },
 ): Promise<string> {
   const result = await chatCompletion({
     model: opts?.model,
@@ -110,6 +113,7 @@ export async function nimComplete(
     temperature: opts?.temperature,
     maxTokens: opts?.maxTokens,
     timeoutMs: opts?.timeoutMs,
+    signal: opts?.signal,
   });
   return result.choices[0]?.message?.content ?? "";
 }

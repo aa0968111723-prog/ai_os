@@ -127,6 +127,10 @@ export async function resolveMcpIdentity(provided: string): Promise<McpIdentity 
   if (isTokenExpired(row.expiresAt, new Date())) return null; // 已過期＝比照撤銷，拒絕
   const auth = await loadAuthState(row.userId); // 使用者停用／不存在 → null
   if (!auth) return null;
+  // 強制改密碼閘門（安全關鍵）：tRPC 的 authedProcedure 會擋 mustChangePassword，但 MCP／REST 兩條
+  // API 路徑不經該中介層——若不在此擋，管理員重設密碼後、被盜或既存的金鑰仍能以受害者身分讀寫全系統，
+  // 帳號鎖定形同虛設。改密碼流程另會撤銷金鑰（見 revokeAllUserMcpTokens），此處為縱深防禦。
+  if (auth.user.mustChangePassword) return null;
   // lastUsedAt 更新（射後不理）：認證結果已定，這只是給使用者看的輔助欄位
   void db
     .update(schema.mcpTokens)
@@ -182,6 +186,24 @@ export async function activeMcpTokenCount(userId: string): Promise<number> {
     .from(schema.mcpTokens)
     .where(and(eq(schema.mcpTokens.userId, userId), isNull(schema.mcpTokens.revokedAt)));
   return rows.length;
+}
+
+/**
+ * 撤銷某使用者「全部」未撤銷金鑰（密碼重設／自助改密碼時呼叫）。
+ * 安全關鍵：密碼變更代表「舊憑證一律作廢」——只刪 session 不夠，MCP 金鑰是另一套長效憑證，
+ * 不一併撤銷的話，被盜或既存金鑰在改密碼後仍能以受害者身分讀寫（見 resolveMcpIdentity 縱深防禦）。
+ * 回傳實際撤銷的金鑰數（供稽核）。可帶入交易執行器 tx 與密碼更新同批原子完成。
+ */
+export async function revokeAllUserMcpTokens(
+  userId: string,
+  exec: { update: typeof db.update } = db,
+): Promise<number> {
+  const revoked = await exec
+    .update(schema.mcpTokens)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(schema.mcpTokens.userId, userId), isNull(schema.mcpTokens.revokedAt)))
+    .returning({ id: schema.mcpTokens.id });
+  return revoked.length;
 }
 
 /** 撤銷自己的一把金鑰（冪等；只能撤自己的）。回是否有實際撤銷到列。 */

@@ -1,5 +1,3 @@
-import html2canvas from "html2canvas";
-
 /**
  * 元件級回饋的選取與截圖工具（任務 D）。
  * 所有屬於回饋 widget 自身的節點都帶 data-fb-widget，選取與截圖都用它來排除，
@@ -402,6 +400,9 @@ export function captureWithHighlight(
       document.body.appendChild(marker);
     }
     try {
+      // 動態載入（QA-025 bundle 瘦身）：html2canvas 佔 main bundle 數百 KB，
+      // 卻只在「送回饋按截圖」這一刻用到——首次截圖才拉取對應 chunk
+      const { default: html2canvas } = await import("html2canvas");
       const canvas = await html2canvas(document.body, {
         x: window.scrollX,
         y: window.scrollY,

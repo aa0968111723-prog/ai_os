@@ -3,10 +3,12 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
-import { validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
+import { MAX_FILE_CATEGORY, normalizeFileCategory, validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
 import { addDataRowValidated } from "../services/databaseCore";
-import { csvToRowObjects } from "../../shared/csv";
+import { classifyDatabaseFile, mediaKindOf, tableStats } from "../services/databaseMedia";
+import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
+import { tabularToRowObjects, TABULAR_FORMATS, type TabularFormat } from "../../shared/tabular";
 import {
   extractTextFromBuffer,
   fetchImport,
@@ -20,7 +22,8 @@ import {
   ssrfGuardError,
   userFileUsage,
 } from "../services/databaseFiles";
-import { checkDiskSpace, removeStoredFile, saveBuffer } from "../services/storage";
+import { checkDiskSpace, copyStoredFile, kindFromMime, removeStoredFile, saveBuffer } from "../services/storage";
+import { fetchDriveFile, getNotionToken } from "../services/integrations";
 
 /**
  * 自訂資料庫（個人→組→團隊→全站）：表結構 CRUD＋列資料 CRUD＋文件層＋連接（CSV/專案/排程）。
@@ -36,7 +39,7 @@ const LIST_LIMIT_DEFAULT = 200;
 const fieldsShape = z.array(z.object({
   key: z.string(),
   label: z.string(),
-  type: z.enum(["text", "number", "select", "date", "checkbox", "url", "user", "project", "schedule"]),
+  type: z.enum(["text", "number", "select", "date", "checkbox", "url", "file", "user", "project", "schedule"]),
   options: z.array(z.string()).optional(),
   required: z.boolean().optional(),
 })).max(60);
@@ -250,21 +253,32 @@ export const databasesRouter = router({
     }),
 
   /**
-   * CSV 匯入（連接 Excel／Google 試算表／其他資料庫的匯出檔）：
-   * headerMap 把 CSV 表頭對應到欄位 key，逐列走與手動新增同一套驗證與保險絲。
-   * 部分列驗證失敗不整批中止——回「成功幾列、失敗哪幾列為什麼」，讓使用者修完再補匯入。
+   * 多格式資料匯入（連接 Excel／Google 試算表／其他資料庫或 API 的匯出檔）：
+   * 支援 CSV／TSV（另存分隔值）與 JSON（物件陣列）；headerMap 把來源表頭／key 對應到欄位 key，
+   * 逐列走與手動新增同一套驗證與保險絲。部分列驗證失敗不整批中止——回「成功幾列、失敗哪幾列為什麼」，
+   * 讓使用者修完再補匯入。（原 importCsv 已併入此路徑，format 預設 csv 相容舊呼叫。）
    */
-  importCsv: authedProcedure
+  importData: authedProcedure
     .input(z.object({
       tableId: z.string().uuid(),
-      csv: z.string().min(1).max(1_500_000), // 留餘裕給 JSON 包裝，不撞 express.json 的 2MB 上限
-      headerMap: z.record(z.string()), // CSV 表頭 → 欄位 key
+      content: z.string().min(1).max(1_500_000), // 留餘裕給 JSON 包裝，不撞 express.json 的 2MB 上限
+      format: z.enum(["csv", "tsv", "json"]).default("csv"),
+      headerMap: z.record(z.string()), // 來源表頭（CSV/TSV）或 JSON key → 欄位 key
     }))
     .mutation(async ({ ctx, input }) => {
       const { table, access } = await getTableChecked(ctx.auth, input.tableId);
       if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
-      const objs = csvToRowObjects(input.csv, input.headerMap);
-      if (objs.length === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可匯入的資料列（確認 CSV 有表頭列＋至少一列資料，且已對應欄位）" });
+      let objs: Array<{ data: Record<string, string>; line: number }>;
+      try {
+        objs = tabularToRowObjects(input.content, input.format as TabularFormat, input.headerMap);
+      } catch (err) {
+        // JSON 解析失敗等：以人話回報而非 500
+        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "資料解析失敗" });
+      }
+      if (objs.length === 0) {
+        const fmtLabel = TABULAR_FORMATS.find((f) => f.id === input.format)?.label ?? "資料";
+        throw new TRPCError({ code: "BAD_REQUEST", message: `沒有可匯入的資料列（確認 ${fmtLabel} 有表頭／欄位＋至少一列資料，且已對應欄位）` });
+      }
       const MAX_IMPORT = 5000;
       const slice = objs.slice(0, MAX_IMPORT); // 只嘗試前 MAX_IMPORT 列
       let imported = 0;
@@ -276,7 +290,7 @@ export const databasesRouter = router({
           await addDataRowValidated(table, ctx.auth.user.id, data);
           imported++;
         } catch (err) {
-          if (errors.length < 50) errors.push({ line, error: err instanceof Error ? err.message : "未知錯誤" }); // line＝CSV 實體行號
+          if (errors.length < 50) errors.push({ line, error: err instanceof Error ? err.message : "未知錯誤" }); // line＝實體行號（JSON＝第幾筆）
           // 達列數上限即停（addDataRowValidated 會拋保險絲訊息）
           if (err instanceof Error && err.message.includes("列上限")) break;
         }
@@ -330,6 +344,8 @@ export const databasesRouter = router({
         sourceUrl: schema.dataFiles.sourceUrl,
         readableChars: sql<number>`coalesce(length(${schema.dataFiles.textContent}), 0)`,
         excerpt: sql<string | null>`left(${schema.dataFiles.textContent}, 300)`,
+        category: schema.dataFiles.category,
+        aiDescription: schema.dataFiles.aiDescription,
         uploadedBy: schema.dataFiles.uploadedBy,
         uploaderName: schema.users.name,
         createdAt: schema.dataFiles.createdAt,
@@ -345,11 +361,14 @@ export const databasesRouter = router({
         id: f.id,
         name: f.name,
         mime: f.mime,
+        kind: mediaKindOf(f.mime),
         sizeBytes: f.sizeBytes,
         hasFile: !!f.storagePath,
         sourceUrl: f.sourceUrl,
         readableChars: Number(f.readableChars),
         excerpt: f.excerpt,
+        category: f.category,
+        aiDescription: f.aiDescription,
         uploadedBy: f.uploadedBy,
         uploaderName: f.uploaderName ?? "?",
         createdAt: f.createdAt,
@@ -386,13 +405,13 @@ export const databasesRouter = router({
       if (ssrf) throw new TRPCError({ code: "BAD_REQUEST", message: ssrf });
       const normalized = normalizeImportUrl(input.url);
 
-      // Notion：官方 API 抽文字（不落地原檔）
+      // Notion：官方 API 抽文字（不落地原檔）。token 優先用「操作者自己的」（整合連接頁設定）→ 站方 NOTION_TOKEN
       if (normalized.kind === "notion") {
         const pageId = notionPageIdFromUrl(input.url);
         if (!pageId) throw new TRPCError({ code: "BAD_REQUEST", message: "看不出這個 Notion 網址的頁面 id——請貼「複製連結」取得的完整頁面網址" });
         let text: string;
         try {
-          text = await fetchNotionText(pageId);
+          text = await fetchNotionText(pageId, await getNotionToken(ctx.auth.user.id));
         } catch (err) {
           throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Notion 匯入失敗" });
         }
@@ -411,18 +430,36 @@ export const databasesRouter = router({
         return { id: row.id, readableChars: text.length };
       }
 
-      // Google／一般網址：抓回內容
-      let fetched: Awaited<ReturnType<typeof fetchImport>>;
-      try {
-        fetched = await fetchImport(normalized.fetchUrl);
-      } catch (err) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "抓取失敗" });
+      // Google／一般網址：Google 連結先試「操作者自己的 Google 授權」抓私有檔（整合連接頁連結後生效），
+      // 沒連結或抓不到再退回原本的公開連結路徑——兩邊都失敗才報錯，且錯誤訊息帶清楚的下一步。
+      let fetched: { buf: Buffer; mime: string };
+      let driveNoAccess: string | null = null; // 已連結 Google 但該帳戶無此檔權限（給更準的人話）
+      let driveName: string | null = null;
+      const privateTried = normalized.kind !== "web" && !!normalized.fileId; // fileId 只在 google-* 有值
+      const priv = privateTried
+        ? await fetchDriveFile(ctx.auth.user.id, normalized.kind as "google-doc" | "google-sheet" | "google-slides" | "google-drive", normalized.fileId!)
+        : null;
+      if (priv?.ok) {
+        fetched = { buf: priv.buf, mime: priv.mime };
+        driveName = priv.name;
+      } else {
+        if (priv && !priv.ok && priv.reason === "no-access") driveNoAccess = priv.message;
+        try {
+          fetched = await fetchImport(normalized.fetchUrl);
+        } catch (err) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "抓取失敗" });
+        }
       }
-      // 期望匯出文字（Google 文件/試算表/簡報）卻拿到 HTML＝多半是私有檔轉跳登入頁——給人話
-      if (normalized.kind.startsWith("google-") && normalized.kind !== "google-drive" && fetched.mime === "text/html") {
+      // 期望匯出文字（Google 文件/試算表/簡報）卻拿到 HTML＝多半是私有檔轉跳登入頁——給人話與下一步。
+      // 只在「公開退回路徑」檢查（個人授權成功抓到的內容不可能是登入頁——雲端裡真正的 HTML 檔要照常匯入）；
+      // google-drive 一般檔維持舊行為（HTML 檔轉純文字匯入），不誤殺。
+      const expectsExport = normalized.kind === "google-doc" || normalized.kind === "google-sheet" || normalized.kind === "google-slides";
+      if (expectsExport && !priv?.ok && fetched.mime === "text/html") {
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message: "Google 回了登入頁——請把該文件的共用設成「任何人知道連結都能檢視」再匯入",
+          message: driveNoAccess
+            ? `${driveNoAccess}，且檔案未開放公開存取——請在 Google 端把檔案共用給該帳戶，或把共用設成「任何人知道連結都能檢視」`
+            : "Google 回了登入頁——把該文件的共用設成「任何人知道連結都能檢視」，或到「整合連接」頁連結你的 Google 帳戶後即可匯入私有檔",
         });
       }
       const quotaErr = await quotaGuardError(ctx.auth.user.id, fetched.buf.length);
@@ -436,6 +473,8 @@ export const databasesRouter = router({
       } catch {
         fallbackName = rawLastSegment;
       }
+      // Drive API 路徑抓得到真實檔名——比網址片段（uc、export…）好得多
+      if (driveName) fallbackName = driveName;
       const name = (input.name?.trim() || fallbackName || "匯入文件").slice(0, 120) + (normalized.suggestedExt && !/\.[a-z0-9]+$/i.test(input.name?.trim() || fallbackName) ? normalized.suggestedExt : "");
 
       // 純網頁：不落地原檔，直接抽文字（HTML 存起來沒有重看價值）
@@ -486,10 +525,31 @@ export const databasesRouter = router({
       if (normalized.kind === "notion") {
         const pageId = notionPageIdFromUrl(file.sourceUrl);
         if (!pageId) throw new Error("Notion 頁面 id 解析失敗");
-        text = await fetchNotionText(pageId);
+        // token 按「重抓者」查（與配額同口徑）——不是原匯入者
+        text = await fetchNotionText(pageId, await getNotionToken(ctx.auth.user.id));
         sizeBytes = Buffer.byteLength(text, "utf8");
       } else {
-        const fetched = await fetchImport(normalized.fetchUrl);
+        // Google 來源先試重抓者自己的 Google 授權（可重抓私有檔），失敗退回公開路徑
+        let fetched: { buf: Buffer; mime: string };
+        const priv = normalized.kind !== "web" && normalized.fileId
+          ? await fetchDriveFile(ctx.auth.user.id, normalized.kind as "google-doc" | "google-sheet" | "google-slides" | "google-drive", normalized.fileId)
+          : null;
+        if (priv?.ok) {
+          fetched = { buf: priv.buf, mime: priv.mime };
+        } else {
+          fetched = await fetchImport(normalized.fetchUrl);
+        }
+        // Google 文件/試算表/簡報在「公開退回路徑」拿到 HTML＝登入頁（來源被改成私有）——
+        // 報錯而非把登入頁當內容「覆蓋掉」既有文字。個人授權成功（priv.ok）與 google-drive
+        // 一般檔（HTML 檔轉純文字是既有行為）都不在此判定內，不誤殺。
+        const expectsExport = normalized.kind === "google-doc" || normalized.kind === "google-sheet" || normalized.kind === "google-slides";
+        if (expectsExport && !priv?.ok && fetched.mime === "text/html") {
+          throw new Error(
+            priv && !priv.ok && priv.reason === "no-access"
+              ? `${priv.message}，且檔案未開放公開存取——請調整 Google 端共用設定後再重新整理`
+              : "Google 回了登入頁（來源可能已改為私有）——調整共用設定，或到「整合連接」頁連結你的 Google 帳戶後再重新整理",
+          );
+        }
         if (fetched.mime === "text/html") {
           text = htmlToText(fetched.buf.toString("utf8")).slice(0, MAX_TEXT_CHARS);
           sizeBytes = Buffer.byteLength(text, "utf8"); // 與 importUrl 同口徑：網頁只算文字，不算原始 HTML
@@ -533,4 +593,92 @@ export const databasesRouter = router({
     if (file.storagePath) await removeStoredFile(file.storagePath);
     return { ok: true };
   }),
+
+  /* ── 圖影分類與資訊量 ───────────────────────── */
+
+  /** 手動分類／描述編輯（圖影與一般文件皆可）：category 空字串＝清除分類 */
+  setFileMeta: authedProcedure
+    .input(z.object({
+      id: z.string().uuid(),
+      category: z.string().max(MAX_FILE_CATEGORY).nullable().optional(),
+      aiDescription: z.string().max(2000).nullable().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { file, access } = await getFileChecked(ctx.auth, input.id);
+      if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
+      const patch: Partial<{ category: string | null; aiDescription: string | null }> = {};
+      if (input.category !== undefined) patch.category = normalizeFileCategory(input.category);
+      if (input.aiDescription !== undefined) patch.aiDescription = input.aiDescription?.trim() || null;
+      if (Object.keys(patch).length === 0) return { ok: true, category: file.category, aiDescription: file.aiDescription };
+      const [updated] = await db.update(schema.dataFiles).set(patch).where(eq(schema.dataFiles.id, file.id)).returning();
+      return { ok: true, category: updated.category, aiDescription: updated.aiDescription };
+    }),
+
+  /**
+   * AI 看圖分類（圖片限定）：視覺模型產生繁中描述＋自動歸類——圖影從「僅存檔」變 AI 可讀可答。
+   * 計費走點數守門（預設 1 點；E2E_MOCK 不扣點回確定性結果）。
+   */
+  classifyFile: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const { file, table, access } = await getFileChecked(ctx.auth, input.id);
+    if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
+    try {
+      return await classifyDatabaseFile(ctx.auth, file, table);
+    } catch (err) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "看圖分類失敗" });
+    }
+  }),
+
+  /** 資訊量統計：列數／文件數／圖影音文分佈／容量／AI 可讀字數／分類分佈（讀取權即可） */
+  stats: authedProcedure.input(z.object({ tableId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const { table } = await getTableChecked(ctx.auth, input.tableId);
+    return tableStats(table);
+  }),
+
+  /**
+   * 把資料庫文件送進專案素材庫（資料庫 × 專案系統的檔案級串接）：
+   * 實體複製一份到素材儲存（兩邊生命週期獨立，任一邊刪除不影響另一邊），
+   * 分類帶進素材 tags、來源記在 meta 供回溯。權限＝文件讀取權 ＋ 專案可編輯（組隔離＋2.3 檢視者擋）。
+   */
+  sendFileToProject: authedProcedure
+    .input(z.object({ fileId: z.string().uuid(), projectId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { file } = await getFileChecked(ctx.auth, input.fileId);
+      if (!file.storagePath) throw new TRPCError({ code: "BAD_REQUEST", message: "這份文件沒有原始檔案（純文字匯入）——素材庫收的是實體檔" });
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      assertProjectNotArchived(project);
+      await assertProjectEditable(ctx.auth, project);
+      const disk = await checkDiskSpace(file.sizeBytes);
+      if (disk) throw new TRPCError({ code: "PRECONDITION_FAILED", message: disk });
+      const copied = await copyStoredFile(file.storagePath, file.mime);
+      try {
+        const [asset] = await db
+          .insert(schema.assets)
+          .values({
+            projectId: project.id,
+            groupId: project.groupId,
+            kind: kindFromMime(file.mime),
+            title: file.name.slice(0, 80),
+            url: "", // 佔位，下一步以 id 回填服務網址（與 /api/upload 同手法）
+            tags: file.category ? [file.category] : [],
+            isAiGenerated: false,
+            storagePath: copied.storagePath,
+            mime: file.mime,
+            sizeBytes: copied.sizeBytes,
+            uploadedBy: ctx.auth.user.id,
+            meta: { fromDatabaseFileId: file.id, ...(file.aiDescription ? { aiDescription: file.aiDescription } : {}) },
+          })
+          .returning();
+        const [updated] = await db
+          .update(schema.assets)
+          .set({ url: `/api/assets/${asset.id}/file` })
+          .where(eq(schema.assets.id, asset.id))
+          .returning();
+        return { assetId: updated.id, title: updated.title, projectTitle: project.title };
+      } catch (dbErr) {
+        await removeStoredFile(copied.storagePath); // DB 失敗清孤兒複本
+        throw dbErr;
+      }
+    }),
 });

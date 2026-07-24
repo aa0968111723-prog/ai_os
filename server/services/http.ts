@@ -8,12 +8,20 @@ import { fetch as undiciFetch, ProxyAgent } from "undici";
 const proxyUrl = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy;
 const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
 
-function shouldBypass(url: string): boolean {
+// 匯出供單元測試：NO_PROXY 網域邊界比對是繞過出口代理的安全邊界，值得直接測。
+export function shouldBypass(url: string): boolean {
   try {
-    const host = new URL(url).hostname;
+    // URL 的 IPv6 hostname 會帶方括號（[::1]）——去掉後才比得到 ::1
+    const host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "");
     if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
     const noProxy = process.env.NO_PROXY ?? process.env.no_proxy ?? "";
-    return noProxy.split(",").some((entry) => entry.trim() && host.endsWith(entry.trim()));
+    // 網域邊界比對：只允許「完全相等」或「.entry 結尾」——舊版純 endsWith 讓 NO_PROXY=example.com
+    // 也匹配 evil-example.com（繞過代理直連），是被利用來規避出口控管的破口。前導點視為同義（.example.com）。
+    return noProxy.split(",").some((raw) => {
+      const entry = raw.trim().replace(/^\./, "").toLowerCase();
+      if (!entry) return false;
+      return host === entry || host.endsWith("." + entry);
+    });
   } catch {
     return false;
   }

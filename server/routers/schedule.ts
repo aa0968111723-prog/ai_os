@@ -4,11 +4,12 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { addScheduleItemCore, listScheduleForGroup } from "../services/scheduleCore";
+import { queueGroupSync } from "../services/googleCalendar";
 
 /**
  * 排程（需求 10）：組行事曆（會議、交付死線…）。
- * Google 日曆整合以 .ics 匯出達成（GET /api/schedule/:groupId/calendar.ics，見 server/index.ts）
- * ——不做 OAuth 雙向同步（成本/價值評估見優化評估報告）。
+ * Google 日曆整合＝OAuth 直連同步（services/googleCalendar：增刪改自動推送到已連結成員的
+ * 專屬 Google 日曆＋每 15 分鐘對帳）；.ics 匯出（GET /api/schedule/:groupId/calendar.ics）保留為後備。
  */
 
 /** ISO 字串 → Date（zod 驗證過再轉；壞值擋在輸入層） */
@@ -66,6 +67,11 @@ export const scheduleRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const row = await getItemChecked(ctx.auth, input.id);
+      // 與 remove 同守衛：只有建立者本人或組長以上可改——否則一般組員可竄改他人（含組長）建立的組行程
+      const role = requireGroup(ctx.auth, row.groupId);
+      if (row.createdBy !== ctx.auth.user.id && role === "member") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以修改行程" });
+      }
       const patch: Partial<typeof schema.scheduleItems.$inferInsert> = {};
       if (input.title !== undefined) patch.title = input.title.trim();
       if (input.startsAt !== undefined) patch.startsAt = new Date(input.startsAt);
@@ -76,6 +82,7 @@ export const scheduleRouter = router({
       if (endsAt && endsAt <= startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "結束時間要在開始之後" });
       if (Object.keys(patch).length === 0) return row;
       const [updated] = await db.update(schema.scheduleItems).set(patch).where(eq(schema.scheduleItems.id, row.id)).returning();
+      queueGroupSync(row.groupId);
       return updated;
     }),
 
@@ -87,40 +94,43 @@ export const scheduleRouter = router({
       throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以刪除行程" });
     }
     await db.delete(schema.scheduleItems).where(eq(schema.scheduleItems.id, row.id));
+    queueGroupSync(row.groupId);
     return { ok: true };
   }),
 });
 
 /**
- * RFC 5545 §3.1 內容行折疊：一行以 75 octet 為界，超過就插入 CRLF＋一個空格續行。
- * 中文（CJK）在 UTF-8 是 3 bytes/字，120 字標題的 SUMMARY 行約 360 octet、500 字備註的
- * DESCRIPTION 行約 1500 octet，遠超上限——不折疊的話 Outlook 等嚴格解析器會靜默丟棄整個事件
- * （稽核缺陷 #3）。折疊一律以「UTF-8 位元組邊界」切，續行 byte（0b10xxxxxx）不可被切斷，
- * 否則多位元組字被腰斬成亂碼。
+ * RFC 5545 3.1 行折疊：內容行超過 75 octets（UTF-8 位元組）要折行，續行以 CRLF+空格開頭。
+ * 以「位元組」而非字元計——中文一字 3 bytes，且不可把多位元組字元從中切斷（逐字元累計位元組數）。
+ * 匯出前逐行套用；解析器會把 CRLF+WSP 還原成原始行。
  */
 export function foldIcsLine(line: string): string {
-  const bytes = Buffer.from(line, "utf8");
-  if (bytes.length <= 75) return line;
-  const parts: string[] = [];
-  let start = 0;
-  let limit = 75; // 首行 75 octet；續行有一個前導空格，實際內容上限 74 octet（前導空格佔 1）
-  while (start < bytes.length) {
-    let end = Math.min(start + limit, bytes.length);
-    // 不切在多位元組字中間：續行 byte 形如 10xxxxxx（0x80–0xBF），往回退到字元邊界
-    if (end < bytes.length) {
-      while (end > start && (bytes[end] & 0xc0) === 0x80) end--;
+  const MAX_OCTETS = 75;
+  if (Buffer.byteLength(line, "utf8") <= MAX_OCTETS) return line;
+  const out: string[] = [];
+  let cur = "";
+  let curBytes = 0;
+  // 續行首的空格佔 1 octet，續行內容上限為 74——首行仍可用滿 75
+  let limit = MAX_OCTETS;
+  for (const ch of line) {
+    const chBytes = Buffer.byteLength(ch, "utf8");
+    if (curBytes + chBytes > limit) {
+      out.push(cur);
+      cur = "";
+      curBytes = 0;
+      limit = MAX_OCTETS - 1;
     }
-    parts.push(bytes.subarray(start, end).toString("utf8"));
-    start = end;
-    limit = 74;
+    cur += ch;
+    curBytes += chBytes;
   }
-  return parts.join("\r\n ");
+  if (cur) out.push(cur);
+  return out.map((seg, i) => (i === 0 ? seg : " " + seg)).join("\r\n");
 }
 
 /**
  * .ics（iCalendar）內容產生：供 server/index.ts 的匯出端點使用。
  * 極簡 VCALENDAR/VEVENT：UTC 時間（Z 結尾）、UID=id@aidirector-os、無結束時間以 1 小時計;
- * 文字欄位跳脫（\ ; , 換行）後再逐行折疊至 75 octet。匯入 Google 日曆/Apple/Outlook 皆可讀。
+ * 文字欄位跳脫（\ ; , 換行）＋ 75-octet 行折疊（RFC 5545）。匯入 Google 日曆/Apple 行事曆皆可讀。
  */
 export function buildIcs(groupName: string, items: Array<{ id: string; title: string; startsAt: Date; endsAt: Date | null; note: string | null }>): string {
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
@@ -149,6 +159,5 @@ export function buildIcs(groupName: string, items: Array<{ id: string; title: st
     );
   }
   lines.push("END:VCALENDAR");
-  // 每一行（含結構行與屬性行）都過折疊；結構行短，折疊為 no-op；長的 CJK 屬性行才真正被折。
   return lines.map(foldIcsLine).join("\r\n");
 }

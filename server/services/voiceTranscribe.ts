@@ -51,6 +51,16 @@ async function transcribeOne(msg: typeof schema.messages.$inferSelect): Promise<
   }
   const model = getModel(STT_MODEL_ID)!;
   const cost = model.points ?? 1;
+  // 崩潰安全的原子認領（CAS）：把 pending→running「先於扣點」落庫，且只有這一列還是 pending 才成立。
+  // 沒這道 CAS 時，程序在扣點後、寫 done/failed 前崩潰，重啟後記憶體 inflight 已清空、該列仍是 pending，
+  // 下一輪掃描會重撿並「再扣一次」，首次扣點永不退回（退點的 catch 因程序已死不執行）＝孤兒＋雙重扣款。
+  // 認領成 running 後，掃描（只撈 pending）不再重撿，最壞情況收斂為「單次扣點＋停在 running」而非雙重扣款。
+  const claimed = await db
+    .update(schema.messages)
+    .set({ voiceStatus: "running" })
+    .where(and(eq(schema.messages.id, msg.id), eq(schema.messages.voiceStatus, "pending")))
+    .returning({ id: schema.messages.id });
+  if (claimed.length === 0) return false; // 已被別的 tick／別台實例認領（或狀態已變）——不重複處理、不扣點
   // 扣點(mock 略過);扣不到（額度不足）就標失敗，語音仍可播放，只是沒逐字稿
   if (!billingBypassed()) {
     const quotaErr = await reserveQuota(msg.userId, msg.groupId, cost, "語音留言逐字稿");
@@ -88,8 +98,9 @@ async function transcribeOne(msg: typeof schema.messages.$inferSelect): Promise<
 
 async function markFailed(messageId: string, reason: string): Promise<void> {
   console.warn(`[voice] 逐字稿失敗（語音仍可播放）：msg=${messageId}`, reason);
+  // 認領後該列為 running（額度不足時在認領後才標失敗），故 guard 需含 running；仍保留 pending 以防未認領路徑。
   await db
     .update(schema.messages)
     .set({ voiceStatus: "failed", body: "🎙️ 語音訊息（逐字稿失敗，點播放鍵聆聽）" })
-    .where(and(eq(schema.messages.id, messageId), inArray(schema.messages.voiceStatus, ["pending"])));
+    .where(and(eq(schema.messages.id, messageId), inArray(schema.messages.voiceStatus, ["pending", "running"])));
 }

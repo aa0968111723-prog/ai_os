@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
-import { AUDIT_CATEGORIES, auditCategoryOf, describeAuditInput, humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
+import { AUDIT_ACTION_LABELS, AUDIT_CATEGORIES, auditCategoryOf, describeAuditInput, groupConsecutiveAudit, humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
+import { getModel, tierLabel } from "@shared/models";
 
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
@@ -171,63 +172,187 @@ function GroupBudgetRow({ group }: { group: { id: string; name: string } }) {
   );
 }
 
+/** 相對時間（比照通訊錄的 relTime；成員「最近登入」與專案「最近更新」用） */
+function relTime(d: string | Date | null | undefined): string {
+  if (!d) return "—";
+  const t = new Date(d).getTime();
+  if (Number.isNaN(t)) return "—";
+  const mins = Math.max(1, Math.round((Date.now() - t) / 60000));
+  if (mins < 60) return `${mins} 分鐘前`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} 小時前`;
+  const days = Math.round(hours / 24);
+  return days < 30 ? `${days} 天前` : new Date(d).toLocaleDateString("zh-TW");
+}
+
+type GroupDetail = inferRouterOutputs<AppRouter>["admin"]["groupDetail"];
+type GroupDetailMember = GroupDetail["members"][number];
+
+/** 角色徽章（與通訊錄同語彙：超管／組長／組員） */
+const ROLE_BADGE_STYLE: Record<"super" | "leader" | "member", CSSProperties> = {
+  super: { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" },
+  leader: { background: "var(--gold-soft)", color: "var(--gold-ink)", border: "1px solid var(--gold)" },
+  member: { background: "var(--card2)", color: "var(--fg-secondary)", border: "1px solid var(--border-soft)" },
+};
+function RoleBadge({ kind, children }: { kind: "super" | "leader" | "member"; children: string }) {
+  return (
+    <span className="pill" style={{ ...ROLE_BADGE_STYLE[kind], fontSize: 11, padding: "1px 8px", borderRadius: 999, whiteSpace: "nowrap" }}>
+      {children}
+    </span>
+  );
+}
+
 /**
- * 成員列＋管理操作（組長切換/移出組/重設密碼）。
+ * 單一成員的數值欄（個人預算／週額度覆寫共用）：只在真的有改時才送出
+ * （同 GroupQuotaRow 的教訓——onBlur 無條件送出會讓 Tab 掃過空欄誤清設定）。
+ */
+function MemberNumberField({ label, current, placeholder, hint, width = 88, onSave, saving, error }: {
+  label: string;
+  current: number | null;
+  placeholder: string;
+  hint?: string;
+  width?: number;
+  onSave: (next: number | null) => void;
+  saving: boolean;
+  error?: string | null;
+}) {
+  return (
+    <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0, fontSize: 12 }}>
+      {label}
+      <input
+        type="number"
+        min={0}
+        style={{ width, padding: "3px 8px", fontSize: 12 }}
+        placeholder={placeholder}
+        defaultValue={current ?? ""}
+        disabled={saving}
+        title={hint}
+        onBlur={(e) => {
+          const next = e.target.value === "" ? null : Math.max(0, Number(e.target.value) || 0);
+          if (next !== current) onSave(next);
+        }}
+      />
+      {error && <span className="error" style={{ marginTop: 0, fontSize: 11 }}>{error}</span>}
+    </label>
+  );
+}
+
+/**
+ * 成員細節列（團隊管理細節補齊）：一列看完一位夥伴——
+ * 角色徽章＋Email＋最近登入＋本週/累計點數，加上就地可調的個人預算、週額度覆寫、派工授權，
+ * 以及既有管理操作（組長切換/移出組/重設密碼）。
  * 為什麼獨立成元件：每位成員要有自己的 isPending/error/臨時密碼狀態，
  * 共用一個 mutation 會讓 A 成員的錯誤與密碼顯示到 B 成員旁邊。
  */
-function MemberChip({ groupId, groupName, member, canResetPassword }: {
+function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf }: {
   groupId: string;
   groupName: string;
-  member: { id?: string; name?: string; role?: "leader" | "member" };
+  member: GroupDetailMember;
   /** 後端會擋「開發者/他團管理員」——注定失敗的重設鈕直接不畫，別讓管理員按了才吃 FORBIDDEN */
   canResetPassword: boolean;
+  isSelf: boolean;
 }) {
   const utils = trpc.useUtils();
   const [tempPassword, setTempPassword] = useState("");
-  const setRole = trpc.admin.setGroupRole.useMutation({ onSuccess: () => utils.admin.overview.invalidate() });
-  const removeMember = trpc.admin.removeFromGroup.useMutation({ onSuccess: () => utils.admin.overview.invalidate() });
+  const invalidate = () => {
+    utils.admin.overview.invalidate();
+    utils.admin.groupDetail.invalidate({ groupId });
+    utils.quota.usage.invalidate({ groupId });
+  };
+  const setRole = trpc.admin.setGroupRole.useMutation({ onSuccess: invalidate });
+  const removeMember = trpc.admin.removeFromGroup.useMutation({ onSuccess: invalidate });
   const resetPassword = trpc.admin.resetMemberPassword.useMutation({
     onSuccess: (data) => {
       setTempPassword(data.tempPassword);
-      utils.admin.overview.invalidate();
+      invalidate();
     },
   });
-  const userId = member.id;
-  if (!userId) return null;
+  const setBudget = trpc.quota.setMemberBudget.useMutation({ onSuccess: invalidate });
+  const setOverride = trpc.quota.setMemberOverride.useMutation({ onSuccess: invalidate });
+  const setDispatch = trpc.quota.setMemberDispatch.useMutation({ onSuccess: invalidate });
+  const userId = member.userId;
   const isLeader = member.role === "leader";
   const pending = setRole.isPending || removeMember.isPending || resetPassword.isPending;
-  const actionError = setRole.error ?? removeMember.error ?? resetPassword.error;
+  const actionError = setRole.error ?? removeMember.error ?? resetPassword.error ?? setDispatch.error;
   const btn = { padding: "2px 10px", fontSize: "var(--fs-12)" } as const;
   return (
-    <div style={{ marginTop: 6 }}>
+    <div style={{ borderTop: "1px solid var(--border-soft)", padding: "8px 0" }}>
+      {/* 第一列：身分與管理操作 */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <span className="chip" style={{ margin: 0 }}>
-          {member.name}
-          {isLeader ? "・組長" : ""}
-        </span>
-        <button style={btn} disabled={pending} onClick={() => setRole.mutate({ groupId, userId, role: isLeader ? "member" : "leader" })}>
-          {isLeader ? "設為組員" : "設為組長"}
-        </button>
-        {/* 破壞性/次危險動作補全站慣例的 --danger-ink：掃視成員列時能一眼與「設為組長」等中性鈕區分 */}
-        <ConfirmButton
-          triggerStyle={{ ...btn, color: "var(--danger-ink)" }}
-          disabled={pending}
-          message={`把 ${member.name} 移出「${groupName}」？之後隨時可以再邀請回來。`}
-          onConfirm={() => removeMember.mutate({ groupId, userId })}
-        >
-          移出組
-        </ConfirmButton>
-        {canResetPassword && (
+        <b style={{ fontSize: 13 }}>{member.name}</b>
+        {member.isSuperAdmin && <RoleBadge kind="super">超管</RoleBadge>}
+        <RoleBadge kind={isLeader ? "leader" : "member"}>{isLeader ? "組長" : "組員"}</RoleBadge>
+        {member.disabled && (
+          <span className="pill" style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, color: "var(--danger-ink)", border: "1px solid var(--border-soft)" }}>已停用</span>
+        )}
+        <a className="hint" href={`mailto:${member.email}`} style={{ fontSize: 12, color: "inherit", overflowWrap: "anywhere" }}>{member.email}</a>
+        <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+          <button style={btn} disabled={pending} onClick={() => setRole.mutate({ groupId, userId, role: isLeader ? "member" : "leader" })}>
+            {isLeader ? "設為組員" : "設為組長"}
+          </button>
+          {/* 破壞性/次危險動作補全站慣例的 --danger-ink：掃視成員列時能一眼與「設為組長」等中性鈕區分 */}
           <ConfirmButton
             triggerStyle={{ ...btn, color: "var(--danger-ink)" }}
             disabled={pending}
-            message={`重設 ${member.name} 的密碼？他會立刻被登出，要用新的臨時密碼重新登入。`}
-            onConfirm={() => resetPassword.mutate({ userId })}
+            message={`把 ${member.name} 移出「${groupName}」？之後隨時可以再邀請回來。`}
+            onConfirm={() => removeMember.mutate({ groupId, userId })}
           >
-            重設密碼
+            移出組
           </ConfirmButton>
+          {canResetPassword && (
+            <ConfirmButton
+              triggerStyle={{ ...btn, color: "var(--danger-ink)" }}
+              disabled={pending}
+              message={`重設 ${member.name} 的密碼？他會立刻被登出，要用新的臨時密碼重新登入。`}
+              onConfirm={() => resetPassword.mutate({ userId })}
+            >
+              重設密碼
+            </ConfirmButton>
+          )}
+        </span>
+      </div>
+      {/* 第二列：活動與點數近況 */}
+      <div className="hint" style={{ fontSize: 11, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+          <Icon name="Clock" size={11} />最近登入 {relTime(member.lastLoginAt)}
+        </span>
+        <span>本週 {member.weekly.toLocaleString()} 點・累計 {member.total.toLocaleString()} 點{member.budget != null && `（個人預算 ${member.budget.toLocaleString()}）`}</span>
+      </div>
+      {/* 第三列：就地可調的個人額度（比照組長「選項」頁同一套 quota mutation） */}
+      <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+        <MemberNumberField
+          label="個人預算"
+          current={member.budget}
+          placeholder="不限"
+          hint="從組預算再分配給這位成員的累計上限；空＝不限"
+          onSave={(next) => setBudget.mutate({ groupId, userId, budgetPoints: next })}
+          saving={setBudget.isPending}
+          error={setBudget.error?.message ?? null}
+        />
+        <MemberNumberField
+          label="週額度"
+          current={member.weeklyOverride}
+          placeholder="跟組"
+          hint="個人每週點數覆寫；空＝跟組設定、0＝不限"
+          onSave={(next) => setOverride.mutate({ groupId, userId, weeklyPointsOverride: next })}
+          saving={setOverride.isPending}
+          error={setOverride.error?.message ?? null}
+        />
+        {member.role === "member" ? (
+          <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0, fontSize: 12, cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              style={{ width: "auto" }}
+              checked={member.canDispatch}
+              disabled={setDispatch.isPending}
+              onChange={(e) => setDispatch.mutate({ groupId, userId, canDispatch: e.target.checked })}
+            />
+            可派工 AI 代理
+          </label>
+        ) : (
+          <span className="hint" style={{ fontSize: 11 }}>組長以上恆可派工 AI 代理</span>
         )}
+        {isSelf && <span className="hint" style={{ fontSize: 11 }}>（我）</span>}
       </div>
       {actionError && <p className="error">{actionError.message}</p>}
       {tempPassword && (
@@ -266,6 +391,244 @@ function CreateGroupRow({ teamId }: { teamId: string }) {
       </div>
       {createGroup.error && <p className="error">建組失敗：{createGroup.error.message}</p>}
     </>
+  );
+}
+
+/** AI／MCP 存取等級的人話標籤（資料庫清單用；與資料庫頁同語意） */
+const AGENT_ACCESS_LABEL: Record<string, string> = {
+  none: "AI 不可見",
+  read: "AI 唯讀",
+  write: "AI 可讀寫",
+};
+
+/** 資料庫清單（組資料庫／團隊資料庫共用）：名稱＋列/文件/欄位數＋寫入與 AI 存取設定＋建立者 */
+function DatabaseList({ databases }: { databases: GroupDetail["databases"] }) {
+  if (databases.length === 0) {
+    return <p className="hint" style={{ margin: "6px 0 0", fontSize: 12 }}>還沒有這個範圍的資料庫——到「資料庫」頁即可建立。</p>;
+  }
+  return (
+    <div style={{ marginTop: 4 }}>
+      {databases.map((d) => (
+        <div key={d.id} style={{ borderTop: "1px solid var(--border-soft)", padding: "6px 0", fontSize: 12 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <Icon name="Database" size={12} />
+            <b>{d.name}</b>
+            <span className="hint">{d.rowCount} 列・{d.fileCount} 份文件・{d.fieldCount} 個欄位</span>
+            <span className="hint" style={{ marginLeft: "auto", fontSize: 11 }}>更新 {relTime(d.updatedAt)}</span>
+          </div>
+          <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <span>{d.memberWritable ? "成員可寫" : "僅管理者可寫"}</span>
+            <span>{AGENT_ACCESS_LABEL[d.agentAccess] ?? d.agentAccess}</span>
+            <span>建立者 {d.creatorName}</span>
+            {d.description && <span style={{ overflowWrap: "anywhere" }}>{d.description}</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 專案狀態白話標籤（active 之外目前只有 archived） */
+const PROJECT_STATUS_LABEL: Record<string, string> = { active: "進行中", archived: "已封存" };
+
+/**
+ * 專案列＋負責人轉移。獨立成元件：每個專案要有自己的 mutation 狀態，
+ * 共用會讓 A 專案的錯誤顯示到 B 專案旁邊。
+ */
+function ProjectOwnerRow({ groupId, project, members }: {
+  groupId: string;
+  project: GroupDetail["projects"][number];
+  members: GroupDetail["members"];
+}) {
+  const utils = trpc.useUtils();
+  const setOwner = trpc.projects.setOwner.useMutation({
+    onSuccess: () => utils.admin.groupDetail.invalidate({ groupId }),
+  });
+  // 負責人可能已離組（不在成員列）：補一個唯讀選項顯示現況，避免下拉顯示成別人
+  const ownerInList = members.some((m) => m.userId === project.owner.userId);
+  return (
+    <div style={{ borderTop: "1px solid var(--border-soft)", padding: "6px 0", fontSize: 12 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <Icon name="FileText" size={12} />
+        <b style={{ overflowWrap: "anywhere" }}>{project.title}</b>
+        {project.status !== "active" && (
+          <span className="pill" style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, background: "var(--card2)", color: "var(--fg-secondary)", border: "1px solid var(--border-soft)" }}>
+            {PROJECT_STATUS_LABEL[project.status] ?? project.status}
+          </span>
+        )}
+        <span className="hint" style={{ fontSize: 11 }}>{project.kind}・{project.platform}</span>
+        <span className="hint" style={{ marginLeft: "auto", fontSize: 11 }}>更新 {relTime(project.updatedAt)}</span>
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
+        <label className="hint" htmlFor={`project-owner-${project.id}`} style={{ margin: 0, fontSize: 12 }}>負責人</label>
+        <select
+          id={`project-owner-${project.id}`}
+          style={{ width: "auto", padding: "3px 10px", fontSize: 12 }}
+          value={project.owner.userId}
+          disabled={setOwner.isPending}
+          onChange={(e) => setOwner.mutate({ projectId: project.id, userId: e.target.value })}
+        >
+          {!ownerInList && (
+            <option value={project.owner.userId}>
+              {project.owner.name ? `${project.owner.name}（已離組）` : "（已離開的成員）"}
+            </option>
+          )}
+          {members.map((m) => (
+            <option key={m.userId} value={m.userId}>{m.name}{m.role === "leader" ? "・組長" : ""}</option>
+          ))}
+        </select>
+        {setOwner.isPending && <span className="hint" style={{ fontSize: 11 }}>轉移中…</span>}
+        {setOwner.error && <span className="error" style={{ marginTop: 0, fontSize: 11 }}>{setOwner.error.message}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** 收合小節的共用樣式（成員之下的專案／資料庫細節；預設收合、summary 帶數量） */
+function DetailBlock({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+  return (
+    <details style={{ marginTop: 8 }}>
+      <summary style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", listStyle: "none" }}>
+        <Icon name="ChevronRight" size={14} className="details-caret" />
+        <b>{title}</b>
+        <span className="hint" style={{ fontSize: 12 }}>（{count}）</span>
+      </summary>
+      {children}
+    </details>
+  );
+}
+
+/**
+ * 組區塊（團隊管理細節補齊的主體）：組長組員的完整細節列、專案與負責人、這一組自己的資料庫，
+ * 加上既有的組預算/週額度列。資料來自 admin.groupDetail（一組一查，後端已按團隊管理權過濾）。
+ */
+function GroupSection({ group, teamAdmins, isSuperAdmin, meId }: {
+  group: { id: string; name: string };
+  teamAdmins: Array<{ id?: string } | undefined>;
+  isSuperAdmin: boolean;
+  meId: string | undefined;
+}) {
+  const detail = trpc.admin.groupDetail.useQuery({ groupId: group.id });
+  return (
+    <div style={{ marginTop: 14, paddingTop: 4 }}>
+      <h3 style={{ fontSize: "var(--fs-16)", margin: "0 0 2px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {group.name}
+        {detail.data && (
+          <span className="hint" style={{ fontSize: 12, fontWeight: 400 }}>
+            {detail.data.members.length} 位成員
+            {detail.data.members.some((m) => m.role === "leader")
+              ? `・組長：${detail.data.members.filter((m) => m.role === "leader").map((m) => m.name).join("、")}`
+              : "・尚未指定組長"}
+          </span>
+        )}
+      </h3>
+      {detail.isLoading ? (
+        <div role="status" aria-label="組詳情載入中">
+          <div className="skeleton" style={{ height: 48, marginTop: 8 }} />
+        </div>
+      ) : detail.error ? (
+        <p className="error">
+          組詳情載入失敗：{detail.error.message}
+          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => detail.refetch()}>再試一次</button>
+        </p>
+      ) : detail.data ? (
+        <>
+          {detail.data.members.length === 0 ? (
+            <p className="hint" style={{ margin: "4px 0 0" }}>（還沒有成員——用右側「邀請成員」把夥伴加進來）</p>
+          ) : (
+            detail.data.members.map((m) => (
+              <MemberDetailRow
+                key={m.userId}
+                groupId={group.id}
+                groupName={group.name}
+                member={m}
+                isSelf={m.userId === meId}
+                // 與後端權限階梯一致：開發者重設任何人；團隊管理員不能重設開發者與其他管理員（自己除外）
+                canResetPassword={
+                  isSuperAdmin ||
+                  (!m.isSuperAdmin && (m.userId === meId || !teamAdmins.some((a) => a?.id === m.userId)))
+                }
+              />
+            ))
+          )}
+          <GroupBudgetRow group={group} />
+          <GroupQuotaRow group={group} />
+          <DetailBlock title="專案與負責人" count={detail.data.projects.length}>
+            {detail.data.projects.length === 0 ? (
+              <p className="hint" style={{ margin: "6px 0 0", fontSize: 12 }}>這個組還沒有專案。</p>
+            ) : (
+              <>
+                <p className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>負責人＝專案的裁決點（可封存/還原）。人員異動時在這裡把專案交接給還在組裡的人。</p>
+                {detail.data.projects.map((p) => (
+                  <ProjectOwnerRow key={p.id} groupId={group.id} project={p} members={detail.data.members} />
+                ))}
+              </>
+            )}
+          </DetailBlock>
+          <DetailBlock title="組資料庫" count={detail.data.databases.length}>
+            <p className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>
+              這一組自己的資料庫（組範圍）。各成員的「個人資料庫」是私人空間、只有本人看得到，這裡不列。
+            </p>
+            <DatabaseList databases={detail.data.databases} />
+          </DetailBlock>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 團隊層細節（admin.teamDetail）：已入團但「還沒進任何組」的成員（舊版總覽的隱形人）
+ * ＋團隊範圍的資料庫。
+ */
+function TeamExtras({ teamId }: { teamId: string }) {
+  const detail = trpc.admin.teamDetail.useQuery({ teamId });
+  if (detail.isLoading || detail.error || !detail.data) return null; // 團隊層附加資訊——載不到不擋整卡（組區塊自己會報錯）
+  const unassigned = detail.data.members.filter((m) => !m.inAnyGroup && m.role !== "admin");
+  return (
+    <>
+      {unassigned.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <p className="hint" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>已入團、尚未分組（{unassigned.length}）</p>
+          <p className="hint" style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用右側「邀請成員」輸入同一個 Email 並選好組別即可入組。</p>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {unassigned.map((m) => (
+              <span key={m.userId} className="chip" style={{ margin: 0, opacity: m.disabled ? 0.6 : 1 }} title={m.email}>
+                {m.name}{m.disabled ? "・已停用" : ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {detail.data.databases.length > 0 && (
+        <DetailBlock title="團隊資料庫" count={detail.data.databases.length}>
+          <p className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>團隊範圍的資料庫：整個團隊各組都能讀。</p>
+          <DatabaseList databases={detail.data.databases} />
+        </DetailBlock>
+      )}
+    </>
+  );
+}
+
+/**
+ * 寄測試信鈕（邀請成員卡）：管理員改完信箱金鑰後一鍵驗證，不必再走一次邀請流程才發現壞掉。
+ * 結果三態：sent＝綠字確認、skipped/failed＝金色警示帶人話原因（sendEmail 已翻成人話）。
+ */
+function TestEmailButton() {
+  const test = trpc.admin.sendTestEmail.useMutation();
+  return (
+    <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <button style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }} disabled={test.isPending} onClick={() => test.mutate()}>
+        {test.isPending ? "寄送中…" : "寄測試信到我的信箱"}
+      </button>
+      {test.data &&
+        (test.data.status === "sent" ? (
+          <span className="hint" style={{ color: "var(--success-ink)" }}>✓ 已寄出——收到即代表信箱機制正常</span>
+        ) : (
+          <span className="hint" style={{ color: "var(--gold-ink)" }}>⚠ {test.data.detail}</span>
+        ))}
+      {test.error && <span className="error" style={{ marginTop: 0 }}>{test.error.message}</span>}
+    </div>
   );
 }
 
@@ -362,15 +725,53 @@ const AUDIT_CAT_STYLE: Record<string, { background: string; color: string; borde
 
 type AuditRowData = inferRouterOutputs<AppRouter>["audit"]["list"]["items"][number];
 
+/** 逐列「就地下鑽」的回呼：點歸屬即把操作紀錄縮到那位組員／那個專案／那一組（分組員・分專案・分組別） */
+type AuditDrill = {
+  actor: (id: string, name: string) => void;
+  project: (id: string, title: string) => void;
+  group: (id: string) => void;
+};
+
+/** 已套用的下鑽過濾膠囊（組員／專案）：帶 X 一點即清，清楚示意「目前縮在這個維度」 */
+const activeFilterChip: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 4,
+  padding: "2px 8px",
+  fontSize: 11,
+  borderRadius: 999,
+  cursor: "pointer",
+  border: "1px solid var(--primary)",
+  background: "var(--primary-tint)",
+  color: "var(--primary-ink)",
+};
+
+/** 下鑽用的「可點歸屬」樣式：看得出可點、但安靜不搶戲（沿用 hint 色，底線示意可點） */
+const DRILL_LINK: CSSProperties = {
+  background: "none",
+  border: "none",
+  padding: 0,
+  font: "inherit",
+  color: "inherit",
+  cursor: "pointer",
+  textDecoration: "underline",
+  textUnderlineOffset: 2,
+  textDecorationColor: "var(--border-soft)",
+};
+
 /**
  * 一列操作紀錄：白話標題＋分類標籤＋歸屬（組／專案）＋可展開的逐項細節。
  * 展開狀態各列獨立（每列自己 useState），不會互相牽動。
+ * 歸屬（組員／團隊・組別／專案）皆可點：一點就把整份紀錄縮到那個維度，非技術夥伴不必先懂過濾器。
+ * repeats：連續重複的同型紀錄（groupConsecutiveAudit 併好、新在前，r＝最新一筆）——
+ * 標題列只佔一列並標「連續 N 次」，展開才逐筆列出時間與各自細節，重複操作不再洗版。
  */
-function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
+function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boolean; drill: AuditDrill; repeats?: AuditRowData[] }) {
   const [open, setOpen] = useState(false);
   const cat = auditCategoryOf(r.action);
   const summary = summarizeAuditInput(r.input);
   const details = describeAuditInput(r.input);
+  const expandable = details.length > 0 || (repeats?.length ?? 0) > 1;
   const catStyle = AUDIT_CAT_STYLE[cat.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
   return (
     <div style={{ borderTop: first ? "none" : "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13, marginTop: first ? 8 : 0 }}>
@@ -383,24 +784,63 @@ function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
         </span>
         {/* 分類標籤：一眼分辨這筆屬於哪一類（帳號／生成／分鏡…） */}
         <span className="pill" style={{ ...catStyle, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>{cat.label}</span>
-        <b>{r.actorName}</b>
+        {/* 操作者：點名字＝只看這位夥伴做的事（分組員） */}
+        <button
+          type="button"
+          onClick={() => drill.actor(r.actorId, r.actorName)}
+          style={{ ...DRILL_LINK, fontWeight: 700 }}
+          title={`只看 ${r.actorName} 的操作`}
+        >
+          {r.actorName}
+        </button>
         {/* 操作者角色：一眼看出是組長還是組員做的（分組員層級） */}
         {r.actorRole && (
           <span className="hint" style={{ fontSize: 11 }}>（{r.actorRole === "leader" ? "組長" : "組員"}）</span>
         )}
         <span>{humanizeAuditAction(r.action)}</span>
+        {/* 連續重複合併：同一人短時間重複做同一件事只佔一列，掛上次數徽章 */}
+        {repeats && repeats.length > 1 && (
+          <span
+            className="pill"
+            style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary)" }}
+            title={`短時間內連續 ${repeats.length} 次，展開可看每一筆`}
+          >
+            連續 {repeats.length} 次
+          </span>
+        )}
         {!r.ok && <span style={{ color: "var(--danger-ink)", fontSize: 11, fontWeight: 600 }}>（失敗）</span>}
         <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</span>
       </div>
-      {/* 歸屬：這筆動到哪個團隊・組別／哪個專案（分團隊組別；非技術夥伴不用去對 uuid） */}
+      {/* 歸屬：這筆動到哪個團隊・組別／哪個專案（分團隊組別；非技術夥伴不用去對 uuid）。
+          兩者皆可點就地下鑽：點組別＝只看那一組、點專案＝只看那個專案。 */}
       {(r.teamName || r.groupName || r.projectTitle) && (
         <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {(r.teamName || r.groupName) && (
+          {(r.teamName || r.groupName) && r.groupId && (
+            <button
+              type="button"
+              onClick={() => drill.group(r.groupId!)}
+              style={{ ...DRILL_LINK, display: "inline-flex", alignItems: "center", gap: 3 }}
+              title="只看這一組的操作"
+            >
+              <Icon name="User" size={11} />{[r.teamName, r.groupName].filter(Boolean).join("・")}
+            </button>
+          )}
+          {/* groupId 已解析不到但仍有組名時（理論上少見）退回純文字，不硬給一個點不動的連結 */}
+          {(r.teamName || r.groupName) && !r.groupId && (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
               <Icon name="User" size={11} />{[r.teamName, r.groupName].filter(Boolean).join("・")}
             </span>
           )}
-          {r.projectTitle && <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}><Icon name="FileText" size={11} />{r.projectTitle}</span>}
+          {r.projectTitle && r.projectId && (
+            <button
+              type="button"
+              onClick={() => drill.project(r.projectId!, r.projectTitle!)}
+              style={{ ...DRILL_LINK, display: "inline-flex", alignItems: "center", gap: 3 }}
+              title="只看這個專案的操作"
+            >
+              <Icon name="FileText" size={11} />{r.projectTitle}
+            </button>
+          )}
         </div>
       )}
       {summary && (
@@ -411,8 +851,9 @@ function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
           {r.error.length > 120 ? `${r.error.slice(0, 120)}…` : r.error}
         </div>
       )}
-      {/* 逐項細節：預設收合，需要看清楚每個欄位時才展開（含技術代碼與 id，供追查） */}
-      {details.length > 0 && (
+      {/* 逐項細節：預設收合，需要看清楚每個欄位時才展開（含技術代碼與 id，供追查）；
+          合併列展開時改列出「每一筆」的時間與各自細節，追查不因合併而少資訊 */}
+      {expandable && (
         <div style={{ marginTop: 4 }}>
           <button
             type="button"
@@ -421,21 +862,39 @@ function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
             className="hint"
             style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 4px", fontSize: 11, background: "none", border: "none", cursor: "pointer" }}
           >
-            <Icon name={open ? "ChevronUp" : "ChevronDown"} size={12} />{open ? "收合細節" : "看細節"}
+            <Icon name={open ? "ChevronUp" : "ChevronDown"} size={12} />
+            {open ? "收合細節" : repeats && repeats.length > 1 ? `看每一筆（${repeats.length}）` : "看細節"}
           </button>
           {open && (
-            <dl style={{ margin: "4px 0 0", display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", fontSize: 12 }}>
-              {details.map((f, k) => (
-                <div key={k} style={{ display: "contents" }}>
-                  <dt className="hint" style={{ whiteSpace: "nowrap" }}>{f.label}</dt>
-                  <dd style={{ margin: 0, overflowWrap: "anywhere" }}>{f.value}</dd>
-                </div>
-              ))}
-              <div style={{ display: "contents" }}>
-                <dt className="hint" style={{ whiteSpace: "nowrap" }}>操作代碼</dt>
-                <dd className="mono hint" style={{ margin: 0, fontSize: 11 }}>{r.action}</dd>
+            <>
+              {repeats && repeats.length > 1 ? (
+                <ol style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 12, display: "grid", gap: 2 }}>
+                  {repeats.map((rep) => {
+                    const inline = describeAuditInput(rep.input)
+                      .map((f) => `${f.label}：${f.value}`)
+                      .join("・");
+                    return (
+                      <li key={rep.id} style={{ overflowWrap: "anywhere" }}>
+                        <span className="hint">{new Date(rep.createdAt).toLocaleString("zh-TW")}</span>
+                        {inline && <span style={{ marginLeft: 8 }}>{inline}</span>}
+                      </li>
+                    );
+                  })}
+                </ol>
+              ) : (
+                <dl style={{ margin: "4px 0 0", display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 10px", fontSize: 12 }}>
+                  {details.map((f, k) => (
+                    <div key={k} style={{ display: "contents" }}>
+                      <dt className="hint" style={{ whiteSpace: "nowrap" }}>{f.label}</dt>
+                      <dd style={{ margin: 0, overflowWrap: "anywhere" }}>{f.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+              <div className="hint" style={{ marginTop: 2, fontSize: 11 }}>
+                技術代碼（供工程追查）：<span className="mono">{r.action}</span>
               </div>
-            </dl>
+            </>
           )}
         </div>
       )}
@@ -452,9 +911,24 @@ function AuditLogRow({ r, first }: { r: AuditRowData; first: boolean }) {
 export function AuditLogCard() {
   // 分類過濾（chip）：null＝全部
   const [category, setCategory] = useState<string | null>(null);
-  // 依組別過濾（下拉）：""＝所有可見組
+  // 四個歸屬維度的過濾（分團隊／組別／組員／專案）：""／null＝不限。
+  // 團隊、組別用下拉（來源＝可見範圍 scope）；組員、專案用逐列「就地下鑽」帶入（另存名稱只為了顯示可清除的膠囊）。
+  const [teamId, setTeamId] = useState("");
   const [groupId, setGroupId] = useState("");
+  const [actor, setActor] = useState<{ id: string; name: string } | null>(null);
+  const [project, setProject] = useState<{ id: string; title: string } | null>(null);
   const scope = trpc.directory.scope.useQuery();
+  // 可見團隊清單（去重）：給「分團隊」下拉；一個團隊時不顯示（沒得分）
+  const teams = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const g of scope.data?.groups ?? []) if (!seen.has(g.teamId)) seen.set(g.teamId, g.teamName);
+    return [...seen].map(([id, name]) => ({ id, name }));
+  }, [scope.data]);
+  // 組別下拉：選了團隊就只列該團隊的組（分組別跟著分團隊收斂，不會列出別團隊的組）
+  const groupOptions = useMemo(
+    () => (scope.data?.groups ?? []).filter((g) => !teamId || g.teamId === teamId),
+    [scope.data, teamId],
+  );
   // action 關鍵字前端 debounce 後才帶進查詢，避免每敲一鍵就打一次 API
   const [actionInput, setActionInput] = useState("");
   const [debouncedAction, setDebouncedAction] = useState("");
@@ -462,12 +936,39 @@ export function AuditLogCard() {
     const t = setTimeout(() => setDebouncedAction(actionInput), 300);
     return () => clearTimeout(t);
   }, [actionInput]);
+  // 中文搜尋：關鍵字先對白話字典（中文說明＋代碼都比對），命中就翻成代碼清單精確過濾——
+  // 夥伴打「邀請」就找得到 admin.invite，不必先懂英文代碼；沒命中才退回原本的代碼模糊比對。
+  const matchedActions = useMemo(() => {
+    const q = debouncedAction.trim().toLowerCase();
+    if (!q) return null;
+    const codes = Object.entries(AUDIT_ACTION_LABELS)
+      .filter(([code, label]) => label.toLowerCase().includes(q) || code.toLowerCase().includes(q))
+      .map(([code]) => code);
+    return codes.length ? codes.slice(0, 80) : null; // 80＝後端上限；超過等於沒在過濾，截斷即可
+  }, [debouncedAction]);
   const audit = trpc.audit.list.useInfiniteQuery(
-    { action: debouncedAction.trim() || undefined, category: category ?? undefined, groupId: groupId || undefined, limit: 30 },
+    {
+      action: matchedActions ? undefined : debouncedAction.trim() || undefined,
+      actions: matchedActions ?? undefined,
+      category: category ?? undefined,
+      teamId: teamId || undefined,
+      groupId: groupId || undefined,
+      actorId: actor?.id,
+      projectId: project?.id,
+      limit: 30,
+    },
     { getNextPageParam: (last) => last.nextCursor ?? undefined },
   );
   const rows = audit.data?.pages.flatMap((p) => p.items) ?? [];
-  const filtering = !!debouncedAction.trim() || !!category || !!groupId;
+  // 連續重複合併：同一人短時間重複同一動作（AI 代理連生 N 張、連續拖分鏡排序）併成一列
+  const grouped = useMemo(() => groupConsecutiveAudit(rows), [rows]);
+  const filtering = !!debouncedAction.trim() || !!category || !!teamId || !!groupId || !!actor || !!project;
+  // 就地下鑽：點某位組員／某個專案／某一組即把整份紀錄縮到那個維度（AuditLogRow 呼叫）
+  const drill: AuditDrill = {
+    actor: (id, name) => setActor({ id, name }),
+    project: (id, title) => setProject({ id, title }),
+    group: (id) => setGroupId(id),
+  };
   const chip = (active: boolean): CSSProperties => ({
     padding: "3px 10px",
     fontSize: 12,
@@ -491,26 +992,66 @@ export function AuditLogCard() {
           </button>
         ))}
       </div>
-      {/* 依組別過濾：一個團隊/多組時，切到單一組別看那組的操作流水（分團隊組別） */}
-      {(scope.data?.groups.length ?? 0) > 1 && (
-        <select
-          value={groupId}
-          onChange={(e) => setGroupId(e.target.value)}
-          aria-label="依組別過濾操作紀錄"
-          style={{ marginBottom: 8, width: "100%" }}
-        >
-          <option value="">所有可見組別</option>
-          {scope.data?.groups.map((g) => (
-            <option key={g.groupId} value={g.groupId}>{g.teamName}・{g.groupName}</option>
-          ))}
-        </select>
+      {/* 分團隊／分組別：跨多團隊時先選團隊（下拉自動收斂到該團隊的組），再選組看那組的流水 */}
+      {((scope.data?.groups.length ?? 0) > 1 || teams.length > 1) && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+          {teams.length > 1 && (
+            <select
+              value={teamId}
+              onChange={(e) => {
+                const nextTeam = e.target.value;
+                setTeamId(nextTeam);
+                // 換團隊後，若目前選的組不屬於新團隊就清掉，避免出現「團隊 A・組別屬 B」的矛盾條件
+                if (nextTeam && groupId && !(scope.data?.groups ?? []).some((g) => g.groupId === groupId && g.teamId === nextTeam)) {
+                  setGroupId("");
+                }
+              }}
+              aria-label="依團隊過濾操作紀錄"
+              style={{ flex: "1 1 200px" }}
+            >
+              <option value="">所有可見團隊</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          )}
+          {groupOptions.length > 1 && (
+            <select
+              value={groupId}
+              onChange={(e) => setGroupId(e.target.value)}
+              aria-label="依組別過濾操作紀錄"
+              style={{ flex: "1 1 200px" }}
+            >
+              <option value="">所有可見組別</option>
+              {groupOptions.map((g) => (
+                <option key={g.groupId} value={g.groupId}>{teams.length > 1 ? g.groupName : `${g.teamName}・${g.groupName}`}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+      {/* 分組員／分專案：這兩維由逐列「就地下鑽」帶入，選定後在此顯示可清除的膠囊，一眼看出目前縮在誰／哪個專案 */}
+      {(actor || project) && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+          <span className="hint" style={{ fontSize: 11 }}>目前只看：</span>
+          {actor && (
+            <button type="button" onClick={() => setActor(null)} style={activeFilterChip} aria-label={`清除組員過濾（${actor.name}）`}>
+              <Icon name="User" size={11} />組員：{actor.name}<Icon name="X" size={11} />
+            </button>
+          )}
+          {project && (
+            <button type="button" onClick={() => setProject(null)} style={activeFilterChip} aria-label={`清除專案過濾（${project.title}）`}>
+              <Icon name="FileText" size={11} />專案：{project.title}<Icon name="X" size={11} />
+            </button>
+          )}
+        </div>
       )}
       <input
         type="search"
         value={actionInput}
         onChange={(e) => setActionInput(e.target.value)}
-        placeholder="進階：再用操作代碼關鍵字細找（如 invite、generation）…"
-        aria-label="用操作代碼關鍵字篩選"
+        placeholder="搜尋操作：打中文（如「邀請」「刪除素材」）或代碼皆可…"
+        aria-label="搜尋操作紀錄"
       />
       {audit.isLoading ? (
         <div role="status" aria-label="操作紀錄載入中">
@@ -530,8 +1071,8 @@ export function AuditLogCard() {
         </p>
       ) : (
         <>
-          {rows.map((r, i) => (
-            <AuditLogRow key={r.id} r={r} first={i === 0} />
+          {grouped.map((g, i) => (
+            <AuditLogRow key={g[0].id} r={g[0]} repeats={g.length > 1 ? g : undefined} first={i === 0} drill={drill} />
           ))}
           {audit.hasNextPage && (
             <div style={{ textAlign: "center", marginTop: 10 }}>
@@ -539,6 +1080,268 @@ export function AuditLogCard() {
                 {audit.isFetchingNextPage ? "載入中…" : "載入更多"}
               </button>
             </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════ 操作洞察卡：人員分類細節・模型使用比較・提示詞流水 ═══════════ */
+
+type InsightTab = "members" | "models" | "prompts";
+
+const INSIGHT_DAYS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 7, label: "近 7 天" },
+  { value: 30, label: "近 30 天" },
+  { value: 90, label: "近 90 天" },
+];
+
+/** 生成狀態 → 白話＋語意色（洞察卡提示詞流水用；與 VALUE_LABELS 同語） */
+const GEN_STATUS_META: Record<string, { label: string; color: string }> = {
+  done: { label: "完成", color: "var(--success-ink)" },
+  failed: { label: "失敗", color: "var(--danger-ink)" },
+  rejected: { label: "退回", color: "var(--danger-ink)" },
+  queued: { label: "排隊中", color: "var(--fg-secondary)" },
+  running: { label: "執行中", color: "var(--fg-secondary)" },
+  awaiting_approval: { label: "等待核准", color: "var(--gold-ink)" },
+};
+
+/** 成功率（生成精準度）：完成/(完成+失敗)。還沒有完結的生成時回 null（顯示 —，不好硬給 0%） */
+function successRate(done: number, failed: number): number | null {
+  const finished = done + failed;
+  return finished === 0 ? null : Math.round((done / finished) * 100);
+}
+
+/** pg 聚合欄位（max(...)::text）的時間字串 → Date：補 T 與時區冒號，Safari 的 Date 解析才吃得下 */
+function parseDbTime(s: string): Date {
+  return new Date(s.replace(" ", "T").replace(/([+-]\d\d)$/, "$1:00"));
+}
+
+/** 提示詞流水的一列：預設截兩行，點一下展開全文（300 字內；全文本來就在生成紀錄） */
+function PromptRow({ p }: { p: RecentPromptData }) {
+  const [open, setOpen] = useState(false);
+  const meta = GEN_STATUS_META[p.status] ?? { label: p.status, color: "var(--fg-secondary)" };
+  const model = getModel(p.modelId);
+  return (
+    <div style={{ borderTop: "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13 }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ color: meta.color, fontSize: 11, fontWeight: 600 }}>{meta.label}</span>
+        <b>{p.userName}</b>
+        <span className="hint" style={{ fontSize: 11 }}>{model?.label ?? p.modelId}</span>
+        {p.points > 0 && <span className="hint" style={{ fontSize: 11 }}>{p.points} 點</span>}
+        <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(p.createdAt).toLocaleString("zh-TW")}</span>
+      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={open ? "收合提示詞" : "展開完整提示詞"}
+        style={{
+          display: "block",
+          width: "100%",
+          textAlign: "left",
+          background: "none",
+          border: "none",
+          padding: 0,
+          font: "inherit",
+          cursor: "pointer",
+          marginTop: 2,
+          overflowWrap: "anywhere",
+          ...(open ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" }),
+        }}
+      >
+        {p.prompt}
+      </button>
+      <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {p.projectTitle && <span><Icon name="FileText" size={11} /> {p.projectTitle}</span>}
+        {p.error && <span style={{ color: "var(--danger-ink)" }}>{p.error.length > 80 ? `${p.error.slice(0, 80)}…` : p.error}</span>}
+      </div>
+    </div>
+  );
+}
+
+type RecentPromptData = inferRouterOutputs<AppRouter>["insights"]["recentPrompts"]["items"][number];
+
+/**
+ * 操作洞察卡（回饋：人員的分類細節、模型的操作與比較、生成精準度、提示詞）。
+ * 三個分頁共用「期間＋組別」過濾：
+ * - 人員細節：每位夥伴的操作量、失敗數、最近活動、依分類攤開的次數；點人可跳到他的提示詞。
+ * - 模型比較：各模型的生成次數、成功率（生成精準度）、點數、使用人數；點模型看它的提示詞。
+ * - 提示詞：一筆筆的生成流水（誰・模型・提示詞・結果・點數），供比較與教學。
+ * 可見範圍與操作紀錄相同（後端已收斂：組長看自己組），組員看不到這張卡的資料。
+ */
+export function InsightsCard() {
+  const [tab, setTab] = useState<InsightTab>("members");
+  const [days, setDays] = useState(30);
+  const [groupId, setGroupId] = useState("");
+  // 下鑽過濾：從「模型比較」點模型、「人員細節」點夥伴，跳到提示詞分頁時帶上
+  const [modelFilter, setModelFilter] = useState<{ id: string; label: string } | null>(null);
+  const [actorFilter, setActorFilter] = useState<{ id: string; name: string } | null>(null);
+  const scope = trpc.directory.scope.useQuery();
+  const common = { days, groupId: groupId || undefined };
+  const members = trpc.insights.actorBreakdown.useQuery(common, { enabled: tab === "members" });
+  const models = trpc.insights.modelStats.useQuery(common, { enabled: tab === "models" });
+  const prompts = trpc.insights.recentPrompts.useQuery(
+    { ...common, modelId: modelFilter?.id, actorId: actorFilter?.id, limit: 30 },
+    { enabled: tab === "prompts" },
+  );
+  const chip = (active: boolean): CSSProperties => ({
+    padding: "3px 10px",
+    fontSize: 12,
+    borderRadius: 999,
+    cursor: "pointer",
+    border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
+    background: active ? "var(--primary-tint)" : "transparent",
+    color: active ? "var(--primary-ink)" : "var(--ink)",
+    fontWeight: active ? 600 : 400,
+  });
+  const groupOptions = scope.data?.groups ?? [];
+  return (
+    <div className="card" data-fb="操作洞察卡">
+      <h2>操作洞察</h2>
+      <p className="hint">把操作紀錄整理成看得懂的統計：每位夥伴在忙哪一塊、哪個模型好用（成功率＝完成÷已完結）、大家的提示詞怎麼寫。</p>
+      {/* 分頁 chips */}
+      <div role="group" aria-label="洞察分頁" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+        <button type="button" style={chip(tab === "members")} aria-pressed={tab === "members"} onClick={() => setTab("members")}>人員細節</button>
+        <button type="button" style={chip(tab === "models")} aria-pressed={tab === "models"} onClick={() => setTab("models")}>模型比較</button>
+        <button type="button" style={chip(tab === "prompts")} aria-pressed={tab === "prompts"} onClick={() => setTab("prompts")}>提示詞</button>
+      </div>
+      {/* 期間＋組別過濾（三個分頁共用） */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+        {INSIGHT_DAYS.map((d) => (
+          <button key={d.value} type="button" style={chip(days === d.value)} aria-pressed={days === d.value} onClick={() => setDays(d.value)}>
+            {d.label}
+          </button>
+        ))}
+        {groupOptions.length > 1 && (
+          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} aria-label="依組別過濾洞察" style={{ marginLeft: "auto", maxWidth: 220 }}>
+            <option value="">所有可見組別</option>
+            {groupOptions.map((g) => (
+              <option key={g.groupId} value={g.groupId}>{g.teamName}・{g.groupName}</option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* ── 人員細節 ── */}
+      {tab === "members" && (
+        members.isLoading ? (
+          <div className="skeleton" style={{ height: 60 }} />
+        ) : members.error ? (
+          <p className="error">載入失敗：{members.error.message}</p>
+        ) : !members.data || members.data.members.length === 0 ? (
+          <p className="hint">這段期間還沒有操作。</p>
+        ) : (
+          members.data.members.map((m) => (
+            <div key={m.userId} style={{ borderTop: "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => { setActorFilter({ id: m.userId, name: m.name }); setTab("prompts"); }}
+                  style={{ ...DRILL_LINK, fontWeight: 700 }}
+                  title={`看 ${m.name} 的提示詞`}
+                >
+                  {m.name}
+                </button>
+                <span className="hint" style={{ fontSize: 12 }}>{m.total} 筆操作</span>
+                {m.fails > 0 && <span style={{ color: "var(--danger-ink)", fontSize: 12 }}>{m.fails} 筆失敗</span>}
+                <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>最近 {parseDbTime(m.lastAt).toLocaleString("zh-TW")}</span>
+              </div>
+              {/* 分類細節：這位夥伴各類操作的次數，多到少 */}
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+                {m.categories.map((c) => {
+                  const style = AUDIT_CAT_STYLE[c.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
+                  return (
+                    <span key={c.key} className="pill" style={{ ...style, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>
+                      {c.label} {c.count}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ))
+        )
+      )}
+
+      {/* ── 模型比較 ── */}
+      {tab === "models" && (
+        models.isLoading ? (
+          <div className="skeleton" style={{ height: 60 }} />
+        ) : models.error ? (
+          <p className="error">載入失敗：{models.error.message}</p>
+        ) : !models.data || models.data.models.length === 0 ? (
+          <p className="hint">這段期間還沒有生成。</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr>
+                  {["模型", "次數", "成功率", "失敗", "點數", "人數", "最近使用"].map((h) => (
+                    <th key={h} className="hint" style={{ textAlign: h === "模型" ? "left" : "right", padding: "4px 6px", fontWeight: 600, fontSize: 11, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {models.data.models.map((m) => {
+                  const model = getModel(m.modelId);
+                  const rate = successRate(m.done, m.failed);
+                  return (
+                    <tr key={`${m.modelId}:${m.kind}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
+                      <td style={{ padding: "6px" }}>
+                        <button
+                          type="button"
+                          onClick={() => { setModelFilter({ id: m.modelId, label: model?.label ?? m.modelId }); setTab("prompts"); }}
+                          style={{ ...DRILL_LINK, fontWeight: 600 }}
+                          title="看這個模型的提示詞"
+                        >
+                          {model?.label ?? m.modelId}
+                        </button>
+                        {model && <span className="hint" style={{ fontSize: 11, marginLeft: 6 }}>{tierLabel(model.tier)}</span>}
+                      </td>
+                      <td style={{ padding: "6px", textAlign: "right" }}>{m.submits}</td>
+                      <td style={{ padding: "6px", textAlign: "right", color: rate == null ? "var(--fg-secondary)" : rate >= 90 ? "var(--success-ink)" : rate < 70 ? "var(--danger-ink)" : "var(--ink)" }}>
+                        {rate == null ? "—" : `${rate}%`}
+                      </td>
+                      <td style={{ padding: "6px", textAlign: "right", color: m.failed > 0 ? "var(--danger-ink)" : "var(--fg-secondary)" }}>{m.failed}</td>
+                      <td style={{ padding: "6px", textAlign: "right" }}>{m.points}</td>
+                      <td style={{ padding: "6px", textAlign: "right" }}>{m.users}</td>
+                      <td className="hint" style={{ padding: "6px", textAlign: "right", fontSize: 11, whiteSpace: "nowrap" }}>{parseDbTime(m.lastUsedAt).toLocaleDateString("zh-TW")}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="hint" style={{ fontSize: 11, marginTop: 6 }}>成功率＝完成 ÷（完成＋失敗）；排隊中／等待核准的生成不列入。點數只計完成的實花（失敗會退點）。</p>
+          </div>
+        )
+      )}
+
+      {/* ── 提示詞 ── */}
+      {tab === "prompts" && (
+        <>
+          {(modelFilter || actorFilter) && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+              <span className="hint" style={{ fontSize: 11 }}>目前只看：</span>
+              {modelFilter && (
+                <button type="button" onClick={() => setModelFilter(null)} style={activeFilterChip} aria-label={`清除模型過濾（${modelFilter.label}）`}>
+                  模型：{modelFilter.label}<Icon name="X" size={11} />
+                </button>
+              )}
+              {actorFilter && (
+                <button type="button" onClick={() => setActorFilter(null)} style={activeFilterChip} aria-label={`清除夥伴過濾（${actorFilter.name}）`}>
+                  <Icon name="User" size={11} />{actorFilter.name}<Icon name="X" size={11} />
+                </button>
+              )}
+            </div>
+          )}
+          {prompts.isLoading ? (
+            <div className="skeleton" style={{ height: 60 }} />
+          ) : prompts.error ? (
+            <p className="error">載入失敗：{prompts.error.message}</p>
+          ) : !prompts.data || prompts.data.items.length === 0 ? (
+            <p className="hint">這段期間還沒有符合條件的生成。</p>
+          ) : (
+            prompts.data.items.map((p) => <PromptRow key={p.id} p={p} />)
           )}
         </>
       )}
@@ -635,14 +1438,19 @@ export function ConsumptionMonitorCard() {
           ) : (
             data.byGroup.map((g, i) => (
               <details key={g.groupId} open={data.byGroup.length === 1} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", padding: "6px 0" }}>
-                <summary style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer", listStyle: "none" }}>
-                  <Icon name="ChevronRight" size={14} className="details-caret" />
-                  <span style={{ flex: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%" }}>{g.groupName}</span>
-                  {/* 組間比較長條：相對「最燒的組」等比，一眼看出占比 */}
-                  <div style={{ flex: 1, height: 8, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
-                    <div style={{ width: `${(g.weekPoints / maxGroupPoints) * 100}%`, height: "100%", background: "var(--primary)", borderRadius: 3 }} />
+                {/* summary 本身保持預設 list-item：Safari/WebKit 一旦在 <summary> 直接下 display:flex
+                    或塞進 block 子元素，就會吃掉原生開合、點了沒反應——flex 版面改放到內層 div，
+                    點擊事件照樣冒泡到 summary 觸發開合，各家瀏覽器（含手機 Safari）都點得動。 */}
+                <summary style={{ cursor: "pointer", listStyle: "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, minHeight: 32 }}>
+                    <Icon name="ChevronRight" size={14} className="details-caret" />
+                    <span style={{ flex: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%" }}>{g.groupName}</span>
+                    {/* 組間比較長條：相對「最燒的組」等比，一眼看出占比 */}
+                    <div style={{ flex: 1, height: 8, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
+                      <div style={{ width: `${(g.weekPoints / maxGroupPoints) * 100}%`, height: "100%", background: "var(--primary)", borderRadius: 3 }} />
+                    </div>
+                    <span style={{ flex: "none", fontFamily: "var(--mono)" }}>{g.weekPoints.toLocaleString()} 點</span>
                   </div>
-                  <span style={{ flex: "none", fontFamily: "var(--mono)" }}>{g.weekPoints.toLocaleString()} 點</span>
                 </summary>
                 {/* 組內兩個維度的近 7 天毛消耗（各自高到低）：成員＝誰在燒、專案＝哪個案子在燒 */}
                 <div style={{ margin: "6px 0 2px", paddingLeft: 22 }}>
@@ -1001,36 +1809,22 @@ export function AdminPage() {
   return (
     <div>
       <h1>團隊管理</h1>
-      <p className="sub">團隊 → 組別 → 成員。邀請連結 72 小時內有效，可直接寄信給對方，或複製連結用 LINE 傳。</p>
+      <p className="sub">團隊 → 組別 → 成員。每個組的組長組員細節（點數・額度・派工・最近登入）、專案負責人交接、各組自己的資料庫都在這裡管理。邀請連結 72 小時內有效，可直接寄信給對方，或複製連結用 LINE 傳。</p>
       <div className="cols">
         <div className="stack">
           {teams.map((team) => (
             <section key={team.id} className="card" data-fb="團隊與成員卡">
               <h2>{team.name}</h2>
               <p className="hint">管理：{team.admins.map((a) => a?.name).join("、") || "—"}</p>
+              <TeamExtras teamId={team.id} />
               {team.groups.map((g) => (
-                <div key={g.id} style={{ marginTop: 10 }}>
-                  <h3 style={{ fontSize: "var(--fs-16)", margin: "0 0 6px" }}>{g.name}</h3>
-                  {g.members.length === 0 ? (
-                    <span className="hint">（還沒有成員）</span>
-                  ) : (
-                    g.members.map((m) => (
-                      <MemberChip
-                        key={m.id}
-                        groupId={g.id}
-                        groupName={g.name}
-                        member={m}
-                        // 與後端權限階梯一致：開發者重設任何人；團隊管理員不能重設開發者與其他管理員（自己除外）
-                        canResetPassword={
-                          isSuperAdmin ||
-                          (!m.isSuperAdmin && (m.id === me.data?.user.id || !team.admins.some((a) => a?.id === m.id)))
-                        }
-                      />
-                    ))
-                  )}
-                  <GroupBudgetRow group={g} />
-                  <GroupQuotaRow group={g} />
-                </div>
+                <GroupSection
+                  key={g.id}
+                  group={g}
+                  teamAdmins={team.admins}
+                  isSuperAdmin={isSuperAdmin}
+                  meId={me.data?.user.id}
+                />
               ))}
               <CreateGroupRow teamId={team.id} />
             </section>
@@ -1041,6 +1835,7 @@ export function AdminPage() {
         {/* 系統自檢只有開發者的 /api/selftest 能用——非開發者按了只會 403，對他們是死功能，故只對開發者顯示 */}
         {isSuperAdmin && <SelfTestCard />}
         <ConsumptionMonitorCard />
+        <InsightsCard />
         <AuditLogCard />
         {isSuperAdmin && <CreateTeamCard />}
         <div className="card" data-fb="點數與額度卡">
@@ -1138,6 +1933,7 @@ export function AdminPage() {
             <span>同時把邀請連結寄到這個 Email</span>
           </label>
           <p className="hint" style={{ margin: "4px 0 0" }}>未設定信箱機制時會自動略過寄信，改用下方連結傳給對方即可。</p>
+          <TestEmailButton />
           <div style={{ marginTop: 16 }}>
             <button
               className="primary"

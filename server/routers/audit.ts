@@ -19,9 +19,18 @@ export const auditRouter = router({
         cursor: z.object({ createdAt: z.string(), id: z.string().uuid() }).nullish(),
         /** action 關鍵字（如 "generation"、"scenes.update"）——ilike 模糊比對 */
         action: z.string().max(80).optional(),
+        /** action 代碼清單（精確比對）：前端把中文關鍵字翻成命中的代碼後帶入，讓夥伴能用中文搜尋 */
+        actions: z.array(z.string().max(80)).max(80).optional(),
         /** 操作分類 key（見 shared/auditWording 的 AUDIT_CATEGORIES）——比關鍵字更白話的過濾 */
         category: z.string().max(40).optional(),
+        /** 依團隊過濾：看整個團隊底下各組的操作流水（分團隊） */
+        teamId: z.string().uuid().optional(),
+        /** 依組別過濾：切到單一組別（分組別） */
         groupId: z.string().uuid().optional(),
+        /** 依操作者過濾：只看某位夥伴做的事（分組員） */
+        actorId: z.string().uuid().optional(),
+        /** 依專案過濾：只看某個專案上發生的操作（分專案） */
+        projectId: z.string().uuid().optional(),
         limit: z.number().int().min(1).max(100).optional(),
       }),
     )
@@ -35,12 +44,19 @@ export const auditRouter = router({
         if (visibleGroupIds.length === 0) throw new TRPCError({ code: "FORBIDDEN", message: "需要組長或管理權限" });
         conds.push(inArray(schema.auditLog.groupId, visibleGroupIds));
       }
+      // 團隊過濾靠 join 的 groups.teamId（非 auditLog 直屬欄位）；非開發者上面已先鎖 visibleGroupIds，
+      // 這裡只是在可見範圍內再縮，不會擴權。分團隊／組別／組員／專案四維度彼此獨立、可疊加。
+      if (input.teamId) conds.push(eq(schema.groups.teamId, input.teamId));
       if (input.groupId) conds.push(eq(schema.auditLog.groupId, input.groupId));
+      if (input.actorId) conds.push(eq(schema.auditLog.actorId, input.actorId));
+      if (input.projectId) conds.push(eq(schema.auditLog.projectId, input.projectId));
       const q = input.action?.trim();
       if (q) {
         const escaped = q.replace(/[\\%_]/g, (m) => `\\${m}`);
         conds.push(ilike(schema.auditLog.action, `%${escaped}%`));
       }
+      // 中文搜尋走這條：前端用 AUDIT_ACTION_LABELS 把「邀請」翻成 ["admin.invite", "auth.acceptInvite"] 帶入
+      if (input.actions?.length) conds.push(inArray(schema.auditLog.action, input.actions));
       // 分類過濾：把該類的路由前綴展開成 OR 的「action LIKE 'prefix.%'」——未知 key 不套用
       if (input.category) {
         const prefixes = auditPrefixesForCategory(input.category);

@@ -192,6 +192,22 @@ async function advanceWithGuard(run: RunRow): Promise<void> {
 }
 
 async function saveRun(runId: string, patch: Partial<typeof schema.workflowRuns.$inferInsert>): Promise<void> {
+  const { status, ...rest } = patch;
+  // 終局值（done/failed）拆兩段（比照 agentRunner.saveRun 的 stop 競態修復，回填此姊妹 runner）：
+  // steps/currentStep/error 照寫（runner 是 steps 唯一寫者），status 只在「仍是 running」時 CAS 推進。
+  // 原版無條件覆寫：使用者在步驟執行期間（含最長 60 秒的生成收尾）按的「停止」（workflows.stop 已 CAS
+  // 成 stopped）會被完成/失敗寫回蓋掉——stopped 是使用者的決定，runner 只能尊重不能覆寫。
+  // 兩段非原子，中間死亡＝steps 已更新、status 留 running，下一輪 tick 自我收斂，不卡死。
+  if (status === "done" || status === "failed") {
+    if (Object.keys(rest).length) {
+      await db.update(schema.workflowRuns).set({ ...rest, updatedAt: new Date() }).where(eq(schema.workflowRuns.id, runId));
+    }
+    await db
+      .update(schema.workflowRuns)
+      .set({ status, updatedAt: new Date() })
+      .where(and(eq(schema.workflowRuns.id, runId), eq(schema.workflowRuns.status, "running")));
+    return;
+  }
   await db.update(schema.workflowRuns).set({ ...patch, updatedAt: new Date() }).where(eq(schema.workflowRuns.id, runId));
 }
 
@@ -283,6 +299,10 @@ async function advanceRun(run: RunRow): Promise<void> {
       modelId: presetStep.modelId,
       prompt: stepPrompt,
       sourceUrl: presetStep.usePrevAsSource && prevUrl ? prevUrl : undefined,
+      // 啟動時勾選的角色/場景卡貫穿每一步：視覺步驟注入同一套錨點（LLM/TTS 步驟由核心自行略過）
+      characterIds: (run.characterIds as string[] | null) ?? undefined,
+      scenePresetIds: (run.scenePresetIds as string[] | null) ?? undefined,
+      workflowRunId: run.id, // 生成列回連本條 run——生成紀錄可回看來源
       reasonPrefix: "工作流生成",
       // 不帶 assertAccess：run 建立時已由 tRPC 層做過組隔離檢查，之後以發起人身分執行
     });

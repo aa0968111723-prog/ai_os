@@ -30,7 +30,10 @@ export async function getProjectRole(auth: AuthState, project: ProjectLike): Pro
   return row?.role === "viewer" ? "viewer" : "editor"; // 無列＝editor（預設開放）
 }
 
-/** 內容寫入守衛：viewer 一律擋（人話訊息說明找誰解鎖） */
+/** 內容寫入守衛：viewer 一律擋（人話訊息說明找誰解鎖）。
+ *  註：封存專案的寫入凍結「不」放這裡——setArchived（還原）本身也呼叫本函式，放這裡會讓「還原」
+ *  因專案當下仍是 archived 而被自己擋住（自鎖）。封存凍結改用 assertProjectNotArchived，掛在
+ *  真正「發起新工作」的路徑（生成/排程/代理），與 scheduleCore／agentCore 同口徑。 */
 export async function assertProjectEditable(auth: AuthState, project: ProjectLike): Promise<void> {
   if ((await getProjectRole(auth, project)) === "viewer") {
     throw new TRPCError({ code: "FORBIDDEN", message: "你在此專案是「檢視者」（唯讀）——要編輯請組長到專案權限卡調整" });
