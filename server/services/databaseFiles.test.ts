@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  assertPublicHostOrError,
   extractKindOf,
+  extractTextFromBuffer,
   formatBytes,
   htmlToText,
+  isPrivateIp,
+  MAX_EXTRACT_BYTES,
   normalizeImportUrl,
   notionPageIdFromUrl,
   ssrfGuardError,
@@ -86,6 +90,33 @@ describe("ssrfGuardError", () => {
   });
 });
 
+describe("isPrivateIp（SSRF 權威判準：DNS 解析後逐一 IP 檢查）", () => {
+  it("擋 IPv4 私有／保留段（含雲端 metadata 169.254.169.254、CGNAT、0/8）", () => {
+    for (const ip of [
+      "127.0.0.1", "10.0.0.1", "10.255.255.255", "192.168.0.1",
+      "172.16.0.1", "172.31.255.255", "169.254.169.254", "100.64.0.1",
+      "100.127.255.255", "0.0.0.0",
+    ]) {
+      expect(isPrivateIp(ip), ip).toBe(true);
+    }
+  });
+  it("擋 IPv6 loopback／ULA／link-local 與 IPv4-mapped 形式", () => {
+    for (const ip of ["::1", "::", "fc00::1", "fd12:3456::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:169.254.169.254"]) {
+      expect(isPrivateIp(ip), ip).toBe(true);
+    }
+  });
+  it("放行公開位址（IPv4 與 IPv6）", () => {
+    for (const ip of ["8.8.8.8", "1.1.1.1", "172.32.0.1", "100.63.255.255", "93.184.216.34", "2606:2800:220:1::1"]) {
+      expect(isPrivateIp(ip), ip).toBe(false);
+    }
+  });
+  it("解析後涵蓋所有奇異數字寫法（getaddrinfo 正規化後就是這些真實 IP）", () => {
+    // 這些主機字串本身繞得過字面字串檢查，但經 DNS/getaddrinfo 正規化後就是內部 IP，
+    // 由 isPrivateIp 在「解析後」一律擋下——這是本次修補的核心不變式。
+    expect(isPrivateIp("127.0.0.1")).toBe(true); // 0x7f.0.0.1 / 2130706433 / 127.1 皆解析成此
+  });
+});
+
 describe("normalizeImportUrl", () => {
   it("Google 文件 → txt 匯出", () => {
     const n = normalizeImportUrl("https://docs.google.com/document/d/1AbC_-xyz/edit?usp=sharing");
@@ -120,5 +151,58 @@ describe("formatBytes", () => {
     expect(formatBytes(500)).toBe("500 B");
     expect(formatBytes(2048)).toBe("2 KB");
     expect(formatBytes(5 * 1024 ** 3)).toBe("5.00 GB");
+  });
+});
+
+/* ── SSRF 權威防線：assertPublicHostOrError（含代理模式修法） ── */
+const PROXY_KEYS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"] as const;
+const savedProxy: Record<string, string | undefined> = {};
+for (const k of PROXY_KEYS) savedProxy[k] = process.env[k];
+function clearProxy(): void { for (const k of PROXY_KEYS) delete process.env[k]; }
+function restoreProxy(): void {
+  for (const k of PROXY_KEYS) { if (savedProxy[k] === undefined) delete process.env[k]; else process.env[k] = savedProxy[k]; }
+}
+
+describe("assertPublicHostOrError：DNS 解析後判內網（SSRF 權威防線）", () => {
+  afterEach(restoreProxy);
+
+  it("字面內網 IP 一律擋（直連模式）", async () => {
+    clearProxy();
+    expect(await assertPublicHostOrError("127.0.0.1")).toBe("不能匯入內部網址");
+  });
+
+  it("★安全修法：設了出口代理時，解析得到的內網 IP 仍要擋（舊版一律放行＝破口）", async () => {
+    clearProxy();
+    process.env.HTTPS_PROXY = "http://egress-proxy.internal:3128";
+    // 127.0.0.1 為字面 IP，getaddrinfo 直接回傳自身（離線可判），代理模式下也必須被擋
+    expect(await assertPublicHostOrError("127.0.0.1")).toBe("不能匯入內部網址");
+  });
+
+  it("代理模式下本機解不到的名稱 → 放行交給代理（不誤擋正常匯入）", async () => {
+    clearProxy();
+    process.env.HTTPS_PROXY = "http://egress-proxy.internal:3128";
+    // .invalid 為 RFC 保留、永不解析 → dnsLookup 拋錯 → 代理模式回 null（委派出口代理）
+    expect(await assertPublicHostOrError("nonexistent-host.invalid")).toBeNull();
+  });
+
+  it("直連模式下解不到的名稱 → 回錯誤（不是放行）", async () => {
+    clearProxy();
+    expect(await assertPublicHostOrError("nonexistent-host.invalid")).toBe("無法解析這個網址的主機（DNS 查詢失敗）");
+  });
+});
+
+/* ── 文字抽取的隔離守門（解壓縮/CPU 炸彈 DoS 防護，見 extractInWorker） ── */
+describe("extractTextFromBuffer：安全降級", () => {
+  it("超過抽取上限的檔案 → 回 null（不進解析器，避免記憶體壓力）", async () => {
+    const oversized = Buffer.alloc(MAX_EXTRACT_BYTES + 1);
+    expect(await extractTextFromBuffer("application/pdf", "big.pdf", oversized)).toBeNull();
+  });
+
+  it("損壞的 pdf → worker 內解析失敗優雅回 null，主程序不受影響", async () => {
+    expect(await extractTextFromBuffer("application/pdf", "x.pdf", Buffer.from("not a real pdf"))).toBeNull();
+  }, 15_000);
+
+  it("純文字走行內路徑（不進 worker），正常抽出", async () => {
+    expect(await extractTextFromBuffer("text/plain", "x.txt", Buffer.from("hello 世界"))).toBe("hello 世界");
   });
 });

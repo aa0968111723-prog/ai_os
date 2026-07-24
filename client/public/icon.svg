@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 與 index.html 內嵌 favicon 同款（金環）：通知圖示/PWA 圖示共用 -->
+  <rect width="512" height="512" rx="96" fill="#e9e3d8"/>
+  <circle cx="256" cy="256" r="176" fill="#c9a24b"/>
+  <circle cx="256" cy="256" r="80" fill="#e9e3d8"/>
+</svg>

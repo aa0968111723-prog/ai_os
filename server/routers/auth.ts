@@ -19,12 +19,15 @@ import {
   getInvitePreview,
   loadAuthState,
 } from "../services/auth";
+import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 
-// 取用戶端 IP 供 per-IP 限流：用 Express req.ip（index.ts 已設 app.set("trust proxy", 1)）。
-// 正式部署在單層反代之後，req.ip 是「反代填入的真實對端位址」，用戶端無法偽造。
-// 舊版取 X-Forwarded-For 最左段——那一段完全由用戶端控制，攻擊者每次換值即可為每個請求製造
-// 一個全新的 IP 鍵，讓 per-IP(30次/15分) 限流形同虛設、可從單一主機對大量帳號做密碼噴灑
-// （滲透實測確認）。改用 req.ip 後，反代會把真實對端附加在信任跳點，用戶端偽造的 XFF 不被採信。
+// 取用戶端 IP 供 per-IP 限流。★安全：一律走 Express 的 req.ip。
+// index.ts 已設 `app.set("trust proxy", 1)`，Express 會信任「最靠近本機的 1 層反代」並取
+// X-Forwarded-For 中由該可信反代附加的那一段＝真實 client IP（見 mcp.ts 的失敗鎖定同口徑）。
+// 舊版自行解析 XFF「最左段」是攻擊者可控值：平台反代會把真實 IP「附加在右側」，故
+//   `X-Forwarded-For: 1.2.3.4`（偽造）到站後變成 `1.2.3.4, <真實IP>`，取最左＝拿到攻擊者
+// 自選的 1.2.3.4，等於每次請求都換一個「新 IP」，per-IP 滑動視窗（30 次/15 分）永遠不觸發，
+// 撞庫防線形同虛設；反之鎖定某受害 IP 也能惡意灌爆其額度做定向 DoS。改用 req.ip 杜絕此類偽造。
 function clientIp(req: Request): string | undefined {
   return req.ip ?? req.socket?.remoteAddress ?? undefined;
 }
@@ -87,6 +90,10 @@ export const authRouter = router({
         .where(eq(schema.users.id, user.id));
       // 舊 session 全部作廢（含可能外洩的），本裝置換發新的繼續用
       await db.delete(schema.sessions).where(eq(schema.sessions.userId, user.id));
+      // MCP 個人金鑰一併撤銷：改密碼＝舊憑證全作廢，金鑰是不經 tRPC 閘門的另一套長效憑證，
+      // 只砍 session 而留著金鑰，等於改密碼後外洩金鑰仍能以本人身分讀寫（MCP／REST）。
+      const revokedTokens = await revokeAllUserMcpTokens(user.id);
+      if (revokedTokens > 0) console.log(`[audit] changePassword 一併撤銷 ${revokedTokens} 把 MCP 金鑰：user=${user.id}`);
       const token = await createSession(user.id);
       setSessionCookie(ctx.res, token);
       console.log(`[audit] changePassword：user=${user.id}`);

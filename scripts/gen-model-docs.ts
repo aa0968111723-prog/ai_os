@@ -3,7 +3,22 @@
  * 用法:npx tsx scripts/gen-model-docs.ts
  */
 import { writeFileSync } from "node:fs";
-import { CATEGORIES, MODELS, WORKFLOW_PRESETS, tierLabel } from "../shared/models";
+import {
+  CATEGORIES,
+  MODELS,
+  SCENARIO_GROUPS,
+  SCENARIO_RECIPES,
+  STYLE_SHOWDOWNS,
+  WORKFLOW_PRESETS,
+  getModel,
+  tierLabel,
+} from "../shared/models";
+
+/** 決策層用:把模型 id 顯示成「名稱(級別・N 點)」;查無則原樣印出 id 方便抓錯 */
+const refModel = (id: string): string => {
+  const m = getModel(id);
+  return m ? `${m.label}(${tierLabel(m.tier)}・${m.points} 點)` : `⚠︎查無:${id}`;
+};
 
 const lines: string[] = [
   "# 模型目錄(自動生成,單一真相在 shared/models.ts)",
@@ -35,12 +50,42 @@ lines.push("|---|---|---|---|---|");
 for (const w of WORKFLOW_PRESETS) {
   lines.push(`| ${tierLabel(w.tier)} | ${w.label} | ${w.points} | ${w.steps.map((s) => s.note).join(" → ")} | ${w.bestFor} |`);
 }
-lines.push("", "## 挑選心法", "",
-  "1. **先用最低成本試方向**(1–3 點),對了再用旗艦重做成品。",
-  "2. **中文字要出現在畫面上** → Seedream 4.5 / Ideogram v3 / Qwen。",
-  "3. **中文旁白** → MiniMax 02 HD(頂級)/ ElevenLabs v3(情感)/ Kokoro 中文(草稿)。",
-  "4. **成本大戶是影片**:Veo 3.1 一支 5 秒 ≈ 32 點;先用 Wan 2.2(8 點)或 LTX(3 點)驗證腳本。",
-  "5. **代理找模型**:MCP 工具 `find_model`、tRPC `models.search`、或直接查 `model_catalog` 資料表。",
+/* ── 決策層:情境速查(對應模型指南頁「看情境」) ── */
+lines.push("", "## 情境速查(看情境選模型)", "",
+  "用「我要做什麼」直接查首選,不必先懂 11 類分法。首選 = 建議先用的模型;替代 = 同情境的備選。", "");
+for (const g of SCENARIO_GROUPS) {
+  const recipes = SCENARIO_RECIPES.filter((r) => r.group === g.id);
+  if (!recipes.length) continue;
+  lines.push(`### ${g.label}(${g.hint})`, "");
+  lines.push("| 情境 | 首選 | 替代 | 為什麼 |");
+  lines.push("|---|---|---|---|");
+  for (const r of recipes) {
+    const primary = refModel(r.pickIds[0]);
+    const alts = r.pickIds.slice(1).map(refModel).join("、") || "—";
+    lines.push(`| ${r.scene}<br/><span>${r.intent}</span> | ${primary} | ${alts} | ${r.why} |`);
+  }
+  lines.push("");
+}
+
+/* ── 決策層:風格 PK(對應模型指南頁「比風格」) ── */
+lines.push("## 風格 PK(比風格:哪個風格用哪個模型)", "");
+for (const s of STYLE_SHOWDOWNS) {
+  lines.push(`### ${s.title}`, "", s.subtitle, "");
+  lines.push("| 風格 / 需求 | 首選 | 次選 |");
+  lines.push("|---|---|---|");
+  for (const a of s.axes) {
+    lines.push(`| ${a.axis}(${a.note}) | ${refModel(a.winnerId)} | ${a.runnerUpId ? refModel(a.runnerUpId) : "—"} |`);
+  }
+  lines.push("");
+}
+
+lines.push("## 挑選心法", "",
+  "1. **不知道用哪個** → 先看上面「情境速查」照你要做的事查首選;要比同類風格看「風格 PK」。",
+  "2. **先用最低成本試方向**(1–3 點),對了再用旗艦重做成品。",
+  "3. **中文字要出現在畫面上** → Qwen Image 2.0(第一主力)/ Seedream 4.5 / Ideogram v3(英文)。",
+  "4. **中文旁白** → MiniMax 2.6 HD(頂級)/ Qwen 3 TTS(量產省)/ Kokoro 中文(草稿)。",
+  "5. **成本大戶是影片**:Veo 3.1 一支 5 秒 ≈ 32 點;先用 Wan 2.2 或 LTX 驗證腳本。",
+  "6. **代理找模型**:MCP 工具 `find_model`、tRPC `models.search`、或直接查 `model_catalog` 資料表。",
   "");
 
 writeFileSync(new URL("../docs/模型目錄.md", import.meta.url), lines.join("\n"));

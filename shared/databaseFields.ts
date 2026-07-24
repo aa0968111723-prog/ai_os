@@ -4,7 +4,7 @@
  * 語意驗證（型別、必填、選項白名單）全部集中在這裡，MCP 與 tRPC 走同一套。
  */
 
-export type DataFieldType = "text" | "number" | "select" | "date" | "checkbox" | "url" | "user" | "project" | "schedule";
+export type DataFieldType = "text" | "number" | "select" | "date" | "checkbox" | "url" | "file" | "user" | "project" | "schedule";
 
 export interface DataField {
   /** 穩定鍵（列資料以此為 key）：建立後不變，改 label 不影響既有資料 */
@@ -27,6 +27,8 @@ export const FIELD_TYPES: Array<{ id: DataFieldType; label: string }> = [
   { id: "date", label: "日期" },
   { id: "checkbox", label: "勾選" },
   { id: "url", label: "網址" },
+  // 附件（值＝本庫文件 data_files.id）：一列掛一個檔——圖片/影片/PDF/任何格式，格線縮圖顯示、可下載
+  { id: "file", label: "附件" },
   { id: "user", label: "成員" },
   // 系統實體連結（值＝該實體 id）：格線顯示標題並可跳轉——資料庫跟專案/排程接起來
   { id: "project", label: "專案連結" },
@@ -37,6 +39,19 @@ export const MAX_FIELDS = 30;
 export const MAX_LABEL = 40;
 export const MAX_OPTIONS = 50;
 export const MAX_TEXT_VALUE = 4000;
+
+/** 文件分類標籤長度上限（資料庫文件層的 category；前後端與 AI 分類共用同一把尺） */
+export const MAX_FILE_CATEGORY = 30;
+/** 分類建議清單（datalist 提示與 AI 分類候選共用；可自由輸入不受此限） */
+export const FILE_CATEGORY_SUGGESTIONS = ["人物", "場景", "物件", "文件掃描", "圖表", "海報文宣", "截圖", "開示", "見證", "其他"];
+
+/** 文件分類正規化：去頭尾空白、截長度；空字串回 null（＝未分類） */
+export function normalizeFileCategory(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim().replace(/\s+/g, " ");
+  if (!s) return null;
+  return s.slice(0, MAX_FILE_CATEGORY);
+}
 const KEY_RE = /^[a-z0-9_-]{1,24}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -133,7 +148,18 @@ export function validateRowData(
         break;
       }
       case "number": {
-        const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+        let n: number;
+        if (typeof v === "number") {
+          n = v;
+        } else if (typeof v === "string") {
+          // Number() 太寬鬆：Number("0x10")===16、Number("0b10")===2、Number("1_000")=NaN——
+          // 匯入代碼型字串（如產品編號 "0x10"）會被靜默變成數字 16。只收「十進位」寫法（可含正負號、
+          // 小數、科學記號、前後空白），把 0x/0b/0o 這類非十進位進位與其他非數字字面擋在外面。
+          const t = v.trim();
+          n = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t) ? Number(t) : NaN;
+        } else {
+          n = NaN;
+        }
         if (!Number.isFinite(n)) return { ok: false, error: `「${f.label}」要是數字` };
         out[f.key] = n;
         break;
@@ -162,11 +188,13 @@ export function validateRowData(
       }
       case "user":
       case "project":
-      case "schedule": {
-        // 三種都存系統實體的 uuid；歸屬驗證交給顯示端（撈得到才顯示標題，撈不到只見縮短 id），
-        // 與 user 型別同取捨——寫入端只擋格式，避免逐列查表拖慢批次寫入
+      case "schedule":
+      case "file": {
+        // 四種都存系統實體的 uuid（file＝本庫文件 data_files.id）；歸屬驗證交給顯示端
+        // （撈得到才顯示標題/縮圖，撈不到只見縮短 id）——寫入端只擋格式，避免逐列查表拖慢批次寫入
         if (typeof v !== "string" || !UUID_RE.test(v)) {
-          return { ok: false, error: `「${f.label}」要是系統內的${f.type === "user" ? "成員" : f.type === "project" ? "專案" : "排程"} id` };
+          const noun = f.type === "user" ? "成員" : f.type === "project" ? "專案" : f.type === "schedule" ? "排程" : "文件";
+          return { ok: false, error: `「${f.label}」要是系統內的${noun} id` };
         }
         out[f.key] = v;
         break;

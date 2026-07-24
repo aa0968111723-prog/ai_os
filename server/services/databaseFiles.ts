@@ -7,7 +7,7 @@
  * - 安全：SSRF 防護（協定白名單＋私有位址阻擋）、抓取逾時與大小上限、配額守門。
  * - 配額：每人（上傳者計）預設 5GB，settings.fileQuotaGb 可調（0＝不限）。
  */
-import { createRequire } from "node:module";
+import { Worker } from "node:worker_threads";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, schema } from "../db";
@@ -22,6 +22,73 @@ export const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
 export const MAX_EXTRACT_BYTES = 30 * 1024 * 1024;
 /** 預設每人配額：5GB（settings.fileQuotaGb 可調；0＝不限） */
 const DEFAULT_QUOTA_GB = 5;
+
+/* ── 二進位文件抽取的隔離守門（解壓縮炸彈／CPU 炸彈 DoS 防護） ──
+ * docx 是 OOXML zip、可用極高壓縮比把 30MB 輸入膨脹成數 GB；pdf 可構造成 CPU 密集。
+ * 兩者一律丟進 worker thread 解析：以「V8 heap 上限（膨脹超限只炸 worker、主程序存活）」＋
+ * 「牆鐘逾時（終止卡死/滴流的解析）」雙重圍住，絕不在請求處理器的事件迴圈上同步解壓/解析。
+ * 舊版只擋壓縮前 30MB、之後把 buffer 同步交給 mammoth/pdf-parse，任何有寫入權的使用者上傳
+ * 一顆 zip 炸彈即可 OOM 或卡死整個單容器部署。 */
+const EXTRACT_WORKER_MEM_MB = 384;        // worker old-space 上限：夠放合法大文件，擋得住膨脹到 GB 的炸彈
+const EXTRACT_WORKER_TIMEOUT_MS = 20_000; // 單檔解析牆鐘上限：卡死/滴流檔到點即終止 worker
+const MAX_PDF_PAGES = 800;                // pdf-parse 頁數上限：擋「數萬頁」構造檔的 CPU 放大
+// worker 以 eval 字串載入（避免 esbuild 單檔打包後找不到獨立 worker 檔）；跑在 CommonJS 情境下，
+// require 直接可用。pdf-parse 是舊式 CJS 套件，直接 require 套件根會觸發它的 debug 模式（讀測試 PDF 而炸），
+// 故深入 lib/pdf-parse.js（官方 README 建議做法）。mammoth/pdf-parse 為 external 相依，執行期存在 node_modules。
+const EXTRACT_WORKER_CODE = `
+const { parentPort, workerData } = require('node:worker_threads');
+(async () => {
+  try {
+    const buffer = Buffer.from(workerData.buf);
+    let text = null;
+    if (workerData.kind === 'pdf') {
+      const pdfParse = require('pdf-parse/lib/pdf-parse.js');
+      const out = await pdfParse(buffer, { max: ${MAX_PDF_PAGES} });
+      text = out && out.text;
+    } else if (workerData.kind === 'docx') {
+      const mammoth = require('mammoth');
+      const out = await mammoth.extractRawText({ buffer });
+      text = out && out.value;
+    }
+    parentPort.postMessage({ ok: true, text: text == null ? null : String(text).slice(0, ${MAX_TEXT_CHARS}) });
+  } catch (e) {
+    parentPort.postMessage({ ok: false, error: (e && e.message) ? e.message : String(e) });
+  }
+})();
+`;
+
+/** 在受限 worker 內解析 pdf/docx；回 null＝失敗/超限/逾時（呼叫端一律降級為「僅存檔」）。 */
+function extractInWorker(kind: "pdf" | "docx", buf: Buffer): Promise<string | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (v: string | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void worker.terminate();
+      resolve(v);
+    };
+    const worker = new Worker(EXTRACT_WORKER_CODE, {
+      eval: true,
+      workerData: { kind, buf },
+      resourceLimits: { maxOldGenerationSizeMb: EXTRACT_WORKER_MEM_MB },
+    });
+    const timer = setTimeout(() => {
+      console.warn(`[databaseFiles] 文字抽取逾時（${kind}，${EXTRACT_WORKER_TIMEOUT_MS}ms）——終止 worker，僅存檔`);
+      finish(null);
+    }, EXTRACT_WORKER_TIMEOUT_MS);
+    worker.on("message", (m: { ok: boolean; text?: string | null; error?: string }) => {
+      if (!m.ok) console.warn(`[databaseFiles] 文字抽取失敗（${kind}，僅存檔）：`, m.error);
+      finish(m.ok ? (m.text ?? null) : null);
+    });
+    worker.on("error", (err) => {
+      // 含 worker heap OOM（zip 炸彈膨脹超過上限）：只炸這個 worker，主程序不受影響
+      console.warn(`[databaseFiles] 文字抽取 worker 錯誤（${kind}，僅存檔）：`, err instanceof Error ? err.message : err);
+      finish(null);
+    });
+    worker.on("exit", () => finish(null)); // 非正常退出（被 OOM 終止等）也收斂成 null
+  });
+}
 
 /* ── 純文字抽取 ─────────────────────────────────── */
 
@@ -78,13 +145,10 @@ export function extractKindOf(mime: string, name: string): "text" | "html" | "su
   return null;
 }
 
-// pdf-parse 是舊式 CJS 套件：直接 import 套件根會觸發它的 debug 模式（讀測試 PDF 而炸）。
-// 深入 lib/pdf-parse.js 是官方 README 的建議做法；createRequire 讓 ESM bundle 也載得起來。
-const cjsRequire = createRequire(import.meta.url);
-
 /**
  * 從原檔 buffer 抽純文字。回 null＝此格式暫不可讀或解析失敗（僅存檔，AI 讀不到內文）。
  * 解析失敗不拋錯——檔案照存，之後格式支援擴充可再補抽。
+ * pdf/docx 走受限 worker（見 extractInWorker）：解壓縮/CPU 炸彈只炸 worker、不拖垮主程序。
  */
 export async function extractTextFromBuffer(mime: string, name: string, buf: Buffer): Promise<string | null> {
   if (buf.length > MAX_EXTRACT_BYTES) return null;
@@ -99,14 +163,12 @@ export async function extractTextFromBuffer(mime: string, name: string, buf: Buf
       case "subtitle":
         return subtitleToText(buf.toString("utf8")).slice(0, MAX_TEXT_CHARS) || null;
       case "pdf": {
-        const pdfParse = cjsRequire("pdf-parse/lib/pdf-parse.js") as (b: Buffer) => Promise<{ text: string }>;
-        const out = await pdfParse(buf);
-        return out.text.replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_TEXT_CHARS) || null;
+        const text = await extractInWorker("pdf", buf);
+        return text ? text.replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_TEXT_CHARS) || null : null;
       }
       case "docx": {
-        const mammoth = (await import("mammoth")).default;
-        const out = await mammoth.extractRawText({ buffer: buf });
-        return out.value.trim().slice(0, MAX_TEXT_CHARS) || null;
+        const text = await extractInWorker("docx", buf);
+        return text ? text.trim().slice(0, MAX_TEXT_CHARS) || null : null;
       }
     }
   } catch (err) {
@@ -117,33 +179,69 @@ export async function extractTextFromBuffer(mime: string, name: string, buf: Buf
 
 /* ── 網址匯入：Google／Notion／一般網頁 ─────────────── */
 
-/** 已解析出的 IP 是否落在私有/保留/loopback/link-local/中繼資料網段（v4＋v6）。 */
-export function ipIsPrivateOrReserved(ip: string): boolean {
-  const s = ip.toLowerCase().trim();
-  if (s.includes(":")) {
-    // IPv6
-    if (s === "::1" || s === "::") return true;
-    if (/^(fc|fd)/.test(s)) return true; // unique-local fc00::/7
-    if (/^fe[89ab]/.test(s)) return true; // link-local fe80::/10
-    if (s.startsWith("::ffff:")) return ipIsPrivateOrReserved(s.slice("::ffff:".length)); // v4-mapped
+/**
+ * 判斷一個「已解析的字面 IP」是否落在私有／保留／內部網段（IPv4 與 IPv6）。
+ * 這是 SSRF 的最終判準：主機名經 DNS 解析成 IP 後，逐一 IP 過此函式——任何一個是內部位址就擋。
+ * 因為 getaddrinfo 會把 0x7f.0.0.1／2130706433／127.1／IPv4-mapped IPv6 這類「奇異寫法」
+ * 一律正規化成真實 IP，故只要在「解析後」判斷，這些繞過字面字串檢查的編碼全部一併涵蓋。
+ */
+export function isPrivateIp(ip: string): boolean {
+  const addr = ip.toLowerCase().trim();
+  // IPv4-mapped IPv6（::ffff:a.b.c.d 或 ::ffff:hex）→ 取出內嵌 IPv4 再判
+  const mapped = addr.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (mapped) return isPrivateIp(mapped[1]);
+  if (addr.includes(":")) {
+    // IPv6：loopback(::1)／未指定(::)／ULA(fc00::/7＝fc,fd)／link-local(fe80::/10＝fe8,fe9,fea,feb)
+    if (addr === "::1" || addr === "::") return true;
+    if (/^(fc|fd)/.test(addr)) return true;
+    if (/^fe[89ab]/.test(addr)) return true;
     return false;
   }
-  const m = s.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  const m = addr.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!m) return false;
   const [a, b] = [Number(m[1]), Number(m[2])];
   return (
     a === 127 || a === 10 || a === 0 ||
     (a === 192 && b === 168) ||
     (a === 172 && b >= 16 && b <= 31) ||
-    (a === 169 && b === 254) || // link-local ＋雲端中繼資料 169.254.169.254
-    (a === 100 && b >= 64 && b <= 127) // CGNAT
+    (a === 169 && b === 254) ||       // link-local（含 AWS/GCP metadata 169.254.169.254）
+    (a === 100 && b >= 64 && b <= 127) // CGNAT 100.64.0.0/10
   );
 }
 
 /**
- * SSRF 防護（字面位址層）：只允許 http(s)，擋 localhost 與私有網段的字面主機名/IP。
- * 注意：這一層擋不了「公開 DNS 名稱解析到內網 IP」（如 nip.io）——那由下方 ssrfResolveGuard
- * 做實際 DNS 解析後再驗證。回錯誤訊息（人話）；null＝放行。
+ * 主機名 → 解析成 IP 並確認「全部」都是公開位址（否則丟人話錯誤）。★這是 SSRF 的權威防線★
+ * ssrfGuardError 只擋「字面內部位址」，擋不了「一個正常主機名 DNS 解析到內網」的情形
+ * （例如 169.254.169.254.nip.io、或攻擊者自架 A 記錄指向 10.x）——那才是真正可讀取內網/雲端
+ * metadata 的 SSRF。這裡在連線前先解析並逐一 IP 檢查，把 DNS 名稱與各種數字編碼一網打盡。
+ * 殘留風險：解析與實際連線之間的 DNS rebinding（TOCTOU）——內部工具威脅模型可接受；
+ * 正式擴大部署時建議改走「出口代理白名單」徹底根除。
+ */
+export async function assertPublicHostOrError(hostname: string): Promise<string | null> {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  // 有設出口代理（HTTPS_PROXY/HTTP_PROXY）時，真正的解析與連線由代理執行，本機 DNS 非權威、
+  // 也可能解不到外部名稱（純代理出口環境）。但仍「先嘗試本機解析」：只要解得到就照樣逐一判 IP，
+  // 補上「公開主機名 DNS 解析到內網（169.254.169.254／10.x…）」這條代理未必擋得住的 SSRF 破口
+  // （舊版在代理模式一律 return null 直接放行，等於整條權威防線關閉）。只有本機真的解不到時，
+  // 才把邊界交回出口代理、不誤擋正常匯入；字面內部位址在任何情況下都已由 ssrfGuardError 快篩擋下。
+  const proxied = !!(process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy);
+  let addrs: Array<{ address: string }>;
+  try {
+    addrs = await dnsLookup(host, { all: true });
+  } catch {
+    return proxied ? null : "無法解析這個網址的主機（DNS 查詢失敗）";
+  }
+  if (addrs.length === 0) return proxied ? null : "無法解析這個網址的主機";
+  for (const { address } of addrs) {
+    if (isPrivateIp(address)) return "不能匯入內部網址";
+  }
+  return null;
+}
+
+/**
+ * SSRF 防護（字面位址快篩）：只允許 http(s)，擋 localhost 與私有網段的「字面位址」。
+ * ★ 這只是快篩；權威判準是 fetchImport 內對每一跳呼叫的 assertPublicHostOrError（DNS 解析後判 IP）。
+ * 回錯誤訊息（人話）；null＝放行（仍須通過後續 DNS 解析檢查）。
  */
 export function ssrfGuardError(rawUrl: string): string | null {
   let u: URL;
@@ -183,38 +281,6 @@ export function ssrfGuardError(rawUrl: string): string | null {
   return null;
 }
 
-/**
- * SSRF 防護（DNS 解析層）：先過字面守衛，再「實際解析主機名」並驗證每一個解析出的 A/AAAA IP，
- * 任一落在私有/保留網段即擋——關掉「公開 DNS 名稱指向內網」的繞過（如 127.0.0.1.nip.io、
- * 169.254.169.254.nip.io，滲透實測確認可繞過字面守衛打雲端中繼資料）。fetchImport 每一跳（含重導向）
- * 都呼叫本函式，故 30x 導向內網名稱亦被擋。回錯誤訊息；null＝放行。
- * 註：仍有極窄的 DNS-rebinding TOCTOU（解析後到連線間 IP 變動）——完整封堵需釘住已解析 IP 連線，
- * 此處先擋掉實務上的名稱繞過（主要威脅）。
- */
-export async function ssrfResolveGuard(rawUrl: string): Promise<string | null> {
-  const literal = ssrfGuardError(rawUrl);
-  if (literal) return literal;
-  let host: string;
-  try {
-    host = new URL(rawUrl).hostname.replace(/^\[|\]$/g, "");
-  } catch {
-    return "網址格式不正確";
-  }
-  // 已是字面 IP 的情況，ssrfGuardError 已驗過，免再解析
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(":")) return null;
-  let addrs: Array<{ address: string }>;
-  try {
-    addrs = await dnsLookup(host, { all: true });
-  } catch {
-    return "無法解析網址主機（DNS 查詢失敗）";
-  }
-  if (!addrs.length) return "無法解析網址主機";
-  for (const a of addrs) {
-    if (ipIsPrivateOrReserved(a.address)) return "網址主機解析到內部位址——已擋下";
-  }
-  return null;
-}
-
 export interface NormalizedImport {
   /** 實際要抓的網址（Google 連結會轉成匯出端點） */
   fetchUrl: string;
@@ -222,6 +288,8 @@ export interface NormalizedImport {
   kind: "google-doc" | "google-sheet" | "google-slides" | "google-drive" | "notion" | "web";
   /** 建議檔名後綴（Google 匯出時已知格式） */
   suggestedExt?: string;
+  /** Google 檔案 id（kind 為 google-* 時有值）——個人 Drive 授權路徑用它打 Drive API 抓私有檔 */
+  fileId?: string;
 }
 
 /**
@@ -241,17 +309,17 @@ export function normalizeImportUrl(rawUrl: string): NormalizedImport {
   const host = u.hostname.toLowerCase();
   if (host === "docs.google.com") {
     const doc = u.pathname.match(/^\/document\/d\/([\w-]+)/);
-    if (doc) return { fetchUrl: `https://docs.google.com/document/d/${doc[1]}/export?format=txt`, kind: "google-doc", suggestedExt: ".txt" };
+    if (doc) return { fetchUrl: `https://docs.google.com/document/d/${doc[1]}/export?format=txt`, kind: "google-doc", suggestedExt: ".txt", fileId: doc[1] };
     const sheet = u.pathname.match(/^\/spreadsheets\/d\/([\w-]+)/);
-    if (sheet) return { fetchUrl: `https://docs.google.com/spreadsheets/d/${sheet[1]}/export?format=csv`, kind: "google-sheet", suggestedExt: ".csv" };
+    if (sheet) return { fetchUrl: `https://docs.google.com/spreadsheets/d/${sheet[1]}/export?format=csv`, kind: "google-sheet", suggestedExt: ".csv", fileId: sheet[1] };
     const slides = u.pathname.match(/^\/presentation\/d\/([\w-]+)/);
-    if (slides) return { fetchUrl: `https://docs.google.com/presentation/d/${slides[1]}/export/txt`, kind: "google-slides", suggestedExt: ".txt" };
+    if (slides) return { fetchUrl: `https://docs.google.com/presentation/d/${slides[1]}/export/txt`, kind: "google-slides", suggestedExt: ".txt", fileId: slides[1] };
   }
   if (host === "drive.google.com") {
     const file = u.pathname.match(/^\/file\/d\/([\w-]+)/);
-    if (file) return { fetchUrl: `https://drive.google.com/uc?export=download&id=${file[1]}`, kind: "google-drive" };
+    if (file) return { fetchUrl: `https://drive.google.com/uc?export=download&id=${file[1]}`, kind: "google-drive", fileId: file[1] };
     const id = u.searchParams.get("id");
-    if (u.pathname === "/uc" && id) return { fetchUrl: `https://drive.google.com/uc?export=download&id=${id}`, kind: "google-drive" };
+    if (u.pathname === "/uc" && id) return { fetchUrl: `https://drive.google.com/uc?export=download&id=${id}`, kind: "google-drive", fileId: id };
   }
   if (host === "www.notion.so" || host === "notion.so" || host.endsWith(".notion.site")) {
     return { fetchUrl: rawUrl, kind: "notion" };
@@ -280,17 +348,36 @@ function notionRichText(rt: unknown): string {
 }
 
 /**
- * 走 Notion 官方 API 抓頁面純文字（需環境變數 NOTION_TOKEN，且頁面已「分享給整合」）。
- * 逐層抓 blocks（深度/數量上限防巨頁）；支援常見文字型 block，其他型別以類型名佔位。
+ * 走 Notion 官方 API 抓頁面純文字（頁面需「分享給整合」）。
+ * token 優先序：呼叫端傳入的「個人 token」（整合連接頁自助設定）→ 站方 NOTION_TOKEN；
+ * 個人 token 對此頁無權（404）且站方另有共用 token 時自動退回站方再試一次——
+ * 與 Google「個人授權失敗退回公開路徑」同口徑，設了個人 token 不會弄壞原本靠站方 token 的頁面。
  */
-export async function fetchNotionText(pageId: string): Promise<string> {
-  const token = process.env.NOTION_TOKEN;
-  if (!token) {
+export async function fetchNotionText(pageId: string, userToken?: string | null): Promise<string> {
+  const siteToken = process.env.NOTION_TOKEN;
+  const primary = userToken || siteToken;
+  if (!primary) {
     throw new Error(
-      "Notion 匯入需要管理員設定 NOTION_TOKEN（Notion「建立整合」取得金鑰，並把頁面分享給該整合）；" +
-      "或改用 Notion 的「匯出」功能下載 Markdown/CSV 後上傳。",
+      "Notion 匯入需要先設定 token：到「整合連接」頁貼上你自己的 Notion integration token" +
+      "（notion.so/my-integrations 建立整合、把頁面分享給它），或請管理員設定站方 NOTION_TOKEN；" +
+      "也可改用 Notion 的「匯出」功能下載 Markdown/CSV 後上傳。",
     );
   }
+  try {
+    return await fetchNotionTextWithToken(pageId, primary);
+  } catch (err) {
+    // 用型別判斷「頁面對此 token 無權（404）」而非比對錯誤訊息字串——訊息之後改寫/i18n 不會默默弄壞退回邏輯
+    if (err instanceof NotionPageNotFoundError && userToken && siteToken && siteToken !== userToken) {
+      return await fetchNotionTextWithToken(pageId, siteToken);
+    }
+    throw err;
+  }
+}
+
+/** Notion 頁面對此 token 不可見（HTTP 404）：專屬型別，讓「退回站方 token」的判斷不綁錯誤訊息字串 */
+export class NotionPageNotFoundError extends Error {}
+
+async function fetchNotionTextWithToken(pageId: string, token: string): Promise<string> {
   const headers = { Authorization: `Bearer ${token}`, "Notion-Version": "2022-06-28" };
   const lines: string[] = [];
   let blockCount = 0;
@@ -302,7 +389,7 @@ export async function fetchNotionText(pageId: string): Promise<string> {
       const qs = cursor ? `?start_cursor=${cursor}&page_size=100` : "?page_size=100";
       const res = await proxyFetch(`https://api.notion.com/v1/blocks/${blockId}/children${qs}`, { headers, timeoutMs: 20_000 });
       if (!res.ok) {
-        if (res.status === 404) throw new Error("Notion 找不到這個頁面——請確認頁面已「分享給整合」（Connections → 選你的整合）");
+        if (res.status === 404) throw new NotionPageNotFoundError("Notion 找不到這個頁面——請確認頁面已「分享給整合」（Connections → 選你的整合）");
         throw new Error(`Notion API 錯誤（${res.status}）`);
       }
       const data = (await res.json()) as { results?: Array<Record<string, unknown>>; has_more?: boolean; next_cursor?: string };
@@ -339,8 +426,9 @@ export async function fetchNotionText(pageId: string): Promise<string> {
 /**
  * 逐塊讀取回應主體，累計位元組超過 max 立即取消串流並丟錯。
  * 避免 `arrayBuffer()` 在檢查大小前就把整個（可能造假 content-length 的）主體讀進記憶體。
+ * （integrations 的 Drive/外部 API 抓取共用同一道上限——export 給它用）
  */
-async function readBodyCapped(res: Response, max: number): Promise<Buffer> {
+export async function readBodyCapped(res: Response, max: number): Promise<Buffer> {
   const tooBig = () => new Error(`檔案太大（上限 ${Math.round(max / 1024 / 1024)}MB）`);
   const reader = res.body?.getReader?.();
   if (!reader) {
@@ -369,9 +457,18 @@ async function readBodyCapped(res: Response, max: number): Promise<Buffer> {
 export async function fetchImport(url: string): Promise<{ buf: Buffer; mime: string; finalUrl: string }> {
   let current = url;
   for (let hop = 0; hop < 5; hop++) {
-    // 每一跳都做「DNS 解析後」的守衛：字面 IP＋解析出的 IP 都要非內網，擋掉 nip.io 類名稱繞過
-    const guard = await ssrfResolveGuard(current);
+    const guard = ssrfGuardError(current);
     if (guard) throw new Error(hop === 0 ? guard : "來源網址重導向到內部位址——已擋下");
+    // ★ 權威 SSRF 判準：把主機名 DNS 解析成 IP，任一 IP 落在內網/保留段就擋（每一跳都重驗，
+    //   杜絕「公開網址 302 到 169.254.169.254／內網服務」與各種數字/DNS 名稱繞過字面檢查）。
+    let hostname: string;
+    try {
+      hostname = new URL(current).hostname;
+    } catch {
+      throw new Error("網址格式不正確");
+    }
+    const dnsGuard = await assertPublicHostOrError(hostname);
+    if (dnsGuard) throw new Error(hop === 0 ? dnsGuard : "來源網址重導向到內部位址——已擋下");
     const res = await proxyFetch(current, { timeoutMs: 25_000, redirect: "manual" });
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");

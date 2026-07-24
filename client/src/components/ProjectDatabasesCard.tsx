@@ -11,6 +11,7 @@ import type { DataField, DataRowData, DataRowValue } from "@shared/databaseField
 function cellText(field: DataField, value: DataRowValue): string {
   if (value === null || value === undefined || value === "") return "—";
   if (field.type === "checkbox") return value ? "✓" : "—";
+  if (field.type === "file") return "📎 附件"; // 值是文件 uuid——唯讀彙整卡不解析檔名，到資料庫頁看
   return String(value);
 }
 

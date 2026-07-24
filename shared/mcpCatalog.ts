@@ -30,8 +30,9 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "list_databases", title: "列出資料庫", access: "read", blurb: "列出你可存取的自訂資料庫（含欄位定義與列數）。" },
   { name: "query_database", title: "查詢資料庫", access: "read", blurb: "查自訂資料庫的列資料（關鍵字粗篩）。" },
   { name: "add_database_row", title: "新增資料列", access: "write", blurb: "在開放 AI 寫入的自訂資料庫新增一列。" },
-  { name: "list_database_files", title: "列出資料庫文件", access: "read", blurb: "列出資料庫掛的文件（上傳／匯入），可用關鍵字過濾內文。" },
-  { name: "read_database_file", title: "讀取資料庫文件", access: "read", blurb: "讀文件抽出的純文字（PDF/DOCX/HTML…），長文分頁讀取。" },
+  { name: "list_database_files", title: "列出資料庫文件", access: "read", blurb: "列出資料庫掛的文件（上傳／匯入，含圖影）：分類、AI 描述、可讀字數；關鍵字過濾內文。" },
+  { name: "read_database_file", title: "讀取資料庫文件", access: "read", blurb: "讀文件抽出的純文字（PDF/DOCX/HTML…）；圖影回 AI 描述＋短效下載網址。" },
+  { name: "get_database_stats", title: "資料庫資訊量", access: "read", blurb: "一個資料庫的資訊量統計：列數、文件數、圖影音文分佈、容量、AI 可讀字數、分類分佈。" },
   { name: "get_project_status", title: "專案全貌", access: "read", blurb: "一次取回分鏡、生成、AI 代理、排程、待辦——規劃前先讀這個。" },
   { name: "plan_agent", title: "規劃 AI 代理", access: "write", blurb: "請 AI 代理針對目標排一份多步製作計畫（只規劃、不執行、不扣執行點數）。" },
   { name: "approve_agent", title: "核准並執行代理", access: "write", blurb: "核准代理計畫，開始背景逐步執行（此刻起才依步驟扣點）。" },
@@ -43,6 +44,10 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "add_schedule_item", title: "新增行程", access: "write", blurb: "為專案新增行程／交付死線（進組行事曆）。" },
   { name: "list_notes", title: "列出筆記", access: "read", blurb: "列出專案相關的會議筆記／知識筆記（本專案 ＋ 組層級共用）。" },
   { name: "get_note", title: "讀取筆記", access: "read", blurb: "讀一則筆記的全文（會議決議、待辦、匯入的知識）。" },
+  { name: "list_dm_contacts", title: "列出私訊對象", access: "read", blurb: "列出你可以私訊的夥伴（同組夥伴＋開發者）：姓名、Email、共同組別。" },
+  { name: "list_dm_threads", title: "列出私訊對話", access: "read", blurb: "列出你的私訊對話串（每位對象的最後一句與未讀數）。" },
+  { name: "read_dm", title: "讀取私訊", access: "read", blurb: "讀你與某位夥伴的私訊往來（只讀得到自己參與的對話）。" },
+  { name: "send_dm", title: "發送私訊", access: "write", blurb: "以你的身分私訊一位同組夥伴或開發者（對方在網站「私訊」頁看到）。" },
 ];
 
 /** 寫入類工具名集合（唯讀金鑰一律擋）——由目錄推導，單一來源不分岔。 */

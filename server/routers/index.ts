@@ -20,12 +20,19 @@ import { workflowsRouter } from "./workflows";
 import { assistantRouter } from "./assistant";
 import { agentsRouter } from "./agents";
 import { auditRouter } from "./audit";
+import { insightsRouter } from "./insights";
 import { notesRouter } from "./notes";
 import { scheduleRouter } from "./schedule";
 import { teamAssistantRouter } from "./teamAssistant";
 import { mcpTokensRouter } from "./mcpTokens";
 import { databasesRouter } from "./databases";
 import { directoryRouter } from "./directory";
+import { dmRouter } from "./dm";
+import { googleCalendarRouter } from "./googleCalendar";
+import { integrationsRouter } from "./integrations";
+import { knowledgeMapRouter } from "./knowledgeMap";
+import { pushRouter } from "./push";
+import { exportJobsRouter } from "./exportJobs";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -49,12 +56,19 @@ export const appRouter = router({
   assistant: assistantRouter,
   agents: agentsRouter,
   audit: auditRouter,
+  insights: insightsRouter,
   notes: notesRouter,
   schedule: scheduleRouter,
   teamAssistant: teamAssistantRouter,
   mcpTokens: mcpTokensRouter,
   databases: databasesRouter,
   directory: directoryRouter,
+  dm: dmRouter,
+  googleCalendar: googleCalendarRouter,
+  integrations: integrationsRouter,
+  knowledgeMap: knowledgeMapRouter,
+  push: pushRouter,
+  exportJobs: exportJobsRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -38,12 +38,15 @@ const t = initTRPC.context<Context>().create({
       const { stack: _stack, ...restData } = s.data as Record<string, unknown>;
       return { ...s, data: restData } as typeof shape;
     };
-    // 內部錯誤（如 SQL）不外洩到前台——細節進伺服器 log，畫面給友善訊息
+    // 內部錯誤（如 SQL）不外洩到前台——細節進伺服器 log，畫面給友善訊息。
+    // 注意（QA-001）：不得把所有 500 一律歸咎「資料庫」——provider 逾時/上游失敗走
+    // SERVICE_UNAVAILABLE 等專屬 code 帶自己的訊息，這裡只兜「真正未分類」的內部錯誤，
+    // 訊息保持中性、不指向特定元件（/api/ready 已分項回報，管理員可自行對照）。
     if (error.code === "INTERNAL_SERVER_ERROR") {
       console.error("[trpc]", error.cause ?? error);
       // 同步進錯誤環形緩衝，讓 /api/selftest「近期錯誤」看得到（errlog 零專案相依，直接 import 不會循環）
       recordError("trpc:" + (shape.data?.path ?? "?"), error.cause ?? error);
-      return strip({ ...shape, message: "系統暫時無法處理，請稍後再試（管理員可到 /api/ready 檢查資料庫連線）" });
+      return strip({ ...shape, message: "系統暫時無法處理，請稍後再試（若持續發生，管理員可到 /api/ready 查看各元件狀態）" });
     }
     // 輸入驗證失敗時，預設 message 是整包 issues 的 JSON——改給第一條的人話訊息
     if (error.cause instanceof ZodError) {
@@ -59,8 +62,16 @@ export const publicProcedure = t.procedure;
 /** 強制改密碼期間仍放行的 procedure（點記法完整路徑）；auth.me 是 publicProcedure 本不經此關，列入是保險 */
 const MUST_CHANGE_PW_ALLOWED = ["auth.changePassword", "auth.me", "auth.logout"];
 
-/** 審計豁免清單：高頻、純閱讀狀態、無安全意義的 mutation——記了只會灌爆 audit_log 稀釋真正要查的事件 */
-const AUDIT_EXEMPT = new Set(["messages.markRead"]);
+/** 審計豁免清單：高頻、純閱讀狀態、無安全意義的 mutation——記了只會灌爆 audit_log 稀釋真正要查的事件。
+ *  push.subscribe 另有隱私因素：App 每次載入回報一次（高頻），且輸入含裝置推送加密金鑰，不落審計明文 */
+const AUDIT_EXEMPT = new Set(["messages.markRead", "dm.markRead", "push.subscribe", "push.sync"]);
+
+/** 審計內文脫敏清單：私訊承諾「只有收發雙方看得到」，但操作紀錄對組長/管理員可見——
+ *  這些 mutation 照記（誰、何時、傳給誰），唯 body 以佔位符取代，不落訊息明文 */
+const AUDIT_REDACT_BODY = new Set(["dm.send"]);
+
+/** 外部抓取的 path 可能被使用者塞查詢字串金鑰（?api_key=…）——動作照記，唯 path 以佔位符取代 */
+const AUDIT_REDACT_PATH = new Set(["integrations.fetchApi"]);
 
 /** 需登入 */
 export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, getRawInput }) => {
@@ -79,7 +90,13 @@ export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, g
   // 放在 next() 之後：只記「真的執行過」的呼叫；query 不記（唯讀且量大）。
   // getRawInput 是驗證前的原始輸入——sanitizeAuditInput 會脫敏截斷，壞輸入也記得下來。
   if (type === "mutation" && !AUDIT_EXEMPT.has(path)) {
-    const raw = await getRawInput().catch(() => undefined);
+    let raw = await getRawInput().catch(() => undefined);
+    if (AUDIT_REDACT_BODY.has(path) && raw && typeof raw === "object" && "body" in raw) {
+      raw = { ...(raw as Record<string, unknown>), body: "（私訊內容不落審計）" };
+    }
+    if (AUDIT_REDACT_PATH.has(path) && raw && typeof raw === "object" && "path" in raw) {
+      raw = { ...(raw as Record<string, unknown>), path: "（抓取路徑不落審計——可能含查詢字串金鑰）" };
+    }
     const { recordAudit } = await import("./services/audit");
     recordAudit(auth, path, raw, {
       ok: result.ok,

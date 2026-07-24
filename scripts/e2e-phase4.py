@@ -64,6 +64,21 @@ stats = call("GET", admin, "quota.consumptionStats", {})
 ok("consumptionStats 形狀", isinstance(stats.get("perDay"), list) and "todayPoints" in stats and "alert" in stats and isinstance(stats.get("byGroup"), list))
 ok("今日消耗已入帳", stats["todayPoints"] >= 1)
 
+# ── 操作洞察（人員分類細節/模型比較/提示詞） ──
+ab = call("GET", admin, "insights.actorBreakdown", {})
+ok("actorBreakdown 形狀", isinstance(ab.get("members"), list) and len(ab["members"]) >= 1)
+me_row = next((m for m in ab["members"] if m["total"] >= 1), None)
+ok("actorBreakdown 有分類細節", me_row is not None and isinstance(me_row.get("categories"), list) and len(me_row["categories"]) >= 1)
+ms = call("GET", admin, "insights.modelStats", {})
+ok("modelStats 形狀", isinstance(ms.get("models"), list) and len(ms["models"]) >= 1)
+flux = next((m for m in ms["models"] if m["modelId"] == "fal-ai/flux/schnell"), None)
+ok("modelStats 記到本次生成", flux is not None and flux["submits"] >= 1 and flux["users"] >= 1)
+rp = call("GET", admin, "insights.recentPrompts", {"limit": 10})
+ok("recentPrompts 形狀", isinstance(rp.get("items"), list) and len(rp["items"]) >= 1)
+ok("recentPrompts 帶提示詞與操作者", any(i.get("prompt") == "扣點驗證" and i.get("userName") for i in rp["items"]))
+rp_model = call("GET", admin, "insights.recentPrompts", {"modelId": "fal-ai/flux/schnell", "limit": 10})
+ok("recentPrompts 可依模型過濾", all(i["modelId"] == "fal-ai/flux/schnell" for i in rp_model["items"]) and len(rp_model["items"]) >= 1)
+
 # ── 錯誤觀測與 selftest ──
 code, body = raw_get(admin, "/api/selftest")
 st = json.loads(body)
@@ -72,7 +87,10 @@ ok("selftest 含「近期錯誤」", any("近期錯誤" in n for n in names))
 ok("selftest 含「認證模式」", any("認證模式" in n for n in names))
 code, body = raw_get(admin, "/api/ready")
 ready = json.loads(body)
-ok("/api/ready 帶 authMode", "authMode" in ready)
+# 安全（資安稽核）：/api/ready 未認證即可存取，只回存活訊號（ok/db/boot），
+# 不外洩內部組態（mockMode／authMode 後門偵察面）——那兩項改到需開發者登入的 /api/selftest（見上方「認證模式」）。
+ok("/api/ready 回存活訊號 boot", "boot" in ready)
+ok("/api/ready 不外洩 authMode／mockMode", "authMode" not in ready and "mockMode" not in ready)
 
 # ── 個資自助匯出 ──
 code, body = raw_get(admin, "/api/me/export")

@@ -3,7 +3,7 @@
  * PostgreSQL · Drizzle（pg 方言）
  * 組織模型：開發者 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
-import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 /* ── 認證與組織 ────────────────────────────────── */
 
@@ -171,6 +171,14 @@ export const generations = pgTable("generations", {
   sceneId: uuid("scene_id"),
   /** 這筆生成要回填分鏡的哪個角色："visual"＝畫面（回填 scenes.assetId）、"narration"＝旁白音檔（回填 scenes.narrationAssetId）；null＝視為 visual */
   sceneRole: text("scene_role", { enum: ["visual", "narration"] }),
+  /** 送出時帶入的角色定裝卡 id（null＝沒帶）——重試/「再用此設定」要能還原錨點，注入不再是黑盒 */
+  characterIds: jsonb("character_ids").$type<string[]>(),
+  /** 送出時帶入的場景設定卡 id（null＝沒帶） */
+  scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
+  /** 來源工作流執行（null＝非工作流產物）：生成紀錄可回看「這筆是哪條工作流跑出來的」 */
+  workflowRunId: uuid("workflow_run_id"),
+  /** 來源 AI 代理執行（null＝非代理產物） */
+  agentRunId: uuid("agent_run_id"),
   resultUrl: text("result_url"),
   /** 文字型輸出(LLM/圖轉文/語音轉文字/訓練結果資訊)直接存這裡 */
   resultText: text("result_text"),
@@ -280,6 +288,10 @@ export const prompts = pgTable("prompts", {
   projectId: uuid("project_id").notNull(),
   groupId: uuid("group_id").notNull(),
   text: text("text").notNull(),
+  /** 最後一次用這則咒語生成時的模型/角色/場景卡（null＝純文字舊列）——「再用」還原完整設定，不只文字 */
+  modelId: text("model_id"),
+  characterIds: jsonb("character_ids").$type<string[]>(),
+  scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   useCount: integer("use_count").notNull().default(1),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -403,11 +415,73 @@ export const messages = pgTable("messages", {
   mentions: jsonb("mentions").$type<string[]>(),
   // 留言第一梯隊：語音留言（kind='voice'，音檔存 ref asset，voiceStatus 轉錄狀態，body 收轉錄稿）
   // 與 @助手回覆（kind='assistant'，body 為 LLM 回答，userId 記觸發者）。
-  voiceStatus: text("voice_status", { enum: ["pending", "done", "failed"] }),
+  // running＝已被某個 tick 認領並「已扣點、轉錄中」的原子狀態：崩潰後留在 running（非 pending），
+  // 下一輪掃描只撈 pending 故不會重撿重扣（見 services/voiceTranscribe 的 CAS 認領）。純 text 欄、無 DB
+  // CHECK 約束，新增列舉值不需遷移。
+  voiceStatus: text("voice_status", { enum: ["pending", "running", "done", "failed"] }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   projectIdx: index("messages_project_idx").on(t.projectId, t.createdAt),
   voicePendingIdx: index("messages_voice_pending_idx").on(t.voiceStatus),
+}));
+
+/**
+ * 站內私訊（通訊錄 1:1 聊天）：獨立於專案留言（messages 掛組/專案、組內可見），
+ * 私訊只有收發雙方看得到——查詢一律以「本人是 sender 或 recipient」為界，管理員也不例外。
+ * 可私訊對象＝同組夥伴（含團隊管理展開；開發者可與全站互訊），見 services/dmCore.ts。
+ * 內容不落審計明文（trpc.ts 對 dm.send 脫敏 body），維持「私」的承諾。新表＝pushSchema 安全。
+ */
+export const dmMessages = pgTable("dm_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  senderId: uuid("sender_id").notNull(),
+  recipientId: uuid("recipient_id").notNull(),
+  body: text("body").notNull(),
+  // 私訊 2.0：kind 區分一般訊息與 AI 代理回覆（'assistant'——@助手 觸發，sender 記提問者、雙方可見）。
+  kind: text("kind").notNull().default("text"),
+  // 標注（跨組指標）：可把「專案／資料庫／排程／筆記」帶進私訊變成可點卡片。送出時以「發訊者本人權限」
+  // 驗證可存取（dmCore.assertDmRef）；卡片只是指標，對方點擊時各目標頁再自行做存取守衛。
+  refType: text("ref_type", { enum: ["project", "database", "schedule", "note"] }),
+  refId: uuid("ref_id"),
+  // 圖／影片／檔案附件：指向 dm_attachments（上傳時建立、送訊時綁定）。允許「只有附件、body 為空」。
+  attachmentId: uuid("attachment_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  // 對話串雙向查詢：sender 前綴查「我發給某人」、recipient 前綴查「某人發給我」＋未讀計數
+  senderIdx: index("dm_messages_sender_idx").on(t.senderId, t.recipientId, t.createdAt),
+  recipientIdx: index("dm_messages_recipient_idx").on(t.recipientId, t.senderId, t.createdAt),
+}));
+
+/**
+ * 私訊附件（圖／影片／檔案）：獨立於專案素材（assets 掛組、組內可見）——私訊附件只有收發雙方看得到，
+ * 檔案服務端點以「本人是上傳者，或本人是所屬訊息的收訊者」為界（見 index.ts /api/dm/attachments/:id/file）。
+ * 上傳先建列（messageId 為 null＝尚未綁定），dm.send 帶 attachmentId 時才把 messageId 補上並驗擁有＋未用。
+ * 落地檔走既有 storage（storagePath）。未送出的孤兒列（挑了檔又沒送）罕見且小，暫不自動清掃。
+ */
+export const dmAttachments = pgTable("dm_attachments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** 上傳者（＝送訊者）。綁定前只有本人讀得到；綁定後所屬訊息的對方也讀得到。 */
+  ownerId: uuid("owner_id").notNull(),
+  /** 綁定到的私訊（null＝上傳後尚未送出）。 */
+  messageId: uuid("message_id"),
+  kind: text("kind").notNull(), // image | video | audio | doc（沿用 storage.kindFromMime）
+  title: text("title").notNull(),
+  storagePath: text("storage_path").notNull(),
+  mime: text("mime").notNull(),
+  sizeBytes: integer("size_bytes").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  ownerIdx: index("dm_attachments_owner_idx").on(t.ownerId),
+  messageIdx: index("dm_attachments_message_idx").on(t.messageId),
+}));
+
+/** 私訊已讀水位：每人對每位對話者一筆 lastReadAt，未讀數＝晚於水位的對方來訊數（dmCore upsert 維護） */
+export const dmReads = pgTable("dm_reads", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  peerId: uuid("peer_id").notNull(),
+  lastReadAt: timestamp("last_read_at").defaultNow().notNull(),
+}, (t) => ({
+  userPeerIdx: index("dm_reads_user_peer_idx").on(t.userId, t.peerId),
 }));
 
 /** 留言表情回應：每人對每則每種表情最多一筆（再按一次＝收回），白名單見 messages router */
@@ -439,6 +513,9 @@ export const workflowRuns = pgTable("workflow_runs", {
   userId: uuid("user_id").notNull(),
   presetId: text("preset_id").notNull(),
   prompt: text("prompt").notNull(),
+  /** 啟動時沿用生成台勾選的角色/場景卡（null＝沒帶）——runner 每 tick 從 run 列重建輸入，必須落庫才能貫穿每一步 */
+  characterIds: jsonb("character_ids").$type<string[]>(),
+  scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   status: text("status", { enum: ["running", "done", "failed", "stopped"] }).notNull().default("running"),
   currentStep: integer("current_step").notNull().default(0),
   /** 每步：{ note, status: "pending"|"running"|"done"|"failed"|"stopped", generationId?, detail? } */
@@ -447,6 +524,36 @@ export const workflowRuns = pgTable("workflow_runs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+/**
+ * 交付包匯出 job（QA-005）：同步 ZIP 下載改為「建 job → 背景打包到 Volume → 輪詢進度 → 完成後下載」。
+ * 大包（遠端素材多）打包可達數分鐘，同步串流讓瀏覽器看似卡死、使用者重複點擊做出重複包。
+ * 新表＝pushSchema 安全；status 由 exportRunner 以 CAS 推進；cancelled 由取消 mutation 設定，
+ * runner 在進度回報時讀到即中止。done 的 zip 檔留在 Volume（storagePath），過期由 runner 定期清理。
+ */
+export const exportJobs = pgTable("export_jobs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  /** 素材庫多選打包的素材 id 清單；null＝全量打包 */
+  assetIds: jsonb("asset_ids"),
+  status: text("status", { enum: ["queued", "running", "done", "failed", "cancelled"] }).notNull().default("queued"),
+  /** 下載時的 Content-Disposition 檔名（依專案標題產生） */
+  zipName: text("zip_name"),
+  /** 完成後 zip 在 Volume 的相對路徑（assets 樹下）；未完成/失敗為 null */
+  storagePath: text("storage_path"),
+  doneEntries: integer("done_entries").notNull().default(0),
+  totalEntries: integer("total_entries").notNull().default(0),
+  /** 已寫出位元組（bigint：多媒體大包可能超過 int4 上限 2.1GB） */
+  bytesWritten: bigint("bytes_written", { mode: "number" }).notNull().default(0),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  projectIdx: index("export_jobs_project_idx").on(t.projectId, t.createdAt),
+  statusIdx: index("export_jobs_status_idx").on(t.status, t.updatedAt),
+}));
 
 /**
  * AI 代理執行紀錄（代理系統核心）：一句目標 → LLM 規劃多步計畫 → 使用者核准 → 伺服器背景逐步執行。
@@ -566,6 +673,73 @@ export const scheduleItems = pgTable("schedule_items", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   groupStartIdx: index("schedule_items_group_start_idx").on(t.groupId, t.startsAt),
+}));
+
+/**
+ * Google 日曆直連同步（OAuth）：每人一條連線。系統在對方 Google 帳戶建立一本專屬日曆
+ * （calendar.app.created 最小權限——只能管理自建日曆，碰不到使用者原有日曆），
+ * 之後排程的增刪改自動推送，不再需要手動匯出/匯入 .ics。
+ * refresh token 以 AES-256-GCM 加密落庫（金鑰見 services/googleCalendar.ts）。
+ */
+export const googleCalendarConnections = pgTable("google_calendar_connections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** 一人一條連線（重新連結＝覆蓋） */
+  userId: uuid("user_id").notNull().unique(),
+  /** 連結的 Google 帳號 email（自 id_token 取得，僅供 UI 顯示辨識） */
+  googleEmail: text("google_email"),
+  /** AES-256-GCM 加密後的 refresh token（iv:tag:cipher，hex） */
+  refreshTokenEnc: text("refresh_token_enc").notNull(),
+  /** 系統在對方帳戶建立的專屬日曆 id（首次同步時建立） */
+  calendarId: text("calendar_id"),
+  /** error＝授權失效（例如使用者在 Google 端撤銷），UI 引導重新連結 */
+  status: text("status", { enum: ["active", "error"] }).notNull().default("active"),
+  lastError: text("last_error"),
+  lastSyncAt: timestamp("last_sync_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+/**
+ * 個人整合連接（每個使用者自己連自己的外部服務）：
+ * - google-drive＝Google 雲端硬碟 OAuth（scope 僅 drive.readonly，secretEnc＝refresh token）；
+ * - notion＝個人 Notion integration token（使用者在 notion.so/my-integrations 自建）；
+ * - api＝外部資料庫/API 連接（Airtable/Supabase/自建服務，secretEnc＝認證標頭值）。
+ * secretEnc 一律 AES-256-GCM 加密（iv:tag:cipher hex，金鑰見 services/integrations.ts——與 DB 分離，
+ * DB 外洩不可解密）；憑證原文永不回傳前端（meta 只存 email/workspace/末四碼等顯示用資訊）。
+ * google-drive/notion 一人一條（name=""）；api 可多條具名連線。新表＝pushSchema 安全。
+ */
+export const userIntegrations = pgTable("user_integrations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  kind: text("kind", { enum: ["google-drive", "notion", "api"] }).notNull(),
+  /** api 連接的顯示名稱（如「總會 Airtable」）；google-drive/notion 固定空字串 */
+  name: text("name").notNull().default(""),
+  /** AES-256-GCM 加密後的憑證（refresh token／integration token／API 金鑰） */
+  secretEnc: text("secret_enc").notNull(),
+  /** api 連接的基底網址：抓取時固定同主機，憑證不會被送去別的主機 */
+  baseUrl: text("base_url"),
+  /** api 連接的認證標頭名（預設 Authorization；值即 secretEnc 解密原文） */
+  authHeader: text("auth_header"),
+  /** 顯示用中繼資料（非敏感）：google email／notion workspace／金鑰末四碼 */
+  meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+  /** error＝授權失效或解密失敗（金鑰輪替），UI 引導重新連結 */
+  status: text("status", { enum: ["active", "error"] }).notNull().default("active"),
+  lastError: text("last_error"),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userKindNameIdx: uniqueIndex("user_integrations_user_kind_name_idx").on(t.userId, t.kind, t.name),
+  userIdx: index("user_integrations_user_idx").on(t.userId),
+}));
+
+/** 排程項 ↔ Google 事件對應（每條連線一份），fingerprint 記上次推送內容摘要——沒變就跳過，省 API 配額 */
+export const googleEventLinks = pgTable("google_event_links", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  connectionId: uuid("connection_id").notNull(),
+  scheduleItemId: uuid("schedule_item_id").notNull(),
+  googleEventId: text("google_event_id").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+}, (t) => ({
+  connItemIdx: uniqueIndex("google_event_links_conn_item_idx").on(t.connectionId, t.scheduleItemId),
 }));
 
 /**
@@ -694,6 +868,11 @@ export const dataFiles = pgTable("data_files", {
   sourceUrl: text("source_url"),
   /** 抽出的可讀文字（上限見 databaseFiles.MAX_TEXT_CHARS）；null＝AI 暫不可讀 */
   textContent: text("text_content"),
+  /** 分類標籤（圖影與一般文件皆可）：人工可改、圖片可由 AI 自動分類填入。nullable＝pushSchema 安全 */
+  category: text("category"),
+  /** AI 看圖描述（vision 模型產生的繁中描述）：圖影檔的「AI 可讀」內容，
+   *  團隊助手與 MCP 代理引用這裡回答「這張圖是什麼」。nullable＝pushSchema 安全 */
+  aiDescription: text("ai_description"),
   uploadedBy: uuid("uploaded_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
@@ -713,6 +892,45 @@ export const dataRows = pgTable("data_rows", {
 }, (t) => ({
   tableIdx: index("data_rows_table_idx").on(t.tableId, t.createdAt),
 }));
+
+/* ── Web Push 跨裝置通知 ────────────────────────── */
+
+/**
+ * Web Push 訂閱（手機＋電腦跨裝置通知）：每位使用者每個「瀏覽器裝置」一筆——
+ * 使用者在通知設定啟用後，瀏覽器發的 PushSubscription（endpoint＋加密金鑰）存這裡，
+ * 伺服器事件（審批/私訊/@提及/生成與代理完成）經 services/webPush 推到所有已連結裝置，
+ * 關頁、關瀏覽器也收得到（相對於既有的頁內桌面通知只在分頁開著時有效）。
+ * endpoint 唯一＝同裝置重複啟用是 upsert 不長重複列；推送回 404/410 即自動清掉失效列。
+ * 新表＝pushSchema 安全。
+ */
+export const pushSubscriptions = pgTable("push_subscriptions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  /** 推送服務給的裝置端點網址（capability URL，只有配對的 VAPID 私鑰能對它發推送） */
+  endpoint: text("endpoint").notNull().unique(),
+  /** 瀏覽器產生的訊息加密公鑰（P-256 ECDH）——推送內容端到端加密到該裝置 */
+  p256dh: text("p256dh").notNull(),
+  /** 瀏覽器產生的驗證密鑰 */
+  auth: text("auth").notNull(),
+  /** 裝置標籤（如「iPhone・Safari」「Windows・Chrome」）：前端從 UA 推導，設定頁列裝置清單用 */
+  label: text("label"),
+  /** 最後同步時刻：每次 App 載入時前端回報一次，供「清最舊裝置」與設定頁排序 */
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("push_subscriptions_user_idx").on(t.userId, t.lastSeenAt),
+}));
+
+/**
+ * VAPID 金鑰對（單列 key='vapid'）：未設 VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY 環境變數時
+ * 開機自動生成並存這裡——金鑰必須跨重啟穩定，否則所有既有訂閱全數失效。新表＝pushSchema 安全。
+ */
+export const webPushVapid = pgTable("web_push_vapid", {
+  key: text("key").primaryKey(),
+  publicKey: text("public_key").notNull(),
+  privateKey: text("private_key").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
 
 export const feedbackAgentRuns = pgTable("feedback_agent_runs", {
   id: uuid("id").primaryKey().defaultRandom(),

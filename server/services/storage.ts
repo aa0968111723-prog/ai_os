@@ -57,6 +57,48 @@ const MIME_EXT: Record<string, string> = {
   "text/vtt": ".vtt",
   "application/x-subrip": ".srt",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  // 媒體格式擴充：手機相簿與各家相機/剪輯軟體的常見格式，上傳不再吃 415
+  "image/heic": ".heic",   // iPhone/iPad 相簿預設
+  "image/heif": ".heif",
+  "image/avif": ".avif",
+  "image/bmp": ".bmp",
+  "image/tiff": ".tiff",
+  "image/svg+xml": ".svg", // 可含腳本：服務端一律強制下載（shouldForceAttachment），縮圖 <img> 不受影響
+  "video/x-matroska": ".mkv",
+  "video/x-msvideo": ".avi",
+  "video/3gpp": ".3gp",    // 舊 Android 錄影
+  "video/x-m4v": ".m4v",
+  "video/mpeg": ".mpg",
+  "audio/aac": ".aac",
+  "audio/flac": ".flac",
+  "audio/x-flac": ".flac",
+  "audio/x-m4a": ".m4a",   // 不少瀏覽器對 .m4a 送這個而非 audio/mp4
+  "audio/opus": ".opus",
+  "audio/amr": ".amr",     // 手機語音備忘錄
+  // Office 與電子書（僅存檔可下載；文字抽取先支援 PDF/DOCX，試算表請另存 CSV 匯入列資料）
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+  "application/vnd.ms-excel": ".xls",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+  "application/vnd.ms-powerpoint": ".ppt",
+  "application/msword": ".doc",
+  "application/rtf": ".rtf",
+  "text/tab-separated-values": ".tsv",
+  "application/epub+zip": ".epub",
+  // 壓縮檔（僅存檔）
+  "application/x-7z-compressed": ".7z",
+  "application/vnd.rar": ".rar",
+  "application/x-rar-compressed": ".rar",
+  "application/gzip": ".gz",
+  "application/x-tar": ".tar",
+};
+
+/** 副檔名別名 → mime（mimeFromPath 後備專用；MIME_EXT 反查只認每個 mime 的「正規」副檔名） */
+const EXT_MIME_ALIASES: Record<string, string> = {
+  ".jpeg": "image/jpeg",
+  ".tif": "image/tiff",
+  ".htm": "text/html",
+  ".mpeg": "video/mpeg",
+  ".log": "text/plain",
 };
 
 export function extFromMime(mime: string): string | undefined {
@@ -69,8 +111,63 @@ export function isAllowedUploadMime(mime: string): boolean {
 
 export function mimeFromPath(p: string): string {
   const ext = path.extname(p).toLowerCase();
+  if (EXT_MIME_ALIASES[ext]) return EXT_MIME_ALIASES[ext];
   for (const [mime, e] of Object.entries(MIME_EXT)) if (e === ext) return mime;
   return "application/octet-stream";
+}
+
+/**
+ * 檔案 signature（magic bytes）嗅探（QA-021）：只認常見二進位格式的固定簽名。
+ * 回 null＝辨識不出（文字類本無簽名；未知二進位）。ISO-BMFF（mp4/m4a/mov 同一 ftyp 家族）
+ * 一律回 video/mp4，相容性裁決在 resolveUploadMime 處理。
+ */
+export function sniffMime(buf: Buffer): string | null {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf[0] === 0x89 && buf.subarray(1, 4).toString("latin1") === "PNG") return "image/png";
+  if (buf.subarray(0, 4).toString("latin1") === "GIF8") return "image/gif";
+  if (buf.subarray(0, 4).toString("latin1") === "RIFF") {
+    const tag = buf.subarray(8, 12).toString("latin1");
+    if (tag === "WEBP") return "image/webp";
+    if (tag === "WAVE") return "audio/wav";
+    return null;
+  }
+  if (buf.subarray(4, 8).toString("latin1") === "ftyp") return "video/mp4"; // ISO-BMFF 家族
+  if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return "video/webm"; // EBML（webm/mkv）
+  if (buf.subarray(0, 3).toString("latin1") === "ID3" || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) return "audio/mpeg";
+  if (buf.subarray(0, 4).toString("latin1") === "OggS") return "audio/ogg";
+  if (buf.subarray(0, 4).toString("latin1") === "%PDF") return "application/pdf";
+  if (buf[0] === 0x50 && buf[1] === 0x4b) return "application/zip"; // zip／docx 共用 PK
+  return null;
+}
+
+/** 同一簽名家族可接受的宣稱 MIME（容器共用簽名：ftyp、PK、RIFF…） */
+const SNIFF_COMPAT: Record<string, string[]> = {
+  "video/mp4": ["video/mp4", "video/quicktime", "audio/mp4"],
+  "video/webm": ["video/webm", "audio/webm"],
+  "audio/wav": ["audio/wav", "audio/x-wav"],
+  "audio/mpeg": ["audio/mpeg", "audio/mp3"],
+  "application/zip": ["application/zip", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+};
+
+/**
+ * 上傳 MIME 與檔案內容一致性裁決（QA-021）：
+ * - 內容簽名與宣稱相容 → 沿用宣稱。
+ * - 簽名辨識出「另一種我們支援的格式」（如副檔名 .jpg、內容其實是 WebP）→ 依內容自動校正 MIME。
+ * - 宣稱是圖片但辨識不出任何已知簽名 → 拒絕（圖片簽名覆蓋完整，驗不出即內容可疑）；
+ *   影音/其他二進位辨識不出時放行沿用宣稱（簽名覆蓋不完整，避免誤殺正常檔）。
+ * 回 null＝內容與宣稱不符且無法校正（呼叫端回 415）。
+ */
+export function resolveUploadMime(declared: string, head: Buffer): { mime: string; corrected: boolean } | null {
+  const sniffed = sniffMime(head);
+  if (!sniffed) {
+    if (declared.startsWith("image/")) return null;
+    return { mime: declared, corrected: false };
+  }
+  const compat = SNIFF_COMPAT[sniffed] ?? [sniffed];
+  if (compat.includes(declared)) return { mime: declared, corrected: false };
+  if (isAllowedUploadMime(sniffed)) return { mime: sniffed, corrected: true };
+  return null;
 }
 
 /** kind 歸類（素材庫分區與交付包資料夾用） */
@@ -79,6 +176,16 @@ export function kindFromMime(mime: string): "image" | "video" | "audio" | "doc" 
   if (mime.startsWith("video/")) return "video";
   if (mime.startsWith("audio/")) return "audio";
   return "doc";
+}
+
+/**
+ * 服務原檔時是否強制下載（不讓瀏覽器頂層內嵌渲染）：非影音一律下載；
+ * SVG 雖歸類為圖片但可含 <script>（同源內嵌＝儲存型 XSS），也強制下載——
+ * <img> 縮圖載入不受 Content-Disposition 影響，格線/清單預覽照常。
+ */
+export function shouldForceAttachment(mime: string): boolean {
+  const m = mime.split(";")[0].trim().toLowerCase();
+  return kindFromMime(m) === "doc" || m === "image/svg+xml";
 }
 
 async function freeBytes(): Promise<number | null> {
@@ -127,6 +234,24 @@ export async function saveBuffer(buf: Buffer, mime: string): Promise<{ storagePa
   mkdirSync(path.dirname(abs), { recursive: true });
   await writeFile(abs, buf);
   return { storagePath: rel, sizeBytes: buf.length };
+}
+
+/**
+ * 複製一份既有的落地檔到新位置（資料庫文件「送進專案素材庫」用）：
+ * 素材與資料庫文件的生命週期各自獨立（任一邊刪除不影響另一邊），所以是實體複製、不是共用路徑。
+ * fs.copyFile 走檔案系統層複製，大影片也不進 Node 記憶體。
+ */
+export async function copyStoredFile(relPath: string, mime: string): Promise<{ storagePath: string; sizeBytes: number }> {
+  ensureStorageDirs();
+  const srcAbs = absPathOf(relPath);
+  // path.extname 回空字串（不是 undefined），?? 接不到——用 || 落到 .bin
+  const rel = newRelPath(extFromMime(mime) ?? (path.extname(relPath) || ".bin"));
+  const abs = absPathOf(rel);
+  mkdirSync(path.dirname(abs), { recursive: true });
+  const { copyFile } = await import("node:fs/promises");
+  await copyFile(srcAbs, abs);
+  const s = await stat(abs);
+  return { storagePath: rel, sizeBytes: s.size };
 }
 
 /** 把 multer 收到的暫存檔移進正式位置（避免大檔在記憶體複製） */
@@ -207,29 +332,55 @@ export async function removeStoredFile(relPath: string): Promise<void> {
   }
 }
 
+/** 遠端成品抓取守門（QA-018）：連線＋下載總逾時；串流階段逐塊累計大小，超上限即中止 */
+const PERSIST_FETCH_TIMEOUT_MS = 120_000;
+
 /**
  * 把外部網址（fal CDN 成品）抓回本地永久保存。
  * 回 null 表示這次沒抓成（網址仍可用一段時間，之後輪詢/補抓可重試）。
+ * 守門（QA-018）：120 秒總逾時（掛住/滴流的外部網址不能無限期佔住 runner tick）；
+ * 下載採串流累計，超過 MAX_FILE_BYTES 立即中止——不再是「整包吞進記憶體後才量大小」，
+ * 沒報 Content-Length（或謊報）的來源也無法把整個 body 灌進 RAM。
  */
 export async function persistRemote(url: string): Promise<{ storagePath: string; mime: string; sizeBytes: number } | null> {
   try {
-    const res = await proxyFetch(url);
+    const res = await proxyFetch(url, { timeoutMs: PERSIST_FETCH_TIMEOUT_MS });
     if (!res.ok) {
       console.warn(`[storage] 抓取成品失敗 ${res.status}：${url}`);
+      void res.body?.cancel().catch(() => {});
       return null;
     }
     const mime = (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim();
     const lenHeader = Number(res.headers.get("content-length") ?? 0);
+    if (lenHeader > MAX_FILE_BYTES) {
+      console.warn(`[storage] 成品超過單檔上限（Content-Length ${lenHeader}B）——沿用外部網址`);
+      void res.body?.cancel().catch(() => {});
+      return null;
+    }
     const guard = await checkDiskSpace(lenHeader || 8 * 1024 * 1024);
     if (guard) {
       console.warn(`[storage] ${guard}——成品未落地，沿用外部網址：${url}`);
+      void res.body?.cancel().catch(() => {});
       return null;
     }
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_FILE_BYTES) {
-      console.warn(`[storage] 成品超過單檔上限（${buf.length}B）——沿用外部網址`);
-      return null;
+    // 逐塊累計：邊下載邊量，超限即取消串流（防 Content-Length 缺席/謊報時記憶體被灌爆）
+    const chunks: Buffer[] = [];
+    let total = 0;
+    if (res.body) {
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_FILE_BYTES) {
+          await reader.cancel().catch(() => {});
+          console.warn(`[storage] 成品下載中超過單檔上限（>${MAX_FILE_BYTES}B）——中止並沿用外部網址`);
+          return null;
+        }
+        chunks.push(Buffer.from(value));
+      }
     }
+    const buf = Buffer.concat(chunks);
     const saved = await saveBuffer(buf, mime);
     return { ...saved, mime };
   } catch (err) {
@@ -265,5 +416,22 @@ export function verifyAssetSig(assetId: string, exp: string | undefined, sig: st
   if (!Number.isFinite(expNum) || expNum < Math.floor(Date.now() / 1000)) return false;
   const expect = createHmac("sha256", signSecret()).update(`${assetId}.${expNum}`).digest("hex");
   // 長度一致時用逐字比較即可（sig 是 hex、非機密洩漏面）
+  return sig.length === expect.length && createHash("sha256").update(sig).digest("hex") === createHash("sha256").update(expect).digest("hex");
+}
+
+/* ── 資料庫文件簽名網址（給 fal vision 抓圖用；HMAC 前綴 dbfile. 與素材簽名分域，不可互換） ── */
+
+export function signDbFileUrl(fileId: string, ttlSeconds = 3600): string {
+  const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const sig = createHmac("sha256", signSecret()).update(`dbfile.${fileId}.${exp}`).digest("hex");
+  const base = process.env.APP_URL?.replace(/\/$/, "") || `http://localhost:${process.env.PORT ?? 3000}`;
+  return `${base}/api/databases/files/${fileId}/file?exp=${exp}&sig=${sig}`;
+}
+
+export function verifyDbFileSig(fileId: string, exp: string | undefined, sig: string | undefined): boolean {
+  if (!exp || !sig) return false;
+  const expNum = Number(exp);
+  if (!Number.isFinite(expNum) || expNum < Math.floor(Date.now() / 1000)) return false;
+  const expect = createHmac("sha256", signSecret()).update(`dbfile.${fileId}.${expNum}`).digest("hex");
   return sig.length === expect.length && createHash("sha256").update(sig).digest("hex") === createHash("sha256").update(expect).digest("hex");
 }

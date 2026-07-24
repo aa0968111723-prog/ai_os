@@ -1,25 +1,47 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
-import { Icon } from "../components/Icon";
+import { Icon, type IconName } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
-import { FIELD_TYPES, newFieldKey, type DataField, type DataRowData, type DataRowValue } from "@shared/databaseFields";
+import { FIELD_TYPES, FILE_CATEGORY_SUGGESTIONS, MAX_FILE_CATEGORY, newFieldKey, type DataField, type DataRowData, type DataRowValue } from "@shared/databaseFields";
 import { detectFormat, inferFields, parseTabular, TABULAR_ACCEPT, TABULAR_FORMATS, type TabularFormat } from "@shared/tabular";
 
 /** 匯入結果外形（importData mutation 回傳；建庫與詳頁匯入共用顯示） */
 type ImportResult = { imported: number; failed: number; skipped: number; truncated: boolean; errors: Array<{ line: number; error: string }> };
 
-/** 客端粗解析 headers＋列數（JSON 格式錯回 error 人話）；正式解析仍在後端 */
+/** 文件上傳的 accept 清單（與伺服器白名單 storage.MIME_EXT 同口徑；伺服器仍是最終把關） */
+const DB_FILE_ACCEPT = [
+  ".txt", ".md", ".csv", ".tsv", ".json", ".html", ".htm", ".srt", ".vtt",
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".rtf", ".epub",
+  ".zip", ".7z", ".rar", ".gz", ".tar",
+  ".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".heif", ".avif", ".bmp", ".tif", ".tiff", ".svg",
+  ".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi", ".3gp", ".mpg", ".mpeg",
+  ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".amr",
+].join(",");
+
+/** 去抖：大量貼上/逐字輸入時，避免每次按鍵都同步全量 parseTabular 凍結 UI（改為停手 250ms 才解析一次） */
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(id);
+  }, [value, ms]);
+  return v;
+}
+
+/** 客端粗解析 headers＋列數（JSON 格式錯回 error 人話）；正式解析仍在後端。
+ *  內容經去抖：大檔貼上或逐字輸入時不會每次按鍵都同步解析（見 useDebounced）。 */
 function usePreview(content: string, format: TabularFormat) {
+  const debounced = useDebounced(content, 250);
   return useMemo(() => {
-    if (!content.trim()) return { headers: [] as string[], count: 0, error: null as string | null };
+    if (!debounced.trim()) return { headers: [] as string[], count: 0, error: null as string | null };
     try {
-      const p = parseTabular(content, format);
+      const p = parseTabular(debounced, format);
       return { headers: p.headers, count: p.records.length, error: null as string | null };
     } catch (e) {
       return { headers: [] as string[], count: 0, error: e instanceof Error ? e.message : "解析失敗" };
     }
-  }, [content, format]);
+  }, [debounced, format]);
 }
 
 /** 匯入結果摘要（成功/失敗/截斷＋前幾筆錯誤） */
@@ -78,6 +100,13 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   const list = trpc.databases.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+
+  // 深連結（知識地圖節點等來源）：/databases?open=<id> 進頁即選定該庫。
+  // 只在掛載時讀一次——之後的選擇交回使用者操作；id 無效（無權/不存在）時 find 不到，安靜落回清單。
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("open");
+    if (id) setSelectedId(id);
+  }, []);
 
   const tables = (list.data ?? []) as TableSummary[];
   const selected = tables.find((t) => t.id === selectedId) ?? null;
@@ -332,6 +361,7 @@ function ImportToCreate({ onApply }: { onApply: (args: { fields: DataField[]; na
       <div style={{ marginTop: 10 }}>
         <p className="hint" style={{ marginTop: 0 }}>
           已經有資料？上傳或貼上 CSV／TSV／JSON，自動判讀出欄位——按「套用為欄位」後再按下方「建立並匯入」，一步成表並灌入列資料。
+          圖片／影片／PDF 等檔案不走這裡：建立後到資料庫的「文件與圖影」區上傳（支援拖放、多檔），或加「附件」欄位逐列掛檔。
         </p>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
           <input ref={fileInput} type="file" aria-label="選擇匯入檔" accept={TABULAR_ACCEPT} style={{ width: "auto" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }} />
@@ -514,7 +544,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
               <tr>
                 {table.fields.map((f) => (
                   <td key={f.key} style={{ padding: "4px 4px" }}>
-                    <CellInput field={f} groupId={groupId} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+                    <CellInput field={f} groupId={groupId} tableId={table.id} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
                   </td>
                 ))}
                 <td style={{ padding: "4px 4px" }}>
@@ -534,6 +564,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
                 key={r.id}
                 fields={table.fields}
                 groupId={groupId}
+                tableId={table.id}
                 row={{ id: r.id, data: r.data as DataRowData }}
                 canWrite={table.access.canWriteRows}
                 canDelete={table.access.canManage || table.access.canWriteRows}
@@ -547,7 +578,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
       </div>
       {mutationError && <p className="error" role="alert">{mutationError}</p>}
 
-      <FilesSection table={table} />
+      <FilesSection table={table} groupId={groupId} />
       <ConnectPanel table={table} />
     </section>
   );
@@ -624,6 +655,7 @@ function DataImportPanel({ table, onImported }: { table: TableSummary; onImporte
           </select>
         </label>
       </div>
+      <ExternalFetchRow onFetched={(text, fmt) => applyContent(text, fmt)} />
       <textarea
         aria-label="匯入內容"
         value={content}
@@ -668,6 +700,50 @@ function DataImportPanel({ table, onImported }: { table: TableSummary; onImporte
   );
 }
 
+/**
+ * 從外部連接抓取（個人整合）：在「整合連接」頁登記過的外部資料庫/API，
+ * 這裡選一條＋路徑一鍵抓，內容直接灌進匯入面板（格式依回應 content-type 自動選）。
+ */
+function ExternalFetchRow({ onFetched }: { onFetched: (text: string, fmt?: TabularFormat) => void }) {
+  const list = trpc.integrations.list.useQuery();
+  const fetchApi = trpc.integrations.fetchApi.useMutation();
+  const [connId, setConnId] = useState("");
+  const [path, setPath] = useState("");
+  const apis = list.data?.apis ?? [];
+  if (list.data && apis.length === 0) {
+    return (
+      <p className="hint" style={{ margin: "0 0 8px" }}>
+        也可以直接從你自己的系統抓：先到<Link href="/integrations">整合連接</Link>登記外部資料庫／API，這裡就會出現一鍵抓取。
+      </p>
+    );
+  }
+  const mimeToFormat = (mime: string): TabularFormat | undefined =>
+    mime.includes("json") ? "json" : mime.includes("csv") ? "csv" : mime.includes("tab-separated") ? "tsv" : undefined;
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+      <span className="meta">從外部連接抓：</span>
+      <select aria-label="選擇外部連接" value={connId} style={{ width: "auto", maxWidth: 200 }} onChange={(e) => setConnId(e.target.value)}>
+        <option value="">選連接…</option>
+        {apis.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      <input aria-label="抓取路徑" value={path} maxLength={500} placeholder="路徑（選填）如 ?limit=100" style={{ flex: "1 1 160px", maxWidth: 260 }} onChange={(e) => setPath(e.target.value)} />
+      <button
+        className="btn-sm"
+        disabled={!connId || fetchApi.isPending}
+        onClick={() =>
+          fetchApi.mutate(
+            { id: connId, path: path.trim() || undefined },
+            { onSuccess: (r) => onFetched(r.content, mimeToFormat(r.mime)) },
+          )
+        }
+      >
+        {fetchApi.isPending ? "抓取中…" : "抓取"}
+      </button>
+      {fetchApi.error && <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{fetchApi.error.message}</span>}
+    </div>
+  );
+}
+
 /* ────────────────────────── 外部連接（本機/手機/其他系統） ────────────────────────── */
 
 /**
@@ -690,6 +766,7 @@ function ConnectPanel({ table }: { table: TableSummary }) {
       <div style={{ marginTop: 10, display: "grid", gap: 12, fontSize: 13 }}>
         <p className="hint" style={{ margin: 0 }}>
           用你的<Link href="/help">個人連線金鑰</Link>（在「怎麼用」頁建立，可隨時撤銷）就能從外部連這個資料庫，權限跟你在網頁上一樣。
+          反方向——讓本系統去抓「你自己的」Google 雲端／Notion／外部資料庫，到<Link href="/integrations">整合連接</Link>設定。
         </p>
         <div>
           <p style={{ margin: "0 0 4px", fontWeight: 600 }}>REST API（本機腳本／手機 App／其他資料庫 ETL）</p>
@@ -731,60 +808,197 @@ function formatBytes(n: number): string {
   return `${n} B`;
 }
 
+/** 媒體類型的顯示標籤與圖示（listFiles 回的 kind） */
+const FILE_KIND_META: Record<string, { label: string; icon: IconName }> = {
+  image: { label: "圖片", icon: "Image" },
+  video: { label: "影片", icon: "Film" },
+  audio: { label: "音訊", icon: "Mic" },
+  doc: { label: "文件", icon: "FileText" },
+};
+
 /**
- * 文件區：檔案上傳（txt/md/csv/json/html/字幕/PDF/DOCX…）＋網址匯入（Google 公開連結、Notion）。
- * 伺服器抽純文字後 AI 才讀得到——可讀字數顯示在每份文件旁；配額每人預設 5GB（管理員可調）。
+ * 資訊量面板：列數／文件數／圖影音文分佈／容量／AI 可讀字數／分類分佈。
+ * 分類 chips 可點＝過濾下方文件清單（onPickCategory）。
  */
-function FilesSection({ table }: { table: TableSummary }) {
+function StatsStrip({ tableId, category, onPickCategory }: { tableId: string; category: string | null; onPickCategory: (c: string | null) => void }) {
+  const stats = trpc.databases.stats.useQuery({ tableId });
+  const s = stats.data;
+  if (!s) return null;
+  const kinds = s.files.byKind.filter((k) => k.count > 0);
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", margin: "8px 0", padding: "8px 10px", background: "var(--bg-sunken, rgba(0,0,0,.04))", borderRadius: 8 }} data-fb="資料庫資訊量面板">
+      <Icon name="Info" size={14} />
+      <span className="meta">資訊量：資料 {s.rowCount.toLocaleString()} 列（{s.fieldCount} 欄）</span>
+      <span className="meta">・文件 {s.files.count} 份{s.files.count > 0 ? `（${kinds.map((k) => `${FILE_KIND_META[k.kind]?.label ?? k.kind} ${k.count}`).join("、")}）共 ${formatBytes(s.files.totalBytes)}` : ""}</span>
+      {s.files.readableChars > 0 && <span className="meta">・AI 可讀 {s.files.readableChars.toLocaleString()} 字</span>}
+      {s.files.describedCount > 0 && <span className="meta">・已看圖描述 {s.files.describedCount} 份</span>}
+      {s.categories.length > 0 && (
+        <span style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="meta">・分類：</span>
+          {s.categories.map((c) => (
+            <button
+              key={c.category}
+              className="badge"
+              style={{ cursor: "pointer", ...(category === c.category ? { outline: "2px solid var(--accent, #4a7)", outlineOffset: 1 } : {}) }}
+              title={category === c.category ? "取消過濾" : `只看「${c.category}」的文件`}
+              onClick={() => onPickCategory(category === c.category ? null : c.category)}
+            >
+              {c.category} {c.count}
+            </button>
+          ))}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** 分類編輯（datalist 提示建議與既有分類；空白＝清除分類） */
+function CategoryEditor({ fileId, tableId, initial, existing, onDone }: { fileId: string; tableId: string; initial: string | null; existing: string[]; onDone: () => void }) {
+  const utils = trpc.useUtils();
+  const [value, setValue] = useState(initial ?? "");
+  const setMeta = trpc.databases.setFileMeta.useMutation({
+    onSuccess: () => {
+      utils.databases.listFiles.invalidate({ tableId });
+      utils.databases.stats.invalidate({ tableId });
+      onDone();
+    },
+  });
+  const suggestions = [...new Set([...existing, ...FILE_CATEGORY_SUGGESTIONS])];
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+      <input
+        aria-label="分類"
+        value={value}
+        maxLength={MAX_FILE_CATEGORY}
+        list={`cat-suggest-${fileId}`}
+        placeholder="分類（空白＝清除）"
+        style={{ width: 130 }}
+        autoFocus
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") setMeta.mutate({ id: fileId, category: value.trim() || null }); if (e.key === "Escape") onDone(); }}
+      />
+      <datalist id={`cat-suggest-${fileId}`}>
+        {suggestions.map((c) => <option key={c} value={c} />)}
+      </datalist>
+      <button className="btn-sm primary" title="儲存分類" disabled={setMeta.isPending} onClick={() => setMeta.mutate({ id: fileId, category: value.trim() || null })}>
+        <Icon name="Check" size={13} />
+      </button>
+      <button className="btn-sm" title="取消" onClick={onDone}><Icon name="X" size={13} /></button>
+    </span>
+  );
+}
+
+/** 送到專案素材庫：挑專案→確認（實體複製一份，兩邊獨立） */
+function SendToProject({ fileId, groupId, onDone }: { fileId: string; groupId: string; onDone: (msg: string) => void }) {
+  const projects = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
+  const [projectId, setProjectId] = useState("");
+  const send = trpc.databases.sendFileToProject.useMutation({
+    onSuccess: (r) => onDone(`已把「${r.title}」送進專案「${r.projectTitle}」的素材庫`),
+  });
+  const opts = (projects.data ?? []).filter((p) => p.status !== "archived");
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+      <select aria-label="選擇專案" value={projectId} style={{ width: "auto", maxWidth: 200 }} onChange={(e) => setProjectId(e.target.value)}>
+        <option value="">選專案…</option>
+        {opts.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
+      </select>
+      <button className="btn-sm primary" disabled={!projectId || send.isPending} onClick={() => send.mutate({ fileId, projectId })}>
+        {send.isPending ? "送出中…" : "送出"}
+      </button>
+      {send.error && <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{send.error.message}</span>}
+    </span>
+  );
+}
+
+/**
+ * 文件區：檔案上傳（文字/PDF/Word/圖片/影音…）＋網址匯入（Google 公開連結、Notion）。
+ * 文字檔伺服器抽純文字、圖片可「AI 分類」產生繁中描述＋分類標籤——AI 助手與 MCP 代理都讀得到；
+ * 圖影有縮圖與播放預覽、可分類過濾、可送進專案素材庫。配額每人預設 5GB（管理員可調）。
+ */
+function FilesSection({ table, groupId }: { table: TableSummary; groupId: string }) {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   const list = trpc.databases.listFiles.useQuery({ tableId: table.id });
-  const importUrl = trpc.databases.importUrl.useMutation({ onSuccess: () => { utils.databases.listFiles.invalidate({ tableId: table.id }); setUrl(""); setUrlName(""); } });
+  const invalidateFiles = () => {
+    utils.databases.listFiles.invalidate({ tableId: table.id });
+    utils.databases.stats.invalidate({ tableId: table.id });
+  };
+  const importUrl = trpc.databases.importUrl.useMutation({ onSuccess: () => { invalidateFiles(); setUrl(""); setUrlName(""); } });
   const refresh = trpc.databases.refreshFile.useMutation({
     onSuccess: (_r, vars) => {
-      utils.databases.listFiles.invalidate({ tableId: table.id });
+      invalidateFiles();
       // 開著的全文預覽也要跟上重抓後的內容，否則顯示過期文字
       utils.databases.getFileText.invalidate({ id: vars.id });
     },
   });
-  const removeFile = trpc.databases.removeFile.useMutation({ onSuccess: () => utils.databases.listFiles.invalidate({ tableId: table.id }) });
+  const removeFile = trpc.databases.removeFile.useMutation({ onSuccess: invalidateFiles });
+  const classify = trpc.databases.classifyFile.useMutation({ onSuccess: invalidateFiles });
 
   const [url, setUrl] = useState("");
   const [urlName, setUrlName] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
-  const preview = trpc.databases.getFileText.useQuery({ id: previewId ?? "" }, { enabled: !!previewId });
+  const [editCatId, setEditCatId] = useState<string | null>(null);
+  const [sendToId, setSendToId] = useState<string | null>(null);
+  const [sentMsg, setSentMsg] = useState<string | null>(null);
+  const [catFilter, setCatFilter] = useState<string | null>(null);
+  const allFiles = list.data?.files ?? [];
+  const previewFile = allFiles.find((f) => f.id === previewId) ?? null;
+  // 文字預覽只對「有抽出文字」的文件發查詢；圖影預覽是媒體本身＋AI 描述，不打 getFileText
+  const preview = trpc.databases.getFileText.useQuery(
+    { id: previewId ?? "" },
+    { enabled: !!previewId && (previewFile?.readableChars ?? 0) > 0 },
+  );
 
-  const doUpload = async (f: File) => {
+  // 多檔逐一上傳（伺服器單請求收一檔）：部分失敗不中止，最後彙整回報哪幾個檔為什麼失敗
+  const doUploadMany = async (picked: File[]) => {
+    if (picked.length === 0) return;
     setUploading(true);
     setUploadError(null);
-    try {
-      const form = new FormData();
-      form.append("file", f);
-      form.append("tableId", table.id);
-      const res = await fetch("/api/databases/upload", { method: "POST", body: form, credentials: "same-origin" });
-      const body = (await res.json()) as { ok?: boolean; error?: string };
-      if (!res.ok || !body.ok) setUploadError(body.error ?? "上傳失敗，請稍後再試");
-      else utils.databases.listFiles.invalidate({ tableId: table.id });
-    } catch {
-      setUploadError("上傳失敗（網路問題），請稍後再試");
-    } finally {
-      setUploading(false);
-      if (fileInput.current) fileInput.current.value = "";
+    setProgress({ done: 0, total: picked.length });
+    const errors: string[] = [];
+    for (const f of picked) {
+      try {
+        const form = new FormData();
+        form.append("file", f);
+        form.append("tableId", table.id);
+        const res = await fetch("/api/databases/upload", { method: "POST", body: form, credentials: "same-origin" });
+        const body = (await res.json()) as { ok?: boolean; error?: string };
+        if (!res.ok || !body.ok) errors.push(`${f.name}：${body.error ?? "上傳失敗"}`);
+      } catch {
+        errors.push(`${f.name}：上傳失敗（網路問題）`);
+      }
+      setProgress((p) => (p ? { done: p.done + 1, total: p.total } : p));
     }
+    invalidateFiles();
+    if (errors.length > 0) setUploadError(errors.slice(0, 5).join("；") + (errors.length > 5 ? `（另有 ${errors.length - 5} 個失敗）` : ""));
+    setUploading(false);
+    setProgress(null);
+    if (fileInput.current) fileInput.current.value = "";
   };
 
   const quota = list.data?.quota;
-  const files = list.data?.files ?? [];
+  const files = catFilter ? allFiles.filter((f) => f.category === catFilter) : allFiles;
+  const existingCategories = [...new Set(allFiles.map((f) => f.category).filter((c): c is string => !!c))];
   const canWrite = table.access.canWriteRows;
   const myId = me.data?.user.id;
 
   return (
-    <div style={{ marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--border-soft, #eee)" }}>
+    <div
+      style={{
+        marginTop: 20, paddingTop: 12, borderTop: "1px solid var(--border-soft, #eee)",
+        ...(dragOver ? { outline: "2px dashed var(--accent, #4a7)", outlineOffset: -2, borderRadius: 8 } : {}),
+      }}
+      onDragOver={canWrite ? (e) => { e.preventDefault(); setDragOver(true); } : undefined}
+      onDragLeave={canWrite ? () => setDragOver(false) : undefined}
+      onDrop={canWrite ? (e) => { e.preventDefault(); setDragOver(false); void doUploadMany([...(e.dataTransfer?.files ?? [])]); } : undefined}
+    >
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <h3 style={{ margin: 0 }}>文件（AI 可讀）</h3>
+        <h3 style={{ margin: 0 }}>文件與圖影（AI 可讀）</h3>
         {quota && (
           <span className="meta" title="所有資料庫合計、按上傳者計；管理員可在「團隊管理→點數與額度」調整">
             我的空間：{formatBytes(quota.usedBytes)}{quota.quotaBytes != null ? ` / ${formatBytes(quota.quotaBytes)}` : "（不限）"}
@@ -792,9 +1006,15 @@ function FilesSection({ table }: { table: TableSummary }) {
         )}
       </div>
       <p className="hint" style={{ marginTop: 4 }}>
-        文字/Markdown/CSV/JSON/HTML/字幕/PDF/Word 上傳後自動抽成純文字——團隊 AI 助手與 MCP 代理都讀得到
-        （受上方「AI 存取」等級管控）。Google 文件請用「任何人知道連結都能檢視」的連結；Notion 需管理員設 NOTION_TOKEN，或用 Notion 匯出檔上傳。
+        圖片（含 iPhone HEIC）、影片、音訊、PDF、Word/Excel/PowerPoint、文字/字幕/壓縮檔等常見格式都能放——
+        可一次選多個檔，或直接把檔案拖進這一區。文字/PDF/Word 自動抽成純文字；圖片可按「AI 分類」產生繁中描述＋自動歸類（1 點/張）——
+        團隊 AI 助手與 MCP 代理都讀得到（受上方「AI 存取」等級管控）。影片／音訊可手動分類、可預覽播放；
+        在欄位加「附件」型別，還能把檔案逐列掛進資料表。
+        Google／Notion 私有內容：到<Link href="/integrations">整合連接</Link>連結你自己的 Google 帳戶或 Notion token，
+        之後貼私有連結就能直接匯入（公開連結照舊可用）。
       </p>
+
+      <StatsStrip tableId={table.id} category={catFilter} onPickCategory={setCatFilter} />
 
       {canWrite && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
@@ -802,12 +1022,13 @@ function FilesSection({ table }: { table: TableSummary }) {
             ref={fileInput}
             type="file"
             aria-label="上傳文件"
-            accept=".txt,.md,.csv,.json,.html,.htm,.srt,.vtt,.pdf,.docx,.zip,.png,.jpg,.jpeg,.webp,.gif,.mp4,.webm,.mov,.mp3,.wav,.m4a,.ogg"
+            accept={DB_FILE_ACCEPT}
+            multiple
             style={{ width: "auto" }}
             disabled={uploading}
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f); }}
+            onChange={(e) => { void doUploadMany([...(e.target.files ?? [])]); }}
           />
-          {uploading && <span className="meta">上傳並抽取文字中…</span>}
+          {uploading && <span className="meta">{progress && progress.total > 1 ? `上傳中（${progress.done}/${progress.total}）…` : "上傳並抽取文字中…"}</span>}
         </div>
       )}
       {canWrite && (
@@ -816,7 +1037,7 @@ function FilesSection({ table }: { table: TableSummary }) {
             aria-label="匯入網址"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="貼 Google 文件/試算表/雲端硬碟公開連結、Notion 頁面或網頁網址"
+            placeholder="貼 Google 文件/試算表/雲端硬碟連結、Notion 頁面或網頁網址（已連結整合可貼私有連結）"
             style={{ flex: "1 1 320px" }}
           />
           <input aria-label="匯入文件名稱" value={urlName} onChange={(e) => setUrlName(e.target.value)} placeholder="名稱（選填）" style={{ flex: "0 1 140px" }} maxLength={120} />
@@ -829,25 +1050,73 @@ function FilesSection({ table }: { table: TableSummary }) {
           </button>
         </div>
       )}
-      {(uploadError || importUrl.error || refresh.error || removeFile.error) && (
-        <p className="error" role="alert">{uploadError ?? importUrl.error?.message ?? refresh.error?.message ?? removeFile.error?.message}</p>
+      {(uploadError || importUrl.error || refresh.error || removeFile.error || classify.error) && (
+        <p className="error" role="alert">{uploadError ?? importUrl.error?.message ?? refresh.error?.message ?? removeFile.error?.message ?? classify.error?.message}</p>
       )}
+      {sentMsg && <p className="hint" style={{ color: "var(--success-ink)" }}>{sentMsg}</p>}
 
-      {files.length === 0 && list.data && <p className="hint" style={{ marginTop: 8 }}>還沒有文件——上傳逐字稿、腳本、名單，AI 就能引用它們回答。</p>}
-      {files.map((f) => (
+      {allFiles.length === 0 && list.data && <p className="hint" style={{ marginTop: 8 }}>還沒有文件——上傳逐字稿、腳本、名單或劇照，AI 就能引用它們回答。</p>}
+      {catFilter && <p className="meta" style={{ margin: "6px 0 0" }}>只顯示分類「{catFilter}」的 {files.length} 份文件——<button className="btn-sm" onClick={() => setCatFilter(null)}>顯示全部</button></p>}
+      {files.map((f) => {
+        const kindMeta = FILE_KIND_META[f.kind] ?? FILE_KIND_META.doc;
+        const fileUrl = `/api/databases/files/${f.id}/file`;
+        const isMedia = f.kind !== "doc";
+        return (
         <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderBottom: "1px solid var(--border-soft, #eee)" }}>
-          <Icon name="FileText" size={15} />
-          <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }} title={f.name}>{f.name}</span>
+          {f.kind === "image" && f.hasFile ? (
+            <img
+              src={fileUrl}
+              alt={f.name}
+              loading="lazy"
+              style={{ height: 36, width: 48, objectFit: "cover", borderRadius: 6, cursor: "pointer", flex: "0 0 auto" }}
+              onClick={() => setPreviewId(previewId === f.id ? null : f.id)}
+            />
+          ) : (
+            <Icon name={kindMeta.icon} size={15} />
+          )}
+          <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }} title={f.name}>{f.name}</span>
           <span className="meta">{formatBytes(f.sizeBytes)}・{f.uploaderName}</span>
+          {isMedia && <span className="badge">{kindMeta.label}</span>}
+          {f.category && <span className="badge" title="分類">{f.category}</span>}
           {f.readableChars > 0 ? (
             <button className="badge" style={{ cursor: "pointer" }} title="點開預覽 AI 讀到的純文字" onClick={() => setPreviewId(previewId === f.id ? null : f.id)}>
               AI 可讀 {f.readableChars.toLocaleString()} 字
             </button>
+          ) : f.aiDescription ? (
+            <button className="badge" style={{ cursor: "pointer" }} title="AI 已看圖——點開看描述" onClick={() => setPreviewId(previewId === f.id ? null : f.id)}>
+              AI 已看圖
+            </button>
+          ) : isMedia ? (
+            <button className="badge" style={{ cursor: "pointer" }} title="預覽" onClick={() => setPreviewId(previewId === f.id ? null : f.id)}>預覽</button>
           ) : (
             <span className="badge" title="此格式暫不支援文字抽取（僅存檔）">僅存檔</span>
           )}
           <span className="spacer" />
-          {f.hasFile && <a className="btn-sm" href={`/api/databases/files/${f.id}/file`} download title="下載原檔"><Icon name="Download" size={13} /></a>}
+          {canWrite && f.kind === "image" && f.hasFile && (
+            <button
+              className="btn-sm"
+              title="AI 看圖：產生繁中描述並自動分類（1 點/張；點數走你的額度）"
+              disabled={classify.isPending}
+              onClick={() => classify.mutate({ id: f.id })}
+            >
+              <Icon name="Sparkles" size={13} /> {classify.isPending && classify.variables?.id === f.id ? "分類中…" : "AI 分類"}
+            </button>
+          )}
+          {canWrite && (editCatId === f.id ? (
+            <CategoryEditor fileId={f.id} tableId={table.id} initial={f.category} existing={existingCategories} onDone={() => setEditCatId(null)} />
+          ) : (
+            <button className="btn-sm" title="編輯分類" onClick={() => { setEditCatId(f.id); setSendToId(null); }}>
+              <Icon name="Tag" size={13} />
+            </button>
+          ))}
+          {f.hasFile && (sendToId === f.id ? (
+            <SendToProject fileId={f.id} groupId={groupId} onDone={(msg) => { setSendToId(null); setSentMsg(msg); }} />
+          ) : (
+            <button className="btn-sm" title="送到專案素材庫（複製一份，分鏡與生成即可取用）" onClick={() => { setSendToId(f.id); setEditCatId(null); setSentMsg(null); }}>
+              <Icon name="Package" size={13} />
+            </button>
+          ))}
+          {f.hasFile && <a className="btn-sm" href={fileUrl} download title="下載原檔"><Icon name="Download" size={13} /></a>}
           {canWrite && f.sourceUrl && (
             <button className="btn-sm" title="重抓來源網址、更新內容" disabled={refresh.isPending} onClick={() => refresh.mutate({ id: f.id })}>
               <Icon name="Undo2" size={13} />
@@ -859,31 +1128,56 @@ function FilesSection({ table }: { table: TableSummary }) {
             </ConfirmButton>
           )}
           {previewId === f.id && (
-            <div style={{ flexBasis: "100%", background: "var(--bg-sunken, rgba(0,0,0,.04))", borderRadius: 8, padding: 10, maxHeight: 240, overflowY: "auto" }}>
-              {preview.data ? (
+            <div style={{ flexBasis: "100%", background: "var(--bg-sunken, rgba(0,0,0,.04))", borderRadius: 8, padding: 10, maxHeight: isMedia ? 420 : 240, overflowY: "auto" }}>
+              {f.kind === "image" && f.hasFile && (
+                <img src={fileUrl} alt={f.name} style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, display: "block", marginBottom: 8 }} />
+              )}
+              {f.kind === "video" && f.hasFile && (
+                <video src={fileUrl} controls preload="metadata" style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, display: "block", marginBottom: 8 }} />
+              )}
+              {f.kind === "audio" && f.hasFile && (
+                <audio src={fileUrl} controls preload="metadata" style={{ width: "100%", marginBottom: 8 }} />
+              )}
+              {isMedia && (
+                f.aiDescription ? (
+                  <>
+                    <p className="meta" style={{ margin: "0 0 4px" }}>AI 看圖描述{f.category ? `（分類：${f.category}）` : ""}——AI 助手與 MCP 代理讀這段回答圖影問題：</p>
+                    <p style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>{f.aiDescription}</p>
+                  </>
+                ) : (
+                  <p className="meta" style={{ margin: 0 }}>
+                    {f.kind === "image" ? "尚未有 AI 描述——按「AI 分類」讓視覺模型看圖產生描述與分類，AI 助手就答得出這張圖的內容。" : "影片／音訊可用「編輯分類」手動歸類；描述可之後補。"}
+                  </p>
+                )
+              )}
+              {!isMedia && (preview.data ? (
                 <>
                   <p className="meta" style={{ margin: "0 0 6px" }}>AI 讀到的純文字（前 20,000 字／共 {preview.data.totalChars.toLocaleString()} 字）：</p>
                   <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: 13 }}>{preview.data.text}</pre>
                 </>
               ) : preview.error ? (
                 <p className="error" role="alert" style={{ margin: 0 }}>預覽載入失敗：{preview.error.message}</p>
-              ) : (
+              ) : (f.readableChars > 0 ? (
                 <p className="meta" style={{ margin: 0 }}>載入中…</p>
-              )}
+              ) : (
+                <p className="meta" style={{ margin: 0 }}>此格式暫不支援文字抽取（僅存檔）。</p>
+              )))}
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
 /** 一列（點值進入行內編輯；blur/Enter 儲存整列） */
 function GridRow({
-  fields, groupId, row, canWrite, canDelete, onSave, onDelete,
+  fields, groupId, tableId, row, canWrite, canDelete, onSave, onDelete,
 }: {
   fields: DataField[];
   groupId: string;
+  tableId: string;
   row: { id: string; data: DataRowData };
   canWrite: boolean;
   canDelete: boolean;
@@ -897,7 +1191,7 @@ function GridRow({
       <tr>
         {fields.map((f) => (
           <td key={f.key} style={{ padding: "4px 4px" }}>
-            <CellInput field={f} groupId={groupId} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+            <CellInput field={f} groupId={groupId} tableId={tableId} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
           </td>
         ))}
         <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
@@ -915,7 +1209,7 @@ function GridRow({
     >
       {fields.map((f) => (
         <td key={f.key} style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-soft, #eee)" }}>
-          <CellDisplay field={f} groupId={groupId} value={row.data[f.key] ?? null} />
+          <CellDisplay field={f} groupId={groupId} tableId={tableId} value={row.data[f.key] ?? null} />
         </td>
       ))}
       <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
@@ -930,9 +1224,10 @@ function GridRow({
   );
 }
 
-function CellDisplay({ field, groupId, value }: { field: DataField; groupId: string; value: DataRowValue }) {
+function CellDisplay({ field, groupId, tableId, value }: { field: DataField; groupId: string; tableId: string; value: DataRowValue }) {
   if (value === null || value === "") return <span className="meta">—</span>;
   if (field.type === "checkbox") return value ? <Icon name="Check" size={14} /> : <span className="meta">—</span>;
+  if (field.type === "file") return <FileCell tableId={tableId} fileId={String(value)} />;
   if (field.type === "url") {
     const raw = String(value);
     // 只把 http(s):／mailto: 當成可點連結——資料庫可為組/團隊/全站範圍，別人能在某格塞
@@ -948,6 +1243,27 @@ function CellDisplay({ field, groupId, value }: { field: DataField; groupId: str
   return <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{String(value)}</span>;
 }
 
+/** 附件欄顯示：圖片給縮圖、其他給圖示＋檔名；點擊開原檔（圖影內嵌預覽、文件下載） */
+function FileCell({ tableId, fileId }: { tableId: string; fileId: string }) {
+  // 與文件區共用同一個 listFiles 查詢（react-query 以 key 去重，一表多附件格也只打一次）
+  const files = trpc.databases.listFiles.useQuery({ tableId });
+  const f = files.data?.files.find((x) => x.id === fileId);
+  if (!files.data) return <span className="meta">…</span>;
+  if (!f) return <span className="meta" title={fileId}>（文件已刪除）</span>;
+  const url = `/api/databases/files/${f.id}/file`;
+  const kindMeta = FILE_KIND_META[f.kind] ?? FILE_KIND_META.doc;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" title={`${f.name}（${formatBytes(f.sizeBytes)}）——點開檢視/下載`} style={{ display: "inline-flex", alignItems: "center", gap: 6, maxWidth: "100%" }}>
+      {f.kind === "image" && f.hasFile ? (
+        <img src={url} alt={f.name} loading="lazy" style={{ height: 28, width: 36, objectFit: "cover", borderRadius: 4, flex: "0 0 auto" }} />
+      ) : (
+        <Icon name={kindMeta.icon} size={14} />
+      )}
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>{f.name}</span>
+    </a>
+  );
+}
+
 /** 專案連結欄：解析標題並直通專案頁（作用組撈不到＝別組或已刪，退回縮短 id） */
 function ProjectLink({ id, groupId }: { id: string; groupId: string }) {
   const projects = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
@@ -959,7 +1275,7 @@ function ProjectLink({ id, groupId }: { id: string; groupId: string }) {
 /** 排程連結欄：解析標題並直通筆記排程頁 */
 function ScheduleLink({ id, groupId }: { id: string; groupId: string }) {
   const list = trpc.schedule.list.useQuery({ groupId, includePast: true }, { enabled: !!groupId });
-  const item = (list.data ?? []).find((s: { id: string }) => s.id === id) as { title?: string } | undefined;
+  const item = (list.data?.items ?? []).find((s: { id: string }) => s.id === id) as { title?: string } | undefined;
   if (!item?.title) return <span className="mono" title={id}>{id.slice(0, 8)}…</span>;
   return <Link href="/planner" title="開啟筆記排程">{item.title}</Link>;
 }
@@ -971,9 +1287,11 @@ function UserName({ id }: { id: string }) {
   return <span className="mono" title={id}>{id.slice(0, 8)}…</span>;
 }
 
-function CellInput({ field, groupId, value, onChange }: { field: DataField; groupId: string; value: DataRowValue; onChange: (v: DataRowValue) => void }) {
+function CellInput({ field, groupId, tableId, value, onChange }: { field: DataField; groupId: string; tableId: string; value: DataRowValue; onChange: (v: DataRowValue) => void }) {
   const common = { "aria-label": field.label, style: { width: "100%", minWidth: 90 } as const };
   switch (field.type) {
+    case "file":
+      return <FileCellInput label={field.label} tableId={tableId} value={typeof value === "string" ? value : ""} onChange={onChange} />;
     case "project":
       return <ProjectPicker label={field.label} groupId={groupId} value={typeof value === "string" ? value : ""} onChange={onChange} />;
     case "schedule":
@@ -998,6 +1316,58 @@ function CellInput({ field, groupId, value, onChange }: { field: DataField; grou
   }
 }
 
+/**
+ * 附件欄輸入：從本庫既有文件挑選，或按「＋」直接上傳新檔（圖片/影片/PDF/各種格式）——
+ * 檔案進文件層（data_files）、格子存文件 id，文件區與 AI 讀取同步受惠。
+ */
+function FileCellInput({ label, tableId, value, onChange }: { label: string; tableId: string; value: string; onChange: (v: DataRowValue) => void }) {
+  const utils = trpc.useUtils();
+  const files = trpc.databases.listFiles.useQuery({ tableId });
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const opts = files.data?.files ?? [];
+
+  const doUpload = async (f: File) => {
+    setUploading(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", f);
+      form.append("tableId", tableId);
+      const res = await fetch("/api/databases/upload", { method: "POST", body: form, credentials: "same-origin" });
+      const body = (await res.json()) as { ok?: boolean; file?: { id: string }; error?: string };
+      if (!res.ok || !body.ok || !body.file) {
+        setError(body.error ?? "上傳失敗，請稍後再試");
+      } else {
+        onChange(body.file.id);
+        utils.databases.listFiles.invalidate({ tableId });
+        utils.databases.stats.invalidate({ tableId });
+      }
+    } catch {
+      setError("上傳失敗（網路問題），請稍後再試");
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  };
+
+  return (
+    <span style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 140 }}>
+      <select aria-label={label} value={value} style={{ flex: 1, minWidth: 90 }} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">—</option>
+        {value && !opts.some((o) => o.id === value) && <option value={value}>（已刪除的文件）</option>}
+        {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </select>
+      <input ref={inputRef} type="file" aria-label={`上傳${label}`} accept={DB_FILE_ACCEPT} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f); }} />
+      <button className="btn-sm" type="button" title="上傳新檔到這一格（也會進本庫的文件區）" disabled={uploading} onClick={() => inputRef.current?.click()}>
+        {uploading ? "…" : <Icon name="Plus" size={13} />}
+      </button>
+      {error && <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{error}</span>}
+    </span>
+  );
+}
+
 /** 專案挑選：作用組的專案清單（值存專案 id；既有值不在清單時仍保留顯示） */
 function ProjectPicker({ label, groupId, value, onChange }: { label: string; groupId: string; value: string; onChange: (v: DataRowValue) => void }) {
   const projects = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
@@ -1014,7 +1384,7 @@ function ProjectPicker({ label, groupId, value, onChange }: { label: string; gro
 /** 排程挑選：作用組的排程清單（含過去；值存排程 id） */
 function SchedulePicker({ label, groupId, value, onChange }: { label: string; groupId: string; value: string; onChange: (v: DataRowValue) => void }) {
   const list = trpc.schedule.list.useQuery({ groupId, includePast: true }, { enabled: !!groupId });
-  const opts = (list.data ?? []) as Array<{ id: string; title: string; startsAt: string | Date }>;
+  const opts = (list.data?.items ?? []) as Array<{ id: string; title: string; startsAt: string | Date }>;
   return (
     <select aria-label={label} style={{ width: "100%", minWidth: 90 }} value={value} onChange={(e) => onChange(e.target.value || null)}>
       <option value="">—</option>

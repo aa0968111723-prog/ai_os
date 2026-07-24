@@ -27,7 +27,10 @@ import type { DataField, DataRowData } from "../../shared/databaseFields";
  */
 async function resolveRequester(req: Request): Promise<{ auth: AuthState; viaToken: boolean; readOnly: boolean } | null> {
   const headerKey = req.headers["x-api-key"];
-  const queryKey = typeof req.query.key === "string" ? req.query.key : undefined;
+  // ?key= 只在 GET 放行：手機日曆訂閱（.ics）／CSV 匯出等唯讀端點無法帶自訂標頭，才需查詢字串金鑰。
+  // 「寫入」端點（POST /rows）一律要走 x-api-key 標頭——否則具寫入權的個人金鑰會被寫進反代存取記錄／
+  // 瀏覽器歷史／Referer，任何讀得到那些記錄的人都能重放它以受害者身分寫資料。
+  const queryKey = req.method === "GET" && typeof req.query.key === "string" ? req.query.key : undefined;
   const provided = (typeof headerKey === "string" && headerKey) || queryKey;
   if (provided) {
     const identity = await resolveMcpIdentity(provided);
@@ -186,7 +189,8 @@ export async function handleDatabaseIcs(req: Request, res: Response): Promise<vo
     if (Number.isNaN(startsAt.getTime())) return [];
     const title = (titleField && typeof data[titleField.key] === "string" && data[titleField.key]) || `${hit.table.name}`;
     const note = fields
-      .filter((f) => f.key !== dateField.key && f.key !== titleField?.key)
+      // 附件欄的值是文件 uuid——日曆描述裡是純噪音，略過
+      .filter((f) => f.key !== dateField.key && f.key !== titleField?.key && f.type !== "file")
       .map((f) => { const v = data[f.key]; return v !== null && v !== undefined && v !== "" ? `${f.label}: ${f.type === "checkbox" ? (v ? "是" : "否") : v}` : null; })
       .filter(Boolean)
       .join("\n");
