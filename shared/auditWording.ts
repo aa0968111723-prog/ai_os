@@ -103,6 +103,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "schedule.add": "新增排程",
   "schedule.update": "更新排程",
   "schedule.remove": "刪除排程",
+  "exportJobs.create": "建立交付包匯出",
+  "exportJobs.cancel": "取消交付包匯出",
   "googleCalendar.syncNow": "手動同步 Google 日曆",
   "googleCalendar.disconnect": "中斷 Google 日曆連結",
   "prompts.save": "儲存提示詞",
@@ -177,7 +179,7 @@ export function humanizeAuditAction(action: string): string {
  */
 export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefixes: readonly string[] }> = [
   { key: "account", label: "帳號與團隊", prefixes: ["auth", "admin"] },
-  { key: "project", label: "專案與素材", prefixes: ["projects"] },
+  { key: "project", label: "專案與素材", prefixes: ["projects", "exportJobs"] },
   { key: "generation", label: "生成與點數", prefixes: ["generation", "quota"] },
   { key: "storyboard", label: "分鏡與審批", prefixes: ["scenes", "approvals"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "teamAssistant", "workflows"] },

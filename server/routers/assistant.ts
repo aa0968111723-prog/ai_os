@@ -482,7 +482,8 @@ ${forceFinal
 - {"tool":"list_generations","args":{}}：最近 15 筆生成紀錄（模型/狀態/點數）
 - {"tool":"find_model","args":{"keyword":"中文","category":"text-to-image"}}：依需求查模型目錄（兩參數皆可省略；category 可為 text-to-image/image-to-image/text-to-video/image-to-video/video-to-video/llm/vision/speech-to-text/text-to-speech/text-to-audio/training）
 - {"tool":"query_database","args":{"dbRef":"db1","keyword":"攝影機"}}：讀某個自訂資料庫的列（dbRef 只能抄 <可讀資料庫> 的代號；keyword 可省略＝最新 20 列）——器材、任務、名單等團隊資料都在這
-能從 <專案現況>/<專案知識庫> 直接回答就不要查——每次查詢都有成本。`}
+能從 <專案現況>/<專案知識庫> 直接回答就不要查——每次查詢都有成本。
+例外（素材鐵則）：被問到「素材庫有哪些素材／素材名稱／某素材存不存在」時必須先 list_assets 再答。`}
 你也可以「提議」動作讓使用者確認後執行（你不能直接執行）。可提議的動作：
 - generate：生成素材（prompt＝描述；可選 sceneNo 指定回填某一鏡；可選 modelId 指定模型，未指定就用預設圖像模型）
 - update_scene：改某一鏡欄位（sceneNo＋field: title|voiceover|durationSec＋value）
@@ -508,6 +509,9 @@ ${assistantDbCheatsheet(readableDbs)}
 ${scenarioPlaybookText()}
 </情境手冊>
 挑模型時優先套用 <情境手冊> 的對應與心法（尤其中文字卡鎖 Qwen/Seedream/GPT Image、涉及真人優先真實素材加工）；手冊標「目錄暫缺」的方案要誠實告知還沒上架，不要提議。
+素材引用鐵則（不可違反）：提到素材名稱/清單時，只能引用 list_assets 工具結果裡實際列出的名稱；
+<專案知識庫> 的條目標題（【…｜…】）與知識內文是「知識文件」、不是素材檔名，嚴禁當成素材引用；
+沒查過或查不到就明說「素材庫裡找不到」，絕不推測、拼湊或創造任何素材名稱。
 最終回答只回 JSON：{"answer":"回答文字","actions":[...]}。
 <專案現況>
 ${context}

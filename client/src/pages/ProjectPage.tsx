@@ -4,7 +4,7 @@ import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip } from "../components/interactions";
 import { worldviewSchema, type Worldview } from "@shared/worldview";
-import { getModel, estimatePoints } from "@shared/models";
+import { getModel, estimatePoints, supportsCardAnchors, CATEGORIES } from "@shared/models";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
@@ -988,6 +988,18 @@ export function ProjectPage({ id }: { id: string }) {
               {summaryChip(`角色 ${charIds.length}`, "#sec-characters", charIds.length > 0)}
               {summaryChip(`場景 ${sceneIds.length}`, "#sec-scenes", sceneIds.length > 0)}
             </div>
+            {/* 能力標示（QA-002）：不讓使用者誤以為定裝參考圖已送入模型——
+                非視覺類模型完全不用卡片（明確警告）；視覺類也只以「文字描述錨點」注入 */}
+            {(charIds.length > 0 || sceneIds.length > 0) && fullModel && !supportsCardAnchors(fullModel.category) && (
+              <p className="hint" role="alert" style={{ color: "var(--gold-ink)", marginTop: 6 }}>
+                ⚠ 此模型（{CATEGORIES.find((c) => c.id === fullModel.category)?.label ?? fullModel.category}）不會使用角色卡／場景卡——已勾選的卡片不影響本次生成
+              </p>
+            )}
+            {(charIds.length > 0 || sceneIds.length > 0) && fullModel && supportsCardAnchors(fullModel.category) && (
+              <p className="hint" style={{ marginTop: 6, fontSize: 12 }}>
+                角色卡／場景卡以「文字描述」注入提示詞；定裝參考圖不會直接送入模型（僅供人工比對成品）
+              </p>
+            )}
             <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
               <button
                 className="primary"
@@ -1009,6 +1021,12 @@ export function ProjectPage({ id }: { id: string }) {
                   {charIds.length > 0 && <>・帶入 {charIds.length} 個角色定裝</>}
                   {sceneIds.length > 0 && <>・{sceneIds.length} 個場景設定</>}
                 </p>
+                {/* 花錢前最後一道能力標示（QA-002）：卡片對此模型無效時，確認框內不可忽略地再講一次 */}
+                {(charIds.length > 0 || sceneIds.length > 0) && fullModel && !supportsCardAnchors(fullModel.category) && (
+                  <p role="alert" style={{ margin: "4px 0", fontSize: 13, color: "var(--gold-ink)" }}>
+                    ⚠ 此模型不會使用角色卡／場景卡——期待角色/場景一致請改用文生圖、圖生圖或影片類模型
+                  </p>
+                )}
                 <p style={{ margin: "4px 0", fontSize: 13 }}>提示詞：{prompt.trim().slice(0, 80)}{prompt.trim().length > 80 ? "…" : ""}</p>
                 {/* 注入透明化（深度優化）：花錢前看得見世界觀實際會帶進哪些東西，不再是黑盒 */}
                 {(wv.tones.length > 0 || wv.styles.length > 0 || wv.taboos.length > 0) && (

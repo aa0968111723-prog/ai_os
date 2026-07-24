@@ -720,10 +720,12 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     }
 
     if (name === "list_schedule") {
-      // 專案視角的過濾在 DB 端完成（本專案 ＋ 組層級），避免 300 筆上限先被別的專案吃掉
-      const items = await listScheduleForGroup(auth, project.groupId, Boolean(args.includePast), project.id);
-      return items
+      // 專案視角的過濾在 DB 端完成（本專案 ＋ 組層級），避免單頁上限先被別的專案吃掉
+      const { items, truncated } = await listScheduleForGroup(auth, project.groupId, Boolean(args.includePast), project.id);
+      const rows = items
         .map((i) => ({ id: i.id, title: i.title, startsAt: i.startsAt, endsAt: i.endsAt, note: i.note, owner: i.ownerName, projectScoped: i.projectId === project.id }));
+      // QA-017：截斷要讓外部 AI 看得見，不能默默當成全部
+      return truncated ? { items: rows, truncated: true, note: "行程超過單頁上限，僅列出最早的一頁" } : rows;
     }
 
     if (name === "add_schedule_item") {
@@ -743,7 +745,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const scenes = await db.select().from(schema.scenes).where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
     const gens = await db.select().from(schema.generations).where(eq(schema.generations.projectId, project.id)).orderBy(desc(schema.generations.createdAt)).limit(50);
     const runs = await listAgentRunsForProject(auth, project.id);
-    const sched = await listScheduleForGroup(auth, project.groupId, false, project.id);
+    const { items: sched } = await listScheduleForGroup(auth, project.groupId, false, project.id);
     const now = new Date();
     const tally = (arr: string[]) => arr.reduce<Record<string, number>>((m, k) => ((m[k] = (m[k] ?? 0) + 1), m), {});
     return {
