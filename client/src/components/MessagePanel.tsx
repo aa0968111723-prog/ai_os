@@ -6,6 +6,7 @@ import type { AppRouter } from "../../../server/routers";
 import { Icon } from "./Icon";
 import { DISCUSS_EVENT, jumpToRef, setPlannerFocus, type DiscussRef } from "../discuss";
 import { escapeRegExp, parseMentionedNames } from "@shared/mentions";
+import { useCustomQuickPhrases, MAX_PHRASE_LEN } from "../useCustomQuickPhrases";
 
 /** 單則留言(含回覆摘要／表情彙總／引用卡）——由 messages.list 推得,列元件與父層共用同一形狀 */
 type MessageRowData = inferRouterOutputs<AppRouter>["messages"]["list"][number];
@@ -74,8 +75,12 @@ function NoteForm({ defaultTitle, defaultContent, pending, error, onCancel, onSu
  * 第一梯隊再加:語音留言(錄音→上傳→背景逐字稿)、@助手參與對話、留言轉待辦、被提及桌面通知。
  */
 
-/** 快速短語:一鍵直接送出;內容貼合團隊日常(確認/隨喜/接手/請示) */
+/** 內建快速短語:一鍵直接送出;內容貼合團隊日常(確認/隨喜/接手/請示)。
+ *  組內夥伴可在其後自行增加自訂短語(見 useCustomQuickPhrases,存本機、每組一份)。 */
 const QUICK_PHRASES = ["收到 🙏", "隨喜讚歎 ✨", "我來處理 💪", "請組長過目 🙏"];
+
+/** 自訂短語小面板的表情盤:點一下把 emoji 插進輸入框末尾,不用切輸入法找符號 */
+const PHRASE_EMOJI = ["🙏", "❤️", "✅", "😊", "✨", "💪", "🎉", "👍", "📎", "🔥"] as const;
 
 /** 桌面通知(重用 GenerationList 同一套):未授權/背景分頁靜默略過 */
 function notifyDesktop(title: string, body: string): void {
@@ -388,6 +393,11 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   const [noteFor, setNoteFor] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [voiceErr, setVoiceErr] = useState<string | null>(null);
+  // 自訂快速短語(每組一份,存本機):管理面板開關 + 新短語輸入框內容
+  const customPhrases = useCustomQuickPhrases(groupId);
+  const [phraseEditorOpen, setPhraseEditorOpen] = useState(false);
+  const [newPhrase, setNewPhrase] = useState("");
+  const newPhraseRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
@@ -542,6 +552,14 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
     });
   };
 
+  // 加入一則自訂短語:成功才清空並保持面板開著(方便連續加),重複/超限則保留輸入讓人修改
+  const commitNewPhrase = () => {
+    if (customPhrases.add(newPhrase)) {
+      setNewPhrase("");
+      newPhraseRef.current?.focus();
+    }
+  };
+
   const pinnedMsgs = (list.data ?? []).filter((m) => m.pinned);
 
   // 傳給 memo 化留言列的穩定 callback:react-query 的 mutate 本身跨 render 穩定,
@@ -677,13 +695,87 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
         ))}
       </div>
 
-      {/* 快速短語:一鍵送出,零打字回應;末尾加「問 AI 助手」把 @助手 帶進輸入框 */}
+      {/* 快速短語:一鍵送出,零打字回應;內建短語後接組內夥伴自訂的短語,末尾加「問 AI 助手」把 @助手 帶進輸入框 */}
       <div className="quick-phrases" role="group" aria-label="快速短語">
         {QUICK_PHRASES.map((q) => (
           <button key={q} type="button" className="chip" disabled={post.isPending} onClick={() => send(q)}>
             {q}
           </button>
         ))}
+        {/* 自訂短語:一鍵送出(同內建),但每則帶一個「×」可移除;管理面板開啟時才顯示刪除鈕 */}
+        {customPhrases.phrases.map((q) => (
+          <span key={`c-${q}`} className={`chip custom-phrase${phraseEditorOpen ? " editing" : ""}`}>
+            <button type="button" className="phrase-send" disabled={post.isPending} onClick={() => send(q)} title="一鍵送出這句">
+              {q}
+            </button>
+            {phraseEditorOpen && (
+              <button
+                type="button"
+                className="phrase-del"
+                aria-label={`移除自訂短語「${q}」`}
+                title="移除這則自訂短語"
+                onClick={() => customPhrases.remove(q)}
+              >
+                <Icon name="X" size={11} />
+              </button>
+            )}
+          </span>
+        ))}
+        {/* ＋自訂:展開小面板輸入新短語(可夾 emoji);組內夥伴自行增加自己組的常用語 */}
+        <span style={{ position: "relative", display: "inline-flex" }}>
+          <button
+            type="button"
+            className={`chip${phraseEditorOpen ? " on" : ""}`}
+            aria-expanded={phraseEditorOpen}
+            title="新增／管理自訂快速短語（存在這台裝置，每組一份）"
+            onClick={() => {
+              setPhraseEditorOpen((v) => !v);
+              if (!phraseEditorOpen) window.setTimeout(() => newPhraseRef.current?.focus(), 0);
+            }}
+          >
+            <Icon name="Plus" size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />自訂短語
+          </button>
+          {phraseEditorOpen && (
+            <div className="mention-pop phrase-editor" role="dialog" aria-label="新增自訂快速短語" style={{ bottom: "auto", top: "calc(100% + 6px)", width: 260, padding: 10, gap: 8 }}>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  ref={newPhraseRef}
+                  className="phrase-input"
+                  value={newPhrase}
+                  aria-label="自訂短語內容"
+                  maxLength={MAX_PHRASE_LEN}
+                  placeholder="例如：素材我來補 📎"
+                  onChange={(e) => setNewPhrase(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); commitNewPhrase(); }
+                    if (e.key === "Escape") setPhraseEditorOpen(false);
+                  }}
+                />
+                <button type="button" className="primary btn-sm" disabled={!newPhrase.trim() || customPhrases.atLimit} onClick={commitNewPhrase}>
+                  加入
+                </button>
+              </div>
+              {/* 表情盤:點一下插到輸入框末尾,長輩志工不必切輸入法找符號 */}
+              <div className="phrase-emoji-row" role="group" aria-label="插入表情">
+                {PHRASE_EMOJI.map((e) => (
+                  <button
+                    key={e}
+                    type="button"
+                    aria-label={`插入 ${e}`}
+                    onClick={() => { setNewPhrase((p) => (p + e).slice(0, MAX_PHRASE_LEN)); newPhraseRef.current?.focus(); }}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+              <p className="hint" style={{ margin: 0 }}>
+                {customPhrases.atLimit
+                  ? "已達上限，先移除幾則再新增。"
+                  : "送出時和內建短語一樣一鍵直送；只存在這台裝置。"}
+              </p>
+            </div>
+          )}
+        </span>
         <button
           type="button"
           className="chip"
