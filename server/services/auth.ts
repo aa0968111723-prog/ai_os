@@ -8,6 +8,15 @@ import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { db, schema } from "../db";
 
+// pg 唯一鍵衝突（23505）：驅動可能把原始錯誤包在 cause，兩層 code 與訊息都檢查。
+// 在地實作（不從 generationCore 匯入）——auth.ts 於 tRPC context 建立時極早載入，
+// 匯入 generationCore 會把整個生成／路由圖一併拉進來造成初始化循環（authedProcedure 尚未就緒）。
+function isUniqueViolation(err: unknown): boolean {
+  const codes = [(err as { code?: unknown } | null)?.code, (err as { cause?: { code?: unknown } } | null)?.cause?.code];
+  if (codes.includes("23505")) return true;
+  return err instanceof Error && err.message.includes("duplicate key");
+}
+
 const SESSION_DAYS = 30;
 const COOKIE_NAME = "aidos_session";
 
@@ -323,10 +332,18 @@ export async function acceptInvite(token: string, name: string, password: string
   // 建帳號＋入團隊/組＋標記邀請已用一次做完：中途任一步失敗整批回滾，不留「有帳號沒入組」的半套資料。
   // 併發用同一 token 落地時，第二筆會撞 users.email 唯一鍵而整筆回滾，只有一筆成功。
   return db.transaction(async (tx) => {
-    const [user] = await tx
-      .insert(schema.users)
-      .values({ name, email: invite.email, passwordHash })
-      .returning();
+    let user;
+    try {
+      [user] = await tx
+        .insert(schema.users)
+        .values({ name, email: invite.email, passwordHash })
+        .returning();
+    } catch (err) {
+      // 併發用同一 token 落地時，輸家會撞 users.email 唯一鍵。整批仍回滾（只有一筆成功），
+      // 但把原始 pg 23505 包成友善訊息，不讓 router 的泛用 catch 把原始約束錯誤（含欄位名）回給用戶端。
+      if (isUniqueViolation(err)) throw new Error("這個 email 已經有帳號了，請直接用原本的密碼登入。");
+      throw err;
+    }
     const userId = user.id;
     await tx.insert(schema.teamMembers).values({ teamId: invite.teamId, userId, role: invite.teamRole });
     if (invite.groupId) {
