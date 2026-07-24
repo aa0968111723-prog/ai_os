@@ -246,11 +246,9 @@ export function HelpPage() {
           <Spot icon="Image" name="素材庫" where="專案頁">
             你上傳或生成出來的圖片、影片、音檔都收在這。生成需要來源檔時從這裡挑。
           </Spot>
-          <Spot icon="Lightbulb" name="AI 導演" where="專案頁">
-            依世界觀給你 3 個分鏡點子，一鍵帶入提示詞。<b>只供參考</b>，成品仍須組長審核。
-          </Spot>
-          <Spot icon="Sparkles" name="AI 拆分鏡" where="專案頁">
-            把整份腳本貼進去，自動切成一格一格的分鏡草稿，省去手動分鏡。
+          <Spot icon="Sparkles" name="專案 AI 代理系統（四合一）" where="專案頁">
+            AI 代理・專案問答・導演建議・拆分鏡統一在同一張卡，分頁切換：給代理一句目標排計畫執行、
+            問專案進度、要 3 個分鏡點子（<b>只供參考</b>，成品仍須組長審核）、貼腳本自動切成分鏡草稿。
           </Spot>
           <Spot icon="Image" name="生成台" where="專案頁核心">
             挑模型、寫提示詞（世界觀自動帶入）、按下生成。送出前會先跳確認框給你看預估點數。

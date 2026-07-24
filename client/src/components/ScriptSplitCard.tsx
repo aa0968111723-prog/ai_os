@@ -7,7 +7,7 @@ import { ConfirmButton } from "./interactions";
  * 導演 AI 拆分鏡（願景「貼腳本→自動建分鏡卡」）：
  * 貼上腳本（或留空用知識庫的腳本）→ AI 切成一幕一幕，建立分鏡草稿（含建議提示詞、配音詞）。
  */
-export function ScriptSplitCard({ projectId }: { projectId: string }) {
+export function ScriptSplitCard({ projectId, embedded = false }: { projectId: string; embedded?: boolean }) {
   const utils = trpc.useUtils();
   const [script, setScript] = useState("");
   const [open, setOpen] = useState(false);
@@ -19,9 +19,10 @@ export function ScriptSplitCard({ projectId }: { projectId: string }) {
     },
   });
 
-  return (
-    <section className="card" data-fb="AI 拆分鏡">
-      <h2>AI 拆分鏡（腳本 → 一幕一幕）</h2>
+  // 四合一（專案 AI 代理系統）分頁模式：外殼與標題由 AiHub 提供，這裡只出內容
+  const body = (
+    <>
+      {!embedded && <h2>AI 拆分鏡（腳本 → 一幕一幕）</h2>}
       <p className="hint">貼上腳本，AI 幫你切成分鏡草稿（每幕有建議畫面＋配音詞）；留空則用知識庫裡的腳本／開示稿。</p>
       {open ? (
         <>
@@ -51,6 +52,13 @@ export function ScriptSplitCard({ projectId }: { projectId: string }) {
       )}
       {split.data && <p className="hint" style={{ color: "var(--success-ink)", marginTop: 8 }}><Icon name="Check" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />已建立 {split.data.count} 幕草稿{split.data.mock ? "（測試模式拆分）" : ""}</p>}
       {split.error && <p className="error">{split.error.message}</p>}
+    </>
+  );
+
+  if (embedded) return <div data-fb="AI 拆分鏡">{body}</div>;
+  return (
+    <section className="card" data-fb="AI 拆分鏡">
+      {body}
     </section>
   );
 }

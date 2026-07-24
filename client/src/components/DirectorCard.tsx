@@ -4,7 +4,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 
 /** AI 導演建議（定案：建議僅供參考，成品須組長審核） */
-export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (prompt: string) => void }) {
+export function DirectorCard({ projectId, onUse, embedded = false }: { projectId: string; onUse: (prompt: string) => void; embedded?: boolean }) {
   const utils = trpc.useUtils();
   // 會扣組共享點數——成功後刷新點數徽章，別讓頂欄顯示舊值
   const suggest = trpc.director.suggest.useMutation({ onSuccess: () => utils.quota.my.invalidate() });
@@ -25,9 +25,10 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
       setSavingIdx((cur) => (cur === i ? null : cur));
     }
   };
-  return (
-    <section className="card" data-fb="AI 導演卡">
-      <h2>AI 導演建議</h2>
+  // 四合一（專案 AI 代理系統）分頁模式：外殼與標題由 AiHub 提供，這裡只出內容
+  const body = (
+    <>
+      {!embedded && <h2>AI 導演建議</h2>}
       <p className="hint">依世界觀＋專案知識庫給分鏡 idea——僅供參考，成品仍須組長審核。</p>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         {/* 本站通則「確認/揭示才扣點」：這裡也要先看價再花錢，不能一鍵靜默扣共享點數 */}
@@ -89,6 +90,13 @@ export function DirectorCard({ projectId, onUse }: { projectId: string; onUse: (
           {addDraft.error && <p className="error">存成分鏡失敗：{addDraft.error.message}</p>}
         </div>
       )}
+    </>
+  );
+
+  if (embedded) return <div data-fb="AI 導演卡">{body}</div>;
+  return (
+    <section className="card" data-fb="AI 導演卡">
+      {body}
     </section>
   );
 }

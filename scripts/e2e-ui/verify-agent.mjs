@@ -18,11 +18,11 @@ await page.waitForTimeout(1800);
 await page.goto(`${BASE}/p/${PROJ}`);
 await page.waitForSelector("#sec-agent", { timeout: 20000 });
 
-// ── 1. 代理卡存在於 ② 創作中心頂部 ──
-ok("AI 代理卡存在", (await page.locator("#sec-agent").count()) === 1);
-const yAgent = (await page.locator("#sec-agent").boundingBox())?.y ?? -1;
-const yAssistant = (await page.locator("#sec-assistant").boundingBox())?.y ?? -1;
-ok("代理卡在 AI 助手之前", yAgent > 0 && yAgent < yAssistant);
+// ── 1. 四合一：專案 AI 代理系統存在，AI 代理為預設分頁 ──
+ok("專案 AI 代理系統（四合一）存在", (await page.locator("#sec-ai-hub").count()) === 1);
+ok("四個分頁齊全", (await page.locator('#sec-ai-hub [role="tab"]').count()) === 4);
+ok("AI 代理為預設分頁", (await page.locator('#sec-ai-hub [role="tab"][aria-selected="true"]:has-text("AI 代理")').count()) === 1);
+ok("AI 代理面板存在", (await page.locator("#sec-agent").count()) === 1);
 ok("有範例目標 chips", (await page.locator('#sec-agent button:has-text("把知識庫的腳本拆成分鏡")').count()) === 1);
 
 // ── 2. 規劃 ──

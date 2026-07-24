@@ -7,20 +7,17 @@ import { worldviewSchema, type Worldview } from "@shared/worldview";
 import { getModel, estimatePoints } from "@shared/models";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
-import { DirectorCard } from "../components/DirectorCard";
 import { MessagePanel } from "../components/MessagePanel";
 import { ModelPicker, type PickedModel } from "../components/ModelPicker";
 import { WorkflowCard } from "../components/WorkflowCard";
 import { AssetLibrary } from "../components/AssetLibrary";
 import { RecycleBin } from "../components/RecycleBin";
 import { KnowledgeBase } from "../components/KnowledgeBase";
-import { ScriptSplitCard } from "../components/ScriptSplitCard";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PromptLibrary } from "../components/PromptLibrary";
 import { TocNav } from "../components/TocNav";
-import { ProjectAssistant } from "../components/ProjectAssistant";
-import { AgentCard } from "../components/AgentCard";
+import { AiHub } from "../components/AiHub";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { useCollab, CursorOverlay, CollabZone, COLLAB_ZONES } from "../realtime";
@@ -251,7 +248,7 @@ function AddOptionChip({
 /**
  * 專案工作台（一體連貫長頁版）：三幕環環相扣——
  * ① 專案上下文（世界觀＋選項就地新增／角色・場景定裝／知識庫／素材庫／成員權限）＝AI 的共同大腦；
- * ② AI 創作中心（助手→導演→拆分鏡→生成台→工作流→提示詞庫，發想到執行一條線）；
+ * ② AI 創作中心（專案 AI 代理系統四合一：代理・問答・導演・拆分鏡→生成台→工作流→提示詞庫，發想到執行一條線）；
  * ③ 分鏡・時間軸・交付＝成品落地。
  * 上下文餵給創作、創作的成品流進分鏡、分鏡打包交付；跨卡動作（導演建議、分鏡提示詞、選來源、
  * 「再用」）都會自動捲到接手的卡並聚焦，不再是各自獨立的功能。
@@ -873,25 +870,13 @@ export function ProjectPage({ id }: { id: string }) {
             id="stage-create"
             num="②"
             title="AI 創作中心"
-            desc="助手・導演・拆分鏡・生成・工作流一條線"
+            desc="專案 AI 代理系統（四合一）＋生成・工作流一條線"
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
-          {/* AI 代理（代理系統核心）：一句目標→計畫核准→伺服器背景逐步執行——把「發想→生成→送審」交給代理跑 */}
-          <AgentCard projectId={id} canEdit={canEdit} isLeader={isLeader} />
-
-          {/* AI 專案助手：統一對話入口——問進度、要建議，它會提議動作（生成/建分鏡/送審/跑工作流），你確認才執行 */}
-          <ProjectAssistant projectId={id} />
-
-          {/* AI 導演建議（讀①的世界觀＋知識庫發想；「用這個」自動帶到生成台） */}
-          <div id="sec-director">
-            <DirectorCard projectId={id} onUse={applyPrompt} />
-          </div>
-
-          {/* AI 拆分鏡：貼腳本 → 自動建分鏡草稿（草稿落在③分鏡列表，逐格可就地生成） */}
-          <div id="sec-split">
-            <ScriptSplitCard projectId={id} />
-          </div>
+          {/* 專案 AI 代理系統（四合一）：AI 代理・專案問答・導演建議・拆分鏡統一入口，分頁切換共用同一組上下文；
+              「用這個」（導演建議）仍自動帶到生成台，拆分鏡草稿仍落在③分鏡列表 */}
+          <AiHub projectId={id} canEdit={canEdit} isLeader={isLeader} onUsePrompt={applyPrompt} />
 
           {/* 生成台（11 類 × 旗艦/經濟/最低成本）＝日常主力工作區 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>

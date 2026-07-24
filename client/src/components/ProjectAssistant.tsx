@@ -79,7 +79,7 @@ function parseSse(chunk: string): { event: string; data: unknown } {
  * 思考過程：問答走 SSE 串流，把「思考中／正在查什麼／查到什麼」即時逐筆呈現；串流不可用時自動退回 tRPC 一次性問答。
  * 收起／清除：對話可整段收起（省版面、不丟執行中狀態）或一鍵清空重來；生成動作可在執行前自己換模型（多模態）。
  */
-export function ProjectAssistant({ projectId }: { projectId: string }) {
+export function ProjectAssistant({ projectId, embedded = false }: { projectId: string; embedded?: boolean }) {
   const utils = trpc.useUtils();
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -211,40 +211,48 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
   const thinkIcon = (phase: ThinkEvent["phase"]): "Loader" | "Search" | "Check" =>
     phase === "step" ? "Check" : phase === "lookup" ? "Search" : "Loader";
 
-  return (
-    <section className="card" data-fb="AI 助手" id="sec-assistant">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-        <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 專案助手
-        </h2>
-        <div style={{ display: "flex", gap: 6 }}>
-          {turns.length > 0 && (
-            <button
-              type="button"
-              className="btn-ghost btn-sm"
-              title="清空這段對話，重新開始"
-              onClick={clear}
-              disabled={busy || pendingKey !== null}
-            >
-              <Icon name="Trash2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />清除
-            </button>
+  // 四合一（專案 AI 代理系統）分頁模式：外殼與標題由 AiHub 提供；「收起」由分頁切換取代，不再另設
+  const showCollapse = !embedded;
+  const body = (
+    <>
+      {(!embedded || turns.length > 0) && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+          {!embedded && (
+            <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
+              <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 專案助手
+            </h2>
           )}
-          <button
-            type="button"
-            className="btn-ghost btn-sm"
-            aria-expanded={!collapsed}
-            aria-controls="sec-assistant-body"
-            title={collapsed ? "展開助手" : "收起助手（省版面）"}
-            onClick={() => setCollapsed((c) => !c)}
-          >
-            <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-            {collapsed ? "展開" : "收起"}
-          </button>
+          <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+            {turns.length > 0 && (
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                title="清空這段對話，重新開始"
+                onClick={clear}
+                disabled={busy || pendingKey !== null}
+              >
+                <Icon name="Trash2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />清除
+              </button>
+            )}
+            {showCollapse && (
+              <button
+                type="button"
+                className="btn-ghost btn-sm"
+                aria-expanded={!collapsed}
+                aria-controls="sec-assistant-body"
+                title={collapsed ? "展開助手" : "收起助手（省版面）"}
+                onClick={() => setCollapsed((c) => !c)}
+              >
+                <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                {collapsed ? "展開" : "收起"}
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 收起時顯示提示；本體恆掛在 DOM（用 hidden 切換）——aria-controls 不懸空，執行中/展開中的動作狀態也不會被卸載清掉 */}
-      {collapsed && (
+      {showCollapse && collapsed && (
         <p className="hint" style={{ marginTop: 8 }}>
           助手已收起{turns.length > 0 ? `（保留 ${turns.length} 則對話）` : ""}{busy ? "・仍在思考中" : ""}。點「展開」繼續。
         </p>
@@ -460,6 +468,13 @@ export function ProjectAssistant({ projectId }: { projectId: string }) {
           </button>
         </div>
       </div>
+    </>
+  );
+
+  if (embedded) return <div data-fb="AI 助手">{body}</div>;
+  return (
+    <section className="card" data-fb="AI 助手" id="sec-assistant">
+      {body}
     </section>
   );
 }

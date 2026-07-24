@@ -62,12 +62,14 @@ await page.waitForSelector("#sec-characters", { timeout: 20000 });
 await page.waitForTimeout(800);
 ok("角色勾選重整後仍勾著（持久化）", await page.locator('#sec-characters input[type="checkbox"]').first().isChecked());
 
-// ── 3. AI 助手快速提問 chips ──
+// ── 3. AI 助手快速提問 chips（四合一：先切到「專案問答」分頁） ──
+await page.locator('#sec-ai-hub [role="tab"]:has-text("專案問答")').click();
 ok("助手有快速提問 chips", (await page.locator('#sec-assistant button:has-text("這個專案進度到哪？")').count()) === 1);
 await page.locator('#sec-assistant button:has-text("這個專案進度到哪？")').click();
 ok("點了帶入輸入框（不自動送出）", (await page.locator('input[aria-label="問 AI 專案助手"]').inputValue()).includes("進度"));
 
-// ── 4. AI 導演建議 → 存成分鏡 ──
+// ── 4. AI 導演建議 → 存成分鏡（四合一：先切到「導演建議」分頁） ──
+await page.locator('#sec-ai-hub [role="tab"]:has-text("導演建議")').click();
 const scenesBefore = await page.locator("#onboard-delivery .gen-row").count();
 await page.locator('button:has-text("給我 3 個分鏡 idea")').click();
 await page.locator('.confirm-panel button:has-text("開始發想"), button:has-text("開始發想")').first().click();

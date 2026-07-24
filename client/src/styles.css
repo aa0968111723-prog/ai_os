@@ -390,7 +390,7 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
 .toc-toggle:focus-visible, .toc-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--r-8); }
 
 /* 捲動落點留白 */
-#onboard-worldview, #sec-knowledge, #sec-director, #sec-split, #sec-characters,
+#onboard-worldview, #sec-knowledge, #sec-ai-hub, #sec-director, #sec-split, #sec-characters,
 #sec-scenes, #sec-assets, #sec-recyclebin, #gen-prompt, #sec-prompts,
 #sec-workflow, #onboard-delivery { scroll-margin-top: var(--sp-16); }
 

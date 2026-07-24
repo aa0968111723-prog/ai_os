@@ -50,7 +50,8 @@ await page.waitForTimeout(1200);
 await shot(page, "05-knowledge");
 log("腳本已入知識庫");
 
-// 5. AI 拆分鏡（留空用知識庫）
+// 5. AI 拆分鏡（留空用知識庫）——四合一：先切到「拆分鏡」分頁
+await page.locator('#sec-ai-hub [role="tab"]:has-text("拆分鏡")').click();
 await page.locator('button:has-text("貼腳本自動拆分鏡")').click();
 await page.getByRole("button", { name: "拆成分鏡", exact: true }).click();
 await page.locator('button:has-text("開始拆分")').click();
@@ -108,7 +109,9 @@ const srtText = await srtRes.text();
 fs.writeFileSync(`${DIR}/timeline.srt`, srtText);
 log("srt 下載：", srtRes.status(), srtText.length, "chars");
 
-// 10. AI 代理一輪
+// 10. AI 代理一輪——四合一：先切回「AI 代理」分頁
+await page.locator("#sec-ai-hub").scrollIntoViewIfNeeded();
+await page.locator('#sec-ai-hub [role="tab"]:has-text("AI 代理")').click();
 await page.locator("#sec-agent").scrollIntoViewIfNeeded();
 await page.fill(`#agent-goal-${pid}`, "為片尾補一格感恩收尾鏡並生成畫面");
 await page.locator('#sec-agent button:has-text("規劃計畫")').click();
