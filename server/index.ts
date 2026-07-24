@@ -17,7 +17,7 @@ import { ensureSchema } from "./db/ensure";
 import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
 import { resolveSession } from "./services/auth";
-import { buildEdl, buildFcpxml, buildSrt, buildXmeml, exportProjectZip } from "./services/exporter";
+import { buildEdl, buildFcpxml, buildSrt, buildXmeml, exportProjectZip, exportZipName } from "./services/exporter";
 import { exportJianyingDraftZip } from "./services/jianying";
 import { handleMcp } from "./services/mcp";
 import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
@@ -31,6 +31,7 @@ import { attachRealtime } from "./services/realtime";
 import { startWorkflowRunner } from "./services/workflowRunner";
 import { startGenerationRunner, runnerHeartbeat } from "./services/generationRunner";
 import { startAgentRunner } from "./services/agentRunner";
+import { startExportRunner } from "./services/exportRunner";
 import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
@@ -231,7 +232,17 @@ app.get("/api/export/:projectId", async (req, res) => {
       return res.status(409).json({ error: "這個專案的交付包正在打包中——請等第一份完成（大包可能需要數分鐘），不用重複點擊" });
     }
     exportsInFlight.add(flightKey);
-    await exportProjectZip(project.id, res, assetIds.length > 0 ? assetIds : undefined);
+    // 打包核心已與 Response 解耦（QA-005 job 化共用）：標頭在此設定、斷線轉成 AbortSignal
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(exportZipName(project.title))}`);
+    const clientAbort = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) clientAbort.abort();
+    });
+    await exportProjectZip(project.id, res, {
+      assetIds: assetIds.length > 0 ? assetIds : undefined,
+      signal: clientAbort.signal,
+    });
   } catch (err) {
     console.error("[export]", err);
     recordError("export", err); // 進錯誤環形緩衝（selftest「近期錯誤」）
@@ -241,6 +252,27 @@ app.get("/api/export/:projectId", async (req, res) => {
     }
   } finally {
     if (flightKey) exportsInFlight.delete(flightKey);
+  }
+});
+
+// 匯出 job 成品下載（QA-005）：job 完成後由此取檔——登入＋組隔離，檔案從 Volume sendFile（支援 Range）
+app.get("/api/export/jobs/:jobId/download", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const [job] = await db.select().from(schema.exportJobs).where(eq(schema.exportJobs.id, req.params.jobId));
+    if (!job) return res.status(404).json({ error: "找不到這個匯出工作" });
+    if (!auth.groups.some((g) => g.groupId === job.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
+    if (job.status !== "done" || !job.storagePath) {
+      return res.status(409).json({ error: `交付包尚未就緒（目前狀態：${job.status}）`, status: job.status });
+    }
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(job.zipName ?? "交付包.zip")}`);
+    res.sendFile(absPathOf(job.storagePath));
+  } catch (err) {
+    console.error("[export-job:download]", err);
+    recordError("export-job:download", err);
+    if (!res.headersSent) res.status(500).json({ error: "下載失敗，請稍後再試" });
   }
 });
 
@@ -652,12 +684,13 @@ app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
     if (!auth.groups.some((g) => g.groupId === groupId)) return res.status(403).json({ error: "你不屬於這個組" });
     const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
     if (!group) return res.status(404).json({ error: "找不到組" });
+    // QA-017：行事曆訂閱是「全量」用途——上限拉高到 2000（一組行程遠低於此；防炸僅防極端）
     const items = await db
       .select()
       .from(schema.scheduleItems)
       .where(eq(schema.scheduleItems.groupId, groupId))
       .orderBy(asc(schema.scheduleItems.startsAt))
-      .limit(500);
+      .limit(2000);
     const { buildIcs } = await import("./routers/schedule");
     res.attachment("組排程.ics"); // RFC 5987 中文檔名
     res.setHeader("Content-Type", "text/calendar; charset=utf-8");
@@ -1058,6 +1091,7 @@ const httpServer = app.listen(port, () => {
         startWorkflowRunner();
         startGenerationRunner(); // A：單張生成也改由伺服器背景推進，關頁不再卡「生成中」
         startAgentRunner(); // AI 代理：核准後的計畫由伺服器背景逐步執行
+        startExportRunner(); // 交付包匯出 job（QA-005）：背景打包＋進度＋過期清理
         scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
         startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
         const { startGoogleCalendarSweep } = await import("./services/googleCalendar");

@@ -6,9 +6,8 @@
 import { ZipArchive } from "archiver";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { Readable, Transform } from "node:stream";
+import { Readable, Transform, type Writable } from "node:stream";
 import { proxyFetch } from "./http";
-import type { Response } from "express";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
@@ -610,12 +609,30 @@ export function appendAndWait(archive: ZipArchive, source: Readable | Buffer, na
   });
 }
 
+/** 交付包檔名（路由端設 Content-Disposition 用；與打包內部同一套 safeName 規則） */
+export function exportZipName(projectTitle: string): string {
+  return `${safeName(projectTitle)}_交付包.zip`;
+}
+
+/** exportProjectZip 的可選參數（QA-005 非同步 job 化：打包核心與 HTTP Response 解耦） */
+export interface ExportZipOptions {
+  /** 素材庫多選打包：提供時媒體檔只打包這些 id 的素材 */
+  assetIds?: string[];
+  /** 中止訊號：同步路由接用戶端斷線、export job 接取消——中止後停止抓取並 abort archive */
+  signal?: AbortSignal;
+  /** 進度回呼：每成功入包一個媒體檔回報一次（total＝預估可入包媒體數；bytes＝已寫出位元組） */
+  onProgress?: (p: { done: number; total: number; bytes: number }) => void;
+}
+
 /**
- * 打包交付 zip。assetIds（可選）＝素材庫多選打包：提供時媒體檔只打包這些 id 的素材
+ * 打包交付 zip 到任意 Writable（HTTP Response 或檔案 WriteStream——QA-005 非同步 job 共用同一核心）。
+ * assetIds（可選）＝素材庫多選打包：提供時媒體檔只打包這些 id 的素材
  * （場景素材/旁白/鎖定素材皆套用同一過濾），交付文件（鏡頭表/字幕/交付格式/README）照常產出，
  * 鏡頭表「檔名」欄如實反映未入包者為「（無素材）」。不傳＝維持既有全量打包行為。
+ * Content-Type/Content-Disposition 等 HTTP 標頭由呼叫端負責（用 exportZipName 取檔名）。
  */
-export async function exportProjectZip(projectId: string, res: Response, assetIds?: string[]): Promise<void> {
+export async function exportProjectZip(projectId: string, sink: Writable, opts?: ExportZipOptions): Promise<void> {
+  const assetIds = opts?.assetIds;
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new Error("找不到專案");
 
@@ -639,34 +656,43 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
   const shouldPack = (id: string) => !packSet || packSet.has(id);
 
   const worldview = worldviewSchema.parse(project.worldview ?? {});
-  const zipName = `${safeName(project.title)}_交付包.zip`;
-
-  res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(zipName)}`);
 
   const archive = new ZipArchive({ zlib: { level: 6 } });
   // archiver 對錯誤是發 'error' 事件——未監聽會變 unhandled 'error' 直接讓 Node 程序崩潰。
+  // 錯誤時 destroy sink：HTTP Response 會斷線（同舊行為）、檔案 WriteStream 會關檔；
+  // appendAndWait／finalize 的錯誤路徑本就會 throw 給呼叫端收尾。
   archive.on("error", (err) => {
     console.error("[export] 打包錯誤：", err instanceof Error ? err.message : err);
-    if (!res.headersSent) {
-      // 標頭還沒 flush 就失敗：先撤掉 zip/attachment 標頭再回錯，否則瀏覽器把錯誤內文存成壞掉的 .zip
-      res.removeHeader("Content-Disposition");
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      res.status(500).end("打包失敗");
-    } else res.destroy();
+    // 打包核心與 HTTP 解耦後改 destroy sink：HTTP Response 會斷線、檔案 WriteStream 會關檔；
+    // 「錯誤別被存成壞 .zip」的標頭撤除由呼叫端（index.ts 的路由 catch）負責。
+    sink.destroy(err instanceof Error ? err : new Error(String(err)));
   });
-  // 用戶端中途取消下載時，停止打包、釋放資源，別再往斷掉的連線寫。
+  // 中止（用戶端斷線／job 取消）時停止打包、釋放資源。
   // 必須用 archive.abort() 而非 destroy()：abort 才會殺掉內部佇列並收尾（_queue.kill + _shutdown），
   // destroy 只斷資料流，佇列滯留持有所有已排入來源、finalize 的 promise 永不 settle。
-  // clientAbort 同時讓進行中的 proxyFetch / append 等待立即中止，不再白抓剩餘素材。
-  const clientAbort = new AbortController();
-  res.on("close", () => {
-    if (!res.writableEnded) {
-      clientAbort.abort();
-      archive.abort();
-    }
-  });
-  archive.pipe(res);
+  // 同一訊號也讓進行中的 proxyFetch / append 等待立即中止，不再白抓剩餘素材。
+  const abortSignal = opts?.signal ?? new AbortController().signal;
+  abortSignal.addEventListener("abort", () => archive.abort(), { once: true });
+  archive.pipe(sink);
+
+  // 進度回報（QA-005）：total＝預估「可入包」媒體數（有落地檔或外部網址、且通過多選過濾者），
+  // 每成功入包一個回報一次；個別檔下載失敗被跳過時 done 不會到 total——最終狀態以 job status 為準。
+  const isFetchable = (a: { storagePath: string | null; url: string | null } | undefined): boolean =>
+    !!a && (!!a.storagePath || !!(a.url && /^https?:\/\//.test(a.url)));
+  const totalEntries =
+    scenes.filter((sc) => {
+      const a = assets.find((x) => x.id === sc.assetId);
+      return a && shouldPack(a.id) && isFetchable(a);
+    }).length +
+    scenes.filter((sc) => {
+      if (!sc.narrationAssetId) return false;
+      const a = assets.find((x) => x.id === sc.narrationAssetId);
+      return a && shouldPack(a.id) && isFetchable(a);
+    }).length +
+    assets.filter((a) => a.locked && shouldPack(a.id) && isFetchable(a)).length;
+  let doneEntries = 0;
+  const reportProgress = () => opts?.onProgress?.({ done: doneEntries, total: totalEntries, bytes: archive.pointer() });
+  reportProgress();
 
   // 05_文件／腳本與鏡頭表.md（一定有）
   const lines: string[] = [
@@ -703,7 +729,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
   // 序號動態補零：依總鏡數決定位數（至少 2 位），避免破百鏡在檔案總管字典序亂序。
   const sceneNumWidth = Math.max(2, String(scenes.length).length);
   for (const [i, scene] of scenes.entries()) {
-    if (clientAbort.signal.aborted) return; // 斷線後別再抓剩餘素材白做工
+    if (abortSignal.aborted) return; // 斷線後別再抓剩餘素材白做工
     const asset = assets.find((a) => a.id === scene.assetId);
     if (!asset || !shouldPack(asset.id)) continue; // 多選打包：未勾選的素材不入包（鏡頭表標「（無素材）」）
     // 來源一律以串流進 archive（不整檔進 RAM）；「取得來源」階段的失敗屬單檔容錯：跳過＋註記
@@ -716,7 +742,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
         source = createReadStream(abs);
       } else if (asset.url && /^https?:\/\//.test(asset.url)) {
         // 30 秒逾時涵蓋連線與串流階段；用戶端斷線也會中止進行中的抓取
-        const fileRes = await fetchRemoteAsset(asset.url, clientAbort.signal);
+        const fileRes = await fetchRemoteAsset(asset.url, abortSignal);
         if (!fileRes.ok || !fileRes.body) {
           void fileRes.body?.cancel().catch(() => {}); // 不讀的 body 要取消，避免連線被佔住
           console.warn(`[export] 素材下載失敗 ${asset.url}: HTTP ${fileRes.status}`);
@@ -735,7 +761,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
         continue;
       }
     } catch (err) {
-      if (clientAbort.signal.aborted) return; // 斷線引發的中止不是素材問題，直接收工
+      if (abortSignal.aborted) return; // 斷線引發的中止不是素材問題，直接收工
       console.warn(`[export] 素材讀取失敗 ${asset.storagePath ?? asset.url}:`, err instanceof Error ? err.message : err);
       warnings.push(`「${scene.title}」素材讀取失敗，未入包（可於系統內重新生成）`);
       continue;
@@ -757,24 +783,26 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
       name = `03_圖像/${num}_${safeName(scene.title)}${extOf(".jpg")}`;
     }
     try {
-      await appendAndWait(archive, source, name, clientAbort.signal);
+      await appendAndWait(archive, source, name, abortSignal);
       writtenNames[i] = name; // 成功入包才回填鏡頭表的實際相對檔名
-      writtenKinds[i] = kind;
+      writtenKinds[i] = kind; // 媒體連結版時間軸要知道用哪種元素引用（video/image/audio）
+      doneEntries += 1;
+      reportProgress();
     } catch (err) {
-      if (clientAbort.signal.aborted) return; // 斷線中止視為正常結束，不往外拋 500
+      if (abortSignal.aborted) return; // 斷線中止視為正常結束，不往外拋 500
       // append 之後的串流錯誤代表該 entry 半寫、zip 已不可修復——不能 continue 交付壞包，
       // 直接往外拋，由既有 archive error handler＋index.ts 的 catch 收尾。
       throw err;
     }
   }
 
-  if (clientAbort.signal.aborted) return;
+  if (abortSignal.aborted) return;
 
   // 02_旁白音檔：逐鏡旁白配音（scenes.narrationAssetId 指向的 asset）。與畫面素材各自獨立——
   // 一幕即使沒有畫面素材，只要有旁白就照樣輸出，檔名鏡號與畫面素材同一套動態補零，方便對齊字幕與畫面。
   // 取來源方式比照場景素材：已落地讀 Volume、否則抓外網，逐檔容錯（失敗只記警告、不毀整包）。
   for (const [i, scene] of scenes.entries()) {
-    if (clientAbort.signal.aborted) return;
+    if (abortSignal.aborted) return;
     if (!scene.narrationAssetId) continue;
     const narr = assets.find((a) => a.id === scene.narrationAssetId);
     if (!narr || !shouldPack(narr.id)) continue; // 多選打包：未勾選的旁白音檔不入包
@@ -785,7 +813,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
         await stat(abs);
         source = createReadStream(abs);
       } else if (narr.url && /^https?:\/\//.test(narr.url)) {
-        const fileRes = await fetchRemoteAsset(narr.url, clientAbort.signal);
+        const fileRes = await fetchRemoteAsset(narr.url, abortSignal);
         if (!fileRes.ok || !fileRes.body) {
           void fileRes.body?.cancel().catch(() => {});
           console.warn(`[export] 旁白下載失敗 ${narr.url}: HTTP ${fileRes.status}`);
@@ -804,7 +832,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
         continue;
       }
     } catch (err) {
-      if (clientAbort.signal.aborted) return;
+      if (abortSignal.aborted) return;
       console.warn(`[export] 旁白讀取失敗 ${narr.storagePath ?? narr.url}:`, err instanceof Error ? err.message : err);
       warnings.push(`「${scene.title}」旁白音檔讀取失敗，未入包`);
       continue;
@@ -813,15 +841,17 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
     const ext = (narr.mime && extFromMime(narr.mime)) || ".mp3";
     const name = `02_旁白音檔/${num}_旁白${ext}`;
     try {
-      await appendAndWait(archive, source, name, clientAbort.signal);
+      await appendAndWait(archive, source, name, abortSignal);
       narrationNames[i] = name; // 成功入包才回填鏡頭表
+      doneEntries += 1;
+      reportProgress();
     } catch (err) {
-      if (clientAbort.signal.aborted) return;
+      if (abortSignal.aborted) return;
       throw err;
     }
   }
 
-  if (clientAbort.signal.aborted) return;
+  if (abortSignal.aborted) return;
 
   // 鏡頭表主體：每幕一列，補上實際寫入交付包的相對檔名（缺媒體標「（無素材）」）、旁白音檔檔名與累計進出點時間碼。
   for (const [i, scene] of scenes.entries()) {
@@ -843,7 +873,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
   const lockedNumWidth = Math.max(2, String(lockedAssets.length).length);
   const kindDir: Record<string, string> = { audio: "音訊", video: "影片", image: "圖像", doc: "文件" };
   for (const asset of lockedAssets) {
-    if (clientAbort.signal.aborted) return;
+    if (abortSignal.aborted) return;
     let source: Readable;
     try {
       if (asset.storagePath) {
@@ -851,7 +881,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
         await stat(abs);
         source = createReadStream(abs);
       } else if (asset.url && /^https?:\/\//.test(asset.url)) {
-        const fileRes = await fetchRemoteAsset(asset.url, clientAbort.signal);
+        const fileRes = await fetchRemoteAsset(asset.url, abortSignal);
         if (!fileRes.ok || !fileRes.body) {
           void fileRes.body?.cancel().catch(() => {});
           warnings.push(`鎖定素材「${asset.title}」下載失敗（HTTP ${fileRes.status}），未入包`); // 與場景素材分支一致：非 OK 要記警告
@@ -868,7 +898,7 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
         continue;
       }
     } catch (err) {
-      if (clientAbort.signal.aborted) return;
+      if (abortSignal.aborted) return;
       warnings.push(`鎖定素材「${asset.title}」讀取失敗，未入包`);
       continue;
     }
@@ -876,9 +906,11 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
     const ext = (asset.mime && extFromMime(asset.mime)) || "";
     const num = String(lockedIdx).padStart(lockedNumWidth, "0");
     try {
-      await appendAndWait(archive, source, `00_鎖定原素材/${kindDir[asset.kind] ?? "其他"}/${num}_${safeName(asset.title)}${ext}`, clientAbort.signal);
+      await appendAndWait(archive, source, `00_鎖定原素材/${kindDir[asset.kind] ?? "其他"}/${num}_${safeName(asset.title)}${ext}`, abortSignal);
+      doneEntries += 1;
+      reportProgress();
     } catch (err) {
-      if (clientAbort.signal.aborted) return;
+      if (abortSignal.aborted) return;
       throw err;
     }
   }
@@ -960,8 +992,9 @@ export async function exportProjectZip(projectId: string, res: Response, assetId
 
   try {
     await archive.finalize();
+    reportProgress(); // finalize 後 bytes 才是最終大小
   } catch (err) {
     // abort() 之後 finalize 會以 ABORTED reject——斷線導致的中止是正常結束，不往外拋
-    if (!clientAbort.signal.aborted) throw err;
+    if (!abortSignal.aborted) throw err;
   }
 }

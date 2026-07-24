@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
 import { getModel, MODELS, tierLabel, estimatePoints } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
+import { ExportJobButton } from "./ExportJobButton";
 import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip } from "./interactions";
 import { discussInMessages } from "../discuss";
@@ -617,16 +618,8 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
             />
           ))}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
-            <a
-              href={`/api/export/${projectId}`}
-              download
-              style={{
-                display: "inline-block", padding: "10px 18px", borderRadius: "var(--r-12)", textDecoration: "none",
-                background: "var(--primary-solid)", color: "var(--primary-fg)", boxShadow: "var(--e2)", fontSize: "var(--fs-14)",
-              }}
-            >
-              打包下載交付包（.zip）
-            </a>
+            {/* QA-005：非同步 job 版打包——就地顯示進度/取消/完成下載，不再是看似卡死的同步下載 */}
+            <ExportJobButton projectId={projectId} />
             {/* 單檔時間軸/字幕下載（需求 #8＋直連強化）：依目標軟體列出可直接匯入的檔，各一顆下載鈕 */}
             <label style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
               目標剪輯軟體
