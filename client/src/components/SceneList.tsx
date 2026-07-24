@@ -217,8 +217,15 @@ function SceneRow({
       savedTimer.current = setTimeout(() => setSavedFlash(false), 2000);
     },
   });
-  const generate = trpc.scenes.generateInto.useMutation({ onSuccess: invalidate });
-  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({ onSuccess: invalidate });
+  // 冪等鍵（QA-007）：同一格「還沒成功」的生成/配音重試沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
+  const genRequestId = useRef<string>(crypto.randomUUID());
+  const voiceRequestId = useRef<string>(crypto.randomUUID());
+  const generate = trpc.scenes.generateInto.useMutation({
+    onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
+  });
+  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({
+    onSuccess: () => { voiceRequestId.current = crypto.randomUUID(); invalidate(); },
+  });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
   // 配音生成中：後端背景 runner 完成後會回填 narrationAssetId，10 秒輪詢自動刷新
@@ -307,7 +314,7 @@ function SceneRow({
                     triggerTitle="用這一格的配音詞生成中文旁白，完成後自動出現試聽"
                     message={`即將生成旁白配音（${getModel(DEFAULT_TTS_MODEL)?.label ?? "中文 TTS"}${ttsPoints != null ? `，約 −${ttsPoints} 點` : ""}）；失敗自動退點`}
                     confirmLabel="確認生成"
-                    onConfirm={() => generateVoiceover.mutate({ sceneId: s.id })}
+                    onConfirm={() => generateVoiceover.mutate({ sceneId: s.id, clientRequestId: voiceRequestId.current })}
                   >
                     {s.narrationUrl ? (
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -375,7 +382,7 @@ function SceneRow({
                 triggerTitle="用這一格的提示詞就地生成，完成後自動回填縮圖"
                 message={`即將${s.assetId ? "重生" : "生成"}這一格（${genModel?.label ?? genModelId}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
                 confirmLabel="確認生成"
-                onConfirm={() => generate.mutate({ sceneId: s.id, modelId: genModel?.id ?? DEFAULT_MODEL })}
+                onConfirm={() => generate.mutate({ sceneId: s.id, modelId: genModel?.id ?? DEFAULT_MODEL, clientRequestId: genRequestId.current })}
               >
                 {s.assetId ? (
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
