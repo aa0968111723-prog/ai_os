@@ -286,13 +286,14 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
     const note = (sc.voiceover ?? "").trim() ? `${sc.title}｜${(sc.voiceover ?? "").trim()}` : sc.title;
     const clipName = escXml(`${i + 1}_${sc.title}`);
 
-    // 音訊 asset（旁白與音訊類場景素材共用）：不宣告 duration——實際音長未探測，亂宣告會在
-    // relink 後造成源範圍越界；檔案在場時 FCP 直接讀實長（Apple 文件：屬性省略即由媒體檔推導）
+    // 音訊 asset（旁白與音訊類場景素材共用）。duration 宣告該鏡秒數：省略的話 DTD 預設 0s，
+    // 離線匯入（Resolve 不解析相對路徑＝必先離線）會變「0s 素材被 N 秒 clip 引用」的越界；
+    // 宣告值只在離線時生效，檔案在場時 FCP 一律讀實檔（relink 到較短檔僅提示並自動限幅）。
     const audioAsset = (path: string) => {
       assetSeq += 1;
       const id = `a${assetSeq}`;
       resources.push(
-        `    <asset id="${id}" name="${escXml(baseName(path))}" start="0s" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">\n` +
+        `    <asset id="${id}" name="${escXml(baseName(path))}" start="0s" duration="${dur}" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">\n` +
           `      <media-rep kind="original-media" src="${escXml(relUri(prefix, path))}"/>\n` +
           `    </asset>`,
       );
@@ -327,9 +328,11 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
     } else if (sc.mediaPath && sc.mediaKind === "video") {
       assetSeq += 1;
       const aid = `a${assetSeq}`;
-      // 影片 asset 同樣不宣告 duration（實長未探測）；asset-clip 端明確給時間軸長度即可
+      // 影片 asset：duration 同音訊 asset 的理由宣告該鏡秒數（離線匯入自洽）；只宣告視訊——
+      // 與 xmeml 的 <media><video/></media> 一致（兩份時間軸聲音行為才不會不同軟體不同結果），
+      // 實檔有無音軌在場時由剪輯軟體讀實檔決定
       resources.push(
-        `    <asset id="${aid}" name="${escXml(baseName(sc.mediaPath))}" start="0s" hasVideo="1" hasAudio="1" format="r1" audioSources="1" audioChannels="2" audioRate="48000">\n` +
+        `    <asset id="${aid}" name="${escXml(baseName(sc.mediaPath))}" start="0s" duration="${dur}" hasVideo="1" videoSources="1" format="r1">\n` +
           `      <media-rep kind="original-media" src="${escXml(relUri(prefix, sc.mediaPath))}"/>\n` +
           `    </asset>`,
       );

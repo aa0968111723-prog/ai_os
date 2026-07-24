@@ -82,7 +82,7 @@ describe("buildFcpxml(骨架版:無媒體路徑)", () => {
       ],
       "P",
     );
-    expect(xml).toMatch(/<asset id="a\d+" name="01_開場\.mp4" start="0s" hasVideo="1"/);
+    expect(xml).toMatch(/<asset id="a\d+" name="01_開場\.mp4" start="0s" duration="5s" hasVideo="1"/);
     expect(xml).toContain(`<media-rep kind="original-media" src="./${encodeURIComponent("01_視頻素材")}/${encodeURIComponent("01_開場.mp4")}"/>`);
     expect(xml).toMatch(/<asset-clip ref="a\d+" offset="0s" start="0s" duration="5s" name="1_開場">/);
     // 無媒體的鏡仍是 gap，offset 接續在前一鏡之後
@@ -100,8 +100,11 @@ const linkedScenes: TimelineScene[] = [
 describe("buildFcpxml(媒體連結版)", () => {
   const xml = buildFcpxml(linkedScenes, "專案", { pathPrefix: "../" });
 
-  it("影片鏡:asset(30fps format r1)＋spine asset-clip,src 為 ../ 相對 URI 且逐段 percent-encode", () => {
-    expect(xml).toContain(`hasVideo="1" hasAudio="1" format="r1"`);
+  it("影片鏡:asset(30fps format r1、duration=該鏡秒數、只聲明視訊)＋spine asset-clip,src 為 ../ 相對 URI 且逐段 percent-encode", () => {
+    // duration 宣告該鏡秒數:省略會落 DTD 預設 0s,離線匯入（Resolve 必先離線）變成 0s 素材被 5s clip 引用
+    // 只聲明視訊（無 hasAudio）——與 xmeml 的 <media><video/></media> 一致,兩份時間軸聲音行為才相同
+    expect(xml).toMatch(/<asset id="a\d+" name="01_開場\.mp4" start="0s" duration="5s" hasVideo="1" videoSources="1" format="r1">/);
+    expect(xml).not.toMatch(/name="01_開場\.mp4"[^>]*hasAudio/);
     expect(xml).toContain(`src="../${encodeURIComponent("01_視頻素材")}/${encodeURIComponent("01_開場.mp4")}"`);
     expect(xml).toMatch(/<asset-clip ref="a\d+" offset="0s" start="0s" duration="5s" name="1_開場">/);
   });
@@ -118,9 +121,8 @@ describe("buildFcpxml(媒體連結版)", () => {
     expect(xml).toMatch(/<gap name="3_收尾" offset="9s" start="0s" duration="3s">[\s\S]*?lane="-1"[\s\S]*?<\/gap>/);
   });
 
-  it("旁白 asset 只聲明音訊(hasAudio、無 format ref),且不宣告未探測的媒體長度", () => {
-    expect(xml).toMatch(/<asset id="a\d+" name="02_旁白\.mp3" start="0s" hasAudio="1"/);
-    expect(xml).not.toMatch(/name="02_旁白\.mp3"[^>]*duration=/);
+  it("旁白 asset 只聲明音訊(hasAudio、無 format ref),duration=該鏡秒數(離線匯入自洽)", () => {
+    expect(xml).toMatch(/<asset id="a\d+" name="02_旁白\.mp3" start="0s" duration="4s" hasAudio="1"/);
   });
 
   it("音訊類場景素材:掛 lane=-2 connected clip(與 lane=-1 旁白並存)", () => {

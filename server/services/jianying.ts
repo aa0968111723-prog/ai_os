@@ -182,6 +182,11 @@ export function buildJianyingDraftContent(scenes: JyScene[], draftName: string):
 
     // 字幕：與 04_字幕/SRT 同一套可讀性切塊（每塊 ≤18 全形字、最短 0.8 秒），一塊一素材一片段
     for (const cue of splitCue(sc.voiceover ?? "", startSec, cumSec)) {
+      // 邊界各自取整再相減（與 media segment 同一套「累計值取整」規則）：獨立四捨五入起點與長度
+      // 會讓相鄰字幕可能重疊 1µs——剪映同軌 segment 不可重疊（pyJianYingDraft 遇重疊即拋錯）
+      const cueStartUs = Math.round(cue.start * US);
+      const cueDurUs = Math.round(cue.end * US) - cueStartUs;
+      if (cueDurUs <= 0) continue; // 理論上不會發生（切塊最短 0.8s），防禦浮點極端值；先擋掉才不會留孤兒素材
       const tid = hex32();
       texts.push({
         id: tid,
@@ -211,7 +216,7 @@ export function buildJianyingDraftContent(scenes: JyScene[], draftName: string):
         global_alpha: 1.0,
       });
       textSegs.push({
-        ...baseSegment(tid, Math.round(cue.start * US), Math.max(Math.round((cue.end - cue.start) * US), 1)),
+        ...baseSegment(tid, cueStartUs, cueDurUs),
         source_timerange: null,
         // 比照 pyJianYingDraft：text 片段引用的 speed id 不登記進 materials.speeds（其實測輸出即如此）
         extra_material_refs: [hex32()],
