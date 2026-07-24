@@ -3,7 +3,7 @@
  * 讓 tRPC 路由與「tRPC 之外的入口」（MCP 介面）共用同一批守門（組隔離、專案／留言歸屬校驗、
  * @提及校驗、時間合法性）——與 generationCore／agentCore 同一設計理由，防護不分岔。
  */
-import { and, asc, eq, gte, isNull, or, type SQL } from "drizzle-orm";
+import { and, asc, eq, gt, gte, isNull, or, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -35,7 +35,12 @@ export async function listScheduleForGroup(
 }>> {
   requireGroup(auth, groupId);
   const conds: SQL[] = [eq(schema.scheduleItems.groupId, groupId)];
-  if (!includePast) conds.push(gte(schema.scheduleItems.startsAt, new Date(Date.now() - 24 * 60 * 60 * 1000)));
+  // overlap 條件（QA-017）：不能只看 startsAt——開始超過 24 小時前、但「還沒結束」的長行程
+  //（跨日會議、多日營隊）也必須出現。判準：startsAt 在窗內，或 endsAt 還在未來（仍進行中）。
+  if (!includePast) {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    conds.push(or(gte(schema.scheduleItems.startsAt, cutoff), gt(schema.scheduleItems.endsAt, new Date()))!);
+  }
   // 專案視角：只回該專案的行程＋整組共用（未掛專案）的行程，避免 300 筆上限被別的專案吃掉。
   if (projectId) conds.push(or(eq(schema.scheduleItems.projectId, projectId), isNull(schema.scheduleItems.projectId))!);
   return db
