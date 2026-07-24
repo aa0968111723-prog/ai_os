@@ -111,6 +111,8 @@ export function WorkflowCard({
     if (!hasActive) return;
     const refresh = () => {
       utils.generation.listByProject.invalidate({ projectId });
+      // 分頁/篩選視圖同步失效，否則工作流逐步落庫的成品在該視圖看不到（修 agent-workflow-refresh-missing-paged）
+      utils.generation.listByProjectPaged.invalidate({ projectId });
       utils.quota.my.invalidate();
     };
     const timer = setInterval(refresh, 4000);

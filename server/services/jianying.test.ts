@@ -29,6 +29,18 @@ describe("buildJianyingDraftContent", () => {
     expect(draft.name).toBe("測試_AI草稿");
   });
 
+  it("畫布依專案比例：9:16 直式→1080×1920、1:1 方形→1080×1080（修 jianying 硬編橫向）", () => {
+    const portrait = JSON.parse(buildJianyingDraftContent(scenes, "直式", "9:16").content);
+    expect(portrait.canvas_config.width).toBe(1080);
+    expect(portrait.canvas_config.height).toBe(1920);
+    const square = JSON.parse(buildJianyingDraftContent(scenes, "方形", "1:1").content);
+    expect(square.canvas_config.width).toBe(1080);
+    expect(square.canvas_config.height).toBe(1080);
+    // 未給或 16:9 → 沿用橫向 1920×1080（向後相容）
+    const land = JSON.parse(buildJianyingDraftContent(scenes, "橫式", "16:9").content);
+    expect(land.canvas_config).toEqual({ height: 1080, ratio: "original", width: 1920 });
+  });
+
   it("視覺素材:影片 type=video、時長=該鏡秒數;圖片 type=photo、固定 3 小時", () => {
     expect(draft.materials.videos).toHaveLength(2);
     const [video, photo] = draft.materials.videos;

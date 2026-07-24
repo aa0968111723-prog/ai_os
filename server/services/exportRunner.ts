@@ -24,6 +24,12 @@ const STALE_RUNNING_MS = 30 * 60 * 1000;
 const JOB_TTL_MS = 24 * 60 * 60 * 1000;
 /** 進度寫 DB 的節流：兩次進度更新至少間隔此毫秒（小檔連發 append 不狂寫 DB） */
 const PROGRESS_MIN_INTERVAL_MS = 1000;
+/**
+ * 單一 job 最長打包時間（修 export-runner-single-worker-hol）：打包為全域單工序列，一件超大/超慢的匯出
+ * 只要持續有進度就永遠不被 30 分陳屍門檻回收（onProgress 一直刷新 updatedAt），會無限期霸佔唯一 worker、
+ * 餓死其他租戶排隊的 job。硬性上限到期即中止該 job（標 failed 讓使用者重試/縮小範圍），釋放 worker 消化佇列。
+ */
+const MAX_JOB_DURATION_MS = 15 * 60 * 1000;
 
 let started = false;
 let ticking = false;
@@ -75,6 +81,12 @@ async function claimAndRun(): Promise<void> {
   const tmpPath = path.join(tmpDir(), `export-job-${job.id}.zip`);
   const abort = new AbortController();
   let lastProgressAt = 0;
+  // 硬性最長打包時間：到期中止本 job，讓單一巨包不致無限霸佔唯一 worker、餓死佇列
+  let timedOut = false;
+  const jobTimer = setTimeout(() => {
+    timedOut = true;
+    abort.abort(new Error("打包逾時"));
+  }, MAX_JOB_DURATION_MS);
   try {
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, job.projectId));
     if (!project) throw new Error("找不到專案（可能已被刪除）");
@@ -120,17 +132,26 @@ async function claimAndRun(): Promise<void> {
     console.log(`[export-job] 完成 ${job.id}（${Math.round(sizeBytes / 1024)}KB）`);
   } catch (err) {
     await unlink(tmpPath).catch(() => {});
-    const wasCancelled = abort.signal.aborted;
+    // 逾時中止：雖走 abort 但視為 failed（讓使用者知道要重試/縮小範圍），與「使用者主動取消」區分
+    const wasCancelled = abort.signal.aborted && !timedOut;
     await db
       .update(schema.exportJobs)
       .set({
         status: wasCancelled ? "cancelled" : "failed",
-        error: wasCancelled ? null : err instanceof Error ? err.message : String(err),
+        error: wasCancelled
+          ? null
+          : timedOut
+            ? `打包超過最長時間（${Math.round(MAX_JOB_DURATION_MS / 60000)} 分鐘）已自動中止——素材過多或來源過慢，請縮小選取範圍後重試`
+            : err instanceof Error
+              ? err.message
+              : String(err),
         updatedAt: new Date(),
       })
       .where(and(eq(schema.exportJobs.id, job.id), inArray(schema.exportJobs.status, ["running", "cancelled"])))
       .catch(() => {});
-    if (!wasCancelled) console.warn(`[export-job] 失敗 ${job.id}：`, err instanceof Error ? err.message : err);
+    if (!wasCancelled) console.warn(`[export-job] ${timedOut ? "逾時" : "失敗"} ${job.id}：`, err instanceof Error ? err.message : err);
+  } finally {
+    clearTimeout(jobTimer);
   }
 }
 

@@ -36,6 +36,22 @@ describe("buildSrt", () => {
   });
 });
 
+describe("時間軸解析度依專案比例（修 fcpxml/xmeml 硬編橫向）", () => {
+  it("FCPXML：9:16 直式→format width/height=1080/1920 且不掛 1080p30 preset 名；未給→維持 1920×1080", () => {
+    const portrait = buildFcpxml(scenes, "直式", { width: 1080, height: 1920 });
+    expect(portrait).toContain(`width="1080" height="1920"`);
+    expect(portrait).not.toContain(`name="FFVideoFormat1080p30"`); // 非標準 1080p 不掛會被 FCP 誤配的 preset 名
+    const land = buildFcpxml(scenes, "橫式");
+    expect(land).toContain(`name="FFVideoFormat1080p30"`);
+    expect(land).toContain(`width="1920" height="1080"`);
+  });
+  it("Premiere XML：1:1 方形→samplecharacteristics width/height=1080/1080", () => {
+    const square = buildXmeml(scenes, "方形", { width: 1080, height: 1080 });
+    expect(square).toContain(`<width>1080</width><height>1080</height>`);
+    expect(square).not.toContain(`<width>1920</width>`);
+  });
+});
+
 describe("buildFcpxml(骨架版:無媒體路徑)", () => {
   it("結構完整:1.9 版本、30fps format、sequence 總長=各鏡和、gap offset 累加", () => {
     const xml = buildFcpxml(scenes, "測試專案");

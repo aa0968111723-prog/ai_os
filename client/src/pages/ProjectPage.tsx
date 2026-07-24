@@ -380,6 +380,8 @@ export function ProjectPage({ id }: { id: string }) {
     // fal submit 失敗時伺服器也已寫入一筆 failed 列並退點——成功失敗都要刷新列表與點數
     onSettled: () => {
       utils.generation.listByProject.invalidate({ projectId: id });
+      // 分頁/篩選視圖用 listByProjectPaged——同步失效，否則展開或篩選狀態下新生成不顯示（修 submit-missing-paged-invalidate）
+      utils.generation.listByProjectPaged.invalidate({ projectId: id });
       utils.quota.my.invalidate();
     },
   });

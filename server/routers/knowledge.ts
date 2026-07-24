@@ -32,7 +32,23 @@ const INJECT_BUDGET = 8_000;
  * 夥伴在卡片庫維護的設定（外觀錨點、色板光線）對 AI 導演與助手同步可見，
  * 不必再手動抄一份進知識庫；卡片字數也計入 budget（先扣卡片、剩餘額度才放知識長文）。
  */
+/** 知識注入的截斷中繼：totalContentChars＝知識長文全量、includedChars＝實際注入量、truncated＝有無被腰斬。
+ *  供拆分鏡等呼叫端把「知識庫太長被截、尾段鏡頭會消失」透明回報給 UI（修 knowledge-split-silent-truncation）。 */
+export interface KnowledgeContextMeta {
+  text: string;
+  totalContentChars: number;
+  includedChars: number;
+  truncated: boolean;
+}
+
 export async function buildKnowledgeContext(projectId: string, budgetChars: number = INJECT_BUDGET): Promise<string> {
+  return (await buildKnowledgeContextWithMeta(projectId, budgetChars)).text;
+}
+
+export async function buildKnowledgeContextWithMeta(
+  projectId: string,
+  budgetChars: number = INJECT_BUDGET,
+): Promise<KnowledgeContextMeta> {
   // 三個查詢互不相依，並行省 DB 往返（知識照舊過濾軟刪除；卡片兩表沒有回收桶，全量即正確）
   const [rows, chars, presets] = await Promise.all([
     db
@@ -62,7 +78,9 @@ export async function buildKnowledgeContext(projectId: string, budgetChars: numb
   }
   const cardBlock = cardParts.join("\n");
 
-  if (rows.length === 0 && !cardBlock) return "";
+  // 知識長文全量（不含卡片——卡片是有界錨點、完整注入）：供截斷透明化計算「掉了多少」
+  const totalContentChars = rows.reduce((sum, r) => sum + r.content.length, 0);
+  if (rows.length === 0 && !cardBlock) return { text: "", totalContentChars: 0, includedChars: 0, truncated: false };
   const labelOf = (k: string) => KNOWLEDGE_KINDS.find((x) => x.id === k)?.label ?? k;
   const parts: string[] = [];
   let budget = Math.max(0, budgetChars);
@@ -70,13 +88,20 @@ export async function buildKnowledgeContext(projectId: string, budgetChars: numb
     parts.push(cardBlock);
     budget = Math.max(0, budget - cardBlock.length); // 卡片先佔額度，知識長文吃剩餘
   }
+  let includedChars = 0;
+  let truncated = false;
   for (const r of rows) {
-    if (budget <= 0) break;
+    if (budget <= 0) {
+      truncated = true; // 還有知識沒注入（額度用光）
+      break;
+    }
     const slice = r.content.slice(0, budget);
+    if (slice.length < r.content.length) truncated = true; // 這筆被腰斬
+    includedChars += slice.length;
     parts.push(`【${labelOf(r.kind)}｜${r.title}】\n${slice}${r.content.length > slice.length ? "…(截斷)" : ""}`);
     budget -= slice.length;
   }
-  return parts.join("\n\n");
+  return { text: parts.join("\n\n"), totalContentChars, includedChars, truncated };
 }
 
 /** 版本歷史（#29）每個 refId 保留的最近版本上限——超過就把最舊的刪掉，避免逐字稿版本無限累積撐爆 DB */

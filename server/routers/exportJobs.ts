@@ -3,6 +3,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
+import { lockExportDedup } from "../services/locks";
 
 /**
  * 交付包匯出 job（QA-005）：建 job → exportRunner 背景打包 → 前端輪詢進度 → 完成後走
@@ -34,25 +35,29 @@ export const exportJobsRouter = router({
       requireGroup(ctx.auth, project.groupId);
 
       const key = assetKey(input.assetIds);
-      // 防重複（QA-005）：同專案的 queued/running job 逐筆比對素材選擇鍵——存在即共用
-      const pending = await db
-        .select()
-        .from(schema.exportJobs)
-        .where(and(eq(schema.exportJobs.projectId, project.id), inArray(schema.exportJobs.status, ["queued", "running"])))
-        .orderBy(desc(schema.exportJobs.createdAt));
-      const existing = pending.find((j) => assetKey(j.assetIds as string[] | null) === key);
-      if (existing) return { job: existing, reused: true };
+      // 防重複（QA-005 ＋ export-job-dedup-not-atomic）：整個「查進行中→無則建」放進交易並取 per-(project,assetKey)
+      // advisory lock——舊版讀後寫非原子，雙擊/併發下兩者都讀到「無進行中」而各插一筆，產出兩份相同交付包。
+      return db.transaction(async (tx) => {
+        await lockExportDedup(tx, project.id, key);
+        const pending = await tx
+          .select()
+          .from(schema.exportJobs)
+          .where(and(eq(schema.exportJobs.projectId, project.id), inArray(schema.exportJobs.status, ["queued", "running"])))
+          .orderBy(desc(schema.exportJobs.createdAt));
+        const existing = pending.find((j) => assetKey(j.assetIds as string[] | null) === key);
+        if (existing) return { job: existing, reused: true };
 
-      const [job] = await db
-        .insert(schema.exportJobs)
-        .values({
-          projectId: project.id,
-          groupId: project.groupId,
-          userId: ctx.auth.user.id,
-          assetIds: input.assetIds && input.assetIds.length > 0 ? input.assetIds : null,
-        })
-        .returning();
-      return { job, reused: false };
+        const [job] = await tx
+          .insert(schema.exportJobs)
+          .values({
+            projectId: project.id,
+            groupId: project.groupId,
+            userId: ctx.auth.user.id,
+            assetIds: input.assetIds && input.assetIds.length > 0 ? input.assetIds : null,
+          })
+          .returning();
+        return { job, reused: false };
+      });
     }),
 
   /** 進度輪詢：回 job 現況（完成後前端組下載連結 /api/export/jobs/:id/download） */

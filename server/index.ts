@@ -21,6 +21,7 @@ import { buildEdl, buildFcpxml, buildSrt, buildXmeml, exportProjectZip, exportZi
 import { exportJianyingDraftZip } from "./services/jianying";
 import { renderMyDataHtml } from "./services/myDataExport";
 import { handleMcp } from "./services/mcp";
+import { isMcpEnabled } from "./services/mcpAuth";
 import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
@@ -974,9 +975,13 @@ app.post("/api/mcp", (req, res, next) => {
   setMcpCors(req, res);
   next();
 }, handleMcp);
-// 其他方法（GET/PUT/DELETE…）：本伺服器不提供 SSE stream，明確回 405 + Allow，
-// 不再落到 SPA catch-all 回 HTML 200 讓 SDK／監控誤判成功
-app.all("/api/mcp", (_req, res) => {
+// 其他方法（GET/PUT/DELETE…）：本伺服器不提供 SSE stream。
+// 未啟用時回 404（與 POST handleMcp 同口徑「不對外張揚端點存在」，修 get-mcp-advertises-when-disabled）；
+// 已啟用才回 405 + Allow，不再落到 SPA catch-all 回 HTML 200 讓 SDK／監控誤判成功。
+app.all("/api/mcp", async (_req, res) => {
+  if (!(await isMcpEnabled())) {
+    return void res.status(404).json({ error: "MCP 未啟用（在「怎麼用」頁建立個人連線金鑰，或設 MCP_API_KEY 環境變數）" });
+  }
   res.setHeader("Allow", "POST, OPTIONS");
   res.status(405).json({ error: "MCP 端點僅接受 JSON-RPC POST（不提供 GET/SSE）", allow: ["POST", "OPTIONS"] });
 });

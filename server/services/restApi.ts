@@ -31,16 +31,27 @@ async function resolveRequester(req: Request): Promise<{ auth: AuthState; viaTok
   // 「寫入」端點（POST /rows）一律要走 x-api-key 標頭——否則具寫入權的個人金鑰會被寫進反代存取記錄／
   // 瀏覽器歷史／Referer，任何讀得到那些記錄的人都能重放它以受害者身分寫資料。
   const queryKey = req.method === "GET" && typeof req.query.key === "string" ? req.query.key : undefined;
+  const fromQuery = !headerKey && !!queryKey; // 純由 ?key= 帶入（非標頭）
   const provided = (typeof headerKey === "string" && headerKey) || queryKey;
   if (provided) {
     const identity = await resolveMcpIdentity(provided);
+    if (!identity) return null;
+    // 經 ?key= 網址呈現的金鑰一律降為唯讀（緩解 query-key-not-readonly-scoped）：訂閱網址（.ics/.csv）會被
+    // 日曆 App／反代存取記錄／瀏覽器歷史保存並反覆重送——即使金鑰本身可寫，從網址帶入時也只授予唯讀，
+    // 確保 ?key= 這條路徑永遠碰不到寫入（現有訂閱／匯出端點皆為 GET 唯讀，故不影響功能）。
+    // 註：這無法阻止「金鑰外洩後被改用 x-api-key 標頭重放為寫入」——徹底根治需為訂閱／匯出另發「天生唯讀」
+    //     的作用域金鑰並在 UI 引導使用（後續 UX 工作），此處先做不破壞現況的縱深防禦。
     // readOnly 金鑰範圍必須一路帶到寫入端點——否則唯讀金鑰能繞過 MCP 的 scopeDeniedReason
     // 守衛，改走 REST POST /rows 寫入資料（MCP 擋、REST 卻放行的不一致提權）。
-    return identity ? { auth: identity.auth, viaToken: true, readOnly: identity.scope.readOnly } : null;
+    return { auth: identity.auth, viaToken: true, readOnly: identity.scope.readOnly || fromQuery };
   }
   const auth = await resolveSession(req);
+  if (!auth) return null;
+  // 強制改密碼閘門（修 rest-session-skips-mustchangepassword）：與 tRPC authedProcedure、MCP 金鑰路徑同口徑——
+  // 管理員重設密碼後帳號帶 mustChangePassword，未改密碼前不得經 REST/CSV/ICS 讀寫，否則臨時密碼窗口=完整讀寫窗口。
+  if (auth.user.mustChangePassword) return null;
   // session（純網頁登入）沒有唯讀概念，一律非唯讀
-  return auth ? { auth, viaToken: false, readOnly: false } : null;
+  return { auth, viaToken: false, readOnly: false };
 }
 
 /** 依 viaToken 選對的授權函式（程式介面套 agentAccess；網頁走純人權限） */

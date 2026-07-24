@@ -11,6 +11,7 @@ import { proxyFetch } from "./http";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
+import { resolutionForFormat } from "../../shared/options";
 import { absPathOf, extFromMime } from "./storage";
 
 export function safeName(value: string): string {
@@ -241,7 +242,12 @@ function relUri(pathPrefix: string, zipRelPath: string): string {
 }
 
 /** 媒體連結版產生器的共用選項：時間軸檔相對媒體資料夾的位置前綴（預設同層 ./） */
-export type TimelineFileOpts = { pathPrefix?: string };
+export type TimelineFileOpts = {
+  pathPrefix?: string;
+  /** 序列解析度（依 project.format 帶入；未給＝1920×1080 橫向，維持既有行為）——修 fcpxml/xmeml 硬編橫向 */
+  width?: number;
+  height?: number;
+};
 
 // 時間軸統一 30fps：FCPXML 時間值必須對齊影格，秒數換成影格數再輸出
 const TIMELINE_FPS = 30;
@@ -269,6 +275,10 @@ function baseName(zipRelPath: string): string {
  */
 export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts: TimelineFileOpts = {}): string {
   const prefix = opts.pathPrefix ?? "./";
+  const seqW = opts.width ?? 1920;
+  const seqH = opts.height ?? 1080;
+  // 標準 1080p 沿用 FCP 內建格式名；直式/方形用自訂尺寸格式（僅 frameDuration＋width/height，不掛會被 FCP 誤配的 preset 名）
+  const fmtName = seqW === 1920 && seqH === 1080 ? ` name="FFVideoFormat1080p30"` : "";
   const resources: string[] = [];
   const spineItems: string[] = [];
   let assetSeq = 0;
@@ -347,8 +357,8 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
     `<!-- 由 AI Director OS 產出：解壓交付包後直接匯入本檔，媒體以相對路徑自動掛上；顯示離線時對整個解壓資料夾 relink 一次即可 -->`,
     `<fcpxml version="1.9">`,
     `  <resources>`,
-    `    <format id="r1" name="FFVideoFormat1080p30" frameDuration="100/3000s" width="1920" height="1080"/>`,
-    `    <format id="r2" name="FFVideoFormatRateUndefined" width="1920" height="1080"/>`,
+    `    <format id="r1"${fmtName} frameDuration="100/3000s" width="${seqW}" height="${seqH}"/>`,
+    `    <format id="r2" name="FFVideoFormatRateUndefined" width="${seqW}" height="${seqH}"/>`,
     ...resources,
     `  </resources>`,
     `  <library>`,
@@ -379,6 +389,8 @@ export function buildFcpxml(scenes: TimelineScene[], projectTitle: string, opts:
  */
 export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: TimelineFileOpts = {}): string {
   const prefix = opts.pathPrefix ?? "./";
+  const seqW = opts.width ?? 1920;
+  const seqH = opts.height ?? 1080;
   const rate = `<rate><timebase>${TIMELINE_FPS}</timebase><ntsc>FALSE</ntsc></rate>`;
   const videoItems: string[] = [];
   const audioItems: string[] = []; // A1：旁白
@@ -433,7 +445,7 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
         `            <file id="${fid}">`,
         `              <name>${escXml(baseName(sc.mediaPath))}</name>`,
         `              <pathurl>${escXml(relUri(prefix, sc.mediaPath))}</pathurl>`,
-        `              <media><video><samplecharacteristics><width>1920</width><height>1080</height></samplecharacteristics></video></media>`,
+        `              <media><video><samplecharacteristics><width>${seqW}</width><height>${seqH}</height></samplecharacteristics></video></media>`,
         `            </file>`,
       ].join("\n");
     } else {
@@ -478,7 +490,7 @@ export function buildXmeml(scenes: TimelineScene[], projectTitle: string, opts: 
     `    ${rate}`,
     `    <media>`,
     `      <video>`,
-    `        <format><samplecharacteristics>${rate}<width>1920</width><height>1080</height><anamorphic>FALSE</anamorphic><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></format>`,
+    `        <format><samplecharacteristics>${rate}<width>${seqW}</width><height>${seqH}</height><anamorphic>FALSE</anamorphic><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics></format>`,
     `        <track>`,
     ...(videoItems.length ? [videoItems.join("\n")] : []),
     `          <enabled>TRUE</enabled><locked>FALSE</locked>`,
@@ -947,8 +959,9 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
       mediaKind: writtenKinds[i],
       narrationPath: narrationNames[i],
     }));
-    // 時間軸檔在 交付/ 子資料夾內，相對媒體資料夾要往上一層
-    const opts = { pathPrefix: "../" };
+    // 時間軸檔在 交付/ 子資料夾內，相對媒體資料夾要往上一層；解析度依專案比例（修 fcpxml/xmeml 硬編橫向）
+    const res = resolutionForFormat(project.format);
+    const opts = { pathPrefix: "../", width: res.width, height: res.height };
     archive.append(buildSrt(timelineScenes), { name: "交付/字幕.srt" });
     archive.append(buildFcpxml(timelineScenes, project.title, opts), { name: "交付/時間軸.fcpxml" });
     archive.append(buildXmeml(timelineScenes, project.title, opts), { name: "交付/Premiere時間軸.xml" });

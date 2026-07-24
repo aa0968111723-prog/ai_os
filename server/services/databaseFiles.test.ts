@@ -25,6 +25,21 @@ describe("htmlToText", () => {
     expect(text).not.toContain(".a{}");
     expect(text).not.toContain("<p>");
   });
+
+  it("病態輸入不會卡死事件迴圈：大量『<』無『>』於毫秒級完成（修 htmltotext ReDoS）", () => {
+    // 原 <[^>]+> 對此輸入呈 O(n²) 回溯；有界標籤長度後退化為線性。5MB 全 '<' 應瞬間完成。
+    const evil = "<".repeat(5_000_000);
+    const t0 = Date.now();
+    const out = htmlToText(evil);
+    expect(Date.now() - t0).toBeLessThan(2000); // 線性化後遠低於此；退化成 O(n²) 會遠超
+    expect(typeof out).toBe("string");
+  });
+
+  it("超大輸入先截斷到上限（防事件迴圈被攻擊者 HTML 同步卡死）", () => {
+    const huge = "文" + "x".repeat(6_000_000); // > HTML_TO_TEXT_MAX_CHARS(3M)
+    const out = htmlToText(huge);
+    expect(out.length).toBeLessThanOrEqual(3_000_001);
+  });
 });
 
 describe("subtitleToText", () => {

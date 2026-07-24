@@ -110,6 +110,8 @@ export function AgentCard({
     if (!hasRunning) return;
     const refresh = () => {
       utils.generation.listByProject.invalidate({ projectId });
+      // 分頁/篩選視圖也要刷新，否則代理逐步落庫的成品在該視圖看不到（修 agent-workflow-refresh-missing-paged）
+      utils.generation.listByProjectPaged.invalidate({ projectId });
       utils.scenes.listByProject.invalidate({ projectId });
       utils.quota.my.invalidate();
     };

@@ -4,7 +4,7 @@
  * - 額度層級：個人覆寫 → 組設定 → 全域預設；一律空＝不限。
  * - 扣退模式不變：先扣預估、失敗全額退回（帳本可查）。
  */
-import { and, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 
 export interface PointsSettings {
@@ -356,6 +356,16 @@ export async function refund(userId: string, groupId: string, points: number, re
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       await db.transaction(async (tx) => {
+        // 冪等退點（防重試雙倍退）：commit 成功但驅動在收到 ack 前斷線時，本迴圈會 attempt 2 重插一列
+        // 相同 +points → 使用者被退兩倍點。故對「有 generationId」的退點先在同交易內查是否已有正額退點列，
+        // 有就跳過（每筆生成至多一列自動退點；charge 為 -delta、refund 為 +delta，正額即退點）。
+        if (generationId) {
+          const [existing] = await tx
+            .select({ n: sql<number>`count(*)` })
+            .from(schema.costLedger)
+            .where(and(eq(schema.costLedger.generationId, generationId), gt(schema.costLedger.delta, 0)));
+          if (Number(existing?.n ?? 0) > 0) return;
+        }
         await tx.insert(schema.costLedger).values({ userId, groupId, delta: points, reason, generationId });
       });
       return;
@@ -371,6 +381,57 @@ export async function refund(userId: string, groupId: string, points: number, re
       await new Promise((r) => setTimeout(r, 500 * attempt));
     }
   }
+}
+
+/**
+ * 陳屍生成的「原子＋冪等」收斂：把「CAS(queued/running→failed) ＋ 退點帳本列」寫在**同一交易**。
+ * 為什麼要同交易（修 sweep-refund-non-atomic）：舊版三處 sweeper 先 commit failed(pointsRefunded=deducted)
+ * 再另起交易呼叫 refund()——若在兩者之間當機/重佈/OOM，列已是終局 failed 而退點列從未寫入，之後所有
+ * sweeper 只掃 queued/running 永不再碰它 → 使用者被扣的點永久蒸發。包進同交易後：全有或全無，中途當機
+ * 整筆 rollback、列留在 queued/running 交下輪重試。退點金額＝該生成帳本淨額絕對值（負淨額＝有扣過才退；
+ * 0＝從未扣點不退，免對沒扣過的列憑空加點灌鬆總預算閘）。退點列對同一 generation 冪等（已有正額退點列
+ * 就不再插），與 CAS 一起杜絕重複退。回傳本次是否真的把列推進成 failed（呼叫端據此決定推播等後續）。
+ */
+export async function failStaleGenerationTx(
+  genId: string,
+  baseError: string,
+  refundReason: string,
+): Promise<{ updated: boolean; refunded: number }> {
+  return db.transaction(async (tx) => {
+    const [ledger] = await tx
+      .select({ net: sql<number>`coalesce(sum(${schema.costLedger.delta}), 0)` })
+      .from(schema.costLedger)
+      .where(eq(schema.costLedger.generationId, genId));
+    const deducted = Math.max(0, -Number(ledger?.net ?? 0)); // 已扣的點數（>0 才要退）
+    const rows = await tx
+      .update(schema.generations)
+      .set({
+        status: "failed",
+        error: baseError + (deducted > 0 ? "，點數已退回" : ""),
+        pointsRefunded: deducted,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(schema.generations.id, genId), inArray(schema.generations.status, ["queued", "running"])))
+      .returning();
+    if (rows.length === 0) return { updated: false, refunded: 0 }; // 已被別處推進到終局
+    if (deducted > 0) {
+      // 冪等退點：同 generation 已有正額退點列就不再插（防併發/重試雙倍退）
+      const [existing] = await tx
+        .select({ n: sql<number>`count(*)` })
+        .from(schema.costLedger)
+        .where(and(eq(schema.costLedger.generationId, genId), gt(schema.costLedger.delta, 0)));
+      if (Number(existing?.n ?? 0) === 0) {
+        await tx.insert(schema.costLedger).values({
+          userId: rows[0].userId,
+          groupId: rows[0].groupId,
+          delta: deducted,
+          reason: refundReason,
+          generationId: genId,
+        });
+      }
+    }
+    return { updated: true, refunded: deducted };
+  });
 }
 
 /** 組用量彙總（組長/管理員儀表用）：每人本週＋累計 */

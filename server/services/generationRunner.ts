@@ -6,11 +6,11 @@
  * 推進全部重用 generationCore.advanceGeneration（已 CAS-safe/冪等，與瀏覽器輪詢或工作流執行器
  * 併發呼叫也不會重複扣退點，直接重用不改它）。
  */
-import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt } from "drizzle-orm";
 import { db, schema } from "../db";
 import { advanceGeneration, sweepUnlandedAssets } from "./generationCore";
 import { sweepVoiceTranscripts } from "./voiceTranscribe";
-import { refund } from "./points";
+import { failStaleGenerationTx } from "./points";
 
 const TICK_MS = 6000;
 /** 單筆推進放行門檻：逾時不砍原 promise，只讓本輪 tick 先去顧其他生成 */
@@ -148,23 +148,8 @@ async function sweepStale(): Promise<void> {
   for (const gen of staleRows) {
     if (inflight.has(gen.id)) continue; // 正在推進的交給正常路徑，避免雙寫
     try {
-      const [ledger] = await db
-        .select({ net: sql<number>`coalesce(sum(${schema.costLedger.delta}), 0)` })
-        .from(schema.costLedger)
-        .where(eq(schema.costLedger.generationId, gen.id));
-      const deducted = Math.max(0, -Number(ledger?.net ?? 0)); // 已扣的點數（>0 才要退）
-      const updatedRows = await db
-        .update(schema.generations)
-        .set({
-          status: "failed",
-          error: "生成停滯逾 30 分鐘，系統自動回收" + (deducted > 0 ? "，點數已退回" : ""),
-          pointsRefunded: deducted,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
-        .returning();
-      if (updatedRows.length === 0) continue; // 已被別處推進到終局 → 不重複退點
-      if (deducted > 0) await refund(gen.userId, gen.groupId, deducted, "生成停滯自動回收退回", gen.id);
+      // 原子＋冪等收斂：CAS→failed 與退點列同一交易，中途當機整筆 rollback，杜絕點數永久蒸發（見 points.ts）
+      await failStaleGenerationTx(gen.id, "生成停滯逾 30 分鐘，系統自動回收", "生成停滯自動回收退回");
     } catch (err) {
       console.warn(`[generation] 陳屍回收略過（下輪再試）：gen=${gen.id}`, err instanceof Error ? err.message : err);
     }
