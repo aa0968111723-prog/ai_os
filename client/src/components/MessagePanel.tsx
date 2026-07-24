@@ -212,7 +212,7 @@ const MessageRow = memo(function MessageRow({
             <audio controls preload="none" src={m.voiceUrl} style={{ height: 32, maxWidth: "100%", display: "block", marginBottom: 4 }} aria-label="語音留言" />
           )}
           {isVoice ? (
-            <span className={m.voiceStatus === "pending" ? "hint" : undefined}>{m.body}</span>
+            <span className={m.voiceStatus === "pending" || m.voiceStatus === "running" ? "hint" : undefined}>{m.body}</span>
           ) : (
             <span>{renderBody(m.body, mentionNames)}</span>
           )}

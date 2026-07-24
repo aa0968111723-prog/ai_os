@@ -2,6 +2,7 @@ import { z } from "zod";
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } from "../trpc";
+import type { AuthState } from "../services/auth";
 import { db, schema } from "../db";
 import { getSettings, updateSettings, usedTotal, usedThisWeek, usedToday, effectiveDailyQuota, groupUsage, usedByGroup, usedByMember, loadQuotaConfig } from "../services/points";
 
@@ -11,6 +12,28 @@ async function assertGroupTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adm
   if (!group) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個組" });
   if (!auth.user.isSuperAdmin && !auth.adminTeamIds.includes(group.teamId)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "只有團隊管理員以上能分配組預算" });
+  }
+}
+
+/**
+ * 對「某組員」分配額度/預算的授權：組長對其他組員即可；但對「自己」必須是團隊管理員以上。
+ * 安全關鍵（自我提額防護）：setMemberOverride/setMemberBudget 只檢查 requireLeader 而未排除自我目標時，
+ * 組長可 setMemberOverride({ userId: 自己, weeklyPointsOverride: 999999 }) 自抬週額度，架空團隊管理員
+ * 設給他的個人上限（真金白銀的 fal 花費）。分配一律由上往下：自己的額度由上級調。
+ */
+async function assertCanAllocateToMember(
+  auth: AuthState,
+  groupId: string,
+  targetUserId: string,
+): Promise<void> {
+  requireLeader(auth, groupId); // 需組長以上，且確認呼叫者屬於這個組
+  // 大小寫無關比對（安全關鍵）：z.string().uuid() 接受大寫 UUID，而 Postgres uuid 比較大小寫無關，
+  // 故大寫版的自己 id 仍會 UPDATE 到自己那列。若在此用大小寫敏感的 !== 比，攻擊者把自己 id 轉大寫即可
+  // 讓「!==」成立而跳過下方團隊管理員閘門，達成自我提額。一律正規化成小寫再比。
+  if (targetUserId.toLowerCase() !== auth.user.id.toLowerCase()) return; // 對其他組員：組長權限即可
+  const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
+  if (!auth.user.isSuperAdmin && !(group && auth.adminTeamIds.includes(group.teamId))) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "不能調整自己的額度／預算——請由團隊管理員以上調整（分配是由上往下）" });
   }
 }
 
@@ -96,7 +119,7 @@ export const quotaRouter = router({
   setMemberBudget: authedProcedure
     .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), budgetPoints: z.number().int().min(0).nullable() }))
     .mutation(async ({ ctx, input }) => {
-      requireLeader(ctx.auth, input.groupId);
+      await assertCanAllocateToMember(ctx.auth, input.groupId, input.userId); // 組長對他人即可；對自己需團隊管理員以上
       const value = input.budgetPoints && input.budgetPoints > 0 ? input.budgetPoints : null;
       const updated = await db
         .update(schema.groupMembers)
@@ -138,7 +161,7 @@ export const quotaRouter = router({
   setMemberOverride: authedProcedure
     .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), weeklyPointsOverride: z.number().int().min(0).nullable() }))
     .mutation(async ({ ctx, input }) => {
-      requireLeader(ctx.auth, input.groupId);
+      await assertCanAllocateToMember(ctx.auth, input.groupId, input.userId); // 組長對他人即可；對自己需團隊管理員以上（防自抬額度）
       await db
         .update(schema.groupMembers)
         .set({ weeklyPointsOverride: input.weeklyPointsOverride })

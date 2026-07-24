@@ -415,7 +415,10 @@ export const messages = pgTable("messages", {
   mentions: jsonb("mentions").$type<string[]>(),
   // 留言第一梯隊：語音留言（kind='voice'，音檔存 ref asset，voiceStatus 轉錄狀態，body 收轉錄稿）
   // 與 @助手回覆（kind='assistant'，body 為 LLM 回答，userId 記觸發者）。
-  voiceStatus: text("voice_status", { enum: ["pending", "done", "failed"] }),
+  // running＝已被某個 tick 認領並「已扣點、轉錄中」的原子狀態：崩潰後留在 running（非 pending），
+  // 下一輪掃描只撈 pending 故不會重撿重扣（見 services/voiceTranscribe 的 CAS 認領）。純 text 欄、無 DB
+  // CHECK 約束，新增列舉值不需遷移。
+  voiceStatus: text("voice_status", { enum: ["pending", "running", "done", "failed"] }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   projectIdx: index("messages_project_idx").on(t.projectId, t.createdAt),

@@ -7,7 +7,7 @@
  * - 安全：SSRF 防護（協定白名單＋私有位址阻擋）、抓取逾時與大小上限、配額守門。
  * - 配額：每人（上傳者計）預設 5GB，settings.fileQuotaGb 可調（0＝不限）。
  */
-import { createRequire } from "node:module";
+import { Worker } from "node:worker_threads";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, schema } from "../db";
@@ -22,6 +22,73 @@ export const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
 export const MAX_EXTRACT_BYTES = 30 * 1024 * 1024;
 /** 預設每人配額：5GB（settings.fileQuotaGb 可調；0＝不限） */
 const DEFAULT_QUOTA_GB = 5;
+
+/* ── 二進位文件抽取的隔離守門（解壓縮炸彈／CPU 炸彈 DoS 防護） ──
+ * docx 是 OOXML zip、可用極高壓縮比把 30MB 輸入膨脹成數 GB；pdf 可構造成 CPU 密集。
+ * 兩者一律丟進 worker thread 解析：以「V8 heap 上限（膨脹超限只炸 worker、主程序存活）」＋
+ * 「牆鐘逾時（終止卡死/滴流的解析）」雙重圍住，絕不在請求處理器的事件迴圈上同步解壓/解析。
+ * 舊版只擋壓縮前 30MB、之後把 buffer 同步交給 mammoth/pdf-parse，任何有寫入權的使用者上傳
+ * 一顆 zip 炸彈即可 OOM 或卡死整個單容器部署。 */
+const EXTRACT_WORKER_MEM_MB = 384;        // worker old-space 上限：夠放合法大文件，擋得住膨脹到 GB 的炸彈
+const EXTRACT_WORKER_TIMEOUT_MS = 20_000; // 單檔解析牆鐘上限：卡死/滴流檔到點即終止 worker
+const MAX_PDF_PAGES = 800;                // pdf-parse 頁數上限：擋「數萬頁」構造檔的 CPU 放大
+// worker 以 eval 字串載入（避免 esbuild 單檔打包後找不到獨立 worker 檔）；跑在 CommonJS 情境下，
+// require 直接可用。pdf-parse 是舊式 CJS 套件，直接 require 套件根會觸發它的 debug 模式（讀測試 PDF 而炸），
+// 故深入 lib/pdf-parse.js（官方 README 建議做法）。mammoth/pdf-parse 為 external 相依，執行期存在 node_modules。
+const EXTRACT_WORKER_CODE = `
+const { parentPort, workerData } = require('node:worker_threads');
+(async () => {
+  try {
+    const buffer = Buffer.from(workerData.buf);
+    let text = null;
+    if (workerData.kind === 'pdf') {
+      const pdfParse = require('pdf-parse/lib/pdf-parse.js');
+      const out = await pdfParse(buffer, { max: ${MAX_PDF_PAGES} });
+      text = out && out.text;
+    } else if (workerData.kind === 'docx') {
+      const mammoth = require('mammoth');
+      const out = await mammoth.extractRawText({ buffer });
+      text = out && out.value;
+    }
+    parentPort.postMessage({ ok: true, text: text == null ? null : String(text).slice(0, ${MAX_TEXT_CHARS}) });
+  } catch (e) {
+    parentPort.postMessage({ ok: false, error: (e && e.message) ? e.message : String(e) });
+  }
+})();
+`;
+
+/** 在受限 worker 內解析 pdf/docx；回 null＝失敗/超限/逾時（呼叫端一律降級為「僅存檔」）。 */
+function extractInWorker(kind: "pdf" | "docx", buf: Buffer): Promise<string | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (v: string | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      void worker.terminate();
+      resolve(v);
+    };
+    const worker = new Worker(EXTRACT_WORKER_CODE, {
+      eval: true,
+      workerData: { kind, buf },
+      resourceLimits: { maxOldGenerationSizeMb: EXTRACT_WORKER_MEM_MB },
+    });
+    const timer = setTimeout(() => {
+      console.warn(`[databaseFiles] 文字抽取逾時（${kind}，${EXTRACT_WORKER_TIMEOUT_MS}ms）——終止 worker，僅存檔`);
+      finish(null);
+    }, EXTRACT_WORKER_TIMEOUT_MS);
+    worker.on("message", (m: { ok: boolean; text?: string | null; error?: string }) => {
+      if (!m.ok) console.warn(`[databaseFiles] 文字抽取失敗（${kind}，僅存檔）：`, m.error);
+      finish(m.ok ? (m.text ?? null) : null);
+    });
+    worker.on("error", (err) => {
+      // 含 worker heap OOM（zip 炸彈膨脹超過上限）：只炸這個 worker，主程序不受影響
+      console.warn(`[databaseFiles] 文字抽取 worker 錯誤（${kind}，僅存檔）：`, err instanceof Error ? err.message : err);
+      finish(null);
+    });
+    worker.on("exit", () => finish(null)); // 非正常退出（被 OOM 終止等）也收斂成 null
+  });
+}
 
 /* ── 純文字抽取 ─────────────────────────────────── */
 
@@ -78,13 +145,10 @@ export function extractKindOf(mime: string, name: string): "text" | "html" | "su
   return null;
 }
 
-// pdf-parse 是舊式 CJS 套件：直接 import 套件根會觸發它的 debug 模式（讀測試 PDF 而炸）。
-// 深入 lib/pdf-parse.js 是官方 README 的建議做法；createRequire 讓 ESM bundle 也載得起來。
-const cjsRequire = createRequire(import.meta.url);
-
 /**
  * 從原檔 buffer 抽純文字。回 null＝此格式暫不可讀或解析失敗（僅存檔，AI 讀不到內文）。
  * 解析失敗不拋錯——檔案照存，之後格式支援擴充可再補抽。
+ * pdf/docx 走受限 worker（見 extractInWorker）：解壓縮/CPU 炸彈只炸 worker、不拖垮主程序。
  */
 export async function extractTextFromBuffer(mime: string, name: string, buf: Buffer): Promise<string | null> {
   if (buf.length > MAX_EXTRACT_BYTES) return null;
@@ -99,14 +163,12 @@ export async function extractTextFromBuffer(mime: string, name: string, buf: Buf
       case "subtitle":
         return subtitleToText(buf.toString("utf8")).slice(0, MAX_TEXT_CHARS) || null;
       case "pdf": {
-        const pdfParse = cjsRequire("pdf-parse/lib/pdf-parse.js") as (b: Buffer) => Promise<{ text: string }>;
-        const out = await pdfParse(buf);
-        return out.text.replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_TEXT_CHARS) || null;
+        const text = await extractInWorker("pdf", buf);
+        return text ? text.replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_TEXT_CHARS) || null : null;
       }
       case "docx": {
-        const mammoth = (await import("mammoth")).default;
-        const out = await mammoth.extractRawText({ buffer: buf });
-        return out.value.trim().slice(0, MAX_TEXT_CHARS) || null;
+        const text = await extractInWorker("docx", buf);
+        return text ? text.trim().slice(0, MAX_TEXT_CHARS) || null : null;
       }
     }
   } catch (err) {
@@ -156,20 +218,20 @@ export function isPrivateIp(ip: string): boolean {
  * 正式擴大部署時建議改走「出口代理白名單」徹底根除。
  */
 export async function assertPublicHostOrError(hostname: string): Promise<string | null> {
-  // 有設出口代理（HTTPS_PROXY/HTTP_PROXY）時：真正解析與連線由「代理」執行，本機 DNS 既非權威、
-  // 也可能解不到外部名稱（直連才有本機解析）。此時把 SSRF 邊界交給出口代理，本機不重複解析以免誤擋
-  // 正常匯入；字面內部位址仍由 ssrfGuardError 快篩擋下。一般部署平台皆為直連（無此環境變數），走下方解析。
-  if (process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy) {
-    return null;
-  }
   const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  // 有設出口代理（HTTPS_PROXY/HTTP_PROXY）時，真正的解析與連線由代理執行，本機 DNS 非權威、
+  // 也可能解不到外部名稱（純代理出口環境）。但仍「先嘗試本機解析」：只要解得到就照樣逐一判 IP，
+  // 補上「公開主機名 DNS 解析到內網（169.254.169.254／10.x…）」這條代理未必擋得住的 SSRF 破口
+  // （舊版在代理模式一律 return null 直接放行，等於整條權威防線關閉）。只有本機真的解不到時，
+  // 才把邊界交回出口代理、不誤擋正常匯入；字面內部位址在任何情況下都已由 ssrfGuardError 快篩擋下。
+  const proxied = !!(process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy);
   let addrs: Array<{ address: string }>;
   try {
     addrs = await dnsLookup(host, { all: true });
   } catch {
-    return "無法解析這個網址的主機（DNS 查詢失敗）";
+    return proxied ? null : "無法解析這個網址的主機（DNS 查詢失敗）";
   }
-  if (addrs.length === 0) return "無法解析這個網址的主機";
+  if (addrs.length === 0) return proxied ? null : "無法解析這個網址的主機";
   for (const { address } of addrs) {
     if (isPrivateIp(address)) return "不能匯入內部網址";
   }

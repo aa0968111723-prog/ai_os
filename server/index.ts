@@ -458,6 +458,9 @@ app.get("/api/assets/:id/file", async (req, res) => {
   try {
     const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, req.params.id));
     if (!asset) return res.status(404).json({ error: "找不到素材" });
+    // 軟刪除（回收桶）素材不再可下載：與匯出流程（exporter 一律 isNull(deletedAt)）同口徑。
+    // 否則已回收的素材仍能被知道 id 的同組成員（或在途簽名網址）抓取，屬保留策略洩漏。
+    if (asset.deletedAt) return res.status(404).json({ error: "找不到素材" });
 
     const signed = verifyAssetSig(asset.id, req.query.exp as string | undefined, req.query.sig as string | undefined);
     if (!signed) {
@@ -708,7 +711,9 @@ app.get("/api/downloads", async (req, res) => {
     const auth = await resolveSession(req);
     if (!auth) return res.status(401).json({ error: "請先登入" });
     const { DOWNLOAD_CATEGORIES, listDownloads } = await import("./services/downloads");
-    res.json({ ok: true, categories: DOWNLOAD_CATEGORIES, items: await listDownloads() });
+    // 受限（內部工程/維運/安全/部署）文件只給組長以上：開發者、團隊管理員、或任一組的組長/管理員身分
+    const privileged = auth.user.isSuperAdmin || auth.groups.some((g) => g.role !== "member");
+    res.json({ ok: true, categories: DOWNLOAD_CATEGORIES, items: await listDownloads(privileged) });
   } catch (err) {
     console.error("[downloads:list]", err);
     recordError("downloads:list", err);
@@ -720,8 +725,10 @@ app.get("/api/downloads/file", async (req, res) => {
     const auth = await resolveSession(req);
     if (!auth) return res.status(401).json({ error: "請先登入" });
     const { resolveDownload } = await import("./services/downloads");
-    // 識別鍵必須整串等於白名單項（resolveDownload 內比對），不存在任何使用者輸入拼路徑的空間
-    const hit = resolveDownload(String(req.query.name ?? ""));
+    // 識別鍵必須整串等於白名單項（resolveDownload 內比對），不存在任何使用者輸入拼路徑的空間。
+    // 受限文件（restricted）另要求組長以上——一般組員即使知道識別鍵也拿不到（後端硬擋，非只前端隱藏）。
+    const privileged = auth.user.isSuperAdmin || auth.groups.some((g) => g.role !== "member");
+    const hit = resolveDownload(String(req.query.name ?? ""), privileged);
     if (!hit) return res.status(404).json({ error: "找不到這份文件" });
     res.setHeader("X-Content-Type-Options", "nosniff");
     // res.download＝attachment 下載（含中文檔名的 RFC 5987 編碼）；檔案缺席走 err 分支回 404

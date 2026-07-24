@@ -48,10 +48,17 @@ export function redirectUri(): string {
 
 /* ────────────────────────── refresh token 加密（AES-256-GCM） ────────────────────────── */
 
-/** 金鑰：GOOGLE_TOKEN_SECRET（可獨立輪替）→ 退回 GOOGLE_CLIENT_SECRET（開啟本功能時必存在的伺服器機密） */
+/** 金鑰種子：GOOGLE_TOKEN_SECRET（可獨立輪替）→ 退回 GOOGLE_CLIENT_SECRET（開啟本功能時必存在的伺服器機密） */
+function keySeed(): string {
+  return process.env.GOOGLE_TOKEN_SECRET || clientSecret();
+}
+// 分域派生（比照 services/integrations 的做法）：AES-GCM 加密與 HMAC state 簽章各用一把、跨用途不可互換。
+// 舊版兩者共用同一把 encKey——同一金鑰同時當對稱加密金鑰與 MAC 金鑰違反金鑰分域原則；分開派生為縱深防禦。
 function encKey(): Buffer {
-  const seed = process.env.GOOGLE_TOKEN_SECRET || clientSecret();
-  return createHash("sha256").update(`gcal-token:${seed}`).digest();
+  return createHash("sha256").update(`gcal-token:${keySeed()}`).digest();
+}
+function stateKey(): Buffer {
+  return createHash("sha256").update(`gcal-state:${keySeed()}`).digest();
 }
 
 export function encryptToken(plain: string): string {
@@ -72,7 +79,7 @@ export function decryptToken(stored: string): string {
 /* ────────────────────────── OAuth state（HMAC 簽章，防 CSRF/竄改） ────────────────────────── */
 
 function stateSig(payload: string): string {
-  return createHmac("sha256", encKey()).update(payload).digest("hex");
+  return createHmac("sha256", stateKey()).update(payload).digest("hex");
 }
 
 /** state = base64url(userId|exp)．sig——callback 驗簽並比對登入者，杜絕跨帳號綁定 */
