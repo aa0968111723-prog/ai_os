@@ -27,6 +27,7 @@ import { mcpTokensRouter } from "./mcpTokens";
 import { databasesRouter } from "./databases";
 import { directoryRouter } from "./directory";
 import { dmRouter } from "./dm";
+import { googleCalendarRouter } from "./googleCalendar";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -57,6 +58,7 @@ export const appRouter = router({
   databases: databasesRouter,
   directory: directoryRouter,
   dm: dmRouter,
+  googleCalendar: googleCalendarRouter,
 });
 
 export type AppRouter = typeof appRouter;

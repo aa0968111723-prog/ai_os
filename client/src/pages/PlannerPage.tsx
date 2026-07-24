@@ -9,7 +9,7 @@ import { flashAnchor, takePlannerFocus } from "../discuss";
 
 /**
  * 筆記排程（需求 #10）：組內共用的「排程表＋會議筆記＋知識地圖」一頁。
- * - 組排程：可掛專案、可匯出 .ics 到個人日曆；清單／月曆兩種檢視（真實日曆）。
+ * - 組排程：可掛專案、可直連 Google 日曆自動同步（.ics 匯出保留為後備）；清單／月曆兩種檢視（真實日曆）。
  * - 筆記／會議紀錄：內容更新由後端自動留版本快照；可「從知識庫匯入」把專案知識帶進筆記。
  * - 知識地圖（心智圖）：把專案／筆記／行程織成一張放射圖，並可用「全組／我的／專案」三種鏡頭聚焦。
  * groupId 由 App 頂欄的組別選單傳入。
@@ -89,7 +89,7 @@ export function PlannerPage({ groupId }: { groupId: string }) {
   return (
     <div>
       <h1>筆記排程</h1>
-      <p className="hint">全組共用的行程表與會議紀錄：排程可切清單／月曆並匯出到個人日曆；筆記可從知識庫匯入；知識地圖把三者織成一張心智圖。</p>
+      <p className="hint">全組共用的行程表與會議紀錄：排程可切清單／月曆並直連 Google 日曆自動同步；筆記可從知識庫匯入；知識地圖把三者織成一張心智圖。</p>
       {/* key 綁組別：切換作用組時整卡重掛，表單草稿不會帶到別的組 */}
       <ScheduleCard key={`sch-${groupId}`} groupId={groupId} />
       <NotesCard key={`note-${groupId}`} groupId={groupId} />
@@ -102,6 +102,95 @@ export function PlannerPage({ groupId }: { groupId: string }) {
 }
 
 /* ────────────────────────── (1) 組排程（清單／月曆） ────────────────────────── */
+
+/**
+ * Google 日曆直連同步工具列：
+ * - 站方已設定 OAuth（configured）→ 顯示「連結 Google 日曆」；連結後排程增刪改自動推送到
+ *   個人 Google 帳戶的專屬日曆（＋每 15 分鐘背景對帳），不必再手動匯出/匯入。
+ * - 未設定 → 退回原本的 .ics 匯出（後備）。
+ * - OAuth 回跳帶 ?gcal=... 的一次性結果訊息在此顯示並清掉網址參數。
+ */
+function GoogleCalendarBar({ groupId }: { groupId: string }) {
+  const utils = trpc.useUtils();
+  const status = trpc.googleCalendar.status.useQuery();
+  const syncNow = trpc.googleCalendar.syncNow.useMutation({ onSettled: () => utils.googleCalendar.status.invalidate() });
+  const disconnect = trpc.googleCalendar.disconnect.useMutation({ onSuccess: () => utils.googleCalendar.status.invalidate() });
+  const [flash, setFlash] = useState<string | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("gcal");
+    if (!q) return;
+    setFlash(
+      q === "connected" ? "已連結 Google 日曆，首次同步進行中（幾秒內完成）"
+      : q === "denied" ? "已取消 Google 授權——隨時可以再連結"
+      : q === "state_mismatch" ? "授權連結已過期，請重新點「連結 Google 日曆」"
+      : "連結失敗，請稍後再試",
+    );
+    window.history.replaceState(null, "", window.location.pathname); // 清掉一次性參數，重新整理不再重播
+  }, []);
+
+  const icsFallback = (
+    <a href={`/api/schedule/${groupId}/calendar.ics`} download style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <Icon name="Download" size={14} />匯出 .ics
+    </a>
+  );
+
+  const st = status.data;
+  if (!st) return icsFallback; // 載入中（或查詢失敗）：先給後備匯出，不擋操作
+  if (!st.configured) {
+    return (
+      <>
+        {icsFallback}
+        <span className="hint" style={{ margin: 0 }}>下載後匯入個人日曆；內容更新請重新下載</span>
+      </>
+    );
+  }
+  if (!st.connected) {
+    return (
+      <>
+        <a href="/api/google/oauth/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="CalendarPlus" size={14} />連結 Google 日曆（自動同步）
+        </a>
+        <span className="hint" style={{ margin: 0 }}>{flash ?? "連結後排程增刪改自動出現在你的 Google 日曆，免匯出匯入"}</span>
+        {icsFallback}
+      </>
+    );
+  }
+  if (st.status === "error") {
+    return (
+      <>
+        <span className="hint" style={{ margin: 0, color: "var(--danger, #b3261e)" }} title={st.lastError ?? undefined}>
+          Google 日曆授權已失效
+        </span>
+        <a href="/api/google/oauth/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Icon name="CalendarPlus" size={14} />重新連結
+        </a>
+      </>
+    );
+  }
+  const lastSync = st.lastSyncAt ? new Date(st.lastSyncAt).toLocaleString("zh-TW") : "排入佇列中";
+  return (
+    <>
+      <span className="hint" style={{ margin: 0 }} title={`最後同步：${lastSync}${st.lastError ? `；上次錯誤：${st.lastError}` : ""}`}>
+        <Icon name="CalendarPlus" size={13} /> 已連結 Google 日曆{st.googleEmail ? `（${st.googleEmail}）` : ""}・自動同步中
+      </span>
+      {flash && <span className="hint" style={{ margin: 0 }}>{flash}</span>}
+      <button type="button" className="btn-sm" onClick={() => syncNow.mutate()} disabled={syncNow.isPending} title="平常不用按：增刪改會自動同步；這顆給想立即確認的人">
+        {syncNow.isPending ? "同步中…" : "立即同步"}
+      </button>
+      {syncNow.isError && <span className="hint" style={{ margin: 0, color: "var(--danger, #b3261e)" }}>{syncNow.error.message}</span>}
+      <ConfirmButton
+        onConfirm={() => disconnect.mutate()}
+        title="中斷 Google 日曆連結？"
+        message="會撤銷授權並移除你 Google 帳戶裡的「AI Director OS・組排程」日曆（系統內排程不受影響）。"
+        confirmLabel="中斷連結"
+        disabled={disconnect.isPending}
+        triggerClassName="btn-sm"
+      >
+        中斷連結
+      </ConfirmButton>
+    </>
+  );
+}
 
 function ScheduleCard({ groupId }: { groupId: string }) {
   const utils = trpc.useUtils();
@@ -183,12 +272,9 @@ function ScheduleCard({ groupId }: { groupId: string }) {
       </div>
       <p className="hint">拍攝、開會、上片時間都排在這裡，全組看同一份，不再翻對話記錄找時間。</p>
 
-      {/* 頂部工具列：.ics 匯出＋（清單檢視）顯示過去行程 */}
+      {/* 頂部工具列：Google 日曆直連同步（主）＋ .ics 匯出（後備）＋（清單檢視）顯示過去行程 */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-        <a href={`/api/schedule/${groupId}/calendar.ics`} download style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <Icon name="Download" size={14} />匯出 .ics（匯入 Google 日曆）
-        </a>
-        <span className="hint" style={{ margin: 0 }}>下載後匯入個人日曆；內容更新請重新下載</span>
+        <GoogleCalendarBar groupId={groupId} />
         <span className="spacer" />
         {view === "list" && (
           <label style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0 }} title="預設只顯示未來與最近 24 小時內的行程">
