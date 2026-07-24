@@ -1,0 +1,45 @@
+/**
+ * C2 迴歸測試：LLM 把「提議動作」誤用唯讀工具格式吐出（如 {"tool":"split_script",…}）時，
+ * 助手必須把它救回成正規的 {answer, actions} 提議，而不是把原始工具 JSON 洩漏成聊天訊息。
+ * 這正是線上實測到的 bug：對代理下多步目標，回覆變成一段 {"tool":"split_script","args":{…}} 純文字。
+ */
+import { describe, it, expect } from "vitest";
+import { coerceActionToolCall } from "./assistant";
+
+describe("coerceActionToolCall（畸形工具呼叫救回）", () => {
+  it("把 {\"tool\":\"split_script\",args} 救回成 split_script 動作", () => {
+    const r = coerceActionToolCall({ tool: "split_script", args: { script: "第一鏡：清晨的公寓，機器人醒來泡咖啡；第二鏡：牠望向窗外的城市。" } });
+    expect(r).not.toBeNull();
+    expect(r!.actions).toHaveLength(1);
+    expect(r!.actions![0]).toMatchObject({ type: "split_script" });
+    expect(r!.answer).toMatch(/分鏡/); // 給人話回覆，不是原始 JSON
+  });
+
+  it("欄位攤在頂層（無 args）也能救回", () => {
+    const r = coerceActionToolCall({ tool: "split_script", script: "第一鏡：清晨的公寓，機器人醒來泡咖啡；第二鏡：牠望向窗外的城市。" });
+    expect(r?.actions?.[0]).toMatchObject({ type: "split_script" });
+  });
+
+  it("把 {\"tool\":\"plan_agent\",args} 救回成 plan_agent 動作", () => {
+    const r = coerceActionToolCall({ tool: "plan_agent", args: { goal: "把腳本拆成分鏡並逐鏡生成畫面" } });
+    expect(r?.actions?.[0]).toMatchObject({ type: "plan_agent", goal: "把腳本拆成分鏡並逐鏡生成畫面" });
+  });
+
+  it("真正的唯讀工具（list_assets）不當動作救回 → 回 null", () => {
+    expect(coerceActionToolCall({ tool: "list_assets", args: { kind: "image" } })).toBeNull();
+  });
+
+  it("正規的最終回答（{answer}）不誤救 → 回 null", () => {
+    expect(coerceActionToolCall({ answer: "目前有 3 個分鏡", actions: [] })).toBeNull();
+  });
+
+  it("動作參數不合法（腳本太短）→ 回 null（不硬塞壞動作）", () => {
+    expect(coerceActionToolCall({ tool: "split_script", args: { script: "太短" } })).toBeNull();
+  });
+
+  it("非物件輸入 → 回 null", () => {
+    expect(coerceActionToolCall(null)).toBeNull();
+    expect(coerceActionToolCall("string")).toBeNull();
+    expect(coerceActionToolCall(42)).toBeNull();
+  });
+});

@@ -272,7 +272,7 @@ app.get("/api/export/jobs/:jobId/download", async (req, res) => {
     }
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(job.zipName ?? "交付包.zip")}`);
-    res.sendFile(absPathOf(job.storagePath));
+    sendStoredFile(res, absPathOf(job.storagePath), {}, "交付包檔案遺失（可能是伺服器重啟前的舊檔，請重新打包）");
   } catch (err) {
     console.error("[export-job:download]", err);
     recordError("export-job:download", err);
@@ -458,6 +458,29 @@ app.use("/api/upload", (err: unknown, _req: express.Request, res: express.Respon
 });
 
 /** 素材檔案服務：登入＋組隔離；或帶簽名（給 fal 抓來源輸入用，短效） */
+/**
+ * 送出落地檔；若實體檔案遺失（ENOENT——例如舊素材存在非持久磁碟、伺服器重新部署後不見）回乾淨的 404，
+ * 不讓 res.sendFile 的 ENOENT 冒泡到全域 500。「檔案不見」不是伺服器故障，且回 500 會讓前端／瀏覽器
+ * 誤以為「稍後再試」而一直重打同一張破圖。（self-healing：舊素材遺失時優雅降級，不再整批噴 500）
+ */
+function sendStoredFile(
+  res: express.Response,
+  absPath: string,
+  options: Parameters<express.Response["sendFile"]>[1] = {},
+  notFoundMsg = "檔案遺失（可能是伺服器重啟前的舊檔，已無法取得）",
+): void {
+  res.sendFile(absPath, options, (err) => {
+    if (!err || res.headersSent) return; // 成功（err 為空）或已開始送內容：不改狀態碼
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      res.status(404).json({ error: notFoundMsg });
+    } else {
+      console.error("[sendStoredFile]", err);
+      res.status(500).json({ error: "讀取檔案失敗" });
+    }
+  });
+}
+
 app.get("/api/assets/:id/file", async (req, res) => {
   try {
     const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, req.params.id));
@@ -484,9 +507,7 @@ app.get("/api/assets/:id/file", async (req, res) => {
     // 避免瀏覽器內嵌渲染帶來的 XSS/內容嗅探風險（#19）
     if (shouldForceAttachment(mime)) res.setHeader("Content-Disposition", "attachment");
     // sendFile 內建 Range 支援（影片/音訊拖進度條需要）
-    res.sendFile(absPathOf(asset.storagePath), {
-      headers: { "Content-Type": mime },
-    });
+    sendStoredFile(res, absPathOf(asset.storagePath), { headers: { "Content-Type": mime } }, "素材檔案遺失（可能是伺服器重啟前的舊素材，已無法取得）");
   } catch (err) {
     console.error("[assets:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取素材失敗" });
@@ -581,7 +602,7 @@ app.get("/api/dm/attachments/:id/file", async (req, res) => {
     const mime = att.mime ?? "application/octet-stream";
     // 圖片/影音維持 inline（縮圖與播放需要）；doc/pdf/txt 與 SVG 強制下載，擋內嵌渲染的 XSS/嗅探
     if (shouldForceAttachment(mime)) res.setHeader("Content-Disposition", "attachment");
-    res.sendFile(absPathOf(att.storagePath), { headers: { "Content-Type": mime } });
+    sendStoredFile(res, absPathOf(att.storagePath), { headers: { "Content-Type": mime } }, "附件檔案遺失（可能是伺服器重啟前的舊檔）");
   } catch (err) {
     console.error("[dm:attachment:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取附件失敗" });
@@ -702,7 +723,7 @@ app.get("/api/databases/files/:id/file", async (req, res) => {
     }
     res.setHeader("X-Content-Type-Options", "nosniff");
     if (shouldForceAttachment(file.mime)) res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
-    res.sendFile(absPathOf(file.storagePath), { headers: { "Content-Type": file.mime } });
+    sendStoredFile(res, absPathOf(file.storagePath), { headers: { "Content-Type": file.mime } }, "文件檔案遺失（可能是伺服器重啟前的舊檔）");
   } catch (err) {
     console.error("[databases:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取文件失敗" });
@@ -1056,7 +1077,13 @@ app.get("/api/selftest", async (req, res) => {
     if (guard) throw new Error(guard);
     const probe = await saveBuffer(Buffer.from("selftest"), "text/plain");
     await removeStoredFile(probe.storagePath);
-    const volume = STORAGE_ROOT === "/data" ? "Volume /data" : `本機 ${STORAGE_ROOT}`;
+    // 持久性判定：掛 Volume 到 /data 或明設 ASSET_DIR 才算持久；否則落在容器本地磁碟，重新部署即遺失舊素材。
+    // 正式環境用非持久磁碟＝定時炸彈（重啟後圖/旁白/成片全 404），自檢直接亮紅並給可執行修法。
+    const persistent = !!process.env.ASSET_DIR || STORAGE_ROOT === "/data";
+    if (!persistent && process.env.NODE_ENV === "production") {
+      throw new Error(`素材存在容器本地磁碟（${STORAGE_ROOT}）非持久——重新部署會遺失所有舊素材（圖/旁白/成片）。請到 Zeabur 掛載 Volume 到 /data，或設環境變數 ASSET_DIR 指向持久磁碟`);
+    }
+    const volume = STORAGE_ROOT === "/data" ? "Volume /data" : process.env.ASSET_DIR ? `ASSET_DIR ${STORAGE_ROOT}` : `本機 ${STORAGE_ROOT}（非持久，僅供開發）`;
     return `${volume} 可讀寫`;
   });
   await run("近期錯誤", async () => {
@@ -1183,7 +1210,7 @@ app.get("/api/feedback/:id/shot", async (req, res) => {
     if (!canView) return res.status(403).json({ error: "沒有權限看這張截圖" });
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.setHeader("X-Content-Type-Options", "nosniff"); // 截圖恆為圖片，維持 inline 但擋內容嗅探（#22）
-    res.sendFile(absPathOf(report.screenshotPath), { headers: { "Content-Type": "image/png" } });
+    sendStoredFile(res, absPathOf(report.screenshotPath), { headers: { "Content-Type": "image/png" } }, "截圖檔案遺失");
   } catch (err) {
     console.error("[feedback:shot]", err);
     recordError("feedback:shot", err);
