@@ -180,7 +180,9 @@ export const databasesRouter = router({
       const { table } = await getTableChecked(ctx.auth, input.tableId);
       const conds = [eq(schema.dataRows.tableId, table.id)];
       if (input.q?.trim()) {
-        conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + input.q.trim() + "%"}`);
+        // 修 R5-I18N-01：轉義 LIKE 萬用字元（% _ \），讓使用者輸入當字面比對（預設 ESCAPE '\'），別被當 SQL 模式
+        const likeEsc = input.q.trim().replace(/[\\%_]/g, (m) => `\\${m}`);
+        conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + likeEsc + "%"}`);
       }
       const rows = await db
         .select({

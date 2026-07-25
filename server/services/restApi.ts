@@ -99,7 +99,7 @@ export async function handleV1ListRows(req: Request, res: Response): Promise<voi
   const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 1000);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
   const conds = [eq(schema.dataRows.tableId, hit.table.id)];
-  if (q) conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + q + "%"}`);
+  if (q) conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + q.replace(/[\\%_]/g, (m) => `\\${m}`) + "%"}`); // 修 R5-I18N-01：轉義 LIKE 萬用字元
   const rows = await db
     .select({ id: schema.dataRows.id, data: schema.dataRows.data, createdAt: schema.dataRows.createdAt, updatedAt: schema.dataRows.updatedAt })
     .from(schema.dataRows)

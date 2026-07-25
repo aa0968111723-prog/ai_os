@@ -162,7 +162,14 @@ const SNIFF_COMPAT: Record<string, string[]> = {
   "video/webm": ["video/webm", "audio/webm"],
   "audio/wav": ["audio/wav", "audio/x-wav"],
   "audio/mpeg": ["audio/mpeg", "audio/mp3"],
-  "application/zip": ["application/zip", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  // PK 簽名的 OOXML/epub 容器（修 R5-STOR-01）：宣稱 xlsx/pptx/epub 時與 zip 簽名相容即沿用宣稱，不誤校正成 application/zip
+  "application/zip": [
+    "application/zip",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/epub+zip",
+  ],
 };
 
 /**

@@ -108,6 +108,16 @@ export async function addScheduleItemCore(input: {
     const [m] = await db.select({ groupId: schema.messages.groupId }).from(schema.messages).where(eq(schema.messages.id, input.sourceMessageId));
     if (!m || m.groupId !== input.groupId) throw new TRPCError({ code: "BAD_REQUEST", message: "來源留言不屬於此組" });
   }
+  // 修 R5-IDOR-01：負責人必須是本組成員——原本 ownerId 直接落庫，可把組行程負責人指派給組外/別團隊任意使用者
+  // 並經 owner join 洩漏其顯示名稱。與 projectId/sourceMessageId/mentions 同一歸屬校驗口徑。
+  if (input.ownerId) {
+    const [om] = await db
+      .select({ id: schema.groupMembers.id })
+      .from(schema.groupMembers)
+      .where(and(eq(schema.groupMembers.groupId, input.groupId), eq(schema.groupMembers.userId, input.ownerId)))
+      .limit(1);
+    if (!om) throw new TRPCError({ code: "BAD_REQUEST", message: "負責人必須是本組成員" });
+  }
   const mentions = await validateMentions(input.groupId, input.mentions);
   const startsAt = parseDate(input.startsAt, "開始");
   const endsAt = input.endsAt ? parseDate(input.endsAt, "結束") : null;

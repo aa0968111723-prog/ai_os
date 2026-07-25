@@ -92,10 +92,38 @@ export async function listDmPeers(auth: AuthState): Promise<DmPeer[]> {
       .from(schema.users)
       .where(eq(schema.users.status, "active"));
   } else {
-    // 一般成員：同組夥伴＋開發者（全站支援窗口——開發者可訊我，我也要能回）
-    const sharedIds = [...sharedByUser.keys()];
+    // 一般成員：同組夥伴＋開發者＋團隊管理員雙向（與 canDmPeer 一致——修 R5-DM-01：原本清單漏了團隊管理員，
+    // 導致「收得到/回得了、卻無法主動發起」的半殘。補上（2）我所屬團隊的團隊管理員、（3）我管團隊底下的成員）。
+    const extraIds = new Set<string>();
+    const myTeamIds = [...new Set(auth.groups.map((g) => g.teamId))];
+    if (myTeamIds.length) {
+      const admins = await db
+        .select({ userId: schema.teamMembers.userId })
+        .from(schema.teamMembers)
+        .where(and(eq(schema.teamMembers.role, "admin"), inArray(schema.teamMembers.teamId, myTeamIds)));
+      for (const a of admins) if (a.userId !== auth.user.id) extraIds.add(a.userId);
+    }
+    if (auth.adminTeamIds.length) {
+      const tmembers = await db
+        .select({ userId: schema.teamMembers.userId })
+        .from(schema.teamMembers)
+        .where(inArray(schema.teamMembers.teamId, auth.adminTeamIds));
+      for (const a of tmembers) if (a.userId !== auth.user.id) extraIds.add(a.userId);
+      const groupsInMyTeams = await db
+        .select({ id: schema.groups.id })
+        .from(schema.groups)
+        .where(inArray(schema.groups.teamId, auth.adminTeamIds));
+      if (groupsInMyTeams.length) {
+        const gmembers = await db
+          .select({ userId: schema.groupMembers.userId })
+          .from(schema.groupMembers)
+          .where(inArray(schema.groupMembers.groupId, groupsInMyTeams.map((g) => g.id)));
+        for (const a of gmembers) if (a.userId !== auth.user.id) extraIds.add(a.userId);
+      }
+    }
+    const allowedIds = [...new Set([...sharedByUser.keys(), ...extraIds])];
     const conds = [eq(schema.users.isSuperAdmin, true)];
-    if (sharedIds.length) conds.push(inArray(schema.users.id, sharedIds));
+    if (allowedIds.length) conds.push(inArray(schema.users.id, allowedIds));
     candidates = await db
       .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, isSuperAdmin: schema.users.isSuperAdmin })
       .from(schema.users)

@@ -2932,8 +2932,17 @@ export function estimatePoints(model: ModelEntry, ctx?: EstimateContext): number
 /* 為什麼:工作流合計點數曾多條與單步實扣不符(UI 顯示夠用、中途才被額度擋下的斷鏈),
    故模組載入時一律由單步模型註冊表推導覆寫,單步點數改動後下游(workflows API/catalog/文件)自動同步。
    注意:必須放在 MODELS/WORKFLOW_PRESETS/LEGACY_MODELS 初始化之後,否則 getModel 會踩 const 的 TDZ。 */
+// 修 R5-V2-01：含「按千字」TTS 步的工作流，用扁平 model.points 加總會嚴重低估（turbo-v2.5 扁平 2 點，
+// 但 8000 字旁白實扣 12 點）——顯示總價低於實扣、且影片步先扣款後 TTS 步才因額度不足中鏈斷點。
+// 改以「提示詞上限（8000 字，同 workflows.ts 上限）」的最壞情況估點覆寫，讓顯示總價 ≥ 實扣、不再誤導與斷鏈。
+const WORKFLOW_MAX_PROMPT_CHARS = 8000;
 for (const w of WORKFLOW_PRESETS) {
-  w.points = w.steps.reduce((sum, st) => sum + (getModel(st.modelId)?.points ?? 0), 0);
+  w.points = w.steps.reduce((sum, st) => {
+    const m = getModel(st.modelId);
+    if (!m) return sum;
+    const perStep = ttsPointsPerKChar.has(m.id) ? estimatePoints(m, { promptChars: WORKFLOW_MAX_PROMPT_CHARS }) : m.points;
+    return sum + perStep;
+  }, 0);
 }
 
 export function getWorkflow(id: string): WorkflowPreset | undefined {

@@ -369,7 +369,8 @@ export const generationRouter = router({
         await postSystemMessage(`✅ 待核生成已核准並送出（${model.label}，${gen.pointsEst} 點）`);
         return updated;
       } catch (err) {
-        await refund(gen.userId, gen.groupId, gen.pointsEst, "核准送出失敗退回", gen.id);
+        // 修 R5-MONEY-002：與扣點側（332）對稱——假生成不扣點就不退點
+        if (!billingBypassed()) await refund(gen.userId, gen.groupId, gen.pointsEst, "核准送出失敗退回", gen.id);
         console.error("[generation] 核准送出失敗:", err);
         await db
           .update(schema.generations)

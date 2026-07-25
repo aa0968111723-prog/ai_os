@@ -315,7 +315,8 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       .returning();
     return updated;
   } catch (err) {
-    await refund(input.userId, project.groupId, est, "生成送出失敗退回", gen.id);
+    // 修 R5-MONEY-002：與扣點側（290）對稱——假生成不扣點就不該退點，否則帳本憑空多一筆 +est 灌鬆額度
+    if (!billingBypassed()) await refund(input.userId, project.groupId, est, "生成送出失敗退回", gen.id);
     console.error("[generation] submit 失敗:", err);
     await db
       .update(schema.generations)

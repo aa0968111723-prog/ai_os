@@ -4,7 +4,7 @@
  * 一開機就續轉,不靠使用者停在頁面。單筆:簽來源音檔網址→送 wizper→輪詢→回填 body。
  * 計費:與假生成同政策——mock 不扣點(billingBypassed);真模式扣 1 點(wizper 便宜),失敗退點。
  */
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { signAssetUrl } from "./storage";
 import { falSubmit, falStatus, billingBypassed } from "./fal";
@@ -41,8 +41,14 @@ export async function sweepVoiceTranscripts(limit = 5): Promise<number> {
       .where(and(eq(schema.messages.id, m.id), eq(schema.messages.voiceStatus, "running")))
       .returning({ id: schema.messages.id });
     if (recovered.length > 0 && !billingBypassed()) {
-      const cost = getModel(STT_MODEL_ID)?.points ?? 1;
-      await refund(m.userId, m.groupId, cost, "語音逐字稿逾時自動回收退回");
+      // 依帳本實際淨額退（修 R5-MONEY-001）：語音扣點以 msg.id 當帳本關聯鍵（複用 costLedger.generationId 欄）。
+      // 「CAS 成 running 後、扣點前崩潰」或「reserveQuota 拋例外」的列從未扣過點，net=0 → 退 0，不再盲退固定 cost 憑空長點。
+      const [ledger] = await db
+        .select({ net: sql<number>`coalesce(sum(${schema.costLedger.delta}), 0)` })
+        .from(schema.costLedger)
+        .where(eq(schema.costLedger.generationId, m.id));
+      const deducted = Math.max(0, -Number(ledger?.net ?? 0));
+      if (deducted > 0) await refund(m.userId, m.groupId, deducted, "語音逐字稿逾時自動回收退回", m.id);
     }
   }
 
@@ -87,7 +93,17 @@ async function transcribeOne(msg: typeof schema.messages.$inferSelect): Promise<
   if (claimed.length === 0) return false; // 已被別的 tick／別台實例認領（或狀態已變）——不重複處理、不扣點
   // 扣點(mock 略過);扣不到（額度不足）就標失敗，語音仍可播放，只是沒逐字稿
   if (!billingBypassed()) {
-    const quotaErr = await reserveQuota(msg.userId, msg.groupId, cost, "語音留言逐字稿");
+    // 扣點以 msg.id 當帳本關聯鍵（修 R5-MONEY-001）：讓失敗退點/陳屍回收能依實際淨額退、且冪等。
+    // reserveQuota 例外（連線池耗盡/序列化失敗/逾時）在此攔下並標失敗、不退點（從未扣過）——
+    // 否則例外會冒泡被 allSettled 吞掉，留下「running 但無扣點列」的孤兒，之後被陳屍回收盲退。
+    let quotaErr: string | null;
+    try {
+      quotaErr = await reserveQuota(msg.userId, msg.groupId, cost, "語音留言逐字稿", msg.id);
+    } catch (err) {
+      console.warn("[voice] 扣點例外（標失敗不退點）：", err instanceof Error ? err.message : err);
+      await markFailed(msg.id, "扣點暫時失敗，稍後重試");
+      return false;
+    }
     if (quotaErr) {
       await markFailed(msg.id, quotaErr);
       return false;
@@ -114,7 +130,7 @@ async function transcribeOne(msg: typeof schema.messages.$inferSelect): Promise<
     }
     throw new Error("轉錄逾時");
   } catch (err) {
-    if (!billingBypassed()) await refund(msg.userId, msg.groupId, cost, "語音逐字稿失敗退回");
+    if (!billingBypassed()) await refund(msg.userId, msg.groupId, cost, "語音逐字稿失敗退回", msg.id); // 帶 msg.id：冪等、與陳屍回收不重複退
     await markFailed(msg.id, err instanceof Error ? err.message : String(err));
     return false;
   }
