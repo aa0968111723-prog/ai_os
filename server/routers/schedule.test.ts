@@ -33,6 +33,22 @@ describe("buildIcs", () => {
     expect(ics).toMatch(/DTSTAMP:\d{8}T\d{6}Z/); // 產生當下時間,只驗格式
   });
 
+  it("allDayDate → 全天事件 VALUE=DATE、DTEND 取隔日、不帶時間/時區（修 R3-ICS-01）", () => {
+    const ics = buildIcs("G", [
+      { id: "a", title: "全天", startsAt: at("2026-07-16T00:00:00Z"), endsAt: null, note: null, allDayDate: "2026-07-16" },
+    ]);
+    expect(ics).toContain("DTSTART;VALUE=DATE:20260716");
+    expect(ics).toContain("DTEND;VALUE=DATE:20260717"); // 隔日（排他）
+    expect(ics).not.toMatch(/DTSTART:20260716T/); // 不是定時事件
+  });
+
+  it("月底全天事件 DTEND 正確跨月進位", () => {
+    const ics = buildIcs("G", [
+      { id: "a", title: "月底", startsAt: at("2026-07-31T00:00:00Z"), endsAt: null, note: null, allDayDate: "2026-07-31" },
+    ]);
+    expect(ics).toContain("DTEND;VALUE=DATE:20260801");
+  });
+
   it("有 endsAt 直接使用,不動", () => {
     const ics = buildIcs("G", [
       { id: "a", title: "有結束", startsAt: at("2026-07-16T03:00:00Z"), endsAt: at("2026-07-16T05:30:00Z"), note: null },

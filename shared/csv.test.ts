@@ -21,6 +21,11 @@ describe("parseCsv", () => {
   it("去 BOM、結尾無換行、LF/CRLF 混用", () => {
     expect(parseCsv("﻿a,b\nc,d")).toEqual([["a", "b"], ["c", "d"]]);
   });
+  it("純 CR 換行（舊 Mac）也正確分列，不再收成一列（修 R2-API-01）", () => {
+    expect(parseCsv("a,b\rc,d\re,f")).toEqual([["a", "b"], ["c", "d"], ["e", "f"]]);
+    // CRLF 不重複分列
+    expect(parseCsv("a,b\r\nc,d")).toEqual([["a", "b"], ["c", "d"]]);
+  });
   it("空輸入回空", () => {
     expect(parseCsv("")).toEqual([]);
   });

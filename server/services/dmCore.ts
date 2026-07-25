@@ -92,10 +92,38 @@ export async function listDmPeers(auth: AuthState): Promise<DmPeer[]> {
       .from(schema.users)
       .where(eq(schema.users.status, "active"));
   } else {
-    // 一般成員：同組夥伴＋開發者（全站支援窗口——開發者可訊我，我也要能回）
-    const sharedIds = [...sharedByUser.keys()];
+    // 一般成員：同組夥伴＋開發者＋團隊管理員雙向（與 canDmPeer 一致——修 R5-DM-01：原本清單漏了團隊管理員，
+    // 導致「收得到/回得了、卻無法主動發起」的半殘。補上（2）我所屬團隊的團隊管理員、（3）我管團隊底下的成員）。
+    const extraIds = new Set<string>();
+    const myTeamIds = [...new Set(auth.groups.map((g) => g.teamId))];
+    if (myTeamIds.length) {
+      const admins = await db
+        .select({ userId: schema.teamMembers.userId })
+        .from(schema.teamMembers)
+        .where(and(eq(schema.teamMembers.role, "admin"), inArray(schema.teamMembers.teamId, myTeamIds)));
+      for (const a of admins) if (a.userId !== auth.user.id) extraIds.add(a.userId);
+    }
+    if (auth.adminTeamIds.length) {
+      const tmembers = await db
+        .select({ userId: schema.teamMembers.userId })
+        .from(schema.teamMembers)
+        .where(inArray(schema.teamMembers.teamId, auth.adminTeamIds));
+      for (const a of tmembers) if (a.userId !== auth.user.id) extraIds.add(a.userId);
+      const groupsInMyTeams = await db
+        .select({ id: schema.groups.id })
+        .from(schema.groups)
+        .where(inArray(schema.groups.teamId, auth.adminTeamIds));
+      if (groupsInMyTeams.length) {
+        const gmembers = await db
+          .select({ userId: schema.groupMembers.userId })
+          .from(schema.groupMembers)
+          .where(inArray(schema.groupMembers.groupId, groupsInMyTeams.map((g) => g.id)));
+        for (const a of gmembers) if (a.userId !== auth.user.id) extraIds.add(a.userId);
+      }
+    }
+    const allowedIds = [...new Set([...sharedByUser.keys(), ...extraIds])];
     const conds = [eq(schema.users.isSuperAdmin, true)];
-    if (sharedIds.length) conds.push(inArray(schema.users.id, sharedIds));
+    if (allowedIds.length) conds.push(inArray(schema.users.id, allowedIds));
     candidates = await db
       .select({ id: schema.users.id, name: schema.users.name, email: schema.users.email, isSuperAdmin: schema.users.isSuperAdmin })
       .from(schema.users)
@@ -120,13 +148,49 @@ async function canDmPeer(auth: AuthState, peer: { id: string; isSuperAdmin: bool
   if (peer.id === auth.user.id) return false;
   if (auth.user.isSuperAdmin || peer.isSuperAdmin) return true;
   const myGroupIds = auth.groups.map((g) => g.groupId);
-  if (myGroupIds.length === 0) return false;
-  const [row] = await db
-    .select({ id: schema.groupMembers.id })
-    .from(schema.groupMembers)
-    .where(and(eq(schema.groupMembers.userId, peer.id), inArray(schema.groupMembers.groupId, myGroupIds)))
-    .limit(1);
-  return row != null;
+  // (1) 同組夥伴
+  if (myGroupIds.length > 0) {
+    const [row] = await db
+      .select({ id: schema.groupMembers.id })
+      .from(schema.groupMembers)
+      .where(and(eq(schema.groupMembers.userId, peer.id), inArray(schema.groupMembers.groupId, myGroupIds)))
+      .limit(1);
+    if (row != null) return true;
+  }
+  // 修 R3-DM-01：團隊管理員常只在 team_members(role=admin)、未掛 group_members，舊版只查同組會讓組員收得到
+  // 卻回不了團隊管理員的私訊（單向串）。補雙向可訊界：
+  // (2) peer 是「我所屬團隊」的團隊管理員
+  const myTeamIds = [...new Set(auth.groups.map((g) => g.teamId))];
+  if (myTeamIds.length > 0) {
+    const [peerAdmin] = await db
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(and(eq(schema.teamMembers.userId, peer.id), eq(schema.teamMembers.role, "admin"), inArray(schema.teamMembers.teamId, myTeamIds)))
+      .limit(1);
+    if (peerAdmin != null) return true;
+  }
+  // (3) 我是「peer 所屬團隊」的團隊管理員（peer 的組所屬團隊，或 peer 直接掛在我管的團隊）
+  if (auth.adminTeamIds.length > 0) {
+    const [peerTeamDirect] = await db
+      .select({ id: schema.teamMembers.id })
+      .from(schema.teamMembers)
+      .where(and(eq(schema.teamMembers.userId, peer.id), inArray(schema.teamMembers.teamId, auth.adminTeamIds)))
+      .limit(1);
+    if (peerTeamDirect != null) return true;
+    const peerGroups = await db
+      .select({ groupId: schema.groupMembers.groupId })
+      .from(schema.groupMembers)
+      .where(eq(schema.groupMembers.userId, peer.id));
+    if (peerGroups.length > 0) {
+      const [g] = await db
+        .select({ id: schema.groups.id })
+        .from(schema.groups)
+        .where(and(inArray(schema.groups.id, peerGroups.map((r) => r.groupId)), inArray(schema.groups.teamId, auth.adminTeamIds)))
+        .limit(1);
+      if (g != null) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -473,14 +537,16 @@ export async function listDmHistory(
 
 /** 已讀水位上報（與 messages.markRead 同語意的 upsert；高頻、無安全意義，審計豁免見 trpc.ts） */
 export async function markDmRead(auth: AuthState, peerId: string): Promise<void> {
-  const updated = await db
-    .update(schema.dmReads)
-    .set({ lastReadAt: new Date() })
-    .where(and(eq(schema.dmReads.userId, auth.user.id), eq(schema.dmReads.peerId, peerId)))
-    .returning();
-  if (updated.length === 0) {
-    await db.insert(schema.dmReads).values({ userId: auth.user.id, peerId });
-  }
+  // 修 R2-CONC-01/R2-02：原「update→0 則 insert」在併發首次標記下兩者都讀到 0、雙雙 insert，
+  // 產生同 (user,peer) 重複已讀列；unreadBySender 的 LEFT JOIN 對重複列扇出，未讀數被永久成倍放大。
+  // 依賴 dm_reads(user_id,peer_id) 唯一索引（ensure.ts 手寫遷移）＋ onConflictDoUpdate 原子 upsert 根治。
+  await db
+    .insert(schema.dmReads)
+    .values({ userId: auth.user.id, peerId, lastReadAt: new Date() })
+    .onConflictDoUpdate({
+      target: [schema.dmReads.userId, schema.dmReads.peerId],
+      set: { lastReadAt: new Date() },
+    });
 }
 
 /**

@@ -572,13 +572,20 @@ export const projectsRouter = router({
         .where(and(eq(schema.groupMembers.groupId, project.groupId), eq(schema.groupMembers.userId, input.userId)));
       if (!target) throw new TRPCError({ code: "BAD_REQUEST", message: "對方不是此組成員" });
       if (target.role !== "member") throw new TRPCError({ code: "BAD_REQUEST", message: "組長/管理員固定是編輯者" });
-      // 先清舊列再視需要插 viewer 列——「無列＝editor」是唯一預設語意，不留 editor 冗餘列
-      await db
-        .delete(schema.projectMembers)
-        .where(and(eq(schema.projectMembers.projectId, project.id), eq(schema.projectMembers.userId, input.userId)));
-      if (input.role === "viewer") {
-        await db.insert(schema.projectMembers).values({ projectId: project.id, userId: input.userId, role: "viewer" });
-      }
+      // 先清舊列再視需要插 viewer 列——「無列＝editor」是唯一預設語意，不留 editor 冗餘列。
+      // 修 R5-CONC-04：delete+insert 包進交易並靠 project_members(project_id,user_id) 唯一索引＋onConflictDoNothing，
+      // 杜絕併發設檢視者各自 delete→insert 留下重複列（projectAcl 讀多列會語義不定）。
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(schema.projectMembers)
+          .where(and(eq(schema.projectMembers.projectId, project.id), eq(schema.projectMembers.userId, input.userId)));
+        if (input.role === "viewer") {
+          await tx
+            .insert(schema.projectMembers)
+            .values({ projectId: project.id, userId: input.userId, role: "viewer" })
+            .onConflictDoNothing();
+        }
+      });
       return { ok: true, role: input.role };
     }),
 

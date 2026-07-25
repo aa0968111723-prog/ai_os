@@ -277,7 +277,12 @@ export const messagesRouter = router({
         ))
         .returning();
       if (removed.length === 0) {
-        await db.insert(schema.messageReactions).values({ messageId: input.messageId, userId: ctx.auth.user.id, emoji: input.emoji });
+        // 修 R2-03：併發/重送同人同表情會插重複列灌大計數；依 message_reactions(message_id,user_id,emoji)
+        // 唯一索引（ensure.ts）＋ onConflictDoNothing，重複 react 冪等（切換開只留一列）。
+        await db
+          .insert(schema.messageReactions)
+          .values({ messageId: input.messageId, userId: ctx.auth.user.id, emoji: input.emoji })
+          .onConflictDoNothing();
       }
       return { on: removed.length === 0 };
     }),
@@ -296,14 +301,15 @@ export const messagesRouter = router({
   markRead: authedProcedure.input(z.object({ projectId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const project = await loadProject(input.projectId);
     requireGroup(ctx.auth, project.groupId);
-    const updated = await db
-      .update(schema.messageReads)
-      .set({ lastReadAt: new Date() })
-      .where(and(eq(schema.messageReads.userId, ctx.auth.user.id), eq(schema.messageReads.projectId, input.projectId)))
-      .returning();
-    if (updated.length === 0) {
-      await db.insert(schema.messageReads).values({ userId: ctx.auth.user.id, projectId: input.projectId });
-    }
+    // 修 R2-CONC-01：原「update→0 則 insert」併發首次標記會雙插重複列，未讀計算扇出翻倍。
+    // 依 message_reads(user_id,project_id) 唯一索引（ensure.ts）＋ onConflictDoUpdate 原子 upsert。
+    await db
+      .insert(schema.messageReads)
+      .values({ userId: ctx.auth.user.id, projectId: input.projectId, lastReadAt: new Date() })
+      .onConflictDoUpdate({
+        target: [schema.messageReads.userId, schema.messageReads.projectId],
+        set: { lastReadAt: new Date() },
+      });
     return { ok: true };
   }),
 

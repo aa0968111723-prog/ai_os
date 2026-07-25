@@ -7,7 +7,7 @@
  * 清理：done/failed 逾 24 小時的 job 檔案與列由 sweep 定期回收（zip 是可重生的衍生物，不佔 Volume）。
  */
 import { createWriteStream } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { unlink, readdir, stat } from "node:fs/promises";
 import { finished } from "node:stream/promises";
 import path from "node:path";
 import { and, asc, eq, inArray, lt } from "drizzle-orm";
@@ -147,7 +147,9 @@ async function claimAndRun(): Promise<void> {
               : String(err),
         updatedAt: new Date(),
       })
-      .where(and(eq(schema.exportJobs.id, job.id), inArray(schema.exportJobs.status, ["running", "cancelled"])))
+      // 修 R3-EXPORT-01：只覆寫仍 running 的列。原本 WHERE 納入 cancelled，逾時或真實錯誤（wasCancelled=false）
+      // 與使用者取消同時發生時，會把已 cancelled 的列改寫成 failed，污染狀態語意。已終局（cancelled/done）不動。
+      .where(and(eq(schema.exportJobs.id, job.id), eq(schema.exportJobs.status, "running")))
       .catch(() => {});
     if (!wasCancelled) console.warn(`[export-job] ${timedOut ? "逾時" : "失敗"} ${job.id}：`, err instanceof Error ? err.message : err);
   } finally {
@@ -175,5 +177,24 @@ async function sweep(): Promise<void> {
   for (const job of expired) {
     if (job.storagePath) await removeStoredFile(job.storagePath);
     await db.delete(schema.exportJobs).where(eq(schema.exportJobs.id, job.id));
+  }
+
+  // 修 R3-STOR2-02：清 tmp 目錄的孤兒暫存檔——當機/重佈會留下半成品 export-job-*.zip（adoptTmpFile 未完成的），
+  // 永久佔 Volume 且無列指向。刪 mtime 逾 1 小時者（遠大於 15 分打包上限與最大上傳時間，不會誤刪進行中的）。
+  try {
+    const dir = tmpDir();
+    const entries = await readdir(dir);
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    for (const name of entries) {
+      const p = path.join(dir, name);
+      try {
+        const st = await stat(p);
+        if (st.isFile() && st.mtimeMs < cutoff) await unlink(p).catch(() => {});
+      } catch {
+        /* 檔案剛被別處刪掉/競態，略過 */
+      }
+    }
+  } catch (err) {
+    console.warn("[export-job] tmp 清掃失敗（下輪再試）：", err instanceof Error ? err.message : err);
   }
 }

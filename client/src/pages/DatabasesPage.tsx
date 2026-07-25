@@ -932,7 +932,8 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
     },
   });
   const removeFile = trpc.databases.removeFile.useMutation({ onSuccess: invalidateFiles });
-  const classify = trpc.databases.classifyFile.useMutation({ onSuccess: invalidateFiles });
+  // 修 R5-01：AI 看圖分類會扣點——成功後一併失效 quota.my，讓頂欄餘額即時同步（比照 GenerationList/AgentCard）
+  const classify = trpc.databases.classifyFile.useMutation({ onSuccess: () => { invalidateFiles(); utils.quota.my.invalidate(); } });
 
   const [url, setUrl] = useState("");
   const [urlName, setUrlName] = useState("");

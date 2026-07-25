@@ -8,7 +8,7 @@ import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
-import { assertProjectEditable } from "../services/projectAcl";
+import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
 
 export interface DirectorSuggestion {
@@ -99,6 +99,7 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND" });
   await input.assertAccess(project);
+  assertProjectNotArchived(project); // 修 R2-002：封存專案不得再付費拆分鏡（含助手 split_script 共用此核心）
   const wv = worldviewSchema.parse(project.worldview ?? {});
 
   // 腳本來源：優先參數；否則用知識庫（含腳本/開示等）——「懂我們素材」的延伸。
@@ -233,6 +234,7 @@ export const directorRouter = router({
     // 2.3 刻意豁免：suggest 是唯讀 AI 問答（不寫入任何內容），與 assistant.ask 同口徑對檢視者開放；
     // 扣的是提問者自己的額度。會「寫入」的 splitScript 才掛 assertProjectEditable。
     requireGroup(ctx.auth, project.groupId);
+    assertProjectNotArchived(project); // 修 R2-002：封存專案不得再觸發付費 AI 導演建議（真模式會扣點呼叫 LLM）
     const wv = worldviewSchema.parse(project.worldview ?? {});
 
     // 知識庫：把開示稿/見證稿/腳本全文注入——這就是「真的懂我們素材」，夥伴不必重講背景

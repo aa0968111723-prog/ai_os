@@ -228,7 +228,16 @@ export const scenesRouter = router({
     const [scene] = await db.select().from(schema.scenes).where(eq(schema.scenes.id, input.sceneId));
     if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
     await getProjectChecked(ctx, scene.projectId, true); // 2.3：檢視者不能還原分鏡
-    await db.update(schema.scenes).set({ deletedAt: null }).where(eq(schema.scenes.id, input.sceneId));
+    // 修 R3-BINV-01：還原時把 orderIndex 重排到尾端，別沿用被刪當下的舊序號——否則與現有分鏡撞出
+    // 重複 orderIndex，破壞排序唯一性（move/reorder 交換失準）。交易＋lockSceneOrder 序列化同專案建格。
+    await db.transaction(async (tx) => {
+      await lockSceneOrder(tx, scene.projectId);
+      const [{ maxOrder }] = await tx
+        .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), -1)` })
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.projectId, scene.projectId), isNull(schema.scenes.deletedAt)));
+      await tx.update(schema.scenes).set({ deletedAt: null, orderIndex: Number(maxOrder) + 1 }).where(eq(schema.scenes.id, input.sceneId));
+    });
     return { ok: true };
   }),
 

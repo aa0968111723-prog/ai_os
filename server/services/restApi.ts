@@ -99,7 +99,7 @@ export async function handleV1ListRows(req: Request, res: Response): Promise<voi
   const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 1000);
   const offset = Math.max(Number(req.query.offset) || 0, 0);
   const conds = [eq(schema.dataRows.tableId, hit.table.id)];
-  if (q) conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + q + "%"}`);
+  if (q) conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + q.replace(/[\\%_]/g, (m) => `\\${m}`) + "%"}`); // 修 R5-I18N-01：轉義 LIKE 萬用字元
   const rows = await db
     .select({ id: schema.dataRows.id, data: schema.dataRows.data, createdAt: schema.dataRows.createdAt, updatedAt: schema.dataRows.updatedAt })
     .from(schema.dataRows)
@@ -196,7 +196,7 @@ export async function handleDatabaseIcs(req: Request, res: Response): Promise<vo
     const data = r.data as DataRowData;
     const dateStr = data?.[dateField.key];
     if (typeof dateStr !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return [];
-    const startsAt = new Date(dateStr + "T09:00:00Z"); // 全日事件簡化為當日 09:00（UTC）起 1 小時
+    const startsAt = new Date(dateStr + "T00:00:00Z"); // 僅作型別欄位；實際以 allDayDate 輸出 VALUE=DATE 全天事件
     if (Number.isNaN(startsAt.getTime())) return [];
     const title = (titleField && typeof data[titleField.key] === "string" && data[titleField.key]) || `${hit.table.name}`;
     const note = fields
@@ -205,7 +205,7 @@ export async function handleDatabaseIcs(req: Request, res: Response): Promise<vo
       .map((f) => { const v = data[f.key]; return v !== null && v !== undefined && v !== "" ? `${f.label}: ${f.type === "checkbox" ? (v ? "是" : "否") : v}` : null; })
       .filter(Boolean)
       .join("\n");
-    return [{ id: r.id, title: String(title).slice(0, 200), startsAt, endsAt: null as Date | null, note: note || null }];
+    return [{ id: r.id, title: String(title).slice(0, 200), startsAt, endsAt: null as Date | null, note: note || null, allDayDate: dateStr }];
   });
 
   const ics = buildIcs(hit.table.name, items);

@@ -81,7 +81,9 @@ const SOURCE_INCOMPAT: Record<string, string[]> = {
 const SOURCE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件", zip: "zip 壓縮包" };
 
 /** 哪些類別注入世界觀(TTS 會唸出注入文字、轉錄/視覺/訓練/影片工具不適用 → 不注入) */
-const INJECT_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video", "image-to-video", "llm", "text-to-audio"]);
+// 修 GEN-202：text-to-audio（配樂/音效）移出注入名單——世界觀的「核心訊息／避免禁忌」是敘事文字，
+// 灌進配樂/音效提示詞只會污染輸出（與 speech-to-text/vision/training 同樣不注入）。
+const INJECT_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video", "image-to-video", "llm"]);
 /** 角色/場景錨點只注入「視覺」類別（畫面要一致）；LLM/TTS 不需要外觀。
  *  單一真相來源在 shared/models.ts 的 CARD_ANCHOR_CATEGORIES（QA-002：UI 依同一集合對使用者標示
  *  「此模型是否會用卡片」，前後端判斷不分岔）。 */
@@ -346,7 +348,8 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       .returning();
     return updated;
   } catch (err) {
-    await refund(input.userId, project.groupId, est, "生成送出失敗退回", gen.id);
+    // 修 R5-MONEY-002：與扣點側（290）對稱——假生成不扣點就不該退點，否則帳本憑空多一筆 +est 灌鬆額度
+    if (!billingBypassed()) await refund(input.userId, project.groupId, est, "生成送出失敗退回", gen.id);
     console.error("[generation] submit 失敗:", err);
     await db
       .update(schema.generations)
@@ -489,10 +492,12 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
   const rows = await db
     .select()
     .from(schema.assets)
+    // 修 R6-LIFE-01：回收桶（deletedAt 非空）素材也要落地——原本 isNull(deletedAt) 濾條會讓「生成後未落地→
+    // 丟回收桶→fal 短效網址過期→還原」的素材變永久死連結，回收桶「可救回」承諾落空。未落地時素材唯一來源就是
+    // 外部 url，還原時必須有 Volume 檔可用。落地本身冪等（已落地的 storagePath 非空撈不到），對回收桶素材無副作用。
     .where(and(
       eq(schema.assets.isAiGenerated, true),
       isNull(schema.assets.storagePath),
-      isNull(schema.assets.deletedAt),
       like(schema.assets.url, "http%"),
     ))
     .limit(limit);

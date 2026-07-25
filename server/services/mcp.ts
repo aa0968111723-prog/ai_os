@@ -80,6 +80,7 @@ const TOOLS = [
         modelId: { type: "string" },
         prompt: { type: "string" },
         source_url: { type: "string", description: "來源網址(圖生圖底圖/待轉錄音訊等,依模型而定)" },
+        client_request_id: { type: "string", description: "冪等鍵(UUID,可選):逾時重送同一鍵回既有生成、不重複扣點" },
       },
       required: ["projectId", "modelId", "prompt"],
     },
@@ -324,12 +325,15 @@ function recordMcpAudit(
       const [proj] = await db.select({ groupId: schema.projects.groupId }).from(schema.projects).where(eq(schema.projects.id, pid));
       groupId = proj?.groupId ?? null;
     }
+    // 修 LOG3-001：send_dm 的 body 是私訊全文、鍵名不符 sanitizeAuditInput 的 password/token… 規則，
+    // 會被明文寫進審計日誌（繞過網頁端 dm.send 的脫敏）。承載私訊/敏感內文的工具先把 body 換成佔位符。
+    const auditArgs = name === "send_dm" && args && typeof args === "object" ? { ...args, body: "（私訊內容不落審計）" } : args;
     await db.insert(schema.auditLog).values({
       actorId,
       action: `mcp.${name}`,
       groupId,
       projectId,
-      input: sanitizeAuditInput(args) as Record<string, unknown>,
+      input: sanitizeAuditInput(auditArgs) as Record<string, unknown>,
       ok: outcome.ok,
       error: outcome.error ? outcome.error.slice(0, 300) : null,
     });
@@ -850,6 +854,8 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     // 疊上「專案級 ACL（檢視者不能生成）」與「成本核准門檻（組員達門檻先送審）」——與網頁端行為一致。
     // userId＝金鑰擁有者本人：扣他的額度、走他的核准門檻、審計記他，真正做到「依自己權限」。
     const gen = await submitGenerationCore({
+      // 修 R6-MONEY-01：帶客戶端冪等鍵——與網頁端同一套唯一鍵，逾時重送同鍵回既有列、不重複建生成/不雙重扣點
+      id: typeof args.client_request_id === "string" ? args.client_request_id : undefined,
       userId: auth.user.id,
       projectId: project.id,
       modelId: String(args.modelId ?? ""),
@@ -873,6 +879,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     // 留言不受專案級 ACL 限制（檢視者也可留言，與網頁端一致）——組隔離已於上方 requireGroup 把關。
     const body = String(args.body ?? "").trim();
     if (!body) throw new Error("body 不可為空");
+    if (body.length > 2000) throw new Error("訊息最長 2000 字"); // 修 IN-01：與網頁端同上限，別讓 MCP 繞過
     const [msg] = await db
       .insert(schema.messages)
       .values({ groupId: project.groupId, projectId: project.id, userId: auth.user.id, kind: "text", body })

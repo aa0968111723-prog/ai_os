@@ -95,10 +95,50 @@ async function applyManualMigrations(): Promise<void> {
       on feedback (user_id, coalesce(group_id, '00000000-0000-0000-0000-000000000000'::uuid))
     `);
 
-    // 生成執行器與陳屍清掃每 ~60 秒掃「in-flight（queued/running）」列——drizzle 的 index() 無法表達
-    // 「partial index（WHERE 條件）」，故手寫。部分索引只含在途列（極少），體積小、命中率高：
-    //   - generationRunner.sweepStale：WHERE status IN(queued,running) ORDER BY updated_at
-    //   - listByProject 的 in-flight 判斷與分鏡 pending 子查詢：WHERE project_id AND status IN(...)
+    // 已讀水位／表情回應唯一約束（修 R2-CONC-01/R2-02/R2-03）：這三處原本走「查後寫（update→0 則 insert／
+    // delete→0 則 insert）」，併發首次寫入各插一列重複列——已讀列重複會讓未讀數的 LEFT JOIN 扇出永久翻倍、
+    // 表情列重複會灌大計數。先去重（保留最新一筆）再建唯一索引，router 端已改 onConflict，此後有 DB 保底。
+    await db.execute(sql`
+      delete from dm_reads a using dm_reads b
+      where a.user_id = b.user_id and a.peer_id = b.peer_id
+        and (a.last_read_at, a.id::text) < (b.last_read_at, b.id::text)
+    `);
+    await db.execute(sql`create unique index if not exists dm_reads_user_peer_uq on dm_reads (user_id, peer_id)`);
+    await db.execute(sql`
+      delete from message_reads a using message_reads b
+      where a.user_id = b.user_id and a.project_id = b.project_id
+        and (a.last_read_at, a.id::text) < (b.last_read_at, b.id::text)
+    `);
+    await db.execute(sql`create unique index if not exists message_reads_user_project_uq on message_reads (user_id, project_id)`);
+    await db.execute(sql`
+      delete from message_reactions a using message_reactions b
+      where a.message_id = b.message_id and a.user_id = b.user_id and a.emoji = b.emoji
+        and (a.created_at, a.id::text) < (b.created_at, b.id::text)
+    `);
+    await db.execute(sql`create unique index if not exists message_reactions_msg_user_emoji_uq on message_reactions (message_id, user_id, emoji)`);
+
+    // project_members(project_id,user_id) 唯一（修 R5-CONC-04）：setProjectRole 的 delete→insert 併發會留重複列。
+    await db.execute(sql`
+      delete from project_members a using project_members b
+      where a.project_id = b.project_id and a.user_id = b.user_id and a.id::text < b.id::text
+    `);
+    await db.execute(sql`create unique index if not exists project_members_project_user_uq on project_members (project_id, user_id)`);
+
+    // team_members(team_id,user_id)／group_members(group_id,user_id) 唯一（修 R6-CONC-01）：
+    // attachExistingUser 的「查後插」併發會把既有帳號重複入團隊/組。先去重（保留最早一筆＝最初加入）再建唯一索引。
+    await db.execute(sql`
+      delete from team_members a using team_members b
+      where a.team_id = b.team_id and a.user_id = b.user_id and a.id::text > b.id::text
+    `);
+    await db.execute(sql`create unique index if not exists team_members_team_user_uq on team_members (team_id, user_id)`);
+    await db.execute(sql`
+      delete from group_members a using group_members b
+      where a.group_id = b.group_id and a.user_id = b.user_id and a.id::text > b.id::text
+    `);
+    await db.execute(sql`create unique index if not exists group_members_group_user_uq on group_members (group_id, user_id)`);
+
+    // 生成執行器與陳屍清掃每 ~60 秒掃「in-flight（queued/running）」列（來自並行 PR #105）——drizzle 的 index()
+    // 無法表達 partial index（WHERE 條件），故手寫。部分索引只含在途列（極少），體積小、命中率高。
     await db.execute(sql`
       create index if not exists generations_active_idx
       on generations (updated_at) where status in ('queued','running')
@@ -107,7 +147,8 @@ async function applyManualMigrations(): Promise<void> {
       create index if not exists generations_project_active_idx
       on generations (project_id, updated_at) where status in ('queued','running')
     `);
-    console.log("[db] ✓ 手寫遷移完成（group_options／feedback 唯一索引＋generations 在途部分索引就緒）");
+
+    console.log("[db] ✓ 手寫遷移完成（唯一索引：dm_reads／message_reads／message_reactions／project_members／team_members／group_members＋generations 在途部分索引就緒）");
   } catch (err) {
     // 不擋開機：索引缺席只是回到「應用層防重」的舊狀態,功能照常
     console.warn("[db] ⚠ 手寫遷移失敗（不影響啟動）：", err instanceof Error ? err.message : err);
