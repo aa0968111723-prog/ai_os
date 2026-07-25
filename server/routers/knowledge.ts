@@ -169,6 +169,8 @@ const DESCRIBE_PROMPT = "請以繁體中文詳細描述這張圖片（場景、�
  * 記憶體鎖與本檔節流/realtime 同一「單容器」部署假設；完成即刪 key，不會無界成長。
  */
 const describeInFlight = new Map<string, Promise<{ id: string; title: string; content: string }>>();
+// 修 R7-CONC-01：addFromAsset 同素材 dup→insert 的記憶體序列化（比照 describeInFlight），杜絕併發雙擊建重複知識列
+const addFromAssetInFlight = new Map<string, Promise<typeof schema.knowledge.$inferSelect>>();
 
 // 記憶體節流（比照 assistant/director 的模式，但獨立計數器、不跨檔共用）：每人每分鐘 6 次，擋狂刷付費視覺模型
 const DESCRIBE_LIMIT_PER_MIN = 6;
@@ -402,52 +404,64 @@ export const knowledgeRouter = router({
     if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材（可能已在回收桶）" });
     requireGroup(ctx.auth, asset.groupId);
     await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3
-    const [dup] = await db
-      .select()
-      .from(schema.knowledge)
-      .where(
-        and(
-          eq(schema.knowledge.sourceAssetId, asset.id),
-          eq(schema.knowledge.projectId, asset.projectId),
-          // 只認未刪除的既有筆：若前一份已丟進回收桶，這次重新加入應建一份新的活筆
-          isNull(schema.knowledge.deletedAt),
-        ),
-      );
-    if (dup) return dup; // 已加過就回原筆，冪等
-    if (asset.kind !== "doc" || !asset.storagePath) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "只有文字類素材（txt/md）能加入知識庫" });
-    }
-    const { open } = await import("node:fs/promises");
-    const { absPathOf } = await import("../services/storage");
-    let content: string;
-    try {
-      // 只讀前段（非整檔進記憶體）——即使有人上傳 200MB 的 .txt，也只吃 MAX_CONTENT×4 bytes。
-      // CJK 一字最多 4 bytes（UTF-8），讀 MAX_CONTENT×4 bytes 後再截到 MAX_CONTENT 字，足夠且有界。
-      const fh = await open(absPathOf(asset.storagePath), "r");
-      try {
-        const buf = Buffer.alloc(MAX_CONTENT * 4);
-        const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
-        content = buf.subarray(0, bytesRead).toString("utf8").slice(0, MAX_CONTENT);
-      } finally {
-        await fh.close();
+    // 修 R7-CONC-01：同素材的「查重→讀檔→insert」以記憶體 in-flight 序列化——併發雙擊/重試各自查空、
+    // 各自 insert 會產生重複知識列（且加倍吃 INJECT_BUDGET 擠掉其他知識）。第二個併發請求直接 await 第一個。
+    const running = addFromAssetInFlight.get(asset.id);
+    if (running) return running;
+    const job = (async () => {
+      const [dup] = await db
+        .select()
+        .from(schema.knowledge)
+        .where(
+          and(
+            eq(schema.knowledge.sourceAssetId, asset.id),
+            eq(schema.knowledge.projectId, asset.projectId),
+            // 只認未刪除的既有筆：若前一份已丟進回收桶，這次重新加入應建一份新的活筆
+            isNull(schema.knowledge.deletedAt),
+          ),
+        );
+      if (dup) return dup; // 已加過就回原筆，冪等
+      if (asset.kind !== "doc" || !asset.storagePath) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "只有文字類素材（txt/md）能加入知識庫" });
       }
-    } catch {
-      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "讀取素材內容失敗" });
+      const { open } = await import("node:fs/promises");
+      const { absPathOf } = await import("../services/storage");
+      let content: string;
+      try {
+        // 只讀前段（非整檔進記憶體）——即使有人上傳 200MB 的 .txt，也只吃 MAX_CONTENT×4 bytes。
+        // CJK 一字最多 4 bytes（UTF-8），讀 MAX_CONTENT×4 bytes 後再截到 MAX_CONTENT 字，足夠且有界。
+        const fh = await open(absPathOf(asset.storagePath), "r");
+        try {
+          const buf = Buffer.alloc(MAX_CONTENT * 4);
+          const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+          content = buf.subarray(0, bytesRead).toString("utf8").slice(0, MAX_CONTENT);
+        } finally {
+          await fh.close();
+        }
+      } catch {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "讀取素材內容失敗" });
+      }
+      if (!content.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這份素材沒有可讀的文字內容" });
+      const [row] = await db
+        .insert(schema.knowledge)
+        .values({
+          projectId: asset.projectId,
+          groupId: asset.groupId,
+          kind: "note",
+          title: asset.title.slice(0, 120),
+          content,
+          sourceAssetId: asset.id,
+          createdBy: ctx.auth.user.id,
+        })
+        .returning();
+      return row;
+    })();
+    addFromAssetInFlight.set(asset.id, job);
+    try {
+      return await job;
+    } finally {
+      addFromAssetInFlight.delete(asset.id);
     }
-    if (!content.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這份素材沒有可讀的文字內容" });
-    const [row] = await db
-      .insert(schema.knowledge)
-      .values({
-        projectId: asset.projectId,
-        groupId: asset.groupId,
-        kind: "note",
-        title: asset.title.slice(0, 120),
-        content,
-        sourceAssetId: asset.id,
-        createdBy: ctx.auth.user.id,
-      })
-      .returning();
-    return row;
   }),
 
   /**
@@ -552,7 +566,10 @@ export const knowledgeRouter = router({
           .returning();
         return { id: row.id, title: row.title, content: row.content };
       } catch (err) {
-        if (chargedPoints > 0) await refund(ctx.auth.user.id, asset.groupId, chargedPoints, "圖片描述入庫失敗退回", asset.id);
+        // 修 R7-MONEY-01：不帶 generationId 冪等鍵——describe 是可重複觸發的操作，每次呼叫都是全新一筆扣點，
+        // 用靜態 asset.id 當鍵會讓「第二次以上失敗」的退點撞到第一次的退點列被冪等抑制、本次扣點永久蒸發。
+        // 此 catch 每次呼叫至多執行一次、無「同筆被輪詢重複退」的併發面，故比照上方 vision 失敗退點（不帶鍵、每次都退）。
+        if (chargedPoints > 0) await refund(ctx.auth.user.id, asset.groupId, chargedPoints, "圖片描述入庫失敗退回");
         throw err;
       }
 
