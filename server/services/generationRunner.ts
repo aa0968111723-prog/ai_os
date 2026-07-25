@@ -152,7 +152,14 @@ async function sweepStale(): Promise<void> {
   for (const gen of staleRows) {
     if (inflight.has(gen.id)) continue; // 正在推進的交給正常路徑，避免雙寫
     try {
-      // 原子＋冪等收斂：CAS→failed 與退點列同一交易，中途當機整筆 rollback，杜絕點數永久蒸發（見 points.ts）
+      // 修 R6-MONEY-02：先讓 advanceGeneration 有機會收斂——重佈後 fal 其實可能已完成，直接退點會把成品丟棄。
+      // advanceGeneration 對已 done/failed 者正常落地/退點；若之後仍 queued/running（真孤兒）才由下方 CAS 收斂。
+      try {
+        await advanceGeneration(gen.id);
+      } catch {
+        /* fal 連不上等：交給下方陳屍收斂 */
+      }
+      // 原子＋冪等收斂：CAS→failed 與退點列同一交易（已被 advanceGeneration 推進成終局者，CAS 自動 no-op）
       await failStaleGenerationTx(gen.id, "生成停滯逾 30 分鐘，系統自動回收", "生成停滯自動回收退回");
     } catch (err) {
       console.warn(`[generation] 陳屍回收略過（下輪再試）：gen=${gen.id}`, err instanceof Error ? err.message : err);

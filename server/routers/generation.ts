@@ -37,9 +37,14 @@ async function sweepStaleGenerations(projectId: string): Promise<void> {
       ),
     );
   for (const gen of staleRows) {
+    // 修 R6-MONEY-02：先讓 advanceGeneration 收斂——重佈後 fal 其實可能已完成，直接退點會把成品丟棄。
+    try {
+      await advanceGeneration(gen.id);
+    } catch {
+      /* fal 連不上等：交給下方陳屍收斂 */
+    }
     // 原子＋冪等收斂：CAS→failed 與「依帳本淨額退點」同一交易（負淨額＝有扣過才退；0＝從未扣點不退，
-    // 免對沒扣過的列憑空加點灌鬆總預算閘）。同交易杜絕「狀態已 commit 但退點列從未寫入 → 點數永久蒸發」，
-    // 退點列對同一 generation 冪等防重複退。細節見 points.ts failStaleGenerationTx。
+    // 免對沒扣過的列憑空加點灌鬆總預算閘）。已被 advanceGeneration 推進成終局者，CAS 自動 no-op。細節見 points.ts。
     await failStaleGenerationTx(gen.id, "生成停滯逾 30 分鐘，系統自動回收", "生成停滯自動回收退回");
   }
 }

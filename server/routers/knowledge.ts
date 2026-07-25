@@ -491,6 +491,7 @@ export const knowledgeRouter = router({
 
       const title = `${DESCRIBE_TITLE_PREFIX}｜${asset.title.slice(0, 60)}`;
       let content: string;
+      let chargedPoints = 0; // 修 R6-CRASH-001：記已扣點數（外層可見），入庫失敗時據此退回
       if (isMockMode()) {
         // 假模式：不扣點，用固定示範文字跑通「描述 → 入庫 → 注入」全流程（與 fal/assistant 的 mock 哲學一致）
         content = `（測試模式描述）這是一張與專案相關的圖片素材：${asset.title}。正式模式會由視覺模型產生詳細中文描述。`;
@@ -500,6 +501,7 @@ export const knowledgeRouter = router({
         // 先扣後呼叫、失敗退回——與 assistant/generationCore 同一守門哲學（點數＝真金，不可先跑再說）
         const quotaError = await reserveQuota(ctx.auth.user.id, asset.groupId, points, "圖片描述入知識庫");
         if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+        chargedPoints = points;
         // 圖片網址：本地檔 → 簽名網址（fal 要能從外部抓到圖，與 generationCore 來源素材同模式）；
         // 純外部素材直接用其網址，但必須是 http(s) 否則模型抓不到——擋下並退點
         const imageUrl = asset.storagePath ? signAssetUrl(asset.id) : asset.url;
@@ -533,20 +535,26 @@ export const knowledgeRouter = router({
         }
       }
 
-      // 入庫成 note：記 sourceAssetId（防重複＋回溯來源圖），之後自動被 buildKnowledgeContext 注入
-      const [row] = await db
-        .insert(schema.knowledge)
-        .values({
-          projectId: asset.projectId,
-          groupId: asset.groupId,
-          kind: "note",
-          title,
-          content,
-          sourceAssetId: asset.id,
-          createdBy: ctx.auth.user.id,
-        })
-        .returning();
-      return { id: row.id, title: row.title, content: row.content };
+      // 入庫成 note：記 sourceAssetId（防重複＋回溯來源圖），之後自動被 buildKnowledgeContext 注入。
+      // 修 R6-CRASH-001：vision 成功（已扣點）後若入庫失敗，原本無退點＝已扣點無成品。入庫失敗也要退點。
+      try {
+        const [row] = await db
+          .insert(schema.knowledge)
+          .values({
+            projectId: asset.projectId,
+            groupId: asset.groupId,
+            kind: "note",
+            title,
+            content,
+            sourceAssetId: asset.id,
+            createdBy: ctx.auth.user.id,
+          })
+          .returning();
+        return { id: row.id, title: row.title, content: row.content };
+      } catch (err) {
+        if (chargedPoints > 0) await refund(ctx.auth.user.id, asset.groupId, chargedPoints, "圖片描述入庫失敗退回", asset.id);
+        throw err;
+      }
 
     })(); // 見上方 describeInFlight：dup 檢查→扣點→fal→入庫整段對同素材序列化
     describeInFlight.set(asset.id, job);
