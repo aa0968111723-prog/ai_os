@@ -4,7 +4,7 @@
  * 一開機就續轉,不靠使用者停在頁面。單筆:簽來源音檔網址→送 wizper→輪詢→回填 body。
  * 計費:與假生成同政策——mock 不扣點(billingBypassed);真模式扣 1 點(wizper 便宜),失敗退點。
  */
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { signAssetUrl } from "./storage";
 import { falSubmit, falStatus, billingBypassed } from "./fal";
@@ -35,20 +35,41 @@ export async function sweepVoiceTranscripts(limit = 5): Promise<number> {
     .limit(limit);
   for (const m of stale) {
     if (inflight.has(m.id)) continue; // 本程序正在處理的不動
-    const recovered = await db
-      .update(schema.messages)
-      .set({ voiceStatus: "failed", body: "🎙️ 語音訊息（逐字稿逾時未完成，點播放鍵聆聽）" })
-      .where(and(eq(schema.messages.id, m.id), eq(schema.messages.voiceStatus, "running")))
-      .returning({ id: schema.messages.id });
-    if (recovered.length > 0 && !billingBypassed()) {
-      // 依帳本實際淨額退（修 R5-MONEY-001）：語音扣點以 msg.id 當帳本關聯鍵（複用 costLedger.generationId 欄）。
-      // 「CAS 成 running 後、扣點前崩潰」或「reserveQuota 拋例外」的列從未扣過點，net=0 → 退 0，不再盲退固定 cost 憑空長點。
-      const [ledger] = await db
-        .select({ net: sql<number>`coalesce(sum(${schema.costLedger.delta}), 0)` })
-        .from(schema.costLedger)
-        .where(eq(schema.costLedger.generationId, m.id));
-      const deducted = Math.max(0, -Number(ledger?.net ?? 0));
-      if (deducted > 0) await refund(m.userId, m.groupId, deducted, "語音逐字稿逾時自動回收退回", m.id);
+    try {
+      // 原子＋冪等收斂（修 R6-MONEY-001）：CAS running→failed 與「依帳本淨額退點」包進同一交易——
+      // 舊版先 commit failed 再另起交易退點，兩步之間當機會留下終局 failed 但退點列從未寫入（掃描只掃 running
+      // 永不再碰）→ 已扣點永久蒸發。同交易後：全有或全無，中途當機整筆 rollback、列留 running 交下輪重試。
+      // 退點金額＝該留言帳本淨額絕對值（never-charged 退 0），並對同 msg.id 冪等。
+      await db.transaction(async (tx) => {
+        const recovered = await tx
+          .update(schema.messages)
+          .set({ voiceStatus: "failed", body: "🎙️ 語音訊息（逐字稿逾時未完成，點播放鍵聆聽）" })
+          .where(and(eq(schema.messages.id, m.id), eq(schema.messages.voiceStatus, "running")))
+          .returning({ id: schema.messages.id });
+        if (recovered.length === 0 || billingBypassed()) return;
+        const [ledger] = await tx
+          .select({ net: sql<number>`coalesce(sum(${schema.costLedger.delta}), 0)` })
+          .from(schema.costLedger)
+          .where(eq(schema.costLedger.generationId, m.id));
+        const deducted = Math.max(0, -Number(ledger?.net ?? 0));
+        if (deducted > 0) {
+          const [existing] = await tx
+            .select({ n: sql<number>`count(*)` })
+            .from(schema.costLedger)
+            .where(and(eq(schema.costLedger.generationId, m.id), gt(schema.costLedger.delta, 0)));
+          if (Number(existing?.n ?? 0) === 0) {
+            await tx.insert(schema.costLedger).values({
+              userId: m.userId,
+              groupId: m.groupId,
+              delta: deducted,
+              reason: "語音逐字稿逾時自動回收退回",
+              generationId: m.id,
+            });
+          }
+        }
+      });
+    } catch (err) {
+      console.warn(`[voice] 陳屍回收略過（下輪再試）：msg=${m.id}`, err instanceof Error ? err.message : err);
     }
   }
 

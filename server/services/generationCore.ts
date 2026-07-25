@@ -459,10 +459,12 @@ export async function sweepUnlandedAssets(limit = 20): Promise<number> {
   const rows = await db
     .select()
     .from(schema.assets)
+    // 修 R6-LIFE-01：回收桶（deletedAt 非空）素材也要落地——原本 isNull(deletedAt) 濾條會讓「生成後未落地→
+    // 丟回收桶→fal 短效網址過期→還原」的素材變永久死連結，回收桶「可救回」承諾落空。未落地時素材唯一來源就是
+    // 外部 url，還原時必須有 Volume 檔可用。落地本身冪等（已落地的 storagePath 非空撈不到），對回收桶素材無副作用。
     .where(and(
       eq(schema.assets.isAiGenerated, true),
       isNull(schema.assets.storagePath),
-      isNull(schema.assets.deletedAt),
       like(schema.assets.url, "http%"),
     ))
     .limit(limit);

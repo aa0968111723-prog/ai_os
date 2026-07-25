@@ -139,6 +139,12 @@ export const notesRouter = router({
     }))
     .mutation(async ({ ctx, input }) => {
       const row = await getNoteChecked(ctx.auth, input.id);
+      // 修 R6-AUTHZ-01：與 remove 同守衛——只有作者本人或組長以上可編輯，否則一般組員能整篇覆寫他人（含組長）
+      // 筆記，等於架空 remove 的刪除守衛（覆寫＝實質摧毀內容）。
+      const editRole = requireGroup(ctx.auth, row.groupId);
+      if (row.createdBy !== ctx.auth.user.id && editRole === "member") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "只有作者本人或組長以上可以編輯筆記" });
+      }
       // 內容真的改變才存版本快照（只改標題不灌版本）——與 knowledge.update 同一原則
       const contentChanges = input.content !== undefined && input.content !== row.content;
       if (contentChanges) await snapshotNote(row, ctx.auth.user.id);
@@ -161,7 +167,12 @@ export const notesRouter = router({
     if (row.createdBy !== ctx.auth.user.id && role === "member") {
       throw new TRPCError({ code: "FORBIDDEN", message: "只有作者本人或組長以上可以刪除筆記" });
     }
-    await db.delete(schema.notes).where(eq(schema.notes.id, row.id));
+    // 修 R6-LIFE-02：級聯清版本快照——update 前 snapshotNote 會把全文寫進 text_versions(kind='note')，
+    // 硬刪只刪本體會留下無讀取路徑的孤兒全文列（敏感內容永久殘留、隨刪隨積）。比照 knowledge.purge 同交易級聯刪。
+    await db.transaction(async (tx) => {
+      await tx.delete(schema.textVersions).where(and(eq(schema.textVersions.kind, "note"), eq(schema.textVersions.refId, row.id)));
+      await tx.delete(schema.notes).where(eq(schema.notes.id, row.id));
+    });
     return { ok: true };
   }),
 });

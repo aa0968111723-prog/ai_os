@@ -124,7 +124,20 @@ async function applyManualMigrations(): Promise<void> {
     `);
     await db.execute(sql`create unique index if not exists project_members_project_user_uq on project_members (project_id, user_id)`);
 
-    console.log("[db] ✓ 手寫遷移完成（group_options／feedback／dm_reads／message_reads／message_reactions／project_members 唯一索引就緒）");
+    // team_members(team_id,user_id)／group_members(group_id,user_id) 唯一（修 R6-CONC-01）：
+    // attachExistingUser 的「查後插」併發會把既有帳號重複入團隊/組。先去重（保留最早一筆＝最初加入）再建唯一索引。
+    await db.execute(sql`
+      delete from team_members a using team_members b
+      where a.team_id = b.team_id and a.user_id = b.user_id and a.id::text > b.id::text
+    `);
+    await db.execute(sql`create unique index if not exists team_members_team_user_uq on team_members (team_id, user_id)`);
+    await db.execute(sql`
+      delete from group_members a using group_members b
+      where a.group_id = b.group_id and a.user_id = b.user_id and a.id::text > b.id::text
+    `);
+    await db.execute(sql`create unique index if not exists group_members_group_user_uq on group_members (group_id, user_id)`);
+
+    console.log("[db] ✓ 手寫遷移完成（group_options／feedback／dm_reads／message_reads／message_reactions／project_members／team_members／group_members 唯一索引就緒）");
   } catch (err) {
     // 不擋開機：索引缺席只是回到「應用層防重」的舊狀態,功能照常
     console.warn("[db] ⚠ 手寫遷移失敗（不影響啟動）：", err instanceof Error ? err.message : err);

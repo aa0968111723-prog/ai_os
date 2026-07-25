@@ -80,6 +80,7 @@ const TOOLS = [
         modelId: { type: "string" },
         prompt: { type: "string" },
         source_url: { type: "string", description: "來源網址(圖生圖底圖/待轉錄音訊等,依模型而定)" },
+        client_request_id: { type: "string", description: "冪等鍵(UUID,可選):逾時重送同一鍵回既有生成、不重複扣點" },
       },
       required: ["projectId", "modelId", "prompt"],
     },
@@ -845,6 +846,8 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     // 疊上「專案級 ACL（檢視者不能生成）」與「成本核准門檻（組員達門檻先送審）」——與網頁端行為一致。
     // userId＝金鑰擁有者本人：扣他的額度、走他的核准門檻、審計記他，真正做到「依自己權限」。
     const gen = await submitGenerationCore({
+      // 修 R6-MONEY-01：帶客戶端冪等鍵——與網頁端同一套唯一鍵，逾時重送同鍵回既有列、不重複建生成/不雙重扣點
+      id: typeof args.client_request_id === "string" ? args.client_request_id : undefined,
       userId: auth.user.id,
       projectId: project.id,
       modelId: String(args.modelId ?? ""),

@@ -273,7 +273,8 @@ export async function attachExistingUser(input: {
     .from(schema.teamMembers)
     .where(and(eq(schema.teamMembers.teamId, input.teamId), eq(schema.teamMembers.userId, input.userId)));
   if (existingTeam.length === 0) {
-    await db.insert(schema.teamMembers).values({ teamId: input.teamId, userId: input.userId, role: input.teamRole });
+    // 修 R6-CONC-01：查後插無鎖，併發把既有帳號重複入團隊；靠 team_members(team_id,user_id) 唯一索引＋onConflictDoNothing 兜底
+    await db.insert(schema.teamMembers).values({ teamId: input.teamId, userId: input.userId, role: input.teamRole }).onConflictDoNothing();
   }
   if (input.groupId) {
     const existingGroup = await db
@@ -281,7 +282,7 @@ export async function attachExistingUser(input: {
       .from(schema.groupMembers)
       .where(and(eq(schema.groupMembers.groupId, input.groupId), eq(schema.groupMembers.userId, input.userId)));
     if (existingGroup.length === 0) {
-      await db.insert(schema.groupMembers).values({ groupId: input.groupId, userId: input.userId, role: input.groupRole });
+      await db.insert(schema.groupMembers).values({ groupId: input.groupId, userId: input.userId, role: input.groupRole }).onConflictDoNothing();
     }
   }
 }
