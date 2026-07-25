@@ -340,6 +340,14 @@ export function ProjectPage({ id }: { id: string }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenePresets.data]);
+  // 來源素材同樣要清：選中的來源被刪（本人刪或協作者刪→WS invalidate）後，
+  // 下拉選項已消失但 state 仍在——生成鈕保持可按、送出必被伺服器擋，使用者看不懂哪裡錯
+  useEffect(() => {
+    const list = assets.data;
+    if (!list || !sourceAsset) return;
+    if (!list.some((a) => a.id === sourceAsset.id)) setSourceAsset(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assets.data]);
   /** 外部指定模型（提示詞庫「再用」/生成紀錄「再用此設定」還原模型用）：nonce 遞增觸發 ModelPicker 套用 */
   const [pickReq, setPickReq] = useState<{ modelId: string; nonce: number } | null>(null);
   /** 提示詞庫「用於工作流」：把咒語帶進工作流想法框（nonce 遞增觸發 WorkflowCard 套用） */
@@ -762,18 +770,25 @@ export function ProjectPage({ id }: { id: string }) {
             </h2>
             {!canEdit && <p className="hint" style={{ margin: "4px 0 0" }}>檢視者唯讀——世界觀可瀏覽、不能修改（打的字不會被儲存）。</p>}
             <label htmlFor="wv-logline">一句話故事（logline）</label>
+            {/* key 綁伺服器值：協作者改動（WS invalidate 重抓）時強制重掛吃進新值——
+                非受控 defaultValue 否則永遠停在舊字，focus+blur 還會把舊值回寫、蓋掉別人的修改。
+                maxLength 與後端 worldviewSchema .max(500) 對齊，貼超長不再靜默存失敗。 */}
             <input
+              key={`logline-${wv.logline}`}
               id="wv-logline"
               defaultValue={wv.logline}
               readOnly={!canEdit}
+              maxLength={500}
               placeholder="例：陳師姐從憂鬱低谷透過印心佛法走出重生"
               onBlur={(e) => canEdit && e.target.value !== wv.logline && updateWv.mutate({ id, worldview: { logline: e.target.value } })}
             />
             <label htmlFor="wv-message">一句關鍵訊息（一片一訊息）</label>
             <input
+              key={`message-${wv.message}`}
               id="wv-message"
               defaultValue={wv.message}
               readOnly={!canEdit}
+              maxLength={500}
               placeholder="例：把心交給佛，煩惱就交給了光"
               onBlur={(e) => canEdit && e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
             />
@@ -795,9 +810,11 @@ export function ProjectPage({ id }: { id: string }) {
               <div style={{ marginTop: 6 }}>
                 <label htmlFor="wv-audience">目標觀眾（供 AI 導演參考）</label>
                 <input
+                  key={`audience-${wv.audience}`}
                   id="wv-audience"
                   defaultValue={wv.audience}
                   readOnly={!canEdit}
+                  maxLength={500}
                   placeholder="例：初次接觸禪修、想在忙碌生活裡找安定的年輕人與家庭"
                   onBlur={(e) => canEdit && e.target.value !== wv.audience && updateWv.mutate({ id, worldview: { audience: e.target.value } })}
                 />
@@ -808,10 +825,11 @@ export function ProjectPage({ id }: { id: string }) {
                   ["cta", "行動呼籲", "例：把心交給佛，留白處給觀眾一個字卡的位置"],
                 ] as const).map(([field, label, ph]) => (
                   <input
-                    key={field}
+                    key={`${field}-${wv.acts[field]}`}
                     aria-label={`三幕結構：${label}`}
                     defaultValue={wv.acts[field]}
                     readOnly={!canEdit}
+                    maxLength={500}
                     placeholder={`${label}——${ph}`}
                     style={{ marginTop: 6 }}
                     onBlur={(e) =>
@@ -960,7 +978,10 @@ export function ProjectPage({ id }: { id: string }) {
                   </p>
                 ) : (
                   <>
+                    {/* placeholder 不是可及名稱（打字即消失、報讀器多半不唸）——補 label 關聯 */}
+                    <label htmlFor="gen-source-url">來源網址</label>
                     <input
+                      id="gen-source-url"
                       value={sourceUrl}
                       onChange={(e) => { setSourceUrl(e.target.value); setSourceUrlError(""); }}
                       onBlur={(e) => {
