@@ -117,7 +117,14 @@ async function applyManualMigrations(): Promise<void> {
     `);
     await db.execute(sql`create unique index if not exists message_reactions_msg_user_emoji_uq on message_reactions (message_id, user_id, emoji)`);
 
-    console.log("[db] ✓ 手寫遷移完成（group_options／feedback／dm_reads／message_reads／message_reactions 唯一索引就緒）");
+    // project_members(project_id,user_id) 唯一（修 R5-CONC-04）：setProjectRole 的 delete→insert 併發會留重複列。
+    await db.execute(sql`
+      delete from project_members a using project_members b
+      where a.project_id = b.project_id and a.user_id = b.user_id and a.id::text < b.id::text
+    `);
+    await db.execute(sql`create unique index if not exists project_members_project_user_uq on project_members (project_id, user_id)`);
+
+    console.log("[db] ✓ 手寫遷移完成（group_options／feedback／dm_reads／message_reads／message_reactions／project_members 唯一索引就緒）");
   } catch (err) {
     // 不擋開機：索引缺席只是回到「應用層防重」的舊狀態,功能照常
     console.warn("[db] ⚠ 手寫遷移失敗（不影響啟動）：", err instanceof Error ? err.message : err);
