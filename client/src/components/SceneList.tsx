@@ -5,7 +5,11 @@ import { StoryboardPlayer } from "./StoryboardPlayer";
 import { ExportJobButton } from "./ExportJobButton";
 import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip } from "./interactions";
+import { AssetImg, AssetVideo, AssetAudio } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
+
+/** 素材類型的中文標籤（與素材庫/生成紀錄同口徑）——分鏡 meta 列不再直接冒英文 enum */
+const SCENE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
 
 const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
   todo: { label: "草稿", cls: "queued" },
@@ -72,6 +76,7 @@ function InlineEdit({
   ariaLabel,
   placeholder,
   style,
+  maxLength,
 }: {
   value: string | number;
   kind: "text" | "number" | "textarea";
@@ -80,6 +85,8 @@ function InlineEdit({
   ariaLabel: string;
   placeholder?: string;
   style?: CSSProperties;
+  /** 與後端 zod 上限對齊（標題 60、配音詞 2000）：貼超長直接截住，不再失焦才爆「儲存失敗」 */
+  maxLength?: number;
 }) {
   const [draft, setDraft] = useState(String(value));
   const [focused, setFocused] = useState(false);
@@ -129,6 +136,7 @@ function InlineEdit({
     disabled: pending,
     "aria-label": ariaLabel,
     placeholder,
+    maxLength,
     onFocus: () => setFocused(true),
     onBlur: () => {
       setFocused(false);
@@ -254,9 +262,9 @@ function SceneRow({
     <div className="gen-row" data-fb="分鏡格" id={`scene-${s.id}`}>
       {s.assetUrl ? (
         s.assetKind === "video" ? (
-          <video className="gen-thumb" src={s.assetUrl} muted preload="metadata" />
+          <AssetVideo className="gen-thumb" src={s.assetUrl} muted preload="metadata" fallbackClassName="gen-thumb" fallbackLabel="素材遺失" fallbackIconSize={16} />
         ) : (
-          <img className="gen-thumb" src={s.assetUrl} alt={s.title} />
+          <AssetImg className="gen-thumb" src={s.assetUrl} alt={s.title} fallbackClassName="gen-thumb" fallbackLabel="素材遺失" fallbackIconSize={16} />
         )
       ) : (
         <div className="gen-thumb" style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "var(--soft)" }}>
@@ -272,6 +280,7 @@ function SceneRow({
             pending={update.isPending || !canEdit}
             ariaLabel={`第 ${i + 1} 鏡標題`}
             placeholder="鏡頭標題"
+            maxLength={60}
             onCommit={(v) => update.mutate({ sceneId: s.id, title: String(v) })}
             style={{ flex: 1, minWidth: 0 }}
           />
@@ -288,7 +297,7 @@ function SceneRow({
             />
             秒
           </label>
-          <span>・{s.assetKind ?? "無素材"}</span>
+          <span>・{s.assetKind ? (SCENE_KIND_LABEL[s.assetKind] ?? s.assetKind) : "無素材"}</span>
           <span className={`pill ${SCENE_STATUS[s.status]?.cls ?? "queued"}`}>
             {SCENE_STATUS[s.status]?.label ?? s.status}
           </span>
@@ -310,6 +319,7 @@ function SceneRow({
             pending={update.isPending || !canEdit}
             ariaLabel={`第 ${i + 1} 鏡配音詞`}
             placeholder="配音詞（可留白）"
+            maxLength={2000}
             onCommit={(v) => update.mutate({ sceneId: s.id, voiceover: String(v) })}
           />
           {/* 旁白配音：有配音詞才給生成鈕（中文 TTS 走後端預設，不必前端帶模型）；完成後就地試聽＋下載。
@@ -345,12 +355,13 @@ function SceneRow({
           )}
           {s.narrationUrl && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-              <audio
+              <AssetAudio
                 controls
                 preload="none"
                 src={s.narrationUrl}
                 aria-label={`第 ${i + 1} 鏡旁白試聽`}
                 style={{ height: 32, maxWidth: "100%" }}
+                fallbackLabel="旁白音檔遺失——可用「重生配音」補回"
               />
               <a
                 // 同源 /api/assets/:id/file 才能讓 download 生效；只有跨源 url 時退回 url（瀏覽器會改成導航，但仍可另存）

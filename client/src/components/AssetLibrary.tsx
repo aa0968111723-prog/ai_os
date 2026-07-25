@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ExportJobButton } from "./ExportJobButton";
-import { ConfirmButton, useRovingRadio } from "./interactions";
+import { ConfirmButton, useRovingRadio, useFocusTrap } from "./interactions";
+import { AssetImg, AssetVideo, AssetAudio } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 
 function fmtSize(bytes?: number | null): string {
@@ -158,13 +159,10 @@ export function AssetLibrary({
     return list;
   }, [allAssets, kindFilter, onlySourceable, search, sortBy]);
 
-  // 大圖遮罩：Esc 關閉
-  useEffect(() => {
-    if (!lightbox) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setLightbox(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [lightbox]);
+  // 大圖遮罩：完整焦點管理（進場聚焦、Tab 環繞、鎖背景捲動、Esc 關閉、關閉歸還焦點）——
+  // 之前只掛 Esc 監聽，aria-modal 宣告了「背景不可及」但 Tab 仍會跑到遮罩背後的按鈕
+  const lightboxRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(lightboxRef, !!lightbox, () => setLightbox(null));
 
   // 點格子外面關掉展開的「⋯」選單
   useEffect(() => {
@@ -368,14 +366,15 @@ export function AssetLibrary({
                         onClick={() => setLightbox({ url: a.url!, title: a.title })}
                         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLightbox({ url: a.url!, title: a.title }); } }}
                       >
-                        <img src={a.url} alt={a.title} loading="lazy" />
+                        <AssetImg src={a.url} alt={a.title} loading="lazy" fallbackHeight={96} />
                       </div>
                     ) : a.kind === "video" && a.url ? (
-                      <video
+                      <AssetVideo
                         src={a.url}
                         controls
                         preload="metadata"
                         style={{ width: "100%", height: 96, objectFit: "cover", display: "block", background: "var(--muted)" }}
+                        fallbackHeight={96}
                       />
                     ) : (
                       <div className="asset-icon"><Icon name={KIND_ICON[a.kind] ?? "Package"} size={32} /></div>
@@ -432,7 +431,7 @@ export function AssetLibrary({
 
                       {/* 音訊直接在格子裡試聽 */}
                       {a.kind === "audio" && a.url && (
-                        <audio controls src={a.url} style={{ height: 28, width: "100%", marginTop: 6 }} />
+                        <AssetAudio controls src={a.url} style={{ height: 28, width: "100%", marginTop: 6 }} />
                       )}
 
                       {/* 主動作（用作來源）顯眼，其餘收進「⋯」選單 */}
@@ -554,6 +553,7 @@ export function AssetLibrary({
       {/* 頁內大圖遮罩：點外部或 Esc 關閉 */}
       {lightbox && (
         <div
+          ref={lightboxRef}
           role="dialog"
           aria-modal="true"
           aria-label={`檢視 ${lightbox.title}`}
@@ -565,11 +565,15 @@ export function AssetLibrary({
           }}
         >
           <div style={{ position: "relative", maxWidth: "92vw", maxHeight: "88vh", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-            <img
+            <AssetImg
               src={lightbox.url}
               alt={lightbox.title}
               onClick={(e) => e.stopPropagation()}
               style={{ maxWidth: "92vw", maxHeight: "80vh", objectFit: "contain", borderRadius: 12, boxShadow: "var(--e4)" }}
+              fallbackLabel="此素材檔已遺失（可能是伺服器重啟前的舊素材）"
+              fallbackHeight={220}
+              fallbackIconSize={32}
+              fallbackStyle={{ minWidth: 280 }}
             />
             <div style={{ color: "#fff", fontSize: 13, textAlign: "center", maxWidth: "80vw" }}>{lightbox.title}</div>
             <button

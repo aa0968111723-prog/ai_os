@@ -214,6 +214,10 @@ export function StoryboardPlayer({
 
   const kind = scene.assetKind;
   const hasVisual = !!scene.assetUrl && (kind === "image" || kind === "video");
+  // 素材檔遺失（後端 404）時的優雅降級：記住載入失敗的 URL，改渲染「此鏡素材遺失」佔位，
+  // 讓預覽照常換鏡並明確告知，不再是一張大破圖停留整個 durationSec
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+  const assetBroken = hasVisual && scene.assetUrl === brokenUrl;
   // 這一鏡要同步播的音：優先逐鏡配音；音訊鏡（配樂/原音）播素材本身
   const audioSrc = scene.narrationUrl ?? (kind === "audio" ? scene.assetUrl : null);
 
@@ -331,11 +335,12 @@ export function StoryboardPlayer({
           boxShadow: "0 18px 50px -20px rgba(0,0,0,0.6)",
         }}
       >
-        {hasVisual && kind === "image" && (
+        {hasVisual && !assetBroken && kind === "image" && (
           <img
             key={`${scene.id}-${index}`}
             src={scene.assetUrl!}
             alt={scene.title}
+            onError={() => setBrokenUrl(scene.assetUrl!)}
             style={{
               maxWidth: "100%",
               maxHeight: "100%",
@@ -345,7 +350,7 @@ export function StoryboardPlayer({
             }}
           />
         )}
-        {hasVisual && kind === "video" && (
+        {hasVisual && !assetBroken && kind === "video" && (
           <video
             key={scene.id}
             ref={videoRef}
@@ -353,20 +358,21 @@ export function StoryboardPlayer({
             muted
             autoPlay={playing}
             playsInline
+            onError={() => setBrokenUrl(scene.assetUrl!)}
             onEnded={() => {
               if (playing && autoAdvance) autoNext();
             }}
             style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", background: "#000", animation: fadeAnim }}
           />
         )}
-        {!hasVisual && (
+        {(!hasVisual || assetBroken) && (
           <div key={`${scene.id}-ph`} style={{ textAlign: "center", color: "#d9cfc0", padding: 24, animation: fadeAnim }}>
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>
-              {kind === "audio" ? <Icon name="Music" size={40} /> : <Icon name="Clapperboard" size={40} />}
+              {assetBroken ? <Icon name="XCircle" size={40} /> : kind === "audio" ? <Icon name="Music" size={40} /> : <Icon name="Clapperboard" size={40} />}
             </div>
             <div style={{ fontSize: 18, fontWeight: 600, color: "#fbf7f0" }}>{scene.title}</div>
             <div className="mono" style={{ fontSize: 13, marginTop: 6, opacity: 0.8 }}>
-              {kind === "audio" ? "配音／音訊鏡" : "尚無素材"}・停留 {dur} 秒
+              {assetBroken ? "此鏡素材遺失——回分鏡「重生這一格」可補回" : kind === "audio" ? "配音／音訊鏡" : "尚無素材"}・停留 {dur} 秒
             </div>
           </div>
         )}

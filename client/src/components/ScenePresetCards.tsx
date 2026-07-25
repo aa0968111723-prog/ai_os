@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
+import { AssetImg } from "./MediaFallback";
 
 /**
  * 場景設定卡（提案核心「場景一致性」）：
@@ -69,13 +70,17 @@ export function ScenePresetCards({
                     <input type="checkbox" checked={on} onChange={() => onToggle(s.id)} /> 生成時帶入
                   </label>
                 </div>
-                {/* 場景參考圖縮圖：素材刪進回收桶時 referenceUrl 會是 null，縮圖自動消失 */}
+                {/* 場景參考圖縮圖：素材刪進回收桶時 referenceUrl 會是 null，縮圖自動消失；
+                    URL 在但檔案遺失（後端 404）時顯示「參考圖遺失」佔位而非破圖 */}
                 {s.referenceUrl && (
-                  <img
+                  <AssetImg
                     src={s.referenceUrl}
                     alt={`${s.name} 的場景參考圖`}
                     loading="lazy"
                     style={{ width: "100%", height: 96, objectFit: "cover", borderRadius: 8, marginTop: 6, border: "1px solid var(--border-soft)" }}
+                    fallbackLabel="參考圖遺失——可重新綁定"
+                    fallbackHeight={96}
+                    fallbackStyle={{ marginTop: 6 }}
                   />
                 )}
                 <div className="hint" style={{ fontSize: 12, marginTop: 4 }}><Icon name="Palette" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.palette}</div>
