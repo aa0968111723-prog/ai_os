@@ -25,7 +25,7 @@ import { isMcpEnabled } from "./services/mcpAuth";
 import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
-  isAllowedUploadMime, kindFromMime, resolveUploadMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT,
+  isAllowedUploadMime, kindFromMime, resolveUploadMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT, mimeFromPath,
 } from "./services/storage";
 import { markBootReady, isBootReady } from "./services/boot";
 import { recordError, listErrors, errorCountSince } from "./services/errlog";
@@ -1142,11 +1142,18 @@ app.post("/api/feedback/screenshot", requireAuthBeforeUpload, upload.single("fil
     const auth = await resolveActiveSession(req);
     if (!auth) { await cleanup(); return res.status(401).json({ error: "請先登入" }); }
     if (!req.file) return res.status(400).json({ error: "沒有收到截圖" });
-    const mime = (req.file.mimetype.split(";")[0] || "").trim().toLowerCase();
-    if (mime !== "image/png" && mime !== "image/jpeg" && mime !== "image/webp") {
+    const declared = (req.file.mimetype.split(";")[0] || "").trim().toLowerCase();
+    if (declared !== "image/png" && declared !== "image/jpeg" && declared !== "image/webp") {
       await cleanup();
       return res.status(415).json({ error: "截圖格式需為 png/jpeg/webp" });
     }
+    // 修 R3-UPLOAD-01：不只信宣稱 MIME——比照其他上傳路徑讀檔頭簽名驗證，內容非真實圖片一律 415。
+    const verdict = resolveUploadMime(declared, await readFileHead(req.file.path));
+    if (!verdict || !verdict.mime.startsWith("image/")) {
+      await cleanup();
+      return res.status(415).json({ error: "截圖內容與宣稱格式不符（無法辨識圖片簽名）" });
+    }
+    const mime = verdict.mime; // 用嗅探後的真實型別落地
     const guard = await checkDiskSpace(req.file.size, true);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
     // 存進獨立 feedback/ 目錄（非 assets 池）：路徑前綴固定，submit/serve 才能白名單驗證杜絕跨組偷讀
@@ -1177,7 +1184,11 @@ app.get("/api/feedback/:id/shot", async (req, res) => {
     if (!canView) return res.status(403).json({ error: "沒有權限看這張截圖" });
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.setHeader("X-Content-Type-Options", "nosniff"); // 截圖恆為圖片，維持 inline 但擋內容嗅探（#22）
-    res.sendFile(absPathOf(report.screenshotPath), { headers: { "Content-Type": "image/png" } });
+    // 修 R3-STOR2-04：依實際副檔名給正確 Content-Type，別硬編 image/png——jpeg/webp 截圖配 nosniff 會破圖
+    const shotMime = mimeFromPath(report.screenshotPath);
+    res.sendFile(absPathOf(report.screenshotPath), {
+      headers: { "Content-Type": shotMime.startsWith("image/") ? shotMime : "image/png" },
+    });
   } catch (err) {
     console.error("[feedback:shot]", err);
     recordError("feedback:shot", err);

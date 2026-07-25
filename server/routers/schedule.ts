@@ -118,8 +118,16 @@ export function foldIcsLine(line: string): string {
  * 極簡 VCALENDAR/VEVENT：UTC 時間（Z 結尾）、UID=id@aidirector-os、無結束時間以 1 小時計;
  * 文字欄位跳脫（\ ; , 換行）＋ 75-octet 行折疊（RFC 5545）。匯入 Google 日曆/Apple 行事曆皆可讀。
  */
-export function buildIcs(groupName: string, items: Array<{ id: string; title: string; startsAt: Date; endsAt: Date | null; note: string | null }>): string {
+export function buildIcs(groupName: string, items: Array<{ id: string; title: string; startsAt: Date; endsAt: Date | null; note: string | null; allDayDate?: string }>): string {
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  // 全天事件（修 R3-ICS-01）：純日期欄位應以 VALUE=DATE 輸出，不帶時間/時區——任何時區的訂閱者都顯示為該日全天，
+  // 不再被合成成 09:00Z 定時事件（UTC-10 以西甚至落到前一天）。DTEND 取隔日（iCalendar 全天事件 DTEND 為排他）。
+  const dateOnly = (ymd: string) => ymd.replace(/-/g, "");
+  const nextDay = (ymd: string) => {
+    const d = new Date(ymd + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10).replace(/-/g, "");
+  };
   // 換行一律轉義：CRLF、單獨 CR、單獨 LF 都要處理——單獨 \r 若漏掉，某些 iCalendar 解析器會把它
   // 當成行邊界，讓欄位值裡的 "\rSUMMARY:..." 被當成偽造屬性注入（ICS injection）。
   const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
@@ -132,13 +140,15 @@ export function buildIcs(groupName: string, items: Array<{ id: string; title: st
   ];
   const stamp = fmt(new Date());
   for (const it of items) {
-    const end = it.endsAt ?? new Date(it.startsAt.getTime() + 60 * 60 * 1000);
+    const dtLines =
+      it.allDayDate && /^\d{4}-\d{2}-\d{2}$/.test(it.allDayDate)
+        ? [`DTSTART;VALUE=DATE:${dateOnly(it.allDayDate)}`, `DTEND;VALUE=DATE:${nextDay(it.allDayDate)}`]
+        : [`DTSTART:${fmt(it.startsAt)}`, `DTEND:${fmt(it.endsAt ?? new Date(it.startsAt.getTime() + 60 * 60 * 1000))}`];
     lines.push(
       "BEGIN:VEVENT",
       `UID:${it.id}@aidirector-os`,
       `DTSTAMP:${stamp}`,
-      `DTSTART:${fmt(it.startsAt)}`,
-      `DTEND:${fmt(end)}`,
+      ...dtLines,
       `SUMMARY:${esc(it.title)}`,
       ...(it.note ? [`DESCRIPTION:${esc(it.note)}`] : []),
       "END:VEVENT",

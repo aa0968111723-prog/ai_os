@@ -161,6 +161,14 @@ export function validateRowData(
           n = NaN;
         }
         if (!Number.isFinite(n)) return { ok: false, error: `「${f.label}」要是數字` };
+        // 修 R3-DVT-02：偵測精度遺失——整數超過安全整數範圍（如貼上長 ID）會被 Number() 靜默改值，
+        // 且輸入字串設長度上限避免超長數字串。要存識別碼請改用文字欄位。
+        if (typeof v === "string" && v.trim().length > 40) {
+          return { ok: false, error: `「${f.label}」數字過長；若是識別碼請改用文字欄位存放` };
+        }
+        if (Number.isInteger(n) && !Number.isSafeInteger(n)) {
+          return { ok: false, error: `「${f.label}」數字過大會失真；若是識別碼請改用文字欄位存放` };
+        }
         out[f.key] = n;
         break;
       }
