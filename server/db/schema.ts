@@ -195,8 +195,9 @@ export const generations = pgTable("generations", {
   // listByProject 對每個分鏡各跑兩支 scene_id 相關子查詢；補索引避免生成量成長後全表掃描。
   // 非 unique（純索引，pushSchema 建索引不觸發 truncate 提問，安全）
   sceneIdIdx: index("generations_scene_id_idx").on(t.sceneId),
-  // 修 R3-SQL-02：最熱讀取路徑是「依專案（時間序）」與「依組」過濾——原本只有 sceneId 索引，
-  // 生成量成長後 listByProject/listByProjectPaged 與跨組統計全表掃描。補複合/單欄索引（非 unique，安全）。
+  // 修 R3-SQL-02（與並行 PR #105 相同結論）：熱路徑 listByProject（WHERE project_id ORDER BY created_at
+  // DESC LIMIT 30）與 keyset 分頁——每位開著專案的檢視者頻繁輪詢，無此索引＝全表掃＋排序。(project_id,
+  // created_at) 讓 Postgres 反向掃即得最新 N 筆；另補依組過濾（跨組統計）索引。
   projectCreatedIdx: index("generations_project_created_idx").on(t.projectId, t.createdAt),
   groupIdx: index("generations_group_idx").on(t.groupId),
 }));
@@ -243,7 +244,10 @@ export const assets = pgTable("assets", {
    *  所有「列出／匯出／注入」查詢都以 isNull(deletedAt) 過濾，還原＝清回 null。 */
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // 素材庫列表／來源下拉每次以 project_id 撈（生成完成也會即時 invalidate 重打）；補索引避免全表掃。
+  projectCreatedIdx: index("assets_project_created_idx").on(t.projectId, t.createdAt),
+}));
 
 /**
  * 專案知識庫（願景核心「真的懂我們素材」v1）：
@@ -359,7 +363,8 @@ export const scenes = pgTable("scenes", {
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
-  // 修 R3-SQL-03：分鏡讀取一律「依專案（＋排序）」，原本無索引→全表掃描。補複合索引。
+  // 修 R3-SQL-03（與並行 PR #105 相同結論）：listByProject（WHERE project_id ORDER BY order_index）
+  // 每 10 秒輪詢，原本無索引→全表掃＋排序。補複合索引。
   projectOrderIdx: index("scenes_project_order_idx").on(t.projectId, t.orderIndex),
 }));
 

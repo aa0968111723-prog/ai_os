@@ -93,8 +93,12 @@ ok("/api/ready 回存活訊號 boot", "boot" in ready)
 ok("/api/ready 不外洩 authMode／mockMode", "authMode" not in ready and "mockMode" not in ready)
 
 # ── 個資自助匯出 ──
-code, body = raw_get(admin, "/api/me/export")
-ok("匯出 200 且為 JSON", code == 200 and body.lstrip()[:1] == b"{")
+# 預設交付「創作者看得懂」的可讀 HTML；?format=json 仍給原始 JSON（資料可攜／系統匯入用）。
+code, html = raw_get(admin, "/api/me/export")
+ok("匯出預設 200 且為可讀 HTML", code == 200 and html.lstrip()[:15].lower() == b"<!doctype html>")
+ok("HTML 匯出不含 <script>（self-contained、零可執行腳本）", b"<script" not in html.lower())
+code, body = raw_get(admin, "/api/me/export?format=json")
+ok("匯出 ?format=json 為 JSON", code == 200 and body.lstrip()[:1] == b"{")
 data = json.loads(body)
 ok("匯出含本人 email 與 generations", data.get("user", {}).get("email") == "admin@aidirector.local" and isinstance(data.get("generations"), list) and len(data["generations"]) >= 1)
 ok("匯出不含密碼雜湊", b"passwordHash" not in body and b"password_hash" not in body)

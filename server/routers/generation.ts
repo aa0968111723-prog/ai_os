@@ -18,14 +18,26 @@ export { effectivePrompt, withCharacterAnchor, withSceneAnchor } from "../servic
 const STALE_GENERATION_MS = 30 * 60 * 1000;
 
 /**
+ * 請求路徑清掃節流（per-project，行程記憶體）：generationRunner 已在背景每 ~60 秒全域掃一遍
+ * （見 services/generationRunner sweepStale），這裡的 request-path 掃只是「無背景排程時」的備援，
+ * 不必每次 listByProject／分頁首頁都掃——每位檢視者每 8 秒打一次 × 每次一輪過濾掃描＋逐列帳本 SUM，
+ * 純屬浪費。節流到每專案至多 60 秒一次；門檻是 30 分鐘，60 秒節流對回收即時性毫無影響。
+ */
+const SWEEP_THROTTLE_MS = 60 * 1000;
+const lastSweptAt = new Map<string, number>();
+
+/**
  * 陳屍清掃：把 updatedAt 停滯逾門檻仍 queued/running 的生成標 failed 並退點。
- * 為什麼掛在 listByProject 開頭：本系統無背景排程、狀態推進全靠瀏覽器輪詢——
- * 關頁即卡 running；更糟的是「扣點後、requestId 寫入前」程序被重佈/OOM 打斷的列
- * 永卡 queued 且 requestId=null（status 輪詢直接提前返回），點數永久蒸發。
- * 使用者打開列表即順手回收，兩種孤兒都在此收斂到終局並退點。
+ * 為什麼掛在 listByProject 開頭：本系統狀態推進主要靠輪詢，request-path 是背景 runner 的備援——
+ * 「扣點後、requestId 寫入前」程序被重佈/OOM 打斷的列永卡 queued 且 requestId=null，點數永久蒸發。
+ * 兩種孤兒都在此（或背景 runner）收斂到終局並退點。
  */
 async function sweepStaleGenerations(projectId: string): Promise<void> {
-  const cutoff = new Date(Date.now() - STALE_GENERATION_MS);
+  // 節流：距上次掃這個專案不足 60 秒就跳過（背景 runner 仍會全域掃，安全）
+  const now = Date.now();
+  if (now - (lastSweptAt.get(projectId) ?? 0) < SWEEP_THROTTLE_MS) return;
+  lastSweptAt.set(projectId, now);
+  const cutoff = new Date(now - STALE_GENERATION_MS);
   const staleRows = await db
     .select()
     .from(schema.generations)
@@ -123,6 +135,7 @@ export const generationRouter = router({
       reasonPrefix: "重試生成",
       assertAccess: async (project) => {
         const role = requireGroup(ctx.auth, project.groupId);
+        assertProjectNotArchived(project); // 封存專案不接受付費生成——與 submit 同口徑（重試＝發起新付費工作）
         await assertProjectEditable(ctx.auth, project); // 2.3：專案檢視者不能生成
         return role;
       },

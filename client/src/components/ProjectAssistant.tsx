@@ -351,6 +351,7 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
                     padding: "8px 12px",
                     fontSize: "var(--fs-14)",
                     whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
                     lineHeight: 1.6,
                   }}
                 >

@@ -9,7 +9,7 @@
 import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
-import { getModel, endpointOf, isNimModel, estimatePoints, CARD_ANCHOR_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { getModel, endpointOf, isNimModel, estimatePoints, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { worldviewSchema, bilingualChips, STYLE_EN, TONE_EN, type Worldview } from "../../shared/worldview";
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
@@ -42,16 +42,30 @@ function persistGenerationResult(assetId: string, generationId: string, remoteUr
   })().catch((err) => console.warn("[storage] 成品落地背景作業失敗：", err instanceof Error ? err.message : err));
 }
 
-/** 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成)。
- *  visual＝圖像/影片類別：調性與風格 chips 附英文錨點（英文語彙模型才吃得動畫風；LLM 維持純中文） */
-function buildPrompt(userPrompt: string, worldview: Worldview, visual: boolean): string {
+/** 注入結果：正向提示詞＋（視覺類別的）負向提示詞。 */
+export interface PromptParts {
+  positive: string;
+  negative: string;
+}
+
+/**
+ * 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成)。
+ * visual＝圖像/影片類別：調性與風格 chips 附英文錨點（英文語彙模型才吃得動畫風；LLM 維持純中文）。
+ * 禁忌詞（合規句：不得宣稱療效、不影射真人…）的去向依類別分流——這是深度優化的關鍵：
+ *   - 視覺（圖/影）：走 negative_prompt（見 effectivePromptParts 的 negative）。擴散模型無法靠正向詞
+ *     「避免」某物，塞正向反而可能被畫出、甚至把禁忌字當畫面文字渲染——故正向不再放禁忌詞。
+ *   - LLM：維持正向文字指引（語言模型讀得懂「避免:…」）。
+ *   - text-to-audio（配樂/音效）：兩邊都不放（合規句對音頻無意義，原本塞正向是雜訊）。
+ */
+function buildPositive(userPrompt: string, worldview: Worldview, visual: boolean, isLlm: boolean): string {
   const parts: string[] = [];
   const tones = visual ? bilingualChips(worldview.tones, TONE_EN) : worldview.tones;
   const styles = visual ? bilingualChips(worldview.styles, STYLE_EN) : worldview.styles;
   if (tones.length) parts.push(`調性:${tones.join("、")}`);
   if (styles.length) parts.push(`視覺風格:${styles.join("、")}`);
   if (worldview.message) parts.push(`核心訊息:${worldview.message}`);
-  if (worldview.taboos.length) parts.push(`避免:${worldview.taboos.join(";")}`);
+  // 禁忌詞只在 LLM 走正向（語言模型讀得懂）；視覺走 negative、audio 不放——見函式說明
+  if (isLlm && worldview.taboos.length) parts.push(`避免:${worldview.taboos.join(";")}`);
   return parts.length ? `${userPrompt}\n\n[專案背景] ${parts.join("|")}` : userPrompt;
 }
 
@@ -75,10 +89,23 @@ const INJECT_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-v
  *  「此模型是否會用卡片」，前後端判斷不分岔）。 */
 const CHARACTER_CATEGORIES = CARD_ANCHOR_CATEGORIES;
 
-/** export 供 MCP 重用：注入與否的判斷必須單一來源，否則 MCP 路徑會把世界觀唸進 TTS 成品 */
+/**
+ * 注入判斷的單一真相來源（export 供 MCP／工作流重用）：回正向＋負向兩段。
+ * 非注入類別（轉錄/視覺/訓練/影片轉影片）原樣返回、無負向。
+ */
+export function effectivePromptParts(model: ModelEntry, userPrompt: string, worldview: Worldview): PromptParts {
+  if (!INJECT_CATEGORIES.has(model.category)) return { positive: userPrompt, negative: "" };
+  const visual = CHARACTER_CATEGORIES.has(model.category);
+  const isLlm = model.category === "llm";
+  const positive = buildPositive(userPrompt, worldview, visual, isLlm);
+  // 視覺類別把禁忌詞收斂成負向提示詞（逐項 trim、去空）；非視覺（llm/audio）無負向
+  const negative = visual ? worldview.taboos.map((t) => t.trim()).filter(Boolean).join(", ") : "";
+  return { positive, negative };
+}
+
+/** 相容薄殼：只要正向的既有呼叫端（generation.ts re-export、services/mcp.ts）不必改 */
 export function effectivePrompt(model: ModelEntry, userPrompt: string, worldview: Worldview): string {
-  if (!INJECT_CATEGORIES.has(model.category)) return userPrompt;
-  return buildPrompt(userPrompt, worldview, CHARACTER_CATEGORIES.has(model.category));
+  return effectivePromptParts(model, userPrompt, worldview).positive;
 }
 
 /** 角色定裝錨點：視覺類別才注入，並前綴到（世界觀已注入的）提示詞 */
@@ -178,12 +205,18 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   // 世界觀 → 角色定裝 → 場景設定，依序疊加注入（都只撈本專案，且只注入視覺類別）
   const charAnchor = input.characterIds?.length ? await buildCharacterAnchor(project.id, input.characterIds) : "";
   const sceneAnchor = input.scenePresetIds?.length ? await buildSceneAnchor(project.id, input.scenePresetIds) : "";
+  const promptParts = effectivePromptParts(model, input.prompt, worldview);
   const fullPrompt = withSceneAnchor(
     model,
-    withCharacterAnchor(model, effectivePrompt(model, input.prompt, worldview), charAnchor),
+    withCharacterAnchor(model, promptParts.positive, charAnchor),
     sceneAnchor,
   );
-  const falInput = model.input(fullPrompt, project.format as ProjectFormat, sourceUrl);
+  const falInput = model.input(fullPrompt, project.format as ProjectFormat, sourceUrl) as Record<string, unknown>;
+  // 禁忌詞負向注入（深度優化）：視覺類別的禁忌詞走 negative_prompt，且只送給 schema 明確支援的模型
+  // （見 supportsNegativePrompt）——存進 params 後，核准重送（decideCost）原樣沿用，不必另改。
+  if (promptParts.negative && supportsNegativePrompt(model)) {
+    falInput.negative_prompt = promptParts.negative;
+  }
 
   // 成本審核門檻（需求 2.1）：組員（member）單筆估點 ≥ 組門檻 → 先落一筆 awaiting_approval，
   // 不扣點、不送 fal，等組長在生成紀錄核准（generation.decideCost）才走扣點＋送出。

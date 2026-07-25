@@ -141,6 +141,33 @@ const proposalSchema = z.discriminatedUnion("type", [
 ]);
 const replySchema = z.object({ answer: z.string().min(1).max(4000), actions: z.array(proposalSchema).max(6).optional() });
 
+/** LLM（尤其較小模型）常把「提議動作」誤用唯讀工具的呼叫格式吐出，例如把拆分鏡寫成
+ *  {"tool":"split_script","args":{"script":"…"}}——但 split_script 是「動作」不是唯讀工具，
+ *  toolCallSchema 與 replySchema 都會 parse 失敗、掉進 fallback 把「原始 JSON」直接洩漏給使用者
+ *  （實測：對代理下多步目標時整段工具 JSON 被當成回答顯示）。這裡把這種畸形工具呼叫救回成正規的
+ *  {answer, actions} 提議（self-healing）。回 null＝救不回（維持既有 fallback）。 */
+const ACTION_TYPE_NAMES = new Set(["generate", "update_scene", "submit_approval", "create_scene", "run_workflow", "split_script", "plan_agent"]);
+const COERCED_ACTION_ANSWER: Record<string, string> = {
+  split_script: "好，我可以把腳本拆成一格格分鏡草稿——按下方動作就開始（AI 導演，免費）。",
+  plan_agent: "這個目標要連續動好幾步，我把它交給 AI 代理排一份可背景執行的計畫——確認後估點再逐步執行。",
+  generate: "我幫你準備了一個生成動作，確認下方就開始。",
+  create_scene: "我幫你準備了新增分鏡，確認下方就加入。",
+  run_workflow: "我幫你準備了一條工作流，確認下方就執行。",
+  update_scene: "我幫你準備了分鏡修改，確認下方就套用。",
+  submit_approval: "我幫你準備了送審動作，確認下方就送出。",
+};
+export function coerceActionToolCall(json: unknown): z.infer<typeof replySchema> | null {
+  if (!json || typeof json !== "object") return null;
+  const o = json as Record<string, unknown>;
+  const name = typeof o.tool === "string" ? o.tool : typeof o.action === "string" ? o.action : typeof o.type === "string" ? o.type : null;
+  if (!name || !ACTION_TYPE_NAMES.has(name)) return null;
+  // args 在（{"tool":X,"args":{…}}）就用 args，否則欄位可能直接攤在頂層（{"tool":X,…}）
+  const args = o.args && typeof o.args === "object" ? (o.args as Record<string, unknown>) : o;
+  const action = proposalSchema.safeParse({ ...args, type: name });
+  if (!action.success) return null;
+  return { answer: COERCED_ACTION_ANSWER[name] ?? "我幫你準備了一個動作，確認下方就執行。", actions: [action.data] };
+}
+
 /** 前端拿到的「已解析」動作（帶真實 sceneId＋人看得懂的標籤＋白名單過的模型），確認後原樣回送 runAction */
 type ResolvedAction =
   // sceneNo/sceneTitle 供前端在「換模型」後就地重建按鈕/確認文字（保留「為第 N 鏡「標題」」而換上新模型與新估點）；
@@ -505,7 +532,7 @@ ${forceFinal
 - {"tool":"query_database","args":{"dbRef":"db1","keyword":"攝影機"}}：讀某個自訂資料庫的列（dbRef 只能抄 <可讀資料庫> 的代號；keyword 可省略＝最新 20 列）——器材、任務、名單等團隊資料都在這
 能從 <專案現況>/<專案知識庫> 直接回答就不要查——每次查詢都有成本。
 例外（素材鐵則）：被問到「素材庫有哪些素材／素材名稱／某素材存不存在」時必須先 list_assets 再答。`}
-你也可以「提議」動作讓使用者確認後執行（你不能直接執行）。可提議的動作：
+你也可以「提議」動作讓使用者確認後執行（你不能直接執行）。動作一律放進最終回答的 "actions" 陣列（例：{"answer":"…","actions":[{"type":"split_script","script":"…"}]}），絕不要用上面 {"tool":…} 的唯讀工具格式來呼叫動作。可提議的動作：
 - generate：生成素材（prompt＝描述；可選 sceneNo 指定回填某一鏡；可選 modelId 指定模型，未指定就用預設圖像模型）
 - update_scene：改某一鏡欄位（sceneNo＋field: title|voiceover|durationSec＋value）
 - submit_approval：把某一鏡送審（sceneNo）
@@ -573,12 +600,20 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           }
           emit("thinking", "整理回答…");
           const parsed = json ? replySchema.safeParse(json) : null;
-          // 解析失敗：LLM 已計費不退點，但至少把純文字當回答（不提議動作），前端不會拿到壞資料
-          if (!parsed?.success) {
-            const fallbackText = raw.replace(/\{[\s\S]*\}/, "").trim() || raw.trim() || "我不太確定，可以換個問法再問一次。";
-            return { answer: fallbackText.slice(0, 4000), actions: [] as ResolvedAction[], steps, mock: false, fallback: true };
+          if (parsed?.success) {
+            return { answer: parsed.data.answer, actions: resolve(parsed.data.actions ?? []), steps, mock: false, fallback: false };
           }
-          return { answer: parsed.data.answer, actions: resolve(parsed.data.actions ?? []), steps, mock: false, fallback: false };
+          // LLM 常把「提議動作」誤用唯讀工具格式（如 {"tool":"split_script",…}）——救回成正規動作提議，
+          // 不讓它掉進下方 fallback 把原始 JSON 洩漏給使用者（C2 self-healing）
+          const coerced = coerceActionToolCall(json);
+          if (coerced) {
+            return { answer: coerced.answer, actions: resolve(coerced.actions ?? []), steps, mock: false, fallback: false };
+          }
+          // 真的解析失敗：把回答裡所有 JSON 區塊一律移除（絕不把原始 JSON／工具呼叫洩漏給使用者），
+          // 剩純文字才用，否則給具體引導語。LLM 已計費不退點，但前端不會拿到壞資料。
+          const stripped = raw.replace(/\{[\s\S]*\}/g, "").trim();
+          const fallbackText = stripped || "我不太確定要怎麼幫你——可以把想做的事講得更具體嗎？例如「把這段腳本拆成分鏡」或「為第 3 鏡生成畫面」。";
+          return { answer: fallbackText.slice(0, 4000), actions: [] as ResolvedAction[], steps, mock: false, fallback: true };
         }
       } catch (err) {
         await refund(input.auth.user.id, project.groupId, ASK_COST_POINTS, "AI 專案助手失敗退回");

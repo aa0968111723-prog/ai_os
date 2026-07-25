@@ -1153,7 +1153,8 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
               )}
               {!isMedia && (preview.data ? (
                 <>
-                  <p className="meta" style={{ margin: "0 0 6px" }}>AI 讀到的純文字（前 20,000 字／共 {preview.data.totalChars.toLocaleString()} 字）：</p>
+                  {/* 「前 20,000 字」只在真的被截斷時講——短檔顯示「前 20,000 字／共 500 字」自相矛盾 */}
+                  <p className="meta" style={{ margin: "0 0 6px" }}>AI 讀到的純文字（{preview.data.totalChars > 20000 ? "前 20,000 字／" : ""}共 {preview.data.totalChars.toLocaleString()} 字）：</p>
                   <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0, fontSize: 13 }}>{preview.data.text}</pre>
                 </>
               ) : preview.error ? (
@@ -1202,9 +1203,12 @@ function GridRow({
       </tr>
     );
   }
+  // 進入編輯時以「當下最新」的 row.data 重種草稿：draft 是掛載時的舊快照，
+  // 共享表（組員／MCP 代理都能寫）若這列已被別人改過，拿舊草稿去存會靜默覆蓋對方的修改（lost update）
+  const beginEdit = () => { setDraft(row.data); setEditing(true); };
   return (
     <tr
-      onDoubleClick={() => canWrite && setEditing(true)}
+      onDoubleClick={() => canWrite && beginEdit()}
       title={canWrite ? "雙擊編輯" : undefined}
       style={{ cursor: canWrite ? "pointer" : "default" }}
     >
@@ -1214,7 +1218,7 @@ function GridRow({
         </td>
       ))}
       <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
-        {canWrite && <button className="btn-sm" title="編輯" onClick={() => setEditing(true)}><Icon name="Ellipsis" size={13} /></button>}
+        {canWrite && <button className="btn-sm" title="編輯" onClick={beginEdit}><Icon name="Ellipsis" size={13} /></button>}
         {canDelete && (
           <ConfirmButton onConfirm={onDelete} message="刪除這一列？" triggerClassName="btn-sm" triggerAriaLabel="刪除這一列">
             <Icon name="X" size={13} />

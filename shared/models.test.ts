@@ -7,11 +7,13 @@
 import { describe, expect, it } from "vitest";
 import {
   MODELS,
+  NEGATIVE_PROMPT_SUPPORTED,
   SCENARIO_GROUPS,
   SCENARIO_RECIPES,
   STYLE_SHOWDOWNS,
   estimatePoints,
   getModel,
+  supportsNegativePrompt,
 } from "./models";
 
 const v3 = getModel("fal-ai/elevenlabs/tts/eleven-v3")!; // $0.10/千字 → 3.1 點/千字
@@ -98,3 +100,28 @@ describe("決策層:情境配方 & 風格 PK 引用完整性", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
+
+/**
+ * negative_prompt allowlist（深度優化：禁忌詞對視覺模型走負向）：
+ * allowlist 內每個 id 都必須真的存在於 MODELS（否則旗標永遠命中不到＝死碼），
+ * 且不可誤收「無 negative_prompt 欄位」的新式模型（FLUX/Seedream/GPT-Image…誤送恐 422）。
+ */
+describe("supportsNegativePrompt（負向提示詞能力旗標）", () => {
+  const liveIds = new Set(MODELS.map((m) => m.id));
+
+  it("allowlist 內所有 id 都存在於現役目錄（無死碼）", () => {
+    for (const id of NEGATIVE_PROMPT_SUPPORTED) {
+      expect(liveIds.has(id), `NEGATIVE_PROMPT_SUPPORTED 的 ${id} 不在 MODELS`).toBe(true);
+    }
+  });
+
+  it("SD 系圖像模型＝true（經典 negative_prompt 模型）", () => {
+    expect(supportsNegativePrompt(getModel("fal-ai/fast-lightning-sdxl")!)).toBe(true);
+    expect(supportsNegativePrompt(getModel("fal-ai/kolors")!)).toBe(true);
+  });
+
+  it("新式無 negative_prompt 欄位的模型＝false（避免誤送 422）", () => {
+    expect(supportsNegativePrompt(getModel("fal-ai/flux/schnell")!)).toBe(false);
+    expect(supportsNegativePrompt(getModel("fal-ai/flux/dev")!)).toBe(false);
+  });
+})

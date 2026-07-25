@@ -114,6 +114,14 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const showFirstRun =
     !!groupId && projects.data !== undefined && myUserId != null && !hasOwnProject && !firstRunDismissed;
 
+  // 換組重置工具列：kindFilter 是各組自訂的 value，殘留到別組會把該組專案全部濾掉
+  // （畫面顯示「沒有符合『』的專案」，其實是舊組的篩選在作怪）；搜尋字串同理
+  useEffect(() => {
+    setKindFilter("");
+    setQ("");
+    setLimit(24);
+  }, [groupId]);
+
   useEffect(() => {
     if (kindOptions.length && !kindOptions.some((o) => o.value === kind)) setKind(kindOptions[0].value);
   }, [kindOptions, kind]);
@@ -199,8 +207,10 @@ export function Launchpad({ groupId }: { groupId: string }) {
         {create.error && <p className="error" role="alert">{create.error.message}</p>}
       </section>
 
-      {/* 組彙總 AI（需求 12 v1）：問整組狀況的唯讀彙總——沒選組就不渲染 */}
-      {groupId && <TeamAssistantCard groupId={groupId} />}
+      {/* 組彙總 AI（需求 12 v1）：問整組狀況的唯讀彙總——沒選組就不渲染。
+          key 綁組：換組即整卡重掛，否則 A 組的問答殘留在畫面上、
+          「追問」還會把 A 組對話歷史連同新 groupId 送去 B 組（跨組脈絡外溢） */}
+      {groupId && <TeamAssistantCard key={groupId} groupId={groupId} />}
 
       {/* 工具列：搜尋／類型篩選／排序（有專案才顯示） */}
       {all.length > 0 && (
@@ -454,7 +464,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
                     <Icon name="Search" size={11} />{m.steps!.join("、")}
                   </div>
                 )}
-                <p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{m.text}</p>
+                <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{m.text}</p>
                 {/* 派工提議：具派工權時才會有；每筆按確認後於該專案建立待核准計畫 */}
                 {(m.dispatches?.length ?? 0) > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>

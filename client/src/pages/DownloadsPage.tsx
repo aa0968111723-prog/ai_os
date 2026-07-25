@@ -57,8 +57,8 @@ export function DownloadsPage() {
 
   return (
     <div>
-      <h1>資料下載區</h1>
-      <p className="hint">團隊共用文件集中下載：開發筆記、模型資料、設計與法律文件。文件更新後這裡自動是最新版。</p>
+      <h1>共用文件下載區</h1>
+      <p className="hint">團隊共用文件集中下載：開發筆記、模型資料、設計與法律文件。文件更新後這裡自動是最新版。<br />（想匯出「你自己的」個人資料，請用右上角選單的「匯出我的個人資料」。）</p>
 
       {errMsg && (
         <p className="error" role="alert">
@@ -91,7 +91,7 @@ export function DownloadsPage() {
                     <Icon name="FileText" size={15} style={{ flex: "none" }} />
                     <span style={{ flex: "1 1 auto", minWidth: 160 }}>{it.title}</span>
                     <span className="hint mono" style={{ flex: "none" }}>
-                      {fmtSize(it.sizeBytes)}・{new Date(it.updatedAt).toLocaleDateString()}
+                      {fmtSize(it.sizeBytes)}・{new Date(it.updatedAt).toLocaleDateString("zh-TW")}
                     </span>
                     <a href={`/api/downloads/file?name=${encodeURIComponent(it.file)}`} download>
                       <Icon name="Download" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />下載

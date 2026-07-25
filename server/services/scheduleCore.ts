@@ -3,7 +3,7 @@
  * 讓 tRPC 路由與「tRPC 之外的入口」（MCP 介面）共用同一批守門（組隔離、專案／留言歸屬校驗、
  * @提及校驗、時間合法性）——與 generationCore／agentCore 同一設計理由，防護不分岔。
  */
-import { and, asc, eq, gt, gte, isNull, or, type SQL } from "drizzle-orm";
+import { and, asc, eq, gt, gte, isNull, lte, or, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -32,23 +32,31 @@ export interface ScheduleListItem {
 /**
  * 清單（組行事曆）：預設只回「未來與最近 24 小時內」；includePast 回全部。startsAt 升冪。
  * 帶負責人名稱（owner join）。呼叫端先 requireGroup（此處也再保險擋一次）。
+ *
  * 回 { items, truncated }（QA-017）：多取一筆探測——超過單頁上限時 truncated=true，
  * 呼叫端（UI/MCP）必須把「還有更多未顯示」讓使用者看見，不得默默當成全部。
+ * range（可選，供月曆／知識地圖用）：以 startsAt 明確界定 [from, to] 視窗；給了 from 就以它為下界
+ * （覆蓋 includePast 的預設 24h 下界），月曆翻到任一月份都拿得到「那個月」的行程（稽核 #2／#5）。
  */
 export async function listScheduleForGroup(
   auth: AuthState,
   groupId: string,
   includePast = false,
   projectId?: string | null,
+  range?: { from?: Date; to?: Date },
 ): Promise<{ items: ScheduleListItem[]; truncated: boolean }> {
   requireGroup(auth, groupId);
   const conds: SQL[] = [eq(schema.scheduleItems.groupId, groupId)];
-  // overlap 條件（QA-017）：不能只看 startsAt——開始超過 24 小時前、但「還沒結束」的長行程
-  //（跨日會議、多日營隊）也必須出現。判準：startsAt 在窗內，或 endsAt 還在未來（仍進行中）。
-  if (!includePast) {
+  if (range?.from) {
+    // range.from 明確下界（月曆／知識地圖）：覆蓋 includePast 的預設 24h 下界
+    conds.push(gte(schema.scheduleItems.startsAt, range.from));
+  } else if (!includePast) {
+    // overlap 條件（QA-017）：不能只看 startsAt——開始超過 24 小時前、但「還沒結束」的長行程
+    //（跨日會議、多日營隊）也必須出現。判準：startsAt 在窗內，或 endsAt 還在未來（仍進行中）。
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     conds.push(or(gte(schema.scheduleItems.startsAt, cutoff), gt(schema.scheduleItems.endsAt, new Date()))!);
   }
+  if (range?.to) conds.push(lte(schema.scheduleItems.startsAt, range.to));
   // 專案視角：只回該專案的行程＋整組共用（未掛專案）的行程，避免單頁上限被別的專案吃掉。
   if (projectId) conds.push(or(eq(schema.scheduleItems.projectId, projectId), isNull(schema.scheduleItems.projectId))!);
   const rows = await db
