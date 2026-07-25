@@ -109,7 +109,10 @@ a .badge:hover, [role="button"].badge:hover { border-color: var(--border-strong)
 .status-chip .mono { font-family: var(--mono); font-weight: 600; color: var(--fg); }
 /* 頂欄情境切換器（組別）：刻意做大、與 pill 區隔 */
 .group-select { min-width: 220px; background: var(--card2) !important; border: 1px solid var(--border);
-  border-radius: var(--radius) !important; font-weight: 600; }
+  border-radius: var(--radius) !important; font-weight: 600;
+  /* 長組名（「團隊・組別（角色）」中文串接）不設上限會把頂欄撐破視窗寬——
+     每一頁都出現橫向捲動。上限吃視窗寬的 60%，超出以省略號截斷 */
+  max-width: min(340px, 60vw); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
 
 /* 標題 */
 h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(28px, 4.5vw, 40px); line-height: 1.12;
@@ -322,7 +325,9 @@ button:focus-visible { border-radius: 999px; }
   .topbar .badge, .topbar .status-chip { font-size: 12px; padding: 5px 11px; min-height: 40px; }
   .group-select { min-width: 160px; }
   button { min-height: 40px; }
-  input, textarea, select { min-height: 40px; font-size: 16px; }
+  /* !important：多處控件用 inline style 壓 12–14px（特異性蓋過這條 media query），
+     iPhone Safari 聚焦 <16px 的輸入框會自動放大整頁且不回彈——行動版一律 16px 防縮放 */
+  input, textarea, select { min-height: 40px; font-size: 16px !important; }
   .chip.pick { min-height: 40px; display: inline-flex; align-items: center; }
   .menu-item { min-height: 40px; }
   .gen-row { gap: 10px; padding: 10px 12px; }

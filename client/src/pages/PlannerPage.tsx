@@ -831,8 +831,8 @@ function KnowledgeImport({
       <p className="hint" style={{ marginTop: 4 }}>選一個專案的知識（開示稿／見證／腳本…），把全文附加到這則筆記的內容尾端。</p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 6 }}>
         <div style={{ flex: "1 1 180px" }}>
-          <label>專案</label>
-          <select value={pid} onChange={(e) => { setPid(e.target.value); setKid(""); }}>
+          <label htmlFor="kb-attach-project">專案</label>
+          <select id="kb-attach-project" value={pid} onChange={(e) => { setPid(e.target.value); setKid(""); }}>
             <option value="">選專案…</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.title}</option>
@@ -840,8 +840,8 @@ function KnowledgeImport({
           </select>
         </div>
         <div style={{ flex: "2 1 220px" }}>
-          <label>知識</label>
-          <select value={kid} disabled={!pid || kb.isLoading} onChange={(e) => setKid(e.target.value)}>
+          <label htmlFor="kb-attach-knowledge">知識</label>
+          <select id="kb-attach-knowledge" value={kid} disabled={!pid || kb.isLoading} onChange={(e) => setKid(e.target.value)}>
             <option value="">{!pid ? "先選專案" : kb.isLoading ? "載入中…" : (kb.data?.length ?? 0) === 0 ? "此專案沒有知識" : "選一筆知識…"}</option>
             {(kb.data ?? []).map((k) => (
               <option key={k.id} value={k.id}>{k.title}（{k.chars.toLocaleString()} 字）</option>
@@ -1295,12 +1295,13 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
               <button type="button" className="btn-sm" onClick={resetLayout} title="清除拖拉過的節點位置，回到自動佈局">重設佈局</button>
             )}
           </div>
+          {/* role=group（非 img）：img 會讓報讀器把整張圖當單一圖片，內部所有可點節點對 AT 隱形 */}
           <svg
             ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
             className="map-svg"
-            role="img"
-            aria-label="知識地圖"
+            role="group"
+            aria-label="知識地圖（可 Tab 到各節點，Enter 開啟詳情）"
             onPointerDown={onSvgPointerDown}
             onPointerMove={onSvgPointerMove}
             onPointerUp={onSvgPointerUp}
@@ -1331,10 +1332,23 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
                     </g>
                   );
                 }
+                // 可點節點的鍵盤/報讀器可及性：role=button＋tabIndex＋Enter/Space 觸發，
+                // 否則純鍵盤使用者無法聚焦或啟動任何節點（WCAG 2.1.1 / 4.1.2）
+                const a11yProps = (selection: Parameters<typeof onNodeClick>[0]) => ({
+                  role: "button" as const,
+                  tabIndex: 0,
+                  "aria-label": n.label,
+                  onKeyDown: (e: React.KeyboardEvent<SVGGElement>) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onNodeClick(selection)();
+                    }
+                  },
+                });
                 if (n.type === "project" || n.type === "bucket" || n.type === "dbhub" || n.type === "more") {
                   const w = Math.max(56, n.label.length * 13 + 22);
                   return (
-                    <g key={n.id} className={`map-node ${n.type} clickable`} onClick={onNodeClick(n.selection)} {...dragProps}>
+                    <g key={n.id} className={`map-node ${n.type} clickable`} onClick={onNodeClick(n.selection)} {...a11yProps(n.selection)} {...dragProps}>
                       <rect x={x - w / 2} y={y - 15} width={w} height={30} rx={15} />
                       <text x={x} y={y} textAnchor="middle" dominantBaseline="central">{n.label}</text>
                     </g>
@@ -1342,7 +1356,7 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
                 }
                 // note / schedule / knowledge / agent / db 葉節點
                 return (
-                  <g key={n.id} className={`map-node ${n.type} clickable`} onClick={onNodeClick(n.selection)} {...dragProps}>
+                  <g key={n.id} className={`map-node ${n.type} clickable`} onClick={onNodeClick(n.selection)} {...a11yProps(n.selection)} {...dragProps}>
                     <circle cx={x} cy={y} r={6} />
                     <text x={x} y={y - 12} textAnchor="middle">{n.label}</text>
                   </g>

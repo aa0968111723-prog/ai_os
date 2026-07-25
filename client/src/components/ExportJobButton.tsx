@@ -4,6 +4,8 @@ import { Icon } from "./Icon";
 
 function fmtMb(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))}KB`;
+  // 多支影片的交付包輕易破 1GB——顯示 2.0GB 而非 2048.0MB（與資料庫頁 formatBytes 同口徑）
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)}GB`;
   return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 }
 

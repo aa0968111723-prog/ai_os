@@ -91,7 +91,7 @@ export function DownloadsPage() {
                     <Icon name="FileText" size={15} style={{ flex: "none" }} />
                     <span style={{ flex: "1 1 auto", minWidth: 160 }}>{it.title}</span>
                     <span className="hint mono" style={{ flex: "none" }}>
-                      {fmtSize(it.sizeBytes)}・{new Date(it.updatedAt).toLocaleDateString()}
+                      {fmtSize(it.sizeBytes)}・{new Date(it.updatedAt).toLocaleDateString("zh-TW")}
                     </span>
                     <a href={`/api/downloads/file?name=${encodeURIComponent(it.file)}`} download>
                       <Icon name="Download" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />下載
