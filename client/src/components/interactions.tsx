@@ -33,7 +33,9 @@ export function useFocusTrap<T extends HTMLElement>(
             node.querySelectorAll<HTMLElement>(
               'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])',
             ),
-          ).filter((el) => el.offsetParent !== null || el === document.activeElement)
+          // 可見性判定用 getClientRects：offsetParent 對 position:fixed 元素恆為 null，
+          // 會把「可見但 fixed」的控件（如粗剪預覽釘在右上角的關閉鈕）誤判為隱藏而踢出焦點環
+          ).filter((el) => el.getClientRects().length > 0 || el === document.activeElement)
         : [];
     // 進場把焦點移進對話框
     (focusables()[0] ?? node)?.focus?.();
