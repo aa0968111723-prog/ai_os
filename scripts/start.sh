@@ -27,11 +27,43 @@ fi
 
 echo "[start] 套用已版本化的 pending migrations…"
 if ! npm run db:migrate; then
-  echo "[start] ⚠ migration 未完成；為避免新程式搭配舊 schema，本服務拒絕啟動"
-  echo "[start]   state=legacy-untracked：既有 DB 還沒納管——先備份，再依 runbook 執行 db:adopt"
-  echo "[start]   Failed query 是 CREATE UNIQUE INDEX：該表有重複列，migration 必須先去重再建索引"
-  echo "[start]   state=invalid：ledger 與檔案不符，需人工處理，本程序不會自行猜測修復"
-  exit 78
+  # 只有在 migrate 失敗、且營運者明確於平台 Variables 授權時，才走 legacy 納管。
+  # 平台上沒有 one-off job，也無法對崩潰重試中的容器開 shell，所以既有 runbook 的
+  # 「dry-run 檢視 → 帶 fingerprint 確認」兩步驟改由兩個變數表達，確認關卡原封不動：
+  #   1. 只設 DB_ADOPT_LEGACY_THROUGH → 只跑 dry-run，印出 state、drift 與該用的 fingerprint
+  #   2. 再把該 fingerprint 設進 DB_ADOPT_LEGACY_CONFIRM → 才真正寫入 ledger
+  # 納管只寫 migration ledger，不對 public 資料表執行任何 DDL；bridge 會逐條核對 live schema
+  # 必須與已審核的版本完全相符，任何非預期差異一律拒絕。
+  # 因為這段只在 migrate 失敗時才進來，納管完成後變數留著也不會再觸發——但仍建議移除。
+  if [ -z "$DB_ADOPT_LEGACY_THROUGH" ]; then
+    echo "[start] ⚠ migration 未完成；為避免新程式搭配舊 schema，本服務拒絕啟動"
+    echo "[start]   state=legacy-untracked：既有 DB 還沒納管——先備份，再設 DB_ADOPT_LEGACY_THROUGH=0001_managed_indexes 重新部署"
+    echo "[start]   Failed query 是 CREATE UNIQUE INDEX：該表有重複列，migration 必須先去重再建索引"
+    echo "[start]   state=invalid：ledger 與檔案不符，需人工處理，本程序不會自行猜測修復"
+    exit 78
+  fi
+
+  if [ -z "$DB_ADOPT_LEGACY_CONFIRM" ]; then
+    echo "[start] DB_ADOPT_LEGACY_THROUGH 已設；先執行 dry-run（不寫入任何東西）…"
+    npm run db:adopt -- --dry-run --through="$DB_ADOPT_LEGACY_THROUGH" || true
+    echo "[start] ⚠ 以上為 dry-run，資料庫未被更動。請先備份，確認上方 state 與 drift 無誤後，"
+    echo "[start]   把 log 中 --confirm= 後面那組 fingerprint 設進 DB_ADOPT_LEGACY_CONFIRM 再重新部署"
+    exit 78
+  fi
+
+  echo "[start] 執行已確認的 legacy 納管（只寫 migration ledger，不動 public 資料表）…"
+  if ! npm run db:adopt -- --through="$DB_ADOPT_LEGACY_THROUGH" --confirm="$DB_ADOPT_LEGACY_CONFIRM"; then
+    echo "[start] ⚠ 納管未通過驗證，沒有寫入任何 ledger；服務拒絕啟動"
+    echo "[start]   fingerprint 不符請重跑 dry-run 取得最新值；state 不是 legacy-untracked 表示不該用納管"
+    exit 78
+  fi
+
+  echo "[start] 納管完成，重新套用 pending migrations…"
+  if ! npm run db:migrate; then
+    echo "[start] ⚠ 納管後 migration 仍未完成；服務拒絕啟動"
+    exit 78
+  fi
+  echo "[start] 納管流程結束——請到平台 Variables 移除 DB_ADOPT_LEGACY_THROUGH 與 DB_ADOPT_LEGACY_CONFIRM"
 fi
 
 echo "[start] 唯讀檢查 migration ledger 與 schema drift…"
