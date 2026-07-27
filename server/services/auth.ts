@@ -7,6 +7,12 @@ import bcrypt from "bcryptjs";
 import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import type { Request, Response } from "express";
 import { db, schema } from "../db";
+import {
+  consumeRateLimits,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+  settleRateLimits,
+} from "./rateLimit";
 
 // pg 唯一鍵衝突（23505）：驅動可能把原始錯誤包在 cause，兩層 code 與訊息都檢查。
 // 在地實作（不從 generationCore 匯入）——auth.ts 於 tRPC context 建立時極早載入，
@@ -44,76 +50,34 @@ export async function verifyPasswordOrDummy(plain: string, hash: string | null |
   return bcrypt.compare(plain, hash);
 }
 
-/* ── 登入防爆破：同帳號 15 分鐘 5 次；同 IP 15 分鐘 30 次（滑動視窗） ── */
-const EMAIL_WINDOW_MS = 15 * 60_000;
-const IP_WINDOW_MS = 15 * 60_000;
-const IP_MAX = 30; // 內部工具人數少，30 次/15 分足以擋撞庫又不誤傷正常多帳號共用出口 IP
-const attempts = new Map<string, { count: number; resetAt: number }>();
-// 每 IP 保存視窗內的嘗試時間戳，實作真正的滑動視窗（過舊的時間戳會被裁掉）
-const ipHits = new Map<string, number[]>();
-
-// 定期清掃：兩個 Map 都會隨新 email／IP 無限成長，逾期項需回收。以呼叫時檢查上次清掃時間
-// 觸發（避免常駐 timer 在測試/關機時殘留），實務上每次登入嘗試都會順便維護。
-let lastSweepAt = 0;
-function sweep(now: number): void {
-  if (now - lastSweepAt < 5 * 60_000) return;
-  lastSweepAt = now;
-  for (const [key, entry] of attempts) {
-    if (now > entry.resetAt) attempts.delete(key);
-  }
-  for (const [key, times] of ipHits) {
-    const kept = times.filter((t) => now - t < IP_WINDOW_MS);
-    if (kept.length === 0) ipHits.delete(key);
-    else ipHits.set(key, kept);
-  }
-}
-
+/* ── 登入防爆破：PostgreSQL 滑動視窗，跨 replica／重啟持久 ── */
 // ip 選填：僅 login 傳入（changePassword 等已登入情境沿用單一 email/自訂 key 限流）。
-export function checkLoginRate(email: string, ip?: string): { ok: boolean; retryAfterMin?: number } {
-  const now = Date.now();
-  sweep(now);
-
-  // 每帳號視窗（維持原行為與回傳語意）
-  let emailRetry = 0;
-  const entry = attempts.get(email);
-  if (!entry || now > entry.resetAt) {
-    attempts.set(email, { count: 1, resetAt: now + EMAIL_WINDOW_MS });
-  } else {
-    entry.count += 1;
-    // 無條件進位：剩 0.1 分鐘也報 1 分鐘，避免顯示「0 分鐘後再試」
-    if (entry.count > 5) emailRetry = Math.ceil((entry.resetAt - now) / 60_000);
-  }
-
-  // 每 IP 滑動視窗
-  let ipRetry = 0;
-  if (ip) {
-    const hits = (ipHits.get(ip) ?? []).filter((t) => now - t < IP_WINDOW_MS);
-    if (hits.length >= IP_MAX) {
-      // 最舊的一筆滑出視窗後才會再放行
-      ipRetry = Math.ceil((hits[0] + IP_WINDOW_MS - now) / 60_000);
-    } else {
-      hits.push(now); // 未達上限才記這次嘗試，被擋時不再累積以免視窗永遠不清空
-    }
-    ipHits.set(ip, hits);
-  }
-
-  if (emailRetry > 0 || ipRetry > 0) {
-    return { ok: false, retryAfterMin: Math.max(emailRetry, ipRetry) || 1 };
-  }
-  return { ok: true };
+// subject 只在本行程短暫存在；rateLimit 會先以含 scope 的 HMAC-SHA-256 轉成 key，DB 不存 email/IP。
+export async function checkLoginRate(
+  email: string,
+  ip?: string,
+): Promise<{ ok: boolean; retryAfterMin?: number }> {
+  const requests = [
+    { scope: RATE_LIMIT_SCOPES.authEmail, subject: email, policy: RATE_LIMIT_POLICIES.authEmail },
+    ...(ip ? [{ scope: RATE_LIMIT_SCOPES.authIp, subject: ip, policy: RATE_LIMIT_POLICIES.authIp }] : []),
+  ];
+  const decisions = await consumeRateLimits(requests);
+  const retryAfterMs = decisions.reduce(
+    (max, decision) => decision.allowed ? max : Math.max(max, decision.retryAfterMs),
+    0,
+  );
+  return retryAfterMs > 0
+    ? { ok: false, retryAfterMin: Math.max(1, Math.ceil(retryAfterMs / 60_000)) }
+    : { ok: true };
 }
-export function clearLoginRate(email: string, ip?: string): void {
-  attempts.delete(email);
-  // 成功登入不應累積到「每 IP 撞庫」計數——否則共用出口 IP 的小團隊正常登入也會把自己鎖死。
-  // 移除這次成功嘗試在 checkLoginRate 剛記下的最新一筆時間戳；失敗嘗試仍保留，維持撞庫防護。
-  if (ip) {
-    const hits = ipHits.get(ip);
-    if (hits && hits.length) {
-      hits.pop();
-      if (hits.length === 0) ipHits.delete(ip);
-      else ipHits.set(ip, hits);
-    }
-  }
+
+export async function clearLoginRate(email: string, ip?: string): Promise<void> {
+  await settleRateLimits([
+    // 成功登入清除自己的帳號失敗視窗。
+    { scope: RATE_LIMIT_SCOPES.authEmail, subject: email, action: "clear" },
+    // IP 是多人共用出口時不能整桶清除；只回收本次成功登入在 checkLoginRate 記下的一格。
+    ...(ip ? [{ scope: RATE_LIMIT_SCOPES.authIp, subject: ip, action: "release-latest" as const }] : []),
+  ]);
 }
 
 /* ── Session ── */

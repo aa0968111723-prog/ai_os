@@ -9,6 +9,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import { and, eq, gt } from "drizzle-orm";
 import { db, schema } from "../db";
 import { loadAuthState, parseCookies, sha256 } from "./auth";
+import { sessionGate } from "./sessionPolicy";
+import { isShuttingDown, onShutdown } from "./shutdown";
 
 /** 與 services/auth 的 session cookie 同名（auth 未匯出常數，改名要兩邊同步） */
 const COOKIE_NAME = "aidos_session";
@@ -162,7 +164,7 @@ async function authorize(
     .where(and(eq(schema.sessions.tokenHash, tokenHash), gt(schema.sessions.expiresAt, new Date())));
   if (!session) return null;
   const auth = await loadAuthState(session.userId);
-  if (!auth) return null;
+  if (sessionGate(auth) !== null || !auth) return null;
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) return null;
   if (!auth.user.isSuperAdmin && !auth.groups.some((g) => g.groupId === project.groupId)) return null;
@@ -186,7 +188,7 @@ async function revalidate(c: Client): Promise<void> {
     // #21 復用單一權限判定：loadAuthState 內含「users.status 非 active → 回 null」（被停用帳號即斷線）、
     // 開發者展開與組成員關係——不再各自查 users/groupMembers，判定口徑與 HTTP 端完全一致。
     const auth = await loadAuthState(c.userId);
-    if (!auth) {
+    if (sessionGate(auth) !== null || !auth) {
       c.ws.close(4403, "權限已變更"); // 帳號被停用或已刪除
       return;
     }
@@ -322,10 +324,14 @@ export function attachRealtime(server: Server): void {
   // 協定內全是小訊息：4 KiB 已綽綽有餘，超過由 ws 直接斷線，不讓人灌大 payload 吃記憶體
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
 
-  server.on("upgrade", (req, socket, head) => {
+  const handleUpgrade = (req: IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) => {
     socket.on("error", () => {
       /* 握手前的 socket 錯誤（對方直接斷線等）不讓它變成 unhandled */
     });
+    if (isShuttingDown()) {
+      socket.destroy();
+      return;
+    }
     let url: URL;
     try {
       url = new URL(req.url ?? "/", "http://internal");
@@ -345,7 +351,7 @@ export function attachRealtime(server: Server): void {
     }
     authorize(req, url.searchParams.get("projectId"))
       .then((ctx) => {
-        if (!ctx) {
+        if (!ctx || isShuttingDown()) {
           socket.destroy();
           return;
         }
@@ -355,7 +361,8 @@ export function attachRealtime(server: Server): void {
         });
       })
       .catch(() => socket.destroy());
-  });
+  };
+  server.on("upgrade", handleUpgrade);
 
   // 心跳：每 30 秒 ping 一輪；連兩輪沒 pong（≒60 秒無回應）視為死連線強制斷開
   let round = 0;
@@ -375,4 +382,36 @@ export function attachRealtime(server: Server): void {
     }
   }, 30_000);
   server.on("close", () => clearInterval(heartbeat));
+  onShutdown(() => {
+    server.removeListener("upgrade", handleUpgrade);
+    clearInterval(heartbeat);
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      let forceTimer: NodeJS.Timeout | undefined;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (forceTimer) clearTimeout(forceTimer);
+        resolve();
+      };
+      // WebSockets are upgraded sockets and are not covered by
+      // httpServer.closeAllConnections(). Send a restart close code first,
+      // then terminate peers that do not complete the handshake promptly.
+      forceTimer = setTimeout(() => {
+        for (const client of wss.clients) client.terminate();
+        finish();
+      }, 1_000);
+      try {
+        wss.close(finish);
+        for (const client of wss.clients) {
+          if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+            client.close(1001, "server shutting down");
+          }
+        }
+      } catch {
+        for (const client of wss.clients) client.terminate();
+        finish();
+      }
+    });
+  });
 }

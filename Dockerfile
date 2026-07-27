@@ -2,7 +2,7 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm install --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
@@ -15,15 +15,29 @@ ARG BUILD_SHA=""
 ARG BUILD_BRANCH=""
 ARG BUILD_TIME=""
 ENV BUILD_SHA=$BUILD_SHA BUILD_BRANCH=$BUILD_BRANCH BUILD_TIME=$BUILD_TIME
-COPY --from=builder /app/node_modules ./node_modules
+# 正式映像只安裝 runtime dependencies；測試、Vite 與 TypeScript 工具不進 production layer。
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=builder /app/dist ./dist
-# db:push 用 schema 直接同步（不走 migration 檔），故只需 schema.ts＋config，不複製 drizzle/
-COPY package.json drizzle.config.ts ./
-COPY server/db/schema.ts ./server/db/schema.ts
-COPY scripts/start.sh ./start.sh
+# migration-first：runner 必須攜帶已審核 SQL、唯讀 drift checker 與明確執行 CLI。
+COPY drizzle.config.ts ./
+COPY --from=builder /app/drizzle ./drizzle
+COPY --from=builder /app/server/db ./server/db
+COPY --from=builder /app/scripts/db ./scripts/db
+COPY --from=builder /app/scripts/start.sh ./start.sh
+# Windows checkout 也必須產出可由 Alpine /bin/sh 執行的 LF 腳本。
+RUN sed -i 's/\r$//' /app/start.sh
 # 資料下載區（需求 #11）在執行期服務 docs/ 與 README 原檔——runner 也要帶著
 COPY --from=builder /app/docs ./docs
 COPY --from=builder /app/README.md ./README.md
+# 應用程式與預設 Volume 以非 root 執行；新掛載的 Zeabur Volume 需保留此目錄擁有權。
+RUN mkdir -p /data /app/.data && chown -R node:node /app /data
+USER node
 EXPOSE 3000
-# 啟動腳本：檢查 DATABASE_URL → 重試建表（DB 慢就緒也扛得住）→ 啟動；log 全中文可讀
+STOPSIGNAL SIGTERM
+# 容器層只做 liveness；DB、Volume 與 runner 就緒狀態由平台探測 /api/ready。
+# 使用 Node 內建 fetch，避免為單一健康檢查把 curl/wget 額外裝進 production image。
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+# 啟動腳本只做唯讀 migration/drift gate；DDL 必須先由 release/one-off job 明確執行。
 CMD ["sh", "/app/start.sh"]

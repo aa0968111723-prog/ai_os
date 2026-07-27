@@ -9,8 +9,16 @@ import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { searchCatalogText, rowLine } from "./assistant";
 import { planAgentCore } from "../services/agentCore";
+import { searchAssistantDatabaseRows } from "../services/databaseRowSearch";
 import type { AuthState } from "../services/auth";
 import type { DataField } from "../../shared/databaseFields";
+import {
+  consumeRateLimit,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+  RateLimitConfigurationError,
+  RateLimitUnavailableError,
+} from "../services/rateLimit";
 
 /**
  * 團隊 AI 代理（需求 12 v2）：彙總「整個組」轄下各專案的現況，回答組長／組員
@@ -40,19 +48,14 @@ const PROJECT_LIMIT = 15;
 /** 每次提問最多幾輪工具查詢（每輪一次 LLM 呼叫；超過就強制直接回答，防打轉燒錢） */
 const MAX_TOOL_ROUNDS = 3;
 
-// 記憶體節流（比照 assistant）：每人每分鐘 6 次，擋狂刷付費 LLM
-const LIMIT_PER_MIN = 6;
-const WINDOW_MS = 60_000;
-const hits = new Map<string, number[]>();
-function overLimit(userId: string): boolean {
-  const now = Date.now();
-  const arr = (hits.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
-  const over = arr.length >= LIMIT_PER_MIN;
-  if (!over) arr.push(now);
-  // 為什麼：空陣列就刪 key，否則長跑容器的 hits Map 會隨歷史使用者無界成長（記憶體洩漏）
-  if (arr.length) hits.set(userId, arr);
-  else hits.delete(userId);
-  return over;
+// PostgreSQL 滑動視窗（跨 replica／重啟持久）：每人每分鐘 6 次。
+async function overLimit(userId: string): Promise<boolean> {
+  const decision = await consumeRateLimit(
+    RATE_LIMIT_SCOPES.teamAssistant,
+    userId,
+    RATE_LIMIT_POLICIES.teamAssistant,
+  );
+  return !decision.allowed;
 }
 
 /** 以台北時間（UTC+8，無夏令時）格式化「最後活動」——容器跑 UTC，直接用本地時間會差 8 小時 */
@@ -154,7 +157,8 @@ async function runTeamTool(
   }
 
   if (call.tool === "query_database") {
-    // 與 assistant 的同名工具同語義（rowLine 同格式）：鑽進單一庫做全量關鍵字搜尋——上下文快照只有 12 列，這裡最多掃最近 100 列
+    // 與 assistant 的同名工具同語義（rowLine 同格式）：dbRef 已鎖死在本組可見／AI 可讀清單，
+    // 關鍵字交給 PostgreSQL 搜完整資料集，回傳仍硬限 20 列，避免提示詞無界增長。
     const dbRef = call.args?.dbRef?.trim() ?? "";
     const target = dbByRef.get(dbRef);
     if (!target) {
@@ -165,18 +169,11 @@ async function runTeamTool(
           : "這個組目前沒有 AI 可讀的資料庫",
       };
     }
-    const rows = await db
-      .select({ data: schema.dataRows.data })
-      .from(schema.dataRows)
-      .where(eq(schema.dataRows.tableId, target.id))
-      .orderBy(desc(schema.dataRows.createdAt))
-      .limit(100);
-    const kw = call.args?.keyword?.trim().toLowerCase();
-    const matched = (kw ? rows.filter((r) => JSON.stringify(r.data ?? {}).toLowerCase().includes(kw)) : rows).slice(0, 20);
+    const { keyword: kw, rows: matched } = await searchAssistantDatabaseRows(target.id, call.args?.keyword);
     const text = matched.length
       ? matched.map((r, i) => `${i + 1}. ${rowLine(target.fields, r.data as Record<string, unknown>)}`).join("\n")
       : kw
-        ? `「${target.name}」最近 ${rows.length} 列裡沒有含「${kw}」的列（全庫共 ${target.rowCount} 列）`
+        ? `「${target.name}」裡沒有含「${kw}」的列（全庫共 ${target.rowCount} 列）`
         : `「${target.name}」目前沒有資料列`;
     return { step: `查了資料庫「${target.name}」(${matched.length} 筆)`, text };
   }
@@ -318,8 +315,15 @@ export const teamAssistantRouter = router({
       history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(2000) })).max(8).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      if (overLimit(ctx.auth.user.id)) {
-        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "問得太頻繁（每分鐘最多 6 次），休息一下再問" });
+      try {
+        if (await overLimit(ctx.auth.user.id)) {
+          throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "問得太頻繁（每分鐘最多 6 次），休息一下再問" });
+        }
+      } catch (error) {
+        if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+          throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "團隊助手安全限流暫時無法使用，請稍後再試" });
+        }
+        throw error;
       }
       // 組員即可問自己組（唯讀彙總不需組長權限）；不屬於該組的直接擋
       const role = requireGroup(ctx.auth, input.groupId);

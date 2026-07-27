@@ -1,14 +1,26 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { MAX_FILE_CATEGORY, normalizeFileCategory, validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
 import { addDataRowValidated } from "../services/databaseCore";
+import {
+  executeIdempotentDatabaseBatch,
+  IDEMPOTENCY_KEY_MAX_LENGTH,
+  IDEMPOTENCY_KEY_MIN_LENGTH,
+  IDEMPOTENCY_KEY_PATTERN,
+  IdempotencyConflictError,
+} from "../services/databaseBatchIdempotency";
+import {
+  escapeLikeLiteral,
+  normalizeDatabaseSearchKeyword,
+} from "../services/databaseRowSearch";
 import { classifyDatabaseFile, mediaKindOf, tableStats } from "../services/databaseMedia";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { tabularToRowObjects, TABULAR_FORMATS, type TabularFormat } from "../../shared/tabular";
+import { findProjectLinkedRows } from "../services/databaseProjectLinks";
 import {
   extractTextFromBuffer,
   fetchImport,
@@ -179,10 +191,9 @@ export const databasesRouter = router({
     .query(async ({ ctx, input }) => {
       const { table } = await getTableChecked(ctx.auth, input.tableId);
       const conds = [eq(schema.dataRows.tableId, table.id)];
-      if (input.q?.trim()) {
-        // 修 R5-I18N-01：轉義 LIKE 萬用字元（% _ \），讓使用者輸入當字面比對（預設 ESCAPE '\'），別被當 SQL 模式
-        const likeEsc = input.q.trim().replace(/[\\%_]/g, (m) => `\\${m}`);
-        conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + likeEsc + "%"}`);
+      const keyword = normalizeDatabaseSearchKeyword(input.q);
+      if (keyword) {
+        conds.push(sql`${schema.dataRows.data}::text ilike ${`%${escapeLikeLiteral(keyword)}%`} escape ${"\\"}`);
       }
       const rows = await db
         .select({
@@ -237,18 +248,24 @@ export const databasesRouter = router({
         .map((t) => ({ table: t, projectFields: (t.fields as DataField[]).filter((f) => f.type === "project") }))
         .filter((x) => x.projectFields.length > 0);
       if (relevant.length === 0) return [];
-      const tableIds = relevant.map((x) => x.table.id);
-      // 一次撈這些庫的全部列，JS 端過濾「任一 project 欄 === projectId」（列量受 20k/庫 保險絲約束）
-      const allRows = await db
-        .select({ id: schema.dataRows.id, tableId: schema.dataRows.tableId, data: schema.dataRows.data })
-        .from(schema.dataRows)
-        .where(inArray(schema.dataRows.tableId, tableIds));
+      // 每個庫的 project 欄 key 不同；在 PostgreSQL 組成「tableId + JSON 欄位值」條件，只把命中列
+      // 傳回 Node。舊版先載入全部可見列再過濾，庫一多時可一次吃進數十萬列與大量 JSON。
+      const allRows = await findProjectLinkedRows(
+        input.projectId,
+        relevant.map(({ table, projectFields }) => ({
+          tableId: table.id,
+          fieldKeys: projectFields.map((field) => field.key),
+        })),
+      );
+      const rowsByTable = new Map<string, Array<{ id: string; data: DataRowData }>>();
+      for (const row of allRows) {
+        const bucket = rowsByTable.get(row.tableId) ?? [];
+        bucket.push({ id: row.id, data: row.data as DataRowData });
+        rowsByTable.set(row.tableId, bucket);
+      }
       const out: Array<{ tableId: string; tableName: string; fields: DataField[]; rows: Array<{ id: string; data: DataRowData }> }> = [];
-      for (const { table, projectFields } of relevant) {
-        const matched = allRows
-          .filter((r) => r.tableId === table.id)
-          .filter((r) => projectFields.some((f) => (r.data as DataRowData)?.[f.key] === input.projectId))
-          .map((r) => ({ id: r.id, data: r.data as DataRowData }));
+      for (const { table } of relevant) {
+        const matched = rowsByTable.get(table.id) ?? [];
         if (matched.length) out.push({ tableId: table.id, tableName: table.name, fields: table.fields as DataField[], rows: matched });
       }
       return out;
@@ -266,6 +283,13 @@ export const databasesRouter = router({
       content: z.string().min(1).max(1_500_000), // 留餘裕給 JSON 包裝，不撞 express.json 的 2MB 上限
       format: z.enum(["csv", "tsv", "json"]).default("csv"),
       headerMap: z.record(z.string()), // 來源表頭（CSV/TSV）或 JSON key → 欄位 key
+      idempotencyKey: z.string()
+        .min(IDEMPOTENCY_KEY_MIN_LENGTH)
+        .max(IDEMPOTENCY_KEY_MAX_LENGTH)
+        .regex(
+          IDEMPOTENCY_KEY_PATTERN,
+          "冪等鍵格式無效：僅可使用英數字、點、底線、冒號與連字號",
+        ),
     }))
     .mutation(async ({ ctx, input }) => {
       const { table, access } = await getTableChecked(ctx.auth, input.tableId);
@@ -283,22 +307,40 @@ export const databasesRouter = router({
       }
       const MAX_IMPORT = 5000;
       const slice = objs.slice(0, MAX_IMPORT); // 只嘗試前 MAX_IMPORT 列
-      let imported = 0;
-      let attempted = 0;
-      const errors: Array<{ line: number; error: string }> = [];
-      for (const { data, line } of slice) {
-        attempted++;
-        try {
-          await addDataRowValidated(table, ctx.auth.user.id, data);
-          imported++;
-        } catch (err) {
-          if (errors.length < 50) errors.push({ line, error: err instanceof Error ? err.message : "未知錯誤" }); // line＝實體行號（JSON＝第幾筆）
-          // 達列數上限即停（addDataRowValidated 會拋保險絲訊息）
-          if (err instanceof Error && err.message.includes("列上限")) break;
+      let batch;
+      try {
+        batch = await executeIdempotentDatabaseBatch({
+          table,
+          actorId: ctx.auth.user.id,
+          rawRows: slice.map((item) => item.data),
+          idempotencyKey: input.idempotencyKey,
+          requestPayload: {
+            operation: "databases.importData",
+            tableId: input.tableId,
+            content: input.content,
+            format: input.format,
+            headerMap: input.headerMap,
+          },
+        });
+      } catch (err) {
+        if (err instanceof IdempotencyConflictError) {
+          throw new TRPCError({ code: "CONFLICT", message: err.message });
         }
+        throw err;
       }
+      const errors = batch.errors.map((error) => ({
+        line: slice[error.index]?.line ?? error.index + 1,
+        error: error.error,
+      }));
       // failed 只算「嘗試過但失敗」的列；被 MAX_IMPORT 截斷、從未嘗試的列另以 skipped 標示（不混入 failed 誤導）
-      return { imported, failed: attempted - imported, skipped: objs.length - attempted, truncated: objs.length > MAX_IMPORT, errors };
+      return {
+        imported: batch.insertedCount,
+        failed: batch.failed,
+        skipped: (objs.length - slice.length) + batch.skipped,
+        truncated: objs.length > MAX_IMPORT,
+        errors,
+        replayed: batch.replayed,
+      };
     }),
 
   /** 更新列：整列覆寫語意（前端送完整 data）；寫入權即可（協作表格，不限本人的列） */

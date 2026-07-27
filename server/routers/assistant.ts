@@ -18,8 +18,14 @@ import { splitScriptCore } from "./director";
 import { buildKnowledgeContext } from "./knowledge";
 import { planAgentCore } from "../services/agentCore";
 import { listVisibleTables, resolveAgentAccess } from "../services/databaseAcl";
+import { searchAssistantDatabaseRows } from "../services/databaseRowSearch";
 import type { AuthState } from "../services/auth";
 import type { DataField } from "../../shared/databaseFields";
+import {
+  consumeProjectAssistantRate,
+  RateLimitConfigurationError,
+  RateLimitUnavailableError,
+} from "../services/rateLimit";
 
 /**
  * 專案 AI 代理系統（統一入口）：一個對話統包「問答、發想、拆分鏡、排計畫執行、查資料庫」——
@@ -89,36 +95,11 @@ export const MODEL_CHEATSHEET = MODELS.filter((m) => m.recommended && !m.needs &
 /** 提示詞用「可用工作流速查」：LLM 只能從這裡挑 presetId（resolve／startWorkflowCore 都會再過 getWorkflow 白名單） */
 const WORKFLOW_CHEATSHEET = WORKFLOW_PRESETS.map((w) => `- ${w.id}｜${w.label}｜約 ${w.points} 點｜${w.bestFor}`).join("\n");
 
-// 記憶體節流（比照 director）：每人每分鐘 6 次，擋狂刷付費 LLM
-const LIMIT_PER_MIN = 6;
-const WINDOW_MS = 60_000;
-const hits = new Map<string, number[]>();
-// 同一題的去重鍵（SSE 串流與退回 tRPC 兩條路徑共用同一 nonce）：一題只計一次名額，
-// 避免「串流中途斷線→退回」把節流額度重複扣兩格（研究確認的邊界問題）。TTL 同節流窗，惰性清掃。
-const seenNonce = new Map<string, number>();
-export function overLimit(userId: string, dedupeKey?: string): boolean {
-  const now = Date.now();
-  if (dedupeKey) {
-    for (const [k, t] of seenNonce) if (now - t > WINDOW_MS) seenNonce.delete(k);
-    // 這一題先前已「成功計過名額」（另一條路徑）→ 給「單次」免計放行（SSE 串流→退回 tRPC 的那一次）。
-    // 用過即刪：同一 nonce 第三次以後不再免計——否則客戶端固定一個 nonce 就能無限繞過節流（安全漏洞）。
-    if (seenNonce.has(dedupeKey)) {
-      seenNonce.delete(dedupeKey);
-      return false;
-    }
-  }
-  const arr = (hits.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
-  const over = arr.length >= LIMIT_PER_MIN;
-  if (!over) {
-    arr.push(now);
-    // 只有「真正計入名額」的請求才登記 nonce——被節流擋下的請求不留記號，
-    // 免得後續重試靠這個記號免計繞過（登記必須在確認未超限之後）。
-    if (dedupeKey) seenNonce.set(dedupeKey, now);
-  }
-  // 為什麼：空陣列就刪 key，否則長跑容器的 hits Map 會隨歷史使用者無界成長（記憶體洩漏）
-  if (arr.length) hits.set(userId, arr);
-  else hits.delete(userId);
-  return over;
+// PostgreSQL 滑動視窗：每人每分鐘 6 次，跨 replica／重啟持久。
+// nonce 僅供串流／tRPC 請求關聯；每個外部呼叫都計次，避免並行呼叫倍增付費 LLM 吞吐。
+export async function overLimit(userId: string, dedupeKey?: string): Promise<boolean> {
+  const decision = await consumeProjectAssistantRate(userId, dedupeKey);
+  return !decision.allowed;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -289,17 +270,9 @@ async function runLookupTool(
           : "目前沒有 AI 可讀的資料庫",
       };
     }
-    const rows = await db
-      .select({ data: schema.dataRows.data })
-      .from(schema.dataRows)
-      .where(eq(schema.dataRows.tableId, target.id))
-      .orderBy(desc(schema.dataRows.createdAt))
-      .limit(100);
-    const kw = call.args?.keyword?.trim().toLowerCase();
-    const matched = (kw
-      ? rows.filter((r) => JSON.stringify(r.data ?? {}).toLowerCase().includes(kw))
-      : rows
-    ).slice(0, 20);
+    // 關鍵字由 PostgreSQL 對此已授權 tableId 的完整資料集過濾，再硬限 20 列；
+    // 不可先 limit 再於 Node 篩，否則第 101 列以後即使命中也永遠不可見。
+    const { keyword: kw, rows: matched } = await searchAssistantDatabaseRows(target.id, call.args?.keyword);
     const text = matched.length
       ? matched.map((r, i) => `${i + 1}. ${rowLine(target.fields, r.data as Record<string, unknown>)}`).join("\n")
       : kw ? `「${target.name}」裡沒有含「${kw}」的列（共 ${target.rowCount} 列）` : `「${target.name}」目前沒有資料列`;
@@ -400,7 +373,7 @@ export interface AskCoreInput {
   auth: AuthState;
   /** 用戶端斷線訊號（SSE 端 res.on('close') → abort）：中止在途 NIM 呼叫並提早跳出工具迴圈，不再白燒免費額度 */
   signal?: AbortSignal;
-  /** 同題去重鍵（串流與退回 tRPC 共用同一 nonce）：一題只計一次節流名額 */
+  /** 串流與退回 tRPC 共用的請求關聯鍵；不提供限流免計，避免惡意並行重送 */
   dedupeKey?: string;
 }
 export interface AskCoreResult {
@@ -424,8 +397,15 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
   const emit = (phase: AskStreamEvent["phase"], text: string) => {
     try { onEvent?.({ phase, text }); } catch { /* 串流端斷線不影響問答本身 */ }
   };
-  if (overLimit(input.auth.user.id, input.dedupeKey)) {
-    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "問得太頻繁（每分鐘最多 6 次），休息一下再問" });
+  try {
+    if (await overLimit(input.auth.user.id, input.dedupeKey)) {
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "問得太頻繁（每分鐘最多 6 次），休息一下再問" });
+    }
+  } catch (error) {
+    if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "AI 助手安全限流暫時無法使用，請稍後再試" });
+    }
+    throw error;
   }
   {
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
@@ -630,7 +610,7 @@ export const assistantRouter = router({
 
   /** 問答：讀專案現況回答，並可提議動作（僅提議，不執行）。核心與 SSE 串流路由共用 runAssistantAsk。 */
   ask: authedProcedure
-    // nonce：串流退回此路徑時帶同一題的去重鍵，讓節流名額只計一次（可省略，省略即照舊每次計）
+    // nonce 僅關聯串流與 fallback；每次外部呼叫仍各自計入限流。
     .input(z.object({ projectId: z.string().uuid(), message: z.string().min(1).max(1000), nonce: z.string().max(64).optional() }))
     .mutation(({ ctx, input }) =>
       runAssistantAsk({

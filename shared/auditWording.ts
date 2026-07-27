@@ -169,6 +169,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "mcp.list_databases": "外部 AI：列出資料庫",
   "mcp.query_database": "外部 AI：查詢資料庫",
   "mcp.add_database_row": "外部 AI：新增資料列",
+  "mcp.add_database_rows": "外部 AI：批次新增資料列",
   "mcp.list_database_files": "外部 AI：列出資料庫文件",
   "mcp.read_database_file": "外部 AI：讀取資料庫文件",
   "mcp.get_project_status": "外部 AI：讀取專案全貌",

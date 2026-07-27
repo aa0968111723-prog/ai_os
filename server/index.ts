@@ -16,20 +16,29 @@ import { ensureSeed } from "./services/seed";
 import { ensureSchema } from "./db/ensure";
 import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
-import { resolveActiveSession } from "./services/auth";
+import { resolveSession, type AuthState } from "./services/auth";
 import { buildEdl, buildFcpxml, buildSrt, buildXmeml, exportProjectZip, exportZipName } from "./services/exporter";
 import { resolutionForFormat } from "../shared/options";
 import { exportJianyingDraftZip } from "./services/jianying";
 import { renderMyDataHtml } from "./services/myDataExport";
 import { handleMcp } from "./services/mcp";
 import { isMcpEnabled } from "./services/mcpAuth";
-import { handleV1ListDatabases, handleV1ListRows, handleV1AddRow, handleCsvExport, handleDatabaseIcs } from "./services/restApi";
+import {
+  handleV1ListDatabases,
+  handleV1ListRows,
+  handleV1AddRow,
+  handleV1AddRowsBatch,
+  handleCsvExport,
+  handleDatabaseIcs,
+} from "./services/restApi";
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, resolveUploadMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT, mimeFromPath,
 } from "./services/storage";
-import { markBootReady, isBootReady } from "./services/boot";
+import { markBootDraining, markBootReady, isBootReady } from "./services/boot";
 import { recordError, listErrors, errorCountSince } from "./services/errlog";
+import { normalizeRequestId, withRequestContext } from "./services/requestContext";
+import { sessionGate } from "./services/sessionPolicy";
 import { attachRealtime } from "./services/realtime";
 import { startWorkflowRunner } from "./services/workflowRunner";
 import { startGenerationRunner, runnerHeartbeat } from "./services/generationRunner";
@@ -38,10 +47,21 @@ import { startExportRunner } from "./services/exportRunner";
 import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { assertRateLimitConfiguration } from "./services/rateLimit";
+import {
+  backgroundTaskCount,
+  beginShutdown,
+  drainHttpServer,
+  isShuttingDown,
+  onShutdown,
+  trackBackgroundTask,
+} from "./services/shutdown";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
 const isProd = process.env.NODE_ENV === "production";
+// 啟動前 fail fast：不能等到第一個登入/MCP/AI 請求才發現 HMAC 金鑰缺失，也絕不退回記憶體限流。
+assertRateLimitConfiguration();
 
 // 部署平台的反向代理（Zeabur／Railway 等）在前面終止 TLS 並轉發，信任第一層 proxy 才能取到真實 client IP（速率限制/HSTS 正確）
 app.set("trust proxy", 1);
@@ -78,6 +98,29 @@ app.use(
   }),
 );
 
+// 每個 HTTP request 都有可跨 tRPC／服務層／錯誤記錄關聯的追蹤 ID。
+// 不記 query/body/IP，避免把金鑰、搜尋字或個資帶進平台 log；只輸出 API 的方法、路徑、狀態與耗時。
+app.use((req, res, next) => {
+  const requestId = normalizeRequestId(req.headers["x-request-id"]);
+  const startedAt = process.hrtime.bigint();
+  res.locals.requestId = requestId;
+  res.setHeader("X-Request-Id", requestId);
+  res.once("finish", () => {
+    if (!req.path.startsWith("/api/") || (req.path === "/api/health" && res.statusCode < 500)) return;
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+    process.stdout.write(`${JSON.stringify({
+      level: res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info",
+      event: "http.request",
+      requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      durationMs: Math.round(durationMs * 10) / 10,
+    })}\n`);
+  });
+  withRequestContext(requestId, next);
+});
+
 app.use(express.json({ limit: "2mb" }));
 
 // 建置追溯（QA 版本漂移）：部署時由建置流程注入（Dockerfile ARG→ENV），
@@ -87,6 +130,20 @@ const BUILD_INFO = {
   branch: process.env.BUILD_BRANCH || null,
   builtAt: process.env.BUILD_TIME || null,
 };
+
+/** Express 非 tRPC 路由共用認證閘門；避免強制改密碼只擋住其中一種傳輸層。 */
+function requireUsableSession(auth: AuthState | null, res: express.Response): auth is AuthState {
+  const gate = sessionGate(auth);
+  if (gate === "unauthenticated") {
+    res.status(401).json({ error: "請先登入" });
+    return false;
+  }
+  if (gate === "password-change-required") {
+    res.status(403).json({ error: "管理員已重設你的密碼，請先完成密碼變更", code: "PASSWORD_CHANGE_REQUIRED" });
+    return false;
+  }
+  return true;
+}
 
 // 健康檢查 — 純 HTTP，不碰 DB
 app.get("/api/health", (_req, res) => {
@@ -111,7 +168,7 @@ app.get("/api/ready", async (_req, res) => {
   }
 
   const bootReady = isBootReady();
-  components.boot = { ok: bootReady, note: bootReady ? "ready（初始化完成）" : "initializing（建表/種子進行中，稍候自動完成）" };
+  components.boot = { ok: bootReady, note: bootReady ? "ready（初始化完成）" : "initializing（migration/schema 驗證或種子同步中；持續發生請查部署 log）" };
 
   // 儲存層：實際寫入＋讀回＋刪除探針，而不是只看目錄存在；
   // 正式環境落到本機 .data fallback（Volume 沒掛上）視為未就緒——重啟即遺失素材，不能算綠燈。
@@ -155,7 +212,7 @@ app.get("/api/ready", async (_req, res) => {
   res.status(ok ? 200 : 503).json({
     ok,
     db: components.db.ok ? "connected（資料庫已接通）" : "error（資料庫未接通）",
-    boot: bootReady ? "ready（初始化完成）" : "initializing（建表/種子進行中，稍候自動完成）",
+    boot: bootReady ? "ready（初始化完成）" : "initializing（migration/schema 驗證或種子同步中；持續發生請查部署 log）",
     components,
     time: new Date().toISOString(),
   });
@@ -222,8 +279,8 @@ const exportsInFlight = new Set<string>();
 app.get("/api/export/:projectId", async (req, res) => {
   let flightKey: string | null = null;
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
     if (!project) return res.status(404).json({ error: "找不到專案" });
     if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
@@ -263,8 +320,8 @@ app.get("/api/export/:projectId", async (req, res) => {
 // 匯出 job 成品下載（QA-005）：job 完成後由此取檔——登入＋組隔離，檔案從 Volume sendFile（支援 Range）
 app.get("/api/export/jobs/:jobId/download", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const [job] = await db.select().from(schema.exportJobs).where(eq(schema.exportJobs.id, req.params.jobId));
     if (!job) return res.status(404).json({ error: "找不到這個匯出工作" });
     if (!auth.groups.some((g) => g.groupId === job.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
@@ -287,8 +344,8 @@ app.get("/api/export/jobs/:jobId/download", async (req, res) => {
 // 單檔下載沒有隨附媒體檔，fcpxml/xmeml 產「骨架版」（gap/空軌佔位）；要「匯入即組好粗剪」請用交付包內的媒體連結版。
 app.get("/api/export/:projectId/timeline", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
     if (!project) return res.status(404).json({ error: "找不到專案" });
     if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
@@ -327,8 +384,8 @@ app.get("/api/export/:projectId/timeline", async (req, res) => {
 // 解壓到剪映草稿目錄後打開剪映即見排好的時間軸。登入＋組隔離比照交付包路由。
 app.get("/api/export/:projectId/jianying", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, req.params.projectId));
     if (!project) return res.status(404).json({ error: "找不到專案" });
     if (!auth.groups.some((g) => g.groupId === project.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
@@ -360,8 +417,8 @@ const upload = multer({
 // 已認證者處理器內仍會再 resolveSession 一次取完整 AuthState（多一次帶索引的輕量查詢，可接受）。
 async function requireAuthBeforeUpload(req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) { res.status(401).json({ error: "請先登入" }); return; }
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     next();
   } catch (err) {
     recordError("upload:auth", err);
@@ -373,8 +430,8 @@ async function requireAuthBeforeUpload(req: express.Request, res: express.Respon
 app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) { await cleanup(); return res.status(401).json({ error: "請先登入" }); }
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
 
     const projectId = String(req.body?.projectId ?? "");
@@ -495,8 +552,8 @@ app.get("/api/assets/:id/file", async (req, res) => {
 
     const signed = verifyAssetSig(asset.id, req.query.exp as string | undefined, req.query.sig as string | undefined);
     if (!signed) {
-      const auth = await resolveActiveSession(req);
-      if (!auth) return res.status(401).json({ error: "請先登入" });
+      const auth = await resolveSession(req);
+      if (!requireUsableSession(auth, res)) return;
       if (!auth.groups.some((g) => g.groupId === asset.groupId)) return res.status(403).json({ error: "你不屬於這個組" });
     }
 
@@ -524,8 +581,8 @@ app.get("/api/assets/:id/file", async (req, res) => {
 app.post("/api/dm/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) { await cleanup(); return res.status(401).json({ error: "請先登入" }); }
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
 
     // 對象界：只能傳附件給「可私訊對象」（同組夥伴或開發者）——與 dm.send 同一守衛，避免對外偷傳
@@ -589,8 +646,8 @@ app.use("/api/dm/upload", (err: unknown, _req: express.Request, res: express.Res
 /** 私訊附件檔案服務：登入＋「本人是上傳者或所屬訊息的對方」才給——非組隔離，維持私訊「只有雙方看得到」 */
 app.get("/api/dm/attachments/:id/file", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const [att] = await db.select().from(schema.dmAttachments).where(eq(schema.dmAttachments.id, req.params.id));
     if (!att) return res.status(404).json({ error: "找不到附件" });
     let allowed = att.ownerId === auth.user.id;
@@ -619,8 +676,8 @@ app.get("/api/dm/attachments/:id/file", async (req, res) => {
 app.post("/api/databases/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) { await cleanup(); return res.status(401).json({ error: "請先登入" }); }
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
 
     const tableId = String(req.body?.tableId ?? "");
@@ -707,8 +764,8 @@ app.get("/api/databases/files/:id/file", async (req, res) => {
     const { verifyDbFileSig } = await import("./services/storage");
     const signed = verifyDbFileSig(req.params.id, req.query.exp as string | undefined, req.query.sig as string | undefined);
     if (!signed) {
-      const auth = await resolveActiveSession(req);
-      if (!auth) return res.status(401).json({ error: "請先登入" });
+      const auth = await resolveSession(req);
+      if (!requireUsableSession(auth, res)) return;
       const [fileRow] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, req.params.id));
       if (!fileRow) return res.status(404).json({ error: "找不到這份文件" });
       const [tableRow] = await db.select().from(schema.dataTables)
@@ -737,8 +794,8 @@ app.get("/api/databases/files/:id/file", async (req, res) => {
 // ── 資料下載區（需求 #11）：docs/README 白名單清單＋下載（登入即可，全站內部文件） ──
 app.get("/api/downloads", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const { DOWNLOAD_CATEGORIES, listDownloads } = await import("./services/downloads");
     // 受限（內部工程/維運/安全/部署）文件只給組長以上：開發者、團隊管理員、或任一組的組長/管理員身分
     const privileged = auth.user.isSuperAdmin || auth.groups.some((g) => g.role !== "member");
@@ -751,8 +808,8 @@ app.get("/api/downloads", async (req, res) => {
 });
 app.get("/api/downloads/file", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const { resolveDownload } = await import("./services/downloads");
     // 識別鍵必須整串等於白名單項（resolveDownload 內比對），不存在任何使用者輸入拼路徑的空間。
     // 受限文件（restricted）另要求組長以上——一般組員即使知道識別鍵也拿不到（後端硬擋，非只前端隱藏）。
@@ -774,8 +831,8 @@ app.get("/api/downloads/file", async (req, res) => {
 // ── Google 日曆直連同步（OAuth 授權碼流程）──瀏覽器重導，走 Express；API 見 routers/googleCalendar ──
 app.get("/api/google/oauth/start", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const { isGoogleCalendarConfigured, buildAuthUrl } = await import("./services/googleCalendar");
     if (!isGoogleCalendarConfigured()) return res.status(503).json({ error: "站方尚未設定 Google 日曆整合（GOOGLE_CLIENT_ID/SECRET）" });
     res.redirect(buildAuthUrl(auth.user.id));
@@ -787,8 +844,8 @@ app.get("/api/google/oauth/start", async (req, res) => {
 });
 app.get("/api/google/oauth/callback", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).send("請先登入後再連結 Google 日曆");
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const { verifyState, exchangeCode, saveConnection } = await import("./services/googleCalendar");
     // state 驗簽＋比對登入者：防 CSRF、也防把授權綁到別人帳上
     const state = verifyState(String(req.query.state ?? ""));
@@ -809,8 +866,8 @@ app.get("/api/google/oauth/callback", async (req, res) => {
 // ── 個人整合連接：Google 雲端硬碟 OAuth（drive.readonly）──瀏覽器重導，走 Express；API 見 routers/integrations ──
 app.get("/api/integrations/google-drive/start", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const { isGoogleDriveConfigured, buildDriveAuthUrl } = await import("./services/integrations");
     if (!isGoogleDriveConfigured()) return res.status(503).json({ error: "站方尚未設定 Google 整合（GOOGLE_CLIENT_ID/SECRET）" });
     res.redirect(buildDriveAuthUrl(auth.user.id));
@@ -822,8 +879,8 @@ app.get("/api/integrations/google-drive/start", async (req, res) => {
 });
 app.get("/api/integrations/google-drive/callback", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).send("請先登入後再連結 Google 雲端");
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const { verifyIntegrationState, exchangeDriveCode, saveGoogleDrive } = await import("./services/integrations");
     // state 驗簽＋比對登入者：防 CSRF、也防把授權綁到別人帳上
     const state = verifyIntegrationState(String(req.query.state ?? ""));
@@ -847,8 +904,8 @@ app.get("/api/integrations/google-drive/callback", async (req, res) => {
 // 組排程 .ics 匯出（需求 10 保留為後備）：登入＋組隔離；沒連結 Google 的人仍可手動匯入
 app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const groupId = req.params.groupId;
     if (!auth.groups.some((g) => g.groupId === groupId)) return res.status(403).json({ error: "你不屬於這個組" });
     const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
@@ -878,8 +935,8 @@ app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
 // 帳號「刪除」仍需管理員操作（見維運手冊）——本端點只解決自助「攜出」，不做自助刪除。
 app.get("/api/me/export", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const uid = auth.user.id;
     // AuthState 沒帶 createdAt，補查一次 users（只取安全欄位，密碼雜湊絕不進 payload）
     const [me] = await db.select().from(schema.users).where(eq(schema.users.id, uid));
@@ -994,7 +1051,7 @@ app.options("/api/mcp", (req, res) => {
   res.setHeader("Access-Control-Max-Age", "600");
   res.status(204).end();
 });
-// MCP 伺服器介面（設 MCP_API_KEY 或個人金鑰啟用；供外部 AI 客戶端操作）
+// MCP 伺服器介面（正式環境由個人金鑰啟用；舊共用金鑰另需明確 ALLOW_LEGACY_MCP_ADMIN_KEY=1）
 app.post("/api/mcp", (req, res, next) => {
   if (!mcpOriginAllowed(req)) return res.status(403).json({ error: "此來源（Origin）不在 MCP 允許清單——管理員可設 MCP_ALLOWED_ORIGINS" });
   setMcpCors(req, res);
@@ -1005,7 +1062,7 @@ app.post("/api/mcp", (req, res, next) => {
 // 已啟用才回 405 + Allow，不再落到 SPA catch-all 回 HTML 200 讓 SDK／監控誤判成功。
 app.all("/api/mcp", async (_req, res) => {
   if (!(await isMcpEnabled())) {
-    return void res.status(404).json({ error: "MCP 未啟用（在「怎麼用」頁建立個人連線金鑰，或設 MCP_API_KEY 環境變數）" });
+    return void res.status(404).json({ error: "MCP 未啟用（請在「怎麼用」頁建立個人連線金鑰）" });
   }
   res.setHeader("Allow", "POST, OPTIONS");
   res.status(405).json({ error: "MCP 端點僅接受 JSON-RPC POST（不提供 GET/SSE）", allow: ["POST", "OPTIONS"] });
@@ -1016,13 +1073,15 @@ app.all("/api/mcp", async (_req, res) => {
 app.get("/api/v1/databases", handleV1ListDatabases);
 app.get("/api/v1/databases/:id/rows", handleV1ListRows);
 app.post("/api/v1/databases/:id/rows", handleV1AddRow);
+app.post("/api/v1/databases/:id/rows/batch", handleV1AddRowsBatch);
 app.get("/api/databases/:id/rows.csv", handleCsvExport);
 app.get("/api/databases/:id/calendar.ics", handleDatabaseIcs);
 
 // 系統自檢（開發者登入後用瀏覽器開，或管理頁按鈕）——部署後一鍵驗證所有子系統
 app.get("/api/selftest", async (req, res) => {
-  const auth = await resolveActiveSession(req);
-  if (!auth?.user.isSuperAdmin) return res.status(403).json({ error: "需要開發者帳號登入後使用" });
+  const auth = await resolveSession(req);
+  if (!requireUsableSession(auth, res)) return;
+  if (!auth.user.isSuperAdmin) return res.status(403).json({ error: "需要開發者帳號登入後使用" });
   const checks: Array<{ name: string; ok: boolean; note: string }> = [];
   const run = async (name: string, fn: () => Promise<string>) => {
     try {
@@ -1097,7 +1156,7 @@ app.get("/api/selftest", async (req, res) => {
     if (n > 0) {
       const recent = listErrors()
         .slice(0, 3)
-        .map((e) => `${e.at.slice(11, 16)} ${e.scope}: ${e.message.slice(0, 80)}`)
+        .map((e) => `${e.at.slice(11, 16)} ${e.scope}${e.requestId ? ` [${e.requestId}]` : ""}: ${e.message.slice(0, 80)}`)
         .join("；");
       throw new Error(`24 小時內 ${n} 筆——${recent}`);
     }
@@ -1122,8 +1181,8 @@ app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext 
 // 差別是逐步把「思考中／正在查什麼／查到什麼」推給前端即時呈現，最後 done 帶最終回答＋可執行動作。
 // 前端串流失敗會自動退回 tRPC ask（見 ProjectAssistant），故此路由是加分體驗、非關鍵路徑。
 app.post("/api/assistant/ask", async (req, res) => {
-  const auth = await resolveActiveSession(req);
-  if (!auth) return res.status(401).json({ error: "請先登入" });
+  const auth = await resolveSession(req);
+  if (!requireUsableSession(auth, res)) return;
   const projectId = String(req.body?.projectId ?? "");
   const message = String(req.body?.message ?? "").trim();
   const nonce = typeof req.body?.nonce === "string" ? req.body.nonce.slice(0, 64) : undefined;
@@ -1177,8 +1236,8 @@ app.post("/api/assistant/ask", async (req, res) => {
 app.post("/api/feedback/screenshot", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) { await cleanup(); return res.status(401).json({ error: "請先登入" }); }
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到截圖" });
     const declared = (req.file.mimetype.split(";")[0] || "").trim().toLowerCase();
     if (declared !== "image/png" && declared !== "image/jpeg" && declared !== "image/webp") {
@@ -1207,8 +1266,8 @@ app.post("/api/feedback/screenshot", requireAuthBeforeUpload, upload.single("fil
 
 app.get("/api/feedback/:id/shot", async (req, res) => {
   try {
-    const auth = await resolveActiveSession(req);
-    if (!auth) return res.status(401).json({ error: "請先登入" });
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
     const [report] = await db.select().from(schema.feedbackReports).where(eq(schema.feedbackReports.id, req.params.id));
     if (!report || !report.screenshotPath) return res.status(404).json({ error: "找不到截圖" });
     // 只服務 feedback/ 目錄下的截圖——擋掉「拿別池 asset 路徑當 screenshotPath 提交後偷讀」
@@ -1268,7 +1327,10 @@ app.use((err: unknown, req: express.Request, res: express.Response, next: expres
   if (req.path.startsWith("/api/")) {
     console.error("[api]", err);
     recordError("api:" + req.path, err);
-    return res.status(500).json({ error: "系統暫時無法處理，請稍後再試" });
+    return res.status(500).json({
+      error: "系統暫時無法處理，請稍後再試",
+      requestId: res.locals.requestId as string | undefined,
+    });
   }
   return next(err);
 });
@@ -1278,6 +1340,7 @@ app.use((err: unknown, req: express.Request, res: express.Response, next: expres
 // 背景維護工作絕不外拋、不影響服務啟動或既有流程。
 function scheduleFeedbackSweep(): void {
   const runSweep = async (): Promise<void> => {
+    if (isShuttingDown()) return;
     try {
       const { sweepFeedbackShots } = await import("./services/storage");
       await sweepFeedbackShots();
@@ -1285,8 +1348,16 @@ function scheduleFeedbackSweep(): void {
       console.warn("[sweep] 回饋截圖孤兒清理略過：", err instanceof Error ? err.message : err);
     }
   };
-  setTimeout(() => void runSweep(), 3 * 60_000); // 開機後 3 分鐘先跑一次
-  setInterval(() => void runSweep(), 6 * 60 * 60_000); // 其後每 6 小時
+  const runTracked = () => {
+    if (isShuttingDown()) return;
+    void trackBackgroundTask(runSweep());
+  };
+  const firstRun = setTimeout(runTracked, 3 * 60_000); // 開機後 3 分鐘先跑一次
+  const interval = setInterval(runTracked, 6 * 60 * 60_000); // 其後每 6 小時
+  onShutdown(() => {
+    clearTimeout(firstRun);
+    clearInterval(interval);
+  });
 }
 
 const httpServer = app.listen(port, () => {
@@ -1304,13 +1375,18 @@ const httpServer = app.listen(port, () => {
   // 背景初始化：失敗「不放棄」，每 60 秒自動重試到成功（健康檢查不等 DB 的原則不變）
   // ——修掉「DB 冷啟動超過 30 秒就永久卡死、看似健康實際全壞」的舊行為。
   let bootTries = 0;
+  let bootRetryTimer: NodeJS.Timeout | undefined;
+  onShutdown(() => {
+    if (bootRetryTimer) clearTimeout(bootRetryTimer);
+  });
   const bootstrap = async (): Promise<void> => {
     try {
       if (await ensureSchema()) {
         await syncCatalog();
         await ensureSeed();
+        if (isShuttingDown()) return;
         markBootReady();
-        // DB 就緒後才啟動背景執行器（每數秒讀 workflow_runs/generations，建表前啟動只會空轉報錯）
+        // schema 驗證與種子同步後才啟動背景執行器，避免資料庫版本未就緒時空轉報錯。
         startWorkflowRunner();
         startGenerationRunner(); // A：單張生成也改由伺服器背景推進，關頁不再卡「生成中」
         startAgentRunner(); // AI 代理：核准後的計畫由伺服器背景逐步執行
@@ -1319,18 +1395,61 @@ const httpServer = app.listen(port, () => {
         startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
         const { startGoogleCalendarSweep } = await import("./services/googleCalendar");
         startGoogleCalendarSweep(); // Google 日曆同步：變更即推之外的週期對帳（未設 GOOGLE_CLIENT_ID 時為 no-op）
-        console.log("[boot] ✓ 建表/目錄/種子完成，系統就緒（工作流＋單張生成執行器已啟動）");
+        console.log("[boot] ✓ migration/schema 驗證、目錄與種子同步完成，系統就緒（背景執行器已啟動）");
         return;
       }
     } catch (err) {
-      console.warn("[boot] 建表/目錄/種子失敗：", err instanceof Error ? err.message : err);
+      console.warn("[boot] migration/schema 驗證、目錄或種子同步失敗：", err instanceof Error ? err.message : err);
     }
+    if (isShuttingDown()) return;
     bootTries += 1;
     console.warn(`[boot] 初始化未完成，60 秒後自動重試（第 ${bootTries} 次）——瀏覽器開 /api/ready 可診斷`);
-    setTimeout(() => { void bootstrap(); }, 60_000);
+    bootRetryTimer = setTimeout(() => {
+      if (isShuttingDown()) return;
+      void trackBackgroundTask(bootstrap());
+    }, 60_000);
   };
-  void bootstrap();
+  void trackBackgroundTask(bootstrap());
 });
 
 // 即時協作（presence/游標/編輯指示/變更同步）：WS 升級掛在同一個 http server 上
 attachRealtime(httpServer);
+
+const SHUTDOWN_DEADLINE_MS = 25_000;
+const handleShutdownSignal = (signal: NodeJS.Signals): void => {
+  if (isShuttingDown()) {
+    console.warn(`[shutdown] ${signal} received while already draining; duplicate signal ignored`);
+    return;
+  }
+
+  // Readiness must turn red before listeners/timers begin their asynchronous
+  // cleanup so the load balancer can remove this instance immediately.
+  markBootDraining();
+  if (!beginShutdown()) return;
+  console.log(
+    `[shutdown] ${signal} received; readiness disabled, HTTP/background drain started ` +
+    `(tracked=${backgroundTaskCount()}, deadline=${SHUTDOWN_DEADLINE_MS}ms)`,
+  );
+
+  void drainHttpServer(httpServer, undefined, SHUTDOWN_DEADLINE_MS)
+    .then((result) => {
+      const code = result.forced || result.error ? 1 : 0;
+      const status = result.forced ? "deadline exceeded; connections forced closed" : "drain complete";
+      console.log(
+        `[shutdown] ${status} in ${result.elapsedMs}ms` +
+        (result.error ? `; server error=${result.error.message}` : ""),
+      );
+      // The pg pool and third-party SDKs may retain their own idle sockets.
+      // All tracked work has settled here (or the hard deadline fired), so an
+      // explicit exit is what makes the 25-second process bound enforceable.
+      setImmediate(() => process.exit(code));
+    })
+    .catch((error) => {
+      console.error("[shutdown] unexpected drain failure:", error instanceof Error ? error.message : error);
+      httpServer.closeAllConnections?.();
+      setImmediate(() => process.exit(1));
+    });
+};
+
+process.on("SIGTERM", handleShutdownSignal);
+process.on("SIGINT", handleShutdownSignal);

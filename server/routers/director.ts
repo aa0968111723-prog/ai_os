@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -10,6 +10,13 @@ import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { buildKnowledgeContext, buildKnowledgeContextWithMeta } from "./knowledge";
+import {
+  consumeRateLimit,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+  RateLimitConfigurationError,
+  RateLimitUnavailableError,
+} from "../services/rateLimit";
 
 export interface DirectorSuggestion {
   title: string;
@@ -29,6 +36,8 @@ const sceneSplitSchema = z
   .min(1)
   .max(12);
 
+export type SplitSceneDraft = z.infer<typeof sceneSplitSchema>[number];
+
 /** LLM 回傳的執行期驗證：JSON.parse 成功但形狀不對（title 是物件、缺欄位）一樣會弄崩前端，必須 safeParse */
 const suggestionSchema = z
   .array(z.object({ title: z.string().min(1).max(100), prompt: z.string().min(1).max(2000) }))
@@ -46,21 +55,21 @@ function isProviderTimeout(err: unknown): boolean {
   return err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
 }
 
-// 記憶體節流：每使用者每分鐘最多 6 次——擋連點/腳本狂刷付費 LLM。
-// 單容器部署，程序內 Map 即足夠；重啟歸零無妨（額度守門仍由 reserveQuota 兜底）。
-const SUGGEST_LIMIT_PER_MINUTE = 6;
-const SUGGEST_WINDOW_MS = 60_000;
-const suggestHits = new Map<string, number[]>();
-function overSuggestLimit(userId: string): boolean {
-  const now = Date.now();
-  const hits = (suggestHits.get(userId) ?? []).filter((t) => now - t < SUGGEST_WINDOW_MS);
-  const over = hits.length >= SUGGEST_LIMIT_PER_MINUTE;
-  if (!over) hits.push(now); // 被擋的請求不計入窗口，一分鐘後自然解封
-  // 窗口清空就刪 key（比照 assistant/teamAssistant/knowledge 的限流器）——否則 Map 會隨
-  // 歷史使用者無限成長，長壽容器記憶體洩漏。
-  if (hits.length) suggestHits.set(userId, hits);
-  else suggestHits.delete(userId);
-  return over;
+// 導演建議與拆分鏡沿用同一 PostgreSQL 滑動視窗：每人每分鐘 6 次，跨 replica／重啟持久。
+async function overSuggestLimit(userId: string): Promise<boolean> {
+  try {
+    const decision = await consumeRateLimit(
+      RATE_LIMIT_SCOPES.director,
+      userId,
+      RATE_LIMIT_POLICIES.director,
+    );
+    return !decision.allowed;
+  } catch (error) {
+    if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "導演安全限流暫時無法使用，請稍後再試" });
+    }
+    throw error;
+  }
 }
 
 /** 假模式：依世界觀組出三個確定性建議（不花錢可測） */
@@ -82,6 +91,14 @@ export interface SplitScriptCoreInput {
   projectId: string;
   /** 要拆的腳本全文；不給（或全空白）就退回知識庫（腳本／開示稿）全文 */
   scriptText?: string;
+  /** 代理 crash replay 用：每幕固定 UUID；數量可多於實際幕數，會依結果取前 N 個。 */
+  sceneIds?: string[];
+  /** 已保存的模型結果；提供時完全跳過節流、額度與模型呼叫，只做冪等資料列落地。 */
+  preparedScenes?: SplitSceneDraft[];
+  /** 真正送出不可冪等的外部模型呼叫前觸發；callback 完成後才會呼叫 provider。 */
+  onProviderStart?: () => void | Promise<void>;
+  /** 分鏡結果驗證成功後、寫入 scenes 前觸發；用來先保存可重播結果。 */
+  onPrepared?: (scenes: SplitSceneDraft[]) => void | Promise<void>;
   assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
 }
 
@@ -93,7 +110,13 @@ export interface SplitScriptCoreInput {
  * 回傳帶 count（本次建立幾幕），呼叫端可直接拿去組「已拆出 N 個分鏡」的訊息。
  */
 export async function splitScriptCore(input: SplitScriptCoreInput) {
-  if (overSuggestLimit(input.userId)) {
+  const preparedResult = input.preparedScenes
+    ? sceneSplitSchema.safeParse(input.preparedScenes)
+    : null;
+  if (preparedResult && !preparedResult.success) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "已保存的分鏡結果格式無效，拒絕重播" });
+  }
+  if (!preparedResult && await overSuggestLimit(input.userId)) {
     throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "請求太頻繁（每分鐘最多 6 次），休息一下再試" });
   }
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
@@ -101,6 +124,73 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
   await input.assertAccess(project);
   assertProjectNotArchived(project); // 修 R2-002：封存專案不得再付費拆分鏡（含助手 split_script 共用此核心）
   const wv = worldviewSchema.parse(project.worldview ?? {});
+
+  const suppliedSceneIds = input.sceneIds ?? [];
+  if (suppliedSceneIds.length > 12 || new Set(suppliedSceneIds).size !== suppliedSceneIds.length) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "固定分鏡識別碼重複或超過 12 筆" });
+  }
+  for (const id of suppliedSceneIds) {
+    if (!z.string().uuid().safeParse(id).success) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "固定分鏡識別碼格式無效" });
+    }
+  }
+
+  // 交易＋per-project advisory lock：兩個併發拆分鏡（雙編輯者／導演卡與助手同時）在 READ COMMITTED
+  // 下會讀到同一個 max(orderIndex)、插出重複序號（排序不定、move 互換失準）——上鎖後同專案建格全序列化
+  const createScenes = (scenesData: z.infer<typeof sceneSplitSchema>) =>
+    db.transaction(async (tx) => {
+      const targetIds = suppliedSceneIds.slice(0, scenesData.length);
+      if (suppliedSceneIds.length > 0 && targetIds.length !== scenesData.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "固定分鏡識別碼數量不足" });
+      }
+      await lockSceneOrder(tx, project.id);
+      if (targetIds.length) {
+        const existing = await tx
+          .select()
+          .from(schema.scenes)
+          .where(inArray(schema.scenes.id, targetIds));
+        if (existing.length) {
+          const byId = new Map(existing.map((scene) => [scene.id, scene]));
+          if (
+            existing.length === targetIds.length
+            && targetIds.every((id) => byId.get(id)?.projectId === project.id)
+          ) {
+            return targetIds.map((id) => byId.get(id)!);
+          }
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "固定分鏡識別碼出現部分寫入或跨專案碰撞，拒絕重播",
+          });
+        }
+      }
+      const [{ maxOrder }] = await tx
+        .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
+      let order = Number(maxOrder);
+      const rows = await tx
+        .insert(schema.scenes)
+        .values(
+          scenesData.map((s, index) => ({
+            ...(targetIds[index] ? { id: targetIds[index] } : {}),
+            projectId: project.id,
+            orderIndex: ++order,
+            title: s.title.slice(0, 60),
+            durationSec: s.durationSec ?? (project.format === "9:16" ? 4 : 5),
+            status: "todo",
+            prompt: s.prompt,
+            voiceover: s.voiceover,
+          })),
+        )
+        .returning();
+      return rows;
+    });
+
+  // 已保存結果的恢復路徑不可再碰節流、額度或 provider；固定 id 讓 commit 前後重播都收斂到同一批 rows。
+  if (preparedResult?.success) {
+    const rows = await createScenes(preparedResult.data);
+    return { scenes: rows, count: rows.length, mock: isMockMode(), truncation: null };
+  }
 
   // 腳本來源：優先參數；否則用知識庫（含腳本/開示等）——「懂我們素材」的延伸。
   // 從知識庫取時一併拿截斷中繼：知識庫在 INJECT_BUDGET(8k) 處就先被截，尾段鏡頭會消失，須透明回報。
@@ -117,33 +207,6 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "沒有腳本可拆——請貼上腳本，或先在知識庫加入腳本/開示稿" });
   }
 
-  // 交易＋per-project advisory lock：兩個併發拆分鏡（雙編輯者／導演卡與助手同時）在 READ COMMITTED
-  // 下會讀到同一個 max(orderIndex)、插出重複序號（排序不定、move 互換失準）——上鎖後同專案建格全序列化
-  const createScenes = (scenesData: z.infer<typeof sceneSplitSchema>) =>
-    db.transaction(async (tx) => {
-      await lockSceneOrder(tx, project.id);
-      const [{ maxOrder }] = await tx
-        .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
-        .from(schema.scenes)
-        .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-      let order = Number(maxOrder);
-      const rows = await tx
-        .insert(schema.scenes)
-        .values(
-          scenesData.map((s) => ({
-            projectId: project.id,
-            orderIndex: ++order,
-            title: s.title.slice(0, 60),
-            durationSec: s.durationSec ?? (project.format === "9:16" ? 4 : 5),
-            status: "todo",
-            prompt: s.prompt,
-            voiceover: s.voiceover,
-          })),
-        )
-        .returning();
-      return rows;
-    });
-
   // 假模式：確定性切幕（依段落）——不花錢可測
   if (isMockMode()) {
     // (\r?\n){2,} 正確匹配 CRLF 或 LF 的空行分隔；舊式 /\n{2,}|\r\n{2,}/ 對 Windows CRLF 失效（整份塞成一幕）
@@ -155,6 +218,7 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
       prompt: `${p.slice(0, 120)}（${wv.tones.join("、") || "溫柔療癒"}調性，${wv.styles.join("、") || "日系水彩"}）`,
       voiceover: p.slice(0, 100),
     }));
+    await input.onPrepared?.(scenesData);
     const rows = await createScenes(scenesData);
     return { scenes: rows, count: rows.length, mock: true, truncation: null };
   }
@@ -192,6 +256,7 @@ ${script.slice(0, SCRIPT_MODEL_BUDGET)}
 只回 JSON 陣列：[{"title":"...","durationSec":5,"prompt":"...","voiceover":"..."}]，最多 12 幕。`;
   try {
     // 拆分鏡 LLM 掛起→逾時走 catch 退點＋請重試（實測踩過無限轉圈）
+    await input.onProviderStart?.();
     const output = await nimComplete(sys, { timeoutMs: 60_000 });
     const match = output.match(/\[[\s\S]*\]/);
     let parsed: ReturnType<typeof sceneSplitSchema.safeParse> | null = null;
@@ -204,6 +269,7 @@ ${script.slice(0, SCRIPT_MODEL_BUDGET)}
       // LLM 已計費故不退點，但無法解析就不建垃圾分鏡——回明確錯誤讓使用者重試
       throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: "AI 回傳的分鏡格式無法解析（模型輸出問題，非資料庫問題）——請再試一次" });
     }
+    await input.onPrepared?.(parsed.data);
     const rows = await createScenes(parsed.data);
     return { scenes: rows, count: rows.length, mock: false, truncation };
   } catch (err) {
@@ -225,8 +291,8 @@ ${script.slice(0, SCRIPT_MODEL_BUDGET)}
  */
 export const directorRouter = router({
   suggest: authedProcedure.input(z.object({ projectId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-    // 節流放最前面：超限直接回友善訊息，連 DB 都不打，狂刷時零成本
-    if (overSuggestLimit(ctx.auth.user.id)) {
+    // 節流放最前面：只打 PostgreSQL 原子限流桶，不讀專案、不呼叫外部模型；超限零外部成本。
+    if (await overSuggestLimit(ctx.auth.user.id)) {
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "建議請求太頻繁（每分鐘最多 6 次），休息一下再試" });
     }
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));

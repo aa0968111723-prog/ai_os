@@ -4,16 +4,17 @@
  * 冪等佔位防重複扣點、陳屍回收退凍結點數）；差別只在步驟是 LLM 動態規劃的，
  * 且步驟種類除了生成還有建分鏡／拆分鏡／送審（重用各自的 core，守門不分岔）。
  */
-import { randomUUID } from "node:crypto";
-import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
+import { createHash, randomUUID } from "node:crypto";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel } from "../../shared/models";
 import { advanceGeneration, submitGenerationCore, type GenerationRow } from "./generationCore";
+import { resolveBackgroundProjectRole } from "./backgroundAccess";
 import { reapStuckGeneration } from "./workflowRunner";
 import { lockSceneOrder } from "./locks";
 import { pushToUsers } from "./webPush";
-import { splitScriptCore } from "../routers/director";
+import { splitScriptCore, type SplitSceneDraft } from "../routers/director";
 import { submitApprovalCore } from "../routers/approvals";
 import { sceneFillRole } from "../routers/assistant";
 import { loadAuthState } from "./auth";
@@ -21,6 +22,15 @@ import { resolveAgentAccess } from "./databaseAcl";
 import { addDataRowValidated } from "./databaseCore";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { sanitizeAuditInput } from "./audit";
+import {
+  agentRunLockName,
+  withRunnerAdvisoryLock,
+} from "./runnerAdvisoryLock";
+import {
+  isShuttingDown,
+  onShutdown,
+  trackBackgroundTask,
+} from "./shutdown";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -41,8 +51,10 @@ export interface AgentStep {
   modelId?: string;
   /** generate 用：提示詞（世界觀注入由 generationCore 做） */
   prompt?: string;
-  /** generate（可選）／voiceover／submit_approval 用：分鏡編號（執行時依當下順序解析，1 起算） */
+  /** generate（可選）／voiceover／submit_approval 用：首次執行時依當下順序解析（1 起算） */
   sceneNo?: number;
+  /** 執行期：首次解析 sceneNo 後立即保存；重播只准使用同一分鏡，避免排序變更後打到別格。 */
+  targetSceneId?: string;
   /** create_scene 用 */
   title?: string;
   voiceover?: string;
@@ -55,10 +67,19 @@ export interface AgentStep {
   points?: number;
   /** 執行期：生成步驟的冪等佔位 id */
   generationId?: string;
+  /**
+   * Runtime id for a replayable non-generation side effect. It is persisted
+   * before execution and used as the target row UUID.
+   */
+  effectId?: string;
+  /** 執行期：split_script 已開始不可冪等的外部模型呼叫；沒有已保存結果時禁止自動重打。 */
+  splitProviderStartedAt?: string;
+  /** 執行期：模型結果先落在 run，再用 effectId 衍生的固定 scene id 原子寫入。 */
+  splitPreparedScenes?: SplitSceneDraft[];
+  /** 舊版恢復標記；只用來辨識升級中的不明在途呼叫，絕不再用分鏡數推論成功。 */
+  scenesBefore?: number;
   /** 執行期：split_script 的失敗重試計數（防 LLM 回壞 JSON 時無限重打 NIM 燒免費額度） */
   retries?: number;
-  /** 執行期：split_script 動手前的分鏡數快照——重啟後看數字有沒有變，判斷上一次是否其實拆成功了（冪等） */
-  scenesBefore?: number;
   detail?: string;
 }
 
@@ -67,30 +88,47 @@ const TICK_MS = 4000;
 const ADVANCE_TIMEOUT_MS = 60_000;
 /** 陳屍回收門檻：與 workflowRunner 同口徑 */
 const STALE_MS = 30 * 60 * 1000;
+/** 每輪最多撈取的活躍代理，避免活躍 run 增長時全表載入。 */
+const BATCH = 50;
+/** 代理步驟可能同時占用 DB 與外部模型連線；分批限制每輪實際併發。 */
+const MAX_CONCURRENT_ADVANCE = 5;
 
 let started = false;
+/** 防止 setInterval 在慢 sweep/tick 尚未結束時持續堆疊新的整輪 Promise。 */
+let cycleRunning = false;
 /** 本進程內推進中的 run：撈到已在推進的直接跳過 */
 const inflight = new Set<string>();
 
 /** 啟動執行器（server/index.ts 開機時呼叫一次；重複呼叫無效果） */
 export function startAgentRunner(): void {
-  if (started) return;
+  if (started || isShuttingDown()) return;
   started = true;
-  void sweepZombies().catch((err) => console.warn("[agent] 啟動陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err));
-  setInterval(() => {
-    void (async () => {
+  void trackBackgroundTask(
+    sweepZombies().catch((err) =>
+      console.warn("[agent] 啟動陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err),
+    ),
+  );
+  const interval = setInterval(() => {
+    if (cycleRunning) return;
+    if (isShuttingDown()) return;
+    cycleRunning = true;
+    void trackBackgroundTask((async () => {
       try {
         await sweepZombies();
       } catch (err) {
         console.warn("[agent] 陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
       }
+      if (isShuttingDown()) return;
       try {
         await tick();
       } catch (err) {
         console.warn("[agent] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err);
       }
-    })();
+    })().finally(() => {
+      cycleRunning = false;
+    }));
   }, TICK_MS);
+  onShutdown(() => clearInterval(interval));
   console.log(`[agent] AI 代理執行器已啟動（每 ${TICK_MS / 1000} 秒推進一次）`);
 }
 
@@ -108,33 +146,48 @@ async function tick(): Promise<void> {
         ),
       ),
     )
-    .orderBy(asc(schema.agentRuns.createdAt));
-  await Promise.allSettled(runs.filter((run) => !inflight.has(run.id)).map((run) => advanceWithGuard(run)));
+    .orderBy(asc(schema.agentRuns.createdAt))
+    .limit(BATCH);
+  if (isShuttingDown()) return;
+  const pending = runs.filter((run) => !inflight.has(run.id));
+  for (let i = 0; i < pending.length; i += MAX_CONCURRENT_ADVANCE) {
+    if (isShuttingDown()) return;
+    await Promise.allSettled(
+      pending.slice(i, i + MAX_CONCURRENT_ADVANCE).map((run) => advanceWithGuard(run)),
+    );
+  }
 }
 
 /** 陳屍回收：與 workflowRunner 同語義——卡住的生成收斂退點；送出前被打斷的 run 收攏成 failed */
 async function sweepZombies(): Promise<void> {
   const cutoff = Date.now() - STALE_MS;
-  const runs = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.status, "running"));
+  const runs = await db
+    .select()
+    .from(schema.agentRuns)
+    .where(eq(schema.agentRuns.status, "running"))
+    .orderBy(asc(schema.agentRuns.updatedAt))
+    .limit(BATCH);
   for (const run of runs) {
     if (inflight.has(run.id)) continue;
     try {
-      const steps = run.steps as AgentStep[];
-      const step = steps[run.currentStep];
-      if (!step) continue;
-      if (step.generationId) {
-        let gen: GenerationRow | null = null;
-        try {
-          gen = await advanceGeneration(step.generationId);
-        } catch (err) {
-          if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
+      await withRunnerAdvisoryLock(agentRunLockName(run.id), async () => {
+        const steps = run.steps as AgentStep[];
+        const step = steps[run.currentStep];
+        if (!step) return;
+        if (step.generationId) {
+          let gen: GenerationRow | null = null;
+          try {
+            gen = await advanceGeneration(step.generationId);
+          } catch (err) {
+            if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
+          }
+          if (gen && (gen.status === "queued" || gen.status === "running") && gen.updatedAt.getTime() < cutoff) {
+            await reapStuckGeneration(gen.id);
+          }
+        } else if (run.updatedAt.getTime() < cutoff) {
+          await failStaleRun(run);
         }
-        if (gen && (gen.status === "queued" || gen.status === "running") && gen.updatedAt.getTime() < cutoff) {
-          await reapStuckGeneration(gen.id);
-        }
-      } else if (run.updatedAt.getTime() < cutoff) {
-        await failStaleRun(run);
-      }
+      });
     } catch (err) {
       console.warn(`[agent] 陳屍回收略過（下輪再試）：run=${run.id}`, err instanceof Error ? err.message : err);
     }
@@ -163,7 +216,10 @@ async function failStaleRun(run: RunRow): Promise<void> {
 async function advanceWithGuard(run: RunRow): Promise<void> {
   inflight.add(run.id);
   let timer: NodeJS.Timeout | undefined;
-  const work = advanceRun(run)
+  const work = withRunnerAdvisoryLock(
+    agentRunLockName(run.id),
+    () => advanceRun(run),
+  )
     .catch((err) => {
       console.error(`[agent] 推進失敗（下輪再試）：run=${run.id}`, err instanceof Error ? err.message : err);
     })
@@ -203,7 +259,11 @@ async function saveRun(runId: string, patch: Partial<typeof schema.agentRuns.$in
       .returning({ id: schema.agentRuns.id });
     // 只在「真的把 running 翻成終局」的那一次發完成通知（idempotent 重入或已被 stop 搶走時 flipped 為空，不重發）
     if (flipped.length) {
-      void notifyRunFinished(runId, status).catch((err) => console.warn("[agent] 完成通知發送失敗（不影響主流程）：", err instanceof Error ? err.message : err));
+      void trackBackgroundTask(
+        notifyRunFinished(runId, status).catch((err) =>
+          console.warn("[agent] 完成通知發送失敗（不影響主流程）：", err instanceof Error ? err.message : err),
+        ),
+      );
     }
     return;
   }
@@ -211,6 +271,67 @@ async function saveRun(runId: string, patch: Partial<typeof schema.agentRuns.$in
 }
 
 /** 目前步驟之後仍在排隊的一律標 stopped（run 已到終局，不會再送出） */
+/** Persist an effect UUID before a replayable database side effect begins. */
+async function persistStepEffectId(
+  run: RunRow,
+  steps: AgentStep[],
+  step: AgentStep,
+): Promise<string> {
+  if (!step.effectId) {
+    step.effectId = randomUUID();
+    await saveRun(run.id, { steps });
+  }
+  return step.effectId;
+}
+
+/**
+ * 從已持久化的 effect id 衍生穩定 UUID。這些 UUID 是資料列的真正冪等鍵；
+ * 同一代理步驟不論由哪個 replica 重播，都會指向完全相同的 scene id。
+ */
+export function deriveEffectUuid(effectId: string, scope: string, ordinal: number): string {
+  const bytes = createHash("sha256")
+    .update(`${effectId}:${scope}:${ordinal}`, "utf8")
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export type SplitRecoveryDecision = "invoke" | "replay_prepared" | "committed" | "ambiguous" | "conflict";
+
+/**
+ * 純函式化 crash-point 判斷，讓每個恢復分支都能做單元測試：
+ * - prepared + 0 rows：不用再呼叫模型，直接把已保存結果寫入；
+ * - prepared + 完整固定 ids：上次已 commit，只差把 run 推進；
+ * - provider 已開始但沒有 prepared：結果不明，採 at-most-once，禁止自動重打；
+ * - 任意部分寫入／跨專案碰撞：資料不一致，停止交由人工處理。
+ */
+export function decideSplitRecovery(
+  step: Pick<AgentStep, "effectId" | "splitPreparedScenes" | "splitProviderStartedAt">,
+  existingScenes: Array<{ id: string; projectId: string }>,
+  projectId: string,
+): SplitRecoveryDecision {
+  if (!step.effectId) return existingScenes.length ? "conflict" : "invoke";
+  const preparedCount = step.splitPreparedScenes?.length ?? 0;
+  if (preparedCount > 0) {
+    const expectedIds = new Set(
+      step.splitPreparedScenes!.map((_, index) => deriveEffectUuid(step.effectId!, "split-scene", index)),
+    );
+    if (existingScenes.length === 0) return "replay_prepared";
+    if (
+      existingScenes.length === expectedIds.size
+      && existingScenes.every((scene) => scene.projectId === projectId && expectedIds.has(scene.id))
+    ) {
+      return "committed";
+    }
+    return "conflict";
+  }
+  if (existingScenes.length) return "conflict";
+  return step.splitProviderStartedAt ? "ambiguous" : "invoke";
+}
+
 function markRestStopped(steps: AgentStep[], fromExclusive: number): void {
   for (let j = fromExclusive + 1; j < steps.length; j++) {
     if (steps[j].status === "pending") steps[j].status = "stopped";
@@ -228,13 +349,29 @@ async function sceneByNo(projectId: string, no: number) {
   return rows[no - 1] ?? null;
 }
 
-/** 現存分鏡數（split_script 冪等快照用） */
-async function sceneCount(projectId: string): Promise<number> {
-  const [{ n }] = await db
-    .select({ n: sql<number>`count(*)` })
+/**
+ * sceneNo 只解析一次並先保存 targetSceneId，之後即使使用者重排／插入分鏡，
+ * crash replay 仍只會操作第一次核准的目標。
+ */
+async function resolvePersistedSceneTarget(run: RunRow, steps: AgentStep[], step: AgentStep) {
+  if (!step.targetSceneId) {
+    const scene = await sceneByNo(run.projectId, step.sceneNo ?? 0);
+    if (!scene) return null;
+    step.targetSceneId = scene.id;
+    await saveRun(run.id, { steps });
+    return scene;
+  }
+  const [scene] = await db
+    .select()
     .from(schema.scenes)
-    .where(and(eq(schema.scenes.projectId, projectId), isNull(schema.scenes.deletedAt)));
-  return Number(n);
+    .where(
+      and(
+        eq(schema.scenes.id, step.targetSceneId),
+        eq(schema.scenes.projectId, run.projectId),
+        isNull(schema.scenes.deletedAt),
+      ),
+    );
+  return scene ?? null;
 }
 
 /**
@@ -243,25 +380,6 @@ async function sceneCount(projectId: string): Promise<number> {
  * 代理背景執行沒有 ctx.auth，直接查 DB 推導——與 requireGroup 的角色語義對齊：
  * 開發者/團隊管理員＝admin、組長＝leader、組員＝member；已被移出組的發起人直接擋（run 會收攏成 failed）。
  */
-async function runnerAccessRole(userId: string, groupId: string): Promise<"admin" | "leader" | "member"> {
-  const [u] = await db.select({ isSuperAdmin: schema.users.isSuperAdmin }).from(schema.users).where(eq(schema.users.id, userId));
-  if (u?.isSuperAdmin) return "admin";
-  const [grp] = await db.select({ teamId: schema.groups.teamId }).from(schema.groups).where(eq(schema.groups.id, groupId));
-  if (grp) {
-    const [tm] = await db
-      .select({ role: schema.teamMembers.role })
-      .from(schema.teamMembers)
-      .where(and(eq(schema.teamMembers.teamId, grp.teamId), eq(schema.teamMembers.userId, userId)));
-    if (tm?.role === "admin") return "admin";
-  }
-  const [gm] = await db
-    .select({ role: schema.groupMembers.role })
-    .from(schema.groupMembers)
-    .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, userId)));
-  if (!gm) throw new TRPCError({ code: "FORBIDDEN", message: "發起人已不在此組，代理無法繼續執行" });
-  return gm.role === "leader" ? "leader" : "member";
-}
-
 /**
  * 執行任何「新」步驟前，復驗發起人「當下」對本專案的權限（審查修復）。
  * 核准後的背景執行可長達數十分鐘，其間發起人可能被降為檢視者／移出組／帳號停用，或專案被封存；
@@ -296,25 +414,29 @@ async function checkRunAuthority(run: RunRow): Promise<string | null> {
  * 自動歸到操作紀錄的「AI 助手與代理」類別。
  */
 function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, error?: string): void {
-  void db
-    .insert(schema.auditLog)
-    .values({
-      actorId: run.userId,
-      action: `agents.step.${step.kind}`,
-      groupId: run.groupId,
-      projectId: run.projectId,
-      input: sanitizeAuditInput({
-        runId: run.id,
-        stepIndex: idx,
-        note: step.note,
-        ...(step.generationId ? { generationId: step.generationId } : {}),
-        ...(step.tableId ? { tableId: step.tableId } : {}),
-        ...(step.sceneNo != null ? { sceneNo: step.sceneNo } : {}),
-      }) as Record<string, unknown>,
-      ok,
-      error: error ? error.slice(0, 300) : null,
-    })
-    .catch((err) => console.warn("[agent] 步驟審計寫入失敗（不影響主流程）：", err instanceof Error ? err.message : err));
+  void trackBackgroundTask(
+    db
+      .insert(schema.auditLog)
+      .values({
+        actorId: run.userId,
+        action: `agents.step.${step.kind}`,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        input: sanitizeAuditInput({
+          runId: run.id,
+          stepIndex: idx,
+          note: step.note,
+          ...(step.generationId ? { generationId: step.generationId } : {}),
+          ...(step.tableId ? { tableId: step.tableId } : {}),
+          ...(step.sceneNo != null ? { sceneNo: step.sceneNo } : {}),
+        }) as Record<string, unknown>,
+        ok,
+        error: error ? error.slice(0, 300) : null,
+      })
+      .catch((err) =>
+        console.warn("[agent] 步驟審計寫入失敗（不影響主流程）：", err instanceof Error ? err.message : err),
+      ),
+  );
 }
 
 /** 終局系統訊息文字（純函式，單元可測）：done/failed 各一句，供發起人與組長在專案動態流即時看到結果 */
@@ -344,7 +466,7 @@ async function notifyRunFinished(runId: string, status: "done" | "failed"): Prom
     body,
   });
   // 跨裝置推播給發起人：代理是關頁後仍在背景跑的長時操作，推播讓手機也收得到完成/中止信號
-  void pushToUsers([run.userId], {
+  await pushToUsers([run.userId], {
     title: status === "done" ? "AI 代理完成" : "AI 代理中止",
     body,
     url: `/p/${run.projectId}`,
@@ -414,15 +536,22 @@ async function advanceRun(run: RunRow): Promise<void> {
   if (step.kind === "create_scene") {
     const title = (step.title ?? "").trim();
     if (!title) return failRun(run, steps, idx, "計畫裡的分鏡標題是空的");
-    // 與 scenes.addDraft 同一套交易＋序號鎖。註：插入與 saveRun 之間若程序死亡會留下一格重複分鏡
-    //（可手動刪，無點數損失）——與生成步驟不同，這類 DB 寫入無外部扣點，不另做佔位機制。
+    const effectId = await persistStepEffectId(run, steps, step);
+    // effectId is the scene primary key. A replay after COMMIT observes the
+    // same project scene and does not append another scene.
     await db.transaction(async (tx) => {
       await lockSceneOrder(tx, run.projectId);
+      const [existing] = await tx
+        .select({ id: schema.scenes.id })
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, effectId), eq(schema.scenes.projectId, run.projectId)));
+      if (existing) return;
       const [{ maxOrder }] = await tx
         .select({ maxOrder: sql<number>`coalesce(max(${schema.scenes.orderIndex}), 0)` })
         .from(schema.scenes)
         .where(and(eq(schema.scenes.projectId, run.projectId), isNull(schema.scenes.deletedAt)));
       await tx.insert(schema.scenes).values({
+        id: effectId,
         projectId: run.projectId,
         orderIndex: Number(maxOrder) + 1,
         title: title.slice(0, 60),
@@ -440,29 +569,69 @@ async function advanceRun(run: RunRow): Promise<void> {
   }
 
   if (step.kind === "split_script") {
-    // 冪等恢復（審查修復）：上一輪標 running＋記 scenesBefore 後程序死亡——分鏡數已增加＝
-    // 上次其實拆成功、只差沒記 done：直接收下成果前進，不重拆（防重複建幕；快照間若有人手動加格
-    // 會提前誤判「拆過了」，屬罕見雙重巧合，代價只是少拆一次、可重新規劃）
-    if (step.status === "running" && step.scenesBefore != null) {
-      const nowCount = await sceneCount(run.projectId);
-      if (nowCount > step.scenesBefore) {
-        step.status = "done";
-        step.detail = `拆出 ${nowCount - step.scenesBefore} 幕`;
-        auditAgentStep(run, step, idx, true);
-        await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
-        return;
-      }
+    if (!step.effectId && step.status === "running" && step.scenesBefore != null) {
+      return failRun(
+        run,
+        steps,
+        idx,
+        "此拆分鏡由舊版執行器啟動，無法安全判定模型是否已呼叫；升級後已停止自動重播，請確認分鏡後重新規劃",
+      );
     }
-    if (step.status !== "running" || step.scenesBefore == null) {
+    const effectId = await persistStepEffectId(run, steps, step);
+    const allSceneIds = Array.from({ length: 12 }, (_, index) =>
+      deriveEffectUuid(effectId, "split-scene", index),
+    );
+    const existingScenes = await db
+      .select({ id: schema.scenes.id, projectId: schema.scenes.projectId })
+      .from(schema.scenes)
+      .where(inArray(schema.scenes.id, allSceneIds));
+    const recovery = decideSplitRecovery(step, existingScenes, run.projectId);
+
+    if (recovery === "committed") {
+      const count = step.splitPreparedScenes!.length;
+      step.status = "done";
+      step.detail = `拆出 ${count} 幕`;
+      auditAgentStep(run, step, idx, true);
+      await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+      return;
+    }
+    if (recovery === "ambiguous") {
+      return failRun(
+        run,
+        steps,
+        idx,
+        "系統在 AI 模型回應落庫前中斷，為避免重複呼叫模型已停止自動重試；請確認現況後重新規劃這一步",
+      );
+    }
+    if (recovery === "conflict") {
+      return failRun(
+        run,
+        steps,
+        idx,
+        "拆分鏡的固定資料列出現部分寫入或識別碼碰撞，已停止以避免產生重複／跨專案資料",
+      );
+    }
+
+    if (step.status !== "running") {
       step.status = "running";
-      step.scenesBefore = await sceneCount(run.projectId);
       await saveRun(run.id, { steps });
     }
     try {
+      const prepared = step.splitPreparedScenes;
       const result = await splitScriptCore({
         userId: run.userId,
         projectId: run.projectId,
         scriptText: step.script,
+        sceneIds: allSceneIds.slice(0, prepared?.length ?? allSceneIds.length),
+        preparedScenes: prepared,
+        onProviderStart: async () => {
+          step.splitProviderStartedAt = new Date().toISOString();
+          await saveRun(run.id, { steps });
+        },
+        onPrepared: async (scenes) => {
+          step.splitPreparedScenes = scenes.map((scene) => ({ ...scene }));
+          await saveRun(run.id, { steps });
+        },
         // run 建立與核准時已由 tRPC 層做過組隔離＋可編輯檢查，之後以發起人身分執行（同工作流慣例）
         assertAccess: () => {},
       });
@@ -471,8 +640,11 @@ async function advanceRun(run: RunRow): Promise<void> {
       auditAgentStep(run, step, idx, true);
       await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
     } catch (err) {
-      // 本地節流（每分鐘 6 次）在打 NIM 前就擋下、零外部成本：不計次，下輪重試
+      // PostgreSQL 跨 replica 節流在打 NIM 前就擋下、零外部成本：不計次，下輪重試
       if (err instanceof TRPCError && err.code === "TOO_MANY_REQUESTS") return;
+      // 只有這個 invocation 明確收到「呼叫失敗」時才容許下一次模型嘗試；
+      // 若程序直接死亡，startedAt 會留在 DB，重啟走上方 ambiguous 而不會重打。
+      step.splitProviderStartedAt = undefined;
       // 有限重試（審查修復：原版把「已計費不退」的解析失敗當暫時性無限重試，每輪重打 NIM 燒免費額度）：
       // INTERNAL＝LLM 回壞 JSON，重試一次＝再燒一次呼叫，上限 3；SERVICE_UNAVAILABLE＝NIM 流量/點數
       // 上限（流量約 1 分鐘解），上限 30（每 4 秒一輪 ≈ 2 分鐘）——超限收攏成 failed，不無限打轉
@@ -491,10 +663,11 @@ async function advanceRun(run: RunRow): Promise<void> {
   }
 
   if (step.kind === "submit_approval") {
-    const scene = await sceneByNo(run.projectId, step.sceneNo ?? 0);
+    const scene = await resolvePersistedSceneTarget(run, steps, step);
     if (!scene) return failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
     try {
-      await submitApprovalCore(scene.id, run.userId, () => {});
+      const effectId = await persistStepEffectId(run, steps, step);
+      await submitApprovalCore(scene.id, run.userId, () => {}, effectId);
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
@@ -520,7 +693,8 @@ async function advanceRun(run: RunRow): Promise<void> {
     const access = resolveAgentAccess(auth, table);
     if (!access.canWriteRows) return failRun(run, steps, idx, "沒有這個資料庫的 AI 寫入權（或其 AI 存取設為唯讀/不開放）");
     try {
-      const row = await addDataRowValidated(table, run.userId, step.rowData ?? {});
+      const effectId = await persistStepEffectId(run, steps, step);
+      const row = await addDataRowValidated(table, run.userId, step.rowData ?? {}, effectId);
       step.status = "done";
       step.detail = `已寫入「${table.name}」一列`;
       auditAgentStep(run, step, idx, true);
@@ -538,7 +712,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   let sceneId: string | undefined;
   let sceneRole: "visual" | "narration" | undefined;
   if (step.kind === "voiceover") {
-    const scene = await sceneByNo(run.projectId, step.sceneNo ?? 0);
+    const scene = await resolvePersistedSceneTarget(run, steps, step);
     if (!scene) return failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
     const text = (scene.voiceover ?? "").trim();
     if (!text) return failRun(run, steps, idx, `第 ${step.sceneNo} 鏡還沒有配音詞——先填配音詞或把這步移除重新規劃`);
@@ -552,7 +726,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     if (!model || model.needs) return failRun(run, steps, idx, "計畫裡的模型無效或需要來源素材");
     if (!step.prompt?.trim()) return failRun(run, steps, idx, "計畫裡的提示詞是空的");
     if (step.sceneNo) {
-      const scene = await sceneByNo(run.projectId, step.sceneNo);
+      const scene = await resolvePersistedSceneTarget(run, steps, step);
       if (!scene) return failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
       // 修 GEN-201：用與助手同源的能力判斷，別再用 kind==="audio" 粗判——text-to-audio（配樂/音效）
       // 會被誤當旁白寫進 narrationAssetId、靜默覆蓋分鏡旁白。role===null（配樂/音效/文字）時直接收攏成
@@ -581,7 +755,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   try {
     // 審查修復：帶入發起人「當下」的真實角色——組員的成本審核門檻（單筆估點 ≥ 門檻須組長核准）
     // 才會對代理生成生效（原版不帶 assertAccess，accessRole=undefined，門檻整段被繞過）
-    const accessRole = await runnerAccessRole(run.userId, run.groupId);
+    const accessRole = await resolveBackgroundProjectRole(run.userId, run.projectId, "代理");
     await submitGenerationCore({
       id: step.generationId,
       userId: run.userId,

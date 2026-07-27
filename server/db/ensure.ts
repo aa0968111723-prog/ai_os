@@ -1,11 +1,18 @@
 /**
- * 啟動時自動同步資料表（等同 drizzle-kit push，但走程式 API）。
- * 為什麼不用 CLI：drizzle-kit push 的互動式輸出在非 TTY 環境（容器）會靜默 exit 1，
- * 表建不起來又看不到錯誤——改用 drizzle-kit/api 的 pushSchema 徹底繞過。
- * 原則不變：伺服器不等 DB 也能起（健康檢查照過）；這裡在背景重試到就緒為止。
+ * Read-only database startup gate.
+ *
+ * Production DDL belongs to reviewed migration files and an explicit
+ * `npm run db:migrate` release step. Application startup must never call
+ * pushSchema.apply(), create an index, or repair/delete data.
  */
 import { sql } from "drizzle-orm";
-import { db, schema } from "./index";
+import { db } from "./index";
+import {
+  inspectMigrationState,
+  inspectSchemaDrift,
+  loadMigrationManifest,
+  type MigrationState,
+} from "./migrationState";
 
 async function dbReady(): Promise<boolean> {
   try {
@@ -16,141 +23,63 @@ async function dbReady(): Promise<boolean> {
   }
 }
 
-export async function ensureSchema(): Promise<boolean> {
-  if (!process.env.DATABASE_URL) {
-    console.warn("[db] DATABASE_URL 未設定——請在部署平台的服務 Variables 設定 DATABASE_URL（Zeabur：跨服務引用 PostgreSQL 服務的連線字串）");
-    return false;
+function explainUnready(state: MigrationState): void {
+  if (state.kind === "empty-unmigrated") {
+    console.warn("[db] 空資料庫尚未初始化；請在 release/one-off job 明確執行 `npm run db:migrate`。");
+    return;
   }
-  for (let i = 1; i <= 10; i++) {
-    if (await dbReady()) break;
-    if (i === 10) {
-      console.warn("[db] ⚠ 資料庫連續 10 次連不上——檢查 DATABASE_URL 是否指向 Postgres 服務（瀏覽器開 /api/ready 可診斷）");
-      return false;
-    }
-    console.log(`[db] 等待資料庫就緒（${i}/10）…`);
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+  if (state.kind === "legacy-untracked") {
+    console.warn(
+      `[db] 偵測到 ${state.userTables.length} 張既有表，但沒有 migration 基準紀錄。` +
+      " 請先備份，執行 `npm run db:adopt:dry-run`，再依輸出的 fingerprint 明確採用。",
+    );
+    return;
   }
-  const { pushSchema } = await import("drizzle-kit/api");
-  const pushed = (await pushSchema(
-    schema as unknown as Record<string, unknown>,
-    db as never,
-  )) as { statementsToExecute: string[]; apply: () => Promise<void>; hasDataLoss?: boolean; warnings?: string[] };
-  const { statementsToExecute, apply, hasDataLoss, warnings } = pushed;
-
-  // 資料遺失防護：pushSchema 若判定會掉資料（DROP COLUMN/TABLE、型別不相容等），
-  // 正式環境預設「不套用」——避免一次誤改 schema 就無聲清空生產資料。
-  // 確實要套用破壞性變更時，設環境變數 ALLOW_DB_DATALOSS=1 明示放行。
-  const destructive = hasDataLoss || (statementsToExecute ?? []).some((s) => /drop\s+(column|table)/i.test(s));
-  if (destructive && process.env.ALLOW_DB_DATALOSS !== "1") {
-    console.warn("[db] ⚠⚠⚠ 偵測到可能造成資料遺失的 schema 變更——已「跳過」套用以保護生產資料。");
-    (warnings ?? []).forEach((w) => console.warn("[db]   ·", w));
-    (statementsToExecute ?? []).filter((s) => /drop\s+(column|table)/i.test(s)).forEach((s) => console.warn("[db]   SQL:", s));
-    console.warn("[db]   確認無誤要套用，請設環境變數 ALLOW_DB_DATALOSS=1 後 Redeploy。其餘功能照常運作。");
-    await applyManualMigrations(); // 既有表仍在，手寫遷移照常補（冪等）
-    return true;
+  if (state.kind === "pending") {
+    console.warn(`[db] 尚有 ${state.pending.length} 份 migration 未套用：${state.pending.map((m) => m.tag).join(", ")}`);
+    console.warn("[db] 應用程式不會在 runtime 改 schema；請由 release/one-off job 執行 `npm run db:migrate`。");
+    return;
   }
-
-  await apply();
-  console.log(
-    (statementsToExecute?.length ?? 0) > 0
-      ? `[db] ✓ 資料表同步完成（套用 ${statementsToExecute.length} 項變更）`
-      : "[db] ✓ 資料表已是最新（無變更）",
-  );
-  await applyManualMigrations();
-  return true;
+  state.errors.forEach((error) => console.warn("[db] migration 歷史錯誤：", error));
 }
 
-/**
- * pushSchema 之外的手寫遷移（冪等，每次開機跑）：drizzle schema 刻意不宣告的約束放這裡——
- * 對「既有資料可能違反約束」的情形，pushSchema 直接建索引會炸開機，這裡先修資料再建索引。
- *
- * group_options (group_id,type,value) 唯一索引（核心缺陷審查:併發首讀種子/同名 upsert 皆因缺此約束）：
- * 先把歷史重複列去重（保留最早一筆——即原始種子；同時間戳以 id 決勝，確定性冪等），再建唯一索引。
- * 此後 optionsStore 的 onConflictDoNothing 與 options.upsert 的 23505 攔截才真正有 DB 保底。
- */
-async function applyManualMigrations(): Promise<void> {
+export async function ensureSchema(): Promise<boolean> {
+  if (!process.env.DATABASE_URL) {
+    console.warn("[db] DATABASE_URL 未設定——正式服務必須指向 PostgreSQL；啟動不會自行建立資料庫。");
+    return false;
+  }
+
+  for (let attempt = 1; attempt <= 10; attempt += 1) {
+    if (await dbReady()) break;
+    if (attempt === 10) {
+      console.warn("[db] 資料庫連續 10 次連不上——檢查 DATABASE_URL 與 Postgres 網路狀態。");
+      return false;
+    }
+    console.log(`[db] 等待資料庫就緒（${attempt}/10）…`);
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+
   try {
-    await db.execute(sql`
-      delete from group_options a using group_options b
-      where a.group_id = b.group_id and a.type = b.type and a.value = b.value
-        and (a.created_at, a.id::text) > (b.created_at, b.id::text)
-    `);
-    await db.execute(sql`
-      create unique index if not exists group_options_group_type_value_uq
-      on group_options (group_id, type, value)
-    `);
+    const manifest = loadMigrationManifest();
+    const state = await inspectMigrationState(db, manifest);
+    if (state.kind !== "ready") {
+      explainUnready(state);
+      return false;
+    }
 
-    // feedback (user_id, group_id) 唯一：滿意度問卷「一人一組一份」。舊版 upsert 走「查後改＋刪重複列」，
-    // 併發送出會各插一列（無 DB 約束擋不住）。先去重（保留最新一筆——與 mine 讀取一致），
-    // 再建唯一索引；group_id 可為 null（無組成員也一人一份），以 coalesce 收斂 NULL 使其參與唯一性。
-    // 此後 router 的 23505 攔截才真正有 DB 保底。
-    await db.execute(sql`
-      delete from feedback a using feedback b
-      where a.user_id = b.user_id
-        and a.group_id is not distinct from b.group_id
-        and (a.created_at, a.id::text) < (b.created_at, b.id::text)
-    `);
-    await db.execute(sql`
-      create unique index if not exists feedback_user_group_uq
-      on feedback (user_id, coalesce(group_id, '00000000-0000-0000-0000-000000000000'::uuid))
-    `);
+    const drift = await inspectSchemaDrift(db);
+    if (drift.statements.length > 0) {
+      console.warn(`[db] 偵測到 schema drift（${drift.statements.length} 項）；為保護正式資料，runtime 不會自動修正。`);
+      drift.warnings.slice(0, 10).forEach((warning) => console.warn("[db]   警告：", warning));
+      drift.statements.slice(0, 10).forEach((statement) => console.warn("[db]   待處理 SQL：", statement));
+      if (drift.statements.length > 10) console.warn(`[db]   另有 ${drift.statements.length - 10} 項未顯示；請執行 npm run db:check。`);
+      return false;
+    }
 
-    // 已讀水位／表情回應唯一約束（修 R2-CONC-01/R2-02/R2-03）：這三處原本走「查後寫（update→0 則 insert／
-    // delete→0 則 insert）」，併發首次寫入各插一列重複列——已讀列重複會讓未讀數的 LEFT JOIN 扇出永久翻倍、
-    // 表情列重複會灌大計數。先去重（保留最新一筆）再建唯一索引，router 端已改 onConflict，此後有 DB 保底。
-    await db.execute(sql`
-      delete from dm_reads a using dm_reads b
-      where a.user_id = b.user_id and a.peer_id = b.peer_id
-        and (a.last_read_at, a.id::text) < (b.last_read_at, b.id::text)
-    `);
-    await db.execute(sql`create unique index if not exists dm_reads_user_peer_uq on dm_reads (user_id, peer_id)`);
-    await db.execute(sql`
-      delete from message_reads a using message_reads b
-      where a.user_id = b.user_id and a.project_id = b.project_id
-        and (a.last_read_at, a.id::text) < (b.last_read_at, b.id::text)
-    `);
-    await db.execute(sql`create unique index if not exists message_reads_user_project_uq on message_reads (user_id, project_id)`);
-    await db.execute(sql`
-      delete from message_reactions a using message_reactions b
-      where a.message_id = b.message_id and a.user_id = b.user_id and a.emoji = b.emoji
-        and (a.created_at, a.id::text) < (b.created_at, b.id::text)
-    `);
-    await db.execute(sql`create unique index if not exists message_reactions_msg_user_emoji_uq on message_reactions (message_id, user_id, emoji)`);
-
-    // project_members(project_id,user_id) 唯一（修 R5-CONC-04）：setProjectRole 的 delete→insert 併發會留重複列。
-    await db.execute(sql`
-      delete from project_members a using project_members b
-      where a.project_id = b.project_id and a.user_id = b.user_id and a.id::text < b.id::text
-    `);
-    await db.execute(sql`create unique index if not exists project_members_project_user_uq on project_members (project_id, user_id)`);
-
-    // team_members(team_id,user_id)／group_members(group_id,user_id) 唯一（修 R6-CONC-01）：
-    // attachExistingUser 的「查後插」併發會把既有帳號重複入團隊/組。先去重（保留最早一筆＝最初加入）再建唯一索引。
-    await db.execute(sql`
-      delete from team_members a using team_members b
-      where a.team_id = b.team_id and a.user_id = b.user_id and a.id::text > b.id::text
-    `);
-    await db.execute(sql`create unique index if not exists team_members_team_user_uq on team_members (team_id, user_id)`);
-    await db.execute(sql`
-      delete from group_members a using group_members b
-      where a.group_id = b.group_id and a.user_id = b.user_id and a.id::text > b.id::text
-    `);
-    await db.execute(sql`create unique index if not exists group_members_group_user_uq on group_members (group_id, user_id)`);
-
-    // 生成執行器與陳屍清掃每 ~60 秒掃「in-flight（queued/running）」列（來自並行 PR #105）——drizzle 的 index()
-    // 無法表達 partial index（WHERE 條件），故手寫。部分索引只含在途列（極少），體積小、命中率高。
-    await db.execute(sql`
-      create index if not exists generations_active_idx
-      on generations (updated_at) where status in ('queued','running')
-    `);
-    await db.execute(sql`
-      create index if not exists generations_project_active_idx
-      on generations (project_id, updated_at) where status in ('queued','running')
-    `);
-
-    console.log("[db] ✓ 手寫遷移完成（唯一索引：dm_reads／message_reads／message_reactions／project_members／team_members／group_members＋generations 在途部分索引就緒）");
-  } catch (err) {
-    // 不擋開機：索引缺席只是回到「應用層防重」的舊狀態,功能照常
-    console.warn("[db] ⚠ 手寫遷移失敗（不影響啟動）：", err instanceof Error ? err.message : err);
+    console.log(`[db] ✓ migration ${manifest.entries.at(-1)?.tag} 已套用，schema 無 drift（唯讀檢查）`);
+    return true;
+  } catch (error) {
+    console.warn("[db] migration/schema 檢查失敗：", error instanceof Error ? error.message : error);
+    return false;
   }
 }

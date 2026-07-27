@@ -52,6 +52,25 @@ def wait_done(opener, gid, timeout=30):
         time.sleep(1)
     return st
 
+def wait_workflow(opener, project_id, run_id, wanted, timeout=30):
+    current = None
+    for _ in range(timeout * 2):
+        rows = call("GET", opener, "workflows.listByProject", {"projectId": project_id})
+        current = next((row for row in rows if row["id"] == run_id), None)
+        if current and current.get("status") == wanted:
+            return current
+        time.sleep(0.5)
+    return current
+
+def wait_workflow_generation(opener, project_id, run_id, status, timeout=30):
+    for _ in range(timeout * 2):
+        page = call("GET", opener, "generation.listByProjectPaged", {"projectId": project_id, "status": status})
+        hit = next((row for row in page.get("items", []) if row.get("workflowRunId") == run_id), None)
+        if hit:
+            return hit
+        time.sleep(0.5)
+    return None
+
 admin = client(); mem = client()
 r = call("POST", admin, "auth.login", {"email": "admin@aidirector.local", "password": "test-admin-123"})
 ok("開發者登入", r.get("user", {}).get("isSuperAdmin") is True)
@@ -102,6 +121,50 @@ ok("組長/管理層自送不受門檻", leader_gen.get("status") in ("queued", 
 
 lst = call("GET", mem, "generation.listByProjectPaged", {"projectId": pid, "status": "rejected"})
 ok("列表可篩 rejected", any(x["id"] == g_gate2["id"] for x in lst["items"]))
+
+# 工作流必須與手動生成使用同一成本門檻；過去 runner 未帶角色，組員可繞過核准直接扣點。
+call("POST", admin, "quota.setApprovalThreshold", {"groupId": grp["id"], "thresholdPoints": 1})
+wf_reject = call("POST", mem, "workflows.start", {
+    "projectId": pid,
+    "presetId": "wf/draft-minimal",
+    "prompt": "工作流成本守門駁回測試",
+})
+wf_gate = wait_workflow_generation(mem, pid, wf_reject["id"], "awaiting_approval")
+ok("🔒 工作流組員同樣進成本待核", wf_gate is not None)
+if wf_gate:
+    call("POST", admin, "generation.decideCost", {
+        "id": wf_gate["id"],
+        "decision": "rejected",
+        "reason": "工作流成本測試駁回",
+    })
+wf_failed = wait_workflow(mem, pid, wf_reject["id"], "failed")
+ok("工作流待核遭駁回後收攏 failed", wf_failed is not None and "駁回" in (wf_failed.get("error") or ""))
+
+# 動態撤權：已送出的第一步可由組長核准收尾，但下一個付費步驟不得沿用舊 editor 權限。
+wf_revoke = call("POST", mem, "workflows.start", {
+    "projectId": pid,
+    "presetId": "wf/draft-minimal",
+    "prompt": "工作流執行中撤權測試",
+})
+wf_first = wait_workflow_generation(mem, pid, wf_revoke["id"], "awaiting_approval")
+ok("撤權測試第一步已停在待核", wf_first is not None)
+call("POST", admin, "projects.setProjectRole", {
+    "projectId": pid,
+    "userId": acc["user"]["id"],
+    "role": "viewer",
+})
+if wf_first:
+    call("POST", admin, "generation.decideCost", {"id": wf_first["id"], "decision": "approved"})
+wf_revoked = wait_workflow(mem, pid, wf_revoke["id"], "failed")
+all_after_revoke = call("GET", admin, "generation.listByProjectPaged", {"projectId": pid})
+wf_generated = [row for row in all_after_revoke.get("items", []) if row.get("workflowRunId") == wf_revoke["id"]]
+ok("🔒 降為 viewer 後工作流不再送下一步", wf_revoked is not None and len(wf_generated) == 1)
+call("POST", admin, "projects.setProjectRole", {
+    "projectId": pid,
+    "userId": acc["user"]["id"],
+    "role": "editor",
+})
+call("POST", admin, "quota.setApprovalThreshold", {"groupId": grp["id"], "thresholdPoints": 2})
 
 # ── #4 版本回看：分鏡綁定歷史 + 設為現用 ──
 wait_done(mem, g_cheap["id"])

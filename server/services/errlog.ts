@@ -5,6 +5,8 @@
  * ★ 本模組不 import 任何專案模組（db/auth/…都不碰），任何地方引用都不會造成循環相依。
  */
 
+import { currentRequestId } from "./requestContext";
+
 export interface ErrEntry {
   /** 發生時間（ISO 字串） */
   at: string;
@@ -12,6 +14,8 @@ export interface ErrEntry {
   scope: string;
   /** 錯誤訊息（已截 300 字） */
   message: string;
+  /** 對應 HTTP X-Request-Id；背景工作沒有 request 時省略。 */
+  requestId?: string;
 }
 
 /** 緩衝上限：滿了丟最舊（環形） */
@@ -29,7 +33,13 @@ const buffer: ErrEntry[] = [];
 export function recordError(scope: string, err: unknown): void {
   try {
     const message = String(err instanceof Error ? err.message : err).slice(0, MAX_MESSAGE_LEN);
-    buffer.push({ at: new Date().toISOString(), scope, message });
+    const requestId = currentRequestId();
+    buffer.push({
+      at: new Date().toISOString(),
+      scope,
+      message,
+      ...(requestId ? { requestId } : {}),
+    });
     if (buffer.length > MAX_ENTRIES) buffer.shift();
   } catch {
     // 靜默：錯誤記錄本身出錯就算了，主流程優先

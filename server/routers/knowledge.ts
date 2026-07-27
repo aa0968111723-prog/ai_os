@@ -9,6 +9,13 @@ import { proxyFetch } from "../services/http";
 import { reserveQuota, refund } from "../services/points";
 import { signAssetUrl } from "../services/storage";
 import { assertProjectEditable } from "../services/projectAcl";
+import {
+  consumeRateLimit,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+  RateLimitConfigurationError,
+  RateLimitUnavailableError,
+} from "../services/rateLimit";
 
 export const KNOWLEDGE_KINDS = [
   { id: "transcript", label: "師父開示稿" },
@@ -166,25 +173,28 @@ const DESCRIBE_PROMPT = "請以繁體中文詳細描述這張圖片（場景、�
  * describeImageAsset 的 per-asset 進行中去重（併發原子冪等，核心缺陷審查）：
  * 「先查 dup 再插入」非原子——雙擊/併發兩請求都查不到彼此、各扣一次點、各建一筆重複描述。
  * 同素材的第二個併發請求直接等第一個的 Promise 拿同一結果，零扣點零重複列。
- * 記憶體鎖與本檔節流/realtime 同一「單容器」部署假設；完成即刪 key，不會無界成長。
+ * 這張 Map 只做「同一 replica 內」的 Promise 合併（完成即刪），不是安全／成本限流的真相來源；
+ * 跨 replicas 的呼叫上限已由下方 PostgreSQL rate limiter 統一守門。
  */
 const describeInFlight = new Map<string, Promise<{ id: string; title: string; content: string }>>();
 // 修 R7-CONC-01：addFromAsset 同素材 dup→insert 的記憶體序列化（比照 describeInFlight），杜絕併發雙擊建重複知識列
 const addFromAssetInFlight = new Map<string, Promise<typeof schema.knowledge.$inferSelect>>();
 
-// 記憶體節流（比照 assistant/director 的模式，但獨立計數器、不跨檔共用）：每人每分鐘 6 次，擋狂刷付費視覺模型
-const DESCRIBE_LIMIT_PER_MIN = 6;
-const DESCRIBE_WINDOW_MS = 60_000;
-const describeHits = new Map<string, number[]>();
-function describeOverLimit(userId: string): boolean {
-  const now = Date.now();
-  const arr = (describeHits.get(userId) ?? []).filter((t) => now - t < DESCRIBE_WINDOW_MS);
-  const over = arr.length >= DESCRIBE_LIMIT_PER_MIN;
-  if (!over) arr.push(now);
-  // 為什麼：空陣列就刪 key，否則長跑容器的 Map 會隨歷史使用者無界成長（記憶體洩漏）
-  if (arr.length) describeHits.set(userId, arr);
-  else describeHits.delete(userId);
-  return over;
+// PostgreSQL 滑動視窗（獨立 scope）：每人每分鐘 6 次，擋跨 replica 狂刷付費視覺模型。
+async function describeOverLimit(userId: string): Promise<boolean> {
+  try {
+    const decision = await consumeRateLimit(
+      RATE_LIMIT_SCOPES.imageDescription,
+      userId,
+      RATE_LIMIT_POLICIES.imageDescription,
+    );
+    return !decision.allowed;
+  } catch (error) {
+    if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "圖片描述安全限流暫時無法使用，請稍後再試" });
+    }
+    throw error;
+  }
 }
 
 export const knowledgeRouter = router({
@@ -470,7 +480,7 @@ export const knowledgeRouter = router({
    * 冪等：同素材已有未刪除的「圖片描述」筆就直接回它（重複點擊／重試不重複扣點）。
    */
   describeImageAsset: authedProcedure.input(z.object({ assetId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-    if (describeOverLimit(ctx.auth.user.id)) {
+    if (await describeOverLimit(ctx.auth.user.id)) {
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "描述得太頻繁（每分鐘最多 6 次），休息一下再試" });
     }
     // 回收桶裡的素材視為不存在——已刪的圖不該再進知識庫

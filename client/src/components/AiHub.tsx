@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { AgentCard } from "./AgentCard";
@@ -21,39 +22,93 @@ export function AiHub({
   canEdit: boolean;
   isLeader?: boolean;
 }) {
-  // 執行區小標的活躍徽章（與 AgentCard 同 query key 共用快取，不另開輪詢）
+  const [collapsed, setCollapsed] = useState(false);
+  // Reuse AgentCard's query key so this activity badge does not add another request.
   const runs = trpc.agents.listByProject.useQuery({ projectId });
   const awaiting = (runs.data ?? []).filter((r) => r.status === "awaiting_approval").length;
   const running = (runs.data ?? []).filter((r) => r.status === "running").length;
+  const hasActiveRun = running > 0 || awaiting > 0;
+  const [executionOpen, setExecutionOpen] = useState(hasActiveRun);
+  const executionProjectRef = useRef(projectId);
+  const previousActiveRef = useRef(hasActiveRun);
+
+  useEffect(() => {
+    // Each project owns its own initial disclosure state.
+    if (executionProjectRef.current !== projectId) {
+      executionProjectRef.current = projectId;
+      previousActiveRef.current = hasActiveRun;
+      setExecutionOpen(hasActiveRun);
+      return;
+    }
+
+    const activityStarted = hasActiveRun && !previousActiveRef.current;
+    previousActiveRef.current = hasActiveRun;
+    // Auto-open once for a new activity episode. Polling while that episode is
+    // active must not undo a user's manual collapse.
+    if (activityStarted) setExecutionOpen(true);
+  }, [hasActiveRun, projectId]);
 
   return (
     <section className="card card--primary" data-fb="專案 AI 代理系統" id="sec-ai-hub">
-      <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> 專案 AI 代理系統
-      </h2>
-      <p className="hint" style={{ marginTop: -4 }}>
-        一個代理連結全專案與資料庫：問進度、要發想、貼腳本、下目標——都用說的。單步動作提議後你確認執行；
-        多步目標排成計畫、核准估點後由伺服器背景逐步跑。
-      </p>
-
-      {/* 統一對話入口（舊錨點 sec-assistant 沿用：外部連結／走查腳本靠它定位） */}
-      <div id="sec-assistant">
-        <ProjectAssistant projectId={projectId} embedded />
+      <div className="section-heading-row">
+        <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
+          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> 專案 AI 代理系統
+        </h2>
+        <span className="spacer" />
+        {running > 0 && <span className="pill running">執行中 {running}</span>}
+        {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
+        <button
+          type="button"
+          className="btn-ghost btn-sm"
+          aria-expanded={!collapsed}
+          aria-controls="sec-ai-hub-body"
+          onClick={() => setCollapsed((v) => !v)}
+        >
+          <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} />
+          {collapsed ? "展開" : "收合"}
+        </button>
       </div>
 
-      {/* 代理執行區：對話裡下的目標（plan_agent）排出的計畫在這裡核准、追進度、停止 */}
-      <div id="sec-agent" style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border-soft)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <strong style={{ fontSize: "var(--fs-13)", display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <Icon name="Film" size={14} /> 代理執行
-          </strong>
-          {running > 0 && <span className="pill running">執行中 {running}</span>}
-          {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
-          <span className="hint" style={{ fontSize: "var(--fs-12)" }}>
-            計畫核准後由伺服器背景逐步跑（關頁不中斷）；每步實際扣點走既有守門
-          </span>
+      {collapsed && (
+        <p className="hint" style={{ margin: "6px 0 0" }}>
+          AI 對話與執行區已收合{running > 0 ? `；仍有 ${running} 個計畫在背景執行` : ""}。
+        </p>
+      )}
+
+      <div id="sec-ai-hub-body" hidden={collapsed}>
+        <p className="hint" style={{ marginTop: 6 }}>
+          一個代理連結全專案與資料庫：問進度、要發想、貼腳本、下目標——都用說的。單步動作提議後你確認執行；
+          多步目標排成計畫、核准估點後由伺服器背景逐步跑。
+        </p>
+
+        {/* 統一對話入口（舊錨點 sec-assistant 沿用：外部連結／走查腳本靠它定位） */}
+        <div id="sec-assistant">
+          <ProjectAssistant projectId={projectId} embedded />
         </div>
-        <AgentCard projectId={projectId} canEdit={canEdit} isLeader={isLeader} embedded hideComposer />
+
+        {/* 空執行區預設收合；新一輪活動會展開一次，同一輪期間尊重使用者手動收合。 */}
+        <details
+          className="ai-hub-execution"
+          id="sec-agent"
+          open={executionOpen}
+        >
+          <summary
+            aria-expanded={executionOpen}
+            onClick={(event) => {
+              event.preventDefault();
+              setExecutionOpen((open) => !open);
+            }}
+          >
+            <span><Icon name="Film" size={14} /> 代理執行</span>
+            {running > 0 && <span className="pill running">執行中 {running}</span>}
+            {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
+            {running === 0 && awaiting === 0 && <span className="hint">目前沒有進行中的計畫</span>}
+          </summary>
+          <p className="hint" style={{ margin: "8px 0 0" }}>
+            計畫核准後由伺服器背景逐步跑（關頁不中斷）；每步實際扣點走既有守門
+          </p>
+          <AgentCard projectId={projectId} canEdit={canEdit} isLeader={isLeader} embedded hideComposer />
+        </details>
       </div>
     </section>
   );

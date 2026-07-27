@@ -2,6 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
+import {
+  AssistantTrace,
+  LiveAssistantTrace,
+  type AssistantActivityEvent,
+} from "./AssistantTrace";
+import { requestAssistantStream } from "./assistantStream";
 
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
@@ -15,12 +21,22 @@ type Action =
   // plan_agent：把目標交給 AI 代理排計畫（確認後也只排計畫——免費；執行另在代理執行區核准估點）
   | { type: "plan_agent"; label: string; goal: string };
 
-type Turn = { role: "you" | "ai"; text: string; actions?: Action[]; steps?: string[] };
+/**
+ * SSE 串流的安全活動事件：只描述「正在讀哪類資料／執行哪個查詢／完成哪一步」，
+ * 不保存也不展示模型的隱藏 chain-of-thought。
+ */
+type ThinkEvent = AssistantActivityEvent;
 
-/** 助手回答核心的結構（tRPC ask 與 SSE done 事件共用形狀） */
-type AskResult = { answer: string; actions: Action[]; steps: string[]; mock: boolean; fallback: boolean };
-/** SSE 串流的「思考過程」事件：思考中／正在查什麼／查到什麼 */
-type ThinkEvent = { phase: "thinking" | "lookup" | "step"; text: string };
+type Turn = {
+  role: "you" | "ai";
+  text: string;
+  actions?: Action[];
+  steps?: string[];
+  /** 可驗證的工具／查詢活動軌跡；回答完成後保留，預設收合。 */
+  activity?: ThinkEvent[];
+  elapsedMs?: number;
+  fallback?: boolean;
+};
 
 /** assistant.generateModels 的一筆（助手可代操、免來源的多模態生成模型） */
 type GenModel = {
@@ -62,20 +78,6 @@ function buildGroups(list: GenModel[]): Array<{ label: string; items: GenModel[]
   return groups;
 }
 
-/** 解析一段 SSE 區塊（以空行分隔）為 {event, data}；data 為 JSON.parse 後的物件（壞掉回 null） */
-function parseSse(chunk: string): { event: string; data: unknown } {
-  let event = "";
-  const dataLines: string[] = [];
-  for (const line of chunk.split("\n")) {
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
-  }
-  const raw = dataLines.join("\n");
-  let data: unknown = null;
-  if (raw) { try { data = JSON.parse(raw); } catch { data = null; } }
-  return { event, data };
-}
-
 /**
  * AI 專案助手（進階版）：問專案進度/生成/分鏡/審批，並可「提議」動作。
  * 安全：任何花點數或改資料的動作都用 ConfirmButton，使用者按確認才真的執行。
@@ -87,8 +89,10 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [collapsed, setCollapsed] = useState(false);
+  const [liveTraceOpen, setLiveTraceOpen] = useState(true);
   // 思考過程串流狀態：active＝正在問答中，events＝已收到的思考步驟（逐筆追加即時顯示）
   const [thinking, setThinking] = useState<{ active: boolean; events: ThinkEvent[] }>({ active: false, events: [] });
+  const [fallbackPending, setFallbackPending] = useState(false);
   // 已執行的提議動作鍵（turnIndex:actionIndex）＋正在執行中的鍵——停用「已執行」的按鈕，避免重複點擊
   const [executed, setExecuted] = useState<Set<string>>(new Set());
   const [pendingKey, setPendingKey] = useState<string | null>(null);
@@ -102,6 +106,17 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
   const bumpScroll = () => requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
   // 進行中串流的中止控制：元件卸載、切換專案、送下一題前都 abort，讓伺服器端 res.on('close') 停掉在途 LLM 呼叫（不白燒免費額度）
   const abortRef = useRef<AbortController | null>(null);
+  // React state 更新是非同步的；用 ref 同步累積本題活動，確保 done 與 fallback 都能完整保存。
+  const traceRef = useRef<ThinkEvent[]>([]);
+  const requestStartedAtRef = useRef(0);
+  // prop 變更不一定會 remount；所有非同步 callback 都以「目前專案＋請求世代」雙重守門，
+  // 避免舊專案的 SSE/tRPC/動作結果在導航後落進新專案。
+  const activeProjectIdRef = useRef(projectId);
+  activeProjectIdRef.current = projectId;
+  const requestEpochRef = useRef(0);
+  const projectGenerationRef = useRef(0);
+  const requestIsCurrent = (requestProjectId: string, epoch: number) =>
+    activeProjectIdRef.current === requestProjectId && requestEpochRef.current === epoch;
 
   // 助手可代操的多模態生成模型（免來源），供「換模型」下拉；載入失敗就沿用助手原提議，不擋流程
   const genModels = trpc.assistant.generateModels.useQuery(undefined, { staleTime: 5 * 60_000 });
@@ -115,108 +130,152 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
   const allGroups = useMemo(() => buildGroups(allModels), [allModels]);
   const sceneGroups = useMemo(() => buildGroups(allModels.filter(sceneFillable)), [allModels]);
 
-  const run = trpc.assistant.runAction.useMutation({
-    onSuccess: (r) => {
-      // 動作可能改了生成/分鏡/審批/額度——讓相關畫面重新抓（create_scene、split_script 建的新分鏡由 scenes.invalidate 涵蓋）
-      utils.generation.invalidate();
-      utils.scenes.invalidate();
-      utils.approvals.invalidate();
-      utils.quota.invalidate();
-      // 工作流啟動後讓工作流卡立刻看到新 run（粗粒度整組 invalidate 即可，卡片自己會輪詢推進）
-      if (r.kind === "run_workflow") utils.workflows.invalidate();
-      // 代理排完計畫：讓下方「代理執行」立刻出現待核准的計畫（統一入口的目標→計畫→核准動線）
-      if (r.kind === "plan_agent") utils.agents.invalidate();
-      push({ role: "ai", text: `✓ ${r.message}` });
-    },
-    onError: (e) => push({ role: "ai", text: `動作沒成功：${e.message}` }),
-  });
+  const run = trpc.assistant.runAction.useMutation();
 
-  // tRPC 一次性問答：串流不可用時的退路（onSuccess/onError 直接補一則 AI 回覆）
-  const ask = trpc.assistant.ask.useMutation({
-    onSuccess: (r) => push({ role: "ai", text: r.answer, actions: r.actions as Action[], steps: r.steps }),
-    onError: (e) => push({ role: "ai", text: e.message }),
-  });
+  // tRPC 一次性問答：串流不可用時的退路。每次呼叫使用帶 request epoch 的局部 callback，
+  // mutation 本身不能取消時也能丟棄過期答案。
+  const ask = trpc.assistant.ask.useMutation();
 
-  const busy = thinking.active || ask.isPending;
+  const busy = thinking.active || fallbackPending;
 
   /** 串流問答：讀 SSE 逐筆更新思考過程，done 補上 AI 回覆。回傳 true＝已處理（含 error／主動中止），false＝請退回 tRPC。 */
-  async function askViaStream(message: string, nonce: string, signal: AbortSignal): Promise<boolean> {
-    let handled = false;
-    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-    try {
-      const res = await fetch("/api/assistant/ask", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, message, nonce }),
-        signal,
-      });
-      if (!res.ok || !res.body) return false; // 串流不可用（舊瀏覽器/代理擋 SSE/驗證失敗）→ 退回 tRPC
-      reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let sep: number;
-        while ((sep = buf.indexOf("\n\n")) >= 0) {
-          const { event, data } = parseSse(buf.slice(0, sep));
-          buf = buf.slice(sep + 2);
-          if (event === "step" && data) {
-            const ev = data as ThinkEvent;
-            setThinking((t) => ({ active: true, events: [...t.events, ev] }));
-            bumpScroll();
-          } else if (event === "done" && data) {
-            handled = true;
-            const r = data as AskResult;
-            push({ role: "ai", text: r.answer, actions: r.actions, steps: r.steps });
-          } else if (event === "error") {
-            handled = true; // 終局錯誤：已處理，不要再退回 tRPC 重跑
-            push({ role: "ai", text: (data as { message?: string })?.message || "AI 助手暫時沒回應，請稍後再試" });
-          }
-          // event === "open"／": ping" 心跳只是保活訊號，parseSse 回空 event，忽略
-        }
-      }
-      return handled;
-    } catch (err) {
-      // 主動中止（卸載／切換專案／送下一題）：視為已處理，不要退回 tRPC 又跑一次
-      if (err instanceof DOMException && err.name === "AbortError") return true;
-      return false; // 網路/讀取中斷 → 退回 tRPC
-    } finally {
-      reader?.cancel().catch(() => {}); // 釋放 reader lock（中止時尤其重要）
-    }
+  async function askViaStream(
+    message: string,
+    nonce: string,
+    signal: AbortSignal,
+    requestProjectId: string,
+    epoch: number,
+  ): Promise<boolean> {
+    return requestAssistantStream({
+      projectId: requestProjectId,
+      message,
+      nonce,
+      signal,
+      handlers: {
+        onStep: (event) => {
+          if (!requestIsCurrent(requestProjectId, epoch)) return;
+          traceRef.current = [...traceRef.current, event];
+          setThinking((state) => ({ active: true, events: [...state.events, event] }));
+          bumpScroll();
+        },
+        onDone: (result) => {
+          if (!requestIsCurrent(requestProjectId, epoch)) return;
+          push({
+            role: "ai",
+            text: result.answer,
+            actions: result.actions as Action[],
+            steps: result.steps,
+            activity: [...traceRef.current],
+            elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
+            fallback: result.fallback,
+          });
+        },
+        onError: (message) => {
+          if (!requestIsCurrent(requestProjectId, epoch)) return;
+          push({
+            role: "ai",
+            text: message,
+            activity: [...traceRef.current],
+            elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
+          });
+        },
+      },
+    });
   }
 
   const send = async () => {
     const m = input.trim();
     if (!m || busy) return;
     abortRef.current?.abort(); // 保險：中止任何殘留串流（busy 守門通常已擋住並行）
+    const requestProjectId = projectId;
+    const epoch = ++requestEpochRef.current;
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    // 同一題的去重鍵：串流與退回 tRPC 共用，讓「每分鐘 6 次」節流名額只計一次
+    traceRef.current = [];
+    requestStartedAtRef.current = Date.now();
+    setLiveTraceOpen(true);
+    // 串流與退回 tRPC 共用的請求關聯鍵；伺服器仍會對每個外部呼叫各自計次。
     const nonce = (crypto?.randomUUID?.() ?? String(Date.now() + Math.random()));
     push({ role: "you", text: m });
     setInput("");
     setThinking({ active: true, events: [] });
-    const handled = await askViaStream(m, nonce, ctrl.signal);
+    const handled = await askViaStream(m, nonce, ctrl.signal, requestProjectId, epoch);
+    if (!requestIsCurrent(requestProjectId, epoch)) return;
     setThinking({ active: false, events: [] });
-    // 主動中止不退回；串流沒完成才用一次性問答補上（帶同一 nonce，不重複佔節流名額）
-    if (!handled && !ctrl.signal.aborted) ask.mutate({ projectId, message: m, nonce });
+    // 主動中止不退回；串流沒完成才用一次性問答補上（帶同一 nonce 方便追蹤）。
+    if (!handled && !ctrl.signal.aborted) {
+      setFallbackPending(true);
+      ask.mutate(
+        { projectId: requestProjectId, message: m, nonce },
+        {
+          onSuccess: (result) => {
+            if (!requestIsCurrent(requestProjectId, epoch)) return;
+            const fallbackActivity = result.steps.map((text) => ({ phase: "step" as const, text }));
+            push({
+              role: "ai",
+              text: result.answer,
+              actions: result.actions as Action[],
+              steps: result.steps,
+              activity: traceRef.current.length > 0 ? [...traceRef.current] : fallbackActivity,
+              elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
+              fallback: true,
+            });
+          },
+          onError: (error) => {
+            if (!requestIsCurrent(requestProjectId, epoch)) return;
+            push({
+              role: "ai",
+              text: error.message,
+              activity: [...traceRef.current],
+              elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
+              fallback: true,
+            });
+          },
+          onSettled: () => {
+            if (requestIsCurrent(requestProjectId, epoch)) setFallbackPending(false);
+          },
+        },
+      );
+    }
+  };
+
+  const cancelCurrent = () => {
+    if (!thinking.active) return;
+    abortRef.current?.abort();
+    requestEpochRef.current += 1;
+    setThinking({ active: false, events: [] });
+    setFallbackPending(false);
+    push({
+      role: "ai",
+      text: "已取消這次查詢；尚未執行任何需確認或扣點的動作。",
+      activity: [...traceRef.current],
+      elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
+    });
   };
 
   // 卸載時中止在途串流；切換專案時中止並清空（避免前一專案的答案落進新專案的對話）
   useEffect(() => {
-    return () => abortRef.current?.abort();
+    return () => {
+      abortRef.current?.abort();
+      requestEpochRef.current += 1;
+      projectGenerationRef.current += 1;
+    };
   }, []);
   useEffect(() => {
     // projectId 變更：中止舊串流並重置對話狀態（本元件在 /p/A→/p/B 只換 prop 不 remount）
     abortRef.current?.abort();
+    requestEpochRef.current += 1;
+    projectGenerationRef.current += 1;
     setTurns([]);
     setThinking({ active: false, events: [] });
+    setFallbackPending(false);
     setExecuted(new Set());
     setModelOverride({});
     setPendingKey(null);
     setInput("");
+    traceRef.current = [];
+    requestStartedAtRef.current = 0;
+    setLiveTraceOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -242,9 +301,6 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
       ? `用 ${info.label} 為第 ${act.sceneNo} 鏡${act.sceneTitle ? `「${act.sceneTitle}」` : ""}生成（${info.points} 點）`
       : `用 ${info.label} 生成：${act.prompt.slice(0, 24)}…（${info.points} 點）`;
   };
-
-  const thinkIcon = (phase: ThinkEvent["phase"]): "Loader" | "Search" | "Check" =>
-    phase === "step" ? "Check" : phase === "lookup" ? "Search" : "Loader";
 
   // 四合一（專案 AI 代理系統）分頁模式：外殼與標題由 AiHub 提供；「收起」由分頁切換取代，不再另設
   const showCollapse = !embedded;
@@ -331,16 +387,22 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
             tabIndex={0}
             style={{ maxHeight: 320, overflowY: "auto", margin: "12px 0", display: "flex", flexDirection: "column", gap: 10 }}
           >
-            {turns.map((t, i) => (
+            {turns.map((t, i) => {
+              const activity = t.activity?.length
+                ? t.activity
+                : (t.steps ?? []).map((text) => ({ phase: "step" as const, text }));
+              return (
               <div key={i} style={{ alignSelf: t.role === "you" ? "flex-end" : "flex-start", maxWidth: "90%" }}>
                 <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 2, textAlign: t.role === "you" ? "right" : "left" }}>
                   {t.role === "you" ? "你" : "助手"}
                 </div>
-                {/* 多步工具透明化：助手回答前查了什麼一行列給使用者看（歷史留存；即時過程見下方思考面板） */}
-                {t.steps && t.steps.length > 0 && (
-                  <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                    <Icon name="Search" size={11} />{t.steps.join("、")}
-                  </div>
+                {/* 回答完成後保留安全的活動軌跡，預設收合以免長對話把工作台撐爆。 */}
+                {t.role === "ai" && (
+                  <AssistantTrace
+                    events={activity}
+                    elapsedMs={t.elapsedMs}
+                    fallback={t.fallback}
+                  />
                 )}
                 <div
                   style={{
@@ -428,14 +490,38 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
                             message={confirmMsg}
                             confirmLabel="執行"
                             onConfirm={async () => {
+                              const actionProjectId = projectId;
+                              const actionProjectGeneration = projectGenerationRef.current;
+                              const actionIsCurrent = () =>
+                                activeProjectIdRef.current === actionProjectId
+                                && projectGenerationRef.current === actionProjectGeneration;
                               setPendingKey(actKey);
                               try {
-                                await run.mutateAsync({ projectId, action: toPayload(payloadAct) });
+                                const result = await run.mutateAsync({
+                                  projectId: actionProjectId,
+                                  action: toPayload(payloadAct),
+                                });
+                                // 動作已在原專案執行；快取失效不依目前畫面，讓回到原專案時能取到新資料。
+                                utils.generation.invalidate();
+                                utils.scenes.invalidate();
+                                utils.approvals.invalidate();
+                                utils.quota.invalidate();
+                                if (result.kind === "run_workflow") utils.workflows.invalidate();
+                                if (result.kind === "plan_agent") utils.agents.invalidate();
+                                if (!actionIsCurrent()) return;
+                                push({ role: "ai", text: `✓ ${result.message}` });
                                 setExecuted((prev) => new Set(prev).add(actKey));
-                              } catch {
-                                // onError 已在對話串提示；不標記為已執行，讓使用者可重試
+                              } catch (error) {
+                                if (actionIsCurrent()) {
+                                  push({
+                                    role: "ai",
+                                    text: `動作沒成功：${error instanceof Error ? error.message : "未知錯誤"}`,
+                                  });
+                                }
                               } finally {
-                                setPendingKey((k) => (k === actKey ? null : k));
+                                if (actionIsCurrent()) {
+                                  setPendingKey((key) => (key === actKey ? null : key));
+                                }
                               }
                             }}
                           >
@@ -460,33 +546,19 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
 
-            {/* 即時思考過程：串流進行中逐筆呈現「思考中／正在查什麼／查到什麼」 */}
+            {/* 即時執行軌跡：只呈現安全的資料來源／工具步驟，不展示模型隱藏推理。 */}
             {thinking.active && (
               <div style={{ alignSelf: "flex-start", maxWidth: "90%" }} role="status">
                 <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 2 }}>助手</div>
-                <div style={{ background: "var(--card2)", border: "1px solid var(--border-soft)", borderRadius: "var(--r-12)", padding: "8px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-12)", fontWeight: 600, color: "var(--fg-secondary)" }}>
-                    <Icon name="Sparkles" size={13} style={{ color: "var(--primary-ink)" }} /> 思考過程
-                  </div>
-                  {thinking.events.length === 0 ? (
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-12)", color: "var(--fg-secondary)" }}>
-                      <Icon name="Loader" size={12} className="spin" /> 連線中…
-                    </div>
-                  ) : (
-                    thinking.events.map((e, k) => {
-                      const isLast = k === thinking.events.length - 1;
-                      const active = isLast && e.phase !== "step";
-                      return (
-                        <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-12)", color: "var(--fg-secondary)" }}>
-                          <Icon name={thinkIcon(e.phase)} size={12} className={active ? "spin" : undefined} style={e.phase === "step" ? { color: "var(--success-ink, var(--primary-ink))" } : undefined} />
-                          {e.text}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                <LiveAssistantTrace
+                  events={thinking.events}
+                  open={liveTraceOpen}
+                  onToggle={() => setLiveTraceOpen((value) => !value)}
+                  onCancel={cancelCurrent}
+                />
               </div>
             )}
           </div>

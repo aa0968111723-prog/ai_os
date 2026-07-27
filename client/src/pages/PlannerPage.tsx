@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { CharCount, ConfirmButton } from "../components/interactions";
+import { PlannerSection, plannerInitialSections } from "../components/PlannerSection";
 import { useLocalDraft } from "../useLocalDraft";
 import { MentionInput, resolveMentions } from "../components/MentionInput";
 import { flashAnchor, takePlannerFocus } from "../discuss";
@@ -64,17 +65,18 @@ function dayKey(d: Date): string {
 }
 
 export function PlannerPage({ groupId }: { groupId: string }) {
+  const [focusTarget] = useState(() => takePlannerFocus());
+  const initialSections = plannerInitialSections(focusTarget);
   // 由留言的排程/筆記引用卡跳來：sessionStorage 交棒了目標 id，這裡輪詢直到該列渲染出來再高亮
   useEffect(() => {
-    const target = takePlannerFocus();
-    if (!target) return;
+    if (!focusTarget) return;
     let tries = 0;
     const timer = window.setInterval(() => {
       tries += 1;
-      if (flashAnchor(target) || tries > 20) window.clearInterval(timer);
+      if (flashAnchor(focusTarget) || tries > 20) window.clearInterval(timer);
     }, 200);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [focusTarget]);
 
   if (!groupId) {
     return (
@@ -90,11 +92,19 @@ export function PlannerPage({ groupId }: { groupId: string }) {
   return (
     <div>
       <h1>筆記排程</h1>
-      <p className="hint">全組共用的行程表與會議紀錄：排程可切清單／月曆並直連 Google 日曆自動同步；筆記可從知識庫匯入；知識地圖把行程、筆記、專案知識庫、AI 代理與資料庫織成一張知識族譜。</p>
+      <p className="hint">全組共用的行程表與會議紀錄：排程可切清單／月曆，系統完成 Google 連線設定後可自動同步，未設定時仍可匯出 .ics；筆記可從知識庫匯入；知識地圖把行程、筆記、專案知識庫、AI 代理與資料庫織成一張知識族譜。</p>
       {/* key 綁組別：切換作用組時整卡重掛，表單草稿不會帶到別的組 */}
-      <ScheduleCard key={`sch-${groupId}`} groupId={groupId} />
-      <NotesCard key={`note-${groupId}`} groupId={groupId} />
-      <KnowledgeMapCard key={`map-${groupId}`} groupId={groupId} />
+      <ScheduleCard
+        key={`sch-${groupId}`}
+        groupId={groupId}
+        initiallyOpen={initialSections.schedule}
+      />
+      <NotesCard
+        key={`note-${groupId}`}
+        groupId={groupId}
+        initiallyOpen={initialSections.notes}
+      />
+      <KnowledgeMapCard key={`map-${groupId}`} groupId={groupId} initiallyOpen={initialSections.knowledgeMap} />
       <p style={{ marginTop: 24 }}>
         <Link href="/">回作業台</Link>
       </p>
@@ -141,7 +151,9 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
     return (
       <>
         {icsFallback}
-        <span className="hint" style={{ margin: 0 }}>下載後匯入個人日曆；內容更新請重新下載</span>
+        <span className="hint" style={{ margin: 0 }}>
+          系統尚未設定 Google 日曆連線，目前不會自動同步；請下載 .ics 匯入個人日曆，內容更新後需重新下載
+        </span>
       </>
     );
   }
@@ -193,8 +205,9 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
   );
 }
 
-function ScheduleCard({ groupId }: { groupId: string }) {
+function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen: boolean }) {
   const utils = trpc.useUtils();
+  const [sectionOpen, setSectionOpen] = useState(initiallyOpen);
   const [view, setView] = useState<"list" | "calendar">("list");
   const [includePast, setIncludePast] = useState(false);
   // 清單檢視吃 includePast 開關；月曆檢視固定拉全部（含過去），才畫得出任意月份
@@ -267,20 +280,27 @@ function ScheduleCard({ groupId }: { groupId: string }) {
   }
 
   return (
-    <section className="card" style={{ marginTop: 16 }} data-fb="排程卡">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0 }}>組排程</h2>
+    <PlannerSection
+      open={sectionOpen}
+      onOpenChange={setSectionOpen}
+      analyticsLabel="排程卡"
+      contentId="planner-schedule-content"
+      title="組排程"
+      lede="安排全組行程、切換清單／月曆與管理日曆同步"
+      primary
+    >
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         {/* 清單／月曆切換（真實日曆）：段落式切換鈕 */}
-        <div className="seg" role="tablist" aria-label="排程檢視" style={{ marginLeft: "auto" }}>
+          <div className="seg" role="tablist" aria-label="排程檢視" style={{ marginLeft: "auto" }}>
           <button role="tab" aria-selected={view === "list"} className={view === "list" ? "on" : ""} onClick={() => setView("list")}>
             <Icon name="FileText" size={13} /> 清單
           </button>
           <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "on" : ""} onClick={() => setView("calendar")}>
             <Icon name="CalendarPlus" size={13} /> 月曆
           </button>
+          </div>
         </div>
-      </div>
-      <p className="hint">拍攝、開會、上片時間都排在這裡，全組看同一份，不再翻對話記錄找時間。</p>
+        <p className="hint">拍攝、開會、上片時間都排在這裡，全組看同一份，不再翻對話記錄找時間。</p>
 
       {/* 頂部工具列：Google 日曆直連同步（主）＋ .ics 匯出（後備）＋（清單檢視）顯示過去行程 */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
@@ -402,7 +422,7 @@ function ScheduleCard({ groupId }: { groupId: string }) {
         </p>
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
-    </section>
+    </PlannerSection>
   );
 }
 
@@ -546,8 +566,9 @@ function CalendarView({
 
 /* ─────────────────────── (2) 筆記・會議紀錄（可從知識庫匯入） ─────────────────────── */
 
-function NotesCard({ groupId }: { groupId: string }) {
+function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen: boolean }) {
   const utils = trpc.useUtils();
+  const [sectionOpen, setSectionOpen] = useState(initiallyOpen);
   const list = trpc.notes.list.useQuery({ groupId });
   const projects = trpc.projects.list.useQuery({ groupId });
   const members = trpc.projects.groupMembers.useQuery({ groupId }).data ?? [];
@@ -641,9 +662,15 @@ function NotesCard({ groupId }: { groupId: string }) {
   const projectTitleOf = (pid: string | null) => (pid ? (projects.data ?? []).find((p) => p.id === pid)?.title ?? null : null);
 
   return (
-    <section className="card" style={{ marginTop: 16 }} data-fb="筆記卡">
-      <h2>筆記・會議紀錄</h2>
-      <p className="hint">會議決議、待辦、想法都記在這裡，全組共用；內容更新會自動保留版本快照，不怕改壞。可從專案知識庫一鍵匯入既有內容。</p>
+    <PlannerSection
+      open={sectionOpen}
+      onOpenChange={setSectionOpen}
+      analyticsLabel="筆記卡"
+      contentId="planner-notes-content"
+      title="筆記・會議紀錄"
+      lede="集中會議決議、待辦與可追溯版本的共用筆記"
+    >
+        <p className="hint">會議決議、待辦、想法都記在這裡，全組共用；內容更新會自動保留版本快照，不怕改壞。可從專案知識庫一鍵匯入既有內容。</p>
 
       {list.isLoading ? (
         <div style={{ marginTop: 8 }} aria-hidden="true">
@@ -770,7 +797,7 @@ function NotesCard({ groupId }: { groupId: string }) {
           <Icon name="Plus" size={14} />新增筆記
         </button>
       )}
-    </section>
+    </PlannerSection>
   );
 }
 
@@ -903,8 +930,9 @@ const LEAF_TOGGLES: Array<{ kind: LeafKind; label: string }> = [
  * 前端只負責過濾（鏡頭／專案聚焦／型別開關）、佈局與導航——點節點開詳情面板，
  * 面板可跳到本頁那筆、進專案頁或深連結開某個資料庫（/databases?open=id）。
  */
-function KnowledgeMapCard({ groupId }: { groupId: string }) {
+function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen: boolean }) {
   const [, setLocation] = useLocation();
+  const [sectionOpen, setSectionOpen] = useState(initiallyOpen);
   const me = trpc.auth.me.useQuery();
   const meId = me.data?.user.id ?? "";
   const graphQ = trpc.knowledgeMap.graph.useQuery({ groupId });
@@ -1213,7 +1241,12 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
   /** 詳情面板的「前往」：按 nav 型別跳頁或跳到上方那筆 */
   const go = (nav: MapNav) => {
     if (!nav) return;
-    if (nav.type === "anchor") flashAnchor(nav.anchorId);
+    if (nav.type === "anchor") {
+      const target = document.getElementById(nav.anchorId);
+      const parentSection = target?.closest<HTMLDetailsElement>(".planner-section");
+      if (parentSection && !parentSection.open) parentSection.open = true;
+      window.requestAnimationFrame(() => flashAnchor(nav.anchorId));
+    }
     else if (nav.type === "project") setLocation(`/p/${nav.projectId}`);
     else setLocation(nav.tableId ? `/databases?open=${nav.tableId}` : "/databases");
   };
@@ -1223,14 +1256,18 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
   const counts = graph?.counts;
 
   return (
-    <section className="card" style={{ marginTop: 16 }} data-fb="知識地圖卡">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0 }}>知識地圖・心智圖</h2>
-      </div>
-      <p className="hint">
+    <PlannerSection
+      open={sectionOpen}
+      onOpenChange={setSectionOpen}
+      analyticsLabel="知識地圖卡"
+      contentId="planner-knowledge-map-content"
+      title="知識地圖・心智圖"
+      lede="依專案與資料型別探索組內知識關聯"
+    >
+        <p className="hint">
         本組知識族譜一張圖：中心是本組，往外是專案／組層級／資料庫分支，再往外是筆記（藍）、行程（琥珀）、知識庫（綠）、AI 代理（紫）與資料庫（青）。
         點任一節點看詳情，一鍵跳到那筆、進專案頁或打開資料庫。節點可以自由拖拉排版（位置記在這台裝置）；空白處拖曳平移、滾輪或右上角按鈕縮放。
-      </p>
+        </p>
 
       {/* 鏡頭：全組／我的／提及我 ＋ 專案聚焦（團隊／個人／專案三個維度） */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
@@ -1382,6 +1419,6 @@ function KnowledgeMapCard({ groupId }: { groupId: string }) {
           <button className="btn-sm btn-ghost" onClick={() => setSelected(null)} aria-label="關閉詳情">關閉</button>
         </div>
       )}
-    </section>
+    </PlannerSection>
   );
 }

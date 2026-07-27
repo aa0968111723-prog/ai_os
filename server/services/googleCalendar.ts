@@ -15,6 +15,11 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "../db";
 import { proxyFetch } from "./http";
 import { recordError } from "./errlog";
+import {
+  isShuttingDown,
+  onShutdown,
+  trackBackgroundTask,
+} from "./shutdown";
 
 /* ────────────────────────── 設定 ────────────────────────── */
 
@@ -257,7 +262,9 @@ export async function syncUserCalendar(userId: string): Promise<{ created: numbe
   } finally {
     const f = inFlight.get(userId);
     inFlight.delete(userId);
-    if (f?.pending) void syncUserCalendar(userId).catch(() => {});
+    if (f?.pending && !isShuttingDown()) {
+      void trackBackgroundTask(syncUserCalendar(userId).catch(() => {}));
+    }
   }
 }
 
@@ -351,15 +358,20 @@ async function doSync(userId: string): Promise<{ created: number; updated: numbe
 /* ────────────────────────── 觸發（debounce）與週期對帳 ────────────────────────── */
 
 const debounceTimers = new Map<string, NodeJS.Timeout>();
+onShutdown(() => {
+  for (const timer of debounceTimers.values()) clearTimeout(timer);
+  debounceTimers.clear();
+});
 
 /** 單人延遲觸發：連續操作合併為一次同步；失敗吞掉（lastError 已記，sweep 會補救） */
 export function queueUserSync(userId: string): void {
-  if (!isGoogleCalendarConfigured()) return;
+  if (!isGoogleCalendarConfigured() || isShuttingDown()) return;
   const prev = debounceTimers.get(userId);
   if (prev) clearTimeout(prev);
   const t = setTimeout(() => {
     debounceTimers.delete(userId);
-    void syncUserCalendar(userId).catch(() => {});
+    if (isShuttingDown()) return;
+    void trackBackgroundTask(syncUserCalendar(userId).catch(() => {}));
   }, DEBOUNCE_MS);
   if (typeof t.unref === "function") t.unref();
   debounceTimers.set(userId, t);
@@ -367,8 +379,8 @@ export function queueUserSync(userId: string): void {
 
 /** 排程增刪改後呼叫：把「該組所有已連結成員」排進同步佇列（組排程是共享的——每個連結者的日曆都要動） */
 export function queueGroupSync(groupId: string): void {
-  if (!isGoogleCalendarConfigured()) return;
-  void (async () => {
+  if (!isGoogleCalendarConfigured() || isShuttingDown()) return;
+  void trackBackgroundTask((async () => {
     const rows = await db
       .select({ userId: schema.googleCalendarConnections.userId })
       .from(schema.googleCalendarConnections)
@@ -378,26 +390,36 @@ export function queueGroupSync(groupId: string): void {
       ))
       .where(eq(schema.googleCalendarConnections.status, "active"));
     for (const r of rows) queueUserSync(r.userId);
-  })().catch((err) => recordError("gcal:queueGroup", err));
+  })().catch((err) => recordError("gcal:queueGroup", err)));
 }
 
 let sweepStarted = false;
 
 /** 週期對帳：每 15 分鐘把所有 active 連線各跑一輪（逐一、不並發——單人流量小，穩比快重要） */
 export function startGoogleCalendarSweep(): void {
-  if (sweepStarted || !isGoogleCalendarConfigured()) return;
+  if (sweepStarted || !isGoogleCalendarConfigured() || isShuttingDown()) return;
   sweepStarted = true;
   const run = async () => {
+    if (isShuttingDown()) return;
     const conns = await db.select({ userId: schema.googleCalendarConnections.userId })
       .from(schema.googleCalendarConnections)
       .where(eq(schema.googleCalendarConnections.status, "active"));
     for (const c of conns) {
+      if (isShuttingDown()) return;
       await syncUserCalendar(c.userId).catch(() => {}); // 個別失敗不擋整輪；lastError 已記
     }
   };
-  setTimeout(() => void run().catch((err) => recordError("gcal:sweep", err)), 30_000); // 開機 30 秒後先跑一輪
-  const iv = setInterval(() => void run().catch((err) => recordError("gcal:sweep", err)), SWEEP_INTERVAL_MS);
+  const runTracked = () => {
+    if (isShuttingDown()) return;
+    void trackBackgroundTask(run().catch((err) => recordError("gcal:sweep", err)));
+  };
+  const firstRun = setTimeout(runTracked, 30_000); // 開機 30 秒後先跑一輪
+  const iv = setInterval(runTracked, SWEEP_INTERVAL_MS);
   if (typeof iv.unref === "function") iv.unref();
+  onShutdown(() => {
+    clearTimeout(firstRun);
+    clearInterval(iv);
+  });
   console.log("[gcal] ✓ Google 日曆同步已啟動（變更即推＋每 15 分鐘對帳）");
 }
 

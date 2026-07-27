@@ -1,11 +1,12 @@
 #!/bin/sh
-# AI Director OS 容器啟動（平台中立，目前用 Zeabur）：建表與種子都在伺服器內自動處理（server/db/ensure.ts），
-# 這裡只做開機前的環境自檢，log 全中文——在部署平台（Zeabur 等）的 Deploy Logs 直接可讀。
+# AI Director OS 容器啟動（平台中立，目前用 Zeabur）。
+# 正式啟動只做唯讀 migration/schema gate；絕不在 runtime push DDL。
 
 if [ -z "$DATABASE_URL" ]; then
   echo "[start] ⚠⚠⚠ DATABASE_URL 未設定！"
   echo "[start]     → 到部署平台的服務 Variables 設定 DATABASE_URL（Zeabur：跨服務引用 PostgreSQL 服務的連線字串）"
-  echo "[start]     伺服器仍會啟動（健康檢查可過），但登入與所有資料操作都會失敗"
+  echo "[start]     正式服務拒絕以無資料庫狀態啟動"
+  exit 78
 else
   echo "[start] DATABASE_URL 已設定（$(echo "$DATABASE_URL" | sed 's#^.*@#***@#')）"
 fi
@@ -17,6 +18,14 @@ elif [ -z "$FAL_KEY" ]; then
   echo "[start]     → 到部署平台的服務 Variables 填入 fal.ai 金鑰後重新部署"
 else
   echo "[start] Fal：真實生成模式（FAL_KEY 已設）"
+fi
+
+echo "[start] 唯讀檢查 migration ledger 與 schema drift…"
+if ! npm run db:check; then
+  echo "[start] ⚠ 資料庫尚未達可啟動狀態；本程序沒有套用任何 DDL"
+  echo "[start]   空 DB：先以 release/one-off job 執行 npm run db:migrate"
+  echo "[start]   既有 DB：先備份，執行 npm run db:adopt:dry-run，再依 fingerprint adopt"
+  exit 78
 fi
 
 exec node dist/index.js

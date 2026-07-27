@@ -9,3 +9,4 @@ dist/
 .data/
 __pycache__/
 e2e-ui-out/
+coverage/

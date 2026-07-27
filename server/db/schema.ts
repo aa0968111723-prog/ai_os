@@ -4,6 +4,7 @@
  * 組織模型：開發者 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
 import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 /* ── 認證與組織 ────────────────────────────────── */
 
@@ -33,7 +34,7 @@ export const groups = pgTable("groups", {
   weeklyPointsPerUser: integer("weekly_points_per_user"),
   /** 組總點數預算（累計上限，非每週重置）：開發者/團隊管理員「分配給這個組」的點數池；
    *  組累計淨消耗達此值即擋下，開發者到組到組員形成分配樹。null/0＝不限（只受全域/上層限制）。
-   *  組長/管理員可看、只有團隊管理員以上能調（點數是由上往下分配的）。nullable＝pushSchema 安全 */
+   *  組長/管理員可看、只有團隊管理員以上能調（點數是由上往下分配的）。nullable，適合向前相容 migration */
   budgetPoints: integer("budget_points"),
   /** 成本審核門檻（需求 2.1）：組員單筆生成估點 ≥ 此值需組長核准才送出；null/0＝不啟用。組長/管理員可調 */
   approvalThresholdPoints: integer("approval_threshold_points"),
@@ -58,11 +59,11 @@ export const groupMembers = pgTable("group_members", {
   /** 個人週額度覆寫（null＝跟組；0＝不限）——組長可對個別成員調 */
   weeklyPointsOverride: integer("weekly_points_override"),
   /** 個人總點數預算（累計上限，非每週重置）：組長從「組預算」再分配給這位組員的點數；
-   *  該組員在本組的累計淨消耗達此值即擋下。null/0＝不限（只受組/全域上限）。組長可調。nullable＝pushSchema 安全 */
+   *  該組員在本組的累計淨消耗達此值即擋下。null/0＝不限（只受組/全域上限）。組長可調。nullable，適合向前相容 migration */
   budgetPoints: integer("budget_points"),
   /** 團隊代理派工授權（需求 12 v2）：組彙總 AI 能「提議在某專案發起代理計畫」，實際執行交回
    *  planAgentCore（沿用該專案的 ACL/扣點/併發守門）。派工預設只開放組長以上；組長/管理員可對
-   *  個別組員把此欄設 true 授權其派工。組長以上永遠可派、不受此欄影響。null＝未授權（nullable＝pushSchema 安全） */
+   *  個別組員把此欄設 true 授權其派工。組長以上永遠可派、不受此欄影響。null＝未授權（nullable migration） */
   canDispatchAgent: boolean("can_dispatch_agent"),
 });
 
@@ -75,7 +76,7 @@ export const settings = pgTable("settings", {
   defaultWeeklyPoints: integer("default_weekly_points"),
   /** 每人每日上限（null/0＝不限）——簡報「每人每日上限，不會有人不小心把預算爆掉」 */
   defaultDailyPoints: integer("default_daily_points"),
-  /** 資料庫文件每人儲存配額 GB（null＝預設 5；0＝不限）。nullable 新欄＝pushSchema 安全 */
+  /** 資料庫文件每人儲存配額 GB（null＝預設 5；0＝不限）。nullable 新欄可向前相容 */
   fileQuotaGb: integer("file_quota_gb"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -106,12 +107,51 @@ export const sessions = pgTable("sessions", {
 });
 
 /**
+ * 跨 replica 的安全／成本限流狀態。
+ *
+ * keyHash 是 `scope + subject` 經 HMAC-SHA-256（production 強制 RATE_LIMIT_SECRET）後的不可逆鍵；
+ * email、IP、user id 等原始識別值一律不落 DB。state 只保存短期時間戳／封鎖期限，
+ * 所有讀改寫都由 services/rateLimit.ts 在 PostgreSQL transaction + advisory xact lock 內完成。
+ */
+export const rateLimitBuckets = pgTable("rate_limit_buckets", {
+  keyHash: text("key_hash").primaryKey(),
+  /** 非敏感用途名稱，例如 auth:email / mcp:ip / assistant:project */
+  scope: text("scope").notNull(),
+  /** { hits: number[], blockedUntil?: number } */
+  state: jsonb("state").$type<Record<string, unknown>>().notNull().default({}),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  updatedIdx: index("rate_limit_buckets_updated_idx").on(t.updatedAt),
+}));
+
+/**
+ * Crash-safe idempotency results for externally retried writes.
+ * The raw Idempotency-Key is never stored; services persist only a SHA-256
+ * digest bound to actor + operation scope. The result row is committed in the
+ * same transaction as the protected write.
+ */
+export const idempotencyRecords = pgTable("idempotency_records", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  actorId: uuid("actor_id").notNull(),
+  scope: text("scope").notNull(),
+  keyHash: text("key_hash").notNull(),
+  requestHash: text("request_hash").notNull(),
+  response: jsonb("response").$type<Record<string, unknown>>().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  actorScopeKeyUq: uniqueIndex("idempotency_records_actor_scope_key_uq")
+    .on(t.actorId, t.scope, t.keyHash),
+  expiresIdx: index("idempotency_records_expires_idx").on(t.expiresAt),
+}));
+
+/**
  * MCP 個人連線金鑰（per-user，取代「單一共用 MCP_API_KEY＝人人開發者」）：
  * 每位夥伴自助建立自己的金鑰，外部 AI 客戶端（Claude 等）帶此金鑰連進來時，
  * MCP 一律以「該金鑰的擁有者」身分＋其真實權限執行——組隔離、專案 ACL、點數額度、
  * 成本核准門檻全部沿用網頁端同一套守衛（見 services/mcp.ts）。
  * 與 sessions/invites 同級保護：DB 只存 SHA-256，原文只在建立當下回一次；撤銷＝軟刪保留審計歸屬。
- * 新表＝pushSchema 安全。
+ * 新表由正式 migration 建立。
  */
 export const mcpTokens = pgTable("mcp_tokens", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -122,9 +162,9 @@ export const mcpTokens = pgTable("mcp_tokens", {
   label: text("label").notNull(),
   /** 最小權限：唯讀金鑰只准呼叫讀取類工具（列專案/讀脈絡/找模型/查生成/查資料庫），
    *  一律擋寫入類（送生成、貼留言、寫資料列）——把金鑰交給外部自動化時可只給讀。
-   *  預設 false（可讀可寫，行為同舊金鑰）。default＝pushSchema 安全、既有列回填 false。 */
+   *  預設 false（可讀可寫，行為同舊金鑰）。default 讓 migration 可確定回填既有列。 */
   readOnly: boolean("read_only").notNull().default(false),
-  /** 到期時刻（null＝永不過期）：過期即驗證失敗（比照撤銷）。交出去的金鑰可設短效期自動失效。nullable＝pushSchema 安全 */
+  /** 到期時刻（null＝永不過期）：過期即驗證失敗（比照撤銷）。交出去的金鑰可設短效期自動失效。nullable 可向前相容 */
   expiresAt: timestamp("expires_at"),
   /** 最近成功呼叫時刻（fire-and-forget 更新）：供使用者判斷哪把在用、哪把可撤 */
   lastUsedAt: timestamp("last_used_at"),
@@ -161,7 +201,7 @@ export const generations = pgTable("generations", {
   prompt: text("prompt").notNull(),
   params: jsonb("params").notNull().default({}),
   /** awaiting_approval/rejected（需求 2.1 成本審核）：達組門檻的組員生成先待核，核准才扣點送 fal；
-   *  enum 只是 TS 層註記（DB 欄位為 text），pushSchema 對既有表無變更 */
+   *  enum 只是 TS 層註記（DB 欄位為 text），不需要 DB 型別 migration */
   status: text("status", { enum: ["queued", "running", "done", "failed", "awaiting_approval", "rejected"] }).notNull().default("queued"),
   pointsEst: integer("points_est").notNull().default(0),
   pointsActual: integer("points_actual"),
@@ -187,18 +227,26 @@ export const generations = pgTable("generations", {
   error: text("error"),
   /** 使用者為生成物取的名字（null＝用 prompt 當標題）——生成紀錄好找片（#20） */
   name: text("name"),
-  /** 收藏標記：標星的生成物可篩「只看收藏」（#20）。nullable+default false＝pushSchema 安全、既有列回填 false */
+  /** 收藏標記：標星的生成物可篩「只看收藏」（#20）。nullable+default false 讓 migration 可確定回填既有列 */
   favorite: boolean("favorite").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
   // listByProject 對每個分鏡各跑兩支 scene_id 相關子查詢；補索引避免生成量成長後全表掃描。
-  // 非 unique（純索引，pushSchema 建索引不觸發 truncate 提問，安全）
+  // 非 unique 純索引，由可審核 migration 建立。
   sceneIdIdx: index("generations_scene_id_idx").on(t.sceneId),
   // 修 R3-SQL-02（與並行 PR #105 相同結論）：熱路徑 listByProject（WHERE project_id ORDER BY created_at
   // DESC LIMIT 30）與 keyset 分頁——每位開著專案的檢視者頻繁輪詢，無此索引＝全表掃＋排序。(project_id,
   // created_at) 讓 Postgres 反向掃即得最新 N 筆；另補依組過濾（跨組統計）索引。
   projectCreatedIdx: index("generations_project_created_idx").on(t.projectId, t.createdAt),
+  // 執行器只掃在途工作；partial index 現在納入 schema/migration 單一真相，
+  // 不再由應用程式開機時偷偷補 DDL。
+  activeIdx: index("generations_active_idx")
+    .on(t.updatedAt)
+    .where(sql`${t.status} in ('queued','running')`),
+  projectActiveIdx: index("generations_project_active_idx")
+    .on(t.projectId, t.updatedAt)
+    .where(sql`${t.status} in ('queued','running')`),
   groupIdx: index("generations_group_idx").on(t.groupId),
 }));
 
@@ -214,7 +262,7 @@ export const costLedger = pgTable("cost_ledger", {
 }, (t) => ({
   // 額度守門的 SUM 聚合都掃這張表（reserveQuota 還在持 advisory lock 的交易內掃），
   // 且 quota.my 徽章每次頁面載入都跑——全非唯一索引（帳本是 append-only，扣點/退點/回收
-  // 對同一 generationId 各插一列，唯一索引會 23505 擋死退點）。開機 pushSchema 自動套用。
+  // 對同一 generationId 各插一列，唯一索引會 23505 擋死退點）。由正式 migration 套用。
   userGroupIdx: index("cost_ledger_user_group_idx").on(t.userId, t.groupId), // usedByMember + reserveQuota 個人預算；user_id 前綴另供 usedToday/usedThisWeek/週日守門
   groupCreatedIdx: index("cost_ledger_group_created_idx").on(t.groupId, t.createdAt), // usedByGroup/groupUsage（group_id 前綴）＋ consumptionStats 組×日期範圍
   createdIdx: index("cost_ledger_created_idx").on(t.createdAt), // consumptionStats 全站（開發者）日期範圍掃描
@@ -273,7 +321,7 @@ export const knowledge = pgTable("knowledge", {
 
 /**
  * 長文版本歷史（#29）：知識庫逐字稿等長文每次更新前存一版快照，可檢視／還原。
- * 目前 kind='knowledge'（refId=knowledge.id）；未來可擴 'worldview'。新表＝pushSchema 安全。
+ * 目前 kind='knowledge'（refId=knowledge.id）；未來可擴 'worldview'。新表由正式 migration 建立。
  */
 export const textVersions = pgTable("text_versions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -397,7 +445,11 @@ export const feedback = pgTable("feedback", {
   /** 重送＝修改（一人一組一份）。舊版靠竄改 createdAt 讓更新浮到最新，會抹掉真正建立時間；
    * 改用獨立 updatedAt：createdAt 保留初次填答時刻，彙整/預填以 updatedAt 排序。 */
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // PostgreSQL 的 UNIQUE 預設不把 NULL 視為相同，因此以固定 UUID 收斂「無組別」問卷。
+  userGroupUq: uniqueIndex("feedback_user_group_uq")
+    .on(t.userId, sql`coalesce(${t.groupId}, '00000000-0000-0000-0000-000000000000'::uuid)`),
+}));
 
 /** 模型目錄(啟動時從 shared/models.ts 同步;代理/報表可直接 SQL 查「哪個模型適合」) */
 export const modelCatalog = pgTable("model_catalog", {
@@ -444,7 +496,7 @@ export const messages = pgTable("messages", {
  * 站內私訊（通訊錄 1:1 聊天）：獨立於專案留言（messages 掛組/專案、組內可見），
  * 私訊只有收發雙方看得到——查詢一律以「本人是 sender 或 recipient」為界，管理員也不例外。
  * 可私訊對象＝同組夥伴（含團隊管理展開；開發者可與全站互訊），見 services/dmCore.ts。
- * 內容不落審計明文（trpc.ts 對 dm.send 脫敏 body），維持「私」的承諾。新表＝pushSchema 安全。
+ * 內容不落審計明文（trpc.ts 對 dm.send 脫敏 body），維持「私」的承諾。新表由正式 migration 建立。
  */
 export const dmMessages = pgTable("dm_messages", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -543,7 +595,7 @@ export const workflowRuns = pgTable("workflow_runs", {
 /**
  * 交付包匯出 job（QA-005）：同步 ZIP 下載改為「建 job → 背景打包到 Volume → 輪詢進度 → 完成後下載」。
  * 大包（遠端素材多）打包可達數分鐘，同步串流讓瀏覽器看似卡死、使用者重複點擊做出重複包。
- * 新表＝pushSchema 安全；status 由 exportRunner 以 CAS 推進；cancelled 由取消 mutation 設定，
+ * 新表由正式 migration 建立；status 由 exportRunner 以 CAS 推進；cancelled 由取消 mutation 設定，
  * runner 在進度回報時讀到即中止。done 的 zip 檔留在 Volume（storagePath），過期由 runner 定期清理。
  */
 export const exportJobs = pgTable("export_jobs", {
@@ -602,10 +654,6 @@ export const agentRuns = pgTable("agent_runs", {
  * 首次讀取時以 shared/options 的預設 lazy-seed；(groupId,type,value) 唯一，讓 seed 冪等。
  * worldview 類（tone/theme/style）value===label（直接是注入生成的字串）；kind/platform 的 value 是穩定 id。
  */
-// 註：(group_id,type,value) 唯一索引「不在此宣告」——drizzle-kit pushSchema 對「已有資料
-// 的表新增 unique」會觸發互動式 truncate 提問，在非 TTY 容器直接卡死開機（redeploy 才會爆）。
-// 改由 ensure.ts 的 applyManualMigrations 在開機時「先去重再 create unique index if not exists」補上；
-// 應用層另有 optionsSeeded 原子認領（optionsStore）＋ upsert 23505 攔截，雙層防重。
 export const groupOptions = pgTable("group_options", {
   id: uuid("id").primaryKey().defaultRandom(),
   groupId: uuid("group_id").notNull(),
@@ -619,7 +667,12 @@ export const groupOptions = pgTable("group_options", {
   active: boolean("active").notNull().default(true),
   createdBy: uuid("created_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // 由可審核 migration 建立；既有資料若重複，必須先走 baseline 前置清理，
+  // 不再在每次應用程式開機時刪資料。
+  groupTypeValueUq: uniqueIndex("group_options_group_type_value_uq")
+    .on(t.groupId, t.type, t.value),
+}));
 
 /**
  * 元件級回饋（R23）：使用者點選頁面元件自動標定 → 分類 + 文字 + 可選截圖。
@@ -629,7 +682,7 @@ export const groupOptions = pgTable("group_options", {
 /**
  * 專案級權限（需求 2.3 v1）：預設「組內全員可編輯」（無列＝editor，完全向後相容）；
  * 組長可把個別成員明確設為 viewer（唯讀：不能生成/改分鏡/改知識庫，仍可看、留言、下載）。
- * 組長/團隊管理員/開發者永遠可編輯（不受列影響）。新表＝pushSchema 安全。
+ * 組長/團隊管理員/開發者永遠可編輯（不受列影響）。新表由正式 migration 建立。
  */
 export const projectMembers = pgTable("project_members", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -720,7 +773,7 @@ export const googleCalendarConnections = pgTable("google_calendar_connections", 
  * - api＝外部資料庫/API 連接（Airtable/Supabase/自建服務，secretEnc＝認證標頭值）。
  * secretEnc 一律 AES-256-GCM 加密（iv:tag:cipher hex，金鑰見 services/integrations.ts——與 DB 分離，
  * DB 外洩不可解密）；憑證原文永不回傳前端（meta 只存 email/workspace/末四碼等顯示用資訊）。
- * google-drive/notion 一人一條（name=""）；api 可多條具名連線。新表＝pushSchema 安全。
+ * google-drive/notion 一人一條（name=""）；api 可多條具名連線。新表由正式 migration 建立。
  */
 export const userIntegrations = pgTable("user_integrations", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -761,7 +814,7 @@ export const googleEventLinks = pgTable("google_event_links", {
  * 審計日誌（需求 2.2「紀錄每一個行動的每一個細節操作」）：
  * 所有登入後 mutation 由 tRPC 中介層集中寫入（見 services/audit.ts）——
  * 誰、何時、做了什麼（procedure 路徑）、對哪個組/專案、輸入摘要（已脫敏）、成功與否。
- * 新表＝pushSchema 安全；只插入不更新，量大時靠索引查詢。
+ * 新表由正式 migration 建立；只插入不更新，量大時靠索引查詢。
  */
 export const auditLog = pgTable("audit_log", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -803,7 +856,7 @@ export const feedbackReports = pgTable("feedback_reports", {
   status: text("status", { enum: ["open", "reviewing", "done"] }).notNull().default("open"),
   /* ── 回饋代理（每 3 天巡一次）自動分診欄位 ──
    * 背景代理讀未處理回饋 → LLM 分診（嚴重度／一句摘要／建議修復／給使用者的回覆）→
-   * 回填以下欄位並寄信通知回報者。全部可為 null（既有列與尚未巡到的回饋維持 null，pushSchema 純新增安全）。 */
+   * 回填以下欄位並寄信通知回報者。全部可為 null（既有列與尚未巡到的回饋維持 null，屬向前相容新增欄位）。 */
   agentReviewedAt: timestamp("agent_reviewed_at"),
   /** LLM 判定的嚴重度：low｜medium｜high（分診排序用；解析不出時 null） */
   agentSeverity: text("agent_severity", { enum: ["low", "medium", "high"] }),
@@ -823,7 +876,7 @@ export const feedbackReports = pgTable("feedback_reports", {
 /**
  * 回饋代理巡檢紀錄（每 3 天一次；亦可開發者手動觸發）：每次巡檢寫一列，
  * 記這輪看了幾筆、寄出幾封信、成功與否——管理頁「回饋代理」卡以最新一列顯示狀態。
- * 只插入不更新完局後不再改（running→done/failed 於同列 update），新表＝pushSchema 安全。
+ * 只插入不更新完局後不再改（running→done/failed 於同列 update），新表由正式 migration 建立。
  */
 /* ── 自訂資料庫（個人→組→團隊→全站 四層範圍） ─────────────
  * 願景：一套可從「個人筆記型清單」長到「組織級結構化資料」的輕量資料庫——
@@ -831,7 +884,7 @@ export const feedbackReports = pgTable("feedback_reports", {
  * 權限完全沿用既有組織模型（見 services/databaseAcl.ts）：
  *   personal＝只有本人；group＝組成員（組長管理）；team＝團隊成員（團隊管理員管理）；
  *   global＝全站可讀（開發者管理）。memberWritable=false 時列資料只有管理者可寫。
- * 新表＝pushSchema 安全。 */
+ * 新表由正式 migration 建立。 */
 
 export const dataTables = pgTable("data_tables", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -869,7 +922,7 @@ export const dataTables = pgTable("data_tables", {
  * - textContent＝伺服器抽出的純文字（AI 讀這裡；null＝此格式暫不可讀，僅存檔）。
  * - storagePath＝Volume 落地檔（null＝純文字匯入，只有 textContent）。
  * - 配額：每人（uploadedBy 加總 sizeBytes）預設 5GB，settings.fileQuotaGb 可調。
- * 新表＝pushSchema 安全。
+ * 新表由正式 migration 建立。
  */
 export const dataFiles = pgTable("data_files", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -883,10 +936,10 @@ export const dataFiles = pgTable("data_files", {
   sourceUrl: text("source_url"),
   /** 抽出的可讀文字（上限見 databaseFiles.MAX_TEXT_CHARS）；null＝AI 暫不可讀 */
   textContent: text("text_content"),
-  /** 分類標籤（圖影與一般文件皆可）：人工可改、圖片可由 AI 自動分類填入。nullable＝pushSchema 安全 */
+  /** 分類標籤（圖影與一般文件皆可）：人工可改、圖片可由 AI 自動分類填入。nullable 可向前相容 */
   category: text("category"),
   /** AI 看圖描述（vision 模型產生的繁中描述）：圖影檔的「AI 可讀」內容，
-   *  團隊助手與 MCP 代理引用這裡回答「這張圖是什麼」。nullable＝pushSchema 安全 */
+   *  團隊助手與 MCP 代理引用這裡回答「這張圖是什麼」。nullable 可向前相容 */
   aiDescription: text("ai_description"),
   uploadedBy: uuid("uploaded_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -916,7 +969,7 @@ export const dataRows = pgTable("data_rows", {
  * 伺服器事件（審批/私訊/@提及/生成與代理完成）經 services/webPush 推到所有已連結裝置，
  * 關頁、關瀏覽器也收得到（相對於既有的頁內桌面通知只在分頁開著時有效）。
  * endpoint 唯一＝同裝置重複啟用是 upsert 不長重複列；推送回 404/410 即自動清掉失效列。
- * 新表＝pushSchema 安全。
+ * 新表由正式 migration 建立。
  */
 export const pushSubscriptions = pgTable("push_subscriptions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -938,7 +991,7 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
 
 /**
  * VAPID 金鑰對（單列 key='vapid'）：未設 VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY 環境變數時
- * 開機自動生成並存這裡——金鑰必須跨重啟穩定，否則所有既有訂閱全數失效。新表＝pushSchema 安全。
+ * 開機自動生成並存這裡——金鑰必須跨重啟穩定，否則所有既有訂閱全數失效。新表由正式 migration 建立。
  */
 export const webPushVapid = pgTable("web_push_vapid", {
   key: text("key").primaryKey(),

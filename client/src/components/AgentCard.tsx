@@ -85,6 +85,7 @@ export function AgentCard({
   // 與 App 同 key 共用快取：核准/停止的授權是「發起人本人或組長以上」，按鈕顯示要跟伺服器規則對齊
   const me = trpc.auth.me.useQuery();
   const [goal, setGoal] = useState("");
+  const [expandedRuns, setExpandedRuns] = useState<Record<string, boolean>>({});
   const runs = trpc.agents.listByProject.useQuery(
     { projectId },
     {
@@ -203,21 +204,38 @@ export function AgentCard({
       {(runs.data ?? []).map((r) => {
         const steps = r.steps as AgentStep[];
         const st = RUN_STATUS[r.status] ?? { label: r.status, cls: "queued" };
+        const defaultOpen = r.status === "running" || r.status === "awaiting_approval";
+        const runOpen = expandedRuns[r.id] ?? defaultOpen;
+        const doneSteps = steps.filter((s) => s.status === "done").length;
         // 與伺服器授權規則對齊（審查修復）：核准/放棄/停止＝發起人本人或組長以上——
         // 一般編輯者對別人的 run 按了必然 FORBIDDEN，直接不顯示按鈕
         const canAct = canEdit && (isLeader || r.userId === me.data?.user.id);
         return (
-          <div key={r.id} style={{ marginTop: 14, paddingTop: 10, borderTop: "1px solid var(--border-soft)" }} data-fb="代理執行列">
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <strong style={{ fontSize: "var(--fs-13)" }}>目標：{r.goal.slice(0, 60)}{r.goal.length > 60 ? "…" : ""}</strong>
+          <details
+            key={r.id}
+            className="agent-run"
+            open={runOpen}
+            onToggle={(e) => {
+              const open = e.currentTarget.open;
+              setExpandedRuns((prev) => (prev[r.id] === open ? prev : { ...prev, [r.id]: open }));
+            }}
+            data-fb="代理執行列"
+          >
+            <summary>
+              <span className="agent-run__goal">目標：{r.goal.slice(0, 60)}{r.goal.length > 60 ? "…" : ""}</span>
               <span className={`pill ${st.cls}`}>{st.label}</span>
+              <span className="hint">步驟 {doneSteps}/{steps.length}</span>
               <span className="hint">{new Date(r.createdAt).toLocaleString("zh-TW", { hour12: false })}</span>
+              <Icon name={runOpen ? "ChevronUp" : "ChevronDown"} size={13} />
+            </summary>
+            <div className="agent-run__body">
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               {r.status === "running" && canAct && (
                 <button className="btn-sm" disabled={stop.isPending} onClick={() => stop.mutate({ runId: r.id })}>
                   {stop.isPending ? "停止中…" : "停止後續步驟"}
                 </button>
               )}
-            </div>
+              </div>
             {r.summary && <p className="hint" style={{ margin: "4px 0" }}>{r.summary}</p>}
             <div style={{ marginTop: 4 }}>
               {steps.map((s, i) => (
@@ -259,7 +277,8 @@ export function AgentCard({
             {r.status === "failed" && r.error && <p className="hint" style={{ marginTop: 4, color: "var(--danger-ink)" }}>原因：{r.error}</p>}
             {r.status === "stopped" && <p className="hint" style={{ marginTop: 4 }}>已停止（已完成與正在生成的步驟不受影響）。</p>}
             {r.status === "done" && <p className="hint" style={{ marginTop: 4, color: "var(--success-ink)" }}>全部完成——成品在生成紀錄與分鏡列表。</p>}
-          </div>
+            </div>
+          </details>
         );
       })}
     </>

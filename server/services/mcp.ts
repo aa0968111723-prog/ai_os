@@ -5,11 +5,11 @@
  *   組隔離（requireGroup）、專案 ACL（assertProjectEditable）、點數額度與成本核准門檻，
  *   全部沿用網頁端同一套守衛（submit_generation 直接重用 submitGenerationCore）。
  * - 金鑰可設「唯讀」與「到期」（見 services/mcpAuth）：唯讀金鑰經 scopeDeniedReason 擋所有寫入類工具。
- * - 舊有共用金鑰 env MCP_API_KEY 仍可用（對應開發者），僅為向後相容；見 services/mcpAuth。
+ * - 舊共用金鑰另需 ALLOW_LEGACY_MCP_ADMIN_KEY=1，且僅限非 production 本機／CI；正式環境只接受個人金鑰。
  * - 工具（讀/寫分類的單一來源在 shared/mcpCatalog）：
  *     基礎：whoami / list_projects / get_project_context / find_model / submit_generation / post_message
  *     生成取回：list_generations / get_generation / list_assets（成品簽成免登入短效網址）
- *     自訂資料庫：list_databases / query_database / add_database_row / list_database_files / read_database_file / get_database_stats
+ *     自訂資料庫：list_databases / query_database / add_database_row / add_database_rows / list_database_files / read_database_file / get_database_stats
  *     AI 代理（重用 agentCore）：plan_agent / approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
  *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item
  *     筆記・會議紀錄（組共用、可匯入知識庫）：list_notes / get_note
@@ -30,6 +30,18 @@ import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity, scopeDeniedReason, type McpScope } from "./mcpAuth";
 import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
 import { addDataRowValidated } from "./databaseCore";
+import {
+  DATABASE_BATCH_REQUEST_LIMIT,
+  databaseBatchWriteDenied,
+  parseDatabaseBatchRows,
+} from "./databaseBatchApi";
+import {
+  executeIdempotentDatabaseBatch,
+  IDEMPOTENCY_KEY_MAX_LENGTH,
+  IDEMPOTENCY_KEY_MIN_LENGTH,
+  IDEMPOTENCY_KEY_PATTERN,
+  parseIdempotencyKey,
+} from "./databaseBatchIdempotency";
 import { formatStatsLine, mediaKindOf, tableStats } from "./databaseMedia";
 import {
   planAgentCore, approveAgentCore, discardAgentCore, stopAgentCore,
@@ -39,6 +51,20 @@ import { addScheduleItemCore, listScheduleForGroup } from "./scheduleCore";
 import { DM_MAX_BODY, listDmPeers, listDmThreads, listDmHistory, markDmRead, resolveDmPeerRef, sendDm } from "./dmCore";
 import type { AgentStep } from "./agentRunner";
 import type { AuthState } from "./auth";
+import {
+  clearRateLimit,
+  inspectFailureRateLimit,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+  RateLimitConfigurationError,
+  RateLimitUnavailableError,
+  recordRateLimitFailure,
+} from "./rateLimit";
+import { toMcpJsonRpcError } from "./mcpErrors";
+import {
+  escapeLikeLiteral,
+  normalizeDatabaseSearchKeyword,
+} from "./databaseRowSearch";
 
 const PROTOCOL_VERSION = "2024-11-05";
 
@@ -133,7 +159,7 @@ const TOOLS = [
       type: "object",
       properties: {
         tableId: { type: "string" },
-        keyword: { type: "string", description: "關鍵字（比對整列資料）" },
+        keyword: { type: "string", maxLength: 200, description: "關鍵字（比對整列資料；最多 200 字）" },
         limit: { type: "number", description: "最多回幾列（預設 50，上限 200）" },
       },
       required: ["tableId"],
@@ -149,6 +175,38 @@ const TOOLS = [
         data: { type: "object", description: "{ 欄位key: 值 }" },
       },
       required: ["tableId", "data"],
+    },
+  },
+  {
+    name: "add_database_rows",
+    description: "批次新增 1–500 列。idempotencyKey 必填；24 小時內重試請沿用同一 key，相同內容會回放原結果，不會重複寫入",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tableId: { type: "string" },
+        idempotencyKey: {
+          type: "string",
+          minLength: IDEMPOTENCY_KEY_MIN_LENGTH,
+          maxLength: IDEMPOTENCY_KEY_MAX_LENGTH,
+          pattern: IDEMPOTENCY_KEY_PATTERN.source,
+          description: "本批唯一鍵；同一批重試必須沿用，改內容必須換 key",
+        },
+        rows: {
+          type: "array",
+          minItems: 1,
+          maxItems: DATABASE_BATCH_REQUEST_LIMIT,
+          items: {
+            type: "object",
+            properties: {
+              data: { type: "object", description: "{ 欄位key: 值 }" },
+            },
+            required: ["data"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["tableId", "idempotencyKey", "rows"],
+      additionalProperties: false,
     },
   },
   {
@@ -439,7 +497,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     });
   }
 
-  if (name === "query_database" || name === "add_database_row") {
+  if (name === "query_database" || name === "add_database_row" || name === "add_database_rows") {
     const tableId = String(args.tableId ?? "");
     const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
     if (!table) throw new Error("找不到這個資料庫");
@@ -450,9 +508,14 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
 
     if (name === "query_database") {
       const conds = [eq(schema.dataRows.tableId, table.id)];
-      const keyword = String(args.keyword ?? "").trim();
-      if (keyword) conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + keyword + "%"}`);
-      const limit = Math.min(Math.max(Number(args.limit) || 50, 1), 200);
+      const keyword = normalizeDatabaseSearchKeyword(
+        typeof args.keyword === "string" ? args.keyword : "",
+      );
+      if (keyword) conds.push(sql`${schema.dataRows.data}::text ilike ${`%${escapeLikeLiteral(keyword)}%`} escape ${"\\"}`);
+      const requestedLimit = Number(args.limit);
+      const limit = Number.isFinite(requestedLimit)
+        ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 200)
+        : 50;
       const rows = await db
         .select({ id: schema.dataRows.id, data: schema.dataRows.data, updatedAt: schema.dataRows.updatedAt })
         .from(schema.dataRows)
@@ -460,6 +523,19 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         .orderBy(desc(schema.dataRows.createdAt))
         .limit(limit);
       return { table: table.name, fields: table.fields, rows };
+    }
+
+    if (name === "add_database_rows") {
+      const denied = databaseBatchWriteDenied(scope.readOnly, access.canWriteRows);
+      if (denied) throw new Error(denied);
+      const rawRows = parseDatabaseBatchRows(args);
+      const idempotencyKey = parseIdempotencyKey(args.idempotencyKey);
+      return executeIdempotentDatabaseBatch({
+        table,
+        actorId: auth.user.id,
+        rawRows,
+        idempotencyKey,
+      });
     }
 
     // add_database_row：走列寫入單一路徑（與 tRPC/代理/REST 一致，含 20,000 列保險絲）
@@ -890,63 +966,78 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   throw new Error(`未知工具：${name}`);
 }
 
-// 金鑰失敗速率限制（記憶體計數，比照系統其他記憶體防線）：每 IP 每分鐘失敗達門檻即封鎖一段時間，
-// 擋暴力猜金鑰。成功即清除該 IP 計數，正常客戶端不受影響（#24）。
-const MCP_FAIL_WINDOW_MS = 60_000;
-const MCP_FAIL_MAX = 10;
-const MCP_BLOCK_MS = 5 * 60_000;
-const mcpFails = new Map<string, { count: number; windowStart: number; blockedUntil: number }>();
-
 function mcpClientIp(req: Request): string {
   // index.ts 已設 trust proxy=1，req.ip 即真實 client IP
   return req.ip ?? req.socket.remoteAddress ?? "unknown";
 }
 
-function mcpBlocked(ip: string): boolean {
-  const rec = mcpFails.get(ip);
-  return rec != null && rec.blockedUntil > Date.now();
-}
-
-function mcpRecordFailure(ip: string): void {
-  const now = Date.now();
-  // 順手清掉過期且未封鎖的陳舊項，避免 Map 無限膨脹被當成記憶體耗盡面
-  if (mcpFails.size > 1024) {
-    for (const [k, v] of mcpFails) {
-      if (v.blockedUntil <= now && now - v.windowStart > MCP_FAIL_WINDOW_MS) mcpFails.delete(k);
-    }
+function mcpRateLimitFailure(res: Response, error: unknown): boolean {
+  if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+    // Fail closed：PostgreSQL/金鑰設定壞掉時不可退回單機記憶體，也不可略過防爆破後繼續驗證。
+    console.error(`[mcp] PostgreSQL 限流不可用（拒絕請求）：${error.name}: ${error.message}`);
+    res.status(503).json({ error: "MCP 安全檢查暫時無法使用，請稍後再試" });
+    return true;
   }
-  let rec = mcpFails.get(ip);
-  if (!rec || now - rec.windowStart > MCP_FAIL_WINDOW_MS) rec = { count: 0, windowStart: now, blockedUntil: 0 };
-  rec.count += 1;
-  if (rec.count >= MCP_FAIL_MAX) rec.blockedUntil = now + MCP_BLOCK_MS;
-  mcpFails.set(ip, rec);
+  return false;
 }
 
 /** JSON-RPC 處理器（掛在 POST /api/mcp） */
 export async function handleMcp(req: Request, res: Response): Promise<void> {
-  // 未啟用＝沒設 env 共用金鑰、也沒任何個人金鑰：回 404 不對外張揚端點（行為同舊版）
+  // 未啟用＝沒有任何個人金鑰，且非 production 也沒有明確開啟 legacy key：回 404 不張揚端點。
   if (!(await isMcpEnabled())) {
-    res.status(404).json({ error: "MCP 未啟用（在「怎麼用」頁建立個人連線金鑰，或設 MCP_API_KEY 環境變數）" });
+    res.status(404).json({ error: "MCP 未啟用（請在「怎麼用」頁建立個人連線金鑰）" });
     return;
   }
   const ip = mcpClientIp(req);
-  if (mcpBlocked(ip)) {
-    res.status(429).json({ error: "嘗試過於頻繁，請稍後再試" });
+  let blocked;
+  try {
+    blocked = await inspectFailureRateLimit(
+      RATE_LIMIT_SCOPES.mcpIp,
+      ip,
+      RATE_LIMIT_POLICIES.mcpFailures,
+    );
+  } catch (error) {
+    if (mcpRateLimitFailure(res, error)) return;
+    throw error;
+  }
+  if (blocked.blocked) {
+    res.setHeader("Retry-After", String(Math.max(1, Math.ceil(blocked.retryAfterMs / 1_000))));
+    res.status(429).json({ error: "MCP 金鑰連續失敗過多（每分鐘 10 次後封鎖 5 分鐘），請稍後再試" });
     return;
   }
   // 身分解析：個人金鑰→該使用者；env 共用金鑰→開發者；皆不符→401（記一次失敗，擋暴力猜）
   const provided = req.headers["x-api-key"];
   const identity = typeof provided === "string" && provided.length > 0 ? await resolveMcpIdentity(provided) : null;
   if (!identity) {
-    mcpRecordFailure(ip);
+    try {
+      await recordRateLimitFailure(
+        RATE_LIMIT_SCOPES.mcpIp,
+        ip,
+        RATE_LIMIT_POLICIES.mcpFailures,
+      );
+    } catch (error) {
+      if (mcpRateLimitFailure(res, error)) return;
+      throw error;
+    }
     res.status(401).json({ error: "MCP 金鑰不正確或已撤銷" });
     return;
   }
-  mcpFails.delete(ip); // 驗證成功即清除該 IP 的失敗計數
+  try {
+    // 驗證成功清掉這個 IP 的失敗視窗；清理失敗也 fail closed，避免 DB 故障時繞過限流。
+    await clearRateLimit(RATE_LIMIT_SCOPES.mcpIp, ip);
+  } catch (error) {
+    if (mcpRateLimitFailure(res, error)) return;
+    throw error;
+  }
   const auth = identity.auth;
   const body = req.body as { jsonrpc?: string; id?: number | string | null; method?: string; params?: Record<string, unknown> };
   const reply = (result: unknown): void => void res.json({ jsonrpc: "2.0", id: body.id ?? null, result });
-  const fail = (code: number, message: string): void => void res.json({ jsonrpc: "2.0", id: body.id ?? null, error: { code, message } });
+  const fail = (code: number, message: string, data?: { code: string }): void =>
+    void res.json({
+      jsonrpc: "2.0",
+      id: body.id ?? null,
+      error: { code, message, ...(data ? { data } : {}) },
+    });
 
   try {
     switch (body.method) {
@@ -968,8 +1059,10 @@ export async function handleMcp(req: Request, res: Response): Promise<void> {
         return fail(-32601, `不支援的方法：${body.method}`);
     }
   } catch (err) {
-    // requireGroup/assertProjectEditable 拋的是 TRPCError；對外一律折成 JSON-RPC error 的人話訊息
-    if (err instanceof TRPCError) return fail(-32000, err.message);
-    return fail(-32000, err instanceof Error ? err.message : String(err));
+    const mapped = toMcpJsonRpcError(err);
+    if (mapped.data.code === "INTERNAL_ERROR") {
+      console.error("[mcp] 未預期的工具錯誤（已對客戶端隱藏細節）：", err);
+    }
+    return fail(mapped.code, mapped.message, mapped.data);
   }
 }

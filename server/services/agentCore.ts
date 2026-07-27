@@ -25,6 +25,13 @@ import { pickGenerateModel, MODEL_CHEATSHEET } from "../routers/assistant";
 import { AGENT_TTS_MODEL, type AgentStep } from "./agentRunner";
 import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
 import type { DataField } from "../../shared/databaseFields";
+import {
+  consumeRateLimit,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+  RateLimitConfigurationError,
+  RateLimitUnavailableError,
+} from "./rateLimit";
 
 export type AgentRunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -35,19 +42,14 @@ const PLAN_KNOWLEDGE_BUDGET = 6000;
 /** 單一計畫的步驟上限（防 LLM 排出巨額計畫；同時是估點總額的天然上限） */
 const MAX_PLAN_STEPS = 12;
 
-// 記憶體節流（比照 assistant.ask）：每人每分鐘 4 次規劃，擋狂刷付費 LLM。
-// 放核心層＝不論從網頁或 MCP 進來都受同一限流保護（付費 LLM 的單一防線）。
-const LIMIT_PER_MIN = 4;
-const WINDOW_MS = 60_000;
-const hits = new Map<string, number[]>();
-function overLimit(userId: string): boolean {
-  const now = Date.now();
-  const arr = (hits.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
-  const over = arr.length >= LIMIT_PER_MIN;
-  if (!over) arr.push(now);
-  if (arr.length) hits.set(userId, arr);
-  else hits.delete(userId);
-  return over;
+// PostgreSQL 滑動視窗：每人每分鐘 4 次規劃；網頁/MCP/所有 replicas 共用同一防線。
+async function overLimit(userId: string): Promise<boolean> {
+  const decision = await consumeRateLimit(
+    RATE_LIMIT_SCOPES.agentPlan,
+    userId,
+    RATE_LIMIT_POLICIES.agentPlan,
+  );
+  return !decision.allowed;
 }
 
 /** LLM 輸出的計畫步驟（一律用代號：sceneNo／modelId／dbRef；uuid 一律不收） */
@@ -221,8 +223,15 @@ const STATUS_LABEL: Record<string, string> = {
 /** 規劃：讀專案現況＋知識庫＋可寫資料庫，請 LLM 針對目標排一份多步計畫（只規劃不執行；固定守門）。 */
 export async function planAgentCore(input: { auth: AuthState; projectId: string; goal: string }): Promise<AgentRunRow> {
   const { auth } = input;
-  if (overLimit(auth.user.id)) {
-    throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "規劃太頻繁（每分鐘最多 4 次），休息一下再試" });
+  try {
+    if (await overLimit(auth.user.id)) {
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "規劃太頻繁（每分鐘最多 4 次），休息一下再試" });
+    }
+  } catch (error) {
+    if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "代理規劃安全限流暫時無法使用，請稍後再試" });
+    }
+    throw error;
   }
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });

@@ -68,35 +68,67 @@ export class NimServiceError extends Error {
   }
 }
 
-/** 呼叫 NVIDIA NIM Chat API(OpenAI 相容);金鑰未設或 HTTP 錯誤一律拋例外,由呼叫端退點 */
+/** 逾時/暫時性失敗自動重試（含首次共 3 次）。LLM 端點偶發 timeout/5xx/網路抖動——
+ *  一次重試就能救回大多數（實測：同一問第一次「暫時沒回應」、第二次就成功）。
+ *  上限/金鑰（NimServiceError）、4xx、用戶端主動中止一律不重試。 */
+const NIM_MAX_ATTEMPTS = 3;
+const NIM_RETRY_BASE_MS = 400;
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** 這個錯誤該不該重試：上限/金鑰重試無用；4xx 客戶端錯誤重試無用；
+ *  網路錯誤、逾時（TimeoutError，無 nimStatus）、5xx 伺服器暫時性錯誤才重試。 */
+export function nimRetryable(err: unknown): boolean {
+  if (err instanceof NimServiceError) return false;
+  const status = (err as { nimStatus?: number } | null | undefined)?.nimStatus;
+  if (typeof status === "number") return status >= 500; // 5xx 才重試；4xx 不重試
+  return true; // 無 HTTP 狀態＝網路/逾時類，重試
+}
+
+/** 呼叫 NVIDIA NIM Chat API(OpenAI 相容);金鑰未設或 HTTP 錯誤一律拋例外,由呼叫端退點。
+ *  暫時性失敗（逾時/5xx/網路）會自動退避重試至多 NIM_MAX_ATTEMPTS 次（見 nimRetryable）。 */
 export async function chatCompletion(options: ChatCompletionOptions): Promise<ChatCompletionResponse> {
   if (!NVIDIA_NIM_API_KEY) {
     throw new NimServiceError("AI 文字服務尚未設定金鑰——請管理員到 build.nvidia.com 申請（免費）並設定 NVIDIA_NIM_API_KEY");
   }
-  const res = await proxyFetch(`${NVIDIA_NIM_ENDPOINT}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${NVIDIA_NIM_API_KEY}` },
-    body: JSON.stringify({
-      model: options.model || NIM_DEFAULT_MODEL,
-      messages: options.messages,
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 2048,
-    }),
-    timeoutMs: options.timeoutMs ?? 60_000,
-    signal: options.signal,
-  });
-  if (!res.ok) {
-    const error = await res.text();
-    // NIM 免費層的兩種上限＋金鑰問題轉人話（讓使用者/管理員知道怎麼辦）；其他錯誤保留原文供除錯
-    if (res.status === 429) {
-      throw new NimServiceError("AI 文字服務流量達上限（NIM 免費層約每分鐘 40 次）——等一分鐘再試；常態壅塞請管理員向 NVIDIA 申請提高流量");
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= NIM_MAX_ATTEMPTS; attempt++) {
+    if (options.signal?.aborted) throw lastErr ?? new DOMException("已中止", "AbortError");
+    try {
+      const res = await proxyFetch(`${NVIDIA_NIM_ENDPOINT}/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${NVIDIA_NIM_API_KEY}` },
+        body: JSON.stringify({
+          model: options.model || NIM_DEFAULT_MODEL,
+          messages: options.messages,
+          temperature: options.temperature ?? 0.7,
+          max_tokens: options.maxTokens ?? 2048,
+        }),
+        timeoutMs: options.timeoutMs ?? 60_000,
+        signal: options.signal,
+      });
+      if (!res.ok) {
+        const error = await res.text();
+        // NIM 免費層的兩種上限＋金鑰問題轉人話（讓使用者/管理員知道怎麼辦）；其他錯誤保留原文供除錯
+        if (res.status === 429) {
+          throw new NimServiceError("AI 文字服務流量達上限（NIM 免費層約每分鐘 40 次）——等一分鐘再試；常態壅塞請管理員向 NVIDIA 申請提高流量");
+        }
+        if (res.status === 401 || res.status === 402 || res.status === 403) {
+          throw new NimServiceError("NIM 金鑰無效或免費試用點數已用完——請管理員到 build.nvidia.com 檢查帳號點數、換新金鑰，或申請加值");
+        }
+        const e = new Error(`NVIDIA NIM API 錯誤 (${res.status}): ${error.slice(0, 300)}`) as Error & { nimStatus?: number };
+        e.nimStatus = res.status; // 供 nimRetryable 判斷 5xx 可重試、4xx 不重試
+        throw e;
+      }
+      return (await res.json()) as ChatCompletionResponse;
+    } catch (err) {
+      if (options.signal?.aborted) throw err; // 用戶端主動中止（SSE 斷線）：尊重中止，不重試
+      if (!nimRetryable(err)) throw err; // 上限/金鑰/4xx：重試無用，原樣拋
+      lastErr = err;
+      if (attempt >= NIM_MAX_ATTEMPTS) throw err; // 用完次數：拋最後一次錯誤（呼叫端照舊退點/顯示人話）
+      await sleep(NIM_RETRY_BASE_MS * attempt); // 線性退避：400ms、800ms
     }
-    if (res.status === 401 || res.status === 402 || res.status === 403) {
-      throw new NimServiceError("NIM 金鑰無效或免費試用點數已用完——請管理員到 build.nvidia.com 檢查帳號點數、換新金鑰，或申請加值");
-    }
-    throw new Error(`NVIDIA NIM API 錯誤 (${res.status}): ${error.slice(0, 300)}`);
   }
-  return (await res.json()) as ChatCompletionResponse;
+  throw lastErr ?? new Error("NVIDIA NIM 呼叫失敗");
 }
 
 /**

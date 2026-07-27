@@ -9,6 +9,7 @@ import { recordError } from "./services/errlog";
 import { db, schema } from "./db";
 import { eq } from "drizzle-orm";
 import { SEED_ADMIN_EMAIL } from "./services/seed";
+import { sessionGate } from "./services/sessionPolicy";
 
 export interface Context {
   auth: AuthState | null;
@@ -75,13 +76,16 @@ const AUDIT_REDACT_PATH = new Set(["integrations.fetchApi"]);
 
 /** 需登入 */
 export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, getRawInput }) => {
-  // 開機初始化（建表/種子）完成前，回可理解的訊息而不是 relation does not exist 500
+  // migration/schema 驗證與種子同步完成前，回可理解的訊息而不是 relation does not exist 500。
   if (!isBootReady()) {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "系統正在初始化（約一分鐘內完成），請稍候重試" });
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "資料庫版本驗證或系統初始化尚未完成，請稍候；持續發生時請管理員檢查 migration 狀態" });
+  }
+  if (sessionGate(ctx.auth) === "unauthenticated") {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "請先登入" });
   }
   if (!ctx.auth) throw new TRPCError({ code: "UNAUTHORIZED", message: "請先登入" });
   // 強制改密碼閘門：前端對話框擋不住直接打 API 的請求，後端也要擋
-  if (ctx.auth.user.mustChangePassword && !MUST_CHANGE_PW_ALLOWED.includes(path)) {
+  if (sessionGate(ctx.auth) === "password-change-required" && !MUST_CHANGE_PW_ALLOWED.includes(path)) {
     throw new TRPCError({ code: "FORBIDDEN", message: "管理員重設了你的密碼——請先在頁面上設定新密碼再繼續使用" });
   }
   const auth = ctx.auth;

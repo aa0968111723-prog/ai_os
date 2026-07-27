@@ -4,6 +4,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
+import { ChatEmptyState, focusChatPartnerPicker } from "../components/ChatEmptyState";
 
 type Thread = inferRouterOutputs<AppRouter>["dm"]["threads"][number];
 type Peer = inferRouterOutputs<AppRouter>["dm"]["peers"][number];
@@ -50,6 +51,7 @@ function dayKey(d: Date): string {
 export function ChatPage({ peerId }: { peerId?: string }) {
   const [, navigate] = useLocation();
   const [q, setQ] = useState("");
+  const peerSearchRef = useRef<HTMLInputElement>(null);
   const threads = trpc.dm.threads.useQuery(undefined, { refetchInterval: 15_000 });
   const peers = trpc.dm.peers.useQuery();
 
@@ -62,14 +64,19 @@ export function ChatPage({ peerId }: { peerId?: string }) {
   const newPeers = (peers.data ?? []).filter(
     (p) => !threadPeerIds.has(p.userId) && (!needle || p.name.toLowerCase().includes(needle) || p.email.toLowerCase().includes(needle)),
   );
+  const focusPartnerPicker = () => {
+    setQ("");
+    focusChatPartnerPicker(peerSearchRef.current);
+  };
 
   return (
     <div style={{ maxWidth: 980, margin: "0 auto" }}>
       <h1>私訊</h1>
       <p className="sub">與同組夥伴（或開發者）一對一聊天——只有你們兩位看得到。可傳圖／影片、標注專案・資料庫・排程・筆記、或 @助手 問 AI；外部 AI 也能透過 MCP 私訊工具幫你收發。</p>
       <div className={`dm-layout ${peerId ? "has-peer" : ""}`}>
-        <aside className="dm-list card" aria-label="對話清單">
+        <aside className="dm-list card" id="dm-partner-picker" aria-label="對話與夥伴選擇器">
           <input
+            ref={peerSearchRef}
             type="search"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -111,13 +118,7 @@ export function ChatPage({ peerId }: { peerId?: string }) {
           // key=peerId：換對象時強制重建對話視窗，翻頁游標／草稿不殘留到別人身上
           <Conversation key={peerId} peerId={peerId} onBack={() => navigate("/chat")} />
         ) : (
-          <section className="dm-thread card dm-empty">
-            <div className="empty-state" style={{ margin: "auto" }}>
-              <Icon name="MessageCircle" size={32} style={{ color: "var(--fg-secondary)" }} />
-              <h3>選一位夥伴開始聊</h3>
-              <p className="hint">左邊挑一個對話，或從「發起新對話」找同組夥伴。</p>
-            </div>
-          </section>
+          <ChatEmptyState onStart={focusPartnerPicker} />
         )}
       </div>
     </div>

@@ -6,9 +6,10 @@
 碰不到你的專案）、封存專案寫入守衛、資料庫 AI 存取等級（none/read）閘門、跨介面審計歸屬。
 
 與 CI 其他 e2e 同口徑：E2E_MOCK=1（假生成，plan/submit 走 mockPlan／假 fal，不需外部金鑰）。
-需要 MCP_API_KEY 設定才會「啟用」端點（否則 handleMcp 回 404 不張揚）——CI 已設 test-mcp-key。
+需要 MCP_API_KEY＋ALLOW_LEGACY_MCP_ADMIN_KEY=1 才會啟用舊測試金鑰——CI 只在非 production 明確設定。
 """
-import json, os, sys, subprocess, datetime, urllib.request, urllib.error
+import json, os, sys, subprocess, datetime, shutil, urllib.request, urllib.error
+from concurrent.futures import ThreadPoolExecutor
 
 HOST = f"http://localhost:{os.environ.get('E2E_PORT', '3199')}"
 EMAIL = os.environ.get("SEED_ADMIN_EMAIL", "admin@aidirector.local")
@@ -24,8 +25,18 @@ def ok(name, cond, detail=""):
     else: _failed += 1; print(f"❌ {name}" + (f"  — {detail}" if detail else ""))
 
 def _psql(sql):
-    return subprocess.run(["psql", f"host={PGHOST} user={PGUSER} dbname={DB}", "-tAc", sql],
-                          capture_output=True, text=True, env={**os.environ, "PGPASSWORD": os.environ.get("PGPASSWORD", "postgres")}).stdout.strip()
+    env = {**os.environ, "PGPASSWORD": os.environ.get("PGPASSWORD", "postgres")}
+    if shutil.which("psql"):
+        command = ["psql", f"host={PGHOST} user={PGUSER} dbname={DB}", "-tAc", sql]
+    elif os.environ.get("E2E_PG_CONTAINER"):
+        command = [
+            "docker", "exec", "-e", f"PGPASSWORD={env['PGPASSWORD']}",
+            os.environ["E2E_PG_CONTAINER"],
+            "psql", "-U", PGUSER, "-d", DB, "-tAc", sql,
+        ]
+    else:
+        raise RuntimeError("psql 不在 PATH；Docker 測試請設定 E2E_PG_CONTAINER")
+    return subprocess.run(command, capture_output=True, text=True, env=env, check=True).stdout.strip()
 
 # ── tRPC（cookie 手動保存：production cookie 帶 Secure，不會經 http 自動回送）──
 class Sess:
@@ -61,6 +72,24 @@ def call(name, args, key):
     txt = d["result"]["content"][0]["text"]
     try: return True, json.loads(txt)
     except Exception: return True, txt
+
+def rest_batch(table_id, rows, key, idempotency_key=None):
+    headers = {"content-type": "application/json", "x-api-key": key}
+    if idempotency_key is not None:
+        headers["Idempotency-Key"] = idempotency_key
+    req = urllib.request.Request(
+        f"{HOST}/api/v1/databases/{table_id}/rows/batch",
+        data=json.dumps({"rows": rows}).encode(),
+        headers=headers,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=40) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        try:
+            return error.code, json.loads(error.read())
+        except Exception:
+            return error.code, {}
 
 BLOCKED = lambda r: ("找不到專案" in r or "不屬於這個組" in r) if isinstance(r, str) else False
 
@@ -100,11 +129,11 @@ ok("initialize", st == 200 and d["result"]["serverInfo"]["name"] == "ai-director
 st, d = mcp_raw("tools/list", None, FULL)
 names = {t["name"] for t in d["result"]["tools"]}
 EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_generation","post_message",
-    "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row",
+    "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row","add_database_rows",
     "list_database_files","read_database_file","get_database_stats","plan_agent","approve_agent","stop_agent","discard_agent",
     "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status",
     "list_notes","get_note","list_dm_contacts","list_dm_threads","read_dm","send_dm"}
-ok("tools/list = 30 且名單完整", len(names) == 30 and EXPECTED <= names, f"{len(names)} 個")
+ok("tools/list = 31 且名單完整", len(names) == 31 and EXPECTED <= names, f"{len(names)} 個")
 
 # ══════════ 23 工具逐一實跑（可寫金鑰）══════════
 print("\n######## 23 工具逐一實跑 ########")
@@ -131,6 +160,52 @@ g, r = call("add_database_row", {"tableId": TID, "data": {"item": "腳架", "qty
 ok("11. add_database_row", g and r.get("rowId"))
 g, r = call("query_database", {"tableId": TID, "keyword": "腳架"}, FULL)
 ok("10b. query_database（關鍵字命中唯一列）", g and len(r["rows"]) == 1 and r["rows"][0]["data"]["item"] == "腳架")
+
+# Batch writes are crash/retry safe across both MCP and REST. The same
+# actor/table/key scope is shared by both protocols.
+MCP_BATCH_KEY = "mcp-batch-20260726-001"
+mcp_batch_args = {
+    "tableId": TID,
+    "idempotencyKey": MCP_BATCH_KEY,
+    "rows": [{"data": {"item": "批次燈架", "qty": 2}}, {"data": {"item": "批次麥克風", "qty": 4}}],
+}
+g, first_batch = call("add_database_rows", mcp_batch_args, FULL)
+ok("11b. MCP 批次首次寫入", g and first_batch.get("insertedCount") == 2 and first_batch.get("replayed") is False)
+g, replay_batch = call("add_database_rows", mcp_batch_args, FULL)
+ok("11c. MCP 同 key 同內容只回放", g and replay_batch.get("insertedCount") == 2 and replay_batch.get("replayed") is True)
+g, conflict_batch = call("add_database_rows", {
+    **mcp_batch_args,
+    "rows": [{"data": {"item": "不同內容", "qty": 99}}],
+}, FULL)
+ok("11d. MCP 同 key 不同內容穩定衝突", (not g) and "IDEMPOTENCY_CONFLICT" in conflict_batch)
+
+REST_BATCH_KEY = "rest-batch-20260726-001"
+rest_rows = [{"data": {"item": "REST 批次 A", "qty": 1}}, {"data": {"item": "REST 批次 B", "qty": 2}}]
+status, missing_key = rest_batch(TID, rest_rows, FULL)
+ok("11e. REST 批次強制 Idempotency-Key", status == 400 and missing_key.get("code") == "IDEMPOTENCY_KEY_REQUIRED")
+with ThreadPoolExecutor(max_workers=2) as executor:
+    concurrent = list(executor.map(
+        lambda _: rest_batch(TID, rest_rows, FULL, REST_BATCH_KEY),
+        range(2),
+    ))
+ok("11f. REST 同 key 併發只提交一次",
+   all(status == 200 for status, _ in concurrent)
+   and sorted(result.get("replayed") for _, result in concurrent) == [False, True])
+status, rest_conflict = rest_batch(
+    TID,
+    [{"data": {"item": "REST 改內容", "qty": 3}}],
+    FULL,
+    REST_BATCH_KEY,
+)
+ok("11g. REST 同 key 不同內容回 409", status == 409 and rest_conflict.get("code") == "IDEMPOTENCY_CONFLICT")
+stored_hashes = _psql(
+    f"select count(*) from idempotency_records where actor_id='{UID}' "
+    f"and scope='database.rows.batch:{TID}' and length(key_hash)=64 "
+    f"and row_to_json(idempotency_records)::text not like '%{MCP_BATCH_KEY}%' "
+    f"and row_to_json(idempotency_records)::text not like '%{REST_BATCH_KEY}%';"
+)
+ok("11h. DB 只存 actor/scope 綁定雜湊，不存原始 key", stored_hashes.isdigit() and int(stored_hashes) >= 2)
+
 g, r = call("list_database_files", {"tableId": TID}, FULL); ok("12. list_database_files（空）", g and r == [])
 g, r = call("read_database_file", {"fileId": "00000000-0000-0000-0000-000000000000"}, FULL)
 ok("13. read_database_file（不存在→報錯）", (not g) and "找不到" in r)
@@ -174,6 +249,7 @@ allread = all(call(n, a, RO)[0] for n, a in READS.items())
 ok(f"唯讀金鑰放行全部 {len(READS)} 個讀取工具", allread)
 WRITES = {"submit_generation": {"projectId": PID, "modelId": MODEL, "prompt": "x"}, "post_message": {"projectId": PID, "body": "x"},
     "add_database_row": {"tableId": TID, "data": {"item": "x"}}, "plan_agent": {"projectId": PID, "goal": "應被唯讀擋下"},
+    "add_database_rows": {"tableId": TID, "idempotencyKey": "readonly-batch-001", "rows": [{"data": {"item": "x"}}]},
     "approve_agent": {"runId": RUN}, "stop_agent": {"runId": RUN}, "discard_agent": {"runId": RUN},
     "add_schedule_item": {"projectId": PID, "title": "x", "startsAt": future},
     "send_dm": {"peer": "x", "body": "x"}}
@@ -255,8 +331,24 @@ admin.call("projects.setArchived", {"id": PID, "archived": False})
 print("\n######## 跨介面審計歸屬 ########")
 mine = _psql(f"select count(*) from audit_log where action like 'mcp.%' and actor_id = '{UID}';")
 fails = _psql(f"select count(*) from audit_log where action like 'mcp.%' and ok = false and actor_id = '{UID}';")
+raw_key_audits = _psql(
+    f"select count(*) from audit_log where actor_id='{UID}' "
+    f"and (input::text like '%{MCP_BATCH_KEY}%' or input::text like '%{REST_BATCH_KEY}%');"
+)
 ok("MCP 操作全落審計且歸屬本人（actor_id）", mine.isdigit() and int(mine) >= 20, f"{mine} 筆")
 ok("唯讀／隔離被擋也留審計（ok=false）", fails.isdigit() and int(fails) >= 8, f"{fails} 筆")
+ok("審計資料不落原始 idempotency key", raw_key_audits == "0")
+
+# ══════════ PostgreSQL 持久失敗封鎖 ══════════
+print("\n######## MCP PostgreSQL 失敗限流 ########")
+# 第 10 次失敗寫入 blockedUntil，但該次仍維持「金鑰錯誤」401；下一次在解析金鑰前即 429。
+bad_codes = [
+    mcp_raw("tools/list", None, f"aidmcp_invalid_rate_limit_{i:02d}")[0]
+    for i in range(10)
+]
+blocked_code = mcp_raw("tools/list", None, "aidmcp_invalid_rate_limit_blocked")[0]
+ok("MCP 限流：1 分鐘 10 次失敗皆 401，後續封鎖 5 分鐘回 429",
+   bad_codes == [401] * 10 and blocked_code == 429)
 
 # ══════════ 總結 ══════════
 print("\n" + "=" * 60)

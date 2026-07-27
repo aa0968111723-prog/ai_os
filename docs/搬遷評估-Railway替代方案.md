@@ -93,12 +93,13 @@
 > 其他平台步驟相同，只有第 1、2 步的介面不同。
 
 1. **開新環境**：Zeabur 建專案（選亞洲區域）→ 加 PostgreSQL → 加 GitHub Repo `ai_os`（自動吃 Dockerfile）→ 掛 Volume 到 `/data`。
-2. **搬環境變數**（照 `railway.toml` 註解的清單）：`DATABASE_URL`（引用新 Postgres）、`APP_URL`（先填 Zeabur 給的網址）、`FAL_KEY`/`FAL_MOCK`、`MCP_API_KEY` 等。建議順手補設 `ASSET_SIGN_SECRET`（任意 64 字亂碼），簽名網址就不怕重啟作廢。
+2. **搬環境變數**（照 `railway.toml` 註解的清單）：`DATABASE_URL`（引用新 Postgres）、`APP_URL`（先填 Zeabur 給的網址）、`FAL_KEY` 等；正式站不要搬舊 `MCP_API_KEY`，個人連線金鑰已在資料庫內隨 dump 搬移。建議順手補設 `ASSET_SIGN_SECRET`（任意 64 字亂碼），簽名網址就不怕重啟作廢。
 3. **搬資料庫**（資料量小，幾分鐘）：
    ```sh
    pg_dump "$RAILWAY_DATABASE_URL" --no-owner --no-privileges | psql "$ZEABUR_DATABASE_URL"
    ```
-   （新站啟動時 `ensure.ts` 會自動建表，故也可先讓新站空跑起來再灌資料，衝突時以 dump 為準。）
+   還原後先跑 `npm run db:check`；舊備份若顯示 `legacy-untracked`，依
+   `docs/資料庫遷移.md` 明確 baseline。Web 啟動不會自動建表，也不可先空跑再覆蓋資料。
 4. **搬 Volume 檔案**：用 Railway CLI 進舊容器打包 `/data/assets` 下載，再上傳到新站（或寫 10 行的一次性搬運腳本走 HTTP）。素材若不多，也可接受「舊素材以資料庫紀錄為準、檔案重新上傳」的簡化路線。
 5. **驗收**（照交接報告的健檢流程）：開 `新網址/api/ready` → 登入 → 團隊管理「跑系統自檢」七項全 ✅ → 抽查舊專案的分鏡與素材可開。
 6. **切換**：把邀請連結、書籤、`APP_URL` 換成新網址；觀察 3–7 天沒問題後才關 Railway（**先降級不刪**，這就是你的回退方案——出事把 `APP_URL` 指回去即可）。
