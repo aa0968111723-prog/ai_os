@@ -79,6 +79,7 @@ export const LEGACY_ADOPTION_THROUGH_TAG = "0001_managed_indexes";
 export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0002_distributed_rate_limits",
   "0003_idempotency_records",
+  "0004_query_indexes",
 ] as const;
 
 export interface LegacyAdoptionCheck {
@@ -114,7 +115,7 @@ function migrationStatements(entry: MigrationFile): string[] {
 /**
  * Proves a legacy database is exactly the historical 0001 schema:
  * current-schema drift must be precisely the additive CREATE TABLE/INDEX DDL
- * in the two reviewed bridge migrations—nothing missing, extra, destructive,
+ * in the reviewed bridge migrations—nothing missing, extra, destructive,
  * or warning-producing.
  */
 export function verifyLegacyAdoptionBridge(
