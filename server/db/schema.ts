@@ -49,7 +49,9 @@ export const teamMembers = pgTable("team_members", {
   teamId: uuid("team_id").notNull(),
   userId: uuid("user_id").notNull(),
   role: text("role", { enum: ["admin", "member"] }).notNull().default("member"),
-});
+}, (t) => ({
+  teamUserUq: uniqueIndex("team_members_team_user_uq").on(t.teamId, t.userId),
+}));
 
 export const groupMembers = pgTable("group_members", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -65,7 +67,9 @@ export const groupMembers = pgTable("group_members", {
    *  planAgentCore（沿用該專案的 ACL/扣點/併發守門）。派工預設只開放組長以上；組長/管理員可對
    *  個別組員把此欄設 true 授權其派工。組長以上永遠可派、不受此欄影響。null＝未授權（nullable migration） */
   canDispatchAgent: boolean("can_dispatch_agent"),
-});
+}, (t) => ({
+  groupUserUq: uniqueIndex("group_members_group_user_uq").on(t.groupId, t.userId),
+}));
 
 /** 全域點數設定（單列 key='global'）——不寫死在程式，管理員隨時可調 */
 export const settings = pgTable("settings", {
@@ -549,6 +553,7 @@ export const dmReads = pgTable("dm_reads", {
   lastReadAt: timestamp("last_read_at").defaultNow().notNull(),
 }, (t) => ({
   userPeerIdx: index("dm_reads_user_peer_idx").on(t.userId, t.peerId),
+  userPeerUq: uniqueIndex("dm_reads_user_peer_uq").on(t.userId, t.peerId),
 }));
 
 /** 留言表情回應：每人對每則每種表情最多一筆（再按一次＝收回），白名單見 messages router */
@@ -560,6 +565,7 @@ export const messageReactions = pgTable("message_reactions", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   msgIdx: index("message_reactions_msg_idx").on(t.messageId),
+  msgUserEmojiUq: uniqueIndex("message_reactions_msg_user_emoji_uq").on(t.messageId, t.userId, t.emoji),
 }));
 
 /** 留言已讀水位：每人每專案一筆 lastReadAt，未讀數＝晚於水位的他人留言數（router upsert 維護） */
@@ -570,6 +576,7 @@ export const messageReads = pgTable("message_reads", {
   lastReadAt: timestamp("last_read_at").defaultNow().notNull(),
 }, (t) => ({
   userProjectIdx: index("message_reads_user_project_idx").on(t.userId, t.projectId),
+  userProjectUq: uniqueIndex("message_reads_user_project_uq").on(t.userId, t.projectId),
 }));
 
 /** 工作流執行紀錄：後端執行器逐步推進（關頁不中斷）；steps 為每步狀態快照 */
@@ -692,6 +699,7 @@ export const projectMembers = pgTable("project_members", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   projectIdx: index("project_members_project_idx").on(t.projectId),
+  projectUserUq: uniqueIndex("project_members_project_user_uq").on(t.projectId, t.userId),
 }));
 
 /**
