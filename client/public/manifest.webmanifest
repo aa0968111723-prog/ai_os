@@ -1,14 +1,53 @@
 {
+  "id": "/",
   "name": "AI Director OS",
   "short_name": "AI Director",
-  "description": "弘法內容創作與協作系統",
+  "description": "弘法內容創作與協作系統｜見證故事、剪輯組、一鍵生成內容",
   "lang": "zh-Hant",
-  "start_url": "/",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "any",
   "background_color": "#e9e3d8",
   "theme_color": "#e9e3d8",
+  "categories": ["productivity", "business", "utilities"],
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "新建專案",
+      "short_name": "新建",
+      "description": "快速建立新的創作專案",
+      "url": "/?action=new",
+      "icons": [{ "src": "/icon.svg", "sizes": "96x96", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "剪輯組",
+      "short_name": "剪輯",
+      "description": "進入剪輯工作台",
+      "url": "/editor",
+      "icons": [{ "src": "/icon.svg", "sizes": "96x96", "type": "image/svg+xml" }]
+    },
+    {
+      "name": "資料庫",
+      "short_name": "資料庫",
+      "description": "開啟資料庫與素材庫",
+      "url": "/library",
+      "icons": [{ "src": "/icon.svg", "sizes": "96x96", "type": "image/svg+xml" }]
+    }
   ]
 }
