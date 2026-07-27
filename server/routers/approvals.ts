@@ -29,27 +29,55 @@ export async function submitApprovalCore(
   sceneId: string,
   userId: string,
   assertAccess: (project: { id: string; groupId: string }) => void | Promise<void>,
+  idempotencyApprovalId?: string,
 ) {
   const { scene, project } = await getScene(sceneId);
   await assertAccess(project);
-  const approval = await db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     // 為什麼：以 advisory xact lock 序列化「同一分鏡」的送審（classifier 1，與 points per-user 鎖的
     // classifier 0 不同鍵空間、不互卡；交易結束自動釋放）。單一 insert…select 的 max()+1 只在該語句
     // 快照內原子，並不序列化「另一交易的並發語句」——READ COMMITTED 下兩並發送審會各算同一 max→插入
     // 相同 version（重複 pending，decide 的 latest 守衛對相等版本失效→雙裁決）。上鎖後同分鏡送審全序列化。
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${scene.id}), 1)`);
+    if (idempotencyApprovalId) {
+      const [existing] = await tx
+        .select()
+        .from(schema.approvals)
+        .where(eq(schema.approvals.id, idempotencyApprovalId));
+      if (existing) {
+        if (
+          existing.sceneId !== scene.id
+          || existing.projectId !== project.id
+          || existing.submittedBy !== userId
+        ) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "送審冪等識別碼已被其他操作使用",
+          });
+        }
+        return { approval: existing, created: false };
+      }
+    }
     // 同一分鏡任一時刻最多一筆 pending——送新版時舊 pending 一律作廢，避免懸置舊版事後被裁決覆寫最新狀態
     await tx
       .update(schema.approvals)
       .set({ status: "needs_work", reason: "已被較新版本取代", decidedAt: new Date() })
       .where(and(eq(schema.approvals.sceneId, scene.id), eq(schema.approvals.status, "pending")));
-    const inserted = (await tx.execute(sql`
-      insert into approvals (project_id, scene_id, version, submitted_by)
-      select ${project.id}::uuid, ${scene.id}::uuid, coalesce(max(version), 0) + 1, ${userId}::uuid
-      from approvals
-      where scene_id = ${scene.id}::uuid
-      returning id
-    `)) as unknown as { rows: Array<{ id: string }> };
+    const inserted = idempotencyApprovalId
+      ? (await tx.execute(sql`
+          insert into approvals (id, project_id, scene_id, version, submitted_by)
+          select ${idempotencyApprovalId}::uuid, ${project.id}::uuid, ${scene.id}::uuid, coalesce(max(version), 0) + 1, ${userId}::uuid
+          from approvals
+          where scene_id = ${scene.id}::uuid
+          returning id
+        `)) as unknown as { rows: Array<{ id: string }> }
+      : (await tx.execute(sql`
+          insert into approvals (project_id, scene_id, version, submitted_by)
+          select ${project.id}::uuid, ${scene.id}::uuid, coalesce(max(version), 0) + 1, ${userId}::uuid
+          from approvals
+          where scene_id = ${scene.id}::uuid
+          returning id
+        `)) as unknown as { rows: Array<{ id: string }> };
     const insertedId = inserted.rows[0]?.id;
     // 為什麼：raw execute 回傳 snake_case 列，改用型別安全的重讀取得 camelCase 完整列給前端
     const [approval] = insertedId
@@ -64,17 +92,20 @@ export async function submitApprovalCore(
       kind: "system",
       body: `📋 「${scene.title}」已送審（v${approval.version}）`,
     });
-    return approval;
+    return { approval, created: true };
   });
+  const { approval } = result;
   // 跨裝置推播給組長們（fire-and-forget：推播失敗不影響送審本身）；同分鏡重送以 tag 覆蓋舊通知
-  void groupLeaderIds(project.groupId, userId)
-    .then((ids) => pushToUsers(ids, {
-      title: "分鏡送審",
-      body: `「${scene.title}」已送審（v${approval.version}）——請裁決`,
-      url: `/p/${project.id}`,
-      tag: `approval-${scene.id}`,
-    }))
-    .catch((err) => console.warn("[approvals] 送審推播失敗：", err instanceof Error ? err.message : err));
+  if (result.created) {
+    void groupLeaderIds(project.groupId, userId)
+      .then((ids) => pushToUsers(ids, {
+        title: "分鏡送審",
+        body: `「${scene.title}」已送審（v${approval.version}）——請裁決`,
+        url: `/p/${project.id}`,
+        tag: `approval-${scene.id}`,
+      }))
+      .catch((err) => console.warn("[approvals] 送審推播失敗：", err instanceof Error ? err.message : err));
+  }
   return approval;
 }
 

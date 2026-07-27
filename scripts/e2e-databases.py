@@ -4,7 +4,7 @@ E2E：自訂資料庫系統（列＋權限＋AI 存取＋文件層）。
 文件上傳抽文字、URL 匯入的 SSRF 阻擋、MCP 讀檔分頁、配額、組隔離。
 與其他套件同框架：全新 DB + 假生成模式；任何 ❌ 非零退出（CI 判紅綠）。
 """
-import json, urllib.request, urllib.parse, urllib.error
+import json, time, urllib.request, urllib.parse, urllib.error
 import os as _os
 
 HOST = f"http://localhost:{_os.environ.get('E2E_PORT', '3199')}"
@@ -220,12 +220,22 @@ csv_db = call("POST", azhe, "databases.create", {
     "scope": "personal", "name": "CSV 匯入測試",
     "fields": [{"key": "name", "label": "姓名", "type": "text", "required": True},
                {"key": "age", "label": "年齡", "type": "number"}]})
-imp = call("POST", azhe, "databases.importData", {
+csv_import_payload = {
     "tableId": csv_db["id"],
     "format": "csv",
     "content": "姓名,年齡\r\n小美,28\r\n阿哲,30\r\n壞列,不是數字",
-    "headerMap": {"姓名": "name", "年齡": "age"}})
-ok("CSV 匯入（2 成功 1 失敗）", imp["imported"] == 2 and imp["failed"] == 1 and len(imp["errors"]) == 1)
+    "headerMap": {"姓名": "name", "年齡": "age"},
+    "idempotencyKey": "e2e-csv-import-001",
+}
+imp = call("POST", azhe, "databases.importData", csv_import_payload)
+ok("CSV 匯入（2 成功 1 失敗）", imp["imported"] == 2 and imp["failed"] == 1 and len(imp["errors"]) == 1 and imp["replayed"] is False)
+imp_replay = call("POST", azhe, "databases.importData", csv_import_payload)
+ok("CSV 匯入同 key 安全重播", imp_replay["imported"] == 2 and imp_replay["replayed"] is True)
+imp_conflict = call("POST", azhe, "databases.importData", {
+    **csv_import_payload,
+    "content": "姓名,年齡\r\n不同內容,99",
+})
+ok("CSV 匯入同 key 不同內容衝突", "__error__" in imp_conflict and "IDEMPOTENCY_CONFLICT" in imp_conflict["__error__"])
 csv_rows = call("GET", azhe, "databases.listRows", {"tableId": csv_db["id"]})
 ok("CSV 匯入的列可查", csv_rows["total"] == 2 and any(r["data"]["name"] == "小美" for r in csv_rows["rows"]))
 
@@ -234,16 +244,38 @@ tsv_imp = call("POST", azhe, "databases.importData", {
     "tableId": csv_db["id"],
     "format": "tsv",
     "content": "姓名\t年齡\r\n阿美\t22",
-    "headerMap": {"姓名": "name", "年齡": "age"}})
+    "headerMap": {"姓名": "name", "年齡": "age"},
+    "idempotencyKey": "e2e-tsv-import-001"})
 ok("TSV 匯入成功", tsv_imp["imported"] == 1 and tsv_imp["failed"] == 0)
 json_imp = call("POST", azhe, "databases.importData", {
     "tableId": csv_db["id"],
     "format": "json",
     "content": '[{"姓名":"小華","年齡":40},{"姓名":"小明","年齡":18}]',
-    "headerMap": {"姓名": "name", "年齡": "age"}})
+    "headerMap": {"姓名": "name", "年齡": "age"},
+    "idempotencyKey": "e2e-json-import-001"})
 ok("JSON 匯入成功", json_imp["imported"] == 2 and json_imp["failed"] == 0)
 multi_rows = call("GET", azhe, "databases.listRows", {"tableId": csv_db["id"]})
 ok("多格式匯入後列數累加", multi_rows["total"] == 5)
+
+# ── 大量匯入效能門檻：5,000 列必須走批次交易，不可退化成逐列 transaction ──
+perf_db = call("POST", azhe, "databases.create", {
+    "scope": "personal", "name": "大量匯入效能測試",
+    "fields": [{"key": "seq", "label": "序號", "type": "number", "required": True},
+               {"key": "label", "label": "標籤", "type": "text"}]})
+perf_content = "序號,標籤\r\n" + "\r\n".join(f"{i},資料-{i}" for i in range(5000))
+perf_started = time.monotonic()
+perf_result = call("POST", azhe, "databases.importData", {
+    "tableId": perf_db["id"],
+    "format": "csv",
+    "content": perf_content,
+    "headerMap": {"序號": "seq", "標籤": "label"},
+    "idempotencyKey": "e2e-perf-import-5000"})
+perf_elapsed = time.monotonic() - perf_started
+ok("5,000 列批次匯入完整落庫", perf_result.get("imported") == 5000 and perf_result.get("failed") == 0)
+# CI 共用 runner 留寬鬆 20 秒上限；真正目的在抓回歸成 5,000 次 transaction/20,000+ SQL 的舊實作。
+ok("5,000 列匯入效能門檻（<20 秒）", perf_elapsed < 20)
+perf_rows = call("GET", azhe, "databases.listRows", {"tableId": perf_db["id"]})
+ok("大量匯入列數可查", perf_rows.get("total") == 5000)
 
 
 # ── CSV 匯出（HTTP GET，帶 cookie）──
@@ -271,7 +303,8 @@ cb_db = call("POST", azhe, "databases.create", {
                {"key": "done", "label": "完成", "type": "checkbox"}]})
 cb_imp = call("POST", azhe, "databases.importData", {
     "tableId": cb_db["id"], "format": "csv", "content": "事項,完成\r\n剪片,是\r\n配音,否",
-    "headerMap": {"事項": "task", "完成": "done"}})
+    "headerMap": {"事項": "task", "完成": "done"},
+    "idempotencyKey": "e2e-checkbox-import-001"})
 ok("CSV 勾選欄位（是/否）匯入成功", cb_imp["imported"] == 2 and cb_imp["failed"] == 0)
 cb_rows = call("GET", azhe, "databases.listRows", {"tableId": cb_db["id"]})
 done_map = {r["data"]["task"]: r["data"]["done"] for r in cb_rows["rows"]}

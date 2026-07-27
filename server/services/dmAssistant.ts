@@ -10,22 +10,23 @@ import { desc, eq, or, and } from "drizzle-orm";
 import { db, schema } from "../db";
 import { isMockMode } from "./fal";
 import { nimComplete, NimServiceError } from "./nvidia-nim";
+import {
+  consumeRateLimit,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+} from "./rateLimit";
 
 /** 觸發字：與留言區一致，讓使用者只要記一個字 */
 export const DM_ASSISTANT_TRIGGER = "@助手";
 
-// 記憶體節流（比照 messageAssistant）：每人每分鐘 6 次。成本 0 點擋不住灌爆 NIM 免費額度，over 就靜默丟棄。
-const LIMIT_PER_MIN = 6;
-const WINDOW_MS = 60_000;
-const hits = new Map<string, number[]>();
-function overLimit(userId: string): boolean {
-  const now = Date.now();
-  const arr = (hits.get(userId) ?? []).filter((t) => now - t < WINDOW_MS);
-  const over = arr.length >= LIMIT_PER_MIN;
-  if (!over) arr.push(now);
-  if (arr.length) hits.set(userId, arr);
-  else hits.delete(userId);
-  return over;
+// PostgreSQL 滑動視窗（比照 messageAssistant）：每人每分鐘 6 次；超限仍維持靜默丟棄。
+async function overLimit(userId: string): Promise<boolean> {
+  const decision = await consumeRateLimit(
+    RATE_LIMIT_SCOPES.dmAssistant,
+    userId,
+    RATE_LIMIT_POLICIES.dmAssistant,
+  );
+  return !decision.allowed;
 }
 
 /**
@@ -34,8 +35,14 @@ function overLimit(userId: string): boolean {
  */
 export async function replyDmAssistant(opts: { askerId: string; askerName: string; peerId: string; peerName: string; question: string }): Promise<void> {
   const { askerId, askerName, peerId, peerName, question } = opts;
-  if (overLimit(askerId)) {
-    console.warn(`[dmAssistant] 觸發過於頻繁，已忽略：asker=${askerId}`);
+  try {
+    if (await overLimit(askerId)) {
+      console.warn(`[dmAssistant] 觸發過於頻繁，已忽略：asker=${askerId}`);
+      return;
+    }
+  } catch (error) {
+    // fire-and-forget：限流 DB 不可用就 fail closed，不呼叫 NIM，也不留下 unhandled rejection。
+    console.error(`[dmAssistant] PostgreSQL 限流不可用，已忽略：${error instanceof Error ? error.message : "unknown error"}`);
     return;
   }
 

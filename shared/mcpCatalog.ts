@@ -30,6 +30,7 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "list_databases", title: "列出資料庫", access: "read", blurb: "列出你可存取的自訂資料庫（含欄位定義與列數）。" },
   { name: "query_database", title: "查詢資料庫", access: "read", blurb: "查自訂資料庫的列資料（關鍵字粗篩）。" },
   { name: "add_database_row", title: "新增資料列", access: "write", blurb: "在開放 AI 寫入的自訂資料庫新增一列。" },
+  { name: "add_database_rows", title: "批次新增資料列", access: "write", blurb: "以必填 idempotencyKey 在 24 小時內安全重試，一次新增 1–500 列而不重複寫入。" },
   { name: "list_database_files", title: "列出資料庫文件", access: "read", blurb: "列出資料庫掛的文件（上傳／匯入，含圖影）：分類、AI 描述、可讀字數；關鍵字過濾內文。" },
   { name: "read_database_file", title: "讀取資料庫文件", access: "read", blurb: "讀文件抽出的純文字（PDF/DOCX/HTML…）；圖影回 AI 描述＋短效下載網址。" },
   { name: "get_database_stats", title: "資料庫資訊量", access: "read", blurb: "一個資料庫的資訊量統計：列數、文件數、圖影音文分佈、容量、AI 可讀字數、分類分佈。" },

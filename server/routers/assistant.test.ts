@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { searchCatalogText, listAssistantGenerateModels, pickGenerateModel, assistantModel, sceneFillRole, overLimit } from "./assistant";
+import { searchCatalogText, listAssistantGenerateModels, pickGenerateModel, assistantModel, sceneFillRole } from "./assistant";
 import { getModel } from "../../shared/models";
 
 /** 該類別已驗證的推薦日常主力（pickGenerateModel 找不到時的退回目標） */
@@ -91,45 +91,6 @@ describe("pickGenerateModel／assistantModel 白名單守門（防幻覺 id、�
     // 但露出端／執行端都只認現役 MODELS：assistantModel 不認、pickGenerateModel 退回預設
     expect(assistantModel("fal-ai/any-llm#gpt-5")).toBeUndefined();
     expect(pickGenerateModel("fal-ai/any-llm#gpt-5").id).toBe(DEFAULT_IMAGE_MODEL);
-  });
-});
-
-describe("overLimit（節流＋同題去重）", () => {
-  it("同一 nonce（串流＋退回兩條路徑）只計一次名額，不會把一題扣成兩格", () => {
-    const uid = `dedupe-user-${Math.random().toString(36).slice(2)}`;
-    const nonce = `nonce-${Math.random().toString(36).slice(2)}`;
-    // 第一條路徑（SSE）計一格
-    expect(overLimit(uid, nonce)).toBe(false);
-    // 第二條路徑（退回 tRPC）同 nonce → 直接放行，不再計格
-    expect(overLimit(uid, nonce)).toBe(false);
-    expect(overLimit(uid, nonce)).toBe(false);
-  });
-
-  it("不同題（無 nonce 或不同 nonce）累計到每分鐘 6 次上限才擋", () => {
-    const uid = `limit-user-${Math.random().toString(36).slice(2)}`;
-    // 6 個不同題放行，第 7 個超限
-    for (let i = 0; i < 6; i++) expect(overLimit(uid, `n${i}-${uid}`)).toBe(false);
-    expect(overLimit(uid, `n6-${uid}`)).toBe(true);
-  });
-
-  it("超限後重用同一 nonce 不能免費繞過節流（被拒的請求不留免計記號）", () => {
-    const uid = `bypass-user-${Math.random().toString(36).slice(2)}`;
-    // 先用滿 6 格（無 nonce）
-    for (let i = 0; i < 6; i++) expect(overLimit(uid)).toBe(false);
-    const nonce = `bypass-nonce-${uid}`;
-    // 已超限：帶 nonce 也被擋，且該 nonce 不因被拒而取得免計資格
-    expect(overLimit(uid, nonce)).toBe(true);
-    expect(overLimit(uid, nonce)).toBe(true); // 重用同 nonce 仍被擋，未繞過
-  });
-
-  it("免計放行僅限單次（第三次重用同一 nonce 不再免計）", () => {
-    const uid = `single-user-${Math.random().toString(36).slice(2)}`;
-    const nonce = `single-nonce-${uid}`;
-    expect(overLimit(uid, nonce)).toBe(false); // 第一次：計一格並登記 nonce
-    expect(overLimit(uid, nonce)).toBe(false); // 第二次：免計放行（SSE→退回），用過即刪
-    // 第三次同 nonce 不再有免計資格：填滿剩餘名額後應被節流擋下
-    for (let i = 0; i < 5; i++) expect(overLimit(uid)).toBe(false); // 補到共 6 格
-    expect(overLimit(uid, nonce)).toBe(true); // 第三次重用：已無免計、且已超限 → 擋
   });
 });
 

@@ -1,0 +1,233 @@
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AssistantStreamHandlers } from "./assistantStream";
+import { ProjectAssistant } from "./ProjectAssistant";
+
+const mocks = vi.hoisted(() => ({
+  askMutate: vi.fn(),
+  invalidate: vi.fn(),
+  requestAssistantStream: vi.fn(),
+  runMutateAsync: vi.fn(),
+}));
+
+vi.mock("../api", () => ({
+  trpc: {
+    useUtils: () => ({
+      agents: { invalidate: mocks.invalidate },
+      approvals: { invalidate: mocks.invalidate },
+      generation: { invalidate: mocks.invalidate },
+      quota: { invalidate: mocks.invalidate },
+      scenes: { invalidate: mocks.invalidate },
+      workflows: { invalidate: mocks.invalidate },
+    }),
+    assistant: {
+      ask: {
+        useMutation: () => ({ mutate: mocks.askMutate }),
+      },
+      generateModels: {
+        useQuery: () => ({ data: [], isLoading: false }),
+      },
+      runAction: {
+        useMutation: () => ({ mutateAsync: mocks.runMutateAsync }),
+      },
+    },
+  },
+}));
+
+vi.mock("./assistantStream", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./assistantStream")>();
+  return {
+    ...original,
+    requestAssistantStream: mocks.requestAssistantStream,
+  };
+});
+
+vi.mock("./AssistantTrace", () => ({
+  AssistantTrace: ({ events }: { events: Array<{ text: string }> }) => (
+    <div data-testid="saved-trace">{events.map((event) => event.text).join("|")}</div>
+  ),
+  LiveAssistantTrace: ({ events }: { events: Array<{ text: string }> }) => (
+    <div data-testid="live-trace">{events.map((event) => event.text).join("|")}</div>
+  ),
+}));
+
+vi.mock("./Icon", () => ({
+  Icon: () => <span aria-hidden="true" />,
+}));
+
+vi.mock("./interactions", () => ({
+  ConfirmButton: ({
+    children,
+    disabled,
+    onConfirm,
+  }: {
+    children: ReactNode;
+    disabled?: boolean;
+    onConfirm: () => Promise<void> | void;
+  }) => (
+    <button type="button" disabled={disabled} onClick={() => void onConfirm()}>
+      {children}
+    </button>
+  ),
+}));
+
+type StreamRequest = {
+  projectId: string;
+  handlers: AssistantStreamHandlers;
+};
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, reject, resolve };
+}
+
+async function submitQuestion(text: string) {
+  const input = screen.getByRole("textbox");
+  await userEvent.setup().type(input, text);
+  fireEvent.keyDown(input, { key: "Enter" });
+}
+
+describe("ProjectAssistant project-scoped async results", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    mocks.requestAssistantStream.mockResolvedValue(true);
+  });
+
+  it("drops late SSE events from the previous project while allowing the new project response", async () => {
+    const requests: StreamRequest[] = [];
+    const completions: Array<ReturnType<typeof deferred<boolean>>> = [];
+    mocks.requestAssistantStream.mockImplementation((request: StreamRequest) => {
+      requests.push(request);
+      const completion = deferred<boolean>();
+      completions.push(completion);
+      return completion.promise;
+    });
+
+    const { rerender } = render(<ProjectAssistant projectId="project-a" embedded />);
+    await submitQuestion("question-a");
+    await waitFor(() => expect(requests).toHaveLength(1));
+
+    rerender(<ProjectAssistant projectId="project-b" embedded />);
+    await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+
+    await act(async () => {
+      requests[0].handlers.onStep({ phase: "lookup", text: "STALE_SSE_STEP" });
+      requests[0].handlers.onDone({
+        answer: "STALE_SSE_ANSWER",
+        actions: [],
+        steps: [],
+        mock: false,
+        fallback: false,
+      });
+      completions[0].resolve(true);
+      await completions[0].promise;
+    });
+
+    expect(screen.queryByText("STALE_SSE_STEP")).not.toBeInTheDocument();
+    expect(screen.queryByText("STALE_SSE_ANSWER")).not.toBeInTheDocument();
+
+    await submitQuestion("question-b");
+    await waitFor(() => expect(requests).toHaveLength(2));
+    await act(async () => {
+      requests[1].handlers.onDone({
+        answer: "CURRENT_SSE_ANSWER",
+        actions: [],
+        steps: [],
+        mock: false,
+        fallback: false,
+      });
+      completions[1].resolve(true);
+      await completions[1].promise;
+    });
+
+    expect(await screen.findByText("CURRENT_SSE_ANSWER")).toBeInTheDocument();
+    expect(screen.queryByText("STALE_SSE_ANSWER")).not.toBeInTheDocument();
+  });
+
+  it("drops a late tRPC fallback callback from the previous project", async () => {
+    mocks.requestAssistantStream.mockResolvedValue(false);
+    const { rerender } = render(<ProjectAssistant projectId="project-a" embedded />);
+    await submitQuestion("fallback-a");
+    await waitFor(() => expect(mocks.askMutate).toHaveBeenCalledTimes(1));
+    const callbacks = mocks.askMutate.mock.calls[0][1] as {
+      onSuccess: (result: { answer: string; actions: unknown[]; steps: string[] }) => void;
+      onError: (error: Error) => void;
+      onSettled: () => void;
+    };
+
+    rerender(<ProjectAssistant projectId="project-b" embedded />);
+    await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+
+    act(() => {
+      callbacks.onSuccess({
+        answer: "STALE_TRPC_ANSWER",
+        actions: [],
+        steps: ["STALE_TRPC_STEP"],
+      });
+      callbacks.onError(new Error("STALE_TRPC_ERROR"));
+      callbacks.onSettled();
+    });
+
+    expect(screen.queryByText("STALE_TRPC_ANSWER")).not.toBeInTheDocument();
+    expect(screen.queryByText("STALE_TRPC_STEP")).not.toBeInTheDocument();
+    expect(screen.queryByText("STALE_TRPC_ERROR")).not.toBeInTheDocument();
+  });
+
+  it("does not append a late confirmed-action result to the newly selected project", async () => {
+    mocks.requestAssistantStream.mockImplementation(async (request: StreamRequest) => {
+      request.handlers.onDone({
+        answer: "ACTION_READY",
+        actions: [
+          {
+            type: "create_scene",
+            label: "RUN_STALE_ACTION",
+            title: "Scene",
+          },
+        ],
+        steps: [],
+        mock: false,
+        fallback: false,
+      });
+      return true;
+    });
+    const action = deferred<{ kind: string; message: string }>();
+    mocks.runMutateAsync.mockReturnValue(action.promise);
+
+    const { rerender } = render(<ProjectAssistant projectId="project-a" embedded />);
+    await submitQuestion("prepare-action");
+    await screen.findByText("ACTION_READY");
+
+    await userEvent.setup().click(screen.getByRole("button", { name: "RUN_STALE_ACTION" }));
+    await waitFor(() => expect(mocks.runMutateAsync).toHaveBeenCalledWith({
+      projectId: "project-a",
+      action: {
+        type: "create_scene",
+        title: "Scene",
+        voiceover: undefined,
+        durationSec: undefined,
+        prompt: undefined,
+      },
+    }));
+
+    rerender(<ProjectAssistant projectId="project-b" embedded />);
+    await waitFor(() => expect(screen.queryByText("ACTION_READY")).not.toBeInTheDocument());
+
+    await act(async () => {
+      action.resolve({ kind: "create_scene", message: "STALE_ACTION_RESULT" });
+      await action.promise;
+    });
+
+    expect(screen.queryByText(/STALE_ACTION_RESULT/)).not.toBeInTheDocument();
+  });
+});

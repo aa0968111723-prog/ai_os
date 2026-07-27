@@ -19,7 +19,7 @@
 ```bash
 npm install
 cp .env.example .env        # 填 DATABASE_URL（本機 Postgres 或 Railway 的）
-npm run db:push             # 建立資料表
+npm run db:migrate          # 依已審核 migration 建立／更新資料表
 npm run dev                 # server :3000 + client :5173
 ```
 
@@ -34,9 +34,12 @@ npm run dev                 # server :3000 + client :5173
 
 1. Railway 新增專案 → 加 **Postgres** 服務
 2. 加 **App 服務**連此 repo（自動用 Dockerfile 建置）
-3. 環境變數：`DATABASE_URL`（引用 Postgres 服務）、`FAL_KEY`（必填——全站一律真實生成，示範模式已移除）
-4. **資料表自動建立**：容器啟動時會自動 `drizzle-kit push`（首次部署免手動）；
-   若 DB 尚未就緒不會擋啟動，重試部署即可。也可自行 `DATABASE_URL=<Railway的> npm run db:push`
+3. 環境變數：`DATABASE_URL`（引用 Postgres 服務）、`FAL_KEY`（必填——全站一律真實生成）、
+   `RATE_LIMIT_SECRET`（必填、至少 32 字元、所有 replicas 相同；限流識別值的 HMAC 金鑰）
+4. **先跑 release migration**：以同一映像的 one-off/release job 執行
+   `npm run db:migrate:dry-run && npm run db:migrate && npm run db:check`，成功後才啟動 App。
+   既有未納管 DB 請先依 [資料庫遷移 Runbook](docs/資料庫遷移.md) 做 dry-run 與明確 baseline。
+   容器啟動只做唯讀 drift gate，絕不在 runtime 自動 push DDL。
 
 ## 結構
 
@@ -65,7 +68,8 @@ docs/     規劃文件
 - [ ] 素材知識庫（RAG：貼上文字語料→檢索引用；逐字稿來源就緒後啟動）
 - [x] AI 導演建議（依世界觀給 3 個分鏡 idea、一鍵帶入提示詞；僅供參考、成品須組長審核）
 - [x] 回饋系統（六項評分＋優缺點；管理頁彙整）
-- [x] MCP 伺服器介面（/api/mcp，4 工具；設 MCP_API_KEY 啟用）
+- [x] MCP 伺服器介面（/api/mcp；正式站使用可撤銷、可到期、綁定個人的連線金鑰；
+      舊 MCP_API_KEY 共用超管金鑰另需明確旗標，只供本機／CI，production 會忽略）
 - [x] 新手友善交接報告（docs/交接報告.md：部署步驟/日常使用/API 文件）
 - [x] 登入・團隊・組別系統：bcrypt 加密登入、邀請制（連結用 LINE 傳）、兩層組織（團隊→組別）、
       角色（開發者/團隊管理/組長/組員）、多組隔離守衛（e2e 34 項全過：scripts/e2e-auth.py）

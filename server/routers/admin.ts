@@ -439,16 +439,17 @@ export const adminRouter = router({
     // 稽核：誰在什麼時候重設了誰（臨時密碼本身不落 log）
     console.log(`[audit] resetMemberPassword：caller=${ctx.auth.user.id} target=${target.id}`);
     const tempPassword = generateTempPassword();
-    // mustChangePassword：臨時密碼登入後前端強制改密碼，auth.changePassword 成功時清回 false
-    await db
-      .update(schema.users)
-      .set({ passwordHash: await hashPassword(tempPassword), mustChangePassword: true })
-      .where(eq(schema.users.id, target.id));
-    // 全 session 作廢：舊登入立刻失效，只有拿到臨時密碼的本人能重新登入
-    await db.delete(schema.sessions).where(eq(schema.sessions.userId, target.id));
-    // MCP 個人金鑰一併撤銷（安全關鍵）：金鑰是不經 tRPC 閘門的另一套長效憑證，只砍 session 的話
-    // 被盜／既存金鑰在密碼重設後仍能以受害者身分讀寫全系統（MCP／REST），帳號鎖定形同虛設。
-    const revokedTokens = await revokeAllUserMcpTokens(target.id);
+    // bcrypt 先在交易外計算；密碼、強制改密碼旗標、session 與 MCP token 必須同一交易輪替。
+    // 任一步失敗即全部 rollback，避免留下舊 session/token 仍可用的混合狀態。
+    const passwordHash = await hashPassword(tempPassword);
+    const revokedTokens = await db.transaction(async (tx) => {
+      await tx
+        .update(schema.users)
+        .set({ passwordHash, mustChangePassword: true })
+        .where(eq(schema.users.id, target.id));
+      await tx.delete(schema.sessions).where(eq(schema.sessions.userId, target.id));
+      return revokeAllUserMcpTokens(target.id, tx);
+    });
     if (revokedTokens > 0) console.log(`[audit] resetMemberPassword 一併撤銷 ${revokedTokens} 把 MCP 金鑰：target=${target.id}`);
     return { tempPassword };
   }),

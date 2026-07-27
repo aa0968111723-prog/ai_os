@@ -18,8 +18,13 @@ import { isMockMode } from "./fal";
 import { nimComplete } from "./nvidia-nim";
 import { sendEmail, isEmailConfigured, type EmailStatus } from "./email";
 import { FEEDBACK_CATEGORIES } from "../../shared/options";
+import {
+  isShuttingDown,
+  onShutdown,
+  trackBackgroundTask,
+} from "./shutdown";
 
-/** 每 3 天巡一次（需求指定）；開機後先延遲一段再首巡，避免和建表/種子搶資源。 */
+/** 每 3 天巡一次（需求指定）；開機後先延遲一段再首巡，避免和 schema 驗證/種子同步搶資源。 */
 const INTERVAL_MS = 3 * 24 * 60 * 60_000;
 const FIRST_RUN_DELAY_MS = 5 * 60_000;
 /** 單輪最多處理筆數：夠一次消化積壓，又不會把一輪 LLM 呼叫拖太長／灌爆額度。 */
@@ -353,18 +358,21 @@ export async function runFeedbackAgentOnce(
  * fire-and-forget 呼叫。已被排程或另一次即時分診處理過（agentReviewedAt 有值）就跳過；
  * 寫回帶 guardUnreviewed 防與排程互相覆寫。全程容錯、絕不外拋——即時分診失敗不影響送出本身。
  */
-export async function triageReportNow(reportId: string): Promise<void> {
-  try {
-    const [report] = await db
-      .select()
-      .from(schema.feedbackReports)
-      .where(eq(schema.feedbackReports.id, reportId));
-    if (!report || report.agentReviewedAt) return; // 找不到或已分診過
-    await reviewAndReplyOne(report, { guardUnreviewed: true });
-    console.log(`[feedbackAgent] ✓ 即時分診完成（回饋 ${reportId}）`);
-  } catch (err) {
-    console.warn(`[feedbackAgent] 即時分診略過（回饋 ${reportId}）：`, err instanceof Error ? err.message : err);
-  }
+export function triageReportNow(reportId: string): Promise<void> {
+  if (isShuttingDown()) return Promise.resolve();
+  return trackBackgroundTask((async () => {
+    try {
+      const [report] = await db
+        .select()
+        .from(schema.feedbackReports)
+        .where(eq(schema.feedbackReports.id, reportId));
+      if (!report || report.agentReviewedAt) return; // 找不到或已分診過
+      await reviewAndReplyOne(report, { guardUnreviewed: true });
+      console.log(`[feedbackAgent] ✓ 即時分診完成（回饋 ${reportId}）`);
+    } catch (err) {
+      console.warn(`[feedbackAgent] 即時分診略過（回饋 ${reportId}）：`, err instanceof Error ? err.message : err);
+    }
+  })());
 }
 
 let started = false;
@@ -375,12 +383,21 @@ let started = false;
  * 全程容錯，比照 scheduleFeedbackSweep：任何失敗都不外拋、不影響服務。
  */
 export function startFeedbackAgent(): void {
-  if (started) return;
+  if (started || isShuttingDown()) return;
   started = true;
-  const tick = () => void runFeedbackAgentOnce({ trigger: "scheduled" }).catch((err) =>
-    console.warn("[feedbackAgent] 排程巡檢略過：", err instanceof Error ? err.message : err),
-  );
-  setTimeout(tick, FIRST_RUN_DELAY_MS);
-  setInterval(tick, INTERVAL_MS);
+  const tick = () => {
+    if (isShuttingDown()) return;
+    void trackBackgroundTask(
+      runFeedbackAgentOnce({ trigger: "scheduled" }).catch((err) =>
+        console.warn("[feedbackAgent] 排程巡檢略過：", err instanceof Error ? err.message : err),
+      ),
+    );
+  };
+  const firstRun = setTimeout(tick, FIRST_RUN_DELAY_MS);
+  const interval = setInterval(tick, INTERVAL_MS);
+  onShutdown(() => {
+    clearTimeout(firstRun);
+    clearInterval(interval);
+  });
   console.log(`[feedbackAgent] 排程已啟動（每 3 天巡一次；信箱機制${isEmailConfigured() ? "已設定" : "未設定，僅落地草稿"}）`);
 }

@@ -36,6 +36,15 @@ describe("sanitizeAuditInput:憑證鍵剔除", () => {
     expect(out).toEqual({ keep: "ok" });
   });
 
+  it("不把批次寫入的原始 idempotency key 寫進審計資料", () => {
+    const out = sanitizeAuditInput({
+      tableId: "table",
+      idempotencyKey: "import-20260726-001",
+      rows: [],
+    }) as Record<string, unknown>;
+    expect(out).toEqual({ tableId: "table", rows: [] });
+  });
+
   it("巢狀物件內的憑證鍵一樣剔除", () => {
     const out = sanitizeAuditInput({ config: { password: "x", host: "db" } }) as { config: Record<string, unknown> };
     expect(out.config).toEqual({ host: "db" });

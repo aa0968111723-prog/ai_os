@@ -4,26 +4,64 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+      - run: npm run audit:high
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:client:coverage
       - run: npm run build
 
-  # 九套 e2e(auth/models/phase2/phase3/phase4/messages/databases/mcp/push):每套「全新資料庫」起跑——
-  # 重置 schema → 重啟伺服器(開機自動建表+種子)→ 跑套件;e2e_lib 讓任何 ❌ 都以非零碼收場。
+  migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      RATE_LIMIT_SECRET: ci-only-rate-limit-secret-00000000000000000000000000000000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: sh scripts/ci-migration-test.sh
+      - run: npx tsx scripts/ci-rate-limit-test.ts
+
+  # 每套 e2e 都從「全新資料庫」起跑：
+  # 重置 public+ledger → 明確 migrate/check → 啟動伺服器(seed) → 跑套件。
   # 環境與本機驗證口徑一致:E2E_MOCK=1(測試專用假生成,不花錢)+ MOCK_BILLING=1(仍真扣點,額度護欄可驗)。
   # 注意:正式部署一律真實模式(示範模式已移除),E2E_MOCK 只在這裡與本機測試設定。
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -42,27 +80,31 @@ jobs:
       MOCK_BILLING: "1"
       SEED_ADMIN_EMAIL: admin@aidirector.local
       SEED_ADMIN_PASSWORD: test-admin-123
+      RATE_LIMIT_SECRET: ci-only-rate-limit-secret-00000000000000000000000000000000
       MCP_API_KEY: test-mcp-key
+      ALLOW_LEGACY_MCP_ADMIN_KEY: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - name: 依序跑各套 e2e(每套全新 DB + 重啟伺服器)
         run: |
           set -eu
           for suite in auth models phase2 phase3 phase4 messages databases mcp push export; do
             echo "::group::e2e-$suite"
-            # 全新資料庫:掃掉上一套的所有表,開機時 ensure.ts 會重建+種子
+            # 全新資料庫：public 與 migration ledger 必須一起重置，避免 ledger 假稱已套用。
             PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
-              -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' -q
+              -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; DROP SCHEMA IF EXISTS drizzle CASCADE;' -q
+            npm run db:migrate
+            npm run db:check
             # setsid:npx→tsx→node 是一串子行程,單殺 npx 會留下佔埠孤兒讓下一套 EADDRINUSE;
             # 讓它當行程群組長,結束時對負 pid 送 TERM 整組收乾淨(本機驗證時實際踩過這雷)。
             setsid npx tsx server/index.ts > "/tmp/server-$suite.log" 2>&1 &
             SERVER_PID=$!
-            # 等到建表+種子完成(/api/ready 的 boot=ready),最多 90 秒
+            # schema 已由顯式 migration 完成；此處只等 seed/runner boot ready，最多 90 秒。
             for i in $(seq 1 90); do
               if curl -sf http://localhost:3199/api/ready 2>/dev/null | grep -q '"boot":"ready'; then
                 break
@@ -81,3 +123,21 @@ jobs:
             wait "$SERVER_PID" 2>/dev/null || true
             echo "::endgroup::"
           done
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [check]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 建置正式非 root 映像
+        run: >-
+          docker build
+          --build-arg BUILD_SHA="${GITHUB_SHA}"
+          --build-arg BUILD_BRANCH="${GITHUB_REF_NAME}"
+          --build-arg BUILD_TIME="$(date -u +%FT%TZ)"
+          --tag ai-director-os:ci .
+      - name: 驗證映像執行身分與健康檢查
+        run: |
+          test "$(docker image inspect ai-director-os:ci --format '{{.Config.User}}')" = "node"
+          test "$(docker image inspect ai-director-os:ci --format '{{json .Config.Healthcheck.Test}}')" != "null"

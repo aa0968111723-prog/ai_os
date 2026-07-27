@@ -4,9 +4,8 @@
  *
  * 兩條認證路徑並存：
  *  1) 個人金鑰（本檔，推薦）：每人自助建立、可撤銷；解析成該人的 AuthState。
- *  2) 舊有共用金鑰 env MCP_API_KEY（向後相容）：對應到超級管理員身分。
- *     這是「單一金鑰＝人人開發者」的舊模型，僅為不破壞既有部署／e2e 而保留；
- *     要讓夥伴各自依權限連線，請改用個人金鑰、並移除此環境變數。
+ *  2) 舊有共用金鑰 env MCP_API_KEY：只在非 production 且另外明確設定
+ *     ALLOW_LEGACY_MCP_ADMIN_KEY=1 時相容，對應到超級管理員；其餘情況一律忽略。
  *
  * 保護等級與 sessions/invites 一致：DB 只存 SHA-256，原文只在建立當下回一次。
  */
@@ -88,12 +87,19 @@ export type McpIdentity =
   | { kind: "user"; auth: AuthState; tokenId: string; scope: McpScope }
   | { kind: "admin"; auth: AuthState; scope: McpScope };
 
+/** 舊共用金鑰等同超級管理員，必須以第二個明確旗標在本機／CI 開啟；預設永遠關閉。 */
+export function legacyMcpAdminKeyEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV !== "production"
+    && env.ALLOW_LEGACY_MCP_ADMIN_KEY === "1"
+    && !!env.MCP_API_KEY;
+}
+
 /**
- * MCP 是否已啟用：設了 env 共用金鑰，或至少有一把未撤銷的個人金鑰存在。
+ * MCP 是否已啟用：非 production 設了舊共用金鑰，或至少有一把未撤銷的個人金鑰存在。
  * 兩者皆無＝沒人開通，維持「未啟用」（handleMcp 回 404、不對外張揚端點）。
  */
 export async function isMcpEnabled(): Promise<boolean> {
-  if (process.env.MCP_API_KEY) return true;
+  if (legacyMcpAdminKeyEnabled()) return true;
   const [row] = await db
     .select({ id: schema.mcpTokens.id })
     .from(schema.mcpTokens)
@@ -107,8 +113,8 @@ export async function isMcpEnabled(): Promise<boolean> {
  * 成功時 fire-and-forget 更新 lastUsedAt（純輔助資訊，失敗不影響認證）。
  */
 export async function resolveMcpIdentity(provided: string): Promise<McpIdentity | null> {
-  // 路徑 2：舊有共用金鑰 → 開發者。放在最前面，維持既有部署行為不變。
-  const envKey = process.env.MCP_API_KEY;
+  // 路徑 2：舊有共用金鑰 → 開發者。僅非 production 相容；正式環境永遠略過。
+  const envKey = legacyMcpAdminKeyEnabled() ? process.env.MCP_API_KEY : undefined;
   if (envKey && envKeyMatches(provided, envKey)) {
     const [admin] = await db.select().from(schema.users).where(eq(schema.users.isSuperAdmin, true)).limit(1);
     if (!admin) return null; // 系統尚未初始化

@@ -14,6 +14,11 @@ import { and, asc, eq, inArray, lt } from "drizzle-orm";
 import { db, schema } from "../db";
 import { exportProjectZip, exportZipName } from "./exporter";
 import { tmpDir, adoptTmpFile, removeStoredFile } from "./storage";
+import {
+  isShuttingDown,
+  onShutdown,
+  trackBackgroundTask,
+} from "./shutdown";
 
 const TICK_MS = 3000;
 /** 同 tick 只打包一件（打包吃磁碟/網路頻寬，序列化避免互相拖慢）；佇列靠下一 tick 消化 */
@@ -37,11 +42,12 @@ let tickCount = 0;
 
 /** 啟動執行器（server/index.ts 開機時呼叫一次；重複呼叫無效果） */
 export function startExportRunner(): void {
-  if (started) return;
+  if (started || isShuttingDown()) return;
   started = true;
-  setInterval(() => {
-    void (async () => {
-      if (ticking) return; // 上一件還在打包：不重入（打包序列化）
+  const interval = setInterval(() => {
+    if (isShuttingDown()) return;
+    void trackBackgroundTask((async () => {
+      if (ticking || isShuttingDown()) return; // 上一件還在打包：不重入（打包序列化）
       ticking = true;
       try {
         tickCount += 1;
@@ -56,20 +62,22 @@ export function startExportRunner(): void {
       } finally {
         ticking = false;
       }
-    })();
+    })());
   }, TICK_MS);
+  onShutdown(() => clearInterval(interval));
   console.log(`[export-job] 匯出執行器已啟動（每 ${TICK_MS / 1000} 秒認領一件）`);
 }
 
 /** 認領最舊的一筆 queued job 並打包；沒有待辦就直接返回 */
 async function claimAndRun(): Promise<void> {
+  if (isShuttingDown()) return;
   const [next] = await db
     .select({ id: schema.exportJobs.id })
     .from(schema.exportJobs)
     .where(eq(schema.exportJobs.status, "queued"))
     .orderBy(asc(schema.exportJobs.createdAt))
     .limit(1);
-  if (!next) return;
+  if (!next || isShuttingDown()) return;
   // CAS 認領：只有真正把 queued 翻成 running 的那一次才打包（多實例安全）
   const [job] = await db
     .update(schema.exportJobs)

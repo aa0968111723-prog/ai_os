@@ -10,7 +10,7 @@ import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 
 /** 這些鍵的值一律不落審計（不論深度）——寧可漏記也不可記到憑證 */
-const SECRET_KEY_RE = /password|token|secret|apikey|api_key/i;
+const SECRET_KEY_RE = /password|token|secret|apikey|api_key|idempotency.?key/i;
 
 const MAX_STRING = 200;
 const MAX_KEYS = 24;

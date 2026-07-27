@@ -11,6 +11,11 @@ import { db, schema } from "../db";
 import { advanceGeneration, sweepUnlandedAssets } from "./generationCore";
 import { sweepVoiceTranscripts } from "./voiceTranscribe";
 import { failStaleGenerationTx } from "./points";
+import {
+  isShuttingDown,
+  onShutdown,
+  trackBackgroundTask,
+} from "./shutdown";
 
 const TICK_MS = 6000;
 /** 單筆推進放行門檻：逾時不砍原 promise，只讓本輪 tick 先去顧其他生成 */
@@ -36,15 +41,18 @@ export function runnerHeartbeat(): { started: boolean; lastTickAt: number | null
 
 /** 啟動執行器（server/index.ts 開機時呼叫一次；重複呼叫無效果） */
 export function startGenerationRunner(): void {
-  if (started) return;
+  if (started || isShuttingDown()) return;
   started = true;
   // 啟動時先掃一次陳屍：重佈／OOM 打斷後一開機就把凍結的點數收斂，不等使用者打開列表才觸發
-  void sweepStale().catch((err) =>
-    console.warn("[generation] 啟動陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err),
+  void trackBackgroundTask(
+    sweepStale().catch((err) =>
+      console.warn("[generation] 啟動陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err),
+    ),
   );
-  setInterval(() => {
+  const interval = setInterval(() => {
+    if (isShuttingDown()) return;
     // 撈生成本身失敗（DB 抖動）也不能變成 unhandled rejection——記警告等下一輪
-    void (async () => {
+    void trackBackgroundTask((async () => {
       tickCount += 1;
       if (tickCount % SWEEP_EVERY_TICKS === 0) {
         try {
@@ -68,14 +76,16 @@ export function startGenerationRunner(): void {
           console.warn("[generation] 語音逐字稿掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
         }
       }
+      if (isShuttingDown()) return;
       try {
         await tick();
         lastTickAt = Date.now();
       } catch (err) {
         console.warn("[generation] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err);
       }
-    })();
+    })());
   }, TICK_MS);
+  onShutdown(() => clearInterval(interval));
   console.log(`[generation] 執行器已啟動（每 ${TICK_MS / 1000} 秒推進一次）`);
 }
 
@@ -86,8 +96,13 @@ async function tick(): Promise<void> {
     .where(inArray(schema.generations.status, ["queued", "running"]))
     .orderBy(asc(schema.generations.updatedAt))
     .limit(BATCH);
+  if (isShuttingDown()) return;
   // 同輪並行推進：一筆卡住的生成（fal 慢回）不能擋住其他生成的進度
-  await Promise.allSettled(rows.filter((g) => !inflight.has(g.id)).map((g) => advanceWithGuard(g.id)));
+  await Promise.allSettled(
+    rows
+      .filter((g) => !inflight.has(g.id) && !isShuttingDown())
+      .map((g) => advanceWithGuard(g.id)),
+  );
 }
 
 /** 推進一筆生成，帶逾時放行：逾時只結束等待、記警告——id 留在 inflight 直到原 promise 結束，防同筆雙寫 */

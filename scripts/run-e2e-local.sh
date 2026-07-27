@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 本機複刻 CI 的 e2e 流程（每套全新 DB + 重啟伺服器，E2E_MOCK=1 不花錢）。
-# 用法：bash scripts/run-e2e-local.sh [suite ...]；不帶參數＝跑全部八套。
+# 本機複刻 CI 的 e2e 流程（每套重置 DB → 顯式 migrate/check → 重啟伺服器）。
+# 用法：bash scripts/run-e2e-local.sh [suite ...]；不帶參數＝跑全部套件。
 set -u
 
 export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/postgres"
@@ -9,18 +9,25 @@ export E2E_MOCK="1"
 export MOCK_BILLING="1"
 export SEED_ADMIN_EMAIL="admin@aidirector.local"
 export SEED_ADMIN_PASSWORD="test-admin-123"
+export RATE_LIMIT_SECRET="local-e2e-rate-limit-secret-000000000000000000000000000000"
 export MCP_API_KEY="test-mcp-key"
+export ALLOW_LEGACY_MCP_ADMIN_KEY="1"
 
 SUITES=("$@")
 if [ "${#SUITES[@]}" -eq 0 ]; then
-  SUITES=(auth models phase2 phase3 phase4 messages databases mcp push)
+  SUITES=(auth models phase2 phase3 phase4 messages databases mcp push export)
 fi
 
 FAILED=()
 for suite in "${SUITES[@]}"; do
   echo "==================== e2e-$suite ===================="
   PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
-    -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' -q
+    -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; DROP SCHEMA IF EXISTS drizzle CASCADE;' -q
+  if ! npm run db:migrate || ! npm run db:check; then
+    echo "✘ e2e-$suite migration/check 失敗"
+    FAILED+=("$suite(migration)")
+    continue
+  fi
   setsid npx tsx server/index.ts > "/tmp/server-$suite.log" 2>&1 &
   SERVER_PID=$!
   READY=0

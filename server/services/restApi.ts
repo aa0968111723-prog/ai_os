@@ -17,6 +17,20 @@ import { resolveSession, type AuthState } from "./auth";
 import { resolveMcpIdentity } from "./mcpAuth";
 import { listVisibleTables, resolveAgentAccess, resolveTableAccess } from "./databaseAcl";
 import { addDataRowValidated } from "./databaseCore";
+import {
+  databaseBatchWriteDenied,
+  parseDatabaseBatchRows,
+} from "./databaseBatchApi";
+import {
+  executeIdempotentDatabaseBatch,
+  IdempotencyConflictError,
+  InvalidIdempotencyKeyError,
+  parseIdempotencyKey,
+} from "./databaseBatchIdempotency";
+import {
+  escapeLikeLiteral,
+  normalizeDatabaseSearchKeyword,
+} from "./databaseRowSearch";
 import { toCsv } from "../../shared/csv";
 import { buildIcs } from "../routers/schedule";
 import type { DataField, DataRowData } from "../../shared/databaseFields";
@@ -95,11 +109,19 @@ export async function handleV1ListRows(req: Request, res: Response): Promise<voi
   if (!who) return void res.status(401).json({ error: "需要認證：帶 x-api-key（個人 MCP 金鑰）或先登入" });
   const hit = await readableTable(who.auth, who.viaToken, req.params.id);
   if (!hit) return void res.status(404).json({ error: "找不到這個資料庫" });
-  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
-  const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 1000);
-  const offset = Math.max(Number(req.query.offset) || 0, 0);
+  const q = normalizeDatabaseSearchKeyword(
+    typeof req.query.q === "string" ? req.query.q : "",
+  );
+  const rawLimit = Number(req.query.limit);
+  const rawOffset = Number(req.query.offset);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(Math.trunc(rawLimit), 1), 1000)
+    : 200;
+  const offset = Number.isFinite(rawOffset)
+    ? Math.min(Math.max(Math.trunc(rawOffset), 0), 20_000)
+    : 0;
   const conds = [eq(schema.dataRows.tableId, hit.table.id)];
-  if (q) conds.push(sql`${schema.dataRows.data}::text ilike ${"%" + q + "%"}`);
+  if (q) conds.push(sql`${schema.dataRows.data}::text ilike ${`%${escapeLikeLiteral(q)}%`} escape ${"\\"}`);
   const rows = await db
     .select({ id: schema.dataRows.id, data: schema.dataRows.data, createdAt: schema.dataRows.createdAt, updatedAt: schema.dataRows.updatedAt })
     .from(schema.dataRows)
@@ -129,6 +151,72 @@ export async function handleV1AddRow(req: Request, res: Response): Promise<void>
     res.json({ id: row.id, data: row.data });
   } catch (err) {
     res.status(400).json({ error: err instanceof Error ? err.message : "新增失敗" });
+  }
+}
+
+/**
+ * POST /api/v1/databases/:id/rows/batch
+ * JSON body: { rows: [{ data: {...} }, ...] }（每次 1–500 筆）
+ * Header: Idempotency-Key（必填；同一批重試必須沿用）
+ *
+ * 欄位驗證錯誤以 errors[index] 逐列回報，合法列仍會寫入；資料列與冪等結果在
+ * 同一 transaction 提交，資料庫錯誤時整批回滾，不留下半批或 commit gap。
+ */
+export async function handleV1AddRowsBatch(req: Request, res: Response): Promise<void> {
+  const who = await resolveRequester(req);
+  if (!who) return void res.status(401).json({ error: "需要認證：帶 x-api-key（個人 MCP 金鑰）或先登入" });
+  const hit = await readableTable(who.auth, who.viaToken, req.params.id);
+  if (!hit) return void res.status(404).json({ error: "找不到這個資料庫" });
+
+  const denied = databaseBatchWriteDenied(who.readOnly, hit.access.canWriteRows);
+  if (denied) return void res.status(403).json({ error: denied });
+
+  let idempotencyKey: string;
+  try {
+    idempotencyKey = parseIdempotencyKey(req.headers["idempotency-key"]);
+  } catch (err) {
+    if (err instanceof InvalidIdempotencyKeyError) {
+      return void res.status(400).json({ code: err.code, error: err.message });
+    }
+    throw err;
+  }
+
+  let rawRows: unknown[];
+  try {
+    rawRows = parseDatabaseBatchRows(req.body);
+  } catch (err) {
+    return void res.status(400).json({
+      error: err instanceof Error ? err.message : "批次資料格式不正確",
+    });
+  }
+
+  try {
+    const response = await executeIdempotentDatabaseBatch({
+      table: hit.table,
+      actorId: who.auth.user.id,
+      rawRows,
+      idempotencyKey,
+    });
+    void db.insert(schema.auditLog).values({
+      actorId: who.auth.user.id,
+      action: "rest.add_database_rows",
+      groupId: hit.table.groupId,
+      input: {
+        tableId: hit.table.id,
+        requested: rawRows.length,
+        insertedCount: response.insertedCount,
+        failed: response.failed,
+        replayed: response.replayed,
+      } as Record<string, unknown>,
+      ok: true,
+    }).catch(() => {});
+    res.setHeader("Idempotency-Replayed", response.replayed ? "true" : "false");
+    res.json(response);
+  } catch (err) {
+    if (err instanceof IdempotencyConflictError) {
+      return void res.status(409).json({ code: err.code, error: err.message });
+    }
+    res.status(500).json({ error: "批次新增失敗，整批未寫入，請稍後再試" });
   }
 }
 

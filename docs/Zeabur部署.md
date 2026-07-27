@@ -11,7 +11,7 @@
 | 服務 | 來源 | 用途 |
 |---|---|---|
 | `ai-os`(App) | GitHub 本 repo(Dockerfile 自動偵測) | Node 22 伺服器,`sh /app/start.sh` 啟動 |
-| `PostgreSQL` | Zeabur 預建服務(Prebuilt) | 資料庫;建表/種子由 App 開機時自動處理(`server/db/ensure.ts`),**不需要**手動跑 migration |
+| `PostgreSQL` | Zeabur 預建服務(Prebuilt) | 資料庫；schema 由明確 release migration 管理，App 啟動只做唯讀驗證與種子同步 |
 
 另外掛一顆 **Volume 到 App 服務的 `/data`**——上傳素材與 AI 生成成品的永久儲存。
 
@@ -25,7 +25,9 @@
    - 不想掛在 `/data` 也可以,改設環境變數 `ASSET_DIR` 指到掛載路徑。
 5. **開對外網域**:App 服務 → Networking → Public → 產生 `xxx.zeabur.app`(或綁自訂網域)。
 6. **設環境變數**(App 服務 → Variables,清單見下節),特別是 `DATABASE_URL` 與 `APP_URL`。
-7. **Redeploy**,然後打開 `https://你的網域/api/ready` 驗證:`ok: true` 且 `db` 正常 → 用管理員帳密登入 → 團隊管理頁「跑系統自檢」。
+7. **初始化 DB**：用同一個新映像的 one-off command/shell 先跑
+   `npm run db:migrate:dry-run && npm run db:migrate && npm run db:check`。Web 容器不會代跑 DDL。
+8. **Redeploy**,然後打開 `https://你的網域/api/ready` 驗證:`ok: true` 且 `db` 正常 → 用管理員帳密登入 → 團隊管理頁「跑系統自檢」。
 
 ## 環境變數清單
 
@@ -53,7 +55,7 @@
 | `TOTAL_BUDGET_POINTS` | 5000 | 首次啟動的總預算種子值(之後在系統內調)。 |
 | `WEEKLY_QUOTA_POINTS` | 300 | 每人每週點數種子值(之後在系統內調)。 |
 | `DAILY_QUOTA_POINTS` | (無) | 每人每日點數上限。 |
-| `MCP_API_KEY` | (無) | 設定後開啟 `/api/mcp`,外部 AI 代理(Claude 等)可直接操作系統。 |
+| `MCP_API_KEY` | **正式站勿設** | 舊共用超管金鑰只供本機／CI；production 會忽略。正式站由每位使用者在「怎麼用」建立可撤銷、可到期的個人連線金鑰。 |
 | `ASSET_DIR` | `/data`(存在時) | 素材儲存根目錄;Volume 掛在別處時指過去。 |
 | `ASSET_MAX_MB` | 100 | 單檔上傳上限。 |
 | `MOCK_BILLING` | (無) | `1`=測試假生成(E2E_MOCK=1)也真扣點(e2e 驗證額度護欄用,正式站不用設)。 |
@@ -75,7 +77,9 @@
    pg_dump "$RAILWAY_DATABASE_URL" --no-owner --no-privileges -Fc -f aios.dump
    pg_restore -d "$ZEABUR_DATABASE_URL" --no-owner --no-privileges aios.dump
    ```
-   還原後先別開放使用,做第 2 步。
+   還原後先別開放使用。用新映像執行 `npm run db:check`；若顯示 `legacy-untracked`，
+   依 [`資料庫遷移.md`](資料庫遷移.md) 先備份、跑 `db:adopt:dry-run`，再帶 fingerprint 明確 baseline。
+   已有 ledger 的備份必須直接通過 `db:check`，不可重新 adopt。
 2. **素材檔案**(Railway Volume `/data` → Zeabur Volume `/data`):
    - 舊站跑 `railway ssh` 或一次性端點把 `/data` 打包(`tar czf /tmp/data.tgz -C /data .`)下載;
    - 新站以同路徑解開(Zeabur 服務可用 Web Terminal 上傳解包,或暫時開個管理端點)。

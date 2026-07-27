@@ -22,6 +22,11 @@ import { db, schema } from "../db";
 import { proxyFetch } from "./http";
 import { STORAGE_ROOT } from "./storage";
 import { assertPublicHostOrError, MAX_IMPORT_BYTES, readBodyCapped, ssrfGuardError } from "./databaseFiles";
+import {
+  consumeRateLimit,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+} from "./rateLimit";
 
 const OAUTH_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -446,23 +451,19 @@ export function resolveApiUrl(baseUrl: string, rawPath: string): string {
   return target.toString();
 }
 
-/** 每人每分鐘的外部抓取節流（單容器記憶體 Map，全站慣例） */
-const apiFetchWindow = new Map<string, { count: number; resetAt: number }>();
-const API_FETCH_PER_MINUTE = 20;
-
 export async function fetchApiConnection(
   userId: string,
   connectionId: string,
   rawPath: string,
 ): Promise<{ status: number; mime: string; content: string; truncated: boolean }> {
-  const now = Date.now();
-  const win = apiFetchWindow.get(userId);
-  if (!win || win.resetAt < now) {
-    apiFetchWindow.set(userId, { count: 1, resetAt: now + 60_000 });
-  } else if (win.count >= API_FETCH_PER_MINUTE) {
+  // 每人每分鐘 20 次，PostgreSQL 滑動視窗跨 replicas 共用；DB 不可用時服務丟錯並 fail closed。
+  const rate = await consumeRateLimit(
+    RATE_LIMIT_SCOPES.apiFetch,
+    userId,
+    RATE_LIMIT_POLICIES.apiFetch,
+  );
+  if (!rate.allowed) {
     throw new Error("外部抓取太頻繁——請一分鐘後再試");
-  } else {
-    win.count += 1;
   }
 
   const [row] = await db.select().from(schema.userIntegrations)

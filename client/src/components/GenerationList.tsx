@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { getModel } from "@shared/models";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
+import { GenerationPromptCopy, GenerationResultCopy } from "./GenerationCopy";
 import { discussInMessages } from "../discuss";
 
 /**
@@ -305,6 +306,13 @@ export function GenerationList({
       </div>
     );
 
+  const activeFilterCount =
+    Number(!!statusFilter) +
+    Number(!!kindFilter) +
+    Number(!!sceneFilter) +
+    Number(!!debouncedSearch) +
+    Number(favoriteOnly);
+
   return (
     <div style={{ marginTop: 14 }} data-fb="生成紀錄">
       {/* 視覺隱藏的狀態宣告區：生成由進行中轉完成/失敗時朗讀一次 */}
@@ -316,10 +324,15 @@ export function GenerationList({
       {retry.error && <p className="error">重試失敗：{retry.error.message}</p>}
       {decideCost.error && <p className="error">核准／駁回失敗：{decideCost.error.message}</p>}
       {setVisual.error && <p className="error">設為分鏡現用失敗：{setVisual.error.message}</p>}
-      <div
-        className="gen-filters"
-        style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 10 }}
-      >
+      <details className="generation-filter-panel">
+        <summary>
+          <span><Icon name="SlidersHorizontal" size={13} /> 篩選與搜尋</span>
+          <span className="hint">{activeFilterCount > 0 ? `已套用 ${activeFilterCount} 項` : "依狀態、類型、分鏡或提示詞尋找"}</span>
+        </summary>
+        <div
+          className="gen-filters"
+          style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}
+        >
         {([["queued", "排隊中"], ["running", "生成中"], ["done", "完成"], ["failed", "失敗"], ["awaiting_approval", "待核准"], ["rejected", "已駁回"]] as const).map(([val, label]) => (
           <button
             key={val}
@@ -391,7 +404,8 @@ export function GenerationList({
             清除
           </button>
         )}
-      </div>
+        </div>
+      </details>
       {/* 查詢失敗不能偽裝成「查無資料」——講清楚是伺服器/網路問題並給重試出口 */}
       {browsing && paged.isError && (
         <p className="error" role="alert" style={{ marginTop: 12 }}>
@@ -501,7 +515,9 @@ export function GenerationList({
                 </>
               )}
             </div>
-            <div style={{ fontSize: 14 }}>{g.prompt}</div>
+            <div style={{ fontSize: 14 }}>
+              <GenerationPromptCopy text={g.prompt} />
+            </div>
             <div className="meta mono" style={{ fontSize: 11 }}>
               {getModel(g.modelId)?.label ?? g.modelId}・−{g.pointsEst} 點{g.pointsRefunded > 0 && `（已退 +${g.pointsRefunded}）`}
             </div>
@@ -572,17 +588,11 @@ export function GenerationList({
               <audio controls src={g.resultUrl} style={{ width: "100%", maxWidth: 320, height: 32, marginTop: 6 }} />
             )}
             {g.resultText && (
-              <div
-                className="result-text"
-                style={{ whiteSpace: "pre-wrap", fontSize: 13, marginTop: 6 }}
-              >
-                {g.resultText}
-                <div style={{ marginTop: 6 }}>
-                  <button style={{ padding: "2px 10px", fontSize: 11 }} onClick={() => copyText(g.id, g.resultText ?? "")}>
-                    {copiedId === g.id ? "已複製 ✓" : "複製文字"}
-                  </button>
-                </div>
-              </div>
+              <GenerationResultCopy
+                text={g.resultText}
+                copied={copiedId === g.id}
+                onCopy={() => copyText(g.id, g.resultText ?? "")}
+              />
             )}
             {/* 已駁回列的 error 欄存的是駁回理由，前綴要講對，別誤導成「生成失敗」 */}
             {g.error && <div className="error">{g.status === "rejected" ? "駁回理由：" : "生成失敗："}{g.error}</div>}

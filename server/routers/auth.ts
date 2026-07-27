@@ -20,6 +20,10 @@ import {
   loadAuthState,
 } from "../services/auth";
 import { revokeAllUserMcpTokens } from "../services/mcpAuth";
+import {
+  RateLimitConfigurationError,
+  RateLimitUnavailableError,
+} from "../services/rateLimit";
 
 // 取用戶端 IP 供 per-IP 限流。★安全：一律走 Express 的 req.ip。
 // index.ts 已設 `app.set("trust proxy", 1)`，Express 會信任「最靠近本機的 1 層反代」並取
@@ -30,6 +34,21 @@ import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 // 撞庫防線形同虛設；反之鎖定某受害 IP 也能惡意灌爆其額度做定向 DoS。改用 req.ip 杜絕此類偽造。
 function clientIp(req: Request): string | undefined {
   return req.ip ?? req.socket?.remoteAddress ?? undefined;
+}
+
+async function guardedAuthRateLimit<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+      console.error(`[auth] PostgreSQL 限流不可用（拒絕認證）：${error.name}: ${error.message}`);
+      throw new TRPCError({
+        code: "SERVICE_UNAVAILABLE",
+        message: "登入安全檢查暫時無法使用，請稍後再試",
+      });
+    }
+    throw error;
+  }
 }
 
 export const authRouter = router({
@@ -45,7 +64,8 @@ export const authRouter = router({
     .input(z.object({ email: z.string().email("email 格式不對"), password: z.string().min(1, "請填密碼") }))
     .mutation(async ({ ctx, input }) => {
       const email = input.email.toLowerCase().trim();
-      const rate = checkLoginRate(email, clientIp(ctx.req));
+      const ip = clientIp(ctx.req);
+      const rate = await guardedAuthRateLimit(() => checkLoginRate(email, ip));
       if (!rate.ok) {
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `嘗試太多次，請約 ${rate.retryAfterMin} 分鐘後再試` });
       }
@@ -57,7 +77,7 @@ export const authRouter = router({
       }
       // 帶 IP 回收：成功登入時把 checkLoginRate 剛記下的那筆 per-IP 命中 pop 掉，維持「失敗才累積、
       // 成功不計入 per-IP 撞庫計數」——否則共用出口 IP（同辦公室/NAT）的小團隊正常登入也會把自己鎖死。
-      clearLoginRate(email, clientIp(ctx.req));
+      await guardedAuthRateLimit(() => clearLoginRate(email, ip));
       const token = await createSession(user.id);
       setSessionCookie(ctx.res, token);
       return loadAuthState(user.id);
@@ -76,7 +96,7 @@ export const authRouter = router({
     .mutation(async ({ ctx, input }) => {
       // 與登入同一個限流器、不同 key：被劫持的 session 也不能拿這裡暴力試出原密碼
       const rateKey = `chpw:${ctx.auth.user.email}`;
-      const rate = checkLoginRate(rateKey);
+      const rate = await guardedAuthRateLimit(() => checkLoginRate(rateKey));
       if (!rate.ok) {
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: `嘗試太多次，請約 ${rate.retryAfterMin} 分鐘後再試` });
       }
@@ -84,18 +104,22 @@ export const authRouter = router({
       if (!user || !(await verifyPassword(input.oldPassword, user.passwordHash))) {
         throw new TRPCError({ code: "UNAUTHORIZED", message: "原密碼不正確" });
       }
-      clearLoginRate(rateKey);
-      // mustChangePassword 清回 false：管理員重設後的強制改密碼流程到此解除
-      await db
-        .update(schema.users)
-        .set({ passwordHash: await hashPassword(input.newPassword), mustChangePassword: false })
-        .where(eq(schema.users.id, user.id));
-      // 舊 session 全部作廢（含可能外洩的），本裝置換發新的繼續用
-      await db.delete(schema.sessions).where(eq(schema.sessions.userId, user.id));
-      // MCP 個人金鑰一併撤銷：改密碼＝舊憑證全作廢，金鑰是不經 tRPC 閘門的另一套長效憑證，
-      // 只砍 session 而留著金鑰，等於改密碼後外洩金鑰仍能以本人身分讀寫（MCP／REST）。
-      const revokedTokens = await revokeAllUserMcpTokens(user.id);
+      await guardedAuthRateLimit(() => clearLoginRate(rateKey));
+      // bcrypt 放在交易外計算，避免昂貴 CPU 工作長時間佔住 DB 連線；真正的憑證輪替則必須原子提交。
+      // 若 update／session 刪除／MCP 撤銷任一步失敗，整筆 rollback，不能留下「新密碼已生效但舊
+      // session 或 token 仍可用」的混合安全狀態。
+      const passwordHash = await hashPassword(input.newPassword);
+      const revokedTokens = await db.transaction(async (tx) => {
+        await tx
+          .update(schema.users)
+          .set({ passwordHash, mustChangePassword: false })
+          .where(eq(schema.users.id, user.id));
+        await tx.delete(schema.sessions).where(eq(schema.sessions.userId, user.id));
+        return revokeAllUserMcpTokens(user.id, tx);
+      });
       if (revokedTokens > 0) console.log(`[audit] changePassword 一併撤銷 ${revokedTokens} 把 MCP 金鑰：user=${user.id}`);
+      // 新 session 在安全輪替 commit 後建立；若這一步罕見失敗，使用者只會被登出，可用新密碼重登，
+      // 不會把舊憑證復活或形成繞過窗口。
       const token = await createSession(user.id);
       setSessionCookie(ctx.res, token);
       console.log(`[audit] changePassword：user=${user.id}`);

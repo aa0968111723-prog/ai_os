@@ -12,6 +12,16 @@ import { getWorkflow } from "../../shared/models";
 import { advanceGeneration, submitGenerationCore, type GenerationRow } from "./generationCore";
 import { failStaleGenerationTx } from "./points";
 import { signAssetUrl } from "./storage";
+import { resolveBackgroundProjectRole } from "./backgroundAccess";
+import {
+  withRunnerAdvisoryLock,
+  workflowRunLockName,
+} from "./runnerAdvisoryLock";
+import {
+  isShuttingDown,
+  onShutdown,
+  trackBackgroundTask,
+} from "./shutdown";
 
 type RunRow = typeof schema.workflowRuns.$inferSelect;
 
@@ -41,19 +51,27 @@ const SWEEP_EVERY_TICKS = 10;
 
 let started = false;
 let tickCount = 0;
+/** 防止慢批次跨過下一個 interval 後，持續疊加新的整輪 Promise 與外部生成併發。 */
+let cycleRunning = false;
 /** 本進程內推進中的 run：撈到已在推進的直接跳過——慢 run 不擋其他 run，也不會被下一輪重入雙寫 */
 const inflight = new Set<string>();
 
 /** 啟動執行器（server/index.ts 開機時呼叫一次；重複呼叫無效果） */
 export function startWorkflowRunner(): void {
-  if (started) return;
+  if (started || isShuttingDown()) return;
   started = true;
   // #8 啟動時先掃一次陳屍：重佈／OOM 打斷後一開機就把凍結的點數與鎖死的 run 收斂，不等使用者觸發
-  void sweepZombies().catch((err) => console.warn("[workflow] 啟動陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err));
-  setInterval(() => {
+  void trackBackgroundTask(
+    sweepZombies().catch((err) =>
+      console.warn("[workflow] 啟動陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err),
+    ),
+  );
+  const interval = setInterval(() => {
+    if (cycleRunning || isShuttingDown()) return;
+    cycleRunning = true;
     // 每輪先掃陳屍再推進：sweep 先於 tick 序列化，避免兩者對同一 run 併發搶寫（sweep 另有 inflight 與復查防護）。
     // 撈 runs 本身失敗（DB 抖動）也不能變成 unhandled rejection——記警告等下一輪
-    void (async () => {
+    void trackBackgroundTask((async () => {
       tickCount += 1;
       if (tickCount % SWEEP_EVERY_TICKS === 0) {
         try {
@@ -62,13 +80,17 @@ export function startWorkflowRunner(): void {
           console.warn("[workflow] 陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
         }
       }
+      if (isShuttingDown()) return;
       try {
         await tick();
       } catch (err) {
         console.warn("[workflow] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err);
       }
-    })();
+    })().finally(() => {
+      cycleRunning = false;
+    }));
   }, TICK_MS);
+  onShutdown(() => clearInterval(interval));
   console.log(`[workflow] 執行器已啟動（每 ${TICK_MS / 1000} 秒推進一次）`);
 }
 
@@ -91,8 +113,10 @@ async function tick(): Promise<void> {
     .limit(BATCH); // 活躍 run 一多也只推進最舊 BATCH 筆，其餘下輪再推——杜絕無界撈全表
   // 同輪推進但限併發：分批（每批 MAX_CONCURRENT_ADVANCE 筆）序列跑，避免一次對整批 run 全開交易耗盡連線池。
   // 一個卡住的 run（fal 慢回）有 ADVANCE_TIMEOUT_MS 放行，不擋同批其他 run 太久。
+  if (isShuttingDown()) return;
   const pending = runs.filter((run) => !inflight.has(run.id));
   for (let i = 0; i < pending.length; i += MAX_CONCURRENT_ADVANCE) {
+    if (isShuttingDown()) return;
     await Promise.allSettled(pending.slice(i, i + MAX_CONCURRENT_ADVANCE).map((run) => advanceWithGuard(run)));
   }
 }
@@ -117,26 +141,28 @@ async function sweepZombies(): Promise<void> {
   for (const run of runs) {
     if (inflight.has(run.id)) continue; // 正在推進的交給正常路徑，避免雙寫
     try {
-      const steps = run.steps as RunStep[];
-      const step = steps[run.currentStep];
-      if (!step) continue; // 越界由正常 advanceRun 收攏，不在此處理
-      if (step.generationId) {
-        // (a) 先讓既有推進邏輯有機會收斂（fal 實際已完成/失敗時，advanceGeneration 會落 DB＋退點）
-        let gen: GenerationRow | null = null;
-        try {
-          gen = await advanceGeneration(step.generationId);
-        } catch (err) {
-          // NOT_FOUND＝佔位 id 已寫回但生成列不存在：交由正常 advanceRun 的冪等重送處理，不在此退點
-          if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
+      await withRunnerAdvisoryLock(workflowRunLockName(run.id), async () => {
+        const steps = run.steps as RunStep[];
+        const step = steps[run.currentStep];
+        if (!step) return; // 越界由正常 advanceRun 收攏，不在此處理
+        if (step.generationId) {
+          // (a) 先讓既有推進邏輯有機會收斂（fal 實際已完成/失敗時，advanceGeneration 會落 DB＋退點）
+          let gen: GenerationRow | null = null;
+          try {
+            gen = await advanceGeneration(step.generationId);
+          } catch (err) {
+            // NOT_FOUND＝佔位 id 已寫回但生成列不存在：交由正常 advanceRun 的冪等重送處理，不在此退點
+            if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
+          }
+          // 收斂後仍卡 queued/running 且逾時＝真孤兒：依帳本淨額退點標 failed，下一輪正常 settleStep 收攏 run
+          if (gen && (gen.status === "queued" || gen.status === "running") && gen.updatedAt.getTime() < cutoff) {
+            await reapStuckGeneration(gen.id);
+          }
+        } else if (run.updatedAt.getTime() < cutoff) {
+          // (b) 目前步驟無生成、run 又逾時未動：重佈在送出前打斷——收攏成 failed 並退凍結點數
+          await failStaleRun(run);
         }
-        // 收斂後仍卡 queued/running 且逾時＝真孤兒：依帳本淨額退點標 failed，下一輪正常 settleStep 收攏 run
-        if (gen && (gen.status === "queued" || gen.status === "running") && gen.updatedAt.getTime() < cutoff) {
-          await reapStuckGeneration(gen.id);
-        }
-      } else if (run.updatedAt.getTime() < cutoff) {
-        // (b) 目前步驟無生成、run 又逾時未動：重佈在送出前打斷——收攏成 failed 並退凍結點數
-        await failStaleRun(run);
-      }
+      });
     } catch (err) {
       console.warn(`[workflow] 陳屍回收略過（下輪再試）：run=${run.id}`, err instanceof Error ? err.message : err);
     }
@@ -179,7 +205,10 @@ async function failStaleRun(run: RunRow): Promise<void> {
 async function advanceWithGuard(run: RunRow): Promise<void> {
   inflight.add(run.id);
   let timer: NodeJS.Timeout | undefined;
-  const work = advanceRun(run)
+  const work = withRunnerAdvisoryLock(
+    workflowRunLockName(run.id),
+    () => advanceRun(run),
+  )
     .catch((err) => {
       // 單一 run 推進失敗（DB 抖動/fal 網路錯誤）不擋其他 run，下一輪自然重試
       console.error(`[workflow] 推進失敗（下輪再試）：run=${run.id}`, err instanceof Error ? err.message : err);
@@ -300,6 +329,9 @@ async function advanceRun(run: RunRow): Promise<void> {
     await saveRun(run.id, { steps });
   }
   try {
+    // 工作流由背景程序執行，不能沿用啟動當下的權限快照：每一個付費步驟前重算發起人角色，
+    // 讓一般組員同樣受到單筆成本核准門檻，並在已被移出組時立即停止。
+    const accessRole = await resolveBackgroundProjectRole(run.userId, run.projectId, "工作流");
     await submitGenerationCore({
       id: step.generationId,
       userId: run.userId,
@@ -312,7 +344,7 @@ async function advanceRun(run: RunRow): Promise<void> {
       scenePresetIds: (run.scenePresetIds as string[] | null) ?? undefined,
       workflowRunId: run.id, // 生成列回連本條 run——生成紀錄可回看來源
       reasonPrefix: "工作流生成",
-      // 不帶 assertAccess：run 建立時已由 tRPC 層做過組隔離檢查，之後以發起人身分執行
+      assertAccess: () => accessRole,
     });
   } catch (err) {
     // 系統忙碌（額度交易例外，未扣點）是暫時性的：不終局，佔位保留、下輪冪等重送
@@ -349,15 +381,20 @@ async function settleStep(run: RunRow, steps: RunStep[], idx: number, step: RunS
     }
     return;
   }
-  if (gen.status === "failed") {
+  if (gen.status === "failed" || gen.status === "rejected") {
     step.status = "failed";
-    step.detail = gen.error ?? "未知錯誤";
+    step.detail = gen.status === "rejected" ? "組長駁回了這筆超額生成" : gen.error ?? "未知錯誤";
     markRestStopped(steps, idx);
     if (run.status === "running") {
-      await saveRun(run.id, { steps, status: "failed", error: `步驟「${step.note}」失敗：${gen.error ?? "未知錯誤"}` });
+      await saveRun(run.id, { steps, status: "failed", error: `步驟「${step.note}」失敗：${step.detail}` });
     } else {
       await saveRun(run.id, { steps }); // 已按停的 run 維持 stopped，只記步驟結果
     }
+    return;
+  }
+  if (gen.status === "awaiting_approval" && step.detail !== "等組長核准超額生成中…") {
+    step.detail = "等組長核准超額生成中…";
+    await saveRun(run.id, { steps });
     return;
   }
   // 還在 queued/running：這輪不動，下輪再看

@@ -210,3 +210,45 @@ bad = mcp("tools/call", {"name": "get_project_context", "arguments": {"projectId
 ok("MCP 錯誤呼叫回 JSON-RPC error", "error" in bad)
 rows2 = wait_audit(lambda rows: any(i.get("ok") is False for i in _mcp_rows(rows)))
 ok("MCP 失敗呼叫也落審計(ok=false)", any(i.get("ok") is False for i in _mcp_rows(rows2)))
+
+# ─── 強制改密碼跨傳輸層守門 ───
+# tRPC 原本已有閘門；這裡特別驗直接 Express 端點，防止用既有 session 繞過。
+reset = call("POST", admin2, "admin.resetMemberPassword", {"userId": acc["user"]["id"]})
+restricted = client()
+restricted_login = call("POST", restricted, "auth.login", {
+    "email": "azhe@example.com",
+    "password": reset["tempPassword"],
+})
+ok("臨時密碼可登入且標記必須改密碼", restricted_login.get("user", {}).get("mustChangePassword") is True)
+blocked_trpc = call("GET", restricted, "projects.list", {})
+ok("🔒 強制改密碼：tRPC 功能被擋", "先" in blocked_trpc.get("__error__", "") and "密碼" in blocked_trpc.get("__error__", ""))
+
+direct = urllib.request.Request(f"{HOST}/api/me/export")
+direct.add_header("Cookie", restricted.cookie)
+try:
+    urllib.request.urlopen(direct)
+    ok("🔒 強制改密碼：Express 端點被擋", False)
+except urllib.error.HTTPError as e:
+    direct_body = json.load(e)
+    ok(
+        "🔒 強制改密碼：Express 端點被擋（403＋穩定代碼）",
+        e.code == 403 and direct_body.get("code") == "PASSWORD_CHANGE_REQUIRED",
+    )
+
+changed = call("POST", restricted, "auth.changePassword", {
+    "oldPassword": reset["tempPassword"],
+    "newPassword": "azhe-pass-99",
+})
+ok("完成改密碼後解除守門", changed.get("ok") is True and isinstance(call("GET", restricted, "projects.list", {}), list))
+
+# ─── PostgreSQL 跨 replica 登入限流（同 email 15 分鐘 5 次） ───
+# 前 5 次仍走等成本 dummy bcrypt 並回統一未授權；第 6 次由持久限流桶拒絕。
+brute = client()
+first_five = [
+    call("POST", brute, "auth.login", {"email": "brute-force@example.com", "password": f"wrong-{i}"})
+    for i in range(5)
+]
+sixth = call("POST", brute, "auth.login", {"email": "brute-force@example.com", "password": "wrong-6"})
+ok("PostgreSQL 登入限流：前 5 次統一拒絕、第 6 次回 429 語意",
+   all("email 或密碼不正確" in item.get("__error__", "") for item in first_five)
+   and "嘗試太多次" in sixth.get("__error__", ""))

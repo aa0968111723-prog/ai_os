@@ -3,11 +3,27 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
+import {
+  type DatabaseDetailTab,
+} from "../components/databaseTabs";
+import { DatabaseDetailTabs } from "../components/DatabaseDetailTabs";
+import {
+  clearDatabaseImportAttempt,
+  databaseImportPayloadSignature,
+  getDatabaseImportAttempt,
+} from "../components/databaseImportIdempotency";
 import { FIELD_TYPES, FILE_CATEGORY_SUGGESTIONS, MAX_FILE_CATEGORY, newFieldKey, type DataField, type DataRowData, type DataRowValue } from "@shared/databaseFields";
 import { detectFormat, inferFields, parseTabular, TABULAR_ACCEPT, TABULAR_FORMATS, type TabularFormat } from "@shared/tabular";
 
 /** 匯入結果外形（importData mutation 回傳；建庫與詳頁匯入共用顯示） */
-type ImportResult = { imported: number; failed: number; skipped: number; truncated: boolean; errors: Array<{ line: number; error: string }> };
+type ImportResult = {
+  imported: number;
+  failed: number;
+  skipped: number;
+  truncated: boolean;
+  errors: Array<{ line: number; error: string }>;
+  replayed: boolean;
+};
 
 /** 文件上傳的 accept 清單（與伺服器白名單 storage.MIME_EXT 同口徑；伺服器仍是最終把關） */
 const DB_FILE_ACCEPT = [
@@ -51,6 +67,7 @@ function ImportResultView({ result }: { result: ImportResult }) {
       <p className="hint" style={{ color: result.imported > 0 ? "var(--success-ink)" : undefined }}>
         匯入完成：成功 {result.imported} 列{result.failed > 0 ? `、失敗 ${result.failed} 列` : ""}
         {result.truncated ? `（超過 5000 列上限，另有 ${result.skipped} 列未處理——請分批匯入）` : ""}
+        {result.replayed ? "（連線重試已安全回放，未重複寫入）" : ""}
       </p>
       {result.errors.length > 0 && (
         <ul style={{ margin: "4px 0", paddingLeft: 18, fontSize: 12, color: "var(--danger-ink, #a33)" }}>
@@ -202,20 +219,38 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
   // 從檔案匯入建立：套用推斷欄位後把「內容＋格式＋表頭對應」暫存，建庫成功後一併把列資料匯入
   const [importSeed, setImportSeed] = useState<{ content: string; format: TabularFormat; headerMap: Record<string, string> } | null>(null);
   const [finished, setFinished] = useState<{ id: string; result: ImportResult | null } | null>(null);
+  const createdImportAttempt = useRef<{ signature: string; key: string } | null>(null);
   const importData = trpc.databases.importData.useMutation();
+
+  const importIntoCreatedTable = async (tableId: string): Promise<void> => {
+    if (!importSeed || Object.keys(importSeed.headerMap).length === 0) return;
+    const payload = { tableId, ...importSeed };
+    const signature = databaseImportPayloadSignature(payload);
+    if (!createdImportAttempt.current || createdImportAttempt.current.signature !== signature) {
+      createdImportAttempt.current = getDatabaseImportAttempt(payload);
+    }
+    try {
+      const attemptKey = createdImportAttempt.current.key;
+      const r = await importData.mutateAsync({
+        ...payload,
+        idempotencyKey: attemptKey,
+      });
+      clearDatabaseImportAttempt(tableId, attemptKey);
+      createdImportAttempt.current = null;
+      setFinished({ id: tableId, result: r });
+    } catch {
+      // Keep the same key so a response-loss retry can only replay, never
+      // append the imported rows a second time.
+      setFinished({ id: tableId, result: null });
+    }
+  };
 
   const create = trpc.databases.create.useMutation({
     onSuccess: async (row) => {
       utils.databases.list.invalidate();
       // 有匯入種子＝從檔案建表：建好後把列資料灌進去，再顯示結果摘要（含失敗列）讓使用者過目
       if (importSeed && Object.keys(importSeed.headerMap).length > 0) {
-        try {
-          const r = await importData.mutateAsync({ tableId: row.id, content: importSeed.content, format: importSeed.format, headerMap: importSeed.headerMap });
-          setFinished({ id: row.id, result: r });
-        } catch {
-          // 建庫成功但匯入失敗（如格式問題）：欄位已建好，導向詳頁可再試匯入
-          setFinished({ id: row.id, result: null });
-        }
+        await importIntoCreatedTable(row.id);
       } else {
         onDone(row.id);
       }
@@ -231,7 +266,18 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
         {finished.result ? (
           <ImportResultView result={finished.result} />
         ) : importSeed ? (
-          <p className="hint" style={{ color: "var(--danger-ink, #a33)" }}>欄位已建好，但列資料匯入未完成——進資料庫後可用「匯入資料」再試一次。</p>
+          <>
+            <p className="hint" style={{ color: "var(--danger-ink, #a33)" }}>
+              欄位已建好，但尚未收到匯入結果。可用相同安全重試鍵再確認一次，不會重複新增資料。
+            </p>
+            <button
+              className="btn-sm"
+              disabled={importData.isPending}
+              onClick={() => void importIntoCreatedTable(finished.id)}
+            >
+              {importData.isPending ? "重新確認中…" : "安全重試匯入"}
+            </button>
+          </>
         ) : null}
         <div style={{ marginTop: 12 }}>
           <button className="primary" onClick={() => onDone(finished.id)}>開啟資料庫</button>
@@ -435,6 +481,7 @@ function FieldsEditor({ fields, onChange }: { fields: DataField[]; onChange: (f:
 function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; groupId: string; onDeleted: () => void }) {
   const utils = trpc.useUtils();
   const [q, setQ] = useState("");
+  const [detailTab, setDetailTab] = useState<DatabaseDetailTab>("rows");
   const [editStructure, setEditStructure] = useState(false);
   const rows = trpc.databases.listRows.useQuery({ tableId: table.id, q: q.trim() || undefined });
   const invalidate = () => { utils.databases.listRows.invalidate({ tableId: table.id, q: q.trim() || undefined }); utils.databases.list.invalidate(); };
@@ -511,75 +558,92 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-        <input aria-label="搜尋資料" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋…" style={{ maxWidth: 220 }} />
-        <span className="meta">{rows.data ? `${rows.data.total.toLocaleString()} 列` : "…"}</span>
-        <span className="spacer" />
-        {/* 匯出 CSV（接 Excel／其他資料庫）；同源 a 標籤帶 cookie 認證 */}
-        <a className="btn-sm" href={`/api/databases/${table.id}/rows.csv`} download title="匯出成 CSV（可用 Excel/其他資料庫開啟）">
-          <Icon name="Download" size={13} /> 匯出 CSV
-        </a>
-        {canWrite && (
-          <button className="btn-sm" onClick={() => setShowImport((v) => !v)} title="匯入資料列（CSV／TSV／JSON——Excel／Google 試算表／其他資料庫的匯出檔）">
-            <Icon name="Package" size={13} /> 匯入資料
-          </button>
-        )}
-      </div>
-      {showImport && canWrite && <DataImportPanel table={table} onImported={invalidate} />}
+      <DatabaseDetailTabs
+        value={detailTab}
+        rowCount={rows.data?.total}
+        onChange={setDetailTab}
+      />
 
-      <div style={{ overflowX: "auto", marginTop: 8 }}>
-        <table className="data-grid" style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              {table.fields.map((f) => (
-                <th key={f.key} style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--border, #ddd)", whiteSpace: "nowrap" }}>
-                  {f.label}{f.required && <span title="必填" style={{ color: "var(--danger-ink, #a33)" }}> *</span>}
-                </th>
-              ))}
-              <th style={{ width: 40, borderBottom: "1px solid var(--border, #ddd)" }} />
-            </tr>
-          </thead>
-          <tbody>
-            {table.access.canWriteRows && (
+      <div
+        id="database-rows-panel"
+        role="tabpanel"
+        aria-label="資料列"
+        hidden={detailTab !== "rows"}
+      >
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+          <input aria-label="搜尋資料" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋…" style={{ maxWidth: 220 }} />
+          <span className="meta">{rows.data ? `${rows.data.total.toLocaleString()} 列` : "…"}</span>
+          <span className="spacer" />
+          {/* 匯出 CSV（接 Excel／其他資料庫）；同源 a 標籤帶 cookie 認證 */}
+          <a className="btn-sm" href={`/api/databases/${table.id}/rows.csv`} download title="匯出成 CSV（可用 Excel/其他資料庫開啟）">
+            <Icon name="Download" size={13} /> 匯出 CSV
+          </a>
+          {canWrite && (
+            <button className="btn-sm" onClick={() => setShowImport((v) => !v)} title="批次匯入資料列（CSV／TSV／JSON——Excel／Google 試算表／其他資料庫的匯出檔）">
+              <Icon name="Package" size={13} /> {showImport ? "收合批次匯入" : "批次匯入"}
+            </button>
+          )}
+        </div>
+        {showImport && canWrite && <DataImportPanel table={table} onImported={invalidate} />}
+
+        <div style={{ overflowX: "auto", marginTop: 8 }}>
+          <table className="data-grid" style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
               <tr>
                 {table.fields.map((f) => (
-                  <td key={f.key} style={{ padding: "4px 4px" }}>
-                    <CellInput field={f} groupId={groupId} tableId={table.id} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
-                  </td>
+                  <th key={f.key} style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--border, #ddd)", whiteSpace: "nowrap" }}>
+                    {f.label}{f.required && <span title="必填" style={{ color: "var(--danger-ink, #a33)" }}> *</span>}
+                  </th>
                 ))}
-                <td style={{ padding: "4px 4px" }}>
-                  <button
-                    className="btn-sm primary"
-                    title="新增這一列"
-                    disabled={addRow.isPending}
-                    onClick={() => addRow.mutate({ tableId: table.id, data: draft }, { onSuccess: () => setDraft(emptyDraft()) })}
-                  >
-                    <Icon name="Plus" size={13} />
-                  </button>
-                </td>
+                <th style={{ width: 40, borderBottom: "1px solid var(--border, #ddd)" }} />
               </tr>
-            )}
-            {(rows.data?.rows ?? []).map((r) => (
-              <GridRow
-                key={r.id}
-                fields={table.fields}
-                groupId={groupId}
-                tableId={table.id}
-                row={{ id: r.id, data: r.data as DataRowData }}
-                canWrite={table.access.canWriteRows}
-                canDelete={table.access.canManage || table.access.canWriteRows}
-                onSave={(data) => updateRow.mutate({ id: r.id, data })}
-                onDelete={() => removeRow.mutate({ id: r.id })}
-              />
-            ))}
-          </tbody>
-        </table>
-        {rows.data && rows.data.rows.length === 0 && <p className="hint" style={{ marginTop: 8 }}>{q ? "沒有符合的資料" : "還沒有資料——從上面那一列開始加"}</p>}
+            </thead>
+            <tbody>
+              {table.access.canWriteRows && (
+                <tr>
+                  {table.fields.map((f) => (
+                    <td key={f.key} style={{ padding: "4px 4px" }}>
+                      <CellInput field={f} groupId={groupId} tableId={table.id} value={draft[f.key] ?? null} onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))} />
+                    </td>
+                  ))}
+                  <td style={{ padding: "4px 4px" }}>
+                    <button
+                      className="btn-sm primary"
+                      title="新增這一列"
+                      disabled={addRow.isPending}
+                      onClick={() => addRow.mutate({ tableId: table.id, data: draft }, { onSuccess: () => setDraft(emptyDraft()) })}
+                    >
+                      <Icon name="Plus" size={13} />
+                    </button>
+                  </td>
+                </tr>
+              )}
+              {(rows.data?.rows ?? []).map((r) => (
+                <GridRow
+                  key={r.id}
+                  fields={table.fields}
+                  groupId={groupId}
+                  tableId={table.id}
+                  row={{ id: r.id, data: r.data as DataRowData }}
+                  canWrite={table.access.canWriteRows}
+                  canDelete={table.access.canManage || table.access.canWriteRows}
+                  onSave={(data) => updateRow.mutate({ id: r.id, data })}
+                  onDelete={() => removeRow.mutate({ id: r.id })}
+                />
+              ))}
+            </tbody>
+          </table>
+          {rows.data && rows.data.rows.length === 0 && <p className="hint" style={{ marginTop: 8 }}>{q ? "沒有符合的資料" : "還沒有資料——從上面那一列開始加，或使用「批次匯入」一次加入最多 5,000 列"}</p>}
+        </div>
+        {mutationError && <p className="error" role="alert">{mutationError}</p>}
       </div>
-      {mutationError && <p className="error" role="alert">{mutationError}</p>}
 
-      <FilesSection table={table} groupId={groupId} />
-      <ConnectPanel table={table} />
+      <div id="database-files-panel" role="tabpanel" aria-label="文件" hidden={detailTab !== "files"}>
+        <FilesSection table={table} groupId={groupId} />
+      </div>
+      <div id="database-connect-panel" role="tabpanel" aria-label="同步與 API" hidden={detailTab !== "connect"}>
+        <ConnectPanel table={table} />
+      </div>
     </section>
   );
 }
@@ -593,9 +657,17 @@ function DataImportPanel({ table, onImported }: { table: TableSummary; onImporte
   const [mapping, setMapping] = useState<Record<string, string>>({}); // 欄位 key → 來源表頭
   const [result, setResult] = useState<ImportResult | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const importAttempt = useRef<{ signature: string; key: string } | null>(null);
   const importData = trpc.databases.importData.useMutation({
     // 匯入後刷新格線，但「不自動關閉面板」——讓使用者看到「成功幾列、失敗哪幾筆」的結果再自行收合
-    onSuccess: (r) => { setResult(r); if (r.imported > 0) onImported(); },
+    onSuccess: (r) => {
+      if (importAttempt.current) {
+        clearDatabaseImportAttempt(table.id, importAttempt.current.key);
+      }
+      importAttempt.current = null; // 成功後下一次明確匯入要使用新 key
+      setResult(r);
+      if (r.imported > 0) onImported();
+    },
   });
 
   const { headers, count, error: parseError } = usePreview(content, format);
@@ -631,6 +703,17 @@ function DataImportPanel({ table, onImported }: { table: TableSummary; onImporte
   };
 
   const headerMap = Object.fromEntries(Object.entries(mapping).filter(([, h]) => h).map(([key, h]) => [h, key]));
+  const startImport = () => {
+    const payload = { tableId: table.id, content, format, headerMap };
+    const signature = databaseImportPayloadSignature(payload);
+    if (!importAttempt.current || importAttempt.current.signature !== signature) {
+      importAttempt.current = getDatabaseImportAttempt(payload);
+    }
+    importData.mutate({
+      ...payload,
+      idempotencyKey: importAttempt.current.key,
+    });
+  };
   const placeholder = format === "json" ? '[{"姓名":"小美","年齡":28},{"姓名":"阿哲","年齡":30}]' : format === "tsv" ? "姓名\t年齡\n小美\t28\n阿哲\t30" : "姓名,年齡\n小美,28\n阿哲,30";
 
   return (
@@ -689,7 +772,7 @@ function DataImportPanel({ table, onImported }: { table: TableSummary; onImporte
         <button
           className="primary btn-sm"
           disabled={!content.trim() || !!parseError || Object.keys(headerMap).length === 0 || importData.isPending}
-          onClick={() => importData.mutate({ tableId: table.id, content, format, headerMap })}
+          onClick={startImport}
         >
           {importData.isPending ? "匯入中…" : "開始匯入"}
         </button>
@@ -754,6 +837,7 @@ function ConnectPanel({ table }: { table: TableSummary }) {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const hasDate = (table.fields as DataField[]).some((f) => f.type === "date");
   const restUrl = `${origin}/api/v1/databases/${table.id}/rows`;
+  const batchUrl = `${origin}/api/v1/databases/${table.id}/rows/batch`;
   const csvUrl = `${origin}/api/databases/${table.id}/rows.csv`;
   const icsUrl = `${origin}/api/databases/${table.id}/calendar.ics?key=你的金鑰`;
 
@@ -779,7 +863,14 @@ curl -H "x-api-key: 你的金鑰" \\
 curl -X POST -H "x-api-key: 你的金鑰" \\
   -H "Content-Type: application/json" \\
   -d '{"data":{"欄位key":"值"}}' \\
-  ${restUrl}`}
+  ${restUrl}
+
+# 批次新增（最多 500 列）；24 小時內逾時重試沿用同一 Idempotency-Key
+curl -X POST -H "x-api-key: 你的金鑰" \\
+  -H "Idempotency-Key: import-20260726-001" \\
+  -H "Content-Type: application/json" \\
+  -d '{"rows":[{"data":{"欄位key":"值"}}]}' \\
+  ${batchUrl}`}
           </pre>
         </div>
         <div>

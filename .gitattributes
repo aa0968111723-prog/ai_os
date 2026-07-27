@@ -1,0 +1,7 @@
+*.sh text eol=lf
+*.sql text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+Dockerfile text eol=lf
+.nvmrc text eol=lf
+.node-version text eol=lf

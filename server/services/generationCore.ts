@@ -218,8 +218,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
 
   // 成本審核門檻（需求 2.1）：組員（member）單筆估點 ≥ 組門檻 → 先落一筆 awaiting_approval，
   // 不扣點、不送 fal，等組長在生成紀錄核准（generation.decideCost）才走扣點＋送出。
-  // 只對「有帶 assertAccess 且角色是 member」的路徑生效：組長/管理員自送不受限；
-  // 工作流 runner（無 assertAccess）沿用啟動時的守門，不在單步重複攔（v1 範圍，見 PR 說明）。
+  // 所有可送出生成的路徑（手動、工作流、AI 代理）都必須帶入當下角色；組長/管理員不受限。
   if (accessRole === "member") {
     const [grp] = await db.select().from(schema.groups).where(eq(schema.groups.id, project.groupId));
     const threshold = grp?.approvalThresholdPoints;

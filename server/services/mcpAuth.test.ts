@@ -14,8 +14,26 @@ import {
   newMcpTokenPlaintext,
   scopeDeniedReason,
   isTokenExpired,
+  legacyMcpAdminKeyEnabled,
   MCP_TOKEN_PREFIX,
 } from "./mcpAuth";
+
+describe("legacyMcpAdminKeyEnabled：正式站禁用共用超管金鑰", () => {
+  it("只在非 production 且有設定時啟用", () => {
+    expect(legacyMcpAdminKeyEnabled({
+      NODE_ENV: "test",
+      MCP_API_KEY: "local-only",
+      ALLOW_LEGACY_MCP_ADMIN_KEY: "1",
+    })).toBe(true);
+    expect(legacyMcpAdminKeyEnabled({
+      NODE_ENV: "production",
+      MCP_API_KEY: "must-not-work",
+      ALLOW_LEGACY_MCP_ADMIN_KEY: "1",
+    })).toBe(false);
+    expect(legacyMcpAdminKeyEnabled({ NODE_ENV: "test", MCP_API_KEY: "flag-missing" })).toBe(false);
+    expect(legacyMcpAdminKeyEnabled({ NODE_ENV: "development" })).toBe(false);
+  });
+});
 
 describe("looksLikeMcpToken：格式閘門", () => {
   it("前綴正確且 64 位 hex → true", () => {
@@ -66,7 +84,7 @@ describe("envKeyMatches：固定時間比對", () => {
 
 describe("scopeDeniedReason：唯讀金鑰守衛", () => {
   it("唯讀金鑰 + 寫入類工具 → 擋（含 add_database_row）", () => {
-    for (const w of ["submit_generation", "post_message", "add_database_row", "plan_agent", "approve_agent", "add_schedule_item"]) {
+    for (const w of ["submit_generation", "post_message", "add_database_row", "add_database_rows", "plan_agent", "approve_agent", "add_schedule_item"]) {
       expect(scopeDeniedReason(w, { readOnly: true })).toContain("唯讀");
     }
   });
@@ -78,6 +96,7 @@ describe("scopeDeniedReason：唯讀金鑰守衛", () => {
   it("可寫金鑰 → 一律放行", () => {
     expect(scopeDeniedReason("submit_generation", { readOnly: false })).toBeNull();
     expect(scopeDeniedReason("add_database_row", { readOnly: false })).toBeNull();
+    expect(scopeDeniedReason("add_database_rows", { readOnly: false })).toBeNull();
   });
   it("未知工具名對唯讀金鑰保守視為寫入 → 擋", () => {
     expect(scopeDeniedReason("some_future_write_tool", { readOnly: true })).toContain("唯讀");
