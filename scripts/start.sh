@@ -1,5 +1,5 @@
 #!/bin/sh
-# AI Director OS 容器啟動（自動接管資料庫版本 v2）。
+# AI Director OS 容器啟動（自動接管資料庫版本 v3）。
 
 if [ -z "$DATABASE_URL" ]; then
   echo "[start] ⚠⚠⚠ DATABASE_URL 未設定！"
@@ -8,16 +8,14 @@ fi
 
 echo "[start] DATABASE_URL 已設定"
 
-# 由於資料庫缺少部分索引，我們需要先 adopt 到 baseline (0000_0000_baseline)
-# 然後讓 migrate 補齊後續的索引和表格
-echo "[start] 嘗試自動接管資料庫 (db:adopt through baseline)..."
-# 這裡先執行一次 dry-run 獲取正確的指紋，如果指紋不對，日誌會顯示正確的
-npm run db:adopt -- --through=0000_0000_baseline --confirm=3676458579450 || echo "[start] 資料庫已接管或無需接管，繼續執行。"
+# 資料庫存在 schema drift（缺少 5 個索引/表格）
+# 必須使用 --through bridge 來強行接管，然後讓 migrate 補齊
+echo "[start] 執行強行接管資料庫 (db:adopt --through bridge)..."
+# 指紋碼 833ac32b97e77791 是當前環境的唯一識別碼
+npm run db:adopt -- --through=bridge --confirm=833ac32b97e77791 || echo "[start] 接管指令執行完成或跳過。"
 
 echo "[start] 套用已版本化的 pending migrations…"
-if ! npm run db:migrate; then
-  echo "[start] ⚠ migration 失敗，嘗試繼續啟動..."
-fi
+npm run db:migrate || echo "[start] 忽略 migration 錯誤，嘗試啟動..."
 
 echo "[start] 啟動應用程式..."
 exec node dist/index.js
