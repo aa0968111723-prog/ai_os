@@ -374,14 +374,35 @@ function pageBackground(): string {
   return "#f4eee4";
 }
 
+const SCREENSHOT_MAX_PIXELS = 2_000_000;
+const SCREENSHOT_MAX_SCALE = 0.8;
+const SCREENSHOT_MIN_SCALE = 0.35;
+const SCREENSHOT_TIMEOUT_MS = 20_000;
+
+/** 將大型/高 DPI 視窗限制在固定像素預算，避免長頁面或平板因記憶體壓力擷取失敗。 */
+export function screenshotScale(width: number, height: number): number {
+  if (width <= 0 || height <= 0) return SCREENSHOT_MIN_SCALE;
+  return Math.max(
+    SCREENSHOT_MIN_SCALE,
+    Math.min(SCREENSHOT_MAX_SCALE, Math.sqrt(SCREENSHOT_MAX_PIXELS / (width * height))),
+  );
+}
+
+async function waitForScreenshotFonts(): Promise<void> {
+  if (!document.fonts?.ready) return;
+  await Promise.race([
+    document.fonts.ready.then(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
+  ]);
+}
+
 /**
- * 擷取目前可視區為 PNG Blob（scale 0.7）。有 rect 就在畫布上描一個主色框標出被回報的元件。
- * 失敗或逾時 8 秒都回 null——截圖是可選的，絕不擋住送出流程。widget 自身節點一律不入鏡。
+ * 擷取目前可視區為 PNG Blob。有 rect 就在畫布上描一個主色框標出被回報的元件。
+ * 失敗或逾時 20 秒都回 null——截圖是可選的，絕不擋住送出流程。widget 自身節點一律不入鏡。
  */
 export function captureWithHighlight(
   rect?: { x: number; y: number; w: number; h: number } | null,
 ): Promise<Blob | null> {
-  const SCALE = 0.7;
   const run = (async (): Promise<Blob | null> => {
     // 高亮框改用「真的畫在 DOM 上的元素」讓 html2canvas 在同一次繪製中連同頁面一起拍進去，
     // 而不是事後用 canvas 座標 strokeRect——後者座標假設(rect*scale)與 html2canvas 內部對 scroll/
@@ -400,28 +421,48 @@ export function captureWithHighlight(
       document.body.appendChild(marker);
     }
     try {
+      await waitForScreenshotFonts();
       // 動態載入（QA-025 bundle 瘦身）：html2canvas 佔 main bundle 數百 KB，
       // 卻只在「送回饋按截圖」這一刻用到——首次截圖才拉取對應 chunk
       const { default: html2canvas } = await import("html2canvas");
+      const viewportWidth = Math.max(1, window.innerWidth);
+      const viewportHeight = Math.max(1, window.innerHeight);
       const canvas = await html2canvas(document.body, {
         x: window.scrollX,
         y: window.scrollY,
-        width: window.innerWidth,
-        height: window.innerHeight,
-        scale: SCALE,
+        width: viewportWidth,
+        height: viewportHeight,
+        windowWidth: viewportWidth,
+        windowHeight: viewportHeight,
+        scale: screenshotScale(viewportWidth, viewportHeight),
         backgroundColor: pageBackground(),
         useCORS: true,
+        allowTaint: false,
+        imageTimeout: 3_000,
+        removeContainer: true,
         logging: false,
         ignoreElements: (el) => el.hasAttribute(WIDGET_ATTR),
       });
-      return await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), "image/png"));
-    } catch {
+      return await new Promise<Blob | null>((resolve, reject) => {
+        try {
+          canvas.toBlob((blob) => resolve(blob), "image/png");
+        } catch (error) {
+          reject(error);
+        }
+      });
+    } catch (error) {
+      console.warn("[feedback:screenshot] capture failed", error);
       return null;
     } finally {
       if (marker) marker.remove();
     }
   })();
 
-  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000));
-  return Promise.race([run, timeout]);
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => resolve(null), SCREENSHOT_TIMEOUT_MS);
+    void run.then((blob) => {
+      window.clearTimeout(timer);
+      resolve(blob);
+    });
+  });
 }
