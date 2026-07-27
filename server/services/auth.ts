@@ -185,6 +185,17 @@ export async function resolveSession(req: Request): Promise<AuthState | null> {
   return loadAuthState(session.userId);
 }
 
+/**
+ * resolveSession ＋ 強制改密碼閘門（修 AUTH2-003）：mustChangePassword 的帳號在改密碼前一律視為未認證（回 null），
+ * 與 tRPC authedProcedure／MCP／restApi 同口徑。index.ts 的 REST 端點（上傳／下載／匯出／個資匯出等）應改用本函式，
+ * 讓臨時密碼窗口不再等於「完整讀寫窗口」。改密碼本身走 tRPC auth.changePassword（用原始 resolveSession，不受此擋）。
+ */
+export async function resolveActiveSession(req: Request): Promise<AuthState | null> {
+  const auth = await resolveSession(req);
+  if (!auth || auth.user.mustChangePassword) return null;
+  return auth;
+}
+
 /* ── 邀請 ── */
 export async function createInvite(input: {
   email: string;
@@ -226,7 +237,8 @@ export async function attachExistingUser(input: {
     .from(schema.teamMembers)
     .where(and(eq(schema.teamMembers.teamId, input.teamId), eq(schema.teamMembers.userId, input.userId)));
   if (existingTeam.length === 0) {
-    await db.insert(schema.teamMembers).values({ teamId: input.teamId, userId: input.userId, role: input.teamRole });
+    // 修 R6-CONC-01：查後插無鎖，併發把既有帳號重複入團隊；靠 team_members(team_id,user_id) 唯一索引＋onConflictDoNothing 兜底
+    await db.insert(schema.teamMembers).values({ teamId: input.teamId, userId: input.userId, role: input.teamRole }).onConflictDoNothing();
   }
   if (input.groupId) {
     const existingGroup = await db
@@ -234,7 +246,7 @@ export async function attachExistingUser(input: {
       .from(schema.groupMembers)
       .where(and(eq(schema.groupMembers.groupId, input.groupId), eq(schema.groupMembers.userId, input.userId)));
     if (existingGroup.length === 0) {
-      await db.insert(schema.groupMembers).values({ groupId: input.groupId, userId: input.userId, role: input.groupRole });
+      await db.insert(schema.groupMembers).values({ groupId: input.groupId, userId: input.userId, role: input.groupRole }).onConflictDoNothing();
     }
   }
 }

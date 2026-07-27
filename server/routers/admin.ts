@@ -421,19 +421,21 @@ export const adminRouter = router({
       if (target.isSuperAdmin) deny("target 是開發者");
       const targetTeamRows = await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.userId, target.id));
       if (target.id !== ctx.auth.user.id && targetTeamRows.some((r) => r.role === "admin")) deny("target 是團隊管理員");
-      // 管理範圍：目標直接在我管的團隊（team_members），或掛在該團隊任一組（group_members）
-      let inScope = targetTeamRows.some((r) => ctx.auth.adminTeamIds.includes(r.teamId));
-      if (!inScope) {
-        const targetGroupRows = await db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, target.id));
-        if (targetGroupRows.length > 0) {
-          const targetGroups = await db
-            .select()
-            .from(schema.groups)
-            .where(inArray(schema.groups.id, targetGroupRows.map((r) => r.groupId)));
-          inScope = targetGroups.some((g) => ctx.auth.adminTeamIds.includes(g.teamId));
-        }
+      // 管理範圍（修 AUTH2-001 跨團隊接管）：不能只憑「目標在我管的某個團隊」就放行——跨團隊帳號
+      // （同時在我管的 T1 與我管不到的 T2）會被舊版 some 放行；重設後伺服器把明文臨時密碼交給我，
+      // 等於接管該帳號並取得 T2 的存取。改為 every：目標「全部」團隊/組籍都必須落在我管的團隊內，
+      // 只要有一個落在我管不到的團隊/組就 deny（無團隊籍的帳號也不由團隊管理員重設，交給超級管理員）。
+      const targetGroupRows = await db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, target.id));
+      const targetGroupTeamIds = targetGroupRows.length
+        ? (
+            await db.select().from(schema.groups).where(inArray(schema.groups.id, targetGroupRows.map((r) => r.groupId)))
+          ).map((g) => g.teamId)
+        : [];
+      const targetTeamIds = [...new Set([...targetTeamRows.map((r) => r.teamId), ...targetGroupTeamIds])];
+      const adminSet = new Set(ctx.auth.adminTeamIds);
+      if (targetTeamIds.length === 0 || !targetTeamIds.every((tid) => adminSet.has(tid))) {
+        deny("target 有超出管理範圍的團隊/組籍");
       }
-      if (!inScope) deny("target 不在管理範圍");
     }
     if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這位成員" });
     // 稽核：誰在什麼時候重設了誰（臨時密碼本身不落 log）

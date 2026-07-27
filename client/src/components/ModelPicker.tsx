@@ -66,16 +66,16 @@ export function ModelPicker({
 
   return (
     <div data-fb="模型挑選">
-      <label>創作類別</label>
-      <select value={category} disabled={categories.isLoading} onChange={(e) => { setCategory(e.target.value); setModelId(""); }}>
+      <label htmlFor="mp-category">創作類別</label>
+      <select id="mp-category" value={category} disabled={categories.isLoading} onChange={(e) => { setCategory(e.target.value); setModelId(""); }}>
         {(categories.data ?? []).filter((c) => c.id !== "workflow").map((c) => (
           <option key={c.id} value={c.id}>{c.label}</option>
         ))}
       </select>
       {cat && <p className="hint" style={{ marginTop: 4 }}>{cat.hint}</p>}
 
-      <label>模型(點數透明)</label>
-      <select value={selected?.id ?? ""} disabled={loading} onChange={(e) => setModelId(e.target.value)}>
+      <label htmlFor="mp-model">模型(點數透明)</label>
+      <select id="mp-model" value={selected?.id ?? ""} disabled={loading} onChange={(e) => setModelId(e.target.value)}>
         {groups.map((g) => {
           const inTier = list.filter((m) => (m as unknown as { tier: string }).tier === g.tier);
           if (!inTier.length) return null;

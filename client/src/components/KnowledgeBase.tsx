@@ -188,7 +188,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
             ))}
           </select>
           <label htmlFor={`kb-title-${projectId}`}>標題</label>
-          <input id={`kb-title-${projectId}`} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例：2024 除夕開示・談放下" />
+          <input id={`kb-title-${projectId}`} value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="例：2024 除夕開示・談放下" />
           <label htmlFor={`kb-content-${projectId}`}>內容（貼上全文）</label>
           <textarea
             id={`kb-content-${projectId}`}
@@ -349,6 +349,7 @@ function KnowledgeRow({
             disabled={update.isPending}
             aria-label="編輯知識標題"
             placeholder="標題"
+            maxLength={120}
             onChange={(e) => setEditTitle(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {

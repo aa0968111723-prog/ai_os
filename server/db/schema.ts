@@ -235,9 +235,9 @@ export const generations = pgTable("generations", {
   // listByProject 對每個分鏡各跑兩支 scene_id 相關子查詢；補索引避免生成量成長後全表掃描。
   // 非 unique 純索引，由可審核 migration 建立。
   sceneIdIdx: index("generations_scene_id_idx").on(t.sceneId),
-  // 熱路徑：listByProject（WHERE project_id ORDER BY created_at DESC LIMIT 30）與 keyset 分頁——
-  // 每位開著專案的檢視者每 8 秒打一次，無此索引＝全表掃＋排序，隨檢視者數與資料量線性惡化。
-  // (project_id, created_at) 讓 Postgres 反向掃即得最新 N 筆。
+  // 修 R3-SQL-02（與並行 PR #105 相同結論）：熱路徑 listByProject（WHERE project_id ORDER BY created_at
+  // DESC LIMIT 30）與 keyset 分頁——每位開著專案的檢視者頻繁輪詢，無此索引＝全表掃＋排序。(project_id,
+  // created_at) 讓 Postgres 反向掃即得最新 N 筆；另補依組過濾（跨組統計）索引。
   projectCreatedIdx: index("generations_project_created_idx").on(t.projectId, t.createdAt),
   // 執行器只掃在途工作；partial index 現在納入 schema/migration 單一真相，
   // 不再由應用程式開機時偷偷補 DDL。
@@ -247,6 +247,7 @@ export const generations = pgTable("generations", {
   projectActiveIdx: index("generations_project_active_idx")
     .on(t.projectId, t.updatedAt)
     .where(sql`${t.status} in ('queued','running')`),
+  groupIdx: index("generations_group_idx").on(t.groupId),
 }));
 
 /** 點數帳本 — 花費紀錄（先扣預估、失敗退回） */
@@ -410,7 +411,8 @@ export const scenes = pgTable("scenes", {
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
-  // listByProject（WHERE project_id ORDER BY order_index）每 10 秒輪詢；補索引避免全表掃＋排序。
+  // 修 R3-SQL-03（與並行 PR #105 相同結論）：listByProject（WHERE project_id ORDER BY order_index）
+  // 每 10 秒輪詢，原本無索引→全表掃＋排序。補複合索引。
   projectOrderIdx: index("scenes_project_order_idx").on(t.projectId, t.orderIndex),
 }));
 
@@ -425,7 +427,10 @@ export const approvals = pgTable("approvals", {
   reason: text("reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   decidedAt: timestamp("decided_at"),
-});
+}, (t) => ({
+  // 修 R3-SQL-03：審批一律「依專案（＋狀態）」查，原本無索引→全表掃描。補複合索引。
+  projectStatusIdx: index("approvals_project_status_idx").on(t.projectId, t.status),
+}));
 
 /** 測試回饋（6 題評分＋優缺點/備註文字） */
 export const feedback = pgTable("feedback", {

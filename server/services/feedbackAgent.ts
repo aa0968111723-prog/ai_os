@@ -12,7 +12,7 @@
  * - 單一進程內以旗標防重入（排程與手動同時觸發不會雙跑）。
  * - 純函式（提示詞組裝／回覆解析／後備分診）抽出供單元測試，不碰 DB。
  */
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { isMockMode } from "./fal";
 import { nimComplete } from "./nvidia-nim";
@@ -232,7 +232,9 @@ async function resendFailedReplies(limit: number): Promise<number> {
   const rows = await db
     .select()
     .from(schema.feedbackReports)
-    .where(eq(schema.feedbackReports.emailStatus, "failed"))
+    // 修 R7-CRASH-EMAIL-01：一併補寄 "skipped"——信箱機制未設定時即時分診會落 emailStatus="skipped"、status="reviewing"，
+    // 站方之後補上金鑰重啟後，這批草稿若只掃 "failed" 就永遠不會寄出（回報者永遠收不到承諾的回覆）。
+    .where(inArray(schema.feedbackReports.emailStatus, ["failed", "skipped"]))
     .orderBy(asc(schema.feedbackReports.createdAt))
     .limit(limit);
   let resent = 0;

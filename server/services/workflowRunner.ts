@@ -67,7 +67,8 @@ export function startWorkflowRunner(): void {
     ),
   );
   const interval = setInterval(() => {
-    if (cycleRunning || isShuttingDown()) return;
+    if (cycleRunning) return;
+    if (isShuttingDown()) return;
     cycleRunning = true;
     // 每輪先掃陳屍再推進：sweep 先於 tick 序列化，避免兩者對同一 run 併發搶寫（sweep 另有 inflight 與復查防護）。
     // 撈 runs 本身失敗（DB 抖動）也不能變成 unhandled rejection——記警告等下一輪

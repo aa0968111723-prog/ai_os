@@ -72,18 +72,24 @@ export const optionsRouter = router({
             throw new TRPCError({ code: "BAD_REQUEST", message: "已經有同名的選項了" });
           }
         }
-        const [updated] = await db
-          .update(schema.groupOptions)
-          .set({
-            label,
-            // value 不變；worldview 類 value 與 label 綁定，改名時同步
-            value: isWorldview(existing.type) ? label : existing.value,
-            // 僅 platform 有 format；更新時未帶 format 就保留原值
-            format: existing.type === "platform" ? input.format ?? existing.format : existing.format,
-          })
-          .where(eq(schema.groupOptions.id, input.id))
-          .returning();
-        return projectOption(updated);
+        try {
+          const [updated] = await db
+            .update(schema.groupOptions)
+            .set({
+              label,
+              // value 不變；worldview 類 value 與 label 綁定，改名時同步
+              value: isWorldview(existing.type) ? label : existing.value,
+              // 僅 platform 有 format；更新時未帶 format 就保留原值
+              format: existing.type === "platform" ? input.format ?? existing.format : existing.format,
+            })
+            .where(eq(schema.groupOptions.id, input.id))
+            .returning();
+          return projectOption(updated);
+        } catch (err) {
+          // 修 R3-OPT-01：改名撞到 (group_id,type,value) 唯一索引時轉人話，與新增分支同句，不再回原始 500
+          if (isUniqueViolation(err)) throw new TRPCError({ code: "BAD_REQUEST", message: "已經有同名的選項了" });
+          throw err;
+        }
       }
 
       // ── 新增 ──
@@ -156,7 +162,7 @@ export const optionsRouter = router({
 
   /** 重新排序（拖曳後把該組該類型的順序寫回） */
   reorder: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), type: optionTypeSchema, orderedIds: z.array(z.string().uuid()) }))
+    .input(z.object({ groupId: z.string().uuid(), type: optionTypeSchema, orderedIds: z.array(z.string().uuid()).max(200) }))
     .mutation(async ({ ctx, input }) => {
       requireLeader(ctx.auth, input.groupId);
       // 逐筆寫 sortOrder 包在單一交易：半途失敗整批回滾，避免只寫了一半→sortOrder 重複／跳號的錯亂排序。

@@ -63,7 +63,12 @@ export function parseDelimited(text: string, delimiter: string): string[][] {
     // 不再無條件切入引號模式而吞併後續的分隔符/換行/整條列（資料靜默錯位/遺失）。
     if (c === '"' && cell === "") { inQuotes = true; i++; continue; }
     if (c === delimiter) { pushCell(); i++; continue; }
-    if (c === "\r") { i++; continue; } // CR 併入 LF 處理
+    // 修 R2-API-01：CRLF 跳過 CR 交給 LF；但「純 CR 換行」（舊 Mac／某些匯出）沒有 LF，
+    // 舊版無條件丟棄 CR → 整份收成一列、匯入零列。裸 CR 也當換行收列。
+    if (c === "\r") {
+      if (s[i + 1] === "\n") { i++; continue; } // CRLF：跳過 CR，交給下一輪的 LF
+      pushRow(); i++; continue; // 裸 CR 當換行
+    }
     if (c === "\n") { pushRow(); i++; continue; }
     cell += c; i++;
   }

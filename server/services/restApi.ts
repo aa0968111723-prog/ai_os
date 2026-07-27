@@ -284,7 +284,7 @@ export async function handleDatabaseIcs(req: Request, res: Response): Promise<vo
     const data = r.data as DataRowData;
     const dateStr = data?.[dateField.key];
     if (typeof dateStr !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return [];
-    const startsAt = new Date(dateStr + "T09:00:00Z"); // 全日事件簡化為當日 09:00（UTC）起 1 小時
+    const startsAt = new Date(dateStr + "T00:00:00Z"); // 僅作型別欄位；實際以 allDayDate 輸出 VALUE=DATE 全天事件
     if (Number.isNaN(startsAt.getTime())) return [];
     const title = (titleField && typeof data[titleField.key] === "string" && data[titleField.key]) || `${hit.table.name}`;
     const note = fields
@@ -293,7 +293,7 @@ export async function handleDatabaseIcs(req: Request, res: Response): Promise<vo
       .map((f) => { const v = data[f.key]; return v !== null && v !== undefined && v !== "" ? `${f.label}: ${f.type === "checkbox" ? (v ? "是" : "否") : v}` : null; })
       .filter(Boolean)
       .join("\n");
-    return [{ id: r.id, title: String(title).slice(0, 200), startsAt, endsAt: null as Date | null, note: note || null }];
+    return [{ id: r.id, title: String(title).slice(0, 200), startsAt, endsAt: null as Date | null, note: note || null, allDayDate: dateStr }];
   });
 
   const ics = buildIcs(hit.table.name, items);

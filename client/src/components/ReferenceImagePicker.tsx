@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
+import { AssetImg } from "./MediaFallback";
 
 export interface ReferenceImage {
   id: string;
@@ -66,10 +67,14 @@ export function ReferenceImagePicker({
     <div data-fb="參考圖選擇器" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {value && (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <img
+          <AssetImg
             src={value.url}
             alt={`參考圖：${value.title}`}
             style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: "1px solid var(--border-soft)" }}
+            fallbackLabel="參考圖遺失"
+            fallbackHeight={56}
+            fallbackIconSize={14}
+            fallbackStyle={{ width: 56, flex: "0 0 56px" }}
           />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="hint" style={{ fontSize: 11, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -130,7 +135,7 @@ export function ReferenceImagePicker({
                 onClick={() => { onChange({ id: a.id, url: a.url!, title: a.title }); setLibraryOpen(false); }}
                 style={{ padding: 0, border: "1px solid var(--border-soft)", borderRadius: 8, overflow: "hidden", cursor: "pointer", background: "none", lineHeight: 0 }}
               >
-                <img src={a.url!} alt={a.title} loading="lazy" style={{ width: "100%", height: 64, objectFit: "cover", display: "block" }} />
+                <AssetImg src={a.url!} alt={a.title} loading="lazy" style={{ width: "100%", height: 64, objectFit: "cover", display: "block" }} fallbackLabel="圖檔遺失" fallbackHeight={64} fallbackIconSize={14} />
               </button>
             ))}
           </div>

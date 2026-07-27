@@ -4,7 +4,20 @@ import { getModel } from "@shared/models";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import { GenerationPromptCopy, GenerationResultCopy } from "./GenerationCopy";
+import { AssetVideo, AssetAudio, MissingMediaBox } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
+
+/** 生成結果縮圖（圖片）：載入失敗顯示「結果已失效」佔位，並拿掉開新分頁連結（點下去只會是 404） */
+function GenResultImgLink({ url, alt }: { url: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [url]);
+  if (failed) return <MissingMediaBox className="gen-thumb" label="結果已失效" iconSize={16} />;
+  return (
+    <a href={url} target="_blank" rel="noreferrer">
+      <img className="gen-thumb" src={url} alt={alt} onError={() => setFailed(true)} />
+    </a>
+  );
+}
 
 /**
  * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（背景分頁/未授權）建構子會丟例外，包 try 忽略。
@@ -422,13 +435,11 @@ export function GenerationList({
           {(g.status === "queued" || g.status === "running") && <StatusPoller id={g.id} />}
           {g.resultUrl ? (
             g.kind === "video" ? (
-              <video className="gen-thumb" src={g.resultUrl} controls muted />
+              <AssetVideo className="gen-thumb" src={g.resultUrl} controls muted fallbackClassName="gen-thumb" fallbackLabel="結果已失效" fallbackIconSize={16} />
             ) : g.kind === "audio" ? (
               <div className="gen-thumb" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted-fg)" }}><Icon name="Volume2" size={24} /></div>
             ) : (
-              <a href={g.resultUrl} target="_blank" rel="noreferrer">
-                <img className="gen-thumb" src={g.resultUrl} alt={g.prompt.slice(0, 40)} />
-              </a>
+              <GenResultImgLink url={g.resultUrl} alt={g.prompt.slice(0, 40)} />
             )
           ) : (
             <div className="gen-thumb" style={g.kind === "text" ? { display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted-fg)" } : undefined}>
@@ -571,7 +582,7 @@ export function GenerationList({
                   {injectedPrompt && (
                     <details style={{ flexBasis: "100%" }}>
                       <summary className="hint" style={{ cursor: "pointer", fontSize: 12 }}>完整注入提示詞</summary>
-                      <div className="mono" style={{ whiteSpace: "pre-wrap", fontSize: 12, marginTop: 4, padding: "6px 8px", background: "var(--surface-2, rgba(0,0,0,0.04))", borderRadius: 6 }}>
+                      <div className="mono" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, marginTop: 4, padding: "6px 8px", background: "var(--surface-2, rgba(0,0,0,0.04))", borderRadius: 6 }}>
                         {injectedPrompt}
                         <div style={{ marginTop: 4 }}>
                           <button style={{ padding: "2px 10px", fontSize: 11 }} onClick={() => copyText(`inj-${g.id}`, injectedPrompt)}>
@@ -585,7 +596,7 @@ export function GenerationList({
               );
             })()}
             {g.kind === "audio" && g.resultUrl && (
-              <audio controls src={g.resultUrl} style={{ width: "100%", maxWidth: 320, height: 32, marginTop: 6 }} />
+              <AssetAudio controls src={g.resultUrl} style={{ width: "100%", maxWidth: 320, height: 32, marginTop: 6 }} fallbackLabel="音檔已失效（可能是伺服器重啟前的舊檔）" />
             )}
             {g.resultText && (
               <GenerationResultCopy

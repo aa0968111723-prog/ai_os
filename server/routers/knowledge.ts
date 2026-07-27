@@ -177,6 +177,8 @@ const DESCRIBE_PROMPT = "請以繁體中文詳細描述這張圖片（場景、�
  * 跨 replicas 的呼叫上限已由下方 PostgreSQL rate limiter 統一守門。
  */
 const describeInFlight = new Map<string, Promise<{ id: string; title: string; content: string }>>();
+// 修 R7-CONC-01：addFromAsset 同素材 dup→insert 的記憶體序列化（比照 describeInFlight），杜絕併發雙擊建重複知識列
+const addFromAssetInFlight = new Map<string, Promise<typeof schema.knowledge.$inferSelect>>();
 
 // PostgreSQL 滑動視窗（獨立 scope）：每人每分鐘 6 次，擋跨 replica 狂刷付費視覺模型。
 async function describeOverLimit(userId: string): Promise<boolean> {
@@ -392,7 +394,12 @@ export const knowledgeRouter = router({
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
     await assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
-    await db.delete(schema.knowledge).where(eq(schema.knowledge.id, input.id));
+    // 修 R3-KNOW-01：級聯清版本快照——update/restoreVersion 會把每次改動前的全文寫進 text_versions
+    //（kind='knowledge', refId=知識id）；purge 只刪本體會讓完整逐字稿/見證全文永久殘留，「永久刪除」名不副實。
+    await db.transaction(async (tx) => {
+      await tx.delete(schema.textVersions).where(and(eq(schema.textVersions.kind, "knowledge"), eq(schema.textVersions.refId, input.id)));
+      await tx.delete(schema.knowledge).where(eq(schema.knowledge.id, input.id));
+    });
     return { ok: true };
   }),
 
@@ -407,52 +414,64 @@ export const knowledgeRouter = router({
     if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材（可能已在回收桶）" });
     requireGroup(ctx.auth, asset.groupId);
     await assertProjectEditable(ctx.auth, { id: asset.projectId, groupId: asset.groupId }); // 2.3
-    const [dup] = await db
-      .select()
-      .from(schema.knowledge)
-      .where(
-        and(
-          eq(schema.knowledge.sourceAssetId, asset.id),
-          eq(schema.knowledge.projectId, asset.projectId),
-          // 只認未刪除的既有筆：若前一份已丟進回收桶，這次重新加入應建一份新的活筆
-          isNull(schema.knowledge.deletedAt),
-        ),
-      );
-    if (dup) return dup; // 已加過就回原筆，冪等
-    if (asset.kind !== "doc" || !asset.storagePath) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "只有文字類素材（txt/md）能加入知識庫" });
-    }
-    const { open } = await import("node:fs/promises");
-    const { absPathOf } = await import("../services/storage");
-    let content: string;
-    try {
-      // 只讀前段（非整檔進記憶體）——即使有人上傳 200MB 的 .txt，也只吃 MAX_CONTENT×4 bytes。
-      // CJK 一字最多 4 bytes（UTF-8），讀 MAX_CONTENT×4 bytes 後再截到 MAX_CONTENT 字，足夠且有界。
-      const fh = await open(absPathOf(asset.storagePath), "r");
-      try {
-        const buf = Buffer.alloc(MAX_CONTENT * 4);
-        const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
-        content = buf.subarray(0, bytesRead).toString("utf8").slice(0, MAX_CONTENT);
-      } finally {
-        await fh.close();
+    // 修 R7-CONC-01：同素材的「查重→讀檔→insert」以記憶體 in-flight 序列化——併發雙擊/重試各自查空、
+    // 各自 insert 會產生重複知識列（且加倍吃 INJECT_BUDGET 擠掉其他知識）。第二個併發請求直接 await 第一個。
+    const running = addFromAssetInFlight.get(asset.id);
+    if (running) return running;
+    const job = (async () => {
+      const [dup] = await db
+        .select()
+        .from(schema.knowledge)
+        .where(
+          and(
+            eq(schema.knowledge.sourceAssetId, asset.id),
+            eq(schema.knowledge.projectId, asset.projectId),
+            // 只認未刪除的既有筆：若前一份已丟進回收桶，這次重新加入應建一份新的活筆
+            isNull(schema.knowledge.deletedAt),
+          ),
+        );
+      if (dup) return dup; // 已加過就回原筆，冪等
+      if (asset.kind !== "doc" || !asset.storagePath) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "只有文字類素材（txt/md）能加入知識庫" });
       }
-    } catch {
-      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "讀取素材內容失敗" });
+      const { open } = await import("node:fs/promises");
+      const { absPathOf } = await import("../services/storage");
+      let content: string;
+      try {
+        // 只讀前段（非整檔進記憶體）——即使有人上傳 200MB 的 .txt，也只吃 MAX_CONTENT×4 bytes。
+        // CJK 一字最多 4 bytes（UTF-8），讀 MAX_CONTENT×4 bytes 後再截到 MAX_CONTENT 字，足夠且有界。
+        const fh = await open(absPathOf(asset.storagePath), "r");
+        try {
+          const buf = Buffer.alloc(MAX_CONTENT * 4);
+          const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+          content = buf.subarray(0, bytesRead).toString("utf8").slice(0, MAX_CONTENT);
+        } finally {
+          await fh.close();
+        }
+      } catch {
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "讀取素材內容失敗" });
+      }
+      if (!content.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這份素材沒有可讀的文字內容" });
+      const [row] = await db
+        .insert(schema.knowledge)
+        .values({
+          projectId: asset.projectId,
+          groupId: asset.groupId,
+          kind: "note",
+          title: asset.title.slice(0, 120),
+          content,
+          sourceAssetId: asset.id,
+          createdBy: ctx.auth.user.id,
+        })
+        .returning();
+      return row;
+    })();
+    addFromAssetInFlight.set(asset.id, job);
+    try {
+      return await job;
+    } finally {
+      addFromAssetInFlight.delete(asset.id);
     }
-    if (!content.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這份素材沒有可讀的文字內容" });
-    const [row] = await db
-      .insert(schema.knowledge)
-      .values({
-        projectId: asset.projectId,
-        groupId: asset.groupId,
-        kind: "note",
-        title: asset.title.slice(0, 120),
-        content,
-        sourceAssetId: asset.id,
-        createdBy: ctx.auth.user.id,
-      })
-      .returning();
-    return row;
   }),
 
   /**
@@ -496,6 +515,7 @@ export const knowledgeRouter = router({
 
       const title = `${DESCRIBE_TITLE_PREFIX}｜${asset.title.slice(0, 60)}`;
       let content: string;
+      let chargedPoints = 0; // 修 R6-CRASH-001：記已扣點數（外層可見），入庫失敗時據此退回
       if (isMockMode()) {
         // 假模式：不扣點，用固定示範文字跑通「描述 → 入庫 → 注入」全流程（與 fal/assistant 的 mock 哲學一致）
         content = `（測試模式描述）這是一張與專案相關的圖片素材：${asset.title}。正式模式會由視覺模型產生詳細中文描述。`;
@@ -505,6 +525,7 @@ export const knowledgeRouter = router({
         // 先扣後呼叫、失敗退回——與 assistant/generationCore 同一守門哲學（點數＝真金，不可先跑再說）
         const quotaError = await reserveQuota(ctx.auth.user.id, asset.groupId, points, "圖片描述入知識庫");
         if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+        chargedPoints = points;
         // 圖片網址：本地檔 → 簽名網址（fal 要能從外部抓到圖，與 generationCore 來源素材同模式）；
         // 純外部素材直接用其網址，但必須是 http(s) 否則模型抓不到——擋下並退點
         const imageUrl = asset.storagePath ? signAssetUrl(asset.id) : asset.url;
@@ -538,20 +559,29 @@ export const knowledgeRouter = router({
         }
       }
 
-      // 入庫成 note：記 sourceAssetId（防重複＋回溯來源圖），之後自動被 buildKnowledgeContext 注入
-      const [row] = await db
-        .insert(schema.knowledge)
-        .values({
-          projectId: asset.projectId,
-          groupId: asset.groupId,
-          kind: "note",
-          title,
-          content,
-          sourceAssetId: asset.id,
-          createdBy: ctx.auth.user.id,
-        })
-        .returning();
-      return { id: row.id, title: row.title, content: row.content };
+      // 入庫成 note：記 sourceAssetId（防重複＋回溯來源圖），之後自動被 buildKnowledgeContext 注入。
+      // 修 R6-CRASH-001：vision 成功（已扣點）後若入庫失敗，原本無退點＝已扣點無成品。入庫失敗也要退點。
+      try {
+        const [row] = await db
+          .insert(schema.knowledge)
+          .values({
+            projectId: asset.projectId,
+            groupId: asset.groupId,
+            kind: "note",
+            title,
+            content,
+            sourceAssetId: asset.id,
+            createdBy: ctx.auth.user.id,
+          })
+          .returning();
+        return { id: row.id, title: row.title, content: row.content };
+      } catch (err) {
+        // 修 R7-MONEY-01：不帶 generationId 冪等鍵——describe 是可重複觸發的操作，每次呼叫都是全新一筆扣點，
+        // 用靜態 asset.id 當鍵會讓「第二次以上失敗」的退點撞到第一次的退點列被冪等抑制、本次扣點永久蒸發。
+        // 此 catch 每次呼叫至多執行一次、無「同筆被輪詢重複退」的併發面，故比照上方 vision 失敗退點（不帶鍵、每次都退）。
+        if (chargedPoints > 0) await refund(ctx.auth.user.id, asset.groupId, chargedPoints, "圖片描述入庫失敗退回");
+        throw err;
+      }
 
     })(); // 見上方 describeInFlight：dup 檢查→扣點→fal→入庫整段對同素材序列化
     describeInFlight.set(asset.id, job);

@@ -21,7 +21,10 @@ const MAX_DEPTH = 3;
 export function sanitizeAuditInput(value: unknown, depth = 0): unknown {
   if (value == null) return value;
   if (typeof value === "string") {
-    return value.length > MAX_STRING ? `${value.slice(0, MAX_STRING)}…(共 ${value.length} 字)` : value;
+    // 修 R5-I18N-03：以碼點（非 UTF-16 code unit）截斷——slice 恰在代理對中間切斷會留孤立代理字元，
+    // jsonb 寫入被 Postgres 拒收使該筆審計靜默遺失。Array.from 依碼點切，emoji/CJK 補充平面字元安全。
+    const cps = Array.from(value);
+    return cps.length > MAX_STRING ? `${cps.slice(0, MAX_STRING).join("")}…(共 ${cps.length} 字)` : value;
   }
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (depth >= MAX_DEPTH) return "…(過深截斷)";
