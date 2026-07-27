@@ -70,6 +70,12 @@ void runCli(async () => {
         `[db] legacy bridge verified: record through ${throughTag}; ` +
         `leave ${manifest.entries.length - prefix.length} additive migration(s) pending`,
       );
+      if (bridge.alreadyPresent > 0) {
+        console.log(
+          `[db] ${bridge.alreadyPresent} reviewed object(s) already exist on this legacy DB; ` +
+          "their migrations re-run as no-ops and the post-migration drift gate still verifies them",
+        );
+      }
       return prefix;
     };
 

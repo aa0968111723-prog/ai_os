@@ -96,8 +96,15 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
  * that made them fail on live data. Wherever the original succeeded there were
  * no duplicates, so the de-duplication added to the corrected file deletes
  * nothing and both versions leave exactly the same schema and rows.
+ *
+ * 0004 created its indexes without IF NOT EXISTS. Wherever the original
+ * succeeded the indexes did not yet exist, so adding the guard produces the
+ * same two indexes by the same definitions.
  */
 export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly string[]>> = {
+  "0004_query_indexes": [
+    "8ce681fac43c4f65210542bd0f775ff49b30967b4188953a54795755b9e9f1cf",
+  ],
   "0005_membership_read_uniqueness": [
     "30b344a7e264c48e4b62af11cb689da353b7f4846f6374a0d33f27aa38cc1337",
   ],
@@ -113,6 +120,8 @@ export interface LegacyAdoptionCheck {
   errors: string[];
   throughIndex: number;
   adoptionFingerprint: string;
+  /** Reviewed statements whose object the legacy database already carries. */
+  alreadyPresent: number;
 }
 
 function rowsOf<T>(result: unknown): T[] {
@@ -139,9 +148,41 @@ function migrationStatements(entry: MigrationFile): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Canonical form plus the original text. Canonicalization deliberately drops
+ * `IF NOT EXISTS` so a statement can be compared against a generated drift
+ * plan, which never emits it — but whether the guard was written is exactly
+ * what decides if the statement can be safely re-run, so the raw text has to
+ * survive alongside it.
+ */
+function migrationStatementPairs(entry: MigrationFile): { raw: string; canonical: string }[] {
+  return entry.sql
+    .split("--> statement-breakpoint")
+    .map((part) => ({
+      raw: part
+        .split(/\r?\n/)
+        .filter((line) => !line.trimStart().startsWith("--"))
+        .join("\n")
+        .trim()
+        .replace(/;+\s*$/, "")
+        .replace(/\s+/g, " "),
+      canonical: canonicalMigrationStatement(part),
+    }))
+    .filter((pair) => pair.canonical);
+}
+
 /** Additive schema DDL — the only statement kinds that may appear as drift. */
 function isAdditiveSchemaStatement(statement: string): boolean {
   return /^CREATE TABLE /i.test(statement) || /^CREATE (?:UNIQUE )?INDEX /i.test(statement);
+}
+
+/**
+ * True when re-running the statement against an object that already exists is
+ * a no-op, so the migration can still be recorded as applied on a database the
+ * former pushSchema path had already created that object in.
+ */
+export function isReRunnableCreateStatement(statement: string): boolean {
+  return /^CREATE (?:TABLE|(?:UNIQUE )?INDEX) IF NOT EXISTS /i.test(statement);
 }
 
 /**
@@ -179,6 +220,7 @@ export function verifyLegacyAdoptionBridge(
   ].join("\0");
   const adoptionFingerprint = createHash("sha256").update(fingerprintPayload).digest("hex").slice(0, 16);
   const errors: string[] = [];
+  let alreadyPresent = 0;
 
   if (throughTag !== LEGACY_ADOPTION_THROUGH_TAG || throughIndex < 0) {
     errors.push(`只允許經審核的 legacy bridge：--through=${LEGACY_ADOPTION_THROUGH_TAG}`);
@@ -196,7 +238,8 @@ export function verifyLegacyAdoptionBridge(
   if (drift.hasDataLoss) errors.push("schema drift 被 Drizzle 標記為可能資料損失");
   if (drift.warnings.length > 0) errors.push(`schema drift 含 ${drift.warnings.length} 個警告`);
 
-  const expected = pending.flatMap(migrationStatements);
+  const pairs = pending.flatMap(migrationStatementPairs);
+  const expected = pairs.map((pair) => pair.canonical);
   const unsafe = expected.filter((statement) =>
     !isAdditiveSchemaStatement(statement) && !isRowDeduplicationStatement(statement),
   );
@@ -204,6 +247,16 @@ export function verifyLegacyAdoptionBridge(
     errors.push("bridge migration 不再是純新增 table/index 或去重；必須重新人工審查");
   }
 
+  // The former pushSchema path created whatever schema.ts held at the time, so
+  // a legacy database can already carry objects belonging to a later bridge
+  // migration. Those show up as expected DDL that is absent from drift, which
+  // is safe precisely when re-running the statement is a no-op — the migration
+  // then records as applied without touching the existing object, and the
+  // post-migration drift gate still proves the end state. Drift the bridge did
+  // not predict stays fatal: that is unreviewed divergence.
+  const reRunnable = new Set(
+    pairs.filter((pair) => isReRunnableCreateStatement(pair.raw)).map((pair) => pair.canonical),
+  );
   const expectedCanonical = expected.filter(isAdditiveSchemaStatement).sort();
   const actualCanonical = drift.statements.map(canonicalMigrationStatement).filter(Boolean).sort();
   if (
@@ -214,8 +267,16 @@ export function verifyLegacyAdoptionBridge(
     const actualSet = new Set(actualCanonical);
     const unexpected = actualCanonical.filter((statement) => !expectedSet.has(statement));
     const missing = expectedCanonical.filter((statement) => !actualSet.has(statement));
+    const missingUnsafe = missing.filter((statement) => !reRunnable.has(statement));
     if (unexpected.length > 0) errors.push(`legacy schema 有 ${unexpected.length} 項非 bridge 預期 drift`);
-    if (missing.length > 0) errors.push(`legacy schema 少了 ${missing.length} 項 bridge 預期 drift`);
+    if (missingUnsafe.length > 0) {
+      errors.push(
+        `legacy schema 少了 ${missingUnsafe.length} 項 bridge 預期 drift，且該 migration 無法安全重跑`,
+      );
+    }
+    if (missing.length > missingUnsafe.length) {
+      alreadyPresent = missing.length - missingUnsafe.length;
+    }
     if (unexpected.length === 0 && missing.length === 0) errors.push("legacy drift 有重複或數量不符");
   }
 
@@ -224,6 +285,7 @@ export function verifyLegacyAdoptionBridge(
     errors,
     throughIndex,
     adoptionFingerprint,
+    alreadyPresent,
   };
 }
 

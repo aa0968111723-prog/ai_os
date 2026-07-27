@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   canonicalMigrationStatement,
   classifyMigrationState,
+  isReRunnableCreateStatement,
   isRowDeduplicationStatement,
   LEGACY_ADOPTION_PENDING_TAGS,
   LEGACY_ADOPTION_THROUGH_TAG,
@@ -146,6 +147,65 @@ describe("legacy migration adoption bridge", () => {
       ),
     ).toBe(false);
     expect(isRowDeduplicationStatement('DELETE FROM "team_members"')).toBe(false);
+  });
+
+  it("accepts reviewed DDL the legacy database already carries when it re-runs as a no-op", () => {
+    // The former pushSchema path left 0004's and 0005's indexes in place, so
+    // they are absent from drift while their tables are still missing — the
+    // exact shape the live database turned out to be in.
+    const alreadyCreated = expectedStatements.filter((statement) =>
+      /^CREATE (?:UNIQUE )?INDEX "(?:approvals_project_status_idx|generations_group_idx|dm_reads_user_peer_uq|group_members_group_user_uq|message_reactions_msg_user_emoji_uq|message_reads_user_project_uq|project_members_project_user_uq|team_members_team_user_uq)"/.test(statement),
+    );
+    expect(alreadyCreated).toHaveLength(8);
+
+    const result = verifyLegacyAdoptionBridge(
+      manifest,
+      {
+        hasDataLoss: false,
+        warnings: [],
+        statements: expectedStatements.filter((statement) => !alreadyCreated.includes(statement)),
+      },
+      LEGACY_ADOPTION_THROUGH_TAG,
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.alreadyPresent).toBe(8);
+  });
+
+  it("rejects absent reviewed DDL that cannot be safely re-run", () => {
+    // Same situation, but the migration lacks IF NOT EXISTS, so re-running it
+    // would fail against the existing object rather than no-op.
+    const fragile = { ...manifest, entries: manifest.entries.map((entry) =>
+      entry.tag === "0004_query_indexes"
+        ? { ...entry, sql: entry.sql.replace(/ IF NOT EXISTS/g, "") }
+        : entry,
+    ) };
+    const fragileStatements = fragile.entries
+      .filter((entry) => LEGACY_ADOPTION_PENDING_TAGS.includes(entry.tag as (typeof LEGACY_ADOPTION_PENDING_TAGS)[number]))
+      .flatMap((entry) => entry.sql.split("--> statement-breakpoint").map(canonicalMigrationStatement).filter(Boolean))
+      .filter((statement) => !isRowDeduplicationStatement(statement));
+
+    const result = verifyLegacyAdoptionBridge(
+      fragile,
+      {
+        hasDataLoss: false,
+        warnings: [],
+        statements: fragileStatements.filter(
+          (statement) => !/^CREATE INDEX "(?:approvals_project_status_idx|generations_group_idx)"/.test(statement),
+        ),
+      },
+      LEGACY_ADOPTION_THROUGH_TAG,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/無法安全重跑/);
+  });
+
+  it("marks CREATE statements re-runnable only when they are guarded", () => {
+    expect(isReRunnableCreateStatement('CREATE INDEX IF NOT EXISTS "a" ON "b" ("c")')).toBe(true);
+    expect(isReRunnableCreateStatement('CREATE UNIQUE INDEX IF NOT EXISTS "a" ON "b" ("c")')).toBe(true);
+    expect(isReRunnableCreateStatement('CREATE TABLE IF NOT EXISTS "a" ("b" text)')).toBe(true);
+    expect(isReRunnableCreateStatement('CREATE INDEX "a" ON "b" ("c")')).toBe(false);
+    expect(isReRunnableCreateStatement('CREATE TABLE "a" ("b" text)')).toBe(false);
   });
 
   it("accepts only the reviewed additive drift after 0001", () => {
