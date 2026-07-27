@@ -207,6 +207,7 @@ function ReportForm({
   const catRoving = useRovingRadio(FEEDBACK_CATEGORIES.map((c) => c.value), category, (v) => setCategory(v as FeedbackCategory));
   const [shotUrl, setShotUrl] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(true);
+  const [captureAttempt, setCaptureAttempt] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const shotBlobRef = useRef<Blob | null>(null);
   const [justSent, setJustSent] = useState(false);
@@ -231,7 +232,7 @@ function ReportForm({
       alive = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [target]);
+  }, [target, captureAttempt]);
 
   // 送出成功短暫顯示感謝後自動關閉
   useEffect(() => {
@@ -411,7 +412,20 @@ function ReportForm({
                 style={{ width: "100%", borderRadius: 8, border: "1px solid var(--border)", display: "block" }}
               />
             ) : (
-              <p className="hint" style={{ margin: 0 }}>這次沒能擷取到畫面，送出文字仍會收到。</p>
+              <div>
+                <p className="hint" style={{ margin: 0 }}>這次沒能擷取到畫面，送出文字仍會收到。</p>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ marginTop: 6, padding: "4px 8px" }}
+                  onClick={() => {
+                    setCapturing(true);
+                    setCaptureAttempt((attempt) => attempt + 1);
+                  }}
+                >
+                  重新擷取
+                </button>
+              </div>
             )}
           </div>
         )}
