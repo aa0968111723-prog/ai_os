@@ -83,6 +83,31 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0005_membership_read_uniqueness",
 ] as const;
 
+/**
+ * Content hashes of migrations whose SQL was corrected after release.
+ *
+ * The ledger stores the sha256 of the migration file, so correcting a released
+ * file would otherwise make every database that already applied the original
+ * look like tampered history. A hash may only be listed here when the corrected
+ * file is provably equivalent on every database where the original succeeded,
+ * so accepting it cannot hide real divergence.
+ *
+ * 0005 created its unique indexes without first removing the duplicate rows
+ * that made them fail on live data. Wherever the original succeeded there were
+ * no duplicates, so the de-duplication added to the corrected file deletes
+ * nothing and both versions leave exactly the same schema and rows.
+ */
+export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly string[]>> = {
+  "0005_membership_read_uniqueness": [
+    "30b344a7e264c48e4b62af11cb689da353b7f4846f6374a0d33f27aa38cc1337",
+  ],
+};
+
+/** True when `hash` is a retired-but-equivalent content hash for `tag`. */
+export function isSupersededMigrationHash(tag: string, hash: string): boolean {
+  return SUPERSEDED_MIGRATION_HASHES[tag]?.includes(hash) ?? false;
+}
+
 export interface LegacyAdoptionCheck {
   ok: boolean;
   errors: string[];
@@ -114,11 +139,32 @@ function migrationStatements(entry: MigrationFile): string[] {
     .filter(Boolean);
 }
 
+/** Additive schema DDL — the only statement kinds that may appear as drift. */
+function isAdditiveSchemaStatement(statement: string): boolean {
+  return /^CREATE TABLE /i.test(statement) || /^CREATE (?:UNIQUE )?INDEX /i.test(statement);
+}
+
+/**
+ * Matches only the row de-duplication idiom that must precede a new unique
+ * index: a self-join DELETE keeping one row per key. Any other DELETE — an
+ * unconditional purge, or one joining a different table — is not matched and
+ * still fails the bridge's manual-review gate.
+ */
+export function isRowDeduplicationStatement(statement: string): boolean {
+  const match = /^DELETE FROM "([^"]+)" a USING "([^"]+)" b WHERE .+/i.exec(statement);
+  return match !== null && match[1] === match[2];
+}
+
 /**
  * Proves a legacy database is exactly the historical 0001 schema:
  * current-schema drift must be precisely the additive CREATE TABLE/INDEX DDL
  * in the reviewed bridge migrations—nothing missing, extra, destructive,
  * or warning-producing.
+ *
+ * Bridge migrations may also carry the reviewed row de-duplication that a new
+ * unique index needs. Those statements change rows rather than schema, so they
+ * never surface as drift and are excluded from the comparison; every other
+ * statement kind still trips the review gate.
  */
 export function verifyLegacyAdoptionBridge(
   manifest: MigrationManifest,
@@ -152,14 +198,13 @@ export function verifyLegacyAdoptionBridge(
 
   const expected = pending.flatMap(migrationStatements);
   const unsafe = expected.filter((statement) =>
-    !/^CREATE TABLE /i.test(statement)
-    && !/^CREATE (?:UNIQUE )?INDEX /i.test(statement),
+    !isAdditiveSchemaStatement(statement) && !isRowDeduplicationStatement(statement),
   );
   if (unsafe.length > 0) {
-    errors.push("bridge migration 不再是純新增 table/index；必須重新人工審查");
+    errors.push("bridge migration 不再是純新增 table/index 或去重；必須重新人工審查");
   }
 
-  const expectedCanonical = [...expected].sort();
+  const expectedCanonical = expected.filter(isAdditiveSchemaStatement).sort();
   const actualCanonical = drift.statements.map(canonicalMigrationStatement).filter(Boolean).sort();
   if (
     expectedCanonical.length !== actualCanonical.length
@@ -327,7 +372,7 @@ export function classifyMigrationState(
       errors.push(`資料庫含本版程式不認識的 migration：created_at=${createdAt}`);
       continue;
     }
-    if (row.hash !== expected.hash) {
+    if (row.hash !== expected.hash && !isSupersededMigrationHash(expected.tag, row.hash)) {
       errors.push(`migration ${expected.tag} 的 hash 與已套用紀錄不符（檔案可能被事後修改）`);
       continue;
     }
