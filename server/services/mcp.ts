@@ -429,7 +429,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   // 唯讀金鑰守衛：最前面就擋掉寫入類工具（送生成／留言／寫資料列），連 DB 都不必碰。
   // 被擋也會被 callTool 落審計（ok=false），可追溯「唯讀金鑰嘗試寫入」。
   const scopeDenied = scopeDeniedReason(name, scope);
-  if (scopeDenied) throw new Error(scopeDenied);
+  if (scopeDenied) throw new TRPCError({ code: "FORBIDDEN", message: scopeDenied });
 
   if (name === "whoami") {
     // 確認身分與權限（測試連線用）：外部客戶端一眼看出「我以誰的身分連進來、能做什麼」。
@@ -527,7 +527,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
 
     if (name === "add_database_rows") {
       const denied = databaseBatchWriteDenied(scope.readOnly, access.canWriteRows);
-      if (denied) throw new Error(denied);
+      if (denied) throw new TRPCError({ code: "FORBIDDEN", message: denied });
       const rawRows = parseDatabaseBatchRows(args);
       const idempotencyKey = parseIdempotencyKey(args.idempotencyKey);
       return executeIdempotentDatabaseBatch({
@@ -539,7 +539,12 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     }
 
     // add_database_row：走列寫入單一路徑（與 tRPC/代理/REST 一致，含 20,000 列保險絲）
-    if (!access.canWriteRows) throw new Error("這個資料庫不開放 AI 寫入（管理者可在工作台「資料庫」頁調整 AI 存取等級）");
+    if (!access.canWriteRows) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "這個資料庫不開放 AI 寫入（管理者可在工作台「資料庫」頁調整 AI 存取等級）",
+      });
+    }
     const row = await addDataRowValidated(table, auth.user.id, args.data ?? {});
     return { rowId: row.id, data: row.data };
   }
@@ -585,9 +590,11 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   if (name === "read_database_file") {
     const fileId = String(args.fileId ?? "");
     const [file] = await db.select().from(schema.dataFiles).where(eq(schema.dataFiles.id, fileId));
-    if (!file) throw new Error("找不到這份文件");
+    if (!file) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
     const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, file.tableId), isNull(schema.dataTables.deletedAt)));
-    if (!table || !resolveAgentAccess(auth, table).canRead) throw new Error("找不到這份文件");
+    if (!table || !resolveAgentAccess(auth, table).canRead) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份文件" });
+    }
     const text = file.textContent ?? "";
     if (!text) {
       const kind = mediaKindOf(file.mime);
@@ -699,7 +706,12 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const ref = String(args.peer ?? "").trim();
     if (!ref) throw new Error("peer 不可為空（userId 或 Email，先用 list_dm_contacts 查）");
     const peer = await resolveDmPeerRef(auth, ref);
-    if (!peer) throw new Error("找不到這位夥伴——只能私訊同組夥伴或開發者（用 list_dm_contacts 看可私訊的名單）");
+    if (!peer) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "找不到這位夥伴——只能私訊同組夥伴或開發者（用 list_dm_contacts 看可私訊的名單）",
+      });
+    }
 
     if (name === "send_dm") {
       const body = String(args.body ?? "").trim();
@@ -866,7 +878,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   requireGroup(auth, project.groupId);
   // 封存專案守衛（寫入類工具才擋，讀取放行）——見 archivedWriteReason
   const archived = archivedWriteReason(name, project.status);
-  if (archived) throw new Error(archived);
+  if (archived) throw new TRPCError({ code: "PRECONDITION_FAILED", message: archived });
 
   if (name === "get_project_context") {
     const wv = worldviewSchema.parse(project.worldview ?? {});

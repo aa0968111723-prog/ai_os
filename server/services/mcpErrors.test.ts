@@ -10,7 +10,7 @@ describe("MCP JSON-RPC error boundary", () => {
   it("returns stable machine-readable idempotency codes", () => {
     expect(toMcpJsonRpcError(new IdempotencyConflictError())).toEqual({
       code: -32009,
-      message: "此 Idempotency-Key 已用於不同的批次內容",
+      message: "IDEMPOTENCY_CONFLICT: 此 Idempotency-Key 已用於不同的批次內容",
       data: { code: "IDEMPOTENCY_CONFLICT" },
     });
     expect(toMcpJsonRpcError(
