@@ -500,11 +500,11 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   if (name === "query_database" || name === "add_database_row" || name === "add_database_rows") {
     const tableId = String(args.tableId ?? "");
     const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
-    if (!table) throw new Error("找不到這個資料庫");
+    if (!table) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
     // AI 介面有效權限＝本人權限 ∩ agentAccess 等級（none 連讀都擋、read 擋寫）——
     // 與 tRPC 同語意：無讀取權當作不存在，不外洩個人庫/他組庫的存在性
     const access = resolveAgentAccess(auth, table);
-    if (!access.canRead) throw new Error("找不到這個資料庫");
+    if (!access.canRead) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
 
     if (name === "query_database") {
       const conds = [eq(schema.dataRows.tableId, table.id)];
@@ -547,8 +547,8 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   if (name === "list_database_files") {
     const tableId = String(args.tableId ?? "");
     const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
-    if (!table) throw new Error("找不到這個資料庫");
-    if (!resolveAgentAccess(auth, table).canRead) throw new Error("找不到這個資料庫");
+    if (!table) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
+    if (!resolveAgentAccess(auth, table).canRead) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
     const files = await db
       .select()
       .from(schema.dataFiles)
@@ -624,8 +624,8 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   if (name === "get_database_stats") {
     const tableId = String(args.tableId ?? "");
     const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
-    if (!table) throw new Error("找不到這個資料庫");
-    if (!resolveAgentAccess(auth, table).canRead) throw new Error("找不到這個資料庫");
+    if (!table) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
+    if (!resolveAgentAccess(auth, table).canRead) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
     const stats = await tableStats(table);
     return { table: table.name, summary: formatStatsLine(stats), ...stats };
   }
