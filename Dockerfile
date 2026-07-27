@@ -19,7 +19,7 @@ ENV BUILD_SHA=$BUILD_SHA BUILD_BRANCH=$BUILD_BRANCH BUILD_TIME=$BUILD_TIME
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=builder /app/dist ./dist
-# migration-first：runner 必須攜帶已審核 SQL、唯讀 drift checker 與明確執行 CLI。
+# migration-first：runner 必須攜帶已審核 SQL、具 advisory lock 的 migration CLI 與唯讀 drift checker。
 COPY drizzle.config.ts ./
 COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/server/db ./server/db
@@ -39,5 +39,5 @@ STOPSIGNAL SIGTERM
 # 使用 Node 內建 fetch，避免為單一健康檢查把 curl/wget 額外裝進 production image。
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
-# 啟動腳本只做唯讀 migration/drift gate；DDL 必須先由 release/one-off job 明確執行。
+# 啟動腳本只會套用映像內已版本化的 migration，成功通過 drift gate 後才啟動應用。
 CMD ["sh", "/app/start.sh"]

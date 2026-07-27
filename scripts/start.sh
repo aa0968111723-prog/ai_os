@@ -1,6 +1,7 @@
 #!/bin/sh
 # AI Director OS 容器啟動（平台中立，目前用 Zeabur）。
-# 正式啟動只做唯讀 migration/schema gate；絕不在 runtime push DDL。
+# 正式啟動先套用已提交、已審核的版本化 migration，再以唯讀 drift gate 驗證。
+# migration runner 具 PostgreSQL advisory lock；未知舊庫、ledger 異常或 drift 一律拒絕啟動。
 
 if [ -z "$DATABASE_URL" ]; then
   echo "[start] ⚠⚠⚠ DATABASE_URL 未設定！"
@@ -20,11 +21,15 @@ else
   echo "[start] Fal：真實生成模式（FAL_KEY 已設）"
 fi
 
+echo "[start] 套用已版本化的 pending migrations…"
+if ! npm run db:migrate; then
+  echo "[start] ⚠ migration 未完成；為避免新程式搭配舊 schema，本服務拒絕啟動"
+  exit 78
+fi
+
 echo "[start] 唯讀檢查 migration ledger 與 schema drift…"
 if ! npm run db:check; then
-  echo "[start] ⚠ 資料庫尚未達可啟動狀態；本程序沒有套用任何 DDL"
-  echo "[start]   空 DB：先以 release/one-off job 執行 npm run db:migrate"
-  echo "[start]   既有 DB：先備份，執行 npm run db:adopt:dry-run，再依 fingerprint adopt"
+  echo "[start] ⚠ migration 後資料庫仍未達可啟動狀態；服務拒絕啟動"
   exit 78
 fi
 
