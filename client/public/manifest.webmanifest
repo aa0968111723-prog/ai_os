@@ -2,7 +2,7 @@
   "id": "/",
   "name": "AI Director OS",
   "short_name": "AI Director",
-  "description": "弘法內容創作與協作系統｜見證故事、剪輯組、一鍵生成內容",
+  "description": "AI-powered content creation & collaboration system",
   "lang": "zh-Hant",
   "dir": "ltr",
   "start_url": "/?source=pwa",
@@ -21,39 +21,45 @@
       "purpose": "any"
     },
     {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/icons/icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "maskable"
     }
   ],
   "shortcuts": [
     {
-      "name": "新建專案",
-      "short_name": "新建",
-      "description": "快速建立新的創作專案",
+      "name": "New Project",
+      "short_name": "New",
+      "description": "Create a new project",
       "url": "/?action=new",
-      "icons": [{ "src": "/icon.svg", "sizes": "96x96", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }]
     },
     {
-      "name": "剪輯組",
-      "short_name": "剪輯",
-      "description": "進入剪輯工作台",
+      "name": "Editor",
+      "short_name": "Editor",
+      "description": "Open the editor workspace",
       "url": "/editor",
-      "icons": [{ "src": "/icon.svg", "sizes": "96x96", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }]
     },
     {
-      "name": "資料庫",
-      "short_name": "資料庫",
-      "description": "開啟資料庫與素材庫",
+      "name": "Library",
+      "short_name": "Library",
+      "description": "Open asset library",
       "url": "/library",
-      "icons": [{ "src": "/icon.svg", "sizes": "96x96", "type": "image/svg+xml" }]
+      "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }]
     }
   ]
 }
