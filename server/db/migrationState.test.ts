@@ -59,6 +59,14 @@ describe("migration ledger classification", () => {
 });
 
 describe("migration manifest validation", () => {
+  it("canonicalizes idempotent index creation for drift comparison", () => {
+    expect(
+      canonicalMigrationStatement(
+        'CREATE UNIQUE INDEX IF NOT EXISTS "reads_uq" ON "reads" ("user_id");',
+      ),
+    ).toBe('CREATE UNIQUE INDEX "reads_uq" ON "reads" ("user_id")');
+  });
+
   it("hashes SQL and rejects a non-monotonic journal", () => {
     const directory = mkdtempSync(path.join(os.tmpdir(), "aios-migrations-"));
     temporaryDirectories.push(directory);

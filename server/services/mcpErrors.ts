@@ -34,7 +34,7 @@ export function toMcpJsonRpcError(error: unknown): McpJsonRpcError {
   if (error instanceof IdempotencyConflictError) {
     return {
       code: -32009,
-      message: "此 Idempotency-Key 已用於不同的批次內容",
+      message: `${error.code}: 此 Idempotency-Key 已用於不同的批次內容`,
       data: { code: error.code },
     };
   }
