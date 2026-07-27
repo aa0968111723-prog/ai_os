@@ -5,10 +5,12 @@ import path from "node:path";
 import {
   canonicalMigrationStatement,
   classifyMigrationState,
+  isRowDeduplicationStatement,
   LEGACY_ADOPTION_PENDING_TAGS,
   LEGACY_ADOPTION_THROUGH_TAG,
   loadMigrationManifest,
   redactDatabaseTarget,
+  SUPERSEDED_MIGRATION_HASHES,
   verifyLegacyAdoptionBridge,
   type MigrationLedgerRow,
 } from "./migrationState";
@@ -56,6 +58,24 @@ describe("migration ledger classification", () => {
     const ahead = [...rows, { id: 99, hash: "future", created_at: "9999999999999" }];
     expect(classifyMigrationState(["users"], true, ahead, manifest).kind).toBe("invalid");
   });
+
+  it("still trusts a database that applied a superseded revision of a migration", () => {
+    const { manifest, rows } = ledgerRows();
+    const [tag, hashes] = Object.entries(SUPERSEDED_MIGRATION_HASHES)[0]!;
+    const entry = manifest.entries.find((candidate) => candidate.tag === tag)!;
+    // The corrected file must actually differ, otherwise this guard is vacuous.
+    expect(hashes).not.toContain(entry.hash);
+
+    const superseded = rows.map((row) =>
+      row.created_at === String(entry.createdAt) ? { ...row, hash: hashes[0]! } : row,
+    );
+    expect(classifyMigrationState(["users"], true, superseded, manifest).kind).toBe("ready");
+
+    const unrelated = rows.map((row) =>
+      row.created_at === String(entry.createdAt) ? { ...row, hash: "not-a-known-revision" } : row,
+    );
+    expect(classifyMigrationState(["users"], true, unrelated, manifest).kind).toBe("invalid");
+  });
 });
 
 describe("migration manifest validation", () => {
@@ -99,12 +119,34 @@ describe("legacy migration adoption bridge", () => {
   const pending = manifest.entries.filter((entry) =>
     LEGACY_ADOPTION_PENDING_TAGS.includes(entry.tag as (typeof LEGACY_ADOPTION_PENDING_TAGS)[number]),
   );
-  const expectedStatements = pending.flatMap((entry) =>
+  const pendingStatements = pending.flatMap((entry) =>
     entry.sql
       .split("--> statement-breakpoint")
       .map(canonicalMigrationStatement)
       .filter(Boolean),
   );
+  // Schema drift only ever reports DDL; the row de-duplication that precedes a
+  // new unique index changes rows, so it never appears in a drift plan.
+  const expectedStatements = pendingStatements.filter(
+    (statement) => !isRowDeduplicationStatement(statement),
+  );
+
+  it("recognizes de-duplication only as a keyed self-join delete", () => {
+    expect(pendingStatements.length).toBeGreaterThan(expectedStatements.length);
+    expect(
+      isRowDeduplicationStatement(
+        'DELETE FROM "team_members" a USING "team_members" b WHERE a."user_id" = b."user_id"',
+      ),
+    ).toBe(true);
+    // A different table on either side, or an unconditional purge, is not the
+    // reviewed idiom and must keep failing the bridge gate.
+    expect(
+      isRowDeduplicationStatement(
+        'DELETE FROM "team_members" a USING "users" b WHERE a."user_id" = b."id"',
+      ),
+    ).toBe(false);
+    expect(isRowDeduplicationStatement('DELETE FROM "team_members"')).toBe(false);
+  });
 
   it("accepts only the reviewed additive drift after 0001", () => {
     const result = verifyLegacyAdoptionBridge(
