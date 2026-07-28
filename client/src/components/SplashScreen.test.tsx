@@ -11,22 +11,23 @@ describe("SplashScreen", () => {
     vi.useRealTimers();
   });
 
-  it("shows Aios brand name and tagline", async () => {
+  it("shows Aios brand mark/logo and tagline", async () => {
     // BrandReveal 初始 opacity 0；跑完 rAF 後進 to 才可視
     render(<SplashScreen ready={false} />);
     expect(screen.getByRole("status")).toHaveAttribute(
       "aria-label",
       `Loading ${BRAND_NAME}`,
     );
-    expect(screen.getByRole("heading", { name: BRAND_NAME })).toBeInTheDocument();
+    // 完整 Logo 以圖檔呈現；副標文字保留
+    expect(document.querySelector(".aios-splash__logo")).toBeTruthy();
     expect(screen.getByText(BRAND_TAGLINE)).toBeInTheDocument();
 
     await act(async () => {
       await Promise.resolve();
       vi.advanceTimersByTime(0);
     });
-    // 即便動畫未播完，文字也不得被 unmount 藏起來
-    expect(screen.getByText(BRAND_NAME)).toBeInTheDocument();
+    // 即便動畫未播完，品牌區不得被 unmount
+    expect(document.querySelector(".brand-logo")).toBeTruthy();
   });
 
   it("calls onDone after ready + min time + exit animation", () => {

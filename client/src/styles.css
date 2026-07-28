@@ -91,40 +91,107 @@ body {
   position: sticky; top: 0; z-index: 30;
   background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-16); letter-spacing: -0.01em; color: inherit; text-decoration: none; }
+.brand {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-weight: 600; font-size: var(--fs-16); letter-spacing: -0.01em;
+  color: inherit; text-decoration: none; flex: none;
+  border-radius: 8px;
+  transition: opacity var(--dur-fast), transform var(--dur-fast);
+}
+.brand:hover { opacity: 0.88; }
+.brand:active { transform: scale(0.98); }
+.brand:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
 .orb { width: 22px; height: 22px; border-radius: 50%; flex: none;
   background: conic-gradient(from 210deg, var(--primary), var(--gold), var(--healing), var(--primary));
   box-shadow: 0 0 0 3px var(--healing-soft), 0 2px 8px -2px rgba(158, 134, 196, 0.4); }
 
 /* ── BrandLogo（Aios 單一品牌入口） ── */
-.brand-logo { display: inline-flex; align-items: center; gap: 8px; line-height: 1; flex: none; }
-.brand-logo--mark { display: block; object-fit: contain; flex: none; }
-.brand-logo--wordmark { gap: 8px; }
-.brand-logo__mark-img { display: block; object-fit: contain; flex: none; }
-.brand-logo__text { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.brand-logo {
+  display: inline-flex; align-items: center; gap: 8px;
+  line-height: 1; flex: none; max-width: 100%;
+}
+.brand-logo--mark {
+  display: block; object-fit: contain; flex: none;
+  /* 輕微立體感，避免方圖貼死 */
+  filter: drop-shadow(0 1px 2px rgba(70, 56, 44, 0.08));
+}
+.brand-logo--img {
+  flex-direction: column; align-items: center; gap: 8px;
+}
+.brand-logo__full-img,
+.brand-logo__mark-img,
+.brand-logo__mark-fallback {
+  display: block; object-fit: contain; flex: none;
+  max-width: 100%; height: auto;
+}
+.brand-logo__full-img {
+  filter: drop-shadow(0 1px 2px rgba(70, 56, 44, 0.06));
+}
+.brand-logo__mark-fallback { display: none; }
+.brand-logo__text {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0;
+}
 .brand-logo__name {
   font-weight: 700; font-size: 1.05em; letter-spacing: -0.02em; color: var(--fg);
   font-family: system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
 }
 .brand-logo__tagline {
-  font-size: 0.72em; font-weight: 400; letter-spacing: 0.04em; color: var(--fg-secondary);
+  font-size: 12px; font-weight: 500; letter-spacing: 0.08em;
+  color: var(--fg-secondary); text-wrap: balance;
 }
 .brand-logo--xs .brand-logo__name { font-size: 13px; }
 .brand-logo--sm .brand-logo__name { font-size: 15px; }
 .brand-logo--md .brand-logo__name { font-size: 17px; }
 .brand-logo--lg .brand-logo__name { font-size: 22px; }
 .brand-logo--hero {
-  flex-direction: column; text-align: center; gap: 10px;
+  flex-direction: column; text-align: center; gap: 12px;
 }
 .brand-logo--hero .brand-logo__text { align-items: center; }
 .brand-logo--hero .brand-logo__name { font-size: clamp(26px, 5vw, 34px); }
-.brand-logo--hero .brand-logo__tagline { font-size: 14px; }
+.brand-logo--hero .brand-logo__tagline {
+  font-size: 13px; letter-spacing: 0.12em; text-transform: none;
+  color: color-mix(in srgb, var(--fg-secondary) 92%, var(--primary));
+}
+.brand-logo--hero .brand-logo__full-img {
+  filter: drop-shadow(0 6px 16px rgba(70, 56, 44, 0.10));
+}
 .brand-logo--tone-monochrome .brand-logo__name { color: var(--fg); }
-/* 頂欄品牌連結內的 wordmark 不要垂直堆叠過高 */
-.brand .brand-logo--full { max-height: 36px; }
-.brand .brand-logo__tagline { display: none; }
 
-/* BrandReveal 結束態保證可見（JS 內聯 style 為主；此處作保險） */
+/* 頂欄：桌面完整 Logo；窄螢幕改 A 標記，避免擠壓 */
+.brand .brand-logo--full { gap: 0; }
+.brand .brand-logo__tagline { display: none; }
+.brand .brand-logo__full-img {
+  height: 26px; width: auto; max-width: min(132px, 36vw);
+  filter: none;
+}
+.brand .brand-logo__mark-fallback {
+  width: 26px; height: 26px;
+  filter: drop-shadow(0 1px 1px rgba(70, 56, 44, 0.06));
+}
+@media (max-width: 560px) {
+  .brand-logo--responsive .brand-logo__full-img { display: none; }
+  .brand-logo--responsive .brand-logo__mark-fallback { display: block; }
+}
+
+/* 登入品牌區 */
+.login-brand {
+  display: flex; flex-direction: column; align-items: center;
+  margin-bottom: var(--sp-16);
+  padding: 4px 0 2px;
+}
+.login-brand .brand-logo--hero .brand-logo__full-img {
+  height: clamp(52px, 12vw, 72px); width: auto; max-width: min(280px, 72vw);
+}
+.login-card {
+  width: 400px; max-width: 92vw; text-align: center;
+  padding-top: 28px;
+}
+
+/* BrandReveal：動畫需在自身盒子上；結束態保險 */
+.brand-reveal { display: block; }
 .brand-reveal--to { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) {
   .brand-reveal {
