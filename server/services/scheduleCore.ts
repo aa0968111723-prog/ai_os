@@ -11,6 +11,7 @@ import type { AuthState } from "./auth";
 import { assertProjectNotArchived } from "./projectAcl";
 import { validateMentions } from "./mentions";
 import { queueGroupSync } from "./googleCalendar";
+import { executeAgentEffectOnce } from "./agentEffectCore";
 
 export type ScheduleRow = typeof schema.scheduleItems.$inferSelect;
 
@@ -27,6 +28,22 @@ export interface ScheduleListItem {
   id: string; projectId: string | null; title: string; startsAt: Date; endsAt: Date | null;
   note: string | null; ownerId: string | null; ownerName: string | null; createdBy: string;
   sourceMessageId: string | null; mentions: string[] | null;
+  planRunId: string | null; planStepId: string | null;
+}
+
+export async function getScheduleItemChecked(auth: AuthState, id: string): Promise<ScheduleRow> {
+  const [row] = await db.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, id));
+  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這筆行程" });
+  requireGroup(auth, row.groupId);
+  return row;
+}
+
+export function scheduleWriteDenied(
+  createdBy: string,
+  actorId: string,
+  role: ReturnType<typeof requireGroup>,
+): boolean {
+  return createdBy !== actorId && role === "member";
 }
 
 /**
@@ -72,6 +89,8 @@ export async function listScheduleForGroup(
       createdBy: schema.scheduleItems.createdBy,
       sourceMessageId: schema.scheduleItems.sourceMessageId,
       mentions: schema.scheduleItems.mentions,
+      planRunId: schema.scheduleItems.planRunId,
+      planStepId: schema.scheduleItems.planStepId,
     })
     .from(schema.scheduleItems)
     .leftJoin(schema.users, eq(schema.users.id, schema.scheduleItems.ownerId))
@@ -88,6 +107,7 @@ export async function listScheduleForGroup(
  */
 export async function addScheduleItemCore(input: {
   auth: AuthState;
+  id?: string;
   groupId: string;
   projectId?: string | null;
   title: string;
@@ -97,6 +117,8 @@ export async function addScheduleItemCore(input: {
   ownerId?: string | null;
   sourceMessageId?: string | null;
   mentions?: string[];
+  planRunId?: string | null;
+  planStepId?: string | null;
 }): Promise<ScheduleRow> {
   const { auth } = input;
   requireGroup(auth, input.groupId);
@@ -134,6 +156,7 @@ export async function addScheduleItemCore(input: {
   const [row] = await db
     .insert(schema.scheduleItems)
     .values({
+      id: input.id,
       groupId: input.groupId,
       projectId: input.projectId ?? null,
       title,
@@ -144,8 +167,169 @@ export async function addScheduleItemCore(input: {
       createdBy: auth.user.id,
       sourceMessageId: input.sourceMessageId ?? null,
       mentions: mentions ?? null,
+      planRunId: input.planRunId ?? null,
+      planStepId: input.planStepId ?? null,
     })
     .returning();
   queueGroupSync(input.groupId); // Google 日曆直連同步：把該組已連結成員的個人日曆排進推送佇列（fire-and-forget）
   return row;
+}
+
+export async function updateScheduleItemCore(input: {
+  auth: AuthState;
+  id: string;
+  title?: string;
+  startsAt?: string;
+  endsAt?: string | null;
+  note?: string | null;
+  ownerId?: string | null;
+  mentions?: string[];
+  planRunId?: string | null;
+  planStepId?: string | null;
+}): Promise<ScheduleRow> {
+  const row = await getScheduleItemChecked(input.auth, input.id);
+  const role = requireGroup(input.auth, row.groupId);
+  if (scheduleWriteDenied(row.createdBy, input.auth.user.id, role)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以修改行程" });
+  }
+  if (row.projectId) {
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, row.projectId));
+    if (!project || project.groupId !== row.groupId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
+    }
+    assertProjectNotArchived(project);
+  }
+  const patch: Partial<typeof schema.scheduleItems.$inferInsert> = {};
+  if (input.title !== undefined) {
+    const title = input.title.trim();
+    if (!title) throw new TRPCError({ code: "BAD_REQUEST", message: "請填標題" });
+    if (title.length > 120) throw new TRPCError({ code: "BAD_REQUEST", message: "標題太長（最多 120 字）" });
+    patch.title = title;
+  }
+  if (input.startsAt !== undefined) patch.startsAt = parseDate(input.startsAt, "開始");
+  if (input.endsAt !== undefined) patch.endsAt = input.endsAt ? parseDate(input.endsAt, "結束") : null;
+  if (input.note !== undefined) {
+    const note = input.note?.trim() || null;
+    if (note && note.length > 500) throw new TRPCError({ code: "BAD_REQUEST", message: "備註太長（最多 500 字）" });
+    patch.note = note;
+  }
+  if (input.ownerId !== undefined) {
+    if (input.ownerId) {
+      const [member] = await db
+        .select({ id: schema.groupMembers.id })
+        .from(schema.groupMembers)
+        .where(and(
+          eq(schema.groupMembers.groupId, row.groupId),
+          eq(schema.groupMembers.userId, input.ownerId),
+        ))
+        .limit(1);
+      if (!member) throw new TRPCError({ code: "BAD_REQUEST", message: "負責人必須是本組成員" });
+    }
+    patch.ownerId = input.ownerId ?? null;
+  }
+  if (input.mentions !== undefined) patch.mentions = (await validateMentions(row.groupId, input.mentions)) ?? null;
+  if (input.planRunId !== undefined) patch.planRunId = input.planRunId;
+  if (input.planStepId !== undefined) patch.planStepId = input.planStepId;
+  const startsAt = patch.startsAt ?? row.startsAt;
+  const endsAt = patch.endsAt === undefined ? row.endsAt : patch.endsAt;
+  if (endsAt && endsAt <= startsAt) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "結束時間要在開始之後" });
+  }
+  if (Object.keys(patch).length === 0) return row;
+  const [updated] = await db
+    .update(schema.scheduleItems)
+    .set(patch)
+    .where(eq(schema.scheduleItems.id, row.id))
+    .returning();
+  queueGroupSync(row.groupId);
+  return updated;
+}
+
+/** 代理專用 exactly-once 更新：行程變更與效果憑證同一交易提交。 */
+export async function updateScheduleItemOnceCore(input: {
+  auth: AuthState;
+  id: string;
+  title?: string;
+  startsAt?: string;
+  endsAt?: string | null;
+  note?: string | null;
+  ownerId?: string | null;
+  mentions?: string[];
+  effectId: string;
+  runId: string;
+  stepId: string;
+}): Promise<{ row: ScheduleRow; replayed: boolean }> {
+  const original = await getScheduleItemChecked(input.auth, input.id);
+  const role = requireGroup(input.auth, original.groupId);
+  if (scheduleWriteDenied(original.createdBy, input.auth.user.id, role)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以修改行程" });
+  }
+  const mentions = input.mentions === undefined
+    ? undefined
+    : (await validateMentions(original.groupId, input.mentions)) ?? [];
+  const result = await executeAgentEffectOnce({
+    effectId: input.effectId,
+    runId: input.runId,
+    stepId: input.stepId,
+    kind: "update_schedule",
+    outputType: "schedule",
+  }, async (tx) => {
+    const [row] = await tx.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, input.id));
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這筆行程" });
+    const currentRole = requireGroup(input.auth, row.groupId);
+    if (scheduleWriteDenied(row.createdBy, input.auth.user.id, currentRole)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以修改行程" });
+    }
+    if (row.projectId) {
+      const [project] = await tx.select().from(schema.projects).where(eq(schema.projects.id, row.projectId));
+      if (!project || project.groupId !== row.groupId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
+      }
+      assertProjectNotArchived(project);
+    }
+    const patch: Partial<typeof schema.scheduleItems.$inferInsert> = {
+      planRunId: input.runId,
+      planStepId: input.stepId,
+    };
+    if (input.title !== undefined) {
+      const title = input.title.trim();
+      if (!title) throw new TRPCError({ code: "BAD_REQUEST", message: "請填標題" });
+      if (title.length > 120) throw new TRPCError({ code: "BAD_REQUEST", message: "標題太長（最多 120 字）" });
+      patch.title = title;
+    }
+    if (input.startsAt !== undefined) patch.startsAt = parseDate(input.startsAt, "開始");
+    if (input.endsAt !== undefined) patch.endsAt = input.endsAt ? parseDate(input.endsAt, "結束") : null;
+    if (input.note !== undefined) {
+      const note = input.note?.trim() || null;
+      if (note && note.length > 500) throw new TRPCError({ code: "BAD_REQUEST", message: "備註太長（最多 500 字）" });
+      patch.note = note;
+    }
+    if (input.ownerId !== undefined) {
+      if (input.ownerId) {
+        const [member] = await tx
+          .select({ id: schema.groupMembers.id })
+          .from(schema.groupMembers)
+          .where(and(
+            eq(schema.groupMembers.groupId, row.groupId),
+            eq(schema.groupMembers.userId, input.ownerId),
+          ))
+          .limit(1);
+        if (!member) throw new TRPCError({ code: "BAD_REQUEST", message: "負責人必須是本組成員" });
+      }
+      patch.ownerId = input.ownerId ?? null;
+    }
+    if (mentions !== undefined) patch.mentions = mentions.length ? mentions : null;
+    const startsAt = patch.startsAt ?? row.startsAt;
+    const endsAt = patch.endsAt === undefined ? row.endsAt : patch.endsAt;
+    if (endsAt && endsAt <= startsAt) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "結束時間要在開始之後" });
+    }
+    await tx.update(schema.scheduleItems).set(patch).where(eq(schema.scheduleItems.id, row.id));
+    return row.id;
+  });
+  if (result.outputId !== input.id) {
+    throw new TRPCError({ code: "CONFLICT", message: "代理更新行程的執行結果指向不同行程" });
+  }
+  if (!result.replayed) queueGroupSync(original.groupId);
+  return { row: await getScheduleItemChecked(input.auth, input.id), replayed: result.replayed };
 }
