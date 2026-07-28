@@ -643,7 +643,7 @@ export const agentRuns = pgTable("agent_runs", {
   goal: text("goal").notNull(),
   /** LLM 的計畫摘要（核准畫面顯示） */
   summary: text("summary").notNull().default(""),
-  status: text("status", { enum: ["awaiting_approval", "running", "done", "failed", "stopped", "discarded"] })
+  status: text("status", { enum: ["awaiting_approval", "running", "waiting", "done", "failed", "stopped", "discarded"] })
     .notNull()
     .default("awaiting_approval"),
   currentStep: integer("current_step").notNull().default(0),
@@ -672,6 +672,42 @@ export const agentStepEffects = pgTable("agent_step_effects", {
 }, (t) => ({
   runStepUq: uniqueIndex("agent_step_effects_run_step_uq").on(t.runId, t.stepId),
   runIdx: index("agent_step_effects_run_idx").on(t.runId),
+}));
+
+/** AI 與團隊共用的正式人類任務；不是只存在 agent_runs.steps JSON 裡的顯示文字。 */
+export const projectTasks = pgTable("project_tasks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  planRunId: uuid("plan_run_id"),
+  planStepId: text("plan_step_id"),
+  /** wait_for_human/request_approval 掛上後，完成／核准會以此喚醒指定步驟。 */
+  wakeRunId: uuid("wake_run_id"),
+  wakeStepId: text("wake_step_id"),
+  taskType: text("task_type", { enum: ["task", "approval"] }).notNull().default("task"),
+  title: text("title").notNull(),
+  description: text("description"),
+  assigneeId: uuid("assignee_id"),
+  approverRole: text("approver_role", { enum: ["project_owner", "group_leader", "admin"] }),
+  status: text("status", { enum: ["todo", "doing", "waiting", "review", "done", "cancelled"] })
+    .notNull()
+    .default("todo"),
+  priority: text("priority", { enum: ["low", "normal", "high", "urgent"] }).notNull().default("normal"),
+  startsAt: timestamp("starts_at", { withTimezone: true }),
+  dueAt: timestamp("due_at", { withTimezone: true }),
+  createdBy: uuid("created_by").notNull(),
+  completedBy: uuid("completed_by"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  sourceMessageId: uuid("source_message_id"),
+  mentions: jsonb("mentions").$type<string[]>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  planStepUq: uniqueIndex("project_tasks_plan_step_uq").on(t.planRunId, t.planStepId),
+  projectStatusIdx: index("project_tasks_project_status_idx").on(t.projectId, t.status),
+  groupStatusIdx: index("project_tasks_group_status_idx").on(t.groupId, t.status),
+  assigneeStatusIdx: index("project_tasks_assignee_status_idx").on(t.assigneeId, t.status),
+  wakeRunIdx: index("project_tasks_wake_run_idx").on(t.wakeRunId),
 }));
 
 /**

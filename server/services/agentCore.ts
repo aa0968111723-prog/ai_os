@@ -355,7 +355,11 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
     const [active] = await tx
       .select({ id: schema.agentRuns.id })
       .from(schema.agentRuns)
-      .where(and(eq(schema.agentRuns.projectId, run.projectId), eq(schema.agentRuns.userId, run.userId), eq(schema.agentRuns.status, "running")))
+      .where(and(
+        eq(schema.agentRuns.projectId, run.projectId),
+        eq(schema.agentRuns.userId, run.userId),
+        inArray(schema.agentRuns.status, ["running", "waiting"]),
+      ))
       .limit(1);
     if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "你已有一個代理在跑——等它完成或先停止" });
     return tx
@@ -395,8 +399,22 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
   if (run.userId !== auth.user.id && role === "member") {
     throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以停止" });
   }
-  if (run.status !== "running") {
+  if (run.status !== "running" && run.status !== "waiting") {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個代理已經結束，不需要停止" });
+  }
+  if (run.status === "waiting") {
+    const steps = run.steps as AgentStep[];
+    const current = steps[run.currentStep];
+    if (current?.status === "waiting") current.status = "stopped";
+    for (let index = run.currentStep + 1; index < steps.length; index += 1) {
+      if (steps[index].status === "pending") steps[index].status = "stopped";
+    }
+    const [stopped] = await db
+      .update(schema.agentRuns)
+      .set({ status: "stopped", steps, updatedAt: new Date() })
+      .where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "waiting")))
+      .returning();
+    return stopped ?? run;
   }
   const updated = await db
     .update(schema.agentRuns)
@@ -418,12 +436,12 @@ export async function listAgentRunsForProject(auth: AuthState, projectId: string
   const active = await db
     .select()
     .from(schema.agentRuns)
-    .where(and(eq(schema.agentRuns.projectId, projectId), inArray(schema.agentRuns.status, ["awaiting_approval", "running"])))
+    .where(and(eq(schema.agentRuns.projectId, projectId), inArray(schema.agentRuns.status, ["awaiting_approval", "running", "waiting"])))
     .orderBy(desc(schema.agentRuns.createdAt));
   const finished = await db
     .select()
     .from(schema.agentRuns)
-    .where(and(eq(schema.agentRuns.projectId, projectId), notInArray(schema.agentRuns.status, ["awaiting_approval", "running", "discarded"])))
+    .where(and(eq(schema.agentRuns.projectId, projectId), notInArray(schema.agentRuns.status, ["awaiting_approval", "running", "waiting", "discarded"])))
     .orderBy(desc(schema.agentRuns.createdAt))
     .limit(5);
   return [...active, ...finished];

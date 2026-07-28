@@ -50,6 +50,13 @@
       "when": 1785224372955,
       "tag": "0006_agent_plan_effects",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785225252483,
+      "tag": "0007_project_human_tasks",
+      "breakpoints": true
     }
   ]
 }
