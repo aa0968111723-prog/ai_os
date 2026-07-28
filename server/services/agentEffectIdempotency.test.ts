@@ -10,6 +10,9 @@ const agentSource = readFileSync(new URL("./agentRunner.ts", import.meta.url), "
 const databaseSource = readFileSync(new URL("./databaseCore.ts", import.meta.url), "utf8");
 const approvalSource = readFileSync(new URL("../routers/approvals.ts", import.meta.url), "utf8");
 const directorSource = readFileSync(new URL("../routers/director.ts", import.meta.url), "utf8");
+const effectSource = readFileSync(new URL("./agentEffectCore.ts", import.meta.url), "utf8");
+const notesSource = readFileSync(new URL("./notesCore.ts", import.meta.url), "utf8");
+const scheduleSource = readFileSync(new URL("./scheduleCore.ts", import.meta.url), "utf8");
 
 function expectBefore(source: string, first: string, second: string): void {
   const firstAt = source.indexOf(first);
@@ -21,7 +24,7 @@ function expectBefore(source: string, first: string, second: string): void {
 describe("agent crash-replay effect ids", () => {
   it("persists one effect id before every replayable side effect", () => {
     expect(agentSource).toContain("effectId?: string");
-    expect(agentSource.match(/persistStepEffectId\(run, steps, step\)/g)).toHaveLength(4);
+    expect(agentSource.match(/persistStepEffectId\(run, steps, step\)/g)).toHaveLength(10);
     expectBefore(
       agentSource,
       "const effectId = await persistStepEffectId(run, steps, step);",
@@ -35,10 +38,35 @@ describe("agent crash-replay effect ids", () => {
     );
   });
 
+  it("uses fixed ids for creates and transaction-bound receipts for updates", () => {
+    expect(agentSource).toContain("id: effectId,");
+    expect(agentSource).toContain("appendNoteOnceCore({");
+    expect(agentSource).toContain("updateScheduleItemOnceCore({");
+    expectBefore(
+      agentSource,
+      "schema.notes.id, effectId",
+      "await addNoteCore({",
+    );
+    expectBefore(
+      agentSource,
+      "schema.scheduleItems.id, effectId",
+      "await addScheduleItemCore({",
+    );
+    expect(notesSource).toContain("executeAgentEffectOnce({");
+    expect(scheduleSource).toContain("executeAgentEffectOnce({");
+    expectBefore(effectSource, "const outputId = await apply(tx);", "tx.insert(schema.agentStepEffects)");
+    expect(agentSource).toContain('addOutputRef(step, "note"');
+    expect(agentSource).toContain('addOutputRef(step, "schedule"');
+  });
+
   it("uses the persisted UUID as scene id and recognizes a committed replay", () => {
     expect(agentSource).toContain("eq(schema.scenes.id, effectId)");
     expect(agentSource).toContain("eq(schema.scenes.projectId, run.projectId)");
-    expectBefore(agentSource, "eq(schema.scenes.id, effectId)", "id: effectId,");
+    const lookupAt = agentSource.indexOf("eq(schema.scenes.id, effectId)");
+    const insertAt = agentSource.indexOf("await tx.insert(schema.scenes).values({", lookupAt);
+    expect(lookupAt).toBeGreaterThanOrEqual(0);
+    expect(insertAt).toBeGreaterThan(lookupAt);
+    expect(agentSource.slice(insertAt, insertAt + 180)).toContain("id: effectId,");
   });
 
   it("persists the scene target before approval or generation can start", () => {

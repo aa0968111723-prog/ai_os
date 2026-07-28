@@ -81,6 +81,10 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0003_idempotency_records",
   "0004_query_indexes",
   "0005_membership_read_uniqueness",
+  "0006_agent_plan_effects",
+  "0007_project_human_tasks",
+  "0008_complete_plan_summary",
+  "0009_agent_events_and_indexes",
 ] as const;
 
 /**
@@ -138,6 +142,8 @@ export function canonicalMigrationStatement(statement: string): string {
     .trim()
     .replace(/;+\s*$/, "")
     .replace(/^(CREATE (?:UNIQUE )?INDEX) IF NOT EXISTS /i, "$1 ")
+    .replace(/^(CREATE TABLE) IF NOT EXISTS /i, "$1 ")
+    .replace(/^(ALTER TABLE "[^"]+" ADD COLUMN) IF NOT EXISTS /i, "$1 ")
     .replace(/\s+/g, " ");
 }
 
@@ -173,7 +179,9 @@ function migrationStatementPairs(entry: MigrationFile): { raw: string; canonical
 
 /** Additive schema DDL — the only statement kinds that may appear as drift. */
 function isAdditiveSchemaStatement(statement: string): boolean {
-  return /^CREATE TABLE /i.test(statement) || /^CREATE (?:UNIQUE )?INDEX /i.test(statement);
+  return /^CREATE TABLE /i.test(statement)
+    || /^CREATE (?:UNIQUE )?INDEX /i.test(statement)
+    || /^ALTER TABLE "[^"]+" ADD COLUMN /i.test(statement);
 }
 
 /**
@@ -182,7 +190,8 @@ function isAdditiveSchemaStatement(statement: string): boolean {
  * former pushSchema path had already created that object in.
  */
 export function isReRunnableCreateStatement(statement: string): boolean {
-  return /^CREATE (?:TABLE|(?:UNIQUE )?INDEX) IF NOT EXISTS /i.test(statement);
+  return /^CREATE (?:TABLE|(?:UNIQUE )?INDEX) IF NOT EXISTS /i.test(statement)
+    || /^ALTER TABLE "[^"]+" ADD COLUMN IF NOT EXISTS /i.test(statement);
 }
 
 /**

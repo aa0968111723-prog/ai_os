@@ -5,6 +5,7 @@
  */
 import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { CompletePlanSummary } from "../../shared/plan";
 
 /* ── 認證與組織 ────────────────────────────────── */
 
@@ -643,7 +644,9 @@ export const agentRuns = pgTable("agent_runs", {
   goal: text("goal").notNull(),
   /** LLM 的計畫摘要（核准畫面顯示） */
   summary: text("summary").notNull().default(""),
-  status: text("status", { enum: ["awaiting_approval", "running", "done", "failed", "stopped", "discarded"] })
+  /** 結構化完整計畫摘要：成功條件、缺少資訊、假設、風險、里程碑、成本與時程。 */
+  planSummary: jsonb("plan_summary").$type<CompletePlanSummary>(),
+  status: text("status", { enum: ["awaiting_approval", "running", "waiting", "done", "failed", "stopped", "discarded"] })
     .notNull()
     .default("awaiting_approval"),
   currentStep: integer("current_step").notNull().default(0),
@@ -654,7 +657,102 @@ export const agentRuns = pgTable("agent_runs", {
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  projectStatusCreatedIdx: index("agent_runs_project_status_created_idx").on(t.projectId, t.status, t.createdAt),
+  statusUpdatedIdx: index("agent_runs_status_updated_idx").on(t.status, t.updatedAt),
+  userStatusIdx: index("agent_runs_user_status_idx").on(t.userId, t.status),
+}));
+
+/** 可稽核代理事件：記錄可驗證的來源、動作、等待、裁決與成果，不保存私密 chain-of-thought。 */
+export const agentEvents = pgTable("agent_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  stepId: text("step_id"),
+  stepIndex: integer("step_index"),
+  eventKey: text("event_key").notNull(),
+  eventType: text("event_type", {
+    enum: [
+      "planned",
+      "approved",
+      "step_started",
+      "step_waiting",
+      "step_completed",
+      "step_failed",
+      "human_resumed",
+      "approval_rejected",
+      "run_completed",
+      "run_failed",
+      "stopped",
+      "discarded",
+      "observation",
+    ],
+  }).notNull(),
+  actorType: text("actor_type", { enum: ["ai", "human", "system"] }).notNull().default("system"),
+  actorId: uuid("actor_id"),
+  summary: text("summary").notNull(),
+  data: jsonb("data").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  runEventUq: uniqueIndex("agent_events_run_event_uq").on(t.runId, t.eventKey),
+  runCreatedIdx: index("agent_events_run_created_idx").on(t.runId, t.createdAt),
+  projectCreatedIdx: index("agent_events_project_created_idx").on(t.projectId, t.createdAt),
+}));
+
+/**
+ * 非建立型代理副作用的永久冪等憑證。
+ * create_note/create_schedule 直接以 effectId 當目標資料列 UUID；append_note/update_schedule
+ * 則把「內容變更」與此紀錄放在同一交易，避免 COMMIT 後、step 寫回前崩潰造成重複追加／修改。
+ */
+export const agentStepEffects = pgTable("agent_step_effects", {
+  id: uuid("id").primaryKey(),
+  runId: uuid("run_id").notNull(),
+  stepId: text("step_id").notNull(),
+  kind: text("kind").notNull(),
+  outputType: text("output_type").notNull(),
+  outputId: uuid("output_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  runStepUq: uniqueIndex("agent_step_effects_run_step_uq").on(t.runId, t.stepId),
+  runIdx: index("agent_step_effects_run_idx").on(t.runId),
+}));
+
+/** AI 與團隊共用的正式人類任務；不是只存在 agent_runs.steps JSON 裡的顯示文字。 */
+export const projectTasks = pgTable("project_tasks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  planRunId: uuid("plan_run_id"),
+  planStepId: text("plan_step_id"),
+  /** wait_for_human/request_approval 掛上後，完成／核准會以此喚醒指定步驟。 */
+  wakeRunId: uuid("wake_run_id"),
+  wakeStepId: text("wake_step_id"),
+  taskType: text("task_type", { enum: ["task", "approval"] }).notNull().default("task"),
+  title: text("title").notNull(),
+  description: text("description"),
+  assigneeId: uuid("assignee_id"),
+  approverRole: text("approver_role", { enum: ["project_owner", "group_leader", "admin"] }),
+  status: text("status", { enum: ["todo", "doing", "waiting", "review", "done", "cancelled"] })
+    .notNull()
+    .default("todo"),
+  priority: text("priority", { enum: ["low", "normal", "high", "urgent"] }).notNull().default("normal"),
+  startsAt: timestamp("starts_at", { withTimezone: true }),
+  dueAt: timestamp("due_at", { withTimezone: true }),
+  createdBy: uuid("created_by").notNull(),
+  completedBy: uuid("completed_by"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  sourceMessageId: uuid("source_message_id"),
+  mentions: jsonb("mentions").$type<string[]>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  planStepUq: uniqueIndex("project_tasks_plan_step_uq").on(t.planRunId, t.planStepId),
+  projectStatusIdx: index("project_tasks_project_status_idx").on(t.projectId, t.status),
+  groupStatusIdx: index("project_tasks_group_status_idx").on(t.groupId, t.status),
+  assigneeStatusIdx: index("project_tasks_assignee_status_idx").on(t.assigneeId, t.status),
+  wakeRunIdx: index("project_tasks_wake_run_idx").on(t.wakeRunId),
+}));
 
 /**
  * 每組自訂選項（R23）：內容類型/發布平台/世界觀(調性·主軸·視覺風格)由各組組長自行增修。
@@ -718,10 +816,14 @@ export const notes = pgTable("notes", {
   sourceMessageId: uuid("source_message_id"),
   /** @提及同組成員（Planner 也能 @人；與留言 mentions 同語意） */
   mentions: jsonb("mentions").$type<string[]>(),
+  /** 由 AI 執行計畫建立／更新時記錄來源，供 Planner 與工作台雙向跳轉。 */
+  planRunId: uuid("plan_run_id"),
+  planStepId: text("plan_step_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
   groupIdx: index("notes_group_idx").on(t.groupId),
+  planRunIdx: index("notes_plan_run_idx").on(t.planRunId),
 }));
 
 /**
@@ -746,9 +848,13 @@ export const scheduleItems = pgTable("schedule_items", {
   sourceMessageId: uuid("source_message_id"),
   /** @提及同組成員（Planner 排程也能 @人） */
   mentions: jsonb("mentions").$type<string[]>(),
+  /** 由 AI 執行計畫建立／更新時記錄來源，供 Planner 與工作台雙向跳轉。 */
+  planRunId: uuid("plan_run_id"),
+  planStepId: text("plan_step_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   groupStartIdx: index("schedule_items_group_start_idx").on(t.groupId, t.startsAt),
+  planRunIdx: index("schedule_items_plan_run_idx").on(t.planRunId),
 }));
 
 /**

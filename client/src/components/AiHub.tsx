@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { AgentCard } from "./AgentCard";
 import { ProjectAssistant } from "./ProjectAssistant";
+import { flashAnchor } from "../discuss";
 
 /**
  * 專案 AI 創作工作台：對外只呈現一套入口，內部沿用既有助手、生成台、製作範本與執行器。
@@ -23,11 +24,17 @@ export function AiHub({
   isLeader?: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [focusedRunAnchor] = useState(() => {
+    if (typeof window === "undefined") return null;
+    const focus = new URLSearchParams(window.location.search).get("focus");
+    return focus?.startsWith("agent-run-") ? focus : null;
+  });
   // Reuse AgentCard's query key so this activity badge does not add another request.
   const runs = trpc.agents.listByProject.useQuery({ projectId });
   const awaiting = (runs.data ?? []).filter((r) => r.status === "awaiting_approval").length;
   const running = (runs.data ?? []).filter((r) => r.status === "running").length;
-  const hasActiveRun = running > 0 || awaiting > 0;
+  const waiting = (runs.data ?? []).filter((r) => r.status === "waiting").length;
+  const hasActiveRun = running > 0 || waiting > 0 || awaiting > 0;
   const [executionOpen, setExecutionOpen] = useState(hasActiveRun);
   const executionProjectRef = useRef(projectId);
   const previousActiveRef = useRef(hasActiveRun);
@@ -47,6 +54,18 @@ export function AiHub({
     // active must not undo a user's manual collapse.
     if (activityStarted) setExecutionOpen(true);
   }, [hasActiveRun, projectId]);
+
+  useEffect(() => {
+    if (!focusedRunAnchor) return;
+    setCollapsed(false);
+    setExecutionOpen(true);
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      tries += 1;
+      if (flashAnchor(focusedRunAnchor) || tries > 20) window.clearInterval(timer);
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [focusedRunAnchor]);
 
   const goTo = (selector: string) => {
     if (selector === "#sec-agent") setExecutionOpen(true);
@@ -78,6 +97,7 @@ export function AiHub({
         </h2>
         <span className="spacer" />
         {running > 0 && <span className="pill running">執行中 {running}</span>}
+        {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
         {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
         <button
           type="button"
@@ -93,7 +113,7 @@ export function AiHub({
 
       {collapsed && (
         <p className="hint" style={{ margin: "6px 0 0" }}>
-          AI 創作工作台已收合{running > 0 ? `；仍有 ${running} 個計畫在背景執行` : ""}。
+          AI 創作工作台已收合{running + waiting > 0 ? `；仍有 ${running} 個執行中、${waiting} 個等待人員的計畫` : ""}。
         </p>
       )}
 
@@ -163,6 +183,7 @@ export function AiHub({
           >
             <span><Icon name="Film" size={14} /> AI 執行計畫</span>
             {running > 0 && <span className="pill running">執行中 {running}</span>}
+            {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
             {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
             {running === 0 && awaiting === 0 && <span className="hint">目前沒有進行中的計畫</span>}
           </summary>

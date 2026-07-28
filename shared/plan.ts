@@ -66,9 +66,11 @@ export const planStepSchema = z.object({
   content: z.string().max(80_000).optional(),
   mentions: z.array(z.string().uuid()).max(20).optional(),
   scheduleItemId: z.string().uuid().optional(),
+  scheduleTitle: z.string().trim().min(1).max(120).optional(),
   endsAt: z.string().datetime({ offset: true }).optional(),
   ownerId: z.string().uuid().optional(),
   taskId: z.string().uuid().optional(),
+  taskStepId: z.string().trim().min(1).max(100).optional(),
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   generationId: z.string().uuid().optional(),
   effectId: z.string().uuid().optional(),
@@ -104,6 +106,7 @@ export const completePlanSummarySchema = z.object({
   successCriteria: z.array(z.string().trim().min(1).max(500)).max(50),
   assumptions: z.array(z.string().trim().min(1).max(500)).max(50),
   missingInformation: z.array(z.string().trim().min(1).max(500)).max(50),
+  expectedOutputs: z.array(z.string().trim().min(1).max(500)).max(50).default([]),
   risks: z.array(planRiskSchema).max(50),
   milestones: z.array(planMilestoneSchema).max(50),
   estimatedPoints: z.number().int().min(0).max(1_000_000),
@@ -125,7 +128,17 @@ export const completePlanSchema = z.object({
     }
     stepIds.add(step.id);
   }
-  const milestoneIds = new Set(plan.summary.milestones.map((milestone) => milestone.id));
+  const milestoneIds = new Set<string>();
+  for (const [index, milestone] of plan.summary.milestones.entries()) {
+    if (milestoneIds.has(milestone.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["summary", "milestones", index, "id"],
+        message: "里程碑 id 不可重複",
+      });
+    }
+    milestoneIds.add(milestone.id);
+  }
   for (const [index, step] of plan.steps.entries()) {
     for (const dependency of step.dependsOn ?? []) {
       if (dependency === step.id || !stepIds.has(dependency)) {
@@ -178,5 +191,6 @@ export const completePlanSchema = z.object({
 });
 
 export type PlanStep = z.infer<typeof planStepSchema>;
+export type PlanReference = z.infer<typeof planReferenceSchema>;
 export type CompletePlanSummary = z.infer<typeof completePlanSummarySchema>;
 export type CompletePlan = z.infer<typeof completePlanSchema>;

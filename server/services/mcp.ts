@@ -57,6 +57,10 @@ import {
 import { addScheduleItemCore, listScheduleForGroup } from "./scheduleCore";
 import { DM_MAX_BODY, listDmPeers, listDmThreads, listDmHistory, markDmRead, resolveDmPeerRef, sendDm } from "./dmCore";
 import type { AgentStep } from "./agentRunner";
+import {
+  getProjectAgentInsights,
+  listProjectAgentEvents,
+} from "./agentEventCore";
 import type { AuthState } from "./auth";
 import {
   clearRateLimit,
@@ -283,7 +287,7 @@ const TOOLS = [
   // ── AI 代理（規劃→核准→背景執行）：讓外部 AI 驅動系統內建的多步製作代理 ──
   {
     name: "plan_agent",
-    description: "請系統內建的 AI 代理針對一句目標排一份「可背景逐步執行」的多步製作計畫（拆分鏡／建鏡／生成／配音／送審）。只規劃、不執行，也不扣執行點數；回 runId 與每步估點，之後用 approve_agent 才開始。",
+    description: "請系統內建的 AI 代理產生完整可執行計畫：目標、成功條件、缺少資訊、假設、風險、里程碑、AI 任務、人類任務、筆記、排程、核准等待、成本與成果。只規劃、不執行；回 runId 與結構化摘要，之後用 approve_agent 才開始。",
     inputSchema: {
       type: "object",
       properties: { projectId: { type: "string" }, goal: { type: "string", description: "一句目標，至少 5 字（例：把知識庫腳本拆成分鏡並逐鏡出圖）" } },
@@ -314,6 +318,24 @@ const TOOLS = [
     name: "get_agent_run",
     description: "查一份代理計畫的每一步與進度（每步 kind／說明／狀態／估點／關聯生成 id）。用來追 approve 後的執行進度。",
     inputSchema: { type: "object", properties: { runId: { type: "string" } }, required: ["runId"] },
+  },
+  {
+    name: "list_agent_events",
+    description: "列出專案 AI 代理的可稽核軌跡：規劃、核准、步驟動作、等待、人員恢復、失敗與成果。不包含模型私密思考。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        cursor: { type: "string", description: "上一頁回傳的 nextCursor" },
+        limit: { type: "number", description: "1–500，預設 200" },
+      },
+      required: ["projectId"],
+    },
+  },
+  {
+    name: "get_agent_insights",
+    description: "取得專案代理健康摘要：阻塞、逾期、待補資訊、AI/人員統一任務清單與成果中心。",
+    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
   // ── 專案排程（組行事曆／交付死線）：外部 AI 可讀可寫，與專案綁定 ──
   {
@@ -770,8 +792,19 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       runId: run.id,
       status: run.status,
       summary: run.summary,
+      planSummary: run.planSummary,
       estPoints: run.estPoints,
-      steps: (run.steps as AgentStep[]).map((s) => ({ kind: s.kind, note: s.note, points: s.points ?? 0 })),
+      steps: (run.steps as AgentStep[]).map((s) => ({
+        id: s.id,
+        kind: s.kind,
+        title: s.title,
+        note: s.note,
+        actorType: s.actorType,
+        dependsOn: s.dependsOn ?? [],
+        milestoneId: s.milestoneId ?? null,
+        sourceRefs: s.sourceRefs ?? [],
+        points: s.points ?? 0,
+      })),
       note: "計畫已排好但尚未執行——用 approve_agent 核准後才會開始扣點執行，或用 discard_agent 放棄。",
     };
   }
@@ -805,14 +838,40 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       runId: r.id,
       goal: r.goal,
       summary: r.summary,
+      planSummary: r.planSummary,
       status: r.status,
       estPoints: r.estPoints,
       currentStep: r.currentStep,
       error: r.error,
-      steps: (r.steps as AgentStep[]).map((s) => ({ kind: s.kind, note: s.note, status: s.status, points: s.points ?? 0, generationId: s.generationId ?? null, detail: s.detail ?? null })),
+      steps: (r.steps as AgentStep[]).map((s) => ({
+        kind: s.kind,
+        id: s.id,
+        title: s.title,
+        note: s.note,
+        status: s.status,
+        actorType: s.actorType,
+        dependsOn: s.dependsOn ?? [],
+        milestoneId: s.milestoneId ?? null,
+        sourceRefs: s.sourceRefs ?? [],
+        outputRefs: s.outputRefs ?? [],
+        points: s.points ?? 0,
+        generationId: s.generationId ?? null,
+        noteId: s.noteId ?? null,
+        scheduleItemId: s.scheduleItemId ?? null,
+        taskId: s.taskId ?? null,
+        detail: s.detail ?? null,
+      })),
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     };
+  }
+  if (name === "list_agent_events") {
+    const cursor = typeof args.cursor === "string" ? args.cursor : undefined;
+    const limit = typeof args.limit === "number" ? Math.trunc(args.limit) : undefined;
+    return listProjectAgentEvents(auth, String(args.projectId ?? ""), { cursor, limit });
+  }
+  if (name === "get_agent_insights") {
+    return getProjectAgentInsights(auth, String(args.projectId ?? ""));
   }
 
   // ── 排程／筆記與統整快照（以 projectId 為鍵，先解析專案的組再套組隔離）──
@@ -889,7 +948,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         awaitingApproval: gens.filter((g) => g.status === "awaiting_approval").length,
       },
       agentRuns: runs
-        .filter((r) => r.status === "awaiting_approval" || r.status === "running")
+        .filter((r) => r.status === "awaiting_approval" || r.status === "running" || r.status === "waiting")
         .map((r) => ({ runId: r.id, goal: r.goal, status: r.status, currentStep: r.currentStep, stepCount: (r.steps as AgentStep[]).length })),
       upcomingSchedule: sched
         .filter((i) => i.startsAt >= now)

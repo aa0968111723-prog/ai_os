@@ -42,6 +42,8 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "discard_agent", title: "放棄代理計畫", access: "write", blurb: "放棄尚未核准的代理計畫（不扣點）。" },
   { name: "list_agent_runs", title: "列出代理", access: "read", blurb: "列出專案的代理計畫與執行狀態。" },
   { name: "get_agent_run", title: "查代理進度", access: "read", blurb: "查一份代理計畫的每一步與執行進度。" },
+  { name: "list_agent_events", title: "查代理軌跡", access: "read", blurb: "查可稽核的代理來源、動作、等待、裁決與成果事件。" },
+  { name: "get_agent_insights", title: "查代理健康", access: "read", blurb: "查專案阻塞、統一任務、風險與成果中心。" },
   { name: "list_schedule", title: "列出行程", access: "read", blurb: "列出專案相關的行程與交付死線。" },
   { name: "add_schedule_item", title: "新增行程", access: "write", blurb: "為專案新增行程／交付死線（進組行事曆）。" },
   { name: "list_notes", title: "列出筆記", access: "read", blurb: "列出專案相關的會議筆記／知識筆記（本專案 ＋ 組層級共用）。" },
