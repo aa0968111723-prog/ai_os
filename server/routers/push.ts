@@ -116,12 +116,13 @@ export const pushRouter = router({
     }),
 
   /** 發一則測試通知到我的所有已連結裝置（設定頁「測試」按鈕） */
-  test: authedProcedure.mutation(({ ctx }) =>
-    pushToUsers([ctx.auth.user.id], {
-      title: "測試通知",
-      body: `${ctx.auth.user.name}，你的跨裝置通知已就緒 ✅`,
+  test: authedProcedure.mutation(async ({ ctx }) => {
+    const result = await pushToUsers([ctx.auth.user.id], {
+      title: "Aios 測試通知",
+      body: `${ctx.auth.user.name}，跨裝置通知已就緒——手機與電腦都會收到這類提醒 ✅`,
       url: "/",
       tag: "push-test",
-    }),
-  ),
+    });
+    return result;
+  }),
 });
