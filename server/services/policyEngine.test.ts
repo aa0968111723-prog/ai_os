@@ -190,6 +190,67 @@ describe("Policy Engine — multi-entry matrix (TD-00 baseline)", () => {
   });
 });
 
+/**
+ * ANIM-00：鏡頭生成（visual／narration）在 direct／workflow／agent／MCP 必須同一政策。
+ * 不重複實作 Command，只鎖 evaluatePolicy 對 source 無關的允許矩陣。
+ */
+describe("ANIM-00 shot generation — same policy across direct/workflow/agent", () => {
+  const shotSources = ["web", "mcp", "workflow", "agent"] as const;
+
+  it("editor member can submit shot visual/narration generation on every entry", () => {
+    for (const source of shotSources) {
+      const d = evaluatePolicy(
+        "generation.submit",
+        ctx({ groupRole: "member", projectRole: "editor", source }),
+      );
+      expect(d.allowed, `source=${source}`).toBe(true);
+      expect(d.requiresApproval).toBe(false);
+    }
+  });
+
+  it("viewer is denied shot generation on direct, workflow, agent, and MCP alike", () => {
+    for (const source of shotSources) {
+      const d = evaluatePolicy(
+        "generation.submit",
+        ctx({ groupRole: "member", projectRole: "viewer", source }),
+      );
+      expect(d.allowed, `source=${source}`).toBe(false);
+    }
+  });
+
+  it("cost threshold requiresApproval is identical for web vs workflow vs agent", () => {
+    const threshold = {
+      groupRole: "member" as const,
+      projectRole: "editor" as const,
+      estimatedPoints: 50,
+      approvalThresholdPoints: 10,
+    };
+    const decisions = shotSources.map((source) =>
+      evaluatePolicy("generation.submit", ctx({ ...threshold, source })),
+    );
+    for (const d of decisions) {
+      expect(d.allowed).toBe(true);
+      expect(d.requiresApproval).toBe(true);
+    }
+    // 決策理由／形狀一致（source 不得改寫門檻邏輯）
+    expect(new Set(decisions.map((d) => `${d.allowed}:${d.requiresApproval}`)).size).toBe(1);
+  });
+
+  it("archived/paused project state blocks generate for animation pipeline (projectState)", () => {
+    // Command 層 assertProjectAllows(generate) 與 source 無關
+    for (const status of ["archived", "paused"] as const) {
+      expect(projectStateAllows(status, "generate")).toBe(false);
+      expect(() => assertProjectAllows({ status }, "generate")).toThrow();
+    }
+    expect(projectStateAllows("active", "generate")).toBe(true);
+  });
+
+  it("export remains allowed when project is archived (delivery path)", () => {
+    expect(projectStateAllows("archived", "export")).toBe(true);
+    expect(projectStateAllows("paused", "export")).toBe(true);
+  });
+});
+
 describe("Project State Machine (TD-03)", () => {
   it("normalizes unknown to active", () => {
     expect(normalizeProjectState(undefined)).toBe("active");
