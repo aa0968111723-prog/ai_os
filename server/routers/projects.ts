@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
@@ -399,8 +399,15 @@ export const projectsRouter = router({
         .from(schema.scenes)
         .where(and(eq(schema.scenes.projectId, input.projectId), isNotNull(schema.scenes.deletedAt)))
         .orderBy(desc(schema.scenes.deletedAt)),
+      // 回收桶清單只要 title/kind/字數——SQL length，勿 SELECT 全文（與 knowledge.list 同口徑）
       db
-        .select()
+        .select({
+          id: schema.knowledge.id,
+          title: schema.knowledge.title,
+          kind: schema.knowledge.kind,
+          chars: sql<number>`length(${schema.knowledge.content})`.mapWith(Number),
+          deletedAt: schema.knowledge.deletedAt,
+        })
         .from(schema.knowledge)
         .where(and(eq(schema.knowledge.projectId, input.projectId), isNotNull(schema.knowledge.deletedAt)))
         .orderBy(desc(schema.knowledge.deletedAt)),
@@ -408,7 +415,7 @@ export const projectsRouter = router({
     return {
       assets: assets.map((a) => ({ id: a.id, title: a.title, kind: a.kind, url: a.url, deletedAt: a.deletedAt })),
       scenes: scenes.map((s) => ({ id: s.id, title: s.title, orderIndex: s.orderIndex, deletedAt: s.deletedAt })),
-      knowledge: knowledge.map((k) => ({ id: k.id, title: k.title, kind: k.kind, chars: k.content.length, deletedAt: k.deletedAt })),
+      knowledge,
     };
   }),
 
