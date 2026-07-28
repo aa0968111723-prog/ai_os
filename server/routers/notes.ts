@@ -4,12 +4,12 @@ import {
   NOTE_CONTENT_MAX,
   NOTE_MENTIONS_MAX,
   NOTE_TITLE_MAX,
-  addNoteCore,
   getNoteChecked,
   listNotesCore,
   removeNoteCore,
   updateNoteCore,
 } from "../services/notesCore";
+import { executeNoteCommand } from "../services/noteCommand";
 
 /**
  * 筆記傳輸層：輸入外形由 zod 提早回報；ACL、歸屬、封存、提及與版本快照
@@ -36,7 +36,10 @@ export const notesRouter = router({
       sourceMessageId: z.string().uuid().optional(),
       mentions: z.array(z.string().uuid()).max(NOTE_MENTIONS_MAX).optional(),
     }))
-    .mutation(({ ctx, input }) => addNoteCore({ auth: ctx.auth, ...input })),
+    .mutation(({ ctx, input }) =>
+      // Command：政策 note.create + 專案狀態機 write + addNoteCore
+      executeNoteCommand({ auth: ctx.auth, source: "web", action: "create", ...input }),
+    ),
 
   update: authedProcedure
     .input(z.object({
