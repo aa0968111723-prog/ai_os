@@ -281,7 +281,13 @@ ${script.slice(0, SCRIPT_MODEL_BUDGET)}
       throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "AI 模型回應逾時（60 秒）——上游模型服務忙碌或無回應，與資料庫無關，稍後重試即可（未多扣點）" });
     }
     if (err instanceof NimServiceError) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "拆分鏡失敗，請重試" });
+    // 保留底層訊息片段方便代理執行列／除錯（完整堆疊仍打 log）；使用者看到可行動的「請重試」
+    const cause = err instanceof Error ? err.message.replace(/\s+/g, " ").slice(0, 100) : "";
+    console.error("[director] splitScript 未分類失敗：", err);
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: cause ? `拆分鏡失敗，請重試（${cause}）` : "拆分鏡失敗，請重試",
+    });
   }
 }
 

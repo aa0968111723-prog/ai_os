@@ -114,7 +114,20 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
   }
   if (!resultRes.ok) {
     if (isTransient(resultRes.status)) return { status: "running" };
-    return { status: "failed", error: `fal result ${resultRes.status}` };
+    // 4xx 終局失敗：帶上回應內文片段＋常見原因，避免只剩「fal result 422」無法排查
+    // （實測：image-to-image 用失效 mock 佔位圖／404 來源網址時 fal 常回 422）
+    let body = "";
+    try {
+      body = (await resultRes.text()).slice(0, 240).trim();
+    } catch {
+      body = "";
+    }
+    const hint =
+      resultRes.status === 422
+        ? "——常見原因：來源圖網址無法被生成服務抓取、格式不支援或只是測試佔位圖。請改用素材庫中真實可開啟的圖片"
+        : "";
+    const detail = body ? `：${body}` : "";
+    return { status: "failed", error: `fal result ${resultRes.status}${detail}${hint}` };
   }
   const result = (await resultRes.json()) as Record<string, unknown>;
   const extracted = extractResult(result);

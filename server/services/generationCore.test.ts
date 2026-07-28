@@ -4,7 +4,11 @@
  * 分流錯了會回到「把合規句塞進圖像正向提示詞」的舊病灶——擴散模型可能把禁忌字畫成畫面文字。
  */
 import { describe, expect, it } from "vitest";
-import { effectivePromptParts } from "./generationCore";
+import {
+  effectivePromptParts,
+  humanizeGenerationError,
+  isUnusableRealModeSourceUrl,
+} from "./generationCore";
 import { MODELS, getModel, type ModelEntry } from "../../shared/models";
 import { worldviewSchema } from "../../shared/worldview";
 
@@ -51,5 +55,36 @@ describe("effectivePromptParts：音頻/非注入類別不放禁忌詞", () => {
     const parts = effectivePromptParts(tts, "南無阿彌陀佛", wv);
     expect(parts.positive).toBe("南無阿彌陀佛");
     expect(parts.negative).toBe("");
+  });
+});
+
+describe("isUnusableRealModeSourceUrl：正式模式擋 mock 佔位來源", () => {
+  it("辨識 /api/mock-asset/*（含舊域名）", () => {
+    expect(isUnusableRealModeSourceUrl("https://ai-os.zeabur.app/api/mock-asset/image")).toBe(true);
+    expect(isUnusableRealModeSourceUrl("https://ai-os-app.zeabur.app/api/mock-asset/video")).toBe(true);
+    expect(isUnusableRealModeSourceUrl("/api/mock-asset/image")).toBe(true);
+  });
+
+  it("真實素材網址不擋", () => {
+    expect(isUnusableRealModeSourceUrl("https://cdn.fal.ai/files/a.png")).toBe(false);
+    expect(isUnusableRealModeSourceUrl("https://ai-os-app.zeabur.app/api/assets/x/file")).toBe(false);
+    expect(isUnusableRealModeSourceUrl(undefined)).toBe(false);
+  });
+});
+
+describe("humanizeGenerationError：供應商人話", () => {
+  it("逾時原文 → 可行動說明", () => {
+    expect(humanizeGenerationError("The operation was aborted due to timeout")).toContain("逾時");
+  });
+
+  it("fal 422 補上來源圖提示", () => {
+    const msg = humanizeGenerationError("fal result 422");
+    expect(msg).toContain("422");
+    expect(msg).toContain("來源圖");
+  });
+
+  it("已含來源圖提示的 422 不重複堆疊", () => {
+    const raw = "fal result 422——常見原因：來源圖網址無法被生成服務抓取";
+    expect(humanizeGenerationError(raw)).toBe(raw);
   });
 });
