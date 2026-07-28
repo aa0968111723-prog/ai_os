@@ -61,7 +61,8 @@ describe("AI 助手資料庫全量搜尋 SQL", () => {
 
   it("REST/MCP/網頁通用搜尋也收斂 NUL、長度與 LIKE 萬用字元", () => {
     expect(normalizeDatabaseSearchKeyword(` \0${"a".repeat(250)} `)).toBe("a".repeat(200));
-    for (const relative of ["./restApi.ts", "./mcp.ts", "../routers/databases.ts"]) {
+    // MCP 查詢已抽到 databaseMcp；mcp.ts 編排層不再直接呼叫 normalize
+    for (const relative of ["./restApi.ts", "./databaseMcp.ts", "../routers/databases.ts"]) {
       const source = readFileSync(new URL(relative, import.meta.url), "utf8");
       expect(source, relative).toContain("normalizeDatabaseSearchKeyword");
       expect(source, relative).toContain("escapeLikeLiteral");

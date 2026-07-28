@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-端到端測試（MCP 專區）：對真跑的伺服器驗證全部 30 個 MCP 工具（其中 23＋4 個私訊工具逐一實跑），以及每一道守門——
+端到端測試（MCP 專區）：對真跑的伺服器驗證全部 MCP 工具（含 update_database_row），以及每一道守門——
 唯讀範圍（擋所有寫入、放行所有讀取）、到期／撤銷／壞金鑰一律 401、跨組隔離（別人的金鑰
 碰不到你的專案）、封存專案寫入守衛、資料庫 AI 存取等級（none/read）閘門、跨介面審計歸屬。
 
@@ -129,11 +129,11 @@ ok("initialize", st == 200 and d["result"]["serverInfo"]["name"] == "ai-director
 st, d = mcp_raw("tools/list", None, FULL)
 names = {t["name"] for t in d["result"]["tools"]}
 EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_generation","post_message",
-    "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row","add_database_rows",
+    "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row","add_database_rows","update_database_row",
     "list_database_files","read_database_file","get_database_stats","plan_agent","approve_agent","stop_agent","discard_agent",
     "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status",
     "list_notes","get_note","list_dm_contacts","list_dm_threads","read_dm","send_dm"}
-ok("tools/list = 31 且名單完整", len(names) == 31 and EXPECTED <= names, f"{len(names)} 個")
+ok("tools/list = 32 且名單完整", len(names) == 32 and EXPECTED <= names, f"{len(names)} 個")
 
 # ══════════ 23 工具逐一實跑（可寫金鑰）══════════
 print("\n######## 23 工具逐一實跑 ########")
@@ -160,6 +160,13 @@ g, r = call("add_database_row", {"tableId": TID, "data": {"item": "腳架", "qty
 ok("11. add_database_row", g and r.get("rowId"))
 g, r = call("query_database", {"tableId": TID, "keyword": "腳架"}, FULL)
 ok("10b. query_database（關鍵字命中唯一列）", g and len(r["rows"]) == 1 and r["rows"][0]["data"]["item"] == "腳架")
+ok("10b2. query_database 回 hasMore/returned", g and r.get("returned") == 1 and r.get("hasMore") is False)
+# 更新列
+ROW_ID = r["rows"][0]["id"]
+g, r = call("update_database_row", {"tableId": TID, "rowId": ROW_ID, "data": {"item": "腳架（已校正）", "qty": 5}}, FULL)
+ok("11u. update_database_row", g and r.get("data", {}).get("item") == "腳架（已校正）")
+g, r = call("query_database", {"tableId": TID, "keyword": "已校正", "includeFields": False}, FULL)
+ok("11u2. 更新後可查且可省略 fields", g and len(r["rows"]) == 1 and "fields" not in r)
 
 # Batch writes are crash/retry safe across both MCP and REST. The same
 # actor/table/key scope is shared by both protocols.
@@ -242,6 +249,7 @@ g, r = call("whoami", {}, RO); ok("唯讀·whoami 標記唯讀", g and r["readOn
 READS = {"whoami": {}, "list_projects": {}, "get_project_context": {"projectId": PID}, "find_model": {"keyword": "flux"},
     "list_generations": {"projectId": PID}, "get_generation": {"generationId": GEN}, "list_assets": {"projectId": PID},
     "list_databases": {}, "query_database": {"tableId": TID}, "list_database_files": {"tableId": TID},
+    # update 屬寫入，下面 write_tools 會測
     "get_database_stats": {"tableId": TID}, "list_dm_contacts": {}, "list_dm_threads": {},
     "list_agent_runs": {"projectId": PID}, "get_agent_run": {"runId": RUN}, "list_schedule": {"projectId": PID},
     "get_project_status": {"projectId": PID}}
@@ -250,6 +258,7 @@ ok(f"唯讀金鑰放行全部 {len(READS)} 個讀取工具", allread)
 WRITES = {"submit_generation": {"projectId": PID, "modelId": MODEL, "prompt": "x"}, "post_message": {"projectId": PID, "body": "x"},
     "add_database_row": {"tableId": TID, "data": {"item": "x"}}, "plan_agent": {"projectId": PID, "goal": "應被唯讀擋下"},
     "add_database_rows": {"tableId": TID, "idempotencyKey": "readonly-batch-001", "rows": [{"data": {"item": "x"}}]},
+    "update_database_row": {"tableId": TID, "rowId": "00000000-0000-4000-8000-000000000001", "data": {"item": "x"}},
     "approve_agent": {"runId": RUN}, "stop_agent": {"runId": RUN}, "discard_agent": {"runId": RUN},
     "add_schedule_item": {"projectId": PID, "title": "x", "startsAt": future},
     "send_dm": {"peer": "x", "body": "x"}}

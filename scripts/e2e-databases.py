@@ -444,3 +444,41 @@ bad_tpl = call("POST", azhe, "databases.createBoundToProject", {
     "projectId": bound_proj["id"], "template": "not_a_real_template",
 })
 ok("未知範本被擋", "__error__" in bad_tpl)
+
+# ── MCP 深化：專案視角 list、equals 查詢、projectId 預填加列、update ──
+# media 表仍是 write；用它驗證
+mcp_list_proj = mcp_call("list_databases", {"projectId": bound_proj["id"]})
+ok("MCP list_databases 帶 projectId 標註關聯",
+   any(d.get("tableId") == media_bound["tableId"] and d.get("linkedToProject") for d in mcp_list_proj))
+mcp_list_only = mcp_call("list_databases", {"projectId": bound_proj["id"], "linkedOnly": True})
+ok("MCP list linkedOnly 不含 none 綁定表",
+   all(d.get("linkedToProject") for d in mcp_list_only)
+   and not any(d["tableId"] == bound["tableId"] for d in mcp_list_only))
+# 預填 project 加列
+mcp_add = mcp_call("add_database_row", {
+    "tableId": media_bound["tableId"],
+    "projectId": bound_proj["id"],
+    "data": {media_name_key: "B-roll 補拍"},
+})
+ok("MCP add_database_row 預填 projectId", mcp_add.get("rowId") and mcp_add.get("data", {}).get(media_proj_key) == bound_proj["id"])
+# equals 篩選
+mcp_eq = mcp_call("query_database", {
+    "tableId": media_bound["tableId"],
+    "equals": {media_proj_key: bound_proj["id"]},
+    "includeFields": False,
+})
+ok("MCP query equals 關聯專案",
+   mcp_eq.get("returned", 0) >= 1 and "fields" not in mcp_eq and mcp_eq.get("hasMore") is False)
+# update
+mcp_row_id = mcp_add["rowId"]
+mcp_upd = mcp_call("update_database_row", {
+    "tableId": media_bound["tableId"],
+    "rowId": mcp_row_id,
+    "projectId": bound_proj["id"],
+    "data": {media_name_key: "B-roll 補拍（已剪）", media_proj_key: bound_proj["id"]},
+})
+ok("MCP update_database_row", mcp_upd.get("data", {}).get(media_name_key) == "B-roll 補拍（已剪）")
+# list files 不回 sourceUrl
+mcp_files = mcp_call("list_database_files", {"tableId": personal["id"]})
+ok("MCP list_database_files 不洩漏 sourceUrl",
+   isinstance(mcp_files, list) and all("sourceUrl" not in f for f in mcp_files))
