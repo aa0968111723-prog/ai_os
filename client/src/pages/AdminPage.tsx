@@ -7,6 +7,8 @@ import { ConfirmButton } from "../components/interactions";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
 import { AUDIT_ACTION_LABELS, AUDIT_CATEGORIES, auditCategoryOf, describeAuditInput, groupConsecutiveAudit, humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
 import { getModel, tierLabel } from "@shared/models";
+import { toCsv } from "@shared/csv";
+import { formatTwd, formatUsd, moneyFxNote } from "@shared/money";
 
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
@@ -1087,9 +1089,9 @@ export function AuditLogCard() {
   );
 }
 
-/* ═══════════ 操作洞察卡：人員分類細節・模型使用比較・提示詞流水 ═══════════ */
+/* ═══════════ 操作洞察卡：人員分類細節・模型使用比較・人×模型用量・提示詞流水 ═══════════ */
 
-type InsightTab = "members" | "models" | "prompts";
+type InsightTab = "members" | "models" | "usage" | "prompts";
 
 const INSIGHT_DAYS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 7, label: "近 7 天" },
@@ -1161,12 +1163,28 @@ function PromptRow({ p }: { p: RecentPromptData }) {
 }
 
 type RecentPromptData = inferRouterOutputs<AppRouter>["insights"]["recentPrompts"]["items"][number];
+type UserModelStatRow = inferRouterOutputs<AppRouter>["insights"]["userModelStats"]["rows"][number];
+
+/** 瀏覽器端下載 CSV（UTF-8 BOM 已由 toCsv 處理，Excel 可開中文） */
+function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 /**
- * 操作洞察卡（回饋：人員的分類細節、模型的操作與比較、生成精準度、提示詞）。
- * 三個分頁共用「期間＋組別」過濾：
+ * 操作洞察卡（回饋：人員的分類細節、模型的操作與比較、人×模型用量明細、生成精準度、提示詞）。
+ * 分頁共用「期間＋組別」過濾：
  * - 人員細節：每位夥伴的操作量、失敗數、最近活動、依分類攤開的次數；點人可跳到他的提示詞。
  * - 模型比較：各模型的生成次數、成功率（生成精準度）、點數、使用人數；點模型看它的提示詞。
+ * - 用量明細：人 × 模型矩陣（完成數、點數、新台幣／美元估價）＋ CSV 匯出——精密成本盤點用。
  * - 提示詞：一筆筆的生成流水（誰・模型・提示詞・結果・點數），供比較與教學。
  * 可見範圍與操作紀錄相同（後端已收斂：組長看自己組），組員看不到這張卡的資料。
  */
@@ -1181,6 +1199,10 @@ export function InsightsCard() {
   const common = { days, groupId: groupId || undefined };
   const members = trpc.insights.actorBreakdown.useQuery(common, { enabled: tab === "members" });
   const models = trpc.insights.modelStats.useQuery(common, { enabled: tab === "models" });
+  const usage = trpc.insights.userModelStats.useQuery(
+    { ...common, actorId: actorFilter?.id, modelId: modelFilter?.id },
+    { enabled: tab === "usage" },
+  );
   const prompts = trpc.insights.recentPrompts.useQuery(
     { ...common, modelId: modelFilter?.id, actorId: actorFilter?.id, limit: 30 },
     { enabled: tab === "prompts" },
@@ -1196,14 +1218,48 @@ export function InsightsCard() {
     fontWeight: active ? 600 : 400,
   });
   const groupOptions = scope.data?.groups ?? [];
+
+  function exportUsageCsv(rows: UserModelStatRow[], fxNote: string) {
+    const header = [
+      "夥伴", "userId", "模型", "modelId", "類型", "送出", "完成", "失敗", "駁回", "在途",
+      "完成點數", "新台幣_NTD", "美元_USD", "目錄單次點數", "官方約略價_USD字串", "最近使用", "匯率說明",
+    ];
+    const body = rows.map((r) => {
+      const model = getModel(r.modelId);
+      return [
+        r.userName,
+        r.userId,
+        model?.label ?? r.modelId,
+        r.modelId,
+        r.kind,
+        r.submits,
+        r.done,
+        r.failed,
+        r.rejected,
+        r.pending,
+        r.points,
+        r.estTwd,
+        r.estUsd,
+        model?.points ?? "",
+        model?.cost ?? "",
+        r.lastUsedAt,
+        fxNote,
+      ];
+    });
+    const csv = toCsv([header, ...body]);
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadCsv(`aios-用量-新台幣-${days}天-${stamp}.csv`, csv);
+  }
+
   return (
     <div className="card" data-fb="操作洞察卡">
       <h2>操作洞察</h2>
-      <p className="hint">把操作紀錄整理成看得懂的統計：每位夥伴在忙哪一塊、哪個模型好用（成功率＝完成÷已完結）、大家的提示詞怎麼寫。</p>
+      <p className="hint">把操作紀錄整理成看得懂的統計：每位夥伴在忙哪一塊、哪個模型好用（成功率＝完成÷已完結）、人×模型用量與估價、大家的提示詞怎麼寫。</p>
       {/* 分頁 chips */}
       <div role="group" aria-label="洞察分頁" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
         <button type="button" style={chip(tab === "members")} aria-pressed={tab === "members"} onClick={() => setTab("members")}>人員細節</button>
         <button type="button" style={chip(tab === "models")} aria-pressed={tab === "models"} onClick={() => setTab("models")}>模型比較</button>
+        <button type="button" style={chip(tab === "usage")} aria-pressed={tab === "usage"} onClick={() => setTab("usage")}>用量明細</button>
         <button type="button" style={chip(tab === "prompts")} aria-pressed={tab === "prompts"} onClick={() => setTab("prompts")}>提示詞</button>
       </div>
       {/* 期間＋組別過濾（三個分頁共用） */}
@@ -1314,6 +1370,127 @@ export function InsightsCard() {
             <p className="hint" style={{ fontSize: 11, marginTop: 6 }}>成功率＝完成 ÷（完成＋失敗）；排隊中／等待核准的生成不列入。點數只計完成的實花（失敗會退點）。</p>
           </div>
         )
+      )}
+
+      {/* ── 用量明細：人 × 模型 ── */}
+      {tab === "usage" && (
+        <>
+          {(modelFilter || actorFilter) && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+              <span className="hint" style={{ fontSize: 11 }}>目前只看：</span>
+              {modelFilter && (
+                <button type="button" onClick={() => setModelFilter(null)} style={activeFilterChip} aria-label={`清除模型過濾（${modelFilter.label}）`}>
+                  模型：{modelFilter.label}<Icon name="X" size={11} />
+                </button>
+              )}
+              {actorFilter && (
+                <button type="button" onClick={() => setActorFilter(null)} style={activeFilterChip} aria-label={`清除夥伴過濾（${actorFilter.name}）`}>
+                  <Icon name="User" size={11} />{actorFilter.name}<Icon name="X" size={11} />
+                </button>
+              )}
+            </div>
+          )}
+          {usage.isLoading ? (
+            <div className="skeleton" style={{ height: 60 }} />
+          ) : usage.error ? (
+            <p className="error">載入失敗：{usage.error.message}</p>
+          ) : !usage.data || usage.data.rows.length === 0 ? (
+            <p className="hint">這段期間還沒有生成用量。</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                <span className="hint" style={{ fontSize: 12 }}>
+                  合計：{usage.data.totals.userCount} 人・{usage.data.totals.modelCount} 模型・
+                  完成 {usage.data.totals.done.toLocaleString("zh-TW")} 次・
+                  {usage.data.totals.points.toLocaleString("zh-TW")} 點・
+                  <b style={{ color: "var(--ink)" }}>新台幣 {formatTwd(usage.data.totals.estTwd)}</b>
+                  <span style={{ marginLeft: 6 }}>（≈ {formatUsd(usage.data.totals.estUsd)}）</span>
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ marginLeft: "auto", fontSize: 12, padding: "4px 10px" }}
+                  onClick={() => exportUsageCsv(usage.data!.rows, usage.data!.fx?.note ?? moneyFxNote())}
+                  title="匯出人×模型用量 CSV（新台幣＋美元）"
+                >
+                  <Icon name="Download" size={12} /> 匯出 CSV（新台幣）
+                </button>
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    {["夥伴", "模型", "送出", "完成", "失敗", "點數", "新台幣", "美元", "最近"].map((h) => (
+                      <th
+                        key={h}
+                        className="hint"
+                        style={{
+                          textAlign: h === "夥伴" || h === "模型" ? "left" : "right",
+                          padding: "4px 6px",
+                          fontWeight: 600,
+                          fontSize: 11,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {usage.data.rows.map((r) => {
+                    const model = getModel(r.modelId);
+                    return (
+                      <tr key={`${r.userId}:${r.modelId}:${r.kind}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
+                        <td style={{ padding: "6px" }}>
+                          <button
+                            type="button"
+                            onClick={() => { setActorFilter({ id: r.userId, name: r.userName }); setTab("prompts"); }}
+                            style={{ ...DRILL_LINK, fontWeight: 600 }}
+                            title={`看 ${r.userName} 的提示詞`}
+                          >
+                            {r.userName}
+                          </button>
+                        </td>
+                        <td style={{ padding: "6px" }}>
+                          <button
+                            type="button"
+                            onClick={() => { setModelFilter({ id: r.modelId, label: model?.label ?? r.modelId }); setTab("prompts"); }}
+                            style={{ ...DRILL_LINK, fontWeight: 600 }}
+                            title="看這個模型的提示詞"
+                          >
+                            {model?.label ?? r.modelId}
+                          </button>
+                          {model && (
+                            <span className="hint" style={{ fontSize: 11, marginLeft: 6 }} title={model.cost}>
+                              {tierLabel(model.tier)}・{model.points}點/次
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: "6px", textAlign: "right" }}>{r.submits}</td>
+                        <td style={{ padding: "6px", textAlign: "right" }}>{r.done}</td>
+                        <td style={{ padding: "6px", textAlign: "right", color: r.failed > 0 ? "var(--danger-ink)" : "var(--fg-secondary)" }}>{r.failed}</td>
+                        <td style={{ padding: "6px", textAlign: "right", fontFamily: "var(--mono)" }}>{r.points.toLocaleString("zh-TW")}</td>
+                        <td style={{ padding: "6px", textAlign: "right", fontFamily: "var(--mono)", fontWeight: 600 }} title="帳面新台幣（1 點 ≈ NT$1）">
+                          {formatTwd(r.estTwd)}
+                        </td>
+                        <td className="hint" style={{ padding: "6px", textAlign: "right", fontFamily: "var(--mono)", fontSize: 11 }} title="帳面美元（對照 Fal 帳單）">
+                          {formatUsd(r.estUsd)}
+                        </td>
+                        <td className="hint" style={{ padding: "6px", textAlign: "right", fontSize: 11, whiteSpace: "nowrap" }}>
+                          {parseDbTime(r.lastUsedAt).toLocaleDateString("zh-TW")}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="hint" style={{ fontSize: 11, marginTop: 6 }}>
+                金額單位為<strong>新台幣（NT$）</strong>：只計<strong>完成</strong>實花點數換算（{usage.data.fx?.note ?? moneyFxNote()}）。
+                失敗多半已退點，不計入。點人名或模型可下鑽提示詞；CSV 含新台幣、美元與匯率說明。
+              </p>
+            </div>
+          )}
+        </>
       )}
 
       {/* ── 提示詞 ── */}

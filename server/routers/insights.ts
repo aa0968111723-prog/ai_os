@@ -3,6 +3,7 @@ import { and, desc, eq, gte, inArray, sql, type SQL } from "drizzle-orm";
 import { router, authedProcedure } from "../trpc";
 import { db, schema } from "../db";
 import { auditCategoryOf } from "../../shared/auditWording";
+import { moneyFxNote, pointsToTwd, pointsToUsd, USD_TO_TWD } from "../../shared/money";
 import type { AuthState } from "../services/auth";
 
 /**
@@ -183,7 +184,145 @@ export const insightsRouter = router({
         items: rows.map((r) => ({ ...r, userName: r.userName ?? "?", projectTitle: r.projectTitle ?? null })) as RecentPromptEntry[],
       };
     }),
+
+  /**
+   * 人 × 模型用量矩陣：期間內每位夥伴對各模型送了幾次、完成／失敗幾次、完成實花幾點。
+   * 金額一律換算成新台幣（estTwd）與對照美元（estUsd）；匯率見 moneyFxNote／USD_TO_TWD。
+   * 點數口徑同 modelStats：只計 done 的 coalesce(points_actual, points_est)。
+   */
+  userModelStats: authedProcedure
+    .input(
+      z
+        .object({
+          teamId: z.string().uuid().optional(),
+          groupId: z.string().uuid().optional(),
+          actorId: z.string().uuid().optional(),
+          modelId: z.string().max(200).optional(),
+          days: daysInput,
+        })
+        .optional(),
+    )
+    .query(async ({ ctx, input }) => {
+      const visible = visibleGroupIds(ctx.auth);
+      if (visible && visible.length === 0) {
+        return { rows: [] as UserModelStatEntry[], totals: emptyUserModelTotals(), fx: usageFxMeta() };
+      }
+      const conds: SQL[] = [gte(schema.generations.createdAt, sinceOf(input?.days))];
+      if (visible) conds.push(inArray(schema.generations.groupId, visible));
+      if (input?.teamId) conds.push(eq(schema.groups.teamId, input.teamId));
+      if (input?.groupId) conds.push(eq(schema.generations.groupId, input.groupId));
+      if (input?.actorId) conds.push(eq(schema.generations.userId, input.actorId));
+      if (input?.modelId) conds.push(eq(schema.generations.modelId, input.modelId));
+
+      const rows = await db
+        .select({
+          userId: schema.generations.userId,
+          userName: schema.users.name,
+          modelId: schema.generations.modelId,
+          kind: schema.generations.kind,
+          submits: sql<number>`count(*)::int`,
+          done: sql<number>`sum(case when ${schema.generations.status} = 'done' then 1 else 0 end)::int`,
+          failed: sql<number>`sum(case when ${schema.generations.status} = 'failed' then 1 else 0 end)::int`,
+          rejected: sql<number>`sum(case when ${schema.generations.status} = 'rejected' then 1 else 0 end)::int`,
+          pending: sql<number>`sum(case when ${schema.generations.status} in ('queued','running','awaiting_approval') then 1 else 0 end)::int`,
+          points: sql<number>`sum(case when ${schema.generations.status} = 'done' then coalesce(${schema.generations.pointsActual}, ${schema.generations.pointsEst}) else 0 end)::int`,
+          lastUsedAt: sql<string>`max(${schema.generations.createdAt})::text`,
+        })
+        .from(schema.generations)
+        .leftJoin(schema.users, eq(schema.users.id, schema.generations.userId))
+        .leftJoin(schema.groups, eq(schema.groups.id, schema.generations.groupId))
+        .where(and(...conds))
+        .groupBy(schema.generations.userId, schema.users.name, schema.generations.modelId, schema.generations.kind)
+        .orderBy(
+          desc(sql`sum(case when ${schema.generations.status} = 'done' then coalesce(${schema.generations.pointsActual}, ${schema.generations.pointsEst}) else 0 end)`),
+          desc(sql`count(*)`),
+        )
+        .limit(500);
+
+      const mapped: UserModelStatEntry[] = rows.map((r) => {
+        const points = r.points;
+        return {
+          userId: r.userId,
+          userName: r.userName ?? "?",
+          modelId: r.modelId,
+          kind: r.kind,
+          submits: r.submits,
+          done: r.done,
+          failed: r.failed,
+          rejected: r.rejected,
+          pending: r.pending,
+          points,
+          /** 帳面新台幣（1 點 ≈ NT$1） */
+          estTwd: pointsToTwd(points),
+          /** 帳面美元（點數 ÷ 目錄匯率 31）——對照 Fal invoice */
+          estUsd: pointsToUsd(points),
+          lastUsedAt: r.lastUsedAt,
+        };
+      });
+
+      const totals = mapped.reduce(
+        (acc, r) => {
+          acc.submits += r.submits;
+          acc.done += r.done;
+          acc.failed += r.failed;
+          acc.points += r.points;
+          acc.estTwd += r.estTwd;
+          acc.estUsd += r.estUsd;
+          acc.users.add(r.userId);
+          acc.models.add(r.modelId);
+          return acc;
+        },
+        {
+          submits: 0,
+          done: 0,
+          failed: 0,
+          points: 0,
+          estTwd: 0,
+          estUsd: 0,
+          users: new Set<string>(),
+          models: new Set<string>(),
+        },
+      );
+
+      return {
+        rows: mapped,
+        totals: {
+          submits: totals.submits,
+          done: totals.done,
+          failed: totals.failed,
+          points: totals.points,
+          estTwd: pointsToTwd(totals.points),
+          /** 合計美元再四捨五入，避免逐列加總誤差 */
+          estUsd: pointsToUsd(totals.points),
+          userCount: totals.users.size,
+          modelCount: totals.models.size,
+        },
+        fx: usageFxMeta(),
+      };
+    }),
 });
+
+function usageFxMeta() {
+  return {
+    currency: "TWD" as const,
+    usdToTwd: USD_TO_TWD,
+    pointsToTwd: 1,
+    note: moneyFxNote(),
+  };
+}
+
+function emptyUserModelTotals() {
+  return {
+    submits: 0,
+    done: 0,
+    failed: 0,
+    points: 0,
+    estTwd: 0,
+    estUsd: 0,
+    userCount: 0,
+    modelCount: 0,
+  };
+}
 
 type ActorBreakdownEntry = {
   userId: string;
@@ -220,4 +359,22 @@ type RecentPromptEntry = {
   userName: string;
   projectId: string;
   projectTitle: string | null;
+};
+
+type UserModelStatEntry = {
+  userId: string;
+  userName: string;
+  modelId: string;
+  kind: string;
+  submits: number;
+  done: number;
+  failed: number;
+  rejected: number;
+  pending: number;
+  points: number;
+  /** 帳面新台幣（NT$） */
+  estTwd: number;
+  /** 帳面美元（US$） */
+  estUsd: number;
+  lastUsedAt: string;
 };
