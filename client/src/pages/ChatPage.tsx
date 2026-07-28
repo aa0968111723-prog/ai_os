@@ -5,6 +5,7 @@ import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { ChatEmptyState, focusChatPartnerPicker } from "../components/ChatEmptyState";
+import { setPlannerFocus } from "../discuss";
 
 type Thread = inferRouterOutputs<AppRouter>["dm"]["threads"][number];
 type Peer = inferRouterOutputs<AppRouter>["dm"]["peers"][number];
@@ -341,7 +342,15 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
                         className="ref-card"
                         title={m.ref.route ? "打開這個項目" : undefined}
                         disabled={!m.ref.route}
-                        onClick={() => m.ref?.route && navigate(m.ref.route)}
+                        onClick={() => {
+                          const ref = m.ref;
+                          if (!ref?.route) return;
+                          // 排程／筆記：順便寫 sessionStorage 交棒，與 URL ?focus= 雙保險（舊訊息 route 只有 /planner 時仍能高亮）
+                          if ((ref.refType === "schedule" || ref.refType === "note") && ref.refId) {
+                            setPlannerFocus(ref.refType, ref.refId);
+                          }
+                          navigate(ref.route);
+                        }}
                       >
                         <Icon name={REF_ICON[m.ref.refType as DmRefType] ?? "FileText"} size={14} />
                         <span className="ref-title">{REF_LABEL[m.ref.refType as DmRefType] ?? "標注"}・{m.ref.title}</span>
@@ -394,7 +403,8 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
             <Icon name="Tag" size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />標注
           </button>
           {refPickerOpen && (
-            <div className="mention-pop dm-ref-pop" role="dialog" aria-label="標注項目" style={{ bottom: "auto", top: "calc(100% + 6px)", width: 280, maxHeight: 300 }}>
+            // 向上展開（mention-pop 預設 bottom），避免被 .dm-thread { overflow:hidden } 裁切底部
+            <div className="mention-pop dm-ref-pop" role="dialog" aria-label="標注項目" style={{ width: 280, maxHeight: 300 }}>
               <div className="dm-ref-tabs" role="tablist">
                 {(["project", "database", "schedule", "note"] as DmRefType[]).map((t) => (
                   <button key={t} type="button" role="tab" aria-selected={refTab === t} className={refTab === t ? "on" : ""} onClick={() => setRefTab(t)}>
@@ -402,11 +412,21 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
                   </button>
                 ))}
               </div>
-              <div style={{ overflowY: "auto" }}>
-                {mentionables.isLoading ? (
+              <div style={{ overflowY: "auto", maxHeight: 220 }}>
+                {mentionables.isError ? (
+                  <span className="error" style={{ padding: "8px 12px", display: "block" }}>
+                    載入失敗：{mentionables.error.message}
+                    <button type="button" className="btn-sm" style={{ marginLeft: 6 }} onClick={() => mentionables.refetch()}>重試</button>
+                  </span>
+                ) : mentionables.isLoading ? (
                   <span className="hint" style={{ padding: "8px 12px" }}>載入中…</span>
                 ) : refItems.length === 0 ? (
-                  <span className="hint" style={{ padding: "8px 12px" }}>沒有可標注的{REF_LABEL[refTab]}。</span>
+                  <span className="hint" style={{ padding: "8px 12px", display: "block" }}>
+                    沒有可標注的{REF_LABEL[refTab]}。
+                    {refTab === "project" && "（僅顯示你所在組的未封存專案）"}
+                    {refTab === "database" && "（僅顯示你看得到的資料表）"}
+                    {(refTab === "schedule" || refTab === "note") && "（請先在筆記排程頁新增）"}
+                  </span>
                 ) : (
                   refItems.slice(0, 30).map((it) => (
                     <button key={it.id} type="button" role="option" aria-selected="false"

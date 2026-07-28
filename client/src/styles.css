@@ -861,8 +861,10 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .dm-compose textarea { flex: 1; resize: none; margin: 0; }
 .dm-compose button { flex: none; }
 /* 私訊 2.0：工具列（上傳圖/影片・標注・問 AI）貼在輸入框上緣 */
-.dm-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
+.dm-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; position: relative; z-index: 4; }
 .dm-tools .chip.on { background: var(--primary-tint); border-color: var(--primary-border); color: var(--primary-ink); }
+/* 標注面板浮在對話區之上，不被 .dm-thread overflow 裁切感太重（仍受限父層；以向上展開為主） */
+.dm-ref-pop { z-index: 12; }
 /* AI 代理回覆：靠左的專屬氣泡，與雙方對話明顯區隔 */
 .dm-row.assistant { justify-content: flex-start; }
 .dm-bubble.assistant { background: var(--primary-tint); border: 1px solid var(--primary-border); border-bottom-left-radius: 4px; }

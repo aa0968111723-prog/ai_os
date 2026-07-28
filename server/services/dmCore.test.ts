@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dmSnippet, dmThreadPreview, sharesAnyGroup } from "./dmCore";
+import { dmRefRoute, dmSnippet, dmThreadPreview, sharesAnyGroup } from "./dmCore";
 
 describe("sharesAnyGroup（可私訊判定核心）", () => {
   it("有交集＝可訊", () => {
@@ -52,5 +52,19 @@ describe("dmThreadPreview（對話串最後一句預覽合成）", () => {
   it("未知 refType 不誤標（回空字串）", () => {
     expect(dmThreadPreview({ body: "", hasAttachment: false, refType: "bogus" })).toBe("");
     expect(dmThreadPreview({ body: "", hasAttachment: false, refType: null })).toBe("");
+  });
+});
+
+describe("dmRefRoute（標注卡導頁必須對上 App 路由）", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  it("專案走 /p/:id（不是已廢棄的 /project/）", () => {
+    expect(dmRefRoute("project", id)).toBe(`/p/${id}`);
+  });
+  it("資料庫帶 open 深連結", () => {
+    expect(dmRefRoute("database", id)).toBe(`/databases?open=${id}`);
+  });
+  it("排程／筆記走 planner focus 錨點", () => {
+    expect(dmRefRoute("schedule", id)).toBe(`/planner?focus=schedule-${id}`);
+    expect(dmRefRoute("note", id)).toBe(`/planner?focus=note-${id}`);
   });
 });

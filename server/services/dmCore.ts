@@ -281,7 +281,8 @@ export async function sendDm(auth: AuthState, peerId: string, body: string, opts
   void pushToUsers([peer.id], {
     title: `${auth.user.name} 傳來私訊`,
     body: dmThreadPreview({ body, hasAttachment: !!att, refType: opts.refType ?? null }),
-    url: "/chat",
+    // 收件人點開應直達與「發訊者」的對話（peer＝發訊者本人）
+    url: `/chat/${auth.user.id}`,
     tag: `dm-${auth.user.id}`,
   }).catch((err) => console.warn("[dm] 私訊推播失敗：", err instanceof Error ? err.message : err));
   return { message: msg, peer: { userId: peer.id, name: peer.name } };
@@ -331,8 +332,21 @@ export interface DmRefInfo {
   refType: DmRefType;
   refId: string;
   title: string;
-  /** 前端導頁提示：project→/project/:id、database→/databases、schedule/note→/planner */
+  /**
+   * 前端導頁（必須是 App 實際存在的路徑）：
+   * - project → `/p/:id`（不是 /project/…，後者沒有路由）
+   * - database → `/databases?open=:id`
+   * - schedule/note → `/planner?focus=schedule-:id` / `note-:id`（Planner 掛載時高亮該列）
+   */
   route: string;
+}
+
+/** 純函式：依型別＋id 組出標注卡可點的前端路徑（單元測試鎖住，防路由又寫錯）。 */
+export function dmRefRoute(refType: DmRefType, refId: string): string {
+  if (refType === "project") return `/p/${refId}`;
+  if (refType === "database") return `/databases?open=${encodeURIComponent(refId)}`;
+  if (refType === "schedule") return `/planner?focus=${encodeURIComponent(`schedule-${refId}`)}`;
+  return `/planner?focus=${encodeURIComponent(`note-${refId}`)}`;
 }
 
 /**
@@ -343,25 +357,26 @@ export async function resolveDmRefs(rows: Array<{ refType: string | null; refId:
   const byType: Record<DmRefType, Set<string>> = { project: new Set(), database: new Set(), schedule: new Set(), note: new Set() };
   for (const r of rows) if (r.refType && r.refId && r.refType in byType) byType[r.refType as DmRefType].add(r.refId);
   const map = new Map<string, DmRefInfo>();
-  const put = (type: DmRefType, id: string, title: string, route: string) => map.set(`${type}:${id}`, { refType: type, refId: id, title, route });
+  const put = (type: DmRefType, id: string, title: string) =>
+    map.set(`${type}:${id}`, { refType: type, refId: id, title, route: dmRefRoute(type, id) });
   if (byType.project.size) {
     const rowsP = await db.select({ id: schema.projects.id, title: schema.projects.title }).from(schema.projects).where(inArray(schema.projects.id, [...byType.project]));
-    for (const p of rowsP) put("project", p.id, p.title, `/project/${p.id}`);
+    for (const p of rowsP) put("project", p.id, p.title);
   }
   if (byType.database.size) {
     const rowsD = await db.select({ id: schema.dataTables.id, name: schema.dataTables.name, deletedAt: schema.dataTables.deletedAt }).from(schema.dataTables).where(inArray(schema.dataTables.id, [...byType.database]));
-    for (const d of rowsD) if (!d.deletedAt) put("database", d.id, d.name, `/databases`);
+    for (const d of rowsD) if (!d.deletedAt) put("database", d.id, d.name);
   }
   if (byType.schedule.size) {
     const rowsS = await db.select({ id: schema.scheduleItems.id, title: schema.scheduleItems.title, startsAt: schema.scheduleItems.startsAt }).from(schema.scheduleItems).where(inArray(schema.scheduleItems.id, [...byType.schedule]));
     for (const s of rowsS) {
       const when = new Date(s.startsAt).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" });
-      put("schedule", s.id, `${s.title}（${when}）`, `/planner`);
+      put("schedule", s.id, `${s.title}（${when}）`);
     }
   }
   if (byType.note.size) {
     const rowsN = await db.select({ id: schema.notes.id, title: schema.notes.title }).from(schema.notes).where(inArray(schema.notes.id, [...byType.note]));
-    for (const n of rowsN) put("note", n.id, n.title, `/planner`);
+    for (const n of rowsN) put("note", n.id, n.title);
   }
   return map;
 }
