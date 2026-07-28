@@ -56,10 +56,15 @@ import {
   onShutdown,
   trackBackgroundTask,
 } from "./services/shutdown";
+import { readProcessRole, shouldRunWorkers } from "./services/processRole";
+import { httpSurfaceForRole } from "./bootstrap/httpSurface";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
 const isProd = process.env.NODE_ENV === "production";
+// TD-07 / TD-07b：Web／Worker 邊界（預設 all；worker 仍 listen HTTP 但不掛 SPA）
+const processRole = readProcessRole();
+const httpSurface = httpSurfaceForRole(processRole);
 // 啟動前 fail fast：不能等到第一個登入/MCP/AI 請求才發現 HMAC 金鑰缺失，也絕不退回記憶體限流。
 assertRateLimitConfiguration();
 
@@ -1303,8 +1308,8 @@ app.all("/api/*", (req, res) => {
   res.status(404).json({ error: "找不到這個 API 路徑", path: req.path });
 });
 
-// 正式環境：服務打包後的前端
-if (isProd) {
+// 正式環境：服務打包後的前端（TD-07b：worker 僅健康檢查表面，不掛 SPA 靜態檔）
+if (isProd && httpSurface.serveSpa) {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
   const publicDir = path.join(dirname, "public");
   app.use((req, res, next) => {
@@ -1322,6 +1327,14 @@ if (isProd) {
     },
   }));
   app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+} else if (isProd && !httpSurface.serveSpa) {
+  // worker-only：不回 index.html，明確 503 避免負載均衡把 UI 流量打到背景實例
+  app.get("*", (_req, res) => {
+    res.status(503).json({
+      error: "此實例為 worker，僅提供健康檢查，不提供產品 UI",
+      processRole,
+    });
+  });
 }
 
 // 統一 JSON 錯誤處理（QA-022）：body-parser 的 malformed JSON／過大請求不再回 Express 預設 HTML 錯誤頁。
@@ -1376,6 +1389,9 @@ function scheduleFeedbackSweep(): void {
 const httpServer = app.listen(port, () => {
   const falMode = isMockMode() ? "E2E 測試模式（僅供自動化測試）" : process.env.FAL_KEY ? "正式模式" : "正式模式（⚠ FAL_KEY 未設定，媒體生成會失敗）";
   console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${falMode}）`);
+  if (!httpSurface.serveSpa) {
+    console.log(`[boot] PROCESS_ROLE=${processRole} — HTTP 僅健康檢查，不提供 SPA`);
+  }
   try {
     ensureStorageDirs();
     console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（持久 Volume）" : "（本機模式）"}`);
@@ -1422,8 +1438,6 @@ const httpServer = app.listen(port, () => {
         if (isShuttingDown()) return;
         markBootReady();
         // TD-07：PROCESS_ROLE 分離 Web／Worker（web 不啟動 Runner；worker 仍與 all 同跑背景）
-        const { readProcessRole, shouldRunWorkers } = await import("./services/processRole");
-        const processRole = readProcessRole();
         // schema 驗證與種子同步後才啟動背景執行器，避免資料庫版本未就緒時空轉報錯。
         if (shouldRunWorkers(processRole)) {
           startWorkflowRunner();
