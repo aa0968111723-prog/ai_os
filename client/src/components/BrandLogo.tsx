@@ -1,4 +1,5 @@
 import {
+  BRAND_FULL_ASPECT,
   BRAND_FULL_LOGO_READY,
   BRAND_LOGO_SRC,
   BRAND_MARK_SRC,
@@ -63,25 +64,29 @@ export function BrandLogo({
   // 完整 Logo 原圖就緒：單張橫式 PNG
   if (BRAND_FULL_LOGO_READY) {
     const height = dims.fullHeight;
-    // 橫式約 3.2:1（待實圖校正）；固定高度避免 CLS
-    const width = Math.round(height * 3.2);
+    // 實圖約 1.97:1；固定高度避免 CLS
+    const width = Math.round(height * BRAND_FULL_ASPECT);
+    const fullLabel = showTagline ? `${BRAND_NAME} · ${BRAND_TAGLINE}` : BRAND_NAME;
     return (
       <span
         className={`brand-logo brand-logo--full brand-logo--img brand-logo--${size} brand-logo--tone-${tone} ${className}`.trim()}
         style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 4 }}
+        role={decorative ? undefined : "img"}
+        aria-label={decorative ? undefined : fullLabel}
+        aria-hidden={ariaHidden}
       >
         <img
           src={logoSrc}
-          alt={alt}
+          alt=""
           width={width}
           height={height}
           draggable={false}
-          aria-hidden={ariaHidden}
+          aria-hidden
           decoding="async"
           style={{ width, height, objectFit: "contain" }}
         />
         {showTagline ? (
-          <span className="brand-logo__tagline" aria-hidden={decorative || undefined}>
+          <span className="brand-logo__tagline" aria-hidden>
             {BRAND_TAGLINE}
           </span>
         ) : null}

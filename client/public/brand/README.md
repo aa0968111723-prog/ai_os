@@ -2,33 +2,34 @@
 
 產品對外名稱：**Aios** · 副標：**AI 創作作業系統**
 
-## 現況（issue #139）
+Vite 靜態根目錄為 `client/public/`，網址路徑為 `/brand/*`。
 
-原始彩色立體 `Aios` Logo 母版**尚未**加入本 repo。
+## 可直接使用
 
-目前入庫的 PNG 為**暫代資產**（沿用既有金環 mark），用途是：
-
-1. 打通 `BrandLogo` 路徑與 PWA／favicon 尺寸，避免 404
-2. 讓元件／manifest 可獨立 build 與測試
-3. **不是**最終品牌造型——補入原圖後應重新裁切並覆蓋下列檔案
-
-## 尚待補入
-
-| 檔案 | 說明 |
+| 檔案 | 用途 |
 |------|------|
-| `source/aios-logo-original.png` | 使用者提供的母版（含留白亦可） |
-| `logo-aios-color.png` | 完整橫式彩色 Logo、透明底、裁掉大面積留白 |
-| `logo-aios-light.png` | 淺色介面可用 |
-| `logo-aios-dark.png` | 深色介面可用 |
+| `logo-aios-color.png` | 完整橫式彩色 Logo（透明底，已裁留白） |
+| `logo-aios-light.png` / `logo-aios-dark.png` | 淺／深介面（目前同彩色透明底） |
 | `logo-aios-mono.png` | 單色完整 wordmark |
-| `icon-aios-*.png` | 以前方彩色 **A** 為標記（非整張橫式 Logo 縮小） |
+| `logo-aios-color-embedded.svg` | 內嵌 WebP 的 SVG 備援（非重繪向量） |
+| `icon-aios-*.png` | 前方彩色 **A** 標記（App Icon） |
 | `mark-aios-mono.png` | 單色 A 標記 |
+| `apple-touch-icon.png` | Apple touch |
+| `source/aios-logo-original.webp` | 使用者提供裁切母版（WebP） |
+| `source/aios-logo-color-cropped.png` | 去背後裁切 PNG |
 
-補入後請將 `client/src/brand.ts` 的 `BRAND_FULL_LOGO_READY` 設為 `true`，並更新對應路徑。
+PWA／favicon 另見：
 
-## 路徑慣例
+- `/icons/icon-192.png`、`icon-512.png`、maskable、`icon-96.png`
+- `/favicon-16x16.png`、`/favicon-32x32.png`、`/favicon.ico`
+- `/apple-touch-icon.png`
 
-- 元件與文件：`/brand/*`
-- PWA／快捷方式：既有 `/icons/icon-*.png`（與 manifest 對齊，避免重複路徑）
-- favicon：`/favicon-16x16.png`、`/favicon-32x32.png`、`/favicon.ico`
-- Apple touch：`/apple-touch-icon.png` 與 `/brand/apple-touch-icon.png`
+## 元件
+
+路徑與 `BRAND_FULL_LOGO_READY` 集中在 `client/src/brand.ts`，UI 請用 `<BrandLogo />`，勿各頁硬編。
+
+## 來源與限制
+
+- 彩色立體外觀來自使用者提供母版，**未**重新描繪或改字樣。
+- `logo-aios-color-embedded.svg` 因早期僅能寫文字檔，把 WebP 內嵌於 SVG；正式介面優先用 PNG。
+- App Icon 取字標前方 **A**，非整張橫式 Logo 縮小。

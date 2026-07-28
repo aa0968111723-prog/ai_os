@@ -2,8 +2,7 @@
  * Aios 品牌單一來源：名稱、副標、資產路徑。
  * 元件請從此檔讀取，勿在各頁硬編 logo 路徑。
  *
- * 原始彩色立體 Logo 母版尚未入庫時，mark／icon 使用現有金環作為暫代資產；
- * 完整橫式 wordmark 以文字 fallback 呈現，待原圖補入後改走 PNG。
+ * 資產位於 client/public/brand/（Vite 以 /brand/* 提供）。
  * 見 client/public/brand/README.md。
  */
 
@@ -18,7 +17,7 @@ export type BrandVariant = "full" | "mark";
 export type BrandTone = "color" | "light" | "dark" | "monochrome";
 export type BrandSize = "xs" | "sm" | "md" | "lg" | "hero";
 
-/** 完整 Logo 資產（橫式 wordmark；原圖補入前可能不存在或為暫代） */
+/** 完整 Logo 資產（橫式 wordmark） */
 export const BRAND_LOGO_SRC: Record<BrandTone, string> = {
   color: "/brand/logo-aios-color.png",
   light: "/brand/logo-aios-light.png",
@@ -27,7 +26,7 @@ export const BRAND_LOGO_SRC: Record<BrandTone, string> = {
 };
 
 /**
- * 品牌標記（A 標／暫代金環）。
+ * 品牌標記（前方彩色 A）。
  * PWA／favicon 沿用既有 /icons/* 路徑；元件與文件用 /brand/*。
  */
 export const BRAND_MARK_SRC: Record<BrandTone, string> = {
@@ -37,8 +36,14 @@ export const BRAND_MARK_SRC: Record<BrandTone, string> = {
   monochrome: "/brand/mark-aios-mono.png",
 };
 
-/** 原圖補入前：full 變體以文字 wordmark 為主，不把正方形 mark 當橫式 Logo 硬縮 */
-export const BRAND_FULL_LOGO_READY = false;
+/** 完整橫式彩色 Logo 已就緒（來自使用者母版裁切） */
+export const BRAND_FULL_LOGO_READY = true;
+
+/**
+ * 完整 Logo 寬高比（logo-aios-color.png ≈ 301×153）。
+ * 用於固定尺寸、避免 CLS。
+ */
+export const BRAND_FULL_ASPECT = 301 / 153;
 
 export const BRAND_SIZE_PX: Record<BrandSize, { mark: number; fullHeight: number }> = {
   xs: { mark: 16, fullHeight: 20 },
