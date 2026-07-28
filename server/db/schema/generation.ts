@@ -16,8 +16,11 @@ export const generations = pgTable("generations", {
   /** awaiting_approval/rejected（需求 2.1 成本審核）：達組門檻的組員生成先待核，核准才扣點送 fal；
    *  enum 只是 TS 層註記（DB 欄位為 text），不需要 DB 型別 migration */
   status: text("status", { enum: ["queued", "running", "done", "failed", "awaiting_approval", "rejected"] }).notNull().default("queued"),
+  /** TD-09 estimated：目錄預估點數（提交前算好；貫穿審核門檻／reserveQuota／失敗退額） */
   pointsEst: integer("points_est").notNull().default(0),
+  /** TD-09 actual：完成時實花點數；現況 advanceGeneration 寫入時 = pointsEst，未來可接 provider 真實成本 */
   pointsActual: integer("points_actual"),
+  /** TD-09 失敗路徑已退回點數（與 cost_ledger 正 delta 對帳；全退後 settled≈0） */
   pointsRefunded: integer("points_refunded").notNull().default(0),
   requestId: text("request_id"),
   /** 綁定的分鏡格（可為 null）：草稿分鏡「就地生成」時填入，完成後把成品回填該格 scenes.assetId */
@@ -63,13 +66,22 @@ export const generations = pgTable("generations", {
   groupIdx: index("generations_group_idx").on(t.groupId),
 }));
 
-/** 點數帳本 — 花費紀錄（先扣預估、失敗退回） */
+/**
+ * 點數帳本（append-only）— TD-09 phase 語意見 docs/architecture/cost-ledger-model.md
+ * - delta < 0＝預留／扣點（reserved charge）；delta > 0＝退點／補點
+ * - 淨消耗 = -SUM(delta)（與 points.ts 守門／quota 同一口徑）
+ * - 先扣預估、失敗退回；成功時 reserved 負列直接視為 settled（現況不另插結算列）
+ * - 同一 generation_id 可多列（扣＋退），禁止 unique(generation_id)
+ */
 export const costLedger = pgTable("cost_ledger", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull(),
   groupId: uuid("group_id").notNull(),
+  /** 有號點數變動：負＝扣／預留，正＝退／補（見 shared/costLedgerTypes.ledgerDirection） */
   delta: integer("delta").notNull(),
+  /** 人話原因（非 enum／非 phase）；常見「生成 …」「…失敗退回」「人工補點」 */
   reason: text("reason").notNull(),
+  /** 可空；有則按生成對帳（退點冪等、週歸屬 JOIN） */
   generationId: uuid("generation_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
