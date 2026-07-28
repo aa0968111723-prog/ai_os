@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-端到端測試（MCP 專區）：對真跑的伺服器驗證全部 MCP 工具（含 update_database_row），以及每一道守門——
+端到端測試（MCP 專區）：對真跑的伺服器驗證正式目錄中的全部 MCP 工具（含資料庫更新與代理稽核工具），以及每一道守門——
 唯讀範圍（擋所有寫入、放行所有讀取）、到期／撤銷／壞金鑰一律 401、跨組隔離（別人的金鑰
 碰不到你的專案）、封存專案寫入守衛、資料庫 AI 存取等級（none/read）閘門、跨介面審計歸屬。
 
@@ -131,12 +131,13 @@ names = {t["name"] for t in d["result"]["tools"]}
 EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_generation","post_message",
     "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row","add_database_rows","update_database_row",
     "list_database_files","read_database_file","get_database_stats","plan_agent","approve_agent","stop_agent","discard_agent",
-    "list_agent_runs","get_agent_run","list_schedule","add_schedule_item","get_project_status",
+    "list_agent_runs","get_agent_run","list_agent_events","get_agent_insights",
+    "list_schedule","add_schedule_item","get_project_status",
     "list_notes","get_note","list_dm_contacts","list_dm_threads","read_dm","send_dm"}
-ok("tools/list = 32 且名單完整", len(names) == 32 and EXPECTED <= names, f"{len(names)} 個")
+ok(f"tools/list = {len(EXPECTED)} 且名單完整", names == EXPECTED, f"{len(names)} 個")
 
-# ══════════ 23 工具逐一實跑（可寫金鑰）══════════
-print("\n######## 23 工具逐一實跑 ########")
+# ══════════ 核心工具逐一實跑（可寫金鑰）══════════
+print("\n######## 核心工具逐一實跑 ########")
 g, r = call("whoami", {}, FULL); ok("1. whoami", g and r["user"]["email"] == EMAIL and r["readOnly"] is False)
 g, r = call("list_projects", {}, FULL); ok("2. list_projects（含新專案）", g and any(p["id"] == PID for p in r))
 g, r = call("get_project_context", {"projectId": PID}, FULL)
@@ -221,6 +222,12 @@ RUN = r.get("runId") if g and isinstance(r, dict) else None
 ok("14. plan_agent（排出多步計畫）", g and RUN and len(r["steps"]) > 0, f'{len(r.get("steps",[])) if isinstance(r,dict) else 0} 步')
 g, r = call("get_agent_run", {"runId": RUN}, FULL); ok("15. get_agent_run（待核准）", g and r["status"] == "awaiting_approval")
 g, r = call("list_agent_runs", {"projectId": PID}, FULL); ok("16. list_agent_runs（含本 run）", g and any(x["runId"] == RUN for x in r))
+g, r = call("list_agent_events", {"projectId": PID}, FULL)
+ok("16b. list_agent_events（含規劃軌跡）", g and isinstance(r.get("items"), list) and len(r["items"]) >= 1)
+g, r = call("get_agent_insights", {"projectId": PID}, FULL)
+ok("16c. get_agent_insights（健康、工作與成果摘要）",
+   g and r.get("status") in ("healthy", "attention", "blocked")
+   and isinstance(r.get("workItems"), list) and isinstance(r.get("results"), list))
 g, r = call("approve_agent", {"runId": RUN}, FULL)
 ok("17. approve_agent（狀態真的離開待核准）", g and r["status"] in ("running", "done"), r.get("status") if isinstance(r, dict) else r)
 g, r = call("stop_agent", {"runId": RUN}, FULL); ok("18. stop_agent", g and r["status"] in ("stopped", "done"))
@@ -252,6 +259,7 @@ READS = {"whoami": {}, "list_projects": {}, "get_project_context": {"projectId":
     # update 屬寫入，下面 write_tools 會測
     "get_database_stats": {"tableId": TID}, "list_dm_contacts": {}, "list_dm_threads": {},
     "list_agent_runs": {"projectId": PID}, "get_agent_run": {"runId": RUN}, "list_schedule": {"projectId": PID},
+    "list_agent_events": {"projectId": PID}, "get_agent_insights": {"projectId": PID},
     "get_project_status": {"projectId": PID}}
 allread = all(call(n, a, RO)[0] for n, a in READS.items())
 ok(f"唯讀金鑰放行全部 {len(READS)} 個讀取工具", allread)
