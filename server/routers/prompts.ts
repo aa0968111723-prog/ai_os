@@ -5,6 +5,12 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
 
+/**
+ * 提示詞字數上限：generation.submit 與 prompts.save 同口徑。
+ * 4000 介於舊 save(2000) 與舊 submit(8000) 之間——生成成功的咒語必能入庫，又避免過長咒語灌庫。
+ */
+export const MAX_PROMPT_CHARS = 4000;
+
 /** 「再用」要還原的完整生成設定：模型＋角色/場景卡（latest-wins，跟著最近一次使用更新） */
 export interface PromptSettings {
   modelId?: string;
@@ -43,9 +49,9 @@ export async function savePromptCore(
   settings: PromptSettings = {},
 ) {
   const text = rawText.trim();
-  if (!text || text.length > 2000) return null;
+  if (!text || text.length > MAX_PROMPT_CHARS) return null;
   // 併發自動存同一咒語會 select-then-insert 競態（重複列/漏加 useCount）。
-  // 用交易＋per-(專案,文字) advisory lock 序列化——不加唯一索引（text 可達 2000 字、
+  // 用交易＋per-(專案,文字) advisory lock 序列化——不加唯一索引（text 可達 MAX_PROMPT_CHARS 字、
   // 超過 btree 索引位元上限，索引建立會失敗）。
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${project.id}), hashtext(${text}))`);
@@ -91,7 +97,8 @@ export const promptsRouter = router({
     .input(
       z.object({
         projectId: z.string().uuid(),
-        text: z.string().min(1).max(2000),
+        // 與 generation.submit 同口徑（MAX_PROMPT_CHARS）——生成成功才能自動入庫
+        text: z.string().min(1).max(MAX_PROMPT_CHARS),
         modelId: z.string().max(200).optional(),
         characterIds: z.array(z.string().uuid()).max(6).optional(),
         scenePresetIds: z.array(z.string().uuid()).max(4).optional(),

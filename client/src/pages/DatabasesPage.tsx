@@ -576,6 +576,8 @@ function FieldsEditor({ fields, onChange }: { fields: DataField[]; onChange: (f:
 
 function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; groupId: string; onDeleted: () => void }) {
   const utils = trpc.useUtils();
+  const me = trpc.auth.me.useQuery();
+  const myId = me.data?.user.id;
   const [q, setQ] = useState("");
   const [detailTab, setDetailTab] = useState<DatabaseDetailTab>("rows");
   const [editStructure, setEditStructure] = useState(false);
@@ -722,7 +724,8 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
                   tableId={table.id}
                   row={{ id: r.id, data: r.data as DataRowData }}
                   canWrite={table.access.canWriteRows}
-                  canDelete={table.access.canManage || table.access.canWriteRows}
+                  // 與後端 removeRow 對齊：管理者可刪任何列；一般寫入者只能刪自己建的列
+                  canDelete={table.access.canManage || (!!myId && r.createdBy === myId)}
                   onSave={(data) => updateRow.mutate({ id: r.id, data })}
                   onDelete={() => removeRow.mutate({ id: r.id })}
                 />

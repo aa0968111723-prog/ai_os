@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, desc, eq, isNull, like, notInArray } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, like, notInArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
@@ -78,10 +78,15 @@ export async function buildKnowledgeContextWithMeta(
     cardParts.push(`【角色定裝卡】\n${lines.join("\n")}`);
   }
   if (presets.length) {
-    const lines = presets.map(
-      (s) => `- ${s.name}：色板 ${s.palette}${s.lighting?.trim() ? `｜光線 ${s.lighting}` : ""}`,
+    // 比照角色卡：色板／光線各自截短，且最多注入 N 張——場景卡可無界累積，完整 palette/lighting
+    // 曾把 cardBlock 撐爆 LLM 預算（且卡片優先佔額度、長文知識被擠掉）。
+    const PRESET_INJECT_MAX = 12;
+    const lines = presets.slice(0, PRESET_INJECT_MAX).map(
+      (s) =>
+        `- ${s.name}：色板 ${s.palette.slice(0, 160)}${s.lighting?.trim() ? `｜光線 ${s.lighting.slice(0, 120)}` : ""}`,
     );
-    cardParts.push(`【場景設定卡】\n${lines.join("\n")}`);
+    const more = presets.length > PRESET_INJECT_MAX ? `\n…另有 ${presets.length - PRESET_INJECT_MAX} 張場景卡未注入` : "";
+    cardParts.push(`【場景設定卡】\n${lines.join("\n")}${more}`);
   }
   const cardBlock = cardParts.join("\n");
 
@@ -204,20 +209,21 @@ export const knowledgeRouter = router({
     if (!project) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, project.groupId);
     // 回收桶裡的知識不列在正式清單（另走 projects.listDeleted）
+    // SQL 層取 length／left——清單只要 120 字摘要，勿 SELECT 全文再 slice（長逐字稿會撐爆記憶體／頻寬）
     const rows = await db
-      .select()
+      .select({
+        id: schema.knowledge.id,
+        kind: schema.knowledge.kind,
+        title: schema.knowledge.title,
+        chars: sql<number>`length(${schema.knowledge.content})`.mapWith(Number),
+        excerpt: sql<string>`left(${schema.knowledge.content}, 120)`,
+        sourceAssetId: schema.knowledge.sourceAssetId,
+        createdAt: schema.knowledge.createdAt,
+      })
       .from(schema.knowledge)
       .where(and(eq(schema.knowledge.projectId, input.projectId), isNull(schema.knowledge.deletedAt)))
       .orderBy(desc(schema.knowledge.createdAt));
-    return rows.map((r) => ({
-      id: r.id,
-      kind: r.kind,
-      title: r.title,
-      chars: r.content.length,
-      excerpt: r.content.slice(0, 120),
-      sourceAssetId: r.sourceAssetId,
-      createdAt: r.createdAt,
-    }));
+    return rows;
   }),
 
   /** 讀單筆全文（編輯用）：回收桶裡的視為不存在（不給編輯，先還原） */
@@ -237,7 +243,8 @@ export const knowledgeRouter = router({
       z.object({
         projectId: z.string().uuid(),
         kind: z.enum(["transcript", "testimony", "script", "note"]).default("note"),
-        title: z.string().min(1, "請填標題").max(120),
+        // 先 trim 再驗：擋純空白標題（與 characters 同口徑）
+        title: z.string().trim().min(1, "請填標題").max(120),
         content: z.string().min(1, "內容不可為空").max(MAX_CONTENT, `內容過長（上限 ${MAX_CONTENT} 字）`),
         sourceAssetId: z.string().uuid().optional(),
       }),
@@ -273,7 +280,7 @@ export const knowledgeRouter = router({
       z.object({
         id: z.string().uuid(),
         kind: z.enum(["transcript", "testimony", "script", "note"]).optional(),
-        title: z.string().min(1).max(120).optional(),
+        title: z.string().trim().min(1).max(120).optional(),
         content: z.string().min(1).max(MAX_CONTENT).optional(),
       }),
     )
@@ -315,18 +322,19 @@ export const knowledgeRouter = router({
       .where(and(eq(schema.knowledge.id, input.knowledgeId), isNull(schema.knowledge.deletedAt)));
     if (!row) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, row.groupId);
+    // 與 list 同口徑：版本清單只要摘要，SQL 層 length／left，勿載入全文
     const versions = await db
-      .select()
+      .select({
+        id: schema.textVersions.id,
+        title: schema.textVersions.title,
+        chars: sql<number>`length(${schema.textVersions.content})`.mapWith(Number),
+        preview: sql<string>`left(${schema.textVersions.content}, 120)`,
+        createdAt: schema.textVersions.createdAt,
+      })
       .from(schema.textVersions)
       .where(and(eq(schema.textVersions.kind, "knowledge"), eq(schema.textVersions.refId, input.knowledgeId)))
       .orderBy(desc(schema.textVersions.createdAt));
-    return versions.map((v) => ({
-      id: v.id,
-      title: v.title,
-      chars: v.content.length,
-      preview: v.content.slice(0, 120),
-      createdAt: v.createdAt,
-    }));
+    return versions;
   }),
 
   /**

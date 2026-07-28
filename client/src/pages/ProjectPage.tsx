@@ -384,16 +384,17 @@ export function ProjectPage({ id }: { id: string }) {
   const submit = trpc.generation.submit.useMutation({
     onSuccess: (data, vars) => {
       submitRequestId.current = crypto.randomUUID();
-      // 成功生成的提示詞自動入庫（簡報「打過的咒語自動存起來」）——連同模型/角色/場景設定，
-      // 「再用」才能還原完整用法而不只文字（三合一）。生成台知道「完整」狀態：
-      // 沒帶卡就傳 []（明確清空舊設定），與製作範本那種「只知道部分」的存法區隔
-      savePrompt.mutate({
-        projectId: id,
-        text: vars.prompt,
-        modelId: vars.modelId,
-        characterIds: vars.characterIds ?? [],
-        scenePresetIds: vars.scenePresetIds ?? [],
-      });
+      // 成功送出（已進排隊／生成）的提示詞才自動入庫——awaiting_approval 尚未真的生成，
+      // 若駁回／永不核准會留下「從未成功」的咒語，與「成功生成的提示詞會自動存」文案矛盾。
+      if (data.status !== "awaiting_approval" && data.status !== "rejected") {
+        savePrompt.mutate({
+          projectId: id,
+          text: vars.prompt,
+          modelId: vars.modelId,
+          characterIds: vars.characterIds ?? [],
+          scenePresetIds: vars.scenePresetIds ?? [],
+        });
+      }
       setPrompt("");
       setConfirming(false);
       // 達門檻的列不會馬上開始生成——明確告知已送核准，否則使用者會以為卡住
@@ -955,7 +956,7 @@ export function ProjectPage({ id }: { id: string }) {
 
           {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
           <div id="sec-scenes">
-            <ScenePresetCards projectId={id} selectedIds={sceneIds} onToggle={toggleScene} />
+            <ScenePresetCards projectId={id} selectedIds={sceneIds} onToggle={toggleScene} readOnly={!canEdit} />
           </div>
 
           {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}

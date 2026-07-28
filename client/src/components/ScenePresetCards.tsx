@@ -8,15 +8,18 @@ import { AssetImg } from "./MediaFallback";
 /**
  * 場景設定卡（提案核心「場景一致性」）：
  * 色板/光線設定一次鎖定，生成勾選 → 自動注入錨點，同場景跨鏡光影一致。
+ * readOnly（檢視者）：隱藏新增／刪除／設參考圖——後端本就會擋，前端不再「按了才失敗」。
  */
 export function ScenePresetCards({
   projectId,
   selectedIds,
   onToggle,
+  readOnly = false,
 }: {
   projectId: string;
   selectedIds: string[];
   onToggle: (id: string) => void;
+  readOnly?: boolean;
 }) {
   const utils = trpc.useUtils();
   const list = trpc.scenePresets.list.useQuery({ projectId });
@@ -58,6 +61,13 @@ export function ScenePresetCards({
           <div className="skeleton" style={{ height: 104 }} />
           <div className="skeleton" style={{ height: 104 }} />
         </div>
+      ) : list.isError ? (
+        <p className="error" role="alert" style={{ marginTop: 8 }}>
+          場景清單暫時載入不了（不是資料不見了）——
+          <button type="button" className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => list.refetch()}>
+            再試一次
+          </button>
+        </p>
       ) : list.data && list.data.length > 0 ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
           {list.data.map((s) => {
@@ -85,7 +95,7 @@ export function ScenePresetCards({
                 )}
                 <div className="hint" style={{ fontSize: 12, marginTop: 4 }}><Icon name="Palette" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.palette}</div>
                 {s.lighting && <div className="hint" style={{ fontSize: 11, marginTop: 3 }}><Icon name="Lightbulb" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.lighting}</div>}
-                {refEditId === s.id ? (
+                {!readOnly && (refEditId === s.id ? (
                   <div style={{ marginTop: 6 }}>
                     <ReferenceImagePicker
                       projectId={projectId}
@@ -105,16 +115,18 @@ export function ScenePresetCards({
                     <Icon name="Image" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
                     {s.referenceUrl ? "換參考圖" : "設參考圖"}
                   </button>
+                ))}
+                {!readOnly && (
+                  <ConfirmButton
+                    triggerStyle={{ padding: "2px 10px", fontSize: 11, marginTop: 6, color: "var(--danger-ink)" }}
+                    disabled={remove.isPending}
+                    onConfirm={() => remove.mutate({ id: s.id })}
+                    message={`刪除場景「${s.name}」？`}
+                    confirmLabel="刪除"
+                  >
+                    刪除
+                  </ConfirmButton>
                 )}
-                <ConfirmButton
-                  triggerStyle={{ padding: "2px 10px", fontSize: 11, marginTop: 6, color: "var(--danger-ink)" }}
-                  disabled={remove.isPending}
-                  onConfirm={() => remove.mutate({ id: s.id })}
-                  message={`刪除場景「${s.name}」？`}
-                  confirmLabel="刪除"
-                >
-                  刪除
-                </ConfirmButton>
               </div>
             );
           })}
@@ -123,7 +135,7 @@ export function ScenePresetCards({
         <p className="hint" style={{ marginTop: 8 }}>還沒有場景——加一張（例：城市清晨＝暖色調、35mm 淺景深、柔和晨光斜射）。</p>
       )}
 
-      {open ? (
+      {!readOnly && (open ? (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
           <label htmlFor="preset-name">場景名</label>
           <input id="preset-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：城市清晨" />
@@ -143,7 +155,7 @@ export function ScenePresetCards({
         </div>
       ) : (
         <button style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setOpen(true)}><Icon name="Plus" /> 新增場景設定</button>
-      )}
+      ))}
       {remove.error && <p className="error" role="alert">{remove.error.message}</p>}
       {update.error && <p className="error" role="alert">參考圖更新失敗：{update.error.message}</p>}
     </section>

@@ -4,12 +4,12 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import {
-  addScheduleItemCore,
   getScheduleItemChecked,
   listScheduleForGroup,
   scheduleWriteDenied,
   updateScheduleItemCore,
 } from "../services/scheduleCore";
+import { executeScheduleCommand } from "../services/scheduleCommand";
 import { queueGroupSync } from "../services/googleCalendar";
 
 /**
@@ -54,7 +54,10 @@ export const scheduleRouter = router({
       sourceMessageId: z.string().uuid().optional(),
       mentions: z.array(z.string().uuid()).max(20).optional(),
     }))
-    .mutation(({ ctx, input }) => addScheduleItemCore({ auth: ctx.auth, ...input })),
+    .mutation(({ ctx, input }) =>
+      // Command：政策 schedule.create + 專案狀態機 write + addScheduleItemCore
+      executeScheduleCommand({ auth: ctx.auth, source: "web", ...input }),
+    ),
 
   update: authedProcedure
     .input(z.object({

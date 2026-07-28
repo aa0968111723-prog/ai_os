@@ -129,6 +129,9 @@ async function tick(): Promise<void> {
  * 掃 status='running' 的 run（inflight 中的交由正常路徑，不插手）：
  *  (a) 目前步驟已有生成、卻卡 queued/running 逾 30 分鐘者：先用既有 advanceGeneration 收斂（fal 或已完成）；
  *      仍收不動的孤兒（送出前被打斷、requestId 缺失，advanceGeneration 無從推進）→ 依帳本淨額退點並標 failed。
+ *  (a′) 步驟已寫佔位 generationId、但生成列從未建立（advanceGeneration NOT_FOUND，常見於
+ *      reserveQuota 反覆 INTERNAL 失敗卻每 tick 刷新 updatedAt 的僵局）：若 run.updatedAt 已逾
+ *      STALE_MS，視同 (b) 收攏——failStaleRun；reapStuckGeneration 對不存在的 id 為 no-op（不退點）。
  *  (b) 目前步驟無生成、且 run 逾 30 分鐘未動（重佈在寫入 generationId 前就被打斷）→ 標該步與 run failed，
  *      並掃這條 run 所有步驟的生成把仍卡著的依帳本淨額退點（done 不動）——解凍點數、放開工作流鎖。
  * 全程 compare-and-set＋復查最新狀態，杜絕與正常推進／使用者按停併發時的重複扣退。
@@ -154,12 +157,15 @@ async function sweepZombies(): Promise<void> {
           try {
             gen = await advanceGeneration(step.generationId);
           } catch (err) {
-            // NOT_FOUND＝佔位 id 已寫回但生成列不存在：交由正常 advanceRun 的冪等重送處理，不在此退點
+            // NOT_FOUND＝佔位 id 已寫回但生成列不存在（見 a′）；其他錯上拋本輪略過
             if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
           }
           // 收斂後仍卡 queued/running 且逾時＝真孤兒：依帳本淨額退點標 failed，下一輪正常 settleStep 收攏 run
           if (gen && (gen.status === "queued" || gen.status === "running") && gen.updatedAt.getTime() < cutoff) {
             await reapStuckGeneration(gen.id);
+          } else if (!gen && run.updatedAt.getTime() < cutoff) {
+            // (a′) 佔位 generationId 永遠找不到列，且 run 已逾時 → 視同 (b) 收攏（不對幽靈 id 退點）
+            await failStaleRun(run);
           }
         } else if (run.updatedAt.getTime() < cutoff) {
           // (b) 目前步驟無生成、run 又逾時未動：重佈在送出前打斷——收攏成 failed 並退凍結點數

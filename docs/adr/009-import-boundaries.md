@@ -1,0 +1,98 @@
+# ADR-009：Import Boundary（分層依賴規則）
+
+- 狀態：Accepted
+- 日期：2026-07-28
+- 適用範圍：`client/`、`server/routers/`、`server/services/` 的靜態 import
+- 相關：TD-10（`chore(architecture): 加入 ADR 與 import boundary`）
+
+## 決策
+
+Aios 以三層邊界約束依賴方向，避免頁面／Router／Service 互相穿透、商業規則複製或前端 bundle 拉入後端實作：
+
+```text
+client  ──HTTP/tRPC──▶  server/routers  ──call──▶  server/services
+   │                         │                          │
+   │  ✗ 不得 import          │  ✗ 不得 import           │  ✗ 不得 import
+   └──── server/*            └──── client/*             └──── routers/*
+         （見例外）                                        （見例外）
+```
+
+`shared/` 為跨端共用契約（型別、純函式、常數），三層皆可依賴；`shared` 不得反向依賴 `client` 或 `server`。
+
+## 規則
+
+### 1. Client 不得 import `server/*`
+
+- `client/**` 不得以相對路徑或別名 import `server/` 底下任何模組（含 `.ts` 實作與型別）。
+- 前端只透過 HTTP／tRPC 與後端通訊；執行期與建置產物不得嵌入 server 原始碼。
+- **允許的替代**：
+  - 共用型別／常數放在 `shared/`。
+  - tRPC 程序呼叫僅經 `client` 端 trpc client（執行期走網路）。
+
+### 2. Server routers 不得 import `client/*`
+
+- `server/routers/**` 不得依賴 React 頁面、hooks 或任何 `client/` 模組。
+- Router 職責：輸入驗證、組裝 Policy／Command／service 呼叫、回傳結果。
+
+### 3. Services 不得 import routers（新程式一律禁止）
+
+- `server/services/**` 不得 import `server/routers/**`。
+- 正確方向：Router → Service；Runner／MCP／Command 亦只呼叫 Service。
+- 若邏輯目前仍掛在 router 檔（例如 helper／core 函式），應逐步抽到 `server/services/*` 或 `shared/*`，而不是讓 service 回頭 import router。
+
+## 既有例外（legacy allowlist）
+
+下列為 **pre-existing** 違規，由 `scripts/check-import-boundaries.mjs` 明確 allowlist。**不得新增**；後續 PR 應逐項移除並從 allowlist 刪除。
+
+### Client → server（tRPC `AppRouter` 型別）
+
+僅為編譯期型別推導，仍耦合 client 編譯圖到 server 樹；理想狀態改為 `shared` 或產生型別檔。
+
+| 檔案 | 匯入 |
+|---|---|
+| `client/src/api.ts` | `../../server/routers`（`import type { AppRouter }`） |
+| `client/src/components/MessagePanel.tsx` | `../../../server/routers` |
+| `client/src/pages/AdminPage.tsx` | `../../../server/routers` |
+| `client/src/pages/ChatPage.tsx` | `../../../server/routers` |
+| `client/src/pages/MembersPage.tsx` | `../../../server/routers` |
+
+### Services → routers（業務 helper 尚未下沉）
+
+| 檔案 | 匯入 | 說明 |
+|---|---|---|
+| `server/services/agentCore.ts` | `../routers/knowledge`（`buildKnowledgeContext`）、`../routers/assistant`（`MODEL_CHEATSHEET`） | 知識／助理 helper 仍在 router 檔 |
+| `server/services/agentRunner.ts` | `../routers/director`、`../routers/approvals`、`../routers/assistant` | 分鏡拆本、核准、scene fill 仍在 router |
+| `server/services/agentSplitRecovery.pg.test.ts` | `../routers/director` | 測試沿用 `splitScriptCore` |
+| `server/services/generationCore.ts` | `../routers/characters`、`../routers/scenePresets` | anchor builder 仍在 router |
+| `server/services/messageAssistant.ts` | `../routers/knowledge` | 同上 knowledge helper |
+| `server/services/restApi.ts` | `../routers/schedule`（`buildIcs`） | ICS 建置仍在 schedule router |
+
+## 強制機制
+
+- 腳本：`scripts/check-import-boundaries.mjs`
+- npm：`npm run check:boundaries`
+- 行為：掃描 `client/` 與 `server/` 的靜態 `import`／`export … from`／`require`／動態 `import()`；命中禁止邊且不在 allowlist 則 **exit 1**。
+- 新增 allowlist 項目必須在本 ADR 同步說明理由與移除條件；預設 PR 審查拒絕擴大 allowlist。
+
+## 驗收
+
+- `npm run check:boundaries` 在乾淨樹上通過（僅 allowlist 內例外）。
+- 新程式若跨層 import，腳本必須失敗。
+- 本 ADR 與 allowlist 內容一致。
+
+## 後果
+
+### 正面
+
+- 依賴方向可機器檢查，減少「service 倒吃 router」與前端誤拉後端。
+- 後續抽 Command／Policy 時邊界更清楚。
+
+### 代價
+
+- 遷移前需維護 allowlist；tRPC `AppRouter` 型別仍暫時穿層。
+- 純文字掃描不解析 re-export 圖的全部間接依賴（以直接 import 為主，足以防回歸）。
+
+## 後續工作（非本 PR 範圍）
+
+1. 將 `AppRouter` 型別匯出路徑收斂到不拖入 server 實作的契約（或 codegen）。
+2. 把 `buildKnowledgeContext`、`splitScriptCore`、`buildIcs`、character/scene anchor 等 helper 下沉至 `server/services/*` 或 `shared/*`，並清空 services→routers allowlist。

@@ -1,73 +1,73 @@
 # TD-00 技術債治理基線報告
 
-> 狀態：In progress（隨 TD-01～03 首批落地同步建立）  
+> 狀態：**本批技術債主線已落地**（TD-00～10 核心 + ANIM-00/01 + GPU-00/01 + HIGH 批次已關 + 部分 MEDIUM 快修）  
 > 日期：2026-07-28  
-> 分支：`feat/td-core-policy-command-worker`
+> 分支：`feat/td-core-policy-command-worker`（PR #155）
 
-## 1. 目的
+## 1. 已落地總表
 
-在重構擴散前，把「多入口政策／專案狀態／成本門檻」鎖成可失敗測試，並記錄現況。
-
-## 2. 已落地（本批次）
-
-| 項目 | 位置 | 狀態 |
+| ID | 項目 | 狀態 |
 |---|---|---|
-| Policy Engine | `server/services/policyEngine.ts` | implemented |
-| 政策矩陣測試 | `server/services/policyEngine.test.ts` | implemented |
-| 專案狀態機 | `server/services/projectState.ts` | implemented |
-| assertProjectNotArchived → 狀態機 | `server/services/projectAcl.ts` | adapted |
-| Generation Command | `server/services/generationCommand.ts` | implemented |
-| Web 生成／重試 | `server/routers/generation.ts` | wired |
-| 分鏡就地生成／配音 | `server/routers/scenes.ts` | wired |
-| MCP `submit_generation` | `server/services/mcp.ts` | wired |
-| PROCESS_ROLE | `server/services/processRole.ts` + boot | implemented |
-| SSRF 回歸補強 | `databaseFiles.test.ts` | extended |
+| TD-00 | 基線報告與政策矩陣測試 | ✅ |
+| TD-01 | Policy Engine | ✅ |
+| TD-02 | Generation Command（Web/MCP/workflow/agent） | ✅ |
+| TD-03 | 專案狀態機 active/paused/archived | ✅ |
+| TD-04 | SSRF 回歸 | ✅ |
+| TD-05a | auth.me capabilities | ✅ |
+| TD-05b | 導覽 capability 閘門 | ✅ |
+| TD-06 | AppShell / AppRoutes / Header 拆分 | ✅ |
+| TD-07/07b | PROCESS_ROLE + worker 不提供 SPA + readiness 區分 web/worker runner | ✅（見 §5 殘件） |
+| TD-08 | schema 領域拆檔 + orphan report | ✅ |
+| TD-09 | cost ledger 模型文件與 shared types | ✅（無破壞 migration） |
+| TD-10 | import boundary ADR + check script | ✅ |
+| ANIM-00 | 動畫純契約與基線測試 | ✅ |
+| ANIM-01 | Production / Sequence / Shot adapter | ✅ |
+| GPU-00 | CloudInferenceProvider + Beam mock | ✅ |
+| GPU-01 | free image PoC `submitCloudMock` | ✅ |
+| Commands | schedule / note / task / database write | ✅ |
+| HIGH | 封存專案 UI、generateInto kind、prompt max、錄音 cleanup、auth leak、zombie 佔位 generation、UUID、UI refresh | ✅ 本批已關 |
+| MEDIUM 快修 | 釘選留言恒在、knowledge purge 清 textVersions、scenePresets readOnly／isError、角色卡 isError、資料庫列 canDelete 對齊建立者 | ✅ 部分 |
 
-## 3. 多入口覆蓋矩陣
+## 2. 刻意未一次做完（需獨立 PR／營運）
 
-| 入口 | generation.submit 政策 | 狀態機 generate | 備註 |
-|---|---|---|---|
-| Web / tRPC direct | ✅ Command | ✅ | `executeGenerationCommand` source=web |
-| MCP | ✅ Command | ✅ | source=mcp |
-| REST `/api/v1` | ⏳ open | ⏳ | 若部署暴露 REST 生成入口需下一 PR 接 Command |
-| workflow runner | ✅ Command | ✅ | source=workflow, backgroundResume |
-| agent runner | ✅ Command | ✅ | source=agent, backgroundResume |
-| approval resume (`decideCost`) | ⏳ open | ✅ 既有 archived 守衛 | 待改 assertProjectAllows(approve) |
-| schedule / background | N/A 生成 | ✅ scheduleCore 既有 | |
+| 項目 | 原因 |
+|---|---|
+| PostgreSQL RLS | 獨立大 migration 與跨入口負向測試 |
+| 正式監控／備份還原演練 | 需平台帳號與演練窗口 |
+| ANIM-02～10 產品域模型 | ANIM-01 adapter + ANIM-02 continuity pure foundation 已落地；DB 版本表與後續依賴場景／分鏡產品化 |
+| GPU-02～ 真實 Beam | 需 secret 與部署；本批僅 mock |
+| REST 生成入口 | **未部署**（`/api/v1` 僅 databases／CSV／ICS，見 `server/services/restApi.ts`），故延期；日後若新增 REST 生成必須走 `executeGenerationCommand`（不可直呼 core） |
+| 細節缺漏 MEDIUM/LOW 全表 | 219 項；HIGH 已關；其餘按路線圖 |
 
-## 4. 安全回歸（P0）
+## 3. 驗證命令
 
-| 案例 | 測試／程式 | 狀態 |
+```bash
+npm run typecheck
+npm run check:boundaries
+npm run report:orphans   # 無 DATABASE_URL 時 skip exit 0
+npm test
+npm run test:client
+```
+
+## 4. 回退
+
+- Policy／Command 為薄殼，可改回直呼 core
+- schema 拆檔為 re-export，回退可合併檔案
+- PROCESS_ROLE 預設 `all`，行為與舊部署一致
+
+## 5. TD-07 remaining（刻意未做／低風險殘件）
+
+已落地：
+
+- `PROCESS_ROLE=web|worker|all`（`server/services/processRole.ts`）
+- web **不**啟動背景 Runner（generation／workflow／agent／export／feedback／calendar sweep）
+- worker **不**掛 SPA 靜態檔；非 API catch-all 回 503 JSON（TD-07b）
+- `/api/ready` 回傳 `processRole`；web 的 `components.runner` 為 skipped，不拖垮就緒
+
+刻意未做（需獨立 PR，避免大重寫）：
+
+| 殘件 | 現況 | 建議後續 |
 |---|---|---|
-| 字面私網／localhost／metadata | `databaseFiles.test.ts` ssrfGuardError | verified |
-| DNS 解析後 isPrivateIp | `databaseFiles.test.ts` isPrivateIp | verified |
-| 成本門檻 policy 預判 | `policyEngine.test.ts` | verified（core 仍為最終扣點真相） |
-| 封存不得生成 | projectState + generationCore | verified |
-| 暫停不得生成 | projectState（UI 尚未全面暴露 paused） | implemented |
-| XFF 登入限流 | 既有 rateLimit 測試 | open（本批未重跑 e2e） |
-
-## 5. 後續 PR（不得一次做完）
-
-1. **TD-02b**：workflowRunner / agentRunner 改呼叫 `executeGenerationCommand`（source=workflow|agent, backgroundResume）
-2. **TD-03b**：`decideCost` 用 `assertProjectAllows(..., "approve")`；paused UI
-3. **TD-05a/b**：capability 回傳前端導覽
-4. **TD-06**：App Shell 拆分
-5. **TD-07b**：worker 實例不掛公開路由
-6. **TD-08～10**、ANIM-＊、GPU-＊：見 `technical-debt-remediation-plan.md`
-
-## 6. 成功定義（本批）
-
-- [x] 政策純函式矩陣：跨 source 一致
-- [x] 主要人類生成入口走單一 Command
-- [x] MCP 生成走同一 Command
-- [x] 封存／暫停狀態機可測
-- [x] PROCESS_ROLE 可關 Runner
-- [x] 全部 runner 入口 Command 化
-- [ ] REST 契約測試
-- [ ] 全站 e2e 綠燈於 CI
-
-## 7. 風險與回退
-
-- Command 僅封裝既有 `submitGenerationCore`，扣點／fal 行為不變。
-- 回退：router 改回直接 `submitGenerationCore` + 舊 assertAccess 即可。
-- `PROCESS_ROLE=web` 時背景生成不會推進——多實例部署需至少一個 worker/all。
+| `createApp()` / 完整 bootstrap 拆檔 | 僅有 `server/bootstrap/httpSurface.ts`、`runnerReadiness.ts`；路由仍在 `server/index.ts` | 依 `docs/核心模組拆解計畫.md` 分階段抽出 |
+| worker 剝除產品 API（tRPC／REST／upload） | worker 仍掛完整 API 表面（與 monorepo 單映像共用 process 一致）；僅 SPA 關閉 | 部署拆映像後再加 HTTP surface 閘門 |
+| 多 replica 同工作去重 | 既有 runner advisory lock／CAS；非本批範圍 | 維運多 replica 時回歸 lease fencing |

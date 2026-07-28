@@ -163,9 +163,13 @@ describe("runner lock source regression guards", () => {
       expect(source).toContain(
         "resolveBackgroundProjectRole(run.userId, run.projectId",
       );
-      expect(source).toContain("assertAccess: () => accessRole");
+      // TD-02：背景生成走 Command（重載 auth），不再直傳 assertAccess 給 generationCore
+      expect(source).toContain("executeGenerationCommand({");
+      expect(source).toContain("backgroundResume: true");
       expect(source).toContain('gen.status === "awaiting_approval"');
       expect(source).toContain('gen.status === "failed" || gen.status === "rejected"');
     }
+    expect(workflowSource).toContain('source: "workflow"');
+    expect(agentSource).toContain('source: "agent"');
   });
 });

@@ -19,6 +19,7 @@ import {
   getInvitePreview,
   loadAuthState,
 } from "../services/auth";
+import { authMeCapabilities } from "../services/policyEngine";
 import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 import {
   RateLimitConfigurationError,
@@ -52,8 +53,15 @@ async function guardedAuthRateLimit<T>(operation: () => Promise<T>): Promise<T> 
 }
 
 export const authRouter = router({
-  /** 目前登入狀態（未登入回 null，前端據此顯示登入頁） */
-  me: publicProcedure.query(({ ctx }) => ctx.auth),
+  /**
+   * 目前登入狀態（未登入回 null，前端據此顯示登入頁）。
+   * 登入時附 capabilitiesByGroupId／capabilities，供 UI 依 Policy Engine 真相來源導覽，
+   * 不再自行拼 isAdmin||isLeader（TD-05a）。既有 user／groups／adminTeamIds 仍完整回傳。
+   */
+  me: publicProcedure.query(({ ctx }) => {
+    if (!ctx.auth) return null;
+    return { ...ctx.auth, ...authMeCapabilities(ctx.auth) };
+  }),
 
   /** 邀請預覽（不消耗 token）：落地頁填資料前先確認連結有效、要加入哪個組 */
   invitePreview: publicProcedure
@@ -128,15 +136,38 @@ export const authRouter = router({
 
   /** 邀請連結落地：設定姓名密碼 → 建帳號＋入團隊/組 → 自動登入 */
   acceptInvite: publicProcedure
-    .input(z.object({ token: z.string().min(10), name: z.string().min(1, "請填姓名").max(40, "名字太長（最多 40 字）"), password: z.string().min(8, "密碼至少 8 碼") }))
+    // name 先 trim 再驗 min——否則 "   " 會通過 min(1) 建出空白顯示名
+    .input(z.object({ token: z.string().min(10), name: z.string().trim().min(1, "請填姓名").max(40, "名字太長（最多 40 字）"), password: z.string().min(8, "密碼至少 8 碼") }))
     .mutation(async ({ ctx, input }) => {
       try {
-        const { userId } = await acceptInvite(input.token, input.name.trim(), input.password);
+        const { userId } = await acceptInvite(input.token, input.name, input.password);
         const token = await createSession(userId);
         setSessionCookie(ctx.res, token);
         return loadAuthState(userId);
       } catch (err) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "邀請無效" });
+        // 只放行 acceptInvite service 明確 throw 的中文 Error；DB/SQL 內部錯一律吞成泛用訊息，不外洩。
+        if (err instanceof TRPCError) throw err;
+        const msg = err instanceof Error ? err.message : "";
+        if (isSafeAcceptInviteMessage(msg)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: msg });
+        }
+        console.error("[auth] acceptInvite unexpected error:", err instanceof Error ? err.message : err);
+        throw new TRPCError({ code: "BAD_REQUEST", message: "邀請處理失敗，請稍後再試" });
       }
     }),
 });
+
+/**
+ * acceptInvite service 已知的安全中文錯誤（見 server/services/auth.ts）。
+ * 允許全文對齊＋前綴兜底；未知英文/SQL 絕不外洩。
+ */
+function isSafeAcceptInviteMessage(msg: string): boolean {
+  if (!msg) return false;
+  const knownExact = new Set([
+    "邀請連結無效或已過期",
+    "這個 email 已經有帳號了，請直接用原本的密碼登入；要加入新團隊時，請登入後由管理員把你加入。",
+    "這個 email 已經有帳號了，請直接用原本的密碼登入。",
+  ]);
+  if (knownExact.has(msg)) return true;
+  return msg.startsWith("邀請連結無效") || msg.startsWith("這個 email 已經有帳號了");
+}

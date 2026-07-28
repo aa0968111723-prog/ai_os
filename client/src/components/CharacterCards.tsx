@@ -58,6 +58,13 @@ export function CharacterCards({
           <div className="skeleton" style={{ height: 104 }} />
           <div className="skeleton" style={{ height: 104 }} />
         </div>
+      ) : list.isError ? (
+        <p className="error" role="alert" style={{ marginTop: 8 }}>
+          角色清單暫時載入不了（不是資料不見了）——
+          <button type="button" className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => list.refetch()}>
+            再試一次
+          </button>
+        </p>
       ) : list.data && list.data.length > 0 ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
           {list.data.map((c) => {

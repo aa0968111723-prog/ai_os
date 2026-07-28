@@ -11,7 +11,9 @@ export type ProcessRole = "web" | "worker" | "all";
 
 export function readProcessRole(env: NodeJS.ProcessEnv = process.env): ProcessRole {
   const raw = (env.PROCESS_ROLE ?? "all").trim().toLowerCase();
-  if (raw === "web" || raw === "worker" || raw === "all") return raw;
+  // 未設或空白 → all（開發／小部署預設）；非法字面值才 warn
+  if (!raw || raw === "all") return "all";
+  if (raw === "web" || raw === "worker") return raw;
   console.warn(`[processRole] 未知 PROCESS_ROLE=${raw}，改用 all`);
   return "all";
 }

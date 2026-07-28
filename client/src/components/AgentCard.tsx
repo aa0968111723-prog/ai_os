@@ -230,8 +230,8 @@ export function AgentCard({
       )}
 
       {hideComposer ? (
-        (runs.data ?? []).length === 0 && (
-          <p className="hint">
+        !runs.isLoading && !runs.error && runs.data && runs.data.length === 0 && (
+          <p className="hint" role="status">
             還沒有 AI 執行計畫——在上方對話用一句話下目標（例：「把腳本拆成分鏡並逐鏡出圖」），我會排出逐步計畫與估點，你核准後由伺服器背景執行。
           </p>
         )
@@ -273,6 +273,14 @@ export function AgentCard({
 
       {actionError && <p className="error" role="alert">{actionError.message}</p>}
       {runs.isLoading && <p className="hint" role="status">正在載入代理計畫…</p>}
+      {/* 列表載入成功但無計畫：引導文案（與 hideComposer 空態對齊；錯誤時不顯示以免誤導成「沒有計畫」） */}
+      {!runs.isLoading && !runs.error && runs.data && runs.data.length === 0 && !hideComposer && (
+        <p className="hint" role="status">
+          {canEdit
+            ? "還沒有 AI 執行計畫——輸入目標後按「規劃計畫」；規劃免費，核准後才會開始執行。"
+            : "目前沒有 AI 執行計畫。"}
+        </p>
+      )}
 
       {insights.data && (
         <details className="agent-run" style={{ marginTop: 10 }}>

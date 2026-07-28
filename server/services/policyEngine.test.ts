@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { TRPCError } from "@trpc/server";
+import type { AuthState } from "./auth";
 import {
   assertPolicy,
+  authMeCapabilities,
+  capabilitiesByGroupFromAuth,
   capabilitiesForGroupRole,
   evaluatePolicy,
+  globalCapabilitiesFromAuth,
   type PolicyAction,
   type PolicyContext,
 } from "./policyEngine";
@@ -45,6 +49,75 @@ describe("Policy Engine — capability mapping", () => {
     const caps = capabilitiesForGroupRole(null, { isSuperAdmin: true });
     expect(caps.has("team.manage")).toBe(true);
     expect(caps.has("generation.submit")).toBe(true);
+  });
+});
+
+describe("Policy Engine — auth.me capability payload (TD-05a)", () => {
+  const baseUser = {
+    id: "u1",
+    name: "測試",
+    email: "t@example.com",
+    isSuperAdmin: false,
+    mustChangePassword: false,
+  };
+
+  function auth(over: Partial<AuthState> = {}): AuthState {
+    return {
+      user: baseUser,
+      groups: [
+        { groupId: "g-member", groupName: "組員組", teamId: "t1", teamName: "隊", role: "member" },
+        { groupId: "g-leader", groupName: "組長組", teamId: "t1", teamName: "隊", role: "leader" },
+        { groupId: "g-admin", groupName: "管理組", teamId: "t1", teamName: "隊", role: "admin" },
+      ],
+      adminTeamIds: [],
+      ...over,
+    };
+  }
+
+  it("maps each group to sorted unique capability arrays (stable keys)", () => {
+    const byGroup = capabilitiesByGroupFromAuth(auth());
+    expect(Object.keys(byGroup).sort()).toEqual(["g-admin", "g-leader", "g-member"]);
+
+    expect(byGroup["g-member"]).toEqual([...byGroup["g-member"]].sort());
+    expect(byGroup["g-member"]).toContain("generation.submit");
+    expect(byGroup["g-member"]).not.toContain("generation.approve");
+    expect(byGroup["g-member"]).not.toContain("group.manage_members");
+
+    expect(byGroup["g-leader"]).toContain("generation.approve");
+    expect(byGroup["g-leader"]).toContain("group.manage_members");
+    expect(byGroup["g-leader"]).not.toContain("team.manage");
+
+    expect(byGroup["g-admin"]).toContain("team.manage");
+    expect(byGroup["g-admin"]).toContain("audit.view");
+  });
+
+  it("team admin on membership team gets full caps for that group", () => {
+    const byGroup = capabilitiesByGroupFromAuth(
+      auth({ adminTeamIds: ["t1"] }),
+    );
+    expect(byGroup["g-member"]).toContain("team.manage");
+    expect(byGroup["g-member"]).toContain("generation.approve");
+  });
+
+  it("global capabilities: superAdmin full set; team admin team.manage; plain empty", () => {
+    expect(globalCapabilitiesFromAuth(auth())).toEqual([]);
+    expect(globalCapabilitiesFromAuth(auth({ adminTeamIds: ["t1"] }))).toEqual(
+      ["team.manage", "team.view"].sort(),
+    );
+    const superCaps = globalCapabilitiesFromAuth(
+      auth({ user: { ...baseUser, isSuperAdmin: true }, groups: [], adminTeamIds: [] }),
+    );
+    expect(superCaps).toContain("team.manage");
+    expect(superCaps).toContain("generation.submit");
+    expect(superCaps).toEqual([...superCaps].sort());
+  });
+
+  it("authMeCapabilities shape is stable for me response", () => {
+    const payload = authMeCapabilities(auth());
+    expect(payload).toEqual({
+      capabilitiesByGroupId: capabilitiesByGroupFromAuth(auth()),
+      capabilities: globalCapabilitiesFromAuth(auth()),
+    });
   });
 });
 
@@ -114,6 +187,67 @@ describe("Policy Engine — multi-entry matrix (TD-00 baseline)", () => {
     expect(() =>
       assertPolicy("generation.approve", ctx({ groupRole: "member" })),
     ).toThrow(TRPCError);
+  });
+});
+
+/**
+ * ANIM-00：鏡頭生成（visual／narration）在 direct／workflow／agent／MCP 必須同一政策。
+ * 不重複實作 Command，只鎖 evaluatePolicy 對 source 無關的允許矩陣。
+ */
+describe("ANIM-00 shot generation — same policy across direct/workflow/agent", () => {
+  const shotSources = ["web", "mcp", "workflow", "agent"] as const;
+
+  it("editor member can submit shot visual/narration generation on every entry", () => {
+    for (const source of shotSources) {
+      const d = evaluatePolicy(
+        "generation.submit",
+        ctx({ groupRole: "member", projectRole: "editor", source }),
+      );
+      expect(d.allowed, `source=${source}`).toBe(true);
+      expect(d.requiresApproval).toBe(false);
+    }
+  });
+
+  it("viewer is denied shot generation on direct, workflow, agent, and MCP alike", () => {
+    for (const source of shotSources) {
+      const d = evaluatePolicy(
+        "generation.submit",
+        ctx({ groupRole: "member", projectRole: "viewer", source }),
+      );
+      expect(d.allowed, `source=${source}`).toBe(false);
+    }
+  });
+
+  it("cost threshold requiresApproval is identical for web vs workflow vs agent", () => {
+    const threshold = {
+      groupRole: "member" as const,
+      projectRole: "editor" as const,
+      estimatedPoints: 50,
+      approvalThresholdPoints: 10,
+    };
+    const decisions = shotSources.map((source) =>
+      evaluatePolicy("generation.submit", ctx({ ...threshold, source })),
+    );
+    for (const d of decisions) {
+      expect(d.allowed).toBe(true);
+      expect(d.requiresApproval).toBe(true);
+    }
+    // 決策理由／形狀一致（source 不得改寫門檻邏輯）
+    expect(new Set(decisions.map((d) => `${d.allowed}:${d.requiresApproval}`)).size).toBe(1);
+  });
+
+  it("archived/paused project state blocks generate for animation pipeline (projectState)", () => {
+    // Command 層 assertProjectAllows(generate) 與 source 無關
+    for (const status of ["archived", "paused"] as const) {
+      expect(projectStateAllows(status, "generate")).toBe(false);
+      expect(() => assertProjectAllows({ status }, "generate")).toThrow();
+    }
+    expect(projectStateAllows("active", "generate")).toBe(true);
+  });
+
+  it("export remains allowed when project is archived (delivery path)", () => {
+    expect(projectStateAllows("archived", "export")).toBe(true);
+    expect(projectStateAllows("paused", "export")).toBe(true);
   });
 });
 

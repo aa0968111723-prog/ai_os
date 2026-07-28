@@ -7,6 +7,7 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { getModel } from "../../shared/models";
 import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
+import { MAX_PROMPT_CHARS } from "./prompts";
 
 /**
  * forEdit（需求 2.3 專案級權限）：分鏡的所有「寫入」mutation 走 forEdit=true——
@@ -281,7 +282,8 @@ export const scenesRouter = router({
     .input(z.object({
       sceneId: z.string().uuid(),
       modelId: z.string(),
-      prompt: z.string().optional(),
+      // 與 generation.submit / prompts.save 同口徑
+      prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
       /** 冪等鍵：timeout 重送同鍵回原列，不重複扣點 */
       clientRequestId: z.string().uuid().optional(),
       /** 生成台勾選的角色/場景卡：就地生成也注入同一套錨點——否則逐鏡出圖與生成台出圖畫風/角色不一致 */
@@ -296,6 +298,12 @@ export const scenesRouter = router({
       if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
       const project = await getProjectChecked(ctx, scene.projectId, true);
       assertProjectNotArchived(project); // 封存專案不接受付費生成
+      // kind 守衛（與 generateVoiceover 對稱）：就地生成回填主畫面 assetId，只接受圖像/影片模型。
+      // text 模型扣點後不會入素材庫；audio 模型會把音訊寫進 visual 槽造成破圖。
+      const model = getModel(input.modelId);
+      if (!model || (model.kind !== "image" && model.kind !== "video")) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡就地生成需要用圖像或影片模型" });
+      }
       const prompt = input.prompt ?? scene.prompt ?? "";
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       // 伺服器端防抖：這一格已有進行中的「畫面」生成就擋下——本鈕直接扣點、無二次確認，快速雙擊會重複送出、

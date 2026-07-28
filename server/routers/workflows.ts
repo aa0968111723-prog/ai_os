@@ -90,7 +90,8 @@ export const workflowsRouter = router({
       z.object({
         projectId: z.string().uuid(),
         presetId: z.string(),
-        prompt: z.string().min(1, "請填想法").max(8000, "想法過長（上限 8000 字）"),
+        // 先 trim 再驗非空／上限：擋純空白；max 與 assistant run_workflow 同口徑（2000）
+        prompt: z.string().trim().min(1, "請填想法").max(2000, "想法過長（上限 2000 字）"),
         /** 生成台勾選的角色/場景卡：整條工作流的視覺步驟都注入同一套錨點（上限與 generation.submit 同口徑） */
         characterIds: z.array(z.string().uuid()).max(6).optional(),
         scenePresetIds: z.array(z.string().uuid()).max(4).optional(),

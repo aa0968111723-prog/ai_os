@@ -6,6 +6,7 @@ import { db, schema } from "../db";
 import { MAX_FILE_CATEGORY, normalizeFileCategory, validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
 import { addDataRowValidated, removeDataRow, updateDataRowValidated } from "../services/databaseCore";
+import { executeDatabaseWriteCommand } from "../services/databaseCommand";
 import {
   executeIdempotentDatabaseBatch,
   IDEMPOTENCY_KEY_MAX_LENGTH,
@@ -228,11 +229,17 @@ export const databasesRouter = router({
   addRow: authedProcedure
     .input(z.object({ tableId: z.string().uuid(), data: z.record(z.unknown()) }))
     .mutation(async ({ ctx, input }) => {
-      const { table, access } = await getTableChecked(ctx.auth, input.tableId);
-      if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
+      // Command：政策 database.write + 專案狀態機 write（若 project-bound）+ databaseCore
       try {
-        return await addDataRowValidated(table, ctx.auth.user.id, input.data);
+        return await executeDatabaseWriteCommand({
+          auth: ctx.auth,
+          source: "web",
+          action: "addRow",
+          tableId: input.tableId,
+          data: input.data,
+        });
       } catch (err) {
+        if (err instanceof TRPCError) throw err;
         throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "新增失敗" });
       }
     }),
@@ -675,6 +682,10 @@ export const databasesRouter = router({
         }
         if (fetched.mime === "text/html") {
           text = htmlToText(fetched.buf.toString("utf8")).slice(0, MAX_TEXT_CHARS);
+          // 與 importUrl 同口徑：抽不到字就報錯，保留既有 textContent，不靜默清空
+          if (!text) {
+            throw new Error("這個網頁抓不到可讀文字（可能是純前端渲染的頁面）——試試該平台的匯出功能後上傳");
+          }
           sizeBytes = Buffer.byteLength(text, "utf8"); // 與 importUrl 同口徑：網頁只算文字，不算原始 HTML
           newStoragePath = null; // 網頁匯入不留原檔
         } else {

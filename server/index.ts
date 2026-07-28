@@ -56,10 +56,16 @@ import {
   onShutdown,
   trackBackgroundTask,
 } from "./services/shutdown";
+import { readProcessRole, shouldRunWorkers } from "./services/processRole";
+import { httpSurfaceForRole } from "./bootstrap/httpSurface";
+import { evaluateRunnerReadiness } from "./bootstrap/runnerReadiness";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
 const isProd = process.env.NODE_ENV === "production";
+// TD-07 / TD-07b：Web／Worker 邊界（預設 all；worker 仍 listen HTTP 但不掛 SPA）
+const processRole = readProcessRole();
+const httpSurface = httpSurfaceForRole(processRole);
 // 啟動前 fail fast：不能等到第一個登入/MCP/AI 請求才發現 HMAC 金鑰缺失，也絕不退回記憶體限流。
 assertRateLimitConfiguration();
 
@@ -187,19 +193,9 @@ app.get("/api/ready", async (_req, res) => {
     components.storage = { ok: false, note: "error（儲存層無法寫入/讀取）" };
   }
 
-  // 生成執行器心跳：boot 完成後 runner 應已啟動且近 60 秒內有 tick（tick 間隔 6 秒）
-  {
-    const hb = runnerHeartbeat();
-    if (!bootReady) {
-      components.runner = { ok: true, note: "pending（等待初始化完成後啟動）" };
-    } else if (!hb.started) {
-      components.runner = { ok: false, note: "not_started（生成執行器未啟動）" };
-    } else if (hb.lastTickAt !== null && Date.now() - hb.lastTickAt > 60_000) {
-      components.runner = { ok: false, note: "stalled（生成執行器逾 60 秒沒有心跳）" };
-    } else {
-      components.runner = { ok: true, note: "ok（生成執行器運作中）" };
-    }
-  }
+  // 生成執行器心跳：worker／all 在 boot 完成後應已啟動且近 60 秒內有 tick；
+  // web 不跑 Runner（TD-07），分項回 skipped 且不拖垮整體就緒。
+  components.runner = evaluateRunnerReadiness(processRole, bootReady, runnerHeartbeat());
 
   // 必要 provider 設定：正式模式需要媒體生成金鑰（只回是否已設定，不洩其值/模式細節）
   components.provider = isMockMode() || process.env.FAL_KEY
@@ -209,8 +205,10 @@ app.get("/api/ready", async (_req, res) => {
   const ok = Object.values(components).every((c) => c.ok);
   // 頂層 db/boot 維持舊版字串形狀：CI e2e 以 grep '"boot":"ready' 等就緒、
   // e2e-phase4 驗頂層 boot 鍵，文件也教管理員看這兩個欄位——分項細節在 components。
+  // processRole：讓部署／探針區分 web 與 worker 實例的必要元件期望。
   res.status(ok ? 200 : 503).json({
     ok,
+    processRole,
     db: components.db.ok ? "connected（資料庫已接通）" : "error（資料庫未接通）",
     boot: bootReady ? "ready（初始化完成）" : "initializing（migration/schema 驗證或種子同步中；持續發生請查部署 log）",
     components,
@@ -1303,8 +1301,8 @@ app.all("/api/*", (req, res) => {
   res.status(404).json({ error: "找不到這個 API 路徑", path: req.path });
 });
 
-// 正式環境：服務打包後的前端
-if (isProd) {
+// 正式環境：服務打包後的前端（TD-07b：worker 僅健康檢查表面，不掛 SPA 靜態檔）
+if (isProd && httpSurface.serveSpa) {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
   const publicDir = path.join(dirname, "public");
   app.use((req, res, next) => {
@@ -1322,6 +1320,14 @@ if (isProd) {
     },
   }));
   app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
+} else if (isProd && !httpSurface.serveSpa) {
+  // worker-only：不回 index.html，明確 503 避免負載均衡把 UI 流量打到背景實例
+  app.get("*", (_req, res) => {
+    res.status(503).json({
+      error: "此實例為 worker，僅提供健康檢查，不提供產品 UI",
+      processRole,
+    });
+  });
 }
 
 // 統一 JSON 錯誤處理（QA-022）：body-parser 的 malformed JSON／過大請求不再回 Express 預設 HTML 錯誤頁。
@@ -1376,6 +1382,9 @@ function scheduleFeedbackSweep(): void {
 const httpServer = app.listen(port, () => {
   const falMode = isMockMode() ? "E2E 測試模式（僅供自動化測試）" : process.env.FAL_KEY ? "正式模式" : "正式模式（⚠ FAL_KEY 未設定，媒體生成會失敗）";
   console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${falMode}）`);
+  if (!httpSurface.serveSpa) {
+    console.log(`[boot] PROCESS_ROLE=${processRole} — HTTP 僅健康檢查，不提供 SPA`);
+  }
   try {
     ensureStorageDirs();
     console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（持久 Volume）" : "（本機模式）"}`);
@@ -1422,8 +1431,6 @@ const httpServer = app.listen(port, () => {
         if (isShuttingDown()) return;
         markBootReady();
         // TD-07：PROCESS_ROLE 分離 Web／Worker（web 不啟動 Runner；worker 仍與 all 同跑背景）
-        const { readProcessRole, shouldRunWorkers } = await import("./services/processRole");
-        const processRole = readProcessRole();
         // schema 驗證與種子同步後才啟動背景執行器，避免資料庫版本未就緒時空轉報錯。
         if (shouldRunWorkers(processRole)) {
           startWorkflowRunner();

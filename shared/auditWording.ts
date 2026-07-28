@@ -37,6 +37,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "generation.rename": "重新命名成品",
   "generation.toggleFavorite": "收藏／取消收藏成品",
   "generation.decideCost": "核決超額生成",
+  "generation.submitCloudMock": "送出免費雲端模擬生成",
   // 模型即時目錄（Fal 價／新模型上架；開發者手動同步）
   "models.syncLive": "同步即時模型價格與目錄",
   "quota.updateSettings": "更新點數全域設定",

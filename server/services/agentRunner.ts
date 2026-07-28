@@ -251,7 +251,13 @@ async function sweepExpiredAgentPlans(): Promise<void> {
   lastPlanExpirySweepAt = now;
 }
 
-/** 陳屍回收：與 workflowRunner 同語義——卡住的生成收斂退點；送出前被打斷的 run 收攏成 failed */
+/**
+ * 陳屍回收：與 workflowRunner 同語義——卡住的生成收斂退點；送出前被打斷的 run 收攏成 failed。
+ *  (a) running 步驟已有 generationId：先 advanceGeneration 收斂；仍卡 queued/running 逾 STALE_MS → reapStuckGeneration。
+ *  (a′) 步驟已寫佔位 generationId、但生成列從未建立（advanceGeneration NOT_FOUND）：若全部 running 步驟
+ *      皆為幽靈 id 且 run.updatedAt 已逾 STALE_MS，視同 (b) 收攏——failStaleRun；reap 對不存在的 id 為 no-op。
+ *  (b) 無 generation 步驟且 run 逾 STALE_MS 未動 → failStaleRun。
+ */
 async function sweepZombies(): Promise<void> {
   const cutoff = Date.now() - STALE_MS;
   const runs = await db
@@ -267,16 +273,26 @@ async function sweepZombies(): Promise<void> {
         const steps = run.steps as AgentStep[];
         const generationSteps = steps.filter((step) => step.status === "running" && step.generationId);
         if (generationSteps.length) {
+          // 是否至少一筆真正找到 generation 列（全 NOT_FOUND＝佔位幽靈，見 a′）
+          let anyGenFound = false;
           for (const step of generationSteps) {
             let gen: GenerationRow | null = null;
             try {
               gen = await advanceGeneration(step.generationId!);
             } catch (err) {
+              // NOT_FOUND＝佔位 id 已寫回但生成列不存在（見 a′）；其他錯上拋本輪略過
               if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
             }
-            if (gen && (gen.status === "queued" || gen.status === "running") && gen.updatedAt.getTime() < cutoff) {
-              await reapStuckGeneration(gen.id);
+            if (gen) {
+              anyGenFound = true;
+              if ((gen.status === "queued" || gen.status === "running") && gen.updatedAt.getTime() < cutoff) {
+                await reapStuckGeneration(gen.id);
+              }
             }
+          }
+          // (a′) 全部佔位 generationId 永遠找不到列，且 run 已逾時 → 視同 (b) 收攏（不對幽靈 id 退點）
+          if (!anyGenFound && run.updatedAt.getTime() < cutoff) {
+            await failStaleRun(run);
           }
         } else if (run.updatedAt.getTime() < cutoff) {
           await failStaleRun(run);

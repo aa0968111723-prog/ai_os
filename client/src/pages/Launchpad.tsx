@@ -58,7 +58,16 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const [, navigate] = useLocation();
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
-  const projects = trpc.projects.list.useQuery({ groupId: groupId || undefined }, { enabled: !!groupId });
+  // 工具列：搜尋／類型篩選／排序／已封存／漸進顯示（includeArchived 影響 list query，須先於它宣告）
+  const [q, setQ] = useState("");
+  const [kindFilter, setKindFilter] = useState("");
+  const [sort, setSort] = useState<"recent" | "title">("recent");
+  const [includeArchived, setIncludeArchived] = useState(false);
+  const [limit, setLimit] = useState(24);
+  const projects = trpc.projects.list.useQuery(
+    { groupId: groupId || undefined, includeArchived: includeArchived || undefined },
+    { enabled: !!groupId },
+  );
   // 跨專案待辦（UX 高：首頁不顯示待審/待核→組長漏審、組員卡住）：專案卡角標用；60 秒輪詢跟上變化
   const pendingSummary = trpc.approvals.pendingSummary.useQuery({ groupId }, { enabled: !!groupId, refetchInterval: 60_000 });
   const pendingOf = (pid: string) => pendingSummary.data?.projects.find((x) => x.projectId === pid);
@@ -80,15 +89,14 @@ export function Launchpad({ groupId }: { groupId: string }) {
       navigate(`/p/${project.id}`);
     },
   });
+  // 還原已封存：組長／負責人可從卡片直接還原（與 ProjectPage 封存鈕同一 mutation）
+  const restoreProject = trpc.projects.setArchived.useMutation({
+    onSuccess: () => utils.projects.list.invalidate(),
+  });
 
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<string>("");
   const [platform, setPlatform] = useState<string>("");
-  // 工具列：搜尋／類型篩選／排序／漸進顯示
-  const [q, setQ] = useState("");
-  const [kindFilter, setKindFilter] = useState("");
-  const [sort, setSort] = useState<"recent" | "title">("recent");
-  const [limit, setLimit] = useState(24);
 
   const [firstRunDismissed, setFirstRunDismissed] = useState<boolean>(() => {
     try {
@@ -120,6 +128,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
   useEffect(() => {
     setKindFilter("");
     setQ("");
+    setIncludeArchived(false);
     setLimit(24);
   }, [groupId]);
 
@@ -131,6 +140,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
   }, [platformOptions, platform]);
 
   const activeGroup = me.data?.groups.find((g) => g.groupId === groupId);
+  const myRole = activeGroup?.role;
+  const isLeader = myRole === "leader" || myRole === "admin";
   const pickedPlatform = platformOptions.find((p) => p.value === platform);
 
   const all = projects.data ?? [];
@@ -215,27 +226,45 @@ export function Launchpad({ groupId }: { groupId: string }) {
           「追問」還會把 A 組對話歷史連同新 groupId 送去 B 組（跨組脈絡外溢） */}
       {groupId && <TeamAssistantCard key={groupId} groupId={groupId} />}
 
-      {/* 工具列：搜尋／類型篩選／排序（有專案才顯示） */}
-      {all.length > 0 && (
+      {/* 工具列：搜尋／類型篩選／排序／顯示已封存（有專案或開了已封存才顯示完整工具列；
+          「顯示已封存」在空狀態也要可見，否則封存後再也找不到還原入口） */}
+      {(all.length > 0 || includeArchived || !!groupId) && !projects.isLoading && (
         <div className="launch-toolbar" style={{ marginBottom: 16 }}>
-          <input
-            style={{ flex: "1 1 200px", width: "auto" }}
-            placeholder="搜尋專案名稱…"
-            value={q}
-            onChange={(e) => { setQ(e.target.value); setLimit(24); }}
-            aria-label="搜尋專案"
-          />
-          <select style={{ width: "auto", flex: "0 0 auto" }} value={kindFilter} onChange={(e) => { setKindFilter(e.target.value); setLimit(24); }} aria-label="依類型篩選">
-            <option value="">全部類型</option>
-            {kindOptions.map((k) => (
-              <option key={k.id} value={k.value}>{k.label}</option>
-            ))}
-          </select>
-          <select style={{ width: "auto", flex: "0 0 auto" }} value={sort} onChange={(e) => setSort(e.target.value as "recent" | "title")} aria-label="排序方式">
-            <option value="recent">最近</option>
-            <option value="title">名稱</option>
-          </select>
-          <span className="hint" style={{ marginLeft: "auto" }}>{shownList.length} 個專案</span>
+          {all.length > 0 && (
+            <>
+              <input
+                style={{ flex: "1 1 200px", width: "auto" }}
+                placeholder="搜尋專案名稱…"
+                value={q}
+                onChange={(e) => { setQ(e.target.value); setLimit(24); }}
+                aria-label="搜尋專案"
+              />
+              <select style={{ width: "auto", flex: "0 0 auto" }} value={kindFilter} onChange={(e) => { setKindFilter(e.target.value); setLimit(24); }} aria-label="依類型篩選">
+                <option value="">全部類型</option>
+                {kindOptions.map((k) => (
+                  <option key={k.id} value={k.value}>{k.label}</option>
+                ))}
+              </select>
+              <select style={{ width: "auto", flex: "0 0 auto" }} value={sort} onChange={(e) => setSort(e.target.value as "recent" | "title")} aria-label="排序方式">
+                <option value="recent">最近</option>
+                <option value="title">名稱</option>
+              </select>
+            </>
+          )}
+          <label
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0, cursor: "pointer", flex: "0 0 auto" }}
+            title="預設隱藏已封存專案；勾選後可列出並還原"
+          >
+            <input
+              type="checkbox"
+              checked={includeArchived}
+              onChange={(e) => { setIncludeArchived(e.target.checked); setLimit(24); }}
+            />
+            顯示已封存
+          </label>
+          {all.length > 0 && (
+            <span className="hint" style={{ marginLeft: "auto" }}>{shownList.length} 個專案</span>
+          )}
         </div>
       )}
 
@@ -246,10 +275,18 @@ export function Launchpad({ groupId }: { groupId: string }) {
         </p>
       )}
 
+      {restoreProject.error && (
+        <p className="error" role="alert">還原失敗：{restoreProject.error.message}</p>
+      )}
+
       {all.length === 0 && !projects.isLoading && !projects.error && !showFirstRun && (
         <div className="empty-state">
-          <h3>還沒有專案</h3>
-          <p>從上面開一個新專案，或先開個不花點數的範例看看完整長相。</p>
+          <h3>{includeArchived ? "還沒有專案（含已封存）" : "還沒有專案"}</h3>
+          <p>
+            {includeArchived
+              ? "從上面開一個新專案，或先開個不花點數的範例看看完整長相。"
+              : "從上面開一個新專案，或勾「顯示已封存」找回已封存的專案。也可先開個不花點數的範例看看完整長相。"}
+          </p>
           <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", marginTop: 12 }}>
             <button
               style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
@@ -271,46 +308,72 @@ export function Launchpad({ groupId }: { groupId: string }) {
       <div className="launch-grid" aria-busy={projects.isLoading}>
         {projects.isLoading &&
           Array.from({ length: 8 }).map((_, i) => <div key={`sk-${i}`} className="launch-card skeleton" style={{ height: 176 }} aria-hidden />)}
-        {shown.map((p) => (
-          <Link
-            key={p.id}
-            href={`/p/${p.id}`}
-            className="launch-card"
-            style={{ textDecoration: "none", color: "inherit" }}
-            onClick={() => recordRecent(p.id)}
-          >
-            <div className="launch-cover" style={{ background: coverOf(p.id) }}>
-              <span className="launch-mono">{p.title.trim().charAt(0) || "○"}</span>
-            </div>
-            <div className="launch-body">
-              <h3 className="launch-title">{p.title}</h3>
-              <div className="launch-meta">
-                <span className="chip" style={{ margin: 0 }}>{kindLabelOf(p.kind)}</span>
-                <span>{p.format}</span>
-                {/* 待辦角標：分鏡待審（組長裁決）／生成待核（成本門檻攔下）——點卡片進專案就能處理 */}
-                {(() => {
-                  const pd = pendingOf(p.id);
-                  if (!pd) return null;
-                  return (
-                    <>
-                      {pd.pendingApprovals > 0 && (
-                        <span className="chip" style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有分鏡送審等組長裁決">
-                          待審 {pd.pendingApprovals}
-                        </span>
-                      )}
-                      {pd.awaitingGenerations > 0 && (
-                        <span className="chip" style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有生成被成本門檻攔下，等組長核准">
-                          待核 {pd.awaitingGenerations}
-                        </span>
-                      )}
-                    </>
-                  );
-                })()}
+        {shown.map((p) => {
+          const isArchived = p.status === "archived";
+          const canRestore = isArchived && (isLeader || p.ownerId === myUserId);
+          return (
+            <Link
+              key={p.id}
+              href={`/p/${p.id}`}
+              className="launch-card"
+              style={{ textDecoration: "none", color: "inherit", opacity: isArchived ? 0.85 : undefined }}
+              onClick={() => recordRecent(p.id)}
+            >
+              <div className="launch-cover" style={{ background: coverOf(p.id) }}>
+                <span className="launch-mono">{p.title.trim().charAt(0) || "○"}</span>
               </div>
-              <div className="launch-meta">更新於 {relTime(p.updatedAt)}</div>
-            </div>
-          </Link>
-        ))}
+              <div className="launch-body">
+                <h3 className="launch-title">{p.title}</h3>
+                <div className="launch-meta">
+                  <span className="chip" style={{ margin: 0 }}>{kindLabelOf(p.kind)}</span>
+                  <span>{p.format}</span>
+                  {isArchived && (
+                    <span className="chip" style={{ margin: 0, color: "var(--fg-secondary)" }} title="已封存，可還原">
+                      已封存
+                    </span>
+                  )}
+                  {/* 待辦角標：分鏡待審（組長裁決）／生成待核（成本門檻攔下）——點卡片進專案就能處理 */}
+                  {!isArchived && (() => {
+                    const pd = pendingOf(p.id);
+                    if (!pd) return null;
+                    return (
+                      <>
+                        {pd.pendingApprovals > 0 && (
+                          <span className="chip" style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有分鏡送審等組長裁決">
+                            待審 {pd.pendingApprovals}
+                          </span>
+                        )}
+                        {pd.awaitingGenerations > 0 && (
+                          <span className="chip" style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有生成被成本門檻攔下，等組長核准">
+                            待核 {pd.awaitingGenerations}
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+                <div className="launch-meta" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span>更新於 {relTime(p.updatedAt)}</span>
+                  {canRestore && (
+                    <button
+                      type="button"
+                      className="btn-sm"
+                      disabled={restoreProject.isPending}
+                      title="還原後會重新出現在作業台"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        restoreProject.mutate({ id: p.id, archived: false });
+                      }}
+                    >
+                      {restoreProject.isPending ? "還原中…" : "還原"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </Link>
+          );
+        })}
       </div>
 
       {shownList.length > limit && (
