@@ -1,6 +1,7 @@
 import { type CSSProperties } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
+import { BrandLogo } from "./BrandLogo";
 import { Icon } from "./Icon";
 
 /** 流程六步（設計規格）：建專案 → 世界觀 → 拆分鏡 → 逐格生成 → 送審 → 交付 */
@@ -47,7 +48,7 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
   return (
     <div className="card card--primary" data-fb="新手導覽卡" style={{ marginBottom: "var(--sp-20)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span className="orb" aria-hidden />
+        <BrandLogo variant="mark" size="sm" decorative />
         <h2 style={{ margin: 0 }}>歡迎加入 · 先看一個完整範例</h2>
         <span className="badge" style={{ marginLeft: "auto" }}>新手導覽</span>
       </div>

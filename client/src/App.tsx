@@ -29,6 +29,8 @@ import { NotificationSettingsDialog, PushSubscriptionSync } from "./components/N
 import { unsubscribeThisDevice } from "./push";
 import { Icon } from "./components/Icon";
 import { useFocusTrap } from "./components/interactions";
+import { BrandLogo } from "./components/BrandLogo";
+import { SplashScreen } from "./components/SplashScreen";
 
 /**
  * 自助改密碼（拿到管理員的臨時密碼後，從這裡換成自己的）：成功後其他裝置全部登出。
@@ -305,14 +307,19 @@ export function App() {
   const [showNotifSettings, setShowNotifSettings] = useState(false);
   // 管理員重設密碼後：不論在哪個路由都用強制對話框擋住，改完密碼（auth.me 重查）才放行
   const mustChangePw = !!me.data?.user.mustChangePassword;
+  // 進站 splash：auth 就緒後淡出；不阻擋互動路徑以外的預載，僅首次掛載
+  const [splashDone, setSplashDone] = useState(false);
 
   return (
     <div className="app">
+      {!splashDone && (
+        <SplashScreen ready={!me.isLoading} onDone={() => setSplashDone(true)} />
+      )}
       {/* 強制改密碼時整塊背景 inert：對話框遮罩只擋滑鼠，Tab 仍能聚焦到背景，要靠 inert 一起擋 */}
       <div inert={(mustChangePw || showChangePw || showNotifSettings) || undefined}>
         <header className="topbar">
           <Link href="/" className="brand" style={{ cursor: "pointer", textDecoration: "none", color: "inherit" }}>
-            <span className="orb" /> AI Director OS
+            <BrandLogo variant="full" size="sm" decorative={false} />
           </Link>
           {me.data && groups.length > 0 && (
             <select

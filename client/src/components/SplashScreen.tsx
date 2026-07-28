@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { BRAND_NAME, BRAND_TAGLINE } from "../brand";
+import { BrandLogo } from "./BrandLogo";
+import { BrandReveal } from "./BrandReveal";
 
 /**
  * Animated splash screen — fades in logo + title, then fades out when `ready`.
@@ -49,24 +52,18 @@ export function SplashScreen({
     <div
       className={`aios-splash aios-splash--${phase}`}
       role="status"
-      aria-label="Loading AI Director OS"
+      aria-label={`Loading ${BRAND_NAME}`}
       aria-live="polite"
     >
       <div className="aios-splash__inner">
-        <div className="aios-splash__logo-wrap">
-          <img
-            className="aios-splash__logo"
-            src="/icons/icon-512.png"
-            alt=""
-            width={200}
-            height={200}
-            draggable={false}
-          />
-          <div className="aios-splash__glow" aria-hidden />
-        </div>
-
-        <h1 className="aios-splash__title">AI Director OS</h1>
-        <p className="aios-splash__tagline">Create · Collaborate · Deliver</p>
+        <BrandReveal mode="fade-rise" onceKey="splash" durationMs={700}>
+          <div className="aios-splash__logo-wrap">
+            <BrandLogo variant="mark" size="hero" decorative className="aios-splash__logo" />
+            <div className="aios-splash__glow" aria-hidden />
+          </div>
+          <h1 className="aios-splash__title">{BRAND_NAME}</h1>
+          <p className="aios-splash__tagline">{BRAND_TAGLINE}</p>
+        </BrandReveal>
 
         <div className="aios-splash__bar" aria-hidden>
           <div className="aios-splash__bar-fill" />

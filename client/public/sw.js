@@ -16,14 +16,14 @@ self.addEventListener("push", (event) => {
     // 非 JSON payload（理論上不會發生——伺服器只送 JSON）：退回純文字
     data = { title: "通知", body: event.data ? event.data.text() : "" };
   }
-  const title = data.title || "AI Director OS";
+  const title = data.title || "Aios";
   event.waitUntil(
     self.registration.showNotification(title, {
       body: data.body || "",
       // 同 tag 互相取代（如同一發訊人的連續私訊）——手機通知列不被洗版
       tag: data.tag || undefined,
-      icon: "/icon.svg",
-      badge: "/icon.svg",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-96.png",
       data: { url: data.url || "/" },
     }),
   );
