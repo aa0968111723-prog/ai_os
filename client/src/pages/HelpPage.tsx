@@ -157,7 +157,7 @@ export function HelpPage() {
     <div style={{ maxWidth: 720, margin: "0 auto" }} data-fb="怎麼用頁">
       <h1>怎麼用 · 一頁看懂整個網站</h1>
       <p className="sub">
-        這頁把 AI Director OS 從頭到尾講清楚：<b>它在做什麼、你會用到哪些地方、每個地方在哪找</b>。
+        這頁把 Aios（AI 創作作業系統）從頭到尾講清楚：<b>它在做什麼、你會用到哪些地方、每個地方在哪找</b>。
         看完這一頁，整個網站你就大致有數了。看到不懂的名詞，翻到最下面的<b>名詞小辭典</b>。
       </p>
 

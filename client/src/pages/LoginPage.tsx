@@ -1,5 +1,8 @@
 import { useRef, useState } from "react";
 import { trpc } from "../api";
+import { BRAND_NAME } from "../brand";
+import { BrandLogo } from "../components/BrandLogo";
+import { BrandReveal } from "../components/BrandReveal";
 import { PasswordInput } from "../components/PasswordInput";
 import { Icon } from "../components/Icon";
 
@@ -58,11 +61,13 @@ export function LoginPage() {
   return (
     <div style={{ minHeight: "70vh", display: "grid", placeItems: "center" }}>
       <div className="card" style={{ width: 400, maxWidth: "92vw", textAlign: "center" }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: "var(--sp-8)" }}>
-          <span className="orb" style={{ width: 46, height: 46 }} />
-        </div>
-        <h1 style={{ margin: "8px 0 2px", fontSize: "var(--fs-24)" }}>AI Director OS</h1>
-        <p className="sub" style={{ marginBottom: 8 }}>懂我們素材的創作系統</p>
+        <BrandReveal mode="fade-rise" onceKey="login" durationMs={750}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: "var(--sp-12)" }}>
+            <BrandLogo variant="full" size="hero" showTagline />
+          </div>
+          {/* 可讀標題由 BrandLogo 的 aria-label 提供；表單前保留視覺層級用的隱藏 h1 */}
+          <h1 className="sr-only">{BRAND_NAME}</h1>
+        </BrandReveal>
         {/* 用 <form>：瀏覽器/密碼管理器靠它辨識登入表單做自動填入；Enter 由 submit 統一處理 */}
         <form style={{ textAlign: "left" }} onSubmit={(e) => { e.preventDefault(); doLogin(); }}>
           <label htmlFor="login-email">Email</label>

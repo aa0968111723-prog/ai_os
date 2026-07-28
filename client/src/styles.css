@@ -91,10 +91,48 @@ body {
   position: sticky; top: 0; z-index: 30;
   background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-16); letter-spacing: -0.01em; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-16); letter-spacing: -0.01em; color: inherit; text-decoration: none; }
 .orb { width: 22px; height: 22px; border-radius: 50%; flex: none;
   background: conic-gradient(from 210deg, var(--primary), var(--gold), var(--healing), var(--primary));
   box-shadow: 0 0 0 3px var(--healing-soft), 0 2px 8px -2px rgba(158, 134, 196, 0.4); }
+
+/* ── BrandLogo（Aios 單一品牌入口） ── */
+.brand-logo { display: inline-flex; align-items: center; gap: 8px; line-height: 1; flex: none; }
+.brand-logo--mark { display: block; object-fit: contain; flex: none; }
+.brand-logo--wordmark { gap: 8px; }
+.brand-logo__mark-img { display: block; object-fit: contain; flex: none; }
+.brand-logo__text { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.brand-logo__name {
+  font-weight: 700; font-size: 1.05em; letter-spacing: -0.02em; color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+}
+.brand-logo__tagline {
+  font-size: 0.72em; font-weight: 400; letter-spacing: 0.04em; color: var(--fg-secondary);
+}
+.brand-logo--xs .brand-logo__name { font-size: 13px; }
+.brand-logo--sm .brand-logo__name { font-size: 15px; }
+.brand-logo--md .brand-logo__name { font-size: 17px; }
+.brand-logo--lg .brand-logo__name { font-size: 22px; }
+.brand-logo--hero {
+  flex-direction: column; text-align: center; gap: 10px;
+}
+.brand-logo--hero .brand-logo__text { align-items: center; }
+.brand-logo--hero .brand-logo__name { font-size: clamp(26px, 5vw, 34px); }
+.brand-logo--hero .brand-logo__tagline { font-size: 14px; }
+.brand-logo--tone-monochrome .brand-logo__name { color: var(--fg); }
+/* 頂欄品牌連結內的 wordmark 不要垂直堆叠過高 */
+.brand .brand-logo--full { max-height: 36px; }
+.brand .brand-logo__tagline { display: none; }
+
+/* BrandReveal 結束態保證可見（JS 內聯 style 為主；此處作保險） */
+.brand-reveal--to { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .brand-reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
 .spacer { flex: 1; }
 .badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--border);
   background: var(--card); border-radius: 999px; font-size: 13px; box-shadow: var(--e1);
