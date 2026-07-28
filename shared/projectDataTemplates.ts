@@ -186,27 +186,48 @@ export function buildBoundTableFields(templateId: ProjectDataTemplateId): {
   return { fields, projectFieldKey, sampleData };
 }
 
-/** 狀態文案：本專案是否已有 AI 可引用的資料 */
+/**
+ * 狀態文案：本專案是否已有 AI 可引用的資料。
+ * linkedAiReadableRowCount 必須只計 agentAccess≠none 的關聯列——避免「UI 說 ok、AI 其實不可見」。
+ * linkedRowCount 可含全部關聯列（含 AI 不可見），僅作補充說明。
+ */
 export function projectDataAiHint(input: {
   knowledgeCount: number;
   assetCount: number;
+  /** 全部已關聯列數（含 AI 不可見）；僅顯示用 */
   linkedRowCount: number;
+  /**
+   * AI 實際可讀的關聯列數（agentAccess read/write）。
+   * 省略時退回 linkedRowCount（舊呼叫相容，但新 UI 應傳入）。
+   */
+  linkedAiReadableRowCount?: number;
 }): { tone: "ok" | "partial" | "empty"; label: string; detail: string } {
   const { knowledgeCount, assetCount, linkedRowCount } = input;
+  const aiRows = input.linkedAiReadableRowCount ?? linkedRowCount;
   const hasText = knowledgeCount > 0;
-  const hasStruct = linkedRowCount > 0;
+  const hasStruct = aiRows > 0;
   const hasMedia = assetCount > 0;
+  const hiddenLinked = Math.max(0, linkedRowCount - aiRows);
+
   if (hasText || hasStruct) {
     return {
       tone: "ok",
       label: "AI 已可引用本專案部分資料",
       detail: [
         hasText ? `文字 ${knowledgeCount} 筆` : null,
-        hasStruct ? `資料表 ${linkedRowCount} 列` : null,
+        hasStruct ? `AI 可讀表列 ${aiRows}` : null,
         hasMedia ? `素材 ${assetCount} 件` : null,
+        hiddenLinked > 0 ? `另有 ${hiddenLinked} 列 AI 不可見` : null,
       ]
         .filter(Boolean)
         .join(" · "),
+    };
+  }
+  if (linkedRowCount > 0 && !hasStruct) {
+    return {
+      tone: "partial",
+      label: "有關聯表，但 AI 目前看不到",
+      detail: "資料表已綁本專案，請把「AI 存取」改為可讀或可讀寫，AI 才會引用。",
     };
   }
   if (hasMedia) {

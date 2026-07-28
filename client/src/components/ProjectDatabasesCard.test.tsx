@@ -6,6 +6,7 @@ const linkedToProject = vi.fn();
 const knowledgeList = vi.fn();
 const assetsList = vi.fn();
 const createBoundToProject = vi.fn();
+const addRow = vi.fn();
 const invalidateLinked = vi.fn();
 const invalidateList = vi.fn();
 
@@ -31,6 +32,15 @@ vi.mock("../api", () => ({
               tableName: "人員與分工",
               template: "roster",
             });
+          },
+        }),
+      },
+      addRow: {
+        useMutation: (opts?: { onSuccess?: (r: unknown, v: { tableId: string }) => void; onError?: (e: { message: string }, v: { tableId: string }) => void }) => ({
+          isPending: false,
+          mutate: (input: { tableId: string; data: Record<string, unknown> }) => {
+            addRow(input);
+            opts?.onSuccess?.({ id: "r-new" }, input);
           },
         }),
       },
@@ -60,6 +70,7 @@ describe("ProjectDatabasesCard", () => {
     knowledgeList.mockReset();
     assetsList.mockReset();
     createBoundToProject.mockReset();
+    addRow.mockReset();
     invalidateLinked.mockReset();
     invalidateList.mockReset();
     linkedToProject.mockReturnValue({ data: [], isLoading: false, error: null });
@@ -126,7 +137,7 @@ describe("ProjectDatabasesCard", () => {
           tableId: "t1",
           tableName: "摘錄與重點",
           fields: [
-            { key: "c1", label: "內容", type: "text" },
+            { key: "c1", label: "內容", type: "text", required: true },
             { key: "proj", label: "關聯專案", type: "project" },
           ],
           rows: [{ id: "r1", data: { c1: "一段重點", proj: "project-1" } }],
@@ -140,5 +151,53 @@ describe("ProjectDatabasesCard", () => {
     expect(screen.getByText("摘錄與重點")).toBeInTheDocument();
     expect(screen.getByText("AI 可讀寫")).toBeInTheDocument();
     expect(screen.getByText("一段重點")).toBeInTheDocument();
+  });
+
+  it("treats agentAccess none linked rows as not AI-readable", () => {
+    linkedToProject.mockReturnValue({
+      data: [
+        {
+          tableId: "t-hidden",
+          tableName: "敏感表",
+          fields: [
+            { key: "c1", label: "內容", type: "text", required: true },
+            { key: "proj", label: "關聯專案", type: "project" },
+          ],
+          rows: [{ id: "r1", data: { c1: "密", proj: "project-1" } }],
+          agentAccess: "none",
+        },
+      ],
+      isLoading: false,
+      error: null,
+    });
+    render(<ProjectDatabasesCard projectId="project-1" />);
+    expect(screen.getByTestId("project-data-ai-status")).toHaveAttribute("data-tone", "partial");
+    expect(screen.getByText(/AI 目前看不到/i)).toBeInTheDocument();
+  });
+
+  it("quick-adds a row with project prefilled", () => {
+    linkedToProject.mockReturnValue({
+      data: [
+        {
+          tableId: "t1",
+          tableName: "摘錄與重點",
+          fields: [
+            { key: "c1", label: "內容", type: "text", required: true },
+            { key: "proj", label: "關聯專案", type: "project" },
+          ],
+          rows: [{ id: "r1", data: { c1: "一段重點", proj: "project-1" } }],
+          agentAccess: "write",
+        },
+      ],
+      isLoading: false,
+      error: null,
+    });
+    render(<ProjectDatabasesCard projectId="project-1" />);
+    fireEvent.change(screen.getByLabelText(/新增 內容/i), { target: { value: "新摘錄" } });
+    fireEvent.click(screen.getByRole("button", { name: /加一列/i }));
+    expect(addRow).toHaveBeenCalledWith({
+      tableId: "t1",
+      data: { c1: "新摘錄", proj: "project-1" },
+    });
   });
 });

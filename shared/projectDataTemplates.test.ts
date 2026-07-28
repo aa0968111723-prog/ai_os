@@ -31,8 +31,21 @@ describe("projectDataAiHint", () => {
   it("partial when only media", () => {
     expect(projectDataAiHint({ knowledgeCount: 0, assetCount: 3, linkedRowCount: 0 }).tone).toBe("partial");
   });
-  it("ok when text or linked rows", () => {
+  it("ok when text or AI-readable linked rows", () => {
     expect(projectDataAiHint({ knowledgeCount: 2, assetCount: 0, linkedRowCount: 0 }).tone).toBe("ok");
     expect(projectDataAiHint({ knowledgeCount: 0, assetCount: 0, linkedRowCount: 5 }).tone).toBe("ok");
+    expect(
+      projectDataAiHint({ knowledgeCount: 0, assetCount: 0, linkedRowCount: 5, linkedAiReadableRowCount: 5 }).tone,
+    ).toBe("ok");
+  });
+  it("partial when linked rows exist but none are AI-readable", () => {
+    const h = projectDataAiHint({
+      knowledgeCount: 0,
+      assetCount: 0,
+      linkedRowCount: 4,
+      linkedAiReadableRowCount: 0,
+    });
+    expect(h.tone).toBe("partial");
+    expect(h.label).toMatch(/AI 目前看不到/);
   });
 });

@@ -307,3 +307,67 @@ export async function addDataRowValidated(
   if (!row) throw new Error("新增資料列失敗");
   return row;
 }
+
+/** 觸碰所屬資料庫 updatedAt（insert／update／delete 共用，list 排序才跟得上） */
+async function touchTableUpdatedAt(
+  tx: DatabaseTransaction | typeof db,
+  tableId: string,
+): Promise<void> {
+  await tx
+    .update(schema.dataTables)
+    .set({ updatedAt: new Date() })
+    .where(eq(schema.dataTables.id, tableId));
+}
+
+/**
+ * 已授權後更新一列（整列覆寫）：驗證＋寫入＋觸碰表 updatedAt。
+ * 授權（canWriteRows）由呼叫端決定——與 addDataRowValidated 同模式。
+ */
+export async function updateDataRowValidated(
+  table: Pick<DataTableRow, "id" | "fields">,
+  rowId: string,
+  userId: string,
+  rawData: unknown,
+): Promise<DataRowRow> {
+  const checked = validateRowData(table.fields as DataField[], rawData);
+  if (!checked.ok) throw new Error(checked.error);
+
+  return db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(schema.dataRows)
+      .where(eq(schema.dataRows.id, rowId));
+    if (!existing || existing.tableId !== table.id) {
+      throw new Error("找不到這一列");
+    }
+    const [updated] = await tx
+      .update(schema.dataRows)
+      .set({ data: checked.data, updatedBy: userId, updatedAt: new Date() })
+      .where(eq(schema.dataRows.id, rowId))
+      .returning();
+    if (!updated) throw new Error("更新資料列失敗");
+    await touchTableUpdatedAt(tx, table.id);
+    return updated;
+  });
+}
+
+/**
+ * 已授權後刪列＋觸碰表 updatedAt。
+ * 授權（建立者或 canManage）由呼叫端決定。
+ */
+export async function removeDataRow(
+  tableId: string,
+  rowId: string,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select({ id: schema.dataRows.id, tableId: schema.dataRows.tableId })
+      .from(schema.dataRows)
+      .where(eq(schema.dataRows.id, rowId));
+    if (!existing || existing.tableId !== tableId) {
+      throw new Error("找不到這一列");
+    }
+    await tx.delete(schema.dataRows).where(eq(schema.dataRows.id, rowId));
+    await touchTableUpdatedAt(tx, tableId);
+  });
+}

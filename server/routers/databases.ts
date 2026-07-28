@@ -5,7 +5,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { MAX_FILE_CATEGORY, normalizeFileCategory, validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
-import { addDataRowValidated } from "../services/databaseCore";
+import { addDataRowValidated, removeDataRow, updateDataRowValidated } from "../services/databaseCore";
 import {
   executeIdempotentDatabaseBatch,
   IDEMPOTENCY_KEY_MAX_LENGTH,
@@ -54,13 +54,14 @@ import { fetchDriveFile, getNotionToken } from "../services/integrations";
 const LIST_LIMIT_DEFAULT = 200;
 
 /** zod 外形（語意驗證交給 validateFields）：unknown 進來、伺服器端把關 */
+// 與 shared/databaseFields.MAX_FIELDS 對齊（語意層仍走 validateFields）
 const fieldsShape = z.array(z.object({
   key: z.string(),
   label: z.string(),
   type: z.enum(["text", "number", "select", "date", "checkbox", "url", "file", "user", "project", "schedule"]),
   options: z.array(z.string()).optional(),
   required: z.boolean().optional(),
-})).max(60);
+})).max(30);
 
 async function getTableChecked(auth: Parameters<typeof resolveTableAccess>[0], id: string): Promise<{ table: DataTableRow; access: ReturnType<typeof resolveTableAccess> }> {
   const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, id), isNull(schema.dataTables.deletedAt)));
@@ -424,14 +425,13 @@ export const databasesRouter = router({
       if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這一列" });
       const { table, access } = await getTableChecked(ctx.auth, row.tableId);
       if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
-      const checked = validateRowData(table.fields as DataField[], input.data);
-      if (!checked.ok) throw new TRPCError({ code: "BAD_REQUEST", message: checked.error });
-      const [updated] = await db
-        .update(schema.dataRows)
-        .set({ data: checked.data, updatedBy: ctx.auth.user.id, updatedAt: new Date() })
-        .where(eq(schema.dataRows.id, row.id))
-        .returning();
-      return updated;
+      try {
+        return await updateDataRowValidated(table, row.id, ctx.auth.user.id, input.data);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "更新失敗";
+        if (msg.includes("找不到")) throw new TRPCError({ code: "NOT_FOUND", message: msg });
+        throw new TRPCError({ code: "BAD_REQUEST", message: msg });
+      }
     }),
 
   /** 刪列：列建立者本人或資料庫管理者（硬刪除；量小、有審計可回溯） */
@@ -442,7 +442,13 @@ export const databasesRouter = router({
     if (!access.canManage && row.createdBy !== ctx.auth.user.id) {
       throw new TRPCError({ code: "FORBIDDEN", message: "只有這一列的建立者或資料庫管理者可以刪除" });
     }
-    await db.delete(schema.dataRows).where(eq(schema.dataRows.id, row.id));
+    try {
+      await removeDataRow(row.tableId, row.id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "刪除失敗";
+      if (msg.includes("找不到")) throw new TRPCError({ code: "NOT_FOUND", message: msg });
+      throw new TRPCError({ code: "BAD_REQUEST", message: msg });
+    }
     return { ok: true };
   }),
 
