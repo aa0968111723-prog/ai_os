@@ -79,6 +79,18 @@ ok("recentPrompts 帶提示詞與操作者", any(i.get("prompt") == "扣點驗�
 rp_model = call("GET", admin, "insights.recentPrompts", {"modelId": "fal-ai/flux/schnell", "limit": 10})
 ok("recentPrompts 可依模型過濾", all(i["modelId"] == "fal-ai/flux/schnell" for i in rp_model["items"]) and len(rp_model["items"]) >= 1)
 
+# ── 人 × 模型用量明細（精密成本盤點） ──
+ums = call("GET", admin, "insights.userModelStats", {})
+ok("userModelStats 形狀", isinstance(ums.get("rows"), list) and isinstance(ums.get("totals"), dict))
+ok("userModelStats totals 含 estTwd", "estTwd" in ums["totals"] and "points" in ums["totals"])
+ums_flux = next((r for r in ums["rows"] if r.get("modelId") == "fal-ai/flux/schnell"), None)
+ok("userModelStats 記到本次生成", ums_flux is not None and ums_flux["submits"] >= 1 and ums_flux.get("userId"))
+if ums_flux and ums_flux.get("userId"):
+    ums_actor = call("GET", admin, "insights.userModelStats", {"actorId": ums_flux["userId"]})
+    ok("userModelStats 可依人過濾", all(r["userId"] == ums_flux["userId"] for r in ums_actor["rows"]) and len(ums_actor["rows"]) >= 1)
+else:
+    ok("userModelStats 可依人過濾", False, "無 flux 列可過濾")
+
 # ── 錯誤觀測與 selftest ──
 code, body = raw_get(admin, "/api/selftest")
 st = json.loads(body)
