@@ -82,13 +82,16 @@ ok("recentPrompts 可依模型過濾", all(i["modelId"] == "fal-ai/flux/schnell"
 # ── 人 × 模型用量明細（精密成本盤點） ──
 ums = call("GET", admin, "insights.userModelStats", {})
 ok("userModelStats 形狀", isinstance(ums.get("rows"), list) and isinstance(ums.get("totals"), dict))
-ok("userModelStats totals 含 estTwd", "estTwd" in ums["totals"] and "points" in ums["totals"])
+ok("userModelStats totals 含新台幣 estTwd", "estTwd" in ums["totals"] and "points" in ums["totals"] and "estUsd" in ums["totals"])
+ok("userModelStats fx 匯率", isinstance(ums.get("fx"), dict) and ums["fx"].get("currency") == "TWD" and ums["fx"].get("usdToTwd") == 31)
 ums_flux = next((r for r in ums["rows"] if r.get("modelId") == "fal-ai/flux/schnell"), None)
 ok("userModelStats 記到本次生成", ums_flux is not None and ums_flux["submits"] >= 1 and ums_flux.get("userId"))
 if ums_flux and ums_flux.get("userId"):
+    ok("userModelStats 列含新台幣欄", "estTwd" in ums_flux and "estUsd" in ums_flux and ums_flux["estTwd"] == ums_flux["points"])
     ums_actor = call("GET", admin, "insights.userModelStats", {"actorId": ums_flux["userId"]})
     ok("userModelStats 可依人過濾", all(r["userId"] == ums_flux["userId"] for r in ums_actor["rows"]) and len(ums_actor["rows"]) >= 1)
 else:
+    ok("userModelStats 列含新台幣欄", False, "無 flux 列")
     ok("userModelStats 可依人過濾", False, "無 flux 列可過濾")
 
 # ── 錯誤觀測與 selftest ──

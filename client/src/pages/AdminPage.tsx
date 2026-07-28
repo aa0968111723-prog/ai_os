@@ -8,6 +8,7 @@ import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
 import { AUDIT_ACTION_LABELS, AUDIT_CATEGORIES, auditCategoryOf, describeAuditInput, groupConsecutiveAudit, humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
 import { getModel, tierLabel } from "@shared/models";
 import { toCsv } from "@shared/csv";
+import { formatTwd, formatUsd, moneyFxNote } from "@shared/money";
 
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
@@ -1183,7 +1184,7 @@ function downloadCsv(filename: string, csv: string) {
  * 分頁共用「期間＋組別」過濾：
  * - 人員細節：每位夥伴的操作量、失敗數、最近活動、依分類攤開的次數；點人可跳到他的提示詞。
  * - 模型比較：各模型的生成次數、成功率（生成精準度）、點數、使用人數；點模型看它的提示詞。
- * - 用量明細：人 × 模型矩陣（完成數、點數、估 NT$）＋ CSV 匯出——精密成本盤點用。
+ * - 用量明細：人 × 模型矩陣（完成數、點數、新台幣／美元估價）＋ CSV 匯出——精密成本盤點用。
  * - 提示詞：一筆筆的生成流水（誰・模型・提示詞・結果・點數），供比較與教學。
  * 可見範圍與操作紀錄相同（後端已收斂：組長看自己組），組員看不到這張卡的資料。
  */
@@ -1218,10 +1219,10 @@ export function InsightsCard() {
   });
   const groupOptions = scope.data?.groups ?? [];
 
-  function exportUsageCsv(rows: UserModelStatRow[]) {
+  function exportUsageCsv(rows: UserModelStatRow[], fxNote: string) {
     const header = [
       "夥伴", "userId", "模型", "modelId", "類型", "送出", "完成", "失敗", "駁回", "在途",
-      "完成點數", "估NT$(1點≈1元)", "目錄單次點數", "官方約略價", "最近使用",
+      "完成點數", "新台幣_NTD", "美元_USD", "目錄單次點數", "官方約略價_USD字串", "最近使用", "匯率說明",
     ];
     const body = rows.map((r) => {
       const model = getModel(r.modelId);
@@ -1237,15 +1238,17 @@ export function InsightsCard() {
         r.rejected,
         r.pending,
         r.points,
-        r.points, // 1 點 ≈ NT$1
+        r.estTwd,
+        r.estUsd,
         model?.points ?? "",
         model?.cost ?? "",
         r.lastUsedAt,
+        fxNote,
       ];
     });
     const csv = toCsv([header, ...body]);
     const stamp = new Date().toISOString().slice(0, 10);
-    downloadCsv(`aios-usage-user-model-${days}d-${stamp}.csv`, csv);
+    downloadCsv(`aios-用量-新台幣-${days}天-${stamp}.csv`, csv);
   }
 
   return (
@@ -1398,24 +1401,25 @@ export function InsightsCard() {
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
                 <span className="hint" style={{ fontSize: 12 }}>
                   合計：{usage.data.totals.userCount} 人・{usage.data.totals.modelCount} 模型・
-                  完成 {usage.data.totals.done.toLocaleString()} 次・
-                  <b>{usage.data.totals.points.toLocaleString()} 點</b>
-                  （估 NT${usage.data.totals.estTwd.toLocaleString()}）
+                  完成 {usage.data.totals.done.toLocaleString("zh-TW")} 次・
+                  {usage.data.totals.points.toLocaleString("zh-TW")} 點・
+                  <b style={{ color: "var(--ink)" }}>新台幣 {formatTwd(usage.data.totals.estTwd)}</b>
+                  <span style={{ marginLeft: 6 }}>（≈ {formatUsd(usage.data.totals.estUsd)}）</span>
                 </span>
                 <button
                   type="button"
                   className="btn btn-ghost"
                   style={{ marginLeft: "auto", fontSize: 12, padding: "4px 10px" }}
-                  onClick={() => exportUsageCsv(usage.data!.rows)}
-                  title="匯出人×模型用量 CSV（含目錄價）"
+                  onClick={() => exportUsageCsv(usage.data!.rows, usage.data!.fx?.note ?? moneyFxNote())}
+                  title="匯出人×模型用量 CSV（新台幣＋美元）"
                 >
-                  <Icon name="Download" size={12} /> 匯出 CSV
+                  <Icon name="Download" size={12} /> 匯出 CSV（新台幣）
                 </button>
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr>
-                    {["夥伴", "模型", "送出", "完成", "失敗", "點數", "估 NT$", "最近"].map((h) => (
+                    {["夥伴", "模型", "送出", "完成", "失敗", "點數", "新台幣", "美元", "最近"].map((h) => (
                       <th
                         key={h}
                         className="hint"
@@ -1465,8 +1469,13 @@ export function InsightsCard() {
                         <td style={{ padding: "6px", textAlign: "right" }}>{r.submits}</td>
                         <td style={{ padding: "6px", textAlign: "right" }}>{r.done}</td>
                         <td style={{ padding: "6px", textAlign: "right", color: r.failed > 0 ? "var(--danger-ink)" : "var(--fg-secondary)" }}>{r.failed}</td>
-                        <td style={{ padding: "6px", textAlign: "right", fontFamily: "var(--mono)" }}>{r.points.toLocaleString()}</td>
-                        <td style={{ padding: "6px", textAlign: "right", fontFamily: "var(--mono)" }}>{r.points.toLocaleString()}</td>
+                        <td style={{ padding: "6px", textAlign: "right", fontFamily: "var(--mono)" }}>{r.points.toLocaleString("zh-TW")}</td>
+                        <td style={{ padding: "6px", textAlign: "right", fontFamily: "var(--mono)", fontWeight: 600 }} title="帳面新台幣（1 點 ≈ NT$1）">
+                          {formatTwd(r.estTwd)}
+                        </td>
+                        <td className="hint" style={{ padding: "6px", textAlign: "right", fontFamily: "var(--mono)", fontSize: 11 }} title="帳面美元（對照 Fal 帳單）">
+                          {formatUsd(r.estUsd)}
+                        </td>
                         <td className="hint" style={{ padding: "6px", textAlign: "right", fontSize: 11, whiteSpace: "nowrap" }}>
                           {parseDbTime(r.lastUsedAt).toLocaleDateString("zh-TW")}
                         </td>
@@ -1476,8 +1485,8 @@ export function InsightsCard() {
                 </tbody>
               </table>
               <p className="hint" style={{ fontSize: 11, marginTop: 6 }}>
-                點數／估 NT$ 只計<strong>完成</strong>的實花（1 點 ≈ NT$1 帳面；真實 Fal 帳單＝USD×結匯）。
-                失敗多半已退點，不計入實花。點人名或模型可下鑽提示詞；CSV 含目錄單次點數與官方約略價字串。
+                金額單位為<strong>新台幣（NT$）</strong>：只計<strong>完成</strong>實花點數換算（{usage.data.fx?.note ?? moneyFxNote()}）。
+                失敗多半已退點，不計入。點人名或模型可下鑽提示詞；CSV 含新台幣、美元與匯率說明。
               </p>
             </div>
           )}

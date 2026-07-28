@@ -3,6 +3,7 @@ import { and, desc, eq, gte, inArray, sql, type SQL } from "drizzle-orm";
 import { router, authedProcedure } from "../trpc";
 import { db, schema } from "../db";
 import { auditCategoryOf } from "../../shared/auditWording";
+import { moneyFxNote, pointsToTwd, pointsToUsd, USD_TO_TWD } from "../../shared/money";
 import type { AuthState } from "../services/auth";
 
 /**
@@ -186,7 +187,7 @@ export const insightsRouter = router({
 
   /**
    * 人 × 模型用量矩陣：期間內每位夥伴對各模型送了幾次、完成／失敗幾次、完成實花幾點。
-   * 精密成本盤點的主資料源——可 filter 組／人；前端估 NT$（1 點 ≈ NT$1）並匯出 CSV。
+   * 金額一律換算成新台幣（estTwd）與對照美元（estUsd）；匯率見 moneyFxNote／USD_TO_TWD。
    * 點數口徑同 modelStats：只計 done 的 coalesce(points_actual, points_est)。
    */
   userModelStats: authedProcedure
@@ -204,7 +205,7 @@ export const insightsRouter = router({
     .query(async ({ ctx, input }) => {
       const visible = visibleGroupIds(ctx.auth);
       if (visible && visible.length === 0) {
-        return { rows: [] as UserModelStatEntry[], totals: emptyUserModelTotals() };
+        return { rows: [] as UserModelStatEntry[], totals: emptyUserModelTotals(), fx: usageFxMeta() };
       }
       const conds: SQL[] = [gte(schema.generations.createdAt, sinceOf(input?.days))];
       if (visible) conds.push(inArray(schema.generations.groupId, visible));
@@ -238,19 +239,26 @@ export const insightsRouter = router({
         )
         .limit(500);
 
-      const mapped: UserModelStatEntry[] = rows.map((r) => ({
-        userId: r.userId,
-        userName: r.userName ?? "?",
-        modelId: r.modelId,
-        kind: r.kind,
-        submits: r.submits,
-        done: r.done,
-        failed: r.failed,
-        rejected: r.rejected,
-        pending: r.pending,
-        points: r.points,
-        lastUsedAt: r.lastUsedAt,
-      }));
+      const mapped: UserModelStatEntry[] = rows.map((r) => {
+        const points = r.points;
+        return {
+          userId: r.userId,
+          userName: r.userName ?? "?",
+          modelId: r.modelId,
+          kind: r.kind,
+          submits: r.submits,
+          done: r.done,
+          failed: r.failed,
+          rejected: r.rejected,
+          pending: r.pending,
+          points,
+          /** 帳面新台幣（1 點 ≈ NT$1） */
+          estTwd: pointsToTwd(points),
+          /** 帳面美元（點數 ÷ 目錄匯率 31）——對照 Fal invoice */
+          estUsd: pointsToUsd(points),
+          lastUsedAt: r.lastUsedAt,
+        };
+      });
 
       const totals = mapped.reduce(
         (acc, r) => {
@@ -258,11 +266,22 @@ export const insightsRouter = router({
           acc.done += r.done;
           acc.failed += r.failed;
           acc.points += r.points;
+          acc.estTwd += r.estTwd;
+          acc.estUsd += r.estUsd;
           acc.users.add(r.userId);
           acc.models.add(r.modelId);
           return acc;
         },
-        { submits: 0, done: 0, failed: 0, points: 0, users: new Set<string>(), models: new Set<string>() },
+        {
+          submits: 0,
+          done: 0,
+          failed: 0,
+          points: 0,
+          estTwd: 0,
+          estUsd: 0,
+          users: new Set<string>(),
+          models: new Set<string>(),
+        },
       );
 
       return {
@@ -272,17 +291,37 @@ export const insightsRouter = router({
           done: totals.done,
           failed: totals.failed,
           points: totals.points,
-          /** 帳面估 NT$：1 點 ≈ NT$1（與 shared/models 定案一致；真實 Fal 帳單以 USD×結匯為準） */
-          estTwd: totals.points,
+          estTwd: pointsToTwd(totals.points),
+          /** 合計美元再四捨五入，避免逐列加總誤差 */
+          estUsd: pointsToUsd(totals.points),
           userCount: totals.users.size,
           modelCount: totals.models.size,
         },
+        fx: usageFxMeta(),
       };
     }),
 });
 
+function usageFxMeta() {
+  return {
+    currency: "TWD" as const,
+    usdToTwd: USD_TO_TWD,
+    pointsToTwd: 1,
+    note: moneyFxNote(),
+  };
+}
+
 function emptyUserModelTotals() {
-  return { submits: 0, done: 0, failed: 0, points: 0, estTwd: 0, userCount: 0, modelCount: 0 };
+  return {
+    submits: 0,
+    done: 0,
+    failed: 0,
+    points: 0,
+    estTwd: 0,
+    estUsd: 0,
+    userCount: 0,
+    modelCount: 0,
+  };
 }
 
 type ActorBreakdownEntry = {
@@ -333,5 +372,9 @@ type UserModelStatEntry = {
   rejected: number;
   pending: number;
   points: number;
+  /** 帳面新台幣（NT$） */
+  estTwd: number;
+  /** 帳面美元（US$） */
+  estUsd: number;
   lastUsedAt: string;
 };
