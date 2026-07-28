@@ -134,7 +134,7 @@ export function ProjectDatabasesCard({
         {/* —— 快速入口 —— */}
         <div>
           <p className="hint" style={{ margin: "0 0 8px" }}>
-            先讓本專案有可讀內容。貼文字、上傳檔案，或一鍵建表；連到 Google／Notion 後還要匯入或關聯專案，AI 才會使用。
+            剪輯、社群、動畫、外出採集都能把依據放這裡。貼文字、上傳檔案，或一鍵建表；外部帳號連上後還要匯入或關聯專案，AI 才會使用。
           </p>
           <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
             <button type="button" className="btn-sm" onClick={() => scrollTo("sec-knowledge")}>
@@ -164,7 +164,7 @@ export function ProjectDatabasesCard({
           <div data-testid="project-data-templates">
             <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>一鍵建立資料表</h3>
             <p className="hint" style={{ margin: "0 0 8px" }}>
-              自動含「關聯專案」欄、已連到本專案，並預設 AI 可讀寫。建立後立刻出現在下方。
+              範本只是起點，之後可自由改欄位與名稱。自動含「關聯專案」、已連本專案，預設 AI 可讀寫。
             </p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {PROJECT_DATA_TEMPLATES.map((t) => (

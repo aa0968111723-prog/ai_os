@@ -28,7 +28,7 @@ vi.mock("../api", () => ({
             createBoundToProject(input);
             opts?.onSuccess?.({
               tableId: "table-new",
-              tableName: "人員名單",
+              tableName: "人員與分工",
               template: "roster",
             });
           },
@@ -77,7 +77,9 @@ describe("ProjectDatabasesCard", () => {
     expect(screen.getByRole("button", { name: /問 AI 助手/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Google／Notion／API/i })).toHaveAttribute("href", "/integrations");
     expect(screen.getByTestId("project-data-templates")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /人員名單/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /人員／分工/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /素材清單/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /發布計畫/i })).toBeInTheDocument();
   });
 
   it("shows ok status when knowledge exists", () => {
@@ -103,10 +105,10 @@ describe("ProjectDatabasesCard", () => {
 
   it("creates a bound table from template and shows success", async () => {
     render(<ProjectDatabasesCard projectId="project-1" />);
-    fireEvent.click(screen.getByRole("button", { name: /人員名單/i }));
+    fireEvent.click(screen.getByRole("button", { name: /人員／分工/i }));
     expect(createBoundToProject).toHaveBeenCalledWith({ projectId: "project-1", template: "roster" });
     await waitFor(() => {
-      expect(screen.getByText(/已建立「人員名單」/i)).toBeInTheDocument();
+      expect(screen.getByText(/已建立「人員與分工」/i)).toBeInTheDocument();
     });
     expect(invalidateLinked).toHaveBeenCalled();
   });

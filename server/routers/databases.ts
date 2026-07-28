@@ -24,6 +24,7 @@ import { findProjectLinkedRows } from "../services/databaseProjectLinks";
 import {
   buildBoundTableFields,
   getProjectDataTemplate,
+  PROJECT_DATA_TEMPLATE_IDS,
   type ProjectDataTemplateId,
 } from "../../shared/projectDataTemplates";
 import {
@@ -298,7 +299,7 @@ export const databasesRouter = router({
   createBoundToProject: authedProcedure
     .input(z.object({
       projectId: z.string().uuid(),
-      template: z.enum(["roster", "quotes", "checklist", "blank"]),
+      template: z.enum(PROJECT_DATA_TEMPLATE_IDS),
       /** 可覆寫預設表名 */
       name: z.string().min(1).max(80).optional(),
     }))
