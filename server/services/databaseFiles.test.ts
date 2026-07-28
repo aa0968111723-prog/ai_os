@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertPublicHostOrError,
@@ -228,3 +229,33 @@ describe("extractTextFromBuffer：安全降級", () => {
     expect(await extractTextFromBuffer("text/plain", "x.txt", Buffer.from("hello 世界"))).toBe("hello 世界");
   });
 });
+
+/**
+ * refreshFile 呼叫端守衛（routers/databases.ts）：
+ * 與 importUrl 對齊——Google 登入頁 HTML 不覆寫既有內容；抽字為空也不靜默清空。
+ */
+describe("refreshFile caller guards (databases router source)", () => {
+  const routerSource = readFileSync(new URL("../routers/databases.ts", import.meta.url), "utf8");
+  // 只取 refreshFile 段：從 refreshFile: 到下一個 removeFile:（避免 importUrl 同句誤過）
+  const refreshStart = routerSource.indexOf("refreshFile:");
+  const refreshEnd = routerSource.indexOf("removeFile:", refreshStart);
+  const refreshSource =
+    refreshStart >= 0 && refreshEnd > refreshStart
+      ? routerSource.slice(refreshStart, refreshEnd)
+      : "";
+
+  it("blocks Google login HTML for export kinds without overwriting existing content", () => {
+    expect(refreshSource).toContain("expectsExport");
+    expect(refreshSource).toContain('fetched.mime === "text/html"');
+    expect(refreshSource).toContain("Google 回了登入頁");
+    // 拋錯發生在 db.update 之前（throw new Error，未 set textContent）
+    expect(refreshSource.indexOf("Google 回了登入頁")).toBeLessThan(refreshSource.indexOf("db.update"));
+  });
+
+  it("throws on empty extracted HTML text with the same message as importUrl", () => {
+    expect(refreshSource).toContain("這個網頁抓不到可讀文字（可能是純前端渲染的頁面）——試試該平台的匯出功能後上傳");
+    expect(refreshSource).toMatch(/if \(!text\)[\s\S]*抓不到可讀文字/);
+    expect(refreshSource.indexOf("抓不到可讀文字")).toBeLessThan(refreshSource.indexOf("db.update"));
+  });
+});
+

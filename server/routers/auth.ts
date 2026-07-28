@@ -145,7 +145,29 @@ export const authRouter = router({
         setSessionCookie(ctx.res, token);
         return loadAuthState(userId);
       } catch (err) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "邀請無效" });
+        // 只放行 acceptInvite service 明確 throw 的中文 Error；DB/SQL 內部錯一律吞成泛用訊息，不外洩。
+        if (err instanceof TRPCError) throw err;
+        const msg = err instanceof Error ? err.message : "";
+        if (isSafeAcceptInviteMessage(msg)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: msg });
+        }
+        console.error("[auth] acceptInvite unexpected error:", err instanceof Error ? err.message : err);
+        throw new TRPCError({ code: "BAD_REQUEST", message: "邀請處理失敗，請稍後再試" });
       }
     }),
 });
+
+/**
+ * acceptInvite service 已知的安全中文錯誤（見 server/services/auth.ts）。
+ * 允許全文對齊＋前綴兜底；未知英文/SQL 絕不外洩。
+ */
+function isSafeAcceptInviteMessage(msg: string): boolean {
+  if (!msg) return false;
+  const knownExact = new Set([
+    "邀請連結無效或已過期",
+    "這個 email 已經有帳號了，請直接用原本的密碼登入；要加入新團隊時，請登入後由管理員把你加入。",
+    "這個 email 已經有帳號了，請直接用原本的密碼登入。",
+  ]);
+  if (knownExact.has(msg)) return true;
+  return msg.startsWith("邀請連結無效") || msg.startsWith("這個 email 已經有帳號了");
+}

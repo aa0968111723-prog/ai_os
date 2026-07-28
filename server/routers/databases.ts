@@ -682,6 +682,10 @@ export const databasesRouter = router({
         }
         if (fetched.mime === "text/html") {
           text = htmlToText(fetched.buf.toString("utf8")).slice(0, MAX_TEXT_CHARS);
+          // 與 importUrl 同口徑：抽不到字就報錯，保留既有 textContent，不靜默清空
+          if (!text) {
+            throw new Error("這個網頁抓不到可讀文字（可能是純前端渲染的頁面）——試試該平台的匯出功能後上傳");
+          }
           sizeBytes = Buffer.byteLength(text, "utf8"); // 與 importUrl 同口徑：網頁只算文字，不算原始 HTML
           newStoragePath = null; // 網頁匯入不留原檔
         } else {

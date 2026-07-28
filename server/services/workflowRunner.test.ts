@@ -22,3 +22,15 @@ describe("workflowRunner cost approval boundary", () => {
     expect(source).toContain("等組長核准超額生成中");
   });
 });
+
+describe("workflowRunner sweepZombies placeholder generationId", () => {
+  it("fails stale runs when advanceGeneration returns NOT_FOUND and run is past STALE_MS", () => {
+    // (a′) 佔位 generationId 永遠找不到列時，不得永久卡 running
+    expect(source).toContain("!gen && run.updatedAt.getTime() < cutoff");
+    expect(source).toContain("await failStaleRun(run)");
+    // 註解鎖死語意：不對幽靈 id 退點、視同 case (b)
+    expect(source).toMatch(/佔位 generationId[\s\S]*failStaleRun/);
+    expect(source).toContain("NOT_FOUND");
+  });
+});
+

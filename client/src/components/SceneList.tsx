@@ -592,8 +592,25 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
         )}
       </div>
       {actionError && <p className="error" role="alert">操作失敗：{actionError.message}</p>}
+      {/* 查詢失敗不能偽裝成空清單／裁決鈕消失——分開 scenes 與 approvals 錯誤並給重試 */}
+      {scenes.isError && (
+        <p className="error" role="alert" style={{ marginTop: 8 }}>
+          分鏡清單暫時載入不了（不是資料不見了）——
+          <button type="button" className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => scenes.refetch()}>
+            再試一次
+          </button>
+        </p>
+      )}
+      {approvals.isError && (
+        <p className="error" role="alert" style={{ marginTop: 8 }}>
+          審批狀態暫時載入不了（通過／退回鈕可能暫時看不到）——
+          <button type="button" className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => approvals.refetch()}>
+            再試一次
+          </button>
+        </p>
+      )}
       {/* 逐格生成模型（深度優化）：分鏡卡就地換文生圖模型，每格「生成這一格/重生」都用它；預估點數即時跟著變 */}
-      {canEdit && list.length > 0 && (
+      {canEdit && !scenes.isError && list.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
           <label htmlFor={`scene-gen-model-${projectId}`} style={{ margin: 0, fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
             逐格生成模型
@@ -626,7 +643,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
             </div>
           ))}
         </div>
-      ) : list.length === 0 ? (
+      ) : scenes.isError ? null : list.length === 0 ? (
         <p className="hint">還沒有分鏡——生成完成後按「＋加入分鏡」，排好順序就能打包交付。</p>
       ) : (
         <>

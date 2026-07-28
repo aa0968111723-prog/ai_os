@@ -9,6 +9,7 @@
  */
 import { and, asc, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
@@ -42,6 +43,16 @@ import {
 } from "./rateLimit";
 
 export type AgentRunRow = typeof schema.agentRuns.$inferSelect;
+
+/**
+ * MCP 入口無 router zod：非法 UUID 進 DB 會變 500。core 入口先擋成 BAD_REQUEST（中文）。
+ * 與 agents router 的 z.string().uuid() 同精神；export 供單元測試。
+ */
+export function assertUuid(value: string, label: string): void {
+  if (!z.string().uuid().safeParse(value).success) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `${label}格式不正確` });
+  }
+}
 
 /** 規劃 0 點（NVIDIA NIM 免費額度——LLM 文字呼叫不收費）；執行期生成步驟另計、走各自守門 */
 const PLAN_COST_POINTS = 0;
@@ -248,6 +259,7 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
 /** 規劃：讀專案現況＋知識庫＋可寫資料庫，請 LLM 針對目標排一份多步計畫（只規劃不執行；固定守門）。 */
 export async function planAgentCore(input: { auth: AuthState; projectId: string; goal: string }): Promise<AgentRunRow> {
   const { auth } = input;
+  assertUuid(input.projectId, "專案編號");
   try {
     if (await overLimit(auth.user.id)) {
       throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "規劃太頻繁（每分鐘最多 4 次），休息一下再試" });
@@ -419,6 +431,7 @@ ${knowledgeCtx ? `<專案知識庫節錄>\n${knowledgeCtx}\n</專案知識庫節
 /** 核准計畫：這一刻起才開始花執行點數（背景執行器下一個 tick 接手）。含 per-(project,user) 併發鎖＋CAS。 */
 export async function approveAgentCore(input: { auth: AuthState; runId: string }): Promise<AgentRunRow> {
   const { auth } = input;
+  assertUuid(input.runId, "代理計畫編號");
   const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, input.runId));
   if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份代理計畫" });
   const role = requireGroup(auth, run.groupId);
@@ -477,6 +490,7 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
 /** 放棄一份還沒核准的計畫（不花錢，純標記） */
 export async function discardAgentCore(input: { auth: AuthState; runId: string }): Promise<AgentRunRow> {
   const { auth } = input;
+  assertUuid(input.runId, "代理計畫編號");
   const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, input.runId));
   if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份代理計畫" });
   const role = requireGroup(auth, run.groupId);
@@ -505,6 +519,7 @@ export async function discardAgentCore(input: { auth: AuthState; runId: string }
 /** 停止後續步驟：正在生成的那一步讓它自然完成（runner 收尾），未送出的標 stopped 不扣點 */
 export async function stopAgentCore(input: { auth: AuthState; runId: string }): Promise<AgentRunRow> {
   const { auth } = input;
+  assertUuid(input.runId, "代理計畫編號");
   const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, input.runId));
   if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這筆代理執行" });
   const role = requireGroup(auth, run.groupId);
@@ -561,6 +576,7 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
 
 /** 讀取：待核准＋執行中全列＋最近 5 筆終局（放棄的不列）。帶組隔離。 */
 export async function listAgentRunsForProject(auth: AuthState, projectId: string): Promise<AgentRunRow[]> {
+  assertUuid(projectId, "專案編號");
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   requireGroup(auth, project.groupId);
@@ -581,6 +597,7 @@ export async function listAgentRunsForProject(auth: AuthState, projectId: string
 
 /** 讀取：單筆代理執行（帶組隔離）。供 MCP get_agent_run 用。 */
 export async function getAgentRunChecked(auth: AuthState, runId: string): Promise<AgentRunRow> {
+  assertUuid(runId, "代理計畫編號");
   const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, runId));
   if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份代理計畫" });
   requireGroup(auth, run.groupId);
