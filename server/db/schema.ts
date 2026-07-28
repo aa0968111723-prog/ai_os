@@ -3,7 +3,7 @@
  * PostgreSQL · Drizzle（pg 方言）
  * 組織模型：開發者 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
-import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex, doublePrecision } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import type { CompletePlanSummary } from "../../shared/plan";
 
@@ -471,6 +471,36 @@ export const modelCatalog = pgTable("model_catalog", {
   verified: boolean("verified").notNull().default(false),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+export const modelLiveCatalog = pgTable("model_live_catalog", {
+  id: text("id").primaryKey(),
+  endpoint: text("endpoint").notNull(),
+  label: text("label").notNull(),
+  category: text("category").notNull(),
+  tier: text("tier").notNull(),
+  kind: text("kind").notNull(),
+  needs: text("needs"),
+  source: text("source", { enum: ["static", "fal_discovered"] }).notNull().default("static"),
+  points: integer("points").notNull(),
+  pointsStatic: integer("points_static"),
+  cost: text("cost").notNull(),
+  costUsd: doublePrecision("cost_usd"),
+  costUnit: text("cost_unit"),
+  estTwd: integer("est_twd").notNull().default(0),
+  strengths: text("strengths").notNull().default(""),
+  bestFor: text("best_for").notNull().default(""),
+  verified: boolean("verified").notNull().default(false),
+  recommended: boolean("recommended").notNull().default(false),
+  available: boolean("available").notNull().default(true),
+  rawPricing: jsonb("raw_pricing"),
+  fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (tbl) => ({
+  categoryIdx: index("model_live_catalog_category_idx").on(tbl.category, tbl.available),
+  sourceIdx: index("model_live_catalog_source_idx").on(tbl.source),
+  fetchedIdx: index("model_live_catalog_fetched_idx").on(tbl.fetchedAt),
+}));
 
 export const messages = pgTable("messages", {
   id: uuid("id").primaryKey().defaultRandom(),

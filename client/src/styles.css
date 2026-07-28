@@ -1093,3 +1093,32 @@ audio.dm-attach-media { height: 36px; }
   border: 1px solid var(--danger-soft); background: color-mix(in srgb, var(--danger-soft) 60%, var(--card));
 }
 .device-link-confirm p { margin: 0 0 10px; font-size: 14px; }
+
+
+/* ═══ 真正的 App：安裝橫幅 + standalone ═══ */
+.install-app {
+  margin: 0; padding: 14px 16px; border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--primary-tint) 55%, var(--card));
+}
+.install-app__row { display: flex; gap: 12px; align-items: flex-start; }
+.install-app__icon { flex: none; width: 48px; height: 48px; border-radius: 12px; box-shadow: var(--e1); background: var(--card); }
+.install-app__body { flex: 1; min-width: 0; }
+.install-app__body strong { font-size: 15px; }
+.install-app__ios { margin: 8px 0 0; padding-left: 1.2em; font-size: 13px; color: var(--fg-secondary); line-height: 1.5; }
+.install-app__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+html.is-standalone body { min-height: 100dvh; background-attachment: scroll; }
+html.is-standalone .app {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+}
+html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-top, 0px)); }
+@media (display-mode: window-controls-overlay) {
+  .topbar {
+    padding-left: env(titlebar-area-x, 0px);
+    padding-right: max(12px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
+    -webkit-app-region: drag;
+  }
+  .topbar button, .topbar a, .topbar select, .topbar input { -webkit-app-region: no-drag; }
+}

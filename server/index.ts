@@ -1307,7 +1307,20 @@ app.all("/api/*", (req, res) => {
 if (isProd) {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
   const publicDir = path.join(dirname, "public");
-  app.use(express.static(publicDir));
+  app.use((req, res, next) => {
+    if (req.path === "/sw.js" || req.path === "/manifest.webmanifest") {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      if (req.path === "/sw.js") res.setHeader("Service-Worker-Allowed", "/");
+    }
+    next();
+  });
+  app.use(express.static(publicDir, {
+    setHeaders(res, filePath) {
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    },
+  }));
   app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 }
 
@@ -1384,6 +1397,28 @@ const httpServer = app.listen(port, () => {
       if (await ensureSchema()) {
         await syncCatalog();
         await ensureSeed();
+        // 即時模型價＋新模型發現（無 FAL_KEY 時退回靜態）
+        try {
+          const { syncLiveModelCatalog } = await import("./services/modelLiveSync");
+          const live = await syncLiveModelCatalog({ discoverPages: Number(process.env.LIVE_MODEL_DISCOVER_PAGES ?? 2) });
+          console.log(
+            `[boot] 模型即時目錄：靜態 ${live.staticUpserted}、即時價 ${live.priced}、新發現 ${live.discovered}` +
+              (live.errors.length ? `（${live.errors[0]}）` : ""),
+          );
+          const everyMs = Number(process.env.LIVE_MODEL_SYNC_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
+          if (everyMs > 0 && !isShuttingDown()) {
+            const timer = setInterval(() => {
+              if (isShuttingDown()) return;
+              void syncLiveModelCatalog({ discoverPages: Number(process.env.LIVE_MODEL_DISCOVER_PAGES ?? 2) }).catch((err) =>
+                console.warn("[modelLive] 週期同步失敗：", err instanceof Error ? err.message : err),
+              );
+            }, everyMs);
+            timer.unref?.();
+            onShutdown(() => clearInterval(timer));
+          }
+        } catch (err) {
+          console.warn("[boot] 模型即時目錄同步略過：", err instanceof Error ? err.message : err);
+        }
         if (isShuttingDown()) return;
         markBootReady();
         // schema 驗證與種子同步後才啟動背景執行器，避免資料庫版本未就緒時空轉報錯。

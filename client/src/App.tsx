@@ -31,6 +31,22 @@ import { Icon } from "./components/Icon";
 import { useFocusTrap } from "./components/interactions";
 import { BrandLogo } from "./components/BrandLogo";
 import { SplashScreen } from "./components/SplashScreen";
+import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "./pwa";
+
+function InstallAppMenuItem({ onDone }: { onDone: () => void }) {
+  const [, bump] = useState(0);
+  useEffect(() => subscribeInstallUi(() => bump((n) => n + 1)), []);
+  if (isStandaloneApp() || !canShowInstallUi()) return null;
+  return (
+    <button type="button" className="menu-item" role="menuitem" onClick={() => {
+      onDone();
+      if (isIosDevice()) { window.alert("iPhone／iPad：請用 Safari 點分享 →「加入主畫面」，再從主畫面圖示開啟。"); return; }
+      void promptInstall();
+    }}>
+      <Icon name="Download" size={15} />安裝成 App
+    </button>
+  );
+}
 
 /**
  * 自助改密碼（拿到管理員的臨時密碼後，從這裡換成自己的）：成功後其他裝置全部登出。
@@ -251,6 +267,7 @@ function UserMenu({
           )}
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">帳號</div>
+          <InstallAppMenuItem onDone={close} />
           <Link href="/my-reports" className="menu-item" role="menuitem" onClick={close}><Icon name="MessageCircle" size={15} />我的回報</Link>
           {/* 個人資料匯出（端點 /api/me/export 由後端提供）：a 標籤直下載，不經前端路由。
            * 文案／圖示刻意與「工作」組的「共用文件下載」明確區隔——前者是團隊共用文件、後者是「你自己的」個資可讀複本，

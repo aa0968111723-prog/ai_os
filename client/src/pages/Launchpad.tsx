@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
+import { InstallAppBanner } from "../components/InstallAppBanner";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 
@@ -166,6 +167,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
       <p className="sub">{activeGroup ? `接續「${activeGroup.groupName}」的專案，或開一個新的。` : "接續這個組的專案，或開一個新的。"}</p>
 
       {showFirstRun && <FirstRunGuide groupId={groupId} onDismiss={dismissFirstRun} />}
+
+      <div style={{ marginBottom: 14 }}><InstallAppBanner /></div>
 
       {/* 精簡建立列（常駐、一行；不再佔右側整欄） */}
       <section className="card" data-fb="新專案卡" style={{ padding: "14px 16px", marginBottom: 16 }}>

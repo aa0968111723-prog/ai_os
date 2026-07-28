@@ -71,6 +71,13 @@
       "when": 1785227646657,
       "tag": "0009_agent_events_and_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785232000000,
+      "tag": "0010_model_live_catalog",
+      "breakpoints": true
     }
   ]
 }
