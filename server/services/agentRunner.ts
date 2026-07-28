@@ -22,6 +22,11 @@ import { resolveAgentAccess } from "./databaseAcl";
 import { addDataRowValidated } from "./databaseCore";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { sanitizeAuditInput } from "./audit";
+import { addNoteCore, appendNoteOnceCore } from "./notesCore";
+import {
+  addScheduleItemCore,
+  updateScheduleItemOnceCore,
+} from "./scheduleCore";
 import {
   agentRunLockName,
   withRunnerAdvisoryLock,
@@ -39,7 +44,18 @@ export const AGENT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
 /** 與 schema.agentRuns.steps 的 jsonb 形狀一致（規劃端 agents.ts 建立、執行端這裡推進） */
 export interface AgentStep {
-  kind: "split_script" | "create_scene" | "generate" | "voiceover" | "submit_approval" | "record_to_database";
+  id?: string;
+  kind:
+    | "split_script"
+    | "create_scene"
+    | "generate"
+    | "voiceover"
+    | "submit_approval"
+    | "record_to_database"
+    | "create_note"
+    | "append_note"
+    | "create_schedule"
+    | "update_schedule";
   /** 人話說明（核准畫面與進度列表顯示） */
   note: string;
   status: "pending" | "running" | "done" | "failed" | "stopped";
@@ -47,6 +63,17 @@ export interface AgentStep {
   tableId?: string;
   /** record_to_database 用：要寫入的一列資料（鍵＝欄位 key） */
   rowData?: Record<string, unknown>;
+  projectId?: string;
+  content?: string;
+  mentions?: string[];
+  notePurpose?: "research" | "meeting" | "decision" | "summary" | "handoff";
+  noteId?: string;
+  scheduleItemId?: string;
+  scheduleTitle?: string;
+  startsAt?: string;
+  endsAt?: string;
+  ownerId?: string;
+  outputRefs?: Array<{ type: string; id: string; label?: string }>;
   /** generate 用：白名單過的模型 id */
   modelId?: string;
   /** generate 用：提示詞（世界觀注入由 generationCore 做） */
@@ -428,6 +455,8 @@ function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, 
           note: step.note,
           ...(step.generationId ? { generationId: step.generationId } : {}),
           ...(step.tableId ? { tableId: step.tableId } : {}),
+          ...(step.noteId ? { noteId: step.noteId } : {}),
+          ...(step.scheduleItemId ? { scheduleItemId: step.scheduleItemId } : {}),
           ...(step.sceneNo != null ? { sceneNo: step.sceneNo } : {}),
         }) as Record<string, unknown>,
         ok,
@@ -437,6 +466,18 @@ function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, 
         console.warn("[agent] 步驟審計寫入失敗（不影響主流程）：", err instanceof Error ? err.message : err),
       ),
   );
+}
+
+function stableStepId(step: AgentStep, idx: number): string {
+  return step.id?.trim() || `step-${idx + 1}`;
+}
+
+function addOutputRef(step: AgentStep, type: "note" | "schedule", id: string, label: string): void {
+  const refs = step.outputRefs ?? [];
+  if (!refs.some((ref) => ref.type === type && ref.id === id)) {
+    refs.push({ type, id, label });
+  }
+  step.outputRefs = refs;
 }
 
 /** 終局系統訊息文字（純函式，單元可測）：done/failed 各一句，供發起人與組長在專案動態流即時看到結果 */
@@ -533,6 +574,159 @@ async function advanceRun(run: RunRow): Promise<void> {
   }
 
   // ── 非生成類步驟：在 tick 內同步執行（都是快速 DB 操作或單次 LLM 呼叫） ──
+  if (step.kind === "create_note") {
+    const title = (step.title ?? step.note ?? "").trim();
+    const content = (step.content ?? "").trim();
+    if (!title) return failRun(run, steps, idx, "計畫沒有指定筆記標題");
+    if (!content) return failRun(run, steps, idx, "計畫沒有提供筆記內容");
+    if (step.projectId && step.projectId !== run.projectId) {
+      return failRun(run, steps, idx, "筆記步驟指向其他專案，已阻止跨專案寫入");
+    }
+    const auth = await loadAuthState(run.userId);
+    if (!auth) return failRun(run, steps, idx, "發起人帳號已停用，代理無法建立筆記");
+    try {
+      const effectId = await persistStepEffectId(run, steps, step);
+      const [existing] = await db.select().from(schema.notes).where(eq(schema.notes.id, effectId));
+      const row = existing ?? await addNoteCore({
+        auth,
+        id: effectId,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        title,
+        content,
+        mentions: step.mentions,
+        planRunId: run.id,
+        planStepId: stableStepId(step, idx),
+      });
+      if (
+        row.groupId !== run.groupId
+        || row.projectId !== run.projectId
+        || row.planRunId !== run.id
+        || row.planStepId !== stableStepId(step, idx)
+      ) {
+        return failRun(run, steps, idx, "筆記冪等識別碼碰撞，已停止以避免跨計畫覆寫");
+      }
+      step.noteId = row.id;
+      addOutputRef(step, "note", row.id, row.title);
+      step.status = "done";
+      step.detail = `已建立筆記「${row.title.slice(0, 30)}」`;
+      auditAgentStep(run, step, idx, true);
+    } catch (err) {
+      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+    }
+    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    return;
+  }
+
+  if (step.kind === "append_note") {
+    if (!step.noteId) return failRun(run, steps, idx, "計畫沒有指定要追加的筆記");
+    const content = (step.content ?? "").trim();
+    if (!content) return failRun(run, steps, idx, "計畫沒有提供要追加的內容");
+    const auth = await loadAuthState(run.userId);
+    if (!auth) return failRun(run, steps, idx, "發起人帳號已停用，代理無法追加筆記");
+    try {
+      const effectId = await persistStepEffectId(run, steps, step);
+      const result = await appendNoteOnceCore({
+        auth,
+        id: step.noteId,
+        content,
+        effectId,
+        runId: run.id,
+        stepId: stableStepId(step, idx),
+      });
+      if (result.row.groupId !== run.groupId || result.row.projectId !== run.projectId) {
+        return failRun(run, steps, idx, "目標筆記不屬於目前計畫專案");
+      }
+      addOutputRef(step, "note", result.row.id, result.row.title);
+      step.status = "done";
+      step.detail = result.replayed ? "已確認筆記先前完成追加" : `已追加至「${result.row.title.slice(0, 30)}」`;
+      auditAgentStep(run, step, idx, true);
+    } catch (err) {
+      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+    }
+    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    return;
+  }
+
+  if (step.kind === "create_schedule") {
+    const title = (step.title ?? step.note ?? "").trim();
+    if (!title) return failRun(run, steps, idx, "計畫沒有指定行程標題");
+    if (!step.startsAt) return failRun(run, steps, idx, "計畫沒有指定行程開始時間");
+    if (step.projectId && step.projectId !== run.projectId) {
+      return failRun(run, steps, idx, "排程步驟指向其他專案，已阻止跨專案寫入");
+    }
+    const auth = await loadAuthState(run.userId);
+    if (!auth) return failRun(run, steps, idx, "發起人帳號已停用，代理無法建立行程");
+    try {
+      const effectId = await persistStepEffectId(run, steps, step);
+      const [existing] = await db.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, effectId));
+      const row = existing ?? await addScheduleItemCore({
+        auth,
+        id: effectId,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        title,
+        startsAt: step.startsAt,
+        endsAt: step.endsAt,
+        note: step.content ?? step.note,
+        ownerId: step.ownerId,
+        mentions: step.mentions,
+        planRunId: run.id,
+        planStepId: stableStepId(step, idx),
+      });
+      if (
+        row.groupId !== run.groupId
+        || row.projectId !== run.projectId
+        || row.planRunId !== run.id
+        || row.planStepId !== stableStepId(step, idx)
+      ) {
+        return failRun(run, steps, idx, "行程冪等識別碼碰撞，已停止以避免跨計畫覆寫");
+      }
+      step.scheduleItemId = row.id;
+      addOutputRef(step, "schedule", row.id, row.title);
+      step.status = "done";
+      step.detail = `已建立行程「${row.title.slice(0, 30)}」`;
+      auditAgentStep(run, step, idx, true);
+    } catch (err) {
+      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+    }
+    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    return;
+  }
+
+  if (step.kind === "update_schedule") {
+    if (!step.scheduleItemId) return failRun(run, steps, idx, "計畫沒有指定要更新的行程");
+    const auth = await loadAuthState(run.userId);
+    if (!auth) return failRun(run, steps, idx, "發起人帳號已停用，代理無法更新行程");
+    try {
+      const effectId = await persistStepEffectId(run, steps, step);
+      const result = await updateScheduleItemOnceCore({
+        auth,
+        id: step.scheduleItemId,
+        title: step.scheduleTitle,
+        startsAt: step.startsAt,
+        endsAt: step.endsAt,
+        note: step.content,
+        ownerId: step.ownerId,
+        mentions: step.mentions,
+        effectId,
+        runId: run.id,
+        stepId: stableStepId(step, idx),
+      });
+      if (result.row.groupId !== run.groupId || result.row.projectId !== run.projectId) {
+        return failRun(run, steps, idx, "目標行程不屬於目前計畫專案");
+      }
+      addOutputRef(step, "schedule", result.row.id, result.row.title);
+      step.status = "done";
+      step.detail = result.replayed ? "已確認行程先前完成更新" : `已更新行程「${result.row.title.slice(0, 30)}」`;
+      auditAgentStep(run, step, idx, true);
+    } catch (err) {
+      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+    }
+    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    return;
+  }
+
   if (step.kind === "create_scene") {
     const title = (step.title ?? "").trim();
     if (!title) return failRun(run, steps, idx, "計畫裡的分鏡標題是空的");

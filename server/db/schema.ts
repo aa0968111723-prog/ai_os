@@ -657,6 +657,24 @@ export const agentRuns = pgTable("agent_runs", {
 });
 
 /**
+ * 非建立型代理副作用的永久冪等憑證。
+ * create_note/create_schedule 直接以 effectId 當目標資料列 UUID；append_note/update_schedule
+ * 則把「內容變更」與此紀錄放在同一交易，避免 COMMIT 後、step 寫回前崩潰造成重複追加／修改。
+ */
+export const agentStepEffects = pgTable("agent_step_effects", {
+  id: uuid("id").primaryKey(),
+  runId: uuid("run_id").notNull(),
+  stepId: text("step_id").notNull(),
+  kind: text("kind").notNull(),
+  outputType: text("output_type").notNull(),
+  outputId: uuid("output_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  runStepUq: uniqueIndex("agent_step_effects_run_step_uq").on(t.runId, t.stepId),
+  runIdx: index("agent_step_effects_run_idx").on(t.runId),
+}));
+
+/**
  * 每組自訂選項（R23）：內容類型/發布平台/世界觀(調性·主軸·視覺風格)由各組組長自行增修。
  * 首次讀取時以 shared/options 的預設 lazy-seed；(groupId,type,value) 唯一，讓 seed 冪等。
  * worldview 類（tone/theme/style）value===label（直接是注入生成的字串）；kind/platform 的 value 是穩定 id。
@@ -718,10 +736,14 @@ export const notes = pgTable("notes", {
   sourceMessageId: uuid("source_message_id"),
   /** @提及同組成員（Planner 也能 @人；與留言 mentions 同語意） */
   mentions: jsonb("mentions").$type<string[]>(),
+  /** 由 AI 執行計畫建立／更新時記錄來源，供 Planner 與工作台雙向跳轉。 */
+  planRunId: uuid("plan_run_id"),
+  planStepId: text("plan_step_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
   groupIdx: index("notes_group_idx").on(t.groupId),
+  planRunIdx: index("notes_plan_run_idx").on(t.planRunId),
 }));
 
 /**
@@ -746,9 +768,13 @@ export const scheduleItems = pgTable("schedule_items", {
   sourceMessageId: uuid("source_message_id"),
   /** @提及同組成員（Planner 排程也能 @人） */
   mentions: jsonb("mentions").$type<string[]>(),
+  /** 由 AI 執行計畫建立／更新時記錄來源，供 Planner 與工作台雙向跳轉。 */
+  planRunId: uuid("plan_run_id"),
+  planStepId: text("plan_step_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   groupStartIdx: index("schedule_items_group_start_idx").on(t.groupId, t.startsAt),
+  planRunIdx: index("schedule_items_plan_run_idx").on(t.planRunId),
 }));
 
 /**

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
@@ -11,18 +12,40 @@ import { ConfirmButton } from "./interactions";
 
 /** 與 server/services/agentRunner 的 AgentStep jsonb 同形狀（tRPC 端 jsonb 推導不出型別，前端自己標） */
 interface AgentStep {
-  kind: "split_script" | "create_scene" | "generate" | "voiceover" | "submit_approval";
+  kind:
+    | "split_script"
+    | "create_scene"
+    | "generate"
+    | "voiceover"
+    | "submit_approval"
+    | "record_to_database"
+    | "create_note"
+    | "append_note"
+    | "create_schedule"
+    | "update_schedule";
   note: string;
   status: "pending" | "running" | "done" | "failed" | "stopped";
   points?: number;
   detail?: string;
+  noteId?: string;
+  scheduleItemId?: string;
+  outputRefs?: Array<{ type: string; id: string; label?: string }>;
 }
 
 const STEP_ICON: Record<AgentStep["status"], IconName> = {
   done: "CheckCircle2", failed: "XCircle", stopped: "CircleStop", running: "Loader", pending: "Clock",
 };
 const KIND_ICON: Record<AgentStep["kind"], IconName> = {
-  split_script: "Clapperboard", create_scene: "Plus", generate: "Sparkles", voiceover: "Mic", submit_approval: "Check",
+  split_script: "Clapperboard",
+  create_scene: "Plus",
+  generate: "Sparkles",
+  voiceover: "Mic",
+  submit_approval: "Check",
+  record_to_database: "Database",
+  create_note: "FileText",
+  append_note: "FileText",
+  create_schedule: "CalendarPlus",
+  update_schedule: "CalendarPlus",
 };
 const RUN_STATUS: Record<string, { label: string; cls: string }> = {
   awaiting_approval: { label: "待你核准", cls: "queued" },
@@ -114,6 +137,8 @@ export function AgentCard({
       // 分頁/篩選視圖也要刷新，否則代理逐步落庫的成品在該視圖看不到（修 agent-workflow-refresh-missing-paged）
       utils.generation.listByProjectPaged.invalidate({ projectId });
       utils.scenes.listByProject.invalidate({ projectId });
+      utils.notes.list.invalidate();
+      utils.schedule.list.invalidate();
       utils.quota.my.invalidate();
     };
     const timer = setInterval(refresh, 4000);
@@ -213,6 +238,7 @@ export function AgentCard({
         return (
           <details
             key={r.id}
+            id={`agent-run-${r.id}`}
             className="agent-run"
             open={runOpen}
             onToggle={(e) => {
@@ -248,6 +274,16 @@ export function AgentCard({
                   {s.points ? <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>約 {s.points} 點</span> : null}
                   {s.status === "pending" && r.status === "running" && <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>排隊中</span>}
                   {s.detail && <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>{s.detail.slice(0, 60)}</span>}
+                  {s.noteId && (
+                    <Link className="chip pick" href={`/planner?focus=note-${s.noteId}`}>
+                      開啟筆記
+                    </Link>
+                  )}
+                  {s.scheduleItemId && (
+                    <Link className="chip pick" href={`/planner?focus=schedule-${s.scheduleItemId}`}>
+                      開啟排程
+                    </Link>
+                  )}
                 </div>
               ))}
             </div>

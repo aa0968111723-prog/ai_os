@@ -204,8 +204,10 @@ describe("legacy migration adoption bridge", () => {
     expect(isReRunnableCreateStatement('CREATE INDEX IF NOT EXISTS "a" ON "b" ("c")')).toBe(true);
     expect(isReRunnableCreateStatement('CREATE UNIQUE INDEX IF NOT EXISTS "a" ON "b" ("c")')).toBe(true);
     expect(isReRunnableCreateStatement('CREATE TABLE IF NOT EXISTS "a" ("b" text)')).toBe(true);
+    expect(isReRunnableCreateStatement('ALTER TABLE "a" ADD COLUMN IF NOT EXISTS "b" text')).toBe(true);
     expect(isReRunnableCreateStatement('CREATE INDEX "a" ON "b" ("c")')).toBe(false);
     expect(isReRunnableCreateStatement('CREATE TABLE "a" ("b" text)')).toBe(false);
+    expect(isReRunnableCreateStatement('ALTER TABLE "a" ADD COLUMN "b" text')).toBe(false);
   });
 
   it("accepts only the reviewed additive drift after 0001", () => {

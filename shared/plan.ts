@@ -66,6 +66,7 @@ export const planStepSchema = z.object({
   content: z.string().max(80_000).optional(),
   mentions: z.array(z.string().uuid()).max(20).optional(),
   scheduleItemId: z.string().uuid().optional(),
+  scheduleTitle: z.string().trim().min(1).max(120).optional(),
   endsAt: z.string().datetime({ offset: true }).optional(),
   ownerId: z.string().uuid().optional(),
   taskId: z.string().uuid().optional(),
