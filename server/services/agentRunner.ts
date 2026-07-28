@@ -648,7 +648,13 @@ async function advanceRun(run: RunRow): Promise<void> {
       // 有限重試（審查修復：原版把「已計費不退」的解析失敗當暫時性無限重試，每輪重打 NIM 燒免費額度）：
       // INTERNAL＝LLM 回壞 JSON，重試一次＝再燒一次呼叫，上限 3；SERVICE_UNAVAILABLE＝NIM 流量/點數
       // 上限（流量約 1 分鐘解），上限 30（每 4 秒一輪 ≈ 2 分鐘）——超限收攏成 failed，不無限打轉
-      if (err instanceof TRPCError && (err.code === "INTERNAL_SERVER_ERROR" || err.code === "SERVICE_UNAVAILABLE")) {
+      // UNPROCESSABLE＝模型 JSON 壞掉：重試有機會；與 INTERNAL 同 cap=3，避免無限燒 NIM
+      if (
+        err instanceof TRPCError &&
+        (err.code === "INTERNAL_SERVER_ERROR" ||
+          err.code === "SERVICE_UNAVAILABLE" ||
+          err.code === "UNPROCESSABLE_CONTENT")
+      ) {
         const cap = err.code === "SERVICE_UNAVAILABLE" ? 30 : 3;
         step.retries = (step.retries ?? 0) + 1;
         if (step.retries < cap) {

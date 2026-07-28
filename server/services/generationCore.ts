@@ -22,6 +22,31 @@ import { buildSceneAnchor } from "../routers/scenePresets";
 export type GenerationRow = typeof schema.generations.$inferSelect;
 
 /**
+ * 正式模式不可當「圖／影／音 編輯模型」來源的佔位網址：
+ * /api/mock-asset/* 是 e2e 假生成用的 1×1 圖或舊域名殘留，fal image-edit 抓到會 422。
+ * 只在 !isMockMode 擋下——e2e 假生成本身仍靠 mock 佔位走完流程。
+ */
+export function isUnusableRealModeSourceUrl(url: string | undefined | null): boolean {
+  if (!url) return false;
+  return /\/api\/mock-asset\//i.test(url);
+}
+
+/** 把供應商原始錯誤轉成使用者可行動的說明（存進 generations.error／推播）。 */
+export function humanizeGenerationError(raw: string | undefined | null): string {
+  const msg = (raw ?? "").trim() || "未知錯誤";
+  if (/aborted due to timeout|TimeoutError|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT/i.test(msg)) {
+    return "AI 模型回應逾時——上游服務忙碌或網路不穩，點數已退回，請稍後重試";
+  }
+  if (/fal result 422/i.test(msg)) {
+    // 若 fal.ts 已附提示就原樣用；否則補上常見原因
+    return msg.includes("來源圖")
+      ? msg
+      : `${msg}——常見原因：來源圖網址無法被生成服務抓取。請改用素材庫中真實可開啟的圖片，勿用測試佔位圖`;
+  }
+  return msg;
+}
+
+/**
  * 成品落地（背景）：fal 的 CDN 網址會過期，完成後盡快抓回 Volume 永久保存。
  * 失敗不影響主流程（外部網址短期內仍可用），之後輪詢會再看到未落地素材可重試。
  */
@@ -201,6 +226,15 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     if (!sourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "此素材沒有可用檔案" });
   }
 
+  // 正式模式：擋下 mock 佔位來源（線上曾出現 sourceUrl=…/api/mock-asset/image → fal 422）
+  if (model.needs && sourceUrl && !isMockMode() && isUnusableRealModeSourceUrl(sourceUrl)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message:
+        "來源圖是測試佔位圖（/api/mock-asset），正式生成無法使用——請改從素材庫選真實圖片，或貼上可公開抓取的圖片網址",
+    });
+  }
+
   const worldview = worldviewSchema.parse(project.worldview ?? {});
   // 世界觀 → 角色定裝 → 場景設定，依序疊加注入（都只撈本專案，且只注入視覺類別）
   const charAnchor = input.characterIds?.length ? await buildCharacterAnchor(project.id, input.characterIds) : "";
@@ -352,7 +386,12 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     console.error("[generation] submit 失敗:", err);
     await db
       .update(schema.generations)
-      .set({ status: "failed", error: String(err), pointsRefunded: est, updatedAt: new Date() })
+      .set({
+        status: "failed",
+        error: humanizeGenerationError(err instanceof Error ? err.message : String(err)),
+        pointsRefunded: est,
+        updatedAt: new Date(),
+      })
       .where(eq(schema.generations.id, gen.id));
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "生成送出失敗,點數已退回,請重試" });
   }
@@ -449,7 +488,12 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     const updatedRows = await db.transaction(async (tx) => {
       const rows = await tx
         .update(schema.generations)
-        .set({ status: "failed", error: result.error ?? "未知錯誤", pointsRefunded: gen.pointsEst, updatedAt: new Date() })
+        .set({
+          status: "failed",
+          error: humanizeGenerationError(result.error),
+          pointsRefunded: gen.pointsEst,
+          updatedAt: new Date(),
+        })
         .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
         .returning();
       if (rows.length > 0 && gen.pointsEst > 0) {
@@ -468,9 +512,10 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
       return current ?? gen;
     }
     // 失敗推播（CAS 保證同筆只推一次）：tag 獨立不與「生成完成」互蓋——失敗訊號不能被後到的成功淹掉
+    const failMsg = humanizeGenerationError(result.error);
     void pushToUsers([gen.userId], {
       title: "生成失敗",
-      body: `${model?.label ?? gen.modelId}：${result.error ?? "未知錯誤"}${gen.pointsEst > 0 ? "（點數已退回）" : ""}`,
+      body: `${model?.label ?? gen.modelId}：${failMsg}${gen.pointsEst > 0 ? "（點數已退回）" : ""}`,
       url: `/p/${gen.projectId}`,
       tag: `gen-failed-${gen.id}`,
     }).catch((err) => console.warn("[generation] 失敗推播失敗：", err instanceof Error ? err.message : err));
