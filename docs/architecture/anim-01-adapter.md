@@ -91,7 +91,7 @@
 | Shot 正式狀態機 | 僅粗映射 scene.status | Command 層 |
 | 選版 DB unique | selected 指標與 AssetVersion | ANIM-04 |
 | scenes router 改讀 adapter | 可選 thin re-export | 後續小 refactor |
-| 角色／風格 bible 掛 Shot | characterRefs 空陣列 | ANIM-02 |
+| 角色／風格 bible 掛 Shot | characterRefs 空陣列 | ~~ANIM-02~~ foundation 已落地（型別／stale／snapshot）；持久化仍 open → 見 `anim-02-continuity.md` |
 
 ## 7. 成功定義（本批）
 
@@ -109,5 +109,5 @@ npx vitest run shared/animationContracts.test.ts shared/animationDomain.test.ts
 ## 9. 後續
 
 1. 匯出／粗剪讀路徑可選改走 `buildProductionBundle`（仍不破 API）。
-2. ANIM-02 角色與風格聖經版本化掛入 Shot。
+2. ~~ANIM-02 角色與風格聖經版本化（pure foundation）。~~ **已完成** → 見 `anim-02-continuity.md`（`shared/animationContinuity.ts`）。Shot.characterRefs 持久化／DB 版本表仍為後續。
 3. 需要時再拆 Production 表；adapter 的 `id === projectId` 策略改為獨立 id + FK。

@@ -18,6 +18,7 @@ import {
   listActiveOrderedScenes,
   type SoftDeletable,
 } from "./animationContracts";
+import type { ShotCharacterRef } from "./animationContinuity";
 
 // ─── 正式領域型別（對齊 remediation plan §3／§4；adapter 投影用） ─────────
 
@@ -43,10 +44,8 @@ export type ShotState =
   | "blocked"
   | "omitted";
 
-export interface ShotCharacterRef {
-  characterId: string;
-  characterBibleVersionId: string;
-}
+/** 再匯出：角色引用型別單一真相在 animationContinuity（ANIM-02） */
+export type { ShotCharacterRef };
 
 /**
  * Production：一支影片／動畫作品。

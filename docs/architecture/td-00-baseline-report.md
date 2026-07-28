@@ -34,7 +34,7 @@
 |---|---|
 | PostgreSQL RLS | 獨立大 migration 與跨入口負向測試 |
 | 正式監控／備份還原演練 | 需平台帳號與演練窗口 |
-| ANIM-02～10 產品域模型 | ANIM-01 adapter 已落地；其餘依賴場景／分鏡產品化 |
+| ANIM-02～10 產品域模型 | ANIM-01 adapter + ANIM-02 continuity pure foundation 已落地；DB 版本表與後續依賴場景／分鏡產品化 |
 | GPU-02～ 真實 Beam | 需 secret 與部署；本批僅 mock |
 | REST 生成入口 | **未部署**（`/api/v1` 僅 databases／CSV／ICS，見 `server/services/restApi.ts`），故延期；日後若新增 REST 生成必須走 `executeGenerationCommand`（不可直呼 core） |
 | 細節缺漏 MEDIUM/LOW 全表 | 219 項；HIGH 已關；其餘按路線圖 |
