@@ -19,6 +19,7 @@ import {
   getInvitePreview,
   loadAuthState,
 } from "../services/auth";
+import { authMeCapabilities } from "../services/policyEngine";
 import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 import {
   RateLimitConfigurationError,
@@ -52,8 +53,15 @@ async function guardedAuthRateLimit<T>(operation: () => Promise<T>): Promise<T> 
 }
 
 export const authRouter = router({
-  /** 目前登入狀態（未登入回 null，前端據此顯示登入頁） */
-  me: publicProcedure.query(({ ctx }) => ctx.auth),
+  /**
+   * 目前登入狀態（未登入回 null，前端據此顯示登入頁）。
+   * 登入時附 capabilitiesByGroupId／capabilities，供 UI 依 Policy Engine 真相來源導覽，
+   * 不再自行拼 isAdmin||isLeader（TD-05a）。既有 user／groups／adminTeamIds 仍完整回傳。
+   */
+  me: publicProcedure.query(({ ctx }) => {
+    if (!ctx.auth) return null;
+    return { ...ctx.auth, ...authMeCapabilities(ctx.auth) };
+  }),
 
   /** 邀請預覽（不消耗 token）：落地頁填資料前先確認連結有效、要加入哪個組 */
   invitePreview: publicProcedure

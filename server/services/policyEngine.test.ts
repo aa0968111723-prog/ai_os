@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { TRPCError } from "@trpc/server";
+import type { AuthState } from "./auth";
 import {
   assertPolicy,
+  authMeCapabilities,
+  capabilitiesByGroupFromAuth,
   capabilitiesForGroupRole,
   evaluatePolicy,
+  globalCapabilitiesFromAuth,
   type PolicyAction,
   type PolicyContext,
 } from "./policyEngine";
@@ -45,6 +49,75 @@ describe("Policy Engine — capability mapping", () => {
     const caps = capabilitiesForGroupRole(null, { isSuperAdmin: true });
     expect(caps.has("team.manage")).toBe(true);
     expect(caps.has("generation.submit")).toBe(true);
+  });
+});
+
+describe("Policy Engine — auth.me capability payload (TD-05a)", () => {
+  const baseUser = {
+    id: "u1",
+    name: "測試",
+    email: "t@example.com",
+    isSuperAdmin: false,
+    mustChangePassword: false,
+  };
+
+  function auth(over: Partial<AuthState> = {}): AuthState {
+    return {
+      user: baseUser,
+      groups: [
+        { groupId: "g-member", groupName: "組員組", teamId: "t1", teamName: "隊", role: "member" },
+        { groupId: "g-leader", groupName: "組長組", teamId: "t1", teamName: "隊", role: "leader" },
+        { groupId: "g-admin", groupName: "管理組", teamId: "t1", teamName: "隊", role: "admin" },
+      ],
+      adminTeamIds: [],
+      ...over,
+    };
+  }
+
+  it("maps each group to sorted unique capability arrays (stable keys)", () => {
+    const byGroup = capabilitiesByGroupFromAuth(auth());
+    expect(Object.keys(byGroup).sort()).toEqual(["g-admin", "g-leader", "g-member"]);
+
+    expect(byGroup["g-member"]).toEqual([...byGroup["g-member"]].sort());
+    expect(byGroup["g-member"]).toContain("generation.submit");
+    expect(byGroup["g-member"]).not.toContain("generation.approve");
+    expect(byGroup["g-member"]).not.toContain("group.manage_members");
+
+    expect(byGroup["g-leader"]).toContain("generation.approve");
+    expect(byGroup["g-leader"]).toContain("group.manage_members");
+    expect(byGroup["g-leader"]).not.toContain("team.manage");
+
+    expect(byGroup["g-admin"]).toContain("team.manage");
+    expect(byGroup["g-admin"]).toContain("audit.view");
+  });
+
+  it("team admin on membership team gets full caps for that group", () => {
+    const byGroup = capabilitiesByGroupFromAuth(
+      auth({ adminTeamIds: ["t1"] }),
+    );
+    expect(byGroup["g-member"]).toContain("team.manage");
+    expect(byGroup["g-member"]).toContain("generation.approve");
+  });
+
+  it("global capabilities: superAdmin full set; team admin team.manage; plain empty", () => {
+    expect(globalCapabilitiesFromAuth(auth())).toEqual([]);
+    expect(globalCapabilitiesFromAuth(auth({ adminTeamIds: ["t1"] }))).toEqual(
+      ["team.manage", "team.view"].sort(),
+    );
+    const superCaps = globalCapabilitiesFromAuth(
+      auth({ user: { ...baseUser, isSuperAdmin: true }, groups: [], adminTeamIds: [] }),
+    );
+    expect(superCaps).toContain("team.manage");
+    expect(superCaps).toContain("generation.submit");
+    expect(superCaps).toEqual([...superCaps].sort());
+  });
+
+  it("authMeCapabilities shape is stable for me response", () => {
+    const payload = authMeCapabilities(auth());
+    expect(payload).toEqual({
+      capabilitiesByGroupId: capabilitiesByGroupFromAuth(auth()),
+      capabilities: globalCapabilitiesFromAuth(auth()),
+    });
   });
 });
 

@@ -151,6 +151,51 @@ export function capabilitiesFromAuth(
   });
 }
 
+/** 排序後的 capability 字串陣列（穩定序列化，供 auth.me 與 contract test） */
+function sortedCapList(caps: Set<Capability>): Capability[] {
+  return [...caps].sort();
+}
+
+/**
+ * 為 auth.groups 中每一組計算 capability（預設 projectRole=editor）。
+ * 回傳 Record<groupId, sorted Capability[]>，供前端導覽取代 isAdmin||isLeader。
+ */
+export function capabilitiesByGroupFromAuth(
+  auth: AuthState,
+  projectRole: ProjectRole | null = "editor",
+): Record<string, Capability[]> {
+  const out: Record<string, Capability[]> = {};
+  for (const g of auth.groups) {
+    out[g.groupId] = sortedCapList(capabilitiesFromAuth(auth, g.groupId, projectRole));
+  }
+  return out;
+}
+
+/**
+ * 跨組／全域 capability：superAdmin 全套；team admin 至少 team.view + team.manage。
+ * 未分組的團隊管理員仍可依此顯示「團隊管理」入口。
+ */
+export function globalCapabilitiesFromAuth(auth: AuthState): Capability[] {
+  if (auth.user.isSuperAdmin) {
+    return sortedCapList(capabilitiesForGroupRole(null, { isSuperAdmin: true }));
+  }
+  if (auth.adminTeamIds.length > 0) {
+    return sortedCapList(new Set<Capability>(["team.view", "team.manage"]));
+  }
+  return [];
+}
+
+/** auth.me 登入時附加的 capability 欄位（不改 AuthState 本體） */
+export function authMeCapabilities(auth: AuthState): {
+  capabilitiesByGroupId: Record<string, Capability[]>;
+  capabilities: Capability[];
+} {
+  return {
+    capabilitiesByGroupId: capabilitiesByGroupFromAuth(auth),
+    capabilities: globalCapabilitiesFromAuth(auth),
+  };
+}
+
 function actionToCapability(action: PolicyAction): Capability {
   if (action === "note.create" || action === "note.append") return "note.write";
   return action as Capability;
