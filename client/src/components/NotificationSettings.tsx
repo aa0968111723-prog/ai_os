@@ -17,7 +17,7 @@ import {
  * - 本裝置：一鍵啟用（授權＋訂閱＋上報）/停用；iPhone 未加入主畫面時給前置引導。
  * - 已連結裝置：列出所有裝置（含本裝置標記）、可逐一移除（如遺失的手機）。
  * - 測試通知：立刻推一則到所有已連結裝置，現場驗證通不通。
- * 啟用後審批、私訊、@提及、生成與 AI 代理完成都會推到這些裝置——關頁也收得到。
+ * 啟用後審批、私訊、@提及、生成與 AI 助手完成都會推到這些裝置——關頁也收得到。
  */
 export function NotificationSettingsDialog({ onClose }: { onClose: () => void }) {
   const utils = trpc.useUtils();
@@ -120,7 +120,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
       <div ref={dialogRef} className="card" style={{ width: 460, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }} role="dialog" aria-modal="true" aria-label="通知設定">
         <h2 style={{ marginTop: 0 }}><Icon name="Bell" size={18} style={{ verticalAlign: "-3px" }} /> 通知設定</h2>
         <p className="hint">
-          把手機和電腦連結進來後，分鏡審批、私訊、@提及、生成與 AI 代理完成都會直接推到裝置上——
+          把手機和電腦連結進來後，分鏡審批、私訊、@提及、生成與 AI 執行計畫完成都會直接推到裝置上——
           關掉網頁、關掉瀏覽器也收得到。
         </p>
 

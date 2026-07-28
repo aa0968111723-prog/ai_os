@@ -4,7 +4,7 @@ import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
 
 /**
- * AI 代理卡（代理系統前端）：一句目標 → 規劃（NIM 免費）→ 計畫預覽（每步＋估點總額）→
+ * AI 助手卡（助手系統前端）：一句目標 → 規劃（NIM 免費）→ 計畫預覽（每步＋估點總額）→
  * 核准執行 → 伺服器背景逐步跑（關頁不中斷）→ 即時進度／可停止。
  * 通則不變：規劃前先看價、核准才開始花執行點數、每步實際扣點走各自守門（超額仍會停下等組長核准）。
  */
@@ -130,7 +130,7 @@ export function AgentCard({
     for (const r of rows) {
       const before = prev.get(r.id);
       if (!isFirst && before === "running" && (r.status === "done" || r.status === "failed")) {
-        notifyDesktop(r.status === "done" ? "AI 代理完成 ✓" : "AI 代理失敗", r.goal.slice(0, 30));
+        notifyDesktop(r.status === "done" ? "AI 執行計畫完成 ✓" : "AI 執行計畫失敗", r.goal.slice(0, 30));
       }
       prev.set(r.id, r.status);
     }
@@ -142,12 +142,12 @@ export function AgentCard({
   const actionError = approve.error ?? discard.error ?? stop.error;
   const busy = approve.isPending || discard.isPending || stop.isPending;
 
-  // 四合一（專案 AI 代理系統）分頁模式：外殼與標題由 AiHub 提供，這裡只出內容
+  // 四合一（專案 AI 創作助手）分頁模式：外殼與標題由 AiHub 提供，這裡只出內容
   const body = (
     <>
       {!embedded && (
         <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 代理（給我一個目標，我來排計畫執行）
+          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作助手（給我一個目標，我來排計畫執行）
         </h2>
       )}
       {!hideComposer && (
@@ -160,7 +160,7 @@ export function AgentCard({
       {hideComposer ? (
         (runs.data ?? []).length === 0 && (
           <p className="hint">
-            還沒有代理計畫——在上方對話用一句話下目標（例：「把腳本拆成分鏡並逐鏡出圖」），我會排出逐步計畫與估點，你核准後由伺服器背景執行。
+            還沒有 AI 執行計畫——在上方對話用一句話下目標（例：「把腳本拆成分鏡並逐鏡出圖」），我會排出逐步計畫與估點，你核准後由伺服器背景執行。
           </p>
         )
       ) : canEdit ? (
@@ -185,18 +185,18 @@ export function AgentCard({
             <ConfirmButton
               triggerClassName="primary"
               disabled={goal.trim().length < 5 || plan.isPending}
-              message="會請 AI 代理讀世界觀＋知識庫排一份逐步計畫——NIM 免費額度，不扣點；計畫只規劃不執行，執行前還會再讓你看估點核准。"
+              message="會請 AI 創作助手讀世界觀＋知識庫排一份逐步計畫——NIM 免費額度，不扣點；計畫只規劃不執行，執行前還會再讓你看估點核准。"
               confirmLabel="開始規劃"
               onConfirm={() => plan.mutate({ projectId, goal: goal.trim() })}
             >
-              {plan.isPending ? "代理規劃中…" : "規劃計畫（免費）"}
+              {plan.isPending ? "規劃中…" : "規劃計畫（免費）"}
             </ConfirmButton>
             {!plan.isPending && goal.trim().length > 0 && goal.trim().length < 5 && <span className="hint">目標至少 5 個字</span>}
           </div>
           {plan.error && <p className="error" role="alert">{plan.error.message}</p>}
         </>
       ) : (
-        <p className="hint">你在此專案是檢視者（唯讀）——可以看代理進度，不能發起或核准。</p>
+        <p className="hint">你在此專案是檢視者（唯讀）——可以看執行計畫進度，不能發起或核准。</p>
       )}
 
       {actionError && <p className="error" role="alert">{actionError.message}</p>}
@@ -219,7 +219,7 @@ export function AgentCard({
               const open = e.currentTarget.open;
               setExpandedRuns((prev) => (prev[r.id] === open ? prev : { ...prev, [r.id]: open }));
             }}
-            data-fb="代理執行列"
+            data-fb="AI 執行計畫列"
           >
             <summary>
               <span className="agent-run__goal">目標：{r.goal.slice(0, 60)}{r.goal.length > 60 ? "…" : ""}</span>
@@ -284,9 +284,9 @@ export function AgentCard({
     </>
   );
 
-  if (embedded) return <div data-fb="AI 代理卡">{body}</div>;
+  if (embedded) return <div data-fb="AI 助手卡">{body}</div>;
   return (
-    <section className="card card--primary" data-fb="AI 代理卡" id="sec-agent">
+    <section className="card card--primary" data-fb="AI 助手卡" id="sec-agent">
       {body}
     </section>
   );

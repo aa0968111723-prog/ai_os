@@ -248,7 +248,7 @@ function AddOptionChip({
 /**
  * 專案工作台（一體連貫長頁版）：三幕環環相扣——
  * ① 專案上下文（世界觀＋選項就地新增／角色・場景定裝／知識庫／素材庫／成員權限）＝AI 的共同大腦；
- * ② AI 創作中心（專案 AI 代理系統：一個對話統包問答・發想・拆分鏡・排計畫執行・查資料庫→生成台→工作流→提示詞庫）；
+ * ② AI 創作中心（AI 創作助手：一個對話統包問答・發想・拆分鏡・排計畫執行・查資料庫→生成台→製作範本→提示詞庫）；
  * ③ 分鏡・時間軸・交付＝成品落地。
  * 上下文餵給創作、創作的成品流進分鏡、分鏡打包交付；跨卡動作（導演建議、分鏡提示詞、選來源、
  * 「再用」）都會自動捲到接手的卡並聚焦，不再是各自獨立的功能。
@@ -350,7 +350,7 @@ export function ProjectPage({ id }: { id: string }) {
   }, [assets.data]);
   /** 外部指定模型（提示詞庫「再用」/生成紀錄「再用此設定」還原模型用）：nonce 遞增觸發 ModelPicker 套用 */
   const [pickReq, setPickReq] = useState<{ modelId: string; nonce: number } | null>(null);
-  /** 提示詞庫「用於工作流」：把咒語帶進工作流想法框（nonce 遞增觸發 WorkflowCard 套用） */
+  /** 提示詞庫「用於製作範本」：把咒語帶進製作範本想法框（nonce 遞增觸發 WorkflowCard 套用） */
   const [wfPromptReq, setWfPromptReq] = useState<{ text: string; nonce: number } | null>(null);
   /** 引導步驟列收合狀態（全部完成後可整條收起，不佔版面） */
   const [onboardCollapsed, setOnboardCollapsed] = useState(false);
@@ -372,7 +372,7 @@ export function ProjectPage({ id }: { id: string }) {
       submitRequestId.current = crypto.randomUUID();
       // 成功生成的提示詞自動入庫（簡報「打過的咒語自動存起來」）——連同模型/角色/場景設定，
       // 「再用」才能還原完整用法而不只文字（三合一）。生成台知道「完整」狀態：
-      // 沒帶卡就傳 []（明確清空舊設定），與工作流那種「只知道部分」的存法區隔
+      // 沒帶卡就傳 []（明確清空舊設定），與製作範本那種「只知道部分」的存法區隔
       savePrompt.mutate({
         projectId: id,
         text: vars.prompt,
@@ -934,13 +934,13 @@ export function ProjectPage({ id }: { id: string }) {
             id="stage-create"
             num="②"
             title="AI 創作中心"
-            desc="專案 AI 代理系統＋生成・工作流一條線"
+            desc="AI 創作助手＋生成・製作範本一條線"
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
-          {/* 專案 AI 代理系統（統一深度整合）：一個對話統包問答・發想・拆分鏡・下目標排計畫・查資料庫；
+          {/* AI 創作助手（統一深度整合）：一個對話統包問答・發想・拆分鏡・下目標排計畫・查資料庫；
               多步目標排成計畫，核准後由伺服器背景執行（可寫入 AI 可寫的資料庫）；拆分鏡草稿仍落在③分鏡列表。
-              生成紀錄的「AI 代理」來源 chip 捲向卡內既有的 #sec-agent 錨點 */}
+              生成紀錄的「AI 執行計畫」來源 chip 捲向卡內既有的 #sec-agent 錨點 */}
           <AiHub projectId={id} canEdit={canEdit} isLeader={isLeader} />
 
           {/* 生成台（11 類 × 旗艦/經濟/最低成本）＝日常主力工作區 */}
@@ -1117,12 +1117,12 @@ export function ProjectPage({ id }: { id: string }) {
           </section>
           </CollabZone>
 
-          {/* 工作流（一鍵串鏈）：沿用生成台勾選的角色/場景卡——整條串鏈的視覺步驟注入同一套錨點 */}
+          {/* 製作範本（一鍵串鏈）：沿用生成台勾選的角色/場景卡——整條串鏈的視覺步驟注入同一套錨點 */}
           <div id="sec-workflow">
             <WorkflowCard projectId={id} charIds={charIds} sceneIds={sceneIds} promptRequest={wfPromptReq} />
           </div>
 
-          {/* 提示詞庫：成功生成的咒語一鍵再用（「再用」還原完整設定帶回生成台；「工作流」帶進想法框） */}
+          {/* 提示詞庫：成功生成的咒語一鍵再用（「再用」還原完整設定帶回生成台；「製作範本」帶進想法框） */}
           <div id="sec-prompts">
             <PromptLibrary
               projectId={id}

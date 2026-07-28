@@ -28,7 +28,7 @@ type Tier = (typeof TIERS)[number]["id"];
 const MODEL_CATEGORY_COUNT = CATEGORIES.filter((c) => c.id !== "workflow").length;
 
 /* ── 需求 #1+6.8:並排比較與三題挑模型精靈的共用定義 ── */
-/** 精靈第 1 題的創作類別(排除工作流:那是串鏈預設,不是單一模型) */
+/** 精靈第 1 題的創作類別(排除製作範本:那是串鏈預設,不是單一模型) */
 const WIZARD_CATEGORIES = CATEGORIES.filter((c) => c.id !== "workflow");
 /** 精靈第 3 題:有沒有來源素材 */
 const WIZARD_SOURCES = [
@@ -528,8 +528,8 @@ export function ModelsPage() {
 
       {(!debouncedQ || matchedWorkflows.length > 0) && (
         <>
-          <h2 style={{ marginTop: 28 }}>工作流(一鍵串鏈)</h2>
-          <p className="hint">在<Link href="/">作業台</Link>開啟專案後,於「工作流」卡使用;每步各自扣點。</p>
+          <h2 style={{ marginTop: 28 }}>製作範本(一鍵串鏈)</h2>
+          <p className="hint">在<Link href="/">作業台</Link>開啟專案後,於「製作範本」卡使用;每步各自扣點。</p>
           {workflows.isLoading && (
             <div className="stack">
               {Array.from({ length: 2 }).map((_, i) => (
@@ -539,7 +539,7 @@ export function ModelsPage() {
           )}
           {workflows.isError && (
             <p className="error">
-              工作流載入失敗——
+              製作範本載入失敗——
               <button style={{ padding: "4px 12px", marginLeft: 4 }} onClick={() => workflows.refetch()}>重試</button>
             </p>
           )}

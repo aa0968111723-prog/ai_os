@@ -24,6 +24,7 @@ vi.mock("./AgentCard", () => ({
 }));
 
 describe("AiHub", () => {
+  const renderAiHub = (props = {}) => render(<AiHub projectId="project-1" canEdit {...props} />);
   beforeEach(() => {
     listByProject.mockReset();
     listByProject.mockReturnValue({ data: [] });
@@ -31,7 +32,7 @@ describe("AiHub", () => {
 
   it("collapses the whole embedded AI area while preserving mounted content", async () => {
     const user = userEvent.setup();
-    render(<AiHub projectId="project-1" canEdit />);
+    renderAiHub();
 
     const body = document.querySelector("#sec-ai-hub-body");
     expect(body).not.toHaveAttribute("hidden");
@@ -39,7 +40,7 @@ describe("AiHub", () => {
 
     await user.click(screen.getByRole("button", { name: "收合" }));
     expect(body).toHaveAttribute("hidden");
-    expect(screen.getByText(/AI 對話與執行區已收合/)).toBeVisible();
+    expect(screen.getByText(/AI 助手與執行計畫已收合/)).toBeVisible();
     expect(screen.getByTestId("assistant")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "展開" }));
@@ -53,7 +54,7 @@ describe("AiHub", () => {
         { id: "run-2", status: "awaiting_approval" },
       ],
     });
-    render(<AiHub projectId="project-1" canEdit />);
+    renderAiHub();
 
     expect(screen.getAllByText("執行中 1")).toHaveLength(2);
     expect(screen.getAllByText("待核准 1")).toHaveLength(2);
@@ -64,7 +65,7 @@ describe("AiHub", () => {
     const user = userEvent.setup();
     let data = [{ id: "run-1", status: "running" }];
     listByProject.mockImplementation(() => ({ data }));
-    const { rerender } = render(<AiHub projectId="project-1" canEdit />);
+    const { rerender } = renderAiHub();
     const details = document.querySelector("#sec-agent");
     const summary = details?.querySelector("summary");
 
@@ -91,7 +92,7 @@ describe("AiHub", () => {
     listByProject.mockImplementation(({ projectId }: { projectId: string }) => ({
       data: dataByProject[projectId],
     }));
-    const { rerender } = render(<AiHub projectId="project-1" canEdit />);
+    const { rerender } = renderAiHub();
     const details = document.querySelector("#sec-agent");
 
     expect(details).not.toHaveAttribute("open");

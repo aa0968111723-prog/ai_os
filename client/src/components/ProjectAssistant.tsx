@@ -18,7 +18,7 @@ type Action =
   | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number; prompt?: string }
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
   | { type: "split_script"; label: string; script: string }
-  // plan_agent：把目標交給 AI 代理排計畫（確認後也只排計畫——免費；執行另在代理執行區核准估點）
+  // plan_agent：把目標交給 AI 創作助手排計畫（確認後也只排計畫——免費；執行另在 AI 執行計畫區核准估點）
   | { type: "plan_agent"; label: string; goal: string };
 
 /**
@@ -302,7 +302,7 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
       : `用 ${info.label} 生成：${act.prompt.slice(0, 24)}…（${info.points} 點）`;
   };
 
-  // 四合一（專案 AI 代理系統）分頁模式：外殼與標題由 AiHub 提供；「收起」由分頁切換取代，不再另設
+  // 四合一（AI 創作助手）分頁模式：外殼與標題由 AiHub 提供；「收起」由分頁切換取代，不再另設
   const showCollapse = !embedded;
   const body = (
     <>
@@ -442,7 +442,7 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
                             : payloadAct.type === "split_script"
                               ? `執行「${payloadAct.label}」？會呼叫 AI 導演拆分鏡（免費）。`
                               : payloadAct.type === "plan_agent"
-                                ? `把這個目標交給 AI 代理？只會排出逐步計畫與估點（免費）——你在「代理執行」核准後才會開始花點執行。`
+                                ? `把這個目標交給 AI 創作助手？只會排出逐步計畫與估點（免費）——你在「AI 執行計畫」核准後才會開始花點執行。`
                                 : `執行「${payloadAct.label}」？`;
                       return (
                         <div key={j} style={{ display: "flex", flexDirection: "column", gap: 4 }}>

@@ -13,7 +13,7 @@ export interface PromptReuseSettings {
 /**
  * 提示詞庫（簡報「打過的咒語一鍵再用」）：
  * 成功生成的提示詞自動入庫，這裡可「再用」（帶入生成台，連同模型/角色/場景設定一起還原）、
- * 「工作流」（帶入工作流想法框）、「複製」、「刪除」。
+ * 「製作範本」（帶入製作範本想法框）、「複製」、「刪除」。
  */
 export function PromptLibrary({
   projectId,
@@ -22,7 +22,7 @@ export function PromptLibrary({
 }: {
   projectId: string;
   onUse: (text: string, settings?: PromptReuseSettings) => void;
-  /** 三合一：把咒語帶進工作流「你的想法」框（不傳就不畫「工作流」鈕） */
+  /** 三合一：把咒語帶進製作範本「你的想法」框（不傳就不畫「製作範本」鈕） */
   onUseForWorkflow?: (text: string) => void;
 }) {
   const utils = trpc.useUtils();
@@ -82,10 +82,10 @@ export function PromptLibrary({
                 {onUseForWorkflow && (
                   <button
                     style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }}
-                    title="把這則咒語帶進工作流的想法框"
+                    title="把這則咒語帶進製作範本的想法框"
                     onClick={() => onUseForWorkflow(p.text)}
                   >
-                    工作流
+                    製作範本
                   </button>
                 )}
                 <button style={{ padding: "3px 10px", fontSize: "var(--fs-12)" }} onClick={() => copy(p.id, p.text)}>
