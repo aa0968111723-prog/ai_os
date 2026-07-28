@@ -9,6 +9,7 @@ import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import { validateMentions } from "./mentions";
 import { assertProjectNotArchived } from "./projectAcl";
+import { executeAgentEffectOnce } from "./agentEffectCore";
 
 export const NOTE_TITLE_MAX = 120;
 export const NOTE_CONTENT_MAX = 40_000;
@@ -28,6 +29,8 @@ export interface NoteSummary {
   creatorName: string;
   sourceMessageId: string | null;
   mentions: string[] | null;
+  planRunId: string | null;
+  planStepId: string | null;
 }
 
 function titleChecked(value: string): string {
@@ -146,6 +149,8 @@ export async function listNotesCore(
       creatorName: schema.users.name,
       sourceMessageId: schema.notes.sourceMessageId,
       mentions: schema.notes.mentions,
+      planRunId: schema.notes.planRunId,
+      planStepId: schema.notes.planStepId,
     })
     .from(schema.notes)
     .leftJoin(schema.users, eq(schema.users.id, schema.notes.createdBy))
@@ -163,6 +168,8 @@ export async function listNotesCore(
     creatorName: row.creatorName ?? "?",
     sourceMessageId: row.sourceMessageId,
     mentions: row.mentions,
+    planRunId: row.planRunId,
+    planStepId: row.planStepId,
   }));
 }
 
@@ -175,12 +182,15 @@ export async function listNotesForProject(auth: AuthState, projectId: string): P
 
 export async function addNoteCore(input: {
   auth: AuthState;
+  id?: string;
   groupId: string;
   projectId?: string | null;
   title: string;
   content: string;
   sourceMessageId?: string | null;
   mentions?: string[];
+  planRunId?: string | null;
+  planStepId?: string | null;
 }): Promise<NoteRow> {
   requireGroup(input.auth, input.groupId);
   if (input.projectId) await projectChecked(input.auth, input.groupId, input.projectId, true);
@@ -192,6 +202,7 @@ export async function addNoteCore(input: {
   const [row] = await db
     .insert(schema.notes)
     .values({
+      id: input.id,
       groupId: input.groupId,
       projectId: input.projectId ?? null,
       title: titleChecked(input.title),
@@ -199,6 +210,8 @@ export async function addNoteCore(input: {
       createdBy: input.auth.user.id,
       sourceMessageId: input.sourceMessageId ?? null,
       mentions: mentions ?? null,
+      planRunId: input.planRunId ?? null,
+      planStepId: input.planStepId ?? null,
     })
     .returning();
   return row;
@@ -250,6 +263,81 @@ export async function appendNoteCore(input: {
     id: row.id,
     content: `${row.content}${separator}${addition}`,
   });
+}
+
+/**
+ * 代理專用的 exactly-once 追加：筆記內容、版本快照與 agent_step_effects
+ * 在同一交易提交。程序若在提交後、step 狀態寫回前死亡，重播只回放結果，不會再追加一次。
+ */
+export async function appendNoteOnceCore(input: {
+  auth: AuthState;
+  id: string;
+  content: string;
+  separator?: string;
+  effectId: string;
+  runId: string;
+  stepId: string;
+}): Promise<{ row: NoteRow; replayed: boolean }> {
+  const addition = contentChecked(input.content);
+  const separator = input.separator ?? "\n\n";
+  const result = await executeAgentEffectOnce({
+    effectId: input.effectId,
+    runId: input.runId,
+    stepId: input.stepId,
+    kind: "append_note",
+    outputType: "note",
+  }, async (tx) => {
+    const [row] = await tx.select().from(schema.notes).where(eq(schema.notes.id, input.id));
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這則筆記" });
+    const role = requireGroup(input.auth, row.groupId);
+    if (noteWriteDenied(row.createdBy, input.auth.user.id, role)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "只有作者本人或組長以上可以編輯筆記" });
+    }
+    if (row.projectId) {
+      const [project] = await tx.select().from(schema.projects).where(eq(schema.projects.id, row.projectId));
+      if (!project || project.groupId !== row.groupId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
+      }
+      assertProjectNotArchived(project);
+    }
+    const content = contentChecked(`${row.content}${separator}${addition}`);
+    await tx.insert(schema.textVersions).values({
+      projectId: row.projectId ?? row.id,
+      groupId: row.groupId,
+      kind: "note",
+      refId: row.id,
+      title: row.title,
+      content: row.content,
+      createdBy: input.auth.user.id,
+    });
+    const keep = await tx
+      .select({ id: schema.textVersions.id })
+      .from(schema.textVersions)
+      .where(and(eq(schema.textVersions.kind, "note"), eq(schema.textVersions.refId, row.id)))
+      .orderBy(desc(schema.textVersions.createdAt))
+      .limit(NOTE_VERSION_KEEP);
+    if (keep.length >= NOTE_VERSION_KEEP) {
+      await tx.delete(schema.textVersions).where(and(
+        eq(schema.textVersions.kind, "note"),
+        eq(schema.textVersions.refId, row.id),
+        notInArray(schema.textVersions.id, keep.map((entry) => entry.id)),
+      ));
+    }
+    await tx
+      .update(schema.notes)
+      .set({
+        content,
+        planRunId: input.runId,
+        planStepId: input.stepId,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.notes.id, row.id));
+    return row.id;
+  });
+  if (result.outputId !== input.id) {
+    throw new TRPCError({ code: "CONFLICT", message: "代理追加筆記的執行結果指向不同筆記" });
+  }
+  return { row: await getNoteChecked(input.auth, input.id), replayed: result.replayed };
 }
 
 export async function removeNoteCore(auth: AuthState, id: string): Promise<{ ok: true }> {

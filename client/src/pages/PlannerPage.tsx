@@ -30,6 +30,8 @@ type ScheduleItem = {
   createdBy?: string;
   sourceMessageId?: string | null;
   mentions?: string[] | null;
+  planRunId?: string | null;
+  planStepId?: string | null;
 };
 
 /** 筆記清單列的形狀（依 notes.list 契約） */
@@ -44,6 +46,8 @@ type NoteItem = {
   creatorName: string;
   sourceMessageId?: string | null;
   mentions?: string[] | null;
+  planRunId?: string | null;
+  planStepId?: string | null;
 };
 
 /** 「團隊／個人／專案」三種鏡頭：全組看全部、我的＝我建立或被 @、專案＝聚焦某一專案。 */
@@ -407,6 +411,11 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
                           <Icon name="MessageCircle" size={11} />來自留言
                         </Link>
                       )}
+                      {ev.planRunId && ev.projectId && (
+                        <Link href={`/p/${ev.projectId}?focus=agent-run-${ev.planRunId}`} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, margin: "2px 0 0 8px" }}>
+                          <Icon name="Sparkles" size={11} />由 AI 計畫建立／更新・回到計畫
+                        </Link>
+                      )}
                     </div>
                     <ConfirmButton
                       onConfirm={() => remove.mutate({ id: ev.id })}
@@ -554,6 +563,11 @@ function CalendarView({
                     {projTitle && <span className="chip" style={{ margin: "0 0 0 8px" }}>{projTitle}</span>}
                   </div>
                   {(ev.note || ev.ownerName) && <div className="meta">{[ev.ownerName, ev.note].filter(Boolean).join("・")}</div>}
+                  {ev.planRunId && ev.projectId && (
+                    <Link href={`/p/${ev.projectId}?focus=agent-run-${ev.planRunId}`} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 2 }}>
+                      <Icon name="Sparkles" size={11} />由 AI 計畫建立／更新・回到計畫
+                    </Link>
+                  )}
                 </div>
                 <ConfirmButton
                   onConfirm={() => onDelete(ev.id)}
@@ -708,6 +722,11 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
                   {n.sourceMessageId && n.projectId && (
                     <Link href={`/p/${n.projectId}`} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 2 }}>
                       <Icon name="MessageCircle" size={11} />來自留言
+                    </Link>
+                  )}
+                  {n.planRunId && n.projectId && (
+                    <Link href={`/p/${n.projectId}?focus=agent-run-${n.planRunId}`} className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, margin: "2px 0 0 8px" }}>
+                      <Icon name="Sparkles" size={11} />由 AI 計畫建立／更新・回到計畫
                     </Link>
                   )}
                 </div>

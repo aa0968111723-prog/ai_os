@@ -782,7 +782,17 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       estPoints: r.estPoints,
       currentStep: r.currentStep,
       error: r.error,
-      steps: (r.steps as AgentStep[]).map((s) => ({ kind: s.kind, note: s.note, status: s.status, points: s.points ?? 0, generationId: s.generationId ?? null, detail: s.detail ?? null })),
+      steps: (r.steps as AgentStep[]).map((s) => ({
+        kind: s.kind,
+        note: s.note,
+        status: s.status,
+        points: s.points ?? 0,
+        generationId: s.generationId ?? null,
+        noteId: s.noteId ?? null,
+        scheduleItemId: s.scheduleItemId ?? null,
+        outputRefs: s.outputRefs ?? [],
+        detail: s.detail ?? null,
+      })),
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     };

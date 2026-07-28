@@ -3,7 +3,13 @@ import { eq } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
-import { addScheduleItemCore, listScheduleForGroup } from "../services/scheduleCore";
+import {
+  addScheduleItemCore,
+  getScheduleItemChecked,
+  listScheduleForGroup,
+  scheduleWriteDenied,
+  updateScheduleItemCore,
+} from "../services/scheduleCore";
 import { queueGroupSync } from "../services/googleCalendar";
 
 /**
@@ -14,13 +20,6 @@ import { queueGroupSync } from "../services/googleCalendar";
 
 /** ISO 字串 → Date（zod 驗證過再轉；壞值擋在輸入層） */
 const isoDate = z.string().refine((s) => !Number.isNaN(Date.parse(s)), "時間格式不正確");
-
-async function getItemChecked(auth: Parameters<typeof requireGroup>[0], id: string) {
-  const [row] = await db.select().from(schema.scheduleItems).where(eq(schema.scheduleItems.id, id));
-  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這筆行程" });
-  requireGroup(auth, row.groupId);
-  return row;
-}
 
 export const scheduleRouter = router({
   /**
@@ -64,33 +63,16 @@ export const scheduleRouter = router({
       startsAt: isoDate.optional(),
       endsAt: isoDate.nullable().optional(),
       note: z.string().max(500).nullable().optional(),
+      ownerId: z.string().uuid().nullable().optional(),
+      mentions: z.array(z.string().uuid()).max(20).optional(),
     }))
-    .mutation(async ({ ctx, input }) => {
-      const row = await getItemChecked(ctx.auth, input.id);
-      // 與 remove 同守衛：只有建立者本人或組長以上可改——否則一般組員可竄改他人（含組長）建立的組行程
-      const role = requireGroup(ctx.auth, row.groupId);
-      if (row.createdBy !== ctx.auth.user.id && role === "member") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以修改行程" });
-      }
-      const patch: Partial<typeof schema.scheduleItems.$inferInsert> = {};
-      if (input.title !== undefined) patch.title = input.title.trim();
-      if (input.startsAt !== undefined) patch.startsAt = new Date(input.startsAt);
-      if (input.endsAt !== undefined) patch.endsAt = input.endsAt ? new Date(input.endsAt) : null;
-      if (input.note !== undefined) patch.note = input.note?.trim() || null;
-      const startsAt = patch.startsAt ?? row.startsAt;
-      const endsAt = patch.endsAt === undefined ? row.endsAt : patch.endsAt;
-      if (endsAt && endsAt <= startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "結束時間要在開始之後" });
-      if (Object.keys(patch).length === 0) return row;
-      const [updated] = await db.update(schema.scheduleItems).set(patch).where(eq(schema.scheduleItems.id, row.id)).returning();
-      queueGroupSync(row.groupId);
-      return updated;
-    }),
+    .mutation(({ ctx, input }) => updateScheduleItemCore({ auth: ctx.auth, ...input })),
 
   /** 刪除：建立者本人或組長以上 */
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-    const row = await getItemChecked(ctx.auth, input.id);
+    const row = await getScheduleItemChecked(ctx.auth, input.id);
     const role = requireGroup(ctx.auth, row.groupId);
-    if (row.createdBy !== ctx.auth.user.id && role === "member") {
+    if (scheduleWriteDenied(row.createdBy, ctx.auth.user.id, role)) {
       throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以刪除行程" });
     }
     await db.delete(schema.scheduleItems).where(eq(schema.scheduleItems.id, row.id));
