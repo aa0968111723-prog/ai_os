@@ -14,6 +14,7 @@ import {
   DEFAULT_CLOUD_MOCK_MODEL_ID,
   submitCloudMockGeneration,
 } from "../services/cloudInference/freeGeneration";
+import { MAX_PROMPT_CHARS } from "./prompts";
 
 // 注入判斷的單一來源已抽到 services/generationCore（工作流執行器共用）；
 // 這裡 re-export 讓既有引用點（services/mcp.ts）不必改路徑
@@ -72,7 +73,8 @@ export const generationRouter = router({
       z.object({
         projectId: z.string().uuid(),
         modelId: z.string(),
-        prompt: z.string().min(1, "請填提示詞").max(8000, "提示詞過長（上限 8000 字）"),
+        // 與 prompts.save 同口徑（MAX_PROMPT_CHARS）——生成成功的咒語必能自動入庫
+        prompt: z.string().min(1, "請填提示詞").max(MAX_PROMPT_CHARS, `提示詞過長（上限 ${MAX_PROMPT_CHARS} 字）`),
         /** 來源輸入(圖生圖底圖/音訊/影片/訓練 zip 的網址;外部 URL) */
         sourceUrl: z.string().url().optional(),
         /** 素材庫來源(優先)：伺服器換成簽名短效網址,fal 才抓得到、外人不可偽造 */

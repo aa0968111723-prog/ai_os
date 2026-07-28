@@ -435,12 +435,18 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [allMessages]);
 
-  // 錄音中卸載：停掉 MediaRecorder 與麥克風軌（防切頁後麥克風常開）
+  // 錄音中卸載：停掉 MediaRecorder 與麥克風軌（防切頁後麥克風常開）；
+  // 清掉 onstop 再 stop，避免 unmount 後仍走 uploadVoice 造成 setState on unmounted / 幽靈留言。
   useEffect(() => {
     return () => {
-      try {
-        if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
-      } catch { /* ignore */ }
+      const rec = recorderRef.current;
+      if (rec) {
+        rec.ondataavailable = null;
+        rec.onstop = null;
+        try {
+          if (rec.state !== "inactive") rec.stop();
+        } catch { /* ignore */ }
+      }
       recorderRef.current = null;
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
