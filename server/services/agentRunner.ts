@@ -50,6 +50,7 @@ export const AGENT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 /** 與 schema.agentRuns.steps 的 jsonb 形狀一致（規劃端 agents.ts 建立、執行端這裡推進） */
 export interface AgentStep {
   id?: string;
+  title?: string;
   kind:
     | "split_script"
     | "create_scene"
@@ -67,6 +68,11 @@ export interface AgentStep {
   /** 人話說明（核准畫面與進度列表顯示） */
   note: string;
   status: "pending" | "running" | "waiting" | "done" | "failed" | "stopped";
+  actorType?: "ai" | "human" | "system";
+  dependsOn?: string[];
+  milestoneId?: string;
+  estimatedMinutes?: number;
+  sourceRefs?: Array<{ type: string; id: string; label?: string }>;
   /** record_to_database 用：目標資料庫 id（規劃端已對照組可寫資料庫解析，非 LLM 原始輸出） */
   tableId?: string;
   /** record_to_database 用：要寫入的一列資料（鍵＝欄位 key） */
@@ -97,7 +103,7 @@ export interface AgentStep {
   /** 執行期：首次解析 sceneNo 後立即保存；重播只准使用同一分鏡，避免排序變更後打到別格。 */
   targetSceneId?: string;
   /** create_scene 用 */
-  title?: string;
+  sceneTitle?: string;
   voiceover?: string;
   durationSec?: number;
   /** create_scene 可選：建議提示詞（之後可就地生成） */
