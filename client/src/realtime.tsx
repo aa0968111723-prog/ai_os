@@ -67,11 +67,14 @@ export function useCollab(
   containerRef: RefObject<HTMLDivElement | null>;
   /** Pointer Events 一套涵蓋滑鼠＋觸控＋手寫筆——手機協作也能上報游標位置 */
   onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void;
+  /** WebSocket 是否已 hello 成功（斷線／重連中為 false）——UI 可顯示「即時同步」狀態 */
+  connected: boolean;
 } {
   const utils = trpc.useUtils();
   const queryClient = useQueryClient();
   const [peers, setPeers] = useState<CollabPeer[]>([]);
   const [self, setSelf] = useState<CollabPeer | null>(null);
+  const [connected, setConnected] = useState(false);
   const [cursors, setCursors] = useState<Map<string, CollabCursor>>(() => new Map());
   const [zoneByUser, setZoneByUser] = useState<Record<string, string>>({});
 
@@ -111,6 +114,7 @@ export function useCollab(
           selfIdRef.current = msg.self?.userId ?? null;
           setSelf(msg.self ?? null);
           setPeers(msg.users ?? []);
+          setConnected(true);
           const zones: Record<string, string> = {};
           for (const f of msg.focus ?? []) if (f?.zone) zones[f.userId] = f.zone;
           setZoneByUser(zones);
@@ -153,6 +157,7 @@ export function useCollab(
         // 斷線期間別留舊 presence/游標騙人；重連成功 hello 會整包重建
         setPeers([]);
         setSelf(null);
+        setConnected(false);
         setZoneByUser({});
         setCursors(new Map());
         if (ev.code === 4403) return; // 伺服器重驗判定權限已變更：重連也只會再被踢，直接停
@@ -169,6 +174,7 @@ export function useCollab(
 
     return () => {
       disposed = true;
+      setConnected(false);
       if (retryTimer !== undefined) clearTimeout(retryTimer);
       wsRef.current = null;
       ws?.close();
@@ -254,7 +260,7 @@ export function useCollab(
     return out;
   }, [zoneByUser, peers]);
 
-  return { peers, cursors, focusZones, self, sendFocus, containerRef, onPointerMove };
+  return { peers, cursors, focusZones, self, sendFocus, containerRef, onPointerMove, connected };
 }
 
 /**

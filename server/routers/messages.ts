@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, gt, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
@@ -94,31 +94,74 @@ async function refBelongs(refType: RefType, refId: string, projectId: string, gr
   }
 }
 
+const MESSAGE_PAGE = 50;
+
 export const messagesRouter = router({
-  list: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
+  /**
+   * 專案留言列表。
+   * - 預設回最近 PAGE 則（舊→新）＋**永遠附上全部釘選**（即使超出最近視窗）
+   * - beforeCreatedAt：載入更早歷史（分頁）
+   */
+  list: authedProcedure
+    .input(
+      z.object({
+        projectId: z.string().uuid(),
+        /** ISO 時間字串或 Date：只取嚴格早於此時間的留言（載入更早） */
+        beforeCreatedAt: z.coerce.date().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
     const project = await loadProject(input.projectId);
     requireGroup(ctx.auth, project.groupId);
-    const rows = await db
-      .select({
-        id: schema.messages.id,
-        body: schema.messages.body,
-        kind: schema.messages.kind,
-        userId: schema.messages.userId,
-        userName: schema.users.name,
-        replyToId: schema.messages.replyToId,
-        pinned: schema.messages.pinned,
-        refType: schema.messages.refType,
-        refId: schema.messages.refId,
-        mentions: schema.messages.mentions,
-        voiceStatus: schema.messages.voiceStatus,
-        createdAt: schema.messages.createdAt,
-      })
+    const baseWhere = and(eq(schema.messages.groupId, project.groupId), eq(schema.messages.projectId, input.projectId));
+    const pageWhere = input.beforeCreatedAt
+      ? and(baseWhere, lt(schema.messages.createdAt, input.beforeCreatedAt))
+      : baseWhere;
+
+    const selectShape = {
+      id: schema.messages.id,
+      body: schema.messages.body,
+      kind: schema.messages.kind,
+      userId: schema.messages.userId,
+      userName: schema.users.name,
+      replyToId: schema.messages.replyToId,
+      pinned: schema.messages.pinned,
+      refType: schema.messages.refType,
+      refId: schema.messages.refId,
+      mentions: schema.messages.mentions,
+      voiceStatus: schema.messages.voiceStatus,
+      createdAt: schema.messages.createdAt,
+    };
+
+    // 多取 1 筆判斷 hasMore
+    const pageRows = await db
+      .select(selectShape)
       .from(schema.messages)
       .leftJoin(schema.users, eq(schema.messages.userId, schema.users.id))
-      .where(and(eq(schema.messages.groupId, project.groupId), eq(schema.messages.projectId, input.projectId)))
+      .where(pageWhere)
       .orderBy(desc(schema.messages.createdAt))
-      .limit(50);
-    const ordered = rows.reverse();
+      .limit(MESSAGE_PAGE + 1);
+    const hasMore = pageRows.length > MESSAGE_PAGE;
+    const windowRows = hasMore ? pageRows.slice(0, MESSAGE_PAGE) : pageRows;
+
+    // 釘選永遠可見：首頁（無 before）額外撈全部 pinned，與視窗合併去重
+    let pinnedExtra: typeof windowRows = [];
+    if (!input.beforeCreatedAt) {
+      pinnedExtra = await db
+        .select(selectShape)
+        .from(schema.messages)
+        .leftJoin(schema.users, eq(schema.messages.userId, schema.users.id))
+        .where(and(baseWhere, eq(schema.messages.pinned, true)))
+        .orderBy(desc(schema.messages.createdAt))
+        .limit(100);
+    }
+
+    const byId = new Map<string, (typeof windowRows)[number]>();
+    for (const r of [...windowRows, ...pinnedExtra]) byId.set(r.id, r);
+    // 時間升序給前端（舊→新）
+    const ordered = [...byId.values()].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
     const ids = ordered.map((r) => r.id);
 
     // 回覆串：被引用留言的「誰說的+前 60 字」摘要（50 筆窗外的舊留言也查得到）
@@ -157,7 +200,7 @@ export const messagesRouter = router({
     }
 
     const refMap = await resolveRefs(ordered);
-    return ordered.map((r) => ({
+    const items = ordered.map((r) => ({
       ...r,
       replyTo: r.replyToId ? (replyMap.get(r.replyToId) ?? null) : null,
       reactions: reactionMap.get(r.id) ?? [],
@@ -165,6 +208,7 @@ export const messagesRouter = router({
       // 語音留言：把音檔可播放網址一併帶出（refMap 給的是縮圖用途，音訊要的是同源 file 端點）
       voiceUrl: r.kind === "voice" && r.refType === "asset" && r.refId ? `/api/assets/${r.refId}/file` : null,
     }));
+    return { items, hasMore };
   }),
 
   post: authedProcedure

@@ -593,29 +593,40 @@ export function ProjectPage({ id }: { id: string }) {
       </p>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <span className="chip" style={{ marginLeft: 10 }}>已封存</span>}</h1>
-        {collab.peers.length > 0 && (
-          <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            {collab.peers.map((peer) => {
-              const isMe = peer.userId === collab.self?.userId;
-              return (
-                <span
-                  key={peer.userId}
-                  title="正在這個專案裡"
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 5,
-                    fontSize: 12, padding: "2px 10px", borderRadius: 999,
-                    border: `1px solid ${peer.color}`, color: peer.color,
-                    textShadow: "0 1px 2px var(--scrim)",
-                    opacity: isMe ? 0.55 : 1,
-                  }}
-                >
-                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: peer.color }} />
-                  {isMe ? "你" : peer.name}
-                </span>
-              );
-            })}
-          </span>
-        )}
+        {/* 即時協作狀態：連線中／誰在場（含自己）；斷線時明確提示改輪詢，避免「好像沒同步」 */}
+        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }} aria-live="polite">
+          {!collab.connected && (
+            <span
+              className="hint"
+              title="WebSocket 未連上時，留言與生成仍會每數秒自動刷新，只是看不到即時游標與「誰在場」"
+              style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, border: "1px dashed var(--border-strong)" }}
+            >
+              即時同步連線中…
+            </span>
+          )}
+          {collab.connected && collab.peers.length === 0 && (
+            <span className="hint" style={{ fontSize: 12 }}>即時同步已連線</span>
+          )}
+          {collab.peers.map((peer) => {
+            const isMe = peer.userId === collab.self?.userId;
+            return (
+              <span
+                key={peer.userId}
+                title={isMe ? "你在這個專案裡" : `${peer.name} 正在這個專案裡（即時）`}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  fontSize: 12, padding: "2px 10px", borderRadius: 999,
+                  border: `1px solid ${peer.color}`, color: peer.color,
+                  textShadow: "0 1px 2px var(--scrim)",
+                  opacity: isMe ? 0.55 : 1,
+                }}
+              >
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: peer.color }} />
+                {isMe ? "你" : peer.name}
+              </span>
+            );
+          })}
+        </span>
         {canArchive && (
           p.status === "archived" ? (
             <button className="btn-sm" disabled={archiveProject.isPending} onClick={() => archiveProject.mutate({ id, archived: false })}>

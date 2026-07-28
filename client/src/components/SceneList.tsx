@@ -203,6 +203,7 @@ function SceneRow({
   submitApproval,
   decide,
   pending,
+  rejectReason,
 }: {
   s: Scene;
   i: number;
@@ -222,6 +223,8 @@ function SceneRow({
   submitApproval: ReturnType<typeof trpc.approvals.submit.useMutation>;
   decide: ReturnType<typeof trpc.approvals.decide.useMutation>;
   pending: { id: string } | undefined;
+  /** 最新一筆已裁決的退回理由（needs_work）——提交人不必翻留言才知道改什麼 */
+  rejectReason?: string | null;
 }) {
   // 每格自持 update／generateInto／generateVoiceover，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
   // 行內編輯（標題/秒數/配音詞）失焦即存但原本沒有成功回饋——比照世界觀卡「已儲存 ✓」短暫顯示 2 秒
@@ -310,6 +313,23 @@ function SceneRow({
             </span>
           ) : null}
         </div>
+        {s.status === "needs_work" && rejectReason && (
+          <p
+            className="hint"
+            role="status"
+            style={{
+              margin: "6px 0 0",
+              padding: "6px 10px",
+              borderRadius: "var(--r-8)",
+              background: "var(--danger-tint, rgba(180,60,60,0.08))",
+              border: "1px solid var(--danger)",
+              color: "var(--danger-ink)",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            <b>退回理由：</b>{rejectReason}
+          </p>
+        )}
 
         {/* 配音詞：每格皆可編輯（含空白格補詞），失焦即存 */}
         <div style={{ marginTop: 6 }}>
@@ -525,6 +545,9 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
   const submitApproval = trpc.approvals.submit.useMutation({ onSuccess: invalidate });
   const decide = trpc.approvals.decide.useMutation({ onSuccess: invalidate });
   const pendingOf = (sceneId: string) => approvals.data?.find((a) => a.sceneId === sceneId && a.status === "pending");
+  // listByProject 已依 createdAt desc：同鏡最新一筆 needs_work 的 reason 即最近退回理由
+  const rejectReasonOf = (sceneId: string) =>
+    approvals.data?.find((a) => a.sceneId === sceneId && a.status === "needs_work" && a.reason)?.reason ?? null;
   // 統一小紅字：這四個共用 mutation 失敗時（送審/裁決/排序/刪除）畫面要有反應。就地編輯/生成的錯誤各格自行顯示。
   const actionError = submitApproval.error ?? decide.error ?? move.error ?? remove.error;
 
@@ -626,6 +649,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
               submitApproval={submitApproval}
               decide={decide}
               pending={pendingOf(s.id)}
+              rejectReason={rejectReasonOf(s.id)}
             />
           ))}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, flexWrap: "wrap" }}>

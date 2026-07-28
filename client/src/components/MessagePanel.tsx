@@ -9,7 +9,7 @@ import { escapeRegExp, parseMentionedNames } from "@shared/mentions";
 import { useCustomQuickPhrases, MAX_PHRASE_LEN } from "../useCustomQuickPhrases";
 
 /** 單則留言(含回覆摘要／表情彙總／引用卡）——由 messages.list 推得,列元件與父層共用同一形狀 */
-type MessageRowData = inferRouterOutputs<AppRouter>["messages"]["list"][number];
+type MessageRowData = inferRouterOutputs<AppRouter>["messages"]["list"]["items"][number];
 
 /** 留言 @了助手就觸發 AI 回覆——與後端 messageAssistant.ASSISTANT_TRIGGER 同字串 */
 const ASSISTANT_TRIGGER = "@助手";
@@ -349,7 +349,23 @@ const MessageRow = memo(function MessageRow({
 export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projectId: string; groupId: string; isLeader: boolean; canEdit: boolean }) {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
+  // 首頁：最近 50 + 全部釘選；older 用 infinite 式 prepend
   const list = trpc.messages.list.useQuery({ projectId }, { refetchInterval: 8000 });
+  const messages: MessageRowData[] = list.data?.items ?? [];
+  const [older, setOlder] = useState<MessageRowData[]>([]);
+  const [olderHasMore, setOlderHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  // 主列表刷新時清掉 older（避免與新視窗重複／亂序）；hasMore 跟伺服器首頁
+  useEffect(() => {
+    setOlder([]);
+    setOlderHasMore(!!list.data?.hasMore);
+  }, [list.data?.hasMore, projectId]);
+  const allMessages = useMemo(() => {
+    if (!older.length) return messages;
+    const seen = new Set(messages.map((m) => m.id));
+    const head = older.filter((m) => !seen.has(m.id));
+    return [...head, ...messages];
+  }, [older, messages]);
   // @提及名單:與 ProjectMembersCard 共用同一查詢(react-query 去重,不多打 API)
   const roles = trpc.projects.listMemberRoles.useQuery({ projectId });
   const post = trpc.messages.post.useMutation({
@@ -399,6 +415,7 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   const [newPhrase, setNewPhrase] = useState("");
   const newPhraseRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -416,19 +433,56 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   useEffect(() => {
     const el = listRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [list.data]);
+  }, [allMessages]);
+
+  // 錄音中卸載：停掉 MediaRecorder 與麥克風軌（防切頁後麥克風常開）
+  useEffect(() => {
+    return () => {
+      try {
+        if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop();
+      } catch { /* ignore */ }
+      recorderRef.current = null;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+  }, []);
 
   // 已讀水位:視窗聚焦且列表刷新出「最新一則」時上報(30 秒節流,避免高頻寫)
   const lastMarked = useRef(0);
   useEffect(() => {
-    if (!list.data?.length) return;
+    if (!allMessages.length) return;
     if (document.visibilityState !== "visible") return;
     if (Date.now() - lastMarked.current < 30_000) return;
     lastMarked.current = Date.now();
     markRead.mutate({ projectId });
     // markRead 只依「最新一則留言」變化觸發——mutation 物件每 render 都新,不能進依賴
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list.data?.length && list.data[list.data.length - 1].id, projectId]);
+  }, [allMessages.length && allMessages[allMessages.length - 1].id, projectId]);
+
+  const loadOlder = async () => {
+    if (loadingOlder || !allMessages.length) return;
+    const earliest = allMessages[0];
+    setLoadingOlder(true);
+    const el = listRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    try {
+      const page = await utils.client.messages.list.query({
+        projectId,
+        beforeCreatedAt: new Date(earliest.createdAt),
+      });
+      setOlder((prev) => {
+        const seen = new Set([...prev, ...messages].map((m) => m.id));
+        const add = page.items.filter((m) => !seen.has(m.id));
+        return [...add, ...prev];
+      });
+      setOlderHasMore(page.hasMore);
+      requestAnimationFrame(() => {
+        if (el) el.scrollTop += el.scrollHeight - prevHeight;
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
 
   // 「在留言中討論」事件:各列表的討論鈕 → 把作品掛進輸入區、捲到留言面板、聚焦
   useEffect(() => {
@@ -446,7 +500,7 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   // 首次載入(seenLatest 未定)不通知——只提示「這次會話新到的」,不轟炸歷史。
   const seenLatest = useRef<string | null>(null);
   useEffect(() => {
-    const rows = list.data;
+    const rows = allMessages;
     if (!rows?.length || !myId) return;
     const newest = rows[rows.length - 1];
     if (seenLatest.current === null) {
@@ -465,7 +519,7 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
     }
     // 只依最新一則 id 變化觸發
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list.data?.length && list.data[list.data.length - 1].id, myId]);
+  }, [allMessages.length && allMessages[allMessages.length - 1]?.id, myId]);
 
   // 錄音:MediaRecorder 收 chunks → 停止時上傳為素材 → postVoice 建語音留言(逐字稿由後端補)
   const startRecording = async () => {
@@ -476,11 +530,13 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       const rec = new MediaRecorder(stream);
       chunksRef.current = [];
       rec.ondataavailable = (e) => { if (e.data.size) chunksRef.current.push(e.data); };
       rec.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
+        if (streamRef.current === stream) streamRef.current = null;
         void uploadVoice(new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" }));
       };
       rec.start();
@@ -560,7 +616,7 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
     }
   };
 
-  const pinnedMsgs = (list.data ?? []).filter((m) => m.pinned);
+  const pinnedMsgs = allMessages.filter((m) => m.pinned);
 
   // 傳給 memo 化留言列的穩定 callback:react-query 的 mutate 本身跨 render 穩定,
   // 這些 useCallback 依賴的又都是 mutate/穩定值,所以 callback 參照不變,memo 才擋得住無謂重繪。
@@ -649,8 +705,13 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
       )}
 
       {list.isLoading && <p className="hint">載入留言中…</p>}
-      {list.error && <p className="error">留言載入失敗，稍後會自動重試。</p>}
-      {!list.isLoading && list.data?.length === 0 && <p className="hint">還沒有留言——留一句給同組夥伴吧。</p>}
+      {list.error && (
+        <p className="error" role="alert">
+          留言載入失敗：{list.error.message}
+          <button type="button" className="btn-sm" style={{ marginLeft: 8 }} onClick={() => list.refetch()}>重試</button>
+        </p>
+      )}
+      {!list.isLoading && allMessages.length === 0 && <p className="hint">還沒有留言——留一句給同組夥伴吧。</p>}
 
       <div
         ref={listRef}
@@ -663,7 +724,14 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
           if (el) stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
         }}
       >
-        {list.data?.map((m) => (
+        {(olderHasMore || (list.data?.hasMore && !older.length)) && (
+          <div style={{ textAlign: "center", marginBottom: 6 }}>
+            <button type="button" className="btn-sm" disabled={loadingOlder} onClick={() => void loadOlder()}>
+              {loadingOlder ? "載入中…" : "載入更早的留言"}
+            </button>
+          </div>
+        )}
+        {allMessages.map((m) => (
           <MessageRow
             key={m.id}
             m={m}
