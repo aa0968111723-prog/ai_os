@@ -20,7 +20,16 @@ import { TocNav } from "../components/TocNav";
 import { AiHub } from "../components/AiHub";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
-import { useCollab, CursorOverlay, CollabZone, COLLAB_ZONES } from "../realtime";
+import {
+  useCollab,
+  CursorOverlay,
+  CollabZone,
+  COLLAB_ZONES,
+  CollabModeBar,
+  useCollabMirrorFollow,
+  zoneOfPeer,
+  type CollabViewMode,
+} from "../realtime";
 
 /**
  * 來源素材「明顯不相容」過濾表（後端 generation.submit 用同一張表把關）：
@@ -268,6 +277,11 @@ export function ProjectPage({ id }: { id: string }) {
   // 即時協作：presence／彩色游標／編輯指示／mutation 成功時廣播「有東西變了」。
   // 專案載入成功才啟用——FORBIDDEN/NOT_FOUND 頁不必開 WS 去被伺服器拒絕（hook 仍無條件呼叫，順序穩定）
   const collab = useCollab(id, !!project.data);
+  // 協作視角：一般（只看 presence／游標）／鏡像跟隨（捲動跟著對方）
+  const [collabMode, setCollabMode] = useState<CollabViewMode>("live");
+  const [followUserId, setFollowUserId] = useState<string | null>(null);
+  useCollabMirrorFollow(collabMode, followUserId, collab.cursors, collab.focusZones);
+  const followZone = followUserId && collabMode === "mirror" ? zoneOfPeer(followUserId, collab.focusZones) : null;
   const me = trpc.auth.me.useQuery();
   // 世界觀三組 chips（主軸／調性／視覺風格）由本專案所屬組的自訂選項供給（組長可就地新增，或到「選項」頁整理）
   const options = trpc.options.byGroup.useQuery(
@@ -521,11 +535,12 @@ export function ProjectPage({ id }: { id: string }) {
     (a) => a.id === sourceAsset?.id || !needs || !(SOURCE_INCOMPAT[needs] ?? []).includes(a.kind),
   );
 
-  /** 編輯指示：把某區塊接上協作狀態（誰在這裡→內框＋標籤） */
+  /** 編輯指示：把某區塊接上協作狀態（誰在這裡→內框＋標籤）；鏡像時被跟隨者焦點區加粗 */
   const zoneProps = (zone: string) => ({
     zone,
     watchers: collab.focusZones[zone] ?? [],
     sendFocus: collab.sendFocus,
+    mirrorActive: followZone === zone,
   });
 
   /** 世界觀 chips 群組（主軸／調性／風格共用）：既有選項＋孤兒值＋組長就地「＋新增」 */
@@ -593,7 +608,7 @@ export function ProjectPage({ id }: { id: string }) {
       </p>
       <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <span className="chip" style={{ marginLeft: 10 }}>已封存</span>}</h1>
-        {/* 即時協作狀態：連線中／誰在場（含自己）；斷線時明確提示改輪詢，避免「好像沒同步」 */}
+        {/* 即時協作：連線狀態＋誰在場＋一般／鏡像跟隨模式切換 */}
         <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }} aria-live="polite">
           {!collab.connected && (
             <span
@@ -609,24 +624,72 @@ export function ProjectPage({ id }: { id: string }) {
           )}
           {collab.peers.map((peer) => {
             const isMe = peer.userId === collab.self?.userId;
+            const following = collabMode === "mirror" && followUserId === peer.userId;
             return (
               <span
                 key={peer.userId}
-                title={isMe ? "你在這個專案裡" : `${peer.name} 正在這個專案裡（即時）`}
+                role={!isMe ? "button" : undefined}
+                tabIndex={!isMe ? 0 : undefined}
+                title={
+                  isMe
+                    ? "你在這個專案裡"
+                    : following
+                      ? `正在鏡像跟隨 ${peer.name}（再點可取消）`
+                      : `點一下以鏡像跟隨 ${peer.name}`
+                }
+                onClick={() => {
+                  if (isMe) return;
+                  if (following) {
+                    setCollabMode("live");
+                    setFollowUserId(null);
+                  } else {
+                    setCollabMode("mirror");
+                    setFollowUserId(peer.userId);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (isMe) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    (e.currentTarget as HTMLElement).click();
+                  }
+                }}
                 style={{
                   display: "inline-flex", alignItems: "center", gap: 5,
                   fontSize: 12, padding: "2px 10px", borderRadius: 999,
                   border: `1px solid ${peer.color}`, color: peer.color,
                   textShadow: "0 1px 2px var(--scrim)",
                   opacity: isMe ? 0.55 : 1,
+                  cursor: isMe ? "default" : "pointer",
+                  outline: following ? `2px solid ${peer.color}` : undefined,
+                  outlineOffset: 2,
                 }}
               >
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: peer.color }} />
                 {isMe ? "你" : peer.name}
+                {following ? " · 跟隨中" : ""}
               </span>
             );
           })}
+          <CollabModeBar
+            connected={collab.connected}
+            mode={collabMode}
+            onModeChange={(m) => {
+              setCollabMode(m);
+              if (m === "live") setFollowUserId(null);
+            }}
+            peers={collab.peers}
+            selfId={collab.self?.userId}
+            followUserId={followUserId}
+            onFollowChange={setFollowUserId}
+          />
         </span>
+        {collabMode === "mirror" && followUserId && (
+          <p className="hint" style={{ flexBasis: "100%", margin: "4px 0 0" }}>
+            鏡像跟隨中：畫面會跟著對方的焦點區與游標捲動（不是螢幕串流；雙方版面不同時以卡片錨點對位）。
+            可點「退出鏡像」或再點對方名字取消。
+          </p>
+        )}
         {canArchive && (
           p.status === "archived" ? (
             <button className="btn-sm" disabled={archiveProject.isPending} onClick={() => archiveProject.mutate({ id, archived: false })}>

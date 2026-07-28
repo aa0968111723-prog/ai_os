@@ -263,6 +263,199 @@ export function useCollab(
   return { peers, cursors, focusZones, self, sendFocus, containerRef, onPointerMove, connected };
 }
 
+// ─── 鏡像跟隨模式（非螢幕串流：跟隨對方焦點區＋游標錨點，做出「同畫面」感）───
+
+/** 協作視角：一般＝只看 presence／游標；鏡像＝主動跟隨選定夥伴的焦點與游標 */
+export type CollabViewMode = "live" | "mirror";
+
+/** 從 focusZones 反查某 user 目前在哪個 collab zone（沒有回 null） */
+export function zoneOfPeer(userId: string, focusZones: Record<string, CollabPeer[]>): string | null {
+  for (const [zone, list] of Object.entries(focusZones)) {
+    if (list.some((p) => p.userId === userId)) return zone;
+  }
+  return null;
+}
+
+/** 可跟隨的其他人（排除自己） */
+export function followablePeers(peers: CollabPeer[], selfId: string | null | undefined): CollabPeer[] {
+  if (!selfId) return peers;
+  return peers.filter((p) => p.userId !== selfId);
+}
+
+/**
+ * 鏡像跟隨：當 mode=mirror 且指定 followUserId 時，
+ * - 對方焦點區變更 → 捲到對應 [data-collab-zone]
+ * - 對方游標更新 → 捲到其錨點卡片或游標位置附近
+ * 不做真正螢幕串流（隱私／頻寬）；兩人版面不同時靠錨點對位。
+ */
+export function useCollabMirrorFollow(
+  mode: CollabViewMode,
+  followUserId: string | null,
+  cursors: Map<string, CollabCursor>,
+  focusZones: Record<string, CollabPeer[]>,
+): void {
+  const lastZoneRef = useRef<string | null>(null);
+  const lastCursorTsRef = useRef(0);
+
+  // 跟隨焦點區
+  useEffect(() => {
+    if (mode !== "mirror" || !followUserId) {
+      lastZoneRef.current = null;
+      return;
+    }
+    const zone = zoneOfPeer(followUserId, focusZones);
+    if (!zone || zone === lastZoneRef.current) return;
+    lastZoneRef.current = zone;
+    let el: Element | null = null;
+    try {
+      el = document.querySelector(`[data-collab-zone="${CSS.escape(zone)}"]`);
+    } catch {
+      el = null;
+    }
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [mode, followUserId, focusZones]);
+
+  // 跟隨游標（節流：只在對方 cursor ts 變化且距上次跟隨 > 400ms 時捲動）
+  useEffect(() => {
+    if (mode !== "mirror" || !followUserId) return;
+    const cur = cursors.get(followUserId);
+    if (!cur) return;
+    if (cur.ts === lastCursorTsRef.current) return;
+    // 太密的游標更新不每幀都 scroll（會暈）
+    if (cur.ts - lastCursorTsRef.current < 400 && lastCursorTsRef.current !== 0) {
+      lastCursorTsRef.current = cur.ts;
+      return;
+    }
+    lastCursorTsRef.current = cur.ts;
+
+    let target: Element | null = null;
+    if (cur.anchor) {
+      try {
+        target = document.querySelector(`[data-fb="${CSS.escape(cur.anchor)}"]`);
+      } catch {
+        target = null;
+      }
+    }
+    if (!target) {
+      const zone = zoneOfPeer(followUserId, focusZones);
+      if (zone) {
+        try {
+          target = document.querySelector(`[data-collab-zone="${CSS.escape(zone)}"]`);
+        } catch {
+          target = null;
+        }
+      }
+    }
+    if (!target) return;
+    const r = target.getBoundingClientRect();
+    const inView = r.top >= 80 && r.bottom <= window.innerHeight - 40;
+    if (!inView) target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [mode, followUserId, cursors, focusZones]);
+}
+
+/**
+ * 標題列旁的協作模式切換：一般 ／ 鏡像跟隨（選夥伴）。
+ * 鏡像不是遠端桌面串流，是「捲動＋焦點跟著對方走」。
+ */
+export function CollabModeBar({
+  connected,
+  mode,
+  onModeChange,
+  peers,
+  selfId,
+  followUserId,
+  onFollowChange,
+}: {
+  connected: boolean;
+  mode: CollabViewMode;
+  onModeChange: (m: CollabViewMode) => void;
+  peers: CollabPeer[];
+  selfId: string | null | undefined;
+  followUserId: string | null;
+  onFollowChange: (userId: string | null) => void;
+}) {
+  const others = followablePeers(peers, selfId);
+  // 被跟隨者離線 → 清掉選擇
+  useEffect(() => {
+    if (followUserId && !others.some((p) => p.userId === followUserId)) onFollowChange(null);
+  }, [followUserId, others, onFollowChange]);
+
+  // 進入鏡像且尚未選人 → 自動選第一位他人
+  useEffect(() => {
+    if (mode === "mirror" && !followUserId && others.length > 0) onFollowChange(others[0].userId);
+  }, [mode, followUserId, others, onFollowChange]);
+
+  if (!connected) return null;
+
+  return (
+    <div
+      role="group"
+      aria-label="協作視角"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        flexWrap: "wrap",
+        fontSize: 12,
+        padding: "3px 4px",
+        borderRadius: 999,
+        border: "1px solid var(--border-soft)",
+        background: mode === "mirror" ? "var(--primary-tint)" : "var(--card2)",
+      }}
+    >
+      <button
+        type="button"
+        className={`chip${mode === "live" ? " on" : ""}`}
+        style={{ margin: 0, padding: "2px 10px", fontSize: 12 }}
+        title="只顯示誰在場與游標，不自動捲動"
+        aria-pressed={mode === "live"}
+        onClick={() => onModeChange("live")}
+      >
+        一般
+      </button>
+      <button
+        type="button"
+        className={`chip${mode === "mirror" ? " on" : ""}`}
+        style={{ margin: 0, padding: "2px 10px", fontSize: 12 }}
+        title="鏡像跟隨：畫面捲動跟著選定夥伴的焦點與游標（非螢幕串流）"
+        aria-pressed={mode === "mirror"}
+        disabled={others.length === 0}
+        onClick={() => onModeChange("mirror")}
+      >
+        鏡像跟隨
+      </button>
+      {mode === "mirror" && (
+        <>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 4, margin: 0 }}>
+            <span className="hint" style={{ fontSize: 11 }}>跟著</span>
+            <select
+              aria-label="選擇要跟隨的夥伴"
+              value={followUserId ?? ""}
+              onChange={(e) => onFollowChange(e.target.value || null)}
+              style={{ fontSize: 12, padding: "2px 6px", maxWidth: 140 }}
+            >
+              {others.length === 0 && <option value="">（沒有其他人）</option>}
+              {others.map((p) => (
+                <option key={p.userId} value={p.userId}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn-sm"
+            style={{ padding: "2px 8px", fontSize: 11 }}
+            onClick={() => onModeChange("live")}
+          >
+            退出鏡像
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 /**
  * 把一枚游標換算成覆蓋層內的座標（px）。
  * 有錨點且本機畫面找得到同名 [data-fb] 卡片 → 用「卡片位置＋卡內比例」（跨版面最準）；
@@ -356,15 +549,19 @@ export function CollabZone({
   watchers,
   sendFocus,
   children,
+  /** 鏡像跟隨中：這區是被跟隨者目前焦點 → 加粗描邊提示 */
+  mirrorActive = false,
 }: {
   zone: string;
   watchers: CollabPeer[];
   sendFocus: (zone: string | null) => void;
   children: ReactNode;
+  mirrorActive?: boolean;
 }) {
   const first = watchers[0];
   return (
     <div
+      data-collab-zone={zone}
       onFocusCapture={() => sendFocus(zone)}
       onBlurCapture={(e) => {
         // focus 移到區塊外才算離開；區塊內欄位間切換不要閃爍 null→zone
@@ -372,7 +569,13 @@ export function CollabZone({
       }}
       style={{
         position: "relative",
-        ...(first ? { boxShadow: `inset 0 0 0 2px ${first.color}`, borderRadius: "var(--radius)" } : {}),
+        ...(first || mirrorActive
+          ? {
+              boxShadow: `inset 0 0 0 ${mirrorActive ? 3 : 2}px ${mirrorActive ? (first?.color ?? "var(--primary)") : first!.color}`,
+              borderRadius: "var(--radius)",
+              transition: "box-shadow 0.2s ease",
+            }
+          : {}),
       }}
     >
       {first && (
