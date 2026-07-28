@@ -378,3 +378,69 @@ for _ in range(40):
         agent_wrote = True
         break
 ok("AI 代理把成果寫進資料庫", agent_wrote)
+
+
+# ── 專案資料一鍵綁表（使用者：剪輯／社群從專案建立可關聯表）──
+# createBoundToProject：組庫 + 關聯專案欄 + 範例列 + agentAccess write
+bound_proj = call("POST", azhe, "projects.create", {
+    "groupId": edit_group["id"], "title": "社群週更實測", "kind": "witness", "platform": "shorts",
+})
+bound = call("POST", azhe, "databases.createBoundToProject", {
+    "projectId": bound_proj["id"], "template": "publish",
+})
+ok("一鍵建立發布計畫表", bound.get("tableId") and bound.get("template") == "publish")
+linked = call("GET", azhe, "databases.linkedToProject", {"projectId": bound_proj["id"]})
+ok("專案卡可看到綁定表", any(g["tableId"] == bound["tableId"] for g in linked))
+bound_group = next(g for g in linked if g["tableId"] == bound["tableId"])
+ok("綁定表預設 AI 可讀寫", bound_group.get("agentAccess") == "write")
+ok("綁定表至少一筆範例列", len(bound_group.get("rows", [])) >= 1)
+# 範例列的 project 欄必須指向本專案
+proj_keys = [f["key"] for f in bound_group["fields"] if f.get("type") == "project"]
+ok("綁定表含關聯專案欄", len(proj_keys) >= 1)
+sample_ok = any(
+    (r.get("data") or {}).get(proj_keys[0]) == bound_proj["id"]
+    for r in bound_group["rows"]
+)
+ok("範例列已指向本專案", sample_ok)
+
+# 素材清單範本（剪輯／動畫）
+media_bound = call("POST", azhe, "databases.createBoundToProject", {
+    "projectId": bound_proj["id"], "template": "media",
+})
+ok("一鍵建立素材清單", media_bound.get("template") == "media")
+linked2 = call("GET", azhe, "databases.linkedToProject", {"projectId": bound_proj["id"]})
+ok("兩張綁定表都出現在專案", len(linked2) >= 2)
+
+# 就地加列語意：addRow 預填專案欄後 linked 列數增加
+media_fields = next(g["fields"] for g in linked2 if g["tableId"] == media_bound["tableId"])
+media_proj_key = next(f["key"] for f in media_fields if f["type"] == "project")
+media_name_key = next(f["key"] for f in media_fields if f["type"] == "text" and f.get("required"))
+before_n = next(g for g in linked2 if g["tableId"] == media_bound["tableId"])
+before_count = len(before_n["rows"])
+call("POST", azhe, "databases.addRow", {
+    "tableId": media_bound["tableId"],
+    "data": {media_name_key: "A-roll 主鏡頭", media_proj_key: bound_proj["id"]},
+})
+linked3 = call("GET", azhe, "databases.linkedToProject", {"projectId": bound_proj["id"]})
+after_n = next(g for g in linked3 if g["tableId"] == media_bound["tableId"])
+ok("就地加列後專案關聯列數增加", len(after_n["rows"]) == before_count + 1)
+
+# agentAccess=none：人仍可在 linkedToProject 看到（專案彙整），但 MCP 不可見
+hide = call("POST", azhe, "databases.update", {
+    "id": bound["tableId"], "agentAccess": "none",
+})
+ok("可把綁定表改為 AI 不可見", hide.get("agentAccess") == "none" if isinstance(hide, dict) else True)
+# update 可能回整表
+if isinstance(hide, dict) and "agentAccess" in hide:
+    ok("更新後 agentAccess=none", hide["agentAccess"] == "none")
+linked_hidden = call("GET", azhe, "databases.linkedToProject", {"projectId": bound_proj["id"]})
+hidden_g = next(g for g in linked_hidden if g["tableId"] == bound["tableId"])
+ok("專案卡仍列出 AI 不可見表（人可見）", hidden_g.get("agentAccess") == "none")
+dbs_hidden = mcp_call("list_databases", {})
+ok("🔒 MCP 看不到 agentAccess=none 綁定表", not any(d["tableId"] == bound["tableId"] for d in dbs_hidden))
+
+# 未知範本被擋
+bad_tpl = call("POST", azhe, "databases.createBoundToProject", {
+    "projectId": bound_proj["id"], "template": "not_a_real_template",
+})
+ok("未知範本被擋", "__error__" in bad_tpl)

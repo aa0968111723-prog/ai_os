@@ -200,4 +200,141 @@ describe("ProjectDatabasesCard", () => {
       data: { c1: "新摘錄", proj: "project-1" },
     });
   });
+
+  // ── 使用者旅程：剪輯／社群／動畫混合角色 ──
+
+  it("user journey: empty project shows all multi-role templates", () => {
+    render(<ProjectDatabasesCard projectId="project-1" />);
+    for (const label of ["人員／分工", "文案／重點", "素材清單", "發布計畫", "待辦清單", "空白資料表"]) {
+      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("link", { name: /管理全部資料表/i })).toHaveAttribute(
+      "href",
+      "/databases?projectId=project-1&from=project",
+    );
+  });
+
+  it("user journey: social editor creates publish template", async () => {
+    render(<ProjectDatabasesCard projectId="project-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /發布計畫/i }));
+    expect(createBoundToProject).toHaveBeenCalledWith({ projectId: "project-1", template: "publish" });
+  });
+
+  it("user journey: editor creates media list template", () => {
+    render(<ProjectDatabasesCard projectId="project-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /素材清單/i }));
+    expect(createBoundToProject).toHaveBeenCalledWith({ projectId: "project-1", template: "media" });
+  });
+
+  it("user journey: mixed tables show AI-readable count and ok tone", () => {
+    linkedToProject.mockReturnValue({
+      data: [
+        {
+          tableId: "t-ok",
+          tableName: "發布計畫",
+          fields: [
+            { key: "title", label: "標題", type: "text", required: true },
+            { key: "proj", label: "關聯專案", type: "project" },
+          ],
+          rows: [
+            { id: "r1", data: { title: "週一貼文", proj: "project-1" } },
+            { id: "r2", data: { title: "週三貼文", proj: "project-1" } },
+          ],
+          agentAccess: "write",
+        },
+        {
+          tableId: "t-secret",
+          tableName: "內部敏感",
+          fields: [
+            { key: "n", label: "名稱", type: "text", required: true },
+            { key: "proj", label: "關聯專案", type: "project" },
+          ],
+          rows: [{ id: "r3", data: { n: "密", proj: "project-1" } }],
+          agentAccess: "none",
+        },
+      ],
+      isLoading: false,
+      error: null,
+    });
+    knowledgeList.mockReturnValue({ data: [{ id: "k1" }], isLoading: false, error: null });
+    render(<ProjectDatabasesCard projectId="project-1" />);
+    expect(screen.getByTestId("project-data-ai-status")).toHaveAttribute("data-tone", "ok");
+    expect(screen.getByText(/AI 可讀 2/i)).toBeInTheDocument();
+    expect(screen.getByText(/另有 1 列 AI 不可見/i)).toBeInTheDocument();
+    expect(screen.getByText(/關聯表列 3/i)).toBeInTheDocument();
+    expect(screen.getByText("AI 不可見")).toBeInTheDocument();
+    expect(screen.getByText("AI 可讀寫")).toBeInTheDocument();
+  });
+
+  it("user journey: read-only member cannot quick-add", () => {
+    linkedToProject.mockReturnValue({
+      data: [
+        {
+          tableId: "t1",
+          tableName: "待辦清單",
+          fields: [
+            { key: "item", label: "項目", type: "text", required: true },
+            { key: "proj", label: "關聯專案", type: "project" },
+          ],
+          rows: [{ id: "r1", data: { item: "確認字幕", proj: "project-1" } }],
+          agentAccess: "read",
+        },
+      ],
+      isLoading: false,
+      error: null,
+    });
+    render(<ProjectDatabasesCard projectId="project-1" canEdit={false} />);
+    expect(screen.queryByRole("button", { name: /加一列/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("project-data-templates")).not.toBeInTheDocument();
+  });
+
+  it("user journey: Enter key submits quick-add", () => {
+    linkedToProject.mockReturnValue({
+      data: [
+        {
+          tableId: "t1",
+          tableName: "文案與重點",
+          fields: [
+            { key: "c1", label: "內容", type: "text", required: true },
+            { key: "proj", label: "關聯專案", type: "project" },
+          ],
+          rows: [],
+          agentAccess: "write",
+        },
+      ],
+      isLoading: false,
+      error: null,
+    });
+    render(<ProjectDatabasesCard projectId="project-1" />);
+    const input = screen.getByLabelText(/新增 內容/i);
+    fireEvent.change(input, { target: { value: "本週金句改成重點句" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    expect(addRow).toHaveBeenCalledWith({
+      tableId: "t1",
+      data: { c1: "本週金句改成重點句", proj: "project-1" },
+    });
+  });
+
+  it("user journey: empty quick-add shows validation instead of calling API", () => {
+    linkedToProject.mockReturnValue({
+      data: [
+        {
+          tableId: "t1",
+          tableName: "人員與分工",
+          fields: [
+            { key: "name", label: "姓名", type: "text", required: true },
+            { key: "proj", label: "關聯專案", type: "project" },
+          ],
+          rows: [{ id: "r1", data: { name: "小編", proj: "project-1" } }],
+          agentAccess: "write",
+        },
+      ],
+      isLoading: false,
+      error: null,
+    });
+    render(<ProjectDatabasesCard projectId="project-1" />);
+    fireEvent.click(screen.getByRole("button", { name: /加一列/i }));
+    expect(addRow).not.toHaveBeenCalled();
+    expect(screen.getByText(/請填「姓名」/i)).toBeInTheDocument();
+  });
 });
