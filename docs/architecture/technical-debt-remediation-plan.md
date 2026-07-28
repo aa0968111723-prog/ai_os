@@ -53,7 +53,14 @@ Aios 已具備專案、生成、工作流、AI 代理、筆記、排程、人類
 交付：
 
 - 建立角色 × 入口 × 專案狀態 × 成本門檻的政策矩陣。
-- 覆蓋 Web direct、workflow、agent、MCP、approval resume。
+- 覆蓋（與 checklist §3 一致，缺一不可列為 TD-00 完成）：
+  - Web / tRPC direct
+  - REST（若部署暴露 `/api/v1`；否則在報告標示「未部署／延期」並寫明理由）
+  - MCP
+  - workflow runner
+  - agent runner
+  - approval resume
+  - schedule / background resume
 - 重新驗證既有滲透測試的重要發現，至少包含：
   - 登入 IP 限流不可被偽造 XFF 繞過。
   - 匯入 URL 的 DNS 解析、redirect 與私有網段阻擋。
@@ -64,6 +71,7 @@ Aios 已具備專案、生成、工作流、AI 代理、筆記、排程、人類
 退出條件：
 
 - 所有 P0 行為都有可失敗的測試，不只依靠人工驗證。
+- 上列多入口覆蓋已有測試或已文件化延期項（不得默默省略）。
 - 發現中的已修項目標示為 verified，不確定項目維持 open，不以推測關閉。
 
 ### Phase 1：Policy Engine
@@ -82,28 +90,53 @@ export type PolicyAction =
   | "generation.submit"
   | "generation.approve"
   | "agent.dispatch"
+  | "task.create"
+  | "schedule.create"
+  | "note.create"
+  | "note.append"
   | "database.read"
   | "database.write"
   | "audit.view";
 
+/**
+ * source 語意（跨入口測試與稽核必須一致）：
+ * - web：瀏覽器經 tRPC / SSE 的直接操作（tRPC direct 歸此類，不另開 "trpc"）
+ * - rest：對外 REST /api/v1 金鑰或 session 入口
+ * - mcp：外部 AI 經 MCP 工具
+ * - workflow / agent：背景 Runner 以發起人身分續跑
+ * - system：排程、resume、內部維運（無人類當下點擊）
+ */
 export interface PolicyContext {
   actorId: string;
   teamId?: string;
   groupId?: string;
   projectId?: string;
-  source: "web" | "mcp" | "workflow" | "agent" | "system";
+  source: "web" | "rest" | "mcp" | "workflow" | "agent" | "system";
   estimatedPoints?: number;
 }
 
-export async function evaluatePolicy(
-  action: PolicyAction,
-  context: PolicyContext,
-): Promise<{
+export type PolicyDecision = {
   allowed: boolean;
   requiresApproval: boolean;
   reason?: string;
-}>;
+};
+
+// 契約示意：實作時放在模組內並有函式本體；此處以型別表達不可破壞的回傳形狀。
+export type EvaluatePolicy = (
+  action: PolicyAction,
+  context: PolicyContext,
+) => Promise<PolicyDecision>;
 ```
+
+Phase 2 第一批 Command 與 `PolicyAction` 的對應（禁止默默重用 `project.edit` 而失去核准／稽核語意）：
+
+| Command | PolicyAction |
+|---|---|
+| `executeGenerationCommand` | `generation.submit`（必要時再走 `generation.approve`） |
+| `createProjectTaskCommand` | `task.create` |
+| `writeProjectDatabaseCommand` | `database.write` |
+| `createScheduleCommand` | `schedule.create` |
+| `createOrAppendNoteCommand` | `note.create` / `note.append` |
 
 遷移方式：
 
@@ -115,7 +148,7 @@ export async function evaluatePolicy(
 退出條件：
 
 - 前端主要導覽不再自行拼 `isAdmin || isLeader`。
-- Direct、workflow、agent 與 MCP 對相同行為取得相同政策結果。
+- Web/tRPC、REST、workflow、agent、MCP 與 system resume 對相同行為取得相同政策結果。
 - 政策拒絕與需核准的原因可稽核。
 
 ### Phase 2：Command Layer
@@ -244,12 +277,17 @@ server/
 └── index.ts
 ```
 
-啟動角色：
+啟動角色（**單值**；三選一，不可在同一 env 重複宣告同一 key）：
 
 ```env
+# 僅 HTTP／API（不領背景工作）
 PROCESS_ROLE=web
-PROCESS_ROLE=worker
-PROCESS_ROLE=all
+
+# 僅背景 Runner（不對外提供應用路由）
+# PROCESS_ROLE=worker
+
+# 單一實例同時兼 Web + Worker（開發／小部署預設）
+# PROCESS_ROLE=all
 ```
 
 退出條件：
@@ -286,7 +324,8 @@ PROCESS_ROLE=all
 | TD-02 | `refactor(generation): 所有生成入口統一走 Command` | direct/workflow/agent/MCP |
 | TD-03 | `fix(project-policy): 統一專案生命週期寫入守衛` | paused/archived |
 | TD-04 | `security(import): 強化 DNS、redirect 與私網 SSRF 防護` | 匯入網路層 |
-| TD-05 | `refactor(team): 導入 capability 並恢復團隊入口分層` | 團隊 UI + capability |
+| TD-05a | `refactor(authz): 導入 capability 模型與舊角色相容映射` | 後端 capability；不改 UI |
+| TD-05b | `feat(team-ui): 依 capability 恢復團隊入口分層` | 僅前端；依賴 TD-05a 已合併 |
 | TD-06 | `refactor(client-shell): 拆分 App Shell 與資料化導覽` | 前端結構 |
 | TD-07 | `refactor(server): 分離 bootstrap、readiness 與 worker` | 後端結構 |
 | TD-08 | `refactor(db): schema 領域拆分與完整性報告` | 不先加破壞性 FK |
@@ -295,11 +334,12 @@ PROCESS_ROLE=all
 
 ## 6. 每個技術債 PR 的硬性規則
 
-- 一個 PR 只處理一個架構邊界。
+- 一個 PR 只處理一個架構邊界（後端政策／Command／Worker／schema／前端 shell 等擇一為主）。
+- **TD-05a／TD-05b 刻意拆成兩個 PR**：capability 真相來源先落地，團隊 UI 再消費；若未來有「必須同 PR 改兩層」的例外，PR 說明須寫清依賴、驗收與回退，且 checklist §1 須勾選跨邊界理由。
 - 優先新增 adapter，再遷移 caller，最後刪除舊路徑。
 - 不允許無測試的大型移動或重新命名。
 - 不允許以「內部呼叫」為理由跳過權限、核准、生命週期、額度或稽核。
-- 不允許只修 Web 而忽略 MCP、workflow、agent 與 background resume。
+- 不允許只修 Web 而忽略 REST、MCP、workflow、agent、approval resume 與 schedule／background resume（見 checklist §3）。
 - 資料庫 migration 必須提供 dry-run、回退與現有資料檢查。
 - 重大安全修復必須加入可重現回歸測試。
 - PR 說明必須列出：行為不變證據、風險、回退方式、未涵蓋範圍。
@@ -349,10 +389,12 @@ Codex 處理後續 PR 時必須：
 
 TD-00 不改產品行為，只將以下現況鎖進測試：
 
-- direct/workflow/agent/MCP 的生成政策一致性。
-- 成本門檻核准一致性。
+- Web/tRPC direct、REST（若存在）、MCP、workflow、agent、approval resume、schedule／background resume 的生成與重要寫入政策一致性。
+- 成本門檻核准一致性（含 workflow／agent／MCP 不可繞過）。
 - active/paused/archived 專案寫入規則。
 - 管理員、組長、成員的導覽與後端能力對照。
 - XFF 與 URL import SSRF 的安全回歸。
+
+未覆蓋的入口必須在 PR 說明標為 open／延期，不得標為已驗證。
 
 只有在 TD-00 穩定後，才開始 TD-01 Policy Engine。

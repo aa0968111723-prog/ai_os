@@ -5,6 +5,7 @@
 ## 1. 範圍
 
 - [ ] PR 只處理一個主要架構邊界。
+- [ ] 若因依賴必須跨邊界（極少見；預設應拆成如 TD-05a／TD-05b），PR 說明已寫清：跨邊界理由、依賴順序、驗收條件與回退方式。
 - [ ] PR 說明列出明確的「不在範圍」。
 - [ ] 沒有順便修改無關 UI、文案、模型目錄或資料表。
 - [ ] 變更可獨立回退，不依賴尚未合併的隱藏提交。
@@ -101,15 +102,17 @@
 
 ## 11. 測試命令
 
-至少執行：
+至少執行（對齊本 repo `package.json`；`npm test`／`test:client` 已是 `vitest run`，無需再加 `--run`）：
 
 ```bash
 npm run typecheck
-npm test -- --run
-npm run test:client -- --run
+npm test
+npm run test:client
 npm run build
-npm audit --audit-level=high
+npm run audit:high
 ```
+
+等價命令可接受（例如 CI job 內部分步驟、或 `npm run test:all` 覆蓋 server+client），但 PR 說明須列出**實際執行**的指令與結果。
 
 依變更範圍追加：
 
@@ -136,7 +139,7 @@ npm audit --audit-level=high
 列出測試或前後結果。
 
 ## 多入口檢查
-Web / MCP / workflow / agent / worker 哪些已驗證？
+Web/tRPC、REST、MCP、workflow、agent、approval resume、schedule/background 哪些已驗證？哪些延期？
 
 ## 資料與 migration
 是否有 schema 變更、dry-run 與回退？
@@ -150,9 +153,9 @@ Web / MCP / workflow / agent / worker 哪些已驗證？
 
 ## 13. 禁止合併條件
 
-出現以下任一狀況時不得合併：
+出現以下任一狀況時不得合併（§3 多入口為**強制 gate**，非建議項）：
 
-- 只修 direct path，未檢查 workflow / agent / MCP。
+- 涉及重要寫入卻只修 direct path，未檢查 workflow / agent / MCP（及適用時的 REST、approval resume、schedule／background resume），且未在 PR 說明標示延期理由。
 - 以「內部呼叫」為理由略過權限或核准。
 - 封存專案仍可產生新成本。
 - 沒有測試就移除相容路徑。

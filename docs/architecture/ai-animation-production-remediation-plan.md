@@ -103,13 +103,22 @@ interface Sequence {
 現有 scene 應逐步收斂為正式 Shot 語意，不必立即改表名，可先以 adapter 相容。
 
 ```ts
+/** 鏡頭上綁定的角色與參考版本（生成前即可驗證，不依賴產出後的 AssetVersion） */
+interface ShotCharacterRef {
+  characterId: string;
+  characterBibleVersionId: string;
+}
+
 interface Shot {
   id: string;
   sequenceId?: string;
   productionId: string;
   orderIndex: number;
   title: string;
+  /** 衍生顯示用；真相來源見 durationFrames 或 timeline frame */
   durationSec: number;
+  /** 單一真相：整數 frame（與 Production frameRate 換算） */
+  durationFrames: number;
   shotType?: string;
   cameraMovement?: string;
   composition?: string;
@@ -119,6 +128,17 @@ interface Shot {
   visualPrompt?: string;
   negativePrompt?: string;
   state: ShotState;
+  /** 本鏡出場角色與當時鎖定的 bible 版本 */
+  characterRefs: ShotCharacterRef[];
+  /** 本鏡風格／參考包版本快照（生成前驗證；過期時標示需重跑） */
+  styleBibleVersionId?: string;
+  referencePackId?: string;
+  referencePackVersionId?: string;
+  /**
+   * 現用版本指標 = 單一真相來源。
+   * AssetVersion.status === "selected" 僅為投影／查詢便利，寫入時必須與指標同交易更新，
+   * 且 (shotId, role) 至多一筆 selected（DB unique partial index）。
+   */
   selectedVisualVersionId?: string;
   selectedNarrationVersionId?: string;
 }
@@ -174,9 +194,19 @@ interface AssetVersion {
   characterBibleVersionIds: string[];
   styleBibleVersionId?: string;
   technicalMetadata?: Record<string, unknown>;
+  /**
+   * status 不得成為第二套「現用」真相。
+   * 選版 Command 原子流程：舊 selected → superseded；新列 → selected；
+   * 並寫入 Shot.selected*VersionId。查詢可用 status，寫入以 Shot 指標為準。
+   */
   status: "candidate" | "selected" | "rejected" | "superseded";
 }
 ```
+
+約束（實作與 migration 必須可驗證）：
+
+- 同一 `(shotId, role)` 至多一筆 `status = selected`（partial unique index）。
+- `Shot.selectedVisualVersionId`／`selectedNarrationVersionId` 與對應 AssetVersion 必須同交易一致；不一致時以 Shot 指標為準並校正 status。
 
 必須能回答：
 
@@ -195,8 +225,11 @@ interface Timeline {
   id: string;
   productionId: string;
   version: number;
-  durationSec: number;
   frameRate: number;
+  /** 衍生：sum(clips) 或 max(endFrame)／frameRate；不得獨立手改 */
+  durationSec: number;
+  /** 單一真相：整數 frame 總長 */
+  durationFrames: number;
 }
 
 interface TimelineClip {
@@ -215,7 +248,11 @@ interface TimelineClip {
 }
 ```
 
-所有時間計算以 frame 或整數毫秒作為單一真相來源，避免浮點秒數累積誤差造成字幕、旁白與畫面逐鏡偏移。
+**時間真相規則：**
+
+- 儲存與運算以 **frame**（或整數毫秒）為唯一真相；`durationSec` 僅為 UI／匯出衍生欄位。
+- 秒 ↔ frame：`frames = round(sec * frameRate)`；反向 `sec = frames / frameRate`；同一 Production 固定 frameRate，禁止混用未標註的浮點秒累加。
+- 字幕、音訊同步、粗剪與交付格式皆讀 frame 欄位，避免秒數雙重真相造成逐鏡偏移。
 
 ## 4. 動畫製作狀態機
 
@@ -277,18 +314,30 @@ type ShotState =
 - `exportEditingPackageCommand`
 - `createProductionRevisionCommand`
 
-其中 `generateShotVisualCommand` 與 `generateShotMotionCommand` 必須固定完成：
+### 5.1 所有動畫 Command 共用契約（不可繞過）
 
-1. 驗證 actor、production、shot 與專案歸屬。
-2. 驗證 Production／Shot 狀態。
-3. 解析角色、風格、場景與參考素材版本。
-4. 建立不可變 prompt snapshot。
-5. 選擇 provider／model adapter。
-6. 計算預估成本與核准需求。
-7. 建立 idempotent job。
-8. 保存 lineage 與技術參數。
-9. 完成後建立 candidate AssetVersion，不直接覆蓋現用版。
-10. 由選版或審核 Command 將候選設為 selected。
+下列步驟適用 **§5 列出的每一個** 動畫 Command（建立腳本／Sequence／Shot、生成、選版、審核、粗剪、匯出、revision 等），不得僅套在視覺生成：
+
+1. 載入 actor 與 **tenant context**（team／group／production／shot 歸屬）。
+2. 驗證資源存在且歸屬正確（跨租戶 ID 拒絕）。
+3. 驗證 Production／Shot **狀態機**允許該動作。
+4. 呼叫上位 **Policy Engine**（含 `PolicyContext.source`：web／rest／mcp／workflow／agent／system）。
+5. 若涉及成本：預估 → 核准門檻 → **核准完成後才可執行**付費側效應。
+6. 寫入主資料與 **idempotency**（同 key 重試不產生第二份副作用）。
+7. 建立 **audit／event**（actor、source、resource、decision reason）。
+8. 發送通知或 **佇列** 背景工作（HTTP 路徑不長跑 provider）。
+
+### 5.2 生成類 Command 額外步驟
+
+`generateShotVisualCommand`、`generateShotMotionCommand`、`generateShotNarrationCommand` 在共用契約之上還必須：
+
+1. 解析角色、風格、場景與參考素材版本（含 Shot.characterRefs／reference pack）。
+2. 建立不可變 prompt snapshot。
+3. 選擇 provider／model adapter（經 `CloudInferenceProvider`，不直耦合供應商 SDK）。
+4. 建立 idempotent job（見 §10 原子契約）。
+5. 保存 lineage 與技術參數。
+6. 完成後建立 **candidate** AssetVersion，不直接覆蓋現用版。
+7. 僅由 `selectShotAssetVersionCommand` 或審核流將候選設為 selected（與 Shot 指標同交易）。
 
 ## 6. 角色與風格一致性
 
@@ -391,14 +440,25 @@ qc.worker
 - provider request id。
 - input snapshot hash。
 - attempt count。
-- heartbeat／lease。
+- heartbeat／lease（含 lease owner／generation token，供 fencing）。
 - retry policy。
 - cancel requested at。
 - progress stage。
 - estimated／actual cost。
 - output checksum。
 
-重試不得重複扣點或讓同一 Shot 同時出現多個「現用版本」。
+### 10.1 不重複執行的可驗證原子契約
+
+欄位本身不足以防重；實作必須滿足：
+
+1. **Idempotency 唯一約束**：`(scope, idempotency_key)` 在 DB 有 unique index；第二次提交回傳同一 job／結果，不開第二條扣點路徑。
+2. **原子 claim**：`UPDATE … SET status='running', lease_owner=?, lease_until=?, lease_token=lease_token+1 WHERE id=? AND (status='queued' OR lease_until < now())` 一列 claim 成功才可呼叫 provider。
+3. **Lease fencing**：完成寫回時 `WHERE lease_token = ?`；過期舊 Worker 的提交必須被拒絕。
+4. **Provider-level idempotency**：對外 request 帶穩定 key／request id，供應商重試不產生雙輸出（或對帳後只收斂一筆）。
+5. **交易邊界**：同一 DB transaction（或明確 saga 補償）內完成「結算扣點／退點 ↔ 建立 AssetVersion ↔ 更新 Shot 選版指標」；禁止先扣點成功再於另一進程無補償地再扣一次。
+6. **選版唯一**：見 §3.5；重試不得讓同一 Shot 同 role 出現兩個 selected。
+
+重試、timeout、取消、Worker 重啟與 stale lease 皆須有回歸測試（ANIM-00）。
 
 ## 11. 成本與儲存
 
@@ -454,6 +514,8 @@ Production 與 Shot 層都應能查看預算、已花費、在途預留與重製
 - 素材 404 時預覽可降級，交付則明確失敗或產生阻塞，不靜默缺檔。
 - Direct、workflow、agent、MCP 對同一鏡頭生成都遵守相同權限、成本門檻與專案狀態。
 - 相同 export idempotency key 重試不產生不同內容的交付包。
+- **生成** idempotency／重試：相同 key 不重複扣點、不重複建立 candidate、不雙重選版。
+- timeout、使用者取消、Worker 重啟、stale lease 提交被 fencing 拒絕的行為正確。
 - 已交付 Production 的修改會建立 revision，不直接覆蓋歷史交付。
 
 ## 14. 與上位技術債計畫的關係
