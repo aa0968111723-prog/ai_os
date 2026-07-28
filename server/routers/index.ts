@@ -33,6 +33,7 @@ import { integrationsRouter } from "./integrations";
 import { knowledgeMapRouter } from "./knowledgeMap";
 import { pushRouter } from "./push";
 import { exportJobsRouter } from "./exportJobs";
+import { tasksRouter } from "./tasks";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -69,6 +70,7 @@ export const appRouter = router({
   knowledgeMap: knowledgeMapRouter,
   push: pushRouter,
   exportJobs: exportJobsRouter,
+  tasks: tasksRouter,
 });
 
 export type AppRouter = typeof appRouter;

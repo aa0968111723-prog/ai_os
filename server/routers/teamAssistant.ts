@@ -72,7 +72,7 @@ const GEN_STATUS_LABEL: Record<string, string> = {
   queued: "排隊中", running: "生成中", done: "完成", failed: "失敗", awaiting_approval: "待核准", rejected: "已駁回",
 };
 const AGENT_RUN_STATUS_LABEL: Record<string, string> = {
-  awaiting_approval: "待核准", running: "執行中", done: "完成", failed: "失敗", stopped: "已停止", discarded: "已放棄",
+  awaiting_approval: "待核准", running: "執行中", waiting: "等待人員", done: "完成", failed: "失敗", stopped: "已停止", discarded: "已放棄",
 };
 
 /* ── 一體化的純函式積木（export 供單元測試） ── */
@@ -645,7 +645,7 @@ ${historyBlock}使用者的問題：${input.message}`;
         .from(schema.agentRuns)
         .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
         .where(and(eq(schema.agentRuns.groupId, input.groupId), ne(schema.agentRuns.status, "discarded")))
-        .orderBy(sql`case when ${schema.agentRuns.status} in ('running','awaiting_approval') then 0 else 1 end`, desc(schema.agentRuns.updatedAt))
+        .orderBy(sql`case when ${schema.agentRuns.status} in ('running','waiting','awaiting_approval') then 0 else 1 end`, desc(schema.agentRuns.updatedAt))
         .limit(10);
       return rows.map(({ run, projectTitle }) => ({
         id: run.id,

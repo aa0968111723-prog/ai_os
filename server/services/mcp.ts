@@ -817,6 +817,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         generationId: s.generationId ?? null,
         noteId: s.noteId ?? null,
         scheduleItemId: s.scheduleItemId ?? null,
+        taskId: s.taskId ?? null,
         outputRefs: s.outputRefs ?? [],
         detail: s.detail ?? null,
       })),
@@ -899,7 +900,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         awaitingApproval: gens.filter((g) => g.status === "awaiting_approval").length,
       },
       agentRuns: runs
-        .filter((r) => r.status === "awaiting_approval" || r.status === "running")
+        .filter((r) => r.status === "awaiting_approval" || r.status === "running" || r.status === "waiting")
         .map((r) => ({ runId: r.id, goal: r.goal, status: r.status, currentStep: r.currentStep, stepCount: (r.steps as AgentStep[]).length })),
       upcomingSchedule: sched
         .filter((i) => i.startsAt >= now)

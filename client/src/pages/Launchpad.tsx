@@ -338,6 +338,7 @@ type ChatMsg = { role: "user" | "assistant"; text: string; steps?: string[]; dis
 const RUN_STATUS: Record<string, { label: string; color?: string }> = {
   awaiting_approval: { label: "待核准", color: "var(--gold-ink)" },
   running: { label: "執行中", color: "var(--primary-ink)" },
+  waiting: { label: "等待人員", color: "var(--gold-ink)" },
   done: { label: "完成", color: "var(--success-ink)" },
   failed: { label: "失敗", color: "var(--danger-ink)" },
   stopped: { label: "已停止" },
@@ -359,7 +360,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
   // 全組執行計畫動態：有進行中（執行中/待核准）的就 8 秒輪詢，全都終局就停（省流量）
   const overview = trpc.teamAssistant.agentOverview.useQuery(
     { groupId },
-    { refetchInterval: (q) => (q.state.data?.some((r) => r.status === "running" || r.status === "awaiting_approval") ? 8000 : false) },
+    { refetchInterval: (q) => (q.state.data?.some((r) => r.status === "running" || r.status === "waiting" || r.status === "awaiting_approval") ? 8000 : false) },
   );
   // 已派工的提議（key＝`訊息idx-提議idx`）→ 結果：避免重複派工、並顯示「到哪核准」
   const [dispatched, setDispatched] = useState<Record<string, DispatchResult>>({});
@@ -397,7 +398,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
   const canDispatchHint = ask.data?.canDispatch ?? false;
   const runs = overview.data ?? [];
   // 收合時仍給進度訊號：進行中（執行中／待核准）幾筆，一眼看出「有沒有在跑」不必展開
-  const activeRuns = runs.filter((r) => r.status === "running" || r.status === "awaiting_approval").length;
+  const activeRuns = runs.filter((r) => r.status === "running" || r.status === "waiting" || r.status === "awaiting_approval").length;
   return (
     <section className="card" data-fb="組彙總AI卡" style={{ padding: "14px 16px", marginBottom: 16 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
