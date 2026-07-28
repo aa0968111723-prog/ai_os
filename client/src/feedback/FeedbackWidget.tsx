@@ -88,7 +88,7 @@ export function FeedbackWidget() {
   };
 
   return (
-    <div data-fb-widget="root" style={{ position: "fixed", right: 18, bottom: 18, zIndex: 45 }}>
+    <div data-fb-widget="root" className="fb-fab-root">
       {mode === "menu" && (
         <div
           className="card"

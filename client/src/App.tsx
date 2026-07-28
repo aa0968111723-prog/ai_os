@@ -57,10 +57,10 @@ function ChangePasswordDialog({ onClose, forced = false }: { onClose: () => void
   useFocusTrap(dialogRef, true, forced ? undefined : onClose);
   return (
     <div
-      style={{ position: "fixed", inset: 0, background: "var(--scrim)", display: "grid", placeItems: "center", zIndex: 50 }}
+      className="modal-scrim"
       onClick={(e) => { if (!forced && e.target === e.currentTarget) onClose(); }}
     >
-      <div ref={dialogRef} className="card" style={{ width: 380, maxWidth: "92vw" }} role="dialog" aria-modal="true" aria-label="改密碼">
+      <div ref={dialogRef} className="card modal-card" style={{ width: 380 }} role="dialog" aria-modal="true" aria-label="改密碼">
         <h2 style={{ marginTop: 0 }}>改密碼</h2>
         {forced && <p className="hint">管理員重設了你的密碼——請先設定一組自己的新密碼再繼續使用</p>}
         <form onSubmit={(e) => { e.preventDefault(); if (canSubmit) change.mutate({ oldPassword: oldPw, newPassword: newPw }); }}>
@@ -318,8 +318,8 @@ export function App() {
       {/* 強制改密碼時整塊背景 inert：對話框遮罩只擋滑鼠，Tab 仍能聚焦到背景，要靠 inert 一起擋 */}
       <div inert={(mustChangePw || showChangePw || showNotifSettings) || undefined}>
         <header className="topbar">
-          <Link href="/" className="brand" style={{ cursor: "pointer", textDecoration: "none", color: "inherit" }}>
-            <BrandLogo variant="full" size="sm" decorative={false} />
+          <Link href="/" className="brand" aria-label="Aios 首頁">
+            <BrandLogo variant="full" size="sm" />
           </Link>
           {me.data && groups.length > 0 && (
             <select
@@ -342,45 +342,48 @@ export function App() {
             </select>
           )}
           <span className="spacer" />
-          {/* 只在 E2E_MOCK=1（自動化測試）下出現；正式部署一律真實模式，不會再看到這顆徽章 */}
-          {me.data && info.data?.mockMode && <span className="badge mock">測試模式</span>}
-          {/* 高頻入口常駐頂欄：筆記排程／資料庫是天天用的工具，從使用者選單升上來一鍵可達；
-           * 手機空間吃緊時標籤收成純圖示（topbar-quick-label），title/aria 仍保留 */}
-          {me.data && <DmNavBadge />}
-          {me.data && (
-            <Link href="/planner" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="筆記排程——把筆記排進待辦與行程">
-              <Icon name="Clock" size={14} />
-              <span className="topbar-quick-label">筆記排程</span>
-            </Link>
-          )}
-          {me.data && (
-            <Link href="/databases" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="資料庫——你的素材與資料集">
-              <Icon name="Package" size={14} />
-              <span className="topbar-quick-label">資料庫</span>
-            </Link>
-          )}
-          {/* 常駐「怎麼用」入口：困惑當下一眼找得到說明，不必想到去點自己的名字（UX 中：可發現性） */}
-          {me.data && (
-            <Link href="/help" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="怎麼用——白話說明與常見問題">
-              <Icon name="HelpCircle" size={14} />
-              <span className="topbar-help-label">怎麼用</span>
-            </Link>
-          )}
-          {me.data && <PendingBadge groupId={activeGroupId} />}
-          {me.data && <PointsBadge groupId={activeGroupId} />}
-          {/* 頂欄收斂：次要入口（模型指南/接上外部 AI/資料下載/管理組/改密碼）＋登出全收進使用者選單 */}
-          {me.data && (
-            <UserMenu
-              userName={me.data.user.name}
-              isAdmin={isAdmin}
-              activeIsLeader={activeIsLeader}
-              canSeeOrg={canSeeOrg}
-              onChangePw={() => setShowChangePw(true)}
-              onNotifSettings={() => setShowNotifSettings(true)}
-              onLogout={() => { void logoutWithPushCleanup(); }}
-              loggingOut={logout.isPending}
-            />
-          )}
+          {/* 右側動作群：窄螢幕橫向滑動，桌面正常換行 */}
+          <div className="topbar-actions">
+            {/* 只在 E2E_MOCK=1（自動化測試）下出現；正式部署一律真實模式，不會再看到這顆徽章 */}
+            {me.data && info.data?.mockMode && <span className="badge mock">測試模式</span>}
+            {/* 高頻入口常駐頂欄：筆記排程／資料庫是天天用的工具，從使用者選單升上來一鍵可達；
+             * 手機空間吃緊時標籤收成純圖示（topbar-quick-label），title/aria 仍保留 */}
+            {me.data && <DmNavBadge />}
+            {me.data && (
+              <Link href="/planner" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="筆記排程——把筆記排進待辦與行程">
+                <Icon name="Clock" size={14} />
+                <span className="topbar-quick-label">筆記排程</span>
+              </Link>
+            )}
+            {me.data && (
+              <Link href="/databases" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="資料庫——你的素材與資料集">
+                <Icon name="Package" size={14} />
+                <span className="topbar-quick-label">資料庫</span>
+              </Link>
+            )}
+            {/* 常駐「怎麼用」入口：困惑當下一眼找得到說明，不必想到去點自己的名字（UX 中：可發現性） */}
+            {me.data && (
+              <Link href="/help" className="badge" style={{ textDecoration: "none", color: "inherit" }} title="怎麼用——白話說明與常見問題">
+                <Icon name="HelpCircle" size={14} />
+                <span className="topbar-help-label">怎麼用</span>
+              </Link>
+            )}
+            {me.data && <PendingBadge groupId={activeGroupId} />}
+            {me.data && <PointsBadge groupId={activeGroupId} />}
+            {/* 頂欄收斂：次要入口（模型指南/接上外部 AI/資料下載/管理組/改密碼）＋登出全收進使用者選單 */}
+            {me.data && (
+              <UserMenu
+                userName={me.data.user.name}
+                isAdmin={isAdmin}
+                activeIsLeader={activeIsLeader}
+                canSeeOrg={canSeeOrg}
+                onChangePw={() => setShowChangePw(true)}
+                onNotifSettings={() => setShowNotifSettings(true)}
+                onLogout={() => { void logoutWithPushCleanup(); }}
+                loggingOut={logout.isPending}
+              />
+            )}
+          </div>
         </header>
 
         {/* lazy 頁面載入中的過場（QA-025 code-splitting）：整個路由樹共用一個 Suspense */}

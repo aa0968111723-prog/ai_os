@@ -114,10 +114,10 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
 
   return (
     <div
-      style={{ position: "fixed", inset: 0, background: "var(--scrim)", display: "grid", placeItems: "center", zIndex: 50 }}
+      className="modal-scrim"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div ref={dialogRef} className="card" style={{ width: 460, maxWidth: "92vw", maxHeight: "86vh", overflowY: "auto" }} role="dialog" aria-modal="true" aria-label="通知設定">
+      <div ref={dialogRef} className="card modal-card" style={{ width: 460 }} role="dialog" aria-modal="true" aria-label="通知設定">
         <h2 style={{ marginTop: 0 }}><Icon name="Bell" size={18} style={{ verticalAlign: "-3px" }} /> 通知設定</h2>
         <p className="hint">
           把手機和電腦連結進來後，分鏡審批、私訊、@提及、生成與 AI 執行計畫完成都會直接推到裝置上——
