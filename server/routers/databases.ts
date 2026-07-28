@@ -6,6 +6,7 @@ import { db, schema } from "../db";
 import { MAX_FILE_CATEGORY, normalizeFileCategory, validateFields, validateRowData, type DataField, type DataRowData } from "../../shared/databaseFields";
 import { canCreateIn, listVisibleTables, resolveTableAccess, type DataTableRow } from "../services/databaseAcl";
 import { addDataRowValidated, removeDataRow, updateDataRowValidated } from "../services/databaseCore";
+import { executeDatabaseWriteCommand } from "../services/databaseCommand";
 import {
   executeIdempotentDatabaseBatch,
   IDEMPOTENCY_KEY_MAX_LENGTH,
@@ -228,11 +229,17 @@ export const databasesRouter = router({
   addRow: authedProcedure
     .input(z.object({ tableId: z.string().uuid(), data: z.record(z.unknown()) }))
     .mutation(async ({ ctx, input }) => {
-      const { table, access } = await getTableChecked(ctx.auth, input.tableId);
-      if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
+      // Command：政策 database.write + 專案狀態機 write（若 project-bound）+ databaseCore
       try {
-        return await addDataRowValidated(table, ctx.auth.user.id, input.data);
+        return await executeDatabaseWriteCommand({
+          auth: ctx.auth,
+          source: "web",
+          action: "addRow",
+          tableId: input.tableId,
+          data: input.data,
+        });
       } catch (err) {
+        if (err instanceof TRPCError) throw err;
         throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "新增失敗" });
       }
     }),
