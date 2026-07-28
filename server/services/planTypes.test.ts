@@ -113,6 +113,25 @@ describe("complete plan schema", () => {
     }).success).toBe(false);
   });
 
+  it("rejects duplicate milestone identifiers", () => {
+    expect(completePlanSchema.safeParse({
+      summary: {
+        ...summary,
+        milestones: [
+          { id: "same", title: "第一階段" },
+          { id: "same", title: "第二階段" },
+        ],
+      },
+      steps: [{
+        id: "checkpoint",
+        kind: "checkpoint",
+        title: "檢查",
+        status: "draft",
+        actorType: "system",
+      }],
+    }).success).toBe(false);
+  });
+
   it("does not invent dates: summary permits unresolved schedule information", () => {
     const parsed = completePlanSummarySchema.parse({
       ...summary,
