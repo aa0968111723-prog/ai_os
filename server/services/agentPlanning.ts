@@ -269,6 +269,7 @@ export function resolveCompletePlanDraft(
       milestoneId: source.milestoneId,
       estimatedMinutes: source.estimatedMinutes,
       sourceRefs,
+      executionMode: "dag",
     };
 
     if (source.kind === "record_to_database") {

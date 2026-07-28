@@ -46,4 +46,54 @@ describe("human task wake state machine", () => {
     expect(result.matched).toBe(false);
     expect(result.steps[0].status).toBe("waiting");
   });
+
+  it("wakes a non-current DAG branch while independent work remains runnable", () => {
+    const result = applyHumanTaskWake([
+      {
+        id: "wait-people",
+        note: "等待名單",
+        status: "waiting",
+        taskId: task.id,
+        executionMode: "dag",
+      },
+      {
+        id: "visual",
+        note: "生成主視覺",
+        status: "pending",
+        executionMode: "dag",
+      },
+      {
+        id: "publish",
+        note: "發布",
+        status: "pending",
+        executionMode: "dag",
+        dependsOn: ["wait-people", "visual"],
+      },
+    ], 1, "wait-people", task, false);
+    expect(result.matched).toBe(true);
+    expect(result.status).toBe("running");
+    expect(result.currentStep).toBe(1);
+    expect(result.steps[0].status).toBe("done");
+  });
+
+  it("remains waiting when another DAG human branch is still unresolved", () => {
+    const result = applyHumanTaskWake([
+      {
+        id: "wait-people",
+        note: "等待名單",
+        status: "waiting",
+        taskId: task.id,
+        executionMode: "dag",
+      },
+      {
+        id: "wait-visual",
+        note: "等待主視覺核准",
+        status: "waiting",
+        taskId: "other-task",
+        executionMode: "dag",
+      },
+    ], 1, "wait-people", task, false);
+    expect(result.status).toBe("waiting");
+    expect(result.currentStep).toBe(1);
+  });
 });

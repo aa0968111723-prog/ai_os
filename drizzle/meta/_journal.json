@@ -64,6 +64,13 @@
       "when": 1785226013256,
       "tag": "0008_complete_plan_summary",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785227646657,
+      "tag": "0009_agent_events_and_indexes",
+      "breakpoints": true
     }
   ]
 }

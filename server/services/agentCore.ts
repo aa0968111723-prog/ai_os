@@ -31,6 +31,8 @@ import {
   resolveCompletePlanDraft,
   type PlannerAliases,
 } from "./agentPlanning";
+import { stopPendingDagSteps } from "./agentDag";
+import { recordAgentEventSafely } from "./agentEventCore";
 import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
@@ -86,9 +88,9 @@ function mockPlan(goal: string, existingSceneCount: number, writableDbs: Writabl
   const budget = getModel("fal-ai/fast-lightning-sdxl");
   const newNo = existingSceneCount + 1;
   const steps: AgentStep[] = [
-    { id: "scene", kind: "create_scene", title: goal.slice(0, 40) || "代理測試鏡", note: `新增分鏡「${goal.slice(0, 20)}」`, status: "pending", actorType: "ai", scenePrompt: goal, points: 0 },
-    { id: "visual", kind: "generate", title: "生成主視覺", note: `用 ${budget?.label ?? "SDXL Lightning"} 為第 ${newNo} 鏡生成畫面`, status: "pending", actorType: "ai", dependsOn: ["scene"], modelId: budget?.id ?? "fal-ai/fast-lightning-sdxl", prompt: goal, sceneNo: newNo, points: budget?.points ?? 1 },
-    { id: "approval", kind: "submit_approval", title: "送交內容審核", note: `把第 ${newNo} 鏡送審`, status: "pending", actorType: "ai", dependsOn: ["visual"], sceneNo: newNo, points: 0 },
+    { id: "scene", kind: "create_scene", title: goal.slice(0, 40) || "代理測試鏡", note: `新增分鏡「${goal.slice(0, 20)}」`, status: "pending", actorType: "ai", executionMode: "dag", scenePrompt: goal, points: 0 },
+    { id: "visual", kind: "generate", title: "生成主視覺", note: `用 ${budget?.label ?? "SDXL Lightning"} 為第 ${newNo} 鏡生成畫面`, status: "pending", actorType: "ai", executionMode: "dag", dependsOn: ["scene"], modelId: budget?.id ?? "fal-ai/fast-lightning-sdxl", prompt: goal, sceneNo: newNo, points: budget?.points ?? 1 },
+    { id: "approval", kind: "submit_approval", title: "送交內容審核", note: `把第 ${newNo} 鏡送審`, status: "pending", actorType: "ai", executionMode: "dag", dependsOn: ["visual"], sceneNo: newNo, points: 0 },
   ];
   // 有可寫資料庫時，示範「把成果記進資料庫」：寫進第一個 text/其次任一欄位
   const targetDb = writableDbs[0];
@@ -102,6 +104,7 @@ function mockPlan(goal: string, existingSceneCount: number, writableDbs: Writabl
         note: `把目標記進資料庫「${targetDb.name}」`,
         status: "pending",
         actorType: "ai",
+        executionMode: "dag",
         dependsOn: ["approval"],
         tableId: targetDb.id,
         rowData: { [field.key]: goal.slice(0, 100) },
@@ -133,6 +136,27 @@ const STATUS_LABEL: Record<string, string> = {
 
 interface PlannerContext extends PlannerAliases {
   text: string;
+}
+
+async function recordPlannedEvent(run: AgentRunRow): Promise<void> {
+  const steps = run.steps as AgentStep[];
+  const planSummary = run.planSummary as CompletePlanSummary | null;
+  await recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    eventKey: "run:planned",
+    eventType: "planned",
+    actorType: "ai",
+    actorId: run.userId,
+    summary: `已建立完整計畫，共 ${steps.length} 個步驟，預估 ${run.estPoints} 點`,
+    data: {
+      successCriteria: planSummary?.successCriteria?.length ?? 0,
+      missingInformation: planSummary?.missingInformation?.length ?? 0,
+      risks: planSummary?.risks?.length ?? 0,
+      milestones: planSummary?.milestones?.length ?? 0,
+    },
+  });
 }
 
 async function buildPlannerContext(groupId: string, projectId: string, writableDbs: WritableDb[]): Promise<PlannerContext> {
@@ -270,6 +294,7 @@ export async function planAgentCore(input: { auth: AuthState; projectId: string;
         estPoints: plan.estPoints,
       })
       .returning();
+    await recordPlannedEvent(run);
     return run;
   }
 
@@ -381,6 +406,7 @@ ${knowledgeCtx ? `<專案知識庫節錄>\n${knowledgeCtx}\n</專案知識庫節
         estPoints: plan.estPoints,
       })
       .returning();
+    await recordPlannedEvent(run);
     return run;
   } catch (err) {
     if (err instanceof TRPCError) throw err;
@@ -434,6 +460,17 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
       .returning();
   });
   if (updated.length === 0) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫已經開始執行或已結束" });
+  await recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    eventKey: "run:approved",
+    eventType: "approved",
+    actorType: "human",
+    actorId: auth.user.id,
+    summary: "使用者已核准代理執行計畫",
+    data: { estPoints: run.estPoints },
+  });
   return updated[0];
 }
 
@@ -452,6 +489,16 @@ export async function discardAgentCore(input: { auth: AuthState; runId: string }
     .where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "awaiting_approval")))
     .returning();
   if (updated.length === 0) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫已經開始執行或已結束" });
+  await recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    eventKey: "run:discarded",
+    eventType: "discarded",
+    actorType: "human",
+    actorId: auth.user.id,
+    summary: "使用者放棄了尚未執行的計畫",
+  });
   return updated[0];
 }
 
@@ -469,16 +516,24 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
   }
   if (run.status === "waiting") {
     const steps = run.steps as AgentStep[];
-    const current = steps[run.currentStep];
-    if (current?.status === "waiting") current.status = "stopped";
-    for (let index = run.currentStep + 1; index < steps.length; index += 1) {
-      if (steps[index].status === "pending") steps[index].status = "stopped";
-    }
+    stopPendingDagSteps(steps);
     const [stopped] = await db
       .update(schema.agentRuns)
       .set({ status: "stopped", steps, updatedAt: new Date() })
       .where(and(eq(schema.agentRuns.id, run.id), eq(schema.agentRuns.status, "waiting")))
       .returning();
+    if (stopped) {
+      await recordAgentEventSafely({
+        runId: run.id,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        eventKey: "run:stopped",
+        eventType: "stopped",
+        actorType: "human",
+        actorId: auth.user.id,
+        summary: "使用者停止了等待中的代理計畫",
+      });
+    }
     return stopped ?? run;
   }
   const updated = await db
@@ -488,8 +543,19 @@ export async function stopAgentCore(input: { auth: AuthState; runId: string }): 
     .returning();
   if (updated.length === 0) {
     const [current] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
+    if (!current) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這筆代理執行" });
     return current;
   }
+  await recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    eventKey: "run:stopped",
+    eventType: "stopped",
+    actorType: "human",
+    actorId: auth.user.id,
+    summary: "使用者要求停止後續代理步驟",
+  });
   return updated[0];
 }
 
@@ -502,7 +568,8 @@ export async function listAgentRunsForProject(auth: AuthState, projectId: string
     .select()
     .from(schema.agentRuns)
     .where(and(eq(schema.agentRuns.projectId, projectId), inArray(schema.agentRuns.status, ["awaiting_approval", "running", "waiting"])))
-    .orderBy(desc(schema.agentRuns.createdAt));
+    .orderBy(desc(schema.agentRuns.createdAt))
+    .limit(100);
   const finished = await db
     .select()
     .from(schema.agentRuns)
