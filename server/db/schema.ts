@@ -5,6 +5,7 @@
  */
 import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { CompletePlanSummary } from "../../shared/plan";
 
 /* ── 認證與組織 ────────────────────────────────── */
 
@@ -643,6 +644,8 @@ export const agentRuns = pgTable("agent_runs", {
   goal: text("goal").notNull(),
   /** LLM 的計畫摘要（核准畫面顯示） */
   summary: text("summary").notNull().default(""),
+  /** 結構化完整計畫摘要：成功條件、缺少資訊、假設、風險、里程碑、成本與時程。 */
+  planSummary: jsonb("plan_summary").$type<CompletePlanSummary>(),
   status: text("status", { enum: ["awaiting_approval", "running", "waiting", "done", "failed", "stopped", "discarded"] })
     .notNull()
     .default("awaiting_approval"),

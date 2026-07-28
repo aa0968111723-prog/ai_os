@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
+import type { CompletePlanSummary } from "../../../shared/plan";
 
 /**
  * AI 助手卡（助手系統前端）：一句目標 → 規劃（NIM 免費）→ 計畫預覽（每步＋估點總額）→
@@ -12,6 +13,8 @@ import { ConfirmButton } from "./interactions";
 
 /** 與 server/services/agentRunner 的 AgentStep jsonb 同形狀（tRPC 端 jsonb 推導不出型別，前端自己標） */
 interface AgentStep {
+  id?: string;
+  title?: string;
   kind:
     | "split_script"
     | "create_scene"
@@ -28,6 +31,11 @@ interface AgentStep {
     | "request_approval";
   note: string;
   status: "pending" | "running" | "waiting" | "done" | "failed" | "stopped";
+  actorType?: "ai" | "human" | "system";
+  dependsOn?: string[];
+  milestoneId?: string;
+  estimatedMinutes?: number;
+  sourceRefs?: Array<{ type: string; id: string; label?: string }>;
   points?: number;
   detail?: string;
   noteId?: string;
@@ -246,6 +254,7 @@ export function AgentCard({
         const runOpen = expandedRuns[r.id] ?? defaultOpen;
         const doneSteps = steps.filter((s) => s.status === "done").length;
         const runTasks = (tasks.data ?? []).filter((task) => task.planRunId === r.id);
+        const planSummary = r.planSummary as CompletePlanSummary | null;
         // 與伺服器授權規則對齊（審查修復）：核准/放棄/停止＝發起人本人或組長以上——
         // 一般編輯者對別人的 run 按了必然 FORBIDDEN，直接不顯示按鈕
         const canAct = canEdit && (isLeader || r.userId === me.data?.user.id);
@@ -277,6 +286,84 @@ export function AgentCard({
               )}
               </div>
             {r.summary && <p className="hint" style={{ margin: "4px 0" }}>{r.summary}</p>}
+            {planSummary && (
+              <details style={{ margin: "8px 0" }}>
+                <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                  完整計畫
+                  <span className="hint" style={{ marginLeft: 8 }}>
+                    {planSummary.successCriteria.length} 項成功條件
+                    {planSummary.missingInformation.length ? `・${planSummary.missingInformation.length} 項待補資訊` : ""}
+                    {planSummary.risks.length ? `・${planSummary.risks.length} 項風險` : ""}
+                  </span>
+                </summary>
+                <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                  <section>
+                    <strong>目標</strong>
+                    <p className="hint" style={{ margin: "3px 0 0" }}>{planSummary.goal}</p>
+                  </section>
+                  {planSummary.successCriteria.length > 0 && (
+                    <section>
+                      <strong>成功條件</strong>
+                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                        {planSummary.successCriteria.map((item, index) => <li key={index}>{item}</li>)}
+                      </ul>
+                    </section>
+                  )}
+                  {planSummary.expectedOutputs.length > 0 && (
+                    <section>
+                      <strong>預期成果</strong>
+                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                        {planSummary.expectedOutputs.map((item, index) => <li key={index}>{item}</li>)}
+                      </ul>
+                    </section>
+                  )}
+                  {planSummary.missingInformation.length > 0 && (
+                    <section>
+                      <strong style={{ color: "var(--warning-ink, var(--danger-ink))" }}>執行前待補資訊</strong>
+                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                        {planSummary.missingInformation.map((item, index) => <li key={index}>{item}</li>)}
+                      </ul>
+                    </section>
+                  )}
+                  {planSummary.milestones.length > 0 && (
+                    <section>
+                      <strong>里程碑</strong>
+                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                        {planSummary.milestones.map((item) => (
+                          <li key={item.id}>
+                            {item.title}{item.dueAt ? `（${new Date(item.dueAt).toLocaleString("zh-TW", { hour12: false })}）` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                  {planSummary.risks.length > 0 && (
+                    <section>
+                      <strong>風險與因應</strong>
+                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                        {planSummary.risks.map((risk, index) => (
+                          <li key={index}>
+                            {risk.title}：{risk.impact}{risk.mitigation ? `；因應：${risk.mitigation}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                  {planSummary.assumptions.length > 0 && (
+                    <section>
+                      <strong>假設</strong>
+                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                        {planSummary.assumptions.map((item, index) => <li key={index}>{item}</li>)}
+                      </ul>
+                    </section>
+                  )}
+                  <div className="meta">
+                    預估成本：{planSummary.estimatedPoints} 點
+                    {planSummary.estimatedDurationMinutes != null ? `・預估工期：${planSummary.estimatedDurationMinutes} 分鐘` : ""}
+                  </div>
+                </div>
+              </details>
+            )}
             <div style={{ marginTop: 4 }}>
               {steps.map((s, i) => (
                 <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
@@ -285,6 +372,9 @@ export function AgentCard({
                   </span>
                   <span style={{ display: "inline-flex" }}><Icon name={KIND_ICON[s.kind] ?? "Sparkles"} size={12} /></span>
                   <span>{s.note}</span>
+                  {s.actorType && <span className="chip">{s.actorType === "human" ? "人員" : s.actorType === "system" ? "系統" : "AI"}</span>}
+                  {(s.dependsOn?.length ?? 0) > 0 && <span className="chip">前置 {s.dependsOn!.length}</span>}
+                  {s.estimatedMinutes != null && <span className="chip">約 {s.estimatedMinutes} 分</span>}
                   {s.points ? <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>約 {s.points} 點</span> : null}
                   {s.status === "pending" && r.status === "running" && <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>排隊中</span>}
                   {s.detail && <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>{s.detail.slice(0, 60)}</span>}

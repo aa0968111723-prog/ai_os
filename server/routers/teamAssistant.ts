@@ -680,6 +680,13 @@ ${historyBlock}使用者的問題：${input.message}`;
       }
       // 交給既有專案代理規劃核心（再驗 assertProjectEditable／封存／額度／規劃節流）
       const run = await planAgentCore({ auth: ctx.auth, projectId: input.projectId, goal: input.goal });
-      return { runId: run.id, projectId: run.projectId, summary: run.summary, estPoints: run.estPoints, status: run.status };
+      return {
+        runId: run.id,
+        projectId: run.projectId,
+        summary: run.summary,
+        planSummary: run.planSummary,
+        estPoints: run.estPoints,
+        status: run.status,
+      };
     }),
 });
