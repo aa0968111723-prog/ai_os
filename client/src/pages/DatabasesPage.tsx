@@ -117,13 +117,25 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   const list = trpc.databases.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // 從專案頁深鏈：?projectId=&from=project —— 麵包屑回專案、建表可預綁關聯專案
+  const [contextProjectId, setContextProjectId] = useState<string | null>(null);
+  const [fromProject, setFromProject] = useState(false);
 
-  // 深連結（知識地圖節點等來源）：/databases?open=<id> 進頁即選定該庫。
-  // 只在掛載時讀一次——之後的選擇交回使用者操作；id 無效（無權/不存在）時 find 不到，安靜落回清單。
+  // 深連結：open 選定庫；projectId/from=project 保留專案上下文（Zeabur 產品閉環）。
+  // 只在掛載時讀一次——之後的選擇交回使用者操作。
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get("open");
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("open");
     if (id) setSelectedId(id);
+    const pid = params.get("projectId");
+    if (pid) setContextProjectId(pid);
+    if (params.get("from") === "project" || pid) setFromProject(true);
   }, []);
+
+  const contextProject = trpc.projects.get.useQuery(
+    { id: contextProjectId! },
+    { enabled: !!contextProjectId },
+  );
 
   const tables = (list.data ?? []) as TableSummary[];
   const selected = tables.find((t) => t.id === selectedId) ?? null;
@@ -133,9 +145,21 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
     return out;
   }, [tables]);
 
+  const projectBackHref = contextProjectId
+    ? `/projects/${encodeURIComponent(contextProjectId)}#sec-databases`
+    : null;
+
   return (
     <div>
       <h1>資料庫</h1>
+      {fromProject && projectBackHref && (
+        <p className="hint" style={{ margin: "0 0 8px" }} data-testid="db-project-context">
+          <Link href={projectBackHref}>
+            ← 回專案{contextProject.data?.title ? `「${contextProject.data.title}」` : ""}
+          </Link>
+          {" · "}從此建立的表可勾選「關聯此專案」，才會出現在專案資料卡。
+        </p>
+      )}
       <p className="hint">
         自訂欄位的輕量資料表：個人清單、組名單、團隊器材、全站公告都放得下。組以上範圍的資料庫，
         團隊 AI 助手答題時看得到；外部 AI 助手（MCP）也能查詢與寫入——權限跟你在網頁上一樣。
@@ -178,6 +202,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
           {creating ? (
             <CreateTableCard
               groupId={groupId}
+              bindProjectId={contextProjectId}
               onDone={(id) => { setCreating(false); setSelectedId(id); }}
               onCancel={() => setCreating(false)}
             />
@@ -186,26 +211,44 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
           ) : (
             <div className="empty-state">
               <h3>選一個資料庫</h3>
-              <p>從左邊清單選一個開始編輯，或建立新的。</p>
+              <p>
+                從左邊清單選一個開始編輯，或建立新的。
+                {contextProjectId ? "從專案進來時，建立可勾選「關聯此專案」。" : null}
+              </p>
             </div>
           )}
         </div>
       </div>
-      <p style={{ marginTop: 24 }}><Link href="/">回作業台</Link></p>
+      <p style={{ marginTop: 24 }}>
+        {projectBackHref ? <Link href={projectBackHref}>回專案資料</Link> : <Link href="/">回作業台</Link>}
+      </p>
     </div>
   );
 }
 
 /* ────────────────────────── 建立 ────────────────────────── */
 
-function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDone: (id: string) => void; onCancel: () => void }) {
+function CreateTableCard({
+  groupId,
+  bindProjectId,
+  onDone,
+  onCancel,
+}: {
+  groupId: string;
+  /** 從專案深鏈進來時，可預設綁「關聯專案」欄 */
+  bindProjectId?: string | null;
+  onDone: (id: string) => void;
+  onCancel: () => void;
+}) {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [scope, setScope] = useState<"personal" | "group" | "team" | "global">("personal");
+  // 有專案上下文時預設組庫，方便與專案同組協作
+  const [scope, setScope] = useState<"personal" | "group" | "team" | "global">(bindProjectId ? "group" : "personal");
   const [memberWritable, setMemberWritable] = useState(true);
   const [agentAccess, setAgentAccess] = useState<TableSummary["agentAccess"]>("write");
+  const [linkToProject, setLinkToProject] = useState(!!bindProjectId);
   const [fields, setFields] = useState<DataField[]>([{ key: newFieldKey(), label: "名稱", type: "text", required: true }]);
 
   const myGroups = me.data?.groups ?? [];
@@ -245,18 +288,59 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
     }
   };
 
+  const addRow = trpc.databases.addRow.useMutation();
   const create = trpc.databases.create.useMutation({
     onSuccess: async (row) => {
       utils.databases.list.invalidate();
-      // 有匯入種子＝從檔案建表：建好後把列資料灌進去，再顯示結果摘要（含失敗列）讓使用者過目
+      // 有匯入種子＝從檔案建表：建好後灌列；無匯入則由 submitCreate 負責範例列與 onDone（避免搶跑）
       if (importSeed && Object.keys(importSeed.headerMap).length > 0) {
         await importIntoCreatedTable(row.id);
-      } else {
-        onDone(row.id);
       }
     },
   });
-  const canSubmit = name.trim().length > 0 && fields.length > 0 && fields.every((f) => f.label.trim()) && !create.isPending && !importData.isPending;
+  const canSubmit = name.trim().length > 0 && fields.length > 0 && fields.every((f) => f.label.trim()) && !create.isPending && !importData.isPending && !addRow.isPending;
+
+  /** 勾選「關聯此專案」時確保有 project 欄；建表後寫一筆範例列，專案卡才看得到 */
+  const buildFieldsForCreate = (): { fields: DataField[]; projectKey: string | null } => {
+    const base = fields.map((f) => ({ ...f, label: f.label.trim() }));
+    if (!linkToProject || !bindProjectId) return { fields: base, projectKey: null };
+    const existing = base.find((f) => f.type === "project");
+    if (existing) return { fields: base, projectKey: existing.key };
+    const projectKey = "proj_link";
+    return {
+      fields: [...base, { key: projectKey, label: "關聯專案", type: "project", required: true }],
+      projectKey,
+    };
+  };
+
+  const submitCreate = async () => {
+    const built = buildFieldsForCreate();
+    try {
+      const row = await create.mutateAsync({
+        scope,
+        groupId: scope === "group" ? pickGroupId : undefined,
+        teamId: scope === "team" ? pickTeamId : undefined,
+        name: name.trim(),
+        description: description.trim() || undefined,
+        fields: built.fields,
+        memberWritable,
+        agentAccess,
+      });
+      if (built.projectKey && bindProjectId) {
+        const sample: DataRowData = { [built.projectKey]: bindProjectId };
+        const firstText = built.fields.find((f) => f.type === "text" && f.required);
+        if (firstText) sample[firstText.key] = "（範例）請改成實際內容";
+        try {
+          await addRow.mutateAsync({ tableId: row.id, data: sample });
+        } catch {
+          // 表已建；範例列失敗仍可手動加
+        }
+      }
+      onDone(row.id);
+    } catch {
+      // create mutation 已顯示錯誤
+    }
+  };
 
   // 建庫＋匯入完成：顯示摘要，讓使用者確認匯入結果後再進入資料庫
   if (finished) {
@@ -324,6 +408,12 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
           成員可新增／編輯資料（關掉＝只有管理者能寫，適合公告類）
         </label>
       )}
+      {bindProjectId && (
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }} data-testid="db-link-project">
+          <input type="checkbox" checked={linkToProject} onChange={(e) => setLinkToProject(e.target.checked)} style={{ width: "auto" }} />
+          關聯此專案（加「關聯專案」欄＋範例列，專案資料卡才會顯示）
+        </label>
+      )}
 
       <label htmlFor="db-agent">AI 存取（MCP 代理與團隊助手）</label>
       <select id="db-agent" value={agentAccess} onChange={(e) => setAgentAccess(e.target.value as TableSummary["agentAccess"])}>
@@ -337,20 +427,26 @@ function CreateTableCard({ groupId, onDone, onCancel }: { groupId: string; onDon
         <button
           className="primary"
           disabled={!canSubmit}
-          onClick={() =>
-            create.mutate({
-              scope,
-              groupId: scope === "group" ? pickGroupId : undefined,
-              teamId: scope === "team" ? pickTeamId : undefined,
-              name: name.trim(),
-              description: description.trim() || undefined,
-              fields: fields.map((f) => ({ ...f, label: f.label.trim() })),
-              memberWritable,
-              agentAccess,
-            })
-          }
+          onClick={() => {
+            if (importSeed && Object.keys(importSeed.headerMap).length > 0) {
+              // 檔案建表路徑：仍用原 create.mutate（onSuccess 會匯入）；額外併入關聯專案欄
+              const built = buildFieldsForCreate();
+              create.mutate({
+                scope,
+                groupId: scope === "group" ? pickGroupId : undefined,
+                teamId: scope === "team" ? pickTeamId : undefined,
+                name: name.trim(),
+                description: description.trim() || undefined,
+                fields: built.fields,
+                memberWritable,
+                agentAccess,
+              });
+            } else {
+              void submitCreate();
+            }
+          }}
         >
-          {importData.isPending ? "匯入資料中…" : create.isPending ? "建立中…" : importSeed ? "建立並匯入" : "建立"}
+          {importData.isPending ? "匯入資料中…" : create.isPending || addRow.isPending ? "建立中…" : importSeed ? "建立並匯入" : "建立"}
         </button>
         <button onClick={onCancel}>取消</button>
       </div>

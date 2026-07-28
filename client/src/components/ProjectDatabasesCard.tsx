@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
@@ -11,8 +11,8 @@ import {
 
 /**
  * 專案資料卡：
- * - 一眼看出 AI 能否引用本專案依據（知識／素材／已關聯表）。
- * - 一鍵建立「已關聯本專案」的組資料表（名單、摘錄、待辦…）。
+ * - 一眼看出 AI 能否引用本專案依據（知識／素材／已關聯表；尊重 agentAccess）。
+ * - 一鍵建立「已關聯本專案」的組資料表；可就地加一列（不跳頁）。
  * - 深鏈到知識、素材、AI 工作台；不碰 #133 plan／notesCore／Runner。
  */
 function cellText(field: DataField, value: DataRowValue): string {
@@ -38,22 +38,46 @@ const TONE_STYLE: Record<"ok" | "partial" | "empty", { border: string; bg: strin
   empty: { border: "var(--border, #ddd)", bg: "var(--surface-2, #f6f6f6)" },
 };
 
+/** 從欄位定義組出「加一列」預設 data：關聯專案必填 + 可選主文字 */
+function buildQuickRowData(
+  fields: DataField[],
+  projectId: string,
+  primaryText: string,
+): { data: DataRowData; primaryKey: string | null } | { error: string } {
+  const projectFields = fields.filter((f) => f.type === "project");
+  if (projectFields.length === 0) return { error: "此表沒有關聯專案欄" };
+  const data: DataRowData = {};
+  for (const pf of projectFields) data[pf.key] = projectId;
+  const primary = fields.find((f) => f.type === "text" && f.required) ?? fields.find((f) => f.type === "text");
+  if (primary) {
+    if (!primaryText.trim()) return { error: `請填「${primary.label}」` };
+    data[primary.key] = primaryText.trim();
+  }
+  for (const f of fields) {
+    if (f.type === "checkbox" && data[f.key] === undefined) data[f.key] = false;
+  }
+  // 其他 required 欄若未填，後端會擋——回人話
+  return { data, primaryKey: primary?.key ?? null };
+}
+
 export function ProjectDatabasesCard({
   projectId,
   canEdit = true,
 }: {
   projectId: string;
-  /** 唯讀成員不顯示一鍵建表 */
+  /** 唯讀成員不顯示一鍵建表／就地加列 */
   canEdit?: boolean;
 }) {
   const utils = trpc.useUtils();
   const linked = trpc.databases.linkedToProject.useQuery({ projectId });
-  // 與 ProjectPage 同 key，共用快取，不另打網路
   const knowledge = trpc.knowledge.list.useQuery({ projectId });
   const assets = trpc.projects.assets.useQuery({ projectId });
 
   const [createError, setCreateError] = useState<string | null>(null);
   const [lastCreated, setLastCreated] = useState<{ tableId: string; tableName: string } | null>(null);
+  const [quickDraft, setQuickDraft] = useState<Record<string, string>>({});
+  const [quickError, setQuickError] = useState<Record<string, string>>({});
+  const [quickOk, setQuickOk] = useState<Record<string, string>>({});
 
   const createBound = trpc.databases.createBoundToProject.useMutation({
     onSuccess: (res) => {
@@ -67,8 +91,29 @@ export function ProjectDatabasesCard({
     },
   });
 
+  const addRow = trpc.databases.addRow.useMutation({
+    onSuccess: (_row, vars) => {
+      setQuickDraft((d) => ({ ...d, [vars.tableId]: "" }));
+      setQuickError((e) => ({ ...e, [vars.tableId]: "" }));
+      setQuickOk((o) => ({ ...o, [vars.tableId]: "已新增" }));
+      void utils.databases.linkedToProject.invalidate({ projectId });
+    },
+    onError: (err, vars) => {
+      setQuickOk((o) => ({ ...o, [vars.tableId]: "" }));
+      setQuickError((e) => ({ ...e, [vars.tableId]: err.message || "新增失敗" }));
+    },
+  });
+
   const groups = linked.data ?? [];
   const linkedRows = groups.reduce((n, group) => n + group.rows.length, 0);
+  const linkedAiReadableRows = useMemo(
+    () =>
+      groups.reduce((n, group) => {
+        if (group.agentAccess === "none") return n;
+        return n + group.rows.length;
+      }, 0),
+    [groups],
+  );
   const knowledgeCount = knowledge.data?.length ?? 0;
   const assetCount = assets.data?.length ?? 0;
   const countsReady = !knowledge.isLoading && !assets.isLoading && !linked.isLoading;
@@ -76,8 +121,8 @@ export function ProjectDatabasesCard({
     knowledgeCount: countsReady ? knowledgeCount : 0,
     assetCount: countsReady ? assetCount : 0,
     linkedRowCount: countsReady ? linkedRows : 0,
+    linkedAiReadableRowCount: countsReady ? linkedAiReadableRows : 0,
   });
-  // 載入中先不誤導成「empty」
   const showStatus = countsReady;
   const toneStyle = TONE_STYLE[aiHint.tone];
 
@@ -85,6 +130,18 @@ export function ProjectDatabasesCard({
     if (!canEdit || createBound.isPending) return;
     setCreateError(null);
     createBound.mutate({ projectId, template });
+  };
+
+  const onQuickAdd = (tableId: string, fields: DataField[]) => {
+    if (!canEdit || addRow.isPending) return;
+    const built = buildQuickRowData(fields, projectId, quickDraft[tableId] ?? "");
+    if ("error" in built) {
+      setQuickError((e) => ({ ...e, [tableId]: built.error }));
+      return;
+    }
+    setQuickError((e) => ({ ...e, [tableId]: "" }));
+    setQuickOk((o) => ({ ...o, [tableId]: "" }));
+    addRow.mutate({ tableId, data: built.data });
   };
 
   return (
@@ -100,7 +157,6 @@ export function ProjectDatabasesCard({
       </summary>
 
       <div style={{ marginTop: 10, display: "grid", gap: 14 }}>
-        {/* —— AI 可引用狀態 —— */}
         {showStatus && (
           <div
             role="status"
@@ -124,6 +180,7 @@ export function ProjectDatabasesCard({
               <span className="meta">文字知識 {knowledgeCount}</span>
               <span className="meta">素材 {assetCount}</span>
               <span className="meta">關聯表列 {linkedRows}</span>
+              <span className="meta">AI 可讀 {linkedAiReadableRows}</span>
             </div>
           </div>
         )}
@@ -131,7 +188,6 @@ export function ProjectDatabasesCard({
           <p className="hint" style={{ margin: 0 }}>正在判斷專案資料狀態…</p>
         )}
 
-        {/* —— 快速入口 —— */}
         <div>
           <p className="hint" style={{ margin: "0 0 8px" }}>
             剪輯、社群、動畫、外出採集都能把依據放這裡。貼文字、上傳檔案，或一鍵建表；外部帳號連上後還要匯入或關聯專案，AI 才會使用。
@@ -159,7 +215,6 @@ export function ProjectDatabasesCard({
           </div>
         </div>
 
-        {/* —— 一鍵專案表 —— */}
         {canEdit && (
           <div data-testid="project-data-templates">
             <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>一鍵建立資料表</h3>
@@ -200,7 +255,6 @@ export function ProjectDatabasesCard({
           </div>
         )}
 
-        {/* —— 已關聯本專案 —— */}
         {linked.isLoading && <p className="hint" style={{ margin: 0 }}>正在讀取已關聯的資料…</p>}
         {linked.error && (
           <p className="error" style={{ margin: 0 }}>關聯資料載入失敗：{linked.error.message}</p>
@@ -211,7 +265,7 @@ export function ProjectDatabasesCard({
             <h3>還沒有資料表關聯到這個專案</h3>
             <p>
               {canEdit
-                ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，用「關聯專案」指到本專案。"
+                ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，勾選「關聯此專案」。"
                 : "請有編輯權限的成員建立或關聯資料表。"}
             </p>
           </div>
@@ -221,10 +275,10 @@ export function ProjectDatabasesCard({
           <div style={{ display: "grid", gap: 14 }}>
             <h3 style={{ margin: 0, fontSize: 14 }}>已關聯本專案的資料</h3>
             {groups.map((group) => {
-              const cols = (group.fields as DataField[])
-                .filter((field) => field.type !== "project")
-                .slice(0, 5);
+              const fields = group.fields as DataField[];
+              const cols = fields.filter((field) => field.type !== "project").slice(0, 5);
               const access = group.agentAccess as "none" | "read" | "write" | undefined;
+              const primary = fields.find((f) => f.type === "text" && f.required) ?? fields.find((f) => f.type === "text");
               return (
                 <div key={group.tableId}>
                   <p className="meta" style={{ margin: "0 0 4px", fontWeight: 600, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -234,11 +288,7 @@ export function ProjectDatabasesCard({
                       {group.tableName}
                     </Link>
                     <span>（{group.rows.length} 列）</span>
-                    <span
-                      className="pill"
-                      title="此表對 AI 的存取設定"
-                      style={{ fontWeight: 500, fontSize: 12 }}
-                    >
+                    <span className="pill" title="此表對 AI 的存取設定" style={{ fontWeight: 500, fontSize: 12 }}>
                       {agentAccessLabel(access)}
                     </span>
                   </p>
@@ -284,11 +334,46 @@ export function ProjectDatabasesCard({
                       </tbody>
                     </table>
                   </div>
+                  {canEdit && primary && (
+                    <div
+                      data-testid={`quick-add-${group.tableId}`}
+                      style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}
+                    >
+                      <input
+                        aria-label={`${group.tableName} 新增 ${primary.label}`}
+                        value={quickDraft[group.tableId] ?? ""}
+                        maxLength={200}
+                        placeholder={`${primary.label}…`}
+                        onChange={(e) => setQuickDraft((d) => ({ ...d, [group.tableId]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            onQuickAdd(group.tableId, fields);
+                          }
+                        }}
+                        style={{ flex: "1 1 160px", minWidth: 120, maxWidth: 320 }}
+                      />
+                      <button
+                        type="button"
+                        className="btn-sm primary"
+                        disabled={addRow.isPending}
+                        onClick={() => onQuickAdd(group.tableId, fields)}
+                      >
+                        <Icon name="Plus" size={13} /> 加一列
+                      </button>
+                      {quickError[group.tableId] && (
+                        <span className="error" style={{ fontSize: 12 }}>{quickError[group.tableId]}</span>
+                      )}
+                      {quickOk[group.tableId] && !quickError[group.tableId] && (
+                        <span className="hint" style={{ fontSize: 12 }}>{quickOk[group.tableId]}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
             <p className="hint" style={{ margin: 0 }}>
-              要改欄位或加列，請到
+              要改欄位或大量編輯，請到
               <Link href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}>知識與資料</Link>
               。資料表需有「關聯專案」欄並指向本專案，才會列在這裡。
             </p>

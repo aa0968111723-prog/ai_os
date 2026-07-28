@@ -550,41 +550,66 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   }
 
   if (name === "list_database_files") {
+    // Zeabur 單容器記憶體有限：禁止 select * 把 textContent 全文灌進 Node。
+    // 字數／關鍵字片段一律在 SQL 端算（與 tRPC listFiles 同口徑）。
     const tableId = String(args.tableId ?? "");
     const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
     if (!table) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
     if (!resolveAgentAccess(auth, table).canRead) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
+    const keyword = String(args.keyword ?? "").trim();
+    const keywordLower = keyword.toLowerCase();
+    const categoryFilter = String(args.category ?? "").trim();
+    const conds = [eq(schema.dataFiles.tableId, table.id)];
+    if (categoryFilter) conds.push(eq(schema.dataFiles.category, categoryFilter));
+    if (keyword) {
+      const like = `%${keyword.replace(/[%_\\]/g, "\\$&")}%`;
+      conds.push(or(
+        sql`${schema.dataFiles.name} ilike ${like} escape '\\'`,
+        sql`coalesce(${schema.dataFiles.category}, '') ilike ${like} escape '\\'`,
+        sql`coalesce(${schema.dataFiles.aiDescription}, '') ilike ${like} escape '\\'`,
+        sql`coalesce(${schema.dataFiles.textContent}, '') ilike ${like} escape '\\'`,
+      )!);
+    }
+    // snippet：有 keyword 時只截命中附近 200 字，不回全文
+    const snippetExpr = keyword
+      ? sql<string | null>`case
+          when position(lower(${keywordLower}) in lower(coalesce(${schema.dataFiles.textContent}, ''))) > 0
+          then substr(
+            ${schema.dataFiles.textContent},
+            greatest(1, position(lower(${keywordLower}) in lower(${schema.dataFiles.textContent})) - 80),
+            200
+          )
+          else null
+        end`
+      : sql<string | null>`null`;
     const files = await db
-      .select()
+      .select({
+        id: schema.dataFiles.id,
+        name: schema.dataFiles.name,
+        mime: schema.dataFiles.mime,
+        sizeBytes: schema.dataFiles.sizeBytes,
+        sourceUrl: schema.dataFiles.sourceUrl,
+        category: schema.dataFiles.category,
+        aiDescription: schema.dataFiles.aiDescription,
+        readableChars: sql<number>`coalesce(length(${schema.dataFiles.textContent}), 0)`,
+        snippet: snippetExpr,
+      })
       .from(schema.dataFiles)
-      .where(eq(schema.dataFiles.tableId, table.id))
+      .where(and(...conds))
       .orderBy(desc(schema.dataFiles.createdAt))
       .limit(200);
-    const keyword = String(args.keyword ?? "").trim().toLowerCase();
-    const categoryFilter = String(args.category ?? "").trim();
-    return files.flatMap((f) => {
-      if (categoryFilter && f.category !== categoryFilter) return [];
-      const text = f.textContent ?? "";
-      let snippet: string | null = null;
-      if (keyword) {
-        const idx = text.toLowerCase().indexOf(keyword);
-        const metaHit = [f.name, f.category ?? "", f.aiDescription ?? ""].some((s) => s.toLowerCase().includes(keyword));
-        if (idx < 0 && !metaHit) return [];
-        if (idx >= 0) snippet = text.slice(Math.max(0, idx - 80), idx + 120);
-      }
-      return [{
-        fileId: f.id,
-        name: f.name,
-        mime: f.mime,
-        kind: mediaKindOf(f.mime), // image/video/audio/doc
-        sizeBytes: f.sizeBytes,
-        readableChars: text.length, // 0＝此格式無抽出文字（圖影看 aiDescription）
-        category: f.category,
-        aiDescription: f.aiDescription ? f.aiDescription.slice(0, 300) : null,
-        sourceUrl: f.sourceUrl,
-        ...(snippet ? { snippet } : {}),
-      }];
-    });
+    return files.map((f) => ({
+      fileId: f.id,
+      name: f.name,
+      mime: f.mime,
+      kind: mediaKindOf(f.mime),
+      sizeBytes: f.sizeBytes,
+      readableChars: Number(f.readableChars) || 0,
+      category: f.category,
+      aiDescription: f.aiDescription ? f.aiDescription.slice(0, 300) : null,
+      sourceUrl: f.sourceUrl,
+      ...(f.snippet ? { snippet: f.snippet } : {}),
+    }));
   }
 
   if (name === "read_database_file") {

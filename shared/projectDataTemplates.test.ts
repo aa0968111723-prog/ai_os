@@ -31,8 +31,58 @@ describe("projectDataAiHint", () => {
   it("partial when only media", () => {
     expect(projectDataAiHint({ knowledgeCount: 0, assetCount: 3, linkedRowCount: 0 }).tone).toBe("partial");
   });
-  it("ok when text or linked rows", () => {
+  it("ok when text or AI-readable linked rows", () => {
     expect(projectDataAiHint({ knowledgeCount: 2, assetCount: 0, linkedRowCount: 0 }).tone).toBe("ok");
     expect(projectDataAiHint({ knowledgeCount: 0, assetCount: 0, linkedRowCount: 5 }).tone).toBe("ok");
+    expect(
+      projectDataAiHint({ knowledgeCount: 0, assetCount: 0, linkedRowCount: 5, linkedAiReadableRowCount: 5 }).tone,
+    ).toBe("ok");
+  });
+  it("partial when linked rows exist but none are AI-readable", () => {
+    const h = projectDataAiHint({
+      knowledgeCount: 0,
+      assetCount: 0,
+      linkedRowCount: 4,
+      linkedAiReadableRowCount: 0,
+    });
+    expect(h.tone).toBe("partial");
+    expect(h.label).toMatch(/AI 目前看不到/);
+  });
+
+  it("user-facing: detail mentions hidden AI rows when mixed", () => {
+    const h = projectDataAiHint({
+      knowledgeCount: 1,
+      assetCount: 0,
+      linkedRowCount: 5,
+      linkedAiReadableRowCount: 2,
+    });
+    expect(h.tone).toBe("ok");
+    expect(h.detail).toMatch(/AI 可讀表列 2/);
+    expect(h.detail).toMatch(/另有 3 列 AI 不可見/);
+  });
+});
+
+describe("templates multi-role coverage (user lens)", () => {
+  it("includes social publish, media list, roster, quotes, checklist, blank", () => {
+    const ids = PROJECT_DATA_TEMPLATES.map((t) => t.id);
+    expect(ids).toEqual(expect.arrayContaining(["roster", "quotes", "media", "publish", "checklist", "blank"]));
+  });
+
+  it("labels stay neutral (no film-only jargon)", () => {
+    for (const t of PROJECT_DATA_TEMPLATES) {
+      expect(t.label + t.defaultName + t.hint).not.toMatch(/本片|場次|金句|哪支片|開示/);
+    }
+  });
+
+  it("publish template has channel + date for social editors", () => {
+    const { fields } = buildBoundTableFields("publish");
+    expect(fields.some((f) => f.label === "渠道" && f.type === "select")).toBe(true);
+    expect(fields.some((f) => f.label === "預計日" && f.type === "date")).toBe(true);
+  });
+
+  it("media template has type options for edit/animation assets", () => {
+    const { fields } = buildBoundTableFields("media");
+    const type = fields.find((f) => f.label === "類型");
+    expect(type?.options).toEqual(expect.arrayContaining(["影片", "圖片", "音訊", "動畫"]));
   });
 });
