@@ -136,10 +136,11 @@ export const authRouter = router({
 
   /** 邀請連結落地：設定姓名密碼 → 建帳號＋入團隊/組 → 自動登入 */
   acceptInvite: publicProcedure
-    .input(z.object({ token: z.string().min(10), name: z.string().min(1, "請填姓名").max(40, "名字太長（最多 40 字）"), password: z.string().min(8, "密碼至少 8 碼") }))
+    // name 先 trim 再驗 min——否則 "   " 會通過 min(1) 建出空白顯示名
+    .input(z.object({ token: z.string().min(10), name: z.string().trim().min(1, "請填姓名").max(40, "名字太長（最多 40 字）"), password: z.string().min(8, "密碼至少 8 碼") }))
     .mutation(async ({ ctx, input }) => {
       try {
-        const { userId } = await acceptInvite(input.token, input.name.trim(), input.password);
+        const { userId } = await acceptInvite(input.token, input.name, input.password);
         const token = await createSession(userId);
         setSessionCookie(ctx.res, token);
         return loadAuthState(userId);

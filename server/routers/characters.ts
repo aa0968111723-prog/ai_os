@@ -41,8 +41,9 @@ export const charactersRouter = router({
     .input(
       z.object({
         projectId: z.string().uuid(),
-        name: z.string().min(1, "請填角色名").max(40),
-        appearance: z.string().min(1, "請填外觀設定").max(1000),
+        // 先 trim 再驗：否則 "   " 通過 min(1) 後再 trim 成空字串入庫
+        name: z.string().trim().min(1, "請填角色名").max(40),
+        appearance: z.string().trim().min(1, "請填外觀設定").max(1000),
         notes: z.string().max(1000).optional(),
         referenceAssetId: z.string().uuid().optional(),
         /** 冪等鍵（client 產生的 UUID，當 row id 用）：timeout 後重送同鍵回原卡片，不重複建立 */
@@ -88,8 +89,8 @@ export const charactersRouter = router({
     .input(
       z.object({
         id: z.string().uuid(),
-        name: z.string().min(1).max(40).optional(),
-        appearance: z.string().min(1).max(1000).optional(),
+        name: z.string().trim().min(1).max(40).optional(),
+        appearance: z.string().trim().min(1).max(1000).optional(),
         notes: z.string().max(1000).optional(),
         referenceAssetId: z.string().uuid().nullable().optional(),
       }),

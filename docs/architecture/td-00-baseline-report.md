@@ -34,7 +34,7 @@
 | 正式監控／備份還原演練 | 需平台帳號與演練窗口 |
 | ANIM-01～10 產品域模型 | 依賴場景／分鏡逐步 adapter |
 | GPU-02～ 真實 Beam | 需 secret 與部署；本批僅 mock |
-| REST 生成入口 Command | 若 `/api/v1` 暴露生成再接 |
+| REST 生成入口 | **未部署**（`/api/v1` 僅 databases／CSV／ICS，見 `server/services/restApi.ts`），故延期；日後若新增 REST 生成必須走 `executeGenerationCommand`（不可直呼 core） |
 | 細節缺漏 MEDIUM/LOW 全表 | 219 項；HIGH 已處理關鍵項，其餘按路線圖 |
 
 ## 3. 驗證命令

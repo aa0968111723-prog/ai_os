@@ -237,7 +237,8 @@ export const knowledgeRouter = router({
       z.object({
         projectId: z.string().uuid(),
         kind: z.enum(["transcript", "testimony", "script", "note"]).default("note"),
-        title: z.string().min(1, "請填標題").max(120),
+        // 先 trim 再驗：擋純空白標題（與 characters 同口徑）
+        title: z.string().trim().min(1, "請填標題").max(120),
         content: z.string().min(1, "內容不可為空").max(MAX_CONTENT, `內容過長（上限 ${MAX_CONTENT} 字）`),
         sourceAssetId: z.string().uuid().optional(),
       }),
@@ -273,7 +274,7 @@ export const knowledgeRouter = router({
       z.object({
         id: z.string().uuid(),
         kind: z.enum(["transcript", "testimony", "script", "note"]).optional(),
-        title: z.string().min(1).max(120).optional(),
+        title: z.string().trim().min(1).max(120).optional(),
         content: z.string().min(1).max(MAX_CONTENT).optional(),
       }),
     )

@@ -67,7 +67,8 @@ export const projectsRouter = router({
     .input(
       z.object({
         groupId: z.string().uuid(),
-        title: z.string().min(1, "請填專案名稱"),
+        // 與 renameAsset 對齊：先 trim 再驗非空，並設合理長度上限（防空白／超長標題）
+        title: z.string().trim().min(1, "請填專案名稱").max(80, "專案名稱太長（最多 80 字）"),
         kind: z.string().min(1),
         platform: z.string().min(1),
       }),
