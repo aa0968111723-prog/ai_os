@@ -69,6 +69,7 @@
 
 ## 7. 後續
 
-1. ANIM-01：Production／Sequence／Shot adapter 引用 `animationContracts`，不先破壞 scenes API。  
+1. ~~ANIM-01：Production／Sequence／Shot adapter 引用 `animationContracts`，不先破壞 scenes API。~~ **已完成** → 見 `anim-01-adapter.md`（`shared/animationDomain.ts`）。  
 2. 將 `exportJobs.assetKey` 改為 import `exportAssetSelectionKey`（小 refactor，可隨 ANIM 或 TD 順手）。  
-3. 補 pg／e2e 覆蓋 open 表（併發 order、export job 原子重用、生成冪等）。
+3. 補 pg／e2e 覆蓋 open 表（併發 order、export job 原子重用、生成冪等）。  
+4. ANIM-02：角色與風格聖經版本化（掛入 Shot.characterRefs 等）。
