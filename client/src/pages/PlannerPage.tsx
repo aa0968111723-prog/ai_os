@@ -65,9 +65,18 @@ function dayKey(d: Date): string {
 }
 
 export function PlannerPage({ groupId }: { groupId: string }) {
-  const [focusTarget] = useState(() => takePlannerFocus());
+  // 深連結來源：① 留言／私訊卡 setPlannerFocus（sessionStorage）② URL ?focus=note-:id|schedule-:id（私訊標注卡直達）
+  const [focusTarget] = useState(() => {
+    const fromStorage = takePlannerFocus();
+    if (fromStorage) return fromStorage;
+    try {
+      const q = new URLSearchParams(window.location.search).get("focus");
+      if (q && /^(note|schedule)-/.test(q)) return q;
+    } catch { /* ignore */ }
+    return null;
+  });
   const initialSections = plannerInitialSections(focusTarget);
-  // 由留言的排程/筆記引用卡跳來：sessionStorage 交棒了目標 id，這裡輪詢直到該列渲染出來再高亮
+  // 由留言／私訊的排程/筆記引用卡跳來：目標 id 就緒後輪詢直到該列渲染再高亮
   useEffect(() => {
     if (!focusTarget) return;
     let tries = 0;
