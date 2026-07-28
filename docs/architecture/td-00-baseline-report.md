@@ -22,6 +22,10 @@
 | MCP `submit_generation` | `server/services/mcp.ts` | wired |
 | PROCESS_ROLE | `server/services/processRole.ts` + boot | implemented |
 | SSRF 回歸補強 | `databaseFiles.test.ts` | extended |
+| TD-05a capabilities on auth.me | `policyEngine` + `auth.me` + `client/src/capabilities.ts` | implemented |
+| TD-06 AppShell 拆分 | `client/src/app/*` | implemented（partial） |
+| TD-07b worker 不提供 SPA | `server/bootstrap/httpSurface.ts` | implemented |
+| GPU-00 CloudInferenceProvider | `server/services/cloudInference/*` | implemented（mock only） |
 
 ## 3. 多入口覆蓋矩陣
 
@@ -48,12 +52,10 @@
 
 ## 5. 後續 PR（不得一次做完）
 
-1. **TD-02b**：workflowRunner / agentRunner 改呼叫 `executeGenerationCommand`（source=workflow|agent, backgroundResume）
-2. **TD-03b**：`decideCost` 用 `assertProjectAllows(..., "approve")`；paused UI
-3. **TD-05a/b**：capability 回傳前端導覽
-4. **TD-06**：App Shell 拆分
-5. **TD-07b**：worker 實例不掛公開路由
-6. **TD-08～10**、ANIM-＊、GPU-＊：見 `technical-debt-remediation-plan.md`
+1. ~~TD-02b / TD-03b / TD-05a / TD-06 partial / TD-07b / GPU-00~~（本分支已落地）
+2. **TD-05b**：導覽改吃 `hasCap` / capability，拿掉 `isAdmin\|\|isLeader` 拼湊
+3. **TD-06 續**：AppHeader / PrimaryNavigation / notification 子模組
+4. **TD-08～10**、ANIM-＊、GPU-01～：見 `technical-debt-remediation-plan.md`
 
 ## 6. 成功定義（本批）
 
