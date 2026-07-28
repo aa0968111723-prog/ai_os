@@ -27,6 +27,14 @@ jobs:
       - run: npm test
       - run: npm run test:client:coverage
       - run: npm run build
+      - name: 保存前端測試覆蓋率證據
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-coverage-${{ github.run_attempt }}
+          path: coverage/
+          if-no-files-found: warn
+          retention-days: 14
 
   migration:
     runs-on: ubuntu-latest
@@ -52,8 +60,24 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: sh scripts/ci-migration-test.sh
-      - run: npx tsx scripts/ci-rate-limit-test.ts
+      - name: 驗證 migration 與 schema drift
+        run: |
+          set -o pipefail
+          sh scripts/ci-migration-test.sh 2>&1 | tee /tmp/migration-ci.log
+      - name: 驗證分散式 rate limit
+        run: |
+          set -o pipefail
+          npx tsx scripts/ci-rate-limit-test.ts 2>&1 | tee /tmp/rate-limit-ci.log
+      - name: 保存 migration 與 rate-limit 證據
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-and-rate-limit-${{ github.run_attempt }}
+          path: |
+            /tmp/migration-ci.log
+            /tmp/rate-limit-ci.log
+          if-no-files-found: warn
+          retention-days: 30
 
   # 每套 e2e 都從「全新資料庫」起跑：
   # 重置 public+ledger → 明確 migrate/check → 啟動伺服器(seed) → 跑套件。
@@ -123,6 +147,14 @@ jobs:
             wait "$SERVER_PID" 2>/dev/null || true
             echo "::endgroup::"
           done
+      - name: 保存 E2E 伺服器紀錄
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-server-logs-${{ github.run_attempt }}
+          path: /tmp/server-*.log
+          if-no-files-found: warn
+          retention-days: 30
 
   container:
     runs-on: ubuntu-latest
@@ -139,5 +171,14 @@ jobs:
           --tag ai-director-os:ci .
       - name: 驗證映像執行身分與健康檢查
         run: |
+          docker image inspect ai-director-os:ci > /tmp/container-inspect.json
           test "$(docker image inspect ai-director-os:ci --format '{{.Config.User}}')" = "node"
           test "$(docker image inspect ai-director-os:ci --format '{{json .Config.Healthcheck.Test}}')" != "null"
+      - name: 保存正式映像驗證證據
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-inspect-${{ github.run_attempt }}
+          path: /tmp/container-inspect.json
+          if-no-files-found: warn
+          retention-days: 14
