@@ -66,7 +66,8 @@ describe("atomic PostgreSQL composition source guards", () => {
     "utf8",
   );
   const coreSource = readFileSync(new URL("./databaseCore.ts", import.meta.url), "utf8");
-  const schemaSource = readFileSync(new URL("../db/schema.ts", import.meta.url), "utf8");
+  // TD-08：表定義在領域模組；idempotency_records 在 schema/auth.ts
+  const schemaSource = readFileSync(new URL("../db/schema/auth.ts", import.meta.url), "utf8");
   const restSource = readFileSync(new URL("./restApi.ts", import.meta.url), "utf8");
   const mcpSource = readFileSync(new URL("./mcp.ts", import.meta.url), "utf8");
   const auditSource = readFileSync(new URL("./audit.ts", import.meta.url), "utf8");
