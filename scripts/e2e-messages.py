@@ -85,6 +85,7 @@ ok("基本留言可送出", "__error__" not in m1)
 m2 = call("POST", b, "messages.post", {"projectId": pid, "body": "回你:收到", "replyToId": m1["id"]})
 ok("回覆留言可送出", "__error__" not in m2)
 rows = call("GET", a, "messages.list", {"projectId": pid})
+rows = rows["items"] if isinstance(rows, dict) and "items" in rows else rows
 r2 = next(r for r in rows if r["id"] == m2["id"])
 ok("回覆帶原句摘要+原作者", r2["replyTo"]["snippet"].startswith("第一則") and r2["replyTo"]["userName"] == "留言甲")
 
@@ -97,9 +98,11 @@ r = call("POST", b, "messages.react", {"messageId": m1["id"], "emoji": "🙏"})
 ok("表情回應可按", r.get("on") is True)
 call("POST", admin, "messages.react", {"messageId": m1["id"], "emoji": "🙏"})
 rows = call("GET", a, "messages.list", {"projectId": pid})
+rows = rows["items"] if isinstance(rows, dict) and "items" in rows else rows
 rx = next(r for r in rows if r["id"] == m1["id"])["reactions"]
 ok("表情彙總數量正確(2 人 🙏)", any(x["emoji"] == "🙏" and x["count"] == 2 for x in rx))
 rows_b = call("GET", b, "messages.list", {"projectId": pid})
+rows_b = rows_b["items"] if isinstance(rows_b, dict) and "items" in rows_b else rows_b
 rx_b = next(r for r in rows_b if r["id"] == m1["id"])["reactions"]
 ok("我按過的表情有標記(mine)", any(x["emoji"] == "🙏" and x["mine"] for x in rx_b))
 r = call("POST", b, "messages.react", {"messageId": m1["id"], "emoji": "🙏"})
@@ -111,6 +114,7 @@ ok("🔒 白名單外表情被擋", "__error__" in bad)
 r = call("POST", admin, "messages.setPinned", {"messageId": m1["id"], "pinned": True})
 ok("組長可釘選", r.get("ok") is True)
 rows = call("GET", a, "messages.list", {"projectId": pid})
+rows = rows["items"] if isinstance(rows, dict) and "items" in rows else rows
 ok("列表帶釘選狀態", next(r for r in rows if r["id"] == m1["id"])["pinned"] is True)
 bad = call("POST", b, "messages.setPinned", {"messageId": m1["id"], "pinned": False})
 ok("🔒 一般組員不能釘選", "__error__" in bad)
@@ -119,6 +123,7 @@ ok("🔒 一般組員不能釘選", "__error__" in bad)
 m3 = call("POST", a, "messages.post", {"projectId": pid, "body": "@留言乙 請看第三鏡", "mentions": [b_id]})
 ok("提及同組夥伴可送出", "__error__" not in m3)
 rows = call("GET", b, "messages.list", {"projectId": pid})
+rows = rows["items"] if isinstance(rows, dict) and "items" in rows else rows
 ok("列表帶提及名單", b_id in (next(r for r in rows if r["id"] == m3["id"])["mentions"] or []))
 bad = call("POST", a, "messages.post", {"projectId": pid, "body": "@路人", "mentions": ["00000000-0000-4000-8000-000000000000"]})
 ok("🔒 不能提及組外的人", "同組" in bad.get("__error__", ""))
@@ -127,6 +132,7 @@ ok("🔒 不能提及組外的人", "同組" in bad.get("__error__", ""))
 m4 = call("POST", b, "messages.post", {"projectId": pid, "body": "這一鏡構圖如何?", "refType": "scene", "refId": scene_id})
 ok("引用分鏡可送出", "__error__" not in m4)
 rows = call("GET", a, "messages.list", {"projectId": pid})
+rows = rows["items"] if isinstance(rows, dict) and "items" in rows else rows
 ok("引用卡解析出標題", (next(r for r in rows if r["id"] == m4["id"])["ref"] or {}).get("title") == "留言引用鏡")
 bad = call("POST", b, "messages.post", {"projectId": pid, "body": "壞引用", "refType": "scene", "refId": "00000000-0000-4000-8000-000000000000"})
 ok("🔒 引用不存在/他案作品被擋", "本專案" in bad.get("__error__", ""))
@@ -167,6 +173,7 @@ audio_id = up["asset"]["id"]
 vm = call("POST", a, "messages.postVoice", {"projectId": pid, "assetId": audio_id})
 ok("語音留言建立(pending)", vm.get("kind") == "voice" and vm.get("voiceStatus") == "pending")
 rows = call("GET", a, "messages.list", {"projectId": pid})
+rows = rows["items"] if isinstance(rows, dict) and "items" in rows else rows
 vrow = next((r for r in rows if r["id"] == vm["id"]), None)
 ok("語音留言帶可播放網址", vrow and vrow.get("voiceUrl", "").endswith(f"/api/assets/{audio_id}/file"))
 # 拿別的(圖片)素材當語音 → 擋;拿別專案音檔 → 擋
@@ -179,6 +186,7 @@ call("POST", a, "messages.post", {"projectId": pid, "body": "@助手 這個專�
 assistant_reply = None
 for _ in range(20):
     rows = call("GET", a, "messages.list", {"projectId": pid})
+    rows = rows["items"] if isinstance(rows, dict) and "items" in rows else rows
     assistant_reply = next((r for r in rows if r["kind"] == "assistant"), None)
     if assistant_reply: break
     time.sleep(0.5)
@@ -211,6 +219,7 @@ ok("留言可引用筆記", "__error__" not in mnote)
 msch = call("POST", a, "messages.post", {"projectId": pid, "body": "這個排程", "refType": "schedule", "refId": todo2["id"]})
 ok("留言可引用排程", "__error__" not in msch)
 rows = call("GET", a, "messages.list", {"projectId": pid})
+rows = rows["items"] if isinstance(rows, dict) and "items" in rows else rows
 mnrow = next((r for r in rows if r["id"] == mnote["id"]), None)
 ok("引用筆記卡解析出標題", (mnrow.get("ref") or {}).get("title") == "週會決議")
 msrow = next((r for r in rows if r["id"] == msch["id"]), None)

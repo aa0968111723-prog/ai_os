@@ -71,6 +71,7 @@ ok("開發者跨組看全部（2 專案）", len(alst)==2)
 
 msg = call("POST",azhe,"messages.post",{"projectId":proj["id"],"body":"登入系統測試完成 🙏"})
 msgs = call("GET",azhe,"messages.list",{"projectId":proj["id"]})
+msgs = msgs["items"] if isinstance(msgs, dict) and "items" in msgs else msgs
 ok("留言含姓名", msgs[-1]["userName"]=="阿哲")
 
 call("POST",azhe,"auth.logout",None)
@@ -147,6 +148,7 @@ ok("重送=v2", sub2["version"]==2)
 dec2 = call("POST",azhe3,"approvals.decide",{"approvalId":sub2["id"],"decision":"approved"})
 ok("v2 通過", dec2["status"]=="approved")
 msgs2 = call("GET",azhe3,"messages.list",{"projectId":proj["id"]})
+msgs2 = msgs2["items"] if isinstance(msgs2, dict) and "items" in msgs2 else msgs2
 sysmsgs = [m for m in msgs2 if m["kind"]=="system"]
 ok("審批事件進留言（系統訊息×4）", len(sysmsgs)>=4 and any("需修改" in m["body"] for m in sysmsgs) and any("已通過" in m["body"] for m in sysmsgs))
 
