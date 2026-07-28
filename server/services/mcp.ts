@@ -57,6 +57,10 @@ import {
 import { addScheduleItemCore, listScheduleForGroup } from "./scheduleCore";
 import { DM_MAX_BODY, listDmPeers, listDmThreads, listDmHistory, markDmRead, resolveDmPeerRef, sendDm } from "./dmCore";
 import type { AgentStep } from "./agentRunner";
+import {
+  getProjectAgentInsights,
+  listProjectAgentEvents,
+} from "./agentEventCore";
 import type { AuthState } from "./auth";
 import {
   clearRateLimit,
@@ -314,6 +318,24 @@ const TOOLS = [
     name: "get_agent_run",
     description: "查一份代理計畫的每一步與進度（每步 kind／說明／狀態／估點／關聯生成 id）。用來追 approve 後的執行進度。",
     inputSchema: { type: "object", properties: { runId: { type: "string" } }, required: ["runId"] },
+  },
+  {
+    name: "list_agent_events",
+    description: "列出專案 AI 代理的可稽核軌跡：規劃、核准、步驟動作、等待、人員恢復、失敗與成果。不包含模型私密思考。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        cursor: { type: "string", description: "上一頁回傳的 nextCursor" },
+        limit: { type: "number", description: "1–500，預設 200" },
+      },
+      required: ["projectId"],
+    },
+  },
+  {
+    name: "get_agent_insights",
+    description: "取得專案代理健康摘要：阻塞、逾期、待補資訊、AI/人員統一任務清單與成果中心。",
+    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
   // ── 專案排程（組行事曆／交付死線）：外部 AI 可讀可寫，與專案綁定 ──
   {
@@ -842,6 +864,14 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     };
+  }
+  if (name === "list_agent_events") {
+    const cursor = typeof args.cursor === "string" ? args.cursor : undefined;
+    const limit = typeof args.limit === "number" ? Math.trunc(args.limit) : undefined;
+    return listProjectAgentEvents(auth, String(args.projectId ?? ""), { cursor, limit });
+  }
+  if (name === "get_agent_insights") {
+    return getProjectAgentInsights(auth, String(args.projectId ?? ""));
   }
 
   // ── 排程／筆記與統整快照（以 projectId 為鍵，先解析專案的組再套組隔離）──

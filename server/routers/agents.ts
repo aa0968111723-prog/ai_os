@@ -7,6 +7,10 @@ import {
   stopAgentCore,
   listAgentRunsForProject,
 } from "../services/agentCore";
+import {
+  getProjectAgentInsights,
+  listProjectAgentEvents,
+} from "../services/agentEventCore";
 
 /**
  * AI 代理（代理系統核心）：一句目標 → LLM 規劃多步計畫（估點）→ 使用者核准 → 背景執行器逐步執行。
@@ -39,4 +43,19 @@ export const agentsRouter = router({
   listByProject: authedProcedure
     .input(z.object({ projectId: z.string().uuid() }))
     .query(({ ctx, input }) => listAgentRunsForProject(ctx.auth, input.projectId)),
+
+  eventsByProject: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      cursor: z.string().max(200).optional(),
+      limit: z.number().int().min(1).max(500).optional(),
+    }))
+    .query(({ ctx, input }) => listProjectAgentEvents(ctx.auth, input.projectId, {
+      cursor: input.cursor,
+      limit: input.limit,
+    })),
+
+  insights: authedProcedure
+    .input(z.object({ projectId: z.string().uuid() }))
+    .query(({ ctx, input }) => getProjectAgentInsights(ctx.auth, input.projectId)),
 });

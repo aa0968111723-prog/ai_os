@@ -657,7 +657,48 @@ export const agentRuns = pgTable("agent_runs", {
   error: text("error"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  projectStatusCreatedIdx: index("agent_runs_project_status_created_idx").on(t.projectId, t.status, t.createdAt),
+  statusUpdatedIdx: index("agent_runs_status_updated_idx").on(t.status, t.updatedAt),
+  userStatusIdx: index("agent_runs_user_status_idx").on(t.userId, t.status),
+}));
+
+/** 可稽核代理事件：記錄可驗證的來源、動作、等待、裁決與成果，不保存私密 chain-of-thought。 */
+export const agentEvents = pgTable("agent_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  runId: uuid("run_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  stepId: text("step_id"),
+  stepIndex: integer("step_index"),
+  eventKey: text("event_key").notNull(),
+  eventType: text("event_type", {
+    enum: [
+      "planned",
+      "approved",
+      "step_started",
+      "step_waiting",
+      "step_completed",
+      "step_failed",
+      "human_resumed",
+      "approval_rejected",
+      "run_completed",
+      "run_failed",
+      "stopped",
+      "discarded",
+      "observation",
+    ],
+  }).notNull(),
+  actorType: text("actor_type", { enum: ["ai", "human", "system"] }).notNull().default("system"),
+  actorId: uuid("actor_id"),
+  summary: text("summary").notNull(),
+  data: jsonb("data").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  runEventUq: uniqueIndex("agent_events_run_event_uq").on(t.runId, t.eventKey),
+  runCreatedIdx: index("agent_events_run_created_idx").on(t.runId, t.createdAt),
+  projectCreatedIdx: index("agent_events_project_created_idx").on(t.projectId, t.createdAt),
+}));
 
 /**
  * 非建立型代理副作用的永久冪等憑證。
