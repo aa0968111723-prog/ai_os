@@ -298,6 +298,12 @@ export const scenesRouter = router({
       assertProjectNotArchived(project); // 封存專案不接受付費生成
       const prompt = input.prompt ?? scene.prompt ?? "";
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
+      // 只放行視覺類（image/video）：text/audio 會扣點卻不入素材庫、不回填分鏡格，與 generateVoiceover
+      // 對 TTS 的 category 守衛對稱——stale 前端或直呼 tRPC 傳錯 modelId 時在扣點前擋下。
+      const model = getModel(input.modelId);
+      if (!model || (model.kind !== "image" && model.kind !== "video")) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡就地生成需要用圖像或影片模型" });
+      }
       // 伺服器端防抖：這一格已有進行中的「畫面」生成就擋下——本鈕直接扣點、無二次確認，快速雙擊會重複送出、
       // 重複扣點。以「進行中(queued/running)＋同格＋visual 角色」查有無在跑（catch 常見雙擊；非強一致鎖）。
       const [pendingVisual] = await db
