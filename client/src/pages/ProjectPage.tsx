@@ -963,7 +963,7 @@ export function ProjectPage({ id }: { id: string }) {
             <KnowledgeBase projectId={id} readOnly={!canEdit} />
           </div>
 
-          {/* 本片資料：AI 可引用狀態 + 一鍵綁表 + 已連列彙整（不碰 plan／notesCore） */}
+          {/* 專案資料：AI 可引用狀態 + 一鍵建表 + 已關聯列彙整（不碰 plan／notesCore） */}
           <ProjectDatabasesCard projectId={id} canEdit={canEdit} />
 
           {/* 素材庫（工作台一體化：從舊「③素材整理」搬進①）——上傳的檔案、生成的成品都是上下文的一部分；

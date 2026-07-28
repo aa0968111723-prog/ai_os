@@ -238,7 +238,7 @@ export const databasesRouter = router({
   /**
    * 連結到某專案的資料列（專案 × 資料庫細部連結）：掃「這個專案所屬組」可見的資料庫中，
    * 任一 project 型別欄位的值等於此 projectId 的列——讓專案頁一眼看到「哪些資料表提到我」
-   * （例：器材借用表裡指派給本片的器材、任務表裡本片的待辦）。
+   * （例：任務表裡本專案的待辦、借用表裡指派給本專案的項目）。
    * 權限：需是專案所屬組成員（requireGroup）；只掃該組可見範圍的庫（不外洩他組庫）。
    */
   linkedToProject: authedProcedure
@@ -273,7 +273,7 @@ export const databasesRouter = router({
         tableName: string;
         fields: DataField[];
         rows: Array<{ id: string; data: DataRowData }>;
-        /** 創作者狀態燈：AI 對此庫的存取（與 databaseAcl.agentAccess 同字） */
+        /** AI 對此庫的存取（與 databaseAcl.agentAccess 同字） */
         agentAccess: "none" | "read" | "write";
       }> = [];
       for (const { table } of relevant) {
@@ -292,7 +292,7 @@ export const databasesRouter = router({
     }),
 
   /**
-   * 創作者一鍵：「為本片建立已綁定的組資料表」——預設組範圍、含專案連結欄、一筆範例列指向本專案。
+   * 一鍵：為本專案建立已關聯的組資料表——預設組範圍、含專案連結欄、一筆範例列指向本專案。
    * 不碰 #133 plan/notes；只走 databaseAcl + databaseCore。
    */
   createBoundToProject: authedProcedure
@@ -328,7 +328,7 @@ export const databasesRouter = router({
           description: `由專案「${project.title}」一鍵建立 · ${tpl.hint}`,
           fields,
           memberWritable: true,
-          // 創作者預設：AI 可讀可寫回本片表（仍受本人 ACL 限制）；敏感表可事後在資料庫頁改
+          // 預設：AI 可讀可寫回此表（仍受本人 ACL 限制）；敏感表可事後在資料庫頁改
           agentAccess: "write",
           createdBy: ctx.auth.user.id,
         })
@@ -337,7 +337,7 @@ export const databasesRouter = router({
       try {
         await addDataRowValidated(table, ctx.auth.user.id, sampleData(input.projectId));
       } catch (err) {
-        // 表已建、範例列失敗仍回表——創作者可手動加列
+        // 表已建、範例列失敗仍回表——使用者可手動加列
         console.warn("[databases.createBoundToProject] sample row failed:", err instanceof Error ? err.message : err);
       }
       return { tableId: table.id, tableName: table.name, template: input.template };

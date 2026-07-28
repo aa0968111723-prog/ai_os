@@ -10,10 +10,10 @@ import {
 } from "@shared/projectDataTemplates";
 
 /**
- * 本片資料卡（創作者視角）：
- * - 一眼看出 AI 能不能引用本片依據（知識／素材／已綁表）。
- * - 一鍵建立「已綁本專案」的組資料表（場次名單、金句、待辦…）。
- * - 深鏈到知識、素材、AI 創作工作台；不碰 #133 plan／notesCore／Runner。
+ * 專案資料卡：
+ * - 一眼看出 AI 能否引用本專案依據（知識／素材／已關聯表）。
+ * - 一鍵建立「已關聯本專案」的組資料表（名單、摘錄、待辦…）。
+ * - 深鏈到知識、素材、AI 工作台；不碰 #133 plan／notesCore／Runner。
  */
 function cellText(field: DataField, value: DataRowValue): string {
   if (value === null || value === undefined || value === "") return "—";
@@ -88,12 +88,12 @@ export function ProjectDatabasesCard({
   };
 
   return (
-    <details className="card card--quiet" data-fb="本片資料" id="sec-databases" open>
+    <details className="card card--quiet" data-fb="專案資料" id="sec-databases" open>
       <summary>
-        <Icon name="Database" size={14} /> 本片資料
+        <Icon name="Database" size={14} /> 專案資料
         <span className="meta" style={{ marginLeft: 8 }}>
           {linkedRows > 0
-            ? `${groups.length} 張表 · ${linkedRows} 列已綁本片`
+            ? `${groups.length} 張表 · ${linkedRows} 列已關聯`
             : "給 AI 與團隊共用的依據"}
         </span>
         <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
@@ -123,28 +123,28 @@ export function ProjectDatabasesCard({
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
               <span className="meta">文字知識 {knowledgeCount}</span>
               <span className="meta">素材 {assetCount}</span>
-              <span className="meta">本片表列 {linkedRows}</span>
+              <span className="meta">關聯表列 {linkedRows}</span>
             </div>
           </div>
         )}
         {!showStatus && (
-          <p className="hint" style={{ margin: 0 }}>正在判斷本片資料狀態…</p>
+          <p className="hint" style={{ margin: 0 }}>正在判斷專案資料狀態…</p>
         )}
 
         {/* —— 快速入口 —— */}
         <div>
           <p className="hint" style={{ margin: "0 0 8px" }}>
-            先讓本片「有東西可讀」。貼文字、上傳檔案，或一鍵建表；連到 Google／Notion 後還要匯入或綁專案，AI 才會用。
+            先讓本專案有可讀內容。貼文字、上傳檔案，或一鍵建表；連到 Google／Notion 後還要匯入或關聯專案，AI 才會使用。
           </p>
           <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
             <button type="button" className="btn-sm" onClick={() => scrollTo("sec-knowledge")}>
-              <Icon name="FileText" size={13} /> 貼上文字／腳本
+              <Icon name="FileText" size={13} /> 貼上文字
             </button>
             <button type="button" className="btn-sm" onClick={() => scrollTo("sec-assets")}>
               <Icon name="Image" size={13} /> 上傳圖片、影片
             </button>
             <button type="button" className="btn-sm" onClick={() => scrollTo("sec-ai-hub")}>
-              <Icon name="Sparkles" size={13} /> 問 AI 創作助手
+              <Icon name="Sparkles" size={13} /> 問 AI 助手
             </button>
             <Link href="/integrations" className="btn-sm" style={{ textDecoration: "none" }}>
               <Icon name="Package" size={13} /> Google／Notion／API
@@ -159,12 +159,12 @@ export function ProjectDatabasesCard({
           </div>
         </div>
 
-        {/* —— 一鍵本片表 —— */}
+        {/* —— 一鍵專案表 —— */}
         {canEdit && (
           <div data-testid="project-data-templates">
-            <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>一鍵建立本片表</h3>
+            <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>一鍵建立資料表</h3>
             <p className="hint" style={{ margin: "0 0 8px" }}>
-              自動含「屬於哪支片」欄、已綁本專案，並預設 AI 可讀寫。建立後立刻出現在下方。
+              自動含「關聯專案」欄、已連到本專案，並預設 AI 可讀寫。建立後立刻出現在下方。
             </p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {PROJECT_DATA_TEMPLATES.map((t) => (
@@ -181,7 +181,7 @@ export function ProjectDatabasesCard({
               ))}
             </div>
             {createBound.isPending && (
-              <p className="hint" style={{ margin: "8px 0 0" }}>正在建立本片表…</p>
+              <p className="hint" style={{ margin: "8px 0 0" }}>正在建立資料表…</p>
             )}
             {createError && (
               <p className="error" style={{ margin: "8px 0 0" }}>{createError}</p>
@@ -200,26 +200,26 @@ export function ProjectDatabasesCard({
           </div>
         )}
 
-        {/* —— 已綁本片 —— */}
-        {linked.isLoading && <p className="hint" style={{ margin: 0 }}>正在讀取已綁本片的資料…</p>}
+        {/* —— 已關聯本專案 —— */}
+        {linked.isLoading && <p className="hint" style={{ margin: 0 }}>正在讀取已關聯的資料…</p>}
         {linked.error && (
           <p className="error" style={{ margin: 0 }}>關聯資料載入失敗：{linked.error.message}</p>
         )}
 
         {!linked.isLoading && !linked.error && groups.length === 0 && (
           <div className="empty-state" style={{ marginTop: 0 }}>
-            <h3>還沒有資料表綁到這支片</h3>
+            <h3>還沒有資料表關聯到這個專案</h3>
             <p>
               {canEdit
-                ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，用「屬於哪支片」指到本專案。"
-                : "請有編輯權限的成員建立或綁定資料表。"}
+                ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，用「關聯專案」指到本專案。"
+                : "請有編輯權限的成員建立或關聯資料表。"}
             </p>
           </div>
         )}
 
         {groups.length > 0 && (
           <div style={{ display: "grid", gap: 14 }}>
-            <h3 style={{ margin: 0, fontSize: 14 }}>已綁本片的資料</h3>
+            <h3 style={{ margin: 0, fontSize: 14 }}>已關聯本專案的資料</h3>
             {groups.map((group) => {
               const cols = (group.fields as DataField[])
                 .filter((field) => field.type !== "project")
@@ -290,7 +290,7 @@ export function ProjectDatabasesCard({
             <p className="hint" style={{ margin: 0 }}>
               要改欄位或加列，請到
               <Link href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}>知識與資料</Link>
-              。資料表需有「屬於哪支片／專案連結」欄並指向本專案，才會列在這裡。
+              。資料表需有「關聯專案」欄並指向本專案，才會列在這裡。
             </p>
           </div>
         )}
