@@ -1,9 +1,17 @@
 /**
- * Data-driven navigation items for App Shell (TD-06).
- * Optional `capability` is reserved for TD-05b gating — missing capability means always eligible.
+ * Data-driven navigation items for App Shell (TD-06 / TD-05b).
+ * Prefer Policy capability gates when auth.me has capabilities data;
+ * unknown UI-only capability strings fall back to soft `require` flags.
  */
 
 import type { IconName } from "../../components/Icon";
+import {
+  hasCap,
+  hasCapInAnyGroup,
+  isPolicyCapability,
+  meHasCapabilitiesData,
+  type MeWithCapabilities,
+} from "../../capabilities";
 
 export type NavSection = "topbar" | "help" | "work" | "manage" | "account";
 
@@ -11,7 +19,12 @@ export type NavigationItem = {
   key: string;
   label: string;
   href: string;
-  /** Future TD-05b: when present, shell may hide item if capability not granted */
+  /**
+   * Capability gate (TD-05b). Prefer PolicyEngine Capability strings when possible.
+   * - Known Policy caps: checked via hasCap / hasCapInAnyGroup when me has capability data
+   * - UI-only strings (not in Policy set): fall back to `require` flags
+   * - Missing capability: always eligible (or only gated by require)
+   */
   capability?: string;
   section: NavSection;
   /** Icon name matching `Icon` component */
@@ -19,7 +32,7 @@ export type NavigationItem = {
   /** Extra title/tooltip when rendered as a badge or menu item */
   title?: string;
   /**
-   * Soft role gate used today (until capability map lands).
+   * Soft role gate — used when capability data is absent, or capability is UI-only.
    * - admin: team admin / super admin only
    * - activeLeader: leader/admin of the active group
    * - org: any leader/admin in any group (canSeeOrg)
@@ -64,7 +77,7 @@ export const accountMenuItems: NavigationItem[] = [
   { key: "mcp", label: "接上外部 AI", href: "/mcp", section: "work", icon: "Sparkles" },
   { key: "integrations", label: "連接的資料來源", href: "/integrations", section: "work", icon: "Package" },
   { key: "downloads", label: "共用文件下載", href: "/downloads", section: "work", icon: "FileText" },
-  // 管理（require gates mirror previous JSX conditions）
+  // 管理（capability 對齊 PolicyEngine；UI-only 字串保留 require 回退）
   {
     key: "options",
     label: "選項",
@@ -72,7 +85,8 @@ export const accountMenuItems: NavigationItem[] = [
     section: "manage",
     icon: "Ellipsis",
     require: "activeLeader",
-    capability: "options.edit",
+    // 組長等同 generation.approve / group.manage_members；用後者當組級閘門
+    capability: "group.manage_members",
   },
   {
     key: "members",
@@ -81,6 +95,7 @@ export const accountMenuItems: NavigationItem[] = [
     section: "manage",
     icon: "User",
     require: "org",
+    // UI-only：Policy 無 directory.view；有 capability 資料時仍回退 require（team.view 組員也有，不能當閘）
     capability: "directory.view",
   },
   {
@@ -99,7 +114,7 @@ export const accountMenuItems: NavigationItem[] = [
     section: "manage",
     icon: "SlidersHorizontal",
     require: "admin",
-    capability: "admin.manage",
+    capability: "team.manage",
   },
   // 帳號（Link-based only; actions like change-password stay in UserMenu)
   {
@@ -111,15 +126,47 @@ export const accountMenuItems: NavigationItem[] = [
   },
 ];
 
+/** Soft role flags — also used when capability data is missing or capability is UI-only. */
+export type NavFilterFlags = {
+  isAdmin: boolean;
+  activeIsLeader: boolean;
+  canSeeOrg: boolean;
+};
+
+export type NavFilterContext = NavFilterFlags & {
+  /** auth.me（含 capabilities）；有資料時優先 capability 閘門 */
+  me?: MeWithCapabilities;
+  /** 作用中組：activeLeader／組級 capability 用 */
+  activeGroupId?: string | null;
+};
+
+function matchesRequire(item: NavigationItem, flags: NavFilterFlags): boolean {
+  if (!item.require) return true;
+  if (item.require === "admin") return flags.isAdmin;
+  if (item.require === "activeLeader") return flags.activeIsLeader;
+  if (item.require === "org") return flags.canSeeOrg;
+  return true;
+}
+
+/**
+ * Filter nav items by capability (preferred) or soft require flags.
+ * - Policy capability + require activeLeader → hasCap(me, activeGroupId, cap)
+ * - Policy capability + org/admin → hasCapInAnyGroup(me, cap)
+ * - UI-only / unknown capability → require flags
+ * - No capability data on me → require flags (pre-TD-05a 相容)
+ */
 export function filterNavItems(
   items: NavigationItem[],
-  flags: { isAdmin: boolean; activeIsLeader: boolean; canSeeOrg: boolean },
+  ctx: NavFilterContext,
 ): NavigationItem[] {
   return items.filter((item) => {
-    if (!item.require) return true;
-    if (item.require === "admin") return flags.isAdmin;
-    if (item.require === "activeLeader") return flags.activeIsLeader;
-    if (item.require === "org") return flags.canSeeOrg;
-    return true;
+    if (item.capability && meHasCapabilitiesData(ctx.me) && isPolicyCapability(item.capability)) {
+      if (item.require === "activeLeader") {
+        return hasCap(ctx.me, ctx.activeGroupId, item.capability);
+      }
+      // org-wide (members/logs) and admin: any group or global
+      return hasCapInAnyGroup(ctx.me, item.capability);
+    }
+    return matchesRequire(item, ctx);
   });
 }

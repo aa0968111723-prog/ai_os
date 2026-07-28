@@ -144,11 +144,15 @@ function PointsBadge({ groupId }: { groupId: string }) {
 }
 
 /** 使用者選單（收斂頂欄）：說明／工作／管理／帳號四組收進單一下拉，管理組僅組長／管理員可見。
- * CSP 下自製（無外部庫）：點外面或 Esc 關閉。 */
+ * CSP 下自製（無外部庫）：點外面或 Esc 關閉。
+ * TD-05b：導覽優先吃 auth.me capabilities（hasCap／hasCapInAnyGroup），require 作 UI-only／缺資料回退。 */
 function UserMenu({
-  userName, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, loggingOut,
+  userName, me, activeGroupId, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, loggingOut,
 }: {
-  userName: string; isAdmin: boolean; activeIsLeader: boolean; canSeeOrg: boolean;
+  userName: string;
+  me: { capabilitiesByGroupId?: Record<string, readonly string[]>; capabilities?: readonly string[] } | null | undefined;
+  activeGroupId: string;
+  isAdmin: boolean; activeIsLeader: boolean; canSeeOrg: boolean;
   onChangePw: () => void; onNotifSettings: () => void; onLogout: () => void; loggingOut: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -163,11 +167,11 @@ function UserMenu({
   }, [open]);
   const close = () => setOpen(false);
 
-  const flags = { isAdmin, activeIsLeader, canSeeOrg };
-  const helpItems = filterNavItems(accountMenuItems.filter((i) => i.section === "help"), flags);
-  const workItems = filterNavItems(accountMenuItems.filter((i) => i.section === "work"), flags);
-  const manageItems = filterNavItems(accountMenuItems.filter((i) => i.section === "manage"), flags);
-  const accountLinkItems = filterNavItems(accountMenuItems.filter((i) => i.section === "account"), flags);
+  const navCtx = { me, activeGroupId, isAdmin, activeIsLeader, canSeeOrg };
+  const helpItems = filterNavItems(accountMenuItems.filter((i) => i.section === "help"), navCtx);
+  const workItems = filterNavItems(accountMenuItems.filter((i) => i.section === "work"), navCtx);
+  const manageItems = filterNavItems(accountMenuItems.filter((i) => i.section === "manage"), navCtx);
+  const accountLinkItems = filterNavItems(accountMenuItems.filter((i) => i.section === "account"), navCtx);
 
   return (
     <div className="menu-wrap" ref={wrap}>
@@ -346,6 +350,8 @@ export function AppShell() {
           {me.data && (
             <UserMenu
               userName={me.data.user.name}
+              me={me.data}
+              activeGroupId={activeGroupId}
               isAdmin={isAdmin}
               activeIsLeader={activeIsLeader}
               canSeeOrg={canSeeOrg}
