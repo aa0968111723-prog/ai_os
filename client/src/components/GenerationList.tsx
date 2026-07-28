@@ -201,7 +201,7 @@ export function GenerationList({
     if (justFinished.length === 0) return;
     // (0) 頁內 aria-live 宣告：桌面通知需另外授權且離頁才有感，報讀器使用者靠這行才知道結果
     setLiveMsg(justFinished.map((x) => `${x.body}：${x.title}`).join("；"));
-    // (1) 桌面通知——聚合：一次偵測到多筆完成（如工作流一次跑完多鏡）就發「一則彙總」而非逐筆洗版
+    // (1) 桌面通知——聚合：一次偵測到多筆完成（如製作範本一次跑完多鏡）就發「一則彙總」而非逐筆洗版
     if (justFinished.length === 1) {
       notifyDesktop(justFinished);
     } else {
@@ -562,20 +562,20 @@ export function GenerationList({
                     <button
                       type="button"
                       className="chip pick"
-                      title="這筆是工作流跑出來的——點了捲到工作流卡"
+                      title="這筆是製作範本跑出來的——點了捲到製作範本卡"
                       onClick={() => document.querySelector("#sec-workflow")?.scrollIntoView({ behavior: "smooth", block: "start" })}
                     >
-                      工作流
+                      製作範本
                     </button>
                   )}
                   {g.agentRunId && (
                     <button
                       type="button"
                       className="chip pick"
-                      title="這筆是 AI 代理跑出來的——點了捲到代理卡"
+                      title="這筆是 AI 執行計畫跑出來的——點了捲到 AI 執行計畫"
                       onClick={() => document.querySelector("#sec-agent")?.scrollIntoView({ behavior: "smooth", block: "start" })}
                     >
-                      AI 代理
+                      AI 執行計畫
                     </button>
                   )}
                   {/* 注入透明化：世界觀/角色/場景錨點注入後「實際送給模型」的完整提示詞 */}

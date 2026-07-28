@@ -347,10 +347,10 @@ function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf 
               disabled={setDispatch.isPending}
               onChange={(e) => setDispatch.mutate({ groupId, userId, canDispatch: e.target.checked })}
             />
-            可派工 AI 代理
+            可派工 AI 執行計畫
           </label>
         ) : (
-          <span className="hint" style={{ fontSize: 11 }}>組長以上恆可派工 AI 代理</span>
+          <span className="hint" style={{ fontSize: 11 }}>組長以上恆可派工 AI 執行計畫</span>
         )}
         {isSelf && <span className="hint" style={{ fontSize: 11 }}>（我）</span>}
       </div>
@@ -960,7 +960,7 @@ export function AuditLogCard() {
     { getNextPageParam: (last) => last.nextCursor ?? undefined },
   );
   const rows = audit.data?.pages.flatMap((p) => p.items) ?? [];
-  // 連續重複合併：同一人短時間重複同一動作（AI 代理連生 N 張、連續拖分鏡排序）併成一列
+  // 連續重複合併：同一人短時間重複同一動作（AI 助手連生 N 張、連續拖分鏡排序）併成一列
   const grouped = useMemo(() => groupConsecutiveAudit(rows), [rows]);
   const filtering = !!debouncedAction.trim() || !!category || !!teamId || !!groupId || !!actor || !!project;
   // 就地下鑽：點某位組員／某個專案／某一組即把整份紀錄縮到那個維度（AuditLogRow 呼叫）

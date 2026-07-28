@@ -307,7 +307,7 @@ export function McpPage() {
       <ul className="hint" style={{ marginTop: 0, paddingLeft: 20, lineHeight: 1.9 }}>
         <li>先讀全貌：<code>get_project_status</code>（分鏡／生成／代理／排程／待辦一次到位）。</li>
         <li>自己生成：<code>find_model → submit_generation → get_generation（輪詢到完成）→ list_assets（取回成品）</code>。</li>
-        <li>交給代理：<code>plan_agent → approve_agent → get_agent_run（追進度）</code>——一句目標讓內建 AI 代理背景跑完多步製作。</li>
+        <li>交給 AI 執行計畫：<code>plan_agent → approve_agent → get_agent_run（追進度）</code>——一句目標讓內建助手背景跑完多步製作。</li>
         <li>排時程：<code>list_schedule／add_schedule_item</code> 把交付死線與會議掛到專案與組行事曆。</li>
       </ul>
       <div className="card">

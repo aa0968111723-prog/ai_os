@@ -138,7 +138,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
       <h1>資料庫</h1>
       <p className="hint">
         自訂欄位的輕量資料表：個人清單、組名單、團隊器材、全站公告都放得下。組以上範圍的資料庫，
-        團隊 AI 助手答題時看得到；外部 AI 代理（MCP）也能查詢與寫入——權限跟你在網頁上一樣。
+        團隊 AI 助手答題時看得到；外部 AI 助手（MCP）也能查詢與寫入——權限跟你在網頁上一樣。
       </p>
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap", marginTop: 12 }}>
         {/* 左欄：清單＋建立 */}
@@ -784,7 +784,7 @@ function DataImportPanel({ table, onImported }: { table: TableSummary; onImporte
 }
 
 /**
- * 從外部連接抓取（個人整合）：在「整合連接」頁登記過的外部資料庫/API，
+ * 從外部連接抓取（個人整合）：在「連接的資料來源」頁登記過的外部資料庫/API，
  * 這裡選一條＋路徑一鍵抓，內容直接灌進匯入面板（格式依回應 content-type 自動選）。
  */
 function ExternalFetchRow({ onFetched }: { onFetched: (text: string, fmt?: TabularFormat) => void }) {
@@ -796,7 +796,7 @@ function ExternalFetchRow({ onFetched }: { onFetched: (text: string, fmt?: Tabul
   if (list.data && apis.length === 0) {
     return (
       <p className="hint" style={{ margin: "0 0 8px" }}>
-        也可以直接從你自己的系統抓：先到<Link href="/integrations">整合連接</Link>登記外部資料庫／API，這裡就會出現一鍵抓取。
+        也可以直接從你自己的系統抓：先到<Link href="/integrations">連接的資料來源</Link>登記外部資料庫／API，這裡就會出現一鍵抓取。
       </p>
     );
   }
@@ -850,7 +850,7 @@ function ConnectPanel({ table }: { table: TableSummary }) {
       <div style={{ marginTop: 10, display: "grid", gap: 12, fontSize: 13 }}>
         <p className="hint" style={{ margin: 0 }}>
           用你的<Link href="/help">個人連線金鑰</Link>（在「怎麼用」頁建立，可隨時撤銷）就能從外部連這個資料庫，權限跟你在網頁上一樣。
-          反方向——讓本系統去抓「你自己的」Google 雲端／Notion／外部資料庫，到<Link href="/integrations">整合連接</Link>設定。
+          反方向——讓本系統去抓「你自己的」Google 雲端／Notion／外部資料庫，到<Link href="/integrations">連接的資料來源</Link>設定。
         </p>
         <div>
           <p style={{ margin: "0 0 4px", fontWeight: 600 }}>REST API（本機腳本／手機 App／其他資料庫 ETL）</p>
@@ -1102,7 +1102,7 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
         可一次選多個檔，或直接把檔案拖進這一區。文字/PDF/Word 自動抽成純文字；圖片可按「AI 分類」產生繁中描述＋自動歸類（1 點/張）——
         團隊 AI 助手與 MCP 代理都讀得到（受上方「AI 存取」等級管控）。影片／音訊可手動分類、可預覽播放；
         在欄位加「附件」型別，還能把檔案逐列掛進資料表。
-        Google／Notion 私有內容：到<Link href="/integrations">整合連接</Link>連結你自己的 Google 帳戶或 Notion token，
+        Google／Notion 私有內容：到<Link href="/integrations">連接的資料來源</Link>連結你自己的 Google 帳戶或 Notion token，
         之後貼私有連結就能直接匯入（公開連結照舊可用）。
       </p>
 

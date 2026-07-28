@@ -12,7 +12,7 @@ import { flashAnchor, takePlannerFocus } from "../discuss";
  * 筆記排程（需求 #10）：組內共用的「排程表＋會議筆記＋知識地圖」一頁。
  * - 組排程：可掛專案、可直連 Google 日曆自動同步（.ics 匯出保留為後備）；清單／月曆兩種檢視（真實日曆）。
  * - 筆記／會議紀錄：內容更新由後端自動留版本快照；可「從知識庫匯入」把專案知識帶進筆記。
- * - 知識地圖（知識族譜）：把專案／筆記／行程／知識庫／AI 代理／資料庫織成一張放射圖，
+ * - 知識地圖（知識族譜）：把專案／筆記／行程／知識庫／AI 助手／資料庫織成一張放射圖，
  *   資料由後端 knowledgeMap.graph 一次聚合（帶組隔離與資料庫 ACL），可用鏡頭／專案／型別開關聚焦。
  * groupId 由 App 頂欄的組別選單傳入。
  */
@@ -92,7 +92,7 @@ export function PlannerPage({ groupId }: { groupId: string }) {
   return (
     <div>
       <h1>筆記排程</h1>
-      <p className="hint">全組共用的行程表與會議紀錄：排程可切清單／月曆，系統完成 Google 連線設定後可自動同步，未設定時仍可匯出 .ics；筆記可從知識庫匯入；知識地圖把行程、筆記、專案知識庫、AI 代理與資料庫織成一張知識族譜。</p>
+      <p className="hint">全組共用的行程表與會議紀錄：排程可切清單／月曆，系統完成 Google 連線設定後可自動同步，未設定時仍可匯出 .ics；筆記可從知識庫匯入；知識地圖把行程、筆記、專案知識庫、AI 執行計畫與資料庫織成一張知識族譜。</p>
       {/* key 綁組別：切換作用組時整卡重掛，表單草稿不會帶到別的組 */}
       <ScheduleCard
         key={`sch-${groupId}`}
@@ -888,7 +888,7 @@ function KnowledgeImport({
 
 type MapLens = Lens;
 
-/** 葉節點的五種型別：筆記／行程（本頁上方兩卡）＋知識庫／AI 代理（掛專案）＋資料庫（組相關） */
+/** 葉節點的五種型別：筆記／行程（本頁上方兩卡）＋知識庫／AI 助手（掛專案）＋資料庫（組相關） */
 type LeafKind = "note" | "schedule" | "knowledge" | "agent" | "db";
 
 /** 點節點後詳情面板的導航動作：anchor＝跳到本頁上方那筆；project＝進專案頁；db＝資料庫頁（可帶 ?open= 深連結） */
@@ -919,13 +919,13 @@ const LEAF_TOGGLES: Array<{ kind: LeafKind; label: string }> = [
   { kind: "note", label: "筆記" },
   { kind: "schedule", label: "行程" },
   { kind: "knowledge", label: "知識" },
-  { kind: "agent", label: "AI 代理" },
+  { kind: "agent", label: "AI 執行計畫" },
   { kind: "db", label: "資料庫" },
 ];
 
 /**
  * 知識地圖（知識族譜）：中心＝這個組，往外一圈是「專案／組層級／資料庫」分支，
- * 再往外是掛在其下的筆記（藍）、行程（琥珀）、知識（綠）、AI 代理（紫）與資料庫（青）。
+ * 再往外是掛在其下的筆記（藍）、行程（琥珀）、知識（綠）、AI 助手（紫）與資料庫（青）。
  * 資料改吃後端聚合端點 knowledgeMap.graph（一次撈齊六類、全帶組隔離與資料庫 ACL），
  * 前端只負責過濾（鏡頭／專案聚焦／型別開關）、佈局與導航——點節點開詳情面板，
  * 面板可跳到本頁那筆、進專案頁或深連結開某個資料庫（/databases?open=id）。
@@ -1006,7 +1006,7 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
         id: `a-${a.id}`,
         kind: "agent",
         label: a.goal,
-        sub: `AI 代理・${AGENT_STATUS_LABEL[a.status] ?? a.status}・估 ${a.estPoints} 點`,
+        sub: `AI 執行計畫・${AGENT_STATUS_LABEL[a.status] ?? a.status}・估 ${a.estPoints} 點`,
         nav: { type: "project", projectId: a.projectId },
       });
 
@@ -1265,7 +1265,7 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
       lede="依專案與資料型別探索組內知識關聯"
     >
         <p className="hint">
-        本組知識族譜一張圖：中心是本組，往外是專案／組層級／資料庫分支，再往外是筆記（藍）、行程（琥珀）、知識庫（綠）、AI 代理（紫）與資料庫（青）。
+        本組知識族譜一張圖：中心是本組，往外是專案／組層級／資料庫分支，再往外是筆記（藍）、行程（琥珀）、知識庫（綠）、AI 執行計畫（紫）與資料庫（青）。
         點任一節點看詳情，一鍵跳到那筆、進專案頁或打開資料庫。節點可以自由拖拉排版（位置記在這台裝置）；空白處拖曳平移、滾輪或右上角按鈕縮放。
         </p>
 
@@ -1315,7 +1315,7 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
         <div className="empty-state" style={{ marginTop: 12 }}>
           <h3>這張地圖還是空的</h3>
           <p>
-            先在上面加幾筆行程或筆記（可掛專案），或在專案裡累積知識庫、跑 AI 代理、建資料庫，這裡就會長出對應的族譜節點。
+            先在上面加幾筆行程或筆記（可掛專案），或在專案裡累積知識庫、跑 AI 執行計畫、建資料庫，這裡就會長出對應的族譜節點。
             {lens !== "all" && "或把鏡頭切回「全組」。"}
           </p>
         </div>

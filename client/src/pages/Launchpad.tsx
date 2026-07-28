@@ -9,7 +9,7 @@ import { ConfirmButton } from "../components/interactions";
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
 /** 最近開啟：點卡片時記下 id，置頂顯示（純前端 localStorage） */
 const RECENT_KEY = "aios.recentProjects";
-/** 「組代理動態」收合偏好記憶鍵（per 組；純前端 localStorage，收起省版面） */
+/** 「組執行計畫動態」收合偏好記憶鍵（per 組；純前端 localStorage，收起省版面） */
 const RUNS_COLLAPSE_KEY = (gid: string) => `aios.teamRuns.collapsed.${gid}`;
 
 function relTime(d: Date | string): string {
@@ -321,7 +321,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
 
 /** 派工提議（與 teamAssistant.ask 回傳的 dispatches 對齊）：確認後送 teamAssistant.dispatch */
 type Dispatch = { projectId: string; projectTitle: string; goal: string; label: string };
-/** 派工結果：在某專案建立了一份待核准的代理計畫 */
+/** 派工結果：在某專案建立了一份待核准的 AI 執行計畫 */
 type DispatchResult = { runId: string; projectId: string; summary: string; estPoints: number };
 
 const TEAM_QUICK_QS = [
@@ -345,9 +345,9 @@ const RUN_STATUS: Record<string, { label: string; color?: string }> = {
 
 /**
  * 組彙總 AI 卡（需求 12 v3 一體化）：可追問的多輪對話問「整組」狀況——後端彙總轄下各專案現況，
- * LLM 可先用唯讀工具鑽進特定專案、自訂資料庫、模型目錄或「全組代理動態」查證再分析；具派工權者
- * （組長以上或被授權組員）還能收到「發起專案代理計畫」的提議，按確認後在該專案建立一份待核准計畫
- * （仍需在該專案核准才會花點）。卡片下方另有「組代理動態」總覽：派工出去的計畫跑到哪一站看清。
+ * LLM 可先用唯讀工具鑽進特定專案、自訂資料庫、模型目錄或「全組執行計畫動態」查證再分析；具派工權者
+ * （組長以上或被授權組員）還能收到「發起專案 AI 執行計畫」的提議，按確認後在該專案建立一份待核准計畫
+ * （仍需在該專案核准才會花點）。卡片下方另有「組執行計畫動態」總覽：派工出去的計畫跑到哪一站看清。
  * 對話只存前端狀態（重整即清空）；唯讀彙總本身不改資料。
  */
 function TeamAssistantCard({ groupId }: { groupId: string }) {
@@ -356,7 +356,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const ask = trpc.teamAssistant.ask.useMutation();
   const dispatch = trpc.teamAssistant.dispatch.useMutation();
-  // 全組代理動態：有進行中（執行中/待核准）的就 8 秒輪詢，全都終局就停（省流量）
+  // 全組執行計畫動態：有進行中（執行中/待核准）的就 8 秒輪詢，全都終局就停（省流量）
   const overview = trpc.teamAssistant.agentOverview.useQuery(
     { groupId },
     { refetchInterval: (q) => (q.state.data?.some((r) => r.status === "running" || r.status === "awaiting_approval") ? 8000 : false) },
@@ -364,7 +364,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
   // 已派工的提議（key＝`訊息idx-提議idx`）→ 結果：避免重複派工、並顯示「到哪核准」
   const [dispatched, setDispatched] = useState<Record<string, DispatchResult>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
-  // 「組代理動態」收合：動態列多到洗掉對話、或不想看時可收起只留標題＋數量摘要（輪詢照跑不中斷）。
+  // 「組執行計畫動態」收合：動態列多到洗掉對話、或不想看時可收起只留標題＋數量摘要（輪詢照跑不中斷）。
   // 本卡不隨換組重掛（父層未給 key），故收合偏好用 effect 依 groupId 重讀，換組即切到該組的偏好。
   const [runsCollapsed, setRunsCollapsed] = useState(false);
   useEffect(() => {
@@ -436,7 +436,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
       )}
 
       <p className="hint" style={{ marginTop: 8 }}>
-        免費・唯讀彙總，可追問、可查證專案／資料庫／代理動態{canDispatchHint ? "，並可提議在專案發起代理計畫（需該專案核准才花點）" : ""}。
+        免費・唯讀彙總，可追問、可查證專案／資料庫／執行計畫動態{canDispatchHint ? "，並可提議在專案發起 AI 執行計畫（需該專案核准才花點）" : ""}。
         {msgs.length > 0 && (
           <button
             type="button"
@@ -475,15 +475,15 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
                         <div key={key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           {done ? (
                             <div className="hint" style={{ color: "var(--success-ink)" }}>
-                              ✓ 已在「{d.projectTitle}」建立代理計畫（估 {done.estPoints} 點）：{done.summary}
+                              ✓ 已在「{d.projectTitle}」建立 AI 執行計畫（估 {done.estPoints} 點）：{done.summary}
                               <Link href={`/p/${d.projectId}`} style={{ marginLeft: 6 }}>到專案核准 →</Link>
                             </div>
                           ) : (
                             <ConfirmButton
                               triggerClassName="btn-tonal btn-sm"
                               disabled={pendingKey === key}
-                              title="在該專案建立一份待核准的代理計畫（核准後才花點）"
-                              message={`在「${d.projectTitle}」發起代理計畫：${d.goal}？\n會建立一份待核准計畫，仍需到該專案核准才會開始執行、花點。`}
+                              title="在該專案建立一份待核准的 AI 執行計畫（核准後才花點）"
+                              message={`在「${d.projectTitle}」發起 AI 執行計畫：${d.goal}？\n會建立一份待核准計畫，仍需到該專案核准才會開始執行、花點。`}
                               confirmLabel="發起計畫"
                               onConfirm={async () => {
                                 setPendingKey(key);
@@ -515,7 +515,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
         </div>
       )}
 
-      {/* 組代理動態：全組各專案的 AI 代理計畫／執行進度一站看（進行中的排前面；核准/停止到各專案頁做）。
+      {/* 組助手動態：全組各專案的 AI 助手計畫／執行進度一站看（進行中的排前面；核准/停止到各專案頁做）。
           標題即收合鈕：列多時可收起只留「標題＋筆數＋進行中」摘要省版面；本體用 hidden 切換恆掛 DOM，
           aria-controls 不懸空、輪詢照跑不中斷（展開即最新）。 */}
       {runs.length > 0 && (
@@ -525,7 +525,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
             onClick={toggleRuns}
             aria-expanded={!runsCollapsed}
             aria-controls="team-agent-runs"
-            title={runsCollapsed ? "展開組代理動態" : "收合組代理動態（省版面）"}
+            title={runsCollapsed ? "展開組執行計畫動態" : "收合組執行計畫動態（省版面）"}
             style={{
               display: "flex", alignItems: "center", gap: 4, width: "100%",
               background: "none", border: "none", padding: 0, cursor: "pointer",
@@ -533,7 +533,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
             }}
           >
             <Icon name="Sparkles" size={12} />
-            <span>組代理動態</span>
+            <span>組執行計畫動態</span>
             <span style={{ color: "var(--fg-secondary)" }}>
               （{runs.length}{activeRuns > 0 ? `，${activeRuns} 進行中` : ""}）
             </span>

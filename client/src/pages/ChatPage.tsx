@@ -10,7 +10,7 @@ type Thread = inferRouterOutputs<AppRouter>["dm"]["threads"][number];
 type Peer = inferRouterOutputs<AppRouter>["dm"]["peers"][number];
 type HistoryItem = inferRouterOutputs<AppRouter>["dm"]["history"]["items"][number];
 
-/** 私訊 @了 這個字就觸發 AI 代理回覆——與後端 dmAssistant.DM_ASSISTANT_TRIGGER 同字串 */
+/** 私訊 @了 這個字就觸發 AI 助手回覆——與後端 dmAssistant.DM_ASSISTANT_TRIGGER 同字串 */
 const ASSISTANT_TRIGGER = "@助手";
 
 /** 可標注的物件型別（與後端 dmCore.DM_REF_TYPES 同步） */
@@ -322,7 +322,7 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
             const day = dayKey(m.createdAt);
             const showDay = day !== lastDay;
             lastDay = day;
-            // AI 代理回覆：不分左右，一律靠左的 AI 氣泡（收發雙方都看得到這則回覆）
+            // AI 助手回覆：不分左右，一律靠左的 AI 氣泡（收發雙方都看得到這則回覆）
             const isAssistant = m.kind === "assistant";
             const rowClass = isAssistant ? "assistant" : m.fromMe ? "mine" : "theirs";
             return (
