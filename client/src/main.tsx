@@ -3,8 +3,11 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { trpc, createTrpcClient } from "./api";
 import { App } from "./App";
+import { bootstrapPwa } from "./pwa";
 import "./styles.css";
 import "./splash.css";
+
+bootstrapPwa();
 
 /** 全站錯誤邊界：任何 render 錯誤都落在設計語言內的空狀態，而非空白白畫面。 */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {

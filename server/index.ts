@@ -1307,7 +1307,20 @@ app.all("/api/*", (req, res) => {
 if (isProd) {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
   const publicDir = path.join(dirname, "public");
-  app.use(express.static(publicDir));
+  app.use((req, res, next) => {
+    if (req.path === "/sw.js" || req.path === "/manifest.webmanifest") {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      if (req.path === "/sw.js") res.setHeader("Service-Worker-Allowed", "/");
+    }
+    next();
+  });
+  app.use(express.static(publicDir, {
+    setHeaders(res, filePath) {
+      if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      }
+    },
+  }));
   app.get("*", (_req, res) => res.sendFile(path.join(publicDir, "index.html")));
 }
 

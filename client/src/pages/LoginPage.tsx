@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { BRAND_NAME } from "../brand";
 import { BrandLogo } from "../components/BrandLogo";
 import { BrandReveal } from "../components/BrandReveal";
+import { InstallAppBanner } from "../components/InstallAppBanner";
 import { PasswordInput } from "../components/PasswordInput";
 import { Icon } from "../components/Icon";
 
@@ -111,6 +112,9 @@ export function LoginPage() {
           <p className="error" role="alert">{friendlyAuthError(login.error.message)}</p>
         ) : null}
         <p className="hint" style={{ marginTop: "var(--sp-12)" }}>帳號採邀請制——請向你的組長或管理員索取邀請連結。忘記密碼請找管理員重設。</p>
+        <div style={{ marginTop: "var(--sp-16)", textAlign: "left" }}>
+          <InstallAppBanner />
+        </div>
       </div>
     </div>
   );
