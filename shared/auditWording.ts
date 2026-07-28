@@ -133,7 +133,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "feedbackReports.runAgentNow": "手動觸發回饋代理巡檢",
   // 自訂資料庫（個人／組／團隊／全站）
   "databases.create": "建立資料庫",
-  "databases.createBoundToProject": "從專案建立綁定資料庫",
+  "databases.createBoundToProject": "建立並綁定專案資料庫",
   "databases.update": "調整資料庫結構",
   "databases.remove": "刪除資料庫",
   "databases.addRow": "新增資料列",

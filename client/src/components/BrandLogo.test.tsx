@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { BRAND_MARK_SRC, BRAND_NAME, BRAND_TAGLINE } from "../brand";
+import { BRAND_FULL_LOGO_READY, BRAND_LOGO_SRC, BRAND_MARK_SRC, BRAND_NAME, BRAND_TAGLINE } from "../brand";
 import { BrandLogo } from "./BrandLogo";
 
 describe("BrandLogo", () => {
@@ -23,8 +23,15 @@ describe("BrandLogo", () => {
   it("full variant exposes accessible name and optional tagline", () => {
     render(<BrandLogo variant="full" size="lg" showTagline />);
     expect(screen.getByRole("img", { name: `${BRAND_NAME} · ${BRAND_TAGLINE}` })).toBeVisible();
-    expect(screen.getByText(BRAND_NAME)).toBeVisible();
     expect(screen.getByText(BRAND_TAGLINE)).toBeVisible();
+    if (BRAND_FULL_LOGO_READY) {
+      const img = document.querySelector(".brand-logo--full img");
+      expect(img).toHaveAttribute("src", BRAND_LOGO_SRC.color);
+      expect(img).toHaveAttribute("width");
+      expect(img).toHaveAttribute("height");
+    } else {
+      expect(screen.getByText(BRAND_NAME)).toBeVisible();
+    }
   });
 
   it("decorative mark is aria-hidden and has empty alt", () => {
