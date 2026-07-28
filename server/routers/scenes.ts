@@ -3,7 +3,7 @@ import { aliasedTable, and, asc, desc, eq, inArray, isNull, sql } from "drizzle-
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
-import { submitGenerationCore } from "../services/generationCore";
+import { executeGenerationCommand } from "../services/generationCommand";
 import { getModel } from "../../shared/models";
 import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
@@ -310,10 +310,11 @@ export const scenesRouter = router({
         ))
         .limit(1);
       if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成中，請稍候再生成" });
-      // 額度／守門／失敗退點全由 submitGenerationCore 既有邏輯處理（走 effectivePrompt 世界觀注入）
-      const gen = await submitGenerationCore({
+      // TD-02：分鏡就地生成走 Command（政策＋狀態機＋ACL＋扣點）
+      const gen = await executeGenerationCommand({
+        auth: ctx.auth,
+        source: "web",
         id: input.clientRequestId, // 冪等鍵：timeout 重送同鍵回原列，不重複扣點
-        userId: ctx.auth.user.id,
         projectId: scene.projectId,
         modelId: input.modelId,
         prompt,
@@ -321,7 +322,6 @@ export const scenesRouter = router({
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
         reasonPrefix: "分鏡生成",
-        assertAccess: (project) => requireGroup(ctx.auth, project.groupId), // 多組隔離
       });
       return { generationId: gen.id };
     }),
@@ -357,17 +357,17 @@ export const scenesRouter = router({
         ))
         .limit(1);
       if (pendingVoice) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成配音，請稍候" });
-      // 額度／守門／失敗退點全由 submitGenerationCore 既有邏輯處理
-      const gen = await submitGenerationCore({
+      // TD-02：配音生成走 Command
+      const gen = await executeGenerationCommand({
+        auth: ctx.auth,
+        source: "web",
         id: input.clientRequestId, // 冪等鍵：timeout 重送同鍵回原列，不重複扣點
-        userId: ctx.auth.user.id,
         projectId: scene.projectId,
         modelId,
         prompt,
         sceneId: scene.id,
         sceneRole: "narration",
         reasonPrefix: "配音生成",
-        assertAccess: (project) => requireGroup(ctx.auth, project.groupId), // 多組隔離
       });
       return { generationId: gen.id };
     }),

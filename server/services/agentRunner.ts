@@ -9,7 +9,8 @@ import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel } from "../../shared/models";
-import { advanceGeneration, submitGenerationCore, type GenerationRow } from "./generationCore";
+import { advanceGeneration, type GenerationRow } from "./generationCore";
+import { executeGenerationCommand } from "./generationCommand";
 import { resolveBackgroundProjectRole } from "./backgroundAccess";
 import { reapStuckGeneration } from "./workflowRunner";
 import { lockSceneOrder } from "./locks";
@@ -1271,12 +1272,15 @@ async function advanceRun(run: RunRow): Promise<void> {
     await saveRun(run.id, { steps, currentStep: idx });
   }
   try {
-    // 審查修復：帶入發起人「當下」的真實角色——組員的成本審核門檻（單筆估點 ≥ 門檻須組長核准）
-    // 才會對代理生成生效（原版不帶 assertAccess，accessRole=undefined，門檻整段被繞過）
-    const accessRole = await resolveBackgroundProjectRole(run.userId, run.projectId, "代理");
-    await submitGenerationCore({
+    // TD-02：代理生成走 Command（成本門檻／狀態機／ACL 與直呼一致）
+    await resolveBackgroundProjectRole(run.userId, run.projectId, "代理");
+    const auth = await loadAuthState(run.userId);
+    if (!auth) throw new TRPCError({ code: "FORBIDDEN", message: "發起人帳號已停用，代理無法繼續執行" });
+    await executeGenerationCommand({
+      auth,
+      source: "agent",
+      backgroundResume: true,
       id: step.generationId,
-      userId: run.userId,
       projectId: run.projectId,
       modelId,
       prompt,
@@ -1284,7 +1288,6 @@ async function advanceRun(run: RunRow): Promise<void> {
       sceneRole,
       agentRunId: run.id, // 生成列回連本次代理執行——生成紀錄可回看「這筆是代理跑出來的」
       reasonPrefix: "AI 代理",
-      assertAccess: () => accessRole,
     });
   } catch (err) {
     if (err instanceof TRPCError && err.code === "INTERNAL_SERVER_ERROR") {

@@ -13,6 +13,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
+import { assertProjectAllows as assertProjectAllowsState } from "./projectState";
 
 interface ProjectLike {
   id: string;
@@ -41,13 +42,13 @@ export async function assertProjectEditable(auth: AuthState, project: ProjectLik
 }
 
 /**
- * 封存專案寫入守衛（純同步，掛在核心層）：已封存的專案不接受任何「發起新工作」的寫入
- * （生成／代理計畫／排程…）。放在 core 而非只在 MCP dispatcher，兩端（tRPC／MCP）一致——
- * 尤其擋外部 AI 客戶端拿舊 projectId 對已封存專案持續排代理／排程（網頁端靠清單濾掉封存，
- * MCP 手上是舊 id，需明確守門）。讀取類不呼叫本函式，照常放行。
+ * 封存／暫停專案寫入守衛（純同步，掛在核心層）：已封存或暫停的專案不接受「發起新工作」
+ * （生成／代理計畫／排程…）。實作委派 projectState.assertProjectAllows（TD-03），
+ * 訊息與既有 archived 人話保持相容。讀取類不呼叫本函式，照常放行。
  */
 export function assertProjectNotArchived(project: { status: string }): void {
-  if (project.status === "archived") {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "此專案已封存——請先在網頁端還原專案，或改用其他專案" });
-  }
+  assertProjectAllowsState(project, "generate");
 }
+
+/** TD-03：新程式碼優先用此名（read/write/generate/approve/restore/export） */
+export { assertProjectAllows } from "./projectState";

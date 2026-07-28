@@ -1,6 +1,6 @@
 # Aios 技術債清理計畫
 
-> 狀態：Proposed
+> 狀態：In progress（首批 TD-00～03／07 見 `feat/td-core-policy-command-worker` 與 `td-00-baseline-report.md`）
 > 
 > 適用範圍：`aa0968111723-prog/ai_os`
 > 

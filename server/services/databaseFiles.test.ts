@@ -103,6 +103,13 @@ describe("ssrfGuardError", () => {
     expect(ssrfGuardError("http://127.1/x")).toContain("內部");        // 缺段
     expect(ssrfGuardError("http://10.0.1/x")).toContain("內部");
   });
+
+  // TD-04：滲透回歸——metadata 與常見 rebinding 字面型必須擋
+  it("擋雲端 metadata 與 .local/.internal 字面", () => {
+    expect(ssrfGuardError("http://169.254.169.254/latest/meta-data/")).toContain("內部");
+    expect(ssrfGuardError("http://metadata.google.internal/")).toContain("內部");
+    expect(ssrfGuardError("http://something.local/secret")).toContain("內部");
+  });
 });
 
 describe("isPrivateIp（SSRF 權威判準：DNS 解析後逐一 IP 檢查）", () => {

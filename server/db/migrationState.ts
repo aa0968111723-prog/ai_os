@@ -85,6 +85,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0007_project_human_tasks",
   "0008_complete_plan_summary",
   "0009_agent_events_and_indexes",
+  // 0010：純新增 model_live_catalog 表＋索引（皆 IF NOT EXISTS），可安全納入 bridge
+  "0010_model_live_catalog",
 ] as const;
 
 /**

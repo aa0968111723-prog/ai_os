@@ -9,7 +9,9 @@ import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getWorkflow } from "../../shared/models";
-import { advanceGeneration, submitGenerationCore, type GenerationRow } from "./generationCore";
+import { advanceGeneration, type GenerationRow } from "./generationCore";
+import { executeGenerationCommand } from "./generationCommand";
+import { loadAuthState } from "./auth";
 import { failStaleGenerationTx } from "./points";
 import { signAssetUrl } from "./storage";
 import { resolveBackgroundProjectRole } from "./backgroundAccess";
@@ -330,12 +332,15 @@ async function advanceRun(run: RunRow): Promise<void> {
     await saveRun(run.id, { steps });
   }
   try {
-    // 工作流由背景程序執行，不能沿用啟動當下的權限快照：每一個付費步驟前重算發起人角色，
-    // 讓一般組員同樣受到單筆成本核准門檻，並在已被移出組時立即停止。
-    const accessRole = await resolveBackgroundProjectRole(run.userId, run.projectId, "工作流");
-    await submitGenerationCore({
+    // TD-02：背景工作流走 Command（每步重載 auth，成本門檻／狀態機／ACL 與直呼一致）
+    await resolveBackgroundProjectRole(run.userId, run.projectId, "工作流"); // 先擋停用／離組／封存
+    const auth = await loadAuthState(run.userId);
+    if (!auth) throw new TRPCError({ code: "FORBIDDEN", message: "發起人帳號已停用，工作流無法繼續執行" });
+    await executeGenerationCommand({
+      auth,
+      source: "workflow",
+      backgroundResume: true,
       id: step.generationId,
-      userId: run.userId,
       projectId: run.projectId,
       modelId: presetStep.modelId,
       prompt: stepPrompt,
@@ -345,7 +350,6 @@ async function advanceRun(run: RunRow): Promise<void> {
       scenePresetIds: (run.scenePresetIds as string[] | null) ?? undefined,
       workflowRunId: run.id, // 生成列回連本條 run——生成紀錄可回看來源
       reasonPrefix: "工作流生成",
-      assertAccess: () => accessRole,
     });
   } catch (err) {
     // 系統忙碌（額度交易例外，未扣點）是暫時性的：不終局，佔位保留、下輪冪等重送
