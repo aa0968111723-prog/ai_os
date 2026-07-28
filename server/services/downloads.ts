@@ -36,6 +36,8 @@ const ENTRIES: DownloadEntry[] = [
   { file: "docs/UX審查報告.md", title: "UX 缺陷專項審查（10 維度）", category: "dev", restricted: true },
   { file: "docs/fal生態研究.md", title: "fal.ai 全生態模型研究（15 類 371 模型）", category: "model" },
   { file: "docs/維運手冊.md", title: "維運手冊（部署／備份／應變）", category: "dev", restricted: true },
+  { file: "docs/AI代理架構與維運.md", title: "AI 代理架構與維運（Issue #133）", category: "dev", restricted: true },
+  { file: "docs/AI代理成熟度與測試報告.md", title: "AI 代理成熟度與測試報告", category: "dev", restricted: true },
   { file: "docs/Zeabur部署.md", title: "Zeabur 部署指南（環境變數／搬遷／驗收）", category: "dev", restricted: true },
   { file: "docs/Google日曆同步.md", title: "Google 日曆直連同步（設定與運作）", category: "dev", restricted: true },
   { file: "docs/模型目錄.md", title: "模型目錄（全模型與點數）", category: "model" },

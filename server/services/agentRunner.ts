@@ -5,7 +5,7 @@
  * 且步驟種類除了生成還有建分鏡／拆分鏡／送審（重用各自的 core，守門不分岔）。
  */
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel } from "../../shared/models";
@@ -41,6 +41,14 @@ import {
   onShutdown,
   trackBackgroundTask,
 } from "./shutdown";
+import {
+  dagStepId,
+  evaluateAgentDag,
+  selectAgentDagStep,
+  stopPendingDagSteps,
+  usesDagExecution,
+} from "./agentDag";
+import { recordAgentEventSafely } from "./agentEventCore";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -73,6 +81,7 @@ export interface AgentStep {
   milestoneId?: string;
   estimatedMinutes?: number;
   sourceRefs?: Array<{ type: string; id: string; label?: string }>;
+  executionMode?: "dag";
   /** record_to_database 用：目標資料庫 id（規劃端已對照組可寫資料庫解析，非 LLM 原始輸出） */
   tableId?: string;
   /** record_to_database 用：要寫入的一列資料（鍵＝欄位 key） */
@@ -139,10 +148,13 @@ const STALE_MS = 30 * 60 * 1000;
 const BATCH = 50;
 /** 代理步驟可能同時占用 DB 與外部模型連線；分批限制每輪實際併發。 */
 const MAX_CONCURRENT_ADVANCE = 5;
+const PLAN_APPROVAL_TTL_MS = 14 * 24 * 60 * 60 * 1_000;
+const PLAN_EXPIRY_SWEEP_INTERVAL_MS = 60 * 60 * 1_000;
 
 let started = false;
 /** 防止 setInterval 在慢 sweep/tick 尚未結束時持續堆疊新的整輪 Promise。 */
 let cycleRunning = false;
+let lastPlanExpirySweepAt = 0;
 /** 本進程內推進中的 run：撈到已在推進的直接跳過 */
 const inflight = new Set<string>();
 
@@ -151,7 +163,7 @@ export function startAgentRunner(): void {
   if (started || isShuttingDown()) return;
   started = true;
   void trackBackgroundTask(
-    sweepZombies().catch((err) =>
+    Promise.all([sweepZombies(), sweepExpiredAgentPlans()]).catch((err) =>
       console.warn("[agent] 啟動陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err),
     ),
   );
@@ -162,6 +174,7 @@ export function startAgentRunner(): void {
     void trackBackgroundTask((async () => {
       try {
         await sweepZombies();
+        await sweepExpiredAgentPlans();
       } catch (err) {
         console.warn("[agent] 陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
       }
@@ -205,6 +218,38 @@ async function tick(): Promise<void> {
   }
 }
 
+/** Prevent free, never-approved plans from growing without bound. */
+async function sweepExpiredAgentPlans(): Promise<void> {
+  const now = Date.now();
+  if (now - lastPlanExpirySweepAt < PLAN_EXPIRY_SWEEP_INTERVAL_MS) return;
+  const expired = await db
+    .update(schema.agentRuns)
+    .set({
+      status: "discarded",
+      error: "計畫超過 14 天未核准，已自動過期",
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(schema.agentRuns.status, "awaiting_approval"),
+      lt(schema.agentRuns.createdAt, new Date(now - PLAN_APPROVAL_TTL_MS)),
+    ))
+    .returning({
+      id: schema.agentRuns.id,
+      groupId: schema.agentRuns.groupId,
+      projectId: schema.agentRuns.projectId,
+    });
+  await Promise.all(expired.map((run) => recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    eventKey: "run:expired",
+    eventType: "discarded",
+    actorType: "system",
+    summary: "計畫超過 14 天未核准，已自動過期",
+  })));
+  lastPlanExpirySweepAt = now;
+}
+
 /** 陳屍回收：與 workflowRunner 同語義——卡住的生成收斂退點；送出前被打斷的 run 收攏成 failed */
 async function sweepZombies(): Promise<void> {
   const cutoff = Date.now() - STALE_MS;
@@ -219,17 +264,18 @@ async function sweepZombies(): Promise<void> {
     try {
       await withRunnerAdvisoryLock(agentRunLockName(run.id), async () => {
         const steps = run.steps as AgentStep[];
-        const step = steps[run.currentStep];
-        if (!step) return;
-        if (step.generationId) {
-          let gen: GenerationRow | null = null;
-          try {
-            gen = await advanceGeneration(step.generationId);
-          } catch (err) {
-            if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
-          }
-          if (gen && (gen.status === "queued" || gen.status === "running") && gen.updatedAt.getTime() < cutoff) {
-            await reapStuckGeneration(gen.id);
+        const generationSteps = steps.filter((step) => step.status === "running" && step.generationId);
+        if (generationSteps.length) {
+          for (const step of generationSteps) {
+            let gen: GenerationRow | null = null;
+            try {
+              gen = await advanceGeneration(step.generationId!);
+            } catch (err) {
+              if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
+            }
+            if (gen && (gen.status === "queued" || gen.status === "running") && gen.updatedAt.getTime() < cutoff) {
+              await reapStuckGeneration(gen.id);
+            }
           }
         } else if (run.updatedAt.getTime() < cutoff) {
           await failStaleRun(run);
@@ -250,12 +296,13 @@ async function failStaleRun(run: RunRow): Promise<void> {
   for (const s of steps) {
     if (s.generationId) await reapStuckGeneration(s.generationId);
   }
-  const step = steps[fresh.currentStep];
+  const staleIndex = selectAgentDagStep(steps);
+  const step = steps[staleIndex];
   if (step) {
     if (step.status === "pending" || step.status === "running") step.status = "failed";
     step.detail = "系統重啟中斷，自動回收";
   }
-  markRestStopped(steps, fresh.currentStep);
+  markRestStopped(steps, staleIndex);
   await saveRun(fresh.id, { steps, status: "failed", error: "這個代理計畫在執行途中被系統重啟打斷，已自動停止——可重新規劃一次" });
 }
 
@@ -314,7 +361,62 @@ async function saveRun(runId: string, patch: Partial<typeof schema.agentRuns.$in
     }
     return;
   }
+  if (status === "running" || status === "waiting") {
+    if (Object.keys(rest).length) {
+      await db
+        .update(schema.agentRuns)
+        .set({ ...rest, updatedAt: new Date() })
+        .where(and(
+          eq(schema.agentRuns.id, runId),
+          inArray(schema.agentRuns.status, ["running", "waiting"]),
+        ));
+    }
+    await db
+      .update(schema.agentRuns)
+      .set({ status, updatedAt: new Date() })
+      .where(and(
+        eq(schema.agentRuns.id, runId),
+        inArray(schema.agentRuns.status, ["running", "waiting"]),
+      ));
+    return;
+  }
   await db.update(schema.agentRuns).set({ ...patch, updatedAt: new Date() }).where(eq(schema.agentRuns.id, runId));
+}
+
+/** Re-evaluate the whole dependency graph after one step changes state. */
+async function saveDagProgress(run: RunRow, steps: AgentStep[]): Promise<void> {
+  const progress = evaluateAgentDag(steps);
+  if (progress.status === "failed") {
+    const blocked = steps[progress.nextIndex];
+    if (blocked?.status === "pending") {
+      blocked.status = "failed";
+      blocked.detail = progress.reason ?? "步驟依賴無法完成";
+      markRestStopped(steps, progress.nextIndex);
+    }
+    await recordAgentEventSafely({
+      runId: run.id,
+      groupId: run.groupId,
+      projectId: run.projectId,
+      stepId: blocked ? stableStepId(blocked, progress.nextIndex) : null,
+      stepIndex: progress.nextIndex,
+      eventKey: `run:dependency-failed:${progress.nextIndex}`,
+      eventType: "step_failed",
+      actorType: "system",
+      summary: progress.reason ?? "代理計畫的步驟依賴無法完成",
+    });
+    await saveRun(run.id, {
+      steps,
+      currentStep: progress.nextIndex,
+      status: "failed",
+      error: progress.reason ?? "代理計畫的步驟依賴無法完成",
+    });
+    return;
+  }
+  await saveRun(run.id, {
+    steps,
+    currentStep: progress.nextIndex,
+    status: progress.status,
+  });
 }
 
 /** 目前步驟之後仍在排隊的一律標 stopped（run 已到終局，不會再送出） */
@@ -380,6 +482,10 @@ export function decideSplitRecovery(
 }
 
 function markRestStopped(steps: AgentStep[], fromExclusive: number): void {
+  if (usesDagExecution(steps)) {
+    stopPendingDagSteps(steps);
+    return;
+  }
   for (let j = fromExclusive + 1; j < steps.length; j++) {
     if (steps[j].status === "pending") steps[j].status = "stopped";
   }
@@ -461,6 +567,25 @@ async function checkRunAuthority(run: RunRow): Promise<string | null> {
  * 自動歸到操作紀錄的「AI 助手與代理」類別。
  */
 function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, error?: string): void {
+  void trackBackgroundTask(recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    stepId: stableStepId(step, idx),
+    stepIndex: idx,
+    eventKey: `step:${stableStepId(step, idx)}:${ok ? "completed" : "failed"}`,
+    eventType: ok ? "step_completed" : "step_failed",
+    actorType: "ai",
+    actorId: run.userId,
+    summary: ok ? `完成：${step.note}` : `失敗：${step.note}`,
+    data: {
+      kind: step.kind,
+      detail: step.detail,
+      sourceRefs: step.sourceRefs ?? [],
+      outputRefs: step.outputRefs ?? [],
+      error,
+    },
+  }));
   void trackBackgroundTask(
     db
       .insert(schema.auditLog)
@@ -490,10 +615,10 @@ function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, 
 }
 
 function stableStepId(step: AgentStep, idx: number): string {
-  return step.id?.trim() || `step-${idx + 1}`;
+  return dagStepId(step, idx);
 }
 
-function addOutputRef(step: AgentStep, type: "note" | "schedule" | "task", id: string, label: string): void {
+function addOutputRef(step: AgentStep, type: string, id: string, label: string): void {
   const refs = step.outputRefs ?? [];
   if (!refs.some((ref) => ref.type === type && ref.id === id)) {
     refs.push({ type, id, label });
@@ -529,6 +654,16 @@ async function notifyRunFinished(runId: string, status: "done" | "failed"): Prom
   const steps = run.steps as AgentStep[];
   const doneCount = steps.filter((s) => s.status === "done").length;
   const body = formatAgentRunMessage(run.goal, doneCount, steps.length, status, run.error);
+  await recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    eventKey: `run:${status}`,
+    eventType: status === "done" ? "run_completed" : "run_failed",
+    actorType: "system",
+    summary: body,
+    data: { doneCount, total: steps.length, error: run.error },
+  });
   await db.insert(schema.messages).values({
     groupId: run.groupId,
     projectId: run.projectId,
@@ -562,10 +697,10 @@ async function failRun(run: RunRow, steps: AgentStep[], idx: number, msg: string
 /** 推進單一 run 一小步 */
 async function advanceRun(run: RunRow): Promise<void> {
   const steps = run.steps as AgentStep[];
-  const idx = run.currentStep;
+  const idx = selectAgentDagStep(steps);
   const step = steps[idx];
   if (!step) {
-    if (run.status === "running") await saveRun(run.id, { status: "done" });
+    if (run.status === "running") await saveDagProgress(run, steps);
     return;
   }
 
@@ -583,8 +718,7 @@ async function advanceRun(run: RunRow): Promise<void> {
 
   // 使用者已按停且這一步沒有生成在跑：從這一步起全部收停
   if (run.status !== "running") {
-    if (step.status === "pending" || step.status === "running") step.status = "stopped";
-    markRestStopped(steps, idx);
+    stopPendingDagSteps(steps);
     await saveRun(run.id, { steps });
     return;
   }
@@ -602,6 +736,24 @@ async function advanceRun(run: RunRow): Promise<void> {
     const authzError = await checkRunAuthority(run);
     if (authzError) return failRun(run, steps, idx, authzError);
   }
+
+  await recordAgentEventSafely({
+    runId: run.id,
+    groupId: run.groupId,
+    projectId: run.projectId,
+    stepId: stableStepId(step, idx),
+    stepIndex: idx,
+    eventKey: `step:${stableStepId(step, idx)}:started`,
+    eventType: "step_started",
+    actorType: "ai",
+    actorId: run.userId,
+    summary: `開始：${step.note}`,
+    data: {
+      kind: step.kind,
+      dependsOn: step.dependsOn ?? [],
+      sourceRefs: step.sourceRefs ?? [],
+    },
+  });
 
   // ── 非生成類步驟：在 tick 內同步執行（都是快速 DB 操作或單次 LLM 呼叫） ──
   if (step.kind === "create_note") {
@@ -644,7 +796,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
-    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    await saveDagProgress(run, steps);
     return;
   }
 
@@ -674,7 +826,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
-    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    await saveDagProgress(run, steps);
     return;
   }
 
@@ -720,7 +872,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
-    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    await saveDagProgress(run, steps);
     return;
   }
 
@@ -753,7 +905,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
-    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    await saveDagProgress(run, steps);
     return;
   }
 
@@ -799,7 +951,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
-    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    await saveDagProgress(run, steps);
     return;
   }
 
@@ -847,7 +999,7 @@ async function advanceRun(run: RunRow): Promise<void> {
         step.status = "done";
         step.detail = task.taskType === "approval" ? "人員已核准" : "人員已完成任務";
         auditAgentStep(run, step, idx, true);
-        await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+        await saveDagProgress(run, steps);
         return;
       }
       if (task.status === "cancelled") {
@@ -865,7 +1017,19 @@ async function advanceRun(run: RunRow): Promise<void> {
         : task.assigneeId
           ? "等待負責人完成"
           : "等待人員認領並完成";
-      await saveRun(run.id, { steps, status: "waiting" });
+      await recordAgentEventSafely({
+        runId: run.id,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        stepId: stableStepId(step, idx),
+        stepIndex: idx,
+        eventKey: `step:${stableStepId(step, idx)}:waiting`,
+        eventType: "step_waiting",
+        actorType: "system",
+        summary: step.detail,
+        data: { taskId: task.id, taskType: task.taskType, assigneeId: task.assigneeId },
+      });
+      await saveDagProgress(run, steps);
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
@@ -901,9 +1065,10 @@ async function advanceRun(run: RunRow): Promise<void> {
       });
     });
     step.status = "done";
+    addOutputRef(step, "scene", effectId, title);
     step.detail = `已新增「${title.slice(0, 30)}」`;
     auditAgentStep(run, step, idx, true);
-    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    await saveDagProgress(run, steps);
     return;
   }
 
@@ -929,9 +1094,12 @@ async function advanceRun(run: RunRow): Promise<void> {
     if (recovery === "committed") {
       const count = step.splitPreparedScenes!.length;
       step.status = "done";
+      for (let sceneIndex = 0; sceneIndex < count; sceneIndex += 1) {
+        addOutputRef(step, "scene", allSceneIds[sceneIndex], `拆分鏡 ${sceneIndex + 1}`);
+      }
       step.detail = `拆出 ${count} 幕`;
       auditAgentStep(run, step, idx, true);
-      await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+      await saveDagProgress(run, steps);
       return;
     }
     if (recovery === "ambiguous") {
@@ -953,7 +1121,7 @@ async function advanceRun(run: RunRow): Promise<void> {
 
     if (step.status !== "running") {
       step.status = "running";
-      await saveRun(run.id, { steps });
+      await saveRun(run.id, { steps, currentStep: idx });
     }
     try {
       const prepared = step.splitPreparedScenes;
@@ -975,9 +1143,12 @@ async function advanceRun(run: RunRow): Promise<void> {
         assertAccess: () => {},
       });
       step.status = "done";
+      for (let sceneIndex = 0; sceneIndex < result.count; sceneIndex += 1) {
+        addOutputRef(step, "scene", allSceneIds[sceneIndex], `拆分鏡 ${sceneIndex + 1}`);
+      }
       step.detail = `拆出 ${result.count} 幕`;
       auditAgentStep(run, step, idx, true);
-      await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+      await saveDagProgress(run, steps);
     } catch (err) {
       // PostgreSQL 跨 replica 節流在打 NIM 前就擋下、零外部成本：不計次，下輪重試
       if (err instanceof TRPCError && err.code === "TOO_MANY_REQUESTS") return;
@@ -1013,13 +1184,14 @@ async function advanceRun(run: RunRow): Promise<void> {
     try {
       const effectId = await persistStepEffectId(run, steps, step);
       await submitApprovalCore(scene.id, run.userId, () => {}, effectId);
+      addOutputRef(step, "approval", effectId, `第 ${step.sceneNo} 鏡審核`);
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
     step.status = "done";
     step.detail = `第 ${step.sceneNo} 鏡已送審`;
     auditAgentStep(run, step, idx, true);
-    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    await saveDagProgress(run, steps);
     return;
   }
 
@@ -1040,6 +1212,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     try {
       const effectId = await persistStepEffectId(run, steps, step);
       const row = await addDataRowValidated(table, run.userId, step.rowData ?? {}, effectId);
+      addOutputRef(step, "database_row", row.id, table.name);
       step.status = "done";
       step.detail = `已寫入「${table.name}」一列`;
       auditAgentStep(run, step, idx, true);
@@ -1047,7 +1220,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
-    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    await saveDagProgress(run, steps);
     return;
   }
 
@@ -1095,7 +1268,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   if (!step.generationId) {
     step.status = "running";
     step.generationId = randomUUID();
-    await saveRun(run.id, { steps });
+    await saveRun(run.id, { steps, currentStep: idx });
   }
   try {
     // 審查修復：帶入發起人「當下」的真實角色——組員的成本審核門檻（單筆估點 ≥ 門檻須組長核准）
@@ -1126,6 +1299,7 @@ async function advanceRun(run: RunRow): Promise<void> {
 async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, step: AgentStep, gen: GenerationRow): Promise<void> {
   if (gen.status === "done") {
     step.status = "done";
+    addOutputRef(step, "generation", gen.id, step.title ?? step.note);
     step.detail = gen.resultText ? gen.resultText.slice(0, 60) : gen.resultUrl ?? "";
     auditAgentStep(run, step, idx, true);
     if (run.status !== "running") {
@@ -1133,8 +1307,7 @@ async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, st
       await saveRun(run.id, { steps });
       return;
     }
-    const next = idx + 1;
-    await saveRun(run.id, { steps, currentStep: next, ...(next >= steps.length ? { status: "done" as const } : {}) });
+    await saveDagProgress(run, steps);
     return;
   }
   if (gen.status === "failed" || gen.status === "rejected") {
