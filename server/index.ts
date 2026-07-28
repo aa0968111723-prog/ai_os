@@ -1397,6 +1397,28 @@ const httpServer = app.listen(port, () => {
       if (await ensureSchema()) {
         await syncCatalog();
         await ensureSeed();
+        // 即時模型價＋新模型發現（無 FAL_KEY 時退回靜態）
+        try {
+          const { syncLiveModelCatalog } = await import("./services/modelLiveSync");
+          const live = await syncLiveModelCatalog({ discoverPages: Number(process.env.LIVE_MODEL_DISCOVER_PAGES ?? 2) });
+          console.log(
+            `[boot] 模型即時目錄：靜態 ${live.staticUpserted}、即時價 ${live.priced}、新發現 ${live.discovered}` +
+              (live.errors.length ? `（${live.errors[0]}）` : ""),
+          );
+          const everyMs = Number(process.env.LIVE_MODEL_SYNC_INTERVAL_MS ?? 6 * 60 * 60 * 1000);
+          if (everyMs > 0 && !isShuttingDown()) {
+            const timer = setInterval(() => {
+              if (isShuttingDown()) return;
+              void syncLiveModelCatalog({ discoverPages: Number(process.env.LIVE_MODEL_DISCOVER_PAGES ?? 2) }).catch((err) =>
+                console.warn("[modelLive] 週期同步失敗：", err instanceof Error ? err.message : err),
+              );
+            }, everyMs);
+            timer.unref?.();
+            onShutdown(() => clearInterval(timer));
+          }
+        } catch (err) {
+          console.warn("[boot] 模型即時目錄同步略過：", err instanceof Error ? err.message : err);
+        }
         if (isShuttingDown()) return;
         markBootReady();
         // schema 驗證與種子同步後才啟動背景執行器，避免資料庫版本未就緒時空轉報錯。

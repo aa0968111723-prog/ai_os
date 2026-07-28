@@ -9,7 +9,8 @@
 import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
-import { getModel, endpointOf, isNimModel, estimatePoints, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { getModel, endpointOf, isNimModel, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { resolveModel, estimatePointsFor } from "./modelResolve";
 import { worldviewSchema, bilingualChips, STYLE_EN, TONE_EN, type Worldview } from "../../shared/worldview";
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
@@ -185,8 +186,8 @@ export function isUniqueViolation(err: unknown): boolean {
 
 /** 送出生成（守護齊全：孤兒列刪除、原子守門扣點、fal 失敗退點＋標 failed） */
 export async function submitGenerationCore(input: SubmitCoreInput): Promise<GenerationRow> {
-  const model = getModel(input.modelId);
-  if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "未知模型(不在註冊表)" });
+  const model = resolveModel(input.modelId) ?? getModel(input.modelId);
+  if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "未知模型(不在註冊表或即時目錄)" });
   if (model.needs && !input.sourceUrl && !input.sourceAssetId) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
   }
@@ -194,7 +195,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   // 逐次估點：按字計費的 TTS 依實際朗讀文字長度算真實成本；其餘＝扁平 model.points（行為不變）。
   // 一次算好貫穿下面所有站（審核門檻／pointsEst／扣點／送出失敗退點），確保三者永遠一致。
   // TTS 不注入世界觀（見 effectivePrompt），故 input.prompt 即送 fal 的計費文字。
-  const est = estimatePoints(model, { promptChars: input.prompt.length });
+  const est = estimatePointsFor(model, { promptChars: input.prompt.length });
 
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
@@ -407,7 +408,7 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
   if (gen.status !== "queued" && gen.status !== "running") return gen;
   if (!gen.requestId) return gen;
 
-  const model = getModel(gen.modelId);
+  const model = resolveModel(gen.modelId) ?? getModel(gen.modelId);
   const endpoint = model ? endpointOf(model) : gen.modelId;
   const kind = (model?.kind ?? gen.kind) as "image" | "video" | "audio" | "text";
 
