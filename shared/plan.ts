@@ -70,6 +70,7 @@ export const planStepSchema = z.object({
   endsAt: z.string().datetime({ offset: true }).optional(),
   ownerId: z.string().uuid().optional(),
   taskId: z.string().uuid().optional(),
+  taskStepId: z.string().trim().min(1).max(100).optional(),
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   generationId: z.string().uuid().optional(),
   effectId: z.string().uuid().optional(),

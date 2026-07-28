@@ -28,6 +28,11 @@ import {
   updateScheduleItemOnceCore,
 } from "./scheduleCore";
 import {
+  addProjectTaskCore,
+  armTaskWaitCore,
+  getProjectTaskChecked,
+} from "./taskCore";
+import {
   agentRunLockName,
   withRunnerAdvisoryLock,
 } from "./runnerAdvisoryLock";
@@ -55,10 +60,13 @@ export interface AgentStep {
     | "create_note"
     | "append_note"
     | "create_schedule"
-    | "update_schedule";
+    | "update_schedule"
+    | "create_task"
+    | "wait_for_human"
+    | "request_approval";
   /** 人話說明（核准畫面與進度列表顯示） */
   note: string;
-  status: "pending" | "running" | "done" | "failed" | "stopped";
+  status: "pending" | "running" | "waiting" | "done" | "failed" | "stopped";
   /** record_to_database 用：目標資料庫 id（規劃端已對照組可寫資料庫解析，非 LLM 原始輸出） */
   tableId?: string;
   /** record_to_database 用：要寫入的一列資料（鍵＝欄位 key） */
@@ -73,6 +81,12 @@ export interface AgentStep {
   startsAt?: string;
   endsAt?: string;
   ownerId?: string;
+  assigneeId?: string;
+  dueAt?: string;
+  priority?: "low" | "normal" | "high" | "urgent";
+  approverRole?: "project_owner" | "group_leader" | "admin";
+  taskId?: string;
+  taskStepId?: string;
   outputRefs?: Array<{ type: string; id: string; label?: string }>;
   /** generate 用：白名單過的模型 id */
   modelId?: string;
@@ -457,6 +471,7 @@ function auditAgentStep(run: RunRow, step: AgentStep, idx: number, ok: boolean, 
           ...(step.tableId ? { tableId: step.tableId } : {}),
           ...(step.noteId ? { noteId: step.noteId } : {}),
           ...(step.scheduleItemId ? { scheduleItemId: step.scheduleItemId } : {}),
+          ...(step.taskId ? { taskId: step.taskId } : {}),
           ...(step.sceneNo != null ? { sceneNo: step.sceneNo } : {}),
         }) as Record<string, unknown>,
         ok,
@@ -472,12 +487,21 @@ function stableStepId(step: AgentStep, idx: number): string {
   return step.id?.trim() || `step-${idx + 1}`;
 }
 
-function addOutputRef(step: AgentStep, type: "note" | "schedule", id: string, label: string): void {
+function addOutputRef(step: AgentStep, type: "note" | "schedule" | "task", id: string, label: string): void {
   const refs = step.outputRefs ?? [];
   if (!refs.some((ref) => ref.type === type && ref.id === id)) {
     refs.push({ type, id, label });
   }
   step.outputRefs = refs;
+}
+
+function referencedTaskId(steps: AgentStep[], step: AgentStep): string | undefined {
+  if (step.taskId) return step.taskId;
+  if (!step.taskStepId) return undefined;
+  const index = steps.findIndex((candidate, candidateIndex) =>
+    stableStepId(candidate, candidateIndex) === step.taskStepId,
+  );
+  return index >= 0 ? steps[index].taskId : undefined;
 }
 
 /** 終局系統訊息文字（純函式，單元可測）：done/failed 各一句，供發起人與組長在專案動態流即時看到結果 */
@@ -724,6 +748,121 @@ async function advanceRun(run: RunRow): Promise<void> {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
     await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    return;
+  }
+
+  if (step.kind === "create_task") {
+    const title = (step.title ?? step.note ?? "").trim();
+    if (!title) return failRun(run, steps, idx, "計畫沒有指定人類任務標題");
+    if (step.projectId && step.projectId !== run.projectId) {
+      return failRun(run, steps, idx, "人類任務指向其他專案，已阻止跨專案寫入");
+    }
+    const auth = await loadAuthState(run.userId);
+    if (!auth) return failRun(run, steps, idx, "發起人帳號已停用，代理無法建立人類任務");
+    try {
+      const effectId = await persistStepEffectId(run, steps, step);
+      const [existing] = await db.select().from(schema.projectTasks).where(eq(schema.projectTasks.id, effectId));
+      const task = existing ?? await addProjectTaskCore({
+        auth,
+        id: effectId,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        planRunId: run.id,
+        planStepId: stableStepId(step, idx),
+        title,
+        description: step.content ?? step.note,
+        assigneeId: step.assigneeId,
+        priority: step.priority,
+        startsAt: step.startsAt,
+        dueAt: step.dueAt,
+        mentions: step.mentions,
+      });
+      if (
+        task.groupId !== run.groupId
+        || task.projectId !== run.projectId
+        || task.planRunId !== run.id
+        || task.planStepId !== stableStepId(step, idx)
+      ) {
+        return failRun(run, steps, idx, "任務冪等識別碼碰撞，已停止以避免跨計畫覆寫");
+      }
+      step.taskId = task.id;
+      addOutputRef(step, "task", task.id, task.title);
+      step.status = "done";
+      step.detail = task.assigneeId ? "已建立並指派人類任務" : "已建立待認領的人類任務";
+      auditAgentStep(run, step, idx, true);
+    } catch (err) {
+      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+    }
+    await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+    return;
+  }
+
+  if (step.kind === "wait_for_human" || step.kind === "request_approval") {
+    const auth = await loadAuthState(run.userId);
+    if (!auth) return failRun(run, steps, idx, "發起人帳號已停用，代理無法建立等待節點");
+    try {
+      let taskId = referencedTaskId(steps, step);
+      let task = taskId ? await getProjectTaskChecked(auth, taskId) : null;
+      if (!task) {
+        const title = (step.title ?? step.note ?? "").trim();
+        if (!title) return failRun(run, steps, idx, "等待節點沒有任務標題或可解析的任務引用");
+        const effectId = await persistStepEffectId(run, steps, step);
+        const [existing] = await db.select().from(schema.projectTasks).where(eq(schema.projectTasks.id, effectId));
+        task = existing ?? await addProjectTaskCore({
+          auth,
+          id: effectId,
+          groupId: run.groupId,
+          projectId: run.projectId,
+          planRunId: run.id,
+          planStepId: stableStepId(step, idx),
+          taskType: step.kind === "request_approval" ? "approval" : "task",
+          title,
+          description: step.content ?? step.note,
+          assigneeId: step.assigneeId,
+          approverRole: step.kind === "request_approval"
+            ? step.approverRole ?? "group_leader"
+            : undefined,
+          priority: step.priority,
+          startsAt: step.startsAt,
+          dueAt: step.dueAt,
+          mentions: step.mentions,
+        });
+        taskId = task.id;
+      }
+      if (task.groupId !== run.groupId || task.projectId !== run.projectId) {
+        return failRun(run, steps, idx, "等待節點引用了其他專案的人類任務");
+      }
+      if (step.kind === "request_approval" && task.taskType !== "approval") {
+        return failRun(run, steps, idx, "核准節點引用的不是核准任務");
+      }
+      step.taskId = task.id;
+      addOutputRef(step, "task", task.id, task.title);
+      if (task.status === "done") {
+        step.status = "done";
+        step.detail = task.taskType === "approval" ? "人員已核准" : "人員已完成任務";
+        auditAgentStep(run, step, idx, true);
+        await saveRun(run.id, { steps, currentStep: idx + 1, ...(idx + 1 >= steps.length ? { status: "done" as const } : {}) });
+        return;
+      }
+      if (task.status === "cancelled") {
+        return failRun(run, steps, idx, task.taskType === "approval" ? "人員未核准" : "人類任務已取消");
+      }
+      await armTaskWaitCore({
+        auth,
+        taskId: task.id,
+        runId: run.id,
+        stepId: stableStepId(step, idx),
+      });
+      step.status = "waiting";
+      step.detail = task.taskType === "approval"
+        ? "等待符合角色的人員核准"
+        : task.assigneeId
+          ? "等待負責人完成"
+          : "等待人員認領並完成";
+      await saveRun(run.id, { steps, status: "waiting" });
+    } catch (err) {
+      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+    }
     return;
   }
 

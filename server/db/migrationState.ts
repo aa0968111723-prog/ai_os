@@ -82,6 +82,7 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0004_query_indexes",
   "0005_membership_read_uniqueness",
   "0006_agent_plan_effects",
+  "0007_project_human_tasks",
 ] as const;
 
 /**

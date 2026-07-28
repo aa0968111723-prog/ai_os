@@ -33,7 +33,8 @@ export function AiHub({
   const runs = trpc.agents.listByProject.useQuery({ projectId });
   const awaiting = (runs.data ?? []).filter((r) => r.status === "awaiting_approval").length;
   const running = (runs.data ?? []).filter((r) => r.status === "running").length;
-  const hasActiveRun = running > 0 || awaiting > 0;
+  const waiting = (runs.data ?? []).filter((r) => r.status === "waiting").length;
+  const hasActiveRun = running > 0 || waiting > 0 || awaiting > 0;
   const [executionOpen, setExecutionOpen] = useState(hasActiveRun);
   const executionProjectRef = useRef(projectId);
   const previousActiveRef = useRef(hasActiveRun);
@@ -96,6 +97,7 @@ export function AiHub({
         </h2>
         <span className="spacer" />
         {running > 0 && <span className="pill running">執行中 {running}</span>}
+        {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
         {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
         <button
           type="button"
@@ -111,7 +113,7 @@ export function AiHub({
 
       {collapsed && (
         <p className="hint" style={{ margin: "6px 0 0" }}>
-          AI 創作工作台已收合{running > 0 ? `；仍有 ${running} 個計畫在背景執行` : ""}。
+          AI 創作工作台已收合{running + waiting > 0 ? `；仍有 ${running} 個執行中、${waiting} 個等待人員的計畫` : ""}。
         </p>
       )}
 
@@ -181,6 +183,7 @@ export function AiHub({
           >
             <span><Icon name="Film" size={14} /> AI 執行計畫</span>
             {running > 0 && <span className="pill running">執行中 {running}</span>}
+            {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
             {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
             {running === 0 && awaiting === 0 && <span className="hint">目前沒有進行中的計畫</span>}
           </summary>
