@@ -10,6 +10,10 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { signAssetUrl } from "../services/storage";
 import { assertProjectEditable } from "../services/projectAcl";
 import { getModel, endpointOf } from "../../shared/models";
+import {
+  DEFAULT_CLOUD_MOCK_MODEL_ID,
+  submitCloudMockGeneration,
+} from "../services/cloudInference/freeGeneration";
 
 // 注入判斷的單一來源已抽到 services/generationCore（工作流執行器共用）；
 // 這裡 re-export 讓既有引用點（services/mcp.ts）不必改路徑
@@ -390,4 +394,31 @@ export const generationRouter = router({
 
   /** 系統資訊(假生成模式徽章用) */
   info: authedProcedure.query(() => ({ mockMode: isMockMode() })),
+
+  /**
+   * GPU-01：免費 CloudInference mock 圖片 PoC（beam_mock only）。
+   * - 不走 fal、不扣點、不寫 generations 表；同步 submit + 輪詢至終態後直回結果。
+   * - 需 CLOUD_INFERENCE_PROVIDER=beam_mock 或 E2E_MOCK=1；否則 PRECONDITION_FAILED。
+   * - modelId 須 cloud-mock/ 前綴；每日免費額度見 freeGeneration（行程記憶體，非多副本）。
+   */
+  submitCloudMock: authedProcedure
+    .input(
+      z.object({
+        prompt: z.string().min(1, "請填提示詞").max(8000, "提示詞過長（上限 8000 字）"),
+        /** 預設 cloud-mock/concept-image；僅接受 cloud-mock/ 前綴 */
+        modelId: z.string().min(1).max(200).optional(),
+        projectId: z.string().uuid().optional(),
+        /** 冪等鍵：同 key 重送回同一 providerJobId（mock adapter 層） */
+        clientRequestId: z.string().uuid().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) =>
+      submitCloudMockGeneration({
+        userId: ctx.auth.user.id,
+        prompt: input.prompt,
+        modelId: input.modelId ?? DEFAULT_CLOUD_MOCK_MODEL_ID,
+        projectId: input.projectId,
+        idempotencyKey: input.clientRequestId,
+      }),
+    ),
 });
