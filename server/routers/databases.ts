@@ -22,6 +22,12 @@ import { assertProjectEditable, assertProjectNotArchived } from "../services/pro
 import { tabularToRowObjects, TABULAR_FORMATS, type TabularFormat } from "../../shared/tabular";
 import { findProjectLinkedRows } from "../services/databaseProjectLinks";
 import {
+  buildBoundTableFields,
+  getProjectDataTemplate,
+  PROJECT_DATA_TEMPLATE_IDS,
+  type ProjectDataTemplateId,
+} from "../../shared/projectDataTemplates";
+import {
   extractTextFromBuffer,
   fetchImport,
   fetchNotionText,
@@ -233,7 +239,7 @@ export const databasesRouter = router({
   /**
    * 連結到某專案的資料列（專案 × 資料庫細部連結）：掃「這個專案所屬組」可見的資料庫中，
    * 任一 project 型別欄位的值等於此 projectId 的列——讓專案頁一眼看到「哪些資料表提到我」
-   * （例：器材借用表裡指派給本片的器材、任務表裡本片的待辦）。
+   * （例：任務表裡本專案的待辦、借用表裡指派給本專案的項目）。
    * 權限：需是專案所屬組成員（requireGroup）；只掃該組可見範圍的庫（不外洩他組庫）。
    */
   linkedToProject: authedProcedure
@@ -263,12 +269,79 @@ export const databasesRouter = router({
         bucket.push({ id: row.id, data: row.data as DataRowData });
         rowsByTable.set(row.tableId, bucket);
       }
-      const out: Array<{ tableId: string; tableName: string; fields: DataField[]; rows: Array<{ id: string; data: DataRowData }> }> = [];
+      const out: Array<{
+        tableId: string;
+        tableName: string;
+        fields: DataField[];
+        rows: Array<{ id: string; data: DataRowData }>;
+        /** AI 對此庫的存取（與 databaseAcl.agentAccess 同字） */
+        agentAccess: "none" | "read" | "write";
+      }> = [];
       for (const { table } of relevant) {
         const matched = rowsByTable.get(table.id) ?? [];
-        if (matched.length) out.push({ tableId: table.id, tableName: table.name, fields: table.fields as DataField[], rows: matched });
+        if (matched.length) {
+          out.push({
+            tableId: table.id,
+            tableName: table.name,
+            fields: table.fields as DataField[],
+            rows: matched,
+            agentAccess: (table.agentAccess as "none" | "read" | "write") ?? "write",
+          });
+        }
       }
       return out;
+    }),
+
+  /**
+   * 一鍵：為本專案建立已關聯的組資料表——預設組範圍、含專案連結欄、一筆範例列指向本專案。
+   * 不碰 #133 plan/notes；只走 databaseAcl + databaseCore。
+   */
+  createBoundToProject: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      template: z.enum(PROJECT_DATA_TEMPLATE_IDS),
+      /** 可覆寫預設表名 */
+      name: z.string().min(1).max(80).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      assertProjectNotArchived(project);
+      // 組員可建組庫；canCreateIn 會擋無權者
+      const denied = canCreateIn(ctx.auth, "group", project.groupId, undefined);
+      if (denied) throw new TRPCError({ code: "FORBIDDEN", message: denied });
+
+      const tpl = getProjectDataTemplate(input.template as ProjectDataTemplateId);
+      const { fields, sampleData } = buildBoundTableFields(input.template as ProjectDataTemplateId);
+      const fieldError = validateFields(fields);
+      if (fieldError) throw new TRPCError({ code: "BAD_REQUEST", message: fieldError });
+
+      const tableName = (input.name?.trim() || `${tpl.defaultName}`).slice(0, 80);
+      const [table] = await db
+        .insert(schema.dataTables)
+        .values({
+          scope: "group",
+          ownerId: null,
+          groupId: project.groupId,
+          teamId: null,
+          name: tableName,
+          description: `由專案「${project.title}」一鍵建立 · ${tpl.hint}`,
+          fields,
+          memberWritable: true,
+          // 預設：AI 可讀可寫回此表（仍受本人 ACL 限制）；敏感表可事後在資料庫頁改
+          agentAccess: "write",
+          createdBy: ctx.auth.user.id,
+        })
+        .returning();
+
+      try {
+        await addDataRowValidated(table, ctx.auth.user.id, sampleData(input.projectId));
+      } catch (err) {
+        // 表已建、範例列失敗仍回表——使用者可手動加列
+        console.warn("[databases.createBoundToProject] sample row failed:", err instanceof Error ? err.message : err);
+      }
+      return { tableId: table.id, tableName: table.name, template: input.template };
     }),
 
   /**
