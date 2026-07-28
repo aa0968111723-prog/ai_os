@@ -5,9 +5,10 @@ import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { falSubmit, isMockMode, billingBypassed } from "../services/fal";
 import { failStaleGenerationTx, refund, reserveQuota } from "../services/points";
-import { advanceGeneration, submitGenerationCore } from "../services/generationCore";
+import { advanceGeneration } from "../services/generationCore";
+import { executeGenerationCommand } from "../services/generationCommand";
 import { signAssetUrl } from "../services/storage";
-import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
+import { assertProjectEditable } from "../services/projectAcl";
 import { getModel, endpointOf } from "../../shared/models";
 
 // 注入判斷的單一來源已抽到 services/generationCore（工作流執行器共用）；
@@ -81,9 +82,11 @@ export const generationRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) =>
-      submitGenerationCore({
+      // TD-02：人類直呼 tRPC 走 Command（政策＋狀態機＋ACL＋submitGenerationCore）
+      executeGenerationCommand({
+        auth: ctx.auth,
+        source: "web",
         id: input.clientRequestId,
-        userId: ctx.auth.user.id,
         projectId: input.projectId,
         modelId: input.modelId,
         prompt: input.prompt,
@@ -91,13 +94,6 @@ export const generationRouter = router({
         sourceAssetId: input.sourceAssetId,
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
-        assertAccess: async (project) => {
-          const role = requireGroup(ctx.auth, project.groupId); // 多組隔離
-          assertProjectNotArchived(project); // 封存專案不接受付費生成（stale UI／直呼 tRPC 也擋）
-          const { assertProjectEditable } = await import("../services/projectAcl");
-          await assertProjectEditable(ctx.auth, project); // 2.3：專案檢視者不能生成
-          return role;
-        },
       }),
     ),
 
@@ -118,8 +114,9 @@ export const generationRouter = router({
     const assetId = gen.sourceUrl?.match(
       /\/api\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/file/i,
     )?.[1];
-    return submitGenerationCore({
-      userId: ctx.auth.user.id,
+    return executeGenerationCommand({
+      auth: ctx.auth,
+      source: "web",
       projectId: gen.projectId,
       modelId: gen.modelId,
       prompt: gen.prompt,
@@ -133,12 +130,6 @@ export const generationRouter = router({
       workflowRunId: gen.workflowRunId ?? undefined,
       agentRunId: gen.agentRunId ?? undefined,
       reasonPrefix: "重試生成",
-      assertAccess: async (project) => {
-        const role = requireGroup(ctx.auth, project.groupId);
-        assertProjectNotArchived(project); // 封存專案不接受付費生成——與 submit 同口徑（重試＝發起新付費工作）
-        await assertProjectEditable(ctx.auth, project); // 2.3：專案檢視者不能生成
-        return role;
-      },
     });
   }),
 
@@ -322,12 +313,11 @@ export const generationRouter = router({
         return updated;
       }
 
-      // 封存守衛（修 R2-001）：封存專案不得再核准送出付費生成——decideCost 原本從不載入專案，
-      // 讓「送審後被封存」的待核生成仍會被核准、扣點、送 fal，繞過 submit/scenes/agent/schedule 全線的封存凍結。
-      // 比照 agentCore 核准鏈：核准前先讀專案並擋封存（rejected 分支不扣點、已於上方返回，不受影響）。
+      // 封存／狀態機（R2-001 + TD-03）：封存專案不得再核准送出付費生成；paused 仍可核准在途待核。
       const [approveProject] = await db.select().from(schema.projects).where(eq(schema.projects.id, gen.projectId));
       if (!approveProject) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
-      assertProjectNotArchived(approveProject);
+      const { assertProjectAllows } = await import("../services/projectState");
+      assertProjectAllows(approveProject, "approve");
 
       // 核准：先 CAS 認領（awaiting_approval → queued），輸家直接得知已被處理。
       // createdAt 一併改為核准時刻（修 cross-period-approval-bypass-rate-quota）：週/日速率額度以

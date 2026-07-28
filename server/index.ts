@@ -1421,16 +1421,23 @@ const httpServer = app.listen(port, () => {
         }
         if (isShuttingDown()) return;
         markBootReady();
+        // TD-07：PROCESS_ROLE 分離 Web／Worker（web 不啟動 Runner；worker 仍與 all 同跑背景）
+        const { readProcessRole, shouldRunWorkers } = await import("./services/processRole");
+        const processRole = readProcessRole();
         // schema 驗證與種子同步後才啟動背景執行器，避免資料庫版本未就緒時空轉報錯。
-        startWorkflowRunner();
-        startGenerationRunner(); // A：單張生成也改由伺服器背景推進，關頁不再卡「生成中」
-        startAgentRunner(); // AI 代理：核准後的計畫由伺服器背景逐步執行
-        startExportRunner(); // 交付包匯出 job（QA-005）：背景打包＋進度＋過期清理
-        scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
-        startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
-        const { startGoogleCalendarSweep } = await import("./services/googleCalendar");
-        startGoogleCalendarSweep(); // Google 日曆同步：變更即推之外的週期對帳（未設 GOOGLE_CLIENT_ID 時為 no-op）
-        console.log("[boot] ✓ migration/schema 驗證、目錄與種子同步完成，系統就緒（背景執行器已啟動）");
+        if (shouldRunWorkers(processRole)) {
+          startWorkflowRunner();
+          startGenerationRunner(); // A：單張生成也改由伺服器背景推進，關頁不再卡「生成中」
+          startAgentRunner(); // AI 代理：核准後的計畫由伺服器背景逐步執行
+          startExportRunner(); // 交付包匯出 job（QA-005）：背景打包＋進度＋過期清理
+          scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
+          startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
+          const { startGoogleCalendarSweep } = await import("./services/googleCalendar");
+          startGoogleCalendarSweep(); // Google 日曆同步：變更即推之外的週期對帳（未設 GOOGLE_CLIENT_ID 時為 no-op）
+          console.log(`[boot] ✓ migration/schema 就緒；PROCESS_ROLE=${processRole}（背景執行器已啟動）`);
+        } else {
+          console.log(`[boot] ✓ migration/schema 就緒；PROCESS_ROLE=${processRole}（略過背景執行器）`);
+        }
         return;
       }
     } catch (err) {

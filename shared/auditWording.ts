@@ -37,6 +37,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "generation.rename": "重新命名成品",
   "generation.toggleFavorite": "收藏／取消收藏成品",
   "generation.decideCost": "核決超額生成",
+  // 模型即時目錄（Fal 價／新模型上架；開發者手動同步）
+  "models.syncLive": "同步即時模型價格與目錄",
   "quota.updateSettings": "更新點數全域設定",
   "quota.setGroupQuota": "調整組別額度",
   "quota.setGroupBudget": "分配組別點數預算",
@@ -207,7 +209,7 @@ export function humanizeAuditAction(action: string): string {
 export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefixes: readonly string[] }> = [
   { key: "account", label: "帳號與團隊", prefixes: ["auth", "admin"] },
   { key: "project", label: "專案與素材", prefixes: ["projects", "exportJobs"] },
-  { key: "generation", label: "生成與點數", prefixes: ["generation", "quota"] },
+  { key: "generation", label: "生成與點數", prefixes: ["generation", "quota", "models"] },
   { key: "storyboard", label: "分鏡與審批", prefixes: ["scenes", "approvals"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "teamAssistant", "workflows"] },
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters"] },

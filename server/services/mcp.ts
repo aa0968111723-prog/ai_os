@@ -3,7 +3,7 @@
  * - 極簡 Streamable HTTP（無狀態 JSON-RPC POST）。
  * - 身分＝金鑰擁有者：每位夥伴帶「自己的」個人金鑰連進來，工具一律以其真實身分與權限執行——
  *   組隔離（requireGroup）、專案 ACL（assertProjectEditable）、點數額度與成本核准門檻，
- *   全部沿用網頁端同一套守衛（submit_generation 直接重用 submitGenerationCore）。
+ *   全部沿用網頁端同一套守衛（submit_generation 走 executeGenerationCommand）。
  * - 金鑰可設「唯讀」與「到期」（見 services/mcpAuth）：唯讀金鑰經 scopeDeniedReason 擋所有寫入類工具。
  * - 舊共用金鑰另需 ALLOW_LEGACY_MCP_ADMIN_KEY=1，且僅限非 production 本機／CI；正式環境只接受個人金鑰。
  * - 工具（讀/寫分類的單一來源在 shared/mcpCatalog）：
@@ -23,9 +23,9 @@ import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
 import { sanitizeAuditInput } from "./audit";
-import { submitGenerationCore, advanceGeneration } from "./generationCore";
+import { advanceGeneration } from "./generationCore";
+import { executeGenerationCommand } from "./generationCommand";
 import { signAssetUrl, signDbFileUrl } from "./storage";
-import { assertProjectEditable } from "./projectAcl";
 import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity, scopeDeniedReason, type McpScope } from "./mcpAuth";
 import { resolveAgentAccess } from "./databaseAcl";
@@ -1024,23 +1024,18 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     const userPrompt = String(args.prompt ?? "").trim();
     if (!userPrompt) throw new Error("prompt 不可為空");
     const sourceUrl = args.source_url ? String(args.source_url) : undefined;
-    // 重用網頁端同一條核心：世界觀注入、原子守門扣點、fal 送出/失敗退點，且透過 assertAccess
-    // 疊上「專案級 ACL（檢視者不能生成）」與「成本核准門檻（組員達門檻先送審）」——與網頁端行為一致。
-    // userId＝金鑰擁有者本人：扣他的額度、走他的核准門檻、審計記他，真正做到「依自己權限」。
-    const gen = await submitGenerationCore({
-      // 修 R6-MONEY-01：帶客戶端冪等鍵——與網頁端同一套唯一鍵，逾時重送同鍵回既有列、不重複建生成/不雙重扣點
+    // TD-02：MCP 與網頁端同一 Command（政策／狀態機／ACL／扣點／門檻）
+    // userId＝金鑰擁有者本人：扣他的額度、走他的核准門檻、審計記他。
+    const gen = await executeGenerationCommand({
+      auth,
+      source: "mcp",
+      // 修 R6-MONEY-01：客戶端冪等鍵——逾時重送同鍵回既有列、不雙重扣點
       id: typeof args.client_request_id === "string" ? args.client_request_id : undefined,
-      userId: auth.user.id,
       projectId: project.id,
       modelId: String(args.modelId ?? ""),
       prompt: userPrompt,
       sourceUrl,
       reasonPrefix: "MCP 生成",
-      assertAccess: async (proj) => {
-        const role = requireGroup(auth, proj.groupId);
-        await assertProjectEditable(auth, proj); // 檢視者（唯讀）不能生成
-        return role; // 回角色供成本核准門檻判斷組員
-      },
     });
     // 待核准（達門檻的組員）與已送出兩種終局都據實回報，讓外部客戶端知道要等組長核准
     if (gen.status === "awaiting_approval") {
