@@ -955,7 +955,7 @@ export function ProjectPage({ id }: { id: string }) {
 
           {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
           <div id="sec-scenes">
-            <ScenePresetCards projectId={id} selectedIds={sceneIds} onToggle={toggleScene} />
+            <ScenePresetCards projectId={id} selectedIds={sceneIds} onToggle={toggleScene} readOnly={!canEdit} />
           </div>
 
           {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}

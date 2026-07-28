@@ -1,5 +1,19 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { formatAgentRunMessage } from "./agentRunner";
+
+const source = readFileSync(new URL("./agentRunner.ts", import.meta.url), "utf8");
+
+describe("agentRunner sweepZombies placeholder generationId", () => {
+  it("fails stale runs when advanceGeneration returns NOT_FOUND and run is past STALE_MS", () => {
+    // (a′) 佔位 generationId 永遠找不到列時，不得永久卡 running（與 workflowRunner 對齊）
+    expect(source).toContain("!anyGenFound && run.updatedAt.getTime() < cutoff");
+    expect(source).toContain("await failStaleRun(run)");
+    // 註解鎖死語意：不對幽靈 id 退點、視同 case (b)
+    expect(source).toMatch(/佔位 generationId[\s\S]*failStaleRun/);
+    expect(source).toContain("NOT_FOUND");
+  });
+});
 
 describe("formatAgentRunMessage（代理終局系統訊息）", () => {
   it("完成：帶勾、目標、已執行步數", () => {
