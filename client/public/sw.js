@@ -8,6 +8,19 @@
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
+function safePath(url) {
+  try {
+    // 只允許站內路徑，避免惡意 payload 導外站
+    if (typeof url !== "string" || !url) return "/";
+    if (url.startsWith("/") && !url.startsWith("//")) return url;
+    const u = new URL(url, self.location.origin);
+    if (u.origin === self.location.origin) return u.pathname + u.search + u.hash;
+  } catch {
+    /* fallthrough */
+  }
+  return "/";
+}
+
 self.addEventListener("push", (event) => {
   let data = {};
   try {
@@ -17,45 +30,62 @@ self.addEventListener("push", (event) => {
     data = { title: "通知", body: event.data ? event.data.text() : "" };
   }
   const title = data.title || "Aios";
+  const path = safePath(data.url);
   event.waitUntil(
     self.registration.showNotification(title, {
       body: data.body || "",
       // 同 tag 互相取代（如同一發訊人的連續私訊）——手機通知列不被洗版
       tag: data.tag || undefined,
+      renotify: Boolean(data.tag),
       icon: "/icons/icon-192.png",
       badge: "/icons/icon-96.png",
-      data: { url: data.url || "/" },
+      // 部分 Android 會用
+      vibrate: data.silent ? undefined : [80, 40, 80],
+      data: { url: path },
     }),
   );
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = (event.notification.data && event.notification.data.url) || "/";
+  const path = safePath(event.notification.data && event.notification.data.url);
+  const targetUrl = new URL(path, self.location.origin).href;
+
   event.waitUntil(
     (async () => {
-      // 已有開著的分頁→聚焦並導到目標頁；沒有→開新視窗
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      // 優先重用已開著的同站分頁：聚焦並導向目標（避免多開一堆分頁）
       for (const client of windows) {
-        if ("focus" in client) {
-          await client.focus();
+        try {
+          const clientUrl = new URL(client.url);
+          if (clientUrl.origin !== self.location.origin) continue;
+          if ("focus" in client) await client.focus();
           if ("navigate" in client) {
             try {
-              await client.navigate(url);
+              await client.navigate(path);
             } catch {
-              // 導頁失敗（跨源等罕見情形）不阻擋——至少已聚焦到 App
+              // navigate 失敗仍已聚焦
+            }
+          } else {
+            // 無 navigate API：用 postMessage 請前端路由（若有監聽）
+            try {
+              client.postMessage({ type: "aios:navigate", url: path });
+            } catch {
+              /* ignore */
             }
           }
           return;
+        } catch {
+          /* 下一扇窗 */
         }
       }
-      await self.clients.openWindow(url);
+      await self.clients.openWindow(targetUrl);
     })(),
   );
 });
 
 // 推送服務輪替金鑰/回收訂閱時瀏覽器發此事件：盡力就地重訂閱並回報伺服器。
-// 失敗不致命——App 下次開啟時的例行同步（push.subscribe）會把訂閱補正。
+// 失敗不致命——App 下次開啟時的例行同步（push.sync）會把訂閱補正。
 self.addEventListener("pushsubscriptionchange", (event) => {
   const applicationServerKey =
     (event.oldSubscription && event.oldSubscription.options && event.oldSubscription.options.applicationServerKey) || undefined;

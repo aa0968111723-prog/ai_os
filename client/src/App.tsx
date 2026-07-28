@@ -256,7 +256,7 @@ function UserMenu({
            * 文案／圖示刻意與「工作」組的「共用文件下載」明確區隔——前者是團隊共用文件、後者是「你自己的」個資可讀複本，
            * 舊版兩者都叫「資料下載／下載我的資料」又都像下載，非技術創作者分不清（使用者回饋）。 */}
           <a href="/api/me/export" download className="menu-item" role="menuitem" title="下載一份你個人資料的可讀備份（含生成紀錄、留言、筆記、排程；不含密碼）" onClick={close}><Icon name="Download" size={15} />匯出我的個人資料</a>
-          <button className="menu-item" role="menuitem" onClick={() => { close(); onNotifSettings(); }}><Icon name="Bell" size={15} />通知設定</button>
+          <button className="menu-item" role="menuitem" onClick={() => { close(); onNotifSettings(); }}><Icon name="Bell" size={15} />連結手機與電腦</button>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
           <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>
             <Icon name="Undo2" size={15} />{loggingOut ? "登出中…" : "登出"}
@@ -274,7 +274,7 @@ export function App() {
   const logout = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
   const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
   // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/審批通知）。
-  // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到「通知設定」重新啟用。
+  // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到「連結手機與電腦」重新啟用。
   const logoutWithPushCleanup = async () => {
     try {
       const endpoint = await unsubscribeThisDevice();
@@ -283,6 +283,19 @@ export function App() {
     logout.mutate();
   };
   const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
+
+  // Service Worker 點通知後若無法 navigate，會 postMessage 請前端路由
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onMsg = (event: MessageEvent) => {
+      const data = event.data as { type?: string; url?: string } | undefined;
+      if (data?.type === "aios:navigate" && typeof data.url === "string" && data.url.startsWith("/")) {
+        navigate(data.url);
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker.removeEventListener("message", onMsg);
+  }, [navigate]);
 
   // 組切換（多組成員）：記住上次選的組
   const groups = me.data?.groups ?? [];
