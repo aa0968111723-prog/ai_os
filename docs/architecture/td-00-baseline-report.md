@@ -16,7 +16,7 @@
 | TD-05a | auth.me capabilities | ✅ |
 | TD-05b | 導覽 capability 閘門 | ✅ |
 | TD-06 | AppShell / AppRoutes / Header 拆分 | ✅ |
-| TD-07/07b | PROCESS_ROLE + worker 不提供 SPA | ✅ |
+| TD-07/07b | PROCESS_ROLE + worker 不提供 SPA + readiness 區分 web/worker runner | ✅（見 §5 殘件） |
 | TD-08 | schema 領域拆檔 + orphan report | ✅ |
 | TD-09 | cost ledger 模型文件與 shared types | ✅（無破壞 migration） |
 | TD-10 | import boundary ADR + check script | ✅ |
@@ -54,3 +54,20 @@ npm run test:client
 - Policy／Command 為薄殼，可改回直呼 core
 - schema 拆檔為 re-export，回退可合併檔案
 - PROCESS_ROLE 預設 `all`，行為與舊部署一致
+
+## 5. TD-07 remaining（刻意未做／低風險殘件）
+
+已落地：
+
+- `PROCESS_ROLE=web|worker|all`（`server/services/processRole.ts`）
+- web **不**啟動背景 Runner（generation／workflow／agent／export／feedback／calendar sweep）
+- worker **不**掛 SPA 靜態檔；非 API catch-all 回 503 JSON（TD-07b）
+- `/api/ready` 回傳 `processRole`；web 的 `components.runner` 為 skipped，不拖垮就緒
+
+刻意未做（需獨立 PR，避免大重寫）：
+
+| 殘件 | 現況 | 建議後續 |
+|---|---|---|
+| `createApp()` / 完整 bootstrap 拆檔 | 僅有 `server/bootstrap/httpSurface.ts`、`runnerReadiness.ts`；路由仍在 `server/index.ts` | 依 `docs/核心模組拆解計畫.md` 分階段抽出 |
+| worker 剝除產品 API（tRPC／REST／upload） | worker 仍掛完整 API 表面（與 monorepo 單映像共用 process 一致）；僅 SPA 關閉 | 部署拆映像後再加 HTTP surface 閘門 |
+| 多 replica 同工作去重 | 既有 runner advisory lock／CAS；非本批範圍 | 維運多 replica 時回歸 lease fencing |

@@ -58,6 +58,7 @@ import {
 } from "./services/shutdown";
 import { readProcessRole, shouldRunWorkers } from "./services/processRole";
 import { httpSurfaceForRole } from "./bootstrap/httpSurface";
+import { evaluateRunnerReadiness } from "./bootstrap/runnerReadiness";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -192,19 +193,9 @@ app.get("/api/ready", async (_req, res) => {
     components.storage = { ok: false, note: "error（儲存層無法寫入/讀取）" };
   }
 
-  // 生成執行器心跳：boot 完成後 runner 應已啟動且近 60 秒內有 tick（tick 間隔 6 秒）
-  {
-    const hb = runnerHeartbeat();
-    if (!bootReady) {
-      components.runner = { ok: true, note: "pending（等待初始化完成後啟動）" };
-    } else if (!hb.started) {
-      components.runner = { ok: false, note: "not_started（生成執行器未啟動）" };
-    } else if (hb.lastTickAt !== null && Date.now() - hb.lastTickAt > 60_000) {
-      components.runner = { ok: false, note: "stalled（生成執行器逾 60 秒沒有心跳）" };
-    } else {
-      components.runner = { ok: true, note: "ok（生成執行器運作中）" };
-    }
-  }
+  // 生成執行器心跳：worker／all 在 boot 完成後應已啟動且近 60 秒內有 tick；
+  // web 不跑 Runner（TD-07），分項回 skipped 且不拖垮整體就緒。
+  components.runner = evaluateRunnerReadiness(processRole, bootReady, runnerHeartbeat());
 
   // 必要 provider 設定：正式模式需要媒體生成金鑰（只回是否已設定，不洩其值/模式細節）
   components.provider = isMockMode() || process.env.FAL_KEY
@@ -214,8 +205,10 @@ app.get("/api/ready", async (_req, res) => {
   const ok = Object.values(components).every((c) => c.ok);
   // 頂層 db/boot 維持舊版字串形狀：CI e2e 以 grep '"boot":"ready' 等就緒、
   // e2e-phase4 驗頂層 boot 鍵，文件也教管理員看這兩個欄位——分項細節在 components。
+  // processRole：讓部署／探針區分 web 與 worker 實例的必要元件期望。
   res.status(ok ? 200 : 503).json({
     ok,
+    processRole,
     db: components.db.ok ? "connected（資料庫已接通）" : "error（資料庫未接通）",
     boot: bootReady ? "ready（初始化完成）" : "initializing（migration/schema 驗證或種子同步中；持續發生請查部署 log）",
     components,
