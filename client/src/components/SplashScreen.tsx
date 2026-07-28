@@ -56,12 +56,17 @@ export function SplashScreen({
       aria-live="polite"
     >
       <div className="aios-splash__inner">
-        <BrandReveal mode="fade-rise" onceKey="splash" durationMs={700}>
+        <BrandReveal mode="fade-rise" onceKey="splash" durationMs={720}>
           <div className="aios-splash__logo-wrap">
-            <BrandLogo variant="mark" size="hero" decorative className="aios-splash__logo" />
+            <BrandLogo
+              variant="full"
+              size="hero"
+              priority
+              decorative
+              className="aios-splash__logo"
+            />
             <div className="aios-splash__glow" aria-hidden />
           </div>
-          <h1 className="aios-splash__title">{BRAND_NAME}</h1>
           <p className="aios-splash__tagline">{BRAND_TAGLINE}</p>
         </BrandReveal>
 

@@ -7,8 +7,8 @@ describe("BrandLogo", () => {
   it("renders mark with fixed dimensions to avoid CLS", () => {
     render(<BrandLogo variant="mark" size="sm" />);
     const img = screen.getByRole("img", { name: BRAND_NAME });
-    expect(img).toHaveAttribute("width", "22");
-    expect(img).toHaveAttribute("height", "22");
+    expect(img).toHaveAttribute("width", "24");
+    expect(img).toHaveAttribute("height", "24");
     expect(img).toHaveAttribute("src", BRAND_MARK_SRC.color);
   });
 

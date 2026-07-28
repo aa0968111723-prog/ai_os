@@ -60,10 +60,10 @@ export function LoginPage() {
 
   return (
     <div style={{ minHeight: "70vh", display: "grid", placeItems: "center" }}>
-      <div className="card" style={{ width: 400, maxWidth: "92vw", textAlign: "center" }}>
-        <BrandReveal mode="fade-rise" onceKey="login" durationMs={750}>
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: "var(--sp-12)" }}>
-            <BrandLogo variant="full" size="hero" showTagline />
+      <div className="card login-card">
+        <BrandReveal mode="fade-rise" onceKey="login" durationMs={720}>
+          <div className="login-brand">
+            <BrandLogo variant="full" size="hero" showTagline priority />
           </div>
           {/* 可讀標題由 BrandLogo 的 aria-label 提供；表單前保留視覺層級用的隱藏 h1 */}
           <h1 className="sr-only">{BRAND_NAME}</h1>

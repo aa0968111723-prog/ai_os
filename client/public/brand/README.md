@@ -8,9 +8,10 @@ Vite 靜態根目錄為 `client/public/`，網址路徑為 `/brand/*`。
 
 | 檔案 | 用途 |
 |------|------|
-| `logo-aios-color.png` | 完整橫式彩色 Logo（透明底，已裁留白） |
+| `logo-aios-color.png` | 完整橫式彩色 Logo（透明底，~720px 寬） |
+| `logo-aios-color@2x.png` | Retina 2× 完整 Logo |
 | `logo-aios-light.png` / `logo-aios-dark.png` | 淺／深介面（目前同彩色透明底） |
-| `logo-aios-mono.png` | 單色完整 wordmark |
+| `logo-aios-mono.png` | 單色完整 wordmark 剪影 |
 | `logo-aios-color-embedded.svg` | 內嵌 WebP 的 SVG 備援（非重繪向量） |
 | `icon-aios-*.png` | 前方彩色 **A** 標記（App Icon） |
 | `mark-aios-mono.png` | 單色 A 標記 |

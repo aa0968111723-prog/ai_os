@@ -318,8 +318,8 @@ export function App() {
       {/* 強制改密碼時整塊背景 inert：對話框遮罩只擋滑鼠，Tab 仍能聚焦到背景，要靠 inert 一起擋 */}
       <div inert={(mustChangePw || showChangePw || showNotifSettings) || undefined}>
         <header className="topbar">
-          <Link href="/" className="brand" style={{ cursor: "pointer", textDecoration: "none", color: "inherit" }}>
-            <BrandLogo variant="full" size="sm" decorative={false} />
+          <Link href="/" className="brand" aria-label="Aios 首頁">
+            <BrandLogo variant="full" size="sm" responsive priority />
           </Link>
           {me.data && groups.length > 0 && (
             <select

@@ -5,7 +5,9 @@
   z-index: 9999;
   display: grid;
   place-items: center;
-  background: #e9e3d8;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 42%, rgba(255, 252, 246, 0.9) 0%, transparent 70%),
+    #e9e3d8;
   transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
               visibility 0.4s;
 }
@@ -22,60 +24,59 @@
   align-items: center;
   text-align: center;
   padding: 24px;
+  width: min(360px, 88vw);
 }
 
 .aios-splash__logo-wrap {
   position: relative;
-  width: min(200px, 48vw);
-  height: min(200px, 48vw);
+  width: 100%;
+  min-height: 88px;
   display: grid;
   place-items: center;
 }
 
-/* BrandReveal 負責進場；此處僅保證 logo 尺寸不造成 CLS */
-.aios-splash__logo,
-.aios-splash__logo-wrap .brand-logo--mark {
-  width: min(120px, 36vw);
-  height: min(120px, 36vw);
-  object-fit: contain;
+/* 完整橫式 Logo：寬優先，高度隨比例 */
+.aios-splash__logo.brand-logo--full,
+.aios-splash__logo-wrap .brand-logo--full {
   position: relative;
   z-index: 1;
+  width: min(260px, 72vw);
+}
+.aios-splash__logo .brand-logo__full-img,
+.aios-splash__logo-wrap .brand-logo__full-img {
+  width: 100%;
+  height: auto;
+  max-height: none;
+  filter: drop-shadow(0 8px 20px rgba(70, 56, 44, 0.10));
 }
 
 .aios-splash__glow {
   position: absolute;
-  inset: -12%;
+  inset: -28% -12%;
   border-radius: 50%;
   background: radial-gradient(
-    circle,
-    rgba(194, 97, 63, 0.12) 0%,
-    rgba(181, 138, 62, 0.08) 40%,
-    transparent 70%
+    ellipse at center,
+    rgba(232, 92, 52, 0.10) 0%,
+    rgba(245, 168, 48, 0.08) 28%,
+    rgba(72, 180, 120, 0.06) 52%,
+    transparent 72%
   );
   opacity: 1;
-  animation: aios-glow-pulse 2.4s ease-in-out 0.6s infinite;
-}
-
-.aios-splash__title {
-  margin: 20px 0 0;
-  font-family: system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
-  font-size: clamp(22px, 5vw, 28px);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: #46382c;
+  animation: aios-glow-pulse 2.6s ease-in-out 0.5s infinite;
+  pointer-events: none;
 }
 
 .aios-splash__tagline {
-  margin: 8px 0 0;
+  margin: 18px 0 0;
   font-size: clamp(12px, 2.8vw, 14px);
-  font-weight: 400;
-  letter-spacing: 0.06em;
+  font-weight: 500;
+  letter-spacing: 0.14em;
   color: #8a7a68;
 }
 
 .aios-splash__bar {
-  margin-top: 36px;
-  width: 120px;
+  margin-top: 32px;
+  width: 112px;
   height: 3px;
   border-radius: 999px;
   background: #e3d7c2;
@@ -84,20 +85,21 @@
 
 .aios-splash__bar-fill {
   height: 100%;
-  width: 30%;
+  width: 34%;
   border-radius: 999px;
-  background: linear-gradient(90deg, #c2613f, #b58a3e, #9e86c4);
-  animation: aios-bar-slide 1.2s ease-in-out 0.7s infinite;
+  /* 對齊 Aios 字標紅→橙→綠漸層 */
+  background: linear-gradient(90deg, #e24a2f, #f0a030, #3cb878, #2aa8b8);
+  animation: aios-bar-slide 1.15s ease-in-out 0.55s infinite;
 }
 
 @keyframes aios-glow-pulse {
-  0%, 100% { transform: scale(1); opacity: 0.9; }
-  50% { transform: scale(1.08); opacity: 1; }
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.06); opacity: 1; }
 }
 
 @keyframes aios-bar-slide {
   0% { transform: translateX(-120%); }
-  100% { transform: translateX(400%); }
+  100% { transform: translateX(360%); }
 }
 
 @media (prefers-reduced-motion: reduce) {

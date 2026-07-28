@@ -2,6 +2,7 @@ import {
   BRAND_FULL_ASPECT,
   BRAND_FULL_LOGO_READY,
   BRAND_LOGO_SRC,
+  BRAND_LOGO_SRC_2X,
   BRAND_MARK_SRC,
   BRAND_NAME,
   BRAND_SIZE_PX,
@@ -24,12 +25,19 @@ export type BrandLogoProps = {
    * 預設 false：提供「Aios」alt。
    */
   decorative?: boolean;
+  /**
+   * 頂欄等窄位：桌面顯示 full、小螢幕自動切 mark（CSS）。
+   * 需同時掛 `.brand-logo--responsive` 樣式。
+   */
+  responsive?: boolean;
+  /** hero／首屏優先載入 */
+  priority?: boolean;
 };
 
 /**
  * 品牌 Logo 單一入口。路徑集中在 `client/src/brand.ts`。
- * - mark：方型標記（favicon／頂欄／收合）
- * - full：完整品牌；原圖未就緒時用 mark + 文字 wordmark，避免把方圖硬縮成橫式 Logo
+ * - mark：方型標記（favicon／頂欄窄位／收合）
+ * - full：完整橫式 Logo；原圖未就緒時用 mark + 文字 wordmark
  */
 export function BrandLogo({
   variant = "full",
@@ -39,12 +47,17 @@ export function BrandLogo({
   showTagline = false,
   className = "",
   decorative = false,
+  responsive = false,
+  priority = false,
 }: BrandLogoProps) {
   const dims = BRAND_SIZE_PX[size];
   const markSrc = BRAND_MARK_SRC[tone];
   const logoSrc = BRAND_LOGO_SRC[tone];
+  const logo2x = BRAND_LOGO_SRC_2X[tone];
   const alt = decorative ? "" : BRAND_NAME;
   const ariaHidden = decorative || undefined;
+  const loading = priority ? "eager" : "lazy";
+  const fetchPriority = priority ? "high" : undefined;
 
   if (variant === "mark") {
     return (
@@ -57,6 +70,8 @@ export function BrandLogo({
         draggable={false}
         aria-hidden={ariaHidden}
         decoding="async"
+        loading={loading}
+        {...(fetchPriority ? { fetchPriority } : {})}
       />
     );
   }
@@ -64,26 +79,53 @@ export function BrandLogo({
   // 完整 Logo 原圖就緒：單張橫式 PNG
   if (BRAND_FULL_LOGO_READY) {
     const height = dims.fullHeight;
-    // 實圖約 1.97:1；固定高度避免 CLS
     const width = Math.round(height * BRAND_FULL_ASPECT);
     const fullLabel = showTagline ? `${BRAND_NAME} · ${BRAND_TAGLINE}` : BRAND_NAME;
+    const srcSet = logo2x ? `${logoSrc} 1x, ${logo2x} 2x` : undefined;
+
     return (
       <span
-        className={`brand-logo brand-logo--full brand-logo--img brand-logo--${size} brand-logo--tone-${tone} ${className}`.trim()}
-        style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 4 }}
+        className={[
+          "brand-logo",
+          "brand-logo--full",
+          "brand-logo--img",
+          `brand-logo--${size}`,
+          `brand-logo--tone-${tone}`,
+          responsive ? "brand-logo--responsive" : "",
+          className,
+        ]
+          .filter(Boolean)
+          .join(" ")}
         role={decorative ? undefined : "img"}
         aria-label={decorative ? undefined : fullLabel}
         aria-hidden={ariaHidden}
       >
+        {/* 窄螢幕：只顯示 A 標記，避免橫式 Logo 擠壓頂欄 */}
+        {responsive ? (
+          <img
+            className="brand-logo__mark-fallback"
+            src={markSrc}
+            alt=""
+            width={dims.mark}
+            height={dims.mark}
+            draggable={false}
+            aria-hidden
+            decoding="async"
+            loading={loading}
+          />
+        ) : null}
         <img
+          className="brand-logo__full-img"
           src={logoSrc}
+          srcSet={srcSet}
           alt=""
           width={width}
           height={height}
           draggable={false}
           aria-hidden
           decoding="async"
-          style={{ width, height, objectFit: "contain" }}
+          loading={loading}
+          {...(fetchPriority ? { fetchPriority } : {})}
         />
         {showTagline ? (
           <span className="brand-logo__tagline" aria-hidden>
@@ -111,6 +153,7 @@ export function BrandLogo({
         draggable={false}
         aria-hidden
         decoding="async"
+        loading={loading}
       />
       <span className="brand-logo__text">
         <span className="brand-logo__name">{BRAND_NAME}</span>
