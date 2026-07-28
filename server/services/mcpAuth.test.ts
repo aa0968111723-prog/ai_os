@@ -84,7 +84,7 @@ describe("envKeyMatches：固定時間比對", () => {
 
 describe("scopeDeniedReason：唯讀金鑰守衛", () => {
   it("唯讀金鑰 + 寫入類工具 → 擋（含 add_database_row）", () => {
-    for (const w of ["submit_generation", "post_message", "add_database_row", "add_database_rows", "plan_agent", "approve_agent", "add_schedule_item"]) {
+    for (const w of ["submit_generation", "post_message", "add_database_row", "add_database_rows", "update_database_row", "plan_agent", "approve_agent", "add_schedule_item"]) {
       expect(scopeDeniedReason(w, { readOnly: true })).toContain("唯讀");
     }
   });

@@ -9,7 +9,7 @@
  * - 工具（讀/寫分類的單一來源在 shared/mcpCatalog）：
  *     基礎：whoami / list_projects / get_project_context / find_model / submit_generation / post_message
  *     生成取回：list_generations / get_generation / list_assets（成品簽成免登入短效網址）
- *     自訂資料庫：list_databases / query_database / add_database_row / add_database_rows / list_database_files / read_database_file / get_database_stats
+ *     自訂資料庫：list_databases / query_database / add_database_row / add_database_rows / update_database_row / list_database_files / read_database_file / get_database_stats
  *     AI 代理（重用 agentCore）：plan_agent / approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
  *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item
  *     筆記・會議紀錄（組共用、可匯入知識庫）：list_notes / get_note
@@ -28,8 +28,8 @@ import { signAssetUrl, signDbFileUrl } from "./storage";
 import { assertProjectEditable } from "./projectAcl";
 import { requireGroup } from "../trpc";
 import { archivedWriteReason, isMcpEnabled, resolveMcpIdentity, scopeDeniedReason, type McpScope } from "./mcpAuth";
-import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
-import { addDataRowValidated } from "./databaseCore";
+import { resolveAgentAccess } from "./databaseAcl";
+import { addDataRowValidated, updateDataRowValidated } from "./databaseCore";
 import {
   DATABASE_BATCH_REQUEST_LIMIT,
   databaseBatchWriteDenied,
@@ -43,6 +43,13 @@ import {
   parseIdempotencyKey,
 } from "./databaseBatchIdempotency";
 import { formatStatsLine, mediaKindOf, tableStats } from "./databaseMedia";
+import {
+  getAgentReadableTable,
+  listMcpDatabaseFiles,
+  listMcpDatabases,
+  mergeProjectIntoRowData,
+  queryMcpDatabase,
+} from "./databaseMcp";
 import {
   planAgentCore, approveAgentCore, discardAgentCore, stopAgentCore,
   listAgentRunsForProject, getAgentRunChecked,
@@ -61,10 +68,7 @@ import {
   recordRateLimitFailure,
 } from "./rateLimit";
 import { toMcpJsonRpcError } from "./mcpErrors";
-import {
-  escapeLikeLiteral,
-  normalizeDatabaseSearchKeyword,
-} from "./databaseRowSearch";
+import type { DataField } from "../../shared/databaseFields";
 
 const PROTOCOL_VERSION = "2024-11-05";
 
@@ -149,30 +153,48 @@ const TOOLS = [
   },
   {
     name: "list_databases",
-    description: "列出你可存取的自訂資料庫（個人/組/團隊/全站 四層範圍），含欄位定義與列數",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    description:
+      "列出你可存取的自訂資料庫（個人/組/團隊/全站），含欄位、列數、agentAccess、是否有專案連結欄。可帶 projectId：標註 linkedToProject；linkedOnly=true 只回已關聯本專案的表（專案燃料視角）",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "專案 UUID：標註／排序「已關聯本專案」的表" },
+        linkedOnly: { type: "boolean", description: "true＝只列有列資料關聯此 projectId 的表（需同時給 projectId）" },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: "query_database",
-    description: "查詢自訂資料庫的列資料（keyword 全文粗篩、limit 上限 200）；先用 list_databases 找 tableId 與欄位定義",
+    description:
+      "查詢列資料：keyword 全文粗篩、equals 欄位等值、limit/offset 分頁（回 hasMore）。長文字欄自動截斷。先 list_databases 取 tableId 與 fields",
     inputSchema: {
       type: "object",
       properties: {
         tableId: { type: "string" },
-        keyword: { type: "string", maxLength: 200, description: "關鍵字（比對整列資料；最多 200 字）" },
+        keyword: { type: "string", maxLength: 200, description: "關鍵字（比對整列 JSON；最多 200 字）" },
         limit: { type: "number", description: "最多回幾列（預設 50，上限 200）" },
+        offset: { type: "number", description: "略過前幾列（分頁用，預設 0）" },
+        equals: {
+          type: "object",
+          description: "欄位等值篩選，鍵＝欄位 key、值＝字串（例：{\"proj_xxx\":\"專案UUID\"}）",
+          additionalProperties: { type: "string" },
+        },
+        includeFields: { type: "boolean", description: "是否附上 fields（預設 true；已知結構可 false 省 token）" },
       },
       required: ["tableId"],
     },
   },
   {
     name: "add_database_row",
-    description: "在自訂資料庫新增一列。data 的鍵＝欄位 key（見 list_databases 回的 fields）；型別與必填由伺服器驗證",
+    description:
+      "新增一列。data 的鍵＝欄位 key；可選 projectId 自動填滿表上所有「關聯專案」欄（方便寫回專案卡）",
     inputSchema: {
       type: "object",
       properties: {
         tableId: { type: "string" },
         data: { type: "object", description: "{ 欄位key: 值 }" },
+        projectId: { type: "string", description: "可選：預填 project 型欄位" },
       },
       required: ["tableId", "data"],
     },
@@ -204,20 +226,38 @@ const TOOLS = [
             additionalProperties: false,
           },
         },
+        projectId: { type: "string", description: "可選：每列預填 project 型欄位" },
       },
       required: ["tableId", "idempotencyKey", "rows"],
       additionalProperties: false,
     },
   },
   {
-    name: "list_database_files",
-    description: "列出資料庫掛的文件（上傳檔、Google/Notion 匯入、圖片/影音）：名稱、媒體類型、分類、AI 描述、可讀字數；keyword 過濾名稱/分類/描述/內文並回匹配片段。之後用 read_database_file 讀全文",
+    name: "update_database_row",
+    description:
+      "更新一列（整列覆寫 data）。需 AI 可寫；可選 projectId 補齊關聯專案欄。rowId 來自 query_database",
     inputSchema: {
       type: "object",
       properties: {
         tableId: { type: "string" },
-        keyword: { type: "string", description: "過濾名稱／分類／AI 描述／內文包含此關鍵字的文件（內文命中回匹配片段）" },
-        category: { type: "string", description: "只列這個分類的文件" },
+        rowId: { type: "string" },
+        data: { type: "object", description: "{ 欄位key: 值 } 完整列" },
+        projectId: { type: "string", description: "可選：預填 project 型欄位" },
+      },
+      required: ["tableId", "rowId", "data"],
+    },
+  },
+  {
+    name: "list_database_files",
+    description:
+      "列出資料庫文件（上傳／匯入／圖影）：名稱、類型、分類、AI 描述、可讀字數；keyword 回匹配片段。不回全文、不回來源 URL（防洩漏）。全文用 read_database_file",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tableId: { type: "string" },
+        keyword: { type: "string", description: "過濾名稱／分類／AI 描述／內文" },
+        category: { type: "string", description: "只列這個分類" },
+        limit: { type: "number", description: "最多幾筆（預設 100，上限 100）" },
       },
       required: ["tableId"],
     },
@@ -478,57 +518,50 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     }));
   }
 
-  // ── 自訂資料庫工具（不掛專案；權限與 tRPC 同一套 databaseAcl）──
+  // ── 自訂資料庫工具（業務層見 databaseMcp；權限 resolveAgentAccess）──
   if (name === "list_databases") {
-    // 以「AI 介面」的有效權限過濾：agentAccess=none 的庫連列表都不出現（MCP 權限由資料庫管理者控管）
-    const tables = await listVisibleTables(auth);
-    return tables.flatMap((t) => {
-      const access = resolveAgentAccess(auth, t);
-      if (!access.canRead) return [];
-      return [{
-        tableId: t.id,
-        name: t.name,
-        scope: t.scope,
-        description: t.description,
-        fields: t.fields,
-        rowCount: t.rowCount,
-        canWriteRows: access.canWriteRows,
-      }];
-    });
+    const projectId = typeof args.projectId === "string" ? args.projectId : undefined;
+    const linkedOnly = args.linkedOnly === true || args.linkedOnly === "true";
+    return listMcpDatabases(auth, { projectId, linkedOnly });
   }
 
-  if (name === "query_database" || name === "add_database_row" || name === "add_database_rows") {
+  if (
+    name === "query_database"
+    || name === "add_database_row"
+    || name === "add_database_rows"
+    || name === "update_database_row"
+  ) {
     const tableId = String(args.tableId ?? "");
-    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
-    if (!table) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
-    // AI 介面有效權限＝本人權限 ∩ agentAccess 等級（none 連讀都擋、read 擋寫）——
-    // 與 tRPC 同語意：無讀取權當作不存在，不外洩個人庫/他組庫的存在性
-    const access = resolveAgentAccess(auth, table);
-    if (!access.canRead) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
+    const hit = await getAgentReadableTable(auth, tableId);
+    if (!hit) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
+    const { table, access } = hit;
 
     if (name === "query_database") {
-      const conds = [eq(schema.dataRows.tableId, table.id)];
-      const keyword = normalizeDatabaseSearchKeyword(
-        typeof args.keyword === "string" ? args.keyword : "",
-      );
-      if (keyword) conds.push(sql`${schema.dataRows.data}::text ilike ${`%${escapeLikeLiteral(keyword)}%`} escape ${"\\"}`);
-      const requestedLimit = Number(args.limit);
-      const limit = Number.isFinite(requestedLimit)
-        ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 200)
-        : 50;
-      const rows = await db
-        .select({ id: schema.dataRows.id, data: schema.dataRows.data, updatedAt: schema.dataRows.updatedAt })
-        .from(schema.dataRows)
-        .where(and(...conds))
-        .orderBy(desc(schema.dataRows.createdAt))
-        .limit(limit);
-      return { table: table.name, fields: table.fields, rows };
+      const equals =
+        args.equals != null && typeof args.equals === "object" && !Array.isArray(args.equals)
+          ? Object.fromEntries(
+            Object.entries(args.equals as Record<string, unknown>)
+              .filter(([, v]) => typeof v === "string")
+              .map(([k, v]) => [k, String(v)]),
+          )
+          : undefined;
+      return queryMcpDatabase(table, {
+        keyword: typeof args.keyword === "string" ? args.keyword : "",
+        limit: args.limit,
+        offset: args.offset,
+        equals,
+        includeFields: args.includeFields !== false && args.includeFields !== "false",
+      });
     }
 
     if (name === "add_database_rows") {
       const denied = databaseBatchWriteDenied(scope.readOnly, access.canWriteRows);
       if (denied) throw new TRPCError({ code: "FORBIDDEN", message: denied });
-      const rawRows = parseDatabaseBatchRows(args);
+      const projectId = typeof args.projectId === "string" ? args.projectId : undefined;
+      // parseDatabaseBatchRows 回的是 data 物件陣列（非 { data } 包裝）
+      const rawRows = parseDatabaseBatchRows(args).map((data) =>
+        mergeProjectIntoRowData(table.fields as DataField[], data, projectId),
+      );
       const idempotencyKey = parseIdempotencyKey(args.idempotencyKey);
       return executeIdempotentDatabaseBatch({
         table,
@@ -538,78 +571,48 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       });
     }
 
-    // add_database_row：走列寫入單一路徑（與 tRPC/代理/REST 一致，含 20,000 列保險絲）
+    if (name === "update_database_row") {
+      if (!access.canWriteRows) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "這個資料庫不開放 AI 寫入（管理者可在工作台「資料庫」頁調整 AI 存取等級）",
+        });
+      }
+      const rowId = String(args.rowId ?? "");
+      const projectId = typeof args.projectId === "string" ? args.projectId : undefined;
+      const data = mergeProjectIntoRowData(table.fields as DataField[], args.data ?? {}, projectId);
+      try {
+        const updated = await updateDataRowValidated(table, rowId, auth.user.id, data);
+        return { rowId: updated.id, data: updated.data };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "更新失敗";
+        if (msg.includes("找不到")) throw new TRPCError({ code: "NOT_FOUND", message: msg });
+        throw new TRPCError({ code: "BAD_REQUEST", message: msg });
+      }
+    }
+
+    // add_database_row：單一路徑 + 可選 projectId 預填
     if (!access.canWriteRows) {
       throw new TRPCError({
         code: "FORBIDDEN",
         message: "這個資料庫不開放 AI 寫入（管理者可在工作台「資料庫」頁調整 AI 存取等級）",
       });
     }
-    const row = await addDataRowValidated(table, auth.user.id, args.data ?? {});
+    const projectId = typeof args.projectId === "string" ? args.projectId : undefined;
+    const data = mergeProjectIntoRowData(table.fields as DataField[], args.data ?? {}, projectId);
+    const row = await addDataRowValidated(table, auth.user.id, data);
     return { rowId: row.id, data: row.data };
   }
 
   if (name === "list_database_files") {
-    // Zeabur 單容器記憶體有限：禁止 select * 把 textContent 全文灌進 Node。
-    // 字數／關鍵字片段一律在 SQL 端算（與 tRPC listFiles 同口徑）。
     const tableId = String(args.tableId ?? "");
-    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
-    if (!table) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
-    if (!resolveAgentAccess(auth, table).canRead) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
-    const keyword = String(args.keyword ?? "").trim();
-    const keywordLower = keyword.toLowerCase();
-    const categoryFilter = String(args.category ?? "").trim();
-    const conds = [eq(schema.dataFiles.tableId, table.id)];
-    if (categoryFilter) conds.push(eq(schema.dataFiles.category, categoryFilter));
-    if (keyword) {
-      const like = `%${keyword.replace(/[%_\\]/g, "\\$&")}%`;
-      conds.push(or(
-        sql`${schema.dataFiles.name} ilike ${like} escape '\\'`,
-        sql`coalesce(${schema.dataFiles.category}, '') ilike ${like} escape '\\'`,
-        sql`coalesce(${schema.dataFiles.aiDescription}, '') ilike ${like} escape '\\'`,
-        sql`coalesce(${schema.dataFiles.textContent}, '') ilike ${like} escape '\\'`,
-      )!);
-    }
-    // snippet：有 keyword 時只截命中附近 200 字，不回全文
-    const snippetExpr = keyword
-      ? sql<string | null>`case
-          when position(lower(${keywordLower}) in lower(coalesce(${schema.dataFiles.textContent}, ''))) > 0
-          then substr(
-            ${schema.dataFiles.textContent},
-            greatest(1, position(lower(${keywordLower}) in lower(${schema.dataFiles.textContent})) - 80),
-            200
-          )
-          else null
-        end`
-      : sql<string | null>`null`;
-    const files = await db
-      .select({
-        id: schema.dataFiles.id,
-        name: schema.dataFiles.name,
-        mime: schema.dataFiles.mime,
-        sizeBytes: schema.dataFiles.sizeBytes,
-        sourceUrl: schema.dataFiles.sourceUrl,
-        category: schema.dataFiles.category,
-        aiDescription: schema.dataFiles.aiDescription,
-        readableChars: sql<number>`coalesce(length(${schema.dataFiles.textContent}), 0)`,
-        snippet: snippetExpr,
-      })
-      .from(schema.dataFiles)
-      .where(and(...conds))
-      .orderBy(desc(schema.dataFiles.createdAt))
-      .limit(200);
-    return files.map((f) => ({
-      fileId: f.id,
-      name: f.name,
-      mime: f.mime,
-      kind: mediaKindOf(f.mime),
-      sizeBytes: f.sizeBytes,
-      readableChars: Number(f.readableChars) || 0,
-      category: f.category,
-      aiDescription: f.aiDescription ? f.aiDescription.slice(0, 300) : null,
-      sourceUrl: f.sourceUrl,
-      ...(f.snippet ? { snippet: f.snippet } : {}),
-    }));
+    const hit = await getAgentReadableTable(auth, tableId);
+    if (!hit) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
+    return listMcpDatabaseFiles(hit.table, {
+      keyword: typeof args.keyword === "string" ? args.keyword : undefined,
+      category: typeof args.category === "string" ? args.category : undefined,
+      limit: args.limit,
+    });
   }
 
   if (name === "read_database_file") {
@@ -655,11 +658,10 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
 
   if (name === "get_database_stats") {
     const tableId = String(args.tableId ?? "");
-    const [table] = await db.select().from(schema.dataTables).where(and(eq(schema.dataTables.id, tableId), isNull(schema.dataTables.deletedAt)));
-    if (!table) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
-    if (!resolveAgentAccess(auth, table).canRead) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
-    const stats = await tableStats(table);
-    return { table: table.name, summary: formatStatsLine(stats), ...stats };
+    const hit = await getAgentReadableTable(auth, tableId);
+    if (!hit) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個資料庫" });
+    const stats = await tableStats(hit.table);
+    return { table: hit.table.name, tableId: hit.table.id, summary: formatStatsLine(stats), ...stats };
   }
 
   // ── 單筆生成查詢（以 generationId，不掛 projectId）：閉合「送生成→取回成品」的迴路 ──
