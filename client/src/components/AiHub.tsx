@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { AgentCard } from "./AgentCard";
 import { ProjectAssistant } from "./ProjectAssistant";
 
 /**
- * 專案 AI 創作助手（統一深度整合）：一個對話入口統包「問答・發想・拆分鏡・下目標排計畫・查知識與資料」。
- * 使用者只需要面對同一個助手、同一組專案上下文（世界觀＋知識庫＋素材＋分鏡＋生成紀錄＋自訂資料表）：
- * - 問：進度／還沒審的分鏡／該用哪個模型／知識與資料裡的器材與任務——助手邊想邊查（唯讀），過程即時顯示。
- * - 做：單步動作（生成／建分鏡／改分鏡／送審／拆分鏡）由助手「提議」，你按確認才執行。
- * - 跑：多步驟目標由助手排成 AI 執行計畫（plan_agent，免費），在下方核准估點後由伺服器背景逐步跑，
- *   可寫入允許 AI 寫入的資料表（record_to_database）——關掉頁面也會繼續，隨時可停止。
- * 對話（ProjectAssistant）與執行區（AgentCard）恆掛同一張卡：排完計畫立刻在下方看到、核准、追進度。
+ * 專案 AI 創作工作台：對外只呈現一套入口，內部沿用既有助手、生成台、製作範本與執行器。
+ * - 問 AI：問答、發想、拆分鏡、查專案資料。
+ * - 直接生成：前往既有生成台，保留模型、來源素材、點數與核准守門。
+ * - 製作範本：前往既有固定步驟串鏈。
+ * - 執行計畫：多步驟目標由助手規劃，核准後在背景執行。
+ *
+ * 第一階段只統一資訊架構與操作入口，不更名 URL、tRPC procedure、schema、MCP 工具或背景執行契約。
  */
 export function AiHub({
   projectId,
@@ -48,11 +48,33 @@ export function AiHub({
     if (activityStarted) setExecutionOpen(true);
   }, [hasActiveRun, projectId]);
 
+  const goTo = (selector: string) => {
+    if (selector === "#sec-agent") setExecutionOpen(true);
+    requestAnimationFrame(() => {
+      document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const routes: Array<{ label: string; description: string; target: string; icon: IconName }> = [
+    { label: "問 AI", description: "問答、發想、拆分鏡", target: "#sec-assistant", icon: "MessageCircle" },
+    { label: "直接生成", description: "圖片、影片、聲音", target: "#sec-studio", icon: "Image" },
+    { label: "製作範本", description: "固定步驟一次串起", target: "#sec-workflow", icon: "Clapperboard" },
+    { label: "執行計畫", description: "多步任務、估點與核准", target: "#sec-agent", icon: "Film" },
+  ];
+
+  const contextLinks: Array<{ label: string; target: string }> = [
+    { label: "專案設定", target: "#stage-context" },
+    { label: "知識", target: "#sec-knowledge" },
+    { label: "資料來源", target: "#sec-databases" },
+    { label: "素材", target: "#sec-assets" },
+    { label: "分鏡與交付", target: "#stage-deliver" },
+  ];
+
   return (
-    <section className="card card--primary" data-fb="AI 創作助手" id="sec-ai-hub">
+    <section className="card card--primary" data-fb="AI 創作工作台" id="sec-ai-hub">
       <div className="section-heading-row">
         <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作助手
+          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作工作台
         </h2>
         <span className="spacer" />
         {running > 0 && <span className="pill running">執行中 {running}</span>}
@@ -71,15 +93,55 @@ export function AiHub({
 
       {collapsed && (
         <p className="hint" style={{ margin: "6px 0 0" }}>
-          AI 助手與執行計畫已收合{running > 0 ? `；仍有 ${running} 個計畫在背景執行` : ""}。
+          AI 創作工作台已收合{running > 0 ? `；仍有 ${running} 個計畫在背景執行` : ""}。
         </p>
       )}
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
         <p className="hint" style={{ marginTop: 6 }}>
-          在這裡直接說明想完成的事。AI 會先讀取目前專案與允許使用的知識資料，再回答、創作或提出下一步；
-          單一步驟由你確認後執行，多步驟則整理成 AI 執行計畫，核准估點後在背景完成。
+          從同一個工作台開始：先說明想完成的成果，或直接選擇生成、製作範本與執行計畫。
+          所有能力沿用目前專案的知識、資料、素材、分鏡、權限、點數與核准規則。
         </p>
+
+        <div
+          role="navigation"
+          aria-label="AI 創作開始方式"
+          style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: 8, margin: "12px 0" }}
+        >
+          {routes.map((route) => (
+            <button
+              key={route.target}
+              type="button"
+              className="btn-ghost"
+              onClick={() => goTo(route.target)}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                minHeight: 64,
+                padding: "10px 12px",
+                textAlign: "left",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-md)",
+              }}
+            >
+              <Icon name={route.icon} size={16} style={{ marginTop: 2, flexShrink: 0 }} />
+              <span>
+                <b style={{ display: "block" }}>{route.label}</b>
+                <span className="hint" style={{ display: "block", marginTop: 2 }}>{route.description}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div className="ctx-summary" role="group" aria-label="AI 創作工作台可連動的專案系統">
+          連動目前專案：
+          {contextLinks.map((item) => (
+            <button key={item.target} type="button" className="chip pick" onClick={() => goTo(item.target)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
 
         {/* 統一對話入口（舊錨點 sec-assistant 沿用：外部連結／走查腳本靠它定位） */}
         <div id="sec-assistant">
