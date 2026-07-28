@@ -41,9 +41,9 @@ function isActiveRun(r: { status: string; steps: unknown }): boolean {
   return r.status === "running" || (r.steps as RunStep[]).some((s) => s.status === "running");
 }
 
-/** 工作流:一鍵串多個模型——由伺服器背景逐步執行,關掉頁面也會繼續跑(#53 根治)。
+/** 製作範本（底層仍為 workflow）：一鍵串多個模型，由伺服器背景逐步執行，關掉頁面也會繼續跑。
  *  charIds/sceneIds＝生成台勾選的角色/場景卡（二合一）：啟動時一併帶入，整條串鏈的視覺步驟注入同一套錨點；
- *  promptRequest＝提示詞庫「用於工作流」的咒語（nonce 遞增才套用一次） */
+ *  promptRequest＝提示詞庫「用於製作範本」的咒語（nonce 遞增才套用一次） */
 export function WorkflowCard({
   projectId,
   charIds = [],
@@ -60,10 +60,10 @@ export function WorkflowCard({
   const [wfId, setWfId] = useState("");
   const [prompt, setPrompt] = useState("");
 
-  // 提示詞庫「用於工作流」：把咒語填進想法框（已手打內容時先問，不默默覆蓋——與生成台 applyPrompt 同禮節）
+  // 提示詞庫「用於製作範本」：把咒語填進想法框（已手打內容時先問，不默默覆蓋——與生成台 applyPrompt 同禮節）
   useEffect(() => {
     if (!promptRequest) return;
-    if (prompt.trim() && prompt !== promptRequest.text && !window.confirm("要覆蓋工作流想法框裡已輸入的文字嗎？")) return;
+    if (prompt.trim() && prompt !== promptRequest.text && !window.confirm("要覆蓋製作範本想法框裡已輸入的文字嗎？")) return;
     setPrompt(promptRequest.text);
     // 只在 nonce 遞增時套用一次；prompt 刻意不入依賴（入了會在使用者打字時重問）
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -80,7 +80,7 @@ export function WorkflowCard({
       refetchIntervalInBackground: true,
     },
   );
-  // #0 完成通知：偵測工作流 run 由 running 轉 done/failed 的「邊緣」，發一則桌面通知。
+  // #0 完成通知：偵測 run 由 running 轉 done/failed 的「邊緣」，發一則桌面通知。
   // 推進本就在伺服器背景做，這裡純附加通知、不改既有輪詢。
   const prevRunStatusRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
@@ -92,7 +92,7 @@ export function WorkflowCard({
     for (const r of rows) {
       const before = prev.get(r.id);
       if (!isFirst && before === "running" && (r.status === "done" || r.status === "failed")) {
-        finished.push({ title: r.status === "done" ? "工作流完成 ✓" : "工作流失敗", body: r.prompt.slice(0, 20) });
+        finished.push({ title: r.status === "done" ? "製作範本完成 ✓" : "製作範本失敗", body: r.prompt.slice(0, 20) });
       }
       prev.set(r.id, r.status);
     }
@@ -111,7 +111,7 @@ export function WorkflowCard({
     if (!hasActive) return;
     const refresh = () => {
       utils.generation.listByProject.invalidate({ projectId });
-      // 分頁/篩選視圖同步失效，否則工作流逐步落庫的成品在該視圖看不到（修 agent-workflow-refresh-missing-paged）
+      // 分頁/篩選視圖同步失效，否則逐步落庫的成品在該視圖看不到
       utils.generation.listByProjectPaged.invalidate({ projectId });
       utils.quota.my.invalidate();
     };
@@ -133,10 +133,12 @@ export function WorkflowCard({
   const stop = trpc.workflows.stop.useMutation({ onSuccess: () => runs.refetch() });
 
   return (
-    <section className="card" data-fb="工作流">
-      <h2>工作流（一鍵串鏈）</h2>
-      <p className="hint">選一條流程 → 填一次想法 → 由伺服器在背景執行——關掉頁面也會繼續跑，成品進下方生成紀錄。</p>
-      <label htmlFor="wf-flow">流程</label>
+    <section className="card" data-fb="製作範本">
+      <h2>製作範本（固定自動流程）</h2>
+      <p className="hint">
+        適合步驟固定、會重複使用的製作方式。選一個範本、填一次想法，系統會在背景依序完成；關掉頁面也會繼續，成品會進入下方生成紀錄。
+      </p>
+      <label htmlFor="wf-flow">選擇製作範本</label>
       <select id="wf-flow" value={wf?.id ?? ""} onChange={(e) => setWfId(e.target.value)}>
         {(workflows.data ?? []).map((w) => (
           <option key={w.id} value={w.id}>
@@ -145,7 +147,7 @@ export function WorkflowCard({
         ))}
       </select>
       {wf && <p className="hint" style={{ marginTop: 4 }}>{wf.strengths}|適合：{wf.bestFor}</p>}
-      <label htmlFor="wf-idea">你的想法（一句話）</label>
+      <label htmlFor="wf-idea">這次想完成什麼？（一句話）</label>
       <textarea id="wf-idea" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂中一炷香緩緩升起，傳達放下與新生" />
       {/* 二合一回看線：啟動會沿用生成台勾選的角色/場景卡，整條串鏈畫風一致（沒勾就不帶） */}
       {(charIds.length > 0 || sceneIds.length > 0) && (
@@ -167,15 +169,15 @@ export function WorkflowCard({
               presetId: wf.id,
               prompt: prompt.trim(),
               // 與 generation.submit 的 zod 上限同口徑（6/4）：勾超過就取前幾張——
-              // 「沿用勾選」是順手帶入，不因超勾讓整條工作流啟動失敗
+              // 「沿用勾選」是順手帶入，不因超勾讓整條製作範本啟動失敗
               characterIds: charIds.length ? charIds.slice(0, 6) : undefined,
               scenePresetIds: sceneIds.length ? sceneIds.slice(0, 4) : undefined,
             })
           }
         >
-          {start.isPending ? "送出中…" : `執行工作流（約 −${wf?.points ?? 0} 點）`}
+          {start.isPending ? "送出中…" : `執行製作範本（約 −${wf?.points ?? 0} 點）`}
         </button>
-        {hasMyActive && <span className="hint">已有一條在跑</span>}
+        {hasMyActive && <span className="hint">已有一個製作範本在執行</span>}
       </div>
       {start.error && <p className="hint" style={{ marginTop: 6 }}>啟動失敗：{start.error.message}</p>}
       {stop.error && <p className="hint" style={{ marginTop: 6 }}>停止失敗：{stop.error.message}</p>}
@@ -202,7 +204,7 @@ export function WorkflowCard({
             </p>
             {steps.map((s, i) => (
               <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
-                <span style={{ display: "inline-flex" }}><Icon name={STEP_ICON[s.status] ?? "Clock"} size={14} className={s.status === "running" ? "spin" : undefined} /></span>
+                <span style={{ display: "inline-flex" }}><Icon name={STEP_ICON[s.status] ?? "Clock"} size={13} /></span>
                 <span>{s.note}</span>
                 {s.status === "pending" && <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>排隊中</span>}
                 {s.detail && <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>{s.detail}</span>}

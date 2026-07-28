@@ -5,9 +5,9 @@ import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 
 /**
- * 整合連接（/integrations）：每個人自己連「自己的」外部服務——
+ * 連接的資料來源（/integrations）：每個人自己連「自己的」外部服務——
  * Google 雲端硬碟（OAuth，只讀）、Notion（個人 integration token）、外部資料庫/API（自帶金鑰）。
- * 連上後在資料庫的「從網址匯入」「匯入資料」直接生效：私有 Google 檔、自己的 Notion 頁、
+ * 連上後在「知識與資料」的匯入入口直接生效：私有 Google 檔、自己的 Notion 頁、
  * 自家系統的 API 都抓得到。憑證加密存放、永不回顯；權限只及本人，隨時可移除。
  */
 export function IntegrationsPage() {
@@ -21,7 +21,7 @@ export function IntegrationsPage() {
     const q = new URLSearchParams(window.location.search).get("gdrive");
     if (!q) return;
     setFlash(
-      q === "connected" ? "已連結 Google 雲端硬碟——現在可以直接匯入你雲端裡的私有文件了"
+      q === "connected" ? "已連結 Google 雲端硬碟——現在可以到「知識與資料」匯入你的私人文件"
       : q === "denied" ? "已取消 Google 授權——隨時可以再連結"
       : q === "state_mismatch" ? "授權連結已過期，請重新點「連結 Google 雲端」"
       : "連結失敗，請稍後再試",
@@ -33,24 +33,34 @@ export function IntegrationsPage() {
 
   return (
     <div>
-      <h1>整合連接</h1>
+      <h1>連接的資料來源</h1>
       <p className="hint">
-        把「你自己的」Google 雲端、Notion、外部資料庫接進來——連上後在資料庫頁匯入私有內容就像貼公開連結一樣簡單。
-        憑證以 AES-256 加密存放、永遠不會回顯；只有你本人用得到，隨時可以移除。
+        Google 雲端、Notion 與外部 API 都是 AI 可以參考的資料來源。先完成連接，再到「知識與資料」選擇要匯入的內容；
+        匯入後才能加入專案、提供 AI 分析或轉成後續任務。憑證以 AES-256 加密存放、永遠不會回顯，只有你本人用得到。
       </p>
       {flash && <p className="hint" style={{ color: "var(--success-ink)" }}>{flash}</p>}
       {list.error && (
         <p className="error" role="alert">
-          載入整合設定失敗：{list.error.message}　<button className="btn-sm" onClick={() => list.refetch()}>重試</button>
+          載入資料來源設定失敗：{list.error.message}　<button className="btn-sm" onClick={() => list.refetch()}>重試</button>
         </p>
       )}
       {remove.error && <p className="error" role="alert">{remove.error.message}</p>}
 
+      <section className="card" style={{ marginTop: 12 }} data-fb="資料來源使用方式">
+        <h2><Icon name="ArrowRight" size={18} /> 連接之後怎麼用？</h2>
+        <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+          <div><strong>1. 連接來源</strong><p className="hint" style={{ margin: "2px 0 0" }}>在下方連接 Google、Notion 或你自己的 API。</p></div>
+          <div><strong>2. 匯入需要的內容</strong><p className="hint" style={{ margin: "2px 0 0" }}>前往「知識與資料」，選擇文件、頁面或資料列，不會把整個帳號內容全部交給系統。</p></div>
+          <div><strong>3. 加入專案交給 AI 使用</strong><p className="hint" style={{ margin: "2px 0 0" }}>把內容綁定到專案後，AI 創作助手才能引用、分析並提出下一步。</p></div>
+        </div>
+        <p style={{ margin: "12px 0 0" }}><Link href="/databases">前往知識與資料 →</Link></p>
+      </section>
+
       {/* ── Google 雲端硬碟 ── */}
-      <section className="card" style={{ marginTop: 12 }} data-fb="整合-Google雲端卡">
+      <section className="card" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
         <h2><Icon name="CalendarPlus" size={18} /> Google 雲端硬碟</h2>
         <p className="hint" style={{ marginTop: 4 }}>
-          連結後，資料庫「從網址匯入」貼你自己雲端裡的文件／試算表／簡報／檔案連結即可匯入——不必再把檔案設成公開。
+          連結後，到「知識與資料」貼上你私人雲端裡的文件、試算表、簡報或檔案連結即可匯入，不必再把檔案設成公開。
           授權範圍只有「讀取」，本系統不能修改或刪除你雲端裡的任何東西。
         </p>
         {!d ? (
@@ -72,7 +82,7 @@ export function IntegrationsPage() {
               </>
             ) : (
               <span className="hint" style={{ margin: 0 }}>
-                <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——匯入私有檔已生效
+                <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——可在「知識與資料」匯入私人檔案
               </span>
             )}
             <GoogleRemoveButton onRemoved={() => utils.integrations.list.invalidate()} />
@@ -83,10 +93,10 @@ export function IntegrationsPage() {
       {/* ── Notion ── */}
       <NotionCard data={d?.notion ?? null} />
 
-      {/* ── 外部資料庫/API ── */}
+      {/* ── 外部資料來源/API ── */}
       <ApiConnectionsCard apis={d?.apis ?? []} onRemove={(id) => remove.mutate({ id })} removingId={remove.isPending ? remove.variables?.id ?? null : null} />
 
-      <p style={{ marginTop: 24 }}><Link href="/databases">去資料庫用用看 →</Link>　<Link href="/">回作業台</Link></p>
+      <p style={{ marginTop: 24 }}><Link href="/databases">前往知識與資料 →</Link>　<Link href="/">回作業台</Link></p>
     </div>
   );
 }
@@ -116,12 +126,12 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
   const removeNotion = trpc.integrations.removeNotion.useMutation({ onSuccess: () => utils.integrations.list.invalidate() });
 
   return (
-    <section className="card" style={{ marginTop: 12 }} data-fb="整合-Notion卡">
+    <section className="card" style={{ marginTop: 12 }} data-fb="資料來源-Notion卡">
       <h2><Icon name="FileText" size={18} /> Notion</h2>
       <p className="hint" style={{ marginTop: 4 }}>
         到 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">notion.so/my-integrations</a> 建立整合、
         複製 Internal Integration Secret 貼進來，並在 Notion 把要匯入的頁面「連結」給該整合（頁面右上 ⋯ → Connections）。
-        之後資料庫「從網址匯入」貼你的 Notion 頁面連結即可。
+        完成後到「知識與資料」貼上 Notion 頁面連結，即可選擇要加入系統與專案的內容。
         {data?.siteTokenAvailable && !data.connected ? "（站方已設共用 token，你也可以不設、直接用共用的）" : ""}
       </p>
       {!data ? (
@@ -205,15 +215,14 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
   };
 
   return (
-    <section className="card" style={{ marginTop: 12 }} data-fb="整合-外部API卡">
-      <h2><Icon name="Package" size={18} /> 外部資料庫／API</h2>
+    <section className="card" style={{ marginTop: 12 }} data-fb="資料來源-外部API卡">
+      <h2><Icon name="Package" size={18} /> 外部資料來源／API</h2>
       <p className="hint" style={{ marginTop: 4 }}>
-        把你自己系統的 API 接進來（Airtable、Supabase、自建服務、任何回 JSON/CSV 的端點）：
-        存一條「基底網址＋認證標頭」，之後在資料庫的「匯入資料」面板一鍵抓取、直接進表。
-        金鑰加密存放；抓取固定走你登記的主機（憑證絕不會被送去別的網址）、僅限 https。
+        把 Airtable、Supabase、自建服務或任何回傳 JSON／CSV 的端點接進來。這裡只保存「基底網址＋認證標頭」；
+        真正要使用哪些內容，仍到「知識與資料」選擇匯入。金鑰加密存放，抓取固定走你登記的主機，且僅允許 https。
       </p>
 
-      {apis.length === 0 && !adding && <p className="hint">還沒有連接——按下面「新增連接」開始。</p>}
+      {apis.length === 0 && !adding && <p className="hint">還沒有外部資料來源——按下面「新增連接」開始。</p>}
       {apis.map((c) => (
         <div key={c.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--border-soft, #eee)" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

@@ -5,12 +5,12 @@ import { AgentCard } from "./AgentCard";
 import { ProjectAssistant } from "./ProjectAssistant";
 
 /**
- * 專案 AI 代理系統（統一深度整合）：一個對話入口統包「問答・發想・拆分鏡・下目標排計畫・查資料庫」。
- * 不是四張卡也不是四個分頁——同一個代理、同一組上下文（世界觀＋知識庫＋素材＋分鏡＋生成紀錄＋自訂資料庫）：
- * - 問：進度／還沒審的分鏡／該用哪個模型／資料庫裡的器材與任務——代理邊想邊查（唯讀），過程即時顯示。
- * - 做：單步動作（生成／建分鏡／改分鏡／送審／拆分鏡）由代理「提議」，你按確認才執行。
- * - 跑：多步驟目標由代理排成計畫（plan_agent，免費），在下方「代理執行」核准估點後由伺服器背景逐步跑，
- *   可寫入 AI 可寫的資料庫（record_to_database）——關掉頁面也會繼續，隨時可停止。
+ * 專案 AI 創作助手（統一深度整合）：一個對話入口統包「問答・發想・拆分鏡・下目標排計畫・查知識與資料」。
+ * 使用者只需要面對同一個助手、同一組專案上下文（世界觀＋知識庫＋素材＋分鏡＋生成紀錄＋自訂資料表）：
+ * - 問：進度／還沒審的分鏡／該用哪個模型／知識與資料裡的器材與任務——助手邊想邊查（唯讀），過程即時顯示。
+ * - 做：單步動作（生成／建分鏡／改分鏡／送審／拆分鏡）由助手「提議」，你按確認才執行。
+ * - 跑：多步驟目標由助手排成 AI 執行計畫（plan_agent，免費），在下方核准估點後由伺服器背景逐步跑，
+ *   可寫入允許 AI 寫入的資料表（record_to_database）——關掉頁面也會繼續，隨時可停止。
  * 對話（ProjectAssistant）與執行區（AgentCard）恆掛同一張卡：排完計畫立刻在下方看到、核准、追進度。
  */
 export function AiHub({
@@ -49,10 +49,10 @@ export function AiHub({
   }, [hasActiveRun, projectId]);
 
   return (
-    <section className="card card--primary" data-fb="專案 AI 代理系統" id="sec-ai-hub">
+    <section className="card card--primary" data-fb="AI 創作助手" id="sec-ai-hub">
       <div className="section-heading-row">
         <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
-          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> 專案 AI 代理系統
+          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作助手
         </h2>
         <span className="spacer" />
         {running > 0 && <span className="pill running">執行中 {running}</span>}
@@ -71,14 +71,14 @@ export function AiHub({
 
       {collapsed && (
         <p className="hint" style={{ margin: "6px 0 0" }}>
-          AI 對話與執行區已收合{running > 0 ? `；仍有 ${running} 個計畫在背景執行` : ""}。
+          AI 助手與執行計畫已收合{running > 0 ? `；仍有 ${running} 個計畫在背景執行` : ""}。
         </p>
       )}
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
         <p className="hint" style={{ marginTop: 6 }}>
-          一個代理連結全專案與資料庫：問進度、要發想、貼腳本、下目標——都用說的。單步動作提議後你確認執行；
-          多步目標排成計畫、核准估點後由伺服器背景逐步跑。
+          在這裡直接說明想完成的事。AI 會先讀取目前專案與允許使用的知識資料，再回答、創作或提出下一步；
+          單一步驟由你確認後執行，多步驟則整理成 AI 執行計畫，核准估點後在背景完成。
         </p>
 
         {/* 統一對話入口（舊錨點 sec-assistant 沿用：外部連結／走查腳本靠它定位） */}
@@ -99,13 +99,13 @@ export function AiHub({
               setExecutionOpen((open) => !open);
             }}
           >
-            <span><Icon name="Film" size={14} /> 代理執行</span>
+            <span><Icon name="Film" size={14} /> AI 執行計畫</span>
             {running > 0 && <span className="pill running">執行中 {running}</span>}
             {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
             {running === 0 && awaiting === 0 && <span className="hint">目前沒有進行中的計畫</span>}
           </summary>
           <p className="hint" style={{ margin: "8px 0 0" }}>
-            計畫核准後由伺服器背景逐步跑（關頁不中斷）；每步實際扣點走既有守門
+            AI 會把多步驟目標整理成可檢查的計畫；核准後由伺服器背景逐步執行，關閉頁面也不會中斷，實際扣點仍經過既有守門。
           </p>
           <AgentCard projectId={projectId} canEdit={canEdit} isLeader={isLeader} embedded hideComposer />
         </details>
