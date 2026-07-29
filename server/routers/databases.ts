@@ -42,7 +42,11 @@ import {
   userFileUsage,
 } from "../services/databaseFiles";
 import { checkDiskSpace, copyStoredFile, kindFromMime, removeStoredFile, saveBuffer } from "../services/storage";
-import { fetchDriveFile, getNotionToken } from "../services/integrations";
+import {
+  fetchDriveFile,
+  fetchDriveWithPublicFallback,
+  getNotionToken,
+} from "../services/integrations";
 
 /**
  * 自訂資料庫（個人→組→團隊→全站）：表結構 CRUD＋列資料 CRUD＋文件層＋連接（CSV/專案/排程）。
@@ -570,15 +574,20 @@ export const databasesRouter = router({
         ? await fetchDriveFile(ctx.auth.user.id, normalized.kind as "google-doc" | "google-sheet" | "google-slides" | "google-drive", normalized.fileId!)
         : null;
       if (priv?.ok) {
-        fetched = { buf: priv.buf, mime: priv.mime };
         driveName = priv.name;
-      } else {
-        if (priv && !priv.ok && priv.reason === "no-access") driveNoAccess = priv.message;
-        try {
-          fetched = await fetchImport(normalized.fetchUrl);
-        } catch (err) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "抓取失敗" });
-        }
+      }
+      if (priv && !priv.ok && priv.reason === "no-access") driveNoAccess = priv.message;
+      try {
+        fetched = await fetchDriveWithPublicFallback(
+          priv,
+          () => fetchImport(normalized.fetchUrl),
+          "Google 雲端匯入失敗",
+        );
+      } catch (err) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err instanceof Error ? err.message : "抓取失敗",
+        });
       }
       // 期望匯出文字（Google 文件/試算表/簡報）卻拿到 HTML＝多半是私有檔轉跳登入頁——給人話與下一步。
       // 只在「公開退回路徑」檢查（個人授權成功抓到的內容不可能是登入頁——雲端裡真正的 HTML 檔要照常匯入）；
@@ -664,11 +673,11 @@ export const databasesRouter = router({
         const priv = normalized.kind !== "web" && normalized.fileId
           ? await fetchDriveFile(ctx.auth.user.id, normalized.kind as "google-doc" | "google-sheet" | "google-slides" | "google-drive", normalized.fileId)
           : null;
-        if (priv?.ok) {
-          fetched = { buf: priv.buf, mime: priv.mime };
-        } else {
-          fetched = await fetchImport(normalized.fetchUrl);
-        }
+        fetched = await fetchDriveWithPublicFallback(
+          priv,
+          () => fetchImport(normalized.fetchUrl),
+          "Google 雲端重新整理失敗",
+        );
         // Google 文件/試算表/簡報在「公開退回路徑」拿到 HTML＝登入頁（來源被改成私有）——
         // 報錯而非把登入頁當內容「覆蓋掉」既有文字。個人授權成功（priv.ok）與 google-drive
         // 一般檔（HTML 檔轉純文字是既有行為）都不在此判定內，不誤殺。

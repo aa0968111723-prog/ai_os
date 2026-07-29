@@ -1,4 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const proxyFetchMock = vi.hoisted(() => vi.fn());
+
+vi.mock("./http", () => ({
+  proxyFetch: proxyFetchMock,
+}));
+
+vi.mock("node:dns/promises", () => ({
+  lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
 import {
   fetchImport,
   isNotionHost,
@@ -72,9 +82,32 @@ describe("notionPageIdFromUrl", () => {
 });
 
 describe("fetchImport（Notion 防回退）", () => {
+  beforeEach(() => {
+    proxyFetchMock.mockReset();
+  });
+
   it("Notion URL 不可進入一般網頁爬取流程", async () => {
     await expect(
       fetchImport(`https://app.notion.com/p/Ai-${COMPACT_PAGE_ID}?source=copy_link`),
     ).rejects.toThrow("必須透過官方 API");
+    expect(proxyFetchMock).not.toHaveBeenCalled();
+  });
+
+  it("一般短網址重導到 Notion 時，在抓取目標前阻擋", async () => {
+    proxyFetchMock.mockResolvedValueOnce(new Response(null, {
+      status: 302,
+      headers: {
+        location: `https://app.notion.com/p/Ai-${COMPACT_PAGE_ID}?source=copy_link`,
+      },
+    }));
+
+    await expect(fetchImport("https://example.com/notion-short-link"))
+      .rejects.toThrow("必須透過官方 API");
+
+    expect(proxyFetchMock).toHaveBeenCalledTimes(1);
+    expect(proxyFetchMock).toHaveBeenCalledWith(
+      "https://example.com/notion-short-link",
+      expect.objectContaining({ redirect: "manual" }),
+    );
   });
 });

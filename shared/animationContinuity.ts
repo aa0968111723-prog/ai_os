@@ -271,7 +271,9 @@ function lookupCurrent(
   map: CharacterCurrentVersionMap,
   characterId: string,
 ): string | undefined {
-  if (map instanceof Map) return map.get(characterId);
+  if (typeof (map as ReadonlyMap<string, string>).get === "function") {
+    return (map as ReadonlyMap<string, string>).get(characterId);
+  }
   return (map as Readonly<Record<string, string>>)[characterId];
 }
 
