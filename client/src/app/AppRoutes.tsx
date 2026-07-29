@@ -4,8 +4,6 @@ import { Launchpad } from "../pages/Launchpad";
 import { ProjectPage } from "../pages/ProjectPage";
 import { GroupOptionsEditor } from "../components/GroupOptionsEditor";
 
-// 路由層級 code-splitting（QA-025）：管理/資料庫/排程等重頁面延遲載入——
-// 首屏（作業台/專案頁/登入）不揹整個 App 的 JS。lazy 需要 default export，用 then 轉接具名匯出。
 const AdminPage = lazy(() => import("../pages/AdminPage").then((m) => ({ default: m.AdminPage })));
 const AuditLogCard = lazy(() => import("../pages/AdminPage").then((m) => ({ default: m.AuditLogCard })));
 const ConsumptionMonitorCard = lazy(() => import("../pages/AdminPage").then((m) => ({ default: m.ConsumptionMonitorCard })));
@@ -29,7 +27,6 @@ export type AppRoutesProps = {
   canSeeOrg: boolean;
 };
 
-/** Authenticated route table (full membership). URLs must stay identical to pre-TD-06 App.tsx. */
 export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }: AppRoutesProps) {
   return (
     <Switch>
@@ -54,7 +51,6 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       </Route>
       <Route path="/logs">
         {canSeeOrg ? (
-          // 組長也看得到「點數消耗監控」：後端已按呼叫者權限把範圍收斂到自己帶的組
           <div className="stack" style={{ maxWidth: 860, margin: "0 auto" }}>
             <ConsumptionMonitorCard />
             <InsightsCard />
@@ -86,9 +82,6 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/chat"><ChatPage /></Route>
       <Route path="/planner"><PlannerPage groupId={activeGroupId} /></Route>
       <Route path="/databases"><DatabasesPage groupId={activeGroupId} /></Route>
-      {/* key=id：換專案（例如頂欄待辦下拉直接跳另一案、或上一頁/下一頁）時強制重建整棵
-          ProjectPage——否則 id prop 變了但元件不重掛，前一案的 prompt／選中模型／角色場景勾選
-          會殘留到新案，且各卡的 localStorage 初始化只在掛載時讀一次，永遠載不到新案的存檔。 */}
       <Route path="/p/:id">{(params) => <ProjectPage key={params.id} id={params.id} />}</Route>
       <Route>
         <p>
@@ -99,16 +92,12 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
   );
 }
 
-/** Routes available when the user is signed in but not yet in any group. */
 export function UngroupedRoutes() {
   return (
     <Switch>
       <Route path="/help"><HelpPage /></Route>
-      {/* 金鑰管理與帳號無關組別，未分組也可先建立（連進來仍受組隔離限制） */}
       <Route path="/mcp"><McpPage /></Route>
-      {/* 連接的資料來源屬帳號層級（Google/Notion/外部 API 都綁個人）——未分組也可先設定 */}
       <Route path="/integrations"><IntegrationsPage /></Route>
-      {/* 私訊也保持可達：還沒被分組的空檔正需要聯絡管理員／開發者（可訊界由後端守） */}
       <Route path="/chat/:peerId">{(params) => <ChatPage peerId={params.peerId} />}</Route>
       <Route path="/chat"><ChatPage /></Route>
       <Route>

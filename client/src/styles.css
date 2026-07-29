@@ -43,6 +43,7 @@
   --gold:    #b58a3e; --gold-ink:    #8a6620; --gold-soft:    #f3ead6; --gold-rgb: 181 138 62;
   --success: #57764c; --success-ink: #47623d; --success-soft: #e7eee1;
   --danger:  #c7493a; --danger-ink:  #b23a2c; --danger-soft:  #f6e2de;
+  --collab:  #3b828e; --collab-ink:  #275c65; --collab-soft:  #e1eff1; --collab-rgb: 59 130 142;
 
   /* ── 立面：四階暖陰影（兩層、負擴散、暖褐調）＋材質 ── */
   --e1: 0 1px 2px rgba(74,54,32,.06);
