@@ -54,6 +54,10 @@ vi.mock("../../../components/AgentCard", () => ({
   AgentCard: () => <div data-testid="agent-card">agent-card</div>,
 }));
 
+vi.mock("../../../components/WorkflowCard", () => ({
+  WorkflowCard: () => <div data-testid="workflow-card">workflow-card</div>,
+}));
+
 vi.mock("../../../components/ModelPicker", () => ({
   ModelPicker: () => <div data-testid="model-picker">model-picker</div>,
 }));

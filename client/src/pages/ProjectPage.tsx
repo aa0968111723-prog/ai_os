@@ -6,7 +6,6 @@ import { ConfirmButton, HelpTip } from "../components/interactions";
 import { worldviewSchema, type Worldview } from "@shared/worldview";
 import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
-import { WorkflowCard } from "../components/WorkflowCard";
 import { AssetLibrary } from "../components/AssetLibrary";
 import { RecycleBin } from "../components/RecycleBin";
 import { KnowledgeBase } from "../components/KnowledgeBase";
@@ -952,15 +951,13 @@ export function ProjectPage({ id }: { id: string }) {
             characterIds={charIds}
             scenePresetIds={sceneIds}
             generateApplyRequest={generateApply}
+            workflowPromptRequest={wfPromptReq}
             onReuseGenerate={applyPrompt}
             onGenerateSourceChange={setSourceHighlightId}
             studioCollab={zoneProps(COLLAB_ZONES.studio)}
           />
 
-          {/* 製作範本（一鍵串鏈）：沿用生成台勾選的角色/場景卡——整條串鏈的視覺步驟注入同一套錨點 */}
-          <div id="sec-workflow">
-            <WorkflowCard projectId={id} charIds={charIds} sceneIds={sceneIds} promptRequest={wfPromptReq} />
-          </div>
+          {/* 製作範本 WorkflowCard 已移入工作台 TemplateMode（#sec-workflow）；此處不再重複掛卡 */}
 
           {/* 提示詞庫：成功生成的咒語一鍵再用（「再用」還原完整設定帶回生成台；「製作範本」帶進想法框） */}
           <div id="sec-prompts">
@@ -969,7 +966,7 @@ export function ProjectPage({ id }: { id: string }) {
               onUse={applyPrompt}
               onUseForWorkflow={(text) => {
                 setWfPromptReq((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
-                scrollToSelector("#sec-workflow");
+                revealWorkbenchAnchor("#sec-workflow", { projectId: id });
               }}
             />
           </div>

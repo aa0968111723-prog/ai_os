@@ -78,6 +78,29 @@ vi.mock("../../../components/AgentCard", () => ({
   AgentCard: () => <div data-testid="agent-card">agent-card</div>,
 }));
 
+vi.mock("../../../components/WorkflowCard", () => ({
+  WorkflowCard: (props: {
+    projectId: string;
+    charIds?: string[];
+    sceneIds?: string[];
+    embedded?: boolean;
+    pickRequest?: { templateId: string; nonce: number } | null;
+    promptRequest?: { text: string; nonce: number } | null;
+  }) => (
+    <div
+      data-testid="workflow-card"
+      data-project-id={props.projectId}
+      data-char-ids={(props.charIds ?? []).join(",")}
+      data-scene-ids={(props.sceneIds ?? []).join(",")}
+      data-embedded={props.embedded ? "1" : "0"}
+      data-template-id={props.pickRequest?.templateId ?? ""}
+      data-prompt={props.promptRequest?.text ?? ""}
+    >
+      workflow-card
+    </div>
+  ),
+}));
+
 vi.mock("../../../components/ModelPicker", () => ({
   ModelPicker: ({
     onChange,
@@ -253,7 +276,8 @@ describe("CreationWorkbench", () => {
       expect(screen.getByLabelText("想完成什麼？")).toHaveValue("用範本跑片頭");
     });
     expect(screen.getByRole("tab", { name: /製作範本/ })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("button", { name: /前往製作範本/ })).toBeVisible();
+    expect(screen.getByTestId("workflow-card")).toBeInTheDocument();
+    expect(document.getElementById("sec-workflow")).toBeTruthy();
   });
 
   it("supports arrow keys on mode tabs", async () => {
@@ -291,18 +315,69 @@ describe("CreationWorkbench", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/預估消耗/);
   });
 
-  it("template adapter scrolls to #sec-workflow", async () => {
+  it("template mode embeds WorkflowCard with projectId/charIds/sceneIds and #sec-workflow", async () => {
     const user = userEvent.setup();
-    renderWorkbench();
+    renderWorkbench({ characterIds: ["c1", "c2"], scenePresetIds: ["s1"] });
     await user.click(screen.getByRole("tab", { name: /製作範本/ }));
 
-    const workflow = document.createElement("div");
-    workflow.id = "sec-workflow";
-    document.body.appendChild(workflow);
+    const card = screen.getByTestId("workflow-card");
+    expect(card).toBeInTheDocument();
+    expect(card).toHaveAttribute("data-project-id", projectId);
+    expect(card).toHaveAttribute("data-char-ids", "c1,c2");
+    expect(card).toHaveAttribute("data-scene-ids", "s1");
+    expect(card).toHaveAttribute("data-embedded", "1");
+    expect(document.getElementById("sec-workflow")).toBeTruthy();
+    expect(document.getElementById("sec-workflow")?.contains(card)).toBe(true);
+    expect(screen.queryByRole("button", { name: /前往製作範本/ })).toBeNull();
+  });
 
-    await user.click(screen.getByRole("button", { name: /前往製作範本/ }));
-    await waitFor(() => expect(workflow.scrollIntoView).toHaveBeenCalled());
-    workflow.remove();
+  it("template mode applies draft.templateId and goal to WorkflowCard", async () => {
+    const user = userEvent.setup();
+    saveDraft(projectId, {
+      ...emptyDraft("template"),
+      goal: "禪堂香煙範本目標",
+      templateId: "wf/quote-card-economy",
+    });
+    renderWorkbench();
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /製作範本/ })).toHaveAttribute("aria-selected", "true");
+    });
+
+    const card = screen.getByTestId("workflow-card");
+    await waitFor(() => {
+      expect(card).toHaveAttribute("data-template-id", "wf/quote-card-economy");
+      expect(card).toHaveAttribute("data-prompt", "禪堂香煙範本目標");
+    });
+  });
+
+  it("CreationAction run_template bring-in switches mode and wires templateId/goal without start", async () => {
+    renderWorkbench({ characterIds: ["c1"], scenePresetIds: ["s1"] });
+
+    act(() => {
+      lastAssistantProps.onCreationAction!({
+        type: "run_template",
+        templateId: "wf/full-short-economy",
+        goal: "帶入範本目標",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /製作範本/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(generationSubmit).not.toHaveBeenCalled();
+
+    const card = screen.getByTestId("workflow-card");
+    await waitFor(() => {
+      expect(card).toHaveAttribute("data-template-id", "wf/full-short-economy");
+      expect(card).toHaveAttribute("data-prompt", "帶入範本目標");
+    });
+    await waitFor(() => {
+      const stored = loadDraft(projectId);
+      expect(stored.templateId).toBe("wf/full-short-economy");
+      expect(stored.goal).toBe("帶入範本目標");
+      expect(stored.mode).toBe("template");
+    });
   });
 
   it("plan mode embeds agent card and opens on activity", async () => {
