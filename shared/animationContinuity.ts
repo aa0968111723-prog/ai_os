@@ -271,8 +271,10 @@ function lookupCurrent(
   map: CharacterCurrentVersionMap,
   characterId: string,
 ): string | undefined {
-  if (map instanceof Map) return map.get(characterId);
-  return map[characterId];
+  if (typeof (map as ReadonlyMap<string, string>).get === "function") {
+    return (map as ReadonlyMap<string, string>).get(characterId);
+  }
+  return (map as Readonly<Record<string, string>>)[characterId];
 }
 
 /** 由 bible 版本列表建「每角色最高 version 的 id」索引（同 version 取後者） */

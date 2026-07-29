@@ -269,6 +269,50 @@ export function driveImportFailureMessage(result: DriveFetchResult | null, publi
   return result.message;
 }
 
+type DriveImportPayload = { buf: Buffer; mime: string };
+
+/**
+ * Google 私有檔與公開連結的單一退回流程。路由只傳入公開抓取函式，避免 import/refresh
+ * 各自重寫判斷而漏掉憑證錯誤、限流或 Google 服務錯誤的 fail-closed 規則。
+ */
+export async function fetchDriveWithPublicFallback(
+  result: DriveFetchResult | null,
+  fetchPublic: () => Promise<DriveImportPayload>,
+  publicPathLabel = "Google 公開連結抓取失敗",
+): Promise<DriveImportPayload> {
+  if (result?.ok) return { buf: result.buf, mime: result.mime };
+  if (!shouldFallbackToPublicDrive(result)) {
+    throw new Error(driveImportFailureMessage(result, publicPathLabel));
+  }
+  try {
+    return await fetchPublic();
+  } catch (err) {
+    const publicError = err instanceof Error ? err.message : publicPathLabel;
+    throw new Error(driveImportFailureMessage(result, publicError));
+  }
+}
+
+/**
+ * 將非 active 的 Drive 連線轉成匯入結果。已標記 error 的連線必須保留為 error，
+ * 否則呼叫端會把它當成「未連線」並退回公開抓取，重新授權提示就會被 401/404 蓋掉。
+ */
+export function inactiveDriveResult(
+  row: Pick<IntegrationRow, "status" | "lastError"> | null,
+): DriveFetchResult | null {
+  if (!row) {
+    return { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
+  }
+  if (row.status === "active") return null;
+  if (row.status === "error") {
+    return {
+      ok: false,
+      reason: "error",
+      message: row.lastError || DRIVE_REAUTH_MESSAGE,
+    };
+  }
+  return { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
+}
+
 function connectedDriveAccount(row: IntegrationRow): string {
   return typeof row.meta?.email === "string" && row.meta.email ? `（${row.meta.email}）` : "";
 }
@@ -317,13 +361,10 @@ export async function fetchDriveFile(
 ): Promise<DriveFetchResult> {
   if (!isGoogleDriveConfigured()) return { ok: false, reason: "not-connected", message: "站方尚未設定 Google 整合" };
   const row = await findIntegration(userId, "google-drive");
-  if (!row || row.status !== "active") {
-    return {
-      ok: false,
-      reason: "not-connected",
-      message: row?.status === "error" ? row.lastError || DRIVE_REAUTH_MESSAGE : "尚未連結 Google 雲端",
-    };
-  }
+  const unavailable = inactiveDriveResult(row);
+  if (unavailable) return unavailable;
+  // inactiveDriveResult 已保證這裡一定是 active row。
+  if (!row) return { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
   try {
     const id = encodeURIComponent(fileId);
     let url: string;
