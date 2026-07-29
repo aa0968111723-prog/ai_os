@@ -115,6 +115,7 @@ describe("PromptLibrary", () => {
     await user.click(screen.getByRole("button", { name: "再用" }));
     expect(onUse).toHaveBeenCalledOnce();
     expect(onUse).toHaveBeenCalledWith(samplePrompt.text, {
+      promptId: samplePrompt.id,
       modelId: samplePrompt.modelId,
       characterIds: samplePrompt.characterIds,
       scenePresetIds: samplePrompt.scenePresetIds,

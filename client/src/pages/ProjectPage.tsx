@@ -11,7 +11,6 @@ import { RecycleBin } from "../components/RecycleBin";
 import { KnowledgeBase } from "../components/KnowledgeBase";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
-import { PromptLibrary } from "../components/PromptLibrary";
 import { TocNav } from "../components/TocNav";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
@@ -336,8 +335,6 @@ export function ProjectPage({ id }: { id: string }) {
   const [sourceHighlightId, setSourceHighlightId] = useState<string | null>(null);
   /** 把提示詞庫／生成紀錄／分鏡／素材庫的設定送進 DirectGenerateMode（nonce 觸發） */
   const [generateApply, setGenerateApply] = useState<DirectGenerateApplyRequest | null>(null);
-  /** 提示詞庫「用於製作範本」：把咒語帶進製作範本想法框（nonce 遞增觸發 WorkflowCard 套用） */
-  const [wfPromptReq, setWfPromptReq] = useState<{ text: string; nonce: number } | null>(null);
   /** 引導步驟列收合狀態（全部完成後可整條收起，不佔版面） */
   const [onboardCollapsed, setOnboardCollapsed] = useState(false);
   const archiveProject = trpc.projects.setArchived.useMutation({
@@ -381,15 +378,20 @@ export function ProjectPage({ id }: { id: string }) {
    * 避免默默蓋掉手打的提示詞；套用後切到直接生成模式、聚焦提示詞框。
    * settings（可選）＝一併還原模型與角色/場景卡勾選：提示詞庫與生成紀錄存的是「完整用法」，不只文字。
    * 陣列語義：[]＝明確清空現勾（如實還原「當時沒帶卡」）；null/undefined＝不知道，維持現勾不動 */
+  /**
+   * 「用這個提示詞」統一入口。
+   * @returns false when user cancels overwrite confirm (nothing applied);
+   *          true after settings/prompt are applied (for resource drawer close/toast).
+   */
   const applyPrompt = (
     text: string,
     settings?: { modelId?: string | null; characterIds?: string[] | null; scenePresetIds?: string[] | null; sourceAssetId?: string | null },
-  ) => {
+  ): boolean => {
     // 現值：優先 DOM（工作台內表單），再退回 draft storage（可能有 debounce 延遲）
     const live = (document.getElementById("gen-prompt") as HTMLTextAreaElement | null)?.value;
     const current = (live ?? loadDraft(id).prompt ?? "").trim();
     // 這裡刻意保留原生 confirm：只在使用者已手打提示詞時才問「要覆蓋嗎」
-    if (current && !window.confirm("要覆蓋你已輸入的提示詞嗎？")) return;
+    if (current && !window.confirm("要覆蓋你已輸入的提示詞嗎？")) return false;
     if (settings) {
       // 只還原「仍存在」的卡片 id（卡片可能已被刪除）；清單還沒載入就先原樣設定，載入後的清理 effect 會補剪
       if (settings.characterIds) {
@@ -422,6 +424,7 @@ export function ProjectPage({ id }: { id: string }) {
         el?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
     });
+    return true;
   };
 
   // 「從這裡開始」四步：用實際 state 判定完成打勾
@@ -951,27 +954,15 @@ export function ProjectPage({ id }: { id: string }) {
             characterIds={charIds}
             scenePresetIds={sceneIds}
             generateApplyRequest={generateApply}
-            workflowPromptRequest={wfPromptReq}
             onReuseGenerate={applyPrompt}
             onGenerateSourceChange={setSourceHighlightId}
             studioCollab={zoneProps(COLLAB_ZONES.studio)}
           />
 
           {/* 製作範本 WorkflowCard 已移入工作台 TemplateMode（#sec-workflow）；此處不再重複掛卡 */}
+          {/* 提示詞庫 / 生成紀錄 / 執行軌跡：CreationResourceDrawer（#sec-prompts 等錨點在工作台內） */}
 
-          {/* 提示詞庫：成功生成的咒語一鍵再用（「再用」還原完整設定帶回生成台；「製作範本」帶進想法框） */}
-          <div id="sec-prompts">
-            <PromptLibrary
-              projectId={id}
-              onUse={applyPrompt}
-              onUseForWorkflow={(text) => {
-                setWfPromptReq((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
-                revealWorkbenchAnchor("#sec-workflow", { projectId: id });
-              }}
-            />
-          </div>
-
-          <StageLink text="成品會自動存入素材庫；在生成紀錄按「＋加入分鏡」，就會排進下方分鏡列" />
+          <StageLink text="成品會自動存入素材庫；在資源抽屜的生成紀錄按「＋加入分鏡」，就會排進下方分鏡列" />
 
           {/* ③ 分鏡・時間軸・交付：排片、粗剪預覽、送審與打包（SceneList 一體卡全含） */}
           <StageHead

@@ -708,7 +708,12 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
 /* 捲動落點留白 */
 #onboard-worldview, #sec-knowledge, #sec-ai-hub, #sec-characters,
 #sec-scenes, #sec-assets, #sec-recyclebin, #gen-prompt, #sec-prompts,
-#sec-workflow, #onboard-delivery { scroll-margin-top: var(--sp-16); }
+#sec-generations, #sec-trail, #sec-templates-fav, #sec-workflow, #onboard-delivery { scroll-margin-top: var(--sp-16); }
+
+/* WB-05: resource drawer — slightly wider than default modal on desktop */
+.creation-resource-drawer.modal-card {
+  width: min(720px, 100%);
+}
 
 @media (max-width: 820px) {
   /* 手機改 block（單欄 grid 會把 rail 關進只有自身高的格子，sticky 沒有活動空間）；
