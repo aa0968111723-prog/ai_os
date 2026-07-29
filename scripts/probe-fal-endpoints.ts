@@ -36,7 +36,15 @@ import { CATEGORIES, MODELS, endpointOf, isNimModel, tierLabel, type ModelEntry 
 import { proxyFetch } from "../server/services/http";
 import { isMockMode } from "../server/services/fal";
 
-type ProbeCode = "OK_VALIDATED" | "OK_QUEUED_CANCELLED" | "AUTH" | "FORBIDDEN" | "NOT_FOUND" | "RATE" | "TRANSIENT";
+type ProbeCode =
+  | "OK_VALIDATED"
+  | "OK_QUEUED_CANCELLED"
+  | "CANCEL_UNCONFIRMED"
+  | "AUTH"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "RATE"
+  | "TRANSIENT";
 
 interface ProbeResult {
   endpoint: string;
@@ -51,6 +59,7 @@ const OK_CODES: ProbeCode[] = ["OK_VALIDATED", "OK_QUEUED_CANCELLED"];
 const LABEL: Record<ProbeCode, string> = {
   OK_VALIDATED: "✅ 連通(驗證擋下,未生成)",
   OK_QUEUED_CANCELLED: "✅ 連通(誤排佇列已取消)",
+  CANCEL_UNCONFIRMED: "❗ 空輸入已入列但取消未確認",
   AUTH: "❌ 金鑰無效(401)",
   FORBIDDEN: "❌ 無權限(403,需後台開通)",
   NOT_FOUND: "❌ 端點不存在(404,該修 id)",
@@ -91,15 +100,33 @@ async function probeEndpoint(endpoint: string, key: string): Promise<{ httpStatu
   if (status === 200 || status === 202) {
     // 端點接受了空輸入並排入佇列——立刻取消,避免計費
     let cancelNote = "未取回 cancel_url";
+    let cancelConfirmed = false;
     try {
       const data = (await res.json()) as { request_id?: string; cancel_url?: string };
-      const cancelUrl = data.cancel_url ?? (data.request_id ? `https://queue.fal.run/${endpoint}/requests/${data.request_id}/cancel` : null);
+      const queueApp = endpoint.split("/").slice(0, 2).join("/");
+      const cancelUrl = data.cancel_url ?? (data.request_id ? `https://queue.fal.run/${queueApp}/requests/${data.request_id}/cancel` : null);
       if (cancelUrl) {
         const c = await proxyFetch(cancelUrl, { method: "PUT", headers: { Authorization: `Key ${key}` }, timeoutMs: 15_000 });
-        cancelNote = `cancel → HTTP ${c.status}`;
+        const cancelBody = c.ok ? "" : (await c.text().catch(() => "")).slice(0, 120);
+        cancelNote = `cancel → HTTP ${c.status}${cancelBody ? `:${cancelBody}` : ""}`;
+        if (!c.ok) {
+          return {
+            httpStatus: status,
+            code: "CANCEL_UNCONFIRMED",
+            detail: `空輸入已被受理,但取消未確認(${cancelNote});需到 Fal request history 核對`,
+          };
+        }
+        cancelConfirmed = true;
       }
     } catch (err) {
       cancelNote = `取消時出錯:${err instanceof Error ? err.message : String(err)}`;
+    }
+    if (!cancelConfirmed) {
+      return {
+        httpStatus: status,
+        code: "CANCEL_UNCONFIRMED",
+        detail: `空輸入已被受理,但取消未確認(${cancelNote});需到 Fal request history 核對`,
+      };
     }
     return { httpStatus: status, code: "OK_QUEUED_CANCELLED", detail: `空輸入被受理,已嘗試取消(${cancelNote})` };
   }
@@ -132,13 +159,14 @@ function writeReport(results: ProbeResult[], meta: { key: boolean }): void {
   const notFound = byCode("NOT_FOUND");
   const forbidden = byCode("FORBIDDEN");
   const transient = [...byCode("TRANSIENT"), ...byCode("RATE")];
+  const cancelUnconfirmed = byCode("CANCEL_UNCONFIRMED");
 
   const lines: string[] = [
     "# fal 端點連通報告(管道通就好,不實際生成)",
     "",
     `> 產生方式:\`FAL_KEY=... npx tsx scripts/probe-fal-endpoints.ts --yes\``,
     "> 方法:對每個端點送空輸入 `{}`,靠 422/400 驗證失敗確認「端點存在＋金鑰通＋未生成」;200/202 會立即取消。",
-    `> 唯一端點數:**${results.length}**|連通:**${ok.length}**|404 不存在:**${notFound.length}**|403 無權限:**${forbidden.length}**|暫時性:**${transient.length}**`,
+    `> 唯一端點數:**${results.length}**|連通:**${ok.length}**|取消未確認:**${cancelUnconfirmed.length}**|404 不存在:**${notFound.length}**|403 無權限:**${forbidden.length}**|暫時性:**${transient.length}**`,
     "",
     "## ❗ 需要處理:端點不存在(404,該修 shared/models.ts 的 id/endpoint)",
     "",
@@ -153,6 +181,13 @@ function writeReport(results: ProbeResult[], meta: { key: boolean }): void {
   if (forbidden.length) {
     lines.push("| 端點 | 影響的模型 |", "|---|---|");
     for (const r of forbidden) lines.push(`| \`${r.endpoint}\` | ${r.modelIds.join("、")} |`);
+  } else {
+    lines.push("(無)");
+  }
+  lines.push("", "## ❗ 需核對:空輸入已入列但取消未確認", "");
+  if (cancelUnconfirmed.length) {
+    lines.push("| 端點 | HTTP | 說明 |", "|---|---|---|");
+    for (const r of cancelUnconfirmed) lines.push(`| \`${r.endpoint}\` | ${r.httpStatus ?? "—"} | ${r.detail} |`);
   } else {
     lines.push("(無)");
   }

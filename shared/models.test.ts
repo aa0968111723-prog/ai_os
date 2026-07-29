@@ -39,6 +39,19 @@ describe("Fal catalog contract", () => {
       expect(JSON.stringify(input), model.id).not.toBe("{}");
     }
   });
+
+  it("does not publish endpoints proven removed by the production Fal queue", () => {
+    const removed = new Set([
+      "fal-ai/expression-editor",
+      "fal-ai/playai/tts/dialog",
+      "fal-ai/playai/tts/v3",
+      "sonauto/v2/text-to-music",
+      "fal-ai/flux-pro-trainer",
+    ]);
+    for (const model of MODELS) {
+      expect(removed.has(endpointOf(model)), model.id).toBe(false);
+    }
+  });
 });
 
 const v3 = getModel("fal-ai/elevenlabs/tts/eleven-v3")!; // $0.10/千字 → 3.1 點/千字

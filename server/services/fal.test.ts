@@ -8,12 +8,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { extractResult, falRequestBase } from "./fal";
 
 describe("Fal queue request URL", () => {
-  it("保留完整多段模型端點，避免狀態輪詢查到錯誤 app", () => {
+  it("依 Fal 真實回傳契約使用前兩段 app namespace", () => {
     expect(falRequestBase("fal-ai/flux/dev", "req-123")).toBe(
-      "https://queue.fal.run/fal-ai/flux/dev/requests/req-123",
+      "https://queue.fal.run/fal-ai/flux/requests/req-123",
     );
     expect(falRequestBase("fal-ai/wan/v2.2-a14b/image-to-video", "req-456")).toBe(
-      "https://queue.fal.run/fal-ai/wan/v2.2-a14b/image-to-video/requests/req-456",
+      "https://queue.fal.run/fal-ai/wan/requests/req-456",
+    );
+    expect(falRequestBase("sonilo/v1.1/text-to-music", "req-789")).toBe(
+      "https://queue.fal.run/sonilo/v1.1/requests/req-789",
     );
   });
 

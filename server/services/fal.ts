@@ -84,7 +84,12 @@ export function falRequestBase(endpoint: string, requestId: string): string {
   if (!requestId.trim() || requestId.includes("/") || requestId.includes("\\")) {
     throw new Error("Fal request id 格式不正確");
   }
-  return `https://queue.fal.run/${normalized}/requests/${encodeURIComponent(requestId)}`;
+  // Fal accepts a full model endpoint for submission, but its real queue
+  // response/status/cancel URLs use the owning app namespace (first two
+  // segments). Zeabur production probes confirmed, for example:
+  //   fal-ai/image-editing/expression-change -> fal-ai/image-editing/requests/...
+  const queueApp = normalized.split("/").slice(0, 2).join("/");
+  return `https://queue.fal.run/${queueApp}/requests/${encodeURIComponent(requestId)}`;
 }
 
 export async function falStatus(endpoint: string, kind: OutputKind, requestId: string): Promise<FalStatusResult> {
@@ -107,9 +112,6 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
   // 暫時性錯誤（429 限流、5xx、網路例外）→ 回 running 讓輪詢重試，絕不誤判失敗而退點；
   // 只有明確的終局狀態（4xx 非 429、非 COMPLETED、輸出無法解析）才回 failed。
   const isTransient = (code: number): boolean => code === 408 || code === 425 || code === 429 || code >= 500;
-  // Fal's current queue contract retains the full submitted endpoint path for
-  // status and result URLs. Truncating e.g. fal-ai/flux/dev to fal-ai/flux
-  // queries a different app and makes valid jobs look failed.
   const base = falRequestBase(endpoint, requestId);
   let statusRes: Awaited<ReturnType<typeof proxyFetch>>;
   try {
