@@ -78,6 +78,13 @@
       "when": 1785232000000,
       "tag": "0010_model_live_catalog",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785427200000,
+      "tag": "0011_agent_planner_telemetry",
+      "breakpoints": true
     }
   ]
 }

@@ -22,6 +22,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
+import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { sanitizeAuditInput } from "./audit";
 import { advanceGeneration } from "./generationCore";
 import { executeGenerationCommand } from "./generationCommand";
@@ -290,7 +291,15 @@ const TOOLS = [
     description: "請系統內建的 AI 代理產生完整可執行計畫：目標、成功條件、缺少資訊、假設、風險、里程碑、AI 任務、人類任務、筆記、排程、核准等待、成本與成果。只規劃、不執行；回 runId 與結構化摘要，之後用 approve_agent 才開始。",
     inputSchema: {
       type: "object",
-      properties: { projectId: { type: "string" }, goal: { type: "string", description: "一句目標，至少 5 字（例：把知識庫腳本拆成分鏡並逐鏡出圖）" } },
+      properties: {
+        projectId: { type: "string" },
+        goal: { type: "string", description: "一句目標，至少 5 字（例：把知識庫腳本拆成分鏡並逐鏡出圖）" },
+        plannerMode: {
+          type: "string",
+          enum: ["auto", "nim", "fal_economy", "fal_balanced", "fal_quality"],
+          description: "規劃模型策略；省略時為 auto（NIM 失敗或格式不合格時備援至 fal.ai）",
+        },
+      },
       required: ["projectId", "goal"],
     },
   },
@@ -787,12 +796,25 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
 
   // ── AI 代理生命週期（以 runId／projectId 為鍵；權限與併發全走 agentCore，與網頁端同一套）──
   if (name === "plan_agent") {
-    const run = await planAgentCore({ auth, projectId: String(args.projectId ?? ""), goal: String(args.goal ?? "") });
+    const plannerModeResult = args.plannerMode === undefined
+      ? null
+      : agentPlannerModeSchema.safeParse(args.plannerMode);
+    if (plannerModeResult && !plannerModeResult.success) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "代理規劃模型選項不正確" });
+    }
+    const plannerMode = plannerModeResult?.success ? plannerModeResult.data : undefined;
+    const run = await planAgentCore({
+      auth,
+      projectId: String(args.projectId ?? ""),
+      goal: String(args.goal ?? ""),
+      plannerMode,
+    });
     return {
       runId: run.id,
       status: run.status,
       summary: run.summary,
       planSummary: run.planSummary,
+      plannerTelemetry: run.plannerTelemetry,
       estPoints: run.estPoints,
       steps: (run.steps as AgentStep[]).map((s) => ({
         id: s.id,

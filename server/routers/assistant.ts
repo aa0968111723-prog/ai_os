@@ -5,6 +5,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { CATEGORIES, WORKFLOW_PRESETS, getWorkflow, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
+import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
 import { nimComplete, NimServiceError } from "../services/nvidia-nim";
@@ -42,7 +43,7 @@ import { buildProjectIntelligence } from "../services/projectIntelligence";
  * 跑工作流／拆分鏡／把目標交給 AI 代理排多步計畫 plan_agent）。
  * 安全設計：助手只「提議」，一切花點數或改資料的動作都由前端讓使用者按確認後、
  * 再走 runAction 以「登入者本人」身分執行（非自動、非開發者）——AI 不會擅自動手。
- * plan_agent 是雙重守門：確認後也只「排出計畫」（免費），執行還要在代理執行區核准估點。
+ * plan_agent 是雙重守門：確認後也只「排出計畫」（站內 0 點；Fal 依 token 計費），執行還要在代理執行區核准估點。
  * LLM 輸出一律只帶「代號」（sceneNo／modelId／presetId／dbRef），落地前全部過白名單／範圍校驗，防幻覺 id。
  *
  * 多步工具調用（W4）：回答前 LLM 可先用「唯讀查詢工具」看專案實際內容——
@@ -117,7 +118,7 @@ const proposalSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().min(1).max(2000) }),
   // split_script 的 script＝腳本全文（要求 LLM 從使用者訊息原樣抄錄）；下限 20 擋「拆一句話」的誤提議，上限 8000 收斂成本
   z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
-  // plan_agent：把多步驟目標交給 AI 代理排計畫（goal 與 agents.plan 同限 5–1000）；確認後也只排計畫（免費），執行另核准
+  // plan_agent：把多步驟目標交給 AI 代理排計畫（goal 與 agents.plan 同限 5–1000）；確認後也只排計畫（站內 0 點），執行另核准
   z.object({ type: z.literal("plan_agent"), goal: z.string().min(5).max(1000) }),
 ]);
 const replySchema = z.object({ answer: z.string().min(1).max(4000), actions: z.array(proposalSchema).max(6).optional() });
@@ -169,7 +170,11 @@ const actionInputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional(), prompt: z.string().max(2000).optional() }),
   z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().min(1).max(2000) }),
   z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
-  z.object({ type: z.literal("plan_agent"), goal: z.string().min(5).max(1000) }),
+  z.object({
+    type: z.literal("plan_agent"),
+    goal: z.string().min(5).max(1000),
+    plannerMode: agentPlannerModeSchema.optional(),
+  }),
 ]);
 
 const FIELD_LABEL: Record<string, string> = { title: "標題", voiceover: "旁白", durationSec: "秒數" };
@@ -466,7 +471,7 @@ ${sceneLines}
               label: a.prompt ? `存成分鏡草稿「${a.title}」（帶畫面提示詞）` : `新增分鏡「${a.title}」`,
             });
           } else if (a.type === "plan_agent") {
-            out.push({ type: "plan_agent", goal: a.goal, label: `讓 AI 代理排計畫：「${a.goal.slice(0, 30)}${a.goal.length > 30 ? "…" : ""}」（規劃免費，執行前再核准）` });
+            out.push({ type: "plan_agent", goal: a.goal, label: `讓 AI 代理排計畫：「${a.goal.slice(0, 30)}${a.goal.length > 30 ? "…" : ""}」（規劃站內 0 點，執行前再核准）` });
           } else if (a.type === "run_workflow") {
             const preset = getWorkflow(a.presetId);
             if (!preset) continue; // 幻覺的 presetId：不給使用者一顆註定失敗的按鈕
@@ -493,7 +498,7 @@ ${sceneLines}
         emit("thinking", "（測試模式）整理專案現況…");
         const goal = input.message.trim();
         const mockActions: ResolvedAction[] = goal.length >= 5
-          ? [{ type: "plan_agent", goal: goal.slice(0, 1000), label: `讓 AI 代理排計畫：「${goal.slice(0, 30)}${goal.length > 30 ? "…" : ""}」（規劃免費，執行前再核准）` }]
+          ? [{ type: "plan_agent", goal: goal.slice(0, 1000), label: `讓 AI 代理排計畫：「${goal.slice(0, 30)}${goal.length > 30 ? "…" : ""}」（規劃站內 0 點，執行前再核准）` }]
           : [];
         const answer = `（測試模式）目前有 ${scenes.length} 個分鏡，其中待審 ${pendingCount} 個；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${readableDbs.length} 個。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
         return { answer, actions: mockActions, steps: [] as string[], mock: true, fallback: false };
@@ -521,7 +526,7 @@ ${forceFinal
 - create_scene：在片尾新增一個分鏡（title 必填 80 字內；可選 voiceover 旁白、durationSec 秒數 1–60、prompt 建議畫面提示詞 2000 字內）
 - run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
 - split_script：把腳本拆成一幕幕的分鏡草稿（script＝腳本全文，從使用者訊息原樣抄錄，至少 20 字；只在使用者貼了完整腳本／逐字稿、想把它變成分鏡時才提議；免費）
-- plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→送審」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫免費，使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
+- plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→送審」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫不扣站內點數（Fal 模式依 token 計費），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
 分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍須組長審核。
 分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。generate 的 modelId 只能填「速查表的 id」或「find_model 查到的免來源模型 id」；presetId 只能抄工作流速查表。不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
@@ -752,8 +757,13 @@ export const assistantRouter = router({
 
       if (a.type === "plan_agent") {
         // 統一入口的「目標→計畫」：重用 AI 代理規劃核心（節流／ACL／封存守門／估點全同一套）。
-        // 這裡只排計畫（免費、落一筆 awaiting_approval 的 run）——執行還要使用者在代理執行區核准估點（雙重守門）。
-        const run = await planAgentCore({ auth: ctx.auth, projectId: project.id, goal: a.goal });
+        // 這裡只排計畫（站內 0 點、落一筆 awaiting_approval 的 run）——執行還要使用者在代理執行區核准估點（雙重守門）。
+        const run = await planAgentCore({
+          auth: ctx.auth,
+          projectId: project.id,
+          goal: a.goal,
+          plannerMode: a.plannerMode,
+        });
         const stepCount = Array.isArray(run.steps) ? (run.steps as unknown[]).length : 0;
         return {
           ok: true,

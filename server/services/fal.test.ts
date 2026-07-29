@@ -5,7 +5,7 @@
  *   注意 MOCK 是 import 時算好的常數 → 每個案例都要 vi.resetModules + 動態 import 重新載入。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { extractResult, falRequestBase } from "./fal";
+import { extractFalUsage, extractResult, falRequestBase } from "./fal";
 
 describe("Fal queue request URL", () => {
   it("依 Fal 真實回傳契約使用前兩段 app namespace", () => {
@@ -102,6 +102,29 @@ describe("extractResult:文字輸出", () => {
   it("全都對不上 → 空物件(呼叫端據此報「無法解析」)", () => {
     expect(extractResult({})).toEqual({});
     expect(extractResult({ unknown_key: 123 })).toEqual({});
+  });
+});
+
+describe("extractFalUsage", () => {
+  it("解析 OpenRouter 實際 token 與美元成本", () => {
+    expect(extractFalUsage({
+      usage: {
+        prompt_tokens: 1200,
+        completion_tokens: 345,
+        total_tokens: 1545,
+        cost: 0.004321,
+      },
+    })).toEqual({
+      promptTokens: 1200,
+      completionTokens: 345,
+      totalTokens: 1545,
+      costUsd: 0.004321,
+    });
+  });
+
+  it("沒有用量或值不合法時不製造假數字", () => {
+    expect(extractFalUsage({})).toBeUndefined();
+    expect(extractFalUsage({ usage: { total_tokens: -1, cost: Number.NaN } })).toBeUndefined();
   });
 });
 

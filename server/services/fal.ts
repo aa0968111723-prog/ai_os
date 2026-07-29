@@ -69,7 +69,31 @@ export interface FalStatusResult {
   status: "queued" | "running" | "done" | "failed";
   resultUrl?: string;
   resultText?: string;
+  usage?: FalUsage;
   error?: string;
+}
+
+export interface FalUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+}
+
+/** fal / OpenRouter 回傳 snake_case；集中轉成站內 camelCase 並排除負數、NaN。 */
+export function extractFalUsage(result: Record<string, unknown>): FalUsage | undefined {
+  const raw = result.usage;
+  if (!raw || typeof raw !== "object") return undefined;
+  const usage = raw as Record<string, unknown>;
+  const number = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+  const parsed: FalUsage = {
+    promptTokens: number(usage.prompt_tokens),
+    completionTokens: number(usage.completion_tokens),
+    totalTokens: number(usage.total_tokens),
+    costUsd: number(usage.cost),
+  };
+  return Object.values(parsed).some((value) => value !== undefined) ? parsed : undefined;
 }
 
 export function falRequestBase(endpoint: string, requestId: string): string {
@@ -158,7 +182,12 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
   const result = (await resultRes.json()) as Record<string, unknown>;
   const extracted = extractResult(result);
   if (!extracted.url && !extracted.text) return { status: "failed", error: "無法解析模型輸出(請回報,我們會補上這個模型的解析)" };
-  return { status: "done", resultUrl: extracted.url, resultText: extracted.text };
+  return {
+    status: "done",
+    resultUrl: extracted.url,
+    resultText: extracted.text,
+    usage: extractFalUsage(result),
+  };
 }
 
 /**

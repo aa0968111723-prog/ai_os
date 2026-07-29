@@ -4,9 +4,19 @@ import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import type { CompletePlanSummary } from "../../../shared/plan";
+import {
+  AGENT_PLANNER_OPTIONS,
+  getAgentPlannerOption,
+  type AgentPlannerMode,
+  type AgentPlannerTelemetry,
+} from "../../../shared/agentPlanner";
+import {
+  readAgentPlannerMode,
+  writeAgentPlannerMode,
+} from "../lib/agentPlannerPreference";
 
 /**
- * AI 助手卡（助手系統前端）：一句目標 → 規劃（NIM 免費）→ 計畫預覽（每步＋估點總額）→
+ * AI 助手卡（助手系統前端）：一句目標 → 選擇規劃供應商／用量 → 計畫預覽（每步＋估點總額）→
  * 核准執行 → 伺服器背景逐步跑（關頁不中斷）→ 即時進度／可停止。
  * 通則不變：規劃前先看價、核准才開始花執行點數、每步實際扣點走各自守門（超額仍會停下等組長核准）。
  */
@@ -140,6 +150,7 @@ export function AgentCard({
   // 與 App 同 key 共用快取：核准/停止的授權是「發起人本人或組長以上」，按鈕顯示要跟伺服器規則對齊
   const me = trpc.auth.me.useQuery();
   const [goal, setGoal] = useState("");
+  const [plannerMode, setPlannerMode] = useState<AgentPlannerMode>(readAgentPlannerMode);
   const [expandedRuns, setExpandedRuns] = useState<Record<string, boolean>>({});
   const runs = trpc.agents.listByProject.useQuery(
     { projectId },
@@ -213,6 +224,7 @@ export function AgentCard({
 
   const actionError = runs.error ?? tasks.error ?? events.error ?? insights.error ?? approve.error ?? discard.error ?? stop.error ?? completeTask.error ?? decideApproval.error;
   const busy = approve.isPending || discard.isPending || stop.isPending || completeTask.isPending || decideApproval.isPending;
+  const plannerOption = getAgentPlannerOption(plannerMode);
 
   // embedded：外殼由 CreationWorkbench / PlanMode（或 legacy AiHub 測試）提供，這裡只出內容
   const body = (
@@ -224,7 +236,7 @@ export function AgentCard({
       )}
       {!hideComposer && (
         <p className="hint" style={{ marginTop: embedded ? 0 : -4 }}>
-          用一句話說目標（例：「把腳本拆成分鏡並逐鏡出圖」）——我會讀世界觀＋知識庫排出<b>逐步計畫與估點</b>（規劃免費），
+          用一句話說目標（例：「把腳本拆成分鏡並逐鏡出圖」）——我會讀世界觀＋知識庫排出<b>逐步計畫與估點</b>（站內 0 點；Fal 依 token 計費），
           你<b>核准後</b>才開始執行；由伺服器背景逐步跑，關掉頁面也會繼續，隨時可停止。每步實際扣點走既有守門，超額仍會停下等組長核准。
         </p>
       )}
@@ -253,15 +265,45 @@ export function AgentCard({
               </button>
             ))}
           </div>
+          <fieldset style={{ margin: "12px 0 0", padding: 0, border: 0 }}>
+            <legend style={{ fontWeight: 650, marginBottom: 6 }}>規劃模型與用量</legend>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 6 }}>
+              {AGENT_PLANNER_OPTIONS.map((option) => {
+                const selected = option.value === plannerMode;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`btn-sm${selected ? " primary" : ""}`}
+                    aria-pressed={selected}
+                    title={option.description}
+                    onClick={() => {
+                      setPlannerMode(option.value);
+                      writeAgentPlannerMode(option.value);
+                    }}
+                    style={{ textAlign: "left", minHeight: 58 }}
+                  >
+                    <strong style={{ display: "block" }}>{option.shortLabel}</strong>
+                    <span style={{ display: "block", fontSize: "var(--fs-11)", opacity: 0.82, marginTop: 2 }}>
+                      {option.usageLabel}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="hint" style={{ margin: "6px 0 0" }}>
+              {plannerOption.description} fal.ai 模式會把本次規劃所需的專案內容傳給模型，並依實際 token 計費；完成後會顯示用量。
+            </p>
+          </fieldset>
           <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <ConfirmButton
               triggerClassName="primary"
               disabled={goal.trim().length < 5 || plan.isPending}
-              message="會請 AI 創作助手讀世界觀＋知識庫排一份逐步計畫——NIM 免費額度，不扣點；計畫只規劃不執行，執行前還會再讓你看估點核准。"
+              message={`會用「${plannerOption.shortLabel}」讀世界觀＋知識庫排一份逐步計畫。規劃不扣站內點數；fal.ai 模式依實際 token 計費。這一步只規劃不執行，執行前還會再讓你看估點核准。`}
               confirmLabel="開始規劃"
-              onConfirm={() => plan.mutate({ projectId, goal: goal.trim() })}
+              onConfirm={() => plan.mutate({ projectId, goal: goal.trim(), plannerMode })}
             >
-              {plan.isPending ? "規劃中…" : "規劃計畫（免費）"}
+              {plan.isPending ? "規劃中…" : "規劃計畫（站內 0 點）"}
             </ConfirmButton>
             {!plan.isPending && goal.trim().length > 0 && goal.trim().length < 5 && <span className="hint">目標至少 5 個字</span>}
           </div>
@@ -277,7 +319,7 @@ export function AgentCard({
       {!runs.isLoading && !runs.error && runs.data && runs.data.length === 0 && !hideComposer && (
         <p className="hint" role="status">
           {canEdit
-            ? "還沒有 AI 執行計畫——輸入目標後按「規劃計畫」；規劃免費，核准後才會開始執行。"
+            ? "還沒有 AI 執行計畫——輸入目標後按「規劃計畫」；規劃不扣站內點數，核准後才會開始執行。"
             : "目前沒有 AI 執行計畫。"}
         </p>
       )}
@@ -363,6 +405,7 @@ export function AgentCard({
         const runTasks = (tasks.data ?? []).filter((task) => task.planRunId === r.id);
         const runEvents = (events.data?.items ?? []).filter((event) => event.runId === r.id);
         const planSummary = r.planSummary as CompletePlanSummary | null;
+        const plannerTelemetry = r.plannerTelemetry as AgentPlannerTelemetry | null;
         // 與伺服器授權規則對齊（審查修復）：核准/放棄/停止＝發起人本人或組長以上——
         // 一般編輯者對別人的 run 按了必然 FORBIDDEN，直接不顯示按鈕
         const canControl = isLeader || r.userId === me.data?.user.id;
@@ -395,6 +438,25 @@ export function AgentCard({
               )}
               </div>
             {r.summary && <p className="hint" style={{ margin: "4px 0" }}>{r.summary}</p>}
+            {plannerTelemetry && plannerTelemetry.provider !== "mock" && (
+              <div className="meta" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <span className="chip">
+                  規劃模型：{plannerTelemetry.provider === "nvidia-nim" ? "NVIDIA NIM" : "fal.ai"}・{plannerTelemetry.model}
+                </span>
+                {plannerTelemetry.totalTokens != null && (
+                  <span className="chip">總用量 {plannerTelemetry.totalTokens.toLocaleString()} tokens</span>
+                )}
+                {plannerTelemetry.costUsd != null && (
+                  <span className="chip">Fal 費用 US${plannerTelemetry.costUsd.toFixed(plannerTelemetry.costUsd < 0.01 ? 6 : 4)}</span>
+                )}
+                {plannerTelemetry.fallbackFrom && (
+                  <span className="chip">已自動備援</span>
+                )}
+                {plannerTelemetry.attemptCount > 1 && (
+                  <span className="chip">模型呼叫 {plannerTelemetry.attemptCount} 次</span>
+                )}
+              </div>
+            )}
             {planSummary && (
               <details style={{ margin: "8px 0" }}>
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>
