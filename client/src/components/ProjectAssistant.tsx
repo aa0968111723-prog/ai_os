@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
+import type { CreationAction } from "../features/creation-workbench/creationActions";
+import { SuggestionActions } from "../features/creation-workbench/SuggestionActions";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import {
@@ -83,8 +85,32 @@ function buildGroups(list: GenModel[]): Array<{ label: string; items: GenModel[]
  * 安全：任何花點數或改資料的動作都用 ConfirmButton，使用者按確認才真的執行。
  * 思考過程：問答走 SSE 串流，把「思考中／正在查什麼／查到什麼」即時逐筆呈現；串流不可用時自動退回 tRPC 一次性問答。
  * 收起／清除：對話可整段收起（省版面、不丟執行中狀態）或一鍵清空重來；生成動作可在執行前自己換模型（多模態）。
+ *
+ * WB-03：onCreationAction 提供「帶入直接生成／建立執行計畫」等跨模式帶入（只填草稿、不扣點、不送出）。
+ * 執行仍走既有 ConfirmButton → runAction；帶入走工作台 CreationAction 契約。
  */
-export function ProjectAssistant({ projectId, embedded = false }: { projectId: string; embedded?: boolean }) {
+export function ProjectAssistant({
+  projectId,
+  embedded = false,
+  onCreationAction,
+  onSavePromptSuggestion,
+  onSaveSceneDraft,
+  askFillRequest = null,
+}: {
+  projectId: string;
+  embedded?: boolean;
+  /** Workbench bring-in: fill draft / switch mode only (no submit, no charge). */
+  onCreationAction?: (action: CreationAction) => void;
+  /** Optional: 存進提示詞庫 from suggestion strip. */
+  onSavePromptSuggestion?: (text: string, modelId?: string) => void;
+  /** Optional: 存成分鏡草稿 from suggestion strip. */
+  onSaveSceneDraft?: (text: string) => void;
+  /**
+   * Workbench CreationAction type:"ask" / apply_prompt→ask: fill chat input without sending.
+   * nonce bumps so the same message can re-apply.
+   */
+  askFillRequest?: { nonce: number; message: string } | null;
+}) {
   const utils = trpc.useUtils();
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -278,6 +304,13 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
     setLiveTraceOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  // WB-03: CreationAction ask / apply_prompt→ask fills input without sending (no charge).
+  useEffect(() => {
+    if (!askFillRequest) return;
+    setInput(askFillRequest.message);
+    setCollapsed(false);
+  }, [askFillRequest]);
 
   // 一鍵清除：清對話與所有連帶暫存（已執行標記、換模型選擇），回到冷啟動可再問
   const clear = () => {
@@ -540,6 +573,61 @@ export function ProjectAssistant({ projectId, embedded = false }: { projectId: s
                             />
                             {isDone ? "已執行" : faceLabel}
                           </ConfirmButton>
+                          {/* WB-03 bring-in：只填草稿／切模式，不走 runAction、不扣點 */}
+                          {onCreationAction && payloadAct.type === "generate" && !isDone && (
+                            <SuggestionActions
+                              suggestionText={payloadAct.prompt}
+                              modelId={payloadAct.modelId}
+                              onAction={onCreationAction}
+                              onSavePrompt={onSavePromptSuggestion}
+                              onSaveSceneDraft={onSaveSceneDraft}
+                              disabled={isRunning}
+                            />
+                          )}
+                          {onCreationAction && payloadAct.type === "plan_agent" && !isDone && (
+                            <button
+                              type="button"
+                              className="btn-sm"
+                              disabled={isRunning}
+                              title="帶入執行計畫目標並切換模式，不自動排程、不扣點"
+                              onClick={() =>
+                                onCreationAction({
+                                  type: "create_plan",
+                                  goal: payloadAct.goal,
+                                })
+                              }
+                            >
+                              帶入執行計畫
+                            </button>
+                          )}
+                          {onCreationAction && payloadAct.type === "run_workflow" && !isDone && (
+                            <button
+                              type="button"
+                              className="btn-sm"
+                              disabled={isRunning}
+                              title="帶入製作範本模式，不自動啟動工作流"
+                              onClick={() =>
+                                onCreationAction({
+                                  type: "run_template",
+                                  templateId: payloadAct.presetId,
+                                  goal: payloadAct.prompt,
+                                })
+                              }
+                            >
+                              帶入製作範本
+                            </button>
+                          )}
+                          {onCreationAction &&
+                            payloadAct.type === "create_scene" &&
+                            payloadAct.prompt &&
+                            !isDone && (
+                              <SuggestionActions
+                                suggestionText={payloadAct.prompt}
+                                onAction={onCreationAction}
+                                showSideEffects={false}
+                                disabled={isRunning}
+                              />
+                            )}
                         </div>
                       );
                     })}

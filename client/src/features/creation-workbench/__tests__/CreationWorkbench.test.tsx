@@ -8,11 +8,49 @@ import { revealWorkbenchAnchor } from "../workbenchNav";
 const listByProject = vi.fn();
 const flashAnchor = vi.fn();
 
+const generationSubmit = vi.fn();
+const promptsSave = vi.fn();
+const scenesAddDraft = vi.fn();
+
 vi.mock("../../../api", () => ({
   trpc: {
+    useUtils: () => ({
+      prompts: { list: { invalidate: vi.fn() } },
+      generation: {
+        listByProject: { invalidate: vi.fn() },
+        listByProjectPaged: { invalidate: vi.fn() },
+      },
+      quota: { my: { invalidate: vi.fn() } },
+      scenes: { listByProject: { invalidate: vi.fn() } },
+    }),
     agents: {
       listByProject: {
         useQuery: (...args: unknown[]) => listByProject(...args),
+      },
+    },
+    projects: {
+      assets: {
+        useQuery: () => ({ data: [] }),
+      },
+    },
+    quota: {
+      my: {
+        useQuery: () => ({ data: undefined }),
+      },
+    },
+    prompts: {
+      save: {
+        useMutation: () => ({ mutate: promptsSave, isPending: false }),
+      },
+    },
+    scenes: {
+      addDraft: {
+        useMutation: () => ({ mutate: scenesAddDraft, isPending: false }),
+      },
+    },
+    generation: {
+      submit: {
+        useMutation: () => ({ mutate: generationSubmit, isPending: false, error: null }),
       },
     },
   },
@@ -22,12 +60,66 @@ vi.mock("../../../discuss", () => ({
   flashAnchor: (...args: unknown[]) => flashAnchor(...args),
 }));
 
+/** Captures onCreationAction from AskAiMode → ProjectAssistant for bring-in tests. */
+let lastAssistantProps: {
+  onCreationAction?: (action: import("../creationActions").CreationAction) => void;
+} = {};
+
 vi.mock("../../../components/ProjectAssistant", () => ({
-  ProjectAssistant: () => <div data-testid="assistant">assistant</div>,
+  ProjectAssistant: (props: {
+    onCreationAction?: (action: import("../creationActions").CreationAction) => void;
+  }) => {
+    lastAssistantProps = props;
+    return <div data-testid="assistant">assistant</div>;
+  },
 }));
 
 vi.mock("../../../components/AgentCard", () => ({
   AgentCard: () => <div data-testid="agent-card">agent-card</div>,
+}));
+
+vi.mock("../../../components/ModelPicker", () => ({
+  ModelPicker: ({
+    onChange,
+  }: {
+    onChange: (m: {
+      id: string;
+      label: string;
+      points: number;
+      needs: string | null;
+      sourceHint: string | null;
+      kind: string;
+      tierLabel: string;
+      strengths: string;
+      verified: boolean;
+      recommended: boolean;
+    } | null) => void;
+  }) => {
+    // fire once after mount without useEffect to keep mock simple
+    queueMicrotask(() =>
+      onChange({
+        id: "fal-ai/flux/schnell",
+        label: "FLUX Schnell",
+        points: 1,
+        needs: null,
+        sourceHint: null,
+        kind: "image",
+        tierLabel: "經濟",
+        strengths: "快",
+        verified: true,
+        recommended: true,
+      }),
+    );
+    return <div data-testid="model-picker">model-picker</div>;
+  },
+}));
+
+vi.mock("../../../components/GenerationList", () => ({
+  GenerationList: () => <div data-testid="generation-list">generation-list</div>,
+}));
+
+vi.mock("../../../realtime", () => ({
+  CollabZone: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 describe("CreationWorkbench", () => {
@@ -35,13 +127,17 @@ describe("CreationWorkbench", () => {
   const originalSearch = window.location.search;
 
   const renderWorkbench = (props = {}) =>
-    render(<CreationWorkbench projectId={projectId} canEdit {...props} />);
+    render(<CreationWorkbench projectId={projectId} canEdit groupId="g1" {...props} />);
 
   beforeEach(() => {
     listByProject.mockReset();
     listByProject.mockReturnValue({ data: [] });
     flashAnchor.mockReset();
     flashAnchor.mockReturnValue(true);
+    generationSubmit.mockReset();
+    promptsSave.mockReset();
+    scenesAddDraft.mockReset();
+    lastAssistantProps = {};
     clearDraft(projectId);
     clearDraft("project-2");
     clearDraft("project-3");
@@ -81,20 +177,20 @@ describe("CreationWorkbench", () => {
     expect(askPanel).not.toHaveAttribute("hidden");
     expect(screen.getByTestId("assistant")).toBeVisible();
 
-    // Other panels exist but are hidden
     const generateTab = screen.getByRole("tab", { name: /直接生成/ });
     await user.click(generateTab);
     expect(generateTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tabpanel", { name: /直接生成/ })).not.toHaveAttribute("hidden");
-    expect(screen.getByRole("button", { name: /前往創作生成台/ })).toBeVisible();
+    const genPanel = screen.getByRole("tabpanel", { name: /直接生成/ });
+    expect(genPanel).not.toHaveAttribute("hidden");
+    // Full generate form (WB-02) lives in panel with #sec-studio
+    expect(document.getElementById("sec-studio")).toBeTruthy();
+    expect(within(genPanel).getByTestId("model-picker")).toBeVisible();
+    expect(document.getElementById("gen-prompt")).toBeTruthy();
 
-    // Ask panel still mounted but hidden
     const askTab = screen.getByRole("tab", { name: /問 AI/ });
     const panels = document.querySelectorAll('[role="tabpanel"]');
     const visible = [...panels].filter((p) => !p.hasAttribute("hidden"));
     expect(visible).toHaveLength(1);
-    expect(visible[0]).toHaveTextContent("前往創作生成台");
-    // assistant remains in document (state-preserving mount)
     expect(screen.getByTestId("assistant")).toBeInTheDocument();
     expect(askTab).toHaveAttribute("aria-selected", "false");
   });
@@ -120,11 +216,29 @@ describe("CreationWorkbench", () => {
     expect(screen.getByLabelText("想完成什麼？")).toHaveValue("拆分鏡並出圖");
     expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
 
-    // draft written to storage (debounced — flush by waiting)
     await waitFor(() => {
       const stored = loadDraft(projectId);
       expect(stored.goal).toBe("拆分鏡並出圖");
       expect(stored.mode).toBe("generate");
+    });
+  });
+
+  it("generate form prompt survives mode switch (draft persistence)", async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+
+    const prompt = document.getElementById("gen-prompt") as HTMLTextAreaElement;
+    expect(prompt).toBeTruthy();
+    await user.type(prompt, "禪堂清晨");
+    expect(prompt).toHaveValue("禪堂清晨");
+
+    await user.click(screen.getByRole("tab", { name: /問 AI/ }));
+    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+    expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe("禪堂清晨");
+
+    await waitFor(() => {
+      expect(loadDraft(projectId).prompt).toBe("禪堂清晨");
     });
   });
 
@@ -167,18 +281,14 @@ describe("CreationWorkbench", () => {
     expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("direct generate adapter scrolls to #sec-studio", async () => {
+  it("direct generate mode hosts #sec-studio form (no jump button)", async () => {
     const user = userEvent.setup();
     renderWorkbench();
     await user.click(screen.getByRole("tab", { name: /直接生成/ }));
 
-    const studio = document.createElement("div");
-    studio.id = "sec-studio";
-    document.body.appendChild(studio);
-
-    await user.click(screen.getByRole("button", { name: /前往創作生成台/ }));
-    await waitFor(() => expect(studio.scrollIntoView).toHaveBeenCalled());
-    studio.remove();
+    expect(document.getElementById("sec-studio")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /前往創作生成台/ })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/預估消耗/);
   });
 
   it("template adapter scrolls to #sec-workflow", async () => {
@@ -231,7 +341,7 @@ describe("CreationWorkbench", () => {
       { id: "run-1", status: "running" },
       { id: "run-2", status: "awaiting_approval" },
     ];
-    rerender(<CreationWorkbench projectId={projectId} canEdit />);
+    rerender(<CreationWorkbench projectId={projectId} canEdit groupId="g1" />);
     expect(details).not.toHaveAttribute("open");
     expect(summary).toHaveAttribute("aria-expanded", "false");
   });
@@ -293,7 +403,6 @@ describe("CreationWorkbench", () => {
   it("revealWorkbenchAnchor(#sec-agent) from other mode shows plan panel (GenerationList path)", async () => {
     renderWorkbench();
     expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
-    // Plan panel is mounted but hidden while ask is active
     const hiddenPlan = document.getElementById("sec-agent")?.closest('[role="tabpanel"]');
     expect(hiddenPlan).toHaveAttribute("hidden");
 
@@ -311,6 +420,39 @@ describe("CreationWorkbench", () => {
     await waitFor(() => {
       expect(document.getElementById("sec-agent")?.scrollIntoView).toHaveBeenCalled();
     });
+  });
+
+  it("revealWorkbenchAnchor(#sec-studio) switches to generate mode", async () => {
+    renderWorkbench();
+    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+
+    act(() => {
+      revealWorkbenchAnchor("#sec-studio", { projectId });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByRole("tabpanel", { name: /直接生成/ })).not.toHaveAttribute("hidden");
+    expect(document.getElementById("sec-studio")?.closest("[hidden]")).toBeNull();
+  });
+
+  it("revealWorkbenchAnchor(#gen-prompt) unhides generate form (onboard / deep-link path)", async () => {
+    renderWorkbench();
+    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+    // Prompt exists but is under a hidden tabpanel while ask is active
+    expect(document.getElementById("gen-prompt")?.closest("[hidden]")).not.toBeNull();
+
+    act(() => {
+      revealWorkbenchAnchor("#gen-prompt", { projectId });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByRole("tabpanel", { name: /直接生成/ })).not.toHaveAttribute("hidden");
+    expect(document.getElementById("gen-prompt")?.closest("[hidden]")).toBeNull();
+    expect(document.getElementById("sec-studio")?.closest("[hidden]")).toBeNull();
   });
 
   it("revealWorkbenchAnchor(#sec-assistant) switches to ask mode", async () => {
@@ -335,7 +477,6 @@ describe("CreationWorkbench", () => {
 
     expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("想完成什麼？")).toHaveValue("restore-plan");
-    // No active runs and no forceOpen → collapsed like AiHub default
     expect(document.querySelector("#sec-agent")).not.toHaveAttribute("open");
   });
 
@@ -353,18 +494,137 @@ describe("CreationWorkbench", () => {
     saveDraft("project-1", { ...emptyDraft("ask"), goal: "goal-one" });
     saveDraft("project-2", { ...emptyDraft("generate"), goal: "goal-two" });
 
-    const { rerender } = render(<CreationWorkbench projectId="project-1" canEdit />);
+    const { rerender } = render(<CreationWorkbench projectId="project-1" canEdit groupId="g1" />);
     expect(screen.getByLabelText("想完成什麼？")).toHaveValue("goal-one");
     expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
 
-    rerender(<CreationWorkbench projectId="project-2" canEdit />);
+    rerender(<CreationWorkbench projectId="project-2" canEdit groupId="g1" />);
     await waitFor(() => {
       expect(screen.getByLabelText("想完成什麼？")).toHaveValue("goal-two");
     });
     expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
 
-    // project-1 storage untouched
     expect(loadDraft("project-1").goal).toBe("goal-one");
+  });
+
+  it("CreationAction generate bring-in fills draft, switches mode, does not submit", async () => {
+    const { generateBringInAction } = await import("../creationActions");
+    renderWorkbench({ characterIds: ["c1"], scenePresetIds: ["s1"] });
+
+    expect(lastAssistantProps.onCreationAction).toBeTypeOf("function");
+
+    act(() => {
+      lastAssistantProps.onCreationAction!(
+        generateBringInAction({
+          prompt: "AI 建議分鏡：香爐特寫",
+          modelId: "fal-ai/flux/schnell",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe(
+      "AI 建議分鏡：香爐特寫",
+    );
+    expect(generationSubmit).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      const stored = loadDraft(projectId);
+      expect(stored.prompt).toBe("AI 建議分鏡：香爐特寫");
+      expect(stored.modelId).toBe("fal-ai/flux/schnell");
+      expect(stored.mode).toBe("generate");
+      // Page-mirrored picks still present after bring-in
+      expect(stored.characterIds).toEqual(["c1"]);
+      expect(stored.scenePresetIds).toEqual(["s1"]);
+    });
+  });
+
+  it("CreationAction create_plan bring-in switches to plan without agents.plan", async () => {
+    renderWorkbench();
+
+    act(() => {
+      lastAssistantProps.onCreationAction!({
+        type: "create_plan",
+        goal: "把腳本拆成分鏡並出圖",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("把腳本拆成分鏡並出圖");
+    expect(document.querySelector("#sec-agent")).toHaveAttribute("open");
+    expect(generationSubmit).not.toHaveBeenCalled();
+  });
+
+  it("planBringInAction with partial prompt/model preserves page character/scene picks", async () => {
+    const { planBringInAction } = await import("../creationActions");
+    renderWorkbench({ characterIds: ["c-keep"], scenePresetIds: ["s-keep"] });
+
+    // Wait for page pick mirror into draft
+    await waitFor(() => {
+      expect(loadDraft(projectId).characterIds).toEqual(["c-keep"]);
+    });
+
+    act(() => {
+      lastAssistantProps.onCreationAction!(
+        planBringInAction("計畫目標", { prompt: "建議文字", modelId: "m-plan" }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(generationSubmit).not.toHaveBeenCalled();
+    await waitFor(() => {
+      const stored = loadDraft(projectId);
+      expect(stored.goal).toBe("計畫目標");
+      expect(stored.prompt).toBe("建議文字");
+      expect(stored.characterIds).toEqual(["c-keep"]);
+      expect(stored.scenePresetIds).toEqual(["s-keep"]);
+    });
+  });
+
+  it("cross-mode: goal/prompt/model survive tab switches after bring-in", async () => {
+    const user = userEvent.setup();
+    const { generateBringInAction } = await import("../creationActions");
+    renderWorkbench();
+
+    act(() => {
+      lastAssistantProps.onCreationAction!(
+        generateBringInAction({
+          prompt: "跨模式提示",
+          modelId: "m-cross",
+          goal: "共享目標",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("共享目標");
+    expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe("跨模式提示");
+
+    await user.click(screen.getByRole("tab", { name: /製作範本/ }));
+    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("共享目標");
+
+    await user.click(screen.getByRole("tab", { name: /執行計畫/ }));
+    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("共享目標");
+
+    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+    expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe("跨模式提示");
+    expect(generationSubmit).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      const stored = loadDraft(projectId);
+      expect(stored.goal).toBe("共享目標");
+      expect(stored.prompt).toBe("跨模式提示");
+      // modelId may be synced from ModelPicker once generate panel is active (mock defaults to flux)
+      expect(stored.modelId).toBeTruthy();
+    });
   });
 });
 

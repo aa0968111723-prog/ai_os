@@ -29,6 +29,8 @@ export function modeForAnchor(anchorOrSelector: string): CreationMode | null {
     case "sec-assistant":
       return "ask";
     case "sec-studio":
+    case "gen-prompt":
+      // Form lives inside generate tabpanel; both anchors must unhide it first.
       return "generate";
     case "sec-workflow":
       return "template";

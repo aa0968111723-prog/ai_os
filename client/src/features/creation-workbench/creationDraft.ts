@@ -18,6 +18,8 @@ export interface CreationDraft {
   scenePresetIds: string[];
   worldviewEnabled: boolean;
   templateId?: string;
+  /** Prompt library source id when draft was filled via apply_prompt (reuse tracking). */
+  promptSourceId?: string;
 }
 
 export const CREATION_MODES: ReadonlyArray<{
@@ -73,6 +75,7 @@ function normalizeDraft(raw: unknown, fallbackMode: CreationMode = "ask"): Creat
       : base.scenePresetIds,
     worldviewEnabled: typeof o.worldviewEnabled === "boolean" ? o.worldviewEnabled : base.worldviewEnabled,
     templateId: typeof o.templateId === "string" ? o.templateId : undefined,
+    promptSourceId: typeof o.promptSourceId === "string" ? o.promptSourceId : undefined,
   };
 }
 
