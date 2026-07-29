@@ -10,6 +10,7 @@ import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import { worldviewSchema, bilingualChips, STYLE_EN, TONE_EN, type Worldview } from "../../shared/worldview";
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
@@ -96,14 +97,9 @@ function buildPositive(userPrompt: string, worldview: Worldview, visual: boolean
 }
 
 /**
- * 來源素材「明顯不相容」表（與前端來源下拉的過濾同一張表）：
- * 寬鬆原則——只擋確定會失敗的組合，doc/zip 等不確定的放行讓模型自行判斷。
+ * 來源素材「明顯不相容」表：單一真相在 shared/sourceIncompat.ts
+ * （前端 generationGates 同源匯入，避免 client/server 漂移）。
  */
-const SOURCE_INCOMPAT: Record<string, string[]> = {
-  image: ["audio"],
-  audio: ["image"], // 影片放行：Whisper/Scribe 類轉錄端點普遍接受影片容器（自動抽音軌）
-  video: ["audio"],
-};
 const SOURCE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件", zip: "zip 壓縮包" };
 
 /** 哪些類別注入世界觀(TTS 會唸出注入文字、轉錄/視覺/訓練/影片工具不適用 → 不注入) */
