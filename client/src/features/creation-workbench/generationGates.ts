@@ -1,19 +1,14 @@
 /**
  * WB-00 baseline: pure generate-button gate logic extracted from ProjectPage.
- * Locks viewer/editor disable reasons, source compatibility, and estimate wiring
- * before the AI creation workbench refactor. Strings and semantics must stay exact.
+ * Locks viewer/editor disable reasons, source compatibility, estimate wiring,
+ * approval-threshold copy, and submit payload shape before workbench refactor.
+ * Strings and semantics must stay exact.
  */
 import { estimatePoints, getModel, type ModelEntry } from "@shared/models";
+import { SOURCE_INCOMPAT as SHARED_SOURCE_INCOMPAT } from "@shared/sourceIncompat";
 
-/**
- * 來源素材「明顯不相容」過濾表（後端 generation.submit 用同一張表把關）：
- * 寬鬆原則——只擋確定會失敗的組合，doc/zip 等不確定的保留。
- */
-export const SOURCE_INCOMPAT: Record<string, string[]> = {
-  image: ["audio"],
-  audio: ["image"], // 影片放行：Whisper/Scribe 類轉錄端點普遍接受影片容器（自動抽音軌）
-  video: ["audio"],
-};
+/** Re-export shared table so client tests/callers keep a stable import path. */
+export const SOURCE_INCOMPAT: Record<string, readonly string[]> = SHARED_SOURCE_INCOMPAT;
 
 /** viewer 唯讀；其餘角色（member / leader / owner 等）可編輯生成 */
 export function projectCanEdit(myProjectRole: string | null | undefined): boolean {
@@ -69,6 +64,14 @@ export function getGenerationDisableReason(input: GenerationGateInput): string |
               : null;
 }
 
+/** 主生成鈕：disableReason 或 submit 進行中都鎖（pending 刻意留在 helper 外也可；此函式鎖定 OR 語意） */
+export function isGenerateButtonDisabled(
+  disableReason: string | null,
+  submitPending: boolean,
+): boolean {
+  return disableReason != null || submitPending;
+}
+
 /** 來源下拉只列「明顯相容」的素材；已選中的不相容素材仍保留，避免 select 空白 */
 export function filterCompatibleSources<T extends { id: string; kind: string }>(
   assets: T[],
@@ -95,8 +98,70 @@ export function estimateGenerationPoints(
 }
 
 /** 是否顯示「依文字長度即時計費」提示（確認框用） */
-export function isUsageBasedPoints(modelId: string, resolveFull: (id: string) => ModelEntry | undefined = getModel): boolean {
+export function isUsageBasedPoints(
+  modelId: string,
+  resolveFull: (id: string) => ModelEntry | undefined = getModel,
+): boolean {
   const full = resolveFull(modelId);
   if (!full) return false;
   return estimatePoints(full, { promptChars: 2000 }) !== estimatePoints(full, { promptChars: 1 });
+}
+
+/**
+ * 成本審核門檻：組員單筆估點 ≥ 組長門檻 → 確認框顯示待核准提醒。
+ * 用 estPoints（真估點）比門檻，不用 model.points（TTS 會漂移）。
+ */
+export function shouldShowApprovalThresholdNotice(input: {
+  myRole: string | null | undefined;
+  approvalThreshold: number | null | undefined;
+  estPoints: number;
+}): boolean {
+  const { myRole, approvalThreshold, estPoints } = input;
+  return (
+    myRole === "member" &&
+    approvalThreshold != null &&
+    approvalThreshold > 0 &&
+    estPoints >= approvalThreshold
+  );
+}
+
+/** 確認框核准門檻文案（與 ProjectPage 完全一致） */
+export function approvalThresholdNotice(estPoints: number, threshold: number): string {
+  return `⏳ 這筆需要組長核准後才會開始生成（${estPoints} 點 ≥ 門檻 ${threshold} 點）`;
+}
+
+export type GenerationSubmitInput = {
+  projectId: string;
+  modelId: string;
+  prompt: string;
+  sourceAssetId?: string;
+  sourceUrl?: string;
+  characterIds?: string[];
+  scenePresetIds?: string[];
+  clientRequestId: string;
+};
+
+/** generation.submit mutation 載荷形狀（確認生成鈕 onClick） */
+export function buildGenerationSubmitInput(input: {
+  projectId: string;
+  model: GenerationGateModel;
+  prompt: string;
+  sourceAsset: GenerationGateSource | null;
+  sourceUrl: string;
+  characterIds: string[];
+  scenePresetIds: string[];
+  clientRequestId: string;
+}): GenerationSubmitInput {
+  const { projectId, model, prompt, sourceAsset, sourceUrl, characterIds, scenePresetIds, clientRequestId } =
+    input;
+  return {
+    projectId,
+    modelId: model.id,
+    prompt: prompt.trim(),
+    sourceAssetId: model.needs && sourceAsset ? sourceAsset.id : undefined,
+    sourceUrl: model.needs && !sourceAsset && sourceUrl.trim() ? sourceUrl.trim() : undefined,
+    characterIds: characterIds.length ? characterIds : undefined,
+    scenePresetIds: scenePresetIds.length ? scenePresetIds : undefined,
+    clientRequestId,
+  };
 }

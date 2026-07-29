@@ -1,16 +1,22 @@
 /**
  * WB-00 baseline: lock generate gates (viewer/editor, missing prompt/model/source,
- * incompat source, estimatePoints wiring) before workbench refactor.
+ * incompat source, estimatePoints wiring, approval threshold, submit payload)
+ * before workbench refactor.
  */
 import { describe, expect, it } from "vitest";
 import { estimatePoints, getModel } from "@shared/models";
+import { SOURCE_INCOMPAT as SHARED_SOURCE_INCOMPAT } from "@shared/sourceIncompat";
 import {
   SOURCE_INCOMPAT,
+  approvalThresholdNotice,
+  buildGenerationSubmitInput,
   estimateGenerationPoints,
   filterCompatibleSources,
   getGenerationDisableReason,
+  isGenerateButtonDisabled,
   isUsageBasedPoints,
   projectCanEdit,
+  shouldShowApprovalThresholdNotice,
   type GenerationGateModel,
 } from "../generationGates";
 
@@ -24,6 +30,12 @@ const imageToImage: GenerationGateModel = {
   id: "fal-ai/flux/dev/image-to-image",
   points: 2,
   needs: "image",
+};
+
+const audioNeeds: GenerationGateModel = {
+  id: "audio-needs-model",
+  points: 1,
+  needs: "audio",
 };
 
 const emptySource = {
@@ -89,7 +101,8 @@ describe("getGenerationDisableReason", () => {
     ).toBe("這個模型需要來源素材——從素材庫選一個，或貼上網址");
   });
 
-  it("locks incompatible source kinds with a clear message", () => {
+  it("locks incompatible source kinds with clear messages (audio → 音訊, image → 圖片)", () => {
+    // image-needs + audio source → 音訊
     expect(
       getGenerationDisableReason({
         canEdit: true,
@@ -100,6 +113,30 @@ describe("getGenerationDisableReason", () => {
         sourceUrlError: "",
       }),
     ).toBe("選到的素材是音訊，這個模型不能用它——請換一個來源");
+
+    // audio-needs + image source → 圖片
+    expect(
+      getGenerationDisableReason({
+        canEdit: true,
+        model: audioNeeds,
+        prompt: "轉錄",
+        sourceAsset: { id: "img-1", title: "定裝", kind: "image" },
+        sourceUrl: "",
+        sourceUrlError: "",
+      }),
+    ).toBe("選到的素材是圖片，這個模型不能用它——請換一個來源");
+
+    // doc is not in SOURCE_INCOMPAT for image needs → not blocked (寬鬆原則)
+    expect(
+      getGenerationDisableReason({
+        canEdit: true,
+        model: imageToImage,
+        prompt: "改圖",
+        sourceAsset: { id: "d1", title: "附件", kind: "doc" },
+        sourceUrl: "",
+        sourceUrlError: "",
+      }),
+    ).toBeNull();
   });
 
   it("locks bad source URLs", () => {
@@ -151,11 +188,22 @@ describe("getGenerationDisableReason", () => {
   });
 });
 
+describe("isGenerateButtonDisabled (disableReason OR submit pending)", () => {
+  it("disables when reason is set or submit is pending", () => {
+    expect(isGenerateButtonDisabled(null, false)).toBe(false);
+    expect(isGenerateButtonDisabled("先填一句提示詞，描述想要的畫面", false)).toBe(true);
+    expect(isGenerateButtonDisabled(null, true)).toBe(true);
+    expect(isGenerateButtonDisabled("x", true)).toBe(true);
+  });
+});
+
 describe("SOURCE_INCOMPAT + filterCompatibleSources", () => {
-  it("keeps the same incompat table as generation.submit policy", () => {
-    expect(SOURCE_INCOMPAT.image).toEqual(["audio"]);
-    expect(SOURCE_INCOMPAT.audio).toEqual(["image"]);
-    expect(SOURCE_INCOMPAT.video).toEqual(["audio"]);
+  it("re-exports the shared client/server incompat table (no dual-copy drift)", () => {
+    // shared/sourceIncompat.ts is the single source; server generationCore imports the same module.
+    expect(SOURCE_INCOMPAT).toBe(SHARED_SOURCE_INCOMPAT);
+    expect([...SOURCE_INCOMPAT.image]).toEqual(["audio"]);
+    expect([...SOURCE_INCOMPAT.audio]).toEqual(["image"]);
+    expect([...SOURCE_INCOMPAT.video]).toEqual(["audio"]);
   });
 
   it("filters out obviously incompatible assets but keeps the selected one", () => {
@@ -195,5 +243,95 @@ describe("estimateGenerationPoints (shared estimatePoints wiring)", () => {
     const orphan: GenerationGateModel = { id: "missing/model", points: 7, needs: null };
     expect(estimateGenerationPoints(orphan, 500, () => undefined)).toBe(7);
     expect(estimateGenerationPoints(null, 10)).toBe(0);
+  });
+});
+
+describe("approval threshold notice (confirm panel)", () => {
+  it("shows only for members at or above a positive threshold using estPoints", () => {
+    expect(
+      shouldShowApprovalThresholdNotice({ myRole: "member", approvalThreshold: 10, estPoints: 10 }),
+    ).toBe(true);
+    expect(
+      shouldShowApprovalThresholdNotice({ myRole: "member", approvalThreshold: 10, estPoints: 9 }),
+    ).toBe(false);
+    expect(
+      shouldShowApprovalThresholdNotice({ myRole: "leader", approvalThreshold: 10, estPoints: 99 }),
+    ).toBe(false);
+    expect(
+      shouldShowApprovalThresholdNotice({ myRole: "member", approvalThreshold: 0, estPoints: 99 }),
+    ).toBe(false);
+    expect(
+      shouldShowApprovalThresholdNotice({ myRole: "member", approvalThreshold: null, estPoints: 99 }),
+    ).toBe(false);
+  });
+
+  it("locks the exact confirm-panel copy", () => {
+    expect(approvalThresholdNotice(12, 10)).toBe(
+      "⏳ 這筆需要組長核准後才會開始生成（12 點 ≥ 門檻 10 點）",
+    );
+  });
+});
+
+describe("buildGenerationSubmitInput (confirm 生成 payload)", () => {
+  it("builds the generation.submit payload with source and card optional fields", () => {
+    expect(
+      buildGenerationSubmitInput({
+        projectId: "project-1",
+        model: imageToImage,
+        prompt: "  改圖  ",
+        sourceAsset: { id: "asset-9", title: "底圖", kind: "image" },
+        sourceUrl: "https://ignored.example/when-asset",
+        characterIds: ["c1"],
+        scenePresetIds: [],
+        clientRequestId: "req-1",
+      }),
+    ).toEqual({
+      projectId: "project-1",
+      modelId: imageToImage.id,
+      prompt: "改圖",
+      sourceAssetId: "asset-9",
+      sourceUrl: undefined,
+      characterIds: ["c1"],
+      scenePresetIds: undefined,
+      clientRequestId: "req-1",
+    });
+  });
+
+  it("uses sourceUrl only when model needs source and no asset is selected", () => {
+    expect(
+      buildGenerationSubmitInput({
+        projectId: "p",
+        model: imageToImage,
+        prompt: "x",
+        sourceAsset: null,
+        sourceUrl: "  https://cdn.example/a.png  ",
+        characterIds: [],
+        scenePresetIds: ["s1"],
+        clientRequestId: "req-2",
+      }),
+    ).toMatchObject({
+      sourceAssetId: undefined,
+      sourceUrl: "https://cdn.example/a.png",
+      characterIds: undefined,
+      scenePresetIds: ["s1"],
+    });
+  });
+
+  it("omits source fields for models that do not need a source", () => {
+    expect(
+      buildGenerationSubmitInput({
+        projectId: "p",
+        model: textToImage,
+        prompt: "禪",
+        sourceAsset: { id: "a", title: "t", kind: "image" },
+        sourceUrl: "https://x",
+        characterIds: [],
+        scenePresetIds: [],
+        clientRequestId: "req-3",
+      }),
+    ).toMatchObject({
+      sourceAssetId: undefined,
+      sourceUrl: undefined,
+    });
   });
 });

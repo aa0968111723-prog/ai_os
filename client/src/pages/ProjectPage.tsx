@@ -4,7 +4,7 @@ import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip } from "../components/interactions";
 import { worldviewSchema, type Worldview } from "@shared/worldview";
-import { getModel, estimatePoints, supportsCardAnchors, CATEGORIES } from "@shared/models";
+import { getModel, supportsCardAnchors, CATEGORIES } from "@shared/models";
 import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
@@ -21,9 +21,15 @@ import { AiHub } from "../components/AiHub";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import {
+  approvalThresholdNotice,
+  buildGenerationSubmitInput,
+  estimateGenerationPoints,
   filterCompatibleSources,
   getGenerationDisableReason,
+  isGenerateButtonDisabled,
+  isUsageBasedPoints,
   projectCanEdit,
+  shouldShowApprovalThresholdNotice,
 } from "../features/creation-workbench/generationGates";
 import {
   useCollab,
@@ -512,7 +518,7 @@ export function ProjectPage({ id }: { id: string }) {
   // 逐次估點：按字計費的 TTS 依「要唸的文字」長度即時估，與後端扣點同一函式（shared/models）——顯示＝扣點。
   // 其餘模型回扁平 points（行為不變）。full 找不到（理論上不會）時退回清單帶的 points。
   const fullModel = model ? getModel(model.id) : undefined;
-  const estPoints = fullModel ? estimatePoints(fullModel, { promptChars: prompt.length }) : (model?.points ?? 0);
+  const estPoints = estimateGenerationPoints(model, prompt.length);
   const disableReason = getGenerationDisableReason({
     canEdit,
     model,
@@ -1091,7 +1097,7 @@ export function ProjectPage({ id }: { id: string }) {
               <button
                 className="primary"
                 data-fb="生成按鈕"
-                disabled={disableReason != null || submit.isPending}
+                disabled={isGenerateButtonDisabled(disableReason, submit.isPending)}
                 onClick={() => { setSubmitNotice(""); setConfirming(true); }}
               >
                 {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${estPoints} 點）`}
@@ -1128,7 +1134,7 @@ export function ProjectPage({ id }: { id: string }) {
                 )}
                 <p style={{ margin: "8px 0" }}>
                   預估 <b style={{ color: "var(--primary-ink)", fontSize: 18 }}>約 {estPoints} 點</b>
-                  {fullModel && estimatePoints(fullModel, { promptChars: 2000 }) !== estimatePoints(fullModel, { promptChars: 1 }) && (
+                  {model && isUsageBasedPoints(model.id) && (
                     <span className="hint" style={{ marginLeft: 6, fontSize: 12 }}>（依文字長度即時計費）</span>
                   )}
                   {quota.data && (
@@ -1142,12 +1148,13 @@ export function ProjectPage({ id }: { id: string }) {
                 {/* 成本審核門檻提醒：組員單筆估點達組長設定的門檻→送出後要等組長核准才會開始生成 */}
                 {/* 用 estPoints（實際估點/扣點值）比門檻，而非 model.points——逐字計費的 TTS 會隨提示詞長度
                     變動，用 model.points 會與伺服器（以真估點判斷）不一致，顯示「免核准」卻被擋審，反之亦然 */}
-                {myRole === "member" &&
-                  quota.data?.approvalThreshold != null &&
-                  quota.data.approvalThreshold > 0 &&
-                  estPoints >= quota.data.approvalThreshold && (
+                {shouldShowApprovalThresholdNotice({
+                  myRole,
+                  approvalThreshold: quota.data?.approvalThreshold,
+                  estPoints,
+                }) && (
                     <p style={{ margin: "4px 0", fontSize: 13, color: "var(--gold-ink)" }}>
-                      ⏳ 這筆需要組長核准後才會開始生成（{estPoints} 點 ≥ 門檻 {quota.data.approvalThreshold} 點）
+                      {approvalThresholdNotice(estPoints, quota.data!.approvalThreshold!)}
                     </p>
                   )}
                 <p className="hint" style={{ fontSize: 12 }}>失敗全額退點。正式模式會實際呼叫 AI 生成。</p>
@@ -1157,16 +1164,18 @@ export function ProjectPage({ id }: { id: string }) {
                     disabled={submit.isPending}
                     onClick={() =>
                       model &&
-                      submit.mutate({
-                        projectId: id,
-                        modelId: model.id,
-                        prompt: prompt.trim(),
-                        sourceAssetId: model.needs && sourceAsset ? sourceAsset.id : undefined,
-                        sourceUrl: model.needs && !sourceAsset && sourceUrl.trim() ? sourceUrl.trim() : undefined,
-                        characterIds: charIds.length ? charIds : undefined,
-                        scenePresetIds: sceneIds.length ? sceneIds : undefined,
-                        clientRequestId: submitRequestId.current,
-                      })
+                      submit.mutate(
+                        buildGenerationSubmitInput({
+                          projectId: id,
+                          model,
+                          prompt,
+                          sourceAsset,
+                          sourceUrl,
+                          characterIds: charIds,
+                          scenePresetIds: sceneIds,
+                          clientRequestId: submitRequestId.current,
+                        }),
+                      )
                     }
                   >
                     {submit.isPending ? "生成中…" : "確認生成"}

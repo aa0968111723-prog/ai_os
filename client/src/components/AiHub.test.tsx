@@ -176,15 +176,19 @@ describe("AiHub", () => {
     expect(flashAnchor).not.toHaveBeenCalled();
   });
 
-  it("context chips scroll to project system anchors (知識 / 素材 / 分鏡)", async () => {
+  it.each([
+    { label: "知識", anchorId: "sec-knowledge" },
+    { label: "素材", anchorId: "sec-assets" },
+    { label: "分鏡與交付", anchorId: "stage-deliver" },
+  ] as const)("context chip $label scrolls to #$anchorId", async ({ label, anchorId }) => {
     const user = userEvent.setup();
     renderAiHub();
-    const knowledge = document.createElement("div");
-    knowledge.id = "sec-knowledge";
-    document.body.appendChild(knowledge);
+    const target = document.createElement("div");
+    target.id = anchorId;
+    document.body.appendChild(target);
 
-    await user.click(screen.getByRole("button", { name: "知識" }));
-    await waitFor(() => expect(knowledge.scrollIntoView).toHaveBeenCalled());
-    knowledge.remove();
+    await user.click(screen.getByRole("button", { name: label }));
+    await waitFor(() => expect(target.scrollIntoView).toHaveBeenCalled());
+    target.remove();
   });
 });

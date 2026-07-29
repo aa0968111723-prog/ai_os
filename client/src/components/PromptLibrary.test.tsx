@@ -88,12 +88,22 @@ describe("PromptLibrary", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders entries sorted as returned (server order = useCount first) with settings chips", () => {
+  it("preserves server list order in the DOM (client does not re-sort) and shows settings chips", () => {
+    // Server returns useCount-desc; client must render in array order without reordering.
+    listQuery.mockReturnValue({
+      data: [
+        { ...samplePrompt, id: "p-high", text: "高頻咒語", useCount: 9 },
+        { ...samplePrompt, id: "p-low", text: "低頻咒語", useCount: 1, modelId: null, characterIds: null, scenePresetIds: null },
+      ],
+    });
     render(<PromptLibrary projectId="project-1" onUse={vi.fn()} onUseForWorkflow={vi.fn()} />);
 
     expect(screen.getByRole("heading", { name: /提示詞庫/ })).toBeVisible();
-    expect(screen.getByText(samplePrompt.text)).toBeVisible();
-    expect(screen.getByText("用過 3 次")).toBeVisible();
+    const rows = document.querySelectorAll(".gen-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent("高頻咒語");
+    expect(rows[1]).toHaveTextContent("低頻咒語");
+    expect(screen.getByText("用過 9 次")).toBeVisible();
     expect(screen.getByText(/FLUX Schnell・角色 2・場景 1/)).toBeVisible();
   });
 
@@ -142,7 +152,8 @@ describe("PromptLibrary", () => {
     expect(await screen.findByRole("button", { name: "已複製" })).toBeVisible();
   });
 
-  it("刪除 confirms and mutates remove with the prompt id", async () => {
+  it("delete mutates remove after confirm handler (ConfirmButton mock fires onConfirm)", async () => {
+    // Real ConfirmButton two-step dialog is covered elsewhere; this locks mutate+invalidate contract.
     const user = userEvent.setup();
     render(<PromptLibrary projectId="project-1" onUse={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "刪除" }));

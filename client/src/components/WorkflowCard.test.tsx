@@ -146,7 +146,8 @@ describe("WorkflowCard", () => {
     confirm.mockRestore();
   });
 
-  it("shows run tracking for an active template and stop control", () => {
+  it("shows run tracking for an active template and stop mutates with runId", async () => {
+    const user = userEvent.setup();
     runsQuery.mockReturnValue({
       data: [
         {
@@ -175,9 +176,11 @@ describe("WorkflowCard", () => {
     expect(screen.getByText(/想法：禪堂/)).toBeVisible();
     expect(screen.getByText("出圖")).toBeVisible();
     expect(screen.getByText("旁白")).toBeVisible();
-    expect(screen.getByRole("button", { name: "停止後續步驟" })).toBeVisible();
     // own active run disables start
     expect(screen.getByRole("button", { name: /執行製作範本/ })).toBeDisabled();
     expect(screen.getByText("已有一個製作範本在執行")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "停止後續步驟" }));
+    expect(stopMutate).toHaveBeenCalledWith({ runId: "run-1" });
   });
 });
