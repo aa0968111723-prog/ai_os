@@ -8,7 +8,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
-import { getModel } from "../../shared/models";
 import { advanceGeneration, type GenerationRow } from "./generationCore";
 import { executeGenerationCommand } from "./generationCommand";
 import { resolveBackgroundProjectRole } from "./backgroundAccess";
@@ -50,6 +49,8 @@ import {
   usesDagExecution,
 } from "./agentDag";
 import { recordAgentEventSafely } from "./agentEventCore";
+import { resolveModel } from "./modelResolve";
+import { modelIsOperationallyReady } from "./aiModelPolicy";
 
 type RunRow = typeof schema.agentRuns.$inferSelect;
 
@@ -1264,14 +1265,20 @@ async function advanceRun(run: RunRow): Promise<void> {
     if (!scene) return failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
     const text = (scene.voiceover ?? "").trim();
     if (!text) return failRun(run, steps, idx, `第 ${step.sceneNo} 鏡還沒有配音詞——先填配音詞或把這步移除重新規劃`);
-    modelId = AGENT_TTS_MODEL;
+    const voiceModel = resolveModel(step.modelId ?? AGENT_TTS_MODEL);
+    if (!voiceModel || voiceModel.category !== "text-to-speech" || voiceModel.needs || !modelIsOperationallyReady(voiceModel)) {
+      return failRun(run, steps, idx, "計畫裡的旁白模型無效或尚未通過正式生成驗證，請重新規劃");
+    }
+    modelId = voiceModel.id;
     prompt = text;
     sceneId = scene.id;
     sceneRole = "narration";
   } else {
     // generate：模型已在規劃端過白名單，這裡再驗一次（防資料庫被手動改壞）
-    const model = getModel(step.modelId ?? "");
-    if (!model || model.needs) return failRun(run, steps, idx, "計畫裡的模型無效或需要來源素材");
+    const model = resolveModel(step.modelId ?? "");
+    if (!model || model.needs || !modelIsOperationallyReady(model)) {
+      return failRun(run, steps, idx, "計畫裡的模型無效、需要來源素材，或尚未通過正式生成驗證");
+    }
     if (!step.prompt?.trim()) return failRun(run, steps, idx, "計畫裡的提示詞是空的");
     if (step.sceneNo) {
       const scene = await resolvePersistedSceneTarget(run, steps, step);

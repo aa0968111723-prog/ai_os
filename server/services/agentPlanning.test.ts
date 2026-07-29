@@ -3,6 +3,7 @@ import {
   completePlanDraftSchema,
   extractPlanJson,
   resolveCompletePlanDraft,
+  summarizePlanDraftIssues,
   type PlannerAliases,
 } from "./agentPlanning";
 
@@ -204,5 +205,15 @@ describe("complete AI planning safety resolver", () => {
   it("extracts a single JSON object from fenced model output and rejects malformed JSON", () => {
     expect(extractPlanJson("```json\n{\"summary\":{},\"steps\":[]}\n```")).toEqual({ summary: {}, steps: [] });
     expect(extractPlanJson("not json {oops}")).toBeNull();
+  });
+
+  it("summarizes validation paths for one-shot plan repair without leaking full data", () => {
+    const result = completePlanDraftSchema.safeParse({ summary: {}, steps: [] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issues = summarizePlanDraftIssues(result.error);
+    expect(issues.length).toBeLessThanOrEqual(12);
+    expect(issues.some((issue) => issue.startsWith("summary.goal:"))).toBe(true);
+    expect(issues.some((issue) => issue.startsWith("steps:"))).toBe(true);
   });
 });

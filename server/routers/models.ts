@@ -51,13 +51,20 @@ export const modelsRouter = router({
     live: liveCacheMeta(),
   })),
 
-  /** 依類別列出(旗艦→經濟→最低排序)；資料源＝live 快取∪靜態 */
+  /** 依類別列出：已驗證／推薦優先，再依旗艦→經濟→最低；資料源＝live 快取∪靜態 */
   byCategory: authedProcedure
     .input(z.object({ category: z.string() }))
     .query(({ input }) => {
       const order: ModelTier[] = ["flagship", "economy", "budget"];
       return listResolvableModels({ category: input.category })
-        .sort((a, b) => order.indexOf(a.tier) - order.indexOf(b.tier))
+        .sort((a, b) => {
+          if (a.verified !== b.verified) return a.verified ? -1 : 1;
+          if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
+          const tierDiff = order.indexOf(a.tier) - order.indexOf(b.tier);
+          if (tierDiff !== 0) return tierDiff;
+          if (a.points !== b.points) return a.points - b.points;
+          return a.id.localeCompare(b.id);
+        })
         .map(publicEntry);
     }),
 
@@ -69,7 +76,14 @@ export const modelsRouter = router({
         q: input.q,
         category: input.category,
         tier: input.tier,
-      }).map(publicEntry),
+      })
+        .sort((a, b) => {
+          if (a.verified !== b.verified) return a.verified ? -1 : 1;
+          if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
+          if (a.points !== b.points) return a.points - b.points;
+          return a.id.localeCompare(b.id);
+        })
+        .map(publicEntry),
     ),
 
   /** 單筆（含 live 點數） */

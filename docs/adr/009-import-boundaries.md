@@ -60,7 +60,7 @@ client  ──HTTP/tRPC──▶  server/routers  ──call──▶  server/se
 
 | 檔案 | 匯入 | 說明 |
 |---|---|---|
-| `server/services/agentCore.ts` | `../routers/knowledge`（`buildKnowledgeContext`）、`../routers/assistant`（`MODEL_CHEATSHEET`） | 知識／助理 helper 仍在 router 檔 |
+| `server/services/agentCore.ts` | `../routers/knowledge`（`buildKnowledgeContext`） | 知識 helper 仍在 router 檔；模型決策已下沉至共用 service |
 | `server/services/agentRunner.ts` | `../routers/director`、`../routers/approvals`、`../routers/assistant` | 分鏡拆本、核准、scene fill 仍在 router |
 | `server/services/agentSplitRecovery.pg.test.ts` | `../routers/director` | 測試沿用 `splitScriptCore` |
 | `server/services/generationCore.ts` | `../routers/characters`、`../routers/scenePresets` | anchor builder 仍在 router |

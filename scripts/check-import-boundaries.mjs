@@ -42,7 +42,6 @@ const ALLOWLIST = new Set([
 
   // Services → routers: helpers not yet extracted (legacy)
   "server/services/agentCore.ts::../routers/knowledge",
-  "server/services/agentCore.ts::../routers/assistant",
   "server/services/agentRunner.ts::../routers/director",
   "server/services/agentRunner.ts::../routers/approvals",
   "server/services/agentRunner.ts::../routers/assistant",
