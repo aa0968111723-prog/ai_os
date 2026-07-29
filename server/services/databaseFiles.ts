@@ -301,11 +301,17 @@ export interface NormalizedImport {
   fileId?: string;
 }
 
+/** Notion 官方與自訂站台網域。必須用「相等或點號子網域」判斷，避免 fake-notion.com 類誤判。 */
+export function isNotionHost(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, "");
+  return ["notion.so", "notion.com", "notion.site"].some((base) => host === base || host.endsWith(`.${base}`));
+}
+
 /**
  * 匯入網址正規化：
  * - Google 文件/試算表/簡報 →「任何人知道連結都能看」時可直接匯出 txt/csv/txt；
  * - Google 雲端硬碟檔案 → uc?export=download 直載；
- * - Notion → kind='notion'（由 fetchNotionText 走官方 API）；
+ * - Notion → kind='notion'（由 fetchNotionText 走官方 API，絕不回退網頁爬取）；
  * - 其他 → 原樣抓（HTML 會轉純文字）。
  */
 export function normalizeImportUrl(rawUrl: string): NormalizedImport {
@@ -330,20 +336,26 @@ export function normalizeImportUrl(rawUrl: string): NormalizedImport {
     const id = u.searchParams.get("id");
     if (u.pathname === "/uc" && id) return { fetchUrl: `https://drive.google.com/uc?export=download&id=${id}`, kind: "google-drive", fileId: id };
   }
-  if (host === "www.notion.so" || host === "notion.so" || host.endsWith(".notion.site")) {
-    return { fetchUrl: rawUrl, kind: "notion" };
+  if (isNotionHost(host)) {
+    // Notion 的 source=copy_link／pvs／v 等參數不參與 Page ID；保存乾淨來源，避免後續行為漂移。
+    u.search = "";
+    u.hash = "";
+    return { fetchUrl: u.toString(), kind: "notion" };
   }
   return { fetchUrl: rawUrl, kind: "web" };
 }
 
-/** Notion 網址 → 頁面 id（路徑最後一段的 32 碼 hex，含或不含連字號） */
+/** Notion 網址 → 頁面 id；支援 notion.so／notion.com／notion.site 與 app.notion.com 等子網域。 */
 export function notionPageIdFromUrl(rawUrl: string): string | null {
   try {
     const u = new URL(rawUrl);
-    const last = u.pathname.split("/").filter(Boolean).pop() ?? "";
-    const m = last.match(/([0-9a-f]{32})$/i) ?? last.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i);
-    if (!m) return null;
-    const hex = m[1].replace(/-/g, "");
+    if (!isNotionHost(u.hostname)) return null;
+    const path = decodeURIComponent(u.pathname);
+    const standard = path.match(/(?:^|[^0-9a-f])([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:$|[^0-9a-f])/i);
+    const compact = path.match(/(?:^|[^0-9a-f])([0-9a-f]{32})(?:$|[^0-9a-f])/i);
+    const match = standard?.[1] ?? compact?.[1];
+    if (!match) return null;
+    const hex = match.replace(/-/g, "").toLowerCase();
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   } catch {
     return null;
@@ -398,7 +410,21 @@ async function fetchNotionTextWithToken(pageId: string, token: string): Promise<
       const qs = cursor ? `?start_cursor=${cursor}&page_size=100` : "?page_size=100";
       const res = await proxyFetch(`https://api.notion.com/v1/blocks/${blockId}/children${qs}`, { headers, timeoutMs: 20_000 });
       if (!res.ok) {
-        if (res.status === 404) throw new NotionPageNotFoundError("Notion 找不到這個頁面——請確認頁面已「分享給整合」（Connections → 選你的整合）");
+        if (res.status === 401) {
+          throw new Error("Notion Token 已失效或格式錯誤——請到「連接的資料來源」重新設定 Integration Secret。");
+        }
+        if (res.status === 403) {
+          throw new Error("Notion 整合沒有讀取內容的權限——請確認整合已開啟 Read content capability。");
+        }
+        if (res.status === 404) {
+          throw new NotionPageNotFoundError("頁面未授權：請在 Notion 頁面右上角點擊 ⋯ → Connections，將頁面連結給 Aios 整合。");
+        }
+        if (res.status === 429) {
+          throw new Error("Notion API 請求過於頻繁，請稍後再試。");
+        }
+        if (res.status >= 500) {
+          throw new Error("Notion 服務暫時無法使用，請稍後再試。");
+        }
         throw new Error(`Notion API 錯誤（${res.status}）`);
       }
       const data = (await res.json()) as { results?: Array<Record<string, unknown>>; has_more?: boolean; next_cursor?: string };
@@ -464,6 +490,16 @@ export async function readBodyCapped(res: Response, max: number): Promise<Buffer
 }
 
 export async function fetchImport(url: string): Promise<{ buf: Buffer; mime: string; finalUrl: string }> {
+  let initial: URL;
+  try {
+    initial = new URL(url);
+  } catch {
+    throw new Error("網址格式不正確");
+  }
+  if (isNotionHost(initial.hostname)) {
+    throw new Error("Notion 連結必須透過官方 API 匯入——請確認頁面已在 Connections 授權給 Aios 整合。");
+  }
+
   let current = url;
   for (let hop = 0; hop < 5; hop++) {
     const guard = ssrfGuardError(current);
