@@ -378,15 +378,20 @@ export function ProjectPage({ id }: { id: string }) {
    * 避免默默蓋掉手打的提示詞；套用後切到直接生成模式、聚焦提示詞框。
    * settings（可選）＝一併還原模型與角色/場景卡勾選：提示詞庫與生成紀錄存的是「完整用法」，不只文字。
    * 陣列語義：[]＝明確清空現勾（如實還原「當時沒帶卡」）；null/undefined＝不知道，維持現勾不動 */
+  /**
+   * 「用這個提示詞」統一入口。
+   * @returns false when user cancels overwrite confirm (nothing applied);
+   *          true after settings/prompt are applied (for resource drawer close/toast).
+   */
   const applyPrompt = (
     text: string,
     settings?: { modelId?: string | null; characterIds?: string[] | null; scenePresetIds?: string[] | null; sourceAssetId?: string | null },
-  ) => {
+  ): boolean => {
     // 現值：優先 DOM（工作台內表單），再退回 draft storage（可能有 debounce 延遲）
     const live = (document.getElementById("gen-prompt") as HTMLTextAreaElement | null)?.value;
     const current = (live ?? loadDraft(id).prompt ?? "").trim();
     // 這裡刻意保留原生 confirm：只在使用者已手打提示詞時才問「要覆蓋嗎」
-    if (current && !window.confirm("要覆蓋你已輸入的提示詞嗎？")) return;
+    if (current && !window.confirm("要覆蓋你已輸入的提示詞嗎？")) return false;
     if (settings) {
       // 只還原「仍存在」的卡片 id（卡片可能已被刪除）；清單還沒載入就先原樣設定，載入後的清理 effect 會補剪
       if (settings.characterIds) {
@@ -419,6 +424,7 @@ export function ProjectPage({ id }: { id: string }) {
         el?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
     });
+    return true;
   };
 
   // 「從這裡開始」四步：用實際 state 判定完成打勾

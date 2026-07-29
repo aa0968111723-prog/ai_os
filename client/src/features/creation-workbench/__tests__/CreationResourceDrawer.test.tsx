@@ -1,6 +1,6 @@
 /**
  * WB-05: CreationResourceDrawer open/close a11y, apply_prompt without auto-submit,
- * GenerationList reuse path, entry anchors.
+ * GenerationList reuse path, entry anchors, poller exclusivity, cancel confirm.
  */
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -161,20 +161,38 @@ describe("CreationResourceDrawer (WB-05)", () => {
     expect(screen.queryByRole("dialog", { name: "資源與結果" })).not.toBeInTheDocument();
   });
 
-  it("opens dialog with focus trap target and closes on Escape / 關閉", async () => {
+  it("when closed, generation-list-poller is mounted; open generations tab swaps to single list", async () => {
+    const user = userEvent.setup();
+    render(
+      <CreationResourceDrawer projectId={projectId} currentMode="generate" canEdit />,
+    );
+
+    expect(screen.getByTestId("generation-list-poller")).toBeInTheDocument();
+    // Poller hosts the list while closed
+    expect(within(screen.getByTestId("generation-list-poller")).getByTestId("generation-list")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /生成紀錄/ }));
+    const dialog = screen.getByRole("dialog", { name: "資源與結果" });
+    expect(screen.queryByTestId("generation-list-poller")).not.toBeInTheDocument();
+    expect(within(dialog).getAllByTestId("generation-list")).toHaveLength(1);
+  });
+
+  it("opens dialog with focus trap target, closes on Escape, returns focus to opener", async () => {
     const user = userEvent.setup();
     render(
       <CreationResourceDrawer projectId={projectId} currentMode="ask" canEdit />,
     );
 
-    await user.click(screen.getByRole("button", { name: /提示詞庫/ }));
+    const openBtn = screen.getByRole("button", { name: /提示詞庫/ });
+    await user.click(openBtn);
     const dialog = screen.getByRole("dialog", { name: "資源與結果" });
     expect(dialog).toBeVisible();
     expect(dialog).toHaveAttribute("aria-modal", "true");
 
-    // Escape closes (useFocusTrap)
+    // Escape closes (useFocusTrap) and returns focus to opener chip
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "資源與結果" })).not.toBeInTheDocument();
+    expect(openBtn).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: /生成紀錄/ }));
     expect(screen.getByRole("dialog", { name: "資源與結果" })).toBeVisible();
@@ -182,7 +200,22 @@ describe("CreationResourceDrawer (WB-05)", () => {
     expect(screen.queryByRole("dialog", { name: "資源與結果" })).not.toBeInTheDocument();
   });
 
-  it("PromptLibrary 帶入目前模式 uses apply_prompt and does not auto-submit", async () => {
+  it("ArrowRight on resource tablist moves selection (roving tabindex)", async () => {
+    const user = userEvent.setup();
+    render(
+      <CreationResourceDrawer projectId={projectId} currentMode="ask" canEdit />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /提示詞庫/ }));
+    const promptsTab = screen.getByRole("tab", { name: /提示詞庫/ });
+    expect(promptsTab).toHaveAttribute("aria-selected", "true");
+    promptsTab.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: /生成紀錄/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /生成紀錄/ })).toHaveFocus();
+  });
+
+  it("PromptLibrary 帶入目前模式 uses apply_prompt and does not auto-submit; notice on entry row", async () => {
     const user = userEvent.setup();
     const onCreationAction = vi.fn();
     render(
@@ -211,8 +244,9 @@ describe("CreationResourceDrawer (WB-05)", () => {
       modelId: samplePrompt.modelId,
     });
     expect(generationSubmit).not.toHaveBeenCalled();
-    // Drawer closes after apply
+    // Drawer closes after apply; notice is on entry row (visible when closed)
     expect(screen.queryByRole("dialog", { name: "資源與結果" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/已帶入「直接生成」/);
   });
 
   it("apply_prompt to ask mode does not charge or submit", async () => {
@@ -244,7 +278,7 @@ describe("CreationResourceDrawer (WB-05)", () => {
 
   it("when onReuseGenerate is set for generate mode, uses that path without submit", async () => {
     const user = userEvent.setup();
-    const onReuseGenerate = vi.fn();
+    const onReuseGenerate = vi.fn(() => true);
     const onCreationAction = vi.fn();
     render(
       <CreationResourceDrawer
@@ -268,11 +302,33 @@ describe("CreationResourceDrawer (WB-05)", () => {
     // Parent path owns generate apply — avoid double fill via apply_prompt
     expect(onCreationAction).not.toHaveBeenCalled();
     expect(generationSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog", { name: "資源與結果" })).not.toBeInTheDocument();
+  });
+
+  it("when onReuseGenerate returns false (cancel confirm), drawer stays open with no success toast", async () => {
+    const user = userEvent.setup();
+    const onReuseGenerate = vi.fn(() => false);
+    render(
+      <CreationResourceDrawer
+        projectId={projectId}
+        currentMode="generate"
+        canEdit
+        onReuseGenerate={onReuseGenerate}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /提示詞庫/ }));
+    await user.click(screen.getByRole("button", { name: /帶入目前模式（直接生成）/ }));
+
+    expect(onReuseGenerate).toHaveBeenCalledOnce();
+    expect(screen.getByRole("dialog", { name: "資源與結果" })).toBeVisible();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(generationSubmit).not.toHaveBeenCalled();
   });
 
   it("GenerationList reuse still works and does not submit", async () => {
     const user = userEvent.setup();
-    const onReuseGenerate = vi.fn();
+    const onReuseGenerate = vi.fn(() => true);
     render(
       <CreationResourceDrawer
         projectId={projectId}
@@ -289,18 +345,49 @@ describe("CreationResourceDrawer (WB-05)", () => {
     expect(onReuseGenerate).toHaveBeenCalledWith("舊生成", { modelId: "fal-ai/flux/schnell" });
     expect(generationSubmit).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog", { name: "資源與結果" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/已帶回直接生成/);
   });
 
-  it("revealWorkbenchAnchor(#sec-prompts) opens the drawer on prompts tab", async () => {
+  it("GenerationList reuse cancel keeps drawer open", async () => {
+    const user = userEvent.setup();
+    const onReuseGenerate = vi.fn(() => false);
+    render(
+      <CreationResourceDrawer
+        projectId={projectId}
+        currentMode="generate"
+        canEdit
+        onReuseGenerate={onReuseGenerate}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /生成紀錄/ }));
+    await user.click(screen.getByRole("button", { name: /再用此設定/ }));
+    expect(onReuseGenerate).toHaveBeenCalledOnce();
+    expect(screen.getByRole("dialog", { name: "資源與結果" })).toBeVisible();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("revealWorkbenchAnchor opens matching tab for #sec-prompts / generations / trail", async () => {
+    const user = userEvent.setup();
     render(
       <CreationResourceDrawer projectId={projectId} currentMode="plan" canEdit />,
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
     revealWorkbenchAnchor("#sec-prompts", { projectId });
-
     expect(await screen.findByRole("dialog", { name: "資源與結果" })).toBeVisible();
     expect(screen.getByRole("tab", { name: /提示詞庫/ })).toHaveAttribute("aria-selected", "true");
+
+    // Close via Escape then open generations
+    await user.keyboard("{Escape}");
+    revealWorkbenchAnchor("#sec-generations", { projectId });
+    expect(await screen.findByRole("dialog", { name: "資源與結果" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: /生成紀錄/ })).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{Escape}");
+    revealWorkbenchAnchor("#sec-trail", { projectId });
+    expect(await screen.findByRole("dialog", { name: "資源與結果" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: /執行軌跡/ })).toHaveAttribute("aria-selected", "true");
   });
 
   it("execution trail links to plan mode via requestWorkbenchMode", async () => {

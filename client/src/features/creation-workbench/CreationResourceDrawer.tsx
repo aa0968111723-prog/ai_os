@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { GenerationList } from "../../components/GenerationList";
 import { Icon, type IconName } from "../../components/Icon";
 import { useFocusTrap } from "../../components/interactions";
@@ -13,6 +20,16 @@ import {
 } from "./workbenchNav";
 
 export type ResourceDrawerTab = "prompts" | "generations" | "trail" | "templates";
+
+export type ReuseGenerateFn = (
+  text: string,
+  settings?: {
+    modelId?: string | null;
+    characterIds?: string[] | null;
+    scenePresetIds?: string[] | null;
+    sourceAssetId?: string | null;
+  },
+) => boolean | void;
 
 const TABS: ReadonlyArray<{
   id: ResourceDrawerTab;
@@ -56,6 +73,11 @@ function tabFromAnchor(anchor: string | undefined): ResourceDrawerTab | null {
   }
 }
 
+/** Parent path returns false only when overwrite confirm is cancelled. */
+function reuseSucceeded(result: boolean | void): boolean {
+  return result !== false;
+}
+
 /**
  * WB-05: unified resource drawer for 提示詞庫 / 生成紀錄 / 執行軌跡 (+ 範本收藏 stub).
  * Embeds PromptLibrary + GenerationList (no rewrites). Bring-in uses CreationAction.apply_prompt
@@ -77,16 +99,11 @@ export function CreationResourceDrawer({
   /** Active workbench mode —「帶入目前模式」target. */
   currentMode: CreationMode;
   onCreationAction?: (action: CreationAction) => void;
-  /** GenerationList「再用此設定」→ parent applyPrompt path (char/scene + generate form). */
-  onReuseGenerate?: (
-    text: string,
-    settings?: {
-      modelId?: string | null;
-      characterIds?: string[] | null;
-      scenePresetIds?: string[] | null;
-      sourceAssetId?: string | null;
-    },
-  ) => void;
+  /**
+   * GenerationList「再用此設定」/ generate 帶入 → parent applyPrompt.
+   * Return `false` when user cancels overwrite so drawer stays open.
+   */
+  onReuseGenerate?: ReuseGenerateFn;
   /** PromptLibrary「製作範本」→ WorkflowCard idea box. */
   onUseForWorkflow?: (text: string) => void;
   /** Controlled open (optional). */
@@ -98,9 +115,10 @@ export function CreationResourceDrawer({
   const prefix = `crd-${reactId.replace(/:/g, "")}`;
   const [internalOpen, setInternalOpen] = useState(false);
   const [tab, setTab] = useState<ResourceDrawerTab>(initialTab);
+  /** Entry-row status (visible when drawer closed after successful apply). */
   const [notice, setNotice] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
-  const openBtnRefs = useRef<Partial<Record<ResourceDrawerTab, HTMLButtonElement | null>>>({});
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const controlled = openProp !== undefined;
   const open = controlled ? !!openProp : internalOpen;
@@ -137,7 +155,7 @@ export function CreationResourceDrawer({
 
   useEffect(() => {
     if (!notice) return;
-    const t = window.setTimeout(() => setNotice(""), 2200);
+    const t = window.setTimeout(() => setNotice(""), 2500);
     return () => window.clearTimeout(t);
   }, [notice]);
 
@@ -145,6 +163,41 @@ export function CreationResourceDrawer({
     setTab(next);
     setOpen(true);
   };
+
+  /** Successful bring-in only: toast on entry row + close drawer. */
+  const finishSuccessfulApply = useCallback(
+    (message: string) => {
+      setNotice(message);
+      close();
+    },
+    [close],
+  );
+
+  const onDrawerTabKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
+      const count = TABS.length;
+      let next = index;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        event.preventDefault();
+        next = (index + 1) % count;
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        event.preventDefault();
+        next = (index - 1 + count) % count;
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        next = 0;
+      } else if (event.key === "End") {
+        event.preventDefault();
+        next = count - 1;
+      } else {
+        return;
+      }
+      const nextId = TABS[next]!.id;
+      setTab(nextId);
+      tabRefs.current[next]?.focus();
+    },
+    [],
+  );
 
   /** 帶入目前模式 via apply_prompt — never auto-submit / charge. */
   const applyPromptToCurrentMode = useCallback(
@@ -156,13 +209,15 @@ export function CreationResourceDrawer({
       // Generate + parent path: sole channel for overwrite-confirm + char/scene parent state.
       // Do not also fire apply_prompt (would bypass confirm and double-fill).
       if (currentMode === "generate" && onReuseGenerate) {
-        onReuseGenerate(text, {
-          modelId: settings?.modelId,
-          characterIds: settings?.characterIds,
-          scenePresetIds: settings?.scenePresetIds,
-        });
-        setNotice(`已帶入「${modeLabel(currentMode)}」（未送出）`);
-        close();
+        const ok = reuseSucceeded(
+          onReuseGenerate(text, {
+            modelId: settings?.modelId,
+            characterIds: settings?.characterIds,
+            scenePresetIds: settings?.scenePresetIds,
+          }),
+        );
+        if (!ok) return; // user cancelled overwrite — keep drawer open, no success toast
+        finishSuccessfulApply(`已帶入「${modeLabel(currentMode)}」（未送出）`);
         return;
       }
 
@@ -181,10 +236,9 @@ export function CreationResourceDrawer({
         onUseForWorkflow(trimmed);
       }
 
-      setNotice(`已帶入「${modeLabel(currentMode)}」（未送出）`);
-      close();
+      finishSuccessfulApply(`已帶入「${modeLabel(currentMode)}」（未送出）`);
     },
-    [close, currentMode, onCreationAction, onReuseGenerate, onUseForWorkflow],
+    [currentMode, finishSuccessfulApply, onCreationAction, onReuseGenerate, onUseForWorkflow],
   );
 
   const goToPlanMode = () => {
@@ -199,9 +253,10 @@ export function CreationResourceDrawer({
       projectId={projectId}
       canEdit={canEdit}
       onReuse={(text, settings) => {
-        onReuseGenerate?.(text, settings);
-        setNotice("已帶回直接生成（未送出）");
-        close();
+        if (!onReuseGenerate) return;
+        const ok = reuseSucceeded(onReuseGenerate(text, settings));
+        if (!ok) return; // cancel: stay open
+        finishSuccessfulApply("已帶回直接生成（未送出）");
       }}
     />
   );
@@ -236,9 +291,6 @@ export function CreationResourceDrawer({
               key={t.id}
               type="button"
               className="btn-ghost btn-sm"
-              ref={(el) => {
-                openBtnRefs.current[t.id] = el;
-              }}
               aria-haspopup="dialog"
               aria-expanded={open && tab === t.id}
               data-resource-tab={t.id}
@@ -248,6 +300,12 @@ export function CreationResourceDrawer({
             </button>
           ))}
         </div>
+        {/* Success feedback lives on the entry row so it remains visible after close. */}
+        {notice ? (
+          <p className="hint" role="status" aria-live="polite" style={{ margin: "8px 0 0" }}>
+            {notice}
+          </p>
+        ) : null}
         {/* Hidden anchors so revealWorkbenchAnchor / scroll still find them */}
         <span id="sec-generations" hidden aria-hidden="true" />
         <span id="sec-trail" hidden aria-hidden="true" />
@@ -300,11 +358,14 @@ export function CreationResourceDrawer({
                 borderBottom: "1px solid var(--border-soft)",
               }}
             >
-              {TABS.map((t) => {
+              {TABS.map((t, index) => {
                 const selected = tab === t.id;
                 return (
                   <button
                     key={t.id}
+                    ref={(el) => {
+                      tabRefs.current[index] = el;
+                    }}
                     type="button"
                     role="tab"
                     id={`${prefix}-tab-${t.id}`}
@@ -313,6 +374,7 @@ export function CreationResourceDrawer({
                     tabIndex={selected ? 0 : -1}
                     className="btn-ghost btn-sm"
                     onClick={() => setTab(t.id)}
+                    onKeyDown={(e) => onDrawerTabKeyDown(e, index)}
                     style={{
                       whiteSpace: "nowrap",
                       border: selected ? "1px solid var(--primary-border)" : "1px solid transparent",
@@ -326,12 +388,6 @@ export function CreationResourceDrawer({
             </div>
 
             <div style={{ flex: 1, overflow: "auto", padding: "10px 14px 16px", WebkitOverflowScrolling: "touch" }}>
-              {notice ? (
-                <p className="hint" role="status" aria-live="polite" style={{ marginTop: 0 }}>
-                  {notice}
-                </p>
-              ) : null}
-
               <div
                 role="tabpanel"
                 id={`${prefix}-panel-prompts`}
@@ -349,8 +405,7 @@ export function CreationResourceDrawer({
                       onUseForWorkflow
                         ? (text) => {
                             onUseForWorkflow(text);
-                            setNotice("已帶入製作範本想法框（未啟動）");
-                            close();
+                            finishSuccessfulApply("已帶入製作範本想法框（未啟動）");
                           }
                         : undefined
                     }

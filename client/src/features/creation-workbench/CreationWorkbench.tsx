@@ -63,6 +63,10 @@ export function CreationWorkbench({
   generateApplyRequest?: DirectGenerateApplyRequest | null;
   /** PromptLibrary「用於製作範本」→ WorkflowCard idea box (nonce-driven) */
   workflowPromptRequest?: { text: string; nonce: number } | null;
+  /**
+   * Parent applyPrompt path. Return `false` when user cancels overwrite confirm
+   * so the resource drawer stays open and does not toast success.
+   */
   onReuseGenerate?: (
     text: string,
     settings?: {
@@ -71,7 +75,7 @@ export function CreationWorkbench({
       scenePresetIds?: string[] | null;
       sourceAssetId?: string | null;
     },
-  ) => void;
+  ) => boolean | void;
   /** Form source cleared/changed → keep AssetLibrary highlight honest. */
   onGenerateSourceChange?: (sourceAssetId: string | null) => void;
   studioCollab?: StudioCollabProps | null;
