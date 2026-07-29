@@ -112,6 +112,23 @@ export function PlannerPage({ groupId }: { groupId: string }) {
     return () => window.clearInterval(timer);
   }, [focusTarget]);
 
+  // 頁首只讀摘要與下方卡片共用同一組 query key，不增加額外資料來源。
+  const schedulePreview = trpc.schedule.list.useQuery(
+    { groupId, includePast: false },
+    { enabled: !!groupId },
+  );
+  const notesPreview = trpc.notes.list.useQuery(
+    { groupId },
+    { enabled: !!groupId },
+  );
+  const upcomingItems = (schedulePreview.data?.items ?? []) as ScheduleItem[];
+  const today = new Date();
+  const todayScheduleCount = upcomingItems.filter((item) => dayKey(new Date(item.startsAt)) === dayKey(today)).length;
+  const nextSchedule = upcomingItems[0];
+  const noteCount = notesPreview.data?.length ?? 0;
+  const linkedKnowledgeCount = upcomingItems.filter((item) => item.projectId).length
+    + (notesPreview.data ?? []).filter((note) => note.projectId).length;
+
   if (!groupId) {
     return (
       <div className="page-shell planner-page">
@@ -140,18 +157,21 @@ export function PlannerPage({ groupId }: { groupId: string }) {
       <nav className="planner-jump-grid" aria-label="筆記排程功能">
         <button type="button" onClick={() => revealPlannerSection("planner-schedule")}>
           <span className="planner-jump-grid__icon schedule"><Icon name="CalendarPlus" size={18} /></span>
-          <span><strong>組排程</strong><small>開會、拍攝與上片期限</small></span>
-          <Icon name="ChevronRight" size={16} />
+          <span>
+            <strong>組排程</strong>
+            <small>{nextSchedule ? `下一筆 ${fmtDateTime(nextSchedule.startsAt)}` : "接下來沒有行程"}</small>
+          </span>
+          <span className="planner-jump-grid__metric"><em>{todayScheduleCount}</em><Icon name="ChevronRight" size={16} /></span>
         </button>
         <button type="button" onClick={() => revealPlannerSection("planner-notes")}>
           <span className="planner-jump-grid__icon notes"><Icon name="FileText" size={18} /></span>
-          <span><strong>筆記與決議</strong><small>會議紀錄、待辦與版本</small></span>
-          <Icon name="ChevronRight" size={16} />
+          <span><strong>筆記與決議</strong><small>{noteCount ? `${noteCount} 份可追溯共用筆記` : "還沒有共用筆記"}</small></span>
+          <span className="planner-jump-grid__metric"><em>{noteCount}</em><Icon name="ChevronRight" size={16} /></span>
         </button>
         <button type="button" onClick={() => revealPlannerSection("planner-knowledge-map")}>
           <span className="planner-jump-grid__icon map"><Icon name="Sparkles" size={18} /></span>
-          <span><strong>知識地圖</strong><small>探索專案與資料關聯</small></span>
-          <Icon name="ChevronRight" size={16} />
+          <span><strong>知識地圖</strong><small>{linkedKnowledgeCount ? `${linkedKnowledgeCount} 筆已連回專案` : "把筆記排程連回專案"}</small></span>
+          <span className="planner-jump-grid__metric"><em>{linkedKnowledgeCount}</em><Icon name="ChevronRight" size={16} /></span>
         </button>
       </nav>
       {/* key 綁組別：切換作用組時整卡重掛，表單草稿不會帶到別的組 */}
