@@ -17,7 +17,7 @@ import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PromptLibrary } from "../components/PromptLibrary";
 import { TocNav } from "../components/TocNav";
-import { AiHub } from "../components/AiHub";
+import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import {
@@ -1008,10 +1008,10 @@ export function ProjectPage({ id }: { id: string }) {
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
-          {/* AI 創作助手（統一深度整合）：一個對話統包問答・發想・拆分鏡・下目標排計畫・查資料庫；
-              多步目標排成計畫，核准後由伺服器背景執行（可寫入 AI 可寫的資料庫）；拆分鏡草稿仍落在③分鏡列表。
+          {/* AI 創作工作台（WB-01 shell）：模式 tabs + 共享草稿；adapter 嵌入問 AI／計畫，
+              直接生成／製作範本仍連到頁面既有 #sec-studio / #sec-workflow。
               生成紀錄的「AI 執行計畫」來源 chip 捲向卡內既有的 #sec-agent 錨點 */}
-          <AiHub projectId={id} canEdit={canEdit} isLeader={isLeader} />
+          <CreationWorkbench projectId={id} canEdit={canEdit} isLeader={isLeader} />
 
           {/* 生成台（11 類 × 旗艦/經濟/最低成本）＝日常主力工作區 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>
