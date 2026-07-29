@@ -60,12 +60,15 @@ export function LoginPage() {
   };
 
   return (
-    <div style={{ 
-      minHeight: "100dvh", 
-      display: "grid", 
-      placeItems: "center",
-      padding: "max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom))"
-    }}>
+    <div
+      style={{
+        // LoginPage 位於 AppHeader 與 .app 底部 padding 之間；不能再佔完整 100dvh，否則頁面必然多出垂直捲軸。
+        minHeight: "calc(100dvh - 112px)",
+        display: "grid",
+        placeItems: "center",
+        padding: "max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom))",
+      }}
+    >
       <div className="card login-card">
         <BrandReveal mode="fade-rise" onceKey="login" durationMs={720}>
           <div className="login-brand">
@@ -79,6 +82,7 @@ export function LoginPage() {
           <label htmlFor="login-email">Email</label>
           <input
             id="login-email"
+            type="email"
             value={email}
             onChange={(e) => { setEmail(e.target.value); clearStaleError(); }}
             placeholder="you@example.com"
