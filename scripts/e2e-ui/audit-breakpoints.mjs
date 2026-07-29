@@ -12,7 +12,7 @@ const VIEWPORTS = [
 ];
 
 const TARGET_URL = process.env.TARGET_URL || "http://localhost:3000";
-const OUT_DIR = process.env.OUT_DIR || "./e2e-ui-out/breakpoints";
+const OUT_DIR = process.env.OUT_DIR || "./docs/uiux-audit/screenshots";
 
 async function run() {
   console.log(`開始執行 UX-00 斷點截圖盤點... 目標網址: ${TARGET_URL}`);

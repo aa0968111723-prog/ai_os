@@ -31,7 +31,7 @@ const VIEWPORTS = [
 ];
 
 const TARGET_URL = process.env.TARGET_URL || "http://localhost:3000";
-const OUT_DIR = process.env.OUT_DIR || "./docs/audit-screenshots";
+const OUT_DIR = process.env.OUT_DIR || "./docs/uiux-audit/screenshots";
 const TEST_EMAIL = process.env.TEST_EMAIL || "test@example.com";
 const TEST_PW = process.env.TEST_PW || "password";
 
