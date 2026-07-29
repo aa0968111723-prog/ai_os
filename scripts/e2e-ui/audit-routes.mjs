@@ -62,7 +62,7 @@ async function run() {
     console.error("❌ 登入失敗，請確認網站狀態或選擇器是否正確:", err.message);
   }
 
-  // 2. 實際進入每一個主要頁面，並在每個裝置尺寸下截圖
+  // 2. 實際進入每一個主要頁面，擷取內容並在每個裝置尺寸下截圖
   for (const route of ROUTES) {
     console.log(`\n正在訪問: ${route}`);
     try {
@@ -71,6 +71,12 @@ async function run() {
       await page.waitForTimeout(1500);
       
       const safeName = route === "/" ? "home" : route.replace(/\//g, "-").replace(/^-/, "");
+
+      // 擷取頁面的實際文字內容，供 AI 分析真實 DOM 狀態
+      const pageText = await page.evaluate(() => document.body.innerText);
+      const textPath = path.join(OUT_DIR, `route-${safeName}-content.txt`);
+      fs.writeFileSync(textPath, `Route: ${route}\n\n${pageText}`);
+      console.log(`    ✅ 頁面內容已擷取: ${textPath}`);
 
       // 針對該路由測試所有裝置尺寸
       for (const vp of VIEWPORTS) {
@@ -89,7 +95,7 @@ async function run() {
   }
 
   await browser.close();
-  console.log(`\n🎉 路由與多裝置尺寸巡覽截圖盤點完成！請至 ${OUT_DIR} 資料夾查看實際畫面。`);
+  console.log(`\n🎉 路由與多裝置尺寸巡覽截圖盤點完成！請至 ${OUT_DIR} 資料夾查看實際畫面與文字內容。`);
 }
 
 run().catch((err) => {
