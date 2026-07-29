@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
+import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 
 /** 分類 value→中文標籤（追蹤列的分類 chip） */
 const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
@@ -18,11 +19,14 @@ export function MyReportsPage() {
   const mine = trpc.feedbackReports.mine.useQuery();
 
   return (
-    <div style={{ maxWidth: 720, margin: "0 auto" }}>
-      <h1>我的回報</h1>
-      <p className="sub">
-        你用右下角「回饋」浮標送出的意見都在這裡。有進度或回饋代理回覆時,狀態會更新。
-      </p>
+    <div className="page-shell secondary-page secondary-page--reading reports-page">
+      <SecondaryPageHeader
+        eyebrow="回饋追蹤"
+        title="我的回報"
+        icon="MessageCircle"
+        badge={mine.isLoading ? "正在同步狀態" : `${mine.data?.length ?? 0} 筆回報`}
+        description={<>你從右下角回饋入口送出的意見都留在這裡；處理進度與回覆會集中更新。</>}
+      />
 
       {mine.isLoading ? (
         <div role="status" aria-label="載入中" aria-busy="true">

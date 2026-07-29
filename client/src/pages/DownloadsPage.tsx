@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { Icon } from "../components/Icon";
+import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 
 /**
  * 資料下載區（需求 #11）：開發筆記／模型資料／UIUX 設計／隱私與法律，集中一頁下載。
@@ -56,9 +57,14 @@ export function DownloadsPage() {
   }, [reloadKey]);
 
   return (
-    <div>
-      <h1>共用文件下載區</h1>
-      <p className="hint">團隊共用文件集中下載：開發筆記、模型資料、設計與法律文件。文件更新後這裡自動是最新版。<br />（想匯出「你自己的」個人資料，請用右上角選單的「匯出我的個人資料」。）</p>
+    <div className="page-shell secondary-page downloads-page">
+      <SecondaryPageHeader
+        eyebrow="團隊文件"
+        title="共用下載"
+        icon="Download"
+        badge={data ? `${data.items.length} 份可下載文件` : "自動保持最新版"}
+        description={<>開發筆記、模型資料、設計與法律文件集中在這裡；想匯出個人資料，請使用帳號選單的專用功能。</>}
+      />
 
       {errMsg && (
         <p className="error" role="alert">
@@ -73,36 +79,38 @@ export function DownloadsPage() {
         </div>
       )}
 
-      {data?.categories.map((cat) => {
-        const items = data.items.filter((it) => it.category === cat.id);
-        return (
-          <section key={cat.id} className="card" style={{ marginTop: 16 }} data-fb={`下載區・${cat.label}`}>
-            <h2 style={{ marginTop: 0 }}>{cat.label}</h2>
-            <p className="hint" style={{ marginTop: 4 }}>{cat.hint}</p>
-            {items.length === 0 ? (
-              <p className="hint" style={{ margin: "10px 0 2px" }}>（待補——文件備齊後會出現在這裡）</p>
-            ) : (
-              <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
-                {items.map((it) => (
-                  <li
-                    key={it.file}
-                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}
-                  >
-                    <Icon name="FileText" size={15} style={{ flex: "none" }} />
-                    <span style={{ flex: "1 1 auto", minWidth: 160 }}>{it.title}</span>
-                    <span className="hint mono" style={{ flex: "none" }}>
-                      {fmtSize(it.sizeBytes)}・{new Date(it.updatedAt).toLocaleDateString("zh-TW")}
-                    </span>
-                    <a href={`/api/downloads/file?name=${encodeURIComponent(it.file)}`} download>
-                      <Icon name="Download" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />下載
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        );
-      })}
+      <div className="download-category-grid">
+        {data?.categories.map((cat) => {
+          const items = data.items.filter((it) => it.category === cat.id);
+          return (
+            <section key={cat.id} className="card download-category-card" data-fb={`下載區・${cat.label}`}>
+              <h2 style={{ marginTop: 0 }}>{cat.label}</h2>
+              <p className="hint" style={{ marginTop: 4 }}>{cat.hint}</p>
+              {items.length === 0 ? (
+                <p className="hint" style={{ margin: "10px 0 2px" }}>（待補——文件備齊後會出現在這裡）</p>
+              ) : (
+                <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
+                  {items.map((it) => (
+                    <li
+                      key={it.file}
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}
+                    >
+                      <Icon name="FileText" size={15} style={{ flex: "none" }} />
+                      <span style={{ flex: "1 1 auto", minWidth: 160 }}>{it.title}</span>
+                      <span className="hint mono" style={{ flex: "none" }}>
+                        {fmtSize(it.sizeBytes)}・{new Date(it.updatedAt).toLocaleDateString("zh-TW")}
+                      </span>
+                      <a href={`/api/downloads/file?name=${encodeURIComponent(it.file)}`} download>
+                        <Icon name="Download" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />下載
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          );
+        })}
+      </div>
 
       <p style={{ marginTop: 24 }}>
         <Link href="/dashboard">回今日工作台</Link>

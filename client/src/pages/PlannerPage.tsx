@@ -77,6 +77,18 @@ function nextTabValue<T extends string>(values: readonly T[], current: T, key: s
   return null;
 }
 
+function revealPlannerSection(id: string): void {
+  const section = document.getElementById(id) as HTMLDetailsElement | null;
+  if (!section) return;
+  section.open = true;
+  requestAnimationFrame(() => {
+    section.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "start",
+    });
+  });
+}
+
 export function PlannerPage({ groupId }: { groupId: string }) {
   // 深連結來源：① 留言／私訊卡 setPlannerFocus（sessionStorage）② URL ?focus=note-:id|schedule-:id（私訊標注卡直達）
   const [focusTarget] = useState(() => {
@@ -102,8 +114,11 @@ export function PlannerPage({ groupId }: { groupId: string }) {
 
   if (!groupId) {
     return (
-      <div>
-        <h1>筆記排程</h1>
+      <div className="page-shell planner-page">
+        <header className="page-intro">
+          <p className="eyebrow">日常協作</p>
+          <h1>筆記與排程</h1>
+        </header>
         <div className="empty-state" style={{ marginTop: "var(--sp-32)" }}>
           <h3>請先選擇組別</h3>
           <p>用頂欄的組別選單選一個組，就能看到這個組的排程與會議筆記。</p>
@@ -112,9 +127,33 @@ export function PlannerPage({ groupId }: { groupId: string }) {
     );
   }
   return (
-    <div>
-      <h1>筆記排程</h1>
-      <p className="hint">全組共用的行程表與會議紀錄：排程可切清單／月曆，系統完成 Google 連線設定後可自動同步，未設定時仍可匯出 .ics；筆記可從知識庫匯入；知識地圖把行程、筆記、專案知識庫、AI 執行計畫與資料庫織成一張知識族譜。</p>
+    <div className="page-shell planner-page">
+      <header className="page-intro planner-intro">
+        <div>
+          <p className="eyebrow">日常協作</p>
+          <h1>筆記與排程</h1>
+          <p className="page-lede">把會議、期限、決議與知識放在同一個地方，今天要做什麼一眼就知道。</p>
+        </div>
+        <span className="page-intro__badge"><Icon name="Clock" size={15} />全組共用</span>
+      </header>
+
+      <nav className="planner-jump-grid" aria-label="筆記排程功能">
+        <button type="button" onClick={() => revealPlannerSection("planner-schedule")}>
+          <span className="planner-jump-grid__icon schedule"><Icon name="CalendarPlus" size={18} /></span>
+          <span><strong>組排程</strong><small>開會、拍攝與上片期限</small></span>
+          <Icon name="ChevronRight" size={16} />
+        </button>
+        <button type="button" onClick={() => revealPlannerSection("planner-notes")}>
+          <span className="planner-jump-grid__icon notes"><Icon name="FileText" size={18} /></span>
+          <span><strong>筆記與決議</strong><small>會議紀錄、待辦與版本</small></span>
+          <Icon name="ChevronRight" size={16} />
+        </button>
+        <button type="button" onClick={() => revealPlannerSection("planner-knowledge-map")}>
+          <span className="planner-jump-grid__icon map"><Icon name="Sparkles" size={18} /></span>
+          <span><strong>知識地圖</strong><small>探索專案與資料關聯</small></span>
+          <Icon name="ChevronRight" size={16} />
+        </button>
+      </nav>
       {/* key 綁組別：切換作用組時整卡重掛，表單草稿不會帶到別的組 */}
       <ScheduleCard
         key={`sch-${groupId}`}
@@ -353,7 +392,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
         <p className="hint">拍攝、開會、上片時間都排在這裡，全組看同一份，不再翻對話記錄找時間。</p>
 
       {/* 頂部工具列：Google 日曆直連同步（主）＋ .ics 匯出（後備）＋（清單檢視）顯示過去行程 */}
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+      <div className="planner-sync-bar" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
         <GoogleCalendarBar groupId={groupId} />
         <span className="spacer" />
         {view === "list" && (
@@ -365,21 +404,21 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
       </div>
 
       {/* 新增列 */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 4 }}>
-        <div style={{ flex: "2 1 200px", minWidth: 160 }}>
+      <div className="schedule-create-form" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 4 }}>
+        <div className="schedule-create-form__title" style={{ flex: "2 1 200px", minWidth: 160 }}>
           <label htmlFor="sch-title">標題（可 @ 提及夥伴）</label>
           <MentionInput value={title} onChange={setTitle} members={members} maxLength={120}
             ariaLabel="排程標題" placeholder="例：週會・腳本審稿（@人 可通知）" onEnter={submit} />
         </div>
-        <div style={{ flex: "1 1 185px" }}>
+        <div className="schedule-create-form__start" style={{ flex: "1 1 185px" }}>
           <label htmlFor="sch-start">開始（必填）</label>
           <input id="sch-start" type="datetime-local" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
         </div>
-        <div style={{ flex: "1 1 185px" }}>
+        <div className="schedule-create-form__end" style={{ flex: "1 1 185px" }}>
           <label htmlFor="sch-end">結束（選填）</label>
           <input id="sch-end" type="datetime-local" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
         </div>
-        <div style={{ flex: "1 1 150px" }}>
+        <div className="schedule-create-form__project" style={{ flex: "1 1 150px" }}>
           <label htmlFor="sch-project">掛在專案（選填）</label>
           <select id="sch-project" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
             <option value="">不掛專案</option>
@@ -388,11 +427,11 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
             ))}
           </select>
         </div>
-        <div style={{ flex: "2 1 180px" }}>
+        <div className="schedule-create-form__note" style={{ flex: "2 1 180px" }}>
           <label htmlFor="sch-note">備註（選填）</label>
           <input id="sch-note" value={note} maxLength={500} placeholder="例：地點、要先準備什麼" onChange={(e) => setNote(e.target.value)} />
         </div>
-        <button className="primary" style={{ flex: "none" }} disabled={!canAdd} onClick={submit}>
+        <button className="primary schedule-create-form__submit" style={{ flex: "none" }} disabled={!canAdd} onClick={submit}>
           {add.isPending ? "加入中…" : "加入"}
         </button>
         {addDisabledReason && <span className="hint" style={{ alignSelf: "center" }}>{addDisabledReason}</span>}

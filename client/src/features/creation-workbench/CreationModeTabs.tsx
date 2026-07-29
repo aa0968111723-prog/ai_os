@@ -58,14 +58,6 @@ export function CreationModeTabs({
       role="tablist"
       aria-label="AI 創作模式"
       className="creation-mode-tabs"
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-        gap: 8,
-        margin: "12px 0",
-        // Mobile-friendly: allow horizontal scroll when grid collapses tightly
-        overflowX: "auto",
-      }}
     >
       {CREATION_MODES.map((item, index) => {
         const selected = mode === item.id;
@@ -81,25 +73,14 @@ export function CreationModeTabs({
             aria-selected={selected}
             aria-controls={modePanelId(prefix, item.id)}
             tabIndex={selected ? 0 : -1}
-            className="btn-ghost"
+            className={`creation-mode-tab${selected ? " is-selected" : ""}`}
             onClick={() => onModeChange(item.id)}
             onKeyDown={(e) => onKeyDown(e, index)}
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: 8,
-              minHeight: 64,
-              padding: "10px 12px",
-              textAlign: "left",
-              border: selected ? "1px solid var(--primary-border)" : "1px solid var(--border)",
-              borderRadius: "var(--radius-md)",
-              background: selected ? "var(--primary-tint)" : undefined,
-            }}
           >
-            <Icon name={MODE_ICONS[item.id]} size={16} style={{ marginTop: 2, flexShrink: 0 }} />
-            <span>
-              <b style={{ display: "block" }}>{item.label}</b>
-              <span className="hint" style={{ display: "block", marginTop: 2 }}>
+            <span className="creation-mode-tab__icon"><Icon name={MODE_ICONS[item.id]} size={17} /></span>
+            <span className="creation-mode-tab__copy">
+              <b>{item.label}</b>
+              <span className="hint">
                 {item.description}
               </span>
             </span>

@@ -4,6 +4,7 @@ import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
+import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 
 type Member = inferRouterOutputs<AppRouter>["directory"]["list"]["members"][number];
 
@@ -53,11 +54,16 @@ export function MembersPage() {
   const members = dir.data?.members ?? [];
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto" }}>
-      <h1>通訊錄</h1>
-      <p className="sub">團隊裡有哪些夥伴、各自帶哪些組、花了多少點、最近在不在——一頁看清楚。點「私訊」可直接在站內一對一聊天。能看到的範圍已按你的權限過濾（組長看自己組）。</p>
+    <div className="page-shell secondary-page secondary-page--reading members-page">
+      <SecondaryPageHeader
+        eyebrow="團隊協作"
+        title="通訊錄"
+        icon="User"
+        badge={dir.isLoading ? "正在整理夥伴" : `${members.length} 位可見夥伴`}
+        description={<>找人、看所屬團隊與最近活動，再直接開始私訊；可見範圍會依你的角色與組別自動隔離。</>}
+      />
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+      <div className="secondary-filter-bar">
         <input
           type="search"
           value={q}

@@ -185,6 +185,52 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const completedRuns = runs.filter((run) => run.status === "done").length;
   const pendingApprovals = pendingSummary.data?.totalPendingApprovals ?? 0;
   const pendingGenerations = pendingSummary.data?.totalAwaitingGenerations ?? 0;
+  const pendingTotal = pendingApprovals + pendingGenerations;
+  const todayLabel = new Intl.DateTimeFormat("zh-TW", {
+    month: "long",
+    day: "numeric",
+    weekday: "long",
+  }).format(new Date());
+  const focusProject = recentProjects[0] ?? null;
+  const focusState = pendingTotal > 0
+    ? {
+        kind: "attention",
+        eyebrow: "優先處理",
+        title: `有 ${pendingTotal} 件需要你決定`,
+        detail: "先處理待審與成本核准，AI 與團隊才能繼續往下走。",
+        href: "#projects",
+        action: "開始處理",
+        icon: "Bell" as const,
+      }
+    : runningRuns > 0
+      ? {
+          kind: "working",
+          eyebrow: "正在推進",
+          title: `AI 正在處理 ${runningRuns} 份計畫`,
+          detail: "你可以先做別的事；需要人員決定時，這裡會提醒你。",
+          href: "#ai-work",
+          action: "查看進度",
+          icon: "Sparkles" as const,
+        }
+      : focusProject
+        ? {
+            kind: "continue",
+            eyebrow: "接著上次",
+            title: focusProject.title,
+            detail: `${kindLabelOf(focusProject.kind)}・更新於 ${relTime(focusProject.updatedAt)}`,
+            href: `/p/${focusProject.id}`,
+            action: "繼續工作",
+            icon: "ArrowRight" as const,
+          }
+        : {
+            kind: "start",
+            eyebrow: "今天第一步",
+            title: "建立一個專案，把想法變成可執行工作",
+            detail: "選內容類型與發布平台後，AI 會沿用同一份專案脈絡協作。",
+            href: "#new-project-panel",
+            action: "建立專案",
+            icon: "Plus" as const,
+          };
 
   const canCreate = !!title.trim() && !!groupId && !!kind && !!platform && !create.isPending;
 
@@ -198,7 +244,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
   return (
     <div className="daily-dashboard">
       <section className="daily-hero" aria-labelledby="daily-title">
-        <div>
+        <div className="daily-hero__copy">
+          <p className="daily-date"><Icon name="CalendarPlus" size={14} />{todayLabel}</p>
           <p className="eyebrow">今日工作台</p>
           <h1 id="daily-title">
             {me.data?.user.name ? `${me.data.user.name}，` : ""}今天從哪裡<span className="accent">開始</span>？
@@ -218,6 +265,12 @@ export function Launchpad({ groupId }: { groupId: string }) {
           {createOpen ? "收起建立表單" : "建立新專案"}
         </button>
       </section>
+
+      <nav className="daily-quick-links" aria-label="常用工具">
+        <Link href="/planner"><Icon name="Clock" size={15} /><span>安排今天</span><small>排程與筆記</small></Link>
+        <Link href="/databases"><Icon name="Database" size={15} /><span>整理資料</span><small>清單與批次匯入</small></Link>
+        <Link href="/chat"><Icon name="MessageCircle" size={15} /><span>聯絡夥伴</span><small>私訊與標注</small></Link>
+      </nav>
 
       {showFirstRun && <FirstRunGuide groupId={groupId} onDismiss={dismissFirstRun} />}
 
@@ -263,55 +316,88 @@ export function Launchpad({ groupId }: { groupId: string }) {
         {create.error && <p className="error" role="alert">{create.error.message}</p>}
       </section>
 
-      <section className="daily-status-grid" aria-label="今日摘要">
-        <a href="#projects" className="daily-status-card attention">
-          <span className="daily-status-card__icon"><Icon name="Bell" size={18} /></span>
-          <span><strong>{pendingApprovals + pendingGenerations}</strong><small>待我處理</small></span>
-          <span className="daily-status-card__detail">{pendingApprovals} 待審・{pendingGenerations} 待核</span>
-        </a>
-        <a href="#ai-work" className="daily-status-card working">
-          <span className="daily-status-card__icon"><Icon name="Sparkles" size={18} /></span>
-          <span><strong>{runningRuns}</strong><small>AI 正在工作</small></span>
-          <span className="daily-status-card__detail">{runs.length ? "查看執行計畫" : "目前沒有執行中的計畫"}</span>
-        </a>
-        <a href="#ai-work" className="daily-status-card waiting">
-          <span className="daily-status-card__icon"><Icon name="Clock" size={18} /></span>
-          <span><strong>{waitingRuns}</strong><small>等待人員或核准</small></span>
-          <span className="daily-status-card__detail">需要決定後才會繼續</span>
-        </a>
-        <a href="#ai-work" className="daily-status-card completed">
-          <span className="daily-status-card__icon"><Icon name="Check" size={18} /></span>
-          <span><strong>{completedRuns}</strong><small>最近成果</small></span>
-          <span className="daily-status-card__detail">已完成的 AI 計畫</span>
-        </a>
-      </section>
+      <div className={`daily-overview${recentProjects.length ? "" : " daily-overview--solo"}`}>
+        <div className="daily-overview__main">
+          {focusState.kind === "start" ? (
+            <button
+              type="button"
+              className={`daily-focus-card ${focusState.kind}`}
+              onClick={() => {
+                setCreateOpen(true);
+                requestAnimationFrame(() => document.getElementById("new-project-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+              }}
+            >
+              <span className="daily-focus-card__icon"><Icon name={focusState.icon} size={21} /></span>
+              <span className="daily-focus-card__copy">
+                <small>{focusState.eyebrow}</small>
+                <strong>{focusState.title}</strong>
+                <span>{focusState.detail}</span>
+              </span>
+              <span className="daily-focus-card__action">{focusState.action}<Icon name="ChevronRight" size={16} /></span>
+            </button>
+          ) : (
+            <a href={focusState.href} className={`daily-focus-card ${focusState.kind}`}>
+              <span className="daily-focus-card__icon"><Icon name={focusState.icon} size={21} /></span>
+              <span className="daily-focus-card__copy">
+                <small>{focusState.eyebrow}</small>
+                <strong>{focusState.title}</strong>
+                <span>{focusState.detail}</span>
+              </span>
+              <span className="daily-focus-card__action">{focusState.action}<Icon name="ChevronRight" size={16} /></span>
+            </a>
+          )}
 
-      {recentProjects.length > 0 && (
-        <section className="continue-work" aria-labelledby="continue-title">
-          <div className="section-heading">
-            <div><p className="eyebrow">接續進度</p><h2 id="continue-title">繼續工作</h2></div>
-            <a href="#projects">查看全部專案</a>
-          </div>
-          <div className="continue-work__grid">
-            {recentProjects.map((project) => {
-              const pending = pendingOf(project.id);
-              return (
-                <Link key={project.id} href={`/p/${project.id}`} className="continue-card" onClick={() => recordRecent(project.id)}>
-                  <span className="continue-card__mark" style={{ background: coverOf(project.id) }}>{project.title.trim().charAt(0) || "○"}</span>
-                  <span className="continue-card__body">
-                    <strong>{project.title}</strong>
-                    <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
-                  </span>
-                  {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
-                    <span className="chip">{pending.pendingApprovals + pending.awaitingGenerations} 待處理</span>
-                  )}
-                  <Icon name="ChevronRight" size={17} />
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      )}
+          <section className="daily-status-grid" aria-label="今日摘要">
+            <a href="#projects" className="daily-status-card attention">
+              <span className="daily-status-card__icon"><Icon name="Bell" size={18} /></span>
+              <span><strong>{pendingTotal}</strong><small>待我處理</small></span>
+              <span className="daily-status-card__detail">{pendingApprovals} 待審・{pendingGenerations} 待核</span>
+            </a>
+            <a href="#ai-work" className="daily-status-card working">
+              <span className="daily-status-card__icon"><Icon name="Sparkles" size={18} /></span>
+              <span><strong>{runningRuns}</strong><small>AI 正在工作</small></span>
+              <span className="daily-status-card__detail">{runs.length ? "查看執行計畫" : "目前沒有執行中的計畫"}</span>
+            </a>
+            <a href="#ai-work" className="daily-status-card waiting">
+              <span className="daily-status-card__icon"><Icon name="Clock" size={18} /></span>
+              <span><strong>{waitingRuns}</strong><small>等待人員</small></span>
+              <span className="daily-status-card__detail">需要決定後才會繼續</span>
+            </a>
+            <a href="#ai-work" className="daily-status-card completed">
+              <span className="daily-status-card__icon"><Icon name="Check" size={18} /></span>
+              <span><strong>{completedRuns}</strong><small>最近成果</small></span>
+              <span className="daily-status-card__detail">已完成的 AI 計畫</span>
+            </a>
+          </section>
+        </div>
+
+        {recentProjects.length > 0 && (
+          <section className="continue-work" aria-labelledby="continue-title">
+            <div className="section-heading">
+              <div><p className="eyebrow">接續進度</p><h2 id="continue-title">最近專案</h2></div>
+              <a href="#projects">全部</a>
+            </div>
+            <div className="continue-work__grid">
+              {recentProjects.map((project) => {
+                const pending = pendingOf(project.id);
+                return (
+                  <Link key={project.id} href={`/p/${project.id}`} className="continue-card" onClick={() => recordRecent(project.id)}>
+                    <span className="continue-card__mark" style={{ background: coverOf(project.id) }}>{project.title.trim().charAt(0) || "○"}</span>
+                    <span className="continue-card__body">
+                      <strong>{project.title}</strong>
+                      <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
+                    </span>
+                    {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
+                      <span className="chip">{pending.pendingApprovals + pending.awaitingGenerations} 待處理</span>
+                    )}
+                    <Icon name="ChevronRight" size={17} />
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
+      </div>
 
       {/* 組彙總 AI（需求 12 v1）：問整組狀況的唯讀彙總——沒選組就不渲染。
           key 綁組：換組即整卡重掛，否則 A 組的問答殘留在畫面上、

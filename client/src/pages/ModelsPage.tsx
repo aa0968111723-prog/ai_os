@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
+import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import {
   CATEGORIES,
   MODELS,
@@ -95,6 +96,8 @@ export function ModelsPage() {
   const workflows = trpc.models.workflows.useQuery();
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [catalogExpanded, setCatalogExpanded] = useState(false);
+  useEffect(() => setCatalogExpanded(false), [category]);
   const copyModelId = (id: string) => {
     navigator.clipboard.writeText(id);
     setCopiedId(id);
@@ -164,13 +167,19 @@ export function ModelsPage() {
 
   const scenariosInGroup = SCENARIO_RECIPES.filter((r) => r.group === scenarioGroup);
   const activeMode = DECISION_MODES.find((m) => m.id === decisionMode);
+  const catalogItems = models.data ?? [];
+  const catalogNeedsDisclosure = !debouncedQ && !tier && catalogItems.length > 8;
+  const visibleCatalogItems = catalogNeedsDisclosure && !catalogExpanded ? catalogItems.slice(0, 8) : catalogItems;
 
   return (
-    <div data-fb="模型指南頁">
-      <h1>模型指南</h1>
-      <p className="sub">
-        {MODEL_CATEGORY_COUNT} 種創作類別、共 {MODELS.length} 個模型(旗艦/經濟/最低成本三檔)。不知道用哪個?先看下面「怎麼選模型」——照你要做的<b>情境</b>或想要的<b>風格</b>,直接告訴你該用哪個模型、為什麼。
-      </p>
+    <div className="page-shell secondary-page models-page" data-fb="模型指南頁">
+      <SecondaryPageHeader
+        eyebrow="創作決策"
+        title="模型指南"
+        icon="Sparkles"
+        badge={`${MODEL_CATEGORY_COUNT} 類・${MODELS.length} 個模型`}
+        description={<>不用先懂所有模型。從你要完成的情境、喜歡的風格或三個簡單問題開始，系統會說明該選哪一個以及原因。</>}
+      />
 
       {/* ── 需求 #1:並排比較——勾 2–4 個模型,這張卡置頂(sticky)浮出 ── */}
       {compareList.length === 1 && (
@@ -388,7 +397,9 @@ export function ModelsPage() {
       <div ref={catalogRef} style={{ scrollMarginTop: "var(--sp-16)" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginTop: 28, marginBottom: "var(--sp-8)" }}>
           <h2 style={{ margin: 0 }}>完整目錄</h2>
-          <span className="hint">搜尋、按類別或檔次瀏覽全部 {MODELS.length} 個模型;「適合」欄告訴你什麼時候用它。</span>
+          <span className="hint">
+            搜尋、按類別或檔次瀏覽全部 {MODELS.length} 個模型；目前顯示 {visibleCatalogItems.length}/{catalogItems.length}。
+          </span>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: "var(--sp-16)" }}>
@@ -472,7 +483,7 @@ export function ModelsPage() {
               <button style={{ padding: "4px 12px", marginLeft: 4 }} onClick={() => models.refetch()}>重試</button>
             </p>
           )}
-          {(models.data ?? []).map((m) => (
+          {visibleCatalogItems.map((m) => (
             <section key={m.id} className="card" style={{ padding: "14px 18px" }}>
               <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                 <b>{m.label}</b>
@@ -511,6 +522,17 @@ export function ModelsPage() {
               </p>
             </section>
           ))}
+          {catalogNeedsDisclosure && (
+            <button
+              type="button"
+              className="model-catalog-disclosure"
+              aria-expanded={catalogExpanded}
+              onClick={() => setCatalogExpanded((value) => !value)}
+            >
+              <Icon name={catalogExpanded ? "ChevronUp" : "ChevronDown"} size={16} />
+              {catalogExpanded ? "收合模型清單" : `再顯示 ${catalogItems.length - visibleCatalogItems.length} 個同類模型`}
+            </button>
+          )}
           {!models.isLoading && !models.isError && !models.data?.length && (
             <div className="empty-state">
               <h3>沒有符合的模型</h3>

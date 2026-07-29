@@ -4,6 +4,7 @@ import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
+import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
 import { AUDIT_ACTION_LABELS, AUDIT_CATEGORIES, auditCategoryOf, describeAuditInput, groupConsecutiveAudit, humanizeAuditAction, summarizeAuditInput } from "@shared/auditWording";
 import { getModel, tierLabel } from "@shared/models";
@@ -1984,9 +1985,14 @@ export function AdminPage() {
   const emailValid = /^\S+@\S+\.\S+$/.test(email.trim());
 
   return (
-    <div>
-      <h1>團隊管理</h1>
-      <p className="sub">團隊 → 組別 → 成員。每個組的組長組員細節（點數・額度・派工・最近登入）、專案負責人交接、各組自己的資料庫都在這裡管理。邀請連結 72 小時內有效，可直接寄信給對方，或複製連結用 LINE 傳。</p>
+    <div className="page-shell secondary-page admin-page">
+      <SecondaryPageHeader
+        eyebrow="組織與治理"
+        title="團隊管理"
+        icon="User"
+        badge={`${teams.length} 個團隊`}
+        description={<>集中管理組別、成員、權限、點數與派工；邀請可直接寄信，也能複製 72 小時有效連結分享。</>}
+      />
       <div className="cols">
         <div className="stack">
           {teams.map((team) => (

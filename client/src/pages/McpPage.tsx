@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
+import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { MCP_TOOLS } from "../../../shared/mcpCatalog";
 import { humanizeAuditAction, summarizeAuditInput } from "../../../shared/auditWording";
 
@@ -145,12 +146,14 @@ export function McpPage() {
   };
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto" }} data-fb="MCP專區">
-      <h1 style={{ display: "flex", alignItems: "center", gap: 10 }}><Icon name="Sparkles" size={22} />接上外部 AI（MCP）</h1>
-      <p className="sub">
-        建立你自己的連線金鑰，就能讓 Claude 等外部 AI 客戶端連進系統，替你查專案、挑模型、送生成、取回成品、留言。
-        連進來的身分就是<b>你本人</b>——只看得到你有份的組與專案、扣你的點數、受同樣的核准門檻限制。
-      </p>
+    <div className="page-shell secondary-page secondary-page--reading mcp-page" data-fb="MCP專區">
+      <SecondaryPageHeader
+        eyebrow="外部 AI 代理"
+        title="接上外部 AI"
+        icon="Sparkles"
+        badge={`${activeCount} 把金鑰使用中`}
+        description={<>讓 Claude 等外部 AI 以你的權限查專案、執行計畫與取回成果；每個動作仍受點數、核准和專案隔離保護。</>}
+      />
 
       {/* 安全提醒 */}
       <div className="card" style={{ borderLeft: "3px solid var(--gold-ink)", background: "var(--card2)" }}>

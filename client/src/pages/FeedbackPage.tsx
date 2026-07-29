@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { useRovingRadio } from "../components/interactions";
+import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 
 const ITEMS: Array<{ key: string; label: string }> = [
   { key: "context", label: "AI 懂不懂我們的素材（不用重複解釋）" },
@@ -96,9 +97,14 @@ function FeedbackForm({
     });
 
   return (
-    <div style={{ maxWidth: 620, margin: "0 auto" }} data-fb="使用回饋頁">
-      <h1>使用回饋</h1>
-      <p className="sub">1＝很不行、5＝很好；憑直覺填就好，兩分鐘。沒用到的功能可以留空，再點一次分數就能取消。</p>
+    <div className="page-shell secondary-page secondary-page--narrow feedback-page" data-fb="使用回饋頁">
+      <SecondaryPageHeader
+        eyebrow="兩分鐘就好"
+        title="使用回饋"
+        icon="MessageCircle"
+        badge={`已回答 ${rated}/${ITEMS.length}`}
+        description={<>依直覺選 1 到 5 分；沒用到的功能可以留空，再點同一分數即可取消。</>}
+      />
       {hasExisting && <p className="hint">你之前填過——直接修改後重新送出即可。</p>}
       <div className="card">
         {ITEMS.map((item) => (

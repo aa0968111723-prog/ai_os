@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
+import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 
 /**
  * 連接的資料來源（/integrations）：每個人自己連「自己的」外部服務——
@@ -32,12 +33,14 @@ export function IntegrationsPage() {
   const d = list.data;
 
   return (
-    <div>
-      <h1>連接的資料來源</h1>
-      <p className="hint">
-        Google 雲端、Notion 與外部 API 都是 AI 可以參考的資料來源。先完成連接，再到「知識與資料」選擇要匯入的內容；
-        匯入後才能加入專案、提供 AI 分析或轉成後續任務。憑證以 AES-256 加密存放、永遠不會回顯，只有你本人用得到。
-      </p>
+    <div className="page-shell secondary-page integrations-page">
+      <SecondaryPageHeader
+        eyebrow="外部資料"
+        title="連接資料來源"
+        icon="ArrowRight"
+        badge="連接不等於自動匯入"
+        description={<>把 Google 雲端、Notion 或自有 API 接進來；之後仍由你挑選哪些內容能提供給專案與 AI。</>}
+      />
       {flash && <p className="hint" style={{ color: "var(--success-ink)" }}>{flash}</p>}
       {list.error && (
         <p className="error" role="alert">
@@ -46,7 +49,7 @@ export function IntegrationsPage() {
       )}
       {remove.error && <p className="error" role="alert">{remove.error.message}</p>}
 
-      <section className="card" style={{ marginTop: 12 }} data-fb="資料來源使用方式">
+      <section className="card integration-flow-card" data-fb="資料來源使用方式">
         <h2><Icon name="ArrowRight" size={18} /> 連接之後怎麼用？</h2>
         <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
           <div><strong>1. 連接來源</strong><p className="hint" style={{ margin: "2px 0 0" }}>在下方連接 Google、Notion 或你自己的 API。</p></div>

@@ -132,7 +132,7 @@ export function AppShell() {
         {/* lazy 頁面載入中的過場（QA-025 code-splitting）：整個路由樹共用一個 Suspense */}
         {me.data ? (
           <>
-            <main id="main-content" tabIndex={-1}>
+            <main id="main-content" className="app-main" tabIndex={-1}>
               <Suspense fallback={<p className="hint">載入中…</p>}>
                 <SessionGate
                   me={me.data}

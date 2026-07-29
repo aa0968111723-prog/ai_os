@@ -117,6 +117,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   const list = trpc.databases.list.useQuery();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [databaseQuery, setDatabaseQuery] = useState("");
   // 從專案頁深鏈：?projectId=&from=project —— 麵包屑回專案、建表可預綁關聯專案
   const [contextProjectId, setContextProjectId] = useState<string | null>(null);
   const [fromProject, setFromProject] = useState(false);
@@ -144,50 +145,90 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
     for (const t of tables) out[t.scope]?.push(t);
     return out;
   }, [tables]);
+  const visibleByScope = useMemo(() => {
+    const needle = databaseQuery.trim().toLocaleLowerCase("zh-TW");
+    if (!needle) return byScope;
+    return Object.fromEntries(
+      Object.entries(byScope).map(([scope, rows]) => [
+        scope,
+        rows.filter((table) =>
+          table.name.toLocaleLowerCase("zh-TW").includes(needle)
+          || table.description?.toLocaleLowerCase("zh-TW").includes(needle),
+        ),
+      ]),
+    ) as Record<string, TableSummary[]>;
+  }, [byScope, databaseQuery]);
+  const totalRows = tables.reduce((sum, table) => sum + table.rowCount, 0);
+  const aiReadyCount = tables.filter((table) => table.agentAccess !== "none").length;
 
   const projectBackHref = contextProjectId
     ? `/p/${encodeURIComponent(contextProjectId)}#sec-databases`
     : null;
 
   return (
-    <div>
-      <h1>資料庫</h1>
+    <div className={`page-shell database-page${selected || creating ? " has-detail" : ""}`}>
+      <header className="page-intro database-intro">
+        <div>
+          <p className="eyebrow">團隊資料中心</p>
+          <h1>資料庫</h1>
+          <p className="page-lede">把名單、素材、任務與文件變成團隊和 AI 都能安全使用的共同資料。</p>
+        </div>
+        <div className="database-intro__stats" aria-label="資料庫摘要">
+          <span><strong>{tables.length}</strong><small>資料庫</small></span>
+          <span><strong>{totalRows.toLocaleString()}</strong><small>資料列</small></span>
+          <span><strong>{aiReadyCount}</strong><small>AI 可使用</small></span>
+        </div>
+      </header>
       {fromProject && projectBackHref && (
-        <p className="hint" style={{ margin: "0 0 8px" }} data-testid="db-project-context">
+        <p className="database-project-context" data-testid="db-project-context">
           <Link href={projectBackHref}>
             ← 回專案{contextProject.data?.title ? `「${contextProject.data.title}」` : ""}
           </Link>
           {" · "}從此建立的表可勾選「關聯此專案」，才會出現在專案資料卡。
         </p>
       )}
-      <p className="hint">
-        自訂欄位的輕量資料表：個人清單、組名單、團隊器材、全站公告都放得下。組以上範圍的資料庫，
-        團隊 AI 助手答題時看得到；外部 AI 助手（MCP）也能查詢與寫入——權限跟你在網頁上一樣。
-      </p>
-      <div className={`database-layout${selected || creating ? " has-detail" : ""}`}>
+      <div className={`database-layout${selected || creating ? " has-detail" : ""}${list.data && tables.length === 0 ? " is-empty" : ""}`}>
         {/* 左欄：清單＋建立 */}
-        <aside className="database-sidebar" aria-label="資料庫清單">
-          <button className="primary" onClick={() => { setCreating(true); setSelectedId(null); }}>
-            <Icon name="Plus" size={14} /> 建立資料庫
-          </button>
+        <aside className="database-sidebar card" aria-label="資料庫清單">
+          <div className="database-sidebar__head">
+            <div><strong>我的資料庫</strong><small>{tables.length} 個空間</small></div>
+            <button aria-label="建立資料庫" className="primary btn-sm" onClick={() => { setCreating(true); setSelectedId(null); }}>
+              <Icon name="Plus" size={14} /> 建立
+            </button>
+          </div>
+          <label className="database-search">
+            <span className="sr-only">搜尋資料庫</span>
+            <Icon name="Search" size={15} />
+            <input
+              type="search"
+              value={databaseQuery}
+              onChange={(event) => setDatabaseQuery(event.target.value)}
+              placeholder="搜尋資料庫…"
+            />
+          </label>
           {(["personal", "group", "team", "global"] as const).map((scope) =>
-            byScope[scope].length === 0 ? null : (
-              <div key={scope} style={{ marginTop: 16 }}>
-                <p className="hint" style={{ margin: "0 0 4px" }}>{SCOPE_LABEL[scope]}</p>
-                {byScope[scope].map((t) => (
+            visibleByScope[scope].length === 0 ? null : (
+              <div key={scope} className="database-scope">
+                <p className="database-scope__label">{SCOPE_LABEL[scope]}<span>{visibleByScope[scope].length}</span></p>
+                {visibleByScope[scope].map((t) => (
                   <button
                     key={t.id}
-                    className="menu-item"
-                    style={{ width: "100%", textAlign: "left", ...(t.id === selectedId ? { background: "var(--bg-sunken, rgba(0,0,0,.05))", borderRadius: 8 } : {}) }}
+                    className={`database-list-item${t.id === selectedId ? " active" : ""}`}
                     onClick={() => { setSelectedId(t.id); setCreating(false); }}
                   >
-                    <Icon name="FileText" size={15} />
-                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
-                    <span className="meta mono" style={{ marginLeft: "auto" }}>{t.rowCount}</span>
+                    <span className="database-list-item__icon"><Icon name="FileText" size={15} /></span>
+                    <span className="database-list-item__copy">
+                      <strong>{t.name}</strong>
+                      <small>{t.agentAccess === "write" ? "AI 可查可寫" : t.agentAccess === "read" ? "AI 唯讀" : "只供成員使用"}</small>
+                    </span>
+                    <span className="meta mono">{t.rowCount}</span>
                   </button>
                 ))}
               </div>
             ),
+          )}
+          {!!databaseQuery.trim() && tables.length > 0 && Object.values(visibleByScope).every((rows) => rows.length === 0) && (
+            <p className="hint database-search-empty">找不到「{databaseQuery.trim()}」</p>
           )}
           {list.data && tables.length === 0 && !creating && (
             <div className="empty-state" style={{ marginTop: 16 }}>
@@ -218,12 +259,27 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
           ) : selected ? (
             <TableDetail key={selected.id} table={selected} groupId={groupId} onDeleted={() => setSelectedId(null)} />
           ) : (
-            <div className="empty-state">
-              <h3>選一個資料庫</h3>
+            <div className="database-welcome">
+              <div className="database-welcome__visual" aria-hidden>
+                <span><Icon name="Database" size={26} /></span>
+                <i />
+                <span><Icon name="FileText" size={20} /></span>
+                <span><Icon name="Sparkles" size={20} /></span>
+              </div>
+              <p className="eyebrow">從日常資料開始</p>
+              <h2>選一個資料庫，或把現有檔案直接帶進來</h2>
               <p>
-                從左邊清單選一個開始編輯，或建立新的。
-                {contextProjectId ? "從專案進來時，建立可勾選「關聯此專案」。" : null}
+                名單、待辦、素材表與發布計畫都可以。建立時可從 CSV／TSV／JSON 推斷欄位，不必逐筆手動輸入。
+                {contextProjectId ? " 新資料庫也能直接關聯目前專案。" : null}
               </p>
+              <div className="database-welcome__actions">
+                <button className="primary" onClick={() => { setCreating(true); setSelectedId(null); }}>
+                  <Icon name="Plus" size={15} />建立或匯入資料庫
+                </button>
+                <Link href="/integrations" className="btn">
+                  <Icon name="ArrowRight" size={15} />連接外部資料
+                </Link>
+              </div>
             </div>
           )}
         </section>
