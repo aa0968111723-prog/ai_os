@@ -1,9 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AiHub } from "./AiHub";
 
 const listByProject = vi.fn();
+const flashAnchor = vi.fn();
 
 vi.mock("../api", () => ({
   trpc: {
@@ -13,6 +14,10 @@ vi.mock("../api", () => ({
       },
     },
   },
+}));
+
+vi.mock("../discuss", () => ({
+  flashAnchor: (...args: unknown[]) => flashAnchor(...args),
 }));
 
 vi.mock("./ProjectAssistant", () => ({
@@ -25,13 +30,23 @@ vi.mock("./AgentCard", () => ({
 
 describe("AiHub", () => {
   const renderAiHub = (props = {}) => render(<AiHub projectId="project-1" canEdit {...props} />);
+  const originalSearch = window.location.search;
+
   beforeEach(() => {
     listByProject.mockReset();
     listByProject.mockReturnValue({ data: [] });
+    flashAnchor.mockReset();
+    flashAnchor.mockReturnValue(true);
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
     });
+    // default: no deep-link focus
+    window.history.replaceState({}, "", "/project/project-1");
+  });
+
+  afterEach(() => {
+    window.history.replaceState({}, "", `/${originalSearch || ""}`);
   });
 
   it("presents one creation workbench with routes into the existing systems", async () => {
@@ -138,5 +153,38 @@ describe("AiHub", () => {
 
     rerender(<AiHub projectId="project-3" canEdit />);
     await waitFor(() => expect(details).not.toHaveAttribute("open"));
+  });
+
+  it("focus=agent-run-* deep link expands the hub and flashes the run anchor", async () => {
+    window.history.replaceState({}, "", "/project/project-1?focus=agent-run-abc123");
+    renderAiHub();
+
+    const body = document.querySelector("#sec-ai-hub-body");
+    expect(body).not.toHaveAttribute("hidden");
+    expect(document.querySelector("#sec-agent")).toHaveAttribute("open");
+
+    await waitFor(() => {
+      expect(flashAnchor).toHaveBeenCalledWith("agent-run-abc123");
+    });
+  });
+
+  it("ignores non agent-run focus query params", () => {
+    window.history.replaceState({}, "", "/project/project-1?focus=generation-xyz");
+    renderAiHub();
+
+    expect(document.querySelector("#sec-agent")).not.toHaveAttribute("open");
+    expect(flashAnchor).not.toHaveBeenCalled();
+  });
+
+  it("context chips scroll to project system anchors (知識 / 素材 / 分鏡)", async () => {
+    const user = userEvent.setup();
+    renderAiHub();
+    const knowledge = document.createElement("div");
+    knowledge.id = "sec-knowledge";
+    document.body.appendChild(knowledge);
+
+    await user.click(screen.getByRole("button", { name: "知識" }));
+    await waitFor(() => expect(knowledge.scrollIntoView).toHaveBeenCalled());
+    knowledge.remove();
   });
 });

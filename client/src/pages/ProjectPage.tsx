@@ -21,6 +21,11 @@ import { AiHub } from "../components/AiHub";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import {
+  filterCompatibleSources,
+  getGenerationDisableReason,
+  projectCanEdit,
+} from "../features/creation-workbench/generationGates";
+import {
   useCollab,
   CursorOverlay,
   CollabZone,
@@ -30,16 +35,6 @@ import {
   zoneOfPeer,
   type CollabViewMode,
 } from "../realtime";
-
-/**
- * 來源素材「明顯不相容」過濾表（後端 generation.submit 用同一張表把關）：
- * 寬鬆原則——只擋確定會失敗的組合，doc/zip 等不確定的保留。
- */
-const SOURCE_INCOMPAT: Record<string, string[]> = {
-  image: ["audio"],
-  audio: ["image"], // 影片放行：Whisper/Scribe 類轉錄端點普遍接受影片容器（自動抽音軌）
-  video: ["audio"],
-};
 
 /** 平滑捲動到頁面某錨點（引導步驟／摘要條／跨卡跳轉共用） */
 function scrollToSelector(selector: string) {
@@ -440,7 +435,7 @@ export function ProjectPage({ id }: { id: string }) {
   const canArchive = isOwner || isLeader;
   // 2.3 前端唯讀可見性：後端守衛已全面擋 viewer，這裡讓寫入控制「事前」禁用＋常駐唯讀橫幅，
   // 不再讓檢視者「按了才失敗」（走完看價確認流程最後一步才被擋是最傷的版本）
-  const canEdit = p.myProjectRole !== "viewer";
+  const canEdit = projectCanEdit(p.myProjectRole);
 
   /** 「用這個提示詞」統一入口（AI 導演／分鏡草稿／提示詞庫「再用」／生成紀錄「再用此設定」）：
    * 避免默默蓋掉手打的提示詞；套用後自動捲到生成台、聚焦提示詞框——跨卡動作由系統接手，不用自己捲。
@@ -518,23 +513,17 @@ export function ProjectPage({ id }: { id: string }) {
   // 其餘模型回扁平 points（行為不變）。full 找不到（理論上不會）時退回清單帶的 points。
   const fullModel = model ? getModel(model.id) : undefined;
   const estPoints = fullModel ? estimatePoints(fullModel, { promptChars: prompt.length }) : (model?.points ?? 0);
-  const missingSource = model != null && needs != null && !sourceAsset && !sourceUrl.trim();
-  const badSourceUrl = model != null && needs != null && !sourceAsset && sourceUrl.trim() !== "" && sourceUrlError !== "";
-  // 已選素材與模型明顯不相容（換模型後殘留、或從素材庫直接點選）：鎖住並講清楚，不靜默清掉
-  const incompatSource = !!needs && !!sourceAsset && (SOURCE_INCOMPAT[needs] ?? []).includes(sourceAsset.kind);
-  const disableReason =
-    !canEdit ? "你在此專案是檢視者（唯讀），不能生成——需要編輯請組長到「成員權限」調整"
-    : !model ? "模型清單還在載入，稍等一下就能生成"
-    : !prompt.trim() ? "先填一句提示詞，描述想要的畫面"
-    : missingSource ? "這個模型需要來源素材——從素材庫選一個，或貼上網址"
-    : incompatSource ? `選到的素材是${sourceAsset.kind === "audio" ? "音訊" : sourceAsset.kind === "image" ? "圖片" : sourceAsset.kind}，這個模型不能用它——請換一個來源`
-    : badSourceUrl ? "網址格式不對，需以 https:// 開頭"
-    : null;
+  const disableReason = getGenerationDisableReason({
+    canEdit,
+    model,
+    prompt,
+    sourceAsset,
+    sourceUrl,
+    sourceUrlError,
+  });
   // 來源下拉只列「明顯相容」的素材（寬鬆過濾，不確定的保留；後端 submit 有同一張表把關）。
   // 已選中的素材即使不相容也保留在清單裡：select 的 value 永遠對得到 option，不會顯示成空白
-  const sourceOptions = (assets.data ?? []).filter(
-    (a) => a.id === sourceAsset?.id || !needs || !(SOURCE_INCOMPAT[needs] ?? []).includes(a.kind),
-  );
+  const sourceOptions = filterCompatibleSources(assets.data ?? [], needs, sourceAsset?.id);
 
   /** 編輯指示：把某區塊接上協作狀態（誰在這裡→內框＋標籤）；鏡像時被跟隨者焦點區加粗 */
   const zoneProps = (zone: string) => ({
