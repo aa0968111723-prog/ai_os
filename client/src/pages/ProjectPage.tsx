@@ -21,6 +21,7 @@ import { projectCanEdit } from "../features/creation-workbench/generationGates";
 import { revealWorkbenchAnchor, scrollToSelector } from "../features/creation-workbench/workbenchNav";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
+import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 import {
   useCollab,
   CursorOverlay,
@@ -448,6 +449,14 @@ export function ProjectPage({ id }: { id: string }) {
     { label: "送審／打包", done: !!scenes.data?.some((s) => s.status === "approved"), target: "#onboard-delivery", hint: "送審通過後即可打包交付" },
   ];
   const allStepsDone = onboardSteps.every((s) => s.done);
+  const completedStepCount = onboardSteps.filter((step) => step.done).length;
+  const nextOnboardIndex = onboardSteps.findIndex((step) => !step.done);
+  const projectJourneySteps: VisualJourneyStep[] = onboardSteps.map((step, index) => ({
+    id: step.target,
+    label: step.label,
+    detail: step.hint,
+    state: step.done ? "done" : index === nextOnboardIndex ? "current" : "upcoming",
+  }));
 
   // 三幕標頭與摘要條的進度數字：全讀頁面既有查詢，查詢還沒回來就不顯示
   const doneGenCount = generations.data?.filter((g) => g.status === "done").length;
@@ -679,6 +688,12 @@ export function ProjectPage({ id }: { id: string }) {
           <h2 style={{ margin: 0 }}>從這裡開始</h2>
           <HelpTip text="這是製作一支片的四個步驟。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
           <span style={{ flex: "1 1 auto" }} />
+          <span className="project-guide__progress" aria-label={`已完成 ${completedStepCount}／${onboardSteps.length} 步`}>
+            <span className="project-guide__progress-track" aria-hidden>
+              <span style={{ width: `${(completedStepCount / onboardSteps.length) * 100}%` }} />
+            </span>
+            {completedStepCount}/{onboardSteps.length}
+          </span>
           {allStepsDone && <span className="chip" style={{ fontSize: 12 }}>全部完成</span>}
           <button
             className="btn-sm"
@@ -690,38 +705,27 @@ export function ProjectPage({ id }: { id: string }) {
           </button>
         </div>
         {!onboardCollapsed && (
-          <div id="project-getting-started-steps" className="project-guide__steps">
-            {onboardSteps.map((s, i) => (
-              <div key={s.label} className="project-guide__step-wrap">
-                <button
-                  className={`project-guide__step${s.done ? " done" : ""}`}
-                  onClick={() => {
-                    // Workbench anchors (#gen-prompt / #sec-studio / …) must switch mode first.
-                    if (s.target === "#gen-prompt" || s.target === "#sec-studio" || s.target === "#sec-agent" || s.target === "#sec-assistant") {
-                      revealWorkbenchAnchor(s.target, { projectId: id });
-                    } else {
-                      scrollToSelector(s.target);
-                    }
-                  }}
-                  title={s.hint}
-                >
-                  <span
-                    aria-hidden
-                    style={{
-                      display: "inline-flex", alignItems: "center", justifyContent: "center",
-                      width: 22, height: 22, borderRadius: "50%", fontSize: 12, fontWeight: 700,
-                      border: s.done ? "none" : "1px solid var(--border)",
-                      background: s.done ? "var(--primary-solid)" : "transparent",
-                      color: s.done ? "var(--primary-fg)" : "inherit",
-                    }}
-                  >
-                    {s.done ? <Icon name="Check" size={13} /> : i + 1}
-                  </span>
-                  <span style={{ fontSize: 13, fontWeight: s.done ? 600 : 400 }}>{s.label}</span>
-                </button>
-                {i < onboardSteps.length - 1 && <span aria-hidden className="project-guide__arrow"><Icon name="ArrowRight" size={14} /></span>}
-              </div>
-            ))}
+          <div id="project-getting-started-steps">
+            <VisualJourney
+              steps={projectJourneySteps}
+              ariaLabel="專案製作進度"
+              compact
+              onSelect={(_, index) => {
+                const step = onboardSteps[index];
+                if (!step) return;
+                // Workbench anchors (#gen-prompt / #sec-studio / …) must switch mode first.
+                if (step.target === "#gen-prompt" || step.target === "#sec-studio" || step.target === "#sec-agent" || step.target === "#sec-assistant") {
+                  revealWorkbenchAnchor(step.target, { projectId: id });
+                } else {
+                  scrollToSelector(step.target);
+                }
+              }}
+            />
+            {!allStepsDone && nextOnboardIndex >= 0 && (
+              <p className="project-guide__next">
+                下一步：<b>{onboardSteps[nextOnboardIndex]?.label}</b>・{onboardSteps[nextOnboardIndex]?.hint}
+              </p>
+            )}
           </div>
         )}
       </section>

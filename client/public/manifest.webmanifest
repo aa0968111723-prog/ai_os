@@ -17,15 +17,15 @@
   "launch_handler": { "client_mode": ["navigate-existing", "auto"] },
   "handle_links": "preferred",
   "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/icon-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "/icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/icons/icon-v2-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-v2-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-v2-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-v2-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "作業台", "short_name": "作業台", "description": "回到專案作業台", "url": "/?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }] },
-    { "name": "筆記排程", "short_name": "排程", "description": "開啟筆記排程", "url": "/planner?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }] },
-    { "name": "資料庫", "short_name": "資料庫", "description": "開啟資料庫", "url": "/databases?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }] },
-    { "name": "私訊", "short_name": "私訊", "description": "開啟站內私訊", "url": "/chat?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-96.png", "sizes": "96x96", "type": "image/png" }] }
+    { "name": "作業台", "short_name": "作業台", "description": "回到專案作業台", "url": "/?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-v2-96.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "筆記排程", "short_name": "排程", "description": "開啟筆記排程", "url": "/planner?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-v2-96.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "資料庫", "short_name": "資料庫", "description": "開啟資料庫", "url": "/databases?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-v2-96.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "私訊", "short_name": "私訊", "description": "開啟站內私訊", "url": "/chat?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-v2-96.png", "sizes": "96x96", "type": "image/png" }] }
   ]
 }

@@ -4,6 +4,7 @@ import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
+import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 
 /**
  * 連接的資料來源（/integrations）：每個人自己連「自己的」外部服務——
@@ -31,6 +32,33 @@ export function IntegrationsPage() {
   }, []);
 
   const d = list.data;
+  const connectedSourceCount = d
+    ? Number(d.googleDrive.connected) + Number(d.notion.connected) + d.apis.length
+    : 0;
+  const hasConnectedSource = connectedSourceCount > 0;
+  const integrationJourney: VisualJourneyStep[] = [
+    {
+      id: "connect",
+      label: "連接來源",
+      detail: hasConnectedSource ? `已有 ${connectedSourceCount} 個來源可使用` : "選擇一種來源開始",
+      icon: "Lock",
+      state: hasConnectedSource ? "done" : "current",
+    },
+    {
+      id: "import",
+      label: "挑選內容",
+      detail: "只匯入這次需要的資料",
+      icon: "Download",
+      state: hasConnectedSource ? "current" : "upcoming",
+    },
+    {
+      id: "use",
+      label: "交給專案與 AI",
+      detail: "綁定後才能引用與分析",
+      icon: "Sparkles",
+      state: "upcoming",
+    },
+  ];
 
   return (
     <div className="page-shell secondary-page integrations-page">
@@ -49,18 +77,45 @@ export function IntegrationsPage() {
       )}
       {remove.error && <p className="error" role="alert">{remove.error.message}</p>}
 
+      <section className="integration-status-grid" aria-label="資料來源連線概況">
+        <a href="#integration-google" className={`integration-status-card${d?.googleDrive.connected ? " is-connected" : ""}`}>
+          <span className="integration-status-card__icon"><Icon name="CalendarPlus" size={18} /></span>
+          <span>
+            <strong>Google 雲端</strong>
+            <small>
+              {!d ? "讀取狀態中" : d.googleDrive.status === "error" ? "授權需重新連接" : d.googleDrive.connected ? "已連接・唯讀" : d.googleDrive.configured ? "可連接" : "站方尚未設定"}
+            </small>
+          </span>
+          <span className="integration-status-card__signal" aria-hidden />
+        </a>
+        <a href="#integration-notion" className={`integration-status-card${d?.notion.connected ? " is-connected" : ""}`}>
+          <span className="integration-status-card__icon notion"><Icon name="FileText" size={18} /></span>
+          <span>
+            <strong>Notion</strong>
+            <small>{!d ? "讀取狀態中" : d.notion.status === "error" ? "Token 需更新" : d.notion.connected ? "已設定工作區" : "尚未連接"}</small>
+          </span>
+          <span className="integration-status-card__signal" aria-hidden />
+        </a>
+        <a href="#integration-api" className={`integration-status-card${(d?.apis.length ?? 0) > 0 ? " is-connected" : ""}`}>
+          <span className="integration-status-card__icon api"><Icon name="Database" size={18} /></span>
+          <span>
+            <strong>外部 API</strong>
+            <small>{!d ? "讀取狀態中" : d.apis.length > 0 ? `${d.apis.length} 個連接` : "尚未新增"}</small>
+          </span>
+          <span className="integration-status-card__signal" aria-hidden />
+        </a>
+      </section>
+
       <section className="card integration-flow-card" data-fb="資料來源使用方式">
-        <h2><Icon name="ArrowRight" size={18} /> 連接之後怎麼用？</h2>
-        <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
-          <div><strong>1. 連接來源</strong><p className="hint" style={{ margin: "2px 0 0" }}>在下方連接 Google、Notion 或你自己的 API。</p></div>
-          <div><strong>2. 匯入需要的內容</strong><p className="hint" style={{ margin: "2px 0 0" }}>前往「知識與資料」，選擇文件、頁面或資料列，不會把整個帳號內容全部交給系統。</p></div>
-          <div><strong>3. 加入專案交給 AI 使用</strong><p className="hint" style={{ margin: "2px 0 0" }}>把內容綁定到專案後，AI 創作助手才能引用、分析並提出下一步。</p></div>
+        <div className="integration-flow-card__head">
+          <div><p className="eyebrow">資料流</p><h2><Icon name="ArrowRight" size={18} /> 連接之後怎麼用？</h2></div>
+          <Link href="/databases" className="btn-tonal btn-sm">前往知識與資料 <Icon name="ArrowRight" size={13} /></Link>
         </div>
-        <p style={{ margin: "12px 0 0" }}><Link href="/databases">前往知識與資料 →</Link></p>
+        <VisualJourney steps={integrationJourney} ariaLabel="外部資料使用流程" />
       </section>
 
       {/* ── Google 雲端硬碟 ── */}
-      <section className="card" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
+      <section id="integration-google" className="card" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
         <h2><Icon name="CalendarPlus" size={18} /> Google 雲端硬碟</h2>
         <p className="hint" style={{ marginTop: 4 }}>
           連結後，到「知識與資料」貼上你私人雲端裡的文件、試算表、簡報或檔案連結即可匯入，不必再把檔案設成公開。
@@ -129,7 +184,7 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
   const removeNotion = trpc.integrations.removeNotion.useMutation({ onSuccess: () => utils.integrations.list.invalidate() });
 
   return (
-    <section className="card" style={{ marginTop: 12 }} data-fb="資料來源-Notion卡">
+    <section id="integration-notion" className="card" style={{ marginTop: 12 }} data-fb="資料來源-Notion卡">
       <h2><Icon name="FileText" size={18} /> Notion</h2>
       <p className="hint" style={{ marginTop: 4 }}>
         到 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">notion.so/my-integrations</a> 建立整合、
@@ -218,7 +273,7 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
   };
 
   return (
-    <section className="card" style={{ marginTop: 12 }} data-fb="資料來源-外部API卡">
+    <section id="integration-api" className="card" style={{ marginTop: 12 }} data-fb="資料來源-外部API卡">
       <h2><Icon name="Package" size={18} /> 外部資料來源／API</h2>
       <p className="hint" style={{ marginTop: 4 }}>
         把 Airtable、Supabase、自建服務或任何回傳 JSON／CSV 的端點接進來。這裡只保存「基底網址＋認證標頭」；

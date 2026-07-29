@@ -19,17 +19,17 @@ export type BrandSize = "xs" | "sm" | "md" | "lg" | "hero";
 
 /** 完整 Logo 資產（橫式 wordmark） */
 export const BRAND_LOGO_SRC: Record<BrandTone, string> = {
-  color: "/brand/logo-aios-color.png",
-  light: "/brand/logo-aios-light.png",
-  dark: "/brand/logo-aios-dark.png",
+  color: "/brand/logo-aios-color-v2.png",
+  light: "/brand/logo-aios-color-v2.png",
+  dark: "/brand/logo-aios-color-v2.png",
   monochrome: "/brand/logo-aios-mono.png",
 };
 
 /** Retina 用 2× 完整 Logo（僅 color；其餘 tone 回退 1×） */
 export const BRAND_LOGO_SRC_2X: Partial<Record<BrandTone, string>> = {
-  color: "/brand/logo-aios-color@2x.png",
-  light: "/brand/logo-aios-color@2x.png",
-  dark: "/brand/logo-aios-color@2x.png",
+  color: "/brand/logo-aios-color-v2@2x.png",
+  light: "/brand/logo-aios-color-v2@2x.png",
+  dark: "/brand/logo-aios-color-v2@2x.png",
 };
 
 /**
@@ -37,9 +37,9 @@ export const BRAND_LOGO_SRC_2X: Partial<Record<BrandTone, string>> = {
  * PWA／favicon 沿用既有 /icons/* 路徑；元件與文件用 /brand/*。
  */
 export const BRAND_MARK_SRC: Record<BrandTone, string> = {
-  color: "/brand/icon-aios-512.png",
-  light: "/brand/icon-aios-512.png",
-  dark: "/brand/icon-aios-512.png",
+  color: "/brand/icon-aios-v2-512.png",
+  light: "/brand/icon-aios-v2-512.png",
+  dark: "/brand/icon-aios-v2-512.png",
   monochrome: "/brand/mark-aios-mono.png",
 };
 
@@ -47,10 +47,10 @@ export const BRAND_MARK_SRC: Record<BrandTone, string> = {
 export const BRAND_FULL_LOGO_READY = true;
 
 /**
- * 完整 Logo 寬高比（logo-aios-color.png ≈ 720×363）。
+ * 完整 Logo 寬高比（v2 透明高解析資產為 720×316）。
  * 用於固定尺寸、避免 CLS。
  */
-export const BRAND_FULL_ASPECT = 720 / 363;
+export const BRAND_FULL_ASPECT = 720 / 316;
 
 export const BRAND_SIZE_PX: Record<BrandSize, { mark: number; fullHeight: number }> = {
   xs: { mark: 18, fullHeight: 18 },

@@ -190,6 +190,7 @@ function SceneRow({
   s,
   i,
   total,
+  rowClassName,
   isLeader,
   canEdit,
   meLoading,
@@ -208,6 +209,7 @@ function SceneRow({
   s: Scene;
   i: number;
   total: number;
+  rowClassName?: string;
   isLeader: boolean;
   canEdit: boolean;
   meLoading: boolean;
@@ -262,7 +264,7 @@ function SceneRow({
   const ttsPoints = ttsModel ? estimatePoints(ttsModel, { promptChars: (s.voiceover ?? "").length }) : undefined;
 
   return (
-    <div className="gen-row" data-fb="分鏡格" id={`scene-${s.id}`}>
+    <div className={`gen-row scene-list__row${rowClassName ? ` ${rowClassName}` : ""}`} data-fb="分鏡格" id={`scene-${s.id}`}>
       {s.assetUrl ? (
         s.assetKind === "video" ? (
           <AssetVideo className="gen-thumb" src={s.assetUrl} muted preload="metadata" fallbackClassName="gen-thumb" fallbackLabel="素材遺失" fallbackIconSize={16} />
@@ -553,6 +555,32 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
 
   const list = (scenes.data ?? []) as Scene[];
   const totalSec = list.reduce((sum, s) => sum + s.durationSec, 0);
+  type SceneFilter = "all" | "draft" | "pending" | "needs_work" | "approved" | "missing";
+  const [sceneFilter, setSceneFilter] = useState<SceneFilter>("all");
+  const [sceneListExpanded, setSceneListExpanded] = useState(false);
+  const statusCounts = {
+    draft: list.filter((s) => s.status === "todo" || s.status === "review").length,
+    pending: list.filter((s) => s.status === "pending").length,
+    needs_work: list.filter((s) => s.status === "needs_work").length,
+    approved: list.filter((s) => s.status === "approved").length,
+    missing: list.filter((s) => !s.assetId).length,
+  };
+  const sceneMatchesFilter = (scene: Scene, filter: SceneFilter) =>
+    filter === "all"
+    || (filter === "draft" && (scene.status === "todo" || scene.status === "review"))
+    || (filter === "missing" && !scene.assetId)
+    || scene.status === filter;
+  const filteredSceneEntries = list
+    .map((scene, index) => ({ scene, index }))
+    .filter(({ scene }) => sceneMatchesFilter(scene, sceneFilter));
+  const sceneFilters: Array<{ id: SceneFilter; label: string; count: number }> = [
+    { id: "all", label: "全部", count: list.length },
+    { id: "draft", label: "草稿", count: statusCounts.draft },
+    { id: "pending", label: "待審", count: statusCounts.pending },
+    { id: "needs_work", label: "需修改", count: statusCounts.needs_work },
+    { id: "approved", label: "已通過", count: statusCounts.approved },
+    { id: "missing", label: "無素材", count: statusCounts.missing },
+  ];
 
   const [showPreview, setShowPreview] = useState(false);
   // 目標剪輯軟體（決定「下載時間軸/字幕」拿哪些檔）；預設剪映——組內主力剪輯軟體；記住上次選擇
@@ -630,6 +658,36 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
           </select>
         </div>
       )}
+      {!scenes.isError && list.length > 0 && (
+        <div className="scene-overview" aria-label="分鏡狀態總覽">
+          <div
+            className="scene-overview__rail"
+            role="img"
+            aria-label={`草稿 ${statusCounts.draft}、待審 ${statusCounts.pending}、需修改 ${statusCounts.needs_work}、已通過 ${statusCounts.approved}`}
+          >
+            {statusCounts.draft > 0 && <span className="draft" style={{ width: `${(statusCounts.draft / list.length) * 100}%` }} />}
+            {statusCounts.pending > 0 && <span className="review" style={{ width: `${(statusCounts.pending / list.length) * 100}%` }} />}
+            {statusCounts.needs_work > 0 && <span className="revision" style={{ width: `${(statusCounts.needs_work / list.length) * 100}%` }} />}
+            {statusCounts.approved > 0 && <span className="approved" style={{ width: `${(statusCounts.approved / list.length) * 100}%` }} />}
+          </div>
+          <div className="scene-overview__controls" role="group" aria-label="篩選分鏡">
+            {sceneFilters.map((filter) => (
+              <button
+                key={filter.id}
+                type="button"
+                className={`scene-filter${sceneFilter === filter.id ? " is-active" : ""}`}
+                aria-pressed={sceneFilter === filter.id}
+                onClick={() => {
+                  setSceneFilter(filter.id);
+                  if (filter.id !== "all") setSceneListExpanded(true);
+                }}
+              >
+                {filter.label} <b>{filter.count}</b>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {scenes.isLoading ? (
         <div aria-hidden="true">
           {[0, 1].map((k) => (
@@ -647,28 +705,49 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
         <p className="hint">還沒有分鏡——生成完成後按「＋加入分鏡」，排好順序就能打包交付。</p>
       ) : (
         <>
-          {list.map((s, i) => (
-            <SceneRow
-              key={s.id}
-              s={s}
-              i={i}
-              total={list.length}
-              isLeader={isLeader}
-              canEdit={canEdit}
-              meLoading={me.isLoading}
-              genModelId={genModelId}
-              onUsePrompt={onUsePrompt}
-              charIds={charIds}
-              sceneIds={sceneIds}
-              invalidate={invalidate}
-              move={move}
-              remove={remove}
-              submitApproval={submitApproval}
-              decide={decide}
-              pending={pendingOf(s.id)}
-              rejectReason={rejectReasonOf(s.id)}
-            />
-          ))}
+          {filteredSceneEntries.length === 0 ? (
+            <div className="empty-state scene-filter-empty">
+              <h3>這個狀態目前沒有分鏡</h3>
+              <p>切回「全部」查看完整順序，或選其他狀態繼續處理。</p>
+            </div>
+          ) : (
+            <div className={`scene-list-rows${sceneListExpanded || sceneFilter !== "all" ? " is-expanded" : ""}`}>
+              {filteredSceneEntries.map(({ scene: s, index: i }, visibleIndex) => (
+                <SceneRow
+                  key={s.id}
+                  s={s}
+                  i={i}
+                  total={list.length}
+                  rowClassName={sceneFilter === "all" && visibleIndex >= 4 ? "is-mobile-overflow" : undefined}
+                  isLeader={isLeader}
+                  canEdit={canEdit}
+                  meLoading={me.isLoading}
+                  genModelId={genModelId}
+                  onUsePrompt={onUsePrompt}
+                  charIds={charIds}
+                  sceneIds={sceneIds}
+                  invalidate={invalidate}
+                  move={move}
+                  remove={remove}
+                  submitApproval={submitApproval}
+                  decide={decide}
+                  pending={pendingOf(s.id)}
+                  rejectReason={rejectReasonOf(s.id)}
+                />
+              ))}
+            </div>
+          )}
+          {sceneFilter === "all" && list.length > 4 && (
+            <button
+              type="button"
+              className="scene-mobile-disclosure"
+              aria-expanded={sceneListExpanded}
+              onClick={() => setSceneListExpanded((value) => !value)}
+            >
+              <Icon name={sceneListExpanded ? "ChevronUp" : "ChevronDown"} size={15} />
+              {sceneListExpanded ? "手機版先收起完整分鏡" : `再顯示 ${list.length - 4} 鏡`}
+            </button>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
             {/* QA-005：非同步 job 版打包——就地顯示進度/取消/完成下載，不再是看似卡死的同步下載 */}
             <ExportJobButton projectId={projectId} />

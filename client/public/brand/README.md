@@ -10,6 +10,8 @@ Vite 靜態根目錄為 `client/public/`，網址路徑為 `/brand/*`。
 |------|------|
 | `logo-aios-color.png` | 完整橫式彩色 Logo（透明底，~720px 寬） |
 | `logo-aios-color@2x.png` | Retina 2× 完整 Logo |
+| `logo-aios-color-v2.png` / `logo-aios-color-v2@2x.png` | 重新製作的乾淨透明高解析正式資產；目前網站優先使用 |
+| `icon-aios-v2-*.png` | 乾淨透明的高解析 A 標記；目前網站與 PWA 優先使用 |
 | `logo-aios-light.png` / `logo-aios-dark.png` | 淺／深介面（目前同彩色透明底） |
 | `logo-aios-mono.png` | 單色完整 wordmark 剪影 |
 | `logo-aios-color-embedded.svg` | 內嵌 WebP 的 SVG 備援（非重繪向量） |
@@ -31,6 +33,6 @@ PWA／favicon 另見：
 
 ## 來源與限制
 
-- 彩色立體外觀來自使用者提供母版，**未**重新描繪或改字樣。
+- v1 彩色立體外觀來自使用者提供母版；v2 以母版為身分參考重製、移除米色底與外部投影，再以色鍵去背保留透明邊緣。
 - `logo-aios-color-embedded.svg` 因早期僅能寫文字檔，把 WebP 內嵌於 SVG；正式介面優先用 PNG。
 - App Icon 取字標前方 **A**，非整張橫式 Logo 縮小。

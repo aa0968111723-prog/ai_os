@@ -798,17 +798,21 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
             <Icon name={runsCollapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ marginLeft: "auto" }} />
           </button>
           <div id="team-agent-runs" hidden={runsCollapsed} style={{ marginTop: 6 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div className="team-run-list">
               {runs.map((r) => {
                 const st = RUN_STATUS[r.status] ?? { label: r.status };
+                const progress = r.totalSteps > 0 ? Math.min(100, Math.round((r.doneSteps / r.totalSteps) * 100)) : 0;
                 return (
-                  <div key={r.id} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: "var(--fs-12)", flexWrap: "wrap" }}>
+                  <div key={r.id} className={`team-run-row is-${r.status}`}>
                     <span className="chip" style={{ margin: 0, color: st.color, borderColor: st.color }}>{st.label}</span>
-                    <Link href={`/p/${r.projectId}`} style={{ fontWeight: 600 }}>{r.projectTitle}</Link>
-                    <span style={{ color: "var(--fg-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }} title={r.goal}>
-                      {r.goal}
+                    <span className="team-run-row__copy">
+                      <Link href={`/p/${r.projectId}`}>{r.projectTitle}</Link>
+                      <span title={r.goal}>{r.goal}</span>
+                      <span className="team-run-row__track" aria-label={`完成 ${progress}%`}>
+                        <span style={{ width: `${progress}%` }} />
+                      </span>
                     </span>
-                    <span style={{ color: "var(--fg-secondary)", marginLeft: "auto" }}>
+                    <span className="team-run-row__meta">
                       {r.totalSteps > 0 ? `${r.doneSteps}/${r.totalSteps} 步` : "—"}・估 {r.estPoints} 點
                     </span>
                   </div>

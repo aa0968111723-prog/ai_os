@@ -153,6 +153,7 @@ export function ModelsPage() {
   const [wizTier, setWizTier] = useState<Tier | "">("");
   const [wizSource, setWizSource] = useState<(typeof WIZARD_SOURCES)[number]["id"] | "">("");
   const wizardReady = !!(wizCategory && wizTier && wizSource);
+  const wizardAnswered = [wizCategory, wizTier, wizSource].filter(Boolean).length;
   // category+tier 過濾;「沒有來源」濾掉 needs 有值的模型(沒素材根本跑不動)
   const wizardResults = wizardReady
     ? MODELS.filter((m) => m.category === wizCategory && m.tier === wizTier && !(wizSource === "no" && m.needs)).sort(
@@ -248,7 +249,7 @@ export function ModelsPage() {
         </div>
 
         {/* 三種決策模式(segmented) */}
-        <div role="tablist" aria-label="決策模式" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+        <div role="tablist" aria-label="決策模式" className="model-decision-tabs">
           {DECISION_MODES.map((mode) => {
             const on = decisionMode === mode.id;
             return (
@@ -256,22 +257,22 @@ export function ModelsPage() {
                 key={mode.id}
                 role="tab"
                 aria-selected={on}
-                className={on ? "tonal" : ""}
-                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                className={`model-decision-tab${on ? " is-selected" : ""}`}
                 onClick={() => setDecisionMode(mode.id)}
               >
-                <Icon name={mode.icon} size={14} />
-                {mode.label}
+                <span className="model-decision-tab__icon"><Icon name={mode.icon} size={16} /></span>
+                <span><strong>{mode.label}</strong><small>{mode.hint}</small></span>
+                {on && <Icon name="Check" size={14} />}
               </button>
             );
           })}
-          {activeMode && <span className="hint" style={{ marginLeft: 2 }}>{activeMode.hint}</span>}
         </div>
+        {activeMode && <p className="model-decision-current"><Icon name={activeMode.icon} size={13} />目前方式：{activeMode.hint}</p>}
 
         {/* 模式一:看情境 */}
         {decisionMode === "scenario" && (
           <div>
-            <div style={{ marginBottom: 10 }}>
+            <div className="model-scenario-groups">
               {SCENARIO_GROUPS.map((g) => {
                 const on = scenarioGroup === g.id;
                 return (
@@ -293,7 +294,7 @@ export function ModelsPage() {
                 );
               })}
             </div>
-            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(288px, 1fr))" }}>
+            <div className="model-scenario-grid">
               {scenariosInGroup.map((r) => (
                 <ScenarioCard key={r.id} recipe={r} copiedId={copiedId} onCopy={copyModelId} onJump={jumpToCatalog} />
               ))}
@@ -312,7 +313,19 @@ export function ModelsPage() {
 
         {/* 模式三:三題篩選(原「幫我挑模型」精靈) */}
         {decisionMode === "quiz" && (
-          <div>
+          <div className="model-quiz">
+            <div className="model-quiz-progress" aria-label={`三題已完成 ${wizardAnswered} 題`}>
+              {[wizCategory, wizTier, wizSource].map((answer, index) => (
+                <span
+                  key={index}
+                  className={answer ? "is-done" : index === wizardAnswered ? "is-current" : ""}
+                  aria-current={!answer && index === wizardAnswered ? "step" : undefined}
+                >
+                  {answer ? <Icon name="Check" size={12} /> : index + 1}
+                </span>
+              ))}
+              <small>{wizardReady ? "完成，以下是適合的模型" : `還有 ${3 - wizardAnswered} 題`}</small>
+            </div>
             <p style={{ margin: "0 0 2px", fontSize: "var(--fs-14)", fontWeight: 600 }}>1. 你要做什麼?</p>
             <div>
               {WIZARD_CATEGORIES.map((c) => (
