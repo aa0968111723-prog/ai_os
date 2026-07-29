@@ -864,6 +864,28 @@ UX-00 → UX-01 → UX-02 → UX-03 → UX-04 → UX-05 → UX-06 → UX-07 → 
 
 ---
 
+## 30. 需要修改的頁面、元件與檔案
+
+根據上述 UX-01 至 UX-08 的優化計畫，預計將涉及以下核心檔案的修改與重構：
+
+### 30.1 全域樣式與設定 (Global Styles & Config)
+- `client/src/styles.css`：實作 Monastic-calm 設計語彙、Design Tokens 收斂、安全區域 (Safe Area) 避讓、以及跨裝置斷點與網格系統。
+- `client/src/brand.ts`：統一品牌色帶語意與 Logo 相關設定。
+- `client/src/app/AppRoutes.tsx`：調整路由層級與未登入/未分組狀態的導流邏輯。
+
+### 30.2 核心頁面 (Pages)
+- `client/src/pages/LoginPage.tsx`：實作 100dvh 滿版置中、PWA 安裝提示整合、以及表單防呆與友善錯誤提示。
+- `client/src/pages/Launchpad.tsx`：優化專案網格 (Responsive Grid)、實作列表視圖切換、以及空狀態引導。
+- `client/src/pages/ProjectPage.tsx`：重整三幕導覽、實作穩定的 TocNav 錨點導覽、以及多模態工作台的無縫切換。
+
+### 30.3 共用元件 (Components)
+- **導覽與佈局**：`TopBar` 相關元件、`AccountMenu.tsx` (收斂 L1 導覽)、`TocNav` 相關元件 (實作 L2/L3 導覽與手機端橫滑標籤)。
+- **互動與回饋**：`BrandLogo.tsx`、`BrandReveal.tsx`、`Icon.tsx`、以及統一的按鈕 (Button) 與狀態標籤 (Badge/Pill) 元件。
+- **創作與資源**：`GenerationList.tsx` (生成列與進度回饋)、`ReferenceImagePicker.tsx` (混合資源庫)、以及影片沉浸式播放器元件。
+- **協作與排程**：`MessagePanel.tsx` (AI 專屬氣泡與上下文摘要)、`KnowledgeBase.tsx` (知識地圖)、以及排程月曆元件。
+
+---
+
 ## 附錄 A — 優先級
 
 | 級 | 範圍 |
