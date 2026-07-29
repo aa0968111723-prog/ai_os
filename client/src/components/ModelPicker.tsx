@@ -16,6 +16,15 @@ export interface PickedModel {
   recommended: boolean;
 }
 
+export function pickDefaultModel(list: PickedModel[]): PickedModel | undefined {
+  return (
+    list.find((model) => model.verified && model.recommended) ??
+    list.find((model) => model.verified) ??
+    list.find((model) => model.recommended) ??
+    list[0]
+  );
+}
+
 /** 兩層模型挑選器:類別 → 模型(旗艦/經濟/最低成本分組)。
  *  pickRequest：外部指定模型（提示詞庫「再用」/生成紀錄「再用此設定」還原完整設定用）——
  *  nonce 遞增才套用一次，之後使用者仍可自由改選，不會被外部值鎖死 */
@@ -30,23 +39,29 @@ export function ModelPicker({
   const [category, setCategory] = useState("text-to-image");
   const models = trpc.models.byCategory.useQuery({ category });
   const [modelId, setModelId] = useState("");
+  const staticRequestedModel = pickRequest
+    ? MODELS.find((model) => model.id === pickRequest.modelId)
+    : undefined;
+  const requestedModel = trpc.models.get.useQuery(
+    { id: pickRequest?.modelId ?? "__no_model_requested__" },
+    { enabled: Boolean(pickRequest?.modelId && !staticRequestedModel) },
+  );
 
-  // 外部指定模型：從共用註冊表查出類別，同步切換兩層下拉。
-  // 只認「現役目錄」MODELS——getModel 連 LEGACY（已下架）都解析得到，套用下架模型會讓
-  // 下拉默默落回推薦預設（類別卻換了）＝還原成別的模型；下架/未知一律靜默略過，維持現選
+  // 外部指定模型：靜態目錄可立即切換；即時同步發現的新模型則由伺服器目錄補解析。
+  // 下架／未知模型仍不套用，避免還原設定時默默換成另一個模型。
   useEffect(() => {
     if (!pickRequest) return;
-    const m = MODELS.find((x) => x.id === pickRequest.modelId);
+    const m = staticRequestedModel ?? requestedModel.data;
     if (!m || m.category === "workflow") return;
     setCategory(m.category);
     setModelId(m.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickRequest?.nonce]);
+  }, [pickRequest?.nonce, requestedModel.data?.id]);
 
   const list = useMemo(() => (models.data ?? []) as PickedModel[] & typeof models.data, [models.data]);
-  // 預設選「本類別推薦」(已驗證的經濟日常主力);使用者手動選過(modelId 有值)則尊重其選擇,
-  // 都沒有才退回清單第一項。切換類別時上層 onChange 會重算點數,不影響金流。
-  const recommendedDefault = list.find((m) => m.recommended) ?? list[0];
+  // 預設順序：已驗證推薦 → 任一已驗證 → 待驗證推薦 → 清單第一項。
+  // 使用者手動指定仍予以尊重，不會因政策排序覆蓋。
+  const recommendedDefault = pickDefaultModel(list as PickedModel[]);
   const selected = (list.find((m) => m.id === modelId) ?? recommendedDefault) as PickedModel | undefined;
 
   useEffect(() => {

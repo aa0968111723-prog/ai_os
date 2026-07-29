@@ -53,9 +53,9 @@ const TIER_STYLE: Record<string, { color: string; borderColor: string; backgroun
   economy: { color: "var(--healing-ink)", borderColor: "var(--healing)", background: "var(--healing-soft)" },
   budget: { color: "var(--gold-ink)", borderColor: "var(--gold)", background: "var(--gold-soft)" },
 };
-/** 精靈結果排序分:recommended 排最前;「有來源」時 needs 有值者次優先(sort 穩定,其餘保持目錄順序) */
+/** 精靈結果排序分：已驗證優先，再看推薦與來源相容性。 */
 function wizScore(m: ModelEntry, source: "" | "yes" | "no"): number {
-  return (m.recommended ? 2 : 0) + (source === "yes" && m.needs ? 1 : 0);
+  return (m.verified ? 10 : 0) + (m.recommended ? 2 : 0) + (source === "yes" && m.needs ? 1 : 0);
 }
 
 /* ── 深度優化:決策中心(看情境/比風格/三題篩選)的共用定義 ── */

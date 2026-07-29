@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { getModel } from "../../shared/models";
 import {
   completePlanSchema,
   type CompletePlan,
@@ -7,9 +6,10 @@ import {
   type PlanReference,
 } from "../../shared/plan";
 import type { AgentStep } from "./agentRunner";
+import { AI_GENERATION_CATEGORIES, selectAiGenerationModel } from "./aiModelPolicy";
+import { resolveModel } from "./modelResolve";
 
 const MAX_DRAFT_STEPS = 30;
-const DEFAULT_IMAGE_MODEL = "fal-ai/fast-lightning-sdxl";
 const TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
 const stepBase = z.object({
@@ -232,9 +232,16 @@ function actorFor(kind: CompletePlanDraft["steps"][number]["kind"]): "ai" | "hum
 }
 
 function safeModel(modelId: string | undefined) {
-  const requested = modelId ? getModel(modelId) : undefined;
-  if (requested && !requested.needs) return requested;
-  return getModel(DEFAULT_IMAGE_MODEL);
+  const requested = modelId ? resolveModel(modelId) : undefined;
+  const category = requested && AI_GENERATION_CATEGORIES.has(requested.category)
+    ? requested.category
+    : "text-to-image";
+  return selectAiGenerationModel({
+    category,
+    preferredId: modelId,
+    preference: "balanced",
+    requireVerified: true,
+  }).model;
 }
 
 export function resolveCompletePlanDraft(
@@ -305,7 +312,18 @@ export function resolveCompletePlanDraft(
         points: model.points,
       });
     } else if (source.kind === "voiceover") {
-      steps.push({ ...base, sceneNo: source.sceneNo, points: getModel(TTS_MODEL)?.points ?? 1 });
+      const voiceModel = selectAiGenerationModel({
+        category: "text-to-speech",
+        preferredId: TTS_MODEL,
+        preference: "balanced",
+        requireVerified: true,
+      }).model;
+      steps.push({
+        ...base,
+        sceneNo: source.sceneNo,
+        modelId: voiceModel.id,
+        points: voiceModel.points,
+      });
     } else if (source.kind === "submit_approval") {
       steps.push({ ...base, sceneNo: source.sceneNo, points: 0 });
     } else if (source.kind === "create_note") {
@@ -476,4 +494,11 @@ export function extractPlanJson(raw: string): unknown {
   } catch {
     return null;
   }
+}
+
+export function summarizePlanDraftIssues(error: z.ZodError): string[] {
+  return error.issues.slice(0, 12).map((issue) => {
+    const path = issue.path.length ? issue.path.join(".") : "root";
+    return `${path}: ${issue.message}`;
+  });
 }
