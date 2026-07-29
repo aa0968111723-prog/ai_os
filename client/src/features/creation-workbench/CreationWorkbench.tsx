@@ -85,6 +85,11 @@ export function CreationWorkbench({
   const [askFillRequest, setAskFillRequest] = useState<{ nonce: number; message: string } | null>(
     null,
   );
+  /** Discrete idea fill for TemplateMode (run_template) — not sticky goal keystrokes */
+  const [templateIdeaBringIn, setTemplateIdeaBringIn] = useState<{
+    text: string;
+    nonce: number;
+  } | null>(null);
   const [sideNotice, setSideNotice] = useState("");
   const utils = trpc.useUtils();
 
@@ -140,6 +145,14 @@ export function CreationWorkbench({
       });
       if (result.mode === "plan") setPlanForceOpen(true);
       else if (result.mode !== "plan") setPlanForceOpen(false);
+
+      // run_template: one-shot idea bring-in (goal text) — does not auto-start workflow.
+      if (action.type === "run_template" && action.goal.trim()) {
+        setTemplateIdeaBringIn((prev) => ({
+          text: action.goal.trim(),
+          nonce: (prev?.nonce ?? 0) + 1,
+        }));
+      }
 
       // Focus generate prompt after bring-in (still no submit).
       if (result.mode === "generate") {
@@ -357,6 +370,7 @@ export function CreationWorkbench({
           goal={draft.goal}
           templateId={draft.templateId}
           promptRequest={workflowPromptRequest}
+          ideaBringIn={templateIdeaBringIn}
         />
         {sideNotice ? (
           <p className="hint" role="status" aria-live="polite" style={{ marginTop: 8 }}>

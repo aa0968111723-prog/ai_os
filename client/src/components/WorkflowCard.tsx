@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { getModel } from "@shared/models";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
-import { CreationCostSummary } from "../features/creation-workbench/CreationCostSummary";
 
 /**
  * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（未授權/背景分頁）建構子會丟例外，包 try 忽略。
@@ -73,8 +72,10 @@ export function WorkflowCard({
   const utils = trpc.useUtils();
   const [wfId, setWfId] = useState("");
   const [prompt, setPrompt] = useState("");
+  /** Set when pickRequest.templateId is not in the loaded list (after data arrives) */
+  const [pickMissId, setPickMissId] = useState<string | null>(null);
 
-  // 提示詞庫「用於製作範本」：把咒語填進想法框（已手打內容時先問，不默默覆蓋——與生成台 applyPrompt 同禮節）
+  // 提示詞庫／工作台帶入：把咒語填進想法框（已手打內容時先問，不默默覆蓋——與生成台 applyPrompt 同禮節）
   useEffect(() => {
     if (!promptRequest) return;
     if (prompt.trim() && prompt !== promptRequest.text && !window.confirm("要覆蓋製作範本想法框裡已輸入的文字嗎？")) return;
@@ -83,13 +84,16 @@ export function WorkflowCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promptRequest?.nonce]);
 
-  // 跨模式帶入 templateId：預選範本（僅在 id 存在於列表時）
+  // 跨模式帶入 templateId：預選範本；列表載入後仍對不到則提示
   useEffect(() => {
     if (!pickRequest?.templateId) return;
     const list = workflows.data;
     if (!list?.length) return;
     if (list.some((w) => w.id === pickRequest.templateId)) {
       setWfId(pickRequest.templateId);
+      setPickMissId(null);
+    } else {
+      setPickMissId(pickRequest.templateId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickRequest?.nonce, workflows.data]);
@@ -172,12 +176,21 @@ export function WorkflowCard({
         ))}
       </select>
       {wf && <p className="hint" style={{ marginTop: 4 }}>{wf.strengths}|適合：{wf.bestFor}</p>}
+      {pickMissId ? (
+        <p className="hint" role="status" style={{ marginTop: 6, color: "var(--gold-ink)" }}>
+          帶入範本無法對應：
+          <b className="mono">{pickMissId}</b>
+          （列表中沒有這個 id，已保留目前選擇）
+        </p>
+      ) : null}
 
-      {/* §6.4 計畫預覽：步驟、模型、估點、核准閘門（資料來自既有 workflow preset） */}
+      {/* §6.4 計畫預覽：步驟、模型、估點、核准閘門（單一區塊，不另掛 CreationCostSummary） */}
       {wf && (
         <div
           className="workflow-plan-preview"
           data-testid="workflow-plan-preview"
+          role="status"
+          aria-live="polite"
           style={{
             marginTop: 10,
             padding: "8px 10px",
@@ -203,10 +216,10 @@ export function WorkflowCard({
             ))}
           </ol>
           <p className="hint" style={{ margin: "6px 0 0" }}>
-            預估點數：約 {wf.points} 點・{wf.steps.length} 步・產物寫入生成紀錄
+            本次模式：製作範本・預估消耗：約 {wf.points} 點（{wf.steps.length} 步）・產物寫入生成紀錄
           </p>
           <p className="hint" style={{ margin: "2px 0 0" }}>
-            核准閘門：各步生成若達門檻仍走既有核准流程（背景執行不中斷）
+            是否需要核准：各步生成若達門檻仍走既有核准流程（背景執行不中斷）
           </p>
         </div>
       )}
@@ -247,17 +260,6 @@ export function WorkflowCard({
       </div>
       {start.error && <p className="hint" style={{ marginTop: 6 }}>啟動失敗：{start.error.message}</p>}
       {stop.error && <p className="hint" style={{ marginTop: 6 }}>停止失敗：{stop.error.message}</p>}
-
-      {wf ? (
-        <CreationCostSummary
-          modeLabel="製作範本"
-          estimateLabel={`約 ${wf.points} 點（${wf.steps.length} 步加總）`}
-          approvalLabel="各步若達門檻需核准"
-          outputSpec="成品寫入生成紀錄"
-        />
-      ) : (
-        <CreationCostSummary modeLabel="製作範本" estimateLabel="依範本步驟加總" />
-      )}
 
       {(runs.data ?? []).map((r) => {
         const steps = r.steps as RunStep[];

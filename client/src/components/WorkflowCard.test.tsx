@@ -171,8 +171,8 @@ describe("WorkflowCard", () => {
     expect(screen.getByTestId("workflow-plan-preview")).toBeVisible();
     expect(screen.getByText("摘金句")).toBeVisible();
     expect(screen.getByText("生成底圖")).toBeVisible();
-    expect(screen.getByText(/預估點數：約 2 點/)).toBeVisible();
-    expect(screen.getByText(/核准閘門/)).toBeVisible();
+    expect(screen.getByText(/預估消耗：約 2 點/)).toBeVisible();
+    expect(screen.getByText(/是否需要核准/)).toBeVisible();
     expect(screen.getByRole("status")).toHaveTextContent(/約 2 點/);
 
     rerender(
@@ -181,6 +181,18 @@ describe("WorkflowCard", () => {
     await waitFor(() => {
       expect(screen.getByLabelText("選擇製作範本")).toHaveValue("wf-storyboard");
     });
+  });
+
+  it("surfaces a hint when pickRequest templateId is not in the list", async () => {
+    render(
+      <WorkflowCard projectId="project-1" pickRequest={{ templateId: "preset-open", nonce: 1 }} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/帶入範本無法對應/)).toBeVisible();
+    });
+    expect(screen.getByText("preset-open")).toBeInTheDocument();
+    // keeps default first preset selected
+    expect(screen.getByLabelText("選擇製作範本")).toHaveValue(sampleWorkflow.id);
   });
 
   it("embedded mode skips outer card chrome", () => {

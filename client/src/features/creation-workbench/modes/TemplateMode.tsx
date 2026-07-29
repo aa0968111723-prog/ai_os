@@ -4,8 +4,9 @@ import { WorkflowCard } from "../../../components/WorkflowCard";
 /**
  * WB-04: embed real WorkflowCard (not scroll adapter).
  * - #sec-workflow stays here for deep links / PromptLibrary / GenerationList chips
- * - draft.templateId → pickRequest pre-select
- * - draft.goal / external promptRequest → idea box (nonce-driven)
+ * - draft.templateId → pickRequest pre-select (nonce once per id change)
+ * - idea box fills only via discrete apply channels (PromptLibrary, run_template
+ *   bring-in, or user "帶入想法") — never on every CreationGoalInput keystroke
  * Mutations stay inside WorkflowCard (workflows.start / stop); no copy.
  */
 export function TemplateMode({
@@ -18,6 +19,7 @@ export function TemplateMode({
   goal,
   templateId,
   promptRequest,
+  ideaBringIn,
 }: {
   projectId: string;
   charIds?: string[];
@@ -25,18 +27,30 @@ export function TemplateMode({
   panelId: string;
   labelledBy: string;
   active: boolean;
+  /** Shared draft goal — display hint only; not auto-written into idea box */
   goal?: string;
   /** Stored on shared draft by run_template bring-in */
   templateId?: string;
-  /** PromptLibrary「用於製作範本」or other external fill */
+  /** PromptLibrary「用於製作範本」(nonce-driven; sticky prop is fine) */
   promptRequest?: { text: string; nonce: number } | null;
+  /**
+   * Discrete idea fill from workbench (e.g. run_template).
+   * Separate from promptRequest so library fill cannot permanently shadow bring-in.
+   */
+  ideaBringIn?: { text: string; nonce: number } | null;
 }) {
   const lastTemplateRef = useRef<string | undefined>();
-  const lastGoalRef = useRef<string | undefined>();
+  const lastExternalPromptNonce = useRef(0);
+  const lastBringInNonce = useRef(0);
   const [pickRequest, setPickRequest] = useState<{ templateId: string; nonce: number } | null>(null);
-  const [goalPromptRequest, setGoalPromptRequest] = useState<{ text: string; nonce: number } | null>(
-    null,
-  );
+  /** Single idea-box channel: monotonic nonce; latest apply always wins */
+  const [ideaRequest, setIdeaRequest] = useState<{ text: string; nonce: number } | null>(null);
+
+  const pushIdea = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setIdeaRequest((prev) => ({ text: trimmed, nonce: (prev?.nonce ?? 0) + 1 }));
+  };
 
   // Pre-select workflow when draft.templateId changes (run_template / restore).
   useEffect(() => {
@@ -46,26 +60,46 @@ export function TemplateMode({
     setPickRequest((prev) => ({ templateId, nonce: (prev?.nonce ?? 0) + 1 }));
   }, [templateId]);
 
-  // Bring draft.goal into idea box once per distinct goal (no auto-start).
+  // PromptLibrary: apply once per external nonce (sticky parent prop OK).
   useEffect(() => {
-    const text = goal?.trim();
-    if (!text) return;
-    if (text === lastGoalRef.current) return;
-    lastGoalRef.current = text;
-    setGoalPromptRequest((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
-  }, [goal]);
+    if (!promptRequest) return;
+    if (promptRequest.nonce === lastExternalPromptNonce.current) return;
+    lastExternalPromptNonce.current = promptRequest.nonce;
+    pushIdea(promptRequest.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to external nonce
+  }, [promptRequest?.nonce]);
 
-  // External promptRequest (PromptLibrary) wins over goal-derived fill when both present:
-  // prefer the higher nonce stream by simply using external when provided.
-  const effectivePromptRequest = promptRequest ?? goalPromptRequest;
+  // run_template / other workbench bring-in: separate channel so it is never
+  // shadowed by a still-truthy sticky PromptLibrary request.
+  useEffect(() => {
+    if (!ideaBringIn) return;
+    if (ideaBringIn.nonce === lastBringInNonce.current) return;
+    lastBringInNonce.current = ideaBringIn.nonce;
+    pushIdea(ideaBringIn.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to bring-in nonce
+  }, [ideaBringIn?.nonce]);
 
   return (
-    <div
-      role="tabpanel"
-      id={panelId}
-      aria-labelledby={labelledBy}
-      hidden={!active}
-    >
+    <div role="tabpanel" id={panelId} aria-labelledby={labelledBy} hidden={!active}>
+      {goal?.trim() ? (
+        <p className="hint" style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <span>
+            目前目標：
+            <b>
+              {goal.slice(0, 80)}
+              {goal.length > 80 ? "…" : ""}
+            </b>
+          </span>
+          <button
+            type="button"
+            className="btn-ghost btn-sm"
+            onClick={() => pushIdea(goal)}
+          >
+            帶入想法
+          </button>
+        </p>
+      ) : null}
+
       {/* Deep-link / TocNav / chips target; modeForAnchor maps to template */}
       <div id="sec-workflow">
         <WorkflowCard
@@ -74,7 +108,7 @@ export function TemplateMode({
           sceneIds={sceneIds}
           embedded
           pickRequest={pickRequest}
-          promptRequest={effectivePromptRequest}
+          promptRequest={ideaRequest}
         />
       </div>
     </div>
