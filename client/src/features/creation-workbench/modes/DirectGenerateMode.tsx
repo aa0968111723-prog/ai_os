@@ -41,7 +41,7 @@ export type StudioCollabProps = {
 /**
  * WB-02: full generate form moved from ProjectPage #sec-studio.
  * Single generation.submit path; gates via generationGates helpers; draft-synced fields.
- * Progressive disclosure: source controls under「進階設定」when model.needs is set.
+ * Progressive disclosure: source under「進階設定」when model.needs is set (default collapsed).
  */
 export function DirectGenerateMode({
   projectId,
@@ -61,6 +61,7 @@ export function DirectGenerateMode({
   setDraft,
   applyRequest,
   onReuseSettings,
+  onSourceChange,
   collab,
 }: {
   projectId: string;
@@ -93,6 +94,8 @@ export function DirectGenerateMode({
       sourceAssetId?: string | null;
     },
   ) => void;
+  /** Keep AssetLibrary highlight in sync when form source changes / clears. */
+  onSourceChange?: (sourceAssetId: string | null) => void;
   collab?: StudioCollabProps | null;
 }) {
   const utils = trpc.useUtils();
@@ -187,8 +190,27 @@ export function DirectGenerateMode({
     if (src) setSourceAsset({ id: src.id, title: src.title, kind: src.kind });
   }, [assets.data, draft.sourceAssetIds]);
 
+  // Mirror form source → parent (AssetLibrary highlight).
+  useEffect(() => {
+    onSourceChange?.(sourceAsset?.id ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceAsset?.id]);
+
   // Parent applyRequest (PromptLibrary / AssetLibrary / SceneList via ProjectPage).
+  // sourceAssetId may arrive before assets load — keep pending until resolved.
   const lastApplyNonce = useRef(0);
+  const pendingSourceIdRef = useRef<string | null>(null);
+
+  const applySourceFromList = (id: string): boolean => {
+    const src = assets.data?.find((a) => a.id === id);
+    if (!src) return false;
+    setSourceAsset({ id: src.id, title: src.title, kind: src.kind });
+    setSourceUrl("");
+    setSourceUrlError("");
+    setAdvancedOpen(true);
+    return true;
+  };
+
   useEffect(() => {
     if (!applyRequest || applyRequest.nonce === lastApplyNonce.current) return;
     lastApplyNonce.current = applyRequest.nonce;
@@ -200,28 +222,28 @@ export function DirectGenerateMode({
       setPickReq((prev) => ({ modelId: applyRequest.modelId!, nonce: (prev?.nonce ?? 0) + 1 }));
     }
     if (applyRequest.sourceAsset) {
+      pendingSourceIdRef.current = null;
       setSourceAsset(applyRequest.sourceAsset);
       setSourceUrl("");
       setSourceUrlError("");
       setAdvancedOpen(true);
     } else if (applyRequest.sourceAssetId) {
-      const src = assets.data?.find((a) => a.id === applyRequest.sourceAssetId);
-      if (src) {
-        setSourceAsset({ id: src.id, title: src.title, kind: src.kind });
-        setSourceUrl("");
-        setSourceUrlError("");
-        setAdvancedOpen(true);
+      if (!applySourceFromList(applyRequest.sourceAssetId)) {
+        pendingSourceIdRef.current = applyRequest.sourceAssetId;
+      } else {
+        pendingSourceIdRef.current = null;
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyRequest?.nonce]);
 
-  // Auto-open advanced when model needs source and none selected yet.
+  // Retry pending sourceAssetId once assets list is available.
   useEffect(() => {
-    if (model?.needs && !sourceAsset && !sourceUrl.trim()) {
-      /* leave collapsed until user opens — progressive disclosure default */
-    }
-  }, [model?.needs, sourceAsset, sourceUrl]);
+    const pending = pendingSourceIdRef.current;
+    if (!pending || !assets.data) return;
+    if (applySourceFromList(pending)) pendingSourceIdRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assets.data]);
 
   const needs = model?.needs;
   const fullModel = model ? getModel(model.id) : undefined;
@@ -419,9 +441,10 @@ export function DirectGenerateMode({
         usageBasedNote={model && isUsageBasedPoints(model.id) ? "（依文字長度即時計費）" : undefined}
         outputSpec={model ? `${model.label}・${projectFormat}` : undefined}
         approvalLabel={
-          confirming
+          // Only after quota loads — avoid flicker of「否」while threshold is still unknown.
+          confirming && quota.data
             ? approvalNeeded
-              ? `是（${estPoints} 點 ≥ 門檻 ${quota.data!.approvalThreshold} 點）`
+              ? `是（${estPoints} 點 ≥ 門檻 ${quota.data.approvalThreshold} 點）`
               : "否"
             : undefined
         }

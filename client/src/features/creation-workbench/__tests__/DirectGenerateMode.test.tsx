@@ -112,12 +112,30 @@ function Harness({
   characterIds = [] as string[],
   scenePresetIds = [] as string[],
   initialPrompt = "",
+  applyRequest = null as
+    | {
+        nonce: number;
+        prompt?: string;
+        modelId?: string | null;
+        sourceAssetId?: string | null;
+        sourceAsset?: { id: string; title: string; kind: string } | null;
+      }
+    | null,
+  onSourceChange,
 }: {
   canEdit?: boolean;
   myRole?: string;
   characterIds?: string[];
   scenePresetIds?: string[];
   initialPrompt?: string;
+  applyRequest?: {
+    nonce: number;
+    prompt?: string;
+    modelId?: string | null;
+    sourceAssetId?: string | null;
+    sourceAsset?: { id: string; title: string; kind: string } | null;
+  } | null;
+  onSourceChange?: (id: string | null) => void;
 }) {
   const [draft, setDraftState] = useState<CreationDraft>(() => ({
     ...emptyDraft("generate"),
@@ -148,6 +166,8 @@ function Harness({
       active
       draft={draft}
       setDraft={setDraft}
+      applyRequest={applyRequest}
+      onSourceChange={onSourceChange}
     />
   );
 }
@@ -230,5 +250,42 @@ describe("DirectGenerateMode", () => {
     const group = screen.getByRole("group", { name: "這次生成會帶入的上下文" });
     expect(within(group).getByText(/角色 2/)).toBeVisible();
     expect(within(group).getByText(/場景 1/)).toBeVisible();
+  });
+
+  it("resolves applyRequest sourceAssetId and notifies onSourceChange", async () => {
+    const onSourceChange = vi.fn();
+    const { rerender } = render(
+      <Harness
+        onSourceChange={onSourceChange}
+        applyRequest={{ nonce: 1, sourceAssetId: "asset-img" }}
+      />,
+    );
+    await waitFor(() => {
+      expect(onSourceChange).toHaveBeenCalledWith("asset-img");
+    });
+    // Parent can clear by applying empty object form
+    rerender(
+      <Harness
+        onSourceChange={onSourceChange}
+        applyRequest={{
+          nonce: 2,
+          sourceAsset: null,
+        }}
+      />,
+    );
+    // sourceAsset: null in apply does not clear today — only form UI clear does.
+    // Setting a new object source updates highlight:
+    rerender(
+      <Harness
+        onSourceChange={onSourceChange}
+        applyRequest={{
+          nonce: 3,
+          sourceAsset: { id: "asset-aud", title: "鐘聲", kind: "audio" },
+        }}
+      />,
+    );
+    await waitFor(() => {
+      expect(onSourceChange).toHaveBeenCalledWith("asset-aud");
+    });
   });
 });

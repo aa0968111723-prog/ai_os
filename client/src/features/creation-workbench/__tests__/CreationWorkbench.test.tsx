@@ -413,6 +413,24 @@ describe("CreationWorkbench", () => {
     expect(document.getElementById("sec-studio")?.closest("[hidden]")).toBeNull();
   });
 
+  it("revealWorkbenchAnchor(#gen-prompt) unhides generate form (onboard / deep-link path)", async () => {
+    renderWorkbench();
+    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+    // Prompt exists but is under a hidden tabpanel while ask is active
+    expect(document.getElementById("gen-prompt")?.closest("[hidden]")).not.toBeNull();
+
+    act(() => {
+      revealWorkbenchAnchor("#gen-prompt", { projectId });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByRole("tabpanel", { name: /直接生成/ })).not.toHaveAttribute("hidden");
+    expect(document.getElementById("gen-prompt")?.closest("[hidden]")).toBeNull();
+    expect(document.getElementById("sec-studio")?.closest("[hidden]")).toBeNull();
+  });
+
   it("revealWorkbenchAnchor(#sec-assistant) switches to ask mode", async () => {
     const user = userEvent.setup();
     renderWorkbench();

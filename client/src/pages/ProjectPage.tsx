@@ -677,7 +677,14 @@ export function ProjectPage({ id }: { id: string }) {
             {onboardSteps.map((s, i) => (
               <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button
-                  onClick={() => scrollToSelector(s.target)}
+                  onClick={() => {
+                    // Workbench anchors (#gen-prompt / #sec-studio / …) must switch mode first.
+                    if (s.target === "#gen-prompt" || s.target === "#sec-studio" || s.target === "#sec-agent" || s.target === "#sec-assistant") {
+                      revealWorkbenchAnchor(s.target, { projectId: id });
+                    } else {
+                      scrollToSelector(s.target);
+                    }
+                  }}
                   title={s.hint}
                   style={{
                     display: "flex", alignItems: "center", gap: 8, textAlign: "left",
@@ -946,6 +953,7 @@ export function ProjectPage({ id }: { id: string }) {
             scenePresetIds={sceneIds}
             generateApplyRequest={generateApply}
             onReuseGenerate={applyPrompt}
+            onGenerateSourceChange={setSourceHighlightId}
             studioCollab={zoneProps(COLLAB_ZONES.studio)}
           />
 

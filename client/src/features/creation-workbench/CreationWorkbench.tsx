@@ -41,6 +41,7 @@ export function CreationWorkbench({
   scenePresetIds = [],
   generateApplyRequest = null,
   onReuseGenerate,
+  onGenerateSourceChange,
   studioCollab = null,
 }: {
   projectId: string;
@@ -63,6 +64,8 @@ export function CreationWorkbench({
       sourceAssetId?: string | null;
     },
   ) => void;
+  /** Form source cleared/changed → keep AssetLibrary highlight honest. */
+  onGenerateSourceChange?: (sourceAssetId: string | null) => void;
   studioCollab?: StudioCollabProps | null;
 }) {
   const reactId = useId();
@@ -228,6 +231,7 @@ export function CreationWorkbench({
           setDraft={setDraft}
           applyRequest={generateApplyRequest}
           onReuseSettings={onReuseGenerate}
+          onSourceChange={onGenerateSourceChange}
           collab={studioCollab}
         />
         <TemplateMode
