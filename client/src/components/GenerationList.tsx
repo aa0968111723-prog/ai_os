@@ -563,7 +563,7 @@ export function GenerationList({
                     <button
                       type="button"
                       className="chip pick"
-                      title="這筆是製作範本跑出來的——點了捲到製作範本卡"
+                      title="這筆是製作範本跑出來的——點了切到工作台「製作範本」模式"
                       onClick={() => revealWorkbenchAnchor("#sec-workflow", { projectId })}
                     >
                       製作範本
@@ -573,7 +573,7 @@ export function GenerationList({
                     <button
                       type="button"
                       className="chip pick"
-                      title="這筆是 AI 執行計畫跑出來的——點了捲到 AI 執行計畫"
+                      title="這筆是 AI 執行計畫跑出來的——點了切到工作台「執行計畫」模式"
                       onClick={() => revealWorkbenchAnchor("#sec-agent", { projectId })}
                     >
                       AI 執行計畫

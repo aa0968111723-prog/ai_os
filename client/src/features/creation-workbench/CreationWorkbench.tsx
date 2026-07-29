@@ -28,10 +28,11 @@ import {
 } from "./workbenchNav";
 
 /**
- * AI 創作工作台 shell（WB-01～WB-04）：單一主卡入口、目標輸入、模式 tabs、
- * 上下文條、共享草稿、直接生成表單、製作範本 WorkflowCard、執行計畫 AgentCard。
+ * AI 創作工作台（WB-01～WB-06 正式頁面入口）：ProjectPage ② 只掛這一個主卡。
+ * 目標輸入、模式 tabs、上下文條、共享草稿、四模式 adapter、CreationResourceDrawer。
  *
- * Anchors: #sec-ai-hub, #sec-assistant, #sec-agent, #sec-studio, #sec-workflow.
+ * Anchors: #sec-ai-hub, #sec-assistant, #sec-agent, #sec-studio, #sec-workflow,
+ * #sec-prompts / #sec-generations / #sec-trail（資源抽屜）。
  */
 export function CreationWorkbench({
   projectId,
@@ -148,7 +149,7 @@ export function CreationWorkbench({
         },
       });
       if (result.mode === "plan") setPlanForceOpen(true);
-      else if (result.mode !== "plan") setPlanForceOpen(false);
+      else setPlanForceOpen(false);
 
       // run_template: one-shot idea bring-in (goal text) — does not auto-start workflow.
       if (action.type === "run_template" && action.goal.trim()) {

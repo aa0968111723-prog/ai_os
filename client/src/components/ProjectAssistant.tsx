@@ -335,7 +335,7 @@ export function ProjectAssistant({
       : `用 ${info.label} 生成：${act.prompt.slice(0, 24)}…（${info.points} 點）`;
   };
 
-  // 四合一（AI 創作助手）分頁模式：外殼與標題由 AiHub 提供；「收起」由分頁切換取代，不再另設
+  // embedded：外殼由 CreationWorkbench / AskAiMode（或 legacy AiHub 測試）提供；「收起」由模式切換取代
   const showCollapse = !embedded;
   const body = (
     <>

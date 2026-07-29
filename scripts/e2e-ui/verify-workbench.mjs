@@ -54,16 +54,26 @@ ok("新選項出現在 chips 列", await newChip.isVisible());
 ok("新選項自動勾上（.on）", ((await newChip.getAttribute("class")) ?? "").includes("on"));
 await page.screenshot({ path: SHOT("2-worldview"), fullPage: false });
 
-// ── ② 創作中心順序：專案 AI 代理系統（四合一）→ 生成台 → 工作流 ──
-const yOf = async (sel) => (await page.locator(sel).boundingBox())?.y ?? -1;
-const yHub = await yOf("#sec-ai-hub");
-const yStudio = await yOf("#sec-studio");
-const yWorkflow = await yOf("#sec-workflow");
-ok("創作中心順序 AI代理系統→生成台→工作流", yHub > 0 && yHub < yStudio && yStudio < yWorkflow);
-ok("統一入口：一個對話＋代理執行區", (await page.locator('#sec-ai-hub input[aria-label="問 AI 專案助手"]').count()) === 1 && (await page.locator("#sec-ai-hub #sec-agent").count()) === 1);
+// ── ② 單一 AI 創作工作台（CreationWorkbench）：四模式 tabs，非平行整頁卡 ──
+ok("單一 AI 創作工作台 #sec-ai-hub", (await page.locator("#sec-ai-hub").count()) === 1);
+ok(
+  "工作台有四個模式 tabs",
+  (await page.locator('#sec-ai-hub [role="tab"]').count()) >= 4
+    && (await page.locator('#sec-ai-hub [role="tab"]:has-text("問 AI")').count()) === 1
+    && (await page.locator('#sec-ai-hub [role="tab"]:has-text("直接生成")').count()) === 1
+    && (await page.locator('#sec-ai-hub [role="tab"]:has-text("製作範本")').count()) === 1
+    && (await page.locator('#sec-ai-hub [role="tab"]:has-text("執行計畫")').count()) === 1,
+);
+ok("預設問 AI 模式有對話輸入", (await page.locator('#sec-ai-hub input[aria-label="問 AI 專案助手"]').count()) === 1);
+// 舊平行整頁卡不得再掛在 stage-create 之下（提示詞庫整卡 / 獨立 WorkflowCard 主卡）
+ok("無平行整頁提示詞庫卡", (await page.locator('section.card[data-fb="提示詞庫"]').count()) === 0);
+ok("資源抽屜入口在工作台內", (await page.locator("#sec-prompts").count()) === 1);
 
-// 生成台「帶入」chips
+// 直接生成模式：tab 切換後 #sec-studio 可見且有上下文 chips
+await page.locator('#sec-ai-hub [role="tab"]:has-text("直接生成")').click();
+await page.waitForTimeout(400);
 await page.locator("#sec-studio").scrollIntoViewIfNeeded();
+ok("直接生成模式露出 #sec-studio", await page.locator("#sec-studio").isVisible());
 ok("生成台就地顯示帶入 chips", (await page.locator('#sec-studio .ctx-summary').count()) === 1);
 await page.screenshot({ path: SHOT("3-studio"), fullPage: false });
 
@@ -74,8 +84,13 @@ await page.waitForTimeout(900);
 const kbBox = await page.locator("#sec-knowledge").boundingBox();
 ok("摘要條 chip 點了捲到知識庫", !!kbBox && kbBox.y > -50 && kbBox.y < 400);
 
-// 銜接語
-ok("幕間銜接語 ×2", (await page.locator("text=自動注入下方每一次生成").count()) === 1 && (await page.locator("text=成品會自動存入素材庫").count()) === 1);
+// 銜接語（指向工作台／資源抽屜，非舊「生成卡」）
+ok(
+  "幕間銜接語 ×2",
+  (await page.locator("text=自動注入下方每一次生成").count()) === 1
+    && (await page.locator("text=成品會自動存入素材庫").count()) === 1,
+);
+ok("② 標頭文案對齊統一工作台", (await page.locator("#stage-create >> text=同一工作台切換").count()) >= 1);
 
 await page.screenshot({ path: SHOT("4-full"), fullPage: true });
 await browser.close();
