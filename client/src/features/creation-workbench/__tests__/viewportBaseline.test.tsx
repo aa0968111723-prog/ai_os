@@ -27,6 +27,7 @@ vi.mock("../../../api", () => ({
         listByProjectPaged: { invalidate: vi.fn() },
       },
       quota: { my: { invalidate: vi.fn() } },
+      scenes: { listByProject: { invalidate: vi.fn() } },
     }),
     agents: {
       listByProject: {
@@ -38,6 +39,7 @@ vi.mock("../../../api", () => ({
     },
     quota: { my: { useQuery: () => ({ data: undefined }) } },
     prompts: { save: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
+    scenes: { addDraft: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     generation: {
       submit: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
     },

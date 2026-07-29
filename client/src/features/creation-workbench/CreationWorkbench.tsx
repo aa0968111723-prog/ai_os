@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useId, useState } from "react";
+import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { flashAnchor } from "../../discuss";
 import { CreationContextBar } from "./CreationContextBar";
 import { CreationGoalInput } from "./CreationGoalInput";
 import { CreationModeTabs, modePanelId, modeTabId } from "./CreationModeTabs";
 import { CreationResourceDrawer } from "./CreationResourceDrawer";
+import {
+  applyCreationAction,
+  type CreationAction,
+} from "./creationActions";
 import { useCreationDraft, type CreationMode } from "./creationDraft";
 import { AskAiMode } from "./modes/AskAiMode";
 import {
@@ -74,6 +79,15 @@ export function CreationWorkbench({
   const { draft, setDraft } = useCreationDraft(projectId);
   const [collapsed, setCollapsed] = useState(false);
   const [planForceOpen, setPlanForceOpen] = useState(false);
+  const utils = trpc.useUtils();
+
+  // Side-effect mutations for suggestion strip (not generation.submit — no auto-charge).
+  const savePrompt = trpc.prompts.save.useMutation({
+    onSuccess: () => utils.prompts.list.invalidate({ projectId }),
+  });
+  const addSceneDraft = trpc.scenes.addDraft.useMutation({
+    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+  });
 
   const [focusedRunAnchor] = useState(() => {
     if (typeof window === "undefined") return null;
@@ -84,6 +98,62 @@ export function CreationWorkbench({
   const { awaiting, running, waiting } = useAgentRunBadges(projectId);
 
   const clearPlanForceOpen = useCallback(() => setPlanForceOpen(false), []);
+
+  /**
+   * WB-03 CreationAction: fill draft + switch mode only.
+   * Never calls generation.submit / agents.plan / workflow start.
+   */
+  const handleCreationAction = useCallback(
+    (action: CreationAction) => {
+      setCollapsed(false);
+      const result = applyCreationAction(action, {
+        draft,
+        setDraft,
+      });
+      if (result.mode === "plan") setPlanForceOpen(true);
+      else if (result.mode !== "plan") setPlanForceOpen(false);
+
+      // Focus generate prompt after bring-in (still no submit).
+      if (result.mode === "generate") {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
+            el?.focus({ preventScroll: true });
+          });
+        });
+      }
+    },
+    [draft, setDraft],
+  );
+
+  const handleSavePromptSuggestion = useCallback(
+    (text: string, modelId?: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || !canEdit) return;
+      savePrompt.mutate({
+        projectId,
+        text: trimmed,
+        modelId: modelId || undefined,
+        characterIds: draft.characterIds,
+        scenePresetIds: draft.scenePresetIds,
+      });
+    },
+    [canEdit, draft.characterIds, draft.scenePresetIds, projectId, savePrompt],
+  );
+
+  const handleSaveSceneDraft = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || !canEdit) return;
+      const title = trimmed.slice(0, 40) || "分鏡草稿";
+      addSceneDraft.mutate({
+        projectId,
+        title,
+        prompt: trimmed.slice(0, 2000),
+      });
+    },
+    [addSceneDraft, canEdit, projectId],
+  );
 
   useEffect(() => {
     if (!focusedRunAnchor) return;
@@ -212,6 +282,9 @@ export function CreationWorkbench({
           panelId={modePanelId(tabPrefix, "ask")}
           labelledBy={modeTabId(tabPrefix, "ask")}
           active={mode === "ask"}
+          onCreationAction={handleCreationAction}
+          onSavePromptSuggestion={canEdit ? handleSavePromptSuggestion : undefined}
+          onSaveSceneDraft={canEdit ? handleSaveSceneDraft : undefined}
         />
         <DirectGenerateMode
           projectId={projectId}

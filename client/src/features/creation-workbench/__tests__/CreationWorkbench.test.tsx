@@ -8,6 +8,10 @@ import { revealWorkbenchAnchor } from "../workbenchNav";
 const listByProject = vi.fn();
 const flashAnchor = vi.fn();
 
+const generationSubmit = vi.fn();
+const promptsSave = vi.fn();
+const scenesAddDraft = vi.fn();
+
 vi.mock("../../../api", () => ({
   trpc: {
     useUtils: () => ({
@@ -17,6 +21,7 @@ vi.mock("../../../api", () => ({
         listByProjectPaged: { invalidate: vi.fn() },
       },
       quota: { my: { invalidate: vi.fn() } },
+      scenes: { listByProject: { invalidate: vi.fn() } },
     }),
     agents: {
       listByProject: {
@@ -35,12 +40,17 @@ vi.mock("../../../api", () => ({
     },
     prompts: {
       save: {
-        useMutation: () => ({ mutate: vi.fn(), isPending: false }),
+        useMutation: () => ({ mutate: promptsSave, isPending: false }),
+      },
+    },
+    scenes: {
+      addDraft: {
+        useMutation: () => ({ mutate: scenesAddDraft, isPending: false }),
       },
     },
     generation: {
       submit: {
-        useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+        useMutation: () => ({ mutate: generationSubmit, isPending: false, error: null }),
       },
     },
   },
@@ -50,8 +60,18 @@ vi.mock("../../../discuss", () => ({
   flashAnchor: (...args: unknown[]) => flashAnchor(...args),
 }));
 
+/** Captures onCreationAction from AskAiMode → ProjectAssistant for bring-in tests. */
+let lastAssistantProps: {
+  onCreationAction?: (action: import("../creationActions").CreationAction) => void;
+} = {};
+
 vi.mock("../../../components/ProjectAssistant", () => ({
-  ProjectAssistant: () => <div data-testid="assistant">assistant</div>,
+  ProjectAssistant: (props: {
+    onCreationAction?: (action: import("../creationActions").CreationAction) => void;
+  }) => {
+    lastAssistantProps = props;
+    return <div data-testid="assistant">assistant</div>;
+  },
 }));
 
 vi.mock("../../../components/AgentCard", () => ({
@@ -114,6 +134,10 @@ describe("CreationWorkbench", () => {
     listByProject.mockReturnValue({ data: [] });
     flashAnchor.mockReset();
     flashAnchor.mockReturnValue(true);
+    generationSubmit.mockReset();
+    promptsSave.mockReset();
+    scenesAddDraft.mockReset();
+    lastAssistantProps = {};
     clearDraft(projectId);
     clearDraft("project-2");
     clearDraft("project-3");
@@ -481,6 +505,98 @@ describe("CreationWorkbench", () => {
     expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
 
     expect(loadDraft("project-1").goal).toBe("goal-one");
+  });
+
+  it("CreationAction generate bring-in fills draft, switches mode, does not submit", async () => {
+    const { generateBringInAction } = await import("../creationActions");
+    renderWorkbench({ characterIds: ["c1"], scenePresetIds: ["s1"] });
+
+    expect(lastAssistantProps.onCreationAction).toBeTypeOf("function");
+
+    act(() => {
+      lastAssistantProps.onCreationAction!(
+        generateBringInAction({
+          prompt: "AI 建議分鏡：香爐特寫",
+          modelId: "fal-ai/flux/schnell",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe(
+      "AI 建議分鏡：香爐特寫",
+    );
+    expect(generationSubmit).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      const stored = loadDraft(projectId);
+      expect(stored.prompt).toBe("AI 建議分鏡：香爐特寫");
+      expect(stored.modelId).toBe("fal-ai/flux/schnell");
+      expect(stored.mode).toBe("generate");
+      // Page-mirrored picks still present after bring-in
+      expect(stored.characterIds).toEqual(["c1"]);
+      expect(stored.scenePresetIds).toEqual(["s1"]);
+    });
+  });
+
+  it("CreationAction create_plan bring-in switches to plan without agents.plan", async () => {
+    renderWorkbench();
+
+    act(() => {
+      lastAssistantProps.onCreationAction!({
+        type: "create_plan",
+        goal: "把腳本拆成分鏡並出圖",
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("把腳本拆成分鏡並出圖");
+    expect(document.querySelector("#sec-agent")).toHaveAttribute("open");
+    expect(generationSubmit).not.toHaveBeenCalled();
+  });
+
+  it("cross-mode: goal/prompt/model survive tab switches after bring-in", async () => {
+    const user = userEvent.setup();
+    const { generateBringInAction } = await import("../creationActions");
+    renderWorkbench();
+
+    act(() => {
+      lastAssistantProps.onCreationAction!(
+        generateBringInAction({
+          prompt: "跨模式提示",
+          modelId: "m-cross",
+          goal: "共享目標",
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("共享目標");
+    expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe("跨模式提示");
+
+    await user.click(screen.getByRole("tab", { name: /製作範本/ }));
+    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("共享目標");
+
+    await user.click(screen.getByRole("tab", { name: /執行計畫/ }));
+    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("共享目標");
+
+    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+    expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe("跨模式提示");
+    expect(generationSubmit).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      const stored = loadDraft(projectId);
+      expect(stored.goal).toBe("共享目標");
+      expect(stored.prompt).toBe("跨模式提示");
+      // modelId may be synced from ModelPicker once generate panel is active (mock defaults to flux)
+      expect(stored.modelId).toBeTruthy();
+    });
   });
 });
 
