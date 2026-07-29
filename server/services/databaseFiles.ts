@@ -512,6 +512,11 @@ export async function fetchImport(url: string): Promise<{ buf: Buffer; mime: str
     } catch {
       throw new Error("網址格式不正確");
     }
+    // 每一跳都必須重驗：一般短網址可能 302 到 Notion。若只檢查初始 URL，
+    // 重導目標會誤走 HTML 爬取並把 Notion SPA 空殼當成匯入內容。
+    if (isNotionHost(hostname)) {
+      throw new Error("Notion 連結必須透過官方 API 匯入——請確認頁面已在 Connections 授權給 Aios 整合。");
+    }
     const dnsGuard = await assertPublicHostOrError(hostname);
     if (dnsGuard) throw new Error(hop === 0 ? dnsGuard : "來源網址重導向到內部位址——已擋下");
     const res = await proxyFetch(current, { timeoutMs: 25_000, redirect: "manual" });
