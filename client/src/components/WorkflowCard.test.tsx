@@ -146,6 +146,61 @@ describe("WorkflowCard", () => {
     confirm.mockRestore();
   });
 
+  it("pre-selects template via pickRequest and shows plan preview steps", async () => {
+    const second = {
+      id: "wf-quote",
+      label: "金句卡",
+      tierLabel: "經濟",
+      points: 2,
+      strengths: "摘句出圖",
+      bestFor: "日更",
+      steps: [
+        { modelId: "nvidia-nim#qwen2.5-72b", note: "摘金句", promptTemplate: "{prompt}" },
+        { modelId: "fal-ai/flux/dev", note: "生成底圖", promptTemplate: "{prev}" },
+      ],
+    };
+    workflowsQuery.mockReturnValue({ data: [sampleWorkflow, second] });
+
+    const { rerender } = render(
+      <WorkflowCard projectId="project-1" pickRequest={{ templateId: "wf-quote", nonce: 1 }} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("選擇製作範本")).toHaveValue("wf-quote");
+    });
+    expect(screen.getByTestId("workflow-plan-preview")).toBeVisible();
+    expect(screen.getByText("摘金句")).toBeVisible();
+    expect(screen.getByText("生成底圖")).toBeVisible();
+    expect(screen.getByText(/預估消耗：約 2 點/)).toBeVisible();
+    expect(screen.getByText(/是否需要核准/)).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent(/約 2 點/);
+
+    rerender(
+      <WorkflowCard projectId="project-1" pickRequest={{ templateId: "wf-storyboard", nonce: 2 }} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText("選擇製作範本")).toHaveValue("wf-storyboard");
+    });
+  });
+
+  it("surfaces a hint when pickRequest templateId is not in the list", async () => {
+    render(
+      <WorkflowCard projectId="project-1" pickRequest={{ templateId: "preset-open", nonce: 1 }} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/帶入範本無法對應/)).toBeVisible();
+    });
+    expect(screen.getByText("preset-open")).toBeInTheDocument();
+    // keeps default first preset selected
+    expect(screen.getByLabelText("選擇製作範本")).toHaveValue(sampleWorkflow.id);
+  });
+
+  it("embedded mode skips outer card chrome", () => {
+    const { container } = render(<WorkflowCard projectId="project-1" embedded />);
+    expect(container.querySelector("section.card")).toBeNull();
+    expect(screen.getByTestId("workflow-card")).toBeInTheDocument();
+  });
+
   it("shows run tracking for an active template and stop mutates with runId", async () => {
     const user = userEvent.setup();
     runsQuery.mockReturnValue({

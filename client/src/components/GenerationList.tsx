@@ -6,6 +6,7 @@ import { ConfirmButton } from "./interactions";
 import { GenerationPromptCopy, GenerationResultCopy } from "./GenerationCopy";
 import { AssetVideo, AssetAudio, MissingMediaBox } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
+import { revealWorkbenchAnchor } from "../features/creation-workbench/workbenchNav";
 
 /** 生成結果縮圖（圖片）：載入失敗顯示「結果已失效」佔位，並拿掉開新分頁連結（點下去只會是 404） */
 function GenResultImgLink({ url, alt }: { url: string; alt: string }) {
@@ -562,8 +563,8 @@ export function GenerationList({
                     <button
                       type="button"
                       className="chip pick"
-                      title="這筆是製作範本跑出來的——點了捲到製作範本卡"
-                      onClick={() => document.querySelector("#sec-workflow")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      title="這筆是製作範本跑出來的——點了切到工作台「製作範本」模式"
+                      onClick={() => revealWorkbenchAnchor("#sec-workflow", { projectId })}
                     >
                       製作範本
                     </button>
@@ -572,8 +573,8 @@ export function GenerationList({
                     <button
                       type="button"
                       className="chip pick"
-                      title="這筆是 AI 執行計畫跑出來的——點了捲到 AI 執行計畫"
-                      onClick={() => document.querySelector("#sec-agent")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      title="這筆是 AI 執行計畫跑出來的——點了切到工作台「執行計畫」模式"
+                      onClick={() => revealWorkbenchAnchor("#sec-agent", { projectId })}
                     >
                       AI 執行計畫
                     </button>

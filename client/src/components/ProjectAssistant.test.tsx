@@ -231,3 +231,109 @@ describe("ProjectAssistant project-scoped async results", () => {
     expect(screen.queryByText(/STALE_ACTION_RESULT/)).not.toBeInTheDocument();
   });
 });
+
+describe("ProjectAssistant WB-03 bring-in (no runAction)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    mocks.requestAssistantStream.mockResolvedValue(true);
+  });
+
+  it("renders bring-in buttons and clicks call onCreationAction without runAction", async () => {
+    const onCreationAction = vi.fn();
+    mocks.requestAssistantStream.mockImplementation(async (request: StreamRequest) => {
+      request.handlers.onDone({
+        answer: "這裡有幾個建議",
+        actions: [
+          {
+            type: "generate",
+            label: "生成香爐",
+            prompt: "香爐特寫",
+            modelId: "fal-ai/flux/schnell",
+          },
+          {
+            type: "plan_agent",
+            label: "排計畫",
+            goal: "拆分鏡並出圖",
+          },
+          {
+            type: "run_workflow",
+            label: "跑範本",
+            presetId: "preset-open",
+            prompt: "片頭 15 秒",
+          },
+        ],
+        steps: [],
+        mock: false,
+        fallback: false,
+      });
+      return true;
+    });
+
+    render(
+      <ProjectAssistant projectId="project-wb03" embedded onCreationAction={onCreationAction} />,
+    );
+    await submitQuestion("給我建議");
+    await screen.findByText("這裡有幾個建議");
+
+    // Bring-in buttons present
+    expect(screen.getByRole("button", { name: "帶入直接生成" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "建立執行計畫" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "帶入執行計畫" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "帶入製作範本" })).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "帶入直接生成" }));
+    expect(onCreationAction).toHaveBeenCalled();
+    const genCall = onCreationAction.mock.calls.at(-1)![0];
+    expect(genCall.type).toBe("generate");
+    expect(genCall.draft.prompt).toBe("香爐特寫");
+    expect(mocks.runMutateAsync).not.toHaveBeenCalled();
+
+    onCreationAction.mockClear();
+    await user.click(screen.getByRole("button", { name: "帶入執行計畫" }));
+    expect(onCreationAction).toHaveBeenCalledWith({
+      type: "create_plan",
+      goal: "拆分鏡並出圖",
+    });
+    expect(mocks.runMutateAsync).not.toHaveBeenCalled();
+
+    onCreationAction.mockClear();
+    await user.click(screen.getByRole("button", { name: "帶入製作範本" }));
+    expect(onCreationAction).toHaveBeenCalledWith({
+      type: "run_template",
+      templateId: "preset-open",
+      goal: "片頭 15 秒",
+    });
+    expect(mocks.runMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("askFillRequest fills chat input without sending", async () => {
+    const { rerender } = render(
+      <ProjectAssistant
+        projectId="project-wb03"
+        embedded
+        askFillRequest={{ nonce: 1, message: "填入問 AI 的問題" }}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("textbox")).toHaveValue("填入問 AI 的問題");
+    });
+    expect(mocks.requestAssistantStream).not.toHaveBeenCalled();
+    expect(mocks.askMutate).not.toHaveBeenCalled();
+
+    rerender(
+      <ProjectAssistant
+        projectId="project-wb03"
+        embedded
+        askFillRequest={{ nonce: 2, message: "第二次填入" }}
+      />,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("textbox")).toHaveValue("第二次填入");
+    });
+  });
+});

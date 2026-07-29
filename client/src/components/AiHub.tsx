@@ -6,13 +6,14 @@ import { ProjectAssistant } from "./ProjectAssistant";
 import { flashAnchor } from "../discuss";
 
 /**
- * 專案 AI 創作工作台：對外只呈現一套入口，內部沿用既有助手、生成台、製作範本與執行器。
- * - 問 AI：問答、發想、拆分鏡、查專案資料。
- * - 直接生成：前往既有生成台，保留模型、來源素材、點數與核准守門。
- * - 製作範本：前往既有固定步驟串鏈。
- * - 執行計畫：多步驟目標由助手規劃，核准後在背景執行。
+ * @deprecated Legacy shell kept for unit tests only (`AiHub.test.tsx`).
+ * Production ProjectPage mounts `CreationWorkbench` exclusively (WB-01～WB-06).
+ * Do not re-mount this on the project page — it would reintroduce parallel AI entries.
  *
- * 第一階段只統一資訊架構與操作入口，不更名 URL、tRPC procedure、schema、MCP 工具或背景執行契約。
+ * Historical behavior (still exercised by tests):
+ * - 問 AI：ProjectAssistant at #sec-assistant
+ * - 直接生成 / 製作範本：scroll adapters to #sec-studio / #sec-workflow
+ * - 執行計畫：AgentCard disclosure at #sec-agent
  */
 export function AiHub({
   projectId,
