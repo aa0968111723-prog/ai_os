@@ -79,7 +79,7 @@ function FeedbackForm({
         <p className="sub">你的回饋會直接影響下一版怎麼改。</p>
         <div style={{ marginTop: 12, display: "flex", gap: 16, justifyContent: "center", alignItems: "center" }}>
           <button onClick={backToForm}>再修改</button>
-          <Link href="/">回作業台</Link>
+          <Link href="/dashboard">回今日工作台</Link>
         </div>
       </div>
     );

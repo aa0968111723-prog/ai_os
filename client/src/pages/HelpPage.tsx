@@ -180,10 +180,10 @@ export function HelpPage() {
           一句話故事、關鍵訊息、調性、畫風。填一次，之後每次生成自動帶入。
         </Step>
         <Step n={2} icon="Sparkles" title="AI 拆分鏡">
-          把腳本貼給「AI 創作助手」，自動切成一格一格的分鏡草稿。
+          在「AI 創作工作台」的問 AI 模式貼腳本，自動切成一格一格的分鏡草稿。
         </Step>
         <Step n={3} icon="Image" title="逐格生成">
-          在生成台挑模型、寫提示詞，做出畫面（圖或影片）與旁白配音。
+          同一工作台切到「直接生成」：挑模型、寫提示詞，做出畫面（圖或影片）與旁白配音。
         </Step>
         <Step n={4} icon="SlidersHorizontal" title="排順序">
           把滿意的成品加入分鏡，用 ▲▼ 排成正確的鏡號順序。
@@ -250,15 +250,16 @@ export function HelpPage() {
           <Spot icon="Image" name="素材庫" where="專案頁">
             你上傳或生成出來的圖片、影片、音檔都收在這。生成需要來源檔時從這裡挑。
           </Spot>
-          <Spot icon="Sparkles" name="AI 創作助手" where="專案頁">
-            一個對話統包：問專案進度與資料庫內容、要分鏡點子（一鍵存成草稿；<b>只供參考</b>，成品仍須組長審核）、
-            貼腳本拆分鏡、下多步驟目標——助手排出 AI 執行計畫與估點，你核准後由伺服器背景逐步執行。
+          <Spot icon="Sparkles" name="AI 創作工作台" where="專案頁② AI 創作中心">
+            專案頁唯一的 AI 創作入口。四個模式在同一工作台切換：
+            <b>問 AI</b>（發想、拆分鏡、查專案資料）、
+            <b>直接生成</b>（挑模型、寫提示詞；世界觀自動帶入；送出前確認預估點數）、
+            <b>製作範本</b>（固定步驟一次串起）、
+            <b>執行計畫</b>（多步目標估點與核准，背景執行）。
+            提示詞庫、生成紀錄與執行軌跡收在工作台底部的資源抽屜，不必再往下找好幾張平行長卡。
           </Spot>
-          <Spot icon="Image" name="生成台" where="專案頁核心">
-            挑模型、寫提示詞（世界觀自動帶入）、按下生成。送出前會先跳確認框給你看預估點數。
-          </Spot>
-          <Spot icon="Package" name="分鏡・交付" where="專案頁下方">
-            把成品加入分鏡、▲▼ 排順序、送審；通過後一鍵打包成 zip 下載。
+          <Spot icon="Package" name="分鏡・交付" where="專案頁③">
+            把成品加入分鏡、▲▼ 排順序、送審；通過後一鍵打包成 zip 下載。也可從工作台資源抽屜的生成紀錄直接「＋加入分鏡」。
           </Spot>
           <Spot icon="MessageCircle" name="專案留言" where="專案頁">
             專案內討論，可 @人。送審、通過、退回等事件也會自動貼進來，進度一目了然。
@@ -337,8 +338,8 @@ export function HelpPage() {
         <Faq q="AI 文字功能為什麼免費？有什麼限制？">
           <ul style={{ margin: 0, paddingLeft: 22 }}>
             <li>
-              <b>AI 創作助手的文字能力（問答、發想、拆分鏡、排計畫）、團隊彙總、留言 @助手</b>走 NVIDIA NIM 的免費開發者方案，
-              <b>不扣站內點數</b>；圖片／影片／音訊生成仍走付費供應商、照模型標示扣點。
+              <b>AI 創作工作台「問 AI／執行計畫」模式的文字能力（問答、發想、拆分鏡、排計畫）、團隊彙總、留言 @助手</b>走 NVIDIA NIM 的免費開發者方案，
+              <b>不扣站內點數</b>；圖片／影片／音訊生成（工作台「直接生成／製作範本」）仍走付費供應商、照模型標示扣點。
             </li>
             <li>
               NIM 免費方案的限制：<b>試用點數制</b>（註冊約 1,000 次呼叫，商用信箱可申請至 5,000 次）、
@@ -427,7 +428,7 @@ export function HelpPage() {
       </div>
 
       <p style={{ marginTop: 24 }}>
-        <Link href="/">回作業台</Link>
+        <Link href="/dashboard">回今日工作台</Link>
         <span className="hint" style={{ margin: "0 10px" }}>·</span>
         <Link href="/models">看模型指南</Link>
         <span className="hint" style={{ margin: "0 10px" }}>·</span>

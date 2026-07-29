@@ -46,7 +46,7 @@ export function AcceptInvitePage({ token }: { token: string }) {
         <h1 style={{ fontSize: "var(--fs-24)", marginTop: 0 }}>這個邀請不能用了</h1>
         <p className="error" role="alert">{preview.data?.reason ?? (preview.error ? friendlyAuthError(preview.error.message) : "邀請連結無效")}</p>
         <p className="hint" style={{ marginTop: 12 }}>
-          已經有帳號了？<Link href="/">前往登入</Link>
+          已經有帳號了？<Link href="/login">前往登入</Link>
         </p>
       </>,
     );

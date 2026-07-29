@@ -1,5 +1,6 @@
-import { Route, Switch } from "wouter";
+import { Redirect, Route, Switch, useLocation } from "wouter";
 import { AcceptInvitePage } from "../pages/AcceptInvitePage";
+import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AppRoutes, UngroupedRoutes } from "./AppRoutes";
 
@@ -38,11 +39,14 @@ export function SessionGate({
   activeIsLeader,
   canSeeOrg,
 }: SessionGateProps) {
+  const [location] = useLocation();
   return (
     <Switch>
       <Route path="/invite/:token">{(params) => <AcceptInvitePage token={params.token} />}</Route>
       <Route>
-        {meLoading ? (
+        {meError && location === "/" ? (
+          <LandingPage />
+        ) : meLoading ? (
           <p className="hint">載入中…</p>
         ) : meError ? (
           <p className="error">
@@ -50,18 +54,27 @@ export function SessionGate({
             <button className="btn-sm" onClick={onRetry}>重試</button>
           </p>
         ) : !me ? (
-          <LoginPage />
+          <Switch>
+            <Route path="/"><LandingPage /></Route>
+            <Route path="/login"><LoginPage /></Route>
+            <Route><Redirect to="/login" /></Route>
+          </Switch>
         ) : me.groups.length === 0 && !me.user.isSuperAdmin && !isAdmin ? (
           // 團隊管理員不擋（!isAdmin）：他本人就能去「團隊管理」建組，擋住反而是自相矛盾的死路。
           // /help 保持可達——等待被加入組的空檔正是最需要說明的時候
           <UngroupedRoutes />
         ) : (
-          <AppRoutes
-            activeGroupId={activeGroupId}
-            isAdmin={isAdmin}
-            activeIsLeader={activeIsLeader}
-            canSeeOrg={canSeeOrg}
-          />
+          <Switch>
+            <Route path="/login"><Redirect to="/dashboard" /></Route>
+            <Route>
+              <AppRoutes
+                activeGroupId={activeGroupId}
+                isAdmin={isAdmin}
+                activeIsLeader={activeIsLeader}
+                canSeeOrg={canSeeOrg}
+              />
+            </Route>
+          </Switch>
         )}
       </Route>
     </Switch>

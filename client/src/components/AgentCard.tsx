@@ -214,7 +214,7 @@ export function AgentCard({
   const actionError = runs.error ?? tasks.error ?? events.error ?? insights.error ?? approve.error ?? discard.error ?? stop.error ?? completeTask.error ?? decideApproval.error;
   const busy = approve.isPending || discard.isPending || stop.isPending || completeTask.isPending || decideApproval.isPending;
 
-  // 四合一（專案 AI 創作助手）分頁模式：外殼與標題由 AiHub 提供，這裡只出內容
+  // embedded：外殼由 CreationWorkbench / PlanMode（或 legacy AiHub 測試）提供，這裡只出內容
   const body = (
     <>
       {!embedded && (

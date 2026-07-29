@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyAppUpdate,
   dismissInstallBanner,
@@ -9,11 +9,27 @@ import {
 } from "./pwa";
 
 describe("pwa helpers", () => {
-  afterEach(() => {
-    localStorage.clear();
-    vi.unstubAllGlobals();
+  const values = new Map<string, string>();
+
+  beforeEach(() => {
+    values.clear();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => { values.set(key, value); },
+        removeItem: (key: string) => { values.delete(key); },
+        clear: () => values.clear(),
+        key: (index: number) => [...values.keys()][index] ?? null,
+        get length() { return values.size; },
+      } satisfies Storage,
+    });
   });
 
+  afterEach(() => {
+    values.clear();
+    vi.unstubAllGlobals();
+  });
   it("tracks install banner dismiss", () => {
     expect(isInstallDismissed()).toBe(false);
     dismissInstallBanner();

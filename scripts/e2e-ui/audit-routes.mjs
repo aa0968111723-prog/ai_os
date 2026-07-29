@@ -1,9 +1,11 @@
 import { chromium } from "playwright";
+import AxeBuilder from "@axe-core/playwright";
 import fs from "fs";
 import path from "path";
 
-const STATIC_ROUTES = [
-  "/",
+const PUBLIC_ROUTES = ["/", "/login"];
+const AUTHENTICATED_ROUTES = [
+  "/dashboard",
   "/admin",
   "/options",
   "/logs",
@@ -62,18 +64,54 @@ async function assertAuthenticated(page) {
 
 async function login(page) {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto(TARGET_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.goto(`${TARGET_URL}/login`, { waitUntil: "domcontentloaded", timeout: 30_000 });
   await page.locator(LOGIN_EMAIL).fill(TEST_EMAIL);
   await page.locator(LOGIN_PASSWORD).fill(TEST_PW);
   await page.locator('button[type="submit"]').click();
   await assertAuthenticated(page);
 }
 
+async function inspectViewport(page, vp) {
+  const layout = await page.evaluate(() => {
+    const root = document.documentElement;
+    const controls = [...document.querySelectorAll(
+      "button,input,select,textarea,[role=button],a.btn,a.brand,.mobile-nav a,.menu-item",
+    )]
+      .filter((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden";
+      })
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          tag: element.tagName,
+          label: (element.getAttribute("aria-label") || element.textContent || "").trim().slice(0, 60),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
+      });
+    return {
+      clientWidth: root.clientWidth,
+      scrollWidth: root.scrollWidth,
+      horizontalOverflow: root.scrollWidth > root.clientWidth + 1,
+      undersizedControls: controls.filter((item) => item.width < 44 || item.height < 44),
+    };
+  });
+  if (layout.horizontalOverflow) {
+    throw new Error(`水平溢出：scrollWidth ${layout.scrollWidth} > clientWidth ${layout.clientWidth}`);
+  }
+  if (vp.width <= 390 && layout.undersizedControls.length > 0) {
+    throw new Error(`手機觸控目標小於 44px：${JSON.stringify(layout.undersizedControls.slice(0, 8))}`);
+  }
+  return layout;
+}
+
 async function run() {
   requiredEnvironment();
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  const routes = [...STATIC_ROUTES];
+  const routes = [...AUTHENTICATED_ROUTES];
   if (TEST_PROJECT_ID) routes.push(`/p/${TEST_PROJECT_ID}`);
   if (TEST_PEER_ID) routes.push(`/chat/${TEST_PEER_ID}`);
 
@@ -81,7 +119,6 @@ async function run() {
   const manifest = {
     targetUrl: TARGET_URL,
     role: TEST_ROLE,
-    testEmail: TEST_EMAIL,
     projectFixture: TEST_PROJECT_ID || null,
     peerFixture: TEST_PEER_ID || null,
     startedAt: new Date().toISOString(),
@@ -91,8 +128,42 @@ async function run() {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
+  const consoleErrors = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
 
   try {
+    for (const route of PUBLIC_ROUTES) {
+      for (const vp of VIEWPORTS) {
+        const label = `public ${route} @ ${vp.name}`;
+        try {
+          consoleErrors.length = 0;
+          await page.setViewportSize({ width: vp.width, height: vp.height });
+          await page.goto(`${TARGET_URL}${route}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+          await page.waitForTimeout(700);
+          if (new URL(page.url()).pathname !== route) throw new Error(`公開路由被導向 ${new URL(page.url()).pathname}`);
+          const layout = await inspectViewport(page, vp);
+          const accessibility = vp.name === "L-1280"
+            ? await new AxeBuilder({ page }).analyze()
+            : null;
+          const severe = accessibility?.violations.filter((item) => item.impact === "critical" || item.impact === "serious") ?? [];
+          if (severe.length) throw new Error(`無障礙 serious/critical：${severe.map((item) => item.id).join(", ")}`);
+          if (consoleErrors.length) throw new Error(`console/page error：${consoleErrors.slice(0, 3).join(" | ")}`);
+          const shotPath = path.join(OUT_DIR, `public-${safeName(route)}-${vp.name}.png`);
+          await page.screenshot({ path: shotPath, fullPage: true });
+          manifest.results.push({ route, public: true, viewport: vp, status: "passed", layout, screenshot: shotPath });
+          console.log(`✅ ${label}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          failures.push(`${label}：${message}`);
+          manifest.results.push({ route, public: true, viewport: vp, status: "failed", currentUrl: page.url(), error: message });
+          console.error(`❌ ${label}：${message}`);
+        }
+      }
+    }
+
     console.log(`登入 UI 巡覽帳號：${TEST_EMAIL}（角色：${TEST_ROLE}）`);
     await login(page);
     console.log("✅ 已確認登入成功，開始巡覽受保護路由");
@@ -104,6 +175,7 @@ async function run() {
       for (const vp of VIEWPORTS) {
         const label = `${route} @ ${vp.name}`;
         try {
+          consoleErrors.length = 0;
           await page.setViewportSize({ width: vp.width, height: vp.height });
           await page.goto(`${TARGET_URL}${route}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
           await assertAuthenticated(page);
@@ -118,19 +190,26 @@ async function run() {
           const title = await page.title();
           const pageText = (await page.locator("body").innerText()).trim();
           if (!pageText) throw new Error("頁面沒有可讀內容");
+          const layout = await inspectViewport(page, vp);
+          const accessibility = vp.name === "L-1280"
+            ? await new AxeBuilder({ page }).analyze()
+            : null;
+          const severe = accessibility?.violations.filter((item) => item.impact === "critical" || item.impact === "serious") ?? [];
+          if (severe.length) throw new Error(`無障礙 serious/critical：${severe.map((item) => item.id).join(", ")}`);
+          if (consoleErrors.length) throw new Error(`console/page error：${consoleErrors.slice(0, 3).join(" | ")}`);
 
           if (!contentSaved && vp.name === "L-1280") {
             const textPath = path.join(OUT_DIR, `route-${routeName}-content.txt`);
             fs.writeFileSync(
               textPath,
-              `Route: ${route}\nURL: ${currentUrl}\nTitle: ${title}\nRole: ${TEST_ROLE}\nAccount: ${TEST_EMAIL}\n\n${pageText}`,
+              `Route: ${route}\nURL: ${currentUrl}\nTitle: ${title}\nRole: ${TEST_ROLE}\n\n${pageText}`,
             );
             contentSaved = true;
           }
 
           const shotPath = path.join(OUT_DIR, `route-${routeName}-${vp.name}.png`);
           await page.screenshot({ path: shotPath, fullPage: true });
-          manifest.results.push({ route, viewport: vp, status: "passed", currentUrl, title, screenshot: shotPath });
+          manifest.results.push({ route, viewport: vp, status: "passed", currentUrl, title, layout, screenshot: shotPath });
           console.log(`✅ ${label}`);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

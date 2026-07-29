@@ -3,21 +3,21 @@ import { Icon } from "./Icon";
 
 /**
  * 章節導覽（#28／需求 6.7 階段化）：專案頁很長，這是一條精簡的頁內目錄，
- * 項目對應五階段標頭錨點，點一下平滑捲到該階段。桌面固定成左側 sticky 側欄；
- * 手機（≤820px）收合成頂部可展開的一列，靜態定位不遮內容、不造成水平捲動。
+ * 項目對應三幕標頭錨點（上下文 → AI 創作中心 → 分鏡・交付），點一下平滑捲到該幕。
+ * 桌面固定成左側 sticky 側欄；手機（≤820px）收合成頂部可展開的一列。
  *
- * 純附加元件：只負責捲動導覽，不碰任何既有區塊的行為與標記。
+ * 純附加元件：只負責捲動導覽。② 只跳到 #stage-create（單一工作台），不把各模式拆成目錄項。
  */
 export type TocItem = { id: string; label: string; badge?: string };
 
-/** 五階段靜態清單（以簡單為準，不掃 DOM）：錨點對應 ProjectPage 各階段標頭（StageHead）的 id，
- *  順序即頁面「企劃→創作→整理→審核→交付」的一條龍敘事順序；特殊頁面可用 items props 覆蓋。 */
-const DEFAULT_ITEMS: TocItem[] = [
-  { id: "stage-plan", label: "① 企劃・定盤" },
-  { id: "stage-create", label: "② 創作・生成" },
-  { id: "stage-assets", label: "③ 素材整理" },
-  { id: "stage-review", label: "④ 分鏡與審核" },
-  { id: "stage-deliver", label: "⑤ 交付" },
+/**
+ * 預設三幕（WB-06）：與 ProjectPage StageHead 對齊。
+ * 特殊頁面可用 items props 覆蓋；勿把 #sec-studio / #sec-workflow 等模式錨點列進目錄。
+ */
+export const DEFAULT_ITEMS: TocItem[] = [
+  { id: "stage-context", label: "① 專案上下文" },
+  { id: "stage-create", label: "② AI 創作中心" },
+  { id: "stage-deliver", label: "③ 分鏡・交付" },
 ];
 
 const MOBILE_QUERY = "(max-width: 820px)";
@@ -79,7 +79,7 @@ export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
     // 點擊即是意圖：立刻標記，不等 scroll-spy（短頁面的最後一區 observer 永遠不會標到）
     setActiveId(id);
     el.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
-    // 跳轉同步寫入 URL hash（replaceState 不塞歷史）：可分享「直達第④階段」的深連結，重整也留在原階段
+    // 跳轉同步寫入 URL hash（replaceState 不塞歷史）：可分享「直達某一幕」（如 #stage-create）的深連結，重整也留在原幕
     history.replaceState(null, "", `#${id}`);
     // 手機收合態下點完自動收起，避免展開的清單遮住內容
     if (window.matchMedia(MOBILE_QUERY).matches) setOpen(false);

@@ -41,13 +41,14 @@ export function isIosDevice(): boolean {
 
 export function isInstallDismissed(): boolean {
   try {
-    const at = Number(localStorage.getItem(DISMISS_KEY));
+    if (typeof window === "undefined") return false;
+    const at = Number(window.localStorage.getItem(DISMISS_KEY));
     return Number.isFinite(at) && Date.now() - at < DISMISS_DAYS * 86400_000;
   } catch { return false; }
 }
 
 export function dismissInstallBanner(): void {
-  try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch {}
+  try { window.localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch {}
   notifyInstall();
 }
 
