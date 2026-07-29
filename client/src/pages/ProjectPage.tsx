@@ -11,7 +11,7 @@ import { RecycleBin } from "../components/RecycleBin";
 import { KnowledgeBase } from "../components/KnowledgeBase";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
-import { TocNav } from "../components/TocNav";
+import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
 import {
@@ -239,12 +239,12 @@ function AddOptionChip({
 }
 
 /**
- * 專案工作台（一體連貫長頁版）：三幕環環相扣——
- * ① 專案上下文（世界觀＋選項就地新增／角色・場景定裝／知識庫／素材庫／成員權限）＝AI 的共同大腦；
- * ② AI 創作中心（AI 創作助手：一個對話統包問答・發想・拆分鏡・排計畫執行・查資料庫→生成台→製作範本→提示詞庫）；
- * ③ 分鏡・時間軸・交付＝成品落地。
- * 上下文餵給創作、創作的成品流進分鏡、分鏡打包交付；跨卡動作（導演建議、分鏡提示詞、選來源、
- * 「再用」）都會自動捲到接手的卡並聚焦，不再是各自獨立的功能。
+ * 專案頁（WB-06 頁面組裝）：三幕長頁，不承擔各創作模式的表單／成本／mutation。
+ * ① 專案上下文（世界觀・定裝・知識庫・素材庫・成員權限）＝AI 的共同大腦；
+ * ② AI 創作中心：單一 CreationWorkbench（問 AI／直接生成／製作範本／執行計畫＋資源抽屜）；
+ * ③ 分鏡・時間軸・交付＝成品落地（SceneList）。
+ * 頁面只負責：抓專案／權限、組裝三幕、把 projectId／groupId／canEdit／capabilities 傳入工作台、
+ * 跨幕捲動與 TocNav。跨幕帶入（再用提示詞、選來源）走 applyPrompt / generateApply 橋接。
  */
 export function ProjectPage({ id }: { id: string }) {
   const utils = trpc.useUtils();
@@ -431,7 +431,7 @@ export function ProjectPage({ id }: { id: string }) {
   const sceneCount = scenes.data?.length ?? 0;
   const onboardSteps = [
     { label: "設世界觀", done: !!(wv.logline.trim() || wv.message.trim()), target: "#onboard-worldview", hint: "填一句故事或關鍵訊息" },
-    { label: "生成一鏡", done: !!generations.data?.some((g) => g.status === "done"), target: "#gen-prompt", hint: "在生成台做出第一張成品" },
+    { label: "生成一鏡", done: !!generations.data?.some((g) => g.status === "done"), target: "#gen-prompt", hint: "在 AI 創作工作台的「直接生成」做出第一張成品" },
     { label: "加入分鏡", done: sceneCount > 0, target: "#onboard-delivery", hint: "把成品排進分鏡" },
     // 第4步用「有分鏡通過審核」當完成訊號，才不會一有分鏡就跟第3步一起打勾（誤導已交付）
     { label: "送審／打包", done: !!scenes.data?.some((s) => s.status === "approved"), target: "#onboard-delivery", hint: "送審通過後即可打包交付" },
@@ -716,19 +716,20 @@ export function ProjectPage({ id }: { id: string }) {
         )}
       </section>
 
-      {/* #28 章節導覽：桌面左側 sticky 側欄／手機頂部可收合列（純附加，不動 .cols 版面）。
-          ③分鏡・交付 帶留言未讀徽章（有人提及我時顯示 @N）——組長漏審/夥伴喊話不再無聲。 */}
+      {/* #28 章節導覽：三幕錨點（上下文 → 工作台 → 交付）；② 只跳 #stage-create，不列各模式。
+          ③ 帶留言未讀徽章（@N 表示有人提及）。 */}
       <div className="toc-layout">
       <TocNav
-        items={[
-          { id: "stage-context", label: "① 專案上下文" },
-          { id: "stage-create", label: "② AI 創作中心" },
-          {
-            id: "stage-deliver",
-            label: "③ 分鏡・交付",
-            badge: unread.data && unread.data.count > 0 ? (unread.data.mentioned ? `@${Math.min(unread.data.count, 99)}` : String(Math.min(unread.data.count, 99))) : undefined,
-          },
-        ]}
+        items={TOC_DEFAULT_ITEMS.map((it) =>
+          it.id === "stage-deliver" && unread.data && unread.data.count > 0
+            ? {
+                ...it,
+                badge: unread.data.mentioned
+                  ? `@${Math.min(unread.data.count, 99)}`
+                  : String(Math.min(unread.data.count, 99)),
+              }
+            : it,
+        )}
       />
       <div className="cols">
         <div className="stack">
@@ -893,8 +894,7 @@ export function ProjectPage({ id }: { id: string }) {
           {/* 專案資料：AI 可引用狀態 + 一鍵建表 + 已關聯列彙整（不碰 plan／notesCore） */}
           <ProjectDatabasesCard projectId={id} canEdit={canEdit} />
 
-          {/* 素材庫（工作台一體化：從舊「③素材整理」搬進①）——上傳的檔案、生成的成品都是上下文的一部分；
-              「用作來源」會自動捲到下方生成台接手 */}
+          {/* 素材庫屬①上下文；「用作來源」切到工作台直接生成模式並帶入來源 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.assets)}>
             {/* data-fb 讓元件回饋標定「上傳素材」；透明包裹，不影響版面 */}
             <div data-fb="上傳素材" id="sec-assets">
@@ -907,7 +907,6 @@ export function ProjectPage({ id }: { id: string }) {
                     nonce: (prev?.nonce ?? 0) + 1,
                     sourceAsset: a,
                   }));
-                  // 選來源＝要生成：切到直接生成並打開進階來源
                   revealWorkbenchAnchor("#sec-studio", { projectId: id });
                 }}
               />
@@ -932,16 +931,15 @@ export function ProjectPage({ id }: { id: string }) {
 
           <StageLink text="以上設定會自動注入下方每一次生成——AI 全程記得，不必重講背景" />
 
-          {/* ② AI 創作中心：發想 → 生成 → 串鏈，同一組上下文 */}
+          {/* ② 唯一 AI 創作入口：CreationWorkbench（四模式 tabs + 資源抽屜）；不掛平行整頁卡 */}
           <StageHead
             id="stage-create"
             num="②"
             title="AI 創作中心"
-            desc="AI 創作助手＋生成・製作範本一條線"
+            desc="問 AI・直接生成・製作範本・執行計畫——同一工作台切換"
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
-          {/* AI 創作工作台：模式 tabs + 共享草稿；直接生成表單在 DirectGenerateMode（#sec-studio） */}
           <CreationWorkbench
             projectId={id}
             canEdit={canEdit}
@@ -959,10 +957,7 @@ export function ProjectPage({ id }: { id: string }) {
             studioCollab={zoneProps(COLLAB_ZONES.studio)}
           />
 
-          {/* 製作範本 WorkflowCard 已移入工作台 TemplateMode（#sec-workflow）；此處不再重複掛卡 */}
-          {/* 提示詞庫 / 生成紀錄 / 執行軌跡：CreationResourceDrawer（#sec-prompts 等錨點在工作台內） */}
-
-          <StageLink text="成品會自動存入素材庫；在資源抽屜的生成紀錄按「＋加入分鏡」，就會排進下方分鏡列" />
+          <StageLink text="成品會自動存入素材庫；在工作台資源抽屜的生成紀錄按「＋加入分鏡」，就會排進下方分鏡列" />
 
           {/* ③ 分鏡・時間軸・交付：排片、粗剪預覽、送審與打包（SceneList 一體卡全含） */}
           <StageHead
