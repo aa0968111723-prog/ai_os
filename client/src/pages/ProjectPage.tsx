@@ -335,8 +335,19 @@ export function ProjectPage({ id }: { id: string }) {
   const [sourceHighlightId, setSourceHighlightId] = useState<string | null>(null);
   /** 把提示詞庫／生成紀錄／分鏡／素材庫的設定送進 DirectGenerateMode（nonce 觸發） */
   const [generateApply, setGenerateApply] = useState<DirectGenerateApplyRequest | null>(null);
-  /** 引導步驟列收合狀態（全部完成後可整條收起，不佔版面） */
-  const [onboardCollapsed, setOnboardCollapsed] = useState(false);
+  /** 引導步驟列收合偏好（per 專案持久化，重整後不會重新佔滿首屏） */
+  const onboardStorageKey = `aios.projectGuide.collapsed.${id}`;
+  const [onboardCollapsed, setOnboardCollapsed] = useState(() => {
+    try { return localStorage.getItem(onboardStorageKey) === "1"; }
+    catch { return false; }
+  });
+  const toggleOnboard = () => {
+    setOnboardCollapsed((current) => {
+      const next = !current;
+      try { localStorage.setItem(onboardStorageKey, next ? "1" : "0"); } catch { /* 偏好儲存失敗不影響操作 */ }
+      return next;
+    });
+  };
   const archiveProject = trpc.projects.setArchived.useMutation({
     onSuccess: () => { utils.projects.get.invalidate({ id }); utils.projects.list.invalidate(); },
   });
@@ -350,7 +361,7 @@ export function ProjectPage({ id }: { id: string }) {
       : `載入失敗：${project.error?.message ?? "未知錯誤"}`;
     return (
       <p className="error">
-        {msg} <Link href="/">回作業台</Link>
+        {msg} <Link href="/dashboard">回今日工作台</Link>
       </p>
     );
   }
@@ -518,8 +529,8 @@ export function ProjectPage({ id }: { id: string }) {
       <CursorOverlay cursors={collab.cursors} />
       {/* 麵包屑：長頁面全程可及的返回入口＋標示專案所屬組（切組後留在他組專案時，一眼看出情境） */}
       <p className="hint" style={{ margin: "14px 0 0", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <Link href="/" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <Icon name="Undo2" size={13} />回作業台
+        <Link href="/dashboard" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <Icon name="Undo2" size={13} />今日工作台
         </Link>
         {(() => {
           const g = me.data?.groups.find((x) => x.groupId === p.groupId);
@@ -669,13 +680,15 @@ export function ProjectPage({ id }: { id: string }) {
           {allStepsDone && <span className="chip" style={{ fontSize: 12 }}>全部完成</span>}
           <button
             className="btn-sm"
-            onClick={() => setOnboardCollapsed((v) => !v)}
+            onClick={toggleOnboard}
+            aria-expanded={!onboardCollapsed}
+            aria-controls="project-getting-started-steps"
           >
             {onboardCollapsed ? "展開" : "收合"}
           </button>
         </div>
         {!onboardCollapsed && (
-          <div style={{ display: "flex", alignItems: "stretch", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+          <div id="project-getting-started-steps" style={{ display: "flex", alignItems: "stretch", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
             {onboardSteps.map((s, i) => (
               <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button
@@ -740,12 +753,12 @@ export function ProjectPage({ id }: { id: string }) {
             title="專案上下文"
             desc="世界觀・定裝・素材・知識庫——AI 的共同大腦"
             accent="group-1"
-            hint={wvReady ? "已定盤" : "未定盤"}
+            hint={wvReady ? "已設定" : "待設定"}
           />
           {/* 上下文摘要條：一眼看見 AI 全程共用哪些設定；點 chip 直達對應卡 */}
           <div className="ctx-summary" role="group" aria-label="AI 全程共用的上下文一覽">
             AI 全程共用：
-            {summaryChip(`世界觀${wvReady ? " ✓" : "（未定盤）"}`, "#onboard-worldview", wvReady)}
+            {summaryChip(`專案基調${wvReady ? " ✓" : "（待設定）"}`, "#onboard-worldview", wvReady)}
             {summaryChip(`角色 ${charCount ?? "…"}・場景 ${presetCount ?? "…"}`, "#sec-characters")}
             {summaryChip(`知識 ${knowledgeCount ?? "…"} 份`, "#sec-knowledge")}
             {summaryChip(`素材 ${assetCount ?? "…"}`, "#sec-assets")}
@@ -754,7 +767,7 @@ export function ProjectPage({ id }: { id: string }) {
           <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
           <section className="card" data-fb="世界觀卡" id="onboard-worldview">
             <h2>
-              世界觀（專案定盤星）
+              專案基調與世界觀
               <HelpTip text="這支片的固定設定，填一次，之後每次生成 AI 自動記得，不用重講背景。" />
               {updateWv.isPending ? (
                 <span className="hint" style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</span>

@@ -26,8 +26,9 @@ function PointsBadge({ groupId }: { groupId: string }) {
     ? "本組組預算"
     : "全系統總預算";
   return (
-    <span className="status-chip" title={caps.length > 0 ? `顯示最緊的累計剩餘（${source}）；週/日上限每天/每週重置，由管理員與組長調整` : "點數額度由管理員調整；日上限每天重置"}>
-      <Icon name="Gem" size={14} /><span className="mono">{label}{weekly}{daily}</span>
+    <span className="status-chip points-badge" title={caps.length > 0 ? `顯示最緊的累計剩餘（${source}）；週/日上限每天/每週重置，由管理員與組長調整` : "點數額度由管理員調整；日上限每天重置"}>
+      <Icon name="Gem" size={14} />
+      <span className="mono"><span>{label}</span><span className="points-badge__cadence">{weekly}{daily}</span></span>
     </span>
   );
 }
@@ -82,7 +83,7 @@ export function AppHeader({
 
   return (
     <header className="topbar">
-      <Link href="/" className="brand" aria-label="Aios 首頁">
+      <Link href="/dashboard" className="brand" aria-label="AI Director OS 今日工作台">
         <BrandLogo variant="full" size="sm" responsive priority />
       </Link>
       {signedIn && groups.length > 0 && (
@@ -94,7 +95,7 @@ export function AppHeader({
           onChange={(e) => {
             onActiveGroupIdChange(e.target.value);
             // 在專案頁切組：專案屬於前一組，留在原地會出現「頂欄是 B 組、內容是 A 組」的矛盾——導回作業台對齊情境
-            if (location.startsWith("/p/")) navigate("/");
+            if (location.startsWith("/p/")) navigate("/dashboard");
           }}
         >
           {groups.map((g) => (
@@ -106,6 +107,7 @@ export function AppHeader({
         </select>
       )}
       <span className="spacer" />
+      <div className="topbar-actions">
       {/* 只在 E2E_MOCK=1（自動化測試）下出現；正式部署一律真實模式，不會再看到這顆徽章 */}
       {signedIn && mockMode && <span className="badge mock">測試模式</span>}
       {signedIn && <PrimaryNavigation />}
@@ -126,6 +128,7 @@ export function AppHeader({
           loggingOut={loggingOut}
         />
       )}
+      </div>
     </header>
   );
 }

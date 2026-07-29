@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
@@ -71,6 +71,15 @@ export function Launchpad({ groupId }: { groupId: string }) {
   // 跨專案待辦（UX 高：首頁不顯示待審/待核→組長漏審、組員卡住）：專案卡角標用；60 秒輪詢跟上變化
   const pendingSummary = trpc.approvals.pendingSummary.useQuery({ groupId }, { enabled: !!groupId, refetchInterval: 60_000 });
   const pendingOf = (pid: string) => pendingSummary.data?.projects.find((x) => x.projectId === pid);
+  const agentOverview = trpc.teamAssistant.agentOverview.useQuery(
+    { groupId },
+    {
+      enabled: !!groupId,
+      refetchInterval: (query) => query.state.data?.some((run) =>
+        run.status === "running" || run.status === "waiting" || run.status === "awaiting_approval"
+      ) ? 8_000 : false,
+    },
+  );
   const options = trpc.options.byGroup.useQuery({ groupId, includeInactive: true }, { enabled: !!groupId });
   const kindOptions = (options.data ?? []).filter((o) => o.type === "kind" && o.active);
   const platformOptions = (options.data ?? []).filter((o) => o.type === "platform" && o.active);
@@ -97,6 +106,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<string>("");
   const [platform, setPlatform] = useState<string>("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const createAutoOpenedGroup = useRef<string | null>(null);
 
   const [firstRunDismissed, setFirstRunDismissed] = useState<boolean>(() => {
     try {
@@ -167,22 +178,53 @@ export function Launchpad({ groupId }: { groupId: string }) {
     });
   }, [all, q, kindFilter, sort]);
   const shown = shownList.slice(0, limit);
+  const recentProjects = shownList.filter((project) => project.status !== "archived").slice(0, 3);
+  const runs = agentOverview.data ?? [];
+  const runningRuns = runs.filter((run) => run.status === "running").length;
+  const waitingRuns = runs.filter((run) => run.status === "waiting" || run.status === "awaiting_approval").length;
+  const completedRuns = runs.filter((run) => run.status === "done").length;
+  const pendingApprovals = pendingSummary.data?.totalPendingApprovals ?? 0;
+  const pendingGenerations = pendingSummary.data?.totalAwaitingGenerations ?? 0;
 
   const canCreate = !!title.trim() && !!groupId && !!kind && !!platform && !create.isPending;
 
+  useEffect(() => {
+    if (projects.data?.length === 0 && createAutoOpenedGroup.current !== groupId) {
+      createAutoOpenedGroup.current = groupId;
+      setCreateOpen(true);
+    }
+  }, [groupId, projects.data]);
+
   return (
-    <div>
-      <h1>
-        今天想<span className="accent">創作</span>什麼？
-      </h1>
-      <p className="sub">{activeGroup ? `接續「${activeGroup.groupName}」的專案，或開一個新的。` : "接續這個組的專案，或開一個新的。"}</p>
+    <div className="daily-dashboard">
+      <section className="daily-hero" aria-labelledby="daily-title">
+        <div>
+          <p className="eyebrow">今日工作台</p>
+          <h1 id="daily-title">
+            {me.data?.user.name ? `${me.data.user.name}，` : ""}今天從哪裡<span className="accent">開始</span>？
+          </h1>
+          <p className="sub">
+            {activeGroup ? `這裡整理「${activeGroup.groupName}」需要你處理的事、AI 進度與最近專案。` : "需要你處理的事與 AI 進度都在這裡。"}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="primary daily-new-project"
+          aria-expanded={createOpen}
+          aria-controls="new-project-panel"
+          onClick={() => setCreateOpen((open) => !open)}
+        >
+          <Icon name={createOpen ? "X" : "Plus"} size={16} />
+          {createOpen ? "收起建立表單" : "建立新專案"}
+        </button>
+      </section>
 
       {showFirstRun && <FirstRunGuide groupId={groupId} onDismiss={dismissFirstRun} />}
 
       <div style={{ marginBottom: 14 }}><InstallAppBanner /></div>
 
       {/* 精簡建立列（常駐、一行；不再佔右側整欄） */}
-      <section className="card" data-fb="新專案卡" style={{ padding: "14px 16px", marginBottom: 16 }}>
+      <section id="new-project-panel" className="card new-project-panel" data-fb="新專案卡" hidden={!createOpen} aria-label="建立新專案">
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div style={{ flex: "3 1 220px" }}>
             <label htmlFor="np-title" style={{ marginTop: 0 }}>新專案名稱</label>
@@ -221,10 +263,72 @@ export function Launchpad({ groupId }: { groupId: string }) {
         {create.error && <p className="error" role="alert">{create.error.message}</p>}
       </section>
 
+      <section className="daily-status-grid" aria-label="今日摘要">
+        <a href="#projects" className="daily-status-card attention">
+          <span className="daily-status-card__icon"><Icon name="Bell" size={18} /></span>
+          <span><strong>{pendingApprovals + pendingGenerations}</strong><small>待我處理</small></span>
+          <span className="daily-status-card__detail">{pendingApprovals} 待審・{pendingGenerations} 待核</span>
+        </a>
+        <a href="#ai-work" className="daily-status-card working">
+          <span className="daily-status-card__icon"><Icon name="Sparkles" size={18} /></span>
+          <span><strong>{runningRuns}</strong><small>AI 正在工作</small></span>
+          <span className="daily-status-card__detail">{runs.length ? "查看執行計畫" : "目前沒有執行中的計畫"}</span>
+        </a>
+        <a href="#ai-work" className="daily-status-card waiting">
+          <span className="daily-status-card__icon"><Icon name="Clock" size={18} /></span>
+          <span><strong>{waitingRuns}</strong><small>等待人員或核准</small></span>
+          <span className="daily-status-card__detail">需要決定後才會繼續</span>
+        </a>
+        <a href="#ai-work" className="daily-status-card completed">
+          <span className="daily-status-card__icon"><Icon name="Check" size={18} /></span>
+          <span><strong>{completedRuns}</strong><small>最近成果</small></span>
+          <span className="daily-status-card__detail">已完成的 AI 計畫</span>
+        </a>
+      </section>
+
+      {recentProjects.length > 0 && (
+        <section className="continue-work" aria-labelledby="continue-title">
+          <div className="section-heading">
+            <div><p className="eyebrow">接續進度</p><h2 id="continue-title">繼續工作</h2></div>
+            <a href="#projects">查看全部專案</a>
+          </div>
+          <div className="continue-work__grid">
+            {recentProjects.map((project) => {
+              const pending = pendingOf(project.id);
+              return (
+                <Link key={project.id} href={`/p/${project.id}`} className="continue-card" onClick={() => recordRecent(project.id)}>
+                  <span className="continue-card__mark" style={{ background: coverOf(project.id) }}>{project.title.trim().charAt(0) || "○"}</span>
+                  <span className="continue-card__body">
+                    <strong>{project.title}</strong>
+                    <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
+                  </span>
+                  {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
+                    <span className="chip">{pending.pendingApprovals + pending.awaitingGenerations} 待處理</span>
+                  )}
+                  <Icon name="ChevronRight" size={17} />
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* 組彙總 AI（需求 12 v1）：問整組狀況的唯讀彙總——沒選組就不渲染。
           key 綁組：換組即整卡重掛，否則 A 組的問答殘留在畫面上、
           「追問」還會把 A 組對話歷史連同新 groupId 送去 B 組（跨組脈絡外溢） */}
-      {groupId && <TeamAssistantCard key={groupId} groupId={groupId} />}
+      <section id="ai-work" className="dashboard-section" aria-labelledby="ai-work-title">
+        <div className="section-heading">
+          <div><p className="eyebrow">協作代理</p><h2 id="ai-work-title">AI 工作與團隊分析</h2></div>
+          <p>看清查證步驟、執行狀態與需要人員決定的節點。</p>
+        </div>
+        {groupId && <TeamAssistantCard key={groupId} groupId={groupId} />}
+      </section>
+
+      <section id="projects" className="dashboard-section" aria-labelledby="projects-title">
+        <div className="section-heading">
+          <div><p className="eyebrow">完整清單</p><h2 id="projects-title">所有專案</h2></div>
+          <button type="button" className="btn-sm" onClick={() => setCreateOpen(true)}>建立新專案</button>
+        </div>
 
       {/* 工具列：搜尋／類型篩選／排序／顯示已封存（有專案或開了已封存才顯示完整工具列；
           「顯示已封存」在空狀態也要可見，否則封存後再也找不到還原入口） */}
@@ -381,6 +485,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
           <button onClick={() => setLimit((n) => n + 48)}>顯示更多（還有 {shownList.length - limit} 個）</button>
         </div>
       )}
+      </section>
     </div>
   );
 }

@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:client": "vitest run --config vitest.client.config.ts",
     "test:client:coverage": "vitest run --config vitest.client.config.ts --coverage",
+    "test:ui:routes": "node scripts/e2e-ui/audit-routes.mjs",
     "test:all": "npm test && npm run test:client:coverage",
     "audit:high": "npm audit --audit-level=high",
     "test:watch": "vitest"
@@ -51,6 +52,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
@@ -69,6 +71,7 @@
     "concurrently": "^9.1.0",
     "esbuild": "^0.25.0",
     "jsdom": "^29.1.1",
+    "playwright": "^1.62.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
     "vitest": "^4.1.10"

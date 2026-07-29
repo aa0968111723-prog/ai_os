@@ -29,10 +29,10 @@ export function ChangePasswordDialog({ onClose, forced = false }: { onClose: () 
   useFocusTrap(dialogRef, true, forced ? undefined : onClose);
   return (
     <div
-      style={{ position: "fixed", inset: 0, background: "var(--scrim)", display: "grid", placeItems: "center", zIndex: 50 }}
+      className="modal-scrim"
       onClick={(e) => { if (!forced && e.target === e.currentTarget) onClose(); }}
     >
-      <div ref={dialogRef} className="card" style={{ width: 380, maxWidth: "92vw" }} role="dialog" aria-modal="true" aria-label="改密碼">
+      <div ref={dialogRef} className="card modal-card" role="dialog" aria-modal="true" aria-label="改密碼">
         <h2 style={{ marginTop: 0 }}>改密碼</h2>
         {forced && <p className="hint">管理員重設了你的密碼——請先設定一組自己的新密碼再繼續使用</p>}
         <form onSubmit={(e) => { e.preventDefault(); if (canSubmit) change.mutate({ oldPassword: oldPw, newPassword: newPw }); }}>

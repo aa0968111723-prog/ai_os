@@ -529,7 +529,7 @@ export function ModelsPage() {
       {(!debouncedQ || matchedWorkflows.length > 0) && (
         <>
           <h2 style={{ marginTop: 28 }}>製作範本(一鍵串鏈)</h2>
-          <p className="hint">在<Link href="/">作業台</Link>開啟專案後,於「製作範本」卡使用;每步各自扣點。</p>
+          <p className="hint">在<Link href="/dashboard">今日工作台</Link>開啟專案後,於「製作範本」卡使用;每步各自扣點。</p>
           {workflows.isLoading && (
             <div className="stack">
               {Array.from({ length: 2 }).map((_, i) => (

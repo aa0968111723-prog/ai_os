@@ -41,13 +41,39 @@ export function AccountMenu({
 }: AccountMenuProps) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const menuItems = () => [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? [])];
+    const focusItem = (index: number) => {
+      const items = menuItems();
+      if (!items.length) return;
+      items[(index + items.length) % items.length]?.focus();
+    };
+    const frame = requestAnimationFrame(() => focusItem(0));
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+        return;
+      }
+      const items = menuItems();
+      const current = items.indexOf(document.activeElement as HTMLElement);
+      if (e.key === "ArrowDown") { e.preventDefault(); focusItem(current + 1); }
+      if (e.key === "ArrowUp") { e.preventDefault(); focusItem(current - 1); }
+      if (e.key === "Home") { e.preventDefault(); focusItem(0); }
+      if (e.key === "End") { e.preventDefault(); focusItem(items.length - 1); }
+    };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
   const close = () => setOpen(false);
 
@@ -58,14 +84,14 @@ export function AccountMenu({
   const accountLinkItems = filterNavItems(accountMenuItems.filter((i) => i.section === "account"), filterCtx);
 
   return (
-    <div className="menu-wrap" ref={wrap}>
-      <button className="badge" aria-haspopup="menu" aria-expanded={open} title={userName} onClick={() => setOpen((v) => !v)}>
+    <div className="menu-wrap account-menu" ref={wrap}>
+      <button ref={triggerRef} className="badge account-menu__trigger" aria-haspopup="menu" aria-expanded={open} title={userName} onClick={() => setOpen((v) => !v)}>
         <Icon name="User" size={14} />
-        <span style={{ maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{userName}</span>
-        <Icon name="ChevronDown" size={14} />
+        <span className="account-menu__name">{userName}</span>
+        <Icon name="ChevronDown" size={14} className="account-menu__chevron" />
       </button>
       {open && (
-        <div className="menu" role="menu">
+        <div ref={menuRef} className="menu" role="menu" aria-label="使用者選單">
           {/* 分組＋分隔線：說明／工作／管理／帳號——扁平長清單太難掃（回饋 W1）。
            * 筆記排程／資料庫是高頻入口，已升到頂欄常駐，故不再列進「工作」；
            * 權限限定的選項／通訊錄／監控／團隊管理獨立成「管理」組，一般組員整段不顯示。 */}

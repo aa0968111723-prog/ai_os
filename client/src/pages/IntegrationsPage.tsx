@@ -96,7 +96,7 @@ export function IntegrationsPage() {
       {/* ── 外部資料來源/API ── */}
       <ApiConnectionsCard apis={d?.apis ?? []} onRemove={(id) => remove.mutate({ id })} removingId={remove.isPending ? remove.variables?.id ?? null : null} />
 
-      <p style={{ marginTop: 24 }}><Link href="/databases">前往知識與資料 →</Link>　<Link href="/">回作業台</Link></p>
+      <p style={{ marginTop: 24 }}><Link href="/databases">前往知識與資料 →</Link>　<Link href="/dashboard">回今日工作台</Link></p>
     </div>
   );
 }

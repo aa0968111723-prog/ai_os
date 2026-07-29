@@ -39,7 +39,7 @@ export function TemplateMode({
    */
   ideaBringIn?: { text: string; nonce: number } | null;
 }) {
-  const lastTemplateRef = useRef<string | undefined>();
+  const lastTemplateRef = useRef<string | undefined>(undefined);
   const lastExternalPromptNonce = useRef(0);
   const lastBringInNonce = useRef(0);
   const [pickRequest, setPickRequest] = useState<{ templateId: string; nonce: number } | null>(null);

@@ -41,7 +41,7 @@ export function MyReportsPage() {
           <p className="hint">
             在任何頁面用右下角「回饋」浮標標定某個元件、或只針對這一頁說幾句就會出現在這裡。
           </p>
-          <Link href="/">回作業台</Link>
+          <Link href="/dashboard">回今日工作台</Link>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

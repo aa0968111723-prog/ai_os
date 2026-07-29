@@ -428,7 +428,7 @@ export function HelpPage() {
       </div>
 
       <p style={{ marginTop: 24 }}>
-        <Link href="/">回作業台</Link>
+        <Link href="/dashboard">回今日工作台</Link>
         <span className="hint" style={{ margin: "0 10px" }}>·</span>
         <Link href="/models">看模型指南</Link>
         <span className="hint" style={{ margin: "0 10px" }}>·</span>

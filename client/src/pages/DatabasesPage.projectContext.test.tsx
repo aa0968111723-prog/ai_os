@@ -111,7 +111,7 @@ describe("DatabasesPage project deep link (user journey)", () => {
     expect(screen.getByText(/回專案「社群週更專案」/i)).toBeInTheDocument();
     const backs = screen.getAllByRole("link", { name: /回專案/i });
     expect(backs.length).toBeGreaterThanOrEqual(1);
-    expect(backs[0].getAttribute("href")).toContain("/projects/11111111-1111-4111-8111-111111111111");
+    expect(backs[0].getAttribute("href")).toContain("/p/11111111-1111-4111-8111-111111111111");
     expect(backs[0].getAttribute("href")).toContain("#sec-databases");
   });
 
