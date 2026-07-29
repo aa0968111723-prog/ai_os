@@ -351,7 +351,7 @@ Login · Accept invite · 權限／錯誤
 
 | 項 | 內容 |
 |----|------|
-| 範圍 | Per-user FirstRun；頂欄／卡待核；扣點確認一致；viewer 事前唯讀 |
+| 範圍 | Per-user FirstRun；頂欄／卡待核；扣點確認一致；viewer事前唯讀 |
 | 手機 | 待核角標；FirstRun 全寬 CTA；確認 sheet 可用 |
 | 桌面 | 待核入口完整；modal 確認 |
 | 依賴 | UX-00 可重疊 |
@@ -561,6 +561,17 @@ UX-00 → UX-01 → UX-02 → UX-03 → UX-04 → UX-05 → UX-06 → UX-07 → 
 - `/databases`：資料庫 (DatabasesPage)
 - `/chat`：聊天與私訊 (ChatPage)
 - `/p/:id`：專案工作台 (ProjectPage)
+
+---
+
+## 16. 無法檢查的頁面及原因
+
+部分頁面無法透過自動化腳本直接進行基準盤點，原因如下：
+
+- `/p/:id` (專案工作台)：需要真實的專案 ID 才能載入完整資料與工作台介面，直接訪問路由參數會顯示空狀態或錯誤。
+- `/chat/:peerId` (一對一私訊)：需要真實的使用者 ID 才能載入對話紀錄。
+- `/admin`、`/options` 等管理頁面：若自動化測試帳號未具備 `isAdmin` 或 `activeIsLeader` 權限，將只能截取到權限阻擋提示畫面。
+- 離線畫面 (`offline.html`)：需要模擬網路斷線狀態，無法透過一般路由巡覽觸發。
 
 ---
 
