@@ -243,6 +243,9 @@ function makeSilentWav(): Buffer {
 }
 const MOCK_WAV = makeSilentWav();
 app.get("/api/mock-asset/:kind", (req, res) => {
+  // Test fixtures are not a production media API. Keeping this public in real
+  // mode lets stale URLs look healthy and can hide broken Fal source inputs.
+  if (!isMockMode()) return res.status(404).json({ error: "找不到測試素材" });
   res.setHeader("Cache-Control", "public, max-age=86400");
   if (req.params.kind === "audio") {
     res.setHeader("Content-Type", "audio/wav");
@@ -1103,7 +1106,16 @@ app.get("/api/selftest", async (req, res) => {
   await run("模型目錄", async () => {
     const rows = await db.select().from(schema.modelCatalog);
     if (rows.length < 70) throw new Error(`只有 ${rows.length} 條——啟動同步失敗?`);
-    return `${rows.length} 條(12 類)`;
+    const falRows = rows.filter((row) => row.id.startsWith("fal-ai/") || row.endpoint.startsWith("fal-ai/"));
+    const unverified = falRows.filter((row) => !row.verified);
+    if (unverified.length > 0) {
+      // 「尚未做付費真實生成」是目錄驗證進度，不是服務故障。
+      // 保留數量與樣本供管理員追蹤，但不可讓 readiness/selftest 變成 500，
+      // 否則 E2E 及正式環境會在模型仍可正常服務時被監控誤判離線。
+      return `${rows.length} 條（Fal 已認證 ${falRows.length - unverified.length}／未認證 ${unverified.length}` +
+        `；待驗例如 ${unverified.slice(0, 3).map((row) => row.id).join("、")}）`;
+    }
+    return `${rows.length} 條（Fal ${falRows.length} 條全部已有正式成功結果認證）`;
   });
   await run("點數設定可讀寫", async () => {
     const { getSettings } = await import("./services/points");

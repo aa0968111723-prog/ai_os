@@ -11,10 +11,48 @@ import {
   SCENARIO_GROUPS,
   SCENARIO_RECIPES,
   STYLE_SHOWDOWNS,
+  endpointOf,
   estimatePoints,
   getModel,
   supportsNegativePrompt,
 } from "./models";
+
+describe("Fal catalog contract", () => {
+  it("every Fal model has a queue-safe full endpoint and serializable baseline input", () => {
+    const sampleSource = {
+      image: "https://example.test/source.png",
+      video: "https://example.test/source.mp4",
+      audio: "https://example.test/source.mp3",
+      zip: "https://example.test/source.zip",
+      doc: "https://example.test/source.pdf",
+    } as const;
+    const falModels = MODELS.filter((model) => model.id.startsWith("fal-ai/"));
+    expect(falModels.length).toBeGreaterThan(200);
+    for (const model of falModels) {
+      const endpoint = endpointOf(model);
+      expect(endpoint, model.id).toMatch(
+        /^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)+$/i,
+      );
+      const sourceUrl = model.needs ? sampleSource[model.needs] : undefined;
+      const input = model.input("catalog certification probe", "16:9", sourceUrl);
+      expect(input, model.id).toBeTypeOf("object");
+      expect(JSON.stringify(input), model.id).not.toBe("{}");
+    }
+  });
+
+  it("does not publish endpoints proven removed by the production Fal queue", () => {
+    const removed = new Set([
+      "fal-ai/expression-editor",
+      "fal-ai/playai/tts/dialog",
+      "fal-ai/playai/tts/v3",
+      "sonauto/v2/text-to-music",
+      "fal-ai/flux-pro-trainer",
+    ]);
+    for (const model of MODELS) {
+      expect(removed.has(endpointOf(model)), model.id).toBe(false);
+    }
+  });
+});
 
 const v3 = getModel("fal-ai/elevenlabs/tts/eleven-v3")!; // $0.10/千字 → 3.1 點/千字
 const kokoro = getModel("fal-ai/kokoro/mandarin-chinese")!; // $0.02/千字 → 0.62 點/千字

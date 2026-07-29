@@ -901,13 +901,12 @@ export const MODELS: ModelEntry[] = [
     input: (p, _f, s) => ({ prompt: p, image_url: s }),
   },
   {
-    // 端點存在為推定(🔸);滑桿參數採端點預設
-    id: "fal-ai/expression-editor", label: "表情微調(Expression Editor)", category: "image-to-image", tier: "budget", kind: "image",
-    needs: "image", points: 1, cost: "按算秒計費(極低)", verified: false,
+    id: "fal-ai/image-editing/expression-change", label: "表情微調(Expression Change)", category: "image-to-image", tier: "budget", kind: "image",
+    needs: "image", points: 2, cost: "$0.04/張", verified: false,
     strengths: "微調照片人物表情(眨眼、微笑、視線)",
     bestFor: "人物照表情太嚴肅/閉眼,不重拍直接調",
     sourceHint: "人物照片",
-    input: (_p, _f, s) => ({ image_url: s }),
+    input: (p, _f, s) => ({ image_url: s, prompt: p.trim() || "gentle smile" }),
   },
   {
     // 參數名 face_image_0 依 fal 文件慣例推定,首跑確認;雙人版需第二張臉(多來源,#15 另案)
@@ -1997,18 +1996,23 @@ export const MODELS: ModelEntry[] = [
     input: (p, _f, s) => ({ text: p, ref_audio_url: s }),
   },
   {
-    id: "fal-ai/playai/tts/dialog", label: "PlayAI 對話(PlayDialog)", category: "text-to-speech", tier: "economy", kind: "audio",
-    points: 2, cost: "按字計費(2025/01 曾調價)", verified: false,
-    strengths: "情感化對話語音;350ms 低延遲,英文對話頂尖",
-    bestFor: "兩人對談、訪談式見證(英文佳)",
-    input: (p) => ({ input: p }),
+    id: "fal-ai/elevenlabs/text-to-dialogue/eleven-v3", label: "ElevenLabs v3 多人對話", category: "text-to-speech", tier: "flagship", kind: "audio",
+    points: 3, cost: "按字計費", verified: false,
+    strengths: "情感化多人對話、角色聲線與非語言提示控制",
+    bestFor: "兩人對談、訪談式見證、Podcast",
+    input: (p) => ({
+      inputs: (p.split(/\r?\n+/).map((text) => text.trim()).filter(Boolean).length
+        ? p.split(/\r?\n+/).map((text) => text.trim()).filter(Boolean)
+        : [p]
+      ).map((text, index) => ({ text, voice: index % 2 === 0 ? "Aria" : "Charlotte" })),
+    }),
   },
   {
-    id: "fal-ai/playai/tts/v3", label: "PlayAI TTS v3", category: "text-to-speech", tier: "economy", kind: "audio",
-    points: 1, cost: "按字計費", verified: false,
-    strengths: "極快、多語、高吞吐;效率導向",
-    bestFor: "量大旁白批次生成(中文非強項)",
-    input: (p) => ({ input: p }),
+    id: "fal-ai/gemini-tts", label: "Gemini TTS", category: "text-to-speech", tier: "economy", kind: "audio",
+    points: 2, cost: "依 Gemini TTS 用量", verified: false,
+    strengths: "多語、自然語言控制語氣/速度/口音;支援多人聲",
+    bestFor: "中文旁白、快速批次生成、主持人對談",
+    input: (p) => ({ prompt: p, language_code: "Chinese Mandarin (Taiwan)", output_format: "mp3" }),
   },
   {
     id: "fal-ai/zonos", label: "Zonos 語音克隆", category: "text-to-speech", tier: "economy", kind: "audio",
@@ -2095,12 +2099,11 @@ export const MODELS: ModelEntry[] = [
     input: (p) => ({ prompt: p }),
   },
   {
-    // 端點推定(fal生態研究 🔸):sonauto/v2/text-to-music 未親驗
-    id: "sonauto/v2/text-to-music", label: "Sonauto V2", category: "text-to-audio", tier: "economy", kind: "audio",
-    points: 2, cost: "約 $0.075/次(推定)", verified: false,
-    strengths: "單次即出人聲+完整編曲;歌詞留空=純器樂",
-    bestFor: "快速出有人聲的完整歌 demo",
-    input: (p) => ({ prompt: p }),
+    id: "sonilo/v1.1/text-to-music", label: "Sonilo V1.1 商用配樂", category: "text-to-audio", tier: "economy", kind: "audio",
+    points: 7, cost: "$0.0025/秒(預設 90 秒≈$0.225)", verified: false,
+    strengths: "商用授權安全、精準時長、單一提示詞即可生成完整配樂",
+    bestFor: "活動影片、Podcast、短片背景配樂",
+    input: (p) => ({ prompt: p, duration: 90, num_samples: 1 }),
   },
   {
     id: "fal-ai/diffrhythm", label: "DiffRhythm(歌詞轉歌)", category: "text-to-audio", tier: "budget", kind: "audio",
@@ -2249,15 +2252,6 @@ export const MODELS: ModelEntry[] = [
     strengths: "FLUX.2 小型化底模 LoRA;訓練與生成都更便宜快速",
     bestFor: "金句卡日更等高頻量產線的風格 LoRA",
     sourceHint: "訓練圖包 zip 網址(10–30 張圖)",
-    input: (p, _f, s) => ({ images_data_url: s, trigger_word: p.trim() || "STYLE" }),
-  },
-  {
-    // 閉源 finetune:產出 finetune_id(非模型檔),需配 flux-pro finetuned 端點使用;價格推定(🔸)
-    id: "fal-ai/flux-pro-trainer", label: "FLUX Pro 官方微調", category: "training", tier: "flagship", kind: "text",
-    needs: "zip", points: 124, cost: "$2–6/次(依迭代數)", verified: false,
-    strengths: "BFL 官方閉源微調;Pro 級畫質+自家風格",
-    bestFor: "對外大型活動主視覺的品牌客製",
-    sourceHint: "訓練圖包 zip 網址",
     input: (p, _f, s) => ({ images_data_url: s, trigger_word: p.trim() || "STYLE" }),
   },
   {
@@ -2873,8 +2867,8 @@ export const SCENARIO_RECIPES: ScenarioRecipe[] = [
   {
     id: "sc-panel-podcast", group: "audio", scene: "多講者座談/問答 Podcast",
     intent: "座談、法師問答、對話式 Podcast 的多角色配音。",
-    pickIds: ["fal-ai/vibevoice/7b", "fal-ai/playai/tts/dialog", "fal-ai/dia-tts"],
-    why: "VibeVoice 7B 原生多講者長對話最自然,座談/問答式弘法音訊首選;英文情境用 PlayDialog。",
+    pickIds: ["fal-ai/vibevoice/7b", "fal-ai/elevenlabs/text-to-dialogue/eleven-v3", "fal-ai/dia-tts"],
+    why: "VibeVoice 7B 原生多講者長對話最自然,座談/問答式弘法音訊首選;高情感英文對話用 ElevenLabs v3。",
   },
 ];
 

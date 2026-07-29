@@ -4,6 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import {
+  armTaskWaitCore,
   completeProjectTaskCore,
   decideProjectApprovalCore,
 } from "./taskCore";
@@ -99,6 +100,121 @@ describe.skipIf(!RUN_PG).sequential("human task wake-up (real PostgreSQL)", () =
     expect(run.status).toBe("done");
     expect(run.currentStep).toBe(1);
     expect((run.steps as Array<{ status: string }>)[0].status).toBe("done");
+  });
+
+  it("atomically links an active task and persists the waiting DAG state", async () => {
+    await ensureProject();
+    const runId = randomUUID();
+    const taskId = randomUUID();
+    runIds.push(runId);
+    taskIds.push(taskId);
+    await db.insert(schema.agentRuns).values({
+      id: runId,
+      projectId,
+      groupId,
+      userId: actorId,
+      goal: "等待人工確認",
+      status: "running",
+      currentStep: 0,
+      steps: [{
+        id: "wait-confirmation",
+        kind: "wait_for_human",
+        note: "等待確認",
+        status: "pending",
+        taskId,
+      }],
+    });
+    await db.insert(schema.projectTasks).values({
+      id: taskId,
+      groupId,
+      projectId,
+      planRunId: runId,
+      planStepId: "wait-confirmation",
+      title: "確認名稱",
+      assigneeId: actorId,
+      createdBy: actorId,
+    });
+
+    const waitingSteps = [{
+      id: "wait-confirmation",
+      kind: "wait_for_human",
+      note: "等待確認",
+      status: "waiting" as const,
+      taskId,
+    }];
+    const result = await armTaskWaitCore({
+      auth,
+      taskId,
+      runId,
+      stepId: "wait-confirmation",
+      steps: waitingSteps,
+    });
+    expect(result.armed).toBe(true);
+    expect(result.task.wakeRunId).toBe(runId);
+    expect(result.task.wakeStepId).toBe("wait-confirmation");
+
+    const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, runId));
+    expect(run.status).toBe("waiting");
+    expect((run.steps as Array<{ status: string; taskId?: string }>)[0]).toMatchObject({
+      status: "waiting",
+      taskId,
+    });
+  });
+
+  it("does not arm or overwrite run progress when completion wins the task lock", async () => {
+    await ensureProject();
+    const runId = randomUUID();
+    const taskId = randomUUID();
+    runIds.push(runId);
+    taskIds.push(taskId);
+    const persistedSteps = [{
+      id: "wait-completed",
+      kind: "wait_for_human",
+      note: "等待已完成任務",
+      status: "pending",
+      taskId,
+    }];
+    await db.insert(schema.agentRuns).values({
+      id: runId,
+      projectId,
+      groupId,
+      userId: actorId,
+      goal: "不要遺失已完成狀態",
+      status: "running",
+      currentStep: 0,
+      steps: persistedSteps,
+    });
+    await db.insert(schema.projectTasks).values({
+      id: taskId,
+      groupId,
+      projectId,
+      planRunId: runId,
+      planStepId: "wait-completed",
+      title: "已完成任務",
+      status: "done",
+      assigneeId: actorId,
+      createdBy: actorId,
+      completedBy: actorId,
+      completedAt: new Date(),
+    });
+
+    const result = await armTaskWaitCore({
+      auth,
+      taskId,
+      runId,
+      stepId: "wait-completed",
+      steps: [{
+        ...persistedSteps[0],
+        status: "waiting",
+      }],
+    });
+    expect(result).toMatchObject({
+      armed: false,
+      task: { status: "done", wakeRunId: null, wakeStepId: null },
+    });
+    const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, runId));
+    expect(run.status).toBe("running");
+    expect((run.steps as Array<{ status: string }>)[0].status).toBe("pending");
   });
 
   it("rejecting approval fails closed and stops later steps", async () => {

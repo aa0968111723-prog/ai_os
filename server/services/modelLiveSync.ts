@@ -32,6 +32,7 @@ export type LiveSyncResult = {
   staticUpserted: number;
   priced: number;
   discovered: number;
+  certifiedFromHistory: number;
   unavailable: number;
   errors: string[];
   fetchedAt: string;
@@ -159,7 +160,9 @@ async function upsertLiveRows(rows: LiveRow[]): Promise<void> {
           estTwd: sql`excluded.est_twd`,
           strengths: sql`excluded.strengths`,
           bestFor: sql`excluded.best_for`,
-          verified: sql`excluded.verified`,
+          // A real successful Fal run is stronger evidence than a static
+          // catalog flag. Never downgrade that evidence on later syncs.
+          verified: sql`${schema.modelLiveCatalog.verified} or excluded.verified`,
           recommended: sql`excluded.recommended`,
           available: sql`excluded.available`,
           rawPricing: sql`excluded.raw_pricing`,
@@ -230,6 +233,14 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
 
   const canCallFal = process.env.E2E_MOCK !== "1" && !!process.env.FAL_KEY;
   if (!canCallFal) {
+    let certifiedFromHistory = 0;
+    try {
+      const { certifyFalModelsFromHistory } = await import("./modelCertification");
+      const certification = await certifyFalModelsFromHistory({ reloadCache: false });
+      certifiedFromHistory = certification.newlyCertified;
+    } catch (err) {
+      errors.push(`歷史 Fal 認證回補失敗：${err instanceof Error ? err.message : String(err)}`);
+    }
     await mirrorToModelCatalog();
     // 重新載入記憶體快取
     const { reloadLiveModelCache } = await import("./modelResolve");
@@ -238,8 +249,9 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
       staticUpserted: staticRows.length,
       priced: 0,
       discovered: 0,
+      certifiedFromHistory,
       unavailable: 0,
-      errors: ["未設定 FAL_KEY 或 E2E_MOCK=1：僅同步靜態目錄"],
+      errors: [...errors, "未設定 FAL_KEY 或 E2E_MOCK=1：僅同步靜態目錄"],
       fetchedAt: fetchedAt.toISOString(),
     };
   }
@@ -334,6 +346,15 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
     }
   }
 
+  let certifiedFromHistory = 0;
+  try {
+    const { certifyFalModelsFromHistory } = await import("./modelCertification");
+    const certification = await certifyFalModelsFromHistory({ reloadCache: false });
+    certifiedFromHistory = certification.newlyCertified;
+  } catch (err) {
+    errors.push(`歷史 Fal 認證回補失敗：${err instanceof Error ? err.message : String(err)}`);
+  }
+
   await mirrorToModelCatalog();
   const { reloadLiveModelCache } = await import("./modelResolve");
   await reloadLiveModelCache();
@@ -347,6 +368,7 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
     staticUpserted: staticRows.length,
     priced,
     discovered,
+    certifiedFromHistory,
     unavailable,
     errors,
     fetchedAt: fetchedAt.toISOString(),
@@ -358,14 +380,18 @@ export async function liveCatalogStatus(): Promise<{
   total: number;
   staticCount: number;
   discoveredCount: number;
+  verifiedCount: number;
+  unverifiedCount: number;
   lastFetchedAt: string | null;
-  sample: Array<{ id: string; label: string; points: number; estTwd: number; source: string; cost: string }>;
+  sample: Array<{ id: string; label: string; points: number; estTwd: number; source: string; cost: string; verified: boolean }>;
 }> {
   const [counts] = await db
     .select({
       total: sql<number>`count(*)::int`,
       staticCount: sql<number>`sum(case when ${schema.modelLiveCatalog.source} = 'static' then 1 else 0 end)::int`,
       discoveredCount: sql<number>`sum(case when ${schema.modelLiveCatalog.source} = 'fal_discovered' then 1 else 0 end)::int`,
+      verifiedCount: sql<number>`sum(case when ${schema.modelLiveCatalog.verified} then 1 else 0 end)::int`,
+      unverifiedCount: sql<number>`sum(case when not ${schema.modelLiveCatalog.verified} then 1 else 0 end)::int`,
       lastFetchedAt: sql<string | null>`max(${schema.modelLiveCatalog.fetchedAt})::text`,
     })
     .from(schema.modelLiveCatalog)
@@ -379,6 +405,7 @@ export async function liveCatalogStatus(): Promise<{
       estTwd: schema.modelLiveCatalog.estTwd,
       source: schema.modelLiveCatalog.source,
       cost: schema.modelLiveCatalog.cost,
+      verified: schema.modelLiveCatalog.verified,
     })
     .from(schema.modelLiveCatalog)
     .where(and(eq(schema.modelLiveCatalog.available, true), inArray(schema.modelLiveCatalog.source, ["static", "fal_discovered"])))
@@ -389,6 +416,8 @@ export async function liveCatalogStatus(): Promise<{
     total: Number(counts?.total ?? 0),
     staticCount: Number(counts?.staticCount ?? 0),
     discoveredCount: Number(counts?.discoveredCount ?? 0),
+    verifiedCount: Number(counts?.verifiedCount ?? 0),
+    unverifiedCount: Number(counts?.unverifiedCount ?? 0),
     lastFetchedAt: counts?.lastFetchedAt ?? null,
     sample,
   };

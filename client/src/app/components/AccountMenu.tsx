@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { Icon } from "../../components/Icon";
 import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
@@ -43,7 +43,7 @@ export function AccountMenu({
   const wrap = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
     const menuItems = () => [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? [])];
@@ -52,7 +52,10 @@ export function AccountMenu({
       if (!items.length) return;
       items[(index + items.length) % items.length]?.focus();
     };
-    const frame = requestAnimationFrame(() => focusItem(0));
+    // The menu DOM exists when a layout effect runs, so focus synchronously.
+    // requestAnimationFrame made keyboard focus depend on runner/frame timing
+    // and intermittently left focus on the trigger in CI and slower devices.
+    focusItem(0);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -70,7 +73,6 @@ export function AccountMenu({
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
     return () => {
-      cancelAnimationFrame(frame);
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };

@@ -58,7 +58,10 @@ export async function falSubmit(endpoint: string, kind: OutputKind, input: Recor
     timeoutMs: 45_000,
   });
   if (!res.ok) throw new Error(`fal submit 失敗 ${res.status}: ${await res.text()}`);
-  const data = (await res.json()) as { request_id: string };
+  const data = (await res.json()) as { request_id?: unknown };
+  if (typeof data.request_id !== "string" || !data.request_id.trim()) {
+    throw new Error("fal submit 回應缺少 request_id");
+  }
   return { requestId: data.request_id };
 }
 
@@ -69,8 +72,34 @@ export interface FalStatusResult {
   error?: string;
 }
 
+export function falRequestBase(endpoint: string, requestId: string): string {
+  const normalized = endpoint.trim().replace(/^\/+|\/+$/g, "");
+  if (
+    !normalized
+    || !/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)+$/i.test(normalized)
+    || normalized.split("/").includes("..")
+  ) {
+    throw new Error("Fal 模型端點格式不正確");
+  }
+  if (!requestId.trim() || requestId.includes("/") || requestId.includes("\\")) {
+    throw new Error("Fal request id 格式不正確");
+  }
+  // Fal accepts a full model endpoint for submission, but its real queue
+  // response/status/cancel URLs use the owning app namespace (first two
+  // segments). Zeabur production probes confirmed, for example:
+  //   fal-ai/image-editing/expression-change -> fal-ai/image-editing/requests/...
+  const queueApp = normalized.split("/").slice(0, 2).join("/");
+  return `https://queue.fal.run/${queueApp}/requests/${encodeURIComponent(requestId)}`;
+}
+
 export async function falStatus(endpoint: string, kind: OutputKind, requestId: string): Promise<FalStatusResult> {
   if (requestId.startsWith("mock_")) {
+    if (!MOCK) {
+      return {
+        status: "failed",
+        error: "測試生成工作不可在正式模式收尾，請重新送出真實生成",
+      };
+    }
     const job = mockJobs.get(requestId);
     if (job && Date.now() < job.doneAt) return { status: "running" };
     const prompt = job?.prompt ?? "";
@@ -82,11 +111,8 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
   }
   // 暫時性錯誤（429 限流、5xx、網路例外）→ 回 running 讓輪詢重試，絕不誤判失敗而退點；
   // 只有明確的終局狀態（4xx 非 429、非 COMPLETED、輸出無法解析）才回 failed。
-  const isTransient = (code: number): boolean => code === 429 || code >= 500;
-  // fal queue 的 status/result 只認「owner/alias」兩段 app id——子路徑模型（如 fast-sdxl/image-to-image）
-  // 用全路徑會 405（實測）。送出用全路徑、查詢用兩段。
-  const appId = endpoint.split("/").slice(0, 2).join("/");
-  const base = `https://queue.fal.run/${appId}/requests/${requestId}`;
+  const isTransient = (code: number): boolean => code === 408 || code === 425 || code === 429 || code >= 500;
+  const base = falRequestBase(endpoint, requestId);
   let statusRes: Awaited<ReturnType<typeof proxyFetch>>;
   try {
     statusRes = await proxyFetch(`${base}/status`, { headers: { Authorization: `Key ${process.env.FAL_KEY}` }, timeoutMs: 30_000 });
@@ -147,8 +173,15 @@ export function extractResult(result: Record<string, unknown>): { url?: string; 
 
   const images = result.images as Array<{ url?: string }> | undefined;
   if (images?.[0]?.url) return { url: images[0].url };
-  const media = urlOf(result.video) ?? urlOf(result.audio) ?? urlOf(result.audio_file) ?? urlOf(result.image);
+  const media =
+    urlOf(result.video)
+    ?? urlOf(result.audio)
+    ?? urlOf(result.audio_file)
+    ?? urlOf(result.image)
+    ?? urlOf(result.file)
+    ?? urlOf(result.model_file);
   if (media) return { url: media };
+  if (typeof result.image_url === "string") return { url: result.image_url };
   if (typeof result.audio_url === "string") return { url: result.audio_url };
   if (typeof result.video_url === "string") return { url: result.video_url };
   const lora = urlOf(result.diffusers_lora_file) ?? urlOf(result.lora_file);
