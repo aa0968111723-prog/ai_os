@@ -13,7 +13,7 @@ export type CreationAction =
   | { type: "ask"; message: string }
   | { type: "generate"; draft: CreationDraft }
   | { type: "run_template"; templateId: string; goal: string }
-  | { type: "create_plan"; goal: string; draft?: CreationDraft }
+  | { type: "create_plan"; goal: string; draft?: Partial<CreationDraft> }
   | {
       type: "apply_prompt";
       promptId: string;
@@ -47,19 +47,35 @@ export type CreationActionContext = {
   onAfterApply?: (result: CreationActionResult) => void;
 };
 
-/** Fields that may be carried across modes when merging a partial draft. */
-function pickBringInFields(source: CreationDraft): DraftPatch {
+/**
+ * Optional bring-in fields from a Partial draft.
+ * Never copies empty arrays (would wipe existing char/scene/source picks).
+ * Only sets worldviewEnabled when the key is explicitly present on the partial.
+ */
+function pickOptionalBringInFields(source: Partial<CreationDraft>): DraftPatch {
   const patch: DraftPatch = {};
-  if (source.goal !== undefined) patch.goal = source.goal;
-  if (source.category !== undefined) patch.category = source.category;
-  if (source.modelId !== undefined) patch.modelId = source.modelId;
-  if (source.prompt !== undefined) patch.prompt = source.prompt;
-  if (source.sourceAssetIds !== undefined) patch.sourceAssetIds = source.sourceAssetIds;
-  if (source.characterIds !== undefined) patch.characterIds = source.characterIds;
-  if (source.scenePresetIds !== undefined) patch.scenePresetIds = source.scenePresetIds;
-  if (source.worldviewEnabled !== undefined) patch.worldviewEnabled = source.worldviewEnabled;
-  if (source.templateId !== undefined) patch.templateId = source.templateId;
-  if (source.promptSourceId !== undefined) patch.promptSourceId = source.promptSourceId;
+  if (typeof source.goal === "string" && source.goal) patch.goal = source.goal;
+  if (typeof source.category === "string") patch.category = source.category;
+  if (typeof source.modelId === "string") patch.modelId = source.modelId;
+  if (typeof source.prompt === "string") patch.prompt = source.prompt;
+  if (Array.isArray(source.characterIds) && source.characterIds.length > 0) {
+    patch.characterIds = source.characterIds;
+  }
+  if (Array.isArray(source.scenePresetIds) && source.scenePresetIds.length > 0) {
+    patch.scenePresetIds = source.scenePresetIds;
+  }
+  if (Array.isArray(source.sourceAssetIds) && source.sourceAssetIds.length > 0) {
+    patch.sourceAssetIds = source.sourceAssetIds;
+  }
+  // Explicit only — never force true via emptyDraft defaults.
+  if (
+    Object.prototype.hasOwnProperty.call(source, "worldviewEnabled") &&
+    typeof source.worldviewEnabled === "boolean"
+  ) {
+    patch.worldviewEnabled = source.worldviewEnabled;
+  }
+  if (typeof source.templateId === "string") patch.templateId = source.templateId;
+  if (typeof source.promptSourceId === "string") patch.promptSourceId = source.promptSourceId;
   return patch;
 }
 
@@ -116,6 +132,8 @@ export function applyCreationAction(
     }
 
     case "run_template": {
+      // templateId is stored on draft for cross-mode survival; TemplateMode shows a hint
+      // until WB-04 pre-selects the workflow preset in UI.
       const patch: DraftPatch = {
         mode: "template",
         templateId: action.templateId,
@@ -127,7 +145,9 @@ export function applyCreationAction(
     }
 
     case "create_plan": {
-      const fromDraft = action.draft ? pickBringInFields(action.draft) : {};
+      // Only goal + mode plan required. Optional draft fields are merge-in only;
+      // empty arrays / emptyDraft defaults must never wipe existing picks (§4.2).
+      const fromDraft = action.draft ? pickOptionalBringInFields(action.draft) : {};
       const patch: DraftPatch = {
         ...fromDraft,
         goal: action.goal,
@@ -139,6 +159,9 @@ export function applyCreationAction(
     }
 
     case "apply_prompt": {
+      // Align with generate: only apply non-empty char/scene lists so omitted/empty
+      // library rows do not wipe existing workbench picks. Full-replace-with-[] is not
+      // the bring-in default (PromptLibrary page path can still clear via apply channel).
       const patch: DraftPatch = {
         mode: action.targetMode,
         promptSourceId: action.promptId,
@@ -154,9 +177,13 @@ export function applyCreationAction(
           patch.goal = action.promptText;
         }
       }
-      if (action.modelId != null) patch.modelId = action.modelId;
-      if (action.characterIds != null) patch.characterIds = action.characterIds;
-      if (action.scenePresetIds != null) patch.scenePresetIds = action.scenePresetIds;
+      if (action.modelId != null && action.modelId !== "") patch.modelId = action.modelId;
+      if (Array.isArray(action.characterIds) && action.characterIds.length > 0) {
+        patch.characterIds = action.characterIds;
+      }
+      if (Array.isArray(action.scenePresetIds) && action.scenePresetIds.length > 0) {
+        patch.scenePresetIds = action.scenePresetIds;
+      }
       ctx.setDraft(patch);
       if (action.targetMode === "ask" && action.promptText) {
         ctx.setAskInput?.(action.promptText);
@@ -207,13 +234,14 @@ export function generateBringInAction(opts: {
   return { type: "generate", draft };
 }
 
-/** Build a create_plan bring-in (fills goal + mode plan; does not call agents.plan). */
+/**
+ * Build a create_plan bring-in (fills goal + mode plan; does not call agents.plan).
+ * `draft` is a true Partial — never spreads emptyDraft() defaults (would wipe picks).
+ */
 export function planBringInAction(goal: string, draft?: Partial<CreationDraft>): CreationAction {
   return {
     type: "create_plan",
     goal,
-    draft: draft
-      ? { ...emptyDraft("plan"), ...draft, goal, mode: "plan" }
-      : undefined,
+    draft: draft ? { ...draft, goal, mode: "plan" } : undefined,
   };
 }

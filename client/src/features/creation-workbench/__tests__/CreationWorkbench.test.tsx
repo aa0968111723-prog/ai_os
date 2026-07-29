@@ -559,6 +559,34 @@ describe("CreationWorkbench", () => {
     expect(generationSubmit).not.toHaveBeenCalled();
   });
 
+  it("planBringInAction with partial prompt/model preserves page character/scene picks", async () => {
+    const { planBringInAction } = await import("../creationActions");
+    renderWorkbench({ characterIds: ["c-keep"], scenePresetIds: ["s-keep"] });
+
+    // Wait for page pick mirror into draft
+    await waitFor(() => {
+      expect(loadDraft(projectId).characterIds).toEqual(["c-keep"]);
+    });
+
+    act(() => {
+      lastAssistantProps.onCreationAction!(
+        planBringInAction("計畫目標", { prompt: "建議文字", modelId: "m-plan" }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(generationSubmit).not.toHaveBeenCalled();
+    await waitFor(() => {
+      const stored = loadDraft(projectId);
+      expect(stored.goal).toBe("計畫目標");
+      expect(stored.prompt).toBe("建議文字");
+      expect(stored.characterIds).toEqual(["c-keep"]);
+      expect(stored.scenePresetIds).toEqual(["s-keep"]);
+    });
+  });
+
   it("cross-mode: goal/prompt/model survive tab switches after bring-in", async () => {
     const user = userEvent.setup();
     const { generateBringInAction } = await import("../creationActions");

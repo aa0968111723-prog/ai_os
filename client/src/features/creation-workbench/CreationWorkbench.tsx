@@ -79,15 +79,34 @@ export function CreationWorkbench({
   const { draft, setDraft } = useCreationDraft(projectId);
   const [collapsed, setCollapsed] = useState(false);
   const [planForceOpen, setPlanForceOpen] = useState(false);
+  const [askFillRequest, setAskFillRequest] = useState<{ nonce: number; message: string } | null>(
+    null,
+  );
+  const [sideNotice, setSideNotice] = useState("");
   const utils = trpc.useUtils();
 
   // Side-effect mutations for suggestion strip (not generation.submit — no auto-charge).
   const savePrompt = trpc.prompts.save.useMutation({
-    onSuccess: () => utils.prompts.list.invalidate({ projectId }),
+    onSuccess: () => {
+      utils.prompts.list.invalidate({ projectId });
+      setSideNotice("已存進提示詞庫");
+    },
+    onError: (err) => setSideNotice(err.message || "存進提示詞庫失敗"),
   });
   const addSceneDraft = trpc.scenes.addDraft.useMutation({
-    onSuccess: () => utils.scenes.listByProject.invalidate({ projectId }),
+    onSuccess: () => {
+      utils.scenes.listByProject.invalidate({ projectId });
+      setSideNotice("已存成分鏡草稿");
+    },
+    onError: (err) => setSideNotice(err.message || "存成分鏡草稿失敗"),
   });
+
+  // Clear side-effect notice after a short beat so aria-live does not stick forever.
+  useEffect(() => {
+    if (!sideNotice) return;
+    const t = window.setTimeout(() => setSideNotice(""), 2500);
+    return () => window.clearTimeout(t);
+  }, [sideNotice]);
 
   const [focusedRunAnchor] = useState(() => {
     if (typeof window === "undefined") return null;
@@ -109,6 +128,12 @@ export function CreationWorkbench({
       const result = applyCreationAction(action, {
         draft,
         setDraft,
+        setAskInput: (message) => {
+          setAskFillRequest((prev) => ({
+            nonce: (prev?.nonce ?? 0) + 1,
+            message,
+          }));
+        },
       });
       if (result.mode === "plan") setPlanForceOpen(true);
       else if (result.mode !== "plan") setPlanForceOpen(false);
@@ -118,6 +143,17 @@ export function CreationWorkbench({
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
+            el?.focus({ preventScroll: true });
+          });
+        });
+      }
+      // Focus ask input after ask fill (still no send).
+      if (result.mode === "ask" && result.askMessage) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            const el = document.querySelector(
+              '#sec-assistant input[aria-label="問 AI 專案助手"]',
+            ) as HTMLInputElement | null;
             el?.focus({ preventScroll: true });
           });
         });
@@ -285,6 +321,7 @@ export function CreationWorkbench({
           onCreationAction={handleCreationAction}
           onSavePromptSuggestion={canEdit ? handleSavePromptSuggestion : undefined}
           onSaveSceneDraft={canEdit ? handleSaveSceneDraft : undefined}
+          askFillRequest={askFillRequest}
         />
         <DirectGenerateMode
           projectId={projectId}
@@ -312,7 +349,13 @@ export function CreationWorkbench({
           labelledBy={modeTabId(tabPrefix, "template")}
           active={mode === "template"}
           goal={draft.goal}
+          templateId={draft.templateId}
         />
+        {sideNotice ? (
+          <p className="hint" role="status" aria-live="polite" style={{ marginTop: 8 }}>
+            {sideNotice}
+          </p>
+        ) : null}
         <PlanMode
           projectId={projectId}
           canEdit={canEdit}

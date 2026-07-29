@@ -95,6 +95,7 @@ export function ProjectAssistant({
   onCreationAction,
   onSavePromptSuggestion,
   onSaveSceneDraft,
+  askFillRequest = null,
 }: {
   projectId: string;
   embedded?: boolean;
@@ -104,6 +105,11 @@ export function ProjectAssistant({
   onSavePromptSuggestion?: (text: string, modelId?: string) => void;
   /** Optional: 存成分鏡草稿 from suggestion strip. */
   onSaveSceneDraft?: (text: string) => void;
+  /**
+   * Workbench CreationAction type:"ask" / apply_prompt→ask: fill chat input without sending.
+   * nonce bumps so the same message can re-apply.
+   */
+  askFillRequest?: { nonce: number; message: string } | null;
 }) {
   const utils = trpc.useUtils();
   const [input, setInput] = useState("");
@@ -298,6 +304,13 @@ export function ProjectAssistant({
     setLiveTraceOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  // WB-03: CreationAction ask / apply_prompt→ask fills input without sending (no charge).
+  useEffect(() => {
+    if (!askFillRequest) return;
+    setInput(askFillRequest.message);
+    setCollapsed(false);
+  }, [askFillRequest]);
 
   // 一鍵清除：清對話與所有連帶暫存（已執行標記、換模型選擇），回到冷啟動可再問
   const clear = () => {
