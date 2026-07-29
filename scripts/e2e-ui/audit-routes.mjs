@@ -21,21 +21,29 @@ const ROUTES = [
   "/chat"
 ];
 
+// 根據 PR 165 計畫定義的必測基準裝置
+const VIEWPORTS = [
+  { name: "S-360", width: 360, height: 800 },
+  { name: "S-390", width: 390, height: 844 },
+  { name: "M-768", width: 768, height: 1024 },
+  { name: "L-1280", width: 1280, height: 800 },
+  { name: "XL-1440", width: 1440, height: 900 },
+];
+
 const TARGET_URL = process.env.TARGET_URL || "http://localhost:3000";
-const OUT_DIR = process.env.OUT_DIR || "./e2e-ui-out/routes";
+const OUT_DIR = process.env.OUT_DIR || "./e2e-ui-out/routes-breakpoints";
 const TEST_EMAIL = process.env.TEST_EMAIL || "test@example.com";
 const TEST_PW = process.env.TEST_PW || "password";
 
 async function run() {
-  console.log(`開始執行全路由巡覽... 目標網址: ${TARGET_URL}`);
+  console.log(`開始執行全路由與多裝置尺寸巡覽... 目標網址: ${TARGET_URL}`);
 
   if (!fs.existsSync(OUT_DIR)) {
     fs.mkdirSync(OUT_DIR, { recursive: true });
   }
 
   const browser = await chromium.launch({ headless: true });
-  // 預設使用 L-1280 桌面斷點進行巡覽
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext();
   const page = await context.newPage();
 
   // 1. 執行登入流程
@@ -49,31 +57,39 @@ async function run() {
     
     // 等待登入完成並跳轉
     await page.waitForTimeout(3000);
-    console.log("✅ 登入動作完成，開始巡覽路由...");
+    console.log("✅ 登入動作完成，開始巡覽路由與裝置尺寸...");
   } catch (err) {
     console.error("❌ 登入失敗，請確認網站狀態或選擇器是否正確:", err.message);
   }
 
-  // 2. 實際進入每一個主要頁面並截圖
+  // 2. 實際進入每一個主要頁面，並在每個裝置尺寸下截圖
   for (const route of ROUTES) {
-    console.log(`正在訪問: ${route}`);
+    console.log(`\n正在訪問: ${route}`);
     try {
       await page.goto(`${TARGET_URL}${route}`, { waitUntil: "networkidle", timeout: 15000 });
       // 稍微等待非同步資料或動畫載入
       await page.waitForTimeout(1500);
       
       const safeName = route === "/" ? "home" : route.replace(/\//g, "-").replace(/^-/, "");
-      const shotPath = path.join(OUT_DIR, `route-${safeName}.png`);
-      
-      await page.screenshot({ path: shotPath, fullPage: true });
-      console.log(`✅ 截圖已儲存: ${shotPath}`);
+
+      // 針對該路由測試所有裝置尺寸
+      for (const vp of VIEWPORTS) {
+        console.log(`  - 測試斷點: ${vp.name} (${vp.width}x${vp.height})`);
+        await page.setViewportSize({ width: vp.width, height: vp.height });
+        // 等待 RWD 重新渲染
+        await page.waitForTimeout(500);
+        
+        const shotPath = path.join(OUT_DIR, `route-${safeName}-${vp.name}.png`);
+        await page.screenshot({ path: shotPath, fullPage: true });
+        console.log(`    ✅ 截圖已儲存: ${shotPath}`);
+      }
     } catch (err) {
       console.error(`❌ 訪問 ${route} 失敗:`, err.message);
     }
   }
 
   await browser.close();
-  console.log("🎉 路由巡覽與截圖盤點完成！請至 e2e-ui-out/routes 資料夾查看實際畫面。");
+  console.log("\n🎉 路由與多裝置尺寸巡覽截圖盤點完成！請至 e2e-ui-out/routes-breakpoints 資料夾查看實際畫面。");
 }
 
 run().catch((err) => {
