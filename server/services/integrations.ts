@@ -12,7 +12,7 @@
  * - OAuth state＝HMAC 簽章＋10 分鐘效期＋timingSafeEqual＋callback 比對登入者（三重繫結防 CSRF/跨帳綁定）。
  * - 外部 API 抓取：https 限定、固定同源（憑證絕不送去 baseUrl 以外的主機）、不跟隨重導向、
  *   SSRF 守衛（字面快篩＋DNS 權威判準）與 25MB/25s 上限全沿用 databaseFiles。
- * - google-drive 的 invalid_grant → 連線標記 error 引導重連（不對死憑證重打）。
+ * - google-drive 的 invalid_grant／持續 HTTP 401 → 連線標記 error 引導重連；快取 token 遇 401 會清除並強制刷新一次。
  */
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -222,11 +222,12 @@ export async function saveGoogleDrive(userId: string, refreshToken: string, emai
 /** access token 短快取（效期約 1 小時，留 5 分鐘邊際）；單容器記憶體 Map（全站慣例） */
 const driveAccessCache = new Map<string, { token: string; expiresAt: number }>();
 
-async function driveAccessToken(row: IntegrationRow): Promise<string> {
+async function driveAccessToken(row: IntegrationRow, forceRefresh = false): Promise<string> {
+  if (forceRefresh) driveAccessCache.delete(row.id);
   const hit = driveAccessCache.get(row.id);
   if (hit && hit.expiresAt > Date.now()) return hit.token;
   const refreshToken = await decryptOrMarkError(row);
-  if (!refreshToken) throw new Error("Google 雲端連結需要重新設定——請到「整合連接」頁重新連結");
+  if (!refreshToken) throw new Error("Google 雲端連結需要重新設定——請到「連接的資料來源」頁重新連結");
   try {
     const json = await tokenRequest({
       refresh_token: refreshToken,
@@ -242,7 +243,7 @@ async function driveAccessToken(row: IntegrationRow): Promise<string> {
   } catch (err) {
     if ((err as Error & { oauthError?: string }).oauthError === "invalid_grant") {
       await db.update(schema.userIntegrations)
-        .set({ status: "error", lastError: "Google 授權已失效（可能已在 Google 帳戶端撤銷）——請重新連結" })
+        .set({ status: "error", lastError: "Google 授權已失效（可能已在 Google 帳戶端撤銷或測試授權已到期）——請重新連結" })
         .where(eq(schema.userIntegrations.id, row.id));
     }
     throw err;
@@ -254,10 +255,60 @@ export type DriveFetchResult =
   | { ok: false; reason: "not-connected" | "no-access" | "error"; message: string };
 
 /**
+ * 只有「未連結」或「已連結帳戶沒有該檔權限」才值得再試公開連結。
+ * token 解密、刷新、401、Google 服務錯誤等連線問題必須直接顯示，不能被公開抓取的 401/404 蓋掉。
+ */
+export function shouldFallbackToPublicDrive(result: DriveFetchResult | null): boolean {
+  return !result || (!result.ok && (result.reason === "not-connected" || result.reason === "no-access"));
+}
+
+/** 私有路徑與公開路徑都失敗時，保留「目前連結帳戶」線索，避免只看到無上下文的 HTTP 401/404。 */
+export function driveImportFailureMessage(result: DriveFetchResult | null, publicError: string): string {
+  if (!result || result.ok || result.reason === "not-connected") return publicError;
+  if (result.reason === "no-access") return `${result.message}；公開連結也無法讀取（${publicError}）`;
+  return result.message;
+}
+
+function connectedDriveAccount(row: IntegrationRow): string {
+  return typeof row.meta?.email === "string" && row.meta.email ? `（${row.meta.email}）` : "";
+}
+
+function driveNoAccessMessage(row: IntegrationRow): string {
+  return `目前連結的 Google 帳戶${connectedDriveAccount(row)}沒有這個檔案的存取權——請把檔案分享給此帳戶；若連錯帳號，請先中斷連結再重新連結`;
+}
+
+const DRIVE_REAUTH_MESSAGE = "Google 雲端授權已失效或無法使用——請到「連接的資料來源」重新連結 Google 雲端";
+
+async function markDriveAuthError(row: IntegrationRow, message = DRIVE_REAUTH_MESSAGE): Promise<void> {
+  driveAccessCache.delete(row.id);
+  await db.update(schema.userIntegrations)
+    .set({ status: "error", lastError: message })
+    .where(eq(schema.userIntegrations.id, row.id))
+    .catch(() => {});
+}
+
+/** 帶 access token 呼叫 Drive；若快取 token 提早失效，清快取並以 refresh token 強制換新後只重試一次。 */
+async function driveFetchAuthorized(row: IntegrationRow, url: string, timeoutMs: number): Promise<Response> {
+  const run = async (token: string) => proxyFetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    timeoutMs,
+  });
+
+  let res = await run(await driveAccessToken(row));
+  if (res.status !== 401) return res;
+
+  // Google 可能在本地 TTL 前撤銷 access token；丟掉 401 回應與快取，強制走 refresh token 再試一次。
+  await res.body?.cancel().catch(() => {});
+  res = await run(await driveAccessToken(row, true));
+  if (res.status === 401) await markDriveAuthError(row);
+  return res;
+}
+
+/**
  * 用「使用者自己的」Google 授權抓私有檔。normalizeImportUrl 解析出的 kind+fileId 進來：
  * - google-doc/sheet/slides 走 Drive export（txt/csv/txt——與公開匯出同格式，後續抽取邏輯不變）；
  * - google-drive 一般檔案先查中繼資料（名稱/大小預檢）再 alt=media 下載。
- * 找不到/無權限回 no-access（呼叫端退回公開路徑或給人話）；未連結回 not-connected。
+ * 找不到/無權限回 no-access（呼叫端可再試公開路徑）；連線/憑證異常回 error（不得用公開 401/404 蓋掉）。
  */
 export async function fetchDriveFile(
   userId: string,
@@ -266,19 +317,26 @@ export async function fetchDriveFile(
 ): Promise<DriveFetchResult> {
   if (!isGoogleDriveConfigured()) return { ok: false, reason: "not-connected", message: "站方尚未設定 Google 整合" };
   const row = await findIntegration(userId, "google-drive");
-  if (!row || row.status !== "active") return { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
+  if (!row || row.status !== "active") {
+    return {
+      ok: false,
+      reason: "not-connected",
+      message: row?.status === "error" ? row.lastError || DRIVE_REAUTH_MESSAGE : "尚未連結 Google 雲端",
+    };
+  }
   try {
-    const token = await driveAccessToken(row);
-    const headers = { Authorization: `Bearer ${token}` };
     const id = encodeURIComponent(fileId);
     let url: string;
     let mimeFallback: string;
     let name: string | null = null;
     if (kind === "google-drive") {
-      const metaRes = await proxyFetch(`${DRIVE_API}/files/${id}?fields=name,mimeType,size&supportsAllDrives=true`, { headers, timeoutMs: 15_000 });
+      const metaRes = await driveFetchAuthorized(row, `${DRIVE_API}/files/${id}?fields=name,mimeType,size&supportsAllDrives=true`, 15_000);
+      if (metaRes.status === 401) return { ok: false, reason: "error", message: DRIVE_REAUTH_MESSAGE };
       if (metaRes.status === 404 || metaRes.status === 403) {
-        return { ok: false, reason: "no-access", message: `你的 Google 帳戶${row.meta?.email ? `（${row.meta.email}）` : ""}沒有這個檔案的存取權` };
+        return { ok: false, reason: "no-access", message: driveNoAccessMessage(row) };
       }
+      if (metaRes.status === 429) return { ok: false, reason: "error", message: "Google Drive 請求過於頻繁，請稍後再試" };
+      if (metaRes.status >= 500) return { ok: false, reason: "error", message: "Google Drive 服務暫時無法使用，請稍後再試" };
       if (!metaRes.ok) throw new Error(`Google Drive 中繼資料查詢失敗（HTTP ${metaRes.status}）`);
       const meta = (await metaRes.json()) as { name?: string; mimeType?: string; size?: string };
       const size = Number(meta.size ?? 0);
@@ -289,12 +347,15 @@ export async function fetchDriveFile(
     } else {
       const exportMime = kind === "google-sheet" ? "text/csv" : "text/plain";
       mimeFallback = exportMime;
-      url = `${DRIVE_API}/files/${id}/export?mimeType=${encodeURIComponent(exportMime)}&supportsAllDrives=true`;
+      url = `${DRIVE_API}/files/${id}/export?mimeType=${encodeURIComponent(exportMime)}`;
     }
-    const res = await proxyFetch(url, { headers, timeoutMs: 25_000 });
+    const res = await driveFetchAuthorized(row, url, 25_000);
+    if (res.status === 401) return { ok: false, reason: "error", message: DRIVE_REAUTH_MESSAGE };
     if (res.status === 404 || res.status === 403) {
-      return { ok: false, reason: "no-access", message: `你的 Google 帳戶${row.meta?.email ? `（${row.meta.email}）` : ""}沒有這個檔案的存取權` };
+      return { ok: false, reason: "no-access", message: driveNoAccessMessage(row) };
     }
+    if (res.status === 429) return { ok: false, reason: "error", message: "Google Drive 請求過於頻繁，請稍後再試" };
+    if (res.status >= 500) return { ok: false, reason: "error", message: "Google Drive 服務暫時無法使用，請稍後再試" };
     if (!res.ok) throw new Error(`Google Drive 讀取失敗（HTTP ${res.status}）`);
     const buf = await readBodyCapped(res, MAX_IMPORT_BYTES);
     const mime = (res.headers.get("content-type") ?? mimeFallback).split(";")[0].trim().toLowerCase();
@@ -312,14 +373,15 @@ export async function fetchDriveFile(
 /** 中斷 Google 雲端連結：盡力撤銷 token 再刪本地紀錄。
  *  ★ 例外：同一人若還有「Google 日曆」連線（同一組 GCP client）——Google 撤銷任一 refresh token
  *  可能連帶撤銷該 user×client 的整個授權，把日曆同步一起弄斷；此時只刪本地紀錄、不打撤銷端點
- *  （本地憑證已刪即不可再用；要徹底撤銷可到 Google 帳戶安全設定移除授權）。 */
+ *  （本地憑證已刪即不可再用；要徹底撤銷可到 Google 帳戶安全設定移除授權）。
+ *  任何日曆查詢/撤銷端點錯誤都不得阻止本地刪除，避免 UI 永遠卡在「已連結」。 */
 async function disconnectGoogleDrive(row: IntegrationRow): Promise<void> {
   driveAccessCache.delete(row.id);
-  const [calendarConn] = await db.select({ id: schema.googleCalendarConnections.id })
-    .from(schema.googleCalendarConnections)
-    .where(and(eq(schema.googleCalendarConnections.userId, row.userId), eq(schema.googleCalendarConnections.status, "active")));
-  if (calendarConn) return;
   try {
+    const [calendarConn] = await db.select({ id: schema.googleCalendarConnections.id })
+      .from(schema.googleCalendarConnections)
+      .where(and(eq(schema.googleCalendarConnections.userId, row.userId), eq(schema.googleCalendarConnections.status, "active")));
+    if (calendarConn) return;
     const refreshToken = decryptSecret(row.secretEnc);
     await proxyFetch(OAUTH_REVOKE_URL, {
       method: "POST",
@@ -327,7 +389,7 @@ async function disconnectGoogleDrive(row: IntegrationRow): Promise<void> {
       body: new URLSearchParams({ token: refreshToken }).toString(),
       timeoutMs: 10_000,
     });
-  } catch { /* 授權可能已失效——本地清理照做 */ }
+  } catch { /* 日曆查詢/授權撤銷可能失敗——本地清理照做 */ }
 }
 
 /* ────────────────────────── Notion（個人 integration token） ────────────────────────── */
