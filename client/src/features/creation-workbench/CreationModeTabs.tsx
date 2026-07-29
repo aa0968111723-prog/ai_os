@@ -77,9 +77,9 @@ export function CreationModeTabs({
             }}
             type="button"
             role="tab"
-            id={`${prefix}-tab-${item.id}`}
+            id={modeTabId(prefix, item.id)}
             aria-selected={selected}
-            aria-controls={`${prefix}-panel-${item.id}`}
+            aria-controls={modePanelId(prefix, item.id)}
             tabIndex={selected ? 0 : -1}
             className="btn-ghost"
             onClick={() => onModeChange(item.id)}

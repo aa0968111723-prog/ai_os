@@ -1,6 +1,9 @@
+import { scrollToSelector } from "./workbenchNav";
+
 /**
  * Chips that scroll to existing project sections — same targets as AiHub.
- * Prefer reduced motion: use instant scroll when user prefers reduced motion.
+ * Prefer reduced motion: use instant scroll when user prefers reduced motion
+ * (handled inside scrollToSelector / goTo).
  */
 
 export const CREATION_CONTEXT_LINKS: ReadonlyArray<{ label: string; target: string }> = [
@@ -11,26 +14,15 @@ export const CREATION_CONTEXT_LINKS: ReadonlyArray<{ label: string; target: stri
   { label: "分鏡與交付", target: "#stage-deliver" },
 ];
 
-function scrollBehavior(): ScrollBehavior {
-  if (typeof window === "undefined") return "auto";
-  try {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return "auto";
-  } catch {
-    /* ignore */
-  }
-  return "smooth";
-}
-
-export function scrollToSelector(selector: string): void {
-  requestAnimationFrame(() => {
-    document.querySelector(selector)?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
-  });
-}
+export { scrollToSelector };
 
 export function CreationContextBar({
   onNavigate,
 }: {
-  /** Optional hook before scroll (e.g. expand hub body) */
+  /**
+   * When provided, sole click handler (should expand/mode-switch + scroll).
+   * When omitted, bar scrolls to the target itself.
+   */
   onNavigate?: (target: string) => void;
 }) {
   return (
@@ -42,8 +34,8 @@ export function CreationContextBar({
           type="button"
           className="chip pick"
           onClick={() => {
-            onNavigate?.(item.target);
-            scrollToSelector(item.target);
+            if (onNavigate) onNavigate(item.target);
+            else scrollToSelector(item.target);
           }}
         >
           {item.label}

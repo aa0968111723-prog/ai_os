@@ -1,5 +1,5 @@
 import { Icon } from "../../../components/Icon";
-import { scrollToSelector } from "../CreationContextBar";
+import { scrollToSelector } from "../workbenchNav";
 import { CreationCostSummary } from "../CreationCostSummary";
 
 /**

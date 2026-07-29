@@ -1,22 +1,29 @@
-import { useEffect, useId, useState } from "react";
-import { trpc } from "../../api";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Icon } from "../../components/Icon";
 import { flashAnchor } from "../../discuss";
-import { CreationContextBar, scrollToSelector } from "./CreationContextBar";
+import { CreationContextBar } from "./CreationContextBar";
 import { CreationGoalInput } from "./CreationGoalInput";
-import { CreationModeTabs } from "./CreationModeTabs";
+import { CreationModeTabs, modePanelId, modeTabId } from "./CreationModeTabs";
 import { CreationResourceDrawer } from "./CreationResourceDrawer";
 import { useCreationDraft, type CreationMode } from "./creationDraft";
 import { AskAiMode } from "./modes/AskAiMode";
 import { DirectGenerateMode } from "./modes/DirectGenerateMode";
 import { PlanMode } from "./modes/PlanMode";
 import { TemplateMode } from "./modes/TemplateMode";
+import { useAgentRunBadges } from "./useAgentRunBadges";
+import {
+  modeForAnchor,
+  scrollToSelector,
+  WORKBENCH_REVEAL_EVENT,
+  type WorkbenchRevealDetail,
+} from "./workbenchNav";
 
 /**
  * AI 創作工作台 shell（WB-01）：單一主卡入口、目標輸入、模式 tabs、上下文條與共享草稿。
  * 四種模式以 adapter 嵌入既有能力；不改 API、不刪除舊元件（生成台／範本卡仍在 ProjectPage）。
  *
  * Anchors preserved for deep links: #sec-ai-hub, #sec-assistant, #sec-agent.
+ * External chips use revealWorkbenchAnchor() so hidden tabpanels are shown first.
  */
 export function CreationWorkbench({
   projectId,
@@ -29,6 +36,7 @@ export function CreationWorkbench({
 }) {
   const reactId = useId();
   const tabPrefix = `cw-${reactId.replace(/:/g, "")}`;
+  const goalInputId = `${tabPrefix}-goal`;
   const { draft, setDraft } = useCreationDraft(projectId);
   const [collapsed, setCollapsed] = useState(false);
   const [planForceOpen, setPlanForceOpen] = useState(false);
@@ -39,11 +47,9 @@ export function CreationWorkbench({
     return focus?.startsWith("agent-run-") ? focus : null;
   });
 
-  // Activity badges — same query key as AgentCard / PlanMode (shared cache).
-  const runs = trpc.agents.listByProject.useQuery({ projectId });
-  const awaiting = (runs.data ?? []).filter((r) => r.status === "awaiting_approval").length;
-  const running = (runs.data ?? []).filter((r) => r.status === "running").length;
-  const waiting = (runs.data ?? []).filter((r) => r.status === "waiting").length;
+  const { awaiting, running, waiting } = useAgentRunBadges(projectId);
+
+  const clearPlanForceOpen = useCallback(() => setPlanForceOpen(false), []);
 
   useEffect(() => {
     if (!focusedRunAnchor) return;
@@ -58,28 +64,53 @@ export function CreationWorkbench({
     return () => window.clearInterval(timer);
   }, [focusedRunAnchor, setDraft]);
 
+  // External reveal: GenerationList chips, requestWorkbenchMode, etc.
+  useEffect(() => {
+    const onReveal = (event: Event) => {
+      const detail = (event as CustomEvent<WorkbenchRevealDetail>).detail;
+      if (!detail) return;
+      if (detail.projectId && detail.projectId !== projectId) return;
+
+      if (detail.expand !== false) setCollapsed(false);
+
+      const mode = detail.mode ?? (detail.anchor ? modeForAnchor(detail.anchor) : null);
+      if (mode) setDraft({ mode });
+
+      if (detail.openPlan || mode === "plan" || detail.anchor === "sec-agent") {
+        setPlanForceOpen(true);
+      }
+
+      if (detail.scroll !== false && detail.anchor) {
+        const selector = `#${detail.anchor}`;
+        // Double rAF: wait for React commit that unhides the tabpanel.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => scrollToSelector(selector));
+        });
+      }
+    };
+    window.addEventListener(WORKBENCH_REVEAL_EVENT, onReveal);
+    return () => window.removeEventListener(WORKBENCH_REVEAL_EVENT, onReveal);
+  }, [projectId, setDraft]);
+
   const mode = draft.mode;
 
   const onModeChange = (next: CreationMode) => {
     setDraft({ mode: next });
-    if (next === "plan") setPlanForceOpen(false);
+    // Clear sticky forceOpen on any user tab change (enter or leave plan).
+    setPlanForceOpen(false);
   };
 
+  /** Single path: mode switch (if workbench anchor) + one reduced-motion scroll. */
   const goTo = (selector: string) => {
-    if (selector === "#sec-agent") {
-      setDraft({ mode: "plan" });
-      setPlanForceOpen(true);
+    setCollapsed(false);
+    const id = selector.replace(/^#/, "");
+    const nextMode = modeForAnchor(id);
+    if (nextMode) {
+      setDraft({ mode: nextMode });
+      if (nextMode === "plan") setPlanForceOpen(true);
+      else setPlanForceOpen(false);
     }
-    if (selector === "#sec-assistant") {
-      setDraft({ mode: "ask" });
-    }
-    if (selector === "#sec-studio") {
-      setDraft({ mode: "generate" });
-    }
-    if (selector === "#sec-workflow") {
-      setDraft({ mode: "template" });
-    }
-    requestAnimationFrame(() => scrollToSelector(selector));
+    scrollToSelector(selector);
   };
 
   return (
@@ -120,7 +151,11 @@ export function CreationWorkbench({
           所有能力沿用目前專案的知識、資料、素材、分鏡、權限、點數與核准規則。
         </p>
 
-        <CreationGoalInput goal={draft.goal} onGoalChange={(goal) => setDraft({ goal })} />
+        <CreationGoalInput
+          inputId={goalInputId}
+          goal={draft.goal}
+          onGoalChange={(goal) => setDraft({ goal })}
+        />
 
         <CreationModeTabs mode={mode} onModeChange={onModeChange} tabPanelIdPrefix={tabPrefix} />
 
@@ -129,19 +164,19 @@ export function CreationWorkbench({
         {/* Only one mode panel visible; all stay mounted so draft/assistant state survives switches. */}
         <AskAiMode
           projectId={projectId}
-          panelId={`${tabPrefix}-panel-ask`}
-          labelledBy={`${tabPrefix}-tab-ask`}
+          panelId={modePanelId(tabPrefix, "ask")}
+          labelledBy={modeTabId(tabPrefix, "ask")}
           active={mode === "ask"}
         />
         <DirectGenerateMode
-          panelId={`${tabPrefix}-panel-generate`}
-          labelledBy={`${tabPrefix}-tab-generate`}
+          panelId={modePanelId(tabPrefix, "generate")}
+          labelledBy={modeTabId(tabPrefix, "generate")}
           active={mode === "generate"}
           goal={draft.goal}
         />
         <TemplateMode
-          panelId={`${tabPrefix}-panel-template`}
-          labelledBy={`${tabPrefix}-tab-template`}
+          panelId={modePanelId(tabPrefix, "template")}
+          labelledBy={modeTabId(tabPrefix, "template")}
           active={mode === "template"}
           goal={draft.goal}
         />
@@ -149,10 +184,11 @@ export function CreationWorkbench({
           projectId={projectId}
           canEdit={canEdit}
           isLeader={isLeader}
-          panelId={`${tabPrefix}-panel-plan`}
-          labelledBy={`${tabPrefix}-tab-plan`}
+          panelId={modePanelId(tabPrefix, "plan")}
+          labelledBy={modeTabId(tabPrefix, "plan")}
           active={mode === "plan"}
           forceOpen={planForceOpen}
+          onForceOpenConsumed={clearPlanForceOpen}
           goal={draft.goal}
         />
 

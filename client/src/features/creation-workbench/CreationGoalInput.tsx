@@ -1,19 +1,27 @@
+import { useId } from "react";
+
 export function CreationGoalInput({
   goal,
   onGoalChange,
   disabled = false,
+  inputId,
 }: {
   goal: string;
   onGoalChange: (goal: string) => void;
   disabled?: boolean;
+  /** Optional stable id from parent; defaults to useId() for multi-instance safety */
+  inputId?: string;
 }) {
+  const autoId = useId();
+  const id = inputId ?? `creation-goal-${autoId.replace(/:/g, "")}`;
+
   return (
     <div className="creation-goal-input" style={{ marginTop: 8 }}>
-      <label htmlFor="creation-goal" style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>
+      <label htmlFor={id} style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>
         想完成什麼？
       </label>
       <textarea
-        id="creation-goal"
+        id={id}
         rows={2}
         value={goal}
         disabled={disabled}

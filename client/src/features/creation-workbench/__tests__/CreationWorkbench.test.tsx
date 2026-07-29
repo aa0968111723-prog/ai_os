@@ -1,8 +1,9 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CreationWorkbench } from "../CreationWorkbench";
 import { clearDraft, loadDraft, saveDraft, emptyDraft, updateDraft } from "../creationDraft";
+import { revealWorkbenchAnchor } from "../workbenchNav";
 
 const listByProject = vi.fn();
 const flashAnchor = vi.fn();
@@ -288,11 +289,89 @@ describe("CreationWorkbench", () => {
     await user.click(screen.getByRole("button", { name: "展開" }));
     expect(body).not.toHaveAttribute("hidden");
   });
+
+  it("revealWorkbenchAnchor(#sec-agent) from other mode shows plan panel (GenerationList path)", async () => {
+    renderWorkbench();
+    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+    // Plan panel is mounted but hidden while ask is active
+    const hiddenPlan = document.getElementById("sec-agent")?.closest('[role="tabpanel"]');
+    expect(hiddenPlan).toHaveAttribute("hidden");
+
+    act(() => {
+      revealWorkbenchAnchor("#sec-agent", { projectId });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+    });
+    const planPanel = screen.getByRole("tabpanel", { name: /執行計畫/ });
+    expect(planPanel).not.toHaveAttribute("hidden");
+    expect(document.getElementById("sec-agent")?.closest("[hidden]")).toBeNull();
+    expect(document.querySelector("#sec-agent")).toHaveAttribute("open");
+    await waitFor(() => {
+      expect(document.getElementById("sec-agent")?.scrollIntoView).toHaveBeenCalled();
+    });
+  });
+
+  it("revealWorkbenchAnchor(#sec-assistant) switches to ask mode", async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+
+    act(() => {
+      revealWorkbenchAnchor("#sec-assistant", { projectId });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByRole("tabpanel", { name: /問 AI/ })).not.toHaveAttribute("hidden");
+    expect(document.getElementById("sec-assistant")?.closest("[hidden]")).toBeNull();
+  });
+
+  it("restored plan-mode draft does not force-open empty execution details", () => {
+    saveDraft(projectId, { ...emptyDraft("plan"), goal: "restore-plan" });
+    renderWorkbench();
+
+    expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("restore-plan");
+    // No active runs and no forceOpen → collapsed like AiHub default
+    expect(document.querySelector("#sec-agent")).not.toHaveAttribute("open");
+  });
+
+  it("tab aria-controls matches tabpanel id", () => {
+    renderWorkbench();
+    const tab = screen.getByRole("tab", { name: /問 AI/ });
+    const controls = tab.getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+    const panel = document.getElementById(controls!);
+    expect(panel).toHaveAttribute("role", "tabpanel");
+    expect(panel).not.toHaveAttribute("hidden");
+  });
+
+  it("switches draft when projectId prop changes without cross-bleed", async () => {
+    saveDraft("project-1", { ...emptyDraft("ask"), goal: "goal-one" });
+    saveDraft("project-2", { ...emptyDraft("generate"), goal: "goal-two" });
+
+    const { rerender } = render(<CreationWorkbench projectId="project-1" canEdit />);
+    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("goal-one");
+    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+
+    rerender(<CreationWorkbench projectId="project-2" canEdit />);
+    await waitFor(() => {
+      expect(screen.getByLabelText("想完成什麼？")).toHaveValue("goal-two");
+    });
+    expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+
+    // project-1 storage untouched
+    expect(loadDraft("project-1").goal).toBe("goal-one");
+  });
 });
 
 describe("creationDraft helpers", () => {
   afterEach(() => {
     clearDraft("p-a");
+    clearDraft("p-b");
   });
 
   it("load/save/update round-trip", () => {
@@ -305,5 +384,16 @@ describe("creationDraft helpers", () => {
     expect(next.mode).toBe("plan");
     expect(next.goal).toBe("hello");
     expect(next.prompt).toBe("x");
+  });
+
+  it("isolates drafts by projectId", () => {
+    saveDraft("p-a", { ...emptyDraft("ask"), goal: "alpha" });
+    saveDraft("p-b", { ...emptyDraft("template"), goal: "beta" });
+    expect(loadDraft("p-a").goal).toBe("alpha");
+    expect(loadDraft("p-a").mode).toBe("ask");
+    expect(loadDraft("p-b").goal).toBe("beta");
+    expect(loadDraft("p-b").mode).toBe("template");
+    updateDraft("p-a", { goal: "alpha-2" });
+    expect(loadDraft("p-b").goal).toBe("beta");
   });
 });
