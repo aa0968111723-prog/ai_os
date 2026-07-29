@@ -541,6 +541,29 @@ UX-00 → UX-01 → UX-02 → UX-03 → UX-04 → UX-05 → UX-06 → UX-07 → 
 
 ---
 
+## 15. 實際成功檢查的頁面與路由
+
+透過自動化巡覽腳本（`scripts/e2e-ui/audit-routes.mjs`），以下主要頁面與路由已納入 UX-00 基準盤點與多裝置尺寸（360, 390, 768, 1280, 1440）的截圖測試範圍：
+
+- `/`：作業台 (Launchpad)
+- `/admin`：管理員頁面 (AdminPage)
+- `/options`：群組設定 (GroupOptionsEditor)
+- `/logs`：用量監控與日誌 (Logs)
+- `/members`：成員管理 (MembersPage)
+- `/feedback`：回饋頁面 (FeedbackPage)
+- `/my-reports`：我的報告 (MyReportsPage)
+- `/models`：模型列表 (ModelsPage)
+- `/help`：說明中心 (HelpPage)
+- `/mcp`：MCP 整合 (McpPage)
+- `/integrations`：外部整合 (IntegrationsPage)
+- `/downloads`：下載區 (DownloadsPage)
+- `/planner`：排程與計畫 (PlannerPage)
+- `/databases`：資料庫 (DatabasesPage)
+- `/chat`：聊天與私訊 (ChatPage)
+- `/p/:id`：專案工作台 (ProjectPage)
+
+---
+
 ## 附錄 A — 優先級
 
 | 級 | 範圍 |
