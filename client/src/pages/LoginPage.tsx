@@ -60,7 +60,12 @@ export function LoginPage() {
   };
 
   return (
-    <div style={{ minHeight: "70vh", display: "grid", placeItems: "center" }}>
+    <div style={{ 
+      minHeight: "100dvh", 
+      display: "grid", 
+      placeItems: "center",
+      padding: "max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom))"
+    }}>
       <div className="card login-card">
         <BrandReveal mode="fade-rise" onceKey="login" durationMs={720}>
           <div className="login-brand">
