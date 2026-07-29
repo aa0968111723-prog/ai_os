@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { getModel, supportsCardAnchors, CATEGORIES } from "@shared/models";
 import { trpc } from "../../../api";
 import { ModelPicker, type PickedModel } from "../../../components/ModelPicker";
-import { GenerationList } from "../../../components/GenerationList";
 import { Icon } from "../../../components/Icon";
 import { CollabZone, type CollabPeer } from "../../../realtime";
 import { CreationCostSummary } from "../CreationCostSummary";
@@ -60,7 +59,7 @@ export function DirectGenerateMode({
   draft,
   setDraft,
   applyRequest,
-  onReuseSettings,
+  onReuseSettings: _onReuseSettings,
   onSourceChange,
   collab,
 }: {
@@ -82,8 +81,8 @@ export function DirectGenerateMode({
   /** Parent-driven apply (PromptLibrary / AssetLibrary / SceneList). */
   applyRequest?: DirectGenerateApplyRequest | null;
   /**
-   * Called when GenerationList「再用此設定」fires — parent should update char/scene
-   * pick state (and may re-enter via applyRequest for prompt/model/source).
+   * @deprecated WB-05: GenerationList moved to CreationResourceDrawer; reuse is wired there.
+   * Kept optional so callers need not change signatures this PR.
    */
   onReuseSettings?: (
     text: string,
@@ -98,6 +97,7 @@ export function DirectGenerateMode({
   onSourceChange?: (sourceAssetId: string | null) => void;
   collab?: StudioCollabProps | null;
 }) {
+  void _onReuseSettings;
   const utils = trpc.useUtils();
   const [model, setModel] = useState<PickedModel | null>(null);
   const [sourceAsset, setSourceAsset] = useState<{ id: string; title: string; kind: string } | null>(
@@ -565,34 +565,10 @@ export function DirectGenerateMode({
       )}
       {submit.error && <p className="error">{submit.error.message}</p>}
 
-      <GenerationList
-        projectId={projectId}
-        canEdit={canEdit}
-        onReuse={(text, settings) => {
-          if (onReuseSettings) {
-            onReuseSettings(text, settings);
-          } else {
-            // Fallback: apply locally (char/scene stay as-is unless parent handles them).
-            if (prompt.trim() && !window.confirm("要覆蓋你已輸入的提示詞嗎？")) return;
-            setPrompt(text);
-            if (settings?.modelId) {
-              setPickReq((prev) => ({
-                modelId: settings.modelId!,
-                nonce: (prev?.nonce ?? 0) + 1,
-              }));
-            }
-            if (settings?.sourceAssetId) {
-              const src = assets.data?.find((a) => a.id === settings.sourceAssetId);
-              if (src) {
-                setSourceAsset({ id: src.id, title: src.title, kind: src.kind });
-                setSourceUrl("");
-                setSourceUrlError("");
-                setAdvancedOpen(true);
-              }
-            }
-          }
-        }}
-      />
+      {/* GenerationList lives in CreationResourceDrawer (WB-05) — avoid duplicate long card here. */}
+      <p className="hint" style={{ marginTop: 12 }}>
+        生成紀錄與「再用此設定」已移到下方「資源與結果」抽屜。
+      </p>
     </div>
   );
 

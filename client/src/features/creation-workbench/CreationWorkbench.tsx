@@ -153,6 +153,17 @@ export function CreationWorkbench({
           nonce: (prev?.nonce ?? 0) + 1,
         }));
       }
+      // apply_prompt → template: same discrete idea channel (goal alone does not fill idea box).
+      if (
+        action.type === "apply_prompt" &&
+        action.targetMode === "template" &&
+        action.promptText?.trim()
+      ) {
+        setTemplateIdeaBringIn((prev) => ({
+          text: action.promptText!.trim(),
+          nonce: (prev?.nonce ?? 0) + 1,
+        }));
+      }
 
       // Focus generate prompt after bring-in (still no submit).
       if (result.mode === "generate") {
@@ -389,7 +400,24 @@ export function CreationWorkbench({
           goal={draft.goal}
         />
 
-        <CreationResourceDrawer projectId={projectId} />
+        <CreationResourceDrawer
+          projectId={projectId}
+          canEdit={canEdit}
+          currentMode={mode}
+          onCreationAction={handleCreationAction}
+          onReuseGenerate={onReuseGenerate}
+          onUseForWorkflow={
+            // Surface as discrete idea fill + switch to template (same as ProjectPage path).
+            (text) => {
+              setTemplateIdeaBringIn((prev) => ({
+                text,
+                nonce: (prev?.nonce ?? 0) + 1,
+              }));
+              // Prefer parent workflowPromptRequest when provided (legacy sticky channel).
+              setDraft({ mode: "template" });
+            }
+          }
+        />
       </div>
     </section>
   );

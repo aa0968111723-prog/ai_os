@@ -11,7 +11,6 @@ import { RecycleBin } from "../components/RecycleBin";
 import { KnowledgeBase } from "../components/KnowledgeBase";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
-import { PromptLibrary } from "../components/PromptLibrary";
 import { TocNav } from "../components/TocNav";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
@@ -336,8 +335,6 @@ export function ProjectPage({ id }: { id: string }) {
   const [sourceHighlightId, setSourceHighlightId] = useState<string | null>(null);
   /** 把提示詞庫／生成紀錄／分鏡／素材庫的設定送進 DirectGenerateMode（nonce 觸發） */
   const [generateApply, setGenerateApply] = useState<DirectGenerateApplyRequest | null>(null);
-  /** 提示詞庫「用於製作範本」：把咒語帶進製作範本想法框（nonce 遞增觸發 WorkflowCard 套用） */
-  const [wfPromptReq, setWfPromptReq] = useState<{ text: string; nonce: number } | null>(null);
   /** 引導步驟列收合狀態（全部完成後可整條收起，不佔版面） */
   const [onboardCollapsed, setOnboardCollapsed] = useState(false);
   const archiveProject = trpc.projects.setArchived.useMutation({
@@ -951,27 +948,15 @@ export function ProjectPage({ id }: { id: string }) {
             characterIds={charIds}
             scenePresetIds={sceneIds}
             generateApplyRequest={generateApply}
-            workflowPromptRequest={wfPromptReq}
             onReuseGenerate={applyPrompt}
             onGenerateSourceChange={setSourceHighlightId}
             studioCollab={zoneProps(COLLAB_ZONES.studio)}
           />
 
           {/* 製作範本 WorkflowCard 已移入工作台 TemplateMode（#sec-workflow）；此處不再重複掛卡 */}
+          {/* 提示詞庫 / 生成紀錄 / 執行軌跡：CreationResourceDrawer（#sec-prompts 等錨點在工作台內） */}
 
-          {/* 提示詞庫：成功生成的咒語一鍵再用（「再用」還原完整設定帶回生成台；「製作範本」帶進想法框） */}
-          <div id="sec-prompts">
-            <PromptLibrary
-              projectId={id}
-              onUse={applyPrompt}
-              onUseForWorkflow={(text) => {
-                setWfPromptReq((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
-                revealWorkbenchAnchor("#sec-workflow", { projectId: id });
-              }}
-            />
-          </div>
-
-          <StageLink text="成品會自動存入素材庫；在生成紀錄按「＋加入分鏡」，就會排進下方分鏡列" />
+          <StageLink text="成品會自動存入素材庫；在資源抽屜的生成紀錄按「＋加入分鏡」，就會排進下方分鏡列" />
 
           {/* ③ 分鏡・時間軸・交付：排片、粗剪預覽、送審與打包（SceneList 一體卡全含） */}
           <StageHead

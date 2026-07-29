@@ -34,6 +34,12 @@ export function modeForAnchor(anchorOrSelector: string): CreationMode | null {
       return "generate";
     case "sec-workflow":
       return "template";
+    // Resource drawer anchors: do not switch creation mode (drawer opens via reveal event).
+    case "sec-prompts":
+    case "sec-generations":
+    case "sec-trail":
+    case "sec-templates-fav":
+      return null;
     default:
       return null;
   }
