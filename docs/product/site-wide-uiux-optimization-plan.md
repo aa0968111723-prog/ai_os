@@ -575,6 +575,44 @@ UX-00 → UX-01 → UX-02 → UX-03 → UX-04 → UX-05 → UX-06 → UX-07 → 
 
 ---
 
+## 17. 網站目前的資訊架構
+
+根據 `AppRoutes.tsx` 與實際巡覽結果，目前全站的資訊架構（IA）可分為以下主要層級：
+
+- **到達與全域 (Global & Landing)**
+  - 登入 / 首頁 (未登入)
+  - 離線提示 (`offline.html`)
+  - 找不到頁面 (404 Fallback)
+  - 尚未分組提示 (Ungrouped Fallback)
+
+- **核心創作路徑 (Core Creation)**
+  - 作業台 (`/` Launchpad)：專案網格、今日節奏、繼續上次
+  - 專案工作台 (`/p/:id`)：三幕導覽、四模式工作台、資源抽屜、生成確認
+
+- **團隊與管理 (Team & Admin)**
+  - 管理員總覽 (`/admin`)
+  - 群組設定 (`/options`)
+  - 用量監控與日誌 (`/logs`)
+  - 成員管理 (`/members`)
+
+- **資源與個人工具 (Resources & Tools)**
+  - 資料庫 (`/databases`)
+  - 排程與計畫 (`/planner`)
+  - 模型列表 (`/models`)
+  - 我的報告 (`/my-reports`)
+  - 下載區 (`/downloads`)
+
+- **協作與擴充 (Collaboration & Extensions)**
+  - 聊天與私訊 (`/chat`, `/chat/:peerId`)
+  - MCP 整合 (`/mcp`)
+  - 外部整合 (`/integrations`)
+
+- **支援與回饋 (Support)**
+  - 說明中心 (`/help`)
+  - 回饋頁面 (`/feedback`)
+
+---
+
 ## 附錄 A — 優先級
 
 | 級 | 範圍 |
