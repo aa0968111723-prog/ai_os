@@ -184,24 +184,109 @@ export async function armTaskWaitCore(input: {
   taskId: string;
   runId: string;
   stepId: string;
-}): Promise<ProjectTaskRow> {
-  const task = await getProjectTaskChecked(input.auth, input.taskId);
-  if (task.planRunId && task.planRunId !== input.runId) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "不能等待其他代理計畫建立的任務" });
-  }
-  const [run] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, input.runId));
-  if (!run || run.groupId !== task.groupId || run.projectId !== task.projectId) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "等待節點與任務不屬於同一個專案計畫" });
-  }
-  if (run.status !== "running" && run.status !== "waiting") {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份代理計畫目前不能進入等待" });
-  }
-  const [updated] = await db
-    .update(schema.projectTasks)
-    .set({ wakeRunId: input.runId, wakeStepId: input.stepId, updatedAt: new Date() })
-    .where(eq(schema.projectTasks.id, task.id))
-    .returning();
-  return updated;
+  steps: AgentDagStep[];
+}): Promise<{ task: ProjectTaskRow; armed: boolean }> {
+  // Cheap membership check before taking a database lock. The task and run are
+  // read again under the task lock below; this first snapshot is not trusted
+  // for any state transition.
+  await getProjectTaskChecked(input.auth, input.taskId);
+
+  return db.transaction(async (tx) => {
+    // settleTask uses the same lock. Linking the task and persisting the run's
+    // waiting step in one transaction closes both lost-wakeup windows:
+    //   complete -> arm, and arm -> save run progress.
+    await tx.execute(sql`
+      select pg_advisory_xact_lock(hashtextextended(${`project-task:${input.taskId}`}, 0))
+    `);
+    const [task] = await tx
+      .select()
+      .from(schema.projectTasks)
+      .where(eq(schema.projectTasks.id, input.taskId));
+    if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這項人類任務" });
+    requireGroup(input.auth, task.groupId);
+    if (task.planRunId && task.planRunId !== input.runId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "不能等待其他代理計畫建立的任務" });
+    }
+
+    const [run] = await tx
+      .select()
+      .from(schema.agentRuns)
+      .where(eq(schema.agentRuns.id, input.runId));
+    if (!run || run.groupId !== task.groupId || run.projectId !== task.projectId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "等待節點與任務不屬於同一個專案計畫" });
+    }
+    if (run.status !== "running" && run.status !== "waiting") {
+      throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份代理計畫目前不能進入等待" });
+    }
+
+    // A terminal task must never be armed. The caller settles the step from
+    // this fresh result instead, so a completion that won the lock is not lost.
+    if (task.status === "done" || task.status === "cancelled") {
+      return { task, armed: false };
+    }
+
+    if (
+      task.wakeRunId
+      && task.wakeStepId
+      && (task.wakeRunId !== input.runId || task.wakeStepId !== input.stepId)
+    ) {
+      const [ownerRun] = await tx
+        .select({ status: schema.agentRuns.status })
+        .from(schema.agentRuns)
+        .where(eq(schema.agentRuns.id, task.wakeRunId));
+      if (ownerRun && (ownerRun.status === "running" || ownerRun.status === "waiting")) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "這項任務已由另一個正在執行的代理等待",
+        });
+      }
+    }
+
+    const waitingStep = input.steps.find((step, index) =>
+      dagStepId(step, index) === input.stepId
+      && (step as AgentDagStep & { taskId?: string }).taskId === task.id,
+    );
+    if (!waitingStep || waitingStep.status !== "waiting") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "代理等待步驟與人類任務無法對應",
+      });
+    }
+    const progress = evaluateAgentDag(input.steps);
+    if (progress.status !== "running" && progress.status !== "waiting") {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "代理步驟目前不能進入等待",
+      });
+    }
+
+    const now = new Date();
+    const [updatedTask] = await tx
+      .update(schema.projectTasks)
+      .set({ wakeRunId: input.runId, wakeStepId: input.stepId, updatedAt: now })
+      .where(eq(schema.projectTasks.id, task.id))
+      .returning();
+    const [updatedRun] = await tx
+      .update(schema.agentRuns)
+      .set({
+        steps: input.steps,
+        currentStep: progress.nextIndex,
+        status: progress.status,
+        updatedAt: now,
+      })
+      .where(and(
+        eq(schema.agentRuns.id, run.id),
+        inArray(schema.agentRuns.status, ["running", "waiting"]),
+      ))
+      .returning({ id: schema.agentRuns.id });
+    if (!updatedRun) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "代理已停止或結束，無法再掛上等待",
+      });
+    }
+    return { task: updatedTask, armed: true };
+  });
 }
 
 interface WakeStep extends AgentDagStep {
@@ -278,6 +363,21 @@ async function settleTask(input: {
     `);
     const [task] = await tx.select().from(schema.projectTasks).where(eq(schema.projectTasks.id, input.id));
     if (!task) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這項人類任務" });
+    requireGroup(input.auth, task.groupId);
+    const [freshProject] = await tx
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.id, task.projectId));
+    if (!freshProject) throw new TRPCError({ code: "NOT_FOUND", message: "找不到任務所屬專案" });
+    if (task.taskType === "approval" && input.decision === "complete") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "核准任務必須明確選擇核准或不核准" });
+    }
+    if (task.taskType === "task" && input.decision !== "complete") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "一般人類任務不能使用核准裁決" });
+    }
+    // Re-authorize the locked, current row. This prevents a stale pre-lock
+    // assignee/approval-role/project-owner snapshot from granting completion.
+    assertTaskActor(input.auth, task, freshProject.ownerId, input.decision);
     if (task.status === "done" || task.status === "cancelled") return task;
     const rejected = input.decision === "reject";
     const [updated] = await tx

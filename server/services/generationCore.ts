@@ -15,7 +15,7 @@ import { resolveModel, estimatePointsFor } from "./modelResolve";
 import { worldviewSchema, bilingualChips, STYLE_EN, TONE_EN, type Worldview } from "../../shared/worldview";
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
-import { reserveQuota, refund } from "./points";
+import { failStaleGenerationTx, reserveQuota } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
 import { buildCharacterAnchor } from "../routers/characters";
 import { groupLeaderIds, pushToUsers } from "./webPush";
@@ -378,19 +378,18 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       .returning();
     return updated;
   } catch (err) {
-    // 修 R5-MONEY-002：與扣點側（290）對稱——假生成不扣點就不該退點，否則帳本憑空多一筆 +est 灌鬆額度
-    if (!billingBypassed()) await refund(input.userId, project.groupId, est, "生成送出失敗退回", gen.id);
     console.error("[generation] submit 失敗:", err);
-    await db
-      .update(schema.generations)
-      .set({
-        status: "failed",
-        error: humanizeGenerationError(err instanceof Error ? err.message : String(err)),
-        pointsRefunded: est,
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.generations.id, gen.id));
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "生成送出失敗,點數已退回,請重試" });
+    // 以帳本實際淨扣款為準，同交易翻轉狀態與退款。這也涵蓋
+    // billing-bypassed/mock 工作，避免「從未扣款卻退點」灌高餘額。
+    const failed = await failStaleGenerationTx(
+      gen.id,
+      humanizeGenerationError(err instanceof Error ? err.message : String(err)),
+      "生成送出失敗退回",
+    );
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: failed.refunded > 0 ? "生成送出失敗，點數已退回，請重試" : "生成送出失敗，請重試",
+    });
   }
 }
 
@@ -462,6 +461,22 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
       const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
       return current ?? gen; // 別人已推進，直接回現況（列必存在,回退舊快照僅是型別防禦）
     }
+    if (
+      gen.modelId.startsWith("fal-ai/")
+      && !gen.requestId.startsWith("mock_")
+      && !gen.requestId.startsWith("nim_")
+    ) {
+      // A real, parseable Fal result is durable certification evidence. Keep
+      // generation completion successful even if catalog maintenance is
+      // temporarily unavailable.
+      const { certifySuccessfulFalModel } = await import("./modelCertification");
+      await certifySuccessfulFalModel(gen.modelId).catch((err) =>
+        console.warn(
+          "[generation] Fal 模型認證寫回失敗：",
+          err instanceof Error ? err.message : err,
+        ),
+      );
+    }
     // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）——
     // 網路 IO 不進交易，commit 後才啟動；失敗由 sweepUnlandedAssets 定期補抓。
     if (advanced.assetId && mediaUrl) persistGenerationResult(advanced.assetId, gen.id, mediaUrl);
@@ -482,41 +497,26 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     // 中間當機/重部署會留下 terminal failed 列（pointsRefunded 記謊）而退點列從未寫入、且無 sweep 會再碰
     // terminal 列 → 使用者點數永久蒸發。包進同交易後：全有或全無，中途當機整筆 rollback，
     // 列留在 queued/running 交由 30 分 sweep 依帳本淨額安全收尾。
-    const updatedRows = await db.transaction(async (tx) => {
-      const rows = await tx
-        .update(schema.generations)
-        .set({
-          status: "failed",
-          error: humanizeGenerationError(result.error),
-          pointsRefunded: gen.pointsEst,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
-        .returning();
-      if (rows.length > 0 && gen.pointsEst > 0) {
-        await tx.insert(schema.costLedger).values({
-          userId: gen.userId,
-          groupId: gen.groupId,
-          delta: gen.pointsEst,
-          reason: "生成失敗退回",
-          generationId: gen.id,
-        });
-      }
-      return rows;
-    });
-    if (updatedRows.length === 0) {
+    const failed = await failStaleGenerationTx(
+      gen.id,
+      humanizeGenerationError(result.error),
+      "生成失敗退回",
+    );
+    if (!failed.updated) {
       const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
       return current ?? gen;
     }
+    const [updated] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
+    if (!updated) return gen;
     // 失敗推播（CAS 保證同筆只推一次）：tag 獨立不與「生成完成」互蓋——失敗訊號不能被後到的成功淹掉
     const failMsg = humanizeGenerationError(result.error);
     void pushToUsers([gen.userId], {
       title: "生成失敗",
-      body: `${model?.label ?? gen.modelId}：${failMsg}${gen.pointsEst > 0 ? "（點數已退回）" : ""}`,
+      body: `${model?.label ?? gen.modelId}：${failMsg}${failed.refunded > 0 ? "（點數已退回）" : ""}`,
       url: `/p/${gen.projectId}`,
       tag: `gen-failed-${gen.id}`,
     }).catch((err) => console.warn("[generation] 失敗推播失敗：", err instanceof Error ? err.message : err));
-    return updatedRows[0];
+    return updated;
   }
   return gen;
 }

@@ -1022,18 +1022,30 @@ async function advanceRun(run: RunRow): Promise<void> {
       if (task.status === "cancelled") {
         return failRun(run, steps, idx, task.taskType === "approval" ? "人員未核准" : "人類任務已取消");
       }
-      await armTaskWaitCore({
-        auth,
-        taskId: task.id,
-        runId: run.id,
-        stepId: stableStepId(step, idx),
-      });
       step.status = "waiting";
       step.detail = task.taskType === "approval"
         ? "等待符合角色的人員核准"
         : task.assigneeId
           ? "等待負責人完成"
           : "等待人員認領並完成";
+      const armed = await armTaskWaitCore({
+        auth,
+        taskId: task.id,
+        runId: run.id,
+        stepId: stableStepId(step, idx),
+        steps,
+      });
+      task = armed.task;
+      if (!armed.armed) {
+        if (task.status === "done") {
+          step.status = "done";
+          step.detail = task.taskType === "approval" ? "人員已核准" : "人員已完成任務";
+          auditAgentStep(run, step, idx, true);
+          await saveDagProgress(run, steps);
+          return;
+        }
+        return failRun(run, steps, idx, task.taskType === "approval" ? "人員未核准" : "人類任務已取消");
+      }
       await recordAgentEventSafely({
         runId: run.id,
         groupId: run.groupId,
@@ -1046,7 +1058,8 @@ async function advanceRun(run: RunRow): Promise<void> {
         summary: step.detail,
         data: { taskId: task.id, taskType: task.taskType, assigneeId: task.assigneeId },
       });
-      await saveDagProgress(run, steps);
+      // armTaskWaitCore already persisted the task link and DAG progress in one
+      // transaction. Saving here would reopen the lost-wakeup window.
     } catch (err) {
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }

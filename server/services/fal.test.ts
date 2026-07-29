@@ -5,21 +5,41 @@
  *   注意 MOCK 是 import 時算好的常數 → 每個案例都要 vi.resetModules + 動態 import 重新載入。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { extractResult } from "./fal";
+import { extractResult, falRequestBase } from "./fal";
+
+describe("Fal queue request URL", () => {
+  it("保留完整多段模型端點，避免狀態輪詢查到錯誤 app", () => {
+    expect(falRequestBase("fal-ai/flux/dev", "req-123")).toBe(
+      "https://queue.fal.run/fal-ai/flux/dev/requests/req-123",
+    );
+    expect(falRequestBase("fal-ai/wan/v2.2-a14b/image-to-video", "req-456")).toBe(
+      "https://queue.fal.run/fal-ai/wan/v2.2-a14b/image-to-video/requests/req-456",
+    );
+  });
+
+  it("拒絕可改寫主機或路徑的端點/request id", () => {
+    expect(() => falRequestBase("https://evil.example/x", "req")).toThrow("端點格式");
+    expect(() => falRequestBase("fal-ai/../admin", "req")).toThrow("端點格式");
+    expect(() => falRequestBase("fal-ai/flux/dev", "../req")).toThrow("request id");
+  });
+});
 
 describe("extractResult:媒體輸出", () => {
   it("images[0].url(最常見的圖像模型)", () => {
     expect(extractResult({ images: [{ url: "https://cdn.fal.ai/a.png" }] })).toEqual({ url: "https://cdn.fal.ai/a.png" });
   });
 
-  it("video.url / audio.url / audio_file.url / image.url(物件包 url)", () => {
+  it("video/audio/file/model_file/image 物件包 url", () => {
     expect(extractResult({ video: { url: "https://x/v.mp4" } })).toEqual({ url: "https://x/v.mp4" });
     expect(extractResult({ audio: { url: "https://x/a.mp3" } })).toEqual({ url: "https://x/a.mp3" });
     expect(extractResult({ audio_file: { url: "https://x/af.wav" } })).toEqual({ url: "https://x/af.wav" });
     expect(extractResult({ image: { url: "https://x/i.jpg" } })).toEqual({ url: "https://x/i.jpg" });
+    expect(extractResult({ file: { url: "https://x/result.bin" } })).toEqual({ url: "https://x/result.bin" });
+    expect(extractResult({ model_file: { url: "https://x/model.bin" } })).toEqual({ url: "https://x/model.bin" });
   });
 
-  it("audio_url / video_url(直接字串)", () => {
+  it("image_url / audio_url / video_url(直接字串)", () => {
+    expect(extractResult({ image_url: "https://x/i2.png" })).toEqual({ url: "https://x/i2.png" });
     expect(extractResult({ audio_url: "https://x/a2.mp3" })).toEqual({ url: "https://x/a2.mp3" });
     expect(extractResult({ video_url: "https://x/v2.mp4" })).toEqual({ url: "https://x/v2.mp4" });
   });
@@ -131,5 +151,13 @@ describe("isMockMode / billingBypassed 真值表(重載模組驗 import 時常�
     const m = await load({ FAL_KEY: "key_test" });
     expect(m.isMockMode()).toBe(false);
     expect(m.billingBypassed()).toBe(false);
+  });
+
+  it("正式模式拒絕收尾跨環境殘留的 mock request", async () => {
+    const m = await load({ FAL_KEY: "key_test" });
+    await expect(m.falStatus("fal-ai/flux/dev", "image", "mock_stale")).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("正式模式"),
+    });
   });
 });

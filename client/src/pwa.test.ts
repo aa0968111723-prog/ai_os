@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dismissInstallBanner, isInstallDismissed, isStandaloneApp } from "./pwa";
 describe("pwa helpers", () => {
-  afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); });
+  afterEach(() => { window.localStorage.clear(); vi.unstubAllGlobals(); });
   it("tracks install banner dismiss", () => {
     expect(isInstallDismissed()).toBe(false);
     dismissInstallBanner();
