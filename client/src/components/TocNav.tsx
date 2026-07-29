@@ -79,7 +79,7 @@ export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
     // 點擊即是意圖：立刻標記，不等 scroll-spy（短頁面的最後一區 observer 永遠不會標到）
     setActiveId(id);
     el.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
-    // 跳轉同步寫入 URL hash（replaceState 不塞歷史）：可分享「直達第④階段」的深連結，重整也留在原階段
+    // 跳轉同步寫入 URL hash（replaceState 不塞歷史）：可分享「直達某一幕」（如 #stage-create）的深連結，重整也留在原幕
     history.replaceState(null, "", `#${id}`);
     // 手機收合態下點完自動收起，避免展開的清單遮住內容
     if (window.matchMedia(MOBILE_QUERY).matches) setOpen(false);

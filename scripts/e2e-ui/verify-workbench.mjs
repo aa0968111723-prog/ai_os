@@ -65,8 +65,11 @@ ok(
     && (await page.locator('#sec-ai-hub [role="tab"]:has-text("執行計畫")').count()) === 1,
 );
 ok("預設問 AI 模式有對話輸入", (await page.locator('#sec-ai-hub input[aria-label="問 AI 專案助手"]').count()) === 1);
-// 舊平行整頁卡不得再掛在 stage-create 之下（提示詞庫整卡 / 獨立 WorkflowCard 主卡）
+// 舊平行整頁卡不得再掛在頁面（embedded 用 div[data-fb]，非 section.card）
 ok("無平行整頁提示詞庫卡", (await page.locator('section.card[data-fb="提示詞庫"]').count()) === 0);
+ok("無平行整頁製作範本卡", (await page.locator('section.card[data-fb="製作範本"]').count()) === 0);
+// 生成紀錄僅在資源抽屜（div[data-fb]），無獨立 section.card 殼
+ok("無平行整頁生成紀錄卡", (await page.locator('section.card[data-fb="生成紀錄"]').count()) === 0);
 ok("資源抽屜入口在工作台內", (await page.locator("#sec-prompts").count()) === 1);
 
 // 直接生成模式：tab 切換後 #sec-studio 可見且有上下文 chips
