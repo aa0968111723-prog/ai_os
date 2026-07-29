@@ -10,9 +10,37 @@ const flashAnchor = vi.fn();
 
 vi.mock("../../../api", () => ({
   trpc: {
+    useUtils: () => ({
+      prompts: { list: { invalidate: vi.fn() } },
+      generation: {
+        listByProject: { invalidate: vi.fn() },
+        listByProjectPaged: { invalidate: vi.fn() },
+      },
+      quota: { my: { invalidate: vi.fn() } },
+    }),
     agents: {
       listByProject: {
         useQuery: (...args: unknown[]) => listByProject(...args),
+      },
+    },
+    projects: {
+      assets: {
+        useQuery: () => ({ data: [] }),
+      },
+    },
+    quota: {
+      my: {
+        useQuery: () => ({ data: undefined }),
+      },
+    },
+    prompts: {
+      save: {
+        useMutation: () => ({ mutate: vi.fn(), isPending: false }),
+      },
+    },
+    generation: {
+      submit: {
+        useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
       },
     },
   },
@@ -30,12 +58,56 @@ vi.mock("../../../components/AgentCard", () => ({
   AgentCard: () => <div data-testid="agent-card">agent-card</div>,
 }));
 
+vi.mock("../../../components/ModelPicker", () => ({
+  ModelPicker: ({
+    onChange,
+  }: {
+    onChange: (m: {
+      id: string;
+      label: string;
+      points: number;
+      needs: string | null;
+      sourceHint: string | null;
+      kind: string;
+      tierLabel: string;
+      strengths: string;
+      verified: boolean;
+      recommended: boolean;
+    } | null) => void;
+  }) => {
+    // fire once after mount without useEffect to keep mock simple
+    queueMicrotask(() =>
+      onChange({
+        id: "fal-ai/flux/schnell",
+        label: "FLUX Schnell",
+        points: 1,
+        needs: null,
+        sourceHint: null,
+        kind: "image",
+        tierLabel: "經濟",
+        strengths: "快",
+        verified: true,
+        recommended: true,
+      }),
+    );
+    return <div data-testid="model-picker">model-picker</div>;
+  },
+}));
+
+vi.mock("../../../components/GenerationList", () => ({
+  GenerationList: () => <div data-testid="generation-list">generation-list</div>,
+}));
+
+vi.mock("../../../realtime", () => ({
+  CollabZone: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 describe("CreationWorkbench", () => {
   const projectId = "project-1";
   const originalSearch = window.location.search;
 
   const renderWorkbench = (props = {}) =>
-    render(<CreationWorkbench projectId={projectId} canEdit {...props} />);
+    render(<CreationWorkbench projectId={projectId} canEdit groupId="g1" {...props} />);
 
   beforeEach(() => {
     listByProject.mockReset();
@@ -81,20 +153,20 @@ describe("CreationWorkbench", () => {
     expect(askPanel).not.toHaveAttribute("hidden");
     expect(screen.getByTestId("assistant")).toBeVisible();
 
-    // Other panels exist but are hidden
     const generateTab = screen.getByRole("tab", { name: /直接生成/ });
     await user.click(generateTab);
     expect(generateTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tabpanel", { name: /直接生成/ })).not.toHaveAttribute("hidden");
-    expect(screen.getByRole("button", { name: /前往創作生成台/ })).toBeVisible();
+    const genPanel = screen.getByRole("tabpanel", { name: /直接生成/ });
+    expect(genPanel).not.toHaveAttribute("hidden");
+    // Full generate form (WB-02) lives in panel with #sec-studio
+    expect(document.getElementById("sec-studio")).toBeTruthy();
+    expect(within(genPanel).getByTestId("model-picker")).toBeVisible();
+    expect(document.getElementById("gen-prompt")).toBeTruthy();
 
-    // Ask panel still mounted but hidden
     const askTab = screen.getByRole("tab", { name: /問 AI/ });
     const panels = document.querySelectorAll('[role="tabpanel"]');
     const visible = [...panels].filter((p) => !p.hasAttribute("hidden"));
     expect(visible).toHaveLength(1);
-    expect(visible[0]).toHaveTextContent("前往創作生成台");
-    // assistant remains in document (state-preserving mount)
     expect(screen.getByTestId("assistant")).toBeInTheDocument();
     expect(askTab).toHaveAttribute("aria-selected", "false");
   });
@@ -120,11 +192,29 @@ describe("CreationWorkbench", () => {
     expect(screen.getByLabelText("想完成什麼？")).toHaveValue("拆分鏡並出圖");
     expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
 
-    // draft written to storage (debounced — flush by waiting)
     await waitFor(() => {
       const stored = loadDraft(projectId);
       expect(stored.goal).toBe("拆分鏡並出圖");
       expect(stored.mode).toBe("generate");
+    });
+  });
+
+  it("generate form prompt survives mode switch (draft persistence)", async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+
+    const prompt = document.getElementById("gen-prompt") as HTMLTextAreaElement;
+    expect(prompt).toBeTruthy();
+    await user.type(prompt, "禪堂清晨");
+    expect(prompt).toHaveValue("禪堂清晨");
+
+    await user.click(screen.getByRole("tab", { name: /問 AI/ }));
+    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+    expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe("禪堂清晨");
+
+    await waitFor(() => {
+      expect(loadDraft(projectId).prompt).toBe("禪堂清晨");
     });
   });
 
@@ -167,18 +257,14 @@ describe("CreationWorkbench", () => {
     expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("direct generate adapter scrolls to #sec-studio", async () => {
+  it("direct generate mode hosts #sec-studio form (no jump button)", async () => {
     const user = userEvent.setup();
     renderWorkbench();
     await user.click(screen.getByRole("tab", { name: /直接生成/ }));
 
-    const studio = document.createElement("div");
-    studio.id = "sec-studio";
-    document.body.appendChild(studio);
-
-    await user.click(screen.getByRole("button", { name: /前往創作生成台/ }));
-    await waitFor(() => expect(studio.scrollIntoView).toHaveBeenCalled());
-    studio.remove();
+    expect(document.getElementById("sec-studio")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /前往創作生成台/ })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/預估消耗/);
   });
 
   it("template adapter scrolls to #sec-workflow", async () => {
@@ -231,7 +317,7 @@ describe("CreationWorkbench", () => {
       { id: "run-1", status: "running" },
       { id: "run-2", status: "awaiting_approval" },
     ];
-    rerender(<CreationWorkbench projectId={projectId} canEdit />);
+    rerender(<CreationWorkbench projectId={projectId} canEdit groupId="g1" />);
     expect(details).not.toHaveAttribute("open");
     expect(summary).toHaveAttribute("aria-expanded", "false");
   });
@@ -293,7 +379,6 @@ describe("CreationWorkbench", () => {
   it("revealWorkbenchAnchor(#sec-agent) from other mode shows plan panel (GenerationList path)", async () => {
     renderWorkbench();
     expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
-    // Plan panel is mounted but hidden while ask is active
     const hiddenPlan = document.getElementById("sec-agent")?.closest('[role="tabpanel"]');
     expect(hiddenPlan).toHaveAttribute("hidden");
 
@@ -311,6 +396,21 @@ describe("CreationWorkbench", () => {
     await waitFor(() => {
       expect(document.getElementById("sec-agent")?.scrollIntoView).toHaveBeenCalled();
     });
+  });
+
+  it("revealWorkbenchAnchor(#sec-studio) switches to generate mode", async () => {
+    renderWorkbench();
+    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+
+    act(() => {
+      revealWorkbenchAnchor("#sec-studio", { projectId });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+    });
+    expect(screen.getByRole("tabpanel", { name: /直接生成/ })).not.toHaveAttribute("hidden");
+    expect(document.getElementById("sec-studio")?.closest("[hidden]")).toBeNull();
   });
 
   it("revealWorkbenchAnchor(#sec-assistant) switches to ask mode", async () => {
@@ -335,7 +435,6 @@ describe("CreationWorkbench", () => {
 
     expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("想完成什麼？")).toHaveValue("restore-plan");
-    // No active runs and no forceOpen → collapsed like AiHub default
     expect(document.querySelector("#sec-agent")).not.toHaveAttribute("open");
   });
 
@@ -353,17 +452,16 @@ describe("CreationWorkbench", () => {
     saveDraft("project-1", { ...emptyDraft("ask"), goal: "goal-one" });
     saveDraft("project-2", { ...emptyDraft("generate"), goal: "goal-two" });
 
-    const { rerender } = render(<CreationWorkbench projectId="project-1" canEdit />);
+    const { rerender } = render(<CreationWorkbench projectId="project-1" canEdit groupId="g1" />);
     expect(screen.getByLabelText("想完成什麼？")).toHaveValue("goal-one");
     expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
 
-    rerender(<CreationWorkbench projectId="project-2" canEdit />);
+    rerender(<CreationWorkbench projectId="project-2" canEdit groupId="g1" />);
     await waitFor(() => {
       expect(screen.getByLabelText("想完成什麼？")).toHaveValue("goal-two");
     });
     expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
 
-    // project-1 storage untouched
     expect(loadDraft("project-1").goal).toBe("goal-one");
   });
 });

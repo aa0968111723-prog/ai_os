@@ -7,7 +7,11 @@ import { CreationModeTabs, modePanelId, modeTabId } from "./CreationModeTabs";
 import { CreationResourceDrawer } from "./CreationResourceDrawer";
 import { useCreationDraft, type CreationMode } from "./creationDraft";
 import { AskAiMode } from "./modes/AskAiMode";
-import { DirectGenerateMode } from "./modes/DirectGenerateMode";
+import {
+  DirectGenerateMode,
+  type DirectGenerateApplyRequest,
+  type StudioCollabProps,
+} from "./modes/DirectGenerateMode";
 import { PlanMode } from "./modes/PlanMode";
 import { TemplateMode } from "./modes/TemplateMode";
 import { useAgentRunBadges } from "./useAgentRunBadges";
@@ -19,20 +23,47 @@ import {
 } from "./workbenchNav";
 
 /**
- * AI 創作工作台 shell（WB-01）：單一主卡入口、目標輸入、模式 tabs、上下文條與共享草稿。
- * 四種模式以 adapter 嵌入既有能力；不改 API、不刪除舊元件（生成台／範本卡仍在 ProjectPage）。
+ * AI 創作工作台 shell（WB-01 + WB-02 generate form）：單一主卡入口、目標輸入、模式 tabs、
+ * 上下文條、共享草稿與直接生成表單（generation.submit 唯一路徑在 DirectGenerateMode）。
  *
- * Anchors preserved for deep links: #sec-ai-hub, #sec-assistant, #sec-agent.
- * External chips use revealWorkbenchAnchor() so hidden tabpanels are shown first.
+ * Anchors: #sec-ai-hub, #sec-assistant, #sec-agent, #sec-studio (inside generate mode).
  */
 export function CreationWorkbench({
   projectId,
   canEdit,
   isLeader = false,
+  groupId,
+  myRole,
+  projectFormat = "",
+  worldview = { tones: [], styles: [], taboos: [] },
+  wvReady = false,
+  characterIds = [],
+  scenePresetIds = [],
+  generateApplyRequest = null,
+  onReuseGenerate,
+  studioCollab = null,
 }: {
   projectId: string;
   canEdit: boolean;
   isLeader?: boolean;
+  groupId?: string;
+  myRole?: string | null;
+  projectFormat?: string;
+  worldview?: { tones: string[]; styles: string[]; taboos: string[] };
+  wvReady?: boolean;
+  characterIds?: string[];
+  scenePresetIds?: string[];
+  generateApplyRequest?: DirectGenerateApplyRequest | null;
+  onReuseGenerate?: (
+    text: string,
+    settings?: {
+      modelId?: string | null;
+      characterIds?: string[] | null;
+      scenePresetIds?: string[] | null;
+      sourceAssetId?: string | null;
+    },
+  ) => void;
+  studioCollab?: StudioCollabProps | null;
 }) {
   const reactId = useId();
   const tabPrefix = `cw-${reactId.replace(/:/g, "")}`;
@@ -82,7 +113,6 @@ export function CreationWorkbench({
 
       if (detail.scroll !== false && detail.anchor) {
         const selector = `#${detail.anchor}`;
-        // Double rAF: wait for React commit that unhides the tabpanel.
         requestAnimationFrame(() => {
           requestAnimationFrame(() => scrollToSelector(selector));
         });
@@ -92,11 +122,23 @@ export function CreationWorkbench({
     return () => window.removeEventListener(WORKBENCH_REVEAL_EVENT, onReveal);
   }, [projectId, setDraft]);
 
+  // Keep char/scene picks mirrored into draft for cross-mode persistence.
+  // Compare by content so default `[]` props (new ref each render) do not loop.
+  useEffect(() => {
+    const same =
+      characterIds.length === draft.characterIds.length &&
+      scenePresetIds.length === draft.scenePresetIds.length &&
+      characterIds.every((id, i) => id === draft.characterIds[i]) &&
+      scenePresetIds.every((id, i) => id === draft.scenePresetIds[i]);
+    if (same) return;
+    setDraft({ characterIds, scenePresetIds });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [characterIds, scenePresetIds]);
+
   const mode = draft.mode;
 
   const onModeChange = (next: CreationMode) => {
     setDraft({ mode: next });
-    // Clear sticky forceOpen on any user tab change (enter or leave plan).
     setPlanForceOpen(false);
   };
 
@@ -169,10 +211,24 @@ export function CreationWorkbench({
           active={mode === "ask"}
         />
         <DirectGenerateMode
+          projectId={projectId}
+          groupId={groupId ?? ""}
+          canEdit={canEdit}
+          myRole={myRole}
+          projectFormat={projectFormat}
+          worldview={worldview}
+          wvReady={wvReady}
+          characterIds={characterIds}
+          scenePresetIds={scenePresetIds}
           panelId={modePanelId(tabPrefix, "generate")}
           labelledBy={modeTabId(tabPrefix, "generate")}
           active={mode === "generate"}
           goal={draft.goal}
+          draft={draft}
+          setDraft={setDraft}
+          applyRequest={generateApplyRequest}
+          onReuseSettings={onReuseGenerate}
+          collab={studioCollab}
         />
         <TemplateMode
           panelId={modePanelId(tabPrefix, "template")}

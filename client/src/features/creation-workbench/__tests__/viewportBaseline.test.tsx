@@ -20,10 +20,26 @@ const listByProject = vi.fn();
 
 vi.mock("../../../api", () => ({
   trpc: {
+    useUtils: () => ({
+      prompts: { list: { invalidate: vi.fn() } },
+      generation: {
+        listByProject: { invalidate: vi.fn() },
+        listByProjectPaged: { invalidate: vi.fn() },
+      },
+      quota: { my: { invalidate: vi.fn() } },
+    }),
     agents: {
       listByProject: {
         useQuery: (...args: unknown[]) => listByProject(...args),
       },
+    },
+    projects: {
+      assets: { useQuery: () => ({ data: [] }) },
+    },
+    quota: { my: { useQuery: () => ({ data: undefined }) } },
+    prompts: { save: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
+    generation: {
+      submit: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
     },
   },
 }));
@@ -34,6 +50,18 @@ vi.mock("../../../components/ProjectAssistant", () => ({
 
 vi.mock("../../../components/AgentCard", () => ({
   AgentCard: () => <div data-testid="agent-card">agent-card</div>,
+}));
+
+vi.mock("../../../components/ModelPicker", () => ({
+  ModelPicker: () => <div data-testid="model-picker">model-picker</div>,
+}));
+
+vi.mock("../../../components/GenerationList", () => ({
+  GenerationList: () => <div data-testid="generation-list">generation-list</div>,
+}));
+
+vi.mock("../../../realtime", () => ({
+  CollabZone: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 function setViewportWidth(width: number) {
