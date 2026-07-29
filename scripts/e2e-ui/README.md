@@ -15,7 +15,7 @@
 需先起伺服器；`E2E_MOCK=1` 為假生成、帶真金鑰為真實生成。
 
 ```bash
-npm i -D playwright
+npm ci
 npx playwright install chromium
 E2E_UI_BASE=http://127.0.0.1:3210 node scripts/e2e-ui/golden-path.mjs
 ```
@@ -24,7 +24,9 @@ E2E_UI_BASE=http://127.0.0.1:3210 node scripts/e2e-ui/golden-path.mjs
 
 ## 全路由 UI/UX 基線
 
-`audit-routes.mjs` 不使用假預設帳密；缺少帳密、登入失敗、路由被導向或任一 viewport 截圖失敗，都會以非 0 結束。
+`audit-routes.mjs` 不使用假預設帳密；缺少帳密、登入失敗、路由被導向、水平溢出、手機觸控目標小於 44px、
+serious／critical 無障礙缺陷、console error 或任一 viewport 截圖失敗，都會以非 0 結束。公開 `/`、`/login`
+會在登入前驗證；登入後從 `/dashboard` 起完整巡覽受保護路由。
 
 ```bash
 TARGET_URL=https://ai-os-app.zeabur.app \

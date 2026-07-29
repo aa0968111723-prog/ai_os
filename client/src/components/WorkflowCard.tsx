@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { getModel } from "@shared/models";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 
@@ -41,26 +42,40 @@ function isActiveRun(r: { status: string; steps: unknown }): boolean {
   return r.status === "running" || (r.steps as RunStep[]).some((s) => s.status === "running");
 }
 
+function modelLabel(modelId: string): string {
+  return getModel(modelId)?.label ?? modelId;
+}
+
 /** 製作範本（底層仍為 workflow）：一鍵串多個模型，由伺服器背景逐步執行，關掉頁面也會繼續跑。
  *  charIds/sceneIds＝生成台勾選的角色/場景卡（二合一）：啟動時一併帶入，整條串鏈的視覺步驟注入同一套錨點；
- *  promptRequest＝提示詞庫「用於製作範本」的咒語（nonce 遞增才套用一次） */
+ *  promptRequest＝提示詞庫「用於製作範本」的咒語（nonce 遞增才套用一次）；
+ *  pickRequest＝跨模式帶入的 templateId 預選（nonce 遞增才套用一次）；
+ *  embedded＝嵌在工作台 TemplateMode 內時不包外層 card */
 export function WorkflowCard({
   projectId,
   charIds = [],
   sceneIds = [],
   promptRequest,
+  pickRequest,
+  embedded = false,
 }: {
   projectId: string;
   charIds?: string[];
   sceneIds?: string[];
   promptRequest?: { text: string; nonce: number } | null;
+  /** Pre-select workflow preset from draft.templateId / run_template bring-in */
+  pickRequest?: { templateId: string; nonce: number } | null;
+  /** When true, render without outer card chrome (lives inside workbench) */
+  embedded?: boolean;
 }) {
   const workflows = trpc.models.workflows.useQuery();
   const utils = trpc.useUtils();
   const [wfId, setWfId] = useState("");
   const [prompt, setPrompt] = useState("");
+  /** Set when pickRequest.templateId is not in the loaded list (after data arrives) */
+  const [pickMissId, setPickMissId] = useState<string | null>(null);
 
-  // 提示詞庫「用於製作範本」：把咒語填進想法框（已手打內容時先問，不默默覆蓋——與生成台 applyPrompt 同禮節）
+  // 提示詞庫／工作台帶入：把咒語填進想法框（已手打內容時先問，不默默覆蓋——與生成台 applyPrompt 同禮節）
   useEffect(() => {
     if (!promptRequest) return;
     if (prompt.trim() && prompt !== promptRequest.text && !window.confirm("要覆蓋製作範本想法框裡已輸入的文字嗎？")) return;
@@ -68,6 +83,20 @@ export function WorkflowCard({
     // 只在 nonce 遞增時套用一次；prompt 刻意不入依賴（入了會在使用者打字時重問）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [promptRequest?.nonce]);
+
+  // 跨模式帶入 templateId：預選範本；列表載入後仍對不到則提示
+  useEffect(() => {
+    if (!pickRequest?.templateId) return;
+    const list = workflows.data;
+    if (!list?.length) return;
+    if (list.some((w) => w.id === pickRequest.templateId)) {
+      setWfId(pickRequest.templateId);
+      setPickMissId(null);
+    } else {
+      setPickMissId(pickRequest.templateId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickRequest?.nonce, workflows.data]);
 
   const wf = workflows.data?.find((w) => w.id === wfId) ?? workflows.data?.[0];
 
@@ -132,11 +161,11 @@ export function WorkflowCard({
   });
   const stop = trpc.workflows.stop.useMutation({ onSuccess: () => runs.refetch() });
 
-  return (
-    <section className="card" data-fb="製作範本">
-      <h2>製作範本（固定自動流程）</h2>
-      <p className="hint">
-        適合步驟固定、會重複使用的製作方式。選一個範本、填一次想法，系統會在背景依序完成；關掉頁面也會繼續，成品會進入下方生成紀錄。
+  const body = (
+    <>
+      {!embedded && <h2>製作範本（固定自動流程）</h2>}
+      <p className="hint" style={{ marginTop: embedded ? 4 : undefined }}>
+        適合步驟固定、會重複使用的製作方式。選一個範本、填一次想法，系統會在背景依序完成；關掉頁面也會繼續，成品會進入生成紀錄。
       </p>
       <label htmlFor="wf-flow">選擇製作範本</label>
       <select id="wf-flow" value={wf?.id ?? ""} onChange={(e) => setWfId(e.target.value)}>
@@ -147,7 +176,57 @@ export function WorkflowCard({
         ))}
       </select>
       {wf && <p className="hint" style={{ marginTop: 4 }}>{wf.strengths}|適合：{wf.bestFor}</p>}
-      <label htmlFor="wf-idea">這次想完成什麼？（一句話）</label>
+      {pickMissId ? (
+        <p className="hint" role="status" style={{ marginTop: 6, color: "var(--gold-ink)" }}>
+          帶入範本無法對應：
+          <b className="mono">{pickMissId}</b>
+          （列表中沒有這個 id，已保留目前選擇）
+        </p>
+      ) : null}
+
+      {/* §6.4 計畫預覽：步驟、模型、估點、核准閘門（單一區塊，不另掛 CreationCostSummary） */}
+      {wf && (
+        <div
+          className="workflow-plan-preview"
+          data-testid="workflow-plan-preview"
+          role="status"
+          aria-live="polite"
+          style={{
+            marginTop: 10,
+            padding: "8px 10px",
+            border: "1px solid var(--border-soft)",
+            borderRadius: "var(--radius-md)",
+            background: "var(--card2)",
+          }}
+        >
+          <strong style={{ fontSize: "var(--fs-13)" }}>計畫預覽</strong>
+          <ol className="hint" style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+            {wf.steps.map((s, i) => (
+              <li key={i} style={{ marginBottom: 2 }}>
+                {s.note}
+                <span className="mono" style={{ marginLeft: 6, fontSize: "var(--fs-11)", opacity: 0.85 }}>
+                  {modelLabel(s.modelId)}
+                </span>
+                {s.usePrevAsSource ? (
+                  <span className="chip" style={{ marginLeft: 4, fontSize: "var(--fs-11)" }}>
+                    沿用上步
+                  </span>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+          <p className="hint" style={{ margin: "6px 0 0" }}>
+            本次模式：製作範本・預估消耗：約 {wf.points} 點（{wf.steps.length} 步）・產物寫入生成紀錄
+          </p>
+          <p className="hint" style={{ margin: "2px 0 0" }}>
+            是否需要核准：各步生成若達門檻仍走既有核准流程（背景執行不中斷）
+          </p>
+        </div>
+      )}
+
+      <label htmlFor="wf-idea" style={{ display: "block", marginTop: 10 }}>
+        這次想完成什麼？（一句話）
+      </label>
       <textarea id="wf-idea" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂中一炷香緩緩升起，傳達放下與新生" />
       {/* 二合一回看線：啟動會沿用生成台勾選的角色/場景卡，整條串鏈畫風一致（沒勾就不帶） */}
       {(charIds.length > 0 || sceneIds.length > 0) && (
@@ -181,6 +260,7 @@ export function WorkflowCard({
       </div>
       {start.error && <p className="hint" style={{ marginTop: 6 }}>啟動失敗：{start.error.message}</p>}
       {stop.error && <p className="hint" style={{ marginTop: 6 }}>停止失敗：{stop.error.message}</p>}
+
       {(runs.data ?? []).map((r) => {
         const steps = r.steps as RunStep[];
         const label = workflows.data?.find((w) => w.id === r.presetId)?.label ?? r.presetId;
@@ -231,6 +311,20 @@ export function WorkflowCard({
           </div>
         );
       })}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div data-fb="製作範本" data-testid="workflow-card">
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <section className="card" data-fb="製作範本" data-testid="workflow-card">
+      {body}
     </section>
   );
 }

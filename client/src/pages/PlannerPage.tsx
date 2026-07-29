@@ -68,6 +68,15 @@ function dayKey(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
+function nextTabValue<T extends string>(values: readonly T[], current: T, key: string): T | null {
+  const index = values.indexOf(current);
+  if (key === "Home") return values[0] ?? null;
+  if (key === "End") return values[values.length - 1] ?? null;
+  if (key === "ArrowRight" || key === "ArrowDown") return values[(index + 1) % values.length] ?? null;
+  if (key === "ArrowLeft" || key === "ArrowUp") return values[(index - 1 + values.length) % values.length] ?? null;
+  return null;
+}
+
 export function PlannerPage({ groupId }: { groupId: string }) {
   // 深連結來源：① 留言／私訊卡 setPlannerFocus（sessionStorage）② URL ?focus=note-:id|schedule-:id（私訊標注卡直達）
   const [focusTarget] = useState(() => {
@@ -119,7 +128,7 @@ export function PlannerPage({ groupId }: { groupId: string }) {
       />
       <KnowledgeMapCard key={`map-${groupId}`} groupId={groupId} initiallyOpen={initialSections.knowledgeMap} />
       <p style={{ marginTop: 24 }}>
-        <Link href="/">回作業台</Link>
+        <Link href="/dashboard">回今日工作台</Link>
       </p>
     </div>
   );
@@ -305,10 +314,38 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
         {/* 清單／月曆切換（真實日曆）：段落式切換鈕 */}
           <div className="seg" role="tablist" aria-label="排程檢視" style={{ marginLeft: "auto" }}>
-          <button role="tab" aria-selected={view === "list"} className={view === "list" ? "on" : ""} onClick={() => setView("list")}>
+          <button
+            role="tab"
+            aria-selected={view === "list"}
+            tabIndex={view === "list" ? 0 : -1}
+            data-schedule-view="list"
+            className={view === "list" ? "on" : ""}
+            onClick={() => setView("list")}
+            onKeyDown={(event) => {
+              const next = nextTabValue(["list", "calendar"] as const, "list", event.key);
+              if (!next) return;
+              event.preventDefault();
+              setView(next);
+              event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-schedule-view="${next}"]`)?.focus();
+            }}
+          >
             <Icon name="FileText" size={13} /> 清單
           </button>
-          <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "on" : ""} onClick={() => setView("calendar")}>
+          <button
+            role="tab"
+            aria-selected={view === "calendar"}
+            tabIndex={view === "calendar" ? 0 : -1}
+            data-schedule-view="calendar"
+            className={view === "calendar" ? "on" : ""}
+            onClick={() => setView("calendar")}
+            onKeyDown={(event) => {
+              const next = nextTabValue(["list", "calendar"] as const, "calendar", event.key);
+              if (!next) return;
+              event.preventDefault();
+              setView(next);
+              event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-schedule-view="${next}"]`)?.focus();
+            }}
+          >
             <Icon name="CalendarPlus" size={13} /> 月曆
           </button>
           </div>
@@ -1300,9 +1337,26 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
       {/* 鏡頭：全組／我的／提及我 ＋ 專案聚焦（團隊／個人／專案三個維度） */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
         <div className="seg" role="tablist" aria-label="鏡頭">
-          <button role="tab" aria-selected={lens === "all"} className={lens === "all" ? "on" : ""} onClick={() => setLens("all")}>全組</button>
-          <button role="tab" aria-selected={lens === "mine"} className={lens === "mine" ? "on" : ""} onClick={() => setLens("mine")}>我的</button>
-          <button role="tab" aria-selected={lens === "mentioned"} className={lens === "mentioned" ? "on" : ""} onClick={() => setLens("mentioned")}>提及我</button>
+          {(["all", "mine", "mentioned"] as const).map((item) => (
+            <button
+              key={item}
+              role="tab"
+              aria-selected={lens === item}
+              tabIndex={lens === item ? 0 : -1}
+              data-map-lens={item}
+              className={lens === item ? "on" : ""}
+              onClick={() => setLens(item)}
+              onKeyDown={(event) => {
+                const next = nextTabValue(["all", "mine", "mentioned"] as const, item, event.key);
+                if (!next) return;
+                event.preventDefault();
+                setLens(next);
+                event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-map-lens="${next}"]`)?.focus();
+              }}
+            >
+              {item === "all" ? "全組" : item === "mine" ? "我的" : "提及我"}
+            </button>
+          ))}
         </div>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <Icon name="SlidersHorizontal" size={13} style={{ color: "var(--fg-secondary)" }} />

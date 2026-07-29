@@ -9,6 +9,30 @@ import { SplashScreen } from "../components/SplashScreen";
 import { ChangePasswordDialog } from "./session/ChangePasswordDialog";
 import { SessionGate } from "./SessionGate";
 import { AppHeader } from "./components/AppHeader";
+import { MobileNavigation } from "./components/MobileNavigation";
+
+const SPLASH_SESSION_KEY = "aios.splash.seen";
+
+function shouldShowSplash(): boolean {
+  try {
+    if (sessionStorage.getItem(SPLASH_SESSION_KEY) === "1") return false;
+    sessionStorage.setItem(SPLASH_SESSION_KEY, "1");
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function pageTitle(pathname: string): string {
+  if (pathname === "/") return "AI Director OS｜把想法變成可執行的團隊計畫";
+  if (pathname === "/login") return "登入｜AI Director OS";
+  if (pathname === "/dashboard") return "今日工作台｜AI Director OS";
+  if (pathname.startsWith("/p/")) return "專案｜AI Director OS";
+  if (pathname.startsWith("/planner")) return "筆記排程｜AI Director OS";
+  if (pathname.startsWith("/databases")) return "知識資料｜AI Director OS";
+  if (pathname.startsWith("/chat")) return "訊息｜AI Director OS";
+  return "AI Director OS";
+}
 
 /**
  * App chrome composer: session/group state, header, routes, dialogs.
@@ -16,7 +40,7 @@ import { AppHeader } from "./components/AppHeader";
  */
 export function AppShell() {
   const utils = trpc.useUtils();
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
   const me = trpc.auth.me.useQuery();
   const logout = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
   const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
@@ -44,16 +68,24 @@ export function AppShell() {
     return () => navigator.serviceWorker.removeEventListener("message", onMsg);
   }, [navigate]);
 
+  useEffect(() => {
+    document.title = pageTitle(location);
+  }, [location]);
+
   // 組切換（多組成員）：記住上次選的組
   const groups = me.data?.groups ?? [];
-  const [activeGroupId, setActiveGroupId] = useState<string>(() => localStorage.getItem("aidos_group") ?? "");
+  const [activeGroupId, setActiveGroupId] = useState<string>(() => {
+    try { return localStorage.getItem("aidos_group") ?? ""; }
+    catch { return ""; }
+  });
   useEffect(() => {
     if (groups.length && !groups.some((g) => g.groupId === activeGroupId)) {
       setActiveGroupId(groups[0].groupId);
     }
   }, [groups, activeGroupId]);
   useEffect(() => {
-    if (activeGroupId) localStorage.setItem("aidos_group", activeGroupId);
+    if (!activeGroupId) return;
+    try { localStorage.setItem("aidos_group", activeGroupId); } catch { /* 無痕／停用儲存時僅不記住組別 */ }
   }, [activeGroupId]);
 
   const isAdmin = !!me.data && (me.data.user.isSuperAdmin || me.data.adminTeamIds.length > 0);
@@ -68,16 +100,17 @@ export function AppShell() {
   // 管理員重設密碼後：不論在哪個路由都用強制對話框擋住，改完密碼（auth.me 重查）才放行
   const mustChangePw = !!me.data?.user.mustChangePassword;
   // 進站 splash：auth 就緒後淡出；不阻擋互動路徑以外的預載，僅首次掛載
-  const [splashDone, setSplashDone] = useState(false);
+  const [splashDone, setSplashDone] = useState(() => !shouldShowSplash());
 
   return (
     <div className="app">
+      {me.data && <a className="skip-link" href="#main-content">跳到主要內容</a>}
       {!splashDone && (
         <SplashScreen ready={!me.isLoading} onDone={() => setSplashDone(true)} />
       )}
       {/* 強制改密碼時整塊背景 inert：對話框遮罩只擋滑鼠，Tab 仍能聚焦到背景，要靠 inert 一起擋 */}
       <div inert={(mustChangePw || showChangePw || showNotifSettings) || undefined}>
-        <AppHeader
+        {me.data && <AppHeader
           userName={me.data?.user.name}
           me={me.data}
           groups={groups}
@@ -91,24 +124,44 @@ export function AppShell() {
           onNotifSettings={() => setShowNotifSettings(true)}
           onLogout={() => { void logoutWithPushCleanup(); }}
           loggingOut={logout.isPending}
-        />
+        />}
 
         {/* 新版已下載完成時由使用者主動更新；不在編輯途中自動刷新。 */}
         <AppUpdateBanner />
 
         {/* lazy 頁面載入中的過場（QA-025 code-splitting）：整個路由樹共用一個 Suspense */}
-        <Suspense fallback={<p className="hint">載入中…</p>}>
-          <SessionGate
-            me={me.data}
-            meLoading={me.isLoading}
-            meError={!!me.error}
-            onRetry={() => { void me.refetch(); }}
-            isAdmin={isAdmin}
-            activeGroupId={activeGroupId}
-            activeIsLeader={activeIsLeader}
-            canSeeOrg={canSeeOrg}
-          />
-        </Suspense>
+        {me.data ? (
+          <>
+            <main id="main-content" tabIndex={-1}>
+              <Suspense fallback={<p className="hint">載入中…</p>}>
+                <SessionGate
+                  me={me.data}
+                  meLoading={me.isLoading}
+                  meError={!!me.error}
+                  onRetry={() => { void me.refetch(); }}
+                  isAdmin={isAdmin}
+                  activeGroupId={activeGroupId}
+                  activeIsLeader={activeIsLeader}
+                  canSeeOrg={canSeeOrg}
+                />
+              </Suspense>
+            </main>
+            <MobileNavigation />
+          </>
+        ) : (
+          <Suspense fallback={<p className="hint">載入中…</p>}>
+            <SessionGate
+              me={me.data}
+              meLoading={me.isLoading}
+              meError={!!me.error}
+              onRetry={() => { void me.refetch(); }}
+              isAdmin={isAdmin}
+              activeGroupId={activeGroupId}
+              activeIsLeader={activeIsLeader}
+              canSeeOrg={canSeeOrg}
+            />
+          </Suspense>
+        )}
       </div>
 
       {mustChangePw ? (

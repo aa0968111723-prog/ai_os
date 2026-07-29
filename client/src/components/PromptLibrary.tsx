@@ -8,22 +8,35 @@ export interface PromptReuseSettings {
   modelId?: string | null;
   characterIds?: string[] | null;
   scenePresetIds?: string[] | null;
+  /** Prompt row id for apply_prompt tracking (optional). */
+  promptId?: string;
 }
 
 /**
  * 提示詞庫（簡報「打過的咒語一鍵再用」）：
  * 成功生成的提示詞自動入庫，這裡可「再用」（帶入生成台，連同模型/角色/場景設定一起還原）、
  * 「製作範本」（帶入製作範本想法框）、「複製」、「刪除」。
+ *
+ * WB-05: `embedded` 模式供 CreationResourceDrawer 使用（無外層 card／可顯示空狀態／自訂再用文案）。
  */
 export function PromptLibrary({
   projectId,
   onUse,
   onUseForWorkflow,
+  embedded = false,
+  showEmpty = false,
+  reuseLabel = "再用",
 }: {
   projectId: string;
   onUse: (text: string, settings?: PromptReuseSettings) => void;
   /** 三合一：把咒語帶進製作範本「你的想法」框（不傳就不畫「製作範本」鈕） */
   onUseForWorkflow?: (text: string) => void;
+  /** Drawer embed: no outer card chrome / h2 (parent provides title). */
+  embedded?: boolean;
+  /** When true, render empty-state instead of returning null (drawer needs layout). */
+  showEmpty?: boolean;
+  /** Primary reuse button label (e.g. 帶入目前模式（直接生成）). */
+  reuseLabel?: string;
 }) {
   const utils = trpc.useUtils();
   const list = trpc.prompts.list.useQuery({ projectId });
@@ -42,13 +55,39 @@ export function PromptLibrary({
     );
   };
 
-  if (!list.data?.length) return null; // 沒有咒語就不佔版面（生成成功後自動出現）
+  const empty = !list.data?.length;
+  if (empty && !showEmpty) return null; // 沒有咒語就不佔版面（生成成功後自動出現）
+  if (list.isLoading && showEmpty) {
+    return (
+      <div className="hint" style={{ marginTop: embedded ? 0 : 8 }} aria-busy="true">
+        載入提示詞庫…
+      </div>
+    );
+  }
+  if (empty && showEmpty) {
+    return (
+      <div className="empty-state" style={{ marginTop: embedded ? 0 : 12 }} data-fb="提示詞庫">
+        <h3>還沒有提示詞——</h3>
+        <p>成功生成後，咒語會自動存進這裡，方便一鍵帶入目前模式。</p>
+      </div>
+    );
+  }
+  if (!list.data?.length) return null;
 
-  return (
-    <section className="card" data-fb="提示詞庫">
-      <h2>提示詞庫（打過的咒語，一鍵再用）</h2>
-      <p className="hint">成功生成的提示詞會自動存這裡（連同模型與角色/場景設定）；常用的排在前面。</p>
-      <div style={{ marginTop: 8 }}>
+  const body = (
+    <>
+      {!embedded && (
+        <>
+          <h2>提示詞庫（打過的咒語，一鍵再用）</h2>
+          <p className="hint">成功生成的提示詞會自動存這裡（連同模型與角色/場景設定）；常用的排在前面。</p>
+        </>
+      )}
+      {embedded && (
+        <p className="hint" style={{ marginTop: 0 }}>
+          成功生成的咒語會自動入庫。按「{reuseLabel}」只帶入、不送出、不扣點。
+        </p>
+      )}
+      <div style={{ marginTop: embedded ? 4 : 8 }}>
         {list.data.map((p) => {
           const modelLabel = p.modelId ? getModel(p.modelId)?.label ?? p.modelId : null;
           const charN = (p.characterIds as string[] | null)?.length ?? 0;
@@ -68,16 +107,17 @@ export function PromptLibrary({
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <button
                   style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }}
-                  title={modelLabel ? "帶回生成台，並還原模型與角色/場景勾選" : "帶回生成台"}
+                  title={modelLabel ? "帶入目前模式，並還原模型與角色/場景勾選" : "帶入目前模式"}
                   onClick={() =>
                     onUse(p.text, {
+                      promptId: p.id,
                       modelId: p.modelId,
                       characterIds: p.characterIds as string[] | null,
                       scenePresetIds: p.scenePresetIds as string[] | null,
                     })
                   }
                 >
-                  再用
+                  {reuseLabel}
                 </button>
                 {onUseForWorkflow && (
                   <button
@@ -106,6 +146,20 @@ export function PromptLibrary({
         })}
       </div>
       {remove.error && <p className="error">{remove.error.message}</p>}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div data-fb="提示詞庫" className="prompt-library--embedded">
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <section className="card" data-fb="提示詞庫">
+      {body}
     </section>
   );
 }

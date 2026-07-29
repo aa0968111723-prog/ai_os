@@ -146,7 +146,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
   }, [tables]);
 
   const projectBackHref = contextProjectId
-    ? `/projects/${encodeURIComponent(contextProjectId)}#sec-databases`
+    ? `/p/${encodeURIComponent(contextProjectId)}#sec-databases`
     : null;
 
   return (
@@ -164,9 +164,9 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
         自訂欄位的輕量資料表：個人清單、組名單、團隊器材、全站公告都放得下。組以上範圍的資料庫，
         團隊 AI 助手答題時看得到；外部 AI 助手（MCP）也能查詢與寫入——權限跟你在網頁上一樣。
       </p>
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap", marginTop: 12 }}>
+      <div className={`database-layout${selected || creating ? " has-detail" : ""}`}>
         {/* 左欄：清單＋建立 */}
-        <div style={{ flex: "0 1 280px", minWidth: 240 }}>
+        <aside className="database-sidebar" aria-label="資料庫清單">
           <button className="primary" onClick={() => { setCreating(true); setSelectedId(null); }}>
             <Icon name="Plus" size={14} /> 建立資料庫
           </button>
@@ -195,10 +195,19 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
               <p>先建一個試試：比如「拍攝器材借用表」或你自己的待辦清單。</p>
             </div>
           )}
-        </div>
+        </aside>
 
         {/* 右欄：建立表單 or 選中庫的格線 */}
-        <div style={{ flex: "1 1 560px", minWidth: 320 }}>
+        <section className="database-main" aria-label={creating ? "建立資料庫" : selected?.name ?? "資料庫內容"}>
+          {(creating || selected) && (
+            <button
+              type="button"
+              className="database-mobile-back btn-ghost"
+              onClick={() => { setCreating(false); setSelectedId(null); }}
+            >
+              <Icon name="Undo2" size={14} /> 返回資料庫清單
+            </button>
+          )}
           {creating ? (
             <CreateTableCard
               groupId={groupId}
@@ -217,10 +226,10 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
               </p>
             </div>
           )}
-        </div>
+        </section>
       </div>
       <p style={{ marginTop: 24 }}>
-        {projectBackHref ? <Link href={projectBackHref}>回專案資料</Link> : <Link href="/">回作業台</Link>}
+        {projectBackHref ? <Link href={projectBackHref}>回專案資料</Link> : <Link href="/dashboard">回今日工作台</Link>}
       </p>
     </div>
   );

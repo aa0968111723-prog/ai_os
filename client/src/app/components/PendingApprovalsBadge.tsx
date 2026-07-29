@@ -72,8 +72,8 @@ export function PendingApprovalsBadge({ groupId }: { groupId: string }) {
             </Link>
           ))}
           <div className="menu-sep" />
-          <Link href="/" className="menu-item" role="menuitem" onClick={close} style={{ color: "var(--fg-secondary)" }}>
-            <Icon name="ArrowRight" size={15} />回作業台看全部
+          <Link href="/dashboard" className="menu-item" role="menuitem" onClick={close} style={{ color: "var(--fg-secondary)" }}>
+            <Icon name="ArrowRight" size={15} />回今日工作台看全部
           </Link>
         </div>
       )}

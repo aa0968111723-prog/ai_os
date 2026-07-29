@@ -43,6 +43,14 @@ export type NavigationItem = {
 /** High-frequency topbar quick links (excluding special badge components like DM/pending/points). */
 export const topbarNavItems: NavigationItem[] = [
   {
+    key: "dashboard",
+    label: "今日",
+    href: "/dashboard",
+    section: "topbar",
+    icon: "CheckCircle2",
+    title: "今日工作台——待處理、AI 進度與最近專案",
+  },
+  {
     key: "planner",
     label: "筆記排程",
     href: "/planner",
@@ -60,7 +68,7 @@ export const topbarNavItems: NavigationItem[] = [
   },
   {
     key: "help",
-    label: "怎麼用",
+    label: "說明",
     href: "/help",
     section: "topbar",
     icon: "HelpCircle",

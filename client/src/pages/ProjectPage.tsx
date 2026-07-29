@@ -4,33 +4,23 @@ import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip } from "../components/interactions";
 import { worldviewSchema, type Worldview } from "@shared/worldview";
-import { getModel, supportsCardAnchors, CATEGORIES } from "@shared/models";
-import { GenerationList } from "../components/GenerationList";
 import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
-import { ModelPicker, type PickedModel } from "../components/ModelPicker";
-import { WorkflowCard } from "../components/WorkflowCard";
 import { AssetLibrary } from "../components/AssetLibrary";
 import { RecycleBin } from "../components/RecycleBin";
 import { KnowledgeBase } from "../components/KnowledgeBase";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
-import { PromptLibrary } from "../components/PromptLibrary";
-import { TocNav } from "../components/TocNav";
-import { AiHub } from "../components/AiHub";
+import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
+import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
+import { loadDraft } from "../features/creation-workbench/creationDraft";
+import {
+  type DirectGenerateApplyRequest,
+} from "../features/creation-workbench/modes/DirectGenerateMode";
+import { projectCanEdit } from "../features/creation-workbench/generationGates";
+import { revealWorkbenchAnchor, scrollToSelector } from "../features/creation-workbench/workbenchNav";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
-import {
-  approvalThresholdNotice,
-  buildGenerationSubmitInput,
-  estimateGenerationPoints,
-  filterCompatibleSources,
-  getGenerationDisableReason,
-  isGenerateButtonDisabled,
-  isUsageBasedPoints,
-  projectCanEdit,
-  shouldShowApprovalThresholdNotice,
-} from "../features/creation-workbench/generationGates";
 import {
   useCollab,
   CursorOverlay,
@@ -41,13 +31,6 @@ import {
   zoneOfPeer,
   type CollabViewMode,
 } from "../realtime";
-
-/** 平滑捲動到頁面某錨點（引導步驟／摘要條／跨卡跳轉共用） */
-function scrollToSelector(selector: string) {
-  requestAnimationFrame(() => {
-    document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
-}
 
 // HelpTip 已移到 components/interactions（SceneList 等元件的標題也要用），這裡從共用處匯入
 
@@ -256,12 +239,12 @@ function AddOptionChip({
 }
 
 /**
- * 專案工作台（一體連貫長頁版）：三幕環環相扣——
- * ① 專案上下文（世界觀＋選項就地新增／角色・場景定裝／知識庫／素材庫／成員權限）＝AI 的共同大腦；
- * ② AI 創作中心（AI 創作助手：一個對話統包問答・發想・拆分鏡・排計畫執行・查資料庫→生成台→製作範本→提示詞庫）；
- * ③ 分鏡・時間軸・交付＝成品落地。
- * 上下文餵給創作、創作的成品流進分鏡、分鏡打包交付；跨卡動作（導演建議、分鏡提示詞、選來源、
- * 「再用」）都會自動捲到接手的卡並聚焦，不再是各自獨立的功能。
+ * 專案頁（WB-06 頁面組裝）：三幕長頁，不承擔各創作模式的表單／成本／mutation。
+ * ① 專案上下文（世界觀・定裝・知識庫・素材庫・成員權限）＝AI 的共同大腦；
+ * ② AI 創作中心：單一 CreationWorkbench（問 AI／直接生成／製作範本／執行計畫＋資源抽屜）；
+ * ③ 分鏡・時間軸・交付＝成品落地（SceneList）。
+ * 頁面只負責：抓專案／權限、組裝三幕、把 projectId／groupId／canEdit／capabilities 傳入工作台、
+ * 跨幕捲動與 TocNav。跨幕帶入（再用提示詞、選來源）走 applyPrompt / generateApply 橋接。
  */
 export function ProjectPage({ id }: { id: string }) {
   const utils = trpc.useUtils();
@@ -312,13 +295,6 @@ export function ProjectPage({ id }: { id: string }) {
     },
   });
 
-  const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState<PickedModel | null>(null);
-  /** 來源：優先素材庫（伺服器簽名網址，永久有效）；也可貼外部網址 */
-  const [sourceAsset, setSourceAsset] = useState<{ id: string; title: string; kind: string } | null>(null);
-  const [sourceUrl, setSourceUrl] = useState("");
-  /** 外部網址 onBlur 預檢結果（new URL()，需 http/https）；非空時生成鈕會鎖住 */
-  const [sourceUrlError, setSourceUrlError] = useState("");
   /** 生成時要帶入的角色定裝卡（跨鏡一致）——持久化，重整不歸零 */
   const [charIds, setCharIds] = usePersistedIds(`aios.pick.chars.${id}`);
   const toggleChar = (cid: string) => setCharIds((prev) => (prev.includes(cid) ? prev.filter((x) => x !== cid) : [...prev, cid]));
@@ -355,59 +331,25 @@ export function ProjectPage({ id }: { id: string }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenePresets.data]);
-  // 來源素材同樣要清：選中的來源被刪（本人刪或協作者刪→WS invalidate）後，
-  // 下拉選項已消失但 state 仍在——生成鈕保持可按、送出必被伺服器擋，使用者看不懂哪裡錯
-  useEffect(() => {
-    const list = assets.data;
-    if (!list || !sourceAsset) return;
-    if (!list.some((a) => a.id === sourceAsset.id)) setSourceAsset(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assets.data]);
-  /** 外部指定模型（提示詞庫「再用」/生成紀錄「再用此設定」還原模型用）：nonce 遞增觸發 ModelPicker 套用 */
-  const [pickReq, setPickReq] = useState<{ modelId: string; nonce: number } | null>(null);
-  /** 提示詞庫「用於製作範本」：把咒語帶進製作範本想法框（nonce 遞增觸發 WorkflowCard 套用） */
-  const [wfPromptReq, setWfPromptReq] = useState<{ text: string; nonce: number } | null>(null);
-  /** 引導步驟列收合狀態（全部完成後可整條收起，不佔版面） */
-  const [onboardCollapsed, setOnboardCollapsed] = useState(false);
-  /** 生成確認彈窗：先估點數、使用者點頭才真的送出、扣點 */
-  const [confirming, setConfirming] = useState(false);
-  /** 送出後回饋：達成本審核門檻被攔下時顯示「已送組長核准」（一般成功維持既有安靜行為，以列表出現新列為回饋） */
-  const [submitNotice, setSubmitNotice] = useState("");
-  // 帶 groupId（本專案的組）才算得出週/日額度——不帶時 quota.my 的 weeklyQuota 恆為 null，彈窗週用量變死碼
-  const quota = trpc.quota.my.useQuery({ groupId: project.data?.groupId }, { enabled: confirming && !!project.data });
-  const savePrompt = trpc.prompts.save.useMutation({ onSuccess: () => utils.prompts.list.invalidate({ projectId: id }) });
+  /** 素材庫選中來源的高亮 id（實際來源 state 在 DirectGenerateMode） */
+  const [sourceHighlightId, setSourceHighlightId] = useState<string | null>(null);
+  /** 把提示詞庫／生成紀錄／分鏡／素材庫的設定送進 DirectGenerateMode（nonce 觸發） */
+  const [generateApply, setGenerateApply] = useState<DirectGenerateApplyRequest | null>(null);
+  /** 引導步驟列收合偏好（per 專案持久化，重整後不會重新佔滿首屏） */
+  const onboardStorageKey = `aios.projectGuide.collapsed.${id}`;
+  const [onboardCollapsed, setOnboardCollapsed] = useState(() => {
+    try { return localStorage.getItem(onboardStorageKey) === "1"; }
+    catch { return false; }
+  });
+  const toggleOnboard = () => {
+    setOnboardCollapsed((current) => {
+      const next = !current;
+      try { localStorage.setItem(onboardStorageKey, next ? "1" : "0"); } catch { /* 偏好儲存失敗不影響操作 */ }
+      return next;
+    });
+  };
   const archiveProject = trpc.projects.setArchived.useMutation({
     onSuccess: () => { utils.projects.get.invalidate({ id }); utils.projects.list.invalidate(); },
-  });
-  // 冪等鍵（QA-007）：同一次「還沒成功」的生成重試沿用同鍵——timeout 後再按不會重複扣點/重複生成；
-  // 成功才換新鍵（下一次生成）
-  const submitRequestId = useRef<string>(crypto.randomUUID());
-  const submit = trpc.generation.submit.useMutation({
-    onSuccess: (data, vars) => {
-      submitRequestId.current = crypto.randomUUID();
-      // 成功送出（已進排隊／生成）的提示詞才自動入庫——awaiting_approval 尚未真的生成，
-      // 若駁回／永不核准會留下「從未成功」的咒語，與「成功生成的提示詞會自動存」文案矛盾。
-      if (data.status !== "awaiting_approval" && data.status !== "rejected") {
-        savePrompt.mutate({
-          projectId: id,
-          text: vars.prompt,
-          modelId: vars.modelId,
-          characterIds: vars.characterIds ?? [],
-          scenePresetIds: vars.scenePresetIds ?? [],
-        });
-      }
-      setPrompt("");
-      setConfirming(false);
-      // 達門檻的列不會馬上開始生成——明確告知已送核准，否則使用者會以為卡住
-      setSubmitNotice(data.status === "awaiting_approval" ? "⏳ 已送組長核准——核准後才會開始生成" : "");
-    },
-    // fal submit 失敗時伺服器也已寫入一筆 failed 列並退點——成功失敗都要刷新列表與點數
-    onSettled: () => {
-      utils.generation.listByProject.invalidate({ projectId: id });
-      // 分頁/篩選視圖用 listByProjectPaged——同步失效，否則展開或篩選狀態下新生成不顯示（修 submit-missing-paged-invalidate）
-      utils.generation.listByProjectPaged.invalidate({ projectId: id });
-      utils.quota.my.invalidate();
-    },
   });
 
   if (project.isLoading) return <p className="hint">載入中…</p>;
@@ -419,7 +361,7 @@ export function ProjectPage({ id }: { id: string }) {
       : `載入失敗：${project.error?.message ?? "未知錯誤"}`;
     return (
       <p className="error">
-        {msg} <Link href="/">回作業台</Link>
+        {msg} <Link href="/dashboard">回今日工作台</Link>
       </p>
     );
   }
@@ -444,16 +386,23 @@ export function ProjectPage({ id }: { id: string }) {
   const canEdit = projectCanEdit(p.myProjectRole);
 
   /** 「用這個提示詞」統一入口（AI 導演／分鏡草稿／提示詞庫「再用」／生成紀錄「再用此設定」）：
-   * 避免默默蓋掉手打的提示詞；套用後自動捲到生成台、聚焦提示詞框——跨卡動作由系統接手，不用自己捲。
+   * 避免默默蓋掉手打的提示詞；套用後切到直接生成模式、聚焦提示詞框。
    * settings（可選）＝一併還原模型與角色/場景卡勾選：提示詞庫與生成紀錄存的是「完整用法」，不只文字。
    * 陣列語義：[]＝明確清空現勾（如實還原「當時沒帶卡」）；null/undefined＝不知道，維持現勾不動 */
+  /**
+   * 「用這個提示詞」統一入口。
+   * @returns false when user cancels overwrite confirm (nothing applied);
+   *          true after settings/prompt are applied (for resource drawer close/toast).
+   */
   const applyPrompt = (
     text: string,
     settings?: { modelId?: string | null; characterIds?: string[] | null; scenePresetIds?: string[] | null; sourceAssetId?: string | null },
-  ) => {
-    // 這裡刻意保留原生 confirm：只在使用者已手打提示詞時才問「要覆蓋嗎」；改成就地面板會多一層互動反而更煩
-    if (prompt.trim() && !window.confirm("要覆蓋你已輸入的提示詞嗎？")) return;
-    setPrompt(text);
+  ): boolean => {
+    // 現值：優先 DOM（工作台內表單），再退回 draft storage（可能有 debounce 延遲）
+    const live = (document.getElementById("gen-prompt") as HTMLTextAreaElement | null)?.value;
+    const current = (live ?? loadDraft(id).prompt ?? "").trim();
+    // 這裡刻意保留原生 confirm：只在使用者已手打提示詞時才問「要覆蓋嗎」
+    if (current && !window.confirm("要覆蓋你已輸入的提示詞嗎？")) return false;
     if (settings) {
       // 只還原「仍存在」的卡片 id（卡片可能已被刪除）；清單還沒載入就先原樣設定，載入後的清理 effect 會補剪
       if (settings.characterIds) {
@@ -466,30 +415,34 @@ export function ProjectPage({ id }: { id: string }) {
         const next = list ? settings.scenePresetIds.filter((sid) => list.some((s) => s.id === sid)) : settings.scenePresetIds;
         setSceneIds(() => next);
       }
-      if (settings.modelId) setPickReq((prev) => ({ modelId: settings.modelId!, nonce: (prev?.nonce ?? 0) + 1 }));
-      // 來源素材仍在庫才還原（已刪/回收桶的來源不帶，避免送出被伺服器擋）
       if (settings.sourceAssetId) {
         const src = assets.data?.find((a) => a.id === settings.sourceAssetId);
-        if (src) {
-          setSourceAsset({ id: src.id, title: src.title, kind: src.kind });
-          setSourceUrl("");
-          setSourceUrlError("");
-        }
+        if (src) setSourceHighlightId(src.id);
       }
     }
-    // 等 React 畫完再捲動；focus 用 preventScroll 才不會打斷平滑捲動
+    setGenerateApply((prev) => ({
+      nonce: (prev?.nonce ?? 0) + 1,
+      prompt: text,
+      modelId: settings?.modelId,
+      sourceAssetId: settings?.sourceAssetId,
+    }));
+    // 切到直接生成模式並露出 #sec-studio / #gen-prompt
+    revealWorkbenchAnchor("#sec-studio", { projectId: id });
     requestAnimationFrame(() => {
-      const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
-      el?.focus({ preventScroll: true });
-      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      requestAnimationFrame(() => {
+        const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
+        el?.focus({ preventScroll: true });
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
     });
+    return true;
   };
 
   // 「從這裡開始」四步：用實際 state 判定完成打勾
   const sceneCount = scenes.data?.length ?? 0;
   const onboardSteps = [
     { label: "設世界觀", done: !!(wv.logline.trim() || wv.message.trim()), target: "#onboard-worldview", hint: "填一句故事或關鍵訊息" },
-    { label: "生成一鏡", done: !!generations.data?.some((g) => g.status === "done"), target: "#gen-prompt", hint: "在生成台做出第一張成品" },
+    { label: "生成一鏡", done: !!generations.data?.some((g) => g.status === "done"), target: "#gen-prompt", hint: "在 AI 創作工作台的「直接生成」做出第一張成品" },
     { label: "加入分鏡", done: sceneCount > 0, target: "#onboard-delivery", hint: "把成品排進分鏡" },
     // 第4步用「有分鏡通過審核」當完成訊號，才不會一有分鏡就跟第3步一起打勾（誤導已交付）
     { label: "送審／打包", done: !!scenes.data?.some((s) => s.status === "approved"), target: "#onboard-delivery", hint: "送審通過後即可打包交付" },
@@ -512,24 +465,6 @@ export function ProjectPage({ id }: { id: string }) {
     // 只送有改的欄位；伺服器與現值合併（避免整包覆蓋造成的資料遺失）
     updateWv.mutate({ id, worldview: { [field]: next } });
   };
-
-  // 生成鈕鎖住時，旁邊同步顯示「為什麼」——非工程師看得懂的一句話
-  const needs = model?.needs;
-  // 逐次估點：按字計費的 TTS 依「要唸的文字」長度即時估，與後端扣點同一函式（shared/models）——顯示＝扣點。
-  // 其餘模型回扁平 points（行為不變）。full 找不到（理論上不會）時退回清單帶的 points。
-  const fullModel = model ? getModel(model.id) : undefined;
-  const estPoints = estimateGenerationPoints(model, prompt.length);
-  const disableReason = getGenerationDisableReason({
-    canEdit,
-    model,
-    prompt,
-    sourceAsset,
-    sourceUrl,
-    sourceUrlError,
-  });
-  // 來源下拉只列「明顯相容」的素材（寬鬆過濾，不確定的保留；後端 submit 有同一張表把關）。
-  // 已選中的素材即使不相容也保留在清單裡：select 的 value 永遠對得到 option，不會顯示成空白
-  const sourceOptions = filterCompatibleSources(assets.data ?? [], needs, sourceAsset?.id);
 
   /** 編輯指示：把某區塊接上協作狀態（誰在這裡→內框＋標籤）；鏡像時被跟隨者焦點區加粗 */
   const zoneProps = (zone: string) => ({
@@ -594,8 +529,8 @@ export function ProjectPage({ id }: { id: string }) {
       <CursorOverlay cursors={collab.cursors} />
       {/* 麵包屑：長頁面全程可及的返回入口＋標示專案所屬組（切組後留在他組專案時，一眼看出情境） */}
       <p className="hint" style={{ margin: "14px 0 0", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <Link href="/" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <Icon name="Undo2" size={13} />回作業台
+        <Link href="/dashboard" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <Icon name="Undo2" size={13} />今日工作台
         </Link>
         {(() => {
           const g = me.data?.groups.find((x) => x.groupId === p.groupId);
@@ -745,17 +680,26 @@ export function ProjectPage({ id }: { id: string }) {
           {allStepsDone && <span className="chip" style={{ fontSize: 12 }}>全部完成</span>}
           <button
             className="btn-sm"
-            onClick={() => setOnboardCollapsed((v) => !v)}
+            onClick={toggleOnboard}
+            aria-expanded={!onboardCollapsed}
+            aria-controls="project-getting-started-steps"
           >
             {onboardCollapsed ? "展開" : "收合"}
           </button>
         </div>
         {!onboardCollapsed && (
-          <div style={{ display: "flex", alignItems: "stretch", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+          <div id="project-getting-started-steps" style={{ display: "flex", alignItems: "stretch", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
             {onboardSteps.map((s, i) => (
               <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button
-                  onClick={() => scrollToSelector(s.target)}
+                  onClick={() => {
+                    // Workbench anchors (#gen-prompt / #sec-studio / …) must switch mode first.
+                    if (s.target === "#gen-prompt" || s.target === "#sec-studio" || s.target === "#sec-agent" || s.target === "#sec-assistant") {
+                      revealWorkbenchAnchor(s.target, { projectId: id });
+                    } else {
+                      scrollToSelector(s.target);
+                    }
+                  }}
                   title={s.hint}
                   style={{
                     display: "flex", alignItems: "center", gap: 8, textAlign: "left",
@@ -785,19 +729,20 @@ export function ProjectPage({ id }: { id: string }) {
         )}
       </section>
 
-      {/* #28 章節導覽：桌面左側 sticky 側欄／手機頂部可收合列（純附加，不動 .cols 版面）。
-          ③分鏡・交付 帶留言未讀徽章（有人提及我時顯示 @N）——組長漏審/夥伴喊話不再無聲。 */}
+      {/* #28 章節導覽：三幕錨點（上下文 → 工作台 → 交付）；② 只跳 #stage-create，不列各模式。
+          ③ 帶留言未讀徽章（@N 表示有人提及）。 */}
       <div className="toc-layout">
       <TocNav
-        items={[
-          { id: "stage-context", label: "① 專案上下文" },
-          { id: "stage-create", label: "② AI 創作中心" },
-          {
-            id: "stage-deliver",
-            label: "③ 分鏡・交付",
-            badge: unread.data && unread.data.count > 0 ? (unread.data.mentioned ? `@${Math.min(unread.data.count, 99)}` : String(Math.min(unread.data.count, 99))) : undefined,
-          },
-        ]}
+        items={TOC_DEFAULT_ITEMS.map((it) =>
+          it.id === "stage-deliver" && unread.data && unread.data.count > 0
+            ? {
+                ...it,
+                badge: unread.data.mentioned
+                  ? `@${Math.min(unread.data.count, 99)}`
+                  : String(Math.min(unread.data.count, 99)),
+              }
+            : it,
+        )}
       />
       <div className="cols">
         <div className="stack">
@@ -808,12 +753,12 @@ export function ProjectPage({ id }: { id: string }) {
             title="專案上下文"
             desc="世界觀・定裝・素材・知識庫——AI 的共同大腦"
             accent="group-1"
-            hint={wvReady ? "已定盤" : "未定盤"}
+            hint={wvReady ? "已設定" : "待設定"}
           />
           {/* 上下文摘要條：一眼看見 AI 全程共用哪些設定；點 chip 直達對應卡 */}
           <div className="ctx-summary" role="group" aria-label="AI 全程共用的上下文一覽">
             AI 全程共用：
-            {summaryChip(`世界觀${wvReady ? " ✓" : "（未定盤）"}`, "#onboard-worldview", wvReady)}
+            {summaryChip(`專案基調${wvReady ? " ✓" : "（待設定）"}`, "#onboard-worldview", wvReady)}
             {summaryChip(`角色 ${charCount ?? "…"}・場景 ${presetCount ?? "…"}`, "#sec-characters")}
             {summaryChip(`知識 ${knowledgeCount ?? "…"} 份`, "#sec-knowledge")}
             {summaryChip(`素材 ${assetCount ?? "…"}`, "#sec-assets")}
@@ -822,7 +767,7 @@ export function ProjectPage({ id }: { id: string }) {
           <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
           <section className="card" data-fb="世界觀卡" id="onboard-worldview">
             <h2>
-              世界觀（專案定盤星）
+              專案基調與世界觀
               <HelpTip text="這支片的固定設定，填一次，之後每次生成 AI 自動記得，不用重講背景。" />
               {updateWv.isPending ? (
                 <span className="hint" style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</span>
@@ -962,20 +907,20 @@ export function ProjectPage({ id }: { id: string }) {
           {/* 專案資料：AI 可引用狀態 + 一鍵建表 + 已關聯列彙整（不碰 plan／notesCore） */}
           <ProjectDatabasesCard projectId={id} canEdit={canEdit} />
 
-          {/* 素材庫（工作台一體化：從舊「③素材整理」搬進①）——上傳的檔案、生成的成品都是上下文的一部分；
-              「用作來源」會自動捲到下方生成台接手 */}
+          {/* 素材庫屬①上下文；「用作來源」切到工作台直接生成模式並帶入來源 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.assets)}>
             {/* data-fb 讓元件回饋標定「上傳素材」；透明包裹，不影響版面 */}
             <div data-fb="上傳素材" id="sec-assets">
               <AssetLibrary
                 projectId={id}
-                selectedSourceId={sourceAsset?.id ?? null}
+                selectedSourceId={sourceHighlightId}
                 onPickSource={(a) => {
-                  setSourceAsset(a);
-                  setSourceUrl("");
-                  setSourceUrlError("");
-                  // 選來源＝要生成：直接把人帶到生成台接手，環環相扣不用自己捲下去找
-                  scrollToSelector("#sec-studio");
+                  setSourceHighlightId(a.id);
+                  setGenerateApply((prev) => ({
+                    nonce: (prev?.nonce ?? 0) + 1,
+                    sourceAsset: a,
+                  }));
+                  revealWorkbenchAnchor("#sec-studio", { projectId: id });
                 }}
               />
             </div>
@@ -999,215 +944,33 @@ export function ProjectPage({ id }: { id: string }) {
 
           <StageLink text="以上設定會自動注入下方每一次生成——AI 全程記得，不必重講背景" />
 
-          {/* ② AI 創作中心：發想 → 生成 → 串鏈，同一組上下文 */}
+          {/* ② 唯一 AI 創作入口：CreationWorkbench（四模式 tabs + 資源抽屜）；不掛平行整頁卡 */}
           <StageHead
             id="stage-create"
             num="②"
             title="AI 創作中心"
-            desc="AI 創作助手＋生成・製作範本一條線"
+            desc="問 AI・直接生成・製作範本・執行計畫——同一工作台切換"
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
-          {/* AI 創作助手（統一深度整合）：一個對話統包問答・發想・拆分鏡・下目標排計畫・查資料庫；
-              多步目標排成計畫，核准後由伺服器背景執行（可寫入 AI 可寫的資料庫）；拆分鏡草稿仍落在③分鏡列表。
-              生成紀錄的「AI 執行計畫」來源 chip 捲向卡內既有的 #sec-agent 錨點 */}
-          <AiHub projectId={id} canEdit={canEdit} isLeader={isLeader} />
+          <CreationWorkbench
+            projectId={id}
+            canEdit={canEdit}
+            isLeader={isLeader}
+            groupId={p.groupId}
+            myRole={myRole}
+            projectFormat={p.format}
+            worldview={{ tones: wv.tones, styles: wv.styles, taboos: wv.taboos }}
+            wvReady={wvReady}
+            characterIds={charIds}
+            scenePresetIds={sceneIds}
+            generateApplyRequest={generateApply}
+            onReuseGenerate={applyPrompt}
+            onGenerateSourceChange={setSourceHighlightId}
+            studioCollab={zoneProps(COLLAB_ZONES.studio)}
+          />
 
-          {/* 生成台（11 類 × 旗艦/經濟/最低成本）＝日常主力工作區 */}
-          <CollabZone {...zoneProps(COLLAB_ZONES.studio)}>
-          <section className="card card--primary" data-fb="生成台" id="sec-studio">
-            <h2>創作生成</h2>
-            <ModelPicker onChange={setModel} pickRequest={pickReq} />
-            {model?.needs && (
-              <>
-                <label htmlFor="gen-source">{model.sourceHint ?? "來源素材"}</label>
-                {sourceOptions.length > 0 && (
-                  <select
-                    id="gen-source"
-                    value={sourceAsset?.id ?? ""}
-                    onChange={(e) => {
-                      const picked = sourceOptions.find((a) => a.id === e.target.value);
-                      setSourceAsset(picked ? { id: picked.id, title: picked.title, kind: picked.kind } : null);
-                      if (picked) { setSourceUrl(""); setSourceUrlError(""); }
-                    }}
-                  >
-                    <option value="">從本專案素材庫選…</option>
-                    {sourceOptions.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        [{a.kind}] {a.title}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {sourceAsset ? (
-                  <p className="hint">
-                    來源：{sourceAsset.title}（素材庫）
-                    <button className="btn-sm" style={{ marginLeft: 8 }} onClick={() => setSourceAsset(null)}>
-                      改用網址
-                    </button>
-                  </p>
-                ) : (
-                  <>
-                    {/* placeholder 不是可及名稱（打字即消失、報讀器多半不唸）——補 label 關聯 */}
-                    <label htmlFor="gen-source-url">來源網址</label>
-                    <input
-                      id="gen-source-url"
-                      value={sourceUrl}
-                      onChange={(e) => { setSourceUrl(e.target.value); setSourceUrlError(""); }}
-                      onBlur={(e) => {
-                        const v = e.target.value.trim();
-                        if (!v) { setSourceUrlError(""); return; }
-                        try {
-                          const u = new URL(v);
-                          setSourceUrlError(u.protocol === "http:" || u.protocol === "https:" ? "" : "網址格式不對，需以 https:// 開頭");
-                        } catch {
-                          setSourceUrlError("網址格式不對，需以 https:// 開頭");
-                        }
-                      }}
-                      placeholder="https://…（或從上方素材庫選）"
-                    />
-                    {sourceUrlError && <p className="error">{sourceUrlError}</p>}
-                  </>
-                )}
-              </>
-            )}
-            <label htmlFor="gen-prompt">{model?.kind === "audio" && model.needs == null ? "要唸的文字/音樂描述" : "提示詞（世界觀會自動帶入，不必重講背景）"}</label>
-            {/* id 是「用這個」等功能捲動聚焦的錨點，別拿掉 */}
-            <textarea id="gen-prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂，柔和光線灑落，一炷香的靜謐" />
-            {/* 帶入中的上下文一覽（環環相扣的回看線）：生成台就地看見「AI 會帶什麼」，要調就一鍵捲回① */}
-            <div className="ctx-summary" style={{ marginTop: 8 }} role="group" aria-label="這次生成會帶入的上下文">
-              帶入：
-              {summaryChip(`世界觀${wvReady ? " ✓" : "（未定盤）"}`, "#onboard-worldview", wvReady)}
-              {summaryChip(`角色 ${charIds.length}`, "#sec-characters", charIds.length > 0)}
-              {summaryChip(`場景 ${sceneIds.length}`, "#sec-scenes", sceneIds.length > 0)}
-            </div>
-            {/* 能力標示（QA-002）：不讓使用者誤以為定裝參考圖已送入模型——
-                非視覺類模型完全不用卡片（明確警告）；視覺類也只以「文字描述錨點」注入 */}
-            {(charIds.length > 0 || sceneIds.length > 0) && fullModel && !supportsCardAnchors(fullModel.category) && (
-              <p className="hint" role="alert" style={{ color: "var(--gold-ink)", marginTop: 6 }}>
-                ⚠ 此模型（{CATEGORIES.find((c) => c.id === fullModel.category)?.label ?? fullModel.category}）不會使用角色卡／場景卡——已勾選的卡片不影響本次生成
-              </p>
-            )}
-            {(charIds.length > 0 || sceneIds.length > 0) && fullModel && supportsCardAnchors(fullModel.category) && (
-              <p className="hint" style={{ marginTop: 6, fontSize: 12 }}>
-                角色卡／場景卡以「文字描述」注入提示詞；定裝參考圖不會直接送入模型（僅供人工比對成品）
-              </p>
-            )}
-            <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
-              <button
-                className="primary"
-                data-fb="生成按鈕"
-                disabled={isGenerateButtonDisabled(disableReason, submit.isPending)}
-                onClick={() => { setSubmitNotice(""); setConfirming(true); }}
-              >
-                {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${estPoints} 點）`}
-              </button>
-              <span className="hint">{disableReason ?? "失敗自動退點・額度由管理員調整"}</span>
-            </div>
-
-            {/* 生成前確認彈窗（簡報「花錢前先讓你看價，你點頭才做」） */}
-            {confirming && model && (
-              <div className="confirm-panel">
-                <h3 style={{ margin: "0 0 8px" }}>即將生成</h3>
-                <p style={{ margin: "4px 0" }}>
-                  <b>{model.label}</b>・{p.format}
-                  {charIds.length > 0 && <>・帶入 {charIds.length} 個角色定裝</>}
-                  {sceneIds.length > 0 && <>・{sceneIds.length} 個場景設定</>}
-                </p>
-                {/* 花錢前最後一道能力標示（QA-002）：卡片對此模型無效時，確認框內不可忽略地再講一次 */}
-                {(charIds.length > 0 || sceneIds.length > 0) && fullModel && !supportsCardAnchors(fullModel.category) && (
-                  <p role="alert" style={{ margin: "4px 0", fontSize: 13, color: "var(--gold-ink)" }}>
-                    ⚠ 此模型不會使用角色卡／場景卡——期待角色/場景一致請改用文生圖、圖生圖或影片類模型
-                  </p>
-                )}
-                <p style={{ margin: "4px 0", fontSize: 13 }}>提示詞：{prompt.trim().slice(0, 80)}{prompt.trim().length > 80 ? "…" : ""}</p>
-                {/* 注入透明化（深度優化）：花錢前看得見世界觀實際會帶進哪些東西，不再是黑盒 */}
-                {(wv.tones.length > 0 || wv.styles.length > 0 || wv.taboos.length > 0) && (
-                  <p className="hint" style={{ margin: "4px 0", fontSize: 12 }}>
-                    自動注入：
-                    {[
-                      wv.tones.length ? `調性（${wv.tones.join("、")}）` : "",
-                      wv.styles.length ? `風格（${wv.styles.join("、")}）` : "",
-                      wv.taboos.length ? `禁忌 ${wv.taboos.length} 條` : "",
-                    ].filter(Boolean).join("・")}
-                  </p>
-                )}
-                <p style={{ margin: "8px 0" }}>
-                  預估 <b style={{ color: "var(--primary-ink)", fontSize: 18 }}>約 {estPoints} 點</b>
-                  {model && isUsageBasedPoints(model.id) && (
-                    <span className="hint" style={{ marginLeft: 6, fontSize: 12 }}>（依文字長度即時計費）</span>
-                  )}
-                  {quota.data && (
-                    <span className="hint" style={{ marginLeft: 8 }}>
-                      {quota.data.totalRemaining != null ? `目前剩 ${quota.data.totalRemaining.toLocaleString()} 點` : "額度不限"}
-                      {quota.data.weeklyQuota != null ? `・本週 ${quota.data.weeklyUsed}/${quota.data.weeklyQuota}` : ""}
-                      {quota.data.dailyQuota != null ? `・今日 ${quota.data.dailyUsed}/${quota.data.dailyQuota}` : ""}
-                    </span>
-                  )}
-                </p>
-                {/* 成本審核門檻提醒：組員單筆估點達組長設定的門檻→送出後要等組長核准才會開始生成 */}
-                {/* 用 estPoints（實際估點/扣點值）比門檻，而非 model.points——逐字計費的 TTS 會隨提示詞長度
-                    變動，用 model.points 會與伺服器（以真估點判斷）不一致，顯示「免核准」卻被擋審，反之亦然 */}
-                {shouldShowApprovalThresholdNotice({
-                  myRole,
-                  approvalThreshold: quota.data?.approvalThreshold,
-                  estPoints,
-                }) && (
-                    <p style={{ margin: "4px 0", fontSize: 13, color: "var(--gold-ink)" }}>
-                      {approvalThresholdNotice(estPoints, quota.data!.approvalThreshold!)}
-                    </p>
-                  )}
-                <p className="hint" style={{ fontSize: 12 }}>失敗全額退點。正式模式會實際呼叫 AI 生成。</p>
-                <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-                  <button
-                    className="primary"
-                    disabled={submit.isPending}
-                    onClick={() =>
-                      model &&
-                      submit.mutate(
-                        buildGenerationSubmitInput({
-                          projectId: id,
-                          model,
-                          prompt,
-                          sourceAsset,
-                          sourceUrl,
-                          characterIds: charIds,
-                          scenePresetIds: sceneIds,
-                          clientRequestId: submitRequestId.current,
-                        }),
-                      )
-                    }
-                  >
-                    {submit.isPending ? "生成中…" : "確認生成"}
-                  </button>
-                  <button disabled={submit.isPending} onClick={() => setConfirming(false)}>再想想</button>
-                </div>
-              </div>
-            )}
-            {submitNotice && <p className="hint" role="status" style={{ marginTop: 10, color: "var(--gold-ink)" }}>{submitNotice}</p>}
-            {submit.error && <p className="error">{submit.error.message}</p>}
-            <GenerationList projectId={id} canEdit={canEdit} onReuse={applyPrompt} />
-          </section>
-          </CollabZone>
-
-          {/* 製作範本（一鍵串鏈）：沿用生成台勾選的角色/場景卡——整條串鏈的視覺步驟注入同一套錨點 */}
-          <div id="sec-workflow">
-            <WorkflowCard projectId={id} charIds={charIds} sceneIds={sceneIds} promptRequest={wfPromptReq} />
-          </div>
-
-          {/* 提示詞庫：成功生成的咒語一鍵再用（「再用」還原完整設定帶回生成台；「製作範本」帶進想法框） */}
-          <div id="sec-prompts">
-            <PromptLibrary
-              projectId={id}
-              onUse={applyPrompt}
-              onUseForWorkflow={(text) => {
-                setWfPromptReq((prev) => ({ text, nonce: (prev?.nonce ?? 0) + 1 }));
-                scrollToSelector("#sec-workflow");
-              }}
-            />
-          </div>
-
-          <StageLink text="成品會自動存入素材庫；在生成紀錄按「＋加入分鏡」，就會排進下方分鏡列" />
+          <StageLink text="成品會自動存入素材庫；在工作台資源抽屜的生成紀錄按「＋加入分鏡」，就會排進下方分鏡列" />
 
           {/* ③ 分鏡・時間軸・交付：排片、粗剪預覽、送審與打包（SceneList 一體卡全含） */}
           <StageHead

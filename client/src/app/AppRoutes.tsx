@@ -1,7 +1,5 @@
 import { lazy } from "react";
-import { Route, Switch, Link } from "wouter";
-import { Launchpad } from "../pages/Launchpad";
-import { ProjectPage } from "../pages/ProjectPage";
+import { Redirect, Route, Switch, Link } from "wouter";
 import { GroupOptionsEditor } from "../components/GroupOptionsEditor";
 
 // 路由層級 code-splitting（QA-025）：管理、資料庫、排程等重頁面延遲載入，
@@ -21,6 +19,8 @@ const DownloadsPage = lazy(() => import("../pages/DownloadsPage").then((m) => ({
 const PlannerPage = lazy(() => import("../pages/PlannerPage").then((m) => ({ default: m.PlannerPage })));
 const DatabasesPage = lazy(() => import("../pages/DatabasesPage").then((m) => ({ default: m.DatabasesPage })));
 const ChatPage = lazy(() => import("../pages/ChatPage").then((m) => ({ default: m.ChatPage })));
+const Launchpad = lazy(() => import("../pages/Launchpad").then((m) => ({ default: m.Launchpad })));
+const ProjectPage = lazy(() => import("../pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
 
 export type AppRoutesProps = {
   activeGroupId: string;
@@ -34,12 +34,15 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
   return (
     <Switch>
       <Route path="/">
+        <Redirect to="/dashboard" />
+      </Route>
+      <Route path="/dashboard">
         <Launchpad groupId={activeGroupId} />
       </Route>
       <Route path="/admin">
         {isAdmin ? <AdminPage /> : (
           <p className="error">
-            這頁需要團隊管理權限 — <Link href="/">回作業台</Link>
+            這頁需要團隊管理權限 — <Link href="/dashboard">回今日工作台</Link>
           </p>
         )}
       </Route>
@@ -48,7 +51,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
           <GroupOptionsEditor groupId={activeGroupId} />
         ) : (
           <p className="error">
-            這頁需要組長或管理員權限 — <Link href="/">回作業台</Link>
+            這頁需要組長或管理員權限 — <Link href="/dashboard">回今日工作台</Link>
           </p>
         )}
       </Route>
@@ -62,7 +65,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
           </div>
         ) : (
           <p className="error">
-            這頁需要組長或管理員權限 — <Link href="/">回作業台</Link>
+            這頁需要組長或管理員權限 — <Link href="/dashboard">回今日工作台</Link>
           </p>
         )}
       </Route>
@@ -71,7 +74,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
           <MembersPage />
         ) : (
           <p className="error">
-            這頁需要組長或管理員權限 — <Link href="/">回作業台</Link>
+            這頁需要組長或管理員權限 — <Link href="/dashboard">回今日工作台</Link>
           </p>
         )}
       </Route>
@@ -91,7 +94,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/p/:id">{(params) => <ProjectPage key={params.id} id={params.id} />}</Route>
       <Route>
         <p>
-          找不到頁面 — <Link href="/">回作業台</Link>
+          找不到頁面 — <Link href="/dashboard">回今日工作台</Link>
         </p>
       </Route>
     </Switch>
