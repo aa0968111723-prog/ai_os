@@ -745,6 +745,32 @@ UX-00 → UX-01 → UX-02 → UX-03 → UX-04 → UX-05 → UX-06 → UX-07 → 
 
 ---
 
+## 24. 設計系統統一方案
+
+為確保全站視覺與互動的一致性，並降低後續開發與維護成本，提出以下設計系統（Design System）統一方案，將於 UX-02 階段作為地基實作：
+
+### 24.1 核心設計語彙 (Design Language)
+- **Monastic-calm (沉靜弘法)**：以暖灰色調 (`--bg: #e9e3d8`) 為基底，搭配象牙白卡片 (`--card: #fdfbf6`)，營造專注、低干擾的創作環境。
+- **單一主色發聲**：全站僅允許單一高飽和度主色（赤陶色 `--primary: #c2613f`）作為主要行動呼籲 (CTA) 與焦點指示，其餘狀態色（金、綠、青）僅用於語意標示，不作為大面積裝飾。
+
+### 24.2 Design Tokens 收斂
+- **色彩 (Colors)**：嚴格限制色階，廢除散落的 hardcode 色碼。所有顏色必須透過 CSS 變數（如 `--fg`, `--border-soft`, `--primary-tint`）呼叫。
+- **排版 (Typography)**：統一字級刻度（`--fs-11` 至 `--fs-32`），正文預設 15px，行動端表單強制 16px 防縮放。字體堆疊 (Font Stack) 嚴格控制 fallback，避開細明體。
+- **間距與圓角 (Spacing & Radius)**：採用 8pt 網格系統（`--sp-4` 至 `--sp-64`），統一卡片圓角（`--radius: 14px`）與按鈕圓角（`999px` 膠囊狀或 `--r-8`）。
+- **陰影與立面 (Elevation)**：規範四階暖陰影（`--e1` 至 `--e4`），配合頂緣受光 (`--hl-top`) 與內凹井 (`--inset-well`) 建立物理層次。
+
+### 24.3 共用元件庫 (Component Library)
+- **按鈕 (Buttons)**：收斂為 Primary (實心赤陶)、Tonal (淺底赤陶字)、Ghost (透明底) 三級權重。統一高度與觸控目標（≥44px）。
+- **表單 (Forms)**：統一輸入井外觀（靜止內凹，Focus 浮起變亮），自訂 Select 箭頭與 Checkbox/Radio 品牌色，確保跨瀏覽器一致性。
+- **狀態標籤 (Badges & Pills)**：區分可互動的 Chip 與純展示的 Badge/Pill，並統一狀態色（Queued/Running: Gold, Done: Success, Failed: Danger）。
+
+### 24.4 無障礙與動態偏好 (A11y & Motion)
+- **色彩對比**：確保所有文字與背景的對比度符合 WCAG AA 標準（如 `--primary-solid` 白字 4.69:1，`--primary-ink` 淺底 5.5:1）。
+- **鍵盤導覽**：所有可互動元件必須具備清晰的 `:focus-visible` 焦點環（2px solid `--primary`）。
+- **動態減弱**：全面支援 `prefers-reduced-motion: reduce`，當使用者開啟系統減弱動態時，自動關閉所有過場與脈衝動畫。
+
+---
+
 ## 附錄 A — 優先級
 
 | 級 | 範圍 |
