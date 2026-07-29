@@ -31,7 +31,7 @@ const VIEWPORTS = [
 ];
 
 const TARGET_URL = process.env.TARGET_URL || "http://localhost:3000";
-const OUT_DIR = process.env.OUT_DIR || "./e2e-ui-out/routes-breakpoints";
+const OUT_DIR = process.env.OUT_DIR || "./docs/audit-screenshots";
 const TEST_EMAIL = process.env.TEST_EMAIL || "test@example.com";
 const TEST_PW = process.env.TEST_PW || "password";
 
@@ -89,7 +89,7 @@ async function run() {
   }
 
   await browser.close();
-  console.log("\n🎉 路由與多裝置尺寸巡覽截圖盤點完成！請至 e2e-ui-out/routes-breakpoints 資料夾查看實際畫面。");
+  console.log(`\n🎉 路由與多裝置尺寸巡覽截圖盤點完成！請至 ${OUT_DIR} 資料夾查看實際畫面。`);
 }
 
 run().catch((err) => {
