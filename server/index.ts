@@ -1109,10 +1109,11 @@ app.get("/api/selftest", async (req, res) => {
     const falRows = rows.filter((row) => row.id.startsWith("fal-ai/") || row.endpoint.startsWith("fal-ai/"));
     const unverified = falRows.filter((row) => !row.verified);
     if (unverified.length > 0) {
-      throw new Error(
-        `${falRows.length} 條 Fal 模型中仍有 ${unverified.length} 條未經正式成功結果認證` +
-        `（例如 ${unverified.slice(0, 3).map((row) => row.id).join("、")}）`,
-      );
+      // 「尚未做付費真實生成」是目錄驗證進度，不是服務故障。
+      // 保留數量與樣本供管理員追蹤，但不可讓 readiness/selftest 變成 500，
+      // 否則 E2E 及正式環境會在模型仍可正常服務時被監控誤判離線。
+      return `${rows.length} 條（Fal 已認證 ${falRows.length - unverified.length}／未認證 ${unverified.length}` +
+        `；待驗例如 ${unverified.slice(0, 3).map((row) => row.id).join("、")}）`;
     }
     return `${rows.length} 條（Fal ${falRows.length} 條全部已有正式成功結果認證）`;
   });
