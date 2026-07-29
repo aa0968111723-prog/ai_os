@@ -28,10 +28,10 @@ import {
 } from "./workbenchNav";
 
 /**
- * AI 創作工作台 shell（WB-01 + WB-02 generate form）：單一主卡入口、目標輸入、模式 tabs、
- * 上下文條、共享草稿與直接生成表單（generation.submit 唯一路徑在 DirectGenerateMode）。
+ * AI 創作工作台 shell（WB-01～WB-04）：單一主卡入口、目標輸入、模式 tabs、
+ * 上下文條、共享草稿、直接生成表單、製作範本 WorkflowCard、執行計畫 AgentCard。
  *
- * Anchors: #sec-ai-hub, #sec-assistant, #sec-agent, #sec-studio (inside generate mode).
+ * Anchors: #sec-ai-hub, #sec-assistant, #sec-agent, #sec-studio, #sec-workflow.
  */
 export function CreationWorkbench({
   projectId,
@@ -45,6 +45,7 @@ export function CreationWorkbench({
   characterIds = [],
   scenePresetIds = [],
   generateApplyRequest = null,
+  workflowPromptRequest = null,
   onReuseGenerate,
   onGenerateSourceChange,
   studioCollab = null,
@@ -60,6 +61,8 @@ export function CreationWorkbench({
   characterIds?: string[];
   scenePresetIds?: string[];
   generateApplyRequest?: DirectGenerateApplyRequest | null;
+  /** PromptLibrary「用於製作範本」→ WorkflowCard idea box (nonce-driven) */
+  workflowPromptRequest?: { text: string; nonce: number } | null;
   onReuseGenerate?: (
     text: string,
     settings?: {
@@ -82,6 +85,11 @@ export function CreationWorkbench({
   const [askFillRequest, setAskFillRequest] = useState<{ nonce: number; message: string } | null>(
     null,
   );
+  /** Discrete idea fill for TemplateMode (run_template) — not sticky goal keystrokes */
+  const [templateIdeaBringIn, setTemplateIdeaBringIn] = useState<{
+    text: string;
+    nonce: number;
+  } | null>(null);
   const [sideNotice, setSideNotice] = useState("");
   const utils = trpc.useUtils();
 
@@ -137,6 +145,14 @@ export function CreationWorkbench({
       });
       if (result.mode === "plan") setPlanForceOpen(true);
       else if (result.mode !== "plan") setPlanForceOpen(false);
+
+      // run_template: one-shot idea bring-in (goal text) — does not auto-start workflow.
+      if (action.type === "run_template" && action.goal.trim()) {
+        setTemplateIdeaBringIn((prev) => ({
+          text: action.goal.trim(),
+          nonce: (prev?.nonce ?? 0) + 1,
+        }));
+      }
 
       // Focus generate prompt after bring-in (still no submit).
       if (result.mode === "generate") {
@@ -345,11 +361,16 @@ export function CreationWorkbench({
           collab={studioCollab}
         />
         <TemplateMode
+          projectId={projectId}
+          charIds={characterIds}
+          sceneIds={scenePresetIds}
           panelId={modePanelId(tabPrefix, "template")}
           labelledBy={modeTabId(tabPrefix, "template")}
           active={mode === "template"}
           goal={draft.goal}
           templateId={draft.templateId}
+          promptRequest={workflowPromptRequest}
+          ideaBringIn={templateIdeaBringIn}
         />
         {sideNotice ? (
           <p className="hint" role="status" aria-live="polite" style={{ marginTop: 8 }}>

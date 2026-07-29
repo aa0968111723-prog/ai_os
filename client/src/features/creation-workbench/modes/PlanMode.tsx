@@ -1,11 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../../../components/Icon";
 import { AgentCard } from "../../../components/AgentCard";
+import { CreationCostSummary } from "../CreationCostSummary";
 import { useAgentRunBadges } from "../useAgentRunBadges";
+
+type PlanSummaryLite = {
+  estimatedPoints?: number;
+  estimatedDurationMinutes?: number | null;
+};
+
+type StepLite = { points?: number; status?: string };
 
 /**
  * Adapter: embed AgentCard execution area like AiHub's #sec-agent details.
  * Keeps #sec-agent anchor for deep links / generation source chips.
+ * Cost presentation unified via CreationCostSummary when plan data is available.
  *
  * Disclosure opens on: active run activity, forceOpen rising (deep link / external
  * reveal), or active false→true (user entered plan tab). Does not auto-open solely
@@ -33,7 +42,7 @@ export function PlanMode({
   onForceOpenConsumed?: () => void;
   goal?: string;
 }) {
-  const { awaiting, running, waiting, hasActiveRun } = useAgentRunBadges(projectId);
+  const { runs, awaiting, running, waiting, hasActiveRun } = useAgentRunBadges(projectId);
   const [executionOpen, setExecutionOpen] = useState(() => hasActiveRun || forceOpen);
   const executionProjectRef = useRef(projectId);
   const previousActiveRunRef = useRef(hasActiveRun);
@@ -69,6 +78,19 @@ export function PlanMode({
     }
   }, [hasActiveRun, projectId, forceOpen, active, onForceOpenConsumed]);
 
+  // Prefer active run for cost summary; fall back to most recent with planSummary.
+  const list = runs.data ?? [];
+  const focusRun =
+    list.find(
+      (r) =>
+        r.status === "awaiting_approval" || r.status === "running" || r.status === "waiting",
+    ) ?? list[0];
+  const planSummary = (focusRun?.planSummary ?? null) as PlanSummaryLite | null;
+  const steps = (focusRun?.steps ?? []) as StepLite[];
+  const stepPoints = steps.reduce((sum, s) => sum + (s.points ?? 0), 0);
+  const estimatedPoints = planSummary?.estimatedPoints ?? (stepPoints > 0 ? stepPoints : null);
+  const showCost = Boolean(focusRun && (estimatedPoints != null || awaiting > 0 || hasActiveRun));
+
   return (
     <div role="tabpanel" id={panelId} aria-labelledby={labelledBy} hidden={!active}>
       {goal ? (
@@ -82,15 +104,40 @@ export function PlanMode({
         </p>
       ) : null}
 
+      {showCost ? (
+        <CreationCostSummary
+          modeLabel="執行計畫"
+          estimateLabel={
+            estimatedPoints != null
+              ? `約 ${estimatedPoints} 點`
+              : hasActiveRun
+                ? "執行中（依步驟加總）"
+                : "—"
+          }
+          approvalLabel={
+            awaiting > 0
+              ? `待核准 ${awaiting}`
+              : focusRun?.status === "awaiting_approval"
+                ? "是（待核准）"
+                : "依計畫步驟與門檻"
+          }
+          outputSpec={
+            planSummary?.estimatedDurationMinutes != null
+              ? `預估工期約 ${planSummary.estimatedDurationMinutes} 分鐘`
+              : undefined
+          }
+        />
+      ) : null}
+
       {/* 空執行區預設收合；新一輪活動會展開一次，同一輪期間尊重使用者手動收合。 */}
       <details
         className="ai-hub-execution"
         id="sec-agent"
         open={executionOpen}
         style={{
-          marginTop: goal ? 8 : 0,
-          borderTop: goal ? undefined : "none",
-          paddingTop: goal ? undefined : 0,
+          marginTop: goal || showCost ? 8 : 0,
+          borderTop: goal || showCost ? undefined : "none",
+          paddingTop: goal || showCost ? undefined : 0,
         }}
       >
         <summary

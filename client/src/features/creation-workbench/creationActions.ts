@@ -132,8 +132,7 @@ export function applyCreationAction(
     }
 
     case "run_template": {
-      // templateId is stored on draft for cross-mode survival; TemplateMode shows a hint
-      // until WB-04 pre-selects the workflow preset in UI.
+      // templateId + goal on draft; TemplateMode wires pickRequest + idea box (no auto-start).
       const patch: DraftPatch = {
         mode: "template",
         templateId: action.templateId,
