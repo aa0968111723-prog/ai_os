@@ -4,6 +4,7 @@
  * - 離線殼（API 永不攔截）
  * - /assets/* cache-first（Vite hash）
  * - 導航 network-first → offline.html
+ * - 新版先進 waiting，使用者確認後才接管，避免編輯中途被背景更新打斷
  */
 const CACHE_VERSION = "aios-app-v1";
 const PRECACHE = `${CACHE_VERSION}-shell`;
@@ -14,13 +15,21 @@ const PRECACHE_URLS = [
   "/icons/icon-192-maskable.png", "/icons/icon-512-maskable.png",
   "/favicon.ico", "/favicon-32x32.png", "/apple-touch-icon.png",
 ];
+
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(PRECACHE);
     await Promise.all(PRECACHE_URLS.map((url) => cache.add(url).catch(() => {})));
-    await self.skipWaiting();
+    // 不自動 skipWaiting：有舊版正在工作時，先等使用者按「立即更新」。
   })());
 });
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
+    void self.skipWaiting();
+  }
+});
+
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
@@ -28,6 +37,7 @@ self.addEventListener("activate", (event) => {
     await self.clients.claim();
   })());
 });
+
 function safePath(url) {
   try {
     if (typeof url !== "string" || !url) return "/";
@@ -37,9 +47,11 @@ function safePath(url) {
   } catch {}
   return "/";
 }
+
 function isApi(url) {
   return url.pathname.startsWith("/api/") || url.pathname.startsWith("/ws") || url.pathname.startsWith("/trpc");
 }
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
@@ -80,6 +92,7 @@ self.addEventListener("fetch", (event) => {
     })());
   }
 });
+
 self.addEventListener("push", (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; }
@@ -91,6 +104,7 @@ self.addEventListener("push", (event) => {
     data: { url: safePath(data.url) },
   }));
 });
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const path = safePath(event.notification.data && event.notification.data.url);
@@ -109,6 +123,7 @@ self.addEventListener("notificationclick", (event) => {
     await self.clients.openWindow(targetUrl);
   })());
 });
+
 self.addEventListener("pushsubscriptionchange", (event) => {
   const applicationServerKey = (event.oldSubscription && event.oldSubscription.options && event.oldSubscription.options.applicationServerKey) || undefined;
   const oldEndpoint = (event.oldSubscription && event.oldSubscription.endpoint) || undefined;

@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { trpc } from "../api";
 import { FeedbackWidget } from "../feedback/FeedbackWidget";
 import { NotificationSettingsDialog, PushSubscriptionSync } from "../components/NotificationSettings";
+import { AppUpdateBanner } from "../components/AppUpdateBanner";
 import { unsubscribeThisDevice } from "../push";
 import { SplashScreen } from "../components/SplashScreen";
 import { ChangePasswordDialog } from "./session/ChangePasswordDialog";
@@ -91,6 +92,9 @@ export function AppShell() {
           onLogout={() => { void logoutWithPushCleanup(); }}
           loggingOut={logout.isPending}
         />
+
+        {/* 新版已下載完成時由使用者主動更新；不在編輯途中自動刷新。 */}
+        <AppUpdateBanner />
 
         {/* lazy 頁面載入中的過場（QA-025 code-splitting）：整個路由樹共用一個 Suspense */}
         <Suspense fallback={<p className="hint">載入中…</p>}>
