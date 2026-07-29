@@ -2,8 +2,7 @@ import { chromium } from "playwright";
 import fs from "fs";
 import path from "path";
 
-// 根據 AppRoutes.tsx 整理出的主要頁面路由
-const ROUTES = [
+const STATIC_ROUTES = [
   "/",
   "/admin",
   "/options",
@@ -18,10 +17,9 @@ const ROUTES = [
   "/downloads",
   "/planner",
   "/databases",
-  "/chat"
+  "/chat",
 ];
 
-// 根據 PR 165 計畫定義的必測基準裝置
 const VIEWPORTS = [
   { name: "S-360", width: 360, height: 800 },
   { name: "S-390", width: 390, height: 844 },
@@ -30,75 +28,139 @@ const VIEWPORTS = [
   { name: "XL-1440", width: 1440, height: 900 },
 ];
 
-const TARGET_URL = process.env.TARGET_URL || "http://localhost:3000";
+const TARGET_URL = (process.env.TARGET_URL || "http://localhost:3000").replace(/\/$/, "");
 const OUT_DIR = process.env.OUT_DIR || "./docs/uiux-audit/screenshots";
-const TEST_EMAIL = process.env.TEST_EMAIL || "test@example.com";
-const TEST_PW = process.env.TEST_PW || "password";
+const TEST_EMAIL = process.env.TEST_EMAIL;
+const TEST_PW = process.env.TEST_PW;
+const TEST_ROLE = process.env.TEST_ROLE || "unspecified";
+const TEST_PROJECT_ID = process.env.TEST_PROJECT_ID;
+const TEST_PEER_ID = process.env.TEST_PEER_ID;
+
+const AUTHENTICATED_MARKER = 'header.topbar button[aria-haspopup="menu"]';
+const LOGIN_EMAIL = "#login-email";
+const LOGIN_PASSWORD = "#login-pw";
+
+function safeName(route) {
+  return route === "/" ? "home" : route.replace(/\//g, "-").replace(/^-/, "");
+}
+
+function requiredEnvironment() {
+  const missing = [];
+  if (!TEST_EMAIL) missing.push("TEST_EMAIL");
+  if (!TEST_PW) missing.push("TEST_PW");
+  if (missing.length > 0) {
+    throw new Error(`缺少 UI 巡覽測試環境變數：${missing.join(", ")}。為避免把登入頁誤存成受保護頁面，不再使用假預設帳密。`);
+  }
+}
+
+async function assertAuthenticated(page) {
+  await page.locator(AUTHENTICATED_MARKER).waitFor({ state: "visible", timeout: 15_000 });
+  if (await page.locator(LOGIN_EMAIL).isVisible().catch(() => false)) {
+    throw new Error("仍停留在登入頁，未建立有效工作階段");
+  }
+}
+
+async function login(page) {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(TARGET_URL, { waitUntil: "domcontentloaded", timeout: 30_000 });
+  await page.locator(LOGIN_EMAIL).fill(TEST_EMAIL);
+  await page.locator(LOGIN_PASSWORD).fill(TEST_PW);
+  await page.locator('button[type="submit"]').click();
+  await assertAuthenticated(page);
+}
 
 async function run() {
-  console.log(`開始執行全路由與多裝置尺寸巡覽... 目標網址: ${TARGET_URL}`);
+  requiredEnvironment();
+  fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  if (!fs.existsSync(OUT_DIR)) {
-    fs.mkdirSync(OUT_DIR, { recursive: true });
-  }
+  const routes = [...STATIC_ROUTES];
+  if (TEST_PROJECT_ID) routes.push(`/p/${TEST_PROJECT_ID}`);
+  if (TEST_PEER_ID) routes.push(`/chat/${TEST_PEER_ID}`);
+
+  const failures = [];
+  const manifest = {
+    targetUrl: TARGET_URL,
+    role: TEST_ROLE,
+    testEmail: TEST_EMAIL,
+    projectFixture: TEST_PROJECT_ID || null,
+    peerFixture: TEST_PEER_ID || null,
+    startedAt: new Date().toISOString(),
+    results: [],
+  };
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
 
-  // 1. 執行登入流程
-  console.log(`嘗試使用帳號 ${TEST_EMAIL} 登入...`);
   try {
-    await page.goto(TARGET_URL, { waitUntil: "networkidle" });
-    // 填寫 Email 與密碼 (對應 LoginPage.tsx 的 input)
-    await page.fill('input[type="text"], input[type="email"]', TEST_EMAIL);
-    await page.fill('input[type="password"]', TEST_PW);
-    await page.click('button[type="submit"]');
-    
-    // 等待登入完成並跳轉
-    await page.waitForTimeout(3000);
-    console.log("✅ 登入動作完成，開始巡覽路由與裝置尺寸...");
-  } catch (err) {
-    console.error("❌ 登入失敗，請確認網站狀態或選擇器是否正確:", err.message);
-  }
+    console.log(`登入 UI 巡覽帳號：${TEST_EMAIL}（角色：${TEST_ROLE}）`);
+    await login(page);
+    console.log("✅ 已確認登入成功，開始巡覽受保護路由");
 
-  // 2. 實際進入每一個主要頁面，擷取內容並在每個裝置尺寸下截圖
-  for (const route of ROUTES) {
-    console.log(`\n正在訪問: ${route}`);
-    try {
-      await page.goto(`${TARGET_URL}${route}`, { waitUntil: "networkidle", timeout: 15000 });
-      // 稍微等待非同步資料或動畫載入
-      await page.waitForTimeout(1500);
-      
-      const safeName = route === "/" ? "home" : route.replace(/\//g, "-").replace(/^-/, "");
+    for (const route of routes) {
+      const routeName = safeName(route);
+      let contentSaved = false;
 
-      // 擷取頁面的實際文字內容，供 AI 分析真實 DOM 狀態
-      const pageText = await page.evaluate(() => document.body.innerText);
-      const textPath = path.join(OUT_DIR, `route-${safeName}-content.txt`);
-      fs.writeFileSync(textPath, `Route: ${route}\n\n${pageText}`);
-      console.log(`    ✅ 頁面內容已擷取: ${textPath}`);
-
-      // 針對該路由測試所有裝置尺寸
       for (const vp of VIEWPORTS) {
-        console.log(`  - 測試斷點: ${vp.name} (${vp.width}x${vp.height})`);
-        await page.setViewportSize({ width: vp.width, height: vp.height });
-        // 等待 RWD 重新渲染
-        await page.waitForTimeout(500);
-        
-        const shotPath = path.join(OUT_DIR, `route-${safeName}-${vp.name}.png`);
-        await page.screenshot({ path: shotPath, fullPage: true });
-        console.log(`    ✅ 截圖已儲存: ${shotPath}`);
+        const label = `${route} @ ${vp.name}`;
+        try {
+          await page.setViewportSize({ width: vp.width, height: vp.height });
+          await page.goto(`${TARGET_URL}${route}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+          await assertAuthenticated(page);
+          await page.waitForTimeout(700);
+
+          const currentUrl = page.url();
+          const actualPath = new URL(currentUrl).pathname;
+          if (actualPath !== route) {
+            throw new Error(`路由被導向 ${actualPath}，預期為 ${route}`);
+          }
+
+          const title = await page.title();
+          const pageText = (await page.locator("body").innerText()).trim();
+          if (!pageText) throw new Error("頁面沒有可讀內容");
+
+          if (!contentSaved && vp.name === "L-1280") {
+            const textPath = path.join(OUT_DIR, `route-${routeName}-content.txt`);
+            fs.writeFileSync(
+              textPath,
+              `Route: ${route}\nURL: ${currentUrl}\nTitle: ${title}\nRole: ${TEST_ROLE}\nAccount: ${TEST_EMAIL}\n\n${pageText}`,
+            );
+            contentSaved = true;
+          }
+
+          const shotPath = path.join(OUT_DIR, `route-${routeName}-${vp.name}.png`);
+          await page.screenshot({ path: shotPath, fullPage: true });
+          manifest.results.push({ route, viewport: vp, status: "passed", currentUrl, title, screenshot: shotPath });
+          console.log(`✅ ${label}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          failures.push(`${label}：${message}`);
+          manifest.results.push({ route, viewport: vp, status: "failed", currentUrl: page.url(), error: message });
+          console.error(`❌ ${label}：${message}`);
+        }
       }
-    } catch (err) {
-      console.error(`❌ 訪問 ${route} 失敗:`, err.message);
     }
+  } finally {
+    manifest.finishedAt = new Date().toISOString();
+    manifest.failures = failures;
+    fs.writeFileSync(path.join(OUT_DIR, "audit-manifest.json"), JSON.stringify(manifest, null, 2));
+    await browser.close();
   }
 
-  await browser.close();
-  console.log(`\n🎉 路由與多裝置尺寸巡覽截圖盤點完成！請至 ${OUT_DIR} 資料夾查看實際畫面與文字內容。`);
+  if (!TEST_PROJECT_ID) {
+    console.warn("⚠️ 未設定 TEST_PROJECT_ID，核心專案工作台 /p/:id 尚未納入本次真實資料巡覽");
+  }
+  if (!TEST_PEER_ID) {
+    console.warn("⚠️ 未設定 TEST_PEER_ID，一對一私訊 /chat/:peerId 尚未納入本次巡覽");
+  }
+  if (failures.length > 0) {
+    throw new Error(`UI/UX 路由巡覽有 ${failures.length} 項失敗；詳見 ${path.join(OUT_DIR, "audit-manifest.json")}`);
+  }
+
+  console.log(`🎉 UI/UX 路由巡覽全部通過；證據已寫入 ${OUT_DIR}`);
 }
 
 run().catch((err) => {
-  console.error("執行失敗:", err);
+  console.error("UI/UX 巡覽失敗：", err instanceof Error ? err.message : err);
   process.exit(1);
 });
