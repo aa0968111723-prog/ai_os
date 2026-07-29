@@ -8,10 +8,11 @@ import { applyAppUpdate, isAppUpdateReady, subscribeAppUpdate } from "../pwa";
 export function AppUpdateBanner() {
   const [, refresh] = useState(0);
   const [updating, setUpdating] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => subscribeAppUpdate(() => refresh((n) => n + 1)), []);
 
-  if (!isAppUpdateReady()) return null;
+  if (!isAppUpdateReady() || dismissed) return null;
 
   const onUpdate = () => {
     setUpdating(true);
@@ -21,29 +22,25 @@ export function AppUpdateBanner() {
 
   return (
     <aside
-      className="card"
+      className="app-update-banner"
       role="status"
       aria-live="polite"
-      style={{
-        margin: "0 auto var(--sp-12)",
-        maxWidth: 980,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "var(--sp-12)",
-        padding: "var(--sp-12) var(--sp-16)",
-        flexWrap: "wrap",
-      }}
     >
-      <div>
-        <strong>Aios 有新版本</strong>
-        <p className="hint" style={{ margin: "4px 0 0" }}>
+      <span className="app-update-banner__signal" aria-hidden>↑</span>
+      <div className="app-update-banner__copy">
+        <strong>新版已準備好</strong>
+        <p className="hint app-update-banner__detail">
           更新後會重新載入目前頁面。尚未送出的文字請先確認已儲存。
         </p>
       </div>
-      <button type="button" className="primary" disabled={updating} onClick={onUpdate}>
-        {updating ? "更新中…" : "立即更新"}
-      </button>
+      <div className="app-update-banner__actions">
+        <button type="button" className="btn-ghost btn-sm" onClick={() => setDismissed(true)}>
+          稍後
+        </button>
+        <button type="button" className="primary btn-sm" disabled={updating} onClick={onUpdate}>
+          {updating ? "更新中…" : "更新"}
+        </button>
+      </div>
     </aside>
   );
 }

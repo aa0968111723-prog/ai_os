@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import { Link } from "wouter";
 import { Icon, type IconName } from "../components/Icon";
+import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 
 /**
  * 怎麼用 / 常見問題：純靜態白話說明頁（無資料查詢、無新依賴）。
@@ -143,9 +144,9 @@ function Term({ word, children }: { word: string; children: ReactNode }) {
 }
 
 /** 區塊小標：圖示＋文字，統一 h2 樣式。 */
-function H2({ icon, children }: { icon: IconName; children: ReactNode }) {
+function H2({ icon, children, id }: { icon: IconName; children: ReactNode; id?: string }) {
   return (
-    <h2 style={{ marginTop: 28, display: "flex", alignItems: "center", gap: 8 }}>
+    <h2 id={id} className="secondary-section-heading">
       <Icon name={icon} size={18} />
       {children}
     </h2>
@@ -154,15 +155,23 @@ function H2({ icon, children }: { icon: IconName; children: ReactNode }) {
 
 export function HelpPage() {
   return (
-    <div style={{ maxWidth: 720, margin: "0 auto" }} data-fb="怎麼用頁">
-      <h1>怎麼用 · 一頁看懂整個網站</h1>
-      <p className="sub">
-        這頁把 Aios（AI 創作作業系統）從頭到尾講清楚：<b>它在做什麼、你會用到哪些地方、每個地方在哪找</b>。
-        看完這一頁，整個網站你就大致有數了。看到不懂的名詞，翻到最下面的<b>名詞小辭典</b>。
-      </p>
+    <div className="page-shell secondary-page secondary-page--reading help-page" data-fb="怎麼用頁">
+      <SecondaryPageHeader
+        eyebrow="快速上手"
+        title="一頁看懂整個網站"
+        icon="HelpCircle"
+        badge="6 步完成一份作品"
+        description={<>從第一份腳本到交付素材，先看完整路線，再依你卡住的地方往下找答案。</>}
+      />
+      <nav className="support-topic-nav" aria-label="說明主題">
+        <a href="#help-route"><Icon name="Clapperboard" size={14} />六步路線</a>
+        <a href="#help-map"><Icon name="MousePointer2" size={14} />功能地圖</a>
+        <a href="#help-faq"><Icon name="Gem" size={14} />常見問題</a>
+        <a href="#help-terms"><Icon name="FileText" size={14} />名詞辭典</a>
+      </nav>
 
       {/* ── 一句話總覽：先給最大的那張圖，之後的一切都掛在這句上 ── */}
-      <div className="card card--primary" style={{ marginTop: 12 }}>
+      <div className="card card--primary help-summary-card">
         <p style={{ margin: 0, fontSize: "var(--fs-16)", lineHeight: 1.85 }}>
           <b>一句話：</b>這個網站把「一份腳本」變成「一包可以直接拖進剪映或 Premiere 的素材」。
           你不用自己找圖、配音、對字幕；AI 會記住這支片的<b>世界觀</b>（背景、語氣、畫風），每次生成自動帶入。
@@ -171,7 +180,7 @@ export function HelpPage() {
       </div>
 
       {/* ── 六步路線圖：把主線流程視覺化，一眼看見全貌 ── */}
-      <H2 icon="Clapperboard">整條路線（六步）</H2>
+      <H2 id="help-route" icon="Clapperboard">整條路線（六步）</H2>
       <p className="hint" style={{ marginTop: 0, fontSize: 13 }}>
         每個專案都走這條路。專案頁上方有「從這裡開始」清單，做到哪一步會自動打勾。
       </p>
@@ -197,7 +206,7 @@ export function HelpPage() {
       </ol>
 
       {/* ── 全站地圖：這頁的重點——把每個看得到的地方講白話 ── */}
-      <H2 icon="MousePointer2">這個網站有哪些地方？</H2>
+      <H2 id="help-map" icon="MousePointer2">這個網站有哪些地方？</H2>
       <p className="hint" style={{ marginTop: 0, fontSize: 13 }}>
         照你會遇到的順序列出來。<b>不是每個人都看得到全部</b>——管理相關的地方只有組長／管理員會出現。
       </p>
@@ -298,7 +307,7 @@ export function HelpPage() {
       </div>
 
       {/* ── 常見問題：保留原本準確的答覆，聚焦錢/失敗/真假/免費 ── */}
-      <H2 icon="Gem">常見問題</H2>
+      <H2 id="help-faq" icon="Gem">常見問題</H2>
       <div className="stack">
         <Faq q="「點數」是什麼？大概要生多久？" defaultOpen>
           <ul style={{ margin: 0, paddingLeft: 22 }}>
@@ -398,7 +407,7 @@ export function HelpPage() {
       </div>
 
       {/* ── 名詞小辭典 ── */}
-      <H2 icon="FileText">名詞小辭典</H2>
+      <H2 id="help-terms" icon="FileText">名詞小辭典</H2>
       <div className="card">
         <Term word="世界觀">
           這支片的固定設定（一句話故事、關鍵訊息、調性、視覺風格、禁忌）。填一次，之後每次生成自動帶入，不用重講背景。

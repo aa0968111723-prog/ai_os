@@ -44,6 +44,10 @@ function dayKey(d: Date): string {
   return new Date(d).toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "short" });
 }
 
+function avatarInitial(name: string): string {
+  return name.trim().charAt(0).toLocaleUpperCase("zh-TW") || "人";
+}
+
 /**
  * 站內私訊（通訊錄 1:1 聊天）。人人可用——可訊對象＝同組夥伴＋開發者（後端 dmCore 守界）。
  * 左欄：對話串（未讀數）＋可發起新對話的夥伴名單；右欄：聊天視窗（輪詢 5 秒、聚焦即已讀）。
@@ -65,26 +69,38 @@ export function ChatPage({ peerId }: { peerId?: string }) {
   const newPeers = (peers.data ?? []).filter(
     (p) => !threadPeerIds.has(p.userId) && (!needle || p.name.toLowerCase().includes(needle) || p.email.toLowerCase().includes(needle)),
   );
+  const unreadCount = (threads.data ?? []).reduce((sum, thread) => sum + thread.unread, 0);
   const focusPartnerPicker = () => {
     setQ("");
     focusChatPartnerPicker(peerSearchRef.current);
   };
 
   return (
-    <div style={{ maxWidth: 980, margin: "0 auto" }}>
-      <h1>私訊</h1>
-      <p className="sub">與同組夥伴（或開發者）一對一聊天——只有你們兩位看得到。可傳圖／影片、標注專案・資料庫・排程・筆記、或 @助手 問 AI；外部 AI 也能透過 MCP 私訊工具幫你收發。</p>
+    <div className={`page-shell chat-page${peerId ? " has-peer" : ""}`}>
+      <header className="page-intro chat-intro">
+        <div>
+          <p className="eyebrow">協作收件匣</p>
+          <h1>私訊</h1>
+          <p className="page-lede">和夥伴聊工作、標注專案資料，也能在對話裡直接請 AI 幫忙整理。</p>
+        </div>
+        <div className="chat-intro__summary" aria-label="私訊摘要">
+          <span><strong>{threads.data?.length ?? "…"}</strong><small>對話</small></span>
+          <span className={unreadCount ? "attention" : ""}><strong>{unreadCount}</strong><small>未讀</small></span>
+        </div>
+      </header>
       <div className={`dm-layout ${peerId ? "has-peer" : ""}`}>
         <aside className="dm-list card" id="dm-partner-picker" aria-label="對話與夥伴選擇器">
-          <input
-            ref={peerSearchRef}
-            type="search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="搜尋夥伴…"
-            aria-label="搜尋夥伴"
-            style={{ width: "100%", marginBottom: 8 }}
-          />
+          <label className="dm-search">
+            <Icon name="Search" size={15} />
+            <input
+              ref={peerSearchRef}
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="搜尋夥伴或對話…"
+              aria-label="搜尋夥伴"
+            />
+          </label>
           {threads.isLoading ? (
             <div className="skeleton" style={{ height: 120, borderRadius: 8 }} role="status" aria-label="載入中" />
           ) : (
@@ -100,11 +116,15 @@ export function ChatPage({ peerId }: { peerId?: string }) {
                   <div className="menu-label" style={{ padding: "8px 2px 4px" }}>發起新對話</div>
                   {newPeers.map((p) => (
                     <button key={p.userId} className="dm-item" onClick={() => navigate(`/chat/${p.userId}`)}>
-                      <span className="dm-item-name">
-                        {p.name}
-                        {p.isSuperAdmin && <span className="dm-chip">開發者</span>}
+                      <span className="dm-avatar" aria-hidden>{avatarInitial(p.name)}</span>
+                      <span className="dm-item-copy">
+                        <span className="dm-item-name">
+                          {p.name}
+                          {p.isSuperAdmin && <span className="dm-chip">開發者</span>}
+                        </span>
+                        <span className="dm-item-sub">{p.sharedGroups[0] ?? p.email}</span>
                       </span>
-                      <span className="dm-item-sub">{p.sharedGroups[0] ?? p.email}</span>
+                      <Icon name="ChevronRight" size={15} />
                     </button>
                   ))}
                 </>
@@ -129,13 +149,16 @@ export function ChatPage({ peerId }: { peerId?: string }) {
 function ThreadItem({ t, active, onOpen }: { t: Thread; active: boolean; onOpen: () => void }) {
   return (
     <button className={`dm-item ${active ? "active" : ""}`} onClick={onOpen} aria-current={active}>
-      <span className="dm-item-name">
-        <span style={{ fontWeight: t.unread > 0 ? 700 : 600 }}>{t.peerName}</span>
-        {t.unread > 0 && <span className="dm-unread">{t.unread > 99 ? "99+" : t.unread}</span>}
-        <span className="dm-item-time">{relTime(t.lastAt)}</span>
-      </span>
-      <span className="dm-item-sub" style={{ fontWeight: t.unread > 0 ? 600 : 400 }}>
-        {t.lastFromMe ? "我：" : ""}{t.lastBody}
+      <span className="dm-avatar" aria-hidden>{avatarInitial(t.peerName)}</span>
+      <span className="dm-item-copy">
+        <span className="dm-item-name">
+          <span style={{ fontWeight: t.unread > 0 ? 700 : 600 }}>{t.peerName}</span>
+          {t.unread > 0 && <span className="dm-unread">{t.unread > 99 ? "99+" : t.unread}</span>}
+          <span className="dm-item-time">{relTime(t.lastAt)}</span>
+        </span>
+        <span className="dm-item-sub" style={{ fontWeight: t.unread > 0 ? 600 : 400 }}>
+          {t.lastFromMe ? "我：" : ""}{t.lastBody}
+        </span>
       </span>
     </button>
   );

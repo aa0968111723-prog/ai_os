@@ -1,6 +1,7 @@
 import { lazy } from "react";
 import { Redirect, Route, Switch, Link } from "wouter";
 import { GroupOptionsEditor } from "../components/GroupOptionsEditor";
+import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 
 // 路由層級 code-splitting（QA-025）：管理、資料庫、排程等重頁面延遲載入，
 // 避免首屏（作業台、專案頁、登入）揹整個 App 的 JS。具名匯出需轉成 lazy 所需的 default export。
@@ -48,7 +49,16 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       </Route>
       <Route path="/options">
         {activeIsLeader ? (
-          <GroupOptionsEditor groupId={activeGroupId} />
+          <div className="page-shell secondary-page admin-tool-page">
+            <SecondaryPageHeader
+              eyebrow="組別設定"
+              title="工作規則與選項"
+              icon="SlidersHorizontal"
+              badge="只影響目前組別"
+              description={<>調整可用的內容類型、風格、標籤與 AI 規則；日常成員只會看到啟用中的選項。</>}
+            />
+            <GroupOptionsEditor groupId={activeGroupId} />
+          </div>
         ) : (
           <p className="error">
             這頁需要組長或管理員權限 — <Link href="/dashboard">回今日工作台</Link>
@@ -58,10 +68,19 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/logs">
         {canSeeOrg ? (
           // 組長也可看點數消耗與洞察；後端會按呼叫者權限收斂到其可管理範圍。
-          <div className="stack" style={{ maxWidth: 860, margin: "0 auto" }}>
-            <ConsumptionMonitorCard />
-            <InsightsCard />
-            <AuditLogCard />
+          <div className="page-shell secondary-page secondary-page--reading admin-tool-page">
+            <SecondaryPageHeader
+              eyebrow="營運觀測"
+              title="用量與活動紀錄"
+              icon="Scale"
+              badge="依管理權限顯示"
+              description={<>查看點數消耗、模型使用、近期操作與異常線索，快速找到需要調整或追蹤的地方。</>}
+            />
+            <div className="stack">
+              <ConsumptionMonitorCard />
+              <InsightsCard />
+              <AuditLogCard />
+            </div>
           </div>
         ) : (
           <p className="error">

@@ -51,7 +51,7 @@ function StageHead({ id, num, title, desc, accent, hint }: {
       id={id}
       role="heading"
       aria-level={2}
-      className={`group-head ${accent}`}
+      className={`group-head project-stage-head ${accent}`}
       style={{ scrollMarginTop: "var(--sp-16)" }}
     >
       <span className="group-num">{num}</span>
@@ -525,10 +525,10 @@ export function ProjectPage({ id }: { id: string }) {
 
   return (
     // position:relative＋ref：游標座標（x/y 比例＋[data-fb] 錨點）與覆蓋層都以這個容器為基準
-    <div ref={collab.containerRef} onPointerMove={collab.onPointerMove} style={{ position: "relative" }}>
+    <div className="project-page" ref={collab.containerRef} onPointerMove={collab.onPointerMove} style={{ position: "relative" }}>
       <CursorOverlay cursors={collab.cursors} />
       {/* 麵包屑：長頁面全程可及的返回入口＋標示專案所屬組（切組後留在他組專案時，一眼看出情境） */}
-      <p className="hint" style={{ margin: "14px 0 0", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+      <p className="project-breadcrumb">
         <Link href="/dashboard" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
           <Icon name="Undo2" size={13} />今日工作台
         </Link>
@@ -537,7 +537,8 @@ export function ProjectPage({ id }: { id: string }) {
           return g ? <span>・{g.teamName}・{g.groupName}</span> : null;
         })()}
       </p>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+      <header className="project-hero">
+      <div className="project-hero__heading">
         <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <span className="chip" style={{ marginLeft: 10 }}>已封存</span>}</h1>
         {/* 即時協作：連線狀態＋誰在場＋一般／鏡像跟隨模式切換 */}
         <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }} aria-live="polite">
@@ -639,13 +640,13 @@ export function ProjectPage({ id }: { id: string }) {
           )
         )}
       </div>
-      <p className="sub">
+      <p className="sub project-hero__meta">
         {p.format}・{p.platform}
         {wv.logline ? `・${wv.logline}` : ""}
       </p>
       {/* #25 常駐交付出口指引：告訴非工程師成品最後怎麼落地，點一下捲到分鏡・交付區 */}
       <p
-        className="hint"
+        className="project-delivery-link"
         role="button"
         tabIndex={0}
         onClick={() => scrollToSelector("#onboard-delivery")}
@@ -654,6 +655,7 @@ export function ProjectPage({ id }: { id: string }) {
       >
         做好後可打包成 zip，媒體檔直接拖進剪映／Premiere 就能剪 <Icon name="ArrowRight" size={13} style={{ verticalAlign: "-2px" }} />
       </p>
+      </header>
       {archiveProject.error && <p className="error">{archiveProject.error.message}</p>}
 
       {/* 2.3 唯讀橫幅：檢視者第一眼就知道自己是唯讀＋能做什麼＋找誰解鎖（不是「系統一直壞」） */}
@@ -672,8 +674,8 @@ export function ProjectPage({ id }: { id: string }) {
       )}
 
       {/* #9 「從這裡開始」步驟列：用實際 state 判定完成打勾，點某步捲到對應區塊 */}
-      <section className="card" data-fb="從這裡開始" style={{ marginBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <section className="card project-guide" data-fb="從這裡開始">
+        <div className="project-guide__head">
           <h2 style={{ margin: 0 }}>從這裡開始</h2>
           <HelpTip text="這是製作一支片的四個步驟。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
           <span style={{ flex: "1 1 auto" }} />
@@ -688,10 +690,11 @@ export function ProjectPage({ id }: { id: string }) {
           </button>
         </div>
         {!onboardCollapsed && (
-          <div id="project-getting-started-steps" style={{ display: "flex", alignItems: "stretch", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+          <div id="project-getting-started-steps" className="project-guide__steps">
             {onboardSteps.map((s, i) => (
-              <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div key={s.label} className="project-guide__step-wrap">
                 <button
+                  className={`project-guide__step${s.done ? " done" : ""}`}
                   onClick={() => {
                     // Workbench anchors (#gen-prompt / #sec-studio / …) must switch mode first.
                     if (s.target === "#gen-prompt" || s.target === "#sec-studio" || s.target === "#sec-agent" || s.target === "#sec-assistant") {
@@ -701,12 +704,6 @@ export function ProjectPage({ id }: { id: string }) {
                     }
                   }}
                   title={s.hint}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8, textAlign: "left",
-                    padding: "8px 12px", borderRadius: "var(--r-12)", cursor: "pointer",
-                    border: s.done ? "1px solid var(--primary-border)" : "1px solid var(--border)",
-                    background: s.done ? "var(--primary-tint)" : "transparent",
-                  }}
                 >
                   <span
                     aria-hidden
@@ -722,7 +719,7 @@ export function ProjectPage({ id }: { id: string }) {
                   </span>
                   <span style={{ fontSize: 13, fontWeight: s.done ? 600 : 400 }}>{s.label}</span>
                 </button>
-                {i < onboardSteps.length - 1 && <span aria-hidden className="hint" style={{ display: "inline-flex", alignItems: "center", fontSize: 14 }}><Icon name="ArrowRight" size={14} /></span>}
+                {i < onboardSteps.length - 1 && <span aria-hidden className="project-guide__arrow"><Icon name="ArrowRight" size={14} /></span>}
               </div>
             ))}
           </div>

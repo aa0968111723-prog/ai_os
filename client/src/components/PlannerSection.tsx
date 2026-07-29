@@ -35,6 +35,7 @@ export function PlannerSection({
 }) {
   return (
     <details
+      id={contentId.replace(/-content$/, "")}
       className="card planner-section"
       open={open}
       onToggle={(event) => onOpenChange(event.currentTarget.open)}

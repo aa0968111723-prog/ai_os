@@ -20,26 +20,14 @@ export const DEFAULT_ITEMS: TocItem[] = [
   { id: "stage-deliver", label: "③ 分鏡・交付" },
 ];
 
-const MOBILE_QUERY = "(max-width: 820px)";
-
 /** 尊重使用者的減少動效偏好：開啟時退回瞬間捲動 */
 function reducedMotion() {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
-  // 手機預設收合成一條，桌面固定展開為側欄
-  const [open, setOpen] = useState(() =>
-    typeof window === "undefined" ? true : !window.matchMedia(MOBILE_QUERY).matches,
-  );
-
-  // 跨越斷點時同步展開狀態（進桌面→展開；進手機→收合）；桌面內的手動收合不受影響
-  useEffect(() => {
-    const mq = window.matchMedia(MOBILE_QUERY);
-    const sync = () => setOpen(!mq.matches);
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
+  // 桌面是側欄；手機由 CSS 轉成常駐橫向階段列，避免長頁反覆展開選單。
+  const [open, setOpen] = useState(true);
 
   // 捲動定位（scroll-spy）：標記目前在視窗上緣附近的區塊，讓目錄有「你在這裡」的方位感
   const [activeId, setActiveId] = useState("");
@@ -81,8 +69,6 @@ export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
     el.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
     // 跳轉同步寫入 URL hash（replaceState 不塞歷史）：可分享「直達某一幕」（如 #stage-create）的深連結，重整也留在原幕
     history.replaceState(null, "", `#${id}`);
-    // 手機收合態下點完自動收起，避免展開的清單遮住內容
-    if (window.matchMedia(MOBILE_QUERY).matches) setOpen(false);
   };
 
   // 深連結：帶 #stage-xxx 開頁時自動捲到該階段（內容掛載晚於瀏覽器原生錨點時機，這裡補跳一次）

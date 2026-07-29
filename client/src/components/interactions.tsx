@@ -245,6 +245,7 @@ export function HelpTip({ text }: { text: string }) {
     <span ref={wrapRef} style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}>
       <button
         type="button"
+        className="help-tip-trigger"
         aria-label={open ? "收合提示" : `顯示提示：${text}`}
         aria-expanded={open}
         title={text}
