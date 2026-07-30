@@ -329,7 +329,7 @@ export function CreationWorkbench({
       )}
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
-        <p className="hint" style={{ marginTop: 6 }}>
+        <p className="hint workbench-intro-lede" style={{ marginTop: 6 }}>
           從同一個工作台開始：先說明想完成的成果，再選擇問 AI、直接生成、製作範本或執行計畫。
           所有能力沿用目前專案的知識、資料、素材、分鏡、權限、點數與核准規則。
         </p>
