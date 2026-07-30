@@ -5,6 +5,7 @@ import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } 
 import type { AuthState } from "../services/auth";
 import { db, schema } from "../db";
 import { getSettings, updateSettings, usedTotal, usedThisWeek, usedToday, effectiveDailyQuota, groupUsage, usedByGroup, usedByMember, loadQuotaConfig } from "../services/points";
+import { getFalAccountBalance } from "../services/falBilling";
 
 /** 團隊管理權檢查（組預算是由上往下分配的，只有團隊管理員以上能調）：開發者或該組所屬團隊的 admin */
 async function assertGroupTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, groupId: string): Promise<void> {
@@ -93,6 +94,20 @@ export const quotaRouter = router({
     .mutation(async ({ ctx, input }) => {
       if (!ctx.auth.user.isSuperAdmin) throw new TRPCError({ code: "FORBIDDEN", message: "只有開發者能調全域預算" });
       return updateSettings(input);
+    }),
+
+  /**
+   * 平台 Fal 帳戶 credits 餘額（USD）——僅開發者（isSuperAdmin）。
+   * 唯讀 query，不記審計；金鑰永不進回傳。錯誤以 ok:false 結構化回傳，不拋 TRPC（除權限）。
+   * 見 docs/product/fal-balance-and-personal-usage-plan.md
+   */
+  falAccountBalance: adminProcedure
+    .input(z.object({ force: z.boolean().optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      if (!ctx.auth.user.isSuperAdmin) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "只有開發者能查看平台 Fal 帳戶餘額" });
+      }
+      return getFalAccountBalance({ force: input?.force === true });
     }),
 
   /** 組週額度（團隊管理/組長可調；0 或空＝不限） */

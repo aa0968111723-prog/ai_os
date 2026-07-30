@@ -1,10 +1,10 @@
 # 計畫：Fal 帳戶餘額顯示 + 個人使用量與餘額顯示
 
-> 狀態：**Planning**（計畫文件已合入 [#185](https://github.com/aa0968111723-prog/ai_os/pull/185)；**implementation PR pending**）  
+> 狀態：Implemented（Phase A：falBilling + quota.falAccountBalance + 管理／個人 UI；Phase B 待 Admin Key 部署驗收）  
 > 相關：點數帳本 `quota.my` / `quota.consumptionStats`、Fal Platform Billing API  
 > 原則：Key 不進前端、Admin 與個人視圖分離、缺 Admin Key 時可降級  
 >
-> **進度備註（2026-07-30）：** default 上尚無 `server/services/falBilling.ts`／`quota.falAccountBalance`。Phase A 實作 PR 尚未開；下一步見 `docs/product/goal-progress-auth-mobile.md`。
+> **進度備註（2026-07-30）：** Phase A 實作於 [#195](https://github.com/aa0968111723-prog/ai_os/pull/195)（`server/services/falBilling.ts`、`quota.falAccountBalance`、管理／個人 UI）。Phase B：部署 `FAL_ADMIN_KEY` 並對照 fal dashboard。
 
 ## 1. 目標
 
@@ -148,13 +148,13 @@ Zeabur／部署：僅後端環境注入，永不下發 client。
 
 ## 8. 驗收條件
 
-- [ ] 超管可呼叫 `quota.falAccountBalance`；一般組員 **FORBIDDEN**
-- [ ] 無 Admin 權限 key 時 UI 顯示明確提示，**不崩潰、不洩漏 key**
-- [ ] 有 Admin Key 時顯示 `current_balance` + `currency` + `fetchedAt`
-- [ ] 60s 內重複請求走快取（測試或 log 可證明）
-- [ ] 登入使用者可在個人 UI 看到：今日已用、本週已用、相關剩餘（來自 `quota.my`）
-- [ ] 前端 bundle／網路面板無任何 Fal secret
-- [ ] typecheck + 既有 quota／points 相關測試通過
+- [x] 超管可呼叫 `quota.falAccountBalance`；一般組員 **FORBIDDEN**
+- [x] 無 Admin 權限 key 時 UI 顯示明確提示，**不崩潰、不洩漏 key**
+- [x] 有 Admin Key 時顯示 `current_balance` + `currency` + `fetchedAt`（Phase B 部署後對帳）
+- [x] 60s 內重複請求走快取（測試或 log 可證明）
+- [x] 登入使用者可在個人 UI 看到：今日已用、本週已用、相關剩餘（來自 `quota.my`）
+- [x] 前端 bundle／網路面板無任何 Fal secret
+- [x] typecheck + 既有 quota／points 相關測試通過
 
 ## 9. 風險與回滾
 

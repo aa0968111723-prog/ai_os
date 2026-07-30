@@ -1832,6 +1832,115 @@ function fmtWhen(d: string | Date | null | undefined): string {
 }
 
 /**
+ * 平台 Fal 帳戶 credits（USD）——僅開發者可見。
+ * 與站內點數並陳但不混用；不自動換算。錯誤態（未設 key／403／上游）完整展示。
+ * 見 docs/product/fal-balance-and-personal-usage-plan.md
+ */
+function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
+  // 僅超管有權呼叫；enabled 避免團隊管理員白打 403
+  const balance = trpc.quota.falAccountBalance.useQuery(
+    {},
+    { enabled: isSuperAdmin, staleTime: 60_000, refetchOnWindowFocus: false },
+  );
+  // 站內總預算剩餘（點）——quota.my 已有 totalRemaining，與 Fal USD 並陳對照
+  const myQuota = trpc.quota.my.useQuery(undefined, { enabled: isSuperAdmin, staleTime: 60_000 });
+  if (!isSuperAdmin) return null;
+
+  const data = balance.data;
+  const systemPointsRemaining = myQuota.data?.totalRemaining ?? null;
+  const fmtUsd = (n: number) =>
+    n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <div className="card" data-fb="Fal 帳戶卡">
+      <h2>Fal 帳戶</h2>
+      <p className="hint">
+        平台在 Fal.ai 的 credits 餘額（單位 <strong>USD</strong>）。與站內
+        <strong>點數</strong>單位不同，僅供營運對帳，<strong>不自動換算</strong>。
+      </p>
+      {balance.isLoading ? (
+        <div className="skeleton" style={{ height: 56, marginTop: 8 }} role="status" aria-label="Fal 餘額載入中" />
+      ) : balance.error ? (
+        <p className="error" role="alert">
+          查詢失敗：{balance.error.message}{" "}
+          <button className="btn-ghost btn-sm" type="button" onClick={() => balance.refetch()}>再試一次</button>
+        </p>
+      ) : data && data.ok ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
+          <div>
+            <span className="hint">Credits 餘額：</span>
+            <b className="mono" style={{ fontSize: 22 }}>
+              ${fmtUsd(data.balance)} {data.currency || "USD"}
+            </b>
+          </div>
+          <div>
+            <span className="hint">帳戶：</span>
+            <span className="mono">{data.username}</span>
+          </div>
+          <div className="hint" style={{ fontSize: 11 }}>
+            更新於 {new Date(data.fetchedAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
+            {data.cached ? "（快取）" : ""}
+          </div>
+        </div>
+      ) : data && !data.ok ? (
+        <div role="status" style={{ marginTop: 4 }}>
+          <p className="hint" style={{ color: data.code === "forbidden" || data.code === "not_configured" ? "var(--gold-ink)" : "var(--fg-secondary)" }}>
+            {data.code === "not_configured" && "⚠ "}
+            {data.code === "forbidden" && "🔒 "}
+            {data.code === "upstream_error" && "⏳ "}
+            {data.message}
+          </p>
+          {data.code === "not_configured" && (
+            <p className="hint" style={{ fontSize: 11, marginTop: 4 }}>
+              在部署環境設定 <code>FAL_ADMIN_KEY</code>（Admin scope）後重新整理即可。金鑰僅後端使用。
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      {/* 並排對照：站內總預算剩餘（點） vs Fal USD——刻意分單位標示 */}
+      <div
+        style={{
+          marginTop: 12,
+          padding: "8px 10px",
+          borderRadius: 8,
+          background: "var(--card2)",
+          border: "1px solid var(--border-soft)",
+          display: "grid",
+          gap: 4,
+          fontSize: 12,
+        }}
+      >
+        <div>
+          <span className="hint">站內總預算剩餘：</span>
+          <span className="mono">
+            {systemPointsRemaining == null ? "不限" : `${systemPointsRemaining.toLocaleString()} 點`}
+          </span>
+        </div>
+        <div>
+          <span className="hint">Fal credits：</span>
+          <span className="mono">
+            {data && data.ok ? `$${fmtUsd(data.balance)} ${data.currency || "USD"}` : "—"}
+          </span>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+        <button
+          type="button"
+          className="btn-ghost btn-sm"
+          disabled={balance.isFetching}
+          onClick={() => balance.refetch()}
+          title="尊重伺服器 60～120 秒快取；短時間內重按可能仍是快取"
+        >
+          {balance.isFetching ? "重新整理中…" : "重新整理"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
  * 回饋代理卡：每 3 天自動巡一次未處理回饋，分診、排修復、寄信回覆回報者。
  * 顯示排程週期／信箱機制狀態／最近一次巡檢結果；開發者可「立即巡檢」不必等排程。
  */
@@ -2064,6 +2173,8 @@ export function AdminPage() {
           {saveSettings.error && <p className="error">{saveSettings.error.message}</p>}
           {settingsSaved && <p className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</p>}
         </div>
+        {/* Fal 帳戶（USD credits）與站內點數並陳；僅開發者 */}
+        <FalAccountCard isSuperAdmin={isSuperAdmin} />
         <div className="card" data-fb="邀請成員卡">
           <h2>邀請成員</h2>
           <label htmlFor="invite-email">Email</label>
