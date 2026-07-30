@@ -83,6 +83,89 @@ export function countDoneSteps(steps: unknown): number {
   return steps.filter((s) => (s as { status?: string } | null)?.status === "done").length;
 }
 
+/**
+ * 目前卡在哪一步（給組儀表「一眼看懂」）：優先 running → waiting → 第一個 pending。
+ * 只回 note/title 短字，不回完整 prompt。
+ */
+export function currentStepNote(steps: unknown): string | null {
+  if (!Array.isArray(steps) || steps.length === 0) return null;
+  const list = steps as Array<{ status?: string; note?: string; title?: string } | null>;
+  const pick = (status: string) =>
+    list.find((s) => s?.status === status);
+  const step = pick("running") ?? pick("waiting") ?? pick("pending") ?? list[list.length - 1];
+  if (!step) return null;
+  const text = (step.note ?? step.title ?? "").trim();
+  if (!text) return null;
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+}
+
+/** 組代理匯總健康度（作業台「AI 工作與團隊分析」） */
+export type GroupAgentHealth = "healthy" | "attention" | "blocked";
+
+export interface GroupAgentRunStatsInput {
+  status: string;
+  projectId: string;
+  updatedAt: Date | string;
+}
+
+export interface GroupAgentSummary {
+  running: number;
+  waiting: number;
+  awaitingApproval: number;
+  failedRecent: number;
+  doneRecent: number;
+  active: number;
+  activeProjects: number;
+  health: GroupAgentHealth;
+}
+
+/** 由 run 列統計組級摘要（純函式；limit 內的列表也可呼叫，前端可重算） */
+export function summarizeGroupAgentRuns(
+  runs: GroupAgentRunStatsInput[],
+  nowMs: number = Date.now(),
+  recentMs: number = 7 * 24 * 60 * 60 * 1000,
+): GroupAgentSummary {
+  const recentCutoff = nowMs - recentMs;
+  let running = 0;
+  let waiting = 0;
+  let awaitingApproval = 0;
+  let failedRecent = 0;
+  let doneRecent = 0;
+  const activeProjectIds = new Set<string>();
+  for (const r of runs) {
+    const t = new Date(r.updatedAt).getTime();
+    if (r.status === "running") {
+      running += 1;
+      activeProjectIds.add(r.projectId);
+    } else if (r.status === "waiting") {
+      waiting += 1;
+      activeProjectIds.add(r.projectId);
+    } else if (r.status === "awaiting_approval") {
+      awaitingApproval += 1;
+      activeProjectIds.add(r.projectId);
+    } else if (r.status === "failed" && t >= recentCutoff) {
+      failedRecent += 1;
+    } else if (r.status === "done" && t >= recentCutoff) {
+      doneRecent += 1;
+    }
+  }
+  const active = running + waiting + awaitingApproval;
+  // blocked：有失敗且尚有等待／待核；attention：有活動或近期失敗；否則 healthy
+  let health: GroupAgentHealth = "healthy";
+  if (failedRecent > 0 && (waiting > 0 || awaitingApproval > 0)) health = "blocked";
+  else if (active > 0 || failedRecent > 0) health = "attention";
+  return {
+    running,
+    waiting,
+    awaitingApproval,
+    failedRecent,
+    doneRecent,
+    active,
+    activeProjects: activeProjectIds.size,
+    health,
+  };
+}
+
 /** 給 LLM／工具結果看的代理執行一行摘要（狀態轉中文、目標截斷防灌爆提示詞） */
 export interface AgentRunBrief { projectTitle: string; goal: string; status: string; doneSteps: number; totalSteps: number; estPoints: number }
 export function formatAgentRunLine(r: AgentRunBrief): string {
@@ -634,20 +717,27 @@ ${historyBlock}使用者的問題：${input.message}`;
 
   /**
    * 組代理動態總覽（一體化儀表）：全組各專案的 AI 代理計畫／執行狀態一站看——進行中的排前面。
-   * 唯讀、組隔離（groupId 過 requireGroup、查詢鎖 agentRuns.groupId）；核准／停止仍到各專案頁做（守門不搬家）。
+   * 回傳 { summary, runs }：summary 供作業台「今日摘要／團隊分析」；runs 含發起人、當前步驟、錯誤摘要。
+   * 唯讀、組隔離；核准／停止仍到各專案頁做（守門不搬家）。
    */
   agentOverview: authedProcedure
     .input(z.object({ groupId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       requireGroup(ctx.auth, input.groupId);
+      // 上限 30：多專案組也能看到近期活躍＋失敗，仍防灌爆
       const rows = await db
-        .select({ run: schema.agentRuns, projectTitle: schema.projects.title })
+        .select({
+          run: schema.agentRuns,
+          projectTitle: schema.projects.title,
+          userName: schema.users.name,
+        })
         .from(schema.agentRuns)
         .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
+        .leftJoin(schema.users, eq(schema.agentRuns.userId, schema.users.id))
         .where(and(eq(schema.agentRuns.groupId, input.groupId), ne(schema.agentRuns.status, "discarded")))
         .orderBy(sql`case when ${schema.agentRuns.status} in ('running','waiting','awaiting_approval') then 0 else 1 end`, desc(schema.agentRuns.updatedAt))
-        .limit(10);
-      return rows.map(({ run, projectTitle }) => ({
+        .limit(30);
+      const runs = rows.map(({ run, projectTitle, userName }) => ({
         id: run.id,
         projectId: run.projectId,
         projectTitle,
@@ -657,7 +747,15 @@ ${historyBlock}使用者的問題：${input.message}`;
         totalSteps: Array.isArray(run.steps) ? (run.steps as unknown[]).length : 0,
         estPoints: run.estPoints,
         updatedAt: run.updatedAt,
+        userId: run.userId,
+        userName: userName ?? null,
+        error: run.error ? run.error.slice(0, 160) : null,
+        currentStepNote: currentStepNote(run.steps),
       }));
+      const summary = summarizeGroupAgentRuns(
+        runs.map((r) => ({ status: r.status, projectId: r.projectId, updatedAt: r.updatedAt })),
+      );
+      return { summary, runs };
     }),
 
   /**

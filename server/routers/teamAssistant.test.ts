@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildHistoryBlock, countDoneSteps, dispatchAllowed, formatAgentRunLine, resolveDispatches } from "./teamAssistant";
+import {
+  buildHistoryBlock,
+  countDoneSteps,
+  currentStepNote,
+  dispatchAllowed,
+  formatAgentRunLine,
+  resolveDispatches,
+  summarizeGroupAgentRuns,
+} from "./teamAssistant";
 
 /** 迷你專案列（只需 id/title，resolveDispatches 泛型只吃這兩欄） */
 const proj = (id: string, title: string) => ({ id, title });
@@ -166,5 +174,78 @@ describe("formatAgentRunLine（代理動態一行摘要）", () => {
     const line = formatAgentRunLine({ ...base, doneSteps: 0, totalSteps: 0 });
     expect(line).toContain("進度 —");
     expect(line).not.toContain("0/0");
+  });
+});
+
+describe("currentStepNote（組儀表當前步驟）", () => {
+  it("優先 running，其次 waiting，再 pending", () => {
+    expect(
+      currentStepNote([
+        { status: "done", note: "已完成" },
+        { status: "pending", note: "待做" },
+        { status: "running", note: "正在生成主視覺" },
+      ]),
+    ).toBe("正在生成主視覺");
+    expect(
+      currentStepNote([
+        { status: "waiting", note: "等人審" },
+        { status: "pending", note: "後面" },
+      ]),
+    ).toBe("等人審");
+  });
+
+  it("空／非陣列回 null；過長截斷", () => {
+    expect(currentStepNote(null)).toBeNull();
+    expect(currentStepNote([])).toBeNull();
+    const long = "字".repeat(100);
+    const note = currentStepNote([{ status: "running", note: long }]);
+    expect(note?.endsWith("…")).toBe(true);
+    expect(note!.length).toBeLessThanOrEqual(81);
+  });
+});
+
+describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
+  const now = Date.parse("2026-07-30T12:00:00Z");
+  const recent = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const old = new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString();
+
+  it("統計 active 與 activeProjects 去重", () => {
+    const s = summarizeGroupAgentRuns(
+      [
+        { status: "running", projectId: "p1", updatedAt: recent },
+        { status: "waiting", projectId: "p1", updatedAt: recent },
+        { status: "awaiting_approval", projectId: "p2", updatedAt: recent },
+        { status: "done", projectId: "p3", updatedAt: recent },
+      ],
+      now,
+    );
+    expect(s.running).toBe(1);
+    expect(s.waiting).toBe(1);
+    expect(s.awaitingApproval).toBe(1);
+    expect(s.active).toBe(3);
+    expect(s.activeProjects).toBe(2);
+    expect(s.doneRecent).toBe(1);
+    expect(s.health).toBe("attention");
+  });
+
+  it("近期失敗 + 仍有等待 → blocked", () => {
+    const s = summarizeGroupAgentRuns(
+      [
+        { status: "failed", projectId: "p1", updatedAt: recent },
+        { status: "waiting", projectId: "p2", updatedAt: recent },
+      ],
+      now,
+    );
+    expect(s.failedRecent).toBe(1);
+    expect(s.health).toBe("blocked");
+  });
+
+  it("過舊失敗不計 failedRecent；無活動 healthy", () => {
+    const s = summarizeGroupAgentRuns(
+      [{ status: "failed", projectId: "p1", updatedAt: old }],
+      now,
+    );
+    expect(s.failedRecent).toBe(0);
+    expect(s.health).toBe("healthy");
   });
 });

@@ -1793,6 +1793,124 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .daily-overview .continue-card__mark { width: 42px; height: 42px; font-size: 20px; }
 .daily-overview .continue-card__body strong { font-size: var(--fs-13); }
 .daily-overview .continue-card__body small { font-size: var(--fs-11); }
+/* 作業台「AI 工作與團隊分析」 */
+.team-ai-card {
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  display: grid;
+  gap: 14px;
+}
+.team-analysis__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.team-analysis__health {
+  font-size: 12px;
+  font-weight: 650;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: var(--card2);
+  color: var(--fg-secondary);
+  white-space: nowrap;
+}
+.team-analysis__health.is-attention {
+  background: var(--gold-soft);
+  color: var(--gold-ink);
+  border-color: transparent;
+}
+.team-analysis__health.is-blocked {
+  background: var(--danger-soft, #fde8e8);
+  color: var(--danger-ink);
+  border-color: transparent;
+}
+.team-analysis__health.is-healthy {
+  background: var(--success-soft);
+  color: var(--success-ink);
+  border-color: transparent;
+}
+.team-analysis__stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.team-stat {
+  display: grid;
+  gap: 2px;
+  padding: 10px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border-soft);
+  background: var(--card2);
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  min-height: 56px;
+}
+.team-stat:hover { border-color: var(--border); box-shadow: var(--e1, none); }
+.team-stat.is-on {
+  border-color: var(--primary);
+  background: var(--primary-tint);
+}
+.team-stat strong { font: 22px/1 var(--serif); }
+.team-stat small { color: var(--fg-secondary); font-size: 11px; font-weight: 650; }
+.team-runs-block {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 10px;
+}
+.team-runs-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  text-align: left;
+}
+.team-run-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.team-run-filters .chip.pick.is-on {
+  background: var(--primary-tint);
+  border-color: var(--primary);
+  color: var(--primary-ink);
+  font-weight: 650;
+}
+.team-run-row__step {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--primary-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-run-row__err {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--danger-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-chat-block {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 12px;
+}
+@media (max-width: 720px) {
+  .team-analysis__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .team-stat:last-child { grid-column: 1 / -1; }
+}
+
 .team-run-list { display: grid; gap: 6px; }
 .team-run-row {
   min-width: 0;
@@ -1808,7 +1926,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 }
 .team-run-row__copy { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 7px; }
 .team-run-row__copy > a { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.team-run-row__copy > span:not(.team-run-row__track) { overflow: hidden; color: var(--fg-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.team-run-row__copy > span:not(.team-run-row__track):not(.team-run-row__step):not(.team-run-row__err) {
+  overflow: hidden; color: var(--fg-secondary); text-overflow: ellipsis; white-space: nowrap;
+}
 .team-run-row__track {
   grid-column: 1 / -1;
   height: 4px;
@@ -2789,7 +2909,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .model-scenario-grid { grid-template-columns: 1fr; }
   .team-run-row { grid-template-columns: auto minmax(0, 1fr); }
   .team-run-row__copy { grid-template-columns: 1fr; }
-  .team-run-row__copy > span:not(.team-run-row__track) { display: none; }
+  /* 手機隱藏目標原文，但保留「現在步驟／錯誤」 */
+  .team-run-row__copy > span:not(.team-run-row__track):not(.team-run-row__step):not(.team-run-row__err) { display: none; }
   .team-run-row__meta { grid-column: 2; }
   .support-topic-nav {
     top: calc(52px + var(--safe-top));
