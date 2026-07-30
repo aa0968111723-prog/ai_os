@@ -51,13 +51,13 @@ pub struct RevealAssetRequest {
 
 /** 與 client/src/platform/desktopBridge.ts 的 DesktopBridgeResult 完全同形，不額外加入 discriminator。 */
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", untagged)]
+#[serde(untagged)]
 pub enum DesktopBridgeResult {
     Success {
         ok: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "handoffId", skip_serializing_if = "Option::is_none")]
         handoff_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(rename = "localName", skip_serializing_if = "Option::is_none")]
         local_name: Option<String>,
     },
     Failure {
@@ -120,6 +120,7 @@ mod tests {
         assert_eq!(value["handoffId"], "handoff-1");
         assert_eq!(value["localName"], "clip.mp4");
         assert!(value.get("shape").is_none());
+        assert!(value.get("handoff_id").is_none());
     }
 
     #[test]
