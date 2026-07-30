@@ -4,6 +4,26 @@
  * （由多代理 UIUX 重設計工作流整合；P0 全域地基層。既有 class 契約全部保留。）
  * v2.1 全面優化：placeholder AA、checkbox 復原原生、40px 觸控、--*-rgb 單一色源、
  *   新增 .btn-sm/.spin/.result-text、summary/toc-current focus 與狀態。 */
+
+/* ── Webfont（UIUX-03）────────────────────────────────────────────────────────
+ * 此前全站沒有任何 webfont，--sans/--serif 只是 system-ui fallback 堆疊——
+ * 同一個畫面在 Windows 是 Segoe UI、Mac 是 PingFang TC、Android 又不同，
+ * 字重與字面寬度全都對不上，這是「不夠質感」最大的單一原因。
+ *
+ * 選 Noto Sans/Serif TC 的理由：它本來就在下方 --sans 的 fallback 堆疊裡，
+ * 且 Figma 也有同一套（見 docs/uiux-audit/figma-design-system.md），設計與實作終於對得上。
+ *
+ * self-host（@fontsource）而非 Google CDN：站內走 helmet CSP，不必為字型開外部網域，
+ * 也不讓弘法內容的瀏覽行為外流到第三方。
+ *
+ * 用**可變字型**而非靜態字重：styles.css 實測用到 400×5、500×3、600×40、650×19、
+ * 700×12、750×2 共六種字重。靜態字型每個字重都要自己一整份中文字符集——同樣的字
+ * 下載六遍，實測單頁 1113KB。可變字型一份 105 個 unicode-range 分包涵蓋 100–900，
+ * 連 650／750 都能精確渲染（靜態字型只能就近取 700）。
+ * 瀏覽器仍只下載當頁真正出現的字，不是整包。 */
+@import "@fontsource-variable/noto-sans-tc/index.css";
+@import "@fontsource-variable/noto-serif-tc/index.css";
+
 :root {
   color-scheme: light; /* OS 深色模式下鎖定亮色控件/自動填入/捲軸，貼合暖色調 */
   /* ── 文字（--soft 僅裝飾，永不承載正文；全部校至 WCAG AA） ── */
@@ -56,9 +76,10 @@
   --scrim: rgba(43,38,32,.32);
   --cover-veil: rgba(43,38,32,.16);
 
-  /* ── 字體（受控 fallback，永遠繞開細明體 PMingLiU） ── */
-  --sans:  system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
-  --serif: Georgia, "Songti TC", "Songti SC", "Times New Roman", "PingFang TC", "Microsoft JhengHei", serif;
+  /* ── 字體（自帶 webfont 打頭；後方 fallback 保留，字型還沒下載完或載入失敗時
+   *    仍走受控堆疊，永遠繞開細明體 PMingLiU） ── */
+  --sans:  "Noto Sans TC Variable", "Noto Sans TC", system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --serif: "Noto Serif TC Variable", "Noto Serif TC", Georgia, "Songti TC", "Songti SC", "Times New Roman", "PingFang TC", serif;
   --mono:  "IBM Plex Mono", ui-monospace, Menlo, monospace;
 
   /* ── 字級刻度 ── */
