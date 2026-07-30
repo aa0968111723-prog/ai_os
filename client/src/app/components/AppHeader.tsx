@@ -7,7 +7,8 @@ import { AccountMenu } from "./AccountMenu";
 import { PendingApprovalsBadge } from "./PendingApprovalsBadge";
 import { PrimaryNavigation } from "./PrimaryNavigation";
 
-/** 彈性點數徽章：剩餘 or 不限（管理員可在團隊管理調整） */
+/** 彈性點數徽章：剩餘 or 不限（管理員可在團隊管理調整）
+ *  強化展示：週／日已用與額度寫入 title；無週額時仍顯示本週已用（站內點，非 Fal USD）。 */
 function PointsBadge({ groupId }: { groupId: string }) {
   // enabled 等組別就緒才查——避免首載以 undefined 先打一輪造成「週額度閃爍」
   const my = trpc.quota.my.useQuery({ groupId: groupId || undefined }, { refetchInterval: 60_000, enabled: !!groupId });
@@ -17,16 +18,35 @@ function PointsBadge({ groupId }: { groupId: string }) {
   // 徽章主數字＝最緊的「累計剩餘」：個人分配 → 組預算 → 全域總預算（任一為 null 即該層不限）
   const caps = [memberBudgetRemaining, groupBudgetRemaining, totalRemaining].filter((v): v is number => v != null);
   const label = caps.length > 0 ? `剩 ${Math.min(...caps).toLocaleString()}` : "不限";
-  const weekly = weeklyQuota != null ? `・週 ${weeklyUsed}/${weeklyQuota}` : "";
-  const daily = dailyQuota != null ? `・日 ${dailyUsed}/${dailyQuota}` : "";
+  // 有額度顯示 used/quota；無週額仍顯示「週已用 N」讓用量可見
+  const weekly =
+    weeklyQuota != null
+      ? `・週 ${weeklyUsed}/${weeklyQuota}`
+      : weeklyUsed > 0
+        ? `・週已用 ${weeklyUsed}`
+        : "";
+  const daily =
+    dailyQuota != null
+      ? `・日 ${dailyUsed}/${dailyQuota}`
+      : dailyUsed > 0
+        ? `・日已用 ${dailyUsed}`
+        : "";
   // 標題點明「剩」指的是哪一層，避免組長/組員把個人分配誤讀成全系統剩餘
   const source = memberBudgetRemaining != null && memberBudgetRemaining === Math.min(...(caps.length ? caps : [Infinity]))
     ? "你的個人分配"
     : groupBudgetRemaining != null && groupBudgetRemaining === Math.min(...(caps.length ? caps : [Infinity]))
     ? "本組組預算"
     : "全系統總預算";
+  const detailParts = [
+    caps.length > 0 ? `最緊剩餘（${source}）` : "累計不限",
+    `今日已用 ${dailyUsed}${dailyQuota != null ? `／日額 ${dailyQuota}` : ""}`,
+    `本週已用 ${weeklyUsed}${weeklyQuota != null ? `／週額 ${weeklyQuota}` : ""}`,
+    memberBudgetRemaining != null ? `個人預算剩 ${memberBudgetRemaining}` : null,
+    groupBudgetRemaining != null ? `組預算剩 ${groupBudgetRemaining}` : null,
+    "單位：站內點數",
+  ].filter(Boolean);
   return (
-    <span className="status-chip points-badge" title={caps.length > 0 ? `顯示最緊的累計剩餘（${source}）；週/日上限每天/每週重置，由管理員與組長調整` : "點數額度由管理員調整；日上限每天重置"}>
+    <span className="status-chip points-badge" title={detailParts.join("；")}>
       <Icon name="Gem" size={14} />
       <span className="mono"><span>{label}</span><span className="points-badge__cadence">{weekly}{daily}</span></span>
     </span>

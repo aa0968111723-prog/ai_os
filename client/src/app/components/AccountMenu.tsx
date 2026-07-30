@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "wouter";
+import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
@@ -18,6 +19,124 @@ function InstallAppMenuItem({ onDone }: { onDone: () => void }) {
     }}>
       <Icon name="Download" size={15} />安裝成 App
     </button>
+  );
+}
+
+/** 簡易用量進度條：quota 為 null＝不限則只顯示已用、不畫上限 */
+function QuotaBar({
+  label,
+  used,
+  quota,
+}: {
+  label: string;
+  used: number;
+  quota: number | null;
+}) {
+  const limited = quota != null && quota > 0;
+  const pct = limited ? Math.min(100, Math.round((used / quota) * 100)) : 0;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11 }}>
+        <span className="hint">{label}</span>
+        <span className="mono" style={{ fontSize: 11 }}>
+          {used.toLocaleString()}
+          {limited ? ` / ${quota.toLocaleString()}` : "（不限）"}
+        </span>
+      </div>
+      {limited && (
+        <div
+          aria-hidden
+          style={{
+            marginTop: 3,
+            height: 4,
+            borderRadius: 999,
+            background: "var(--border-soft)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              width: `${pct}%`,
+              height: "100%",
+              borderRadius: 999,
+              background: pct >= 90 ? "var(--gold-ink)" : "var(--primary)",
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 帳號選單內個人點數摘要（強化 quota.my 展示）。
+ * 今日已用、本週已用、週／日額度、個人／組預算剩餘——與頂欄徽章互補、單位皆為站內點。
+ */
+function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; enabled: boolean }) {
+  const my = trpc.quota.my.useQuery(
+    { groupId: groupId || undefined },
+    { enabled: enabled && !!groupId, staleTime: 30_000 },
+  );
+  if (!enabled) return null;
+  if (!groupId) {
+    return (
+      <div className="account-menu__quota" role="presentation" style={{ padding: "8px 12px", fontSize: 12 }}>
+        <div className="hint">選好作用組別後可看個人點數用量</div>
+      </div>
+    );
+  }
+  if (my.isLoading) {
+    return (
+      <div className="account-menu__quota" role="presentation" style={{ padding: "8px 12px" }}>
+        <div className="skeleton" style={{ height: 48 }} />
+      </div>
+    );
+  }
+  if (my.error || !my.data) {
+    return (
+      <div className="account-menu__quota" role="presentation" style={{ padding: "8px 12px", fontSize: 12 }}>
+        <span className="hint">點數暫時讀不到</span>
+      </div>
+    );
+  }
+  const d = my.data;
+  const caps = [d.memberBudgetRemaining, d.groupBudgetRemaining, d.totalRemaining].filter(
+    (v): v is number => v != null,
+  );
+  const tightRemaining = caps.length > 0 ? Math.min(...caps) : null;
+
+  return (
+    <div
+      className="account-menu__quota"
+      role="presentation"
+      style={{
+        padding: "8px 12px 10px",
+        borderBottom: "1px solid var(--border-soft)",
+        fontSize: 12,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+        <span style={{ fontWeight: 600, fontSize: 12 }}>我的點數</span>
+        <span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>
+          {tightRemaining == null ? "不限" : `剩 ${tightRemaining.toLocaleString()} 點`}
+        </span>
+      </div>
+      <QuotaBar label="今日已用" used={d.dailyUsed} quota={d.dailyQuota} />
+      <QuotaBar label="本週已用" used={d.weeklyUsed} quota={d.weeklyQuota} />
+      {(d.memberBudgetRemaining != null || d.groupBudgetRemaining != null) && (
+        <div className="hint" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.4 }}>
+          {d.memberBudgetRemaining != null && (
+            <div>個人預算剩 {d.memberBudgetRemaining.toLocaleString()} 點</div>
+          )}
+          {d.groupBudgetRemaining != null && (
+            <div>本組預算剩 {d.groupBudgetRemaining.toLocaleString()} 點</div>
+          )}
+        </div>
+      )}
+      <div className="hint" style={{ marginTop: 4, fontSize: 10 }}>
+        單位為站內點數（非 Fal USD）
+      </div>
+    </div>
   );
 }
 
@@ -98,6 +217,8 @@ export function AccountMenu({
       </button>
       {open && (
         <div ref={menuRef} className="menu" role="menu" aria-label="使用者選單">
+          {/* 個人點數摘要：今日／本週用量與剩餘（quota.my）；與頂欄徽章互補 */}
+          <PersonalQuotaSummary groupId={activeGroupId} enabled={open} />
           {/* 分組＋分隔線：說明／工作／管理／帳號——扁平長清單太難掃（回饋 W1）。
            * 筆記排程／資料庫是高頻入口，已升到頂欄常駐，故不再列進「工作」；
            * 權限限定的選項／通訊錄／監控／團隊管理獨立成「管理」組，一般組員整段不顯示。 */}
