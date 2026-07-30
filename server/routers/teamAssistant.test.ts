@@ -81,6 +81,19 @@ describe("resolveDispatches（LLM 代號派工 → 可執行提議）", () => {
     // goal 本身保留全文（送 dispatch 用），只有 label 截斷
     expect(out[0].goal).toBe(longGoal);
   });
+
+  it("多筆合法派工一次全收（上限由呼叫端裁，此處不截）", () => {
+    const out = resolveDispatches(
+      projByRef,
+      [
+        { projectRef: "p1", goal: "第一案目標足夠長" },
+        { projectRef: "p2", goal: "第二案目標足夠長" },
+      ],
+      true,
+    );
+    expect(out).toHaveLength(2);
+    expect(out.map((d) => d.projectId)).toEqual(["uuid-1", "uuid-2"]);
+  });
 });
 
 describe("buildHistoryBlock（追問脈絡 → 提示詞區塊）", () => {
@@ -146,6 +159,10 @@ describe("countDoneSteps（steps jsonb 防禦解析）", () => {
       ]),
     ).toBe(2);
   });
+
+  it("空陣列回 0", () => {
+    expect(countDoneSteps([])).toBe(0);
+  });
 });
 
 describe("formatAgentRunLine（代理動態一行摘要）", () => {
@@ -175,6 +192,15 @@ describe("formatAgentRunLine（代理動態一行摘要）", () => {
     expect(line).toContain("進度 —");
     expect(line).not.toContain("0/0");
   });
+
+  it("各已知狀態中文化", () => {
+    expect(formatAgentRunLine({ ...base, status: "awaiting_approval" })).toContain("待核准");
+    expect(formatAgentRunLine({ ...base, status: "waiting" })).toContain("等待人員");
+    expect(formatAgentRunLine({ ...base, status: "done" })).toContain("完成");
+    expect(formatAgentRunLine({ ...base, status: "failed" })).toContain("失敗");
+    expect(formatAgentRunLine({ ...base, status: "stopped" })).toContain("已停止");
+    expect(formatAgentRunLine({ ...base, status: "discarded" })).toContain("已放棄");
+  });
 });
 
 describe("currentStepNote（組儀表當前步驟）", () => {
@@ -202,12 +228,40 @@ describe("currentStepNote（組儀表當前步驟）", () => {
     expect(note?.endsWith("…")).toBe(true);
     expect(note!.length).toBeLessThanOrEqual(81);
   });
+
+  it("note 空時回退 title；兩者皆空回 null", () => {
+    expect(currentStepNote([{ status: "running", title: "生成封面" }])).toBe("生成封面");
+    expect(currentStepNote([{ status: "running", note: "  ", title: "  " }])).toBeNull();
+  });
+
+  it("沒有 running/waiting/pending 時取最後一列", () => {
+    expect(
+      currentStepNote([
+        { status: "done", note: "第一步" },
+        { status: "failed", note: "最後一步失敗" },
+      ]),
+    ).toBe("最後一步失敗");
+  });
 });
 
 describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
   const now = Date.parse("2026-07-30T12:00:00Z");
   const recent = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
   const old = new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString();
+
+  it("空陣列 → healthy、全 0（對應 UI 空狀態）", () => {
+    const s = summarizeGroupAgentRuns([], now);
+    expect(s).toEqual({
+      running: 0,
+      waiting: 0,
+      awaitingApproval: 0,
+      failedRecent: 0,
+      doneRecent: 0,
+      active: 0,
+      activeProjects: 0,
+      health: "healthy",
+    });
+  });
 
   it("統計 active 與 activeProjects 去重", () => {
     const s = summarizeGroupAgentRuns(
@@ -240,12 +294,64 @@ describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
     expect(s.health).toBe("blocked");
   });
 
+  it("近期失敗 + 待核准 → blocked", () => {
+    const s = summarizeGroupAgentRuns(
+      [
+        { status: "failed", projectId: "p1", updatedAt: recent },
+        { status: "awaiting_approval", projectId: "p2", updatedAt: recent },
+      ],
+      now,
+    );
+    expect(s.health).toBe("blocked");
+  });
+
+  it("僅近期失敗、無等待／待核 → attention（不是 blocked）", () => {
+    const s = summarizeGroupAgentRuns(
+      [{ status: "failed", projectId: "p1", updatedAt: recent }],
+      now,
+    );
+    expect(s.failedRecent).toBe(1);
+    expect(s.active).toBe(0);
+    expect(s.health).toBe("attention");
+  });
+
+  it("僅 awaiting_approval → attention", () => {
+    const s = summarizeGroupAgentRuns(
+      [{ status: "awaiting_approval", projectId: "p1", updatedAt: recent }],
+      now,
+    );
+    expect(s.awaitingApproval).toBe(1);
+    expect(s.active).toBe(1);
+    expect(s.health).toBe("attention");
+  });
+
   it("過舊失敗不計 failedRecent；無活動 healthy", () => {
     const s = summarizeGroupAgentRuns(
       [{ status: "failed", projectId: "p1", updatedAt: old }],
       now,
     );
     expect(s.failedRecent).toBe(0);
+    expect(s.health).toBe("healthy");
+  });
+
+  it("過舊 done 不計 doneRecent", () => {
+    const s = summarizeGroupAgentRuns(
+      [{ status: "done", projectId: "p1", updatedAt: old }],
+      now,
+    );
+    expect(s.doneRecent).toBe(0);
+    expect(s.health).toBe("healthy");
+  });
+
+  it("discarded / stopped 不進 active 計數", () => {
+    const s = summarizeGroupAgentRuns(
+      [
+        { status: "discarded", projectId: "p1", updatedAt: recent },
+        { status: "stopped", projectId: "p2", updatedAt: recent },
+      ],
+      now,
+    );
+    expect(s.active).toBe(0);
     expect(s.health).toBe("healthy");
   });
 });
