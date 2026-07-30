@@ -210,7 +210,7 @@ app.get("/api/ready", async (_req, res) => {
     : { ok: false, note: "missing（媒體生成金鑰未設定，生成會失敗）" };
 
   const ok = Object.values(components).every((c) => c.ok);
-  // 頂層 db/boot 維持舊版字串形狀：CI e2e 以 grep '"boot":"ready' 等就緒、
+  // 頂層 db/boot 維持舊版字串形狀：e2e 用 scripts/wait-api-ready.sh 等 ok:true + boot 以 ready 開頭、
   // e2e-phase4 驗頂層 boot 鍵，文件也教管理員看這兩個欄位——分項細節在 components。
   // processRole：讓部署／探針區分 web 與 worker 實例的必要元件期望。
   res.status(ok ? 200 : 503).json({

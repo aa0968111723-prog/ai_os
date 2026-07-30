@@ -128,18 +128,16 @@ jobs:
             # 讓它當行程群組長,結束時對負 pid 送 TERM 整組收乾淨(本機驗證時實際踩過這雷)。
             setsid npx tsx server/index.ts > "/tmp/server-$suite.log" 2>&1 &
             SERVER_PID=$!
-            # schema 已由顯式 migration 完成；此處只等 seed/runner boot ready，最多 90 秒。
-            for i in $(seq 1 90); do
-              if curl -sf http://localhost:3199/api/ready 2>/dev/null | grep -q '"boot":"ready'; then
-                break
-              fi
-              if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-                echo "伺服器行程已死,啟動 log:"; cat "/tmp/server-$suite.log"; exit 1
-              fi
-              sleep 1
-            done
-            if ! curl -sf http://localhost:3199/api/ready | grep -q '"boot":"ready'; then
+            # schema 已由顯式 migration 完成；等 /api/ready 真正 ok:true + boot ready。
+            # 勿用 `curl -sf | grep '"boot":"ready'`：初始化中 503 時 -f 吞掉 body，易誤判。
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "伺服器行程已死,啟動 log:"; cat "/tmp/server-$suite.log"; exit 1
+            fi
+            if ! bash scripts/wait-api-ready.sh "http://127.0.0.1:${PORT}" 90; then
               echo "90 秒內未就緒,啟動 log:"; cat "/tmp/server-$suite.log"; exit 1
+            fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "就緒後伺服器已死,啟動 log:"; cat "/tmp/server-$suite.log"; exit 1
             fi
             python3 "scripts/e2e-$suite.py" || { echo "套件失敗,伺服器 log:"; tail -50 "/tmp/server-$suite.log"; exit 1; }
             # /bin/kill:sh(dash)內建 kill 吃不下負 pid;bash 可以,但外部 kill 兩者皆穩

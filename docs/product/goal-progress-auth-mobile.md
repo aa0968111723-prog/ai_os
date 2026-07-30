@@ -2,7 +2,7 @@
 
 > 狀態：活文件（docs-only 快照）  
 > 基準分支：`claude/healing-migration-ai-os-erewp2`  
-> 更新：2026-07-30（post MOB-03 / Fal Phase A / AUTH-03）
+> 更新：2026-07-30（post DESK-01 / MOB-04）
 
 本文件彙整近期已合入目標與下一步，避免「計畫仍寫 Planning、實作卻已上線」的落差。不取代各計畫正文。
 
@@ -15,8 +15,10 @@
 | **AUTH-03** | 單次上傳授權（`aidup_…` Bearer／桌面 handoff，與 cookie 解耦） | [#194](https://github.com/aa0968111723-prog/ai_os/pull/194) | migration `0013` upload grants + upload lineage meta |
 | **UX-M1** | 手機專案頁減負 Phase 1（≤820px 收合 + 留言 sheet） | [#191](https://github.com/aa0968111723-prog/ai_os/pull/191) | 計畫：[`mobile-project-page-declutter-plan.md`](./mobile-project-page-declutter-plan.md) → **Phase 1 Implemented** |
 | **MOB-03** | 工作台 S 斷點 2×2 tabs + 長任務離開文案 | [#196](https://github.com/aa0968111723-prog/ai_os/pull/196) | workbench 手機版配置與 leave-copy |
+| **MOB-04** | 斷點 overflow 驗收 + mobile baseline | [#198](https://github.com/aa0968111723-prog/ai_os/pull/198) | `scripts/e2e-ui/audit-breakpoints.mjs`、`docs/uiux-audit/mobile-baseline.md` |
+| **DESK-01** | AssetLibrary 外部軟體 CTA（`hasDesktopBridge` 閘門） | [#199](https://github.com/aa0968111723-prog/ai_os/pull/199) | 有 bridge → 開啟／資料夾；無 bridge → 下載 + 桌面版提示 |
 | **Scene prompt UI** | 分鏡每鏡獨立提示詞編輯（API + SceneList UI） | MVP [#187](https://github.com/aa0968111723-prog/ai_os/pull/187)、UI [#190](https://github.com/aa0968111723-prog/ai_os/pull/190) | 跟進 #187 的前端編輯體驗 |
-| **Fal Phase A** | `falBilling.ts` + `quota.falAccountBalance` + 管理頁卡片 + 個人 `quota.my` 展示強化 | [#195](https://github.com/aa0968111723-prog/ai_os/pull/195) | 計畫：[`fal-balance-and-personal-usage-plan.md`](./fal-balance-and-personal-usage-plan.md) → **Implemented Phase A**；default 上已有 `server/services/falBilling.ts` |
+| **Fal Phase A** | `falBilling.ts` + `quota.falAccountBalance` + 管理頁卡片 + 個人 `quota.my` 展示強化 | [#195](https://github.com/aa0968111723-prog/ai_os/pull/195) | 計畫：[`fal-balance-and-personal-usage-plan.md`](./fal-balance-and-personal-usage-plan.md) → **Implemented Phase A** |
 | **Fal plan doc** | Fal 餘額 + 個人用量展示計畫（僅文件） | [#185](https://github.com/aa0968111723-prog/ai_os/pull/185) | 計畫正文；狀態已與 Phase A 實作對齊 |
 | **Mobile plan doc** | 手機減負計畫（僅文件） | [#186](https://github.com/aa0968111723-prog/ai_os/pull/186) | 已由 UX-M1 實作 |
 
@@ -37,23 +39,21 @@
 |------|------|------|------|
 | **Fal Phase B** | 部署 `FAL_ADMIN_KEY`、對帳真實 balance | **僅營運**（程式已合入） | 部署 Admin Key 後對照 fal dashboard 驗收；無需 runtime PR |
 | **UX-M2 / UX-M3** | 手機三 tab、工作台內再減負 | 可選、未開 | 僅在 Phase 1 / MOB-03 後仍嫌擠時啟動 |
-| **DESK-01** | 資產 CTA（桌面資產入口／行動呼籲） | **下一步** | 獨立 feat PR；勿與 docs 混進 |
-| **MOB-04** | 手機／工作台相關 e2e 覆蓋 | **下一步（可能仍 pending）** | 補 Playwright／e2e-ui 回歸；可與 DESK-01 分 PR |
 
 ## 3. 開源 PR 分流（非 dependabot · base = default）
 
 | PR | 標題 | mergeable | CI（歷史） | 是否仍相關 | 建議 |
 |----|------|-----------|------------|------------|------|
-| **#107** | docs: 核心缺陷審查報告收斂狀態 | **MERGEABLE / CLEAN** | check + e2e 綠 | 是（純文件、小 diff） | 可審後合；與 default 無衝突 |
-| **#66** | 通訊錄協作：私訊／群組／專案討論 | **CONFLICTING / DIRTY** | 當下 check+e2e 綠；Vercel rate-limit 失敗 | **部分**——default 已有 1:1 `dm`（#81 等）；本 PR 是較大的 conversations 模型（+1137） | **勿強合**；需 rebase 並對齊既有 `dm`／避免雙軌訊息中心 |
-| **#3**（draft） | fix(options): 併發首讀 seed 防重複 | **CONFLICTING / DIRTY** | 舊 commit 綠 | **否——已由 default 超集取代** | default `optionsStore.ensureGroupOptions` 已有 atomic claim + `onConflictDoNothing`；建議 **close as superseded** |
+| **#66** | 通訊錄協作：私訊／群組／專案討論 | **CONFLICTING** | 歷史綠 | **部分**——default 已有 1:1 `dm` | **勿強合**；需 rebase 並對齊既有 `dm` |
+| **#107** | docs: 核心缺陷審查報告收斂狀態 | **已合** [#107](https://github.com/aa0968111723-prog/ai_os/pull/107) | — | — | — |
+| **#3**（draft） | fix(options): 併發首讀 seed 防重複 | **已關閉 superseded** | — | 否 | default `optionsStore.ensureGroupOptions` 已超集 |
 
 原則：**不**強合大型過期 PR；衝突或 draft 先 triage／rebase，CI 綠才考慮。
 
-## 4. 本 PR 變更範圍
+## 4. 本快照變更範圍
 
-- 刷新本進度快照：AUTH-03、Fal Phase A、MOB-03 → **已完成**
-- §2 下一步改為 Fal Phase B（ops）、UX-M2/M3（可選）、DESK-01、MOB-04
-- 確認 `fal-balance-and-personal-usage-plan.md` 狀態已是 Implemented Phase A（無矛盾則不動）
+- DESK-01 / MOB-04 → **已完成**
+- §2 下一步僅留 Fal Phase B（ops）與可選 UX-M2/M3
+- 開源 PR 表對齊 #107 已合、#3 已關
 
-**不含** runtime 行為變更。
+**不含** runtime 行為變更（runtime 就緒判定修復見獨立 fix PR）。
