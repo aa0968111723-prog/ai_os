@@ -5,20 +5,20 @@
   "observations": {
     "stylesCssLines": 3681,
     "tsxFiles": 96,
-    "filesUsingPrimitives": 11
+    "filesUsingPrimitives": 12
   },
   "totals": {
-    "total": 852,
+    "total": 735,
     "perClass": {
       "empty-state": 21,
-      "hint": 381,
+      "hint": 281,
       "skeleton": 68,
       "badge": 18,
-      "btn-ghost": 51,
-      "btn-sm": 109,
+      "btn-ghost": 47,
+      "btn-sm": 105,
       "card": 88,
-      "chip": 71,
-      "pill": 34,
+      "chip": 66,
+      "pill": 30,
       "btn-tonal": 6,
       "btn": 5
     }
@@ -293,15 +293,15 @@
       "btn-ghost": 1
     },
     "client/src/pages/AdminPage.tsx": {
-      "hint": 114,
+      "hint": 14,
       "skeleton": 22,
-      "pill": 6,
-      "btn-ghost": 6,
-      "btn-sm": 5,
-      "chip": 8,
+      "chip": 3,
       "card": 12,
+      "pill": 2,
       "btn": 1,
-      "empty-state": 2
+      "btn-ghost": 2,
+      "empty-state": 2,
+      "btn-sm": 1
     },
     "client/src/pages/ChatPage.tsx": {
       "card": 3,
