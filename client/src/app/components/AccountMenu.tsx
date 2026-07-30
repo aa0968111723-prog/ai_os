@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { Icon } from "../../components/Icon";
+import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
 import type { MeWithCapabilities } from "../../capabilities";
 import { accountMenuItems, filterNavItems } from "../navigation/navigationItems";
@@ -84,6 +85,7 @@ export function AccountMenu({
   const workItems = filterNavItems(accountMenuItems.filter((i) => i.section === "work"), filterCtx);
   const manageItems = filterNavItems(accountMenuItems.filter((i) => i.section === "manage"), filterCtx);
   const accountLinkItems = filterNavItems(accountMenuItems.filter((i) => i.section === "account"), filterCtx);
+  const desktop = hasDesktopBridge();
 
   return (
     <div className="menu-wrap account-menu" ref={wrap}>
@@ -105,6 +107,11 @@ export function AccountMenu({
           ))}
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">工作</div>
+          {desktop && (
+            <Link href="/desktop" className="menu-item" role="menuitem" onClick={close}>
+              <Icon name="Monitor" size={15} />桌面剪輯連接
+            </Link>
+          )}
           {workItems.map((item) => (
             <Link key={item.key} href={item.href} className="menu-item" role="menuitem" onClick={close}>
               {item.icon && <Icon name={item.icon} size={15} />}{item.label}
