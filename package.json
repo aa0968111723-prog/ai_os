@@ -10,6 +10,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "check:boundaries": "node scripts/check-import-boundaries.mjs",
+    "check:ui-primitives": "node scripts/check-ui-primitives.mjs",
+    "report:ui-primitives": "node scripts/check-ui-primitives.mjs --report",
     "db:generate": "drizzle-kit generate",
     "db:check": "tsx scripts/db/check.ts",
     "db:migrate": "tsx scripts/db/migrate.ts",
