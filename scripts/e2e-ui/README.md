@@ -9,6 +9,7 @@
 | `verify-deep.mjs` | 世界觀進階編輯、導演存分鏡、勾選持久化、逐格模型、彈窗注入 |
 | `verify-agent.mjs` | AI 代理全生命週期（規劃→核准→背景執行→放棄） |
 | `audit-routes.mjs` | 全路由 × 360／390／768／1280／1440 基線；確認登入、輸出 manifest，任一失敗即非 0 |
+| `audit-breakpoints.mjs` | **MOB-04**：關鍵頁 × 同上 viewport 水平溢出斷言；可選登入 + `/p/:id`；fail-closed |
 
 ## 安裝與啟動
 
@@ -46,5 +47,22 @@ node scripts/e2e-ui/audit-routes.mjs
 - `audit-manifest.json`：角色、帳號、實際 URL、viewport、標題、成功／失敗
 
 若未提供 `TEST_PROJECT_ID` 或 `TEST_PEER_ID`，腳本會明確警告，不能把核心專案頁或一對一私訊宣稱為已驗收。
+
+## 斷點水平溢出（MOB-04）
+
+`audit-breakpoints.mjs` 比全路由 audit 輕：固定 viewport 集合，對 `/`（與可選 `/p/:id`）斷言無水平溢出。設了 `TEST_PROJECT_ID` 卻缺 `TEST_EMAIL`／`TEST_PW` 時 **fail-closed**（非 0）。詳見 [`docs/uiux-audit/mobile-baseline.md`](../../docs/uiux-audit/mobile-baseline.md)。
+
+```bash
+# 僅公開 /
+TARGET_URL=http://127.0.0.1:3000 node scripts/e2e-ui/audit-breakpoints.mjs
+
+# 含工作台
+TARGET_URL=http://127.0.0.1:3000 \
+TEST_EMAIL='…' TEST_PW='…' TEST_PROJECT_ID='…' \
+node scripts/e2e-ui/audit-breakpoints.mjs
+
+# 只要 assert
+SKIP_SCREENSHOTS=1 TARGET_URL=http://127.0.0.1:3000 node scripts/e2e-ui/audit-breakpoints.mjs
+```
 
 正式站測試帳號請使用專用低權限帳號；不要把密碼、Token 或真實使用者資料提交到 Git。
