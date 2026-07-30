@@ -190,6 +190,8 @@ export function ProjectAssistant({
       projectId: requestProjectId,
       message,
       nonce,
+      // 使用者在代理卡選的模型檔位；預設 nim＝免費，選 fal 檔位平台才付費
+      mode: defaultPlannerMode,
       signal,
       handlers: {
         onStep: (event) => {
@@ -246,7 +248,7 @@ export function ProjectAssistant({
     if (!handled && !ctrl.signal.aborted) {
       setFallbackPending(true);
       ask.mutate(
-        { projectId: requestProjectId, message: m, nonce },
+        { projectId: requestProjectId, message: m, nonce, mode: defaultPlannerMode },
         {
           onSuccess: (result) => {
             if (!requestIsCurrent(requestProjectId, epoch)) return;

@@ -66,6 +66,7 @@ import {
 import { readProcessRole, shouldRunWorkers } from "./services/processRole";
 import { httpSurfaceForRole } from "./bootstrap/httpSurface";
 import { evaluateRunnerReadiness } from "./bootstrap/runnerReadiness";
+import { agentPlannerModeSchema } from "../shared/agentPlanner";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -1247,6 +1248,9 @@ app.post("/api/assistant/ask", async (req, res) => {
   const projectId = String(req.body?.projectId ?? "");
   const message = String(req.body?.message ?? "").trim();
   const nonce = typeof req.body?.nonce === "string" ? req.body.nonce.slice(0, 64) : undefined;
+  // 模型檔位：非法值一律忽略而非報錯——寧可用免費的 NIM 回答，也不要因為偏好壞掉就不給答案。
+  const parsedMode = agentPlannerModeSchema.safeParse(req.body?.mode);
+  const mode = parsedMode.success ? parsedMode.data : undefined;
   if (!UUID_RE.test(projectId) || !message || message.length > 1000) {
     return res.status(400).json({ error: "參數不正確（需 projectId 與 1–1000 字的問題）" });
   }
@@ -1276,7 +1280,7 @@ app.post("/api/assistant/ask", async (req, res) => {
   try {
     const { runAssistantAsk } = await import("./routers/assistant");
     const result = await runAssistantAsk(
-      { projectId, message, auth, signal: clientAbort.signal, dedupeKey: nonce },
+      { projectId, message, auth, signal: clientAbort.signal, dedupeKey: nonce, mode },
       (e) => sse("step", e),
     );
     sse("done", result);
