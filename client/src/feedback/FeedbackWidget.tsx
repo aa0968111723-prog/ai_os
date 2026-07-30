@@ -141,19 +141,13 @@ export function FeedbackWidget() {
       {mode !== "picking" && (
         <button
           data-fb="回饋按鈕"
-          className="primary"
+          className="primary fb-fab-btn"
           aria-label="開啟回饋"
           aria-expanded={mode !== "closed"}
           onClick={() => (mode === "closed" ? setMode("menu") : close())}
-          style={{
-            float: "right",
-            borderRadius: 999,
-            padding: "11px 20px",
-            fontSize: 15,
-            boxShadow: "var(--e3)",
-          }}
         >
-          <Icon name="MessageCircle" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />回饋
+          <Icon name="MessageCircle" size={15} className="fb-fab-icon" />
+          <span className="fb-fab-label">回饋</span>
         </button>
       )}
     </div>
@@ -303,11 +297,11 @@ function ReportForm({
 
   return (
     <div
-      className="card"
+      className="card fb-report-form"
       role="dialog"
       aria-label="填寫回饋"
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
-      style={{ width: 320, maxWidth: "92vw", marginBottom: 12, padding: 16, maxHeight: "78vh", overflowY: "auto" }}
+      style={{ width: 320, maxWidth: "92vw", marginBottom: 12, padding: 16, overflowY: "auto" }}
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
         <strong style={{ fontSize: 15 }}>填寫回饋</strong>
