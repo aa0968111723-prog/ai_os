@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Badge, Button, Card, Chip, DensityProvider, EmptyState, Hint, Pill, Skeleton, cx } from ".";
+import { Badge, Button, Card, Chip, DensityProvider, EmptyState, Hint, Meta, Pill, Skeleton, cx } from ".";
 
 /**
  * 這批測試的重點不是「元件會渲染」，而是 **class 輸出與遷移前逐字相同**。
@@ -231,6 +231,42 @@ describe("Hint — 新手／專家分層", () => {
     const toggle = screen.getByRole("button", { name: "顯示說明" });
     await userEvent.click(toggle);
     expect(toggle.getAttribute("aria-controls")).toBe(screen.getByText("說明文字").id);
+  });
+});
+
+describe("Meta — 內容 vs 說明的分界", () => {
+  it("視覺輸出與 hint 完全相同（遷移零變化）", () => {
+    const { container } = render(<Meta>步驟 3/7</Meta>);
+    const el = container.firstElementChild!;
+    expect(el.tagName).toBe("SPAN");
+    expect(el.getAttribute("class")).toBe("hint");
+  });
+
+  it("精簡模式下**不會**被收起 —— 藏內容會讓人以為資料不見了", () => {
+    render(
+      <DensityProvider value="concise">
+        <Meta>約 12 分</Meta>
+        <Hint>這裡解釋怎麼用</Hint>
+      </DensityProvider>,
+    );
+    expect(screen.getByText("約 12 分")).toBeInTheDocument();
+    // 對照組：同一個密度下，說明被收成問號
+    expect(screen.queryByText("這裡解釋怎麼用")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "顯示說明" })).toBeInTheDocument();
+  });
+
+  it("支援清單與段落等內容常見的標籤", () => {
+    const { container } = render(
+      <Meta as="ul">
+        <li>成功條件一</li>
+      </Meta>,
+    );
+    expect(container.querySelector("ul")!.getAttribute("class")).toBe("hint");
+  });
+
+  it("呼叫端 className 疊加", () => {
+    const { container } = render(<Meta className="mono">US$0.0042</Meta>);
+    expect(container.firstElementChild!.getAttribute("class")).toBe("hint mono");
   });
 });
 

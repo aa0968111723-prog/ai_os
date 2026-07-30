@@ -10,6 +10,8 @@
  * 2. **不新增全域 CSS** —— 只消費 styles.css 既有的 token 與 class。
  * 3. **把規範變成型別** —— 例如 Pill 的狀態只能四選一、Chip 給 onClick 就自動補齊鍵盤無障礙。
  * 4. **每句說明都要宣告層級** —— Hint 的 `layer` 決定它在精簡模式下去留。
+ * 5. **說明與內容必須分開** —— `.hint` 在站內同時承擔「解釋」與「小灰字內容」兩種角色；
+ *    前者可收（Hint），後者不可收（Meta）。混在一起就無法安全減字。
  *
  * `scripts/check-ui-primitives.mjs` 會擋住繞過這一層的新裸 class。
  */
@@ -22,5 +24,6 @@ export { Card, type CardVariant } from "./Card";
 export { Chip } from "./Chip";
 export { EmptyState } from "./EmptyState";
 export { Hint } from "./Hint";
+export { Meta } from "./Meta";
 export { Pill, type PillStatus } from "./Pill";
 export { Skeleton } from "./Skeleton";

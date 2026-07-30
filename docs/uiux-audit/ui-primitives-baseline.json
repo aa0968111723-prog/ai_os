@@ -3,21 +3,21 @@
   "note": "單向棘輪基準線。任何檔案的裸 class 用量不得超過此處數字；新檔案視為 0。遷移完一批後執行 `node scripts/check-ui-primitives.mjs --write-baseline` 收緊。",
   "generatedFrom": "scripts/check-ui-primitives.mjs",
   "observations": {
-    "stylesCssLines": 3628,
-    "tsxFiles": 95,
+    "stylesCssLines": 3681,
+    "tsxFiles": 96,
     "filesUsingPrimitives": 4
   },
   "totals": {
-    "total": 1013,
+    "total": 963,
     "perClass": {
       "empty-state": 21,
-      "hint": 490,
+      "hint": 459,
       "skeleton": 68,
       "badge": 18,
       "btn-ghost": 55,
-      "btn-sm": 132,
-      "card": 93,
-      "chip": 91,
+      "btn-sm": 126,
+      "card": 92,
+      "chip": 79,
       "pill": 34,
       "btn-tonal": 6,
       "btn": 5
@@ -55,11 +55,9 @@
       "btn-sm": 1
     },
     "client/src/components/AgentCard.tsx": {
-      "hint": 31,
-      "btn-sm": 7,
-      "chip": 16,
-      "pill": 3,
-      "card": 1
+      "chip": 4,
+      "btn-sm": 1,
+      "pill": 3
     },
     "client/src/components/AiHub.tsx": {
       "card": 1,
