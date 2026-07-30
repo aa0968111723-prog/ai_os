@@ -29,47 +29,66 @@ export const MCP_UPLOAD_GRANT_TOOLS = [
   {
     name: "request_upload_grant",
     description:
-      "簽發單次素材上傳授權（aidup_…）。MCP 不傳二進位檔；回傳 token + uploadUrl 後，請使用者或腳本對 /api/upload 上傳，或到網頁上傳台選檔。",
+      "簽發單次素材上傳授權（前綴 aidup_）。MCP 不接受二進位檔案；請把回傳的 token 用於 POST /api/upload（Authorization: Bearer aidup_… + multipart file），或請使用者到網頁上傳台選檔。成功入庫後用 list_assets 確認。token 只回一次。",
     inputSchema: {
       type: "object",
       properties: {
-        projectId: { type: "string", description: "目標專案 ID（必須有編輯權）" },
-        ttlSeconds: {
-          type: "number",
-          description: `授權有效秒數（預設 ${3600}，上限見 UPLOAD_GRANT_MAX_TTL_SEC）`,
-        },
-        note: { type: "string", description: "可選備註（僅自己可見）" },
+        projectId: { type: "string" },
+        maxBytes: { type: "number", description: "此授權允許的最大位元組（不可超過系統上限；可省略＝系統上限）" },
+        ttlSeconds: { type: "number", description: "有效秒數（預設 3600＝1 小時；下限 60、上限 7 天）" },
+        sourceAssetId: { type: "string", description: "可選：來源素材 id（寫入 lineage）" },
+        purpose: { type: "string", description: "可選：用途備註（僅審計，不影響上傳）", maxLength: 120 },
       },
       required: ["projectId"],
+      additionalProperties: false,
     },
   },
   {
     name: "get_upload_grant_status",
-    description: "查詢你簽發的上傳授權是否仍有效／已用／過期（不回 token 原文）。",
+    description: "查詢你簽發的上傳授權狀態（pending／used／expired／revoked）。不回 token 原文。",
     inputSchema: {
       type: "object",
-      properties: {
-        grantId: { type: "string", description: "request_upload_grant 回傳的 grantId" },
-      },
+      properties: { grantId: { type: "string" } },
       required: ["grantId"],
+      additionalProperties: false,
     },
   },
 ] as const;
 
+export async function handleGetUploadGrantStatus(
+  auth: AuthState,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const grantId = String(args.grantId ?? "");
+  if (!looksLikeUuid(grantId)) throw new TRPCError({ code: "BAD_REQUEST", message: "grantId 無效" });
+  const [row] = await db.select().from(schema.uploadGrants).where(eq(schema.uploadGrants.id, grantId));
+  if (!row || row.userId !== auth.user.id) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "找不到這筆上傳授權（或不屬於你）" });
+  }
+  requireGroup(auth, row.groupId);
+  const now = Date.now();
+  let status: "pending" | "used" | "expired" | "revoked" = "pending";
+  if (row.revokedAt) status = "revoked";
+  else if (row.usedAt) status = "used";
+  else if (row.expiresAt.getTime() <= now) status = "expired";
+  return {
+    grantId: row.id,
+    projectId: row.projectId,
+    status,
+    maxBytes: row.maxBytes,
+    expiresAt: row.expiresAt,
+    usedAt: row.usedAt,
+    revokedAt: row.revokedAt,
+  };
+}
+
 export async function handleRequestUploadGrant(
   auth: AuthState,
-  project: { id: string; groupId: string; status: string },
+  project: { id: string; groupId: string },
   args: Record<string, unknown>,
-) {
-  const projectId = String(args.projectId ?? project.id);
-  if (projectId !== project.id) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "projectId 必須與目前上下文一致" });
-  }
+): Promise<Record<string, unknown>> {
+  await assertProjectEditable(auth, project);
 
-  // ACL + 封存已由呼叫端 assertProjectEditable / archivedWriteReason 處理
-  await assertProjectEditable(auth, projectId);
-
-  // pending 上限
   const pending = await db
     .select({ id: schema.uploadGrants.id })
     .from(schema.uploadGrants)
@@ -77,75 +96,76 @@ export async function handleRequestUploadGrant(
       and(
         eq(schema.uploadGrants.userId, auth.user.id),
         isNull(schema.uploadGrants.usedAt),
+        isNull(schema.uploadGrants.revokedAt),
         gt(schema.uploadGrants.expiresAt, new Date()),
       ),
     );
   if (pending.length >= MCP_UPLOAD_GRANT_MAX_PENDING) {
     throw new TRPCError({
       code: "TOO_MANY_REQUESTS",
-      message: `你同時有 ${pending.length} 個未使用的上傳授權（上限 ${MCP_UPLOAD_GRANT_MAX_PENDING}）。請先用掉或等過期再簽。`,
+      message: `未使用的上傳授權已達上限（${MCP_UPLOAD_GRANT_MAX_PENDING} 筆）——請先用掉或等過期後再簽`,
     });
   }
 
-  let ttl = MCP_UPLOAD_GRANT_DEFAULT_TTL_SEC;
-  if (typeof args.ttlSeconds === "number" && Number.isFinite(args.ttlSeconds)) {
-    ttl = Math.min(Math.max(60, Math.floor(args.ttlSeconds)), UPLOAD_GRANT_MAX_TTL_SEC);
+  let sourceAssetId: string | null = null;
+  if (args.sourceAssetId != null && String(args.sourceAssetId).trim()) {
+    const sid = String(args.sourceAssetId).trim();
+    if (!looksLikeUuid(sid)) throw new TRPCError({ code: "BAD_REQUEST", message: "來源素材 id 無效" });
+    const [src] = await db.select().from(schema.assets).where(eq(schema.assets.id, sid));
+    if (!src || src.projectId !== project.id) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "來源素材不在此專案" });
+    }
+    sourceAssetId = sid;
   }
 
-  const note = typeof args.note === "string" ? args.note.slice(0, 200) : undefined;
+  let maxBytes = MAX_FILE_BYTES;
+  if (args.maxBytes != null && args.maxBytes !== "") {
+    const n = Number(args.maxBytes);
+    if (!Number.isFinite(n) || n < 1) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "maxBytes 無效" });
+    }
+    maxBytes = Math.min(Math.floor(n), MAX_FILE_BYTES);
+  }
 
-  const { token, grant } = await createUploadGrant({
+  let ttlSeconds = MCP_UPLOAD_GRANT_DEFAULT_TTL_SEC;
+  if (args.ttlSeconds != null && args.ttlSeconds !== "") {
+    const t = Number(args.ttlSeconds);
+    if (!Number.isFinite(t)) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "ttlSeconds 無效" });
+    }
+    ttlSeconds = Math.min(UPLOAD_GRANT_MAX_TTL_SEC, Math.max(60, Math.floor(t)));
+  }
+
+  const grant = await createUploadGrant({
     userId: auth.user.id,
-    projectId,
-    ttlSeconds: ttl,
-    note,
-    source: "mcp",
+    projectId: project.id,
+    groupId: project.groupId,
+    sourceAssetId,
+    maxBytes,
+    ttlSeconds,
   });
 
+  console.log(
+    `[audit] mcp.request_upload_grant：user=${auth.user.id} project=${project.id} grant=${grant.id}`,
+  );
+
   const base = publicAppBase();
-  const uploadUrl = `${base}/api/upload`;
   return {
     grantId: grant.id,
-    token, // 僅此一次回傳
-    uploadUrl,
-    expiresAt: grant.expiresAt.toISOString(),
-    maxBytes: MAX_FILE_BYTES,
-    instructions: [
-      "1. 用 Authorization: Bearer <token> 或 form field grantToken 呼叫 POST /api/upload",
-      "2. 或把 token 貼到網頁「上傳台」選檔",
-      "3. 成功後可用 get_upload_grant_status 確認 status=used",
-      "4. token 為一次性；過期或用過即失效",
-    ],
-  };
-}
-
-export async function handleGetUploadGrantStatus(auth: AuthState, args: Record<string, unknown>) {
-  const grantId = String(args.grantId ?? "");
-  if (!looksLikeUuid(grantId)) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "grantId 必須是有效 UUID" });
-  }
-
-  const [row] = await db
-    .select()
-    .from(schema.uploadGrants)
-    .where(and(eq(schema.uploadGrants.id, grantId), eq(schema.uploadGrants.userId, auth.user.id)))
-    .limit(1);
-
-  if (!row) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "找不到此上傳授權（或不屬於你）" });
-  }
-
-  const now = new Date();
-  let status: "pending" | "used" | "expired" = "pending";
-  if (row.usedAt) status = "used";
-  else if (row.expiresAt <= now) status = "expired";
-
-  return {
-    grantId: row.id,
-    projectId: row.projectId,
-    status,
-    expiresAt: row.expiresAt.toISOString(),
-    usedAt: row.usedAt?.toISOString() ?? null,
-    note: row.note ?? null,
+    token: grant.token,
+    expiresAt: grant.expiresAt,
+    maxBytes: grant.maxBytes,
+    projectId: grant.projectId,
+    uploadUrl: `${base}/api/upload`,
+    http: {
+      method: "POST",
+      headers: { Authorization: `Bearer ${grant.token}` },
+      multipart: {
+        file: "<binary>",
+      },
+    },
+    webHandoffPath: "/mcp-upload",
+    instructions:
+      "MCP 無法直接接收檔案。請用回傳的 token 對 uploadUrl 做 multipart 上傳（Authorization: Bearer aidup_…），或請使用者到網頁「MCP 上傳台」貼上 token 並用檔案選擇器選檔。成功後呼叫 list_assets 確認。token 僅此一次。",
   };
 }
