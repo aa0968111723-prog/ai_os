@@ -84,12 +84,12 @@ describe("envKeyMatches：固定時間比對", () => {
 
 describe("scopeDeniedReason：唯讀金鑰守衛", () => {
   it("唯讀金鑰 + 寫入類工具 → 擋（含 add_database_row）", () => {
-    for (const w of ["submit_generation", "post_message", "add_database_row", "add_database_rows", "update_database_row", "plan_agent", "approve_agent", "add_schedule_item"]) {
+    for (const w of ["submit_generation", "post_message", "request_upload_grant", "add_database_row", "add_database_rows", "update_database_row", "plan_agent", "approve_agent", "add_schedule_item"]) {
       expect(scopeDeniedReason(w, { readOnly: true })).toContain("唯讀");
     }
   });
   it("唯讀金鑰 + 讀取類工具 → 放行（null）", () => {
-    for (const r of ["whoami", "list_projects", "get_project_context", "find_model", "list_generations", "get_generation", "list_assets", "get_project_status", "list_agent_runs", "get_agent_run", "list_schedule", "list_databases", "query_database"]) {
+    for (const r of ["whoami", "list_projects", "get_project_context", "find_model", "list_generations", "get_generation", "list_assets", "get_upload_grant_status", "get_project_status", "list_agent_runs", "get_agent_run", "list_schedule", "list_databases", "query_database"]) {
       expect(scopeDeniedReason(r, { readOnly: true })).toBeNull();
     }
   });
@@ -121,6 +121,7 @@ describe("archivedWriteReason：封存專案守衛", () => {
   it("封存專案 + 寫入類工具 → 擋（回人話原因）", () => {
     expect(archivedWriteReason("submit_generation", "archived")).toContain("已封存");
     expect(archivedWriteReason("post_message", "archived")).toContain("已封存");
+    expect(archivedWriteReason("request_upload_grant", "archived")).toContain("已封存");
   });
   it("封存專案 + 讀取類工具 → 放行（null）", () => {
     expect(archivedWriteReason("get_project_context", "archived")).toBeNull();
