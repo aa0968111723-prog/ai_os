@@ -6,8 +6,12 @@ import {
   type PlanReference,
 } from "../../shared/plan";
 import type { AgentStep } from "./agentRunner";
-import { AI_GENERATION_CATEGORIES, selectAiGenerationModel } from "./aiModelPolicy";
+import {
+  modelIsOperationallyReady,
+  selectAiGenerationModel,
+} from "./aiModelPolicy";
 import { resolveModel } from "./modelResolve";
+import type { ModelEntry } from "../../shared/models";
 
 const MAX_DRAFT_STEPS = 30;
 const TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
@@ -65,6 +69,11 @@ export const completePlanDraftSchema = z.object({
       prompt: z.string().trim().min(1).max(8_000),
       sceneNo: z.number().int().positive().optional(),
       modelId: z.string().trim().max(200).optional(),
+      // CA-01：代號（char1／preset1／asset1）— resolve 時轉 UUID，禁止把未解析字串寫入 step
+      characterRefs: z.array(z.string().trim().min(1).max(40)).max(6).optional(),
+      scenePresetRefs: z.array(z.string().trim().min(1).max(40)).max(4).optional(),
+      sourceAssetRef: z.string().trim().min(1).max(40).optional(),
+      sourceUrl: z.string().trim().max(2_000).optional(),
     }),
     stepBase.extend({
       kind: z.literal("voiceover"),
@@ -148,6 +157,12 @@ export interface PlannerAliases {
   schedules: PlannerAlias[];
   tasks: PlannerAlias[];
   databases: PlannerDatabaseAlias[];
+  /** CA-01：角色定裝（char1…） */
+  characters: PlannerAlias[];
+  /** CA-01：場景設定卡（preset1…） */
+  scenePresets: PlannerAlias[];
+  /** CA-01：素材庫（asset1…）— 供 needs 模型來源 */
+  assets: PlannerAlias[];
 }
 
 export interface ResolvedAgentPlan {
@@ -218,6 +233,9 @@ function referenceFor(
     ["schedule", aliases.schedules],
     ["task", aliases.tasks],
     ["database", aliases.databases],
+    ["character", aliases.characters],
+    ["scene_preset", aliases.scenePresets],
+    ["asset", aliases.assets],
   ];
   for (const [type, rows] of groups) {
     const row = rows.find((item) => item.ref === ref);
@@ -231,17 +249,67 @@ function actorFor(kind: CompletePlanDraft["steps"][number]["kind"]): "ai" | "hum
   return "ai";
 }
 
-function safeModel(modelId: string | undefined) {
-  const requested = modelId ? resolveModel(modelId) : undefined;
-  const category = requested && AI_GENERATION_CATEGORIES.has(requested.category)
-    ? requested.category
-    : "text-to-image";
-  return selectAiGenerationModel({
-    category,
-    preferredId: modelId,
-    preference: "balanced",
-    requireVerified: true,
-  }).model;
+/**
+ * CA-01：`resolveGenerateModel`（取代舊 safeModel 靜默降級）。
+ * - 未指定 modelId → 預設已驗證文生圖
+ * - 無 needs → 保留 requested（須 operationally ready）
+ * - 有 needs 且已有來源 → 保留 needs 模型（不經 AI_GENERATION_CATEGORIES 濾掉 i2i／i2v）
+ * - 有 needs 但缺來源 → 不靜默降級（回 needs_source）
+ * - 明確指定無效／未就緒 id → invalid（不塞 DEFAULT）
+ */
+function resolveGenerateModel(
+  modelId: string | undefined,
+  hasSource: boolean,
+): { model: ModelEntry | null; issue?: "invalid" | "needs_source" | "none_available" } {
+  const preferred = modelId?.trim();
+  if (!preferred) {
+    try {
+      return {
+        model: selectAiGenerationModel({
+          category: "text-to-image",
+          preference: "balanced",
+          requireVerified: true,
+        }).model,
+      };
+    } catch {
+      return { model: null, issue: "none_available" };
+    }
+  }
+
+  const requested = resolveModel(preferred);
+  if (!requested || !modelIsOperationallyReady(requested)) {
+    return { model: null, issue: "invalid" };
+  }
+  if (requested.needs) {
+    if (!hasSource) return { model: null, issue: "needs_source" };
+    return { model: requested };
+  }
+  return { model: requested };
+}
+
+/** 解析 char／preset 等多代號；未知 → missingInformation，不得寫入未解析字串 */
+function resolveAliasIdList(
+  refs: string[] | undefined,
+  map: Map<string, PlannerAlias>,
+  missingInformation: string[],
+  stepTitle: string,
+  kindLabel: string,
+  sourceRefs: PlanReference[],
+  refType: string,
+): string[] | undefined {
+  if (!refs?.length) return undefined;
+  const ids: string[] = [];
+  for (const ref of refs) {
+    const row = map.get(ref);
+    if (row) {
+      ids.push(row.id);
+      sourceRefs.push({ type: refType, id: row.id, label: row.label });
+    } else {
+      missingInformation.push(`步驟「${stepTitle}」找不到${kindLabel}代號「${ref}」`);
+    }
+  }
+  const uniqueIds = unique(ids);
+  return uniqueIds.length ? uniqueIds : undefined;
 }
 
 export function resolveCompletePlanDraft(
@@ -254,6 +322,9 @@ export function resolveCompletePlanDraft(
   const schedules = aliasMap(aliases.schedules);
   const tasks = aliasMap(aliases.tasks);
   const databases = aliasMap(aliases.databases);
+  const characters = aliasMap(aliases.characters);
+  const scenePresets = aliasMap(aliases.scenePresets);
+  const assets = aliasMap(aliases.assets);
   const rawIds = new Set(draft.steps.map((step) => step.id));
   const retainedIds = new Set<string>();
   const steps: AgentStep[] = [];
@@ -299,9 +370,56 @@ export function resolveCompletePlanDraft(
         points: 0,
       });
     } else if (source.kind === "generate") {
-      const model = safeModel(source.modelId);
+      const characterIds = resolveAliasIdList(
+        source.characterRefs,
+        characters,
+        missingInformation,
+        source.title,
+        "角色定裝",
+        sourceRefs,
+        "character",
+      );
+      const scenePresetIds = resolveAliasIdList(
+        source.scenePresetRefs,
+        scenePresets,
+        missingInformation,
+        source.title,
+        "場景設定",
+        sourceRefs,
+        "scene_preset",
+      );
+      let sourceAssetId: string | undefined;
+      if (source.sourceAssetRef) {
+        const asset = assets.get(source.sourceAssetRef);
+        if (asset) {
+          sourceAssetId = asset.id;
+          sourceRefs.push({ type: "asset", id: asset.id, label: asset.label });
+        } else {
+          missingInformation.push(`步驟「${source.title}」找不到素材代號「${source.sourceAssetRef}」`);
+        }
+      }
+      const rawSourceUrl = source.sourceUrl?.trim();
+      let sourceUrl: string | undefined;
+      if (rawSourceUrl && !sourceAssetId) {
+        // 規劃端拒非 https（執行期 generationCore 另有 SSRF／needs 守門）
+        if (!/^https:\/\//i.test(rawSourceUrl)) {
+          missingInformation.push(`步驟「${source.title}」的 sourceUrl 必須是 https:// 網址`);
+        } else {
+          sourceUrl = rawSourceUrl;
+        }
+      }
+      const hasSource = !!(sourceAssetId || sourceUrl);
+      const { model, issue } = resolveGenerateModel(source.modelId, hasSource);
       if (!model) {
-        missingInformation.push(`步驟「${source.title}」沒有可用的生成模型`);
+        if (issue === "needs_source") {
+          missingInformation.push(
+            `步驟「${source.title}」模型需要來源素材，請指定 sourceAssetRef 或改用無 needs 模型`,
+          );
+        } else if (issue === "invalid") {
+          missingInformation.push(`步驟「${source.title}」指定的模型無效或尚未通過正式生成驗證`);
+        } else {
+          missingInformation.push(`步驟「${source.title}」沒有可用的生成模型`);
+        }
         continue;
       }
       steps.push({
@@ -309,6 +427,10 @@ export function resolveCompletePlanDraft(
         modelId: model.id,
         prompt: source.prompt,
         sceneNo: source.sceneNo,
+        characterIds,
+        scenePresetIds,
+        sourceAssetId,
+        sourceUrl,
         points: model.points,
       });
     } else if (source.kind === "voiceover") {

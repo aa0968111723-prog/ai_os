@@ -109,6 +109,14 @@ export interface AgentStep {
   modelId?: string;
   /** generate 用：提示詞（世界觀注入由 generationCore 做） */
   prompt?: string;
+  /** CA-01：角色定裝卡 id（最多 6；規劃端已校驗歸屬） */
+  characterIds?: string[];
+  /** CA-01：場景設定卡 id（最多 4） */
+  scenePresetIds?: string[];
+  /** CA-01：素材庫來源（圖生圖／i2v 等 needs 模型） */
+  sourceAssetId?: string;
+  /** CA-01：外部來源網址（僅無 sourceAssetId 時；仍走 generationCore SSRF／needs） */
+  sourceUrl?: string;
   /** generate（可選）／voiceover／submit_approval 用：首次執行時依當下順序解析（1 起算） */
   sceneNo?: number;
   /** 執行期：首次解析 sceneNo 後立即保存；重播只准使用同一分鏡，避免排序變更後打到別格。 */
@@ -1275,9 +1283,14 @@ async function advanceRun(run: RunRow): Promise<void> {
     sceneRole = "narration";
   } else {
     // generate：模型已在規劃端過白名單，這裡再驗一次（防資料庫被手動改壞）
+    // CA-01：needs 模型在「有來源素材／網址」時可放行（對齊直接生成／工作流）
     const model = resolveModel(step.modelId ?? "");
-    if (!model || model.needs || !modelIsOperationallyReady(model)) {
-      return failRun(run, steps, idx, "計畫裡的模型無效、需要來源素材，或尚未通過正式生成驗證");
+    if (!model || !modelIsOperationallyReady(model)) {
+      return failRun(run, steps, idx, "計畫裡的模型無效或尚未通過正式生成驗證");
+    }
+    const hasSource = !!(step.sourceAssetId || step.sourceUrl?.trim());
+    if (model.needs && !hasSource) {
+      return failRun(run, steps, idx, `此模型需要來源素材（${model.sourceHint ?? model.needs}）——規劃時請指定 sourceAssetRef 或 sourceUrl`);
     }
     if (!step.prompt?.trim()) return failRun(run, steps, idx, "計畫裡的提示詞是空的");
     if (step.sceneNo) {
@@ -1322,6 +1335,11 @@ async function advanceRun(run: RunRow): Promise<void> {
       prompt,
       sceneId,
       sceneRole,
+      // CA-01：與 workflowRunner／直接生成對齊——定裝／場景／來源素材
+      characterIds: step.characterIds,
+      scenePresetIds: step.scenePresetIds,
+      sourceAssetId: step.sourceAssetId,
+      sourceUrl: step.sourceUrl,
       agentRunId: run.id, // 生成列回連本次代理執行——生成紀錄可回看「這筆是代理跑出來的」
       reasonPrefix: "AI 代理",
     });

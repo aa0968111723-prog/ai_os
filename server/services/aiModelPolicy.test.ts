@@ -69,4 +69,12 @@ describe("AI model policy", () => {
     expect(firstUnverified).toBeGreaterThan(lastVerified);
     expect(buildAiModelCheatsheet()).toContain("可正式使用");
   });
+
+  it("CA-01：cheatsheet 含 needs 模型並標註須 sourceAssetRef", () => {
+    const sheet = buildAiModelCheatsheet(24);
+    expect(sheet).toMatch(/需來源/);
+    expect(sheet).toMatch(/sourceAssetRef/);
+    // 至少出現一條 image-to-image 或 image-to-video 路徑（id 含 image-to- 或 edit）
+    expect(sheet).toMatch(/image-to-image|image-to-video|\/edit/);
+  });
 });

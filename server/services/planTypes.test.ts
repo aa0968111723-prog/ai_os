@@ -140,4 +140,50 @@ describe("complete plan schema", () => {
     });
     expect(parsed.milestones[0].dueAt).toBeUndefined();
   });
+
+  // ── CA-01：generate 步驟定裝／場景／來源欄位 ──
+
+  it("accepts generate step with characterIds / scenePresetIds / sourceAssetId / sourceUrl", () => {
+    const parsed = completePlanSchema.parse({
+      summary,
+      steps: [{
+        id: "gen",
+        kind: "generate",
+        title: "定裝圖生圖",
+        status: "pending",
+        actorType: "ai",
+        modelId: "fal-ai/flux/dev/image-to-image",
+        prompt: "暖色清晨",
+        characterIds: ["55555555-5555-4555-8555-555555555555"],
+        scenePresetIds: ["66666666-6666-4666-8666-666666666666"],
+        sourceAssetId: "77777777-7777-4777-8777-777777777777",
+        sourceUrl: "https://cdn.example.com/ref.png",
+      }],
+    });
+    const step = parsed.steps[0];
+    expect(step.characterIds).toEqual(["55555555-5555-4555-8555-555555555555"]);
+    expect(step.scenePresetIds).toEqual(["66666666-6666-4666-8666-666666666666"]);
+    expect(step.sourceAssetId).toBe("77777777-7777-4777-8777-777777777777");
+    expect(step.sourceUrl).toBe("https://cdn.example.com/ref.png");
+  });
+
+  it("still parses legacy generate step without CA-01 fields", () => {
+    const parsed = completePlanSchema.parse({
+      summary,
+      steps: [{
+        id: "legacy-gen",
+        kind: "generate",
+        title: "舊版生成步驟",
+        status: "pending",
+        actorType: "ai",
+        modelId: "fal-ai/fast-lightning-sdxl",
+        prompt: "城市微光主視覺",
+      }],
+    });
+    expect(parsed.steps[0].characterIds).toBeUndefined();
+    expect(parsed.steps[0].scenePresetIds).toBeUndefined();
+    expect(parsed.steps[0].sourceAssetId).toBeUndefined();
+    expect(parsed.steps[0].sourceUrl).toBeUndefined();
+    expect(parsed.steps[0].prompt).toBe("城市微光主視覺");
+  });
 });

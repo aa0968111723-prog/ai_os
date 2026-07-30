@@ -42,3 +42,21 @@ describe("agentCore source：各入口呼叫 assertUuid", () => {
     expect(calls.length).toBeGreaterThanOrEqual(7);
   });
 });
+
+describe("agentCore CA-01 planner context (source-lock)", () => {
+  const source = readFileSync(new URL("./agentCore.ts", import.meta.url), "utf8");
+
+  it("buildPlannerContext 載入 char/preset/asset 代號並寫入 generate 欄位表", () => {
+    expect(source).toContain("PlannerAliases");
+    expect(source).toContain("schema.characters");
+    expect(source).toContain("schema.scenePresets");
+    expect(source).toContain("schema.assets");
+    expect(source).toContain("<角色定裝代號>");
+    expect(source).toContain("<場景設定代號>");
+    expect(source).toContain("<素材庫代號>");
+    expect(source).toContain("characterRefs?");
+    expect(source).toContain("scenePresetRefs?");
+    expect(source).toContain("sourceAssetRef?");
+    expect(source).toContain("sourceUrl?");
+  });
+});

@@ -3,6 +3,7 @@
  * 純函式（不碰 db），是「世界觀注入」的單一真相來源，被生成台/工作流/代理/MCP 共用。
  * 分流錯了會回到「把合規句塞進圖像正向提示詞」的舊病灶——擴散模型可能把禁忌字畫成畫面文字。
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   effectivePromptParts,
@@ -86,5 +87,25 @@ describe("humanizeGenerationError：供應商人話", () => {
   it("已含來源圖提示的 422 不重複堆疊", () => {
     const raw = "fal result 422——常見原因：來源圖網址無法被生成服務抓取";
     expect(humanizeGenerationError(raw)).toBe(raw);
+  });
+});
+
+describe("generationCore CA-01 assertGenerationEntityIds (source-lock)", () => {
+  const source = readFileSync(new URL("./generationCore.ts", import.meta.url), "utf8");
+
+  it("exports assertGenerationEntityIds and invokes it inside submitGenerationCore", () => {
+    // KD-12 fail-closed：外鍵 UUID 必須屬本 projectId，否則拒絕寫入 generation 列
+    expect(source).toContain("export async function assertGenerationEntityIds");
+    expect(source).toContain("await assertGenerationEntityIds(project.id, {");
+    expect(source).toContain("characterIds: input.characterIds");
+    expect(source).toContain("scenePresetIds: input.scenePresetIds");
+    expect(source).toContain("sourceAssetId: input.sourceAssetId");
+    // 必須在 assertProjectAllows 之後、素材簽名／建列之前
+    const projectAllowsIdx = source.indexOf('assertProjectAllows(project, "generate")');
+    const assertEntityIdx = source.indexOf("await assertGenerationEntityIds(project.id");
+    const sourceAssetResolveIdx = source.indexOf("if (input.sourceAssetId)", assertEntityIdx);
+    expect(projectAllowsIdx).toBeGreaterThan(-1);
+    expect(assertEntityIdx).toBeGreaterThan(projectAllowsIdx);
+    expect(sourceAssetResolveIdx).toBeGreaterThan(assertEntityIdx);
   });
 });

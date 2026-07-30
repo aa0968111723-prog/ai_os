@@ -18,7 +18,14 @@ const aliases: PlannerAliases = {
     label: "成果資料庫",
     fields: [{ key: "title", label: "標題", type: "text" }],
   }],
+  // CA-01：角色／場景／素材代號
+  characters: [{ ref: "char1", id: "55555555-5555-4555-8555-555555555555", label: "安倢" }],
+  scenePresets: [{ ref: "preset1", id: "66666666-6666-4666-8666-666666666666", label: "暖色清晨" }],
+  assets: [{ ref: "asset1", id: "77777777-7777-4777-8777-777777777777", label: "分鏡首格" }],
 };
+
+/** 已驗證、needs:image 的圖生圖模型（CA-01 safeModel 雙閘門） */
+const NEEDS_IMAGE_MODEL = "fal-ai/flux/dev/image-to-image";
 
 function summary() {
   return {
@@ -215,5 +222,126 @@ describe("complete AI planning safety resolver", () => {
     expect(issues.length).toBeLessThanOrEqual(12);
     expect(issues.some((issue) => issue.startsWith("summary.goal:"))).toBe(true);
     expect(issues.some((issue) => issue.startsWith("steps:"))).toBe(true);
+  });
+
+  // ── CA-01：generate 代號解析＋safeModel 雙閘門 ──
+
+  it("resolves characterRefs / scenePresetRefs / sourceAssetRef to UUIDs and sourceRefs", () => {
+    const draft = completePlanDraftSchema.parse({
+      summary: summary(),
+      steps: [{
+        id: "gen",
+        kind: "generate",
+        title: "定裝＋場景圖生圖",
+        prompt: "暖色清晨的安倢站在窗邊",
+        modelId: NEEDS_IMAGE_MODEL,
+        characterRefs: ["char1"],
+        scenePresetRefs: ["preset1"],
+        sourceAssetRef: "asset1",
+      }],
+    });
+
+    const plan = resolveCompletePlanDraft(draft, aliases);
+    const step = plan.steps[0];
+
+    expect(plan.steps).toHaveLength(1);
+    expect(step.characterIds).toEqual([aliases.characters[0].id]);
+    expect(step.scenePresetIds).toEqual([aliases.scenePresets[0].id]);
+    expect(step.sourceAssetId).toBe(aliases.assets[0].id);
+    expect(step.modelId).toBe(NEEDS_IMAGE_MODEL);
+
+    const types = (step.sourceRefs ?? []).map((r) => r.type);
+    expect(types).toContain("character");
+    expect(types).toContain("scene_preset");
+    expect(types).toContain("asset");
+    expect(step.sourceRefs).toEqual(expect.arrayContaining([
+      { type: "character", id: aliases.characters[0].id, label: "安倢" },
+      { type: "scene_preset", id: aliases.scenePresets[0].id, label: "暖色清晨" },
+      { type: "asset", id: aliases.assets[0].id, label: "分鏡首格" },
+    ]));
+    expect(plan.summary.missingInformation).toEqual([]);
+  });
+
+  it("keeps a needs model when sourceAssetRef is present (no silent downgrade)", () => {
+    const draft = completePlanDraftSchema.parse({
+      summary: summary(),
+      steps: [{
+        id: "img2img",
+        kind: "generate",
+        title: "以首格重繪",
+        prompt: "把背景換成暖色清晨",
+        modelId: NEEDS_IMAGE_MODEL,
+        sourceAssetRef: "asset1",
+      }],
+    });
+
+    const plan = resolveCompletePlanDraft(draft, aliases);
+
+    expect(plan.steps).toHaveLength(1);
+    expect(plan.steps[0].modelId).toBe(NEEDS_IMAGE_MODEL);
+    expect(plan.steps[0].sourceAssetId).toBe(aliases.assets[0].id);
+    expect(plan.summary.missingInformation).toEqual([]);
+  });
+
+  it("drops a needs model without source and records sourceAssetRef in missingInformation", () => {
+    const draft = completePlanDraftSchema.parse({
+      summary: summary(),
+      steps: [{
+        id: "needs-no-src",
+        kind: "generate",
+        title: "缺來源的圖生圖",
+        prompt: "改背景",
+        modelId: NEEDS_IMAGE_MODEL,
+      }],
+    });
+
+    const plan = resolveCompletePlanDraft(draft, aliases);
+
+    expect(plan.steps.map((s) => s.id)).not.toContain("needs-no-src");
+    const missing = plan.summary.missingInformation.join(" ");
+    expect(missing).toMatch(/來源素材|sourceAssetRef/);
+  });
+
+  it("unknown characterRefs → missingInformation; step kept without that id when model is safe", () => {
+    const draft = completePlanDraftSchema.parse({
+      summary: summary(),
+      steps: [{
+        id: "partial-char",
+        kind: "generate",
+        title: "未知角色代號",
+        prompt: "一位路人在街角",
+        characterRefs: ["char99", "char1"],
+      }],
+    });
+
+    const plan = resolveCompletePlanDraft(draft, aliases);
+    const step = plan.steps.find((s) => s.id === "partial-char");
+
+    expect(step).toBeDefined();
+    // 已知 char1 保留；未知 char99 不寫入
+    expect(step!.characterIds).toEqual([aliases.characters[0].id]);
+    expect(plan.summary.missingInformation.some((m) => m.includes("char99"))).toBe(true);
+    expect(plan.summary.missingInformation.some((m) => m.includes("角色定裝"))).toBe(true);
+  });
+
+  it("invalid explicit modelId → missingInformation, no silent default to another model", () => {
+    const draft = completePlanDraftSchema.parse({
+      summary: summary(),
+      steps: [{
+        id: "bad-model",
+        kind: "generate",
+        title: "指定無效模型",
+        prompt: "測試無效 modelId",
+        modelId: "this-model-does-not-exist-anywhere",
+      }],
+    });
+
+    const plan = resolveCompletePlanDraft(draft, aliases);
+
+    expect(plan.steps.map((s) => s.id)).not.toContain("bad-model");
+    const missing = plan.summary.missingInformation.join(" ");
+    expect(missing).toMatch(/模型無效|尚未通過正式生成驗證/);
+    // 不得靜默塞 DEFAULT：步驟整筆 drop，而非換成其他 modelId
+    expect(plan.steps.every((s) => s.modelId !== "this-model-does-not-exist-anywhere")).toBe(true);
   });
 });
