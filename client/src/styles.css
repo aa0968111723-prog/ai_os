@@ -101,7 +101,29 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --topbar-pad-y: 12px;
-  --touch-min: 40px;
+  /* 觸控目標下限（UIUX-04）：全站計畫 §4 與 WCAG 2.5.5(AAA) 都要求 ≥44px。
+   * 此前 :root 是 40px，且所有套用它的規則都關在 @media (max-width: 820px) 內——
+   * 手機早就 44px，桌面卻完全沒有下限（按鈕實高約 38px）。現在提到 44 並讓規則全站生效。 */
+  --touch-min: 44px;
+}
+
+/* 觸控目標：不分裝置一律 ≥44px。放在 :root 之後、各元件規則之前，
+ * 讓元件自己的 padding 仍可加高，但不會低於下限。 */
+button,
+.btn,
+.menu-item,
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select {
+  min-height: var(--touch-min);
+}
+/* WCAG 2.5.8 明文豁免「位於句子或文字區塊中的行內目標」。站內常把次要動作寫進說明句裡
+ * （「載入失敗——再試一次」「目前篩選下沒有計畫——改看全部」），這些若吃 44px 下限，
+ * 12px 的行高會被撐成 44px，整段文字散開反而更難讀。行內情境還原自然高度。 */
+p > .btn-ghost,
+.hint > .btn-ghost,
+.error > .btn-ghost {
+  min-height: 0;
 }
 
 /* 寬螢幕：略放寬內容區，減少兩側空蕩與過度換行 */
@@ -489,7 +511,8 @@ button:focus-visible { border-radius: 999px; }
 
 /* ─── 平板／窄螢幕（≤820px） ─── */
 @media (max-width: 820px) {
-  :root { --app-pad-x: 14px; --topbar-pad-y: 8px; --touch-min: 44px; }
+  /* --touch-min 已在 :root 提到 44px 並全站生效，此處不再覆寫 */
+  :root { --app-pad-x: 14px; --topbar-pad-y: 8px; }
   .app {
     padding:
       0
@@ -1368,7 +1391,7 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  min-height: 40px; padding: 9px 18px; border-radius: 999px;
+  min-height: var(--touch-min); padding: 9px 18px; border-radius: 999px;
   border: 1px solid var(--border); background: var(--card); color: var(--fg);
   font-size: 14px; font-weight: 650; line-height: 1.4; text-decoration: none;
   transition: transform var(--dur-fast), background var(--dur-base), border-color var(--dur-base), box-shadow var(--dur-base);
@@ -2657,7 +2680,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 }
 .creation-skill-add {
   display: inline-flex; align-items: center; gap: 8px;
-  min-height: 40px; padding: 4px 12px 4px 4px;
+  min-height: var(--touch-min); padding: 4px 12px 4px 4px;
   border: 1px dashed var(--border-strong);
   border-radius: 999px;
   background: color-mix(in srgb, var(--card) 80%, var(--primary-tint));
@@ -2994,7 +3017,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 }
 .support-topic-nav a {
   min-width: 0;
-  min-height: 40px;
+  min-height: var(--touch-min);
   display: inline-flex;
   align-items: center;
   justify-content: center;
