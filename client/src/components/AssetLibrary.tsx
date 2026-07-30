@@ -404,6 +404,17 @@ export function AssetLibrary({
                         {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
                       </div>
+                      {/* AUTH-03 lineage：桌面編輯回傳的新素材可追溯來源 */}
+                      {(() => {
+                        const srcId = (a.meta as { sourceAssetId?: string } | null | undefined)?.sourceAssetId;
+                        if (!srcId) return null;
+                        const srcTitle = (allAssets ?? []).find((x) => x.id === srcId)?.title;
+                        return (
+                          <div className="hint" style={{ fontSize: 11 }} title={srcId}>
+                            由「{srcTitle ?? "原始素材"}」編輯而來
+                          </div>
+                        );
+                      })()}
 
                       {/* 文件「加入知識庫」的就地回饋：進行中轉圈／成功後短暫綠字（2.5 秒自動消失） */}
                       {toKnowledge.isPending && toKnowledge.variables?.assetId === a.id && (

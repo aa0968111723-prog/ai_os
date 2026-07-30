@@ -182,3 +182,31 @@ export const mcpTokens = pgTable("mcp_tokens", {
 }, (t) => ({
   userIdx: index("mcp_tokens_user_idx").on(t.userId),
 }));
+
+/**
+ * AUTH-03 上傳授權（單次、可撤銷、可 audit）：桌面 handoff／長時間上傳可與 session cookie 解耦。
+ * DB 只存 SHA-256（前綴 aidup_）；原文只在 createUploadGrant 回一次。成功寫入 asset 後 used_at 標記。
+ */
+export const uploadGrants = pgTable("upload_grants", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** SHA-256（非原文） */
+  tokenHash: text("token_hash").notNull().unique(),
+  userId: uuid("user_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  /** 可選：來源素材（lineage；上傳時可寫入 assets.meta.sourceAssetId） */
+  sourceAssetId: uuid("source_asset_id"),
+  /** 可選：桌面 handoff 識別（非 UUID 也可；上限由 service 截斷） */
+  handoffId: text("handoff_id"),
+  /** 此 grant 允許的最大位元組（通常＝全域上傳上限） */
+  maxBytes: integer("max_bytes").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  /** 成功入庫後標記；失敗不寫，允許重試 */
+  usedAt: timestamp("used_at"),
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("upload_grants_user_idx").on(t.userId),
+  expiresIdx: index("upload_grants_expires_idx").on(t.expiresAt),
+}));
+

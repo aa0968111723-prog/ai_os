@@ -25,6 +25,13 @@ import {
 } from "../services/auth";
 import { authMeCapabilities } from "../services/policyEngine";
 import { revokeAllUserMcpTokens } from "../services/mcpAuth";
+import { assertProjectEditable } from "../services/projectAcl";
+import {
+  createUploadGrant,
+  UPLOAD_GRANT_MAX_TTL_SEC,
+  looksLikeUuid,
+} from "../services/uploadGrants";
+import { MAX_FILE_BYTES } from "../services/storage";
 import {
   RateLimitConfigurationError,
   RateLimitUnavailableError,
@@ -172,6 +179,66 @@ export const authRouter = router({
       }
       console.log(`[audit] revokeSession：user=${ctx.auth.user.id} session=${input.id}`);
       return { ok: true as const, self: false };
+    }),
+
+  /**
+   * AUTH-03：簽發單次上傳授權（桌面 handoff／長時間上傳可與 cookie 解耦）。
+   * 回傳 token 僅此一次（前綴 aidup_）；之後只存雜湊。
+   * 上傳時以 Authorization: Bearer aidup_… 或既有 session cookie。
+   */
+  createUploadGrant: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid("專案 id 無效"),
+      sourceAssetId: z.string().uuid("來源素材 id 無效").optional(),
+      handoffId: z.string().trim().min(1).max(120).optional(),
+      /** 秒；預設 24h，上限 7 天，下限 60 秒 */
+      ttlSeconds: z.number().int().min(60).max(UPLOAD_GRANT_MAX_TTL_SEC).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      }
+      if (!ctx.auth.groups.some((g) => g.groupId === project.groupId)) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "你不屬於這個組" });
+      }
+      try {
+        await assertProjectEditable(ctx.auth, project);
+      } catch {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "你在此專案是「檢視者」（唯讀）——無法簽發上傳授權",
+        });
+      }
+      if (input.sourceAssetId) {
+        if (!looksLikeUuid(input.sourceAssetId)) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "來源素材 id 無效" });
+        }
+        const [src] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.sourceAssetId));
+        if (!src || src.projectId !== project.id) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "來源素材不在此專案" });
+        }
+      }
+      const grant = await createUploadGrant({
+        userId: ctx.auth.user.id,
+        projectId: project.id,
+        groupId: project.groupId,
+        sourceAssetId: input.sourceAssetId ?? null,
+        handoffId: input.handoffId ?? null,
+        maxBytes: MAX_FILE_BYTES,
+        ttlSeconds: input.ttlSeconds,
+      });
+      // 不把 token 原文寫進 log
+      console.log(
+        `[audit] createUploadGrant：user=${ctx.auth.user.id} project=${project.id} grant=${grant.id}`,
+      );
+      return {
+        id: grant.id,
+        token: grant.token,
+        expiresAt: grant.expiresAt,
+        maxBytes: grant.maxBytes,
+        projectId: grant.projectId,
+      };
     }),
 
   /** 自助改密碼：驗舊密碼 → 換新 → 其他裝置全部登出（本裝置換發新 session 無感續用） */

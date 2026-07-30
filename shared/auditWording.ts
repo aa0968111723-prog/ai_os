@@ -13,6 +13,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "auth.logoutAll": "登出全部裝置",
   "auth.touchSession": "延續登入工作階段",
   "auth.revokeSession": "撤銷登入裝置",
+  "auth.createUploadGrant": "簽發上傳授權",
   "auth.changePassword": "修改密碼",
   "auth.acceptInvite": "接受邀請加入",
   "admin.createTeam": "建立團隊",
