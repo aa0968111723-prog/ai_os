@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Aios",
+  "version": "0.1.0",
+  "identifier": "today.director.aios",
+  "build": {
+    "frontendDist": "../dist/public"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "capabilities": ["remote-main"],
+      "csp": null
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "Aios",
+        "url": "https://ai-os-app.zeabur.app",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 640,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "devtools": false
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "Aios AI 創作與協作桌面應用程式",
+    "longDescription": "Aios 桌面版可安全把專案素材交給已安裝的剪輯、音訊與圖片軟體，監看編輯檔並回傳成新版本。",
+    "icon": [
+      "../client/public/icons/icon-192.png",
+      "../client/public/icons/icon-512.png",
+      "../client/public/favicon.ico"
+    ],
+    "windows": {
+      "allowDowngrades": false,
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["aios"]
+      }
+    }
+  }
+}
