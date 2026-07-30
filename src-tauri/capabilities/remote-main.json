@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/remote-schema.json",
+  "identifier": "remote-main",
+  "description": "Only the exact Aios production origin may call the narrowly scoped desktop media bridge.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["https://ai-os-app.zeabur.app/*"]
+  },
+  "local": false,
+  "platforms": ["macOS", "windows", "linux"],
+  "permissions": [
+    "core:default",
+    "allow-desktop-bridge"
+  ]
+}
