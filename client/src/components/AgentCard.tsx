@@ -74,13 +74,14 @@ const KIND_ICON: Record<AgentStep["kind"], IconName> = {
   wait_for_human: "Pause",
   request_approval: "Check",
 };
+/** 創作者語：少代碼狀態名，多「場記／過目／開拍」感 */
 const RUN_STATUS: Record<string, { label: string; cls: string }> = {
-  awaiting_approval: { label: "待你核准", cls: "queued" },
-  running: { label: "執行中", cls: "running" },
-  waiting: { label: "等待人員", cls: "queued" },
+  awaiting_approval: { label: "待你過目", cls: "queued" },
+  running: { label: "開拍中", cls: "running" },
+  waiting: { label: "等你回覆", cls: "queued" },
   done: { label: "已完成", cls: "done" },
-  failed: { label: "失敗", cls: "failed" },
-  stopped: { label: "已停止", cls: "queued" },
+  failed: { label: "需要重來", cls: "failed" },
+  stopped: { label: "已暫停", cls: "queued" },
 };
 const EVENT_LABEL: Record<string, string> = {
   planned: "完成規劃",
@@ -142,20 +143,35 @@ export function AgentCard({
   isLeader = false,
   embedded = false,
   hideComposer = false,
+  initialGoal,
+  compactComposer = false,
 }: {
   projectId: string;
   canEdit: boolean;
   isLeader?: boolean;
   embedded?: boolean;
-  /** 統一入口模式：目標從上方對話下（plan_agent），這裡只留「計畫核准／進度／停止」的執行區 */
+  /** 舊入口：只留核准／進度（新工作台執行計畫模式請勿使用） */
   hideComposer?: boolean;
+  /** 工作台共用 goal 帶入 */
+  initialGoal?: string;
+  /** 精簡排版：規劃模型預設收合，職能改橫向 chip */
+  compactComposer?: boolean;
 }) {
   const utils = trpc.useUtils();
   // 與 App 同 key 共用快取：核准/停止的授權是「發起人本人或組長以上」，按鈕顯示要跟伺服器規則對齊
   const me = trpc.auth.me.useQuery();
-  const [goal, setGoal] = useState("");
+  const [goal, setGoal] = useState(() => (initialGoal ?? "").trim());
   const [plannerMode, setPlannerMode] = useState<AgentPlannerMode>(readAgentPlannerMode);
   const [expandedRuns, setExpandedRuns] = useState<Record<string, boolean>>({});
+  const goalInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // 工作台 goal 變更時同步（使用者已在本地輸入較長內容則不覆蓋）
+  useEffect(() => {
+    const next = (initialGoal ?? "").trim();
+    if (!next) return;
+    setGoal((prev) => (prev.trim().length >= 5 ? prev : next));
+  }, [initialGoal]);
+
   const runs = trpc.agents.listByProject.useQuery(
     { projectId },
     {
@@ -190,8 +206,22 @@ export function AgentCard({
   const completeTask = trpc.tasks.complete.useMutation({ onSuccess: invalidateAll });
   const decideApproval = trpc.tasks.decideApproval.useMutation({ onSuccess: invalidateAll });
 
+  const runList = runs.data ?? [];
+  const meId = me.data?.user.id;
+  /** 待核准且我能按的：置頂主操作 */
+  const pendingMyApproval = runList.filter((r) => {
+    if (r.status !== "awaiting_approval") return false;
+    return isLeader || r.userId === meId;
+  });
+  /** 列表排序：待核准 → 執行中 → 等待 → 其他 */
+  const sortedRuns = [...runList].sort((a, b) => {
+    const rank = (s: string) =>
+      s === "awaiting_approval" ? 0 : s === "running" ? 1 : s === "waiting" ? 2 : 3;
+    return rank(a.status) - rank(b.status);
+  });
+
   // 執行中每步的成品/分鏡/扣點會陸續落庫——相關卡片跟著刷（比照 WorkflowCard 的節奏）
-  const hasRunning = (runs.data ?? []).some((r) => r.status === "running" || (r.steps as AgentStep[]).some((s) => s.status === "running"));
+  const hasRunning = runList.some((r) => r.status === "running" || (r.steps as AgentStep[]).some((s) => s.status === "running"));
   useEffect(() => {
     if (!hasRunning) return;
     const refresh = () => {
@@ -235,43 +265,84 @@ export function AgentCard({
     <>
       {!embedded && (
         <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 職能助手（請分鏡助理／生成員排計畫執行）
+          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> 多步計畫
         </h2>
       )}
-      {!hideComposer && (
-        <p className="hint" style={{ marginTop: embedded ? 0 : -4 }}>
-          用一句話交代目標（例：「請分鏡助理先出草稿並逐鏡出圖」）——系統會依 <b>AI 職能</b>（非真人組員）讀世界觀＋知識庫排出<b>逐步計畫與估點</b>（站內 0 點；Fal 依 token 計費），
-          你<b>核准後</b>才開始執行；由伺服器背景逐步跑，關掉頁面也會繼續，隨時可停止。每步實際扣點走既有守門，超額仍會停下等組長核准。
-        </p>
+
+      {/* 待過目置頂：像審片單，不用先展開列表 */}
+      {pendingMyApproval.length > 0 && (
+        <div className="agent-approval-rail" role="region" aria-label="待你過目的計畫">
+          {pendingMyApproval.map((r) => (
+            <div key={r.id} className="agent-approval-rail__item">
+              <div className="agent-approval-rail__badge" aria-hidden>
+                <Icon name="Play" size={18} />
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 650 }}>
+                  可以開拍 · 約 {r.estPoints} 點
+                </div>
+                <div className="hint" style={{ marginTop: 2 }}>
+                  {r.goal.slice(0, 80)}{r.goal.length > 80 ? "…" : ""}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <ConfirmButton
+                  triggerClassName="primary"
+                  disabled={busy}
+                  message={`過目後開始背景開拍，預估約 ${r.estPoints} 點（失敗會退點）。`}
+                  confirmLabel="開拍"
+                  onConfirm={() => approve.mutate({ runId: r.id })}
+                >
+                  {approve.isPending ? "開拍中…" : `開拍（約 −${r.estPoints} 點）`}
+                </ConfirmButton>
+                <button type="button" className="btn-sm" disabled={busy} onClick={() => discard.mutate({ runId: r.id })}>
+                  先不要
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
 
-      {hideComposer ? (
-        !runs.isLoading && !runs.error && runs.data && runs.data.length === 0 && (
-          <p className="hint" role="status">
-            還沒有 AI 職能執行計畫——在上方對話請分鏡助理或生成員用一句話下目標，我會排出逐步計畫與估點，你核准後由伺服器背景執行。
-          </p>
-        )
-      ) : canEdit ? (
+      {!hideComposer && canEdit ? (
         <>
-          <label htmlFor={`agent-goal-${projectId}`}>你的目標（一句話，可點名 AI 職能）</label>
+          {!compactComposer && (
+            <p className="hint" style={{ marginTop: embedded ? 0 : -4 }}>
+              寫目標 → 排步驟 → 你核准才扣點；關頁也會繼續跑。
+            </p>
+          )}
+          <label htmlFor={`agent-goal-${projectId}`}>目標</label>
           <textarea
+            ref={goalInputRef}
             id={`agent-goal-${projectId}`}
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
-            rows={2}
+            rows={compactComposer ? 2 : 2}
             maxLength={1000}
             placeholder={`例：${GOAL_EXAMPLES[0]}`}
           />
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-            {GOAL_EXAMPLES.map((g) => (
-              <button key={g} type="button" className="btn-sm" title="點了帶入目標框" onClick={() => setGoal(g)}>
-                {g}
+          <div className="creation-skill-picker__row" style={{ marginTop: 6 }}>
+            {AI_ROLE_ROSTER.slice(0, compactComposer ? 4 : 6).map((role) => (
+              <button
+                key={role.id}
+                type="button"
+                className="chip pick"
+                title={role.summary}
+                onClick={() => {
+                  setGoal(role.defaultGoalHint);
+                  goalInputRef.current?.focus();
+                }}
+              >
+                {role.title}
               </button>
             ))}
           </div>
-          <fieldset style={{ margin: "12px 0 0", padding: 0, border: 0 }}>
-            <legend style={{ fontWeight: 650, marginBottom: 6 }}>規劃模型與用量</legend>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 6 }}>
+          <details style={{ margin: "8px 0 0" }} open={!compactComposer}>
+            <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+              規劃模型
+              <span className="hint" style={{ marginLeft: 8 }}>{plannerOption.shortLabel}</span>
+            </summary>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 6, marginTop: 6 }}>
               {AGENT_PLANNER_OPTIONS.map((option) => {
                 const selected = option.value === plannerMode;
                 return (
@@ -285,7 +356,7 @@ export function AgentCard({
                       setPlannerMode(option.value);
                       writeAgentPlannerMode(option.value);
                     }}
-                    style={{ textAlign: "left", minHeight: 58 }}
+                    style={{ textAlign: "left" }}
                   >
                     <strong style={{ display: "block" }}>{option.shortLabel}</strong>
                     <span style={{ display: "block", fontSize: "var(--fs-11)", opacity: 0.82, marginTop: 2 }}>
@@ -295,80 +366,38 @@ export function AgentCard({
                 );
               })}
             </div>
-            <p className="hint" style={{ margin: "6px 0 0" }}>
-              {plannerOption.description} fal.ai 模式會把本次規劃所需的專案內容傳給模型，並依實際 token 計費；完成後會顯示用量。
-            </p>
-          </fieldset>
+          </details>
           <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <ConfirmButton
               triggerClassName="primary"
               disabled={goal.trim().length < 5 || plan.isPending}
-              message={`會用「${plannerOption.shortLabel}」讀世界觀＋知識庫排一份逐步計畫。規劃不扣站內點數；fal.ai 模式依實際 token 計費。這一步只規劃不執行，執行前還會再讓你看估點核准。`}
-              confirmLabel="開始規劃"
+              message={`會讀專案資料排出步驟與估點。規劃不扣站內點數；你核准後才開始執行與扣點。`}
+              confirmLabel="排步驟"
               onConfirm={() => plan.mutate({ projectId, goal: goal.trim(), plannerMode })}
             >
-              {plan.isPending ? "規劃中…" : "規劃計畫（站內 0 點）"}
+              {plan.isPending ? "排程中…" : "幫我排步驟"}
             </ConfirmButton>
-            {!plan.isPending && goal.trim().length > 0 && goal.trim().length < 5 && <span className="hint">目標至少 5 個字</span>}
+            {!plan.isPending && goal.trim().length > 0 && goal.trim().length < 5 && (
+              <span className="hint">目標至少 5 個字</span>
+            )}
           </div>
           {plan.error && <p className="error" role="alert">{plan.error.message}</p>}
         </>
+      ) : hideComposer ? (
+        !runs.isLoading && !runs.error && runList.length === 0 && (
+          <p className="hint" role="status">還沒有計畫——在上方寫目標並掛技能，或切到「執行計畫」直接排步驟。</p>
+        )
       ) : (
-        <p className="hint">你在此專案是檢視者（唯讀）——可以看執行計畫進度，不能發起或核准。</p>
+        <p className="hint">你在此專案是檢視者（唯讀）——可以看進度，不能發起或核准。</p>
       )}
 
       {actionError && <p className="error" role="alert">{actionError.message}</p>}
-      {runs.isLoading && <p className="hint" role="status">正在載入 AI 職能計畫…</p>}
-      {/* 列表載入成功但無計畫：引導文案（與 hideComposer 空態對齊；錯誤時不顯示以免誤導成「沒有計畫」） */}
-      {!runs.isLoading && !runs.error && runs.data && runs.data.length === 0 && !hideComposer && (
+      {runs.isLoading && <p className="hint" role="status">載入計畫…</p>}
+      {!runs.isLoading && !runs.error && runList.length === 0 && !hideComposer && canEdit && (
         <p className="hint" role="status">
-          {canEdit
-            ? "還沒有 AI 職能執行計畫——可請「分鏡助理」或「生成員」出草稿：輸入目標後按「規劃計畫」；規劃不扣站內點數，核准後才會開始執行。"
-            : "目前沒有 AI 職能執行計畫。"}
+          還沒有計畫——寫好目標後按「幫我排步驟」；核准前不會扣執行點數。
         </p>
       )}
-
-      {/* L0/L1：AI 職能花名冊（敘事席位，非 memberships） */}
-      <details className="agent-run" style={{ marginTop: 10 }}>
-        <summary>
-          <strong>AI 職能</strong>
-          <span className="hint">可啟用的席位・不是專案成員</span>
-        </summary>
-        <div className="agent-run__body" style={{ display: "grid", gap: 8 }}>
-          <p className="hint" style={{ margin: 0 }}>
-            人是專案成員；下列為可啟用的 <b>AI 職能</b>。下目標時可點名（例：請分鏡助理…），規劃仍開一筆執行計畫，媒體生成走既有扣點路徑。
-          </p>
-          <div style={{ display: "grid", gap: 6 }}>
-            {AI_ROLE_ROSTER.map((role) => (
-              <div
-                key={role.id}
-                className="gen-row"
-                style={{ gridTemplateColumns: "auto 1fr", alignItems: "start", gap: 8 }}
-              >
-                <span className="chip" title={role.id}>AI</span>
-                <div>
-                  <strong>{role.title}</strong>
-                  <span className="hint" style={{ display: "block", marginTop: 2 }}>
-                    {role.summary}
-                    {role.humanKeeps.length > 0 ? ` · 人保留：${role.humanKeeps.join("、")}` : ""}
-                  </span>
-                  {canEdit && !hideComposer && (
-                    <button
-                      type="button"
-                      className="btn-sm"
-                      style={{ marginTop: 4 }}
-                      title="帶入目標框"
-                      onClick={() => setGoal(role.defaultGoalHint)}
-                    >
-                      用此職能目標
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </details>
 
       {insights.data && (
         <details className="agent-run" style={{ marginTop: 10 }}>
@@ -442,10 +471,14 @@ export function AgentCard({
         </details>
       )}
 
-      {(runs.data ?? []).map((r) => {
+      {sortedRuns.map((r) => {
         const steps = r.steps as AgentStep[];
         const st = RUN_STATUS[r.status] ?? { label: r.status, cls: "queued" };
-        const defaultOpen = r.status === "running" || r.status === "waiting" || r.status === "awaiting_approval";
+        const defaultOpen =
+          r.status === "running" ||
+          r.status === "waiting" ||
+          r.status === "awaiting_approval" ||
+          r.status === "failed";
         const runOpen = expandedRuns[r.id] ?? defaultOpen;
         const doneSteps = steps.filter((s) => s.status === "done").length;
         const runTasks = (tasks.data ?? []).filter((task) => task.planRunId === r.id);
@@ -678,18 +711,18 @@ export function AgentCard({
                       confirmLabel="執行"
                       onConfirm={() => approve.mutate({ runId: r.id })}
                     >
-                      {approve.isPending ? "啟動中…" : `執行計畫（預估 −${r.estPoints} 點）`}
+                      {approve.isPending ? "開拍中…" : `開拍（約 −${r.estPoints} 點）`}
                     </ConfirmButton>
                 )}
                 {canControl && (
                     <button className="btn-sm" disabled={busy} onClick={() => discard.mutate({ runId: r.id })}>
-                      放棄這份計畫
+                      先不要
                     </button>
                 )}
                 {!canApprove && !canControl && (
-                  <span className="hint">等發起人或組長核准</span>
+                  <span className="hint">等發起人或組長過目</span>
                 )}
-                <span className="hint">核准前不會花任何執行點數</span>
+                <span className="hint">過目前不扣點</span>
               </div>
             )}
             {r.status === "failed" && r.error && <p className="hint" style={{ marginTop: 4, color: "var(--danger-ink)" }}>原因：{r.error}</p>}

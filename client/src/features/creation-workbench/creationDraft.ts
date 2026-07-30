@@ -20,6 +20,11 @@ export interface CreationDraft {
   templateId?: string;
   /** Prompt library source id when draft was filled via apply_prompt (reuse tracking). */
   promptSourceId?: string;
+  /**
+   * ＋ 技能（模式／AI 職能 id）。只影響入口與目標提示，不扣點。
+   * 見 shared/agentSkills.ts
+   */
+  skillIds?: string[];
 }
 
 export const CREATION_MODES: ReadonlyArray<{
@@ -27,10 +32,10 @@ export const CREATION_MODES: ReadonlyArray<{
   label: string;
   description: string;
 }> = [
-  { id: "ask", label: "問 AI", description: "問答、發想、拆分鏡" },
-  { id: "generate", label: "直接生成", description: "圖片、影片、聲音" },
-  { id: "template", label: "製作範本", description: "固定步驟一次串起" },
-  { id: "plan", label: "執行計畫", description: "多步任務、估點與核准" },
+  { id: "ask", label: "一起想", description: "發想、拆分鏡、問專案" },
+  { id: "generate", label: "直接出圖", description: "圖、影、聲音" },
+  { id: "template", label: "套用範本", description: "固定套路一次串" },
+  { id: "plan", label: "多步開拍", description: "排步驟、過目再開拍" },
 ] as const;
 
 const STORAGE_PREFIX = "aios.creationDraft.";
@@ -43,6 +48,7 @@ export function emptyDraft(mode: CreationMode = "ask"): CreationDraft {
     characterIds: [],
     scenePresetIds: [],
     worldviewEnabled: true,
+    skillIds: [],
   };
 }
 
@@ -76,6 +82,9 @@ function normalizeDraft(raw: unknown, fallbackMode: CreationMode = "ask"): Creat
     worldviewEnabled: typeof o.worldviewEnabled === "boolean" ? o.worldviewEnabled : base.worldviewEnabled,
     templateId: typeof o.templateId === "string" ? o.templateId : undefined,
     promptSourceId: typeof o.promptSourceId === "string" ? o.promptSourceId : undefined,
+    skillIds: Array.isArray(o.skillIds)
+      ? o.skillIds.filter((x): x is string => typeof x === "string" && x.length > 0).slice(0, 12)
+      : base.skillIds,
   };
 }
 

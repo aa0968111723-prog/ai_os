@@ -97,7 +97,7 @@ function setViewportWidth(width: number) {
   window.dispatchEvent(new Event("resize"));
 }
 
-const TAB_NAMES = [/問 AI/, /直接生成/, /製作範本/, /執行計畫/] as const;
+const TAB_NAMES = [/一起想/, /直接出圖/, /套用範本/, /多步開拍/] as const;
 
 describe("viewport presence smoke — CreationWorkbench shell (no layout engine)", () => {
   beforeEach(() => {

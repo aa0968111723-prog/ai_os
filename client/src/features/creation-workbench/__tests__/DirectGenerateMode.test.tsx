@@ -202,7 +202,7 @@ describe("DirectGenerateMode", () => {
     await waitFor(() => {
       expect(screen.getByRole("status")).toHaveTextContent(/預估消耗：約 \d+ 點/);
     });
-    expect(screen.getByRole("status")).toHaveTextContent("本次模式：直接生成");
+    expect(screen.getByRole("status")).toHaveTextContent("本次模式：直接出圖");
   });
 
   it("keeps #sec-studio and #gen-prompt anchors", () => {

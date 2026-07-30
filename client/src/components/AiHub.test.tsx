@@ -55,22 +55,22 @@ describe("AiHub", () => {
 
     expect(screen.getByRole("heading", { name: "AI 創作工作台" })).toBeVisible();
     expect(screen.getByRole("navigation", { name: "AI 創作開始方式" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "問 AI 問答、發想、拆分鏡" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "直接生成 圖片、影片、聲音" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "製作範本 固定步驟一次串起" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "執行計畫 多步任務、估點與核准" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "一起想 發想、拆分鏡、問專案" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "直接出圖 圖、影、聲音" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "套用範本 固定套路一次串" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "多步開拍 排步驟、過目再開拍" })).toBeVisible();
     expect(screen.getByRole("group", { name: "AI 創作工作台可連動的專案系統" })).toBeVisible();
 
     const generationTarget = document.createElement("div");
     generationTarget.id = "sec-studio";
     document.body.appendChild(generationTarget);
-    await user.click(screen.getByRole("button", { name: "直接生成 圖片、影片、聲音" }));
+    await user.click(screen.getByRole("button", { name: "直接出圖 圖、影、聲音" }));
     await waitFor(() => expect(generationTarget.scrollIntoView).toHaveBeenCalled());
     generationTarget.remove();
 
     const details = document.querySelector("#sec-agent");
     expect(details).not.toHaveAttribute("open");
-    await user.click(screen.getByRole("button", { name: "執行計畫 多步任務、估點與核准" }));
+    await user.click(screen.getByRole("button", { name: "多步開拍 排步驟、過目再開拍" }));
     await waitFor(() => expect(details).toHaveAttribute("open"));
   });
 

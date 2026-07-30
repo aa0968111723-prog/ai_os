@@ -76,10 +76,10 @@ export function AiHub({
   };
 
   const routes: Array<{ label: string; description: string; target: string; icon: IconName }> = [
-    { label: "問 AI", description: "問答、發想、拆分鏡", target: "#sec-assistant", icon: "MessageCircle" },
-    { label: "直接生成", description: "圖片、影片、聲音", target: "#sec-studio", icon: "Image" },
-    { label: "製作範本", description: "固定步驟一次串起", target: "#sec-workflow", icon: "Clapperboard" },
-    { label: "執行計畫", description: "多步任務、估點與核准", target: "#sec-agent", icon: "Film" },
+    { label: "一起想", description: "發想、拆分鏡、問專案", target: "#sec-assistant", icon: "MessageCircle" },
+    { label: "直接出圖", description: "圖、影、聲音", target: "#sec-studio", icon: "Image" },
+    { label: "套用範本", description: "固定套路一次串", target: "#sec-workflow", icon: "Clapperboard" },
+    { label: "多步開拍", description: "排步驟、過目再開拍", target: "#sec-agent", icon: "Film" },
   ];
 
   const contextLinks: Array<{ label: string; target: string }> = [
@@ -120,7 +120,7 @@ export function AiHub({
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
         <p className="hint" style={{ marginTop: 6 }}>
-          從同一個工作台開始：先說明想完成的成果，或直接選擇生成、製作範本與執行計畫。
+          寫你想完成的畫面，或直接選一起想、出圖、範本與多步開拍。
           所有能力沿用目前專案的知識、資料、素材、分鏡、權限、點數與核准規則。
         </p>
 
@@ -182,7 +182,7 @@ export function AiHub({
               setExecutionOpen((open) => !open);
             }}
           >
-            <span><Icon name="Film" size={14} /> AI 執行計畫</span>
+            <span><Icon name="Film" size={14} /> 多步開拍</span>
             {running > 0 && <span className="pill running">執行中 {running}</span>}
             {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
             {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}

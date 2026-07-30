@@ -436,7 +436,7 @@ export function DirectGenerateMode({
       )}
 
       <CreationCostSummary
-        modeLabel="直接生成"
+        modeLabel="直接出圖"
         estimateLabel={model ? `約 ${estPoints} 點` : "依所選模型計算"}
         usageBasedNote={model && isUsageBasedPoints(model.id) ? "（依文字長度即時計費）" : undefined}
         outputSpec={model ? `${model.label}・${projectFormat}` : undefined}

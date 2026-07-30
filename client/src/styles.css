@@ -2628,6 +2628,155 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   background: color-mix(in srgb, var(--field) 70%, transparent);
 }
 .creation-goal-input label { margin-top: 0 !important; }
+
+/* ── ＋ 請誰來幫忙：創作者向技能／劇組（畫面卡，非代碼列表） ── */
+.creation-skill-picker { margin-top: 10px; position: relative; }
+.creation-skill-picker__row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+}
+.creation-skill-add {
+  display: inline-flex; align-items: center; gap: 8px;
+  min-height: 40px; padding: 4px 12px 4px 4px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 80%, var(--primary-tint));
+  color: var(--fg); font-weight: 600; font-size: var(--fs-13);
+  cursor: pointer;
+}
+.creation-skill-add:hover:not(:disabled) {
+  border-color: var(--primary-border);
+  background: var(--primary-tint);
+}
+.creation-skill-add:disabled { opacity: 0.5; cursor: not-allowed; }
+.creation-skill-add__glyph {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--primary-tint); color: var(--primary-ink);
+}
+.creation-skill-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 36px; padding: 4px 10px 4px 6px;
+  border-radius: 999px; border: 1px solid var(--border-soft);
+  background: var(--card2); font-size: var(--fs-12); font-weight: 600;
+  cursor: pointer; color: var(--fg);
+}
+.creation-skill-chip.is-role {
+  border-color: var(--primary-border);
+  background: color-mix(in srgb, var(--primary-tint) 55%, var(--card));
+}
+.creation-skill-chip__icon {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--card); color: var(--primary-ink);
+}
+.creation-skill-chip__x { opacity: 0.55; font-size: 14px; line-height: 1; }
+.creation-skill-menu {
+  position: absolute; z-index: 40; left: 0; right: 0;
+  margin-top: 8px; padding: 12px 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12);
+  background: var(--card);
+  box-shadow: 0 12px 40px color-mix(in srgb, var(--fg) 12%, transparent);
+  max-height: min(70vh, 480px); overflow: auto;
+}
+.creation-skill-menu__head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px;
+  margin-bottom: 10px;
+}
+.creation-skill-menu__section { margin-top: 10px; }
+.creation-skill-menu__label {
+  display: block; margin: 0 0 8px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  text-transform: none; color: var(--muted); opacity: 0.9;
+}
+.creation-skill-menu__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px;
+}
+.creation-skill-menu__grid--roles {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+.creation-skill-card {
+  position: relative;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  text-align: left;
+  min-height: 118px; padding: 12px 12px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12);
+  background: color-mix(in srgb, var(--card2) 70%, transparent);
+  cursor: pointer; color: var(--fg);
+}
+.creation-skill-card:hover {
+  border-color: var(--border-strong);
+  background: var(--card2);
+}
+.creation-skill-card.is-selected {
+  border-color: var(--primary-border);
+  background: color-mix(in srgb, var(--primary-tint) 40%, var(--card));
+  box-shadow: inset 0 0 0 1px var(--primary-border);
+}
+.creation-skill-card__avatar {
+  width: 44px; height: 44px; border-radius: 14px;
+  display: grid; place-items: center;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--primary-tint) 80%, #fff),
+    color-mix(in srgb, var(--card2) 50%, var(--primary-tint))
+  );
+  color: var(--primary-ink);
+}
+.creation-skill-card.is-role .creation-skill-card__avatar {
+  border-radius: 50%;
+}
+.creation-skill-card__body { display: grid; gap: 2px; min-width: 0; width: 100%; }
+.creation-skill-card__scene {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--muted); opacity: 0.85;
+}
+.creation-skill-card__title {
+  font-size: var(--fs-14); font-weight: 700; line-height: 1.25;
+}
+.creation-skill-card__summary {
+  font-size: 11px; line-height: 1.4; color: var(--muted);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.creation-skill-card__check {
+  position: absolute; top: 8px; right: 8px;
+  width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--primary-ink); color: var(--card);
+}
+
+/* 待過目／開拍橫幅 */
+.agent-approval-rail {
+  display: grid; gap: 8px; margin: 0 0 12px;
+}
+.agent-approval-rail__item {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--r-12);
+  border: 1px solid var(--primary-border);
+  background:
+    linear-gradient(105deg,
+      color-mix(in srgb, var(--primary-tint) 55%, transparent),
+      color-mix(in srgb, var(--card) 90%, transparent));
+}
+.agent-approval-rail__badge {
+  width: 40px; height: 40px; border-radius: 12px;
+  display: grid; place-items: center; flex: 0 0 auto;
+  background: var(--primary-ink); color: var(--card);
+}
+
+@media (max-width: 640px) {
+  .creation-skill-menu__grid,
+  .creation-skill-menu__grid--roles {
+    grid-template-columns: 1fr 1fr;
+  }
+  .creation-skill-card { min-height: 108px; padding: 10px; }
+  .creation-skill-card__summary { -webkit-line-clamp: 3; }
+}
 .creation-resource-entry {
   padding: 11px 12px;
   border: 1px dashed var(--border-strong);
