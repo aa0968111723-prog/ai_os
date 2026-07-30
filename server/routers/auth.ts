@@ -10,6 +10,8 @@ import {
   hashPassword,
   createSession,
   destroySession,
+  destroyAllUserSessions,
+  renewSessionIfNeeded,
   setSessionCookie,
   clearSessionCookie,
   getSessionToken,
@@ -96,6 +98,39 @@ export const authRouter = router({
     if (token) await destroySession(token);
     clearSessionCookie(ctx.res);
     return { ok: true };
+  }),
+
+  /**
+   * 登出全部裝置：刪該使用者所有 sessions，本裝置立即換發新 session 無感續用。
+   * 刻意不撤銷 MCP 金鑰（避免誤傷自動化／外部工具）；改密碼仍會撤 MCP。
+   */
+  logoutAll: authedProcedure.mutation(async ({ ctx }) => {
+    const userId = ctx.auth.user.id;
+    await destroyAllUserSessions(userId);
+    const token = await createSession(userId);
+    setSessionCookie(ctx.res, token);
+    console.log(`[audit] logoutAll：user=${userId}`);
+    return { ok: true };
+  }),
+
+  /**
+   * Session 滑動續期：活躍使用者在剩餘 < 7 天時延長至 30 天並刷新 cookie Max-Age。
+   * 由前端 AppShell 節流呼叫（掛載／visibility + 本地 6h 上限），避免每請求寫 DB。
+   * 未進入續期窗時不寫庫（renewed=false）。
+   */
+  touchSession: authedProcedure.mutation(async ({ ctx }) => {
+    const token = getSessionToken(ctx.req);
+    if (!token) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "尚未登入" });
+    }
+    const result = await renewSessionIfNeeded(token);
+    if (!result) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "工作階段已失效，請重新登入" });
+    }
+    if (result.renewed) {
+      setSessionCookie(ctx.res, token);
+    }
+    return { ok: true as const, renewed: result.renewed, expiresAt: result.expiresAt };
   }),
 
   /** 自助改密碼：驗舊密碼 → 換新 → 其他裝置全部登出（本裝置換發新 session 無感續用） */

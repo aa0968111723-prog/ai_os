@@ -32,13 +32,15 @@ export type AccountMenuProps = {
   onChangePw: () => void;
   onNotifSettings: () => void;
   onLogout: () => void;
+  /** 登出全部裝置（他機 session 全撤；本機換發新 cookie） */
+  onLogoutAll?: () => void;
   loggingOut: boolean;
 };
 
 /** 使用者選單（收斂頂欄）：說明／工作／管理／帳號四組收進單一下拉，管理組僅組長／管理員可見。
  * CSP 下自製（無外部庫）：點外面或 Esc 關閉。 */
 export function AccountMenu({
-  userName, me, activeGroupId, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, loggingOut,
+  userName, me, activeGroupId, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, onLogoutAll, loggingOut,
 }: AccountMenuProps) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -145,6 +147,22 @@ export function AccountMenu({
           <a href="/api/me/export" download className="menu-item" role="menuitem" title="下載一份你個人資料的可讀備份（含生成紀錄、留言、筆記、排程；不含密碼）" onClick={close}><Icon name="Download" size={15} />匯出我的個人資料</a>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onNotifSettings(); }}><Icon name="Bell" size={15} />連結手機與電腦</button>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
+          {onLogoutAll && (
+            <button
+              className="menu-item danger"
+              role="menuitem"
+              disabled={loggingOut}
+              title="撤銷所有裝置的登入；本裝置會立刻換發新工作階段繼續使用"
+              onClick={() => {
+                close();
+                if (window.confirm("要登出全部裝置嗎？其他手機／電腦需重新登入；本裝置會繼續保持登入。")) {
+                  onLogoutAll();
+                }
+              }}
+            >
+              <Icon name="Smartphone" size={15} />{loggingOut ? "處理中…" : "登出全部裝置"}
+            </button>
+          )}
           <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>
             <Icon name="Undo2" size={15} />{loggingOut ? "登出中…" : "登出"}
           </button>

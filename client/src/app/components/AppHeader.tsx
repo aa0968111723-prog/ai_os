@@ -55,6 +55,7 @@ export type AppHeaderProps = {
   onChangePw: () => void;
   onNotifSettings: () => void;
   onLogout: () => void;
+  onLogoutAll?: () => void;
   loggingOut: boolean;
 };
 
@@ -75,6 +76,7 @@ export function AppHeader({
   onChangePw,
   onNotifSettings,
   onLogout,
+  onLogoutAll,
   loggingOut,
 }: AppHeaderProps) {
   const [location, navigate] = useLocation();
@@ -125,6 +127,7 @@ export function AppHeader({
           onChangePw={onChangePw}
           onNotifSettings={onNotifSettings}
           onLogout={onLogout}
+          onLogoutAll={onLogoutAll}
           loggingOut={loggingOut}
         />
       )}
