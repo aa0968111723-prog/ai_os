@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "allow-desktop-bridge"
+description = "Allows the trusted Aios production WebView to detect allowlisted editors and manage Aios-owned media handoffs."
+commands.allow = [
+  "detect_editors",
+  "open_asset",
+  "reveal_asset",
+  "stop_handoff"
+]
