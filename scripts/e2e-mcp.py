@@ -156,7 +156,8 @@ EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_
     "list_database_files","read_database_file","get_database_stats","plan_agent","approve_agent","stop_agent","discard_agent",
     "list_agent_runs","get_agent_run","list_agent_events","get_agent_insights",
     "list_schedule","add_schedule_item","get_project_status",
-    "list_notes","get_note","list_dm_contacts","list_dm_threads","read_dm","send_dm"}
+    "list_notes","get_note","list_dm_contacts","list_dm_threads","read_dm","send_dm",
+    "request_upload_grant","get_upload_grant_status"}
 ok(f"tools/list = {len(EXPECTED)} 且名單完整", names == EXPECTED, f"{len(names)} 個")
 
 # ══════════ 核心工具逐一實跑（可寫金鑰）══════════
@@ -175,6 +176,16 @@ ok("6. submit_generation", g and GEN, r.get("status") if isinstance(r, dict) els
 g, r = call("get_generation", {"generationId": GEN}, FULL); ok("7. get_generation（取回單筆）", g and r["id"] == GEN)
 g, r = call("list_generations", {"projectId": PID}, FULL); ok("5b. list_generations（送出後=1）", g and len(r) == 1)
 g, r = call("list_assets", {"projectId": PID}, FULL); ok("8. list_assets", g and isinstance(r, list))
+g, r = call("request_upload_grant", {"projectId": PID, "purpose": "e2e"}, FULL)
+GRANT = r.get("grantId") if g and isinstance(r, dict) else None
+ok("8u. request_upload_grant",
+   g and GRANT and isinstance(r.get("token"), str) and str(r.get("token", "")).startswith("aidup_")
+   and r.get("uploadUrl") and r.get("http", {}).get("method") == "POST",
+   r if isinstance(r, dict) else r)
+g, r = call("get_upload_grant_status", {"grantId": GRANT}, FULL)
+ok("8u2. get_upload_grant_status（pending）",
+   g and r.get("grantId") == GRANT and r.get("status") == "pending" and r.get("projectId") == PID,
+   r if isinstance(r, dict) else r)
 g, r = call("list_databases", {}, FULL)
 vis = {t["tableId"] for t in r} if g else set()
 ok("9. list_databases（可寫＋唯讀可見、none 不可見）",
@@ -283,7 +294,8 @@ READS = {"whoami": {}, "list_projects": {}, "get_project_context": {"projectId":
     "get_database_stats": {"tableId": TID}, "list_dm_contacts": {}, "list_dm_threads": {},
     "list_agent_runs": {"projectId": PID}, "get_agent_run": {"runId": RUN}, "list_schedule": {"projectId": PID},
     "list_agent_events": {"projectId": PID}, "get_agent_insights": {"projectId": PID},
-    "get_project_status": {"projectId": PID}}
+    "get_project_status": {"projectId": PID},
+    "get_upload_grant_status": {"grantId": GRANT}}
 allread = all(call(n, a, RO)[0] for n, a in READS.items())
 ok(f"唯讀金鑰放行全部 {len(READS)} 個讀取工具", allread)
 WRITES = {"submit_generation": {"projectId": PID, "modelId": MODEL, "prompt": "x"}, "post_message": {"projectId": PID, "body": "x"},
@@ -292,7 +304,8 @@ WRITES = {"submit_generation": {"projectId": PID, "modelId": MODEL, "prompt": "x
     "update_database_row": {"tableId": TID, "rowId": "00000000-0000-4000-8000-000000000001", "data": {"item": "x"}},
     "approve_agent": {"runId": RUN}, "stop_agent": {"runId": RUN}, "discard_agent": {"runId": RUN},
     "add_schedule_item": {"projectId": PID, "title": "x", "startsAt": future},
-    "send_dm": {"peer": "x", "body": "x"}}
+    "send_dm": {"peer": "x", "body": "x"},
+    "request_upload_grant": {"projectId": PID}}
 allblocked = all((lambda gr: (not gr[0]) and "唯讀" in gr[1])(call(n, a, RO)) for n, a in WRITES.items())
 ok(f"唯讀金鑰擋下全部 {len(WRITES)} 個寫入工具", allblocked)
 
@@ -329,10 +342,11 @@ else:
     for n, a in {"get_project_context": {"projectId": PID}, "get_project_status": {"projectId": PID},
                  "list_generations": {"projectId": PID}, "submit_generation": {"projectId": PID, "modelId": MODEL, "prompt": "x"},
                  "post_message": {"projectId": PID, "body": "x"}, "add_schedule_item": {"projectId": PID, "title": "x", "startsAt": future},
-                 "plan_agent": {"projectId": PID, "goal": "偷別組專案"}}.items():
+                 "plan_agent": {"projectId": PID, "goal": "偷別組專案"},
+                 "request_upload_grant": {"projectId": PID}}.items():
         g, r = call(n, a, U2)
         if not ((not g) and BLOCKED(r)): isolated = False; print(f"   ⚠ 未被擋: {n} — {r}")
-    ok("U2 對別組專案的 7 個讀寫工具全被擋", isolated)
+    ok("U2 對別組專案的 8 個讀寫工具全被擋", isolated)
 
     # ══════════ 站內私訊工具（開發者 ↔ U2 雙向；只碰本人參與的對話）══════════
     print("\n######## 站內私訊（MCP）########")
@@ -360,10 +374,11 @@ archived_blocked = True
 for n, a in {"post_message": {"projectId": PID, "body": "x"},
              "add_schedule_item": {"projectId": PID, "title": "x", "startsAt": future},
              "plan_agent": {"projectId": PID, "goal": "封存專案不該能排計畫"},
-             "submit_generation": {"projectId": PID, "modelId": MODEL, "prompt": "x"}}.items():
+             "submit_generation": {"projectId": PID, "modelId": MODEL, "prompt": "x"},
+             "request_upload_grant": {"projectId": PID}}.items():
     g, r = call(n, a, FULL)
     if not ((not g) and "封存" in r): archived_blocked = False; print(f"   ⚠ 未被擋: {n} — {r}")
-ok("封存專案擋下全部 4 個寫入工具", archived_blocked)
+ok("封存專案擋下全部 5 個寫入工具", archived_blocked)
 g, r = call("get_project_context", {"projectId": PID}, FULL); ok("封存後讀取仍放行", g and isinstance(r, dict))
 admin.call("projects.setArchived", {"id": PID, "archived": False})
 

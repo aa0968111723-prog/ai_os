@@ -9,6 +9,7 @@
  * - 工具（讀/寫分類的單一來源在 shared/mcpCatalog）：
  *     基礎：whoami / list_projects / get_project_context / find_model / submit_generation / post_message
  *     生成取回：list_generations / get_generation / list_assets（成品簽成免登入短效網址）
+ *     上傳授權：request_upload_grant / get_upload_grant_status（MCP 不傳二進位；簽 aidup_ 後走 POST /api/upload）
  *     自訂資料庫：list_databases / query_database / add_database_row / add_database_rows / update_database_row / list_database_files / read_database_file / get_database_stats
  *     AI 代理（重用 agentCore）：plan_agent / approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
  *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item
@@ -73,6 +74,11 @@ import {
   recordRateLimitFailure,
 } from "./rateLimit";
 import { toMcpJsonRpcError } from "./mcpErrors";
+import {
+  handleGetUploadGrantStatus,
+  handleRequestUploadGrant,
+  MCP_UPLOAD_GRANT_TOOLS,
+} from "./mcpUploadGrant";
 import type { DataField } from "../../shared/databaseFields";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -432,6 +438,8 @@ const TOOLS = [
     description: "一次取回專案全貌：分鏡進度、近期生成狀態、進行中的 AI 代理、即將到來的行程、以及待處理事項。外部 AI 規劃下一步前先讀這個。",
     inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
+  // ── 素材上傳授權（實作見 mcpUploadGrant；MCP JSON-RPC 不傳二進位）──
+  ...MCP_UPLOAD_GRANT_TOOLS,
 ];
 
 /**
@@ -733,6 +741,11 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       chars: note.content.length,
       updatedAt: note.updatedAt,
     };
+  }
+
+  // ── 上傳授權狀態（以 grantId；不掛 projectId；只回狀態不回 token 原文）──
+  if (name === "get_upload_grant_status") {
+    return handleGetUploadGrantStatus(auth, args);
   }
 
   // ── 站內私訊（重用 dmCore，與網頁端同一守衛）：只碰金鑰擁有者本人參與的對話 ──
@@ -1076,6 +1089,11 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       .values({ groupId: project.groupId, projectId: project.id, userId: auth.user.id, kind: "text", body })
       .returning();
     return { messageId: msg.id };
+  }
+
+  if (name === "request_upload_grant") {
+    // 寫入類：組隔離 + 封存守衛已於上方把關；ACL／pending 上限／TTL 見 mcpUploadGrant。
+    return handleRequestUploadGrant(auth, project, args);
   }
 
   throw new Error(`未知工具：${name}`);
