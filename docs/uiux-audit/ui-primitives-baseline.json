@@ -5,19 +5,19 @@
   "observations": {
     "stylesCssLines": 3681,
     "tsxFiles": 96,
-    "filesUsingPrimitives": 15
+    "filesUsingPrimitives": 18
   },
   "totals": {
-    "total": 662,
+    "total": 619,
     "perClass": {
       "empty-state": 21,
-      "hint": 239,
+      "hint": 205,
       "skeleton": 68,
       "badge": 16,
       "btn-ghost": 47,
-      "btn-sm": 82,
+      "btn-sm": 78,
       "card": 85,
-      "chip": 66,
+      "chip": 61,
       "pill": 27,
       "btn-tonal": 6,
       "btn": 5
@@ -117,9 +117,8 @@
     },
     "client/src/components/GroupOptionsEditor.tsx": {
       "card": 5,
-      "hint": 17,
+      "hint": 2,
       "skeleton": 3,
-      "chip": 2,
       "btn-sm": 1
     },
     "client/src/components/InstallAppBanner.tsx": {
@@ -146,8 +145,8 @@
       "hint": 1
     },
     "client/src/components/MessagePanel.tsx": {
-      "btn-sm": 7,
-      "hint": 8,
+      "btn-sm": 3,
+      "hint": 1,
       "card": 1,
       "chip": 5
     },
@@ -158,9 +157,7 @@
     },
     "client/src/components/NotificationSettings.tsx": {
       "card": 1,
-      "hint": 12,
-      "btn-ghost": 4,
-      "chip": 3
+      "btn-ghost": 4
     },
     "client/src/components/PasswordInput.tsx": {
       "btn-ghost": 1

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
+import { Chip, Hint, Meta } from "./ui";
 import {
   OPTION_TYPES,
   OPTION_TYPE_META,
@@ -34,7 +35,7 @@ function ApprovalThresholdCard({ groupId }: { groupId: string }) {
   return (
     <section className="card" data-fb="成本審核門檻卡" style={{ marginBottom: 16 }}>
       <h2>成本審核門檻</h2>
-      <p className="hint">組員單筆生成達此點數需組長核准才會送出；空白或 0＝不啟用。</p>
+      <Hint layer="always">組員單筆生成達此點數需組長核准才會送出；空白或 0＝不啟用。</Hint>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
         <label className="hint" htmlFor={`approval-threshold-${groupId}`} style={{ margin: 0 }}>門檻點數</label>
         {usage.isLoading ? (
@@ -58,9 +59,9 @@ function ApprovalThresholdCard({ groupId }: { groupId: string }) {
             }}
           />
         )}
-        {setThreshold.isPending && <span className="hint">儲存中…</span>}
+        {setThreshold.isPending && <Meta>儲存中…</Meta>}
         {setThreshold.error && <span className="error" style={{ marginTop: 0 }}>{setThreshold.error.message}</span>}
-        {saved && <span className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</span>}
+        {saved && <Meta style={{ color: "var(--success-ink)" }}>已儲存 ✓</Meta>}
       </div>
     </section>
   );
@@ -95,7 +96,7 @@ function MemberBudgetRow({ groupId, member }: {
   const over = current != null && member.total > current;
   return (
     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-      <span className="chip" style={{ margin: 0 }}>{member.name}{isLeader ? "・組長" : ""}</span>
+      <Chip style={{ margin: 0 }}>{member.name}{isLeader ? "・組長" : ""}</Chip>
       <label className="hint" htmlFor={inputId} style={{ margin: 0 }}>分配</label>
       <input
         id={inputId}
@@ -110,12 +111,12 @@ function MemberBudgetRow({ groupId, member }: {
           if (next !== current) setMemberBudget.mutate({ groupId, userId: member.userId, budgetPoints: next });
         }}
       />
-      <span className="hint" style={over ? { color: "var(--danger-ink)" } : undefined}>
+      <Meta style={over ? { color: "var(--danger-ink)" } : undefined}>
         已用 {member.total}{current != null ? `／${current}` : "・不限"}
-      </span>
+      </Meta>
       {/* 派工權切換：組長恆有、顯示靜態標記；組員可由組長開/關「用組彙總 AI 派工到專案」 */}
       {isLeader ? (
-        <span className="hint" title="組長以上本就有派工權">・可派工</span>
+        <Meta title="組長以上本就有派工權">・可派工</Meta>
       ) : (
         <button
           type="button"
@@ -128,9 +129,9 @@ function MemberBudgetRow({ groupId, member }: {
           派工權：{member.canDispatch ? "已開" : "關"}
         </button>
       )}
-      {(setMemberBudget.isPending || setDispatch.isPending) && <span className="hint">儲存中…</span>}
+      {(setMemberBudget.isPending || setDispatch.isPending) && <Meta>儲存中…</Meta>}
       {(setMemberBudget.error || setDispatch.error) && <span className="error" style={{ marginTop: 0 }}>{(setMemberBudget.error ?? setDispatch.error)!.message}</span>}
-      {saved && <span className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</span>}
+      {saved && <Meta style={{ color: "var(--success-ink)" }}>已儲存 ✓</Meta>}
     </div>
   );
 }
@@ -149,7 +150,7 @@ function PointsAllocationCard({ groupId }: { groupId: string }) {
   return (
     <section className="card" data-fb="點數分配卡" style={{ marginBottom: 16 }}>
       <h2>點數分配</h2>
-      <p className="hint">把「組預算」分給各組員（累計上限，非每週重置）；空白＝不限。組預算由團隊管理員分配給你這個組。</p>
+      <Hint layer="always">把「組預算」分給各組員（累計上限，非每週重置）；空白＝不限。組預算由團隊管理員分配給你這個組。</Hint>
       {usage.isLoading ? (
         <span className="skeleton" style={{ display: "block", height: 40, borderRadius: "var(--r-12)", marginTop: 8 }} aria-hidden="true" />
       ) : usage.error ? (
@@ -161,22 +162,22 @@ function PointsAllocationCard({ groupId }: { groupId: string }) {
         <>
           {/* 組預算總覽：沒設＝不限，設了就顯示已用/剩餘與分配進度 */}
           {groupBudget != null ? (
-            <div className="hint" style={{ marginTop: 4 }}>
+            <Meta as="div" style={{ marginTop: 4 }}>
               組預算 <b>{groupBudget}</b> 點・已用 {data!.groupUsed}・已分給組員 {allocated}・
               <span style={{ color: unallocated != null && unallocated < 0 ? "var(--danger-ink)" : undefined }}>
                 {unallocated != null && unallocated < 0 ? `超分配 ${-unallocated}` : `未分配 ${unallocated}`}
               </span>
-            </div>
+            </Meta>
           ) : (
-            <div className="hint" style={{ marginTop: 4 }}>這個組沒有設定累計組預算（不限）——仍可為個別組員設個人累計上限。</div>
+            <Meta as="div" style={{ marginTop: 4 }}>這個組沒有設定累計組預算（不限）——仍可為個別組員設個人累計上限。</Meta>
           )}
           {unallocated != null && unallocated < 0 && (
-            <p className="hint" style={{ color: "var(--danger-ink)", marginTop: 4 }}>
+            <Hint layer="always" style={{ color: "var(--danger-ink)", marginTop: 4 }}>
               分配給組員的總和已超過組預算——組員各自的個人上限仍有效，但整組仍受組預算擋著，請斟酌調整。
-            </p>
+            </Hint>
           )}
           {(data!.rows.length === 0) ? (
-            <p className="hint" style={{ marginTop: 8 }}>這個組還沒有成員。</p>
+            <Meta as="p" style={{ marginTop: 8 }}>這個組還沒有成員。</Meta>
           ) : (
             data!.rows.map((m) => <MemberBudgetRow key={m.userId} groupId={groupId} member={m} />)
           )}
@@ -271,10 +272,10 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
     <PointsAllocationCard groupId={groupId} />
     <section className="card" data-fb="組選項編輯器">
       <h2>這一組的選項</h2>
-      <p className="hint">
+      <Hint>
         這裡調整的是「你這個組」建專案與生成時能挑的選項；只有組長或管理員進得來，改完全組立即生效。
         停用的選項不會出現在挑選處，但保留紀錄、隨時可再啟用。
-      </p>
+      </Hint>
 
       {OPTION_TYPES.map((type) => {
         const meta = OPTION_TYPE_META[type];
@@ -282,10 +283,10 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
         return (
           <div key={type} style={{ marginTop: 20, borderTop: "1px solid var(--border-soft)", paddingTop: 14 }}>
             <div style={{ fontWeight: 600, fontSize: "var(--fs-15)" }}>{meta.label}</div>
-            <p className="hint" style={{ marginTop: 2 }}>{meta.hint}</p>
+            <Hint style={{ marginTop: 2 }}>{meta.hint}</Hint>
 
             {rows.length === 0 ? (
-              <p className="hint" style={{ marginTop: 8 }}>還沒有選項——用下面的欄位加一個。</p>
+              <Hint layer="always" style={{ marginTop: 8 }}>還沒有選項——用下面的欄位加一個。</Hint>
             ) : (
               <div style={{ marginTop: 8 }}>
                 {rows.map((o, i) => (
@@ -344,7 +345,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
                       </select>
                     )}
 
-                    {!o.active && <span className="chip">停用中</span>}
+                    {!o.active && <Chip>停用中</Chip>}
 
                     <button
                       disabled={busy}

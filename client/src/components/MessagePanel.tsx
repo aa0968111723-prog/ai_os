@@ -8,6 +8,7 @@ import { DISCUSS_EVENT, jumpToRef, setPlannerFocus, type DiscussRef } from "../d
 import { escapeRegExp, parseMentionedNames } from "@shared/mentions";
 import { useCustomQuickPhrases, MAX_PHRASE_LEN } from "../useCustomQuickPhrases";
 
+import { Button, Hint, Meta } from "./ui";
 /** 單則留言(含回覆摘要／表情彙總／引用卡）——由 messages.list 推得,列元件與父層共用同一形狀 */
 type MessageRowData = inferRouterOutputs<AppRouter>["messages"]["list"]["items"][number];
 
@@ -35,7 +36,7 @@ function TodoForm({ defaultTitle, pending, error, onCancel, onSubmit }: {
       >
         建立待辦
       </button>
-      <button className="btn-sm" onClick={onCancel}>取消</button>
+      <Button size="sm" onClick={onCancel}>取消</Button>
       {error && <span className="error" style={{ flexBasis: "100%" }}>{error}</span>}
     </div>
   );
@@ -57,7 +58,7 @@ function NoteForm({ defaultTitle, defaultContent, pending, error, onCancel, onSu
       <input aria-label="筆記標題" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="筆記標題" />
       <textarea aria-label="筆記內容" value={content} maxLength={5000} onChange={(e) => setContent(e.target.value)} rows={2} style={{ flexBasis: "100%" }} placeholder="筆記內容" />
       <button className="primary btn-sm" disabled={!title.trim() || !content.trim() || pending} onClick={() => onSubmit(title.trim(), content.trim())}>存成筆記</button>
-      <button className="btn-sm" onClick={onCancel}>取消</button>
+      <Button size="sm" onClick={onCancel}>取消</Button>
       {error && <span className="error" style={{ flexBasis: "100%" }}>{error}</span>}
     </div>
   );
@@ -727,14 +728,14 @@ export function MessagePanel({
         </div>
       )}
 
-      {list.isLoading && <p className="hint">載入留言中…</p>}
+      {list.isLoading && <Meta as="p">載入留言中…</Meta>}
       {list.error && (
         <p className="error" role="alert">
           留言載入失敗：{list.error.message}
-          <button type="button" className="btn-sm" style={{ marginLeft: 8 }} onClick={() => list.refetch()}>重試</button>
+          <Button size="sm" style={{ marginLeft: 8 }} onClick={() => list.refetch()}>重試</Button>
         </p>
       )}
-      {!list.isLoading && allMessages.length === 0 && <p className="hint">還沒有留言——留一句給同組夥伴吧。</p>}
+      {!list.isLoading && allMessages.length === 0 && <Hint layer="always">還沒有留言——留一句給同組夥伴吧。</Hint>}
 
       <div
         ref={listRef}
@@ -749,9 +750,9 @@ export function MessagePanel({
       >
         {(olderHasMore || (list.data?.hasMore && !older.length)) && (
           <div style={{ textAlign: "center", marginBottom: 6 }}>
-            <button type="button" className="btn-sm" disabled={loadingOlder} onClick={() => void loadOlder()}>
+            <Button size="sm" disabled={loadingOlder} onClick={() => void loadOlder()}>
               {loadingOlder ? "載入中…" : "載入更早的留言"}
-            </button>
+            </Button>
           </div>
         )}
         {allMessages.map((m) => (
@@ -859,11 +860,11 @@ export function MessagePanel({
                   </button>
                 ))}
               </div>
-              <p className="hint" style={{ margin: 0 }}>
+              <Meta as="p" style={{ margin: 0 }}>
                 {customPhrases.atLimit
                   ? "已達上限，先移除幾則再新增。"
                   : "送出時和內建短語一樣一鍵直送；只存在這台裝置。"}
-              </p>
+              </Meta>
             </div>
           )}
         </span>
@@ -898,7 +899,7 @@ export function MessagePanel({
                 </button>
               ))}
               {!scheduleQ.data?.items.length && !notesQ.data?.length && (
-                <span className="hint" style={{ padding: "8px 12px" }}>還沒有排程或筆記——先到「筆記排程」建立</span>
+                <Hint as="span" layer="always" style={{ padding: "8px 12px" }}>還沒有排程或筆記——先到「筆記排程」建立</Hint>
               )}
             </div>
           )}
@@ -952,7 +953,7 @@ export function MessagePanel({
             {mentionCandidates.map((m) => (
               <button key={m.userId} type="button" role="option" aria-selected="false" onClick={() => insertMention(m.name)}>
                 @{m.name}
-                <span className="hint" style={{ marginLeft: 6 }}>{m.groupRole === "leader" ? "組長" : ""}</span>
+                <Meta style={{ marginLeft: 6 }}>{m.groupRole === "leader" ? "組長" : ""}</Meta>
               </button>
             ))}
           </div>
@@ -980,8 +981,8 @@ export function MessagePanel({
           送出
         </button>
       </div>
-      {recording && <p className="hint" role="status" style={{ color: "var(--danger-ink)" }}>● 錄音中…說完按「停止」送出</p>}
-      {postVoice.isPending && <p className="hint">語音上傳中…</p>}
+      {recording && <Meta as="p" role="status" style={{ color: "var(--danger-ink)" }}>● 錄音中…說完按「停止」送出</Meta>}
+      {postVoice.isPending && <Meta as="p">語音上傳中…</Meta>}
       {voiceErr && <p className="error">{voiceErr}</p>}
       {/* 失敗要讓人看得到:先前送出失敗畫面毫無反應,使用者以為有送出 */}
       {post.error && <p className="error">留言送出失敗：{post.error.message}</p>}

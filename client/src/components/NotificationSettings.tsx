@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "./interactions";
+import { Chip, Hint, Meta } from "./ui";
 import {
   copyLinkDeviceGuide,
   deviceKind,
@@ -204,9 +205,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
           <h2>
             <Icon name="Bell" size={18} style={{ verticalAlign: "-3px" }} /> 連結手機與電腦
           </h2>
-          <p className="hint">
+          <Hint>
             把通知送到你的手機和電腦——關掉網頁、關掉瀏覽器也收得到審批、私訊、@提及與生成完成。
-          </p>
+          </Hint>
         </header>
 
         {/* 狀態總覽 */}
@@ -260,9 +261,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
               <div>
                 {isIOS() && !isStandalone() ? (
                   <>
-                    <p className="hint" style={{ margin: 0 }}>
+                    <Hint layer="always" style={{ margin: 0 }}>
                       iPhone／iPad 必須先<strong>加入主畫面</strong>才能收通知（需 iOS 16.4+）：
-                    </p>
+                    </Hint>
                     <ol className="device-link-ios">
                       <li>用 <strong>Safari</strong> 開啟本站</li>
                       <li>點底部分享 → <strong>加入主畫面</strong></li>
@@ -271,17 +272,17 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                     </ol>
                   </>
                 ) : (
-                  <p className="hint" style={{ margin: 0 }}>
+                  <Hint layer="always" style={{ margin: 0 }}>
                     這個瀏覽器不支援推播——請改用較新的 Chrome、Edge、Firefox 或 Safari。
-                  </p>
+                  </Hint>
                 )}
               </div>
             </div>
           ) : thisEndpoint ? (
             <div className="device-link-actions">
-              <span className="chip" style={{ color: "var(--success-ink)" }}>
+              <Chip style={{ color: "var(--success-ink)" }}>
                 <Icon name="CheckCircle2" size={13} style={{ verticalAlign: "-2px" }} /> 已啟用
-              </span>
+              </Chip>
               <button type="button" className="primary" onClick={() => void sendTest()} disabled={busy}>
                 {busy ? "處理中…" : "發送測試通知"}
               </button>
@@ -300,12 +301,12 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                 {busy ? "連結中…" : "在本裝置啟用通知"}
               </button>
               {publicKey.error && (
-                <span className="hint">通知金鑰暫時讀不到——稍後重開此視窗再試</span>
+                <Meta>通知金鑰暫時讀不到——稍後重開此視窗再試</Meta>
               )}
               {perm === "denied" && (
-                <span className="hint" role="status">
+                <Hint as="span" layer="always" role="status">
                   通知權限被封鎖——請到瀏覽器網站設定把「通知」改為允許
-                </span>
+                </Hint>
               )}
             </div>
           )}
@@ -315,11 +316,11 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
         <section aria-label="已連結裝置">
           <h3 style={{ marginTop: "var(--sp-16)" }}>已連結裝置</h3>
           {devices.isLoading ? (
-            <p className="hint">載入中…</p>
+            <Meta as="p">載入中…</Meta>
           ) : deviceRows.length === 0 ? (
-            <p className="hint">
+            <Hint layer="always">
               還沒有任何裝置——先啟用本裝置，再到手機或另一台電腦用同一帳號重複一次。
-            </p>
+            </Hint>
           ) : (
             <ul className="device-link-list">
               {deviceRows.map((d) => {
@@ -333,7 +334,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                     <span className="device-link-meta">
                       <span className="device-link-name">
                         {d.label ?? "未知裝置"}
-                        {isThis && <span className="chip">本裝置</span>}
+                        {isThis && <Chip>本裝置</Chip>}
                       </span>
                       <span className="meta">最近同步 {relSeen(d.lastSeenAt)}</span>
                     </span>
@@ -359,22 +360,22 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
             </ul>
           )}
           {otherDevices.length === 0 && thisEndpoint && (
-            <p className="hint" style={{ marginTop: 8 }}>
+            <Hint style={{ marginTop: 8 }}>
               目前只有這台——再到手機或另一台電腦啟用一次，兩邊就都能收通知。
-            </p>
+            </Hint>
           )}
         </section>
 
         {/* AUTH-02：登入工作階段（與推播裝置分開——推播是訂閱，這是 cookie session） */}
         <section aria-label="登入裝置">
           <h3 style={{ marginTop: "var(--sp-16)" }}>登入裝置</h3>
-          <p className="hint" style={{ marginTop: 0 }}>
+          <Hint style={{ marginTop: 0 }}>
             這裡列出目前有效的登入工作階段。遺失的手機／共用電腦可單筆撤銷，或一次登出全部。
-          </p>
+          </Hint>
           {sessions.isLoading ? (
-            <p className="hint">載入中…</p>
+            <Meta as="p">載入中…</Meta>
           ) : (sessions.data ?? []).length === 0 ? (
-            <p className="hint">目前沒有有效工作階段。</p>
+            <Meta as="p">目前沒有有效工作階段。</Meta>
           ) : (
             <ul className="device-link-list">
               {(sessions.data ?? []).map((s) => {
@@ -388,7 +389,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                     <span className="device-link-meta">
                       <span className="device-link-name">
                         {label}
-                        {s.isCurrent && <span className="chip">本裝置</span>}
+                        {s.isCurrent && <Chip>本裝置</Chip>}
                       </span>
                       <span className="meta">最近活動 {relSeen(seen)}</span>
                     </span>
@@ -512,9 +513,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
           </p>
         )}
         {notice && (
-          <p className="hint" style={{ color: "var(--success-ink)" }} role="status">
+          <Meta as="p" style={{ color: "var(--success-ink)" }} role="status">
             {notice}
-          </p>
+          </Meta>
         )}
 
         <div style={{ marginTop: "var(--sp-16)" }}>
