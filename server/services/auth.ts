@@ -23,8 +23,13 @@ function isUniqueViolation(err: unknown): boolean {
   return err instanceof Error && err.message.includes("duplicate key");
 }
 
-const SESSION_DAYS = 30;
+/** Absolute session lifetime after mint / sliding renew (days). */
+export const SESSION_DAYS = 30;
+/** Renew when remaining lifetime falls below this (days). */
+export const SESSION_SLIDE_REMAINING_DAYS = 7;
 const COOKIE_NAME = "aidos_session";
+const SESSION_MS = SESSION_DAYS * 86_400_000;
+const SLIDE_REMAINING_MS = SESSION_SLIDE_REMAINING_DAYS * 86_400_000;
 
 /* ── 密碼 ── */
 export async function hashPassword(plain: string): Promise<string> {
@@ -88,13 +93,56 @@ export function sha256(value: string): string {
 
 export async function createSession(userId: string): Promise<string> {
   const token = randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000);
+  const expiresAt = nextSessionExpiry();
   await db.insert(schema.sessions).values({ tokenHash: sha256(token), userId, expiresAt });
   return token;
 }
 
 export async function destroySession(token: string): Promise<void> {
   await db.delete(schema.sessions).where(eq(schema.sessions.tokenHash, sha256(token)));
+}
+
+/** Revoke every session for a user (other devices + current). Caller re-mints if current device should stay signed in. */
+export async function destroyAllUserSessions(userId: string): Promise<number> {
+  const deleted = await db
+    .delete(schema.sessions)
+    .where(eq(schema.sessions.userId, userId))
+    .returning({ id: schema.sessions.id });
+  return deleted.length;
+}
+
+/** Pure: whether `expiresAt` is inside the sliding renew window. */
+export function shouldRenewSession(expiresAt: Date, now: Date = new Date()): boolean {
+  return expiresAt.getTime() - now.getTime() < SLIDE_REMAINING_MS;
+}
+
+export function nextSessionExpiry(now: Date = new Date()): Date {
+  return new Date(now.getTime() + SESSION_MS);
+}
+
+/**
+ * Sliding session renew for an existing cookie token.
+ * Only writes DB + returns renewed=true when remaining lifetime < 7d; otherwise no-op (no write).
+ * Does not rotate the token — only bumps expiresAt and lets the caller refresh Set-Cookie Max-Age.
+ */
+export async function renewSessionIfNeeded(
+  token: string,
+  now: Date = new Date(),
+): Promise<{ renewed: boolean; expiresAt: Date } | null> {
+  const [session] = await db
+    .select()
+    .from(schema.sessions)
+    .where(and(eq(schema.sessions.tokenHash, sha256(token)), gt(schema.sessions.expiresAt, now)));
+  if (!session) return null;
+  if (!shouldRenewSession(session.expiresAt, now)) {
+    return { renewed: false, expiresAt: session.expiresAt };
+  }
+  const expiresAt = nextSessionExpiry(now);
+  await db
+    .update(schema.sessions)
+    .set({ expiresAt })
+    .where(eq(schema.sessions.id, session.id));
+  return { renewed: true, expiresAt };
 }
 
 export function parseCookies(req: Request): Record<string, string> {

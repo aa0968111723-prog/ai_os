@@ -43,6 +43,8 @@ export function AppShell() {
   const [location, navigate] = useLocation();
   const me = trpc.auth.me.useQuery();
   const logout = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
+  const logoutAll = trpc.auth.logoutAll.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
+  const touchSession = trpc.auth.touchSession.useMutation();
   const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
   // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/審批通知）。
   // 盡力而為：解除失敗不擋登出；要再收通知，下次登入後到「連結手機與電腦」重新啟用。
@@ -53,7 +55,41 @@ export function AppShell() {
     } catch { /* 推播清理失敗照樣登出 */ }
     logout.mutate();
   };
+  /** 登出全部裝置：撤銷所有 sessions 後本機換發新 cookie；不撤 MCP（見 AUTH-01）。 */
+  const logoutAllDevices = async () => {
+    try {
+      const endpoint = await unsubscribeThisDevice();
+      if (endpoint) await pushUnsubscribe.mutateAsync({ endpoint });
+    } catch { /* 推播清理失敗照樣登出全部 */ }
+    logoutAll.mutate();
+  };
   const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
+
+  // AUTH-01 sliding：掛載與回到前景時節流呼叫 touchSession（本地 6h），
+  // server 僅在剩餘 < 7 天才寫 DB／刷新 cookie，避免每請求寫庫。
+  useEffect(() => {
+    if (!me.data?.user?.id) return;
+    const TOUCH_KEY = "aios.session.touchAt";
+    const TOUCH_MIN_MS = 6 * 3600_000;
+    const maybeTouch = () => {
+      try {
+        const last = Number(localStorage.getItem(TOUCH_KEY) || "0");
+        if (Number.isFinite(last) && Date.now() - last < TOUCH_MIN_MS) return;
+        localStorage.setItem(TOUCH_KEY, String(Date.now()));
+      } catch {
+        /* private mode：仍嘗試 touch，靠 server 不寫庫節流 */
+      }
+      touchSession.mutate();
+    };
+    maybeTouch();
+    const onVis = () => {
+      if (document.visibilityState === "visible") maybeTouch();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+    // touchSession 穩定 mutation 物件；刻意只跟登入 user id
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me.data?.user?.id]);
 
   // Service Worker 點通知後若無法 navigate，會 postMessage 請前端路由
   useEffect(() => {
@@ -123,7 +159,8 @@ export function AppShell() {
           onChangePw={() => setShowChangePw(true)}
           onNotifSettings={() => setShowNotifSettings(true)}
           onLogout={() => { void logoutWithPushCleanup(); }}
-          loggingOut={logout.isPending}
+          onLogoutAll={() => { void logoutAllDevices(); }}
+          loggingOut={logout.isPending || logoutAll.isPending}
         />}
 
         {/* 新版已下載完成時由使用者主動更新；不在編輯途中自動刷新。 */}
