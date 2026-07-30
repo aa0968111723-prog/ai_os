@@ -14,7 +14,23 @@ from concurrent.futures import ThreadPoolExecutor
 HOST = f"http://localhost:{os.environ.get('E2E_PORT', '3199')}"
 EMAIL = os.environ.get("SEED_ADMIN_EMAIL", "admin@aidirector.local")
 PW = os.environ.get("SEED_ADMIN_PASSWORD", "test-admin-123")
-DB = os.environ.get("PGDATABASE", "postgres")
+
+def _db_from_url():
+    """Prefer PGDATABASE; else path of DATABASE_URL（本機 docker 常用 aidirector）。"""
+    if os.environ.get("PGDATABASE"):
+        return os.environ["PGDATABASE"]
+    url = os.environ.get("DATABASE_URL") or ""
+    if url:
+        try:
+            from urllib.parse import urlparse
+            path = (urlparse(url).path or "").lstrip("/")
+            if path:
+                return path.split("?")[0] or "postgres"
+        except Exception:
+            pass
+    return "postgres"
+
+DB = _db_from_url()
 PGHOST = os.environ.get("PGHOST", "localhost")
 PGUSER = os.environ.get("PGUSER", "postgres")
 
@@ -25,17 +41,24 @@ def ok(name, cond, detail=""):
     else: _failed += 1; print(f"❌ {name}" + (f"  — {detail}" if detail else ""))
 
 def _psql(sql):
+    """跑一條 SQL（-tAc）。本機有 psql 優先；否則用 Docker 容器內 psql。
+
+    容器名：E2E_PG_CONTAINER 或 E2E_PSQL_DOCKER（run-e2e-local 兩者對齊）。
+    """
     env = {**os.environ, "PGPASSWORD": os.environ.get("PGPASSWORD", "postgres")}
+    container = os.environ.get("E2E_PG_CONTAINER") or os.environ.get("E2E_PSQL_DOCKER")
     if shutil.which("psql"):
         command = ["psql", f"host={PGHOST} user={PGUSER} dbname={DB}", "-tAc", sql]
-    elif os.environ.get("E2E_PG_CONTAINER"):
+    elif container:
         command = [
             "docker", "exec", "-e", f"PGPASSWORD={env['PGPASSWORD']}",
-            os.environ["E2E_PG_CONTAINER"],
+            container,
             "psql", "-U", PGUSER, "-d", DB, "-tAc", sql,
         ]
     else:
-        raise RuntimeError("psql 不在 PATH；Docker 測試請設定 E2E_PG_CONTAINER")
+        raise RuntimeError(
+            "psql 不在 PATH；Docker 測試請設定 E2E_PG_CONTAINER 或 E2E_PSQL_DOCKER（例：stress-pg）"
+        )
     return subprocess.run(command, capture_output=True, text=True, env=env, check=True).stdout.strip()
 
 # ── tRPC（cookie 手動保存：production cookie 帶 Secure，不會經 http 自動回送）──
@@ -234,7 +257,7 @@ g, r = call("stop_agent", {"runId": RUN}, FULL); ok("18. stop_agent", g and r["s
 g, r2 = call("plan_agent", {"projectId": PID, "goal": "另一個計畫供放棄測試用途"}, FULL)
 RUN2 = r2.get("runId") if g and isinstance(r2, dict) else None
 g, r = call("discard_agent", {"runId": RUN2}, FULL); ok("19. discard_agent", g and r["status"] == "discarded")
-future = (datetime.datetime.utcnow() + datetime.timedelta(days=5)).replace(microsecond=0).isoformat() + "Z"
+future = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=5)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 g, r = call("add_schedule_item", {"projectId": PID, "title": "交付死線", "startsAt": future}, FULL)
 SCH = r.get("id") if g and isinstance(r, dict) else None
 ok("20. add_schedule_item", g and SCH)
