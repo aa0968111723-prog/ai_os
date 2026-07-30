@@ -29,7 +29,7 @@ export function CreationGoalInput({
         onChange={(e) => onGoalChange(e.target.value)}
         style={{ width: "100%", resize: "vertical", minHeight: 56 }}
       />
-      <p className="hint" style={{ margin: "4px 0 0" }}>
+      <p className="hint creation-goal-persist-hint" style={{ margin: "4px 0 0" }}>
         目標會跨模式保留；切換「問 AI / 直接生成 / 製作範本 / 執行計畫」不會清空。
       </p>
     </div>
