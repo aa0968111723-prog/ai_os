@@ -27,10 +27,6 @@ sha2 = "0.10"
 mime_guess = "2"
 url = "2"
 walkdir = "2"
-thiserror = "2"
-
-[target.'cfg(windows)'.dependencies]
-windows-registry = "0.5"
 
 [features]
 default = ["custom-protocol"]
