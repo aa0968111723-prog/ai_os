@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { BRAND_NAME, BRAND_TAGLINE } from "../brand";
-import { BrandLogo } from "./BrandLogo";
 import { BrandReveal } from "./BrandReveal";
+
+/** Highest-res clean A mark for splash (v2 transparent) */
+const SPLASH_MARK_SRC = "/brand/icon-aios-v2-1024.png";
 
 /**
  * Animated splash screen — fades in logo + title, then fades out when `ready`.
@@ -58,12 +60,18 @@ export function SplashScreen({
       <div className="aios-splash__inner">
         <BrandReveal mode="fade-rise" onceKey="splash" durationMs={720}>
           <div className="aios-splash__logo-wrap">
-            <BrandLogo
-              variant="full"
-              size="hero"
-              priority
-              decorative
-              className="aios-splash__logo"
+            {/* Direct high-res 1024 mark for sharpest possible first impression on mobile */}
+            <img
+              className="aios-splash__logo aios-splash__logo--mark"
+              src={SPLASH_MARK_SRC}
+              alt=""
+              width={160}
+              height={160}
+              draggable={false}
+              aria-hidden
+              decoding="async"
+              loading="eager"
+              fetchPriority="high"
             />
             <div className="aios-splash__glow" aria-hidden />
           </div>
