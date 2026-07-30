@@ -1,5 +1,7 @@
 use crate::models::{DetectedEditor, EditorLaunch, ExternalEditorKind};
-use std::{env, fs, path::{Path, PathBuf}, process::Command};
+use std::{env, path::{Path, PathBuf}, process::Command};
+#[cfg(target_os = "macos")]
+use std::fs;
 use walkdir::WalkDir;
 
 fn editor(
@@ -39,6 +41,7 @@ fn existing_first(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
     paths.into_iter().find(|p| p.exists())
 }
 
+#[cfg(target_os = "windows")]
 fn find_file_limited(root: &Path, names: &[&str], max_depth: usize) -> Option<PathBuf> {
     if !root.exists() { return None; }
     let targets: Vec<String> = names.iter().map(|n| n.to_ascii_lowercase()).collect();
@@ -161,52 +164,24 @@ pub fn select_editor(editor_id: Option<&str>, kind: &ExternalEditorKind) -> Opti
 
 pub fn launch_editor(editor: &DetectedEditor, file: &Path) -> Result<(), String> {
     if !editor.installed { return Err(format!("找不到已安裝的 {}", editor.name)); }
-    let mut command = match &editor.launch {
-        EditorLaunch::SystemDefault => {
-            #[cfg(target_os = "windows")]
-            {
-                let mut cmd = Command::new("cmd");
-                cmd.args(["/C", "start", "", &file.to_string_lossy()]);
-                cmd
-            }
-            #[cfg(target_os = "macos")]
-            {
-                let mut cmd = Command::new("/usr/bin/open");
-                cmd.arg(file);
-                cmd
-            }
-            #[cfg(target_os = "linux")]
-            {
-                let mut cmd = Command::new("xdg-open");
-                cmd.arg(file);
-                cmd
-            }
-        }
-        EditorLaunch::Executable(path) => {
-            let mut cmd = Command::new(path);
-            cmd.arg(file);
-            cmd
-        }
-        EditorLaunch::MacApplication(path) => {
-            let mut cmd = Command::new("/usr/bin/open");
-            cmd.arg("-a").arg(path).arg(file);
-            cmd
-        }
-        EditorLaunch::Command(name) => {
-            let mut cmd = Command::new(name);
-            cmd.arg(file);
-            cmd
-        }
-    };
-    command.spawn().map(|_| ()).map_err(|err| format!("啟動 {} 失敗：{err}", editor.name))
+    match &editor.launch {
+        EditorLaunch::SystemDefault => tauri_plugin_opener::open_path(file, None::<&str>)
+            .map_err(|err| format!("用系統預設程式開啟失敗：{err}")),
+        EditorLaunch::Executable(path) => tauri_plugin_opener::open_path(file, Some(path.to_string_lossy().as_ref()))
+            .map_err(|err| format!("啟動 {} 失敗：{err}", editor.name)),
+        EditorLaunch::MacApplication(path) => Command::new("/usr/bin/open")
+            .arg("-a")
+            .arg(path)
+            .arg(file)
+            .spawn()
+            .map(|_| ())
+            .map_err(|err| format!("啟動 {} 失敗：{err}", editor.name)),
+        EditorLaunch::Command(name) => tauri_plugin_opener::open_path(file, Some(name.as_str()))
+            .map_err(|err| format!("啟動 {} 失敗：{err}", editor.name)),
+    }
 }
 
 pub fn reveal_in_folder(path: &Path) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    let result = Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();
-    #[cfg(target_os = "macos")]
-    let result = Command::new("/usr/bin/open").arg("-R").arg(path).spawn();
-    #[cfg(target_os = "linux")]
-    let result = Command::new("xdg-open").arg(path.parent().unwrap_or(path)).spawn();
-    result.map(|_| ()).map_err(|err| format!("無法在檔案管理器顯示：{err}"))
+    tauri_plugin_opener::reveal_item_in_dir(path)
+        .map_err(|err| format!("無法在檔案管理器顯示：{err}"))
 }
