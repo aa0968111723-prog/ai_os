@@ -48,6 +48,9 @@ export function Hint({
       <button
         type="button"
         className="btn-ghost btn-sm"
+        // btn-sm 的水平內距只撐到 38px 寬，未達計畫 §4 的 44px 觸控目標；
+        // 高度本來就有 44px，這裡把寬度補齊成正方形。
+        style={{ minWidth: 44 }}
         aria-expanded={open}
         aria-controls={id}
         aria-label={toggleLabel}

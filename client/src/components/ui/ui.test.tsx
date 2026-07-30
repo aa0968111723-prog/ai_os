@@ -213,6 +213,15 @@ describe("Hint — 新手／專家分層", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
+  it("問號按鈕的觸控目標達 44px（btn-sm 只撐到 38px 寬）", () => {
+    render(
+      <DensityProvider value="concise">
+        <Hint>說明文字</Hint>
+      </DensityProvider>,
+    );
+    expect(screen.getByRole("button", { name: "顯示說明" })).toHaveStyle({ minWidth: "44px" });
+  });
+
   it("展開的說明由問號按鈕以 aria-controls 指向", async () => {
     render(
       <DensityProvider value="concise">
