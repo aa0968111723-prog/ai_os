@@ -1,5 +1,6 @@
 import { Redirect, Route, Switch, useLocation } from "wouter";
 import { AcceptInvitePage } from "../pages/AcceptInvitePage";
+import { DesktopCompanionPage } from "../pages/DesktopCompanionPage";
 import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AppRoutes, UngroupedRoutes } from "./AppRoutes";
@@ -66,6 +67,8 @@ export function SessionGate({
         ) : (
           <Switch>
             <Route path="/login"><Redirect to="/dashboard" /></Route>
+            {/* 桌面剪輯連接只在已登入且已有專案權限時可進；頁面內再辨識是否真為 Tauri 桌面環境。 */}
+            <Route path="/desktop"><DesktopCompanionPage /></Route>
             <Route>
               <AppRoutes
                 activeGroupId={activeGroupId}
