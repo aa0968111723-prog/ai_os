@@ -65,7 +65,7 @@ export const scenesRouter = router({
       })
       .from(schema.scenes)
       // JOIN 也要排除軟刪素材：deleteAsset 刻意保留 scenes.assetId（供還原），若 join 不濾 deletedAt，
-      // 該格會繼續顯示已刪素材的縮圖/音檔——與交付包（exporter 已濾）不一致。還原後 join 自動重連。
+      // 該格會繼續顯示已刪素材的縮圖/音檔——與交付包（box 已濾）不一致。還原後 join 自動重連。
       .leftJoin(schema.assets, and(eq(schema.scenes.assetId, schema.assets.id), isNull(schema.assets.deletedAt)))
       .leftJoin(narrationAssets, and(eq(schema.scenes.narrationAssetId, narrationAssets.id), isNull(narrationAssets.deletedAt)))
       // 排除已軟刪除（回收桶）的分鏡——漏掉這個過濾會讓刪掉的分鏡繼續出現在列表
@@ -251,7 +251,7 @@ export const scenesRouter = router({
     return { ok: true };
   }),
 
-  /** 就地編輯分鏡欄位（標題／秒數／旁白）：只更新有帶的欄位 */
+  /** 就地編輯分鏡欄位（標題／秒數／旁白／提示詞）：只更新有帶的欄位 */
   update: authedProcedure
     .input(
       z.object({
@@ -259,6 +259,8 @@ export const scenesRouter = router({
         title: z.string().min(1).max(60).optional(),
         durationSec: z.number().int().min(1).max(60).optional(),
         voiceover: z.string().max(2000).optional(),
+        // 獨立單格修：允許就地改提示詞，之後「重生這一格」用新 prompt（不影響其他格）
+        prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -272,6 +274,7 @@ export const scenesRouter = router({
       if (input.title !== undefined) patch.title = input.title;
       if (input.durationSec !== undefined) patch.durationSec = input.durationSec;
       if (input.voiceover !== undefined) patch.voiceover = input.voiceover;
+      if (input.prompt !== undefined) patch.prompt = input.prompt;
       if (Object.keys(patch).length === 0) return scene; // 無欄位可更，回原狀
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, input.sceneId)).returning();
       return updated;
