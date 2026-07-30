@@ -24,7 +24,8 @@ export function Meta({
   children,
   ...rest
 }: {
-  /** 內容的形狀很多樣：條列（ul/ol/li）、段落、可收合區的標頭（summary）都用得上 */
+  /** 內容的形狀很多樣：條列（ul/ol/li）、段落、可收合區的標頭（summary）都用得上。
+   *  刻意不含 th/td —— 表頭的 scope 屬於 ThHTMLAttributes，塞進來會讓型別謊報。 */
   as?: "span" | "p" | "div" | "ul" | "ol" | "li" | "small" | "summary";
   className?: string;
   children?: ReactNode;

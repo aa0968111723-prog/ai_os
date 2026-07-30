@@ -8,6 +8,7 @@ import { useLocalDraft } from "../useLocalDraft";
 import { MentionInput, resolveMentions } from "../components/MentionInput";
 import { flashAnchor, takePlannerFocus } from "../discuss";
 
+import { Button, Chip, Hint, Meta } from "../components/ui";
 /**
  * 筆記排程（需求 #10）：組內共用的「排程表＋會議筆記＋知識地圖」一頁。
  * - 組排程：可掛專案、可直連 Google 日曆自動同步（.ics 匯出保留為後備）；清單／月曆兩種檢視（真實日曆）。
@@ -232,9 +233,9 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
     return (
       <>
         {icsFallback}
-        <span className="hint" style={{ margin: 0 }}>
+        <Hint as="span" layer="always" style={{ margin: 0 }}>
           系統尚未設定 Google 日曆連線，目前不會自動同步；請下載 .ics 匯入個人日曆，內容更新後需重新下載
-        </span>
+        </Hint>
       </>
     );
   }
@@ -244,7 +245,7 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
         <a href="/api/google/oauth/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <Icon name="CalendarPlus" size={14} />連結 Google 日曆（自動同步）
         </a>
-        <span className="hint" style={{ margin: 0 }}>{flash ?? "連結後排程增刪改自動出現在你的 Google 日曆，免匯出匯入"}</span>
+        <Meta style={{ margin: 0 }}>{flash ?? "連結後排程增刪改自動出現在你的 Google 日曆，免匯出匯入"}</Meta>
         {icsFallback}
       </>
     );
@@ -252,9 +253,9 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
   if (st.status === "error") {
     return (
       <>
-        <span className="hint" style={{ margin: 0, color: "var(--danger, #b3261e)" }} title={st.lastError ?? undefined}>
+        <Meta style={{ margin: 0, color: "var(--danger, #b3261e)" }} title={st.lastError ?? undefined}>
           Google 日曆授權已失效
-        </span>
+        </Meta>
         <a href="/api/google/oauth/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
           <Icon name="CalendarPlus" size={14} />重新連結
         </a>
@@ -264,14 +265,14 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
   const lastSync = st.lastSyncAt ? new Date(st.lastSyncAt).toLocaleString("zh-TW") : "排入佇列中";
   return (
     <>
-      <span className="hint" style={{ margin: 0 }} title={`最後同步：${lastSync}${st.lastError ? `；上次錯誤：${st.lastError}` : ""}`}>
+      <Meta style={{ margin: 0 }} title={`最後同步：${lastSync}${st.lastError ? `；上次錯誤：${st.lastError}` : ""}`}>
         <Icon name="CalendarPlus" size={13} /> 已連結 Google 日曆{st.googleEmail ? `（${st.googleEmail}）` : ""}・自動同步中
-      </span>
-      {flash && <span className="hint" style={{ margin: 0 }}>{flash}</span>}
-      <button type="button" className="btn-sm" onClick={() => syncNow.mutate()} disabled={syncNow.isPending} title="平常不用按：增刪改會自動同步；這顆給想立即確認的人">
+      </Meta>
+      {flash && <Meta style={{ margin: 0 }}>{flash}</Meta>}
+      <Button size="sm" onClick={() => syncNow.mutate()} disabled={syncNow.isPending} title="平常不用按：增刪改會自動同步；這顆給想立即確認的人">
         {syncNow.isPending ? "同步中…" : "立即同步"}
-      </button>
-      {syncNow.isError && <span className="hint" style={{ margin: 0, color: "var(--danger, #b3261e)" }}>{syncNow.error.message}</span>}
+      </Button>
+      {syncNow.isError && <Meta style={{ margin: 0, color: "var(--danger, #b3261e)" }}>{syncNow.error.message}</Meta>}
       <ConfirmButton
         onConfirm={() => disconnect.mutate()}
         title="中斷 Google 日曆連結？"
@@ -409,7 +410,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
           </button>
           </div>
         </div>
-        <p className="hint">拍攝、開會、上片時間都排在這裡，全組看同一份，不再翻對話記錄找時間。</p>
+        <Hint>拍攝、開會、上片時間都排在這裡，全組看同一份，不再翻對話記錄找時間。</Hint>
 
       {/* 頂部工具列：Google 日曆直連同步（主）＋ .ics 匯出（後備）＋（清單檢視）顯示過去行程 */}
       <div className="planner-sync-bar" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
@@ -454,7 +455,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
         <button className="primary schedule-create-form__submit" style={{ flex: "none" }} disabled={!canAdd} onClick={submit}>
           {add.isPending ? "加入中…" : "加入"}
         </button>
-        {addDisabledReason && <span className="hint" style={{ alignSelf: "center" }}>{addDisabledReason}</span>}
+        {addDisabledReason && <Hint as="span" layer="always" style={{ alignSelf: "center" }}>{addDisabledReason}</Hint>}
       </div>
       {/* 結束早於開始屬輸入錯誤：用 .error 樣式即時顯示，別讓人當成普通提示忽略 */}
       {endInvalid && <p className="error" role="alert" style={{ marginTop: 6 }}>結束時間要晚於開始時間</p>}
@@ -495,7 +496,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
                         {ev.title}
-                        {projTitle && <span className="chip" style={{ margin: "0 0 0 8px" }}>{projTitle}</span>}
+                        {projTitle && <Chip style={{ margin: "0 0 0 8px" }}>{projTitle}</Chip>}
                         {ev.mentions?.length ? <span className="chip" style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {ev.mentions.length}</span> : null}
                       </div>
                       {(ev.note || ev.ownerName) && (
@@ -531,9 +532,9 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
       )}
       {/* QA-017：超過單頁上限時明示——不再讓使用者以為行程只有這些 */}
       {scheduleTruncated && (
-        <p className="hint" role="alert" style={{ color: "var(--gold-ink)", marginTop: 8 }}>
+        <Meta as="p" role="alert" style={{ color: "var(--gold-ink)", marginTop: 8 }}>
           ⚠ 行程超過單頁上限（300 筆），較晚的行程未顯示——可用專案篩選或刪除過期行程縮小範圍
-        </p>
+        </Meta>
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
     </PlannerSection>
@@ -596,13 +597,13 @@ function CalendarView({
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-        <button className="btn-sm" onClick={() => goMonth(-1)} aria-label="上個月">
+        <Button size="sm" onClick={() => goMonth(-1)} aria-label="上個月">
           <Icon name="ChevronRight" size={14} style={{ transform: "rotate(180deg)" }} />
-        </button>
+        </Button>
         <strong style={{ fontSize: "var(--fs-15)" }}>{monthLabel}</strong>
-        <button className="btn-sm" onClick={() => goMonth(1)} aria-label="下個月">
+        <Button size="sm" onClick={() => goMonth(1)} aria-label="下個月">
           <Icon name="ChevronRight" size={14} />
-        </button>
+        </Button>
         <button className="btn-sm btn-ghost" onClick={() => { setCursor(new Date(today.getFullYear(), today.getMonth(), 1)); setSelectedKey(null); }}>
           回本月
         </button>
@@ -656,7 +657,7 @@ function CalendarView({
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
                     {ev.title}
-                    {projTitle && <span className="chip" style={{ margin: "0 0 0 8px" }}>{projTitle}</span>}
+                    {projTitle && <Chip style={{ margin: "0 0 0 8px" }}>{projTitle}</Chip>}
                   </div>
                   {(ev.note || ev.ownerName) && <div className="meta">{[ev.ownerName, ev.note].filter(Boolean).join("・")}</div>}
                   {ev.planRunId && ev.projectId && (
@@ -789,7 +790,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
       title="筆記・會議紀錄"
       lede="集中會議決議、待辦與可追溯版本的共用筆記"
     >
-        <p className="hint">會議決議、待辦、想法都記在這裡，全組共用；內容更新會自動保留版本快照，不怕改壞。可從專案知識庫一鍵匯入既有內容。</p>
+        <Hint>會議決議、待辦、想法都記在這裡，全組共用；內容更新會自動保留版本快照，不怕改壞。可從專案知識庫一鍵匯入既有內容。</Hint>
 
       {list.isLoading ? (
         <div style={{ marginTop: 8 }} aria-hidden="true">
@@ -810,7 +811,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
                     {n.title}
-                    {projTitle && <span className="chip" style={{ margin: "0 0 0 8px" }}>{projTitle}</span>}
+                    {projTitle && <Chip style={{ margin: "0 0 0 8px" }}>{projTitle}</Chip>}
                     {n.mentions?.length ? <span className="chip" style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {n.mentions.length}</span> : null}
                   </div>
                   <div className="meta">{n.excerpt}{n.chars > n.excerpt.length ? "…" : ""}（{n.chars.toLocaleString()} 字）</div>
@@ -827,7 +828,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 4 }}>
-                  <button className="btn-sm" onClick={() => openEdit(n)}>編輯</button>
+                  <Button size="sm" onClick={() => openEdit(n)}>編輯</Button>
                   <ConfirmButton
                     onConfirm={() => remove.mutate({ id: n.id })}
                     message={`刪除筆記「${n.title}」？`}
@@ -870,7 +871,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
           />
           {/* 即時字數（與知識庫同款）：maxLength 會把超長貼上靜默截尾，計數＋觸頂警示讓截斷不再無聲 */}
           {contentReady && <CharCount value={content} max={40000} />}
-          <p className="hint" style={{ marginTop: 4 }}>（編輯中的內容會自動暫存在本機——切組、重整、手機切換都不會不見）</p>
+          <Hint style={{ marginTop: 4 }}>（編輯中的內容會自動暫存在本機——切組、重整、手機切換都不會不見）</Hint>
 
           {/* 從知識庫匯入：把某專案知識庫的一筆全文附加到內容尾端（4.4「匯入知識」） */}
           {contentReady && (
@@ -900,16 +901,16 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
               <option key={p.id} value={p.id}>{p.title}</option>
             ))}
           </select>
-          {editingId && <p className="hint" style={{ marginTop: 4 }}>內容更新會自動保留版本快照</p>}
+          {editingId && <Hint style={{ marginTop: 4 }}>內容更新會自動保留版本快照</Hint>}
           <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button className="primary" disabled={!canSave} onClick={save}>
               {saving ? "儲存中…" : "儲存"}
             </button>
             <button onClick={closeForm}>取消</button>
             {!canSave && !saving && (
-              <span className="hint">
+              <Meta>
                 {!contentReady ? "全文載入中…" : !title.trim() ? "先填標題" : !content.trim() ? "先填內容" : ""}
-              </span>
+              </Meta>
             )}
           </div>
           {(add.error || update.error || full.error) && (
@@ -979,7 +980,7 @@ function KnowledgeImport({
         <strong style={{ fontSize: "var(--fs-13)" }}>從知識庫匯入</strong>
         <button type="button" className="btn-sm btn-ghost" style={{ marginLeft: "auto" }} onClick={() => setOpen(false)}>收合</button>
       </div>
-      <p className="hint" style={{ marginTop: 4 }}>選一個專案的知識（開示稿／見證／腳本…），把全文附加到這則筆記的內容尾端。</p>
+      <Hint style={{ marginTop: 4 }}>選一個專案的知識（開示稿／見證／腳本…），把全文附加到這則筆記的內容尾端。</Hint>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 6 }}>
         <div style={{ flex: "1 1 180px" }}>
           <label htmlFor="kb-attach-project">專案</label>
@@ -1388,10 +1389,10 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
       title="知識地圖・心智圖"
       lede="依專案與資料型別探索組內知識關聯"
     >
-        <p className="hint">
+        <Hint>
         本組知識族譜一張圖：中心是本組，往外是專案／組層級／資料庫分支，再往外是筆記（藍）、行程（琥珀）、知識庫（綠）、AI 執行計畫（紫）與資料庫（青）。
         點任一節點看詳情，一鍵跳到那筆、進專案頁或打開資料庫。節點可以自由拖拉排版（位置記在這台裝置）；空白處拖曳平移、滾輪或右上角按鈕縮放。
-        </p>
+        </Hint>
 
       {/* 鏡頭：全組／我的／提及我 ＋ 專案聚焦（團隊／個人／專案三個維度） */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
@@ -1427,10 +1428,10 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
           </select>
         </div>
         {counts && (
-          <span className="hint" style={{ margin: 0 }}>
+          <Meta style={{ margin: 0 }}>
             筆記 {counts.note}・行程 {counts.schedule}・知識 {counts.knowledge}・代理 {counts.agent}・資料庫 {counts.db}
             {graph && graph.hiddenBranchCount > 0 ? `・另有 ${graph.hiddenBranchCount} 個分支未畫（過密）` : ""}
-          </span>
+          </Meta>
         )}
       </div>
 
@@ -1445,7 +1446,7 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
         <span className="map-legend"><span className="map-dot bucket" /> 組層級</span>
       </div>
       {lens === "mentioned" && (
-        <p className="hint" style={{ marginTop: 6 }}>「提及我」只適用有 @提及 的筆記與行程；知識、代理與資料庫在此鏡頭下不顯示。</p>
+        <Hint style={{ marginTop: 6 }}>「提及我」只適用有 @提及 的筆記與行程；知識、代理與資料庫在此鏡頭下不顯示。</Hint>
       )}
 
       {graphQ.isLoading ? (
@@ -1464,13 +1465,13 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
         <div className="map-wrap" style={{ marginTop: 12 }}>
           {/* 畫布工具：縮放與重設（浮在右上角）；佈局被拖過才出現「重設佈局」 */}
           <div className="map-tools">
-            <button type="button" className="btn-sm" onClick={() => zoomAt(W / 2, H / 2, 1.2)} aria-label="放大" title="放大">＋</button>
-            <button type="button" className="btn-sm" onClick={() => zoomAt(W / 2, H / 2, 1 / 1.2)} aria-label="縮小" title="縮小">－</button>
+            <Button size="sm" onClick={() => zoomAt(W / 2, H / 2, 1.2)} aria-label="放大" title="放大">＋</Button>
+            <Button size="sm" onClick={() => zoomAt(W / 2, H / 2, 1 / 1.2)} aria-label="縮小" title="縮小">－</Button>
             {(view.s !== 1 || view.tx !== 0 || view.ty !== 0) && (
-              <button type="button" className="btn-sm" onClick={resetView} title="回到原始平移與縮放">重設檢視</button>
+              <Button size="sm" onClick={resetView} title="回到原始平移與縮放">重設檢視</Button>
             )}
             {hasCustomLayout && (
-              <button type="button" className="btn-sm" onClick={resetLayout} title="清除拖拉過的節點位置，回到自動佈局">重設佈局</button>
+              <Button size="sm" onClick={resetLayout} title="清除拖拉過的節點位置，回到自動佈局">重設佈局</Button>
             )}
           </div>
           {/* role=group（非 img）：img 會讓報讀器把整張圖當單一圖片，內部所有可點節點對 AT 隱形 */}
@@ -1550,12 +1551,12 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
         <div className="map-detail" role="status">
           <div style={{ minWidth: 0, flex: 1 }}>
             <strong style={{ fontSize: "var(--fs-14)", display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>{selected.label}</strong>
-            <span className="hint" style={{ margin: 0 }}>{selected.sub}</span>
+            <Meta style={{ margin: 0 }}>{selected.sub}</Meta>
           </div>
           {selected.nav && (
-            <button className="btn-sm primary" onClick={() => go(selected.nav)}>
+            <Button size="sm" variant="primary" onClick={() => go(selected.nav)}>
               {navLabel(selected.nav)}
-            </button>
+            </Button>
           )}
           <button className="btn-sm btn-ghost" onClick={() => setSelected(null)} aria-label="關閉詳情">關閉</button>
         </div>

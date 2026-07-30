@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
+import { Button, Card, Hint, Meta } from "../components/ui";
 import {
   CATEGORIES,
   MODELS,
@@ -129,9 +130,9 @@ export function ModelsPage() {
             <Icon name="Check" size={12} />已驗證
           </span>
         ) : (
-          <span className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <Meta style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             <Icon name="TriangleAlert" size={12} />待首跑確認
-          </span>
+          </Meta>
         ),
     },
   ];
@@ -184,9 +185,9 @@ export function ModelsPage() {
 
       {/* ── 需求 #1:並排比較——勾 2–4 個模型,這張卡置頂(sticky)浮出 ── */}
       {compareList.length === 1 && (
-        <p className="hint" style={{ margin: "0 0 var(--sp-16)" }}>
+        <Hint style={{ margin: "0 0 var(--sp-16)" }}>
           已勾 1 個模型——再勾 1 個就會浮出並排比較表(最多 {COMPARE_MAX} 個)。
-        </p>
+        </Hint>
       )}
       {compareList.length >= 2 && (
         <section
@@ -198,7 +199,7 @@ export function ModelsPage() {
             <Icon name="Scale" size={16} />
             <b>並排比較({compareList.length}/{COMPARE_MAX})</b>
             <span className="spacer" />
-            <button className="btn-ghost btn-sm" onClick={() => setCompareIds([])}>清空比較</button>
+            <Button variant="ghost" size="sm" onClick={() => setCompareIds([])}>清空比較</Button>
           </div>
           {/* 小螢幕:表格保住最小寬,由外層橫向捲動 */}
           <div style={{ overflowX: "auto", marginTop: 8 }}>
@@ -240,12 +241,12 @@ export function ModelsPage() {
       )}
 
       {/* ── 深度優化:決策中心——三種模式回答「怎麼選模型」 ── */}
-      <section className="card card--primary" data-fb="模型決策中心" style={{ marginBottom: "var(--sp-16)" }}>
+      <Card as="section" variant="primary" data-fb="模型決策中心" style={{ marginBottom: "var(--sp-16)" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           <h2 style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Icon name="Sparkles" size={18} />怎麼選模型?
           </h2>
-          <span className="hint">先想「我要做什麼」,再看該用哪個——不必先懂 11 類分法。</span>
+          <Hint as="span">先想「我要做什麼」,再看該用哪個——不必先懂 11 類分法。</Hint>
         </div>
 
         {/* 三種決策模式(segmented) */}
@@ -362,13 +363,13 @@ export function ModelsPage() {
             </div>
 
             {!wizardReady ? (
-              <p className="hint" style={{ margin: "12px 0 0" }}>
+              <Hint style={{ margin: "12px 0 0" }}>
                 {!wizCategory
                   ? "先答第 1 題:點一個創作類別。"
                   : !wizTier
                     ? `已選「${WIZARD_CATEGORIES.find((c) => c.id === wizCategory)?.label ?? ""}」——接著答第 2 題,挑個預算傾向。`
                     : "最後一題:有沒有來源素材?答完推薦立刻出現。"}
-              </p>
+              </Hint>
             ) : (
               <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)" }}>
                 {wizardResults.map((m) => (
@@ -391,28 +392,28 @@ export function ModelsPage() {
                         {copiedId === m.id ? <><Icon name="Check" size={12} />已複製</> : "複製模型 ID"}
                       </button>
                     </div>
-                    <p className="hint" style={{ margin: "4px 0 0" }}>
+                    <Meta as="p" style={{ margin: "4px 0 0" }}>
                       {m.strengths}
                       {wizSource === "yes" && m.needs ? `|需要來源:${m.sourceHint ?? NEEDS_LABEL[m.needs]}` : ""}
-                    </p>
+                    </Meta>
                   </div>
                 ))}
                 {wizardResults.length === 0 && (
-                  <p className="hint" style={{ margin: "12px 0 0" }}>這個組合目前沒有模型——換個預算檔試試。</p>
+                  <Hint layer="always" style={{ margin: "12px 0 0" }}>這個組合目前沒有模型——換個預算檔試試。</Hint>
                 )}
               </div>
             )}
           </div>
         )}
-      </section>
+      </Card>
 
       {/* ── 完整目錄:搜尋/類別/檔次篩選＋模型清單(決策中心「在目錄看同類」捲到這) ── */}
       <div ref={catalogRef} style={{ scrollMarginTop: "var(--sp-16)" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginTop: 28, marginBottom: "var(--sp-8)" }}>
           <h2 style={{ margin: 0 }}>完整目錄</h2>
-          <span className="hint">
+          <Meta>
             搜尋、按類別或檔次瀏覽全部 {MODELS.length} 個模型；目前顯示 {visibleCatalogItems.length}/{catalogItems.length}。
-          </span>
+          </Meta>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: "var(--sp-16)" }}>
@@ -439,7 +440,7 @@ export function ModelsPage() {
               </button>
             )}
           </span>
-          {q && <span className="hint">搜尋涵蓋全部類別</span>}
+          {q && <Meta>搜尋涵蓋全部類別</Meta>}
           {!q && <span className="eyebrow cjk">類別</span>}
           {!q &&
             (categories.data ?? []).filter((c) => c.id !== "workflow").map((c) => {
@@ -502,8 +503,8 @@ export function ModelsPage() {
                 <b>{m.label}</b>
                 <span className="pill" style={TIER_STYLE[m.tier]}>{m.tierLabel}</span>
                 <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span>
-                <span className="hint mono" style={{ fontSize: 11 }}>{m.cost}</span>
-                {!m.verified && <span className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}><Icon name="TriangleAlert" size={12} />待正式模式首跑確認</span>}
+                <Meta className="mono" style={{ fontSize: 11 }}>{m.cost}</Meta>
+                {!m.verified && <Meta style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}><Icon name="TriangleAlert" size={12} />待正式模式首跑確認</Meta>}
                 {/* 需求 #1:勾選加入並排比較;滿 4 個時其餘停用 */}
                 <label
                   className="hint"
@@ -523,7 +524,7 @@ export function ModelsPage() {
                 </label>
               </div>
               <p style={{ margin: "6px 0 2px", fontSize: "var(--fs-14)" }}>{m.strengths}</p>
-              <p className="hint" style={{ margin: 0 }}>適合:{m.bestFor}{m.needs ? `|需要來源:${m.sourceHint ?? m.needs}` : ""}</p>
+              <Meta as="p" style={{ margin: 0 }}>適合:{m.bestFor}{m.needs ? `|需要來源:${m.sourceHint ?? m.needs}` : ""}</Meta>
               <p className="hint mono" style={{ margin: "4px 0 0", fontSize: 11, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 {m.id}
                 <button
@@ -564,7 +565,7 @@ export function ModelsPage() {
       {(!debouncedQ || matchedWorkflows.length > 0) && (
         <>
           <h2 style={{ marginTop: 28 }}>製作範本(一鍵串鏈)</h2>
-          <p className="hint">在<Link href="/dashboard">今日工作台</Link>開啟專案後,於「製作範本」卡使用;每步各自扣點。</p>
+          <Hint>在<Link href="/dashboard">今日工作台</Link>開啟專案後,於「製作範本」卡使用;每步各自扣點。</Hint>
           {workflows.isLoading && (
             <div className="stack">
               {Array.from({ length: 2 }).map((_, i) => (
@@ -587,9 +588,9 @@ export function ModelsPage() {
                   <span className="mono" style={{ fontSize: 12 }}>約 {w.points} 點</span>
                 </div>
                 <p style={{ margin: "6px 0 2px", fontSize: "var(--fs-14)" }}>{w.strengths}</p>
-                <p className="hint" style={{ margin: 0 }}>
+                <Meta as="p" style={{ margin: 0 }}>
                   適合:{w.bestFor}|步驟:{w.steps.map((s) => s.note).join(" → ")}
-                </p>
+                </Meta>
               </section>
             ))}
           </div>
@@ -669,16 +670,16 @@ function ScenarioCard({
     <div className="card card--std" style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
       <div>
         <b style={{ fontSize: "var(--fs-15)" }}>{recipe.scene}</b>
-        <p className="hint" style={{ margin: "2px 0 0" }}>{recipe.intent}</p>
+        <Meta as="p" style={{ margin: "2px 0 0" }}>{recipe.intent}</Meta>
       </div>
       {primary && (
         <div style={{ borderTop: "1px solid var(--border-soft)", paddingTop: 6 }}>
           <ModelInline id={primary.id} lead="首選" copiedId={copiedId} onCopy={onCopy} />
-          <p className="hint" style={{ margin: "3px 0 0" }}>{recipe.why}</p>
+          <Meta as="p" style={{ margin: "3px 0 0" }}>{recipe.why}</Meta>
         </div>
       )}
       {alts.length > 0 && (
-        <div className="hint" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", margin: 0 }}>
+        <Meta as="div" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", margin: 0 }}>
           <span>替代:</span>
           {alts.map((m) => (
             <span
@@ -696,7 +697,7 @@ function ScenarioCard({
               {copiedId === m.id ? <>已複製<Icon name="Check" size={11} /></> : m.label}
             </span>
           ))}
-        </div>
+        </Meta>
       )}
       {primary && (
         <button
@@ -735,7 +736,7 @@ function ShowdownCard({
           在目錄看同類<Icon name="ArrowRight" size={12} />
         </button>
       </div>
-      <p className="hint" style={{ margin: "2px 0 0" }}>{showdown.subtitle}</p>
+      <Meta as="p" style={{ margin: "2px 0 0" }}>{showdown.subtitle}</Meta>
       <div style={{ overflowX: "auto", marginTop: 8 }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 520, fontSize: "var(--fs-13)", lineHeight: 1.5 }}>
           <thead>
@@ -750,7 +751,7 @@ function ShowdownCard({
               <tr key={a.axis}>
                 <th scope="row" style={{ ...compareCell, fontWeight: 500 }}>
                   {a.axis}
-                  <span className="hint" style={{ display: "block", fontWeight: 400 }}>{a.note}</span>
+                  <Meta style={{ display: "block", fontWeight: 400 }}>{a.note}</Meta>
                 </th>
                 <td style={compareCell}>
                   <ModelInline id={a.winnerId} copiedId={copiedId} onCopy={onCopy} />
@@ -759,7 +760,7 @@ function ShowdownCard({
                   {a.runnerUpId ? (
                     <ModelInline id={a.runnerUpId} copiedId={copiedId} onCopy={onCopy} />
                   ) : (
-                    <span className="hint">—</span>
+                    <Meta>—</Meta>
                   )}
                 </td>
               </tr>

@@ -5,19 +5,19 @@
   "observations": {
     "stylesCssLines": 3681,
     "tsxFiles": 96,
-    "filesUsingPrimitives": 9
+    "filesUsingPrimitives": 11
   },
   "totals": {
-    "total": 904,
+    "total": 852,
     "perClass": {
       "empty-state": 21,
-      "hint": 418,
+      "hint": 381,
       "skeleton": 68,
       "badge": 18,
-      "btn-ghost": 52,
-      "btn-sm": 119,
-      "card": 89,
-      "chip": 74,
+      "btn-ghost": 51,
+      "btn-sm": 109,
+      "card": 88,
+      "chip": 71,
       "pill": 34,
       "btn-tonal": 6,
       "btn": 5
@@ -377,13 +377,13 @@
     },
     "client/src/pages/ModelsPage.tsx": {
       "pill": 4,
-      "hint": 25,
-      "card": 8,
-      "btn-ghost": 6,
-      "btn-sm": 4,
+      "card": 7,
+      "btn-ghost": 5,
+      "hint": 6,
       "chip": 6,
       "skeleton": 2,
-      "empty-state": 1
+      "empty-state": 1,
+      "btn-sm": 3
     },
     "client/src/pages/MyReportsPage.tsx": {
       "skeleton": 1,
@@ -393,10 +393,10 @@
     },
     "client/src/pages/PlannerPage.tsx": {
       "empty-state": 4,
-      "hint": 23,
-      "btn-sm": 14,
       "skeleton": 3,
-      "chip": 5,
+      "chip": 2,
+      "hint": 5,
+      "btn-sm": 5,
       "btn-ghost": 3
     },
     "client/src/pages/ProjectPage.tsx": {
