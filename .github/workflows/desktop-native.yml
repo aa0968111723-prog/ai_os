@@ -1,0 +1,100 @@
+name: Desktop Native
+
+on:
+  pull_request:
+    paths:
+      - "client/src/platform/**"
+      - "client/src/pages/DesktopCompanionPage.tsx"
+      - "client/src/app/SessionGate.tsx"
+      - "client/src/app/components/AccountMenu.tsx"
+      - "src-tauri/**"
+      - "package.json"
+      - ".github/workflows/desktop-native.yml"
+  workflow_dispatch:
+    inputs:
+      build_installers:
+        description: "Build Windows and macOS installer artifacts"
+        type: boolean
+        required: true
+        default: true
+  push:
+    tags:
+      - "desktop-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install JavaScript dependencies
+        run: npm ci
+      - name: Typecheck web application
+        run: npm run typecheck
+      - name: Test desktop bridge frontend
+        run: npm run test:client -- desktopBridge.test.ts
+      - name: Test native desktop runtime
+        run: npm run desktop:test
+      - name: Check native desktop runtime
+        run: npm run desktop:check
+
+  installers:
+    name: Build ${{ matrix.label }} installer
+    # 桌面 PR 直接建內部測試包，確保 bundle 設定與圖示不是只通過 cargo check；
+    # tag／手動執行則沿用同一流程。未配置正式簽章 secrets 時不得公開發布。
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_installers)
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            bundles: nsis,msi
+            artifact: aios-windows-installers
+            paths: |
+              src-tauri/target/release/bundle/nsis/*.exe
+              src-tauri/target/release/bundle/msi/*.msi
+          - os: macos-14
+            label: macOS
+            bundles: app,dmg
+            artifact: aios-macos-installers
+            paths: |
+              src-tauri/target/release/bundle/macos/*.app
+              src-tauri/target/release/bundle/dmg/*.dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install JavaScript dependencies
+        run: npm ci
+      - name: Build web assets
+        run: npm run build
+      - name: Build native installer
+        shell: bash
+        env:
+          # 沒有 Apple 發布憑證時使用 ad-hoc 簽章，僅供內部測試；正式對外 DMG 必須加入 Developer ID 與 notarization secrets。
+          APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos-14' && '-' || '' }}
+        run: npx --yes @tauri-apps/cli@2 build --bundles "${{ matrix.bundles }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ github.sha }}
+          path: ${{ matrix.paths }}
+          if-no-files-found: error
+          retention-days: 14
