@@ -1,0 +1,4839 @@
+{
+  "targetUrl": "https://ai-os-app.zeabur.app",
+  "role": "creator",
+  "projectFixture": null,
+  "peerFixture": null,
+  "startedAt": "2026-07-30T22:44:01.610Z",
+  "results": [
+    {
+      "route": "/",
+      "public": true,
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/",
+      "error": "手機觸控目標小於 44px：[{\"tag\":\"A\",\"label\":\"AI Director OS 首頁\",\"width\":26,\"height\":44}]"
+    },
+    {
+      "route": "/",
+      "public": true,
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/",
+      "error": "手機觸控目標小於 44px：[{\"tag\":\"A\",\"label\":\"AI Director OS 首頁\",\"width\":26,\"height\":44}]"
+    },
+    {
+      "route": "/",
+      "public": true,
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "登入工作台",
+            "width": 108,
+            "height": 40
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\public-home-M-768.png"
+    },
+    {
+      "route": "/",
+      "public": true,
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/",
+      "error": "無障礙 serious/critical：color-contrast"
+    },
+    {
+      "route": "/",
+      "public": true,
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "登入工作台",
+            "width": 108,
+            "height": 40
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\public-home-XL-1440.png"
+    },
+    {
+      "route": "/login",
+      "public": true,
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/login",
+      "error": "手機觸控目標小於 44px：[{\"tag\":\"BUTTON\",\"label\":\"顯示密碼\",\"width\":40,\"height\":40}]"
+    },
+    {
+      "route": "/login",
+      "public": true,
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/login",
+      "error": "手機觸控目標小於 44px：[{\"tag\":\"BUTTON\",\"label\":\"顯示密碼\",\"width\":40,\"height\":40}]"
+    },
+    {
+      "route": "/login",
+      "public": true,
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "BUTTON",
+            "label": "顯示密碼",
+            "width": 40,
+            "height": 40
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\public-login-M-768.png"
+    },
+    {
+      "route": "/login",
+      "public": true,
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/login",
+      "error": "無障礙 serious/critical：color-contrast"
+    },
+    {
+      "route": "/login",
+      "public": true,
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 358,
+            "height": 40
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 358,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "顯示密碼",
+            "width": 40,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "登入",
+            "width": 358,
+            "height": 40
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\public-login-XL-1440.png"
+    },
+    {
+      "route": "/dashboard",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/dashboard",
+      "error": "手機觸控目標小於 44px：[{\"tag\":\"INPUT\",\"label\":\"\",\"width\":13,\"height\":44}]"
+    },
+    {
+      "route": "/dashboard",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/dashboard",
+      "error": "手機觸控目標小於 44px：[{\"tag\":\"INPUT\",\"label\":\"\",\"width\":13,\"height\":44}]"
+    },
+    {
+      "route": "/dashboard",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/dashboard",
+      "title": "今日工作台｜AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 13,
+            "height": 44
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-dashboard-M-768.png"
+    },
+    {
+      "route": "/dashboard",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/dashboard",
+      "title": "今日工作台｜AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "組執行計畫動態（0 筆）",
+            "width": 1106,
+            "height": 19
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 1030,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "詢問",
+            "width": 66,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "哪個案子卡住了？這週花了多少點？",
+            "width": 218,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "哪些專案有分鏡在等審核？",
+            "width": 170,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "為什麼有專案特別燒點？",
+            "width": 158,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "依目前狀況，哪個專案該優先推進？",
+            "width": 218,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "建立新專案",
+            "width": 86,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-dashboard-L-1280.png"
+    },
+    {
+      "route": "/dashboard",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/dashboard",
+      "title": "今日工作台｜AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "組執行計畫動態（0 筆）",
+            "width": 1190,
+            "height": 19
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 1114,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "詢問",
+            "width": 66,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "哪個案子卡住了？這週花了多少點？",
+            "width": 218,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "哪些專案有分鏡在等審核？",
+            "width": 170,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "為什麼有專案特別燒點？",
+            "width": 158,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "依目前狀況，哪個專案該優先推進？",
+            "width": 218,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "建立新專案",
+            "width": 86,
+            "height": 27
+          },
+          {
+            "tag": "INPUT",
+            "label": "搜尋專案",
+            "width": 867,
+            "height": 40
+          },
+          {
+            "tag": "SELECT",
+            "label": "依類型篩選",
+            "width": 108,
+            "height": 40
+          },
+          {
+            "tag": "SELECT",
+            "label": "排序方式",
+            "width": 80,
+            "height": 40
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-dashboard-XL-1440.png"
+    },
+    {
+      "route": "/admin",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/admin",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-admin-S-360.png"
+    },
+    {
+      "route": "/admin",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/admin",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-admin-S-390.png"
+    },
+    {
+      "route": "/admin",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/admin",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-admin-M-768.png"
+    },
+    {
+      "route": "/admin",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/admin",
+      "error": "locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header.topbar button[aria-haspopup=\"menu\"]') to be visible\u001b[22m\n"
+    },
+    {
+      "route": "/admin",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/admin",
+      "error": "locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header.topbar button[aria-haspopup=\"menu\"]') to be visible\u001b[22m\n"
+    },
+    {
+      "route": "/options",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/admin",
+      "error": "page.goto: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - navigating to \"https://ai-os-app.zeabur.app/options\", waiting until \"domcontentloaded\"\u001b[22m\n"
+    },
+    {
+      "route": "/options",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/options",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-options-S-390.png"
+    },
+    {
+      "route": "/options",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/options",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 44
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-options-M-768.png"
+    },
+    {
+      "route": "/options",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/options",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-options-L-1280.png"
+    },
+    {
+      "route": "/options",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/options",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 140,
+            "height": 40
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 110,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "INPUT",
+            "label": "新增內容類型",
+            "width": 990,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "新增",
+            "width": 80,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 796,
+            "height": 40
+          },
+          {
+            "tag": "SELECT",
+            "label": "畫面比例",
+            "width": 92,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 796,
+            "height": 40
+          },
+          {
+            "tag": "SELECT",
+            "label": "畫面比例",
+            "width": 92,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 796,
+            "height": 40
+          },
+          {
+            "tag": "SELECT",
+            "label": "畫面比例",
+            "width": 92,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "INPUT",
+            "label": "新增發布平台",
+            "width": 890,
+            "height": 40
+          },
+          {
+            "tag": "SELECT",
+            "label": "畫面比例",
+            "width": 92,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "新增",
+            "width": 80,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "INPUT",
+            "label": "新增調性",
+            "width": 990,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "新增",
+            "width": 80,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "INPUT",
+            "label": "新增主軸 / 敘事弧",
+            "width": 990,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "新增",
+            "width": 80,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "上移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "BUTTON",
+            "label": "下移",
+            "width": 32,
+            "height": 16
+          },
+          {
+            "tag": "INPUT",
+            "label": "選項名稱",
+            "width": 896,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "停用",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "刪除",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "INPUT",
+            "label": "新增視覺風格",
+            "width": 990,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "新增",
+            "width": 80,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-options-XL-1440.png"
+    },
+    {
+      "route": "/logs",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/logs",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-logs-S-360.png"
+    },
+    {
+      "route": "/logs",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/logs",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-logs-S-390.png"
+    },
+    {
+      "route": "/logs",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/logs",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "BUTTON",
+            "label": "as",
+            "width": 13,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "D",
+            "width": 22,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "as",
+            "width": 13,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "as",
+            "width": 13,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "as",
+            "width": 13,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "as",
+            "width": 13,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "as",
+            "width": 13,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "as",
+            "width": 13,
+            "height": 44
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-logs-M-768.png"
+    },
+    {
+      "route": "/logs",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/logs",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "人員細節",
+            "width": 70,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "模型比較",
+            "width": 70,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "用量明細",
+            "width": 70,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "提示詞",
+            "width": 58,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "近 7 天",
+            "width": 59,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "近 30 天",
+            "width": 66,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "近 90 天",
+            "width": 66,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "全部",
+            "width": 46,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "帳號與團隊",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "專案與素材",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "生成與點數",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "分鏡與審批",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "AI 助手與代理",
+            "width": 97,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "知識庫與角色",
+            "width": 94,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "留言與協作",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "設定與選項",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "問題回饋",
+            "width": 70,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "自訂資料庫",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "外部 AI 連線（MCP／整合）",
+            "width": 175,
+            "height": 25
+          },
+          {
+            "tag": "INPUT",
+            "label": "搜尋操作紀錄",
+            "width": 758,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-logs-L-1280.png"
+    },
+    {
+      "route": "/logs",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/logs",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "人員細節",
+            "width": 70,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "模型比較",
+            "width": 70,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "用量明細",
+            "width": 70,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "提示詞",
+            "width": 58,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "近 7 天",
+            "width": 59,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "近 30 天",
+            "width": 66,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "近 90 天",
+            "width": 66,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "全部",
+            "width": 46,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "帳號與團隊",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "專案與素材",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "生成與點數",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "分鏡與審批",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "AI 助手與代理",
+            "width": 97,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "知識庫與角色",
+            "width": 94,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "留言與協作",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "設定與選項",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "問題回饋",
+            "width": 70,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "自訂資料庫",
+            "width": 82,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "外部 AI 連線（MCP／整合）",
+            "width": 175,
+            "height": 25
+          },
+          {
+            "tag": "INPUT",
+            "label": "搜尋操作紀錄",
+            "width": 758,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-logs-XL-1440.png"
+    },
+    {
+      "route": "/members",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/members",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-members-S-360.png"
+    },
+    {
+      "route": "/members",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/members",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-members-S-390.png"
+    },
+    {
+      "route": "/members",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/members",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-members-M-768.png"
+    },
+    {
+      "route": "/members",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/members",
+      "error": "無障礙 serious/critical：color-contrast"
+    },
+    {
+      "route": "/members",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/members",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "label": "搜尋成員",
+            "width": 534,
+            "height": 40
+          },
+          {
+            "tag": "SELECT",
+            "label": "依組別過濾",
+            "width": 240,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-members-XL-1440.png"
+    },
+    {
+      "route": "/feedback",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/feedback",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-feedback-S-360.png"
+    },
+    {
+      "route": "/feedback",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/feedback",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-feedback-S-390.png"
+    },
+    {
+      "route": "/feedback",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/feedback",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-feedback-M-768.png"
+    },
+    {
+      "route": "/feedback",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/feedback",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 614,
+            "height": 40
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 614,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "送出回饋",
+            "width": 94,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-feedback-L-1280.png"
+    },
+    {
+      "route": "/feedback",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/feedback",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 614,
+            "height": 40
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 614,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "送出回饋",
+            "width": 94,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-feedback-XL-1440.png"
+    },
+    {
+      "route": "/my-reports",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/my-reports",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-my-reports-S-360.png"
+    },
+    {
+      "route": "/my-reports",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/my-reports",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-my-reports-S-390.png"
+    },
+    {
+      "route": "/my-reports",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/my-reports",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-my-reports-M-768.png"
+    },
+    {
+      "route": "/my-reports",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/my-reports",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-my-reports-L-1280.png"
+    },
+    {
+      "route": "/my-reports",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/my-reports",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-my-reports-XL-1440.png"
+    },
+    {
+      "route": "/models",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/models",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-models-S-360.png"
+    },
+    {
+      "route": "/models",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/models",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-models-S-390.png"
+    },
+    {
+      "route": "/models",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/models",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-models-M-768.png"
+    },
+    {
+      "route": "/models",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/models",
+      "error": "locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header.topbar button[aria-haspopup=\"menu\"]') to be visible\u001b[22m\n"
+    },
+    {
+      "route": "/models",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/models",
+      "error": "locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header.topbar button[aria-haspopup=\"menu\"]') to be visible\u001b[22m\n"
+    },
+    {
+      "route": "/help",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/help",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-help-S-360.png"
+    },
+    {
+      "route": "/help",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/help",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-help-S-390.png"
+    },
+    {
+      "route": "/help",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/help",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-help-M-768.png"
+    },
+    {
+      "route": "/help",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/help",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-help-L-1280.png"
+    },
+    {
+      "route": "/help",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/help",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-help-XL-1440.png"
+    },
+    {
+      "route": "/mcp",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/mcp",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-mcp-S-360.png"
+    },
+    {
+      "route": "/mcp",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/mcp",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-mcp-S-390.png"
+    },
+    {
+      "route": "/mcp",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/mcp",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-mcp-M-768.png"
+    },
+    {
+      "route": "/mcp",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/mcp",
+      "error": "無障礙 serious/critical：color-contrast"
+    },
+    {
+      "route": "/mcp",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/mcp",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "複製",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 758,
+            "height": 40
+          },
+          {
+            "tag": "SELECT",
+            "label": "可讀可寫（能送生成、留言、寫資料）唯讀（只能查詢，不能寫入／扣點）",
+            "width": 391,
+            "height": 40
+          },
+          {
+            "tag": "SELECT",
+            "label": "永久7 天30 天90 天1 年",
+            "width": 351,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "建立金鑰",
+            "width": 114,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "撤銷",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "撤銷",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "撤銷",
+            "width": 50,
+            "height": 25
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-mcp-XL-1440.png"
+    },
+    {
+      "route": "/integrations",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/integrations",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-integrations-S-360.png"
+    },
+    {
+      "route": "/integrations",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/integrations",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-integrations-S-390.png"
+    },
+    {
+      "route": "/integrations",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/integrations",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-integrations-M-768.png"
+    },
+    {
+      "route": "/integrations",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/integrations",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "中斷連結",
+            "width": 74,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "更換 token",
+            "width": 86,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "移除",
+            "width": 50,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "新增連接",
+            "width": 90,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-integrations-L-1280.png"
+    },
+    {
+      "route": "/integrations",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/integrations",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "中斷連結",
+            "width": 74,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "更換 token",
+            "width": 86,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "移除",
+            "width": 50,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "新增連接",
+            "width": 90,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-integrations-XL-1440.png"
+    },
+    {
+      "route": "/downloads",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/downloads",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-downloads-S-360.png"
+    },
+    {
+      "route": "/downloads",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/downloads",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-downloads-S-390.png"
+    },
+    {
+      "route": "/downloads",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/downloads",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-downloads-M-768.png"
+    },
+    {
+      "route": "/downloads",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/downloads",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-downloads-L-1280.png"
+    },
+    {
+      "route": "/downloads",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/downloads",
+      "title": "AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-downloads-XL-1440.png"
+    },
+    {
+      "route": "/planner",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/planner",
+      "error": "手機觸控目標小於 44px：[{\"tag\":\"INPUT\",\"label\":\"\",\"width\":13,\"height\":44},{\"tag\":\"BUTTON\",\"label\":\"放大\",\"width\":38,\"height\":44},{\"tag\":\"BUTTON\",\"label\":\"縮小\",\"width\":38,\"height\":44},{\"tag\":\"g\",\"label\":\"範例專案：禪心一炷香\",\"width\":50,\"height\":10},{\"tag\":\"g\",\"label\":\"圖片描述｜貓密\",\"width\":25,\"height\":10},{\"tag\":\"g\",\"label\":\"圖片描述｜日系水彩、溫…\",\"width\":43,\"height\":10},{\"tag\":\"g\",\"label\":\"orb_visual_…\",\"width\":24,\"height\":10},{\"tag\":\"g\",\"label\":\"範例見證 · 那炷香之…\",\"width\":35,\"height\":10}]"
+    },
+    {
+      "route": "/planner",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "failed",
+      "currentUrl": "https://ai-os-app.zeabur.app/planner",
+      "error": "手機觸控目標小於 44px：[{\"tag\":\"INPUT\",\"label\":\"\",\"width\":13,\"height\":44},{\"tag\":\"BUTTON\",\"label\":\"放大\",\"width\":38,\"height\":44},{\"tag\":\"BUTTON\",\"label\":\"縮小\",\"width\":38,\"height\":44},{\"tag\":\"g\",\"label\":\"範例專案：禪心一炷香\",\"width\":55,\"height\":11},{\"tag\":\"g\",\"label\":\"圖片描述｜貓密\",\"width\":28,\"height\":10},{\"tag\":\"g\",\"label\":\"圖片描述｜日系水彩、溫…\",\"width\":47,\"height\":10},{\"tag\":\"g\",\"label\":\"orb_visual_…\",\"width\":25,\"height\":10},{\"tag\":\"g\",\"label\":\"範例見證 · 那炷香之…\",\"width\":38,\"height\":10}]"
+    },
+    {
+      "route": "/planner",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/planner",
+      "title": "筆記排程｜AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 13,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "放大",
+            "width": 38,
+            "height": 44
+          },
+          {
+            "tag": "BUTTON",
+            "label": "縮小",
+            "width": 38,
+            "height": 44
+          },
+          {
+            "tag": "g",
+            "label": "範例專案：禪心一炷香",
+            "width": 115,
+            "height": 23
+          },
+          {
+            "tag": "g",
+            "label": "圖片描述｜貓密",
+            "width": 58,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "圖片描述｜日系水彩、溫…",
+            "width": 98,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "orb_visual_…",
+            "width": 50,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "範例見證 · 那炷香之…",
+            "width": 79,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "建立一個關於 AI 助…",
+            "width": 77,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "幫我為這個專案想一個 …",
+            "width": 92,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "+4",
+            "width": 42,
+            "height": 23
+          },
+          {
+            "tag": "g",
+            "label": "書法與禪",
+            "width": 56,
+            "height": 23
+          },
+          {
+            "tag": "g",
+            "label": "靜的禪境",
+            "width": 33,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "Manus 完整測試專案",
+            "width": 135,
+            "height": 23
+          },
+          {
+            "tag": "g",
+            "label": "製作一段關於 AI 發…",
+            "width": 77,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "D",
+            "width": 42,
+            "height": 23
+          },
+          {
+            "tag": "g",
+            "label": "幫我規劃一個 2 步的…",
+            "width": 82,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "資料庫",
+            "width": 46,
+            "height": 23
+          },
+          {
+            "tag": "g",
+            "label": "MCP 測試資料庫",
+            "width": 62,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "專案資料表",
+            "width": 42,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "發布計畫",
+            "width": 33,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "素材清單",
+            "width": 33,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "文案與重點",
+            "width": 42,
+            "height": 22
+          },
+          {
+            "tag": "g",
+            "label": "資訊",
+            "width": 17,
+            "height": 22
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-planner-M-768.png"
+    },
+    {
+      "route": "/planner",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/planner",
+      "title": "筆記排程｜AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "清單",
+            "width": 68,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "月曆",
+            "width": 68,
+            "height": 28
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "INPUT",
+            "label": "排程標題",
+            "width": 183,
+            "height": 40
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 261,
+            "height": 42
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 261,
+            "height": 42
+          },
+          {
+            "tag": "SELECT",
+            "label": "不掛專案D範例專案：禪心一炷香書法與禪Manus 完整測試專案",
+            "width": 170,
+            "height": 40
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 892,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "加入",
+            "width": 170,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "新增筆記",
+            "width": 114,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "全組",
+            "width": 50,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "我的",
+            "width": 50,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "提及我",
+            "width": 63,
+            "height": 28
+          },
+          {
+            "tag": "SELECT",
+            "label": "聚焦專案",
+            "width": 193,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "筆記",
+            "width": 61,
+            "height": 23
+          },
+          {
+            "tag": "BUTTON",
+            "label": "行程",
+            "width": 61,
+            "height": 23
+          },
+          {
+            "tag": "BUTTON",
+            "label": "知識",
+            "width": 61,
+            "height": 23
+          },
+          {
+            "tag": "BUTTON",
+            "label": "AI 執行計畫",
+            "width": 100,
+            "height": 23
+          },
+          {
+            "tag": "BUTTON",
+            "label": "資料庫",
+            "width": 73,
+            "height": 23
+          },
+          {
+            "tag": "BUTTON",
+            "label": "放大",
+            "width": 38,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "縮小",
+            "width": 38,
+            "height": 27
+          },
+          {
+            "tag": "g",
+            "label": "範例專案：禪心一炷香",
+            "width": 181,
+            "height": 36
+          },
+          {
+            "tag": "g",
+            "label": "圖片描述｜貓密",
+            "width": 92,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "圖片描述｜日系水彩、溫…",
+            "width": 154,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "orb_visual_…",
+            "width": 78,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "範例見證 · 那炷香之…",
+            "width": 125,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "建立一個關於 AI 助…",
+            "width": 121,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "幫我為這個專案想一個 …",
+            "width": 144,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "+4",
+            "width": 67,
+            "height": 36
+          },
+          {
+            "tag": "g",
+            "label": "書法與禪",
+            "width": 88,
+            "height": 36
+          },
+          {
+            "tag": "g",
+            "label": "靜的禪境",
+            "width": 52,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "Manus 完整測試專案",
+            "width": 212,
+            "height": 36
+          },
+          {
+            "tag": "g",
+            "label": "製作一段關於 AI 發…",
+            "width": 121,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "D",
+            "width": 67,
+            "height": 36
+          },
+          {
+            "tag": "g",
+            "label": "幫我規劃一個 2 步的…",
+            "width": 129,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "資料庫",
+            "width": 73,
+            "height": 36
+          },
+          {
+            "tag": "g",
+            "label": "MCP 測試資料庫",
+            "width": 98,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "專案資料表",
+            "width": 66,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "發布計畫",
+            "width": 52,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "素材清單",
+            "width": 52,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "文案與重點",
+            "width": 66,
+            "height": 34
+          },
+          {
+            "tag": "g",
+            "label": "資訊",
+            "width": 26,
+            "height": 34
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-planner-L-1280.png"
+    },
+    {
+      "route": "/planner",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/planner",
+      "title": "筆記排程｜AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "清單",
+            "width": 68,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "月曆",
+            "width": 68,
+            "height": 28
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 13,
+            "height": 13
+          },
+          {
+            "tag": "INPUT",
+            "label": "排程標題",
+            "width": 183,
+            "height": 40
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 282,
+            "height": 42
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 282,
+            "height": 42
+          },
+          {
+            "tag": "SELECT",
+            "label": "不掛專案D範例專案：禪心一炷香書法與禪Manus 完整測試專案",
+            "width": 184,
+            "height": 40
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 962,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "加入",
+            "width": 184,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "新增筆記",
+            "width": 114,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "全組",
+            "width": 50,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "我的",
+            "width": 50,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "提及我",
+            "width": 63,
+            "height": 28
+          },
+          {
+            "tag": "SELECT",
+            "label": "聚焦專案",
+            "width": 193,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "筆記",
+            "width": 61,
+            "height": 23
+          },
+          {
+            "tag": "BUTTON",
+            "label": "行程",
+            "width": 61,
+            "height": 23
+          },
+          {
+            "tag": "BUTTON",
+            "label": "知識",
+            "width": 61,
+            "height": 23
+          },
+          {
+            "tag": "BUTTON",
+            "label": "AI 執行計畫",
+            "width": 100,
+            "height": 23
+          },
+          {
+            "tag": "BUTTON",
+            "label": "資料庫",
+            "width": 73,
+            "height": 23
+          },
+          {
+            "tag": "BUTTON",
+            "label": "放大",
+            "width": 38,
+            "height": 27
+          },
+          {
+            "tag": "BUTTON",
+            "label": "縮小",
+            "width": 38,
+            "height": 27
+          },
+          {
+            "tag": "g",
+            "label": "範例專案：禪心一炷香",
+            "width": 195,
+            "height": 38
+          },
+          {
+            "tag": "g",
+            "label": "圖片描述｜貓密",
+            "width": 99,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "圖片描述｜日系水彩、溫…",
+            "width": 166,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "orb_visual_…",
+            "width": 84,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "範例見證 · 那炷香之…",
+            "width": 134,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "建立一個關於 AI 助…",
+            "width": 131,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "幫我為這個專案想一個 …",
+            "width": 156,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "+4",
+            "width": 72,
+            "height": 38
+          },
+          {
+            "tag": "g",
+            "label": "書法與禪",
+            "width": 95,
+            "height": 38
+          },
+          {
+            "tag": "g",
+            "label": "靜的禪境",
+            "width": 56,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "Manus 完整測試專案",
+            "width": 228,
+            "height": 38
+          },
+          {
+            "tag": "g",
+            "label": "製作一段關於 AI 發…",
+            "width": 131,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "D",
+            "width": 72,
+            "height": 38
+          },
+          {
+            "tag": "g",
+            "label": "幫我規劃一個 2 步的…",
+            "width": 139,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "資料庫",
+            "width": 78,
+            "height": 38
+          },
+          {
+            "tag": "g",
+            "label": "MCP 測試資料庫",
+            "width": 106,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "專案資料表",
+            "width": 71,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "發布計畫",
+            "width": 56,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "素材清單",
+            "width": 56,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "文案與重點",
+            "width": 71,
+            "height": 37
+          },
+          {
+            "tag": "g",
+            "label": "資訊",
+            "width": 28,
+            "height": 37
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-planner-XL-1440.png"
+    },
+    {
+      "route": "/databases",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/databases",
+      "title": "知識資料｜AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-databases-S-360.png"
+    },
+    {
+      "route": "/databases",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/databases",
+      "title": "知識資料｜AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-databases-S-390.png"
+    },
+    {
+      "route": "/databases",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/databases",
+      "title": "知識資料｜AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 668,
+            "height": 38
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-databases-M-768.png"
+    },
+    {
+      "route": "/databases",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/databases",
+      "title": "知識資料｜AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "建立資料庫",
+            "width": 67,
+            "height": 29
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 239,
+            "height": 38
+          },
+          {
+            "tag": "BUTTON",
+            "label": "建立或匯入資料庫",
+            "width": 165,
+            "height": 41
+          },
+          {
+            "tag": "A",
+            "label": "連接外部資料",
+            "width": 144,
+            "height": 41
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-databases-L-1280.png"
+    },
+    {
+      "route": "/databases",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/databases",
+      "title": "知識資料｜AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "BUTTON",
+            "label": "建立資料庫",
+            "width": 67,
+            "height": 29
+          },
+          {
+            "tag": "INPUT",
+            "label": "",
+            "width": 239,
+            "height": 38
+          },
+          {
+            "tag": "BUTTON",
+            "label": "建立或匯入資料庫",
+            "width": 165,
+            "height": 41
+          },
+          {
+            "tag": "A",
+            "label": "連接外部資料",
+            "width": 144,
+            "height": 41
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-databases-XL-1440.png"
+    },
+    {
+      "route": "/chat",
+      "viewport": {
+        "name": "S-360",
+        "width": 360,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/chat",
+      "title": "訊息｜AI Director OS",
+      "layout": {
+        "clientWidth": 360,
+        "scrollWidth": 360,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-chat-S-360.png"
+    },
+    {
+      "route": "/chat",
+      "viewport": {
+        "name": "S-390",
+        "width": 390,
+        "height": 844
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/chat",
+      "title": "訊息｜AI Director OS",
+      "layout": {
+        "clientWidth": 390,
+        "scrollWidth": 390,
+        "horizontalOverflow": false,
+        "undersizedControls": []
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-chat-S-390.png"
+    },
+    {
+      "route": "/chat",
+      "viewport": {
+        "name": "M-768",
+        "width": 768,
+        "height": 1024
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/chat",
+      "title": "訊息｜AI Director OS",
+      "layout": {
+        "clientWidth": 768,
+        "scrollWidth": 768,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "INPUT",
+            "label": "搜尋夥伴",
+            "width": 253,
+            "height": 38
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-chat-M-768.png"
+    },
+    {
+      "route": "/chat",
+      "viewport": {
+        "name": "L-1280",
+        "width": 1280,
+        "height": 800
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/chat",
+      "title": "訊息｜AI Director OS",
+      "layout": {
+        "clientWidth": 1280,
+        "scrollWidth": 1280,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "label": "搜尋夥伴",
+            "width": 253,
+            "height": 38
+          },
+          {
+            "tag": "BUTTON",
+            "label": "發起新對話",
+            "width": 129,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-chat-L-1280.png"
+    },
+    {
+      "route": "/chat",
+      "viewport": {
+        "name": "XL-1440",
+        "width": 1440,
+        "height": 900
+      },
+      "status": "passed",
+      "currentUrl": "https://ai-os-app.zeabur.app/chat",
+      "title": "訊息｜AI Director OS",
+      "layout": {
+        "clientWidth": 1440,
+        "scrollWidth": 1440,
+        "horizontalOverflow": false,
+        "undersizedControls": [
+          {
+            "tag": "A",
+            "label": "AI Director OS 今日工作台",
+            "width": 59,
+            "height": 26
+          },
+          {
+            "tag": "SELECT",
+            "label": "切換作用中的組別",
+            "width": 262,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "1",
+            "width": 52,
+            "height": 28
+          },
+          {
+            "tag": "BUTTON",
+            "label": "Bruce（開發者）",
+            "width": 171,
+            "height": 32
+          },
+          {
+            "tag": "INPUT",
+            "label": "搜尋夥伴",
+            "width": 253,
+            "height": 38
+          },
+          {
+            "tag": "BUTTON",
+            "label": "發起新對話",
+            "width": 129,
+            "height": 40
+          },
+          {
+            "tag": "BUTTON",
+            "label": "開啟回饋",
+            "width": 81,
+            "height": 41
+          }
+        ]
+      },
+      "screenshot": "docs\\uiux-audit\\screenshots\\baseline-2026-07-31\\route-chat-XL-1440.png"
+    }
+  ],
+  "finishedAt": "2026-07-30T22:47:36.098Z",
+  "failures": [
+    "public / @ S-360：手機觸控目標小於 44px：[{\"tag\":\"A\",\"label\":\"AI Director OS 首頁\",\"width\":26,\"height\":44}]",
+    "public / @ S-390：手機觸控目標小於 44px：[{\"tag\":\"A\",\"label\":\"AI Director OS 首頁\",\"width\":26,\"height\":44}]",
+    "public / @ L-1280：無障礙 serious/critical：color-contrast",
+    "public /login @ S-360：手機觸控目標小於 44px：[{\"tag\":\"BUTTON\",\"label\":\"顯示密碼\",\"width\":40,\"height\":40}]",
+    "public /login @ S-390：手機觸控目標小於 44px：[{\"tag\":\"BUTTON\",\"label\":\"顯示密碼\",\"width\":40,\"height\":40}]",
+    "public /login @ L-1280：無障礙 serious/critical：color-contrast",
+    "/dashboard @ S-360：手機觸控目標小於 44px：[{\"tag\":\"INPUT\",\"label\":\"\",\"width\":13,\"height\":44}]",
+    "/dashboard @ S-390：手機觸控目標小於 44px：[{\"tag\":\"INPUT\",\"label\":\"\",\"width\":13,\"height\":44}]",
+    "/admin @ L-1280：locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header.topbar button[aria-haspopup=\"menu\"]') to be visible\u001b[22m\n",
+    "/admin @ XL-1440：locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header.topbar button[aria-haspopup=\"menu\"]') to be visible\u001b[22m\n",
+    "/options @ S-360：page.goto: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - navigating to \"https://ai-os-app.zeabur.app/options\", waiting until \"domcontentloaded\"\u001b[22m\n",
+    "/members @ L-1280：無障礙 serious/critical：color-contrast",
+    "/models @ L-1280：locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header.topbar button[aria-haspopup=\"menu\"]') to be visible\u001b[22m\n",
+    "/models @ XL-1440：locator.waitFor: Timeout 15000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('header.topbar button[aria-haspopup=\"menu\"]') to be visible\u001b[22m\n",
+    "/mcp @ L-1280：無障礙 serious/critical：color-contrast",
+    "/planner @ S-360：手機觸控目標小於 44px：[{\"tag\":\"INPUT\",\"label\":\"\",\"width\":13,\"height\":44},{\"tag\":\"BUTTON\",\"label\":\"放大\",\"width\":38,\"height\":44},{\"tag\":\"BUTTON\",\"label\":\"縮小\",\"width\":38,\"height\":44},{\"tag\":\"g\",\"label\":\"範例專案：禪心一炷香\",\"width\":50,\"height\":10},{\"tag\":\"g\",\"label\":\"圖片描述｜貓密\",\"width\":25,\"height\":10},{\"tag\":\"g\",\"label\":\"圖片描述｜日系水彩、溫…\",\"width\":43,\"height\":10},{\"tag\":\"g\",\"label\":\"orb_visual_…\",\"width\":24,\"height\":10},{\"tag\":\"g\",\"label\":\"範例見證 · 那炷香之…\",\"width\":35,\"height\":10}]",
+    "/planner @ S-390：手機觸控目標小於 44px：[{\"tag\":\"INPUT\",\"label\":\"\",\"width\":13,\"height\":44},{\"tag\":\"BUTTON\",\"label\":\"放大\",\"width\":38,\"height\":44},{\"tag\":\"BUTTON\",\"label\":\"縮小\",\"width\":38,\"height\":44},{\"tag\":\"g\",\"label\":\"範例專案：禪心一炷香\",\"width\":55,\"height\":11},{\"tag\":\"g\",\"label\":\"圖片描述｜貓密\",\"width\":28,\"height\":10},{\"tag\":\"g\",\"label\":\"圖片描述｜日系水彩、溫…\",\"width\":47,\"height\":10},{\"tag\":\"g\",\"label\":\"orb_visual_…\",\"width\":25,\"height\":10},{\"tag\":\"g\",\"label\":\"範例見證 · 那炷香之…\",\"width\":38,\"height\":10}]"
+  ]
+}
