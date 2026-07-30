@@ -6,6 +6,38 @@ import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
 import type { MeWithCapabilities } from "../../capabilities";
 import { accountMenuItems, filterNavItems } from "../navigation/navigationItems";
+import { useDensity } from "../../components/ui";
+import { writeUiDensity } from "../../lib/densityPreference";
+import { UI_DENSITY_DESCRIPTION, UI_DENSITY_LABEL } from "@shared/uiDensity";
+
+/**
+ * 介面密度切換（引導／精簡）。
+ *
+ * 全站 `hint` 說明小字實測 505 處，佔所有帶樣式元素四分之一以上；對熟手是雜訊，
+ * 對第一次上手的夥伴卻是生命線。這個開關讓兩種人共用同一套介面而不必犧牲任一方。
+ *
+ * 標籤同時說明「現在是哪種」與「按下去會變成哪種」——選單項目若只顯示狀態，
+ * 使用者無從得知它可以按。
+ */
+function DensityMenuItem({ onDone }: { onDone: () => void }) {
+  const density = useDensity();
+  const next = density === "guide" ? "concise" : "guide";
+  return (
+    <button
+      type="button"
+      className="menu-item"
+      role="menuitem"
+      title={UI_DENSITY_DESCRIPTION[next]}
+      onClick={() => {
+        onDone();
+        writeUiDensity(next);
+      }}
+    >
+      <Icon name="HelpCircle" size={15} />
+      介面說明：{UI_DENSITY_LABEL[density]}（改用{UI_DENSITY_LABEL[next]}）
+    </button>
+  );
+}
 
 function InstallAppMenuItem({ onDone }: { onDone: () => void }) {
   const [, bump] = useState(0);
@@ -257,6 +289,7 @@ export function AccountMenu({
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">帳號</div>
           <InstallAppMenuItem onDone={close} />
+          <DensityMenuItem onDone={close} />
           {accountLinkItems.map((item) => (
             <Link key={item.key} href={item.href} className="menu-item" role="menuitem" onClick={close}>
               {item.icon && <Icon name={item.icon} size={15} />}{item.label}
