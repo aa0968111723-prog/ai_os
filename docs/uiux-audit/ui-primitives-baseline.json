@@ -5,20 +5,20 @@
   "observations": {
     "stylesCssLines": 3681,
     "tsxFiles": 96,
-    "filesUsingPrimitives": 12
+    "filesUsingPrimitives": 15
   },
   "totals": {
-    "total": 735,
+    "total": 662,
     "perClass": {
       "empty-state": 21,
-      "hint": 281,
+      "hint": 239,
       "skeleton": 68,
-      "badge": 18,
+      "badge": 16,
       "btn-ghost": 47,
-      "btn-sm": 105,
-      "card": 88,
+      "btn-sm": 82,
+      "card": 85,
       "chip": 66,
-      "pill": 30,
+      "pill": 27,
       "btn-tonal": 6,
       "btn": 5
     }
@@ -311,13 +311,13 @@
       "chip": 3
     },
     "client/src/pages/DatabasesPage.tsx": {
-      "hint": 14,
-      "card": 6,
-      "btn-sm": 26,
+      "card": 3,
+      "btn-sm": 10,
+      "hint": 1,
       "empty-state": 1,
       "btn-ghost": 1,
       "btn": 1,
-      "badge": 10
+      "badge": 8
     },
     "client/src/pages/DesktopCompanionPage.tsx": {
       "card": 4,
@@ -345,10 +345,9 @@
       "chip": 1
     },
     "client/src/pages/IntegrationsPage.tsx": {
-      "hint": 14,
-      "btn-sm": 11,
       "card": 4,
       "btn-tonal": 1,
+      "btn-sm": 4,
       "badge": 1
     },
     "client/src/pages/LandingPage.tsx": {
@@ -364,9 +363,7 @@
     },
     "client/src/pages/McpPage.tsx": {
       "card": 6,
-      "hint": 15,
-      "skeleton": 3,
-      "pill": 3
+      "skeleton": 3
     },
     "client/src/pages/MembersPage.tsx": {
       "skeleton": 1,

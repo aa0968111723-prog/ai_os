@@ -15,6 +15,7 @@ import {
 import { FIELD_TYPES, FILE_CATEGORY_SUGGESTIONS, MAX_FILE_CATEGORY, newFieldKey, type DataField, type DataRowData, type DataRowValue } from "@shared/databaseFields";
 import { detectFormat, inferFields, parseTabular, TABULAR_ACCEPT, TABULAR_FORMATS, type TabularFormat } from "@shared/tabular";
 
+import { Badge, Button, Card, Hint, Meta } from "../components/ui";
 /** 匯入結果外形（importData mutation 回傳；建庫與詳頁匯入共用顯示） */
 type ImportResult = {
   imported: number;
@@ -64,11 +65,11 @@ function usePreview(content: string, format: TabularFormat) {
 function ImportResultView({ result }: { result: ImportResult }) {
   return (
     <div style={{ marginTop: 8 }}>
-      <p className="hint" style={{ color: result.imported > 0 ? "var(--success-ink)" : undefined }}>
+      <Meta as="p" style={{ color: result.imported > 0 ? "var(--success-ink)" : undefined }}>
         匯入完成：成功 {result.imported} 列{result.failed > 0 ? `、失敗 ${result.failed} 列` : ""}
         {result.truncated ? `（超過 5000 列上限，另有 ${result.skipped} 列未處理——請分批匯入）` : ""}
         {result.replayed ? "（連線重試已安全回放，未重複寫入）" : ""}
-      </p>
+      </Meta>
       {result.errors.length > 0 && (
         <ul style={{ margin: "4px 0", paddingLeft: 18, fontSize: 12, color: "var(--danger-ink, #a33)" }}>
           {result.errors.slice(0, 10).map((e) => <li key={e.line}>第 {e.line} 筆：{e.error}</li>)}
@@ -410,15 +411,15 @@ function CreateTableCard({
   // 建庫＋匯入完成：顯示摘要，讓使用者確認匯入結果後再進入資料庫
   if (finished) {
     return (
-      <section className="card" data-fb="建立資料庫完成卡">
+      <Card as="section" data-fb="建立資料庫完成卡">
         <h2><Icon name="CheckCircle2" size={18} /> 資料庫「{name.trim()}」已建立</h2>
         {finished.result ? (
           <ImportResultView result={finished.result} />
         ) : importSeed ? (
           <>
-            <p className="hint" style={{ color: "var(--danger-ink, #a33)" }}>
+            <Hint layer="always" style={{ color: "var(--danger-ink, #a33)" }}>
               欄位已建好，但尚未收到匯入結果。可用相同安全重試鍵再確認一次，不會重複新增資料。
-            </p>
+            </Hint>
             <button
               className="btn-sm"
               disabled={importData.isPending}
@@ -431,12 +432,12 @@ function CreateTableCard({
         <div style={{ marginTop: 12 }}>
           <button className="primary" onClick={() => onDone(finished.id)}>開啟資料庫</button>
         </div>
-      </section>
+      </Card>
     );
   }
 
   return (
-    <section className="card" data-fb="建立資料庫卡">
+    <Card as="section" data-fb="建立資料庫卡">
       <h2>建立資料庫</h2>
       <ImportToCreate
         onApply={({ fields: inferred, name: suggested, seed }) => {
@@ -515,9 +516,9 @@ function CreateTableCard({
         </button>
         <button onClick={onCancel}>取消</button>
       </div>
-      {importSeed && <p className="hint" style={{ marginTop: 6 }}>已備妥 {Object.keys(importSeed.headerMap).length} 欄的匯入資料——按「建立並匯入」會一併把列資料灌進新資料庫。</p>}
+      {importSeed && <Hint layer="always" style={{ marginTop: 6 }}>已備妥 {Object.keys(importSeed.headerMap).length} 欄的匯入資料——按「建立並匯入」會一併把列資料灌進新資料庫。</Hint>}
       {(create.error || importData.error) && <p className="error" role="alert">{create.error?.message ?? importData.error?.message}</p>}
-    </section>
+    </Card>
   );
 }
 
@@ -566,10 +567,10 @@ function ImportToCreate({ onApply }: { onApply: (args: { fields: DataField[]; na
         <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
       </summary>
       <div style={{ marginTop: 10 }}>
-        <p className="hint" style={{ marginTop: 0 }}>
+        <Hint style={{ marginTop: 0 }}>
           已經有資料？上傳或貼上 CSV／TSV／JSON，自動判讀出欄位——按「套用為欄位」後再按下方「建立並匯入」，一步成表並灌入列資料。
           圖片／影片／PDF 等檔案不走這裡：建立後到資料庫的「文件與圖影」區上傳（支援拖放、多檔），或加「附件」欄位逐列掛檔。
-        </p>
+        </Hint>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
           <input ref={fileInput} type="file" aria-label="選擇匯入檔" accept={TABULAR_ACCEPT} style={{ width: "auto" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }} />
           <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 13 }}>
@@ -588,7 +589,7 @@ function ImportToCreate({ onApply }: { onApply: (args: { fields: DataField[]; na
           style={{ width: "100%", fontFamily: "monospace", fontSize: 12 }}
         />
         <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button className="btn-sm primary" disabled={headers.length === 0} onClick={apply}>套用為欄位（{headers.length} 欄）</button>
+          <Button size="sm" variant="primary" disabled={headers.length === 0} onClick={apply}>套用為欄位（{headers.length} 欄）</Button>
           {error ? (
             <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{error}</span>
           ) : applied ? (
@@ -625,14 +626,14 @@ function FieldsEditor({ fields, onChange }: { fields: DataField[]; onChange: (f:
           <label style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
             <input type="checkbox" checked={!!f.required} onChange={(e) => set(i, { required: e.target.checked })} style={{ width: "auto" }} />必填
           </label>
-          <button className="btn-sm" aria-label={`刪除欄位 ${f.label || i + 1}`} disabled={fields.length <= 1} onClick={() => onChange(fields.filter((_, j) => j !== i))}>
+          <Button size="sm" aria-label={`刪除欄位 ${f.label || i + 1}`} disabled={fields.length <= 1} onClick={() => onChange(fields.filter((_, j) => j !== i))}>
             <Icon name="X" size={13} />
-          </button>
+          </Button>
         </div>
       ))}
-      <button className="btn-sm" style={{ marginTop: 8 }} disabled={fields.length >= 30} onClick={() => onChange([...fields, { key: newFieldKey(), label: "", type: "text" }])}>
+      <Button size="sm" style={{ marginTop: 8 }} disabled={fields.length >= 30} onClick={() => onChange([...fields, { key: newFieldKey(), label: "", type: "text" }])}>
         <Icon name="Plus" size={13} /> 加欄位
-      </button>
+      </Button>
     </div>
   );
 }
@@ -664,10 +665,10 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
   const mutationError = addRow.error?.message ?? updateRow.error?.message ?? removeRow.error?.message ?? updateTable.error?.message;
 
   return (
-    <section className="card" data-fb="資料庫詳頁卡">
+    <Card as="section" data-fb="資料庫詳頁卡">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0 }}>{table.name}</h2>
-        <span className="badge">{SCOPE_LABEL[table.scope]}</span>
+        <Badge>{SCOPE_LABEL[table.scope]}</Badge>
         {!table.memberWritable && <span className="badge" title="只有管理者能寫入"><Icon name="Lock" size={12} /> 唯讀共享</span>}
         {table.agentAccess !== "write" && (
           <span className="badge" title={AGENT_ACCESS_OPTIONS.find((o) => o.value === table.agentAccess)?.hint}>
@@ -677,9 +678,9 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
         <span className="spacer" />
         {table.access.canManage && (
           <>
-            <button className="btn-sm" onClick={() => { setDraftFields(table.fields); setEditStructure((v) => !v); }}>
+            <Button size="sm" onClick={() => { setDraftFields(table.fields); setEditStructure((v) => !v); }}>
               <Icon name="Ellipsis" size={13} /> {editStructure ? "收起結構" : "調整欄位"}
-            </button>
+            </Button>
             <ConfirmButton
               onConfirm={() => removeTable.mutate({ id: table.id })}
               message={`確定要刪除資料庫「${table.name}」？（列資料會一併看不到；有需要可請工程師從資料庫還原）`}
@@ -690,12 +691,12 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
           </>
         )}
       </div>
-      {table.description && <p className="hint" style={{ marginTop: 4 }}>{table.description}</p>}
+      {table.description && <Meta as="p" style={{ marginTop: 4 }}>{table.description}</Meta>}
 
       {editStructure && table.access.canManage && (
         <div style={{ margin: "12px 0", padding: 12, border: "1px dashed var(--border, #ccc)", borderRadius: 8 }}>
           <FieldsEditor fields={draftFields} onChange={setDraftFields} />
-          <p className="hint" style={{ marginTop: 8 }}>移除欄位不會刪掉既有列裡的值，只是不再顯示；新增欄位對舊列顯示為空。</p>
+          <Hint layer="always" style={{ marginTop: 8 }}>移除欄位不會刪掉既有列裡的值，只是不再顯示；新增欄位對舊列顯示為空。</Hint>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="primary btn-sm" disabled={updateTable.isPending} onClick={() => updateTable.mutate({ id: table.id, fields: draftFields.map((f) => ({ ...f, label: f.label.trim() })) })}>
               {updateTable.isPending ? "儲存中…" : "儲存欄位"}
@@ -742,9 +743,9 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
             <Icon name="Download" size={13} /> 匯出 CSV
           </a>
           {canWrite && (
-            <button className="btn-sm" onClick={() => setShowImport((v) => !v)} title="批次匯入資料列（CSV／TSV／JSON——Excel／Google 試算表／其他資料庫的匯出檔）">
+            <Button size="sm" onClick={() => setShowImport((v) => !v)} title="批次匯入資料列（CSV／TSV／JSON——Excel／Google 試算表／其他資料庫的匯出檔）">
               <Icon name="Package" size={13} /> {showImport ? "收合批次匯入" : "批次匯入"}
-            </button>
+            </Button>
           )}
         </div>
         {showImport && canWrite && <DataImportPanel table={table} onImported={invalidate} />}
@@ -797,7 +798,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
               ))}
             </tbody>
           </table>
-          {rows.data && rows.data.rows.length === 0 && <p className="hint" style={{ marginTop: 8 }}>{q ? "沒有符合的資料" : "還沒有資料——從上面那一列開始加，或使用「批次匯入」一次加入最多 5,000 列"}</p>}
+          {rows.data && rows.data.rows.length === 0 && <Hint layer="always" style={{ marginTop: 8 }}>{q ? "沒有符合的資料" : "還沒有資料——從上面那一列開始加，或使用「批次匯入」一次加入最多 5,000 列"}</Hint>}
         </div>
         {mutationError && <p className="error" role="alert">{mutationError}</p>}
       </div>
@@ -808,7 +809,7 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
       <div id="database-connect-panel" role="tabpanel" aria-label="同步與 API" hidden={detailTab !== "connect"}>
         <ConnectPanel table={table} />
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -882,10 +883,10 @@ function DataImportPanel({ table, onImported }: { table: TableSummary; onImporte
 
   return (
     <div style={{ margin: "8px 0", padding: 12, border: "1px dashed var(--border, #ccc)", borderRadius: 8 }}>
-      <p className="hint" style={{ marginTop: 0 }}>
+      <Hint style={{ marginTop: 0 }}>
         上傳或貼上 CSV／TSV／JSON——Excel／Google 試算表可「另存為 CSV／Tab 分隔」，其他資料庫或 API 可匯出 JSON（物件陣列）。
         選檔會自動判斷格式並對應欄位，確認對照後匯入。
-      </p>
+      </Hint>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
         <input
           ref={fileInput}
@@ -959,9 +960,9 @@ function ExternalFetchRow({ onFetched }: { onFetched: (text: string, fmt?: Tabul
   const apis = list.data?.apis ?? [];
   if (list.data && apis.length === 0) {
     return (
-      <p className="hint" style={{ margin: "0 0 8px" }}>
+      <Hint style={{ margin: "0 0 8px" }}>
         也可以直接從你自己的系統抓：先到<Link href="/integrations">連接的資料來源</Link>登記外部資料庫／API，這裡就會出現一鍵抓取。
-      </p>
+      </Hint>
     );
   }
   const mimeToFormat = (mime: string): TabularFormat | undefined =>
@@ -1012,10 +1013,10 @@ function ConnectPanel({ table }: { table: TableSummary }) {
         <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
       </summary>
       <div style={{ marginTop: 10, display: "grid", gap: 12, fontSize: 13 }}>
-        <p className="hint" style={{ margin: 0 }}>
+        <Hint layer="always" style={{ margin: 0 }}>
           用你的<Link href="/help">個人連線金鑰</Link>（在「怎麼用」頁建立，可隨時撤銷）就能從外部連這個資料庫，權限跟你在網頁上一樣。
           反方向——讓本系統去抓「你自己的」Google 雲端／Notion／外部資料庫，到<Link href="/integrations">連接的資料來源</Link>設定。
-        </p>
+        </Hint>
         <div>
           <p style={{ margin: "0 0 4px", fontWeight: 600 }}>REST API（本機腳本／手機 App／其他資料庫 ETL）</p>
           <pre style={{ background: "var(--bg-sunken, rgba(0,0,0,.05))", padding: 8, borderRadius: 6, overflow: "auto", margin: 0, fontSize: 12 }}>
@@ -1135,10 +1136,10 @@ function CategoryEditor({ fileId, tableId, initial, existing, onDone }: { fileId
       <datalist id={`cat-suggest-${fileId}`}>
         {suggestions.map((c) => <option key={c} value={c} />)}
       </datalist>
-      <button className="btn-sm primary" title="儲存分類" disabled={setMeta.isPending} onClick={() => setMeta.mutate({ id: fileId, category: value.trim() || null })}>
+      <Button size="sm" variant="primary" title="儲存分類" disabled={setMeta.isPending} onClick={() => setMeta.mutate({ id: fileId, category: value.trim() || null })}>
         <Icon name="Check" size={13} />
-      </button>
-      <button className="btn-sm" title="取消" onClick={onDone}><Icon name="X" size={13} /></button>
+      </Button>
+      <Button size="sm" title="取消" onClick={onDone}><Icon name="X" size={13} /></Button>
     </span>
   );
 }
@@ -1157,9 +1158,9 @@ function SendToProject({ fileId, groupId, onDone }: { fileId: string; groupId: s
         <option value="">選專案…</option>
         {opts.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
       </select>
-      <button className="btn-sm primary" disabled={!projectId || send.isPending} onClick={() => send.mutate({ fileId, projectId })}>
+      <Button size="sm" variant="primary" disabled={!projectId || send.isPending} onClick={() => send.mutate({ fileId, projectId })}>
         {send.isPending ? "送出中…" : "送出"}
-      </button>
+      </Button>
       {send.error && <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{send.error.message}</span>}
     </span>
   );
@@ -1261,14 +1262,14 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
           </span>
         )}
       </div>
-      <p className="hint" style={{ marginTop: 4 }}>
+      <Hint style={{ marginTop: 4 }}>
         圖片（含 iPhone HEIC）、影片、音訊、PDF、Word/Excel/PowerPoint、文字/字幕/壓縮檔等常見格式都能放——
         可一次選多個檔，或直接把檔案拖進這一區。文字/PDF/Word 自動抽成純文字；圖片可按「AI 分類」產生繁中描述＋自動歸類（1 點/張）——
         團隊 AI 助手與 MCP 代理都讀得到（受上方「AI 存取」等級管控）。影片／音訊可手動分類、可預覽播放；
         在欄位加「附件」型別，還能把檔案逐列掛進資料表。
         Google／Notion 私有內容：到<Link href="/integrations">連接的資料來源</Link>連結你自己的 Google 帳戶或 Notion token，
         之後貼私有連結就能直接匯入（公開連結照舊可用）。
-      </p>
+      </Hint>
 
       <StatsStrip tableId={table.id} category={catFilter} onPickCategory={setCatFilter} />
 
@@ -1309,10 +1310,10 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
       {(uploadError || importUrl.error || refresh.error || removeFile.error || classify.error) && (
         <p className="error" role="alert">{uploadError ?? importUrl.error?.message ?? refresh.error?.message ?? removeFile.error?.message ?? classify.error?.message}</p>
       )}
-      {sentMsg && <p className="hint" style={{ color: "var(--success-ink)" }}>{sentMsg}</p>}
+      {sentMsg && <Meta as="p" style={{ color: "var(--success-ink)" }}>{sentMsg}</Meta>}
 
-      {allFiles.length === 0 && list.data && <p className="hint" style={{ marginTop: 8 }}>還沒有文件——上傳逐字稿、腳本、名單或劇照，AI 就能引用它們回答。</p>}
-      {catFilter && <p className="meta" style={{ margin: "6px 0 0" }}>只顯示分類「{catFilter}」的 {files.length} 份文件——<button className="btn-sm" onClick={() => setCatFilter(null)}>顯示全部</button></p>}
+      {allFiles.length === 0 && list.data && <Hint layer="always" style={{ marginTop: 8 }}>還沒有文件——上傳逐字稿、腳本、名單或劇照，AI 就能引用它們回答。</Hint>}
+      {catFilter && <p className="meta" style={{ margin: "6px 0 0" }}>只顯示分類「{catFilter}」的 {files.length} 份文件——<Button size="sm" onClick={() => setCatFilter(null)}>顯示全部</Button></p>}
       {files.map((f) => {
         const kindMeta = FILE_KIND_META[f.kind] ?? FILE_KIND_META.doc;
         const fileUrl = `/api/databases/files/${f.id}/file`;
@@ -1332,7 +1333,7 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
           )}
           <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }} title={f.name}>{f.name}</span>
           <span className="meta">{formatBytes(f.sizeBytes)}・{f.uploaderName}</span>
-          {isMedia && <span className="badge">{kindMeta.label}</span>}
+          {isMedia && <Badge>{kindMeta.label}</Badge>}
           {f.category && <span className="badge" title="分類">{f.category}</span>}
           {f.readableChars > 0 ? (
             <button className="badge" style={{ cursor: "pointer" }} title="點開預覽 AI 讀到的純文字" onClick={() => setPreviewId(previewId === f.id ? null : f.id)}>
@@ -1361,22 +1362,22 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
           {canWrite && (editCatId === f.id ? (
             <CategoryEditor fileId={f.id} tableId={table.id} initial={f.category} existing={existingCategories} onDone={() => setEditCatId(null)} />
           ) : (
-            <button className="btn-sm" title="編輯分類" onClick={() => { setEditCatId(f.id); setSendToId(null); }}>
+            <Button size="sm" title="編輯分類" onClick={() => { setEditCatId(f.id); setSendToId(null); }}>
               <Icon name="Tag" size={13} />
-            </button>
+            </Button>
           ))}
           {f.hasFile && (sendToId === f.id ? (
             <SendToProject fileId={f.id} groupId={groupId} onDone={(msg) => { setSendToId(null); setSentMsg(msg); }} />
           ) : (
-            <button className="btn-sm" title="送到專案素材庫（複製一份，分鏡與生成即可取用）" onClick={() => { setSendToId(f.id); setEditCatId(null); setSentMsg(null); }}>
+            <Button size="sm" title="送到專案素材庫（複製一份，分鏡與生成即可取用）" onClick={() => { setSendToId(f.id); setEditCatId(null); setSentMsg(null); }}>
               <Icon name="Package" size={13} />
-            </button>
+            </Button>
           ))}
           {f.hasFile && <a className="btn-sm" href={fileUrl} download title="下載原檔"><Icon name="Download" size={13} /></a>}
           {canWrite && f.sourceUrl && (
-            <button className="btn-sm" title="重抓來源網址、更新內容" disabled={refresh.isPending} onClick={() => refresh.mutate({ id: f.id })}>
+            <Button size="sm" title="重抓來源網址、更新內容" disabled={refresh.isPending} onClick={() => refresh.mutate({ id: f.id })}>
               <Icon name="Undo2" size={13} />
-            </button>
+            </Button>
           )}
           {(table.access.canManage || f.uploadedBy === myId) && (
             <ConfirmButton onConfirm={() => removeFile.mutate({ id: f.id })} message={`刪除文件「${f.name}」？（原檔與 AI 可讀文字都會刪除、空間即時釋放）`} triggerClassName="btn-sm" triggerAriaLabel={`刪除文件 ${f.name}`}>
@@ -1452,8 +1453,8 @@ function GridRow({
           </td>
         ))}
         <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
-          <button className="btn-sm primary" title="儲存" onClick={() => { onSave(draft); setEditing(false); }}><Icon name="Check" size={13} /></button>
-          <button className="btn-sm" title="取消" onClick={() => { setDraft(row.data); setEditing(false); }}><Icon name="X" size={13} /></button>
+          <Button size="sm" variant="primary" title="儲存" onClick={() => { onSave(draft); setEditing(false); }}><Icon name="Check" size={13} /></Button>
+          <Button size="sm" title="取消" onClick={() => { setDraft(row.data); setEditing(false); }}><Icon name="X" size={13} /></Button>
         </td>
       </tr>
     );
@@ -1473,7 +1474,7 @@ function GridRow({
         </td>
       ))}
       <td style={{ padding: "4px 4px", whiteSpace: "nowrap" }}>
-        {canWrite && <button className="btn-sm" title="編輯" onClick={beginEdit}><Icon name="Ellipsis" size={13} /></button>}
+        {canWrite && <Button size="sm" title="編輯" onClick={beginEdit}><Icon name="Ellipsis" size={13} /></Button>}
         {canDelete && (
           <ConfirmButton onConfirm={onDelete} message="刪除這一列？" triggerClassName="btn-sm" triggerAriaLabel="刪除這一列">
             <Icon name="X" size={13} />
@@ -1620,9 +1621,9 @@ function FileCellInput({ label, tableId, value, onChange }: { label: string; tab
         {opts.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
       </select>
       <input ref={inputRef} type="file" aria-label={`上傳${label}`} accept={DB_FILE_ACCEPT} style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void doUpload(f); }} />
-      <button className="btn-sm" type="button" title="上傳新檔到這一格（也會進本庫的文件區）" disabled={uploading} onClick={() => inputRef.current?.click()}>
+      <Button size="sm" type="button" title="上傳新檔到這一格（也會進本庫的文件區）" disabled={uploading} onClick={() => inputRef.current?.click()}>
         {uploading ? "…" : <Icon name="Plus" size={13} />}
-      </button>
+      </Button>
       {error && <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{error}</span>}
     </span>
   );

@@ -6,6 +6,7 @@ import { ConfirmButton } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 
+import { Button, Hint, Meta } from "../components/ui";
 /**
  * 連接的資料來源（/integrations）：每個人自己連「自己的」外部服務——
  * Google 雲端硬碟（OAuth，只讀）、Notion（個人 integration token）、外部資料庫/API（自帶金鑰）。
@@ -69,10 +70,10 @@ export function IntegrationsPage() {
         badge="連接不等於自動匯入"
         description={<>把 Google 雲端、Notion 或自有 API 接進來；之後仍由你挑選哪些內容能提供給專案與 AI。</>}
       />
-      {flash && <p className="hint" style={{ color: "var(--success-ink)" }}>{flash}</p>}
+      {flash && <Meta as="p" style={{ color: "var(--success-ink)" }}>{flash}</Meta>}
       {list.error && (
         <p className="error" role="alert">
-          載入資料來源設定失敗：{list.error.message}　<button className="btn-sm" onClick={() => list.refetch()}>重試</button>
+          載入資料來源設定失敗：{list.error.message}　<Button size="sm" onClick={() => list.refetch()}>重試</Button>
         </p>
       )}
       {remove.error && <p className="error" role="alert">{remove.error.message}</p>}
@@ -117,14 +118,14 @@ export function IntegrationsPage() {
       {/* ── Google 雲端硬碟 ── */}
       <section id="integration-google" className="card" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
         <h2><Icon name="CalendarPlus" size={18} /> Google 雲端硬碟</h2>
-        <p className="hint" style={{ marginTop: 4 }}>
+        <Hint style={{ marginTop: 4 }}>
           連結後，到「知識與資料」貼上你私人雲端裡的文件、試算表、簡報或檔案連結即可匯入，不必再把檔案設成公開。
           授權範圍只有「讀取」，本系統不能修改或刪除你雲端裡的任何東西。
-        </p>
+        </Hint>
         {!d ? (
-          <p className="hint">載入中…</p>
+          <Meta as="p">載入中…</Meta>
         ) : !d.googleDrive.configured ? (
-          <p className="hint">站方尚未設定 Google 整合（管理員需設 GOOGLE_CLIENT_ID／SECRET 並註冊 redirect URI）——設定後這裡就能一鍵連結。</p>
+          <Hint layer="always">站方尚未設定 Google 整合（管理員需設 GOOGLE_CLIENT_ID／SECRET 並註冊 redirect URI）——設定後這裡就能一鍵連結。</Hint>
         ) : !d.googleDrive.connected ? (
           <a className="btn-sm primary" href="/api/integrations/google-drive/start" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Icon name="Plus" size={14} /> 連結 Google 雲端
@@ -133,15 +134,15 @@ export function IntegrationsPage() {
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             {d.googleDrive.status === "error" ? (
               <>
-                <span className="hint" style={{ margin: 0, color: "var(--danger-ink, #a33)" }} title={d.googleDrive.lastError ?? undefined}>
+                <Meta style={{ margin: 0, color: "var(--danger-ink, #a33)" }} title={d.googleDrive.lastError ?? undefined}>
                   授權已失效{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}
-                </span>
+                </Meta>
                 <a className="btn-sm" href="/api/integrations/google-drive/start">重新連結</a>
               </>
             ) : (
-              <span className="hint" style={{ margin: 0 }}>
+              <Meta style={{ margin: 0 }}>
                 <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——可在「知識與資料」匯入私人檔案
-              </span>
+              </Meta>
             )}
             <GoogleRemoveButton onRemoved={() => utils.integrations.list.invalidate()} />
           </div>
@@ -186,26 +187,26 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
   return (
     <section id="integration-notion" className="card" style={{ marginTop: 12 }} data-fb="資料來源-Notion卡">
       <h2><Icon name="FileText" size={18} /> Notion</h2>
-      <p className="hint" style={{ marginTop: 4 }}>
+      <Hint style={{ marginTop: 4 }}>
         到 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">notion.so/my-integrations</a> 建立整合、
         複製 Internal Integration Secret 貼進來，並在 Notion 把要匯入的頁面「連結」給該整合（頁面右上 ⋯ → Connections）。
         完成後到「知識與資料」貼上 Notion 頁面連結，即可選擇要加入系統與專案的內容。
         {data?.siteTokenAvailable && !data.connected ? "（站方已設共用 token，你也可以不設、直接用共用的）" : ""}
-      </p>
+      </Hint>
       {!data ? (
-        <p className="hint">載入中…</p>
+        <Meta as="p">載入中…</Meta>
       ) : data.connected && !editing ? (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           {data.status === "error" ? (
-            <span className="hint" style={{ margin: 0, color: "var(--danger-ink, #a33)" }} title={data.lastError ?? undefined}>
+            <Meta style={{ margin: 0, color: "var(--danger-ink, #a33)" }} title={data.lastError ?? undefined}>
               token 已失效——請重新設定
-            </span>
+            </Meta>
           ) : (
-            <span className="hint" style={{ margin: 0 }}>
+            <Meta style={{ margin: 0 }}>
               <Icon name="Check" size={13} /> 已設定{data.workspace ? `（workspace：${data.workspace}）` : ""}{data.last4 ? `・末四碼 ${data.last4}` : ""}
-            </span>
+            </Meta>
           )}
-          <button className="btn-sm" onClick={() => setEditing(true)}>更換 token</button>
+          <Button size="sm" onClick={() => setEditing(true)}>更換 token</Button>
           <ConfirmButton
             onConfirm={() => removeNotion.mutate()}
             message="移除你的 Notion token？（之後 Notion 匯入會退回站方共用設定——若站方沒設則無法匯入）"
@@ -226,15 +227,15 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
             style={{ flex: "1 1 260px", maxWidth: 420 }}
             autoComplete="off"
           />
-          <button className="btn-sm primary" disabled={!token.trim() || setNotion.isPending} onClick={() => setNotion.mutate({ token: token.trim() })}>
+          <Button size="sm" variant="primary" disabled={!token.trim() || setNotion.isPending} onClick={() => setNotion.mutate({ token: token.trim() })}>
             {setNotion.isPending ? "驗證中…" : "驗證並儲存"}
-          </button>
-          {editing && <button className="btn-sm" onClick={() => { setEditing(false); setToken(""); }}>取消</button>}
+          </Button>
+          {editing && <Button size="sm" onClick={() => { setEditing(false); setToken(""); }}>取消</Button>}
         </div>
       )}
       {setNotion.error && <p className="error" role="alert">{setNotion.error.message}</p>}
       {removeNotion.error && <p className="error" role="alert">{removeNotion.error.message}</p>}
-      <p className="hint" style={{ marginTop: 6 }}><Icon name="Lock" size={12} /> token 送出後即加密存放，不會再顯示——之後只看得到末四碼。</p>
+      <Hint layer="always" style={{ marginTop: 6 }}><Icon name="Lock" size={12} /> token 送出後即加密存放，不會再顯示——之後只看得到末四碼。</Hint>
     </section>
   );
 }
@@ -275,12 +276,12 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
   return (
     <section id="integration-api" className="card" style={{ marginTop: 12 }} data-fb="資料來源-外部API卡">
       <h2><Icon name="Package" size={18} /> 外部資料來源／API</h2>
-      <p className="hint" style={{ marginTop: 4 }}>
+      <Hint layer="always" style={{ marginTop: 4 }}>
         把 Airtable、Supabase、自建服務或任何回傳 JSON／CSV 的端點接進來。這裡只保存「基底網址＋認證標頭」；
         真正要使用哪些內容，仍到「知識與資料」選擇匯入。金鑰加密存放，抓取固定走你登記的主機，且僅允許 https。
-      </p>
+      </Hint>
 
-      {apis.length === 0 && !adding && <p className="hint">還沒有外部資料來源——按下面「新增連接」開始。</p>}
+      {apis.length === 0 && !adding && <Hint layer="always">還沒有外部資料來源——按下面「新增連接」開始。</Hint>}
       {apis.map((c) => (
         <div key={c.id} style={{ padding: "8px 0", borderBottom: "1px solid var(--border-soft, #eee)" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -295,9 +296,9 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
               style={{ width: 180 }}
               onChange={(e) => { testPath.current[c.id] = e.target.value; }}
             />
-            <button className="btn-sm" disabled={fetchApi.isPending && fetchApi.variables?.id === c.id} onClick={() => test(c.id)}>
+            <Button size="sm" disabled={fetchApi.isPending && fetchApi.variables?.id === c.id} onClick={() => test(c.id)}>
               {fetchApi.isPending && fetchApi.variables?.id === c.id ? "抓取中…" : "測試抓取"}
-            </button>
+            </Button>
             <ConfirmButton
               onConfirm={() => onRemove(c.id)}
               message={`刪除連接「${c.name}」？（已加密的金鑰會一併刪除）`}
@@ -333,7 +334,7 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
               onChange={(e) => setSecret(e.target.value)}
             />
           </div>
-          <p className="hint" style={{ margin: 0 }}>標頭值原樣送出——需要 Bearer 前綴就一起貼（如「Bearer pat123」）。</p>
+          <Hint layer="always" style={{ margin: 0 }}>標頭值原樣送出——需要 Bearer 前綴就一起貼（如「Bearer pat123」）。</Hint>
           <div style={{ display: "flex", gap: 8 }}>
             <button
               className="btn-sm primary"
@@ -342,14 +343,14 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
             >
               {addApi.isPending ? "建立中…" : "建立連接"}
             </button>
-            <button className="btn-sm" onClick={() => setAdding(false)}>取消</button>
+            <Button size="sm" onClick={() => setAdding(false)}>取消</Button>
           </div>
           {addApi.error && <p className="error" role="alert">{addApi.error.message}</p>}
         </div>
       ) : (
-        <button className="btn-sm" style={{ marginTop: 10 }} onClick={() => setAdding(true)}>
+        <Button size="sm" style={{ marginTop: 10 }} onClick={() => setAdding(true)}>
           <Icon name="Plus" size={13} /> 新增連接
-        </button>
+        </Button>
       )}
     </section>
   );

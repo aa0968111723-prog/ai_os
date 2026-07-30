@@ -25,7 +25,8 @@ export function Hint({
   children: ReactNode;
   /** `guide`＝精簡模式可收；`always`＝任何模式都顯示 */
   layer?: "guide" | "always";
-  as?: "p" | "div" | "span";
+  /** 說明有時是條列（例如「先讀全貌 → 再看細節」的使用建議） */
+  as?: "p" | "div" | "span" | "ul" | "ol";
   className?: string;
   /** 精簡模式下「？」按鈕的無障礙名稱 */
   toggleLabel?: string;
