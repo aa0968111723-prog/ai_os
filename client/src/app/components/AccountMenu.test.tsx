@@ -1,10 +1,34 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../../api", () => ({
+  trpc: {
+    quota: {
+      my: {
+        useQuery: () => ({
+          data: {
+            totalRemaining: 100,
+            weeklyQuota: 300,
+            weeklyUsed: 12,
+            dailyQuota: 50,
+            dailyUsed: 3,
+            memberBudgetRemaining: null,
+            groupBudgetRemaining: null,
+          },
+          isLoading: false,
+          error: null,
+        }),
+      },
+    },
+  },
+}));
+
 import { AccountMenu } from "./AccountMenu";
 
 const props = {
   userName: "Bruce",
+  activeGroupId: "00000000-0000-4000-8000-000000000001",
   isAdmin: false,
   activeIsLeader: false,
   canSeeOrg: false,
