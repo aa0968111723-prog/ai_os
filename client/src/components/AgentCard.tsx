@@ -53,6 +53,8 @@ interface AgentStep {
   noteId?: string;
   scheduleItemId?: string;
   taskId?: string;
+  /** 執行中生成佔位 id——有值＝支線已送出、關頁也在跑 */
+  generationId?: string;
   outputRefs?: Array<{ type: string; id: string; label?: string }>;
 }
 
@@ -268,6 +270,35 @@ export function AgentCard({
           <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> 多步計畫
         </h2>
       )}
+
+      {/* 多代理長跑：同時在拍的支線（關頁也繼續） */}
+      {(() => {
+        const flying = runList.flatMap((r) => {
+          if (r.status !== "running" && r.status !== "stopped") return [];
+          const steps = r.steps as AgentStep[];
+          return steps
+            .filter((s) => s.status === "running" && (s.generationId || s.kind === "generate" || s.kind === "voiceover"))
+            .map((s) => ({ runId: r.id, note: s.note || s.title || "進行中", kind: s.kind }));
+        });
+        if (!flying.length) return null;
+        return (
+          <div className="agent-crew-live" role="status" aria-live="polite">
+            <div className="agent-crew-live__head">
+              <Icon name="Sparkles" size={14} />
+              <strong>劇組開拍中</strong>
+              <span className="hint">關頁也會繼續 · {flying.length} 條支線</span>
+            </div>
+            <div className="agent-crew-live__row">
+              {flying.slice(0, 6).map((f, i) => (
+                <span key={`${f.runId}-${i}`} className="agent-crew-live__chip">
+                  <Icon name={f.kind === "voiceover" ? "Mic" : "Image"} size={12} />
+                  {f.note.slice(0, 28)}{f.note.length > 28 ? "…" : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 待過目置頂：像審片單，不用先展開列表 */}
       {pendingMyApproval.length > 0 && (

@@ -44,6 +44,8 @@ import {
 import {
   dagStepId,
   evaluateAgentDag,
+  listInFlightGenerationSteps,
+  listRunnableDagSteps,
   selectAgentDagStep,
   stopPendingDagSteps,
   usesDagExecution,
@@ -56,6 +58,11 @@ type RunRow = typeof schema.agentRuns.$inferSelect;
 
 /** 逐格配音的後端預設 TTS（與 scenes.generateVoiceover 的預設一致） */
 export const AGENT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
+/**
+ * 多代理並行：同一 tick 最多新送出幾條獨立 generate／voiceover。
+ * 供應商端本就併發；這裡讓場記一次掛上多支「在拍」鏡頭。
+ */
+const MAX_PARALLEL_GEN_STARTS = 3;
 
 /** 與 schema.agentRuns.steps 的 jsonb 形狀一致（規劃端 agents.ts 建立、執行端這裡推進） */
 export interface AgentStep {
@@ -720,9 +727,165 @@ async function failRun(run: RunRow, steps: AgentStep[], idx: number, msg: string
   }
 }
 
-/** 推進單一 run 一小步 */
+/**
+ * 多代理並行開拍：把所有「依賴已滿足」的 generate 支線同輪送出（上限 MAX_PARALLEL_GEN_STARTS）。
+ * 供應商端並發跑長任務；使用者關頁不影響——runner tick 持續收斂。
+ * 僅 generate（voiceover 常依 scene 序，仍走單步路徑）。
+ */
+async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): Promise<void> {
+  if (run.status !== "running") return;
+  const flying = listInFlightGenerationSteps(steps).length;
+  let budget = Math.max(0, MAX_PARALLEL_GEN_STARTS - flying);
+  if (budget <= 0) return;
+
+  const authzError = await checkRunAuthority(run);
+  if (authzError) return;
+
+  for (const idx of listRunnableDagSteps(steps)) {
+    if (budget <= 0) break;
+    const step = steps[idx]!;
+    if (step.kind !== "generate") continue;
+    if (step.generationId) continue;
+
+    const model = resolveModel(step.modelId ?? "");
+    if (!model || !modelIsOperationallyReady(model)) {
+      await failRun(run, steps, idx, "計畫裡的模型無效或尚未通過正式生成驗證");
+      return;
+    }
+    const hasSource = !!(step.sourceAssetId || step.sourceUrl?.trim());
+    if (model.needs && !hasSource) {
+      await failRun(
+        run,
+        steps,
+        idx,
+        `此模型需要來源素材（${model.sourceHint ?? model.needs}）——規劃時請指定 sourceAssetRef 或 sourceUrl`,
+      );
+      return;
+    }
+    if (!step.prompt?.trim()) {
+      await failRun(run, steps, idx, "計畫裡的提示詞是空的");
+      return;
+    }
+
+    let sceneId: string | undefined;
+    let sceneRole: "visual" | "narration" | undefined;
+    if (step.sceneNo) {
+      const scene = await resolvePersistedSceneTarget(run, steps, step);
+      if (!scene) {
+        await failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
+        return;
+      }
+      const role = sceneFillRole(model);
+      if (role === null) {
+        await failRun(
+          run,
+          steps,
+          idx,
+          `第 ${step.sceneNo} 鏡：${model.label} 是配樂/音效或文字模型，無法填入分鏡——請改用旁白語音模型，或這步不要綁分鏡`,
+        );
+        return;
+      }
+      sceneId = scene.id;
+      sceneRole = role;
+    }
+
+    const [fresh] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
+    if (!fresh || fresh.status !== "running") return;
+
+    step.status = "running";
+    step.generationId = randomUUID();
+    await saveRun(run.id, { steps, currentStep: idx });
+
+    await recordAgentEventSafely({
+      runId: run.id,
+      groupId: run.groupId,
+      projectId: run.projectId,
+      stepId: stableStepId(step, idx),
+      stepIndex: idx,
+      eventKey: `step:${stableStepId(step, idx)}:started`,
+      eventType: "step_started",
+      actorType: "ai",
+      actorId: run.userId,
+      summary: `開始：${step.note}`,
+      data: { kind: step.kind, parallel: true, dependsOn: step.dependsOn ?? [] },
+    });
+
+    try {
+      await resolveBackgroundProjectRole(run.userId, run.projectId, "代理");
+      const auth = await loadAuthState(run.userId);
+      if (!auth) throw new TRPCError({ code: "FORBIDDEN", message: "發起人帳號已停用，代理無法繼續執行" });
+      await executeGenerationCommand({
+        auth,
+        source: "agent",
+        backgroundResume: true,
+        id: step.generationId,
+        projectId: run.projectId,
+        modelId: model.id,
+        prompt: step.prompt,
+        sceneId,
+        sceneRole,
+        characterIds: step.characterIds,
+        scenePresetIds: step.scenePresetIds,
+        sourceAssetId: step.sourceAssetId,
+        sourceUrl: step.sourceUrl,
+        agentRunId: run.id,
+        reasonPrefix: "AI 代理",
+      });
+      budget -= 1;
+    } catch (err) {
+      if (err instanceof TRPCError && err.code === "INTERNAL_SERVER_ERROR") {
+        console.warn(`[agent] 並行送出暫時失敗（下輪重試）：run=${run.id} step=${idx}`, err.message);
+        return;
+      }
+      await failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
+      return;
+    }
+  }
+}
+
+/** 推進單一 run：長任務可多支線 in-flight；同輪可並行送出獨立 generate（多代理開拍） */
 async function advanceRun(run: RunRow): Promise<void> {
   const steps = run.steps as AgentStep[];
+
+  // ── 多代理長跑：先結算所有已送出的生成（供應商並發，我們輪詢收斂） ──
+  const inFlight = listInFlightGenerationSteps(steps);
+  let terminalSettled = false;
+  for (const gIdx of inFlight) {
+    const gStep = steps[gIdx]!;
+    let gen: GenerationRow | null = null;
+    try {
+      gen = await advanceGeneration(gStep.generationId!);
+    } catch (err) {
+      if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
+    }
+    if (gen) {
+      await settleGeneration(run, steps, gIdx, gStep, gen);
+      if (gStep.status === "failed") return; // fail-closed 已停後續
+      if (gStep.status === "done") terminalSettled = true;
+    }
+  }
+
+  // 使用者已按停：沒有新生成要送時收停 pending
+  {
+    const [freshStop] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
+    if (freshStop && freshStop.status !== "running") {
+      const stillFlying = listInFlightGenerationSteps(steps);
+      if (!stillFlying.length) {
+        stopPendingDagSteps(steps);
+        await saveRun(run.id, { steps });
+      } else {
+        // 已送出的生成允許自然結算；心跳 updatedAt 避免誤判陳屍
+        await saveRun(run.id, { steps });
+      }
+      return;
+    }
+  }
+
+  // 同輪：把其他可跑的 generate／voiceover 也送出去（多鏡頭同時在拍）
+  if (run.status === "running") {
+    await startParallelGenerateBranches(run, steps);
+  }
+
   const idx = selectAgentDagStep(steps);
   const step = steps[idx];
   if (!step) {
@@ -730,16 +893,10 @@ async function advanceRun(run: RunRow): Promise<void> {
     return;
   }
 
-  // 已送出的生成步驟：看結果決定前進/收尾/等待
-  if (step.generationId) {
-    let gen: GenerationRow | null = null;
-    try {
-      gen = await advanceGeneration(step.generationId);
-    } catch (err) {
-      // NOT_FOUND＝佔位 id 已寫回但生成列不存在（送出前死亡）——往下走用同一個 id 冪等重送
-      if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
-    }
-    if (gen) return settleGeneration(run, steps, idx, step, gen);
+  // 已送出的生成步驟：上面已 settle；若仍 running 則本輪只做並行送出 + 心跳
+  if (step.generationId && step.status === "running") {
+    await saveRun(run.id, { steps }); // 長任務心跳：供應商還在跑也更新 updatedAt
+    return;
   }
 
   // 使用者已按停且這一步沒有生成在跑：從這一步起全部收停
@@ -748,6 +905,9 @@ async function advanceRun(run: RunRow): Promise<void> {
     await saveRun(run.id, { steps });
     return;
   }
+
+  // 若本輪已 settle 完一批，先讓 DAG 重選；下一步可能是非生成步驟
+  void terminalSettled;
 
   // 執行前再讀一次狀態（審查修復：撈列到這裡有數秒空窗）——使用者剛按停就不要再執行任何步驟：
   // 免費步驟雖不扣點，但「按了停止還在建分鏡/送審」同樣違反使用者預期（生成路徑送出前另有一次復查）

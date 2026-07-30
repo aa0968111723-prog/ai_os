@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateAgentDag,
   isDagStepRunnable,
+  listInFlightGenerationSteps,
+  listRunnableDagSteps,
   selectAgentDagStep,
   stopPendingDagSteps,
   type AgentDagStep,
@@ -34,6 +36,17 @@ describe("agent DAG scheduler", () => {
       step("visual-b", "pending"),
     ];
     expect(selectAgentDagStep(steps)).toBe(1);
+    expect(listRunnableDagSteps(steps)).toEqual([1]);
+    expect(listInFlightGenerationSteps(steps)).toEqual([0]);
+  });
+
+  it("lists multiple independent runnable branches for multi-agent parallel start", () => {
+    const steps = [
+      step("a", "pending"),
+      step("b", "pending"),
+      step("c", "pending", ["a"]),
+    ];
+    expect(listRunnableDagSteps(steps)).toEqual([0, 1]);
   });
 
   it("moves to waiting only when no independent work remains", () => {

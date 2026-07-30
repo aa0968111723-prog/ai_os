@@ -2749,6 +2749,29 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   background: var(--primary-ink); color: var(--card);
 }
 
+/* 多代理長跑：同時在拍的支線 */
+.agent-crew-live {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--r-12);
+  border: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--card2) 80%, var(--primary-tint));
+}
+.agent-crew-live__head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  margin-bottom: 8px;
+}
+.agent-crew-live__row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.agent-crew-live__chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 600;
+  background: var(--card); border: 1px solid var(--border-soft);
+  color: var(--fg);
+}
+
 /* 待過目／開拍橫幅 */
 .agent-approval-rail {
   display: grid; gap: 8px; margin: 0 0 12px;
