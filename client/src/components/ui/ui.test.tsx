@@ -235,14 +235,14 @@ describe("Hint — 新手／專家分層", () => {
 });
 
 describe("EmptyState", () => {
-  it("標題與說明都在，說明用 always 不會在精簡模式消失", () => {
+  it("標題與說明都在，精簡模式也不會消失（空狀態的說明是唯一內容）", () => {
     render(
       <DensityProvider value="concise">
         <EmptyState
           title="還沒有專案"
           description="建立第一個專案，開始你的創作。"
           action={<Button variant="primary">建立專案</Button>}
-        />,
+        />
       </DensityProvider>,
     );
     expect(screen.getByRole("heading", { name: "還沒有專案" })).toBeInTheDocument();
@@ -253,5 +253,13 @@ describe("EmptyState", () => {
   it("class 契約不變", () => {
     const { container } = render(<EmptyState title="空" description="說明" />);
     expect(container.firstElementChild!.getAttribute("class")).toBe("empty-state");
+  });
+
+  it("說明用純 <p> 而非 hint —— 空狀態的唯一內容不該縮成 12px", () => {
+    const { container } = render(<EmptyState title="空" description="說明" />);
+    const p = container.querySelector("p")!;
+    expect(p.tagName).toBe("P");
+    expect(p).not.toHaveClass("hint");
+    expect(p.getAttribute("class")).toBeNull();
   });
 });

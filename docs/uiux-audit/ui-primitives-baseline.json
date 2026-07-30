@@ -4,20 +4,20 @@
   "generatedFrom": "scripts/check-ui-primitives.mjs",
   "observations": {
     "stylesCssLines": 3628,
-    "tsxFiles": 84,
-    "filesUsingPrimitives": 0
+    "tsxFiles": 95,
+    "filesUsingPrimitives": 4
   },
   "totals": {
-    "total": 1050,
+    "total": 1013,
     "perClass": {
-      "empty-state": 22,
-      "hint": 505,
-      "skeleton": 70,
+      "empty-state": 21,
+      "hint": 490,
+      "skeleton": 68,
       "badge": 18,
-      "btn-ghost": 59,
-      "btn-sm": 139,
-      "card": 95,
-      "chip": 97,
+      "btn-ghost": 55,
+      "btn-sm": 132,
+      "card": 93,
+      "chip": 91,
       "pill": 34,
       "btn-tonal": 6,
       "btn": 5
@@ -365,13 +365,7 @@
       "chip": 1
     },
     "client/src/pages/Launchpad.tsx": {
-      "card": 2,
-      "hint": 15,
-      "chip": 7,
-      "btn-sm": 7,
-      "btn-ghost": 4,
-      "empty-state": 1,
-      "skeleton": 2
+      "chip": 1
     },
     "client/src/pages/LoginPage.tsx": {
       "card": 1,
