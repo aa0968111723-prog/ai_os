@@ -6,7 +6,7 @@ use crate::{
     },
 };
 use reqwest::{
-    header::{COOKIE, CONTENT_LENGTH},
+    header::{CONTENT_LENGTH, COOKIE},
     multipart,
     redirect::Policy,
     Client,
@@ -31,7 +31,6 @@ const APP_ORIGIN: &str = "https://ai-os-app.zeabur.app";
 const MAX_ASSET_BYTES: u64 = 200 * 1024 * 1024;
 const WATCH_INTERVAL: Duration = Duration::from_secs(2);
 const STABLE_FOR: Duration = Duration::from_secs(4);
-const SAFE_ID_MIN: usize = 8;
 
 #[derive(Clone)]
 struct HandoffRecord {
@@ -62,11 +61,29 @@ struct UploadedAsset {
 }
 
 fn valid_id(value: &str) -> bool {
-    value.len() >= SAFE_ID_MIN
-        && value.len() <= 128
+    (8..=128).contains(&value.len())
         && value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+fn optional_valid_id(value: Option<&str>) -> bool {
+    match value {
+        Some(value) => valid_id(value),
+        None => true,
+    }
+}
+
+fn valid_editor_id(value: Option<&str>) -> bool {
+    match value {
+        Some(value) => {
+            (2..=64).contains(&value.len())
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        }
+        None => true,
+    }
 }
 
 fn safe_filename(raw: Option<&str>, asset_id: &str) -> String {
@@ -76,37 +93,40 @@ fn safe_filename(raw: Option<&str>, asset_id: &str) -> String {
     if trimmed.is_empty() || trimmed.len() > 180 {
         return fallback;
     }
-    if trimmed.chars().any(|c| c.is_control() || matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|')) {
+    if trimmed
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+    {
         return fallback;
     }
     trimmed.to_string()
 }
 
 async fn cookie_header(window: &WebviewWindow) -> Result<String, String> {
-    // cookies_for_url 可讀到 HttpOnly session；此函式只從 async command／背景 task 呼叫，
-    // 避免 Tauri 文件提到的 Windows 同步 handler deadlock。
+    // cookies_for_url 會包含 HttpOnly session。只從 async command／背景 task 呼叫，
+    // 避免 Tauri 文件所述的 Windows 同步 handler deadlock。
     let url = Url::parse(APP_ORIGIN).map_err(|err| format!("正式站網址設定錯誤：{err}"))?;
     let cookies = window
         .cookies_for_url(url)
         .map_err(|err| format!("無法取得登入工作階段：{err}"))?;
-    let value = cookies
+    let header = cookies
         .iter()
         .map(|cookie| format!("{}={}", cookie.name(), cookie.value()))
         .collect::<Vec<_>>()
         .join("; ");
-    if value.is_empty() {
+    if header.is_empty() {
         return Err("Aios 桌面版尚未登入，請先在主視窗完成登入".into());
     }
-    Ok(value)
+    Ok(header)
 }
 
-fn client() -> Result<Client, String> {
+fn http_client() -> Result<Client, String> {
     Client::builder()
         .redirect(Policy::limited(2))
         .timeout(Duration::from_secs(90))
         .user_agent("AiosDesktop/0.1")
         .build()
-        .map_err(|err| format!("無法初始化桌面下載器：{err}"))
+        .map_err(|err| format!("無法初始化桌面連線：{err}"))
 }
 
 async fn sha256_file(path: &Path) -> Result<String, String> {
@@ -116,7 +136,12 @@ async fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
-fn emit_status(app: &tauri::AppHandle, record: &HandoffRecord, phase: &str, message: impl Into<String>) {
+fn emit_status(
+    app: &tauri::AppHandle,
+    record: &HandoffRecord,
+    phase: &str,
+    message: impl Into<String>,
+) {
     let _ = app.emit(
         "aios:desktop-handoff-status",
         HandoffStatusEvent {
@@ -134,34 +159,30 @@ async fn download_asset(
     asset_id: &str,
     target: &Path,
 ) -> Result<(), String> {
-    let cookie = cookie_header(window).await?;
-    let url = format!("{APP_ORIGIN}/api/assets/{asset_id}/file");
-    let response = client()?
-        .get(url)
-        .header(COOKIE, cookie)
+    let response = http_client()?
+        .get(format!("{APP_ORIGIN}/api/assets/{asset_id}/file"))
+        .header(COOKIE, cookie_header(window).await?)
         .send()
         .await
         .map_err(|err| format!("下載素材失敗：{err}"))?;
 
-    if response.status().as_u16() == 401 {
-        return Err("登入已失效，請重新登入 Aios 桌面版".into());
-    }
-    if response.status().as_u16() == 403 {
-        return Err("你沒有這個素材的下載權限".into());
+    match response.status().as_u16() {
+        401 => return Err("登入已失效，請重新登入 Aios 桌面版".into()),
+        403 => return Err("你沒有這個素材的下載權限".into()),
+        _ => {}
     }
     if !response.status().is_success() {
         return Err(format!("下載素材失敗（HTTP {}）", response.status()));
     }
-
-    if let Some(size) = response
+    if response
         .headers()
         .get(CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|size| size > MAX_ASSET_BYTES)
+        .unwrap_or(false)
     {
-        if size > MAX_ASSET_BYTES {
-            return Err("素材超過桌面交接上限 200MB".into());
-        }
+        return Err("素材超過桌面交接上限 200MB".into());
     }
 
     let bytes = response
@@ -192,7 +213,6 @@ async fn upload_revision(
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "找不到 Aios 主視窗".to_string())?;
-    let cookie = cookie_header(&window).await?;
     let metadata = fs::metadata(&record.local_path)
         .await
         .map_err(|err| format!("讀取編輯檔資訊失敗：{err}"))?;
@@ -206,7 +226,7 @@ async fn upload_revision(
     let file_name = record
         .local_path
         .file_name()
-        .and_then(|n| n.to_str())
+        .and_then(|name| name.to_str())
         .unwrap_or("desktop-revision.bin")
         .to_string();
     let mime = mime_guess::from_path(&record.local_path)
@@ -215,25 +235,26 @@ async fn upload_revision(
     let title = record
         .local_path
         .file_stem()
-        .and_then(|n| n.to_str())
+        .and_then(|name| name.to_str())
         .map(|stem| format!("{stem}（桌面編輯）"))
         .unwrap_or_else(|| "桌面編輯版本".into());
 
-    let part = multipart::Part::bytes(bytes)
+    let file_part = multipart::Part::bytes(bytes)
         .file_name(file_name)
         .mime_str(&mime)
         .map_err(|err| format!("建立上傳檔案失敗：{err}"))?;
+    // 目前伺服器的 /api/upload 會忽略額外欄位，但保留它們以便後續正式 revision schema 接上。
     let form = multipart::Form::new()
         .text("projectId", project_id.to_string())
         .text("title", title)
         .text("sourceAssetId", record.asset_id.clone())
         .text("desktopHandoffId", record.handoff_id.clone())
         .text("editorId", record.editor_id.clone())
-        .part("file", part);
+        .part("file", file_part);
 
-    let response = client()?
+    let response = http_client()?
         .post(format!("{APP_ORIGIN}/api/upload"))
-        .header(COOKIE, cookie)
+        .header(COOKIE, cookie_header(&window).await?)
         .multipart(form)
         .send()
         .await
@@ -243,21 +264,25 @@ async fn upload_revision(
         .json::<UploadAssetResponse>()
         .await
         .map_err(|err| format!("無法解析 Aios 回傳結果：{err}"))?;
-
     if !status.is_success() || body.ok == Some(false) {
         return Err(body
             .error
             .unwrap_or_else(|| format!("回傳 Aios 失敗（HTTP {status}）")));
     }
-    body.asset.ok_or_else(|| "Aios 沒有回傳新素材資料".into())
+    body.asset
+        .ok_or_else(|| "Aios 沒有回傳新素材資料".to_string())
 }
 
 fn start_watcher(app: tauri::AppHandle, record: HandoffRecord, initial_hash: String) {
     tauri::async_runtime::spawn(async move {
         let mut uploaded_hash = initial_hash;
         let mut candidate: Option<(String, Instant)> = None;
-
-        emit_status(&app, &record, "watching", "正在監看編輯檔案；穩定儲存後會自動回傳新版本");
+        emit_status(
+            &app,
+            &record,
+            "watching",
+            "正在監看編輯檔案；穩定儲存後會自動回傳新版本",
+        );
 
         loop {
             sleep(WATCH_INTERVAL).await;
@@ -273,7 +298,6 @@ fn start_watcher(app: tauri::AppHandle, record: HandoffRecord, initial_hash: Str
                     continue;
                 }
             };
-
             if current_hash == uploaded_hash {
                 candidate = None;
                 continue;
@@ -290,7 +314,12 @@ fn start_watcher(app: tauri::AppHandle, record: HandoffRecord, initial_hash: Str
                 continue;
             }
 
-            emit_status(&app, &record, "uploading", "偵測到已儲存的修改，正在上傳為新版本…");
+            emit_status(
+                &app,
+                &record,
+                "uploading",
+                "偵測到已儲存的修改，正在上傳為新素材版本…",
+            );
             match upload_revision(&app, &record).await {
                 Ok(asset) => {
                     uploaded_hash = current_hash;
@@ -311,8 +340,12 @@ fn start_watcher(app: tauri::AppHandle, record: HandoffRecord, initial_hash: Str
                     }
                 }
                 Err(message) => {
-                    // 保留 candidate；下一輪仍是同一 hash 時會重試，網路恢復後可自癒。
-                    emit_status(&app, &record, "error", format!("自動回傳失敗：{message}"));
+                    emit_status(
+                        &app,
+                        &record,
+                        "error",
+                        format!("自動回傳失敗：{message}"),
+                    );
                     sleep(Duration::from_secs(8)).await;
                 }
             }
@@ -320,7 +353,7 @@ fn start_watcher(app: tauri::AppHandle, record: HandoffRecord, initial_hash: Str
     });
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn detect_editors() -> Vec<crate::models::DetectedEditor> {
     crate::editors::detect_editors()
         .into_iter()
@@ -328,7 +361,7 @@ pub async fn detect_editors() -> Vec<crate::models::DetectedEditor> {
         .collect()
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn open_asset(
     app: tauri::AppHandle,
     window: WebviewWindow,
@@ -336,29 +369,35 @@ pub async fn open_asset(
     request: OpenAssetRequest,
 ) -> DesktopBridgeResult {
     if !valid_id(&request.asset_id)
-        || request.project_id.as_deref().is_some_and(|id| !valid_id(id))
-        || request.editor_id.as_deref().is_some_and(|id| {
-            id.len() < 2
-                || id.len() > 64
-                || !id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-        })
+        || !optional_valid_id(request.project_id.as_deref())
+        || !valid_editor_id(request.editor_id.as_deref())
     {
-        return DesktopBridgeResult::failure("invalid-request", "資產、專案或剪輯軟體識別碼格式不正確");
+        return DesktopBridgeResult::failure(
+            "invalid-request",
+            "資產、專案或剪輯軟體識別碼格式不正確",
+        );
     }
 
     let Some(editor) = select_editor(request.editor_id.as_deref(), &request.editor_kind) else {
-        return DesktopBridgeResult::failure("editor-not-found", "找不到符合用途的已安裝剪輯軟體");
+        return DesktopBridgeResult::failure(
+            "editor-not-found",
+            "找不到符合用途的已安裝剪輯軟體",
+        );
     };
 
     let handoff_id = Uuid::new_v4().to_string();
     let file_name = safe_filename(request.suggested_name.as_deref(), &request.asset_id);
     let root = match app.path().app_local_data_dir() {
         Ok(path) => path.join("handoffs").join(&handoff_id),
-        Err(err) => return DesktopBridgeResult::failure("download-failed", format!("找不到桌面資料目錄：{err}")),
+        Err(err) => {
+            return DesktopBridgeResult::failure(
+                "download-failed",
+                format!("找不到桌面資料目錄：{err}"),
+            )
+        }
     };
     let local_path = root.join(file_name);
-
-    let placeholder = HandoffRecord {
+    let record = HandoffRecord {
         handoff_id: handoff_id.clone(),
         asset_id: request.asset_id.clone(),
         project_id: request.project_id.clone(),
@@ -366,8 +405,8 @@ pub async fn open_asset(
         local_path: local_path.clone(),
         stopped: Arc::new(AtomicBool::new(false)),
     };
-    emit_status(&app, &placeholder, "downloaded", "正在下載素材到 Aios 管理的本機快取…");
 
+    emit_status(&app, &record, "downloaded", "正在下載素材到 Aios 管理的本機快取…");
     if let Err(message) = download_asset(&window, &request.asset_id, &local_path).await {
         return DesktopBridgeResult::failure("download-failed", message);
     }
@@ -379,46 +418,74 @@ pub async fn open_asset(
         return DesktopBridgeResult::failure("launch-failed", message);
     }
 
-    emit_status(&app, &placeholder, "launched", format!("已用 {} 開啟", editor.name));
-    state.records.write().await.insert(handoff_id.clone(), placeholder.clone());
-    if placeholder.project_id.is_some() {
-        start_watcher(app, placeholder.clone(), initial_hash);
+    emit_status(&app, &record, "launched", format!("已用 {} 開啟", editor.name));
+    state
+        .records
+        .write()
+        .await
+        .insert(handoff_id.clone(), record.clone());
+    if record.project_id.is_some() {
+        start_watcher(app, record, initial_hash);
     }
 
     DesktopBridgeResult::success(
         Some(handoff_id),
-        local_path.file_name().and_then(|n| n.to_str()).map(str::to_string),
+        local_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_string),
     )
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn reveal_asset(
     state: State<'_, HandoffState>,
     request: RevealAssetRequest,
 ) -> DesktopBridgeResult {
-    if !valid_id(&request.asset_id) || request.project_id.as_deref().is_some_and(|id| !valid_id(id)) {
-        return DesktopBridgeResult::failure("invalid-request", "資產或專案識別碼格式不正確");
+    if !valid_id(&request.asset_id) || !optional_valid_id(request.project_id.as_deref()) {
+        return DesktopBridgeResult::failure(
+            "invalid-request",
+            "資產或專案識別碼格式不正確",
+        );
     }
     let records = state.records.read().await;
-    let Some(record) = records.values().rev().find(|record| {
-        record.asset_id == request.asset_id
-            && request.project_id.as_deref().is_none_or(|id| record.project_id.as_deref() == Some(id))
-    }) else {
-        return DesktopBridgeResult::failure("download-failed", "這個素材尚未交接到本機；請先選擇剪輯軟體開啟");
+    let record = records.values().find(|record| {
+        let project_matches = match request.project_id.as_deref() {
+            Some(project_id) => record.project_id.as_deref() == Some(project_id),
+            None => true,
+        };
+        record.asset_id == request.asset_id && project_matches
+    });
+    let Some(record) = record else {
+        return DesktopBridgeResult::failure(
+            "download-failed",
+            "這個素材尚未交接到本機；請先選擇剪輯軟體開啟",
+        );
     };
+
     match reveal_in_folder(&record.local_path) {
-        Ok(()) => DesktopBridgeResult::success(Some(record.handoff_id.clone()), record.local_path.file_name().and_then(|n| n.to_str()).map(str::to_string)),
+        Ok(()) => DesktopBridgeResult::success(
+            Some(record.handoff_id.clone()),
+            record
+                .local_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string),
+        ),
         Err(message) => DesktopBridgeResult::failure("launch-failed", message),
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub async fn stop_handoff(
     state: State<'_, HandoffState>,
     handoff_id: String,
 ) -> DesktopBridgeResult {
     if !valid_id(&handoff_id) {
-        return DesktopBridgeResult::failure("invalid-request", "交接識別碼格式不正確");
+        return DesktopBridgeResult::failure(
+            "invalid-request",
+            "交接識別碼格式不正確",
+        );
     }
     let mut records = state.records.write().await;
     let Some(record) = records.remove(&handoff_id) else {
@@ -435,7 +502,10 @@ mod tests {
     #[test]
     fn filename_is_sanitized() {
         assert_eq!(safe_filename(Some("edited.mp4"), "asset_1234"), "edited.mp4");
-        assert_eq!(safe_filename(Some("../../evil.exe"), "asset_1234"), "asset-asset_1234.bin");
+        assert_eq!(
+            safe_filename(Some("../../evil.exe"), "asset_1234"),
+            "asset-asset_1234.bin"
+        );
     }
 
     #[test]
