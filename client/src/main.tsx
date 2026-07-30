@@ -4,9 +4,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { trpc, createTrpcClient } from "./api";
 import { App } from "./App";
 import { bootstrapPwa } from "./pwa";
+import { bootstrapTauriDesktop } from "./platform/tauriDesktop";
 import "./styles.css";
 import "./splash.css";
 
+// 先安裝桌面橋接，讓第一個 React render 就能辨識「Aios 桌面版」與已安裝剪輯軟體。
+bootstrapTauriDesktop();
 bootstrapPwa();
 
 /** 全站錯誤邊界：任何 render 錯誤都落在設計語言內的空狀態，而非空白白畫面。 */
