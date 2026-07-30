@@ -1,8 +1,10 @@
 # 計畫：Fal 帳戶餘額顯示 + 個人使用量與餘額顯示
 
-> 狀態：Planning（本 PR 僅文件，不含 runtime 行為變更）  
+> 狀態：**Planning**（計畫文件已合入 [#185](https://github.com/aa0968111723-prog/ai_os/pull/185)；**implementation PR pending**）  
 > 相關：點數帳本 `quota.my` / `quota.consumptionStats`、Fal Platform Billing API  
-> 原則：Key 不進前端、Admin 與個人視圖分離、缺 Admin Key 時可降級
+> 原則：Key 不進前端、Admin 與個人視圖分離、缺 Admin Key 時可降級  
+>
+> **進度備註（2026-07-30）：** default 上尚無 `server/services/falBilling.ts`／`quota.falAccountBalance`。Phase A 實作 PR 尚未開；下一步見 `docs/product/goal-progress-auth-mobile.md`。
 
 ## 1. 目標
 
