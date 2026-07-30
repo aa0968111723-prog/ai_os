@@ -2363,6 +2363,164 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   font-size: var(--fs-12);
 }
 .project-guide__next b { color: var(--primary-ink); }
+.project-guide__next--collapsed { margin-top: 8px; }
+
+/* ── UX-M1 手機專案頁減負（≤820px；桌機不加 class 不套用） ── */
+.project-presence-chip {
+  min-height: 32px;
+  cursor: pointer;
+  border-color: var(--border-strong);
+}
+.project-ctx-collapse > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  min-height: 44px;
+}
+.project-ctx-collapse > summary::-webkit-details-marker { display: none; }
+.project-ctx-collapse__title { font-weight: 600; font-size: var(--fs-14); }
+.project-ctx-collapse__meta { margin-left: 4px; }
+.project-ctx-collapse__body { margin-top: 8px; }
+/* 收合列已有標題：內層卡去雙重 chrome，避免 h2 再佔一截 */
+.project-ctx-collapse__body > .card {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 4px 0 0;
+  margin: 0;
+}
+.project-ctx-collapse__body > .card > h2:first-child {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.project-delivery-link--stage {
+  margin: 0 0 8px;
+  font-size: var(--fs-12);
+}
+
+/* 留言 FAB：固定於右下，避開 mobile-nav 與回饋 FAB */
+.project-messages-fab {
+  display: none;
+}
+.project-page--mobile-compact .project-messages-fab {
+  position: fixed;
+  z-index: 42;
+  right: max(14px, var(--safe-right));
+  bottom: max(16px, var(--safe-bottom));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--popover);
+  box-shadow: var(--e3);
+  color: var(--primary-ink);
+  font-size: var(--fs-13);
+  font-weight: 650;
+  cursor: pointer;
+}
+.project-messages-fab__badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger, #c44);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+
+/* 留言 bottom sheet：portal 到 body，關閉後不佔主長流高度 */
+.project-messages-sheet-root {
+  position: fixed;
+  inset: 0;
+  z-index: 46;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  pointer-events: none;
+}
+.project-messages-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: rgba(43, 38, 32, 0.36);
+  cursor: pointer;
+  pointer-events: auto;
+}
+.project-messages-sheet {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 560px);
+  max-height: min(85vh, 720px);
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 18px 18px 0 0;
+  background: var(--popover);
+  box-shadow: var(--e4);
+  pointer-events: auto;
+  animation: modal-sheet-in 220ms var(--ease-out);
+}
+.project-messages-sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.project-messages-sheet__head strong { font-size: var(--fs-15); }
+.project-messages-sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px calc(12px + var(--safe-bottom));
+  -webkit-overflow-scrolling: touch;
+}
+.message-panel--bare {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+}
+@media (max-width: 560px) {
+  .project-page--mobile-compact .project-messages-fab {
+    /* 避開系統 mobile-nav 與右下角回饋 FAB */
+    right: max(70px, calc(var(--safe-right) + 56px));
+    bottom: calc(max(8px, var(--safe-bottom)) + 78px);
+  }
+  .project-messages-sheet {
+    width: 100%;
+    max-height: calc(100dvh - 72px - var(--safe-top));
+    border-radius: 16px 16px 0 0;
+  }
+  .project-messages-sheet__body {
+    padding-bottom: calc(16px + var(--safe-bottom));
+  }
+}
 
 /* 分鏡視覺總覽：先看整體狀態，再展開需要操作的卡。 */
 .scene-overview {

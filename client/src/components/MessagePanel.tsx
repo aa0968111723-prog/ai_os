@@ -346,7 +346,20 @@ const MessageRow = memo(function MessageRow({
   );
 });
 
-export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projectId: string; groupId: string; isLeader: boolean; canEdit: boolean }) {
+export function MessagePanel({
+  projectId,
+  groupId,
+  isLeader,
+  canEdit,
+  bare = false,
+}: {
+  projectId: string;
+  groupId: string;
+  isLeader: boolean;
+  canEdit: boolean;
+  /** sheet／抽屜內嵌：去掉外層 card 與重複 h2（外層已有標題列） */
+  bare?: boolean;
+}) {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
   // 首頁：最近 50 + 全部釘選；older 用 infinite 式 prepend
@@ -682,8 +695,12 @@ export function MessagePanel({ projectId, groupId, isLeader, canEdit }: { projec
   );
 
   return (
-    <aside className="card" data-fb="組內留言" ref={panelRef}>
-      <h2>組內留言</h2>
+    <aside
+      className={bare ? "message-panel message-panel--bare" : "card message-panel"}
+      data-fb="組內留言"
+      ref={panelRef}
+    >
+      {!bare && <h2>組內留言</h2>}
 
       {/* 📌 釘選列:組長固定的決議,不被日常對話洗掉 */}
       {pinnedMsgs.length > 0 && (

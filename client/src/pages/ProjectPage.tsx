@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
@@ -32,6 +33,65 @@ import {
   zoneOfPeer,
   type CollabViewMode,
 } from "../realtime";
+
+/** 與 styles.css 單欄／平板界線對齊：≤820px 為手機減負模式 */
+const PROJECT_MOBILE_MQ = "(max-width: 820px)";
+
+function useMatchMedia(query: string): boolean {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia(query).matches;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia(query);
+    const onChange = () => setMatches(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
+}
+
+type CtxSectionKey = "characters" | "scenes" | "knowledge" | "databases" | "assets" | "recycle";
+
+/** 手機上下文卡：details 收合；桌機直接渲染 children（版面不變） */
+function CtxCollapse({
+  compact,
+  sectionId,
+  title,
+  meta,
+  open,
+  onOpenChange,
+  children,
+}: {
+  compact: boolean;
+  sectionId: string;
+  title: string;
+  meta?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  if (!compact) {
+    return <div id={sectionId}>{children}</div>;
+  }
+  return (
+    <details
+      id={sectionId}
+      className="card card--quiet project-ctx-collapse"
+      open={open}
+      onToggle={(e) => onOpenChange((e.currentTarget as HTMLDetailsElement).open)}
+    >
+      <summary>
+        <span className="project-ctx-collapse__title">{title}</span>
+        {meta != null && meta !== "" && <span className="meta project-ctx-collapse__meta">{meta}</span>}
+        <Icon name="ChevronDown" size={14} className="details-caret" style={{ marginLeft: "auto" }} />
+      </summary>
+      <div className="project-ctx-collapse__body">{children}</div>
+    </details>
+  );
+}
 
 // HelpTip 已移到 components/interactions（SceneList 等元件的標題也要用），這裡從共用處匯入
 
@@ -267,6 +327,29 @@ export function ProjectPage({ id }: { id: string }) {
   const [followUserId, setFollowUserId] = useState<string | null>(null);
   useCollabMirrorFollow(collabMode, followUserId, collab.cursors, collab.focusZones);
   const followZone = followUserId && collabMode === "mirror" ? zoneOfPeer(followUserId, collab.focusZones) : null;
+  /** UX-M1：≤820px 手機減負（收合上下文、留言 sheet）；桌機 ≥821 行為不變 */
+  const mobileCompact = useMatchMedia(PROJECT_MOBILE_MQ);
+  const [presenceExpanded, setPresenceExpanded] = useState(false);
+  const [messagesSheetOpen, setMessagesSheetOpen] = useState(false);
+  const [ctxOpen, setCtxOpen] = useState<Record<CtxSectionKey, boolean>>({
+    characters: false,
+    scenes: false,
+    knowledge: false,
+    databases: false,
+    assets: false,
+    recycle: false,
+  });
+  const setCtxSectionOpen = (key: CtxSectionKey, open: boolean) =>
+    setCtxOpen((prev) => (prev[key] === open ? prev : { ...prev, [key]: open }));
+  // Escape 關閉留言 sheet
+  useEffect(() => {
+    if (!messagesSheetOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMessagesSheetOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [messagesSheetOpen]);
   const me = trpc.auth.me.useQuery();
   // 世界觀三組 chips（主軸／調性／視覺風格）由本專案所屬組的自訂選項供給（組長可就地新增，或到「選項」頁整理）
   const options = trpc.options.byGroup.useQuery(
@@ -336,11 +419,18 @@ export function ProjectPage({ id }: { id: string }) {
   const [sourceHighlightId, setSourceHighlightId] = useState<string | null>(null);
   /** 把提示詞庫／生成紀錄／分鏡／素材庫的設定送進 DirectGenerateMode（nonce 觸發） */
   const [generateApply, setGenerateApply] = useState<DirectGenerateApplyRequest | null>(null);
-  /** 引導步驟列收合偏好（per 專案持久化，重整後不會重新佔滿首屏） */
+  /** 引導步驟列收合偏好（per 專案持久化，重整後不會重新佔滿首屏）
+   *  無偏好時：手機預設收合、桌機預設展開；已寫入 localStorage 的 "0"/"1" 一律尊重 */
   const onboardStorageKey = `aios.projectGuide.collapsed.${id}`;
   const [onboardCollapsed, setOnboardCollapsed] = useState(() => {
-    try { return localStorage.getItem(onboardStorageKey) === "1"; }
-    catch { return false; }
+    try {
+      const stored = localStorage.getItem(onboardStorageKey);
+      if (stored === "1") return true;
+      if (stored === "0") return false;
+      return typeof window !== "undefined" && !!window.matchMedia?.(PROJECT_MOBILE_MQ).matches;
+    } catch {
+      return false;
+    }
   });
   const toggleOnboard = () => {
     setOnboardCollapsed((current) => {
@@ -519,22 +609,54 @@ export function ProjectPage({ id }: { id: string }) {
     </div>
   );
 
-  /** 上下文摘要條的一顆 chip：顯示計數、點了捲到對應卡 */
+  /** 摘要 chip → 目標 section：手機時先展開收合卡再捲動 */
+  const targetToCtxKey = (target: string): CtxSectionKey | null => {
+    if (target === "#sec-characters") return "characters";
+    if (target === "#sec-scenes") return "scenes";
+    if (target === "#sec-knowledge") return "knowledge";
+    if (target === "#sec-databases") return "databases";
+    if (target === "#sec-assets") return "assets";
+    if (target === "#sec-recyclebin") return "recycle";
+    return null;
+  };
+  const jumpToContext = (target: string) => {
+    const key = targetToCtxKey(target);
+    if (mobileCompact && key) setCtxSectionOpen(key, true);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollToSelector(target));
+    });
+  };
+
+  /** 上下文摘要條的一顆 chip：顯示計數、點了捲到對應卡（手機一併展開） */
   const summaryChip = (label: string, target: string, on = false) => (
     <span
       role="button"
       tabIndex={0}
       className={`chip pick ${on ? "on" : ""}`}
-      onClick={() => scrollToSelector(target)}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); scrollToSelector(target); } }}
+      onClick={() => jumpToContext(target)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jumpToContext(target); } }}
     >
       {label}
     </span>
   );
 
+  const unreadCount = unread.data?.count ?? 0;
+  const unreadBadgeLabel = unread.data?.mentioned
+    ? `@${Math.min(unreadCount, 99)}`
+    : unreadCount > 0
+      ? String(Math.min(unreadCount, 99))
+      : null;
+  const onlineCount = collab.peers.length;
+  const showPresenceDetails = !mobileCompact || presenceExpanded || !collab.connected;
+
   return (
     // position:relative＋ref：游標座標（x/y 比例＋[data-fb] 錨點）與覆蓋層都以這個容器為基準
-    <div className="project-page" ref={collab.containerRef} onPointerMove={collab.onPointerMove} style={{ position: "relative" }}>
+    <div
+      className={`project-page${mobileCompact ? " project-page--mobile-compact" : ""}`}
+      ref={collab.containerRef}
+      onPointerMove={collab.onPointerMove}
+      style={{ position: "relative" }}
+    >
       <CursorOverlay cursors={collab.cursors} />
       {/* 麵包屑：長頁面全程可及的返回入口＋標示專案所屬組（切組後留在他組專案時，一眼看出情境） */}
       <p className="project-breadcrumb">
@@ -549,81 +671,112 @@ export function ProjectPage({ id }: { id: string }) {
       <header className="project-hero">
       <div className="project-hero__heading">
         <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <span className="chip" style={{ marginLeft: 10 }}>已封存</span>}</h1>
-        {/* 即時協作：連線狀態＋誰在場＋一般／鏡像跟隨模式切換 */}
-        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }} aria-live="polite">
-          {!collab.connected && (
-            <span
-              className="hint"
-              title="WebSocket 未連上時，留言與生成仍會每數秒自動刷新，只是看不到即時游標與「誰在場」"
-              style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, border: "1px dashed var(--border-strong)" }}
+        {/* 即時協作：連線狀態＋誰在場＋一般／鏡像跟隨模式切換
+            手機預設收成「N 人在線」chip，點開才看名單／鏡像（不拿掉 WebSocket） */}
+        <span
+          className="project-presence"
+          style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}
+          aria-live="polite"
+        >
+          {mobileCompact && collab.connected && !presenceExpanded && (
+            <button
+              type="button"
+              className="chip project-presence-chip"
+              aria-expanded={false}
+              aria-controls="project-presence-details"
+              onClick={() => setPresenceExpanded(true)}
+              title="展開協作在場名單"
             >
-              即時同步連線中…
+              {onlineCount > 0 ? `${onlineCount} 人在線` : "即時同步已連線"}
+            </button>
+          )}
+          {showPresenceDetails && (
+            <span id="project-presence-details" className="project-presence__details" style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              {!collab.connected && (
+                <span
+                  className="hint"
+                  title="WebSocket 未連上時，留言與生成仍會每數秒自動刷新，只是看不到即時游標與「誰在場」"
+                  style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, border: "1px dashed var(--border-strong)" }}
+                >
+                  即時同步連線中…
+                </span>
+              )}
+              {collab.connected && collab.peers.length === 0 && (
+                <span className="hint" style={{ fontSize: 12 }}>即時同步已連線</span>
+              )}
+              {collab.peers.map((peer) => {
+                const isMe = peer.userId === collab.self?.userId;
+                const following = collabMode === "mirror" && followUserId === peer.userId;
+                return (
+                  <span
+                    key={peer.userId}
+                    role={!isMe ? "button" : undefined}
+                    tabIndex={!isMe ? 0 : undefined}
+                    title={
+                      isMe
+                        ? "你在這個專案裡"
+                        : following
+                          ? `正在鏡像跟隨 ${peer.name}（再點可取消）`
+                          : `點一下以鏡像跟隨 ${peer.name}`
+                    }
+                    onClick={() => {
+                      if (isMe) return;
+                      if (following) {
+                        setCollabMode("live");
+                        setFollowUserId(null);
+                      } else {
+                        setCollabMode("mirror");
+                        setFollowUserId(peer.userId);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (isMe) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        (e.currentTarget as HTMLElement).click();
+                      }
+                    }}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 5,
+                      fontSize: 12, padding: "2px 10px", borderRadius: 999,
+                      border: `1px solid ${peer.color}`, color: peer.color,
+                      textShadow: "0 1px 2px var(--scrim)",
+                      opacity: isMe ? 0.55 : 1,
+                      cursor: isMe ? "default" : "pointer",
+                      outline: following ? `2px solid ${peer.color}` : undefined,
+                      outlineOffset: 2,
+                    }}
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: peer.color }} />
+                    {isMe ? "你" : peer.name}
+                    {following ? " · 跟隨中" : ""}
+                  </span>
+                );
+              })}
+              <CollabModeBar
+                connected={collab.connected}
+                mode={collabMode}
+                onModeChange={(m) => {
+                  setCollabMode(m);
+                  if (m === "live") setFollowUserId(null);
+                }}
+                peers={collab.peers}
+                selfId={collab.self?.userId}
+                followUserId={followUserId}
+                onFollowChange={setFollowUserId}
+              />
+              {mobileCompact && collab.connected && (
+                <button
+                  type="button"
+                  className="btn-sm"
+                  aria-expanded={true}
+                  onClick={() => setPresenceExpanded(false)}
+                >
+                  收合
+                </button>
+              )}
             </span>
           )}
-          {collab.connected && collab.peers.length === 0 && (
-            <span className="hint" style={{ fontSize: 12 }}>即時同步已連線</span>
-          )}
-          {collab.peers.map((peer) => {
-            const isMe = peer.userId === collab.self?.userId;
-            const following = collabMode === "mirror" && followUserId === peer.userId;
-            return (
-              <span
-                key={peer.userId}
-                role={!isMe ? "button" : undefined}
-                tabIndex={!isMe ? 0 : undefined}
-                title={
-                  isMe
-                    ? "你在這個專案裡"
-                    : following
-                      ? `正在鏡像跟隨 ${peer.name}（再點可取消）`
-                      : `點一下以鏡像跟隨 ${peer.name}`
-                }
-                onClick={() => {
-                  if (isMe) return;
-                  if (following) {
-                    setCollabMode("live");
-                    setFollowUserId(null);
-                  } else {
-                    setCollabMode("mirror");
-                    setFollowUserId(peer.userId);
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (isMe) return;
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    (e.currentTarget as HTMLElement).click();
-                  }
-                }}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: 5,
-                  fontSize: 12, padding: "2px 10px", borderRadius: 999,
-                  border: `1px solid ${peer.color}`, color: peer.color,
-                  textShadow: "0 1px 2px var(--scrim)",
-                  opacity: isMe ? 0.55 : 1,
-                  cursor: isMe ? "default" : "pointer",
-                  outline: following ? `2px solid ${peer.color}` : undefined,
-                  outlineOffset: 2,
-                }}
-              >
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: peer.color }} />
-                {isMe ? "你" : peer.name}
-                {following ? " · 跟隨中" : ""}
-              </span>
-            );
-          })}
-          <CollabModeBar
-            connected={collab.connected}
-            mode={collabMode}
-            onModeChange={(m) => {
-              setCollabMode(m);
-              if (m === "live") setFollowUserId(null);
-            }}
-            peers={collab.peers}
-            selfId={collab.self?.userId}
-            followUserId={followUserId}
-            onFollowChange={setFollowUserId}
-          />
         </span>
         {collabMode === "mirror" && followUserId && (
           <p className="hint" style={{ flexBasis: "100%", margin: "4px 0 0" }}>
@@ -653,17 +806,19 @@ export function ProjectPage({ id }: { id: string }) {
         {p.format}・{p.platform}
         {wv.logline ? `・${wv.logline}` : ""}
       </p>
-      {/* #25 常駐交付出口指引：告訴非工程師成品最後怎麼落地，點一下捲到分鏡・交付區 */}
-      <p
-        className="project-delivery-link"
-        role="button"
-        tabIndex={0}
-        onClick={() => scrollToSelector("#onboard-delivery")}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); scrollToSelector("#onboard-delivery"); } }}
-        style={{ marginTop: -4, marginBottom: 10, cursor: "pointer", fontSize: 13 }}
-      >
-        做好後可打包成 zip，媒體檔直接拖進剪映／Premiere 就能剪 <Icon name="ArrowRight" size={13} style={{ verticalAlign: "-2px" }} />
-      </p>
+      {/* #25 常駐交付出口指引：桌機完整句；手機隱藏長句（③ 區內改一行短提示，見下方） */}
+      {!mobileCompact && (
+        <p
+          className="project-delivery-link"
+          role="button"
+          tabIndex={0}
+          onClick={() => scrollToSelector("#onboard-delivery")}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); scrollToSelector("#onboard-delivery"); } }}
+          style={{ marginTop: -4, marginBottom: 10, cursor: "pointer", fontSize: 13 }}
+        >
+          做好後可打包成 zip，媒體檔直接拖進剪映／Premiere 就能剪 <Icon name="ArrowRight" size={13} style={{ verticalAlign: "-2px" }} />
+        </p>
+      )}
       </header>
       {archiveProject.error && <p className="error">{archiveProject.error.message}</p>}
 
@@ -727,6 +882,12 @@ export function ProjectPage({ id }: { id: string }) {
               </p>
             )}
           </div>
+        )}
+        {/* 收合時仍留下一步一行，避免新手不知道下一步（手機預設收合尤為重要） */}
+        {onboardCollapsed && !allStepsDone && nextOnboardIndex >= 0 && (
+          <p className="project-guide__next project-guide__next--collapsed">
+            下一步：<b>{onboardSteps[nextOnboardIndex]?.label}</b>・{onboardSteps[nextOnboardIndex]?.hint}
+          </p>
         )}
       </section>
 
@@ -890,47 +1051,87 @@ export function ProjectPage({ id }: { id: string }) {
           </CollabZone>
 
           {/* 角色定裝卡：勾選後生成自動注入外觀錨點。
-              錨點 id 掛外層 div、不再加外層 <h2>——元件自帶標題，疊兩個同字樣大標會像壞掉（比照 sec-scenes 做法） */}
-          <div id="sec-characters">
+              手機預設收合（CtxCollapse）；桌機維持全展開。錨點 id 掛外層供摘要 chip 捲動。 */}
+          <CtxCollapse
+            compact={mobileCompact}
+            sectionId="sec-characters"
+            title="角色定裝"
+            meta={charCount != null ? `${charCount} 張` : undefined}
+            open={ctxOpen.characters}
+            onOpenChange={(o) => setCtxSectionOpen("characters", o)}
+          >
             <CharacterCards projectId={id} selectedIds={charIds} onToggle={toggleChar} />
-          </div>
+          </CtxCollapse>
 
           {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
-          <div id="sec-scenes">
+          <CtxCollapse
+            compact={mobileCompact}
+            sectionId="sec-scenes"
+            title="場景設定"
+            meta={presetCount != null ? `${presetCount} 張` : undefined}
+            open={ctxOpen.scenes}
+            onOpenChange={(o) => setCtxSectionOpen("scenes", o)}
+          >
             <ScenePresetCards projectId={id} selectedIds={sceneIds} onToggle={toggleScene} readOnly={!canEdit} />
-          </div>
+          </CtxCollapse>
 
           {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}
-          <div id="sec-knowledge">
+          <CtxCollapse
+            compact={mobileCompact}
+            sectionId="sec-knowledge"
+            title="知識庫"
+            meta={knowledgeCount != null ? `${knowledgeCount} 份` : undefined}
+            open={ctxOpen.knowledge}
+            onOpenChange={(o) => setCtxSectionOpen("knowledge", o)}
+          >
             <KnowledgeBase projectId={id} readOnly={!canEdit} />
-          </div>
+          </CtxCollapse>
 
-          {/* 專案資料：AI 可引用狀態 + 一鍵建表 + 已關聯列彙整（不碰 plan／notesCore） */}
-          <ProjectDatabasesCard projectId={id} canEdit={canEdit} />
+          {/* 專案資料：AI 可引用狀態 + 一鍵建表；手機受控預設收合，桌機維持展開 */}
+          <ProjectDatabasesCard
+            projectId={id}
+            canEdit={canEdit}
+            open={mobileCompact ? ctxOpen.databases : undefined}
+            onOpenChange={mobileCompact ? (o) => setCtxSectionOpen("databases", o) : undefined}
+          />
 
           {/* 素材庫屬①上下文；「用作來源」切到工作台直接生成模式並帶入來源 */}
           <CollabZone {...zoneProps(COLLAB_ZONES.assets)}>
-            {/* data-fb 讓元件回饋標定「上傳素材」；透明包裹，不影響版面 */}
-            <div data-fb="上傳素材" id="sec-assets">
-              <AssetLibrary
-                projectId={id}
-                selectedSourceId={sourceHighlightId}
-                onPickSource={(a) => {
-                  setSourceHighlightId(a.id);
-                  setGenerateApply((prev) => ({
-                    nonce: (prev?.nonce ?? 0) + 1,
-                    sourceAsset: a,
-                  }));
-                  revealWorkbenchAnchor("#sec-studio", { projectId: id });
-                }}
-              />
+            <div data-fb="上傳素材">
+              <CtxCollapse
+                compact={mobileCompact}
+                sectionId="sec-assets"
+                title="素材庫"
+                meta={assetCount != null ? `${assetCount}` : undefined}
+                open={ctxOpen.assets}
+                onOpenChange={(o) => setCtxSectionOpen("assets", o)}
+              >
+                <AssetLibrary
+                  projectId={id}
+                  selectedSourceId={sourceHighlightId}
+                  onPickSource={(a) => {
+                    setSourceHighlightId(a.id);
+                    setGenerateApply((prev) => ({
+                      nonce: (prev?.nonce ?? 0) + 1,
+                      sourceAsset: a,
+                    }));
+                    revealWorkbenchAnchor("#sec-studio", { projectId: id });
+                  }}
+                />
+              </CtxCollapse>
             </div>
           </CollabZone>
 
-          {/* 回收桶：軟刪除還原（誤刪素材／分鏡可救回） */}
-          <div id="sec-recyclebin">
+          {/* 回收桶：元件本身預設收合；手機再包一層摘要列，桌機維持原樣 */}
+          <CtxCollapse
+            compact={mobileCompact}
+            sectionId="sec-recyclebin"
+            title="回收桶"
+            open={ctxOpen.recycle}
+            onOpenChange={(o) => setCtxSectionOpen("recycle", o)}
+          >
             <RecycleBin projectId={id} />
-          </div>
+          </CtxCollapse>
 
           {/* 專案權限（需求 2.3）：誰可編輯、誰唯讀——屬專案設定的一環，但非日常操作，收合呈現不佔主視線 */}
           <details className="card card--quiet" data-fb="專案權限收合卡" id="sec-members">
@@ -982,6 +1183,18 @@ export function ProjectPage({ id }: { id: string }) {
             accent="group-3"
             hint={pendingSceneCount != null ? `分鏡 ${sceneCount}・待審 ${pendingSceneCount}` : undefined}
           />
+          {/* 手機：首屏長句交付導引改放 ③ 區一行，減少首屏噪音 */}
+          {mobileCompact && (
+            <p
+              className="project-delivery-link project-delivery-link--stage"
+              role="button"
+              tabIndex={0}
+              onClick={() => scrollToSelector("#onboard-delivery")}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); scrollToSelector("#onboard-delivery"); } }}
+            >
+              做好可打包 zip 交付 <Icon name="ArrowRight" size={13} style={{ verticalAlign: "-2px" }} />
+            </p>
+          )}
           <CollabZone {...zoneProps(COLLAB_ZONES.scenes)}>
             {/* data-fb 讓元件回饋標定「打包下載」（分鏡與交付區）；透明包裹，不影響版面。id 供引導步驟與交付指引捲動定位 */}
             {/* 錨點 id 掛外層 div、不再加外層 <h2>（SceneList 卡片自帶同名標題，白話提示移進去了） */}
@@ -992,12 +1205,73 @@ export function ProjectPage({ id }: { id: string }) {
           </CollabZone>
         </div>
 
-        {/* 組內留言 */}
-        <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-          <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
-        </CollabZone>
+        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度） */}
+        {!mobileCompact && (
+          <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
+            <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+          </CollabZone>
+        )}
       </div>
       </div>
+
+      {mobileCompact && (
+        <>
+          <button
+            type="button"
+            className="project-messages-fab"
+            aria-label={unreadBadgeLabel ? `組內留言，未讀 ${unreadBadgeLabel}` : "組內留言"}
+            aria-haspopup="dialog"
+            aria-expanded={messagesSheetOpen}
+            onClick={() => setMessagesSheetOpen(true)}
+          >
+            <Icon name="MessageCircle" size={20} />
+            <span>留言</span>
+            {unreadBadgeLabel && (
+              <span className="project-messages-fab__badge" aria-hidden>{unreadBadgeLabel}</span>
+            )}
+          </button>
+          {messagesSheetOpen && createPortal(
+            <div className="project-messages-sheet-root">
+              <button
+                type="button"
+                className="project-messages-sheet-backdrop"
+                aria-label="關閉留言"
+                onClick={() => setMessagesSheetOpen(false)}
+              />
+              <div
+                className="project-messages-sheet"
+                role="dialog"
+                aria-modal="true"
+                aria-label="組內留言"
+              >
+                <div className="project-messages-sheet__head">
+                  <strong>組內留言</strong>
+                  <button
+                    type="button"
+                    className="btn-sm"
+                    aria-label="關閉"
+                    onClick={() => setMessagesSheetOpen(false)}
+                  >
+                    <Icon name="X" size={16} />
+                  </button>
+                </div>
+                <div className="project-messages-sheet__body">
+                  <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
+                    <MessagePanel
+                      projectId={id}
+                      groupId={p.groupId}
+                      isLeader={isLeader}
+                      canEdit={canEdit}
+                      bare
+                    />
+                  </CollabZone>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
+        </>
+      )}
     </div>
   );
 }
