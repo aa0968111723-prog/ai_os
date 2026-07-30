@@ -4,13 +4,25 @@ export type ExternalEditorKind =
   | "audio-editor"
   | "image-editor";
 
+export type DetectedDesktopEditor = {
+  /** 穩定 allowlist id；renderer 只能回傳這個 id，不能傳 executable path。 */
+  id: string;
+  name: string;
+  kind: ExternalEditorKind;
+  installed: boolean;
+  /** true＝系統預設開啟，不代表某一套特定軟體。 */
+  systemDefault?: boolean;
+};
+
 export type DesktopAssetHandoffRequest = {
-  /** Aios 內部資產識別碼；桌面端自行向後端換取短效下載，不接受 renderer 傳任意網址或本機路徑。 */
+  /** Aios 內部資產識別碼；桌面端自行向後端換取下載，不接受 renderer 傳任意網址或本機路徑。 */
   assetId: string;
-  /** 可選：把交接紀錄關聯回專案。 */
+  /** 可選：把交接紀錄關聯回專案；自動回傳 revision 時必填。 */
   projectId?: string;
   /** 使用者選擇的用途；原生端再依安裝狀態與 allowlist 決定實際程式。 */
   editorKind: ExternalEditorKind;
+  /** 從 detectEditors() 回傳的穩定 id；未提供時由桌面端挑該用途第一個可用程式。 */
+  editorId?: string;
   /** 只供顯示／建議副檔名，不作為可執行路徑。 */
   suggestedName?: string;
   /** 編輯完成後回到 Aios 的安全內部路由。 */
@@ -23,10 +35,16 @@ export type DesktopAssetRevealRequest = {
 };
 
 export type DesktopBridgeResult =
-  | { ok: true; handoffId?: string }
+  | { ok: true; handoffId?: string; localName?: string }
   | {
       ok: false;
-      reason: "unsupported" | "invalid-request" | "download-failed" | "editor-not-found" | "launch-failed";
+      reason:
+        | "unsupported"
+        | "invalid-request"
+        | "download-failed"
+        | "editor-not-found"
+        | "launch-failed"
+        | "upload-failed";
       message: string;
     };
 
@@ -34,11 +52,15 @@ export type AiosDesktopBridge = {
   version: 1;
   openAsset(request: DesktopAssetHandoffRequest): Promise<DesktopBridgeResult>;
   revealAsset(request: DesktopAssetRevealRequest): Promise<DesktopBridgeResult>;
+  /** 實際 Tauri 桌面版提供；舊版 bridge 可省略，前端會退到用途自動選擇。 */
+  detectEditors?(): Promise<DetectedDesktopEditor[]>;
+  /** 停止監看與自動回傳；不刪已上傳的 revision。 */
+  stopHandoff?(handoffId: string): Promise<DesktopBridgeResult>;
 };
 
 declare global {
   interface Window {
-    /** 由未來 Tauri／桌面殼注入；一般瀏覽器與 PWA 不存在。 */
+    /** 由 Tauri／桌面殼注入；一般瀏覽器與 PWA 不存在。 */
     __AIOS_DESKTOP__?: AiosDesktopBridge;
   }
 }
@@ -111,9 +133,20 @@ export function hasDesktopBridge(): boolean {
   return bridge() != null;
 }
 
+export async function detectDesktopEditors(): Promise<DetectedDesktopEditor[]> {
+  const desktop = bridge();
+  if (!desktop?.detectEditors) return [];
+  try {
+    return await desktop.detectEditors();
+  } catch {
+    return [];
+  }
+}
+
 function validateHandoff(request: DesktopAssetHandoffRequest): string | null {
   if (!SAFE_ID_RE.test(request.assetId)) return "資產識別碼格式不正確";
   if (!isSafeId(request.projectId)) return "專案識別碼格式不正確";
+  if (request.editorId && !/^[a-z0-9-]{2,64}$/.test(request.editorId)) return "剪輯軟體識別碼格式不正確";
   if (request.suggestedName && !SAFE_NAME_RE.test(request.suggestedName)) return "建議檔名含不支援的字元";
   if (request.returnPath && !normalizeAiosInternalPath(request.returnPath)) return "返回路由不合法";
   return null;
@@ -121,7 +154,7 @@ function validateHandoff(request: DesktopAssetHandoffRequest): string | null {
 
 /**
  * 把 Aios 資產交給桌面剪輯／音訊／影像軟體。
- * Web renderer 永遠只傳 assetId 與用途；不接受 executable、shell args、file:// 或任意 download URL。
+ * Web renderer 永遠只傳 assetId、用途與 allowlist editorId；不接受 executable、shell args、file:// 或任意 download URL。
  */
 export async function openAssetInExternalEditor(request: DesktopAssetHandoffRequest): Promise<DesktopBridgeResult> {
   const invalid = validateHandoff(request);
@@ -131,7 +164,7 @@ export async function openAssetInExternalEditor(request: DesktopAssetHandoffRequ
     return {
       ok: false,
       reason: "unsupported",
-      message: "瀏覽器／PWA 無法可靠啟動本機剪輯軟體；請使用未來的 Aios 桌面版，或先下載檔案後用系統開啟。",
+      message: "瀏覽器／PWA 無法可靠啟動本機剪輯軟體；請使用 Aios 桌面版，或先下載檔案後用系統開啟。",
     };
   }
   return desktop.openAsset({
@@ -153,4 +186,11 @@ export async function revealAssetInFolder(request: DesktopAssetRevealRequest): P
     };
   }
   return desktop.revealAsset(request);
+}
+
+export async function stopDesktopHandoff(handoffId: string): Promise<DesktopBridgeResult> {
+  if (!SAFE_ID_RE.test(handoffId)) return { ok: false, reason: "invalid-request", message: "交接識別碼格式不正確" };
+  const desktop = bridge();
+  if (!desktop?.stopHandoff) return { ok: false, reason: "unsupported", message: "目前桌面版不支援停止監看" };
+  return desktop.stopHandoff(handoffId);
 }
