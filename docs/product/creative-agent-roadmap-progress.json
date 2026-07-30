@@ -1,0 +1,149 @@
+{
+  "roadmapId": "CA-ROADMAP-2026-07",
+  "updatedAt": "2026-07-30T00:00:00Z",
+  "designDoc": "docs/product/creative-agent-evolution-roadmap.md",
+  "researchDir": "docs/research/creative-agent-2026-07/",
+  "glossary": {
+    "CA": "創作代理能力路線圖 PR",
+    "WB": "AI 創作工作台 UX PR",
+    "CreationDraftOwner": "CA-02"
+  },
+  "constraints": [
+    "no LangGraph/CrewAI/Temporal runtime deps",
+    "generationCommand sole media write path",
+    "never write continuity into generations.params",
+    "one implementation branch per agent session"
+  ],
+  "prs": [
+    {
+      "id": "CA-00",
+      "title": "Docs landing + progress tracker",
+      "passes": false,
+      "est_sessions": 0.5,
+      "branch": "docs/creative-agent-evolution-roadmap",
+      "mergedSha": null,
+      "dependencies": [],
+      "notes": "roadmap + research + progress"
+    },
+    {
+      "id": "CA-01",
+      "title": "Agent generate parity — characters, presets, source, needs models",
+      "passes": false,
+      "est_sessions": 2,
+      "branch": "feat/ca-01-agent-generate-parity",
+      "mergedSha": null,
+      "dependencies": ["CA-00"],
+      "notes": "highest product value"
+    },
+    {
+      "id": "CA-02",
+      "title": "CreationDraft module (single owner for WB-01)",
+      "passes": false,
+      "est_sessions": 1,
+      "branch": "feat/ca-02-creation-draft-contract",
+      "mergedSha": null,
+      "dependencies": ["CA-00"],
+      "notes": ""
+    },
+    {
+      "id": "CA-03",
+      "title": "Extend ProjectAgentInsights unified feed",
+      "passes": false,
+      "est_sessions": 1.5,
+      "branch": "feat/ca-03-unified-insights-feed",
+      "mergedSha": null,
+      "dependencies": ["CA-00"],
+      "notes": "kind ai|human + source map; AgentCard same PR"
+    },
+    {
+      "id": "CA-04a",
+      "title": "Continuity snapshot column + draft bible write",
+      "passes": false,
+      "est_sessions": 1.5,
+      "branch": "feat/ca-04a-continuity-snapshot",
+      "mergedSha": null,
+      "dependencies": ["CA-01"],
+      "notes": "migration continuity_snapshot jsonb"
+    },
+    {
+      "id": "CA-04b",
+      "title": "True bible version table + stale UI",
+      "passes": false,
+      "est_sessions": 2,
+      "branch": "feat/ca-04b-bible-versions",
+      "mergedSha": null,
+      "dependencies": ["CA-04a"],
+      "notes": "optional lag"
+    },
+    {
+      "id": "CA-05a",
+      "title": "Execute notify + checkpoint step kinds",
+      "passes": false,
+      "est_sessions": 2,
+      "branch": "feat/ca-05a-notify-checkpoint",
+      "mergedSha": null,
+      "dependencies": ["CA-00"],
+      "notes": "pg tests required"
+    },
+    {
+      "id": "CA-05b",
+      "title": "onFailure recovery policy",
+      "passes": false,
+      "est_sessions": 1.5,
+      "branch": "feat/ca-05b-on-failure",
+      "mergedSha": null,
+      "dependencies": ["CA-05a"],
+      "notes": ""
+    },
+    {
+      "id": "CA-06",
+      "title": "Thin intent router",
+      "passes": false,
+      "est_sessions": 1,
+      "branch": "feat/ca-06-intent-router",
+      "mergedSha": null,
+      "dependencies": ["CA-02"],
+      "notes": "rules first; off by default ok"
+    },
+    {
+      "id": "CA-07",
+      "title": "Unified tool catalog",
+      "passes": false,
+      "est_sessions": 1,
+      "branch": "feat/ca-07-tool-catalog",
+      "mergedSha": null,
+      "dependencies": ["CA-00"],
+      "notes": "descriptor layer only"
+    },
+    {
+      "id": "CA-08",
+      "title": "VLM quality gate (flag off)",
+      "passes": false,
+      "est_sessions": 2,
+      "branch": "feat/ca-08-vlm-quality-gate",
+      "mergedSha": null,
+      "dependencies": ["CA-01", "CA-05a"],
+      "notes": "lagging optional"
+    },
+    {
+      "id": "CA-09",
+      "title": "Ops canary + SLO docs",
+      "passes": false,
+      "est_sessions": 0.75,
+      "branch": "docs/ca-09-agent-ops-canary",
+      "mergedSha": null,
+      "dependencies": ["CA-00"],
+      "notes": "anytime"
+    },
+    {
+      "id": "CA-10",
+      "title": "Mid-run replan API",
+      "passes": false,
+      "est_sessions": 2,
+      "branch": "feat/ca-10-mid-run-replan",
+      "mergedSha": null,
+      "dependencies": ["CA-05b"],
+      "notes": "new generationId only"
+    }
+  ]
+}
