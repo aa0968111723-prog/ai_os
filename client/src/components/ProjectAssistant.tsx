@@ -97,7 +97,7 @@ function buildGroups(list: GenModel[]): Array<{ label: string; items: GenModel[]
  * 思考過程：問答走 SSE 串流，把「思考中／正在查什麼／查到什麼」即時逐筆呈現；串流不可用時自動退回 tRPC 一次性問答。
  * 收起／清除：對話可整段收起（省版面、不丟執行中狀態）或一鍵清空重來；生成動作可在執行前自己換模型（多模態）。
  *
- * WB-03：onCreationAction 提供「帶入直接生成／建立執行計畫」等跨模式帶入（只填草稿、不扣點、不送出）。
+ * WB-03：onCreationAction 提供「帶入直接出圖／建立多步開拍」等跨模式帶入（只填草稿、不扣點、不送出）。
  * 執行仍走既有 ConfirmButton → runAction；帶入走工作台 CreationAction 契約。
  */
 export function ProjectAssistant({
@@ -641,7 +641,7 @@ export function ProjectAssistant({
                               type="button"
                               className="btn-sm"
                               disabled={isRunning}
-                              title="帶入執行計畫目標並切換模式，不自動排程、不扣點"
+                              title="帶入多步開拍目標並切換模式，不自動排程、不扣點"
                               onClick={() =>
                                 onCreationAction({
                                   type: "create_plan",
@@ -649,7 +649,7 @@ export function ProjectAssistant({
                                 })
                               }
                             >
-                              帶入執行計畫
+                              帶入多步開拍
                             </button>
                           )}
                           {onCreationAction && payloadAct.type === "run_workflow" && !isDone && (
@@ -657,7 +657,7 @@ export function ProjectAssistant({
                               type="button"
                               className="btn-sm"
                               disabled={isRunning}
-                              title="帶入製作範本模式，不自動啟動工作流"
+                              title="帶入套用範本模式，不自動啟動工作流"
                               onClick={() =>
                                 onCreationAction({
                                   type: "run_template",
@@ -666,7 +666,7 @@ export function ProjectAssistant({
                                 })
                               }
                             >
-                              帶入製作範本
+                              帶入套用範本
                             </button>
                           )}
                           {onCreationAction &&

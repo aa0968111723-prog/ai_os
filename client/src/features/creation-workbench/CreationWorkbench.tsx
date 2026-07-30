@@ -26,6 +26,10 @@ import {
   WORKBENCH_REVEAL_EVENT,
   type WorkbenchRevealDetail,
 } from "./workbenchNav";
+import {
+  composeGoalFromSkills,
+  resolveModeFromSkills,
+} from "../../../../shared/agentSkills";
 
 /**
  * AI 創作工作台（WB-01～WB-06 正式頁面入口）：ProjectPage ② 只掛這一個主卡。
@@ -280,7 +284,15 @@ export function CreationWorkbench({
 
   const onModeChange = (next: CreationMode) => {
     setDraft({ mode: next });
-    setPlanForceOpen(false);
+    setPlanForceOpen(next === "plan");
+  };
+
+  /** ＋ 技能：切 mode、必要時補 goal 提示（不扣點） */
+  const onSkillIdsChange = (skillIds: string[]) => {
+    const mode = resolveModeFromSkills(skillIds) ?? draft.mode;
+    const goal = composeGoalFromSkills(skillIds, draft.goal);
+    setDraft({ skillIds, mode, goal });
+    setPlanForceOpen(mode === "plan");
   };
 
   /** Single path: mode switch (if workbench anchor) + one reduced-motion scroll. */
@@ -330,14 +342,16 @@ export function CreationWorkbench({
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
         <p className="hint workbench-intro-lede" style={{ marginTop: 6 }}>
-          從同一個工作台開始：先說明想完成的成果，再選擇問 AI、直接生成、製作範本或執行計畫。
-          所有能力沿用目前專案的知識、資料、素材、分鏡、權限、點數與核准規則。
+          寫你想完成的畫面或片子，再按 <b>＋ 請誰來幫忙</b>——像請劇組，不必先背四個分頁。
         </p>
 
         <CreationGoalInput
           inputId={goalInputId}
           goal={draft.goal}
           onGoalChange={(goal) => setDraft({ goal })}
+          skillIds={draft.skillIds ?? []}
+          onSkillIdsChange={canEdit ? onSkillIdsChange : undefined}
+          disabled={!canEdit}
         />
 
         <CreationModeTabs mode={mode} onModeChange={onModeChange} tabPanelIdPrefix={tabPrefix} />

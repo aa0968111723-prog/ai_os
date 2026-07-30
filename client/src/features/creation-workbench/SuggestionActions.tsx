@@ -39,7 +39,7 @@ export function SuggestionActions({
         type="button"
         className="btn-sm"
         disabled={disabled}
-        title="填入直接生成提示詞並切換模式，不送出、不扣點"
+        title="填入出圖提示詞並切換模式，不送出、不扣點"
         onClick={() =>
           onAction(
             generateBringInAction({
@@ -49,13 +49,13 @@ export function SuggestionActions({
           )
         }
       >
-        帶入直接生成
+        帶入直接出圖
       </button>
       <button
         type="button"
         className="btn-sm"
         disabled={disabled}
-        title="帶入執行計畫目標並切換模式，不自動排程"
+        title="帶入多步開拍目標並切換模式，不自動排程"
         onClick={() =>
           onAction(
             planBringInAction(text, {
@@ -65,7 +65,7 @@ export function SuggestionActions({
           )
         }
       >
-        建立執行計畫
+        建立多步開拍
       </button>
       {showSideEffects && onSaveSceneDraft && (
         <button

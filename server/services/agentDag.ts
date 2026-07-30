@@ -48,9 +48,28 @@ export function isDagStepRunnable(steps: AgentDagStep[], index: number): boolean
  * ticks, after which their provider jobs progress concurrently.
  */
 export function selectAgentDagStep(steps: AgentDagStep[]): number {
-  const runnable = steps.findIndex((_, index) => isDagStepRunnable(steps, index));
-  if (runnable >= 0) return runnable;
+  const runnable = listRunnableDagSteps(steps);
+  if (runnable.length) return runnable[0]!;
   return steps.findIndex((step) => step.status === "running");
+}
+
+/** 本輪所有可安全啟動的 pending 步驟（多代理並行：獨立支線可同輪送出） */
+export function listRunnableDagSteps(steps: AgentDagStep[]): number[] {
+  const out: number[] = [];
+  for (let index = 0; index < steps.length; index++) {
+    if (isDagStepRunnable(steps, index)) out.push(index);
+  }
+  return out;
+}
+
+/** 已送出、供應商仍在跑的生成步驟索引（長任務：多支線同時 in-flight） */
+export function listInFlightGenerationSteps(steps: AgentDagStep[]): number[] {
+  const out: number[] = [];
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    if (step?.status === "running" && step.generationId) out.push(index);
+  }
+  return out;
 }
 
 export function evaluateAgentDag(steps: AgentDagStep[]): AgentDagProgress {

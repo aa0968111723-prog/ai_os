@@ -35,6 +35,13 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
     expect(source).not.toMatch(/submitGenerationCore\s*\(/);
     expect(source).toContain("executeGenerationCommand({");
   });
+
+  it("long multi-agent: parallel generate branches + in-flight settle", () => {
+    expect(source).toContain("startParallelGenerateBranches");
+    expect(source).toContain("MAX_PARALLEL_GEN_STARTS");
+    expect(source).toContain("listInFlightGenerationSteps");
+    expect(source).toContain("listRunnableDagSteps");
+  });
 });
 
 describe("formatAgentRunMessage（代理終局系統訊息）", () => {

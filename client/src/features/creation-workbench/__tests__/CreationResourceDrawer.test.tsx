@@ -230,7 +230,7 @@ describe("CreationResourceDrawer (WB-05)", () => {
     await user.click(screen.getByRole("button", { name: /提示詞庫/ }));
     const dialog = screen.getByRole("dialog", { name: "資源與結果" });
     const applyBtn = within(dialog).getByRole("button", {
-      name: /帶入目前模式（直接生成）/,
+      name: /帶入目前模式（直接出圖）/,
     });
     await user.click(applyBtn);
 
@@ -246,7 +246,7 @@ describe("CreationResourceDrawer (WB-05)", () => {
     expect(generationSubmit).not.toHaveBeenCalled();
     // Drawer closes after apply; notice is on entry row (visible when closed)
     expect(screen.queryByRole("dialog", { name: "資源與結果" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent(/已帶入「直接生成」/);
+    expect(screen.getByRole("status")).toHaveTextContent(/已帶入「直接出圖」/);
   });
 
   it("apply_prompt to ask mode does not charge or submit", async () => {
@@ -263,7 +263,7 @@ describe("CreationResourceDrawer (WB-05)", () => {
 
     await user.click(screen.getByRole("button", { name: /提示詞庫/ }));
     await user.click(
-      screen.getByRole("button", { name: /帶入目前模式（問 AI）/ }),
+      screen.getByRole("button", { name: /帶入目前模式（一起想）/ }),
     );
 
     expect(onCreationAction).toHaveBeenCalledWith(
@@ -291,7 +291,7 @@ describe("CreationResourceDrawer (WB-05)", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /提示詞庫/ }));
-    await user.click(screen.getByRole("button", { name: /帶入目前模式（直接生成）/ }));
+    await user.click(screen.getByRole("button", { name: /帶入目前模式（直接出圖）/ }));
 
     expect(onReuseGenerate).toHaveBeenCalledOnce();
     expect(onReuseGenerate).toHaveBeenCalledWith(samplePrompt.text, {
@@ -318,7 +318,7 @@ describe("CreationResourceDrawer (WB-05)", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /提示詞庫/ }));
-    await user.click(screen.getByRole("button", { name: /帶入目前模式（直接生成）/ }));
+    await user.click(screen.getByRole("button", { name: /帶入目前模式（直接出圖）/ }));
 
     expect(onReuseGenerate).toHaveBeenCalledOnce();
     expect(screen.getByRole("dialog", { name: "資源與結果" })).toBeVisible();
@@ -345,7 +345,7 @@ describe("CreationResourceDrawer (WB-05)", () => {
     expect(onReuseGenerate).toHaveBeenCalledWith("舊生成", { modelId: "fal-ai/flux/schnell" });
     expect(generationSubmit).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog", { name: "資源與結果" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent(/已帶回直接生成/);
+    expect(screen.getByRole("status")).toHaveTextContent(/已帶回直接出圖/);
   });
 
   it("GenerationList reuse cancel keeps drawer open", async () => {
@@ -412,6 +412,6 @@ describe("CreationResourceDrawer (WB-05)", () => {
     await user.click(screen.getByRole("button", { name: /執行軌跡/ }));
     expect(screen.getByText(/拆三格分鏡並出圖/)).toBeVisible();
     expect(screen.getByRole("button", { name: /開啟計畫/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /前往執行計畫模式/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /前往多步開拍模式/ })).toBeVisible();
   });
 });

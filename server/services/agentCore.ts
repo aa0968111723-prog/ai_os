@@ -475,7 +475,8 @@ export async function planAgentCore(input: {
 6. 步驟少而完整，最多 ${MAX_PLAN_STEPS} 步。每一步都要有唯一 id、title；用 dependsOn 表示真實依賴，不要硬湊線性流程。
 7. sceneNo 是執行當下的分鏡順序（1 起算）；新分鏡會接在現有 ${scenes.length} 格之後。
 8. modelId 只能抄模型速查的 id；不確定就省略。優先選經濟模型，除非目標明確要求品質。needs 模型務必搭配 sourceAssetRef 或 sourceUrl，否則該步無法執行。
-9. 只輸出一個 JSON 物件，不要 Markdown、說明或思考過程。
+9. **多代理並行**：互不依賴的 generate 步驟不要硬串 dependsOn——獨立支線會同時開拍（長任務關頁也繼續）；真有先後才寫 dependsOn。
+10. 只輸出一個 JSON 物件，不要 Markdown、說明或思考過程。
 ${buildPlannerRoleBlock()}
 <可用模型速查>
 ${buildAiModelCheatsheet()}

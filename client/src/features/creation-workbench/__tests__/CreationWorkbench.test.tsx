@@ -180,12 +180,12 @@ describe("CreationWorkbench", () => {
     renderWorkbench();
 
     expect(screen.getByRole("heading", { name: "AI 創作工作台" })).toBeVisible();
-    expect(screen.getByLabelText("想完成什麼？")).toBeVisible();
+    expect(screen.getByLabelText("你想完成什麼畫面？")).toBeVisible();
     expect(screen.getByRole("tablist", { name: "AI 創作模式" })).toBeVisible();
-    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "false");
-    expect(screen.getByRole("tab", { name: /製作範本/ })).toHaveAttribute("aria-selected", "false");
-    expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: /一起想/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /直接出圖/ })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: /套用範本/ })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: /多步開拍/ })).toHaveAttribute("aria-selected", "false");
     expect(screen.getByRole("group", { name: "AI 創作工作台可連動的專案系統" })).toBeVisible();
     expect(document.getElementById("sec-ai-hub")).toBeTruthy();
     expect(document.getElementById("sec-assistant")).toBeTruthy();
@@ -196,21 +196,21 @@ describe("CreationWorkbench", () => {
     const user = userEvent.setup();
     renderWorkbench();
 
-    const askPanel = screen.getByRole("tabpanel", { name: /問 AI/ });
+    const askPanel = screen.getByRole("tabpanel", { name: /一起想/ });
     expect(askPanel).not.toHaveAttribute("hidden");
     expect(screen.getByTestId("assistant")).toBeVisible();
 
-    const generateTab = screen.getByRole("tab", { name: /直接生成/ });
+    const generateTab = screen.getByRole("tab", { name: /直接出圖/ });
     await user.click(generateTab);
     expect(generateTab).toHaveAttribute("aria-selected", "true");
-    const genPanel = screen.getByRole("tabpanel", { name: /直接生成/ });
+    const genPanel = screen.getByRole("tabpanel", { name: /直接出圖/ });
     expect(genPanel).not.toHaveAttribute("hidden");
     // Full generate form (WB-02) lives in panel with #sec-studio
     expect(document.getElementById("sec-studio")).toBeTruthy();
     expect(within(genPanel).getByTestId("model-picker")).toBeVisible();
     expect(document.getElementById("gen-prompt")).toBeTruthy();
 
-    const askTab = screen.getByRole("tab", { name: /問 AI/ });
+    const askTab = screen.getByRole("tab", { name: /一起想/ });
     const panels = document.querySelectorAll('[role="tabpanel"]');
     const visible = [...panels].filter((p) => !p.hasAttribute("hidden"));
     expect(visible).toHaveLength(1);
@@ -222,13 +222,13 @@ describe("CreationWorkbench", () => {
     const user = userEvent.setup();
     renderWorkbench();
 
-    const goal = screen.getByLabelText("想完成什麼？");
+    const goal = screen.getByLabelText("你想完成什麼畫面？");
     await user.type(goal, "拆分鏡並出圖");
     expect(goal).toHaveValue("拆分鏡並出圖");
 
-    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
-    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("拆分鏡並出圖");
-    const generatePanel = screen.getByRole("tabpanel", { name: /直接生成/ });
+    await user.click(screen.getByRole("tab", { name: /直接出圖/ }));
+    expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("拆分鏡並出圖");
+    const generatePanel = screen.getByRole("tabpanel", { name: /直接出圖/ });
     expect(within(generatePanel).getByText(/目前目標/)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "收合" }));
@@ -236,8 +236,8 @@ describe("CreationWorkbench", () => {
     expect(screen.getByText(/草稿與模式選擇已保留/)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "展開" }));
-    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("拆分鏡並出圖");
-    expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("拆分鏡並出圖");
+    expect(screen.getByRole("tab", { name: /直接出圖/ })).toHaveAttribute("aria-selected", "true");
 
     await waitFor(() => {
       const stored = loadDraft(projectId);
@@ -249,15 +249,15 @@ describe("CreationWorkbench", () => {
   it("generate form prompt survives mode switch (draft persistence)", async () => {
     const user = userEvent.setup();
     renderWorkbench();
-    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+    await user.click(screen.getByRole("tab", { name: /直接出圖/ }));
 
     const prompt = document.getElementById("gen-prompt") as HTMLTextAreaElement;
     expect(prompt).toBeTruthy();
     await user.type(prompt, "禪堂清晨");
     expect(prompt).toHaveValue("禪堂清晨");
 
-    await user.click(screen.getByRole("tab", { name: /問 AI/ }));
-    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+    await user.click(screen.getByRole("tab", { name: /一起想/ }));
+    await user.click(screen.getByRole("tab", { name: /直接出圖/ }));
     expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe("禪堂清晨");
 
     await waitFor(() => {
@@ -273,9 +273,9 @@ describe("CreationWorkbench", () => {
     renderWorkbench();
 
     await waitFor(() => {
-      expect(screen.getByLabelText("想完成什麼？")).toHaveValue("用範本跑片頭");
+      expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("用範本跑片頭");
     });
-    expect(screen.getByRole("tab", { name: /製作範本/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /套用範本/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("workflow-card")).toBeInTheDocument();
     expect(document.getElementById("sec-workflow")).toBeTruthy();
   });
@@ -284,31 +284,31 @@ describe("CreationWorkbench", () => {
     const user = userEvent.setup();
     renderWorkbench();
 
-    const ask = screen.getByRole("tab", { name: /問 AI/ });
+    const ask = screen.getByRole("tab", { name: /一起想/ });
     ask.focus();
     expect(ask).toHaveFocus();
 
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: /直接出圖/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /直接出圖/ })).toHaveFocus();
 
     await user.keyboard("{ArrowRight}");
-    expect(screen.getByRole("tab", { name: /製作範本/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /套用範本/ })).toHaveAttribute("aria-selected", "true");
 
     await user.keyboard("{End}");
-    expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /多步開拍/ })).toHaveAttribute("aria-selected", "true");
 
     await user.keyboard("{Home}");
-    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /一起想/ })).toHaveAttribute("aria-selected", "true");
 
     await user.keyboard("{ArrowLeft}");
-    expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /多步開拍/ })).toHaveAttribute("aria-selected", "true");
   });
 
   it("direct generate mode hosts #sec-studio form (no jump button)", async () => {
     const user = userEvent.setup();
     renderWorkbench();
-    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+    await user.click(screen.getByRole("tab", { name: /直接出圖/ }));
 
     expect(document.getElementById("sec-studio")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /前往創作生成台/ })).toBeNull();
@@ -318,7 +318,7 @@ describe("CreationWorkbench", () => {
   it("template mode embeds WorkflowCard with projectId/charIds/sceneIds and #sec-workflow", async () => {
     const user = userEvent.setup();
     renderWorkbench({ characterIds: ["c1", "c2"], scenePresetIds: ["s1"] });
-    await user.click(screen.getByRole("tab", { name: /製作範本/ }));
+    await user.click(screen.getByRole("tab", { name: /套用範本/ }));
 
     const card = screen.getByTestId("workflow-card");
     expect(card).toBeInTheDocument();
@@ -328,7 +328,7 @@ describe("CreationWorkbench", () => {
     expect(card).toHaveAttribute("data-embedded", "1");
     expect(document.getElementById("sec-workflow")).toBeTruthy();
     expect(document.getElementById("sec-workflow")?.contains(card)).toBe(true);
-    expect(screen.queryByRole("button", { name: /前往製作範本/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /前往套用範本/ })).toBeNull();
   });
 
   it("template mode pre-selects draft.templateId; goal is hint-only until 帶入想法", async () => {
@@ -341,7 +341,7 @@ describe("CreationWorkbench", () => {
     renderWorkbench();
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /製作範本/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /套用範本/ })).toHaveAttribute("aria-selected", "true");
     });
 
     const card = screen.getByTestId("workflow-card");
@@ -362,9 +362,9 @@ describe("CreationWorkbench", () => {
     const user = userEvent.setup();
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     renderWorkbench();
-    await user.click(screen.getByRole("tab", { name: /製作範本/ }));
+    await user.click(screen.getByRole("tab", { name: /套用範本/ }));
 
-    const goal = screen.getByLabelText("想完成什麼？");
+    const goal = screen.getByLabelText("你想完成什麼畫面？");
     await user.type(goal, "abc");
 
     const card = screen.getByTestId("workflow-card");
@@ -385,7 +385,7 @@ describe("CreationWorkbench", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /製作範本/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /套用範本/ })).toHaveAttribute("aria-selected", "true");
     });
     expect(generationSubmit).not.toHaveBeenCalled();
 
@@ -426,7 +426,7 @@ describe("CreationWorkbench", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /製作範本/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /套用範本/ })).toHaveAttribute("aria-selected", "true");
     });
     await waitFor(() => {
       expect(screen.getByTestId("workflow-card")).toHaveAttribute("data-prompt", "新的帶入目標");
@@ -454,7 +454,7 @@ describe("CreationWorkbench", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /製作範本/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /套用範本/ })).toHaveAttribute("aria-selected", "true");
     });
     expect(document.getElementById("sec-workflow")?.closest("[hidden]")).toBeNull();
     await waitFor(() => {
@@ -475,32 +475,30 @@ describe("CreationWorkbench", () => {
     expect(screen.getAllByText("執行中 1").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("待核准 1").length).toBeGreaterThanOrEqual(1);
 
-    await user.click(screen.getByRole("tab", { name: /執行計畫/ }));
+    await user.click(screen.getByRole("tab", { name: /多步開拍/ }));
     expect(screen.getByTestId("agent-card")).toBeInTheDocument();
-    expect(document.querySelector("#sec-agent")).toHaveAttribute("open");
+    // 多步開拍：#sec-agent 常駐可見（非 details 收合）
+    expect(document.querySelector("#sec-agent")).toBeTruthy();
+    expect(document.getElementById("sec-agent")?.closest('[role="tabpanel"]')).not.toHaveAttribute("hidden");
   });
 
-  it("does not reopen execution after user collapses it while activity continues", async () => {
-    const user = userEvent.setup();
+  it("plan panel stays mounted and visible while activity continues", async () => {
     let data = [{ id: "run-1", status: "running" }];
     listByProject.mockImplementation(() => ({ data }));
     const { rerender } = renderWorkbench();
 
-    await user.click(screen.getByRole("tab", { name: /執行計畫/ }));
-    const details = document.querySelector("#sec-agent");
-    const summary = details?.querySelector("summary");
-    expect(details).toHaveAttribute("open");
-    expect(summary).not.toBeNull();
-    await user.click(summary!);
-    expect(details).not.toHaveAttribute("open");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: /多步開拍/ }));
+    expect(document.querySelector("#sec-agent")).toBeTruthy();
+    expect(screen.getByTestId("agent-card")).toBeInTheDocument();
 
     data = [
       { id: "run-1", status: "running" },
       { id: "run-2", status: "awaiting_approval" },
     ];
     rerender(<CreationWorkbench projectId={projectId} canEdit groupId="g1" />);
-    expect(details).not.toHaveAttribute("open");
-    expect(summary).toHaveAttribute("aria-expanded", "false");
+    expect(document.querySelector("#sec-agent")).toBeTruthy();
+    expect(screen.getAllByText(/待核准|等你/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("focus=agent-run-* deep link switches to plan and flashes anchor", async () => {
@@ -508,10 +506,10 @@ describe("CreationWorkbench", () => {
     renderWorkbench();
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /多步開拍/ })).toHaveAttribute("aria-selected", "true");
     });
     expect(document.querySelector("#sec-ai-hub-body")).not.toHaveAttribute("hidden");
-    expect(document.querySelector("#sec-agent")).toHaveAttribute("open");
+    expect(document.querySelector("#sec-agent")).toBeTruthy();
     await waitFor(() => {
       expect(flashAnchor).toHaveBeenCalledWith("agent-run-abc123");
     });
@@ -521,7 +519,7 @@ describe("CreationWorkbench", () => {
     window.history.replaceState({}, "", "/project/project-1?focus=generation-xyz");
     renderWorkbench();
 
-    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /一起想/ })).toHaveAttribute("aria-selected", "true");
     expect(flashAnchor).not.toHaveBeenCalled();
   });
 
@@ -559,7 +557,7 @@ describe("CreationWorkbench", () => {
 
   it("revealWorkbenchAnchor(#sec-agent) from other mode shows plan panel (GenerationList path)", async () => {
     renderWorkbench();
-    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /一起想/ })).toHaveAttribute("aria-selected", "true");
     const hiddenPlan = document.getElementById("sec-agent")?.closest('[role="tabpanel"]');
     expect(hiddenPlan).toHaveAttribute("hidden");
 
@@ -568,12 +566,12 @@ describe("CreationWorkbench", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /多步開拍/ })).toHaveAttribute("aria-selected", "true");
     });
-    const planPanel = screen.getByRole("tabpanel", { name: /執行計畫/ });
+    const planPanel = screen.getByRole("tabpanel", { name: /多步開拍/ });
     expect(planPanel).not.toHaveAttribute("hidden");
     expect(document.getElementById("sec-agent")?.closest("[hidden]")).toBeNull();
-    expect(document.querySelector("#sec-agent")).toHaveAttribute("open");
+    expect(document.querySelector("#sec-agent")).toBeTruthy();
     await waitFor(() => {
       expect(document.getElementById("sec-agent")?.scrollIntoView).toHaveBeenCalled();
     });
@@ -581,22 +579,22 @@ describe("CreationWorkbench", () => {
 
   it("revealWorkbenchAnchor(#sec-studio) switches to generate mode", async () => {
     renderWorkbench();
-    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /一起想/ })).toHaveAttribute("aria-selected", "true");
 
     act(() => {
       revealWorkbenchAnchor("#sec-studio", { projectId });
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /直接出圖/ })).toHaveAttribute("aria-selected", "true");
     });
-    expect(screen.getByRole("tabpanel", { name: /直接生成/ })).not.toHaveAttribute("hidden");
+    expect(screen.getByRole("tabpanel", { name: /直接出圖/ })).not.toHaveAttribute("hidden");
     expect(document.getElementById("sec-studio")?.closest("[hidden]")).toBeNull();
   });
 
   it("revealWorkbenchAnchor(#gen-prompt) unhides generate form (onboard / deep-link path)", async () => {
     renderWorkbench();
-    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /一起想/ })).toHaveAttribute("aria-selected", "true");
     // Prompt exists but is under a hidden tabpanel while ask is active
     expect(document.getElementById("gen-prompt")?.closest("[hidden]")).not.toBeNull();
 
@@ -605,9 +603,9 @@ describe("CreationWorkbench", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /直接出圖/ })).toHaveAttribute("aria-selected", "true");
     });
-    expect(screen.getByRole("tabpanel", { name: /直接生成/ })).not.toHaveAttribute("hidden");
+    expect(screen.getByRole("tabpanel", { name: /直接出圖/ })).not.toHaveAttribute("hidden");
     expect(document.getElementById("gen-prompt")?.closest("[hidden]")).toBeNull();
     expect(document.getElementById("sec-studio")?.closest("[hidden]")).toBeNull();
   });
@@ -615,16 +613,16 @@ describe("CreationWorkbench", () => {
   it("revealWorkbenchAnchor(#sec-assistant) switches to ask mode", async () => {
     const user = userEvent.setup();
     renderWorkbench();
-    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+    await user.click(screen.getByRole("tab", { name: /直接出圖/ }));
 
     act(() => {
       revealWorkbenchAnchor("#sec-assistant", { projectId });
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /一起想/ })).toHaveAttribute("aria-selected", "true");
     });
-    expect(screen.getByRole("tabpanel", { name: /問 AI/ })).not.toHaveAttribute("hidden");
+    expect(screen.getByRole("tabpanel", { name: /一起想/ })).not.toHaveAttribute("hidden");
     expect(document.getElementById("sec-assistant")?.closest("[hidden]")).toBeNull();
   });
 
@@ -632,14 +630,14 @@ describe("CreationWorkbench", () => {
     saveDraft(projectId, { ...emptyDraft("plan"), goal: "restore-plan" });
     renderWorkbench();
 
-    expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("restore-plan");
+    expect(screen.getByRole("tab", { name: /多步開拍/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("restore-plan");
     expect(document.querySelector("#sec-agent")).not.toHaveAttribute("open");
   });
 
   it("tab aria-controls matches tabpanel id", () => {
     renderWorkbench();
-    const tab = screen.getByRole("tab", { name: /問 AI/ });
+    const tab = screen.getByRole("tab", { name: /一起想/ });
     const controls = tab.getAttribute("aria-controls");
     expect(controls).toBeTruthy();
     const panel = document.getElementById(controls!);
@@ -652,14 +650,14 @@ describe("CreationWorkbench", () => {
     saveDraft("project-2", { ...emptyDraft("generate"), goal: "goal-two" });
 
     const { rerender } = render(<CreationWorkbench projectId="project-1" canEdit groupId="g1" />);
-    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("goal-one");
-    expect(screen.getByRole("tab", { name: /問 AI/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("goal-one");
+    expect(screen.getByRole("tab", { name: /一起想/ })).toHaveAttribute("aria-selected", "true");
 
     rerender(<CreationWorkbench projectId="project-2" canEdit groupId="g1" />);
     await waitFor(() => {
-      expect(screen.getByLabelText("想完成什麼？")).toHaveValue("goal-two");
+      expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("goal-two");
     });
-    expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /直接出圖/ })).toHaveAttribute("aria-selected", "true");
 
     expect(loadDraft("project-1").goal).toBe("goal-one");
   });
@@ -680,7 +678,7 @@ describe("CreationWorkbench", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /直接出圖/ })).toHaveAttribute("aria-selected", "true");
     });
     expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe(
       "AI 建議分鏡：香爐特寫",
@@ -709,10 +707,10 @@ describe("CreationWorkbench", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /多步開拍/ })).toHaveAttribute("aria-selected", "true");
     });
-    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("把腳本拆成分鏡並出圖");
-    expect(document.querySelector("#sec-agent")).toHaveAttribute("open");
+    expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("把腳本拆成分鏡並出圖");
+    expect(document.querySelector("#sec-agent")).toBeTruthy();
     expect(generationSubmit).not.toHaveBeenCalled();
   });
 
@@ -732,7 +730,7 @@ describe("CreationWorkbench", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /執行計畫/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /多步開拍/ })).toHaveAttribute("aria-selected", "true");
     });
     expect(generationSubmit).not.toHaveBeenCalled();
     await waitFor(() => {
@@ -760,18 +758,18 @@ describe("CreationWorkbench", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByRole("tab", { name: /直接生成/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: /直接出圖/ })).toHaveAttribute("aria-selected", "true");
     });
-    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("共享目標");
+    expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("共享目標");
     expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe("跨模式提示");
 
-    await user.click(screen.getByRole("tab", { name: /製作範本/ }));
-    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("共享目標");
+    await user.click(screen.getByRole("tab", { name: /套用範本/ }));
+    expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("共享目標");
 
-    await user.click(screen.getByRole("tab", { name: /執行計畫/ }));
-    expect(screen.getByLabelText("想完成什麼？")).toHaveValue("共享目標");
+    await user.click(screen.getByRole("tab", { name: /多步開拍/ }));
+    expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("共享目標");
 
-    await user.click(screen.getByRole("tab", { name: /直接生成/ }));
+    await user.click(screen.getByRole("tab", { name: /直接出圖/ }));
     expect((document.getElementById("gen-prompt") as HTMLTextAreaElement).value).toBe("跨模式提示");
     expect(generationSubmit).not.toHaveBeenCalled();
 

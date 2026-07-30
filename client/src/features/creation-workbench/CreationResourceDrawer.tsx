@@ -256,7 +256,7 @@ export function CreationResourceDrawer({
         if (!onReuseGenerate) return;
         const ok = reuseSucceeded(onReuseGenerate(text, settings));
         if (!ok) return; // cancel: stay open
-        finishSuccessfulApply("已帶回直接生成（未送出）");
+        finishSuccessfulApply("已帶回直接出圖（未送出）");
       }}
     />
   );
@@ -431,13 +431,13 @@ export function CreationResourceDrawer({
                 {tab === "trail" && (
                   <div data-fb="執行軌跡">
                     <p className="hint" style={{ marginTop: 0 }}>
-                      最近的執行計畫摘要。完整步驟、核准與停止請到「執行計畫」模式。
+                      最近的多步開拍摘要。完整步驟、過目與停止請到「多步開拍」模式。
                     </p>
                     {runs.isLoading && <p className="hint">載入執行軌跡…</p>}
                     {!runs.isLoading && runList.length === 0 && (
                       <div className="empty-state" style={{ marginTop: 8 }}>
                         <h3>還沒有執行軌跡——</h3>
-                        <p>在「執行計畫」或「製作範本」跑一次就會出現在這裡。</p>
+                        <p>在「多步開拍」或「套用範本」跑一次就會出現在這裡。</p>
                       </div>
                     )}
                     {runList.length > 0 && (
@@ -482,7 +482,7 @@ export function CreationResourceDrawer({
                     )}
                     <div style={{ marginTop: 12 }}>
                       <button type="button" className="btn-ghost" onClick={goToPlanMode}>
-                        <Icon name="Film" size={13} /> 前往執行計畫模式
+                        <Icon name="Film" size={13} /> 前往多步開拍模式
                       </button>
                     </div>
                   </div>
@@ -498,7 +498,7 @@ export function CreationResourceDrawer({
                 {tab === "templates" && (
                   <div className="empty-state" style={{ marginTop: 8 }} data-fb="範本收藏">
                     <h3>範本收藏（即將推出）</h3>
-                    <p>常用製作範本會收藏在這裡。目前請到「製作範本」模式挑選與執行。</p>
+                    <p>常用範本會收藏在這裡。目前請到「套用範本」挑選與執行。</p>
                     <button
                       type="button"
                       className="btn-ghost"
@@ -511,7 +511,7 @@ export function CreationResourceDrawer({
                         });
                       }}
                     >
-                      <Icon name="Clapperboard" size={13} /> 前往製作範本
+                      <Icon name="Clapperboard" size={13} /> 前往套用範本
                     </button>
                   </div>
                 )}
