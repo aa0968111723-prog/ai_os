@@ -1,5 +1,5 @@
 /**
- * MOB-03：工作台手機 + 長任務文案契約（純字串／樣式守衛，不需掛 DB）。
+ * MOB-03 / MOB-04：工作台手機 + 長任務文案 + 防水平溢出 CSS 契約（純字串／樣式守衛，不需掛 DB）。
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,5 +27,20 @@ describe("MOB-03 long-task leave copy", () => {
     const chunk = styles.slice(last560, last560 + 20000);
     expect(chunk).toMatch(/\.creation-mode-tabs\s*\{[\s\S]*grid-template-columns:\s*1fr 1fr/);
     expect(chunk).toMatch(/\.creation-mode-tab\s*\{[\s\S]*min-height:\s*64px/);
+  });
+});
+
+describe("MOB-04 overflow-related CSS contract", () => {
+  it("html and body clip horizontal overflow at the root", () => {
+    // 全站防 100vw／子層撐出橫向捲動條（見 styles.css 註解）
+    expect(styles).toMatch(/html\s*\{[^}]*overflow-x:\s*clip/);
+    expect(styles).toMatch(/body\s*\{[\s\S]*?overflow-x:\s*clip/);
+  });
+
+  it("S creation-mode-tabs stay grid (no horizontal scroll snap strip)", () => {
+    const last560 = styles.lastIndexOf("@media (max-width: 560px)");
+    const chunk = styles.slice(last560, last560 + 20000);
+    expect(chunk).toMatch(/\.creation-mode-tabs\s*\{[\s\S]*?overflow:\s*visible/);
+    expect(chunk).toMatch(/\.creation-mode-tabs\s*\{[\s\S]*?scroll-snap-type:\s*none/);
   });
 });
