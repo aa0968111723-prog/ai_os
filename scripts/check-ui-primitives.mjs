@@ -153,7 +153,9 @@ function observations() {
   let primitiveImports = 0;
   for (const file of files) {
     const src = fs.readFileSync(file, "utf8");
-    if (/from\s+["'][^"']*components\/ui(\/[^"']*)?["']/.test(src)) primitiveImports++;
+    // 相對匯入有兩種寫法：元件同層用 "./ui"、頁面用 "../components/ui"。
+    // 只認後者會漏算，讓「遷移進度」看起來停滯。
+    if (/from\s+["'](?:[^"']*components\/ui|\.{1,2}\/ui)(\/[^"']*)?["']/.test(src)) primitiveImports++;
   }
   return { stylesCssLines: stylesLines, tsxFiles: files.length, filesUsingPrimitives: primitiveImports };
 }

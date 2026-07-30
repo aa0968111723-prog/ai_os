@@ -23,6 +23,7 @@ import { revealWorkbenchAnchor, scrollToSelector } from "../features/creation-wo
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
+import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   useCollab,
   CursorOverlay,
@@ -119,7 +120,7 @@ function StageHead({ id, num, title, desc, accent, hint }: {
       <span className="group-title">{title}</span>
       {desc && <span className="group-desc">{desc}</span>}
       <span className="group-rule" />
-      {hint && <span className="hint" style={{ whiteSpace: "nowrap" }}>{hint}</span>}
+      {hint && <Meta style={{ whiteSpace: "nowrap" }}>{hint}</Meta>}
     </div>
   );
 }
@@ -127,10 +128,10 @@ function StageHead({ id, num, title, desc, accent, hint }: {
 /** 幕與幕之間的銜接語：告訴使用者上一幕的東西怎麼流進下一幕（環環相扣的敘事線） */
 function StageLink({ text }: { text: string }) {
   return (
-    <p className="hint" aria-hidden style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 0 2px" }}>
+    <Meta as="p" aria-hidden style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 0 2px" }}>
       <Icon name="ChevronDown" size={14} style={{ flexShrink: 0 }} />
       {text}
-    </p>
+    </Meta>
   );
 }
 
@@ -183,7 +184,7 @@ function TokenListEditor({
             )}
           </span>
         ))}
-        {values.length === 0 && readOnly && <span className="hint">未設定</span>}
+        {values.length === 0 && readOnly && <Meta>未設定</Meta>}
         {!readOnly && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: "4px 6px 4px 0" }}>
             <input
@@ -288,12 +289,12 @@ function AddOptionChip({
         }}
         style={{ width: 160, fontSize: "var(--fs-13)", padding: "4px 10px" }}
       />
-      <button className="btn-sm primary" disabled={!label.trim() || add.isPending} onClick={submit}>
+      <Button size="sm" variant="primary" disabled={!label.trim() || add.isPending} onClick={submit}>
         {add.isPending ? "新增中…" : "加入"}
-      </button>
-      <button className="btn-sm" disabled={add.isPending} onClick={() => { setOpen(false); setLabel(""); }}>
+      </Button>
+      <Button size="sm" disabled={add.isPending} onClick={() => { setOpen(false); setLabel(""); }}>
         取消
-      </button>
+      </Button>
       {add.error && <span className="error" style={{ marginTop: 0 }}>{add.error.message}</span>}
     </span>
   );
@@ -443,7 +444,7 @@ export function ProjectPage({ id }: { id: string }) {
     onSuccess: () => { utils.projects.get.invalidate({ id }); utils.projects.list.invalidate(); },
   });
 
-  if (project.isLoading) return <p className="hint">載入中…</p>;
+  if (project.isLoading) return <Meta as="p">載入中…</Meta>;
   if (project.error || !project.data) {
     const code = project.error?.data?.code;
     const msg =
@@ -576,7 +577,7 @@ export function ProjectPage({ id }: { id: string }) {
   /** 世界觀 chips 群組（主軸／調性／風格共用）：既有選項＋孤兒值＋組長就地「＋新增」 */
   const chipGroup = (field: "themes" | "tones" | "styles", opts: string[], optType: "theme" | "tone" | "style", labelledBy: string) => (
     <div role="group" aria-labelledby={labelledBy}>
-      {options.isLoading && !opts.length && <span className="hint">載入中…</span>}
+      {options.isLoading && !opts.length && <Meta>載入中…</Meta>}
       {opts.map((t) => {
         const on = wv[field].includes(t);
         return (
@@ -670,7 +671,7 @@ export function ProjectPage({ id }: { id: string }) {
       </p>
       <header className="project-hero">
       <div className="project-hero__heading">
-        <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <span className="chip" style={{ marginLeft: 10 }}>已封存</span>}</h1>
+        <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <Chip style={{ marginLeft: 10 }}>已封存</Chip>}</h1>
         {/* 即時協作：連線狀態＋誰在場＋一般／鏡像跟隨模式切換
             手機預設收成「N 人在線」chip，點開才看名單／鏡像（不拿掉 WebSocket） */}
         <span
@@ -702,7 +703,7 @@ export function ProjectPage({ id }: { id: string }) {
                 </span>
               )}
               {collab.connected && collab.peers.length === 0 && (
-                <span className="hint" style={{ fontSize: 12 }}>即時同步已連線</span>
+                <Meta style={{ fontSize: 12 }}>即時同步已連線</Meta>
               )}
               {collab.peers.map((peer) => {
                 const isMe = peer.userId === collab.self?.userId;
@@ -779,16 +780,16 @@ export function ProjectPage({ id }: { id: string }) {
           )}
         </span>
         {collabMode === "mirror" && followUserId && (
-          <p className="hint" style={{ flexBasis: "100%", margin: "4px 0 0" }}>
+          <Hint layer="always" style={{ flexBasis: "100%", margin: "4px 0 0" }}>
             鏡像跟隨中：畫面會跟著對方的焦點區與游標捲動（不是螢幕串流；雙方版面不同時以卡片錨點對位）。
             可點「退出鏡像」或再點對方名字取消。
-          </p>
+          </Hint>
         )}
         {canArchive && (
           p.status === "archived" ? (
-            <button className="btn-sm" disabled={archiveProject.isPending} onClick={() => archiveProject.mutate({ id, archived: false })}>
+            <Button size="sm" disabled={archiveProject.isPending} onClick={() => archiveProject.mutate({ id, archived: false })}>
               還原專案
-            </button>
+            </Button>
           ) : (
             <ConfirmButton
               triggerClassName="btn-sm"
@@ -849,7 +850,7 @@ export function ProjectPage({ id }: { id: string }) {
             </span>
             {completedStepCount}/{onboardSteps.length}
           </span>
-          {allStepsDone && <span className="chip" style={{ fontSize: 12 }}>全部完成</span>}
+          {allStepsDone && <Chip style={{ fontSize: 12 }}>全部完成</Chip>}
           <button
             className="btn-sm"
             onClick={toggleOnboard}
@@ -927,12 +928,12 @@ export function ProjectPage({ id }: { id: string }) {
           </div>
           {/* 世界觀（快速層） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
-          <section className="card" data-fb="世界觀卡" id="onboard-worldview">
+          <Card as="section" data-fb="世界觀卡" id="onboard-worldview">
             <h2>
               專案基調與世界觀
               <HelpTip text="這支片的固定設定，填一次，之後每次生成 AI 自動記得，不用重講背景。" />
               {updateWv.isPending ? (
-                <span className="hint" style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</span>
+                <Meta style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</Meta>
               ) : wvSaved !== "idle" ? (
                 <span
                   className="hint"
@@ -945,7 +946,7 @@ export function ProjectPage({ id }: { id: string }) {
                 </span>
               ) : null}
             </h2>
-            {!canEdit && <p className="hint" style={{ margin: "4px 0 0" }}>檢視者唯讀——世界觀可瀏覽、不能修改（打的字不會被儲存）。</p>}
+            {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——世界觀可瀏覽、不能修改（打的字不會被儲存）。</Hint>}
             <label htmlFor="wv-logline">一句話故事（logline）</label>
             {/* key 綁伺服器值：協作者改動（WS invalidate 重抓）時強制重掛吃進新值——
                 非受控 defaultValue 否則永遠停在舊字，focus+blur 還會把舊值回寫、蓋掉別人的修改。
@@ -976,9 +977,9 @@ export function ProjectPage({ id }: { id: string }) {
             <label id="wv-styles">視覺風格（畫面一致的關鍵，生成時自動注入）<HelpTip text="語氣與畫風，會自動加進每次生成的提示詞。" /></label>
             {chipGroup("styles", styleOpts, "style", "wv-styles")}
             {isLeader && (
-              <p className="hint" style={{ marginTop: 8, fontSize: 12 }}>
+              <Hint style={{ marginTop: 8, fontSize: 12 }}>
                 選項可直接按各列的「＋新增」加；改名／停用／排序在 <Link href="/options">選項整理頁</Link>。
-              </p>
+              </Hint>
             )}
             {/* 進階層全面可編輯（深度優化：後端 updateWorldview 早支援 partial patch，前端不再唯讀）——
                 目標觀眾/三幕結構供 AI 導演參考；禁忌事項會自動注入每次生成 */}
@@ -1041,13 +1042,13 @@ export function ProjectPage({ id }: { id: string }) {
                   readOnly={!canEdit}
                   onChange={(next) => updateWv.mutate({ id, worldview: { taboos: next } })}
                 />
-                <p className="hint" style={{ marginTop: 8, fontSize: 12 }}>
+                <Hint style={{ marginTop: 8, fontSize: 12 }}>
                   視覺風格與禁忌事項會自動注入每次生成的提示詞；其他欄位供 AI 導演與團隊參考。
-                </p>
+                </Hint>
               </div>
             </details>
             {updateWv.error && <p className="error">世界觀儲存失敗：{updateWv.error.message}</p>}
-          </section>
+          </Card>
           </CollabZone>
 
           {/* 角色定裝卡：勾選後生成自動注入外觀錨點。

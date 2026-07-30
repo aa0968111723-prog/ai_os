@@ -24,7 +24,8 @@ export function Meta({
   children,
   ...rest
 }: {
-  as?: "span" | "p" | "div" | "ul" | "li" | "small";
+  /** 內容的形狀很多樣：條列（ul/ol/li）、段落、可收合區的標頭（summary）都用得上 */
+  as?: "span" | "p" | "div" | "ul" | "ol" | "li" | "small" | "summary";
   className?: string;
   children?: ReactNode;
 } & Omit<HTMLAttributes<HTMLElement>, "children" | "className">) {

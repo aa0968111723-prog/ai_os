@@ -3,6 +3,7 @@ import { getModel } from "@shared/models";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 
+import { Card, Chip, Hint, Meta } from "./ui";
 /**
  * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（未授權/背景分頁）建構子會丟例外，包 try 忽略。
  * 純附加通知——不影響任何既有輪詢與顯示邏輯。
@@ -164,9 +165,9 @@ export function WorkflowCard({
   const body = (
     <>
       {!embedded && <h2>製作範本（固定自動流程）</h2>}
-      <p className="hint" style={{ marginTop: embedded ? 4 : undefined }}>
+      <Hint style={{ marginTop: embedded ? 4 : undefined }}>
         適合步驟固定、會重複使用的製作方式。選一個範本、填一次想法，系統會在背景依序完成；關掉頁面也會繼續，成品會進入生成紀錄。
-      </p>
+      </Hint>
       <label htmlFor="wf-flow">選擇製作範本</label>
       <select id="wf-flow" value={wf?.id ?? ""} onChange={(e) => setWfId(e.target.value)}>
         {(workflows.data ?? []).map((w) => (
@@ -175,13 +176,13 @@ export function WorkflowCard({
           </option>
         ))}
       </select>
-      {wf && <p className="hint" style={{ marginTop: 4 }}>{wf.strengths}|適合：{wf.bestFor}</p>}
+      {wf && <Meta as="p" style={{ marginTop: 4 }}>{wf.strengths}|適合：{wf.bestFor}</Meta>}
       {pickMissId ? (
-        <p className="hint" role="status" style={{ marginTop: 6, color: "var(--gold-ink)" }}>
+        <Meta as="p" role="status" style={{ marginTop: 6, color: "var(--gold-ink)" }}>
           帶入範本無法對應：
           <b className="mono">{pickMissId}</b>
           （列表中沒有這個 id，已保留目前選擇）
-        </p>
+        </Meta>
       ) : null}
 
       {/* §6.4 計畫預覽：步驟、模型、估點、核准閘門（單一區塊，不另掛 CreationCostSummary） */}
@@ -200,7 +201,7 @@ export function WorkflowCard({
           }}
         >
           <strong style={{ fontSize: "var(--fs-13)" }}>計畫預覽</strong>
-          <ol className="hint" style={{ margin: "6px 0 0", paddingLeft: 20 }}>
+          <Meta as="ol" style={{ margin: "6px 0 0", paddingLeft: 20 }}>
             {wf.steps.map((s, i) => (
               <li key={i} style={{ marginBottom: 2 }}>
                 {s.note}
@@ -208,19 +209,19 @@ export function WorkflowCard({
                   {modelLabel(s.modelId)}
                 </span>
                 {s.usePrevAsSource ? (
-                  <span className="chip" style={{ marginLeft: 4, fontSize: "var(--fs-11)" }}>
+                  <Chip style={{ marginLeft: 4, fontSize: "var(--fs-11)" }}>
                     沿用上步
-                  </span>
+                  </Chip>
                 ) : null}
               </li>
             ))}
-          </ol>
-          <p className="hint" style={{ margin: "6px 0 0" }}>
+          </Meta>
+          <Hint layer="always" style={{ margin: "6px 0 0" }}>
             本次模式：製作範本・預估消耗：約 {wf.points} 點（{wf.steps.length} 步）・產物寫入生成紀錄
-          </p>
-          <p className="hint" style={{ margin: "2px 0 0" }}>
+          </Hint>
+          <Hint style={{ margin: "2px 0 0" }}>
             是否需要核准：各步生成若達門檻仍走既有核准流程（背景執行不中斷）
-          </p>
+          </Hint>
         </div>
       )}
 
@@ -230,12 +231,12 @@ export function WorkflowCard({
       <textarea id="wf-idea" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂中一炷香緩緩升起，傳達放下與新生" />
       {/* 二合一回看線：啟動會沿用生成台勾選的角色/場景卡，整條串鏈畫風一致（沒勾就不帶） */}
       {(charIds.length > 0 || sceneIds.length > 0) && (
-        <p className="hint" style={{ marginTop: 6 }}>
+        <Meta as="p" style={{ marginTop: 6 }}>
           帶入生成台勾選：
           {charIds.length > 0 && <span className="chip on" style={{ marginLeft: 4 }}>角色 {charIds.length}</span>}
           {sceneIds.length > 0 && <span className="chip on" style={{ marginLeft: 4 }}>場景 {sceneIds.length}</span>}
           <span style={{ marginLeft: 4 }}>——視覺步驟都注入同一套錨點</span>
-        </p>
+        </Meta>
       )}
       <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button
@@ -256,10 +257,10 @@ export function WorkflowCard({
         >
           {start.isPending ? "送出中…" : `執行製作範本（約 −${wf?.points ?? 0} 點）`}
         </button>
-        {hasMyActive && <span className="hint">已有一個製作範本在執行</span>}
+        {hasMyActive && <Hint as="span" layer="always">已有一個製作範本在執行</Hint>}
       </div>
-      {start.error && <p className="hint" style={{ marginTop: 6 }}>啟動失敗：{start.error.message}</p>}
-      {stop.error && <p className="hint" style={{ marginTop: 6 }}>停止失敗：{stop.error.message}</p>}
+      {start.error && <Meta as="p" style={{ marginTop: 6 }}>啟動失敗：{start.error.message}</Meta>}
+      {stop.error && <Meta as="p" style={{ marginTop: 6 }}>停止失敗：{stop.error.message}</Meta>}
 
       {(runs.data ?? []).map((r) => {
         const steps = r.steps as RunStep[];
@@ -269,21 +270,21 @@ export function WorkflowCard({
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <strong style={{ fontSize: "var(--fs-13)" }}>{label}</strong>
               <span className={`pill ${r.status}`}>{RUN_STATUS_LABEL[r.status] ?? r.status}</span>
-              <span className="hint">{new Date(r.createdAt).toLocaleString("zh-TW", { hour12: false })}</span>
+              <Meta>{new Date(r.createdAt).toLocaleString("zh-TW", { hour12: false })}</Meta>
               {r.status === "running" && (
                 <button disabled={stop.isPending} onClick={() => stop.mutate({ runId: r.id })}>
                   {stop.isPending ? "停止中…" : "停止後續步驟"}
                 </button>
               )}
             </div>
-            <p className="hint" style={{ margin: "4px 0" }}>
+            <Meta as="p" style={{ margin: "4px 0" }}>
               想法：{r.prompt}
               {/* 這條 run 帶了哪些錨點（落庫在 run 上，重整/他人看到的都一致） */}
-              {((r.characterIds as string[] | null)?.length ?? 0) > 0 && <span className="chip" style={{ marginLeft: 6 }}>角色 {(r.characterIds as string[]).length}</span>}
-              {((r.scenePresetIds as string[] | null)?.length ?? 0) > 0 && <span className="chip" style={{ marginLeft: 4 }}>場景 {(r.scenePresetIds as string[]).length}</span>}
-            </p>
+              {((r.characterIds as string[] | null)?.length ?? 0) > 0 && <Chip style={{ marginLeft: 6 }}>角色 {(r.characterIds as string[]).length}</Chip>}
+              {((r.scenePresetIds as string[] | null)?.length ?? 0) > 0 && <Chip style={{ marginLeft: 4 }}>場景 {(r.scenePresetIds as string[]).length}</Chip>}
+            </Meta>
             {steps.map((s, i) => (
-              <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+              <Meta key={i} as="div" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
                 <span style={{ display: "inline-flex" }}><Icon name={STEP_ICON[s.status] ?? "Clock"} size={13} /></span>
                 <span>{s.note}</span>
                 {s.status === "pending" && <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>排隊中</span>}
@@ -304,10 +305,10 @@ export function WorkflowCard({
                     查看生成
                   </button>
                 )}
-              </div>
+              </Meta>
             ))}
-            {r.status === "failed" && r.error && <p className="hint" style={{ marginTop: "var(--sp-4)" }}>原因：{r.error}</p>}
-            {r.status === "stopped" && <p className="hint" style={{ marginTop: 4 }}>已停止（已完成與正在生成的步驟不受影響）。</p>}
+            {r.status === "failed" && r.error && <Meta as="p" style={{ marginTop: "var(--sp-4)" }}>原因：{r.error}</Meta>}
+            {r.status === "stopped" && <Meta as="p" style={{ marginTop: 4 }}>已停止（已完成與正在生成的步驟不受影響）。</Meta>}
           </div>
         );
       })}
@@ -323,8 +324,8 @@ export function WorkflowCard({
   }
 
   return (
-    <section className="card" data-fb="製作範本" data-testid="workflow-card">
+    <Card as="section" data-fb="製作範本" data-testid="workflow-card">
       {body}
-    </section>
+    </Card>
   );
 }

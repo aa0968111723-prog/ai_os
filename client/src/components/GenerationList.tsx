@@ -8,6 +8,7 @@ import { AssetVideo, AssetAudio, MissingMediaBox } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 import { revealWorkbenchAnchor } from "../features/creation-workbench/workbenchNav";
 
+import { Button, Hint, Meta } from "./ui";
 /** 生成結果縮圖（圖片）：載入失敗顯示「結果已失效」佔位，並拿掉開新分頁連結（點下去只會是 404） */
 function GenResultImgLink({ url, alt }: { url: string; alt: string }) {
   const [failed, setFailed] = useState(false);
@@ -333,7 +334,7 @@ export function GenerationList({
       <div className="sr-only" role="status" aria-live="polite">{liveMsg}</div>
       {addSceneError && <p className="error">加入分鏡失敗：{addSceneError}</p>}
       {addedId && !addSceneError && (
-        <p className="hint" style={{ color: "var(--success-ink)" }}>已加入分鏡 ✓（在下方分鏡・交付區）</p>
+        <Meta as="p" style={{ color: "var(--success-ink)" }}>已加入分鏡 ✓（在下方分鏡・交付區）</Meta>
       )}
       {retry.error && <p className="error">重試失敗：{retry.error.message}</p>}
       {decideCost.error && <p className="error">核准／駁回失敗：{decideCost.error.message}</p>}
@@ -341,7 +342,7 @@ export function GenerationList({
       <details className="generation-filter-panel">
         <summary>
           <span><Icon name="SlidersHorizontal" size={13} /> 篩選與搜尋</span>
-          <span className="hint">{activeFilterCount > 0 ? `已套用 ${activeFilterCount} 項` : "依狀態、類型、分鏡或提示詞尋找"}</span>
+          <Meta>{activeFilterCount > 0 ? `已套用 ${activeFilterCount} 項` : "依狀態、類型、分鏡或提示詞尋找"}</Meta>
         </summary>
         <div
           className="gen-filters"
@@ -424,12 +425,12 @@ export function GenerationList({
       {browsing && paged.isError && (
         <p className="error" role="alert" style={{ marginTop: 12 }}>
           生成紀錄暫時載入不了（不是資料不見了）——
-          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => paged.refetch()}>再試一次</button>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => paged.refetch()}>再試一次</Button>
         </p>
       )}
-      {browsing && paged.isLoading && rows.length === 0 && <p className="hint" style={{ marginTop: 12 }}>載入中…</p>}
+      {browsing && paged.isLoading && rows.length === 0 && <Meta as="p" style={{ marginTop: 12 }}>載入中…</Meta>}
       {browsing && !paged.isLoading && !paged.isError && rows.length === 0 && (
-        <p className="hint" style={{ marginTop: 12 }}>沒有符合條件的生成紀錄。</p>
+        <Meta as="p" style={{ marginTop: 12 }}>沒有符合條件的生成紀錄。</Meta>
       )}
       {rows.map((g) => (
         <div key={g.id} className="gen-row" id={`generation-${g.id}`}>
@@ -582,7 +583,7 @@ export function GenerationList({
                   {/* 注入透明化：世界觀/角色/場景錨點注入後「實際送給模型」的完整提示詞 */}
                   {injectedPrompt && (
                     <details style={{ flexBasis: "100%" }}>
-                      <summary className="hint" style={{ cursor: "pointer", fontSize: 12 }}>完整注入提示詞</summary>
+                      <Meta as="summary" style={{ cursor: "pointer", fontSize: 12 }}>完整注入提示詞</Meta>
                       <div className="mono" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, marginTop: 4, padding: "6px 8px", background: "var(--surface-2, rgba(0,0,0,0.04))", borderRadius: 6 }}>
                         {injectedPrompt}
                         <div style={{ marginTop: 4 }}>
@@ -613,9 +614,9 @@ export function GenerationList({
             <span className={`pill ${STATUS_PILL_CLASS[g.status] ?? g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
             {/* MOB-03：進行中列提示可離開（背景 runner 推進） */}
             {(g.status === "queued" || g.status === "running") && (
-              <span className="hint" style={{ fontSize: 11, textAlign: "right", maxWidth: 140 }}>
+              <Meta style={{ fontSize: 11, textAlign: "right", maxWidth: 140 }}>
                 背景執行中，可離開
-              </span>
+              </Meta>
             )}
             {canEdit && g.status === "done" && g.kind !== "text" && (
               inScenes(g.id) ? (
