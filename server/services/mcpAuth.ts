@@ -48,7 +48,7 @@ export function envKeyMatches(provided: string, expected: string): boolean {
 }
 
 /** 掛在「專案」上、會寫入／扣點的工具——封存專案守衛用（資料庫寫入不掛專案，不在此列） */
-export const MCP_WRITE_TOOLS = new Set(["submit_generation", "post_message"]);
+export const MCP_WRITE_TOOLS = new Set(["submit_generation", "post_message", "request_upload_grant"]);
 
 /**
  * 封存專案寫入守衛（純函式，供單元測試）：外部 AI 客戶端拿舊 projectId 對已封存專案
