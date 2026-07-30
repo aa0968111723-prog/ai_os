@@ -1,9 +1,10 @@
 # 計畫：Fal 帳戶餘額顯示 + 個人使用量與餘額顯示
 
 > 狀態：Implemented（Phase A：falBilling + quota.falAccountBalance + 管理／個人 UI；Phase B 待 Admin Key 部署驗收）  
-
 > 相關：點數帳本 `quota.my` / `quota.consumptionStats`、Fal Platform Billing API  
-> 原則：Key 不進前端、Admin 與個人視圖分離、缺 Admin Key 時可降級
+> 原則：Key 不進前端、Admin 與個人視圖分離、缺 Admin Key 時可降級  
+>
+> **進度備註（2026-07-30）：** Phase A 實作於 [#195](https://github.com/aa0968111723-prog/ai_os/pull/195)（`server/services/falBilling.ts`、`quota.falAccountBalance`、管理／個人 UI）。Phase B：部署 `FAL_ADMIN_KEY` 並對照 fal dashboard。
 
 ## 1. 目標
 
