@@ -23,7 +23,11 @@
     "test:ui:routes": "node scripts/e2e-ui/audit-routes.mjs",
     "test:all": "npm test && npm run test:client:coverage",
     "audit:high": "npm audit --audit-level=high",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "desktop:check": "cargo check --manifest-path src-tauri/Cargo.toml",
+    "desktop:test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "desktop:dev": "npx --yes @tauri-apps/cli@2 dev",
+    "desktop:build": "npx --yes @tauri-apps/cli@2 build"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",
