@@ -6,6 +6,7 @@ import { App } from "./App";
 import { bootstrapPwa } from "./pwa";
 import { bootstrapTauriDesktop } from "./platform/tauriDesktop";
 import "./styles.css";
+import "./styles.mobile-fab-01.css";
 import "./splash.css";
 
 // 先安裝桌面橋接，讓第一個 React render 就能辨識「Aios 桌面版」與已安裝剪輯軟體。

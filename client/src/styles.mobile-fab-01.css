@@ -1,0 +1,40 @@
+/* MOB-FAB-01：手機（≤560px）回饋 FAB 清位 + 工作台密度
+ * 獨立檔案：不改動 styles.css 主體契約；僅 ≤560px 生效。
+ * - 底部留白涵蓋 mobile-nav（~62–70）+ FAB（~48）+ 呼吸
+ * - FAB 改 icon-only（.fb-fab-label 隱藏）；aria-label 仍在 button
+ * - 常駐說明文案在手機隱藏，桌機不變
+ */
+@media (max-width: 560px) {
+  .app {
+    padding-bottom: calc(140px + var(--safe-bottom));
+  }
+  html.is-standalone .app {
+    padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .fb-fab-root .fb-fab-label {
+    display: none;
+  }
+  .fb-fab-root button.primary[data-fb="回饋按鈕"],
+  .fb-fab-root button.primary[aria-label="開啟回饋"] {
+    padding: 12px;
+    min-width: 48px;
+    min-height: 48px;
+    font-size: 0;
+  }
+  .fb-fab-root button.primary[data-fb="回饋按鈕"] svg,
+  .fb-fab-root button.primary[aria-label="開啟回饋"] svg {
+    margin-right: 0 !important;
+    vertical-align: middle;
+  }
+
+  .fb-fab-root .card[role="dialog"],
+  .fb-fab-root .card[role="group"] {
+    max-height: min(70dvh, 520px);
+  }
+
+  .workbench-intro-lede,
+  .creation-goal-persist-hint {
+    display: none;
+  }
+}
