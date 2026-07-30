@@ -1,0 +1,37 @@
+[package]
+name = "aios-desktop"
+version = "0.1.0"
+description = "Aios desktop companion for managed media editing handoffs"
+authors = ["Aios"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "aios_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.1", features = [] }
+tauri-plugin-deep-link = "2.4.9"
+tauri-plugin-opener = "2.5"
+tauri-plugin-single-instance = { version = "2.3", features = ["deep-link"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread", "sync", "time"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+sha2 = "0.10"
+mime_guess = "2"
+url = "2"
+walkdir = "2"
+thiserror = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.5"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
