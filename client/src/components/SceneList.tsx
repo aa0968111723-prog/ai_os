@@ -400,20 +400,37 @@ function SceneRow({
 
         {rowError && <p className="error" role="alert">存檔／生成失敗：{rowError.message}</p>}
 
-        {/* 建議提示詞：拆分鏡草稿（有 prompt、還沒素材）可一鍵帶回生成台 */}
-        {s.prompt && !s.assetId && (
-          <div style={{ fontSize: "var(--fs-12)", marginTop: 6, background: "var(--card2)", borderRadius: "var(--r-8)", padding: "6px 10px" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-              <Icon name="Clapperboard" size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-              <span>{s.prompt}</span>
+        {/* 提示詞：可獨立編輯——有/無素材都可改，失焦即存；重生這一格會用新 prompt（#187） */}
+        {canEdit ? (
+          <div style={{ marginTop: 6 }}>
+            <div className="hint" style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4, fontSize: "var(--fs-12)" }}>
+              <Icon name="Clapperboard" size={13} />
+              <span>提示詞（可直接改，再按重生——只影響這一格）</span>
+              <HelpTip text="獨立針對這一格修改提示詞。失焦即存；之後「生成／重生這一格」會用新提示詞，不影響其他分鏡。" />
             </div>
-            {onUsePrompt && (
+            <InlineEdit
+              value={s.prompt ?? ""}
+              kind="textarea"
+              pending={update.isPending || !canEdit}
+              ariaLabel={`第 ${i + 1} 鏡提示詞`}
+              placeholder="這一格的生成提示詞（可留白後再填）"
+              maxLength={4000}
+              onCommit={(v) => update.mutate({ sceneId: s.id, prompt: String(v) })}
+            />
+            {onUsePrompt && (s.prompt ?? "").trim() !== "" && !s.assetId && (
               <button style={{ padding: "2px 10px", fontSize: "var(--fs-11)", marginTop: 5 }} onClick={() => onUsePrompt(s.prompt!)}>
                 用此提示詞生成
               </button>
             )}
           </div>
-        )}
+        ) : s.prompt ? (
+          <div style={{ fontSize: "var(--fs-12)", marginTop: 6, background: "var(--card2)", borderRadius: "var(--r-8)", padding: "6px 10px" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+              <Icon name="Clapperboard" size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+              <span>{s.prompt}</span>
+            </div>
+          </div>
+        ) : null}
 
         {/* 就地生成／重生＋單檔下載。扣點前先確認（顯示預估點數）；檢視者不顯示生成鈕（2.3 唯讀） */}
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
