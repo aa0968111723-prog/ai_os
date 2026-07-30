@@ -180,6 +180,58 @@ export function isUniqueViolation(err: unknown): boolean {
   return err instanceof Error && err.message.includes("duplicate key");
 }
 
+/**
+ * CA-01／KD-12：fail-closed 實體 ACL——角色／場景／來源素材必須屬於本 projectId，
+ * 否則拒絕寫入 generation 列（不靜默 persist 外鍵 UUID）。空／未傳＝略過該欄。
+ */
+export async function assertGenerationEntityIds(
+  projectId: string,
+  opts: {
+    characterIds?: string[];
+    scenePresetIds?: string[];
+    sourceAssetId?: string;
+  },
+): Promise<void> {
+  if (opts.characterIds?.length) {
+    const ids = [...new Set(opts.characterIds)];
+    const rows = await db
+      .select({ id: schema.characters.id })
+      .from(schema.characters)
+      .where(and(eq(schema.characters.projectId, projectId), inArray(schema.characters.id, ids)));
+    if (rows.length !== ids.length) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "角色定裝卡不屬於本專案或不存在" });
+    }
+  }
+  if (opts.scenePresetIds?.length) {
+    const ids = [...new Set(opts.scenePresetIds)];
+    const rows = await db
+      .select({ id: schema.scenePresets.id })
+      .from(schema.scenePresets)
+      .where(and(eq(schema.scenePresets.projectId, projectId), inArray(schema.scenePresets.id, ids)));
+    if (rows.length !== ids.length) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "場景設定卡不屬於本專案或不存在" });
+    }
+  }
+  if (opts.sourceAssetId) {
+    const [row] = await db
+      .select({ id: schema.assets.id })
+      .from(schema.assets)
+      .where(
+        and(
+          eq(schema.assets.id, opts.sourceAssetId),
+          eq(schema.assets.projectId, projectId),
+          isNull(schema.assets.deletedAt),
+        ),
+      );
+    if (!row) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "來源素材不屬於本專案或不存在（可能已在回收桶）",
+      });
+    }
+  }
+}
+
 /** 送出生成（守護齊全：孤兒列刪除、原子守門扣點、fal 失敗退點＋標 failed） */
 export async function submitGenerationCore(input: SubmitCoreInput): Promise<GenerationRow> {
   const model = resolveModel(input.modelId) ?? getModel(input.modelId);
@@ -200,6 +252,13 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   // 與 scheduleCore／agentCore／Command 同口徑。
   const { assertProjectAllows } = await import("./projectState");
   assertProjectAllows(project, "generate");
+
+  // CA-01／KD-12：專案歸屬 fail-closed——在簽名／建列／扣點之前擋下外鍵 UUID
+  await assertGenerationEntityIds(project.id, {
+    characterIds: input.characterIds,
+    scenePresetIds: input.scenePresetIds,
+    sourceAssetId: input.sourceAssetId,
+  });
 
   // 素材庫來源 → 簽名網址（同組檢查；本地檔或外部網址都可）
   let sourceUrl = input.sourceUrl;

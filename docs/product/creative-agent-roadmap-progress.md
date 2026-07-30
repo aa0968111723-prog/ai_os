@@ -6,7 +6,7 @@
 | **設計文件** | [`creative-agent-evolution-roadmap.md`](./creative-agent-evolution-roadmap.md) |
 | **研究簡報** | [`docs/research/creative-agent-2026-07/`](../research/creative-agent-2026-07/) |
 | **updatedAt** | 2026-07-30 |
-| **狀態** | CA-00 進行中（本 PR 落地文件） |
+| **狀態** | CA-01 實作中（`feat/ca-01-agent-generate-parity`：generate 對齊 characters／presets／source／needs） |
 
 ## Glossary
 
@@ -62,7 +62,7 @@ scripts/e2e-agent.py
 | **branch** | `feat/ca-01-agent-generate-parity` |
 | **merged_sha** | |
 | **dependencies** | CA-00 |
-| **notes** | 最高價值；safeModel + runner needs 雙閘門同改；assertGenerationEntityIds fail-closed |
+| **notes** | 實作對齊 #208 設計稿：plan/AgentStep 四欄、PlannerAliases char/preset/asset、`resolveGenerateModel`（禁 needs 靜默降級）、runner 閘門 B+透傳、`assertGenerationEntityIds`、cheatsheet 含 needs；單元測綠。職能概念見 #204。 |
 
 ### CA-02 — CreationDraft module (WB-01 must import)
 

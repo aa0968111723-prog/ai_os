@@ -131,17 +131,24 @@ export function selectAiGenerationModel(request: AiModelRequest = {}): AiModelDe
 }
 
 export function buildAiModelCheatsheet(limit = 18): string {
+  // CA-01：無 needs 類別 + 需來源類別（圖生圖／i2v）——後者必須搭配 sourceAssetRef／sourceUrl
   const categories: ModelCategory[] = [
     "text-to-image",
     "text-to-video",
+    "image-to-image",
+    "image-to-video",
     "text-to-speech",
     "text-to-audio",
     "llm",
   ];
   const lines: string[] = [];
   for (const category of categories) {
+    const allowNeeds = category === "image-to-image" || category === "image-to-video";
     const candidates = listResolvableModels({ category })
-      .filter((model) => !model.needs && AI_GENERATION_CATEGORIES.has(model.category))
+      .filter((model) => {
+        if (allowNeeds) return Boolean(model.needs);
+        return !model.needs && AI_GENERATION_CATEGORIES.has(model.category);
+      })
       .sort((a, b) => {
         const readinessDiff = Number(modelIsOperationallyReady(b)) - Number(modelIsOperationallyReady(a));
         if (readinessDiff !== 0) return readinessDiff;
@@ -149,10 +156,14 @@ export function buildAiModelCheatsheet(limit = 18): string {
         if (a.points !== b.points) return a.points - b.points;
         return a.id.localeCompare(b.id);
       })
-      .slice(0, 4);
+      .slice(0, allowNeeds ? 2 : 4);
     for (const model of candidates) {
+      const ready = modelIsOperationallyReady(model) ? "可正式使用" : "待驗證";
+      const needsNote = model.needs
+        ? `｜需來源(${model.sourceHint ?? model.needs})→sourceAssetRef 或 sourceUrl`
+        : "";
       lines.push(
-        `- ${model.id}｜${model.label}｜${model.points} 點｜${modelIsOperationallyReady(model) ? "可正式使用" : "待驗證"}｜${model.bestFor}`,
+        `- ${model.id}｜${model.label}｜${model.points} 點｜${ready}${needsNote}｜${model.bestFor}`,
       );
       if (lines.length >= limit) return lines.join("\n");
     }

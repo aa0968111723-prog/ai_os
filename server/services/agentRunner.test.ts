@@ -15,6 +15,28 @@ describe("agentRunner sweepZombies placeholder generationId", () => {
   });
 });
 
+describe("agentRunner CA-01 generate parity (source-lock)", () => {
+  it("passes characterIds / scenePresetIds / sourceAssetId / sourceUrl to executeGenerationCommand", () => {
+    expect(source).toContain("characterIds: step.characterIds");
+    expect(source).toContain("scenePresetIds: step.scenePresetIds");
+    expect(source).toContain("sourceAssetId: step.sourceAssetId");
+    expect(source).toContain("sourceUrl: step.sourceUrl");
+    expect(source).toContain("executeGenerationCommand({");
+  });
+
+  it("needs gate requires source (hasSource / model.needs) before submit", () => {
+    expect(source).toContain("const hasSource = !!(step.sourceAssetId || step.sourceUrl?.trim())");
+    expect(source).toContain("if (model.needs && !hasSource)");
+    expect(source).toMatch(/sourceAssetRef|sourceUrl/);
+  });
+
+  it("does NOT call submitGenerationCore directly (Command path only)", () => {
+    // TD-02／CA-01：代理生成走 executeGenerationCommand，禁止直呼 core 略過門檻
+    expect(source).not.toMatch(/submitGenerationCore\s*\(/);
+    expect(source).toContain("executeGenerationCommand({");
+  });
+});
+
 describe("formatAgentRunMessage（代理終局系統訊息）", () => {
   it("完成：帶勾、目標、已執行步數", () => {
     const msg = formatAgentRunMessage("把腳本拆成分鏡並逐鏡出圖", 5, 5, "done");

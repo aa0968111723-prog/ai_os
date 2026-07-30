@@ -12,6 +12,8 @@ import {
   listProjectAgentEvents,
 } from "../services/agentEventCore";
 import { agentPlannerModeSchema } from "../../shared/agentPlanner";
+import { listAiProjectRoles } from "../../shared/aiProjectRoles";
+import { listPlaybooks } from "../../shared/rolePlaybooks";
 
 /**
  * AI 代理（代理系統核心）：一句目標 → LLM 規劃多步計畫（估點）→ 使用者核准 → 背景執行器逐步執行。
@@ -20,6 +22,30 @@ import { agentPlannerModeSchema } from "../../shared/agentPlanner";
  * 安全設計：規劃固定守門、核准前不扣執行費、核准畫面揭示每步估點、執行期各步走既有守門與退點。
  */
 export const agentsRouter = router({
+  /**
+   * 唯讀：AI 職能目錄＋playbook 摘要（L0/L1 產品敘事用；非真人成員、不建假帳號）。
+   * 前端亦可直接 import shared；此 query 供需要經 tRPC 的入口使用。
+   */
+  listRoles: authedProcedure.query(() => ({
+    roles: listAiProjectRoles().map((r) => ({
+      id: r.id,
+      title: r.title,
+      summary: r.summary,
+      primary: r.primary,
+      kindHints: r.kindHints,
+      humanKeeps: r.humanKeeps,
+      defaultGoalHint: r.defaultGoalHint,
+    })),
+    playbooks: listPlaybooks().map((p) => ({
+      id: p.id,
+      roleId: p.roleId,
+      version: p.version,
+      title: p.title,
+      goalTemplate: p.goalTemplate,
+      suggestedKinds: p.suggestedKinds,
+    })),
+  })),
+
   /** 規劃：讀專案現況＋知識庫＋可寫資料庫，請 LLM 針對目標排一份多步計畫（只規劃不執行） */
   plan: authedProcedure
     .input(z.object({

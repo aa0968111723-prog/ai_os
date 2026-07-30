@@ -14,10 +14,12 @@ import {
   readAgentPlannerMode,
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
+import { listAiProjectRoles } from "../../../shared/aiProjectRoles";
 
 /**
- * AI 助手卡（助手系統前端）：一句目標 → 選擇規劃供應商／用量 → 計畫預覽（每步＋估點總額）→
- * 核准執行 → 伺服器背景逐步跑（關頁不中斷）→ 即時進度／可停止。
+ * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
+ * 計畫預覽（每步＋估點總額）→ 核准執行 → 伺服器背景逐步跑（關頁不中斷）→ 即時進度／可停止。
+ * AI 職能是產品敘事席位，不是真人成員；執行仍是一筆 agent_run。
  * 通則不變：規劃前先看價、核准才開始花執行點數、每步實際扣點走各自守門（超額仍會停下等組長核准）。
  */
 
@@ -127,10 +129,12 @@ function notifyDesktop(title: string, body: string): void {
 }
 
 const GOAL_EXAMPLES = [
-  "把知識庫的腳本拆成分鏡，並為每一鏡生成畫面",
-  "幫我做三格開場分鏡：禪堂晨光、點香、遠景，各配一張圖",
-  "為已有配音詞的分鏡都生成旁白，然後把第 1 鏡送審",
+  "請分鏡助理：把知識庫腳本拆成分鏡，並為每一鏡生成畫面（帶定裝）",
+  "請生成員：做三格開場分鏡——禪堂晨光、點香、遠景，各配一張圖",
+  "請配音統籌：為已有配音詞的分鏡生成旁白；品管再把第 1 鏡送審",
 ];
+
+const AI_ROLE_ROSTER = listAiProjectRoles();
 
 export function AgentCard({
   projectId,
@@ -231,12 +235,12 @@ export function AgentCard({
     <>
       {!embedded && (
         <h2 style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作助手（給我一個目標，我來排計畫執行）
+          <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 職能助手（請分鏡助理／生成員排計畫執行）
         </h2>
       )}
       {!hideComposer && (
         <p className="hint" style={{ marginTop: embedded ? 0 : -4 }}>
-          用一句話說目標（例：「把腳本拆成分鏡並逐鏡出圖」）——我會讀世界觀＋知識庫排出<b>逐步計畫與估點</b>（站內 0 點；Fal 依 token 計費），
+          用一句話交代目標（例：「請分鏡助理先出草稿並逐鏡出圖」）——系統會依 <b>AI 職能</b>（非真人組員）讀世界觀＋知識庫排出<b>逐步計畫與估點</b>（站內 0 點；Fal 依 token 計費），
           你<b>核准後</b>才開始執行；由伺服器背景逐步跑，關掉頁面也會繼續，隨時可停止。每步實際扣點走既有守門，超額仍會停下等組長核准。
         </p>
       )}
@@ -244,12 +248,12 @@ export function AgentCard({
       {hideComposer ? (
         !runs.isLoading && !runs.error && runs.data && runs.data.length === 0 && (
           <p className="hint" role="status">
-            還沒有 AI 執行計畫——在上方對話用一句話下目標（例：「把腳本拆成分鏡並逐鏡出圖」），我會排出逐步計畫與估點，你核准後由伺服器背景執行。
+            還沒有 AI 職能執行計畫——在上方對話請分鏡助理或生成員用一句話下目標，我會排出逐步計畫與估點，你核准後由伺服器背景執行。
           </p>
         )
       ) : canEdit ? (
         <>
-          <label htmlFor={`agent-goal-${projectId}`}>你的目標（一句話）</label>
+          <label htmlFor={`agent-goal-${projectId}`}>你的目標（一句話，可點名 AI 職能）</label>
           <textarea
             id={`agent-goal-${projectId}`}
             value={goal}
@@ -314,15 +318,57 @@ export function AgentCard({
       )}
 
       {actionError && <p className="error" role="alert">{actionError.message}</p>}
-      {runs.isLoading && <p className="hint" role="status">正在載入代理計畫…</p>}
+      {runs.isLoading && <p className="hint" role="status">正在載入 AI 職能計畫…</p>}
       {/* 列表載入成功但無計畫：引導文案（與 hideComposer 空態對齊；錯誤時不顯示以免誤導成「沒有計畫」） */}
       {!runs.isLoading && !runs.error && runs.data && runs.data.length === 0 && !hideComposer && (
         <p className="hint" role="status">
           {canEdit
-            ? "還沒有 AI 執行計畫——輸入目標後按「規劃計畫」；規劃不扣站內點數，核准後才會開始執行。"
-            : "目前沒有 AI 執行計畫。"}
+            ? "還沒有 AI 職能執行計畫——可請「分鏡助理」或「生成員」出草稿：輸入目標後按「規劃計畫」；規劃不扣站內點數，核准後才會開始執行。"
+            : "目前沒有 AI 職能執行計畫。"}
         </p>
       )}
+
+      {/* L0/L1：AI 職能花名冊（敘事席位，非 memberships） */}
+      <details className="agent-run" style={{ marginTop: 10 }}>
+        <summary>
+          <strong>AI 職能</strong>
+          <span className="hint">可啟用的席位・不是專案成員</span>
+        </summary>
+        <div className="agent-run__body" style={{ display: "grid", gap: 8 }}>
+          <p className="hint" style={{ margin: 0 }}>
+            人是專案成員；下列為可啟用的 <b>AI 職能</b>。下目標時可點名（例：請分鏡助理…），規劃仍開一筆執行計畫，媒體生成走既有扣點路徑。
+          </p>
+          <div style={{ display: "grid", gap: 6 }}>
+            {AI_ROLE_ROSTER.map((role) => (
+              <div
+                key={role.id}
+                className="gen-row"
+                style={{ gridTemplateColumns: "auto 1fr", alignItems: "start", gap: 8 }}
+              >
+                <span className="chip" title={role.id}>AI</span>
+                <div>
+                  <strong>{role.title}</strong>
+                  <span className="hint" style={{ display: "block", marginTop: 2 }}>
+                    {role.summary}
+                    {role.humanKeeps.length > 0 ? ` · 人保留：${role.humanKeeps.join("、")}` : ""}
+                  </span>
+                  {canEdit && !hideComposer && (
+                    <button
+                      type="button"
+                      className="btn-sm"
+                      style={{ marginTop: 4 }}
+                      title="帶入目標框"
+                      onClick={() => setGoal(role.defaultGoalHint)}
+                    >
+                      用此職能目標
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </details>
 
       {insights.data && (
         <details className="agent-run" style={{ marginTop: 10 }}>
@@ -330,7 +376,7 @@ export function AgentCard({
             <span className={`pill ${insights.data.status === "healthy" ? "done" : insights.data.status === "blocked" ? "failed" : "queued"}`}>
               {insights.data.status === "healthy" ? "健康" : insights.data.status === "blocked" ? "有阻塞" : "需注意"}
             </span>
-            <strong>專案代理健康</strong>
+            <strong>AI 職能健康</strong>
             <span className="hint">
               執行中 {insights.data.activeRuns}・待辦 {insights.data.openTasks}・成果 {insights.data.results.length}
             </span>

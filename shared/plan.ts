@@ -87,6 +87,11 @@ export const planStepSchema = z.object({
   durationSec: z.number().positive().max(3_600).optional(),
   scenePrompt: z.string().max(8_000).optional(),
   script: z.string().max(80_000).optional(),
+  // CA-01：代理 generate 與直接生成對齊——定裝／場景／來源素材
+  characterIds: z.array(z.string().uuid()).max(6).optional(),
+  scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
+  sourceAssetId: z.string().uuid().optional(),
+  sourceUrl: z.string().max(2_000).optional(),
 });
 
 export const planRiskSchema = z.object({
