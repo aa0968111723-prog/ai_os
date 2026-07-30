@@ -56,7 +56,7 @@ kill_port_listeners() {
 
 SUITES=("$@")
 if [ "${#SUITES[@]}" -eq 0 ]; then
-  SUITES=(auth models phase2 phase3 phase4 messages databases mcp push export)
+  SUITES=(auth models phase2 phase3 phase4 messages databases mcp push export team-assistant)
 fi
 
 FAILED=()
