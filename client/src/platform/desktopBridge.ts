@@ -66,10 +66,19 @@ declare global {
 }
 
 const SAFE_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
+const SAFE_EDITOR_ID_RE = /^[a-z0-9-]{2,64}$/;
 const SAFE_NAME_RE = /^[^\u0000-\u001F\u007F\\/:*?"<>|]{1,180}$/;
+const EDITOR_KINDS = new Set<ExternalEditorKind>([
+  "system-default",
+  "video-editor",
+  "audio-editor",
+  "image-editor",
+]);
 
 const SAFE_ROUTE_PATTERNS = [
   /^\/$/,
+  /^\/dashboard$/,
+  /^\/desktop$/,
   /^\/p\/[A-Za-z0-9_-]{8,128}$/,
   /^\/planner$/,
   /^\/databases$/,
@@ -133,11 +142,31 @@ export function hasDesktopBridge(): boolean {
   return bridge() != null;
 }
 
+function isDetectedEditor(value: unknown): value is DetectedDesktopEditor {
+  if (!value || typeof value !== "object") return false;
+  const editor = value as Partial<DetectedDesktopEditor>;
+  return typeof editor.id === "string"
+    && SAFE_EDITOR_ID_RE.test(editor.id)
+    && typeof editor.name === "string"
+    && editor.name.trim().length > 0
+    && editor.name.length <= 100
+    && typeof editor.kind === "string"
+    && EDITOR_KINDS.has(editor.kind as ExternalEditorKind)
+    && editor.installed === true
+    && (editor.systemDefault == null || typeof editor.systemDefault === "boolean");
+}
+
 export async function detectDesktopEditors(): Promise<DetectedDesktopEditor[]> {
   const desktop = bridge();
   if (!desktop?.detectEditors) return [];
   try {
-    return await desktop.detectEditors();
+    const editors = await desktop.detectEditors();
+    if (!Array.isArray(editors)) return [];
+    const unique = new Map<string, DetectedDesktopEditor>();
+    for (const editor of editors) {
+      if (isDetectedEditor(editor) && !unique.has(editor.id)) unique.set(editor.id, editor);
+    }
+    return [...unique.values()];
   } catch {
     return [];
   }
@@ -146,7 +175,8 @@ export async function detectDesktopEditors(): Promise<DetectedDesktopEditor[]> {
 function validateHandoff(request: DesktopAssetHandoffRequest): string | null {
   if (!SAFE_ID_RE.test(request.assetId)) return "資產識別碼格式不正確";
   if (!isSafeId(request.projectId)) return "專案識別碼格式不正確";
-  if (request.editorId && !/^[a-z0-9-]{2,64}$/.test(request.editorId)) return "剪輯軟體識別碼格式不正確";
+  if (!EDITOR_KINDS.has(request.editorKind)) return "剪輯用途格式不正確";
+  if (request.editorId && !SAFE_EDITOR_ID_RE.test(request.editorId)) return "剪輯軟體識別碼格式不正確";
   if (request.suggestedName && !SAFE_NAME_RE.test(request.suggestedName)) return "建議檔名含不支援的字元";
   if (request.returnPath && !normalizeAiosInternalPath(request.returnPath)) return "返回路由不合法";
   return null;
