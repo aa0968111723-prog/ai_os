@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildAiosDeepLink,
   detectDesktopEditors,
+  editorKindForAsset,
   hasDesktopBridge,
   normalizeAiosInternalPath,
   openAssetInExternalEditor,
   parseAiosDeepLink,
   revealAssetInFolder,
   stopDesktopHandoff,
+  suggestedFileName,
 } from "./desktopBridge";
 
 describe("Aios desktop deep links", () => {
@@ -41,6 +43,31 @@ describe("Aios desktop deep links", () => {
     "aios://open?path=%2Fadmin",
   ])("rejects invalid deep link: %s", (link) => {
     expect(parseAiosDeepLink(link)).toBeNull();
+  });
+});
+
+describe("editorKindForAsset / suggestedFileName", () => {
+  it.each([
+    ["video", "video-editor"],
+    ["audio", "audio-editor"],
+    ["image", "image-editor"],
+    ["doc", "system-default"],
+    ["other", "system-default"],
+  ] as const)("maps kind %s → %s", (kind, editorKind) => {
+    expect(editorKindForAsset(kind)).toBe(editorKind);
+  });
+
+  it("prefers meta.originalName, then titled extension, then mime-derived name", () => {
+    expect(suggestedFileName({ title: "clip", mime: "video/mp4", meta: { originalName: "scene-01.mp4" } }))
+      .toBe("scene-01.mp4");
+    expect(suggestedFileName({ title: "already.mov", mime: "video/quicktime", meta: {} }))
+      .toBe("already.mov");
+    expect(suggestedFileName({ title: "voice", mime: "audio/mpeg", meta: null }))
+      .toBe("voice.mp3");
+    expect(suggestedFileName({ title: "shot", mime: "video/quicktime" }))
+      .toBe("shot.mov");
+    expect(suggestedFileName({ title: "note", mime: null }))
+      .toBe("note.bin");
   });
 });
 
