@@ -106,6 +106,12 @@ export const sessions = pgTable("sessions", {
   userId: uuid("user_id").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  /** 最近活躍（sliding touch / resolve 節流更新）；nullable 向前相容 */
+  lastSeenAt: timestamp("last_seen_at"),
+  /** User-Agent 截斷 240；列表 UI 顯示裝置提示，不存完整指紋 */
+  userAgent: text("user_agent"),
+  /** sha256(ip + pepper)；永不存 raw IP */
+  ipHash: text("ip_hash"),
 });
 
 /**

@@ -39,22 +39,51 @@ function kindLabel(kind: DeviceKind): string {
  * - 測試通知：驗證通不通
  * - 複製引導：方便在另一台裝置完成連結
  */
+function summarizeUserAgent(ua: string | null | undefined): string {
+  if (!ua) return "未知瀏覽器／裝置";
+  const s = ua.slice(0, 120);
+  if (/Edg\//i.test(s)) return "Microsoft Edge";
+  if (/Chrome\//i.test(s) && !/Edg\//i.test(s)) return "Chrome";
+  if (/Firefox\//i.test(s)) return "Firefox";
+  if (/Safari\//i.test(s) && !/Chrome\//i.test(s)) return "Safari";
+  if (/iPhone|iPad/i.test(s)) return "iOS 裝置";
+  if (/Android/i.test(s)) return "Android 裝置";
+  return s.length > 48 ? `${s.slice(0, 48)}…` : s;
+}
+
 export function NotificationSettingsDialog({ onClose }: { onClose: () => void }) {
   const utils = trpc.useUtils();
   const supported = isPushSupported();
   const thisKind = deviceKind();
   const publicKey = trpc.push.publicKey.useQuery(undefined, { staleTime: Infinity });
   const devices = trpc.push.devices.useQuery();
+  const sessions = trpc.auth.listSessions.useQuery();
   const subscribe = trpc.push.subscribe.useMutation();
   const unsubscribe = trpc.push.unsubscribe.useMutation();
   const removeDevice = trpc.push.removeDevice.useMutation();
   const test = trpc.push.test.useMutation();
+  const revokeSession = trpc.auth.revokeSession.useMutation({
+    onSuccess: async (r) => {
+      if (r.self) {
+        await utils.auth.me.invalidate();
+        return;
+      }
+      await utils.auth.listSessions.invalidate();
+    },
+  });
+  const logoutAll = trpc.auth.logoutAll.useMutation({
+    onSuccess: async () => {
+      await utils.auth.me.invalidate();
+      await utils.auth.listSessions.invalidate();
+    },
+  });
 
   const [thisEndpoint, setThisEndpoint] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<{ id: string; endpoint: string; label: string } | null>(null);
+  const [confirmRevokeSession, setConfirmRevokeSession] = useState<{ id: string; label: string; isCurrent: boolean } | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef, true, onClose);
 
@@ -336,6 +365,86 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
           )}
         </section>
 
+        {/* AUTH-02：登入工作階段（與推播裝置分開——推播是訂閱，這是 cookie session） */}
+        <section aria-label="登入裝置">
+          <h3 style={{ marginTop: "var(--sp-16)" }}>登入裝置</h3>
+          <p className="hint" style={{ marginTop: 0 }}>
+            這裡列出目前有效的登入工作階段。遺失的手機／共用電腦可單筆撤銷，或一次登出全部。
+          </p>
+          {sessions.isLoading ? (
+            <p className="hint">載入中…</p>
+          ) : (sessions.data ?? []).length === 0 ? (
+            <p className="hint">目前沒有有效工作階段。</p>
+          ) : (
+            <ul className="device-link-list">
+              {(sessions.data ?? []).map((s) => {
+                const label = summarizeUserAgent(s.userAgent);
+                const seen = s.lastSeenAt ?? s.createdAt;
+                return (
+                  <li key={s.id} className={s.isCurrent ? "is-this" : undefined}>
+                    <span className="device-link-icon" aria-hidden>
+                      <Icon name={s.isCurrent ? kindIcon(thisKind) : "Monitor"} size={18} />
+                    </span>
+                    <span className="device-link-meta">
+                      <span className="device-link-name">
+                        {label}
+                        {s.isCurrent && <span className="chip">本裝置</span>}
+                      </span>
+                      <span className="meta">最近活動 {relSeen(seen)}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      disabled={busy || revokeSession.isPending || logoutAll.isPending}
+                      title={s.isCurrent ? "撤銷本裝置（會登出）" : "撤銷此登入"}
+                      aria-label={s.isCurrent ? "撤銷本裝置登入" : `撤銷 ${label}`}
+                      onClick={() =>
+                        setConfirmRevokeSession({
+                          id: s.id,
+                          label,
+                          isCurrent: s.isCurrent,
+                        })
+                      }
+                    >
+                      <Icon name="Trash2" size={14} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="device-link-actions" style={{ marginTop: 8 }}>
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={busy || logoutAll.isPending || (sessions.data ?? []).length === 0}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    "要登出全部裝置嗎？其他手機／電腦需重新登入；本裝置會立刻換發新工作階段繼續使用。",
+                  )
+                ) {
+                  setBusy(true);
+                  setError(null);
+                  logoutAll.mutate(undefined, {
+                    onSuccess: () => {
+                      setNotice("已登出全部其他裝置——本裝置繼續保持登入");
+                      setBusy(false);
+                    },
+                    onError: (err) => {
+                      setError(err.message || "登出全部失敗");
+                      setBusy(false);
+                    },
+                  });
+                }
+              }}
+            >
+              <Icon name="Smartphone" size={14} />
+              {logoutAll.isPending ? "處理中…" : "登出全部裝置"}
+            </button>
+          </div>
+        </section>
+
         {confirmRemove && (
           <div className="device-link-confirm" role="alertdialog" aria-label="確認移除裝置">
             <p>
@@ -351,6 +460,46 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                 確定移除
               </button>
               <button type="button" disabled={busy} onClick={() => setConfirmRemove(null)}>
+                取消
+              </button>
+            </div>
+          </div>
+        )}
+
+        {confirmRevokeSession && (
+          <div className="device-link-confirm" role="alertdialog" aria-label="確認撤銷登入">
+            <p>
+              {confirmRevokeSession.isCurrent
+                ? "確定撤銷本裝置登入？你會立刻被登出。"
+                : <>確定撤銷 <strong>{confirmRevokeSession.label}</strong> 的登入？該裝置需重新登入。</>}
+            </p>
+            <div className="device-link-actions">
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || revokeSession.isPending}
+                onClick={() => {
+                  setBusy(true);
+                  setError(null);
+                  revokeSession.mutate(
+                    { id: confirmRevokeSession.id },
+                    {
+                      onSuccess: (r) => {
+                        setConfirmRevokeSession(null);
+                        setNotice(r.self ? "已登出本裝置" : "已撤銷該登入裝置");
+                        setBusy(false);
+                      },
+                      onError: (err) => {
+                        setError(err.message || "撤銷失敗");
+                        setBusy(false);
+                      },
+                    },
+                  );
+                }}
+              >
+                確定撤銷
+              </button>
+              <button type="button" disabled={busy} onClick={() => setConfirmRevokeSession(null)}>
                 取消
               </button>
             </div>
