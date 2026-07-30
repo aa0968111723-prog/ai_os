@@ -89,6 +89,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0010_model_live_catalog",
   // 0011：純新增 guarded JSONB 欄位，可安全納入 bridge
   "0011_agent_planner_telemetry",
+  // 0012：sessions 裝置 meta 欄位（皆 ADD COLUMN IF NOT EXISTS），可安全納入 bridge
+  "0012_session_device_meta",
 ] as const;
 
 /**

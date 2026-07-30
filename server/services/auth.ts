@@ -91,10 +91,57 @@ export function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-export async function createSession(userId: string): Promise<string> {
+/** Throttle for lastSeenAt / sliding touch writes (AUTH-02 shares with AUTH-01). */
+export const SESSION_TOUCH_MIN_MS = 3600_000;
+const UA_MAX = 240;
+
+export type SessionCreateMeta = {
+  userAgent?: string | null;
+  ip?: string | null;
+};
+
+/** Truncate UA for storage (max 240). Empty → null. */
+export function truncateUserAgent(ua: string | null | undefined): string | null {
+  if (!ua) return null;
+  const t = ua.trim();
+  if (!t) return null;
+  return t.length > UA_MAX ? t.slice(0, UA_MAX) : t;
+}
+
+/**
+ * Hash client IP for session meta. Never store raw IP.
+ * Pepper: SESSION_IP_PEPPER || RATE_LIMIT_SECRET || dev fallback (non-production only).
+ */
+export function hashSessionIp(
+  ip: string | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (!ip) return null;
+  const trimmed = ip.trim();
+  if (!trimmed) return null;
+  const pepper =
+    env.SESSION_IP_PEPPER?.trim() ||
+    env.RATE_LIMIT_SECRET?.trim() ||
+    (env.NODE_ENV === "production" ? "" : "dev-session-ip-pepper");
+  if (!pepper) {
+    // Production without pepper: refuse to store anything rather than reversible hash
+    return null;
+  }
+  return sha256(`${trimmed}|${pepper}`);
+}
+
+export async function createSession(userId: string, meta?: SessionCreateMeta): Promise<string> {
   const token = randomBytes(32).toString("hex");
   const expiresAt = nextSessionExpiry();
-  await db.insert(schema.sessions).values({ tokenHash: sha256(token), userId, expiresAt });
+  const now = new Date();
+  await db.insert(schema.sessions).values({
+    tokenHash: sha256(token),
+    userId,
+    expiresAt,
+    lastSeenAt: now,
+    userAgent: truncateUserAgent(meta?.userAgent),
+    ipHash: hashSessionIp(meta?.ip),
+  });
   return token;
 }
 
@@ -120,10 +167,81 @@ export function nextSessionExpiry(now: Date = new Date()): Date {
   return new Date(now.getTime() + SESSION_MS);
 }
 
+/** Pure: whether lastSeenAt is stale enough to warrant a DB touch write. */
+export function shouldTouchLastSeen(lastSeenAt: Date | null | undefined, now: Date = new Date()): boolean {
+  if (!lastSeenAt) return true;
+  return now.getTime() - lastSeenAt.getTime() >= SESSION_TOUCH_MIN_MS;
+}
+
+export type SessionListItem = {
+  id: string;
+  createdAt: Date;
+  expiresAt: Date;
+  lastSeenAt: Date | null;
+  userAgent: string | null;
+  isCurrent: boolean;
+};
+
+/** List active (non-expired) sessions for a user. Never returns ipHash. */
+export async function listUserSessions(
+  userId: string,
+  currentToken: string | undefined,
+  now: Date = new Date(),
+): Promise<SessionListItem[]> {
+  const rows = await db
+    .select({
+      id: schema.sessions.id,
+      tokenHash: schema.sessions.tokenHash,
+      createdAt: schema.sessions.createdAt,
+      expiresAt: schema.sessions.expiresAt,
+      lastSeenAt: schema.sessions.lastSeenAt,
+      userAgent: schema.sessions.userAgent,
+    })
+    .from(schema.sessions)
+    .where(and(eq(schema.sessions.userId, userId), gt(schema.sessions.expiresAt, now)));
+  const currentHash = currentToken ? sha256(currentToken) : null;
+  return rows
+    .map((r) => ({
+      id: r.id,
+      createdAt: r.createdAt,
+      expiresAt: r.expiresAt,
+      lastSeenAt: r.lastSeenAt ?? null,
+      userAgent: r.userAgent ?? null,
+      isCurrent: currentHash != null && r.tokenHash === currentHash,
+    }))
+    .sort((a, b) => {
+      // Current first, then most recently seen
+      if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
+      const aT = (a.lastSeenAt ?? a.createdAt).getTime();
+      const bT = (b.lastSeenAt ?? b.createdAt).getTime();
+      return bT - aT;
+    });
+}
+
+/**
+ * Revoke one session by id for the owning user.
+ * Returns: "revoked" | "not_found" | "current" (caller may treat current as logout).
+ */
+export async function revokeUserSession(
+  userId: string,
+  sessionId: string,
+  currentToken: string | undefined,
+): Promise<"revoked" | "not_found" | "current"> {
+  const [row] = await db
+    .select()
+    .from(schema.sessions)
+    .where(and(eq(schema.sessions.id, sessionId), eq(schema.sessions.userId, userId)));
+  if (!row) return "not_found";
+  const isCurrent = currentToken != null && row.tokenHash === sha256(currentToken);
+  await db.delete(schema.sessions).where(eq(schema.sessions.id, sessionId));
+  return isCurrent ? "current" : "revoked";
+}
+
 /**
  * Sliding session renew for an existing cookie token.
- * Only writes DB + returns renewed=true when remaining lifetime < 7d; otherwise no-op (no write).
- * Does not rotate the token — only bumps expiresAt and lets the caller refresh Set-Cookie Max-Age.
+ * - When remaining < 7d: bump expiresAt + lastSeenAt (renewed=true).
+ * - Else if lastSeen stale (>1h): only bump lastSeenAt (renewed=false, still a write).
+ * - Else: no DB write.
  */
 export async function renewSessionIfNeeded(
   token: string,
@@ -134,15 +252,24 @@ export async function renewSessionIfNeeded(
     .from(schema.sessions)
     .where(and(eq(schema.sessions.tokenHash, sha256(token)), gt(schema.sessions.expiresAt, now)));
   if (!session) return null;
-  if (!shouldRenewSession(session.expiresAt, now)) {
-    return { renewed: false, expiresAt: session.expiresAt };
+
+  const renew = shouldRenewSession(session.expiresAt, now);
+  if (renew) {
+    const expiresAt = nextSessionExpiry(now);
+    await db
+      .update(schema.sessions)
+      .set({ expiresAt, lastSeenAt: now })
+      .where(eq(schema.sessions.id, session.id));
+    return { renewed: true, expiresAt };
   }
-  const expiresAt = nextSessionExpiry(now);
-  await db
-    .update(schema.sessions)
-    .set({ expiresAt })
-    .where(eq(schema.sessions.id, session.id));
-  return { renewed: true, expiresAt };
+
+  if (shouldTouchLastSeen(session.lastSeenAt, now)) {
+    await db
+      .update(schema.sessions)
+      .set({ lastSeenAt: now })
+      .where(eq(schema.sessions.id, session.id));
+  }
+  return { renewed: false, expiresAt: session.expiresAt };
 }
 
 export function parseCookies(req: Request): Record<string, string> {

@@ -12,6 +12,8 @@ import {
   destroySession,
   destroyAllUserSessions,
   renewSessionIfNeeded,
+  listUserSessions,
+  revokeUserSession,
   setSessionCookie,
   clearSessionCookie,
   getSessionToken,
@@ -37,6 +39,15 @@ import {
 // 撞庫防線形同虛設；反之鎖定某受害 IP 也能惡意灌爆其額度做定向 DoS。改用 req.ip 杜絕此類偽造。
 function clientIp(req: Request): string | undefined {
   return req.ip ?? req.socket?.remoteAddress ?? undefined;
+}
+
+function clientUserAgent(req: Request): string | undefined {
+  const ua = req.headers["user-agent"];
+  return typeof ua === "string" ? ua : undefined;
+}
+
+function sessionMetaFromReq(req: Request) {
+  return { userAgent: clientUserAgent(req), ip: clientIp(req) };
 }
 
 async function guardedAuthRateLimit<T>(operation: () => Promise<T>): Promise<T> {
@@ -88,7 +99,7 @@ export const authRouter = router({
       // 帶 IP 回收：成功登入時把 checkLoginRate 剛記下的那筆 per-IP 命中 pop 掉，維持「失敗才累積、
       // 成功不計入 per-IP 撞庫計數」——否則共用出口 IP（同辦公室/NAT）的小團隊正常登入也會把自己鎖死。
       await guardedAuthRateLimit(() => clearLoginRate(email, ip));
-      const token = await createSession(user.id);
+      const token = await createSession(user.id, sessionMetaFromReq(ctx.req));
       setSessionCookie(ctx.res, token);
       return loadAuthState(user.id);
     }),
@@ -107,7 +118,7 @@ export const authRouter = router({
   logoutAll: authedProcedure.mutation(async ({ ctx }) => {
     const userId = ctx.auth.user.id;
     await destroyAllUserSessions(userId);
-    const token = await createSession(userId);
+    const token = await createSession(userId, sessionMetaFromReq(ctx.req));
     setSessionCookie(ctx.res, token);
     console.log(`[audit] logoutAll：user=${userId}`);
     return { ok: true };
@@ -116,7 +127,7 @@ export const authRouter = router({
   /**
    * Session 滑動續期：活躍使用者在剩餘 < 7 天時延長至 30 天並刷新 cookie Max-Age。
    * 由前端 AppShell 節流呼叫（掛載／visibility + 本地 6h 上限），避免每請求寫 DB。
-   * 未進入續期窗時不寫庫（renewed=false）。
+   * 未進入續期窗時：僅節流更新 lastSeenAt（>1h）；其餘不寫庫。
    */
   touchSession: authedProcedure.mutation(async ({ ctx }) => {
     const token = getSessionToken(ctx.req);
@@ -132,6 +143,36 @@ export const authRouter = router({
     }
     return { ok: true as const, renewed: result.renewed, expiresAt: result.expiresAt };
   }),
+
+  /**
+   * AUTH-02：目前帳號的有效登入裝置列表（不含 ipHash）。
+   * isCurrent 標示本 cookie 對應的那一筆。
+   */
+  listSessions: authedProcedure.query(async ({ ctx }) => {
+    const token = getSessionToken(ctx.req);
+    return listUserSessions(ctx.auth.user.id, token);
+  }),
+
+  /**
+   * AUTH-02：撤銷單筆 session。撤銷本機時等同登出（清 cookie）。
+   * 不可撤銷他人 session（以 userId 範圍限定）。
+   */
+  revokeSession: authedProcedure
+    .input(z.object({ id: z.string().uuid("工作階段 id 無效") }))
+    .mutation(async ({ ctx, input }) => {
+      const token = getSessionToken(ctx.req);
+      const result = await revokeUserSession(ctx.auth.user.id, input.id, token);
+      if (result === "not_found") {
+        throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個登入工作階段（可能已過期或已撤銷）" });
+      }
+      if (result === "current") {
+        clearSessionCookie(ctx.res);
+        console.log(`[audit] revokeSession current：user=${ctx.auth.user.id}`);
+        return { ok: true as const, self: true };
+      }
+      console.log(`[audit] revokeSession：user=${ctx.auth.user.id} session=${input.id}`);
+      return { ok: true as const, self: false };
+    }),
 
   /** 自助改密碼：驗舊密碼 → 換新 → 其他裝置全部登出（本裝置換發新 session 無感續用） */
   changePassword: authedProcedure
@@ -163,7 +204,7 @@ export const authRouter = router({
       if (revokedTokens > 0) console.log(`[audit] changePassword 一併撤銷 ${revokedTokens} 把 MCP 金鑰：user=${user.id}`);
       // 新 session 在安全輪替 commit 後建立；若這一步罕見失敗，使用者只會被登出，可用新密碼重登，
       // 不會把舊憑證復活或形成繞過窗口。
-      const token = await createSession(user.id);
+      const token = await createSession(user.id, sessionMetaFromReq(ctx.req));
       setSessionCookie(ctx.res, token);
       console.log(`[audit] changePassword：user=${user.id}`);
       return { ok: true };
@@ -176,7 +217,7 @@ export const authRouter = router({
     .mutation(async ({ ctx, input }) => {
       try {
         const { userId } = await acceptInvite(input.token, input.name, input.password);
-        const token = await createSession(userId);
+        const token = await createSession(userId, sessionMetaFromReq(ctx.req));
         setSessionCookie(ctx.res, token);
         return loadAuthState(userId);
       } catch (err) {
