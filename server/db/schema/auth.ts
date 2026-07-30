@@ -189,8 +189,8 @@ export const mcpTokens = pgTable("mcp_tokens", {
  */
 export const uploadGrants = pgTable("upload_grants", {
   id: uuid("id").primaryKey().defaultRandom(),
-  /** SHA-256（非原文） */
-  tokenHash: text("token_hash").notNull(),
+  /** SHA-256（非原文）；.unique() → CONSTRAINT upload_grants_token_hash_unique（對齊 0013） */
+  tokenHash: text("token_hash").notNull().unique(),
   userId: uuid("user_id").notNull(),
   projectId: uuid("project_id").notNull(),
   groupId: uuid("group_id").notNull(),
@@ -206,8 +206,6 @@ export const uploadGrants = pgTable("upload_grants", {
   revokedAt: timestamp("revoked_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
-  // Named unique index — must match drizzle/0013_upload_grants.sql for legacy bridge drift equality
-  tokenHashUq: uniqueIndex("upload_grants_token_hash_uq").on(t.tokenHash),
   userIdx: index("upload_grants_user_idx").on(t.userId),
   expiresIdx: index("upload_grants_expires_idx").on(t.expiresAt),
 }));
