@@ -30,22 +30,34 @@
 .aios-splash__logo-wrap {
   position: relative;
   width: 100%;
-  min-height: 96px;
+  min-height: 140px;
   display: grid;
   place-items: center;
 }
 
-/* 完整橫式 Logo：寬優先，高度隨比例 */
+/* Full wordmark (kept for other uses) */
 .aios-splash__logo.brand-logo--full,
 .aios-splash__logo-wrap .brand-logo--full {
   position: relative;
   z-index: 1;
   width: min(280px, 76vw);
 }
+
+/* Pure A mark — larger for crisp first impression on retina */
+.aios-splash__logo.brand-logo--mark,
+.aios-splash__logo--mark,
+.aios-splash__logo-wrap .brand-logo--mark {
+  position: relative;
+  z-index: 1;
+  width: min(132px, 38vw);
+  height: auto;
+}
+
 .aios-splash__logo .brand-logo__full-img,
 .aios-splash__logo-wrap .brand-logo__full-img,
 .aios-splash__logo .brand-logo--mark,
-.aios-splash__logo-wrap .brand-logo--mark {
+.aios-splash__logo-wrap .brand-logo--mark,
+.aios-splash__logo img {
   width: 100%;
   height: auto;
   max-height: none;
@@ -53,17 +65,17 @@
   image-rendering: -webkit-optimize-contrast;
   image-rendering: high-quality;
   /* 輕微陰影，避免過度柔化緞帶邊緣 */
-  filter: drop-shadow(0 6px 14px rgba(70, 56, 44, 0.08));
+  filter: drop-shadow(0 6px 16px rgba(70, 56, 44, 0.10));
 }
 
 .aios-splash__glow {
   position: absolute;
-  inset: -28% -12%;
+  inset: -32% -18%;
   border-radius: 50%;
   background: radial-gradient(
     ellipse at center,
-    rgba(232, 92, 52, 0.10) 0%,
-    rgba(245, 168, 48, 0.08) 28%,
+    rgba(232, 92, 52, 0.12) 0%,
+    rgba(245, 168, 48, 0.09) 28%,
     rgba(72, 180, 120, 0.06) 52%,
     transparent 72%
   );
@@ -73,7 +85,7 @@
 }
 
 .aios-splash__tagline {
-  margin: 18px 0 0;
+  margin: 20px 0 0;
   font-size: clamp(12px, 2.8vw, 14px);
   font-weight: 500;
   letter-spacing: 0.14em;
@@ -81,7 +93,7 @@
 }
 
 .aios-splash__bar {
-  margin-top: 32px;
+  margin-top: 36px;
   width: 112px;
   height: 3px;
   border-radius: 999px;
