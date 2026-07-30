@@ -63,10 +63,15 @@ function buildQuickRowData(
 export function ProjectDatabasesCard({
   projectId,
   canEdit = true,
+  open: openProp,
+  onOpenChange,
 }: {
   projectId: string;
   /** 唯讀成員不顯示一鍵建表／就地加列 */
   canEdit?: boolean;
+  /** 受控展開（手機專案頁預設收合）；未傳則桌機維持預設展開 */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const utils = trpc.useUtils();
   const linked = trpc.databases.linkedToProject.useQuery({ projectId });
@@ -144,8 +149,23 @@ export function ProjectDatabasesCard({
     addRow.mutate({ tableId, data: built.data });
   };
 
+  const controlled = openProp !== undefined;
+  // 未受控時預設展開（桌機現況）；受控時完全交給父層（手機預設收合）
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(true);
+  const open = controlled ? openProp : uncontrolledOpen;
+
   return (
-    <details className="card card--quiet" data-fb="專案資料" id="sec-databases" open>
+    <details
+      className="card card--quiet"
+      data-fb="專案資料"
+      id="sec-databases"
+      open={open}
+      onToggle={(e) => {
+        const next = (e.currentTarget as HTMLDetailsElement).open;
+        if (controlled) onOpenChange?.(next);
+        else setUncontrolledOpen(next);
+      }}
+    >
       <summary>
         <Icon name="Database" size={14} /> 專案資料
         <span className="meta" style={{ marginLeft: 8 }}>
