@@ -153,7 +153,7 @@ export function FeedbackWidget() {
             boxShadow: "var(--e3)",
           }}
         >
-          <Icon name="MessageCircle" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />回饋
+          <Icon name="MessageCircle" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} /><span className="fb-fab-label">回饋</span>
         </button>
       )}
     </div>
