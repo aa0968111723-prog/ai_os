@@ -52,7 +52,9 @@ jobs:
 
   installers:
     name: Build ${{ matrix.label }} installer
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_installers)
+    # 桌面 PR 直接建內部測試包，確保 bundle 設定與圖示不是只通過 cargo check；
+    # tag／手動執行則沿用同一流程。未配置正式簽章 secrets 時不得公開發布。
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.build_installers)
     needs: verify
     strategy:
       fail-fast: false
