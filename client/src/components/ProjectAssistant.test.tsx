@@ -280,13 +280,13 @@ describe("ProjectAssistant WB-03 bring-in (no runAction)", () => {
     await screen.findByText("這裡有幾個建議");
 
     // Bring-in buttons present
-    expect(screen.getByRole("button", { name: "帶入直接生成" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "建立執行計畫" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "帶入執行計畫" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "帶入製作範本" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "帶入直接出圖" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "建立多步開拍" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "帶入多步開拍" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "帶入套用範本" })).toBeInTheDocument();
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "帶入直接生成" }));
+    await user.click(screen.getByRole("button", { name: "帶入直接出圖" }));
     expect(onCreationAction).toHaveBeenCalled();
     const genCall = onCreationAction.mock.calls.at(-1)![0];
     expect(genCall.type).toBe("generate");
@@ -294,7 +294,7 @@ describe("ProjectAssistant WB-03 bring-in (no runAction)", () => {
     expect(mocks.runMutateAsync).not.toHaveBeenCalled();
 
     onCreationAction.mockClear();
-    await user.click(screen.getByRole("button", { name: "帶入執行計畫" }));
+    await user.click(screen.getByRole("button", { name: "帶入多步開拍" }));
     expect(onCreationAction).toHaveBeenCalledWith({
       type: "create_plan",
       goal: "拆分鏡並出圖",
@@ -302,7 +302,7 @@ describe("ProjectAssistant WB-03 bring-in (no runAction)", () => {
     expect(mocks.runMutateAsync).not.toHaveBeenCalled();
 
     onCreationAction.mockClear();
-    await user.click(screen.getByRole("button", { name: "帶入製作範本" }));
+    await user.click(screen.getByRole("button", { name: "帶入套用範本" }));
     expect(onCreationAction).toHaveBeenCalledWith({
       type: "run_template",
       templateId: "preset-open",
