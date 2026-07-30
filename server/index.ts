@@ -17,6 +17,13 @@ import { ensureSchema } from "./db/ensure";
 import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
 import { resolveSession, type AuthState } from "./services/auth";
+import {
+  buildUploadLineageMeta,
+  looksLikeUuid,
+  markUploadGrantUsed,
+  resolveUploadRequestAuth,
+  type UploadGrantRecord,
+} from "./services/uploadGrants";
 import { buildEdl, buildFcpxml, buildSrt, buildXmeml, exportProjectZip, exportZipName } from "./services/exporter";
 import { resolutionForFormat } from "../shared/options";
 import { exportJianyingDraftZip } from "./services/jianying";
@@ -414,12 +421,13 @@ const upload = multer({
 // ★安全：在 multer「把整個上傳主體寫進磁碟」之前先擋掉未登入請求。
 // multer 是中介層、跑在路由處理器之前——若把 resolveSession 留到處理器內，未認證者仍能對每次請求
 // 把 200MB 串進 Volume 暫存目錄（寫完才回 401），並行洪泛即可塞爆磁碟（單容器/單 Volume 部署下＝全站故障）。
-// 這道前置閘門讓未帶有效 session 的請求在讀取主體前就被拒（無 cookie 時 resolveSession 不查 DB，零成本）。
-// 已認證者處理器內仍會再 resolveSession 一次取完整 AuthState（多一次帶索引的輕量查詢，可接受）。
+// 這道前置閘門讓未帶有效 session／upload grant 的請求在讀取主體前就被拒。
+// AUTH-03：cookie session **或** Authorization: Bearer aidup_…（單次 grant；token 不進 query string）。
+// 已認證者處理器內仍會再 resolve 一次取完整 AuthState／grant（多一次輕量查詢，可接受）。
 async function requireAuthBeforeUpload(req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> {
   try {
-    const auth = await resolveSession(req);
-    if (!requireUsableSession(auth, res)) return;
+    const resolved = await resolveUploadRequestAuth(req);
+    if (!requireUsableSession(resolved?.auth ?? null, res)) return;
     next();
   } catch (err) {
     recordError("upload:auth", err);
@@ -427,16 +435,24 @@ async function requireAuthBeforeUpload(req: express.Request, res: express.Respon
   }
 }
 
-/** 上傳素材（multipart: file + projectId [+ title]）→ 入素材庫、回傳 asset */
+/** 上傳素材（multipart: file + projectId [+ title + lineage]）→ 入素材庫、回傳 asset */
 app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
-    const auth = await resolveSession(req);
+    const resolved = await resolveUploadRequestAuth(req);
+    const auth = resolved?.auth ?? null;
+    const grant: UploadGrantRecord | null = resolved?.grant ?? null;
     if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
 
     const projectId = String(req.body?.projectId ?? "");
-    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+    // Grant 綁定單一專案：不可拿 project A 的 grant 寫入 project B
+    if (grant && projectId && projectId !== grant.projectId) {
+      await cleanup();
+      return res.status(403).json({ error: "此上傳授權不適用於該專案" });
+    }
+    const effectiveProjectId = grant ? grant.projectId : projectId;
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, effectiveProjectId));
     if (!project) { await cleanup(); return res.status(404).json({ error: "找不到專案" }); }
     if (!auth.groups.some((g) => g.groupId === project.groupId)) {
       await cleanup(); return res.status(403).json({ error: "你不屬於這個組" });
@@ -448,6 +464,13 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
     } catch {
       await cleanup();
       return res.status(403).json({ error: "你在此專案是「檢視者」（唯讀）——要上傳請組長調整專案權限" });
+    }
+
+    if (grant && req.file.size > grant.maxBytes) {
+      await cleanup();
+      return res.status(413).json({
+        error: `檔案超過此上傳授權上限（${Math.round(grant.maxBytes / 1024 / 1024)}MB）`,
+      });
     }
 
     let mime = req.file.mimetype.split(";")[0].trim().toLowerCase();
@@ -471,6 +494,24 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
     const guard = await checkDiskSpace(req.file.size, true);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
 
+    // Lineage：body 優先，grant 補 source／handoff（桌面 companion 可能只帶 grant）
+    const bodySource = String(req.body?.sourceAssetId ?? "").trim();
+    const bodyHandoff = String(req.body?.desktopHandoffId ?? "").trim();
+    const bodyEditor = String(req.body?.editorId ?? "").trim();
+    let sourceAssetId =
+      (bodySource && looksLikeUuid(bodySource) ? bodySource : null)
+      ?? grant?.sourceAssetId
+      ?? null;
+    if (sourceAssetId) {
+      const [src] = await db.select().from(schema.assets).where(eq(schema.assets.id, sourceAssetId));
+      if (!src || src.projectId !== project.id) {
+        await cleanup();
+        return res.status(400).json({ error: "來源素材不在此專案，無法建立版本關聯" });
+      }
+    }
+    const desktopHandoffId = bodyHandoff || grant?.handoffId || null;
+    const editorId = bodyEditor || null;
+
     // adoptTmpFile 已把暫存檔「移到」Volume 正式位置——之後若 DB 寫入失敗，
     // 要刪的是這個已落地的檔（storagePath），不是原暫存路徑（已不存在）；
     // 否則會在 Volume 留下沒有 DB 列指向的孤兒檔案，長期累積吃滿磁碟。
@@ -478,6 +519,12 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
     try {
       const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8"); // multer 檔名編碼修正
       const title = String(req.body?.title ?? "").trim() || originalName || "上傳素材";
+      const meta = buildUploadLineageMeta({
+        originalName,
+        sourceAssetId,
+        desktopHandoffId,
+        editorId,
+      });
       const [asset] = await db
         .insert(schema.assets)
         .values({
@@ -489,7 +536,7 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
           isAiGenerated: false,
           storagePath, mime, sizeBytes,
           uploadedBy: auth.user.id,
-          meta: { originalName },
+          meta,
         })
         .returning();
       const [updated] = await db
@@ -497,6 +544,10 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
         .set({ url: `/api/assets/${asset.id}/file` })
         .where(eq(schema.assets.id, asset.id))
         .returning();
+      // 成功入庫後才標記 grant 已用（失敗不標記 → 允許重試）
+      if (grant) {
+        await markUploadGrantUsed(grant.id);
+      }
       res.json({ ok: true, asset: updated });
     } catch (dbErr) {
       const { removeStoredFile } = await import("./services/storage");
