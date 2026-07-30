@@ -5,6 +5,13 @@ import { ExportJobButton } from "./ExportJobButton";
 import { ConfirmButton, useRovingRadio, useFocusTrap } from "./interactions";
 import { AssetImg, AssetVideo, AssetAudio } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
+import {
+  editorKindForAsset,
+  hasDesktopBridge,
+  openAssetInExternalEditor,
+  revealAssetInFolder,
+  suggestedFileName,
+} from "../platform/desktopBridge";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -103,6 +110,79 @@ export function AssetLibrary({
       return next;
     });
 
+  // DESK-01：桌面橋接可用才顯示「用外部軟體開啟／在資料夾顯示」；Web 只給下載路徑與提示，不承諾自動回傳
+  const desktopAvailable = hasDesktopBridge();
+  const [desktopBusyId, setDesktopBusyId] = useState<string | null>(null);
+  const [desktopStatus, setDesktopStatus] = useState<{
+    assetId: string;
+    kind: "ok" | "err";
+    text: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!desktopAvailable) return;
+    const onRevision = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string; title?: string }>).detail;
+      if (detail?.projectId && detail.projectId !== projectId) return;
+      void utils.projects.assets.invalidate({ projectId });
+      setDesktopStatus({
+        assetId: "",
+        kind: "ok",
+        text: `已回傳新素材${detail?.title ? `「${detail.title}」` : ""}，原始素材仍保留。`,
+      });
+    };
+    window.addEventListener("aios:asset-revision-uploaded", onRevision);
+    return () => window.removeEventListener("aios:asset-revision-uploaded", onRevision);
+  }, [desktopAvailable, projectId, utils.projects.assets]);
+
+  const openInExternalEditor = async (asset: {
+    id: string;
+    title: string;
+    kind: string;
+    mime?: string | null;
+    meta?: unknown;
+  }) => {
+    setDesktopBusyId(asset.id);
+    setDesktopStatus({ assetId: asset.id, kind: "ok", text: "正在準備本機交接…" });
+    try {
+      const result = await openAssetInExternalEditor({
+        assetId: asset.id,
+        projectId,
+        editorKind: editorKindForAsset(asset.kind),
+        suggestedName: suggestedFileName(asset),
+        returnPath: `/p/${projectId}?tab=assets`,
+      });
+      if (!result.ok) {
+        setDesktopStatus({ assetId: asset.id, kind: "err", text: result.message });
+        return;
+      }
+      setDesktopStatus({
+        assetId: asset.id,
+        kind: "ok",
+        text: "已啟動外部軟體。儲存後 Aios 會自動回傳新素材版本。",
+      });
+      setMenuOpenId(null);
+    } finally {
+      setDesktopBusyId(null);
+    }
+  };
+
+  const revealInFolder = async (assetId: string) => {
+    setDesktopBusyId(assetId);
+    setDesktopStatus(null);
+    try {
+      const result = await revealAssetInFolder({ assetId, projectId });
+      if (!result.ok) {
+        setDesktopStatus({ assetId, kind: "err", text: result.message });
+        return;
+      }
+      setDesktopStatus({ assetId, kind: "ok", text: "已在本機資料夾顯示。" });
+      setMenuOpenId(null);
+    } finally {
+      setDesktopBusyId(null);
+    }
+  };
+
   /** 多檔逐一上傳：一檔失敗不擋後面的檔，全部跑完再彙整成敗 */
   const doUpload = async (files: FileList | null) => {
     if (uploading) {
@@ -196,6 +276,12 @@ export function AssetLibrary({
   return (
     <section className="card">
       <h2>素材庫（上傳參考素材・生成成品自動入庫）</h2>
+      {/* DESK-01：桌面回傳 revision 時顯示於區塊層級（不綁特定卡片） */}
+      {desktopStatus?.assetId === "" && desktopStatus.kind === "ok" && (
+        <p className="hint" role="status" aria-live="polite" style={{ color: "var(--success-ink)" }}>
+          {desktopStatus.text}
+        </p>
+      )}
 
       <div
         className={`upload-zone ${dragOver ? "drag" : ""}`}
@@ -440,6 +526,23 @@ export function AssetLibrary({
                         </div>
                       )}
 
+                      {/* DESK-01：外部編輯就地 busy／錯誤回饋（卡片內，不用 alert） */}
+                      {desktopBusyId === a.id && (
+                        <div className="hint" style={{ fontSize: 11 }} role="status" aria-live="polite">
+                          <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />準備本機交接…
+                        </div>
+                      )}
+                      {desktopStatus?.assetId === a.id && desktopBusyId !== a.id && (
+                        <div
+                          className={desktopStatus.kind === "err" ? "error" : "hint"}
+                          style={{ fontSize: 11, ...(desktopStatus.kind === "ok" ? { color: "var(--success-ink)" } : undefined) }}
+                          role={desktopStatus.kind === "err" ? "alert" : "status"}
+                          aria-live="polite"
+                        >
+                          {desktopStatus.text}
+                        </div>
+                      )}
+
                       {/* 音訊直接在格子裡試聽 */}
                       {a.kind === "audio" && a.url && (
                         <AssetAudio controls src={a.url} style={{ height: 28, width: "100%", marginTop: 6 }} />
@@ -478,6 +581,51 @@ export function AssetLibrary({
                             borderTop: "1px solid var(--border-soft)",
                           }}
                         >
+                          {/* DESK-01：有桌面橋才顯示可作用的外部開啟；Web 只給下載與提示，不假扮可自動回傳 */}
+                          {desktopAvailable ? (
+                            <>
+                              <button
+                                type="button"
+                                className="menu-item"
+                                disabled={desktopBusyId === a.id}
+                                title="用本機剪輯／影像軟體開啟，儲存後可自動回傳新版本"
+                                onClick={() => void openInExternalEditor(a)}
+                              >
+                                <Icon name="Monitor" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                                {desktopBusyId === a.id ? "準備中…" : "用外部軟體開啟"}
+                              </button>
+                              <button
+                                type="button"
+                                className="menu-item"
+                                disabled={desktopBusyId === a.id}
+                                title="在本機檔案總管／Finder 顯示"
+                                onClick={() => void revealInFolder(a.id)}
+                              >
+                                <Icon name="Package" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />在資料夾顯示
+                              </button>
+                              <div className="menu-sep" />
+                            </>
+                          ) : (
+                            <>
+                              {(a.url || a.storagePath) && (
+                                <a
+                                  href={`/api/assets/${a.id}/file`}
+                                  download={suggestedFileName(a)}
+                                  className="menu-item"
+                                  role="menuitem"
+                                  title="下載到本機後用系統軟體開啟"
+                                  onClick={() => setMenuOpenId(null)}
+                                  style={{ textDecoration: "none" }}
+                                >
+                                  <Icon name="Download" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />下載
+                                </a>
+                              )}
+                              <div className="hint" style={{ fontSize: 11, padding: "2px 4px", margin: 0 }}>
+                                下載後本機開啟；Aios 桌面版可自動回傳編輯結果
+                              </div>
+                              <div className="menu-sep" />
+                            </>
+                          )}
                           {a.kind === "doc" && (
                             <button
                               className="menu-item"

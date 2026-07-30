@@ -3,30 +3,15 @@ import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import {
   detectDesktopEditors,
+  editorKindForAsset,
   hasDesktopBridge,
   openAssetInExternalEditor,
   revealAssetInFolder,
   stopDesktopHandoff,
+  suggestedFileName,
   type DetectedDesktopEditor,
-  type ExternalEditorKind,
 } from "../platform/desktopBridge";
 import type { DesktopHandoffStatusEvent, DesktopRevisionEvent } from "../platform/tauriDesktop";
-
-function editorKindForAsset(kind: string): ExternalEditorKind {
-  if (kind === "video") return "video-editor";
-  if (kind === "audio") return "audio-editor";
-  if (kind === "image") return "image-editor";
-  return "system-default";
-}
-
-function suggestedFileName(asset: { title: string; mime?: string | null; meta?: unknown }): string {
-  const meta = asset.meta && typeof asset.meta === "object" ? asset.meta as Record<string, unknown> : null;
-  const originalName = typeof meta?.originalName === "string" ? meta.originalName.trim() : "";
-  if (originalName) return originalName;
-  if (/\.[A-Za-z0-9]{1,8}$/.test(asset.title)) return asset.title;
-  const extension = asset.mime?.split("/")[1]?.replace("quicktime", "mov").replace("mpeg", "mp3") ?? "bin";
-  return `${asset.title}.${extension}`;
-}
 
 export function DesktopCompanionPage() {
   const desktopAvailable = hasDesktopBridge();

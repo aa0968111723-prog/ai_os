@@ -142,6 +142,27 @@ export function hasDesktopBridge(): boolean {
   return bridge() != null;
 }
 
+/** Map asset.kind → desktop editor purpose (same mapping as DesktopCompanion / AssetLibrary). */
+export function editorKindForAsset(kind: string): ExternalEditorKind {
+  if (kind === "video") return "video-editor";
+  if (kind === "audio") return "audio-editor";
+  if (kind === "image") return "image-editor";
+  return "system-default";
+}
+
+/**
+ * Prefer meta.originalName; else title if it already has an extension; else title + mime-derived ext.
+ * Display / handoff suggestion only — never treated as a path.
+ */
+export function suggestedFileName(asset: { title: string; mime?: string | null; meta?: unknown }): string {
+  const meta = asset.meta && typeof asset.meta === "object" ? asset.meta as Record<string, unknown> : null;
+  const originalName = typeof meta?.originalName === "string" ? meta.originalName.trim() : "";
+  if (originalName) return originalName;
+  if (/\.[A-Za-z0-9]{1,8}$/.test(asset.title)) return asset.title;
+  const extension = asset.mime?.split("/")[1]?.replace("quicktime", "mov").replace("mpeg", "mp3") ?? "bin";
+  return `${asset.title}.${extension}`;
+}
+
 function isDetectedEditor(value: unknown): value is DetectedDesktopEditor {
   if (!value || typeof value !== "object") return false;
   const editor = value as Partial<DetectedDesktopEditor>;
