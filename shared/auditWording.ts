@@ -10,6 +10,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // 帳號與團隊
   "auth.login": "登入",
   "auth.logout": "登出",
+  "auth.logoutAll": "登出全部裝置",
+  "auth.touchSession": "延續登入工作階段",
   "auth.changePassword": "修改密碼",
   "auth.acceptInvite": "接受邀請加入",
   "admin.createTeam": "建立團隊",
