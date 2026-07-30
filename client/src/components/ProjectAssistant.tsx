@@ -10,6 +10,15 @@ import {
   type AssistantActivityEvent,
 } from "./AssistantTrace";
 import { requestAssistantStream } from "./assistantStream";
+import {
+  AGENT_PLANNER_OPTIONS,
+  getAgentPlannerOption,
+  type AgentPlannerMode,
+} from "../../../shared/agentPlanner";
+import {
+  readAgentPlannerMode,
+  writeAgentPlannerMode,
+} from "../lib/agentPlannerPreference";
 
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
@@ -20,8 +29,8 @@ type Action =
   | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number; prompt?: string }
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
   | { type: "split_script"; label: string; script: string }
-  // plan_agent：把目標交給 AI 創作助手排計畫（確認後也只排計畫——免費；執行另在 AI 執行計畫區核准估點）
-  | { type: "plan_agent"; label: string; goal: string };
+  // plan_agent：把目標交給 AI 創作助手排計畫；plannerMode 由使用者在確認前選擇
+  | { type: "plan_agent"; label: string; goal: string; plannerMode?: AgentPlannerMode };
 
 /**
  * SSE 串流的安全活動事件：只描述「正在讀哪類資料／執行哪個查詢／完成哪一步」，
@@ -62,7 +71,9 @@ function toPayload(a: Action) {
   if (a.type === "create_scene") return { type: "create_scene" as const, title: a.title, voiceover: a.voiceover, durationSec: a.durationSec, prompt: a.prompt };
   if (a.type === "run_workflow") return { type: "run_workflow" as const, presetId: a.presetId, prompt: a.prompt };
   if (a.type === "split_script") return { type: "split_script" as const, script: a.script };
-  if (a.type === "plan_agent") return { type: "plan_agent" as const, goal: a.goal };
+  if (a.type === "plan_agent") {
+    return { type: "plan_agent" as const, goal: a.goal, plannerMode: a.plannerMode };
+  }
   return { type: "submit_approval" as const, sceneId: a.sceneId };
 }
 
@@ -124,6 +135,9 @@ export function ProjectAssistant({
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   // 使用者在執行前自選的模型（動作鍵 → 模型 id）：只影響 generate 動作，覆蓋助手原提議的 modelId
   const [modelOverride, setModelOverride] = useState<Record<string, string>>({});
+  // 代理規劃供應商／用量策略；保留使用者上次選擇，個別提議仍可覆蓋。
+  const [defaultPlannerMode, setDefaultPlannerMode] = useState<AgentPlannerMode>(readAgentPlannerMode);
+  const [plannerModeOverride, setPlannerModeOverride] = useState<Record<string, AgentPlannerMode>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const push = (t: Turn) => {
     setTurns((prev) => [...prev, t]);
@@ -297,6 +311,7 @@ export function ProjectAssistant({
     setFallbackPending(false);
     setExecuted(new Set());
     setModelOverride({});
+    setPlannerModeOverride({});
     setPendingKey(null);
     setInput("");
     traceRef.current = [];
@@ -460,7 +475,13 @@ export function ProjectAssistant({
                       const isRunning = pendingKey === actKey;
                       // generate 動作套上使用者可能換過的模型；其餘動作照原樣
                       const gen = act.type === "generate" ? effectiveGenerate(act, actKey) : null;
-                      const payloadAct = gen ? gen.action : act;
+                      const chosenPlannerMode = plannerModeOverride[actKey] ?? defaultPlannerMode;
+                      const payloadAct = gen
+                        ? gen.action
+                        : act.type === "plan_agent"
+                          ? { ...act, plannerMode: chosenPlannerMode }
+                          : act;
+                      const plannerOption = getAgentPlannerOption(chosenPlannerMode);
                       // 綁分鏡的 generate 只讓換到「能填進分鏡格」的模型；未綁分鏡可換任何多模態模型
                       const groups = gen ? (gen.action.sceneId ? sceneGroups : allGroups) : [];
                       const chosenId = gen?.action.modelId ?? "";
@@ -475,7 +496,7 @@ export function ProjectAssistant({
                             : payloadAct.type === "split_script"
                               ? `執行「${payloadAct.label}」？會呼叫 AI 導演拆分鏡（免費）。`
                               : payloadAct.type === "plan_agent"
-                                ? `把這個目標交給 AI 創作助手？只會排出逐步計畫與估點（免費）——你在「AI 執行計畫」核准後才會開始花點執行。`
+                                ? `把這個目標交給 AI 創作助手，並使用「${plannerOption.shortLabel}」？規劃不扣站內點數；fal.ai 模式依實際 token 計費。這一步只排計畫，你在「AI 執行計畫」核准後才會開始花執行點數。`
                                 : `執行「${payloadAct.label}」？`;
                       return (
                         <div key={j} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -515,6 +536,37 @@ export function ProjectAssistant({
                               {gen.info.strengths}
                               {!gen.info.verified && <span style={{ color: "var(--gold-ink)" }}>（新模型 ID，首跑校準；失敗自動退點）</span>}
                             </div>
+                          )}
+                          {payloadAct.type === "plan_agent" && !isDone && (
+                            <label style={{ display: "grid", gap: 3, fontSize: "var(--fs-11)", color: "var(--fg-secondary)", maxWidth: 360 }}>
+                              <span>
+                                <Icon name="SlidersHorizontal" size={12} /> 規劃模型與用量
+                              </span>
+                              <select
+                                aria-label="選擇代理規劃模型與用量"
+                                value={chosenPlannerMode}
+                                disabled={isRunning}
+                                onChange={(event) => {
+                                  const mode = event.target.value as AgentPlannerMode;
+                                  setPlannerModeOverride((prev) => ({ ...prev, [actKey]: mode }));
+                                  setDefaultPlannerMode(mode);
+                                  writeAgentPlannerMode(mode);
+                                }}
+                                style={{ fontSize: "var(--fs-12)", padding: "4px 6px", maxWidth: 360 }}
+                              >
+                                {AGENT_PLANNER_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label} — {option.usageLabel}
+                                  </option>
+                                ))}
+                              </select>
+                              <span>
+                                {plannerOption.description}
+                                {(chosenPlannerMode === "auto" || chosenPlannerMode.startsWith("fal_"))
+                                  ? " 可能會把本次規劃所需的專案內容傳給 fal.ai。"
+                                  : ""}
+                              </span>
+                            </label>
                           )}
                           <ConfirmButton
                             triggerClassName="btn-tonal btn-sm"

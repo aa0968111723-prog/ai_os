@@ -11,6 +11,7 @@ import {
   getProjectAgentInsights,
   listProjectAgentEvents,
 } from "../services/agentEventCore";
+import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 
 /**
  * AI 代理（代理系統核心）：一句目標 → LLM 規劃多步計畫（估點）→ 使用者核准 → 背景執行器逐步執行。
@@ -21,8 +22,17 @@ import {
 export const agentsRouter = router({
   /** 規劃：讀專案現況＋知識庫＋可寫資料庫，請 LLM 針對目標排一份多步計畫（只規劃不執行） */
   plan: authedProcedure
-    .input(z.object({ projectId: z.string().uuid(), goal: z.string().min(5, "目標至少 5 個字").max(1000) }))
-    .mutation(({ ctx, input }) => planAgentCore({ auth: ctx.auth, projectId: input.projectId, goal: input.goal })),
+    .input(z.object({
+      projectId: z.string().uuid(),
+      goal: z.string().min(5, "目標至少 5 個字").max(1000),
+      plannerMode: agentPlannerModeSchema.optional(),
+    }))
+    .mutation(({ ctx, input }) => planAgentCore({
+      auth: ctx.auth,
+      projectId: input.projectId,
+      goal: input.goal,
+      plannerMode: input.plannerMode,
+    })),
 
   /** 核准計畫：這一刻起才開始花執行點數（背景執行器下一個 tick 接手） */
   approve: authedProcedure

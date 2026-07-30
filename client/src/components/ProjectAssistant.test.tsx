@@ -337,3 +337,55 @@ describe("ProjectAssistant WB-03 bring-in (no runAction)", () => {
     });
   });
 });
+
+describe("ProjectAssistant 代理規劃模型選擇", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    mocks.requestAssistantStream.mockImplementation(async (request: StreamRequest) => {
+      request.handlers.onDone({
+        answer: "可以建立代理計畫",
+        actions: [{
+          type: "plan_agent",
+          label: "排計畫",
+          goal: "安排活動前一週的完整準備",
+        }],
+        steps: [],
+        mock: false,
+        fallback: false,
+      });
+      return true;
+    });
+    mocks.runMutateAsync.mockResolvedValue({
+      kind: "plan_agent",
+      message: "已建立計畫",
+    });
+  });
+
+  it("讓使用者在確認前選 Fal 用量級別並送到後端", async () => {
+    render(<ProjectAssistant projectId="project-agent" embedded />);
+    await submitQuestion("請排完整計畫");
+    await screen.findByText("可以建立代理計畫");
+
+    const user = userEvent.setup();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "選擇代理規劃模型與用量" }),
+      "fal_economy",
+    );
+    await user.click(screen.getByRole("button", { name: "排計畫" }));
+
+    await waitFor(() => expect(mocks.runMutateAsync).toHaveBeenCalledWith({
+      projectId: "project-agent",
+      action: {
+        type: "plan_agent",
+        goal: "安排活動前一週的完整準備",
+        plannerMode: "fal_economy",
+      },
+    }));
+    expect(window.localStorage.getItem("aios.agentPlannerMode")).toBe("fal_economy");
+  });
+});

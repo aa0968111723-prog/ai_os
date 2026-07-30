@@ -3,6 +3,7 @@
  */
 import { pgTable, uuid, text, integer, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import type { CompletePlanSummary } from "../../../shared/plan";
+import type { AgentPlannerTelemetry } from "../../../shared/agentPlanner";
 
 /**
  * AI 代理執行紀錄（代理系統核心）：一句目標 → LLM 規劃多步計畫 → 使用者核准 → 伺服器背景逐步執行。
@@ -20,6 +21,8 @@ export const agentRuns = pgTable("agent_runs", {
   summary: text("summary").notNull().default(""),
   /** 結構化完整計畫摘要：成功條件、缺少資訊、假設、風險、里程碑、成本與時程。 */
   planSummary: jsonb("plan_summary").$type<CompletePlanSummary>(),
+  /** 規劃供應商／模型／實際 token 與費用；不保存提示詞、原始輸出或 chain-of-thought。 */
+  plannerTelemetry: jsonb("planner_telemetry").$type<AgentPlannerTelemetry>(),
   status: text("status", { enum: ["awaiting_approval", "running", "waiting", "done", "failed", "stopped", "discarded"] })
     .notNull()
     .default("awaiting_approval"),

@@ -87,6 +87,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0009_agent_events_and_indexes",
   // 0010：純新增 model_live_catalog 表＋索引（皆 IF NOT EXISTS），可安全納入 bridge
   "0010_model_live_catalog",
+  // 0011：純新增 guarded JSONB 欄位，可安全納入 bridge
+  "0011_agent_planner_telemetry",
 ] as const;
 
 /**
