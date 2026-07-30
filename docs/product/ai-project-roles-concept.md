@@ -178,7 +178,9 @@
 - [x] LLM／Fal／ai_os 三層分工
 - [x] 職能表初稿與 L0–L4
 - [x] 與 CA／Fal 餘額／手機減負交叉引用
-- [ ] 產品確認後：L0 文案可開小 PR；L2 席位另開設計再實作
+- [x] L0 文案：AgentCard 空態／標籤改「AI 職能」（分鏡助理／生成員等）；見 `docs/product/ai-roles-l0-l1-notes.md`
+- [x] L1 catalog：`shared/aiProjectRoles.ts` + `shared/rolePlaybooks.ts`；`planAgentCore` 注入 playbook；`agents.listRoles` 唯讀
+- [ ] 產品確認後：L2 席位另開設計再實作
 
 ---
 
