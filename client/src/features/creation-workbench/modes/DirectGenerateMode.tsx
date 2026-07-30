@@ -528,7 +528,11 @@ export function DirectGenerateMode({
             </p>
           )}
           <p className="hint" style={{ fontSize: 12 }}>失敗全額退點。正式模式會實際呼叫 AI 生成。</p>
-          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+          {/* MOB-03：長任務可離開——背景 runner 不綁 cookie；完成會推播到已連結裝置 */}
+          <p className="hint" style={{ fontSize: 12, marginTop: 6 }}>
+            可關閉此頁，完成會推播到已連結裝置。
+          </p>
+          <div className="confirm-actions" style={{ display: "flex", gap: 10, marginTop: 10 }}>
             <button
               type="button"
               className="primary"

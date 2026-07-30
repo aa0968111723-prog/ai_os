@@ -3417,26 +3417,37 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .ctx-summary::-webkit-scrollbar { display: none; }
   .ctx-summary .chip { flex: none; }
   .card--primary { padding: 14px; }
+  /* MOB-03：S 手機強制 2×2 工作台模式格（拇指可點，min-height ≥64） */
   .creation-mode-tabs {
-    display: flex;
-    gap: 6px;
-    margin-inline: -2px;
-    padding: 2px 2px 5px;
-    overflow-x: auto;
-    scroll-snap-type: x mandatory;
-    scrollbar-width: none;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-inline: 0;
+    padding: 0;
+    overflow: visible;
+    scroll-snap-type: none;
   }
   .creation-mode-tabs::-webkit-scrollbar { display: none; }
   .creation-mode-tab {
-    min-width: 118px;
-    min-height: 54px;
-    flex: 0 0 118px;
+    min-width: 0;
+    min-height: 64px;
+    flex: none;
     align-items: center;
-    padding: 8px;
-    scroll-snap-align: start;
+    padding: 10px;
   }
   .creation-mode-tab__icon { width: 30px; height: 30px; }
   .creation-mode-tab__copy .hint { display: none; }
+  /* MOB-03：生成確認在 S 上確認鈕全寬 ≥44 */
+  .confirm-panel .confirm-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .confirm-panel .confirm-actions .primary,
+  .confirm-panel .confirm-actions button {
+    width: 100%;
+    min-height: var(--touch-min, 44px);
+    justify-content: center;
+  }
   .creation-resource-entry { padding: 9px; }
   .creation-resource-entry [role="group"] { flex-wrap: nowrap !important; overflow-x: auto; }
   .creation-resource-entry [role="group"] button { flex: none; }

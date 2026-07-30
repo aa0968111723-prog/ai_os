@@ -611,6 +611,12 @@ export function GenerationList({
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
             <span className={`pill ${STATUS_PILL_CLASS[g.status] ?? g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
+            {/* MOB-03：進行中列提示可離開（背景 runner 推進） */}
+            {(g.status === "queued" || g.status === "running") && (
+              <span className="hint" style={{ fontSize: 11, textAlign: "right", maxWidth: 140 }}>
+                背景執行中，可離開
+              </span>
+            )}
             {canEdit && g.status === "done" && g.kind !== "text" && (
               inScenes(g.id) ? (
                 <button style={{ padding: "4px 12px", fontSize: 12 }} disabled>已加入</button>
