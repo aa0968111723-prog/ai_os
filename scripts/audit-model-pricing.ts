@@ -13,62 +13,30 @@
  * 而不是硬給一個看似精確的數字。實際帳單以 fal.ai/pricing 與月帳單為準。
  */
 import { writeFileSync } from "node:fs";
-import { CATEGORIES, MODELS, tierLabel, type ModelEntry } from "../shared/models";
+import {
+  CATEGORIES,
+  MODELS,
+  PRICE_AUDIO_MINUTES,
+  PRICE_MUSIC_MINUTES,
+  PRICE_V2V_MINUTES,
+  PRICE_VIDEO_SECONDS,
+  parseRealCost,
+  tierLabel,
+  type ModelEntry,
+  type ParsedRealCost,
+} from "../shared/models";
 
+/* 解析與用量假設改為 import shared/models 的 parseRealCost——與「實價計點」同一支函式，
+   報告永遠對得上實際扣點；匯率仍可用 TWD_PER_USD 覆寫（僅影響本報告的 NT$ 估值欄）。 */
 const RATE = Number(process.env.TWD_PER_USD ?? 31);
-const VIDEO_SECONDS = Number(process.env.VIDEO_SECONDS ?? 5);
-const AUDIO_MINUTES = Number(process.env.AUDIO_MINUTES ?? 10);
-const MUSIC_MINUTES = Number(process.env.MUSIC_MINUTES ?? 3);
-const V2V_MINUTES = Number(process.env.V2V_MINUTES ?? 1);
-
-/** 「/分」的典型用量因類別而異：轉錄整檔開示、配樂一首、對嘴一支短片，長度天差地遠 */
-function minutesFor(category: ModelEntry["category"]): { mul: number; note: string } {
-  if (category === "speech-to-text") return { mul: AUDIO_MINUTES, note: `×${AUDIO_MINUTES} 分鐘（單檔轉錄假設）` };
-  if (category === "text-to-audio") return { mul: MUSIC_MINUTES, note: `×${MUSIC_MINUTES} 分鐘（單首配樂假設）` };
-  if (category === "video-to-video") return { mul: V2V_MINUTES, note: `×${V2V_MINUTES} 分鐘（單支短片假設）` };
-  return { mul: 1, note: "×1 分鐘（保守假設）" };
-}
-
-/** 單位 → 單次生成的用量倍數與說明；不在表內＝無法機械換算 */
-const UNIT_ASSUMPTIONS: Array<{ match: RegExp; multiplier: (m: ModelEntry) => { mul: number; note: string } }> = [
-  { match: /^(張|圖|次|支|首|段|call)/i, multiplier: () => ({ mul: 1, note: "×1（每次一件）" }) },
-  { match: /^MP/i, multiplier: () => ({ mul: 1, note: "×1MP（16:9 標準輸出 ≈ 1MP）" }) },
-  { match: /^秒/, multiplier: () => ({ mul: VIDEO_SECONDS, note: `×${VIDEO_SECONDS} 秒（單鏡假設）` }) },
-  { match: /^分(鐘)?/, multiplier: (m) => minutesFor(m.category) },
-];
-
-interface ParsedCost {
-  /** 解析出的 USD 中值（範圍取中點）；null＝解析不了 */
-  usdMid: number | null;
-  /** 單位換算倍數；null＝單位不明 */
-  multiplier: number | null;
-  unitNote: string;
-}
-
-/** 從 "$0.06–0.16/張(依解析度)" 這類字串解析 USD 中值與單位倍數 */
-function parseCost(cost: string, model: ModelEntry): ParsedCost {
-  // 金額：$a 或 $a–b（同時容忍 - 與 ~ 當範圍號）
-  const m = cost.match(/\$\s*([0-9]+(?:\.[0-9]+)?)(?:\s*[–\-~]\s*([0-9]+(?:\.[0-9]+)?))?/);
-  if (!m) return { usdMid: null, multiplier: null, unitNote: "無 $ 金額" };
-  const lo = Number(m[1]);
-  const hi = m[2] !== undefined ? Number(m[2]) : lo;
-  const usdMid = (lo + hi) / 2;
-
-  const unitMatch = cost.match(/\/\s*([^\s（(]+)/);
-  if (!unitMatch) return { usdMid, multiplier: 1, unitNote: "×1（未標單位，視為每次）" };
-  const unit = unitMatch[1];
-  for (const u of UNIT_ASSUMPTIONS) {
-    if (u.match.test(unit)) {
-      const r = u.multiplier(model);
-      return { usdMid, multiplier: r.mul, unitNote: r.note };
-    }
-  }
-  return { usdMid, multiplier: null, unitNote: `單位「/${unit}」需人工換算` };
-}
+const VIDEO_SECONDS = PRICE_VIDEO_SECONDS;
+const AUDIO_MINUTES = PRICE_AUDIO_MINUTES;
+const MUSIC_MINUTES = PRICE_MUSIC_MINUTES;
+const V2V_MINUTES = PRICE_V2V_MINUTES;
 
 interface Row {
   model: ModelEntry;
-  parsed: ParsedCost;
+  parsed: ParsedRealCost;
   /** 換算後單次 NT$ 估值；null＝無法機械換算 */
   twd: number | null;
   /** points − twd（正＝點數收太多、負＝點數低於成本） */
@@ -76,7 +44,7 @@ interface Row {
 }
 
 const rows: Row[] = MODELS.map((model) => {
-  const parsed = parseCost(model.cost, model);
+  const parsed = parseRealCost(model.cost, model.category);
   const twd = parsed.usdMid !== null && parsed.multiplier !== null ? parsed.usdMid * parsed.multiplier * RATE : null;
   return { model, parsed, twd, delta: twd !== null ? model.points - twd : null };
 });
