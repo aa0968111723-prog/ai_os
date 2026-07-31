@@ -1914,10 +1914,14 @@ export function ProjectPage({ id }: { id: string }) {
           </CollabZone>
         </div>
 
-        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度） */}
+        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。
+            id 供 ?focus=messages 通知深連結捲動定位——這個錨點已被平行 PR 弄丟兩次
+            （#246、#251），approvals.deeplink.test.ts 的守衛就是為此而存在，別再拿掉。 */}
         {!mobileCompact && (
           <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-            <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+            <div id="project-messages">
+              <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+            </div>
           </CollabZone>
         )}
       </div>
