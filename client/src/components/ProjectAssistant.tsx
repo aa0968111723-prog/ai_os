@@ -535,8 +535,10 @@ export function ProjectAssistant({
                           )}
                           {payloadAct.type === "plan_agent" && !isDone && (
                             <label style={{ display: "grid", gap: 3, fontSize: "var(--fs-11)", color: "var(--fg-secondary)", maxWidth: 360 }}>
+                              {/* 這個選擇同時決定「問答」與「代理規劃」用哪個模型——
+                                * 兩者共用同一個偏好鍵。標籤要講清楚，否則使用者以為只在調規劃。 */}
                               <span>
-                                <Icon name="SlidersHorizontal" size={12} /> 規劃模型與用量
+                                <Icon name="SlidersHorizontal" size={12} /> 規劃模型與用量（也會套用到問答）
                               </span>
                               <select
                                 aria-label="選擇代理規劃模型與用量"
@@ -706,9 +708,43 @@ export function ProjectAssistant({
             disabled={busy}
             style={{ flex: 1 }}
           />
-          <button className="primary" onClick={() => void send()} disabled={busy || !input.trim()}>
+          <Button variant="primary" onClick={() => void send()} disabled={busy || !input.trim()}>
             {busy ? "思考中…" : "問"}
-          </button>
+          </Button>
+        </div>
+
+        {/* 回答模型選擇：先前只有「確認 plan_agent 動作」時才選得到，一般問答沒得選。
+         * 這裡把它提到輸入框旁邊，並且明講代價——NIM 走免費額度，fal 是平台實付 USD，
+         * 使用者有權在按下「問」之前就知道這一次會不會花到基金會的錢。 */}
+        <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0, fontSize: "var(--fs-11)" }}>
+            <Icon name="SlidersHorizontal" size={12} />
+            回答模型
+            <select
+              aria-label="選擇回答這則提問的模型"
+              value={defaultPlannerMode}
+              disabled={busy}
+              onChange={(event) => {
+                const mode = event.target.value as AgentPlannerMode;
+                setDefaultPlannerMode(mode);
+                writeAgentPlannerMode(mode);
+              }}
+              style={{ fontSize: "var(--fs-12)", padding: "2px 6px", width: "auto" }}
+            >
+              {AGENT_PLANNER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.shortLabel}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Hint as="span" layer="always">
+            {defaultPlannerMode === "nim"
+              ? "NVIDIA NIM 免費額度，站內 0 點、平台 0 成本。"
+              : defaultPlannerMode === "auto"
+                ? "先用免費的 NIM；它沒回應時才改用 fal.ai（那次平台會付費）。"
+                : "走 fal.ai：站內仍是 0 點，但平台會實付 USD。專案內容也會傳給 fal.ai。"}
+          </Hint>
         </div>
       </div>
     </>
