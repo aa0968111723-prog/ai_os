@@ -3,6 +3,7 @@ import {
   type ReactNode, type CSSProperties, type RefObject, type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { Icon } from "./Icon";
+import { Button, Meta } from "./ui";
 
 /**
  * 共用互動基元（第二輪：把原生 window.confirm/prompt/alert 與無漫遊 radiogroup
@@ -174,9 +175,9 @@ export function ConfirmButton({
       <button ref={confirmRef} type="button" className="primary btn-sm" onClick={confirm}>
         {confirmLabel}
       </button>
-      <button type="button" className="btn-ghost btn-sm" onClick={cancel}>
+      <Button variant="ghost" size="sm" onClick={cancel}>
         {cancelLabel}
-      </button>
+      </Button>
     </>
   );
 
@@ -185,7 +186,7 @@ export function ConfirmButton({
       <span ref={wrapRef} style={{ display: "block" }}>
         <div className="confirm-panel" role="alertdialog" aria-label={title || message || "確認"}>
           {title && <h3>{title}</h3>}
-          {message && <p className="hint" style={{ marginTop: title ? 4 : 0 }}>{message}</p>}
+          {message && <Meta as="p" style={{ marginTop: title ? 4 : 0 }}>{message}</Meta>}
           {reason && (
             <>
               {reason.label && <label htmlFor={reasonId}>{reason.label}</label>}
@@ -221,7 +222,7 @@ export function ConfirmButton({
       aria-label={title || message || "確認"}
       style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}
     >
-      <span className="hint" style={{ margin: 0 }}>{message || title || "確定嗎？"}</span>
+      <Meta style={{ margin: 0 }}>{message || title || "確定嗎？"}</Meta>
       {buttons}
     </span>
   );
@@ -286,14 +287,14 @@ export function CharCount({ value, max }: { value: string; max: number }) {
   const near = len >= max * 0.9;
   const atMax = len >= max;
   return (
-    <p
-      className="hint"
+    <Meta
+      as="p"
       role={atMax ? "status" : undefined}
       style={{ margin: "4px 0 0", textAlign: "right", ...(near ? { color: atMax ? "var(--danger-ink)" : "var(--gold-ink)" } : {}) }}
     >
       {len.toLocaleString()} / {max.toLocaleString()} 字
       {atMax && "——已達上限，再貼上的內容不會被收錄；長稿請分成多份"}
-    </p>
+    </Meta>
   );
 }
 

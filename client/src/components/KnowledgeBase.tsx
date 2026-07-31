@@ -4,6 +4,7 @@ import { useLocalDraft } from "../useLocalDraft";
 import { Icon } from "./Icon";
 import { CharCount, ConfirmButton } from "./interactions";
 import { VersionHistory } from "./VersionHistory";
+import { Chip, Hint, Meta } from "./ui";
 
 const KINDS = [
   { id: "transcript", label: "師父開示稿" },
@@ -151,10 +152,10 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
   return (
     <section className="card" data-fb="專案知識庫">
       <h2>專案知識庫（AI 讀得懂你的素材）</h2>
-      <p className="hint">
+      <Hint>
         貼上師父開示稿、見證故事、腳本——AI 導演發想時會自動讀取，你不必每次重講背景。
         {list.data && list.data.length > 0 && `目前 ${list.data.length} 份・約 ${totalChars.toLocaleString()} 字。`}
-      </p>
+      </Hint>
 
       {list.isLoading ? (
         <div style={{ marginTop: 8 }} aria-hidden="true">
@@ -178,7 +179,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
       )}
 
       {readOnly ? (
-        <p className="hint" style={{ marginTop: 12 }}>你在此專案是檢視者（唯讀）——知識庫可瀏覽、不能新增或修改。</p>
+        <Hint layer="always" style={{ marginTop: 12 }}>你在此專案是檢視者（唯讀）——知識庫可瀏覽、不能新增或修改。</Hint>
       ) : open ? (
         <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
           <label htmlFor={`kb-kind-${projectId}`}>類型</label>
@@ -200,7 +201,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
           />
           {/* 即時字數：長開示逼近 4 萬字是主要情境，不能等按下「加入」才被上限打回 */}
           <CharCount value={content} max={MAX_CONTENT_CHARS} />
-          <p className="hint" style={{ marginTop: 4 }}>（草稿自動保留，重整不會不見）</p>
+          <Hint style={{ marginTop: 4 }}>（草稿自動保留，重整不會不見）</Hint>
           <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button
               className="primary"
@@ -212,7 +213,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
             <button onClick={() => setOpen(false)}>取消</button>
             {/* 沉默 disable 說明：講清楚還差哪個欄位（比照生成鈕 disableReason 模式） */}
             {!add.isPending && (!title.trim() || !content.trim()) && (
-              <span className="hint">{!title.trim() ? "先填標題" : "先貼內容"}</span>
+              <Hint as="span" layer="always">{!title.trim() ? "先填標題" : "先貼內容"}</Hint>
             )}
           </div>
           {add.error && <p className="error">{add.error.message}</p>}
@@ -240,7 +241,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
               >
                 選資料夾匯入
               </button>
-              <span className="hint">資料夾模式部分瀏覽器（如 Safari iOS）可能不支援；不行就用上面的多檔選取。</span>
+              <Hint as="span">資料夾模式部分瀏覽器（如 Safari iOS）可能不支援；不行就用上面的多檔選取。</Hint>
             </div>
             {/*
              * 「選資料夾」變體：webkitdirectory 是非標準屬性（React 型別沒收錄），用 callback ref 補上。
@@ -260,11 +261,11 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
               }}
             />
             {importing && (
-              <p className="hint" style={{ margin: "6px 0 0", display: "flex", alignItems: "center", gap: 6 }}>
+              <Meta as="p" style={{ margin: "6px 0 0", display: "flex", alignItems: "center", gap: 6 }}>
                 <Icon name="Loader" size={12} className="spin" />匯入中 {importing.done}/{importing.total}…（逐檔上傳，先別關頁面）
-              </p>
+              </Meta>
             )}
-            {!importing && importSummary && <p className="hint" style={{ margin: "6px 0 0" }}>{importSummary}</p>}
+            {!importing && importSummary && <Meta as="p" style={{ margin: "6px 0 0" }}>{importSummary}</Meta>}
           </div>
         </div>
       ) : (
@@ -342,7 +343,7 @@ function KnowledgeRow({
   if (editing) {
     return (
       <div className="gen-row" style={{ gridTemplateColumns: "auto 1fr", alignItems: "start" }}>
-        <span className="chip">{KIND_LABEL[k.kind] ?? k.kind}</span>
+        <Chip>{KIND_LABEL[k.kind] ?? k.kind}</Chip>
         <div style={{ minWidth: 0 }}>
           <input
             value={editTitle}
@@ -398,7 +399,7 @@ function KnowledgeRow({
 
   return (
     <div className="gen-row" style={{ gridTemplateColumns: "auto 1fr auto", alignItems: "center" }}>
-      <span className="chip">{KIND_LABEL[k.kind] ?? k.kind}</span>
+      <Chip>{KIND_LABEL[k.kind] ?? k.kind}</Chip>
       <div>
         <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>{k.title}</div>
         <div className="meta" style={{ fontSize: "var(--fs-12)" }}>{k.excerpt}{k.chars > 120 ? "…" : ""}（{k.chars.toLocaleString()} 字）</div>

@@ -19,6 +19,7 @@ import {
   readAgentPlannerMode,
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
+import { Hint, Meta } from "./ui";
 
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
@@ -394,15 +395,15 @@ export function ProjectAssistant({
 
       {/* 收起時顯示提示；本體恆掛在 DOM（用 hidden 切換）——aria-controls 不懸空，執行中/展開中的動作狀態也不會被卸載清掉 */}
       {showCollapse && collapsed && (
-        <p className="hint" style={{ marginTop: 8 }}>
+        <Meta as="p" style={{ marginTop: 8 }}>
           助手已收起{turns.length > 0 ? `（保留 ${turns.length} 則對話）` : ""}{busy ? "・仍在思考中" : ""}。點「展開」繼續。
-        </p>
+        </Meta>
       )}
 
       <div id="sec-assistant-body" hidden={collapsed}>
-        <p className="hint" style={{ marginTop: 4 }}>
+        <Hint style={{ marginTop: 4 }}>
           一個對話統包：<b>問</b>（進度、還沒審的分鏡、該用哪個模型…，我會<b>邊想邊查</b>素材庫／分鏡／生成紀錄／模型目錄／<b>資料庫</b>，唯讀）、<b>發想</b>（要分鏡 idea 我直接給，並可一鍵存成草稿）、<b>拆分鏡</b>（貼腳本進來）、<b>下目標</b>（多步驟目標我會交給代理排計畫，你核准估點後由伺服器背景逐步執行）。任何花點數或改資料的動作都要你按確認；提問本身由 NVIDIA NIM 免費額度驅動，不扣點。
-        </p>
+        </Hint>
 
         {/* 快速開場：問答／發想／下目標都從同一個入口——點一顆帶入輸入框，按「問」才送出 */}
         {turns.length === 0 && !thinking.active && (

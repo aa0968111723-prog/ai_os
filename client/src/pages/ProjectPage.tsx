@@ -694,13 +694,12 @@ export function ProjectPage({ id }: { id: string }) {
           {showPresenceDetails && (
             <span id="project-presence-details" className="project-presence__details" style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               {!collab.connected && (
-                <span
-                  className="hint"
+                <Meta
                   title="WebSocket 未連上時，留言與生成仍會每數秒自動刷新，只是看不到即時游標與「誰在場」"
                   style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, border: "1px dashed var(--border-strong)" }}
                 >
                   即時同步連線中…
-                </span>
+                </Meta>
               )}
               {collab.connected && collab.peers.length === 0 && (
                 <Meta style={{ fontSize: 12 }}>即時同步已連線</Meta>
@@ -935,15 +934,14 @@ export function ProjectPage({ id }: { id: string }) {
               {updateWv.isPending ? (
                 <Meta style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</Meta>
               ) : wvSaved !== "idle" ? (
-                <span
-                  className="hint"
+                <Meta
                   style={{
                     marginLeft: 8, fontSize: 13, fontWeight: 400, color: "var(--primary-ink)",
                     opacity: wvSaved === "fading" ? 0 : 1, transition: "opacity var(--dur-slow)",
                   }}
                 >
                   已儲存 <Icon name="Check" size={13} />
-                </span>
+                </Meta>
               ) : null}
             </h2>
             {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——世界觀可瀏覽、不能修改（打的字不會被儲存）。</Hint>}

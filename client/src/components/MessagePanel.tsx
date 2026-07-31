@@ -213,7 +213,12 @@ const MessageRow = memo(function MessageRow({
             <audio controls preload="none" src={m.voiceUrl} style={{ height: 32, maxWidth: "100%", display: "block", marginBottom: 4 }} aria-label="語音留言" />
           )}
           {isVoice ? (
-            <span className={m.voiceStatus === "pending" || m.voiceStatus === "running" ? "hint" : undefined}>{m.body}</span>
+            m.voiceStatus === "pending" || m.voiceStatus === "running" ? (
+              // 轉錄未完成時 body 是佔位字（「轉錄中…」）——是內容不是說明，任何模式都要看得到
+              <Meta>{m.body}</Meta>
+            ) : (
+              <span>{m.body}</span>
+            )
           ) : (
             <span>{renderBody(m.body, mentionNames)}</span>
           )}

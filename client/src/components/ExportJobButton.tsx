@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
+import { Button, Meta } from "./ui";
 
 function fmtMb(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))}KB`;
@@ -60,9 +61,9 @@ export function ExportJobButton({
           <Icon name="Check" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />
           下載交付包（{fmtMb(job.data?.bytesWritten ?? 0)}）
         </a>
-        <button type="button" className="btn-ghost btn-sm" onClick={() => setJobId(null)} title="內容有更新時重新打包一份新的">
+        <Button variant="ghost" size="sm" onClick={() => setJobId(null)} title="內容有更新時重新打包一份新的">
           重新打包
-        </button>
+        </Button>
       </span>
     );
   }
@@ -73,9 +74,11 @@ export function ExportJobButton({
         <button type="button" className={triggerClassName} disabled={create.isPending} onClick={() => create.mutate({ projectId, assetIds })}>
           重新打包
         </button>
-        <span className={status === "failed" ? "error" : "hint"}>
-          {status === "failed" ? `打包失敗：${job.data?.error ?? "未知原因"}` : "已取消打包"}
-        </span>
+        {status === "failed" ? (
+          <span className="error">打包失敗：{job.data?.error ?? "未知原因"}</span>
+        ) : (
+          <Meta>已取消打包</Meta>
+        )}
       </span>
     );
   }
@@ -86,14 +89,14 @@ export function ExportJobButton({
   const bytes = job.data?.bytesWritten ?? 0;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      <span className="hint" role="status" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <Meta role="status" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
         <Icon name="Loader" className="spin" size={14} />
         {status === "queued" ? "排隊中…" : `打包中… ${total > 0 ? `${done}/${total} 檔・` : ""}${fmtMb(bytes)}`}
         （大包可能需要數分鐘，可離開此頁稍後回來）
-      </span>
-      <button type="button" className="btn-ghost btn-sm" disabled={cancel.isPending} onClick={() => jobId && cancel.mutate({ id: jobId })}>
+      </Meta>
+      <Button variant="ghost" size="sm" disabled={cancel.isPending} onClick={() => jobId && cancel.mutate({ id: jobId })}>
         取消
-      </button>
+      </Button>
     </span>
   );
 }

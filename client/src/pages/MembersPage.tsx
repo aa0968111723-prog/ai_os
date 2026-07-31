@@ -5,6 +5,7 @@ import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
+import { Hint, Meta } from "../components/ui";
 
 type Member = inferRouterOutputs<AppRouter>["directory"]["list"]["members"][number];
 
@@ -91,15 +92,15 @@ export function MembersPage() {
       ) : dir.error ? (
         // 尚無可見組別（如剛建團隊、還沒建組/加人）後端回 FORBIDDEN——對管理員是空狀態而非錯誤，給中性提示
         dir.error.data?.code === "FORBIDDEN" ? (
-          <p className="hint">還沒有你能看到的組別成員。先到「團隊管理」建立組別、把夥伴加進來，這裡就會出現。</p>
+          <Hint layer="always">還沒有你能看到的組別成員。先到「團隊管理」建立組別、把夥伴加進來，這裡就會出現。</Hint>
         ) : (
           <p className="error" role="alert">通訊錄載入失敗：{dir.error.message}</p>
         )
       ) : members.length === 0 ? (
-        <p className="hint">{debouncedQ.trim() || groupId ? "沒有符合條件的成員。" : "還沒有成員。"}</p>
+        <Hint layer="always">{debouncedQ.trim() || groupId ? "沒有符合條件的成員。" : "還沒有成員。"}</Hint>
       ) : (
         <>
-          <p className="hint" style={{ marginBottom: 8 }}>共 {members.length} 位</p>
+          <Meta as="p" style={{ marginBottom: 8 }}>共 {members.length} 位</Meta>
           {members.map((m) => (
             <MemberCard key={m.userId} m={m} isSelf={m.userId === me.data?.user.id} />
           ))}
@@ -134,10 +135,10 @@ function MemberCard({ m, isSelf }: { m: Member; isSelf: boolean }) {
       </div>
 
       {/* Email：可直接點開寄信 */}
-      <div className="hint" style={{ fontSize: 12, marginTop: 4, display: "flex", alignItems: "center", gap: 4, overflowWrap: "anywhere" }}>
+      <Meta as="div" style={{ fontSize: 12, marginTop: 4, display: "flex", alignItems: "center", gap: 4, overflowWrap: "anywhere" }}>
         <Icon name="MessageCircle" size={12} />
         <a href={`mailto:${m.email}`} style={{ color: "inherit" }}>{m.email}</a>
-      </div>
+      </Meta>
 
       {/* 所屬團隊/組別＋各組點數用量：一列一組，右邊接點數（本週用量＋個人預算） */}
       <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
@@ -147,16 +148,16 @@ function MemberCard({ m, isSelf }: { m: Member; isSelf: boolean }) {
               <Icon name="User" size={12} />{g.teamName}・{g.groupName}
               <span style={g.role === "leader" ? ROLE_BADGE.leader : ROLE_BADGE.member}>{g.role === "leader" ? "組長" : "組員"}</span>
             </span>
-            <span className="hint" style={{ marginLeft: "auto" }}>
+            <Meta style={{ marginLeft: "auto" }}>
               本週 {g.weeklyUsed} 點
               {g.budget != null && `・個人預算 ${g.totalUsed}／${g.budget}`}
-            </span>
+            </Meta>
           </div>
         ))}
       </div>
 
       {/* 最近活動：登入與最後操作 */}
-      <div className="hint" style={{ fontSize: 11, marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <Meta as="div" style={{ fontSize: 11, marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
           <Icon name="Clock" size={11} />最近登入 {relTime(m.lastLoginAt)}
         </span>
@@ -164,7 +165,7 @@ function MemberCard({ m, isSelf }: { m: Member; isSelf: boolean }) {
           <Icon name="CheckCircle2" size={11} />
           {m.lastActionLabel ? `最後操作「${m.lastActionLabel}」${relTime(m.lastActionAt)}` : "尚無操作紀錄"}
         </span>
-      </div>
+      </Meta>
     </section>
   );
 }

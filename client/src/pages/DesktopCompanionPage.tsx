@@ -12,6 +12,7 @@ import {
   type DetectedDesktopEditor,
 } from "../platform/desktopBridge";
 import type { DesktopHandoffStatusEvent, DesktopRevisionEvent } from "../platform/tauriDesktop";
+import { Button, Hint, Meta } from "../components/ui";
 
 export function DesktopCompanionPage() {
   const desktopAvailable = hasDesktopBridge();
@@ -136,9 +137,9 @@ export function DesktopCompanionPage() {
     <section className="stack" style={{ maxWidth: 900, margin: "0 auto" }}>
       <div className="card">
         <h2>桌面剪輯連接</h2>
-        <p className="hint">
+        <Hint layer="always">
           選擇專案素材與電腦中已安裝的軟體。Aios 只會把素材下載到自己的本機快取；儲存修改後會上傳成新素材，不覆寫原檔。
-        </p>
+        </Hint>
       </div>
 
       <div className="card stack">
@@ -163,7 +164,7 @@ export function DesktopCompanionPage() {
         <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
           <legend style={{ fontWeight: 600, marginBottom: 8 }}>開啟軟體</legend>
           {matchingEditors.length === 0 ? (
-            <p className="hint">沒有偵測到符合這類素材的軟體。</p>
+            <Hint layer="always">沒有偵測到符合這類素材的軟體。</Hint>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {matchingEditors.map((editor) => (
@@ -188,10 +189,10 @@ export function DesktopCompanionPage() {
             {busy ? <><Icon name="Loader" className="spin" size={14} /> 準備中…</> : "用外部軟體開啟並監看"}
           </button>
           <button type="button" disabled={!selectedAsset} onClick={() => void revealSelected()}>在 Finder／檔案總管顯示</button>
-          {activeHandoffId && <button type="button" className="btn-ghost" onClick={() => void stopWatching()}>停止自動回傳</button>}
+          {activeHandoffId && <Button variant="ghost" onClick={() => void stopWatching()}>停止自動回傳</Button>}
         </div>
 
-        {message && <p className="hint" role="status" aria-live="polite">{message}</p>}
+        {message && <Meta as="p" role="status" aria-live="polite">{message}</Meta>}
         {error && <p className="error" role="alert">{error}</p>}
       </div>
 

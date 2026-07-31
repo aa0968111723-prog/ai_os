@@ -12,6 +12,7 @@ import {
   revealAssetInFolder,
   suggestedFileName,
 } from "../platform/desktopBridge";
+import { Hint, Meta } from "./ui";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -278,9 +279,9 @@ export function AssetLibrary({
       <h2>素材庫（上傳參考素材・生成成品自動入庫）</h2>
       {/* DESK-01：桌面回傳 revision 時顯示於區塊層級（不綁特定卡片） */}
       {desktopStatus?.assetId === "" && desktopStatus.kind === "ok" && (
-        <p className="hint" role="status" aria-live="polite" style={{ color: "var(--success-ink)" }}>
+        <Meta as="p" role="status" aria-live="polite" style={{ color: "var(--success-ink)" }}>
           {desktopStatus.text}
-        </p>
+        </Meta>
       )}
 
       <div
@@ -393,17 +394,17 @@ export function AssetLibrary({
                   </button>
                   {/* QA-005：多選打包也走非同步 job——進度/取消/完成下載就地顯示 */}
                   <ExportJobButton projectId={projectId} assetIds={[...selected]} idleLabel={`打包所選（${selected.size}）`} triggerClassName="primary btn-sm" />
-                  <span className="hint" style={{ margin: 0, fontSize: 11 }}>已勾 {selected.size} 個</span>
+                  <Meta style={{ margin: 0, fontSize: 11 }}>已勾 {selected.size} 個</Meta>
                 </>
               )}
             </div>
-            <p className="hint" style={{ margin: 0 }}>
+            <Meta as="p" style={{ margin: 0 }}>
               {filterActive ? `顯示 ${shown.length} / 共 ${total} 個素材` : `共 ${total} 個素材`}
-            </p>
+            </Meta>
           </div>
 
           {shown.length === 0 ? (
-            <p className="hint" style={{ marginTop: 10 }}>
+            <Hint layer="always" style={{ marginTop: 10 }}>
               沒有符合條件的素材——換個種類或清掉搜尋字。
               <span
                 role="button"
@@ -414,7 +415,7 @@ export function AssetLibrary({
               >
                 清除篩選
               </span>
-            </p>
+            </Hint>
           ) : (
             <div className="asset-grid">
               {shown.map((a) => {
@@ -484,53 +485,53 @@ export function AssetLibrary({
                           {a.title}
                         </div>
                       )}
-                      <div className="hint" style={{ fontSize: 11 }}>
+                      <Meta as="div" style={{ fontSize: 11 }}>
                         {a.locked ? <><Icon name="Lock" size={11} style={{ verticalAlign: "-1px", marginRight: 4, color: "var(--gold-ink)" }} />鎖定 · </> : ""}
                         {a.isAiGenerated ? "AI 生成" : "上傳"}
                         {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
-                      </div>
+                      </Meta>
                       {/* AUTH-03 lineage：桌面編輯回傳的新素材可追溯來源 */}
                       {(() => {
                         const srcId = (a.meta as { sourceAssetId?: string } | null | undefined)?.sourceAssetId;
                         if (!srcId) return null;
                         const srcTitle = (allAssets ?? []).find((x) => x.id === srcId)?.title;
                         return (
-                          <div className="hint" style={{ fontSize: 11 }} title={srcId}>
+                          <Meta as="div" style={{ fontSize: 11 }} title={srcId}>
                             由「{srcTitle ?? "原始素材"}」編輯而來
-                          </div>
+                          </Meta>
                         );
                       })()}
 
                       {/* 文件「加入知識庫」的就地回饋：進行中轉圈／成功後短暫綠字（2.5 秒自動消失） */}
                       {toKnowledge.isPending && toKnowledge.variables?.assetId === a.id && (
-                        <div className="hint" style={{ fontSize: 11 }}>
+                        <Meta as="div" style={{ fontSize: 11 }}>
                           <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />加入知識庫中…
-                        </div>
+                        </Meta>
                       )}
                       {knowledgeAddedId === a.id && (
-                        <div className="hint" style={{ fontSize: 11, color: "var(--success-ink)" }}>
+                        <Meta as="div" style={{ fontSize: 11, color: "var(--success-ink)" }}>
                           <Icon name="Check" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />已加入知識庫
-                        </div>
+                        </Meta>
                       )}
 
                       {/* AI 描述入知識庫的就地回饋：進行中轉圈／成功後短暫綠字（2.5 秒自動消失） */}
                       {describeImage.isPending && describeImage.variables?.assetId === a.id && (
-                        <div className="hint" style={{ fontSize: 11 }}>
+                        <Meta as="div" style={{ fontSize: 11 }}>
                           <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />AI 描述中…
-                        </div>
+                        </Meta>
                       )}
                       {describedId === a.id && (
-                        <div className="hint" style={{ fontSize: 11, color: "var(--success-ink)" }}>
+                        <Meta as="div" style={{ fontSize: 11, color: "var(--success-ink)" }}>
                           <Icon name="Check" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />已描述入知識庫
-                        </div>
+                        </Meta>
                       )}
 
                       {/* DESK-01：外部編輯就地 busy／錯誤回饋（卡片內，不用 alert） */}
                       {desktopBusyId === a.id && (
-                        <div className="hint" style={{ fontSize: 11 }} role="status" aria-live="polite">
+                        <Meta as="div" style={{ fontSize: 11 }} role="status" aria-live="polite">
                           <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />準備本機交接…
-                        </div>
+                        </Meta>
                       )}
                       {desktopStatus?.assetId === a.id && desktopBusyId !== a.id && (
                         <div
@@ -620,9 +621,9 @@ export function AssetLibrary({
                                   <Icon name="Download" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />下載
                                 </a>
                               )}
-                              <div className="hint" style={{ fontSize: 11, padding: "2px 4px", margin: 0 }}>
+                              <Hint as="div" layer="always" style={{ fontSize: 11, padding: "2px 4px", margin: 0 }}>
                                 下載後本機開啟；Aios 桌面版可自動回傳編輯結果
-                              </div>
+                              </Hint>
                               <div className="menu-sep" />
                             </>
                           )}

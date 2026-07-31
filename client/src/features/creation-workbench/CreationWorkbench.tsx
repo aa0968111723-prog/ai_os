@@ -30,6 +30,7 @@ import {
   composeGoalFromSkills,
   resolveModeFromSkills,
 } from "../../../../shared/agentSkills";
+import { Hint, Meta } from "../../components/ui";
 
 /**
  * AI 創作工作台（WB-01～WB-06 正式頁面入口）：ProjectPage ② 只掛這一個主卡。
@@ -331,19 +332,19 @@ export function CreationWorkbench({
       </div>
 
       {collapsed && (
-        <p className="hint" style={{ margin: "6px 0 0" }}>
+        <Meta as="p" style={{ margin: "6px 0 0" }}>
           AI 創作工作台已收合
           {running + waiting > 0
             ? `；仍有 ${running} 個執行中、${waiting} 個等待人員的計畫`
             : ""}
           。草稿與模式選擇已保留。
-        </p>
+        </Meta>
       )}
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
-        <p className="hint workbench-intro-lede" style={{ marginTop: 6 }}>
+        <Hint className="workbench-intro-lede" style={{ marginTop: 6 }}>
           寫你想完成的畫面或片子，再按 <b>＋ 請誰來幫忙</b>——像請劇組，不必先背四個分頁。
-        </p>
+        </Hint>
 
         <CreationGoalInput
           inputId={goalInputId}
@@ -403,9 +404,9 @@ export function CreationWorkbench({
           ideaBringIn={templateIdeaBringIn}
         />
         {sideNotice ? (
-          <p className="hint" role="status" aria-live="polite" style={{ marginTop: 8 }}>
+          <Meta as="p" role="status" aria-live="polite" style={{ marginTop: 8 }}>
             {sideNotice}
-          </p>
+          </Meta>
         ) : null}
         <PlanMode
           projectId={projectId}

@@ -6,6 +6,7 @@ import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { ChatEmptyState, focusChatPartnerPicker } from "../components/ChatEmptyState";
 import { setPlannerFocus } from "../discuss";
+import { Button, Hint, Meta } from "../components/ui";
 
 type Thread = inferRouterOutputs<AppRouter>["dm"]["threads"][number];
 type Peer = inferRouterOutputs<AppRouter>["dm"]["peers"][number];
@@ -109,7 +110,7 @@ export function ChatPage({ peerId }: { peerId?: string }) {
                 <ThreadItem key={t.peerId} t={t} active={t.peerId === peerId} onOpen={() => navigate(`/chat/${t.peerId}`)} />
               ))}
               {filteredThreads.length === 0 && needle === "" && (
-                <p className="hint" style={{ fontSize: 12 }}>還沒有對話——從下面的夥伴名單挑一位開始聊。</p>
+                <Hint layer="always" style={{ fontSize: 12 }}>還沒有對話——從下面的夥伴名單挑一位開始聊。</Hint>
               )}
               {newPeers.length > 0 && (
                 <>
@@ -130,7 +131,7 @@ export function ChatPage({ peerId }: { peerId?: string }) {
                 </>
               )}
               {filteredThreads.length === 0 && newPeers.length === 0 && (
-                <p className="hint" style={{ fontSize: 12 }}>{needle ? "沒有符合的夥伴。" : "目前沒有可私訊的夥伴。"}</p>
+                <Meta as="p" style={{ fontSize: 12 }}>{needle ? "沒有符合的夥伴。" : "目前沒有可私訊的夥伴。"}</Meta>
               )}
             </>
           )}
@@ -321,7 +322,7 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
         <button className="btn-sm dm-back" onClick={onBack} aria-label="返回對話清單"><Icon name="Undo2" size={13} /></button>
         <div style={{ minWidth: 0 }}>
           <b>{peer?.name ?? "…"}</b>
-          {peer?.email && <div className="hint" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{peer.email}</div>}
+          {peer?.email && <Meta as="div" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{peer.email}</Meta>}
         </div>
       </header>
       <div
@@ -334,13 +335,13 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
       >
         {hasMore && (
           <div style={{ textAlign: "center", marginBottom: 4 }}>
-            <button className="btn-sm" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? "載入中…" : "載入更早的訊息"}</button>
+            <Button size="sm" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? "載入中…" : "載入更早的訊息"}</Button>
           </div>
         )}
         {history.isLoading ? (
           <div className="skeleton" style={{ height: 160, borderRadius: 8 }} role="status" aria-label="訊息載入中" />
         ) : items.length === 0 ? (
-          <p className="hint" style={{ textAlign: "center", marginTop: 24 }}>還沒有訊息——打個招呼吧 🙏</p>
+          <Hint layer="always" style={{ textAlign: "center", marginTop: 24 }}>還沒有訊息——打個招呼吧 🙏</Hint>
         ) : (
           items.map((m) => {
             const day = dayKey(m.createdAt);
@@ -439,17 +440,17 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
                 {mentionables.isError ? (
                   <span className="error" style={{ padding: "8px 12px", display: "block" }}>
                     載入失敗：{mentionables.error.message}
-                    <button type="button" className="btn-sm" style={{ marginLeft: 6 }} onClick={() => mentionables.refetch()}>重試</button>
+                    <Button size="sm" style={{ marginLeft: 6 }} onClick={() => mentionables.refetch()}>重試</Button>
                   </span>
                 ) : mentionables.isLoading ? (
-                  <span className="hint" style={{ padding: "8px 12px" }}>載入中…</span>
+                  <Meta style={{ padding: "8px 12px" }}>載入中…</Meta>
                 ) : refItems.length === 0 ? (
-                  <span className="hint" style={{ padding: "8px 12px", display: "block" }}>
+                  <Hint as="span" layer="always" style={{ padding: "8px 12px", display: "block" }}>
                     沒有可標注的{REF_LABEL[refTab]}。
                     {refTab === "project" && "（僅顯示你所在組的未封存專案）"}
                     {refTab === "database" && "（僅顯示你看得到的資料表）"}
                     {(refTab === "schedule" || refTab === "note") && "（請先在筆記排程頁新增）"}
-                  </span>
+                  </Hint>
                 ) : (
                   refItems.slice(0, 30).map((it) => (
                     <button key={it.id} type="button" role="option" aria-selected="false"

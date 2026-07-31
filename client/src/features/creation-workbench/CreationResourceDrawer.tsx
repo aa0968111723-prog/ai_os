@@ -18,6 +18,7 @@ import {
   requestWorkbenchMode,
   type WorkbenchRevealDetail,
 } from "./workbenchNav";
+import { Button, Hint, Meta } from "../../components/ui";
 
 export type ResourceDrawerTab = "prompts" | "generations" | "trail" | "templates";
 
@@ -271,16 +272,16 @@ export function CreationResourceDrawer({
           </h3>
           <span className="spacer" />
           {(running > 0 || waiting > 0 || awaiting > 0) && (
-            <span className="hint" style={{ fontSize: "var(--fs-12)" }}>
+            <Meta style={{ fontSize: "var(--fs-12)" }}>
               {running > 0 ? `執行中 ${running}` : ""}
               {waiting > 0 ? ` 等待 ${waiting}` : ""}
               {awaiting > 0 ? ` 待核 ${awaiting}` : ""}
-            </span>
+            </Meta>
           )}
         </div>
-        <p className="hint" style={{ margin: "0 0 8px" }}>
+        <Hint style={{ margin: "0 0 8px" }}>
           提示詞庫、生成紀錄與執行軌跡收在抽屜裡——手機不必再捲過好幾張長卡。
-        </p>
+        </Hint>
         <div
           style={{ display: "flex", flexWrap: "wrap", gap: 8 }}
           role="group"
@@ -302,9 +303,9 @@ export function CreationResourceDrawer({
         </div>
         {/* Success feedback lives on the entry row so it remains visible after close. */}
         {notice ? (
-          <p className="hint" role="status" aria-live="polite" style={{ margin: "8px 0 0" }}>
+          <Meta as="p" role="status" aria-live="polite" style={{ margin: "8px 0 0" }}>
             {notice}
-          </p>
+          </Meta>
         ) : null}
         {/* Hidden anchors so revealWorkbenchAnchor / scroll still find them */}
         <span id="sec-generations" hidden aria-hidden="true" />
@@ -341,9 +342,9 @@ export function CreationResourceDrawer({
             >
               <h2 style={{ margin: 0, fontSize: "var(--fs-16)" }}>資源與結果</h2>
               <span className="spacer" />
-              <button type="button" className="btn-ghost btn-sm" aria-label="關閉資源抽屜" onClick={close}>
+              <Button variant="ghost" size="sm" aria-label="關閉資源抽屜" onClick={close}>
                 <Icon name="X" size={14} /> 關閉
-              </button>
+              </Button>
             </header>
 
             <div
@@ -430,10 +431,10 @@ export function CreationResourceDrawer({
               >
                 {tab === "trail" && (
                   <div data-fb="執行軌跡">
-                    <p className="hint" style={{ marginTop: 0 }}>
+                    <Hint style={{ marginTop: 0 }}>
                       最近的多步開拍摘要。完整步驟、過目與停止請到「多步開拍」模式。
-                    </p>
-                    {runs.isLoading && <p className="hint">載入執行軌跡…</p>}
+                    </Hint>
+                    {runs.isLoading && <Meta as="p">載入執行軌跡…</Meta>}
                     {!runs.isLoading && runList.length === 0 && (
                       <div className="empty-state" style={{ marginTop: 8 }}>
                         <h3>還沒有執行軌跡——</h3>
@@ -456,7 +457,7 @@ export function CreationResourceDrawer({
                                   {title.slice(0, 100)}
                                   {title.length > 100 ? "…" : ""}
                                 </div>
-                                <div className="hint mono" style={{ fontSize: "var(--fs-11)", marginTop: 2 }}>
+                                <Meta as="div" className="mono" style={{ fontSize: "var(--fs-11)", marginTop: 2 }}>
                                   <span
                                     className={`pill ${
                                       r.status === "running"
@@ -470,20 +471,20 @@ export function CreationResourceDrawer({
                                   >
                                     {status}
                                   </span>
-                                </div>
+                                </Meta>
                               </div>
-                              <button type="button" className="btn-sm" onClick={goToPlanMode}>
+                              <Button size="sm" onClick={goToPlanMode}>
                                 開啟計畫
-                              </button>
+                              </Button>
                             </li>
                           );
                         })}
                       </ul>
                     )}
                     <div style={{ marginTop: 12 }}>
-                      <button type="button" className="btn-ghost" onClick={goToPlanMode}>
+                      <Button variant="ghost" onClick={goToPlanMode}>
                         <Icon name="Film" size={13} /> 前往多步開拍模式
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}

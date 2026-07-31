@@ -4,6 +4,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
+import { Button, Hint, Meta } from "./ui";
 
 /**
  * 角色定裝卡（提案核心「角色一致性」）：
@@ -51,7 +52,7 @@ export function CharacterCards({
   return (
     <section className="card" data-fb="角色定裝卡">
       <h2>角色定裝卡（跨鏡一致）</h2>
-      <p className="hint">設定角色外觀一次鎖定；生成時勾選角色，AI 自動帶入外觀，跨鏡頭不走樣。可上傳定裝參考圖，或從素材庫綁定。</p>
+      <Hint>設定角色外觀一次鎖定；生成時勾選角色，AI 自動帶入外觀，跨鏡頭不走樣。可上傳定裝參考圖，或從素材庫綁定。</Hint>
 
       {list.isLoading ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
@@ -61,9 +62,9 @@ export function CharacterCards({
       ) : list.isError ? (
         <p className="error" role="alert" style={{ marginTop: 8 }}>
           角色清單暫時載入不了（不是資料不見了）——
-          <button type="button" className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => list.refetch()}>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => list.refetch()}>
             再試一次
-          </button>
+          </Button>
         </p>
       ) : list.data && list.data.length > 0 ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
@@ -90,8 +91,8 @@ export function CharacterCards({
                     fallbackStyle={{ marginTop: 6 }}
                   />
                 )}
-                <div className="hint" style={{ fontSize: "var(--fs-12)", marginTop: "var(--sp-4)" }}><Icon name="User" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{c.appearance}</div>
-                {c.notes && <div className="hint" style={{ fontSize: "var(--fs-11)", marginTop: 3 }}><Icon name="FileText" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{c.notes}</div>}
+                <Meta as="div" style={{ fontSize: "var(--fs-12)", marginTop: "var(--sp-4)" }}><Icon name="User" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{c.appearance}</Meta>
+                {c.notes && <Meta as="div" style={{ fontSize: "var(--fs-11)", marginTop: 3 }}><Icon name="FileText" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{c.notes}</Meta>}
                 {refEditId === c.id ? (
                   <div style={{ marginTop: 6 }}>
                     <ReferenceImagePicker
@@ -100,7 +101,7 @@ export function CharacterCards({
                       onChange={(next) => update.mutate({ id: c.id, referenceAssetId: next?.id ?? null })}
                       disabled={update.isPending}
                     />
-                    <button className="btn-ghost" style={{ marginTop: 4, fontSize: "var(--fs-11)" }} onClick={() => setRefEditId(null)}>收起</button>
+                    <Button variant="ghost" style={{ marginTop: 4, fontSize: "var(--fs-11)" }} onClick={() => setRefEditId(null)}>收起</Button>
                   </div>
                 ) : (
                   <button

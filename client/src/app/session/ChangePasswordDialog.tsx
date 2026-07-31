@@ -3,6 +3,7 @@ import { trpc } from "../../api";
 import { PasswordInput } from "../../components/PasswordInput";
 import { Icon } from "../../components/Icon";
 import { useFocusTrap } from "../../components/interactions";
+import { Hint, Meta } from "../../components/ui";
 
 /**
  * 自助改密碼（拿到管理員的臨時密碼後，從這裡換成自己的）：成功後其他裝置全部登出。
@@ -34,20 +35,20 @@ export function ChangePasswordDialog({ onClose, forced = false }: { onClose: () 
     >
       <div ref={dialogRef} className="card modal-card" role="dialog" aria-modal="true" aria-label="改密碼">
         <h2 style={{ marginTop: 0 }}>改密碼</h2>
-        {forced && <p className="hint">管理員重設了你的密碼——請先設定一組自己的新密碼再繼續使用</p>}
+        {forced && <Hint layer="always">管理員重設了你的密碼——請先設定一組自己的新密碼再繼續使用</Hint>}
         <form onSubmit={(e) => { e.preventDefault(); if (canSubmit) change.mutate({ oldPassword: oldPw, newPassword: newPw }); }}>
           <label htmlFor="chpw-old">原密碼（或管理員給的臨時密碼）</label>
           <PasswordInput id="chpw-old" value={oldPw} onChange={(e) => setOldPw(e.target.value)} autoComplete="current-password" autoFocus />
           <label htmlFor="chpw-new">新密碼（至少 8 碼）</label>
           <PasswordInput id="chpw-new" value={newPw} onChange={(e) => setNewPw(e.target.value)} autoComplete="new-password" />
-          {newPw.length > 0 && newPw.length < 8 && <p className="hint">還差 {8 - newPw.length} 個字</p>}
+          {newPw.length > 0 && newPw.length < 8 && <Hint layer="always">還差 {8 - newPw.length} 個字</Hint>}
           <div style={{ marginTop: "var(--sp-16)", display: "flex", gap: "var(--sp-8)" }}>
             <button className="primary" type="submit" disabled={!canSubmit}>{change.isPending ? "更新中…" : "更新密碼"}</button>
             {!forced && <button type="button" onClick={onClose}>取消</button>}
           </div>
         </form>
         {change.error && <p className="error" role="alert">{change.error.message}</p>}
-        {change.isSuccess && <p className="hint" style={{ color: "var(--success-ink)" }} role="status"><Icon name="Check" size={14} style={{ verticalAlign: "-2px" }} /> 已更新——其他裝置已登出，本裝置不受影響</p>}
+        {change.isSuccess && <Meta as="p" style={{ color: "var(--success-ink)" }} role="status"><Icon name="Check" size={14} style={{ verticalAlign: "-2px" }} /> 已更新——其他裝置已登出，本裝置不受影響</Meta>}
       </div>
     </div>
   );

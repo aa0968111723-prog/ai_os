@@ -3,21 +3,21 @@
   "note": "單向棘輪基準線。任何檔案的裸 class 用量不得超過此處數字；新檔案視為 0。遷移完一批後執行 `node scripts/check-ui-primitives.mjs --write-baseline` 收緊。",
   "generatedFrom": "scripts/check-ui-primitives.mjs",
   "observations": {
-    "stylesCssLines": 3681,
+    "stylesCssLines": 3692,
     "tsxFiles": 96,
-    "filesUsingPrimitives": 18
+    "filesUsingPrimitives": 49
   },
   "totals": {
-    "total": 619,
+    "total": 419,
     "perClass": {
       "empty-state": 21,
-      "hint": 205,
+      "hint": 47,
       "skeleton": 68,
-      "badge": 16,
-      "btn-ghost": 47,
-      "btn-sm": 78,
+      "badge": 13,
+      "btn-ghost": 33,
+      "btn-sm": 61,
       "card": 85,
-      "chip": 61,
+      "chip": 53,
       "pill": 27,
       "btn-tonal": 6,
       "btn": 5
@@ -32,7 +32,6 @@
       "hint": 2
     },
     "client/src/app/components/AccountMenu.tsx": {
-      "hint": 5,
       "skeleton": 1,
       "badge": 1
     },
@@ -47,8 +46,7 @@
       "badge": 2
     },
     "client/src/app/session/ChangePasswordDialog.tsx": {
-      "card": 1,
-      "hint": 3
+      "card": 1
     },
     "client/src/app/SessionGate.tsx": {
       "hint": 1,
@@ -64,20 +62,17 @@
       "pill": 6,
       "btn-ghost": 2,
       "btn-sm": 1,
-      "hint": 5,
       "chip": 1
     },
     "client/src/components/AppUpdateBanner.tsx": {
-      "hint": 1,
-      "btn-ghost": 1,
-      "btn-sm": 2
+      "btn-sm": 1
     },
     "client/src/components/AssetLibrary.tsx": {
       "card": 1,
-      "hint": 13,
       "skeleton": 1,
       "empty-state": 1,
-      "chip": 2
+      "chip": 2,
+      "hint": 1
     },
     "client/src/components/AssistantTrace.tsx": {
       "btn-ghost": 1,
@@ -85,10 +80,8 @@
     },
     "client/src/components/CharacterCards.tsx": {
       "card": 1,
-      "hint": 3,
       "skeleton": 2,
-      "btn-ghost": 3,
-      "btn-sm": 1,
+      "btn-ghost": 1,
       "empty-state": 1
     },
     "client/src/components/ChatEmptyState.tsx": {
@@ -96,15 +89,8 @@
       "empty-state": 1,
       "hint": 1
     },
-    "client/src/components/ExportJobButton.tsx": {
-      "btn-ghost": 2,
-      "btn-sm": 2,
-      "hint": 2
-    },
     "client/src/components/FirstRunGuide.tsx": {
-      "card": 1,
-      "badge": 1,
-      "hint": 3
+      "card": 1
     },
     "client/src/components/GenerationCopy.tsx": {
       "hint": 2
@@ -127,16 +113,12 @@
       "btn-ghost": 1
     },
     "client/src/components/interactions.tsx": {
-      "btn-sm": 2,
-      "btn-ghost": 1,
-      "hint": 3
+      "btn-sm": 1
     },
     "client/src/components/KnowledgeBase.tsx": {
       "card": 1,
-      "hint": 7,
       "skeleton": 1,
-      "empty-state": 1,
-      "chip": 2
+      "empty-state": 1
     },
     "client/src/components/MediaFallback.tsx": {
       "hint": 2
@@ -146,13 +128,10 @@
     },
     "client/src/components/MessagePanel.tsx": {
       "btn-sm": 3,
-      "hint": 1,
       "card": 1,
       "chip": 5
     },
     "client/src/components/ModelPicker.tsx": {
-      "hint": 3,
-      "btn-sm": 1,
       "chip": 1
     },
     "client/src/components/NotificationSettings.tsx": {
@@ -168,33 +147,25 @@
     "client/src/components/ProjectAssistant.tsx": {
       "btn-ghost": 2,
       "btn-sm": 5,
-      "hint": 2,
       "chip": 1,
       "card": 1
     },
     "client/src/components/ProjectDatabasesCard.tsx": {
       "card": 1,
-      "hint": 9,
-      "btn-sm": 7,
+      "btn-sm": 4,
       "empty-state": 1,
       "pill": 1
     },
     "client/src/components/ProjectMembersCard.tsx": {
       "card": 1,
-      "hint": 7,
       "skeleton": 2
     },
     "client/src/components/PromptLibrary.tsx": {
-      "hint": 4,
       "empty-state": 1,
-      "chip": 1,
       "card": 1
     },
     "client/src/components/RecycleBin.tsx": {
-      "hint": 6,
-      "btn-sm": 1,
       "card": 1,
-      "badge": 1,
       "skeleton": 3
     },
     "client/src/components/ReferenceImagePicker.tsx": {
@@ -202,7 +173,6 @@
     },
     "client/src/components/SceneList.tsx": {
       "pill": 2,
-      "hint": 1,
       "btn-tonal": 4,
       "btn-sm": 1,
       "skeleton": 4,
@@ -210,16 +180,11 @@
     },
     "client/src/components/ScenePresetCards.tsx": {
       "card": 1,
-      "hint": 4,
       "skeleton": 2,
-      "btn-ghost": 3,
-      "btn-sm": 1
+      "btn-ghost": 1
     },
     "client/src/components/VersionHistory.tsx": {
-      "btn-sm": 1,
-      "skeleton": 2,
-      "hint": 2,
-      "badge": 1
+      "skeleton": 2
     },
     "client/src/components/WorkflowCard.tsx": {
       "chip": 2,
@@ -240,9 +205,8 @@
       "hint": 1
     },
     "client/src/features/creation-workbench/CreationResourceDrawer.tsx": {
-      "hint": 6,
-      "btn-ghost": 5,
-      "btn-sm": 4,
+      "btn-ghost": 3,
+      "btn-sm": 2,
       "card": 1,
       "empty-state": 2,
       "pill": 1
@@ -254,12 +218,10 @@
       "card": 1,
       "pill": 3,
       "btn-ghost": 1,
-      "btn-sm": 1,
-      "hint": 3
+      "btn-sm": 1
     },
     "client/src/features/creation-workbench/modes/DirectGenerateMode.tsx": {
       "chip": 1,
-      "hint": 12,
       "card": 1,
       "btn-sm": 1
     },
@@ -276,9 +238,8 @@
     },
     "client/src/feedback/FeedbackWidget.tsx": {
       "card": 3,
-      "btn-ghost": 3,
-      "hint": 8,
-      "chip": 2
+      "chip": 2,
+      "btn-ghost": 1
     },
     "client/src/main.tsx": {
       "empty-state": 1
@@ -286,7 +247,6 @@
     "client/src/pages/AcceptInvitePage.tsx": {
       "card": 1,
       "skeleton": 3,
-      "hint": 4,
       "btn-ghost": 1
     },
     "client/src/pages/AdminPage.tsx": {
@@ -303,14 +263,12 @@
     "client/src/pages/ChatPage.tsx": {
       "card": 3,
       "skeleton": 2,
-      "hint": 6,
-      "btn-sm": 4,
+      "btn-sm": 2,
       "chip": 3
     },
     "client/src/pages/DatabasesPage.tsx": {
       "card": 3,
       "btn-sm": 10,
-      "hint": 1,
       "empty-state": 1,
       "btn-ghost": 1,
       "btn": 1,
@@ -319,27 +277,19 @@
     "client/src/pages/DesktopCompanionPage.tsx": {
       "card": 4,
       "empty-state": 1,
-      "hint": 3,
-      "chip": 1,
-      "btn-ghost": 1
+      "chip": 1
     },
     "client/src/pages/DownloadsPage.tsx": {
-      "btn-ghost": 1,
-      "btn-sm": 1,
       "skeleton": 2,
-      "card": 1,
-      "hint": 4
+      "card": 1
     },
     "client/src/pages/FeedbackPage.tsx": {
       "skeleton": 4,
       "card": 3,
-      "hint": 2,
       "chip": 1
     },
     "client/src/pages/HelpPage.tsx": {
-      "card": 5,
-      "hint": 9,
-      "chip": 1
+      "card": 5
     },
     "client/src/pages/IntegrationsPage.tsx": {
       "card": 4,
@@ -348,8 +298,7 @@
       "badge": 1
     },
     "client/src/pages/LandingPage.tsx": {
-      "btn": 3,
-      "chip": 1
+      "btn": 3
     },
     "client/src/pages/Launchpad.tsx": {
       "chip": 1
@@ -364,7 +313,6 @@
     },
     "client/src/pages/MembersPage.tsx": {
       "skeleton": 1,
-      "hint": 6,
       "card": 1,
       "btn-tonal": 1,
       "btn-sm": 1
@@ -373,7 +321,7 @@
       "pill": 4,
       "card": 7,
       "btn-ghost": 5,
-      "hint": 6,
+      "hint": 5,
       "chip": 6,
       "skeleton": 2,
       "empty-state": 1,
@@ -381,9 +329,7 @@
     },
     "client/src/pages/MyReportsPage.tsx": {
       "skeleton": 1,
-      "card": 2,
-      "hint": 7,
-      "chip": 3
+      "card": 2
     },
     "client/src/pages/PlannerPage.tsx": {
       "empty-state": 4,
@@ -396,12 +342,10 @@
     "client/src/pages/ProjectPage.tsx": {
       "card": 4,
       "chip": 6,
-      "hint": 2,
       "btn-sm": 3
     },
     "client/src/realtime.tsx": {
       "chip": 2,
-      "hint": 1,
       "btn-sm": 1
     }
   }

@@ -317,8 +317,8 @@ function SceneRow({
           ) : null}
         </div>
         {s.status === "needs_work" && rejectReason && (
-          <p
-            className="hint"
+          <Meta
+            as="p"
             role="status"
             style={{
               margin: "6px 0 0",
@@ -331,7 +331,7 @@ function SceneRow({
             }}
           >
             <b>退回理由：</b>{rejectReason}
-          </p>
+          </Meta>
         )}
 
         {/* 配音詞：每格皆可編輯（含空白格補詞），失焦即存 */}

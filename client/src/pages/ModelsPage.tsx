@@ -525,7 +525,7 @@ export function ModelsPage() {
               </div>
               <p style={{ margin: "6px 0 2px", fontSize: "var(--fs-14)" }}>{m.strengths}</p>
               <Meta as="p" style={{ margin: 0 }}>適合:{m.bestFor}{m.needs ? `|需要來源:${m.sourceHint ?? m.needs}` : ""}</Meta>
-              <p className="hint mono" style={{ margin: "4px 0 0", fontSize: 11, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <Meta as="p" className="mono" style={{ margin: "4px 0 0", fontSize: 11, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 {m.id}
                 <button
                   style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 12px", fontSize: "var(--fs-11)", fontFamily: "var(--sans)" }}
@@ -533,7 +533,7 @@ export function ModelsPage() {
                 >
                   {copiedId === m.id ? <><Icon name="Check" size={12} />已複製</> : "複製"}
                 </button>
-              </p>
+              </Meta>
             </section>
           ))}
           {catalogNeedsDisclosure && (
@@ -565,7 +565,8 @@ export function ModelsPage() {
       {(!debouncedQ || matchedWorkflows.length > 0) && (
         <>
           <h2 style={{ marginTop: 28 }}>製作範本(一鍵串鏈)</h2>
-          <Hint>在<Link href="/dashboard">今日工作台</Link>開啟專案後,於「製作範本」卡使用;每步各自扣點。</Hint>
+          {/* 「每步各自扣點」是實際代價：不知道範本逐步計費就可能誤啟動 → 不可收 */}
+        <Hint layer="always">在<Link href="/dashboard">今日工作台</Link>開啟專案後,於「製作範本」卡使用;每步各自扣點。</Hint>
           {workflows.isLoading && (
             <div className="stack">
               {Array.from({ length: 2 }).map((_, i) => (

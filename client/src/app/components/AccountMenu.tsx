@@ -6,7 +6,7 @@ import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
 import type { MeWithCapabilities } from "../../capabilities";
 import { accountMenuItems, filterNavItems } from "../navigation/navigationItems";
-import { useDensity } from "../../components/ui";
+import { Hint, Meta, useDensity } from "../../components/ui";
 import { writeUiDensity } from "../../lib/densityPreference";
 import { UI_DENSITY_DESCRIPTION, UI_DENSITY_LABEL } from "@shared/uiDensity";
 
@@ -69,7 +69,7 @@ function QuotaBar({
   return (
     <div style={{ marginTop: 6 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11 }}>
-        <span className="hint">{label}</span>
+        <Meta>{label}</Meta>
         <span className="mono" style={{ fontSize: 11 }}>
           {used.toLocaleString()}
           {limited ? ` / ${quota.toLocaleString()}` : "（不限）"}
@@ -113,7 +113,7 @@ function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; e
   if (!groupId) {
     return (
       <div className="account-menu__quota" role="presentation" style={{ padding: "8px 12px", fontSize: 12 }}>
-        <div className="hint">選好作用組別後可看個人點數用量</div>
+        <Hint as="div" layer="always">選好作用組別後可看個人點數用量</Hint>
       </div>
     );
   }
@@ -127,7 +127,7 @@ function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; e
   if (my.error || !my.data) {
     return (
       <div className="account-menu__quota" role="presentation" style={{ padding: "8px 12px", fontSize: 12 }}>
-        <span className="hint">點數暫時讀不到</span>
+        <Meta>點數暫時讀不到</Meta>
       </div>
     );
   }
@@ -156,18 +156,18 @@ function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; e
       <QuotaBar label="今日已用" used={d.dailyUsed} quota={d.dailyQuota} />
       <QuotaBar label="本週已用" used={d.weeklyUsed} quota={d.weeklyQuota} />
       {(d.memberBudgetRemaining != null || d.groupBudgetRemaining != null) && (
-        <div className="hint" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.4 }}>
+        <Meta as="div" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.4 }}>
           {d.memberBudgetRemaining != null && (
             <div>個人預算剩 {d.memberBudgetRemaining.toLocaleString()} 點</div>
           )}
           {d.groupBudgetRemaining != null && (
             <div>本組預算剩 {d.groupBudgetRemaining.toLocaleString()} 點</div>
           )}
-        </div>
+        </Meta>
       )}
-      <div className="hint" style={{ marginTop: 4, fontSize: 10 }}>
+      <Hint as="div" layer="always" style={{ marginTop: 4, fontSize: 10 }}>
         單位為站內點數（非 Fal USD）
-      </div>
+      </Hint>
     </div>
   );
 }

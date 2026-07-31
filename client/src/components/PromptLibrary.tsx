@@ -2,6 +2,7 @@ import { useState } from "react";
 import { trpc } from "../api";
 import { getModel } from "@shared/models";
 import { ConfirmButton } from "./interactions";
+import { Chip, Hint, Meta } from "./ui";
 
 /** 「再用」帶回生成台的完整設定（與伺服器 prompts 列的新欄位同形狀） */
 export interface PromptReuseSettings {
@@ -59,9 +60,9 @@ export function PromptLibrary({
   if (empty && !showEmpty) return null; // 沒有咒語就不佔版面（生成成功後自動出現）
   if (list.isLoading && showEmpty) {
     return (
-      <div className="hint" style={{ marginTop: embedded ? 0 : 8 }} aria-busy="true">
+      <Meta as="div" style={{ marginTop: embedded ? 0 : 8 }} aria-busy="true">
         載入提示詞庫…
-      </div>
+      </Meta>
     );
   }
   if (empty && showEmpty) {
@@ -79,13 +80,13 @@ export function PromptLibrary({
       {!embedded && (
         <>
           <h2>提示詞庫（打過的咒語，一鍵再用）</h2>
-          <p className="hint">成功生成的提示詞會自動存這裡（連同模型與角色/場景設定）；常用的排在前面。</p>
+          <Hint>成功生成的提示詞會自動存這裡（連同模型與角色/場景設定）；常用的排在前面。</Hint>
         </>
       )}
       {embedded && (
-        <p className="hint" style={{ marginTop: 0 }}>
+        <Hint layer="always" style={{ marginTop: 0 }}>
           成功生成的咒語會自動入庫。按「{reuseLabel}」只帶入、不送出、不扣點。
-        </p>
+        </Hint>
       )}
       <div style={{ marginTop: embedded ? 4 : 8 }}>
         {list.data.map((p) => {
@@ -96,12 +97,12 @@ export function PromptLibrary({
             <div key={p.id} className="gen-row" style={{ gridTemplateColumns: "1fr auto", alignItems: "center" }}>
               <div style={{ fontSize: "var(--fs-13)" }}>
                 {p.text}
-                {p.useCount > 1 && <span className="chip" style={{ marginLeft: 6 }}>用過 {p.useCount} 次</span>}
+                {p.useCount > 1 && <Chip style={{ marginLeft: 6 }}>用過 {p.useCount} 次</Chip>}
                 {/* 這則咒語最近一次的完整用法：再用時會一併還原（純文字舊列沒有，不顯示） */}
                 {(modelLabel || charN > 0 || sceneN > 0) && (
-                  <div className="hint mono" style={{ fontSize: "var(--fs-11)", marginTop: 2 }}>
+                  <Meta as="div" className="mono" style={{ fontSize: "var(--fs-11)", marginTop: 2 }}>
                     {[modelLabel, charN > 0 ? `角色 ${charN}` : "", sceneN > 0 ? `場景 ${sceneN}` : ""].filter(Boolean).join("・")}
-                  </div>
+                  </Meta>
                 )}
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>

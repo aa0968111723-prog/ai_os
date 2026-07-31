@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { PasswordInput } from "../components/PasswordInput";
 import { friendlyAuthError } from "./LoginPage";
+import { Hint, Meta } from "../components/ui";
 
 const TEAM_ROLE_LABEL: Record<string, string> = { admin: "團隊管理員", member: "成員" };
 const GROUP_ROLE_LABEL: Record<string, string> = { leader: "組長", member: "組員" };
@@ -45,9 +46,9 @@ export function AcceptInvitePage({ token }: { token: string }) {
       <>
         <h1 style={{ fontSize: "var(--fs-24)", marginTop: 0 }}>這個邀請不能用了</h1>
         <p className="error" role="alert">{preview.data?.reason ?? (preview.error ? friendlyAuthError(preview.error.message) : "邀請連結無效")}</p>
-        <p className="hint" style={{ marginTop: 12 }}>
+        <Hint layer="always" style={{ marginTop: 12 }}>
           已經有帳號了？<Link href="/login">前往登入</Link>
-        </p>
+        </Hint>
       </>,
     );
   }
@@ -70,7 +71,7 @@ export function AcceptInvitePage({ token }: { token: string }) {
   return wrap(
     <>
       {me.data && (
-        <p className="hint" style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", marginTop: 0, marginBottom: "var(--sp-12)" }}>
+        <Hint layer="always" style={{ display: "flex", alignItems: "center", gap: "var(--sp-8)", marginTop: 0, marginBottom: "var(--sp-12)" }}>
           <span style={{ flex: 1 }}>
             你目前已登入為 <b>{me.data.user.name}</b>——完成加入後這個瀏覽器會切換成新帳號
           </span>
@@ -83,7 +84,7 @@ export function AcceptInvitePage({ token }: { token: string }) {
           >
             {logout.isPending ? "登出中…" : "登出"}
           </button>
-        </p>
+        </Hint>
       )}
       <form
         onSubmit={(e) => {
@@ -97,13 +98,13 @@ export function AcceptInvitePage({ token }: { token: string }) {
           {d.groupName ? <>・<b>{d.groupName}</b></> : ""}
           {d.groupName ? `（${GROUP_ROLE_LABEL[d.groupRole ?? "member"]}）` : `（${TEAM_ROLE_LABEL[d.teamRole ?? "member"]}）`}
         </p>
-        <p className="hint" style={{ marginTop: -4 }}>邀請寄給：{d.email}</p>
+        <Meta as="p" style={{ marginTop: -4 }}>邀請寄給：{d.email}</Meta>
 
         <label htmlFor="inv-name">你的名字（夥伴會看到）</label>
         <input id="inv-name" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder="例：阿哲" autoFocus />
         <label htmlFor="inv-pw">密碼（至少 8 碼）</label>
         <PasswordInput id="inv-pw" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-        {password.length > 0 && password.length < 8 && <p className="hint">還差 {8 - password.length} 個字</p>}
+        {password.length > 0 && password.length < 8 && <Hint layer="always">還差 {8 - password.length} 個字</Hint>}
 
         <div style={{ marginTop: "var(--sp-16)" }}>
           <button className="primary" type="submit" style={{ width: "100%" }} disabled={!canSubmit}>

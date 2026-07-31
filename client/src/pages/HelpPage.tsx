@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 import { Link } from "wouter";
 import { Icon, type IconName } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
+import { Chip, Hint, Meta } from "../components/ui";
 
 /**
  * 怎麼用 / 常見問題：純靜態白話說明頁（無資料查詢、無新依賴）。
@@ -49,9 +50,9 @@ function Step({ n, icon, title, children }: { n: number; icon: IconName; title: 
         <Icon name={icon} size={15} />
         <b style={{ fontSize: "var(--fs-14)" }}>{title}</b>
       </div>
-      <div className="hint" style={{ fontSize: 13, lineHeight: 1.65 }}>
+      <Meta as="div" style={{ fontSize: 13, lineHeight: 1.65 }}>
         {children}
-      </div>
+      </Meta>
     </li>
   );
 }
@@ -78,11 +79,11 @@ function Spot({ icon, name, where, children }: { icon: IconName; name: string; w
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <b style={{ fontSize: "var(--fs-14)" }}>{name}</b>
-          <span className="chip" style={{ fontSize: 11 }}>{where}</span>
+          <Chip style={{ fontSize: 11 }}>{where}</Chip>
         </div>
-        <div className="hint" style={{ fontSize: 13, lineHeight: 1.7, marginTop: 2 }}>
+        <Meta as="div" style={{ fontSize: 13, lineHeight: 1.7, marginTop: 2 }}>
           {children}
-        </div>
+        </Meta>
       </div>
     </div>
   );
@@ -136,9 +137,9 @@ function Term({ word, children }: { word: string; children: ReactNode }) {
   return (
     <div style={{ marginBottom: 12 }}>
       <b>{word}</b>
-      <div className="hint" style={{ fontSize: "var(--fs-14)", lineHeight: 1.75, marginTop: 2 }}>
+      <Meta as="div" style={{ fontSize: "var(--fs-14)", lineHeight: 1.75, marginTop: 2 }}>
         {children}
-      </div>
+      </Meta>
     </div>
   );
 }
@@ -181,9 +182,9 @@ export function HelpPage() {
 
       {/* ── 六步路線圖：把主線流程視覺化，一眼看見全貌 ── */}
       <H2 id="help-route" icon="Clapperboard">整條路線（六步）</H2>
-      <p className="hint" style={{ marginTop: 0, fontSize: 13 }}>
+      <Meta as="p" style={{ marginTop: 0, fontSize: 13 }}>
         每個專案都走這條路。專案頁上方有「從這裡開始」清單，做到哪一步會自動打勾。
-      </p>
+      </Meta>
       <ol style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 0, margin: 0 }}>
         <Step n={1} icon="Palette" title="設世界觀">
           一句話故事、關鍵訊息、調性、畫風。填一次，之後每次生成自動帶入。
@@ -207,9 +208,9 @@ export function HelpPage() {
 
       {/* ── 全站地圖：這頁的重點——把每個看得到的地方講白話 ── */}
       <H2 id="help-map" icon="MousePointer2">這個網站有哪些地方？</H2>
-      <p className="hint" style={{ marginTop: 0, fontSize: 13 }}>
+      <Hint layer="always" style={{ marginTop: 0, fontSize: 13 }}>
         照你會遇到的順序列出來。<b>不是每個人都看得到全部</b>——管理相關的地方只有組長／管理員會出現。
-      </p>
+      </Hint>
       <div className="stack">
         <MapGroup title="最上面那一排（頂欄・隨時都在）" icon="MousePointer2">
           <Spot icon="Gem" name="剩餘點數" where="頂欄">
@@ -358,9 +359,9 @@ export function HelpPage() {
               打到限制時畫面會直接告訴你原因：「流量達上限」等一分鐘就好；「試用點數用完」請管理員到
               build.nvidia.com 檢查帳號、換新金鑰或申請加值——不影響圖片／影片生成與已有的成品。
             </li>
-            <li className="hint" style={{ fontSize: 12 }}>
+            <Meta as="li" style={{ fontSize: 12 }}>
               提醒：這些功能會把世界觀與知識庫節錄送到 NVIDIA 雲端運算——請避免在知識庫放不宜外流的個資。
-            </li>
+            </Meta>
           </ul>
         </Faq>
 
@@ -378,10 +379,10 @@ export function HelpPage() {
             <li><b>交付</b>——時間軸與字幕檔：時間軸.fcpxml（Final Cut Pro／DaVinci Resolve／剪映專業版）、
               Premiere時間軸.xml、字幕.srt、剪輯表.edl</li>
           </ul>
-          <p className="hint" style={{ margin: "0 0 8px", fontSize: 13 }}>
+          <Meta as="p" style={{ margin: "0 0 8px", fontSize: 13 }}>
             若專案有<b>鎖定素材</b>，會多一個 00_鎖定原素材（原封不動的原音／開示／配樂）；
             另附 README.txt 說明資料夾結構與各軟體匯入步驟。
-          </p>
+          </Meta>
           <p style={{ margin: "0 0 8px" }}>
             <b>最快的組片方式</b>：解壓後直接把「交付/」裡對應你剪輯軟體的時間軸檔匯入
             （Premiere 用 .xml、Final Cut Pro／Resolve／剪映專業版用 .fcpxml）——
@@ -438,9 +439,9 @@ export function HelpPage() {
 
       <p style={{ marginTop: 24 }}>
         <Link href="/dashboard">回今日工作台</Link>
-        <span className="hint" style={{ margin: "0 10px" }}>·</span>
+        <Meta style={{ margin: "0 10px" }}>·</Meta>
         <Link href="/models">看模型指南</Link>
-        <span className="hint" style={{ margin: "0 10px" }}>·</span>
+        <Meta style={{ margin: "0 10px" }}>·</Meta>
         <Link href="/mcp">接上外部 AI</Link>
       </p>
     </div>

@@ -8,6 +8,7 @@ import {
   projectDataAiHint,
   type ProjectDataTemplateId,
 } from "@shared/projectDataTemplates";
+import { Button, Hint, Meta } from "./ui";
 
 /**
  * 專案資料卡：
@@ -195,7 +196,7 @@ export function ProjectDatabasesCard({
               {aiHint.tone === "empty" && <Icon name="Info" size={14} style={{ marginRight: 6, verticalAlign: -2 }} />}
               {aiHint.label}
             </p>
-            <p className="hint" style={{ margin: "4px 0 0" }}>{aiHint.detail}</p>
+            <Meta as="p" style={{ margin: "4px 0 0" }}>{aiHint.detail}</Meta>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
               <span className="meta">文字知識 {knowledgeCount}</span>
               <span className="meta">素材 {assetCount}</span>
@@ -205,23 +206,23 @@ export function ProjectDatabasesCard({
           </div>
         )}
         {!showStatus && (
-          <p className="hint" style={{ margin: 0 }}>正在判斷專案資料狀態…</p>
+          <Meta as="p" style={{ margin: 0 }}>正在判斷專案資料狀態…</Meta>
         )}
 
         <div>
-          <p className="hint" style={{ margin: "0 0 8px" }}>
+          <Hint style={{ margin: "0 0 8px" }}>
             剪輯、社群、動畫、外出採集都能把依據放這裡。貼文字、上傳檔案，或一鍵建表；外部帳號連上後還要匯入或關聯專案，AI 才會使用。
-          </p>
+          </Hint>
           <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
-            <button type="button" className="btn-sm" onClick={() => scrollTo("sec-knowledge")}>
+            <Button size="sm" onClick={() => scrollTo("sec-knowledge")}>
               <Icon name="FileText" size={13} /> 貼上文字
-            </button>
-            <button type="button" className="btn-sm" onClick={() => scrollTo("sec-assets")}>
+            </Button>
+            <Button size="sm" onClick={() => scrollTo("sec-assets")}>
               <Icon name="Image" size={13} /> 上傳圖片、影片
-            </button>
-            <button type="button" className="btn-sm" onClick={() => scrollTo("sec-ai-hub")}>
+            </Button>
+            <Button size="sm" onClick={() => scrollTo("sec-ai-hub")}>
               <Icon name="Sparkles" size={13} /> 問 AI 助手
-            </button>
+            </Button>
             <Link href="/integrations" className="btn-sm" style={{ textDecoration: "none" }}>
               <Icon name="Package" size={13} /> Google／Notion／API
             </Link>
@@ -238,9 +239,9 @@ export function ProjectDatabasesCard({
         {canEdit && (
           <div data-testid="project-data-templates">
             <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>一鍵建立資料表</h3>
-            <p className="hint" style={{ margin: "0 0 8px" }}>
+            <Hint layer="always" style={{ margin: "0 0 8px" }}>
               範本只是起點，之後可自由改欄位與名稱。自動含「關聯專案」、已連本專案，預設 AI 可讀寫。
-            </p>
+            </Hint>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {PROJECT_DATA_TEMPLATES.map((t) => (
                 <button
@@ -256,13 +257,13 @@ export function ProjectDatabasesCard({
               ))}
             </div>
             {createBound.isPending && (
-              <p className="hint" style={{ margin: "8px 0 0" }}>正在建立資料表…</p>
+              <Meta as="p" style={{ margin: "8px 0 0" }}>正在建立資料表…</Meta>
             )}
             {createError && (
               <p className="error" style={{ margin: "8px 0 0" }}>{createError}</p>
             )}
             {lastCreated && !createBound.isPending && (
-              <p className="hint" style={{ margin: "8px 0 0" }}>
+              <Meta as="p" style={{ margin: "8px 0 0" }}>
                 已建立「{lastCreated.tableName}」。
                 <Link
                   href={`/databases?open=${encodeURIComponent(lastCreated.tableId)}&projectId=${encodeURIComponent(projectId)}&from=project`}
@@ -270,12 +271,12 @@ export function ProjectDatabasesCard({
                 >
                   開啟編輯 →
                 </Link>
-              </p>
+              </Meta>
             )}
           </div>
         )}
 
-        {linked.isLoading && <p className="hint" style={{ margin: 0 }}>正在讀取已關聯的資料…</p>}
+        {linked.isLoading && <Meta as="p" style={{ margin: 0 }}>正在讀取已關聯的資料…</Meta>}
         {linked.error && (
           <p className="error" style={{ margin: 0 }}>關聯資料載入失敗：{linked.error.message}</p>
         )}
@@ -385,18 +386,18 @@ export function ProjectDatabasesCard({
                         <span className="error" style={{ fontSize: 12 }}>{quickError[group.tableId]}</span>
                       )}
                       {quickOk[group.tableId] && !quickError[group.tableId] && (
-                        <span className="hint" style={{ fontSize: 12 }}>{quickOk[group.tableId]}</span>
+                        <Meta style={{ fontSize: 12 }}>{quickOk[group.tableId]}</Meta>
                       )}
                     </div>
                   )}
                 </div>
               );
             })}
-            <p className="hint" style={{ margin: 0 }}>
+            <Hint style={{ margin: 0 }}>
               要改欄位或大量編輯，請到
               <Link href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}>知識與資料</Link>
               。資料表需有「關聯專案」欄並指向本專案，才會列在這裡。
-            </p>
+            </Hint>
           </div>
         )}
       </div>

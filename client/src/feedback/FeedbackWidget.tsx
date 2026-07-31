@@ -5,6 +5,7 @@ import { FEEDBACK_CATEGORIES, FEEDBACK_PAGES, type FeedbackCategory } from "@sha
 import { captureWithHighlight, pickElement, type PickResult } from "./picker";
 import { Icon } from "../components/Icon";
 import { useRovingRadio } from "../components/interactions";
+import { Button, Hint, Meta } from "../components/ui";
 
 /** 目前路由對應到人看得懂的頁面名（與 FEEDBACK_PAGES 對齊；對不上就回 null） */
 function pageForPath(path: string): string | null {
@@ -99,13 +100,13 @@ export function FeedbackWidget() {
         >
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
             <strong style={{ fontSize: 15 }}>想回報什麼？</strong>
-            <button className="btn-ghost" onClick={close} aria-label="關閉">
+            <Button variant="ghost" onClick={close} aria-label="關閉">
               <Icon name="X" size={14} />
-            </button>
+            </Button>
           </div>
-          <p className="hint" style={{ margin: "6px 0 12px" }}>
+          <Hint style={{ margin: "6px 0 12px" }}>
             指出畫面上某個地方，或只針對這一頁說幾句。
-          </p>
+          </Hint>
           <button
             className="primary"
             style={{ width: "100%", marginBottom: 8 }}
@@ -284,7 +285,7 @@ function ReportForm({
         style={{ width: 300, marginBottom: 12, padding: 20, textAlign: "center" }}
       >
         <strong style={{ fontSize: 15 }}>收到了，感恩</strong>
-        <p className="hint" style={{ margin: "6px 0 0" }}>你說的會直接影響下一版怎麼改。</p>
+        <Hint style={{ margin: "6px 0 0" }}>你說的會直接影響下一版怎麼改。</Hint>
         <Link href="/my-reports" onClick={onClose} style={{ display: "inline-block", marginTop: 10, fontSize: 13 }}>
           查看我的回報
         </Link>
@@ -305,18 +306,18 @@ function ReportForm({
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
         <strong style={{ fontSize: 15 }}>填寫回饋</strong>
-        <button className="btn-ghost" onClick={onClose} aria-label="關閉">
+        <Button variant="ghost" onClick={onClose} aria-label="關閉">
           <Icon name="X" size={14} />
-        </button>
+        </Button>
       </div>
 
       {target && (
-        <p className="hint" style={{ margin: "8px 0 0" }}>
+        <Meta as="p" style={{ margin: "8px 0 0" }}>
           標定：<strong style={{ color: "var(--primary-ink)" }}>{target.targetLabel}</strong>{" "}
           <span role="button" tabIndex={0} onClick={onRepick} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRepick(); } }} style={{ color: "var(--primary-ink)", cursor: "pointer", textDecoration: "underline" }}>
             重選
           </span>
-        </p>
+        </Meta>
       )}
 
       <label style={{ margin: "12px 0 4px" }}>① 這是什麼樣的回饋？</label>
@@ -340,7 +341,7 @@ function ReportForm({
         })}
       </div>
       {categoryHint && (
-        <p className="hint" style={{ margin: "6px 0 0" }}>{categoryHint}</p>
+        <Hint style={{ margin: "6px 0 0" }}>{categoryHint}</Hint>
       )}
 
       <label style={{ margin: "12px 0 4px" }}>涉及哪些頁面？（可複選）</label>
@@ -375,7 +376,7 @@ function ReportForm({
         autoFocus
       />
 
-      <label htmlFor="fb-expected" style={{ margin: "12px 0 4px" }}>③ 希望怎麼改？<span className="hint">（選填）</span></label>
+      <label htmlFor="fb-expected" style={{ margin: "12px 0 4px" }}>③ 希望怎麼改？<Meta>（選填）</Meta></label>
       <textarea
         id="fb-expected"
         value={expected}
@@ -398,7 +399,7 @@ function ReportForm({
         {!noShot && (
           <div style={{ marginTop: 8 }}>
             {capturing ? (
-              <p className="hint" style={{ margin: 0 }}>正在擷取畫面…</p>
+              <Meta as="p" style={{ margin: 0 }}>正在擷取畫面…</Meta>
             ) : shotUrl ? (
               <img
                 src={shotUrl}
@@ -407,7 +408,7 @@ function ReportForm({
               />
             ) : (
               <div>
-                <p className="hint" style={{ margin: 0 }}>這次沒能擷取到畫面，送出文字仍會收到。</p>
+                <Meta as="p" style={{ margin: 0 }}>這次沒能擷取到畫面，送出文字仍會收到。</Meta>
                 <button
                   type="button"
                   className="btn-ghost"
@@ -429,7 +430,7 @@ function ReportForm({
         <button className="primary" disabled={!canSubmit} onClick={doSubmit}>
           {submitting ? "送出中…" : "送出"}
         </button>
-        <span className="hint">{problem.trim().length === 0 ? "第 ② 題至少寫一句" : ""}</span>
+        <Hint as="span" layer="always">{problem.trim().length === 0 ? "第 ② 題至少寫一句" : ""}</Hint>
       </div>
       {submit.error && (
         <p className="error" role="alert">

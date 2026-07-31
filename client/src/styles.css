@@ -29,7 +29,13 @@
   /* ── 文字（--soft 僅裝飾，永不承載正文；全部校至 WCAG AA） ── */
   --fg: #2b2620;
   --fg-secondary: #6f6355;   /* meta/hint/lead/label，於卡面 ~4.6:1 過 AA */
-  --muted-fg: #7a6e5e;       /* placeholder/次級 label，~4.6:1 */
+  /* disabled 主按鈕的文字色。舊值 #7a6e5e 的註解宣稱「placeholder/次級 label，~4.6:1」，
+   * 但那 4.6 是對照卡面 --card 算的，而它實際只用在 background: var(--muted) 的兩處
+   * disabled 按鈕上——在那個底色只有 4.12:1，未達 AA（部署站巡覽的 color-contrast 失敗就是它）。
+   * placeholder 也不是它，是 --fg-secondary。
+   * 改為在 --muted 上剛好過 4.5 的最淺值：4.57:1，且相對亮度仍高於 --fg-secondary，
+   * 明度階梯（fg > fg-secondary > muted-fg > soft）維持不變。 */
+  --muted-fg: #736758;
   --soft: #9a8c78;           /* 裝飾線/hover 邊色 only，~3:1 不做文字 */
 
   /* ── 表面階梯：明度單調遞增＋彩度往白收斂（解「單色米黃疲勞」核心） ── */
@@ -196,6 +202,11 @@ body {
   font-weight: 600; font-size: var(--fs-16); letter-spacing: -0.01em;
   color: inherit; text-decoration: none; flex: none;
   border-radius: 8px;
+  /* 首頁 logo 連結是可點目標。responsive 的 BrandLogo 在手機收成小標記時，
+   * 實測只有 26px 寬（部署站巡覽於 360/390 回報未達 44px）——高度本來就夠，
+   * 補寬度下限即可，不影響桌面（那裡 logo 本來就比 44 寬）。 */
+  min-width: var(--touch-min);
+  justify-content: center;
   transition: opacity var(--dur-fast), transform var(--dur-fast);
 }
 .brand:hover { opacity: 0.88; }

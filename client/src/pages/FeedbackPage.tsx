@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { useRovingRadio } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
+import { Hint } from "../components/ui";
 
 const ITEMS: Array<{ key: string; label: string }> = [
   { key: "context", label: "AI 懂不懂我們的素材（不用重複解釋）" },
@@ -105,7 +106,7 @@ function FeedbackForm({
         badge={`已回答 ${rated}/${ITEMS.length}`}
         description={<>依直覺選 1 到 5 分；沒用到的功能可以留空，再點同一分數即可取消。</>}
       />
-      {hasExisting && <p className="hint">你之前填過——直接修改後重新送出即可。</p>}
+      {hasExisting && <Hint layer="always">你之前填過——直接修改後重新送出即可。</Hint>}
       <div className="card">
         {ITEMS.map((item) => (
           <RatingRow key={item.key} item={item} value={scores[item.key]} onSet={setScore} />
@@ -129,7 +130,7 @@ function FeedbackForm({
           >
             {submit.isPending ? "送出中…" : hasExisting ? "更新回饋" : "送出回饋"}
           </button>
-          <span className="hint">{rated === 0 ? "至少評 1 題就能送出" : "沒用到的功能可以留空"}</span>
+          <Hint as="span" layer="always">{rated === 0 ? "至少評 1 題就能送出" : "沒用到的功能可以留空"}</Hint>
         </div>
         {submit.error && <p className="error" role="alert">送出失敗，請稍後再試</p>}
       </div>

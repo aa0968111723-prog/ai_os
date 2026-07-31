@@ -229,7 +229,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
             ),
           )}
           {!!databaseQuery.trim() && tables.length > 0 && Object.values(visibleByScope).every((rows) => rows.length === 0) && (
-            <p className="hint database-search-empty">找不到「{databaseQuery.trim()}」</p>
+            <Meta as="p" className="database-search-empty">找不到「{databaseQuery.trim()}」</Meta>
           )}
           {list.data && tables.length === 0 && !creating && (
             <div className="empty-state" style={{ marginTop: 16 }}>
