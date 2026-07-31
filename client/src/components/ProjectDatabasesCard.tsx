@@ -8,7 +8,7 @@ import {
   projectDataAiHint,
   type ProjectDataTemplateId,
 } from "@shared/projectDataTemplates";
-import { Button, Card, EmptyState, Hint, Meta } from "./ui";
+import { Button, Card, EmptyState, Hint, Meta, Pill } from "./ui";
 /**
  * 專案資料卡：
  * - 一眼看出 AI 能否引用本專案依據（知識／素材／已關聯表；尊重 agentAccess）。
@@ -299,9 +299,9 @@ export function ProjectDatabasesCard({
                       {group.tableName}
                     </Link>
                     <span>（{group.rows.length} 列）</span>
-                    <span className="pill" title="此表對 AI 的存取設定" style={{ fontWeight: 500, fontSize: 12 }}>
+                    <Pill title="此表對 AI 的存取設定" style={{ fontWeight: 500, fontSize: 12 }}>
                       {agentAccessLabel(access)}
-                    </span>
+                    </Pill>
                   </p>
                   <div style={{ overflowX: "auto" }}>
                     <table className="data-grid" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>

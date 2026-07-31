@@ -327,8 +327,8 @@ function ReportForm({
               onClick={() => setCategory(c.value)}
               role="radio"
               aria-checked={on}
-              // 選取態由 role="radio" 的 aria-checked 表達；Chip 預設補的 aria-pressed 只在
-              // role="button" 合法，留著會變成互相打架的兩組狀態，所以這裡明確關掉。
+              // 選取態由 role="radio" 的 aria-checked 表達；aria-pressed 只在 role="button"
+              // 合法，Chip 見到自訂 role 就不會再補（見 ui/Chip.tsx）。
               {...catRoving.itemProps(i)}
               title={c.hint}
             >

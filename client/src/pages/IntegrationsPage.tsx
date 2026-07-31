@@ -120,6 +120,10 @@ export function IntegrationsPage() {
         <h2><Icon name="CalendarPlus" size={18} /> Google 雲端硬碟</h2>
         <Hint style={{ marginTop: 4 }}>
           連結後，到「知識與資料」貼上你私人雲端裡的文件、試算表、簡報或檔案連結即可匯入，不必再把檔案設成公開。
+        </Hint>
+        {/* 授權範圍是「按下連結鍵之前必須看到」的資訊——這句被精簡模式收進「？」，
+            等於讓人在不知道我們拿到什麼權限的情況下把雲端帳號交出去，故 always。 */}
+        <Hint layer="always" style={{ marginTop: 4 }}>
           授權範圍只有「讀取」，本系統不能修改或刪除你雲端裡的任何東西。
         </Hint>
         {!d ? (

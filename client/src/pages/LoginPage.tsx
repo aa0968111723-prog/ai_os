@@ -6,7 +6,7 @@ import { BrandReveal } from "../components/BrandReveal";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { PasswordInput } from "../components/PasswordInput";
 import { Icon } from "../components/Icon";
-import { Card } from "../components/ui";
+import { Card, Hint } from "../components/ui";
 
 /**
  * zod 驗證失敗時 tRPC 預設把整包 issues JSON 塞進 error.message（伺服器端 errorFormatter
@@ -121,7 +121,8 @@ export function LoginPage() {
         ) : login.error ? (
           <p className="error" role="alert">{friendlyAuthError(login.error.message)}</p>
         ) : null}
-        <p className="hint" style={{ marginTop: "var(--sp-12)" }}>帳號採邀請制——請向你的組長或管理員索取邀請連結。忘記密碼請找管理員重設。</p>
+        {/* 登入頁沒有註冊／忘記密碼入口，這句就是唯一的出路——收起來會讓進不去的人卡死，故 always */}
+        <Hint layer="always" style={{ marginTop: "var(--sp-12)" }}>帳號採邀請制——請向你的組長或管理員索取邀請連結。忘記密碼請找管理員重設。</Hint>
         <div style={{ marginTop: "var(--sp-16)", textAlign: "left" }}>
           <InstallAppBanner />
         </div>

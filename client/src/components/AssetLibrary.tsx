@@ -333,8 +333,8 @@ export function AssetLibrary({
                     onClick={() => setKindFilter(f.key)}
                     role="radio"
                     aria-checked={on}
-                    // 選取態由 role="radio" 的 aria-checked 表達；Chip 預設補的 aria-pressed
-                    // 只在 role="button" 合法，留著會變成兩組互相打架的狀態，故明確關掉。
+                    // 選取態由 role="radio" 的 aria-checked 表達；aria-pressed 只在
+                    // role="button" 合法，Chip 見到自訂 role 就不會再補（見 ui/Chip.tsx）。
                     {...kindRoving.itemProps(idx)}
                   >
                     {f.icon && <Icon name={f.icon} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />}

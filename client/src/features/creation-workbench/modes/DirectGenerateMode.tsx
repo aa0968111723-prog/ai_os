@@ -17,7 +17,7 @@ import {
   shouldShowApprovalThresholdNotice,
 } from "../generationGates";
 import { scrollToSelector } from "../workbenchNav";
-import { Button, Card, Hint, Meta } from "../../../components/ui";
+import { Button, Card, Chip, Hint, Meta } from "../../../components/ui";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
   nonce: number;
@@ -281,21 +281,16 @@ export function DirectGenerateMode({
           .join("・")
       : undefined;
 
+  // `on` 是「這項上下文已備妥」的視覺標示，不是切換態——點下去只是捲到該區塊。
+  // 所以走 className 給 .on，不傳 selected：否則會輸出 aria-pressed，把一次性動作
+  // 講成「未按下的切換鈕」，對讀屏使用者謊報元件性質。
   const summaryChip = (label: string, target: string, on = false) => (
-    <span
-      role="button"
-      tabIndex={0}
-      className={`chip pick ${on ? "on" : ""}`}
+    <Chip
+      className={on ? "on" : undefined}
       onClick={() => scrollToSelector(target)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          scrollToSelector(target);
-        }
-      }}
     >
       {label}
-    </span>
+    </Chip>
   );
 
   const form = (

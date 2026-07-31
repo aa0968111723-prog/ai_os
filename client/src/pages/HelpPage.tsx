@@ -15,8 +15,8 @@ import { Card, Chip, Hint, Meta } from "../components/ui";
 /** 六步路線圖的一格：大編號＋圖示＋標題＋白話一句。橫向排、窄螢幕自動換行。 */
 function Step({ n, icon, title, children }: { n: number; icon: IconName; title: string; children: ReactNode }) {
   return (
-    <li
-      className="card"
+    <Card
+      as="li"
       style={{
         flex: "1 1 150px",
         minWidth: 150,
@@ -53,7 +53,7 @@ function Step({ n, icon, title, children }: { n: number; icon: IconName; title: 
       <Meta as="div" style={{ fontSize: 13, lineHeight: 1.65 }}>
         {children}
       </Meta>
-    </li>
+    </Card>
   );
 }
 

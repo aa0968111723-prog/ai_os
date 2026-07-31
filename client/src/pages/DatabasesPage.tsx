@@ -691,9 +691,9 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
           <FieldsEditor fields={draftFields} onChange={setDraftFields} />
           <Hint layer="always" style={{ marginTop: 8 }}>移除欄位不會刪掉既有列裡的值，只是不再顯示；新增欄位對舊列顯示為空。</Hint>
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="primary btn-sm" disabled={updateTable.isPending} onClick={() => updateTable.mutate({ id: table.id, fields: draftFields.map((f) => ({ ...f, label: f.label.trim() })) })}>
+            <Button variant="primary" size="sm" disabled={updateTable.isPending} onClick={() => updateTable.mutate({ id: table.id, fields: draftFields.map((f) => ({ ...f, label: f.label.trim() })) })}>
               {updateTable.isPending ? "儲存中…" : "儲存欄位"}
-            </button>
+            </Button>
             {table.scope !== "personal" && (
               <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <input type="checkbox" checked={table.memberWritable} onChange={(e) => updateTable.mutate({ id: table.id, memberWritable: e.target.checked })} style={{ width: "auto" }} />
@@ -1251,11 +1251,16 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
       </div>
       <Hint style={{ marginTop: 4 }}>
         圖片（含 iPhone HEIC）、影片、音訊、PDF、Word/Excel/PowerPoint、文字/字幕/壓縮檔等常見格式都能放——
-        可一次選多個檔，或直接把檔案拖進這一區。文字/PDF/Word 自動抽成純文字；圖片可按「AI 分類」產生繁中描述＋自動歸類（1 點/張）——
-        團隊 AI 助手與 MCP 代理都讀得到（受上方「AI 存取」等級管控）。影片／音訊可手動分類、可預覽播放；
+        可一次選多個檔，或直接把檔案拖進這一區。影片／音訊可手動分類、可預覽播放；
         在欄位加「附件」型別，還能把檔案逐列掛進資料表。
-        Google／Notion 私有內容：到<Link href="/integrations">連接的資料來源</Link>連結你自己的 Google 帳戶或 Notion token，
+        Google／Notion 私有連結：到<Link href="/integrations">連接的資料來源</Link>連結你自己的 Google 帳戶或 Notion token，
         之後貼私有連結就能直接匯入（公開連結照舊可用）。
+      </Hint>
+      {/* 這句同時帶著「每張扣多少點」與「AI 讀得到什麼」——精簡模式的契約
+          （shared/uiDensity.ts）寫明扣點與權限資訊不隨熟練度消失，故 always。 */}
+      <Hint layer="always" style={{ marginTop: 4 }}>
+        文字/PDF/Word 自動抽成純文字；圖片可按「AI 分類」產生繁中描述＋自動歸類（1 點/張）——
+        團隊 AI 助手與 MCP 代理都讀得到（受上方「AI 存取」等級管控）。
       </Hint>
 
       <StatsStrip tableId={table.id} category={catFilter} onPickCategory={setCatFilter} />

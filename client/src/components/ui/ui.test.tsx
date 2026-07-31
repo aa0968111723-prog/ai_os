@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Badge, Button, Card, Chip, DensityProvider, EmptyState, Hint, Meta, Pill, Skeleton, cx } from ".";
+import { useRovingRadio } from "../interactions";
 
 /**
  * 這批測試的重點不是「元件會渲染」，而是 **class 輸出與遷移前逐字相同**。
@@ -171,6 +173,70 @@ describe("Chip — 展示 vs 可互動", () => {
     const el = container.firstElementChild!;
     expect(el.getAttribute("class")).toBe("chip pick on");
     expect(el).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it.each(["radio", "checkbox", "switch"])(
+    "呼叫端指定 role=%s 時不輸出 aria-pressed —— 該屬性只在 role=button 合法，並存等於兩組打架的狀態",
+    (role) => {
+      const { container } = render(
+        <Chip selected onClick={() => {}} role={role} aria-checked>
+          篩選
+        </Chip>,
+      );
+      const el = container.firstElementChild!;
+      expect(el).toHaveAttribute("role", role);
+      expect(el).toHaveAttribute("aria-checked", "true");
+      expect(el).not.toHaveAttribute("aria-pressed");
+      // 視覺選取態仍在（.on 不受 role 影響）
+      expect(el.getAttribute("class")).toBe("chip pick on");
+    },
+  );
+
+  it("呼叫端明確指定 role=button 時照常輸出 aria-pressed", () => {
+    const { container } = render(
+      <Chip selected={false} onClick={() => {}} role="button">
+        切換
+      </Chip>,
+    );
+    expect(container.firstElementChild).toHaveAttribute("aria-pressed", "false");
+  });
+
+  // 站內三處（AssetLibrary／FeedbackWidget／FeedbackPage）把 Chip 當 radiogroup 的選項，
+  // 方向鍵漫遊靠 useRovingRadio 的 ref 取得 DOM 節點——而 ref 是透過 Chip 的 `{...rest}`
+  // 才落到元素上。若哪天 Chip 改成不再轉發未知 props，focus() 會變成 no-op，
+  // 鍵盤使用者會完全動不了那組選項，但畫面看起來一切正常。
+  it("轉發 ref 與自訂 role，方向鍵漫遊才真的能動", async () => {
+    function Row() {
+      const [value, setValue] = useState<number | undefined>(undefined);
+      const roving = useRovingRadio(["1", "2", "3"], value ? String(value) : "", (v) => setValue(Number(v)));
+      return (
+        <div role="radiogroup" aria-label="評分" {...roving.groupProps}>
+          {[1, 2, 3].map((n, i) => (
+            <Chip
+              key={n}
+              selected={value === n}
+              onClick={() => setValue(n)}
+              role="radio"
+              aria-checked={value === n}
+              aria-label={`${n} 分`}
+              {...roving.itemProps(i)}
+            >
+              {n}
+            </Chip>
+          ))}
+        </div>
+      );
+    }
+    const user = userEvent.setup();
+    render(<Row />);
+    const first = screen.getByRole("radio", { name: "1 分" });
+    expect(first).not.toHaveAttribute("aria-pressed");
+    first.focus();
+    await user.keyboard("{ArrowRight}");
+    const second = screen.getByRole("radio", { name: "2 分" });
+    expect(document.activeElement).toBe(second);
+    expect(second).toHaveAttribute("aria-checked", "true");
+    expect(second).not.toHaveAttribute("aria-pressed");
   });
 
   it("selected 但無 onClick 時不假裝可互動", () => {

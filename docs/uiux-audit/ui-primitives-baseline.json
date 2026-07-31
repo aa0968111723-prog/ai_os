@@ -3,9 +3,9 @@
   "note": "單向棘輪基準線。任何檔案的裸 class 用量不得超過此處數字；新檔案視為 0。遷移完一批後執行 `node scripts/check-ui-primitives.mjs --write-baseline` 收緊。",
   "generatedFrom": "scripts/check-ui-primitives.mjs",
   "observations": {
-    "stylesCssLines": 3692,
+    "stylesCssLines": 3701,
     "tsxFiles": 96,
-    "filesUsingPrimitives": 67
+    "filesUsingPrimitives": 72
   },
   "structurallyExempt": {
     "badge": 7,
@@ -17,74 +17,29 @@
     "btn": 4
   },
   "totals": {
-    "total": 22,
+    "total": 8,
     "perClass": {
-      "empty-state": 3,
-      "card": 5,
-      "btn-ghost": 1,
-      "pill": 1,
-      "hint": 7,
-      "chip": 3,
+      "empty-state": 2,
+      "card": 3,
+      "hint": 1,
       "btn": 1,
-      "btn-sm": 1
+      "chip": 1
     }
   },
   "files": {
     "client/src/components/CharacterCards.tsx": {
       "empty-state": 1
     },
-    "client/src/components/ChatEmptyState.tsx": {
-      "empty-state": 1
-    },
     "client/src/components/MessagePanel.tsx": {
       "card": 1
-    },
-    "client/src/components/PasswordInput.tsx": {
-      "btn-ghost": 1
-    },
-    "client/src/components/ProjectDatabasesCard.tsx": {
-      "pill": 1
-    },
-    "client/src/components/ProjectMembersCard.tsx": {
-      "card": 1
-    },
-    "client/src/features/creation-workbench/CreationCostSummary.tsx": {
-      "hint": 1
-    },
-    "client/src/features/creation-workbench/CreationGoalInput.tsx": {
-      "hint": 1
-    },
-    "client/src/features/creation-workbench/CreationModeTabs.tsx": {
-      "hint": 1
-    },
-    "client/src/features/creation-workbench/CreationSkillPicker.tsx": {
-      "hint": 1
-    },
-    "client/src/features/creation-workbench/modes/DirectGenerateMode.tsx": {
-      "chip": 1
-    },
-    "client/src/features/creation-workbench/modes/TemplateMode.tsx": {
-      "hint": 1
     },
     "client/src/pages/AdminPage.tsx": {
       "hint": 1,
       "btn": 1,
       "empty-state": 1
     },
-    "client/src/pages/DatabasesPage.tsx": {
-      "btn-sm": 1
-    },
     "client/src/pages/DesktopCompanionPage.tsx": {
       "chip": 1
-    },
-    "client/src/pages/FeedbackPage.tsx": {
-      "chip": 1
-    },
-    "client/src/pages/HelpPage.tsx": {
-      "card": 1
-    },
-    "client/src/pages/LoginPage.tsx": {
-      "hint": 1
     },
     "client/src/pages/ModelsPage.tsx": {
       "card": 2

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { WorkflowCard } from "../../../components/WorkflowCard";
-import { Button } from "../../../components/ui";
+import { Button, Meta } from "../../../components/ui";
 
 /**
  * WB-04: embed real WorkflowCard (not scroll adapter).
@@ -82,8 +82,9 @@ export function TemplateMode({
 
   return (
     <div role="tabpanel" id={panelId} aria-labelledby={labelledBy} hidden={!active}>
+      {/* 目前目標是**內容**（使用者自己寫的字），收起來會讓人以為草稿掉了 → Meta */}
       {goal?.trim() ? (
-        <p className="hint" style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <Meta as="p" style={{ marginTop: 4, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
           <span>
             目前目標：
             <b>
@@ -96,7 +97,7 @@ export function TemplateMode({
             onClick={() => pushIdea(goal)}>
             帶入想法
           </Button>
-        </p>
+        </Meta>
       ) : null}
 
       {/* Deep-link / TocNav / chips target; modeForAnchor maps to template */}

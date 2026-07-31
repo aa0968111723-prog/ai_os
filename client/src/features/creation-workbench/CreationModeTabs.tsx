@@ -1,5 +1,6 @@
 import { useCallback, useId, useRef, type KeyboardEvent } from "react";
 import { Icon, type IconName } from "../../components/Icon";
+import { Meta } from "../../components/ui";
 import { CREATION_MODES, type CreationMode } from "./creationDraft";
 
 const MODE_ICONS: Record<CreationMode, IconName> = {
@@ -80,9 +81,9 @@ export function CreationModeTabs({
             <span className="creation-mode-tab__icon"><Icon name={MODE_ICONS[item.id]} size={17} /></span>
             <span className="creation-mode-tab__copy">
               <b>{item.label}</b>
-              <span className="hint">
-                {item.description}
-              </span>
+              {/* 分頁標籤的第二行文字＝tab 可及名稱的一部分（內容，非說明）。
+                  用 Hint 會在精簡模式塞一顆「？」按鈕進 <button role="tab"> 裡——巢狀按鈕，直接壞掉。 */}
+              <Meta>{item.description}</Meta>
             </span>
           </button>
         );

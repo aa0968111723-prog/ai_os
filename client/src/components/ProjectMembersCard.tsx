@@ -1,5 +1,5 @@
 import { trpc } from "../api";
-import { Hint, Meta, Skeleton } from "./ui";
+import { Card, Hint, Meta, Skeleton } from "./ui";
 /**
  * 專案權限卡（需求 2.3）：預設組內全員可編輯；組長可把個別成員設為「檢視者」（唯讀）。
  * 組長/管理員固定是編輯者（不可降）——裁決與管理不能被自己鎖住。
@@ -22,9 +22,8 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
   if (roles.error) return null; // 讀不到（極端情況）就整卡收起，不擋工作台
   const data = roles.data;
 
-  return (
-    // bare：外層已有收合容器（工作台的 details）自帶標題時，不再包 .card 也不重複大標
-    <div className={bare ? undefined : "card"} data-fb="專案權限卡">
+  const body = (
+    <>
       {!bare && <h2>專案權限</h2>}
       <Hint layer="always" style={{ marginTop: 4 }}>
         預設組內全員可編輯；把成員設為「檢視者」後，他在此專案只能瀏覽、留言與下載，不能生成或修改。
@@ -93,6 +92,14 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
         </ul>
       )}
       {setRole.error && <p className="error" role="alert">{setRole.error.message}</p>}
-    </div>
+    </>
+  );
+
+  // bare：外層已有收合容器（工作台的 details）自帶標題時，不再包 .card 也不重複大標。
+  // Card 一定會輸出 .card，所以「有沒有卡面」只能由這裡分岔，不能靠 className 條件式。
+  return bare ? (
+    <div data-fb="專案權限卡">{body}</div>
+  ) : (
+    <Card data-fb="專案權限卡">{body}</Card>
   );
 }

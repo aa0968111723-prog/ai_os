@@ -615,9 +615,11 @@ export function ProjectPage({ id }: { id: string }) {
   };
 
   /** 上下文摘要條的一顆 chip：顯示計數、點了捲到對應卡（手機一併展開） */
+  // `on` 是「那一區已有內容」的視覺標示，不是按下狀態——點下去只會捲動，不會切換任何東西。
+  // 所以走 className 給 .on，不傳 selected：後者會輸出 aria-pressed，把一次性動作
+  // 講成「未按下的切換鈕」，對讀屏使用者謊報元件性質。
   const summaryChip = (label: string, target: string, on = false) => (
-    // on 表示「那一區已有內容」而非按下狀態，故蓋掉 Chip 預設補的 aria-pressed
-    <Chip selected={on} aria-pressed={undefined} onClick={() => jumpToContext(target)}>
+    <Chip className={on ? "on" : undefined} onClick={() => jumpToContext(target)}>
       {label}
     </Chip>
   );

@@ -712,7 +712,10 @@ export function AgentCard({
               <details style={{ marginTop: 10 }}>
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>
                   可稽核執行軌跡（{runEvents.length}）
-                  <Hint as="span" style={{ marginLeft: 8 }}>顯示來源、動作、等待與結果，不顯示私密思考</Hint>
+                  {/* 這句是 <summary> 可及名稱的一部分（內容，非說明）。用 Hint 會在精簡模式
+                      塞一顆「？」按鈕進 <summary> 裡——按鈕點擊會冒泡去開合 details，
+                      說明永遠展不開，且 summary 本身就是互動元素，巢狀按鈕直接壞掉。 */}
+                  <Meta style={{ marginLeft: 8 }}>顯示來源、動作、等待與結果，不顯示私密思考</Meta>
                 </summary>
                 <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
                   {runEvents.map((event) => (

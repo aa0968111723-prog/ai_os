@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { useRovingRadio } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Card, Hint, Skeleton } from "../components/ui";
+import { Card, Chip, Hint, Skeleton } from "../components/ui";
 const ITEMS: Array<{ key: string; label: string }> = [
   { key: "context", label: "AI 懂不懂我們的素材（不用重複解釋）" },
   { key: "cost", label: "額度夠用、花費看得懂" },
@@ -159,20 +159,20 @@ function RatingRow({
         {[1, 2, 3, 4, 5].map((n, i) => {
           const on = value === n;
           return (
-            <span
+            <Chip
               key={n}
+              selected={on}
+              onClick={() => onSet(item.key, n)}
               role="radio"
               aria-checked={on}
               aria-label={`${n} 分`}
+              // 選取態由 role="radio" 的 aria-checked 表達；aria-pressed 只在 role="button"
+              // 合法，Chip 見到自訂 role 就不會再補（見 ui/Chip.tsx）。
+              // Enter／空白鍵啟動由 Chip 提供；方向鍵漫遊與 tabIndex 由 roving 覆蓋。
               {...roving.itemProps(i)}
-              className={`chip pick ${on ? "on" : ""}`}
-              onClick={() => onSet(item.key, n)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSet(item.key, n); }
-              }}
             >
               {n}
-            </span>
+            </Chip>
           );
         })}
       </div>
