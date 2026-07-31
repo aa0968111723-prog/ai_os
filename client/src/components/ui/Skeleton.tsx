@@ -25,7 +25,10 @@ export function Skeleton({
   className?: string;
   style?: CSSProperties;
 } & Omit<HTMLAttributes<HTMLDivElement>, "className" | "style">) {
-  const announces = "role" in rest || "aria-label" in rest;
+  // 看**值**而非看鍵：呼叫端寫 aria-label={undefined} 時鍵存在但值是空的，
+  // 若只用 `in` 判斷會把 aria-hidden 拿掉卻又沒有可讀名稱——兩頭落空。
+  const r = rest as { role?: string; "aria-label"?: string; "aria-labelledby"?: string };
+  const announces = !!(r.role || r["aria-label"] || r["aria-labelledby"]);
   return (
     <div
       {...(announces ? {} : { "aria-hidden": "true" as const })}

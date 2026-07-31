@@ -134,6 +134,22 @@ describe("Card — class 契約", () => {
 });
 
 describe("Chip — 展示 vs 可互動", () => {
+  it("清單裡的可點標籤要寫成 <li><Chip/></li>，listitem 才不會被蓋掉", () => {
+    // Chip 刻意不支援 as="li"：可互動時它會輸出 role="button"，直接掛在 <li>
+    // 上會覆蓋 listitem，外層 <ul> 就不再被讀屏當成清單（也不會念出項目數）。
+    // 正確做法是讓 <li> 保有清單語意、Chip 當它的子元素承接互動。
+    const { container } = render(
+      <ul>
+        <li>
+          <Chip onClick={() => {}}>剪輯</Chip>
+        </li>
+      </ul>,
+    );
+    const li = container.querySelector("li")!;
+    expect(li).not.toHaveAttribute("role");
+    expect(li.firstElementChild).toHaveAttribute("role", "button");
+  });
+
   it("沒有 onClick 就是純展示，不該有 role", () => {
     const { container } = render(<Chip>AI</Chip>);
     const el = container.firstElementChild!;
@@ -371,6 +387,19 @@ describe("Skeleton — 播報用骨架不能被 aria-hidden 蓋掉", () => {
   it("只給 aria-label 也視為要播報", () => {
     const { container } = render(<Skeleton height={48} aria-label="訊息載入中" />);
     expect(container.firstElementChild).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("aria-labelledby 也算播報", () => {
+    const { container } = render(<Skeleton height={48} aria-labelledby="loading-title" />);
+    expect(container.firstElementChild).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("aria-label={undefined} 仍要 aria-hidden —— 判斷看值不看鍵", () => {
+    // 條件渲染很容易寫成 aria-label={loading ? "載入中" : undefined}。
+    // 若用 `"aria-label" in rest` 判斷，這裡的鍵存在但值是空的，會落到
+    // 「aria-hidden 被拿掉、又沒有可讀名稱」的最壞情況：讀屏念出一個無名節點。
+    const { container } = render(<Skeleton height={48} aria-label={undefined} />);
+    expect(container.firstElementChild).toHaveAttribute("aria-hidden", "true");
   });
 });
 

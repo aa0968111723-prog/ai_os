@@ -31,7 +31,12 @@ export function Chip({
    */
   selected?: boolean;
   onClick?: () => void;
-  as?: "span" | "div" | "li";
+  /**
+   * 刻意不含 "li"：可互動的 Chip 會輸出 role="button"，掛在 <li> 上會蓋掉
+   * listitem 角色，外層 <ul> 就不再被讀屏當成清單（項目數也不會被念出來）。
+   * 要做「清單裡的可點標籤」請寫 <li><Chip onClick=… /></li>，語意才完整。
+   */
+  as?: "span" | "div";
   className?: string;
   children?: ReactNode;
 } & Omit<HTMLAttributes<HTMLElement>, "onClick" | "children" | "className">) {
