@@ -442,6 +442,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
             pendingLoading={pendingSummary.isLoading}
             pendingFailed={!!pendingSummary.error}
             starterProjects={all}
+            isLeader={isLeader}
+            myUserId={myUserId}
           />
         )}
       </section>
@@ -726,6 +728,8 @@ type DecisionItem = {
   estPoints?: number;
   /** 只有人類核准節點有：走既有 tasks.decideApproval */
   taskId?: string;
+  /** 代理計畫的發起人（用來比照專案頁判斷能不能就地核准） */
+  ownerId?: string | null;
 };
 
 const DECISION_META: Record<DecisionKind, { label: string; hint: string }> = {
@@ -746,6 +750,22 @@ const STARTER_PLAYBOOK_IDS = ["playbook.storyboard.v1", "playbook.creation.short
 
 /** 收件匣一次最多列幾件：再多就是清單而不是「先做這幾件」 */
 const DECISION_INBOX_MAX = 6;
+
+/**
+ * 能不能就地裁決這份代理計畫。
+ *
+ * 與 approveAgentCore 的守門同一條規則（組員只能裁自己發起的），也與專案頁
+ * AgentCard 的 canControl 一致。不比照的話，一般組員會看到別人計畫上的「核准」鈕，
+ * 按下去必定吃 FORBIDDEN——畫面對能力說謊。看得到但不能裁的，一律導去專案頁。
+ */
+export function canDecideRun(
+  item: { ownerId?: string | null },
+  isLeader: boolean,
+  myUserId?: string,
+): boolean {
+  if (isLeader) return true;
+  return Boolean(myUserId) && item.ownerId === myUserId;
+}
 
 /** 卡了幾天（未滿一天回 0；沒有時間戳回 null，呼叫端不顯示） */
 function daysStuck(since: Date | null, nowMs: number): number | null {
@@ -776,7 +796,7 @@ export function dueLabel(due: Date | string | null | undefined, nowMs: number = 
  * 而是「我現在該先處理哪一件」。同時間才用類別穩定排序，避免每次輪詢跳動。
  */
 export function buildDecisionInbox(
-  runs: Array<{ id: string; projectId: string; projectTitle: string; goal: string; status: string; estPoints: number; updatedAt: Date | string }>,
+  runs: Array<{ id: string; projectId: string; projectTitle: string; goal: string; status: string; estPoints: number; updatedAt: Date | string; userId?: string | null }>,
   pending: PendingDecisionSource[],
   tasks: PendingTaskSource[] = [],
 ): DecisionItem[] {
@@ -791,6 +811,7 @@ export function buildDecisionInbox(
     items.push({
       key: `agent-${r.id}`, kind: "agent", projectId: r.projectId, projectTitle: r.projectTitle,
       what: r.goal, since: toDate(r.updatedAt), runId: r.id, estPoints: r.estPoints,
+      ownerId: r.userId ?? null,
     });
   }
   for (const t of tasks) {
@@ -851,6 +872,8 @@ function TeamAssistantCard({
   pendingLoading,
   pendingFailed,
   starterProjects,
+  isLeader,
+  myUserId,
 }: {
   groupId: string;
   /** 組內「分鏡送審／生成待核」的 per-project 計數（由 Launchpad 已查到的 pendingSummary 傳入） */
@@ -859,6 +882,9 @@ function TeamAssistantCard({
   pendingFailed: boolean;
   /** 起手式的「在哪個專案發起」下拉；沿用這一頁已查到的專案清單，不另發查詢 */
   starterProjects: Array<{ id: string; title: string; status: string }>;
+  /** 與專案頁同一條規則：組長以上、或自己發起的計畫，才可就地核准 */
+  isLeader: boolean;
+  myUserId?: string;
 }) {
   const utils = trpc.useUtils();
   const [question, setQuestion] = useState("");
@@ -1062,7 +1088,7 @@ function TeamAssistantCard({
                         {d.kind === "agent" && d.estPoints != null ? `・估 ${d.estPoints} 點` : ""}
                       </Meta>
                       <span className="team-inbox__act">
-                        {d.kind === "agent" && d.runId ? (
+                        {d.kind === "agent" && d.runId && canDecideRun(d, isLeader, myUserId) ? (
                           <>
                             {/* 就地核准／放棄：走專案頁同一支 mutation。核准這一刻起才開始花點，
                                 所以一定要二次確認並把估點寫在確認訊息裡。 */}

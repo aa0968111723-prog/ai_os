@@ -10,7 +10,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type React from "react";
-import { buildDecisionInbox, dueLabel, Launchpad, mergeTeamHealth } from "./Launchpad";
+import { buildDecisionInbox, canDecideRun, dueLabel, Launchpad, mergeTeamHealth } from "./Launchpad";
 
 /** 泛用 trpc 樁：任何 `trpc.a.b.useQuery()` 都回 queryData 裡以路徑登記的值 */
 const h = vi.hoisted(() => {
@@ -635,5 +635,49 @@ describe("S5：組彙總 AI 的決策軌跡", () => {
     expect(await screen.findByText("簡短回答。")).toBeInTheDocument();
     expect(screen.queryByText(/^依據：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/沒能讀到阻塞/)).not.toBeInTheDocument();
+  });
+});
+
+describe("就地裁決的權限與專案頁同一條規則", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  it("canDecideRun：組長恆可；組員只能裁自己發起的", () => {
+    expect(canDecideRun({ ownerId: "someone-else" }, true, "u1")).toBe(true);
+    expect(canDecideRun({ ownerId: "u1" }, false, "u1")).toBe(true);
+    expect(canDecideRun({ ownerId: "someone-else" }, false, "u1")).toBe(false);
+    // 還沒拿到自己的 id 時保守：不給按（寧可多一次點擊，也不要按了才吃 FORBIDDEN）
+    expect(canDecideRun({ ownerId: "u1" }, false, undefined)).toBe(false);
+    expect(canDecideRun({ ownerId: null }, false, "u1")).toBe(false);
+  });
+
+  it("組員看到別人發起的計畫 → 給深連結而不是必定失敗的「核准」鈕", () => {
+    seed({
+      runs: [run({ userId: "someone-else" })],
+      summary: { awaitingApproval: 1, active: 1, health: "attention" },
+    });
+    h.queryData.set("auth.me", {
+      user: { id: "u1", name: "阿光" },
+      groups: [{ groupId: GROUP, role: "member" }],
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(inbox());
+    expect(box.queryByRole("button", { name: "核准" })).not.toBeInTheDocument();
+    expect(box.getByRole("link", { name: "前往處理 →" })).toBeInTheDocument();
+  });
+
+  it("組員看到自己發起的計畫 → 可就地核准", () => {
+    seed({
+      runs: [run({ userId: "u1" })],
+      summary: { awaitingApproval: 1, active: 1, health: "attention" },
+    });
+    h.queryData.set("auth.me", {
+      user: { id: "u1", name: "阿光" },
+      groups: [{ groupId: GROUP, role: "member" }],
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(inbox()).getByRole("button", { name: "核准" })).toBeInTheDocument();
   });
 });
