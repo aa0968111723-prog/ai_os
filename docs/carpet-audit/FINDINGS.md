@@ -247,3 +247,44 @@ Detail: `149 entries under server/services/`
 
 ---
 
+## 2026-07-31T06:14:44.127Z · `folder.server-routers` ✅ pass
+
+**區塊：server/routers 目錄** · kind=`folder-scan` · cycle=0 · cursor→27
+
+Detail: `46 entries under server/routers/`
+
+---
+
+## 2026-07-31T06:25:39.165Z · `folder.shared` ✅ pass
+
+**區塊：shared 契約** · kind=`folder-scan` · cycle=1 · cursor→0
+
+Detail: `39 entries under shared/`
+
+---
+
+## 2026-07-31T06:26:40.751Z · `e2e.auth` ❌ fail
+
+**E2E：登入／邀請／角色／多組隔離** · kind=`e2e-py` · cycle=1 · cursor→2
+
+Detail: `exit=1`
+
+---
+
+## 2026-07-31 · `e2e.auth` ❌ fail（地毯流程）
+
+**E2E：登入／邀請／角色／多組隔離** · kind=`e2e-py`
+
+### Findings
+
+#### [medium] CARPET-E2E-NO-DB-RESET: e2e-auth 非冪等，DB 有殘留帳號即崩潰
+
+- **File**: `scripts/e2e-auth.py:43-44`；`scripts/carpet-audit/run-next.mjs` e2e-py 分支
+- **Evidence**: `admin.invite` 對已存在 `azhe@example.com` 回 `inviteUrl: null, attached: true` → `token = inv["inviteUrl"].split` → `AttributeError`
+- **Consequence**: 第二輪起 carpet 跑 `e2e.auth` 必紅（非產品 ACL 回歸）；`scripts/run-e2e-local.sh` 每套件前會 reset DB，carpet 未做
+- **Fix**: run-next 在 e2e-py 前可選 `CARPET_E2E_RESET_DB=1` 走 drop schema + migrate + 重啟 seed；或 e2e-auth 對 attached 路徑改用既有密碼登入
+
+對照：同腳本在 clean DB 下曾 **43/43** 全過（WAVE-0）。
+
+---
+
