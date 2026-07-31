@@ -44,6 +44,13 @@ export const RATE_LIMIT_POLICIES = {
   driveList: { limit: 30, windowMs: 60_000 },
   notionList: { limit: 30, windowMs: 60_000 },
   adobeJob: { limit: 12, windowMs: 60_000 },
+  /** 陌生裝置驗證碼提交：碼是 6 位數，靠「10 分嘗試上限 5 次」＋本限流把線上猜中壓到可忽略 */
+  deviceVerify: { limit: 10, windowMs: 15 * 60_000 },
+  /**
+   * 觸發陌生裝置挑戰的次數上限。防「攻擊者已握有正確密碼，狂送登入把受害者信箱灌爆」
+   * ——郵件轟炸本身就是攻擊，而且會讓受害者對驗證信麻痺。
+   */
+  deviceChallenge: { limit: 5, windowMs: 60 * 60_000 },
 } as const satisfies Record<string, RateLimitPolicy | FailureRateLimitPolicy>;
 
 export const RATE_LIMIT_SCOPES = {
@@ -62,6 +69,8 @@ export const RATE_LIMIT_SCOPES = {
   driveList: "integrations:drive-list",
   notionList: "integrations:notion-list",
   adobeJob: "integrations:adobe-job",
+  deviceVerify: "auth:device-verify",
+  deviceChallenge: "auth:device-challenge",
 } as const;
 
 export interface RateLimitPolicy {

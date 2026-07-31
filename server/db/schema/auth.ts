@@ -3,6 +3,7 @@
  * 組織模型：開發者 → 團隊(team_admin) → 組別(leader/member)；角色是關係不是屬性。
  */
 import { pgTable, uuid, text, integer, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import type { DeviceDetails } from "../../../shared/deviceDetails";
 
 /* ── 認證與組織 ────────────────────────────────── */
 
@@ -18,6 +19,12 @@ export const users = pgTable("users", {
   /** 介面密度偏好（P1c 跨裝置同步）。null＝未設定過，前端用預設 guide；
    *  值域與 shared/uiDensity.ts 的 uiDensitySchema 一致，寫入端一律先過 zod。 */
   uiDensity: text("ui_density", { enum: ["guide", "concise"] }),
+  /**
+   * 裝置驗證豁免期限（管理員預先授信）：此時刻前，這個帳號在陌生裝置登入免信箱驗證碼。
+   * 用途是救援「同事人在國外／信箱壞掉收不到驗證碼」——否則 enforce 模式下會把人鎖在門外。
+   * 管理員按一次給 30 分鐘、用掉即清除，並寫審計。null＝無豁免（正常狀態）。
+   */
+  deviceGraceUntil: timestamp("device_grace_until"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -125,7 +132,16 @@ export const sessions = pgTable("sessions", {
   userAgent: text("user_agent"),
   /** sha256(ip + pepper)；永不存 raw IP */
   ipHash: text("ip_hash"),
-});
+  /**
+   * 簽發這筆 session 的已信任裝置（user_devices.id）。nullable：
+   * 上線前既有 session／裝置信任關閉（DEVICE_TRUST_MODE=off）時為 null，不會把既有登入者踢出去。
+   * 有值時「移除裝置」＝連帶刪除該裝置所有 session（見 services/deviceTrust.revokeDevice）。
+   */
+  deviceId: uuid("device_id"),
+}, (t) => ({
+  // revokeDevice 會 DELETE ... WHERE device_id = ?，沒索引就是整表掃描
+  deviceIdx: index("sessions_device_idx").on(t.deviceId),
+}));
 
 /**
  * 線上狀態（私訊「誰在線上」）：每位使用者一列的「最後活躍時刻」，由 tRPC 中介層在
@@ -259,4 +275,92 @@ export const emailStepUpChallenges = pgTable("email_step_up_challenges", {
 }, (t) => ({
   userIdx: index("email_step_up_challenges_user_idx").on(t.userId),
   expiresIdx: index("email_step_up_challenges_expires_idx").on(t.expiresAt),
+}));
+
+/**
+ * 已信任的「人＋裝置」配對（裝置綁定登入）。
+ *
+ * 設計要點見 docs/device-trust-design.md：
+ * - 網頁讀不到硬體序號（IMEI／主機板序號／MAC 是瀏覽器安全模型的硬限制），
+ *   故「這台裝置」＝伺服器發出的長效隨機憑證（cookie aidos_device），DB 只存 SHA-256。
+ * - fingerprintHash 只作異常訊號與裝置命名，**不作主識別**：瀏覽器版本／螢幕會漂移，
+ *   拿它當封鎖條件會製造大量假警報，反而訓練使用者無腦輸驗證碼。
+ * - 是 (user, device) 配對不是單純裝置：同一台辦公室電腦上 A 驗過不代表 B 免驗。
+ * - 信任「永久直到手動移除」（Bruce 2026-07-31 決定），故無 expiresAt 欄位；
+ *   撤銷走 revokedAt（軟刪，保留審計歸屬），且連帶刪除該裝置的所有 session。
+ */
+export const userDevices = pgTable("user_devices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  /**
+   * SHA-256（非原文）：比照 sessions.tokenHash，DB 外洩不可直接冒用裝置。
+   * 唯一性以具名 uniqueIndex 宣告（見下方 index 設定）而非欄位 .unique()：
+   * 後者會讓 drizzle 期待一個名為 *_token_hash_unique 的 CONSTRAINT，
+   * 而 CONSTRAINT 不支援 IF NOT EXISTS，migration 就無法保持冪等。
+   */
+  tokenHash: text("token_hash").notNull(),
+  /** 給人看的裝置名稱，如「iPhone · Safari」「Windows · Chrome」 */
+  label: text("label").notNull(),
+  /** 穩定被動特徵的雜湊（OS/瀏覽器家族、機型、架構、螢幕、時區；刻意不含任何版本號） */
+  fingerprintHash: text("fingerprint_hash").notNull(),
+  /**
+   * 裝置細節（廠牌／機型／OS 版本／CPU／記憶體／顯示卡），給人在「我的裝置」清單辨認用。
+   * ★與 fingerprintHash 分開：這裡的值會隨系統與驅動更新漂移，
+   *   若拿去比對會每個月要求全公司重驗一次。細節給人看、指紋給機器比。
+   * ★刻意與 fingerprintHash 分開：這裡的值會隨系統與驅動更新漂移，
+   *   若拿去比對會每個月要求全公司重驗一次。細節給人看、指紋給機器比。
+   * 每次以該裝置成功登入時更新（系統升級後清單顯示的是最新狀態）。
+   * nullable：裝置信任啟用前建立的列、或前端沒送特徵時為 null。
+   */
+  details: jsonb("details").$type<DeviceDetails>(),
+  /** 最近一次以此裝置成功登入 */
+  lastSeenAt: timestamp("last_seen_at"),
+  /** sha256(ip + pepper)：沿用 sessions 同一套，永不存 raw IP */
+  lastSeenIpHash: text("last_seen_ip_hash"),
+  /** 通過信箱驗證而受信任的時刻 */
+  trustedAt: timestamp("trusted_at").defaultNow().notNull(),
+  /** 撤銷時刻——非 null 即拒；不硬刪，保留審計歸屬 */
+  revokedAt: timestamp("revoked_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  tokenHashUq: uniqueIndex("user_devices_token_hash_uq").on(t.tokenHash),
+  userIdx: index("user_devices_user_idx").on(t.userId),
+}));
+
+/**
+ * 陌生裝置的信箱驗證挑戰。
+ *
+ * 刻意獨立於 email_step_up_challenges，不去擴充那張表：
+ * 1. 語意不同——step-up 是「已登入者要做敏感操作」，這裡是「還沒有 session 的登入關卡」。
+ *    兩者的降級策略必須相反：step-up 在信箱未設定時放行是合理的優雅降級，
+ *    登入若照做就等於「信箱一壞全世界免驗證進站」。
+ * 2. 這張挑戰要綁定發起裝置的指紋，step-up 沒有這個概念。
+ * 3. email_step_up_challenges 是已發布的 migration 建立的；在同一批 pending migration 裡
+ *    「先 CREATE TABLE 再 ALTER ADD COLUMN」會讓 legacy adoption bridge 的
+ *    整表 DDL 比對對不起來（bridge 產生的是含新欄位的完整 CREATE TABLE）。
+ */
+export const deviceChallenges = pgTable("device_challenges", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  /**
+   * 驗證碼的 SHA-256。不用 bcrypt：6 位數只有 100 萬種組合，bcrypt 擋不住有 DB 的離線暴力，
+   * 卻讓每次線上驗證多花 100ms。真正的防線是 10 分鐘過期＋最多 5 次嘗試＋限流，
+   * 線上猜中機率 5/1,000,000。雜湊的目的只是「DB 外洩者讀不到明碼」，SHA-256 足夠。
+   */
+  codeHash: text("code_hash").notNull(),
+  /** 綁定發起裝置：防「攻擊者在自己機器觸發挑戰、騙受害者唸出信裡的碼、於他處兌換」 */
+  fingerprintHash: text("fingerprint_hash").notNull(),
+  /** 給人看的裝置描述（「iPhone · Safari」），寫進驗證信與後續 user_devices.label */
+  deviceLabel: text("device_label").notNull(),
+  /** 裝置細節，兌換成功後原樣寫進 user_devices.details */
+  details: jsonb("details").$type<DeviceDetails>(),
+  /** 錯誤嘗試次數，達上限即作廢（正確的碼也不再接受，必須重新登入取得新挑戰） */
+  attemptCount: integer("attempt_count").notNull().default(0),
+  expiresAt: timestamp("expires_at").notNull(),
+  /** 用掉即標記；同一挑戰不可重放 */
+  consumedAt: timestamp("consumed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("device_challenges_user_idx").on(t.userId),
+  expiresIdx: index("device_challenges_expires_idx").on(t.expiresAt),
 }));

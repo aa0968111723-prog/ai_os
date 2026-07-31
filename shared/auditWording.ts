@@ -13,6 +13,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "auth.logoutAll": "登出全部裝置",
   "auth.touchSession": "延續登入工作階段",
   "auth.revokeSession": "撤銷登入裝置",
+  "auth.verifyDevice": "驗證新裝置登入",
+  "auth.revokeDevice": "移除信任裝置",
   "auth.createUploadGrant": "簽發上傳授權",
   "auth.changePassword": "修改密碼",
   "auth.setUiDensity": "調整介面說明密度",
@@ -23,6 +25,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "admin.setGroupRole": "調整組內角色",
   "admin.removeFromGroup": "把成員移出組別",
   "admin.resetMemberPassword": "重設成員密碼",
+  "admin.grantDeviceGrace": "豁免成員的新裝置驗證",
   // 專案與素材
   "projects.create": "建立專案",
   "projects.createSample": "建立範例專案",

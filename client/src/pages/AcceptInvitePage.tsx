@@ -4,6 +4,7 @@ import { trpc } from "../api";
 import { PasswordInput } from "../components/PasswordInput";
 import { friendlyAuthError } from "./LoginPage";
 import { Button, Card, Hint, Meta, Skeleton } from "../components/ui";
+import { collectDeviceHint } from "../deviceHint";
 const TEAM_ROLE_LABEL: Record<string, string> = { admin: "團隊管理員", member: "成員" };
 const GROUP_ROLE_LABEL: Record<string, string> = { leader: "組長", member: "組員" };
 
@@ -86,7 +87,14 @@ export function AcceptInvitePage({ token }: { token: string }) {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (canSubmit) accept.mutate({ token, name: name.trim(), password });
+          // 帶裝置特徵：邀請 token 本來就寄到本人信箱，兌換＝已證明持有信箱，
+          // 故落地即把這台裝置記為已信任，新人不會建完帳號又被要求驗一次信箱。
+          // collectDeviceHint 是非同步的（UA Client Hints），內部已吞例外，失敗只是少了細節。
+          if (canSubmit) {
+            void collectDeviceHint().then((device) =>
+              accept.mutate({ token, name: name.trim(), password, device }),
+            );
+          }
         }}
       >
         <h1 style={{ fontSize: "var(--fs-24)", marginTop: 0 }}>歡迎加入</h1>

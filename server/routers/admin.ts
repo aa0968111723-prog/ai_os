@@ -9,6 +9,7 @@ import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 import { sendEmail, isEmailConfigured, type EmailStatus } from "../services/email";
 import { groupUsage } from "../services/points";
 import { canRunCommand, resolveCommandLevel } from "../../shared/groupAgent";
+import { DEVICE_GRACE_MINUTES, grantDeviceGrace } from "../services/deviceTrust";
 
 /** 團隊管理權檢查：開發者或該團隊 admin */
 function assertTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, teamId: string): void {
@@ -418,36 +419,10 @@ export const adminRouter = router({
 
   /** 重設成員密碼：伺服器自產臨時密碼、砍掉全部 session 強制重登。臨時密碼只在這次回應出現、不落資料庫與 log */
   resetMemberPassword: adminProcedure.input(z.object({ userId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
-    const [target] = await db.select().from(schema.users).where(eq(schema.users.id, input.userId));
-    if (!ctx.auth.user.isSuperAdmin) {
-      // 權限階梯：開發者可重設任何人；團隊管理員只能重設「自己管的團隊」裡的一般成員。
-      // 所有拒絕情況（不存在/開發者/他團管理員/不在範圍）共用同一句訊息——
-      // 不同文案會讓人拿任意 UUID 連打探出「這個 id 是不是開發者/管理員」，細分原因只進伺服器 log
-      const deny = (reason: string): never => {
-        console.warn(`[audit] resetMemberPassword 拒絕：caller=${ctx.auth.user.id} target=${input.userId} reason=${reason}`);
-        throw new TRPCError({ code: "FORBIDDEN", message: "這位成員的密碼無法由你重設——請聯絡超級管理員" });
-      };
-      if (!target) deny("target 不存在");
-      if (target.isSuperAdmin) deny("target 是開發者");
-      const targetTeamRows = await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.userId, target.id));
-      if (target.id !== ctx.auth.user.id && targetTeamRows.some((r) => r.role === "admin")) deny("target 是團隊管理員");
-      // 管理範圍（修 AUTH2-001 跨團隊接管）：不能只憑「目標在我管的某個團隊」就放行——跨團隊帳號
-      // （同時在我管的 T1 與我管不到的 T2）會被舊版 some 放行；重設後伺服器把明文臨時密碼交給我，
-      // 等於接管該帳號並取得 T2 的存取。改為 every：目標「全部」團隊/組籍都必須落在我管的團隊內，
-      // 只要有一個落在我管不到的團隊/組就 deny（無團隊籍的帳號也不由團隊管理員重設，交給超級管理員）。
-      const targetGroupRows = await db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, target.id));
-      const targetGroupTeamIds = targetGroupRows.length
-        ? (
-            await db.select().from(schema.groups).where(inArray(schema.groups.id, targetGroupRows.map((r) => r.groupId)))
-          ).map((g) => g.teamId)
-        : [];
-      const targetTeamIds = [...new Set([...targetTeamRows.map((r) => r.teamId), ...targetGroupTeamIds])];
-      const adminSet = new Set(ctx.auth.adminTeamIds);
-      if (targetTeamIds.length === 0 || !targetTeamIds.every((tid) => adminSet.has(tid))) {
-        deny("target 有超出管理範圍的團隊/組籍");
-      }
-    }
-    if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這位成員" });
+    const target = await assertCanAdministerMember(ctx.auth, input.userId, {
+      operation: "resetMemberPassword",
+      denyMessage: "這位成員的密碼無法由你重設——請聯絡超級管理員",
+    });
     // 稽核：誰在什麼時候重設了誰（臨時密碼本身不落 log）
     console.log(`[audit] resetMemberPassword：caller=${ctx.auth.user.id} target=${target.id}`);
     const tempPassword = generateTempPassword();
@@ -465,4 +440,68 @@ export const adminRouter = router({
     if (revokedTokens > 0) console.log(`[audit] resetMemberPassword 一併撤銷 ${revokedTokens} 把 MCP 金鑰：target=${target.id}`);
     return { tempPassword };
   }),
+
+  /**
+   * 裝置驗證救援：給某位成員 30 分鐘的「陌生裝置免驗證碼」窗口。
+   *
+   * 為什麼需要：enforce 模式下，同事換手機又剛好收不到信（人在國外、信箱壞掉、
+   * 信被擋成垃圾郵件）就等於被鎖在門外，而系統沒有其他自助途徑。
+   *
+   * 走與重設密碼「同一套」權限階梯（assertCanAdministerMember）：這條路雖然比重設密碼弱
+   * （對方仍需輸入正確密碼），但若團隊管理員能對開發者帳號開豁免，就等於替
+   * 「已握有超管密碼的攻擊者」拆掉最後一道裝置關卡，屬提權路徑。
+   */
+  grantDeviceGrace: adminProcedure.input(z.object({ userId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
+    const target = await assertCanAdministerMember(ctx.auth, input.userId, {
+      operation: "grantDeviceGrace",
+      denyMessage: "這位成員的裝置驗證無法由你豁免——請聯絡超級管理員",
+    });
+    const until = await grantDeviceGrace(target.id);
+    console.log(`[audit] grantDeviceGrace：caller=${ctx.auth.user.id} target=${target.id} until=${until.toISOString()}`);
+    return { until, minutes: DEVICE_GRACE_MINUTES };
+  }),
 });
+
+/**
+ * 「我能不能對這位成員做管理動作」的共用權限階梯。
+ *
+ * 由 resetMemberPassword 與 grantDeviceGrace 共用——這段邏輯修過真實漏洞
+ * （AUTH2-001 跨團隊接管），複製第二份必然日後分歧，故抽成單一來源。
+ *
+ * 所有拒絕情況（不存在／開發者／他團管理員／超出範圍）共用同一句訊息：
+ * 不同文案會讓人拿任意 UUID 連打，探出「這個 id 是不是開發者／管理員」。細分原因只進伺服器 log。
+ */
+async function assertCanAdministerMember(
+  auth: { user: { id: string; isSuperAdmin: boolean }; adminTeamIds: string[] },
+  targetUserId: string,
+  opts: { operation: string; denyMessage: string },
+): Promise<typeof schema.users.$inferSelect> {
+  const [target] = await db.select().from(schema.users).where(eq(schema.users.id, targetUserId));
+  if (!auth.user.isSuperAdmin) {
+    const deny = (reason: string): never => {
+      console.warn(`[audit] ${opts.operation} 拒絕：caller=${auth.user.id} target=${targetUserId} reason=${reason}`);
+      throw new TRPCError({ code: "FORBIDDEN", message: opts.denyMessage });
+    };
+    if (!target) deny("target 不存在");
+    if (target.isSuperAdmin) deny("target 是開發者");
+    const targetTeamRows = await db.select().from(schema.teamMembers).where(eq(schema.teamMembers.userId, target.id));
+    if (target.id !== auth.user.id && targetTeamRows.some((r) => r.role === "admin")) deny("target 是團隊管理員");
+    // 管理範圍（修 AUTH2-001 跨團隊接管）：不能只憑「目標在我管的某個團隊」就放行——跨團隊帳號
+    // （同時在我管的 T1 與我管不到的 T2）會被舊版 some 放行；重設後伺服器把明文臨時密碼交給我，
+    // 等於接管該帳號並取得 T2 的存取。改為 every：目標「全部」團隊/組籍都必須落在我管的團隊內，
+    // 只要有一個落在我管不到的團隊/組就 deny（無團隊籍的帳號也不由團隊管理員重設，交給超級管理員）。
+    const targetGroupRows = await db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, target.id));
+    const targetGroupTeamIds = targetGroupRows.length
+      ? (
+          await db.select().from(schema.groups).where(inArray(schema.groups.id, targetGroupRows.map((r) => r.groupId)))
+        ).map((g) => g.teamId)
+      : [];
+    const targetTeamIds = [...new Set([...targetTeamRows.map((r) => r.teamId), ...targetGroupTeamIds])];
+    const adminSet = new Set(auth.adminTeamIds);
+    if (targetTeamIds.length === 0 || !targetTeamIds.every((tid) => adminSet.has(tid))) {
+      deny("target 有超出管理範圍的團隊/組籍");
+    }
+  }
+  if (!target) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這位成員" });
+  return target;
+}
