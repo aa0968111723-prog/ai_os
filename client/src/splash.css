@@ -6,8 +6,8 @@
   display: grid;
   place-items: center;
   background:
-    radial-gradient(ellipse 80% 60% at 50% 42%, rgba(255, 252, 246, 0.9) 0%, transparent 70%),
-    #e9e3d8;
+    radial-gradient(ellipse 80% 60% at 50% 42%, rgba(255, 255, 255, 0.92) 0%, transparent 70%),
+    #f0eee8;
   transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
               visibility 0.4s;
 }
@@ -53,7 +53,7 @@
      -webkit-optimize-contrast 會關掉平滑濾波、讓縮圖邊緣出現鋸齒，反而更糊。 */
   image-rendering: auto;
   /* 輕微陰影，避免過度柔化緞帶邊緣 */
-  filter: drop-shadow(0 6px 14px rgba(70, 56, 44, 0.08));
+  filter: drop-shadow(0 6px 14px rgba(28, 25, 23, 0.08));
 }
 
 .aios-splash__glow {
@@ -62,9 +62,9 @@
   border-radius: 50%;
   background: radial-gradient(
     ellipse at center,
-    rgba(232, 92, 52, 0.10) 0%,
-    rgba(245, 168, 48, 0.08) 28%,
-    rgba(72, 180, 120, 0.06) 52%,
+    rgba(246, 119, 30, 0.10) 0%,
+    rgba(235, 162, 7, 0.08) 28%,
+    rgba(7, 143, 83, 0.06) 52%,
     transparent 72%
   );
   opacity: 1;
@@ -77,7 +77,7 @@
   font-size: clamp(12px, 2.8vw, 14px);
   font-weight: 500;
   letter-spacing: 0.14em;
-  color: #8a7a68;
+  color: #67615b;
 }
 
 .aios-splash__bar {
@@ -85,7 +85,7 @@
   width: 112px;
   height: 3px;
   border-radius: 999px;
-  background: #e3d7c2;
+  background: #e2ded6;
   overflow: hidden;
 }
 
@@ -93,8 +93,8 @@
   height: 100%;
   width: 34%;
   border-radius: 999px;
-  /* 對齊 Aios 字標紅→橙→綠漸層 */
-  background: linear-gradient(90deg, #e24a2f, #f0a030, #3cb878, #2aa8b8);
+  /* 對齊 Aios 字標緞帶六色（逐像素實測） */
+  background: linear-gradient(90deg, #c5161b, #f6771e, #eba207, #8db12a, #078f53, #0b9d95);
   animation: aios-bar-slide 1.15s ease-in-out 0.55s infinite;
 }
 

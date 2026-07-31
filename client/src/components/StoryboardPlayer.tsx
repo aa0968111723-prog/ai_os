@@ -180,7 +180,7 @@ export function StoryboardPlayer({
     position: "fixed",
     inset: 0,
     zIndex: 1000,
-    background: "rgba(43, 38, 32, 0.92)",
+    background: "rgba(28, 25, 23, 0.92)",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
@@ -189,9 +189,9 @@ export function StoryboardPlayer({
     overflowY: "auto",
   };
   const btn: CSSProperties = {
-    background: "rgba(251, 247, 240, 0.12)",
-    color: "#fbf7f0",
-    border: "1px solid rgba(251, 247, 240, 0.28)",
+    background: "rgba(250, 249, 247, 0.12)",
+    color: "#faf9f7",
+    border: "1px solid rgba(250, 249, 247, 0.28)",
     borderRadius: 999,
     padding: "8px 14px",
     fontSize: 15,
@@ -202,7 +202,7 @@ export function StoryboardPlayer({
   if (total === 0 || !scene) {
     return (
       <div style={{ ...overlay, justifyContent: "center" }} role="dialog" aria-modal="true" aria-label="粗剪預覽" ref={stageRef} tabIndex={-1}>
-        <p style={{ color: "#fbf7f0", fontSize: 15 }}>還沒有分鏡可以預覽——先加入分鏡再回來看整支片節奏。</p>
+        <p style={{ color: "#faf9f7", fontSize: 15 }}>還沒有分鏡可以預覽——先加入分鏡再回來看整支片節奏。</p>
         {onClose && (
           <button style={{ ...btn, marginTop: 16 }} onClick={onClose}>
             關閉
@@ -258,13 +258,13 @@ export function StoryboardPlayer({
       <style>{`
         @keyframes sbp-fade { from { opacity: 0; } to { opacity: 1; } }
         @keyframes sbp-kenburns { from { transform: scale(1); } to { transform: scale(1.06); } }
-        .sbp-seg { position: relative; padding: 0; border: 0; cursor: pointer; background: rgba(251,247,240,0.2);
+        .sbp-seg { position: relative; padding: 0; border: 0; cursor: pointer; background: rgba(250,249,247,0.2);
           height: 8px; border-radius: 999px; overflow: hidden; min-width: 8px;
           transition: height var(--dur-fast), box-shadow var(--dur-fast); }
-        .sbp-seg:hover, .sbp-seg:focus-visible { height: 12px; box-shadow: 0 0 0 2px rgba(251,247,240,0.35); outline: none; }
+        .sbp-seg:hover, .sbp-seg:focus-visible { height: 12px; box-shadow: 0 0 0 2px rgba(250,249,247,0.35); outline: none; }
         .sbp-seg-fill { position: absolute; inset: 0 auto 0 0; background: var(--primary); }
         .sbp-seg-mic { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); width: 4px; height: 4px;
-          border-radius: 999px; background: rgba(251,247,240,0.85); }
+          border-radius: 999px; background: rgba(250,249,247,0.85); }
       `}</style>
 
       {/* 頂部：第 i/N 鏡・標題・經過/總長 ＋ 時間軸（分段寬度∝秒數、可點跳鏡） */}
@@ -274,12 +274,12 @@ export function StoryboardPlayer({
             display: "flex",
             alignItems: "baseline",
             gap: 10,
-            color: "#fbf7f0",
+            color: "#faf9f7",
             marginBottom: 8,
             flexWrap: "wrap",
           }}
         >
-          <span className="mono" style={{ color: "#e8a883", fontSize: "var(--fs-14)" }}>
+          <span className="mono" style={{ color: "#ffab6b", fontSize: "var(--fs-14)" }}>
             第 {index + 1}/{total} 鏡
           </span>
           <span style={{ fontSize: "var(--fs-16)", fontWeight: 600 }}>{scene.title}</span>
@@ -328,7 +328,7 @@ export function StoryboardPlayer({
           height: "min(58vh, 620px)",
           borderRadius: 16,
           overflow: "hidden",
-          background: "#1f1b16",
+          background: "#1c1a19",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -366,11 +366,11 @@ export function StoryboardPlayer({
           />
         )}
         {(!hasVisual || assetBroken) && (
-          <div key={`${scene.id}-ph`} style={{ textAlign: "center", color: "#d9cfc0", padding: 24, animation: fadeAnim }}>
+          <div key={`${scene.id}-ph`} style={{ textAlign: "center", color: "#d2cfca", padding: 24, animation: fadeAnim }}>
             <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>
               {assetBroken ? <Icon name="XCircle" size={40} /> : kind === "audio" ? <Icon name="Music" size={40} /> : <Icon name="Clapperboard" size={40} />}
             </div>
-            <div style={{ fontSize: 18, fontWeight: 600, color: "#fbf7f0" }}>{scene.title}</div>
+            <div style={{ fontSize: 18, fontWeight: 600, color: "#faf9f7" }}>{scene.title}</div>
             <div className="mono" style={{ fontSize: 13, marginTop: 6, opacity: 0.8 }}>
               {assetBroken ? "此鏡素材遺失——回分鏡「重生這一格」可補回" : kind === "audio" ? "配音／音訊鏡" : "尚無素材"}・停留 {dur} 秒
             </div>
@@ -391,8 +391,8 @@ export function StoryboardPlayer({
           minHeight: 46,
           marginTop: 12,
           borderRadius: "var(--r-12)",
-          background: "rgba(20, 17, 13, 0.72)",
-          color: "#fbf7f0",
+          background: "rgba(24, 22, 21, 0.72)",
+          color: "#faf9f7",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -456,7 +456,7 @@ export function StoryboardPlayer({
 
       {/* 開關列：自動換鏡（減少動態偏好者預設關）＋同步旁白 */}
       <div style={{ display: "flex", gap: 18, margin: "12px 0 0", flexWrap: "wrap", justifyContent: "center" }}>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#d9cfc0", fontSize: 13, cursor: "pointer" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#d2cfca", fontSize: 13, cursor: "pointer" }}>
           <input
             type="checkbox"
             checked={autoAdvance}
@@ -465,7 +465,7 @@ export function StoryboardPlayer({
           />
           自動換鏡{reducedMotion ? "（系統偏好減少動態，預設已關閉）" : ""}
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#d9cfc0", fontSize: 13, cursor: "pointer" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#d2cfca", fontSize: 13, cursor: "pointer" }}>
           <input
             type="checkbox"
             checked={narrationOn}

@@ -743,7 +743,7 @@ export function AssetLibrary({
           data-fb="素材大圖"
           onClick={() => setLightbox(null)}
           style={{
-            position: "fixed", inset: 0, zIndex: 1000, background: "rgba(43, 38, 32, 0.72)",
+            position: "fixed", inset: 0, zIndex: 1000, background: "rgba(28, 25, 23, 0.72)",
             display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
           }}
         >
