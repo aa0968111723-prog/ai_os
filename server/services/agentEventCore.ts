@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -56,6 +56,22 @@ export async function recordAgentEventSafely(input: RecordAgentEventInput): Prom
   }
 }
 
+/**
+ * 事件游標的時間欄位，保留 PostgreSQL 的**微秒**精度。
+ *
+ * 為什麼不能用 `createdAt.toISOString()`：JS 的 Date 只有毫秒，node-postgres 把
+ * `timestamptz` 轉成 Date 時會**截掉**微秒。同一毫秒內寫入的兩筆事件（背景執行器一次
+ * tick 連寫好幾筆時很常見）會拿到同一個毫秒值，於是游標條件 `created_at < 該毫秒`
+ * 把它們全部排除——下一頁直接跳過整批事件。更糟的是：被跳過後該頁筆數不足 limit+1，
+ * `truncated` 變 false、`nextCursor` 變 null，呼叫端一旦把 null 當成「從頭開始」，
+ * 就會拿到重複的第一頁。稽核軌跡靜靜漏掉事件是不能接受的。
+ *
+ * 改法：時間戳由 DB 以 to_char 直接輸出微秒字串（順便繞過驅動與行程時區的轉換），
+ * 比較改用 row-wise tuple——(created_at, id) < (游標時間, 游標 id) 與
+ * ORDER BY created_at DESC, id DESC 完全同構，不會有邊界漏抓或重抓。
+ */
+const EVENT_CURSOR_TS = sql<string>`to_char(${schema.agentEvents.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US')`;
+
 export async function listProjectAgentEvents(
   auth: AuthState,
   projectId: string,
@@ -71,29 +87,28 @@ export async function listProjectAgentEvents(
   ];
   if (options?.cursor) {
     const separator = options.cursor.lastIndexOf("|");
-    const date = new Date(separator >= 0 ? options.cursor.slice(0, separator) : "");
+    const rawTs = separator >= 0 ? options.cursor.slice(0, separator) : "";
     const id = separator >= 0 ? options.cursor.slice(separator + 1) : "";
-    if (Number.isNaN(date.getTime()) || !id) {
+    // 仍用 Date 驗格式（擋掉亂填的游標）；實際比較用原字串，才不會又被截成毫秒
+    if (!rawTs || Number.isNaN(new Date(rawTs).getTime()) || !id) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "事件分頁游標格式不正確" });
     }
-    conditions.push(or(
-      lt(schema.agentEvents.createdAt, date),
-      and(eq(schema.agentEvents.createdAt, date), lt(schema.agentEvents.id, id)),
-    )!);
+    conditions.push(sql`(${schema.agentEvents.createdAt} at time zone 'UTC', ${schema.agentEvents.id}) < (${rawTs}::timestamp, ${id}::uuid)`);
   }
   const rows = await db
-    .select()
+    .select({ row: schema.agentEvents, cursorAt: EVENT_CURSOR_TS })
     .from(schema.agentEvents)
     .where(and(...conditions))
     .orderBy(desc(schema.agentEvents.createdAt), desc(schema.agentEvents.id))
     .limit(limit + 1);
   const truncated = rows.length > limit;
   const page = truncated ? rows.slice(0, limit) : rows;
+  // 游標要取「這一頁最舊的一筆」＝反轉前的最後一筆；先算好再 reverse，
+  // 免得又踩到 reverse() 就地改陣列的坑
+  const oldest = page[page.length - 1];
   return {
-    items: page.reverse(),
-    nextCursor: truncated && page.length
-      ? `${page[page.length - 1].createdAt.toISOString()}|${page[page.length - 1].id}`
-      : null,
+    items: page.map((r) => r.row).reverse(),
+    nextCursor: truncated && oldest ? `${oldest.cursorAt}|${oldest.row.id}` : null,
   };
 }
 
