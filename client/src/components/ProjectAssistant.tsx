@@ -121,6 +121,7 @@ export function ProjectAssistant({
   onSavePromptSuggestion,
   onSaveSceneDraft,
   askFillRequest = null,
+  knowledgeIds,
 }: {
   projectId: string;
   embedded?: boolean;
@@ -135,6 +136,8 @@ export function ProjectAssistant({
    * nonce bumps so the same message can re-apply.
    */
   askFillRequest?: { nonce: number; message: string } | null;
+  /** 本次問答優先注入的知識 id（工作台勾選） */
+  knowledgeIds?: string[];
 }) {
   const utils = trpc.useUtils();
   const [input, setInput] = useState("");
@@ -206,6 +209,7 @@ export function ProjectAssistant({
       nonce,
       // 使用者在代理卡選的模型檔位；預設 nim＝免費，選 fal 檔位平台才付費
       mode: defaultPlannerMode,
+      knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
       signal,
       handlers: {
         onStep: (event) => {
@@ -264,7 +268,13 @@ export function ProjectAssistant({
     if (!handled && !ctrl.signal.aborted) {
       setFallbackPending(true);
       ask.mutate(
-        { projectId: requestProjectId, message: m, nonce, mode: defaultPlannerMode },
+        {
+          projectId: requestProjectId,
+          message: m,
+          nonce,
+          mode: defaultPlannerMode,
+          knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
+        },
         {
           onSuccess: (result) => {
             if (!requestIsCurrent(requestProjectId, epoch)) return;

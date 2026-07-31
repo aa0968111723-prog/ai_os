@@ -19,6 +19,7 @@ type KnowledgeListItem = {
   title: string;
   chars: number;
   excerpt: string;
+  pinned?: boolean;
 };
 
 /* ── 需求 6.3：批次匯入 txt/md 的限制 ── */
@@ -48,13 +49,20 @@ function readFileText(file: File): Promise<string> {
  */
 export function KnowledgeBase({ projectId, readOnly = false }: { projectId: string; readOnly?: boolean }) {
   const utils = trpc.useUtils();
-  const list = trpc.knowledge.list.useQuery({ projectId });
+  const [searchQ, setSearchQ] = useState("");
+  const [filterKind, setFilterKind] = useState<"" | (typeof KINDS)[number]["id"]>("");
+  const list = trpc.knowledge.list.useQuery({
+    projectId,
+    q: searchQ.trim() || undefined,
+    kind: filterKind || undefined,
+  });
   // 新增表單的標題／內容改用本地草稿：邊打邊存 localStorage，重整／當機也不掉逐字稿。
   const [title, setTitle, clearTitleDraft] = useLocalDraft(`knowledge-new-title-${projectId}`, "");
   const [content, setContent, clearContentDraft] = useLocalDraft(`knowledge-new-content-${projectId}`, "");
   const add = trpc.knowledge.add.useMutation({
     onSuccess: () => {
       utils.knowledge.list.invalidate({ projectId });
+      utils.knowledge.injectPreview.invalidate({ projectId });
       // 成功加入後清掉草稿（順帶把畫面值還原成空），避免下一次開表單又冒出舊內容。
       clearTitleDraft();
       clearContentDraft();
@@ -64,6 +72,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
   const remove = trpc.knowledge.remove.useMutation({
     onSuccess: () => {
       utils.knowledge.list.invalidate({ projectId });
+      utils.knowledge.injectPreview.invalidate({ projectId });
       // 地毯實測缺陷修復：軟刪後回收桶要立即看得到（否則使用者以為救不回來）——
       // RecycleBin 掛載時已抓過 listDeleted，不失效它就要等重整才出現
       utils.projects.listDeleted.invalidate({ projectId });
@@ -148,13 +157,46 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
 
   const totalChars = (list.data ?? []).reduce((s, r) => s + r.chars, 0);
 
+  const [showPreview, setShowPreview] = useState(false);
+  const preview = trpc.knowledge.injectPreview.useQuery(
+    { projectId, mode: "balanced" },
+    { enabled: showPreview && !!list.data?.length },
+  );
+  const previewSplit = trpc.knowledge.injectPreview.useQuery(
+    { projectId, mode: "script_only", includeCards: false, budgetChars: 12_000 },
+    { enabled: showPreview && !!list.data?.length },
+  );
+
   return (
     <Card as="section" data-fb="專案知識庫">
       <h2>專案知識庫（AI 讀得懂你的素材）</h2>
       <Hint>
-        貼上師父開示稿、見證故事、腳本——AI 導演發想時會自動讀取，你不必每次重講背景。
-        {list.data && list.data.length > 0 && `目前 ${list.data.length} 份・約 ${totalChars.toLocaleString()} 字。`}
+        貼上開示稿、見證、腳本——AI 導演／助手會自動讀取。
+        <strong> 釘選</strong>的篇目注入優先（不會被新筆記擠掉）。
+        {list.data && list.data.length > 0 && ` 目前 ${list.data.length} 份・約 ${totalChars.toLocaleString()} 字。`}
       </Hint>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, alignItems: "center" }}>
+        <input
+          type="search"
+          placeholder="搜尋標題／內容／摘要…"
+          value={searchQ}
+          onChange={(e) => setSearchQ(e.target.value)}
+          style={{ flex: "1 1 160px", minWidth: 140, fontSize: 13 }}
+          aria-label="搜尋知識庫"
+        />
+        <select
+          value={filterKind}
+          onChange={(e) => setFilterKind(e.target.value as typeof filterKind)}
+          aria-label="篩選類型"
+          style={{ fontSize: 13 }}
+        >
+          <option value="">全部類型</option>
+          {KINDS.map((k) => (
+            <option key={k.id} value={k.id}>{k.label}</option>
+          ))}
+        </select>
+      </div>
 
       {list.isLoading ? (
         <div style={{ marginTop: 8 }} aria-hidden="true">
@@ -169,6 +211,58 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
           {list.data.map((k) => (
             <KnowledgeRow key={k.id} k={k} projectId={projectId} remove={remove} readOnly={readOnly} />
           ))}
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              style={{ padding: "4px 12px", fontSize: "var(--fs-12)" }}
+              onClick={() => setShowPreview((v) => !v)}
+            >
+              {showPreview ? "收合 AI 注入預覽" : "預覽 AI 會讀什麼"}
+            </button>
+            {showPreview && (
+              <div style={{ marginTop: 8, fontSize: "var(--fs-12)", lineHeight: 1.5 }}>
+                {preview.isLoading || previewSplit.isLoading ? (
+                  <Meta>計算注入預覽…</Meta>
+                ) : preview.isError ? (
+                  <p className="error">{preview.error.message}</p>
+                ) : preview.data ? (
+                  <>
+                    <Hint layer="always" style={{ marginBottom: 6 }}>
+                      導演發想（balanced・{preview.data.budgetChars.toLocaleString()} 字預算）：
+                      已納入 {preview.data.includedChars.toLocaleString()}／庫內全文{" "}
+                      {preview.data.totalContentChars.toLocaleString()} 字
+                      {preview.data.truncated ? " · 有截斷" : " · 未截斷"}
+                      {preview.data.cardsIncluded ? " · 含角色／場景卡" : ""}
+                    </Hint>
+                    <ul style={{ margin: "0 0 10px", paddingLeft: 18 }}>
+                      {preview.data.items.map((it) => (
+                        <li key={it.id} style={{ opacity: it.status === "skipped" ? 0.55 : 1 }}>
+                          {it.pinned ? "📌 " : ""}
+                          {KIND_LABEL[it.kind] ?? it.kind}・{it.title}
+                          {" — "}
+                          {it.status === "full"
+                            ? "全文"
+                            : it.status === "partial"
+                              ? `部分 ${it.includedChars.toLocaleString()} 字`
+                              : "本次未納入"}
+                        </li>
+                      ))}
+                    </ul>
+                    {previewSplit.data && (
+                      <Hint layer="always">
+                        拆分鏡（script_only・{previewSplit.data.budgetChars.toLocaleString()} 字）：
+                        已納入 {previewSplit.data.includedChars.toLocaleString()} 字
+                        {previewSplit.data.truncated ? " · 有截斷" : ""}
+                        {" · "}
+                        腳本篇{" "}
+                        {previewSplit.data.items.filter((i) => i.status !== "skipped").length} 則會進模型
+                      </Hint>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <EmptyState icon={<Icon name="FileText" />} title={<>還沒有素材知識</>} description={<>加一份開示稿或腳本，讓 AI 真的懂這支片。</>} style={{ marginTop: 8 }} />
@@ -295,17 +389,24 @@ function KnowledgeRow({
   // 全文只在編輯時才抓（列表 API 只回摘要）。
   const full = trpc.knowledge.get.useQuery({ id: k.id }, { enabled: editing });
   const update = trpc.knowledge.update.useMutation({
-    onSuccess: () => {
+    onSuccess: (_row, vars) => {
       utils.knowledge.list.invalidate({ projectId });
+      utils.knowledge.injectPreview.invalidate({ projectId });
       // 地毯實測缺陷修復（高）：全文快取也要失效——只失效 list 時，「儲存→立刻再編輯」
       // 會從過期的 knowledge.get 快取播種出「儲存前的舊全文」，使用者再按儲存＝靜默倒回舊版
       utils.knowledge.get.invalidate({ id: k.id });
-      // 儲存成功才清編輯草稿（閉包引用下方宣告的 clear 函式，執行時已初始化完畢）
-      clearEditTitleDraft();
-      clearEditContentDraft();
-      setEditing(false);
+      // 只改釘選時不關編輯、不清草稿
+      if (vars.pinned === undefined) {
+        clearEditTitleDraft();
+        clearEditContentDraft();
+        setEditing(false);
+      }
     },
   });
+  const togglePin = () => {
+    if (readOnly) return;
+    update.mutate({ id: k.id, pinned: !k.pinned });
+  };
 
   // 編輯中的長文也走本地草稿（與新增表單同一套）：切頁/重整/手機被回收都不掉字；儲存成功才清
   const [editTitle, setEditTitle, clearEditTitleDraft] = useLocalDraft(`knowledge-edit-title-${k.id}`, "");
@@ -395,13 +496,29 @@ function KnowledgeRow({
 
   return (
     <div className="gen-row" style={{ gridTemplateColumns: "auto 1fr auto", alignItems: "center" }}>
-      <Chip>{KIND_LABEL[k.kind] ?? k.kind}</Chip>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-start" }}>
+        <Chip>{KIND_LABEL[k.kind] ?? k.kind}</Chip>
+        {k.pinned && (
+          <Meta as="span" style={{ fontSize: 11, fontWeight: 600, color: "var(--primary-ink)" }}>
+            釘選優先
+          </Meta>
+        )}
+      </div>
       <div>
         <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>{k.title}</div>
         <div className="meta" style={{ fontSize: "var(--fs-12)" }}>{k.excerpt}{k.chars > 120 ? "…" : ""}（{k.chars.toLocaleString()} 字）</div>
       </div>
       {!readOnly && (
-        <div style={{ display: "flex", gap: 4 }}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button
+            type="button"
+            style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }}
+            title={k.pinned ? "取消釘選（注入改回一般優先序）" : "釘選：AI 注入時優先讀這篇"}
+            disabled={update.isPending}
+            onClick={togglePin}
+          >
+            {k.pinned ? "取消釘選" : "釘選"}
+          </button>
           <button style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }} onClick={openEdit}>
             編輯
           </button>

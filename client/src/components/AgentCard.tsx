@@ -203,6 +203,8 @@ export function AgentCard({
   initialGoal?: string;
   /** 精簡排版：規劃模型預設收合，職能改橫向 chip */
   compactComposer?: boolean;
+  /** 工作台知識優先勾選（id 列表）→ 規劃 extraSourceIds */
+  initialKnowledgeIds?: string[];
 }) {
   const utils = trpc.useUtils();
   // 與 App 同 key 共用快取：核准/停止的授權是「發起人本人或組長以上」，按鈕顯示要跟伺服器規則對齊
@@ -224,6 +226,20 @@ export function AgentCard({
     if (!next) return;
     setGoal((prev) => (prev.trim().length >= 5 ? prev : next));
   }, [initialGoal]);
+
+  // 工作台「本次知識優先」→ 合併進 knowledgeSources（標題稍後由 list 補；先用 id）
+  useEffect(() => {
+    const ids = initialKnowledgeIds ?? [];
+    if (!ids.length) return;
+    setKnowledgeSources((prev) => {
+      const map = new Map(prev.map((k) => [k.id, k]));
+      for (const id of ids) {
+        if (!map.has(id)) map.set(id, { id, title: id.slice(0, 8) + "…" });
+      }
+      // 保留使用者在代理卡另加的來源，但工作台勾選的 id 一定在
+      return Array.from(map.values()).slice(0, 10);
+    });
+  }, [initialKnowledgeIds?.join(",")]);
 
   const runs = trpc.agents.listByProject.useQuery(
     { projectId },

@@ -148,6 +148,7 @@ export async function requestAssistantStream({
   message,
   nonce,
   mode,
+  knowledgeIds,
   signal,
   handlers,
   fetchImpl = fetch,
@@ -157,6 +158,8 @@ export async function requestAssistantStream({
   nonce: string;
   /** 使用者選的模型檔位；省略＝後端預設免費的 NIM */
   mode?: AgentPlannerMode;
+  /** 本次問答優先注入的知識 id */
+  knowledgeIds?: string[];
   signal: AbortSignal;
   handlers: AssistantStreamHandlers;
   fetchImpl?: FetchLike;
@@ -166,7 +169,13 @@ export async function requestAssistantStream({
     const response = await fetchImpl("/api/assistant/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId, message, nonce, mode }),
+      body: JSON.stringify({
+        projectId,
+        message,
+        nonce,
+        mode,
+        knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
+      }),
       signal,
     });
     if (!response.ok || !response.body) return false;

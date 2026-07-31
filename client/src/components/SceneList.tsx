@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { getModel, MODELS, tierLabel, estimatePoints } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
 import { SceneStudio } from "./SceneStudio";
@@ -455,8 +456,8 @@ function SceneRow({
                     modelId: genModel?.id ?? DEFAULT_MODEL,
                     clientRequestId: genRequestId.current,
                     // 上限同 generation.submit（6/4）：超勾取前幾張，不讓逐格生成因此整個被 zod 擋下
-                    characterIds: charIds?.length ? charIds.slice(0, 6) : undefined,
-                    scenePresetIds: sceneIds?.length ? sceneIds.slice(0, 4) : undefined,
+                    characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+                    scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                   })
                 }
               >

@@ -13,13 +13,17 @@
 | [世界觀調性多選](世界觀調性多選) | 調性多選：主副、出圖前 2、建議組合 |
 | [世界觀 Chips 複選與優先序](世界觀-chips-複選與優先序) | 主軸／調性／風格總則：多選與優先序 |
 | [世界觀如何注入 AI 生成](世界觀如何注入-AI-生成) | 真的會被模型吃到嗎？哪些路徑會／不會 |
+| [角色定裝卡](角色定裝卡) | 角色外觀鎖定、生成勾選注入、跨鏡一致 |
+| [場景設定卡](場景設定卡) | 色板／光線鎖定、生成勾選注入、跨鏡一致 |
+| [專案知識庫](專案知識庫) | 長文素材、釘選優先、注入預覽與配額 |
 | [協作與鏡像跟隨](協作與鏡像跟隨) | 雙人 presence、游標、鏡像精準度 |
 
 ## 程式碼對應（給工程）
 
 - 世界觀 schema／格式化：`shared/worldview.ts`
-- 生成注入單一真相：`server/services/generationCore.ts` → `effectivePromptParts`
-- 單元測試：`server/services/generationCore.test.ts`、`shared/worldview.test.ts`
+- 角色／場景錨點：`server/services/cardAnchors.ts`
+- 生成注入單一真相：`server/services/generationCore.ts` → `effectivePromptParts`／`withSceneAnchor`
+- 單元測試：`server/services/generationCore.test.ts`、`shared/worldview.test.ts`、`server/services/cardAnchors.test.ts`
 
 ## 維護
 

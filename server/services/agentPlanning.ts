@@ -5,6 +5,7 @@ import {
   type CompletePlanSummary,
   type PlanReference,
 } from "../../shared/plan";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import type { AgentStep } from "./agentRunner";
 import {
   modelIsOperationallyReady,
@@ -73,8 +74,8 @@ export const completePlanDraftSchema = z.object({
       sceneNo: z.number().int().positive().optional(),
       modelId: z.string().trim().max(200).optional(),
       // CA-01：代號（char1／preset1／asset1）— resolve 時轉 UUID，禁止把未解析字串寫入 step
-      characterRefs: z.array(z.string().trim().min(1).max(40)).max(6).optional(),
-      scenePresetRefs: z.array(z.string().trim().min(1).max(40)).max(4).optional(),
+      characterRefs: z.array(z.string().trim().min(1).max(40)).max(MAX_GENERATE_CHARACTERS).optional(),
+      scenePresetRefs: z.array(z.string().trim().min(1).max(40)).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       sourceAssetRef: z.string().trim().min(1).max(40).optional(),
       sourceUrl: z.string().trim().max(2_000).optional(),
     }),

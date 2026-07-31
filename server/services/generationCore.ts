@@ -81,8 +81,8 @@ export interface PromptParts {
 
 /**
  * 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成)。
- * visual＝formatWorldviewVisualPositive（雙語 tones/styles + 短 logline + message）。
- * LLM＝formatWorldviewForAi(..., "generation-llm")（themes／taboos 正向）。
+ * visual＝formatWorldviewVisualPositive（tones/styles + 短 logline + message；**不含**觀眾／三幕／人物）。
+ * LLM＝formatWorldviewForAi(..., "generation-llm")（themes、短進階觀眾／三幕／人物、taboos 正向）。
  * 禁忌詞（合規句）分流——這是深度優化的關鍵：
  *   - 視覺（圖/影）：走 negative_prompt（見 effectivePromptParts 的 negative）。擴散模型無法靠正向詞
  *     「避免」某物，塞正向反而可能被畫出、甚至把禁忌字當畫面文字渲染——故正向不再放禁忌詞。

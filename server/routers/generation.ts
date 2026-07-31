@@ -10,6 +10,7 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { signAssetUrl } from "../services/storage";
 import { assertProjectEditable } from "../services/projectAcl";
 import { getModel, endpointOf } from "../../shared/models";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import {
   DEFAULT_CLOUD_MOCK_MODEL_ID,
   submitCloudMockGeneration,
@@ -80,9 +81,9 @@ export const generationRouter = router({
         /** 素材庫來源(優先)：伺服器換成簽名短效網址,fal 才抓得到、外人不可偽造 */
         sourceAssetId: z.string().uuid().optional(),
         /** 選定的角色定裝卡：外觀錨點自動注入視覺生成,跨鏡一致 */
-        characterIds: z.array(z.string().uuid()).max(6).optional(),
+        characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
         /** 選定的場景設定卡：色板/光線錨點注入,同場景光影一致 */
-        scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
+        scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
         /** 冪等鍵（client 產生的 UUID）：timeout 後重送同鍵回原生成列，不重複扣點 */
         clientRequestId: z.string().uuid().optional(),
       }),
