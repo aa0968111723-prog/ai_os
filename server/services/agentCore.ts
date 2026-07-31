@@ -788,7 +788,11 @@ export async function approveAgentCore(input: { auth: AuthState; runId: string }
         inArray(schema.agentRuns.status, ["running", "waiting"]),
       ))
       .limit(1);
-    if (active) throw new TRPCError({ code: "BAD_REQUEST", message: "你已有一個代理在跑——等它完成或先停止" });
+    // 用 CONFLICT 而非 BAD_REQUEST：這不是輸入錯誤，是「現在不行、等一下就行」的暫時狀態。
+    // 組代理的調度計畫要靠這個碼把它跟「NOT_FOUND／狀態已變」這種終局錯誤分開——
+    // 混在一起的話，組長手上剛好在跑一份計畫就足以讓整份組級調度折成失敗，
+    // 而前面已核准的子計畫還在燒點。使用者看到的訊息完全不變。
+    if (active) throw new TRPCError({ code: "CONFLICT", message: "你已有一個代理在跑——等它完成或先停止" });
     return tx
       .update(schema.agentRuns)
       .set({ status: "running", updatedAt: new Date() })

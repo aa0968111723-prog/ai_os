@@ -105,6 +105,9 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0018_knowledge_pinned",
   // 0019：knowledge.summary nullable text（ADD COLUMN IF NOT EXISTS），可安全納入 bridge
   "0019_knowledge_summary",
+  // 0020：純新增 group_agent_runs／group_agent_events 表＋索引，與 group_members 一個 nullable
+  //       欄位（皆 IF NOT EXISTS），不動任何既有資料，可安全納入 bridge
+  "0020_group_agent_commander",
 ] as const;
 
 /**
@@ -175,7 +178,12 @@ export function canonicalMigrationStatement(statement: string): string {
     .replace(/^(CREATE (?:UNIQUE )?INDEX) IF NOT EXISTS /i, "$1 ")
     .replace(/^(CREATE TABLE) IF NOT EXISTS /i, "$1 ")
     .replace(/^(ALTER TABLE "[^"]+" ADD COLUMN) IF NOT EXISTS /i, "$1 ")
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    // 逗號後的空白也一併正規化。drizzle-kit 產生的欄位清單沒有空白（`("a","b")`），
+    // 手寫的 migration 幾乎一定會為了可讀性加上（`("a", "b")`）——只收斂空白「run」的話，
+    // 兩者永遠對不上，於是一句完全等價的 CREATE INDEX 會同時被判成「非預期 drift」與「缺漏」。
+    // 這在識別字之間不是語意差異，正規化掉才不會逼每一份手寫 migration 去猜產生器的排版。
+    .replace(/,\s+/g, ",");
 }
 
 function migrationStatements(entry: MigrationFile): string[] {

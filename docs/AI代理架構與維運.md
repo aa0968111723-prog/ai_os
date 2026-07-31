@@ -24,6 +24,8 @@ AI 代理不是頁面跳轉器，也不是把聊天文字包成待辦。一次�
 | `taskCore.ts` | 正式人類任務、角色核准、等待喚醒與交易一致性 |
 | `agentEventCore.ts` | 可稽核事件、健康度、阻塞、統一任務與成果中心 |
 | notes/schedule/database/generation core | 實際副作用；網頁、MCP 與 Runner 共用守門 |
+| `groupCommand.ts` | 組級指令（跨專案核准／停止／放棄／重跑／派工／調任務）的分級授權與組隔離；落地一律轉呼叫上列 core |
+| `groupCampaignCore.ts`／`groupCampaignRunner.ts` | 組代理自己的多步調度計畫（campaign）與其背景執行器 |
 
 路由只做傳輸驗證，不複製服務邏輯。網頁與 MCP 因此套用相同組隔離、專案 ACL、封存、額度及資料庫 AI 權限。
 
@@ -34,6 +36,7 @@ AI 代理不是頁面跳轉器，也不是把聊天文字包成待辦。一次�
 - `project_tasks`：AI 與團隊共用的人類任務／核准；以 `wake_run_id`、`wake_step_id` 精準喚醒。
 - `agent_events`：append-only 可稽核軌跡；`(run_id,event_key)` 唯一，跨 replica 重播不重複。
 - notes、schedule_items、project_tasks：保存 `plan_run_id`、`plan_step_id`，支援雙向追溯。
+- `group_agent_runs`／`group_agent_events`：組層的調度計畫與事件軌跡。**不併入上面兩張表**——`agent_events.project_id` NOT NULL，而組級的下令、超預算停手、跳過整條支線不屬於任何單一專案（見 ADR-010）。
 
 常用查詢有 project/status/time、status/updated、user/status 與事件 run/project/time 索引。清單均有限制；事件使用 `nextCursor` 分頁。未核准計畫 14 天自動過期，避免免費規劃無界堆積。
 
@@ -83,6 +86,14 @@ LLM 看不到可直接寫入的 UUID。提示詞只提供：
 
 事件資料只放 kind、依賴、來源、輸出、等待任務與錯誤摘要；不得放完整 prompt、token、密碼、私訊或模型內部推理。
 
+## 組層：組代理總指揮
+
+本文寫的是「一個專案裡的代理」。組層另有一個角色會**跨專案下令**：組代理總指揮——分級授權（none／dispatch／supervise／command）、六種組級指令，以及它自己的多步調度計畫（campaign）與背景執行器。
+
+它不新增任何內容副作用：每一道指令都轉呼叫本文列出的 core（`planAgentCore`／`approveAgentCore`／`stopAgentCore`／`discardAgentCore`／`updateProjectTaskCore`），並以**發起人的身分**執行，因此本文的專案 ACL、封存、額度、規劃節流、併發鎖與冪等保證原樣生效。組這一層只多驗兩件事：下令者的等級、目標物是否屬於這個組。
+
+完整說明（能力分層、授權矩陣、campaign 執行模型、點數授權的安全性質、兩張新表與排查手冊）見 **〈[組代理總指揮](./組代理總指揮.md)〉**；授權模型與事件表的取捨見 **[ADR-010](./adr/010-group-agent-command-authority.md)**。
+
 ## 新增步驟種類檢查表
 
 1. 更新 `shared/plan.ts`、規劃 draft schema、Runner `AgentStep` 與前端 icon／文案。
@@ -95,6 +106,7 @@ LLM 看不到可直接寫入的 UUID。提示詞只提供：
 ## 維運
 
 - 部署順序：`db:migrate` → `db:check` → 啟動 replicas。Web replica 不執行 DDL。
+- 背景執行器有兩支：`agentRunner`（專案內 DAG）與 `groupCampaignRunner`（跨專案調度，每 8 秒一 tick）。兩支都靠 advisory lock 防多副本重複推進；組層排查見〈組代理總指揮〉的維運段。
 - 事故排查：先看 run 狀態與 `agent_events`，再以 `generationId/effectId/taskId` 對照業務表。
 - 不可手動把 waiting 改 running；應完成／裁決正式 task，讓交易喚醒。
 - 不可刪除事件來「修狀態」。事件是事實軌跡，狀態修復使用新事件與經審核 migration。

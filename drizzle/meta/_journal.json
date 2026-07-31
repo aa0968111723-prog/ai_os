@@ -141,6 +141,13 @@
       "when": 1785600100000,
       "tag": "0019_knowledge_summary",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785600200000,
+      "tag": "0020_group_agent_commander",
+      "breakpoints": true
     }
   ]
 }

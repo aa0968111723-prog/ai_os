@@ -10,24 +10,62 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type React from "react";
-import { buildDecisionInbox, buildTeamQuestionSuggestions, canDecideRun, dueLabel, Launchpad, mergeTeamHealth } from "./Launchpad";
+import {
+  buildDecisionInbox,
+  buildTeamQuestionSuggestions,
+  campaignRefetchInterval,
+  canDecideRun,
+  dueLabel,
+  Launchpad,
+  mergeTeamHealth,
+} from "./Launchpad";
 
 /** 泛用 trpc 樁：任何 `trpc.a.b.useQuery()` 都回 queryData 裡以路徑登記的值 */
 const h = vi.hoisted(() => {
-  const bag: { queryData: Map<string, unknown>; mutations: Array<{ path: string; input: unknown }>; root: Record<string, unknown>; askReply: Record<string, unknown> } =
-    { queryData: new Map(), mutations: [], root: {}, askReply: {} };
+  const bag: {
+    queryData: Map<string, unknown>;
+    mutations: Array<{ path: string; input: unknown }>;
+    root: Record<string, unknown>;
+    askReply: Record<string, unknown>;
+    /** mutateAsync 的回傳值（依 tRPC 路徑登記）：有些畫面會把回傳的人話結果直接顯示出來，
+     *  例如指令執行完按鈕換成「✓ 已核准…」。固定回 {} 的話那條路徑永遠測不到。 */
+    mutationReply: Map<string, unknown>;
+    /** 查詢的「載入中／失敗」狀態（依 tRPC 路徑登記）。
+     *  沒有這個的話，所有查詢永遠是「已載入且成功」，於是「查不到時畫面說了什麼謊」
+     *  這一整類問題——空手顯示「還沒有計畫」、權限讀不到顯示成沒有權限——一條都測不到。 */
+    queryState: Map<string, { isLoading?: boolean; error?: { message: string } }>;
+    /** 被按過「再試一次」的查詢路徑：驗重試鈕真的接到那一支查詢，而不是接了個空函式 */
+    refetches: string[];
+    /** mutation 的錯誤（依 tRPC 路徑登記）：驗「哪一個動作失敗了」有沒有講對。
+     *  固定 error: null 的話，四支 mutation 共用一句錯誤訊息的問題永遠測不出來。 */
+    mutationError: Map<string, { message: string }>;
+    /** 被 reset() 過的 mutation 路徑：tRPC 的 error 會一直留到 reset()，
+     *  所以「上一個動作的舊錯誤有沒有清掉」只能從有沒有真的呼叫 reset 來驗。 */
+    resets: string[];
+    /** 要 reject 的 mutation 與它的錯誤（依路徑）：驗動作有沒有接住 rejection。
+     *  永遠 resolve 的話，沒包 try/catch 的按鈕在測試裡看起來一樣正常。
+     *  reject 的同時也把錯誤登記進 mutationError，比照 tRPC「失敗後 error 就留著」的行為。 */
+    mutationRejects: Map<string, { message: string }>;
+  } = {
+    queryData: new Map(), mutations: [], root: {}, askReply: {}, mutationReply: new Map(),
+    queryState: new Map(), refetches: [], mutationError: new Map(),
+    resets: [], mutationRejects: new Map(),
+  };
   const queryData = bag.queryData;
   const mutations = bag.mutations;
   let root: Record<string, unknown>;
   const makeNode = (path: string): Record<string, unknown> => {
     const base: Record<string, unknown> = {
-      useQuery: () => ({
-        data: queryData.get(path),
-        isLoading: false,
-        isError: false,
-        error: null,
-        refetch: () => {},
-      }),
+      useQuery: () => {
+        const st = bag.queryState.get(path);
+        return {
+          data: queryData.get(path),
+          isLoading: st?.isLoading ?? false,
+          isError: !!st?.error,
+          error: st?.error ?? null,
+          refetch: () => { bag.refetches.push(path); },
+        };
+      },
       useMutation: (opts?: { onSuccess?: (d: unknown) => void }) => ({
         mutate: (input: unknown, callOpts?: { onSuccess?: (d: unknown) => void }) => {
           mutations.push({ path, input });
@@ -35,11 +73,16 @@ const h = vi.hoisted(() => {
           void opts?.onSuccess?.(reply);
           void callOpts?.onSuccess?.(reply);
         },
-        mutateAsync: async (input: unknown) => { mutations.push({ path, input }); return {}; },
+        mutateAsync: async (input: unknown) => {
+          mutations.push({ path, input });
+          const rejection = bag.mutationRejects.get(path);
+          if (rejection) { bag.mutationError.set(path, rejection); throw rejection; }
+          return bag.mutationReply.get(path) ?? {};
+        },
         isPending: false,
-        error: null,
+        error: bag.mutationError.get(path) ?? null,
         data: undefined,
-        reset: () => {},
+        reset: () => { bag.resets.push(path); bag.mutationError.delete(path); },
       }),
       invalidate: () => {},
       useUtils: () => root,
@@ -57,7 +100,8 @@ const h = vi.hoisted(() => {
     }) as Record<string, unknown>;
   };
   root = makeNode("");
-  Object.assign(bag, { queryData, mutations, root });
+  // 只有 root 是後來才建出來的（makeNode 要先定義），其餘欄位一開始就在 bag 上，寫回去等於原地賦值
+  bag.root = root;
   return bag;
 });
 
@@ -100,6 +144,13 @@ function seed(opts: {
   pending?: Array<Record<string, unknown>>;
   insights?: Record<string, unknown> | null;
 }) {
+  // 載入／失敗狀態預設全清：它會跨測試殘留，而殘留的方向是「上一個測試登記的逾時
+  // 讓下一個測試的畫面整塊消失」，那種紅燈查起來會指向完全無關的地方。
+  h.queryState.clear();
+  h.refetches.length = 0;
+  h.mutationError.clear();
+  h.resets.length = 0;
+  h.mutationRejects.clear();
   const runs = opts.runs ?? [];
   h.queryData.set("auth.me", {
     user: { id: "u1", name: "阿光" },
@@ -834,5 +885,707 @@ describe("組彙總 AI 入口的重新定位", () => {
     expect(screen.getByLabelText("問卡片答不出來的事"))
       .toHaveValue("「招生短片」的代理為什麼失敗？要改什麼才不會再失敗？");
     expect(h.mutations.filter((m) => m.path === "teamAssistant.ask")).toHaveLength(0);
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────
+   L3 組代理總指揮（TeamCommanderBlock）
+
+   這一區與卡片其他區塊的差別是它會「自己下令」：核准子計畫、花點、改人員任務。
+   所以測的重點不是版面好不好看，而是三件會出事的事——
+   沒權限的人不該看到入口、按鈕不該出現在錯的狀態、提議送出去的形狀不能被前端動過。
+   ──────────────────────────────────────────────────────────────── */
+
+/** 總指揮區塊（用 aria-label 定位，不依賴版面結構） */
+const commander = () => screen.getByLabelText("組代理總指揮");
+
+/** 一份典型的組級調度計畫：四步、已完成一步、等在人工關卡 */
+const campaign = (over: Partial<Record<string, unknown>> = {}) => ({
+  id: "camp-1",
+  groupId: GROUP,
+  userId: "u1",
+  goal: "把三個待審的案子推到可交付",
+  summary: "先派兩案、盯著子計畫、卡住就找人",
+  status: "awaiting_approval",
+  budgetPoints: 100,
+  spentPoints: 0,
+  error: null,
+  steps: [
+    { id: "s1", kind: "dispatch", title: "在招生短片開一份分鏡計畫", note: "", status: "done", result: "已建立" },
+    { id: "s2", kind: "watch", title: "盯著分鏡計畫", note: "", status: "running" },
+    { id: "s3", kind: "wait_for_human", title: "等阿光確認旁白", note: "", status: "waiting" },
+    { id: "s4", kind: "report", title: "回報結論", note: "", status: "pending" },
+  ],
+  createdAt: daysAgo(1),
+  updatedAt: daysAgo(0),
+  ...over,
+});
+
+/**
+ * 在既有 seed 之上補「我的指令等級」與「這個組的調度計畫」。
+ *
+ * levelState／campaignsState 讓測試能演出「查詢還在跑」與「查詢失敗」——
+ * 這一區最貴的兩個謊（把載入中講成「還沒有計畫」、把讀不到權限講成「沒有權限」）
+ * 只有在那兩種狀態下才看得到。
+ */
+function seedCommander(opts: {
+  level?: string;
+  campaigns?: Array<Record<string, unknown>>;
+  levelState?: { isLoading?: boolean; error?: { message: string } };
+  campaignsState?: { isLoading?: boolean; error?: { message: string } };
+  /** 我在這個組的角色（預設組長）：組員只動得了自己發起的調度計畫 */
+  role?: "leader" | "member";
+  myUserId?: string;
+}) {
+  seed({ runs: [], pending: [] });
+  if (opts.role === "member") {
+    h.queryData.set("auth.me", {
+      user: { id: opts.myUserId ?? "u1", name: "阿光" },
+      groups: [{ groupId: GROUP, role: "member" }],
+    });
+  } else if (opts.myUserId) {
+    h.queryData.set("auth.me", {
+      user: { id: opts.myUserId, name: "阿光" },
+      groups: [{ groupId: GROUP, role: "leader" }],
+    });
+  }
+  if (opts.level !== undefined) h.queryData.set("teamAssistant.commandLevel", opts.level);
+  h.queryData.set("teamAssistant.campaigns", opts.campaigns ?? []);
+  if (opts.levelState) h.queryState.set("teamAssistant.commandLevel", opts.levelState);
+  if (opts.campaignsState) h.queryState.set("teamAssistant.campaigns", opts.campaignsState);
+}
+
+describe("L3 組代理總指揮：誰看得到、什麼狀態給什麼鈕", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.mutationReply.clear();
+  });
+
+  it.each(["none", "dispatch"])(
+    "指令等級 %s 又沒有任何計畫 → 整塊不渲染（不給一塊按不動的空框佔版面）",
+    (level) => {
+      seedCommander({ level });
+      render(<Launchpad groupId={GROUP} />);
+      expect(screen.queryByLabelText("組代理總指揮")).not.toBeInTheDocument();
+    },
+  );
+
+  it("沒有發起權但組內已有計畫 → 仍要看得到（別人下的令不能對這個人隱形）", () => {
+    seedCommander({ level: "supervise", campaigns: [campaign({ status: "running" })] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText("執行中")).toBeInTheDocument();
+    // 看得到不等於發得動：沒有 command 等級就不給「排調度計畫」的入口
+    expect(box.queryByLabelText("要組代理達成什麼")).not.toBeInTheDocument();
+    expect(box.queryByRole("button", { name: "排調度計畫" })).not.toBeInTheDocument();
+  });
+
+  it("有 command 等級 → 出現「排調度計畫」表單；目標不足 5 字時按鈕按不下去", async () => {
+    seedCommander({ level: "command" });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    const goal = box.getByLabelText("要組代理達成什麼");
+    const btn = box.getByRole("button", { name: "排調度計畫" });
+    // 空目標：後端 zod 也會擋，但讓人按下去才吃錯誤是白跑一趟
+    expect(btn).toBeDisabled();
+    await userEvent.type(goal, "推四案");
+    expect(btn).toBeDisabled();
+    await userEvent.type(goal, "到可交付");
+    expect(btn).toBeEnabled();
+  });
+
+  it("填了目標與授權後送出的就是那兩個值（授權 0 以外的數字不能在路上被吃掉）", async () => {
+    seedCommander({ level: "command" });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    await userEvent.type(box.getByLabelText("要組代理達成什麼"), "把三個待審的案子推到可交付");
+    await userEvent.clear(box.getByLabelText("自動核准授權（點）"));
+    await userEvent.type(box.getByLabelText("自動核准授權（點）"), "250");
+    await userEvent.click(box.getByRole("button", { name: "排調度計畫" }));
+    expect(h.mutations).toEqual([{
+      path: "teamAssistant.planCampaign",
+      input: { groupId: GROUP, goal: "把三個待審的案子推到可交付", budgetPoints: 250 },
+    }]);
+  });
+
+  it("待核准：列出狀態、進度與已自動核准點數，並給核准／放棄（還沒開跑就不該有「停止」）", async () => {
+    seedCommander({ level: "command", campaigns: [campaign()] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText("待核准")).toBeInTheDocument();
+    // skipped 不算在分母；這份四步都要做，所以是 1/4。
+    // 兩個點數都要帶「估」：它們是估點不是實扣，這一區曾是全卡唯一沒標的地方。
+    expect(box.getByText("1/4 步・已自動核准 估 0 點／授權 估 100 點")).toBeInTheDocument();
+
+    await userEvent.click(box.getByRole("button", { name: "核准" }));
+    expect(h.mutations).toEqual([{ path: "teamAssistant.approveCampaign", input: { runId: "camp-1" } }]);
+    await userEvent.click(box.getByRole("button", { name: "放棄" }));
+    expect(h.mutations[1]).toEqual({ path: "teamAssistant.discardCampaign", input: { runId: "camp-1" } });
+    expect(box.queryByRole("button", { name: "停止" })).not.toBeInTheDocument();
+  });
+
+  it("執行中：只給停止——核准／放棄出現在這裡等於讓人重按一份已經在花點的計畫", () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "running", spentPoints: 30 })] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText("1/4 步・已自動核准 估 30 點／授權 估 100 點")).toBeInTheDocument();
+    expect(box.getByRole("button", { name: "停止" })).toBeInTheDocument();
+    expect(box.queryByRole("button", { name: "核准" })).not.toBeInTheDocument();
+    expect(box.queryByRole("button", { name: "放棄" })).not.toBeInTheDocument();
+    expect(box.queryByRole("button", { name: /^繼續/ })).not.toBeInTheDocument();
+  });
+
+  it("等待人員：給「繼續」與加授權輸入框，送出時把加的點數一起帶上", async () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "waiting", spentPoints: 100 })] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText("等待人員")).toBeInTheDocument();
+    const add = box.getByLabelText(/加多少自動核准授權/);
+    await userEvent.clear(add);
+    await userEvent.type(add, "40");
+    await userEvent.click(box.getByRole("button", { name: /^繼續/ }));
+    expect(h.mutations).toEqual([{
+      path: "teamAssistant.resumeCampaign",
+      input: { runId: "camp-1", addBudgetPoints: 40 },
+    }]);
+  });
+
+  it("等待人員也還能停止（卡在人工關卡的計畫本來就該收得掉）", () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "waiting" })] });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(commander()).getByRole("button", { name: "停止" })).toBeInTheDocument();
+  });
+
+  it("已結束的計畫不再給任何動作鈕（完成的計畫按「繼續」只會吃 PRECONDITION_FAILED）", () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "done", spentPoints: 88 })] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText("完成")).toBeInTheDocument();
+    for (const name of ["核准", "放棄", "停止"]) {
+      expect(box.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    expect(box.queryByRole("button", { name: /^繼續/ })).not.toBeInTheDocument();
+  });
+
+  it("點目標可展開步驟；每一步帶著種類與狀態 class（樣式靠這個分色，狀態錯就看不出哪一步炸了）", async () => {
+    seedCommander({
+      level: "command",
+      campaigns: [campaign({
+        status: "running",
+        steps: [
+          { id: "s1", kind: "dispatch", title: "在招生短片開一份分鏡計畫", note: "", status: "done", result: "已建立" },
+          { id: "s2", kind: "watch", title: "盯著分鏡計畫", note: "", status: "failed", error: "子計畫重試三次仍失敗" },
+          { id: "s3", kind: "wait_for_human", title: "等阿光確認旁白", note: "", status: "waiting" },
+          { id: "s4", kind: "report", title: "回報結論", note: "", status: "skipped" },
+        ],
+      })],
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    // 沒展開前不該把整份步驟攤在列表裡（一組計畫十二步會把卡片洗版）
+    expect(box.queryByText(/派工｜在招生短片開一份分鏡計畫/)).not.toBeInTheDocument();
+
+    await userEvent.click(box.getByRole("button", { name: "把三個待審的案子推到可交付" }));
+    expect(box.getByText("派工｜在招生短片開一份分鏡計畫——已建立")).toHaveClass("team-commander__step", "is-done");
+    expect(box.getByText("盯進度｜盯著分鏡計畫——子計畫重試三次仍失敗")).toHaveClass("team-commander__step", "is-failed");
+    expect(box.getByText("等待人員｜等阿光確認旁白")).toHaveClass("team-commander__step", "is-waiting");
+    expect(box.getByText("結論｜回報結論")).toHaveClass("team-commander__step", "is-skipped");
+    // skipped 不算分母：三步要做、一步已完成
+    expect(box.getByText("1/3 步・已自動核准 估 0 點／授權 估 100 點")).toBeInTheDocument();
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────
+   總指揮區塊的「畫面不准說謊」：載入中／載入失敗／權限讀不到／多份計畫互不干擾。
+
+   這一整組測的都是同一件事——當程式其實不知道答案時，畫面有沒有假裝知道。
+   每一條後面都跟著一筆真的會發生的損失（雙倍派工、授權加錯份、按了必失敗的鈕）。
+   ──────────────────────────────────────────────────────────────── */
+describe("L3 組代理總指揮：載入中與載入失敗不能長成「還沒有計畫」", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.mutationReply.clear();
+    h.queryState.clear();
+    h.refetches.length = 0;
+  });
+
+  it("調度計畫還在載入 → 說「載入中」，不准說「還沒有組代理調度計畫」", () => {
+    // 空手講成「還沒有」的實際後果：其實有一份 running 的計畫正在派工，
+    // 組長據此重排第二份，兩份同時對同一批專案派工又各自自動核准 → 點數雙倍支出。
+    seedCommander({ level: "command", campaignsState: { isLoading: true } });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText(/調度計畫載入中/)).toBeInTheDocument();
+    expect(box.queryByText(/還沒有組代理調度計畫/)).not.toBeInTheDocument();
+  });
+
+  it("調度計畫載入失敗 → 說失敗並給「再試一次」，重試真的接到那支查詢", async () => {
+    seedCommander({ level: "command", campaignsState: { error: { message: "逾時" } } });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByRole("alert")).toHaveTextContent(/調度計畫載入失敗/);
+    expect(box.queryByText(/還沒有組代理調度計畫/)).not.toBeInTheDocument();
+    await userEvent.click(box.getByRole("button", { name: "再試一次" }));
+    expect(h.refetches).toContain("teamAssistant.campaigns");
+  });
+
+  it("沒有發起權、但計畫清單還在載入 → 整塊不准消失（消失＝謊稱這組什麼都沒有）", () => {
+    seedCommander({ level: "none", campaignsState: { isLoading: true } });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(commander()).getByText(/調度計畫載入中/)).toBeInTheDocument();
+  });
+
+  it("指揮權還在查 → 講「正在確認權限」，不是無聲消失也不是假裝沒有權限", () => {
+    seedCommander({ levelState: { isLoading: true }, campaigns: [] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText(/正在確認你的指揮權限/)).toBeInTheDocument();
+    // 還沒確認完就不給發起入口（給了才是真的危險）
+    expect(box.queryByRole("button", { name: "排調度計畫" })).not.toBeInTheDocument();
+  });
+
+  it("指揮權查詢失敗 → 明講「不代表你沒有權限」，並能重試", async () => {
+    seedCommander({ levelState: { error: { message: "500" } }, campaigns: [] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText(/這不代表你沒有權限/)).toBeInTheDocument();
+    await userEvent.click(box.getByRole("button", { name: "再試一次" }));
+    expect(h.refetches).toContain("teamAssistant.commandLevel");
+  });
+
+  it("兩者都載完、確實沒權限也沒計畫 → 才可以整塊收掉", () => {
+    seedCommander({ level: "none", campaigns: [] });
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.queryByLabelText("組代理總指揮")).not.toBeInTheDocument();
+  });
+});
+
+describe("L3 組代理總指揮：加授權輸入框以計畫為單位（跨列共用會把點數加到別份計畫上）", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.mutationReply.clear();
+    h.queryState.clear();
+  });
+
+  const twoWaiting = () => [
+    campaign({ id: "camp-1", goal: "把三個待審的案子推到可交付", status: "waiting" }),
+    campaign({ id: "camp-2", goal: "補齊社課回顧的旁白", status: "waiting" }),
+  ];
+
+  it("在 A 列輸入的點數不會出現在 B 列，送出的也是 A 的數字", async () => {
+    seedCommander({ level: "command", campaigns: twoWaiting() });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    const addA = box.getByLabelText(/為「把三個待審的案子推到/);
+    const addB = box.getByLabelText(/為「補齊社課回顧的旁白/);
+    await userEvent.clear(addA);
+    await userEvent.type(addA, "200");
+    // B 那格必須原封不動——共用 state 時它會跟著變成 200，按下 B 就是白送 200 點授權
+    expect(addB).toHaveValue(0);
+
+    await userEvent.click(box.getByRole("button", { name: /^繼續執行「補齊社課回顧的旁白」/ }));
+    expect(h.mutations).toEqual([{
+      path: "teamAssistant.resumeCampaign",
+      input: { runId: "camp-2", addBudgetPoints: 0 },
+    }]);
+  });
+
+  it("按鈕點名是哪一份調度計畫（一排同名的「繼續」等於逼人靠位置猜）", async () => {
+    seedCommander({ level: "command", campaigns: twoWaiting() });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    const addA = box.getByLabelText(/為「把三個待審的案子推到/);
+    await userEvent.clear(addA);
+    await userEvent.type(addA, "200");
+    // 可見文字與無障礙名稱都要帶著那份計畫的目標與加了幾點
+    const btnA = box.getByRole("button", { name: /^繼續執行「把三個待審的案子推到/ });
+    expect(btnA).toHaveAccessibleName(/加授權 估 200 點$/);
+    expect(btnA).toHaveTextContent(/^繼續「把三個待審的案子推到/);
+    expect(btnA).toHaveTextContent("（+估 200 點）");
+    await userEvent.click(btnA);
+    expect(h.mutations).toEqual([{
+      path: "teamAssistant.resumeCampaign",
+      input: { runId: "camp-1", addBudgetPoints: 200 },
+    }]);
+  });
+});
+
+describe("L3 組代理總指揮：停止／放棄照後端「發起人或組長以上」露出", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.mutationReply.clear();
+    h.queryState.clear();
+  });
+
+  it("組員看別人發起的計畫：不給停止／放棄（按下去只會吃 FORBIDDEN，看起來像系統壞掉）", () => {
+    seedCommander({
+      level: "command",
+      role: "member",
+      myUserId: "u9",
+      campaigns: [campaign({ status: "running", userId: "u1" })],
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    // 看得到別人的計畫（不能對他隱形），但動不了
+    expect(box.getByText("執行中")).toBeInTheDocument();
+    expect(box.queryByRole("button", { name: "停止" })).not.toBeInTheDocument();
+  });
+
+  it("組員看自己發起的計畫：停止照給（後端放行的就該露出來）", () => {
+    seedCommander({
+      level: "command",
+      role: "member",
+      myUserId: "u9",
+      campaigns: [campaign({ status: "running", userId: "u9" })],
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(commander()).getByRole("button", { name: "停止" })).toBeInTheDocument();
+  });
+
+  it("組員看別人待核准的計畫：核准與放棄都不露出", () => {
+    seedCommander({
+      level: "command",
+      role: "member",
+      myUserId: "u9",
+      campaigns: [campaign({ status: "awaiting_approval", userId: "u1" })],
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.queryByRole("button", { name: "核准" })).not.toBeInTheDocument();
+    expect(box.queryByRole("button", { name: "放棄" })).not.toBeInTheDocument();
+  });
+
+  it("組長看別人發起的計畫：停止照給（組長本來就管得動全組）", () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "running", userId: "u7" })] });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(commander()).getByRole("button", { name: "停止" })).toBeInTheDocument();
+  });
+
+  it("只有 supervise 等級的發起人：能放棄自己的計畫，但不能核准（核准要 command）", () => {
+    seedCommander({
+      level: "supervise",
+      role: "member",
+      myUserId: "u9",
+      campaigns: [campaign({ status: "awaiting_approval", userId: "u9" })],
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByRole("button", { name: "放棄" })).toBeInTheDocument();
+    expect(box.queryByRole("button", { name: "核准" })).not.toBeInTheDocument();
+  });
+});
+
+describe("L3 組代理總指揮：waiting 要講清楚在等什麼、下一步是什麼", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.mutationReply.clear();
+    h.queryState.clear();
+  });
+
+  /** 預算停手：watch 步驟卡在 waiting，成因是子計畫估點超出授權 */
+  const budgetWaiting = (over: Record<string, unknown> = {}) => campaign({
+    status: "waiting",
+    budgetPoints: 0,
+    spentPoints: 0,
+    steps: [
+      { id: "s1", kind: "dispatch", title: "在招生短片開一份分鏡計畫", note: "", status: "done", result: "已建立" },
+      {
+        id: "s2", kind: "watch", title: "盯著分鏡計畫", note: "", status: "waiting",
+        error: "子計畫估 40 點，超出本次授權（已用 0／0 點）",
+      },
+    ],
+    ...over,
+  });
+
+  it("預算停手：講明是授權不夠，並指出「加授權」或「自己去核准那份子計畫」兩條路", () => {
+    seedCommander({ level: "command", campaigns: [budgetWaiting()] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText(/等你決定授權：「盯著分鏡計畫」/)).toHaveTextContent("子計畫估 40 點，超出本次授權");
+    expect(box.getByText(/等你決定授權/)).toHaveTextContent(/自己到那個專案核准那份子計畫/);
+  });
+
+  it("預算停手且沒填點數：明講按了會停在同一步（不然使用者會按第二次、第三次然後說鈕壞了）", async () => {
+    seedCommander({ level: "command", campaigns: [budgetWaiting()] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText(/下一輪還是會停在同一步/)).toBeInTheDocument();
+    // 填了點數，這句提示就該消失
+    await userEvent.clear(box.getByLabelText(/加多少自動核准授權/));
+    await userEvent.type(box.getByLabelText(/加多少自動核准授權/), "50");
+    expect(box.queryByText(/下一輪還是會停在同一步/)).not.toBeInTheDocument();
+  });
+
+  it("人工關卡：講在等誰做什麼，且不出現「加授權」那句（加點解決不了人工關卡）", () => {
+    seedCommander({
+      level: "command",
+      campaigns: [campaign({
+        status: "waiting",
+        steps: [
+          { id: "s1", kind: "wait_for_human", title: "等阿光確認旁白", note: "旁白稿要本人點頭", status: "waiting" },
+        ],
+      })],
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByText(/等人處理：「等阿光確認旁白」/)).toHaveTextContent("旁白稿要本人點頭");
+    expect(box.queryByText(/等你決定授權/)).not.toBeInTheDocument();
+    expect(box.queryByText(/下一輪還是會停在同一步/)).not.toBeInTheDocument();
+  });
+});
+
+describe("L3 組代理總指揮：文案誠實度", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.mutationReply.clear();
+    h.queryState.clear();
+  });
+
+  it("授權 0 點的核准確認訊息不准說「會在 0 點授權內自動核准」——那讀起來像它會自己處理", () => {
+    seedCommander({ level: "command", campaigns: [campaign({ budgetPoints: 0 })] });
+    render(<Launchpad groupId={GROUP} />);
+    const msg = within(commander()).getByRole("button", { name: "核准" }).getAttribute("message") ?? "";
+    expect(msg).toMatch(/停下來等你核准/);
+    expect(msg).not.toMatch(/0 點的授權內自動核准/);
+  });
+
+  it("授權大於 0 時才講「在授權內自動核准」，而且點數帶「估」", () => {
+    seedCommander({ level: "command", campaigns: [campaign({ budgetPoints: 100 })] });
+    render(<Launchpad groupId={GROUP} />);
+    const msg = within(commander()).getByRole("button", { name: "核准" }).getAttribute("message") ?? "";
+    expect(msg).toMatch(/估 100 點的授權內自動核准子計畫/);
+  });
+
+  it("已停止的計畫在列表上就看得出「子計畫沒有跟著停」（確認訊息按完就消失了）", () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "stopped" })] });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(commander()).getByText(/先前派出去的子計畫仍在各專案照常執行/)).toBeInTheDocument();
+  });
+
+  it("動作失敗時指名是哪一個動作——後端四句訊息長得很像，對不上按鈕就會被當成按錯鈕", () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "waiting" })] });
+    h.mutationError.set("teamAssistant.resumeCampaign", { message: "只有發起人或組長以上可以續跑組代理調度計畫" });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(commander()).getByRole("alert"))
+      .toHaveTextContent("讓調度計畫繼續失敗：只有發起人或組長以上可以續跑組代理調度計畫");
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────
+   總指揮的四個動作：失敗要接住，舊錯誤不能賴在下一個動作上。
+
+   這兩件事都不會讓畫面「看起來」壞掉，所以只能靠測試守：
+   前者是主控台一路噴 unhandled rejection（開發環境還會被 overlay 蓋住整頁），
+   後者是橫幅指著一顆使用者這一輪根本沒按的鈕。
+   ──────────────────────────────────────────────────────────────── */
+describe("L3 組代理總指揮：動作失敗的收尾", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.mutationReply.clear();
+    h.queryState.clear();
+  });
+
+  /** 在這段期間內冒出來的 unhandled rejection（Node 在該 tick 結束時才判定，所以要讓出一個 macrotask） */
+  async function unhandledDuring(fn: () => Promise<void>): Promise<unknown[]> {
+    const caught: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { caught.push(reason); };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await fn();
+      await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+    return caught;
+  }
+
+  it.each([
+    ["approveCampaign", "awaiting_approval", /^核准$/, "核准調度計畫失敗"],
+    ["discardCampaign", "awaiting_approval", /^放棄$/, "放棄調度計畫失敗"],
+    ["stopCampaign", "running", /^停止$/, "停止調度計畫失敗"],
+    ["resumeCampaign", "waiting", /^繼續/, "讓調度計畫繼續失敗"],
+  ] as const)(
+    "%s 被後端擋下來時接得住，不會變成 unhandled rejection（錯誤仍由橫幅講出來）",
+    async (path, status, btn, banner) => {
+      seedCommander({ level: "command", campaigns: [campaign({ status })] });
+      h.mutationRejects.set(`teamAssistant.${path}`, { message: "只有發起人或組長以上可以動這份調度計畫" });
+      const view = render(<Launchpad groupId={GROUP} />);
+      const caught = await unhandledDuring(async () => {
+        await userEvent.click(within(commander()).getByRole("button", { name: btn }));
+      });
+      expect(caught).toEqual([]);
+      expect(h.mutations).toEqual([{ path: `teamAssistant.${path}`, input: expect.anything() }]);
+      // 吞掉 rejection 不等於吞掉錯誤：使用者仍要看得到是哪一個動作失敗、後端說了什麼。
+      // 失敗本身不改任何 React state，所以這裡補一次 rerender，演出真實 tRPC 下錯誤落地後的那次重繪。
+      view.rerender(<Launchpad groupId={GROUP} />);
+      expect(within(commander()).getByRole("alert"))
+        .toHaveTextContent(`${banner}：只有發起人或組長以上可以動這份調度計畫`);
+    },
+  );
+
+  it("動作開始前先清掉上一個動作的舊錯誤（不然核准失敗過一次，之後每個成功的動作都還掛著那句）", async () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "waiting" })] });
+    h.mutationError.set("teamAssistant.approveCampaign", { message: "點數不足" });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByRole("alert")).toHaveTextContent("核准調度計畫失敗：點數不足");
+
+    // 這次按的是「繼續」而且成功了，橫幅卻還在講「核准失敗」——指著一顆這一輪沒按的鈕
+    await userEvent.click(box.getByRole("button", { name: /^繼續/ }));
+    expect(h.resets).toEqual(expect.arrayContaining([
+      "teamAssistant.approveCampaign",
+      "teamAssistant.resumeCampaign",
+      "teamAssistant.stopCampaign",
+      "teamAssistant.discardCampaign",
+    ]));
+    expect(box.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("繼續失敗時不清掉輸入框的授權點數（清掉的話重按一次就變成不加授權，下一輪照樣停在同一步）", async () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "waiting" })] });
+    h.mutationRejects.set("teamAssistant.resumeCampaign", { message: "額度不足" });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    const add = box.getByLabelText(/加多少自動核准授權/);
+    await userEvent.clear(add);
+    await userEvent.type(add, "40");
+    await userEvent.click(box.getByRole("button", { name: /^繼續/ }));
+    expect(add).toHaveValue(40);
+  });
+});
+
+describe("L3 組代理總指揮：展開步驟的鈕要說得出自己是開還是關", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.queryState.clear();
+  });
+
+  it("目標鈕帶 aria-expanded／aria-controls，且指到真的步驟容器（只聽文字的人才知道展開了沒）", async () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "running" })] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    const toggle = box.getByRole("button", { name: "把三個待審的案子推到可交付" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const controls = toggle.getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // aria-controls 指到不存在的 id 等於沒寫：展開後那個 id 一定要真的是步驟清單
+    const panel = document.getElementById(controls!);
+    expect(panel).not.toBeNull();
+    expect(within(panel!).getByText(/派工｜在招生短片開一份分鏡計畫/)).toBeInTheDocument();
+  });
+});
+
+describe("campaignRefetchInterval（waiting 也要輪詢，不然人工關卡解掉了畫面也不會動）", () => {
+  it("running 與 waiting 都輪詢；其餘狀態與空清單不輪詢", () => {
+    expect(campaignRefetchInterval([{ status: "running" }])).toBe(10_000);
+    // 這一條是修法本身：waiting 才是最需要盯的狀態（別人可能剛把關卡處理掉）
+    expect(campaignRefetchInterval([{ status: "waiting" }])).toBe(10_000);
+    expect(campaignRefetchInterval([{ status: "awaiting_approval" }, { status: "done" }])).toBe(false);
+    expect(campaignRefetchInterval([])).toBe(false);
+    expect(campaignRefetchInterval(undefined)).toBe(false);
+  });
+});
+
+describe("組彙總 AI 的指令提議（ask 的 actions）", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.mutationReply.clear();
+    h.askReply = {};
+  });
+
+  /** 提議裡的 command 直接對應後端 zod 的形狀；前端只負責原樣轉交 */
+  const APPROVE = { kind: "approve_run", runId: "22222222-2222-4222-8222-222222222222" };
+  const DISPATCH = {
+    kind: "dispatch",
+    projectId: "33333333-3333-4333-8333-333333333333",
+    goal: "補一版可用的旁白稿",
+    plannerMode: "thorough",
+    playbookId: "playbook.storyboard.v1",
+  };
+
+  const askWithActions = (actions: Array<Record<string, unknown>>) => {
+    h.askReply = {
+      answer: "「招生短片」那份計畫還卡在待核。",
+      steps: [], dispatches: [], canDispatch: true, contextUsed: [], degraded: false, actions,
+    };
+  };
+
+  const askNow = async (q: string) => {
+    await userEvent.type(screen.getByLabelText("問卡片答不出來的事"), q);
+    await userEvent.click(screen.getByRole("button", { name: "詢問" }));
+  };
+
+  it("回傳 actions → 畫面出現對應按鈕（有理由就掛在 title 上）", async () => {
+    seed({ runs: [], pending: [] });
+    askWithActions([{ command: APPROVE, label: "核准「招生短片」的計畫", reason: "它已經等了 8 天" }]);
+    render(<Launchpad groupId={GROUP} />);
+    await askNow("那份計畫怎麼還沒動？");
+    const btn = await screen.findByRole("button", { name: "核准「招生短片」的計畫" });
+    expect(btn).toHaveAttribute("title", "它已經等了 8 天");
+  });
+
+  it("按下去送的是 teamAssistant.command，且 command 與提議逐欄一致（前端不重新拆解）", async () => {
+    seed({ runs: [], pending: [] });
+    askWithActions([
+      { command: APPROVE, label: "核准「招生短片」的計畫" },
+      { command: DISPATCH, label: "在社課回顧補一版旁白稿", reason: "旁白缺稿" },
+    ]);
+    render(<Launchpad groupId={GROUP} />);
+    await askNow("接下來該做什麼？");
+    // 挑帶了 plannerMode／playbookId 的那一則：任何一欄在路上被吃掉，這裡就會紅
+    await userEvent.click(await screen.findByRole("button", { name: "在社課回顧補一版旁白稿" }));
+    const sent = h.mutations.filter((m) => m.path === "teamAssistant.command");
+    expect(sent).toHaveLength(1);
+    expect(sent[0].input).toEqual({ groupId: GROUP, command: DISPATCH });
+  });
+
+  it("執行成功後按鈕換成後端回的結果文字（同一道指令不會被按第二次）", async () => {
+    seed({ runs: [], pending: [] });
+    h.mutationReply.set("teamAssistant.command", {
+      kind: "approve_run",
+      message: "已核准「招生短片」的計畫，開始執行（估 12 點）",
+      runId: APPROVE.runId,
+    });
+    askWithActions([{ command: APPROVE, label: "核准「招生短片」的計畫" }]);
+    render(<Launchpad groupId={GROUP} />);
+    await askNow("那份計畫怎麼還沒動？");
+    await userEvent.click(await screen.findByRole("button", { name: "核准「招生短片」的計畫" }));
+    expect(await screen.findByText("✓ 已核准「招生短片」的計畫，開始執行（估 12 點）")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "核准「招生短片」的計畫" })).not.toBeInTheDocument();
+    expect(h.mutations.filter((m) => m.path === "teamAssistant.command")).toHaveLength(1);
+  });
+
+  it("清除對話也要清掉已執行的指令記錄——不然新一輪的提議會頂著上一輪的「✓ …」，按鈕根本不出現", async () => {
+    seed({ runs: [], pending: [] });
+    h.mutationReply.set("teamAssistant.command", {
+      kind: "approve_run",
+      message: "已核准「招生短片」的計畫，開始執行（估 12 點）",
+      runId: APPROVE.runId,
+    });
+    askWithActions([{ command: APPROVE, label: "核准「招生短片」的計畫" }]);
+    render(<Launchpad groupId={GROUP} />);
+    await askNow("那份計畫怎麼還沒動？");
+    await userEvent.click(await screen.findByRole("button", { name: "核准「招生短片」的計畫" }));
+    expect(await screen.findByText("✓ 已核准「招生短片」的計畫，開始執行（估 12 點）")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "清除對話" }));
+    // 第二輪的提議落回同一個 key（act-{訊息索引}-{i}，索引從 0 重來）：
+    // actioned 沒清的話，這則新提議會直接被畫成上一輪的成功結果，使用者以為新指令送出去了。
+    askWithActions([{ command: DISPATCH, label: "在社課回顧補一版旁白稿" }]);
+    await askNow("那接下來呢？");
+    expect(await screen.findByRole("button", { name: "在社課回顧補一版旁白稿" })).toBeInTheDocument();
+    expect(screen.queryByText("✓ 已核准「招生短片」的計畫，開始執行（估 12 點）")).not.toBeInTheDocument();
   });
 });

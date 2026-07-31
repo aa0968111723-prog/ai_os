@@ -7,6 +7,7 @@ import { db, schema } from "../db";
 import { getSettings, updateSettings, usedTotal, usedThisWeek, usedToday, effectiveDailyQuota, groupUsage, usedByGroup, usedByMember, loadQuotaConfig } from "../services/points";
 import { getFalAccountBalance } from "../services/falBilling";
 import { getFalPointsCeiling } from "../services/falCeiling";
+import { canRunCommand, groupCommandLevelSchema, levelAtLeast, resolveCommandLevel, type GroupCommandLevel } from "../../shared/groupAgent";
 
 /** 團隊管理權檢查（組預算是由上往下分配的，只有團隊管理員以上能調）：開發者或該組所屬團隊的 admin */
 async function assertGroupTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, groupId: string): Promise<void> {
@@ -27,6 +28,8 @@ async function assertCanAllocateToMember(
   auth: AuthState,
   groupId: string,
   targetUserId: string,
+  /** 錯誤訊息裡的受詞（額度／預算之外，組代理指揮權也走同一把尺——見 setMemberCommandLevel） */
+  subject = "額度／預算",
 ): Promise<void> {
   requireLeader(auth, groupId); // 需組長以上，且確認呼叫者屬於這個組
   // 大小寫無關比對（安全關鍵）：z.string().uuid() 接受大寫 UUID，而 Postgres uuid 比較大小寫無關，
@@ -35,8 +38,42 @@ async function assertCanAllocateToMember(
   if (targetUserId.toLowerCase() !== auth.user.id.toLowerCase()) return; // 對其他組員：組長權限即可
   const [group] = await db.select().from(schema.groups).where(eq(schema.groups.id, groupId));
   if (!auth.user.isSuperAdmin && !(group && auth.adminTeamIds.includes(group.teamId))) {
-    throw new TRPCError({ code: "FORBIDDEN", message: "不能調整自己的額度／預算——請由團隊管理員以上調整（分配是由上往下）" });
+    throw new TRPCError({ code: "FORBIDDEN", message: `不能調整自己的${subject}——請由團隊管理員以上調整（分配是由上往下）` });
   }
+}
+
+/* ── 組代理指揮權（agent_command_level）的寫入規則 ──
+ *
+ * 這個欄位有兩個寫入端：新的 setMemberCommandLevel（四級）與舊的 setMemberDispatch（布林開關）。
+ * 兩支都必須把「等級」與「舊布林」寫成同一個意思，否則兩套規則會分岔——而分岔的後果不是顯示錯字，
+ * 是授權錯誤：resolveCommandLevel 的規則是「明確設過的等級優先，null 才退回讀布林」，
+ * 所以只要有一支只寫其中一欄，就會出現「畫面上關掉了、後端仍放行」或反過來的落差。
+ */
+
+/**
+ * 指揮權等級 → 舊布林 canDispatchAgent 該寫成什麼。
+ *
+ * 為什麼還要維護這個舊欄位：站內仍有直接讀 canDispatchAgent 的舊路徑（見 shared/groupAgent
+ * 的 resolveCommandLevel fallback，以及尚未遷移的讀取面）。把它留在原地不動，會讓「等級降到 none
+ * 但布林還是 true」的成員在那些路徑上照樣派得動工——降權失效是最不該無聲發生的事。
+ * 關閉時寫 null 而非 false：沿用本欄「null＝未授權」的原始語意，不製造第二種「關」。
+ */
+export function dispatchFlagForLevel(level: GroupCommandLevel): true | null {
+  return canRunCommand(level, "dispatch") ? true : null;
+}
+
+/**
+ * 舊「可派工」開關的一次切換 → 該落庫的指揮權等級。
+ *
+ * 兩條規則都刻意不對稱，因為兩個方向的誤判代價不同：
+ *  - 打開時**不降級**：組長已經把某人設成「可監督」，別人在舊 UI 按一下「派工權：開」，
+ *    若無條件寫成 dispatch 就是把監督權默默收回——使用者按的是「開」，結果權限變小，沒有人會預期。
+ *  - 關掉時一律寫 none：若只把布林設回 null 而留著 supervise，畫面顯示「關」但後端仍准他替別人核准
+ *    並開始花點。收權必須是真的收權，寧可多收也不能假收。
+ */
+export function levelFromDispatchToggle(current: GroupCommandLevel, canDispatch: boolean): GroupCommandLevel {
+  if (!canDispatch) return "none";
+  return levelAtLeast(current, "dispatch") ? current : "dispatch";
 }
 
 /** 點數與額度管理（定案：不鎖死——開發者調全域、管理員調組、組長調成員） */
@@ -183,20 +220,60 @@ export const quotaRouter = router({
       return { ok: true, thresholdPoints: value };
     }),
 
-  /** 團隊代理派工授權（需求 12 v2）：組長對個別組員開/關「用組彙總 AI 派工到專案」的權。
-   *  組長以上本就有派工權、不需也不受此欄影響——只對 role='member' 的成員有意義。 */
-  setMemberDispatch: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), canDispatch: z.boolean() }))
+  /**
+   * 組代理指揮權等級（分級授權的唯一設定入口）：組長對個別組員設 none／dispatch／supervise／command。
+   *
+   * 為什麼需要這支：等級已經落庫並在 L1/L2/L3 全面生效，但先前只有一支布林 mutation，
+   * 於是「可監督」以上根本沒有任何管道設得出來——後端做完的分級授權對一般組員等於不存在。
+   *
+   * 守門刻意沿用 assertCanAllocateToMember（與個人預算／週額度同一把尺）：組長對別的組員即可，
+   * 對「自己」需團隊管理員以上。後者不是形式主義——supervise 以上能替別人核准子計畫，
+   * 也就是能直接開始花真金白銀的點；讓被授權者自己往上調等於把提權的鑰匙交到他手上。
+   * （組長角色本身恆為 command、不看此欄，但他隨時可能被降成組員，屆時這個自設值就會生效。）
+   */
+  setMemberCommandLevel: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), level: groupCommandLevelSchema }))
     .mutation(async ({ ctx, input }) => {
-      requireLeader(ctx.auth, input.groupId);
+      await assertCanAllocateToMember(ctx.auth, input.groupId, input.userId, "組代理指揮權");
+      const canDispatch = dispatchFlagForLevel(input.level);
       const updated = await db
         .update(schema.groupMembers)
-        // 關閉時寫 null（回到「未授權」的預設語意），開啟寫 true——與 memberCanDispatch 的判斷一致
-        .set({ canDispatchAgent: input.canDispatch ? true : null })
+        // 兩欄一起寫：只寫等級的話，舊讀取路徑仍看得到相反的布林（見上方寫入規則註解）
+        .set({ agentCommandLevel: input.level, canDispatchAgent: canDispatch })
         .where(and(eq(schema.groupMembers.groupId, input.groupId), eq(schema.groupMembers.userId, input.userId)))
         .returning({ id: schema.groupMembers.id });
       if (updated.length === 0) throw new TRPCError({ code: "NOT_FOUND", message: "這位成員不在這個組" });
-      return { ok: true, canDispatch: input.canDispatch };
+      return { ok: true, level: input.level, canDispatch: canDispatch === true };
+    }),
+
+  /** 團隊代理派工授權（需求 12 v2）：組長對個別組員開/關「用組彙總 AI 派工到專案」的權。
+   *  組長以上本就有派工權、不需也不受此欄影響——只對 role='member' 的成員有意義。
+   *
+   *  分級授權上線後這支**只是 setMemberCommandLevel 的粗糙版**（開＝至少 dispatch、關＝none），
+   *  保留是因為既有 UI（組長「選項」頁的派工權按鈕）與外部呼叫仍在用它，直接刪掉會讓那些入口壞掉。
+   *  但它不能只寫布林：resolveCommandLevel 以「明確設過的等級」優先，舊布林只是 null 時的退路，
+   *  所以只寫布林的話，一位已被設成 supervise 的組員按下「關」之後，後端仍會讓他替別人核准並花點——
+   *  開關變成謊言。故一律折算成等級一起寫（見 levelFromDispatchToggle 的兩條不對稱規則）。 */
+  setMemberDispatch: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), userId: z.string().uuid(), canDispatch: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      // 守門與 setMemberCommandLevel 完全一致（含「不能改自己」）：兩支寫同樣的欄位，
+      // 若守門寬嚴不同，攻擊者只要挑寬的那支下手，嚴的那支就白設了。
+      await assertCanAllocateToMember(ctx.auth, input.groupId, input.userId, "組代理指揮權");
+      const [member] = await db
+        .select({ agentCommandLevel: schema.groupMembers.agentCommandLevel, canDispatchAgent: schema.groupMembers.canDispatchAgent, role: schema.groupMembers.role })
+        .from(schema.groupMembers)
+        .where(and(eq(schema.groupMembers.groupId, input.groupId), eq(schema.groupMembers.userId, input.userId)));
+      if (!member) throw new TRPCError({ code: "NOT_FOUND", message: "這位成員不在這個組" });
+      // 以「這位成員目前的實際等級」為基準折算：對組長讀出來的是 command，但那來自角色而非欄位，
+      // 這裡只在乎欄位值，故一律以 member 身分解析（組長本來就不看此欄）。
+      const current = resolveCommandLevel("member", member);
+      const level = levelFromDispatchToggle(current, input.canDispatch);
+      await db
+        .update(schema.groupMembers)
+        .set({ agentCommandLevel: level, canDispatchAgent: dispatchFlagForLevel(level) })
+        .where(and(eq(schema.groupMembers.groupId, input.groupId), eq(schema.groupMembers.userId, input.userId)));
+      return { ok: true, canDispatch: input.canDispatch, level };
     }),
 
   /** 個別成員覆寫（組長對自己組員微調） */
@@ -222,6 +299,10 @@ export const quotaRouter = router({
     const members = await db.select().from(schema.groupMembers).where(eq(schema.groupMembers.groupId, input.groupId));
     const rows = members.map((m) => {
       const u = usageByUser.get(m.userId);
+      // 組代理指揮權：設定 UI 要顯示目前等級（沒有回傳就只能顯示布林，四級選單永遠選不到正確的現值）。
+      // canDispatch 一律由等級推導，不再自己判斷布林——否則一位設成 supervise 但舊布林仍為 null 的組員，
+      // 會在畫面上顯示「不可派工」而後端放行，兩邊各說各話。
+      const commandLevel = resolveCommandLevel(m.role, m);
       return {
         userId: m.userId,
         name: users.find((x) => x.id === m.userId)?.name ?? "?",
@@ -230,8 +311,10 @@ export const quotaRouter = router({
         total: u?.total ?? 0, // 累計淨消耗——個人預算的分母
         weeklyOverride: m.weeklyPointsOverride ?? null, // null＝跟組
         budget: m.budgetPoints ?? null, // null＝不限（未分配個人預算）
+        /** 組代理指揮權等級（組長以上恆為 command，不看欄位） */
+        commandLevel,
         // 團隊代理派工授權（組長以上本就可派，此旗標只對一般組員有意義；null/false＝未授權）
-        canDispatch: m.role !== "member" || m.canDispatchAgent === true,
+        canDispatch: canRunCommand(commandLevel, "dispatch"),
       };
     });
     const allocated = rows.reduce((s, r) => s + (r.budget ?? 0), 0); // 已分配給組員的個人預算總和

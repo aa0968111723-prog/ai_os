@@ -12,6 +12,8 @@ import {
   formatAgentRunLine,
   groupSummaryFromCounts,
   resolveDispatches,
+  resolveCommandProposals,
+  formatCommandRefs,
   summarizeGroupAgentRuns,
 } from "./teamAssistant";
 
@@ -525,5 +527,122 @@ describe("sanitizeContextUsed／sanitizeRationale（S5：決策軌跡的守門�
     expect(sanitizeRationale("   ")).toBeUndefined();
     expect(sanitizeRationale(undefined)).toBeUndefined();
     expect(sanitizeRationale(123)).toBeUndefined();
+  });
+});
+
+/* ── 組代理總指揮：指令提議的解析（L1/L2 的露出面） ── */
+
+const commandRefs = {
+  runs: [
+    { ref: "r1", id: "10000000-0000-0000-0000-000000000001", projectTitle: "招生短片", status: "awaiting_approval", goal: "逐鏡出圖", estPoints: 40 },
+    { ref: "r2", id: "10000000-0000-0000-0000-000000000002", projectTitle: "社課回顧", status: "running", goal: "配音", estPoints: 12 },
+    { ref: "r3", id: "10000000-0000-0000-0000-000000000003", projectTitle: "禪修營", status: "failed", goal: "拆分鏡", estPoints: 8 },
+  ],
+  tasks: [
+    { ref: "t1", id: "20000000-0000-0000-0000-000000000001", title: "借投影機", projectTitle: "招生短片", assigneeName: "阿光", overdueDays: 3 },
+  ],
+  members: [{ ref: "u1", id: "30000000-0000-0000-0000-000000000001", name: "阿光" }],
+};
+
+describe("resolveCommandProposals（LLM 代號指令 → 可執行動作）", () => {
+  it("等級不足時一律回空——即使 LLM 越權提議也不落地", () => {
+    for (const level of ["none", "dispatch"] as const) {
+      expect(resolveCommandProposals(commandRefs, [{ kind: "approve_run", ref: "r1" }], level)).toEqual([]);
+    }
+  });
+
+  it("有監督權時解析出真實 runId 與人看得懂的標籤（含估點，按之前就知道要花多少）", () => {
+    const out = resolveCommandProposals(commandRefs, [{ kind: "approve_run", ref: "r1", reason: "三鏡都等它" }], "supervise");
+    expect(out).toHaveLength(1);
+    expect(out[0].command).toEqual({ kind: "approve_run", runId: "10000000-0000-0000-0000-000000000001" });
+    expect(out[0].label).toContain("招生短片");
+    expect(out[0].label).toContain("40 點");
+    expect(out[0].reason).toBe("三鏡都等它");
+  });
+
+  it("狀態對不上的指令整筆丟掉——LLM 只看得到清單，不會自己想「這個狀態能不能做這件事」", () => {
+    // r2 正在跑：不能核准也不能放棄；r1 待核准：不能停止也不能重跑
+    const bad = resolveCommandProposals(commandRefs, [
+      { kind: "approve_run", ref: "r2" },
+      { kind: "discard_run", ref: "r2" },
+      { kind: "stop_run", ref: "r1" },
+      { kind: "retry_run", ref: "r1" },
+    ], "supervise");
+    expect(bad).toEqual([]);
+  });
+
+  it("狀態對得上的都放行：停正在跑的、重跑失敗的", () => {
+    const out = resolveCommandProposals(commandRefs, [
+      { kind: "stop_run", ref: "r2" },
+      { kind: "retry_run", ref: "r3" },
+    ], "supervise");
+    expect(out.map((o) => o.command.kind)).toEqual(["stop_run", "retry_run"]);
+  });
+
+  it("幻覺的代號整筆略過", () => {
+    expect(resolveCommandProposals(commandRefs, [{ kind: "approve_run", ref: "r9" }], "supervise")).toEqual([]);
+    expect(resolveCommandProposals(commandRefs, [{ kind: "assign_task", ref: "t9", assigneeRef: "u1" }], "supervise")).toEqual([]);
+  });
+
+  it("assign_task 解析成員代號與明確日期；模糊日期不落地", () => {
+    const out = resolveCommandProposals(commandRefs, [
+      { kind: "assign_task", ref: "t1", assigneeRef: "u1", dueAt: "2026-08-10T00:00:00+08:00" },
+      { kind: "assign_task", ref: "t1", dueAt: "下週五" },
+    ], "supervise");
+    expect(out).toHaveLength(1);
+    expect(out[0].command).toMatchObject({ kind: "assign_task", taskId: "20000000-0000-0000-0000-000000000001", assigneeId: "30000000-0000-0000-0000-000000000001" });
+    expect(out[0].label).toContain("阿光");
+  });
+
+  it("assign_task 三個欄位都沒有時丟掉（不給一顆什麼都不會改的按鈕）", () => {
+    expect(resolveCommandProposals(commandRefs, [{ kind: "assign_task", ref: "t1" }], "supervise")).toEqual([]);
+  });
+
+  it("最多 4 筆——再多就變成另一種選項牆（用相異提議證明，否則會被去重規則蓋掉）", () => {
+    const manyRefs = {
+      ...commandRefs,
+      runs: Array.from({ length: 8 }, (_, i) => ({
+        ref: `r${i + 1}`,
+        id: `10000000-0000-0000-0000-00000000000${i + 1}`,
+        projectTitle: `案子 ${i + 1}`,
+        status: "running",
+        goal: "配音",
+        estPoints: 5,
+      })),
+    };
+    const many = Array.from({ length: 8 }, (_, i) => ({ kind: "stop_run" as const, ref: `r${i + 1}` }));
+    expect(resolveCommandProposals(manyRefs, many, "command")).toHaveLength(4);
+  });
+
+  it("同一道指令重複提議只留一筆——四顆一模一樣的按鈕會把上限用完卻只給一個選擇", () => {
+    const dup = Array.from({ length: 4 }, () => ({ kind: "stop_run" as const, ref: "r2" }));
+    expect(resolveCommandProposals(commandRefs, dup, "command")).toHaveLength(1);
+  });
+
+  it("同一件任務但改的欄位不同，算兩筆不同的提議（改派與改期是兩個決定）", () => {
+    const out = resolveCommandProposals(commandRefs, [
+      { kind: "assign_task", ref: "t1", assigneeRef: "u1" },
+      { kind: "assign_task", ref: "t1", dueAt: "2026-08-10T00:00:00+08:00" },
+    ], "supervise");
+    expect(out).toHaveLength(2);
+  });
+});
+
+describe("formatCommandRefs（可下令對象的提示詞區塊）", () => {
+  it("沒有監督權時整段不注入——不揭露做不到的動作", () => {
+    expect(formatCommandRefs(commandRefs, "dispatch")).toBe("");
+    expect(formatCommandRefs(commandRefs, "none")).toBe("");
+  });
+
+  it("有監督權時列出代號、專案、狀態與逾期天數（狀態要看得到，才不會提議做不到的事）", () => {
+    const text = formatCommandRefs(commandRefs, "supervise");
+    expect(text).toContain("r1｜「招生短片」｜待核准");
+    expect(text).toContain("r3｜「禪修營」｜失敗");
+    expect(text).toContain("逾期 3 天");
+    expect(text).toContain("u1=阿光");
+  });
+
+  it("完全沒有可下令對象時回空字串（提示詞一字不多佔）", () => {
+    expect(formatCommandRefs({ runs: [], tasks: [], members: [] }, "command")).toBe("");
   });
 });

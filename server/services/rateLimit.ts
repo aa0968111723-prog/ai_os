@@ -28,6 +28,14 @@ export const RATE_LIMIT_POLICIES = {
   projectAssistant: { limit: 6, windowMs: 60_000 },
   teamAssistant: { limit: 6, windowMs: 60_000 },
   agentPlan: { limit: 4, windowMs: 60_000 },
+  /**
+   * 組代理調度計畫的規劃：自成一桶，不與 agentPlan 共用。
+   *
+   * 共用的話兩種動作會互相餓死——組代理連續派幾件工（每件都走 planAgentCore）就會把桶用完，
+   * 接著使用者想排一份調度計畫會拿到「規劃太頻繁」，而他自己根本沒排過任何計畫；
+   * 反過來也一樣。兩者都是昂貴的 LLM 規劃，各自限流才擋得住濫用又不會互相誤傷。
+   */
+  groupCampaignPlan: { limit: 4, windowMs: 60_000 },
   messageAssistant: { limit: 6, windowMs: 60_000 },
   dmAssistant: { limit: 6, windowMs: 60_000 },
   director: { limit: 6, windowMs: 60_000 },
@@ -45,6 +53,7 @@ export const RATE_LIMIT_SCOPES = {
   projectAssistant: "assistant:project",
   teamAssistant: "assistant:team",
   agentPlan: "assistant:agent-plan",
+  groupCampaignPlan: "assistant:group-campaign-plan",
   messageAssistant: "assistant:message",
   dmAssistant: "assistant:dm",
   director: "assistant:director",

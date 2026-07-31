@@ -8,6 +8,16 @@ import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
 import { agentOutputKindLabel } from "../../../shared/agentOutputs";
+import {
+  GROUP_RUN_STATUS_LABEL,
+  GROUP_STEP_KIND_LABEL,
+  campaignProgress,
+  canRunCampaign,
+  resolveCampaignWaitReason,
+  type GroupCampaignStep,
+  type GroupCommand,
+  type GroupCommandLevel,
+} from "../../../shared/groupAgent";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
@@ -749,12 +759,22 @@ export function buildTeamQuestionSuggestions(input: {
   return out;
 }
 
-/** 對話訊息（前端狀態；assistant 訊息帶當輪的查證步驟與派工提議） */
+/**
+ * 指令提議（與 teamAssistant.ask 回傳的 actions 對齊）：確認後送 teamAssistant.command。
+ *
+ * 與派工的差別是「開新工 vs 收拾現況」：派工會建立新的待核計畫，指令是對既有的計畫與任務動手
+ * （核准、停止、重跑、改派）。command 的形狀由後端 zod 決定，前端只負責原樣轉交——
+ * 在這裡重新拆解成欄位只會讓兩邊的形狀有機會分岔。
+ */
+type TeamAction = { command: GroupCommand; label: string; reason?: string };
+
+/** 對話訊息（前端狀態；assistant 訊息帶當輪的查證步驟與派工／指令提議） */
 type ChatMsg = {
   role: "user" | "assistant";
   text: string;
   steps?: string[];
   dispatches?: Dispatch[];
+  actions?: TeamAction[];
   /** 決策軌跡：1–3 句結構化結論（不是 chain-of-thought） */
   rationale?: string;
   /** 這輪實際依據了哪些上下文區塊（後端已過白名單） */
@@ -985,6 +1005,413 @@ function matchesRunFilter(status: string, filter: RunFilter): boolean {
  * 組彙總 AI 卡：① 團隊分析（全組代理健康／篩選清單）② 可追問的組彙總對話 ③ 派工。
  * 對話只存前端狀態（重整即清空）；唯讀彙總本身不改資料。
  */
+/**
+ * 調度計畫清單的輪詢間隔（false＝不輪詢）。
+ *
+ * running 要輪詢是顯然的；**waiting 才是最需要盯的狀態**——那一刻整份計畫停在
+ * 「等你決定授權」或「等人做完某件事」，而解鎖的動作常常發生在別的地方：
+ * 別人剛去核准了那份卡住的子計畫、剛把人工關卡處理掉。不輪詢的話這裡會一直顯示
+ * 「等待人員」，使用者只好再按一次「繼續」（沒用），或以為壞了跑去重排一份（雙倍派工）。
+ * 其餘狀態（待核准／已結束）不會自己變，靜止的組不該每 10 秒打一次 API。
+ *
+ * 抽成純函式是為了能單獨驗——輪詢條件寫在 useQuery 的 options 裡就只能靠人眼看。
+ */
+export function campaignRefetchInterval(list: Array<{ status: string }> | undefined): number | false {
+  return list?.some((c) => c.status === "running" || c.status === "waiting") ? 10_000 : false;
+}
+
+/**
+ * 按鈕與輸入框上「這是哪一份調度計畫」的短標題。
+ *
+ * 為什麼要點名：waiting 的調度計畫可能同時有好幾份，每一份都有自己的「繼續」與加授權輸入框。
+ * 全部叫「繼續」的話，讀屏使用者聽到的是一排同名按鈕，眼睛看得到的人也只能靠位置猜——
+ * 而按錯的後果不是白按一次，是把授權點數加到別份計畫上，然後它會在沒人看著時把那些點花掉。
+ * 截斷是因為完整目標可長達 1000 字，塞進小按鈕會把整列撐爆、把中間的摘要壓成幾個字。
+ */
+function campaignShortGoal(goal: string): string {
+  const t = (goal ?? "").trim();
+  return t.length > 12 ? `${t.slice(0, 12)}…` : t;
+}
+
+/**
+ * 組代理總指揮：組代理自己的跨專案調度計畫（campaign）。
+ *
+ * 為什麼獨立成一塊、而不是塞進上面的計畫清單：那份清單是「各專案的代理在做什麼」，
+ * 這裡是「組代理在指揮什麼」——同一畫面上混在一起，使用者分不出哪一份是誰派的、
+ * 停掉一份會連帶影響什麼。兩者的父子關係在步驟明細裡才講得清楚。
+ *
+ * 這一區的用詞刻意只有兩個：組代理自己的那份叫**調度計畫**，它派到各專案去的叫**子計畫**。
+ * 之前同一畫面上「調度計畫／子計畫／計畫／代理計畫」四種叫法混用，
+ * 於是後端回的錯誤訊息對不上使用者剛按的那顆鈕——人會以為自己按到了別的東西。
+ */
+function TeamCommanderBlock({
+  groupId,
+  level,
+  levelLoading,
+  levelFailed,
+  onRetryLevel,
+  isLeader,
+  myUserId,
+}: {
+  groupId: string;
+  level: GroupCommandLevel;
+  /**
+   * 指揮權「還在查」與「查不到」必須跟「查到了，你沒有這個權限」分開講。
+   *
+   * 不分開的代價：呼叫端在載入中只能給 "none"，這一塊就整個無聲消失，
+   * 組長看到的是「這個功能沒開給我」，於是跑去成員設定改權限、或乾脆改用別的路徑派工——
+   * 而其實只是那一支查詢慢了兩秒。權限這種東西一旦被畫面說錯，人不會回頭再看第二眼。
+   */
+  levelLoading: boolean;
+  levelFailed: boolean;
+  onRetryLevel: () => void;
+  /**
+   * 「發起人或組長以上」的判斷材料，與 canDecideRun 共用同一條規則。
+   *
+   * 後端的 stop／discard 只放行發起人或組長以上。前端若不比照，一般組員會看到別人計畫上的
+   * 「停止」鈕，按下去必定吃 FORBIDDEN——這張卡在收件匣那一區已經守住這條線了
+   * （按了必失敗的鈕就不給按），這一區不跟上就變成同一張卡兩套誠實度標準。
+   */
+  isLeader: boolean;
+  myUserId?: string;
+}) {
+  const utils = trpc.useUtils();
+  const [goal, setGoal] = useState("");
+  const [budget, setBudget] = useState(0);
+  const [openId, setOpenId] = useState<string | null>(null);
+  /**
+   * 加授權點數：**每份調度計畫各自一格**，鍵是 campaign id。
+   *
+   * 曾經是單一個 useState(0) 給整塊共用。兩份計畫同時 waiting 時，在 A 列輸入的 200
+   * 會同步顯示在 B 列（連按鈕上的「（+200 點）」都一起變），使用者按了 B 那顆，
+   * 200 點自動核准授權就加到了 B 身上——那是會在沒人看著時被組代理自己花掉的錢，
+   * 而畫面從頭到尾都顯示得「很正確」，事後也查不出是哪一步輸錯。
+   */
+  const [addBudget, setAddBudget] = useState<Record<string, number>>({});
+  const addFor = (id: string) => addBudget[id] ?? 0;
+  // 門檻讀 shared 的 canRunCampaign，與後端守門、成員設定頁的授權說明同一個出處。
+  // 前端自己寫 levelAtLeast(level, "command") 的話，哪天門檻改了就只有這裡不會跟著改。
+  const canCommand = canRunCampaign(level);
+  const campaigns = trpc.teamAssistant.campaigns.useQuery(
+    { groupId },
+    { refetchInterval: (q) => campaignRefetchInterval(q.state.data) },
+  );
+  const plan = trpc.teamAssistant.planCampaign.useMutation();
+  const approve = trpc.teamAssistant.approveCampaign.useMutation();
+  const stop = trpc.teamAssistant.stopCampaign.useMutation();
+  const discard = trpc.teamAssistant.discardCampaign.useMutation();
+  const resume = trpc.teamAssistant.resumeCampaign.useMutation();
+  const refresh = () => {
+    utils.teamAssistant.campaigns.invalidate();
+    utils.teamAssistant.agentOverview.invalidate();
+  };
+  const list = campaigns.data ?? [];
+  const listLoading = campaigns.isLoading;
+  const listFailed = !!campaigns.error;
+  /**
+   * 整塊收掉的條件是「確定沒有東西可看，也確定這個人發不動」。
+   *
+   * 只要指揮權或計畫清單還有任何一項在載入／載入失敗，就得留著這一塊把不確定性講出來：
+   * 空手收掉等於對兩件不同的事給同一個答案（「你沒權限」與「這組沒計畫」），
+   * 而這兩件事的下一步完全相反。
+   */
+  if (!canCommand && !levelLoading && !levelFailed && !listLoading && !listFailed && list.length === 0) return null;
+
+  /**
+   * 動作類錯誤要指名是哪一個動作失敗的。
+   *
+   * 原本四支 mutation 的錯誤共用一句「{message}」，而後端訊息長得很像
+   * （「只有發起人或組長以上可以停止／放棄／續跑組代理調度計畫」），
+   * 使用者剛按了「繼續」卻讀到一句講「停止」的話，只會以為自己按錯鈕又按一次。
+   */
+  const actionError =
+    (approve.error && { what: "核准調度計畫", error: approve.error }) ||
+    (resume.error && { what: "讓調度計畫繼續", error: resume.error }) ||
+    (stop.error && { what: "停止調度計畫", error: stop.error }) ||
+    (discard.error && { what: "放棄調度計畫", error: discard.error }) ||
+    null;
+  /**
+   * 每個動作按下去的第一件事：把四支 mutation 的舊錯誤全部清掉。
+   *
+   * tRPC 的 mutation.error 會一路留到 reset()，而上面的 actionError 取的是第一個非 null 的錯誤——
+   * 核准失敗過一次之後，就算接著按「繼續」而且成功了，橫幅還是掛著「核准調度計畫失敗」。
+   * 那句話指著一顆使用者這一輪根本沒按的鈕，讀起來就是「我剛剛按的也失敗了」，
+   * 於是他會再按一次已經生效的動作——重複核准、重複加授權，都是真的會多花點的操作。
+   */
+  const resetActionErrors = () => {
+    approve.reset();
+    resume.reset();
+    stop.reset();
+    discard.reset();
+  };
+
+  return (
+    <div className="team-commander" aria-label="組代理總指揮">
+      <div className="team-stuck__head">
+        <strong>組代理總指揮</strong>
+        <Meta>跨專案調度：派工、盯著子計畫、在授權內補救</Meta>
+      </div>
+
+      {/* 指揮權讀不到 ≠ 沒有指揮權。講成後者的話，有權限的人會停下來不做事。 */}
+      {levelLoading && !levelFailed && (
+        <Hint layer="always" style={{ marginTop: 8 }}>
+          正在確認你的指揮權限——確認完才知道要不要給你「排調度計畫」的入口。
+        </Hint>
+      )}
+      {levelFailed && (
+        <p className="error" role="alert" style={{ marginTop: 8 }}>
+          指揮權限載入失敗——這不代表你沒有權限，只是這一刻讀不到，所以先不顯示發起入口。
+          <Button variant="ghost" size="sm" onClick={onRetryLevel}>再試一次</Button>
+        </p>
+      )}
+
+      {canCommand && (
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginTop: 8 }}>
+          <div style={{ flex: "1 1 260px" }}>
+            <label htmlFor="tc-goal" style={{ marginTop: 0 }}>要組代理達成什麼</label>
+            <input
+              id="tc-goal"
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="例：把三個待審的案子推到可交付，人力不夠就找人"
+              maxLength={1000}
+            />
+          </div>
+          <div style={{ flex: "0 1 190px" }}>
+            <label htmlFor="tc-budget" style={{ marginTop: 0 }}>自動核准授權（點）</label>
+            <input
+              id="tc-budget"
+              type="number"
+              min={0}
+              max={100000}
+              value={budget}
+              onChange={(e) => setBudget(Math.max(0, Number(e.target.value) || 0))}
+            />
+          </div>
+          <Button
+            disabled={goal.trim().length < 5 || plan.isPending}
+            onClick={async () => {
+              try {
+                await plan.mutateAsync({ groupId, goal: goal.trim(), budgetPoints: budget });
+                setGoal("");
+                refresh();
+              } catch { /* plan.error 已顯示 */ }
+            }}
+          >
+            {plan.isPending ? "規劃中…" : "排調度計畫"}
+          </Button>
+          <Hint layer="always" style={{ flexBasis: "100%", margin: 0 }}>
+            授權 0 點＝組代理每派出一份子計畫都會停下來等你核准。填了額度它才會在額度內自己核准；
+            超過的一律停手問你，不會先做了再說。
+          </Hint>
+        </div>
+      )}
+      {plan.error && <p className="error" role="alert">{plan.error.message}</p>}
+
+      {/* 載入中／載入失敗都不能長成「還沒有調度計畫」。
+          實際會發生的事：查詢逾時，畫面說「還沒有」，但其實有一份 running 的調度計畫
+          正在派工；組長據此重排第二份，兩份同時對同一批專案派工又各自在授權內自動核准，
+          點數就是雙倍支出，而且沒有任何一個畫面顯示過那份看不見的計畫。
+          語彙照同一張卡的「組執行計畫動態」：載入中…／載入失敗＋再試一次。 */}
+      {listLoading ? (
+        <>
+          <Skeleton height={44} style={{ marginTop: 8 }} />
+          <Hint layer="always" style={{ marginTop: 6 }}>
+            調度計畫載入中…還沒讀到這個組有沒有正在跑的調度計畫，先別急著重排一份。
+          </Hint>
+        </>
+      ) : listFailed ? (
+        <p className="error" role="alert" style={{ marginTop: 8 }}>
+          調度計畫載入失敗——現在無法確認有沒有調度計畫正在派工，這時候重排一份可能會變成兩份同時派工。
+          <Button variant="ghost" size="sm" onClick={() => campaigns.refetch()}>再試一次</Button>
+        </p>
+      ) : list.length === 0 ? (
+        <Hint layer="always" style={{ marginTop: 8 }}>
+          還沒有組代理調度計畫。上面填一句目標，它會排出「派工到哪幾個案子、怎麼盯、卡住找誰」的計畫給你核准。
+        </Hint>
+      ) : (
+        <div className="team-run-list" style={{ marginTop: 8 }}>
+          {list.map((c) => {
+            const steps = (c.steps ?? []) as GroupCampaignStep[];
+            const progress = campaignProgress(steps);
+            const open = openId === c.id;
+            /** waiting 在等什麼（budget＝授權不夠停手；human＝組級人工關卡），成因讀 shared 的唯一出處 */
+            const waitReason = c.status === "waiting" ? resolveCampaignWaitReason(steps) : null;
+            const add = addFor(c.id);
+            const shortGoal = campaignShortGoal(c.goal);
+            // 後端：stop／discard 要「發起人或組長以上」；approve／resume 還要再加上 canRunCampaign。
+            // 露出面照抄這兩條，畫面上就不會有一顆按了必吃 FORBIDDEN 的鈕。
+            const mine = canDecideRun({ ownerId: c.userId }, isLeader, myUserId);
+            return (
+              <div key={c.id} className={`team-run-row is-${c.status}`}>
+                <Chip style={{ margin: 0 }}>{GROUP_RUN_STATUS_LABEL[c.status] ?? c.status}</Chip>
+                <span className="team-run-row__copy">
+                  {/* 這顆鈕是展開／收合步驟清單的開關，但看起來只是一行目標文字。
+                      不給 aria-expanded／aria-controls 的話，讀螢幕的人按完只聽到同一句目標，
+                      不知道步驟到底展開了沒——只好反覆按，把剛展開的清單又收回去。
+                      屬性照同一張卡的「組執行計畫動態」切換鈕（見下方 team-runs-toggle）。 */}
+                  <button
+                    type="button"
+                    className="hint"
+                    onClick={() => setOpenId(open ? null : c.id)}
+                    aria-expanded={open}
+                    aria-controls={`team-campaign-steps-${c.id}`}
+                  >
+                    {c.goal}
+                  </button>
+                  <span title={c.summary}>{c.summary}</span>
+                  {c.error && <span className="team-run-row__err" title={c.error}>{c.error}</span>}
+                  {/* 「等待人員」四個字對兩種完全不同的處境給了同一句話：一種要人去做事，
+                      一種要人加授權（或自己去核准那份卡住的子計畫）。不分開講，使用者唯一能做的
+                      就是亂按「繼續」——而預算停手時按「繼續」不加點，執行器下一輪照樣停手，
+                      狀態原地彈回 waiting，看起來就像這顆鈕壞了。 */}
+                  {waitReason && (
+                    <span className="team-commander__steps">
+                      <span className="team-commander__step is-waiting">
+                        {waitReason.kind === "budget"
+                          ? `等你決定授權：「${waitReason.title}」的子計畫估點超出這份調度計畫的授權——${waitReason.detail}。要它往下跑，請在右邊填要加多少授權點數再按「繼續」；或自己到那個專案核准那份子計畫，再按「繼續」。`
+                          : `等人處理：「${waitReason.title}」——${waitReason.detail}。這一關做完了才按「繼續」，加不加授權點數都可以。`}
+                      </span>
+                    </span>
+                  )}
+                  {/* 停止只停組代理，不停已派出的子計畫。這條反直覺行為確認訊息裡有講，
+                      但按完就消失了——列表上看不出來的話，人會以為「已停止」＝不再花任何點。 */}
+                  {c.status === "stopped" && (
+                    <span className="team-commander__steps">
+                      <span className="team-commander__step is-stopped">
+                        已停止的是這份調度計畫本身，組代理不會再下新指令；先前派出去的子計畫仍在各專案照常執行、照常花點，要停請到那些專案停。
+                      </span>
+                    </span>
+                  )}
+                  {open && (
+                    <span className="team-commander__steps" id={`team-campaign-steps-${c.id}`}>
+                      {steps.map((s) => (
+                        <span key={s.id} className={`team-commander__step is-${s.status}`}>
+                          {GROUP_STEP_KIND_LABEL[s.kind] ?? s.kind}｜{s.title}
+                          {s.result ? `——${s.result}` : ""}
+                          {s.error ? `——${s.error}` : ""}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </span>
+                <span className="team-run-row__meta">
+                  {/* 授權與已用都是**估點**（子計畫核准當下的估算），這一區原本是全卡唯一沒標「估」的
+                      數字，讀起來像結帳金額。其他區塊一律寫「估 N 點」，這裡不跟上就會被當成實扣。 */}
+                  {progress.done}/{progress.total} 步・已自動核准 估 {c.spentPoints} 點／授權 估 {c.budgetPoints} 點
+                  <span style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+                    {c.status === "awaiting_approval" && canCommand && mine && (
+                      <ConfirmButton
+                        triggerClassName="btn-tonal btn-sm"
+                        title="核准後組代理才會開始下令"
+                        message={
+                          c.budgetPoints > 0
+                            ? `核准這份調度計畫？\n組代理會依計畫派工，並在 估 ${c.budgetPoints} 點的授權內自動核准子計畫；超過授權就停下來問你。`
+                            // 授權 0 點時原本也說「會在 0 點授權內自動核准子計畫」，讀起來像「它會自己處理」，
+                            // 實際上它派出第一份子計畫就停下來等人——期待與行為差了一整晚。
+                            : "核准這份調度計畫？\n這份的自動核准授權是 0 點：組代理會派出第一份子計畫，然後**停下來等你核准**，不會自己往下跑。要它連續跑，請在核准後於「等待人員」那一列補上授權點數再按「繼續」。"
+                        }
+                        confirmLabel="核准"
+                        // 不接住 rejection 的話，後端擋下來（FORBIDDEN／額度不足）就會變成
+                        // unhandled promise rejection——畫面照樣只有下方那句錯誤，但主控台一路噴紅，
+                        // 開發環境還會被 overlay 蓋掉整頁。錯誤文字仍由 actionError 顯示，這裡只負責吞掉。
+                        onConfirm={async () => {
+                          resetActionErrors();
+                          try {
+                            await approve.mutateAsync({ runId: c.id });
+                            refresh();
+                          } catch { /* actionError 已顯示 */ }
+                        }}
+                      >核准</ConfirmButton>
+                    )}
+                    {/* 放棄只動一份還沒核准、沒花過任何點的調度計畫，所以後端只要「發起人或組長以上」，
+                        不必到 command——露出面跟著後端，別多擋也別少擋。 */}
+                    {c.status === "awaiting_approval" && mine && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={async () => {
+                          resetActionErrors();
+                          try {
+                            await discard.mutateAsync({ runId: c.id });
+                            refresh();
+                          } catch { /* actionError 已顯示 */ }
+                        }}
+                      >放棄</Button>
+                    )}
+                    {(c.status === "running" || c.status === "waiting") && mine && (
+                      <ConfirmButton
+                        triggerClassName="btn-ghost btn-sm"
+                        title="組代理不再下新指令；已派出的子計畫不受影響"
+                        message={"停止這份調度計畫？\n組代理不會再下新指令。已經派出去、已經核准的子計畫不會被一併停掉——要停那些請到各專案停。"}
+                        confirmLabel="停止"
+                        onConfirm={async () => {
+                          resetActionErrors();
+                          try {
+                            await stop.mutateAsync({ runId: c.id });
+                            refresh();
+                          } catch { /* actionError 已顯示 */ }
+                        }}
+                      >停止</ConfirmButton>
+                    )}
+                    {c.status === "waiting" && canCommand && mine && (
+                      <>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100000}
+                          value={add}
+                          // 標籤與按鈕都要點名是哪一份調度計畫：同時有兩份在等人時，
+                          // 四個一模一樣的「繼續」＋兩個一模一樣的輸入框，按錯就是把授權加到別份上。
+                          aria-label={`為「${shortGoal}」加多少自動核准授權（估點）`}
+                          style={{ width: 84 }}
+                          onChange={(e) => {
+                            const v = Math.max(0, Number(e.target.value) || 0);
+                            setAddBudget((prev) => ({ ...prev, [c.id]: v }));
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          aria-label={`繼續執行「${shortGoal}」${add > 0 ? `，加授權 估 ${add} 點` : "，不加授權"}`}
+                          onClick={async () => {
+                            resetActionErrors();
+                            try {
+                              await resume.mutateAsync({ runId: c.id, addBudgetPoints: add });
+                              // 失敗時不能清掉輸入框：那個數字是使用者剛想清楚要加多少授權，
+                              // 清掉之後他重按一次就會變成「不加授權的繼續」，下一輪照樣停在同一步。
+                              setAddBudget((prev) => ({ ...prev, [c.id]: 0 }));
+                              refresh();
+                            } catch { /* actionError 已顯示 */ }
+                          }}
+                        >
+                          繼續「{shortGoal}」{add > 0 ? `（+估 ${add} 點）` : ""}
+                        </Button>
+                      </>
+                    )}
+                  </span>
+                  {/* 預算停手且沒填點數：按下去會原地彈回 waiting。不先講清楚，使用者會按第二次、第三次，
+                      然後回報「繼續鈕沒反應」。仍留著讓他按——他可能剛自己去核准了那份子計畫，
+                      那種情況下不加點按繼續才是對的。 */}
+                  {waitReason?.kind === "budget" && add === 0 && canCommand && mine && (
+                    <Meta as="span" style={{ display: "block", marginTop: 4 }}>
+                      沒填授權點數就按「繼續」，除非你已經自己核准了那份子計畫，否則下一輪還是會停在同一步——它缺的是授權，不是再按一次。
+                    </Meta>
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {actionError && (
+        <p className="error" role="alert">
+          {actionError.what}失敗：{actionError.error.message}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TeamAssistantCard({
   groupId,
   pendingDecisions,
@@ -1010,6 +1437,10 @@ function TeamAssistantCard({
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const ask = trpc.teamAssistant.ask.useMutation();
   const dispatch = trpc.teamAssistant.dispatch.useMutation();
+  // L1/L2 指令：核准／停止／重跑子計畫、改派人員任務。授權、組隔離與落地全在後端的
+  // runGroupCommand，前端只負責把提議原樣送回去——不在這裡重新拆解成欄位。
+  const command = trpc.teamAssistant.command.useMutation();
+  const commandLevel = trpc.teamAssistant.commandLevel.useQuery({ groupId }, { staleTime: 5 * 60_000 });
   // 就地裁決代理計畫：沿用專案頁同一組 mutation（守門／額度／併發鎖全在 approveAgentCore 裡，
   // 這裡只是換一個入口，沒有第二條扣點路徑）
   const approveRun = trpc.agents.approve.useMutation();
@@ -1029,6 +1460,8 @@ function TeamAssistantCard({
   );
   const roles = trpc.agents.listRoles.useQuery(undefined, { staleTime: 10 * 60_000 });
   const [dispatched, setDispatched] = useState<Record<string, DispatchResult>>({});
+  /** 已執行過的指令（key → 後端回的人話結果）：按過的按鈕換成結果，免得重複按 */
+  const [actioned, setActioned] = useState<Record<string, string>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [starterProjectId, setStarterProjectId] = useState("");
   const [runsCollapsed, setRunsCollapsed] = useState(false);
@@ -1056,6 +1489,7 @@ function TeamAssistantCard({
         onSuccess: (d) => {
           setMsgs((prev) => [...prev, {
             role: "assistant", text: d.answer, steps: d.steps, dispatches: d.dispatches as Dispatch[],
+            actions: (d.actions ?? []) as TeamAction[],
             rationale: d.rationale ?? undefined, contextUsed: d.contextUsed ?? [], degraded: d.degraded ?? false,
           }]);
           if ((d.dispatches?.length ?? 0) > 0) overview.refetch();
@@ -1659,6 +2093,18 @@ function TeamAssistantCard({
         </div>
       </div>
 
+      {/* level 在載入／失敗時都會退成 "none"，所以那兩個狀態必須另外傳下去分開講——
+          否則整塊會在查詢還沒回來時無聲消失，組長讀到的是「這功能沒開給我」。 */}
+      <TeamCommanderBlock
+        groupId={groupId}
+        level={(commandLevel.data ?? "none") as GroupCommandLevel}
+        levelLoading={commandLevel.isLoading}
+        levelFailed={!!commandLevel.error}
+        onRetryLevel={() => { void commandLevel.refetch(); }}
+        isLeader={isLeader}
+        myUserId={myUserId}
+      />
+
       {/* ── 組彙總對話 ── */}
       <div className="team-chat-block">
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -1711,7 +2157,10 @@ function TeamAssistantCard({
               variant="ghost"
               size="sm"
               style={{ marginLeft: 8 }}
-              onClick={() => { setMsgs([]); setDispatched({}); ask.reset(); }}
+              // actioned 也要清：它的 key 是「act-{訊息索引}-{i}」，而清完對話訊息索引從 0 重來。
+              // 少清這一項的話，新問一輪拿到的第一則提議會直接顯示上一輪同一格的「✓ …」結果文字，
+              // 按鈕根本不出現——使用者會以為那道新指令已經執行過了，其實一次也沒送出去。
+              onClick={() => { setMsgs([]); setDispatched({}); setActioned({}); ask.reset(); }}
             >
               清除對話
             </Button>
@@ -1746,6 +2195,43 @@ function TeamAssistantCard({
                       {m.contextUsed!.map((c) => (
                         <Chip key={c} style={{ margin: 0 }} title="這輪回答實際用到的資料區塊">{c}</Chip>
                       ))}
+                    </div>
+                  )}
+                  {(m.actions?.length ?? 0) > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                      {m.actions!.map((a, i) => {
+                        const key = `act-${mi}-${i}`;
+                        const done = actioned[key];
+                        return done ? (
+                          <Hint key={key} as="div" layer="always" style={{ color: "var(--success-ink)" }}>✓ {done}</Hint>
+                        ) : (
+                          <ConfirmButton
+                            key={key}
+                            triggerClassName="btn-tonal btn-sm"
+                            disabled={pendingKey === key}
+                            title={a.reason ?? "對既有的計畫或任務下指令"}
+                            message={`${a.label}？${a.reason ? `\n理由：${a.reason}` : ""}${a.command.kind === "approve_run" ? "\n核准後這份子計畫就會開始執行、開始花點。" : ""}`}
+                            confirmLabel="執行"
+                            onConfirm={async () => {
+                              setPendingKey(key);
+                              try {
+                                const r = await command.mutateAsync({ groupId, command: a.command });
+                                setActioned((prev) => ({ ...prev, [key]: r.message }));
+                                utils.projects.invalidate();
+                                utils.teamAssistant.groupInsights.invalidate();
+                                overview.refetch();
+                              } catch {
+                                /* command.error 已顯示 */
+                              } finally {
+                                setPendingKey((k) => (k === key ? null : k));
+                              }
+                            }}
+                          >
+                            <Icon name="Waypoints" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                            {a.label}
+                          </ConfirmButton>
+                        );
+                      })}
                     </div>
                   )}
                   {(m.dispatches?.length ?? 0) > 0 && (
@@ -1797,6 +2283,7 @@ function TeamAssistantCard({
               ),
             )}
             {dispatch.error && <p className="error" role="alert" style={{ marginBottom: 0 }}>{dispatch.error.message}</p>}
+            {command.error && <p className="error" role="alert" style={{ marginBottom: 0 }}>{command.error.message}</p>}
           </div>
         )}
       </div>

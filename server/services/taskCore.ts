@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -560,6 +560,85 @@ async function settleTask(input: {
     );
   }
   return settled;
+}
+
+/**
+ * 調整一件既有人類任務的負責人／期限／優先序（組代理 L2 調度權的落地點）。
+ *
+ * 為什麼是新的一支而不是沿用 addProjectTaskCore：任務原本只有「建立」與「完成」兩個動作，
+ * 於是組代理看得到「阿光 2 件逾期」卻什麼都做不了——它能做的最多是再開一件新任務，
+ * 那只會讓逾期數字變成 3。改派與改期才是實際的處置。
+ *
+ * 守門與建立時同一套：組隔離、專案可編輯、非封存、負責人必須是本組成員；
+ * 另加「只有負責人、建立者或組長以上可調整」，與 completeProjectTaskCore 的行為者規則同口徑。
+ * 已終局（done/cancelled）的任務不接受調整——改期一件已完成的任務只會讓歷史失真。
+ */
+export async function updateProjectTaskCore(input: {
+  auth: AuthState;
+  id: string;
+  assigneeId?: string | null;
+  dueAt?: string | null;
+  priority?: "low" | "normal" | "high" | "urgent";
+  /**
+   * 呼叫端已經驗過「組級指揮權」，不必再套個人層的行為者規則。
+   *
+   * 為什麼需要這個開關：個人層規則是「只有負責人、建立者或組長以上」，而組代理的 assign_task
+   * 只要 supervise。兩條規則不打通的話，被授權 supervise 的組員會拿到一顆對「別人的任務」
+   * 按下去必吃 FORBIDDEN 的按鈕——提議面說可以、執行面說不行，正是這份 PR 一直在避免的落差。
+   * 收斂方向選「組級授權涵蓋個人層」：supervise 的文案已經寫明它能替別人核准會花錢的計畫，
+   * 而改派一件任務嚴格來說比那個小。只有 runGroupCommand 會傳 true（它剛驗過等級）。
+   */
+  viaGroupCommand?: boolean;
+}): Promise<ProjectTaskRow> {
+  const task = await getProjectTaskChecked(input.auth, input.id);
+  const role = requireGroup(input.auth, task.groupId);
+  if (
+    !input.viaGroupCommand
+    && input.auth.user.id !== task.assigneeId
+    && input.auth.user.id !== task.createdBy
+    && role === "member"
+  ) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "只有負責人、建立者或組長以上可以調整任務" });
+  }
+  if (task.status === "done" || task.status === "cancelled") {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這件任務已經結束，不能再調整" });
+  }
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, task.projectId));
+  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+  await assertProjectEditable(input.auth, project);
+  assertProjectNotArchived(project);
+
+  const patch: Partial<typeof schema.projectTasks.$inferInsert> = { updatedAt: new Date() };
+  if (input.assigneeId !== undefined) {
+    await memberChecked(task.groupId, input.assigneeId);
+    patch.assigneeId = input.assigneeId;
+  }
+  if (input.dueAt !== undefined) {
+    const dueAt = parseOptionalDate(input.dueAt, "期限") ?? null;
+    if (dueAt && task.startsAt && dueAt < task.startsAt) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "期限不可早於開始時間" });
+    }
+    patch.dueAt = dueAt;
+  }
+  if (input.priority !== undefined) patch.priority = input.priority;
+  // 只有 updatedAt 代表呼叫端什麼都沒要改——不要靜默寫一次讓 updatedAt 跳動
+  if (Object.keys(patch).length === 1) return task;
+
+  // 狀態條件要進 WHERE，不能只靠上面那道讀後檢查：這中間還 await 了專案查詢、
+  // assertProjectEditable 與 memberChecked，別的請求完全來得及在那個空檔把任務完成或取消掉。
+  // 少了這個條件就會改到一件已經結束的任務的負責人或期限——正是上面那道檢查要擋的事。
+  const [updated] = await db
+    .update(schema.projectTasks)
+    .set(patch)
+    .where(and(
+      eq(schema.projectTasks.id, task.id),
+      notInArray(schema.projectTasks.status, ["done", "cancelled"]),
+    ))
+    .returning();
+  if (!updated) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這件任務已經結束，不能再調整" });
+  }
+  return updated;
 }
 
 export function completeProjectTaskCore(auth: AuthState, id: string): Promise<ProjectTaskRow> {

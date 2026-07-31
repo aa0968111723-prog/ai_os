@@ -13,6 +13,31 @@ import { getGroupAgentInsights, recordAgentEventSafely } from "../services/agent
 import { listGroupTasks } from "../services/taskCore";
 import { buildProjectIntelligence } from "../services/projectIntelligence";
 import { agentPlannerModeSchema } from "../../shared/agentPlanner";
+import {
+  assertGroupCommand,
+  getGroupCommandLevel,
+  runGroupCommand,
+} from "../services/groupCommand";
+import {
+  approveGroupCampaign,
+  discardGroupCampaign,
+  getGroupCampaign,
+  listGroupAgentEvents,
+  listGroupCampaigns,
+  planGroupCampaign,
+  resumeGroupCampaign,
+  stopGroupCampaign,
+} from "../services/groupCampaignCore";
+import {
+  COMMAND_LABEL,
+  canRunCommand,
+  groupCommandSchema,
+  levelAtLeast,
+  resolveCommandLevel,
+  taskPrioritySchema,
+  type GroupCommandLevel,
+  type GroupCommandResult,
+} from "../../shared/groupAgent";
 import { searchAssistantDatabaseRows } from "../services/databaseRowSearch";
 import type { AuthState } from "../services/auth";
 import type { DataField } from "../../shared/databaseFields";
@@ -51,6 +76,8 @@ const ASK_COST_POINTS = 0;
 const PROJECT_LIMIT = 15;
 /** 每次提問最多幾輪工具查詢（每輪一次 LLM 呼叫；超過就強制直接回答，防打轉燒錢） */
 const MAX_TOOL_ROUNDS = 3;
+/** 可下令對象一次列幾筆（子計畫／人員任務／成員各自）：夠指到真正該處理的那幾件，又不灌爆提示詞 */
+const COMMAND_REF_LIMIT = 12;
 
 // PostgreSQL 滑動視窗（跨 replica／重啟持久）：每人每分鐘 6 次。
 async function overLimit(userId: string): Promise<boolean> {
@@ -281,18 +308,15 @@ export function buildHistoryBlock(history: ChatTurn[] | undefined): string {
  * 抽成純函式 export，讓「露出面（ask 是否提議）」與「執行面（dispatch 是否放行）」用同一條規則、且可單元測試。
  */
 export function dispatchAllowed(role: "admin" | "leader" | "member", grantFlag: boolean | null | undefined): boolean {
-  if (role !== "member") return true;
-  return grantFlag === true;
+  // 分級授權上線後這裡不再自己判斷，改折進 resolveCommandLevel——否則「誰能派工」會有兩套規則，
+  // 而兩套規則遲早會分岔（露出面說可以、執行面說不行，或反過來，後者是安全漏洞）。
+  return canRunCommand(resolveCommandLevel(role, { canDispatchAgent: grantFlag }), "dispatch");
 }
 
-/** 派工權（含 DB 取值）：組長以上永遠可；一般組員讀 groupMembers.canDispatchAgent 判定。ask 與 dispatch 共用。 */
+/** 派工權（含 DB 取值）：讀指揮權等級再判定，與 command／campaign 同一條規則。 */
 export async function memberCanDispatch(auth: AuthState, groupId: string, role: "admin" | "leader" | "member"): Promise<boolean> {
   if (role !== "member") return true; // 免一趟 DB：組長／團隊管理員／開發者恆可
-  const [m] = await db
-    .select({ can: schema.groupMembers.canDispatchAgent })
-    .from(schema.groupMembers)
-    .where(and(eq(schema.groupMembers.groupId, groupId), eq(schema.groupMembers.userId, auth.user.id)));
-  return dispatchAllowed(role, m?.can);
+  return canRunCommand(await getGroupCommandLevel(auth, groupId), "dispatch");
 }
 
 /* ── 多步唯讀查詢工具：LLM 回答前可鑽進特定專案、資料庫、代理動態或查模型目錄（範圍鎖死本組） ── */
@@ -582,6 +606,19 @@ async function runTeamTool(
 
 /** LLM 提議的派工：projectRef＝現況清單的專案代號（p1…），goal＝要交給該專案代理達成的目標 */
 const dispatchProposalSchema = z.object({ projectRef: z.string().max(8), goal: z.string().min(5).max(1000) });
+
+/**
+ * LLM 提議的一道指令（L1 監督／L2 調度）。一律用代號（r1／t1／u1）——與派工同樣的理由：
+ * uuid 會被幻覺，代號對不到就整筆丟掉，使用者不會拿到一顆註定失敗的按鈕。
+ */
+const commandProposalSchema = z.object({
+  kind: z.enum(["approve_run", "stop_run", "discard_run", "retry_run", "assign_task"]),
+  ref: z.string().max(8),
+  assigneeRef: z.string().max(8).optional(),
+  dueAt: z.string().max(40).optional(),
+  priority: taskPrioritySchema.optional(),
+  reason: z.string().max(200).optional(),
+});
 const teamReplySchema = z.object({
   answer: z.string().min(1).max(4000),
   // S5 決策軌跡：結構化結論＋依據的上下文標籤。刻意不收「思考過程」——
@@ -589,6 +626,8 @@ const teamReplySchema = z.object({
   rationale: z.string().max(1000).optional(),
   contextUsed: z.array(z.string().max(40)).max(20).optional(),
   dispatches: z.array(dispatchProposalSchema).max(4).optional(),
+  // L1/L2：不只提議「開新工」，也提議「收拾現況」——核准、停止、重跑、改派
+  actions: z.array(commandProposalSchema).max(6).optional(),
 });
 
 /** 前端拿到的「已解析」派工提議（帶真實 projectId＋人看得懂的標籤），確認後送 dispatch */
@@ -623,6 +662,116 @@ export function resolveDispatches<T extends { id: string; title: string }>(
   return out;
 }
 
+/* ── 指令提議：讓 ask 不只會分析，還能把「該做什麼」變成按得下去的動作 ── */
+
+/** ask 上下文裡「可下令的對象」：子計畫 rN、人員任務 tN、成員 uN */
+export interface CommandRefs {
+  runs: Array<{ ref: string; id: string; projectTitle: string; status: string; goal: string; estPoints: number }>;
+  tasks: Array<{ ref: string; id: string; title: string; projectTitle: string; assigneeName: string | null; overdueDays: number | null }>;
+  members: Array<{ ref: string; id: string; name: string }>;
+}
+
+/** 解析後、可直接送 command 的提議（帶人看得懂的標籤與「為什麼」） */
+export interface ResolvedCommand {
+  command: z.infer<typeof groupCommandSchema>;
+  label: string;
+  reason?: string;
+}
+
+/**
+ * 代號提議 → 可執行指令（純函式，單元可測）。
+ *
+ * 每一條丟棄規則都對應一種「按下去一定會失敗」的提議：
+ *  - 等級不足 → 整批丟（防禦性；提示詞另已不揭露超出等級的動作）。
+ *  - 代號對不到（幻覺）→ 丟該筆。
+ *  - 對狀態不對的子計畫下令（核准一份正在跑的、停止一份已完成的）→ 丟該筆。
+ *    這是最常見的一種：LLM 只看得到清單，不會自己想「這個狀態能不能做這件事」。
+ *  - assign_task 三個欄位都沒有 → 丟（那是一顆什麼都不會改的按鈕）。
+ * 上限 4 筆：再多就變成選項牆，跟原本「不知道要拿它幹嘛」是同一個病。
+ */
+export function resolveCommandProposals(
+  refs: CommandRefs,
+  proposals: Array<z.infer<typeof commandProposalSchema>>,
+  level: GroupCommandLevel,
+): ResolvedCommand[] {
+  const out: ResolvedCommand[] = [];
+  // 同一道指令重複提議要去掉：LLM 很容易把同一件事講兩次，而四筆上限的用意是「不要變成選項牆」——
+  // 四顆一模一樣的按鈕正好把那個上限用完，卻只給了一個選擇。
+  const seen = new Set<string>();
+  const runByRef = new Map(refs.runs.map((r) => [r.ref, r]));
+  const taskByRef = new Map(refs.tasks.map((t) => [t.ref, t]));
+  const memberByRef = new Map(refs.members.map((m) => [m.ref, m]));
+  /** 什麼狀態的子計畫接受什麼指令（與 agentCore 各支 core 的前置條件一致） */
+  const ALLOWED_STATUS: Record<string, string[]> = {
+    approve_run: ["awaiting_approval"],
+    discard_run: ["awaiting_approval"],
+    stop_run: ["running", "waiting"],
+    retry_run: ["failed", "stopped"],
+  };
+
+  for (const p of proposals) {
+    if (out.length >= 4) break;
+    if (!canRunCommand(level, p.kind)) continue;
+    const ref = p.ref.trim();
+    const dedupeKey = [p.kind, ref, p.assigneeRef ?? "", p.dueAt ?? "", p.priority ?? ""].join("|");
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
+    if (p.kind === "assign_task") {
+      const task = taskByRef.get(ref);
+      if (!task) continue;
+      const member = p.assigneeRef ? memberByRef.get(p.assigneeRef.trim()) : undefined;
+      const dueAt = p.dueAt && !Number.isNaN(Date.parse(p.dueAt)) ? new Date(p.dueAt).toISOString() : undefined;
+      if (!member && !dueAt && !p.priority) continue;
+      const parts = [
+        member ? `改派給 ${member.name}` : null,
+        dueAt ? `改期到 ${dueAt.slice(0, 10)}` : null,
+        p.priority ? `優先序 ${p.priority}` : null,
+      ].filter(Boolean).join("、");
+      out.push({
+        command: { kind: "assign_task", taskId: task.id, assigneeId: member?.id, dueAt, priority: p.priority },
+        label: `調整「${task.title.slice(0, 20)}」：${parts}`,
+        reason: p.reason,
+      });
+      continue;
+    }
+
+    const run = runByRef.get(ref);
+    if (!run) continue;
+    if (!ALLOWED_STATUS[p.kind]?.includes(run.status)) continue;
+    const what = COMMAND_LABEL[p.kind];
+    out.push({
+      command: { kind: p.kind, runId: run.id },
+      label: `${what}：「${run.projectTitle}」${p.kind === "approve_run" ? `（估 ${run.estPoints} 點）` : ""}`,
+      reason: p.reason,
+    });
+  }
+  return out;
+}
+
+/** 可下令對象 → 提示詞區塊。沒有任何對象時回空字串（提示詞一字不多佔）。 */
+export function formatCommandRefs(refs: CommandRefs, level: GroupCommandLevel): string {
+  if (!levelAtLeast(level, "supervise")) return "";
+  const lines: string[] = [];
+  if (refs.runs.length) {
+    lines.push("子計畫（可核准／停止／放棄／重新規劃）：");
+    for (const r of refs.runs) {
+      lines.push(`  ${r.ref}｜「${r.projectTitle}」｜${AGENT_RUN_STATUS_LABEL[r.status] ?? r.status}｜估 ${r.estPoints} 點｜目標「${r.goal.slice(0, 30)}」`);
+    }
+  }
+  if (refs.tasks.length) {
+    lines.push("人員任務（可改派／改期／改優先序）：");
+    for (const t of refs.tasks) {
+      lines.push(`  ${t.ref}｜「${t.title.slice(0, 30)}」｜${t.projectTitle}｜${t.assigneeName ?? "未指派"}${t.overdueDays !== null ? `｜逾期 ${t.overdueDays} 天` : ""}`);
+    }
+  }
+  if (refs.members.length) {
+    lines.push(`成員：${refs.members.map((m) => `${m.ref}=${m.name}`).join("、")}`);
+  }
+  if (!lines.length) return "";
+  return `\n可下令的對象（代號 rN／tN／uN；下令一律用代號，不要吐 uuid）：\n${lines.join("\n")}`;
+}
+
 export const teamAssistantRouter = router({
   /**
    * 組彙總問答：撈整組專案現況（聚合查詢、無 N+1）＋可見資料庫餵給 LLM；LLM 可先用唯讀工具鑽進
@@ -647,8 +796,10 @@ export const teamAssistantRouter = router({
         throw error;
       }
       // 組員即可問自己組（唯讀彙總不需組長權限）；不屬於該組的直接擋
-      const role = requireGroup(ctx.auth, input.groupId);
-      const canDispatch = await memberCanDispatch(ctx.auth, input.groupId, role);
+      requireGroup(ctx.auth, input.groupId);
+      const commandLevel = await getGroupCommandLevel(ctx.auth, input.groupId);
+      const canDispatch = canRunCommand(commandLevel, "dispatch");
+      const canSupervise = levelAtLeast(commandLevel, "supervise");
 
       // ── 組彙總上下文：active 優先、最近更新在前，最多列 PROJECT_LIMIT 案 ──
       const [projRows, countRows, weekRows] = await Promise.all([
@@ -879,6 +1030,52 @@ export const teamAssistantRouter = router({
         console.warn("[teamAssistant] 組級阻塞讀取失敗（改以降級模式回答）：", err instanceof Error ? err.message : err);
       }
 
+      // ── L1/L2：可下令的對象。有監督權的人問「怎麼辦」時，答案不該停在「你可以去核准那三份」——
+      // 它應該直接把那三顆按鈕遞過來。沒有監督權就整段不撈也不注入（省一趟查詢，也不揭露做不到的動作）。
+      const commandRefs: CommandRefs = { runs: [], tasks: [], members: [] };
+      if (canSupervise) {
+        const nowMs = Date.now();
+        const [runRows, taskRows, memberRows] = await Promise.all([
+          db
+            .select({ run: schema.agentRuns, projectTitle: schema.projects.title })
+            .from(schema.agentRuns)
+            .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
+            .where(and(
+              eq(schema.agentRuns.groupId, input.groupId),
+              inArray(schema.agentRuns.status, ["awaiting_approval", "running", "waiting", "failed", "stopped"]),
+            ))
+            .orderBy(desc(schema.agentRuns.updatedAt))
+            .limit(COMMAND_REF_LIMIT),
+          listGroupTasks(ctx.auth, input.groupId, { openOnly: true, limit: COMMAND_REF_LIMIT }),
+          db
+            .select({ id: schema.users.id, name: schema.users.name })
+            .from(schema.groupMembers)
+            .innerJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
+            .where(eq(schema.groupMembers.groupId, input.groupId))
+            // 沒有 ORDER BY 的 LIMIT，PostgreSQL 不保證回傳順序：uN 代號會在兩輪之間指到不同的人，
+            // 使用者上一輪讀到的理由對不上這一輪的按鈕；超過上限時連「哪幾個人進得了提示詞」都會飄。
+            .orderBy(asc(schema.users.name), asc(schema.users.id))
+            .limit(COMMAND_REF_LIMIT),
+        ]);
+        commandRefs.runs = runRows.map((r, i) => ({
+          ref: `r${i + 1}`,
+          id: r.run.id,
+          projectTitle: r.projectTitle,
+          status: r.run.status,
+          goal: r.run.goal,
+          estPoints: r.run.estPoints,
+        }));
+        commandRefs.tasks = taskRows.slice(0, COMMAND_REF_LIMIT).map((t, i) => ({
+          ref: `t${i + 1}`,
+          id: t.id,
+          title: t.title,
+          projectTitle: t.projectTitle,
+          assigneeName: t.assigneeName,
+          overdueDays: t.dueAt && t.dueAt.getTime() < nowMs ? Math.floor((nowMs - t.dueAt.getTime()) / 86_400_000) : null,
+        }));
+        commandRefs.members = memberRows.map((m, i) => ({ ref: `u${i + 1}`, id: m.id, name: m.name ?? "未命名成員" }));
+      }
+
       const context = [
         `各專案現況（每行一案、前綴代號 pN；active 優先、依最後更新排序${hidden > 0 ? `；另有 ${hidden} 案未列` : ""}）：`,
         lines.length ? lines.join("\n") : "（本組目前沒有專案）",
@@ -887,6 +1084,7 @@ export const teamAssistantRouter = router({
         "阻塞與人員負荷（含人類任務——問「誰卡住了／哪個案子卡住了」以這段為準）：",
         degraded ? "（本次讀取失敗，這段資料不可用；回答時要說明沒能確認阻塞狀況）" : blockerBlock,
         ...(dbSections.length ? ["", "組可見的自訂資料庫（前綴代號 dbN；工作台「資料庫」頁維護；快照僅最近幾列，全量搜尋用 query_database 工具）：", ...dbSections] : []),
+        formatCommandRefs(commandRefs, commandLevel),
       ].join("\n");
 
       // 假模式：不扣點，回確定性摘要（可測、不花錢），不提議派工
@@ -894,7 +1092,8 @@ export const teamAssistantRouter = router({
         const preview = lines.slice(0, 3).join("\n");
         const answer = `（測試模式）本組共 ${totalProjects} 個專案${lines.length ? `：\n${preview}${lines.length > 3 ? "\n…" : ""}` : "。"}\n你的問題：「${input.message}」——正式模式會由 LLM 彙總分析${canDispatch ? "，並可提議在某專案發起代理計畫" : ""}。`;
         return {
-          answer, dispatches: [] as ResolvedDispatch[], steps: [] as string[], canDispatch, mock: true,
+          answer, dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[], steps: [] as string[],
+          canDispatch, commandLevel, mock: true,
           rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
         };
       }
@@ -907,6 +1106,18 @@ export const teamAssistantRouter = router({
         ? `你也可以「提議派工」：把某個專案的目標交給該專案的 AI 代理去規劃並（經核准後）執行。僅在使用者明確想「動手推進某個專案」時才提議，純詢問時不要提議。
 派工格式：dispatches 陣列，每筆 {"projectRef":"p2","goal":"要達成的目標（5–1000字，具體說明做什麼、幾格分鏡、什麼風格）"}。projectRef 只能用上面現況清單的代號 pN。一次最多提議 4 筆。派工只是「提議」——使用者按確認後，會在該專案建立一份待核准的代理計畫，仍需在該專案核准才會開始花點。`
         : `你沒有派工權（僅組長以上或被授權的組員可派工），因此只做唯讀彙總與建議，不要提議任何動作，dispatches 一律省略。`;
+
+      // 監督能力區段（L1/L2）：有權的人才看得到這段——沒權的人連提議都不該出現，
+      // 否則按下去只會吃 FORBIDDEN，比不給按鈕更糟。
+      const commandBlock = canSupervise && (commandRefs.runs.length || commandRefs.tasks.length)
+        ? `你還可以「提議指令」收拾現況（不是開新工）：actions 陣列，每筆 {"kind":"…","ref":"r1","reason":"為什麼要這麼做（≤200字）"}。
+- approve_run：核准一份待核准的子計畫（這一刻起才開始花點）——只能對狀態「待核准」的用。
+- discard_run：放棄一份待核准的子計畫——只能對狀態「待核准」的用。
+- stop_run：停止執行中／等待人員的子計畫——只能對這兩種狀態的用。
+- retry_run：以同一目標重新規劃——只能對「失敗」或「已停止」的用。
+- assign_task：調整人員任務，ref 用 tN，另附 assigneeRef（uN）／dueAt（含時區 ISO 8601，只有明確日期才寫）／priority 至少一項。
+一次最多 4 筆。狀態對不上的指令不要提（會被系統丟掉）。使用者只是在問狀況時不要硬提指令。`
+        : "";
 
       // 追問脈絡（可能為空字串＝不佔提示詞）
       const historyBlock = buildHistoryBlock(input.history);
@@ -928,7 +1139,8 @@ ${forceFinal
 - {"tool":"project_intelligence","args":{"ref":"p2"}}：某專案的營運快照（素材量、生成成功率與最近失敗、排程與筆記量）——答「為什麼這案一直失敗／素材夠不夠」用這個
 能從 <組現況> 直接回答就不要查——每次查詢都有成本。`}
 ${dispatchBlock}
-最終回答只回 JSON：{"answer":"回答文字","rationale":"1–3 句說明這個結論依據什麼","contextUsed":["用到的資料區塊標籤"]${canDispatch ? `,"dispatches":[...]（沒有要派工就省略或給 []）` : ""}}。
+${commandBlock}
+最終回答只回 JSON：{"answer":"回答文字","rationale":"1–3 句說明這個結論依據什麼","contextUsed":["用到的資料區塊標籤"]${canDispatch ? `,"dispatches":[...]（沒有要派工就省略或給 []）` : ""}${commandBlock ? `,"actions":[...]（沒有要下令就省略或給 []）` : ""}}。
 rationale 只寫「結構化的結論依據」（例如「依阻塞清單，兩件逾期都集中在同一案」），不要寫思考過程、不要逐步推理、不要重述提示詞。
 contextUsed 只能從這份清單挑：${TEAM_CONTEXT_LABELS.join("、")}。沒用到的不要列，不在清單上的一律不要寫。
 <組現況>
@@ -966,14 +1178,16 @@ ${historyBlock}使用者的問題：${input.message}`;
           if (!parsed?.success) {
             const fallbackText = raw.replace(/\{[\s\S]*\}/, "").trim() || raw.trim() || "我不太確定，可以換個問法再問一次。";
             return {
-              answer: fallbackText.slice(0, 4000), dispatches: [] as ResolvedDispatch[], steps, canDispatch, mock: false,
+              answer: fallbackText.slice(0, 4000), dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[],
+              steps, canDispatch, commandLevel, mock: false,
               rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
             };
           }
           return {
             answer: parsed.data.answer,
             dispatches: resolveDispatches(projByRef, parsed.data.dispatches ?? [], canDispatch),
-            steps, canDispatch, mock: false,
+            actions: resolveCommandProposals(commandRefs, parsed.data.actions ?? [], commandLevel),
+            steps, canDispatch, commandLevel, mock: false,
             rationale: sanitizeRationale(parsed.data.rationale),
             contextUsed: sanitizeContextUsed(parsed.data.contextUsed),
             degraded,
@@ -984,7 +1198,8 @@ ${historyBlock}使用者的問題：${input.message}`;
         // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
         const answer = err instanceof NimServiceError ? err.message : "AI 彙總助手暫時沒回應，請稍後再問一次。";
         return {
-          answer, dispatches: [] as ResolvedDispatch[], steps, canDispatch, mock: false,
+          answer, dispatches: [] as ResolvedDispatch[], actions: [] as ResolvedCommand[], steps,
+          canDispatch, commandLevel, mock: false,
           rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
         };
       }
@@ -1056,6 +1271,110 @@ ${historyBlock}使用者的問題：${input.message}`;
       return { summary, runs, totalRuns: counts.totalRuns, listLimit: GROUP_AGENT_LIST_LIMIT };
     }),
 
+  /** 我在這個組的組代理指揮權等級（前端據此決定露出哪些按鈕；後端每次動作仍會再驗一次） */
+  commandLevel: authedProcedure
+    .input(z.object({ groupId: z.string().uuid() }))
+    .query(({ ctx, input }) => getGroupCommandLevel(ctx.auth, input.groupId)),
+
+  /**
+   * L1／L2：下一道組級指令（核准／停止／放棄／重新規劃子計畫、調整人員任務、派工）。
+   *
+   * 這裡刻意薄：所有授權、組隔離與落地都在 runGroupCommand，與 campaign 執行器共用同一支。
+   * 從對話框按、從卡片按、組代理自己按，走的是同一條路——不會有「換個入口就少一道檢查」。
+   */
+  command: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), command: groupCommandSchema }))
+    .mutation(({ ctx, input }): Promise<GroupCommandResult> =>
+      runGroupCommand({ auth: ctx.auth, groupId: input.groupId, command: input.command, origin: "team_card" })),
+
+  /**
+   * L2：一次下多道指令（批次派工／批次收拾）。
+   *
+   * 逐筆執行、逐筆回報成敗——不用交易包起來：這些指令各自會呼叫外部規劃模型並可能扣點，
+   * 一筆失敗就把前面成功的計畫也「回滾」是做不到的（點已經花了、子計畫已經建了），
+   * 假裝做得到只會讓狀態與畫面對不起來。所以誠實回傳每一筆的結果，讓使用者看得到哪筆沒過。
+   */
+  commandBatch: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), commands: z.array(groupCommandSchema).min(1).max(6) }))
+    .mutation(async ({ ctx, input }) => {
+      const results: Array<{ ok: true; result: GroupCommandResult } | { ok: false; kind: string; error: string }> = [];
+      for (const command of input.commands) {
+        try {
+          results.push({ ok: true, result: await runGroupCommand({ auth: ctx.auth, groupId: input.groupId, command, origin: "team_card" }) });
+        } catch (err) {
+          // 非 TRPCError 會被折成一句「執行失敗」回前端，而且因為沒有往外拋，tRPC 的錯誤路徑
+          // 也不會記——出事時伺服器端完全沒有痕跡，維運說不出一道可能已經花了點的指令為什麼失敗
+          if (!(err instanceof TRPCError)) {
+            console.warn(
+              `[groupCommand] 批次指令失敗 group=${input.groupId} kind=${command.kind}：`,
+              err instanceof Error ? err.message : err,
+            );
+          }
+          results.push({ ok: false, kind: command.kind, error: err instanceof TRPCError ? err.message : "執行失敗" });
+        }
+      }
+      return { results, okCount: results.filter((r) => r.ok).length };
+    }),
+
+  /* ── L3：組代理常駐計畫（campaign） ── */
+
+  /** 規劃一份組級調度計畫（只規劃不執行；核准後背景執行器才會開始下令） */
+  planCampaign: authedProcedure
+    .input(z.object({
+      groupId: z.string().uuid(),
+      goal: z.string().min(5, "目標至少 5 個字").max(1000),
+      /** 授權組代理可自動核准的點數上限；0＝每份子計畫都要人按（預設不給，寧可多按幾次） */
+      budgetPoints: z.number().int().min(0).max(100_000).default(0),
+    }))
+    .mutation(({ ctx, input }) => planGroupCampaign({
+      auth: ctx.auth,
+      groupId: input.groupId,
+      goal: input.goal,
+      budgetPoints: input.budgetPoints,
+    })),
+
+  approveCampaign: authedProcedure
+    .input(z.object({ runId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => approveGroupCampaign(ctx.auth, input.runId)),
+
+  stopCampaign: authedProcedure
+    .input(z.object({ runId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => stopGroupCampaign(ctx.auth, input.runId)),
+
+  discardCampaign: authedProcedure
+    .input(z.object({ runId: z.string().uuid() }))
+    .mutation(({ ctx, input }) => discardGroupCampaign(ctx.auth, input.runId)),
+
+  /** 讓卡在人工關卡／超出授權的計畫繼續（可就地加自動核准授權） */
+  resumeCampaign: authedProcedure
+    .input(z.object({ runId: z.string().uuid(), addBudgetPoints: z.number().int().min(0).max(100_000).optional() }))
+    .mutation(({ ctx, input }) => resumeGroupCampaign({ auth: ctx.auth, runId: input.runId, addBudgetPoints: input.addBudgetPoints })),
+
+  campaigns: authedProcedure
+    .input(z.object({ groupId: z.string().uuid() }))
+    .query(({ ctx, input }) => listGroupCampaigns(ctx.auth, input.groupId)),
+
+  campaign: authedProcedure
+    .input(z.object({ runId: z.string().uuid() }))
+    .query(({ ctx, input }) => getGroupCampaign(ctx.auth, input.runId)),
+
+  /**
+   * 組代理的下令軌跡（含不屬於任何 campaign 的單發指令）。
+   *
+   * 沒有這一支的話，「誰在什麼時候替誰核准了一份會花點的計畫」只有資料庫查得到——
+   * 那是這整套裡最該被追溯的一件事，寫進去卻讀不出來等於白寫。
+   */
+  commandLog: authedProcedure
+    .input(z.object({
+      groupId: z.string().uuid(),
+      limit: z.number().int().min(1).max(200).optional(),
+      campaignOnly: z.boolean().optional(),
+    }))
+    .query(({ ctx, input }) => listGroupAgentEvents(ctx.auth, input.groupId, {
+      limit: input.limit,
+      campaignOnly: input.campaignOnly,
+    })),
+
   /**
    * 全組代理洞察（作業台「誰卡住了」）：把阻塞歸到專案、把未結人類任務歸到人。
    * 唯讀、組隔離；判斷規則與專案頁的過程面板共用同一支純函式（assembleAgentInsights），
@@ -1085,10 +1404,8 @@ ${historyBlock}使用者的問題：${input.message}`;
       playbookId: z.string().max(80).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const role = requireGroup(ctx.auth, input.groupId);
-      if (!(await memberCanDispatch(ctx.auth, input.groupId, role))) {
-        throw new TRPCError({ code: "FORBIDDEN", message: "需要組長授權才能用團隊代理派工到專案" });
-      }
+      // 派工權走與 command／campaign 同一條規則（分級授權），不再各判各的
+      await assertGroupCommand(ctx.auth, input.groupId, "dispatch");
       // 專案必須屬於 input.groupId：否則具本組派工權的人可借道對別組專案派工（跨組越權）
       const [project] = await db.select({ groupId: schema.projects.groupId }).from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project || project.groupId !== input.groupId) {

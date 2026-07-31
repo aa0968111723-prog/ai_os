@@ -44,6 +44,73 @@ export const agentRuns = pgTable("agent_runs", {
   groupUpdatedIdx: index("agent_runs_group_updated_idx").on(t.groupId, t.updatedAt),
 }));
 
+/**
+ * 組代理計畫（campaign）：組代理自己的多步調度計畫——派工到各專案、盯著子計畫、
+ * 在授權內補救、找人、下結論。與 agent_runs 的關係是「指揮 vs 執行」：
+ * 這裡一步 dispatch 會產生一份 agent_runs（子計畫），子計畫仍走該專案全部既有守門。
+ *
+ * 沒有 projectId：組代理的作用域是整個組，一份 campaign 通常橫跨多案。
+ */
+export const groupAgentRuns = pgTable("group_agent_runs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  /** 使用者的一句組級目標（例：把三個待審案子推到可交付，人力不夠就找人） */
+  goal: text("goal").notNull(),
+  /** 計畫摘要（核准畫面顯示） */
+  summary: text("summary").notNull().default(""),
+  /** 規劃器的結論式說明（1–3 句；不保存 chain-of-thought） */
+  rationale: text("rationale"),
+  status: text("status", { enum: ["awaiting_approval", "running", "waiting", "done", "failed", "stopped", "discarded"] })
+    .notNull()
+    .default("awaiting_approval"),
+  /** 每步：見 shared/groupAgent 的 GroupCampaignStep */
+  steps: jsonb("steps").notNull(),
+  /**
+   * 本次授權組代理可自動核准的點數上限。組代理能自動核准子計畫＝能在無人盯著時自動花錢，
+   * 所以授權額度隨計畫走、不吃組的總額度；0＝不授權自動核准（每份子計畫都要人按）。
+   */
+  budgetPoints: integer("budget_points").notNull().default(0),
+  /** 已被本 campaign 自動核准出去的估點累計（與 budgetPoints 比對） */
+  spentPoints: integer("spent_points").notNull().default(0),
+  error: text("error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  groupStatusUpdatedIdx: index("group_agent_runs_group_status_updated_idx").on(t.groupId, t.status, t.updatedAt),
+  statusUpdatedIdx: index("group_agent_runs_status_updated_idx").on(t.status, t.updatedAt),
+}));
+
+/**
+ * 組代理事件軌跡。不共用 agent_events：那張表的 project_id 是 NOT NULL，
+ * 而組代理最重要的幾件事（下令、超預算停手、跳過整條支線）根本不屬於任何單一專案。
+ * 硬塞一個假的 projectId 會讓專案頁的事件流出現不屬於它的紀錄。
+ */
+export const groupAgentEvents = pgTable("group_agent_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  groupId: uuid("group_id").notNull(),
+  /** 屬於某份 campaign 的事件；單發指令（ask 提議後人按的那種）此欄為 null */
+  runId: uuid("run_id"),
+  /** 事件牽涉到的專案／子計畫（有才填） */
+  projectId: uuid("project_id"),
+  childRunId: uuid("child_run_id"),
+  stepId: text("step_id"),
+  /** 同一 (runId, eventKey) 只記一次；單發指令的 runId 為 null 不套用唯一鍵 */
+  eventKey: text("event_key").notNull(),
+  eventType: text("event_type", {
+    enum: ["planned", "approved", "command", "step_started", "step_waiting", "step_completed", "step_failed", "run_completed", "run_failed", "stopped", "discarded", "observation"],
+  }).notNull(),
+  actorType: text("actor_type", { enum: ["ai", "human", "system"] }).notNull().default("system"),
+  actorId: uuid("actor_id"),
+  summary: text("summary").notNull(),
+  data: jsonb("data").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  runEventUq: uniqueIndex("group_agent_events_run_event_uq").on(t.runId, t.eventKey),
+  groupCreatedIdx: index("group_agent_events_group_created_idx").on(t.groupId, t.createdAt),
+  runCreatedIdx: index("group_agent_events_run_created_idx").on(t.runId, t.createdAt),
+}));
+
 /** 可稽核代理事件：記錄可驗證的來源、動作、等待、裁決與成果，不保存私密 chain-of-thought。 */
 export const agentEvents = pgTable("agent_events", {
   id: uuid("id").primaryKey().defaultRandom(),
