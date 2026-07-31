@@ -57,7 +57,8 @@ import {
   planAgentCore, approveAgentCore, discardAgentCore, stopAgentCore,
   listAgentRunsForProject, getAgentRunChecked,
 } from "./agentCore";
-import { addScheduleItemCore, listScheduleForGroup } from "./scheduleCore";
+import { addScheduleItemCore, listScheduleForGroup, updateScheduleItemCore } from "./scheduleCore";
+import { addNoteCore, appendNoteCore } from "./notesCore";
 import { DM_MAX_BODY, listDmPeers, listDmThreads, listDmHistory, markDmRead, resolveDmPeerRef, sendDm } from "./dmCore";
 import type { AgentStep } from "./agentRunner";
 import {
@@ -378,6 +379,21 @@ export const TOOLS = [
       required: ["projectId", "title", "startsAt"],
     },
   },
+  {
+    name: "update_schedule_item",
+    description: "更新一筆既有行程（標題／時間／備註；整筆語意、同輸入重呼叫結果一致）。只有建立者本人或組長以上可改；先用 list_schedule 找 scheduleItemId。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scheduleItemId: { type: "string" },
+        title: { type: "string" },
+        startsAt: { type: "string", description: "ISO 8601（省略＝不變）" },
+        endsAt: { type: "string", description: "ISO 8601（省略＝不變；須晚於 startsAt）" },
+        note: { type: "string" },
+      },
+      required: ["scheduleItemId"],
+    },
+  },
   // ── 筆記・會議紀錄（組共用的知識筆記，可匯入知識庫）：外部 AI 可讀，閉合「知識地圖」迴路 ──
   {
     name: "list_notes",
@@ -396,6 +412,31 @@ export const TOOLS = [
     name: "get_note",
     description: "讀一則筆記的全文（會議決議、待辦、由知識庫匯入的內容）。先用 list_notes 找 noteId。",
     inputSchema: { type: "object", properties: { noteId: { type: "string" } }, required: ["noteId"] },
+  },
+  {
+    name: "add_note",
+    description: "為專案新增一則筆記（會議紀錄／整理／交接）。與網頁筆記同一套權限與版本行為；title 最長 120、content 最長 80000 字。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        title: { type: "string" },
+        content: { type: "string" },
+      },
+      required: ["projectId", "title", "content"],
+    },
+  },
+  {
+    name: "append_note",
+    description: "在既有筆記末尾追加內容（自動保留更新前版本快照）。只有作者本人或組長以上可改；先用 list_notes 找 noteId。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        noteId: { type: "string" },
+        content: { type: "string", description: "要追加的內容（以空行接在原文之後）" },
+      },
+      required: ["noteId", "content"],
+    },
   },
   // ── 站內私訊（通訊錄 1:1 聊天）：只讀寫「金鑰擁有者本人」參與的對話，別人的私訊碰不到 ──
   {
@@ -744,6 +785,28 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     };
   }
 
+  // ── M1 寫入（D2）：重用 notesCore／scheduleCore——與網頁端同一套守衛（作者/組長、封存、版本快照）──
+  if (name === "append_note") {
+    const row = await appendNoteCore({
+      auth,
+      id: String(args.noteId ?? ""),
+      content: String(args.content ?? ""),
+    });
+    return { id: row.id, title: row.title, chars: row.content.length, updatedAt: row.updatedAt };
+  }
+
+  if (name === "update_schedule_item") {
+    const row = await updateScheduleItemCore({
+      auth,
+      id: String(args.scheduleItemId ?? ""),
+      title: args.title === undefined ? undefined : String(args.title),
+      startsAt: args.startsAt === undefined ? undefined : String(args.startsAt),
+      endsAt: args.endsAt === undefined ? undefined : String(args.endsAt),
+      note: args.note === undefined ? undefined : String(args.note),
+    });
+    return { id: row.id, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, note: row.note };
+  }
+
   // ── 上傳授權狀態（以 grantId；不掛 projectId；只回狀態不回 token 原文）──
   if (name === "get_upload_grant_status") {
     return handleGetUploadGrantStatus(auth, args);
@@ -911,7 +974,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   }
 
   // ── 排程／筆記與統整快照（以 projectId 為鍵，先解析專案的組再套組隔離）──
-  if (name === "list_schedule" || name === "add_schedule_item" || name === "list_notes" || name === "get_project_status") {
+  if (name === "list_schedule" || name === "add_schedule_item" || name === "list_notes" || name === "add_note" || name === "get_project_status") {
     const pid = String(args.projectId ?? "");
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
     if (!project) throw new Error("找不到專案");
@@ -966,6 +1029,18 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         note: args.note ? String(args.note) : null,
       });
       return { id: row.id, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt };
+    }
+
+    if (name === "add_note") {
+      // notesCore 內部再驗一次專案歸屬與封存（requireActive）；標題／內容長度守門也在 core
+      const row = await addNoteCore({
+        auth,
+        groupId: project.groupId,
+        projectId: project.id,
+        title: String(args.title ?? ""),
+        content: String(args.content ?? ""),
+      });
+      return { id: row.id, title: row.title, chars: row.content.length, createdAt: row.createdAt };
     }
 
     // get_project_status：把各子系統一次統整給外部 AI（細部連結分鏡／生成／代理／排程／待辦）
