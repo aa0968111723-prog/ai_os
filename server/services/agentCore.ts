@@ -6,6 +6,9 @@
  * 抽成服務層的原因與 generationCore 相同：tRPC 路由與「tRPC 之外的入口」（本專案為 MCP 介面）
  * 要重用同一批守門（組隔離、專案 ACL、額度、併發鎖、CAS、防幻覺代號解析）——邏輯若複製兩份，防護遲早分岔。
  * 錯誤一律 TRPCError：tRPC 端原樣拋、MCP 端由 handleMcp 折成 JSON-RPC error 的人話訊息。
+ *
+ * 邊界（#133 PR-4）：組級 MCP 工具（get_project_status 等）服務創作代理的「讀寫查詢」，
+ * 但代理的執行永遠只走 agent_run + Runner——不存在第二條扣點／執行路徑。
  */
 import { and, asc, desc, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -634,7 +637,7 @@ export async function planAgentCore(input: {
 8. modelId 只能抄模型速查的 id；不確定就省略。優先選經濟模型，除非目標明確要求品質。needs 模型務必搭配 sourceAssetRef 或 sourceUrl，否則該步無法執行。
 9. **多代理並行**：互不依賴的 generate 步驟不要硬串 dependsOn——獨立支線會同時開拍（長任務關頁也繼續）；真有先後才寫 dependsOn。
 10. 只輸出一個 JSON 物件，不要 Markdown、說明或思考過程。禁止輸出 chain-of-thought、逐步心智草稿或內部推理；summary.rationale 與步驟 rationale 是給使用者看的簡短結論式說明（rationale ≤500 字、步驟 rationale ≤300 字），不是推理紀錄。
-11. summary.rationale 必填（1–3 句說明為何這樣排計畫）；summary.contextUsed 只能列你實際依據的上下文區塊標籤，不要虛列。
+11. summary.rationale 必填（1–3 句說明為何這樣排計畫）；summary.contextUsed 只能列你實際依據的上下文區塊標籤，不要虛列。可用標籤限：專案現況、專案運作情報、專案知識庫節錄、使用者指定來源、團隊成員、專案筆記、專案排程、既有人類任務、角色定裝、場景設定、素材庫、可寫資料庫、可用模型速查。
 ${buildPlannerRoleBlock()}
 <可用模型速查>
 ${buildAiModelCheatsheet()}
