@@ -2738,6 +2738,128 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   }
 }
 
+/* 分鏡流程引導：五階段一條線＋「下一步」一句話，回答「我現在該做什麼」。 */
+.scene-pipeline {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card2) 72%, transparent);
+}
+.scene-pipeline__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.scene-pipeline__steps::-webkit-scrollbar { display: none; }
+.scene-pipeline__step {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: var(--fs-12);
+  color: var(--soft);
+  white-space: nowrap;
+}
+/* 步驟之間畫一小段連接線，讀起來是一條路而不是五顆亂放的膠囊 */
+.scene-pipeline__step + .scene-pipeline__step::before {
+  content: "";
+  width: 10px;
+  height: 1px;
+  margin-right: 5px;
+  background: var(--border-strong);
+  flex: none;
+}
+.scene-pipeline__num {
+  width: 17px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  font-family: var(--mono);
+  font-size: 10px;
+  flex: none;
+}
+.scene-pipeline__step.is-done { color: var(--success-ink); }
+.scene-pipeline__step.is-done .scene-pipeline__num {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+.scene-pipeline__step.is-current {
+  color: var(--primary-ink);
+  background: var(--primary-tint);
+  border: 1px solid var(--primary-border);
+  font-weight: 600;
+}
+.scene-pipeline__step.is-current .scene-pipeline__num {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-contrast, #fff);
+}
+.scene-pipeline__hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 7px;
+}
+
+/* 分鏡縮圖即單格工作室入口：去按鈕外觀，只留 hover 提示 */
+.scene-thumb-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: var(--r-8);
+  line-height: 0;
+}
+.scene-thumb-btn:hover .gen-thumb,
+.scene-thumb-btn:focus-visible .gen-thumb {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* 交付中心：就緒度＋主 CTA 一眼看懂；剪輯師的單檔收進「進階」摺疊。 */
+.scene-deliver {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card2) 72%, transparent);
+}
+.scene-deliver__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.scene-deliver__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.scene-deliver__advanced { margin-top: 10px; }
+.scene-deliver__advanced > summary {
+  cursor: pointer;
+  font-size: var(--fs-13);
+  color: var(--soft);
+  padding: 4px 0;
+  user-select: none;
+}
+.scene-deliver__advanced > summary:hover { color: var(--ink); }
+.scene-deliver__advanced[open] > summary { color: var(--ink); }
+
 /* 分鏡視覺總覽：先看整體狀態，再展開需要操作的卡。 */
 .scene-overview {
   margin-top: 10px;

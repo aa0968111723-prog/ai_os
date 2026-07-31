@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
-import { getModel, MODELS, tierLabel, estimatePoints } from "@shared/models";
+import { getModel, MODELS } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
 import { SceneStudio } from "./SceneStudio";
 import { ExportJobButton } from "./ExportJobButton";
 import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip } from "./interactions";
-import { AssetImg, AssetVideo, AssetAudio } from "./MediaFallback";
+import { AssetImg, AssetVideo } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 
 import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus } from "./ui";
@@ -21,12 +21,11 @@ const SCENE_STATUS: Record<string, { label: string; cls: PillStatus }> = {
   approved: { label: "已通過", cls: "done" },
 };
 
-// 逐格生成的預設模型：便宜快、剪輯人員逐格試圖首選；深度優化後可在分鏡卡就地換文生圖模型。
+// 逐格快速出圖的預設模型：便宜快、試構圖首選。要換模型／細修請開「單格工作室」——
+// 工作室選過的模型記在同一把 localStorage 鑰匙，這裡的「生成這一格」會跟著用。
 const DEFAULT_MODEL = "fal-ai/fast-lightning-sdxl";
-// 逐格可選的文生圖模型（不需來源素材的 text-to-image；與生成台同一份目錄）
+// 可當快速出圖的文生圖模型（不需來源素材；與單格工作室「重畫這格」同一份清單口徑）
 const SCENE_GEN_MODELS = MODELS.filter((m) => m.category === "text-to-image" && !m.needs);
-// 逐格配音的後端預設 TTS（scenes.generateVoiceover 未帶 modelId 時用它）——前端只拿來顯示預估點數
-const DEFAULT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
 // 目標剪輯軟體 → 可直接匯入的檔案（需求 #8＋直連強化）：每套軟體列出「最能直接組好時間軸」的
 // 格式優先（Premiere 吃 xmeml 時間軸、FCP/Resolve/剪映專業版吃 fcpxml），字幕 SRT 當通用備援；
@@ -64,11 +63,11 @@ type Scene = {
 };
 
 /**
- * 行內可編輯欄位：草稿即所見。
- * - 文字/數字：Enter 或失焦送出，Esc 還原；數字夾在 1–60。
- * - 多行（配音詞）：失焦送出、Esc 還原，Enter 保留換行（唸稿常要斷行）。
+ * 行內可編輯欄位（標題／秒數）：草稿即所見。
+ * - Enter 或失焦送出，Esc 還原；數字夾在 1–60。
  * committedRef 去重：Enter 觸發送出後緊接的 blur 不會重打一次 API。
  * 未聚焦時才跟隨伺服器刷新，避免 10 秒輪詢把使用者正在打的字洗掉。
+ * （配音詞／提示詞的多行編輯已收進「單格工作室」，這裡不再需要 textarea。）
  */
 function InlineEdit({
   value,
@@ -81,13 +80,13 @@ function InlineEdit({
   maxLength,
 }: {
   value: string | number;
-  kind: "text" | "number" | "textarea";
+  kind: "text" | "number";
   onCommit: (next: string | number) => void;
   pending: boolean;
   ariaLabel: string;
   placeholder?: string;
   style?: CSSProperties;
-  /** 與後端 zod 上限對齊（標題 60、配音詞 2000）：貼超長直接截住，不再失焦才爆「儲存失敗」 */
+  /** 與後端 zod 上限對齊（標題 60）：貼超長直接截住，不再失焦才爆「儲存失敗」 */
   maxLength?: number;
 }) {
   const [draft, setDraft] = useState(String(value));
@@ -117,8 +116,8 @@ function InlineEdit({
       onCommit(clamped);
       return;
     }
-    const trimmed = kind === "text" ? draft.trim() : draft;
-    if (kind === "text" && trimmed === "") {
+    const trimmed = draft.trim();
+    if (trimmed === "") {
       // 標題不可空：還原
       setDraft(committedRef.current);
       return;
@@ -133,43 +132,21 @@ function InlineEdit({
     setFocused(false);
   };
 
-  const commonProps = {
-    value: draft,
-    disabled: pending,
-    "aria-label": ariaLabel,
-    placeholder,
-    maxLength,
-    onFocus: () => setFocused(true),
-    onBlur: () => {
-      setFocused(false);
-      commit();
-    },
-  };
-
-  if (kind === "textarea") {
-    return (
-      <textarea
-        {...commonProps}
-        rows={2}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            revert();
-            e.currentTarget.blur();
-          }
-        }}
-        style={{ minHeight: 44, fontSize: 12, padding: "5px 8px", ...style }}
-      />
-    );
-  }
-
   return (
     <input
-      {...commonProps}
+      value={draft}
+      disabled={pending}
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      maxLength={maxLength}
       type={kind === "number" ? "number" : "text"}
       min={kind === "number" ? 1 : undefined}
       max={kind === "number" ? 60 : undefined}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        commit();
+      }}
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
@@ -187,7 +164,8 @@ function InlineEdit({
   );
 }
 
-/** 單格分鏡：縮圖、可編輯資訊、就地生成/重生、單檔下載、送審/裁決三態、排序、刪除 */
+/** 單格分鏡（精簡版）：縮圖、標題/秒數、狀態，加「一顆依狀態決定的主要動作」。
+ *  深改（提示詞、配音、換模型、版本）都收進單格工作室——列表回歸排順序與總覽。 */
 function SceneRow({
   s,
   i,
@@ -197,7 +175,6 @@ function SceneRow({
   canEdit,
   meLoading,
   genModelId,
-  onUsePrompt,
   onOpenStudio,
   charIds,
   sceneIds,
@@ -216,9 +193,8 @@ function SceneRow({
   isLeader: boolean;
   canEdit: boolean;
   meLoading: boolean;
-  /** 逐格生成用的文生圖模型（分鏡卡工具列可換；預設 SDXL Lightning） */
+  /** 快速出圖用的文生圖模型（跟著單格工作室上次選的；預設 SDXL Lightning） */
   genModelId: string;
-  onUsePrompt?: (prompt: string) => void;
   /** 開這一格的單格工作室。工作室由 SceneList 統一渲染，不掛在列內——`.gen-row` 帶
    *  content-visibility:auto（paint containment），會成為 fixed 定位的包含區塊，把全螢幕 modal 裁掉。 */
   onOpenStudio: () => void;
@@ -234,8 +210,8 @@ function SceneRow({
   /** 最新一筆已裁決的退回理由（needs_work）——提交人不必翻留言才知道改什麼 */
   rejectReason?: string | null;
 }) {
-  // 每格自持 update／generateInto／generateVoiceover，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
-  // 行內編輯（標題/秒數/配音詞）失焦即存但原本沒有成功回饋——比照世界觀卡「已儲存 ✓」短暫顯示 2 秒
+  // 每格自持 update／generateInto，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
+  // 行內編輯（標題/秒數）失焦即存但原本沒有成功回饋——比照世界觀卡「已儲存 ✓」短暫顯示 2 秒
   const [savedFlash, setSavedFlash] = useState(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(savedTimer.current), []);
@@ -247,41 +223,48 @@ function SceneRow({
       savedTimer.current = setTimeout(() => setSavedFlash(false), 2000);
     },
   });
-  // 冪等鍵（QA-007）：同一格「還沒成功」的生成/配音重試沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
+  // 冪等鍵（QA-007）：同一格「還沒成功」的生成重試沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
   const genRequestId = useRef<string>(crypto.randomUUID());
-  const voiceRequestId = useRef<string>(crypto.randomUUID());
   const generate = trpc.scenes.generateInto.useMutation({
     onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
-  });
-  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({
-    onSuccess: () => { voiceRequestId.current = crypto.randomUUID(); invalidate(); },
   });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
   // 配音生成中：後端背景 runner 完成後會回填 narrationAssetId，10 秒輪詢自動刷新
   const isVoicing = s.pendingVoiceStatus === "queued" || s.pendingVoiceStatus === "running";
   const hasVoiceover = (s.voiceover ?? "").trim() !== "";
-  const rowError = update.error ?? generate.error ?? generateVoiceover.error;
-  // 逐格生成／配音的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
+  const hasPrompt = (s.prompt ?? "").trim() !== "";
+  const rowError = update.error ?? generate.error;
+  // 快速出圖的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
   const genModel = getModel(genModelId) ?? getModel(DEFAULT_MODEL);
   const genPoints = genModel?.points;
-  // 配音走按字計費的中文 TTS：估點依「這一格旁白文字」長度即時算，與後端扣點同一函式——顯示＝扣點
-  const ttsModel = getModel(DEFAULT_TTS_MODEL);
-  const ttsPoints = ttsModel ? estimatePoints(ttsModel, { promptChars: (s.voiceover ?? "").length }) : undefined;
+  const isDraft = s.status === "todo" || s.status === "review";
+
+  // 主要動作已經是「開單格工作室」時（沒提示詞／被退回要修），就不再重複列 tonal 版工作室鈕
+  const primaryOpensStudio = canEdit && ((!s.assetId && !hasPrompt && !isGenerating) || s.status === "needs_work");
 
   return (
     <div className={`gen-row scene-list__row${rowClassName ? ` ${rowClassName}` : ""}`} data-fb="分鏡格" id={`scene-${s.id}`}>
-      {s.assetUrl ? (
-        s.assetKind === "video" ? (
-          <AssetVideo className="gen-thumb" src={s.assetUrl} muted preload="metadata" fallbackClassName="gen-thumb" fallbackLabel="素材遺失" fallbackIconSize={16} />
+      {/* 縮圖即入口：點縮圖＝開單格工作室（Adobe 式「點素材放大修」的直覺） */}
+      <button
+        type="button"
+        className="scene-thumb-btn"
+        title="開單格工作室：細修畫面、配音、版本"
+        aria-label={`第 ${i + 1} 鏡縮圖，開單格工作室`}
+        onClick={onOpenStudio}
+      >
+        {s.assetUrl ? (
+          s.assetKind === "video" ? (
+            <AssetVideo className="gen-thumb" src={s.assetUrl} muted preload="metadata" fallbackClassName="gen-thumb" fallbackLabel="素材遺失" fallbackIconSize={16} />
+          ) : (
+            <AssetImg className="gen-thumb" src={s.assetUrl} alt={s.title} fallbackClassName="gen-thumb" fallbackLabel="素材遺失" fallbackIconSize={16} />
+          )
         ) : (
-          <AssetImg className="gen-thumb" src={s.assetUrl} alt={s.title} fallbackClassName="gen-thumb" fallbackLabel="素材遺失" fallbackIconSize={16} />
-        )
-      ) : (
-        <div className="gen-thumb" style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "var(--soft)" }}>
-          {isGenerating ? <Icon name="Loader" className="spin" size={20} /> : <Icon name="Plus" size={20} />}
-        </div>
-      )}
+          <span className="gen-thumb" style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "var(--soft)" }}>
+            {isGenerating ? <Icon name="Loader" className="spin" size={20} /> : <Icon name="Plus" size={20} />}
+          </span>
+        )}
+      </button>
       <div style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span className="mono" style={{ color: "var(--primary-ink)", flexShrink: 0 }}>{i + 1}</span>
@@ -308,11 +291,25 @@ function SceneRow({
             />
             秒
           </label>
-          <span>・{s.assetKind ? (SCENE_KIND_LABEL[s.assetKind] ?? s.assetKind) : "無素材"}</span>
+          <span>・{s.assetKind ? (SCENE_KIND_LABEL[s.assetKind] ?? s.assetKind) : "無畫面"}</span>
           <Pill status={SCENE_STATUS[s.status]?.cls ?? "queued"}>
             {SCENE_STATUS[s.status]?.label ?? s.status}
           </Pill>
           {isGenerating && <Pill status="running">生成中…</Pill>}
+          {/* 旁白狀態一眼可見（編輯入口在單格工作室・配音） */}
+          {isVoicing ? (
+            <Meta style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <Icon name="Mic" size={11} /> 配音生成中…
+            </Meta>
+          ) : s.narrationAssetId ? (
+            <Meta style={{ color: "var(--success-ink)", display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <Icon name="Mic" size={11} /> 旁白 ✓
+            </Meta>
+          ) : hasVoiceover ? (
+            <Meta style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <Icon name="Mic" size={11} /> 旁白未生成
+            </Meta>
+          ) : null}
           {update.isPending ? (
             <Meta>儲存中…</Meta>
           ) : savedFlash ? (
@@ -339,140 +336,91 @@ function SceneRow({
           </Meta>
         )}
 
-        {/* 配音詞：每格皆可編輯（含空白格補詞），失焦即存 */}
-        <div style={{ marginTop: 6 }}>
-          <InlineEdit
-            value={s.voiceover ?? ""}
-            kind="textarea"
-            pending={update.isPending || !canEdit}
-            ariaLabel={`第 ${i + 1} 鏡配音詞`}
-            placeholder="配音詞（可留白）"
-            maxLength={2000}
-            onCommit={(v) => update.mutate({ sceneId: s.id, voiceover: String(v) })}
-          />
-          {/* 旁白配音：有配音詞才給生成鈕（中文 TTS 走後端預設，不必前端帶模型）；完成後就地試聽＋下載。
-              扣點前先確認（顯示預估點數，兌現 HelpPage「點頭才扣」承諾）；檢視者不顯示（2.3 唯讀） */}
-          {canEdit && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-              {hasVoiceover ? (
-                isVoicing || generateVoiceover.isPending ? (
-                  <Button size="sm" disabled>配音生成中…</Button>
-                ) : (
-                  <ConfirmButton
-                    triggerClassName="btn-sm"
-                    triggerTitle="用這一格的配音詞生成中文旁白，完成後自動出現試聽"
-                    message={`即將生成旁白配音（${getModel(DEFAULT_TTS_MODEL)?.label ?? "中文 TTS"}${ttsPoints != null ? `，約 −${ttsPoints} 點` : ""}）；失敗自動退點`}
-                    confirmLabel="確認生成"
-                    onConfirm={() => generateVoiceover.mutate({ sceneId: s.id, clientRequestId: voiceRequestId.current })}
-                  >
-                    {s.narrationUrl ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <Icon name="RotateCw" /> 重生配音{ttsPoints != null ? `（約 −${ttsPoints} 點）` : ""}
-                      </span>
-                    ) : (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <Icon name="Mic" /> 生成配音{ttsPoints != null ? `（約 −${ttsPoints} 點）` : ""}
-                      </span>
-                    )}
-                  </ConfirmButton>
-                )
-              ) : (
-                <Hint as="span" layer="always">先填配音詞才能生成旁白</Hint>
-              )}
-            </div>
-          )}
-          {s.narrationUrl && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-              <AssetAudio
-                controls
-                preload="none"
-                src={s.narrationUrl}
-                aria-label={`第 ${i + 1} 鏡旁白試聽`}
-                style={{ height: 32, maxWidth: "100%" }}
-                fallbackLabel="旁白音檔遺失——可用「重生配音」補回"
-              />
-              <a
-                // 同源 /api/assets/:id/file 才能讓 download 生效；只有跨源 url 時退回 url（瀏覽器會改成導航，但仍可另存）
-                href={s.narrationAssetId ? `/api/assets/${s.narrationAssetId}/file` : s.narrationUrl}
-                download
-                className="btn-tonal"
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "var(--sp-4) var(--sp-12)", fontSize: "var(--fs-12)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "solid", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
-              >
-                <Icon name="Download" /> 下載旁白
-              </a>
-            </div>
-          )}
-        </div>
-
         {rowError && <p className="error" role="alert">存檔／生成失敗：{rowError.message}</p>}
 
-        {/* 提示詞：可獨立編輯——有/無素材都可改，失焦即存；重生這一格會用新 prompt（#187） */}
-        {canEdit ? (
-          <div style={{ marginTop: 6 }}>
-            <Meta as="div" style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4, fontSize: "var(--fs-12)" }}>
-              <Icon name="Clapperboard" size={13} />
-              <span>提示詞（可直接改，再按重生——只影響這一格）</span>
-              <HelpTip text="獨立針對這一格修改提示詞。失焦即存；之後「生成／重生這一格」會用新提示詞，不影響其他分鏡。" />
-            </Meta>
-            <InlineEdit
-              value={s.prompt ?? ""}
-              kind="textarea"
-              pending={update.isPending || !canEdit}
-              ariaLabel={`第 ${i + 1} 鏡提示詞`}
-              placeholder="這一格的生成提示詞（可留白後再填）"
-              maxLength={4000}
-              onCommit={(v) => update.mutate({ sceneId: s.id, prompt: String(v) })}
-            />
-            {onUsePrompt && (s.prompt ?? "").trim() !== "" && !s.assetId && (
-              <button style={{ padding: "2px 10px", fontSize: "var(--fs-11)", marginTop: 5 }} onClick={() => onUsePrompt(s.prompt!)}>
-                用此提示詞生成
-              </button>
-            )}
-          </div>
-        ) : s.prompt ? (
-          <div style={{ fontSize: "var(--fs-12)", marginTop: 6, background: "var(--card2)", borderRadius: "var(--r-8)", padding: "6px 10px" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-              <Icon name="Clapperboard" size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-              <span>{s.prompt}</span>
-            </div>
-          </div>
-        ) : null}
-
-        {/* 就地生成／重生＋單檔下載。扣點前先確認（顯示預估點數）；檢視者不顯示生成鈕（2.3 唯讀） */}
+        {/* 動作列：一顆依狀態決定的主要動作＋固定的次要入口（單格工作室／下載／討論）。
+            扣點動作先確認（顯示預估點數）；檢視者只看得到工作室（唯讀）、下載與討論（2.3） */}
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {!canEdit ? null : s.prompt ? (
+          {canEdit && (
             isGenerating || generate.isPending ? (
               <Button size="sm" variant="primary" disabled>生成中…</Button>
-            ) : (
-              <ConfirmButton
-                triggerClassName="primary btn-sm"
-                triggerTitle="用這一格的提示詞就地生成，完成後自動回填縮圖"
-                message={`即將${s.assetId ? "重生" : "生成"}這一格（${genModel?.label ?? genModelId}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
-                confirmLabel="確認生成"
-                onConfirm={() =>
-                  generate.mutate({
-                    sceneId: s.id,
-                    modelId: genModel?.id ?? DEFAULT_MODEL,
-                    clientRequestId: genRequestId.current,
-                    // 上限同 generation.submit（6/4）：超勾取前幾張，不讓逐格生成因此整個被 zod 擋下
-                    characterIds: charIds?.length ? charIds.slice(0, 6) : undefined,
-                    scenePresetIds: sceneIds?.length ? sceneIds.slice(0, 4) : undefined,
-                  })
-                }
-              >
-                {s.assetId ? (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <Icon name="RotateCw" /> 重生這一格{genPoints != null ? `（約 −${genPoints} 點）` : ""}
-                  </span>
-                ) : (
+            ) : !s.assetId ? (
+              hasPrompt ? (
+                <ConfirmButton
+                  triggerClassName="primary btn-sm"
+                  triggerTitle="用這一格的提示詞快速出圖，完成後自動回填縮圖；要換模型請開單格工作室"
+                  message={`即將生成這一格（${genModel?.label ?? genModelId}${genPoints != null ? `，約 −${genPoints} 點` : ""}）；失敗自動退點`}
+                  confirmLabel="確認生成"
+                  onConfirm={() =>
+                    generate.mutate({
+                      sceneId: s.id,
+                      modelId: genModel?.id ?? DEFAULT_MODEL,
+                      clientRequestId: genRequestId.current,
+                      // 上限同 generation.submit（6/4）：超勾取前幾張，不讓逐格生成因此整個被 zod 擋下
+                      characterIds: charIds?.length ? charIds.slice(0, 6) : undefined,
+                      scenePresetIds: sceneIds?.length ? sceneIds.slice(0, 4) : undefined,
+                    })
+                  }
+                >
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                     <Icon name="Sparkles" /> 生成這一格{genPoints != null ? `（約 −${genPoints} 點）` : ""}
                   </span>
-                )}
+                </ConfirmButton>
+              ) : (
+                <Button size="sm" variant="primary" title="這一格還沒有提示詞——開單格工作室寫提示詞、出第一版畫面" onClick={onOpenStudio}>
+                  <Icon name="Sparkles" size={13} /> 寫提示詞出圖
+                </Button>
+              )
+            ) : !meLoading && isDraft ? (
+              <Button size="sm" variant="primary" disabled={submitApproval.isPending} onClick={() => submitApproval.mutate({ sceneId: s.id })}>
+                送審
+              </Button>
+            ) : !meLoading && s.status === "needs_work" ? (
+              <>
+                <Button size="sm" variant="primary" title="照退回理由修這一格：開單格工作室改畫面或配音" onClick={onOpenStudio}>
+                  <Icon name="SlidersHorizontal" size={13} /> 去修這一格
+                </Button>
+                <Button size="sm" disabled={submitApproval.isPending} onClick={() => submitApproval.mutate({ sceneId: s.id })}>
+                  重送審
+                </Button>
+              </>
+            ) : null
+          )}
+          {!meLoading && isLeader && s.status === "pending" && pending && (
+            <>
+              <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--success-ink)", borderColor: "var(--success)" }}
+                disabled={decide.isPending}
+                onClick={() => decide.mutate({ approvalId: pending.id, decision: "approved" })}>
+                <Icon name="Check" /> 通過
+              </button>
+              <ConfirmButton
+                triggerStyle={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger-ink)", borderColor: "var(--danger)" }}
+                disabled={decide.isPending}
+                title="退回這一鏡"
+                reason={{
+                  label: "退回理由（會通知提交人）",
+                  placeholder: "說明需要修改的地方…",
+                  required: true,
+                  presets: ["畫面與腳本不符", "人物長相跑掉", "文字有錯字", "風格不一致", "請再修一版"],
+                }}
+                confirmLabel="退回"
+                onConfirm={(reason) => decide.mutate({ approvalId: pending.id, decision: "needs_work", reason })}
+              >
+                <Icon name="Undo2" /> 退回
               </ConfirmButton>
-            )
-          ) : (
-            !s.assetId && <Hint as="span" layer="always">先請上方「AI 創作助手」拆分鏡或發想，給這格提示詞就能就地生成</Hint>
+            </>
+          )}
+          {/* 單格工作室：Adobe 式「把單張拉出來改」——畫面、配音、版本的深改都在這裡。
+              檢視者也開得起來（唯讀回看版本與成本），寫入控制由工作室內部依 canEdit 隱藏。 */}
+          {!primaryOpensStudio && (
+            <Button
+              size="sm"
+              variant="tonal"
+              title="把這一格拉出來單獨修：改畫面（換模型/以底圖修）、編配音詞生成旁白、回看並切換版本"
+              onClick={onOpenStudio}
+            >
+              <Icon name="SlidersHorizontal" size={13} /> 單格工作室
+            </Button>
           )}
           {s.assetUrl && (
             <a
@@ -486,24 +434,8 @@ function SceneRow({
               <Icon name="Download" /> 下載
             </a>
           )}
-          {/* 單格工作室：Adobe 式「把單張拉出來改」——以現用畫面當底圖修、換模型重畫、切回任何一版。
-              檢視者也開得起來（唯讀回看版本與成本），寫入控制由工作室內部依 canEdit 隱藏。 */}
-          <Button
-            size="sm"
-            variant="tonal"
-            title="把這一格拉出來單獨修：以現在這張為底圖改、換模型重畫、回看並切換版本"
-            onClick={onOpenStudio}
-          >
-            <Icon name="SlidersHorizontal" size={13} /> 單格工作室
-          </Button>
-        </div>
-        {s.prompt && (
-          <Meta as="div" style={{ marginTop: 3 }}>模型：{genModel?.label ?? genModelId}（可在上方「逐格生成模型」換）</Meta>
-        )}
-
-        {!meLoading && (
-          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-            {/* 在留言中討論：對所有人開放（含檢視者——留言是唯讀者的參與出口） */}
+          {/* 在留言中討論：對所有人開放（含檢視者——留言是唯讀者的參與出口） */}
+          {!meLoading && (
             <button
               style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12 }}
               title="把這一鏡帶進組內留言討論"
@@ -511,40 +443,15 @@ function SceneRow({
             >
               <Icon name="MessageCircle" size={13} /> 討論
             </button>
-            {/* 已通過也能重送：後端本就版本化（重送＝新版本、舊 pending 作廢），換素材後不必刪掉重建。
-                檢視者不顯示（2.3：viewer 不能改分鏡審批狀態，後端 approvals.submit 也已擋） */}
-            {canEdit && (s.status === "todo" || s.status === "review" || s.status === "needs_work" || s.status === "approved") && (
-              <button style={{ padding: "3px 12px", fontSize: 12 }} disabled={submitApproval.isPending}
-                onClick={() => submitApproval.mutate({ sceneId: s.id })}>
-                {s.status === "approved" ? "重送新版審核" : "送審"}
-              </button>
-            )}
-            {isLeader && s.status === "pending" && pending && (
-              <>
-                <button style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--success-ink)", borderColor: "var(--success)" }}
-                  disabled={decide.isPending}
-                  onClick={() => decide.mutate({ approvalId: pending.id, decision: "approved" })}>
-                  <Icon name="Check" /> 通過
-                </button>
-                <ConfirmButton
-                  triggerStyle={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger-ink)", borderColor: "var(--danger)" }}
-                  disabled={decide.isPending}
-                  title="退回這一鏡"
-                  reason={{
-                    label: "退回理由（會通知提交人）",
-                    placeholder: "說明需要修改的地方…",
-                    required: true,
-                    presets: ["畫面與腳本不符", "人物長相跑掉", "文字有錯字", "風格不一致", "請再修一版"],
-                  }}
-                  confirmLabel="退回"
-                  onConfirm={(reason) => decide.mutate({ approvalId: pending.id, decision: "needs_work", reason })}
-                >
-                  <Icon name="Undo2" /> 退回
-                </ConfirmButton>
-              </>
-            )}
-          </div>
-        )}
+          )}
+          {/* 已通過也能重送：後端本就版本化（重送＝新版本、舊 pending 作廢），換素材後不必刪掉重建 */}
+          {!meLoading && canEdit && s.status === "approved" && (
+            <button style={{ padding: "3px 12px", fontSize: 12 }} disabled={submitApproval.isPending}
+              onClick={() => submitApproval.mutate({ sceneId: s.id })}>
+              重送新版審核
+            </button>
+          )}
+        </div>
       </div>
       {canEdit && (
         <div style={{ display: "flex", gap: 4 }}>
@@ -565,9 +472,20 @@ function SceneRow({
   );
 }
 
-/** 分鏡與交付：可編輯＋就地生成/重生＋單檔下載＋粗剪預覽＋送審/裁決（三態機）＋打包下載。
- *  canEdit=false（2.3 檢視者）：隱藏所有寫入控制（生成/配音/送審/排序/刪除/行內編輯），瀏覽與下載照常 */
-export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, charIds, sceneIds }: { projectId: string; isLeader: boolean; canEdit?: boolean; onUsePrompt?: (prompt: string) => void; charIds?: string[]; sceneIds?: string[] }) {
+/** 製作流程五階段：給「現在該做什麼」一個明確答案（C 流程引導）。 */
+type StageKey = "board" | "asset" | "voice" | "review" | "deliver";
+const PIPELINE_STAGES: Array<{ key: StageKey; label: string }> = [
+  { key: "board", label: "排分鏡" },
+  { key: "asset", label: "補畫面" },
+  { key: "voice", label: "配音" },
+  { key: "review", label: "送審" },
+  { key: "deliver", label: "打包交付" },
+];
+
+/** 分鏡・交付：排順序＋逐格主要動作（A）→ 流程引導（C）→ 交付中心（B）。
+ *  深改（提示詞/配音/換模型/版本）集中在單格工作室；審批三態機與打包照舊。
+ *  canEdit=false（2.3 檢視者）：隱藏所有寫入控制，瀏覽與下載照常 */
+export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneIds }: { projectId: string; isLeader: boolean; canEdit?: boolean; charIds?: string[]; sceneIds?: string[] }) {
   const utils = trpc.useUtils();
   // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
   const me = trpc.auth.me.useQuery();
@@ -627,14 +545,55 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
     { id: "pending", label: "待審", count: statusCounts.pending },
     { id: "needs_work", label: "需修改", count: statusCounts.needs_work },
     { id: "approved", label: "已通過", count: statusCounts.approved },
-    { id: "missing", label: "無素材", count: statusCounts.missing },
+    { id: "missing", label: "無畫面", count: statusCounts.missing },
   ];
+
+  // ── C 流程引導：五階段，算出「現在卡在哪一步」與下一步提示 ──
+  const voicePending = list.filter((s) => (s.voiceover ?? "").trim() !== "" && !s.narrationAssetId).length;
+  const unapproved = statusCounts.draft + statusCounts.needs_work;
+  const allApproved = list.length > 0 && statusCounts.approved === list.length;
+  const currentStage: StageKey =
+    list.length === 0 ? "board"
+    : statusCounts.missing > 0 ? "asset"
+    : voicePending > 0 ? "voice"
+    : !allApproved ? "review"
+    : "deliver";
+  const stageDone: Record<StageKey, boolean> = {
+    board: list.length > 0,
+    asset: list.length > 0 && statusCounts.missing === 0,
+    voice: list.length > 0 && statusCounts.missing === 0 && voicePending === 0,
+    review: allApproved,
+    deliver: false, // 打包沒有「完成」狀態——隨時可以再打包
+  };
+  /** 依當前階段給一句「下一步」與（可選的）一鍵切到對應篩選 */
+  const stageHint = (): { text: string; filter?: SceneFilter } => {
+    switch (currentStage) {
+      case "board":
+        return { text: "還沒有分鏡——請上方 AI 創作中心「拆分鏡」，或在生成紀錄按「＋加入分鏡」。" };
+      case "asset":
+        return { text: `還有 ${statusCounts.missing} 鏡沒有畫面——按該格「生成這一格」快速出圖，或點縮圖開單格工作室細修。`, filter: "missing" };
+      case "voice":
+        return { text: `有 ${voicePending} 鏡已填配音詞、還沒生成旁白——點該格縮圖開單格工作室的「配音」分頁。不配旁白也可以先送審。` };
+      case "review":
+        if (unapproved === 0 && statusCounts.pending > 0) {
+          return isLeader
+            ? { text: `有 ${statusCounts.pending} 鏡等你裁決——按「通過」或「退回」。`, filter: "pending" }
+            : { text: `已送審 ${statusCounts.pending} 鏡，等組長裁決；通過後就能打包交付。` };
+        }
+        return {
+          text: `畫面齊了——逐格按「送審」${statusCounts.needs_work > 0 ? `（${statusCounts.needs_work} 鏡被退回，先照理由修好再重送）` : ""}${statusCounts.pending > 0 ? `；另有 ${statusCounts.pending} 鏡審核中` : ""}，全部通過就能打包交付。`,
+          filter: statusCounts.needs_work > 0 ? "needs_work" : undefined,
+        };
+      case "deliver":
+        return { text: `全部 ${list.length} 鏡已通過——到下方「交付」打包帶走。` };
+    }
+  };
 
   const [showPreview, setShowPreview] = useState(false);
   // 單格工作室（全螢幕）：哪一格被拉出來修。與粗剪預覽一樣掛在分鏡卡層級，不掛在分鏡列內
   // （`.gen-row` 的 content-visibility 會成為 fixed 的包含區塊）。檢視者也能開，內部依 canEdit 唯讀。
   const [studioScene, setStudioScene] = useState<{ id: string; number: number } | null>(null);
-  // 目標剪輯軟體（決定「下載時間軸/字幕」拿哪些檔）；預設剪映——組內主力剪輯軟體；記住上次選擇
+  // 目標剪輯軟體（決定「進階單檔」拿哪些檔）；預設剪映——組內主力剪輯軟體；記住上次選擇
   const [editTarget, setEditTargetState] = useState<EditTargetKey>(() => {
     try {
       const saved = window.localStorage.getItem(EDIT_TARGET_LS_KEY);
@@ -648,24 +607,24 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
     try { window.localStorage.setItem(EDIT_TARGET_LS_KEY, next); } catch { /* 持久化只是加分 */ }
   };
   const target = EDIT_TARGETS.find((t) => t.key === editTarget) ?? EDIT_TARGETS[0];
-  // 逐格生成模型（深度優化：原本寫死 SDXL Lightning）——per 專案記住上次選擇；失效 id 回退預設
-  const [genModelId, setGenModelIdState] = useState<string>(() => {
+  // 快速出圖模型：跟著單格工作室「重畫這格」上次選的（同一把 localStorage 鑰匙）；失效 id 回退預設。
+  // 工作室關閉時重讀——在工作室換過模型，列表的「生成這一格」立即跟上。
+  const readGenModel = () => {
     try {
       const saved = window.localStorage.getItem(`aios.scenegen.${projectId}`);
       return saved && SCENE_GEN_MODELS.some((m) => m.id === saved) ? saved : DEFAULT_MODEL;
     } catch {
       return DEFAULT_MODEL;
     }
-  });
-  const setGenModelId = (next: string) => {
-    setGenModelIdState(next);
-    try { window.localStorage.setItem(`aios.scenegen.${projectId}`, next); } catch { /* 持久化只是加分 */ }
   };
+  const [genModelId, setGenModelId] = useState<string>(readGenModel);
+
+  const hint = stageHint();
 
   return (
     <Card as="section" data-fb="分鏡與交付">
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0 }}>分鏡・交付<HelpTip text="把成品排成一支片的順序，可送審與打包交付。" /></h2>
+        <h2 style={{ margin: 0 }}>分鏡・交付<HelpTip text="把成品排成一支片的順序：補畫面→配音→送審，全部通過後在下方「交付」打包。細修單格請點縮圖開單格工作室。" /></h2>
         {list.length > 0 && (
           <span className="mono" style={{ fontSize: 13, color: "var(--primary-ink)" }}>共 {list.length} 鏡・約 {totalSec} 秒</span>
         )}
@@ -688,25 +647,31 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
           </Button>
         </p>
       )}
-      {/* 逐格生成模型（深度優化）：分鏡卡就地換文生圖模型，每格「生成這一格/重生」都用它；預估點數即時跟著變 */}
-      {canEdit && !scenes.isError && list.length > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-          <label htmlFor={`scene-gen-model-${projectId}`} style={{ margin: 0, fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
-            逐格生成模型
-            <HelpTip text="每一格「生成這一格／重生」用的文生圖模型。便宜的適合快速試構圖，旗艦的適合定稿。" />
-          </label>
-          <select
-            id={`scene-gen-model-${projectId}`}
-            value={genModelId}
-            onChange={(e) => setGenModelId(e.target.value)}
-            style={{ width: "auto", fontSize: "var(--fs-13)", padding: "6px 10px" }}
-          >
-            {SCENE_GEN_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {tierLabel(m.tier)}・{m.label} — {m.points} 點
-              </option>
+      {/* ── C 流程引導：五階段一條線＋「下一步」一句話，回答「我現在該做什麼」 ── */}
+      {!scenes.isLoading && !scenes.isError && (
+        <div className="scene-pipeline" role="group" aria-label="製作流程進度">
+          <ol className="scene-pipeline__steps">
+            {PIPELINE_STAGES.map((stage, idx) => (
+              <li
+                key={stage.key}
+                className={`scene-pipeline__step${stageDone[stage.key] ? " is-done" : ""}${currentStage === stage.key ? " is-current" : ""}`}
+                aria-current={currentStage === stage.key ? "step" : undefined}
+              >
+                <span className="scene-pipeline__num" aria-hidden="true">
+                  {stageDone[stage.key] ? <Icon name="Check" size={11} /> : idx + 1}
+                </span>
+                {stage.label}
+              </li>
             ))}
-          </select>
+          </ol>
+          <div className="scene-pipeline__hint">
+            <Hint as="span" layer="always">{hint.text}</Hint>
+            {hint.filter && list.length > 0 && (
+              <Button size="sm" variant="ghost" onClick={() => { setSceneFilter(hint.filter!); setSceneListExpanded(true); }}>
+                只看這些
+              </Button>
+            )}
+          </div>
         </div>
       )}
       {!scenes.isError && list.length > 0 && (
@@ -772,7 +737,6 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
                   canEdit={canEdit}
                   meLoading={me.isLoading}
                   genModelId={genModelId}
-                  onUsePrompt={onUsePrompt}
                   charIds={charIds}
                   sceneIds={sceneIds}
                   invalidate={invalidate}
@@ -797,67 +761,103 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
               {sceneListExpanded ? "手機版先收起完整分鏡" : `再顯示 ${list.length - 4} 鏡`}
             </button>
           )}
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
-            {/* QA-005：非同步 job 版打包——就地顯示進度/取消/完成下載，不再是看似卡死的同步下載 */}
-            <ExportJobButton projectId={projectId} />
-            {/* 單檔時間軸/字幕下載（需求 #8＋直連強化）：依目標軟體列出可直接匯入的檔，各一顆下載鈕 */}
-            <label style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
-              目標剪輯軟體
-              <select
-                value={editTarget}
-                aria-label="目標剪輯軟體"
-                onChange={(e) => setEditTarget(e.target.value as EditTargetKey)}
-                style={{ width: "auto", fontSize: "var(--fs-13)", padding: "6px 10px" }}
-              >
-                {EDIT_TARGETS.map((t) => (
-                  <option key={t.key} value={t.key}>{t.label}</option>
-                ))}
-              </select>
-            </label>
-            {target.files.map((f) => (
-              <a
-                key={f.format}
-                href={`/api/export/${projectId}/timeline?format=${f.format}`}
-                download
-                className="btn-tonal"
-                title={`下載 ${target.label} 可匯入的${f.name}單檔（時間碼依分鏡秒數累計）`}
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "solid", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
-              >
-                <Icon name="Download" /> {f.name}（{f.ext}）
-              </a>
-            ))}
-            {"draft" in target && target.draft && (
-              <a
-                href={`/api/export/${projectId}/jianying`}
-                download
-                className="btn-tonal"
-                title="實驗性：剪映/CapCut 草稿資料夾（含素材與排好的時間軸）。解壓到剪映草稿目錄後打開剪映即可直接剪——目錄位置與相容版本見包內「安裝說明.txt」。"
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "dashed", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
-              >
-                <Icon name="Download" /> 剪映草稿包（實驗）
-              </a>
-            )}
-            <button
-              data-fb="粗剪預覽"
-              style={{ padding: "10px 18px", fontSize: "var(--fs-14)", borderRadius: "var(--r-12)" }}
-              aria-expanded={showPreview}
-              onClick={() => setShowPreview((v) => !v)}
-            >
-              {showPreview ? (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Icon name="ChevronDown" /> 收合粗剪預覽
-                </span>
+          {/* ── B 交付中心：先講就緒度，再給一顆主 CTA；剪輯師的單檔收進「進階」摺疊 ── */}
+          <section className="scene-deliver" aria-label="交付">
+            <div className="scene-deliver__head">
+              <h3 style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-15)" }}>
+                <Icon name="Package" size={16} /> 交付
+              </h3>
+              {allApproved ? (
+                <Meta role="status" style={{ color: "var(--success-ink)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <Icon name="Check" size={13} /> 全部 {list.length} 鏡已通過審核，可以打包交付
+                </Meta>
               ) : (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <Icon name="ChevronRight" /> 粗剪預覽
-                </span>
+                <Meta role="status">
+                  已通過 {statusCounts.approved}／{list.length} 鏡
+                  {(() => {
+                    const parts = [
+                      statusCounts.missing > 0 ? `${statusCounts.missing} 鏡無畫面` : null,
+                      statusCounts.draft > 0 ? `${statusCounts.draft} 鏡未送審` : null,
+                      statusCounts.pending > 0 ? `${statusCounts.pending} 鏡待審` : null,
+                      statusCounts.needs_work > 0 ? `${statusCounts.needs_work} 鏡需修改` : null,
+                    ].filter(Boolean);
+                    return parts.length > 0 ? `——${parts.join("、")}` : "";
+                  })()}
+                </Meta>
               )}
-            </button>
-            <Meta>共 {list.length} 鏡・約 {totalSec} 秒｜含素材＋腳本鏡頭表，直接進剪映/Premiere；大專案打包需要一點時間</Meta>
-          </div>
-          <Hint style={{ margin: "6px 0 0" }}>
-            zip 交付包內附「媒體連結版」時間軸（交付/時間軸.fcpxml・Premiere時間軸.xml）——解壓後匯入一個檔，粗剪含旁白自動排好；另附字幕.srt 與剪輯表.edl
-          </Hint>
+            </div>
+            <div className="scene-deliver__actions">
+              {/* QA-005：非同步 job 版打包——就地顯示進度/取消/完成下載，不再是看似卡死的同步下載 */}
+              <ExportJobButton projectId={projectId} />
+              <button
+                data-fb="粗剪預覽"
+                style={{ padding: "10px 18px", fontSize: "var(--fs-14)", borderRadius: "var(--r-12)" }}
+                aria-expanded={showPreview}
+                title="打包前先把分鏡依順序連播一次，看整支片的節奏"
+                onClick={() => setShowPreview((v) => !v)}
+              >
+                {showPreview ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Icon name="ChevronDown" /> 收合粗剪預覽
+                  </span>
+                ) : (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <Icon name="Play" size={14} /> 粗剪預覽
+                  </span>
+                )}
+              </button>
+            </div>
+            <Hint style={{ margin: "6px 0 0" }}>
+              zip 內含全部素材、腳本鏡頭表與「媒體連結版」時間軸（交付/時間軸.fcpxml・Premiere時間軸.xml・字幕.srt・剪輯表.edl）——
+              解壓後匯入一個檔，粗剪含旁白自動排好；大專案打包需要一點時間
+            </Hint>
+            <details className="scene-deliver__advanced">
+              <summary>進階：只要單檔（給剪輯師的時間軸／字幕／草稿包）</summary>
+              <Hint style={{ margin: "8px 0" }}>
+                這裡的單檔是「骨架版」時間軸——只有分鏡順序與秒數、不掛媒體，適合只要對位參考；
+                要含媒體的完整時間軸請直接用上面的交付包。
+              </Hint>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                {/* 單檔時間軸/字幕下載（需求 #8＋直連強化）：依目標軟體列出可直接匯入的檔，各一顆下載鈕 */}
+                <label style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-12)", whiteSpace: "nowrap" }}>
+                  目標剪輯軟體
+                  <select
+                    value={editTarget}
+                    aria-label="目標剪輯軟體"
+                    onChange={(e) => setEditTarget(e.target.value as EditTargetKey)}
+                    style={{ width: "auto", fontSize: "var(--fs-13)", padding: "6px 10px" }}
+                  >
+                    {EDIT_TARGETS.map((t) => (
+                      <option key={t.key} value={t.key}>{t.label}</option>
+                    ))}
+                  </select>
+                </label>
+                {target.files.map((f) => (
+                  <a
+                    key={f.format}
+                    href={`/api/export/${projectId}/timeline?format=${f.format}`}
+                    download
+                    className="btn-tonal"
+                    title={`下載 ${target.label} 可匯入的${f.name}單檔（時間碼依分鏡秒數累計）`}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "solid", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
+                  >
+                    <Icon name="Download" /> {f.name}（{f.ext}）
+                  </a>
+                ))}
+                {"draft" in target && target.draft && (
+                  <a
+                    href={`/api/export/${projectId}/jianying`}
+                    download
+                    className="btn-tonal"
+                    title="實驗性：剪映/CapCut 草稿資料夾（含素材與排好的時間軸）。解壓到剪映草稿目錄後打開剪映即可直接剪——目錄位置與相容版本見包內「安裝說明.txt」。"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: "var(--fs-13)", borderRadius: "var(--r-8)", textDecoration: "none", borderStyle: "dashed", borderWidth: 1, transition: "background var(--dur-base), border-color var(--dur-base)" }}
+                  >
+                    <Icon name="Download" /> 剪映草稿包（實驗）
+                  </a>
+                )}
+              </div>
+            </details>
+          </section>
           {showPreview && (
             <div style={{ marginTop: 14 }}>
               {/* 傳 onClose：StoryboardPlayer 是全螢幕 modal，沒接 onClose 的話 ✕鈕與 Esc 都失效→使用者被困需重載 */}
@@ -873,7 +873,11 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
               canEdit={canEdit}
               charIds={charIds}
               sceneIds={sceneIds}
-              onClose={() => setStudioScene(null)}
+              onClose={() => {
+                setStudioScene(null);
+                // 在工作室換過「重畫」模型的話，列表的「生成這一格」跟著用（同一把鑰匙）
+                setGenModelId(readGenModel());
+              }}
               onChanged={invalidate}
             />
           )}
