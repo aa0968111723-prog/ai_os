@@ -2740,7 +2740,10 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 @media (max-width: 560px) {
   .project-messages-sheet {
     width: 100%;
-    max-height: calc(100dvh - 72px - var(--safe-top));
+    /* 100% 這一夾不可省：媒體查詢特異性高於上面的基礎規則，手機一律吃這條。
+       父層 root 的底緣已被 --kb-inset 抬高，100% 才是「鍵盤之上的可用高度」；
+       只寫 100dvh 在 iOS 不隨鍵盤縮，sheet 會直接長到鍵盤底下。 */
+    max-height: min(calc(100dvh - 72px - var(--safe-top)), 100%);
     border-radius: 16px 16px 0 0;
   }
   .project-messages-sheet__body {

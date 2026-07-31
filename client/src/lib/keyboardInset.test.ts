@@ -114,11 +114,21 @@ describe("installKeyboardInset", () => {
 
   // 只換成 dvh 是不夠的：iOS 的鍵盤不改變 dvh（dvh 只追網址列這類動態工具列）。
   // sheet 必須另外夾到「已被 --kb-inset 縮短的父層 100%」，否則照樣溢出到鍵盤底下。
-  it("留言 sheet 夾到父層 100%，不只靠 dvh", () => {
+  //
+  // 這條一定要掃「每一個」同名規則：基礎規則與 ≤560px 覆寫都叫 .project-messages-sheet，
+  // 而媒體查詢特異性較高——手機吃的是後者。只檢查 indexOf 找到的第一個，會在
+  // 「基礎規則已修、手機那條還破」時給出綠燈（本專案實際發生過一次）。
+  it("留言 sheet 的每一條 max-height 都夾到父層 100%，不只靠 dvh", () => {
     const styles = readFileSync(resolve(process.cwd(), "client/src/styles.css"), "utf8");
-    const start = styles.indexOf(".project-messages-sheet {");
-    const rule = styles.slice(start, styles.indexOf("}", start));
-    expect(rule).toMatch(/max-height:\s*min\([^)]*100%\)/);
+    const rules: string[] = [];
+    for (let at = styles.indexOf(".project-messages-sheet {"); at !== -1;
+      at = styles.indexOf(".project-messages-sheet {", at + 1)) {
+      rules.push(styles.slice(at, styles.indexOf("}", at)));
+    }
+    expect(rules.length).toBeGreaterThanOrEqual(2); // 基礎規則＋≤560px 覆寫
+    for (const rule of rules) {
+      expect(rule).toMatch(/max-height:\s*min\([^;]*100%\)/);
+    }
   });
 
   it("卸載會移掉監聽與變數", () => {
