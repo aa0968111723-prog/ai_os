@@ -4,6 +4,7 @@ import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import type { AgentStep } from "./agentRunner";
+import { listGroupTasks } from "./taskCore";
 import type { CompletePlanSummary } from "../../shared/plan";
 
 export type AgentEventType = typeof schema.agentEvents.$inferInsert["eventType"];
@@ -171,39 +172,61 @@ export function classifyAgentHealth(
   return "healthy";
 }
 
-export async function getProjectAgentInsights(
-  auth: AuthState,
-  projectId: string,
-): Promise<ProjectAgentInsights> {
-  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
-  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
-  requireGroup(auth, project.groupId);
-  const [runRows, taskRows] = await Promise.all([
-    db
-      .select()
-      .from(schema.agentRuns)
-      .where(and(
-        eq(schema.agentRuns.projectId, projectId),
-        eq(schema.agentRuns.groupId, project.groupId),
-      ))
-      .orderBy(desc(schema.agentRuns.createdAt))
-      .limit(101),
-    db
-      .select()
-      .from(schema.projectTasks)
-      .where(and(
-        eq(schema.projectTasks.projectId, projectId),
-        eq(schema.projectTasks.groupId, project.groupId),
-      ))
-      .orderBy(asc(schema.projectTasks.dueAt))
-      .limit(301),
-  ]);
-  const runsTruncated = runRows.length > 100;
-  const tasksTruncated = taskRows.length > 300;
-  const runs = runsTruncated ? runRows.slice(0, 100) : runRows;
-  const tasks = tasksTruncated ? taskRows.slice(0, 300) : taskRows;
-  const now = Date.now();
-  const recentCutoff = now - 7 * 24 * 60 * 60 * 1_000;
+/** assembleAgentInsights 需要的 run 欄位（專案級與組級共用；刻意不吃整列，免得誤用未經 ACL 的欄位） */
+export interface AgentInsightRun {
+  id: string;
+  projectId: string;
+  goal: string;
+  status: string;
+  error: string | null;
+  updatedAt: Date;
+  steps: unknown;
+  planSummary: CompletePlanSummary | null;
+}
+
+/** assembleAgentInsights 需要的人類任務欄位 */
+export interface AgentInsightTask {
+  id: string;
+  projectId: string;
+  title: string;
+  status: string;
+  priority: string;
+  taskType: string;
+  dueAt: Date | null;
+  planRunId: string | null;
+  wakeRunId: string | null;
+  assigneeId: string | null;
+}
+
+/** 代理上限：專案級與組級沿用同一組數字，避免兩邊悄悄長出不同的截斷語意 */
+export const AGENT_INSIGHT_LIMITS = {
+  runs: 100,
+  tasks: 300,
+  blockers: 50,
+  results: 200,
+  workItems: 300,
+  recentFailuresInBlockers: 10,
+  recentMs: 7 * 24 * 60 * 60 * 1_000,
+} as const;
+
+/**
+ * 由 run 與人類任務列組出「代理洞察」（純函式）。
+ *
+ * 抽出來的理由：這段判斷（哪些算阻塞、逾期怎麼分級、待補資訊與風險怎麼數）原本埋在
+ * getProjectAgentInsights 裡，組級要用就只能複製一份——複製出來的第二套規則遲早會跟
+ * 專案頁對不上，同一件事在兩個畫面上得到兩種結論。現在兩邊都呼叫這一支。
+ *
+ * 呼叫端負責 ACL 與截斷；本函式只做判斷，不碰資料庫。
+ */
+export function assembleAgentInsights(
+  runs: AgentInsightRun[],
+  tasks: AgentInsightTask[],
+  options: { nowMs?: number; runsTruncated?: boolean; tasksTruncated?: boolean } = {},
+): ProjectAgentInsights {
+  const runsTruncated = options.runsTruncated ?? false;
+  const tasksTruncated = options.tasksTruncated ?? false;
+  const now = options.nowMs ?? Date.now();
+  const recentCutoff = now - AGENT_INSIGHT_LIMITS.recentMs;
   const activeRuns = runs.filter((run) =>
     run.status === "awaiting_approval" || run.status === "running" || run.status === "waiting",
   );
@@ -213,7 +236,7 @@ export async function getProjectAgentInsights(
     run.status === "failed" && run.updatedAt.getTime() >= recentCutoff,
   );
   const planSummaries = activeRuns
-    .map((run) => run.planSummary as CompletePlanSummary | null)
+    .map((run) => run.planSummary)
     .filter((summary): summary is CompletePlanSummary => Boolean(summary));
   const unresolvedInformation = planSummaries.reduce(
     (count, summary) => count + (summary.missingInformation?.length ?? 0),
@@ -240,14 +263,14 @@ export async function getProjectAgentInsights(
         taskId: task.id,
         runId: task.wakeRunId ?? undefined,
       })),
-    ...recentFailures.slice(0, 10).map((run) => ({
+    ...recentFailures.slice(0, AGENT_INSIGHT_LIMITS.recentFailuresInBlockers).map((run) => ({
       severity: "critical" as const,
       type: "failed_run" as const,
       label: `代理失敗：${run.error ?? run.goal}`,
       runId: run.id,
     })),
     ...activeRuns
-      .filter((run) => ((run.planSummary as CompletePlanSummary | null)?.missingInformation?.length ?? 0) > 0)
+      .filter((run) => (run.planSummary?.missingInformation?.length ?? 0) > 0)
       .map((run) => ({
         severity: "warning" as const,
         type: "missing_information" as const,
@@ -257,7 +280,7 @@ export async function getProjectAgentInsights(
   ];
 
   const allResults = collectAgentResults(runs);
-  const results = allResults.slice(0, 200);
+  const results = allResults.slice(0, AGENT_INSIGHT_LIMITS.results);
   const allWorkItems: ProjectAgentWorkItem[] = [
     ...openTasks.map((task) => ({
       id: `human:${task.id}`,
@@ -284,7 +307,7 @@ export async function getProjectAgentInsights(
         })),
     ),
   ];
-  const workItems = allWorkItems.slice(0, 300);
+  const workItems = allWorkItems.slice(0, AGENT_INSIGHT_LIMITS.workItems);
   const status = classifyAgentHealth(blockers, risks);
   return {
     status,
@@ -295,7 +318,7 @@ export async function getProjectAgentInsights(
     recentFailures: recentFailures.length,
     unresolvedInformation,
     risks,
-    blockers: blockers.slice(0, 50),
+    blockers: blockers.slice(0, AGENT_INSIGHT_LIMITS.blockers),
     results,
     workItems,
     truncated: {
@@ -304,5 +327,241 @@ export async function getProjectAgentInsights(
       results: allResults.length > results.length,
       workItems: allWorkItems.length > workItems.length,
     },
+  };
+}
+
+export async function getProjectAgentInsights(
+  auth: AuthState,
+  projectId: string,
+): Promise<ProjectAgentInsights> {
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+  requireGroup(auth, project.groupId);
+  const [runRows, taskRows] = await Promise.all([
+    db
+      .select()
+      .from(schema.agentRuns)
+      .where(and(
+        eq(schema.agentRuns.projectId, projectId),
+        eq(schema.agentRuns.groupId, project.groupId),
+      ))
+      .orderBy(desc(schema.agentRuns.createdAt))
+      .limit(AGENT_INSIGHT_LIMITS.runs + 1),
+    db
+      .select()
+      .from(schema.projectTasks)
+      .where(and(
+        eq(schema.projectTasks.projectId, projectId),
+        eq(schema.projectTasks.groupId, project.groupId),
+      ))
+      .orderBy(asc(schema.projectTasks.dueAt))
+      .limit(AGENT_INSIGHT_LIMITS.tasks + 1),
+  ]);
+  const runsTruncated = runRows.length > AGENT_INSIGHT_LIMITS.runs;
+  const tasksTruncated = taskRows.length > AGENT_INSIGHT_LIMITS.tasks;
+  return assembleAgentInsights(
+    (runsTruncated ? runRows.slice(0, AGENT_INSIGHT_LIMITS.runs) : runRows).map(toInsightRun),
+    tasksTruncated ? taskRows.slice(0, AGENT_INSIGHT_LIMITS.tasks) : taskRows,
+    { runsTruncated, tasksTruncated },
+  );
+}
+
+/** 組級洞察：專案級的全部欄位，外加「哪個專案」「誰」兩層歸屬 */
+export interface GroupAgentPerson {
+  userId: string | null;
+  name: string | null;
+  openTasks: number;
+  overdueTasks: number;
+  /** 最早到期的未結任務（null＝手上的任務都沒設期限） */
+  earliestDueAt: Date | null;
+}
+
+export interface GroupAgentProjectRollup {
+  projectId: string;
+  projectTitle: string;
+  blockers: number;
+  criticalBlockers: number;
+  openTasks: number;
+  overdueTasks: number;
+  activeRuns: number;
+}
+
+/**
+ * 等人裁決的人類核准節點（作業台「待我裁決」的第四種來源）。
+ *
+ * 明列而不要前端從 blockers 的文案反推：靠 `label.startsWith("等待核准：")` 猜，
+ * 文案一改就默默漏件，而漏掉的正是「整份計畫卡在這裡」的那一件。
+ */
+export interface GroupPendingApprovalTask {
+  taskId: string;
+  projectId: string;
+  projectTitle: string;
+  title: string;
+  dueAt: Date | null;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  runId: string | null;
+}
+
+export interface GroupAgentInsights extends ProjectAgentInsights {
+  byProject: GroupAgentProjectRollup[];
+  people: GroupAgentPerson[];
+  pendingApprovalTasks: GroupPendingApprovalTask[];
+  /** 「誰卡住了」的來源筆數上限有沒有被吃到（提醒畫面不是全貌） */
+  peopleTruncated: boolean;
+}
+
+/** 「誰卡住了」一次最多列幾個人；超過就靠排序把最卡的排前面 */
+const GROUP_PEOPLE_LIMIT = 12;
+
+/**
+ * 由組內的 run 與任務組出組級洞察（純函式）。
+ *
+ * 判斷完全交給 assembleAgentInsights——組級與專案級對「什麼算阻塞」必須是同一套規則；
+ * 這裡只多做兩件事：把阻塞與任務歸到專案、把未結任務歸到人。
+ */
+export function assembleGroupAgentInsights(
+  runs: AgentInsightRun[],
+  tasks: Array<AgentInsightTask & { assigneeName?: string | null; projectTitle?: string | null }>,
+  projectTitles: Map<string, string>,
+  options: { nowMs?: number; runsTruncated?: boolean; tasksTruncated?: boolean } = {},
+): GroupAgentInsights {
+  const base = assembleAgentInsights(runs, tasks, options);
+  const now = options.nowMs ?? Date.now();
+  const openTasks = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
+
+  // ── 歸屬到專案 ──
+  const rollups = new Map<string, GroupAgentProjectRollup>();
+  const rollupOf = (projectId: string): GroupAgentProjectRollup => {
+    let cur = rollups.get(projectId);
+    if (!cur) {
+      cur = {
+        projectId,
+        projectTitle: projectTitles.get(projectId) ?? `專案 ${projectId.slice(0, 8)}`,
+        blockers: 0, criticalBlockers: 0, openTasks: 0, overdueTasks: 0, activeRuns: 0,
+      };
+      rollups.set(projectId, cur);
+    }
+    return cur;
+  };
+  // 阻塞帶的是 runId／taskId，要先建反查表才知道它屬於哪個專案
+  const projectOfRun = new Map(runs.map((r) => [r.id, r.projectId] as const));
+  const projectOfTask = new Map(tasks.map((t) => [t.id, t.projectId] as const));
+  for (const blocker of base.blockers) {
+    const projectId = (blocker.taskId ? projectOfTask.get(blocker.taskId) : undefined)
+      ?? (blocker.runId ? projectOfRun.get(blocker.runId) : undefined);
+    if (!projectId) continue;
+    const cur = rollupOf(projectId);
+    cur.blockers += 1;
+    if (blocker.severity === "critical") cur.criticalBlockers += 1;
+  }
+  for (const task of openTasks) {
+    const cur = rollupOf(task.projectId);
+    cur.openTasks += 1;
+    if (task.dueAt && task.dueAt.getTime() < now) cur.overdueTasks += 1;
+  }
+  for (const run of runs) {
+    if (run.status !== "running" && run.status !== "waiting" && run.status !== "awaiting_approval") continue;
+    rollupOf(run.projectId).activeRuns += 1;
+  }
+  const byProject = [...rollups.values()].sort((a, b) =>
+    b.criticalBlockers - a.criticalBlockers || b.blockers - a.blockers || b.overdueTasks - a.overdueTasks
+    || a.projectTitle.localeCompare(b.projectTitle, "zh-Hant"),
+  );
+
+  // ── 歸屬到人（未指派的併成一列，否則「沒人認領」這個最該處理的狀況會消失） ──
+  const people = new Map<string, GroupAgentPerson>();
+  for (const task of openTasks) {
+    const key = task.assigneeId ?? "";
+    let cur = people.get(key);
+    if (!cur) {
+      cur = {
+        userId: task.assigneeId ?? null,
+        name: task.assigneeId ? (task.assigneeName ?? null) : null,
+        openTasks: 0, overdueTasks: 0, earliestDueAt: null,
+      };
+      people.set(key, cur);
+    }
+    cur.openTasks += 1;
+    if (task.dueAt) {
+      if (task.dueAt.getTime() < now) cur.overdueTasks += 1;
+      if (!cur.earliestDueAt || task.dueAt.getTime() < cur.earliestDueAt.getTime()) cur.earliestDueAt = task.dueAt;
+    }
+  }
+  const allPeople = [...people.values()].sort((a, b) =>
+    b.overdueTasks - a.overdueTasks || b.openTasks - a.openTasks
+    || (a.earliestDueAt?.getTime() ?? Number.POSITIVE_INFINITY) - (b.earliestDueAt?.getTime() ?? Number.POSITIVE_INFINITY),
+  );
+
+  // ── 等人裁決的核准節點：掛著 wakeRunId 代表「整份計畫停在這一步等人」 ──
+  const pendingApprovalTasks: GroupPendingApprovalTask[] = openTasks
+    .filter((t) => t.taskType === "approval" && Boolean(t.wakeRunId))
+    .map((t) => ({
+      taskId: t.id,
+      projectId: t.projectId,
+      projectTitle: t.projectTitle ?? projectTitles.get(t.projectId) ?? `專案 ${t.projectId.slice(0, 8)}`,
+      title: t.title,
+      dueAt: t.dueAt,
+      assigneeId: t.assigneeId,
+      assigneeName: t.assigneeName ?? null,
+      runId: t.wakeRunId,
+    }))
+    .sort((a, b) =>
+      (a.dueAt?.getTime() ?? Number.POSITIVE_INFINITY) - (b.dueAt?.getTime() ?? Number.POSITIVE_INFINITY),
+    );
+
+  return {
+    ...base,
+    byProject,
+    people: allPeople.slice(0, GROUP_PEOPLE_LIMIT),
+    pendingApprovalTasks,
+    peopleTruncated: allPeople.length > GROUP_PEOPLE_LIMIT,
+  };
+}
+
+/**
+ * 全組代理洞察（作業台「誰卡住了」）。唯讀、組隔離；判斷與專案頁共用同一支純函式。
+ */
+export async function getGroupAgentInsights(
+  auth: AuthState,
+  groupId: string,
+): Promise<GroupAgentInsights> {
+  requireGroup(auth, groupId);
+  const [runRows, taskRows] = await Promise.all([
+    db
+      .select({ run: schema.agentRuns, projectTitle: schema.projects.title })
+      .from(schema.agentRuns)
+      .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
+      .where(eq(schema.agentRuns.groupId, groupId))
+      .orderBy(desc(schema.agentRuns.updatedAt))
+      .limit(AGENT_INSIGHT_LIMITS.runs + 1),
+    listGroupTasks(auth, groupId, { limit: AGENT_INSIGHT_LIMITS.tasks + 1 }),
+  ]);
+  const runsTruncated = runRows.length > AGENT_INSIGHT_LIMITS.runs;
+  const tasksTruncated = taskRows.length > AGENT_INSIGHT_LIMITS.tasks;
+  const runs = runsTruncated ? runRows.slice(0, AGENT_INSIGHT_LIMITS.runs) : runRows;
+  const tasks = tasksTruncated ? taskRows.slice(0, AGENT_INSIGHT_LIMITS.tasks) : taskRows;
+  const projectTitles = new Map<string, string>();
+  for (const row of runs) projectTitles.set(row.run.projectId, row.projectTitle);
+  for (const task of tasks) projectTitles.set(task.projectId, task.projectTitle);
+  return assembleGroupAgentInsights(
+    runs.map((row) => toInsightRun(row.run)),
+    tasks,
+    projectTitles,
+    { runsTruncated, tasksTruncated },
+  );
+}
+
+/** agent_runs 整列 → 洞察需要的欄位（planSummary 的 jsonb 在此收斂型別，判斷層不再各自 cast） */
+export function toInsightRun(run: typeof schema.agentRuns.$inferSelect): AgentInsightRun {
+  return {
+    id: run.id,
+    projectId: run.projectId,
+    goal: run.goal,
+    status: run.status,
+    error: run.error,
+    updatedAt: run.updatedAt,
+    steps: run.steps,
+    planSummary: (run.planSummary as CompletePlanSummary | null) ?? null,
   };
 }

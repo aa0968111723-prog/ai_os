@@ -648,8 +648,41 @@ const HEALTH_LABEL: Record<string, { label: string; hint: string }> = {
   blocked: { label: "有阻塞", hint: "近期失敗且仍有等待／待核——優先到對應專案處理" },
 };
 
-/** 一件「等人裁決」的事：三種來源合流成同一份收件匣 */
-type DecisionKind = "agent" | "scene" | "generation";
+/** 人員阻塞把健康度往上推時要換一句話——否則畫面會說「狀態穩定」旁邊卻列著兩項逾期 */
+const PEOPLE_HEALTH_HINT: Record<string, string> = {
+  attention: "有人員任務在等或即將到期——見下方「誰卡住了」",
+  blocked: "有人員任務逾期或關卡卡住，AI 停在那裡等人——先處理下方「誰卡住了」",
+};
+
+type TeamHealth = "idle" | "healthy" | "attention" | "blocked";
+const HEALTH_SEVERITY: Record<TeamHealth, number> = { idle: 0, healthy: 1, attention: 2, blocked: 3 };
+
+/**
+ * 代理健康度 ＋ 人員阻塞健康度 → 這張卡真正該顯示的健康度。
+ *
+ * 為什麼要合：run 狀態與人類任務是兩個資料源，只看前者就會出現「狀態穩定」旁邊
+ * 列著兩項逾期任務的自相矛盾畫面——而那兩項逾期正是 AI 停下來等的東西。
+ * 取兩者中較嚴重的；`idle`（從沒發起過計畫）只有在人員面也沒事時才保留，
+ * 因為「沒用過 AI」不代表「沒有事情卡住」。
+ */
+export function mergeTeamHealth(
+  runHealth: TeamHealth | undefined,
+  peopleStatus: "healthy" | "attention" | "blocked" | undefined,
+): { health: TeamHealth; fromPeople: boolean } {
+  const run = runHealth ?? "healthy";
+  // 只有 attention／blocked 算「人員面有事」。people=healthy 不能當成升級訊號，
+  // 否則它的嚴重度（1）會蓋掉 idle（0），讓空組又變回「狀態穩定」。
+  if (
+    (peopleStatus === "attention" || peopleStatus === "blocked")
+    && HEALTH_SEVERITY[peopleStatus] > HEALTH_SEVERITY[run]
+  ) {
+    return { health: peopleStatus, fromPeople: true };
+  }
+  return { health: run, fromPeople: false };
+}
+
+/** 一件「等人裁決」的事：四種來源合流成同一份收件匣 */
+type DecisionKind = "agent" | "task" | "scene" | "generation";
 type PendingDecisionSource = {
   projectId: string;
   projectTitle: string;
@@ -657,6 +690,14 @@ type PendingDecisionSource = {
   awaitingGenerations: number;
   oldestPendingApprovalAt?: Date | string | null;
   oldestAwaitingGenerationAt?: Date | string | null;
+};
+/** 組級洞察裡的一項人類核准節點（來自 teamAssistant.groupInsights 的 workItems） */
+type PendingTaskSource = {
+  taskId: string;
+  projectId: string;
+  projectTitle: string;
+  title: string;
+  dueAt?: Date | string | null;
 };
 type DecisionItem = {
   key: string;
@@ -670,10 +711,13 @@ type DecisionItem = {
   /** 只有代理計畫有：可在這張卡就地核准／放棄（走既有 agents.approve／discard，不另開扣點路徑） */
   runId?: string;
   estPoints?: number;
+  /** 只有人類核准節點有：走既有 tasks.decideApproval */
+  taskId?: string;
 };
 
 const DECISION_META: Record<DecisionKind, { label: string; hint: string }> = {
   agent: { label: "計畫待核", hint: "核准後才開始執行、才開始花點" },
+  task: { label: "人員核准", hint: "代理計畫卡在這個人類關卡，核准或退回都會喚醒後續步驟" },
   scene: { label: "分鏡送審", hint: "要看過內容才能裁決，到專案頁決定" },
   generation: { label: "生成待核", hint: "達組內成本門檻的生成，核准才會送出" },
 };
@@ -688,6 +732,22 @@ function daysStuck(since: Date | null, nowMs: number): number | null {
 }
 
 /**
+ * 到期日的人話（未來／過去都要對）。
+ *
+ * 不能直接套 relTime：它只算「過去多久」，未來的日期會被算成負數再夾到 1 分鐘，
+ * 於是「三天後到期」顯示成「1 分鐘前」——最該提醒的那種欄位反而在說謊。
+ */
+export function dueLabel(due: Date | string | null | undefined, nowMs: number = Date.now()): string | null {
+  if (!due) return null;
+  const t = due instanceof Date ? due.getTime() : new Date(due).getTime();
+  if (Number.isNaN(t)) return null;
+  const days = Math.round((t - nowMs) / 86_400_000);
+  if (days < 0) return `逾期 ${-days} 天`;
+  if (days === 0) return "今天到期";
+  return `${days} 天後到期`;
+}
+
+/**
  * 三種待裁決來源 → 一份排序好的收件匣（純函式，便於測）。
  *
  * 排序＝卡最久的排前面（沒有時間戳的排最後），因為這張卡的問題從來不是「有沒有資料」，
@@ -696,6 +756,7 @@ function daysStuck(since: Date | null, nowMs: number): number | null {
 export function buildDecisionInbox(
   runs: Array<{ id: string; projectId: string; projectTitle: string; goal: string; status: string; estPoints: number; updatedAt: Date | string }>,
   pending: PendingDecisionSource[],
+  tasks: PendingTaskSource[] = [],
 ): DecisionItem[] {
   const toDate = (v: Date | string | null | undefined): Date | null => {
     if (!v) return null;
@@ -708,6 +769,13 @@ export function buildDecisionInbox(
     items.push({
       key: `agent-${r.id}`, kind: "agent", projectId: r.projectId, projectTitle: r.projectTitle,
       what: r.goal, since: toDate(r.updatedAt), runId: r.id, estPoints: r.estPoints,
+    });
+  }
+  for (const t of tasks) {
+    items.push({
+      key: `task-${t.taskId}`, kind: "task", projectId: t.projectId, projectTitle: t.projectTitle,
+      // 到期日就是「該在什麼時候之前決定」，拿它當卡住基準比建立時間更貼近使用者感受
+      what: t.title, since: toDate(t.dueAt), taskId: t.taskId,
     });
   }
   for (const p of pending) {
@@ -724,7 +792,7 @@ export function buildDecisionInbox(
       });
     }
   }
-  const ORDER: DecisionKind[] = ["agent", "scene", "generation"];
+  const ORDER: DecisionKind[] = ["agent", "task", "scene", "generation"];
   return items.sort((a, b) => {
     const ta = a.since?.getTime() ?? Number.POSITIVE_INFINITY;
     const tb = b.since?.getTime() ?? Number.POSITIVE_INFINITY;
@@ -776,6 +844,13 @@ function TeamAssistantCard({
   // 這裡只是換一個入口，沒有第二條扣點路徑）
   const approveRun = trpc.agents.approve.useMutation();
   const discardRun = trpc.agents.discard.useMutation();
+  const decideTask = trpc.tasks.decideApproval.useMutation();
+  // 組級洞察：人類任務阻塞與「誰卡住了」。與 agentOverview 分開查——一條是狀態計數、
+  // 一條是判斷結果，合成一支會讓計數也被 100/300 的洞察上限綁住。
+  const insights = trpc.teamAssistant.groupInsights.useQuery(
+    { groupId },
+    { refetchInterval: (q) => ((q.state.data?.activeRuns ?? 0) > 0 ? 30_000 : false) },
+  );
   const overview = trpc.teamAssistant.agentOverview.useQuery(
     { groupId },
     {
@@ -824,15 +899,41 @@ function TeamAssistantCard({
     [runs, runFilter],
   );
   // 預設「進行中」若為空且列表有其他狀態，自動提示可切全部
-  const healthMeta = HEALTH_LABEL[summary?.health ?? "healthy"] ?? HEALTH_LABEL.healthy;
-  const inbox = useMemo(() => buildDecisionInbox(runs, pendingDecisions), [runs, pendingDecisions]);
+  const merged = mergeTeamHealth(summary?.health, insights.data?.status);
+  const healthMeta = {
+    ...(HEALTH_LABEL[merged.health] ?? HEALTH_LABEL.healthy),
+    // 被人員阻塞推上去時要換一句話，否則會出現「狀態穩定」旁邊列著兩項逾期
+    hint: merged.fromPeople
+      ? (PEOPLE_HEALTH_HINT[merged.health] ?? HEALTH_LABEL[merged.health].hint)
+      : (HEALTH_LABEL[merged.health] ?? HEALTH_LABEL.healthy).hint,
+  };
+  // 人類核准節點由伺服器明列（pendingApprovalTasks），不從 blockers 的文案反推——
+  // 靠標籤前綴猜「這是不是核准節點」會在文案一改就默默漏件。
+  const pendingTasks = insights.data?.pendingApprovalTasks ?? [];
+  const inbox = useMemo(
+    () => buildDecisionInbox(runs, pendingDecisions, pendingTasks),
+    [runs, pendingDecisions, pendingTasks],
+  );
+  // 「誰卡住了」：沒有任何人員任務也沒有阻塞時整段不渲染——空區塊只會佔版面、不傳達資訊
+  const stuck = useMemo(() => {
+    const d = insights.data;
+    const people = d?.people ?? [];
+    const projects = (d?.byProject ?? []).filter((p) => p.blockers > 0 || p.overdueTasks > 0);
+    return {
+      show: !!d && (people.length > 0 || projects.length > 0),
+      people, projects,
+      openTasks: d?.openTasks ?? 0,
+      overdueTasks: d?.overdueTasks ?? 0,
+    };
+  }, [insights.data]);
   // 每次 render 取一次「現在」：同一畫面上的「卡了 N 天」不該用到兩個不同的基準時間
   const nowMs = Date.now();
   const [decidingKey, setDecidingKey] = useState<string | null>(null);
-  const decideError = approveRun.error ?? discardRun.error;
-  /** 就地裁決後：代理清單、跨專案待辦、專案卡角標都要跟上（三處看的是同一件事） */
+  const decideError = approveRun.error ?? discardRun.error ?? decideTask.error;
+  /** 就地裁決後：代理清單、組級洞察、跨專案待辦、專案卡角標都要跟上（四處看的是同一件事） */
   const afterDecide = () => {
     overview.refetch();
+    insights.refetch();
     utils.approvals.pendingSummary.invalidate();
     utils.projects.invalidate();
   };
@@ -848,7 +949,7 @@ function TeamAssistantCard({
           </div>
           {summary && (
             <span
-              className={`team-analysis__health is-${summary.health}`}
+              className={`team-analysis__health is-${merged.health}`}
               title={healthMeta.hint}
             >
               {healthMeta.label}
@@ -946,6 +1047,51 @@ function TeamAssistantCard({
                               放棄
                             </ConfirmButton>
                           </>
+                        ) : d.kind === "task" && d.taskId ? (
+                          <>
+                            {/* 人類核准節點：要決定的內容就是任務標題本身（不像分鏡要看圖），
+                                所以可以就地裁決；走 tasks.decideApproval，喚醒邏輯留在 core 裡 */}
+                            <ConfirmButton
+                              triggerClassName="btn-tonal btn-sm"
+                              disabled={busy}
+                              title="核准這個人類關卡，讓計畫的後續步驟繼續"
+                              message={`核准「${d.projectTitle}」的人員關卡？\n${d.what}\n核准後計畫的後續步驟會被喚醒繼續執行。`}
+                              confirmLabel="核准並繼續"
+                              onConfirm={async () => {
+                                setDecidingKey(d.key);
+                                try {
+                                  await decideTask.mutateAsync({ id: d.taskId!, decision: "approve" });
+                                  afterDecide();
+                                } catch {
+                                  /* decideTask.error 已顯示 */
+                                } finally {
+                                  setDecidingKey((k) => (k === d.key ? null : k));
+                                }
+                              }}
+                            >
+                              核准
+                            </ConfirmButton>
+                            <ConfirmButton
+                              triggerClassName="btn-ghost btn-sm"
+                              disabled={busy}
+                              title="退回這個關卡（計畫不會繼續往下走）"
+                              message={`退回「${d.projectTitle}」的人員關卡？\n${d.what}\n計畫不會繼續往下走，需要重新處理後再送一次。`}
+                              confirmLabel="退回"
+                              onConfirm={async () => {
+                                setDecidingKey(d.key);
+                                try {
+                                  await decideTask.mutateAsync({ id: d.taskId!, decision: "reject" });
+                                  afterDecide();
+                                } catch {
+                                  /* decideTask.error 已顯示 */
+                                } finally {
+                                  setDecidingKey((k) => (k === d.key ? null : k));
+                                }
+                              }}
+                            >
+                              退回
+                            </ConfirmButton>
+                          </>
                         ) : (
                           /* 分鏡／生成刻意不就地裁決：不看內容就按核准等於盲簽 */
                           <Link href={`/p/${d.projectId}`} title={meta.hint}>前往處理 →</Link>
@@ -963,6 +1109,75 @@ function TeamAssistantCard({
             )}
             {decideError && <p className="error" role="alert" style={{ margin: 0 }}>{decideError.message}</p>}
           </div>
+        )}
+
+        {/* ── 誰卡住了：把未結人類任務歸到人與專案。
+            這張卡原本只看得到 agent_runs，於是「7 項人員任務逾期」這種最該被看見的
+            阻塞完全不在畫面上——AI 停著等人，畫面卻說一切正常。 ── */}
+        {stuck.show && (
+          <div className="team-stuck" aria-label="誰卡住了">
+            <div className="team-stuck__head">
+              <strong>誰卡住了</strong>
+              <Meta>
+                {stuck.openTasks} 項人員任務進行中
+                {stuck.overdueTasks > 0 ? `・${stuck.overdueTasks} 項逾期` : ""}
+              </Meta>
+            </div>
+            <div className="team-stuck__cols">
+              <div>
+                <Meta as="p" style={{ margin: "0 0 4px" }}>依人員</Meta>
+                {stuck.people.length === 0 ? (
+                  <Hint layer="always" style={{ margin: 0 }}>沒有進行中的人員任務。</Hint>
+                ) : (
+                  <ul className="team-stuck__list">
+                    {stuck.people.map((p) => (
+                      <li key={p.userId ?? "unassigned"}>
+                        <span className="team-stuck__who">{p.userId ? (p.name ?? "（未命名成員）") : "尚未指派"}</span>
+                        <Meta>
+                          {p.openTasks} 項
+                          {p.overdueTasks > 0 ? `・${p.overdueTasks} 逾期` : ""}
+                          {dueLabel(p.earliestDueAt, nowMs) ? `・最近一件：${dueLabel(p.earliestDueAt, nowMs)}` : ""}
+                        </Meta>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {insights.data?.peopleTruncated && (
+                  <Meta as="p" style={{ margin: "4px 0 0" }}>人數較多，只列最卡的前幾位。</Meta>
+                )}
+              </div>
+              <div>
+                <Meta as="p" style={{ margin: "0 0 4px" }}>依專案</Meta>
+                {stuck.projects.length === 0 ? (
+                  <Hint layer="always" style={{ margin: 0 }}>沒有專案有阻塞。</Hint>
+                ) : (
+                  <ul className="team-stuck__list">
+                    {stuck.projects.map((p) => (
+                      <li key={p.projectId}>
+                        <Link href={`/p/${p.projectId}`} className="team-stuck__who">{p.projectTitle}</Link>
+                        <Meta>
+                          {p.criticalBlockers > 0 ? `${p.criticalBlockers} 項嚴重・` : ""}
+                          {p.blockers} 項阻塞
+                          {p.overdueTasks > 0 ? `・${p.overdueTasks} 逾期` : ""}
+                        </Meta>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+            {insights.data && (insights.data.truncated.runs || insights.data.truncated.tasks) && (
+              <Meta as="p" style={{ margin: 0 }}>
+                資料量已達分析上限，這裡是抽樣結果——完整清單請到各專案頁看。
+              </Meta>
+            )}
+          </div>
+        )}
+        {insights.error && (
+          <p className="error" role="alert" style={{ margin: "8px 0 0" }}>
+            人員阻塞分析載入失敗——
+            <Button variant="ghost" size="sm" onClick={() => insights.refetch()}>再試一次</Button>
+          </p>
         )}
 
         {/* 健康度徽章旁的解釋：徽章本身已有文字標籤，這句是補充 → 引導層 */}

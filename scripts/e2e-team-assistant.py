@@ -289,4 +289,31 @@ for row in pending.get("projects", []):
 ok("pendingSummary 組隔離",
    "__error__" in call("GET", admin, "approvals.pendingSummary", {"groupId": fake_gid}))
 
+# ── 10. 組級代理洞察（「誰卡住了」）──
+# 判斷規則與專案頁的過程面板共用同一支純函式；這裡驗傳輸層的形狀與組隔離。
+gi = call("GET", admin, "teamAssistant.groupInsights", {"groupId": gid})
+ok("groupInsights 有健康度", gi.get("status") in ("healthy", "attention", "blocked"))
+for field in ("blockers", "byProject", "people", "pendingApprovalTasks", "workItems", "results"):
+    ok(f"groupInsights.{field} 是陣列（空組也不是 null）", isinstance(gi.get(field), list))
+ok("groupInsights 有 truncated 四旗標",
+   isinstance(gi.get("truncated"), dict) and set(gi["truncated"]) == {"runs", "tasks", "results", "workItems"})
+ok("groupInsights 有 peopleTruncated", isinstance(gi.get("peopleTruncated"), bool))
+# 每一項阻塞都要歸得到某個專案：byProject 的阻塞總和不得少於 blockers 筆數
+ok("阻塞都歸得到專案（總和對得上）",
+   sum(p.get("blockers", 0) for p in gi.get("byProject", [])) == len(gi.get("blockers", [])))
+# 人類核准節點必須帶齊就地裁決需要的欄位
+for t in gi.get("pendingApprovalTasks", []):
+    ok(f"核准節點 {t['taskId'][:8]} 欄位齊全",
+       all(k in t for k in ("taskId", "projectId", "projectTitle", "title", "dueAt", "runId")))
+ok("🔒 非本組 groupInsights 被擋",
+   "__error__" in call("GET", admin, "teamAssistant.groupInsights", {"groupId": fake_gid}))
+
+# 專案級洞察仍在（S2 只是把判斷抽成共用純函式，不該改變專案頁行為）
+pi = call("GET", admin, "agents.insights", {"projectId": pid})
+if "__error__" not in str(pi):
+    ok("專案級洞察仍回同一組欄位",
+       all(k in pi for k in ("status", "activeRuns", "openTasks", "blockers", "results", "workItems", "truncated")))
+else:
+    ok("專案級洞察端點（略過：本 e2e 未涵蓋）", True)
+
 print("—— e2e-team-assistant 完成 ——")

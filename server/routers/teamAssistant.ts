@@ -9,6 +9,7 @@ import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { searchCatalogText, rowLine } from "./assistant";
 import { planAgentCore } from "../services/agentCore";
+import { getGroupAgentInsights } from "../services/agentEventCore";
 import { searchAssistantDatabaseRows } from "../services/databaseRowSearch";
 import type { AuthState } from "../services/auth";
 import type { DataField } from "../../shared/databaseFields";
@@ -864,6 +865,15 @@ ${historyBlock}使用者的問題：${input.message}`;
       // totalRuns／listLimit：前端才能誠實說「顯示最近 30 筆（共 N 筆）」而不是把 30 當全部
       return { summary, runs, totalRuns: counts.totalRuns, listLimit: GROUP_AGENT_LIST_LIMIT };
     }),
+
+  /**
+   * 全組代理洞察（作業台「誰卡住了」）：把阻塞歸到專案、把未結人類任務歸到人。
+   * 唯讀、組隔離；判斷規則與專案頁的過程面板共用同一支純函式（assembleAgentInsights），
+   * 不另立第二套「什麼算阻塞」的定義。
+   */
+  groupInsights: authedProcedure
+    .input(z.object({ groupId: z.string().uuid() }))
+    .query(({ ctx, input }) => getGroupAgentInsights(ctx.auth, input.groupId)),
 
   /**
    * 派工：把「使用者已確認」的目標交給某專案的 AI 代理規劃執行。

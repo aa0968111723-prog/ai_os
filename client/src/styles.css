@@ -1985,6 +1985,25 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .team-inbox__age, .team-inbox__act { grid-column: 2; }
 }
 
+/* 誰卡住了：人員／專案兩欄的阻塞歸屬 */
+.team-stuck {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 10px);
+}
+.team-stuck__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.team-stuck__head > strong { font-size: 13px; }
+.team-stuck__cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.team-stuck__list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.team-stuck__list > li { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.team-stuck__who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
+@media (max-width: 640px) {
+  .team-stuck__cols { grid-template-columns: 1fr; }
+}
+
 .team-analysis__stats {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

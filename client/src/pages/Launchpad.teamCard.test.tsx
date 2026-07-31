@@ -10,7 +10,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type React from "react";
-import { buildDecisionInbox, Launchpad } from "./Launchpad";
+import { buildDecisionInbox, dueLabel, Launchpad, mergeTeamHealth } from "./Launchpad";
 
 /** 泛用 trpc 樁：任何 `trpc.a.b.useQuery()` 都回 queryData 裡以路徑登記的值 */
 const h = vi.hoisted(() => {
@@ -90,6 +90,7 @@ function seed(opts: {
   summary?: Record<string, unknown>;
   totalRuns?: number;
   pending?: Array<Record<string, unknown>>;
+  insights?: Record<string, unknown> | null;
 }) {
   const runs = opts.runs ?? [];
   h.queryData.set("auth.me", {
@@ -117,6 +118,16 @@ function seed(opts: {
       ...opts.summary,
     },
   });
+  if (opts.insights !== null) {
+    h.queryData.set("teamAssistant.groupInsights", {
+      status: "healthy", activeRuns: 0, waitingRuns: 0, openTasks: 0, overdueTasks: 0,
+      recentFailures: 0, unresolvedInformation: 0, risks: 0,
+      blockers: [], results: [], workItems: [],
+      truncated: { runs: false, tasks: false, results: false, workItems: false },
+      byProject: [], people: [], pendingApprovalTasks: [], peopleTruncated: false,
+      ...opts.insights,
+    });
+  }
 }
 
 /** 收件匣區塊（用 aria-label 定位，不依賴版面結構） */
@@ -282,5 +293,142 @@ describe("團隊分析卡：健康度語意與筆數誠實度", () => {
     });
     render(<Launchpad groupId={GROUP} />);
     expect(screen.getByText(/近七日另有 3 筆被停止/)).toBeInTheDocument();
+  });
+});
+
+describe("S2：人類核准節點與「誰卡住了」", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  it("人類核准節點是第四種待裁決來源，可就地核准／退回", async () => {
+    seed({
+      runs: [],
+      insights: {
+        openTasks: 2, overdueTasks: 1,
+        pendingApprovalTasks: [{
+          taskId: "task-9", projectId: "p2", projectTitle: "社課回顧",
+          title: "確認旁白稿", dueAt: daysAgo(4), assigneeId: "u1", assigneeName: "阿光", runId: "run-2",
+        }],
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(inbox());
+    expect(box.getByText("人員核准")).toBeInTheDocument();
+    expect(box.getByText("確認旁白稿")).toBeInTheDocument();
+    expect(box.getByText("卡了 4 天")).toBeInTheDocument();
+
+    await userEvent.click(box.getByRole("button", { name: "核准" }));
+    expect(h.mutations).toEqual([{ path: "tasks.decideApproval", input: { id: "task-9", decision: "approve" } }]);
+    await userEvent.click(box.getByRole("button", { name: "退回" }));
+    expect(h.mutations[1]).toEqual({ path: "tasks.decideApproval", input: { id: "task-9", decision: "reject" } });
+  });
+
+  it("四種來源一起依卡最久排序（人員核准不會固定黏在某一段）", () => {
+    const items = buildDecisionInbox(
+      [run({ id: "a", updatedAt: daysAgo(2) })] as never,
+      [{ projectId: "p2", projectTitle: "社課回顧", pendingApprovals: 1, awaitingGenerations: 0, oldestPendingApprovalAt: daysAgo(1) }],
+      [{ taskId: "t9", projectId: "p2", projectTitle: "社課回顧", title: "確認旁白稿", dueAt: daysAgo(9) }],
+    );
+    expect(items.map((i) => i.key)).toEqual(["task-t9", "agent-a", "scene-p2"]);
+  });
+
+  it("「誰卡住了」把未結任務歸到人與專案；未指派獨立顯示", () => {
+    seed({
+      runs: [],
+      insights: {
+        openTasks: 4, overdueTasks: 2,
+        people: [
+          { userId: "u1", name: "阿光", openTasks: 3, overdueTasks: 2, earliestDueAt: daysAgo(5) },
+          { userId: null, name: null, openTasks: 1, overdueTasks: 0, earliestDueAt: null },
+        ],
+        byProject: [
+          { projectId: "p2", projectTitle: "社課回顧", blockers: 3, criticalBlockers: 1, openTasks: 2, overdueTasks: 1, activeRuns: 1 },
+        ],
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const stuck = within(screen.getByLabelText("誰卡住了"));
+    expect(stuck.getByText("阿光")).toBeInTheDocument();
+    expect(stuck.getByText("尚未指派")).toBeInTheDocument();
+    expect(stuck.getByText(/3 項・2 逾期/)).toBeInTheDocument();
+    expect(stuck.getByText("社課回顧")).toBeInTheDocument();
+    expect(stuck.getByText(/1 項嚴重・3 項阻塞/)).toBeInTheDocument();
+    expect(stuck.getByText(/4 項人員任務進行中・2 項逾期/)).toBeInTheDocument();
+  });
+
+  it("沒有人員任務也沒有阻塞時整段不渲染（空區塊只佔版面）", () => {
+    seed({ runs: [], insights: {} });
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.queryByLabelText("誰卡住了")).not.toBeInTheDocument();
+  });
+
+  it("分析資料被上限截斷時要講出來（否則會被當成全貌）", () => {
+    seed({
+      runs: [],
+      insights: {
+        openTasks: 300,
+        people: [{ userId: "u1", name: "阿光", openTasks: 300, overdueTasks: 12, earliestDueAt: daysAgo(9) }],
+        truncated: { runs: false, tasks: true, results: false, workItems: false },
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(screen.getByLabelText("誰卡住了")).getByText(/資料量已達分析上限/)).toBeInTheDocument();
+  });
+});
+
+describe("mergeTeamHealth（代理健康度 ＋ 人員阻塞）", () => {
+  it("取較嚴重的一邊，並標記是不是人員面推上去的", () => {
+    expect(mergeTeamHealth("healthy", "blocked")).toEqual({ health: "blocked", fromPeople: true });
+    expect(mergeTeamHealth("blocked", "healthy")).toEqual({ health: "blocked", fromPeople: false });
+    expect(mergeTeamHealth("attention", "attention")).toEqual({ health: "attention", fromPeople: false });
+  });
+
+  it("沒發起過計畫但有人員任務逾期 → 不再顯示「尚未啟用」", () => {
+    expect(mergeTeamHealth("idle", "blocked")).toEqual({ health: "blocked", fromPeople: true });
+    expect(mergeTeamHealth("idle", "healthy")).toEqual({ health: "idle", fromPeople: false });
+  });
+
+  it("缺值時當作 healthy（洞察還在載入不該讓徽章亂跳）", () => {
+    expect(mergeTeamHealth(undefined, undefined)).toEqual({ health: "healthy", fromPeople: false });
+    expect(mergeTeamHealth("attention", undefined)).toEqual({ health: "attention", fromPeople: false });
+  });
+});
+
+describe("dueLabel（到期日人話，未來與過去都要對）", () => {
+  const now = Date.parse("2026-07-30T12:00:00Z");
+  it("未來的日期不能講成「N 分鐘前」", () => {
+    expect(dueLabel(new Date(now + 2 * 86_400_000), now)).toBe("2 天後到期");
+    expect(dueLabel(new Date(now), now)).toBe("今天到期");
+    expect(dueLabel(new Date(now - 9 * 86_400_000), now)).toBe("逾期 9 天");
+  });
+  it("沒有值或無效值回 null（呼叫端不顯示）", () => {
+    expect(dueLabel(null, now)).toBeNull();
+    expect(dueLabel(undefined, now)).toBeNull();
+    expect(dueLabel("不是日期", now)).toBeNull();
+  });
+});
+
+describe("健康度與人員阻塞不再自相矛盾（實機曾出現：狀態穩定旁列著兩項逾期）", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  it("代理面穩定但人員面 blocked → 徽章改為「有阻塞」並指向「誰卡住了」", () => {
+    seed({
+      runs: [run({ status: "done" })],
+      summary: { doneRecent: 1, hasRuns: true, health: "healthy" },
+      insights: {
+        status: "blocked", openTasks: 3, overdueTasks: 2,
+        people: [{ userId: "u1", name: "阿光", openTasks: 2, overdueTasks: 2, earliestDueAt: daysAgo(9) }],
+        byProject: [{ projectId: "p1", projectTitle: "招生短片", blockers: 3, criticalBlockers: 2, openTasks: 3, overdueTasks: 2, activeRuns: 0 }],
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.getByText("有阻塞")).toBeInTheDocument();
+    expect(screen.queryByText("狀態穩定")).not.toBeInTheDocument();
+    expect(screen.getByText(/AI 停在那裡等人/)).toBeInTheDocument();
   });
 });
