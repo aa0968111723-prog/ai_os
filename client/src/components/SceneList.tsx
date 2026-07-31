@@ -876,6 +876,19 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
               sceneIds={sceneIds}
               onClose={() => setStudioScene(null)}
               onChanged={invalidate}
+              /* 就地裁決：查 list（不是 filtered——切到別的篩選不該讓開著的工作室失去狀態），
+                 且每次 render 重算，裁決後 invalidate 會讓這裡自然更新、按鈕自己收起來 */
+              isLeader={isLeader}
+              meLoading={me.isLoading}
+              sceneStatus={list.find((s) => s.id === studioScene.id)?.status}
+              pendingApprovalId={pendingOf(studioScene.id)?.id}
+              rejectReason={rejectReasonOf(studioScene.id)}
+              approvalsError={approvals.isError}
+              deciding={decide.isPending}
+              onDecide={(decision, reason) => {
+                const approvalId = pendingOf(studioScene.id)?.id;
+                if (approvalId) decide.mutate({ approvalId, decision, reason });
+              }}
             />
           )}
         </>
