@@ -117,3 +117,26 @@ Detail: `paths ok, no auto findings`
 
 ---
 
+## 2026-07-31T06:02:43.402Z · `ui.workbench` ❌ fail
+
+**UI：創作工作台／技能選單** · kind=`ui-playwright` · cycle=0 · cursor→19
+
+Detail: `exit=1`
+
+---
+
+## 2026-07-31 · `ui.workbench` ❌ fail（基建）
+
+**UI：創作工作台／技能選單** · kind=`ui-playwright`
+
+### Findings
+
+#### [medium] CARPET-UI-PLAYWRIGHT-MISSING: 環境缺 playwright 套件
+
+- **File**: `scripts/e2e-ui/verify-workbench.mjs`
+- **Evidence**: `ERR_MODULE_NOT_FOUND: Cannot find package 'playwright'`
+- **Consequence**: 所有 `ui-*` Playwright 區塊無法實機執行，地毯 UI 覆蓋空洞
+- **Fix**: 確保 `npm ci` 含 devDependencies；`npx playwright install chromium`；本機已補裝
+
+---
+
