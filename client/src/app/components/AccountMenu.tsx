@@ -1,5 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
@@ -8,7 +7,7 @@ import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscrib
 import type { MeWithCapabilities } from "../../capabilities";
 import { accountMenuItems, filterNavItems } from "../navigation/navigationItems";
 import { Hint, Meta, Skeleton, useDensity } from "../../components/ui";
-import { useMatchMedia } from "../../lib/useMatchMedia";
+import { MenuSurface } from "./MenuSurface";
 import { writeUiDensity } from "../../lib/densityPreference";
 import { UI_DENSITY_DESCRIPTION, UI_DENSITY_LABEL } from "@shared/uiDensity";
 
@@ -205,53 +204,9 @@ export function AccountMenu({
   userName, me, activeGroupId, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, onLogoutAll, loggingOut,
 }: AccountMenuProps) {
   const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
-      // 手機 sheet 模式選單 portal 到 body（脫離 topbar 的 backdrop-filter 包含區塊），
-      // 判斷「點在外面」要同時看 wrap 與選單本體
-      if (wrap.current?.contains(t) || menuRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const menuItems = () => [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? [])];
-    const focusItem = (index: number) => {
-      const items = menuItems();
-      if (!items.length) return;
-      items[(index + items.length) % items.length]?.focus();
-    };
-    // The menu DOM exists when a layout effect runs, so focus synchronously.
-    // requestAnimationFrame made keyboard focus depend on runner/frame timing
-    // and intermittently left focus on the trigger in CI and slower devices.
-    focusItem(0);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-        triggerRef.current?.focus();
-        return;
-      }
-      const items = menuItems();
-      const current = items.indexOf(document.activeElement as HTMLElement);
-      if (e.key === "ArrowDown") { e.preventDefault(); focusItem(current + 1); }
-      if (e.key === "ArrowUp") { e.preventDefault(); focusItem(current - 1); }
-      if (e.key === "Home") { e.preventDefault(); focusItem(0); }
-      if (e.key === "End") { e.preventDefault(); focusItem(items.length - 1); }
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  const close = () => setOpen(false);
-  // ≤820px 轉為貼底 sheet：portal 到 body——topbar 的 backdrop-filter 會把 fixed
-  // 後代的包含區塊變成自己，bottom:0 只會貼在頂欄底而不是螢幕底
-  const compact = useMatchMedia("(max-width: 820px)");
+  // 外點／Esc／方向鍵漫遊／手機貼底 sheet 全收在 MenuSurface（見該檔的三個陷阱說明）
+  const close = useCallback(() => setOpen(false), []);
 
   const filterCtx = { isAdmin, activeIsLeader, canSeeOrg, me, activeGroupId };
   const helpItems = filterNavItems(accountMenuItems.filter((i) => i.section === "help"), filterCtx);
@@ -261,18 +216,13 @@ export function AccountMenu({
   const desktop = hasDesktopBridge();
 
   return (
-    <div className="menu-wrap account-menu" ref={wrap}>
+    <div className="menu-wrap account-menu">
       <button ref={triggerRef} className="badge account-menu__trigger" aria-haspopup="menu" aria-expanded={open} title={userName} onClick={() => setOpen((v) => !v)}>
         <Icon name="User" size={14} />
         <span className="account-menu__name">{userName}</span>
         <Icon name="ChevronDown" size={14} className="account-menu__chevron" />
       </button>
-      {/* 手機（≤820px）scrim＋選單 portal 到 body：topbar 的 backdrop-filter 會把
-          fixed 後代的包含區塊變成頂欄本身，bottom sheet 一定要脫離它才能貼螢幕底。
-          桌機維持 wrap 內 absolute 下拉。外點關閉已同時檢查 wrap 與 menuRef。 */}
-      {open && withPortal(compact, <>
-        {compact && <button type="button" className="account-menu__scrim" aria-hidden tabIndex={-1} onClick={close} />}
-        <div ref={menuRef} className={`menu account-menu__menu${compact ? " is-sheet" : ""}`} role="menu" aria-label="使用者選單">
+      <MenuSurface open={open} onClose={close} label="使用者選單" triggerRef={triggerRef} className="account-menu__menu">
           {/* 身分標頭：手機 sheet 打開先看到「這是誰的選單」；桌機同樣受益 */}
           <div className="account-menu__id" role="presentation">
             <span className="account-menu__avatar" aria-hidden><Icon name="User" size={17} /></span>
@@ -349,13 +299,7 @@ export function AccountMenu({
           <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>
             <Icon name="Undo2" size={15} />{loggingOut ? "登出中…" : "登出"}
           </button>
-        </div>
-      </>)}
+      </MenuSurface>
     </div>
   );
-}
-
-/** compact 時 portal 到 body；桌機原地渲染（保持 absolute 下拉定位） */
-function withPortal(compact: boolean, node: React.ReactNode) {
-  return compact && typeof document !== "undefined" ? createPortal(node, document.body) : node;
 }
