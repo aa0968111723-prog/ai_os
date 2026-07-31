@@ -97,16 +97,10 @@ async function refBelongs(refType: RefType, refId: string, projectId: string, gr
 const MESSAGE_PAGE = 50;
 
 export const messagesRouter = router({
-  /**
-   * 專案留言列表。
-   * - 預設回最近 PAGE 則（舊→新）＋**永遠附上全部釘選**（即使超出最近視窗）
-   * - beforeCreatedAt：載入更早歷史（分頁）
-   */
   list: authedProcedure
     .input(
       z.object({
         projectId: z.string().uuid(),
-        /** ISO 時間字串或 Date：只取嚴格早於此時間的留言（載入更早） */
         beforeCreatedAt: z.coerce.date().optional(),
       }),
     )
@@ -133,7 +127,6 @@ export const messagesRouter = router({
       createdAt: schema.messages.createdAt,
     };
 
-    // 多取 1 筆判斷 hasMore
     const pageRows = await db
       .select(selectShape)
       .from(schema.messages)
@@ -144,7 +137,6 @@ export const messagesRouter = router({
     const hasMore = pageRows.length > MESSAGE_PAGE;
     const windowRows = hasMore ? pageRows.slice(0, MESSAGE_PAGE) : pageRows;
 
-    // 釘選永遠可見：首頁（無 before）額外撈全部 pinned，與視窗合併去重
     let pinnedExtra: typeof windowRows = [];
     if (!input.beforeCreatedAt) {
       pinnedExtra = await db
@@ -158,13 +150,11 @@ export const messagesRouter = router({
 
     const byId = new Map<string, (typeof windowRows)[number]>();
     for (const r of [...windowRows, ...pinnedExtra]) byId.set(r.id, r);
-    // 時間升序給前端（舊→新）
     const ordered = [...byId.values()].sort(
       (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
     );
     const ids = ordered.map((r) => r.id);
 
-    // 回覆串：被引用留言的「誰說的+前 60 字」摘要（50 筆窗外的舊留言也查得到）
     const replyIds = [...new Set(ordered.map((r) => r.replyToId).filter((v): v is string => !!v))];
     const replyMap = new Map<string, { userName: string | null; snippet: string }>();
     if (replyIds.length) {
@@ -176,7 +166,6 @@ export const messagesRouter = router({
       for (const p of parents) replyMap.set(p.id, { userName: p.userName, snippet: p.body.slice(0, 60) });
     }
 
-    // 表情回應彙總：每則 × 每表情 → 數量+我按過沒
     const reactionMap = new Map<string, Array<{ emoji: string; count: number; mine: boolean }>>();
     if (ids.length) {
       const reactions = await db
@@ -205,7 +194,6 @@ export const messagesRouter = router({
       replyTo: r.replyToId ? (replyMap.get(r.replyToId) ?? null) : null,
       reactions: reactionMap.get(r.id) ?? [],
       ref: r.refType && r.refId ? (refMap.get(`${r.refType}:${r.refId}`) ?? null) : null,
-      // 語音留言：把音檔可播放網址一併帶出（refMap 給的是縮圖用途，音訊要的是同源 file 端點）
       voiceUrl: r.kind === "voice" && r.refType === "asset" && r.refId ? `/api/assets/${r.refId}/file` : null,
     }));
     return { items, hasMore };
@@ -225,20 +213,16 @@ export const messagesRouter = router({
     .mutation(async ({ ctx, input }) => {
       const project = await loadProject(input.projectId);
       requireGroup(ctx.auth, project.groupId);
-      // 回覆對象必須是同專案留言（擋跨專案/跨組引用）
       if (input.replyToId) {
         const parent = await loadMessage(input.replyToId);
         if (parent.projectId !== input.projectId) throw new TRPCError({ code: "BAD_REQUEST", message: "只能回覆本專案的留言" });
       }
-      // 引用作品：refType/refId 成對，且必須屬於本專案（scene/asset/generation 掛專案）
-      // 或本組（note/schedule 掛組、可跨專案）——擋跨組窺探
       if (!!input.refType !== !!input.refId) throw new TRPCError({ code: "BAD_REQUEST", message: "引用參數不完整" });
       if (input.refType && input.refId) {
         if (!(await refBelongs(input.refType, input.refId, input.projectId, project.groupId))) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "引用的項目不在本專案／本組" });
         }
       }
-      // @提及：只能提及同組成員（共用校驗）
       const mentions = await validateMentions(project.groupId, input.mentions);
       const [msg] = await db
         .insert(schema.messages)
@@ -253,19 +237,15 @@ export const messagesRouter = router({
           mentions: mentions ?? null,
         })
         .returning();
-      // @提及跨裝置推播（fire-and-forget）：被提及者關頁也收得到——補齊 MessagePanel 桌面通知
-      // 「分頁開著才有效」的缺口。內文帶預覽截斷，點開直達該專案。
       const mentionTargets = (mentions ?? []).filter((id) => id !== ctx.auth.user.id);
       if (mentionTargets.length) {
         void pushToUsers(mentionTargets, {
           title: `${ctx.auth.user.name} 在「${project.title}」提及你`,
           body: dmSnippet(input.body),
-          url: `/p/${project.id}`,
+          url: `/p/${project.id}?focus=messages`,
           tag: `mention-${msg.id}`,
         }).catch((err) => console.warn("[messages] @提及推播失敗：", err instanceof Error ? err.message : err));
       }
-      // @助手：留言 @了助手 → 背景讓 AI 讀專案+對話+知識庫回一則(fire-and-forget，不擋送出)。
-      // 檢視者也能問(留言是唯讀者的參與出口)；扣點/退點在 replyAsAssistant 內走既有守門。
       if (input.body.includes(ASSISTANT_TRIGGER)) {
         void replyAsAssistant({
           projectId: input.projectId,
@@ -277,13 +257,11 @@ export const messagesRouter = router({
       return msg;
     }),
 
-  /** 語音留言：前端錄音上傳為素材後，用其 assetId 建立語音留言；逐字稿由背景 sweep 補上。 */
   postVoice: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), assetId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
       const project = await loadProject(input.projectId);
       requireGroup(ctx.auth, project.groupId);
-      // 音檔素材必須屬於本專案且為音訊（擋盜用別案素材、擋把圖片當語音）
       const [asset] = await db
         .select()
         .from(schema.assets)
@@ -306,7 +284,6 @@ export const messagesRouter = router({
       return msg;
     }),
 
-  /** 表情回應開關：同人同則同表情再按一次＝收回 */
   react: authedProcedure
     .input(z.object({ messageId: z.string().uuid(), emoji: z.enum(REACTION_EMOJI) }))
     .mutation(async ({ ctx, input }) => {
@@ -321,8 +298,6 @@ export const messagesRouter = router({
         ))
         .returning();
       if (removed.length === 0) {
-        // 修 R2-03：併發/重送同人同表情會插重複列灌大計數；依 message_reactions(message_id,user_id,emoji)
-        // 唯一索引（ensure.ts）＋ onConflictDoNothing，重複 react 冪等（切換開只留一列）。
         await db
           .insert(schema.messageReactions)
           .values({ messageId: input.messageId, userId: ctx.auth.user.id, emoji: input.emoji })
@@ -331,7 +306,6 @@ export const messagesRouter = router({
       return { on: removed.length === 0 };
     }),
 
-  /** 釘選（組長以上）：重要決議固定在留言區頂部，不被日常對話洗掉 */
   setPinned: authedProcedure
     .input(z.object({ messageId: z.string().uuid(), pinned: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
@@ -341,12 +315,9 @@ export const messagesRouter = router({
       return { ok: true };
     }),
 
-  /** 已讀水位：打開留言區（且視窗聚焦）時上報；審計中介層對此路徑豁免（高頻、無安全意義） */
   markRead: authedProcedure.input(z.object({ projectId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const project = await loadProject(input.projectId);
     requireGroup(ctx.auth, project.groupId);
-    // 修 R2-CONC-01：原「update→0 則 insert」併發首次標記會雙插重複列，未讀計算扇出翻倍。
-    // 依 message_reads(user_id,project_id) 唯一索引（ensure.ts）＋ onConflictDoUpdate 原子 upsert。
     await db
       .insert(schema.messageReads)
       .values({ userId: ctx.auth.user.id, projectId: input.projectId, lastReadAt: new Date() })
@@ -357,7 +328,6 @@ export const messagesRouter = router({
     return { ok: true };
   }),
 
-  /** 未讀數+是否有人提及我：餵 TocNav「⑤交付」徽章；只算他人留言 */
   unread: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
     const project = await loadProject(input.projectId);
     requireGroup(ctx.auth, project.groupId);
