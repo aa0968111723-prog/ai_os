@@ -9,6 +9,12 @@ import {
   isWorldviewReady,
   hasActs,
   removesDefaultTaboos,
+  toggleWorldviewChip,
+  selectWorldviewStyle,
+  keepPrimaryWorldviewStyle,
+  promoteWorldviewChip,
+  chipSoftWarnings,
+  CHIP_SOFT_MAX,
   type Worldview,
 } from "@shared/worldview";
 import { SceneList } from "../components/SceneList";
@@ -327,7 +333,7 @@ export function ProjectPage({ id }: { id: string }) {
   // 協作視角：一般（只看 presence／游標）／鏡像跟隨（捲動跟著對方）
   const [collabMode, setCollabMode] = useState<CollabViewMode>("live");
   const [followUserId, setFollowUserId] = useState<string | null>(null);
-  useCollabMirrorFollow(collabMode, followUserId, collab.cursors, collab.focusZones);
+  useCollabMirrorFollow(collabMode, followUserId, collab.cursorsLiveRef, collab.focusZones, collab.containerRef);
   const followZone = followUserId && collabMode === "mirror" ? zoneOfPeer(followUserId, collab.focusZones) : null;
   /** UX-M1：≤820px 手機減負（收合上下文、留言 sheet）；桌機 ≥821 行為不變 */
   const mobileCompact = useMatchMedia(PROJECT_MOBILE_MQ);
@@ -548,8 +554,9 @@ export function ProjectPage({ id }: { id: string }) {
   const allStepsDone = onboardSteps.every((s) => s.done);
   const completedStepCount = onboardSteps.filter((step) => step.done).length;
   const nextOnboardIndex = onboardSteps.findIndex((step) => !step.done);
+  // id 必須唯一（不可用 target：③④ 都錨到 #onboard-delivery 會撞 React key）
   const projectJourneySteps: VisualJourneyStep[] = onboardSteps.map((step, index) => ({
-    id: step.target,
+    id: `onboard-step-${index + 1}`,
     label: step.label,
     detail: step.hint,
     state: step.done ? "done" : index === nextOnboardIndex ? "current" : "upcoming",
@@ -566,10 +573,29 @@ export function ProjectPage({ id }: { id: string }) {
 
   const toggle = (field: "tones" | "themes" | "styles", value: string) => {
     if (!canEdit) return; // 檢視者：chips 不可切換（樂觀更新會先亮再彈回，比不動更誤導）
-    const current = wv[field];
-    const next = current.includes(value) ? current.filter((x) => x !== value) : [...current, value];
+    // 風格＝准單選（點選即取代）；主軸／調性＝可複選
+    const next =
+      field === "styles" ? selectWorldviewStyle(wv.styles, value) : toggleWorldviewChip(wv[field], value);
     // 只送有改的欄位；伺服器與現值合併（避免整包覆蓋造成的資料遺失）
     updateWv.mutate({ id, worldview: { [field]: next } });
+  };
+
+  /** 已選 chip 提到第一位＝主要（主軸／調性；舊多風格資料也可用） */
+  const promote = (field: "tones" | "themes" | "styles", value: string) => {
+    if (!canEdit) return;
+    const cur = wv[field];
+    if (cur[0] === value) return;
+    // 風格：升主要＝只留該項（准單選，不再保留備選）
+    const next = field === "styles" ? [value] : promoteWorldviewChip(cur, value);
+    updateWv.mutate({ id, worldview: { [field]: next } });
+  };
+
+  /** 舊多選風格一鍵收斂：只留主要 */
+  const keepPrimaryStyle = () => {
+    if (!canEdit) return;
+    const next = keepPrimaryWorldviewStyle(wv.styles);
+    if (next.length === wv.styles.length) return;
+    updateWv.mutate({ id, worldview: { styles: next } });
   };
 
   /** 編輯指示：把某區塊接上協作狀態（誰在這裡→內框＋標籤）；鏡像時被跟隨者焦點區加粗 */
@@ -580,32 +606,179 @@ export function ProjectPage({ id }: { id: string }) {
     mirrorActive: followZone === zone,
   });
 
-  /** 世界觀 chips 群組（主軸／調性／風格共用）：既有選項＋孤兒值＋組長就地「＋新增」 */
-  const chipGroup = (field: "themes" | "tones" | "styles", opts: string[], optType: "theme" | "tone" | "style", labelledBy: string) => (
-    <div role="group" aria-labelledby={labelledBy}>
-      {options.isLoading && !opts.length && <Meta>載入中…</Meta>}
-      {opts.map((t) => {
-        const on = wv[field].includes(t);
-        return (
-          <Chip key={t} selected={on} onClick={() => toggle(field, t)}>
-            {t}
-          </Chip>
-        );
-      })}
-      {orphansOf(field, opts).map((t) => (
-        <Chip key={t} selected
-          style={{ borderStyle: "dashed", opacity: 0.75 }}
-          title="這個選項已被移出清單，點一下可從本專案移除"
-          onClick={() => toggle(field, t)}>
-          {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
-        </Chip>
-      ))}
-      {/* 選項就地新增：組長直接在工作台加，不必繞去「選項」選單頁（加完自動勾上） */}
-      {isLeader && canEdit && (
-        <AddOptionChip groupId={p.groupId} type={optType} onAdded={(label) => toggle(field, label)} />
-      )}
-    </div>
-  );
+  const chipSoftMaxLabel: Record<"themes" | "tones" | "styles", string> = {
+    themes: `建議 ≤${CHIP_SOFT_MAX.themes}（第一個為主）`,
+    tones: `建議 ≤${CHIP_SOFT_MAX.tones}；出圖取前 2（第一個為主）`,
+    styles: `准單選：點選即為出圖風格`,
+  };
+
+  /** 世界觀 chips 群組（主軸／調性／風格）：選項＋孤兒＋組長「＋新增」
+   *  風格＝准單選（點＝設／取代；再點唯一已選＝清空）；固定顯示「出圖風格」。
+   *  主軸／調性＝複選（順序＝優先序；Shift+點或「改主要」升第一）。 */
+  const chipGroup = (field: "themes" | "tones" | "styles", opts: string[], optType: "theme" | "tone" | "style", labelledBy: string) => {
+    const selected = wv[field];
+    const softMax = CHIP_SOFT_MAX[field];
+    const overSoft = selected.length > softMax;
+    const secondaries = selected.slice(1);
+    const isStyle = field === "styles";
+    const onChipActivate = (t: string, e?: { shiftKey?: boolean }) => {
+      if (!canEdit) return;
+      if (!isStyle) {
+        const on = selected.includes(t);
+        const isPrimary = on && selected[0] === t;
+        if (on && !isPrimary && e?.shiftKey) {
+          promote(field, t);
+          return;
+        }
+      }
+      toggle(field, t);
+    };
+    return (
+      <div role="group" aria-labelledby={labelledBy}>
+        {options.isLoading && !opts.length && <Meta>載入中…</Meta>}
+        {opts.map((t) => {
+          const on = selected.includes(t);
+          const isPrimary = on && selected[0] === t;
+          return (
+            <Chip
+              key={t}
+              selected={on}
+              onClick={(ev) => onChipActivate(t, ev)}
+              title={
+                isStyle
+                  ? on && selected.length === 1
+                    ? "目前出圖風格（再點取消）"
+                    : on
+                      ? "點一下改為只留此風格"
+                      : "點選設為出圖風格（會取代先前選擇）"
+                  : on
+                    ? isPrimary
+                      ? "主要（點一下取消選取）"
+                      : "已選（點一下取消；Shift+點＝設為主要）"
+                    : `點選加入（${chipSoftMaxLabel[field]}）`
+              }
+            >
+              {isPrimary && (
+                <Meta as="span" style={{ marginRight: 4, fontSize: 11, fontWeight: 600, color: "var(--primary-ink)" }}>
+                  {isStyle ? "出圖" : "主要"}
+                </Meta>
+              )}
+              {t}
+            </Chip>
+          );
+        })}
+        {orphansOf(field, opts).map((t) => {
+          const isPrimary = selected[0] === t;
+          return (
+            <Chip
+              key={t}
+              selected
+              style={{ borderStyle: "dashed", opacity: 0.75 }}
+              title={
+                isStyle
+                  ? "此選項已移出清單；點一下可改為只留它或取消（准單選）"
+                  : "這個選項已被移出清單，點一下可從本專案移除"
+              }
+              onClick={() => toggle(field, t)}
+            >
+              {isPrimary && (
+                <Meta as="span" style={{ marginRight: 4, fontSize: 11, fontWeight: 600 }}>
+                  {isStyle ? "出圖" : "主要"}
+                </Meta>
+              )}
+              {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
+            </Chip>
+          );
+        })}
+        {/* 選項就地新增：組長直接在工作台加，不必繞去「選項」選單頁（加完自動勾上） */}
+        {isLeader && canEdit && (
+          <AddOptionChip groupId={p.groupId} type={optType} onAdded={(label) => toggle(field, label)} />
+        )}
+        {/* 風格：永遠標示「誰會進圖影」——避免多選心智殘留 */}
+        {isStyle && (
+          <Meta style={{ display: "block", marginTop: 6, fontSize: 12 }} aria-live="polite">
+            出圖風格：{selected[0] ? <strong>{selected[0]}</strong> : "尚未設定"}
+            {selected.length > 1 ? `（另有 ${selected.length - 1} 個舊備選不進圖）` : ""}
+          </Meta>
+        )}
+        {/* 主軸／調性：改主要；風格舊多選：一鍵只留主要 + 點備選改為該風格 */}
+        {canEdit && secondaries.length > 0 && !isStyle && (
+          <Meta style={{ display: "block", marginTop: 6, fontSize: 12 }}>
+            改主要：
+            {secondaries.map((t) => (
+              <button
+                key={`promo-${field}-${t}`}
+                type="button"
+                className="linkish"
+                style={{
+                  marginLeft: 6,
+                  fontSize: 12,
+                  border: 0,
+                  background: "none",
+                  cursor: "pointer",
+                  color: "var(--primary-ink)",
+                  textDecoration: "underline",
+                }}
+                onClick={() => promote(field, t)}
+              >
+                {t}
+              </button>
+            ))}
+          </Meta>
+        )}
+        {canEdit && isStyle && secondaries.length > 0 && (
+          <Meta style={{ display: "block", marginTop: 6, fontSize: 12 }}>
+            舊資料多選——
+            <button
+              type="button"
+              className="linkish"
+              style={{
+                marginLeft: 4,
+                fontSize: 12,
+                border: 0,
+                background: "none",
+                cursor: "pointer",
+                color: "var(--primary-ink)",
+                textDecoration: "underline",
+                fontWeight: 600,
+              }}
+              onClick={keepPrimaryStyle}
+            >
+              只留「{selected[0]}」
+            </button>
+            {" · 改為："}
+            {secondaries.map((t) => (
+              <button
+                key={`promo-style-${t}`}
+                type="button"
+                className="linkish"
+                style={{
+                  marginLeft: 6,
+                  fontSize: 12,
+                  border: 0,
+                  background: "none",
+                  cursor: "pointer",
+                  color: "var(--primary-ink)",
+                  textDecoration: "underline",
+                }}
+                onClick={() => promote("styles", t)}
+              >
+                {t}
+              </button>
+            ))}
+          </Meta>
+        )}
+        {overSoft && (
+          <Hint layer="always" style={{ display: "block", marginTop: 6, fontSize: 12, color: "var(--warn, #b45309)" }}>
+            已選 {selected.length} 個——{chipSoftMaxLabel[field]}
+            {isStyle && selected[0] ? `；目前出圖用「${selected[0]}」` : ""}
+          </Hint>
+        )}
+      </div>
+    );
+  };
+
+  const wvChipWarnings = chipSoftWarnings(wv);
 
   /** 摘要 chip → 目標 section：手機時先展開收合卡再捲動 */
   const targetToCtxKey = (target: string): CtxSectionKey | null => {
@@ -772,7 +945,7 @@ export function ProjectPage({ id }: { id: string }) {
         </span>
         {collabMode === "mirror" && followUserId && (
           <Hint layer="always" style={{ flexBasis: "100%", margin: "4px 0 0" }}>
-            鏡像跟隨中：畫面會跟著對方的焦點區與游標捲動（不是螢幕串流；雙方版面不同時以卡片錨點對位）。
+            極限精準鏡像：錨點＋螢幕比例鎖定，巢狀捲動雙次校正（非螢幕串流）。
             可點「退出鏡像」或再點對方名字取消。
           </Hint>
         )}
@@ -959,15 +1132,32 @@ export function ProjectPage({ id }: { id: string }) {
               placeholder="例：把心交給佛，煩惱就交給了光"
               onBlur={(e) => canEdit && e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
             />
-            <label id="wv-themes">訊息主軸</label>
+            <label id="wv-themes">
+              訊息主軸
+              <HelpTip text="敘事弧或片型標籤。建議 1～2 個；第一個為主。主要給腳本／導演／旁白用，不會直接塞進圖影。" />
+            </label>
             {chipGroup("themes", themeOpts, "theme", "wv-themes")}
-            <label id="wv-tones">調性（生成時自動注入）<HelpTip text="語氣與畫風，會自動加進每次生成的提示詞。" /></label>
+            <label id="wv-tones">
+              調性（生成時自動注入）
+              <HelpTip text="語氣感覺。建議 ≤2 個可並存的（如溫暖+真誠）。第一個為主；出圖只取前 2 個。點「設主要」可改優先序。" />
+            </label>
             {chipGroup("tones", toneOpts, "tone", "wv-tones")}
-            <label id="wv-styles">視覺風格（畫面一致的關鍵，生成時自動注入）<HelpTip text="語氣與畫風，會自動加進每次生成的提示詞。" /></label>
+            <label id="wv-styles">
+              視覺風格（畫面一致的關鍵，生成時自動注入）
+              <HelpTip text="准單選：點哪個就畫成哪個，再點可取消。只會注入「出圖風格」那一個，不會混多種畫風。" />
+            </label>
             {chipGroup("styles", styleOpts, "style", "wv-styles")}
+            {wvChipWarnings.length > 0 && (
+              <Hint layer="always" role="status" style={{ marginTop: 8, fontSize: 12, color: "var(--warn, #b45309)" }}>
+                {wvChipWarnings.map((w) => (
+                  <div key={w}>{w}</div>
+                ))}
+              </Hint>
+            )}
             {isLeader && (
               <Hint style={{ marginTop: 8, fontSize: 12 }}>
                 選項可直接按各列的「＋新增」加；改名／停用／排序在 <Link href="/options">選項整理頁</Link>。
+                視覺風格准單選；調性／主軸可複選（順序＝優先序）。圖影只注入出圖風格與前兩個調性。
               </Hint>
             )}
             {/* 進階層全面可編輯（深度優化：後端 updateWorldview 早支援 partial patch，前端不再唯讀）——
@@ -1045,7 +1235,7 @@ export function ProjectPage({ id }: { id: string }) {
                   }}
                 />
                 <Hint style={{ marginTop: 8, fontSize: 12 }}>
-                  <strong>會進 AI：</strong>調性／風格／訊息／禁忌 → 每次生成；觀眾／三幕／敘事人物／主軸 → 導演建議與拆分鏡；代理與助手讀摘要（含訊息與禁忌）。
+                  <strong>會進 AI：</strong>調性（最多前 2）／風格（只取主要 1 個）／訊息／禁忌 → 圖影與文字生成；觀眾／三幕／敘事人物／主軸 → 導演建議與拆分鏡；代理與助手讀摘要（含訊息、禁忌與選項提示）。
                   <strong> 僅備註：</strong>參考連結（寫進交付鏡頭表，不進模型）。
                 </Hint>
               </div>

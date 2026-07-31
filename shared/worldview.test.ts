@@ -8,11 +8,24 @@ import {
   worldviewSchema,
   formatWorldviewForAi,
   formatWorldviewVisualPositive,
+  formatChipsPrimarySecondary,
   isWorldviewReady,
   hasActs,
   removesDefaultTaboos,
   DEFAULT_TABOOS,
   LOGLINE_INJECT_MAX,
+  VISUAL_INJECT_MAX,
+  LLM_INJECT_MAX,
+  CHIP_SOFT_MAX,
+  toggleWorldviewChip,
+  selectWorldviewStyle,
+  keepPrimaryWorldviewStyle,
+  promoteWorldviewChip,
+  hasStyleFamilyConflict,
+  chipSoftWarnings,
+  worldviewChipGuidanceForAi,
+  normalizeWorldviewChipsPatch,
+  summarizeWorldviewChipsPatch,
 } from "./worldview";
 
 describe("bilingualChips（視覺注入的英文錨點）", () => {
@@ -121,6 +134,129 @@ describe("formatWorldviewVisualPositive", () => {
     expect(s).toContain(full.message);
     expect(s).not.toContain("避免");
     expect(s).not.toContain("醫療");
+  });
+
+  it("風格只取第一個、調性最多前兩個（多選不污染畫面）", () => {
+    const crowded = worldviewSchema.parse({
+      styles: ["寫實攝影", "水墨禪意", "3D 動畫"],
+      tones: ["莊嚴", "溫暖", "活潑", "簡約"],
+      logline: "測試",
+    });
+    const s = formatWorldviewVisualPositive(crowded);
+    expect(s).toContain("photorealistic");
+    expect(s).not.toContain("ink wash");
+    expect(s).not.toContain("3D animated");
+    expect(s).toContain("solemn");
+    expect(s).toContain("warm, gentle");
+    expect(s).not.toContain("lively");
+    expect(s).not.toContain("minimal");
+    // 常數契約：改上限時測試與注入要同步
+    expect(VISUAL_INJECT_MAX.styles).toBe(1);
+    expect(VISUAL_INJECT_MAX.tones).toBe(2);
+  });
+});
+
+describe("chips 優先序與軟警告", () => {
+  it("toggle／promote 維護順序＝主要（主軸／調性複選）", () => {
+    let cur: string[] = [];
+    cur = toggleWorldviewChip(cur, "寫實攝影");
+    cur = toggleWorldviewChip(cur, "水墨禪意");
+    expect(cur).toEqual(["寫實攝影", "水墨禪意"]);
+    cur = promoteWorldviewChip(cur, "水墨禪意");
+    expect(cur).toEqual(["水墨禪意", "寫實攝影"]);
+    cur = toggleWorldviewChip(cur, "水墨禪意");
+    expect(cur).toEqual(["寫實攝影"]);
+  });
+
+  it("selectWorldviewStyle 准單選：點選取代、再點清空、多選收斂", () => {
+    expect(selectWorldviewStyle([], "寫實攝影")).toEqual(["寫實攝影"]);
+    expect(selectWorldviewStyle(["寫實攝影"], "水墨禪意")).toEqual(["水墨禪意"]);
+    expect(selectWorldviewStyle(["寫實攝影"], "寫實攝影")).toEqual([]);
+    // 舊多選：點任一個 → 只留該項
+    expect(selectWorldviewStyle(["寫實攝影", "水墨禪意", "3D 動畫"], "水墨禪意")).toEqual(["水墨禪意"]);
+    expect(selectWorldviewStyle(["寫實攝影", "水墨禪意"], "寫實攝影")).toEqual(["寫實攝影"]);
+  });
+
+  it("keepPrimaryWorldviewStyle 一鍵只留主要", () => {
+    expect(keepPrimaryWorldviewStyle(["寫實攝影", "水墨禪意"])).toEqual(["寫實攝影"]);
+    expect(keepPrimaryWorldviewStyle(["日系水彩"])).toEqual(["日系水彩"]);
+    expect(keepPrimaryWorldviewStyle([])).toEqual([]);
+  });
+
+  it("跨媒材家族衝突／同家族不衝突", () => {
+    expect(hasStyleFamilyConflict(["寫實攝影", "水墨禪意"])).toBe(true);
+    expect(hasStyleFamilyConflict(["寫實攝影", "膠片質感"])).toBe(false);
+    expect(hasStyleFamilyConflict(["日系水彩"])).toBe(false);
+  });
+
+  it("chipSoftWarnings 在超標與衝突時有文案", () => {
+    const w = chipSoftWarnings({
+      themes: ["a", "b", "c"],
+      tones: ["1", "2", "3"],
+      styles: ["寫實攝影", "3D 動畫"],
+    });
+    expect(w.some((x) => x.includes("視覺風格"))).toBe(true);
+    expect(w.some((x) => x.includes("只留主要") || x.includes("出圖只取"))).toBe(true);
+    expect(w.some((x) => x.includes("調性"))).toBe(true);
+    expect(w.some((x) => x.includes("訊息主軸"))).toBe(true);
+    expect(w.some((x) => x.includes("媒材"))).toBe(true);
+    expect(CHIP_SOFT_MAX.styles).toBe(1);
+  });
+
+  it("formatChipsPrimarySecondary 標主要／備選", () => {
+    expect(formatChipsPrimarySecondary(["A"])).toBe("A");
+    expect(formatChipsPrimarySecondary(["A", "B", "C"])).toBe("主要:A；備選:B、C");
+    expect(formatChipsPrimarySecondary(["A", "B", "C"], 2)).toBe("主要:A；備選:B…(+1)");
+  });
+
+  it("worldviewChipGuidanceForAi 無警告時空字串", () => {
+    expect(worldviewChipGuidanceForAi({ themes: ["禪修日常"], tones: ["溫暖"], styles: ["水墨禪意"] })).toBe(
+      "",
+    );
+    expect(worldviewChipGuidanceForAi({ themes: [], tones: [], styles: ["寫實攝影", "3D 動畫"] })).toContain(
+      "世界觀 chips 提示",
+    );
+  });
+
+  it("generation-llm 截斷多選 chips", () => {
+    const crowded = worldviewSchema.parse({
+      ...full,
+      styles: ["寫實攝影", "水墨禪意", "3D 動畫"],
+      tones: ["莊嚴", "溫暖", "活潑"],
+      themes: ["苦→修行→轉變→感恩", "禪修日常", "活動紀實"],
+    });
+    const s = formatWorldviewForAi(crowded, "generation-llm");
+    expect(s).toContain("視覺風格:寫實攝影");
+    expect(s).not.toContain("水墨禪意");
+    expect(s).toContain("調性:莊嚴、溫暖");
+    expect(s).not.toContain("活潑");
+    expect(s).toContain("訊息主軸:苦→修行→轉變→感恩、禪修日常");
+    expect(s).not.toContain("活動紀實");
+    expect(LLM_INJECT_MAX.themes).toBe(2);
+  });
+
+  it("brief／export 含主要標與選項提示", () => {
+    const crowded = worldviewSchema.parse({
+      ...full,
+      styles: ["寫實攝影", "3D 動畫"],
+    });
+    const brief = formatWorldviewForAi(crowded, "brief");
+    expect(brief).toContain("主要:寫實攝影");
+    expect(brief).toContain("選項提示");
+    const exp = formatWorldviewForAi(crowded, "export");
+    expect(exp).toContain("主要:寫實攝影");
+  });
+
+  it("normalizeWorldviewChipsPatch 截斷去重；未傳欄位不出現", () => {
+    const p = normalizeWorldviewChipsPatch({
+      styles: [" 寫實攝影 ", "寫實攝影", "水墨禪意", "3D 動畫"],
+      tones: ["溫暖", "真誠", "活潑"],
+      // themes 未傳
+    });
+    expect(p.styles).toEqual(["寫實攝影"]);
+    expect(p.tones).toEqual(["溫暖", "真誠"]);
+    expect(p.themes).toBeUndefined();
+    expect(summarizeWorldviewChipsPatch(p)).toContain("寫實攝影");
   });
 });
 

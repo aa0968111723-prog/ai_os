@@ -1,0 +1,23 @@
+# Wiki 文稿（倉庫內來源）
+
+此目錄是 [GitHub Wiki](https://github.com/aa0968111723-prog/ai_os/wiki) 的可版本控制來源。  
+公開說明採**中性**產品／工程用語，不綁定特定組織或信仰敘事。
+
+## 頁面
+
+| 檔案 | Wiki 頁面 |
+|------|-----------|
+| [Home.md](./Home.md) | [Home](https://github.com/aa0968111723-prog/ai_os/wiki) |
+| [世界觀與一句話故事.md](./世界觀與一句話故事.md) | 世界觀與一句話故事 |
+| [世界觀與一句關鍵訊息.md](./世界觀與一句關鍵訊息.md) | 世界觀與一句關鍵訊息 |
+| [世界觀調性多選.md](./世界觀調性多選.md) | 世界觀調性多選 |
+| [世界觀-chips-複選與優先序.md](./世界觀-chips-複選與優先序.md) | 世界觀 Chips 複選與優先序 |
+| [世界觀如何注入-AI-生成.md](./世界觀如何注入-AI-生成.md) | 世界觀如何注入 AI 生成 |
+| [協作與鏡像跟隨.md](./協作與鏡像跟隨.md) | 協作與鏡像跟隨 |
+
+## 同步到 GitHub Wiki
+
+```bash
+# Wiki 需已建立至少一頁（網頁 Create the first page）
+bash scripts/sync-wiki.sh
+```

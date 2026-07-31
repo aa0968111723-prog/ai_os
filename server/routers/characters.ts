@@ -1,24 +1,13 @@
 import { z } from "zod";
-import { and, asc, eq, getTableColumns, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { isUniqueViolation } from "../services/generationCore";
 
-/**
- * 把選定角色組成注入生成提示詞的「定裝錨點」（給 generation 重用）。
- * 只放外觀（appearance），不放個性/語氣——那些會被畫成文字或無意義。
- */
-export async function buildCharacterAnchor(projectId: string, characterIds: string[]): Promise<string> {
-  if (characterIds.length === 0) return "";
-  const rows = await db
-    .select()
-    .from(schema.characters)
-    .where(and(eq(schema.characters.projectId, projectId), inArray(schema.characters.id, characterIds)));
-  if (rows.length === 0) return "";
-  return rows.map((c) => `${c.name}：${c.appearance}`).join("；");
-}
+/** @deprecated 請直接 import from services/cardAnchors；保留 re-export 相容舊路徑 */
+export { buildCharacterAnchor } from "../services/cardAnchors";
 
 export const charactersRouter = router({
   list: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
