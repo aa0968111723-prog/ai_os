@@ -203,8 +203,19 @@ async function requeueAssetLanding(assetId: string, originUrl: string): Promise<
   }
 }
 
-/** 檢查單筆紀錄。任何意外都吞在這一層——一筆壞掉不能讓整輪巡檢中斷。 */
-async function checkRow(source: AuditSource, row: AuditRow, result: ReconcileResult): Promise<void> {
+/**
+ * 檢查單筆紀錄。任何意外都吞在這一層——一筆壞掉不能讓整輪巡檢中斷。
+ * 缺檔且可重抓的素材先收進 requeues、不在掃描中途直接改 DB：
+ * full 模式用 offset 分頁配 WHERE storagePath IS NOT NULL，掃到一半就把 storagePath
+ * 清掉會讓後面的列整批往前移、下一批 offset 直接跳過它們——大量缺檔（正是本模組
+ * 要抓的事故場景）時會有一整段素材在同一輪裡漏檢。所以統一等該來源掃完才動手。
+ */
+async function checkRow(
+  source: AuditSource,
+  row: AuditRow,
+  result: ReconcileResult,
+  requeues: { id: string; originUrl: string }[],
+): Promise<void> {
   const rel = row.rel;
   if (!rel) return; // 理論上被 isNotNull 濾掉了，防禦性再擋一次
   result.checked += 1;
@@ -217,7 +228,7 @@ async function checkRow(source: AuditSource, row: AuditRow, result: ReconcileRes
       // 沒有任何可重抓的地方，只能記錄下來讓管理員知道要從備份還原。
       const origin = row.originUrl?.trim();
       if (source.entity === "asset" && origin) {
-        if (await requeueAssetLanding(row.id, origin)) result.recoveredQueued += 1;
+        requeues.push({ id: row.id, originUrl: origin });
       }
       return;
     }
@@ -252,25 +263,32 @@ export async function reconcileAssets(opts: {
   const perSource = Math.max(1, Math.ceil((opts.sampleSize ?? DEFAULT_SAMPLE_SIZE) / sources.length));
 
   for (const source of sources) {
+    // 這一來源掃描中發現「缺檔且可重抓」的素材，統一等掃完再降級（原因見 checkRow 註解）
+    const requeues: { id: string; originUrl: string }[] = [];
     try {
       if (mode === "sample") {
         for (const row of await source.fetch(perSource, 0, true)) {
-          await checkRow(source, row, result);
+          await checkRow(source, row, result, requeues);
         }
-        continue;
-      }
-      let offset = 0;
-      for (;;) {
-        const rows = await source.fetch(FULL_BATCH, offset, false);
-        if (rows.length === 0) break;
-        for (const row of rows) await checkRow(source, row, result);
-        offset += rows.length;
-        if (rows.length < FULL_BATCH) break; // 撈不滿一批＝掃到底了
-        await yieldEventLoop();
+      } else {
+        let offset = 0;
+        for (;;) {
+          const rows = await source.fetch(FULL_BATCH, offset, false);
+          if (rows.length === 0) break;
+          for (const row of rows) await checkRow(source, row, result, requeues);
+          offset += rows.length;
+          if (rows.length < FULL_BATCH) break; // 撈不滿一批＝掃到底了
+          await yieldEventLoop();
+        }
       }
     } catch (err) {
       // 單一來源查詢失敗（表被鎖、連線斷）不影響其他來源——寧可回部分結果也不要整輪作廢
       recordError(`storage:audit-source:${source.entity}`, err);
+    }
+    // 放在 try/catch 外：就算來源掃到一半斷線，掃過那段裡發現的缺檔仍要排進補抓，
+    // 不能因為後半段失敗就連前半段的自我修復也一起放棄。
+    for (const item of requeues) {
+      if (await requeueAssetLanding(item.id, item.originUrl)) result.recoveredQueued += 1;
     }
   }
 

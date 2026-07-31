@@ -14,6 +14,16 @@ import { formatTwd, formatUsd, moneyFxNote } from "@shared/money";
 import { CommandLevelField } from "./MembersPage";
 
 import { Button, Card, Chip, EmptyState, Hint, Meta, Pill, Skeleton } from "../components/ui";
+// 素材儲存健康卡與全站警示橫幅共用同一份查詢與文案（素材保護）——狀態判讀只有一個出處。
+// fmtWhen 取別名：本檔已有一個只收 string|Date 的同名函式（Fal 帳戶卡用），
+// 儲存狀態的時間欄位是 unknown（superjson 前後皆容），要用橫幅那支寬鬆版。
+import {
+  ASSET_BACKUP_URL,
+  STORAGE_MODE_LABEL,
+  StorageHealthBoundary,
+  fmtWhen as fmtStorageWhen,
+  useStorageStatus,
+} from "../components/StorageAlertBanner";
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
   bug: { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" },
@@ -719,6 +729,95 @@ function SelfTestCard() {
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * 素材儲存健康卡（素材保護）：持久性模式、上次對帳結果、缺檔／待落地／落地失敗數、上次備份時間，
+ * 加一顆「立即下載素材備份」。
+ *
+ * 刻意「不」限制只有開發者看得到：儲存出問題時要行動的是團隊管理員
+ * （下載備份、通知組員先別刪原始檔）——系統自檢那張卡硬擋非 superAdmin，
+ * 等於團隊管理員完全看不到儲存問題，這張卡就是補這個洞的。
+ * 資料來源與全站警示橫幅同一份查詢（useStorageStatus，共用快取，不多打一次 API）。
+ */
+/** 素材儲存健康卡的單列數據：名稱＋值（比照系統自檢卡的列版式）；tone 控制值的語意色 */
+function StorageRow({ label, tone, children }: { label: string; tone?: "ok" | "bad" | "warn"; children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 8, fontSize: 13, padding: "3px 0", alignItems: "baseline" }}>
+      <b style={{ minWidth: 110, flex: "none" }}>{label}</b>
+      <span style={{
+        color: tone === "bad" ? "var(--danger-ink)" : tone === "warn" ? "var(--gold-ink)" : tone === "ok" ? "var(--success-ink)" : undefined,
+        fontWeight: tone === "bad" ? 600 : undefined,
+      }}>
+        {children}
+      </span>
+    </div>
+  );
+}
+
+function StorageHealthCardInner() {
+  const { status, refetch } = useStorageStatus();
+  const audit = status?.lastAudit ?? null;
+  return (
+    <Card data-fb="素材儲存健康卡">
+      <h2>素材儲存健康</h2>
+      <Hint>大家上傳與生成的素材檔存放狀況。出現紅字＝素材有遺失風險，先按「立即下載素材備份」保住現有檔案，再通知部署負責人。</Hint>
+      {status ? (
+        <div style={{ marginTop: 6 }}>
+          <StorageRow label="儲存位置" tone={status.persistence.persistent ? "ok" : "bad"}>
+            {STORAGE_MODE_LABEL[status.persistence.mode]}
+            {status.persistence.root && <Meta style={{ marginLeft: 6 }}>（{status.persistence.root}）</Meta>}
+          </StorageRow>
+          <StorageRow label="目前狀態" tone={status.degraded.degraded ? "bad" : "ok"}>
+            {status.degraded.degraded
+              ? <>異常{status.degraded.note ? `：${status.degraded.note}` : ""}{status.degraded.since ? `（自 ${fmtStorageWhen(status.degraded.since)}）` : ""}</>
+              : "正常"}
+          </StorageRow>
+          <StorageRow label="上次對帳" tone={audit && (audit.missing > 0 || audit.corrupt > 0) ? "bad" : undefined}>
+            {audit
+              ? <>{fmtStorageWhen(audit.finishedAt)}・檢查 {audit.checked} 筆{audit.missing > 0 ? `・缺檔 ${audit.missing}` : ""}{audit.corrupt > 0 ? `・內容損毀 ${audit.corrupt}` : ""}</>
+              : "還沒跑過（部署後每天自動對帳一次）"}
+          </StorageRow>
+          <StorageRow label="缺檔素材" tone={status.missing > 0 ? "bad" : "ok"}>
+            {status.missing > 0 ? `${status.missing} 筆——資料庫有紀錄、伺服器上找不到檔` : "0 筆"}
+          </StorageRow>
+          <StorageRow label="待落地" tone={status.pending > 0 ? "warn" : undefined}>
+            {status.pending > 0 ? `${status.pending} 筆生成成品還在搬回伺服器（自動補抓中）` : "0 筆"}
+          </StorageRow>
+          <StorageRow label="落地失敗" tone={status.failed > 0 ? "bad" : undefined}>
+            {status.failed > 0
+              ? `${status.failed} 筆已放棄重試——請到各專案素材庫找紅字「未永久備份」的素材，趁來源網址還沒過期趕快下載`
+              : "0 筆"}
+          </StorageRow>
+          <StorageRow label="上次備份" tone={status.lastBackupAt ? undefined : "warn"}>
+            {status.lastBackupAt ? fmtStorageWhen(status.lastBackupAt) : "從未備份過——建議現在就按下面的按鈕抓一份"}
+          </StorageRow>
+        </div>
+      ) : (
+        // 後端還沒部署這支查詢、或暫時讀不到：不擋備份出口——愈是狀況不明，備份愈重要
+        <Meta as="p" style={{ marginTop: 6 }}>
+          儲存健康資訊暫時讀取不到（後端可能還在更新）。
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => refetch()}>再試一次</Button>
+        </Meta>
+      )}
+      <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {/* 開新分頁下載：tar.gz 由後端串流，檔案大時分頁會停留在下載狀態，不佔用管理頁本身 */}
+        <Button as="a" variant="primary" href={ASSET_BACKUP_URL} target="_blank" rel="noreferrer">
+          <Icon name="Download" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />立即下載素材備份
+        </Button>
+        <Hint as="span" style={{ fontSize: 11 }}>打包全部素材檔為 .tar.gz——請定期抓一份存到雲端硬碟或本機。</Hint>
+      </div>
+    </Card>
+  );
+}
+
+/** 卡片自身壞掉（後端契約變動等）只犧牲這張卡，不弄垮整個團隊管理頁 */
+function StorageHealthCard() {
+  return (
+    <StorageHealthBoundary>
+      <StorageHealthCardInner />
+    </StorageHealthBoundary>
   );
 }
 
@@ -2151,6 +2250,8 @@ export function AdminPage() {
         </div>
 
         <aside className="stack">
+        {/* 素材儲存健康：刻意不做 isSuperAdmin gate——團隊管理員才是出事時要下載備份、通知組員的人 */}
+        <StorageHealthCard />
         {/* 系統自檢只有開發者的 /api/selftest 能用——非開發者按了只會 403，對他們是死功能，故只對開發者顯示 */}
         {isSuperAdmin && <SelfTestCard />}
         <ConsumptionMonitorCard />

@@ -6,6 +6,7 @@ import {
   canonicalMigrationStatement,
   classifyMigrationState,
   isReRunnableCreateStatement,
+  isReviewedLandingBackfillStatement,
   isRowDeduplicationStatement,
   LEGACY_ADOPTION_PENDING_TAGS,
   LEGACY_ADOPTION_THROUGH_TAG,
@@ -145,9 +146,10 @@ describe("legacy migration adoption bridge", () => {
       .filter(Boolean),
   );
   // Schema drift only ever reports DDL; the row de-duplication that precedes a
-  // new unique index changes rows, so it never appears in a drift plan.
+  // new unique index and 0022's reviewed landing-state backfill change rows,
+  // so they never appear in a drift plan.
   const expectedStatements = pendingStatements.filter(
-    (statement) => !isRowDeduplicationStatement(statement),
+    (statement) => !isRowDeduplicationStatement(statement) && !isReviewedLandingBackfillStatement(statement),
   );
 
   it("recognizes de-duplication only as a keyed self-join delete", () => {
@@ -165,6 +167,21 @@ describe("legacy migration adoption bridge", () => {
       ),
     ).toBe(false);
     expect(isRowDeduplicationStatement('DELETE FROM "team_members"')).toBe(false);
+  });
+
+  it("recognizes the landing backfill only in its reviewed 0022 shape", () => {
+    // 0022 實際出貨的語句（canonical 形式）必須被放行
+    const shipped = pendingStatements.find((statement) => /^UPDATE assets /i.test(statement));
+    expect(shipped).toBeDefined();
+    expect(isReviewedLandingBackfillStatement(shipped!)).toBe(true);
+    // 改動 SET 清單、放寬 WHERE、或換張表都不是經審查的語句，必須照舊擋下人工審查
+    expect(isReviewedLandingBackfillStatement("UPDATE assets SET land_state='pending' WHERE true")).toBe(false);
+    expect(
+      isReviewedLandingBackfillStatement(
+        "UPDATE assets SET land_state='pending',land_next_try_at=now(),origin_url=url WHERE storage_path IS NULL",
+      ),
+    ).toBe(false);
+    expect(isReviewedLandingBackfillStatement('UPDATE "users" SET name=NULL')).toBe(false);
   });
 
   it("accepts reviewed DDL the legacy database already carries when it re-runs as a no-op", () => {

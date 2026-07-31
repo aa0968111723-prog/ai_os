@@ -31,6 +31,9 @@ let started = false;
 /** 本進程內推進中的生成 id：撈到已在推進的直接跳過——慢生成不擋其他，也不會被下一輪重入雙寫 */
 const inflight = new Set<string>();
 let tickCount = 0;
+/** sweep 重入旗標（比照 exportRunner 的 ticking 手法）：落地補抓單檔最長可到 120 秒、單輪最多 20 筆，
+ *  一輪可能遠超過 60 秒的節流間隔——沒有旗標的話，下一輪會撈到同一批還在下載中的素材重複抓、留孤兒檔 */
+let sweeping = false;
 /** 最近一次 tick 完成時間（/api/ready 的 runner 心跳分項用；null＝尚未啟動或未跑過） */
 let lastTickAt: number | null = null;
 
@@ -54,26 +57,33 @@ export function startGenerationRunner(): void {
     // 撈生成本身失敗（DB 抖動）也不能變成 unhandled rejection——記警告等下一輪
     void trackBackgroundTask((async () => {
       tickCount += 1;
-      if (tickCount % SWEEP_EVERY_TICKS === 0) {
+      // 重入防護：前一輪 sweep（尤其落地補抓的下載 IO）還沒跑完就再進一輪的話，
+      // 會對同一批素材重複下載、互相踩認領。skip 而非排隊——sweep 是週期性補償，晚一輪無妨。
+      if (tickCount % SWEEP_EVERY_TICKS === 0 && !sweeping) {
+        sweeping = true;
         try {
-          await sweepStale();
-        } catch (err) {
-          console.warn("[generation] 陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
-        }
-        // 落地補抓（修：persistGenerationResult 背景落地一次失敗後，素材永久指向會過期的 fal CDN）：
-        // 與陳屍掃描同節流（約 60 秒一次），重試把未落地素材抓回 Volume。失敗只記警告不擋 tick。
-        try {
-          const landed = await sweepUnlandedAssets();
-          if (landed > 0) console.log(`[generation] 落地補抓本輪完成 ${landed} 筆`);
-        } catch (err) {
-          console.warn("[generation] 落地補抓掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
-        }
-        // 語音留言逐字稿補抓（留言第一梯隊）：與落地補抓同節流，把待轉錄的語音留言轉成文字回填。
-        try {
-          const done = await sweepVoiceTranscripts();
-          if (done > 0) console.log(`[generation] 語音逐字稿本輪完成 ${done} 筆`);
-        } catch (err) {
-          console.warn("[generation] 語音逐字稿掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
+          try {
+            await sweepStale();
+          } catch (err) {
+            console.warn("[generation] 陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
+          }
+          // 落地補抓（修：persistGenerationResult 背景落地一次失敗後，素材永久指向會過期的 fal CDN）：
+          // 與陳屍掃描同節流（約 60 秒一次），重試把未落地素材抓回 Volume。失敗只記警告不擋 tick。
+          try {
+            const landed = await sweepUnlandedAssets();
+            if (landed > 0) console.log(`[generation] 落地補抓本輪完成 ${landed} 筆`);
+          } catch (err) {
+            console.warn("[generation] 落地補抓掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
+          }
+          // 語音留言逐字稿補抓（留言第一梯隊）：與落地補抓同節流，把待轉錄的語音留言轉成文字回填。
+          try {
+            const done = await sweepVoiceTranscripts();
+            if (done > 0) console.log(`[generation] 語音逐字稿本輪完成 ${done} 筆`);
+          } catch (err) {
+            console.warn("[generation] 語音逐字稿掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
+          }
+        } finally {
+          sweeping = false;
         }
       }
       if (isShuttingDown()) return;

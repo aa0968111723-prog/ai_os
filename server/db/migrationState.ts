@@ -110,6 +110,12 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0020_group_agent_commander",
   // 0021：純新增 user_presence 表（CREATE TABLE IF NOT EXISTS），不動任何既有資料，可安全納入 bridge
   "0021_user_presence",
+  // 0022：素材保全——三張新表＋assets 八個 nullable/有 default 欄位＋部分索引（皆 IF NOT EXISTS），
+  //       外加一句經審查的落地狀態回填 UPDATE（只寫新加入的 land_* 追蹤欄位、只挑「本地無檔、
+  //       url 仍是外部網址、AI 生成」的列；不碰 url/storage_path/使用者內容，重跑冪等）。
+  //       row-changing 語句不會出現在 drift 計畫中，比照 0005 的去重前例以 idiom 白名單放行
+  //      （見 isReviewedLandingBackfillStatement），其餘 UPDATE 仍一律擋下要求人工審查。
+  "0022_asset_durability",
 ] as const;
 
 /**
@@ -247,6 +253,20 @@ export function isRowDeduplicationStatement(statement: string): boolean {
 }
 
 /**
+ * Matches only the reviewed landing-state backfill shipped in 0022: an UPDATE
+ * on assets that stamps the freshly added land_* tracking columns (and copies
+ * url into origin_url) for rows that were never persisted locally. It touches
+ * rows, not schema, so it never appears in a drift plan; the WHERE clause is
+ * part of the match because it is what makes the statement idempotent and
+ * scoped to re-fetchable AI output. Any other UPDATE — different table,
+ * different SET list, a widened WHERE — is not the reviewed idiom and still
+ * fails the bridge's manual-review gate.
+ */
+export function isReviewedLandingBackfillStatement(statement: string): boolean {
+  return /^UPDATE assets SET land_state='pending',\s*land_next_try_at=now\(\),\s*origin_url=url WHERE storage_path IS NULL AND url LIKE 'http%' AND is_ai_generated = true$/i.test(statement);
+}
+
+/**
  * Proves a legacy database is exactly the historical 0001 schema:
  * current-schema drift must be precisely the additive CREATE TABLE/INDEX DDL
  * in the reviewed bridge migrations—nothing missing, extra, destructive,
@@ -291,7 +311,9 @@ export function verifyLegacyAdoptionBridge(
   const pairs = pending.flatMap(migrationStatementPairs);
   const expected = pairs.map((pair) => pair.canonical);
   const unsafe = expected.filter((statement) =>
-    !isAdditiveSchemaStatement(statement) && !isRowDeduplicationStatement(statement),
+    !isAdditiveSchemaStatement(statement)
+    && !isRowDeduplicationStatement(statement)
+    && !isReviewedLandingBackfillStatement(statement),
   );
   if (unsafe.length > 0) {
     errors.push("bridge migration 不再是純新增 table/index 或去重；必須重新人工審查");

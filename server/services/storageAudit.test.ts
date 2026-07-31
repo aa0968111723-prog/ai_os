@@ -23,6 +23,9 @@ const tableRows = vi.hoisted(
 );
 const updates = vi.hoisted(() => [] as { table: string; values: Record<string, unknown> }[]);
 const inserts = vi.hoisted(() => [] as { table: string; values: Record<string, unknown> }[]);
+/** 表名 → 第幾次 fetch 開始拒絕（1-indexed）；模擬掃描中途連線斷掉 */
+const fetchFailures = vi.hoisted(() => new Map<string, number>());
+const fetchCounts = vi.hoisted(() => new Map<string, number>());
 
 vi.mock("../db", () => {
   const nameOf = (t: unknown): string =>
@@ -57,8 +60,15 @@ vi.mock("../db", () => {
             then: (
               resolve: (rows: unknown[]) => unknown,
               reject: (err: unknown) => unknown,
-            ) =>
-              Promise.resolve((tableRows[name] ?? []).slice(skip, skip + take)).then(resolve, reject),
+            ) => {
+              const n = (fetchCounts.get(name) ?? 0) + 1;
+              fetchCounts.set(name, n);
+              const failAt = fetchFailures.get(name);
+              if (failAt !== undefined && n >= failAt) {
+                return Promise.reject(new Error("connection reset")).then(resolve, reject);
+              }
+              return Promise.resolve((tableRows[name] ?? []).slice(skip, skip + take)).then(resolve, reject);
+            },
           };
           return builder;
         },
@@ -113,6 +123,8 @@ beforeEach(() => {
   for (const key of Object.keys(tableRows)) tableRows[key] = [];
   updates.length = 0;
   inserts.length = 0;
+  fetchFailures.clear();
+  fetchCounts.clear();
   statStored.mockClear();
 });
 
@@ -236,6 +248,39 @@ describe("reconcileAssets", () => {
     expect(result.checked).toBe(25);
     expect(result.missing).toBe(25);
     expect(result.sample).toHaveLength(20);
+  });
+
+  it("full 模式超過一批（500 筆）時分批掃完、不漏不重", async () => {
+    const total = 502; // 500 + 2：強迫跨到第二批
+    tableRows.assets = Array.from({ length: total }, (_, i) => {
+      diskFiles.set(`2026/07/big-${i}.png`, 100);
+      return assetRow(`a-${i}`, `2026/07/big-${i}.png`);
+    });
+
+    const result = await reconcileAssets({ mode: "full", record: false });
+
+    expect(result.checked).toBe(total);
+    expect(statStored).toHaveBeenCalledTimes(total);
+    expect(result.missing).toBe(0);
+  });
+
+  it("來源掃到一半失敗時，前半段已發現的缺檔仍會排進補抓", async () => {
+    // 501 筆缺檔素材（跨兩批）；第一批的 a-0 有 originUrl，第二批的查詢直接炸掉——
+    // 模擬掃描中途斷線。前半段找到的補抓對象不能因為後半段失敗而被放棄。
+    tableRows.assets = Array.from({ length: 501 }, (_, i) =>
+      assetRow(`a-${i}`, `2026/07/gone-${i}.png`, {
+        originUrl: i === 0 ? "https://cdn.fal.example/out.png" : null,
+      }),
+    );
+    fetchFailures.set("assets", 2);
+
+    const result = await reconcileAssets({ mode: "full", record: false });
+
+    expect(result.checked).toBe(500); // 只掃完第一批
+    expect(result.missing).toBe(500);
+    expect(result.recoveredQueued).toBe(1);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].values).toMatchObject({ landState: "pending", url: "https://cdn.fal.example/out.png" });
   });
 
   it("sample 模式每個來源各抽 sampleSize/來源數 筆", async () => {

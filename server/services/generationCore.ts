@@ -84,6 +84,161 @@ function persistGenerationResult(asset: FreshGeneratedAsset, generationId: strin
   })().catch((err) => console.warn("[storage] 成品落地背景作業失敗：", err instanceof Error ? err.message : err));
 }
 
+/* ── 落地補抓狀態機（persistGenerationResult 與 sweepUnlandedAssets 共用同一套退場邏輯） ── */
+
+/** 補抓退場的絕對年齡上限：fal CDN 網址壽命以小時計，成品誕生超過一天還沒落地，來源幾乎必死 */
+const LAND_GIVEUP_AGE_MS = 24 * 60 * 60 * 1000;
+/** 指數退避上限：再怎麼退也至少每 6 小時試一次，不會在來源死透前就把窗口睡過頭 */
+const LAND_BACKOFF_CAP_MS = 6 * 60 * 60 * 1000;
+
+/** 放棄前最多嘗試幾次（含第一次背景落地）；可用 ASSET_LAND_MAX_ATTEMPTS 覆寫，預設 8 */
+function landMaxAttempts(): number {
+  const n = Number(process.env.ASSET_LAND_MAX_ATTEMPTS ?? 8);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 8;
+}
+
+/**
+ * persistRemote 契約上已把所有失敗收斂成結構化結果、不拋錯；這裡再兜一層防禦——
+ * 萬一底層有漏網例外（怪 runtime 錯誤等），單筆爆炸也只當成一次可重試的 io 失敗，
+ * 不能讓補抓佇列整輪中斷。
+ */
+async function persistRemoteSafe(url: string): Promise<PersistResult> {
+  try {
+    return await persistRemote(url);
+  } catch (err) {
+    return { ok: false, reason: "io", retryable: true, detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** 落地失敗登記所需的最小素材脈絡（背景落地與補抓佇列兩個入口共用同一結構） */
+interface LandFailureCtx {
+  id: string;
+  projectId: string;
+  title: string;
+  createdAt: Date;
+  /** 這次失敗「之前」DB 已記的嘗試次數（land_attempts）；本函式會 +1 落庫 */
+  attempts: number;
+  generationId?: string | null;
+  uploadedBy?: string | null;
+}
+
+/** 推播對象：AI 成品找發起生成的人；查不到（或手動上傳）退回上傳者。都沒有回 null＝只記 log。 */
+async function resolveLandOwner(ctx: LandFailureCtx): Promise<string | null> {
+  try {
+    if (ctx.generationId) {
+      const [gen] = await db
+        .select({ userId: schema.generations.userId })
+        .from(schema.generations)
+        .where(eq(schema.generations.id, ctx.generationId));
+      if (gen?.userId) return gen.userId;
+    }
+  } catch (err) {
+    console.warn("[storage] 落地失敗通知：查詢素材擁有者失敗（改用上傳者）：", err instanceof Error ? err.message : err);
+  }
+  return ctx.uploadedBy ?? null;
+}
+
+/**
+ * 落地失敗登記：可重試的排指數退避，救不回的直接退場＋通知擁有者。
+ * 「退場」是這個狀態機的核心修正——舊版對 404/410 也無限重試，死列佔滿補抓名額後，
+ * 真正救得回來的新成品反而永遠輪不到；而且沒有任何人被告知成品其實沒有備份。
+ */
+async function recordLandFailure(ctx: LandFailureCtx, failure: Extract<PersistResult, { ok: false }>): Promise<void> {
+  const attempts = ctx.attempts + 1;
+  const now = new Date();
+  const tooOld = now.getTime() - new Date(ctx.createdAt).getTime() > LAND_GIVEUP_AGE_MS;
+  const permanent = !failure.retryable || attempts >= landMaxAttempts() || tooOld;
+  if (!permanent) {
+    // 指數退避：2^attempts 分鐘、上限 6 小時。剛失敗的列往後排，把名額讓給還沒試過的
+    const backoffMs = Math.min(2 ** attempts * 60_000, LAND_BACKOFF_CAP_MS);
+    await db
+      .update(schema.assets)
+      .set({
+        landAttempts: attempts,
+        landLastError: failure.detail,
+        landLastTriedAt: now,
+        landNextTryAt: new Date(now.getTime() + backoffMs),
+        landClaimedAt: null, // 釋放認領：本輪已有結論，下輪依 landNextTryAt 決定何時再試
+      })
+      .where(eq(schema.assets.id, ctx.id));
+    return;
+  }
+  // 永久失敗：too-large 是結構性限制（管理員調高 ASSET_MAX_MB 之前重試無意義）→ skipped；
+  // 其餘（來源 404/410、次數/年齡耗盡）→ failed。兩者都清掉 landNextTryAt＝正式出隊，
+  // 死列從此不再佔補抓名額。
+  const finalState = failure.reason === "too-large" ? ("skipped" as const) : ("failed" as const);
+  await db
+    .update(schema.assets)
+    .set({
+      landState: finalState,
+      landAttempts: attempts,
+      landLastError: failure.detail,
+      landLastTriedAt: now,
+      landNextTryAt: null,
+      landClaimedAt: null,
+    })
+    .where(eq(schema.assets.id, ctx.id));
+  recordError("asset:land-failed", `asset=${ctx.id}「${ctx.title}」落地放棄（${failure.reason}）：${failure.detail}`);
+  // 這不是可以安靜吞掉的失敗：成品沒有永久備份、外部網址隨時過期。推播給擁有者搶最後的下載窗口。
+  const ownerId = await resolveLandOwner(ctx);
+  if (!ownerId) {
+    console.warn(`[storage] 落地放棄但找不到可通知的擁有者：asset=${ctx.id}`);
+    return;
+  }
+  const body =
+    failure.reason === "too-large"
+      ? `「${ctx.title}」超過單檔大小上限，系統無法自動備份。這支成品沒有永久備份，外部網址即將失效，請立刻自行下載一份保存；並請管理員調高 ASSET_MAX_MB 上限，之後的大檔成品才能自動備份。`
+      : `「${ctx.title}」自動備份多次失敗，系統已停止重試。這支成品沒有永久備份，外部網址即將失效，請立刻自行下載一份保存。`;
+  await pushToUsers([ownerId], {
+    title: "素材沒有備份，請立刻下載",
+    body,
+    url: `/p/${ctx.projectId}`,
+    tag: `asset-land-failed-${ctx.id}`,
+  }).catch((err) => console.warn("[storage] 落地放棄推播失敗：", err instanceof Error ? err.message : err));
+}
+
+/**
+ * 落地成功寫回（條件式 update）：只有「storage_path 仍為空」的那一次寫入算數。
+ * 背景落地與補抓佇列可能同時抓同一筆（認領斷頭回收、重佈疊代都會發生），誰先 commit 誰贏；
+ * 輸的那邊必須把自己剛下載的檔刪掉，否則 Volume 會累積無人引用的孤兒檔。
+ * 注意：只改 url、不動 originUrl——原始外部網址是日後對帳補救的唯一線索（見 schema 註解）。
+ */
+async function commitLandedAsset(
+  assetId: string,
+  generationId: string | null,
+  persisted: Extract<PersistResult, { ok: true }>,
+): Promise<boolean> {
+  const localUrl = `/api/assets/${assetId}/file`;
+  const won = await db
+    .update(schema.assets)
+    .set({
+      storagePath: persisted.storagePath,
+      mime: persisted.mime,
+      sizeBytes: persisted.sizeBytes,
+      sha256: persisted.sha256,
+      url: localUrl,
+      landState: "landed",
+      landNextTryAt: null,
+      landClaimedAt: null,
+      landLastError: null,
+    })
+    .where(and(eq(schema.assets.id, assetId), isNull(schema.assets.storagePath)))
+    .returning({ id: schema.assets.id });
+  if (won.length === 0) {
+    // 另一輪已先落地：自己這份是重複下載的孤兒檔，立刻清掉
+    await removeStoredFile(persisted.storagePath);
+    return false;
+  }
+  // 順帶把來源生成的 resultUrl 指向落地後的自有網址（與舊版 persistGenerationResult 同口徑）
+  if (generationId) {
+    await db
+      .update(schema.generations)
+      .set({ resultUrl: localUrl, updatedAt: new Date() })
+      .where(eq(schema.generations.id, generationId));
+  }
+  return true;
+}
+
 /** 注入結果：正向提示詞＋（視覺類別的）負向提示詞。 */
 export interface PromptParts {
   positive: string;
@@ -605,46 +760,88 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
 }
 
 /**
- * 落地補抓（修：persistGenerationResult 是「射後不理」的背景作業，一次網路抖動失敗後，
- * 素材的 url 就永久停在 fal CDN 外部網址、storagePath 為空——fal CDN 網址是短效的，
- * 過期後成品變永久死連結且無源可重抓，是慢性資料流失）。
- * 這裡掃「AI 生成、未落地（storagePath 空）、url 仍是外部 http」的素材重試 persistRemote，
- * 由 generationRunner 的 sweep tick 定期呼叫。冪等：已落地的（storagePath 非空）撈不到；
- * 假模式的 /api/mock-asset/* 佔位網址略過（不需落地、也避免 e2e 期間改動 mock 素材）。
+ * 落地補抓佇列：把 land_state='pending' 且到了 land_next_try_at 的素材抓回 Volume 永久保存，
+ * 由 generationRunner 的 sweep tick 定期呼叫。重寫修掉稽核確認的三個結構缺陷：
+ * (1) 舊版無 ORDER BY 且固定 LIMIT 20——只要累積 20 筆「永遠抓不回來」的死列（fal 網址已過期），
+ *     佇列就永久卡死，新成品再也輪不到補抓。現在以 land_next_try_at 排序＋失敗退場（recordLandFailure）。
+ * (2) 無認領機制——前一輪還沒跑完、下一輪又撈到同一批，重複下載且可能留孤兒檔。
+ *     現在用 FOR UPDATE SKIP LOCKED 一句 SQL 認領＋land_claimed_at 十分鐘斷頭回收。
+ * (3) e2e 假素材的 mock 佔位網址永久佔名額——現在直接標 skipped 正式出隊。
+ * 修 R6-LIFE-01（刻意沿用）：回收桶（deletedAt 非空）素材也要落地——「生成後未落地→丟回收桶→
+ * fal 短效網址過期→還原」的素材會變永久死連結，回收桶「可救回」的承諾就落空了。未落地時素材唯一
+ * 來源就是外部網址，還原時必須有 Volume 檔可用，所以下面的認領條件刻意不濾 deleted_at。
  */
 export async function sweepUnlandedAssets(limit = 20): Promise<number> {
-  const rows = await db
-    .select()
-    .from(schema.assets)
-    // 修 R6-LIFE-01：回收桶（deletedAt 非空）素材也要落地——原本 isNull(deletedAt) 濾條會讓「生成後未落地→
-    // 丟回收桶→fal 短效網址過期→還原」的素材變永久死連結，回收桶「可救回」承諾落空。未落地時素材唯一來源就是
-    // 外部 url，還原時必須有 Volume 檔可用。落地本身冪等（已落地的 storagePath 非空撈不到），對回收桶素材無副作用。
-    .where(and(
-      eq(schema.assets.isAiGenerated, true),
-      isNull(schema.assets.storagePath),
-      like(schema.assets.url, "http%"),
-    ))
-    .limit(limit);
+  // 認領（單一 SQL）：SKIP LOCKED 讓多實例／重疊輪次各拿各的、不搶同一筆；
+  // land_claimed_at 逾 10 分鐘視為前一個 worker 斷頭（當掉/重佈），開放重新認領。
+  const claimed = (await db.execute(sql`
+    with claimable as (
+      select id from assets
+       where land_state = 'pending'
+         and (land_next_try_at is null or land_next_try_at <= now())
+         and (land_claimed_at is null or land_claimed_at < now() - interval '10 minutes')
+       order by land_next_try_at asc nulls first, created_at asc
+       limit ${limit}
+         for update skip locked
+    )
+    update assets a
+       set land_claimed_at = now()
+      from claimable
+     where a.id = claimable.id
+     returning a.id, a.project_id as "projectId", a.title, a.url,
+               a.origin_url as "originUrl", a.meta, a.land_attempts as "landAttempts",
+               a.uploaded_by as "uploadedBy", a.created_at as "createdAt"
+  `)) as unknown as {
+    rows: Array<{
+      id: string;
+      projectId: string;
+      title: string;
+      url: string;
+      originUrl: string | null;
+      meta: unknown;
+      landAttempts: number;
+      uploadedBy: string | null;
+      createdAt: Date | string;
+    }>;
+  };
   let landed = 0;
-  for (const asset of rows) {
-    if (asset.url.includes("/api/mock-asset/")) continue; // 假模式佔位圖不落地
+  for (const asset of claimed.rows ?? []) {
     try {
-      const persisted = await persistRemote(asset.url);
-      if (!persisted) continue; // fal 網址已死/抓取失敗 → 下輪再試（或已無源，無害，不擋）
-      const localUrl = `/api/assets/${asset.id}/file`;
-      await db
-        .update(schema.assets)
-        .set({ storagePath: persisted.storagePath, mime: persisted.mime, sizeBytes: persisted.sizeBytes, url: localUrl })
-        .where(eq(schema.assets.id, asset.id));
-      // 順帶把來源生成的 resultUrl 也指向落地後的自有網址（與 persistGenerationResult 同口徑）
-      const genId = (asset.meta as { generationId?: string } | null)?.generationId;
-      if (genId) {
-        await db.update(schema.generations).set({ resultUrl: localUrl, updatedAt: new Date() }).where(eq(schema.generations.id, genId));
+      // 來源優先用 originUrl（落地成功也不抹除的原始外部網址）；舊資料沒補 originUrl 才退回 url
+      const source = (asset.originUrl ?? "").trim() || asset.url;
+      // e2e 假素材的 /api/mock-asset/* 佔位網址（或根本不是可抓取的外部網址）：標 skipped 出隊。
+      // 舊版只 continue 不改狀態，這批假素材每輪都佔滿 LIMIT 名額——是佇列被塞爆的直接原因。
+      if (source.includes("/api/mock-asset/") || !/^https?:\/\//i.test(source)) {
+        await db
+          .update(schema.assets)
+          .set({ landState: "skipped", landNextTryAt: null, landClaimedAt: null })
+          .where(eq(schema.assets.id, asset.id));
+        continue;
       }
-      landed += 1;
-      console.log(`[storage] 落地補抓成功：asset=${asset.id}（${persisted.sizeBytes}B ${persisted.mime}）`);
+      const generationId = (asset.meta as { generationId?: string } | null)?.generationId ?? null;
+      const persisted = await persistRemoteSafe(source);
+      if (!persisted.ok) {
+        await recordLandFailure(
+          {
+            id: asset.id,
+            projectId: asset.projectId,
+            title: asset.title,
+            createdAt: new Date(asset.createdAt),
+            attempts: asset.landAttempts,
+            generationId,
+            uploadedBy: asset.uploadedBy,
+          },
+          persisted,
+        );
+        continue;
+      }
+      if (await commitLandedAsset(asset.id, generationId, persisted)) {
+        landed += 1;
+        console.log(`[storage] 落地補抓成功：asset=${asset.id}（${persisted.sizeBytes}B ${persisted.mime}）`);
+      }
     } catch (err) {
-      console.warn(`[storage] 落地補抓略過（下輪再試）：asset=${asset.id}`, err instanceof Error ? err.message : err);
+      // 單筆意外（DB 抖動等）不擋整輪；認領 10 分鐘後自動斷頭回收，下輪可重試
+      console.warn(`[storage] 落地補抓單筆失敗（認領逾時後自動回收重試）：asset=${asset.id}`, err instanceof Error ? err.message : err);
     }
   }
   return landed;

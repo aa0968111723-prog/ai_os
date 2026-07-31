@@ -23,6 +23,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "admin.setGroupRole": "調整組內角色",
   "admin.removeFromGroup": "把成員移出組別",
   "admin.resetMemberPassword": "重設成員密碼",
+  // 儲存健康（素材保全）
+  "system.acknowledgeVolumeChange": "確認儲存卷更換並重設指紋",
   // 專案與素材
   "projects.create": "建立專案",
   "projects.createSample": "建立範例專案",
@@ -253,7 +255,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "teamAssistant", "workflows"] },
   { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters"] },
   { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "dm", "googleCalendar", "push"] },
-  { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
+  { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options", "system"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   { key: "database", label: "自訂資料庫", prefixes: ["databases"] },
   { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["mcpTokens", "mcp", "integrations", "adobe"] },

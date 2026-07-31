@@ -8,7 +8,10 @@ import helmet from "helmet";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import multer from "multer";
-import { unlink } from "node:fs/promises";
+import { readdir, stat, unlink } from "node:fs/promises";
+// timingSafeEqual：備份端點的 Bearer 權杖比對要恆定時間——這支端點能整包拉走全站素材，
+// 不能留下逐字元早退的計時側信道讓人慢慢猜出權杖。
+import { timingSafeEqual } from "node:crypto";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "./routers";
 import { createContext } from "./trpc";
@@ -708,6 +711,10 @@ app.get("/api/assets/:id/file", async (req, res) => {
 app.post("/api/dm/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
+    // 儲存層降級守門（與 /api/upload 同一道）：嚴格模式（ASSET_STRICT=1）且降級中一律拒收——
+    // 把附件寫進「等下就會消失」的磁碟，比當場告知不能傳更傷。預設未設 ASSET_STRICT 時恆為 null（只警告不擋）。
+    const blocked = storageWriteBlockReason();
+    if (blocked) { await cleanup(); return res.status(503).json({ error: blocked }); }
     const auth = await resolveSession(req);
     if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
@@ -809,6 +816,10 @@ app.get("/api/dm/attachments/:id/file", async (req, res) => {
 app.post("/api/databases/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
+    // 儲存層降級守門（與 /api/upload 同一道）：嚴格模式（ASSET_STRICT=1）且降級中一律拒收——
+    // 文件是要給 AI 長期讀的，寫進會消失的磁碟等於默默種下破檔。預設未設 ASSET_STRICT 時恆為 null（只警告不擋）。
+    const blocked = storageWriteBlockReason();
+    if (blocked) { await cleanup(); return res.status(503).json({ error: blocked }); }
     const auth = await resolveSession(req);
     if (!requireUsableSession(auth, res)) { await cleanup(); return; }
     if (!req.file) return res.status(400).json({ error: "沒有收到檔案（欄位名要是 file）" });
@@ -1420,6 +1431,175 @@ app.get("/api/selftest", async (req, res) => {
   res.status(allOk ? 200 : 500).json({ ok: allOk, mockMode: isMockMode(), checks, time: new Date().toISOString() });
 });
 
+/**
+ * 素材備份逃生出口（P0 可還原性保障）：把 STORAGE_ROOT/assets 底下全部檔案（排除 tmp/）
+ * 加一份 manifest.json，以 tar.gz 串流直接下載。
+ *
+ * 為什麼是一支 HTTP 端點：Zeabur 沒有 ssh、也沒有 one-off job，容器裡的 Volume 檔案
+ * 除了走 HTTP 之外沒有任何不依賴平台 CLI 的取回路徑——這支就是素材遺失事故時唯一的還原來源。
+ *
+ * 設計要點：
+ * - 全程 pipe 到 response、不落地暫存檔：備份行為不可以反過來吃掉被備份對象（同一顆 Volume）的空間。
+ * - ?since=ISO8601 只打包該時間之後有改動的檔（增量備份，給每日排程省流量）。
+ * - 開始先插 backup_runs 一列（ok 預設 false），全部送完才改 true——程序中途被砍不會留下假成功；
+ *   系統自檢的「素材備份新鮮度」只認 ok=true 的列。
+ * - 串流中途出錯一律 destroy response：寧可讓下載端看到明確的失敗，也不能留下一份
+ *   「看起來完整其實半截」的 tar 讓人誤以為備份成功。
+ *
+ * 認證：登入的開發者（isSuperAdmin），或 Authorization: Bearer ${ADMIN_BACKUP_TOKEN}（給外部 cron+curl 排程）。
+ * 未設定 ADMIN_BACKUP_TOKEN 時 Bearer 路徑一律拒絕——環境變數沒設不能退化成無認證後門。
+ */
+app.get("/api/admin/backup/assets.tar.gz", async (req, res) => {
+  try {
+    // ── 認證：二擇一 ──
+    let triggeredBy: string;
+    const bearer = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization ?? ""))?.[1]?.trim();
+    if (bearer) {
+      const expected = (process.env.ADMIN_BACKUP_TOKEN ?? "").trim();
+      const given = Buffer.from(bearer);
+      const want = Buffer.from(expected);
+      const ok = expected.length > 0 && given.length === want.length && timingSafeEqual(given, want);
+      if (!ok) return res.status(403).json({ error: "備份權杖不正確（或伺服器尚未設定 ADMIN_BACKUP_TOKEN）——請管理員到部署平台 Variables 設定後再試" });
+      triggeredBy = "外部排程（Bearer 權杖）";
+    } else {
+      const auth = await resolveSession(req);
+      if (!requireUsableSession(auth, res)) return;
+      if (!auth.user.isSuperAdmin) return res.status(403).json({ error: "需要開發者帳號才能下載素材備份" });
+      triggeredBy = `管理員手動（${auth.user.email}）`;
+    }
+
+    // ── ?since= 增量備份：格式錯就明講，別安靜退回全量讓排程以為自己在做增量 ──
+    let since: Date | null = null;
+    const sinceRaw = String(req.query.since ?? "").trim();
+    if (sinceRaw) {
+      const parsed = new Date(sinceRaw);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ error: "since 參數需為 ISO 8601 時間（例：2026-07-31T00:00:00Z），只打包該時間之後有改動的檔案" });
+      }
+      since = parsed;
+    }
+
+    // ── 走訪 assets/：先收檔案清單（rel/size）——manifest 要在串流開頭就寫得出全貌 ──
+    // tmp/ 實際位於 STORAGE_ROOT/tmp（不在 assets/ 下），這裡再排除一次是防禦：
+    // 萬一日後有人把暫存目錄搬進 assets/，備份也不該把上傳到一半的殘檔包進去。
+    const assetsRoot = path.join(STORAGE_ROOT, "assets");
+    const files: Array<{ rel: string; abs: string; size: number }> = [];
+    const walk = async (dir: string, relBase: string): Promise<void> => {
+      let entries;
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return; // 目錄不存在（全新部署）＝零個檔案，照樣出一份只有 manifest 的備份
+      }
+      for (const ent of entries) {
+        const rel = relBase ? `${relBase}/${ent.name}` : ent.name;
+        if (ent.isDirectory()) {
+          if (rel === "tmp") continue;
+          await walk(path.join(dir, ent.name), rel);
+        } else if (ent.isFile()) {
+          try {
+            const st = await stat(path.join(dir, ent.name));
+            if (since && st.mtimeMs <= since.getTime()) continue;
+            files.push({ rel, abs: path.join(dir, ent.name), size: st.size });
+          } catch {
+            // 走訪期間被刪（如回饋截圖清理）——略過即可，manifest 只記「當下真的在」的檔
+          }
+        }
+      }
+    };
+    await walk(assetsRoot, "");
+    const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+
+    // ── manifest：事故還原時第一個要看的檔——備份當下磁碟身分、持久性判定、檔案清單、DB 各表列數 ──
+    const countRows = async (table: typeof schema.assets | typeof schema.dataFiles | typeof schema.dmAttachments | typeof schema.exportJobs): Promise<number> => {
+      const rows = (await db.select({ n: sql<number>`count(*)::int` }).from(table)) as Array<{ n: number }>;
+      return rows[0]?.n ?? 0;
+    };
+    const identity = await verifyVolumeIdentity();
+    const manifest = {
+      takenAt: new Date().toISOString(),
+      volumeId: identity.volumeId,
+      storageRoot: STORAGE_ROOT,
+      persistence: assessStoragePersistence(),
+      files: files.map((f) => ({ rel: f.rel, size: f.size })),
+      dbCounts: {
+        assets: await countRows(schema.assets),
+        dataFiles: await countRows(schema.dataFiles),
+        dmAttachments: await countRows(schema.dmAttachments),
+        exportJobs: await countRows(schema.exportJobs),
+      },
+    };
+
+    // ── 落一筆 backup_runs（ok 先 false）：中途被砍留得下「跑到一半」的證據 ──
+    const [run] = await db
+      .insert(backupRuns)
+      .values({ kind: since ? "incremental" : "full", target: "HTTP 下載（/api/admin/backup/assets.tar.gz）", triggeredBy })
+      .returning({ id: backupRuns.id });
+    let settled = false;
+    const settle = async (ok: boolean, error?: string): Promise<void> => {
+      if (settled) return;
+      settled = true;
+      try {
+        await db
+          .update(backupRuns)
+          .set({ finishedAt: new Date(), ok, fileCount: files.length, totalBytes, error: error ?? null })
+          .where(eq(backupRuns.id, run.id));
+      } catch (err) {
+        // 結果落庫失敗只記警告：備份本體（下載）已成或已敗，紀錄壞掉不該再影響什麼
+        console.warn("[backup] 備份結果寫入失敗：", err instanceof Error ? err.message : err);
+      }
+      if (!ok && error) recordError("storage:backup", new Error(error));
+    };
+
+    // ── 串流打包：TarArchive + gzip 直接 pipe 到 response ──
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    res.setHeader("Content-Type", "application/gzip");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(`素材備份-${stamp}.tar.gz`)}`);
+    const { TarArchive } = await import("archiver");
+    const archive = new TarArchive({ gzip: true });
+    archive.on("error", (err) => {
+      console.error("[backup] 打包錯誤：", err instanceof Error ? err.message : err);
+      void settle(false, `打包中途失敗：${err instanceof Error ? err.message : String(err)}`);
+      // destroy 讓下載端看到連線異常中止，而不是拿到一份「看起來完整」的半截 tar
+      res.destroy(err instanceof Error ? err : new Error(String(err)));
+    });
+    // 斷線偵測：close 且 writableFinished=false＝用戶端沒收完就走了。abort 殺掉打包佇列，
+    // truncated promise 讓下面的 race 一定收得了尾——abort 之後 finalize 的 promise
+    // 不保證會 settle（見 exporter.ts 同款註解），不能光 await 它。
+    let truncatedResolve!: () => void;
+    const truncated = new Promise<void>((resolve) => { truncatedResolve = resolve; });
+    res.on("close", () => {
+      if (!res.writableFinished) {
+        archive.abort();
+        void settle(false, "下載連線提前中斷（用戶端斷線或代理逾時）——這一份不算成功備份");
+        truncatedResolve();
+      }
+    });
+    archive.pipe(res);
+    archive.append(Buffer.from(JSON.stringify(manifest, null, 2)), { name: "manifest.json" });
+    // archive.file 走 lazystream：排隊時只持有路徑、輪到才開檔，幾千個檔也不會吃記憶體
+    for (const f of files) archive.file(f.abs, { name: `assets/${f.rel}` });
+    try {
+      await Promise.race([archive.finalize(), truncated]);
+    } catch (err) {
+      // finalize reject＝abort 或打包錯誤——對應的 handler 已 settle(false) 並斷線；沒 settle 過才往外拋
+      if (!settled) throw err;
+      return;
+    }
+    if (settled) return; // race 由 truncated 收尾（斷線）：settle(false) 已記錄，別再蓋成成功
+    await settle(true);
+    console.log(`[backup] 素材備份下載完成：${files.length} 個檔案／${Math.round(totalBytes / 1048576)}MB（${triggeredBy}${since ? `｜增量 since=${since.toISOString()}` : ""}）`);
+  } catch (err) {
+    console.error("[backup] 素材備份失敗：", err);
+    recordError("storage:backup", err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "素材備份產生失敗，請稍後再試；持續失敗請到系統自檢頁查看「近期錯誤」" });
+    } else {
+      res.destroy(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+});
+
 // tRPC API
 app.use("/api/trpc", createExpressMiddleware({ router: appRouter, createContext }));
 
@@ -1644,6 +1824,80 @@ function scheduleFeedbackSweep(): void {
   });
 }
 
+/**
+ * DB↔磁碟對帳排程（素材遺失防護）：開機後 5 分鐘先抽樣快檢——「換卷／清 Volume」型的整批遺失
+ * 在部署完幾分鐘內就會被抓到，而不是等幾週後有人點開舊專案；其後每 6 小時全量掃一次
+ * （全量才會統計孤兒檔並把缺檔排進補抓佇列）。
+ * 寫法比照 scheduleFeedbackSweep：trackBackgroundTask 讓關機時等它收尾、onShutdown 清計時器；
+ * 任何失敗只記警告不外拋——背景巡檢絕不能影響服務本體。
+ */
+function scheduleStorageAudit(): void {
+  const runAudit = async (mode: "sample" | "full"): Promise<void> => {
+    if (isShuttingDown()) return;
+    try {
+      const { reconcileAssets } = await import("./services/storageAudit");
+      const result = await reconcileAssets({ mode, sampleSize: 30 });
+      const label = mode === "sample" ? "抽樣" : "全量";
+      if (result.missing > 0 || result.corrupt > 0) {
+        // 大聲印：缺檔／毀損的細節已由 reconcileAssets 進 errlog 與 storage_audit_runs，這裡讓部署 log 也看得到
+        console.error(`[storage-audit] ⚠ ${label}對帳：檢查 ${result.checked} 筆，缺檔 ${result.missing}、毀損 ${result.corrupt}、已排補抓 ${result.recoveredQueued}——請到系統自檢頁查看樣本`);
+      } else {
+        console.log(`[storage-audit] ${label}對帳完成：檢查 ${result.checked} 筆，全部對得上`);
+      }
+    } catch (err) {
+      console.warn("[storage-audit] 對帳略過（下輪再試）：", err instanceof Error ? err.message : err);
+    }
+  };
+  const firstRun = setTimeout(() => {
+    if (isShuttingDown()) return;
+    void trackBackgroundTask(runAudit("sample")); // 開機後 5 分鐘：抽樣快檢（要快，先確認沒有整批遺失）
+  }, 5 * 60_000);
+  const interval = setInterval(() => {
+    if (isShuttingDown()) return;
+    void trackBackgroundTask(runAudit("full")); // 其後每 6 小時：全量掃（含孤兒統計與補抓排隊）
+  }, 6 * 60 * 60_000);
+  onShutdown(() => {
+    clearTimeout(firstRun);
+    clearInterval(interval);
+  });
+}
+
+/**
+ * 開機卷指紋核對：確認「這次掛到的磁碟」還是資料庫記得的那顆。
+ * 一定要等 bootstrap 成功（DB schema 就緒）才跑——storage_state 表可能還沒建好；
+ * verifyVolumeIdentity 內部已把一切例外吞成 unknown 並自行 recordError／標記降級，
+ * 這層只負責兩件事：把結果印進部署 log、事故時推播所有開發者（越早有人知道，備份還原成功率越高）。
+ */
+async function checkVolumeIdentityOnBoot(): Promise<void> {
+  try {
+    const identity = await verifyVolumeIdentity();
+    if (identity.verdict === "volume-changed" || identity.verdict === "volume-empty") {
+      // 大聲印：這是「素材可能已整批遺失」等級的事故訊號，不能只躺在錯誤緩衝裡
+      console.error(`[storage] ★★★ 儲存磁碟身分異常（${identity.verdict}）：${identity.note}`);
+      try {
+        const { pushToUsers } = await import("./services/webPush");
+        const admins = await db
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(eq(schema.users.isSuperAdmin, true));
+        await pushToUsers(admins.map((a) => a.id), {
+          title: "儲存磁碟異常——素材可能遺失",
+          body: identity.note,
+          url: "/admin",
+          tag: "storage-volume-identity", // 同 tag 互相取代：重啟多次也只留最新一則，不洗版
+        });
+      } catch (err) {
+        console.warn("[storage] 卷異常推播失敗（警示仍在系統自檢頁與儲存橫幅可見）：", err instanceof Error ? err.message : err);
+      }
+    } else {
+      console.log(`[storage] 卷指紋核對：${identity.note}`);
+    }
+  } catch (err) {
+    // verifyVolumeIdentity 承諾不拋；這層是雙保險——觀測性功能絕不能把開機流程弄垮
+    console.warn("[storage] 卷指紋核對略過：", err instanceof Error ? err.message : err);
+  }
+}
+
 const httpServer = app.listen(port, () => {
   const falMode = isMockMode() ? "E2E 測試模式（僅供自動化測試）" : process.env.FAL_KEY ? "正式模式" : "正式模式（⚠ FAL_KEY 未設定，媒體生成會失敗）";
   console.log(`[server] AI Director OS 啟動於 :${port}（${isProd ? "production" : "development"}｜Fal ${falMode}）`);
@@ -1652,7 +1906,11 @@ const httpServer = app.listen(port, () => {
   }
   try {
     ensureStorageDirs();
-    console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（持久 Volume）" : "（本機模式）"}`);
+    // ★ 不再用「STORAGE_ROOT 是不是 /data」判斷持不持久：Dockerfile 在映像層就 mkdir 了 /data，
+    //   那個判斷恆真＝永遠印「持久 Volume」的假綠燈。改問 assessStoragePersistence()（看掛載點），
+    //   不持久時它的 note 自帶警告與修法，直接印出來就是給維運看的第一道警示。
+    const persistence = assessStoragePersistence();
+    (persistence.persistent ? console.log : console.warn)(`[server] 儲存層：${persistence.note}`);
   } catch (err) {
     console.warn("[server] 儲存目錄建立失敗（上傳/落地將不可用）：", err instanceof Error ? err.message : err);
   }
@@ -1695,6 +1953,9 @@ const httpServer = app.listen(port, () => {
         }
         if (isShuttingDown()) return;
         markBootReady();
+        // 卷指紋核對要等 DB 就緒（storage_state 表）才有得比對，所以掛在這裡而不是 listen 回呼；
+        // web 與 worker 實例掛的是同一顆 Volume，任何角色開機都該核對，不放進 shouldRunWorkers 區塊。
+        void trackBackgroundTask(checkVolumeIdentityOnBoot());
         // TD-07：PROCESS_ROLE 分離 Web／Worker（web 不啟動 Runner；worker 仍與 all 同跑背景）
         // schema 驗證與種子同步後才啟動背景執行器，避免資料庫版本未就緒時空轉報錯。
         if (shouldRunWorkers(processRole)) {
@@ -1711,6 +1972,7 @@ const httpServer = app.listen(port, () => {
           );
           startExportRunner(); // 交付包匯出 job（QA-005）：背景打包＋進度＋過期清理
           scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
+          scheduleStorageAudit(); // DB↔磁碟對帳排程（素材遺失防護）：開機 5 分鐘抽樣、每 6 小時全量
           startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
           const { startGoogleCalendarSweep } = await import("./services/googleCalendar");
           startGoogleCalendarSweep(); // Google 日曆同步：變更即推之外的週期對帳（未設 GOOGLE_CLIENT_ID 時為 no-op）

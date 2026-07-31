@@ -39,7 +39,10 @@ function isSourceable(kind: string): boolean {
 
 /**
  * 專案素材庫：上傳（拖放/點選/多檔）、預覽、改名、刪除、選為生成來源。
- * 上傳走 /api/upload（multipart）；檔案存伺服器持久 Volume，網址永久有效。
+ * 上傳走 /api/upload（multipart）；檔案存伺服器持久 Volume。
+ * 保存狀態依 assets.landState 四態顯示（素材保護）：落地成功才說「已保存於伺服器」，
+ * 落地失敗／放棄的要用紅字催使用者立刻下載——舊版只看 storagePath 有沒有值，
+ * 檔案其實已經死掉時仍顯示「已永久保存」，等於主動誘導使用者刪掉手邊唯一副本。
  * 工具列提供種類篩選、標題搜尋、排序（最新／名稱），三者可組合過濾。
  */
 export function AssetLibrary({
@@ -497,9 +500,32 @@ export function AssetLibrary({
                       <Meta as="div" style={{ fontSize: 11 }}>
                         {a.locked ? <><Icon name="Lock" size={11} style={{ verticalAlign: "-1px", marginRight: 4, color: "var(--gold-ink)" }} />鎖定 · </> : ""}
                         {a.isAiGenerated ? "AI 生成" : "上傳"}
-                        {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
+                        {/* 保存狀態依 landState 判斷（素材保護；欄位由 server/db/schema/generation.ts 提供）：
+                            以前只看 storagePath 有沒有值——檔案已死仍寫「已永久保存」，會誘導使用者刪掉唯一副本。
+                            failed/skipped 不擠在這行小灰字裡，下面用紅字警示塊單獨講清楚。 */}
+                        {a.landState === "landed" ? "・已保存於伺服器" : a.landState === "pending" ? "・保存中…" : ""}
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
                       </Meta>
+                      {/* 落地失敗（failed）／放棄落地（skipped）：伺服器上「沒有」這個檔的可靠副本，
+                          外部來源網址（fal CDN）隨時會過期——紅字催促＋直接給下載出口，趁還抓得到趕快抓。
+                          用裸 .error 而非 Meta：styles.css 裡 .hint 排在 .error 之後同特異度，疊上會把紅字蓋成灰字。 */}
+                      {(a.landState === "failed" || a.landState === "skipped") && (
+                        <div className="error" style={{ fontSize: 11, marginTop: 2 }} role="alert">
+                          <Icon name="TriangleAlert" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                          未永久備份，請立刻下載
+                          {(a.originUrl ?? a.url) && (
+                            <a
+                              href={a.originUrl ?? a.url ?? undefined}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="開啟外部來源網址下載原檔——這個網址會過期，請盡快存到本機再重新上傳"
+                              style={{ marginLeft: 6, color: "inherit", fontWeight: 600, textDecoration: "underline" }}
+                            >
+                              下載
+                            </a>
+                          )}
+                        </div>
+                      )}
                       {/* AUTH-03 lineage：桌面編輯回傳的新素材可追溯來源 */}
                       {(() => {
                         const srcId = (a.meta as { sourceAssetId?: string } | null | undefined)?.sourceAssetId;
