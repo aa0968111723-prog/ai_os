@@ -80,6 +80,14 @@ function stateKey(): Buffer {
   return createHash("sha256").update(`integrations-state:${keySeed()}`).digest();
 }
 
+/**
+ * 供其他外部帳號整合（#224 的 Adobe，見 services/adobe/tokenService）派生自己的金鑰：
+ * 同一顆持久種子、不同分域前綴——各整合的密文與簽章互不可用，輪替種子也只需改一處環境變數。
+ */
+export function deriveIntegrationKey(domain: string): Buffer {
+  return createHash("sha256").update(`${domain}:${keySeed()}`).digest();
+}
+
 export function encryptSecret(plain: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", encKey(), iv);

@@ -977,6 +977,45 @@ app.get("/api/integrations/google-drive/callback", async (req, res) => {
   }
 });
 
+// ── Adobe 帳號連結（#224 PR2）──瀏覽器重導，走 Express；API 見 routers/adobe ──
+// mock 模式下 /start 直接導回自家 callback（不出網），讓連結／撤銷／狀態在沒有 Adobe 憑證時也能完整驗證。
+app.get("/api/integrations/adobe/start", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
+    const { isAdobeConfigured, buildAdobeAuthUrl } = await import("./services/adobe/oauth");
+    if (!isAdobeConfigured()) return res.status(503).json({ error: "站方尚未設定 Adobe 整合（ADOBE_CLIENT_ID/SECRET）" });
+    res.redirect(buildAdobeAuthUrl(auth.user.id));
+  } catch (err) {
+    console.error("[integrations:adobe:start]", err);
+    recordError("integrations:adobe:start", err);
+    if (!res.headersSent) res.status(500).json({ error: "啟動授權失敗，請稍後再試" });
+  }
+});
+app.get("/api/integrations/adobe/callback", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
+    const { verifyAdobeState } = await import("./services/adobe/oauth");
+    // state 驗簽＋比對登入者：防 CSRF、也防把授權綁到別人帳上
+    const state = verifyAdobeState(String(req.query.state ?? ""));
+    if (!state || state.userId !== auth.user.id) return res.redirect("/integrations?adobe=state_mismatch");
+    if (req.query.error) return res.redirect("/integrations?adobe=denied"); // 使用者在 Adobe 畫面按了取消
+    const code = String(req.query.code ?? "");
+    if (!code) return res.redirect("/integrations?adobe=denied");
+    const { completeAdobeConnection } = await import("./services/adobe");
+    const { email } = await completeAdobeConnection(auth.user.id, code);
+    // Express callback 繞過 tRPC 審計中介層——比照 Google 雲端 callback 手動補記（fire-and-forget）
+    const { recordAudit } = await import("./services/audit");
+    recordAudit(auth, "adobe.connect", { email }, { ok: true });
+    res.redirect("/integrations?adobe=connected");
+  } catch (err) {
+    console.error("[integrations:adobe:callback]", err);
+    recordError("integrations:adobe:callback", err);
+    if (!res.headersSent) res.redirect("/integrations?adobe=failed");
+  }
+});
+
 // 組排程 .ics 匯出（需求 10 保留為後備）：登入＋組隔離；沒連結 Google 的人仍可手動匯入
 app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
   try {

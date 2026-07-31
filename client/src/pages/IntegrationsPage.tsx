@@ -5,6 +5,9 @@ import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
+import { AdobeConnectButton } from "../components/settings/AdobeConnectButton";
+import { AdobeConnectionStatus } from "../components/settings/AdobeConnectionStatus";
+import { useAdobeConnection } from "../hooks/useAdobeConnection";
 
 import { Badge, Button, Card, Hint, Meta } from "../components/ui";
 /**
@@ -156,6 +159,9 @@ export function IntegrationsPage() {
       {/* ── Notion ── */}
       <NotionCard data={d?.notion ?? null} />
 
+      {/* ── Adobe 帳號（修圖／剪輯）── */}
+      <AdobeCard />
+
       {/* ── 外部資料來源/API ── */}
       <ApiConnectionsCard apis={d?.apis ?? []} onRemove={(id) => remove.mutate({ id })} removingId={remove.isPending ? remove.variables?.id ?? null : null} />
 
@@ -176,6 +182,37 @@ function GoogleRemoveButton({ onRemoved }: { onRemoved: () => void }) {
     >
       中斷連結
     </ConfirmButton>
+  );
+}
+
+/**
+ * Adobe 帳號連結（#224 PR2）：連上之後 AI 可直接在使用者「自己的」Adobe 帳號內修圖與備稿，
+ * 少掉「下載 → 上傳 → 再下載」的來回。模擬模式下整條流程照跑，只是不會真的動到 Adobe。
+ */
+function AdobeCard() {
+  const { data, flash, disconnect, startUrl } = useAdobeConnection();
+  return (
+    <Card as="section" id="integration-adobe" style={{ marginTop: 12 }} data-fb="資料來源-Adobe卡">
+      <h2><Icon name="Palette" size={18} /> Adobe 帳號（修圖／剪輯）</h2>
+      <Hint style={{ marginTop: 4 }}>
+        連結你自己的 Adobe 帳號後，可以請 AI 直接在該帳號內完成去背、調色等修圖，並把剪輯素材備好，
+        不必再一路下載上傳。素材與成品都留在你的 Adobe 帳號裡。
+      </Hint>
+      <Hint layer="always" style={{ marginTop: 4 }}>
+        AI 只會處理「你指定的素材」；授權可隨時中斷，中斷後本系統保存的憑證即刪除。
+      </Hint>
+      {flash && <Meta as="p" style={{ color: "var(--success-ink)" }}>{flash}</Meta>}
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap", marginTop: 6 }}>
+        <AdobeConnectionStatus data={data} />
+        <AdobeConnectButton
+          data={data}
+          startUrl={startUrl}
+          onDisconnect={() => disconnect.mutate()}
+          disconnecting={disconnect.isPending}
+        />
+      </div>
+      {disconnect.error && <p className="error" role="alert">{disconnect.error.message}</p>}
+    </Card>
   );
 }
 

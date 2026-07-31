@@ -6,14 +6,16 @@
  * - 導航 network-first → offline.html
  * - 新版先進 waiting，使用者確認後才接管，避免編輯中途被背景更新打斷
  */
-const CACHE_VERSION = "aios-app-v1";
+// 版號變更會丟棄舊 shell 快取。品牌資產換版時務必一併加版號，
+// 否則已安裝的 PWA 會一直沿用舊圖示（開屏圖會停在舊版）。
+const CACHE_VERSION = "aios-app-v2";
 const PRECACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
 const PRECACHE_URLS = [
   "/offline.html", "/manifest.webmanifest",
-  "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-96.png",
-  "/icons/icon-192-maskable.png", "/icons/icon-512-maskable.png",
-  "/favicon.ico", "/favicon-32x32.png", "/apple-touch-icon.png",
+  "/icons/icon-v2-192.png", "/icons/icon-v2-512.png", "/icons/icon-v2-1024.png", "/icons/icon-v2-96.png",
+  "/icons/icon-v2-192-maskable.png", "/icons/icon-v2-512-maskable.png", "/icons/icon-v2-1024-maskable.png",
+  "/favicon-v2.ico", "/favicon-v2-32x32.png", "/apple-touch-icon-v2.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -79,16 +81,40 @@ self.addEventListener("fetch", (event) => {
     })());
     return;
   }
+  // manifest 決定安裝後的圖示與開屏畫面，必須 network-first：
+  // 走 cache-first 會讓已安裝的 PWA 永遠讀到舊 manifest，換了圖也不會生效。
+  if (url.pathname === "/manifest.webmanifest") {
+    event.respondWith((async () => {
+      const cache = await caches.open(PRECACHE);
+      try {
+        const res = await fetch(req, { cache: "no-store" });
+        if (res.ok) await cache.put(req, res.clone());
+        return res;
+      } catch {
+        return (await cache.match(req)) || Response.error();
+      }
+    })());
+    return;
+  }
   const brand = url.pathname.startsWith("/icons/") || url.pathname.startsWith("/brand/") ||
-    url.pathname === "/favicon.ico" || url.pathname.startsWith("/favicon-") ||
-    url.pathname === "/apple-touch-icon.png" || url.pathname === "/manifest.webmanifest" ||
+    url.pathname.startsWith("/favicon") || url.pathname.startsWith("/apple-touch-icon") ||
     url.pathname === "/offline.html" || url.pathname === "/icon.svg";
   if (brand) {
+    // stale-while-revalidate：先回快取，背景更新。
+    // 背景更新要掛 waitUntil，否則 SW 回應後被回收，cache.put 可能沒寫進去，
+    // 導致新資產永遠追不上。
     event.respondWith((async () => {
       const cache = await caches.open(PRECACHE);
       const hit = await cache.match(req);
-      const net = fetch(req).then((res) => { if (res.ok) cache.put(req, res.clone()); return res; }).catch(() => null);
-      return hit || (await net) || Response.error();
+      const net = fetch(req).then((res) => {
+        if (res.ok) return cache.put(req, res.clone()).then(() => res);
+        return res;
+      }).catch(() => null);
+      if (hit) {
+        event.waitUntil(net);
+        return hit;
+      }
+      return (await net) || Response.error();
     })());
   }
 });
@@ -99,7 +125,7 @@ self.addEventListener("push", (event) => {
   catch { data = { title: "通知", body: event.data ? event.data.text() : "" }; }
   event.waitUntil(self.registration.showNotification(data.title || "Aios", {
     body: data.body || "", tag: data.tag || undefined, renotify: Boolean(data.tag),
-    icon: "/icons/icon-192.png", badge: "/icons/icon-96.png",
+    icon: "/icons/icon-v2-192.png", badge: "/icons/icon-v2-96.png",
     vibrate: data.silent ? undefined : [80, 40, 80],
     data: { url: safePath(data.url) },
   }));
