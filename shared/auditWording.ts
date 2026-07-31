@@ -26,6 +26,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // 專案與素材
   "projects.create": "建立專案",
   "projects.createSample": "建立範例專案",
+  "projects.createSeriesMaster": "建立母版專案",
+  "projects.createSeriesEpisode": "從母版開新的一集",
   "projects.setArchived": "封存／解封專案",
   "projects.updateWorldview": "更新世界觀",
   "projects.setProjectRole": "調整專案成員角色",

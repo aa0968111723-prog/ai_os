@@ -5,6 +5,18 @@ import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { PLATFORMS } from "../../shared/models";
+import {
+  buildEpisodeNote,
+  buildEpisodeScenes,
+  buildEpisodeTitle,
+  buildMasterNote,
+  episodeVariablesSchema,
+  getSeriesTemplate,
+  masterTitle,
+  parseEpisodeTitle,
+  seriesTemplateIdSchema,
+  type SeriesTemplate,
+} from "../../shared/seriesTemplate";
 import { removeStoredFile } from "../services/storage";
 import { getGroupOptions, ensureGroupOptions } from "../services/optionsStore";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
@@ -25,6 +37,40 @@ export function canOwnProject(groupMemberIds: readonly string[], teamAdminIds: r
  * 避免兩個請求同時通過去重、各插一份範例。單容器部署、程序內 Set 即足夠，重啟歸零無妨。
  */
 const sampleInFlight = new Set<string>();
+
+/** 同上，母版本體用（鍵＝groupId:templateId）：雙擊不會生出兩個同名母版 */
+const seriesInFlight = new Set<string>();
+
+/** 母版寫死的禁忌（SOP §2.2）——每集從母版複製世界觀時一併帶走 */
+const MASTER_TABOOS = ["不斷章取義", "不戲謔開示", "不使用爭議人物畫面", "未經組長審核不得對外當定稿"];
+
+/**
+ * 母版要用的內容類型／發布平台：一律取該組「啟用中」的選項（與 projects.create 同一把尺）。
+ * 平台優先挑直式（母版規格寫死 9:16）；該組沒有直式選項時退第一個啟用平台——
+ * 寧可先建起來再由組長到「選項」頁補直式，也不要因為選項沒設好就整條流程開不了。
+ */
+async function pickSeriesOptions(groupId: string, template: SeriesTemplate) {
+  await ensureGroupOptions(groupId);
+  const [kindOpts, platformOpts] = await Promise.all([
+    getGroupOptions(groupId, "kind"),
+    getGroupOptions(groupId, "platform"),
+  ]);
+  const activeKinds = kindOpts.filter((o) => o.active);
+  const activePlatforms = platformOpts.filter((o) => o.active);
+  const kind =
+    activeKinds.find((o) => o.value === template.kind || o.label === template.kind)?.value
+    ?? activeKinds[0]?.value
+    ?? template.kind;
+  const platform =
+    activePlatforms.find((o) => o.format === template.aspect)
+    ?? activePlatforms[0];
+  const fallback = PLATFORMS.find((p) => p.format === template.aspect) ?? PLATFORMS[0];
+  return {
+    kind,
+    platform: platform?.value ?? fallback.id,
+    format: platform?.format ?? fallback.format,
+  };
+}
 
 export const projectsRouter = router({
   /** 列出指定組的專案（未指定 → 所有我可見的組）；隔離由 requireGroup／成員組清單保證 */
@@ -287,6 +333,183 @@ export const projectsRouter = router({
       } finally {
         sampleInFlight.delete(input.groupId);
       }
+    }),
+
+  /**
+   * 母版系列總覽：這個組有沒有這條系列的母版，以及已經開了哪幾集。
+   * 面板據此決定顯示「建立母版」還是「開這一集」——不必讓組員自己在專案清單裡認名字。
+   */
+  seriesOverview: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), templateId: seriesTemplateIdSchema }))
+    .query(async ({ ctx, input }) => {
+      requireGroup(ctx.auth, input.groupId);
+      const template = getSeriesTemplate(input.templateId)!;
+      // 一次撈該組未封存專案再於記憶體分類：母版與本集都是「標題約定」，
+      // SQL like 對全形分隔符與前綴的比對反而更脆（且本查詢已有 groupId 索引可用）。
+      const rows = await db
+        .select()
+        .from(schema.projects)
+        .where(and(eq(schema.projects.groupId, input.groupId), ne(schema.projects.status, "archived")))
+        .orderBy(desc(schema.projects.updatedAt));
+      const master = rows.find((p) => p.title.trim() === masterTitle(template)) ?? null;
+      const episodes = rows
+        .map((p) => ({ project: p, parsed: parseEpisodeTitle(p.title) }))
+        .filter((r) => r.parsed?.template.id === template.id)
+        .map((r) => ({ id: r.project.id, title: r.project.title, dueDate: r.parsed!.dueDate, topic: r.parsed!.topic, updatedAt: r.project.updatedAt }));
+      return {
+        master: master ? { id: master.id, title: master.title } : null,
+        episodes,
+      };
+    }),
+
+  /**
+   * 建立母版本體（SOP §2「只做一次」）。
+   *
+   * 母版＝固定骨架：寫死規格的專案筆記＋5 段分鏡空殼。與 createSample 同樣是
+   * **零點數路徑**——不呼叫 fal、不建 generation、不掛任何素材。
+   * 去重鍵＝同組同標題（`【母版】<系列名>`），重複點只會拿到同一個母版。
+   */
+  createSeriesMaster: authedProcedure
+    .input(z.object({ groupId: z.string().uuid(), templateId: seriesTemplateIdSchema }))
+    .mutation(async ({ ctx, input }) => {
+      // 母版是全系列的共同骨架，改它等於改全組的片型——比照選項／額度，收在組長以上
+      requireLeader(ctx.auth, input.groupId);
+      const template = getSeriesTemplate(input.templateId)!;
+      const title = masterTitle(template);
+
+      const findExisting = () =>
+        db
+          .select()
+          .from(schema.projects)
+          .where(and(eq(schema.projects.groupId, input.groupId), eq(schema.projects.title, title)))
+          .limit(1);
+
+      const [existing] = await findExisting();
+      if (existing) return existing;
+
+      const lockKey = `${input.groupId}:${template.id}`;
+      if (seriesInFlight.has(lockKey)) {
+        throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "母版建立中，請稍候…" });
+      }
+      seriesInFlight.add(lockKey);
+      try {
+        const [again] = await findExisting();
+        if (again) return again;
+        const picked = await pickSeriesOptions(input.groupId, template);
+        return db.transaction(async (tx) => {
+          const [project] = await tx
+            .insert(schema.projects)
+            .values({
+              groupId: input.groupId,
+              ownerId: ctx.auth.user.id,
+              title,
+              kind: picked.kind,
+              platform: picked.platform,
+              format: picked.format,
+              worldview: worldviewSchema.parse({ taboos: MASTER_TABOOS }),
+            })
+            .returning();
+          await tx.insert(schema.knowledge).values({
+            projectId: project.id,
+            groupId: project.groupId,
+            kind: "note",
+            title: `${template.seriesName} · 母版規格`,
+            content: buildMasterNote(template),
+            createdBy: ctx.auth.user.id,
+          });
+          // 母版也放 5 段空殼：組長維護時看得到骨架長相，開一集時也照著複製
+          await tx.insert(schema.scenes).values(
+            buildEpisodeScenes(template).map((s) => ({
+              projectId: project.id,
+              orderIndex: s.orderIndex,
+              title: s.title,
+              durationSec: s.durationSec,
+              status: "todo",
+              prompt: s.prompt,
+              voiceover: s.voiceover,
+            })),
+          );
+          return project;
+        });
+      } finally {
+        seriesInFlight.delete(lockKey);
+      }
+    }),
+
+  /**
+   * 從母版開一集（SOP §2.5／組員操作卡 §1–2）：複製骨架 → 填 4 格變數。
+   *
+   * 沿用母版的世界觀與規格（kind／platform／format），另外寫入本集筆記與 5 段分鏡空殼。
+   * 同樣是零點數路徑；分鏡一律 todo 草稿，仍須走既有審批三態機才算定稿。
+   */
+  createSeriesEpisode: authedProcedure
+    .input(
+      z.object({
+        groupId: z.string().uuid(),
+        templateId: seriesTemplateIdSchema,
+        variables: episodeVariablesSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      requireGroup(ctx.auth, input.groupId);
+      const template = getSeriesTemplate(input.templateId)!;
+      // 必須先有母版：SOP 的順序是「先建母版→再開集」，沒有母版就沒有共同骨架可跟，
+      // 這時默默生一個本集只會養出各自為政的片型。
+      const [master] = await db
+        .select()
+        .from(schema.projects)
+        .where(and(eq(schema.projects.groupId, input.groupId), eq(schema.projects.title, masterTitle(template))))
+        .limit(1);
+      if (!master) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `這個組還沒有「${masterTitle(template)}」——請組長先建立母版` });
+      }
+      if (master.status === "archived") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "母版已封存——請先還原母版再開新的一集" });
+      }
+      const title = buildEpisodeTitle(template, input.variables);
+      // 同一天同主題重複點：直接回既有那一集，不生第二個同名專案
+      const [dupe] = await db
+        .select()
+        .from(schema.projects)
+        .where(and(eq(schema.projects.groupId, input.groupId), eq(schema.projects.title, title)))
+        .limit(1);
+      if (dupe) return dupe;
+
+      return db.transaction(async (tx) => {
+        const [project] = await tx
+          .insert(schema.projects)
+          .values({
+            groupId: input.groupId,
+            ownerId: ctx.auth.user.id,
+            title,
+            // 規格全部跟母版走（SOP §2.4：每集只改 4 變數）
+            kind: master.kind,
+            platform: master.platform,
+            format: master.format,
+            worldview: master.worldview,
+          })
+          .returning();
+        await tx.insert(schema.knowledge).values({
+          projectId: project.id,
+          groupId: project.groupId,
+          kind: "note",
+          title: `本集變數 · ${input.variables.topic}`,
+          content: buildEpisodeNote(template, input.variables),
+          createdBy: ctx.auth.user.id,
+        });
+        await tx.insert(schema.scenes).values(
+          buildEpisodeScenes(template, input.variables).map((s) => ({
+            projectId: project.id,
+            orderIndex: s.orderIndex,
+            title: s.title,
+            durationSec: s.durationSec,
+            status: "todo",
+            prompt: s.prompt,
+            voiceover: s.voiceover,
+          })),
+        );
+        return project;
+      });
     }),
 
   get: authedProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {

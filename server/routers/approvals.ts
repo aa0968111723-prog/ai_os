@@ -5,6 +5,7 @@ import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
 import { canAccessGroup, groupLeaderIds, pushToUsers } from "../services/webPush";
+import { composeReworkReason, isMasterTitle, reworkTagSchema } from "../../shared/seriesTemplate";
 
 async function getScene(sceneId: string) {
   // isNull(deletedAt)：軟刪除（回收桶）的分鏡不得被送審／裁決——否則會把已刪分鏡復活進審批流程
@@ -33,6 +34,14 @@ export async function submitApprovalCore(
 ) {
   const { scene, project } = await getScene(sceneId);
   await assertAccess(project);
+  // 母版本體不是某一集：它是全系列共同骨架，送審會讓組長裁決一個「永遠不會交付的東西」，
+  // 通過後還可能被誤當定稿。要出片請從母版開一集（projects.createSeriesEpisode）。
+  if (isMasterTitle(project.title)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "母版本體不送審——請先從母版開一集，再送這一集的分鏡",
+    });
+  }
   const result = await db.transaction(async (tx) => {
     // 為什麼：以 advisory xact lock 序列化「同一分鏡」的送審（classifier 1，與 points per-user 鎖的
     // classifier 0 不同鍵空間、不互卡；交易結束自動釋放）。單一 insert…select 的 max()+1 只在該語句
@@ -120,17 +129,37 @@ export const approvalsRouter = router({
     }),
   ),
 
-  /** 組長裁決：通過 / 需修改（退回必附理由 → 自動變組內訊息） */
+  /**
+   * 組長裁決：通過 / 需修改（退回必附理由 → 自動變組內訊息）。
+   *
+   * reasonTag（可選）＝母版系列的固定退回標籤（結構跑掉／出處不符／點數過高／風格不符／其他）。
+   * 帶標籤時理由存成 `[標籤] 說明`，仍走既有單一 reason 欄位——不動資料表，舊資料照樣讀得懂；
+   * 「其他」一定要另寫一句說明（見 shared/seriesTemplate 的 composeReworkReason）。
+   */
   decide: authedProcedure
-    .input(z.object({ approvalId: z.string().uuid(), decision: z.enum(["approved", "needs_work"]), reason: z.string().max(500).optional() }))
+    .input(z.object({
+      approvalId: z.string().uuid(),
+      decision: z.enum(["approved", "needs_work"]),
+      reason: z.string().max(500).optional(),
+      reasonTag: reworkTagSchema.optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       const [approval] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, input.approvalId));
       if (!approval || !approval.sceneId) throw new TRPCError({ code: "NOT_FOUND" });
       if (approval.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "此版本已裁決過" });
       const { scene, project } = await getScene(approval.sceneId);
       requireLeader(ctx.auth, project.groupId); // 只有組長以上能裁決
-      if (input.decision === "needs_work" && !input.reason?.trim()) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "退回必須附一句理由（會通知提交人）" });
+      // 退回理由的單一組裝點：有標籤走固定句型，沒標籤沿用自由文字（兩者都存進同一個 reason 欄位）
+      const reworkReason = input.reasonTag
+        ? composeReworkReason(input.reasonTag, input.reason)
+        : input.reason?.trim() || null;
+      if (input.decision === "needs_work" && !reworkReason) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: input.reasonTag === "其他"
+            ? "退回標籤選「其他」時，必須另寫一句說明"
+            : "退回必須附一句理由（會通知提交人）",
+        });
       }
       // 整段裁決包進單一交易＋與 submitApprovalCore 相同的 advisory lock（classifier 1）：
       // decide 若不取鎖，「latest 守衛通過 → CAS」與「blanket void → 改分鏡狀態」之間 submit 可插隊——
@@ -153,7 +182,7 @@ export const approvalsRouter = router({
         // 其餘 returning 為空即擋下，避免 lost-update／重複系統訊息（比照 generationCore 的 inArray CAS）
         const [updated] = await tx
           .update(schema.approvals)
-          .set({ status: input.decision, decidedBy: ctx.auth.user.id, reason: input.reason?.trim(), decidedAt: new Date() })
+          .set({ status: input.decision, decidedBy: ctx.auth.user.id, reason: reworkReason ?? undefined, decidedAt: new Date() })
           .where(and(eq(schema.approvals.id, approval.id), eq(schema.approvals.status, "pending")))
           .returning();
         if (!updated) throw new TRPCError({ code: "BAD_REQUEST", message: "此版本已被裁決過" });
@@ -169,7 +198,7 @@ export const approvalsRouter = router({
           projectId: project.id,
           userId: ctx.auth.user.id,
           kind: "system",
-          body: input.decision === "approved" ? `✅ 「${scene.title}」v${approval.version} 已通過` : `↩️ 「${scene.title}」v${approval.version} 需修改：${input.reason}`,
+          body: input.decision === "approved" ? `✅ 「${scene.title}」v${approval.version} 已通過` : `↩️ 「${scene.title}」v${approval.version} 需修改：${reworkReason}`,
         });
         return updated;
       });
@@ -183,7 +212,7 @@ export const approvalsRouter = router({
             title: input.decision === "approved" ? "分鏡已通過" : "分鏡需修改",
             body: input.decision === "approved"
               ? `【${project.title}】「${scene.title}」v${approval.version} 已通過 ✅`
-              : `【${project.title}】「${scene.title}」v${approval.version} 需修改：${input.reason?.trim() ?? ""}`,
+              : `【${project.title}】「${scene.title}」v${approval.version} 需修改：${reworkReason ?? ""}`,
             url: `/p/${project.id}?focus=scene-${scene.id}`,
             tag: `approval-${scene.id}`,
           }) : undefined))

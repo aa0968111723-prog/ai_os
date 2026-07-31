@@ -87,9 +87,14 @@ function scene(over: SceneOver) {
   };
 }
 
-function mount(over: { isLeader?: boolean; canEdit?: boolean } = {}) {
+function mount(over: { isLeader?: boolean; canEdit?: boolean; projectTitle?: string } = {}) {
   return render(
-    <SceneList projectId="p-1" isLeader={over.isLeader ?? false} canEdit={over.canEdit ?? true} />,
+    <SceneList
+      projectId="p-1"
+      isLeader={over.isLeader ?? false}
+      canEdit={over.canEdit ?? true}
+      projectTitle={over.projectTitle}
+    />,
   );
 }
 
@@ -202,6 +207,44 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     first.unmount();
     mount({ isLeader: false });
     expect(rowOf("s1").queryByRole("button", { name: /通過/ })).not.toBeInTheDocument();
+  });
+
+  // #255：母版系列的一集，退回原因收斂成固定 5 種（其餘專案維持自由文字）。
+  // 判斷只看傳進來的專案標題——這條接線斷過一次（SceneList 曾自己重查 projects.get），故留守衛。
+  it("母版系列的一集：退回改出固定標籤，且標籤原樣送到後端", async () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", status: "pending" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    approvalsQuery.mockReturnValue({
+      data: [{ id: "ap1", sceneId: "s1", status: "pending" }],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount({ isLeader: true, projectTitle: "週更開示60秒｜2026-08-05｜留一點空隙" });
+
+    await userEvent.click(rowOf("s1").getByRole("button", { name: /退回/ }));
+    await userEvent.click(screen.getByRole("button", { name: "結構跑掉" }));
+    await userEvent.click(screen.getByRole("button", { name: "退回" }));
+
+    expect(decideMutate).toHaveBeenCalledWith({
+      approvalId: "ap1", decision: "needs_work", reason: "", reasonTag: "結構跑掉",
+    });
+  });
+
+  it("一般專案：退回維持自由文字＋快捷句，不出現母版標籤", async () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", status: "pending" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    approvalsQuery.mockReturnValue({
+      data: [{ id: "ap1", sceneId: "s1", status: "pending" }],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount({ isLeader: true, projectTitle: "隨便一個專案" });
+
+    await userEvent.click(rowOf("s1").getByRole("button", { name: /退回/ }));
+    expect(screen.queryByRole("button", { name: "結構跑掉" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "畫面與腳本不符" })).toBeInTheDocument();
   });
 
   it("檢視者（2.3 唯讀）：沒有任何寫入鈕，仍可開單格工作室、下載與討論", () => {
