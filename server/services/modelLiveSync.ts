@@ -35,6 +35,8 @@ export type LiveSyncResult = {
   certifiedFromHistory: number;
   unavailable: number;
   errors: string[];
+  /** 靜態實價 vs Fal 即時價偏差 ≥40% 的模型（cost 字串過期鬧鐘；實扣已用即時價，不影響收費正確性） */
+  driftWarnings: string[];
   fetchedAt: string;
 };
 
@@ -252,11 +254,13 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
       certifiedFromHistory,
       unavailable: 0,
       errors: [...errors, "未設定 FAL_KEY 或 E2E_MOCK=1：僅同步靜態目錄"],
+      driftWarnings: [],
       fetchedAt: fetchedAt.toISOString(),
     };
   }
 
   // 2) 靜態 endpoint 即時價
+  const driftWarnings: string[] = [];
   try {
     const endpoints = MODELS.map((m) => endpointOf(m));
     const pricing = await fetchFalPricing(endpoints);
@@ -266,6 +270,14 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
       const p = pricing.get(ep) ?? pricing.get(m.id);
       if (!p) continue;
       const points = pricingToPoints(p, m.kind);
+      // 漂移鬧鐘：實扣走即時價（本 updates 覆寫），但靜態 cost 字串若已偏差 ≥40% 且 ≥1 點，
+      // 代表目錄記載價過期——顯示（無 key 環境）與文件會失真，提醒回頭修 cost 字串。
+      if (m.points > 0 && Math.abs(points - m.points) >= 1) {
+        const ratio = points / m.points;
+        if (ratio >= 1.4 || ratio <= 1 / 1.4) {
+          driftWarnings.push(`${m.id}: 靜態 ${m.points} 點 vs 即時 ${points} 點（$${p.price}/${p.unit}）——請更新 cost 字串`);
+        }
+      }
       updates.push({
         ...staticToLive(m),
         points,
@@ -361,8 +373,10 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
 
   console.log(
     `[modelLive] 同步完成：靜態 ${staticRows.length}、即時價 ${priced}、新發現 ${discovered}` +
-      (errors.length ? `、警告 ${errors.length}` : ""),
+      (errors.length ? `、警告 ${errors.length}` : "") +
+      (driftWarnings.length ? `、價格漂移 ${driftWarnings.length}` : ""),
   );
+  for (const w of driftWarnings) console.warn(`[modelLive] 價格漂移：${w}`);
 
   return {
     staticUpserted: staticRows.length,
@@ -371,6 +385,7 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
     certifiedFromHistory,
     unavailable,
     errors,
+    driftWarnings,
     fetchedAt: fetchedAt.toISOString(),
   };
 }
