@@ -67,12 +67,18 @@ ok("admin.overview 有團隊", isinstance(overview, list) and len(overview) > 0)
 group = next(g for team in overview for g in team["groups"])
 gid = group["id"]
 
-# ── 1. 空狀態 agentOverview（對應截圖「目前沒有需要立刻處理的代理阻塞」）──
+# ── 1. 空狀態 agentOverview ──
+# S1 起「從沒發起過計畫」是 idle 而不是 healthy：舊版把「沒東西可分析」講成「分析結果良好」，
+# 於是新組的第一屏是五個 0 加一句安慰話。
 empty = call("GET", admin, "teamAssistant.agentOverview", {"groupId": gid})
 ok("空組 overview 有 summary", isinstance(empty.get("summary"), dict))
-ok("空組 health=healthy", empty["summary"].get("health") == "healthy")
+ok("空組 health=idle（不是 healthy）", empty["summary"].get("health") == "idle")
+ok("空組 hasRuns=False", empty["summary"].get("hasRuns") is False)
 ok("空組 active=0", empty["summary"].get("active") == 0)
+ok("空組 stoppedRecent=0", empty["summary"].get("stoppedRecent") == 0)
 ok("空組 runs=[]", empty.get("runs") == [])
+ok("空組 totalRuns=0", empty.get("totalRuns") == 0)
+ok("回傳 listLimit（前端才能誠實說「只顯示前 N 筆」）", isinstance(empty.get("listLimit"), int) and empty["listLimit"] > 0)
 
 # ── 2. 建專案 + 規劃代理 → awaiting_approval ──
 proj = call("POST", admin, "projects.create", {
@@ -97,6 +103,10 @@ summary = active_ov.get("summary", {})
 ok("有待核 → awaitingApproval ≥ 1", summary.get("awaitingApproval", 0) >= 1)
 ok("有待核 → active ≥ 1", summary.get("active", 0) >= 1)
 ok("有待核 → health=attention", summary.get("health") == "attention")
+ok("有計畫 → hasRuns=True", summary.get("hasRuns") is True)
+# 計數走整組聚合、清單走 limit 30：兩者是不同來源，totalRuns 至少要蓋過清單筆數
+ok("totalRuns ≥ 清單筆數", active_ov.get("totalRuns", 0) >= len(active_ov.get("runs", [])))
+ok("totalRuns ≥ 1", active_ov.get("totalRuns", 0) >= 1)
 ok("runs 含本計畫", any(r.get("id") == run_id for r in active_ov.get("runs", [])))
 run_row = next((r for r in active_ov.get("runs", []) if r.get("id") == run_id), {})
 ok("run 帶 projectTitle", run_row.get("projectTitle") == "團隊分析 E2E 專案")
@@ -253,9 +263,30 @@ else:
     ok("跨組隔離(略過：seed 僅一組)", True)
 
 # ── 8. 放棄計畫後不應再出現在 active ──
+before_discard_total = call("GET", admin, "teamAssistant.agentOverview", {"groupId": gid}).get("totalRuns", 0)
 discarded = call("POST", admin, "agents.discard", {"runId": run_id})
 ok("可放棄待核計畫", discarded.get("status") == "discarded")
 after_discard = call("GET", admin, "teamAssistant.agentOverview", {"groupId": gid})
 ok("放棄後不在 runs", all(r.get("id") != run_id for r in after_discard.get("runs", [])))
+# 整組計數與清單套同一個 ne(status,'discarded')：放棄一筆，totalRuns 必須跟著少一
+ok("放棄後 totalRuns 少 1（計數與清單同條件）",
+   after_discard.get("totalRuns", -1) == before_discard_total - 1)
+
+# ── 9. 待我裁決收件匣的資料來源：pendingSummary 要帶「最久那件」的時間戳 ──
+# 作業台把「代理計畫待核／分鏡送審／生成待核」合流成一份收件匣並依卡最久排序，
+# 沒有時間戳就排不出「先做哪一件」。
+pending = call("GET", admin, "approvals.pendingSummary", {"groupId": gid})
+ok("pendingSummary 有 projects 陣列", isinstance(pending.get("projects"), list))
+ok("pendingSummary 有兩個總數",
+   isinstance(pending.get("totalPendingApprovals"), int) and isinstance(pending.get("totalAwaitingGenerations"), int))
+for row in pending.get("projects", []):
+    ok(f"待辦列 {row['projectId'][:8]} 帶 oldest 欄位（可為 null）",
+       "oldestPendingApprovalAt" in row and "oldestAwaitingGenerationAt" in row)
+    if row.get("pendingApprovals", 0) > 0:
+        ok(f"有分鏡待審就必有時間戳 {row['projectId'][:8]}", row.get("oldestPendingApprovalAt") is not None)
+    if row.get("awaitingGenerations", 0) > 0:
+        ok(f"有生成待核就必有時間戳 {row['projectId'][:8]}", row.get("oldestAwaitingGenerationAt") is not None)
+ok("pendingSummary 組隔離",
+   "__error__" in call("GET", admin, "approvals.pendingSummary", {"groupId": fake_gid}))
 
 print("—— e2e-team-assistant 完成 ——")

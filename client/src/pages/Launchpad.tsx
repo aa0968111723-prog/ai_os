@@ -5,7 +5,7 @@ import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
-import { Button, Card, Chip, EmptyState, Hint, Skeleton } from "../components/ui";
+import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
@@ -193,6 +193,16 @@ export function Launchpad({ groupId }: { groupId: string }) {
     day: "numeric",
     weekday: "long",
   }).format(new Date());
+  // 「待我裁決」用的組級待辦：把 pendingSummary 的 per-project 計數配上專案標題。
+  // 兩份資料都是這一頁本來就查過的（專案卡角標與頂欄計數共用），不多發任何查詢。
+  const pendingDecisions = useMemo<PendingDecisionSource[]>(() => {
+    const titleOf = new Map((projects.data ?? []).map((p) => [p.id, p.title] as const));
+    return (pendingSummary.data?.projects ?? []).map((p) => ({
+      ...p,
+      // 查不到標題不能整列丟掉（會靜靜吃掉一件待辦）；用專案 id 前綴當可辨識的替代
+      projectTitle: titleOf.get(p.projectId) ?? `專案 ${p.projectId.slice(0, 8)}`,
+    }));
+  }, [pendingSummary.data, projects.data]);
   const focusProject = recentProjects[0] ?? null;
   const focusState = pendingTotal > 0
     ? {
@@ -423,7 +433,15 @@ export function Launchpad({ groupId }: { groupId: string }) {
           <div><p className="eyebrow">協作代理</p><h2 id="ai-work-title">AI 工作與團隊分析</h2></div>
           <p>看清查證步驟、執行狀態與需要人員決定的節點。</p>
         </div>
-        {groupId && <TeamAssistantCard key={groupId} groupId={groupId} />}
+        {groupId && (
+          <TeamAssistantCard
+            key={groupId}
+            groupId={groupId}
+            pendingDecisions={pendingDecisions}
+            pendingLoading={pendingSummary.isLoading}
+            pendingFailed={!!pendingSummary.error}
+          />
+        )}
       </section>
 
       <section id="projects" className="dashboard-section" aria-labelledby="projects-title">
@@ -622,10 +640,98 @@ const RUN_STATUS: Record<string, { label: string; color?: string }> = {
 };
 
 const HEALTH_LABEL: Record<string, { label: string; hint: string }> = {
+  // idle 與 healthy 必須分開講：舊版把「從沒發起過計畫」也講成「狀態穩定・沒有阻塞」，
+  // 於是新組看到的是五個 0 加一句安慰話——把「沒東西可分析」講成「分析結果良好」。
+  idle: { label: "尚未啟用", hint: "這個組還沒有 AI 執行計畫——可到專案頁用「執行計畫」發起，或在下方問組彙總 AI" },
   healthy: { label: "狀態穩定", hint: "目前沒有需要立刻處理的代理阻塞" },
   attention: { label: "需要關注", hint: "有進行中的計畫、待核或近期失敗——先掃一眼下方清單" },
   blocked: { label: "有阻塞", hint: "近期失敗且仍有等待／待核——優先到對應專案處理" },
 };
+
+/** 一件「等人裁決」的事：三種來源合流成同一份收件匣 */
+type DecisionKind = "agent" | "scene" | "generation";
+type PendingDecisionSource = {
+  projectId: string;
+  projectTitle: string;
+  pendingApprovals: number;
+  awaitingGenerations: number;
+  oldestPendingApprovalAt?: Date | string | null;
+  oldestAwaitingGenerationAt?: Date | string | null;
+};
+type DecisionItem = {
+  key: string;
+  kind: DecisionKind;
+  projectId: string;
+  projectTitle: string;
+  /** 這件事是什麼（代理＝目標原文，其餘＝件數描述） */
+  what: string;
+  /** 最久的那一件是什麼時候進待辦的（用來排「卡最久的排前面」）；查不到就排最後 */
+  since: Date | null;
+  /** 只有代理計畫有：可在這張卡就地核准／放棄（走既有 agents.approve／discard，不另開扣點路徑） */
+  runId?: string;
+  estPoints?: number;
+};
+
+const DECISION_META: Record<DecisionKind, { label: string; hint: string }> = {
+  agent: { label: "計畫待核", hint: "核准後才開始執行、才開始花點" },
+  scene: { label: "分鏡送審", hint: "要看過內容才能裁決，到專案頁決定" },
+  generation: { label: "生成待核", hint: "達組內成本門檻的生成，核准才會送出" },
+};
+
+/** 收件匣一次最多列幾件：再多就是清單而不是「先做這幾件」 */
+const DECISION_INBOX_MAX = 6;
+
+/** 卡了幾天（未滿一天回 0；沒有時間戳回 null，呼叫端不顯示） */
+function daysStuck(since: Date | null, nowMs: number): number | null {
+  if (!since) return null;
+  return Math.max(0, Math.floor((nowMs - since.getTime()) / 86_400_000));
+}
+
+/**
+ * 三種待裁決來源 → 一份排序好的收件匣（純函式，便於測）。
+ *
+ * 排序＝卡最久的排前面（沒有時間戳的排最後），因為這張卡的問題從來不是「有沒有資料」，
+ * 而是「我現在該先處理哪一件」。同時間才用類別穩定排序，避免每次輪詢跳動。
+ */
+export function buildDecisionInbox(
+  runs: Array<{ id: string; projectId: string; projectTitle: string; goal: string; status: string; estPoints: number; updatedAt: Date | string }>,
+  pending: PendingDecisionSource[],
+): DecisionItem[] {
+  const toDate = (v: Date | string | null | undefined): Date | null => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const items: DecisionItem[] = [];
+  for (const r of runs) {
+    if (r.status !== "awaiting_approval") continue;
+    items.push({
+      key: `agent-${r.id}`, kind: "agent", projectId: r.projectId, projectTitle: r.projectTitle,
+      what: r.goal, since: toDate(r.updatedAt), runId: r.id, estPoints: r.estPoints,
+    });
+  }
+  for (const p of pending) {
+    if (p.pendingApprovals > 0) {
+      items.push({
+        key: `scene-${p.projectId}`, kind: "scene", projectId: p.projectId, projectTitle: p.projectTitle,
+        what: `${p.pendingApprovals} 個分鏡等你裁決`, since: toDate(p.oldestPendingApprovalAt),
+      });
+    }
+    if (p.awaitingGenerations > 0) {
+      items.push({
+        key: `generation-${p.projectId}`, kind: "generation", projectId: p.projectId, projectTitle: p.projectTitle,
+        what: `${p.awaitingGenerations} 筆生成等你核准`, since: toDate(p.oldestAwaitingGenerationAt),
+      });
+    }
+  }
+  const ORDER: DecisionKind[] = ["agent", "scene", "generation"];
+  return items.sort((a, b) => {
+    const ta = a.since?.getTime() ?? Number.POSITIVE_INFINITY;
+    const tb = b.since?.getTime() ?? Number.POSITIVE_INFINITY;
+    if (ta !== tb) return ta - tb;
+    return ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind);
+  });
+}
 
 type RunFilter = "all" | "active" | "awaiting_approval" | "waiting" | "running" | "failed" | "done";
 
@@ -649,12 +755,27 @@ function matchesRunFilter(status: string, filter: RunFilter): boolean {
  * 組彙總 AI 卡：① 團隊分析（全組代理健康／篩選清單）② 可追問的組彙總對話 ③ 派工。
  * 對話只存前端狀態（重整即清空）；唯讀彙總本身不改資料。
  */
-function TeamAssistantCard({ groupId }: { groupId: string }) {
+function TeamAssistantCard({
+  groupId,
+  pendingDecisions,
+  pendingLoading,
+  pendingFailed,
+}: {
+  groupId: string;
+  /** 組內「分鏡送審／生成待核」的 per-project 計數（由 Launchpad 已查到的 pendingSummary 傳入） */
+  pendingDecisions: PendingDecisionSource[];
+  pendingLoading: boolean;
+  pendingFailed: boolean;
+}) {
   const utils = trpc.useUtils();
   const [question, setQuestion] = useState("");
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const ask = trpc.teamAssistant.ask.useMutation();
   const dispatch = trpc.teamAssistant.dispatch.useMutation();
+  // 就地裁決代理計畫：沿用專案頁同一組 mutation（守門／額度／併發鎖全在 approveAgentCore 裡，
+  // 這裡只是換一個入口，沒有第二條扣點路徑）
+  const approveRun = trpc.agents.approve.useMutation();
+  const discardRun = trpc.agents.discard.useMutation();
   const overview = trpc.teamAssistant.agentOverview.useQuery(
     { groupId },
     {
@@ -695,6 +816,8 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
   const canDispatchHint = ask.data?.canDispatch ?? false;
   const summary = overview.data?.summary;
   const runs = overview.data?.runs ?? [];
+  const totalRuns = overview.data?.totalRuns ?? runs.length;
+  const listLimit = overview.data?.listLimit ?? runs.length;
   const activeRuns = summary?.active ?? 0;
   const filteredRuns = useMemo(
     () => runs.filter((r) => matchesRunFilter(r.status, runFilter)),
@@ -702,6 +825,17 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
   );
   // 預設「進行中」若為空且列表有其他狀態，自動提示可切全部
   const healthMeta = HEALTH_LABEL[summary?.health ?? "healthy"] ?? HEALTH_LABEL.healthy;
+  const inbox = useMemo(() => buildDecisionInbox(runs, pendingDecisions), [runs, pendingDecisions]);
+  // 每次 render 取一次「現在」：同一畫面上的「卡了 N 天」不該用到兩個不同的基準時間
+  const nowMs = Date.now();
+  const [decidingKey, setDecidingKey] = useState<string | null>(null);
+  const decideError = approveRun.error ?? discardRun.error;
+  /** 就地裁決後：代理清單、跨專案待辦、專案卡角標都要跟上（三處看的是同一件事） */
+  const afterDecide = () => {
+    overview.refetch();
+    utils.approvals.pendingSummary.invalidate();
+    utils.projects.invalidate();
+  };
 
   return (
     <Card as="section" className="team-ai-card" data-fb="組彙總AI卡">
@@ -729,25 +863,108 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
             <Button variant="ghost" size="sm" onClick={() => overview.refetch()}>再試一次</Button>
           </p>
         )}
-        {summary && !overview.isLoading && (
-          <div className="team-analysis__stats" role="group" aria-label="代理狀態計數">
-            <button type="button" className={`team-stat${runFilter === "running" ? " is-on" : ""}`} onClick={() => { setRunFilter("running"); setRunsCollapsed(false); }}>
-              <strong>{summary.running}</strong><small>執行中</small>
-            </button>
-            <button type="button" className={`team-stat${runFilter === "waiting" ? " is-on" : ""}`} onClick={() => { setRunFilter("waiting"); setRunsCollapsed(false); }}>
-              <strong>{summary.waiting}</strong><small>等待人員</small>
-            </button>
-            <button type="button" className={`team-stat${runFilter === "awaiting_approval" ? " is-on" : ""}`} onClick={() => { setRunFilter("awaiting_approval"); setRunsCollapsed(false); }}>
-              <strong>{summary.awaitingApproval}</strong><small>待核准</small>
-            </button>
-            <button type="button" className={`team-stat${runFilter === "failed" ? " is-on" : ""}`} onClick={() => { setRunFilter("failed"); setRunsCollapsed(false); }}>
-              <strong>{summary.failedRecent}</strong><small>近七日失敗</small>
-            </button>
-            <button type="button" className={`team-stat${runFilter === "done" ? " is-on" : ""}`} onClick={() => { setRunFilter("done"); setRunsCollapsed(false); }}>
-              <strong>{summary.doneRecent}</strong><small>近七日完成</small>
-            </button>
+
+        {/* ── 待我裁決：這張卡的第一屏。
+            原本第一屏是五個計數＋一句「目前不需要立即處理」，但同一頁其實已經查到
+            分鏡送審／生成待核的筆數——組內有東西卡著，這張叫「團隊分析」的卡照樣顯示全 0。
+            現在三種「等人決定」的來源合流成一份收件匣，卡最久的排前面；計數降到第二屏。 ── */}
+        {!overview.isLoading && (
+          <div className="team-inbox" aria-label="待我裁決">
+            <div className="team-inbox__head">
+              <strong>待我裁決</strong>
+              <Meta>
+                {pendingLoading && inbox.length === 0 ? "統計中…" : `${inbox.length} 件`}
+                {pendingFailed ? "・跨專案待辦載入失敗，可能少列" : ""}
+              </Meta>
+            </div>
+            {inbox.length === 0 ? (
+              <Hint layer="always" style={{ margin: 0 }}>
+                {pendingFailed
+                  ? "跨專案待辦載入失敗，暫時無法確認有沒有待裁決事項。"
+                  : "沒有等你決定的事項——代理計畫、分鏡送審、生成核准都清空了。"}
+              </Hint>
+            ) : (
+              <div className="team-inbox__list">
+                {inbox.slice(0, DECISION_INBOX_MAX).map((d) => {
+                  const meta = DECISION_META[d.kind];
+                  const stuck = daysStuck(d.since, nowMs);
+                  const busy = decidingKey === d.key;
+                  return (
+                    <div key={d.key} className={`team-inbox__row is-${d.kind}`}>
+                      <Chip style={{ margin: 0 }} title={meta.hint}>{meta.label}</Chip>
+                      <span className="team-inbox__copy">
+                        <Link href={`/p/${d.projectId}`} title="開啟這個專案">{d.projectTitle}</Link>
+                        <span title={d.what}>{d.what}</span>
+                      </span>
+                      <Meta className="team-inbox__age">
+                        {stuck === null ? "—" : stuck === 0 ? "今天" : `卡了 ${stuck} 天`}
+                        {d.kind === "agent" && d.estPoints != null ? `・估 ${d.estPoints} 點` : ""}
+                      </Meta>
+                      <span className="team-inbox__act">
+                        {d.kind === "agent" && d.runId ? (
+                          <>
+                            {/* 就地核准／放棄：走專案頁同一支 mutation。核准這一刻起才開始花點，
+                                所以一定要二次確認並把估點寫在確認訊息裡。 */}
+                            <ConfirmButton
+                              triggerClassName="btn-tonal btn-sm"
+                              disabled={busy}
+                              title="核准後代理才開始執行、才開始花點"
+                              message={`核准「${d.projectTitle}」的執行計畫？\n${d.what}\n核准後背景執行器會接手，估 ${d.estPoints ?? 0} 點。`}
+                              confirmLabel="核准並開始"
+                              onConfirm={async () => {
+                                setDecidingKey(d.key);
+                                try {
+                                  await approveRun.mutateAsync({ runId: d.runId! });
+                                  afterDecide();
+                                } catch {
+                                  /* approveRun.error 已顯示 */
+                                } finally {
+                                  setDecidingKey((k) => (k === d.key ? null : k));
+                                }
+                              }}
+                            >
+                              核准
+                            </ConfirmButton>
+                            <ConfirmButton
+                              triggerClassName="btn-ghost btn-sm"
+                              disabled={busy}
+                              title="放棄這份還沒核准的計畫（不花點）"
+                              message={`放棄「${d.projectTitle}」的執行計畫？\n${d.what}\n計畫會被丟棄，不會花點；要再做得重新規劃。`}
+                              confirmLabel="放棄計畫"
+                              onConfirm={async () => {
+                                setDecidingKey(d.key);
+                                try {
+                                  await discardRun.mutateAsync({ runId: d.runId! });
+                                  afterDecide();
+                                } catch {
+                                  /* discardRun.error 已顯示 */
+                                } finally {
+                                  setDecidingKey((k) => (k === d.key ? null : k));
+                                }
+                              }}
+                            >
+                              放棄
+                            </ConfirmButton>
+                          </>
+                        ) : (
+                          /* 分鏡／生成刻意不就地裁決：不看內容就按核准等於盲簽 */
+                          <Link href={`/p/${d.projectId}`} title={meta.hint}>前往處理 →</Link>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+                {inbox.length > DECISION_INBOX_MAX && (
+                  <Meta as="p" style={{ margin: 0 }}>
+                    還有 {inbox.length - DECISION_INBOX_MAX} 件——先處理上面卡最久的幾件。
+                  </Meta>
+                )}
+              </div>
+            )}
+            {decideError && <p className="error" role="alert" style={{ margin: 0 }}>{decideError.message}</p>}
           </div>
         )}
+
         {/* 健康度徽章旁的解釋：徽章本身已有文字標籤，這句是補充 → 引導層 */}
         <Hint style={{ margin: "8px 0 0" }}>{healthMeta.hint}</Hint>
       </div>
@@ -764,13 +981,38 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
         >
           <Icon name="Sparkles" size={13} />
           <span>組執行計畫動態</span>
-          {/* 在 <button> 內，必須用 span（<p> 會是無效 HTML）；筆數是狀態不是說明 */}
-          <Hint as="span" layer="always">
-            （{runs.length} 筆{activeRuns > 0 ? `・${activeRuns} 進行中` : ""}）
-          </Hint>
+          {/* 在 <button> 內，必須用 span（<p> 會是無效 HTML）；筆數是狀態不是說明。
+              載入中／失敗要講出來——空手顯示「（0 筆）」會被讀成「這組沒有計畫」。 */}
+          <Meta>
+            （{overview.isLoading
+              ? "載入中…"
+              : overview.error
+                ? "載入失敗"
+                : `${totalRuns} 筆${activeRuns > 0 ? `・${activeRuns} 進行中` : ""}`}）
+          </Meta>
           <Icon name={runsCollapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ marginLeft: "auto" }} />
         </button>
         <div id="team-agent-runs" hidden={runsCollapsed}>
+          {/* 計數降到第二屏：它們回答「整體狀況如何」，而第一屏要回答的是「我現在該做什麼」 */}
+          {summary && !overview.isLoading && (
+            <div className="team-analysis__stats" role="group" aria-label="代理狀態計數">
+              <button type="button" className={`team-stat${runFilter === "running" ? " is-on" : ""}`} onClick={() => setRunFilter("running")}>
+                <strong>{summary.running}</strong><small>執行中</small>
+              </button>
+              <button type="button" className={`team-stat${runFilter === "waiting" ? " is-on" : ""}`} onClick={() => setRunFilter("waiting")}>
+                <strong>{summary.waiting}</strong><small>等待人員</small>
+              </button>
+              <button type="button" className={`team-stat${runFilter === "awaiting_approval" ? " is-on" : ""}`} onClick={() => setRunFilter("awaiting_approval")}>
+                <strong>{summary.awaitingApproval}</strong><small>待核准</small>
+              </button>
+              <button type="button" className={`team-stat${runFilter === "failed" ? " is-on" : ""}`} onClick={() => setRunFilter("failed")}>
+                <strong>{summary.failedRecent}</strong><small>近七日失敗</small>
+              </button>
+              <button type="button" className={`team-stat${runFilter === "done" ? " is-on" : ""}`} onClick={() => setRunFilter("done")}>
+                <strong>{summary.doneRecent}</strong><small>近七日完成</small>
+              </button>
+            </div>
+          )}
           {runs.length > 0 && (
             <div className="team-run-filters" role="toolbar" aria-label="依狀態篩選代理">
               {RUN_FILTERS.map((f) => (
@@ -789,7 +1031,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
           {runs.length === 0 && !overview.isLoading && !overview.error && (
             /* 空清單時這句是唯一的下一步指引，收起來就變成一片空白 */
             <Hint layer="always" style={{ marginTop: 8 }}>
-              這個組還沒有 AI 執行計畫。可在下方問組彙總 AI，或到專案頁用「執行計畫」發起。
+              還沒有計畫可顯示。到專案頁用「執行計畫」發起後，這裡會列出全組進度。
             </Hint>
           )}
           {runs.length > 0 && filteredRuns.length === 0 && (
@@ -833,6 +1075,16 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
                 );
               })}
             </div>
+          )}
+          {/* 清單有上限而計數沒有：不講清楚，使用者會把「30 筆」當成全組總量 */}
+          {totalRuns > listLimit && (
+            <Meta as="p" style={{ margin: "8px 0 0" }}>
+              清單只顯示最近 {listLimit} 筆（全組共 {totalRuns} 筆）；上方計數統計的是全部。
+              {summary && summary.stoppedRecent > 0 ? `近七日另有 ${summary.stoppedRecent} 筆被停止。` : ""}
+            </Meta>
+          )}
+          {totalRuns <= listLimit && summary && summary.stoppedRecent > 0 && (
+            <Meta as="p" style={{ margin: "8px 0 0" }}>近七日另有 {summary.stoppedRecent} 筆被停止。</Meta>
           )}
         </div>
       </div>
