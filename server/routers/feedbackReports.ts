@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, or, eq, inArray, desc, type SQL } from "drizzle-orm";
+import { and, or, eq, inArray, desc, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, adminProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
@@ -13,6 +13,28 @@ import { isEmailConfigured } from "../services/email";
 
 /** 合法狀態（與 schema feedback_reports.status 一致）——過濾與更新共用 */
 const STATUS_VALUES = ["open", "reviewing", "done"] as const;
+
+/**
+ * `mine` 的欄位投影（獨立成常數才驗得到「回了什麼、沒回什麼」）。
+ *
+ * screenshotPath 刻意不在其中：伺服器儲存路徑對前端毫無用處,外流只是白白多給一條
+ * 內部結構線索。改回 hasScreenshot 布林,圖本身一律走 `GET /api/feedback/:id/shot`
+ * ——該端點的權限判斷已經允許作者本人讀取,權限只留在那一處,這裡不複製第二份。
+ */
+export const MINE_FIELDS = {
+  id: schema.feedbackReports.id,
+  category: schema.feedbackReports.category,
+  pages: schema.feedbackReports.pages,
+  targetLabel: schema.feedbackReports.targetLabel,
+  note: schema.feedbackReports.note,
+  hasScreenshot: sql<boolean>`${schema.feedbackReports.screenshotPath} is not null`,
+  status: schema.feedbackReports.status,
+  agentReviewedAt: schema.feedbackReports.agentReviewedAt,
+  agentSeverity: schema.feedbackReports.agentSeverity,
+  agentReply: schema.feedbackReports.agentReply,
+  emailStatus: schema.feedbackReports.emailStatus,
+  createdAt: schema.feedbackReports.createdAt,
+} as const;
 
 /**
  * 元件級回饋後端（R23）：使用者點頁面元件 → 分類＋文字（＋可選截圖）即時回報。
@@ -113,19 +135,7 @@ export const feedbackReportsRouter = router({
    */
   mine: authedProcedure.query(async ({ ctx }) => {
     return db
-      .select({
-        id: schema.feedbackReports.id,
-        category: schema.feedbackReports.category,
-        pages: schema.feedbackReports.pages,
-        targetLabel: schema.feedbackReports.targetLabel,
-        note: schema.feedbackReports.note,
-        status: schema.feedbackReports.status,
-        agentReviewedAt: schema.feedbackReports.agentReviewedAt,
-        agentSeverity: schema.feedbackReports.agentSeverity,
-        agentReply: schema.feedbackReports.agentReply,
-        emailStatus: schema.feedbackReports.emailStatus,
-        createdAt: schema.feedbackReports.createdAt,
-      })
+      .select(MINE_FIELDS)
       .from(schema.feedbackReports)
       .where(eq(schema.feedbackReports.userId, ctx.auth.user.id))
       .orderBy(desc(schema.feedbackReports.createdAt))

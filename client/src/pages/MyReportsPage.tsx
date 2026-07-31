@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
@@ -71,6 +72,8 @@ type MineReport = {
   agentReply: string | null;
   emailStatus: string | null;
   createdAt: string | Date;
+  /** 有沒有附截圖；後端只回布林，圖本身走 /api/feedback/:id/shot（不外流儲存路徑） */
+  hasScreenshot?: boolean;
 };
 
 function ReportCard({ report }: { report: MineReport }) {
@@ -92,6 +95,8 @@ function ReportCard({ report }: { report: MineReport }) {
       )}
 
       <p style={{ margin: "8px 0 0", whiteSpace: "pre-wrap", fontSize: 13 }}>{report.note}</p>
+
+      {report.hasScreenshot && <ReportShot id={report.id} />}
 
       {report.agentReviewedAt ? (
         <div
@@ -121,5 +126,51 @@ function ReportCard({ report }: { report: MineReport }) {
         </Hint>
       )}
     </Card>
+  );
+}
+
+/**
+ * 回報當下附上的截圖（含標記框）：縮圖點開看原圖。
+ *
+ * 圖一律走 /api/feedback/:id/shot——該端點的權限判斷本來就允許作者本人讀取,
+ * 所以這裡不必（也不該）把儲存路徑帶到前端,只憑 hasScreenshot 決定畫不畫。
+ *
+ * 讀不到圖時換成一句說明,而不是留一個破圖 icon：破圖會讓回報者以為「我根本沒附成功」,
+ * 於是重送一次同樣的回饋——而檔案隨部署重建消失是這個站真實會發生的事。
+ */
+function ReportShot({ id }: { id: string }) {
+  const [failed, setFailed] = useState(false);
+  const src = `/api/feedback/${id}/shot`;
+
+  if (failed) {
+    return (
+      <Hint style={{ marginTop: 8, fontSize: 12 }}>
+        當時附的截圖已經讀不到了（檔案可能已清除）——你寫的內容仍完整保留。
+      </Hint>
+    );
+  }
+
+  return (
+    <a
+      href={src}
+      target="_blank"
+      rel="noreferrer"
+      title="點開看原圖"
+      style={{ display: "inline-block", marginTop: 8, lineHeight: 0 }}
+    >
+      <img
+        src={src}
+        alt="我附上的回報截圖"
+        loading="lazy"
+        onError={() => setFailed(true)}
+        style={{
+          maxWidth: "100%",
+          maxHeight: 200,
+          objectFit: "contain",
+          borderRadius: 8,
+          border: "1px solid var(--border)",
+        }}
+      />
+    </a>
   );
 }
