@@ -155,10 +155,18 @@ EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_
     "list_generations","get_generation","list_assets","list_databases","query_database","add_database_row","add_database_rows","update_database_row",
     "list_database_files","read_database_file","get_database_stats","plan_agent","approve_agent","stop_agent","discard_agent",
     "list_agent_runs","get_agent_run","list_agent_events","get_agent_insights",
-    "list_schedule","add_schedule_item","get_project_status",
-    "list_notes","get_note","list_dm_contacts","list_dm_threads","read_dm","send_dm",
+    "list_schedule","add_schedule_item","update_schedule_item","get_project_status",
+    "list_notes","get_note","add_note","append_note",
+    "list_tasks","create_task","complete_task",
+    "list_knowledge","get_knowledge","list_scenes",
+    "get_integrations_status","import_drive_file",
+    "list_dm_contacts","list_dm_threads","read_dm","send_dm",
     "request_upload_grant","get_upload_grant_status"}
-ok(f"tools/list = {len(EXPECTED)} 且名單完整", names == EXPECTED, f"{len(names)} 個")
+_missing, _extra = sorted(EXPECTED - names), sorted(names - EXPECTED)
+ok(f"tools/list = {len(EXPECTED)} 且名單完整", names == EXPECTED,
+   f"{len(names)} 個"
+   + (f"；缺 {_missing}" if _missing else "")
+   + (f"；多出 {_extra}（新增工具請同步更新此 EXPECTED 與 shared/mcpCatalog）" if _extra else ""))
 
 # ══════════ 核心工具逐一實跑（可寫金鑰）══════════
 print("\n######## 核心工具逐一實跑 ########")
