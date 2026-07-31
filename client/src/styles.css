@@ -2899,14 +2899,15 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   background: var(--card); color: var(--primary-ink);
 }
 .creation-skill-chip__x { opacity: 0.55; font-size: 14px; line-height: 1; }
+/* 定位／疊層／桌機幾何都交給 MenuSurface（.menu ＋ .menu-surface--stretch）——
+   這裡只留這張面板自己的外觀。手機會被 .menu-surface.is-sheet 接手成貼底 sheet。 */
 .creation-skill-menu {
-  position: absolute; z-index: 40; left: 0; right: 0;
-  margin-top: 8px; padding: 12px 12px 14px;
+  padding: 12px 12px 14px;
   border: 1px solid var(--border-soft);
   border-radius: var(--r-12);
   background: var(--card);
   box-shadow: 0 12px 40px color-mix(in srgb, var(--fg) 12%, transparent);
-  max-height: min(70vh, 480px); overflow: auto;
+  max-height: min(70dvh, 480px); overflow: auto;
 }
 .creation-skill-menu__head {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px;
@@ -3927,6 +3928,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 
 /* 選單載體（MenuSurface）：桌機是下拉，不需要 scrim；身分標頭全尺寸共用 */
 .menu-surface__scrim { display: none; }
+/* placement="stretch"：與觸發器同寬。覆寫 .menu 的右對齊與 184px 下限——
+   卡片牆／表單類面板塞不進窄下拉。手機的 .is-sheet 會再蓋掉這組值。 */
+.menu-surface--stretch { left: 0; right: 0; min-width: 0; }
 .account-menu__id {
   display: flex; align-items: center; gap: 9px;
   padding: 10px 12px 8px;
