@@ -259,16 +259,13 @@ function AddOptionChip({
   };
   if (!open) {
     return (
-      <span
-        role="button"
-        tabIndex={0}
-        className="chip pick"
+      // 這顆是「打開輸入框」的動作、不是切換態，所以蓋掉 Chip 預設補的 aria-pressed
+      <Chip
         title="新增一個選項（全組共用；加完自動幫本專案勾上）"
         onClick={() => setOpen(true)}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(true); } }}
       >
         <Icon name="Plus" size={12} style={{ verticalAlign: "-2px" }} /> 新增
-      </span>
+      </Chip>
     );
   }
   return (
@@ -579,27 +576,18 @@ export function ProjectPage({ id }: { id: string }) {
       {opts.map((t) => {
         const on = wv[field].includes(t);
         return (
-          <span
-            key={t}
-            role="button"
-            tabIndex={0}
-            aria-pressed={on}
-            className={`chip pick ${on ? "on" : ""}`}
-            onClick={() => toggle(field, t)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(field, t); } }}
-          >
+          <Chip key={t} selected={on} onClick={() => toggle(field, t)}>
             {t}
-          </span>
+          </Chip>
         );
       })}
       {orphansOf(field, opts).map((t) => (
-        <span key={t} role="button" tabIndex={0} aria-pressed
-          className="chip pick on" style={{ borderStyle: "dashed", opacity: 0.75 }}
+        <Chip key={t} selected
+          style={{ borderStyle: "dashed", opacity: 0.75 }}
           title="這個選項已被移出清單，點一下可從本專案移除"
-          onClick={() => toggle(field, t)}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(field, t); } }}>
+          onClick={() => toggle(field, t)}>
           {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
-        </span>
+        </Chip>
       ))}
       {/* 選項就地新增：組長直接在工作台加，不必繞去「選項」選單頁（加完自動勾上） */}
       {isLeader && canEdit && (
@@ -628,15 +616,10 @@ export function ProjectPage({ id }: { id: string }) {
 
   /** 上下文摘要條的一顆 chip：顯示計數、點了捲到對應卡（手機一併展開） */
   const summaryChip = (label: string, target: string, on = false) => (
-    <span
-      role="button"
-      tabIndex={0}
-      className={`chip pick ${on ? "on" : ""}`}
-      onClick={() => jumpToContext(target)}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jumpToContext(target); } }}
-    >
+    // on 表示「那一區已有內容」而非按下狀態，故蓋掉 Chip 預設補的 aria-pressed
+    <Chip selected={on} aria-pressed={undefined} onClick={() => jumpToContext(target)}>
       {label}
-    </span>
+    </Chip>
   );
 
   const unreadCount = unread.data?.count ?? 0;

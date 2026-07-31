@@ -8,11 +8,11 @@ import { ConfirmButton, HelpTip } from "./interactions";
 import { AssetImg, AssetVideo, AssetAudio } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 
-import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton } from "./ui";
+import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus } from "./ui";
 /** 素材類型的中文標籤（與素材庫/生成紀錄同口徑）——分鏡 meta 列不再直接冒英文 enum */
 const SCENE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
 
-const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
+const SCENE_STATUS: Record<string, { label: string; cls: PillStatus }> = {
   todo: { label: "草稿", cls: "queued" },
   review: { label: "草稿", cls: "queued" },
   pending: { label: "待審", cls: "running" },
@@ -304,9 +304,9 @@ function SceneRow({
             秒
           </label>
           <span>・{s.assetKind ? (SCENE_KIND_LABEL[s.assetKind] ?? s.assetKind) : "無素材"}</span>
-          <span className={`pill ${SCENE_STATUS[s.status]?.cls ?? "queued"}`}>
+          <Pill status={SCENE_STATUS[s.status]?.cls ?? "queued"}>
             {SCENE_STATUS[s.status]?.label ?? s.status}
-          </span>
+          </Pill>
           {isGenerating && <Pill status="running">生成中…</Pill>}
           {update.isPending ? (
             <Meta>儲存中…</Meta>
@@ -710,7 +710,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
         <div aria-hidden="true">
           {[0, 1].map((k) => (
             <div key={k} className="gen-row">
-              <div className="gen-thumb skeleton" />
+              <Skeleton className="gen-thumb" />
               <div>
                 <Skeleton style={{ height: 14, width: k === 0 ? "70%" : "58%", marginBottom: 8 }} />
                 <Skeleton style={{ height: 11, width: "42%" }} />

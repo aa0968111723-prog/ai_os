@@ -8,7 +8,7 @@ import { AssetVideo, AssetAudio, MissingMediaBox } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 import { revealWorkbenchAnchor } from "../features/creation-workbench/workbenchNav";
 
-import { Button, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
+import { Button, Chip, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus } from "./ui";
 /** 生成結果縮圖（圖片）：載入失敗顯示「結果已失效」佔位，並拿掉開新分頁連結（點下去只會是 404） */
 function GenResultImgLink({ url, alt }: { url: string; alt: string }) {
   const [failed, setFailed] = useState(false);
@@ -79,8 +79,8 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "已駁回",
 };
 
-/** 成本審核的兩個新狀態沒有專屬 .pill 配色——借語意最近的既有 class（待核准＝queued 金、已駁回＝failed 紅） */
-const STATUS_PILL_CLASS: Record<string, string> = { awaiting_approval: "queued", rejected: "failed" };
+/** 成本審核的兩個新狀態沒有專屬 pill 配色——借語意最近的既有狀態（待核准＝queued 金、已駁回＝failed 紅） */
+const STATUS_PILL_CLASS: Record<string, PillStatus> = { awaiting_approval: "queued", rejected: "failed" };
 
 /** 「再用此設定」帶回生成台的完整設定（與 ProjectPage.applyPrompt 的 settings 同形狀） */
 export interface ReuseSettings {
@@ -303,7 +303,7 @@ export function GenerationList({
       <div style={{ marginTop: 14 }} aria-hidden="true">
         {[0, 1, 2].map((k) => (
           <div key={k} className="gen-row">
-            <div className="gen-thumb skeleton" />
+            <Skeleton className="gen-thumb" />
             <div>
               <Skeleton style={{ height: 14, width: k === 1 ? "55%" : "72%", marginBottom: 8 }} />
               <Skeleton style={{ height: 11, width: "40%" }} />
@@ -608,7 +608,7 @@ export function GenerationList({
             {g.error && <div className="error">{g.status === "rejected" ? "駁回理由：" : "生成失敗："}{g.error}</div>}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-            <span className={`pill ${STATUS_PILL_CLASS[g.status] ?? g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
+            <Pill status={STATUS_PILL_CLASS[g.status] ?? (g.status as PillStatus)}>{STATUS_LABEL[g.status] ?? g.status}</Pill>
             {/* MOB-03：進行中列提示可離開（背景 runner 推進） */}
             {(g.status === "queued" || g.status === "running") && (
               <Meta style={{ fontSize: 11, textAlign: "right", maxWidth: 140 }}>

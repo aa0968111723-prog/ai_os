@@ -15,7 +15,7 @@ import {
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
 import { listAiProjectRoles } from "../../../shared/aiProjectRoles";
-import { Button, Card, Chip, Hint, Meta, Pill } from "./ui";
+import { Button, Card, Chip, Hint, Meta, Pill, type PillStatus } from "./ui";
 
 /**
  * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
@@ -78,7 +78,7 @@ const KIND_ICON: Record<AgentStep["kind"], IconName> = {
   request_approval: "Check",
 };
 /** 創作者語：少代碼狀態名，多「場記／過目／開拍」感 */
-const RUN_STATUS: Record<string, { label: string; cls: string }> = {
+const RUN_STATUS: Record<string, { label: string; cls: PillStatus }> = {
   awaiting_approval: { label: "待你過目", cls: "queued" },
   running: { label: "開拍中", cls: "running" },
   waiting: { label: "等你回覆", cls: "queued" },
@@ -378,10 +378,10 @@ export function AgentCard({
               {AGENT_PLANNER_OPTIONS.map((option) => {
                 const selected = option.value === plannerMode;
                 return (
-                  <button
+                  <Button
                     key={option.value}
-                    type="button"
-                    className={`btn-sm${selected ? " primary" : ""}`}
+                    size="sm"
+                    variant={selected ? "primary" : "neutral"}
                     aria-pressed={selected}
                     title={option.description}
                     onClick={() => {
@@ -394,7 +394,7 @@ export function AgentCard({
                     <span style={{ display: "block", fontSize: "var(--fs-11)", opacity: 0.82, marginTop: 2 }}>
                       {option.usageLabel}
                     </span>
-                  </button>
+                  </Button>
                 );
               })}
             </div>
@@ -434,9 +434,9 @@ export function AgentCard({
       {insights.data && (
         <details className="agent-run" style={{ marginTop: 10 }}>
           <summary>
-            <span className={`pill ${insights.data.status === "healthy" ? "done" : insights.data.status === "blocked" ? "failed" : "queued"}`}>
+            <Pill status={insights.data.status === "healthy" ? "done" : insights.data.status === "blocked" ? "failed" : "queued"}>
               {insights.data.status === "healthy" ? "健康" : insights.data.status === "blocked" ? "有阻塞" : "需注意"}
-            </span>
+            </Pill>
             <strong>AI 職能健康</strong>
             <Meta>
               執行中 {insights.data.activeRuns}・待辦 {insights.data.openTasks}・成果 {insights.data.results.length}
@@ -505,7 +505,7 @@ export function AgentCard({
 
       {sortedRuns.map((r) => {
         const steps = r.steps as AgentStep[];
-        const st = RUN_STATUS[r.status] ?? { label: r.status, cls: "queued" };
+        const st: { label: string; cls: PillStatus } = RUN_STATUS[r.status] ?? { label: r.status, cls: "queued" };
         const defaultOpen =
           r.status === "running" ||
           r.status === "waiting" ||
@@ -535,7 +535,7 @@ export function AgentCard({
           >
             <summary>
               <span className="agent-run__goal">目標：{r.goal.slice(0, 60)}{r.goal.length > 60 ? "…" : ""}</span>
-              <span className={`pill ${st.cls}`}>{st.label}</span>
+              <Pill status={st.cls}>{st.label}</Pill>
               <Meta>步驟 {doneSteps}/{steps.length}</Meta>
               <Meta>{new Date(r.createdAt).toLocaleString("zh-TW", { hour12: false })}</Meta>
               <Icon name={runOpen ? "ChevronUp" : "ChevronDown"} size={13} />
@@ -717,9 +717,9 @@ export function AgentCard({
                 <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
                   {runEvents.map((event) => (
                     <div key={event.id} className="gen-row" style={{ gridTemplateColumns: "auto 1fr", alignItems: "start" }}>
-                      <span className={`pill ${event.eventType.includes("failed") || event.eventType === "approval_rejected" ? "failed" : event.eventType.includes("completed") || event.eventType === "human_resumed" ? "done" : "queued"}`}>
+                      <Pill status={event.eventType.includes("failed") || event.eventType === "approval_rejected" ? "failed" : event.eventType.includes("completed") || event.eventType === "human_resumed" ? "done" : "queued"}>
                         {EVENT_LABEL[event.eventType] ?? event.eventType}
-                      </span>
+                      </Pill>
                       <div>
                         <div>{event.summary}</div>
                         <div className="meta">

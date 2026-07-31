@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Button, Card, Chip, EmptyState, Hint, Meta } from "../components/ui";
+import { Button, Card, Chip, EmptyState, Hint, Meta, Pill, Skeleton } from "../components/ui";
 import {
   CATEGORIES,
   MODELS,
@@ -116,7 +116,7 @@ export function ModelsPage() {
   const compareFull = compareIds.length >= COMPARE_MAX;
   // 比較表的列定義(欄=所選模型)
   const compareRows: Array<{ label: string; render: (m: ModelEntry) => ReactNode }> = [
-    { label: "級別", render: (m) => <span className="pill" style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</span> },
+    { label: "級別", render: (m) => <Pill style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</Pill> },
     { label: "點數", render: (m) => <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span> },
     { label: "官方約略價", render: (m) => <span className="mono" style={{ fontSize: 11 }}>{m.cost}</span> },
     { label: "特性", render: (m) => m.strengths },
@@ -273,21 +273,15 @@ export function ModelsPage() {
               {SCENARIO_GROUPS.map((g) => {
                 const on = scenarioGroup === g.id;
                 return (
-                  <span
+                  <Chip
                     key={g.id}
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={on}
+                    selected={on}
                     title={g.hint}
-                    className={`chip pick ${on ? "on" : ""}`}
                     style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
                     onClick={() => setScenarioGroup(g.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setScenarioGroup(g.id); }
-                    }}
                   >
                     <Icon name={GROUP_ICON[g.id]} size={12} />{g.label}
-                  </span>
+                  </Chip>
                 );
               })}
             </div>
@@ -438,42 +432,30 @@ export function ModelsPage() {
             (categories.data ?? []).filter((c) => c.id !== "workflow").map((c) => {
               const on = category === c.id;
               return (
-                <span
+                <Chip
                   key={c.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={on}
+                  selected={on}
                   title={c.hint}
-                  className={`chip pick ${on ? "on" : ""}`}
                   onClick={() => setCategory(c.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setCategory(c.id); }
-                  }}
                   style={{ cursor: "pointer" }}
                 >
                   {c.label}
-                </span>
+                </Chip>
               );
             })}
           <span className="eyebrow cjk">檔次</span>
           {TIERS.map((t) => {
             const on = tier === t.id;
             return (
-              <span
+              <Chip
                 key={t.id}
-                role="button"
-                tabIndex={0}
-                aria-pressed={on}
+                selected={on}
                 title={`只看${t.label}模型;再按一次取消`}
-                className={`chip pick ${on ? "on" : ""}`}
                 onClick={() => setTier(on ? "" : t.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setTier(on ? "" : t.id); }
-                }}
                 style={{ cursor: "pointer" }}
               >
                 {t.label}
-              </span>
+              </Chip>
             );
           })}
         </div>
@@ -481,7 +463,7 @@ export function ModelsPage() {
         <div className="stack">
           {models.isLoading &&
             Array.from({ length: 3 }).map((_, i) => (
-              <div key={`sk-${i}`} className="card skeleton" style={{ height: 96 }} aria-hidden />
+              <Skeleton key={`sk-${i}`} className="card" height={96} />
             ))}
           {models.isError && (
             <p className="error">
@@ -493,7 +475,7 @@ export function ModelsPage() {
             <Card as="section" key={m.id} style={{ padding: "14px 18px" }}>
               <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                 <b>{m.label}</b>
-                <span className="pill" style={TIER_STYLE[m.tier]}>{m.tierLabel}</span>
+                <Pill style={TIER_STYLE[m.tier]}>{m.tierLabel}</Pill>
                 <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span>
                 <Meta className="mono" style={{ fontSize: 11 }}>{m.cost}</Meta>
                 {!m.verified && <Meta style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}><Icon name="TriangleAlert" size={12} />待正式模式首跑確認</Meta>}
@@ -557,7 +539,7 @@ export function ModelsPage() {
           {workflows.isLoading && (
             <div className="stack">
               {Array.from({ length: 2 }).map((_, i) => (
-                <div key={`wf-sk-${i}`} className="card skeleton" style={{ height: 88 }} aria-hidden />
+                <Skeleton key={`wf-sk-${i}`} className="card" height={88} />
               ))}
             </div>
           )}
@@ -572,7 +554,7 @@ export function ModelsPage() {
               <Card as="section" key={w.id} style={{ padding: "14px 18px" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                   <b>{w.label}</b>
-                  <span className="pill" style={TIER_STYLE[w.tier]}>{w.tierLabel}</span>
+                  <Pill style={TIER_STYLE[w.tier]}>{w.tierLabel}</Pill>
                   <span className="mono" style={{ fontSize: 12 }}>約 {w.points} 點</span>
                 </div>
                 <p style={{ margin: "6px 0 2px", fontSize: "var(--fs-14)" }}>{w.strengths}</p>
@@ -588,23 +570,17 @@ export function ModelsPage() {
   );
 }
 
-/** 精靈選項 chip:沿用 .chip.pick 視覺與頁內既有的鍵盤操作模式(Enter/空白切換;再點一次取消) */
+/** 精靈選項 chip:視覺與鍵盤操作(Enter/空白切換)由 <Chip> 提供;再點一次取消由 onToggle 決定 */
 function WizardChip({ on, label, title, onToggle }: { on: boolean; label: string; title?: string; onToggle: () => void }) {
   return (
-    <span
-      role="button"
-      tabIndex={0}
-      aria-pressed={on}
+    <Chip
+      selected={on}
       title={title}
-      className={`chip pick ${on ? "on" : ""}`}
       onClick={onToggle}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); }
-      }}
       style={{ cursor: "pointer" }}
     >
       {label}
-    </span>
+    </Chip>
   );
 }
 
@@ -626,7 +602,7 @@ function ModelInline({
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", lineHeight: 1.6 }}>
       {lead && <span className="eyebrow cjk" style={{ fontWeight: 700, color: "var(--primary-ink)" }}>{lead}</span>}
       <b style={{ fontSize: "var(--fs-14)" }}>{m.label}</b>
-      <span className="pill" style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</span>
+      <Pill style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</Pill>
       <span className="mono" style={{ fontSize: 11 }}>{m.points} 點</span>
       <Button variant="ghost" size="sm"
         title={`複製模型 ID:${m.id}`}
@@ -668,20 +644,15 @@ function ScenarioCard({
         <Meta as="div" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", margin: 0 }}>
           <span>替代:</span>
           {alts.map((m) => (
-            <span
+            // 這顆是「複製 ID」的一次性動作、不是切換態，所以蓋掉 Chip 預設補的 aria-pressed
+            <Chip
               key={m.id}
-              role="button"
-              tabIndex={0}
-              className="chip pick"
               style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 3 }}
               title={`${m.strengths}｜點一下複製 ID`}
               onClick={() => onCopy(m.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onCopy(m.id); }
-              }}
             >
               {copiedId === m.id ? <>已複製<Icon name="Check" size={11} /></> : m.label}
-            </span>
+            </Chip>
           ))}
         </Meta>
       )}

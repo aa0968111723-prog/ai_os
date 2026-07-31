@@ -10,6 +10,7 @@ import { ChangePasswordDialog } from "./session/ChangePasswordDialog";
 import { SessionGate } from "./SessionGate";
 import { AppHeader } from "./components/AppHeader";
 import { MobileNavigation } from "./components/MobileNavigation";
+import { Meta } from "../components/ui";
 
 const SPLASH_SESSION_KEY = "aios.splash.seen";
 
@@ -170,7 +171,7 @@ export function AppShell() {
         {me.data ? (
           <>
             <main id="main-content" className="app-main" tabIndex={-1}>
-              <Suspense fallback={<p className="hint">載入中…</p>}>
+              <Suspense fallback={<Meta as="p">載入中…</Meta>}>
                 <SessionGate
                   me={me.data}
                   meLoading={me.isLoading}
@@ -186,7 +187,7 @@ export function AppShell() {
             <MobileNavigation />
           </>
         ) : (
-          <Suspense fallback={<p className="hint">載入中…</p>}>
+          <Suspense fallback={<Meta as="p">載入中…</Meta>}>
             <SessionGate
               me={me.data}
               meLoading={me.isLoading}

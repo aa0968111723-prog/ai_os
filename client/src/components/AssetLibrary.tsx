@@ -12,7 +12,7 @@ import {
   revealAssetInFolder,
   suggestedFileName,
 } from "../platform/desktopBridge";
-import { Card, EmptyState, Hint, Meta } from "./ui";
+import { Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -312,7 +312,7 @@ export function AssetLibrary({
       {assets.isLoading ? (
         <div className="asset-grid">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="asset-cell skeleton" style={{ height: 132 }} />
+            <Skeleton key={i} className="asset-cell" height={132} />
           ))}
         </div>
       ) : !total ? (
@@ -327,18 +327,19 @@ export function AssetLibrary({
                 const count = f.key === "all" ? total : kindCounts[f.key] ?? 0;
                 const on = kindFilter === f.key;
                 return (
-                  <span
+                  <Chip
                     key={f.key}
+                    selected={on}
+                    onClick={() => setKindFilter(f.key)}
                     role="radio"
                     aria-checked={on}
+                    // 選取態由 role="radio" 的 aria-checked 表達；Chip 預設補的 aria-pressed
+                    // 只在 role="button" 合法，留著會變成兩組互相打架的狀態，故明確關掉。
                     {...kindRoving.itemProps(idx)}
-                    className={`chip pick ${on ? "on" : ""}`}
-                    onClick={() => setKindFilter(f.key)}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setKindFilter(f.key); } }}
                   >
                     {f.icon && <Icon name={f.icon} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />}
                     {f.label} {count}
-                  </span>
+                  </Chip>
                 );
               })}
             </div>
@@ -365,18 +366,16 @@ export function AssetLibrary({
                 </select>
               </label>
               {onPickSource && (
-                <span
+                <Chip
+                  selected={onlySourceable}
+                  onClick={() => setOnlySourceable((v) => !v)}
                   role="switch"
                   aria-checked={onlySourceable}
-                  tabIndex={0}
-                  className={`chip pick ${onlySourceable ? "on" : ""}`}
                   title="只顯示能當生成來源的圖片與影片"
-                  onClick={() => setOnlySourceable((v) => !v)}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOnlySourceable((v) => !v); } }}
                 >
                   {onlySourceable && <Icon name="Check" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />}
                   只看可當來源的
-                </span>
+                </Chip>
               )}
             </div>
             {/* 多選打包（需求 #8）：勾卡片角落的核取框，這裡出現「打包所選」——沒勾任何時不顯示打包鈕 */}
@@ -531,14 +530,23 @@ export function AssetLibrary({
                         </Meta>
                       )}
                       {desktopStatus?.assetId === a.id && desktopBusyId !== a.id && (
-                        <div
-                          className={desktopStatus.kind === "err" ? "error" : "hint"}
-                          style={{ fontSize: 11, ...(desktopStatus.kind === "ok" ? { color: "var(--success-ink)" } : undefined) }}
-                          role={desktopStatus.kind === "err" ? "alert" : "status"}
-                          aria-live="polite"
-                        >
-                          {desktopStatus.text}
-                        </div>
+                        // 交接結果是「內容」（狀態／錯誤原文），不是說明，故走 Meta。
+                        // 錯誤那支維持裸 .error：Meta 一定會加上 .hint，而 styles.css 裡
+                        // .hint 排在 .error 之後且同特異度，疊起來會把紅字蓋成灰字。
+                        desktopStatus.kind === "err" ? (
+                          <div className="error" style={{ fontSize: 11 }} role="alert" aria-live="polite">
+                            {desktopStatus.text}
+                          </div>
+                        ) : (
+                          <Meta
+                            as="div"
+                            style={{ fontSize: 11, ...(desktopStatus.kind === "ok" ? { color: "var(--success-ink)" } : undefined) }}
+                            role="status"
+                            aria-live="polite"
+                          >
+                            {desktopStatus.text}
+                          </Meta>
+                        )
                       )}
 
                       {/* 音訊直接在格子裡試聽 */}

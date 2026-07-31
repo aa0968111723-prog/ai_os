@@ -3,7 +3,7 @@
 | 欄位 | 值 |
 |------|-----|
 | **Document ID** | FIGMA-DS-2026-07 |
-| **Status** | Phase 1 完成（foundations）；Phase 2–4 待續 |
+| **Status** | Phase 1–2 完成（tokens + 檔案結構與 Foundations 文件頁）；Phase 3–4 待續 |
 | **Figma 檔** | [Aios Design System](https://www.figma.com/design/ZUfpFsC0YLOltnUbMYQzKo) |
 | **File key** | `ZUfpFsC0YLOltnUbMYQzKo` |
 | **Plan** | `team::1640375764347468262` |
@@ -49,18 +49,37 @@ Dev Mode 可直接讀出對應的 CSS 變數名，讓這條回路有跡可循。
 
 稽核結果：`ALL_SCOPES` 殘留 0、缺 code syntax 0、語意色未 alias 0。
 
-## 3. 已知落差（待裁決）
+## 3. 落差狀態
 
-| # | 落差 | 現況 | 影響 |
-|---|------|------|------|
-| 1 | **字重 600 在 Figma 不存在** | Figma 的 Noto Sans TC 只有 Black/Bold/DemiLight/Light/Medium/Regular/Thin。`styles.css` 的按鈕與標題用 `font-weight: 600` | Text styles 暫用 Bold(700)。Medium 是 500，兩邊都不精確。P5 選定 webfont 時一併解決 |
-| 2 | **網站沒有 webfont** | `--sans` 是純 system-ui fallback 堆疊，無 `@font-face`、無 Google Fonts | 每台裝置看到的字不同。Figma 端選 Noto Sans/Serif TC 是因為它**已在站內 fallback 堆疊中**，若 P5 把它正式引入 webfont，Figma 與網頁就會真正一致 |
-| 3 | **觸控目標 40 vs 44** | `--touch-min: 40px`，但全站計畫 §4 要求 ≥44px | 已建成變數 `space/touch-min = 40` 保持與 code 一致；差異待產品裁決後兩邊同步 |
-| 4 | **無深色模式** | `styles.css` 寫死 `color-scheme: light` | 刻意建成單一模式，不憑空造一個 code 裡不存在的 Dark mode |
+| # | 落差 | 狀態 |
+|---|------|------|
+| 1 | 字重 600 在 Figma 的 Noto Sans TC 不存在（只有 Medium 500 / Bold 700） | **僅影響設計稿近似**。網頁已改用可變字型，600 精確可渲染，實作端無問題。Figma text styles 用 Bold 近似 |
+| 2 | 網站沒有 webfont | **已解決**：self-host `@fontsource-variable/noto-sans-tc` + `noto-serif-tc`，`--sans`/`--serif` 以它打頭。Figma 與網頁現在真正同一套字 |
+| 3 | 觸控目標 40 vs 計畫要求的 44 | **已解決**：`--touch-min` 提到 44 且規則移出 `@media (max-width: 820px)` 全站生效。Figma 變數 `space/touch-min` 已同步為 44 需重跑（見下方待辦） |
+| 4 | 無深色模式 | **維持現狀**：`styles.css` 寫死 `color-scheme: light`，刻意建成單一模式，不憑空造 code 裡不存在的 Dark mode |
 
-## 4. 尚未進行
+> 待辦：Figma 的 `space/touch-min` 仍是建立當時的 40，需重跑同步為 44。
 
-- **Phase 2** 檔案結構：Cover / Getting Started / Foundations 文件頁
+## 4. Phase 2 產出（檔案結構與 Foundations 文件頁）
+
+頁面骨架：`📕 Cover` / `🚀 Getting Started` / `——— FOUNDATIONS ———` /
+`🎨 Color` / `🔤 Typography` / `📐 Spacing & Radius` / `🌗 Elevation` / `——— COMPONENTS ———`
+
+四張 Foundations 文件頁都**綁到變數／樣式本身，不是複製的值**——改 token 文件會跟著變：
+
+| 頁 | 內容 |
+|----|------|
+| 🎨 Color | 38 個語意色票依用途分九組，填色綁 Color 集合變數，每格標出對應的 `var(--x)` |
+| 🔤 Typography | 10 個 text style 各配一段實際中文範例（「弘法內容創作與協作」），標字級／行高／字重與 styles.css 出處 |
+| 📐 Spacing & Radius | 8pt 間距條依實際 px 等比繪製；圓角方塊四角都綁到 Radius 變數 |
+| 🌗 Elevation | 六個 effect style 各一張示範卡，套用的是 style 本身 |
+
+實作時踩到並修正的兩處：
+- auto-layout 容器的**預設白底**會在暖沙頁底上露出白色橫條 → 內層一律清空 fills
+- Figma 的 `lineHeight.value` 帶浮點雜訊（`112.00000476837166%`）→ 顯示前取整
+
+## 5. 尚未進行
+
 - **Phase 3** 元件：8 個 primitives（Button/Card/Chip/Badge/Pill/Hint/EmptyState/Skeleton）
   ＋ PR #211 劇組 UI 元件（技能卡、已選 chip、待你過目橫幅、支線進度）
 - **Phase 4** Code Connect 綁定與無障礙稽核

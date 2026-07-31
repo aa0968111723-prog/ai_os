@@ -18,7 +18,7 @@ import {
   requestWorkbenchMode,
   type WorkbenchRevealDetail,
 } from "./workbenchNav";
-import { Button, Card, EmptyState, Hint, Meta } from "../../components/ui";
+import { Button, Card, EmptyState, Hint, Meta, Pill } from "../../components/ui";
 export type ResourceDrawerTab = "prompts" | "generations" | "trail" | "templates";
 
 export type ReuseGenerateFn = (
@@ -448,8 +448,8 @@ export function CreationResourceDrawer({
                                   {title.length > 100 ? "…" : ""}
                                 </div>
                                 <Meta as="div" className="mono" style={{ fontSize: "var(--fs-11)", marginTop: 2 }}>
-                                  <span
-                                    className={`pill ${
+                                  <Pill
+                                    status={
                                       r.status === "running"
                                         ? "running"
                                         : r.status === "failed"
@@ -457,10 +457,10 @@ export function CreationResourceDrawer({
                                           : r.status === "done"
                                             ? "done"
                                             : "queued"
-                                    }`}
+                                    }
                                   >
                                     {status}
-                                  </span>
+                                  </Pill>
                                 </Meta>
                               </div>
                               <Button size="sm" onClick={goToPlanMode}>
@@ -487,9 +487,8 @@ export function CreationResourceDrawer({
                 hidden={tab !== "templates"}
               >
                 {tab === "templates" && (
-                  <EmptyState title={<>範本收藏（即將推出）</>} description={<>常用範本會收藏在這裡。目前請到「套用範本」挑選與執行。</>} action={<><button
-                      type="button"
-                      className="btn-ghost"
+                  <EmptyState title={<>範本收藏（即將推出）</>} description={<>常用範本會收藏在這裡。目前請到「套用範本」挑選與執行。</>} action={<><Button
+                      variant="ghost"
                       style={{ marginTop: 8 }}
                       onClick={() => {
                         close();
@@ -500,7 +499,7 @@ export function CreationResourceDrawer({
                       }}
                     >
                       <Icon name="Clapperboard" size={13} /> 前往套用範本
-                    </button></>} style={{ marginTop: 8 }} data-fb="範本收藏" />
+                    </Button></>} style={{ marginTop: 8 }} data-fb="範本收藏" />
                 )}
               </div>
             </div>

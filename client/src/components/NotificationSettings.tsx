@@ -409,9 +409,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
             </ul>
           )}
           <div className="device-link-actions" style={{ marginTop: 8 }}>
-            <button
+            <Button
+              variant="ghost"
               type="button"
-              className="btn-ghost"
               disabled={busy || logoutAll.isPending || (sessions.data ?? []).length === 0}
               onClick={() => {
                 if (
@@ -436,7 +436,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
             >
               <Icon name="Smartphone" size={14} />
               {logoutAll.isPending ? "處理中…" : "登出全部裝置"}
-            </button>
+            </Button>
           </div>
         </section>
 

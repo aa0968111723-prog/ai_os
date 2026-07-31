@@ -8,7 +8,7 @@ import { DISCUSS_EVENT, jumpToRef, setPlannerFocus, type DiscussRef } from "../d
 import { escapeRegExp, parseMentionedNames } from "@shared/mentions";
 import { useCustomQuickPhrases, MAX_PHRASE_LEN } from "../useCustomQuickPhrases";
 
-import { Button, Hint, Meta } from "./ui";
+import { Button, Chip, Hint, Meta } from "./ui";
 /** 單則留言(含回覆摘要／表情彙總／引用卡）——由 messages.list 推得,列元件與父層共用同一形狀 */
 type MessageRowData = inferRouterOutputs<AppRouter>["messages"]["list"]["items"][number];
 
@@ -799,7 +799,7 @@ export function MessagePanel({
         ))}
         {/* 自訂短語:一鍵送出(同內建),但每則帶一個「×」可移除;管理面板開啟時才顯示刪除鈕 */}
         {customPhrases.phrases.map((q) => (
-          <span key={`c-${q}`} className={`chip custom-phrase${phraseEditorOpen ? " editing" : ""}`}>
+          <Chip key={`c-${q}`} className={`custom-phrase${phraseEditorOpen ? " editing" : ""}`}>
             <button type="button" className="phrase-send" disabled={post.isPending} onClick={() => send(q)} title="一鍵送出這句">
               {q}
             </button>
@@ -814,7 +814,7 @@ export function MessagePanel({
                 <Icon name="X" size={11} />
               </button>
             )}
-          </span>
+          </Chip>
         ))}
         {/* ＋自訂:展開小面板輸入新短語(可夾 emoji);組內夥伴自行增加自己組的常用語 */}
         <span style={{ position: "relative", display: "inline-flex" }}>

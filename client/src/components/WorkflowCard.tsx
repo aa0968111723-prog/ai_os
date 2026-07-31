@@ -3,7 +3,7 @@ import { getModel } from "@shared/models";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 
-import { Card, Chip, Hint, Meta } from "./ui";
+import { Button, Card, Chip, Hint, Meta, Pill, type PillStatus } from "./ui";
 /**
  * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（未授權/背景分頁）建構子會丟例外，包 try 忽略。
  * 純附加通知——不影響任何既有輪詢與顯示邏輯。
@@ -37,6 +37,8 @@ interface RunStep {
 
 const STEP_ICON: Record<RunStep["status"], IconName> = { done: "CheckCircle2", failed: "XCircle", stopped: "CircleStop", running: "Loader", pending: "Clock" };
 const RUN_STATUS_LABEL: Record<string, string> = { running: "執行中", done: "已完成", failed: "失敗", stopped: "已停止" };
+/** run 狀態 → Pill 色階；`stopped` 站內沒有對應色階（`.pill.stopped` 不存在），落回中性 */
+const RUN_PILL_STATUS: Record<string, PillStatus> = { running: "running", done: "done", failed: "failed" };
 
 /** 與伺服器 runner 相同的「活躍」語義：run 還在跑，或按停後仍有一步在生成收尾——這期間都要輪詢 */
 function isActiveRun(r: { status: string; steps: unknown }): boolean {
@@ -269,7 +271,7 @@ export function WorkflowCard({
           <div key={r.id} style={{ marginTop: 12, paddingTop: 8, borderTop: "1px solid var(--border-soft)" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <strong style={{ fontSize: "var(--fs-13)" }}>{label}</strong>
-              <span className={`pill ${r.status}`}>{RUN_STATUS_LABEL[r.status] ?? r.status}</span>
+              <Pill status={RUN_PILL_STATUS[r.status]}>{RUN_STATUS_LABEL[r.status] ?? r.status}</Pill>
               <Meta>{new Date(r.createdAt).toLocaleString("zh-TW", { hour12: false })}</Meta>
               {r.status === "running" && (
                 <button disabled={stop.isPending} onClick={() => stop.mutate({ runId: r.id })}>
@@ -291,9 +293,9 @@ export function WorkflowCard({
                 {s.detail && <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>{s.detail}</span>}
                 {/* 細膩回看線：每一步點過去就是它的生成列（成品/錯誤/點數都在那裡） */}
                 {s.generationId && (s.status === "done" || s.status === "failed" || s.status === "running") && (
-                  <button
-                    type="button"
-                    className="btn-ghost btn-sm"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     style={{ padding: "0 6px", fontSize: "var(--fs-11)" }}
                     title="捲到這一步的生成紀錄"
                     onClick={() => {
@@ -303,7 +305,7 @@ export function WorkflowCard({
                     }}
                   >
                     查看生成
-                  </button>
+                  </Button>
                 )}
               </Meta>
             ))}

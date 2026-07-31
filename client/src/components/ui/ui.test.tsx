@@ -146,7 +146,20 @@ describe("Chip — 展示 vs 可互動", () => {
     expect(el.getAttribute("class")).toBe("chip pick");
     expect(el).toHaveAttribute("role", "button");
     expect(el).toHaveAttribute("tabindex", "0");
-    expect(el).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("一次性動作（沒給 selected）不輸出 aria-pressed —— 否則讀屏會念成「未按下的切換鈕」", () => {
+    const { container } = render(<Chip onClick={() => {}}>複製模型 ID</Chip>);
+    expect(container.firstElementChild).not.toHaveAttribute("aria-pressed");
+  });
+
+  it("selected 明確給 false 時仍輸出 aria-pressed —— 那是真的切換鈕，只是未按下", () => {
+    const { container } = render(
+      <Chip selected={false} onClick={() => {}}>
+        篩選：全部
+      </Chip>,
+    );
+    expect(container.firstElementChild).toHaveAttribute("aria-pressed", "false");
   });
 
   it("selected 加上 on 並反映在 aria-pressed", () => {

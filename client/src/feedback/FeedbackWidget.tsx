@@ -5,7 +5,7 @@ import { FEEDBACK_CATEGORIES, FEEDBACK_PAGES, type FeedbackCategory } from "@sha
 import { captureWithHighlight, pickElement, type PickResult } from "./picker";
 import { Icon } from "../components/Icon";
 import { useRovingRadio } from "../components/interactions";
-import { Button, Card, Hint, Meta } from "../components/ui";
+import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 /** 目前路由對應到人看得懂的頁面名（與 FEEDBACK_PAGES 對齊；對不上就回 null） */
 function pageForPath(path: string): string | null {
   if (path === "/") return "作業台（首頁）";
@@ -90,8 +90,7 @@ export function FeedbackWidget() {
   return (
     <div data-fb-widget="root" className="fb-fab-root">
       {mode === "menu" && (
-        <div
-          className="card"
+        <Card
           role="group"
           aria-label="回饋選項"
           onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); close(); } }}
@@ -116,7 +115,7 @@ export function FeedbackWidget() {
           <button style={{ width: "100%" }} onClick={openPageOnly}>
             <Icon name="FileText" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />只回報這一頁
           </button>
-        </div>
+        </Card>
       )}
 
       {mode === "form" && (
@@ -294,8 +293,8 @@ function ReportForm({
   const guide = GUIDE[category] ?? GUIDE.other;
 
   return (
-    <div
-      className="card fb-report-form"
+    <Card
+      className="fb-report-form"
       role="dialog"
       aria-label="填寫回饋"
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
@@ -322,18 +321,19 @@ function ReportForm({
         {FEEDBACK_CATEGORIES.map((c, i) => {
           const on = category === c.value;
           return (
-            <span
+            <Chip
               key={c.value}
+              selected={on}
+              onClick={() => setCategory(c.value)}
               role="radio"
               aria-checked={on}
+              // 選取態由 role="radio" 的 aria-checked 表達；Chip 預設補的 aria-pressed 只在
+              // role="button" 合法，留著會變成互相打架的兩組狀態，所以這裡明確關掉。
               {...catRoving.itemProps(i)}
               title={c.hint}
-              className={`chip pick ${on ? "on" : ""}`}
-              onClick={() => setCategory(c.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setCategory(c.value); } }}
             >
               {c.label}
-            </span>
+            </Chip>
           );
         })}
       </div>
@@ -346,18 +346,16 @@ function ReportForm({
         {FEEDBACK_PAGES.map((p) => {
           const on = pages.has(p);
           return (
-            <span
+            <Chip
               key={p}
+              selected={on}
+              onClick={() => togglePage(p)}
               role="checkbox"
               aria-checked={on}
-              tabIndex={0}
-              className={`chip pick ${on ? "on" : ""}`}
-              onClick={() => togglePage(p)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePage(p); } }}
             >
               {p}
               {p === currentPage ? "・目前" : ""}
-            </span>
+            </Chip>
           );
         })}
       </div>
@@ -432,6 +430,6 @@ function ReportForm({
           送出失敗，請稍後再試
         </p>
       )}
-    </div>
+    </Card>
   );
 }

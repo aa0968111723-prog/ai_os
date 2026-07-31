@@ -10,14 +10,21 @@ import { cx } from "./cx";
  * 換成這個元件即自動修好，且 class 輸出不變（`chip pick`／`chip pick on`）。
  */
 export function Chip({
-  selected = false,
+  selected,
   onClick,
   as: Tag = "span",
   className,
   children,
   ...rest
 }: {
-  /** 選取態 → 加 `on` */
+  /**
+   * 選取態 → 加 `on`，並輸出 `aria-pressed`。
+   *
+   * **不給就代表這不是切換鈕**。站內的互動 chip 分兩種：可切換的篩選／職能選擇，
+   * 以及「點一下複製模型 ID」這類一次性動作。若一律輸出 aria-pressed，
+   * 後者會被讀屏念成「未按下的切換鈕」——那是對使用者謊報元件性質。
+   * 所以 aria-pressed 只在 selected 有明確值時才輸出。
+   */
   selected?: boolean;
   onClick?: () => void;
   as?: "span" | "div" | "li";
@@ -41,7 +48,8 @@ export function Chip({
         ? {
             role: "button",
             tabIndex: 0,
-            "aria-pressed": selected,
+            // 一次性動作（selected 未給）不輸出 aria-pressed —— 見上方 selected 的說明
+            ...(selected === undefined ? {} : { "aria-pressed": selected }),
             onClick,
             onKeyDown: handleKeyDown,
           }

@@ -4,7 +4,7 @@ import { DesktopCompanionPage } from "../pages/DesktopCompanionPage";
 import { LandingPage } from "../pages/LandingPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AppRoutes, UngroupedRoutes } from "./AppRoutes";
-import { Button } from "../components/ui";
+import { Button, Meta } from "../components/ui";
 
 export type SessionMe = {
   user: { isSuperAdmin: boolean; mustChangePassword: boolean };
@@ -49,7 +49,7 @@ export function SessionGate({
         {meError && location === "/" ? (
           <LandingPage />
         ) : meLoading ? (
-          <p className="hint">載入中…</p>
+          <Meta as="p">載入中…</Meta>
         ) : meError ? (
           <p className="error">
             系統暫時連不上（不是你被登出）——請稍候重新整理，或按{" "}

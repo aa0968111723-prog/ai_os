@@ -804,13 +804,12 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
         <span>{humanizeAuditAction(r.action)}</span>
         {/* 連續重複合併：同一人短時間重複做同一件事只佔一列，掛上次數徽章 */}
         {repeats && repeats.length > 1 && (
-          <span
-            className="pill"
+          <Pill
             style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary)" }}
             title={`短時間內連續 ${repeats.length} 次，展開可看每一筆`}
           >
             連續 {repeats.length} 次
-          </span>
+          </Pill>
         )}
         {!r.ok && <span style={{ color: "var(--danger-ink)", fontSize: 11, fontWeight: 600 }}>（失敗）</span>}
         <Meta style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</Meta>
@@ -1310,9 +1309,9 @@ export function InsightsCard() {
                 {m.categories.map((c) => {
                   const style = AUDIT_CAT_STYLE[c.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
                   return (
-                    <span key={c.key} className="pill" style={{ ...style, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>
+                    <Pill key={c.key} style={{ ...style, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>
                       {c.label} {c.count}
-                    </span>
+                    </Pill>
                   );
                 })}
               </div>
@@ -1787,17 +1786,13 @@ function FeedbackReportsSection() {
       <Hint>夥伴在任何頁面用右下角「回饋」浮標標定某個元件送出的意見。</Hint>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
         {FEEDBACK_STATUS_FILTERS.map((f) => (
-          <span
+          <Chip
             key={f.value || "all"}
-            role="button"
-            tabIndex={0}
-            aria-pressed={statusFilter === f.value}
-            className={`chip pick ${statusFilter === f.value ? "on" : ""}`}
+            selected={statusFilter === f.value}
             onClick={() => setStatusFilter(f.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setStatusFilter(f.value); } }}
           >
             {f.label}
-          </span>
+          </Chip>
         ))}
       </div>
       {reports.isLoading ? (

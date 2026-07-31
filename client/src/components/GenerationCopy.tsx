@@ -1,3 +1,5 @@
+import { Meta } from "./ui";
+
 export const GENERATION_PROMPT_COLLAPSE_AT = 180;
 export const GENERATION_RESULT_COLLAPSE_AT = 320;
 export const GENERATION_RESULT_PREVIEW_LENGTH = 220;
@@ -12,7 +14,7 @@ export function GenerationPromptCopy({ text }: { text: string }) {
   return (
     <details className="generation-copy-details">
       <summary>
-        {text.slice(0, GENERATION_PROMPT_COLLAPSE_AT)}… <span className="hint">顯示完整提示詞</span>
+        {text.slice(0, GENERATION_PROMPT_COLLAPSE_AT)}… <Meta>顯示完整提示詞</Meta>
       </summary>
       <div className="mono generation-copy-details__body">{text}</div>
     </details>
@@ -50,7 +52,7 @@ export function GenerationResultCopy({
     <details className="result-text generation-copy-details" style={{ marginTop: 6 }}>
       <summary>
         {generationResultPreview(text)}…{" "}
-        <span className="hint">顯示完整結果（{text.length.toLocaleString()} 字）</span>
+        <Meta>顯示完整結果（{text.length.toLocaleString()} 字）</Meta>
       </summary>
       <div className="generation-copy-details__body" style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>
         {text}
