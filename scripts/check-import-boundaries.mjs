@@ -41,13 +41,12 @@ const ALLOWLIST = new Set([
   "client/src/pages/MembersPage.tsx::../../../server/routers",
 
   // Services → routers: helpers not yet extracted (legacy)
+  // generationCore anchors → services/cardAnchors (scene+character)
   "server/services/agentCore.ts::../routers/knowledge",
   "server/services/agentRunner.ts::../routers/director",
   "server/services/agentRunner.ts::../routers/approvals",
   "server/services/agentRunner.ts::../routers/assistant",
   "server/services/agentSplitRecovery.pg.test.ts::../routers/director",
-  "server/services/generationCore.ts::../routers/characters",
-  "server/services/generationCore.ts::../routers/scenePresets",
   "server/services/messageAssistant.ts::../routers/knowledge",
   "server/services/restApi.ts::../routers/schedule",
 ]);

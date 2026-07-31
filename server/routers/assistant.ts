@@ -3,7 +3,14 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
-import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
+import {
+  worldviewSchema,
+  formatWorldviewForAi,
+  worldviewChipGuidanceForAi,
+  normalizeWorldviewChipsPatch,
+  summarizeWorldviewChipsPatch,
+  CHIP_SOFT_MAX,
+} from "../../shared/worldview";
 import { CATEGORIES, WORKFLOW_PRESETS, getWorkflow, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
 import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
@@ -121,6 +128,13 @@ const proposalSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
   // plan_agent：把多步驟目標交給 AI 代理排計畫（goal 與 agents.plan 同限 5–1000）；確認後也只排計畫（站內 0 點），執行另核准
   z.object({ type: z.literal("plan_agent"), goal: z.string().min(5).max(1000) }),
+  // 套用世界觀 chips（主軸／調性／風格）：陣列第一個＝主要；落地時硬截到軟上限；使用者確認後才寫入
+  z.object({
+    type: z.literal("apply_worldview_chips"),
+    themes: z.array(z.string().max(100)).max(5).optional(),
+    tones: z.array(z.string().max(100)).max(5).optional(),
+    styles: z.array(z.string().max(100)).max(5).optional(),
+  }),
 ]);
 const replySchema = z.object({ answer: z.string().min(1).max(4000), actions: z.array(proposalSchema).max(6).optional() });
 
@@ -129,7 +143,16 @@ const replySchema = z.object({ answer: z.string().min(1).max(4000), actions: z.a
  *  toolCallSchema 與 replySchema 都會 parse 失敗、掉進 fallback 把「原始 JSON」直接洩漏給使用者
  *  （實測：對代理下多步目標時整段工具 JSON 被當成回答顯示）。這裡把這種畸形工具呼叫救回成正規的
  *  {answer, actions} 提議（self-healing）。回 null＝救不回（維持既有 fallback）。 */
-const ACTION_TYPE_NAMES = new Set(["generate", "update_scene", "submit_approval", "create_scene", "run_workflow", "split_script", "plan_agent"]);
+const ACTION_TYPE_NAMES = new Set([
+  "generate",
+  "update_scene",
+  "submit_approval",
+  "create_scene",
+  "run_workflow",
+  "split_script",
+  "plan_agent",
+  "apply_worldview_chips",
+]);
 const COERCED_ACTION_ANSWER: Record<string, string> = {
   split_script: "好，我可以把腳本拆成一格格分鏡草稿——按下方動作就開始（AI 導演，免費）。",
   plan_agent: "這個目標要連續動好幾步，我把它交給 AI 代理排一份可背景執行的計畫——確認後估點再逐步執行。",
@@ -138,6 +161,7 @@ const COERCED_ACTION_ANSWER: Record<string, string> = {
   run_workflow: "我幫你準備了一條工作流，確認下方就執行。",
   update_scene: "我幫你準備了分鏡修改，確認下方就套用。",
   submit_approval: "我幫你準備了送審動作，確認下方就送出。",
+  apply_worldview_chips: "我幫你準備了世界觀基調建議（主軸／調性／風格）——確認下方就寫入專案（可再手動微調）。",
 };
 export function coerceActionToolCall(json: unknown): z.infer<typeof replySchema> | null {
   if (!json || typeof json !== "object") return null;
@@ -161,7 +185,14 @@ type ResolvedAction =
   | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number; prompt?: string }
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
   | { type: "split_script"; label: string; script: string }
-  | { type: "plan_agent"; label: string; goal: string };
+  | { type: "plan_agent"; label: string; goal: string }
+  | {
+      type: "apply_worldview_chips";
+      label: string;
+      themes?: string[];
+      tones?: string[];
+      styles?: string[];
+    };
 
 /** runAction 輸入：前端把已確認的動作原樣送回（型別與 ResolvedAction 對齊） */
 const actionInputSchema = z.discriminatedUnion("type", [
@@ -175,6 +206,12 @@ const actionInputSchema = z.discriminatedUnion("type", [
     type: z.literal("plan_agent"),
     goal: z.string().min(5).max(1000),
     plannerMode: agentPlannerModeSchema.optional(),
+  }),
+  z.object({
+    type: z.literal("apply_worldview_chips"),
+    themes: z.array(z.string().max(100)).max(5).optional(),
+    tones: z.array(z.string().max(100)).max(5).optional(),
+    styles: z.array(z.string().max(100)).max(5).optional(),
   }),
 ]);
 
@@ -462,9 +499,10 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       const knowledgeCtx = await buildKnowledgeContext(project.id, KNOWLEDGE_BUDGET);
       // 連結全專案×資料庫：AI 可讀的自訂資料庫（代號速查進提示詞；細列用 query_database 工具按需查）
       const readableDbs = await listAssistantReadableDbs(input.auth);
+      const chipGuide = worldviewChipGuidanceForAi(wv);
       const context = `標題：${project.title}（${project.kind}，${project.format}）
 世界觀｜${formatWorldviewForAi(wv, "brief")}
-分鏡（共 ${scenes.length}）：
+${chipGuide ? `${chipGuide}\n` : ""}分鏡（共 ${scenes.length}）：
 ${sceneLines}
 生成：完成 ${genDone}／生成中 ${genRunning}／失敗 ${genFailed}｜待審分鏡：${pendingCount}`;
 
@@ -494,6 +532,22 @@ ${sceneLines}
             });
           } else if (a.type === "plan_agent") {
             out.push({ type: "plan_agent", goal: a.goal, label: `讓 AI 代理排計畫：「${a.goal.slice(0, 30)}${a.goal.length > 30 ? "…" : ""}」（規劃站內 0 點，執行前再核准）` });
+          } else if (a.type === "apply_worldview_chips") {
+            // 落地前先正規化（截到建議上限）；至少要有一個欄位，否則略過空提議
+            const patch = normalizeWorldviewChipsPatch({
+              themes: a.themes,
+              tones: a.tones,
+              styles: a.styles,
+            });
+            if (!patch.themes && !patch.tones && !patch.styles) continue;
+            const summary = summarizeWorldviewChipsPatch(patch);
+            out.push({
+              type: "apply_worldview_chips",
+              themes: patch.themes,
+              tones: patch.tones,
+              styles: patch.styles,
+              label: `套用基調：${summary.slice(0, 48)}${summary.length > 48 ? "…" : ""}`,
+            });
           } else if (a.type === "run_workflow") {
             const preset = getWorkflow(a.presetId);
             if (!preset) continue; // 幻覺的 presetId：不給使用者一顆註定失敗的按鈕
@@ -549,8 +603,10 @@ ${forceFinal
 - run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
 - split_script：把腳本拆成一幕幕的分鏡草稿（script＝腳本全文，從使用者訊息原樣抄錄，至少 20 字；只在使用者貼了完整腳本／逐字稿、想把它變成分鏡時才提議；免費）
 - plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→送審」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫不扣站內點數（Fal 模式依 token 計費），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
-分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
+- apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用內建詞（調性：莊嚴/溫暖/真誠/療癒/活潑/簡約；風格主風格：日系水彩/寫實攝影/3D 動畫/手繪插畫/極簡線條/水墨禪意；質感：膠片質感；主軸：苦→修行→轉變→感恩/禪修日常/佛法入門/活動紀實/感恩分享）或組內已有選項。
+分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍須組長審核。
+世界觀 chips：風格先選媒材家族（寫實／插畫／3D）再選主風格，可選一個同家族質感；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
 分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。generate 的 modelId 只能填「速查表的 id」或「find_model 查到的免來源模型 id」；presetId 只能抄工作流速查表。不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
 一次回覆最多提議 6 個動作；每個動作都要使用者按確認才會執行，不要假設前一步已完成，也不要替使用者跳過確認。
 <可用模型速查>
@@ -832,9 +888,36 @@ export const assistantRouter = router({
         return { ok: true, kind: "split_script" as const, createdScenes: result.count, message: `已拆出 ${result.count} 個分鏡，可逐鏡生成畫面${truncNote}` };
       }
 
+      if (a.type === "apply_worldview_chips") {
+        // 執行端再正規化一次（不信任前端 payload）；至少一欄才寫入
+        const patch = normalizeWorldviewChipsPatch({
+          themes: a.themes,
+          tones: a.tones,
+          styles: a.styles,
+        });
+        if (!patch.themes && !patch.tones && !patch.styles) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "沒有可套用的主軸／調性／風格" });
+        }
+        const current = worldviewSchema.parse(project.worldview ?? {});
+        const merged = worldviewSchema.parse({ ...current, ...patch });
+        await db
+          .update(schema.projects)
+          .set({ worldview: merged, updatedAt: new Date() })
+          .where(eq(schema.projects.id, project.id));
+        const summary = summarizeWorldviewChipsPatch(patch);
+        return {
+          ok: true,
+          kind: "apply_worldview_chips" as const,
+          message: `已套用世界觀基調：${summary}。可在專案「基調與世界觀」再微調或改主要。`,
+        };
+      }
+
       // submit_approval：走與網頁「送審」完全相同的核心（版本號原子產生、標分鏡 pending、系統訊息）。
       // 先比照 generate/update_scene 驗證 sceneId 屬於 input.projectId——否則守衛與審計都綁在
       // 請求指名的專案上，實際被改動的卻是另一專案的分鏡（2.2 誤歸屬＋2.3 可被繞過）
+      if (a.type !== "submit_approval") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "不支援的助手動作" });
+      }
       {
         const [scene] = await db
           .select({ id: schema.scenes.id })

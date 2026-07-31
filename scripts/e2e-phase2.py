@@ -194,8 +194,46 @@ if img:
 else:
     ok("圖片描述入知識庫(略過：無圖片素材)", True)
 
-# ── 6.4 卡片 → 知識上下文(間接驗證：助手 mock 回應含知識庫字數) ──
-call("POST", mem, "characters.add", {"projectId": pid, "name": "安倢", "appearance": "紅傘、米白外套、齊肩黑髮"}) if True else None
+# ── 6.4 角色定裝 + 場景設定卡 → 知識上下文／生成綁定 ──
+char = call("POST", mem, "characters.add", {
+    "projectId": pid, "name": "安倢", "appearance": "紅傘、米白外套、齊肩黑髮",
+})
+ok("建立角色定裝卡", "id" in char)
+preset = call("POST", mem, "scenePresets.add", {
+    "projectId": pid,
+    "name": "禪堂前庭",
+    "palette": "米金、木色、白牆",
+    "lighting": "清晨柔側光",
+})
+ok("建立場景設定卡", "id" in preset and preset.get("name") == "禪堂前庭")
+presets = call("GET", mem, "scenePresets.list", {"projectId": pid})
+ok("場景清單含新建卡", any(p["id"] == preset["id"] and "米金" in p.get("palette", "") for p in presets))
+# 生成同時綁角色＋場景：跨鏡光影／外觀一致
+g_cards = call("POST", mem, "generation.submit", {
+    "projectId": pid,
+    "modelId": "fal-ai/flux/schnell",
+    "prompt": "安倢站在禪堂前庭",
+    "characterIds": [char["id"]],
+    "scenePresetIds": [preset["id"]],
+})
+ok("帶角色＋場景設定的生成可送出", g_cards.get("status") in ("queued", "running", "done"))
+# 外鍵場景卡 fail-closed
+bad_scene = call("POST", mem, "generation.submit", {
+    "projectId": pid,
+    "modelId": "fal-ai/flux/schnell",
+    "prompt": "假場景",
+    "scenePresetIds": ["99999999-9999-4999-8999-999999999999"],
+})
+ok("🔒 外鍵場景設定被擋", "__error__" in bad_scene and "場景設定" in bad_scene["__error__"])
+# 場景卡冪等
+sid = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+p1 = call("POST", mem, "scenePresets.add", {
+    "projectId": pid, "name": "雨巷", "palette": "青灰", "clientRequestId": sid,
+})
+p2 = call("POST", mem, "scenePresets.add", {
+    "projectId": pid, "name": "雨巷改名不應新建", "palette": "墨黑", "clientRequestId": sid,
+})
+ok("場景設定 clientRequestId 冪等", p1.get("id") == sid and p2.get("id") == sid and p2.get("name") == p1.get("name"))
 ask = call("POST", mem, "assistant.ask", {"projectId": pid, "message": "素材裡有什麼?"})
 ok("助手可回應(mock)", "answer" in ask)
 

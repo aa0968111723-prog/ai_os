@@ -63,7 +63,7 @@ client  ──HTTP/tRPC──▶  server/routers  ──call──▶  server/se
 | `server/services/agentCore.ts` | `../routers/knowledge`（`buildKnowledgeContext`） | 知識 helper 仍在 router 檔；模型決策已下沉至共用 service |
 | `server/services/agentRunner.ts` | `../routers/director`、`../routers/approvals`、`../routers/assistant` | 分鏡拆本、核准、scene fill 仍在 router |
 | `server/services/agentSplitRecovery.pg.test.ts` | `../routers/director` | 測試沿用 `splitScriptCore` |
-| `server/services/generationCore.ts` | `../routers/characters`、`../routers/scenePresets` | anchor builder 仍在 router |
+| ~~`server/services/generationCore.ts`~~ | ~~`../routers/characters`、`../routers/scenePresets`~~ | ✅ 已下沉 `services/cardAnchors`（角色＋場景錨點） |
 | `server/services/messageAssistant.ts` | `../routers/knowledge` | 同上 knowledge helper |
 | `server/services/restApi.ts` | `../routers/schedule`（`buildIcs`） | ICS 建置仍在 schedule router |
 

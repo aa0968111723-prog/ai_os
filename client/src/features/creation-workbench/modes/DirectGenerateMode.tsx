@@ -494,8 +494,12 @@ export function DirectGenerateMode({
               {[
                 worldview.logline?.trim() ? "故事錨點" : "",
                 worldview.message?.trim() ? "核心訊息" : "",
-                worldview.tones.length ? `調性（${worldview.tones.join("、")}）` : "",
-                worldview.styles.length ? `風格（${worldview.styles.join("、")}）` : "",
+                worldview.tones.length
+                  ? `調性（${worldview.tones.slice(0, 2).join("、")}${worldview.tones.length > 2 ? "…" : ""}）`
+                  : "",
+                worldview.styles.length
+                  ? `風格主要「${worldview.styles[0]}」${worldview.styles.length > 1 ? `（另 ${worldview.styles.length - 1} 備選不進圖）` : ""}`
+                  : "",
                 worldview.taboos.length ? `禁忌 ${worldview.taboos.length} 條` : "",
               ]
                 .filter(Boolean)

@@ -10,7 +10,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type React from "react";
-import { buildDecisionInbox, canDecideRun, dueLabel, Launchpad, mergeTeamHealth } from "./Launchpad";
+import { buildDecisionInbox, buildTeamQuestionSuggestions, canDecideRun, dueLabel, Launchpad, mergeTeamHealth } from "./Launchpad";
 
 /** 泛用 trpc 樁：任何 `trpc.a.b.useQuery()` 都回 queryData 裡以路徑登記的值 */
 const h = vi.hoisted(() => {
@@ -606,7 +606,7 @@ describe("S5：組彙總 AI 的決策軌跡", () => {
       degraded: false,
     });
     render(<Launchpad groupId={GROUP} />);
-    await userEvent.type(screen.getByLabelText("組彙總 AI"), "哪個案子卡住了？");
+    await userEvent.type(screen.getByLabelText("問卡片答不出來的事"), "哪個案子卡住了？");
     await userEvent.click(screen.getByRole("button", { name: "詢問" }));
     expect(await screen.findByText(/依據：依阻塞清單/)).toBeInTheDocument();
     expect(screen.getByText("阻塞與人員負荷")).toBeInTheDocument();
@@ -621,7 +621,7 @@ describe("S5：組彙總 AI 的決策軌跡", () => {
       rationale: undefined, contextUsed: ["專案現況"], degraded: true,
     });
     render(<Launchpad groupId={GROUP} />);
-    await userEvent.type(screen.getByLabelText("組彙總 AI"), "有人卡住嗎？");
+    await userEvent.type(screen.getByLabelText("問卡片答不出來的事"), "有人卡住嗎？");
     await userEvent.click(screen.getByRole("button", { name: "詢問" }));
     expect(await screen.findByText(/沒能讀到阻塞與人員任務資料/)).toBeInTheDocument();
   });
@@ -630,7 +630,7 @@ describe("S5：組彙總 AI 的決策軌跡", () => {
     seed({ runs: [], pending: [] });
     askReturning({ answer: "簡短回答。", steps: [], dispatches: [], canDispatch: false, contextUsed: [], degraded: false });
     render(<Launchpad groupId={GROUP} />);
-    await userEvent.type(screen.getByLabelText("組彙總 AI"), "隨便問問");
+    await userEvent.type(screen.getByLabelText("問卡片答不出來的事"), "隨便問問");
     await userEvent.click(screen.getByRole("button", { name: "詢問" }));
     expect(await screen.findByText("簡短回答。")).toBeInTheDocument();
     expect(screen.queryByText(/^依據：/)).not.toBeInTheDocument();
@@ -716,5 +716,123 @@ describe("阻塞清單截斷時的誠實度", () => {
     });
     render(<Launchpad groupId={GROUP} />);
     expect(within(screen.getByLabelText("誰卡住了")).queryByText(/明細只列前/)).not.toBeInTheDocument();
+  });
+});
+
+describe("建議問句：問卡片答不出來的事", () => {
+  const S = buildTeamQuestionSuggestions;
+  const empty = { runs: [], people: [], planConcerns: [], pending: [] };
+  const mkRun = (o: Partial<{ projectId: string; projectTitle: string; status: string; error: string | null; goal: string }>) =>
+    ({ projectId: "p1", projectTitle: "招生短片", status: "running", error: null, goal: "拆分鏡", ...o });
+
+  it("不再出現卡片正上方就已經回答的問題", () => {
+    const all = S({
+      ...empty,
+      runs: [mkRun({ status: "failed", error: "供應商逾時" })],
+      people: [{ userId: "u1", name: "阿光", openTasks: 3, overdueTasks: 2 }],
+      pending: [{ projectTitle: "社課回顧", pendingApprovals: 3, awaitingGenerations: 1 }],
+    }).map((s) => s.text).join("\n");
+    // 這三句的答案就在「誰卡住了」與「待我裁決」裡，問了只是重述
+    expect(all).not.toContain("哪個案子卡住了");
+    expect(all).not.toContain("哪些專案有分鏡在等審核");
+    expect(all).not.toContain("哪個專案該優先推進");
+  });
+
+  it("指名道姓地問，而不是四句對誰都一樣的罐頭問句", () => {
+    const out = S({ ...empty, runs: [mkRun({ status: "failed", projectTitle: "招生短片", error: "供應商逾時" })] });
+    expect(out[0].text).toContain("「招生短片」");
+    expect(out[0].text).toContain("為什麼失敗");
+    // tooltip 要講出這句是被什麼觸發的
+    expect(out[0].why).toContain("供應商逾時");
+  });
+
+  it("依急迫性排序：失敗 → 逾期的人 → 待核成本 → 缺資訊 → 待審內容", () => {
+    const out = S({
+      runs: [mkRun({ status: "failed", projectId: "pf", projectTitle: "失敗案" })],
+      people: [{ userId: "u1", name: "阿光", openTasks: 3, overdueTasks: 2 }],
+      planConcerns: [{ projectTitle: "缺資訊案", missingInformation: 2, risks: 0 }],
+      pending: [{ projectTitle: "待審案", pendingApprovals: 3, awaitingGenerations: 1 }],
+    });
+    expect(out.map((s) => s.id)).toEqual(["failed:pf", "person:u1", "gen:待審案", "concern:缺資訊案"]);
+    expect(out).toHaveLength(4);
+  });
+
+  it("未指派的逾期任務講成「沒人認領」，不會顯示成 null", () => {
+    const out = S({ ...empty, people: [{ userId: null, name: null, openTasks: 1, overdueTasks: 1 }] });
+    expect(out[0].text).toContain("沒人認領的任務");
+    expect(out[0].text).not.toContain("null");
+  });
+
+  it("組很安靜時給通用的深入問題，不會空手", () => {
+    const out = S(empty);
+    expect(out).toHaveLength(3);
+    expect(out.every((s) => s.id.startsWith("fallback:"))).toBe(true);
+    expect(out[0].text).toContain("優先推進哪個案子");
+    expect(out[0].why).toContain("沒有需要追問的異常");
+  });
+
+  it("兜底句是補位時，tooltip 不會謊稱「沒有異常」（同排第一句明明就指出了異常）", () => {
+    const out = S({ ...empty, pending: [{ projectTitle: "招生短片", pendingApprovals: 3, awaitingGenerations: 0 }] });
+    expect(out[0].id).toBe("scene:招生短片");
+    const filler = out.find((s) => s.id.startsWith("fallback:"))!;
+    expect(filler.why).toContain("上面幾句才是針對這個組現在的狀況");
+    expect(filler.why).not.toContain("沒有");
+  });
+
+  it("狀態很多時不超過 4 句（不變成另一種選項牆）", () => {
+    const out = S({
+      runs: [mkRun({ status: "failed", projectId: "pf" }), mkRun({ status: "running", projectId: "pr" })],
+      people: [
+        { userId: "u1", name: "阿光", openTasks: 3, overdueTasks: 2 },
+        { userId: "u2", name: "小美", openTasks: 2, overdueTasks: 1 },
+      ],
+      planConcerns: [{ projectTitle: "A", missingInformation: 2, risks: 1 }],
+      pending: [{ projectTitle: "B", pendingApprovals: 3, awaitingGenerations: 2 }],
+    });
+    expect(out).toHaveLength(4);
+    expect(new Set(out.map((s) => s.id)).size).toBe(4);
+  });
+
+  it("沒有逾期的人不會被拿來當建議（只挑真的有異常的）", () => {
+    const out = S({ ...empty, people: [{ userId: "u1", name: "阿光", openTasks: 5, overdueTasks: 0 }] });
+    expect(out.every((s) => !s.id.startsWith("person:"))).toBe(true);
+  });
+});
+
+describe("組彙總 AI 入口的重新定位", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  it("標籤與說明講清楚它的職責是「鑽進去查」，不是覆述儀表板", () => {
+    seed({ runs: [], pending: [] });
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.getByLabelText("問卡片答不出來的事")).toBeInTheDocument();
+    expect(screen.getByText(/上面的卡片給你數字，這裡給你數字背後的東西/)).toBeInTheDocument();
+    expect(screen.getByText(/鑽進分鏡全文、生成紀錄/)).toBeInTheDocument();
+  });
+
+  it("建議問句會指名真實的專案（證明它讀了這個組的資料）", () => {
+    seed({
+      runs: [run({ status: "failed", projectTitle: "招生短片", error: "供應商逾時" })],
+      summary: { failedRecent: 1, hasRuns: true, health: "attention" },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const btn = screen.getByRole("button", { name: /「招生短片」的代理為什麼失敗/ });
+    expect(btn).toBeInTheDocument();
+    expect(btn).toHaveAttribute("title", expect.stringContaining("供應商逾時"));
+  });
+
+  it("點建議問句只帶入輸入框，不會直接送出（免費但仍是使用者按下才問）", async () => {
+    seed({
+      runs: [run({ status: "failed", projectTitle: "招生短片", error: "供應商逾時" })],
+      summary: { failedRecent: 1, hasRuns: true, health: "attention" },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    await userEvent.click(screen.getByRole("button", { name: /為什麼失敗/ }));
+    expect(screen.getByLabelText("問卡片答不出來的事"))
+      .toHaveValue("「招生短片」的代理為什麼失敗？要改什麼才不會再失敗？");
+    expect(h.mutations.filter((m) => m.path === "teamAssistant.ask")).toHaveLength(0);
   });
 });

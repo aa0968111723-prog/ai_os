@@ -6,7 +6,7 @@
  */
 import { desc, eq } from "drizzle-orm";
 import { db, schema } from "../db";
-import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
+import { worldviewSchema, formatWorldviewForAi, worldviewChipGuidanceForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
 import { nimComplete, NimServiceError } from "./nvidia-nim";
 import { reserveQuota, refund } from "./points";
@@ -89,7 +89,7 @@ export async function replyAsAssistant(opts: {
 <專案>
 標題：${project.title}
 世界觀｜${formatWorldviewForAi(wv, "brief")}
-</專案>
+${worldviewChipGuidanceForAi(wv) ? `${worldviewChipGuidanceForAi(wv)}\n` : ""}</專案>
 <近期對話>
 ${convo}
 </近期對話>

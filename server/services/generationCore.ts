@@ -22,9 +22,8 @@ import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { failStaleGenerationTx, reserveQuota } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
-import { buildCharacterAnchor } from "../routers/characters";
+import { buildCharacterAnchor, buildSceneAnchor } from "./cardAnchors";
 import { groupLeaderIds, pushToUsers } from "./webPush";
-import { buildSceneAnchor } from "../routers/scenePresets";
 
 export type GenerationRow = typeof schema.generations.$inferSelect;
 
@@ -296,8 +295,11 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
 
   const worldview = worldviewSchema.parse(project.worldview ?? {});
   // 世界觀 → 角色定裝 → 場景設定，依序疊加注入（都只撈本專案，且只注入視覺類別）
-  const charAnchor = input.characterIds?.length ? await buildCharacterAnchor(project.id, input.characterIds) : "";
-  const sceneAnchor = input.scenePresetIds?.length ? await buildSceneAnchor(project.id, input.scenePresetIds) : "";
+  // 角色／場景查詢互不相依，並行省一趟 DB RTT
+  const [charAnchor, sceneAnchor] = await Promise.all([
+    input.characterIds?.length ? buildCharacterAnchor(project.id, input.characterIds) : Promise.resolve(""),
+    input.scenePresetIds?.length ? buildSceneAnchor(project.id, input.scenePresetIds) : Promise.resolve(""),
+  ]);
   const promptParts = effectivePromptParts(model, input.prompt, worldview);
   const fullPrompt = withSceneAnchor(
     model,

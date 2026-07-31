@@ -16,7 +16,7 @@ import { z } from "zod";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
-import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
+import { worldviewSchema, formatWorldviewForAi, worldviewChipGuidanceForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
 import { reserveQuota, refund, checkQuota } from "./points";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
@@ -555,6 +555,7 @@ export async function planAgentCore(input: {
   if (goal.length < 5) throw new TRPCError({ code: "BAD_REQUEST", message: "目標至少 5 個字" });
   if (goal.length > 1000) throw new TRPCError({ code: "BAD_REQUEST", message: "目標太長（最多 1000 字）" });
   const wv = worldviewSchema.parse(project.worldview ?? {});
+  const chipGuide = worldviewChipGuidanceForAi(wv);
   const scenes = await db
     .select()
     .from(schema.scenes)
@@ -692,7 +693,7 @@ ${picked.text ? `<使用者指定來源>\n${picked.text}\n</使用者指定來�
 <專案現況>
 標題：${project.title}（${project.kind}，${project.format}）
 世界觀｜${formatWorldviewForAi(wv, "brief")}
-分鏡（共 ${scenes.length}）：
+${chipGuide ? `${chipGuide}\n` : ""}分鏡（共 ${scenes.length}）：
 ${sceneLines}
 </專案現況>
 <專案運作情報>
