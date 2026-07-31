@@ -11,7 +11,8 @@ import {
   GROUP_RUN_STATUS_LABEL,
   GROUP_STEP_KIND_LABEL,
   campaignProgress,
-  levelAtLeast,
+  canRunCampaign,
+  resolveCampaignWaitReason,
   type GroupCampaignStep,
   type GroupCommand,
   type GroupCommandLevel,
@@ -999,23 +1000,95 @@ function matchesRunFilter(status: string, filter: RunFilter): boolean {
  * 對話只存前端狀態（重整即清空）；唯讀彙總本身不改資料。
  */
 /**
+ * 調度計畫清單的輪詢間隔（false＝不輪詢）。
+ *
+ * running 要輪詢是顯然的；**waiting 才是最需要盯的狀態**——那一刻整份計畫停在
+ * 「等你決定授權」或「等人做完某件事」，而解鎖的動作常常發生在別的地方：
+ * 別人剛去核准了那份卡住的子計畫、剛把人工關卡處理掉。不輪詢的話這裡會一直顯示
+ * 「等待人員」，使用者只好再按一次「繼續」（沒用），或以為壞了跑去重排一份（雙倍派工）。
+ * 其餘狀態（待核准／已結束）不會自己變，靜止的組不該每 10 秒打一次 API。
+ *
+ * 抽成純函式是為了能單獨驗——輪詢條件寫在 useQuery 的 options 裡就只能靠人眼看。
+ */
+export function campaignRefetchInterval(list: Array<{ status: string }> | undefined): number | false {
+  return list?.some((c) => c.status === "running" || c.status === "waiting") ? 10_000 : false;
+}
+
+/**
+ * 按鈕與輸入框上「這是哪一份調度計畫」的短標題。
+ *
+ * 為什麼要點名：waiting 的調度計畫可能同時有好幾份，每一份都有自己的「繼續」與加授權輸入框。
+ * 全部叫「繼續」的話，讀屏使用者聽到的是一排同名按鈕，眼睛看得到的人也只能靠位置猜——
+ * 而按錯的後果不是白按一次，是把授權點數加到別份計畫上，然後它會在沒人看著時把那些點花掉。
+ * 截斷是因為完整目標可長達 1000 字，塞進小按鈕會把整列撐爆、把中間的摘要壓成幾個字。
+ */
+function campaignShortGoal(goal: string): string {
+  const t = (goal ?? "").trim();
+  return t.length > 12 ? `${t.slice(0, 12)}…` : t;
+}
+
+/**
  * 組代理總指揮：組代理自己的跨專案調度計畫（campaign）。
  *
  * 為什麼獨立成一塊、而不是塞進上面的計畫清單：那份清單是「各專案的代理在做什麼」，
  * 這裡是「組代理在指揮什麼」——同一畫面上混在一起，使用者分不出哪一份是誰派的、
  * 停掉一份會連帶影響什麼。兩者的父子關係在步驟明細裡才講得清楚。
+ *
+ * 這一區的用詞刻意只有兩個：組代理自己的那份叫**調度計畫**，它派到各專案去的叫**子計畫**。
+ * 之前同一畫面上「調度計畫／子計畫／計畫／代理計畫」四種叫法混用，
+ * 於是後端回的錯誤訊息對不上使用者剛按的那顆鈕——人會以為自己按到了別的東西。
  */
-function TeamCommanderBlock({ groupId, level }: { groupId: string; level: GroupCommandLevel }) {
+function TeamCommanderBlock({
+  groupId,
+  level,
+  levelLoading,
+  levelFailed,
+  onRetryLevel,
+  isLeader,
+  myUserId,
+}: {
+  groupId: string;
+  level: GroupCommandLevel;
+  /**
+   * 指揮權「還在查」與「查不到」必須跟「查到了，你沒有這個權限」分開講。
+   *
+   * 不分開的代價：呼叫端在載入中只能給 "none"，這一塊就整個無聲消失，
+   * 組長看到的是「這個功能沒開給我」，於是跑去成員設定改權限、或乾脆改用別的路徑派工——
+   * 而其實只是那一支查詢慢了兩秒。權限這種東西一旦被畫面說錯，人不會回頭再看第二眼。
+   */
+  levelLoading: boolean;
+  levelFailed: boolean;
+  onRetryLevel: () => void;
+  /**
+   * 「發起人或組長以上」的判斷材料，與 canDecideRun 共用同一條規則。
+   *
+   * 後端的 stop／discard 只放行發起人或組長以上。前端若不比照，一般組員會看到別人計畫上的
+   * 「停止」鈕，按下去必定吃 FORBIDDEN——這張卡在收件匣那一區已經守住這條線了
+   * （按了必失敗的鈕就不給按），這一區不跟上就變成同一張卡兩套誠實度標準。
+   */
+  isLeader: boolean;
+  myUserId?: string;
+}) {
   const utils = trpc.useUtils();
   const [goal, setGoal] = useState("");
   const [budget, setBudget] = useState(0);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [addBudget, setAddBudget] = useState(0);
-  const canCommand = levelAtLeast(level, "command");
+  /**
+   * 加授權點數：**每份調度計畫各自一格**，鍵是 campaign id。
+   *
+   * 曾經是單一個 useState(0) 給整塊共用。兩份計畫同時 waiting 時，在 A 列輸入的 200
+   * 會同步顯示在 B 列（連按鈕上的「（+200 點）」都一起變），使用者按了 B 那顆，
+   * 200 點自動核准授權就加到了 B 身上——那是會在沒人看著時被組代理自己花掉的錢，
+   * 而畫面從頭到尾都顯示得「很正確」，事後也查不出是哪一步輸錯。
+   */
+  const [addBudget, setAddBudget] = useState<Record<string, number>>({});
+  const addFor = (id: string) => addBudget[id] ?? 0;
+  // 門檻讀 shared 的 canRunCampaign，與後端守門、成員設定頁的授權說明同一個出處。
+  // 前端自己寫 levelAtLeast(level, "command") 的話，哪天門檻改了就只有這裡不會跟著改。
+  const canCommand = canRunCampaign(level);
   const campaigns = trpc.teamAssistant.campaigns.useQuery(
     { groupId },
-    // 有計畫在跑時才輪詢：靜止的組不該每 10 秒打一次 API
-    { refetchInterval: (q) => (q.state.data?.some((c) => c.status === "running") ? 10_000 : false) },
+    { refetchInterval: (q) => campaignRefetchInterval(q.state.data) },
   );
   const plan = trpc.teamAssistant.planCampaign.useMutation();
   const approve = trpc.teamAssistant.approveCampaign.useMutation();
@@ -1027,8 +1100,30 @@ function TeamCommanderBlock({ groupId, level }: { groupId: string; level: GroupC
     utils.teamAssistant.agentOverview.invalidate();
   };
   const list = campaigns.data ?? [];
-  // 沒有計畫、又沒有權限發起的人不該看到一塊空框——那只會佔版面又沒有下一步
-  if (!canCommand && list.length === 0) return null;
+  const listLoading = campaigns.isLoading;
+  const listFailed = !!campaigns.error;
+  /**
+   * 整塊收掉的條件是「確定沒有東西可看，也確定這個人發不動」。
+   *
+   * 只要指揮權或計畫清單還有任何一項在載入／載入失敗，就得留著這一塊把不確定性講出來：
+   * 空手收掉等於對兩件不同的事給同一個答案（「你沒權限」與「這組沒計畫」），
+   * 而這兩件事的下一步完全相反。
+   */
+  if (!canCommand && !levelLoading && !levelFailed && !listLoading && !listFailed && list.length === 0) return null;
+
+  /**
+   * 動作類錯誤要指名是哪一個動作失敗的。
+   *
+   * 原本四支 mutation 的錯誤共用一句「{message}」，而後端訊息長得很像
+   * （「只有發起人或組長以上可以停止／放棄／續跑組代理調度計畫」），
+   * 使用者剛按了「繼續」卻讀到一句講「停止」的話，只會以為自己按錯鈕又按一次。
+   */
+  const actionError =
+    (approve.error && { what: "核准調度計畫", error: approve.error }) ||
+    (resume.error && { what: "讓調度計畫繼續", error: resume.error }) ||
+    (stop.error && { what: "停止調度計畫", error: stop.error }) ||
+    (discard.error && { what: "放棄調度計畫", error: discard.error }) ||
+    null;
 
   return (
     <div className="team-commander" aria-label="組代理總指揮">
@@ -1036,6 +1131,19 @@ function TeamCommanderBlock({ groupId, level }: { groupId: string; level: GroupC
         <strong>組代理總指揮</strong>
         <Meta>跨專案調度：派工、盯著子計畫、在授權內補救</Meta>
       </div>
+
+      {/* 指揮權讀不到 ≠ 沒有指揮權。講成後者的話，有權限的人會停下來不做事。 */}
+      {levelLoading && !levelFailed && (
+        <Hint layer="always" style={{ marginTop: 8 }}>
+          正在確認你的指揮權限——確認完才知道要不要給你「排調度計畫」的入口。
+        </Hint>
+      )}
+      {levelFailed && (
+        <p className="error" role="alert" style={{ marginTop: 8 }}>
+          指揮權限載入失敗——這不代表你沒有權限，只是這一刻讀不到，所以先不顯示發起入口。
+          <Button variant="ghost" size="sm" onClick={onRetryLevel}>再試一次</Button>
+        </p>
+      )}
 
       {canCommand && (
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginTop: 8 }}>
@@ -1080,7 +1188,24 @@ function TeamCommanderBlock({ groupId, level }: { groupId: string; level: GroupC
       )}
       {plan.error && <p className="error" role="alert">{plan.error.message}</p>}
 
-      {list.length === 0 ? (
+      {/* 載入中／載入失敗都不能長成「還沒有調度計畫」。
+          實際會發生的事：查詢逾時，畫面說「還沒有」，但其實有一份 running 的調度計畫
+          正在派工；組長據此重排第二份，兩份同時對同一批專案派工又各自在授權內自動核准，
+          點數就是雙倍支出，而且沒有任何一個畫面顯示過那份看不見的計畫。
+          語彙照同一張卡的「組執行計畫動態」：載入中…／載入失敗＋再試一次。 */}
+      {listLoading ? (
+        <>
+          <Skeleton height={44} style={{ marginTop: 8 }} />
+          <Hint layer="always" style={{ marginTop: 6 }}>
+            調度計畫載入中…還沒讀到這個組有沒有正在跑的調度計畫，先別急著重排一份。
+          </Hint>
+        </>
+      ) : listFailed ? (
+        <p className="error" role="alert" style={{ marginTop: 8 }}>
+          調度計畫載入失敗——現在無法確認有沒有調度計畫正在派工，這時候重排一份可能會變成兩份同時派工。
+          <Button variant="ghost" size="sm" onClick={() => campaigns.refetch()}>再試一次</Button>
+        </p>
+      ) : list.length === 0 ? (
         <Hint layer="always" style={{ marginTop: 8 }}>
           還沒有組代理調度計畫。上面填一句目標，它會排出「派工到哪幾個案子、怎麼盯、卡住找誰」的計畫給你核准。
         </Hint>
@@ -1090,6 +1215,13 @@ function TeamCommanderBlock({ groupId, level }: { groupId: string; level: GroupC
             const steps = (c.steps ?? []) as GroupCampaignStep[];
             const progress = campaignProgress(steps);
             const open = openId === c.id;
+            /** waiting 在等什麼（budget＝授權不夠停手；human＝組級人工關卡），成因讀 shared 的唯一出處 */
+            const waitReason = c.status === "waiting" ? resolveCampaignWaitReason(steps) : null;
+            const add = addFor(c.id);
+            const shortGoal = campaignShortGoal(c.goal);
+            // 後端：stop／discard 要「發起人或組長以上」；approve／resume 還要再加上 canRunCampaign。
+            // 露出面照抄這兩條，畫面上就不會有一顆按了必吃 FORBIDDEN 的鈕。
+            const mine = canDecideRun({ ownerId: c.userId }, isLeader, myUserId);
             return (
               <div key={c.id} className={`team-run-row is-${c.status}`}>
                 <Chip style={{ margin: 0 }}>{GROUP_RUN_STATUS_LABEL[c.status] ?? c.status}</Chip>
@@ -1099,6 +1231,28 @@ function TeamCommanderBlock({ groupId, level }: { groupId: string; level: GroupC
                   </button>
                   <span title={c.summary}>{c.summary}</span>
                   {c.error && <span className="team-run-row__err" title={c.error}>{c.error}</span>}
+                  {/* 「等待人員」四個字對兩種完全不同的處境給了同一句話：一種要人去做事，
+                      一種要人加授權（或自己去核准那份卡住的子計畫）。不分開講，使用者唯一能做的
+                      就是亂按「繼續」——而預算停手時按「繼續」不加點，執行器下一輪照樣停手，
+                      狀態原地彈回 waiting，看起來就像這顆鈕壞了。 */}
+                  {waitReason && (
+                    <span className="team-commander__steps">
+                      <span className="team-commander__step is-waiting">
+                        {waitReason.kind === "budget"
+                          ? `等你決定授權：「${waitReason.title}」的子計畫估點超出這份調度計畫的授權——${waitReason.detail}。要它往下跑，請在右邊填要加多少授權點數再按「繼續」；或自己到那個專案核准那份子計畫，再按「繼續」。`
+                          : `等人處理：「${waitReason.title}」——${waitReason.detail}。這一關做完了才按「繼續」，加不加授權點數都可以。`}
+                      </span>
+                    </span>
+                  )}
+                  {/* 停止只停組代理，不停已派出的子計畫。這條反直覺行為確認訊息裡有講，
+                      但按完就消失了——列表上看不出來的話，人會以為「已停止」＝不再花任何點。 */}
+                  {c.status === "stopped" && (
+                    <span className="team-commander__steps">
+                      <span className="team-commander__step is-stopped">
+                        已停止的是這份調度計畫本身，組代理不會再下新指令；先前派出去的子計畫仍在各專案照常執行、照常花點，要停請到那些專案停。
+                      </span>
+                    </span>
+                  )}
                   {open && (
                     <span className="team-commander__steps">
                       {steps.map((s) => (
@@ -1112,21 +1266,31 @@ function TeamCommanderBlock({ groupId, level }: { groupId: string; level: GroupC
                   )}
                 </span>
                 <span className="team-run-row__meta">
-                  {progress.done}/{progress.total} 步・已自動核准 {c.spentPoints}/{c.budgetPoints} 點
+                  {/* 授權與已用都是**估點**（子計畫核准當下的估算），這一區原本是全卡唯一沒標「估」的
+                      數字，讀起來像結帳金額。其他區塊一律寫「估 N 點」，這裡不跟上就會被當成實扣。 */}
+                  {progress.done}/{progress.total} 步・已自動核准 估 {c.spentPoints} 點／授權 估 {c.budgetPoints} 點
                   <span style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
-                    {c.status === "awaiting_approval" && canCommand && (
-                      <>
-                        <ConfirmButton
-                          triggerClassName="btn-tonal btn-sm"
-                          title="核准後組代理才會開始下令"
-                          message={`核准這份調度計畫？\n組代理會依計畫派工，並在 ${c.budgetPoints} 點授權內自動核准子計畫。`}
-                          confirmLabel="核准"
-                          onConfirm={async () => { await approve.mutateAsync({ runId: c.id }); refresh(); }}
-                        >核准</ConfirmButton>
-                        <Button variant="ghost" size="sm" onClick={async () => { await discard.mutateAsync({ runId: c.id }); refresh(); }}>放棄</Button>
-                      </>
+                    {c.status === "awaiting_approval" && canCommand && mine && (
+                      <ConfirmButton
+                        triggerClassName="btn-tonal btn-sm"
+                        title="核准後組代理才會開始下令"
+                        message={
+                          c.budgetPoints > 0
+                            ? `核准這份調度計畫？\n組代理會依計畫派工，並在 估 ${c.budgetPoints} 點的授權內自動核准子計畫；超過授權就停下來問你。`
+                            // 授權 0 點時原本也說「會在 0 點授權內自動核准子計畫」，讀起來像「它會自己處理」，
+                            // 實際上它派出第一份子計畫就停下來等人——期待與行為差了一整晚。
+                            : "核准這份調度計畫？\n這份的自動核准授權是 0 點：組代理會派出第一份子計畫，然後**停下來等你核准**，不會自己往下跑。要它連續跑，請在核准後於「等待人員」那一列補上授權點數再按「繼續」。"
+                        }
+                        confirmLabel="核准"
+                        onConfirm={async () => { await approve.mutateAsync({ runId: c.id }); refresh(); }}
+                      >核准</ConfirmButton>
                     )}
-                    {(c.status === "running" || c.status === "waiting") && (
+                    {/* 放棄只動一份還沒核准、沒花過任何點的調度計畫，所以後端只要「發起人或組長以上」，
+                        不必到 command——露出面跟著後端，別多擋也別少擋。 */}
+                    {c.status === "awaiting_approval" && mine && (
+                      <Button variant="ghost" size="sm" onClick={async () => { await discard.mutateAsync({ runId: c.id }); refresh(); }}>放棄</Button>
+                    )}
+                    {(c.status === "running" || c.status === "waiting") && mine && (
                       <ConfirmButton
                         triggerClassName="btn-ghost btn-sm"
                         title="組代理不再下新指令；已派出的子計畫不受影響"
@@ -1135,35 +1299,53 @@ function TeamCommanderBlock({ groupId, level }: { groupId: string; level: GroupC
                         onConfirm={async () => { await stop.mutateAsync({ runId: c.id }); refresh(); }}
                       >停止</ConfirmButton>
                     )}
-                    {c.status === "waiting" && canCommand && (
+                    {c.status === "waiting" && canCommand && mine && (
                       <>
                         <input
                           type="number"
                           min={0}
                           max={100000}
-                          value={addBudget}
-                          aria-label="加多少自動核准授權"
+                          value={add}
+                          // 標籤與按鈕都要點名是哪一份調度計畫：同時有兩份在等人時，
+                          // 四個一模一樣的「繼續」＋兩個一模一樣的輸入框，按錯就是把授權加到別份上。
+                          aria-label={`為「${shortGoal}」加多少自動核准授權（估點）`}
                           style={{ width: 84 }}
-                          onChange={(e) => setAddBudget(Math.max(0, Number(e.target.value) || 0))}
+                          onChange={(e) => {
+                            const v = Math.max(0, Number(e.target.value) || 0);
+                            setAddBudget((prev) => ({ ...prev, [c.id]: v }));
+                          }}
                         />
                         <Button
                           size="sm"
-                          onClick={async () => { await resume.mutateAsync({ runId: c.id, addBudgetPoints: addBudget }); setAddBudget(0); refresh(); }}
+                          aria-label={`繼續執行「${shortGoal}」${add > 0 ? `，加授權 估 ${add} 點` : "，不加授權"}`}
+                          onClick={async () => {
+                            await resume.mutateAsync({ runId: c.id, addBudgetPoints: add });
+                            setAddBudget((prev) => ({ ...prev, [c.id]: 0 }));
+                            refresh();
+                          }}
                         >
-                          繼續{addBudget > 0 ? `（+${addBudget} 點）` : ""}
+                          繼續「{shortGoal}」{add > 0 ? `（+估 ${add} 點）` : ""}
                         </Button>
                       </>
                     )}
                   </span>
+                  {/* 預算停手且沒填點數：按下去會原地彈回 waiting。不先講清楚，使用者會按第二次、第三次，
+                      然後回報「繼續鈕沒反應」。仍留著讓他按——他可能剛自己去核准了那份子計畫，
+                      那種情況下不加點按繼續才是對的。 */}
+                  {waitReason?.kind === "budget" && add === 0 && canCommand && mine && (
+                    <Meta as="span" style={{ display: "block", marginTop: 4 }}>
+                      沒填授權點數就按「繼續」，除非你已經自己核准了那份子計畫，否則下一輪還是會停在同一步——它缺的是授權，不是再按一次。
+                    </Meta>
+                  )}
                 </span>
               </div>
             );
           })}
         </div>
       )}
-      {(approve.error || stop.error || discard.error || resume.error) && (
+      {actionError && (
         <p className="error" role="alert">
-          {(approve.error ?? stop.error ?? discard.error ?? resume.error)!.message}
+          {actionError.what}失敗：{actionError.error.message}
         </p>
       )}
     </div>
@@ -1851,7 +2033,17 @@ function TeamAssistantCard({
         </div>
       </div>
 
-      <TeamCommanderBlock groupId={groupId} level={(commandLevel.data ?? "none") as GroupCommandLevel} />
+      {/* level 在載入／失敗時都會退成 "none"，所以那兩個狀態必須另外傳下去分開講——
+          否則整塊會在查詢還沒回來時無聲消失，組長讀到的是「這功能沒開給我」。 */}
+      <TeamCommanderBlock
+        groupId={groupId}
+        level={(commandLevel.data ?? "none") as GroupCommandLevel}
+        levelLoading={commandLevel.isLoading}
+        levelFailed={!!commandLevel.error}
+        onRetryLevel={() => { void commandLevel.refetch(); }}
+        isLeader={isLeader}
+        myUserId={myUserId}
+      />
 
       {/* ── 組彙總對話 ── */}
       <div className="team-chat-block">
