@@ -8,6 +8,7 @@ import { createInvite, attachExistingUser, hashPassword } from "../services/auth
 import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 import { sendEmail, isEmailConfigured, type EmailStatus } from "../services/email";
 import { groupUsage } from "../services/points";
+import { canRunCommand, resolveCommandLevel } from "../../shared/groupAgent";
 
 /** 團隊管理權檢查：開發者或該團隊 admin */
 function assertTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, teamId: string): void {
@@ -145,6 +146,7 @@ export const adminRouter = router({
         weeklyOverride: schema.groupMembers.weeklyPointsOverride,
         budget: schema.groupMembers.budgetPoints,
         canDispatchAgent: schema.groupMembers.canDispatchAgent,
+        agentCommandLevel: schema.groupMembers.agentCommandLevel,
         name: schema.users.name,
         email: schema.users.email,
         status: schema.users.status,
@@ -192,20 +194,28 @@ export const adminRouter = router({
       group: { id: group.id, name: group.name, createdAt: group.createdAt },
       // 組長排前、再組員，同角色按名字——「這一組誰帶、誰在裡面」一眼分明
       members: memberRows
-        .map((m) => ({
-          userId: m.userId,
-          name: m.name ?? "?",
-          email: m.email ?? "",
-          role: m.role,
-          isSuperAdmin: m.isSuperAdmin ?? false,
-          disabled: m.status === "disabled",
-          weekly: usageBy.get(m.userId)?.weekly ?? 0,
-          total: usageBy.get(m.userId)?.total ?? 0,
-          weeklyOverride: m.weeklyOverride ?? null, // null＝跟組
-          budget: m.budget ?? null, // null＝不限（未分配個人預算）
-          canDispatch: m.role !== "member" || m.canDispatchAgent === true,
-          lastLoginAt: loginBy.get(m.userId) ?? null,
-        }))
+        .map((m) => {
+          // 指揮權等級要跟著回傳，設定 UI 的四級選單才選得到現值（只回布林的話，
+          // supervise／command 在畫面上一律長得跟 dispatch 一樣，管理員永遠不知道自己給出了什麼）。
+          // canDispatch 改由等級推導，與 quota.usage 同一條規則，兩支清單不會各報一個答案。
+          const commandLevel = resolveCommandLevel(m.role, m);
+          return {
+            userId: m.userId,
+            name: m.name ?? "?",
+            email: m.email ?? "",
+            role: m.role,
+            isSuperAdmin: m.isSuperAdmin ?? false,
+            disabled: m.status === "disabled",
+            weekly: usageBy.get(m.userId)?.weekly ?? 0,
+            total: usageBy.get(m.userId)?.total ?? 0,
+            weeklyOverride: m.weeklyOverride ?? null, // null＝跟組
+            budget: m.budget ?? null, // null＝不限（未分配個人預算）
+            /** 組代理指揮權等級（組長以上恆為 command，不看欄位） */
+            commandLevel,
+            canDispatch: canRunCommand(commandLevel, "dispatch"),
+            lastLoginAt: loginBy.get(m.userId) ?? null,
+          };
+        })
         .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name, "zh-Hant") : a.role === "leader" ? -1 : 1)),
       projects: projectRows.map((p) => ({
         id: p.id,

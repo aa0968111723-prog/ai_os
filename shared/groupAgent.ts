@@ -94,6 +94,24 @@ export function canRunCommand(level: GroupCommandLevel, kind: GroupCommandKind):
   return levelAtLeast(level, COMMAND_MIN_LEVEL[kind]);
 }
 
+/**
+ * 發起／核准／續跑一份 campaign（L3 常駐總指揮）所需的最低等級。
+ *
+ * 為什麼不塞進 COMMAND_MIN_LEVEL：那張表的鍵是「一道人按下去的指令」——按一次、花一次、有人看著。
+ * campaign 不是指令，是「授權組代理在無人盯著時反覆下那些指令」，量級完全不同。
+ *
+ * 但它必須跟 COMMAND_MIN_LEVEL 一樣是**唯一出處**：後端守門、前端露出、成員設定頁的授權說明
+ * 全部讀這一個常數。任何一邊自己寫死等級字串，就會回到這個常數存在之前的狀態——
+ * 後端只驗 supervise、前端只露給 command、設定頁又跟組長說「可監督」不會自動花錢：
+ * 組長照著那段文案決定只給「可監督」，被授權的人卻能直接打 API 排一份帶自動核准授權的計畫
+ * 再自己核准。組長以為沒授出去的「無人盯著時自動花點」，其實授出去了，而且畫面上看不到那份計畫。
+ */
+export const CAMPAIGN_MIN_LEVEL: GroupCommandLevel = "command";
+
+export function canRunCampaign(level: GroupCommandLevel): boolean {
+  return levelAtLeast(level, CAMPAIGN_MIN_LEVEL);
+}
+
 export const taskPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
 
 /**
@@ -184,6 +202,8 @@ export interface GroupCampaignStep {
   childRunId?: string;
   childStatus?: string;
   attempts?: number;
+  /** 因暫時性阻礙（併發鎖／節流）空轉了幾輪；成功或轉 waiting 後歸零 */
+  transientWaits?: number;
   estPoints?: number;
   result?: string;
   error?: string;
@@ -216,6 +236,25 @@ export type GroupPlanDraft = z.infer<typeof groupPlanDraftSchema>;
 
 /** 一份 campaign 最多幾步：組級調度再多就不是計畫、是失控 */
 export const MAX_CAMPAIGN_STEPS = 12;
+/**
+ * 遇到「暫時性阻礙」最多空轉幾輪才改成停下來等人（8 秒一輪 ≈ 8 分鐘）。
+ *
+ * 什麼算暫時性：核准撞到同專案的併發鎖（等前一份跑完就能核准）、派工撞到規劃節流
+ * （每人每分鐘 4 次）。這些都不是輸入錯誤，隔一下就會好——照失敗處理的話，
+ * 組長手上剛好在跑一份代理計畫，就足以讓整份 campaign 死掉，而前面已核准的子計畫還在燒點。
+ * 但也不能無限等：一份其實永遠過不了的計畫在清單上裝忙一整天，沒人知道要去停哪一份。
+ */
+export const MAX_TRANSIENT_WAITS = 60;
+
+/**
+ * 這個錯誤是不是「等一下就會好」。
+ *
+ * 用 tRPC 錯誤碼判斷而不是比對中文訊息：訊息文案一改，這裡就會靜默失效，
+ * 而失效的方向是「把暫時性阻礙當成永久失敗」——整份計畫死掉，最難查。
+ */
+export function isTransientCommandError(code: string | undefined): boolean {
+  return code === "CONFLICT" || code === "TOO_MANY_REQUESTS" || code === "SERVICE_UNAVAILABLE";
+}
 /** 單一 watch 步驟最多重新規劃幾次（硬頂；LLM 給再大也收斂到這裡） */
 export const MAX_WATCH_ATTEMPTS = 3;
 
@@ -291,6 +330,45 @@ export function skipUnreachableSteps(steps: GroupCampaignStep[]): number {
 }
 
 /**
+ * 人按下「繼續」時，各個 waiting 步驟該變成什麼（純函式：單元測試就能證明它不會回到原地）。
+ *
+ * 兩種 waiting 的語意完全不同，一律回 pending 會出事：
+ *  - wait_for_human：這一步的內容本來就是「等人」，人回來按了繼續＝這道關卡已經過了 → done。
+ *    若回 pending，下一輪執行器對 wait_for_human 唯一的動作就是再設回 waiting，
+ *    於是 resolveCampaignOutcome 永遠回 null、依賴它的步驟永遠 pending、
+ *    skipUnreachableSteps 也收不掉（waiting 不在 dead 集合裡）——使用者按幾次繼續都只會
+ *    看到「等待人員」，整份計畫永遠掛在清單上。
+ *  - watch（子計畫估點超出授權而停手）：加了授權之後要重新判一次要不要核准 → pending，
+ *    讓執行器再輪詢一遍。
+ * 回傳被放行的人工關卡 id，讓呼叫端能誠實記一筆「這一步是人放行的」。
+ */
+export function resumeCampaignSteps(steps: GroupCampaignStep[]): { steps: GroupCampaignStep[]; passedHumanGates: string[] } {
+  const passedHumanGates: string[] = [];
+  const next = steps.map((s) => {
+    if (s.status !== "waiting") return s;
+    if (s.kind === "wait_for_human") {
+      passedHumanGates.push(s.id);
+      return { ...s, status: "done" as const, result: "人已確認，放行", error: undefined };
+    }
+    return { ...s, status: "pending" as const, error: undefined };
+  });
+  return { steps: next, passedHumanGates };
+}
+
+/**
+ * 這份計畫還有沒有「執行器現在就推得動」的事。
+ *
+ * 用途是把 run 的 waiting 與 running 分清楚：一份計畫可能有多條獨立支線，
+ * 其中一條卡在人工關卡（waiting）、另一條的子計畫還在跑。若只要有任何 waiting 步驟就把整份
+ * 標成 waiting，執行器（只撈 running）就再也不會回來輪詢另一條支線——已經花了錢的子計畫
+ * 跑完了不會被標完成、失敗了也不會用掉重試額度，而畫面只說「等待人員」，
+ * 看起來像只有一條支線在等人。
+ */
+export function campaignHasActiveWork(steps: GroupCampaignStep[]): boolean {
+  return steps.some((s) => s.status === "running") || nextRunnableStep(steps) !== undefined;
+}
+
+/**
  * 由步驟狀態決定整份計畫的終局（還沒結束回 null）。
  *
  * 規則刻意直白：還有 running/waiting/pending → 未結束；有任何 failed → failed；
@@ -314,6 +392,28 @@ export function resolveCampaignOutcome(steps: GroupCampaignStep[]): "done" | "fa
 export function withinCampaignBudget(input: { budgetPoints: number; spentPoints: number; stepPoints: number }): boolean {
   if (input.budgetPoints <= 0) return false;
   return input.spentPoints + input.stepPoints <= input.budgetPoints;
+}
+
+/** 一份 waiting 計畫在等什麼（budget＝授權不夠停手；human＝組級人工關卡） */
+export type CampaignWaitReason =
+  | { kind: "budget"; stepId: string; title: string; detail: string }
+  | { kind: "human"; stepId: string; title: string; detail: string };
+
+/**
+ * waiting 的成因。
+ *
+ * 為什麼要有這一支：run 層只有一個 waiting 狀態，但它有兩種完全不同的解法——人工關卡要人去做事，
+ * 預算停手要人加授權（或自己去核准那份子計畫）。畫面上不分成因，使用者唯一能做的就是亂按「繼續」；
+ * 而預算停手時不加點就按繼續，執行器下一輪照樣判 hold，狀態原地彈回 waiting，看起來就像功能壞掉。
+ * watch 步驟會轉 waiting 的唯一來源就是預算閘，所以用 kind 分即可。
+ */
+export function resolveCampaignWaitReason(steps: GroupCampaignStep[]): CampaignWaitReason | null {
+  const step = steps.find((s) => s.status === "waiting");
+  if (!step) return null;
+  const detail = (step.error || step.note || "").trim();
+  return step.kind === "watch"
+    ? { kind: "budget", stepId: step.id, title: step.title, detail: detail || "子計畫的估點超出本次授權" }
+    : { kind: "human", stepId: step.id, title: step.title, detail: detail || "需要有人處理後才能繼續" };
 }
 
 /** watch 步驟這一輪該做什麼（純決策，執行留給執行器） */

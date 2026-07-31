@@ -96,15 +96,20 @@ export async function getGroupCommandLevel(auth: AuthState, groupId: string): Pr
   return resolveCommandLevel(role, member ?? null);
 }
 
-/** 沒有足夠等級就擋（訊息點名缺什麼權，使用者才知道要去找誰開） */
-export async function assertGroupCommand(auth: AuthState, groupId: string, kind: GroupCommandKind): Promise<GroupCommandLevel> {
-  const level = await getGroupCommandLevel(auth, groupId);
+/** 等級不足就擋（唯一一句訊息；讀等級與已知等級兩條路共用，兩邊不會分岔） */
+export function assertCommandLevel(level: GroupCommandLevel, kind: GroupCommandKind): void {
   if (!canRunCommand(level, kind)) {
     throw new TRPCError({
       code: "FORBIDDEN",
       message: `你的組代理權限不足以${COMMAND_LABEL[kind]}——請組長在成員設定把你的指揮權調到「${kind === "dispatch" ? "可派工" : "可監督"}」以上`,
     });
   }
+}
+
+/** 沒有足夠等級就擋（訊息點名缺什麼權，使用者才知道要去找誰開） */
+export async function assertGroupCommand(auth: AuthState, groupId: string, kind: GroupCommandKind): Promise<GroupCommandLevel> {
+  const level = await getGroupCommandLevel(auth, groupId);
+  assertCommandLevel(level, kind);
   return level;
 }
 
@@ -139,12 +144,19 @@ export async function runGroupCommand(input: {
   /** campaign 自動執行時帶上，事件才連得回那份計畫 */
   campaignRunId?: string;
   campaignStepId?: string;
-  /** 略過權限檢查（僅供 campaign 執行器：發起人的等級在核准 campaign 當下就驗過了） */
-  skipLevelCheck?: boolean;
+  /**
+   * 已解析好的指揮權等級（僅供 campaign 執行器）。
+   *
+   * 刻意不是「略過檢查」的布林：那個版本的意思是「核准 campaign 當下驗過就一路通行」，
+   * 於是組長事後把人降權，執行器仍以原等級繼續下令花錢——收權在整條 L3 路徑上無聲失效。
+   * 改成傳入等級之後，執行器每輪重讀一次現值，檢查照跑，只是省掉重複的 DB 查詢。
+   */
+  level?: GroupCommandLevel;
 }): Promise<GroupCommandResult> {
   const { auth, groupId, command } = input;
   requireGroup(auth, groupId);
-  if (!input.skipLevelCheck) await assertGroupCommand(auth, groupId, command.kind);
+  if (input.level !== undefined) assertCommandLevel(input.level, command.kind);
+  else await assertGroupCommand(auth, groupId, command.kind);
   const origin = input.origin ?? "team_card";
   const actorType = origin === "campaign" ? "ai" : "human";
 

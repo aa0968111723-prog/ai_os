@@ -95,6 +95,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "tasks.decideApproval": "人類任務：核准裁決",
   "teamAssistant.ask": "詢問團隊 AI 助手",
   "teamAssistant.dispatch": "團隊代理派工到專案",
+  "quota.setMemberCommandLevel": "調整組員的組代理指揮權",
   "teamAssistant.command": "組代理下指令",
   "teamAssistant.commandBatch": "組代理批次下指令",
   "teamAssistant.planCampaign": "組代理規劃調度計畫",

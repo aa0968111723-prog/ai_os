@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -6,14 +6,19 @@ import type { AuthState } from "./auth";
 import { isMockMode } from "./fal";
 import { nimComplete, NimServiceError } from "./nvidia-nim";
 import { listGroupTasks } from "./taskCore";
-import { assertGroupCommand, recordGroupAgentEventSafely } from "./groupCommand";
+import { getGroupCommandLevel, recordGroupAgentEventSafely } from "./groupCommand";
 import {
+  CAMPAIGN_MIN_LEVEL,
   MAX_CAMPAIGN_STEPS,
   MAX_WATCH_ATTEMPTS,
+  campaignHasActiveWork,
+  canRunCampaign,
   groupPlanDraftSchema,
   resolveCampaignOutcome,
+  resumeCampaignSteps,
   skipUnreachableSteps,
   type GroupCampaignStep,
+  type GroupCommandLevel,
   type GroupPlanDraft,
   type GroupRunStatus,
 } from "../../shared/groupAgent";
@@ -192,8 +197,8 @@ export async function planGroupCampaign(input: {
 }): Promise<GroupCampaignRow> {
   const { auth, groupId } = input;
   requireGroup(auth, groupId);
-  // 發起 campaign＝要求組代理在無人盯著時自己下令，所以要最高等級
-  await assertGroupCommand(auth, groupId, "approve_run");
+  // 發起 campaign＝要求組代理在無人盯著時自己下令，所以要最高等級（command）
+  await assertCampaignAuthority(auth, groupId);
   const goal = input.goal.trim();
   if (goal.length < 5) throw new TRPCError({ code: "BAD_REQUEST", message: "目標至少 5 個字" });
   if (goal.length > 1000) throw new TRPCError({ code: "BAD_REQUEST", message: "目標太長（最多 1000 字）" });
@@ -306,6 +311,39 @@ ${memberLines}
 
 /* ── 生命週期 ── */
 
+/**
+ * campaign 的等級閘（發起／核准／續跑共用一支）。
+ *
+ * 分開寫的話遲早只補到其中一支，另外兩支就是同一個洞——而這個洞的內容是
+ * 「未達 command 的人可以開一個在無人盯著時自動花錢的常駐代理」。
+ * 門檻讀 shared 的 CAMPAIGN_MIN_LEVEL，與前端露出、成員設定頁的授權說明同一個出處。
+ */
+async function assertCampaignAuthority(auth: AuthState, groupId: string): Promise<GroupCommandLevel> {
+  const level = await getGroupCommandLevel(auth, groupId);
+  if (!canRunCampaign(level)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "發起或掌控組代理調度計畫需要「可總指揮」權限——那等於授權它在沒人看著時自動核准子計畫、自動花點，請組長到成員設定調整",
+    });
+  }
+  return level;
+}
+
+/**
+ * 「發起人或組長以上」——生命週期四支共用的檢查。
+ *
+ * 抽成一支而不是各寫一份：任何一支漏掉，被授權的一般組員就能單方面動別人的計畫。
+ * resume 漏掉尤其致命——它是唯一會調高 budgetPoints 的入口，而 budgetPoints 是
+ * 「組代理在無人盯著時能自動花多少」的唯一人工閘，且執行器是以**發起人**身分下令、
+ * 扣發起人的額度：讓旁人拉高它，等於替發起人簽了一張他沒同意的授權書。
+ */
+function assertCampaignOwnerOrLeader(auth: AuthState, run: GroupCampaignRow, action: string): void {
+  const role = requireGroup(auth, run.groupId);
+  if (run.userId !== auth.user.id && role === "member") {
+    throw new TRPCError({ code: "FORBIDDEN", message: `只有發起人或組長以上可以${action}組代理調度計畫` });
+  }
+}
+
 async function loadCampaign(auth: AuthState, runId: string): Promise<GroupCampaignRow> {
   const [run] = await db.select().from(schema.groupAgentRuns).where(eq(schema.groupAgentRuns.id, runId));
   if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份組代理計畫" });
@@ -316,11 +354,8 @@ async function loadCampaign(auth: AuthState, runId: string): Promise<GroupCampai
 /** 核准：這一刻起背景執行器才會開始下令（含花點） */
 export async function approveGroupCampaign(auth: AuthState, runId: string): Promise<GroupCampaignRow> {
   const run = await loadCampaign(auth, runId);
-  await assertGroupCommand(auth, run.groupId, "approve_run");
-  const role = requireGroup(auth, run.groupId);
-  if (run.userId !== auth.user.id && role === "member") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以核准組代理計畫" });
-  }
+  await assertCampaignAuthority(auth, run.groupId);
+  assertCampaignOwnerOrLeader(auth, run, "核准");
   const updated = await db
     .update(schema.groupAgentRuns)
     .set({ status: "running", updatedAt: new Date() })
@@ -350,10 +385,7 @@ export async function approveGroupCampaign(auth: AuthState, runId: string): Prom
  */
 export async function stopGroupCampaign(auth: AuthState, runId: string): Promise<GroupCampaignRow> {
   const run = await loadCampaign(auth, runId);
-  const role = requireGroup(auth, run.groupId);
-  if (run.userId !== auth.user.id && role === "member") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以停止組代理計畫" });
-  }
+  assertCampaignOwnerOrLeader(auth, run, "停止");
   if (run.status !== "running" && run.status !== "waiting") {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份組代理計畫已經結束，不需要停止" });
   }
@@ -380,10 +412,7 @@ export async function stopGroupCampaign(auth: AuthState, runId: string): Promise
 /** 放棄一份還沒核准的計畫（純標記，沒有花任何點） */
 export async function discardGroupCampaign(auth: AuthState, runId: string): Promise<GroupCampaignRow> {
   const run = await loadCampaign(auth, runId);
-  const role = requireGroup(auth, run.groupId);
-  if (run.userId !== auth.user.id && role === "member") {
-    throw new TRPCError({ code: "FORBIDDEN", message: "只有發起人或組長以上可以放棄組代理計畫" });
-  }
+  assertCampaignOwnerOrLeader(auth, run, "放棄");
   const [discarded] = await db
     .update(schema.groupAgentRuns)
     .set({ status: "discarded", updatedAt: new Date() })
@@ -415,13 +444,16 @@ export async function resumeGroupCampaign(input: {
   addBudgetPoints?: number;
 }): Promise<GroupCampaignRow> {
   const run = await loadCampaign(input.auth, input.runId);
-  await assertGroupCommand(input.auth, run.groupId, "approve_run");
+  await assertCampaignAuthority(input.auth, run.groupId);
+  // 加授權＝調高「無人盯著時能自動花多少」，只有發起人或組長以上可以做
+  assertCampaignOwnerOrLeader(input.auth, run, "續跑");
   if (run.status !== "waiting") {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這份計畫目前沒有在等人" });
   }
   const add = Math.max(0, Math.min(100_000, Math.floor(input.addBudgetPoints ?? 0)));
-  const steps = (run.steps as GroupCampaignStep[]).map((s) =>
-    s.status === "waiting" ? { ...s, status: "pending" as const, error: undefined } : s);
+  // 人工關卡標 done、預算停手回 pending——一律回 pending 的話 wait_for_human 會被執行器
+  // 再設回 waiting，使用者按幾次「繼續」都回到原地（見 resumeCampaignSteps 的註解）
+  const { steps, passedHumanGates } = resumeCampaignSteps(run.steps as GroupCampaignStep[]);
   const [resumed] = await db
     .update(schema.groupAgentRuns)
     .set({
@@ -440,8 +472,8 @@ export async function resumeGroupCampaign(input: {
     eventType: "observation",
     actorType: "human",
     actorId: input.auth.user.id,
-    summary: add > 0 ? `使用者讓計畫繼續，並加了 ${add} 點自動核准授權` : "使用者讓計畫繼續",
-    data: { addBudgetPoints: add, budgetPoints: resumed.budgetPoints },
+    summary: `${passedHumanGates.length ? `使用者放行了 ${passedHumanGates.length} 道人工關卡並讓計畫繼續` : "使用者讓計畫繼續"}${add > 0 ? `，並加了 ${add} 點自動核准授權` : ""}`,
+    data: { addBudgetPoints: add, budgetPoints: resumed.budgetPoints, passedHumanGates },
   });
   return resumed;
 }
@@ -460,6 +492,30 @@ export async function listGroupCampaigns(auth: AuthState, groupId: string, limit
     .limit(Math.max(1, Math.min(50, limit)));
 }
 
+/**
+ * 全組的組代理事件軌跡（含**不屬於任何 campaign** 的單發指令）。
+ *
+ * 為什麼需要這一支：L1／L2 從卡片或對話框按下的每一道令，事件的 runId 都是 null，
+ * 而 getGroupCampaign 只查 `runId = 某份計畫`——寫得進去、讀不出來。
+ * 「誰在什麼時候替誰核准了一份會花點的計畫」是這整套裡最該被追溯的一件事，
+ * 只能靠人進資料庫下 SQL 才看得到，等於這條軌跡少了一半價值。
+ */
+export async function listGroupAgentEvents(
+  auth: AuthState,
+  groupId: string,
+  options?: { limit?: number; campaignOnly?: boolean },
+): Promise<Array<typeof schema.groupAgentEvents.$inferSelect>> {
+  requireGroup(auth, groupId);
+  const conditions = [eq(schema.groupAgentEvents.groupId, groupId)];
+  if (options?.campaignOnly) conditions.push(isNotNull(schema.groupAgentEvents.runId));
+  return db
+    .select()
+    .from(schema.groupAgentEvents)
+    .where(and(...conditions))
+    .orderBy(desc(schema.groupAgentEvents.createdAt))
+    .limit(Math.max(1, Math.min(200, options?.limit ?? 60)));
+}
+
 /** 單份 campaign ＋ 事件軌跡（詳情頁） */
 export async function getGroupCampaign(auth: AuthState, runId: string): Promise<{ run: GroupCampaignRow; events: Array<typeof schema.groupAgentEvents.$inferSelect> }> {
   const run = await loadCampaign(auth, runId);
@@ -473,18 +529,69 @@ export async function getGroupCampaign(auth: AuthState, runId: string): Promise<
 }
 
 /**
+ * 只把步驟落庫，不折整份計畫的終局（終局判斷是 settleCampaign 的事）。
+ *
+ * 為什麼要跟 settleCampaign 分開：executeStep 把一步標成 running 之後、**真正下令之前**必須先落庫，
+ * 但那一刻這一步還沒有終局，交給 settleCampaign 會被誤折。
+ * 為什麼一定要先落庫：dispatch 中間夾著 planAgentCore 的 LLM 規劃（數十秒且會重試），
+ * 比關機 drain 的上限長得多。不先寫的話，關機時剛好在派工的那一步，重開機後 steps 裡它還是
+ * pending，執行器會再挑中同一步、再規劃一次——同一個目標長出第二份待核子計畫，watch 只綁得到
+ * 新的那份，舊的孤兒留在專案的待核清單上，人如果照著按下核准就是真的跑兩輪、真的花兩份點。
+ *
+ * 同樣套 CAS（只在計畫仍活著時寫）：使用者可能就在這段期間按了停止。
+ */
+export async function saveCampaignSteps(run: GroupCampaignRow, steps: GroupCampaignStep[]): Promise<boolean> {
+  const written = await db
+    .update(schema.groupAgentRuns)
+    .set({ steps, updatedAt: new Date() })
+    .where(and(
+      eq(schema.groupAgentRuns.id, run.id),
+      inArray(schema.groupAgentRuns.status, ["running", "waiting"]),
+    ))
+    .returning({ id: schema.groupAgentRuns.id });
+  return written.length > 0;
+}
+
+/**
  * 把步驟狀態折成整份計畫的狀態並寫回（執行器每推進一步後呼叫）。
  * 純粹的收尾判斷在 shared 的 resolveCampaignOutcome，這裡只負責落庫與記終局事件。
  */
 export async function settleCampaign(run: GroupCampaignRow, steps: GroupCampaignStep[]): Promise<GroupRunStatus> {
   skipUnreachableSteps(steps);
   const outcome = resolveCampaignOutcome(steps);
-  const waiting = steps.some((s) => s.status === "waiting");
-  const status: GroupRunStatus = outcome ?? (waiting ? "waiting" : "running");
-  await db
+  // waiting 只在「執行器現在真的推不動任何事」時才算數。有另一條支線還在跑就必須維持 running，
+  // 否則 tick（只撈 running）再也不會回來輪詢那條支線——已經花錢的子計畫跑完了不會被標完成、
+  // 失敗了也不會用掉重試額度，而畫面只說「等待人員」。
+  const status: GroupRunStatus = outcome
+    ?? (campaignHasActiveWork(steps) ? "running" : steps.some((s) => s.status === "waiting") ? "waiting" : "running");
+  // 什麼都沒變就不要寫。原本每 8 秒無條件重寫整包 steps jsonb 有兩個代價：
+  //  1. 寫入放大——一份盯著長跑子計畫的計畫，可以連續數天每 8 秒產生一列 dead tuple。
+  //  2. 更糟的是 updatedAt 每輪都被刷新，於是所有以「多久沒動」為判準的陳屍偵測全變成死碼：
+  //     一份永遠卡住的計畫在維運端看起來永遠「剛剛才動過」。
+  // 不寫的時候 updatedAt 就真的是「最後一次有進展」的時間，陳屍偵測才有東西可依據。
+  const unchanged = status === run.status && JSON.stringify(steps) === JSON.stringify(run.steps);
+  if (unchanged) return status;
+  // CAS：手上的 steps 是這一輪進場時的快照，而中間可能等了一次數十秒的 LLM 規劃。
+  // 使用者在那段期間按下的「停止」走的是 router（不受執行器的 advisory lock 管），
+  // 無條件覆寫會把 stopped 連同被標停的步驟整包蓋回 running＋舊快照——下一輪 tick 又撈起來
+  // 繼續派工、繼續在授權內自動核准花點。使用者看到「已停止」跳回「執行中」，
+  // 而且沒有任何地方說得出為什麼按了停止還在花錢。寫不進去就整輪放棄寫回。
+  const written = await db
     .update(schema.groupAgentRuns)
     .set({ status, steps, updatedAt: new Date() })
-    .where(eq(schema.groupAgentRuns.id, run.id));
+    .where(and(
+      eq(schema.groupAgentRuns.id, run.id),
+      inArray(schema.groupAgentRuns.status, ["running", "waiting"]),
+    ))
+    .returning({ status: schema.groupAgentRuns.status });
+  if (written.length === 0) {
+    // 這一輪的結果作廢：使用者已經停止／放棄，或另一個 process 已經收尾
+    const [current] = await db
+      .select({ status: schema.groupAgentRuns.status })
+      .from(schema.groupAgentRuns)
+      .where(eq(schema.groupAgentRuns.id, run.id));
+    return (current?.status as GroupRunStatus) ?? "stopped";
+  }
   if (outcome) {
     await recordGroupAgentEventSafely({
       groupId: run.groupId,

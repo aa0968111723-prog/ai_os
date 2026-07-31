@@ -2135,7 +2135,10 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 }
 .team-run-row__copy { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 7px; }
 .team-run-row__copy > a { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.team-run-row__copy > span:not(.team-run-row__track):not(.team-run-row__step):not(.team-run-row__err) {
+/* 這條「單行省略」是給摘要文字用的。展開的組代理步驟清單（.team-commander__steps）
+   同樣是 __copy 的 span 子層，若被這條掃到，整份步驟會被壓成一行然後省略號吃掉——
+   點了「展開」卻只看得到第一步的前半句，等於這個展開沒有作用。 */
+.team-run-row__copy > span:not(.team-run-row__track):not(.team-run-row__step):not(.team-run-row__err):not(.team-commander__steps) {
   overflow: hidden; color: var(--fg-secondary); text-overflow: ellipsis; white-space: nowrap;
 }
 .team-run-row__track {
@@ -2149,6 +2152,103 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .team-run-row.is-done .team-run-row__track > span { background: var(--success); }
 .team-run-row.is-failed .team-run-row__track > span { background: var(--danger); }
 .team-run-row__meta { color: var(--fg-secondary); font-family: var(--mono); font-size: 10px; white-space: nowrap; }
+
+/* ── 組代理總指揮（L3 常駐調度計畫）──
+   外框刻意與「誰卡住了」「代理產出與計畫疑慮」同一套（軟框＋10/12 內距＋圓角）：
+   這三段在同一張卡裡是平行的區塊，外觀一分岔就會被讀成「這一塊是別的東西」。
+   不用 grid + gap：裡面的表單列與清單各自帶著 marginTop，兩套間距會疊加，
+   這一區就比隔壁高出一截、看起來像被塞進來的。 */
+.team-commander {
+  min-width: 0;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 10px);
+}
+/* 計畫列的狀態辨識：左緣色條。這一區的 .team-run-row 沒有進度條（.team-run-row__track），
+   所以既有的 is-done/is-failed 進度條著色對它完全沒作用——不補這條的話，
+   一串執行中／等待中／失敗的計畫在畫面上長得一模一樣，只能逐列讀 chip 的字。 */
+.team-commander .team-run-row { border-left-width: 3px; }
+.team-commander .team-run-row.is-running { border-left-color: var(--primary); }
+.team-commander .team-run-row.is-awaiting_approval { border-left-color: var(--gold); }
+.team-commander .team-run-row.is-waiting { border-left-color: var(--gold); }
+.team-commander .team-run-row.is-done { border-left-color: var(--success); }
+.team-commander .team-run-row.is-failed { border-left-color: var(--danger); }
+.team-commander .team-run-row.is-stopped { border-left-color: var(--border-strong); }
+/* 展開目標／收合的那顆鈕是寫在句子裡的行內目標（WCAG 2.5.8 明文豁免），
+   若吃 44px 的全域按鈕下限，7px 內距的計畫列會被撐成三倍高。
+   外觀對齊同一格線裡的專案連結（.team-run-row__copy > a），讓人看得出「這是可點的標題」。 */
+.team-commander .team-run-row__copy > button.hint {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--primary-ink);
+  font-size: var(--fs-12);
+  font-weight: 650;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.team-commander .team-run-row__copy > button.hint:hover:not(:disabled) {
+  background: none;
+  color: var(--primary-solid-hover);
+  text-decoration: underline;
+}
+/* 步驟清單被塞在 .team-run-row__copy 的兩欄格線（auto minmax(0,1fr)）裡，
+   不跨滿整列的話會被擠進第二欄剩下的寬度，變成一條看不了的窄長條。 */
+.team-commander__steps {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  margin-top: 4px;
+}
+.team-commander__step {
+  min-width: 0;
+  padding: 3px 4px 3px 8px;
+  border-left: 2px solid var(--border);
+  border-radius: 0 var(--r-8) var(--r-8) 0;
+  background: color-mix(in srgb, var(--card2) 62%, transparent);
+  color: var(--fg-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+  /* 步驟文字會夾著目標原文與後端的錯誤訊息（可能是一長串沒有空白的英數或網址）。
+     不強制斷字的話那一串會把整張卡撐寬、連帶整頁橫向捲動——手機上就是整欄溢出。 */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+/* 步驟狀態的顏色分工：成功／危險／警示／弱化各有各的意思，不共用一個灰。
+   waiting 用金色（＝「在等你」，與待核准的 chip 同一個語意色），
+   skipped 只降對比不上色——它是「不必做」，不該和失敗一樣醒目。 */
+.team-commander__step.is-running { border-left-color: var(--primary); color: var(--primary-ink); }
+.team-commander__step.is-done { border-left-color: var(--success); color: var(--success-ink); }
+.team-commander__step.is-failed {
+  border-left-color: var(--danger);
+  background: color-mix(in srgb, var(--danger-soft) 55%, transparent);
+  color: var(--danger-ink);
+}
+.team-commander__step.is-waiting {
+  border-left-color: var(--gold);
+  background: color-mix(in srgb, var(--gold-soft) 55%, transparent);
+  color: var(--gold-ink);
+}
+.team-commander__step.is-stopped { border-left-color: var(--border-strong); }
+.team-commander__step.is-skipped { opacity: 0.6; }
+/* 右欄的「進度・已用點數＋動作鈕」：既有規則給了 nowrap（那是給純數字用的），
+   這一區的右欄還塞著核准／停止／繼續與加授權輸入框，nowrap 會讓它在窄螢幕
+   撐爆第三欄、把中間的目標壓成幾個字。 */
+.team-commander .team-run-row__meta { min-width: 0; white-space: normal; }
+@media (max-width: 560px) {
+  /* 手機：右欄已被既有規則移到第二欄下方，這裡只要讓動作鈕自然左對齊、
+     並確保步驟清單不會因為外層的 padding 再被擠出邊界。 */
+  .team-commander { padding: 10px 9px; }
+  .team-commander .team-run-row__meta { grid-column: 1 / -1; }
+}
 
 /* ── 共用視覺流程：把長段說明轉成「完成／現在／下一步」的可掃讀路徑。 ── */
 .visual-journey {
@@ -3459,8 +3559,10 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .model-scenario-grid { grid-template-columns: 1fr; }
   .team-run-row { grid-template-columns: auto minmax(0, 1fr); }
   .team-run-row__copy { grid-template-columns: 1fr; }
-  /* 手機隱藏目標原文，但保留「現在步驟／錯誤」 */
-  .team-run-row__copy > span:not(.team-run-row__track):not(.team-run-row__step):not(.team-run-row__err) { display: none; }
+  /* 手機隱藏目標原文，但保留「現在步驟／錯誤」。
+     組代理的步驟清單也要排除：那是使用者主動點開才出現的東西，
+     被這條掃到的話手機上點「展開」等於沒反應。 */
+  .team-run-row__copy > span:not(.team-run-row__track):not(.team-run-row__step):not(.team-run-row__err):not(.team-commander__steps) { display: none; }
   .team-run-row__meta { grid-column: 2; }
   .support-topic-nav {
     top: calc(52px + var(--safe-top));

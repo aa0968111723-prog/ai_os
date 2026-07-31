@@ -1,15 +1,20 @@
-import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { loadAuthState, type AuthState } from "./auth";
 import { isShuttingDown, onShutdown, trackBackgroundTask } from "./shutdown";
 import { withRunnerAdvisoryLock } from "./runnerAdvisoryLock";
-import { runGroupCommand, recordGroupAgentEventSafely } from "./groupCommand";
-import { settleCampaign, type GroupCampaignRow } from "./groupCampaignCore";
+import { getGroupCommandLevel, runGroupCommand, recordGroupAgentEventSafely } from "./groupCommand";
+import { saveCampaignSteps, settleCampaign, type GroupCampaignRow } from "./groupCampaignCore";
 import {
+  MAX_TRANSIENT_WAITS,
+  canRunCampaign,
   decideWatchAction,
+  isTransientCommandError,
   nextRunnableStep,
   type GroupCampaignStep,
+  type GroupCommandLevel,
+  type GroupStepStatus,
 } from "../../shared/groupAgent";
 
 /**
@@ -60,13 +65,30 @@ async function tick(): Promise<void> {
     .select()
     .from(schema.groupAgentRuns)
     .where(eq(schema.groupAgentRuns.status, "running"))
-    .orderBy(desc(schema.groupAgentRuns.updatedAt))
+    // 最久沒動的先推。用 desc 會餓死：每推一次就刷新 updatedAt，活躍的永遠排在前面，
+    // 一旦同時有超過 BATCH 份在跑，尾端那幾份的 updatedAt 永遠停在核准當下、永遠撈不到——
+    // 使用者看到「執行中」但進度一格都不動，而且沒有任何日誌說得出為什麼。
+    .orderBy(asc(schema.groupAgentRuns.updatedAt))
     .limit(BATCH);
+  if (runs.length === BATCH) {
+    // 撈滿代表可能還有沒排到的：不講的話「有些計畫這輪沒推」在維運端完全不可見
+    console.warn(`[groupAgent] 本輪撈滿 ${BATCH} 份執行中的計畫，可能還有未排到的（下輪會先推最久沒動的）`);
+  }
   for (const run of runs) {
     if (isShuttingDown()) return;
-    // 多副本部署時同一份計畫只能有一個 process 在推——組級步驟會下令花錢，重複執行的代價是雙倍點數
-    const result = await withRunnerAdvisoryLock(`group-campaign:${run.id}`, () => advanceCampaign(run));
-    if (!result.acquired) continue;
+    try {
+      // 多副本部署時同一份計畫只能有一個 process 在推——組級步驟會下令花錢，重複執行的代價是雙倍點數
+      await withRunnerAdvisoryLock(`group-campaign:${run.id}`, () => advanceCampaign(run));
+    } catch (err) {
+      // 逐份包住：advanceCampaign 有好幾段不在 try 裡會直接拋（loadAuthState、讀子計畫、讀授權、
+      // 兩支 UPDATE），連取鎖本身都會拋（鎖池 max 4、連線逾時 10 秒，且與其他 runner 共用）。
+      // 不包的話一份出錯就吃掉整輪，同一輪排在後面的計畫全部不推進；錯誤持續時整個 L3 停擺。
+      // 訊息一定要帶 runId／groupId——沒有主詞的日誌在多組環境等於沒有日誌。
+      console.warn(
+        `[groupAgent] 推進失敗（下輪再試）run=${run.id} group=${run.groupId}：`,
+        err instanceof Error ? err.message : err,
+      );
+    }
   }
 }
 
@@ -78,10 +100,18 @@ export async function advanceCampaign(run: GroupCampaignRow): Promise<void> {
     await failCampaign(run, steps, "發起人帳號已停用，組代理停止下令");
     return;
   }
-  // 發起人可能在計畫跑到一半被移出組或被降級——每輪重驗，不倚賴核准當下的那一次
+  // 發起人可能在計畫跑到一半被移出組——每輪重驗，不倚賴核准當下的那一次
   const membership = auth.groups.find((g) => g.groupId === run.groupId);
   if (!membership) {
     await failCampaign(run, steps, "發起人已不屬於這個組，組代理停止下令");
+    return;
+  }
+  // 也可能只是被「降權」。這件事一定要在這裡重讀 DB：loadAuthState 組出來的 groups 只帶角色，
+  // 不帶指揮權等級，所以光看 membership 看不出組長是不是已經把他從「可總指揮」收回去了。
+  // 收權失效是最不該無聲發生的事——組長按了收權、畫面顯示「不可用」，代理卻還在花他的點。
+  const commandLevel = await getGroupCommandLevel(auth, run.groupId);
+  if (!canRunCampaign(commandLevel)) {
+    await failCampaign(run, steps, "發起人的組代理指揮權已被收回，這份調度計畫停止下令（已派出的子計畫不受影響）");
     return;
   }
 
@@ -89,14 +119,14 @@ export async function advanceCampaign(run: GroupCampaignRow): Promise<void> {
   let progressed = false;
   for (const step of steps) {
     if (step.kind !== "watch" || step.status !== "running") continue;
-    progressed = (await pollWatchStep(run, steps, step, auth)) || progressed;
+    progressed = (await pollWatchStep(run, steps, step, auth, commandLevel)) || progressed;
   }
 
   // ② 再推進一個新步驟（每 tick 只推一步：每一步都可能是一次 LLM 規劃或一次開始花錢）
   if (!progressed) {
     const next = nextRunnableStep(steps);
     if (next) {
-      await executeStep(run, steps, next, auth);
+      await executeStep(run, steps, next, auth, commandLevel);
       progressed = true;
     }
   }
@@ -117,10 +147,18 @@ async function failCampaign(run: GroupCampaignRow, steps: GroupCampaignStep[], r
   for (const step of steps) {
     if (step.status === "pending" || step.status === "running") step.status = "stopped";
   }
-  await db
+  // 同樣要 CAS：使用者可能在這一輪期間已經按了停止／放棄。把那個決定覆寫成 failed
+  // 不會讓計畫復活（failed 也是終局），但會讓事後追查看到錯的死因——
+  // 「使用者停的」與「代理因為權限被收回而停手」是兩個完全不同的故事。
+  const written = await db
     .update(schema.groupAgentRuns)
     .set({ status: "failed", steps, error: reason.slice(0, 500), updatedAt: new Date() })
-    .where(eq(schema.groupAgentRuns.id, run.id));
+    .where(and(
+      eq(schema.groupAgentRuns.id, run.id),
+      inArray(schema.groupAgentRuns.status, ["running", "waiting"]),
+    ))
+    .returning({ id: schema.groupAgentRuns.id });
+  if (written.length === 0) return;
   await recordGroupAgentEventSafely({
     groupId: run.groupId,
     runId: run.id,
@@ -133,7 +171,47 @@ async function failCampaign(run: GroupCampaignRow, steps: GroupCampaignStep[], r
 /** 一步執行失敗的統一收尾：留錯誤在步驟上（不吞），整份計畫的終局交給 settleCampaign 折 */
 function markStepFailed(step: GroupCampaignStep, err: unknown): void {
   step.status = "failed";
-  step.error = (err instanceof TRPCError ? err.message : err instanceof Error ? err.message : String(err)).slice(0, 300);
+  step.error = errorText(err);
+}
+
+/**
+ * 讀步驟當下的狀態。
+ *
+ * 為什麼要多這一支：TypeScript 的控制流分析看不進 handleTransient／markStepFailed 這種
+ * 「傳物件進去改欄位」的寫法，於是在 catch 之後它仍以為 status 只可能是 try 區塊裡指派過的那幾個值，
+ * 直接比對 "failed" 會被判成不可能的比較。經過一次函式呼叫就會回到宣告型別。
+ */
+function stepStatusOf(step: GroupCampaignStep): GroupStepStatus {
+  return step.status;
+}
+
+function errorText(err: unknown): string {
+  return (err instanceof TRPCError ? err.message : err instanceof Error ? err.message : String(err)).slice(0, 300);
+}
+
+/**
+ * 這一步是不是撞到「等一下就會好」的阻礙——是的話退回 pending 空轉一輪，不要判死。
+ *
+ * 為什麼重要：核准會撞同專案的併發鎖（組長手上剛好在跑一份代理計畫就會撞），
+ * 派工會撞規劃節流（每人每分鐘 4 次，一份五個 dispatch 的計畫必然踩到）。
+ * 照失敗處理的話，這兩種每天都會發生的日常狀況會讓整份 campaign 折成 failed，
+ * 而前面已經核准的子計畫還在燒點——最貴的失敗方式。
+ * 但也不能無限等：超過上限就轉 waiting 交給人，而不是永遠在清單上裝忙。
+ * 回傳 true＝已處理（呼叫端不要再標失敗）。
+ */
+function handleTransient(step: GroupCampaignStep, err: unknown): boolean {
+  const code = err instanceof TRPCError ? err.code : undefined;
+  if (!isTransientCommandError(code)) return false;
+  const waits = (step.transientWaits ?? 0) + 1;
+  step.transientWaits = waits;
+  if (waits > MAX_TRANSIENT_WAITS) {
+    step.status = "waiting";
+    step.error = `一直被擋住（${errorText(err)}）——請先處理掉衝突，再按繼續`;
+    return true;
+  }
+  step.status = "pending";
+  step.error = `暫時被擋住（${errorText(err)}），稍後自動再試（第 ${waits} 次）`;
+  return true;
 }
 
 async function executeStep(
@@ -141,6 +219,7 @@ async function executeStep(
   steps: GroupCampaignStep[],
   step: GroupCampaignStep,
   auth: AuthState,
+  commandLevel: GroupCommandLevel,
 ): Promise<void> {
   step.status = "running";
   await recordGroupAgentEventSafely({
@@ -155,6 +234,15 @@ async function executeStep(
     data: { kind: step.kind },
   });
 
+  // 下令之前先落庫。dispatch 中間夾著一次 LLM 規劃（數十秒），比關機 drain 的上限長得多；
+  // 不先寫的話，關機時剛好在派工的那一步，重開機後它還是 pending，執行器會再派一次——
+  // 同一個目標長出兩份待核子計畫，watch 只綁得到新的那份。
+  // 寫不進去＝使用者已經停止／放棄這份計畫，這一步不該再執行。
+  if (!(await saveCampaignSteps(run, steps))) {
+    step.status = "stopped";
+    return;
+  }
+
   try {
     switch (step.kind) {
       case "dispatch": {
@@ -166,11 +254,13 @@ async function executeStep(
           origin: "campaign",
           campaignRunId: run.id,
           campaignStepId: step.id,
-          skipLevelCheck: true, // 等級在核准 campaign 當下驗過；這裡重驗的是「發起人還在不在組裡」
+          // 每輪重讀的現值——降權之後這裡就會擋下來，不是「核准當下驗過就一路通行」
+          level: commandLevel,
         });
         step.childRunId = result.runId;
         step.estPoints = result.estPoints;
         step.result = result.message;
+        step.transientWaits = 0;
         step.status = "done";
         break;
       }
@@ -183,7 +273,7 @@ async function executeStep(
           origin: "campaign",
           campaignRunId: run.id,
           campaignStepId: step.id,
-          skipLevelCheck: true,
+          level: commandLevel,
         });
         step.result = result.message;
         step.status = "done";
@@ -213,23 +303,27 @@ async function executeStep(
         // 進到這裡代表它盯的 dispatch 剛完成——第一次輪詢（核准／看子計畫狀態）就在下面這支
         step.status = "running";
         step.attempts = step.attempts ?? 0;
-        await pollWatchStep(run, steps, step, auth);
+        await pollWatchStep(run, steps, step, auth, commandLevel);
         return;
       }
     }
   } catch (err) {
-    markStepFailed(step, err);
+    if (!handleTransient(step, err)) markStepFailed(step, err);
   }
+
+  // 暫時性阻礙被退回 pending／waiting 等下一輪，那不是終局：每 8 秒記一筆「又被擋住」只會把軌跡洗掉
+  const settled = stepStatusOf(step);
+  if (settled !== "done" && settled !== "failed") return;
 
   await recordGroupAgentEventSafely({
     groupId: run.groupId,
     runId: run.id,
     stepId: step.id,
-    eventKey: `step:${step.id}:${step.status === "done" ? "completed" : "failed"}`,
-    eventType: step.status === "done" ? "step_completed" : "step_failed",
+    eventKey: `step:${step.id}:${settled === "done" ? "completed" : "failed"}`,
+    eventType: settled === "done" ? "step_completed" : "step_failed",
     actorType: "ai",
     actorId: run.userId,
-    summary: step.status === "done" ? `完成：${step.title}${step.result ? `——${step.result}` : ""}` : `失敗：${step.title}——${step.error}`,
+    summary: settled === "done" ? `完成：${step.title}${step.result ? `——${step.result}` : ""}` : `失敗：${step.title}——${step.error}`,
     data: { kind: step.kind, childRunId: step.childRunId ?? null },
   });
 }
@@ -247,6 +341,7 @@ async function pollWatchStep(
   steps: GroupCampaignStep[],
   step: GroupCampaignStep,
   auth: AuthState,
+  commandLevel: GroupCommandLevel,
 ): Promise<boolean> {
   const target = steps.find((s) => s.id === step.targetStepId);
   const childRunId = step.childRunId ?? target?.childRunId;
@@ -303,6 +398,28 @@ async function pollWatchStep(
       return false; // 還在跑，下一輪再看
 
     case "approve": {
+      // 先預扣再核准，而且用 SQL 端的相對增減（不是把讀進來的快照加一加寫回去）。
+      //
+      // 兩步不可能原子（核准會提交一筆自己的交易），所以只能挑一個安全的失敗方向：
+      //  - 先核准後記帳：中間死掉 → 點已經花了、spentPoints 還是 0，其他支線看到「已用 0」
+      //    繼續核准，一份授權 500 點的計畫可以自動核准掉好幾倍。這是危險方向。
+      //  - 先預扣後核准：中間死掉 → 多記了一筆沒花的授權，下一條支線提早停下來問人。保守方向。
+      // WHERE 裡再驗一次上限，讓「同一份 campaign 的兩條支線同時要核准」也不會一起擠進門。
+      const reserved = await db
+        .update(schema.groupAgentRuns)
+        .set({ spentPoints: sql`${schema.groupAgentRuns.spentPoints} + ${child.estPoints}`, updatedAt: new Date() })
+        .where(and(
+          eq(schema.groupAgentRuns.id, run.id),
+          sql`${schema.groupAgentRuns.spentPoints} + ${child.estPoints} <= ${schema.groupAgentRuns.budgetPoints}`,
+        ))
+        .returning({ spentPoints: schema.groupAgentRuns.spentPoints });
+      if (reserved.length === 0) {
+        // 另一條支線剛把額度用掉了：這輪改成停手等人，不要硬核准
+        step.status = "waiting";
+        step.error = `子計畫估 ${child.estPoints} 點，授權已被同一份計畫的其他支線用完——請人決定要不要加授權`;
+        await event(`step:${step.id}:budget-hold`, "step_waiting", `停手等人：${step.error}`, { estPoints: child.estPoints, budgetPoints });
+        return true;
+      }
       try {
         await runGroupCommand({
           auth,
@@ -311,15 +428,24 @@ async function pollWatchStep(
           origin: "campaign",
           campaignRunId: run.id,
           campaignStepId: step.id,
-          skipLevelCheck: true,
+          level: commandLevel,
         });
-        // 核准成功才記帳：先加後核准的話，核准被併發鎖擋下會白白吃掉授權額度
+        step.transientWaits = 0;
+      } catch (err) {
+        // 核准沒成功就把預扣退回去，否則一次暫時性衝突會永久吃掉一份額度
         await db
           .update(schema.groupAgentRuns)
-          .set({ spentPoints: spentPoints + child.estPoints, updatedAt: new Date() })
+          .set({ spentPoints: sql`greatest(0, ${schema.groupAgentRuns.spentPoints} - ${child.estPoints})`, updatedAt: new Date() })
           .where(eq(schema.groupAgentRuns.id, run.id));
-      } catch (err) {
-        markStepFailed(step, err);
+        // 撞到同專案的併發鎖是「等一下就行」，不是這份計畫該死的理由
+        if (!handleTransient(step, err)) {
+          markStepFailed(step, err);
+          await event(`step:${step.id}:failed`, "step_failed", `失敗：${step.title}——${step.error}`);
+        } else {
+          // 退回 pending 會讓 nextRunnableStep 重新挑到它，但 watch 的推進本來就靠輪詢，
+          // 這裡維持 running 讓下一輪照常回來看一眼即可
+          step.status = "running";
+        }
       }
       return true;
     }
@@ -349,7 +475,7 @@ async function pollWatchStep(
           origin: "campaign",
           campaignRunId: run.id,
           campaignStepId: step.id,
-          skipLevelCheck: true,
+          level: commandLevel,
         });
         step.childRunId = result.runId;
         step.attempts = attempts + 1;

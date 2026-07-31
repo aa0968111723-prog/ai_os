@@ -10,6 +10,8 @@ import { AUDIT_ACTION_LABELS, AUDIT_CATEGORIES, auditCategoryOf, describeAuditIn
 import { getModel, tierLabel } from "@shared/models";
 import { toCsv } from "@shared/csv";
 import { formatTwd, formatUsd, moneyFxNote } from "@shared/money";
+// 指揮權選單與其說明只有一份（定義在通訊錄頁）：兩頁各抄一份文案，遲早會對同一級講出不同的後果。
+import { CommandLevelField } from "./MembersPage";
 
 import { Button, Card, Chip, EmptyState, Hint, Meta, Pill, Skeleton } from "../components/ui";
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
@@ -286,11 +288,10 @@ function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf 
   });
   const setBudget = trpc.quota.setMemberBudget.useMutation({ onSuccess: invalidate });
   const setOverride = trpc.quota.setMemberOverride.useMutation({ onSuccess: invalidate });
-  const setDispatch = trpc.quota.setMemberDispatch.useMutation({ onSuccess: invalidate });
   const userId = member.userId;
   const isLeader = member.role === "leader";
   const pending = setRole.isPending || removeMember.isPending || resetPassword.isPending;
-  const actionError = setRole.error ?? removeMember.error ?? resetPassword.error ?? setDispatch.error;
+  const actionError = setRole.error ?? removeMember.error ?? resetPassword.error;
   const btn = { padding: "2px 10px", fontSize: "var(--fs-12)" } as const;
   return (
     <div style={{ borderTop: "1px solid var(--border-soft)", padding: "8px 0" }}>
@@ -355,19 +356,12 @@ function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf 
           saving={setOverride.isPending}
           error={setOverride.error?.message ?? null}
         />
+        {/* 組代理指揮權：從布林開關換成四級授權。只有布林的話，後端已生效的「可監督／可總指揮」
+            永遠設不出來，L1/L2/L3 對一般組員等於不存在——功能做了卻沒有入口。 */}
         {member.role === "member" ? (
-          <label className="hint" style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0, fontSize: 12, cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              style={{ width: "auto" }}
-              checked={member.canDispatch}
-              disabled={setDispatch.isPending}
-              onChange={(e) => setDispatch.mutate({ groupId, userId, canDispatch: e.target.checked })}
-            />
-            可派工 AI 執行計畫
-          </label>
+          <CommandLevelField groupId={groupId} userId={userId} level={member.commandLevel} isSelf={isSelf} onSaved={invalidate} />
         ) : (
-          <Hint as="span" style={{ fontSize: 11 }}>組長以上恆可派工 AI 執行計畫</Hint>
+          <Hint as="span" style={{ fontSize: 11 }}>組長以上恆為「可總指揮」，不受此設定影響</Hint>
         )}
         {isSelf && <Meta style={{ fontSize: 11 }}>（我）</Meta>}
       </div>

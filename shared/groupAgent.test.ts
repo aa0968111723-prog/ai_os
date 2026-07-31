@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  CAMPAIGN_MIN_LEVEL,
+  campaignHasActiveWork,
   campaignProgress,
+  canRunCampaign,
   canRunCommand,
   countDoneCampaignSteps,
   decideWatchAction,
   levelAtLeast,
   nextRunnableStep,
+  isTransientCommandError,
   resolveCampaignOutcome,
+  resolveCampaignWaitReason,
   resolveCommandLevel,
+  resumeCampaignSteps,
   skipUnreachableSteps,
   withinCampaignBudget,
   type GroupCampaignStep,
@@ -207,6 +213,104 @@ describe("decideWatchAction（盯子計畫的決策：整個 L3 唯一會自己�
     for (const status of ["stopped", "discarded"]) {
       const d = decideWatchAction({ ...base, childStatus: status, attempts: 0, maxAttempts: 3 });
       expect(d.action).toBe("fail");
+    }
+  });
+});
+
+describe("canRunCampaign（L3 常駐總指揮的門檻）", () => {
+  it("只有 command 過得去——supervise 是「他按一次、花一次」，command 是「之後每一次都他自己按」", () => {
+    expect(canRunCampaign("command")).toBe(true);
+    for (const level of ["supervise", "dispatch", "none"] as const) {
+      expect(canRunCampaign(level)).toBe(false);
+    }
+  });
+
+  it("門檻常數就是 command——前端露出、後端守門、設定頁文案讀的是同一個值", () => {
+    expect(CAMPAIGN_MIN_LEVEL).toBe("command");
+  });
+});
+
+describe("resumeCampaignSteps（人按下「繼續」之後）", () => {
+  it("人工關卡標成 done——回 pending 的話執行器只會把它再設回 waiting，永遠過不去", () => {
+    const steps = [
+      step({ id: "a", kind: "wait_for_human", status: "waiting" }),
+      step({ id: "b", dependsOn: ["a"] }),
+    ];
+    const out = resumeCampaignSteps(steps);
+    expect(out.steps[0].status).toBe("done");
+    expect(out.passedHumanGates).toEqual(["a"]);
+    // 放行之後下一步才輪得到（原本的 bug 是這一步永遠等不到）
+    expect(nextRunnableStep(out.steps)?.id).toBe("b");
+  });
+
+  it("預算停手的 watch 回 pending 讓執行器重判一次，並清掉舊的錯誤字樣", () => {
+    const steps = [step({ id: "w", kind: "watch", status: "waiting", error: "超出本次授權" })];
+    const out = resumeCampaignSteps(steps);
+    expect(out.steps[0].status).toBe("pending");
+    expect(out.steps[0].error).toBeUndefined();
+    expect(out.passedHumanGates).toEqual([]);
+  });
+
+  it("不是 waiting 的步驟一律不動（別把跑到一半的步驟重置）", () => {
+    const steps = [step({ id: "a", status: "running" }), step({ id: "b", status: "done" })];
+    const out = resumeCampaignSteps(steps);
+    expect(out.steps.map((s) => s.status)).toEqual(["running", "done"]);
+  });
+});
+
+describe("campaignHasActiveWork（一條支線在等人，不該凍結另一條）", () => {
+  it("有步驟在跑就算活著——即使另一步在等人", () => {
+    const steps = [
+      step({ id: "a", kind: "watch", status: "waiting" }),
+      step({ id: "b", kind: "watch", status: "running" }),
+    ];
+    expect(campaignHasActiveWork(steps)).toBe(true);
+  });
+
+  it("有依賴已滿足的 pending 也算活著", () => {
+    const steps = [step({ id: "a", status: "done" }), step({ id: "b", dependsOn: ["a"] })];
+    expect(campaignHasActiveWork(steps)).toBe(true);
+  });
+
+  it("只剩等人的步驟與等不到的下游時才算不活躍（run 這時才該顯示等待人員）", () => {
+    const steps = [
+      step({ id: "a", kind: "wait_for_human", status: "waiting" }),
+      step({ id: "b", dependsOn: ["a"] }),
+    ];
+    expect(campaignHasActiveWork(steps)).toBe(false);
+  });
+});
+
+describe("resolveCampaignWaitReason（在等什麼要分得出來）", () => {
+  it("watch 停手＝預算閘，理由用步驟上的錯誤字（畫面才講得出下一步）", () => {
+    const steps = [step({ id: "w", kind: "watch", status: "waiting", title: "盯著招生短片", error: "子計畫估 200 點，超出本次授權" })];
+    const reason = resolveCampaignWaitReason(steps);
+    expect(reason).toMatchObject({ kind: "budget", stepId: "w" });
+    expect(reason?.detail).toContain("超出本次授權");
+  });
+
+  it("wait_for_human＝人工關卡，沒有錯誤字時退回用步驟說明", () => {
+    const steps = [step({ id: "h", kind: "wait_for_human", status: "waiting", note: "等阿光拍完實體素材" })];
+    const reason = resolveCampaignWaitReason(steps);
+    expect(reason).toMatchObject({ kind: "human", stepId: "h" });
+    expect(reason?.detail).toBe("等阿光拍完實體素材");
+  });
+
+  it("沒有任何 waiting 步驟時回 null", () => {
+    expect(resolveCampaignWaitReason([step({ id: "a", status: "running" })])).toBeNull();
+  });
+});
+
+describe("isTransientCommandError（哪些阻礙等一下就會好）", () => {
+  it("併發鎖（CONFLICT）與節流（TOO_MANY_REQUESTS）算暫時性——不該讓整份調度計畫死掉", () => {
+    expect(isTransientCommandError("CONFLICT")).toBe(true);
+    expect(isTransientCommandError("TOO_MANY_REQUESTS")).toBe(true);
+    expect(isTransientCommandError("SERVICE_UNAVAILABLE")).toBe(true);
+  });
+
+  it("權限不足與找不到目標是終局，重試幾次都一樣", () => {
+    for (const code of ["FORBIDDEN", "NOT_FOUND", "PRECONDITION_FAILED", "BAD_REQUEST", undefined]) {
+      expect(isTransientCommandError(code)).toBe(false);
     }
   });
 });

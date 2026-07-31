@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""團隊分析（teamAssistant）E2E：agentOverview 健康度、ask mock、dispatch ACL、組隔離。
+"""團隊分析（teamAssistant）E2E：agentOverview 健康度、ask mock、dispatch ACL、組隔離，
+以及組代理總指揮（L1 監督權／L2 調度權／L3 常駐計畫）的授權、狀態守門與生命週期。
 
 前置：E2E_MOCK=1、伺服器已 migrate/seed、SEED_ADMIN_EMAIL/PASSWORD 可用。
 用法：python3 scripts/e2e-team-assistant.py
@@ -49,7 +50,10 @@ def call(op, opener, path, data=None):
     except urllib.error.HTTPError as error:
         body = json.load(error)
     if "error" in body:
-        return {"__error__": body["error"]["json"]["message"]}
+        err = body["error"]["json"]
+        # 一併帶回 tRPC code：FORBIDDEN（沒權）／NOT_FOUND（不是這個組的東西）／PRECONDITION_FAILED
+        # （狀態不對）是三種完全不同的失敗，只比對中文訊息的話，文案一改就會整批誤綠。
+        return {"__error__": err.get("message", ""), "__code__": (err.get("data") or {}).get("code")}
     return body["result"]["data"]["json"]
 
 
@@ -402,5 +406,247 @@ ok("rationale 不是 chain-of-thought（長度受限）",
 mem_s5 = call("POST", member, "teamAssistant.ask", {"groupId": gid, "message": "有什麼阻塞？"})
 ok("組員 ask 也有 contextUsed", isinstance(mem_s5.get("contextUsed"), list))
 ok("組員 ask 仍無派工權", mem_s5.get("canDispatch") is False)
+
+# ── 14. 組代理指揮權等級（commandLevel）──
+# 前端用它決定露出哪些按鈕、後端每道指令再用同一個值守門。兩邊讀不到同一個值的話，
+# 畫面會長出一排按下去必被拒的按鈕（或反過來：有權的人看不到入口）。
+lvl_admin = call("GET", admin, "teamAssistant.commandLevel", {"groupId": gid})
+ok("組長指揮權為 command（最高級）", lvl_admin == "command")
+lvl_member = call("GET", member, "teamAssistant.commandLevel", {"groupId": gid})
+ok("撤權後的組員指揮權為 none", lvl_member == "none")
+ok("🔒 非本組 commandLevel 被擋", "__error__" in call("GET", admin, "teamAssistant.commandLevel", {"groupId": fake_gid}))
+
+# ── 15. L1／L2：分級授權（none < dispatch < supervise < command）──
+# 為什麼不能沿用單一布林：舊的 canDispatchAgent 只回答「能不能生出一份待核計畫」，
+# 而「能不能替別人核准、讓它現在就開始花點」是完全不同量級的授權。折在同一個布林裡，
+# 等於每次開派工權都把最貴的那個權限一起送出去。
+ghost_run = "00000000-0000-4000-8000-000000000001"
+ghost_task = "00000000-0000-4000-8000-000000000002"
+
+mem_approve = call("POST", member, "teamAssistant.command", {
+    "groupId": gid,
+    "command": {"kind": "approve_run", "runId": leader_dispatch.get("runId", ghost_run)},
+})
+ok("🔒 無授權組員下 approve_run 得 FORBIDDEN", mem_approve.get("__code__") == "FORBIDDEN")
+mem_cmd_dispatch = call("POST", member, "teamAssistant.command", {
+    "groupId": gid,
+    "command": {"kind": "dispatch", "projectId": pid, "goal": "無授權組員的派工指令應被擋下"},
+})
+ok("🔒 無授權組員下 dispatch 指令得 FORBIDDEN", mem_cmd_dispatch.get("__code__") == "FORBIDDEN")
+
+lift = call("POST", admin, "quota.setMemberCommandLevel", {"groupId": gid, "userId": mem_id, "level": "supervise"})
+ok("組長可把組員調到監督權", lift.get("ok") is True and lift.get("level") == "supervise")
+ok("調級後 commandLevel 立刻反映", call("GET", member, "teamAssistant.commandLevel", {"groupId": gid}) == "supervise")
+# 舊 UI 的「派工權：開」不得把已授權的監督權默默降級——使用者按的是「開」，權限卻變小，沒有人會預期
+keep = call("POST", admin, "quota.setMemberDispatch", {"groupId": gid, "userId": mem_id, "canDispatch": True})
+ok("舊布林開關不會把 supervise 降成 dispatch", keep.get("level") == "supervise")
+
+mem_own_discard = call("POST", member, "teamAssistant.command", {
+    "groupId": gid,
+    "command": {"kind": "discard_run", "runId": mem_dispatch_ok.get("runId", ghost_run)},
+})
+ok("監督權組員可放棄自己發起的子計畫", mem_own_discard.get("kind") == "discard_run")
+
+# 分級授權只是「能不能下這種令」，不取代各專案原本的守門——別人的計畫仍需發起人或組長以上。
+# 這一條若鬆掉，等於把 supervise 悄悄升級成「全組的計畫都歸我處置」。
+if "runId" in disp_full:
+    mem_other_discard = call("POST", member, "teamAssistant.command", {
+        "groupId": gid,
+        "command": {"kind": "discard_run", "runId": disp_full["runId"]},
+    })
+    ok("🔒 監督權不繞過專案守門（別人的計畫仍擋）", mem_other_discard.get("__code__") == "FORBIDDEN")
+else:
+    ok("別人的計畫守門（略過：前置派工未成功）", True)
+
+back = call("POST", admin, "quota.setMemberCommandLevel", {"groupId": gid, "userId": mem_id, "level": "none"})
+ok("指揮權可收回 none（連舊布林一起關）", back.get("level") == "none" and back.get("canDispatch") is False)
+mem_after_revoke = call("POST", member, "teamAssistant.command", {
+    "groupId": gid,
+    "command": {"kind": "discard_run", "runId": ghost_run},
+})
+ok("🔒 收回後再下令仍是 FORBIDDEN（而不是 NOT_FOUND）", mem_after_revoke.get("__code__") == "FORBIDDEN")
+
+# ── 16. 組隔離：拿別組（或不存在）的 runId／taskId／projectId 下令 ──
+# 借道別組的 id 是最省事的越權手法：權限在本組驗、東西卻是別組的。所以指令一律先確認
+# 目標物真的屬於這個組，且回 NOT_FOUND（不是 FORBIDDEN）——不對外洩漏「這個 id 存在」。
+iso_run = call("POST", admin, "teamAssistant.command", {
+    "groupId": gid, "command": {"kind": "approve_run", "runId": ghost_run},
+})
+ok("🔒 非本組 runId 下令得 NOT_FOUND", iso_run.get("__code__") == "NOT_FOUND")
+iso_stop = call("POST", admin, "teamAssistant.command", {
+    "groupId": gid, "command": {"kind": "stop_run", "runId": ghost_run},
+})
+ok("🔒 非本組 runId 停止得 NOT_FOUND", iso_stop.get("__code__") == "NOT_FOUND")
+iso_task = call("POST", admin, "teamAssistant.command", {
+    "groupId": gid, "command": {"kind": "assign_task", "taskId": ghost_task, "priority": "high"},
+})
+ok("🔒 非本組 taskId 下令得 NOT_FOUND", iso_task.get("__code__") == "NOT_FOUND")
+
+if other_groups and "id" in cross_proj:
+    # 真・別組物件：專案存在、只是不屬於這個組。守門必須擋在規劃之前（連 LLM 都不該被叫起來）
+    iso_proj = call("POST", admin, "teamAssistant.command", {
+        "groupId": gid,
+        "command": {"kind": "dispatch", "projectId": cross_proj["id"], "goal": "跨組專案不該被本組指令派工"},
+    })
+    ok("🔒 跨組 projectId 下令得 NOT_FOUND", iso_proj.get("__code__") == "NOT_FOUND")
+    # 別組真實 runId：規劃有每人每分鐘 4 次的節流，撞到就略過（這條是加分項，不是本輪的守門重點）
+    cross_run = call("POST", admin, "agents.plan", {
+        "projectId": cross_proj["id"], "goal": "他組的子計畫，供跨組下令隔離測試",
+    })
+    if "id" in cross_run:
+        iso_cross_run = call("POST", admin, "teamAssistant.command", {
+            "groupId": gid, "command": {"kind": "approve_run", "runId": cross_run["id"]},
+        })
+        ok("🔒 別組真實 runId 下令得 NOT_FOUND", iso_cross_run.get("__code__") == "NOT_FOUND")
+    else:
+        ok("別組真實 runId（略過：規劃節流）", True)
+else:
+    ok("跨組物件下令（略過：seed 僅一組）", True)
+
+# ── 17. 狀態守門：指令要吃得下「這個狀態能不能做這件事」──
+# 這是提議面最常見的錯：清單上看得到一份計畫，就以為每個動作都按得下去。
+if "runId" in leader_dispatch:
+    approve_once = call("POST", admin, "teamAssistant.command", {
+        "groupId": gid, "command": {"kind": "approve_run", "runId": leader_dispatch["runId"]},
+    })
+    ok("組長可核准待核子計畫", approve_once.get("kind") == "approve_run")
+    approve_twice = call("POST", admin, "teamAssistant.command", {
+        "groupId": gid, "command": {"kind": "approve_run", "runId": leader_dispatch["runId"]},
+    })
+    ok("🔒 對已核准（running）的子計畫再核准被擋", approve_twice.get("__code__") == "PRECONDITION_FAILED")
+    discard_running = call("POST", admin, "teamAssistant.command", {
+        "groupId": gid, "command": {"kind": "discard_run", "runId": leader_dispatch["runId"]},
+    })
+    ok("🔒 已開始執行的子計畫不能放棄", discard_running.get("__code__") == "PRECONDITION_FAILED")
+else:
+    ok("狀態守門（略過：前置派工未成功）", True)
+
+# 重新規劃只給「已結束且沒成功」的。這裡刻意挑一份**待核**的來測（而不是剛核准那份）：
+# 待核狀態永遠不是合法的重跑對象，不受背景 Runner 跑多快影響。對還在跑的按重跑會在同專案
+# 開出第二份，併發鎖會擋在核准那一步，使用者只拿得到一份永遠核准不了的孤兒計畫。
+if "runId" in disp_full:
+    retry_awaiting = call("POST", admin, "teamAssistant.command", {
+        "groupId": gid, "command": {"kind": "retry_run", "runId": disp_full["runId"]},
+    })
+    ok("🔒 只有失敗／被停止的子計畫可重新規劃", retry_awaiting.get("__code__") == "PRECONDITION_FAILED")
+else:
+    ok("重新規劃守門（略過：前置派工未成功）", True)
+
+# ── 18. 批次指令：逐筆回報成敗，不假裝可以整批回滾 ──
+# 這些指令各自會呼叫外部規劃模型並可能扣點，一筆失敗就把前面成功的「回滾」是做不到的；
+# 假裝做得到只會讓狀態與畫面對不起來。
+batch_cmds = [{"kind": "approve_run", "runId": ghost_run}]
+if "runId" in disp_full:
+    batch_cmds.insert(0, {"kind": "discard_run", "runId": disp_full["runId"]})
+batch = call("POST", admin, "teamAssistant.commandBatch", {"groupId": gid, "commands": batch_cmds})
+ok("批次回傳每一筆結果", isinstance(batch.get("results"), list) and len(batch["results"]) == len(batch_cmds))
+ok("批次成功數與失敗筆並存（不是全成或全敗）", batch.get("okCount") == len(batch_cmds) - 1)
+ok("批次失敗筆帶得出原因", any(r.get("ok") is False and r.get("error") for r in batch.get("results", [])))
+
+# ── 19. L3：組代理常駐計畫（campaign）的生命週期 ──
+# 假模式給的是固定計畫（派工→盯著→結論），所以這一段驗的是流程與守門，不是 LLM 排得好不好。
+camp = call("POST", admin, "teamAssistant.planCampaign", {
+    "groupId": gid, "goal": "把這一組的待辦往前推一輪，供組代理總指揮 E2E 驗收",
+})
+ok("planCampaign 產出待核計畫", camp.get("status") == "awaiting_approval")
+camp_id = camp.get("id")
+camp_steps = camp.get("steps") or []
+ok("campaign 有步驟", isinstance(camp_steps, list) and len(camp_steps) > 0)
+# 組代理只調度、不動手：五種步驟以外的東西（生圖、改分鏡、寫資料庫）不該出現在組級計畫裡
+GROUP_STEP_KINDS = {"dispatch", "watch", "assign_task", "wait_for_human", "report"}
+ok("步驟種類全在組級白名單內", {s.get("kind") for s in camp_steps} <= GROUP_STEP_KINDS)
+ok("步驟一律從 pending 開始（執行期欄位不接受規劃器指定）",
+   all(s.get("status") == "pending" for s in camp_steps))
+watch_steps = [s for s in camp_steps if s.get("kind") == "watch"]
+ok("watch 指得到一個真實存在的 dispatch 步驟",
+   all(s.get("targetStepId") in {d["id"] for d in camp_steps if d.get("kind") == "dispatch"} for s in watch_steps))
+ok("watch 天然依賴它盯的那一步（否則會在子計畫還沒建立時就開始盯）",
+   all(s.get("targetStepId") in (s.get("dependsOn") or []) for s in watch_steps))
+# 預設不授權自動花點：沒給 budgetPoints 就是 0，寧可多按幾次核准，也不要預設把錢交出去
+ok("未指定授權時 budgetPoints=0（安全預設）", camp.get("budgetPoints") == 0)
+ok("尚未開始執行時 spentPoints=0", camp.get("spentPoints") == 0)
+ok("摘要寫明自動核准授權", "授權" in (camp.get("summary") or ""))
+
+camp_list = call("GET", admin, "teamAssistant.campaigns", {"groupId": gid})
+ok("campaigns 查得到剛排的計畫",
+   isinstance(camp_list, list) and any(c.get("id") == camp_id for c in camp_list))
+camp_detail = call("GET", admin, "teamAssistant.campaign", {"runId": camp_id})
+ok("campaign 詳情帶 run 與事件軌跡",
+   isinstance(camp_detail.get("run"), dict) and isinstance(camp_detail.get("events"), list))
+ok("軌跡記得下「規劃」這件事", any(e.get("eventType") == "planned" for e in camp_detail.get("events", [])))
+
+# resume 只對「真的在等人」的計畫有意義：待核的計畫按繼續是無意義操作，
+# 若放行則會把一份還沒被人看過的計畫直接推成 running。
+resume_bad = call("POST", admin, "teamAssistant.resumeCampaign", {"runId": camp_id})
+ok("🔒 對非 waiting 的 campaign 按繼續被擋", resume_bad.get("__code__") == "PRECONDITION_FAILED")
+
+approved_camp = call("POST", admin, "teamAssistant.approveCampaign", {"runId": camp_id})
+ok("核准後 campaign 進入 running", approved_camp.get("status") == "running")
+approve_camp_twice = call("POST", admin, "teamAssistant.approveCampaign", {"runId": camp_id})
+ok("🔒 重複核准 campaign 被擋", approve_camp_twice.get("__code__") == "PRECONDITION_FAILED")
+discard_running_camp = call("POST", admin, "teamAssistant.discardCampaign", {"runId": camp_id})
+ok("🔒 已核准的 campaign 不能改用放棄", discard_running_camp.get("__code__") == "PRECONDITION_FAILED")
+
+stopped_camp = call("POST", admin, "teamAssistant.stopCampaign", {"runId": camp_id})
+# 背景執行器每 8 秒推一步，所以停止可能落在 running、waiting（撞到授權上限停手）或已被推到終局。
+# 這裡真正不能誤綠的是「按了停止卻還在跑」——用下一行的狀態查詢把它釘死。
+ok("停止 campaign（或它已自行走到終局）",
+   stopped_camp.get("status") == "stopped" or stopped_camp.get("__code__") == "PRECONDITION_FAILED")
+after_stop = call("GET", admin, "teamAssistant.campaign", {"runId": camp_id})
+ok("停止後不會再有 running 的 campaign",
+   after_stop.get("run", {}).get("status") in ("stopped", "failed", "done"))
+
+# 未核准的可以直接放棄（純標記，沒有花任何點）
+camp2 = call("POST", admin, "teamAssistant.planCampaign", {
+    "groupId": gid, "goal": "第二份組代理計畫：只用來驗放棄流程", "budgetPoints": 30,
+})
+ok("第二份 campaign 帶得到指定授權", camp2.get("budgetPoints") == 30)
+camp2_id = camp2.get("id", ghost_run)
+discarded_camp = call("POST", admin, "teamAssistant.discardCampaign", {"runId": camp2_id})
+ok("未核准的 campaign 可放棄", discarded_camp.get("status") == "discarded")
+camp_list2 = call("GET", admin, "teamAssistant.campaigns", {"groupId": gid})
+ok("放棄的 campaign 不進清單",
+   isinstance(camp_list2, list) and all(c.get("id") != camp2_id for c in camp_list2))
+
+# campaign 的授權門檻是 command（CAMPAIGN_MIN_LEVEL），比單一指令的 supervise 高一級：
+# 發起 campaign 不是「按一次、花一次」，是授權它在無人盯著時反覆自己按。
+mem_camp = call("POST", member, "teamAssistant.planCampaign", {
+    "groupId": gid, "goal": "無授權組員不應排得出組代理計畫",
+})
+ok("🔒 無授權組員不能發起 campaign", mem_camp.get("__code__") == "FORBIDDEN")
+# supervise 能核准單一子計畫，但**不能**發起會自動核准的常駐計畫——這是成員設定頁那段
+# 「可監督不會自動花錢」文案的唯一保證，鬆掉就等於那段字在騙人。
+call("POST", admin, "quota.setMemberCommandLevel", {"groupId": gid, "userId": mem_id, "level": "supervise"})
+sup_camp = call("POST", member, "teamAssistant.planCampaign", {
+    "groupId": gid, "goal": "監督權不該排得出會自動花點的常駐計畫",
+})
+ok("🔒 supervise 不能發起 campaign（要 command）", sup_camp.get("__code__") == "FORBIDDEN")
+call("POST", admin, "quota.setMemberCommandLevel", {"groupId": gid, "userId": mem_id, "level": "command"})
+cmd_camp = call("POST", member, "teamAssistant.planCampaign", {
+    "groupId": gid, "goal": "被授權總指揮的組員可以排調度計畫",
+})
+ok("command 等級的組員可以發起 campaign", cmd_camp.get("status") == "awaiting_approval")
+if cmd_camp.get("id"):
+    call("POST", member, "teamAssistant.discardCampaign", {"runId": cmd_camp["id"]})
+call("POST", admin, "quota.setMemberCommandLevel", {"groupId": gid, "userId": mem_id, "level": "none"})
+ok("組員仍看得到 campaign 清單（唯讀不需授權）",
+   isinstance(call("GET", member, "teamAssistant.campaigns", {"groupId": gid}), list))
+ok("🔒 非本組不能發起 campaign",
+   "__error__" in call("POST", admin, "teamAssistant.planCampaign", {"groupId": fake_gid, "goal": "跨組不該成功的組代理計畫"}))
+ok("🔒 目標太短的 campaign 被擋",
+   "__error__" in call("POST", admin, "teamAssistant.planCampaign", {"groupId": gid, "goal": "推一下"}))
+
+# ── 21. 下令軌跡：不屬於任何 campaign 的單發指令也讀得出來 ──
+# 這一條在意的是「寫得進去、讀不出來」：L1／L2 從卡片按下的指令 run_id 都是 NULL，
+# 沒有這支查詢的話「誰替誰核准了一份會花點的計畫」只有進資料庫下 SQL 才看得到。
+log = call("GET", admin, "teamAssistant.commandLog", {"groupId": gid, "limit": 50})
+ok("commandLog 讀得到組級事件", isinstance(log, list))
+ok("commandLog 含不屬於 campaign 的單發指令（run_id 為空）",
+   isinstance(log, list) and any(e.get("runId") is None for e in log))
+ok("🔒 非本組讀不到下令軌跡",
+   "__error__" in call("GET", admin, "teamAssistant.commandLog", {"groupId": fake_gid}))
+camp_only = call("GET", admin, "teamAssistant.commandLog", {"groupId": gid, "campaignOnly": True})
+ok("campaignOnly 只回屬於 campaign 的事件",
+   isinstance(camp_only, list) and all(e.get("runId") for e in camp_only))
 
 print("—— e2e-team-assistant 完成 ——")

@@ -22,6 +22,7 @@ import {
   approveGroupCampaign,
   discardGroupCampaign,
   getGroupCampaign,
+  listGroupAgentEvents,
   listGroupCampaigns,
   planGroupCampaign,
   resumeGroupCampaign,
@@ -1339,6 +1340,23 @@ ${historyBlock}使用者的問題：${input.message}`;
   campaign: authedProcedure
     .input(z.object({ runId: z.string().uuid() }))
     .query(({ ctx, input }) => getGroupCampaign(ctx.auth, input.runId)),
+
+  /**
+   * 組代理的下令軌跡（含不屬於任何 campaign 的單發指令）。
+   *
+   * 沒有這一支的話，「誰在什麼時候替誰核准了一份會花點的計畫」只有資料庫查得到——
+   * 那是這整套裡最該被追溯的一件事，寫進去卻讀不出來等於白寫。
+   */
+  commandLog: authedProcedure
+    .input(z.object({
+      groupId: z.string().uuid(),
+      limit: z.number().int().min(1).max(200).optional(),
+      campaignOnly: z.boolean().optional(),
+    }))
+    .query(({ ctx, input }) => listGroupAgentEvents(ctx.auth, input.groupId, {
+      limit: input.limit,
+      campaignOnly: input.campaignOnly,
+    })),
 
   /**
    * 全組代理洞察（作業台「誰卡住了」）：把阻塞歸到專案、把未結人類任務歸到人。
