@@ -1,4 +1,4 @@
-# 組內留言協作強化 e2e:回覆串/表情回應/@提及/引用作品卡/釘選/未讀水位/檢視者參與。
+# 組內留言協作強化 e2e:回覆串/表情回應/@提及/引用作品卡/釘選/未讀水位/檢視者參與/私訊上線狀態。
 # 前置:E2E_MOCK=1、:3199(可用 E2E_PORT 覆蓋)、SEED_ADMIN_EMAIL=admin@aidirector.local、
 #       SEED_ADMIN_PASSWORD=test-admin-123、全新 DB。
 import json, urllib.request, urllib.parse, urllib.error
@@ -238,5 +238,16 @@ smention = call("POST", a, "schedule.add", {"groupId": gid, "title": "@留言乙
 ok("排程可 @提及同組夥伴", b_id in (smention.get("mentions") or []))
 bad_m = call("POST", a, "notes.add", {"groupId": gid, "title": "壞提及", "content": "x", "mentions": ["00000000-0000-4000-8000-000000000000"]})
 ok("🔒 筆記不能提及組外的人", "同組" in bad_m.get("__error__", ""))
+
+# ── 私訊「誰在線上」(dm.presence) ──
+# 心跳沒有專屬 API:所有登入後的呼叫都會更新最後活躍時刻,所以三個人跑完上面整套之後必然都在線。
+pres = call("GET", a, "dm.presence")
+ok("私訊上線清單可讀", isinstance(pres, list))
+pres_by = {p["userId"]: p for p in pres if isinstance(p, dict)}
+peers = call("GET", a, "dm.peers")
+ok("上線清單的界＝可私訊對象(不會多報任何人)", set(pres_by) == {p["userId"] for p in peers})
+ok("清單只列對象、不列自己", a_id not in pres_by)
+ok("同組夥伴帶著最後活躍時刻(=上線中)", isinstance(pres_by.get(b_id, {}).get("lastActiveAt"), str))
+ok("只回 userId 與 lastActiveAt(不順手外洩其他個資)", all(set(p) == {"userId", "lastActiveAt"} for p in pres))
 
 print("—— e2e-messages 完成 ——")

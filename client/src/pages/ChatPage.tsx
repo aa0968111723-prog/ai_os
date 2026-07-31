@@ -6,11 +6,15 @@ import { trpc } from "../api";
 import { useLocalDraft } from "../useLocalDraft";
 import { Icon, type IconName } from "../components/Icon";
 import { ChatEmptyState, focusChatPartnerPicker } from "../components/ChatEmptyState";
+import { PresenceDot, PresenceText } from "../components/PresenceDot";
 import { setPlannerFocus } from "../discuss";
+import { presenceState } from "@shared/presence";
 import { Button, Card, Hint, Meta, Skeleton } from "../components/ui";
 type Thread = inferRouterOutputs<AppRouter>["dm"]["threads"][number];
 type Peer = inferRouterOutputs<AppRouter>["dm"]["peers"][number];
 type HistoryItem = inferRouterOutputs<AppRouter>["dm"]["history"]["items"][number];
+/** 對象最後活躍時刻（undefined＝不在可訊界，不顯示任何線上指示；null＝離線太久） */
+type PeerLastActive = Date | null | undefined;
 
 /** 私訊 @了 這個字就觸發 AI 助手回覆——與後端 dmAssistant.DM_ASSISTANT_TRIGGER 同字串 */
 const ASSISTANT_TRIGGER = "@助手";
@@ -60,6 +64,15 @@ export function ChatPage({ peerId }: { peerId?: string }) {
   const peerSearchRef = useRef<HTMLInputElement>(null);
   const threads = trpc.dm.threads.useQuery(undefined, { refetchInterval: 15_000 });
   const peers = trpc.dm.peers.useQuery();
+  // 誰在線上：30 秒輪詢一次（上線窗 3 分鐘，這個頻率足夠即時，也不會變成另一種洗版）。
+  // 分頁切到背景時 react-query 會自動停掉輪詢——沒在看的畫面不必更新，也順便讓「上線中」
+  // 維持它該有的意思：這個人的 App 真的開在眼前。
+  const presence = trpc.dm.presence.useQuery(undefined, { refetchInterval: 30_000 });
+  const lastActiveByUser = useMemo(
+    () => new Map((presence.data ?? []).map((p) => [p.userId, p.lastActiveAt])),
+    [presence.data],
+  );
+  const onlineCount = (presence.data ?? []).filter((p) => presenceState(p.lastActiveAt) === "online").length;
 
   const threadPeerIds = useMemo(() => new Set((threads.data ?? []).map((t) => t.peerId)), [threads.data]);
   const needle = q.trim().toLowerCase();
@@ -87,6 +100,7 @@ export function ChatPage({ peerId }: { peerId?: string }) {
         <div className="chat-intro__summary" aria-label="私訊摘要">
           <span><strong>{threads.data?.length ?? "…"}</strong><small>對話</small></span>
           <span className={unreadCount ? "attention" : ""}><strong>{unreadCount}</strong><small>未讀</small></span>
+          <span><strong>{presence.data ? onlineCount : "…"}</strong><small>在線</small></span>
         </div>
       </header>
       <div className={`dm-layout ${peerId ? "has-peer" : ""}`}>
@@ -107,7 +121,13 @@ export function ChatPage({ peerId }: { peerId?: string }) {
           ) : (
             <>
               {filteredThreads.map((t) => (
-                <ThreadItem key={t.peerId} t={t} active={t.peerId === peerId} onOpen={() => navigate(`/chat/${t.peerId}`)} />
+                <ThreadItem
+                  key={t.peerId}
+                  t={t}
+                  active={t.peerId === peerId}
+                  lastActiveAt={lastActiveByUser.get(t.peerId)}
+                  onOpen={() => navigate(`/chat/${t.peerId}`)}
+                />
               ))}
               {filteredThreads.length === 0 && needle === "" && (
                 <Hint layer="always" style={{ fontSize: 12 }}>還沒有對話——從下面的夥伴名單挑一位開始聊。</Hint>
@@ -117,7 +137,10 @@ export function ChatPage({ peerId }: { peerId?: string }) {
                   <div className="menu-label" style={{ padding: "8px 2px 4px" }}>發起新對話</div>
                   {newPeers.map((p) => (
                     <button key={p.userId} className="dm-item" onClick={() => navigate(`/chat/${p.userId}`)}>
-                      <span className="dm-avatar" aria-hidden>{avatarInitial(p.name)}</span>
+                      <span className="dm-avatar-wrap">
+                        <span className="dm-avatar" aria-hidden>{avatarInitial(p.name)}</span>
+                        <PresenceDot lastActiveAt={lastActiveByUser.get(p.userId) ?? null} />
+                      </span>
                       <span className="dm-item-copy">
                         <span className="dm-item-name">
                           {p.name}
@@ -138,7 +161,12 @@ export function ChatPage({ peerId }: { peerId?: string }) {
         </Card>
         {peerId ? (
           // key=peerId：換對象時強制重建對話視窗，翻頁游標／草稿不殘留到別人身上
-          <Conversation key={peerId} peerId={peerId} onBack={() => navigate("/chat")} />
+          <Conversation
+            key={peerId}
+            peerId={peerId}
+            lastActiveAt={lastActiveByUser.get(peerId)}
+            onBack={() => navigate("/chat")}
+          />
         ) : (
           <ChatEmptyState onStart={focusPartnerPicker} />
         )}
@@ -147,10 +175,18 @@ export function ChatPage({ peerId }: { peerId?: string }) {
   );
 }
 
-function ThreadItem({ t, active, onOpen }: { t: Thread; active: boolean; onOpen: () => void }) {
+function ThreadItem({
+  t,
+  active,
+  lastActiveAt,
+  onOpen,
+}: { t: Thread; active: boolean; lastActiveAt: PeerLastActive; onOpen: () => void }) {
   return (
     <button className={`dm-item ${active ? "active" : ""}`} onClick={onOpen} aria-current={active}>
-      <span className="dm-avatar" aria-hidden>{avatarInitial(t.peerName)}</span>
+      <span className="dm-avatar-wrap">
+        <span className="dm-avatar" aria-hidden>{avatarInitial(t.peerName)}</span>
+        <PresenceDot lastActiveAt={lastActiveAt ?? null} />
+      </span>
       <span className="dm-item-copy">
         <span className="dm-item-name">
           <span style={{ fontWeight: t.unread > 0 ? 700 : 600 }}>{t.peerName}</span>
@@ -165,7 +201,7 @@ function ThreadItem({ t, active, onOpen }: { t: Thread; active: boolean; onOpen:
   );
 }
 
-function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }) {
+function Conversation({ peerId, lastActiveAt, onBack }: { peerId: string; lastActiveAt: PeerLastActive; onBack: () => void }) {
   const utils = trpc.useUtils();
   const [, navigate] = useLocation();
   const history = trpc.dm.history.useQuery({ peerId }, { refetchInterval: 5_000, retry: 1 });
@@ -324,7 +360,14 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
         <Button size="sm" className="dm-back" onClick={onBack} aria-label="返回對話清單"><Icon name="Undo2" size={13} /></Button>
         <div style={{ minWidth: 0 }}>
           <b>{peer?.name ?? "…"}</b>
-          {peer?.email && <Meta as="div" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{peer.email}</Meta>}
+          {/* lastActiveAt 為 undefined＝這位已不在可訊界（例如已被移出組），只留既有對話可回看，
+              不報他的線上狀態；此時標頭就跟改版前一樣只顯示 email。 */}
+          {(peer?.email || lastActiveAt !== undefined) && (
+            <Meta as="div" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {lastActiveAt !== undefined && <><PresenceText lastActiveAt={lastActiveAt} />{peer?.email ? "・" : ""}</>}
+              {peer?.email}
+            </Meta>
+          )}
         </div>
       </header>
       <div

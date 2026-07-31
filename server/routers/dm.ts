@@ -7,6 +7,7 @@ import {
   listDmHistory,
   listDmMentionables,
   listDmPeers,
+  listDmPresence,
   listDmThreads,
   markDmRead,
   sendDm,
@@ -24,6 +25,12 @@ export const dmRouter = router({
 
   /** 對話串清單：每位往來對象一列（最後一句預覽＋未讀數），新到舊 */
   threads: authedProcedure.query(({ ctx }) => listDmThreads(ctx.auth)),
+
+  /**
+   * 誰在線上：每位可私訊對象的最後活躍時刻（聊天頁輪詢；界同 peers，三態由 shared/presence 在畫面上判）。
+   * 心跳不在這裡寫——所有登入後的呼叫都會經過 trpc.ts 的 touchPresence，這支只負責讀。
+   */
+  presence: authedProcedure.query(({ ctx }) => listDmPresence(ctx.auth)),
 
   /** 與某對象的歷史訊息（舊到新）；before 游標往前翻更舊的 */
   history: authedProcedure

@@ -128,6 +128,22 @@ export const sessions = pgTable("sessions", {
 });
 
 /**
+ * 線上狀態（私訊「誰在線上」）：每位使用者一列的「最後活躍時刻」，由 tRPC 中介層在
+ * 登入後的 API 呼叫上節流寫入（見 services/presence）。
+ *
+ * 為什麼不掛在 users 上：users 是全站最熱的讀取表，心跳每分鐘都在 UPDATE 會讓每一列
+ * 不斷產生新版本（表膨脹＋每次讀都要走更多 dead tuple），而這份資料短命到隨時可以整張丟掉。
+ * 為什麼不放記憶體：多 replica 部署時各自只看得到自己那份連線，同一個人在 A 機器活躍、
+ * B 機器上的夥伴就看不到——線上狀態必須是共享狀態。
+ */
+export const userPresence = pgTable("user_presence", {
+  /** 一人一列（PK 即 upsert 的衝突鍵）；沒有列＝從未活躍過＝離線 */
+  userId: uuid("user_id").primaryKey(),
+  /** 最後一次有動作的時刻；三態判定（上線中／剛離開／離線）見 shared/presence.ts */
+  lastActiveAt: timestamp("last_active_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
  * 跨 replica 的安全／成本限流狀態。
  *
  * keyHash 是 `scope + subject` 經 HMAC-SHA-256（production 強制 RATE_LIMIT_SECRET）後的不可逆鍵；
