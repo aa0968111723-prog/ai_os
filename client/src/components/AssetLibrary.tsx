@@ -579,8 +579,13 @@ export function AssetLibrary({
                       </div>
 
                       {menuOpen && (
+                        /* 刻意不用 role="menu"：這一區只是幾顆動作按鈕，沒有實作 ARIA menu
+                            要求的方向鍵漫遊／Escape／type-ahead。掛 role="menu" 而子項沒有
+                            role="menuitem" 會違反 aria-required-children（讀屏念成「沒有項目的選單」）；
+                            補上 menuitem 又等於承諾方向鍵導航——在沒實作的情況下只有一個項目
+                            可 Tab，比現在更糟。當成一般按鈕群組是誠實且完全可鍵盤操作的做法。
+                           站內真正的 ARIA menu 是 AccountMenu，那裡有完整的鍵盤實作。 */
                         <div
-                          role="menu"
                           onClick={(e) => e.stopPropagation()}
                           style={{
                             display: "flex", flexDirection: "column", gap: 6, marginTop: 6, paddingTop: 6,

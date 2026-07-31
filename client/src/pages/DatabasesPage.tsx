@@ -1311,6 +1311,13 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
         return (
         <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderBottom: "1px solid var(--border-soft, #eee)" }}>
           {f.kind === "image" && f.hasFile ? (
+            /* 縮圖的 onClick 是冗餘的滑鼠捷徑，刻意不做成可聚焦控件。
+                同一列右側必然有一顆等效的預覽 button：isMedia = kind !== "doc"，
+                而這裡只在 kind === "image" 時渲染，故三個 button 分支必中其一
+                （「僅存檔」那個 Badge fallback 對圖片不可達）。
+                WCAG 2.1.1 要求的是「功能可用鍵盤操作」——已經可以。
+                再補 role="button" tabIndex={0} 只會多一個指向同一動作的 Tab 停留點，
+               讓鍵盤導航變長卻不增加任何能力。 */
             <img
               src={fileUrl}
               alt={f.name}

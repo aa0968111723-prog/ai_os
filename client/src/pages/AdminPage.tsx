@@ -2251,7 +2251,14 @@ export function AdminPage() {
                 <Hint layer="always">複製這個連結傳給夥伴（{invite.data.expiresInHours} 小時內有效）：</Hint>
               )}
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input readOnly value={toFullUrl(invite.data.inviteUrl)} onFocus={(e) => e.target.select()} />
+                {/* 上方的說明句沒有與這個欄位關聯，讀屏聚焦到這裡時只會念出一長串
+                    URL 而不知道它是什麼。補 aria-label 給它一個名字。 */}
+                <input
+                  readOnly
+                  aria-label="邀請連結（唯讀，可複製）"
+                  value={toFullUrl(invite.data.inviteUrl)}
+                  onFocus={(e) => e.target.select()}
+                />
                 <CopyButton text={toFullUrl(invite.data.inviteUrl)} />
               </div>
             </div>
