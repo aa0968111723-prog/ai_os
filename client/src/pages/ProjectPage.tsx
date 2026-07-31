@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import { trpc } from "../api";
+import { DISCUSS_EVENT, flashAnchor } from "../discuss";
 import { useMatchMedia } from "../lib/useMatchMedia";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip } from "../components/interactions";
@@ -339,9 +340,13 @@ export function ProjectPage({ id }: { id: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [messagesSheetOpen]);
 
-  // 通知深連結（#225 契約補完）：@提及推播帶 ?focus=messages（開留言），
-  // 送審／裁決推播帶 ?focus=scene-<id>（捲到該分鏡格）。分鏡列表是非同步載入，
-  // 目標元素可能還沒在 DOM——輪詢重試幾秒，出現即捲、逾時放棄（仍停留在專案頁，不算失敗）。
+  // 通知深連結（#225 契約補完＋創作者旅程強化）：
+  // - ?focus=messages：開留言（手機 sheet／桌機捲側欄）
+  // - ?focus=scene-<id>：捲到該分鏡格＋高亮（SceneList 會自行展開手機收合，見其 focus effect）
+  // - ?focus=pending：捲到分鏡區並由 SceneList 切「待審」篩選（組長彙總入口用）
+  // - ?focus=generation-<id>：開資源抽屜的生成紀錄並捲到該筆（生成完成/失敗推播用）
+  // 分鏡/生成列表是非同步載入且手機上第 5 格以後預設收合（display:none）——
+  // 輪詢要等到元素「可見」（getClientRects）才捲，逾時放棄（停在專案頁不算失敗）。
   useEffect(() => {
     const focus = new URLSearchParams(window.location.search).get("focus");
     if (!focus) return;
@@ -350,24 +355,48 @@ export function ProjectPage({ id }: { id: string }) {
       else scrollToSelector("#project-messages");
       return;
     }
+    if (focus === "pending") {
+      scrollToSelector("#onboard-delivery");
+      return;
+    }
+    if (/^generation-[0-9a-f-]+$/i.test(focus)) {
+      // 生成紀錄住在資源抽屜：走既有 reveal 通道開抽屜＋切分頁，再輪詢高亮該筆
+      revealWorkbenchAnchor("#sec-generations", { projectId: id });
+      let tries = 0;
+      const timer = window.setInterval(() => {
+        tries += 1;
+        if (flashAnchor(focus) || tries >= 50) window.clearInterval(timer);
+      }, 300);
+      return () => window.clearInterval(timer);
+    }
     if (/^scene-[0-9a-f-]+$/i.test(focus)) {
       let tries = 0;
       const timer = window.setInterval(() => {
-        const el = document.getElementById(focus);
         tries += 1;
-        if (el) {
+        const el = document.getElementById(focus);
+        // 手機收合中的列 getClientRects 為空——等 SceneList 的 focus effect 展開後才捲
+        if (el && el.getClientRects().length > 0) {
           window.clearInterval(timer);
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-        } else if (tries >= 25) {
+          flashAnchor(focus);
+        } else if (tries >= 50) {
           window.clearInterval(timer);
         }
-      }, 200);
+      }, 300);
       return () => window.clearInterval(timer);
     }
     // focus=agent-run-* 由 CreationWorkbench／AiHub 自行處理（既有契約）
     // 掛載時讀一次網址即可；mobileCompact 變化不該重觸發深連結
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // 手機「討論這個」：MessagePanel 只在 sheet 開著時 mount，事件會發進真空——
+  // 這裡代收事件開 sheet，MessagePanel 掛載時再從交棒暫存補收引用卡（見 discuss.ts）
+  useEffect(() => {
+    if (!mobileCompact) return;
+    const onDiscuss = () => setMessagesSheetOpen(true);
+    window.addEventListener(DISCUSS_EVENT, onDiscuss);
+    return () => window.removeEventListener(DISCUSS_EVENT, onDiscuss);
+  }, [mobileCompact]);
   const me = trpc.auth.me.useQuery();
   // 世界觀三組 chips（主軸／調性／視覺風格）由本專案所屬組的自訂選項供給（組長可就地新增，或到「選項」頁整理）
   const options = trpc.options.byGroup.useQuery(

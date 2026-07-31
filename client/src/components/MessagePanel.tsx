@@ -4,9 +4,10 @@ import { useLocation } from "wouter";
 import { trpc } from "../api";
 import type { AppRouter } from "../../../server/routers";
 import { Icon } from "./Icon";
-import { DISCUSS_EVENT, jumpToRef, setPlannerFocus, type DiscussRef } from "../discuss";
+import { DISCUSS_EVENT, jumpToRef, setPlannerFocus, takePendingDiscussRef, type DiscussRef } from "../discuss";
 import { escapeRegExp, parseMentionedNames } from "@shared/mentions";
 import { useCustomQuickPhrases, MAX_PHRASE_LEN } from "../useCustomQuickPhrases";
+import { useLocalDraft } from "../useLocalDraft";
 
 import { Button, Card, Chip, Hint, Meta } from "./ui";
 /** 單則留言(含回覆摘要／表情彙總／引用卡）——由 messages.list 推得,列元件與父層共用同一形狀 */
@@ -387,7 +388,7 @@ export function MessagePanel({
   const roles = trpc.projects.listMemberRoles.useQuery({ projectId });
   const post = trpc.messages.post.useMutation({
     onSuccess: () => {
-      setBody("");
+      clearBodyDraft();
       setReplyTo(null);
       setPendingRef(null);
       // 自己送出視同回到底部:就算正往上翻舊留言,也要看見自己的留言已送出
@@ -417,7 +418,8 @@ export function MessagePanel({
   });
   const addSchedule = trpc.schedule.add.useMutation({ onSuccess: () => setTodoFor(null) });
 
-  const [body, setBody] = useState("");
+  // 草稿防丟：誤觸遮罩關 sheet／通知整頁重載都不再蒸發（送出成功才清）
+  const [body, setBody, clearBodyDraft] = useLocalDraft(`msg-${projectId}`, "");
   const [replyTo, setReplyTo] = useState<{ id: string; userName: string; snippet: string } | null>(null);
   const [pendingRef, setPendingRef] = useState<DiscussRef | null>(null);
   const [emojiPickFor, setEmojiPickFor] = useState<string | null>(null);
@@ -510,6 +512,7 @@ export function MessagePanel({
   // 「在留言中討論」事件:各列表的討論鈕 → 把作品掛進輸入區、捲到留言面板、聚焦
   useEffect(() => {
     const onDiscuss = (e: Event) => {
+      takePendingDiscussRef(); // 事件路徑已收到，消費掉交棒暫存避免下次掛載誤收
       const ref = (e as CustomEvent<DiscussRef>).detail;
       setPendingRef(ref);
       panelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -517,6 +520,15 @@ export function MessagePanel({
     };
     window.addEventListener(DISCUSS_EVENT, onDiscuss);
     return () => window.removeEventListener(DISCUSS_EVENT, onDiscuss);
+  }, []);
+
+  // 手機交棒補收：sheet 因「討論這個」被打開時，事件已在 mount 前發出——
+  // 掛載時從暫存把引用卡撿回來（桌機常駐面板走上面的事件路徑，暫存已被消費）
+  useEffect(() => {
+    const pending = takePendingDiscussRef();
+    if (!pending) return;
+    setPendingRef(pending);
+    window.setTimeout(() => inputRef.current?.focus(), 350);
   }, []);
 
   // 被提及/釘選/助手回覆桌面通知:記住看過的最新一則,新到的他人留言若 @我 或釘選就通知。
@@ -875,7 +887,7 @@ export function MessagePanel({
           className="chip"
           title="在留言裡問 AI 助手（讀專案與知識庫後回答）"
           onClick={() => {
-            setBody((b) => (b.includes(ASSISTANT_TRIGGER) ? b : `${ASSISTANT_TRIGGER} ${b}`.trimEnd() + " "));
+            setBody(body.includes(ASSISTANT_TRIGGER) ? body : `${ASSISTANT_TRIGGER} ${body}`.trimEnd() + " ");
             inputRef.current?.focus();
           }}
         >
