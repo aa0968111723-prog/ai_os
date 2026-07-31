@@ -38,6 +38,10 @@ export const agentRuns = pgTable("agent_runs", {
   projectStatusCreatedIdx: index("agent_runs_project_status_created_idx").on(t.projectId, t.status, t.createdAt),
   statusUpdatedIdx: index("agent_runs_status_updated_idx").on(t.status, t.updatedAt),
   userStatusIdx: index("agent_runs_user_status_idx").on(t.userId, t.status),
+  // 組級查詢（teamAssistant.agentOverview 的清單＋整組計數、list_agent_runs 工具）原本沒有任何
+  // group_id 前綴索引 → 每次打開作業台都全表掃描 agent_runs。加上 updated_at 後綴讓清單的
+  // 「近期優先」排序也能靠索引取前幾筆。
+  groupUpdatedIdx: index("agent_runs_group_updated_idx").on(t.groupId, t.updatedAt),
 }));
 
 /** 可稽核代理事件：記錄可驗證的來源、動作、等待、裁決與成果，不保存私密 chain-of-thought。 */

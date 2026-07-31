@@ -1974,6 +1974,86 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   color: var(--success-ink);
   border-color: transparent;
 }
+/* 待我裁決收件匣：團隊分析卡的第一屏（計數降到第二屏） */
+.team-inbox {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 10px);
+  background: var(--card2);
+}
+.team-inbox__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.team-inbox__head > strong { font-size: 13px; }
+.team-inbox__list { display: grid; gap: 6px; }
+.team-inbox__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.team-inbox__list > .team-inbox__row:first-child { border-top: 0; padding-top: 0; }
+.team-inbox__copy { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 7px; }
+.team-inbox__copy > a { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.team-inbox__copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.team-inbox__age { font-family: var(--mono); font-size: 10px; white-space: nowrap; }
+.team-inbox__act { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+@media (max-width: 640px) {
+  .team-inbox__row { grid-template-columns: auto minmax(0, 1fr); }
+  .team-inbox__copy { grid-template-columns: 1fr; }
+  .team-inbox__age, .team-inbox__act { grid-column: 2; }
+}
+
+/* 誰卡住了：人員／專案兩欄的阻塞歸屬 */
+.team-stuck {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 10px);
+}
+.team-stuck__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.team-stuck__head > strong { font-size: 13px; }
+.team-stuck__cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.team-stuck__list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.team-stuck__list > li { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.team-stuck__who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
+@media (max-width: 640px) {
+  .team-stuck__cols { grid-template-columns: 1fr; }
+}
+
+/* 代理產出與計畫疑慮 */
+.team-output {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 10px);
+}
+.team-output__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.team-output__head > strong { font-size: 13px; }
+.team-output__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-output__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--card2);
+}
+.team-output__kind { color: var(--fg-secondary); font-size: 10px; font-weight: 650; }
+
 .team-analysis__stats {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

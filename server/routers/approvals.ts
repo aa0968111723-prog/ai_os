@@ -202,7 +202,9 @@ export const approvalsRouter = router({
     const [apprAgg, genAgg] = await Promise.all([
       // join scenes 過濾軟刪：回收桶分鏡的懸置 pending 無法裁決（decide 的 getScene 會拒絕），不該計入待辦
       db
-        .select({ projectId: schema.approvals.projectId, n: sql<number>`count(*)` })
+        // oldest：最久沒人裁決的那一件是哪天送的——作業台「待我裁決」用它排「卡最久的排前面」。
+        // 只是既有聚合多一個 min()，不是新查詢。
+        .select({ projectId: schema.approvals.projectId, n: sql<number>`count(*)`, oldest: sql<string | null>`min(${schema.approvals.createdAt})` })
         .from(schema.approvals)
         .innerJoin(schema.projects, eq(schema.approvals.projectId, schema.projects.id))
         .innerJoin(schema.scenes, eq(schema.approvals.sceneId, schema.scenes.id))
@@ -216,7 +218,7 @@ export const approvalsRouter = router({
         )
         .groupBy(schema.approvals.projectId),
       db
-        .select({ projectId: schema.generations.projectId, n: sql<number>`count(*)` })
+        .select({ projectId: schema.generations.projectId, n: sql<number>`count(*)`, oldest: sql<string | null>`min(${schema.generations.createdAt})` })
         .from(schema.generations)
         .innerJoin(schema.projects, eq(schema.generations.projectId, schema.projects.id))
         .where(
@@ -229,15 +231,33 @@ export const approvalsRouter = router({
         .groupBy(schema.generations.projectId),
     ]);
     // count 經 node-postgres 回來是字串，一律 Number()（比照 teamAssistant 的守則）
-    const byProject = new Map<string, { pendingApprovals: number; awaitingGenerations: number }>();
+    type PendingCell = {
+      pendingApprovals: number;
+      awaitingGenerations: number;
+      oldestPendingApprovalAt: Date | null;
+      oldestAwaitingGenerationAt: Date | null;
+    };
+    const emptyCell = (): PendingCell => ({
+      pendingApprovals: 0, awaitingGenerations: 0,
+      oldestPendingApprovalAt: null, oldestAwaitingGenerationAt: null,
+    });
+    // min(timestamp) 依驅動設定可能回 Date 或字串，統一轉 Date（無效值當作沒有）
+    const toDate = (v: unknown): Date | null => {
+      if (v == null) return null;
+      const d = v instanceof Date ? v : new Date(String(v));
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    const byProject = new Map<string, PendingCell>();
     for (const r of apprAgg) {
-      const cur = byProject.get(r.projectId) ?? { pendingApprovals: 0, awaitingGenerations: 0 };
+      const cur = byProject.get(r.projectId) ?? emptyCell();
       cur.pendingApprovals += Number(r.n);
+      cur.oldestPendingApprovalAt = toDate(r.oldest);
       byProject.set(r.projectId, cur);
     }
     for (const r of genAgg) {
-      const cur = byProject.get(r.projectId) ?? { pendingApprovals: 0, awaitingGenerations: 0 };
+      const cur = byProject.get(r.projectId) ?? emptyCell();
       cur.awaitingGenerations += Number(r.n);
+      cur.oldestAwaitingGenerationAt = toDate(r.oldest);
       byProject.set(r.projectId, cur);
     }
     const projects = [...byProject.entries()].map(([projectId, c]) => ({ projectId, ...c }));

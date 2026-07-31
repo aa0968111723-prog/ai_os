@@ -4,7 +4,9 @@ import {
   countDoneSteps,
   currentStepNote,
   dispatchAllowed,
+  foldGroupStatusAggregate,
   formatAgentRunLine,
+  groupSummaryFromCounts,
   resolveDispatches,
   summarizeGroupAgentRuns,
 } from "./teamAssistant";
@@ -249,7 +251,7 @@ describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
   const recent = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
   const old = new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString();
 
-  it("空陣列 → healthy、全 0（對應 UI 空狀態）", () => {
+  it("空陣列 → idle（不是 healthy）：沒東西可分析 ≠ 分析結果良好", () => {
     const s = summarizeGroupAgentRuns([], now);
     expect(s).toEqual({
       running: 0,
@@ -257,10 +259,18 @@ describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
       awaitingApproval: 0,
       failedRecent: 0,
       doneRecent: 0,
+      stoppedRecent: 0,
       active: 0,
       activeProjects: 0,
-      health: "healthy",
+      hasRuns: false,
+      health: "idle",
     });
+  });
+
+  it("有計畫但全部靜止 → healthy、hasRuns=true（與 idle 區分開）", () => {
+    const s = summarizeGroupAgentRuns([{ status: "done", projectId: "p1", updatedAt: old }], now);
+    expect(s.hasRuns).toBe(true);
+    expect(s.health).toBe("healthy");
   });
 
   it("統計 active 與 activeProjects 去重", () => {
@@ -343,7 +353,7 @@ describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
     expect(s.health).toBe("healthy");
   });
 
-  it("discarded / stopped 不進 active 計數", () => {
+  it("discarded / stopped 不進 active 計數；stopped 進 stoppedRecent", () => {
     const s = summarizeGroupAgentRuns(
       [
         { status: "discarded", projectId: "p1", updatedAt: recent },
@@ -352,6 +362,83 @@ describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
       now,
     );
     expect(s.active).toBe(0);
+    expect(s.stoppedRecent).toBe(1);
     expect(s.health).toBe("healthy");
+  });
+
+  it("過舊 stopped 不計 stoppedRecent（與 failed／done 同一條近期窗）", () => {
+    const s = summarizeGroupAgentRuns([{ status: "stopped", projectId: "p1", updatedAt: old }], now);
+    expect(s.stoppedRecent).toBe(0);
+    expect(s.hasRuns).toBe(true);
+  });
+
+  it("近期窗邊界：剛好落在 cutoff 上算近期，早一毫秒不算", () => {
+    const recentMs = 7 * 24 * 60 * 60 * 1000;
+    const onCutoff = new Date(now - recentMs).toISOString();
+    const justBefore = new Date(now - recentMs - 1).toISOString();
+    expect(summarizeGroupAgentRuns([{ status: "done", projectId: "p1", updatedAt: onCutoff }], now).doneRecent).toBe(1);
+    expect(summarizeGroupAgentRuns([{ status: "done", projectId: "p1", updatedAt: justBefore }], now).doneRecent).toBe(0);
+  });
+
+  it("近期窗內時，五個狀態計數的總和等於非 discarded 的筆數（不再有計畫消失在數字之間）", () => {
+    const runs = [
+      { status: "running", projectId: "p1", updatedAt: recent },
+      { status: "waiting", projectId: "p1", updatedAt: recent },
+      { status: "awaiting_approval", projectId: "p2", updatedAt: recent },
+      { status: "failed", projectId: "p2", updatedAt: recent },
+      { status: "done", projectId: "p3", updatedAt: recent },
+      { status: "stopped", projectId: "p3", updatedAt: recent },
+      { status: "discarded", projectId: "p4", updatedAt: recent },
+    ];
+    const s = summarizeGroupAgentRuns(runs, now);
+    const sum = s.running + s.waiting + s.awaitingApproval + s.failedRecent + s.doneRecent + s.stoppedRecent;
+    expect(sum).toBe(runs.filter((r) => r.status !== "discarded").length);
+  });
+});
+
+describe("foldGroupStatusAggregate（整組計數，不受清單 limit 影響）", () => {
+  it("count 回字串也要正確累加；進行中看全部、終局看近期窗", () => {
+    const counts = foldGroupStatusAggregate(
+      [
+        { status: "running", n: "2", nRecent: "1" },
+        { status: "waiting", n: "1", nRecent: "0" },
+        { status: "awaiting_approval", n: "3", nRecent: "3" },
+        { status: "failed", n: "9", nRecent: "2" },
+        { status: "done", n: "120", nRecent: "7" },
+        { status: "stopped", n: "4", nRecent: "1" },
+      ],
+      2,
+    );
+    // running/waiting/awaiting_approval 是「當下」狀態，不套近期窗
+    expect(counts.running).toBe(2);
+    expect(counts.waiting).toBe(1);
+    expect(counts.awaitingApproval).toBe(3);
+    // failed/done/stopped 只認近期窗內的
+    expect(counts.failedRecent).toBe(2);
+    expect(counts.doneRecent).toBe(7);
+    expect(counts.stoppedRecent).toBe(1);
+    // totalRuns 算全部（含窗外），用來判斷 idle
+    expect(counts.totalRuns).toBe(2 + 1 + 3 + 9 + 120 + 4);
+    expect(counts.activeProjects).toBe(2);
+  });
+
+  it("空聚合 → totalRuns 0，摘要為 idle", () => {
+    const counts = foldGroupStatusAggregate([], 0);
+    expect(counts.totalRuns).toBe(0);
+    expect(groupSummaryFromCounts(counts).health).toBe("idle");
+  });
+
+  it("整組有 200 筆完成、清單只看得到 30 筆時，doneRecent 仍回整組的數字", () => {
+    // 這正是改成 SQL 聚合的理由：舊版把 limit 30 的視窗當成全組樣本
+    const counts = foldGroupStatusAggregate([{ status: "done", n: "200", nRecent: "45" }], 0);
+    expect(counts.doneRecent).toBe(45);
+    expect(groupSummaryFromCounts(counts).hasRuns).toBe(true);
+  });
+
+  it("未知狀態不計入任何桶，但仍計入 totalRuns（不謊報 idle）", () => {
+    const counts = foldGroupStatusAggregate([{ status: "some_future_status", n: "5", nRecent: "5" }], 0);
+    expect(counts.running + counts.waiting + counts.awaitingApproval).toBe(0);
+    expect(counts.totalRuns).toBe(5);
+    expect(groupSummaryFromCounts(counts).health).toBe("healthy");
   });
 });
