@@ -489,6 +489,9 @@ button.primary:disabled { opacity: 1; background: var(--muted); color: var(--mut
 /* 版面 */
 .cols { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
 @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+/* grid blowout 防護：grid 項目預設 min-width:auto，會被子內容的本質寬度撐爆
+ * （手機實測：專案頁主欄被撐到 490px、整頁右緣被裁）。1fr 軌要能縮就得歸零下限。 */
+.cols > * { min-width: 0; }
 .stack > * + * { margin-top: 16px; }
 .stack > .group-head { margin-top: var(--sp-48); }
 .error { color: var(--danger-ink); font-size: 13px; margin-top: 8px; }
@@ -3897,6 +3900,17 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .scene-studio__media { max-height: 40dvh; }
   .scene-studio__versions { max-height: none; }
 }
+
+/* ── 資料庫欄位編輯列：名稱｜型別｜必填｜刪除 固定一列（單選的選項輸入換整行） ── */
+.db-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.db-field-row > input:first-child { min-width: 0; }
+.db-field-row__options { grid-column: 1 / -1; min-width: 0; }
 
 /* ── 分享收件頁（Web Share Target）：相簿分享進來的檔案在這裡選去處 ── */
 .share-target-files { list-style: none; display: grid; gap: 8px; margin: 8px 0 12px; padding: 0; }

@@ -551,7 +551,7 @@ function GroupSection({ group, teamAdmins, isSuperAdmin, meId }: {
       ) : detail.data ? (
         <>
           {detail.data.members.length === 0 ? (
-            <Hint layer="always" style={{ margin: "4px 0 0" }}>（還沒有成員——用右側「邀請成員」把夥伴加進來）</Hint>
+            <Hint layer="always" style={{ margin: "4px 0 0" }}>（還沒有成員——用「邀請成員」卡把夥伴加進來）</Hint>
           ) : (
             detail.data.members.map((m) => (
               <MemberDetailRow
@@ -607,7 +607,7 @@ function TeamExtras({ teamId }: { teamId: string }) {
       {unassigned.length > 0 && (
         <div style={{ marginTop: 8 }}>
           <Meta as="p" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>已入團、尚未分組（{unassigned.length}）</Meta>
-          <Hint layer="always" style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用右側「邀請成員」輸入同一個 Email 並選好組別即可入組。</Hint>
+          <Hint layer="always" style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用「邀請成員」卡輸入同一個 Email 並選好組別即可入組。</Hint>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {unassigned.map((m) => (
               <Chip key={m.userId} style={{ margin: 0, opacity: m.disabled ? 0.6 : 1 }} title={m.email}>
