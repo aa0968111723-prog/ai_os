@@ -393,6 +393,8 @@ export function ProjectPage({ id }: { id: string }) {
   const mobileCompact = useMatchMedia(PROJECT_MOBILE_MQ);
   const [presenceExpanded, setPresenceExpanded] = useState(false);
   const [messagesSheetOpen, setMessagesSheetOpen] = useState(false);
+  /** ?focus=messages&mid=<id> 要捲到的那一則；MessagePanel 定位完成後清掉，避免重開時重閃 */
+  const [focusMessageId, setFocusMessageId] = useState<string | undefined>(undefined);
   const [ctxOpen, setCtxOpen] = useState<Record<CtxSectionKey, boolean>>({
     characters: false,
     scenes: false,
@@ -423,6 +425,10 @@ export function ProjectPage({ id }: { id: string }) {
     const focus = new URLSearchParams(window.location.search).get("focus");
     if (!focus) return;
     if (focus === "messages") {
+      // mid=<messageId>：@提及推播要捲到「那一則」，不只是打開面板。
+      // 白名單比照下方 scene 分支；MessagePanel 收到 prop 後自行定位（含往回翻頁）
+      const mid = new URLSearchParams(window.location.search).get("mid");
+      if (mid && /^[0-9a-f-]{8,64}$/i.test(mid)) setFocusMessageId(mid);
       if (mobileCompact) setMessagesSheetOpen(true);
       else scrollToSelector("#project-messages");
       return;
@@ -1920,7 +1926,14 @@ export function ProjectPage({ id }: { id: string }) {
         {!mobileCompact && (
           <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
             <div id="project-messages">
-              <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+              <MessagePanel
+                projectId={id}
+                groupId={p.groupId}
+                isLeader={isLeader}
+                canEdit={canEdit}
+                focusMessageId={focusMessageId}
+                onFocusHandled={() => setFocusMessageId(undefined)}
+              />
             </div>
           </CollabZone>
         )}
@@ -1974,6 +1987,8 @@ export function ProjectPage({ id }: { id: string }) {
                       isLeader={isLeader}
                       canEdit={canEdit}
                       bare
+                      focusMessageId={focusMessageId}
+                      onFocusHandled={() => setFocusMessageId(undefined)}
                     />
                   </CollabZone>
                 </div>

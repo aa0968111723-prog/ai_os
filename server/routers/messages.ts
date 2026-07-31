@@ -242,7 +242,8 @@ export const messagesRouter = router({
         void pushToUsers(mentionTargets, {
           title: `${ctx.auth.user.name} 在「${project.title}」提及你`,
           body: dmSnippet(input.body),
-          url: `/p/${project.id}?focus=messages`,
+          // mid 讓收端捲到並高亮「被提及的那一則」，而不只是打開留言面板
+          url: `/p/${project.id}?focus=messages&mid=${msg.id}`,
           tag: `mention-${msg.id}`,
         }).catch((err) => console.warn("[messages] @提及推播失敗：", err instanceof Error ? err.message : err));
       }

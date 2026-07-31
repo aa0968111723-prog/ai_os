@@ -106,10 +106,19 @@ describe("installKeyboardInset", () => {
   // CSS 那一半：貼底面板要真的讀這個變數才有效
   it("有輸入框的貼底面板讀 --kb-inset 讓開鍵盤", () => {
     const styles = readFileSync(resolve(process.cwd(), "client/src/styles.css"), "utf8");
-    for (const sel of [".project-messages-sheet-root {", ".modal-scrim {"]) {
+    for (const sel of [".project-messages-sheet-root {", ".modal-scrim {", ".fb-fab-root {"]) {
       const rule = styles.slice(styles.indexOf(sel), styles.indexOf("}", styles.indexOf(sel)));
       expect(rule).toContain("var(--kb-inset");
     }
+  });
+
+  // 只換成 dvh 是不夠的：iOS 的鍵盤不改變 dvh（dvh 只追網址列這類動態工具列）。
+  // sheet 必須另外夾到「已被 --kb-inset 縮短的父層 100%」，否則照樣溢出到鍵盤底下。
+  it("留言 sheet 夾到父層 100%，不只靠 dvh", () => {
+    const styles = readFileSync(resolve(process.cwd(), "client/src/styles.css"), "utf8");
+    const start = styles.indexOf(".project-messages-sheet {");
+    const rule = styles.slice(start, styles.indexOf("}", start));
+    expect(rule).toMatch(/max-height:\s*min\([^)]*100%\)/);
   });
 
   it("卸載會移掉監聽與變數", () => {
