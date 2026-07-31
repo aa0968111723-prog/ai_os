@@ -136,6 +136,19 @@ describe("SceneList 流程引導（C）", () => {
     expect(rowOf("s1").getByText("旁白未生成")).toBeInTheDocument();
   });
 
+  it("旁白素材被軟刪（narrationUrl 變 null）：仍算「未生成」，流程條退回配音", () => {
+    // 鎖住「為什麼判斷要看 narrationUrl 而不是 narrationAssetId」這個不變式：
+    // scenes.narrationAssetId 在素材軟刪後刻意保留（供回收桶還原），若拿它判斷，
+    // 這一格會假裝成「旁白 ✓」並放行到打包交付，但交付包（已濾軟刪）裡根本沒有那個音檔。
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1", status: "approved", voiceover: "大家好", narrationUrl: null })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    expect(rowOf("s1").getByText("旁白未生成")).toBeInTheDocument();
+    expect(screen.getByText("配音").closest("li")).toHaveAttribute("aria-current", "step");
+  });
+
   it("全部通過：流程條到「打包交付」，交付中心亮綠", () => {
     scenesQuery.mockReturnValue({
       data: [scene({ id: "s1", status: "approved" }), scene({ id: "s2", status: "approved", voiceover: "好", narrationUrl: "https://example.test/n1.mp3" })],
