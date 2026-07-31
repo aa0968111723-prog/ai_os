@@ -455,7 +455,7 @@ export function GenerationList({
                 aria-label="在留言中討論這筆生成"
                 title="把這筆生成帶進組內留言討論"
                 onClick={() => discussInMessages({ refType: "generation", refId: g.id, title: g.name || g.prompt.slice(0, 40) })}
-                style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
+                style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
               >
                 <Icon name="MessageCircle" size={15} />
               </button>
@@ -466,7 +466,7 @@ export function GenerationList({
                   aria-pressed={!!g.favorite}
                   disabled={toggleFavorite.isPending}
                   onClick={() => toggleFavorite.mutate({ generationId: g.id, favorite: !g.favorite })}
-                  style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: g.favorite ? "var(--gold)" : "var(--muted-fg)" }}
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 2, background: "none", border: "none", cursor: "pointer", color: g.favorite ? "var(--gold)" : "var(--muted-fg)" }}
                 >
                   <Icon name="Star" size={16} style={g.favorite ? { fill: "currentColor" } : undefined} />
                 </button>
@@ -493,7 +493,7 @@ export function GenerationList({
                     onClick={() => submitRename(g.id)}
                     disabled={rename.isPending}
                     aria-label="儲存名稱"
-                    style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--success)" }}
+                    style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--success)" }}
                   >
                     <Icon name="Check" size={15} />
                   </button>
@@ -501,7 +501,7 @@ export function GenerationList({
                     type="button"
                     onClick={() => setRenamingId(null)}
                     aria-label="取消命名"
-                    style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
+                    style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
                   >
                     <Icon name="X" size={15} />
                   </button>
@@ -517,7 +517,7 @@ export function GenerationList({
                         setRenamingId(g.id);
                         setRenameDraft(g.name ?? "");
                       }}
-                      style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
+                      style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
                     >
                       <Icon name="Pencil" size={14} />
                     </button>

@@ -96,7 +96,12 @@
   /* ── 字體（自帶 webfont 打頭；後方 fallback 保留，字型還沒下載完或載入失敗時
    *    仍走受控堆疊，永遠繞開細明體 PMingLiU） ── */
   --sans:  "Noto Sans TC Variable", "Noto Sans TC", system-ui, -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
-  --serif: "Noto Serif TC Variable", "Noto Serif TC", Georgia, "Songti TC", "Songti SC", "Times New Roman", "PingFang TC", serif;
+  /* --serif 尾端的 "Microsoft JhengHei" 是 Windows 的最後防線：它前面的 CJK 字型
+   * （Songti/PingFang）全是 macOS 專屬，若少了它，Windows 在 Noto Serif TC 下載完成前
+   * （font-display: swap＋unicode-range 分包＝每次冷載入都會發生）或載入失敗時，
+   * generic serif 對 zh-Hant 就是細明體 PMingLiU——正是上面註解說要永遠繞開的東西。
+   * 用黑體墊 serif 不理想，但「短暫黑體」遠勝「短暫細明體」。 */
+  --serif: "Noto Serif TC Variable", "Noto Serif TC", Georgia, "Songti TC", "Songti SC", "Times New Roman", "PingFang TC", "Microsoft JhengHei", serif;
   --mono:  "IBM Plex Mono", ui-monospace, Menlo, monospace;
 
   /* ── 字級刻度 ── */
@@ -150,6 +155,30 @@ p > .btn-ghost,
 .error > .btn-ghost {
   min-height: 0;
   min-width: 0;
+}
+/* 月曆格是另一種正當豁免：7 欄 1fr 格線在 375px 手機只有 ~313px 可用，
+ * 7×44 + 6×4 = 332px 的顯式下限會把格線撐到溢出，.planner-section 的
+ * overflow:hidden 再把週六欄直接裁掉（360px 機種裁 ~30px、320px 整欄消失）。
+ * grid 的 1fr 軌道基準會被 item 的 min-width 撐大，overflow 也壓不掉顯式下限，
+ * 唯一正解是在格線內還原 min-width。點擊高度仍有 min-height 74px（窄幅 56px）守著。 */
+.cal-cell {
+  min-width: 0;
+}
+/* chip 裡的移除小叉。位於密排 chip 內，44px 下限會把整顆 chip 撐爆（chip 本身
+ * 才 ~24px 高）；取 WCAG 2.5.8 AA 的 24px 下限再加一點餘裕，並置中圖示——
+ * inline-flex 預設 align-items:stretch 會把小圖示釘在盒子左上角。 */
+.tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+  color: inherit;
 }
 
 /* 寬螢幕：略放寬內容區，減少兩側空蕩與過度換行 */

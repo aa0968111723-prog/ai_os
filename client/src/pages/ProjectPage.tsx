@@ -172,10 +172,10 @@ function TokenListEditor({
             {!readOnly && (
               <button
                 type="button"
+                className="tag-remove"
                 aria-label={`移除「${v}」`}
                 title="移除"
                 onClick={() => onChange(values.filter((x) => x !== v))}
-                style={{ padding: 0, border: "none", background: "none", boxShadow: "none", display: "inline-flex", cursor: "pointer", color: "inherit" }}
               >
                 <Icon name="X" size={12} />
               </button>

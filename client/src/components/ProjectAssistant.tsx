@@ -19,7 +19,7 @@ import {
   readAgentPlannerMode,
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
-import { Button, Card, Chip, Hint, Meta } from "./ui";
+import { Badge, Button, Card, Chip, Hint, Meta } from "./ui";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -47,6 +47,10 @@ type Turn = {
   activity?: ThinkEvent[];
   elapsedMs?: number;
   fallback?: boolean;
+  /** 這一則回答動用了付費備援（auto 模式 NIM 失敗）。不標出來，
+   *  「花到基金會的錢」這件事在畫面上就與免費回答毫無差別。 */
+  paid?: boolean;
+  paidModel?: string;
 };
 
 /** assistant.generateModels 的一筆（助手可代操、免來源的多模態生成模型） */
@@ -210,6 +214,8 @@ export function ProjectAssistant({
             activity: [...traceRef.current],
             elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
             fallback: result.fallback,
+            paid: result.fellBackToPaid === true,
+            paidModel: result.model,
           });
         },
         onError: (message) => {
@@ -261,6 +267,8 @@ export function ProjectAssistant({
               activity: traceRef.current.length > 0 ? [...traceRef.current] : fallbackActivity,
               elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
               fallback: true,
+              paid: result.fellBackToPaid === true,
+              paidModel: result.model,
             });
           },
           onError: (error) => {
@@ -439,6 +447,16 @@ export function ProjectAssistant({
               <div key={i} style={{ alignSelf: t.role === "you" ? "flex-end" : "flex-start", maxWidth: "90%" }}>
                 <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 2, textAlign: t.role === "you" ? "right" : "left" }}>
                   {t.role === "you" ? "你" : "助手"}
+                  {/* 付費備援標示：送出前的靜態提示只說「可能」，這裡標的是「真的發生了」。
+                      成本透明是站方不變式（伺服器端特意送出 fellBackToPaid 就是為了這裡）。 */}
+                  {t.role === "ai" && t.paid && (
+                    <Badge
+                      style={{ marginLeft: 6 }}
+                      title={t.paidModel ? `NIM 無回應，這一題已自動改用付費模型 ${t.paidModel}` : "NIM 無回應，這一題已自動改用付費模型"}
+                    >
+                      已用付費備援{t.paidModel ? ` · ${t.paidModel.split("/").pop()}` : ""}
+                    </Badge>
+                  )}
                 </div>
                 {/* 回答完成後保留安全的活動軌跡，預設收合以免長對話把工作台撐爆。 */}
                 {t.role === "ai" && (

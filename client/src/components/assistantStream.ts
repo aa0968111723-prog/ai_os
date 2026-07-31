@@ -7,6 +7,11 @@ export type AssistantStreamDone = {
   steps: string[];
   mock: boolean;
   fallback: boolean;
+  /** auto 備援真的花了錢時為 true。伺服器註解明言「供 UI 誠實顯示，不讓付費
+   *  行為隱形」——這三欄若沒人消費，付費事件在產品內就是零痕跡。 */
+  fellBackToPaid?: boolean;
+  provider?: string;
+  model?: string;
 };
 
 export type AssistantStreamHandlers = {

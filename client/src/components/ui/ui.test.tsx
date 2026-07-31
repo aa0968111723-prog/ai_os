@@ -134,20 +134,22 @@ describe("Card — class 契約", () => {
 });
 
 describe("Chip — 展示 vs 可互動", () => {
-  it("清單裡的可點標籤要寫成 <li><Chip/></li>，listitem 才不會被蓋掉", () => {
+  it("as='li' 必須是型別錯誤——防線在聯集，不在執行期", () => {
     // Chip 刻意不支援 as="li"：可互動時它會輸出 role="button"，直接掛在 <li>
     // 上會覆蓋 listitem，外層 <ul> 就不再被讀屏當成清單（也不會念出項目數）。
-    // 正確做法是讓 <li> 保有清單語意、Chip 當它的子元素承接互動。
-    const { container } = render(
-      <ul>
-        <li>
-          <Chip onClick={() => {}}>剪輯</Chip>
-        </li>
-      </ul>,
+    // 這條防線只存在於 as 的型別聯集（"span" | "div"）。執行期測試守不住它——
+    // 元件不可能改到父層 DOM，渲染 <li><Chip/></li> 再斷言 li 沒有 role 是
+    // 套套邏輯，永遠綠。真正釘住聯集的是下面那行 ts-expect-error：若有人把
+    // "li" 加回聯集，指令會因為「錯誤消失了」而讓 typecheck 轉紅。
+    // （這段註解刻意不用 @ 開頭寫出完整指令名——註解開頭的指令字面量
+    //   本身就會被 TS 當成第二個指令，然後以「未使用」報錯。）
+    const forbidden = (
+      // @ts-expect-error -- as="li" 會蓋掉 listitem 語意，聯集刻意不含它
+      <Chip as="li" onClick={() => {}}>
+        剪輯
+      </Chip>
     );
-    const li = container.querySelector("li")!;
-    expect(li).not.toHaveAttribute("role");
-    expect(li.firstElementChild).toHaveAttribute("role", "button");
+    expect(forbidden).toBeTruthy(); // JSX 物件本身建得出來；擋的是型別層
   });
 
   it("沒有 onClick 就是純展示，不該有 role", () => {
@@ -328,7 +330,7 @@ describe("Hint — 新手／專家分層", () => {
       </DensityProvider>,
     );
     expect(screen.queryByText("說明文字")).not.toBeInTheDocument();
-    const toggle = screen.getByRole("button", { name: "顯示說明" });
+    const toggle = screen.getByRole("button", { name: /^顯示說明：說明文字/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
     await userEvent.click(toggle);
@@ -355,7 +357,7 @@ describe("Hint — 新手／專家分層", () => {
         <Hint>說明文字</Hint>
       </DensityProvider>,
     );
-    expect(screen.getByRole("button", { name: "顯示說明" })).toHaveStyle({ minWidth: "44px" });
+    expect(screen.getByRole("button", { name: /^顯示說明/ })).toHaveStyle({ minWidth: "44px" });
   });
 
   it("展開的說明由問號按鈕以 aria-controls 指向", async () => {
@@ -364,9 +366,50 @@ describe("Hint — 新手／專家分層", () => {
         <Hint>說明文字</Hint>
       </DensityProvider>,
     );
-    const toggle = screen.getByRole("button", { name: "顯示說明" });
+    const toggle = screen.getByRole("button", { name: /^顯示說明：說明文字/ });
     await userEvent.click(toggle);
     expect(toggle.getAttribute("aria-controls")).toBe(screen.getByText("說明文字").id);
+  });
+
+  it("同頁多顆收合按鈕的名稱互異（讀屏 rotor 才分得出誰是誰）", () => {
+    // AdminPage 一頁就有 9 顆收合 Hint。若全叫「顯示說明」，元件清單聽到的是
+    // 一整排同名按鈕，語音控制「點 顯示說明」也無從指定——名稱必須帶內容片段。
+    render(
+      <DensityProvider value="concise">
+        <Hint>選好風格後會自動帶入語氣</Hint>
+        <Hint>分鏡助理會先讀知識庫</Hint>
+      </DensityProvider>,
+    );
+    const names = screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    expect(names).toHaveLength(2);
+    expect(new Set(names).size).toBe(2);
+    expect(names[0]).toContain("選好風格");
+    expect(names[1]).toContain("分鏡助理");
+  });
+
+  it("巢狀元素裡的文字也取得到；取不出文字才退回通稱", () => {
+    render(
+      <DensityProvider value="concise">
+        <Hint>
+          <strong>重點</strong>之後是內文
+        </Hint>
+        <Hint>
+          <svg aria-hidden="true" />
+        </Hint>
+      </DensityProvider>,
+    );
+    const names = screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    expect(names[0]).toContain("重點之後是內文");
+    expect(names[1]).toBe("顯示說明");
+  });
+
+  it("toggleLabel 仍可覆蓋自動推導", () => {
+    render(
+      <DensityProvider value="concise">
+        <Hint toggleLabel="顯示排程說明">用上面的欄位加第一筆</Hint>
+      </DensityProvider>,
+    );
+    expect(screen.getByRole("button", { name: "顯示排程說明" })).toBeInTheDocument();
   });
 });
 
@@ -421,7 +464,7 @@ describe("Meta — 內容 vs 說明的分界", () => {
     expect(screen.getByText("約 12 分")).toBeInTheDocument();
     // 對照組：同一個密度下，說明被收成問號
     expect(screen.queryByText("這裡解釋怎麼用")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "顯示說明" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^顯示說明：這裡解釋怎麼用/ })).toBeInTheDocument();
   });
 
   it("支援清單與段落等內容常見的標籤", () => {

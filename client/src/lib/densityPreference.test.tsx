@@ -94,7 +94,7 @@ describe("DensityGate — 把偏好接到 primitives", () => {
       </DensityGate>,
     );
     expect(screen.queryByText("選好風格後會自動帶入每次生成。")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "顯示說明" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^顯示說明/ })).toBeInTheDocument();
   });
 
   it("沒存過時走引導模式，說明常駐", () => {
@@ -131,7 +131,7 @@ describe("DensityGate — 把偏好接到 primitives", () => {
         <Hint>選好風格後會自動帶入每次生成。</Hint>
       </DensityGate>,
     );
-    await userEvent.click(screen.getByRole("button", { name: "顯示說明" }));
+    await userEvent.click(screen.getByRole("button", { name: /^顯示說明/ }));
     expect(screen.getByText("選好風格後會自動帶入每次生成。")).toBeInTheDocument();
   });
 });
