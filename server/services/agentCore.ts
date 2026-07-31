@@ -209,14 +209,15 @@ async function loadPickedPlannerSources(
 async function loadDriveEphemeralSources(
   userId: string,
   fileIds: string[],
-): Promise<PickedPlannerSource[]> {
-  if (fileIds.length === 0) return [];
+): Promise<{ sources: PickedPlannerSource[]; capped: boolean }> {
+  if (fileIds.length === 0) return { sources: [], capped: false };
   if (fileIds.length > MAX_PLAN_DRIVE_SOURCES) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `一次規劃最多納入 ${MAX_PLAN_DRIVE_SOURCES} 個雲端檔案` });
   }
   const { fetchDrivePickedFile } = await import("./integrations");
   const { extractTextFromBuffer } = await import("./databaseFiles");
   const sources: PickedPlannerSource[] = [];
+  let capped = false;
   for (const fileId of fileIds) {
     const picked = await fetchDrivePickedFile(userId, fileId);
     if (!picked.ok) {
@@ -229,9 +230,10 @@ async function loadDriveEphemeralSources(
     if (!source) {
       throw new TRPCError({ code: "BAD_REQUEST", message: `「${picked.name}」抓不到可讀文字——請改選文件、試算表或含文字的檔案` });
     }
+    if (source.capped) capped = true; // PR-E3 驗收：單檔 8k 硬頂被觸發要可觀察（併入截斷遙測）
     sources.push({ title: source.title, content: source.content, origin: source.origin });
   }
-  return sources;
+  return { sources, capped };
 }
 
 // PostgreSQL 滑動視窗：每人每分鐘 4 次規劃；網頁/MCP/所有 replicas 共用同一防線。
@@ -604,9 +606,10 @@ export async function planAgentCore(input: {
   // PR-E2/E3：使用者選中的來源（站內＋僅本次雲端檔）永遠排在知識預算最前；剩餘額度才給一般知識庫節錄
   // PR-E5：預算依規劃檔位分級（economy 省、quality 寬），一律受 MAX_PLAN_KNOWLEDGE_CHARS 硬頂
   const knowledgeBudget = plannerKnowledgeBudget(input.plannerMode ?? "auto");
+  const driveEphemeral = await loadDriveEphemeralSources(auth.user.id, input.driveFileIds ?? []);
   const pickedSources = [
     ...(await loadPickedPlannerSources(auth, project.id, input.extraSourceIds ?? [])),
-    ...(await loadDriveEphemeralSources(auth.user.id, input.driveFileIds ?? [])),
+    ...driveEphemeral.sources,
   ];
   const picked = buildPickedSourceBlock(pickedSources, knowledgeBudget);
   const [knowledgeMeta, intelligence] = await Promise.all([
@@ -614,7 +617,8 @@ export async function planAgentCore(input: {
     buildProjectIntelligence(project.id),
   ]);
   const knowledgeCtx = knowledgeMeta.text;
-  const knowledgeTruncated = picked.truncated || knowledgeMeta.truncated;
+  // 截斷可觀察：預算截斷、知識截斷、或任一僅本次雲端檔觸發 8k 單檔硬頂
+  const knowledgeTruncated = picked.truncated || knowledgeMeta.truncated || driveEphemeral.capped;
   const knowledgeIncludedChars = picked.usedChars + knowledgeMeta.includedChars;
   const knowledgeTotalChars = picked.totalChars + knowledgeMeta.totalContentChars;
 

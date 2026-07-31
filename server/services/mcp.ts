@@ -11,11 +11,15 @@
  *     生成取回：list_generations / get_generation / list_assets（成品簽成免登入短效網址）
  *     上傳授權：request_upload_grant / get_upload_grant_status（MCP 不傳二進位；簽 aidup_ 後走 POST /api/upload）
  *     自訂資料庫：list_databases / query_database / add_database_row / add_database_rows / update_database_row / list_database_files / read_database_file / get_database_stats
- *     AI 代理（重用 agentCore）：plan_agent / approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
- *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item
- *     筆記・會議紀錄（組共用、可匯入知識庫）：list_notes / get_note
+ *     AI 代理（重用 agentCore）：plan_agent（含 shortCreation 短版旗標）/ approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
+ *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item / update_schedule_item
+ *     筆記・會議紀錄（重用 notesCore）：list_notes / get_note / add_note / append_note
+ *     人類任務（重用 taskCore；完成等待節點會喚醒代理）：list_tasks / create_task / complete_task
+ *     知識庫與分鏡（唯讀＋截斷）：list_knowledge / get_knowledge / list_scenes
+ *     外部連接（E5/M5；本人 token、指定 fileId、不提供整盤瀏覽）：get_integrations_status / import_drive_file
  *     站內私訊（只碰本人參與的對話）：list_dm_contacts / list_dm_threads / read_dm / send_dm
  *     統整：get_project_status（一次回分鏡＋生成＋代理＋排程＋待辦）
+ *     tools/list 附 shared/mcpCatalog 推導的 annotations（readOnly/destructive/idempotent/openWorld）
  */
 import type { Request, Response } from "express";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";

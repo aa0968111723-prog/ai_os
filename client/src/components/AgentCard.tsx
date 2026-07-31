@@ -209,6 +209,9 @@ export function AgentCard({
   const [goal, setGoal] = useState(() => (initialGoal ?? "").trim());
   // PR-E3：搜尋雲端後「勾選」僅本次納入規劃的檔案（內容由後端規劃當下拉取，不落庫）
   const [driveSources, setDriveSources] = useState<Array<{ id: string; name: string }>>([]);
+  // PR-E2：轉存進知識庫的來源（站內知識 id）——優先注入本次與之後的規劃
+  const [knowledgeSources, setKnowledgeSources] = useState<Array<{ id: string; title: string }>>([]);
+  const [saveToKnowledgeError, setSaveToKnowledgeError] = useState<string | null>(null);
   const [showDrivePicker, setShowDrivePicker] = useState(false);
   const [plannerMode, setPlannerMode] = useState<AgentPlannerMode>(readAgentPlannerMode);
   const [expandedRuns, setExpandedRuns] = useState<Record<string, boolean>>({});
@@ -247,8 +250,24 @@ export function AgentCard({
     utils.agents.insights.invalidate({ projectId });
   };
   const plan = trpc.agents.plan.useMutation({
-    onSuccess: () => { setGoal(""); setDriveSources([]); invalidateAll(); },
+    onSuccess: () => { setGoal(""); setDriveSources([]); setKnowledgeSources([]); invalidateAll(); },
   });
+  const importToKnowledge = trpc.knowledge.importDriveFile.useMutation();
+  // PR-E2「轉存進知識庫」：逐檔轉存（序列化）→ 成為站內知識來源 chips → 規劃帶 extraSourceIds 優先注入
+  const saveDriveFilesToKnowledge = async (files: Array<{ id: string; name: string }>) => {
+    setSaveToKnowledgeError(null);
+    const errors: string[] = [];
+    for (const f of files) {
+      try {
+        const row = await importToKnowledge.mutateAsync({ projectId, fileId: f.id, kind: "note" });
+        setKnowledgeSources((prev) => (prev.some((k) => k.id === row.id) ? prev : [...prev, { id: row.id, title: row.title }].slice(0, 10)));
+      } catch (err) {
+        errors.push(`${f.name}：${err instanceof Error ? err.message : "轉存失敗"}`);
+      }
+    }
+    utils.knowledge.list.invalidate({ projectId });
+    if (errors.length) setSaveToKnowledgeError(errors.slice(0, 3).join("；"));
+  };
   const approve = trpc.agents.approve.useMutation({ onSuccess: invalidateAll });
   const discard = trpc.agents.discard.useMutation({ onSuccess: invalidateAll });
   const stop = trpc.agents.stop.useMutation({ onSuccess: invalidateAll });
@@ -468,9 +487,23 @@ export function AgentCard({
             >
               <Icon name="HardDrive" size={12} /> 搜尋雲端（僅本次）
             </button>
+            {knowledgeSources.map((k) => (
+              <span key={k.id} className="chip" title="已轉存進知識庫（可重複使用）——本次規劃優先注入">
+                知識：{k.title.slice(0, 16)}{k.title.length > 16 ? "…" : ""}
+                <button
+                  type="button"
+                  className="chip__x"
+                  aria-label={`本次不注入 ${k.title}`}
+                  style={{ marginLeft: 4, border: 0, background: "none", cursor: "pointer", padding: 0 }}
+                  onClick={() => setKnowledgeSources((prev) => prev.filter((x) => x.id !== k.id))}
+                >
+                  <Icon name="X" size={10} />
+                </button>
+              </span>
+            ))}
             {driveSources.map((f) => (
               <span key={f.id} className="chip" title="僅本次規劃使用，不會存進站內">
-                {f.name.slice(0, 20)}{f.name.length > 20 ? "…" : ""}
+                僅本次：{f.name.slice(0, 16)}{f.name.length > 16 ? "…" : ""}
                 <button
                   type="button"
                   className="chip__x"
@@ -483,10 +516,13 @@ export function AgentCard({
               </span>
             ))}
           </div>
+          {saveToKnowledgeError && <p className="error" role="alert">{saveToKnowledgeError}</p>}
+          {importToKnowledge.isPending && <p className="hint" role="status">轉存進知識庫中…</p>}
           {showDrivePicker && (
             <GoogleDrivePicker
               onClose={() => setShowDrivePicker(false)}
-              pickLabel="納入本次規劃"
+              pickLabel="僅本次規劃"
+              onSaveToKnowledge={(files) => { void saveDriveFilesToKnowledge(files); }}
               onPick={(files) => {
                 setDriveSources((prev) => {
                   const merged = [...prev];
@@ -500,12 +536,13 @@ export function AgentCard({
             <ConfirmButton
               triggerClassName="primary"
               disabled={goal.trim().length < 5 || plan.isPending}
-              message={`會讀專案資料排出步驟與估點${driveSources.length ? `（含你勾選的 ${driveSources.length} 個雲端檔，僅本次使用）` : ""}。規劃不扣站內點數；你核准後才開始執行與扣點。`}
+              message={`會讀專案資料排出步驟與估點${knowledgeSources.length || driveSources.length ? `（優先注入你選的來源：知識 ${knowledgeSources.length}、僅本次雲端檔 ${driveSources.length}）` : ""}。規劃不扣站內點數；你核准後才開始執行與扣點。`}
               confirmLabel="排步驟"
               onConfirm={() => plan.mutate({
                 projectId,
                 goal: goal.trim(),
                 plannerMode,
+                extraSourceIds: knowledgeSources.length ? knowledgeSources.map((k) => k.id) : undefined,
                 driveFileIds: driveSources.length ? driveSources.map((f) => f.id) : undefined,
               })}
             >

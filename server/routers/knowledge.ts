@@ -411,6 +411,47 @@ export const knowledgeRouter = router({
     return { ok: true };
   }),
 
+  /**
+   * PR-E2「轉存進知識庫」：Google 選檔器挑中的檔案直接抽文字入知識庫（可重複使用、
+   * 之後的規劃自動注入）。走「使用者自己的」Drive 授權與 401 政策（fetchDrivePickedFile），
+   * 與資料庫文件匯入同一條抓取管線；只收得出純文字的檔（40k 上限截斷）。
+   */
+  importDriveFile: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      fileId: z.string().regex(/^[\w-]{5,200}$/, "Google 檔案 id 格式不正確"),
+      kind: z.enum(["transcript", "testimony", "script", "note"]).default("note"),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project); // 檢視者不能寫知識庫（與 add 同口徑）
+      const { fetchDrivePickedFile } = await import("../services/integrations");
+      const { extractTextFromBuffer, htmlToText } = await import("../services/databaseFiles");
+      const picked = await fetchDrivePickedFile(ctx.auth.user.id, input.fileId);
+      if (!picked.ok) throw new TRPCError({ code: "BAD_REQUEST", message: picked.message });
+      const raw = picked.mime === "text/html"
+        ? htmlToText(picked.buf.toString("utf8"))
+        : picked.mime.startsWith("text/")
+          ? picked.buf.toString("utf8")
+          : (await extractTextFromBuffer(picked.mime, picked.name, picked.buf)) ?? "";
+      const content = raw.trim().slice(0, MAX_CONTENT);
+      if (!content) throw new TRPCError({ code: "BAD_REQUEST", message: `「${picked.name}」抓不到可讀文字——圖影檔請改匯入資料庫文件區` });
+      const [row] = await db
+        .insert(schema.knowledge)
+        .values({
+          projectId: project.id,
+          groupId: project.groupId,
+          kind: input.kind,
+          title: picked.name.slice(0, 120),
+          content,
+          createdBy: ctx.auth.user.id,
+        })
+        .returning();
+      return { id: row.id, title: row.title, chars: content.length, truncated: raw.trim().length > content.length };
+    }),
+
   /** 把已上傳的文字素材（txt/md）轉成知識——去重：同 asset 只建一次 */
   addFromAsset: authedProcedure.input(z.object({ assetId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     // 回收桶裡的素材視為不存在（比照 describeImageAsset）——否則已刪逐字稿可被復活成知識、

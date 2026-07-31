@@ -422,6 +422,11 @@ export interface DriveListedFile {
   mimeType: string;
   size: number | null;
   modifiedTime: string | null;
+  /** 資料夾列（可進入縮小範圍，不可勾選匯入） */
+  isFolder: boolean;
+  /** 擁有者提示：非本人檔案顯示擁有者名稱（共用進來的檔要讓使用者看得出來） */
+  owner: string | null;
+  ownedByMe: boolean;
 }
 
 export type DriveListResult =
@@ -464,7 +469,7 @@ export function drivePickedImportShape(
  */
 export async function listDriveFiles(
   userId: string,
-  opts: { query?: string; pageToken?: string } = {},
+  opts: { query?: string; pageToken?: string; folderId?: string } = {},
 ): Promise<DriveListResult> {
   if (!isGoogleDriveConfigured()) return { ok: false, reason: "not-connected", message: "站方尚未設定 Google 整合" };
   const row = await findIntegration(userId, "google-drive");
@@ -476,14 +481,17 @@ export async function listDriveFiles(
   }
   if (!row) return { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
   try {
-    const qParts = ["trashed = false", "mimeType != 'application/vnd.google-apps.folder'"];
+    // 資料夾也列出（可點入縮小範圍；勾選匯入仍擋資料夾）；folderId 限縮在某資料夾內
+    const qParts = ["trashed = false"];
     const term = opts.query?.trim();
     if (term) qParts.push(`name contains '${escapeDriveQueryTerm(term.slice(0, 200))}'`);
+    const folderId = opts.folderId?.trim();
+    if (folderId) qParts.push(`'${escapeDriveQueryTerm(folderId.slice(0, 200))}' in parents`);
     const params = new URLSearchParams({
       q: qParts.join(" and "),
       pageSize: String(DRIVE_LIST_PAGE_SIZE),
-      orderBy: "modifiedTime desc",
-      fields: "nextPageToken,files(id,name,mimeType,size,modifiedTime)",
+      orderBy: "folder,modifiedTime desc",
+      fields: "nextPageToken,files(id,name,mimeType,size,modifiedTime,ownedByMe,owners(displayName))",
       supportsAllDrives: "true",
       includeItemsFromAllDrives: "true",
     });
@@ -495,16 +503,27 @@ export async function listDriveFiles(
     if (!res.ok) throw new Error(`Google Drive 清單查詢失敗（HTTP ${res.status}）`);
     const json = (await res.json()) as {
       nextPageToken?: string;
-      files?: Array<{ id?: string; name?: string; mimeType?: string; size?: string; modifiedTime?: string }>;
+      files?: Array<{
+        id?: string;
+        name?: string;
+        mimeType?: string;
+        size?: string;
+        modifiedTime?: string;
+        ownedByMe?: boolean;
+        owners?: Array<{ displayName?: string }>;
+      }>;
     };
     const files: DriveListedFile[] = (json.files ?? [])
-      .filter((f): f is { id: string; name: string; mimeType: string; size?: string; modifiedTime?: string } => !!f.id && !!f.name && !!f.mimeType)
+      .filter((f): f is NonNullable<typeof f> & { id: string; name: string; mimeType: string } => !!f.id && !!f.name && !!f.mimeType)
       .map((f) => ({
         id: f.id,
         name: f.name,
         mimeType: f.mimeType,
         size: f.size != null ? Number(f.size) : null,
         modifiedTime: f.modifiedTime ?? null,
+        isFolder: f.mimeType === "application/vnd.google-apps.folder",
+        owner: f.owners?.[0]?.displayName ?? null,
+        ownedByMe: f.ownedByMe ?? false,
       }));
     return {
       ok: true,
