@@ -54,6 +54,8 @@ export const agentsRouter = router({
       plannerMode: agentPlannerModeSchema.optional(),
       // PR-E2：使用者明確選中要注入本次規劃的站內來源（知識／資料庫文件 id）——優先於一般知識節錄
       extraSourceIds: z.array(z.string().uuid()).max(10).optional(),
+      // PR-E3：使用者搜尋雲端後「勾選」僅本次納入的 Google 檔案 id（不落庫；每檔 8k 字硬頂）
+      driveFileIds: z.array(z.string().regex(/^[\w-]{5,200}$/, "Google 檔案 id 格式不正確")).max(5).optional(),
     }))
     .mutation(({ ctx, input }) => planAgentCore({
       auth: ctx.auth,
@@ -61,6 +63,7 @@ export const agentsRouter = router({
       goal: input.goal,
       plannerMode: input.plannerMode,
       extraSourceIds: input.extraSourceIds,
+      driveFileIds: input.driveFileIds,
     })),
 
   /** 核准計畫：這一刻起才開始花執行點數（背景執行器下一個 tick 接手） */

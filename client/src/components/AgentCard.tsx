@@ -17,6 +17,7 @@ import {
 } from "../lib/agentPlannerPreference";
 import { listAiProjectRoles } from "../../../shared/aiProjectRoles";
 import { getPlaybook } from "../../../shared/rolePlaybooks";
+import { GoogleDrivePicker } from "./GoogleDrivePicker";
 
 /**
  * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
@@ -206,6 +207,9 @@ export function AgentCard({
   // 與 App 同 key 共用快取：核准/停止的授權是「發起人本人或組長以上」，按鈕顯示要跟伺服器規則對齊
   const me = trpc.auth.me.useQuery();
   const [goal, setGoal] = useState(() => (initialGoal ?? "").trim());
+  // PR-E3：搜尋雲端後「勾選」僅本次納入規劃的檔案（內容由後端規劃當下拉取，不落庫）
+  const [driveSources, setDriveSources] = useState<Array<{ id: string; name: string }>>([]);
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
   const [plannerMode, setPlannerMode] = useState<AgentPlannerMode>(readAgentPlannerMode);
   const [expandedRuns, setExpandedRuns] = useState<Record<string, boolean>>({});
   const goalInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -243,7 +247,7 @@ export function AgentCard({
     utils.agents.insights.invalidate({ projectId });
   };
   const plan = trpc.agents.plan.useMutation({
-    onSuccess: () => { setGoal(""); invalidateAll(); },
+    onSuccess: () => { setGoal(""); setDriveSources([]); invalidateAll(); },
   });
   const approve = trpc.agents.approve.useMutation({ onSuccess: invalidateAll });
   const discard = trpc.agents.discard.useMutation({ onSuccess: invalidateAll });
@@ -455,13 +459,55 @@ export function AgentCard({
               })}
             </div>
           </details>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+            <button
+              type="button"
+              className="btn-sm"
+              onClick={() => setShowDrivePicker((v) => !v)}
+              title="搜尋你的 Google 雲端並勾選檔案，只給這次規劃參考（不會存進站內；未勾選的 AI 看不到）"
+            >
+              <Icon name="HardDrive" size={12} /> 搜尋雲端（僅本次）
+            </button>
+            {driveSources.map((f) => (
+              <span key={f.id} className="chip" title="僅本次規劃使用，不會存進站內">
+                {f.name.slice(0, 20)}{f.name.length > 20 ? "…" : ""}
+                <button
+                  type="button"
+                  className="chip__x"
+                  aria-label={`移除 ${f.name}`}
+                  style={{ marginLeft: 4, border: 0, background: "none", cursor: "pointer", padding: 0 }}
+                  onClick={() => setDriveSources((prev) => prev.filter((x) => x.id !== f.id))}
+                >
+                  <Icon name="X" size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+          {showDrivePicker && (
+            <GoogleDrivePicker
+              onClose={() => setShowDrivePicker(false)}
+              pickLabel="納入本次規劃"
+              onPick={(files) => {
+                setDriveSources((prev) => {
+                  const merged = [...prev];
+                  for (const f of files) if (!merged.some((x) => x.id === f.id)) merged.push(f);
+                  return merged.slice(0, 5);
+                });
+              }}
+            />
+          )}
           <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <ConfirmButton
               triggerClassName="primary"
               disabled={goal.trim().length < 5 || plan.isPending}
-              message={`會讀專案資料排出步驟與估點。規劃不扣站內點數；你核准後才開始執行與扣點。`}
+              message={`會讀專案資料排出步驟與估點${driveSources.length ? `（含你勾選的 ${driveSources.length} 個雲端檔，僅本次使用）` : ""}。規劃不扣站內點數；你核准後才開始執行與扣點。`}
               confirmLabel="排步驟"
-              onConfirm={() => plan.mutate({ projectId, goal: goal.trim(), plannerMode })}
+              onConfirm={() => plan.mutate({
+                projectId,
+                goal: goal.trim(),
+                plannerMode,
+                driveFileIds: driveSources.length ? driveSources.map((f) => f.id) : undefined,
+              })}
             >
               {plan.isPending ? "排程中…" : "幫我排步驟"}
             </ConfirmButton>

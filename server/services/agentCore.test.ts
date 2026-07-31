@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { TRPCError } from "@trpc/server";
 import { readFileSync } from "node:fs";
-import { assertUuid, buildPickedSourceBlock } from "./agentCore";
+import { assertUuid, buildPickedSourceBlock, DRIVE_PLAN_SOURCE_CHAR_CAP, toEphemeralPlanSource } from "./agentCore";
 
 describe("assertUuid（MCP / core 入口）", () => {
   it("合法 UUID 不拋錯", () => {
@@ -104,5 +104,20 @@ describe("PR-E2 buildPickedSourceBlock（使用者指定來源優先注入）", 
   it("標籤截到 60 字內（contextUsed 單項上限）", () => {
     const block = buildPickedSourceBlock([{ title: "超".repeat(80), content: "x", origin: "file" }], 100);
     expect(block.labels[0].length).toBeLessThanOrEqual(60);
+  });
+});
+
+describe("PR-E3 toEphemeralPlanSource（僅本次雲端來源硬頂）", () => {
+  it("正常文字：trim 後收錄、capped=false", () => {
+    const s = toEphemeralPlanSource("週報", "  內容文字  ");
+    expect(s).toEqual({ title: "週報", content: "內容文字", origin: "file", capped: false });
+  });
+  it("超過單檔硬頂即截斷並標記 capped", () => {
+    const s = toEphemeralPlanSource("長文", "字".repeat(DRIVE_PLAN_SOURCE_CHAR_CAP + 5));
+    expect(s?.content.length).toBe(DRIVE_PLAN_SOURCE_CHAR_CAP);
+    expect(s?.capped).toBe(true);
+  });
+  it("空白文字回 null（呼叫端 fail-fast 給人話）", () => {
+    expect(toEphemeralPlanSource("空", "   ")).toBeNull();
   });
 });

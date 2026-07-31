@@ -65,6 +65,27 @@ const PLAN_KNOWLEDGE_BUDGET = 6000;
 const MAX_PLAN_STEPS = 30;
 /** PR-E2：一次規劃可指定的來源上限（使用者明確選中才注入——連接 ≠ 授權讀全部） */
 const MAX_PLAN_EXTRA_SOURCES = 10;
+/** PR-E3：一次規劃可「僅本次」納入的 Google 檔案上限與單檔字元硬頂（不落庫、不進長期知識） */
+const MAX_PLAN_DRIVE_SOURCES = 5;
+export const DRIVE_PLAN_SOURCE_CHAR_CAP = 8_000;
+
+/**
+ * PR-E3（純函式，可測）：把即時拉取的外部檔文字轉成規劃來源。
+ * 單檔硬頂 DRIVE_PLAN_SOURCE_CHAR_CAP；空文字回 null（呼叫端擋下並給人話）。
+ */
+export function toEphemeralPlanSource(
+  name: string,
+  text: string,
+): (PickedPlannerSource & { capped: boolean }) | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  return {
+    title: name,
+    content: trimmed.slice(0, DRIVE_PLAN_SOURCE_CHAR_CAP),
+    origin: "file",
+    capped: trimmed.length > DRIVE_PLAN_SOURCE_CHAR_CAP,
+  };
+}
 
 /** PR-E2：使用者明確指定的規劃來源（已在站內的知識或資料庫文件） */
 export interface PickedPlannerSource {
@@ -144,6 +165,39 @@ async function loadPickedPlannerSources(
     }
     // 同一句話不洩漏存在性（全站慣例）；含「無可讀文字」的文件也走此路
     throw new TRPCError({ code: "BAD_REQUEST", message: "有指定來源不存在、無權讀取或沒有可讀文字——請重新選擇來源" });
+  }
+  return sources;
+}
+
+/**
+ * PR-E3：即時拉取使用者「勾選的」Google 檔案文字，只給本次規劃用（不落庫、不進長期知識）。
+ * 走呼叫者自己的 Drive 授權（fetchDrivePickedFile 同一套 token／401／大小守門）；
+ * 未勾選的搜尋結果永遠不會到這裡。抓取失敗 fail-fast——不靜默略過使用者點名的檔案。
+ */
+async function loadDriveEphemeralSources(
+  userId: string,
+  fileIds: string[],
+): Promise<PickedPlannerSource[]> {
+  if (fileIds.length === 0) return [];
+  if (fileIds.length > MAX_PLAN_DRIVE_SOURCES) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `一次規劃最多納入 ${MAX_PLAN_DRIVE_SOURCES} 個雲端檔案` });
+  }
+  const { fetchDrivePickedFile } = await import("./integrations");
+  const { extractTextFromBuffer } = await import("./databaseFiles");
+  const sources: PickedPlannerSource[] = [];
+  for (const fileId of fileIds) {
+    const picked = await fetchDrivePickedFile(userId, fileId);
+    if (!picked.ok) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: picked.message });
+    }
+    const text = picked.mime.startsWith("text/")
+      ? picked.buf.toString("utf8")
+      : (await extractTextFromBuffer(picked.mime, picked.name, picked.buf)) ?? "";
+    const source = toEphemeralPlanSource(picked.name, text);
+    if (!source) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: `「${picked.name}」抓不到可讀文字——請改選文件、試算表或含文字的檔案` });
+    }
+    sources.push({ title: source.title, content: source.content, origin: source.origin });
   }
   return sources;
 }
@@ -439,6 +493,8 @@ export async function planAgentCore(input: {
   plannerMode?: AgentPlannerMode;
   /** PR-E2：使用者明確選中、要優先注入本次規劃的站內來源（知識或資料庫文件 id） */
   extraSourceIds?: string[];
+  /** PR-E3：使用者搜尋後「勾選」要僅本次納入的 Google 檔案 id（不落庫；每檔 8k 字硬頂） */
+  driveFileIds?: string[];
 }): Promise<AgentRunRow> {
   const { auth } = input;
   assertUuid(input.projectId, "專案編號");
@@ -505,8 +561,11 @@ export async function planAgentCore(input: {
   const sceneLines = scenes.length
     ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」${STATUS_LABEL[s.status] ?? s.status}｜畫面${s.assetId ? "有" : "無"}｜配音詞${(s.voiceover ?? "").trim() ? "有" : "無"}｜旁白音檔${s.narrationAssetId ? "有" : "無"}`).join("\n")
     : "（尚無分鏡）";
-  // PR-E2：使用者選中的來源永遠排在知識預算最前；剩餘額度才給一般知識庫節錄
-  const pickedSources = await loadPickedPlannerSources(auth, project.id, input.extraSourceIds ?? []);
+  // PR-E2/E3：使用者選中的來源（站內＋僅本次雲端檔）永遠排在知識預算最前；剩餘額度才給一般知識庫節錄
+  const pickedSources = [
+    ...(await loadPickedPlannerSources(auth, project.id, input.extraSourceIds ?? [])),
+    ...(await loadDriveEphemeralSources(auth.user.id, input.driveFileIds ?? [])),
+  ];
   const picked = buildPickedSourceBlock(pickedSources, PLAN_KNOWLEDGE_BUDGET);
   const [knowledgeMeta, intelligence] = await Promise.all([
     buildKnowledgeContextWithMeta(project.id, Math.max(0, PLAN_KNOWLEDGE_BUDGET - picked.usedChars)),

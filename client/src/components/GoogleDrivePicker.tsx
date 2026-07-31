@@ -44,11 +44,19 @@ function formatSize(size: number | null): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function GoogleDrivePicker({ tableId, onImported, onClose }: {
-  tableId: string;
+export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLabel }: {
+  /** 匯入模式：目的資料庫（有 onPick 時可省略） */
+  tableId?: string;
   /** 至少一檔匯入成功後呼叫（呼叫端刷新文件清單） */
-  onImported: () => void;
+  onImported?: () => void;
   onClose: () => void;
+  /**
+   * 選取模式（PR-E3）：提供時不匯入，改把勾選檔案回傳給呼叫端
+   *（如「僅本次規劃」——內容由後端在規劃當下拉取，不落庫）。
+   */
+  onPick?: (files: Array<{ id: string; name: string }>) => void;
+  /** 選取模式主按鈕文案（預設「納入本次規劃」） */
+  pickLabel?: string;
 }) {
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
@@ -96,6 +104,14 @@ export function GoogleDrivePicker({ tableId, onImported, onClose }: {
   const doImport = async () => {
     const picked = files.filter((f) => selected.has(f.id));
     if (picked.length === 0) return;
+    // 選取模式：不匯入，把勾選結果交回呼叫端（內容等規劃當下才抓）
+    if (onPick) {
+      onPick(picked.map((f) => ({ id: f.id, name: f.name })));
+      setSelected(new Set());
+      onClose();
+      return;
+    }
+    if (!tableId) return;
     setImporting(true);
     setResults([]);
     const out: Array<{ name: string; ok: boolean; message?: string }> = [];
@@ -113,7 +129,7 @@ export function GoogleDrivePicker({ tableId, onImported, onClose }: {
     setImporting(false);
     if (okCount > 0) {
       setSelected(new Set());
-      onImported();
+      onImported?.();
       utils.databases.listFiles.invalidate({ tableId });
     }
   };
@@ -197,12 +213,18 @@ export function GoogleDrivePicker({ tableId, onImported, onClose }: {
               disabled={selected.size === 0 || importing}
               onClick={() => { void doImport(); }}
             >
-              {importing ? `匯入中（${results.length}/${selected.size}）…` : `匯入選取（${selected.size}）`}
+              {onPick
+                ? `${pickLabel ?? "納入本次規劃"}（${selected.size}）`
+                : importing ? `匯入中（${results.length}/${selected.size}）…` : `匯入選取（${selected.size}）`}
             </button>
             {data?.ok && data.nextPageToken && (
               <button className="btn-sm" onClick={loadMore} disabled={list.isFetching}>載入更多</button>
             )}
-            <span className="meta">只會匯入你勾選的檔案；內容進站後才會被 AI 讀到。</span>
+            <span className="meta">
+              {onPick
+                ? "只有勾選的檔案會進本次規劃（每檔最多 8,000 字、不會存進站內）；未勾選的搜尋結果 AI 看不到。"
+                : "只會匯入你勾選的檔案；內容進站後才會被 AI 讀到。"}
+            </span>
           </div>
 
           {results.length > 0 && (
