@@ -1,25 +1,13 @@
 import { z } from "zod";
-import { and, asc, eq, getTableColumns, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { isUniqueViolation } from "../services/generationCore";
 
-/**
- * 把選定場景組成注入生成提示詞的「場景錨點」（色板＋光線；給 generation 重用）。
- */
-export async function buildSceneAnchor(projectId: string, presetIds: string[]): Promise<string> {
-  if (presetIds.length === 0) return "";
-  const rows = await db
-    .select()
-    .from(schema.scenePresets)
-    .where(and(eq(schema.scenePresets.projectId, projectId), inArray(schema.scenePresets.id, presetIds)));
-  if (rows.length === 0) return "";
-  return rows
-    .map((s) => `${s.name}：色板 ${s.palette}${s.lighting ? `、光線 ${s.lighting}` : ""}`)
-    .join("；");
-}
+/** @deprecated 請直接 import from services/cardAnchors；保留 re-export 相容舊路徑 */
+export { buildSceneAnchor } from "../services/cardAnchors";
 
 export const scenePresetsRouter = router({
   list: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
@@ -42,9 +30,10 @@ export const scenePresetsRouter = router({
     .input(
       z.object({
         projectId: z.string().uuid(),
-        name: z.string().min(1, "請填場景名").max(40),
-        palette: z.string().min(1, "請填色板").max(500),
-        lighting: z.string().max(500).optional(),
+        // 先 trim 再驗：與角色定裝卡同口徑，避免空白字串入庫
+        name: z.string().trim().min(1, "請填場景名").max(40),
+        palette: z.string().trim().min(1, "請填色板").max(500),
+        lighting: z.string().trim().max(500).optional(),
         referenceAssetId: z.string().uuid().optional(),
         /** 冪等鍵（client 產生的 UUID，當 row id 用）：timeout 後重送同鍵回原卡片，不重複建立 */
         clientRequestId: z.string().uuid().optional(),
@@ -89,9 +78,9 @@ export const scenePresetsRouter = router({
     .input(
       z.object({
         id: z.string().uuid(),
-        name: z.string().min(1).max(40).optional(),
-        palette: z.string().min(1).max(500).optional(),
-        lighting: z.string().max(500).optional(),
+        name: z.string().trim().min(1).max(40).optional(),
+        palette: z.string().trim().min(1).max(500).optional(),
+        lighting: z.string().trim().max(500).optional(),
         referenceAssetId: z.string().uuid().nullable().optional(),
       }),
     )

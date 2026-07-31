@@ -11,6 +11,22 @@ import {
   isWorldviewReady,
   hasActs,
   removesDefaultTaboos,
+  toggleWorldviewChip,
+  selectWorldviewStyle,
+  selectWorldviewStyleFamily,
+  keepPrimaryWorldviewStyle,
+  promoteWorldviewChip,
+  chipSoftWarnings,
+  parseWorldviewStyleSlots,
+  formatWorldviewStylesLabel,
+  stylesForVisualInject,
+  STYLE_FAMILY_ORDER,
+  STYLE_FAMILY_META,
+  STYLE_MEDIA_FAMILY,
+  looksForFamily,
+  texturesForFamily,
+  CHIP_SOFT_MAX,
+  type StyleMediaFamily,
   type Worldview,
 } from "@shared/worldview";
 import { SceneList } from "../components/SceneList";
@@ -45,7 +61,6 @@ import {
 
 /** 與 styles.css 單欄／平板界線對齊：≤820px 為手機減負模式 */
 const PROJECT_MOBILE_MQ = "(max-width: 820px)";
-
 
 type CtxSectionKey = "characters" | "scenes" | "knowledge" | "databases" | "assets" | "recycle";
 
@@ -314,7 +329,7 @@ export function ProjectPage({ id }: { id: string }) {
   // 協作視角：一般（只看 presence／游標）／鏡像跟隨（捲動跟著對方）
   const [collabMode, setCollabMode] = useState<CollabViewMode>("live");
   const [followUserId, setFollowUserId] = useState<string | null>(null);
-  useCollabMirrorFollow(collabMode, followUserId, collab.cursors, collab.focusZones);
+  useCollabMirrorFollow(collabMode, followUserId, collab.cursorsLiveRef, collab.focusZones, collab.containerRef);
   const followZone = followUserId && collabMode === "mirror" ? zoneOfPeer(followUserId, collab.focusZones) : null;
   /** UX-M1：≤820px 手機減負（收合上下文、留言 sheet）；桌機 ≥821 行為不變 */
   const mobileCompact = useMatchMedia(PROJECT_MOBILE_MQ);
@@ -405,6 +420,8 @@ export function ProjectPage({ id }: { id: string }) {
   );
   /** 世界觀儲存回饋：成功後短暫顯示「已儲存 ✓」再淡出 */
   const [wvSaved, setWvSaved] = useState<"idle" | "shown" | "fading">("idle");
+  /** 視覺風格：媒材家族分頁（未選時跟 styles 推斷） */
+  const [styleFamilyTab, setStyleFamilyTab] = useState<StyleMediaFamily | null>(null);
   const wvTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   useEffect(() => () => wvTimers.current.forEach(clearTimeout), []);
   const updateWv = trpc.projects.updateWorldview.useMutation({
@@ -593,8 +610,9 @@ export function ProjectPage({ id }: { id: string }) {
   const allStepsDone = onboardSteps.every((s) => s.done);
   const completedStepCount = onboardSteps.filter((step) => step.done).length;
   const nextOnboardIndex = onboardSteps.findIndex((step) => !step.done);
+  // id 必須唯一（不可用 target：③④ 都錨到 #onboard-delivery 會撞 React key）
   const projectJourneySteps: VisualJourneyStep[] = onboardSteps.map((step, index) => ({
-    id: step.target,
+    id: `onboard-step-${index + 1}`,
     label: step.label,
     detail: step.hint,
     state: step.done ? "done" : index === nextOnboardIndex ? "current" : "upcoming",
@@ -611,10 +629,42 @@ export function ProjectPage({ id }: { id: string }) {
 
   const toggle = (field: "tones" | "themes" | "styles", value: string) => {
     if (!canEdit) return; // 檢視者：chips 不可切換（樂觀更新會先亮再彈回，比不動更誤導）
-    const current = wv[field];
-    const next = current.includes(value) ? current.filter((x) => x !== value) : [...current, value];
+    // 風格＝家族／主風格／質感規則；主軸／調性＝可複選
+    const next =
+      field === "styles" ? selectWorldviewStyle(wv.styles, value) : toggleWorldviewChip(wv[field], value);
     // 只送有改的欄位；伺服器與現值合併（避免整包覆蓋造成的資料遺失）
     updateWv.mutate({ id, worldview: { [field]: next } });
+  };
+
+  /** 已選 chip 提到第一位＝主要（主軸／調性）；風格走 select 規則 */
+  const promote = (field: "tones" | "themes" | "styles", value: string) => {
+    if (!canEdit) return;
+    if (field === "styles") {
+      updateWv.mutate({ id, worldview: { styles: selectWorldviewStyle(wv.styles, value) } });
+      return;
+    }
+    const cur = wv[field];
+    if (cur[0] === value) return;
+    updateWv.mutate({ id, worldview: { [field]: promoteWorldviewChip(cur, value) } });
+  };
+
+  /** 舊多選／跨家族一鍵收斂為可注入 look(+質感) */
+  const keepPrimaryStyle = () => {
+    if (!canEdit) return;
+    const next = keepPrimaryWorldviewStyle(wv.styles);
+    if (next.length === wv.styles.length && next.every((v, i) => v === wv.styles[i])) return;
+    updateWv.mutate({ id, worldview: { styles: next } });
+  };
+
+  const pickStyleFamily = (family: StyleMediaFamily) => {
+    if (!canEdit) {
+      setStyleFamilyTab(family);
+      return;
+    }
+    setStyleFamilyTab(family);
+    const slots = parseWorldviewStyleSlots(wv.styles);
+    if (slots.family === family && slots.look) return; // 已在此家族，只切分頁
+    updateWv.mutate({ id, worldview: { styles: selectWorldviewStyleFamily(wv.styles, family) } });
   };
 
   /** 編輯指示：把某區塊接上協作狀態（誰在這裡→內框＋標籤）；鏡像時被跟隨者焦點區加粗 */
@@ -625,32 +675,279 @@ export function ProjectPage({ id }: { id: string }) {
     mirrorActive: followZone === zone,
   });
 
-  /** 世界觀 chips 群組（主軸／調性／風格共用）：既有選項＋孤兒值＋組長就地「＋新增」 */
-  const chipGroup = (field: "themes" | "tones" | "styles", opts: string[], optType: "theme" | "tone" | "style", labelledBy: string) => (
-    <div role="group" aria-labelledby={labelledBy}>
-      {options.isLoading && !opts.length && <Meta>載入中…</Meta>}
-      {opts.map((t) => {
-        const on = wv[field].includes(t);
-        return (
-          <Chip key={t} selected={on} onClick={() => toggle(field, t)}>
-            {t}
+  const chipSoftMaxLabel: Record<"themes" | "tones", string> = {
+    themes: `建議 ≤${CHIP_SOFT_MAX.themes}（第一個為主）`,
+    tones: `建議 ≤${CHIP_SOFT_MAX.tones}；出圖取前 2（第一個為主）`,
+  };
+
+  /** 世界觀 chips（主軸／調性）：複選；順序＝優先序；Shift+點或「改主要」升第一。 */
+  const chipGroup = (field: "themes" | "tones", opts: string[], optType: "theme" | "tone", labelledBy: string) => {
+    const selected = wv[field];
+    const softMax = CHIP_SOFT_MAX[field];
+    const overSoft = selected.length > softMax;
+    const secondaries = selected.slice(1);
+    const onChipActivate = (t: string, e?: { shiftKey?: boolean }) => {
+      if (!canEdit) return;
+      const on = selected.includes(t);
+      const isPrimary = on && selected[0] === t;
+      if (on && !isPrimary && e?.shiftKey) {
+        promote(field, t);
+        return;
+      }
+      toggle(field, t);
+    };
+    return (
+      <div role="group" aria-labelledby={labelledBy}>
+        {options.isLoading && !opts.length && <Meta>載入中…</Meta>}
+        {opts.map((t) => {
+          const on = selected.includes(t);
+          const isPrimary = on && selected[0] === t;
+          return (
+            <Chip
+              key={t}
+              selected={on}
+              onClick={(ev) => onChipActivate(t, ev)}
+              title={
+                on
+                  ? isPrimary
+                    ? "主要（點一下取消選取）"
+                    : "已選（點一下取消；Shift+點＝設為主要）"
+                  : `點選加入（${chipSoftMaxLabel[field]}）`
+              }
+            >
+              {isPrimary && (
+                <Meta as="span" style={{ marginRight: 4, fontSize: 11, fontWeight: 600, color: "var(--primary-ink)" }}>
+                  主要
+                </Meta>
+              )}
+              {t}
+            </Chip>
+          );
+        })}
+        {orphansOf(field, opts).map((t) => {
+          const isPrimary = selected[0] === t;
+          return (
+            <Chip
+              key={t}
+              selected
+              style={{ borderStyle: "dashed", opacity: 0.75 }}
+              title="這個選項已被移出清單，點一下可從本專案移除"
+              onClick={() => toggle(field, t)}
+            >
+              {isPrimary && (
+                <Meta as="span" style={{ marginRight: 4, fontSize: 11, fontWeight: 600 }}>
+                  主要
+                </Meta>
+              )}
+              {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
+            </Chip>
+          );
+        })}
+        {isLeader && canEdit && (
+          <AddOptionChip groupId={p.groupId} type={optType} onAdded={(label) => toggle(field, label)} />
+        )}
+        {canEdit && secondaries.length > 0 && (
+          <Meta style={{ display: "block", marginTop: 6, fontSize: 12 }}>
+            改主要：
+            {secondaries.map((t) => (
+              <button
+                key={`promo-${field}-${t}`}
+                type="button"
+                className="linkish"
+                style={{
+                  marginLeft: 6,
+                  fontSize: 12,
+                  border: 0,
+                  background: "none",
+                  cursor: "pointer",
+                  color: "var(--primary-ink)",
+                  textDecoration: "underline",
+                }}
+                onClick={() => promote(field, t)}
+              >
+                {t}
+              </button>
+            ))}
+          </Meta>
+        )}
+        {overSoft && (
+          <Hint layer="always" style={{ display: "block", marginTop: 6, fontSize: 12, color: "var(--warn, #b45309)" }}>
+            已選 {selected.length} 個——{chipSoftMaxLabel[field]}
+          </Hint>
+        )}
+      </div>
+    );
+  };
+
+  /**
+   * 視覺風格：媒材家族（互斥）→ 主風格（准單選）→ 同家族質感（可選 0～1）→ 自訂。
+   * 固定顯示出圖摘要；舊多選／跨家族可一鍵收斂。
+   */
+  const stylePicker = (labelledBy: string) => {
+    const slots = parseWorldviewStyleSlots(wv.styles);
+    const inject = stylesForVisualInject(wv.styles);
+    const activeFamily: StyleMediaFamily | null = styleFamilyTab ?? slots.family;
+    const lookOpts = activeFamily ? looksForFamily(activeFamily) : [];
+    const textureOpts = activeFamily ? texturesForFamily(activeFamily) : [];
+    const customOpts = styleOpts.filter((s) => !STYLE_MEDIA_FAMILY[s]);
+    const orphans = orphansOf("styles", styleOpts);
+    const canonical = keepPrimaryWorldviewStyle(wv.styles);
+    const dirty =
+      wv.styles.length !== canonical.length || wv.styles.some((v, i) => v !== canonical[i]);
+
+    return (
+      <div role="group" aria-labelledby={labelledBy}>
+        <Meta style={{ display: "block", marginBottom: 6, fontSize: 12 }}>媒材家族（互斥）</Meta>
+        <div role="radiogroup" aria-label="媒材家族">
+          {STYLE_FAMILY_ORDER.map((fam) => {
+            const meta = STYLE_FAMILY_META[fam];
+            const on = activeFamily === fam;
+            return (
+              <Chip
+                key={fam}
+                selected={on}
+                role="radio"
+                aria-checked={on}
+                title={`${meta.label}：${meta.hint}`}
+                onClick={() => pickStyleFamily(fam)}
+              >
+                {meta.label}
+              </Chip>
+            );
+          })}
+        </div>
+
+        {activeFamily && (
+          <>
+            <Meta style={{ display: "block", marginTop: 10, marginBottom: 6, fontSize: 12 }}>
+              主風格（{STYLE_FAMILY_META[activeFamily].label}・擇一）
+            </Meta>
+            {lookOpts.map((t) => {
+              const on = slots.look === t;
+              return (
+                <Chip
+                  key={t}
+                  selected={on}
+                  onClick={() => toggle("styles", t)}
+                  title={on ? "目前主風格（再點取消全部風格）" : "設為主風格"}
+                >
+                  {on && (
+                    <Meta as="span" style={{ marginRight: 4, fontSize: 11, fontWeight: 600, color: "var(--primary-ink)" }}>
+                      主
+                    </Meta>
+                  )}
+                  {t}
+                </Chip>
+              );
+            })}
+            {textureOpts.length > 0 && (
+              <>
+                <Meta style={{ display: "block", marginTop: 10, marginBottom: 6, fontSize: 12 }}>
+                  質感（可選・與主風格同家族）
+                </Meta>
+                {textureOpts.map((t) => {
+                  const on = slots.texture === t;
+                  return (
+                    <Chip
+                      key={t}
+                      selected={on}
+                      onClick={() => toggle("styles", t)}
+                      title={on ? "取消質感" : "加上質感（可與主風格並存注入）"}
+                    >
+                      {on && (
+                        <Meta as="span" style={{ marginRight: 4, fontSize: 11, fontWeight: 600, color: "var(--primary-ink)" }}>
+                          質感
+                        </Meta>
+                      )}
+                      {t}
+                    </Chip>
+                  );
+                })}
+              </>
+            )}
+          </>
+        )}
+
+        {(customOpts.length > 0 || isLeader) && (
+          <>
+            <Meta style={{ display: "block", marginTop: 10, marginBottom: 6, fontSize: 12 }}>
+              自訂風格（准單選・無家族映射）
+            </Meta>
+            {customOpts.map((t) => {
+              const on = wv.styles.length === 1 && wv.styles[0] === t;
+              return (
+                <Chip
+                  key={t}
+                  selected={on}
+                  onClick={() => toggle("styles", t)}
+                  title={on ? "目前出圖風格（再點取消）" : "設為出圖風格（取代內建選擇）"}
+                >
+                  {on && (
+                    <Meta as="span" style={{ marginRight: 4, fontSize: 11, fontWeight: 600, color: "var(--primary-ink)" }}>
+                      出圖
+                    </Meta>
+                  )}
+                  {t}
+                </Chip>
+              );
+            })}
+            {isLeader && canEdit && (
+              <AddOptionChip groupId={p.groupId} type="style" onAdded={(label) => toggle("styles", label)} />
+            )}
+          </>
+        )}
+
+        {orphans.map((t) => (
+          <Chip
+            key={`orphan-style-${t}`}
+            selected
+            style={{ borderStyle: "dashed", opacity: 0.75 }}
+            title="此選項已移出清單；點一下套用收斂規則或取消"
+            onClick={() => toggle("styles", t)}
+          >
+            {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
           </Chip>
-        );
-      })}
-      {orphansOf(field, opts).map((t) => (
-        <Chip key={t} selected
-          style={{ borderStyle: "dashed", opacity: 0.75 }}
-          title="這個選項已被移出清單，點一下可從本專案移除"
-          onClick={() => toggle(field, t)}>
-          {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
-        </Chip>
-      ))}
-      {/* 選項就地新增：組長直接在工作台加，不必繞去「選項」選單頁（加完自動勾上） */}
-      {isLeader && canEdit && (
-        <AddOptionChip groupId={p.groupId} type={optType} onAdded={(label) => toggle(field, label)} />
-      )}
-    </div>
-  );
+        ))}
+
+        <Meta style={{ display: "block", marginTop: 8, fontSize: 12 }} aria-live="polite">
+          出圖風格：
+          {inject.length ? (
+            <strong>{formatWorldviewStylesLabel(inject)}</strong>
+          ) : (
+            "尚未設定"
+          )}
+          {slots.family ? ` · 媒材：${STYLE_FAMILY_META[slots.family].label}` : ""}
+        </Meta>
+
+        {canEdit && dirty && (
+          <Meta style={{ display: "block", marginTop: 6, fontSize: 12 }}>
+            資料需收斂——
+            <button
+              type="button"
+              className="linkish"
+              style={{
+                marginLeft: 4,
+                fontSize: 12,
+                border: 0,
+                background: "none",
+                cursor: "pointer",
+                color: "var(--primary-ink)",
+                textDecoration: "underline",
+                fontWeight: 600,
+              }}
+              onClick={keepPrimaryStyle}
+            >
+              一鍵只留「{formatWorldviewStylesLabel(canonical) || canonical[0] || "可注入項"}」
+            </button>
+          </Meta>
+        )}
+
+        {options.isLoading && !styleOpts.length && <Meta>載入中…</Meta>}
+      </div>
+    );
+  };
+
+  const wvChipWarnings = chipSoftWarnings(wv);
 
   /** 摘要 chip → 目標 section：手機時先展開收合卡再捲動 */
   const targetToCtxKey = (target: string): CtxSectionKey | null => {
@@ -817,7 +1114,7 @@ export function ProjectPage({ id }: { id: string }) {
         </span>
         {collabMode === "mirror" && followUserId && (
           <Hint layer="always" style={{ flexBasis: "100%", margin: "4px 0 0" }}>
-            鏡像跟隨中：畫面會跟著對方的焦點區與游標捲動（不是螢幕串流；雙方版面不同時以卡片錨點對位）。
+            極限精準鏡像：錨點＋螢幕比例鎖定，巢狀捲動雙次校正（非螢幕串流）。
             可點「退出鏡像」或再點對方名字取消。
           </Hint>
         )}
@@ -1004,15 +1301,32 @@ export function ProjectPage({ id }: { id: string }) {
               placeholder="例：把心交給佛，煩惱就交給了光"
               onBlur={(e) => canEdit && e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
             />
-            <label id="wv-themes">訊息主軸</label>
+            <label id="wv-themes">
+              訊息主軸
+              <HelpTip text="敘事弧或片型標籤。建議 1～2 個；第一個為主。主要給腳本／導演／旁白用，不會直接塞進圖影。" />
+            </label>
             {chipGroup("themes", themeOpts, "theme", "wv-themes")}
-            <label id="wv-tones">調性（生成時自動注入）<HelpTip text="語氣與畫風，會自動加進每次生成的提示詞。" /></label>
+            <label id="wv-tones">
+              調性（生成時自動注入）
+              <HelpTip text="語氣感覺。建議 ≤2 個可並存的（如溫暖+真誠）。第一個為主；出圖只取前 2 個。點「設主要」可改優先序。" />
+            </label>
             {chipGroup("tones", toneOpts, "tone", "wv-tones")}
-            <label id="wv-styles">視覺風格（畫面一致的關鍵，生成時自動注入）<HelpTip text="語氣與畫風，會自動加進每次生成的提示詞。" /></label>
-            {chipGroup("styles", styleOpts, "style", "wv-styles")}
+            <label id="wv-styles">
+              視覺風格（畫面一致的關鍵，生成時自動注入）
+              <HelpTip text="先選媒材（寫實／插畫／3D），再選一個主風格；同家族可加一個質感（如膠片）。跨媒材不會混進同一張圖。" />
+            </label>
+            {stylePicker("wv-styles")}
+            {wvChipWarnings.length > 0 && (
+              <Hint layer="always" role="status" style={{ marginTop: 8, fontSize: 12, color: "var(--warn, #b45309)" }}>
+                {wvChipWarnings.map((w) => (
+                  <div key={w}>{w}</div>
+                ))}
+              </Hint>
+            )}
             {isLeader && (
               <Hint style={{ marginTop: 8, fontSize: 12 }}>
                 選項可直接按各列的「＋新增」加；改名／停用／排序在 <Link href="/options">選項整理頁</Link>。
+                視覺風格＝媒材家族＋主風格（＋可選質感）；調性／主軸可複選。圖影注入主風格與同家族質感、前兩個調性。
               </Hint>
             )}
             {/* 進階層全面可編輯（深度優化：後端 updateWorldview 早支援 partial patch，前端不再唯讀）——
@@ -1090,7 +1404,7 @@ export function ProjectPage({ id }: { id: string }) {
                   }}
                 />
                 <Hint style={{ marginTop: 8, fontSize: 12 }}>
-                  <strong>會進 AI：</strong>調性／風格／訊息／禁忌 → 每次生成；觀眾／三幕／敘事人物／主軸 → 導演建議與拆分鏡；代理與助手讀摘要（含訊息與禁忌）。
+                  <strong>會進 AI：</strong>調性（最多前 2）／風格（主風格＋可選同家族質感）／訊息／禁忌 → 圖影與文字生成；觀眾／三幕／敘事人物／主軸 → 導演建議與拆分鏡；代理與助手讀摘要（含訊息、禁忌與選項提示）。
                   <strong> 僅備註：</strong>參考連結（寫進交付鏡頭表，不進模型）。
                 </Hint>
               </div>
@@ -1260,13 +1574,10 @@ export function ProjectPage({ id }: { id: string }) {
           </CollabZone>
         </div>
 
-        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。
-            id 供 ?focus=messages 通知深連結捲動定位 */}
+        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度） */}
         {!mobileCompact && (
           <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-            <div id="project-messages">
-              <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
-            </div>
+            <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
           </CollabZone>
         )}
       </div>

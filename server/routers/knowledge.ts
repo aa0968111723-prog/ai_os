@@ -9,6 +9,7 @@ import { proxyFetch } from "../services/http";
 import { reserveQuota, refund } from "../services/points";
 import { signAssetUrl } from "../services/storage";
 import { assertProjectEditable } from "../services/projectAcl";
+import { formatCharacterKnowledgeBlock, formatSceneKnowledgeBlock } from "../services/cardAnchors";
 import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
@@ -68,26 +69,12 @@ export async function buildKnowledgeContextWithMeta(
     db.select().from(schema.scenePresets).where(eq(schema.scenePresets.projectId, projectId)).orderBy(asc(schema.scenePresets.createdAt)),
   ]);
 
-  // 卡片段落（6.4）：欄位各自截短（外觀 160／個性 120 字）——卡片是「設定錨點」不是長文，
-  // 截短後總量有界，因此整段完整注入、不被 budget 腰斬（斷在半張卡會餵給 LLM 誤導性的半截設定）。
+  // 卡片段落（6.4）：單一真相在 cardAnchors（角色定裝＋場景設定）——截短與張數上限一致
   const cardParts: string[] = [];
-  if (chars.length) {
-    const lines = chars.map(
-      (c) => `- ${c.name}：${c.appearance.slice(0, 160)}${c.notes?.trim() ? `｜個性：${c.notes.slice(0, 120)}` : ""}`,
-    );
-    cardParts.push(`【角色定裝卡】\n${lines.join("\n")}`);
-  }
-  if (presets.length) {
-    // 比照角色卡：色板／光線各自截短，且最多注入 N 張——場景卡可無界累積，完整 palette/lighting
-    // 曾把 cardBlock 撐爆 LLM 預算（且卡片優先佔額度、長文知識被擠掉）。
-    const PRESET_INJECT_MAX = 12;
-    const lines = presets.slice(0, PRESET_INJECT_MAX).map(
-      (s) =>
-        `- ${s.name}：色板 ${s.palette.slice(0, 160)}${s.lighting?.trim() ? `｜光線 ${s.lighting.slice(0, 120)}` : ""}`,
-    );
-    const more = presets.length > PRESET_INJECT_MAX ? `\n…另有 ${presets.length - PRESET_INJECT_MAX} 張場景卡未注入` : "";
-    cardParts.push(`【場景設定卡】\n${lines.join("\n")}${more}`);
-  }
+  const charBlock = formatCharacterKnowledgeBlock(chars);
+  if (charBlock) cardParts.push(charBlock);
+  const sceneBlock = formatSceneKnowledgeBlock(presets);
+  if (sceneBlock) cardParts.push(sceneBlock);
   const cardBlock = cardParts.join("\n");
 
   // 知識長文全量（不含卡片——卡片是有界錨點、完整注入）：供截斷透明化計算「掉了多少」

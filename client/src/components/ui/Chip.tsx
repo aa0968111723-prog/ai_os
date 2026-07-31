@@ -1,4 +1,4 @@
-import type { HTMLAttributes, KeyboardEvent, ReactNode } from "react";
+import type { HTMLAttributes, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { cx } from "./cx";
 
 /**
@@ -8,6 +8,9 @@ import { cx } from "./cx";
  * 可互動時補上 `role="button"`、`tabIndex`、Enter／Space 鍵盤啟動。
  * 全站現況是裸 `<span className="chip pick">` 搭 onClick——滑鼠可點、鍵盤按不到；
  * 換成這個元件即自動修好，且 class 輸出不變（`chip pick`／`chip pick on`）。
+ *
+ * onClick 可接收 MouseEvent（世界觀 chips 用 shiftKey／detail 做「設主要」）。
+ * 鍵盤 Enter／Space 會合成 detail:1 且不帶 shift（除非按鍵當下 shift 仍按著）。
  */
 export function Chip({
   selected,
@@ -30,7 +33,7 @@ export function Chip({
    * 兩者並存等於同時宣告兩種互相打架的狀態。所以非 button 的 role 一律不輸出 aria-pressed。
    */
   selected?: boolean;
-  onClick?: () => void;
+  onClick?: (event: MouseEvent<HTMLElement>) => void;
   /**
    * 刻意不含 "li"：可互動的 Chip 會輸出 role="button"，掛在 <li> 上會蓋掉
    * listitem 角色，外層 <ul> 就不再被讀屏當成清單（項目數也不會被念出來）。
@@ -51,7 +54,13 @@ export function Chip({
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      onClick?.();
+      // 合成點擊事件：保留 shiftKey，讓「Shift+Enter 設主要」在鍵盤也可達
+      onClick?.({
+        shiftKey: event.shiftKey,
+        detail: 1,
+        preventDefault: () => event.preventDefault(),
+        stopPropagation: () => event.stopPropagation(),
+      } as MouseEvent<HTMLElement>);
     }
   }
 

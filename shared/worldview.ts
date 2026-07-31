@@ -3,6 +3,12 @@ import { z } from "zod";
 /**
  * 世界觀（專案定盤星）— 業界 brief 驗證過的分層設計：
  * 快速層 5 欄（1 分鐘填完）＋進階層（摺疊，可後補）。
+ *
+ * Chips 策略：
+ * - **視覺風格＝媒材家族 × 主風格 × 可選質感**（家族互斥；主風格准單選；同家族質感 0～1）。
+ *   儲存仍為 `styles: string[]`（[主風格, 質感?]）；跨家族舊資料注入只吃可解析的主風格。
+ * - 主軸／調性可複選：陣列**順序＝優先序**（index 0＝主要）；UI 軟上限；注入硬截斷。
+ * - 圖影：風格 look(+同家族 texture)、調性 2；LLM／導演標主要並截斷。
  */
 // 上限：字串欄位單值 500 字、陣列最多 30 項且逐項 100 字——世界觀整份會注入付費 LLM，無上限＝可被塞爆與注入
 export const worldviewSchema = z.object({
@@ -35,8 +41,30 @@ export function DEFAULT_TABOOS(): string[] {
 
 export const TONE_OPTIONS = ["莊嚴", "溫暖", "真誠", "療癒", "活潑", "簡約"];
 export const THEME_OPTIONS = ["苦→修行→轉變→感恩", "禪修日常", "佛法入門", "活動紀實", "感恩分享"];
-/** 視覺風格：注入每次圖像/影片生成與 AI 導演建議，維持整支片畫風一致 */
+/** 視覺風格內建清單：注入每次圖像/影片生成與 AI 導演建議，維持整支片畫風一致 */
 export const STYLE_OPTIONS = ["日系水彩", "寫實攝影", "3D 動畫", "手繪插畫", "極簡線條", "膠片質感", "水墨禪意"];
+
+/**
+ * UI／正規化上限：風格 look+質感 ≤2；調性／主軸 2（軟警告，助手套用時截斷）。
+ */
+export const CHIP_SOFT_MAX = {
+  themes: 2,
+  tones: 2,
+  styles: 2,
+} as const;
+
+/** 圖／影正向注入硬截斷（風格經 stylesForVisualInject 再截；避免跨家族互撞） */
+export const VISUAL_INJECT_MAX = {
+  tones: 2,
+  styles: 2,
+} as const;
+
+/** LLM 生成附加：同樣收斂，避免 token 與敘事方向過散 */
+export const LLM_INJECT_MAX = {
+  themes: 2,
+  tones: 2,
+  styles: 2,
+} as const;
 
 /**
  * 內建 chips 的英文錨點：FLUX/SDXL 等圖像影片模型以英文語彙訓練為主，純中文風格詞
@@ -61,9 +89,313 @@ export const TONE_EN: Record<string, string> = {
   "簡約": "clean, minimal",
 };
 
+/** 媒材家族：互斥；跨家族並選畫面易沖 */
+export type StyleMediaFamily = "photo" | "illustrate" | "3d";
+
+export const STYLE_FAMILY_ORDER: StyleMediaFamily[] = ["photo", "illustrate", "3d"];
+
+export const STYLE_FAMILY_META: Record<
+  StyleMediaFamily,
+  { label: string; hint: string; defaultStyle: string }
+> = {
+  photo: { label: "寫實", hint: "攝影／紀實感", defaultStyle: "寫實攝影" },
+  illustrate: { label: "插畫", hint: "手繪／平面", defaultStyle: "手繪插畫" },
+  "3d": { label: "3D", hint: "立體渲染", defaultStyle: "3D 動畫" },
+};
+
+/**
+ * 風格媒材家族：跨家族並選容易畫面互沖（寫實 vs 插畫 vs 3D）。
+ * 同家族內 look + texture（如寫實+膠片）可並存注入。
+ */
+export const STYLE_MEDIA_FAMILY: Record<string, StyleMediaFamily> = {
+  "寫實攝影": "photo",
+  "膠片質感": "photo",
+  "日系水彩": "illustrate",
+  "手繪插畫": "illustrate",
+  "極簡線條": "illustrate",
+  "水墨禪意": "illustrate",
+  "3D 動畫": "3d",
+};
+
+/** look＝主風格（家族內互斥）；texture＝同家族可選質感（0～1） */
+export type StyleLookRole = "look" | "texture";
+
+export const STYLE_LOOK_ROLE: Record<string, StyleLookRole> = {
+  "寫實攝影": "look",
+  "膠片質感": "texture",
+  "日系水彩": "look",
+  "手繪插畫": "look",
+  "極簡線條": "look",
+  "水墨禪意": "look",
+  "3D 動畫": "look",
+};
+
 /** 把 chips 轉成「中文(英文)」雙語注入形；無對應者原樣保留 */
 export function bilingualChips(values: string[], map: Record<string, string>): string[] {
   return values.map((v) => (map[v] ? `${v}(${map[v]})` : v));
+}
+
+export function styleFamilyOf(value: string): StyleMediaFamily | null {
+  return STYLE_MEDIA_FAMILY[value] ?? null;
+}
+
+export function styleRoleOf(value: string): StyleLookRole | null {
+  return STYLE_LOOK_ROLE[value] ?? null;
+}
+
+/** 內建選項依家族分組（look 在前、texture 在後） */
+export function builtinStylesForFamily(family: StyleMediaFamily): string[] {
+  const looks: string[] = [];
+  const textures: string[] = [];
+  for (const s of STYLE_OPTIONS) {
+    if (STYLE_MEDIA_FAMILY[s] !== family) continue;
+    if (STYLE_LOOK_ROLE[s] === "texture") textures.push(s);
+    else looks.push(s);
+  }
+  return [...looks, ...textures];
+}
+
+export function looksForFamily(family: StyleMediaFamily): string[] {
+  return STYLE_OPTIONS.filter(
+    (s) => STYLE_MEDIA_FAMILY[s] === family && STYLE_LOOK_ROLE[s] !== "texture",
+  );
+}
+
+export function texturesForFamily(family: StyleMediaFamily): string[] {
+  return STYLE_OPTIONS.filter(
+    (s) => STYLE_MEDIA_FAMILY[s] === family && STYLE_LOOK_ROLE[s] === "texture",
+  );
+}
+
+/** 從 styles 陣列解析家族／主風格／質感／其餘（舊多選或自訂） */
+export function parseWorldviewStyleSlots(styles: string[]): {
+  family: StyleMediaFamily | null;
+  look: string | null;
+  texture: string | null;
+  customs: string[];
+  extras: string[];
+} {
+  let look: string | null = null;
+  let texture: string | null = null;
+  const customs: string[] = [];
+  const extras: string[] = [];
+  for (const s of styles) {
+    const fam = STYLE_MEDIA_FAMILY[s];
+    const role = STYLE_LOOK_ROLE[s];
+    if (!fam) {
+      customs.push(s);
+      continue;
+    }
+    if (role === "texture") {
+      if (!texture) texture = s;
+      else extras.push(s);
+    } else {
+      if (!look) look = s;
+      else extras.push(s);
+    }
+  }
+  const family =
+    (look ? STYLE_MEDIA_FAMILY[look] : null) ??
+    (texture ? STYLE_MEDIA_FAMILY[texture] : null) ??
+    null;
+  // 質感與主風格不同家族 → 質感降為 extras
+  if (look && texture && STYLE_MEDIA_FAMILY[look] !== STYLE_MEDIA_FAMILY[texture]) {
+    extras.push(texture);
+    texture = null;
+  }
+  return { family, look, texture, customs, extras };
+}
+
+/** 合成可寫回的 styles：[look, texture?]；皆空則 [] */
+export function composeWorldviewStyles(look: string | null, texture: string | null): string[] {
+  if (!look && !texture) return [];
+  if (!look && texture) {
+    const fam = STYLE_MEDIA_FAMILY[texture];
+    const def = fam ? STYLE_FAMILY_META[fam].defaultStyle : null;
+    if (def && def !== texture) return [def, texture];
+    return [texture];
+  }
+  if (look && texture && STYLE_MEDIA_FAMILY[look] === STYLE_MEDIA_FAMILY[texture]) {
+    return [look, texture];
+  }
+  return look ? [look] : [];
+}
+
+/**
+ * 正規化 styles：收斂為 look(+同家族 texture) 或單一自訂。
+ * 跨家族舊資料只保留第一個可解析主風格（及合法質感）。
+ */
+export function canonicalizeWorldviewStyles(styles: string[]): string[] {
+  const slots = parseWorldviewStyleSlots(styles);
+  if (slots.look || slots.texture) {
+    return composeWorldviewStyles(slots.look, slots.texture);
+  }
+  if (slots.customs.length) return [slots.customs[0]!];
+  if (styles.length) return [styles[0]!];
+  return [];
+}
+
+/** 圖影／LLM 實際注入的風格列表（look + 同家族 texture；自訂最多 1） */
+export function stylesForVisualInject(styles: string[]): string[] {
+  const slots = parseWorldviewStyleSlots(styles);
+  if (slots.look || slots.texture) {
+    return composeWorldviewStyles(slots.look, slots.texture).slice(0, VISUAL_INJECT_MAX.styles);
+  }
+  if (slots.customs.length) return slots.customs.slice(0, 1);
+  return styles.slice(0, 1);
+}
+
+/** 人話：主風格／質感或舊多選主要標 */
+export function formatWorldviewStylesLabel(styles: string[]): string {
+  if (!styles.length) return "";
+  const slots = parseWorldviewStyleSlots(styles);
+  if (slots.look && slots.texture) return `主風格:${slots.look}；質感:${slots.texture}`;
+  if (slots.look) return slots.look;
+  if (slots.texture) return slots.texture;
+  if (slots.customs.length === 1 && styles.length === 1) return slots.customs[0]!;
+  return formatChipsPrimarySecondary(styles);
+}
+
+/** 切換 chip（主軸／調性）：未選→加到尾端；已選→移除（順序＝優先序） */
+export function toggleWorldviewChip(current: string[], value: string): string[] {
+  if (current.includes(value)) return current.filter((x) => x !== value);
+  return [...current, value];
+}
+
+/** 選媒材家族：若已在該家族則維持；否則套該家族預設主風格 */
+export function selectWorldviewStyleFamily(
+  current: string[],
+  family: StyleMediaFamily,
+): string[] {
+  const slots = parseWorldviewStyleSlots(current);
+  if (slots.family === family && slots.look) {
+    return composeWorldviewStyles(
+      slots.look,
+      slots.texture && STYLE_MEDIA_FAMILY[slots.texture] === family ? slots.texture : null,
+    );
+  }
+  return [STYLE_FAMILY_META[family].defaultStyle];
+}
+
+/** 選主風格（look）：同家族可保留質感；再點同一主風格→清空 */
+export function selectWorldviewStyleLook(current: string[], look: string): string[] {
+  const slots = parseWorldviewStyleSlots(current);
+  if (slots.look === look) return [];
+  const fam = STYLE_MEDIA_FAMILY[look];
+  const keepTexture =
+    fam && slots.texture && STYLE_MEDIA_FAMILY[slots.texture] === fam ? slots.texture : null;
+  return composeWorldviewStyles(look, keepTexture);
+}
+
+/** 選質感：切換；無主風格時帶入家族預設主風格 */
+export function selectWorldviewStyleTexture(current: string[], texture: string): string[] {
+  const slots = parseWorldviewStyleSlots(current);
+  if (slots.texture === texture) {
+    return composeWorldviewStyles(slots.look, null);
+  }
+  const fam = STYLE_MEDIA_FAMILY[texture];
+  const look =
+    slots.look && fam && STYLE_MEDIA_FAMILY[slots.look] === fam
+      ? slots.look
+      : fam
+        ? STYLE_FAMILY_META[fam].defaultStyle
+        : null;
+  return composeWorldviewStyles(look, texture);
+}
+
+/**
+ * 視覺風格選擇入口：內建 look／texture 走家族規則；自訂＝准單選取代。
+ * 舊多選點內建項會收斂到合法 look(+texture)。
+ */
+export function selectWorldviewStyle(current: string[], value: string): string[] {
+  const role = STYLE_LOOK_ROLE[value];
+  const fam = STYLE_MEDIA_FAMILY[value];
+  if (fam && role === "texture") return selectWorldviewStyleTexture(current, value);
+  if (fam && role === "look") return selectWorldviewStyleLook(current, value);
+  // 自訂或未映射：准單選
+  if (current.length === 1 && current[0] === value) return [];
+  return [value];
+}
+
+/** 只保留可注入的主風格（一鍵收斂舊多選／跨家族；質感若合法則保留） */
+export function keepPrimaryWorldviewStyle(current: string[]): string[] {
+  return canonicalizeWorldviewStyles(current);
+}
+
+/** 把已選 chip 提到第一位（設為主要；主軸／調性用） */
+export function promoteWorldviewChip(current: string[], value: string): string[] {
+  if (!current.includes(value)) return current;
+  return [value, ...current.filter((x) => x !== value)];
+}
+
+/** 是否橫跨兩個以上媒材家族（寫實／插畫／3D） */
+export function hasStyleFamilyConflict(styles: string[]): boolean {
+  const families = new Set(
+    styles.map((s) => STYLE_MEDIA_FAMILY[s]).filter((f): f is StyleMediaFamily => !!f),
+  );
+  return families.size > 1;
+}
+
+export type WorldviewChipField = "themes" | "tones" | "styles";
+
+/** UI／助手共用：超過軟上限或風格跨家族時的人話警告（空＝健康） */
+export function chipSoftWarnings(wv: Pick<Worldview, WorldviewChipField>): string[] {
+  const warnings: string[] = [];
+  const slots = parseWorldviewStyleSlots(wv.styles);
+  const inject = stylesForVisualInject(wv.styles);
+  const canonical = canonicalizeWorldviewStyles(wv.styles);
+  const needsConverge =
+    wv.styles.length > CHIP_SOFT_MAX.styles ||
+    hasStyleFamilyConflict(wv.styles) ||
+    (wv.styles.length > 0 &&
+      (canonical.length !== wv.styles.length || canonical.some((v, i) => v !== wv.styles[i])));
+
+  if (needsConverge && wv.styles.length > 0) {
+    const label = inject.length ? inject.join("、") : (wv.styles[0] ?? "");
+    warnings.push(
+      `視覺風格需收斂（出圖將用「${label}」；請用媒材家族重選，或一鍵只留可注入項）`,
+    );
+  }
+  if (wv.tones.length > CHIP_SOFT_MAX.tones) {
+    warnings.push(
+      `調性已選 ${wv.tones.length} 個（建議 ≤${CHIP_SOFT_MAX.tones}；出圖只取前 ${VISUAL_INJECT_MAX.tones} 個）`,
+    );
+  }
+  if (wv.themes.length > CHIP_SOFT_MAX.themes) {
+    warnings.push(
+      `訊息主軸已選 ${wv.themes.length} 個（建議 ≤${CHIP_SOFT_MAX.themes}，過多會讓敘事弧互相拉扯）`,
+    );
+  }
+  if (hasStyleFamilyConflict(wv.styles)) {
+    const famLabel = slots.family ? STYLE_FAMILY_META[slots.family].label : "目前主風格所屬";
+    warnings.push(`風格橫跨不同媒材（寫實／插畫／3D）——建議只留「${famLabel}」一類`);
+  }
+  return warnings;
+}
+
+/**
+ * 餵給專案助手／代理的選項提示：有警告才回字串，否則空。
+ * 引導模型在使用者問基調時建議收斂，而不是替使用者改資料。
+ */
+export function worldviewChipGuidanceForAi(wv: Pick<Worldview, WorldviewChipField>): string {
+  const w = chipSoftWarnings(wv);
+  if (!w.length) return "";
+  return (
+    `【世界觀 chips 提示】${w.join("；")}。` +
+    "若使用者問風格／調性／主軸或生成方向飄移，請主動建議收斂（風格：一個媒材家族＋一個主風格，可選一個同家族質感；調性≤2、主軸≤2），" +
+    "並說明：圖影注入 look(+質感)；可用 apply_worldview_chips 建議套用（使用者確認後寫入；styles 最多 2 且應同家族）。"
+  );
+}
+
+/** 有多個時標「主要／備選」；單個原樣。max 可截斷後再格式（截斷後仍標主要） */
+export function formatChipsPrimarySecondary(values: string[], max?: number): string {
+  if (!values.length) return "";
+  const slice = max !== undefined ? values.slice(0, max) : values;
+  if (!slice.length) return "";
+  if (slice.length === 1) return slice[0]!;
+  const [primary, ...rest] = slice;
+  const more = values.length > slice.length ? `…(+${values.length - slice.length})` : "";
+  return `主要:${primary}；備選:${rest.join("、")}${more}`;
 }
 
 /**
@@ -118,15 +450,26 @@ function joinPipe(parts: string[]): string {
   return parts.filter(Boolean).join("｜");
 }
 
-/** 代理／助手：必含 message 與 taboos，避免規劃偏離一片一訊息或合規 */
+/** 代理／助手：必含 message 與 taboos；chips 標主要／備選並附軟警告摘要 */
 function formatWorldviewBrief(wv: Worldview): string {
+  const styleLine = wv.styles.length
+    ? `視覺風格：${formatWorldviewStylesLabel(wv.styles)}`
+    : "視覺風格：—";
+  const toneLine = wv.tones.length
+    ? `調性：${formatChipsPrimarySecondary(wv.tones)}`
+    : "調性：—";
+  const themeLine = wv.themes.length
+    ? `訊息主軸：${formatChipsPrimarySecondary(wv.themes)}`
+    : "";
+  const soft = chipSoftWarnings(wv);
   return joinPipe([
     `一句話：${wv.logline.trim() || "—"}`,
     `核心訊息：${wv.message.trim() || "—"}`,
-    wv.themes.length ? `訊息主軸：${wv.themes.join("、")}` : "",
-    `調性：${wv.tones.join("、") || "—"}`,
-    `視覺風格：${wv.styles.join("、") || "—"}`,
+    themeLine,
+    toneLine,
+    styleLine,
     wv.taboos.length ? `禁忌：${wv.taboos.join("；")}` : "",
+    soft.length ? `選項提示：${soft.join("；")}` : "",
   ]);
 }
 
@@ -137,9 +480,13 @@ function formatWorldviewDirector(wv: Worldview): string {
       `一句話故事：${wv.logline.trim() || "—"}`,
       `關鍵訊息：${wv.message.trim() || "—"}`,
       wv.audience.trim() ? `目標觀眾：${wv.audience.trim()}` : "",
-      wv.themes.length ? `訊息主軸（敘事弧）：${wv.themes.join("、")}` : "",
-      `調性：${wv.tones.join("、") || "—"}`,
-      `視覺風格：${wv.styles.join("、") || "—"}`,
+      wv.themes.length
+        ? `訊息主軸（敘事弧，第一個為主）：${formatChipsPrimarySecondary(wv.themes)}`
+        : "",
+      `調性（第一個為主）：${wv.tones.length ? formatChipsPrimarySecondary(wv.tones) : "—"}`,
+      `視覺風格（主風格＋可選同家族質感；分鏡以主風格為準）：${
+        wv.styles.length ? formatWorldviewStylesLabel(wv.styles) : "—"
+      }`,
     ]),
   ];
   const acts = formatActsLine(wv.acts);
@@ -150,10 +497,12 @@ function formatWorldviewDirector(wv: Worldview): string {
     );
   }
   if (wv.taboos.length) lines.push(`禁忌：${wv.taboos.join("；")}`);
+  const soft = chipSoftWarnings(wv);
+  if (soft.length) lines.push(`選項提示：${soft.join("；")}`);
   return lines.join("\n");
 }
 
-/** LLM 生成附加片段（接在 [專案背景] 內；themes 只對文字模型有意義） */
+/** LLM 生成附加片段（接在 [專案背景] 內；themes 只對文字模型有意義；硬截斷） */
 function formatWorldviewGenerationLlm(wv: Worldview): string {
   const parts: string[] = [];
   const log = wv.logline.trim();
@@ -161,40 +510,46 @@ function formatWorldviewGenerationLlm(wv: Worldview): string {
     const clipped = log.length > LOGLINE_INJECT_MAX ? `${log.slice(0, LOGLINE_INJECT_MAX)}…` : log;
     parts.push(`故事錨點:${clipped}`);
   }
-  if (wv.tones.length) parts.push(`調性:${wv.tones.join("、")}`);
-  if (wv.styles.length) parts.push(`視覺風格:${wv.styles.join("、")}`);
+  const tones = wv.tones.slice(0, LLM_INJECT_MAX.tones);
+  if (tones.length) parts.push(`調性:${tones.join("、")}`);
+  const styles = stylesForVisualInject(wv.styles).slice(0, LLM_INJECT_MAX.styles);
+  if (styles.length) parts.push(`視覺風格:${styles.join("、")}`);
   if (wv.message.trim()) parts.push(`核心訊息:${wv.message.trim()}`);
-  if (wv.themes.length) parts.push(`訊息主軸:${wv.themes.join("、")}`);
+  const themes = wv.themes.slice(0, LLM_INJECT_MAX.themes);
+  if (themes.length) parts.push(`訊息主軸:${themes.join("、")}`);
   if (wv.taboos.length) parts.push(`避免:${wv.taboos.join(";")}`);
   return parts.join("|");
 }
 
-/** 交付鏡頭表：人話 bullet，含風格／主軸／三幕／人物 */
+/** 交付鏡頭表：人話 bullet，含主要／備選與軟警告 */
 function formatWorldviewExport(wv: Worldview): string {
   const lines = [
     `- 一句話故事：${wv.logline.trim() || "—"}`,
     `- 關鍵訊息：${wv.message.trim() || "—"}`,
-    `- 調性：${wv.tones.join("、") || "—"}`,
-    `- 視覺風格：${wv.styles.join("、") || "—"}`,
+    `- 調性：${wv.tones.length ? formatChipsPrimarySecondary(wv.tones) : "—"}`,
+    `- 視覺風格：${wv.styles.length ? formatWorldviewStylesLabel(wv.styles) : "—"}`,
   ];
-  if (wv.themes.length) lines.push(`- 訊息主軸：${wv.themes.join("、")}`);
+  if (wv.themes.length) lines.push(`- 訊息主軸：${formatChipsPrimarySecondary(wv.themes)}`);
   if (wv.audience.trim()) lines.push(`- 目標觀眾：${wv.audience.trim()}`);
   const acts = formatActsLine(wv.acts);
   if (acts) lines.push(`- 三幕結構：${acts}`);
   if (wv.people.length) lines.push(`- 敘事人物：${wv.people.join("；")}`);
   lines.push(`- 禁忌事項：${wv.taboos.join("；") || "—"}`);
   if (wv.references.length) lines.push(`- 參考連結（備註）：${wv.references.join("；")}`);
+  const soft = chipSoftWarnings(wv);
+  if (soft.length) lines.push(`- 選項提示：${soft.join("；")}`);
   return lines.join("\n");
 }
 
 /**
  * 視覺類別正向注入片段（中英雙語 tones/styles + 短 logline + message）。
+ * 風格經 stylesForVisualInject（主風格＋同家族質感）；調性前 VISUAL_INJECT_MAX.tones。
  * 禁忌不放正向——由 generationCore 走 negative_prompt。
  */
 export function formatWorldviewVisualPositive(wv: Worldview): string {
   const parts: string[] = [];
-  const tones = bilingualChips(wv.tones, TONE_EN);
-  const styles = bilingualChips(wv.styles, STYLE_EN);
+  const tones = bilingualChips(wv.tones.slice(0, VISUAL_INJECT_MAX.tones), TONE_EN);
+  const styles = bilingualChips(stylesForVisualInject(wv.styles), STYLE_EN);
   if (tones.length) parts.push(`調性:${tones.join("、")}`);
   if (styles.length) parts.push(`視覺風格:${styles.join("、")}`);
   const log = wv.logline.trim();
@@ -211,4 +566,58 @@ export function removesDefaultTaboos(prev: string[], next: string[]): boolean {
   const defaults = DEFAULT_TABOOS();
   const nextSet = new Set(next);
   return defaults.some((d) => prev.includes(d) && !nextSet.has(d));
+}
+
+/**
+ * 助手／API 套用 chips 前正規化：trim、去重；風格 canonicalize（look+質感）；調性／主軸截到上限。
+ * 只回傳「有傳入」的欄位（未傳＝不改）；空陣列＝清空該欄。
+ */
+export function normalizeWorldviewChipsPatch(input: {
+  themes?: string[] | undefined;
+  tones?: string[] | undefined;
+  styles?: string[] | undefined;
+}): Partial<Pick<Worldview, WorldviewChipField>> {
+  const clean = (arr: string[] | undefined, max: number): string[] | undefined => {
+    if (arr === undefined) return undefined;
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of arr) {
+      const v = String(raw ?? "")
+        .trim()
+        .slice(0, 100);
+      if (!v || seen.has(v)) continue;
+      seen.add(v);
+      out.push(v);
+      if (out.length >= max) break;
+    }
+    return out;
+  };
+  const patch: Partial<Pick<Worldview, WorldviewChipField>> = {};
+  const themes = clean(input.themes, CHIP_SOFT_MAX.themes);
+  const tones = clean(input.tones, CHIP_SOFT_MAX.tones);
+  const stylesRaw = clean(input.styles, 8);
+  const styles = stylesRaw === undefined ? undefined : canonicalizeWorldviewStyles(stylesRaw);
+  if (themes !== undefined) patch.themes = themes;
+  if (tones !== undefined) patch.tones = tones;
+  if (styles !== undefined) patch.styles = styles;
+  return patch;
+}
+
+/** 人話摘要「將套用的 chips」（按鈕 label／確認框用） */
+export function summarizeWorldviewChipsPatch(
+  patch: Partial<Pick<Worldview, WorldviewChipField>>,
+): string {
+  const parts: string[] = [];
+  if (patch.styles) {
+    parts.push(
+      patch.styles.length ? `風格「${formatWorldviewStylesLabel(patch.styles)}」` : "清空風格",
+    );
+  }
+  if (patch.tones) {
+    parts.push(patch.tones.length ? `調性 ${patch.tones.join("、")}` : "清空調性");
+  }
+  if (patch.themes) {
+    parts.push(patch.themes.length ? `主軸 ${patch.themes.join("、")}` : "清空主軸");
+  }
+  return parts.join("；") || "（無變更）";
 }
