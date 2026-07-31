@@ -360,6 +360,36 @@ export const TOOLS = [
     description: "取得專案代理健康摘要：阻塞、逾期、待補資訊、AI/人員統一任務清單與成果中心。",
     inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
+  // ── 知識庫與分鏡（M3）：唯讀摘要＋分段全文——外部 AI 規劃前的素材視角 ──
+  {
+    name: "list_knowledge",
+    description: "列出專案知識庫條目（腳本／師父開示稿／見證／筆記）：id／類型／標題／字數／前 160 字摘要。全文用 get_knowledge 分段讀；limit 上限 50。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        limit: { type: "number", description: "最多回幾筆（預設 20，上限 50）" },
+      },
+      required: ["projectId"],
+    },
+  },
+  {
+    name: "get_knowledge",
+    description: "讀一筆知識的全文（每次最多 20000 字；totalChars 超過時用 offset 續讀，避免一次撐爆上下文）。先用 list_knowledge 找 knowledgeId。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        knowledgeId: { type: "string" },
+        offset: { type: "number", description: "從第幾個字開始讀（預設 0）" },
+      },
+      required: ["knowledgeId"],
+    },
+  },
+  {
+    name: "list_scenes",
+    description: "列出專案分鏡（唯讀摘要）：順序、標題、狀態、有無畫面／配音詞／旁白音檔。規劃拆鏡或補生成前先看這個。",
+    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+  },
   // ── 人類任務（M2）：外部 AI 可列可建可結——完成等待節點的任務會自動恢復代理 ──
   {
     name: "list_tasks",
@@ -823,6 +853,72 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       chars: note.content.length,
       updatedAt: note.updatedAt,
     };
+  }
+
+  // ── M3 知識庫與分鏡（D4）：唯讀＋截斷——組隔離同網頁；軟刪除（回收桶）一律不列不讀 ──
+  if (name === "list_knowledge") {
+    const pid = String(args.projectId ?? "");
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
+    if (!project) throw new Error("找不到專案");
+    requireGroup(auth, project.groupId);
+    const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+    // 與 knowledge.list router 同口徑：SQL 層取 length/left，不載全文
+    const rows = await db
+      .select({
+        id: schema.knowledge.id,
+        kind: schema.knowledge.kind,
+        title: schema.knowledge.title,
+        chars: sql<number>`length(${schema.knowledge.content})`.mapWith(Number),
+        excerpt: sql<string>`left(${schema.knowledge.content}, 160)`,
+        createdAt: schema.knowledge.createdAt,
+      })
+      .from(schema.knowledge)
+      .where(and(eq(schema.knowledge.projectId, project.id), isNull(schema.knowledge.deletedAt)))
+      .orderBy(desc(schema.knowledge.createdAt))
+      .limit(limit);
+    return rows;
+  }
+
+  if (name === "get_knowledge") {
+    const kid = String(args.knowledgeId ?? "");
+    const [row] = await db
+      .select()
+      .from(schema.knowledge)
+      .where(and(eq(schema.knowledge.id, kid), isNull(schema.knowledge.deletedAt)));
+    if (!row) throw new Error("找不到這筆知識（可能已在回收桶）");
+    requireGroup(auth, row.groupId);
+    const offset = Math.max(0, Math.trunc(Number(args.offset) || 0));
+    const CHUNK = 20_000;
+    return {
+      id: row.id,
+      kind: row.kind,
+      title: row.title,
+      totalChars: row.content.length,
+      offset,
+      text: row.content.slice(offset, offset + CHUNK),
+      truncated: offset + CHUNK < row.content.length,
+    };
+  }
+
+  if (name === "list_scenes") {
+    const pid = String(args.projectId ?? "");
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
+    if (!project) throw new Error("找不到專案");
+    requireGroup(auth, project.groupId);
+    const scenes = await db
+      .select()
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+      .orderBy(schema.scenes.orderIndex);
+    return scenes.map((s, index) => ({
+      sceneNo: index + 1,
+      sceneId: s.id,
+      title: s.title,
+      status: s.status,
+      hasVisual: !!s.assetId,
+      hasVoiceover: !!(s.voiceover ?? "").trim(),
+      hasNarrationAudio: !!s.narrationAssetId,
+    }));
   }
 
   // ── M2 任務（D3）：重用 taskCore——負責人歸屬、封存、等待節點喚醒與網頁端同一套 ──
