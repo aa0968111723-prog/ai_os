@@ -3,7 +3,7 @@
 | 欄位 | 值 |
 |------|-----|
 | **Document ID** | FIGMA-DS-2026-07 |
-| **Status** | Phase 1–2 完成（tokens + 檔案結構與 Foundations 文件頁）；Phase 3–4 待續 |
+| **Status** | Phase 1–3 完成（tokens + Foundations 文件頁 + 8 個 primitives 元件）；Phase 4（Code Connect）待續 |
 | **Figma 檔** | [Aios Design System](https://www.figma.com/design/ZUfpFsC0YLOltnUbMYQzKo) |
 | **File key** | `ZUfpFsC0YLOltnUbMYQzKo` |
 | **Plan** | `team::1640375764347468262` |
@@ -78,11 +78,34 @@ Dev Mode 可直接讀出對應的 CSS 變數名，讓這條回路有跡可循。
 - auto-layout 容器的**預設白底**會在暖沙頁底上露出白色橫條 → 內層一律清空 fills
 - Figma 的 `lineHeight.value` 帶浮點雜訊（`112.00000476837166%`）→ 顯示前取整
 
-## 5. 尚未進行
+## 5. Phase 3 產出（primitives 元件）
 
-- **Phase 3** 元件：8 個 primitives（Button/Card/Chip/Badge/Pill/Hint/EmptyState/Skeleton）
-  ＋ PR #211 劇組 UI 元件（技能卡、已選 chip、待你過目橫幅、支線進度）
-- **Phase 4** Code Connect 綁定與無障礙稽核
+| 元件 | 變體 | 頁 |
+|------|------|----|
+| Button | 16（變體 4 × 尺寸 2 × 狀態 2） | 🔘 Button |
+| Chip | 4（展示／可互動 × 未選／已選） | 🏷 Chip · Pill · Badge |
+| Pill | 5（queued/running/done/failed/neutral） | 同上 |
+| Badge | 2（一般／假資料） | 同上 |
+| Card | 4（default/primary/std/quiet） | 🗂 Card · Skeleton · EmptyState |
+| Skeleton / EmptyState / Hint / Meta | 各 1 | 同上 |
 
-元件的視覺細節建議在使用者能親自檢視時再進行——那正是「透過 Figma 調整元件細節」的本意。
-視覺依據見 `client/gallery.html`（`npm run dev` → <http://localhost:5173/gallery.html>）。
+**填色、邊框、圓角、內距全部綁到變數**，不寫死色值——改 token 元件會跟著變。
+每個元件的 description 寫的是「code 端的關鍵約束」而非外觀描述，例如：
+
+- Chip：「一次性動作不要給 selected，否則會輸出 aria-pressed 謊報成切換鈕」
+- Skeleton：「給了 role 或 aria-label 就不強加 aria-hidden——兩者矛盾會讓讀屏收不到『正在載入』」
+- EmptyState：「說明用純 `<p>`（15px）不是 hint（12px）：空狀態的唯一內容不該是全頁最小的字」
+- Card：「details 才收 open/onToggle——判別聯集避免 `<div open>` 這種無效 DOM 通過型別」
+
+實作時踩到並修正的兩處（都是 Figma Plugin API 的順序陷阱）：
+- `combineAsVariants` 後所有變體疊在 (0,0)，且**必須先關 auto-layout 再設座標**，
+  否則 auto-layout 會把 x/y 蓋掉
+- **`resize()` 會把 sizing mode 重設為 FIXED**，在設定 `AUTO` 之後才 resize 會讓
+  卡片高度塌成 10px、文字掉到框外
+
+## 6. 尚未進行
+
+- **Phase 3 續**：PR #211 的劇組 UI 元件（技能卡、已選 chip、待你過目橫幅、支線進度）
+- **Phase 4**：Code Connect 綁定（把 Figma 元件對到 `client/src/components/ui/*`）與無障礙稽核
+
+視覺對照依據見 `client/gallery.html`（`npm run dev` → <http://localhost:5173/gallery.html>）。
