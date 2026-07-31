@@ -11,8 +11,12 @@ import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus }
 
 /** 提示詞上限：與後端 MAX_PROMPT_CHARS／scenes.update 同口徑 */
 const MAX_PROMPT_CHARS = 4000;
+/** 配音詞上限：與後端 scenes.update 的 voiceover z.string().max(2000) 同口徑 */
+const MAX_VOICEOVER_CHARS = 2000;
 /** 逐格生成的預設模型（與 SceneList 同一支，換頁不會突然變別的模型） */
 const DEFAULT_REGEN_MODEL = "fal-ai/fast-lightning-sdxl";
+/** 逐格配音的後端預設 TTS（scenes.generateVoiceover 未帶 modelId 時用它）——前端只拿來顯示預估點數 */
+const DEFAULT_TTS_MODEL = "fal-ai/kokoro/mandarin-chinese";
 
 /** 重生（文生圖／文生影片）與修正（吃底圖）兩份清單——判斷來自 shared，與後端守門同一份規則 */
 const REGEN_MODELS = MODELS.filter(isSceneRegenModel);
@@ -29,11 +33,12 @@ const VERSION_STATE: Record<SceneVersion["state"], { label: string; cls: PillSta
   failed: { label: "失敗", cls: "failed" },
 };
 
-type StudioTab = "regen" | "refine" | "versions";
+type StudioTab = "regen" | "refine" | "voice" | "versions";
 
 const TABS: Array<{ id: StudioTab; label: string; icon: Parameters<typeof Icon>[0]["name"] }> = [
   { id: "refine", label: "修正這張", icon: "Palette" },
   { id: "regen", label: "重畫這格", icon: "Sparkles" },
+  { id: "voice", label: "配音", icon: "Mic" },
   { id: "versions", label: "版本", icon: "Clock" },
 ];
 
@@ -50,10 +55,11 @@ function readStored(key: string, fallback: string, valid: (v: string) => boolean
 /**
  * 單格工作室：把「一格」單獨拉到全螢幕反覆修，不牽動其他分鏡。
  *
- * 三件事在同一個畫面裡（這是與分鏡列最大的差別——分鏡列一次看全片，這裡只看一格）：
+ * 四件事在同一個畫面裡（這是與分鏡列最大的差別——分鏡列一次看全片，這裡只看一格）：
  * 1. **修正這張**：以現用畫面（或任何一版）當底圖送圖生圖／圖生影片——保留構圖只改指定的地方。
  * 2. **重畫這格**：換模型從頭重畫，適合構圖本身要換掉。
- * 3. **版本**：這一格歷來每一次生成都在，含模型／指示／花了幾點；一鍵切回任何一版，可逆。
+ * 3. **配音**：編這一格的配音詞、生成中文旁白、就地試聽——單格的深改只有這一個入口。
+ * 4. **版本**：這一格歷來每一次生成都在，含模型／指示／花了幾點；一鍵切回任何一版，可逆。
  *
  * 現用是哪一版的單一真相是 scenes.assetId／narrationAssetId（伺服器端），
  * 本元件只呈現與觸發，不自己保存版本狀態。
@@ -67,6 +73,14 @@ export function SceneStudio({
   sceneIds,
   onClose,
   onChanged,
+  isLeader = false,
+  meLoading = false,
+  sceneStatus,
+  pendingApprovalId,
+  rejectReason,
+  approvalsError = false,
+  deciding = false,
+  onDecide,
 }: {
   sceneId: string;
   projectId: string;
@@ -79,6 +93,24 @@ export function SceneStudio({
   onClose: () => void;
   /** 這一格被改動（存檔／送生成／切版本）時通知外層刷新分鏡列 */
   onChanged: () => void;
+  /* ── 就地裁決（全部選配）───────────────────────────────────────────────
+   * 組長改完一鏡要通過／退回，過去得先關掉工作室回分鏡列才找得到按鈕。
+   * 審批資料與 mutation 都留在 SceneList，這裡只收「現況」與一個回呼——
+   * 工作室因此不必碰 trpc.approvals，既有測試的 mock（只有 scenes.*）不受影響。 */
+  /** 是否為組長（後端 approvals.decide 另有把關，這裡只決定要不要畫） */
+  isLeader?: boolean;
+  /** auth.me 尚未回來：先不畫裁決區，避免按鈕先缺後補的閃爍 */
+  meLoading?: boolean;
+  /** 這一鏡的最新狀態（取自分鏡列的活資料，裁決後會自己更新） */
+  sceneStatus?: string;
+  /** 待裁決的審批 id；沒有就不畫裁決鈕 */
+  pendingApprovalId?: string;
+  /** 最近一次被退回的理由（status=needs_work 時顯示） */
+  rejectReason?: string | null;
+  /** 審批清單讀取失敗：據此解釋「為什麼沒有裁決鈕」，而不是預設沉默 */
+  approvalsError?: boolean;
+  deciding?: boolean;
+  onDecide?: (decision: "approved" | "needs_work", reason?: string) => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef, true, onClose);
@@ -86,6 +118,7 @@ export function SceneStudio({
 
   const [tab, setTab] = useState<StudioTab>("refine");
   const [promptDraft, setPromptDraft] = useState<string | null>(null); // null＝跟隨伺服器
+  const [voiceDraft, setVoiceDraft] = useState<string | null>(null); // null＝跟隨伺服器
   const [instruction, setInstruction] = useState("");
   /** 修正用的底圖；null＝這一格目前的畫面 */
   const [baseAssetId, setBaseAssetId] = useState<string | null>(null);
@@ -120,26 +153,42 @@ export function SceneStudio({
     onChanged();
   };
   const update = trpc.scenes.update.useMutation({ onSuccess: () => { setPromptDraft(null); refresh(); } });
+  // 配音詞另開一支 update：存提示詞與存配音詞的 pending／已儲存回饋各自獨立，不互相污染
+  const saveVoice = trpc.scenes.update.useMutation({ onSuccess: () => { setVoiceDraft(null); refresh(); } });
   // 冪等鍵（QA-007）：還沒成功的重送沿用同鍵——timeout 重按不重複扣點；成功才換新鍵
   const regenRequestId = useRef(crypto.randomUUID());
   const refineRequestId = useRef(crypto.randomUUID());
+  const voiceRequestId = useRef(crypto.randomUUID());
   const regen = trpc.scenes.generateInto.useMutation({
     onSuccess: () => { regenRequestId.current = crypto.randomUUID(); setTab("versions"); refresh(); },
   });
   const refine = trpc.scenes.refine.useMutation({
     onSuccess: () => { refineRequestId.current = crypto.randomUUID(); setTab("versions"); refresh(); },
   });
+  // 完成後留在配音頁（試聽就在同一頁出現），不像重畫/修正要跳到版本頁看進度
+  const generateVoiceover = trpc.scenes.generateVoiceover.useMutation({
+    onSuccess: () => { voiceRequestId.current = crypto.randomUUID(); refresh(); },
+  });
   const setCurrent = trpc.scenes.setVisualFromAsset.useMutation({
     onSuccess: () => { setPreviewAssetId(null); refresh(); },
   });
-  const actionError = update.error ?? regen.error ?? refine.error ?? setCurrent.error;
+  const actionError = update.error ?? saveVoice.error ?? regen.error ?? refine.error ?? generateVoiceover.error ?? setCurrent.error;
 
   const prompt = promptDraft ?? data?.prompt ?? "";
   const promptDirty = promptDraft !== null && promptDraft !== (data?.prompt ?? "");
+  const voiceover = voiceDraft ?? data?.voiceover ?? "";
+  const voiceDirty = voiceDraft !== null && voiceDraft !== (data?.voiceover ?? "");
+  /** 後端生成旁白吃的是「已儲存」的配音詞——估點與可否生成都以它為準 */
+  const savedVoiceover = data?.voiceover ?? "";
 
   const regenModel = getModel(regenModelId) ?? getModel(DEFAULT_REGEN_MODEL);
   const refineModel = getModel(refineModelId);
   const refinePoints = refineModel ? estimatePoints(refineModel, { promptChars: instruction.length }) : undefined;
+  // 配音走按字計費的中文 TTS：估點依「已儲存的配音詞」長度算，與後端扣點同一函式——顯示＝扣點
+  const ttsModel = getModel(DEFAULT_TTS_MODEL);
+  const ttsPoints = ttsModel ? estimatePoints(ttsModel, { promptChars: savedVoiceover.length }) : undefined;
+  const currentNarration = narrationVersions.find((v) => v.isCurrent);
+  const isVoicing = narrationVersions.some((v) => v.state === "generating") || generateVoiceover.isPending;
 
   /** 修正的底圖：指定的那一版，或這一格現用畫面 */
   const baseVersion = baseAssetId ? list.find((v) => v.assetId === baseAssetId) : currentVisual;
@@ -185,6 +234,45 @@ export function SceneStudio({
           </p>
         )}
         {actionError && <p className="error" role="alert">操作失敗：{actionError.message}</p>}
+
+        {/* 就地裁決：改完這一鏡不必回分鏡列才能通過／退回。
+            退回理由沿用分鏡列同一組常用句，組長在手機上全程可不打字。 */}
+        {!meLoading && isLeader && sceneStatus === "pending" && pendingApprovalId && onDecide && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: "var(--sp-8)" }}>
+            <Meta as="span">這一鏡待你裁決</Meta>
+            <Button
+              variant="neutral"
+              size="sm"
+              style={{ color: "var(--success-ink)", borderColor: "var(--success)" }}
+              disabled={deciding}
+              onClick={() => onDecide("approved")}
+            >
+              <Icon name="Check" size={15} /> 通過
+            </Button>
+            <ConfirmButton
+              triggerStyle={{ color: "var(--danger-ink)", borderColor: "var(--danger)" }}
+              disabled={deciding}
+              title="退回這一鏡"
+              reason={{
+                label: "退回理由（會通知提交人）",
+                placeholder: "說明需要修改的地方…",
+                required: true,
+                presets: ["畫面與腳本不符", "人物長相跑掉", "文字有錯字", "風格不一致", "請再修一版"],
+              }}
+              confirmLabel="退回"
+              onConfirm={(reason) => onDecide("needs_work", reason)}
+            >
+              <Icon name="Undo2" size={15} /> 退回
+            </ConfirmButton>
+          </div>
+        )}
+        {/* 讀不到審批清單時說清楚，否則組長只會看到「裁決鈕不見了」而無從判斷 */}
+        {!meLoading && isLeader && sceneStatus === "pending" && !pendingApprovalId && approvalsError && (
+          <Hint layer="always">審批狀態讀不到，通過／退回暫時無法顯示——可回分鏡列再試一次。</Hint>
+        )}
+        {sceneStatus === "needs_work" && rejectReason && (
+          <Meta as="p" role="status">退回理由：{rejectReason}</Meta>
+        )}
 
         <div className="scene-studio__body">
           {/* ── 舞台：這一格現在長什麼樣（或正在看的那一版） ───────────────── */}
@@ -260,7 +348,7 @@ export function SceneStudio({
                   src={narrationVersions.find((v) => v.isCurrent)!.assetUrl!}
                   aria-label={`第 ${sceneNumber} 鏡旁白試聽`}
                   style={{ height: 32, width: "100%" }}
-                  fallbackLabel="旁白音檔遺失——可在分鏡列「重生配音」補回"
+                  fallbackLabel="旁白音檔遺失——可在「配音」分頁重生補回"
                 />
               </div>
             )}
@@ -460,6 +548,86 @@ export function SceneStudio({
                       )}
                     </div>
                   </>
+                )}
+              </div>
+            )}
+
+            {/* 配音：編這一格的配音詞、生成中文旁白、就地試聽——分鏡列的深改都收到這裡 */}
+            {tab === "voice" && (
+              <div role="tabpanel" id={`studio-panel-voice-${sceneId}`} aria-labelledby={`studio-tab-voice-${sceneId}`}>
+                {!canEdit ? (
+                  <Hint layer="always">你是檢視者，只能試聽旁白，不能修改配音詞。</Hint>
+                ) : (
+                  <>
+                    <label htmlFor={`studio-voiceover-${sceneId}`} style={{ fontSize: "var(--fs-12)", margin: 0 }}>
+                      這一格的配音詞
+                      <HelpTip text="旁白唸的稿。存好後按「生成配音」會用中文 TTS 唸出來；改了稿要先儲存，生成才會用新的。" />
+                    </label>
+                    <textarea
+                      id={`studio-voiceover-${sceneId}`}
+                      value={voiceover}
+                      disabled={saveVoice.isPending}
+                      maxLength={MAX_VOICEOVER_CHARS}
+                      rows={3}
+                      placeholder="這一格旁白要唸什麼（可留白＝這格沒有旁白）"
+                      onChange={(e) => setVoiceDraft(e.target.value)}
+                      style={{ fontSize: "var(--fs-13)", padding: "6px 9px", width: "100%" }}
+                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <Button size="sm" disabled={!voiceDirty || saveVoice.isPending} onClick={() => saveVoice.mutate({ sceneId, voiceover })}>
+                        {saveVoice.isPending ? "儲存中…" : "儲存配音詞"}
+                      </Button>
+                      {voiceDirty ? <Meta>尚未儲存</Meta> : saveVoice.isSuccess ? <Meta style={{ color: "var(--success-ink)" }}>已儲存 <Icon name="Check" size={12} /></Meta> : null}
+                    </div>
+                    {savedVoiceover.trim() === "" && <Hint layer="always">先填配音詞並儲存，才能生成旁白。</Hint>}
+                    {voiceDirty && savedVoiceover.trim() !== "" && (
+                      <Hint layer="always">配音詞還沒儲存——先按「儲存配音詞」，生成才會用新的稿。</Hint>
+                    )}
+                    <div style={{ marginTop: 8 }}>
+                      {isVoicing ? (
+                        <Button variant="primary" disabled>配音生成中…</Button>
+                      ) : (
+                        <ConfirmButton
+                          triggerClassName="primary"
+                          disabled={savedVoiceover.trim() === "" || voiceDirty}
+                          triggerTitle="用已儲存的配音詞生成中文旁白，完成後就在下方試聽"
+                          message={`即將生成旁白配音（${ttsModel?.label ?? "中文 TTS"}${ttsPoints != null ? `，約 −${ttsPoints} 點` : ""}）；失敗自動退點`}
+                          confirmLabel="確認生成"
+                          onConfirm={() => generateVoiceover.mutate({ sceneId, clientRequestId: voiceRequestId.current })}
+                        >
+                          {currentNarration ? (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <Icon name="RotateCw" size={14} /> 重生配音{ttsPoints != null ? `（約 −${ttsPoints} 點）` : ""}
+                            </span>
+                          ) : (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <Icon name="Mic" size={14} /> 生成配音{ttsPoints != null ? `（約 −${ttsPoints} 點）` : ""}
+                            </span>
+                          )}
+                        </ConfirmButton>
+                      )}
+                    </div>
+                  </>
+                )}
+                {currentNarration?.assetUrl && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <AssetAudio
+                      controls
+                      preload="none"
+                      src={currentNarration.assetUrl}
+                      aria-label={`第 ${sceneNumber} 鏡旁白試聽`}
+                      style={{ height: 32, flex: 1, minWidth: 180 }}
+                      fallbackLabel="旁白音檔遺失——可用「重生配音」補回"
+                    />
+                    <Button as="a" size="sm" variant="tonal" href={`/api/assets/${currentNarration.assetId}/file`} download>
+                      <Icon name="Download" size={13} /> 下載旁白
+                    </Button>
+                  </div>
+                )}
+                {canEdit && (
+                  <Hint style={{ marginTop: 6 }}>
+                    重生不會覆蓋舊旁白：完成後成為新的一版，舊版仍留在「版本」裡。
+                  </Hint>
                 )}
               </div>
             )}

@@ -1340,17 +1340,19 @@ audio.dm-attach-media { height: 36px; }
   contain-intrinsic-size: auto 88px;
 }
 
-/* 回饋浮鈕：避開 Home 指示條與拇指熱區 */
+/* 回饋浮鈕：避開 Home 指示條與拇指熱區。
+   展開後是含 textarea 的表單，鍵盤一彈出就會蓋住輸入框與送出鈕——
+   底緣要一起抬過 --kb-inset（見 lib/keyboardInset.ts）。 */
 .fb-fab-root {
   position: fixed;
   right: max(14px, var(--safe-right));
-  bottom: max(14px, var(--safe-bottom));
+  bottom: calc(max(14px, var(--safe-bottom)) + var(--kb-inset, 0px));
   z-index: 45;
 }
 @media (max-width: 560px) {
   .fb-fab-root {
     right: max(12px, var(--safe-right));
-    bottom: max(12px, var(--safe-bottom));
+    bottom: calc(max(12px, var(--safe-bottom)) + var(--kb-inset, 0px));
   }
 }
 
@@ -2785,8 +2787,10 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   position: relative;
   z-index: 1;
   width: min(100%, 560px);
-  /* dvh 而非 vh：鍵盤／網址列改變可用高度時，sheet 要跟著縮而不是把輸入列推到畫面外 */
-  max-height: min(85dvh, 720px);
+  /* dvh 而非 vh：鍵盤／網址列改變可用高度時，sheet 要跟著縮而不是把輸入列推到畫面外。
+     再夾一層 100%：父層 .project-messages-sheet-root 的底緣已被 --kb-inset 抬高，
+     100% 解析到那個已縮短的高度——iOS 的 dvh 不隨鍵盤變，只靠 dvh 仍會溢出。 */
+  max-height: min(85dvh, 720px, 100%);
   display: flex;
   flex-direction: column;
   margin: 0;
@@ -2835,13 +2839,138 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 @media (max-width: 560px) {
   .project-messages-sheet {
     width: 100%;
-    max-height: calc(100dvh - 72px - var(--safe-top));
+    /* 100% 這一夾不可省：媒體查詢特異性高於上面的基礎規則，手機一律吃這條。
+       父層 root 的底緣已被 --kb-inset 抬高，100% 才是「鍵盤之上的可用高度」；
+       只寫 100dvh 在 iOS 不隨鍵盤縮，sheet 會直接長到鍵盤底下。 */
+    max-height: min(calc(100dvh - 72px - var(--safe-top)), 100%);
     border-radius: 16px 16px 0 0;
   }
   .project-messages-sheet__body {
     padding-bottom: calc(16px + var(--safe-bottom));
   }
 }
+
+/* 分鏡流程引導：五階段一條線＋「下一步」一句話，回答「我現在該做什麼」。 */
+.scene-pipeline {
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card2) 72%, transparent);
+}
+.scene-pipeline__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.scene-pipeline__steps::-webkit-scrollbar { display: none; }
+.scene-pipeline__step {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: var(--fs-12);
+  color: var(--soft);
+  white-space: nowrap;
+}
+/* 步驟之間畫一小段連接線，讀起來是一條路而不是五顆亂放的膠囊 */
+.scene-pipeline__step + .scene-pipeline__step::before {
+  content: "";
+  width: 10px;
+  height: 1px;
+  margin-right: 5px;
+  background: var(--border-strong);
+  flex: none;
+}
+.scene-pipeline__num {
+  width: 17px;
+  height: 17px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  font-family: var(--mono);
+  font-size: 10px;
+  flex: none;
+}
+.scene-pipeline__step.is-done { color: var(--success-ink); }
+.scene-pipeline__step.is-done .scene-pipeline__num {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+.scene-pipeline__step.is-current {
+  color: var(--primary-ink);
+  background: var(--primary-tint);
+  border: 1px solid var(--primary-border);
+  font-weight: 600;
+}
+.scene-pipeline__step.is-current .scene-pipeline__num {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-contrast, #fff);
+}
+.scene-pipeline__hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 7px;
+}
+
+/* 分鏡縮圖即單格工作室入口：去按鈕外觀，只留 hover 提示 */
+.scene-thumb-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: var(--r-8);
+  line-height: 0;
+}
+.scene-thumb-btn:hover .gen-thumb,
+.scene-thumb-btn:focus-visible .gen-thumb {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* 交付中心：就緒度＋主 CTA 一眼看懂；剪輯師的單檔收進「進階」摺疊。 */
+.scene-deliver {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card2) 72%, transparent);
+}
+.scene-deliver__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.scene-deliver__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.scene-deliver__advanced { margin-top: 10px; }
+.scene-deliver__advanced > summary {
+  cursor: pointer;
+  font-size: var(--fs-13);
+  color: var(--soft);
+  padding: 4px 0;
+  user-select: none;
+}
+.scene-deliver__advanced > summary:hover { color: var(--ink); }
+.scene-deliver__advanced[open] > summary { color: var(--ink); }
 
 /* 分鏡視覺總覽：先看整體狀態，再展開需要操作的卡。 */
 .scene-overview {
@@ -2991,14 +3120,15 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   background: var(--card); color: var(--primary-ink);
 }
 .creation-skill-chip__x { opacity: 0.55; font-size: 14px; line-height: 1; }
+/* 定位／疊層／桌機幾何都交給 MenuSurface（.menu ＋ .menu-surface--stretch）——
+   這裡只留這張面板自己的外觀。手機會被 .menu-surface.is-sheet 接手成貼底 sheet。 */
 .creation-skill-menu {
-  position: absolute; z-index: 40; left: 0; right: 0;
-  margin-top: 8px; padding: 12px 12px 14px;
+  padding: 12px 12px 14px;
   border: 1px solid var(--border-soft);
   border-radius: var(--r-12);
   background: var(--card);
   box-shadow: 0 12px 40px color-mix(in srgb, var(--fg) 12%, transparent);
-  max-height: min(70vh, 480px); overflow: auto;
+  max-height: min(70dvh, 480px); overflow: auto;
 }
 .creation-skill-menu__head {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px;
@@ -4021,6 +4151,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 
 /* 選單載體（MenuSurface）：桌機是下拉，不需要 scrim；身分標頭全尺寸共用 */
 .menu-surface__scrim { display: none; }
+/* placement="stretch"：與觸發器同寬。覆寫 .menu 的右對齊與 184px 下限——
+   卡片牆／表單類面板塞不進窄下拉。手機的 .is-sheet 會再蓋掉這組值。 */
+.menu-surface--stretch { left: 0; right: 0; min-width: 0; }
 .account-menu__id {
   display: flex; align-items: center; gap: 9px;
   padding: 10px 12px 8px;
@@ -4138,8 +4271,8 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   /* 內容與浮動元素讓出分頁列高度（列高約 64px + safe-bottom）；
      未登入（無分頁列）維持原本留白，:has 不支援時多留白也不致遮擋 */
   .app:has(.mobile-nav) { padding-bottom: calc(88px + var(--safe-bottom)); }
-  /* 回饋 FAB 只在登入後出現（AppShell），一律墊高避開分頁列 */
-  .fb-fab-root { bottom: calc(72px + var(--safe-bottom)); }
+  /* 回饋 FAB 只在登入後出現（AppShell），一律墊高避開分頁列；鍵盤彈出時再往上讓 */
+  .fb-fab-root { bottom: calc(72px + var(--safe-bottom) + var(--kb-inset, 0px)); }
 
   /* 更多面板：貼底 bottom sheet（scrim 蓋住分頁列，面板含拖曳把手與 safe-area 內距） */
   .mobile-more-scrim,

@@ -13,6 +13,7 @@ const versionsQuery = vi.fn();
 const updateMutate = vi.fn();
 const regenMutate = vi.fn();
 const refineMutate = vi.fn();
+const voiceMutate = vi.fn();
 const setCurrentMutate = vi.fn();
 const invalidate = vi.fn();
 
@@ -24,6 +25,7 @@ vi.mock("../api", () => ({
       update: { useMutation: () => ({ mutate: updateMutate, isPending: false, isSuccess: false, error: null }) },
       generateInto: { useMutation: () => ({ mutate: regenMutate, isPending: false, error: null }) },
       refine: { useMutation: () => ({ mutate: refineMutate, isPending: false, error: null }) },
+      generateVoiceover: { useMutation: () => ({ mutate: voiceMutate, isPending: false, error: null }) },
       setVisualFromAsset: { useMutation: () => ({ mutate: setCurrentMutate, isPending: false, error: null }) },
     },
   },
@@ -48,7 +50,7 @@ function genRow(over: Partial<SceneVersionGenerationRow> & { generationId: strin
 }
 
 /** 伺服器回傳的形狀（scenes.versions）——用真的 buildSceneVersions 產生，避免 mock 與正式投影分岔 */
-function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?: string | null; prompt?: string | null } = {}) {
+function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?: string | null; prompt?: string | null; voiceover?: string | null } = {}) {
   const rows = opts.rows ?? [genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" })];
   const currentAssetId = opts.currentAssetId === undefined ? "asset-g1" : opts.currentAssetId;
   const versions = buildSceneVersions(rows, { assetId: currentAssetId, narrationAssetId: null });
@@ -57,7 +59,7 @@ function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?:
     projectId: "p-1",
     title: "海邊遠景",
     prompt: opts.prompt === undefined ? "黃昏的海邊" : opts.prompt,
-    voiceover: null,
+    voiceover: opts.voiceover ?? null,
     assetId: currentAssetId,
     narrationAssetId: null,
     versions,
@@ -72,15 +74,28 @@ function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?:
   };
 }
 
-function mountStudio(over: { canEdit?: boolean } = {}) {
+type DecideProps = {
+  isLeader?: boolean;
+  meLoading?: boolean;
+  sceneStatus?: string;
+  pendingApprovalId?: string;
+  rejectReason?: string | null;
+  approvalsError?: boolean;
+  deciding?: boolean;
+  onDecide?: (decision: "approved" | "needs_work", reason?: string) => void;
+};
+
+function mountStudio(over: { canEdit?: boolean } & DecideProps = {}) {
+  const { canEdit, ...decide } = over;
   return render(
     <SceneStudio
       sceneId="s-1"
       projectId="p-1"
       sceneNumber={3}
-      canEdit={over.canEdit ?? true}
+      canEdit={canEdit ?? true}
       onClose={vi.fn()}
       onChanged={vi.fn()}
+      {...decide}
     />,
   );
 }
@@ -271,6 +286,47 @@ describe("SceneStudio", () => {
     expect(screen.queryByRole("button", { name: /設為現用/ })).not.toBeInTheDocument();
   });
 
+  it("配音頁：還沒填配音詞→生成鈕鎖住並指路；填了要先儲存", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /配音/ }));
+    expect(screen.getByText(/先填配音詞並儲存/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^生成配音/ })).toBeDisabled();
+    // 打了字＝尚未儲存：儲存鈕亮起、生成仍鎖（後端唸的是已儲存的稿）
+    await user.type(screen.getByRole("textbox", { name: /這一格的配音詞/ }), "各位同學大家好");
+    expect(screen.getByRole("button", { name: /儲存配音詞/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^生成配音/ })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /儲存配音詞/ }));
+    expect(updateMutate).toHaveBeenCalledWith({ sceneId: "s-1", voiceover: "各位同學大家好" });
+  });
+
+  it("配音詞已儲存：生成配音帶冪等鍵送出（重試不重複扣點）", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({ voiceover: "各位同學大家好" }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /配音/ }));
+    await user.click(screen.getByRole("button", { name: /^生成配音/ }));
+    await user.click(screen.getByRole("button", { name: "確認生成" }));
+    expect(voiceMutate).toHaveBeenCalledTimes(1);
+    const arg = voiceMutate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.sceneId).toBe("s-1");
+    expect(typeof arg.clientRequestId).toBe("string");
+  });
+
+  it("檢視者的配音頁：唯讀，沒有編輯與生成鈕", async () => {
+    const user = userEvent.setup();
+    mountStudio({ canEdit: false });
+    await user.click(screen.getByRole("tab", { name: /配音/ }));
+    expect(screen.getByText(/只能試聽旁白/)).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /這一格的配音詞/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^生成配音/ })).not.toBeInTheDocument();
+  });
+
   it("檢視者：看得到版本與成本，但沒有任何寫入鈕（2.3 唯讀）", async () => {
     const user = userEvent.setup();
     mountStudio({ canEdit: false });
@@ -290,5 +346,73 @@ describe("SceneStudio", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/版本讀不到/);
     await user.click(screen.getByRole("button", { name: "再試一次" }));
     expect(refetch).toHaveBeenCalled();
+  });
+});
+
+describe("SceneStudio 就地裁決", () => {
+  const leaderPending = {
+    isLeader: true,
+    sceneStatus: "pending",
+    pendingApprovalId: "ap-1",
+  } as const;
+
+  it("組長看待審的這一鏡：通過與退回都在工作室內", () => {
+    mountStudio({ ...leaderPending, onDecide: vi.fn() });
+    expect(screen.getByRole("button", { name: /通過/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /退回/ })).toBeEnabled();
+  });
+
+  it("按通過直接回報決定，不必先回分鏡列", async () => {
+    const onDecide = vi.fn();
+    const user = userEvent.setup();
+    mountStudio({ ...leaderPending, onDecide });
+    await user.click(screen.getByRole("button", { name: /通過/ }));
+    expect(onDecide).toHaveBeenCalledWith("approved");
+  });
+
+  it("退回必須帶理由，且常用理由可一鍵帶入（手機上不必打字）", async () => {
+    const onDecide = vi.fn();
+    const user = userEvent.setup();
+    mountStudio({ ...leaderPending, onDecide });
+
+    await user.click(screen.getByRole("button", { name: /退回/ }));
+    await user.click(screen.getByRole("button", { name: "人物長相跑掉" }));
+    await user.click(screen.getByRole("button", { name: "退回" }));
+    expect(onDecide).toHaveBeenCalledWith("needs_work", "人物長相跑掉");
+  });
+
+  it("非組長、非待審、或沒有待裁決審批：一律不畫裁決鈕", () => {
+    const cases = [
+      { ...leaderPending, isLeader: false },
+      { ...leaderPending, sceneStatus: "approved" },
+      { ...leaderPending, pendingApprovalId: undefined },
+    ];
+    for (const props of cases) {
+      const { unmount } = mountStudio({ ...props, onDecide: vi.fn() });
+      expect(screen.queryByRole("button", { name: /通過/ })).toBeNull();
+      unmount();
+    }
+  });
+
+  it("auth.me 還沒回來時先不畫，避免按鈕先缺後補的閃爍", () => {
+    mountStudio({ ...leaderPending, meLoading: true, onDecide: vi.fn() });
+    expect(screen.queryByRole("button", { name: /通過/ })).toBeNull();
+  });
+
+  it("審批清單讀不到時說明原因，而不是沉默地少一排按鈕", () => {
+    mountStudio({ isLeader: true, sceneStatus: "pending", approvalsError: true, onDecide: vi.fn() });
+    expect(screen.getByText(/審批狀態讀不到/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /通過/ })).toBeNull();
+  });
+
+  it("被退回的鏡在工作室內就看得到理由", () => {
+    mountStudio({ sceneStatus: "needs_work", rejectReason: "文字有錯字" });
+    expect(screen.getByText(/退回理由：文字有錯字/)).toBeInTheDocument();
+  });
+
+  it("裁決送出中兩顆鈕都鎖住，避免重複送出", () => {
+    mountStudio({ ...leaderPending, deciding: true, onDecide: vi.fn() });
+    expect(screen.getByRole("button", { name: /通過/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /退回/ })).toBeDisabled();
   });
 });

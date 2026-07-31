@@ -393,6 +393,8 @@ export function ProjectPage({ id }: { id: string }) {
   const mobileCompact = useMatchMedia(PROJECT_MOBILE_MQ);
   const [presenceExpanded, setPresenceExpanded] = useState(false);
   const [messagesSheetOpen, setMessagesSheetOpen] = useState(false);
+  /** ?focus=messages&mid=<id> 要捲到的那一則；MessagePanel 定位完成後清掉，避免重開時重閃 */
+  const [focusMessageId, setFocusMessageId] = useState<string | undefined>(undefined);
   const [ctxOpen, setCtxOpen] = useState<Record<CtxSectionKey, boolean>>({
     characters: false,
     scenes: false,
@@ -423,6 +425,10 @@ export function ProjectPage({ id }: { id: string }) {
     const focus = new URLSearchParams(window.location.search).get("focus");
     if (!focus) return;
     if (focus === "messages") {
+      // mid=<messageId>：@提及推播要捲到「那一則」，不只是打開面板。
+      // 白名單比照下方 scene 分支；MessagePanel 收到 prop 後自行定位（含往回翻頁）
+      const mid = new URLSearchParams(window.location.search).get("mid");
+      if (mid && /^[0-9a-f-]{8,64}$/i.test(mid)) setFocusMessageId(mid);
       if (mobileCompact) setMessagesSheetOpen(true);
       else scrollToSelector("#project-messages");
       return;
@@ -1909,22 +1915,27 @@ export function ProjectPage({ id }: { id: string }) {
             {/* 錨點 id 掛外層 div、不再加外層 <h2>（SceneList 卡片自帶同名標題，白話提示移進去了） */}
             <div data-fb="打包下載" id="onboard-delivery">
               {/* charIds/sceneIds：逐鏡就地生成也注入生成台勾選的角色/場景錨點——逐鏡出圖與生成台出圖同一套畫風 */}
-              <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} onUsePrompt={applyPrompt} charIds={charIds} sceneIds={sceneIds} />
+              <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} />
             </div>
           </CollabZone>
         </div>
 
-        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度） */}
+        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。
+            id 供 ?focus=messages 通知深連結捲動定位——這個錨點已被平行 PR 弄丟兩次
+            （#246、#251），approvals.deeplink.test.ts 的守衛就是為此而存在，別再拿掉。 */}
         {!mobileCompact && (
-          /* id 是 @提及推播深連結的捲動錨點（?focus=messages → scrollToSelector("#project-messages")）。
-             CollabZone 不轉發 id，所以錨點要留在外層——手機化重構把原本帶 id 的外層換成 CollabZone
-             時整個掉了，深連結因此變成「會開頁但不會捲到留言」的無聲失效。
-             approvals.deeplink.test.ts 就是為了擋這種事而存在的（同一個錨點掉過一次）。 */
-          <div id="project-messages">
-            <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-              <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
-            </CollabZone>
-          </div>
+          <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
+            <div id="project-messages">
+              <MessagePanel
+                projectId={id}
+                groupId={p.groupId}
+                isLeader={isLeader}
+                canEdit={canEdit}
+                focusMessageId={focusMessageId}
+                onFocusHandled={() => setFocusMessageId(undefined)}
+              />
+            </div>
+          </CollabZone>
         )}
       </div>
       </div>
@@ -1976,6 +1987,8 @@ export function ProjectPage({ id }: { id: string }) {
                       isLeader={isLeader}
                       canEdit={canEdit}
                       bare
+                      focusMessageId={focusMessageId}
+                      onFocusHandled={() => setFocusMessageId(undefined)}
                     />
                   </CollabZone>
                 </div>

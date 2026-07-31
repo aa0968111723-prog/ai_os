@@ -127,6 +127,14 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
  * 0004 created its indexes without IF NOT EXISTS. Wherever the original
  * succeeded the indexes did not yet exist, so adding the guard produces the
  * same two indexes by the same definitions.
+ *
+ * 0018 packed two statements into one file without the `--> statement-breakpoint`
+ * separator every other multi-statement migration uses, and wrote the index
+ * columns with spaces after the commas. Both are purely textual: the runner
+ * executes the same ALTER TABLE and CREATE INDEX in the same order either way,
+ * and `("a", "b")` and `("a","b")` are the same index to PostgreSQL. The
+ * correction only lets the bridge compare the file against a generated drift
+ * plan, which emits neither the separator nor the spaces.
  */
 export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly string[]>> = {
   "0004_query_indexes": [
@@ -135,12 +143,6 @@ export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly strin
   "0005_membership_read_uniqueness": [
     "30b344a7e264c48e4b62af11cb689da353b7f4846f6374a0d33f27aa38cc1337",
   ],
-  /**
-   * 0018 把兩句 DDL 寫在同一段、中間沒有 `--> statement-breakpoint`，於是所有以「一句 SQL」為單位
-   * 比對的機制（legacy adoption bridge、drift 對照）都把那兩句當成一個字串，永遠對不上真實的兩項 drift。
-   * 補上分隔標記後，**實際執行的 SQL 一字未改**——那個標記只是切分用的註解，兩句照樣依序執行，
-   * 任何已套用原版的資料庫最終狀態完全相同，所以列在這裡是安全的。
-   */
   "0018_knowledge_pinned": [
     "cddbd89830cce4850f83515692724cb507a4c52afc28941633fc1f882e907e82",
   ],

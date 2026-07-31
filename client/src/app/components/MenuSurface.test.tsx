@@ -105,3 +105,75 @@ describe("MenuSurface", () => {
     expect(trigger).toHaveFocus();
   });
 });
+
+describe("MenuSurface 角色與桌機幾何", () => {
+  function Dialogish() {
+    const [open, setOpen] = useState(false);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    return (
+      <div className="menu-wrap">
+        <button ref={triggerRef} onClick={() => setOpen((v) => !v)}>開面板</button>
+        <MenuSurface
+          open={open}
+          onClose={() => setOpen(false)}
+          label="請誰來幫忙"
+          triggerRef={triggerRef}
+          surfaceRole="dialog"
+          placement="stretch"
+          roving={false}
+          id="skill-menu"
+        >
+          <button aria-pressed="false">卡片一</button>
+          <button aria-pressed="false">卡片二</button>
+        </MenuSurface>
+      </div>
+    );
+  }
+
+  it("surfaceRole=dialog 時對讀屏是對話框，不是選單", async () => {
+    restore = stubMatchMedia(false);
+    const user = userEvent.setup();
+    render(<Dialogish />);
+    await user.click(screen.getByRole("button", { name: "開面板" }));
+
+    expect(screen.getByRole("dialog", { name: "請誰來幫忙" })).toBeInTheDocument();
+    // 內容不是 menuitem，就不該宣稱自己是 menu（等於承諾了沒實作的方向鍵模型）
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("roving=false 時不搶走焦點——焦點留在觸發器", async () => {
+    restore = stubMatchMedia(false);
+    const user = userEvent.setup();
+    render(<Dialogish />);
+    const trigger = screen.getByRole("button", { name: "開面板" });
+    await user.click(trigger);
+
+    expect(trigger).toHaveFocus();
+    expect(screen.getByRole("button", { name: "卡片一" })).not.toHaveFocus();
+  });
+
+  it("placement=stretch 掛上與觸發器同寬的幾何，並透傳 id 供 aria-controls", async () => {
+    restore = stubMatchMedia(false);
+    const user = userEvent.setup();
+    render(<Dialogish />);
+    await user.click(screen.getByRole("button", { name: "開面板" }));
+
+    const surface = screen.getByRole("dialog", { name: "請誰來幫忙" });
+    expect(surface.className).toContain("menu-surface--stretch");
+    expect(surface).toHaveAttribute("id", "skill-menu");
+  });
+
+  it("dialog 版本在手機一樣變貼底 sheet 並可用遮罩關閉", async () => {
+    restore = stubMatchMedia(true);
+    const user = userEvent.setup();
+    render(<Dialogish />);
+    await user.click(screen.getByRole("button", { name: "開面板" }));
+
+    const surface = screen.getByRole("dialog", { name: "請誰來幫忙" });
+    expect(surface.className).toContain("is-sheet");
+    expect(surface.parentElement).toBe(document.body);
+
+    await user.click(document.querySelector(".menu-surface__scrim") as HTMLElement);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
