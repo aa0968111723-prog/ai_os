@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
+import { SeriesTemplatePanel } from "../components/SeriesTemplatePanel";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
@@ -288,6 +289,10 @@ export function Launchpad({ groupId }: { groupId: string }) {
       {showFirstRun && <FirstRunGuide groupId={groupId} onDismiss={dismissFirstRun} />}
 
       <div style={{ marginBottom: 14 }}><InstallAppBanner /></div>
+
+      {/* 母版系列（#255 第 1 期）：相同結構的短影音走「複製母版→填 4 格」，
+          不要每集從空專案重想流程 */}
+      {groupId && <SeriesTemplatePanel groupId={groupId} isLeader={isLeader} />}
 
       {/* 精簡建立列（常駐、一行；不再佔右側整欄） */}
       <Card as="section" id="new-project-panel" className="new-project-panel" data-fb="新專案卡" hidden={!createOpen} aria-label="建立新專案">

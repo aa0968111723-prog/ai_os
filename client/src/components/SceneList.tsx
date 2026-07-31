@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { getModel, MODELS, tierLabel, estimatePoints } from "@shared/models";
+import { REWORK_TAGS, parseEpisodeTitle, reworkTagNeedsNote, type ReworkTag } from "@shared/seriesTemplate";
 import { StoryboardPlayer } from "./StoryboardPlayer";
 import { SceneStudio } from "./SceneStudio";
 import { ExportJobButton } from "./ExportJobButton";
@@ -209,6 +210,7 @@ function SceneRow({
   decide,
   pending,
   rejectReason,
+  isSeriesEpisode = false,
 }: {
   s: Scene;
   i: number;
@@ -234,6 +236,8 @@ function SceneRow({
   pending: { id: string } | undefined;
   /** 最新一筆已裁決的退回理由（needs_work）——提交人不必翻留言才知道改什麼 */
   rejectReason?: string | null;
+  /** 這一格屬於母版系列的一集 → 退回改用固定標籤（#255） */
+  isSeriesEpisode?: boolean;
 }) {
   // 每格自持 update／generateInto／generateVoiceover，pending 與錯誤才不會互相污染（一格存檔不會鎖住別格）
   // 行內編輯（標題/秒數/配音詞）失焦即存但原本沒有成功回饋——比照世界觀卡「已儲存 ✓」短暫顯示 2 秒
@@ -531,14 +535,30 @@ function SceneRow({
                   triggerStyle={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger-ink)", borderColor: "var(--danger)" }}
                   disabled={decide.isPending}
                   title="退回這一鏡"
-                  reason={{
-                    label: "退回理由（會通知提交人）",
-                    placeholder: "說明需要修改的地方…",
-                    required: true,
-                    presets: ["畫面與腳本不符", "人物長相跑掉", "文字有錯字", "風格不一致", "請再修一版"],
-                  }}
+                  reason={
+                    isSeriesEpisode
+                      ? {
+                        // 母版系列：退回原因收斂成固定 5 種，退回後只重做被點名的步驟或鏡號，不整案重跑
+                        label: "退回原因（會通知提交人）",
+                        placeholder: "選「其他」時必填；其餘可補一句細節…",
+                        tags: REWORK_TAGS,
+                        tagRequired: true,
+                        tagsNeedingNote: REWORK_TAGS.filter((t) => reworkTagNeedsNote(t.value)).map((t) => t.value),
+                      }
+                      : {
+                        label: "退回理由（會通知提交人）",
+                        placeholder: "說明需要修改的地方…",
+                        required: true,
+                        presets: ["畫面與腳本不符", "人物長相跑掉", "文字有錯字", "風格不一致", "請再修一版"],
+                      }
+                  }
                   confirmLabel="退回"
-                  onConfirm={(reason) => decide.mutate({ approvalId: pending.id, decision: "needs_work", reason })}
+                  onConfirm={(reason, tag) => decide.mutate({
+                    approvalId: pending.id,
+                    decision: "needs_work",
+                    reason,
+                    reasonTag: (tag as ReworkTag | undefined),
+                  })}
                 >
                   <Icon name="Undo2" /> 退回
                 </ConfirmButton>
@@ -585,6 +605,11 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
   const remove = trpc.scenes.remove.useMutation({ onSuccess: invalidate });
   const submitApproval = trpc.approvals.submit.useMutation({ onSuccess: invalidate });
   const decide = trpc.approvals.decide.useMutation({ onSuccess: invalidate });
+  // #255：這個專案是不是母版系列的一集？是的話退回改用固定標籤（結構跑掉／出處不符／…），
+  // 組員才知道要重做哪一步；不是的話維持原本的自由文字＋快捷句。
+  // 共用 ProjectPage 已在跑的同一把 query key，不會多打一次。
+  const project = trpc.projects.get.useQuery({ id: projectId });
+  const isSeriesEpisode = !!project.data && !!parseEpisodeTitle(project.data.title);
   const pendingOf = (sceneId: string) => approvals.data?.find((a) => a.sceneId === sceneId && a.status === "pending");
   // listByProject 已依 createdAt desc：同鏡最新一筆 needs_work 的 reason 即最近退回理由
   const rejectReasonOf = (sceneId: string) =>
@@ -783,6 +808,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
                   decide={decide}
                   pending={pendingOf(s.id)}
                   rejectReason={rejectReasonOf(s.id)}
+                  isSeriesEpisode={isSeriesEpisode}
                 />
               ))}
             </div>

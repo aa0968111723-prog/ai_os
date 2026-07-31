@@ -6,6 +6,7 @@
  */
 
 import { getAiProjectRole, listAiProjectRoles, type AiProjectRole } from "./aiProjectRoles";
+import { buildSeriesPlannerHint } from "./seriesTemplate";
 
 export interface RolePlaybook {
   id: string;
@@ -108,6 +109,16 @@ export const ROLE_PLAYBOOKS: readonly RolePlaybook[] = [
       "缺日期／缺腳本 → missingInformation，禁止臆測。" +
       "summary.rationale 用 1–3 句說明為何這條短路徑足夠。",
     suggestedKinds: ["split_script", "create_scene", "generate", "voiceover", "submit_approval"],
+  },
+  // #255 第 2 期：短影音母版備料串鏈——本集專案已從母版複製，代理只補料、關卡留在組長
+  {
+    id: "playbook.series.master.v1",
+    roleId: "role.storyboard",
+    version: "1",
+    title: "母版備料：週更短影音 5 段串鏈（第 2 期）",
+    goalTemplate: "依本集 4 格變數與母版 5 段結構，把這一集的旁白、分鏡提示與素材備齊並送組長待審",
+    plannerHint: buildSeriesPlannerHint(),
+    suggestedKinds: ["create_scene", "generate", "voiceover", "submit_approval"],
   },
 ] as const;
 
