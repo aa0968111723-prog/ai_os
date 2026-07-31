@@ -422,9 +422,18 @@ export function captureWithHighlight(
     }
     try {
       await waitForScreenshotFonts();
-      // 動態載入（QA-025 bundle 瘦身）：html2canvas 佔 main bundle 數百 KB，
+      // 動態載入（QA-025 bundle 瘦身）：截圖引擎佔 main bundle 數百 KB，
       // 卻只在「送回饋按截圖」這一刻用到——首次截圖才拉取對應 chunk
-      const { default: html2canvas } = await import("html2canvas");
+      //
+      // 用 html2canvas-pro 而非原版 html2canvas（FB-SHOT-01）：原版 1.4.1 的色彩解析
+      // 只認 rgb/rgba/hsl/hsla，遇到其他色彩函式直接 throw。而 styles.css 用了 60+ 處
+      // color-mix()，瀏覽器把它的 computed value 序列化成 `color(srgb 0.96 0.96 0.95 / 0.9)`
+      // ——原版一讀到就丟 "Attempting to parse an unsupported color function \"color\""，
+      // 整張圖 reject。這條規則裡包含 .topbar（每一頁都有），所以全站截圖 100% 失敗，
+      // 使用者永遠只看到「這次沒能擷取到畫面」，按「重新擷取」也沒用。
+      // html2canvas-pro 的 SUPPORTED_COLOR_FUNCTIONS 另含 color/lab/lch/oklab/oklch，
+      // API 與選項完全相容（見 client/src/feedback/picker.test.ts 的色彩函式守門測試）。
+      const { default: html2canvas } = await import("html2canvas-pro");
       const viewportWidth = Math.max(1, window.innerWidth);
       const viewportHeight = Math.max(1, window.innerHeight);
       const canvas = await html2canvas(document.body, {

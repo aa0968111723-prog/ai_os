@@ -1395,6 +1395,17 @@ audio.dm-attach-media { height: 36px; }
     bottom: calc(max(12px, var(--safe-bottom)) + var(--kb-inset, 0px));
   }
 }
+/* 面板高度上限（FB-SHOT-01）：ReportForm 內聯了 overflowY:auto，但沒有 max-height 的
+   overflow 是死的——面板從固定的底緣往上長，內容一多就整個長出視窗頂端，被切掉的部分
+   永遠捲不回來（分類 chips、「①這是什麼樣的回饋」都在最上面）。此前只有
+   styles.mobile-fab-01.css 的 ≤560px 有上限，561px 以上完全沒有防護；而 ≤820px 的
+   FAB 墊高（見 4339 行）早就從 820px 就開始，中間 561–820px 是空窗。
+   這條基礎規則補上所有寬度，≤560px 仍由 mobile-fab-01（載入在後）收得更緊。
+   扣掉 --kb-inset：iOS 鍵盤不會縮 dvh，不顯式扣就會被鍵盤推出畫面。 */
+.fb-fab-root .card[role="dialog"],
+.fb-fab-root .card[role="group"] {
+  max-height: min(78dvh, calc(100dvh - var(--kb-inset, 0px) - 96px));
+}
 
 /* 桌面大螢幕：兩欄更從容 */
 @media (min-width: 1200px) {

@@ -202,19 +202,31 @@ function ReportForm({
   const [capturing, setCapturing] = useState(true);
   const [captureAttempt, setCaptureAttempt] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const shotBlobRef = useRef<Blob | null>(null);
+  // 存的是「這次擷取的 Promise」而非結果：使用者常常打完字 1 秒內就按送出，
+  // 那時擷取（實測約 2 秒）還沒回來。只看結果會讓送出靜默附不到圖——畫面明明還寫著
+  // 「正在擷取畫面…」。doSubmit 改 await 這個 Promise，該等就等。
+  const shotPromiseRef = useRef<Promise<Blob | null>>(Promise.resolve(null));
   const [justSent, setJustSent] = useState(false);
+  const [shotUploadFailed, setShotUploadFailed] = useState(false);
 
   // 表單一開就先擷取一張截圖當預覽（widget 自身不入鏡）；有標定元件就在圖上描框
   useEffect(() => {
+    // 使用者勾了「不附截圖」就別擷取——擷取要跑滿整頁光柵化，勾了還做純屬白工
+    if (noShot) {
+      shotPromiseRef.current = Promise.resolve(null);
+      setCapturing(false);
+      return;
+    }
     let alive = true;
     let url: string | null = null;
-    (async () => {
-      const blob = await captureWithHighlight(target?.targetRect ?? null);
+    setCapturing(true);
+    const pending = captureWithHighlight(target?.targetRect ?? null);
+    shotPromiseRef.current = pending;
+    void (async () => {
+      const blob = await pending;
       if (!alive) {
         return;
       }
-      shotBlobRef.current = blob;
       if (blob) {
         url = URL.createObjectURL(blob);
         setShotUrl(url);
@@ -225,7 +237,7 @@ function ReportForm({
       alive = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [target, captureAttempt]);
+  }, [target, captureAttempt, noShot]);
 
   // 送出成功短暫顯示感謝後自動關閉
   useEffect(() => {
@@ -237,19 +249,32 @@ function ReportForm({
   const doSubmit = async () => {
     if (submitting) return; // 截圖上傳期間 submit.isPending 還沒 true，另用 submitting 擋重複送出
     setSubmitting(true);
+    setShotUploadFailed(false);
     try {
       let screenshotPath: string | undefined;
-      if (!noShot && shotBlobRef.current) {
-        try {
-          const fd = new FormData();
-          fd.append("file", shotBlobRef.current, "shot.png");
-          const res = await fetch("/api/feedback/screenshot", { method: "POST", body: fd });
-          if (res.ok) {
-            const j = (await res.json()) as { path?: string };
-            if (j.path) screenshotPath = j.path;
+      if (!noShot) {
+        // 擷取還在跑就等它（內建 20 秒逾時，不會無限等）
+        const blob = await shotPromiseRef.current;
+        if (blob) {
+          try {
+            const fd = new FormData();
+            fd.append("file", blob, "shot.png");
+            // 一定要有逾時：截圖是幾百 KB，連線卡住時沒有 signal 的 fetch 會一直掛著，
+            // submitting 永遠放不掉——連純文字回饋都送不出去（這才是最惡的一種「卡住」）
+            const res = await fetch("/api/feedback/screenshot", {
+              method: "POST",
+              body: fd,
+              signal: AbortSignal.timeout(20_000),
+            });
+            if (res.ok) {
+              const j = (await res.json()) as { path?: string };
+              if (j.path) screenshotPath = j.path;
+            }
+          } catch {
+            // 截圖是可選的：上傳失敗就當沒附，不擋文字回報
           }
-        } catch {
-          // 截圖是可選的：上傳失敗就當沒附，不擋文字回報
+          // 預覽圖明明還在畫面上，卻靜默沒附上去，使用者會以為附了——送出後老實講一句
+          if (!screenshotPath) setShotUploadFailed(true);
         }
       }
       // 兩題引導答案組成一段結構化文字存進既有 note 欄位（不動 DB schema；審閱端直接可讀）
@@ -281,7 +306,9 @@ function ReportForm({
         aria-live="polite"
         style={{ width: 300, marginBottom: 12, padding: 20, textAlign: "center" }}>
         <strong style={{ fontSize: 15 }}>收到了，感恩</strong>
-        <Hint style={{ margin: "6px 0 0" }}>你說的會直接影響下一版怎麼改。</Hint>
+        <Hint style={{ margin: "6px 0 0" }}>
+          {shotUploadFailed ? "截圖這次沒能附上，你寫的文字都收到了。" : "你說的會直接影響下一版怎麼改。"}
+        </Hint>
         <Link href="/my-reports" onClick={onClose} style={{ display: "inline-block", marginTop: 10, fontSize: 13 }}>
           查看我的回報
         </Link>
@@ -396,10 +423,16 @@ function ReportForm({
             {capturing ? (
               <Meta as="p" style={{ margin: 0 }}>正在擷取畫面…</Meta>
             ) : shotUrl ? (
+              // maxHeight 不能省：預覽圖的長寬比就是視窗長寬比，手機（例如 440×940）
+              // 算出來比整個面板還高，送出鈕會被推到捲軸深處。夾高＋靠上裁切，
+              // 看得到是哪一頁就夠了——真正送出去的仍是完整的原圖。
               <img
                 src={shotUrl}
                 alt="截圖預覽"
-                style={{ width: "100%", borderRadius: 8, border: "1px solid var(--border)", display: "block" }}
+                style={{
+                  width: "100%", maxHeight: 200, objectFit: "cover", objectPosition: "top center",
+                  borderRadius: 8, border: "1px solid var(--border)", display: "block",
+                }}
               />
             ) : (
               <div>
