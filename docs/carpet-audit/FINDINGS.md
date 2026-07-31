@@ -186,3 +186,26 @@ Detail: `exit=1 needs TEST_EMAIL/TEST_PW`
 
 ---
 
+## 2026-07-31T06:09:46.669Z · `ui.breakpoints` ❌ fail
+
+**UI：MOB-04 水平溢出斷言** · kind=`ui-playwright` · cycle=0 · cursor→22
+
+Detail: `exit=1`
+
+---
+
+## 2026-07-31 · `ui.breakpoints` ❌ fail（基建）
+
+**UI：MOB-04 水平溢出斷言** · kind=`ui-playwright`
+
+### Findings
+
+#### [medium] CARPET-UI-PW-BROWSER-MISMATCH: Playwright 版本與 browser cache 不一致
+
+- **File**: `scripts/e2e-ui/audit-breakpoints.mjs`
+- **Evidence**: 需要 `chromium_headless_shell-1234`，本機 cache 為 `chromium-1208`；且腳本未走 `PW_CHROMIUM` 覆寫
+- **Consequence**: MOB-04 / 部分 UI 審計無法在本 codespace 跑
+- **Fix**: `npx playwright install` 對齊 package 版；audit-breakpoints/routes 改用 `PW_CHROMIUM` 或 chromium.launch 預設
+
+---
+
