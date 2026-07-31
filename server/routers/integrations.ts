@@ -4,11 +4,19 @@ import { router, authedProcedure } from "../trpc";
 import {
   addApiConnection,
   fetchApiConnection,
+  listDriveFiles,
   listIntegrations,
   removeIntegration,
   removeIntegrationByKind,
   setNotionIntegration,
 } from "../services/integrations";
+import {
+  consumeRateLimit,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+  RateLimitConfigurationError,
+  RateLimitUnavailableError,
+} from "../services/rateLimit";
 
 /**
  * 個人整合連接自助管理：Google 雲端（OAuth 進入點與 callback 是瀏覽器重導流程，
@@ -72,6 +80,29 @@ export const integrationsRouter = router({
       } catch (err) {
         throw new TRPCError({ code: "NOT_FOUND", message: err instanceof Error ? err.message : "找不到這條連接" });
       }
+    }),
+
+  /**
+   * 選檔器（PR-E1）：列自己雲端裡的檔案（名稱搜尋＋分頁）。只回中繼資料，不抓內容——
+   * 內容要等使用者明確選中、按匯入才抓（連接 ≠ 授權 AI 讀全雲端）。
+   * 未連結回 { ok:false, reason:'not-connected' } 由前端顯示 CTA，不當錯誤丟。
+   */
+  listDriveFiles: authedProcedure
+    .input(z.object({
+      query: z.string().trim().max(200).optional(),
+      pageToken: z.string().max(500).optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const rate = await consumeRateLimit(RATE_LIMIT_SCOPES.driveList, ctx.auth.user.id, RATE_LIMIT_POLICIES.driveList);
+        if (!rate.allowed) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "瀏覽太頻繁——請一分鐘後再試" });
+      } catch (err) {
+        if (err instanceof RateLimitUnavailableError || err instanceof RateLimitConfigurationError) {
+          throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "選檔安全限流暫時無法使用，請稍後再試" });
+        }
+        throw err;
+      }
+      return listDriveFiles(ctx.auth.user.id, { query: input.query, pageToken: input.pageToken });
     }),
 
   /** 中斷 Google 雲端連結（撤銷授權＋刪本地紀錄；冪等） */

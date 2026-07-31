@@ -118,8 +118,8 @@ export function IntegrationsPage() {
       <section id="integration-google" className="card" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
         <h2><Icon name="CalendarPlus" size={18} /> Google 雲端硬碟</h2>
         <p className="hint" style={{ marginTop: 4 }}>
-          連結後，到「知識與資料」貼上你私人雲端裡的文件、試算表、簡報或檔案連結即可匯入，不必再把檔案設成公開。
-          授權範圍只有「讀取」，本系統不能修改或刪除你雲端裡的任何東西。
+          連結後，到「知識與資料」用「從 Google 雲端選檔」直接瀏覽並多選匯入（也可照舊貼連結），不必再把檔案設成公開。
+          AI 與代理只會讀「你選中並匯入」的檔案，不是整顆雲端；授權範圍只有「讀取」，本系統不能修改或刪除你雲端裡的任何東西。
         </p>
         {!d ? (
           <p className="hint">載入中…</p>
@@ -140,7 +140,7 @@ export function IntegrationsPage() {
               </>
             ) : (
               <span className="hint" style={{ margin: 0 }}>
-                <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——可在「知識與資料」匯入私人檔案
+                <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——可在「知識與資料」選檔或貼連結匯入私人檔案
               </span>
             )}
             <GoogleRemoveButton onRemoved={() => utils.integrations.list.invalidate()} />

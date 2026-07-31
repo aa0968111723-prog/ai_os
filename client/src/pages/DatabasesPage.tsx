@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
+import { GoogleDrivePicker } from "../components/GoogleDrivePicker";
 import { ConfirmButton } from "../components/interactions";
 import {
   type DatabaseDetailTab,
@@ -1198,6 +1199,7 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
   const [editCatId, setEditCatId] = useState<string | null>(null);
   const [sendToId, setSendToId] = useState<string | null>(null);
   const [sentMsg, setSentMsg] = useState<string | null>(null);
@@ -1304,7 +1306,21 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
           >
             {importUrl.isPending ? "匯入中…" : "從網址匯入"}
           </button>
+          <button
+            className="btn-sm"
+            onClick={() => setShowDrivePicker((v) => !v)}
+            title="已連結 Google 帳戶可直接瀏覽並多選匯入，不必貼網址"
+          >
+            <Icon name="HardDrive" size={13} /> 從 Google 雲端選檔
+          </button>
         </div>
+      )}
+      {canWrite && showDrivePicker && (
+        <GoogleDrivePicker
+          tableId={table.id}
+          onImported={invalidateFiles}
+          onClose={() => setShowDrivePicker(false)}
+        />
       )}
       {(uploadError || importUrl.error || refresh.error || removeFile.error || classify.error) && (
         <p className="error" role="alert">{uploadError ?? importUrl.error?.message ?? refresh.error?.message ?? removeFile.error?.message ?? classify.error?.message}</p>
