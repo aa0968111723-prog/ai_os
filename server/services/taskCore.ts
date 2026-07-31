@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, notInArray, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -579,11 +579,22 @@ export async function updateProjectTaskCore(input: {
   assigneeId?: string | null;
   dueAt?: string | null;
   priority?: "low" | "normal" | "high" | "urgent";
+  /**
+   * 呼叫端已經驗過「組級指揮權」，不必再套個人層的行為者規則。
+   *
+   * 為什麼需要這個開關：個人層規則是「只有負責人、建立者或組長以上」，而組代理的 assign_task
+   * 只要 supervise。兩條規則不打通的話，被授權 supervise 的組員會拿到一顆對「別人的任務」
+   * 按下去必吃 FORBIDDEN 的按鈕——提議面說可以、執行面說不行，正是這份 PR 一直在避免的落差。
+   * 收斂方向選「組級授權涵蓋個人層」：supervise 的文案已經寫明它能替別人核准會花錢的計畫，
+   * 而改派一件任務嚴格來說比那個小。只有 runGroupCommand 會傳 true（它剛驗過等級）。
+   */
+  viaGroupCommand?: boolean;
 }): Promise<ProjectTaskRow> {
   const task = await getProjectTaskChecked(input.auth, input.id);
   const role = requireGroup(input.auth, task.groupId);
   if (
-    input.auth.user.id !== task.assigneeId
+    !input.viaGroupCommand
+    && input.auth.user.id !== task.assigneeId
     && input.auth.user.id !== task.createdBy
     && role === "member"
   ) {
@@ -613,12 +624,21 @@ export async function updateProjectTaskCore(input: {
   // 只有 updatedAt 代表呼叫端什麼都沒要改——不要靜默寫一次讓 updatedAt 跳動
   if (Object.keys(patch).length === 1) return task;
 
+  // 狀態條件要進 WHERE，不能只靠上面那道讀後檢查：這中間還 await 了專案查詢、
+  // assertProjectEditable 與 memberChecked，別的請求完全來得及在那個空檔把任務完成或取消掉。
+  // 少了這個條件就會改到一件已經結束的任務的負責人或期限——正是上面那道檢查要擋的事。
   const [updated] = await db
     .update(schema.projectTasks)
     .set(patch)
-    .where(eq(schema.projectTasks.id, task.id))
+    .where(and(
+      eq(schema.projectTasks.id, task.id),
+      notInArray(schema.projectTasks.status, ["done", "cancelled"]),
+    ))
     .returning();
-  return updated ?? task;
+  if (!updated) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這件任務已經結束，不能再調整" });
+  }
+  return updated;
 }
 
 export function completeProjectTaskCore(auth: AuthState, id: string): Promise<ProjectTaskRow> {

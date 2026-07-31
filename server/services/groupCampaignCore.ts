@@ -8,6 +8,13 @@ import { nimComplete, NimServiceError } from "./nvidia-nim";
 import { listGroupTasks } from "./taskCore";
 import { getGroupCommandLevel, recordGroupAgentEventSafely } from "./groupCommand";
 import {
+  consumeRateLimit,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+  RateLimitConfigurationError,
+  RateLimitUnavailableError,
+} from "./rateLimit";
+import {
   CAMPAIGN_MIN_LEVEL,
   MAX_CAMPAIGN_STEPS,
   MAX_WATCH_ATTEMPTS,
@@ -204,6 +211,22 @@ export async function planGroupCampaign(input: {
   if (goal.length > 1000) throw new TRPCError({ code: "BAD_REQUEST", message: "目標太長（最多 1000 字）" });
   const budgetPoints = Math.max(0, Math.min(100_000, Math.floor(input.budgetPoints)));
 
+  // 節流。沒有這道的話 planCampaign 是一條無節流、每次跑一輪 60 秒 LLM 的路徑：
+  // ask 的每分鐘 6 次限流管不到它，一個 command 等級的人可以同時開一串長呼叫。
+  // 用自己的桶而不是 agentPlan 的：共用會讓「剛派了幾件工」與「想排一份調度計畫」互相餓死，
+  // 而使用者看到的是一句「規劃太頻繁」配上他自己根本沒排過計畫的畫面。
+  try {
+    const decision = await consumeRateLimit(RATE_LIMIT_SCOPES.groupCampaignPlan, auth.user.id, RATE_LIMIT_POLICIES.groupCampaignPlan);
+    if (!decision.allowed) {
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "規劃太頻繁（每分鐘最多 4 次），休息一下再試" });
+    }
+  } catch (error) {
+    if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "組代理規劃安全限流暫時無法使用，請稍後再試" });
+    }
+    throw error;
+  }
+
   const refs = await buildCampaignRefs(auth, groupId);
   if (refs.projects.length === 0) {
     throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這個組目前沒有可派工的專案（封存的不算）" });
@@ -346,7 +369,12 @@ function assertCampaignOwnerOrLeader(auth: AuthState, run: GroupCampaignRow, act
 
 async function loadCampaign(auth: AuthState, runId: string): Promise<GroupCampaignRow> {
   const [run] = await db.select().from(schema.groupAgentRuns).where(eq(schema.groupAgentRuns.id, runId));
-  if (!run) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份組代理計畫" });
+  // 別組的 id 一律回 NOT_FOUND，不要讓 requireGroup 回 FORBIDDEN——那等於告訴對方
+  // 「這個 id 真的存在，只是不給你」。groupCommand 的 loadRunInGroup 已經是這個口徑，
+  // 兩邊要一致，否則猜 id 的人只要比對錯誤碼就能列舉出別組有哪些計畫。
+  if (!run || !auth.groups.some((g) => g.groupId === run.groupId)) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "找不到這份組代理計畫" });
+  }
   requireGroup(auth, run.groupId);
   return run;
 }

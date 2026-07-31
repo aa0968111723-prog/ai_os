@@ -80,6 +80,14 @@ export const COMMAND_MIN_LEVEL: Record<GroupCommandKind, GroupCommandLevel> = {
   assign_task: "supervise",
 };
 
+/** 等級的人話標籤（錯誤訊息與成員設定頁共用一份用詞，兩邊不會各叫各的） */
+export const COMMAND_LEVEL_LABEL: Record<GroupCommandLevel, string> = {
+  none: "不可用",
+  dispatch: "可派工",
+  supervise: "可監督",
+  command: "可總指揮",
+};
+
 /** 指令的人話標籤（審計摘要與 UI 共用，避免兩邊各寫一份中文） */
 export const COMMAND_LABEL: Record<GroupCommandKind, string> = {
   dispatch: "派工",
@@ -131,7 +139,13 @@ export const groupCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("approve_run"), runId: z.string().uuid() }),
   z.object({ kind: z.literal("stop_run"), runId: z.string().uuid() }),
   z.object({ kind: z.literal("discard_run"), runId: z.string().uuid() }),
-  z.object({ kind: z.literal("retry_run"), runId: z.string().uuid() }),
+  z.object({
+    kind: z.literal("retry_run"),
+    runId: z.string().uuid(),
+    // 重新規劃時沿用原本的規劃檔位與 playbook（campaign 的步驟保存得到；人手動重跑時沒有就用預設）
+    plannerMode: agentPlannerModeSchema.optional(),
+    playbookId: z.string().max(80).optional(),
+  }),
   z.object({
     kind: z.literal("assign_task"),
     taskId: z.string().uuid(),

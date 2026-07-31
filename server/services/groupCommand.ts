@@ -12,6 +12,8 @@ import {
 import { updateProjectTaskCore } from "./taskCore";
 import {
   COMMAND_LABEL,
+  COMMAND_LEVEL_LABEL,
+  COMMAND_MIN_LEVEL,
   canRunCommand,
   resolveCommandLevel,
   type GroupCommand,
@@ -101,7 +103,9 @@ export function assertCommandLevel(level: GroupCommandLevel, kind: GroupCommandK
   if (!canRunCommand(level, kind)) {
     throw new TRPCError({
       code: "FORBIDDEN",
-      message: `你的組代理權限不足以${COMMAND_LABEL[kind]}——請組長在成員設定把你的指揮權調到「${kind === "dispatch" ? "可派工" : "可監督"}」以上`,
+      // 等級名稱從 COMMAND_MIN_LEVEL 推導，不要在這裡自己分支：哪天有指令改成需要 command，
+      // 寫死的訊息會叫使用者去要一個不夠用的權限，照著做也拿不到那個功能
+      message: `你的組代理權限不足以${COMMAND_LABEL[kind]}——請組長在成員設定把你的指揮權調到「${COMMAND_LEVEL_LABEL[COMMAND_MIN_LEVEL[kind]]}」以上`,
     });
   }
 }
@@ -257,12 +261,21 @@ export async function runGroupCommand(input: {
 
     case "retry_run": {
       const run = await loadRunInGroup(groupId, command.runId);
+      // 重新規劃要沿用原本的規劃檔位與 playbook（呼叫端從 campaign 步驟帶回來）。
+      // 不帶的話，一份原本指定「品質檔＋創作短版」的計畫重跑後會悄悄變成預設檔位，
+      // 使用者看到的是「同一個目標、結果卻不一樣」，而且沒有任何地方說得出為什麼。
       // 只重跑「已經結束且沒成功」的：對還在跑的計畫按重跑等於同專案開兩份，
       // 併發鎖會擋在核准那一步，使用者只會拿到一份永遠核准不了的孤兒計畫。
       if (run.status !== "failed" && run.status !== "stopped") {
         throw new TRPCError({ code: "PRECONDITION_FAILED", message: "只有失敗或被停止的計畫可以重新規劃" });
       }
-      const fresh = await planAgentCore({ auth, projectId: run.projectId, goal: run.goal });
+      const fresh = await planAgentCore({
+        auth,
+        projectId: run.projectId,
+        goal: run.goal,
+        plannerMode: command.plannerMode,
+        playbookId: command.playbookId,
+      });
       const title = await projectTitleOf(run.projectId);
       await record({
         eventKey: `cmd:retry:${fresh.id}`,
@@ -295,6 +308,9 @@ export async function runGroupCommand(input: {
         assigneeId: command.assigneeId,
         dueAt: command.dueAt,
         priority: command.priority,
+        // 等級已在本函式開頭驗過（assign_task 需 supervise）——個人層的「只有負責人或建立者」
+        // 不該再擋一次，否則提議面給得出來、執行面必吃 FORBIDDEN
+        viaGroupCommand: true,
       });
       const changes: string[] = [];
       if (command.assigneeId !== undefined) changes.push(command.assigneeId ? "改派負責人" : "取消指派");
@@ -302,7 +318,11 @@ export async function runGroupCommand(input: {
       if (command.priority !== undefined) changes.push(`優先序改為 ${command.priority}`);
       const what = changes.join("、") || "沒有變更";
       await record({
-        eventKey: `cmd:task:${task.id}:${Date.now()}`,
+        // campaign 的步驟可能因崩潰重播，用步驟 id 當鍵才擋得住重複紀錄（軌跡會顯示改了兩次、其實只改了一次）；
+        // 人按的指令則相反——按兩次就是兩件事，用時間戳保留兩筆
+        eventKey: input.campaignStepId
+          ? `cmd:task:${task.id}:${input.campaignStepId}`
+          : `cmd:task:${task.id}:${Date.now()}`,
         eventType: "command",
         projectId: task.projectId,
         summary: `調整任務「${task.title}」：${what}`,

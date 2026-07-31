@@ -598,9 +598,33 @@ describe("resolveCommandProposals（LLM 代號指令 → 可執行動作）", ()
     expect(resolveCommandProposals(commandRefs, [{ kind: "assign_task", ref: "t1" }], "supervise")).toEqual([]);
   });
 
-  it("最多 4 筆——再多就變成另一種選項牆", () => {
-    const many = Array.from({ length: 8 }, () => ({ kind: "stop_run" as const, ref: "r2" }));
-    expect(resolveCommandProposals(commandRefs, many, "command")).toHaveLength(4);
+  it("最多 4 筆——再多就變成另一種選項牆（用相異提議證明，否則會被去重規則蓋掉）", () => {
+    const manyRefs = {
+      ...commandRefs,
+      runs: Array.from({ length: 8 }, (_, i) => ({
+        ref: `r${i + 1}`,
+        id: `10000000-0000-0000-0000-00000000000${i + 1}`,
+        projectTitle: `案子 ${i + 1}`,
+        status: "running",
+        goal: "配音",
+        estPoints: 5,
+      })),
+    };
+    const many = Array.from({ length: 8 }, (_, i) => ({ kind: "stop_run" as const, ref: `r${i + 1}` }));
+    expect(resolveCommandProposals(manyRefs, many, "command")).toHaveLength(4);
+  });
+
+  it("同一道指令重複提議只留一筆——四顆一模一樣的按鈕會把上限用完卻只給一個選擇", () => {
+    const dup = Array.from({ length: 4 }, () => ({ kind: "stop_run" as const, ref: "r2" }));
+    expect(resolveCommandProposals(commandRefs, dup, "command")).toHaveLength(1);
+  });
+
+  it("同一件任務但改的欄位不同，算兩筆不同的提議（改派與改期是兩個決定）", () => {
+    const out = resolveCommandProposals(commandRefs, [
+      { kind: "assign_task", ref: "t1", assigneeRef: "u1" },
+      { kind: "assign_task", ref: "t1", dueAt: "2026-08-10T00:00:00+08:00" },
+    ], "supervise");
+    expect(out).toHaveLength(2);
   });
 });
 

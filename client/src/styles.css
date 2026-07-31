@@ -2222,7 +2222,6 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   /* 步驟文字會夾著目標原文與後端的錯誤訊息（可能是一長串沒有空白的英數或網址）。
      不強制斷字的話那一串會把整張卡撐寬、連帶整頁橫向捲動——手機上就是整欄溢出。 */
   overflow-wrap: anywhere;
-  word-break: break-word;
 }
 /* 步驟狀態的顏色分工：成功／危險／警示／弱化各有各的意思，不共用一個灰。
    waiting 用金色（＝「在等你」，與待核准的 chip 同一個語意色），

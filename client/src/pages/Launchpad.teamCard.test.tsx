@@ -39,9 +39,17 @@ const h = vi.hoisted(() => {
     /** mutation 的錯誤（依 tRPC 路徑登記）：驗「哪一個動作失敗了」有沒有講對。
      *  固定 error: null 的話，四支 mutation 共用一句錯誤訊息的問題永遠測不出來。 */
     mutationError: Map<string, { message: string }>;
+    /** 被 reset() 過的 mutation 路徑：tRPC 的 error 會一直留到 reset()，
+     *  所以「上一個動作的舊錯誤有沒有清掉」只能從有沒有真的呼叫 reset 來驗。 */
+    resets: string[];
+    /** 要 reject 的 mutation 與它的錯誤（依路徑）：驗動作有沒有接住 rejection。
+     *  永遠 resolve 的話，沒包 try/catch 的按鈕在測試裡看起來一樣正常。
+     *  reject 的同時也把錯誤登記進 mutationError，比照 tRPC「失敗後 error 就留著」的行為。 */
+    mutationRejects: Map<string, { message: string }>;
   } = {
     queryData: new Map(), mutations: [], root: {}, askReply: {}, mutationReply: new Map(),
     queryState: new Map(), refetches: [], mutationError: new Map(),
+    resets: [], mutationRejects: new Map(),
   };
   const queryData = bag.queryData;
   const mutations = bag.mutations;
@@ -65,11 +73,16 @@ const h = vi.hoisted(() => {
           void opts?.onSuccess?.(reply);
           void callOpts?.onSuccess?.(reply);
         },
-        mutateAsync: async (input: unknown) => { mutations.push({ path, input }); return bag.mutationReply.get(path) ?? {}; },
+        mutateAsync: async (input: unknown) => {
+          mutations.push({ path, input });
+          const rejection = bag.mutationRejects.get(path);
+          if (rejection) { bag.mutationError.set(path, rejection); throw rejection; }
+          return bag.mutationReply.get(path) ?? {};
+        },
         isPending: false,
         error: bag.mutationError.get(path) ?? null,
         data: undefined,
-        reset: () => {},
+        reset: () => { bag.resets.push(path); bag.mutationError.delete(path); },
       }),
       invalidate: () => {},
       useUtils: () => root,
@@ -87,7 +100,8 @@ const h = vi.hoisted(() => {
     }) as Record<string, unknown>;
   };
   root = makeNode("");
-  Object.assign(bag, { queryData, mutations, root, mutationReply: bag.mutationReply, queryState: bag.queryState });
+  // 只有 root 是後來才建出來的（makeNode 要先定義），其餘欄位一開始就在 bag 上，寫回去等於原地賦值
+  bag.root = root;
   return bag;
 });
 
@@ -135,6 +149,8 @@ function seed(opts: {
   h.queryState.clear();
   h.refetches.length = 0;
   h.mutationError.clear();
+  h.resets.length = 0;
+  h.mutationRejects.clear();
   const runs = opts.runs ?? [];
   h.queryData.set("auth.me", {
     user: { id: "u1", name: "阿光" },
@@ -1361,6 +1377,115 @@ describe("L3 組代理總指揮：文案誠實度", () => {
   });
 });
 
+/* ────────────────────────────────────────────────────────────────
+   總指揮的四個動作：失敗要接住，舊錯誤不能賴在下一個動作上。
+
+   這兩件事都不會讓畫面「看起來」壞掉，所以只能靠測試守：
+   前者是主控台一路噴 unhandled rejection（開發環境還會被 overlay 蓋住整頁），
+   後者是橫幅指著一顆使用者這一輪根本沒按的鈕。
+   ──────────────────────────────────────────────────────────────── */
+describe("L3 組代理總指揮：動作失敗的收尾", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.mutationReply.clear();
+    h.queryState.clear();
+  });
+
+  /** 在這段期間內冒出來的 unhandled rejection（Node 在該 tick 結束時才判定，所以要讓出一個 macrotask） */
+  async function unhandledDuring(fn: () => Promise<void>): Promise<unknown[]> {
+    const caught: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { caught.push(reason); };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await fn();
+      await new Promise((r) => setTimeout(r, 0));
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+    return caught;
+  }
+
+  it.each([
+    ["approveCampaign", "awaiting_approval", /^核准$/, "核准調度計畫失敗"],
+    ["discardCampaign", "awaiting_approval", /^放棄$/, "放棄調度計畫失敗"],
+    ["stopCampaign", "running", /^停止$/, "停止調度計畫失敗"],
+    ["resumeCampaign", "waiting", /^繼續/, "讓調度計畫繼續失敗"],
+  ] as const)(
+    "%s 被後端擋下來時接得住，不會變成 unhandled rejection（錯誤仍由橫幅講出來）",
+    async (path, status, btn, banner) => {
+      seedCommander({ level: "command", campaigns: [campaign({ status })] });
+      h.mutationRejects.set(`teamAssistant.${path}`, { message: "只有發起人或組長以上可以動這份調度計畫" });
+      const view = render(<Launchpad groupId={GROUP} />);
+      const caught = await unhandledDuring(async () => {
+        await userEvent.click(within(commander()).getByRole("button", { name: btn }));
+      });
+      expect(caught).toEqual([]);
+      expect(h.mutations).toEqual([{ path: `teamAssistant.${path}`, input: expect.anything() }]);
+      // 吞掉 rejection 不等於吞掉錯誤：使用者仍要看得到是哪一個動作失敗、後端說了什麼。
+      // 失敗本身不改任何 React state，所以這裡補一次 rerender，演出真實 tRPC 下錯誤落地後的那次重繪。
+      view.rerender(<Launchpad groupId={GROUP} />);
+      expect(within(commander()).getByRole("alert"))
+        .toHaveTextContent(`${banner}：只有發起人或組長以上可以動這份調度計畫`);
+    },
+  );
+
+  it("動作開始前先清掉上一個動作的舊錯誤（不然核准失敗過一次，之後每個成功的動作都還掛著那句）", async () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "waiting" })] });
+    h.mutationError.set("teamAssistant.approveCampaign", { message: "點數不足" });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    expect(box.getByRole("alert")).toHaveTextContent("核准調度計畫失敗：點數不足");
+
+    // 這次按的是「繼續」而且成功了，橫幅卻還在講「核准失敗」——指著一顆這一輪沒按的鈕
+    await userEvent.click(box.getByRole("button", { name: /^繼續/ }));
+    expect(h.resets).toEqual(expect.arrayContaining([
+      "teamAssistant.approveCampaign",
+      "teamAssistant.resumeCampaign",
+      "teamAssistant.stopCampaign",
+      "teamAssistant.discardCampaign",
+    ]));
+    expect(box.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("繼續失敗時不清掉輸入框的授權點數（清掉的話重按一次就變成不加授權，下一輪照樣停在同一步）", async () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "waiting" })] });
+    h.mutationRejects.set("teamAssistant.resumeCampaign", { message: "額度不足" });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    const add = box.getByLabelText(/加多少自動核准授權/);
+    await userEvent.clear(add);
+    await userEvent.type(add, "40");
+    await userEvent.click(box.getByRole("button", { name: /^繼續/ }));
+    expect(add).toHaveValue(40);
+  });
+});
+
+describe("L3 組代理總指揮：展開步驟的鈕要說得出自己是開還是關", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+    h.queryState.clear();
+  });
+
+  it("目標鈕帶 aria-expanded／aria-controls，且指到真的步驟容器（只聽文字的人才知道展開了沒）", async () => {
+    seedCommander({ level: "command", campaigns: [campaign({ status: "running" })] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(commander());
+    const toggle = box.getByRole("button", { name: "把三個待審的案子推到可交付" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const controls = toggle.getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    // aria-controls 指到不存在的 id 等於沒寫：展開後那個 id 一定要真的是步驟清單
+    const panel = document.getElementById(controls!);
+    expect(panel).not.toBeNull();
+    expect(within(panel!).getByText(/派工｜在招生短片開一份分鏡計畫/)).toBeInTheDocument();
+  });
+});
+
 describe("campaignRefetchInterval（waiting 也要輪詢，不然人工關卡解掉了畫面也不會動）", () => {
   it("running 與 waiting 都輪詢；其餘狀態與空清單不輪詢", () => {
     expect(campaignRefetchInterval([{ status: "running" }])).toBe(10_000);
@@ -1440,5 +1565,27 @@ describe("組彙總 AI 的指令提議（ask 的 actions）", () => {
     expect(await screen.findByText("✓ 已核准「招生短片」的計畫，開始執行（估 12 點）")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "核准「招生短片」的計畫" })).not.toBeInTheDocument();
     expect(h.mutations.filter((m) => m.path === "teamAssistant.command")).toHaveLength(1);
+  });
+
+  it("清除對話也要清掉已執行的指令記錄——不然新一輪的提議會頂著上一輪的「✓ …」，按鈕根本不出現", async () => {
+    seed({ runs: [], pending: [] });
+    h.mutationReply.set("teamAssistant.command", {
+      kind: "approve_run",
+      message: "已核准「招生短片」的計畫，開始執行（估 12 點）",
+      runId: APPROVE.runId,
+    });
+    askWithActions([{ command: APPROVE, label: "核准「招生短片」的計畫" }]);
+    render(<Launchpad groupId={GROUP} />);
+    await askNow("那份計畫怎麼還沒動？");
+    await userEvent.click(await screen.findByRole("button", { name: "核准「招生短片」的計畫" }));
+    expect(await screen.findByText("✓ 已核准「招生短片」的計畫，開始執行（估 12 點）")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "清除對話" }));
+    // 第二輪的提議落回同一個 key（act-{訊息索引}-{i}，索引從 0 重來）：
+    // actioned 沒清的話，這則新提議會直接被畫成上一輪的成功結果，使用者以為新指令送出去了。
+    askWithActions([{ command: DISPATCH, label: "在社課回顧補一版旁白稿" }]);
+    await askNow("那接下來呢？");
+    expect(await screen.findByRole("button", { name: "在社課回顧補一版旁白稿" })).toBeInTheDocument();
+    expect(screen.queryByText("✓ 已核准「招生短片」的計畫，開始執行（估 12 點）")).not.toBeInTheDocument();
   });
 });

@@ -695,6 +695,9 @@ export function resolveCommandProposals(
   level: GroupCommandLevel,
 ): ResolvedCommand[] {
   const out: ResolvedCommand[] = [];
+  // 同一道指令重複提議要去掉：LLM 很容易把同一件事講兩次，而四筆上限的用意是「不要變成選項牆」——
+  // 四顆一模一樣的按鈕正好把那個上限用完，卻只給了一個選擇。
+  const seen = new Set<string>();
   const runByRef = new Map(refs.runs.map((r) => [r.ref, r]));
   const taskByRef = new Map(refs.tasks.map((t) => [t.ref, t]));
   const memberByRef = new Map(refs.members.map((m) => [m.ref, m]));
@@ -710,6 +713,9 @@ export function resolveCommandProposals(
     if (out.length >= 4) break;
     if (!canRunCommand(level, p.kind)) continue;
     const ref = p.ref.trim();
+    const dedupeKey = [p.kind, ref, p.assigneeRef ?? "", p.dueAt ?? "", p.priority ?? ""].join("|");
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
 
     if (p.kind === "assign_task") {
       const task = taskByRef.get(ref);
@@ -1046,6 +1052,9 @@ export const teamAssistantRouter = router({
             .from(schema.groupMembers)
             .innerJoin(schema.users, eq(schema.users.id, schema.groupMembers.userId))
             .where(eq(schema.groupMembers.groupId, input.groupId))
+            // 沒有 ORDER BY 的 LIMIT，PostgreSQL 不保證回傳順序：uN 代號會在兩輪之間指到不同的人，
+            // 使用者上一輪讀到的理由對不上這一輪的按鈕；超過上限時連「哪幾個人進得了提示詞」都會飄。
+            .orderBy(asc(schema.users.name), asc(schema.users.id))
             .limit(COMMAND_REF_LIMIT),
         ]);
         commandRefs.runs = runRows.map((r, i) => ({
@@ -1293,6 +1302,14 @@ ${historyBlock}使用者的問題：${input.message}`;
         try {
           results.push({ ok: true, result: await runGroupCommand({ auth: ctx.auth, groupId: input.groupId, command, origin: "team_card" }) });
         } catch (err) {
+          // 非 TRPCError 會被折成一句「執行失敗」回前端，而且因為沒有往外拋，tRPC 的錯誤路徑
+          // 也不會記——出事時伺服器端完全沒有痕跡，維運說不出一道可能已經花了點的指令為什麼失敗
+          if (!(err instanceof TRPCError)) {
+            console.warn(
+              `[groupCommand] 批次指令失敗 group=${input.groupId} kind=${command.kind}：`,
+              err instanceof Error ? err.message : err,
+            );
+          }
           results.push({ ok: false, kind: command.kind, error: err instanceof TRPCError ? err.message : "執行失敗" });
         }
       }

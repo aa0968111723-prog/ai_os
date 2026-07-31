@@ -79,6 +79,11 @@ export function CommandLevelField({ groupId, userId, level, isSelf, onSaved }: {
           value={shown}
           disabled={setLevel.isPending}
           style={{ width: "auto", flex: "0 1 150px" }}
+          // 存檔失敗後焦點還停在這個選單上，而錯誤字長在選單後面：不接上去的話，
+          // 讀螢幕的人聽到的仍是「組代理指揮權，可監督」——他會以為權限已經改好了，
+          // 實際上後端根本沒收下，那個人的花錢權限與畫面說的不是同一件事。
+          aria-invalid={setLevel.error ? true : undefined}
+          aria-describedby={setLevel.error ? `${fieldId}-error` : undefined}
           onChange={(e) => setLevel.mutate({ groupId, userId, level: e.target.value as GroupCommandLevel })}
         >
           {COMMAND_LEVEL_OPTIONS.map((o) => (
@@ -88,7 +93,12 @@ export function CommandLevelField({ groupId, userId, level, isSelf, onSaved }: {
         {setLevel.isPending && <Meta>儲存中…</Meta>}
       </div>
       <Hint layer="always" style={{ margin: 0, fontSize: 11 }}>{describeCommandLevel(shown)}</Hint>
-      {setLevel.error && <span className="error" style={{ marginTop: 0, fontSize: 11 }}>{setLevel.error.message}</span>}
+      {/* role="alert" 才會被朗讀出來（比照通訊錄載入失敗那句）：這行字是「權限沒改成功」的唯一證據 */}
+      {setLevel.error && (
+        <span id={`${fieldId}-error`} className="error" role="alert" style={{ marginTop: 0, fontSize: 11 }}>
+          {setLevel.error.message}
+        </span>
+      )}
     </div>
   );
 }
@@ -104,7 +114,9 @@ function MembershipCommandLevel({ groupId, userId, isSelf }: { groupId: string; 
   const usage = trpc.quota.usage.useQuery({ groupId });
   const row = usage.data?.rows.find((r) => r.userId === userId);
   if (usage.isLoading) return <Skeleton style={{ height: 22, width: 200, borderRadius: 8 }} />;
-  if (usage.error) return <Meta style={{ fontSize: 11 }}>指揮權現況載入失敗：{usage.error.message}</Meta>;
+  // 一樣要 role="alert"：讀不到現況時整個控制項就不畫了，沒朗讀出來的話這裡只是安靜地少一塊，
+  // 組長會以為這個組沒有指揮權設定，而不是「這一刻讀不到」。
+  if (usage.error) return <Meta role="alert" style={{ fontSize: 11 }}>指揮權現況載入失敗：{usage.error.message}</Meta>;
   // 讀不到這個人（剛被移出組、清單還沒重整）就不畫控制項——寧可少一個入口，也不要送出一個猜出來的等級
   if (!row) return null;
   if (row.role !== "member") return <Meta style={{ fontSize: 11 }}>組長以上恆為「可總指揮」</Meta>;

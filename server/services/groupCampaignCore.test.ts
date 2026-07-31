@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { campaignSummaryText, resolveCampaignPlan, type CampaignRefs } from "./groupCampaignCore";
-import type { GroupPlanDraft } from "../../shared/groupAgent";
+import { MAX_WATCH_ATTEMPTS, type GroupPlanDraft } from "../../shared/groupAgent";
 
 const refs: CampaignRefs = {
   projects: [
@@ -98,8 +98,12 @@ describe("resolveCampaignPlan（規劃草稿 → 可執行步驟）", () => {
     const steps = resolveCampaignPlan(draft([
       { id: "s1", kind: "dispatch", title: "派工", projectRef: "p1", goal: "把腳本拆成分鏡" },
       { id: "s2", kind: "watch", title: "盯著", targetStepId: "s1", maxAttempts: 3 },
+      { id: "s3", kind: "watch", title: "超過硬頂", targetStepId: "s1", maxAttempts: 99 },
+      { id: "s4", kind: "watch", title: "負值", targetStepId: "s1", maxAttempts: -5 },
     ]), refs);
     expect(steps[1].maxAttempts).toBe(3);
+    expect(steps[2].maxAttempts).toBe(MAX_WATCH_ATTEMPTS);
+    expect(steps[3].maxAttempts).toBe(0);
   });
 
   it("步驟數超過上限時只留前 12 步", () => {

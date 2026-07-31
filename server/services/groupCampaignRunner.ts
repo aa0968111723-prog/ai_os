@@ -471,7 +471,7 @@ async function pollWatchStep(
         const result = await runGroupCommand({
           auth,
           groupId: run.groupId,
-          command: { kind: "retry_run", runId: child.id },
+          command: { kind: "retry_run", runId: child.id, plannerMode: target?.plannerMode, playbookId: target?.playbookId },
           origin: "campaign",
           campaignRunId: run.id,
           campaignStepId: step.id,
@@ -480,6 +480,14 @@ async function pollWatchStep(
         step.childRunId = result.runId;
         step.attempts = attempts + 1;
         step.childStatus = "awaiting_approval";
+        // 其他分支都有記事件，只有這裡沒有的話，軌跡上會看到「一份子計畫失敗」然後
+        // 「另一個 childRunId 被核准」，中間沒有任何一句說明它為什麼換了一份
+        await event(
+          `step:${step.id}:retry:${step.attempts}`,
+          "step_completed",
+          `重新規劃：${step.title}——子計畫失敗，已排第 ${step.attempts} 次（新的子計畫待核）`,
+          { previousChildRunId: child.id, childRunId: result.runId, attempts: step.attempts },
+        );
       } catch (err) {
         markStepFailed(step, err);
       }
@@ -529,6 +537,64 @@ export async function sweepStaleCampaigns(): Promise<number> {
     });
   }
   return stale.length;
+}
+
+/**
+ * 開機修復：把「落庫成 running、但沒有人在推」的步驟接回去。
+ *
+ * 為什麼會有這種步驟：executeStep 刻意在下令**之前**先把步驟標成 running 落庫（不先落庫的話，
+ * 關機剛好卡在派工那一步會重開機後再派一次）。代價是反過來的風險——如果 process 就死在
+ * 落庫之後、settleCampaign 之前，那一步會永遠停在 running：nextRunnableStep 只挑 pending，
+ * watch 輪詢只看 watch，於是這份計畫從此不動，而畫面顯示「執行中」。
+ *
+ * 怎麼判斷那一步到底做完沒有：**看事件軌跡，不要看步驟本身**。
+ * 步驟上的 childRunId 是下令成功後才寫的、且和 settleCampaign 同一次落庫，所以一個卡在 running
+ * 的 dispatch 步驟身上永遠不會有 childRunId——照「有 childRunId 就算完成、沒有就重跑」的規則做，
+ * 等於一律重跑，正好又踩回重複派工。而 runGroupCommand 在 planAgentCore 成功後就會立刻寫一筆
+ * 帶 childRunId 的事件（唯一鍵擋重複），那才是「這一步真的下過令」的憑證。
+ */
+export async function recoverInterruptedCampaigns(): Promise<number> {
+  const runs = await db
+    .select()
+    .from(schema.groupAgentRuns)
+    .where(eq(schema.groupAgentRuns.status, "running"))
+    .limit(BATCH);
+  let healed = 0;
+  for (const run of runs) {
+    const steps = structuredClone(run.steps) as GroupCampaignStep[];
+    // watch 停在 running 是正常的（它靠每輪輪詢推進），只修其餘種類
+    const stuck = steps.filter((s) => s.status === "running" && s.kind !== "watch");
+    if (!stuck.length) continue;
+    const events = await db
+      .select({ stepId: schema.groupAgentEvents.stepId, childRunId: schema.groupAgentEvents.childRunId, summary: schema.groupAgentEvents.summary })
+      .from(schema.groupAgentEvents)
+      .where(and(
+        eq(schema.groupAgentEvents.runId, run.id),
+        inArray(schema.groupAgentEvents.eventType, ["command", "approved"]),
+      ));
+    const doneByStep = new Map(events.filter((e) => e.stepId).map((e) => [e.stepId as string, e]));
+    for (const step of stuck) {
+      const evidence = doneByStep.get(step.id);
+      if (evidence) {
+        step.status = "done";
+        step.childRunId = step.childRunId ?? evidence.childRunId ?? undefined;
+        step.result = step.result ?? evidence.summary;
+      } else {
+        step.status = "pending";
+      }
+      healed += 1;
+    }
+    await saveCampaignSteps(run, steps);
+    await recordGroupAgentEventSafely({
+      groupId: run.groupId,
+      runId: run.id,
+      eventKey: `campaign:recovered:${stuck.map((s) => s.id).join(",")}`,
+      eventType: "observation",
+      summary: `重啟後接回 ${stuck.length} 個中斷的步驟（有下令憑證的標完成、沒有的退回重跑）`,
+      data: { steps: stuck.map((s) => ({ id: s.id, kind: s.kind, status: s.status })) },
+    });
+  }
+  return healed;
 }
 
 /** 測試用：撈某份 campaign 目前的子計畫狀態（避免測試自己拼 join） */

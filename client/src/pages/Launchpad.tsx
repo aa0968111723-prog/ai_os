@@ -1125,6 +1125,20 @@ function TeamCommanderBlock({
     (stop.error && { what: "停止調度計畫", error: stop.error }) ||
     (discard.error && { what: "放棄調度計畫", error: discard.error }) ||
     null;
+  /**
+   * 每個動作按下去的第一件事：把四支 mutation 的舊錯誤全部清掉。
+   *
+   * tRPC 的 mutation.error 會一路留到 reset()，而上面的 actionError 取的是第一個非 null 的錯誤——
+   * 核准失敗過一次之後，就算接著按「繼續」而且成功了，橫幅還是掛著「核准調度計畫失敗」。
+   * 那句話指著一顆使用者這一輪根本沒按的鈕，讀起來就是「我剛剛按的也失敗了」，
+   * 於是他會再按一次已經生效的動作——重複核准、重複加授權，都是真的會多花點的操作。
+   */
+  const resetActionErrors = () => {
+    approve.reset();
+    resume.reset();
+    stop.reset();
+    discard.reset();
+  };
 
   return (
     <div className="team-commander" aria-label="組代理總指揮">
@@ -1227,7 +1241,17 @@ function TeamCommanderBlock({
               <div key={c.id} className={`team-run-row is-${c.status}`}>
                 <Chip style={{ margin: 0 }}>{GROUP_RUN_STATUS_LABEL[c.status] ?? c.status}</Chip>
                 <span className="team-run-row__copy">
-                  <button type="button" className="hint" onClick={() => setOpenId(open ? null : c.id)}>
+                  {/* 這顆鈕是展開／收合步驟清單的開關，但看起來只是一行目標文字。
+                      不給 aria-expanded／aria-controls 的話，讀螢幕的人按完只聽到同一句目標，
+                      不知道步驟到底展開了沒——只好反覆按，把剛展開的清單又收回去。
+                      屬性照同一張卡的「組執行計畫動態」切換鈕（見下方 team-runs-toggle）。 */}
+                  <button
+                    type="button"
+                    className="hint"
+                    onClick={() => setOpenId(open ? null : c.id)}
+                    aria-expanded={open}
+                    aria-controls={`team-campaign-steps-${c.id}`}
+                  >
                     {c.goal}
                   </button>
                   <span title={c.summary}>{c.summary}</span>
@@ -1255,7 +1279,7 @@ function TeamCommanderBlock({
                     </span>
                   )}
                   {open && (
-                    <span className="team-commander__steps">
+                    <span className="team-commander__steps" id={`team-campaign-steps-${c.id}`}>
                       {steps.map((s) => (
                         <span key={s.id} className={`team-commander__step is-${s.status}`}>
                           {GROUP_STEP_KIND_LABEL[s.kind] ?? s.kind}｜{s.title}
@@ -1283,13 +1307,32 @@ function TeamCommanderBlock({
                             : "核准這份調度計畫？\n這份的自動核准授權是 0 點：組代理會派出第一份子計畫，然後**停下來等你核准**，不會自己往下跑。要它連續跑，請在核准後於「等待人員」那一列補上授權點數再按「繼續」。"
                         }
                         confirmLabel="核准"
-                        onConfirm={async () => { await approve.mutateAsync({ runId: c.id }); refresh(); }}
+                        // 不接住 rejection 的話，後端擋下來（FORBIDDEN／額度不足）就會變成
+                        // unhandled promise rejection——畫面照樣只有下方那句錯誤，但主控台一路噴紅，
+                        // 開發環境還會被 overlay 蓋掉整頁。錯誤文字仍由 actionError 顯示，這裡只負責吞掉。
+                        onConfirm={async () => {
+                          resetActionErrors();
+                          try {
+                            await approve.mutateAsync({ runId: c.id });
+                            refresh();
+                          } catch { /* actionError 已顯示 */ }
+                        }}
                       >核准</ConfirmButton>
                     )}
                     {/* 放棄只動一份還沒核准、沒花過任何點的調度計畫，所以後端只要「發起人或組長以上」，
                         不必到 command——露出面跟著後端，別多擋也別少擋。 */}
                     {c.status === "awaiting_approval" && mine && (
-                      <Button variant="ghost" size="sm" onClick={async () => { await discard.mutateAsync({ runId: c.id }); refresh(); }}>放棄</Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={async () => {
+                          resetActionErrors();
+                          try {
+                            await discard.mutateAsync({ runId: c.id });
+                            refresh();
+                          } catch { /* actionError 已顯示 */ }
+                        }}
+                      >放棄</Button>
                     )}
                     {(c.status === "running" || c.status === "waiting") && mine && (
                       <ConfirmButton
@@ -1297,7 +1340,13 @@ function TeamCommanderBlock({
                         title="組代理不再下新指令；已派出的子計畫不受影響"
                         message={"停止這份調度計畫？\n組代理不會再下新指令。已經派出去、已經核准的子計畫不會被一併停掉——要停那些請到各專案停。"}
                         confirmLabel="停止"
-                        onConfirm={async () => { await stop.mutateAsync({ runId: c.id }); refresh(); }}
+                        onConfirm={async () => {
+                          resetActionErrors();
+                          try {
+                            await stop.mutateAsync({ runId: c.id });
+                            refresh();
+                          } catch { /* actionError 已顯示 */ }
+                        }}
                       >停止</ConfirmButton>
                     )}
                     {c.status === "waiting" && canCommand && mine && (
@@ -1320,9 +1369,14 @@ function TeamCommanderBlock({
                           size="sm"
                           aria-label={`繼續執行「${shortGoal}」${add > 0 ? `，加授權 估 ${add} 點` : "，不加授權"}`}
                           onClick={async () => {
-                            await resume.mutateAsync({ runId: c.id, addBudgetPoints: add });
-                            setAddBudget((prev) => ({ ...prev, [c.id]: 0 }));
-                            refresh();
+                            resetActionErrors();
+                            try {
+                              await resume.mutateAsync({ runId: c.id, addBudgetPoints: add });
+                              // 失敗時不能清掉輸入框：那個數字是使用者剛想清楚要加多少授權，
+                              // 清掉之後他重按一次就會變成「不加授權的繼續」，下一輪照樣停在同一步。
+                              setAddBudget((prev) => ({ ...prev, [c.id]: 0 }));
+                              refresh();
+                            } catch { /* actionError 已顯示 */ }
                           }}
                         >
                           繼續「{shortGoal}」{add > 0 ? `（+估 ${add} 點）` : ""}
@@ -2098,7 +2152,10 @@ function TeamAssistantCard({
               variant="ghost"
               size="sm"
               style={{ marginLeft: 8 }}
-              onClick={() => { setMsgs([]); setDispatched({}); ask.reset(); }}
+              // actioned 也要清：它的 key 是「act-{訊息索引}-{i}」，而清完對話訊息索引從 0 重來。
+              // 少清這一項的話，新問一輪拿到的第一則提議會直接顯示上一輪同一格的「✓ …」結果文字，
+              // 按鈕根本不出現——使用者會以為那道新指令已經執行過了，其實一次也沒送出去。
+              onClick={() => { setMsgs([]); setDispatched({}); setActioned({}); ask.reset(); }}
             >
               清除對話
             </Button>
