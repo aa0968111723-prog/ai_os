@@ -213,7 +213,12 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
   if (pasted) {
     script = pasted;
   } else {
-    knowledgeMeta = await buildKnowledgeContextWithMeta(project.id);
+    // 拆分鏡：優先腳本類（script_only）、不含卡片雜訊；預算略放寬讓長腳本尾段較不易在知識層被砍
+    knowledgeMeta = await buildKnowledgeContextWithMeta(project.id, {
+      mode: "script_only",
+      includeCards: false,
+      budgetChars: 12_000,
+    });
     script = knowledgeMeta.text.trim();
   }
   if (!script) {
@@ -327,7 +332,8 @@ export const directorRouter = router({
     const wv = worldviewSchema.parse(project.worldview ?? {});
 
     // 知識庫：把開示稿/見證稿/腳本全文注入——這就是「真的懂我們素材」，夥伴不必重講背景
-    const knowledge = await buildKnowledgeContext(project.id);
+    // 發想：balanced 配額＋釘選優先，卡片一併進上下文
+    const knowledge = await buildKnowledgeContext(project.id, { mode: "balanced" });
 
     // fallback 專指「真模式呼叫 LLM 失敗、退回罐頭建議」——前端據此提示「AI 暫時沒回應」；假模式的示範建議不算
     if (isMockMode()) return { suggestions: mockSuggestions(wv, project.kind), mock: true, fallback: false, usedKnowledge: !!knowledge };

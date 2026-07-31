@@ -400,15 +400,79 @@ export function formatChipsPrimarySecondary(values: string[], max?: number): str
 
 /**
  * AI 消費端格式模式（單一真相，避免 agent/director/assistant 各寫一行摘要而分岔）：
- * - brief：單行摘要（代理規劃／專案助手／留言助手）
- * - director：導演建議與拆分鏡（含觀眾、三幕、敘事人物）
- * - export：交付鏡頭表人話段落
- * - generation-llm：生成台 LLM 正向附加（themes 進敘事；logline 截斷）
+ * - brief：單行摘要（代理／專案助手／留言助手）——含進階：觀眾／三幕／人物（截斷）
+ * - director：導演建議與拆分鏡（進階全文）
+ * - export：交付鏡頭表人話段落（含參考連結）
+ * - generation-llm：生成台 LLM 正向附加（themes＋短進階；logline 截斷）
+ * 圖影正向仍只走 formatWorldviewVisualPositive（不塞觀眾／三幕／人物長敘事）。
  */
 export type WorldviewFormatMode = "brief" | "director" | "export" | "generation-llm";
 
 /** 視覺生成注入 logline 上限（全長塞每鏡會爆 token；截斷後加省略） */
 export const LOGLINE_INJECT_MAX = 80;
+
+/**
+ * 進階欄位進 brief／LLM 的截斷（導演／export 仍用全文）。
+ * 避免助手／每格 LLM 被長三幕與人物表撐爆。
+ */
+export const ADVANCED_INJECT_MAX = {
+  audience: 120,
+  actsLine: 220,
+  peopleBrief: 5,
+  peopleLlm: 3,
+} as const;
+
+/** UI／文件共用：欄位被哪些消費端讀到（標籤用） */
+export type WorldviewConsumerId = "visual" | "llm" | "brief" | "director" | "export";
+
+export const WORLDVIEW_CONSUMER_LABEL: Record<WorldviewConsumerId, string> = {
+  visual: "圖影",
+  llm: "文字生成",
+  brief: "助手／代理",
+  director: "導演",
+  export: "匯出",
+};
+
+/**
+ * 進階（與快速層關鍵欄）誰會讀——ProjectPage 徽章與 wiki 單一真相。
+ * visual＝圖影正向；禁忌圖影另走 negative（見 generationCore）。
+ */
+export const WORLDVIEW_FIELD_READERS: Record<
+  string,
+  { readers: WorldviewConsumerId[]; note?: string }
+> = {
+  logline: { readers: ["visual", "llm", "brief", "director", "export"] },
+  message: { readers: ["visual", "llm", "brief", "director", "export"] },
+  themes: { readers: ["llm", "brief", "director", "export"], note: "圖影不注入主軸" },
+  tones: { readers: ["visual", "llm", "brief", "director", "export"] },
+  styles: { readers: ["visual", "llm", "brief", "director", "export"] },
+  audience: { readers: ["llm", "brief", "director", "export"], note: "圖影不注入" },
+  acts: { readers: ["llm", "brief", "director", "export"], note: "圖影不注入" },
+  people: {
+    readers: ["llm", "brief", "director", "export"],
+    note: "圖影請用角色定裝卡",
+  },
+  taboos: {
+    readers: ["visual", "llm", "brief", "director", "export"],
+    note: "圖影走負向；部分模型才支援",
+  },
+  references: { readers: ["export"], note: "僅交付備註，不進模型" },
+};
+
+function clipInject(text: string, max: number): string {
+  const t = text.trim();
+  if (!t) return "";
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+/** 敘事人物注入字串（截斷項數） */
+export function formatPeopleInject(people: string[], max: number): string {
+  const clean = people.map((p) => p.trim()).filter(Boolean);
+  if (!clean.length) return "";
+  const slice = clean.slice(0, max);
+  const more = clean.length > max ? `…(+${clean.length - max})` : "";
+  return `${slice.join("；")}${more}`;
+}
 
 /** 三幕有任一欄非空才算「已設」 */
 export function hasActs(wv: Pick<Worldview, "acts">): boolean {
@@ -450,7 +514,10 @@ function joinPipe(parts: string[]): string {
   return parts.filter(Boolean).join("｜");
 }
 
-/** 代理／助手：必含 message 與 taboos；chips 標主要／備選並附軟警告摘要 */
+/**
+ * 代理／助手：必含 message 與 taboos；進階含觀眾／三幕／人物（截斷）；
+ * chips 標主要／備選並附軟警告。references 不進 brief。
+ */
 function formatWorldviewBrief(wv: Worldview): string {
   const styleLine = wv.styles.length
     ? `視覺風格：${formatWorldviewStylesLabel(wv.styles)}`
@@ -461,6 +528,10 @@ function formatWorldviewBrief(wv: Worldview): string {
   const themeLine = wv.themes.length
     ? `訊息主軸：${formatChipsPrimarySecondary(wv.themes)}`
     : "";
+  const audience = clipInject(wv.audience, ADVANCED_INJECT_MAX.audience);
+  const actsRaw = formatActsLine(wv.acts);
+  const acts = actsRaw ? clipInject(actsRaw, ADVANCED_INJECT_MAX.actsLine) : "";
+  const people = formatPeopleInject(wv.people, ADVANCED_INJECT_MAX.peopleBrief);
   const soft = chipSoftWarnings(wv);
   return joinPipe([
     `一句話：${wv.logline.trim() || "—"}`,
@@ -468,6 +539,9 @@ function formatWorldviewBrief(wv: Worldview): string {
     themeLine,
     toneLine,
     styleLine,
+    audience ? `目標觀眾：${audience}` : "",
+    acts ? `三幕：${acts}` : "",
+    people ? `敘事人物：${people}` : "",
     wv.taboos.length ? `禁忌：${wv.taboos.join("；")}` : "",
     soft.length ? `選項提示：${soft.join("；")}` : "",
   ]);
@@ -502,7 +576,11 @@ function formatWorldviewDirector(wv: Worldview): string {
   return lines.join("\n");
 }
 
-/** LLM 生成附加片段（接在 [專案背景] 內；themes 只對文字模型有意義；硬截斷） */
+/**
+ * LLM 生成附加片段（接在 [專案背景] 內）。
+ * 含 themes、短進階（觀眾／三幕／人物）；硬截斷控 token。
+ * 圖影不走此函式——敘事進階對擴散是雜訊。
+ */
 function formatWorldviewGenerationLlm(wv: Worldview): string {
   const parts: string[] = [];
   const log = wv.logline.trim();
@@ -517,6 +595,13 @@ function formatWorldviewGenerationLlm(wv: Worldview): string {
   if (wv.message.trim()) parts.push(`核心訊息:${wv.message.trim()}`);
   const themes = wv.themes.slice(0, LLM_INJECT_MAX.themes);
   if (themes.length) parts.push(`訊息主軸:${themes.join("、")}`);
+  const audience = clipInject(wv.audience, ADVANCED_INJECT_MAX.audience);
+  if (audience) parts.push(`目標觀眾:${audience}`);
+  const actsRaw = formatActsLine(wv.acts);
+  const acts = actsRaw ? clipInject(actsRaw, ADVANCED_INJECT_MAX.actsLine) : "";
+  if (acts) parts.push(`三幕:${acts}`);
+  const people = formatPeopleInject(wv.people, ADVANCED_INJECT_MAX.peopleLlm);
+  if (people) parts.push(`敘事人物:${people}`);
   if (wv.taboos.length) parts.push(`避免:${wv.taboos.join(";")}`);
   return parts.join("|");
 }
@@ -566,6 +651,126 @@ export function removesDefaultTaboos(prev: string[], next: string[]): boolean {
   const defaults = DEFAULT_TABOOS();
   const nextSet = new Set(next);
   return defaults.some((d) => prev.includes(d) && !nextSet.has(d));
+}
+
+/** 禁忌是否仍全等於預設合規句（可摺疊成「合規保護已開啟」） */
+export function isDefaultTaboosOnly(taboos: string[]): boolean {
+  const defaults = DEFAULT_TABOOS();
+  if (taboos.length !== defaults.length) return false;
+  const set = new Set(taboos);
+  return defaults.every((d) => set.has(d));
+}
+
+/** 進階設定一鍵範例（依專案 kind；中性可改寫） */
+export type WorldviewAdvancedExample = {
+  audience: string;
+  acts: { hook: string; turn: string; cta: string };
+  people: string[];
+};
+
+const ADVANCED_EXAMPLE_DEFAULT: WorldviewAdvancedExample = {
+  audience: "想在忙碌生活裡找片刻安定的年輕人與家庭",
+  acts: {
+    hook: "清晨安靜的室內，一位訪客放慢腳步，光線從窗邊柔柔灑落",
+    turn: "在整理與等待之間，紛亂的念頭漸漸被安放，呼吸變得平穩",
+    cta: "留下一句可帶走的提醒，畫面留白給觀眾自己的心",
+  },
+  people: ["主角：安靜的訪客，淺色外套", "引導者：溫和語氣，不多話"],
+};
+
+const ADVANCED_EXAMPLES_BY_KIND: Record<string, WorldviewAdvancedExample> = {
+  witness: {
+    audience: "正在經歷低谷、需要真實故事陪伴的朋友",
+    acts: {
+      hook: "故事主角在最難的時刻現身，現場氛圍先讓人願意聽下去",
+      turn: "轉折出現：一次選擇或一句話，心開始鬆動、方向改變",
+      cta: "把希望留給觀眾：你可以不孤單，下一步可以很小",
+    },
+    people: ["見證主角：經歷轉變的人", "陪伴者：傾聽、不多評價"],
+  },
+  teaching: {
+    audience: "初次接觸、想把概念聽懂的聽眾",
+    acts: {
+      hook: "用生活場景開場，讓抽象觀念先有畫面",
+      turn: "一句關鍵提醒對上日常困境，聽眾對上號",
+      cta: "給一個今天就能做的小練習或記住的一句話",
+    },
+    people: ["講者：語氣穩、節奏慢", "聽眾代表：帶著問題進來的人"],
+  },
+  short: {
+    audience: "滑手機 3 秒內要被抓住的社群觀眾",
+    acts: {
+      hook: "第一秒就有強畫面或一句疑問，停得住拇指",
+      turn: "中段給反差或小驚喜，資訊只留一個重點",
+      cta: "結尾字幕或口白重複那一個重點，方便分享",
+    },
+    people: ["出鏡者：表情清楚、動作乾淨"],
+  },
+  promo: {
+    audience: "可能參加活動、但還在猶豫的人",
+    acts: {
+      hook: "活動最有感的一刻或最美畫面先出現",
+      turn: "說清楚為誰、有什麼、為什麼現在",
+      cta: "明確行動：報名、轉傳、或記下時間地點",
+    },
+    people: ["主持人／講者", "參與者代表：真實的現場感受"],
+  },
+  recap: {
+    audience: "參加過想回味、或錯過想補課的人",
+    acts: {
+      hook: "用最有溫度的現場片段開場",
+      turn: "串起當天主軸：人、時刻、一句共同記憶",
+      cta: "邀請下次見面，或連到完整內容／相簿",
+    },
+    people: ["現場主角們：短描述即可"],
+  },
+};
+
+/** 依專案 kind 取進階範例；未知 kind 用中性預設 */
+export function worldviewAdvancedExampleForKind(kind?: string | null): WorldviewAdvancedExample {
+  if (kind && ADVANCED_EXAMPLES_BY_KIND[kind]) return ADVANCED_EXAMPLES_BY_KIND[kind]!;
+  return ADVANCED_EXAMPLE_DEFAULT;
+}
+
+/**
+ * 把敘事人物 token 拆成定裝卡欄位。
+ * 支援「名＝外觀」「名: 外觀」「名：外觀」「名 - 外觀」；否則整段當名、外觀待補。
+ */
+export function parsePersonTokenForCharacter(token: string): {
+  name: string;
+  appearance: string;
+  notes: string;
+} {
+  const raw = token.trim().slice(0, 100);
+  // 含全形 ＝／： 與常見分隔符（使用者常從中文輸入法打出）
+  const m = raw.match(/^(.{1,40}?)\s*[=＝:：\-–—]\s*(.+)$/);
+  if (m) {
+    const name = m[1]!.trim().slice(0, 40) || "未命名";
+    const appearance = m[2]!.trim().slice(0, 1000) || "待補外觀描述（髮型、服裝、標誌道具）";
+    return { name, appearance, notes: "由敘事人物建立，可再補定裝細節" };
+  }
+  const name = raw.slice(0, 40) || "未命名";
+  return {
+    name,
+    appearance: "待補外觀描述（髮型、服裝、標誌道具）",
+    notes: "由敘事人物建立，可再補定裝細節",
+  };
+}
+
+/**
+ * 套用進階範例：onlyEmpty 時只填空白欄；否則覆寫觀眾／三幕／人物（禁忌與參考不動）。
+ */
+export function applyWorldviewAdvancedExample(
+  current: Worldview,
+  kind?: string | null,
+  onlyEmpty = true,
+): Partial<Pick<Worldview, "audience" | "acts" | "people">> {
+  const ex = worldviewAdvancedExampleForKind(kind);
+  const patch: Partial<Pick<Worldview, "audience" | "acts" | "people">> = {};
+  if (!onlyEmpty || !current.audience.trim()) patch.audience = ex.audience;
+  if (!onlyEmpty || !hasActs(current)) patch.acts = { ...ex.acts };
+  if (!onlyEmpty || current.people.length === 0) patch.people = [...ex.people];
+  return patch;
 }
 
 /**

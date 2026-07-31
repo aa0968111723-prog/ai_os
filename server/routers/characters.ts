@@ -1,6 +1,12 @@
 import { z } from "zod";
-import { and, asc, eq, getTableColumns, isNull } from "drizzle-orm";
+import { and, asc, count, eq, getTableColumns, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import {
+  CHAR_APPEARANCE_MAX,
+  CHAR_NAME_MAX,
+  CHAR_NOTES_MAX,
+  MAX_PROJECT_CHARACTERS,
+} from "../../shared/cardLimits";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
@@ -8,6 +14,8 @@ import { isUniqueViolation } from "../services/generationCore";
 
 /** @deprecated 請直接 import from services/cardAnchors；保留 re-export 相容舊路徑 */
 export { buildCharacterAnchor } from "../services/cardAnchors";
+
+export { MAX_PROJECT_CHARACTERS };
 
 export const charactersRouter = router({
   list: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
@@ -31,9 +39,9 @@ export const charactersRouter = router({
       z.object({
         projectId: z.string().uuid(),
         // 先 trim 再驗：否則 "   " 通過 min(1) 後再 trim 成空字串入庫
-        name: z.string().trim().min(1, "請填角色名").max(40),
-        appearance: z.string().trim().min(1, "請填外觀設定").max(1000),
-        notes: z.string().max(1000).optional(),
+        name: z.string().trim().min(1, "請填角色名").max(CHAR_NAME_MAX),
+        appearance: z.string().trim().min(1, "請填外觀設定").max(CHAR_APPEARANCE_MAX),
+        notes: z.string().trim().max(CHAR_NOTES_MAX).optional(),
         referenceAssetId: z.string().uuid().optional(),
         /** 冪等鍵（client 產生的 UUID，當 row id 用）：timeout 後重送同鍵回原卡片，不重複建立 */
         clientRequestId: z.string().uuid().optional(),
@@ -46,6 +54,27 @@ export const charactersRouter = router({
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能改卡片
       // 跨組引用驗證：referenceAssetId 必須同組且是圖片，否則能把別組定裝圖綁進本組角色
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, project.groupId);
+
+      // 冪等重送：若 clientRequestId 已存在本專案卡，直接回既有（不佔新上限名額）
+      if (input.clientRequestId) {
+        const [existing] = await db
+          .select()
+          .from(schema.characters)
+          .where(and(eq(schema.characters.id, input.clientRequestId), eq(schema.characters.projectId, project.id)));
+        if (existing) return existing;
+      }
+
+      const [{ n }] = await db
+        .select({ n: count() })
+        .from(schema.characters)
+        .where(eq(schema.characters.projectId, project.id));
+      if (Number(n) >= MAX_PROJECT_CHARACTERS) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `此專案角色定裝已達上限（${MAX_PROJECT_CHARACTERS} 張）——先刪不用的再新增`,
+        });
+      }
+
       try {
         const [row] = await db
           .insert(schema.characters)
@@ -53,9 +82,9 @@ export const charactersRouter = router({
             id: input.clientRequestId,
             projectId: project.id,
             groupId: project.groupId,
-            name: input.name.trim(),
-            appearance: input.appearance.trim(),
-            notes: input.notes?.trim(),
+            name: input.name,
+            appearance: input.appearance,
+            notes: input.notes || null,
             referenceAssetId: input.referenceAssetId,
             createdBy: ctx.auth.user.id,
           })
@@ -78,9 +107,9 @@ export const charactersRouter = router({
     .input(
       z.object({
         id: z.string().uuid(),
-        name: z.string().trim().min(1).max(40).optional(),
-        appearance: z.string().trim().min(1).max(1000).optional(),
-        notes: z.string().max(1000).optional(),
+        name: z.string().trim().min(1, "請填角色名").max(CHAR_NAME_MAX).optional(),
+        appearance: z.string().trim().min(1, "請填外觀設定").max(CHAR_APPEARANCE_MAX).optional(),
+        notes: z.string().trim().max(CHAR_NOTES_MAX).nullable().optional(),
         referenceAssetId: z.string().uuid().nullable().optional(),
       }),
     )
@@ -91,14 +120,23 @@ export const charactersRouter = router({
       await (await import("../services/projectAcl")).assertProjectEditable(ctx.auth, { id: row.projectId, groupId: row.groupId }); // 2.3
       // 跨組引用驗證：改綁 referenceAssetId 時同樣要同組且是圖片（null＝清除引用，免驗）
       if (input.referenceAssetId) await assertReferenceImage(input.referenceAssetId, row.groupId);
+
+      // partial update：只 set 有傳入的欄位，避免 A 改 name、B 改 appearance 時讀後寫互相覆蓋
+      const patch: {
+        name?: string;
+        appearance?: string;
+        notes?: string | null;
+        referenceAssetId?: string | null;
+      } = {};
+      if (input.name !== undefined) patch.name = input.name;
+      if (input.appearance !== undefined) patch.appearance = input.appearance;
+      if (input.notes !== undefined) patch.notes = input.notes || null;
+      if (input.referenceAssetId !== undefined) patch.referenceAssetId = input.referenceAssetId;
+      if (Object.keys(patch).length === 0) return row;
+
       const [updated] = await db
         .update(schema.characters)
-        .set({
-          name: input.name?.trim() ?? row.name,
-          appearance: input.appearance?.trim() ?? row.appearance,
-          notes: input.notes !== undefined ? input.notes?.trim() : row.notes,
-          referenceAssetId: input.referenceAssetId !== undefined ? input.referenceAssetId : row.referenceAssetId,
-        })
+        .set(patch)
         .where(eq(schema.characters.id, input.id))
         .returning();
       return updated;

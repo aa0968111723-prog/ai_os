@@ -33,6 +33,10 @@ import {
   worldviewChipGuidanceForAi,
   normalizeWorldviewChipsPatch,
   summarizeWorldviewChipsPatch,
+  isDefaultTaboosOnly,
+  worldviewAdvancedExampleForKind,
+  parsePersonTokenForCharacter,
+  applyWorldviewAdvancedExample,
 } from "./worldview";
 
 describe("bilingualChips（視覺注入的英文錨點）", () => {
@@ -88,14 +92,18 @@ describe("isWorldviewReady / hasActs", () => {
 });
 
 describe("formatWorldviewForAi：跨消費端契約", () => {
-  it("brief 必含 message 與 taboos（代理／助手防偏離）", () => {
+  it("brief 必含 message、taboos、進階（觀眾／三幕／人物）；不含參考 URL", () => {
     const s = formatWorldviewForAi(full, "brief");
     expect(s).toContain(full.message);
     expect(s).toContain(full.logline);
     expect(s).toContain("溫暖");
     expect(s).toContain("禁忌");
     expect(s).toContain("醫療");
-    expect(s).not.toContain("三幕");
+    expect(s).toContain("目標觀眾：忙碌的都會上班族");
+    expect(s).toContain("三幕：");
+    expect(s).toContain("鉤子：晨光前庭");
+    expect(s).toContain("敘事人物：");
+    expect(s).toContain("安倢：紅傘");
     expect(s).not.toContain("example.com");
   });
 
@@ -117,7 +125,7 @@ describe("formatWorldviewForAi：跨消費端契約", () => {
     expect(s).toContain("參考連結");
   });
 
-  it("generation-llm 含 themes 與截斷 logline", () => {
+  it("generation-llm 含 themes、進階短欄與截斷 logline", () => {
     const long = worldviewSchema.parse({
       ...full,
       logline: "字".repeat(LOGLINE_INJECT_MAX + 20),
@@ -127,7 +135,20 @@ describe("formatWorldviewForAi：跨消費端契約", () => {
     expect(s).toContain("訊息主軸:禪修日常");
     expect(s).toContain("故事錨點:");
     expect(s).toContain("…");
-    expect(s.length).toBeLessThan(long.logline.length + 200);
+    expect(s).toContain("目標觀眾:");
+    expect(s).toContain("三幕:");
+    expect(s).toContain("敘事人物:");
+    expect(s).not.toContain("example.com");
+    expect(s.length).toBeLessThan(long.logline.length + 400);
+  });
+
+  it("圖影正向仍不含觀眾／三幕／人物／禁忌句", () => {
+    const s = formatWorldviewVisualPositive(full);
+    expect(s).not.toContain("忙碌的都會上班族");
+    expect(s).not.toContain("晨光前庭");
+    expect(s).not.toContain("安倢");
+    expect(s).not.toContain("醫療");
+    expect(s).toContain("Chinese ink wash");
   });
 });
 
@@ -308,7 +329,7 @@ describe("chips 優先序、家族與軟警告", () => {
   });
 });
 
-describe("removesDefaultTaboos", () => {
+describe("removesDefaultTaboos / isDefaultTaboosOnly", () => {
   it("刪掉預設禁語其中一條 → true", () => {
     const prev = DEFAULT_TABOOS();
     const next = prev.slice(1);
@@ -319,5 +340,51 @@ describe("removesDefaultTaboos", () => {
     const prev = DEFAULT_TABOOS();
     expect(removesDefaultTaboos(prev, prev)).toBe(false);
     expect(removesDefaultTaboos(prev, [...prev, "自訂"])).toBe(false);
+  });
+
+  it("isDefaultTaboosOnly 辨識預設集合", () => {
+    expect(isDefaultTaboosOnly(DEFAULT_TABOOS())).toBe(true);
+    expect(isDefaultTaboosOnly([...DEFAULT_TABOOS(), "自訂"])).toBe(false);
+    expect(isDefaultTaboosOnly([])).toBe(false);
+  });
+});
+
+describe("進階範例與敘事人物→定裝", () => {
+  it("worldviewAdvancedExampleForKind 依 kind 有差異", () => {
+    const w = worldviewAdvancedExampleForKind("witness");
+    const t = worldviewAdvancedExampleForKind("teaching");
+    const d = worldviewAdvancedExampleForKind("unknown-kind");
+    expect(w.audience).toBeTruthy();
+    expect(t.acts.hook).toBeTruthy();
+    expect(w.audience).not.toBe(t.audience);
+    expect(d.people.length).toBeGreaterThan(0);
+  });
+
+  it("parsePersonTokenForCharacter 拆名與外觀", () => {
+    expect(parsePersonTokenForCharacter("安倢＝紅傘、米白外套")).toMatchObject({
+      name: "安倢",
+      appearance: "紅傘、米白外套",
+    });
+    expect(parsePersonTokenForCharacter("講者: 白衣")).toMatchObject({ name: "講者", appearance: "白衣" });
+    const solo = parsePersonTokenForCharacter("訪客");
+    expect(solo.name).toBe("訪客");
+    expect(solo.appearance).toContain("待補外觀");
+  });
+
+  it("applyWorldviewAdvancedExample onlyEmpty 不覆蓋已填", () => {
+    const cur = worldviewSchema.parse({
+      audience: "已有觀眾",
+      acts: { hook: "已有鉤子", turn: "", cta: "" },
+      people: ["已有人"],
+    });
+    const patch = applyWorldviewAdvancedExample(cur, "short", true);
+    expect(patch.audience).toBeUndefined();
+    expect(patch.acts).toBeUndefined(); // hasActs true
+    expect(patch.people).toBeUndefined();
+    const empty = worldviewSchema.parse({});
+    const fullPatch = applyWorldviewAdvancedExample(empty, "short", true);
+    expect(fullPatch.audience).toBeTruthy();
+    expect(fullPatch.acts?.hook).toBeTruthy();
+    expect(fullPatch.people?.length).toBeGreaterThan(0);
   });
 });

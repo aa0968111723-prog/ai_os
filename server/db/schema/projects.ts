@@ -34,12 +34,25 @@ export const knowledge = pgTable("knowledge", {
   content: text("content").notNull(),
   /** 若由上傳的文字素材自動建立，記來源 asset（供去重與回溯） */
   sourceAssetId: uuid("source_asset_id"),
+  /**
+   * 注入優先：釘選列在 buildKnowledgeContext 永遠先於「僅依建立時間」。
+   * 解決「新筆記擠掉舊腳本／開示」——使用者可釘住本片主腳本。
+   */
+  pinned: boolean("pinned").notNull().default(false),
+  /**
+   * 抽取摘要（更新內容時自動寫入；預算緊時可注入摘要取代全文尾巴）。
+   * null＝尚未產生（舊列或空內容）。
+   */
+  summary: text("summary"),
   createdBy: uuid("created_by").notNull(),
   /** 軟刪除（回收桶）：非 null＝已丟進回收桶（保留逐字稿／見證，可還原）。
    *  ★ buildKnowledgeContext 必以 isNull(deletedAt) 過濾——已刪的逐字稿絕不可再注入 AI 導演 LLM。 */
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  projectPinnedCreatedIdx: index("knowledge_project_pinned_created_idx")
+    .on(t.projectId, t.pinned, t.createdAt),
+}));
 
 /**
  * 長文版本歷史（#29）：知識庫逐字稿等長文每次更新前存一版快照，可檢視／還原。

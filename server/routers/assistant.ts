@@ -434,6 +434,8 @@ export interface AskCoreInput {
    * 選 fal 檔位品質較好，但平台實付 USD——故預設絕不自動升級。
    */
   mode?: AgentPlannerMode;
+  /** 工作台勾選的知識篇：注入時 preferIds 優先（與代理 extraSourceIds 同語意） */
+  knowledgeIds?: string[];
 }
 export interface AskCoreResult {
   answer: string;
@@ -496,7 +498,11 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
         ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」${STATUS_LABEL[s.status] ?? s.status} 畫面${s.assetId ? "有" : "無"} 旁白${s.narrationAssetId ? "有" : "無"}`).join("\n")
         : "（尚無分鏡）";
       // 6.1 全專案上下文：把知識庫（逐字稿/見證/腳本/筆記）注入助手——與導演共用同一組裝器與軟刪除守門
-      const knowledgeCtx = await buildKnowledgeContext(project.id, KNOWLEDGE_BUDGET);
+      const knowledgeCtx = await buildKnowledgeContext(project.id, {
+        budgetChars: KNOWLEDGE_BUDGET,
+        mode: "balanced",
+        preferIds: input.knowledgeIds?.slice(0, 20),
+      });
       // 連結全專案×資料庫：AI 可讀的自訂資料庫（代號速查進提示詞；細列用 query_database 工具按需查）
       const readableDbs = await listAssistantReadableDbs(input.auth);
       const chipGuide = worldviewChipGuidanceForAi(wv);
@@ -716,6 +722,8 @@ export const assistantRouter = router({
       nonce: z.string().max(64).optional(),
       /** 使用者選的模型檔位；預設 nim＝免費。選 fal 檔位時平台實付 USD。 */
       mode: agentPlannerModeSchema.optional(),
+      /** 本次問答優先注入的知識 id（工作台勾選） */
+      knowledgeIds: z.array(z.string().uuid()).max(20).optional(),
     }))
     .mutation(({ ctx, input }) =>
       runAssistantAsk({
@@ -724,6 +732,7 @@ export const assistantRouter = router({
         auth: ctx.auth,
         dedupeKey: input.nonce,
         mode: input.mode,
+        knowledgeIds: input.knowledgeIds,
       }),
     ),
 

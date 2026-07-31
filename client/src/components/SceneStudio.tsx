@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { MODELS, estimatePoints, getModel, tierLabel } from "@shared/models";
 import { isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion } from "@shared/sceneVersions";
 import { Icon } from "./Icon";
@@ -415,8 +416,8 @@ export function SceneStudio({
                               prompt: instruction,
                               sourceAssetId: baseVersion!.assetId!,
                               clientRequestId: refineRequestId.current,
-                              characterIds: charIds?.length ? charIds.slice(0, 6) : undefined,
-                              scenePresetIds: sceneIds?.length ? sceneIds.slice(0, 4) : undefined,
+                              characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+                              scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                             })
                           }
                         >
@@ -472,8 +473,8 @@ export function SceneStudio({
                               modelId: regenModelId,
                               prompt,
                               clientRequestId: regenRequestId.current,
-                              characterIds: charIds?.length ? charIds.slice(0, 6) : undefined,
-                              scenePresetIds: sceneIds?.length ? sceneIds.slice(0, 4) : undefined,
+                              characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+                              scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
                             })
                           }
                         >
