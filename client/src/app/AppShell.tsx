@@ -11,9 +11,37 @@ import { ChangePasswordDialog } from "./session/ChangePasswordDialog";
 import { SessionGate } from "./SessionGate";
 import { AppHeader } from "./components/AppHeader";
 import { MobileNavigation } from "./components/MobileNavigation";
-import { Meta } from "../components/ui";
+import { Button, Meta } from "../components/ui";
+import { Icon } from "../components/Icon";
 
 const SPLASH_SESSION_KEY = "aios.splash.seen";
+
+/**
+ * 未登入時分享進來的檔案會留在 SHARE_CACHE（SW 收下後 303，登入流程中不會丟）——
+ * 但登入後沒有任何入口喚回，實測會無聲滯留。這裡在登入後檢查一次，
+ * 有待存分享就顯示一條回去認領的 banner（在分享收件頁本身時不顯示）。
+ */
+function ShareInboxRescue() {
+  const [location, navigate] = useLocation();
+  const [hasInbox, setHasInbox] = useState(false);
+  useEffect(() => {
+    if (!("caches" in window)) return;
+    let alive = true;
+    void caches.open("aios-share-inbox")
+      .then((cache) => cache.match("/share-payload/meta"))
+      .then((hit) => { if (alive) setHasInbox(!!hit); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [location]);
+  if (!hasInbox || location === "/share-target") return null;
+  return (
+    <div className="share-rescue-banner" role="status">
+      <Icon name="Download" size={15} />
+      <span>你有一批分享進來、還沒存的檔案</span>
+      <Button size="sm" variant="primary" onClick={() => navigate("/share-target")}>去存入</Button>
+    </div>
+  );
+}
 
 function shouldShowSplash(): boolean {
   try {
@@ -180,6 +208,7 @@ export function AppShell() {
 
         {/* 新版已下載完成時由使用者主動更新；不在編輯途中自動刷新。 */}
         <AppUpdateBanner />
+        {me.data && <ShareInboxRescue />}
 
         {/* lazy 頁面載入中的過場（QA-025 code-splitting）：整個路由樹共用一個 Suspense */}
         {me.data ? (

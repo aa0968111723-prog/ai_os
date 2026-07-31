@@ -3912,6 +3912,16 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .db-field-row > input:first-child { min-width: 0; }
 .db-field-row__options { grid-column: 1 / -1; min-width: 0; }
 
+/* 未存分享救援 banner：登入後喚回滯留在 SHARE_CACHE 的分享 */
+.share-rescue-banner {
+  display: flex; align-items: center; gap: 8px;
+  margin: 8px 0 0; padding: 8px 12px;
+  border: 1px solid var(--primary-border); border-radius: var(--r-12);
+  background: var(--primary-tint); color: var(--primary-ink);
+  font-size: var(--fs-13); font-weight: 600;
+}
+.share-rescue-banner span { flex: 1 1 auto; min-width: 0; }
+
 /* ── 分享收件頁（Web Share Target）：相簿分享進來的檔案在這裡選去處 ── */
 .share-target-files { list-style: none; display: grid; gap: 8px; margin: 8px 0 12px; padding: 0; }
 .share-target-files li {
@@ -3972,6 +3982,14 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     position: absolute; top: -2px; right: -4px;
     width: 8px; height: 8px; border-radius: 999px;
     background: var(--danger, #c44); box-shadow: 0 0 0 2px var(--popover);
+  }
+
+  /* 帳號選單要壓過分頁列（z 44）且底緣讓出分頁列高度——
+     真機實測：選單長度超過螢幕時「登出」被分頁列蓋住按不到 */
+  .topbar .menu {
+    z-index: 45;
+    max-height: calc(100dvh - 60px - var(--safe-top) - 96px - var(--safe-bottom));
+    overflow-y: auto;
   }
 
   /* 內容與浮動元素讓出分頁列高度（列高約 64px + safe-bottom）；
