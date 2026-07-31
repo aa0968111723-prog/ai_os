@@ -22,6 +22,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
+import { mcpToolAnnotations } from "../../shared/mcpCatalog";
 import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
 import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { sanitizeAuditInput } from "./audit";
@@ -83,7 +84,7 @@ import type { DataField } from "../../shared/databaseFields";
 
 const PROTOCOL_VERSION = "2024-11-05";
 
-const TOOLS = [
+export const TOOLS = [
   {
     name: "whoami",
     description: "確認這把金鑰的身分與權限：回你的名稱、所屬組別與角色、以及此金鑰是否唯讀。可用來測試連線是否成功。",
@@ -1182,7 +1183,14 @@ export async function handleMcp(req: Request, res: Response): Promise<void> {
       case "ping":
         return reply({});
       case "tools/list":
-        return reply({ tools: TOOLS });
+        // D1：附上 catalog 推導的 annotations（read/write 分類同源；四個 hint 顯式輸出，
+        // 因協議層預設偏保守——未給 destructive/openWorld 會被視為 true）
+        return reply({
+          tools: TOOLS.map((tool) => {
+            const annotations = mcpToolAnnotations(tool.name);
+            return annotations ? { ...tool, annotations } : tool;
+          }),
+        });
       case "tools/call": {
         const { name, arguments: args } = (body.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
         const result = await callTool(auth, identity.scope, String(name), args ?? {});
