@@ -16,7 +16,7 @@ export function InstallAppBanner() {
   return (
     <Card as="aside" className="install-app" role="region" aria-label="安裝 Aios 應用程式">
       <div className="install-app__row">
-        <img src="/icons/icon-192.png" alt="" width={48} height={48} className="install-app__icon" />
+        <img src="/icons/icon-v2-192.png" alt="" width={48} height={48} className="install-app__icon" />
         <div className="install-app__body">
           <strong>把 Aios 裝成應用程式</strong>
           <Hint style={{ margin: "4px 0 0" }}>
