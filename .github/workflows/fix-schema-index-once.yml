@@ -4,17 +4,22 @@ on:
   push:
     branches:
       - fix/schema-knowledge-pinned-index
+  pull_request:
+    branches:
+      - claude/healing-migration-ai-os-erewp2
 
 permissions:
   contents: write
 
 jobs:
   repair:
+    if: github.event_name == 'push' || github.head_ref == 'fix/schema-knowledge-pinned-index'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repair branch
         uses: actions/checkout@v4
         with:
+          ref: fix/schema-knowledge-pinned-index
           fetch-depth: 0
 
       - name: Set up Node.js
@@ -59,4 +64,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add server/db/schema/projects.ts .github/workflows/fix-schema-index-once.yml
           git commit -m "fix(db): align knowledge pinned index with migration"
-          git push origin HEAD
+          git push origin HEAD:fix/schema-knowledge-pinned-index
