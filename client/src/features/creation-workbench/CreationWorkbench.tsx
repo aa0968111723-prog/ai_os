@@ -61,7 +61,13 @@ export function CreationWorkbench({
   groupId?: string;
   myRole?: string | null;
   projectFormat?: string;
-  worldview?: { tones: string[]; styles: string[]; taboos: string[] };
+  worldview?: {
+    logline?: string;
+    message?: string;
+    tones: string[];
+    styles: string[];
+    taboos: string[];
+  };
   wvReady?: boolean;
   characterIds?: string[];
   scenePresetIds?: string[];

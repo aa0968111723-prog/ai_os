@@ -12,7 +12,12 @@ import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
-import { worldviewSchema, bilingualChips, STYLE_EN, TONE_EN, type Worldview } from "../../shared/worldview";
+import {
+  worldviewSchema,
+  formatWorldviewVisualPositive,
+  formatWorldviewForAi,
+  type Worldview,
+} from "../../shared/worldview";
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { failStaleGenerationTx, reserveQuota } from "./points";
@@ -77,23 +82,21 @@ export interface PromptParts {
 
 /**
  * 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成)。
- * visual＝圖像/影片類別：調性與風格 chips 附英文錨點（英文語彙模型才吃得動畫風；LLM 維持純中文）。
- * 禁忌詞（合規句：不得宣稱療效、不影射真人…）的去向依類別分流——這是深度優化的關鍵：
+ * visual＝formatWorldviewVisualPositive（雙語 tones/styles + 短 logline + message）。
+ * LLM＝formatWorldviewForAi(..., "generation-llm")（themes／taboos 正向）。
+ * 禁忌詞（合規句）分流——這是深度優化的關鍵：
  *   - 視覺（圖/影）：走 negative_prompt（見 effectivePromptParts 的 negative）。擴散模型無法靠正向詞
  *     「避免」某物，塞正向反而可能被畫出、甚至把禁忌字當畫面文字渲染——故正向不再放禁忌詞。
  *   - LLM：維持正向文字指引（語言模型讀得懂「避免:…」）。
  *   - text-to-audio（配樂/音效）：兩邊都不放（合規句對音頻無意義，原本塞正向是雜訊）。
  */
 function buildPositive(userPrompt: string, worldview: Worldview, visual: boolean, isLlm: boolean): string {
-  const parts: string[] = [];
-  const tones = visual ? bilingualChips(worldview.tones, TONE_EN) : worldview.tones;
-  const styles = visual ? bilingualChips(worldview.styles, STYLE_EN) : worldview.styles;
-  if (tones.length) parts.push(`調性:${tones.join("、")}`);
-  if (styles.length) parts.push(`視覺風格:${styles.join("、")}`);
-  if (worldview.message) parts.push(`核心訊息:${worldview.message}`);
-  // 禁忌詞只在 LLM 走正向（語言模型讀得懂）；視覺走 negative、audio 不放——見函式說明
-  if (isLlm && worldview.taboos.length) parts.push(`避免:${worldview.taboos.join(";")}`);
-  return parts.length ? `${userPrompt}\n\n[專案背景] ${parts.join("|")}` : userPrompt;
+  const bg = visual
+    ? formatWorldviewVisualPositive(worldview)
+    : isLlm
+      ? formatWorldviewForAi(worldview, "generation-llm")
+      : "";
+  return bg ? `${userPrompt}\n\n[專案背景] ${bg}` : userPrompt;
 }
 
 /**

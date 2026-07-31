@@ -68,7 +68,13 @@ export function DirectGenerateMode({
   canEdit: boolean;
   myRole: string | null | undefined;
   projectFormat: string;
-  worldview: { tones: string[]; styles: string[]; taboos: string[] };
+  worldview: {
+    logline?: string;
+    message?: string;
+    tones: string[];
+    styles: string[];
+    taboos: string[];
+  };
   wvReady: boolean;
   characterIds: string[];
   scenePresetIds: string[];
@@ -479,10 +485,13 @@ export function DirectGenerateMode({
           </p>
           {(worldview.tones.length > 0 ||
             worldview.styles.length > 0 ||
-            worldview.taboos.length > 0) && (
+            worldview.taboos.length > 0 ||
+            !!(worldview.logline?.trim() || worldview.message?.trim())) && (
             <Meta as="p" style={{ margin: "4px 0", fontSize: 12 }}>
               自動注入：
               {[
+                worldview.logline?.trim() ? "故事錨點" : "",
+                worldview.message?.trim() ? "核心訊息" : "",
                 worldview.tones.length ? `調性（${worldview.tones.join("、")}）` : "",
                 worldview.styles.length ? `風格（${worldview.styles.join("、")}）` : "",
                 worldview.taboos.length ? `禁忌 ${worldview.taboos.length} 條` : "",

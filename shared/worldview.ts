@@ -65,3 +65,150 @@ export const TONE_EN: Record<string, string> = {
 export function bilingualChips(values: string[], map: Record<string, string>): string[] {
   return values.map((v) => (map[v] ? `${v}(${map[v]})` : v));
 }
+
+/**
+ * AI 消費端格式模式（單一真相，避免 agent/director/assistant 各寫一行摘要而分岔）：
+ * - brief：單行摘要（代理規劃／專案助手／留言助手）
+ * - director：導演建議與拆分鏡（含觀眾、三幕、敘事人物）
+ * - export：交付鏡頭表人話段落
+ * - generation-llm：生成台 LLM 正向附加（themes 進敘事；logline 截斷）
+ */
+export type WorldviewFormatMode = "brief" | "director" | "export" | "generation-llm";
+
+/** 視覺生成注入 logline 上限（全長塞每鏡會爆 token；截斷後加省略） */
+export const LOGLINE_INJECT_MAX = 80;
+
+/** 三幕有任一欄非空才算「已設」 */
+export function hasActs(wv: Pick<Worldview, "acts">): boolean {
+  const a = wv.acts;
+  return !!(a.hook.trim() || a.turn.trim() || a.cta.trim());
+}
+
+/**
+ * 基調就緒：一句話或關鍵訊息，且至少一項調性或視覺風格。
+ * 只用 logline/message 會顯示「✓」卻沒有可注入畫風——摘要條與 onboarding 共用此判定。
+ */
+export function isWorldviewReady(wv: Pick<Worldview, "logline" | "message" | "tones" | "styles">): boolean {
+  const narrative = !!(wv.logline.trim() || wv.message.trim());
+  const style = wv.tones.length > 0 || wv.styles.length > 0;
+  return narrative && style;
+}
+
+/** 三幕結構單行（空欄省略） */
+export function formatActsLine(acts: Worldview["acts"]): string {
+  const parts: string[] = [];
+  if (acts.hook.trim()) parts.push(`鉤子：${acts.hook.trim()}`);
+  if (acts.turn.trim()) parts.push(`轉折：${acts.turn.trim()}`);
+  if (acts.cta.trim()) parts.push(`行動呼籲：${acts.cta.trim()}`);
+  return parts.join(" → ");
+}
+
+/**
+ * 世界觀 → AI／交付用文字（前後端共用）。
+ * references 刻意不進模型（URL 對擴散／LLM 敘事弱、且易膨脹）；僅 export 可列備註。
+ */
+export function formatWorldviewForAi(wv: Worldview, mode: WorldviewFormatMode): string {
+  if (mode === "export") return formatWorldviewExport(wv);
+  if (mode === "director") return formatWorldviewDirector(wv);
+  if (mode === "generation-llm") return formatWorldviewGenerationLlm(wv);
+  return formatWorldviewBrief(wv);
+}
+
+function joinPipe(parts: string[]): string {
+  return parts.filter(Boolean).join("｜");
+}
+
+/** 代理／助手：必含 message 與 taboos，避免規劃偏離一片一訊息或合規 */
+function formatWorldviewBrief(wv: Worldview): string {
+  return joinPipe([
+    `一句話：${wv.logline.trim() || "—"}`,
+    `核心訊息：${wv.message.trim() || "—"}`,
+    wv.themes.length ? `訊息主軸：${wv.themes.join("、")}` : "",
+    `調性：${wv.tones.join("、") || "—"}`,
+    `視覺風格：${wv.styles.join("、") || "—"}`,
+    wv.taboos.length ? `禁忌：${wv.taboos.join("；")}` : "",
+  ]);
+}
+
+/** 導演建議／拆分鏡：敘事決策完整上下文（含觀眾、三幕、敘事人物） */
+function formatWorldviewDirector(wv: Worldview): string {
+  const lines: string[] = [
+    joinPipe([
+      `一句話故事：${wv.logline.trim() || "—"}`,
+      `關鍵訊息：${wv.message.trim() || "—"}`,
+      wv.audience.trim() ? `目標觀眾：${wv.audience.trim()}` : "",
+      wv.themes.length ? `訊息主軸（敘事弧）：${wv.themes.join("、")}` : "",
+      `調性：${wv.tones.join("、") || "—"}`,
+      `視覺風格：${wv.styles.join("、") || "—"}`,
+    ]),
+  ];
+  const acts = formatActsLine(wv.acts);
+  if (acts) lines.push(`三幕結構：${acts}`);
+  if (wv.people.length) {
+    lines.push(
+      `敘事人物（非畫面定裝；畫面一致請用角色卡）：${wv.people.join("；")}`,
+    );
+  }
+  if (wv.taboos.length) lines.push(`禁忌：${wv.taboos.join("；")}`);
+  return lines.join("\n");
+}
+
+/** LLM 生成附加片段（接在 [專案背景] 內；themes 只對文字模型有意義） */
+function formatWorldviewGenerationLlm(wv: Worldview): string {
+  const parts: string[] = [];
+  const log = wv.logline.trim();
+  if (log) {
+    const clipped = log.length > LOGLINE_INJECT_MAX ? `${log.slice(0, LOGLINE_INJECT_MAX)}…` : log;
+    parts.push(`故事錨點:${clipped}`);
+  }
+  if (wv.tones.length) parts.push(`調性:${wv.tones.join("、")}`);
+  if (wv.styles.length) parts.push(`視覺風格:${wv.styles.join("、")}`);
+  if (wv.message.trim()) parts.push(`核心訊息:${wv.message.trim()}`);
+  if (wv.themes.length) parts.push(`訊息主軸:${wv.themes.join("、")}`);
+  if (wv.taboos.length) parts.push(`避免:${wv.taboos.join(";")}`);
+  return parts.join("|");
+}
+
+/** 交付鏡頭表：人話 bullet，含風格／主軸／三幕／人物 */
+function formatWorldviewExport(wv: Worldview): string {
+  const lines = [
+    `- 一句話故事：${wv.logline.trim() || "—"}`,
+    `- 關鍵訊息：${wv.message.trim() || "—"}`,
+    `- 調性：${wv.tones.join("、") || "—"}`,
+    `- 視覺風格：${wv.styles.join("、") || "—"}`,
+  ];
+  if (wv.themes.length) lines.push(`- 訊息主軸：${wv.themes.join("、")}`);
+  if (wv.audience.trim()) lines.push(`- 目標觀眾：${wv.audience.trim()}`);
+  const acts = formatActsLine(wv.acts);
+  if (acts) lines.push(`- 三幕結構：${acts}`);
+  if (wv.people.length) lines.push(`- 敘事人物：${wv.people.join("；")}`);
+  lines.push(`- 禁忌事項：${wv.taboos.join("；") || "—"}`);
+  if (wv.references.length) lines.push(`- 參考連結（備註）：${wv.references.join("；")}`);
+  return lines.join("\n");
+}
+
+/**
+ * 視覺類別正向注入片段（中英雙語 tones/styles + 短 logline + message）。
+ * 禁忌不放正向——由 generationCore 走 negative_prompt。
+ */
+export function formatWorldviewVisualPositive(wv: Worldview): string {
+  const parts: string[] = [];
+  const tones = bilingualChips(wv.tones, TONE_EN);
+  const styles = bilingualChips(wv.styles, STYLE_EN);
+  if (tones.length) parts.push(`調性:${tones.join("、")}`);
+  if (styles.length) parts.push(`視覺風格:${styles.join("、")}`);
+  const log = wv.logline.trim();
+  if (log) {
+    const clipped = log.length > LOGLINE_INJECT_MAX ? `${log.slice(0, LOGLINE_INJECT_MAX)}…` : log;
+    parts.push(`故事錨點:${clipped}`);
+  }
+  if (wv.message.trim()) parts.push(`核心訊息:${wv.message.trim()}`);
+  return parts.join("|");
+}
+
+/** 是否正要移除預設弘法禁語（清空或刪掉 DEFAULT 其中一條）——UI 確認用 */
+export function removesDefaultTaboos(prev: string[], next: string[]): boolean {
+  const defaults = DEFAULT_TABOOS();
+  const nextSet = new Set(next);
+  return defaults.some((d) => prev.includes(d) && !nextSet.has(d));
+}

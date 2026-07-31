@@ -187,7 +187,7 @@ export function HelpPage() {
       </Meta>
       <ol style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 0, margin: 0 }}>
         <Step n={1} icon="Palette" title="設世界觀">
-          一句話故事、關鍵訊息、調性、畫風。填一次，之後每次生成自動帶入。
+          一句話故事（或關鍵訊息）＋至少一項調性或畫風。填一次，生成與 AI 助手自動帶入；進階的觀眾／三幕／人物給導演用。
         </Step>
         <Step n={2} icon="Sparkles" title="AI 拆分鏡">
           在「AI 創作工作台」的問 AI 模式貼腳本，自動切成一格一格的分鏡草稿。
@@ -411,7 +411,7 @@ export function HelpPage() {
       <H2 id="help-terms" icon="FileText">名詞小辭典</H2>
       <Card>
         <Term word="世界觀">
-          這支片的固定設定（一句話故事、關鍵訊息、調性、視覺風格、禁忌）。填一次，之後每次生成自動帶入，不用重講背景。
+          這支片的固定設定。調性／風格／訊息／禁忌會在每次生成自動帶入；目標觀眾、三幕結構、敘事人物會給 AI 導演建議與拆分鏡用。畫面外觀一致請另建「角色定裝卡」。
         </Term>
         <Term word="分鏡">把片子切成一格一格的鏡頭；每一格有秒數、畫面，可配旁白與字幕。</Term>
         <Term word="逐鏡配音">

@@ -3,7 +3,7 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
-import { worldviewSchema } from "../../shared/worldview";
+import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { CATEGORIES, WORKFLOW_PRESETS, getWorkflow, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
 import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
@@ -463,7 +463,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       // 連結全專案×資料庫：AI 可讀的自訂資料庫（代號速查進提示詞；細列用 query_database 工具按需查）
       const readableDbs = await listAssistantReadableDbs(input.auth);
       const context = `標題：${project.title}（${project.kind}，${project.format}）
-世界觀｜一句話：${wv.logline || "—"}｜調性：${wv.tones.join("、") || "—"}｜核心訊息：${wv.message || "—"}｜視覺風格：${wv.styles.join("、") || "—"}
+世界觀｜${formatWorldviewForAi(wv, "brief")}
 分鏡（共 ${scenes.length}）：
 ${sceneLines}
 生成：完成 ${genDone}／生成中 ${genRunning}／失敗 ${genFailed}｜待審分鏡：${pendingCount}`;
