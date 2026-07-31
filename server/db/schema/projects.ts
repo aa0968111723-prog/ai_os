@@ -49,7 +49,10 @@ export const knowledge = pgTable("knowledge", {
    *  ★ buildKnowledgeContext 必以 isNull(deletedAt) 過濾——已刪的逐字稿絕不可再注入 AI 導演 LLM。 */
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  projectPinnedCreatedIdx: index("knowledge_project_pinned_created_idx")
+    .on(t.projectId, t.pinned, t.createdAt),
+}));
 
 /**
  * 長文版本歷史（#29）：知識庫逐字稿等長文每次更新前存一版快照，可檢視／還原。
