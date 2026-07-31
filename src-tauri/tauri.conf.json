@@ -36,7 +36,6 @@
     "shortDescription": "Aios AI 創作與協作桌面應用程式",
     "longDescription": "Aios 桌面版可安全把專案素材交給已安裝的剪輯、音訊與圖片軟體，監看編輯檔並回傳成新版本。",
     "icon": [
-      "../client/public/icons/icon-v2-192.png",
       "../client/public/icons/icon-v2-512.png",
       "../client/public/icons/icon-v2-1024.png",
       "../client/public/favicon-v2.ico"

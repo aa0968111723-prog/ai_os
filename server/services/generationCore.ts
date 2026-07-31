@@ -367,8 +367,8 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       void groupLeaderIds(project.groupId, input.userId)
         .then((ids) => pushToUsers(ids, {
           title: "生成待核准",
-          body: `${model.label}（${est} 點 ≥ 門檻 ${threshold} 點）——請到生成紀錄核准或駁回`,
-          url: `/p/${project.id}`,
+          body: `【${project.title}】${model.label}（${est} 點 ≥ 門檻 ${threshold} 點）——請到生成紀錄核准或駁回`,
+          url: `/p/${project.id}?focus=generation-${gated.id}`,
           tag: `gen-approve-${project.id}`,
         }))
         .catch((err) => console.warn("[generation] 待核推播失敗：", err instanceof Error ? err.message : err));
@@ -549,7 +549,8 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     void pushToUsers([gen.userId], {
       title: "生成完成",
       body: `${model?.label ?? gen.modelId}：${gen.prompt.slice(0, 60)}`,
-      url: `/p/${gen.projectId}`,
+      // 深連結：直達生成紀錄該筆（ProjectPage focus=generation-* 會開抽屜捲動高亮）
+      url: `/p/${gen.projectId}?focus=generation-${gen.id}`,
       tag: `gen-${gen.projectId}`,
     }).catch((err) => console.warn("[generation] 完成推播失敗：", err instanceof Error ? err.message : err));
     return advanced.updated;
@@ -577,7 +578,7 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     void pushToUsers([gen.userId], {
       title: "生成失敗",
       body: `${model?.label ?? gen.modelId}：${failMsg}${failed.refunded > 0 ? "（點數已退回）" : ""}`,
-      url: `/p/${gen.projectId}`,
+      url: `/p/${gen.projectId}?focus=generation-${gen.id}`,
       tag: `gen-failed-${gen.id}`,
     }).catch((err) => console.warn("[generation] 失敗推播失敗：", err instanceof Error ? err.message : err));
     return updated;

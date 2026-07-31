@@ -13,7 +13,7 @@ const shot = (page, n) => page.screenshot({ path: `${DIR}/${n}.png`, fullPage: t
 const results = [];
 const ok = (name, cond) => { results.push([!!cond, name]); console.log(cond ? "✅" : "❌", name); };
 
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium", headless: true });
+const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || "/opt/pw-browsers/chromium", headless: true });
 const page = await browser.newPage({ viewport: { width: 1366, height: 950 } });
 page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
 

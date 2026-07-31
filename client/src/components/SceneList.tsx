@@ -531,7 +531,12 @@ function SceneRow({
                   triggerStyle={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger-ink)", borderColor: "var(--danger)" }}
                   disabled={decide.isPending}
                   title="退回這一鏡"
-                  reason={{ label: "退回理由（會通知提交人）", placeholder: "說明需要修改的地方…", required: true }}
+                  reason={{
+                    label: "退回理由（會通知提交人）",
+                    placeholder: "說明需要修改的地方…",
+                    required: true,
+                    presets: ["畫面與腳本不符", "人物長相跑掉", "文字有錯字", "風格不一致", "請再修一版"],
+                  }}
                   confirmLabel="退回"
                   onConfirm={(reason) => decide.mutate({ approvalId: pending.id, decision: "needs_work", reason })}
                 >
@@ -592,6 +597,16 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
   type SceneFilter = "all" | "draft" | "pending" | "needs_work" | "approved" | "missing";
   const [sceneFilter, setSceneFilter] = useState<SceneFilter>("all");
   const [sceneListExpanded, setSceneListExpanded] = useState(false);
+
+  // 通知深連結配套（與 ProjectPage 的 focus effect 分工）：
+  // focus=scene-<id> 時手機收合的第 5 格以後是 display:none，先展開完整列表讓目標可見；
+  // focus=pending（組長彙總入口）直接切到「待審」篩選，一到頁就是要裁決的清單。
+  useEffect(() => {
+    const focus = new URLSearchParams(window.location.search).get("focus");
+    if (!focus) return;
+    if (focus === "pending") setSceneFilter("pending");
+    else if (/^scene-[0-9a-f-]+$/i.test(focus)) setSceneListExpanded(true);
+  }, []);
   const statusCounts = {
     draft: list.filter((s) => s.status === "todo" || s.status === "review").length,
     pending: list.filter((s) => s.status === "pending").length,

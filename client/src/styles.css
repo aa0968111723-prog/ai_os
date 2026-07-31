@@ -3912,6 +3912,29 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .db-field-row > input:first-child { min-width: 0; }
 .db-field-row__options { grid-column: 1 / -1; min-width: 0; }
 
+/* 帳號選單：桌機不需要 scrim（下拉模式）；身分標頭全尺寸共用 */
+.account-menu__scrim { display: none; }
+.account-menu__id {
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-14);
+}
+.account-menu__avatar {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  border-radius: 999px; background: var(--primary-tint); color: var(--primary-ink);
+}
+
+/* 未存分享救援 banner：登入後喚回滯留在 SHARE_CACHE 的分享 */
+.share-rescue-banner {
+  display: flex; align-items: center; gap: 8px;
+  margin: 8px 0 0; padding: 8px 12px;
+  border: 1px solid var(--primary-border); border-radius: var(--r-12);
+  background: var(--primary-tint); color: var(--primary-ink);
+  font-size: var(--fs-13); font-weight: 600;
+}
+.share-rescue-banner span { flex: 1 1 auto; min-width: 0; }
+
 /* ── 分享收件頁（Web Share Target）：相簿分享進來的檔案在這裡選去處 ── */
 .share-target-files { list-style: none; display: grid; gap: 8px; margin: 8px 0 12px; padding: 0; }
 .share-target-files li {
@@ -3967,6 +3990,41 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   .mobile-nav button:active { transform: scale(.92); }
   .mobile-nav a.active,
   .mobile-nav button.active { color: var(--primary-ink); background: var(--primary-tint); }
+  .mobile-nav__icon-wrap { position: relative; display: inline-flex; }
+  .mobile-nav__dot {
+    position: absolute; top: -2px; right: -4px;
+    width: 8px; height: 8px; border-radius: 999px;
+    background: var(--danger, #c44); box-shadow: 0 0 0 2px var(--popover);
+  }
+
+  /* 帳號選單手機化：從「頂欄下拉長清單」改成貼底 bottom sheet（與更多面板同語彙）。
+     真機實測下拉版「登出」會被分頁列蓋住按不到；sheet 版拇指區直達、含拖曳把手與 scrim。 */
+  /* 加 :hover 併列是為了壓過 (hover:none) 區塊的 button:hover 重置——
+     指標停在全幅 scrim 上時，重置會把遮罩塗回實色象牙紙 */
+  .account-menu__scrim,
+  button.account-menu__scrim:hover {
+    position: fixed; z-index: 46; inset: 0;
+    display: block; width: 100%; height: 100%;
+    padding: 0; border: 0; border-radius: 0;
+    background: rgba(43, 38, 32, .38);
+  }
+  .account-menu__menu.is-sheet {
+    position: fixed; z-index: 47; inset-inline: 0; top: auto; bottom: 0;
+    left: 0; right: 0; max-width: none;
+    border: 1px solid var(--border-soft); border-bottom: 0;
+    border-radius: 22px 22px 0 0;
+    box-shadow: var(--e4);
+    max-height: calc(100dvh - 64px - var(--safe-top));
+    overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+    padding-bottom: max(16px, var(--safe-bottom));
+    animation: mobile-sheet-up 260ms var(--ease-out);
+  }
+  .account-menu__menu.is-sheet::before {
+    content: ""; display: block;
+    width: 36px; height: 4px; margin: 8px auto 6px;
+    border-radius: 999px; background: var(--border-strong);
+  }
+  .account-menu__menu.is-sheet .menu-item { min-height: 48px; }
 
   /* 內容與浮動元素讓出分頁列高度（列高約 64px + safe-bottom）；
      未登入（無分頁列）維持原本留白，:has 不支援時多留白也不致遮擋 */
@@ -3975,7 +4033,8 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   .fb-fab-root { bottom: calc(72px + var(--safe-bottom)); }
 
   /* 更多面板：貼底 bottom sheet（scrim 蓋住分頁列，面板含拖曳把手與 safe-area 內距） */
-  .mobile-more-scrim {
+  .mobile-more-scrim,
+  button.mobile-more-scrim:hover {
     position: fixed; z-index: 46; inset: 0;
     display: block; width: 100%; height: 100%;
     padding: 0; border: 0; border-radius: 0;

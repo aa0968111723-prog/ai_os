@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
+import { useLocalDraft } from "../useLocalDraft";
 import { Icon, type IconName } from "../components/Icon";
 import { ChatEmptyState, focusChatPartnerPicker } from "../components/ChatEmptyState";
 import { setPlannerFocus } from "../discuss";
@@ -172,7 +173,8 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
   const [older, setOlder] = useState<HistoryItem[]>([]);
   const [olderHasMore, setOlderHasMore] = useState<boolean | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [draft, setDraft] = useState("");
+  // 草稿防丟：切去看通知／整頁重載回來，打一半的訊息還在（送出成功才清）
+  const [draft, setDraft, clearDmDraft] = useLocalDraft(`dm-${peerId}`, "");
   // 私訊 2.0：待送的附件（上傳完成待綁定）／標注卡；標注 picker 開關與分頁；上傳狀態
   const [pendingAttach, setPendingAttach] = useState<PendingAttach | null>(null);
   const [pendingRef, setPendingRef] = useState<PendingRef | null>(null);
@@ -194,7 +196,7 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
 
   const send = trpc.dm.send.useMutation({
     onSuccess: () => {
-      setDraft("");
+      clearDmDraft();
       setPendingAttach(null);
       setPendingRef(null);
       stickBottom.current = true;
@@ -296,7 +298,7 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
   };
 
   const insertAssistant = () => {
-    setDraft((b) => (b.includes(ASSISTANT_TRIGGER) ? b : `${ASSISTANT_TRIGGER} ${b}`.trimStart()));
+    setDraft(draft.includes(ASSISTANT_TRIGGER) ? draft : `${ASSISTANT_TRIGGER} ${draft}`.trimStart());
     textRef.current?.focus();
   };
 

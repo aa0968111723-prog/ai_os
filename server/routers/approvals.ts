@@ -100,7 +100,7 @@ export async function submitApprovalCore(
     void groupLeaderIds(project.groupId, userId)
       .then((ids) => pushToUsers(ids, {
         title: "分鏡送審",
-        body: `「${scene.title}」已送審（v${approval.version}）——請裁決`,
+        body: `【${project.title}】「${scene.title}」已送審（v${approval.version}）——請裁決`,
         // 深連結（#225 契約）：帶 focus=scene-<id>，專案頁會捲到該分鏡格
         url: `/p/${project.id}?focus=scene-${scene.id}`,
         tag: `approval-${scene.id}`,
@@ -182,8 +182,8 @@ export const approvalsRouter = router({
           .then((ok) => (ok ? pushToUsers([submitterId], {
             title: input.decision === "approved" ? "分鏡已通過" : "分鏡需修改",
             body: input.decision === "approved"
-              ? `「${scene.title}」v${approval.version} 已通過 ✅`
-              : `「${scene.title}」v${approval.version} 需修改：${input.reason?.trim() ?? ""}`,
+              ? `【${project.title}】「${scene.title}」v${approval.version} 已通過 ✅`
+              : `【${project.title}】「${scene.title}」v${approval.version} 需修改：${input.reason?.trim() ?? ""}`,
             url: `/p/${project.id}?focus=scene-${scene.id}`,
             tag: `approval-${scene.id}`,
           }) : undefined))
