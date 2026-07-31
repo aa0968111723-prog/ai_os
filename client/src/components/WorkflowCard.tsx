@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { getModel } from "@shared/models";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
@@ -252,8 +253,8 @@ export function WorkflowCard({
               prompt: prompt.trim(),
               // 與 generation.submit 的 zod 上限同口徑（6/4）：勾超過就取前幾張——
               // 「沿用勾選」是順手帶入，不因超勾讓整條製作範本啟動失敗
-              characterIds: charIds.length ? charIds.slice(0, 6) : undefined,
-              scenePresetIds: sceneIds.length ? sceneIds.slice(0, 4) : undefined,
+              characterIds: charIds.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+              scenePresetIds: sceneIds.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
             })
           }
         >

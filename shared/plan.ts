@@ -5,6 +5,7 @@
  * 不會在本階段執行新增 kind，避免資料模型與副作用一次性耦合。
  */
 import { z } from "zod";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "./cardLimits";
 
 export const planStepKindSchema = z.enum([
   "split_script",
@@ -89,9 +90,9 @@ export const planStepSchema = z.object({
   durationSec: z.number().positive().max(3_600).optional(),
   scenePrompt: z.string().max(8_000).optional(),
   script: z.string().max(80_000).optional(),
-  // CA-01：代理 generate 與直接生成對齊——定裝／場景／來源素材
-  characterIds: z.array(z.string().uuid()).max(6).optional(),
-  scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
+  // CA-01：代理 generate 與直接生成對齊——定裝／場景／來源素材（上限見 cardLimits）
+  characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
+  scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
   sourceAssetId: z.string().uuid().optional(),
   sourceUrl: z.string().max(2_000).optional(),
 });

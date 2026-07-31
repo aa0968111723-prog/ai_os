@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
@@ -100,8 +101,8 @@ export const promptsRouter = router({
         // 與 generation.submit 同口徑（MAX_PROMPT_CHARS）——生成成功才能自動入庫
         text: z.string().min(1).max(MAX_PROMPT_CHARS),
         modelId: z.string().max(200).optional(),
-        characterIds: z.array(z.string().uuid()).max(6).optional(),
-        scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
+        characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
+        scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {

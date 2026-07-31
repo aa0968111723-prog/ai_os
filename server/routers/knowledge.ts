@@ -17,6 +17,14 @@ import {
   RateLimitConfigurationError,
   RateLimitUnavailableError,
 } from "../services/rateLimit";
+import {
+  assembleKnowledgeContext,
+  KNOWLEDGE_INJECT_BUDGET_DEFAULT,
+  type KnowledgeInjectMode,
+  type KnowledgeInjectOptions,
+  type KnowledgeInjectResult,
+  type KnowledgeRowForInject,
+} from "../../shared/knowledgeInject";
 
 export const KNOWLEDGE_KINDS = [
   { id: "transcript", label: "師父開示稿" },
@@ -28,17 +36,20 @@ export const KNOWLEDGE_KINDS = [
 /** 單筆知識內容上限（避免超長逐字稿撐爆 DB／注入；夠放一篇開示或短腳本） */
 const MAX_CONTENT = 40_000;
 /** 注入 AI 導演時的預設總字數上限（LLM 上下文成本控制；超過只取前幾份＋截斷） */
-const INJECT_BUDGET = 8_000;
+export const INJECT_BUDGET = KNOWLEDGE_INJECT_BUDGET_DEFAULT;
+
+export type KnowledgeContextOptions = KnowledgeInjectOptions;
 
 /**
  * 把專案知識庫組成一段可注入 LLM 的上下文（給 director.suggest／assistant.ask 等重用）。
- * 依建立時間由新到舊取，總量到 budget 為止；回空字串代表沒有知識。
- * budget 依呼叫端的模型窗口自定（6.1 上下文窗口）：目前後端 LLM（gemini flash 系）窗口極大，
- * 上限主要是成本考量而非模型限制——助手可放寬、導演維持預設。
  *
- * 6.4 卡片↔知識庫同步：知識條目「之前」先注入角色定裝卡／場景設定卡的精簡段落——
- * 夥伴在卡片庫維護的設定（外觀錨點、色板光線）對 AI 導演與助手同步可見，
- * 不必再手動抄一份進知識庫；卡片字數也計入 budget（先扣卡片、剩餘額度才放知識長文）。
+ * 優先序（見 shared/knowledgeInject.ts）：
+ * 1. preferIds（呼叫端指定）
+ * 2. pinned（使用者釘選）
+ * 3. mode：balanced 配額／script_first／script_only／flat
+ *
+ * 6.4 卡片↔知識庫同步：知識條目「之前」先注入角色定裝卡／場景設定卡的精簡段落；
+ * 卡片字數計入 budget（先扣卡片、剩餘額度才放知識長文）。script_only 預設不含卡片。
  */
 /** 知識注入的截斷中繼：totalContentChars＝知識長文全量、includedChars＝實際注入量、truncated＝有無被腰斬。
  *  供拆分鏡等呼叫端把「知識庫太長被截、尾段鏡頭會消失」透明回報給 UI（修 knowledge-split-silent-truncation）。 */
@@ -47,20 +58,43 @@ export interface KnowledgeContextMeta {
   totalContentChars: number;
   includedChars: number;
   truncated: boolean;
+  /** 擴充報告（預覽／UI）；舊呼叫端可忽略 */
+  cardsIncluded?: boolean;
+  mode?: KnowledgeInjectMode;
+  budgetChars?: number;
+  items?: KnowledgeInjectResult["items"];
 }
 
-export async function buildKnowledgeContext(projectId: string, budgetChars: number = INJECT_BUDGET): Promise<string> {
-  return (await buildKnowledgeContextWithMeta(projectId, budgetChars)).text;
+function normalizeInjectArg(
+  budgetOrOpts: number | KnowledgeContextOptions = INJECT_BUDGET,
+): KnowledgeContextOptions {
+  if (typeof budgetOrOpts === "number") return { budgetChars: budgetOrOpts };
+  return budgetOrOpts ?? {};
+}
+
+export async function buildKnowledgeContext(
+  projectId: string,
+  budgetOrOpts: number | KnowledgeContextOptions = INJECT_BUDGET,
+): Promise<string> {
+  return (await buildKnowledgeContextWithMeta(projectId, budgetOrOpts)).text;
 }
 
 export async function buildKnowledgeContextWithMeta(
   projectId: string,
-  budgetChars: number = INJECT_BUDGET,
+  budgetOrOpts: number | KnowledgeContextOptions = INJECT_BUDGET,
 ): Promise<KnowledgeContextMeta> {
+  const opts = normalizeInjectArg(budgetOrOpts);
   // 三個查詢互不相依，並行省 DB 往返（知識照舊過濾軟刪除；卡片兩表沒有回收桶，全量即正確）
   const [rows, chars, presets] = await Promise.all([
     db
-      .select()
+      .select({
+        id: schema.knowledge.id,
+        kind: schema.knowledge.kind,
+        title: schema.knowledge.title,
+        content: schema.knowledge.content,
+        pinned: schema.knowledge.pinned,
+        createdAt: schema.knowledge.createdAt,
+      })
       .from(schema.knowledge)
       // ★ 絕不注入已軟刪除（回收桶）的知識——刪掉的逐字稿／見證不可再餵給 AI 導演 LLM
       .where(and(eq(schema.knowledge.projectId, projectId), isNull(schema.knowledge.deletedAt)))
@@ -77,30 +111,33 @@ export async function buildKnowledgeContextWithMeta(
   if (sceneBlock) cardParts.push(sceneBlock);
   const cardBlock = cardParts.join("\n");
 
-  // 知識長文全量（不含卡片——卡片是有界錨點、完整注入）：供截斷透明化計算「掉了多少」
-  const totalContentChars = rows.reduce((sum, r) => sum + r.content.length, 0);
-  if (rows.length === 0 && !cardBlock) return { text: "", totalContentChars: 0, includedChars: 0, truncated: false };
   const labelOf = (k: string) => KNOWLEDGE_KINDS.find((x) => x.id === k)?.label ?? k;
-  const parts: string[] = [];
-  let budget = Math.max(0, budgetChars);
-  if (cardBlock) {
-    parts.push(cardBlock);
-    budget = Math.max(0, budget - cardBlock.length); // 卡片先佔額度，知識長文吃剩餘
-  }
-  let includedChars = 0;
-  let truncated = false;
-  for (const r of rows) {
-    if (budget <= 0) {
-      truncated = true; // 還有知識沒注入（額度用光）
-      break;
-    }
-    const slice = r.content.slice(0, budget);
-    if (slice.length < r.content.length) truncated = true; // 這筆被腰斬
-    includedChars += slice.length;
-    parts.push(`【${labelOf(r.kind)}｜${r.title}】\n${slice}${r.content.length > slice.length ? "…(截斷)" : ""}`);
-    budget -= slice.length;
-  }
-  return { text: parts.join("\n\n"), totalContentChars, includedChars, truncated };
+  const injectRows: KnowledgeRowForInject[] = rows.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    title: r.title,
+    content: r.content,
+    pinned: r.pinned,
+    createdAt: r.createdAt,
+  }));
+
+  const assembled = assembleKnowledgeContext(injectRows, cardBlock, labelOf, {
+    budgetChars: opts.budgetChars ?? INJECT_BUDGET,
+    preferIds: opts.preferIds,
+    includeCards: opts.includeCards,
+    mode: opts.mode ?? "balanced",
+  });
+
+  return {
+    text: assembled.text,
+    totalContentChars: assembled.totalContentChars,
+    includedChars: assembled.includedChars,
+    truncated: assembled.truncated,
+    cardsIncluded: assembled.cardsIncluded,
+    mode: assembled.mode,
+    budgetChars: assembled.budgetChars,
+    items: assembled.items,
+  };
 }
 
 /** 版本歷史（#29）每個 refId 保留的最近版本上限——超過就把最舊的刪掉，避免逐字稿版本無限累積撐爆 DB */
@@ -205,13 +242,52 @@ export const knowledgeRouter = router({
         chars: sql<number>`length(${schema.knowledge.content})`.mapWith(Number),
         excerpt: sql<string>`left(${schema.knowledge.content}, 120)`,
         sourceAssetId: schema.knowledge.sourceAssetId,
+        pinned: schema.knowledge.pinned,
         createdAt: schema.knowledge.createdAt,
       })
       .from(schema.knowledge)
       .where(and(eq(schema.knowledge.projectId, input.projectId), isNull(schema.knowledge.deletedAt)))
-      .orderBy(desc(schema.knowledge.createdAt));
+      // 釘選在前，再依建立時間新→舊（與注入 rank 一致，方便使用者掃清單）
+      .orderBy(desc(schema.knowledge.pinned), desc(schema.knowledge.createdAt));
     return rows;
   }),
+
+  /**
+   * 注入預覽（不呼叫 LLM）：回傳目前預算下「會進 AI 的篇目／被截／被略過」。
+   * 導演預設 balanced；拆分鏡可傳 mode=script_only。
+   */
+  injectPreview: authedProcedure
+    .input(
+      z.object({
+        projectId: z.string().uuid(),
+        budgetChars: z.number().int().min(500).max(50_000).optional(),
+        mode: z.enum(["balanced", "script_first", "script_only", "flat"]).optional(),
+        preferIds: z.array(z.string().uuid()).max(20).optional(),
+        includeCards: z.boolean().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, project.groupId);
+      const meta = await buildKnowledgeContextWithMeta(input.projectId, {
+        budgetChars: input.budgetChars ?? INJECT_BUDGET,
+        mode: input.mode ?? "balanced",
+        preferIds: input.preferIds,
+        includeCards: input.includeCards,
+      });
+      return {
+        budgetChars: meta.budgetChars ?? INJECT_BUDGET,
+        totalContentChars: meta.totalContentChars,
+        includedChars: meta.includedChars,
+        truncated: meta.truncated,
+        cardsIncluded: meta.cardsIncluded ?? false,
+        mode: meta.mode ?? "balanced",
+        items: meta.items ?? [],
+        /** 不回全文；只回字數方便 UI 估 */
+        textChars: meta.text.length,
+      };
+    }),
 
   /** 讀單筆全文（編輯用）：回收桶裡的視為不存在（不給編輯，先還原） */
   get: authedProcedure.input(z.object({ id: z.string().uuid() })).query(async ({ ctx, input }) => {
@@ -269,6 +345,8 @@ export const knowledgeRouter = router({
         kind: z.enum(["transcript", "testimony", "script", "note"]).optional(),
         title: z.string().trim().min(1).max(120).optional(),
         content: z.string().min(1).max(MAX_CONTENT).optional(),
+        /** 釘選＝注入優先；只改釘選不觸發版本快照 */
+        pinned: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -291,6 +369,7 @@ export const knowledgeRouter = router({
           kind: input.kind ?? row.kind,
           title: input.title?.trim() ?? row.title,
           content: input.content ?? row.content,
+          pinned: input.pinned ?? row.pinned,
         })
         .where(eq(schema.knowledge.id, input.id))
         .returning();
