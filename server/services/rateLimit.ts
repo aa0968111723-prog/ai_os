@@ -33,6 +33,7 @@ export const RATE_LIMIT_POLICIES = {
   director: { limit: 6, windowMs: 60_000 },
   imageDescription: { limit: 6, windowMs: 60_000 },
   apiFetch: { limit: 20, windowMs: 60_000 },
+  driveList: { limit: 30, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitPolicy | FailureRateLimitPolicy>;
 
 export const RATE_LIMIT_SCOPES = {
@@ -47,6 +48,7 @@ export const RATE_LIMIT_SCOPES = {
   director: "assistant:director",
   imageDescription: "knowledge:image-description",
   apiFetch: "integrations:api-fetch",
+  driveList: "integrations:drive-list",
 } as const;
 
 export interface RateLimitPolicy {

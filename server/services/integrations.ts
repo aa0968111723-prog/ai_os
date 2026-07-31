@@ -411,6 +411,157 @@ export async function fetchDriveFile(
   }
 }
 
+/* ────────────────────────── Google 選檔器（PR-E1：使用者主路徑） ────────────────────────── */
+
+/** 選檔清單單頁上限（防 prompt/UI 膨脹；有 nextPageToken 可續載） */
+export const DRIVE_LIST_PAGE_SIZE = 30;
+
+export interface DriveListedFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number | null;
+  modifiedTime: string | null;
+}
+
+export type DriveListResult =
+  | { ok: true; email: string | null; files: DriveListedFile[]; nextPageToken: string | null }
+  | { ok: false; reason: "not-connected" | "error"; message: string };
+
+/** Drive q 字串跳脫（純函式，可測）：單引號與反斜線——防搜尋詞注入查詢語法 */
+export function escapeDriveQueryTerm(term: string): string {
+  return term.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+/**
+ * 選檔器挑中的檔案 → 匯入用的來源網址與匯出類型（純函式，可測）。
+ * sourceUrl 刻意產生 normalizeImportUrl 認得的形狀——匯入後「重新整理」走既有 Google 路徑，
+ * 不必為選檔匯入另開一條 refresh 分支。回 null＝此 Google 類型無法匯入（資料夾／表單等）。
+ */
+export function drivePickedImportShape(
+  fileId: string,
+  mimeType: string,
+): { kind: "google-doc" | "google-sheet" | "google-slides" | "google-drive"; sourceUrl: string } | null {
+  const id = encodeURIComponent(fileId);
+  if (mimeType === "application/vnd.google-apps.document") {
+    return { kind: "google-doc", sourceUrl: `https://docs.google.com/document/d/${id}/edit` };
+  }
+  if (mimeType === "application/vnd.google-apps.spreadsheet") {
+    return { kind: "google-sheet", sourceUrl: `https://docs.google.com/spreadsheets/d/${id}/edit` };
+  }
+  if (mimeType === "application/vnd.google-apps.presentation") {
+    return { kind: "google-slides", sourceUrl: `https://docs.google.com/presentation/d/${id}/edit` };
+  }
+  // 其餘 google-apps 原生類型（資料夾、表單、繪圖…）沒有可靠的文字匯出——明確不支援
+  if (mimeType.startsWith("application/vnd.google-apps.")) return null;
+  return { kind: "google-drive", sourceUrl: `https://drive.google.com/file/d/${id}/view` };
+}
+
+/**
+ * 列出使用者自己雲端裡可選的檔案（名稱搜尋＋分頁）。
+ * 只讀中繼資料（id/名稱/類型/大小/時間），不碰內容——內容要等使用者明確選中才抓。
+ * 錯誤對映與 fetchDriveFile 同一套（401 重連指引、429 限流、5xx 服務異常）。
+ */
+export async function listDriveFiles(
+  userId: string,
+  opts: { query?: string; pageToken?: string } = {},
+): Promise<DriveListResult> {
+  if (!isGoogleDriveConfigured()) return { ok: false, reason: "not-connected", message: "站方尚未設定 Google 整合" };
+  const row = await findIntegration(userId, "google-drive");
+  const unavailable = inactiveDriveResult(row);
+  if (unavailable && !unavailable.ok) {
+    return unavailable.reason === "error"
+      ? { ok: false, reason: "error", message: unavailable.message }
+      : { ok: false, reason: "not-connected", message: unavailable.message };
+  }
+  if (!row) return { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
+  try {
+    const qParts = ["trashed = false", "mimeType != 'application/vnd.google-apps.folder'"];
+    const term = opts.query?.trim();
+    if (term) qParts.push(`name contains '${escapeDriveQueryTerm(term.slice(0, 200))}'`);
+    const params = new URLSearchParams({
+      q: qParts.join(" and "),
+      pageSize: String(DRIVE_LIST_PAGE_SIZE),
+      orderBy: "modifiedTime desc",
+      fields: "nextPageToken,files(id,name,mimeType,size,modifiedTime)",
+      supportsAllDrives: "true",
+      includeItemsFromAllDrives: "true",
+    });
+    if (opts.pageToken) params.set("pageToken", opts.pageToken);
+    const res = await driveFetchAuthorized(row, `${DRIVE_API}/files?${params}`, 15_000);
+    if (res.status === 401) return { ok: false, reason: "error", message: DRIVE_REAUTH_MESSAGE };
+    if (res.status === 429) return { ok: false, reason: "error", message: "Google Drive 請求過於頻繁，請稍後再試" };
+    if (res.status >= 500) return { ok: false, reason: "error", message: "Google Drive 服務暫時無法使用，請稍後再試" };
+    if (!res.ok) throw new Error(`Google Drive 清單查詢失敗（HTTP ${res.status}）`);
+    const json = (await res.json()) as {
+      nextPageToken?: string;
+      files?: Array<{ id?: string; name?: string; mimeType?: string; size?: string; modifiedTime?: string }>;
+    };
+    const files: DriveListedFile[] = (json.files ?? [])
+      .filter((f): f is { id: string; name: string; mimeType: string; size?: string; modifiedTime?: string } => !!f.id && !!f.name && !!f.mimeType)
+      .map((f) => ({
+        id: f.id,
+        name: f.name,
+        mimeType: f.mimeType,
+        size: f.size != null ? Number(f.size) : null,
+        modifiedTime: f.modifiedTime ?? null,
+      }));
+    return {
+      ok: true,
+      email: typeof row.meta?.email === "string" ? row.meta.email : null,
+      files,
+      nextPageToken: json.nextPageToken ?? null,
+    };
+  } catch (err) {
+    return { ok: false, reason: "error", message: err instanceof Error ? err.message : "Google Drive 清單查詢失敗" };
+  }
+}
+
+export type DrivePickedResult =
+  | { ok: true; buf: Buffer; mime: string; name: string; sourceUrl: string }
+  | { ok: false; reason: "not-connected" | "no-access" | "error"; message: string };
+
+/**
+ * 抓「選檔器挑中的」檔案內容：先查中繼資料決定匯出型（Google 文件→txt、試算表→csv、簡報→txt、
+ * 一般檔→直載），再委派給 fetchDriveFile 走同一套 token／401／大小守門。
+ * 選檔路徑沒有公開退回——檔案就是從此帳戶的清單挑的，失敗訊息直接顯示（重連／分享指引）。
+ */
+export async function fetchDrivePickedFile(userId: string, fileId: string): Promise<DrivePickedResult> {
+  if (!isGoogleDriveConfigured()) return { ok: false, reason: "not-connected", message: "站方尚未設定 Google 整合" };
+  const row = await findIntegration(userId, "google-drive");
+  const unavailable = inactiveDriveResult(row);
+  if (unavailable && !unavailable.ok) return unavailable;
+  if (!row) return { ok: false, reason: "not-connected", message: "尚未連結 Google 雲端" };
+  let meta: { name?: string; mimeType?: string };
+  try {
+    const metaRes = await driveFetchAuthorized(row, `${DRIVE_API}/files/${encodeURIComponent(fileId)}?fields=name,mimeType,size&supportsAllDrives=true`, 15_000);
+    if (metaRes.status === 401) return { ok: false, reason: "error", message: DRIVE_REAUTH_MESSAGE };
+    if (metaRes.status === 404 || metaRes.status === 403) {
+      return { ok: false, reason: "no-access", message: driveNoAccessMessage(row) };
+    }
+    if (metaRes.status === 429) return { ok: false, reason: "error", message: "Google Drive 請求過於頻繁，請稍後再試" };
+    if (metaRes.status >= 500) return { ok: false, reason: "error", message: "Google Drive 服務暫時無法使用，請稍後再試" };
+    if (!metaRes.ok) throw new Error(`Google Drive 中繼資料查詢失敗（HTTP ${metaRes.status}）`);
+    meta = (await metaRes.json()) as { name?: string; mimeType?: string };
+  } catch (err) {
+    return { ok: false, reason: "error", message: err instanceof Error ? err.message : "Google Drive 讀取失敗" };
+  }
+  const shape = drivePickedImportShape(fileId, meta.mimeType ?? "application/octet-stream");
+  if (!shape) {
+    return { ok: false, reason: "error", message: "這種 Google 類型（資料夾／表單／繪圖等）無法匯入為文件——請改選文件、試算表、簡報或一般檔案" };
+  }
+  const fetched = await fetchDriveFile(userId, shape.kind, fileId);
+  if (!fetched.ok) return fetched;
+  return {
+    ok: true,
+    buf: fetched.buf,
+    mime: fetched.mime,
+    // 匯出路徑（Google 文件系）fetchDriveFile 不帶名稱——用中繼資料的真實檔名
+    name: fetched.name ?? meta.name ?? "匯入文件",
+    sourceUrl: shape.sourceUrl,
+  };
+}
+
 /** 中斷 Google 雲端連結：盡力撤銷 token 再刪本地紀錄。
  *  ★ 例外：同一人若還有「Google 日曆」連線（同一組 GCP client）——Google 撤銷任一 refresh token
  *  可能連帶撤銷該 user×client 的整個授權，把日曆同步一起弄斷；此時只刪本地紀錄、不打撤銷端點

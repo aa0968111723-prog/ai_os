@@ -135,6 +135,8 @@ function mockPlan(goal: string, existingSceneCount: number, writableDbs: Writabl
     summary: `（測試模式計畫）${goal.slice(0, 80)}｜${steps.length} 個可執行步驟`,
     planSummary: {
       goal,
+      rationale: "測試模式使用固定短流程：建鏡、生成、送審即可驗證代理全生命週期。",
+      contextUsed: ["專案現況", "可寫資料庫"],
       successCriteria: ["建立分鏡", "生成主視覺", "送交審核"],
       assumptions: ["測試模式使用固定且可重現的計畫"],
       missingInformation: [],
@@ -429,6 +431,8 @@ export async function planAgentCore(input: {
 {
   "summary": {
     "goal": "明確成果目標",
+    "rationale": "1–3 句：為何這樣安排整份計畫（給使用者看的結論式說明）",
+    "contextUsed": ["實際依據的上下文區塊標籤，如 專案世界觀、專案知識庫節錄、分鏡現況、團隊成員、專案筆記"],
     "successCriteria": ["可驗證的完成條件"],
     "assumptions": ["使用了哪些假設"],
     "missingInformation": ["執行前仍需人提供什麼"],
@@ -443,6 +447,7 @@ export async function planAgentCore(input: {
       "kind": "下列種類之一",
       "title": "人看得懂的成果／動作",
       "note": "執行說明",
+      "rationale": "可省略；一句話說明為何需要此步（關鍵步驟建議填）",
       "dependsOn": ["前置步驟 id"],
       "milestoneId": "里程碑 id",
       "estimatedMinutes": 20,
@@ -476,7 +481,8 @@ export async function planAgentCore(input: {
 7. sceneNo 是執行當下的分鏡順序（1 起算）；新分鏡會接在現有 ${scenes.length} 格之後。
 8. modelId 只能抄模型速查的 id；不確定就省略。優先選經濟模型，除非目標明確要求品質。needs 模型務必搭配 sourceAssetRef 或 sourceUrl，否則該步無法執行。
 9. **多代理並行**：互不依賴的 generate 步驟不要硬串 dependsOn——獨立支線會同時開拍（長任務關頁也繼續）；真有先後才寫 dependsOn。
-10. 只輸出一個 JSON 物件，不要 Markdown、說明或思考過程。
+10. 只輸出一個 JSON 物件，不要 Markdown、說明或思考過程。禁止輸出 chain-of-thought、逐步心智草稿或內部推理；summary.rationale 與步驟 rationale 是給使用者看的簡短結論式說明（rationale ≤500 字、步驟 rationale ≤300 字），不是推理紀錄。
+11. summary.rationale 必填（1–3 句說明為何這樣排計畫）；summary.contextUsed 只能列你實際依據的上下文區塊標籤，不要虛列。
 ${buildPlannerRoleBlock()}
 <可用模型速查>
 ${buildAiModelCheatsheet()}

@@ -84,6 +84,8 @@ export interface AgentStep {
     | "request_approval";
   /** 人話說明（核准畫面與進度列表顯示） */
   note: string;
+  /** 決策軌跡：為何需要此步（規劃端結構化說明，非模型內部推理） */
+  rationale?: string;
   status: "pending" | "running" | "waiting" | "done" | "failed" | "stopped";
   actorType?: "ai" | "human" | "system";
   dependsOn?: string[];

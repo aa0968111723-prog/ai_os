@@ -141,6 +141,61 @@ describe("complete plan schema", () => {
     expect(parsed.milestones[0].dueAt).toBeUndefined();
   });
 
+  // ── 決策軌跡（PR-1）：summary.rationale / contextUsed 與步驟 rationale ──
+
+  it("accepts structured decision-trace fields on summary and steps", () => {
+    const parsed = completePlanSchema.parse({
+      summary: {
+        ...summary,
+        rationale: "腳本已齊、日期已定，先拆分鏡再生成即可交付，不需額外排程。",
+        contextUsed: ["專案世界觀", "專案知識庫節錄", "分鏡現況"],
+      },
+      steps: [{
+        id: "note",
+        kind: "create_note",
+        title: "整理拍攝重點",
+        rationale: "把散落的企劃資訊集中，後續步驟才有共同依據。",
+        status: "draft",
+        actorType: "ai",
+      }],
+    });
+    expect(parsed.summary.rationale).toContain("先拆分鏡");
+    expect(parsed.summary.contextUsed).toEqual(["專案世界觀", "專案知識庫節錄", "分鏡現況"]);
+    expect(parsed.steps[0].rationale).toContain("共同依據");
+  });
+
+  it("keeps legacy plans without decision-trace fields parseable", () => {
+    const parsed = completePlanSummarySchema.parse(summary);
+    expect(parsed.rationale).toBeUndefined();
+    expect(parsed.contextUsed).toBeUndefined();
+  });
+
+  it("rejects oversized or overlong decision-trace fields", () => {
+    expect(completePlanSummarySchema.safeParse({
+      ...summary,
+      rationale: "長".repeat(501),
+    }).success).toBe(false);
+    expect(completePlanSummarySchema.safeParse({
+      ...summary,
+      contextUsed: Array.from({ length: 31 }, (_, i) => `區塊${i}`),
+    }).success).toBe(false);
+    expect(completePlanSummarySchema.safeParse({
+      ...summary,
+      contextUsed: ["超".repeat(61)],
+    }).success).toBe(false);
+    expect(completePlanSchema.safeParse({
+      summary,
+      steps: [{
+        id: "note",
+        kind: "create_note",
+        title: "整理拍攝重點",
+        rationale: "長".repeat(301),
+        status: "draft",
+        actorType: "ai",
+      }],
+    }).success).toBe(false);
+  });
+
   // ── CA-01：generate 步驟定裝／場景／來源欄位 ──
 
   it("accepts generate step with characterIds / scenePresetIds / sourceAssetId / sourceUrl", () => {
