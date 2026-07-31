@@ -118,6 +118,18 @@ async function guardedAuthRateLimit<T>(operation: () => Promise<T>): Promise<T> 
   }
 }
 
+/**
+ * 登入成功的回應。
+ *
+ * ★把 AuthState 攤在頂層（而非包在 auth 欄位裡）是刻意的相容性選擇：
+ * 加裝置驗證前，login 直接回傳 AuthState，既有用戶端（含 e2e 腳本）都讀
+ * `user`／`groups` 等頂層欄位。改成巢狀會無聲打壞它們——多一個 status 欄位
+ * 就能表達判別聯集，不必讓每個既有讀取端跟著改。
+ */
+function okLogin(auth: Awaited<ReturnType<typeof loadAuthState>>) {
+  return { status: "ok" as const, ...(auth ?? {}) };
+}
+
 export const authRouter = router({
   /**
    * 目前登入狀態（未登入回 null，前端據此顯示登入頁）。
@@ -173,7 +185,7 @@ export const authRouter = router({
       if (mode === "off") {
         const token = await createSession(user.id, meta);
         setSessionCookie(ctx.res, token);
-        return { status: "ok" as const, auth: await loadAuthState(user.id) };
+        return okLogin(await loadAuthState(user.id));
       }
 
       const deviceCtx = { userAgent: clientUserAgent(ctx.req) ?? "", hint: input.device, ip };
@@ -194,7 +206,7 @@ export const authRouter = router({
         setSessionCookie(ctx.res, token);
         // 重新簽發 cookie 讓 400 天上限滾動續期——信任本身無到期日，但瀏覽器對 cookie 有硬上限
         if (deviceToken) setDeviceCookie(ctx.res, deviceToken);
-        return { status: "ok" as const, auth: await loadAuthState(user.id) };
+        return okLogin(await loadAuthState(user.id));
       }
 
       // 陌生裝置。三種免驗情形：暖身期、超管 break-glass、管理員預先授信。
@@ -216,7 +228,7 @@ export const authRouter = router({
         console.log(
           `[audit] deviceTrust 新裝置自動信任（mode=${mode}${graced ? " grace" : ""}）：user=${user.id} device=${issued.device.deviceId}`,
         );
-        return { status: "ok" as const, auth: await loadAuthState(user.id) };
+        return okLogin(await loadAuthState(user.id));
       }
 
       // enforce：不發 session，只發一張沒有任何 API 權限的票根，並寄驗證碼。
@@ -296,7 +308,7 @@ export const authRouter = router({
       setSessionCookie(ctx.res, issued.session);
       setDeviceCookie(ctx.res, issued.device.token);
       console.log(`[audit] deviceTrust 新裝置通過驗證：user=${user.id} device=${issued.device.deviceId}`);
-      return { status: "ok" as const, auth: await loadAuthState(user.id) };
+      return okLogin(await loadAuthState(user.id));
     }),
 
   /** 介面密度偏好上行（P1c）：本機 localStorage 仍是即時來源，這裡只負責
