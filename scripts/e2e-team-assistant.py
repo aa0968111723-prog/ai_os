@@ -298,9 +298,15 @@ for field in ("blockers", "byProject", "people", "pendingApprovalTasks", "workIt
 ok("groupInsights 有 truncated 四旗標",
    isinstance(gi.get("truncated"), dict) and set(gi["truncated"]) == {"runs", "tasks", "results", "workItems"})
 ok("groupInsights 有 peopleTruncated", isinstance(gi.get("peopleTruncated"), bool))
-# 每一項阻塞都要歸得到某個專案：byProject 的阻塞總和不得少於 blockers 筆數
-ok("阻塞都歸得到專案（總和對得上）",
-   sum(p.get("blockers", 0) for p in gi.get("byProject", [])) == len(gi.get("blockers", [])))
+# 歸屬要對「未截斷」的完整清單算——拿 len(blockers) 比是比不出來的（兩邊都截斷過），
+# 所以改用伺服器回報的 blockersTotal 當基數。
+ok("groupInsights 回報未截斷的阻塞總數", isinstance(gi.get("blockersTotal"), int))
+ok("阻塞都歸得到專案（以未截斷總數為基數）",
+   sum(p.get("blockers", 0) for p in gi.get("byProject", [])) == gi.get("blockersTotal"))
+ok("顯示用的阻塞清單不超過總數", len(gi.get("blockers", [])) <= gi.get("blockersTotal", 0))
+# 同一列的阻塞數不得小於逾期數（會渲染成「3 項阻塞・9 逾期」的自相矛盾）
+for _p in gi.get("byProject", []):
+    ok(f"專案 {_p['projectId'][:8]} 阻塞數 ≥ 逾期數", _p.get("blockers", 0) >= _p.get("overdueTasks", 0))
 # 人類核准節點必須帶齊就地裁決需要的欄位
 for t in gi.get("pendingApprovalTasks", []):
     ok(f"核准節點 {t['taskId'][:8]} 欄位齊全",
@@ -333,5 +339,68 @@ for c in gi2.get("planConcerns", []):
        c.get("missingInformation", 0) > 0 or c.get("risks", 0) > 0)
 ok("疑慮總和不超過整體待補資訊數", concern_missing <= gi2.get("unresolvedInformation", 0))
 ok("疑慮總和不超過整體風險數", concern_risks <= gi2.get("risks", 0))
+
+
+# ── 12. 派工參數不再被丟掉（S4）──
+# 專案頁的「執行計畫」本來就吃這四個參數；派工時原樣轉交，守門一個都不繞過。
+disp_full = call("POST", admin, "teamAssistant.dispatch", {
+    "groupId": gid,
+    "projectId": pid,
+    "goal": "帶 playbook 與規劃模式的派工：把腳本拆成分鏡",
+    "playbookId": "playbook.storyboard.v1",
+    "plannerMode": "fal_economy",
+})
+ok(f"帶參數派工成功{'' if 'runId' in disp_full else '（'+str(disp_full.get('__error__'))[:120]+'）'}", "runId" in disp_full)
+
+# 規劃模式是 enum，亂填必須被擋（而不是默默用預設值排出一份不同的計畫）
+bad_mode = call("POST", admin, "teamAssistant.dispatch", {
+    "groupId": gid, "projectId": pid,
+    "goal": "不合法的規劃模式應被擋下",
+    "plannerMode": "economy",
+})
+ok("🔒 不合法 plannerMode 被擋", "__error__" in bad_mode)
+ok("帶參數派工仍是待核准（沒有繞過核准）", disp_full.get("status") == "awaiting_approval")
+ok("派工回傳規劃遙測（不是黑盒）", "plannerTelemetry" in disp_full)
+
+# 不合法的 playbookId 不該讓派工整個炸掉，也不該被當成 roleId 偷渡
+disp_bad_pb = call("POST", admin, "teamAssistant.dispatch", {
+    "groupId": gid, "projectId": pid,
+    "goal": "不存在的 playbook 應被忽略而非崩潰",
+    "playbookId": "playbook.does.not.exist",
+})
+ok("未知 playbookId 不會讓派工崩潰", "runId" in disp_bad_pb or "__error__" in disp_bad_pb)
+
+# 超出上限的來源清單要被 zod 擋下（而不是塞爆規劃預算）
+disp_too_many = call("POST", admin, "teamAssistant.dispatch", {
+    "groupId": gid, "projectId": pid,
+    "goal": "來源數量超過上限應被擋下",
+    "extraSourceIds": ["00000000-0000-4000-8000-%012d" % i for i in range(11)],
+})
+ok("🔒 來源超過上限被擋", "__error__" in disp_too_many)
+
+# 派工出處要留痕：事件流裡看得到「由團隊分析卡派工」
+if "runId" in disp_full:
+    evs = call("GET", admin, "agents.eventsByProject", {"projectId": pid, "limit": 200})
+    items = evs.get("items", []) if isinstance(evs, dict) else []
+    ok("派工在事件流留下出處",
+       any(e.get("runId") == disp_full["runId"] and e.get("eventKey") == "run:dispatched-from-team" for e in items))
+
+
+# ── 13. ask 的上下文與決策軌跡（S5）──
+ask_s5 = call("POST", admin, "teamAssistant.ask", {"groupId": gid, "message": "誰卡住了？有什麼阻塞？"})
+ok("ask 回傳 contextUsed 陣列", isinstance(ask_s5.get("contextUsed"), list))
+ok("ask 回傳 degraded 旗標", isinstance(ask_s5.get("degraded"), bool))
+ok("正常情況不是降級模式", ask_s5.get("degraded") is False)
+# contextUsed 必須全在白名單內——這個欄位存在的意義就是「不能讓模型自由發揮」
+ALLOWED = {"專案現況", "組花費", "資料庫快照", "阻塞與人員負荷",
+           "分鏡明細", "生成紀錄", "模型目錄", "資料庫搜尋", "代理動態", "人員任務", "專案營運快照"}
+ok("contextUsed 全在白名單內", set(ask_s5.get("contextUsed", [])) <= ALLOWED)
+ok("rationale 不是 chain-of-thought（長度受限）",
+   ask_s5.get("rationale") is None or len(ask_s5["rationale"]) <= 301)
+
+# 組員也拿得到同一組欄位（唯讀彙總不需組長權限）
+mem_s5 = call("POST", member, "teamAssistant.ask", {"groupId": gid, "message": "有什麼阻塞？"})
+ok("組員 ask 也有 contextUsed", isinstance(mem_s5.get("contextUsed"), list))
+ok("組員 ask 仍無派工權", mem_s5.get("canDispatch") is False)
 
 print("—— e2e-team-assistant 完成 ——")

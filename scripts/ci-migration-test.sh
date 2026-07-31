@@ -94,7 +94,8 @@ E2E_MOCK=1 RUN_PG_INTEGRATION=1 npx vitest run \
   server/services/agentSplitRecovery.pg.test.ts \
   server/services/agentEffectCore.pg.test.ts \
   server/services/taskWake.pg.test.ts \
-  server/services/agentEvents.pg.test.ts
+  server/services/agentEvents.pg.test.ts \
+  server/services/groupInsights.pg.test.ts
 
 echo "[migration-ci] modified applied hash must fail closed"
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q \

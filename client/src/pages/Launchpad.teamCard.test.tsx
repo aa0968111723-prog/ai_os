@@ -10,12 +10,14 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type React from "react";
-import { buildDecisionInbox, dueLabel, Launchpad, mergeTeamHealth } from "./Launchpad";
+import { buildDecisionInbox, canDecideRun, dueLabel, Launchpad, mergeTeamHealth } from "./Launchpad";
 
 /** 泛用 trpc 樁：任何 `trpc.a.b.useQuery()` 都回 queryData 裡以路徑登記的值 */
 const h = vi.hoisted(() => {
-  const queryData = new Map<string, unknown>();
-  const mutations: Array<{ path: string; input: unknown }> = [];
+  const bag: { queryData: Map<string, unknown>; mutations: Array<{ path: string; input: unknown }>; root: Record<string, unknown>; askReply: Record<string, unknown> } =
+    { queryData: new Map(), mutations: [], root: {}, askReply: {} };
+  const queryData = bag.queryData;
+  const mutations = bag.mutations;
   let root: Record<string, unknown>;
   const makeNode = (path: string): Record<string, unknown> => {
     const base: Record<string, unknown> = {
@@ -26,8 +28,13 @@ const h = vi.hoisted(() => {
         error: null,
         refetch: () => {},
       }),
-      useMutation: () => ({
-        mutate: (input: unknown) => { mutations.push({ path, input }); },
+      useMutation: (opts?: { onSuccess?: (d: unknown) => void }) => ({
+        mutate: (input: unknown, callOpts?: { onSuccess?: (d: unknown) => void }) => {
+          mutations.push({ path, input });
+          const reply = path === "teamAssistant.ask" ? bag.askReply : {};
+          void opts?.onSuccess?.(reply);
+          void callOpts?.onSuccess?.(reply);
+        },
         mutateAsync: async (input: unknown) => { mutations.push({ path, input }); return {}; },
         isPending: false,
         error: null,
@@ -50,7 +57,8 @@ const h = vi.hoisted(() => {
     }) as Record<string, unknown>;
   };
   root = makeNode("");
-  return { queryData, mutations, root };
+  Object.assign(bag, { queryData, mutations, root });
+  return bag;
 });
 
 vi.mock("../api", () => ({ trpc: h.root }));
@@ -122,7 +130,7 @@ function seed(opts: {
     h.queryData.set("teamAssistant.groupInsights", {
       status: "healthy", activeRuns: 0, waitingRuns: 0, openTasks: 0, overdueTasks: 0,
       recentFailures: 0, unresolvedInformation: 0, risks: 0,
-      blockers: [], results: [], workItems: [],
+      blockers: [], blockersTotal: 0, results: [], workItems: [],
       truncated: { runs: false, tasks: false, results: false, workItems: false },
       byProject: [], people: [], pendingApprovalTasks: [], peopleTruncated: false,
       ...opts.insights,
@@ -222,10 +230,17 @@ describe("團隊分析卡：待我裁決收件匣", () => {
     expect(h.mutations[1]).toEqual({ path: "agents.discard", input: { runId: "run-1" } });
   });
 
-  it("收件匣為空時說「沒有等你決定的事項」，不是五個 0", () => {
+  it("用過代理但收件匣為空 → 說「都清空了」，不是五個 0", () => {
+    seed({ runs: [run({ status: "done" })], summary: { hasRuns: true, health: "healthy" }, pending: [] });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(inbox()).getByText(/都清空了/)).toBeInTheDocument();
+  });
+
+  it("從沒用過代理且收件匣為空 → 引導去起手式，而不是「都清空了」", () => {
     seed({ runs: [], pending: [] });
     render(<Launchpad groupId={GROUP} />);
-    expect(within(inbox()).getByText(/沒有等你決定的事項/)).toBeInTheDocument();
+    expect(within(inbox()).getByText(/挑一個起手式/)).toBeInTheDocument();
+    expect(within(inbox()).queryByText(/都清空了/)).not.toBeInTheDocument();
   });
 
   it("超過上限只列前 6 件，並誠實說明還有幾件", () => {
@@ -496,5 +511,210 @@ describe("S3：代理產出與計畫疑慮", () => {
     });
     render(<Launchpad groupId={GROUP} />);
     expect(within(screen.getByLabelText("代理產出與計畫疑慮")).getByText(/已達顯示上限/)).toBeInTheDocument();
+  });
+});
+
+describe("S4：空組起手式與派工參數", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  const withPlaybooks = () => {
+    h.queryData.set("agents.listRoles", {
+      roles: [],
+      playbooks: [
+        { id: "playbook.storyboard.v1", roleId: "role.storyboard", version: 1, title: "分鏡助理", goalTemplate: "把知識庫腳本拆成分鏡", suggestedKinds: [] },
+        { id: "playbook.creation.short.v1", roleId: "role.creation", version: 1, title: "快速開拍", goalTemplate: "先出一版可看的成品", suggestedKinds: [] },
+        { id: "playbook.director.v1", roleId: "role.director", version: 1, title: "計畫統籌", goalTemplate: "釐清目標與缺資訊", suggestedKinds: [] },
+        { id: "playbook.qa.v1", roleId: "role.qa", version: 1, title: "不該出現的第四個", goalTemplate: "x", suggestedKinds: [] },
+      ],
+    });
+  };
+
+  it("從沒用過代理 → 出現三個起手式與專案下拉", () => {
+    withPlaybooks();
+    seed({ runs: [], pending: [] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(screen.getByLabelText("起手式"));
+    expect(box.getByRole("button", { name: /分鏡助理/ })).toBeInTheDocument();
+    expect(box.getByRole("button", { name: /快速開拍/ })).toBeInTheDocument();
+    expect(box.getByRole("button", { name: /計畫統籌/ })).toBeInTheDocument();
+    // 只挑三個，第四個不列（起手式是降低門檻，不是把選擇成本原封不動還回去）
+    expect(box.queryByRole("button", { name: /不該出現的第四個/ })).not.toBeInTheDocument();
+    expect(box.getByLabelText("要在哪個專案發起")).toBeInTheDocument();
+  });
+
+  it("已用過代理就不再佔版面", () => {
+    withPlaybooks();
+    seed({ runs: [run({ status: "done" })], summary: { hasRuns: true, health: "healthy" } });
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.queryByLabelText("起手式")).not.toBeInTheDocument();
+  });
+
+  it("按下起手式會帶著 playbookId 派工到選中的專案", async () => {
+    withPlaybooks();
+    seed({ runs: [], pending: [] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(screen.getByLabelText("起手式"));
+    await userEvent.click(box.getByRole("button", { name: /分鏡助理/ }));
+    expect(h.mutations).toEqual([{
+      path: "teamAssistant.dispatch",
+      input: { groupId: GROUP, projectId: "p1", goal: "把知識庫腳本拆成分鏡", playbookId: "playbook.storyboard.v1" },
+    }]);
+  });
+
+  it("換專案後派工到換過的那個專案", async () => {
+    withPlaybooks();
+    seed({ runs: [], pending: [] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(screen.getByLabelText("起手式"));
+    await userEvent.selectOptions(box.getByLabelText("要在哪個專案發起"), "p2");
+    await userEvent.click(box.getByRole("button", { name: /快速開拍/ }));
+    expect(h.mutations[0]).toMatchObject({ path: "teamAssistant.dispatch", input: { projectId: "p2" } });
+  });
+
+  it("沒有可派的專案時不渲染起手式（避免按了才發現沒地方去）", () => {
+    withPlaybooks();
+    seed({ runs: [], pending: [] });
+    h.queryData.set("projects.list", []);
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.queryByLabelText("起手式")).not.toBeInTheDocument();
+  });
+});
+
+describe("S5：組彙總 AI 的決策軌跡", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  /** ask 是 mutation：讓它回一個固定答案，驗畫面怎麼呈現 */
+  const askReturning = (reply: Record<string, unknown>) => {
+    h.askReply = reply;
+  };
+
+  it("顯示依據與用到的上下文標籤（不是 chain-of-thought）", async () => {
+    seed({ runs: [], pending: [] });
+    askReturning({
+      answer: "「招生短片」卡最久。",
+      steps: ["查了全組阻塞(2 項)"],
+      dispatches: [],
+      canDispatch: true,
+      rationale: "依阻塞清單，兩件逾期都集中在同一案。",
+      contextUsed: ["阻塞與人員負荷", "專案現況"],
+      degraded: false,
+    });
+    render(<Launchpad groupId={GROUP} />);
+    await userEvent.type(screen.getByLabelText("組彙總 AI"), "哪個案子卡住了？");
+    await userEvent.click(screen.getByRole("button", { name: "詢問" }));
+    expect(await screen.findByText(/依據：依阻塞清單/)).toBeInTheDocument();
+    expect(screen.getByText("阻塞與人員負荷")).toBeInTheDocument();
+    expect(screen.getByText("專案現況")).toBeInTheDocument();
+  });
+
+  it("阻塞資料讀不到時明確警示——不講的話這個回答看起來與完整資料下的沒有兩樣", async () => {
+    seed({ runs: [], pending: [] });
+    askReturning({
+      answer: "目前看起來還好。",
+      steps: [], dispatches: [], canDispatch: false,
+      rationale: undefined, contextUsed: ["專案現況"], degraded: true,
+    });
+    render(<Launchpad groupId={GROUP} />);
+    await userEvent.type(screen.getByLabelText("組彙總 AI"), "有人卡住嗎？");
+    await userEvent.click(screen.getByRole("button", { name: "詢問" }));
+    expect(await screen.findByText(/沒能讀到阻塞與人員任務資料/)).toBeInTheDocument();
+  });
+
+  it("沒有 rationale／contextUsed 時不渲染空殼", async () => {
+    seed({ runs: [], pending: [] });
+    askReturning({ answer: "簡短回答。", steps: [], dispatches: [], canDispatch: false, contextUsed: [], degraded: false });
+    render(<Launchpad groupId={GROUP} />);
+    await userEvent.type(screen.getByLabelText("組彙總 AI"), "隨便問問");
+    await userEvent.click(screen.getByRole("button", { name: "詢問" }));
+    expect(await screen.findByText("簡短回答。")).toBeInTheDocument();
+    expect(screen.queryByText(/^依據：/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/沒能讀到阻塞/)).not.toBeInTheDocument();
+  });
+});
+
+describe("就地裁決的權限與專案頁同一條規則", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  it("canDecideRun：組長恆可；組員只能裁自己發起的", () => {
+    expect(canDecideRun({ ownerId: "someone-else" }, true, "u1")).toBe(true);
+    expect(canDecideRun({ ownerId: "u1" }, false, "u1")).toBe(true);
+    expect(canDecideRun({ ownerId: "someone-else" }, false, "u1")).toBe(false);
+    // 還沒拿到自己的 id 時保守：不給按（寧可多一次點擊，也不要按了才吃 FORBIDDEN）
+    expect(canDecideRun({ ownerId: "u1" }, false, undefined)).toBe(false);
+    expect(canDecideRun({ ownerId: null }, false, "u1")).toBe(false);
+  });
+
+  it("組員看到別人發起的計畫 → 給深連結而不是必定失敗的「核准」鈕", () => {
+    seed({
+      runs: [run({ userId: "someone-else" })],
+      summary: { awaitingApproval: 1, active: 1, health: "attention" },
+    });
+    h.queryData.set("auth.me", {
+      user: { id: "u1", name: "阿光" },
+      groups: [{ groupId: GROUP, role: "member" }],
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(inbox());
+    expect(box.queryByRole("button", { name: "核准" })).not.toBeInTheDocument();
+    expect(box.getByRole("link", { name: "前往處理 →" })).toBeInTheDocument();
+  });
+
+  it("組員看到自己發起的計畫 → 可就地核准", () => {
+    seed({
+      runs: [run({ userId: "u1" })],
+      summary: { awaitingApproval: 1, active: 1, health: "attention" },
+    });
+    h.queryData.set("auth.me", {
+      user: { id: "u1", name: "阿光" },
+      groups: [{ groupId: GROUP, role: "member" }],
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(inbox()).getByRole("button", { name: "核准" })).toBeInTheDocument();
+  });
+});
+
+describe("阻塞清單截斷時的誠實度", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  it("明細被上限截斷、依專案統計是全量時，要把兩個數字的關係講清楚", () => {
+    seed({
+      runs: [],
+      insights: {
+        openTasks: 60, overdueTasks: 60,
+        blockers: Array.from({ length: 50 }, (_, i) => ({ severity: "warning", type: "overdue_task", label: `逾期 ${i}` })),
+        blockersTotal: 71,
+        people: [{ userId: "u1", name: "阿光", openTasks: 60, overdueTasks: 60, earliestDueAt: daysAgo(30) }],
+        byProject: [{ projectId: "p1", projectTitle: "招生短片", blockers: 71, criticalBlockers: 0, openTasks: 60, overdueTasks: 60, activeRuns: 0 }],
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(screen.getByLabelText("誰卡住了")).getByText(/共 71 項阻塞（明細只列前 50 項/)).toBeInTheDocument();
+  });
+
+  it("沒有截斷時不多嘴", () => {
+    seed({
+      runs: [],
+      insights: {
+        openTasks: 2, overdueTasks: 1,
+        blockers: [{ severity: "warning", type: "overdue_task", label: "逾期 1" }],
+        blockersTotal: 1,
+        people: [{ userId: "u1", name: "阿光", openTasks: 2, overdueTasks: 1, earliestDueAt: daysAgo(2) }],
+        byProject: [{ projectId: "p1", projectTitle: "招生短片", blockers: 1, criticalBlockers: 0, openTasks: 2, overdueTasks: 1, activeRuns: 0 }],
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(screen.getByLabelText("誰卡住了")).queryByText(/明細只列前/)).not.toBeInTheDocument();
   });
 });

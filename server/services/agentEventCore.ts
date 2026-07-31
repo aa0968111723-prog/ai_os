@@ -149,6 +149,8 @@ export interface ProjectAgentInsights {
   unresolvedInformation: number;
   risks: number;
   blockers: ProjectAgentBlocker[];
+  /** 截斷前的阻塞總數——blockers 只保留前 50 筆，組級歸屬與畫面說明都需要真實基數 */
+  blockersTotal: number;
   results: ProjectAgentResult[];
   workItems: ProjectAgentWorkItem[];
   truncated: { runs: boolean; tasks: boolean; results: boolean; workItems: boolean };
@@ -225,6 +227,55 @@ export const AGENT_INSIGHT_LIMITS = {
 } as const;
 
 /**
+ * 阻塞清單的唯一組裝處（純函式）。
+ *
+ * 抽出來的理由：組級要把阻塞歸屬到專案，必須用**未截斷**的完整清單。原本它直接讀
+ * assembleAgentInsights 回傳的 blockers，而那個陣列已經 slice 到 50 筆——同一列的
+ * 「N 項阻塞」來自截斷後的數字、「N 逾期」卻來自完整清單，於是會渲染出「3 項阻塞・9 逾期」
+ * 這種阻塞數小於逾期數的自相矛盾。更糟的是組裝順序固定（逾期 → 等待人員 → 失敗 → 缺資訊），
+ * 截斷永遠先砍掉後三類，逾期任務一多，「AI 停在這個專案等人核准」就整批不見。
+ */
+export function buildAgentBlockers(input: {
+  overdueTasks: AgentInsightTask[];
+  openTasks: AgentInsightTask[];
+  recentFailures: AgentInsightRun[];
+  activeRuns: AgentInsightRun[];
+}): ProjectAgentBlocker[] {
+  return [
+    ...input.overdueTasks.map((task) => ({
+      severity: task.priority === "urgent" || task.priority === "high" ? "critical" as const : "warning" as const,
+      type: "overdue_task" as const,
+      label: `任務逾期：${task.title}`,
+      taskId: task.id,
+      runId: task.planRunId ?? undefined,
+    })),
+    ...input.openTasks
+      .filter((task) => Boolean(task.wakeRunId))
+      .map((task) => ({
+        severity: "warning" as const,
+        type: "waiting_human" as const,
+        label: `${task.taskType === "approval" ? "等待核准" : "等待人員"}：${task.title}`,
+        taskId: task.id,
+        runId: task.wakeRunId ?? undefined,
+      })),
+    ...input.recentFailures.slice(0, AGENT_INSIGHT_LIMITS.recentFailuresInBlockers).map((run) => ({
+      severity: "critical" as const,
+      type: "failed_run" as const,
+      label: `代理失敗：${run.error ?? run.goal}`,
+      runId: run.id,
+    })),
+    ...input.activeRuns
+      .filter((run) => (run.planSummary?.missingInformation?.length ?? 0) > 0)
+      .map((run) => ({
+        severity: "warning" as const,
+        type: "missing_information" as const,
+        label: `計畫仍有待補資訊：${run.goal}`,
+        runId: run.id,
+      })),
+  ];
+}
+
+/**
  * 由 run 與人類任務列組出「代理洞察」（純函式）。
  *
  * 抽出來的理由：這段判斷（哪些算阻塞、逾期怎麼分級、待補資訊與風險怎麼數）原本埋在
@@ -261,38 +312,7 @@ export function assembleAgentInsights(
     (count, summary) => count + (summary.risks?.length ?? 0),
     0,
   );
-  const blockers: ProjectAgentBlocker[] = [
-    ...overdueTasks.map((task) => ({
-      severity: task.priority === "urgent" || task.priority === "high" ? "critical" as const : "warning" as const,
-      type: "overdue_task" as const,
-      label: `任務逾期：${task.title}`,
-      taskId: task.id,
-      runId: task.planRunId ?? undefined,
-    })),
-    ...openTasks
-      .filter((task) => Boolean(task.wakeRunId))
-      .map((task) => ({
-        severity: "warning" as const,
-        type: "waiting_human" as const,
-        label: `${task.taskType === "approval" ? "等待核准" : "等待人員"}：${task.title}`,
-        taskId: task.id,
-        runId: task.wakeRunId ?? undefined,
-      })),
-    ...recentFailures.slice(0, AGENT_INSIGHT_LIMITS.recentFailuresInBlockers).map((run) => ({
-      severity: "critical" as const,
-      type: "failed_run" as const,
-      label: `代理失敗：${run.error ?? run.goal}`,
-      runId: run.id,
-    })),
-    ...activeRuns
-      .filter((run) => (run.planSummary?.missingInformation?.length ?? 0) > 0)
-      .map((run) => ({
-        severity: "warning" as const,
-        type: "missing_information" as const,
-        label: `計畫仍有待補資訊：${run.goal}`,
-        runId: run.id,
-      })),
-  ];
+  const blockers: ProjectAgentBlocker[] = buildAgentBlockers({ overdueTasks, openTasks, recentFailures, activeRuns });
 
   const allResults = collectAgentResults(runs);
   const results = allResults.slice(0, AGENT_INSIGHT_LIMITS.results);
@@ -334,6 +354,7 @@ export function assembleAgentInsights(
     unresolvedInformation,
     risks,
     blockers: blockers.slice(0, AGENT_INSIGHT_LIMITS.blockers),
+    blockersTotal: blockers.length,
     results,
     workItems,
     truncated: {
@@ -474,6 +495,14 @@ export function assembleGroupAgentInsights(
   const base = assembleAgentInsights(runs, tasks, options);
   const now = options.nowMs ?? Date.now();
   const openTasks = tasks.filter((t) => t.status !== "done" && t.status !== "cancelled");
+  // 歸屬要用**未截斷**的阻塞清單重算一次：base.blockers 已 slice 到 50 筆，
+  // 拿它做統計會讓同一列的「N 項阻塞」與「N 逾期」來自不同基數（阻塞數還可能小於逾期數）。
+  const allBlockers = buildAgentBlockers({
+    overdueTasks: openTasks.filter((t) => t.dueAt && t.dueAt.getTime() < now),
+    openTasks,
+    recentFailures: runs.filter((r) => r.status === "failed" && r.updatedAt.getTime() >= now - AGENT_INSIGHT_LIMITS.recentMs),
+    activeRuns: runs.filter((r) => r.status === "awaiting_approval" || r.status === "running" || r.status === "waiting"),
+  });
 
   // ── 歸屬到專案 ──
   const rollups = new Map<string, GroupAgentProjectRollup>();
@@ -492,7 +521,7 @@ export function assembleGroupAgentInsights(
   // 阻塞帶的是 runId／taskId，要先建反查表才知道它屬於哪個專案
   const projectOfRun = new Map(runs.map((r) => [r.id, r.projectId] as const));
   const projectOfTask = new Map(tasks.map((t) => [t.id, t.projectId] as const));
-  for (const blocker of base.blockers) {
+  for (const blocker of allBlockers) {
     const projectId = (blocker.taskId ? projectOfTask.get(blocker.taskId) : undefined)
       ?? (blocker.runId ? projectOfRun.get(blocker.runId) : undefined);
     if (!projectId) continue;
@@ -611,7 +640,12 @@ export async function getGroupAgentInsights(
       .where(eq(schema.agentRuns.groupId, groupId))
       .orderBy(desc(schema.agentRuns.updatedAt))
       .limit(AGENT_INSIGHT_LIMITS.runs + 1),
-    listGroupTasks(auth, groupId, { limit: AGENT_INSIGHT_LIMITS.tasks + 1 }),
+    // openOnly 是必要的，不是最佳化：listGroupTasks 依 due_at ASC 排序，最早到期的
+    // 幾乎必然是早就完成的歷史任務。不帶 openOnly 時，300 筆預算會被 done/cancelled
+    // 佔滿，而下游一律先把它們過濾掉——結果 openTasks=0、people=[]、
+    // pendingApprovalTasks=[]，「誰卡住了」整段不渲染、收件匣漏掉所有人員核准節點。
+    // 也就是組越大、任務史越長，這個功能越確定失效（正是它要解決的那個問題）。
+    listGroupTasks(auth, groupId, { openOnly: true, limit: AGENT_INSIGHT_LIMITS.tasks + 1 }),
   ]);
   const runsTruncated = runRows.length > AGENT_INSIGHT_LIMITS.runs;
   const tasksTruncated = taskRows.length > AGENT_INSIGHT_LIMITS.tasks;

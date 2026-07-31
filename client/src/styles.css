@@ -3990,3 +3990,17 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 
 /* 今日工作台日期列：與「今日工作台」eyebrow 同行相黏——補間距 */
 .daily-date { margin-right: 12px; }
+
+/* 空組起手式（團隊分析卡第一屏） */
+.team-starters {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 10px);
+  background: var(--card2);
+}
+.team-starters__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.team-starters__head > strong { font-size: 13px; }
+.team-starters__list { display: flex; flex-wrap: wrap; gap: 8px; }
