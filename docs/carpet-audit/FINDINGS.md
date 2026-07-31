@@ -109,3 +109,11 @@ Detail: `paths ok, no auto findings`
 
 ---
 
+## 2026-07-31 · `e2e.models` 實機 ✅ pass
+
+**E2E：模型目錄／多模態生成（mock）** · 22/22
+
+文生圖／圖生圖／LLM／TTS／STT／交付／自檢全綠。
+
+---
+
