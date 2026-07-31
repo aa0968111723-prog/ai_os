@@ -56,6 +56,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "scenes.addDraft": "新增分鏡草稿",
   "scenes.addFromGeneration": "把成品加入分鏡",
   "scenes.setVisualFromGeneration": "設定分鏡畫面",
+  "scenes.setVisualFromAsset": "切換分鏡版本",
+  "scenes.refine": "以底圖修正分鏡畫面",
   "scenes.update": "更新分鏡",
   "scenes.move": "移動分鏡",
   "scenes.reorder": "重排分鏡順序",
