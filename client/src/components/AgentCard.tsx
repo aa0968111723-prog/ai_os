@@ -192,6 +192,7 @@ export function AgentCard({
   hideComposer = false,
   initialGoal,
   compactComposer = false,
+  initialKnowledgeIds,
 }: {
   projectId: string;
   canEdit: boolean;
