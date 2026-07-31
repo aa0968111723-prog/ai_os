@@ -54,7 +54,7 @@ export function PendingApprovalsBadge({ groupId }: { groupId: string }) {
           {rows.map((p) => (
             <Link
               key={p.projectId}
-              href={`/p/${p.projectId}`}
+              href={`/p/${p.projectId}?focus=pending`}
               className="menu-item"
               role="menuitem"
               onClick={close}

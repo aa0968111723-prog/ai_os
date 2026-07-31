@@ -3967,6 +3967,12 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   .mobile-nav button:active { transform: scale(.92); }
   .mobile-nav a.active,
   .mobile-nav button.active { color: var(--primary-ink); background: var(--primary-tint); }
+  .mobile-nav__icon-wrap { position: relative; display: inline-flex; }
+  .mobile-nav__dot {
+    position: absolute; top: -2px; right: -4px;
+    width: 8px; height: 8px; border-radius: 999px;
+    background: var(--danger, #c44); box-shadow: 0 0 0 2px var(--popover);
+  }
 
   /* 內容與浮動元素讓出分頁列高度（列高約 64px + safe-bottom）；
      未登入（無分頁列）維持原本留白，:has 不支援時多留白也不致遮擋 */

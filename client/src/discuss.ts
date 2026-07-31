@@ -8,8 +8,30 @@ export type DiscussRef = { refType: RefKind; refId: string; title: string };
 
 export const DISCUSS_EVENT = "aios:discuss";
 
+/**
+ * 手機交棒：MessagePanel 在 mobileCompact 時只有留言 sheet 開著才 mount——
+ * sheet 關著時事件會發進真空（實測「討論這個」在手機 100% 無反應）。
+ * 比照 setPlannerFocus 的交棒模式：先把 ref 暫存，ProjectPage 監聽事件開 sheet，
+ * MessagePanel 掛載時 takePendingDiscussRef() 補收。桌機（面板常駐）走原事件路徑，
+ * handler 內同步消費暫存避免殘留。
+ */
+const DISCUSS_PENDING_KEY = "aios:discuss-pending";
+
 export function discussInMessages(ref: DiscussRef): void {
+  try { sessionStorage.setItem(DISCUSS_PENDING_KEY, JSON.stringify(ref)); } catch { /* 隱私模式：僅事件路徑 */ }
   window.dispatchEvent(new CustomEvent<DiscussRef>(DISCUSS_EVENT, { detail: ref }));
+}
+
+export function takePendingDiscussRef(): DiscussRef | null {
+  try {
+    const raw = sessionStorage.getItem(DISCUSS_PENDING_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(DISCUSS_PENDING_KEY);
+    const ref = JSON.parse(raw) as DiscussRef;
+    return ref && typeof ref.refId === "string" && typeof ref.refType === "string" ? ref : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 跳到被引用的作品:各列表已掛 id={`${refType}-${refId}`} 錨點;找得到就捲過去+短暫高亮 */

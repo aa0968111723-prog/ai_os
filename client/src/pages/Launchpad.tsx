@@ -363,7 +363,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
           )}
 
           <section className="daily-status-grid" aria-label="今日摘要">
-            <a href="#projects" className="daily-status-card attention">
+            {/* 直落「待我裁決」收件匣（#ai-work 區）——先前連 #projects 還要自己找案子 */}
+            <a href="#ai-work" className="daily-status-card attention">
               <span className="daily-status-card__icon"><Icon name="Bell" size={18} /></span>
               <span><strong>{pendingTotal}</strong><small>待我處理</small></span>
               <span className="daily-status-card__detail">{pendingApprovals} 待審・{pendingGenerations} 待核</span>
@@ -1305,7 +1306,7 @@ function TeamAssistantCard({
                           </>
                         ) : (
                           /* 分鏡／生成刻意不就地裁決：不看內容就按核准等於盲簽 */
-                          <Link href={`/p/${d.projectId}`} title={meta.hint}>前往處理 →</Link>
+                          <Link href={`/p/${d.projectId}?focus=pending`} title={meta.hint}>前往處理 →</Link>
                         )}
                       </span>
                     </div>

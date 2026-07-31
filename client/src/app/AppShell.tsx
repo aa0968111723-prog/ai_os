@@ -66,6 +66,8 @@ export function AppShell() {
     logoutAll.mutate();
   };
   const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
+  // 手機底部列的私訊未讀訊號（30 秒輪詢，與頂欄 DmNavBadge 同頻；頂欄在 ≤820px 隱藏）
+  const dmUnread = trpc.dm.unread.useQuery(undefined, { enabled: !!me.data, refetchInterval: 30_000 });
 
   // 密度偏好下行同步（P1c）：登入後「第一次」拿到帳號偏好時，若與本機不同就採用帳號值。
   // 只採用一次（adoptedRef）——之後本機的切換以本機為準（AccountMenu 會同步上行），
@@ -196,7 +198,7 @@ export function AppShell() {
                 />
               </Suspense>
             </main>
-            <MobileNavigation />
+            <MobileNavigation dmUnread={dmUnread.data?.total ?? 0} />
           </>
         ) : (
           <Suspense fallback={<Meta as="p">載入中…</Meta>}>
