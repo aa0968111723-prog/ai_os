@@ -7,7 +7,7 @@ const SHOT = (n) => `${process.env.E2E_UI_OUT || "./e2e-ui-out"}/shot-${n}.png`;
 const results = [];
 const ok = (name, cond) => { results.push([cond ? "✅" : "❌", name]); console.log(cond ? "✅" : "❌", name); };
 
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium", headless: true });
+const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || "/opt/pw-browsers/chromium", headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
 // 登入

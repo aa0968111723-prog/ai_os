@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "description": "全站地毯式測試區塊清單。排程每 60 秒推進一格；可被 PR 變更觸發優先重測。",
+  "blocks": [
+    {
+      "id": "infra.health",
+      "title": "基礎設施：健康檢查／ready／selftest",
+      "paths": ["server/index.ts", "server/bootstrap/"],
+      "kind": "api",
+      "commands": ["curl -sf http://127.0.0.1:${PORT:-3000}/api/ready"]
+    },
+    {
+      "id": "e2e.auth",
+      "title": "E2E：登入／邀請／角色／多組隔離",
+      "paths": ["server/routers/auth.ts", "server/services/auth.ts", "scripts/e2e-auth.py"],
+      "kind": "e2e-py",
+      "suite": "auth"
+    },
+    {
+      "id": "e2e.models",
+      "title": "E2E：模型目錄／多模態生成（mock）",
+      "paths": ["shared/models.ts", "server/routers/generation.ts", "scripts/e2e-models.py"],
+      "kind": "e2e-py",
+      "suite": "models"
+    },
+    {
+      "id": "e2e.phase2",
+      "title": "E2E：世界觀／分鏡／審批／點數",
+      "paths": ["server/routers/scenes.ts", "server/routers/approvals.ts", "scripts/e2e-phase2.py"],
+      "kind": "e2e-py",
+      "suite": "phase2"
+    },
+    {
+      "id": "e2e.phase3",
+      "title": "E2E：工作流／導演／知識庫",
+      "paths": ["server/routers/workflows.ts", "server/routers/director.ts", "scripts/e2e-phase3.py"],
+      "kind": "e2e-py",
+      "suite": "phase3"
+    },
+    {
+      "id": "e2e.phase4",
+      "title": "E2E：素材／匯出／回收桶",
+      "paths": ["server/routers/projects.ts", "server/services/exporter.ts", "scripts/e2e-phase4.py"],
+      "kind": "e2e-py",
+      "suite": "phase4"
+    },
+    {
+      "id": "e2e.messages",
+      "title": "E2E：站內留言／反應／未讀",
+      "paths": ["server/routers/messages.ts", "scripts/e2e-messages.py"],
+      "kind": "e2e-py",
+      "suite": "messages"
+    },
+    {
+      "id": "e2e.databases",
+      "title": "E2E：自訂資料庫四層範圍",
+      "paths": ["server/routers/databases.ts", "server/services/databaseCore.ts", "scripts/e2e-databases.py"],
+      "kind": "e2e-py",
+      "suite": "databases"
+    },
+    {
+      "id": "e2e.mcp",
+      "title": "E2E：MCP 工具與上傳授權",
+      "paths": ["server/services/mcp.ts", "scripts/e2e-mcp.py"],
+      "kind": "e2e-py",
+      "suite": "mcp"
+    },
+    {
+      "id": "e2e.push",
+      "title": "E2E：Web Push 訂閱",
+      "paths": ["server/routers/push.ts", "scripts/e2e-push.py"],
+      "kind": "e2e-py",
+      "suite": "push"
+    },
+    {
+      "id": "e2e.export",
+      "title": "E2E：交付包／匯出任務",
+      "paths": ["server/routers/exportJobs.ts", "scripts/e2e-export.py"],
+      "kind": "e2e-py",
+      "suite": "export"
+    },
+    {
+      "id": "e2e.team-assistant",
+      "title": "E2E：團隊助手／派工",
+      "paths": ["server/routers/teamAssistant.ts", "scripts/e2e-team-assistant.py"],
+      "kind": "e2e-py",
+      "suite": "team-assistant"
+    },
+    {
+      "id": "e2e.agent",
+      "title": "E2E：AI 代理規劃／核准／執行",
+      "paths": ["server/services/agentCore.ts", "server/services/agentRunner.ts", "scripts/e2e-agent.py"],
+      "kind": "e2e-py",
+      "suite": "agent"
+    },
+    {
+      "id": "unit.server",
+      "title": "單元測試：server + shared",
+      "paths": ["server/", "shared/"],
+      "kind": "npm",
+      "command": "npm test"
+    },
+    {
+      "id": "unit.client",
+      "title": "單元測試：client",
+      "paths": ["client/"],
+      "kind": "npm",
+      "command": "npm run test:client"
+    },
+    {
+      "id": "static.agent-parallel",
+      "title": "靜態：代理並行開拍（DAG／MAX_PARALLEL）",
+      "paths": [
+        "server/services/agentRunner.ts",
+        "server/services/agentDag.ts",
+        "shared/agentSkills.ts"
+      ],
+      "kind": "static-review",
+      "focus": [
+        "startParallelGenerateBranches authz silent return",
+        "INTERNAL_SERVER_ERROR ghost generationId",
+        "fail-closed mid in-flight settle",
+        "scene target under parallel branches"
+      ]
+    },
+    {
+      "id": "static.acl-routers",
+      "title": "靜態：routers 寫入守衛 assertProjectEditable",
+      "paths": ["server/routers/"],
+      "kind": "static-review",
+      "focus": ["viewer bypass", "requireGroup only mutations", "soft-delete deletedAt"]
+    },
+    {
+      "id": "static.security",
+      "title": "靜態：SSRF／上傳／session／MCP 金鑰",
+      "paths": [
+        "server/services/storage.ts",
+        "server/services/http.ts",
+        "server/services/mcpAuth.ts",
+        "server/services/uploadGrants.ts",
+        "server/services/sessionPolicy.ts"
+      ],
+      "kind": "static-review"
+    },
+    {
+      "id": "ui.workbench",
+      "title": "UI：創作工作台／技能選單",
+      "paths": [
+        "client/src/features/creation-workbench/",
+        "shared/agentSkills.ts"
+      ],
+      "kind": "ui-playwright",
+      "script": "scripts/e2e-ui/verify-workbench.mjs"
+    },
+    {
+      "id": "ui.agent",
+      "title": "UI：代理卡生命週期",
+      "paths": ["client/src/components/AgentCard.tsx", "client/src/components/ProjectAssistant.tsx"],
+      "kind": "ui-playwright",
+      "script": "scripts/e2e-ui/verify-agent.mjs"
+    },
+    {
+      "id": "ui.routes",
+      "title": "UI：全路由 × 多 viewport 基線",
+      "paths": ["client/src/pages/", "client/src/App.tsx"],
+      "kind": "ui-playwright",
+      "script": "scripts/e2e-ui/audit-routes.mjs"
+    },
+    {
+      "id": "ui.breakpoints",
+      "title": "UI：MOB-04 水平溢出斷言",
+      "paths": ["client/src/styles.css", "client/src/styles.mobile-fab-01.css"],
+      "kind": "ui-playwright",
+      "script": "scripts/e2e-ui/audit-breakpoints.mjs"
+    },
+    {
+      "id": "ui.golden",
+      "title": "UI：黃金路徑全旅程",
+      "paths": ["client/src/pages/", "client/src/components/"],
+      "kind": "ui-playwright",
+      "script": "scripts/e2e-ui/golden-path.mjs"
+    },
+    {
+      "id": "folder.client-components",
+      "title": "區塊：client/components 目錄",
+      "paths": ["client/src/components/"],
+      "kind": "folder-scan"
+    },
+    {
+      "id": "folder.client-pages",
+      "title": "區塊：client/pages 目錄",
+      "paths": ["client/src/pages/"],
+      "kind": "folder-scan"
+    },
+    {
+      "id": "folder.server-services",
+      "title": "區塊：server/services 目錄",
+      "paths": ["server/services/"],
+      "kind": "folder-scan"
+    },
+    {
+      "id": "folder.server-routers",
+      "title": "區塊：server/routers 目錄",
+      "paths": ["server/routers/"],
+      "kind": "folder-scan"
+    },
+    {
+      "id": "folder.shared",
+      "title": "區塊：shared 契約",
+      "paths": ["shared/"],
+      "kind": "folder-scan"
+    }
+  ]
+}
