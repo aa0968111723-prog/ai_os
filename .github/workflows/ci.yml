@@ -47,7 +47,7 @@ jobs:
       - run: npm run test:client:coverage
       - name: 保存前端測試覆蓋率證據
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: client-coverage-${{ github.run_attempt }}
           path: coverage/
@@ -101,7 +101,7 @@ jobs:
           npx tsx scripts/ci-rate-limit-test.ts 2>&1 | tee /tmp/rate-limit-ci.log
       - name: 保存 migration 與 rate-limit 證據
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: migration-and-rate-limit-${{ github.run_attempt }}
           path: |
@@ -178,7 +178,7 @@ jobs:
           done
       - name: 保存 E2E 伺服器紀錄
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-server-logs-${{ github.run_attempt }}
           path: /tmp/server-*.log
@@ -205,7 +205,7 @@ jobs:
           test "$(docker image inspect ai-director-os:ci --format '{{json .Config.Healthcheck.Test}}')" != "null"
       - name: 保存正式映像驗證證據
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: container-inspect-${{ github.run_attempt }}
           path: /tmp/container-inspect.json

@@ -92,7 +92,7 @@ jobs:
           # 沒有 Apple 發布憑證時使用 ad-hoc 簽章，僅供內部測試；正式對外 DMG 必須加入 Developer ID 與 notarization secrets。
           APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos-14' && '-' || '' }}
         run: npx --yes @tauri-apps/cli@2 build --bundles "${{ matrix.bundles }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}-${{ github.sha }}
           path: ${{ matrix.paths }}
