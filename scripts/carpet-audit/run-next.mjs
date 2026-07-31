@@ -175,14 +175,17 @@ async function executeBlock(block) {
       if (!(await ensureServerReady())) {
         return { ok: false, detail: "server not ready for UI", findings };
       }
+      // audit-routes 等要求明確帳密；本地 carpet 用 seed 開發者（勿與 AUTH_MODE=dev 混用）
+      if (!process.env.TEST_EMAIL) process.env.TEST_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@aidirector.local";
+      if (!process.env.TEST_PW) process.env.TEST_PW = process.env.SEED_ADMIN_PASSWORD || "test-admin-123";
       const envNote = block.script?.includes("audit-routes")
-        ? "needs TEST_EMAIL/TEST_PW"
+        ? `TEST_EMAIL=${process.env.TEST_EMAIL}`
         : "";
       const r = await runCmd(
         "bash",
         [
           "-lc",
-          `export E2E_UI_BASE="\${E2E_UI_BASE:-http://127.0.0.1:${PORT}}" TARGET_URL="\${TARGET_URL:-http://127.0.0.1:${PORT}}"; node ${block.script}`,
+          `export E2E_UI_BASE="\${E2E_UI_BASE:-http://127.0.0.1:${PORT}}" TARGET_URL="\${TARGET_URL:-http://127.0.0.1:${PORT}}" TEST_EMAIL="\${TEST_EMAIL}" TEST_PW="\${TEST_PW}" PW_CHROMIUM="\${PW_CHROMIUM:-}"; node ${block.script}`,
         ],
         { timeoutMs: 20 * 60 * 1000 },
       );

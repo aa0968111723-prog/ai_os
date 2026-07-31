@@ -163,3 +163,26 @@ Detail: `exit=1`
 
 ---
 
+## 2026-07-31T06:08:42.024Z · `ui.routes` ❌ fail
+
+**UI：全路由 × 多 viewport 基線** · kind=`ui-playwright` · cycle=0 · cursor→21
+
+Detail: `exit=1 needs TEST_EMAIL/TEST_PW`
+
+---
+
+## 2026-07-31 · `ui.routes` ❌ fail（基建）
+
+**UI：全路由 × 多 viewport 基線** · kind=`ui-playwright`
+
+### Findings
+
+#### [low] CARPET-UI-ROUTES-CREDS: 缺 TEST_EMAIL/TEST_PW 即 fail-closed
+
+- **File**: `scripts/e2e-ui/audit-routes.mjs`
+- **Evidence**: `缺少 UI 巡覽測試環境變數：TEST_EMAIL, TEST_PW`
+- **Consequence**: carpet 未注入帳密時整格紅燈（設計為 fail-closed，非產品 bug）
+- **Fix**: run-next 對 ui-playwright 預設帶入 SEED_ADMIN_*；下輪可重跑 `--force-id=ui.routes`
+
+---
+
