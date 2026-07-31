@@ -1574,11 +1574,14 @@ export function ProjectPage({ id }: { id: string }) {
           </CollabZone>
         </div>
 
-        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度） */}
+        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。
+            id 是 ?focus=messages 深連結的桌機捲動錨點（approvals.deeplink 契約）——上一輪改版時遺失，補回 */}
         {!mobileCompact && (
-          <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-            <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
-          </CollabZone>
+          <div id="project-messages">
+            <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
+              <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+            </CollabZone>
+          </div>
         )}
       </div>
       </div>
