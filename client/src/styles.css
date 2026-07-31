@@ -3773,3 +3773,130 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .creation-resource-entry [role="group"] button { flex: none; }
   .project-page .toc-link { min-height: 44px; }
 }
+
+/* ── 單格工作室（SceneStudio）：把一格拉到全螢幕反覆修 ─────────────────
+   舞台（左，看畫面）＋工具（右，改東西）。`.modal-card` 預設 460px 是給
+   確認型對話框用的，這裡要能同時看清畫面與版本縮圖，故加寬並改成兩欄。 */
+.modal-card.scene-studio {
+  width: min(1120px, 100%);
+  max-height: min(92dvh, 100%);
+}
+.scene-studio__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-12);
+  margin-bottom: var(--sp-12);
+}
+.scene-studio__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: var(--sp-16);
+  align-items: start;
+}
+.scene-studio__stage {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.scene-studio__media {
+  width: 100%;
+  max-height: 62dvh;
+  object-fit: contain;
+  border-radius: var(--r-12);
+  background: var(--muted);
+}
+.scene-studio__stagebar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+}
+.scene-studio__narration {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12);
+  padding: var(--sp-8);
+  background: var(--card2);
+}
+.scene-studio__tools {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+.scene-studio__tabs {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: var(--sp-4);
+}
+.scene-studio__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 6px 12px;
+  font-size: var(--fs-13);
+  min-height: var(--touch-min);
+  border-radius: var(--r-8);
+  transition: background var(--dur-base), border-color var(--dur-base);
+}
+.scene-studio__tab.is-active {
+  border-color: var(--primary);
+  color: var(--primary-ink);
+}
+.scene-studio__base {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-8);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12);
+  padding: var(--sp-8);
+  background: var(--card2);
+}
+.scene-studio__versions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+  max-height: 46dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.scene-studio__version {
+  display: flex;
+  gap: var(--sp-8);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12);
+  padding: var(--sp-8);
+}
+.scene-studio__version.is-current {
+  border-color: var(--primary);
+  background: var(--card2);
+}
+/* 縮圖當按鈕：只是可點的圖，不要繼承全域 button 的外框與內距 */
+.scene-studio__vthumb {
+  padding: 0;
+  border: none;
+  background: none;
+  min-height: 0;
+  min-width: 0;
+  border-radius: var(--r-8);
+  cursor: pointer;
+}
+.scene-studio__vthumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--soft);
+  flex-shrink: 0;
+}
+@media (max-width: 900px) {
+  /* 窄螢幕改單欄：舞台在上、工具在下（先看畫面再動手，與桌機的閱讀順序一致） */
+  .scene-studio__body { grid-template-columns: minmax(0, 1fr); }
+  .scene-studio__media { max-height: 40dvh; }
+  .scene-studio__versions { max-height: none; }
+}
