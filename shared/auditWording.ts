@@ -172,6 +172,11 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "integrations.remove": "刪除外部資料庫／API 連接",
   "integrations.removeGoogleDrive": "中斷 Google 雲端連結",
   "integrations.googleDriveConnect": "連結 Google 雲端硬碟", // Express OAuth callback 手動補記
+  // Adobe 帳號（修圖／剪輯）
+  "adobe.connect": "連結 Adobe 帳號", // Express OAuth callback 手動補記
+  "adobe.disconnect": "中斷 Adobe 連結",
+  "adobe.editPhoto": "在 Adobe 帳號內修圖",
+  "adobe.renderTimeline": "在 Adobe 帳號內算圖剪輯",
   // 跨裝置通知（subscribe/sync 實務上審計豁免——高頻例行回報＋含裝置金鑰，列入字典保底）
   "push.subscribe": "連結通知裝置",
   "push.sync": "同步通知裝置",
@@ -241,7 +246,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   { key: "database", label: "自訂資料庫", prefixes: ["databases"] },
-  { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["mcpTokens", "mcp", "integrations"] },
+  { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["mcpTokens", "mcp", "integrations", "adobe"] },
 ];
 
 const OTHER_CATEGORY = { key: "other", label: "其他" } as const;

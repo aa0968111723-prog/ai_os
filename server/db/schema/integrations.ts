@@ -61,6 +61,43 @@ export const userIntegrations = pgTable("user_integrations", {
   userIdx: index("user_integrations_user_idx").on(t.userId),
 }));
 
+/**
+ * 外部帳號連結（#224 PR1）：使用者把「自己的」創作平台帳號接上來，AI 就在該帳號內動作
+ * （目前只有 adobe：修圖／剪輯）。與 user_integrations 的差別是這裡存的是 OAuth 雙 token：
+ * access token 有效期短、需要用 refresh token 續期，故 expires_at 與兩份密文都要落庫
+ * （user_integrations 只存單一長期憑證，塞進去會讓兩種語意混在同一張表）。
+ * 兩份 token 皆 AES-256-GCM 加密（iv:tag:cipher hex，金鑰由 services/integrations 的同一顆種子
+ * 分域派生 adobe-token:），原文永不回傳前端；meta 只放 email/帳號 id 等顯示用資訊。
+ * mode 記下這條連結是 mock 還是 real 模式建立的——切換模式後舊連結不可沿用（憑證語意不同）。
+ * 一人一個 provider 一條連結（重新連結＝覆蓋）。新表由正式 migration 建立。
+ */
+export const externalAccounts = pgTable("external_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  provider: text("provider", { enum: ["adobe"] }).notNull(),
+  /** 連結的外部帳號 email（自 userinfo 取得，僅供 UI 顯示辨識） */
+  accountEmail: text("account_email"),
+  /** 外部帳號的穩定 id（Adobe 為 IMS user id）——email 可變，稽核對照用這個 */
+  accountId: text("account_id"),
+  /** 加密後的 access token（短效，過期前自動以 refresh token 換新） */
+  accessTokenEnc: text("access_token_enc"),
+  /** 加密後的 refresh token（長效；沒有它就只能重新走一次授權） */
+  refreshTokenEnc: text("refresh_token_enc"),
+  /** access token 到期時刻（提前 5 分鐘視為過期，避免臨界點打到 401） */
+  expiresAt: timestamp("expires_at"),
+  /** 實際取得的授權範圍（空白分隔）——Adobe 可能只給部分，UI 據此顯示可用能力 */
+  scope: text("scope"),
+  mode: text("mode", { enum: ["mock", "real"] }).notNull().default("mock"),
+  /** error＝授權失效或解密失敗（金鑰輪替），UI 引導重新連結 */
+  status: text("status", { enum: ["active", "error"] }).notNull().default("active"),
+  lastError: text("last_error"),
+  lastUsedAt: timestamp("last_used_at"),
+  meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userProviderIdx: uniqueIndex("external_accounts_user_provider_idx").on(t.userId, t.provider),
+}));
+
 /** 排程項 ↔ Google 事件對應（每條連線一份），fingerprint 記上次推送內容摘要——沒變就跳過，省 API 配額 */
 export const googleEventLinks = pgTable("google_event_links", {
   id: uuid("id").primaryKey().defaultRandom(),
