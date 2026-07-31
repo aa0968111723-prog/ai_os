@@ -18,7 +18,7 @@ describe.skipIf(!RUN_PG).sequential("agent event trace (real PostgreSQL)", () =>
       name: "Event test",
       email: "event-test@example.test",
       isSuperAdmin: false,
-      mustChangePassword: false,
+      mustChangePassword: false, uiDensity: null,
     },
     groups: [{
       groupId,

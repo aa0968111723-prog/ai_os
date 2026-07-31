@@ -1,5 +1,6 @@
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState, useRef } from "react";
 import { useLocation } from "wouter";
+import { readUiDensity, writeUiDensity } from "../lib/densityPreference";
 import { trpc } from "../api";
 import { FeedbackWidget } from "../feedback/FeedbackWidget";
 import { NotificationSettingsDialog, PushSubscriptionSync } from "../components/NotificationSettings";
@@ -65,6 +66,17 @@ export function AppShell() {
     logoutAll.mutate();
   };
   const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
+
+  // 密度偏好下行同步（P1c）：登入後「第一次」拿到帳號偏好時，若與本機不同就採用帳號值。
+  // 只採用一次（adoptedRef）——之後本機的切換以本機為準（AccountMenu 會同步上行），
+  // 否則 me 快取裡的舊值會在重新整理查詢時把使用者剛切好的偏好蓋回去。
+  const densityAdoptedRef = useRef(false);
+  useEffect(() => {
+    const server = me.data?.user.uiDensity;
+    if (densityAdoptedRef.current || !server) return;
+    densityAdoptedRef.current = true;
+    if (readUiDensity() !== server) writeUiDensity(server);
+  }, [me.data]);
 
   // AUTH-01 sliding：掛載與回到前景時節流呼叫 touchSession（本地 6h），
   // server 僅在剩餘 < 7 天才寫 DB／刷新 cookie，避免每請求寫庫。

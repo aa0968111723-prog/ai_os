@@ -15,6 +15,9 @@ export const users = pgTable("users", {
   status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
   /** 管理員重設密碼後為 true：首次登入強制改密碼（changePassword 成功即清除） */
   mustChangePassword: boolean("must_change_password").notNull().default(false),
+  /** 介面密度偏好（P1c 跨裝置同步）。null＝未設定過，前端用預設 guide；
+   *  值域與 shared/uiDensity.ts 的 uiDensitySchema 一致，寫入端一律先過 zod。 */
+  uiDensity: text("ui_density", { enum: ["guide", "concise"] }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

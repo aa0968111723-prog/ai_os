@@ -58,7 +58,7 @@ describe("Policy Engine — auth.me capability payload (TD-05a)", () => {
     name: "測試",
     email: "t@example.com",
     isSuperAdmin: false,
-    mustChangePassword: false,
+    mustChangePassword: false, uiDensity: null,
   };
 
   function auth(over: Partial<AuthState> = {}): AuthState {

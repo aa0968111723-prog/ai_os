@@ -22,6 +22,14 @@ import { UI_DENSITY_DESCRIPTION, UI_DENSITY_LABEL } from "@shared/uiDensity";
 function DensityMenuItem({ onDone }: { onDone: () => void }) {
   const density = useDensity();
   const next = density === "guide" ? "concise" : "guide";
+  const utils = trpc.useUtils();
+  // 上行同步（P1c）：本機 localStorage 仍是即時來源——先寫本機讓畫面立刻切，
+  // 再 best-effort 帶到帳號。失敗只記 log 不打斷：單機行為與同步前完全一樣，
+  // 下次成功的切換自然會把最新值帶上去。
+  const setUiDensity = trpc.auth.setUiDensity.useMutation({
+    onSuccess: () => utils.auth.me.invalidate(),
+    onError: (err) => console.warn("[density] 偏好同步到帳號失敗（本機已生效）：", err.message),
+  });
   return (
     <button
       type="button"
@@ -31,6 +39,7 @@ function DensityMenuItem({ onDone }: { onDone: () => void }) {
       onClick={() => {
         onDone();
         writeUiDensity(next);
+        setUiDensity.mutate({ density: next });
       }}
     >
       <Icon name="HelpCircle" size={15} />

@@ -93,6 +93,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0012_session_device_meta",
   // 0013：純新增 upload_grants 表＋索引（皆 IF NOT EXISTS），可安全納入 bridge
   "0013_upload_grants",
+  // 0014：users 加 nullable ui_density 欄位（ADD COLUMN IF NOT EXISTS），可安全納入 bridge
+  "0014_good_jean_grey",
 ] as const;
 
 /**
