@@ -2906,10 +2906,12 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   padding: 4px 9px;
   border-radius: 999px;
   font-size: var(--fs-12);
-  color: var(--soft);
+  /* 未達成階段用 --fg-secondary 不用 --soft：--soft 定義行自帶「~3:1 不做文字」，
+     疊在 .scene-pipeline 底色上只有 2.93:1。這條流程引導最需要被讀到，不能是全頁最淡的字 */
+  color: var(--fg-secondary);
   white-space: nowrap;
 }
-/* 步驟之間畫一小段連接線，讀起來是一條路而不是五顆亂放的膠囊 */
+/* 步驟之間畫一小段連接線，讀起來是一條路而不是五顆亂放的膠囊——裝飾線才是 --soft 的用途 */
 .scene-pipeline__step + .scene-pipeline__step::before {
   content: "";
   width: 10px;
@@ -2942,9 +2944,11 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   font-weight: 600;
 }
 .scene-pipeline__step.is-current .scene-pipeline__num {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: var(--primary-contrast, #fff);
+  /* 實心底＋亮字要用 --primary-solid（4.69:1 過 AA）；--primary 是裝飾用相，
+     白字疊上去只有 4.14:1，而這顆是 10px 的 mono 數字，是全站最小字級之一 */
+  border-color: var(--primary-solid);
+  background: var(--primary-solid);
+  color: var(--primary-fg);
 }
 .scene-pipeline__hint {
   display: flex;
@@ -2991,15 +2995,25 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   margin-top: 10px;
 }
 .scene-deliver__advanced { margin-top: 10px; }
+/* summary 不在全站 44px 觸控下限的選擇器清單裡（那份只涵蓋 button/.btn/input/select…），
+   要像 .project-ctx-collapse > summary 一樣自己補；list-style:none 是為了 Firefox
+   也隱藏三角標記（::-webkit-details-marker 只管 WebKit）。 */
 .scene-deliver__advanced > summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  list-style: none;
   cursor: pointer;
   font-size: var(--fs-13);
-  color: var(--soft);
-  padding: 4px 0;
+  /* 交付中心的進階入口是文字不是裝飾線：--soft 只有 ~2.93:1，用 --fg-secondary 才過 AA */
+  color: var(--fg-secondary);
   user-select: none;
 }
-.scene-deliver__advanced > summary:hover { color: var(--ink); }
-.scene-deliver__advanced[open] > summary { color: var(--ink); }
+.scene-deliver__advanced > summary::-webkit-details-marker { display: none; }
+/* --ink 不存在（系統裡是 --fg／--primary-ink），寫錯會讓整條宣告 invalid、
+   靜默退化成繼承色——今天剛好看起來對，之後父層一改 color 就悄悄壞掉 */
+.scene-deliver__advanced > summary:hover { color: var(--fg); }
+.scene-deliver__advanced[open] > summary { color: var(--fg); }
 
 /* 分鏡視覺總覽：先看整體狀態，再展開需要操作的卡。 */
 .scene-overview {

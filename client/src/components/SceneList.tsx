@@ -45,6 +45,20 @@ type EditTargetKey = (typeof EDIT_TARGETS)[number]["key"];
 // 記住上次選的目標剪輯軟體（跨專案共用——同一位剪輯師用的軟體不會換來換去）
 const EDIT_TARGET_LS_KEY = "aios.edittarget";
 
+/**
+ * 單格分鏡：欄位逐一對齊 scenes.listByProject 的投影。
+ *
+ * 這裡**不宣告 narrationAssetId**，而且是刻意的：該欄位不在這支 procedure 的投影裡
+ * （只出現在 scenes.versions）。先前把它宣告成 optional，讓「這格有沒有旁白」的判斷
+ * 永遠是 falsy——流程條卡死在「配音」而使用者明明聽得到旁白，tsc 卻擋不下來。
+ * 少了這行宣告，同樣的誤用現在會直接編譯失敗。
+ *
+ * （不用 inferRouterOutputs 由 router 推導，是因為 ADR 009 禁止 client 匯入 server。）
+ *
+ * 判斷旁白好了沒一律看 narrationUrl：它來自濾過軟刪的 join，語意是「有可播的旁白」。
+ * scenes.narrationAssetId 在素材軟刪後會刻意保留（供回收桶還原），拿它判斷會讓
+ * 已刪旁白的格子假裝成「旁白 ✓」，還會與交付包（已濾軟刪）不一致。
+ */
 type Scene = {
   id: string;
   title: string;
@@ -57,11 +71,11 @@ type Scene = {
   assetUrl: string | null;
   assetKind: string | null;
   generationId: string | null;
-  // 平行後端補上：該格若有進行中的就地生成，回 queued/running；無則 null。
+  /** 該格若有進行中的「畫面」生成，回 queued/running；無則 null（後端已排除 narration）。 */
   pendingGenStatus?: string | null;
-  // 旁白配音（後端補上）：已落地旁白音檔的 asset id／可播 url，與進行中配音生成狀態。
-  narrationAssetId?: string | null;
+  /** 已生成且未軟刪的旁白音檔網址——判斷「這格有沒有旁白」的唯一依據。 */
   narrationUrl?: string | null;
+  /** 該格若有進行中的「配音」生成，回 queued/running；無則 null。 */
   pendingVoiceStatus?: string | null;
 };
 
@@ -236,7 +250,7 @@ function SceneRow({
   });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
-  // 配音生成中：後端背景 runner 完成後會回填 narrationAssetId，10 秒輪詢自動刷新
+  // 配音生成中：後端背景 runner 完成後會回填旁白音檔，10 秒輪詢自動刷新
   const isVoicing = s.pendingVoiceStatus === "queued" || s.pendingVoiceStatus === "running";
   const hasVoiceover = (s.voiceover ?? "").trim() !== "";
   const hasPrompt = (s.prompt ?? "").trim() !== "";
@@ -307,7 +321,7 @@ function SceneRow({
             <Meta style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
               <Icon name="Mic" size={11} /> 配音生成中…
             </Meta>
-          ) : s.narrationAssetId ? (
+          ) : s.narrationUrl ? (
             <Meta style={{ color: "var(--success-ink)", display: "inline-flex", alignItems: "center", gap: 3 }}>
               <Icon name="Mic" size={11} /> 旁白 ✓
             </Meta>
@@ -576,7 +590,10 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
   ];
 
   // ── C 流程引導：五階段，算出「現在卡在哪一步」與下一步提示 ──
-  const voicePending = list.filter((s) => (s.voiceover ?? "").trim() !== "" && !s.narrationAssetId).length;
+  // 判斷「這格旁白生成好了沒」一律看 narrationUrl，不要看 narrationAssetId：
+  // scenes.listByProject 的投影只有 narrationUrl（narrationAssets join 已濾軟刪），沒有 narrationAssetId。
+  // 型別上它是 optional 所以不會被 tsc 擋下，錯用只會安靜地永遠判為「沒有旁白」。
+  const voicePending = list.filter((s) => (s.voiceover ?? "").trim() !== "" && !s.narrationUrl).length;
   const unapproved = statusCounts.draft + statusCounts.needs_work;
   const allApproved = list.length > 0 && statusCounts.approved === list.length;
   const currentStage: StageKey =

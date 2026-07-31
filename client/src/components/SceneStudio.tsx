@@ -146,7 +146,11 @@ export function SceneStudio({
   const visualVersions = useMemo(() => list.filter((v) => v.role === "visual"), [list]);
   const narrationVersions = useMemo(() => list.filter((v) => v.role === "narration"), [list]);
   const currentVisual = visualVersions.find((v) => v.isCurrent);
-  const isGenerating = data?.summary.generating ?? false;
+  // 畫面的寫入 gate 只看 visual：summary.generating 不分 role（它的用途是決定輪詢節奏），
+  // 拿它擋修正/重畫會讓「配音生成中」連帶鎖死畫面——與後端明寫的
+  // 「旁白獨立於畫面，配音生成中不該擋住畫面重生，反之亦然」相反，
+  // 也與分鏡列不一致（listByProject 的 pendingGenStatus 已排除 narration）。
+  const isGenerating = visualVersions.some((v) => v.state === "generating");
 
   const refresh = () => {
     utils.scenes.versions.invalidate({ sceneId });

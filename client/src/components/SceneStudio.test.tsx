@@ -179,6 +179,36 @@ describe("SceneStudio", () => {
     expect(screen.getByRole("button", { name: "生成中…" })).toBeDisabled();
   });
 
+  it("配音生成中不鎖畫面：修正與重畫照樣可送（旁白與畫面互不阻擋）", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({
+        rows: [
+          genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" }),
+          // 進行中的是「旁白」生成——後端明寫兩者互不阻擋，分鏡列的 pendingGenStatus 也排除 narration。
+          // 若這裡改回吃 summary.generating（不分 role），下面兩個斷言會立刻紅。
+          genRow({
+            generationId: "g2",
+            createdAt: "2026-07-02T00:00:00.000Z",
+            sceneRole: "narration",
+            status: "running",
+            assetId: null,
+            assetUrl: null,
+            assetKind: null,
+          }),
+        ],
+      }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.type(screen.getByRole("textbox", { name: /要改哪裡/ }), "改天空");
+    expect(screen.getByRole("button", { name: /修正這張/ })).toBeEnabled();
+    await user.click(screen.getByRole("tab", { name: /重畫這格/ }));
+    expect(screen.getByRole("button", { name: /重畫這格（/ })).toBeEnabled();
+  });
+
   it("重畫這格用的是這一格的提示詞；提示詞空白就不給按", async () => {
     const user = userEvent.setup();
     mountStudio();
