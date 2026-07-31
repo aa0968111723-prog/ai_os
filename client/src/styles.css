@@ -1,9 +1,10 @@
-/* AI Director OS — 設計語言 v2「monastic-calm 沉靜弘法」
- * 主張：一張近乎純白的紙，安靜浮在一片暖灰的禪地上；層次靠明度階梯、髮絲線、
- * 兩層暖陰影與字階四件事撐起，顏色是儀式而非裝潢。全站同時只允許一顆飽和赤陶發聲。
- * （由多代理 UIUX 重設計工作流整合；P0 全域地基層。既有 class 契約全部保留。）
- * v2.1 全面優化：placeholder AA、checkbox 復原原生、40px 觸控、--*-rgb 單一色源、
- *   新增 .btn-sm/.spin/.result-text、summary/toc-current focus 與狀態。 */
+/* AI Director OS — 設計語言 v3「ribbon-light 彩帶白紙」（UIUX 大換殼）
+ * 主張：logo 是一條在純白上流動的彩帶（紅→橘→琥珀→黃綠→綠→藍綠），
+ * 整站因此回到「白紙」：表面全面提亮收斂成中性淺灰階，讓 logo 六色成為唯一的色彩語彙。
+ * 主色從赤陶換成 logo「A」的紅橘相；成功=logo 綠、協作=logo 藍綠、金=logo 琥珀、
+ * 危險=logo 紅——語意色全部對齊 logo 實測色值（自 v2 資產逐像素取樣）。
+ * 品牌緞帶漸層（--brand-ribbon）只在少數儀式位置發聲：頂欄髮絲線、進度條、splash。
+ * 既有 class 與變數名契約全部保留；全部文字/底色組合經 WCAG AA 對比驗證。 */
 
 /* ── Webfont（UIUX-03）────────────────────────────────────────────────────────
  * 此前全站沒有任何 webfont，--sans/--serif 只是 system-ui fallback 堆疊——
@@ -34,64 +35,73 @@
 @import "@fontsource/ibm-plex-mono/latin-600.css";
 
 :root {
-  color-scheme: light; /* OS 深色模式下鎖定亮色控件/自動填入/捲軸，貼合暖色調 */
+  color-scheme: light; /* OS 深色模式下鎖定亮色控件/自動填入/捲軸，貼合白紙基調 */
   /* ── 文字（--soft 僅裝飾，永不承載正文；全部校至 WCAG AA） ── */
-  --fg: #2b2620;
-  --fg-secondary: #6f6355;   /* meta/hint/lead/label，於卡面 ~4.6:1 過 AA */
-  /* disabled 主按鈕的文字色。舊值 #7a6e5e 的註解宣稱「placeholder/次級 label，~4.6:1」，
-   * 但那 4.6 是對照卡面 --card 算的，而它實際只用在 background: var(--muted) 的兩處
-   * disabled 按鈕上——在那個底色只有 4.12:1，未達 AA（部署站巡覽的 color-contrast 失敗就是它）。
-   * placeholder 也不是它，是 --fg-secondary。
-   * 改為在 --muted 上剛好過 4.5 的最淺值：4.57:1，且相對亮度仍高於 --fg-secondary，
+  --fg: #292524;             /* 中性暖黑：白卡上 15.2:1 */
+  --fg-secondary: #67615b;   /* meta/hint/lead/label，白卡 6.1:1、card2 5.6:1 過 AA */
+  /* disabled 主按鈕的文字色：只用在 background: var(--muted) 的 disabled 按鈕上，
+   * AA 必須對照 --muted 而非卡面算（v2 曾在這裡踩過 4.12:1 的洞）。
    * 明度階梯（fg > fg-secondary > muted-fg > soft）維持不變。 */
-  --muted-fg: #736758;
-  --soft: #9a8c78;           /* 裝飾線/hover 邊色 only，~3:1 不做文字 */
+  --muted-fg: #6b645d;       /* 於 --muted 上 5.07:1 過 AA */
+  --soft: #a49c93;           /* 裝飾線/hover 邊色 only，~3:1 不做文字 */
 
-  /* ── 表面階梯：明度單調遞增＋彩度往白收斂（解「單色米黃疲勞」核心） ── */
-  --surface-sunken: #e4dbc8; /* L~84 最深井：按壓態、進度槽底 */
-  --bg:      #e9e3d8;        /* L~89 頁底（暖灰，最沉靜） */
-  --muted:   #f0e9dc;        /* L~90 卡內凹陷填色：縮圖底、asset-icon、skeleton */
-  --field:   #f4ecdd;        /* L~91 輸入井（凹於卡面） */
-  --card2:   #f6efe3;        /* L~93 次級/巢狀表面：chip、upload-zone、gen-row、confirm */
-  --card:    #fdfbf6;        /* L~98 主表面「象牙紙」：卡片、badge、輸入 focus 態 */
-  --popover: #fffdfa;        /* L~99 浮層/選單/彈窗 */
+  /* ── 表面階梯：明度單調遞增＋彩度往白收斂（logo 的家就是白紙） ── */
+  --surface-sunken: #e6e2db; /* 最深井：按壓態、進度槽底 */
+  --bg:      #f0eee8;        /* 頁底（中性淺灰，微暖不搶色） */
+  --muted:   #f1efea;        /* 卡內凹陷填色：縮圖底、asset-icon、skeleton */
+  --field:   #f5f3ee;        /* 輸入井（凹於卡面） */
+  --card2:   #f6f5f1;        /* 次級/巢狀表面：chip、upload-zone、gen-row、confirm */
+  --card:    #ffffff;        /* 主表面「白紙」：卡片、badge、輸入 focus 態 */
+  --popover: #ffffff;        /* 浮層/選單/彈窗（與卡同白，靠 e3/e4 陰影分層） */
 
   /* ── 三段邊界（髮絲線＝編輯感） ── */
-  --border:        #e3d7c2;
-  --border-soft:   #ece3d3;
-  --border-strong: #d3c3a6;
+  --border:        #e2ded6;
+  --border-soft:   #ebe8e1;
+  --border-strong: #cfc9be;
 
-  /* ── 主色三分工：品牌相／實心底／淺底文字（解 AA 與「按鈕像壞掉」） ── */
-  --primary:              #c2613f; /* 品牌相：focus 環、選取邊、大字 accent（裝飾） */
-  --primary-rgb:          194 97 63; /* = --primary 通道值，供 rgb(var()/α) 半透明用；改色改這裡 */
-  --primary-solid:        #b0542f; /* 實心按鈕底：白字 4.69:1 過 AA */
-  --primary-solid-hover:  #9c4a28;
-  --primary-solid-active: #8a4022;
-  --primary-ink:          #a44b27; /* 淺底上赤陶文字/連結：5.5:1 過 AA */
-  --primary-fg:           #fff7f1;
-  --primary-tint:         #f6e7de; /* 選取/tonal 底 */
-  --primary-tint-hover:   #f0dccf; /* tonal hover 底 */
-  --primary-border:       #e7c6b4;
+  /* ── 主色三分工：品牌相／實心底／淺底文字（logo「A」的紅橘相） ── */
+  --primary:              #e05a10; /* 品牌相：focus 環、選取邊、大字 accent（logo 橘，白底 3.3:1 過非文字對比） */
+  --primary-rgb:          224 90 16; /* = --primary 通道值，供 rgb(var()/α) 半透明用；改色改這裡 */
+  --primary-solid:        #c23a0c; /* 實心按鈕底：白字 5.38:1 過 AA */
+  --primary-solid-hover:  #ad3407; /* 白字 6.42:1 */
+  --primary-solid-active: #992e06;
+  --primary-ink:          #b23508; /* 淺底上紅橘文字/連結：白卡 6.17:1、tint 5.44:1 過 AA */
+  --primary-fg:           #fff6f0;
+  --primary-tint:         #fdeee4; /* 選取/tonal 底 */
+  --primary-tint-hover:   #fbe2d2; /* tonal hover 底 */
+  --primary-border:       #f3c6ad;
 
-  /* ── 點綴（克制；各守一語意，含可讀 ink 檔） ── */
-  --healing: #9e86c4; --healing-ink: #6f5a97; --healing-soft: #ece5f2; --healing-rgb: 158 134 196;
-  /* gold-ink 原為 #8a6620，在 --gold-soft 上只有 4.39:1（全站 14 處用到這組），未達 AA。
-     調到 #856118＝4.72:1 留餘裕（#88641f 只有 4.51 太貼線）。 */
-  --gold:    #b58a3e; --gold-ink:    #856118; --gold-soft:    #f3ead6; --gold-rgb: 181 138 62;
-  --success: #57764c; --success-ink: #47623d; --success-soft: #e7eee1;
-  --danger:  #c7493a; --danger-ink:  #b23a2c; --danger-soft:  #f6e2de;
-  --collab:  #3b828e; --collab-ink:  #275c65; --collab-soft:  #e1eff1; --collab-rgb: 59 130 142;
+  /* ── 品牌緞帶六色（logo 逐像素實測；只做裝飾，不承載文字） ── */
+  --brand-red:    #c5161b;
+  --brand-orange: #f6771e;
+  --brand-amber:  #eba207;
+  --brand-lime:   #8db12a;
+  --brand-green:  #078f53;
+  --brand-teal:   #0b9d95;
+  --brand-ribbon: linear-gradient(90deg,
+    var(--brand-red) 0%, var(--brand-orange) 22%, var(--brand-amber) 40%,
+    var(--brand-lime) 56%, var(--brand-green) 76%, var(--brand-teal) 100%);
+  --brand-ribbon-soft: linear-gradient(90deg,
+    rgba(197,22,27,.10), rgba(246,119,30,.10), rgba(235,162,7,.08),
+    rgba(141,177,42,.08), rgba(7,143,83,.08), rgba(11,157,149,.10));
 
-  /* ── 立面：四階暖陰影（兩層、負擴散、暖褐調）＋材質 ── */
-  --e1: 0 1px 2px rgba(74,54,32,.06);
-  --e2: 0 1px 2px rgba(74,54,32,.06), 0 2px 6px -1px rgba(74,54,32,.09);
-  --e3: 0 2px 4px -1px rgba(74,54,32,.07), 0 8px 18px -6px rgba(74,54,32,.13);
-  --e4: 0 4px 8px -2px rgba(74,54,32,.10), 0 16px 36px -12px rgba(74,54,32,.20);
+  /* ── 點綴（各守一語意、全部對齊 logo 色相，含可讀 ink 檔；ink 皆 AA 驗證） ── */
+  --healing: #907cc6; --healing-ink: #63519e; --healing-soft: #eeeaf7; --healing-rgb: 144 124 198;
+  --gold:    #c8890a; --gold-ink:    #8a6116; --gold-soft:    #faf0d8; --gold-rgb: 200 137 10;
+  --success: #12934f; --success-ink: #0e7a43; --success-soft: #e3f3e9;
+  --danger:  #d2231f; --danger-ink:  #b3231e; --danger-soft:  #fdecea;
+  --collab:  #0f918a; --collab-ink:  #0b6e69; --collab-soft:  #e0f2f1; --collab-rgb: 15 145 138;
+
+  /* ── 立面：四階中性陰影（兩層、負擴散；白紙上陰影要乾淨不帶褐） ── */
+  --e1: 0 1px 2px rgba(28,25,23,.06);
+  --e2: 0 1px 2px rgba(28,25,23,.06), 0 2px 6px -1px rgba(28,25,23,.09);
+  --e3: 0 2px 4px -1px rgba(28,25,23,.07), 0 8px 18px -6px rgba(28,25,23,.13);
+  --e4: 0 4px 8px -2px rgba(28,25,23,.10), 0 16px 36px -12px rgba(28,25,23,.20);
   --shadow: var(--e2);                              /* 向後相容 */
-  --hl-top: inset 0 1px 0 rgba(255,255,255,.5);     /* 頂緣受光（精修：黏土→精緻紙面，陰影更俐落） */
-  --inset-well: inset 0 1px 2px rgba(74,54,32,.07); /* 輸入井內凹 */
-  --scrim: rgba(43,38,32,.32);
-  --cover-veil: rgba(43,38,32,.16);
+  --hl-top: inset 0 1px 0 rgba(255,255,255,.5);     /* 頂緣受光 */
+  --inset-well: inset 0 1px 2px rgba(28,25,23,.07); /* 輸入井內凹 */
+  --scrim: rgba(28,25,23,.34);
+  --cover-veil: rgba(28,25,23,.14);
 
   /* ── 字體（自帶 webfont 打頭；後方 fallback 保留，字型還沒下載完或載入失敗時
    *    仍走受控堆疊，永遠繞開細明體 PMingLiU） ── */
@@ -201,9 +211,9 @@ body {
   margin: 0; background: var(--bg); color: var(--fg);
   font-family: var(--sans); font-size: var(--fs-15); line-height: 1.6; -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  /* 環境光降到耳語級（三色光合法時刻之一） */
-  background-image: radial-gradient(120% 80% at 85% -10%, rgba(224, 178, 132, 0.16), transparent 55%),
-    radial-gradient(80% 60% at 5% 5%, rgb(var(--healing-rgb) / 0.10), transparent 52%);
+  /* 環境光降到耳語級：緞帶兩端的橘與藍綠各在對角落各打一盞極淡的光 */
+  background-image: radial-gradient(120% 80% at 85% -10%, rgba(246, 119, 30, 0.07), transparent 55%),
+    radial-gradient(80% 60% at 5% 5%, rgba(11, 157, 149, 0.06), transparent 52%);
   /* fixed 在 iOS 捲動時易閃爍／耗電——僅在可 hover 的桌面裝置啟用 */
   background-attachment: scroll;
   /* 100dvh：手機動態工具列不會裁切底部；safe-area 給瀏海／Home 指示條 */
@@ -236,6 +246,12 @@ body {
   /* 與內容同寬時補一條髮絲，捲動才有「浮在上面」的分界 */
   border-bottom: 1px solid transparent;
 }
+/* 品牌緞帶髮絲線：頂欄底部一條 2px 的 logo 六色漸層——全站最高頻的儀式位置 */
+.topbar::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: var(--brand-ribbon); opacity: .5; pointer-events: none;
+  border-radius: 999px;
+}
 
 .brand {
   display: inline-flex; align-items: center; gap: 8px;
@@ -257,8 +273,9 @@ body {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto;
 }
 .orb { width: 22px; height: 22px; border-radius: 50%; flex: none;
-  background: conic-gradient(from 210deg, var(--primary), var(--gold), var(--healing), var(--primary));
-  box-shadow: 0 0 0 3px var(--healing-soft), 0 2px 8px -2px rgba(158, 134, 196, 0.4); }
+  background: conic-gradient(from 210deg, var(--brand-red), var(--brand-orange), var(--brand-amber),
+    var(--brand-lime), var(--brand-green), var(--brand-teal), var(--brand-red));
+  box-shadow: 0 0 0 3px var(--collab-soft), 0 2px 8px -2px rgba(11, 157, 149, 0.4); }
 
 /* ── BrandLogo（Aios 單一品牌入口） ── */
 .brand-logo {
@@ -268,7 +285,7 @@ body {
 .brand-logo--mark {
   display: block; object-fit: contain; flex: none;
   /* 輕微立體感，避免方圖貼死 */
-  filter: drop-shadow(0 1px 2px rgba(70, 56, 44, 0.08));
+  filter: drop-shadow(0 1px 2px rgba(28, 25, 23, 0.08));
 }
 .brand-logo--img {
   flex-direction: column; align-items: center; gap: 8px;
@@ -280,7 +297,7 @@ body {
   max-width: 100%; height: auto;
 }
 .brand-logo__full-img {
-  filter: drop-shadow(0 1px 2px rgba(70, 56, 44, 0.06));
+  filter: drop-shadow(0 1px 2px rgba(28, 25, 23, 0.06));
 }
 .brand-logo__mark-fallback { display: none; }
 .brand-logo__text {
@@ -309,7 +326,7 @@ body {
   color: var(--fg-secondary);
 }
 .brand-logo--hero .brand-logo__full-img {
-  filter: drop-shadow(0 6px 16px rgba(70, 56, 44, 0.10));
+  filter: drop-shadow(0 6px 16px rgba(28, 25, 23, 0.10));
 }
 .brand-logo--tone-monochrome .brand-logo__name { color: var(--fg); }
 
@@ -322,7 +339,7 @@ body {
 }
 .brand .brand-logo__mark-fallback {
   width: 26px; height: 26px;
-  filter: drop-shadow(0 1px 1px rgba(70, 56, 44, 0.06));
+  filter: drop-shadow(0 1px 1px rgba(28, 25, 23, 0.06));
 }
 @media (max-width: 560px) {
   .brand-logo--responsive .brand-logo__full-img { display: none; }
@@ -571,10 +588,10 @@ a:hover { color: var(--primary-solid-hover); }
   border-radius: var(--r-12); padding: 16px; box-shadow: var(--e4); }
 .confirm-panel h3 { font-size: 15px; }
 
-/* 空狀態柔光（三色光合法時刻） */
+/* 空狀態柔光（logo 緞帶三段：橘／綠／琥珀） */
 .empty-state { text-align: center; padding: var(--sp-48) var(--sp-24); border-radius: var(--radius);
   background: radial-gradient(circle at 32% 30%, rgb(var(--primary-rgb) / 0.10), transparent 60%),
-    radial-gradient(circle at 70% 42%, rgb(var(--healing-rgb) / 0.10), transparent 60%),
+    radial-gradient(circle at 70% 42%, rgba(7, 143, 83, 0.08), transparent 60%),
     radial-gradient(circle at 50% 82%, rgb(var(--gold-rgb) / 0.08), transparent 62%); }
 .empty-state h3 { font-family: var(--serif); font-size: 18px; margin: 0 0 8px; }
 .empty-state p { color: var(--fg-secondary); }
@@ -594,6 +611,8 @@ button:focus-visible, a:focus-visible, select:focus-visible, .badge:focus-visibl
 button:focus-visible { border-radius: 999px; }
 
 /* 捲軸細緻化 */
+/* 文字選取：logo 橘的淺暈，選取時也在品牌語彙裡 */
+::selection { background: rgb(var(--primary-rgb) / .22); }
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -1164,10 +1183,10 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .map-node.note circle { fill: var(--primary); stroke: #fff; stroke-width: 1; }
 .map-node.schedule circle { fill: var(--gold); stroke: #fff; stroke-width: 1; }
 .map-node.knowledge circle { fill: var(--success); stroke: #fff; stroke-width: 1; }
-.map-node.agent circle { fill: #7c5cbf; stroke: #fff; stroke-width: 1; }
-.map-node.db circle { fill: #3d7f8c; stroke: #fff; stroke-width: 1; }
-.map-node.dbhub rect { fill: var(--card); stroke: #3d7f8c; stroke-width: 1.4; }
-.map-node.dbhub text { fill: #3d7f8c; font-weight: 600; }
+.map-node.agent circle { fill: var(--healing); stroke: #fff; stroke-width: 1; }
+.map-node.db circle { fill: var(--collab); stroke: #fff; stroke-width: 1; }
+.map-node.dbhub rect { fill: var(--card); stroke: var(--collab); stroke-width: 1.4; }
+.map-node.dbhub text { fill: var(--collab-ink); font-weight: 600; }
 .map-node.dbhub.clickable:hover rect { stroke-width: 1.8; }
 .map-node.note text, .map-node.schedule text, .map-node.knowledge text, .map-node.agent text, .map-node.db text { font-size: 11px; fill: var(--fg-secondary); }
 .map-node.clickable:hover text { fill: var(--fg); }
@@ -1185,8 +1204,8 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .map-dot.sched { background: var(--gold); }
 .map-dot.schedule { background: var(--gold); }
 .map-dot.knowledge { background: var(--success); }
-.map-dot.agent { background: #7c5cbf; }
-.map-dot.db { background: #3d7f8c; }
+.map-dot.agent { background: var(--healing); }
+.map-dot.db { background: var(--collab); }
 .map-dot.proj { background: var(--card); border: 1.4px solid var(--primary-border); }
 .map-dot.bucket { background: var(--card); border: 1.4px solid var(--border-strong); }
 /* 圖例即開關（知識地圖）：關閉的型別壓淡；配色沿用對應 map-dot */
@@ -1500,8 +1519,9 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
   transition: transform var(--dur-fast), background var(--dur-base), border-color var(--dur-base), box-shadow var(--dur-base);
 }
 .btn:hover { color: var(--fg); background: var(--card2); border-color: var(--border-strong); }
-.btn.primary { background: var(--primary-solid); color: var(--primary-fg); border-color: transparent; box-shadow: var(--e1); }
-.btn.primary:hover { background: var(--primary-solid-hover); color: var(--primary-fg); box-shadow: var(--e2); }
+/* 主按鈕＝logo「A」的紅→橘緞帶；兩端點皆為白字 AA（#c5161b 5.9:1、#c23a0c 5.4:1） */
+.btn.primary { background: linear-gradient(120deg, var(--brand-red), var(--primary-solid)); color: var(--primary-fg); border-color: transparent; box-shadow: var(--e1); }
+.btn.primary:hover { background: linear-gradient(120deg, #a81216, var(--primary-solid-hover)); color: var(--primary-fg); box-shadow: var(--e2); }
 
 .public-site { min-height: 100dvh; }
 .public-header {
@@ -1574,6 +1594,15 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
   position: relative; min-height: 250px; padding: 28px;
   border: 1px solid var(--border); border-radius: 18px; background: var(--card); box-shadow: var(--e1);
 }
+/* 能力卡：頂緣藏一條緞帶髮絲，hover 亮起；圖示依卡序輪用 logo 三色 ink */
+.landing-capability::before {
+  content: ""; position: absolute; top: -1px; left: 18px; right: 18px; height: 3px;
+  border-radius: 999px; background: var(--brand-ribbon); opacity: 0;
+  transition: opacity var(--dur-base); pointer-events: none;
+}
+.landing-capability:hover::before { opacity: .85; }
+.landing-capability:nth-child(3n+2) > svg { color: var(--success-ink); }
+.landing-capability:nth-child(3n) > svg { color: var(--collab-ink); }
 /* 序號用 fg-secondary 而非 border-strong：邊框 token 當文字只有 ~1.7:1，
    20px 未達 WCAG「大字」門檻（24px+），一樣要過 4.5:1（fg-secondary 4.6:1）。 */
 .landing-capability__number { position: absolute; right: 22px; top: 18px; color: var(--fg-secondary); font: 20px var(--serif); }
@@ -1587,10 +1616,10 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
   border-radius: 24px; background: var(--fg); color: var(--card);
 }
 .landing-trust h2 { margin-bottom: 0; color: var(--card); }
-.landing-trust .eyebrow { color: #efb79f; }
+.landing-trust .eyebrow { color: #ffb27a; }
 .landing-trust ul { display: grid; gap: 17px; margin: 0; padding: 0; list-style: none; }
-.landing-trust li { display: flex; gap: 10px; align-items: flex-start; color: #eee5d8; }
-.landing-trust li svg { flex: none; margin-top: 4px; color: #efb79f; }
+.landing-trust li { display: flex; gap: 10px; align-items: flex-start; color: #efedea; }
+.landing-trust li svg { flex: none; margin-top: 4px; color: #5fd0a8; }
 .public-footer { display: flex; align-items: center; gap: 8px; min-height: 72px; border-top: 1px solid var(--border); color: var(--fg-secondary); font-size: 13px; }
 .public-footer a { min-height: 44px; display: inline-flex; align-items: center; }
 
@@ -2603,8 +2632,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   display: grid;
   place-items: center;
   border-radius: 12px;
-  background: linear-gradient(145deg, var(--healing-soft), var(--primary-tint));
-  color: var(--healing-ink);
+  background: linear-gradient(145deg, var(--collab-soft), var(--primary-tint));
+  color: var(--collab-ink);
   font: 17px/1 var(--serif);
 }
 .dm-item-copy { min-width: 0; display: grid; }
@@ -2662,7 +2691,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   height: 100%;
   display: block;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--primary), var(--gold));
+  background: var(--brand-ribbon);
   transition: width var(--dur-slow);
 }
 .project-guide .visual-journey {
@@ -2779,7 +2808,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   border-radius: 0;
   padding: 0;
   margin: 0;
-  background: rgba(43, 38, 32, 0.36);
+  background: rgba(28, 25, 23, 0.36);
   cursor: pointer;
   pointer-events: auto;
 }
@@ -3138,7 +3167,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .creation-skill-menu__label {
   display: block; margin: 0 0 8px;
   font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
-  /* --muted 是**表面**色（#f0e9dc，近乎白），被誤當文字色配 --card 底只有 1.09:1，
+  /* --muted 是**表面**色（#f1efea，近乎白），被誤當文字色配 --card 底只有 1.09:1，
      等於看不見。應該是 --muted-fg／--fg-secondary 才對。 */
   text-transform: none; color: var(--fg-secondary); opacity: 0.9;
 }
@@ -4246,7 +4275,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     position: fixed; z-index: 46; inset: 0;
     display: block; width: 100%; height: 100%;
     padding: 0; border: 0; border-radius: 0;
-    background: rgba(43, 38, 32, .38);
+    background: rgba(28, 25, 23, .38);
   }
   .menu-surface.is-sheet {
     position: fixed; z-index: 47; inset-inline: 0; top: auto; bottom: 0;
@@ -4280,7 +4309,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     position: fixed; z-index: 46; inset: 0;
     display: block; width: 100%; height: 100%;
     padding: 0; border: 0; border-radius: 0;
-    background: rgba(43, 38, 32, .38);
+    background: rgba(28, 25, 23, .38);
   }
   .mobile-more-sheet {
     position: fixed; z-index: 47; inset-inline: 0; bottom: 0;

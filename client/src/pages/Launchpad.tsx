@@ -36,14 +36,14 @@ function relTime(d: Date | string): string {
   return days < 30 ? `${days} 天前` : new Date(d).toLocaleDateString("zh-TW");
 }
 
-/** 封面色帶：以 id 雜湊選一組低彩度暖色（克制、不喧賓奪主；三色光只在此低聲出現） */
+/** 封面色帶：以 id 雜湊選一段 logo 緞帶的粉彩化身（紅／橘／琥珀／黃綠／綠／藍綠，低彩度不喧賓奪主） */
 const COVERS = [
-  "linear-gradient(135deg, #efe3d4, #e6d4bf)",
-  "linear-gradient(135deg, #ece4d0, #ddceb4)",
-  "linear-gradient(135deg, #ece0e6, #dccfe0)",
-  "linear-gradient(135deg, #efe6cf, #e4d5b6)",
-  "linear-gradient(135deg, #e7e7dc, #d5d6c6)",
-  "linear-gradient(135deg, #f0e2da, #e6cfc2)",
+  "linear-gradient(135deg, #fbe7e6, #f6cfcc)", // 緞帶紅
+  "linear-gradient(135deg, #fdeadb, #f9d4b6)", // 緞帶橘
+  "linear-gradient(135deg, #fbf0d6, #f4e0ac)", // 緞帶琥珀
+  "linear-gradient(135deg, #eff4dc, #dfe9bb)", // 緞帶黃綠
+  "linear-gradient(135deg, #e2f3ea, #c3e6d2)", // 緞帶綠
+  "linear-gradient(135deg, #e0f3f2, #bfe5e3)", // 緞帶藍綠
 ];
 function coverOf(id: string): string {
   let h = 0;
