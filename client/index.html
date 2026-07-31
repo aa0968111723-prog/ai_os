@@ -2,7 +2,10 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- interactive-widget=resizes-content：鍵盤彈出時讓版面視窗跟著縮，貼底 sheet 的
+         輸入列與送出鈕才不會被蓋住（Chrome／Android）。Safari 尚未支援，由
+         client/src/lib/keyboardInset.ts 的 visualViewport 監聽補上 --kb-inset。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="description" content="Aios — AI 創作作業系統" />
     <meta name="theme-color" content="#e9e3d8" />
     <meta name="color-scheme" content="light" />

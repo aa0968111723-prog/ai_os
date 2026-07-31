@@ -1276,6 +1276,8 @@ audio.dm-attach-media { height: 36px; }
 .modal-scrim {
   position: fixed;
   inset: 0;
+  /* 讓開虛擬鍵盤：≤560px 對話框改貼底抽屜，鍵盤會直接蓋住表單欄位與確認鈕 */
+  bottom: var(--kb-inset, 0px);
   z-index: 50;
   display: grid;
   place-items: center;
@@ -2664,6 +2666,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   align-items: flex-end;
   justify-content: center;
   pointer-events: none;
+  /* 讓開虛擬鍵盤：底緣抬到鍵盤上方，留言輸入列與送出鈕才不會被蓋住。
+     桌機與「版面視窗會自己縮」的 Android 上 --kb-inset 為 0，行為不變。 */
+  bottom: var(--kb-inset, 0px);
 }
 .project-messages-sheet-backdrop {
   position: absolute;
@@ -2681,7 +2686,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   position: relative;
   z-index: 1;
   width: min(100%, 560px);
-  max-height: min(85vh, 720px);
+  /* dvh 而非 vh：鍵盤／網址列改變可用高度時，sheet 要跟著縮而不是把輸入列推到畫面外 */
+  max-height: min(85dvh, 720px);
   display: flex;
   flex-direction: column;
   margin: 0;
