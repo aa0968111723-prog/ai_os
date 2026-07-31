@@ -98,6 +98,11 @@ const UA_MAX = 240;
 export type SessionCreateMeta = {
   userAgent?: string | null;
   ip?: string | null;
+  /**
+   * 簽發這筆 session 的已信任裝置（user_devices.id）。裝置信任關閉或既有流程未帶時為 null。
+   * 有值時「移除裝置」會連帶刪掉這筆 session（見 services/deviceTrust.revokeDevice）。
+   */
+  deviceId?: string | null;
 };
 
 /** Truncate UA for storage (max 240). Empty → null. */
@@ -130,17 +135,26 @@ export function hashSessionIp(
   return sha256(`${trimmed}|${pepper}`);
 }
 
-export async function createSession(userId: string, meta?: SessionCreateMeta): Promise<string> {
+export async function createSession(
+  userId: string,
+  meta?: SessionCreateMeta,
+  /**
+   * 交易控制代碼（結構化型別，比照 revokeAllUserMcpTokens 慣例）：
+   * 裝置信任要「記裝置＋發 session」原子完成，不可留下「裝置記了但 session 沒發」的半套狀態。
+   */
+  exec: { insert: typeof db.insert } = db,
+): Promise<string> {
   const token = randomBytes(32).toString("hex");
   const expiresAt = nextSessionExpiry();
   const now = new Date();
-  await db.insert(schema.sessions).values({
+  await exec.insert(schema.sessions).values({
     tokenHash: sha256(token),
     userId,
     expiresAt,
     lastSeenAt: now,
     userAgent: truncateUserAgent(meta?.userAgent),
     ipHash: hashSessionIp(meta?.ip),
+    deviceId: meta?.deviceId ?? null,
   });
   return token;
 }
@@ -289,16 +303,20 @@ export function parseCookies(req: Request): Record<string, string> {
   return out;
 }
 
+// ★用 res.append 不用 res.setHeader：裝置綁定（services/deviceTrust）會在同一個回應裡
+// 再設一個 aidos_device cookie，而 setHeader 會覆寫整個 Set-Cookie 標頭——先設裝置再設
+// session 會把裝置 cookie 洗掉（下次登入又被當陌生裝置），反之亦然。append 疊加後兩者
+// 並存且與呼叫順序無關。每條回應路徑最多設一次 session cookie，故對既有行為無影響。
 export function setSessionCookie(res: Response, token: string): void {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  res.setHeader(
+  res.append(
     "Set-Cookie",
     `${COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_DAYS * 86_400}${secure}`,
   );
 }
 
 export function clearSessionCookie(res: Response): void {
-  res.setHeader("Set-Cookie", `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`);
+  res.append("Set-Cookie", `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`);
 }
 
 export function getSessionToken(req: Request): string | undefined {

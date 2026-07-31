@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "./interactions";
 import { Button, Card, Chip, Hint, Meta } from "./ui";
+import { deviceDetailLines } from "@shared/deviceDetails";
 import {
   copyLinkDeviceGuide,
   deviceKind,
@@ -78,6 +79,19 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
       await utils.auth.listSessions.invalidate();
     },
   });
+  // 信任裝置（免驗證碼直接登入的機器）——與上面 push.devices（推播訂閱）、
+  // listSessions（現在還開著的登入）是三件不同的事，命名刻意分開避免混淆。
+  const trustedDevices = trpc.auth.listDevices.useQuery();
+  const revokeDevice = trpc.auth.revokeDevice.useMutation({
+    onSuccess: async (r) => {
+      // 移除本裝置＝連 session 一起被刪，要回登入頁而不是刷新清單
+      if (r.self) {
+        await utils.auth.me.invalidate();
+        return;
+      }
+      await Promise.all([utils.auth.listDevices.invalidate(), utils.auth.listSessions.invalidate()]);
+    },
+  });
 
   const [thisEndpoint, setThisEndpoint] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -85,6 +99,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<{ id: string; endpoint: string; label: string } | null>(null);
   const [confirmRevokeSession, setConfirmRevokeSession] = useState<{ id: string; label: string; isCurrent: boolean } | null>(null);
+  const [confirmRevokeDevice, setConfirmRevokeDevice] = useState<{ id: string; label: string; isCurrent: boolean } | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef, true, onClose);
 
@@ -439,6 +454,102 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
             </Button>
           </div>
         </section>
+
+        {/*
+          信任裝置（與上方「登入裝置」不同層次，容易混淆故標題與說明都寫清楚）：
+          上面那個是「現在還開著的登入」，這裡是「免信箱驗證即可直接登入的機器」。
+          信任是永久制、沒有到期日，所以這個移除鈕是唯一的解除途徑——mode=off 時整區隱藏，
+          免得功能還沒啟用就先讓人看到一個看不懂又按不出效果的區塊。
+        */}
+        {trustedDevices.data && trustedDevices.data.mode !== "off" && (
+          <section aria-label="信任裝置">
+            <h3 style={{ marginTop: "var(--sp-16)" }}>信任裝置</h3>
+            <Hint style={{ marginTop: 0 }}>
+              這些手機／電腦已通過信箱驗證，登入時不用再收驗證碼。
+              換手機或電腦不用了就移除它——移除後那台要重新收信驗證，而且會立刻被登出。
+            </Hint>
+            {trustedDevices.isLoading ? (
+              <Meta as="p">載入中…</Meta>
+            ) : trustedDevices.data.devices.length === 0 ? (
+              <Meta as="p">還沒有信任裝置。</Meta>
+            ) : (
+              <ul className="device-link-list">
+                {trustedDevices.data.devices.map((d) => (
+                  <li key={d.id} className={d.isCurrent ? "is-this" : undefined}>
+                    <span className="device-link-icon" aria-hidden>
+                      <Icon name={d.isCurrent ? kindIcon(thisKind) : "Monitor"} size={18} />
+                    </span>
+                    <span className="device-link-meta">
+                      <span className="device-link-name">
+                        {d.label}
+                        {d.isCurrent && <Chip>本裝置</Chip>}
+                      </span>
+                      <span className="meta">
+                        最近登入 {relSeen(d.lastSeenAt ?? d.trustedAt)}
+                      </span>
+                      {/* 細節攤開顯示：辦公室裡每台「Windows · Chrome」看起來都一樣，
+                          要靠處理器／記憶體／顯示卡／螢幕才分得出是哪一台 */}
+                      {deviceDetailLines(d.details).length > 0 && (
+                        <span className="meta" style={{ display: "block", marginTop: 2, lineHeight: 1.6 }}>
+                          {deviceDetailLines(d.details).join("｜")}
+                        </span>
+                      )}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      disabled={busy || revokeDevice.isPending}
+                      title={d.isCurrent ? "移除本裝置的信任（會登出）" : "移除此信任裝置"}
+                      aria-label={d.isCurrent ? "移除本裝置信任" : `移除信任裝置 ${d.label}`}
+                      onClick={() => setConfirmRevokeDevice({ id: d.id, label: d.label, isCurrent: d.isCurrent })}
+                    >
+                      <Icon name="Trash2" size={14} />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+
+        {confirmRevokeDevice && (
+          <div className="device-link-confirm" role="alertdialog" aria-label="確認移除信任裝置">
+            <p>
+              {confirmRevokeDevice.isCurrent ? (
+                "確定移除本裝置的信任？你會立刻被登出，下次登入要重新收信箱驗證碼。"
+              ) : (
+                <>
+                  確定移除 <strong>{confirmRevokeDevice.label}</strong> 的信任？
+                  該裝置會立刻被登出，下次登入要重新收信箱驗證碼。
+                </>
+              )}
+            </p>
+            <div className="device-link-actions">
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || revokeDevice.isPending}
+                onClick={() => {
+                  const target = confirmRevokeDevice;
+                  setConfirmRevokeDevice(null);
+                  setError(null);
+                  revokeDevice.mutate(
+                    { id: target.id },
+                    {
+                      onSuccess: (r) => setNotice(r.self ? "已移除本裝置的信任並登出" : "已移除該信任裝置"),
+                      onError: (err) => setError(err.message || "移除信任裝置失敗"),
+                    },
+                  );
+                }}
+              >
+                確定移除
+              </button>
+              <button type="button" disabled={busy} onClick={() => setConfirmRevokeDevice(null)}>
+                取消
+              </button>
+            </div>
+          </div>
+        )}
 
         {confirmRemove && (
           <div className="device-link-confirm" role="alertdialog" aria-label="確認移除裝置">

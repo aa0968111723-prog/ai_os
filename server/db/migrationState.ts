@@ -110,6 +110,11 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0020_group_agent_commander",
   // 0021：純新增 user_presence 表（CREATE TABLE IF NOT EXISTS），不動任何既有資料，可安全納入 bridge
   "0021_user_presence",
+  // 0022：純新增 user_devices／device_challenges 兩張表＋索引，與 sessions／users 各一個
+  //       nullable 欄位（皆 IF NOT EXISTS），不動任何既有資料，可安全納入 bridge。
+  //       所有欄位都寫在 CREATE TABLE 裡、不在同一批 pending 內用 ALTER 補欄位——
+  //       否則 bridge 比對的整表 DDL（含全部欄位的單一 CREATE TABLE）會對不起來。
+  "0022_device_trust",
 ] as const;
 
 /**

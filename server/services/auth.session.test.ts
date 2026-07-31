@@ -60,7 +60,9 @@ describe("AUTH-01 logoutAll / touchSession contract", () => {
     expect(authRouter).toContain("logoutAll: authedProcedure.mutation");
     expect(authRouter).toContain("destroyAllUserSessions");
     expect(authRouter).toContain("await destroyAllUserSessions(userId)");
-    expect(authRouter).toMatch(/createSession\(userId,\s*sessionMetaFromReq\(ctx\.req\)\)/);
+    // 重發 session 時必須帶請求 meta；裝置綁定後還會多帶 deviceId（沿用裝置歸屬，
+    // 否則改密碼／登出全部之後「移除這台裝置」就再也踢不掉它），故容許展開形式。
+    expect(authRouter).toMatch(/createSession\(userId,\s*\{?\s*\.{0,3}\s*sessionMetaFromReq\(ctx\.req\)/);
     expect(authRouter).toContain("setSessionCookie(ctx.res, token)");
     // Must NOT revoke MCP on logoutAll (unlike changePassword)
     const logoutAllBlock = authRouter.slice(

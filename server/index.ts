@@ -17,6 +17,7 @@ import { ensureSchema } from "./db/ensure";
 import { syncCatalog } from "./services/catalog";
 import { isMockMode } from "./services/fal";
 import { resolveSession, type AuthState } from "./services/auth";
+import { deviceTrustMisconfigured, resolveDeviceTrustMode } from "./services/deviceTrust";
 import {
   buildUploadLineageMeta,
   looksLikeUuid,
@@ -1295,6 +1296,27 @@ app.get("/api/selftest", async (req, res) => {
     }
     return "正常（登入制）";
   });
+  await run("裝置綁定登入", async () => {
+    // 設 enforce 但信箱機制沒就緒＝保證把所有人鎖在門外（陌生裝置要驗證碼，
+    // 但驗證碼永遠寄不出去），包含超管、無後門。resolveDeviceTrustMode 已自動降級成
+    // monitor，這裡把「你設的」與「實際生效的」落差亮出來，否則會靜默不生效。
+    const { resolveDeviceTrustMode, deviceTrustMisconfigured } = await import("./services/deviceTrust");
+    const { isEmailConfigured } = await import("./services/email");
+    const effective = resolveDeviceTrustMode();
+    if (deviceTrustMisconfigured()) {
+      throw new Error(
+        "⚠ DEVICE_TRUST_MODE=enforce 但信箱機制未設定（缺 RESEND_API_KEY／EMAIL_FROM）——" +
+        "已自動降級為 monitor（只記錄不擋），否則陌生裝置將永遠收不到驗證碼而全員鎖死。" +
+        "請先設定信箱機制並用管理頁「寄測試信給自己」確認寄得出去，再切回 enforce",
+      );
+    }
+    const label = effective === "off"
+      ? "未啟用（off）"
+      : effective === "monitor"
+        ? "暖身中（monitor：記錄並自動信任新裝置，不阻擋）"
+        : "強制（enforce：陌生裝置需信箱驗證碼）";
+    return `${label}｜信箱機制${isEmailConfigured() ? "已就緒" : "未設定"}`;
+  });
   const allOk = checks.every((c) => c.ok);
   res.status(allOk ? 200 : 500).json({ ok: allOk, mockMode: isMockMode(), checks, time: new Date().toISOString() });
 });
@@ -1536,6 +1558,20 @@ const httpServer = app.listen(port, () => {
   }
   if (isProd && process.env.AUTH_MODE === "dev") {
     console.warn("[server] ⚠⚠⚠ 正式環境偵測到 AUTH_MODE=dev（無認證後門）——已自動忽略不生效；請到 Variables 移除此變數。");
+  }
+  // 裝置綁定登入的生效模式（見 docs/device-trust-design.md）。
+  // 設 enforce 卻沒有信箱機制＝陌生裝置永遠收不到驗證碼＝全員（含超管）鎖死且無後門，
+  // 故 resolveDeviceTrustMode 會自動降級為 monitor；這裡把落差寫進開機 log，不必等人去點自檢頁。
+  {
+    const effective = resolveDeviceTrustMode();
+    if (deviceTrustMisconfigured()) {
+      console.warn(
+        "[server] ⚠⚠⚠ DEVICE_TRUST_MODE=enforce 但信箱機制未設定（缺 RESEND_API_KEY／EMAIL_FROM）——" +
+        "已自動降級為 monitor（只記錄不擋）。若照 enforce 執行，任何人換裝置都會收不到驗證碼而永久登不進來。",
+      );
+    } else if (effective !== "off") {
+      console.log(`[server] 裝置綁定登入：${effective}`);
+    }
   }
   // 背景初始化：失敗「不放棄」，每 60 秒自動重試到成功（健康檢查不等 DB 的原則不變）
   // ——修掉「DB 冷啟動超過 30 秒就永久卡死、看似健康實際全壞」的舊行為。
