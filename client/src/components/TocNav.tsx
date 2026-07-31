@@ -71,6 +71,18 @@ export function TocNav({ items = DEFAULT_ITEMS }: { items?: TocItem[] }) {
     history.replaceState(null, "", `#${id}`);
   };
 
+  // 手機的頁籤條是隱藏捲軸的橫捲膠囊列：當前頁籤若在畫面外，使用者會以為
+  // 「只有這幾個」。activeId 變動時把當前膠囊捲進視野——只動容器的水平軸
+  // （scrollIntoView 會連整頁垂直一起捲，正在閱讀時頁面跳動比看不到頁籤更糟）。
+  useEffect(() => {
+    if (!activeId) return;
+    const link = document.querySelector<HTMLElement>(`#toc-list [aria-current="true"]`);
+    const list = link?.closest<HTMLElement>("#toc-list");
+    if (!link || !list || list.scrollWidth <= list.clientWidth) return;
+    const target = link.offsetLeft - (list.clientWidth - link.offsetWidth) / 2;
+    list.scrollTo({ left: Math.max(0, target), behavior: reducedMotion() ? "auto" : "smooth" });
+  }, [activeId]);
+
   // 深連結：帶 #stage-xxx 開頁時自動捲到該階段（內容掛載晚於瀏覽器原生錨點時機，這裡補跳一次）
   useEffect(() => {
     const id = window.location.hash.slice(1);

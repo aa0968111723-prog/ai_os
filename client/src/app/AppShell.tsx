@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { readUiDensity, writeUiDensity } from "../lib/densityPreference";
+import { DensityIntroBanner } from "./components/DensityIntroBanner";
 import { trpc } from "../api";
 import { FeedbackWidget } from "../feedback/FeedbackWidget";
 import { NotificationSettingsDialog, PushSubscriptionSync } from "../components/NotificationSettings";
@@ -182,6 +183,8 @@ export function AppShell() {
         {/* lazy 頁面載入中的過場（QA-025 code-splitting）：整個路由樹共用一個 Suspense */}
         {me.data ? (
           <>
+            {/* 密度功能一次性介紹：回應「不知道怎麼切換精簡與引導」的回饋 */}
+            <DensityIntroBanner />
             <main id="main-content" className="app-main" tabIndex={-1}>
               <Suspense fallback={<Meta as="p">載入中…</Meta>}>
                 <SessionGate

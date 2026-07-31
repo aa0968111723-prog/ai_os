@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
@@ -21,7 +22,6 @@ import { UI_DENSITY_DESCRIPTION, UI_DENSITY_LABEL } from "@shared/uiDensity";
  */
 function DensityMenuItem({ onDone }: { onDone: () => void }) {
   const density = useDensity();
-  const next = density === "guide" ? "concise" : "guide";
   const utils = trpc.useUtils();
   // 上行同步（P1c）：本機 localStorage 仍是即時來源——先寫本機讓畫面立刻切，
   // 再 best-effort 帶到帳號。失敗只記 log 不打斷：單機行為與同步前完全一樣，
@@ -30,21 +30,37 @@ function DensityMenuItem({ onDone }: { onDone: () => void }) {
     onSuccess: () => utils.auth.me.invalidate(),
     onError: (err) => console.warn("[density] 偏好同步到帳號失敗（本機已生效）：", err.message),
   });
+  // 舊版是一顆「介面說明：精簡模式（改用引導模式）」切換鈕——使用者回饋根本
+  // 看不懂那是什麼（2026-07-31）。改成兩個選項並排、勾在目前生效的那個：
+  // 「目前是哪個、還有哪個可選」一眼可讀，不用先解讀一句雙重否定。
+  const pick = (mode: "guide" | "concise") => {
+    if (mode !== density) {
+      writeUiDensity(mode);
+      setUiDensity.mutate({ density: mode });
+    }
+    onDone();
+  };
   return (
-    <button
-      type="button"
-      className="menu-item"
-      role="menuitem"
-      title={UI_DENSITY_DESCRIPTION[next]}
-      onClick={() => {
-        onDone();
-        writeUiDensity(next);
-        setUiDensity.mutate({ density: next });
-      }}
-    >
-      <Icon name="HelpCircle" size={15} />
-      介面說明：{UI_DENSITY_LABEL[density]}（改用{UI_DENSITY_LABEL[next]}）
-    </button>
+    <div role="presentation">
+      <div className="menu-label" role="presentation">介面說明密度</div>
+      {(["guide", "concise"] as const).map((mode) => (
+        <button
+          key={mode}
+          type="button"
+          className="menu-item"
+          role="menuitemradio"
+          aria-checked={density === mode}
+          title={UI_DENSITY_DESCRIPTION[mode]}
+          onClick={() => pick(mode)}
+        >
+          <Icon name={density === mode ? "CheckCircle2" : "Circle"} size={15} />
+          {UI_DENSITY_LABEL[mode]}
+          <Meta style={{ marginLeft: "auto", fontSize: 11 }}>
+            {mode === "guide" ? "附說明" : "更乾淨"}
+          </Meta>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -208,8 +224,14 @@ export function AccountMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
-    const menuItems = () => [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? [])];
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      // 選單經 portal 掛在 body（topbar 的 backdrop-filter 會困住 fixed 定位），
+      // 外點判定要同時認觸發鈕一側與 portal 一側
+      if (wrap.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const menuItems = () => [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])') ?? [])];
     const focusItem = (index: number) => {
       const items = menuItems();
       if (!items.length) return;
@@ -256,8 +278,22 @@ export function AccountMenu({
         <span className="account-menu__name">{userName}</span>
         <Icon name="ChevronDown" size={14} className="account-menu__chevron" />
       </button>
-      {open && (
-        <div ref={menuRef} className="menu" role="menu" aria-label="使用者選單">
+      {open && createPortal(
+        <div className="account-menu__layer" role="presentation">
+          {/* 手機抽屜的暗色背景；點它會關（外點判定不含 backdrop）。桌面由 CSS 隱藏。 */}
+          <div className="account-menu__backdrop" aria-hidden="true" />
+          <div
+            ref={menuRef}
+            className="menu account-menu__pop"
+            role="menu"
+            aria-label="使用者選單"
+            style={(() => {
+              // 桌面：釘在觸發鈕右下（fixed 座標）。手機（≤560px）由 CSS 蓋成
+              // 底部抽屜，用 !important 收回這組 inline 座標的主導權（見 styles.css）。
+              const r = triggerRef.current?.getBoundingClientRect();
+              return r ? { top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right) } : undefined;
+            })()}
+          >
           {/* 個人點數摘要：今日／本週用量與剩餘（quota.my）；與頂欄徽章互補 */}
           <PersonalQuotaSummary groupId={activeGroupId} enabled={open} />
           {/* 分組＋分隔線：說明／工作／管理／帳號——扁平長清單太難掃（回饋 W1）。
@@ -329,7 +365,9 @@ export function AccountMenu({
           <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>
             <Icon name="Undo2" size={15} />{loggingOut ? "登出中…" : "登出"}
           </button>
-        </div>
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

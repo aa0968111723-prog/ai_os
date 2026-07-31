@@ -76,7 +76,8 @@ export type IconName =
   | "Monitor"
   | "Copy"
   | "Waypoints"
-  | "HardDrive";
+  | "HardDrive"
+  | "Circle";
 
 /**
  * 每個名稱對應一組 Lucide 24x24 stroke 幾何（忠實重現原始路徑）。
@@ -469,6 +470,7 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="4" cy="12" r="2" />
     </>
   ),
+  Circle: <circle cx="12" cy="12" r="10" />,
 };
 
 /**

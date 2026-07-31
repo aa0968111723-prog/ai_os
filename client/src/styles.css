@@ -488,6 +488,12 @@ button.primary:disabled { opacity: 1; background: var(--muted); color: var(--mut
 
 /* 版面 */
 .cols { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
+/* grid 的 1fr 其實是 minmax(auto,1fr)：子項的 min-content（一列不換行的 chips、
+ * 寬表格）會把軌道撐到比視口寬，內層再被 overflow:hidden 裁掉——手機上
+ * 「整張卡連文字都被切掉」（2026-07-31 截圖實證：390px 視口下 .stack 被撐到
+ * 490px）的根因就是這一個。min-width:0 讓欄位真正約束子項，
+ * 內層各自的換行／橫捲機制才接得到手。 */
+.cols > * { min-width: 0; }
 @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
 .stack > * + * { margin-top: 16px; }
 .stack > .group-head { margin-top: var(--sp-48); }
@@ -519,8 +525,50 @@ a:hover { color: var(--primary-solid-hover); }
 .menu-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 13px;
   color: var(--fg); background: transparent; border: 0; border-radius: var(--r-8); padding: 8px 10px; cursor: pointer; text-decoration: none; }
 .menu-item:hover { background: var(--card2); }
+/* 密度雙選項：勾在目前生效者上（menuitemradio） */
+.menu-item[aria-checked="true"] { background: var(--primary-tint); color: var(--primary-ink); font-weight: 600; }
 .menu-item.danger { color: var(--danger-ink); }
 .menu-sep { height: 1px; background: var(--border-soft); margin: 6px 4px; }
+/* ── 帳號選單 portal 層（桌面＝釘在觸發鈕下的 fixed 選單；手機＝底部抽屜） ──
+ * 為什麼要 portal：topbar 的 backdrop-filter 會成為 fixed 後代的 containing block，
+ * 選單留在 topbar 裡就永遠做不成貼底抽屜。 */
+.account-menu__pop {
+  position: fixed; /* 座標由元件 inline 提供（觸發鈕右下） */
+  z-index: 60;
+  max-height: min(78vh, calc(100dvh - 72px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.account-menu__backdrop { display: none; }
+@media (max-width: 560px) {
+  /* 手機：桌面那組 inline top/right 座標在這裡讓位給抽屜（!important 收回主導權） */
+  .account-menu__pop {
+    top: auto !important;
+    right: 0 !important;
+    left: 0 !important;
+    bottom: 0 !important;
+    border-radius: 16px 16px 0 0;
+    border-inline: 0;
+    border-bottom: 0;
+    padding-bottom: calc(10px + var(--safe-bottom));
+    box-shadow: 0 -12px 40px rgb(43 38 32 / 0.22);
+    animation: account-sheet-up 180ms var(--ease-out, ease-out);
+  }
+  .account-menu__backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 59;
+    background: rgb(43 38 32 / 0.32);
+  }
+  @keyframes account-sheet-up {
+    from { transform: translateY(24px); opacity: 0.6; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .account-menu__pop { animation: none; }
+}
 .menu-label { font-size: 11px; font-weight: 600; color: var(--fg-secondary); padding: 2px 10px; letter-spacing: 0.06em; user-select: none; }
 /* 分組標題與前一組留一點呼吸：分隔線之後緊接標題時，標題自帶上緣間距讓群組更成塊 */
 .menu-sep + .menu-label { margin-top: 2px; }
@@ -642,6 +690,16 @@ button:focus-visible { border-radius: 999px; }
   /* 主動作在表單內拉滿，拇指更好按 */
   form .primary[type="submit"],
   .login-card .primary { width: 100%; justify-content: center; }
+}
+
+/* 密度功能一次性介紹橫幅（DensityIntroBanner） */
+.density-intro {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 8px 0 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--primary-border);
+  border-radius: var(--r-12);
+  background: color-mix(in srgb, var(--primary-tint) 45%, var(--card));
 }
 
 /* 視覺隱藏但報讀器可讀（生成完成/失敗的 aria-live 宣告等） */
@@ -2628,9 +2686,11 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 }
 @media (max-width: 560px) {
   .project-page--mobile-compact .project-messages-fab {
-    /* 避開系統 mobile-nav 與右下角回饋 FAB */
-    right: max(70px, calc(var(--safe-right) + 56px));
-    bottom: calc(max(8px, var(--safe-bottom)) + 78px);
+    /* 直疊在回饋 FAB 之上（右緣同一條窄帶），不再橫排——橫排時兩顆合計
+     * 吃掉 ~130px 寬的內容帶，截圖實證會蓋住輸入列的送出鈕（2026-07-31
+     * 手機回饋「一直被切到」的一部分）。直疊只遮右緣一條，FAB stack 慣例。 */
+    right: max(12px, var(--safe-right));
+    bottom: calc(max(8px, var(--safe-bottom)) + 78px + 62px);
   }
   .project-messages-sheet {
     width: 100%;
@@ -3714,6 +3774,14 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   }
   .ctx-summary::-webkit-scrollbar { display: none; }
   .ctx-summary .chip { flex: none; }
+  /* 可捲線索：scrollbar 藏起來後，被截斷的 chip 看起來就像「被切掉」而不是
+   * 「可以捲」（2026-07-31 手機截圖回饋原話「一直被切到」）。兩端 16px 淡出
+   * 讓截斷讀起來是漸隱＝後面還有東西。用 mask 而非疊漸層，不依賴容器底色。 */
+  .ctx-summary,
+  .project-page .toc-list {
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 20px), transparent);
+    mask-image: linear-gradient(90deg, transparent 0, #000 16px, #000 calc(100% - 20px), transparent);
+  }
   .card--primary { padding: 14px; }
   /* MOB-03：S 手機強制 2×2 工作台模式格（拇指可點，min-height ≥64） */
   .creation-mode-tabs {
