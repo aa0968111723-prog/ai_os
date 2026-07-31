@@ -1443,7 +1443,7 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
       ) : graphQ.error ? (
         <p className="error">{graphQ.error.message}</p>
       ) : !graph || graph.shownBranches.length === 0 ? (
-        <EmptyState title={<>這張地圖還是空的</>} description={<>先在上面加幾筆行程或筆記（可掛專案），或在專案裡累積知識庫、跑 AI 執行計畫、建資料庫，這裡就會長出對應的族譜節點。
+        <EmptyState icon={<Icon name="Waypoints" />} title={<>這張地圖還是空的</>} description={<>先在上面加幾筆行程或筆記（可掛專案），或在專案裡累積知識庫、跑 AI 執行計畫、建資料庫，這裡就會長出對應的族譜節點。
             {lens !== "all" && "或把鏡頭切回「全組」。"}</>} style={{ marginTop: 12 }} />
       ) : (
         <div className="map-wrap" style={{ marginTop: 12 }}>
