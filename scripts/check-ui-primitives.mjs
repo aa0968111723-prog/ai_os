@@ -54,7 +54,47 @@ const OWNED_CLASSES = {
 };
 
 /**
- * 合理例外：這些檔案／class 組合就算超過 baseline 也放行。
+ * **結構性豁免**：這些「標籤 × class」組合永遠不該遷移，不是「還沒遷移」。
+ *
+ * 兩者混在一起數，會讓棘輪的總量誤導人以為還有那麼多待辦。分開之後，
+ * 「待遷移」歸零就是真的做完了。
+ *
+ * 加入這裡的門檻很高：必須是「遷移會讓程式碼變差」，不是「遷移比較麻煩」。
+ */
+const STRUCTURAL_EXEMPTIONS = [
+  {
+    tags: ["Link"],
+    classes: ["chip", "hint", "btn", "btn-sm", "btn-ghost", "btn-tonal", "badge", "pill"],
+    why: "wouter 的 <Link> 是路由元件；primitives 渲染原生標籤，換掉會失去 client-side 導航",
+  },
+  {
+    tags: ["a"],
+    classes: ["btn", "btn-sm", "btn-ghost", "btn-tonal"],
+    why: "<a className=\"btn-sm\"> 沒有 .btn 基底，換成 <Button as=\"a\"> 會多加 btn —— 那是真的視覺改變，不是等價轉換",
+  },
+  {
+    tags: ["button"],
+    classes: ["chip", "badge"],
+    why: "原生 <button> 的語意與鍵盤行為優於 <span role=\"button\">；換成 Chip/Badge 是無障礙降級",
+  },
+  {
+    tags: ["label", "th", "td", "dt", "dd", "summary", "a"],
+    classes: ["hint"],
+    why: "這些標籤各有專屬 HTML 屬性（htmlFor／scope／href），塞進 Meta 的 HTMLAttributes 會讓型別謊報",
+  },
+  {
+    tags: ["span"],
+    classes: ["skeleton"],
+    why: "Skeleton 渲染 <div>；span→div 會把行內元素變區塊，改變版面",
+  },
+];
+
+function isExempt(tag, cls) {
+  return STRUCTURAL_EXEMPTIONS.some((e) => e.tags.includes(tag) && e.classes.includes(cls));
+}
+
+/**
+ * 個案例外：檔案／class 組合就算超過 baseline 也放行。
  * 加入前請在 PR 描述說明理由——這個清單長大＝護欄失效。
  */
 const ALLOWLIST = new Set([
@@ -84,6 +124,11 @@ function extractClassTokens(source) {
   const attr = /className\s*=\s*/g;
   let m;
   while ((m = attr.exec(source)) !== null) {
+    // 往回找這個 className 屬於哪個標籤——結構性豁免是依「標籤 × class」判定的，
+    // 只看 class 無法分辨 <span className="chip"> 與 <Link className="chip">。
+    const before = source.slice(Math.max(0, m.index - 400), m.index);
+    const openTag = before.match(/<([A-Za-z][\w.]*)(?:\s[^<>]*)?$/);
+    const tag = openTag ? openTag[1] : "?";
     let i = attr.lastIndex;
     const ch = source[i];
     let raw = "";
@@ -91,7 +136,7 @@ function extractClassTokens(source) {
       const end = source.indexOf(ch, i + 1);
       if (end === -1) continue;
       raw = source.slice(i + 1, end);
-      tokens.push(...splitTokens(raw));
+      tokens.push(...splitTokens(raw).map((t) => ({ tag, cls: t })));
       attr.lastIndex = end + 1;
     } else if (ch === "{") {
       let depth = 0;
@@ -107,7 +152,7 @@ function extractClassTokens(source) {
       const expr = source.slice(i + 1, j);
       // 撈表達式裡的所有字面字串（含 template literal）
       for (const lit of expr.matchAll(/"([^"]*)"|'([^']*)'|`([^`]*)`/g)) {
-        tokens.push(...splitTokens(lit[1] ?? lit[2] ?? lit[3] ?? ""));
+        tokens.push(...splitTokens(lit[1] ?? lit[2] ?? lit[3] ?? "").map((t) => ({ tag, cls: t })));
       }
       attr.lastIndex = j + 1;
     }
@@ -130,18 +175,23 @@ function relPosix(abs) {
 /** 掃描全部檔案，回傳 { [relPath]: { [class]: count } }（只含 OWNED_CLASSES）。 */
 function scan() {
   const counts = {};
-  if (!fs.existsSync(SCAN_ROOT)) return counts;
+  const exempt = {};
+  if (!fs.existsSync(SCAN_ROOT)) return { counts, exempt };
   for (const file of walk(SCAN_ROOT)) {
     if (file.startsWith(PRIMITIVES_DIR + path.sep)) continue; // primitives 自己可以寫 class
     const rel = relPosix(file);
     const tokens = extractClassTokens(fs.readFileSync(file, "utf8"));
-    for (const token of tokens) {
-      if (!(token in OWNED_CLASSES)) continue;
+    for (const { tag, cls } of tokens) {
+      if (!(cls in OWNED_CLASSES)) continue;
+      if (isExempt(tag, cls)) {
+        exempt[cls] = (exempt[cls] ?? 0) + 1;
+        continue;
+      }
       counts[rel] ??= {};
-      counts[rel][token] = (counts[rel][token] ?? 0) + 1;
+      counts[rel][cls] = (counts[rel][cls] ?? 0) + 1;
     }
   }
-  return counts;
+  return { counts, exempt };
 }
 
 /** 額外觀測值：不擋，但列在報告裡讓退化趨勢看得見。 */
@@ -177,7 +227,7 @@ function loadBaseline() {
   return JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8"));
 }
 
-function writeBaseline(counts, obs) {
+function writeBaseline(counts, obs, exempt) {
   fs.mkdirSync(path.dirname(BASELINE_PATH), { recursive: true });
   const payload = {
     $schema: "ui-primitives-baseline/v1",
@@ -186,6 +236,7 @@ function writeBaseline(counts, obs) {
       "遷移完一批後執行 `node scripts/check-ui-primitives.mjs --write-baseline` 收緊。",
     generatedFrom: "scripts/check-ui-primitives.mjs",
     observations: obs,
+    structurallyExempt: exempt,
     totals: totals(counts),
     files: Object.fromEntries(
       Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)),
@@ -212,7 +263,7 @@ function check(counts, baseline) {
 
 // ── main ──────────────────────────────────────────────────────────────────────
 const args = new Set(process.argv.slice(2));
-const counts = scan();
+const { counts, exempt } = scan();
 const obs = observations();
 const sum = totals(counts);
 
@@ -222,7 +273,7 @@ if (args.has("--json")) {
 }
 
 if (args.has("--write-baseline")) {
-  const payload = writeBaseline(counts, obs);
+  const payload = writeBaseline(counts, obs, exempt);
   console.log(`已寫入基準線 → ${relPosix(BASELINE_PATH)}`);
   console.log(`  裸 class 總量 ${payload.totals.total}／涵蓋 ${Object.keys(counts).length} 個檔案`);
   console.log(`  styles.css ${obs.stylesCssLines} 行、tsx ${obs.tsxFiles} 個、已用 primitives ${obs.filesUsingPrimitives} 個`);
@@ -230,10 +281,12 @@ if (args.has("--write-baseline")) {
 }
 
 if (args.has("--report")) {
+  const exemptTotal = Object.values(exempt).reduce((a, b) => a + b, 0);
   console.log("UI primitives 現況");
   console.log(`  styles.css        ${obs.stylesCssLines} 行`);
   console.log(`  tsx 檔            ${obs.tsxFiles} 個（其中 ${obs.filesUsingPrimitives} 個已用 primitives）`);
-  console.log(`  裸 class 總量      ${sum.total}`);
+  console.log(`  待遷移            ${sum.total}`);
+  console.log(`  結構性豁免        ${exemptTotal}（遷移會讓程式碼變差，非待辦）`);
   for (const [cls, n] of Object.entries(sum.perClass).sort(([, a], [, b]) => b - a)) {
     console.log(`    ${cls.padEnd(14)} ${String(n).padStart(4)}  → ${OWNED_CLASSES[cls]}`);
   }
@@ -243,6 +296,14 @@ if (args.has("--report")) {
     .slice(0, 12);
   console.log("  用量最高的檔案：");
   for (const [file, n] of top) console.log(`    ${String(n).padStart(4)}  ${file}`);
+  if (exemptTotal) {
+    console.log("  結構性豁免明細（依標籤 × class）：");
+    for (const rule of STRUCTURAL_EXEMPTIONS) {
+      const hit = rule.classes.filter((c) => exempt[c]);
+      if (hit.length) console.log(`    <${rule.tags.join("|")}> × ${hit.join("/")}
+      理由：${rule.why}`);
+    }
+  }
   process.exit(0);
 }
 

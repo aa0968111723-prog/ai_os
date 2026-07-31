@@ -7,20 +7,27 @@
     "tsxFiles": 96,
     "filesUsingPrimitives": 60
   },
+  "structurallyExempt": {
+    "badge": 7,
+    "chip": 23,
+    "hint": 25,
+    "skeleton": 4,
+    "btn-sm": 8,
+    "btn-tonal": 6,
+    "btn": 4
+  },
   "totals": {
-    "total": 172,
+    "total": 95,
     "perClass": {
       "empty-state": 21,
-      "hint": 47,
-      "badge": 7,
-      "chip": 41,
-      "btn-sm": 11,
+      "hint": 22,
+      "btn-sm": 3,
       "pill": 14,
-      "skeleton": 9,
+      "skeleton": 5,
+      "chip": 18,
       "card": 7,
       "btn-ghost": 4,
-      "btn-tonal": 6,
-      "btn": 5
+      "btn": 1
     }
   },
   "files": {
@@ -31,22 +38,12 @@
     "client/src/app/AppShell.tsx": {
       "hint": 2
     },
-    "client/src/app/components/AccountMenu.tsx": {
-      "badge": 1
-    },
-    "client/src/app/components/PrimaryNavigation.tsx": {
-      "badge": 2
-    },
     "client/src/app/SessionGate.tsx": {
       "hint": 1
     },
     "client/src/components/AgentCard.tsx": {
-      "chip": 4,
       "btn-sm": 1,
       "pill": 3
-    },
-    "client/src/components/AiHub.tsx": {
-      "chip": 1
     },
     "client/src/components/AssetLibrary.tsx": {
       "skeleton": 1,
@@ -67,12 +64,7 @@
     "client/src/components/GenerationList.tsx": {
       "skeleton": 1,
       "empty-state": 1,
-      "chip": 6,
       "pill": 1
-    },
-    "client/src/components/GroupOptionsEditor.tsx": {
-      "hint": 2,
-      "skeleton": 2
     },
     "client/src/components/InstallAppBanner.tsx": {
       "hint": 1
@@ -88,7 +80,7 @@
     },
     "client/src/components/MessagePanel.tsx": {
       "card": 1,
-      "chip": 5
+      "chip": 1
     },
     "client/src/components/NotificationSettings.tsx": {
       "btn-ghost": 1
@@ -97,7 +89,6 @@
       "btn-ghost": 1
     },
     "client/src/components/ProjectDatabasesCard.tsx": {
-      "btn-sm": 2,
       "empty-state": 1,
       "pill": 1
     },
@@ -112,7 +103,6 @@
     },
     "client/src/components/SceneList.tsx": {
       "pill": 1,
-      "btn-tonal": 4,
       "skeleton": 1,
       "empty-state": 1
     },
@@ -120,9 +110,6 @@
       "pill": 1,
       "btn-ghost": 1,
       "btn-sm": 1
-    },
-    "client/src/features/creation-workbench/CreationContextBar.tsx": {
-      "chip": 1
     },
     "client/src/features/creation-workbench/CreationCostSummary.tsx": {
       "hint": 1
@@ -155,21 +142,15 @@
       "empty-state": 1
     },
     "client/src/pages/AdminPage.tsx": {
-      "hint": 14,
-      "skeleton": 2,
       "pill": 2,
+      "hint": 1,
       "btn": 1,
       "chip": 1,
       "empty-state": 2
     },
-    "client/src/pages/ChatPage.tsx": {
-      "chip": 3
-    },
     "client/src/pages/DatabasesPage.tsx": {
       "empty-state": 1,
-      "btn": 1,
-      "btn-sm": 3,
-      "badge": 4
+      "btn-sm": 1
     },
     "client/src/pages/DesktopCompanionPage.tsx": {
       "empty-state": 1,
@@ -181,40 +162,21 @@
     "client/src/pages/HelpPage.tsx": {
       "card": 1
     },
-    "client/src/pages/IntegrationsPage.tsx": {
-      "btn-tonal": 1,
-      "btn-sm": 3
-    },
-    "client/src/pages/LandingPage.tsx": {
-      "btn": 3
-    },
-    "client/src/pages/Launchpad.tsx": {
-      "chip": 1
-    },
     "client/src/pages/LoginPage.tsx": {
       "hint": 1
     },
-    "client/src/pages/MembersPage.tsx": {
-      "btn-tonal": 1,
-      "btn-sm": 1
-    },
     "client/src/pages/ModelsPage.tsx": {
       "pill": 4,
-      "hint": 5,
       "chip": 5,
       "card": 2,
       "skeleton": 2,
       "empty-state": 1
     },
     "client/src/pages/PlannerPage.tsx": {
-      "empty-state": 4,
-      "hint": 5
+      "empty-state": 4
     },
     "client/src/pages/ProjectPage.tsx": {
-      "chip": 5
-    },
-    "client/src/realtime.tsx": {
-      "chip": 2
+      "chip": 4
     }
   }
 }

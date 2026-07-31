@@ -41,6 +41,22 @@
 
 被接管的 class 與對應元件見腳本內 `OWNED_CLASSES`。純版面 utility 不納入，避免噪音。
 
+### 「待遷移」與「結構性豁免」是兩件事
+
+腳本內 `STRUCTURAL_EXEMPTIONS` 列出**永遠不該遷移**的「標籤 × class」組合，
+它們不計入待遷移數。兩者混在一起數會讓總量誤導人以為還有那麼多待辦；
+分開之後，**待遷移歸零就是真的做完了**。
+
+| 標籤 | class | 為什麼不該遷移 |
+|------|-------|----------------|
+| `<Link>` | chip/hint/btn* /badge/pill | wouter 路由元件；primitives 渲染原生標籤，換掉會失去 client-side 導航 |
+| `<a>` | btn/btn-sm/btn-ghost/btn-tonal | 沒有 `.btn` 基底，換成 `<Button as="a">` 會**多加** btn——真的視覺改變 |
+| `<button>` | chip/badge | 原生 button 的語意與鍵盤行為優於 `<span role="button">`；換掉是無障礙降級 |
+| `<label>/<th>/<td>/<dt>/<dd>/<summary>/<a>` | hint | 各有專屬 HTML 屬性（htmlFor／scope／href），塞進 Meta 的 HTMLAttributes 會讓型別謊報 |
+| `<span>` | skeleton | Skeleton 渲染 `<div>`；span→div 會把行內元素變區塊，改變版面 |
+
+加入這張表的門檻很高：必須是「**遷移會讓程式碼變差**」，不是「遷移比較麻煩」。
+
 ## 3. 指令
 
 ```bash
