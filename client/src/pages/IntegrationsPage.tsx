@@ -119,12 +119,12 @@ export function IntegrationsPage() {
       <Card as="section" id="integration-google" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
         <h2><Icon name="CalendarPlus" size={18} /> Google 雲端硬碟</h2>
         <Hint style={{ marginTop: 4 }}>
-          連結後，到「知識與資料」貼上你私人雲端裡的文件、試算表、簡報或檔案連結即可匯入，不必再把檔案設成公開。
+          連結後，到「知識與資料」用「從 Google 雲端選檔」直接瀏覽並多選匯入（也可照舊貼連結），不必再把檔案設成公開。
         </Hint>
-        {/* 授權範圍是「按下連結鍵之前必須看到」的資訊——這句被精簡模式收進「？」，
+        {/* 權限範圍是「按下連結鍵之前必須看到」的資訊——這句被精簡模式收進「？」，
             等於讓人在不知道我們拿到什麼權限的情況下把雲端帳號交出去，故 always。 */}
         <Hint layer="always" style={{ marginTop: 4 }}>
-          授權範圍只有「讀取」，本系統不能修改或刪除你雲端裡的任何東西。
+          AI 與代理只會讀「你選中並匯入」的檔案，不是整顆雲端；授權範圍只有「讀取」，本系統不能修改或刪除你雲端裡的任何東西。
         </Hint>
         {!d ? (
           <Meta as="p">載入中…</Meta>
@@ -145,7 +145,7 @@ export function IntegrationsPage() {
               </>
             ) : (
               <Meta style={{ margin: 0 }}>
-                <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——可在「知識與資料」匯入私人檔案
+                <Icon name="Check" size={13} /> 已連結{d.googleDrive.email ? `（${d.googleDrive.email}）` : ""}——可在「知識與資料」選檔或貼連結匯入私人檔案
               </Meta>
             )}
             <GoogleRemoveButton onRemoved={() => utils.integrations.list.invalidate()} />
@@ -194,7 +194,8 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
       <Hint style={{ marginTop: 4 }}>
         到 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">notion.so/my-integrations</a> 建立整合、
         複製 Internal Integration Secret 貼進來，並在 Notion 把要匯入的頁面「連結」給該整合（頁面右上 ⋯ → Connections）。
-        完成後到「知識與資料」貼上 Notion 頁面連結，即可選擇要加入系統與專案的內容。
+        完成後到「知識與資料」用「從 Notion 選頁」搜尋並多選匯入（也可照舊貼頁面連結）。
+        AI 只會讀「你選中並匯入」的頁面——連接整合不等於把整個 workspace 交給 AI。
         {data?.siteTokenAvailable && !data.connected ? "（站方已設共用 token，你也可以不設、直接用共用的）" : ""}
       </Hint>
       {!data ? (

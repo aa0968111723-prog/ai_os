@@ -1856,9 +1856,12 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   return (
     <Card data-fb="Fal 帳戶卡">
       <h2>Fal 帳戶</h2>
+      {/* 方案 C 的擋扣規則是成本／阻斷資訊——精簡模式也必須看得到，故 always。
+          舊文案「不自動換算」已因 #220 失真（現在會換算並做硬上限），採 base 新文案。 */}
       <Hint layer="always">
-        平台在 Fal.ai 的 credits 餘額（單位 <strong>USD</strong>）。與站內
-        <strong>點數</strong>單位不同，僅供營運對帳，<strong>不自動換算</strong>。
+        平台在 Fal.ai 的 credits 餘額（單位 <strong>USD</strong>），並以即時匯率換算台幣等值。
+        方案 C：<strong>1 點 ＝ NT$1</strong>，站內可花點數的硬上限即時對齊此餘額——
+        Fal 沒錢時扣點會被擋下（查不到餘額則不擋，不因上游異常鎖住全站）。
       </Hint>
       {balance.isLoading ? (
         <Skeleton style={{ height: 56, marginTop: 8 }} role="status" aria-label="Fal 餘額載入中" />
@@ -1874,7 +1877,24 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
             <b className="mono" style={{ fontSize: 22 }}>
               ${fmtUsd(data.balance)} {data.currency || "USD"}
             </b>
+            {data.balanceTwd != null && (
+              <span className="mono" style={{ marginLeft: 8 }}>
+                ≈ NT${data.balanceTwd.toLocaleString("zh-TW")}
+              </span>
+            )}
           </div>
+          {data.pointsCap != null && (
+            <div>
+              <Meta>可花點數上限（1 點＝NT$1）：</Meta>
+              <b className="mono">{data.pointsCap.toLocaleString("zh-TW")} 點</b>
+              {data.rate != null && (
+                <Meta style={{ marginLeft: 8, fontSize: 11 }}>
+                  匯率 US$1＝NT${data.rate}
+                  {data.rateSource === "fallback" ? "（回退值）" : ""}
+                </Meta>
+              )}
+            </div>
+          )}
           <div>
             <Meta>帳戶：</Meta>
             <span className="mono">{data.username}</span>

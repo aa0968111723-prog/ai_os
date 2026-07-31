@@ -108,6 +108,31 @@ describe("complete AI planning safety resolver", () => {
     expect(plan.summary.missingInformation).toEqual([]);
   });
 
+  it("carries decision-trace rationale and contextUsed through resolution", () => {
+    const draft = completePlanDraftSchema.parse({
+      summary: {
+        ...summary(),
+        rationale: "企劃筆記已完整，先整理重點再指派確認即可，不需生成步驟。",
+        contextUsed: ["專案筆記", "團隊成員", "專案筆記"],
+      },
+      steps: [{
+        id: "research",
+        kind: "create_note",
+        title: "整理企劃重點",
+        rationale: "先集中資訊，後續任務才有依據。",
+        content: "依城市微光企劃整理議題與分工。",
+        sourceRefs: ["note1"],
+        milestoneId: "ready",
+      }],
+    });
+
+    const plan = resolveCompletePlanDraft(draft, aliases);
+
+    expect(plan.summary.rationale).toContain("不需生成步驟");
+    expect(plan.summary.contextUsed).toEqual(["專案筆記", "團隊成員"]);
+    expect(plan.steps[0].rationale).toBe("先集中資訊，後續任務才有依據。");
+  });
+
   it("never invents an absolute date from a vague weekday", () => {
     const draft = completePlanDraftSchema.parse({
       summary: summary(),

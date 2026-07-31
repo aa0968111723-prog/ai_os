@@ -30,7 +30,7 @@
 .aios-splash__logo-wrap {
   position: relative;
   width: 100%;
-  min-height: 88px;
+  min-height: 96px;
   display: grid;
   place-items: center;
 }
@@ -40,14 +40,20 @@
 .aios-splash__logo-wrap .brand-logo--full {
   position: relative;
   z-index: 1;
-  width: min(260px, 72vw);
+  width: min(280px, 76vw);
 }
 .aios-splash__logo .brand-logo__full-img,
-.aios-splash__logo-wrap .brand-logo__full-img {
+.aios-splash__logo-wrap .brand-logo__full-img,
+.aios-splash__logo .brand-logo--mark,
+.aios-splash__logo-wrap .brand-logo--mark {
   width: 100%;
   height: auto;
   max-height: none;
-  filter: drop-shadow(0 8px 20px rgba(70, 56, 44, 0.10));
+  /* 銳化邊緣，減少高 DPI 上的柔邊 */
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: high-quality;
+  /* 輕微陰影，避免過度柔化緞帶邊緣 */
+  filter: drop-shadow(0 6px 14px rgba(70, 56, 44, 0.08));
 }
 
 .aios-splash__glow {

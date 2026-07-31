@@ -55,3 +55,27 @@ describe("rolePlaybooks", () => {
     expect(playbookGoalHint("role.nope")).toBeUndefined();
   });
 });
+
+describe("創作代理短版 playbook（#133 PR-3）", () => {
+  it("短版存在且以 playbook id 取用；限制排程與大量人類任務", () => {
+    const short = getPlaybook("playbook.creation.short.v1");
+    expect(short).toBeDefined();
+    expect(short?.roleId).toBe("role.storyboard");
+    expect(short?.plannerHint).toContain("不要預設 create_schedule");
+    expect(short?.plannerHint).toContain("missingInformation");
+    expect(short?.plannerHint).toContain("summary.rationale");
+    expect(short?.suggestedKinds).toEqual([
+      "split_script", "create_scene", "generate", "voiceover", "submit_approval",
+    ]);
+  });
+
+  it("不影響長版：role.storyboard 仍解析到主 playbook（#133 路徑不受影響）", () => {
+    expect(getPlaybook("role.storyboard")?.id).toBe("playbook.storyboard.v1");
+  });
+
+  it("短版提示會注入規劃器 role block", () => {
+    const block = buildPlannerRoleBlock();
+    expect(block).toContain("playbook.creation.short.v1");
+    expect(block.length).toBeLessThan(8000);
+  });
+});
