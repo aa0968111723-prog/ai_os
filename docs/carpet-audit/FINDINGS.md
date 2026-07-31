@@ -140,3 +140,26 @@ Detail: `exit=1`
 
 ---
 
+## 2026-07-31T06:07:15.077Z · `ui.agent` ❌ fail
+
+**UI：代理卡生命週期** · kind=`ui-playwright` · cycle=0 · cursor→20
+
+Detail: `exit=1`
+
+---
+
+## 2026-07-31 · `ui.agent` ❌ fail（基建）
+
+**UI：代理卡生命週期** · kind=`ui-playwright`
+
+### Findings
+
+#### [medium] CARPET-UI-CHROMIUM-SIGTRAP: Playwright Chromium 啟動即 SIGTRAP
+
+- **File**: `scripts/e2e-ui/verify-agent.mjs`
+- **Evidence**: `browserType.launch` → chrome_crashpad_handler / `signal=SIGTRAP`；executable 已能找到（`~/.cache/ms-playwright/chromium-1208/.../chrome`）
+- **Consequence**: 所有 UI Playwright 區塊在本 codespace 無法實機跑（缺系統 library 或 sandbox 限制）
+- **Fix**: `npx playwright install-deps`（需 root）或改用已備 `/opt/pw-browsers` 映像；e2e-ui 已支援 `PW_CHROMIUM` 覆寫路徑
+
+---
+
