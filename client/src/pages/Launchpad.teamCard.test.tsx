@@ -127,7 +127,10 @@ vi.mock("../components/FirstRunGuide", () => ({ FirstRunGuide: () => null }));
 vi.mock("../components/InstallAppBanner", () => ({ InstallAppBanner: () => null }));
 
 const GROUP = "11111111-1111-4111-8111-111111111111";
-const NOW = Date.parse("2026-07-30T12:00:00Z");
+/* NOW 必須取真實現在而非寫死日期：元件用 Date.now() 與 Math.floor 算「卡了 N 天」，
+ * 寫死日期的 fixture 每過一天斷言就全部位移（CI 於 2026-07-31 實際紅過一次）。
+ * daysAgo(n) 以執行當下為基準，floor 後永遠恰好是 n 天。 */
+const NOW = Date.now();
 const daysAgo = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
 
 /**
