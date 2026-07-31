@@ -94,6 +94,8 @@ async function waitForRouteContent(page) {
       const main = document.querySelector("#main-content") ?? document.querySelector("main");
       if (!main) return false;
       const text = (main.innerText || "").trim();
+      // 開機 splash 動畫還在＝過場中：等它退場再量（動畫縮放會被誤判成裁切）
+      if (document.querySelector(".aios-splash")) return false;
       // 只有 Suspense fallback 的「載入中…」不算內容
       return text.length > 0 && text !== "載入中…" && !/^載入中…?$/.test(text);
     },
@@ -119,6 +121,10 @@ async function inspectViewport(page, vp) {
       "button,input,select,textarea,[role=button],a.btn,a.brand,.mobile-nav a,.menu-item",
     )]
       .filter((element) => {
+        if (element.closest("svg")) return false; // 族譜地圖等視覺化的圖形節點（可縮放），非標準控件
+        // .tag-remove：chip 內的移除小叉，44px 會把整顆 chip 撐爆——取 WCAG 2.5.8
+        // AA 的 24px 下限＋餘裕做 28px（styles.css 有完整理由）。文件化的刻意豁免。
+        if (element.classList.contains("tag-remove")) return false;
         const rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
         return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden";
@@ -139,15 +145,52 @@ async function inspectViewport(page, vp) {
           height: Math.round(rect.height),
         };
       });
+    // 內部裁切偵測（2026-07-31 手機截圖事故的守衛）：.cols 少 min-width:0 時，
+    // 超寬內容被祖先的 overflow:hidden 裁掉——頁級 scrollWidth 量不到（維持 = 視口），
+    // 使用者卻看到文字被切半。逐元素查「內容比容器寬、又不能捲」的節點。
+    // 滿版出血豁免：超寬子項帶負左 margin（topbar／ctx-summary 貼齊螢幕緣的設計）。
+    const clippedInside = [];
+    for (const el of document.querySelectorAll(".app *")) {
+      if (el.closest("svg")) continue;
+      const cs = getComputedStyle(el);
+      // 只抓「自身 overflow 是 visible、內容卻比容器寬」的元素——那代表溢出
+      // 會被某個祖先默默裁掉（.cols 事故的形狀）。自己宣告 hidden/clip 的是
+      // 作者刻意裁（裝飾性出血光暈等偽元素也計入 scrollWidth）；auto/scroll 會捲。
+      if (cs.display === "none" || cs.overflowX !== "visible") continue;
+      // 表單控件天生內捲（文字比框寬時捲動），不是版面錯誤
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) continue;
+      // sr-only／視覺摺疊元素（寬度趨近 0 的絕對定位）不參與版面
+      if (cs.position === "absolute" && el.clientWidth <= 2) continue;
+      if (el.clientWidth <= 0 || el.scrollWidth <= el.clientWidth + 3) continue;
+      // 造成溢出的最寬「後代」（滿版出血常是孫代：main > page-shell > nav.support-topic-nav）
+      let widest = null;
+      for (const d of el.querySelectorAll("*")) {
+        const w = d.getBoundingClientRect().width;
+        if (w > el.clientWidth + 2 && (!widest || w > widest.w)) widest = { d, w };
+      }
+      if (widest && parseFloat(getComputedStyle(widest.d).marginLeft) < 0) continue; // 滿版出血＝刻意
+      if (widest && getComputedStyle(widest.d).position === "absolute") continue; // 絕對定位裝飾（splash 光暈等）
+      // 沒有任何超寬後代＝溢出來自偽元素或 nowrap 文字的 min-content 量測差。
+      // 前者是裝飾、後者是幾個 px 的長尾微裁——都不是 .cols 那種「整卡被裁」
+      // 的事故形狀，不作紅燈（微裁另以人工清單追蹤）。
+      if (!widest) continue;
+      const name = `${el.tagName.toLowerCase()}${el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\s+/).slice(0, 2).join(".") : ""}`;
+      clippedInside.push({ sel: name, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth });
+      if (clippedInside.length >= 5) break;
+    }
     return {
       clientWidth: root.clientWidth,
       scrollWidth: root.scrollWidth,
       horizontalOverflow: root.scrollWidth > root.clientWidth + 1,
       undersizedControls: controls.filter((item) => item.width < 44 || item.height < 44),
+      clippedInside,
     };
   });
   if (layout.horizontalOverflow) {
     throw new Error(`水平溢出：scrollWidth ${layout.scrollWidth} > clientWidth ${layout.clientWidth}`);
+  }
+  if (vp.width <= 390 && layout.clippedInside.length > 0) {
+    throw new Error(`手機內部裁切（內容比容器寬又不能捲）：${JSON.stringify(layout.clippedInside)}`);
   }
   if (vp.width <= 390 && layout.undersizedControls.length > 0) {
     throw new Error(`手機觸控目標小於 44px：${JSON.stringify(layout.undersizedControls.slice(0, 8))}`);
@@ -203,6 +246,8 @@ async function run() {
           await page.setViewportSize({ width: vp.width, height: vp.height });
           await page.goto(`${TARGET_URL}${route}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
           await page.waitForTimeout(700);
+          // 開機 splash 的縮放動畫會被裁切偵測誤判——等它退場（公開頁沒有 #main-content 可等）
+          await page.waitForFunction(() => !document.querySelector(".aios-splash"), { timeout: 8_000 }).catch(() => {});
           if (new URL(page.url()).pathname !== route) throw new Error(`公開路由被導向 ${new URL(page.url()).pathname}`);
           const layout = await inspectViewport(page, vp);
           const accessibility = vp.name === "L-1280"

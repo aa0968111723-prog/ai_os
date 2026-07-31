@@ -1893,6 +1893,9 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
   align-items: stretch;
 }
 .daily-overview--solo { grid-template-columns: 1fr; }
+/* 與 .cols 同病：只有 __main 有 min-width:0，另一欄在手機收單欄後被子項
+ * min-content 撐爆 12px、內容被裁（390px 稽核實測）。防爆一律上在容器層。 */
+.daily-overview > * { min-width: 0; }
 .daily-overview__main { min-width: 0; display: grid; gap: 10px; }
 .daily-focus-card {
   width: 100%;

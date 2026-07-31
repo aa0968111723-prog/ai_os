@@ -583,7 +583,9 @@ export function ProjectPage({ id }: { id: string }) {
       })}
       {orphansOf(field, opts).map((t) => (
         <Chip key={t} selected
-          style={{ borderStyle: "dashed", opacity: 0.75 }}
+          // 只用虛線框標「已移出」——opacity 會把 primary-ink 的 5.5:1 壓到 AA 以下
+          // （axe 桌面稽核實測 color-contrast serious）；狀態已由虛線＋Info 圖示表達。
+          style={{ borderStyle: "dashed" }}
           title="這個選項已被移出清單，點一下可從本專案移除"
           onClick={() => toggle(field, t)}>
           {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
