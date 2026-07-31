@@ -334,4 +334,49 @@ for c in gi2.get("planConcerns", []):
 ok("疑慮總和不超過整體待補資訊數", concern_missing <= gi2.get("unresolvedInformation", 0))
 ok("疑慮總和不超過整體風險數", concern_risks <= gi2.get("risks", 0))
 
+
+# ── 12. 派工參數不再被丟掉（S4）──
+# 專案頁的「執行計畫」本來就吃這四個參數；派工時原樣轉交，守門一個都不繞過。
+disp_full = call("POST", admin, "teamAssistant.dispatch", {
+    "groupId": gid,
+    "projectId": pid,
+    "goal": "帶 playbook 與規劃模式的派工：把腳本拆成分鏡",
+    "playbookId": "playbook.storyboard.v1",
+    "plannerMode": "fal_economy",
+})
+ok(f"帶參數派工成功{'' if 'runId' in disp_full else '（'+str(disp_full.get('__error__'))[:120]+'）'}", "runId" in disp_full)
+
+# 規劃模式是 enum，亂填必須被擋（而不是默默用預設值排出一份不同的計畫）
+bad_mode = call("POST", admin, "teamAssistant.dispatch", {
+    "groupId": gid, "projectId": pid,
+    "goal": "不合法的規劃模式應被擋下",
+    "plannerMode": "economy",
+})
+ok("🔒 不合法 plannerMode 被擋", "__error__" in bad_mode)
+ok("帶參數派工仍是待核准（沒有繞過核准）", disp_full.get("status") == "awaiting_approval")
+ok("派工回傳規劃遙測（不是黑盒）", "plannerTelemetry" in disp_full)
+
+# 不合法的 playbookId 不該讓派工整個炸掉，也不該被當成 roleId 偷渡
+disp_bad_pb = call("POST", admin, "teamAssistant.dispatch", {
+    "groupId": gid, "projectId": pid,
+    "goal": "不存在的 playbook 應被忽略而非崩潰",
+    "playbookId": "playbook.does.not.exist",
+})
+ok("未知 playbookId 不會讓派工崩潰", "runId" in disp_bad_pb or "__error__" in disp_bad_pb)
+
+# 超出上限的來源清單要被 zod 擋下（而不是塞爆規劃預算）
+disp_too_many = call("POST", admin, "teamAssistant.dispatch", {
+    "groupId": gid, "projectId": pid,
+    "goal": "來源數量超過上限應被擋下",
+    "extraSourceIds": ["00000000-0000-4000-8000-%012d" % i for i in range(11)],
+})
+ok("🔒 來源超過上限被擋", "__error__" in disp_too_many)
+
+# 派工出處要留痕：事件流裡看得到「由團隊分析卡派工」
+if "runId" in disp_full:
+    evs = call("GET", admin, "agents.eventsByProject", {"projectId": pid, "limit": 200})
+    items = evs.get("items", []) if isinstance(evs, dict) else []
+    ok("派工在事件流留下出處",
+       any(e.get("runId") == disp_full["runId"] and e.get("eventKey") == "run:dispatched-from-team" for e in items))
+
 print("—— e2e-team-assistant 完成 ——")

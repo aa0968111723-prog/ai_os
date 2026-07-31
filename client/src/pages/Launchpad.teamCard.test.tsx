@@ -222,10 +222,17 @@ describe("團隊分析卡：待我裁決收件匣", () => {
     expect(h.mutations[1]).toEqual({ path: "agents.discard", input: { runId: "run-1" } });
   });
 
-  it("收件匣為空時說「沒有等你決定的事項」，不是五個 0", () => {
+  it("用過代理但收件匣為空 → 說「都清空了」，不是五個 0", () => {
+    seed({ runs: [run({ status: "done" })], summary: { hasRuns: true, health: "healthy" }, pending: [] });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(inbox()).getByText(/都清空了/)).toBeInTheDocument();
+  });
+
+  it("從沒用過代理且收件匣為空 → 引導去起手式，而不是「都清空了」", () => {
     seed({ runs: [], pending: [] });
     render(<Launchpad groupId={GROUP} />);
-    expect(within(inbox()).getByText(/沒有等你決定的事項/)).toBeInTheDocument();
+    expect(within(inbox()).getByText(/挑一個起手式/)).toBeInTheDocument();
+    expect(within(inbox()).queryByText(/都清空了/)).not.toBeInTheDocument();
   });
 
   it("超過上限只列前 6 件，並誠實說明還有幾件", () => {
@@ -496,5 +503,74 @@ describe("S3：代理產出與計畫疑慮", () => {
     });
     render(<Launchpad groupId={GROUP} />);
     expect(within(screen.getByLabelText("代理產出與計畫疑慮")).getByText(/已達顯示上限/)).toBeInTheDocument();
+  });
+});
+
+describe("S4：空組起手式與派工參數", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  const withPlaybooks = () => {
+    h.queryData.set("agents.listRoles", {
+      roles: [],
+      playbooks: [
+        { id: "playbook.storyboard.v1", roleId: "role.storyboard", version: 1, title: "分鏡助理", goalTemplate: "把知識庫腳本拆成分鏡", suggestedKinds: [] },
+        { id: "playbook.creation.short.v1", roleId: "role.creation", version: 1, title: "快速開拍", goalTemplate: "先出一版可看的成品", suggestedKinds: [] },
+        { id: "playbook.director.v1", roleId: "role.director", version: 1, title: "計畫統籌", goalTemplate: "釐清目標與缺資訊", suggestedKinds: [] },
+        { id: "playbook.qa.v1", roleId: "role.qa", version: 1, title: "不該出現的第四個", goalTemplate: "x", suggestedKinds: [] },
+      ],
+    });
+  };
+
+  it("從沒用過代理 → 出現三個起手式與專案下拉", () => {
+    withPlaybooks();
+    seed({ runs: [], pending: [] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(screen.getByLabelText("起手式"));
+    expect(box.getByRole("button", { name: /分鏡助理/ })).toBeInTheDocument();
+    expect(box.getByRole("button", { name: /快速開拍/ })).toBeInTheDocument();
+    expect(box.getByRole("button", { name: /計畫統籌/ })).toBeInTheDocument();
+    // 只挑三個，第四個不列（起手式是降低門檻，不是把選擇成本原封不動還回去）
+    expect(box.queryByRole("button", { name: /不該出現的第四個/ })).not.toBeInTheDocument();
+    expect(box.getByLabelText("要在哪個專案發起")).toBeInTheDocument();
+  });
+
+  it("已用過代理就不再佔版面", () => {
+    withPlaybooks();
+    seed({ runs: [run({ status: "done" })], summary: { hasRuns: true, health: "healthy" } });
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.queryByLabelText("起手式")).not.toBeInTheDocument();
+  });
+
+  it("按下起手式會帶著 playbookId 派工到選中的專案", async () => {
+    withPlaybooks();
+    seed({ runs: [], pending: [] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(screen.getByLabelText("起手式"));
+    await userEvent.click(box.getByRole("button", { name: /分鏡助理/ }));
+    expect(h.mutations).toEqual([{
+      path: "teamAssistant.dispatch",
+      input: { groupId: GROUP, projectId: "p1", goal: "把知識庫腳本拆成分鏡", playbookId: "playbook.storyboard.v1" },
+    }]);
+  });
+
+  it("換專案後派工到換過的那個專案", async () => {
+    withPlaybooks();
+    seed({ runs: [], pending: [] });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(screen.getByLabelText("起手式"));
+    await userEvent.selectOptions(box.getByLabelText("要在哪個專案發起"), "p2");
+    await userEvent.click(box.getByRole("button", { name: /快速開拍/ }));
+    expect(h.mutations[0]).toMatchObject({ path: "teamAssistant.dispatch", input: { projectId: "p2" } });
+  });
+
+  it("沒有可派的專案時不渲染起手式（避免按了才發現沒地方去）", () => {
+    withPlaybooks();
+    seed({ runs: [], pending: [] });
+    h.queryData.set("projects.list", []);
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.queryByLabelText("起手式")).not.toBeInTheDocument();
   });
 });

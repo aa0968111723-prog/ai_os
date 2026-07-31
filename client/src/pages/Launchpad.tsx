@@ -441,6 +441,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
             pendingDecisions={pendingDecisions}
             pendingLoading={pendingSummary.isLoading}
             pendingFailed={!!pendingSummary.error}
+            starterProjects={all}
           />
         )}
       </section>
@@ -723,6 +724,15 @@ const DECISION_META: Record<DecisionKind, { label: string; hint: string }> = {
   generation: { label: "生成待核", hint: "達組內成本門檻的生成，核准才會送出" },
 };
 
+/**
+ * 空組起手式用的三個 playbook。
+ *
+ * 刻意只挑三個而不是全部列出：起手式的作用是「降低第一步的門檻」，
+ * 給七個選項等於把選擇成本原封不動還給使用者。這三個涵蓋最常見的起點——
+ * 從腳本拆分鏡、直接出媒體、先把計畫講清楚。
+ */
+const STARTER_PLAYBOOK_IDS = ["playbook.storyboard.v1", "playbook.creation.short.v1", "playbook.director.v1"] as const;
+
 /** 收件匣一次最多列幾件：再多就是清單而不是「先做這幾件」 */
 const DECISION_INBOX_MAX = 6;
 
@@ -829,12 +839,15 @@ function TeamAssistantCard({
   pendingDecisions,
   pendingLoading,
   pendingFailed,
+  starterProjects,
 }: {
   groupId: string;
   /** 組內「分鏡送審／生成待核」的 per-project 計數（由 Launchpad 已查到的 pendingSummary 傳入） */
   pendingDecisions: PendingDecisionSource[];
   pendingLoading: boolean;
   pendingFailed: boolean;
+  /** 起手式的「在哪個專案發起」下拉；沿用這一頁已查到的專案清單，不另發查詢 */
+  starterProjects: Array<{ id: string; title: string; status: string }>;
 }) {
   const utils = trpc.useUtils();
   const [question, setQuestion] = useState("");
@@ -858,8 +871,10 @@ function TeamAssistantCard({
       refetchInterval: (q) => ((q.state.data?.summary?.active ?? 0) > 0 ? 8000 : false),
     },
   );
+  const roles = trpc.agents.listRoles.useQuery(undefined, { staleTime: 10 * 60_000 });
   const [dispatched, setDispatched] = useState<Record<string, DispatchResult>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [starterProjectId, setStarterProjectId] = useState("");
   const [runsCollapsed, setRunsCollapsed] = useState(false);
   const [runFilter, setRunFilter] = useState<RunFilter>("active");
   useEffect(() => {
@@ -915,6 +930,28 @@ function TeamAssistantCard({
     () => buildDecisionInbox(runs, pendingDecisions, pendingTasks),
     [runs, pendingDecisions, pendingTasks],
   );
+  // 起手式：只在「這個組還沒用過代理」時出現，用完就消失（不長期佔第一屏）。
+  // 目標文字直接取自 playbook 模板——與專案頁的「執行計畫」同一組敘事，不另編一套。
+  const starters = useMemo(() => {
+    const projects = (starterProjects ?? []).filter((p) => p.status !== "archived");
+    const playbooks = roles.data?.playbooks ?? [];
+    const items = STARTER_PLAYBOOK_IDS
+      .map((id) => playbooks.find((p) => p.id === id))
+      .filter((p): p is NonNullable<typeof p> => Boolean(p))
+      .map((p) => ({ id: p.id, playbookId: p.id, title: p.title, goal: p.goalTemplate }));
+    return {
+      // 沒有專案可派、或這組已經用過代理，就不佔版面
+      show: !overview.isLoading && summary?.hasRuns === false && projects.length > 0 && items.length > 0,
+      projects,
+      items,
+    };
+  }, [starterProjects, roles.data, overview.isLoading, summary?.hasRuns]);
+  useEffect(() => {
+    if (starters.projects.length && !starters.projects.some((p) => p.id === starterProjectId)) {
+      setStarterProjectId(starters.projects[0].id);
+    }
+  }, [starters.projects, starterProjectId]);
+
   // 代理產出與計畫疑慮：兩段都空就不渲染
   const agentOutput = useMemo(() => {
     const results = insights.data?.groupResults ?? [];
@@ -989,7 +1026,9 @@ function TeamAssistantCard({
               <Hint layer="always" style={{ margin: 0 }}>
                 {pendingFailed
                   ? "跨專案待辦載入失敗，暫時無法確認有沒有待裁決事項。"
-                  : "沒有等你決定的事項——代理計畫、分鏡送審、生成核准都清空了。"}
+                  : summary?.hasRuns
+                    ? "沒有等你決定的事項——代理計畫、分鏡送審、生成核准都清空了。"
+                    : "這個組還沒開始用 AI 代理。下面挑一個起手式就能發起第一份計畫（建立計畫免費，核准後才花點）。"}
               </Hint>
             ) : (
               <div className="team-inbox__list">
@@ -1115,6 +1154,78 @@ function TeamAssistantCard({
               </div>
             )}
             {decideError && <p className="error" role="alert" style={{ margin: 0 }}>{decideError.message}</p>}
+          </div>
+        )}
+
+        {/* ── 起手式：空組的第一屏不能只有一句「沒有東西」。
+            用既有的 playbook 目標模板當三個起點，選一個專案就能發起——
+            所有守門仍在 planAgentCore 裡，這裡只是把入口搬到看得到的地方。 ── */}
+        {starters.show && (
+          <div className="team-starters" aria-label="起手式">
+            <div className="team-starters__head">
+              <strong>從這裡開始</strong>
+              <Meta>建立計畫免費，核准後才開始花點</Meta>
+            </div>
+            <label htmlFor="ta-starter-project" style={{ marginTop: 0 }}>要在哪個專案發起</label>
+            <select
+              id="ta-starter-project"
+              value={starterProjectId}
+              onChange={(e) => setStarterProjectId(e.target.value)}
+              style={{ width: "auto", maxWidth: "100%" }}
+            >
+              {starters.projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.title}</option>
+              ))}
+            </select>
+            <div className="team-starters__list">
+              {starters.items.map((s) => {
+                const key = `starter-${s.id}`;
+                const done = dispatched[key];
+                const target = starters.projects.find((p) => p.id === starterProjectId);
+                return done ? (
+                  <Hint key={key} as="div" layer="always" style={{ color: "var(--success-ink)" }}>
+                    ✓ 已建立「{s.title}」的執行計畫（估 {done.estPoints} 點）：{done.summary}
+                    <Link href={`/p/${done.projectId}?focus=agent-run-${done.runId}`} style={{ marginLeft: 6 }}>到專案核准 →</Link>
+                  </Hint>
+                ) : (
+                  <ConfirmButton
+                    key={key}
+                    triggerClassName="btn-tonal btn-sm"
+                    disabled={!target || pendingKey === key}
+                    title={s.goal}
+                    message={`在「${target?.title ?? ""}」發起 AI 執行計畫：${s.goal}？\n會建立一份待核准計畫，仍需到該專案核准才會開始執行、花點。`}
+                    confirmLabel="發起計畫"
+                    onConfirm={async () => {
+                      if (!target) return;
+                      setPendingKey(key);
+                      try {
+                        const r = await dispatch.mutateAsync({
+                          groupId,
+                          projectId: target.id,
+                          goal: s.goal,
+                          // playbook 一併帶上：同一句目標帶不帶 playbook 排出來的步驟骨架不同
+                          playbookId: s.playbookId,
+                        });
+                        setDispatched((prev) => ({ ...prev, [key]: r }));
+                        utils.projects.invalidate();
+                        overview.refetch();
+                        insights.refetch();
+                        setRunFilter("awaiting_approval");
+                        setRunsCollapsed(false);
+                      } catch {
+                        /* dispatch.error 已顯示 */
+                      } finally {
+                        setPendingKey((k) => (k === key ? null : k));
+                      }
+                    }}
+                  >
+                    <Icon name="Play" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                    {s.title}
+                  </ConfirmButton>
+                );
+              })}
+            </div>
+            {dispatch.error && <p className="error" role="alert" style={{ margin: 0 }}>{dispatch.error.message}</p>}
           </div>
         )}
 

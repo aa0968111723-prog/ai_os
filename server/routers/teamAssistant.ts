@@ -9,7 +9,8 @@ import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { searchCatalogText, rowLine } from "./assistant";
 import { planAgentCore } from "../services/agentCore";
-import { getGroupAgentInsights } from "../services/agentEventCore";
+import { getGroupAgentInsights, recordAgentEventSafely } from "../services/agentEventCore";
+import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { searchAssistantDatabaseRows } from "../services/databaseRowSearch";
 import type { AuthState } from "../services/auth";
 import type { DataField } from "../../shared/databaseFields";
@@ -882,7 +883,18 @@ ${historyBlock}使用者的問題：${input.message}`;
    * 派工權、與「專案必須屬於這個組」（防拿別組的 projectId 借道跨組派工）。
    */
   dispatch: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), projectId: z.string().uuid(), goal: z.string().min(5, "目標至少 5 個字").max(1000) }))
+    .input(z.object({
+      groupId: z.string().uuid(),
+      projectId: z.string().uuid(),
+      goal: z.string().min(5, "目標至少 5 個字").max(1000),
+      // 這四個參數專案頁的「執行計畫」本來就有，派工時卻被丟掉——同一句目標從團隊卡送出
+      // 會得到一份沒有 playbook、沒有指定來源、模式也不同的計畫。全部原樣轉交給
+      // planAgentCore，守門（ACL／額度／節流／併發鎖）一個都不繞過。
+      plannerMode: agentPlannerModeSchema.optional(),
+      extraSourceIds: z.array(z.string().uuid()).max(10).optional(),
+      driveFileIds: z.array(z.string().min(1).max(200)).max(5).optional(),
+      playbookId: z.string().max(80).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       const role = requireGroup(ctx.auth, input.groupId);
       if (!(await memberCanDispatch(ctx.auth, input.groupId, role))) {
@@ -893,8 +905,37 @@ ${historyBlock}使用者的問題：${input.message}`;
       if (!project || project.groupId !== input.groupId) {
         throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個組的專案" });
       }
-      // 交給既有專案代理規劃核心（再驗 assertProjectEditable／封存／額度／規劃節流）
-      const run = await planAgentCore({ auth: ctx.auth, projectId: input.projectId, goal: input.goal });
+      // 交給既有專案代理規劃核心（再驗 assertProjectEditable／封存／額度／規劃節流）。
+      // 刻意不另加一層 teamDispatch 節流：planAgentCore 已套 agentPlan 滑動視窗（每人每分鐘 4 次），
+      // 再疊一層只是讓同一個人被兩套規則擋、錯誤訊息還不一致。
+      const run = await planAgentCore({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        goal: input.goal,
+        plannerMode: input.plannerMode,
+        extraSourceIds: input.extraSourceIds,
+        driveFileIds: input.driveFileIds,
+        playbookId: input.playbookId,
+      });
+      // 出處要留痕：同一份計畫從專案頁發起與從團隊卡派工，事後追查責任時是不同的故事。
+      // 走 recordAgentEventSafely（失敗不影響派工本身），事件內容只有可驗證的事實。
+      await recordAgentEventSafely({
+        runId: run.id,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        eventKey: "run:dispatched-from-team",
+        eventType: "observation",
+        actorType: "human",
+        actorId: ctx.auth.user.id,
+        summary: `由作業台團隊分析卡派工${input.playbookId ? `（playbook：${input.playbookId}）` : ""}`,
+        data: {
+          origin: "team_card",
+          plannerMode: input.plannerMode ?? null,
+          playbookId: input.playbookId ?? null,
+          pickedSources: input.extraSourceIds?.length ?? 0,
+          driveFiles: input.driveFileIds?.length ?? 0,
+        },
+      });
       return {
         runId: run.id,
         projectId: run.projectId,
@@ -902,6 +943,8 @@ ${historyBlock}使用者的問題：${input.message}`;
         planSummary: run.planSummary,
         estPoints: run.estPoints,
         status: run.status,
+        // 規劃遙測：讓派工的人看得到「這份計畫是誰、用什麼模式排的」，而不是黑盒
+        plannerTelemetry: run.plannerTelemetry,
       };
     }),
 });
