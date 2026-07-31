@@ -16,6 +16,8 @@ export interface CreationDraft {
   sourceAssetIds: string[];
   characterIds: string[];
   scenePresetIds: string[];
+  /** 問 AI／多步開拍：優先注入的知識庫篇目 id（≤20） */
+  knowledgeIds: string[];
   worldviewEnabled: boolean;
   templateId?: string;
   /** Prompt library source id when draft was filled via apply_prompt (reuse tracking). */
@@ -47,6 +49,7 @@ export function emptyDraft(mode: CreationMode = "ask"): CreationDraft {
     sourceAssetIds: [],
     characterIds: [],
     scenePresetIds: [],
+    knowledgeIds: [],
     worldviewEnabled: true,
     skillIds: [],
   };
@@ -79,6 +82,9 @@ function normalizeDraft(raw: unknown, fallbackMode: CreationMode = "ask"): Creat
     scenePresetIds: Array.isArray(o.scenePresetIds)
       ? o.scenePresetIds.filter((x): x is string => typeof x === "string")
       : base.scenePresetIds,
+    knowledgeIds: Array.isArray(o.knowledgeIds)
+      ? o.knowledgeIds.filter((x): x is string => typeof x === "string").slice(0, 20)
+      : base.knowledgeIds,
     worldviewEnabled: typeof o.worldviewEnabled === "boolean" ? o.worldviewEnabled : base.worldviewEnabled,
     templateId: typeof o.templateId === "string" ? o.templateId : undefined,
     promptSourceId: typeof o.promptSourceId === "string" ? o.promptSourceId : undefined,
