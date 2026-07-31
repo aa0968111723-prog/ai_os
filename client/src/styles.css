@@ -24,6 +24,15 @@
 @import "@fontsource-variable/noto-sans-tc/index.css";
 @import "@fontsource-variable/noto-serif-tc/index.css";
 
+/* 等寬字（UIUX-03 補漏）：--mono 一直宣告著 "IBM Plex Mono" 卻從來沒載入過——
+ * 與 --sans/--serif 是同一個問題，先前只修了那兩個。它退回系統等寬字時，
+ * Windows 是 Consolas、Mac 是 Menlo，數字寬度與字高都不同；而 --mono 正好用在
+ * 點數、費用、模型 ID、時間戳這些**需要對齊**的地方。
+ * 只載 latin 子集與實際用到的兩個字重（styles.css 裡 mono 一律搭 600）——
+ * 共約 30KB，與中文字體不是同一個量級。 */
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+
 :root {
   color-scheme: light; /* OS 深色模式下鎖定亮色控件/自動填入/捲軸，貼合暖色調 */
   /* ── 文字（--soft 僅裝飾，永不承載正文；全部校至 WCAG AA） ── */
