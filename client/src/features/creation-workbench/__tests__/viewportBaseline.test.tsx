@@ -45,6 +45,10 @@ vi.mock("../../../api", () => ({
     generation: {
       submit: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
     },
+    // 規劃模式的 KnowledgeSourceStrip 會查知識庫清單；沒有這層 mock 整個工作台 render 就爆
+    knowledge: {
+      list: { useQuery: () => ({ data: [] }) },
+    },
   },
 }));
 

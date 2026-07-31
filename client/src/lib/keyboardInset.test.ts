@@ -106,9 +106,28 @@ describe("installKeyboardInset", () => {
   // CSS 那一半：貼底面板要真的讀這個變數才有效
   it("有輸入框的貼底面板讀 --kb-inset 讓開鍵盤", () => {
     const styles = readFileSync(resolve(process.cwd(), "client/src/styles.css"), "utf8");
-    for (const sel of [".project-messages-sheet-root {", ".modal-scrim {"]) {
+    for (const sel of [".project-messages-sheet-root {", ".modal-scrim {", ".fb-fab-root {"]) {
       const rule = styles.slice(styles.indexOf(sel), styles.indexOf("}", styles.indexOf(sel)));
       expect(rule).toContain("var(--kb-inset");
+    }
+  });
+
+  // 只換成 dvh 是不夠的：iOS 的鍵盤不改變 dvh（dvh 只追網址列這類動態工具列）。
+  // sheet 必須另外夾到「已被 --kb-inset 縮短的父層 100%」，否則照樣溢出到鍵盤底下。
+  //
+  // 這條一定要掃「每一個」同名規則：基礎規則與 ≤560px 覆寫都叫 .project-messages-sheet，
+  // 而媒體查詢特異性較高——手機吃的是後者。只檢查 indexOf 找到的第一個，會在
+  // 「基礎規則已修、手機那條還破」時給出綠燈（本專案實際發生過一次）。
+  it("留言 sheet 的每一條 max-height 都夾到父層 100%，不只靠 dvh", () => {
+    const styles = readFileSync(resolve(process.cwd(), "client/src/styles.css"), "utf8");
+    const rules: string[] = [];
+    for (let at = styles.indexOf(".project-messages-sheet {"); at !== -1;
+      at = styles.indexOf(".project-messages-sheet {", at + 1)) {
+      rules.push(styles.slice(at, styles.indexOf("}", at)));
+    }
+    expect(rules.length).toBeGreaterThanOrEqual(2); // 基礎規則＋≤560px 覆寫
+    for (const rule of rules) {
+      expect(rule).toMatch(/max-height:\s*min\([^;]*100%\)/);
     }
   });
 

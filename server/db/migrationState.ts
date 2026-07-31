@@ -125,11 +125,13 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
  * succeeded the indexes did not yet exist, so adding the guard produces the
  * same two indexes by the same definitions.
  *
- * 0018 packed two statements into one chunk because the separator was missing.
- * The correction only inserts `--> statement-breakpoint` between them: the DDL
- * text, its order and its IF NOT EXISTS guards are untouched, so the original
- * (both statements in a single exec) and the corrected file (two execs) leave
- * exactly the same column and index behind.
+ * 0018 packed two statements into one file without the `--> statement-breakpoint`
+ * separator every other multi-statement migration uses, and wrote the index
+ * columns with spaces after the commas. Both are purely textual: the runner
+ * executes the same ALTER TABLE and CREATE INDEX in the same order either way,
+ * and `("a", "b")` and `("a","b")` are the same index to PostgreSQL. The
+ * correction only lets the bridge compare the file against a generated drift
+ * plan, which emits neither the separator nor the spaces.
  */
 export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly string[]>> = {
   "0004_query_indexes": [
