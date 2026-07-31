@@ -14,7 +14,11 @@ export const OPTION_TYPE_META: Record<OptionType, { label: string; hint: string;
   platform: { label: "發布平台", hint: "含畫面比例；生成時自動帶入", hasFormat: true },
   tone: { label: "調性", hint: "世界觀的語氣（莊嚴、溫暖…）；會注入生成", hasFormat: false },
   theme: { label: "主軸 / 敘事弧", hint: "故事走向（苦→修行→轉變→感恩…）；會注入生成", hasFormat: false },
-  style: { label: "視覺風格", hint: "畫面風格（日系水彩、水墨禪意…）；會注入生成", hasFormat: false },
+  style: {
+    label: "視覺風格",
+    hint: "媒材家族＋主風格（可選質感）；會注入生成",
+    hasFormat: false,
+  },
 };
 
 /** 發布平台合法比例（自訂 platform 時限這三種，生成台才對得上） */

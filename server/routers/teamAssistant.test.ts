@@ -5,6 +5,10 @@ import {
   currentStepNote,
   dispatchAllowed,
   foldGroupStatusAggregate,
+  formatGroupBlockerDigest,
+  sanitizeContextUsed,
+  sanitizeRationale,
+  TEAM_CONTEXT_LABELS,
   formatAgentRunLine,
   groupSummaryFromCounts,
   resolveDispatches,
@@ -440,5 +444,86 @@ describe("foldGroupStatusAggregate（整組計數，不受清單 limit 影響）
     expect(counts.running + counts.waiting + counts.awaitingApproval).toBe(0);
     expect(counts.totalRuns).toBe(5);
     expect(groupSummaryFromCounts(counts).health).toBe("healthy");
+  });
+});
+
+describe("formatGroupBlockerDigest（S5：ask 的阻塞上下文）", () => {
+  const base = {
+    status: "blocked",
+    openTasks: 5,
+    overdueTasks: 2,
+    blockers: [
+      { severity: "critical", type: "overdue_task", label: "任務逾期：補齊角色定裝卡" },
+      { severity: "warning", type: "waiting_human", label: "等待核准：確認旁白稿" },
+    ],
+    people: [
+      { name: "阿光", userId: "u1", openTasks: 3, overdueTasks: 2 },
+      { name: null, userId: null, openTasks: 2, overdueTasks: 0 },
+    ],
+    byProject: [
+      { projectTitle: "招生短片", blockers: 2, criticalBlockers: 1, overdueTasks: 2 },
+    ],
+  };
+
+  it("把阻塞、人員負荷與專案歸屬寫成結構化結論（不塞原始列）", () => {
+    const text = formatGroupBlockerDigest(base);
+    expect(text).toContain("有阻塞");
+    expect(text).toContain("未結人員任務 5（逾期 2）");
+    expect(text).toContain("[嚴重] 任務逾期：補齊角色定裝卡");
+    expect(text).toContain("[注意] 等待核准：確認旁白稿");
+    expect(text).toContain("阿光 3 件（逾期 2）");
+    expect(text).toContain("尚未指派 2 件");
+    expect(text).toContain("「招生短片」2 項（嚴重 1）");
+  });
+
+  it("沒有阻塞時明說「無」，不要留白讓模型自己想像", () => {
+    const text = formatGroupBlockerDigest({ ...base, status: "healthy", blockers: [], people: [], byProject: [] });
+    expect(text).toContain("無明顯阻塞");
+    expect(text).toContain("阻塞：無");
+  });
+
+  it("阻塞過多時截斷並誠實說還有幾項", () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ severity: "warning", type: "overdue_task", label: `第 ${i + 1} 項` }));
+    const text = formatGroupBlockerDigest({ ...base, blockers: many });
+    expect(text).toContain("（另有 4 項未列）");
+    expect(text).not.toContain("第 9 項");
+  });
+
+  it("沒有任務在身的人不列（避免整組人名洗版提示詞）", () => {
+    const text = formatGroupBlockerDigest({
+      ...base,
+      people: [{ name: "閒著", userId: "u9", openTasks: 0, overdueTasks: 0 }],
+    });
+    expect(text).not.toContain("閒著");
+  });
+});
+
+describe("sanitizeContextUsed／sanitizeRationale（S5：決策軌跡的守門）", () => {
+  it("只留白名單內的標籤，去重且限量", () => {
+    expect(sanitizeContextUsed(["專案現況", "阻塞與人員負荷", "專案現況"]))
+      .toEqual(["專案現況", "阻塞與人員負荷"]);
+  });
+
+  it("編造的來源一律丟掉——不設限的話它會編出看起來很專業卻沒讀過的名稱", () => {
+    expect(sanitizeContextUsed(["財務報表", "使用者訪談紀錄", "專案現況"])).toEqual(["專案現況"]);
+    expect(sanitizeContextUsed(["完全不存在的東西"])).toEqual([]);
+  });
+
+  it("非陣列／非字串一律回空，不會炸", () => {
+    expect(sanitizeContextUsed(undefined)).toEqual([]);
+    expect(sanitizeContextUsed("專案現況")).toEqual([]);
+    expect(sanitizeContextUsed([1, null, {}, "組花費"])).toEqual(["組花費"]);
+  });
+
+  it("最多八個（提示詞回來再多也不全收）", () => {
+    expect(sanitizeContextUsed([...TEAM_CONTEXT_LABELS]).length).toBe(8);
+  });
+
+  it("rationale 壓成單行並截到 300 字", () => {
+    expect(sanitizeRationale("  依據阻塞清單，\n\n兩件逾期集中在同一案  ")).toBe("依據阻塞清單， 兩件逾期集中在同一案");
+    expect(sanitizeRationale("字".repeat(400))!.length).toBe(301); // 300 + 省略號
+    expect(sanitizeRationale("   ")).toBeUndefined();
+    expect(sanitizeRationale(undefined)).toBeUndefined();
+    expect(sanitizeRationale(123)).toBeUndefined();
   });
 });

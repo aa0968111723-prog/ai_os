@@ -489,6 +489,9 @@ button.primary:disabled { opacity: 1; background: var(--muted); color: var(--mut
 /* 版面 */
 .cols { display: grid; grid-template-columns: 1fr 340px; gap: 16px; align-items: start; }
 @media (max-width: 860px) { .cols { grid-template-columns: 1fr; } }
+/* grid blowout 防護：grid 項目預設 min-width:auto，會被子內容的本質寬度撐爆
+ * （手機實測：專案頁主欄被撐到 490px、整頁右緣被裁）。1fr 軌要能縮就得歸零下限。 */
+.cols > * { min-width: 0; }
 .stack > * + * { margin-top: 16px; }
 .stack > .group-head { margin-top: var(--sp-48); }
 .error { color: var(--danger-ink); font-size: 13px; margin-top: 8px; }
@@ -2666,6 +2669,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   position: absolute;
   inset: 0;
   border: 0;
+  /* 這是全螢幕 <button>：全域按鈕的 999px 圓角會把遮罩變成巨大橢圓色塊，須歸零 */
+  border-radius: 0;
   padding: 0;
   margin: 0;
   background: rgba(43, 38, 32, 0.36);
@@ -2705,6 +2710,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   padding: 10px 12px calc(12px + var(--safe-bottom));
   -webkit-overflow-scrolling: touch;
 }
+/* 留言輸入列在窄 sheet 內被擠壓時，「送出」「停止」不可直排斷字（送/出 疊兩行） */
+.project-messages-sheet button.primary,
+.project-messages-sheet button.recording { flex: none; white-space: nowrap; }
 .message-panel--bare {
   border: 0;
   box-shadow: none;
@@ -3893,6 +3901,37 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .scene-studio__versions { max-height: none; }
 }
 
+/* ── 資料庫欄位編輯列：名稱｜型別｜必填｜刪除 固定一列（單選的選項輸入換整行） ── */
+.db-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.db-field-row > input:first-child { min-width: 0; }
+.db-field-row__options { grid-column: 1 / -1; min-width: 0; }
+
+/* ── 分享收件頁（Web Share Target）：相簿分享進來的檔案在這裡選去處 ── */
+.share-target-files { list-style: none; display: grid; gap: 8px; margin: 8px 0 12px; padding: 0; }
+.share-target-files li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: var(--r-12);
+  background: color-mix(in srgb, var(--card2) 72%, transparent);
+}
+.share-target-files img {
+  width: 52px; height: 52px; object-fit: cover; border-radius: var(--r-8); background: var(--muted);
+}
+.share-target-files__icon {
+  width: 52px; height: 52px; display: grid; place-items: center;
+  border-radius: var(--r-8); background: var(--card2); color: var(--primary-ink);
+}
+.share-target-files__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-13); font-weight: 650; }
+.share-target-dest { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 10px; }
+/* 免 media query 的自適應：窄螢幕時按鈕自然換行撐滿（也避開 mob03 測試對「最後一個 560px 區塊」的假設） */
+.share-target-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.share-target-actions button { flex: 1 1 160px; justify-content: center; }
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * 手機 App 殼層 v2（≤820px）：底部分頁列＋貼底「更多」面板，比照原生 tab bar。
  * 先前分頁列只在 ≤560px 出現、topbar 導覽又在 ≤820px 隱藏，561–820px（直立平板）
@@ -3990,3 +4029,17 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 
 /* 今日工作台日期列：與「今日工作台」eyebrow 同行相黏——補間距 */
 .daily-date { margin-right: 12px; }
+
+/* 空組起手式（團隊分析卡第一屏） */
+.team-starters {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 10px);
+  background: var(--card2);
+}
+.team-starters__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.team-starters__head > strong { font-size: 13px; }
+.team-starters__list { display: flex; flex-wrap: wrap; gap: 8px; }

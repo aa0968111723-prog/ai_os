@@ -300,3 +300,66 @@ describe("assembleGroupAgentInsights：代理產出與計畫疑慮（S3）", () 
     expect(g.planConcerns).toEqual([]);
   });
 });
+
+/**
+ * 對抗式稽核抓到的兩個缺陷的回歸鎖。
+ * 兩者都是「大組才會現形」——小資料量測不出來，所以這裡刻意造出規模。
+ */
+describe("組級洞察的兩個規模缺陷（回歸鎖）", () => {
+  const NOW = Date.parse("2026-07-30T12:00:00Z");
+  const at = (days: number) => new Date(NOW - days * 86_400_000);
+  const mkTask = (over: Partial<AgentInsightTask & { assigneeName: string; projectTitle: string }>) => ({
+    id: "t", projectId: "p1", title: "任務", status: "todo", priority: "normal", taskType: "task",
+    dueAt: null as Date | null, planRunId: null, wakeRunId: null, assigneeId: null,
+    assigneeName: null as string | null, projectTitle: "招生短片", ...over,
+  });
+
+  it("阻塞歸屬用未截斷的完整清單——同一列的阻塞數不得小於逾期數", () => {
+    // 60 筆逾期任務（超過 blockers 的 50 筆上限）＋ 8 個等人核准 ＋ 3 筆近期失敗
+    const tasks = [
+      ...Array.from({ length: 60 }, (_, i) => mkTask({
+        id: `overdue-${i}`, title: `逾期 ${i}`, dueAt: at(60 - i),
+      })),
+      ...Array.from({ length: 8 }, (_, i) => mkTask({
+        id: `approval-${i}`, title: `等核准 ${i}`, taskType: "approval", wakeRunId: `r-wait-${i}`,
+      })),
+    ];
+    const runs: AgentInsightRun[] = [
+      ...Array.from({ length: 8 }, (_, i) => ({
+        id: `r-wait-${i}`, projectId: "p1", goal: "等人", status: "waiting",
+        error: null, updatedAt: at(1), steps: [], planSummary: null,
+      })),
+      ...Array.from({ length: 3 }, (_, i) => ({
+        id: `r-fail-${i}`, projectId: "p1", goal: "掛了", status: "failed",
+        error: "供應商逾時", updatedAt: at(1), steps: [], planSummary: null,
+      })),
+    ];
+    const g = assembleGroupAgentInsights(runs, tasks, new Map([["p1", "招生短片"]]), { nowMs: NOW });
+
+    // 顯示用的 blockers 仍受 50 筆上限，但 blockersTotal 講真話
+    expect(g.blockers.length).toBe(50);
+    expect(g.blockersTotal).toBe(60 + 8 + 3);
+
+    const p1 = g.byProject.find((p) => p.projectId === "p1")!;
+    // 歸屬要涵蓋全部 71 項，不是截斷後的 50
+    expect(p1.blockers).toBe(g.blockersTotal);
+    // 這是使用者看得到的自相矛盾：阻塞數不能小於逾期數
+    expect(p1.blockers).toBeGreaterThanOrEqual(p1.overdueTasks);
+    expect(p1.overdueTasks).toBe(60);
+  });
+
+  it("等人核准與失敗的阻塞不會因為逾期任務太多而整批消失在歸屬統計裡", () => {
+    const tasks = [
+      ...Array.from({ length: 55 }, (_, i) => mkTask({ id: `o-${i}`, dueAt: at(55 - i), projectId: "p1" })),
+      mkTask({ id: "wait-1", projectId: "p2", projectTitle: "社課回顧", taskType: "approval", wakeRunId: "r1" }),
+    ];
+    const runs: AgentInsightRun[] = [
+      { id: "r1", projectId: "p2", goal: "等人", status: "waiting", error: null, updatedAt: at(1), steps: [], planSummary: null },
+    ];
+    const g = assembleGroupAgentInsights(runs, tasks, new Map([["p1", "招生短片"], ["p2", "社課回顧"]]), { nowMs: NOW });
+    // p2 的唯一阻塞排在 blockers 的第 56 位，早就被 50 筆上限砍掉——但歸屬必須算得到
+    const p2 = g.byProject.find((p) => p.projectId === "p2")!;
+    expect(p2.blockers).toBe(1);
+    expect(g.pendingApprovalTasks.map((t) => t.taskId)).toEqual(["wait-1"]);
+  });
+});

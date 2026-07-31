@@ -441,6 +441,9 @@ export function Launchpad({ groupId }: { groupId: string }) {
             pendingDecisions={pendingDecisions}
             pendingLoading={pendingSummary.isLoading}
             pendingFailed={!!pendingSummary.error}
+            starterProjects={all}
+            isLeader={isLeader}
+            myUserId={myUserId}
           />
         )}
       </section>
@@ -620,15 +623,139 @@ type Dispatch = { projectId: string; projectTitle: string; goal: string; label: 
 /** 派工結果：在某專案建立了一份待核准的 AI 執行計畫 */
 type DispatchResult = { runId: string; projectId: string; summary: string; estPoints: number };
 
-const TEAM_QUICK_QS = [
-  "哪個案子卡住了？這週花了多少點？",
-  "哪些專案有分鏡在等審核？",
-  "為什麼有專案特別燒點？",
-  "依目前狀況，哪個專案該優先推進？",
+/**
+ * 兜底的引導問句：這個組安靜到沒東西可指的時候才用。
+ *
+ * 刻意**不**放「哪個案子卡住了」「哪些專案有分鏡在等審核」這類——那些的答案就在
+ * 這個輸入框正上方的「誰卡住了」與「待我裁決」裡。問了只會得到一段重述你剛看過的話，
+ * 這正是這個對話框讓人覺得「不知道要拿來幹嘛」的原因：它被廣告的工作，儀表板已經接手。
+ * 對話層真正的價值在儀表板結構上做不到的事——鑽進內容、解釋異常、跨來源權衡。
+ */
+const TEAM_FALLBACK_QS = [
+  "以現在的人力負荷與進度，這週該優先推進哪個案子、哪個可以先放？",
+  "各專案的素材與生成成功率如何？有沒有哪個案子一直在重試？",
+  "資料庫裡有哪些內容可以拿來當下一支片的題材？",
 ];
 
+/** 一則依現況生成的建議問句 */
+export type TeamQuestionSuggestion = {
+  /** 去重與 React key 用 */
+  id: string;
+  /** 帶進輸入框的問句 */
+  text: string;
+  /** 這句是被畫面上哪個事實觸發的（顯示在 tooltip，讓人看得出它讀了自己的資料） */
+  why: string;
+};
+
+/** 一次最多給幾句：再多就變成另一種「選項牆」，跟原本的問題同一個病 */
+const MAX_QUESTION_SUGGESTIONS = 4;
+
+/**
+ * 依這個組的真實狀態生成建議問句（純函式；資料全部來自畫面已查到的東西，零新查詢）。
+ *
+ * 每一句都必須是**卡片答不出來**的：卡片給的是數字與清單，這裡問的是那些數字背後的內容
+ * 與原因——要鑽進分鏡全文、生成紀錄、人員任務或資料庫才答得出來。
+ * 依急迫性排序：失敗 → 逾期的人 → 待核成本 → 計畫缺資訊 → 待審內容。
+ */
+export function buildTeamQuestionSuggestions(input: {
+  runs: Array<{ projectId: string; projectTitle: string; status: string; error: string | null; goal: string }>;
+  people: Array<{ userId: string | null; name: string | null; openTasks: number; overdueTasks: number }>;
+  planConcerns: Array<{ projectTitle: string; missingInformation: number; risks: number }>;
+  pending: Array<{ projectTitle: string; pendingApprovals: number; awaitingGenerations: number }>;
+}): TeamQuestionSuggestion[] {
+  const out: TeamQuestionSuggestion[] = [];
+  const push = (id: string, text: string, why: string) => {
+    if (out.length < MAX_QUESTION_SUGGESTIONS && !out.some((s) => s.id === id)) out.push({ id, text, why });
+  };
+
+  // ① 失敗：卡片只顯示「近七日失敗 N」與一行錯誤，答不出「為什麼會失敗、要怎麼避免」
+  const failed = input.runs.find((r) => r.status === "failed");
+  if (failed) {
+    push(
+      `failed:${failed.projectId}`,
+      `「${failed.projectTitle}」的代理為什麼失敗？要改什麼才不會再失敗？`,
+      `因為「${failed.projectTitle}」有一份失敗的計畫${failed.error ? `：${failed.error.slice(0, 40)}` : ""}`,
+    );
+  }
+
+  // ② 逾期的人：卡片顯示「阿光 3 件・2 逾期」，答不出「那幾件是什麼、卡在哪一步」
+  const stuckPerson = input.people.find((p) => p.overdueTasks > 0);
+  if (stuckPerson) {
+    const who = stuckPerson.userId ? (stuckPerson.name ?? "這位成員") : "沒人認領的任務";
+    push(
+      `person:${stuckPerson.userId ?? "unassigned"}`,
+      `${who}手上那 ${stuckPerson.overdueTasks} 件逾期的是什麼？分別卡在哪一步？`,
+      `因為${who}有 ${stuckPerson.overdueTasks} 件逾期`,
+    );
+  }
+
+  // ③ 待核生成：卡片顯示筆數，答不出「這幾筆各要花多少點、值不值得核」
+  const costly = input.pending.find((p) => p.awaitingGenerations > 0);
+  if (costly) {
+    push(
+      `gen:${costly.projectTitle}`,
+      `「${costly.projectTitle}」那 ${costly.awaitingGenerations} 筆待核生成分別用什麼模型、要花多少點？值得核准嗎？`,
+      `因為「${costly.projectTitle}」有 ${costly.awaitingGenerations} 筆生成卡在成本門檻`,
+    );
+  }
+
+  // ④ 計畫缺資訊：卡片顯示「待補 2」，答不出「缺的是哪些、我該補什麼給它」
+  const concern = input.planConcerns.find((c) => c.missingInformation > 0);
+  if (concern) {
+    push(
+      `concern:${concern.projectTitle}`,
+      `「${concern.projectTitle}」的計畫還缺哪些資訊？我需要補什麼它才跑得下去？`,
+      `因為「${concern.projectTitle}」的計畫有 ${concern.missingInformation} 項待補資訊`,
+    );
+  }
+
+  // ⑤ 待審分鏡：卡片顯示「3 個分鏡等你裁決」，答不出「那三鏡各寫了什麼、該注意什麼」
+  const toReview = input.pending.find((p) => p.pendingApprovals > 0);
+  if (toReview) {
+    push(
+      `scene:${toReview.projectTitle}`,
+      `「${toReview.projectTitle}」那 ${toReview.pendingApprovals} 鏡的畫面與配音詞各寫了什麼？裁決前我該注意什麼？`,
+      `因為「${toReview.projectTitle}」有 ${toReview.pendingApprovals} 鏡送審中`,
+    );
+  }
+
+  // ⑥ 有在跑的計畫：問它實際做了什麼，而不是看進度條
+  const running = input.runs.find((r) => r.status === "running" || r.status === "waiting");
+  if (running) {
+    push(
+      `running:${running.projectId}`,
+      `「${running.projectTitle}」的代理現在實際做到哪、已經產出什麼了？`,
+      `因為「${running.projectTitle}」有計畫正在執行`,
+    );
+  }
+
+  // 補到滿：兜底問句同樣是卡片答不出來的那類。
+  // why 不能寫死成「這個組沒有異常」——它多半是在異常已被前幾句用掉後補位的，
+  // 那樣講會與同一排的第一句自相矛盾。
+  const hadSpecific = out.length > 0;
+  for (const text of TEAM_FALLBACK_QS) {
+    push(
+      `fallback:${text}`,
+      text,
+      hadSpecific ? "通用的深入問題（上面幾句才是針對這個組現在的狀況）" : "這個組目前沒有需要追問的異常，這是通用的深入問題",
+    );
+  }
+  return out;
+}
+
 /** 對話訊息（前端狀態；assistant 訊息帶當輪的查證步驟與派工提議） */
-type ChatMsg = { role: "user" | "assistant"; text: string; steps?: string[]; dispatches?: Dispatch[] };
+type ChatMsg = {
+  role: "user" | "assistant";
+  text: string;
+  steps?: string[];
+  dispatches?: Dispatch[];
+  /** 決策軌跡：1–3 句結構化結論（不是 chain-of-thought） */
+  rationale?: string;
+  /** 這輪實際依據了哪些上下文區塊（後端已過白名單） */
+  contextUsed?: string[];
+  /** 阻塞資料讀取失敗 → 回答是在資訊不全的情況下給的，要講出來 */
+  degraded?: boolean;
+};
 
 /** 代理狀態 → 中文標籤與強調色（與後端 AGENT_RUN_STATUS_LABEL 對齊） */
 const RUN_STATUS: Record<string, { label: string; color?: string }> = {
@@ -714,6 +841,8 @@ type DecisionItem = {
   estPoints?: number;
   /** 只有人類核准節點有：走既有 tasks.decideApproval */
   taskId?: string;
+  /** 代理計畫的發起人（用來比照專案頁判斷能不能就地核准） */
+  ownerId?: string | null;
 };
 
 const DECISION_META: Record<DecisionKind, { label: string; hint: string }> = {
@@ -723,8 +852,33 @@ const DECISION_META: Record<DecisionKind, { label: string; hint: string }> = {
   generation: { label: "生成待核", hint: "達組內成本門檻的生成，核准才會送出" },
 };
 
+/**
+ * 空組起手式用的三個 playbook。
+ *
+ * 刻意只挑三個而不是全部列出：起手式的作用是「降低第一步的門檻」，
+ * 給七個選項等於把選擇成本原封不動還給使用者。這三個涵蓋最常見的起點——
+ * 從腳本拆分鏡、直接出媒體、先把計畫講清楚。
+ */
+const STARTER_PLAYBOOK_IDS = ["playbook.storyboard.v1", "playbook.creation.short.v1", "playbook.director.v1"] as const;
+
 /** 收件匣一次最多列幾件：再多就是清單而不是「先做這幾件」 */
 const DECISION_INBOX_MAX = 6;
+
+/**
+ * 能不能就地裁決這份代理計畫。
+ *
+ * 與 approveAgentCore 的守門同一條規則（組員只能裁自己發起的），也與專案頁
+ * AgentCard 的 canControl 一致。不比照的話，一般組員會看到別人計畫上的「核准」鈕，
+ * 按下去必定吃 FORBIDDEN——畫面對能力說謊。看得到但不能裁的，一律導去專案頁。
+ */
+export function canDecideRun(
+  item: { ownerId?: string | null },
+  isLeader: boolean,
+  myUserId?: string,
+): boolean {
+  if (isLeader) return true;
+  return Boolean(myUserId) && item.ownerId === myUserId;
+}
 
 /** 卡了幾天（未滿一天回 0；沒有時間戳回 null，呼叫端不顯示） */
 function daysStuck(since: Date | null, nowMs: number): number | null {
@@ -755,7 +909,7 @@ export function dueLabel(due: Date | string | null | undefined, nowMs: number = 
  * 而是「我現在該先處理哪一件」。同時間才用類別穩定排序，避免每次輪詢跳動。
  */
 export function buildDecisionInbox(
-  runs: Array<{ id: string; projectId: string; projectTitle: string; goal: string; status: string; estPoints: number; updatedAt: Date | string }>,
+  runs: Array<{ id: string; projectId: string; projectTitle: string; goal: string; status: string; estPoints: number; updatedAt: Date | string; userId?: string | null }>,
   pending: PendingDecisionSource[],
   tasks: PendingTaskSource[] = [],
 ): DecisionItem[] {
@@ -770,6 +924,7 @@ export function buildDecisionInbox(
     items.push({
       key: `agent-${r.id}`, kind: "agent", projectId: r.projectId, projectTitle: r.projectTitle,
       what: r.goal, since: toDate(r.updatedAt), runId: r.id, estPoints: r.estPoints,
+      ownerId: r.userId ?? null,
     });
   }
   for (const t of tasks) {
@@ -829,12 +984,20 @@ function TeamAssistantCard({
   pendingDecisions,
   pendingLoading,
   pendingFailed,
+  starterProjects,
+  isLeader,
+  myUserId,
 }: {
   groupId: string;
   /** 組內「分鏡送審／生成待核」的 per-project 計數（由 Launchpad 已查到的 pendingSummary 傳入） */
   pendingDecisions: PendingDecisionSource[];
   pendingLoading: boolean;
   pendingFailed: boolean;
+  /** 起手式的「在哪個專案發起」下拉；沿用這一頁已查到的專案清單，不另發查詢 */
+  starterProjects: Array<{ id: string; title: string; status: string }>;
+  /** 與專案頁同一條規則：組長以上、或自己發起的計畫，才可就地核准 */
+  isLeader: boolean;
+  myUserId?: string;
 }) {
   const utils = trpc.useUtils();
   const [question, setQuestion] = useState("");
@@ -858,8 +1021,10 @@ function TeamAssistantCard({
       refetchInterval: (q) => ((q.state.data?.summary?.active ?? 0) > 0 ? 8000 : false),
     },
   );
+  const roles = trpc.agents.listRoles.useQuery(undefined, { staleTime: 10 * 60_000 });
   const [dispatched, setDispatched] = useState<Record<string, DispatchResult>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [starterProjectId, setStarterProjectId] = useState("");
   const [runsCollapsed, setRunsCollapsed] = useState(false);
   const [runFilter, setRunFilter] = useState<RunFilter>("active");
   useEffect(() => {
@@ -883,7 +1048,10 @@ function TeamAssistantCard({
       { groupId, message: q, history },
       {
         onSuccess: (d) => {
-          setMsgs((prev) => [...prev, { role: "assistant", text: d.answer, steps: d.steps, dispatches: d.dispatches as Dispatch[] }]);
+          setMsgs((prev) => [...prev, {
+            role: "assistant", text: d.answer, steps: d.steps, dispatches: d.dispatches as Dispatch[],
+            rationale: d.rationale ?? undefined, contextUsed: d.contextUsed ?? [], degraded: d.degraded ?? false,
+          }]);
           if ((d.dispatches?.length ?? 0) > 0) overview.refetch();
         },
       },
@@ -915,6 +1083,40 @@ function TeamAssistantCard({
     () => buildDecisionInbox(runs, pendingDecisions, pendingTasks),
     [runs, pendingDecisions, pendingTasks],
   );
+  // 起手式：只在「這個組還沒用過代理」時出現，用完就消失（不長期佔第一屏）。
+  // 目標文字直接取自 playbook 模板——與專案頁的「執行計畫」同一組敘事，不另編一套。
+  const starters = useMemo(() => {
+    const projects = (starterProjects ?? []).filter((p) => p.status !== "archived");
+    const playbooks = roles.data?.playbooks ?? [];
+    const items = STARTER_PLAYBOOK_IDS
+      .map((id) => playbooks.find((p) => p.id === id))
+      .filter((p): p is NonNullable<typeof p> => Boolean(p))
+      .map((p) => ({ id: p.id, playbookId: p.id, title: p.title, goal: p.goalTemplate }));
+    return {
+      // 沒有專案可派、或這組已經用過代理，就不佔版面
+      show: !overview.isLoading && summary?.hasRuns === false && projects.length > 0 && items.length > 0,
+      projects,
+      items,
+    };
+  }, [starterProjects, roles.data, overview.isLoading, summary?.hasRuns]);
+  useEffect(() => {
+    if (starters.projects.length && !starters.projects.some((p) => p.id === starterProjectId)) {
+      setStarterProjectId(starters.projects[0].id);
+    }
+  }, [starters.projects, starterProjectId]);
+
+  // 建議問句：依這個組的真實狀態即時生成，而不是四句寫死的話。
+  // 資料全部來自這張卡已經查到的東西——零新查詢。
+  const questionSuggestions = useMemo(
+    () => buildTeamQuestionSuggestions({
+      runs,
+      people: insights.data?.people ?? [],
+      planConcerns: insights.data?.planConcerns ?? [],
+      pending: pendingDecisions,
+    }),
+    [runs, insights.data, pendingDecisions],
+  );
+
   // 代理產出與計畫疑慮：兩段都空就不渲染
   const agentOutput = useMemo(() => {
     const results = insights.data?.groupResults ?? [];
@@ -989,7 +1191,9 @@ function TeamAssistantCard({
               <Hint layer="always" style={{ margin: 0 }}>
                 {pendingFailed
                   ? "跨專案待辦載入失敗，暫時無法確認有沒有待裁決事項。"
-                  : "沒有等你決定的事項——代理計畫、分鏡送審、生成核准都清空了。"}
+                  : summary?.hasRuns
+                    ? "沒有等你決定的事項——代理計畫、分鏡送審、生成核准都清空了。"
+                    : "這個組還沒開始用 AI 代理。下面挑一個起手式就能發起第一份計畫（建立計畫免費，核准後才花點）。"}
               </Hint>
             ) : (
               <div className="team-inbox__list">
@@ -1009,7 +1213,7 @@ function TeamAssistantCard({
                         {d.kind === "agent" && d.estPoints != null ? `・估 ${d.estPoints} 點` : ""}
                       </Meta>
                       <span className="team-inbox__act">
-                        {d.kind === "agent" && d.runId ? (
+                        {d.kind === "agent" && d.runId && canDecideRun(d, isLeader, myUserId) ? (
                           <>
                             {/* 就地核准／放棄：走專案頁同一支 mutation。核准這一刻起才開始花點，
                                 所以一定要二次確認並把估點寫在確認訊息裡。 */}
@@ -1118,6 +1322,78 @@ function TeamAssistantCard({
           </div>
         )}
 
+        {/* ── 起手式：空組的第一屏不能只有一句「沒有東西」。
+            用既有的 playbook 目標模板當三個起點，選一個專案就能發起——
+            所有守門仍在 planAgentCore 裡，這裡只是把入口搬到看得到的地方。 ── */}
+        {starters.show && (
+          <div className="team-starters" aria-label="起手式">
+            <div className="team-starters__head">
+              <strong>從這裡開始</strong>
+              <Meta>建立計畫免費，核准後才開始花點</Meta>
+            </div>
+            <label htmlFor="ta-starter-project" style={{ marginTop: 0 }}>要在哪個專案發起</label>
+            <select
+              id="ta-starter-project"
+              value={starterProjectId}
+              onChange={(e) => setStarterProjectId(e.target.value)}
+              style={{ width: "auto", maxWidth: "100%" }}
+            >
+              {starters.projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.title}</option>
+              ))}
+            </select>
+            <div className="team-starters__list">
+              {starters.items.map((s) => {
+                const key = `starter-${s.id}`;
+                const done = dispatched[key];
+                const target = starters.projects.find((p) => p.id === starterProjectId);
+                return done ? (
+                  <Hint key={key} as="div" layer="always" style={{ color: "var(--success-ink)" }}>
+                    ✓ 已建立「{s.title}」的執行計畫（估 {done.estPoints} 點）：{done.summary}
+                    <Link href={`/p/${done.projectId}?focus=agent-run-${done.runId}`} style={{ marginLeft: 6 }}>到專案核准 →</Link>
+                  </Hint>
+                ) : (
+                  <ConfirmButton
+                    key={key}
+                    triggerClassName="btn-tonal btn-sm"
+                    disabled={!target || pendingKey === key}
+                    title={s.goal}
+                    message={`在「${target?.title ?? ""}」發起 AI 執行計畫：${s.goal}？\n會建立一份待核准計畫，仍需到該專案核准才會開始執行、花點。`}
+                    confirmLabel="發起計畫"
+                    onConfirm={async () => {
+                      if (!target) return;
+                      setPendingKey(key);
+                      try {
+                        const r = await dispatch.mutateAsync({
+                          groupId,
+                          projectId: target.id,
+                          goal: s.goal,
+                          // playbook 一併帶上：同一句目標帶不帶 playbook 排出來的步驟骨架不同
+                          playbookId: s.playbookId,
+                        });
+                        setDispatched((prev) => ({ ...prev, [key]: r }));
+                        utils.projects.invalidate();
+                        overview.refetch();
+                        insights.refetch();
+                        setRunFilter("awaiting_approval");
+                        setRunsCollapsed(false);
+                      } catch {
+                        /* dispatch.error 已顯示 */
+                      } finally {
+                        setPendingKey((k) => (k === key ? null : k));
+                      }
+                    }}
+                  >
+                    <Icon name="Play" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                    {s.title}
+                  </ConfirmButton>
+                );
+              })}
+            </div>
+            {dispatch.error && <p className="error" role="alert" style={{ margin: 0 }}>{dispatch.error.message}</p>}
+          </div>
+        )}
+
         {/* ── 誰卡住了：把未結人類任務歸到人與專案。
             這張卡原本只看得到 agent_runs，於是「7 項人員任務逾期」這種最該被看見的
             阻塞完全不在畫面上——AI 停著等人，畫面卻說一切正常。 ── */}
@@ -1176,6 +1452,12 @@ function TeamAssistantCard({
             {insights.data && (insights.data.truncated.runs || insights.data.truncated.tasks) && (
               <Meta as="p" style={{ margin: 0 }}>
                 資料量已達分析上限，這裡是抽樣結果——完整清單請到各專案頁看。
+              </Meta>
+            )}
+            {insights.data && insights.data.blockersTotal > insights.data.blockers.length && (
+              /* 阻塞清單有顯示上限，依專案的統計卻是全量；不講清楚兩個數字看起來會像對不上 */
+              <Meta as="p" style={{ margin: 0 }}>
+                共 {insights.data.blockersTotal} 項阻塞（明細只列前 {insights.data.blockers.length} 項；上方依專案的統計是全部）。
               </Meta>
             )}
           </div>
@@ -1375,13 +1657,13 @@ function TeamAssistantCard({
       <div className="team-chat-block">
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 260px" }}>
-            <label htmlFor="ta-question" style={{ marginTop: 0 }}>組彙總 AI</label>
+            <label htmlFor="ta-question" style={{ marginTop: 0 }}>問卡片答不出來的事</label>
             <input
               id="ta-question"
               value={question}
               maxLength={500}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder={msgs.length ? "接著追問…（記得上下文）" : "問問整組狀況：哪個案子卡住了？這週花了多少點？"}
+              placeholder={msgs.length ? "接著追問…（記得上下文）" : "例：「招生短片」那 3 鏡的配音詞各寫了什麼？"}
               onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
             />
           </div>
@@ -1399,9 +1681,16 @@ function TeamAssistantCard({
 
         {msgs.length === 0 && !ask.isPending && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-            {TEAM_QUICK_QS.map((q) => (
-              <Button key={q} size="sm" title="點了帶入輸入框，按「詢問」才送出（免費）" onClick={() => setQuestion(q)}>
-                {q}
+            {questionSuggestions.map((s) => (
+              <Button
+                key={s.id}
+                size="sm"
+                /* tooltip 講出「這句是被什麼觸發的」——讓人看得出它讀了自己的資料，
+                   而不是四句對誰都一樣的罐頭問句 */
+                title={`${s.why}。點了帶入輸入框，按「詢問」才送出（免費）`}
+                onClick={() => setQuestion(s.text)}
+              >
+                {s.text}
               </Button>
             ))}
           </div>
@@ -1409,7 +1698,8 @@ function TeamAssistantCard({
 
         {/* 「免費・唯讀」是花不花錢的前提，屬於代價資訊 → 兩種模式都要看得到 */}
         <Hint layer="always" style={{ marginTop: 8 }}>
-          免費・唯讀分析整組專案與代理進度{canDispatchHint ? "，並可提議發起 AI 執行計畫（需該專案核准才花點）" : ""}。
+          免費・唯讀。上面的卡片給你數字，這裡給你數字背後的東西——它會鑽進分鏡全文、生成紀錄、
+          人員任務與資料庫查證後再回答{canDispatchHint ? "，也可提議發起 AI 執行計畫（需該專案核准才花點）" : ""}。
           {msgs.length > 0 && (
             <Button
               variant="ghost"
@@ -1436,6 +1726,22 @@ function TeamAssistantCard({
                     </div>
                   )}
                   <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{m.text}</p>
+                  {m.degraded && (
+                    /* 資訊不全時一定要講：不講的話這個回答看起來與完整資料下的回答沒有兩樣 */
+                    <Meta as="p" style={{ margin: "4px 0 0", color: "var(--danger-ink)" }}>
+                      ⚠ 這次沒能讀到阻塞與人員任務資料，以上回答可能漏掉卡住的事項。
+                    </Meta>
+                  )}
+                  {m.rationale && (
+                    <Meta as="p" style={{ margin: "4px 0 0" }}>依據：{m.rationale}</Meta>
+                  )}
+                  {(m.contextUsed?.length ?? 0) > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                      {m.contextUsed!.map((c) => (
+                        <Chip key={c} style={{ margin: 0 }} title="這輪回答實際用到的資料區塊">{c}</Chip>
+                      ))}
+                    </div>
+                  )}
                   {(m.dispatches?.length ?? 0) > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
                       {m.dispatches!.map((d, i) => {

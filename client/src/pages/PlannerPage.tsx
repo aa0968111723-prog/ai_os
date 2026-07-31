@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
+import { useMatchMedia } from "../lib/useMatchMedia";
 import { Icon } from "../components/Icon";
 import { CharCount, ConfirmButton } from "../components/interactions";
 import { PlannerSection, plannerInitialSections } from "../components/PlannerSection";
@@ -289,6 +290,9 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
   const [sectionOpen, setSectionOpen] = useState(initiallyOpen);
   const [view, setView] = useState<"list" | "calendar">("list");
   const [includePast, setIncludePast] = useState(false);
+  // 手機減負：六欄新增表單先收成一顆「＋ 新增行程」，清單優先（桌機維持常駐表單）
+  const compact = useMatchMedia("(max-width: 820px)");
+  const [createOpen, setCreateOpen] = useState(false);
   // 清單檢視吃 includePast 開關；月曆檢視固定拉全部（含過去），才畫得出任意月份
   const list = trpc.schedule.list.useQuery({ groupId, includePast: view === "calendar" ? true : includePast });
   // 專案下拉＋列表上的專案名對照；與筆記卡同 key，react-query 只會打一次
@@ -421,8 +425,20 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
         )}
       </div>
 
-      {/* 新增列 */}
-      <div className="schedule-create-form" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 4 }}>
+      {/* 新增列：手機預設收合（清單優先，展開才吃半屏高度）；桌機常駐 */}
+      {compact && !createOpen && (
+        <Button
+          variant="primary"
+          style={{ width: "100%", justifyContent: "center", marginTop: 12 }}
+          aria-expanded={false}
+          aria-controls="schedule-create-form"
+          onClick={() => setCreateOpen(true)}
+        >
+          <Icon name="CalendarPlus" size={14} /> 新增行程
+        </Button>
+      )}
+      {(!compact || createOpen) && (
+      <div id="schedule-create-form" className="schedule-create-form" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginTop: 12, borderTop: "1px solid var(--border-soft)", paddingTop: 4 }}>
         <div className="schedule-create-form__title" style={{ flex: "2 1 200px", minWidth: 160 }}>
           <label htmlFor="sch-title">標題（可 @ 提及夥伴）</label>
           <MentionInput value={title} onChange={setTitle} members={members} maxLength={120}
@@ -452,8 +468,12 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
         <button className="primary schedule-create-form__submit" style={{ flex: "none" }} disabled={!canAdd} onClick={submit}>
           {add.isPending ? "加入中…" : "加入"}
         </button>
+        {compact && (
+          <Button variant="ghost" style={{ flex: "none" }} onClick={() => setCreateOpen(false)}>收合</Button>
+        )}
         {addDisabledReason && <Hint as="span" layer="always" style={{ alignSelf: "center" }}>{addDisabledReason}</Hint>}
       </div>
+      )}
       {/* 結束早於開始屬輸入錯誤：用 .error 樣式即時顯示，別讓人當成普通提示忽略 */}
       {endInvalid && <p className="error" role="alert" style={{ marginTop: 6 }}>結束時間要晚於開始時間</p>}
       {add.error && <p className="error">{add.error.message}</p>}

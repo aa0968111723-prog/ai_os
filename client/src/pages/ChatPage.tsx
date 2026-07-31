@@ -182,6 +182,7 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
   const [refTab, setRefTab] = useState<DmRefType>("project");
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const stickBottom = useRef(true);
 
@@ -420,6 +421,22 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
         />
         <button type="button" className="chip" disabled={uploading} title="上傳圖片／影片／檔案（也可直接貼上截圖）" onClick={() => fileRef.current?.click()}>
           <Icon name="Image" size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />{uploading ? "上傳中…" : "圖/影片"}
+        </button>
+        {/* 手機一鍵開相機：capture 屬性讓瀏覽器直接喚起相機 App（桌機退化為一般選檔） */}
+        <input
+          ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void uploadAttachment(f);
+            e.target.value = "";
+          }}
+        />
+        <button type="button" className="chip" disabled={uploading} title="開相機拍照後直接傳送" onClick={() => cameraRef.current?.click()}>
+          <Icon name="Camera" size={12} style={{ verticalAlign: "-2px", marginRight: 3 }} />拍照
         </button>
         <span style={{ position: "relative", display: "inline-flex" }}>
           <button type="button" className={`chip${refPickerOpen ? " on" : ""}`} aria-expanded={refPickerOpen} title="標注一個專案／資料庫／排程／筆記" onClick={() => setRefPickerOpen((v) => !v)}>

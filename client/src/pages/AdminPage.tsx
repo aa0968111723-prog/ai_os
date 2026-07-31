@@ -51,6 +51,19 @@ function toFullUrl(url: string): string {
   return /^https?:\/\//.test(url) ? url : `${location.origin}${url}`;
 }
 
+/** 系統分享鈕（手機）：navigator.share 直接開分享面板（LINE 轉傳邀請連結最短路徑）；不支援時不顯示 */
+function ShareLinkButton({ url, title }: { url: string; title: string }) {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") return null;
+  return (
+    <button
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 12px", fontSize: "var(--fs-12)", flex: "none" }}
+      onClick={() => { navigator.share({ title, url }).catch(() => { /* 使用者取消分享面板不是錯誤 */ }); }}
+    >
+      <Icon name="Share2" size={12} />分享
+    </button>
+  );
+}
+
 /** 複製鈕：成功顯示「已複製 ✓」約 2 秒（邀請連結、臨時密碼共用） */
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -538,7 +551,7 @@ function GroupSection({ group, teamAdmins, isSuperAdmin, meId }: {
       ) : detail.data ? (
         <>
           {detail.data.members.length === 0 ? (
-            <Hint layer="always" style={{ margin: "4px 0 0" }}>（還沒有成員——用右側「邀請成員」把夥伴加進來）</Hint>
+            <Hint layer="always" style={{ margin: "4px 0 0" }}>（還沒有成員——用「邀請成員」卡把夥伴加進來）</Hint>
           ) : (
             detail.data.members.map((m) => (
               <MemberDetailRow
@@ -594,7 +607,7 @@ function TeamExtras({ teamId }: { teamId: string }) {
       {unassigned.length > 0 && (
         <div style={{ marginTop: 8 }}>
           <Meta as="p" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>已入團、尚未分組（{unassigned.length}）</Meta>
-          <Hint layer="always" style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用右側「邀請成員」輸入同一個 Email 並選好組別即可入組。</Hint>
+          <Hint layer="always" style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用「邀請成員」卡輸入同一個 Email 並選好組別即可入組。</Hint>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {unassigned.map((m) => (
               <Chip key={m.userId} style={{ margin: 0, opacity: m.disabled ? 0.6 : 1 }} title={m.email}>
@@ -2286,6 +2299,7 @@ export function AdminPage() {
                   onFocus={(e) => e.target.select()}
                 />
                 <CopyButton text={toFullUrl(invite.data.inviteUrl)} />
+                <ShareLinkButton url={toFullUrl(invite.data.inviteUrl)} title="Aios 邀請連結" />
               </div>
             </div>
           )}

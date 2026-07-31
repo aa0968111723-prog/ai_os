@@ -11,6 +11,9 @@
 const CACHE_VERSION = "aios-app-v2";
 const PRECACHE = `${CACHE_VERSION}-shell`;
 const ASSET_CACHE = `${CACHE_VERSION}-assets`;
+// Web Share Target 暫存區：分享進來的檔案先落地在 Cache，等 /share-target 頁認領。
+// 獨立命名空間，不掛 CACHE_VERSION——SW 換版不該弄丟使用者剛分享、還沒存的檔案。
+const SHARE_CACHE = "aios-share-inbox";
 const PRECACHE_URLS = [
   "/offline.html", "/manifest.webmanifest",
   "/icons/icon-v2-192.png", "/icons/icon-v2-512.png", "/icons/icon-v2-1024.png", "/icons/icon-v2-96.png",
@@ -56,8 +59,40 @@ function isApi(url) {
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-  if (req.method !== "GET") return;
   const url = new URL(req.url);
+  // Web Share Target（Android 安裝版）：相簿／其他 App 分享過來的 multipart POST。
+  // 檔案先存進 SHARE_CACHE（頁面重整、登入流程中都不會丟），303 轉去接收頁認領。
+  if (req.method === "POST" && url.origin === self.location.origin && url.pathname === "/share-target") {
+    event.respondWith((async () => {
+      try {
+        const form = await req.formData();
+        const files = form.getAll("media").filter((f) => typeof f !== "string");
+        const meta = {
+          title: typeof form.get("title") === "string" ? form.get("title") : "",
+          text: typeof form.get("text") === "string" ? form.get("text") : "",
+          url: typeof form.get("url") === "string" ? form.get("url") : "",
+          at: Date.now(),
+          files: [],
+        };
+        const cache = await caches.open(SHARE_CACHE);
+        for (const key of await cache.keys()) await cache.delete(key); // 一次只保留最新一批
+        let i = 0;
+        for (const f of files) {
+          const key = `/share-payload/file-${i}`;
+          const type = f.type || "application/octet-stream";
+          meta.files.push({ key, name: f.name || `分享檔案-${i + 1}`, type, size: f.size });
+          await cache.put(key, new Response(f, { headers: { "Content-Type": type } }));
+          i += 1;
+        }
+        await cache.put("/share-payload/meta", new Response(JSON.stringify(meta), { headers: { "Content-Type": "application/json" } }));
+      } catch {
+        /* 解析失敗仍導向接收頁，由頁面顯示「沒有待存的分享」 */
+      }
+      return Response.redirect("/share-target", 303);
+    })());
+    return;
+  }
+  if (req.method !== "GET") return;
   if (url.origin !== self.location.origin || isApi(url)) return;
   if (req.mode === "navigate") {
     event.respondWith((async () => {

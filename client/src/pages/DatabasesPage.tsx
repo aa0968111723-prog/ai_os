@@ -604,26 +604,28 @@ function FieldsEditor({ fields, onChange }: { fields: DataField[]; onChange: (f:
   return (
     <div>
       {fields.map((f, i) => (
-        <div key={f.key} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
-          <input aria-label={`欄位 ${i + 1} 名稱`} value={f.label} maxLength={40} placeholder="欄位名稱" style={{ flex: "1 1 120px" }} onChange={(e) => set(i, { label: e.target.value })} />
+        // grid 固定「名稱｜型別｜必填｜刪除」一列（窄螢幕名稱欄自動縮），
+        // 不用 flex-wrap——手機上會把刪除 ✕ 擠成孤行，看起來像壞掉
+        <div key={f.key} className="db-field-row">
+          <input aria-label={`欄位 ${i + 1} 名稱`} value={f.label} maxLength={40} placeholder="欄位名稱" onChange={(e) => set(i, { label: e.target.value })} />
           <select aria-label={`欄位 ${i + 1} 型別`} value={f.type} style={{ width: "auto" }} onChange={(e) => set(i, { type: e.target.value as DataField["type"], options: e.target.value === "select" ? f.options ?? ["選項一"] : undefined })}>
             {FIELD_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
-          {f.type === "select" && (
-            <input
-              aria-label={`欄位 ${i + 1} 選項`}
-              value={(f.options ?? []).join("、")}
-              placeholder="選項用、分隔"
-              style={{ flex: "1 1 140px" }}
-              onChange={(e) => set(i, { options: e.target.value.split(/[、,]/).map((s) => s.trim()).filter(Boolean) })}
-            />
-          )}
-          <label style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", margin: 0 }}>
             <input type="checkbox" checked={!!f.required} onChange={(e) => set(i, { required: e.target.checked })} style={{ width: "auto" }} />必填
           </label>
           <Button size="sm" aria-label={`刪除欄位 ${f.label || i + 1}`} disabled={fields.length <= 1} onClick={() => onChange(fields.filter((_, j) => j !== i))}>
             <Icon name="X" size={13} />
           </Button>
+          {f.type === "select" && (
+            <input
+              aria-label={`欄位 ${i + 1} 選項`}
+              className="db-field-row__options"
+              value={(f.options ?? []).join("、")}
+              placeholder="選項用、分隔"
+              onChange={(e) => set(i, { options: e.target.value.split(/[、,]/).map((s) => s.trim()).filter(Boolean) })}
+            />
+          )}
         </div>
       ))}
       <Button size="sm" style={{ marginTop: 8 }} disabled={fields.length >= 30} onClick={() => onChange([...fields, { key: newFieldKey(), label: "", type: "text" }])}>

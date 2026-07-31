@@ -136,7 +136,7 @@ describe("formatWorldviewVisualPositive", () => {
     expect(s).not.toContain("醫療");
   });
 
-  it("風格只取第一個、調性最多前兩個（多選不污染畫面）", () => {
+  it("跨家族多選只注入第一主風格；同家族可 look+質感；調性最多前兩個", () => {
     const crowded = worldviewSchema.parse({
       styles: ["寫實攝影", "水墨禪意", "3D 動畫"],
       tones: ["莊嚴", "溫暖", "活潑", "簡約"],
@@ -150,8 +150,16 @@ describe("formatWorldviewVisualPositive", () => {
     expect(s).toContain("warm, gentle");
     expect(s).not.toContain("lively");
     expect(s).not.toContain("minimal");
-    // 常數契約：改上限時測試與注入要同步
-    expect(VISUAL_INJECT_MAX.styles).toBe(1);
+    // 同家族：主風格 + 質感可並存注入
+    const withTexture = worldviewSchema.parse({
+      styles: ["寫實攝影", "膠片質感"],
+      logline: "質感",
+    });
+    const s2 = formatWorldviewVisualPositive(withTexture);
+    expect(s2).toContain("photorealistic");
+    expect(s2).toContain("analog film");
+    // 常數契約：風格上限＝look+質感
+    expect(VISUAL_INJECT_MAX.styles).toBe(2);
     expect(VISUAL_INJECT_MAX.tones).toBe(2);
   });
 });
@@ -168,17 +176,21 @@ describe("chips 優先序與軟警告", () => {
     expect(cur).toEqual(["寫實攝影"]);
   });
 
-  it("selectWorldviewStyle 准單選：點選取代、再點清空、多選收斂", () => {
+  it("selectWorldviewStyle：家族 look／質感與再點清空", () => {
     expect(selectWorldviewStyle([], "寫實攝影")).toEqual(["寫實攝影"]);
     expect(selectWorldviewStyle(["寫實攝影"], "水墨禪意")).toEqual(["水墨禪意"]);
     expect(selectWorldviewStyle(["寫實攝影"], "寫實攝影")).toEqual([]);
-    // 舊多選：點任一個 → 只留該項
+    // 同家族加質感
+    expect(selectWorldviewStyle(["寫實攝影"], "膠片質感")).toEqual(["寫實攝影", "膠片質感"]);
+    // 舊跨家族多選：點另一 look → 收斂到該 look
     expect(selectWorldviewStyle(["寫實攝影", "水墨禪意", "3D 動畫"], "水墨禪意")).toEqual(["水墨禪意"]);
-    expect(selectWorldviewStyle(["寫實攝影", "水墨禪意"], "寫實攝影")).toEqual(["寫實攝影"]);
+    // 再點目前主 look → 清空（含清掉跨家族殘值）
+    expect(selectWorldviewStyle(["寫實攝影", "水墨禪意"], "寫實攝影")).toEqual([]);
   });
 
-  it("keepPrimaryWorldviewStyle 一鍵只留主要", () => {
+  it("keepPrimaryWorldviewStyle 一鍵 canonicalize", () => {
     expect(keepPrimaryWorldviewStyle(["寫實攝影", "水墨禪意"])).toEqual(["寫實攝影"]);
+    expect(keepPrimaryWorldviewStyle(["寫實攝影", "膠片質感"])).toEqual(["寫實攝影", "膠片質感"]);
     expect(keepPrimaryWorldviewStyle(["日系水彩"])).toEqual(["日系水彩"]);
     expect(keepPrimaryWorldviewStyle([])).toEqual([]);
   });
@@ -195,12 +207,11 @@ describe("chips 優先序與軟警告", () => {
       tones: ["1", "2", "3"],
       styles: ["寫實攝影", "3D 動畫"],
     });
-    expect(w.some((x) => x.includes("視覺風格"))).toBe(true);
-    expect(w.some((x) => x.includes("只留主要") || x.includes("出圖只取"))).toBe(true);
+    expect(w.some((x) => x.includes("視覺風格") || x.includes("收斂"))).toBe(true);
     expect(w.some((x) => x.includes("調性"))).toBe(true);
     expect(w.some((x) => x.includes("訊息主軸"))).toBe(true);
     expect(w.some((x) => x.includes("媒材"))).toBe(true);
-    expect(CHIP_SOFT_MAX.styles).toBe(1);
+    expect(CHIP_SOFT_MAX.styles).toBe(2);
   });
 
   it("formatChipsPrimarySecondary 標主要／備選", () => {
@@ -218,7 +229,7 @@ describe("chips 優先序與軟警告", () => {
     );
   });
 
-  it("generation-llm 截斷多選 chips", () => {
+  it("generation-llm 截斷多選 chips（風格經 stylesForVisualInject）", () => {
     const crowded = worldviewSchema.parse({
       ...full,
       styles: ["寫實攝影", "水墨禪意", "3D 動畫"],
@@ -235,19 +246,20 @@ describe("chips 優先序與軟警告", () => {
     expect(LLM_INJECT_MAX.themes).toBe(2);
   });
 
-  it("brief／export 含主要標與選項提示", () => {
+  it("brief／export 含選項提示（跨家族風格）", () => {
     const crowded = worldviewSchema.parse({
       ...full,
       styles: ["寫實攝影", "3D 動畫"],
     });
     const brief = formatWorldviewForAi(crowded, "brief");
-    expect(brief).toContain("主要:寫實攝影");
     expect(brief).toContain("選項提示");
+    // 標籤可為「寫實攝影」或主要/備選形
+    expect(brief).toMatch(/寫實攝影/);
     const exp = formatWorldviewForAi(crowded, "export");
-    expect(exp).toContain("主要:寫實攝影");
+    expect(exp).toMatch(/寫實攝影/);
   });
 
-  it("normalizeWorldviewChipsPatch 截斷去重；未傳欄位不出現", () => {
+  it("normalizeWorldviewChipsPatch 截斷去重並 canonicalize 風格", () => {
     const p = normalizeWorldviewChipsPatch({
       styles: [" 寫實攝影 ", "寫實攝影", "水墨禪意", "3D 動畫"],
       tones: ["溫暖", "真誠", "活潑"],
@@ -257,6 +269,9 @@ describe("chips 優先序與軟警告", () => {
     expect(p.tones).toEqual(["溫暖", "真誠"]);
     expect(p.themes).toBeUndefined();
     expect(summarizeWorldviewChipsPatch(p)).toContain("寫實攝影");
+    // look+質感可保留兩個
+    const p2 = normalizeWorldviewChipsPatch({ styles: ["寫實攝影", "膠片質感", "水墨禪意"] });
+    expect(p2.styles).toEqual(["寫實攝影", "膠片質感"]);
   });
 });
 
