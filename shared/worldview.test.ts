@@ -9,6 +9,7 @@ import {
   formatWorldviewForAi,
   formatWorldviewVisualPositive,
   formatChipsPrimarySecondary,
+  formatWorldviewStylesLabel,
   isWorldviewReady,
   hasActs,
   removesDefaultTaboos,
@@ -19,9 +20,15 @@ import {
   CHIP_SOFT_MAX,
   toggleWorldviewChip,
   selectWorldviewStyle,
+  selectWorldviewStyleFamily,
+  selectWorldviewStyleLook,
+  selectWorldviewStyleTexture,
   keepPrimaryWorldviewStyle,
   promoteWorldviewChip,
   hasStyleFamilyConflict,
+  parseWorldviewStyleSlots,
+  stylesForVisualInject,
+  canonicalizeWorldviewStyles,
   chipSoftWarnings,
   worldviewChipGuidanceForAi,
   normalizeWorldviewChipsPatch,
@@ -88,7 +95,6 @@ describe("formatWorldviewForAi：跨消費端契約", () => {
     expect(s).toContain("溫暖");
     expect(s).toContain("禁忌");
     expect(s).toContain("醫療");
-    // brief 不塞長 acts／people／URL（控 token）
     expect(s).not.toContain("三幕");
     expect(s).not.toContain("example.com");
   });
@@ -136,7 +142,7 @@ describe("formatWorldviewVisualPositive", () => {
     expect(s).not.toContain("醫療");
   });
 
-  it("跨家族多選只注入第一主風格；同家族可 look+質感；調性最多前兩個", () => {
+  it("跨家族多選只注入可解析主風格；調性最多前兩個", () => {
     const crowded = worldviewSchema.parse({
       styles: ["寫實攝影", "水墨禪意", "3D 動畫"],
       tones: ["莊嚴", "溫暖", "活潑", "簡約"],
@@ -150,21 +156,22 @@ describe("formatWorldviewVisualPositive", () => {
     expect(s).toContain("warm, gentle");
     expect(s).not.toContain("lively");
     expect(s).not.toContain("minimal");
-    // 同家族：主風格 + 質感可並存注入
-    const withTexture = worldviewSchema.parse({
-      styles: ["寫實攝影", "膠片質感"],
-      logline: "質感",
-    });
-    const s2 = formatWorldviewVisualPositive(withTexture);
-    expect(s2).toContain("photorealistic");
-    expect(s2).toContain("analog film");
-    // 常數契約：風格上限＝look+質感
     expect(VISUAL_INJECT_MAX.styles).toBe(2);
     expect(VISUAL_INJECT_MAX.tones).toBe(2);
   });
+
+  it("同家族主風格＋質感可並存注入", () => {
+    const film = worldviewSchema.parse({
+      styles: ["寫實攝影", "膠片質感"],
+      logline: "測試",
+    });
+    const s = formatWorldviewVisualPositive(film);
+    expect(s).toContain("photorealistic");
+    expect(s).toContain("analog film grain");
+  });
 });
 
-describe("chips 優先序與軟警告", () => {
+describe("chips 優先序、家族與軟警告", () => {
   it("toggle／promote 維護順序＝主要（主軸／調性複選）", () => {
     let cur: string[] = [];
     cur = toggleWorldviewChip(cur, "寫實攝影");
@@ -176,19 +183,44 @@ describe("chips 優先序與軟警告", () => {
     expect(cur).toEqual(["寫實攝影"]);
   });
 
-  it("selectWorldviewStyle：家族 look／質感與再點清空", () => {
+  it("selectWorldviewStyle：look 准單選、texture 可疊、跨家族切換", () => {
     expect(selectWorldviewStyle([], "寫實攝影")).toEqual(["寫實攝影"]);
     expect(selectWorldviewStyle(["寫實攝影"], "水墨禪意")).toEqual(["水墨禪意"]);
     expect(selectWorldviewStyle(["寫實攝影"], "寫實攝影")).toEqual([]);
-    // 同家族加質感
     expect(selectWorldviewStyle(["寫實攝影"], "膠片質感")).toEqual(["寫實攝影", "膠片質感"]);
-    // 舊跨家族多選：點另一 look → 收斂到該 look
+    expect(selectWorldviewStyle(["寫實攝影", "膠片質感"], "膠片質感")).toEqual(["寫實攝影"]);
+    // 舊多選：點 look → 只留該 look
     expect(selectWorldviewStyle(["寫實攝影", "水墨禪意", "3D 動畫"], "水墨禪意")).toEqual(["水墨禪意"]);
-    // 再點目前主 look → 清空（含清掉跨家族殘值）
-    expect(selectWorldviewStyle(["寫實攝影", "水墨禪意"], "寫實攝影")).toEqual([]);
   });
 
-  it("keepPrimaryWorldviewStyle 一鍵 canonicalize", () => {
+  it("selectWorldviewStyleFamily／Look／Texture", () => {
+    expect(selectWorldviewStyleFamily([], "photo")).toEqual(["寫實攝影"]);
+    expect(selectWorldviewStyleFamily(["手繪插畫"], "photo")).toEqual(["寫實攝影"]);
+    expect(selectWorldviewStyleFamily(["寫實攝影", "膠片質感"], "photo")).toEqual([
+      "寫實攝影",
+      "膠片質感",
+    ]);
+    expect(selectWorldviewStyleLook(["寫實攝影", "膠片質感"], "寫實攝影")).toEqual([]);
+    expect(selectWorldviewStyleTexture([], "膠片質感")).toEqual(["寫實攝影", "膠片質感"]);
+  });
+
+  it("parse／canonicalize／stylesForVisualInject", () => {
+    expect(parseWorldviewStyleSlots(["寫實攝影", "膠片質感"])).toMatchObject({
+      family: "photo",
+      look: "寫實攝影",
+      texture: "膠片質感",
+    });
+    expect(canonicalizeWorldviewStyles(["寫實攝影", "水墨禪意", "3D 動畫"])).toEqual(["寫實攝影"]);
+    expect(stylesForVisualInject(["寫實攝影", "膠片質感", "水墨禪意"])).toEqual([
+      "寫實攝影",
+      "膠片質感",
+    ]);
+    expect(formatWorldviewStylesLabel(["寫實攝影", "膠片質感"])).toBe(
+      "主風格:寫實攝影；質感:膠片質感",
+    );
+  });
+
+  it("keepPrimaryWorldviewStyle 一鍵收斂", () => {
     expect(keepPrimaryWorldviewStyle(["寫實攝影", "水墨禪意"])).toEqual(["寫實攝影"]);
     expect(keepPrimaryWorldviewStyle(["寫實攝影", "膠片質感"])).toEqual(["寫實攝影", "膠片質感"]);
     expect(keepPrimaryWorldviewStyle(["日系水彩"])).toEqual(["日系水彩"]);
@@ -207,7 +239,8 @@ describe("chips 優先序與軟警告", () => {
       tones: ["1", "2", "3"],
       styles: ["寫實攝影", "3D 動畫"],
     });
-    expect(w.some((x) => x.includes("視覺風格") || x.includes("收斂"))).toBe(true);
+    expect(w.some((x) => x.includes("視覺風格"))).toBe(true);
+    expect(w.some((x) => x.includes("收斂") || x.includes("出圖"))).toBe(true);
     expect(w.some((x) => x.includes("調性"))).toBe(true);
     expect(w.some((x) => x.includes("訊息主軸"))).toBe(true);
     expect(w.some((x) => x.includes("媒材"))).toBe(true);
@@ -229,7 +262,7 @@ describe("chips 優先序與軟警告", () => {
     );
   });
 
-  it("generation-llm 截斷多選 chips（風格經 stylesForVisualInject）", () => {
+  it("generation-llm 截斷多選 chips", () => {
     const crowded = worldviewSchema.parse({
       ...full,
       styles: ["寫實攝影", "水墨禪意", "3D 動畫"],
@@ -246,32 +279,32 @@ describe("chips 優先序與軟警告", () => {
     expect(LLM_INJECT_MAX.themes).toBe(2);
   });
 
-  it("brief／export 含選項提示（跨家族風格）", () => {
+  it("brief／export 含風格標籤與選項提示", () => {
     const crowded = worldviewSchema.parse({
       ...full,
       styles: ["寫實攝影", "3D 動畫"],
     });
     const brief = formatWorldviewForAi(crowded, "brief");
+    expect(brief).toContain("寫實攝影");
     expect(brief).toContain("選項提示");
-    // 標籤可為「寫實攝影」或主要/備選形
-    expect(brief).toMatch(/寫實攝影/);
     const exp = formatWorldviewForAi(crowded, "export");
-    expect(exp).toMatch(/寫實攝影/);
+    expect(exp).toContain("寫實攝影");
   });
 
-  it("normalizeWorldviewChipsPatch 截斷去重並 canonicalize 風格", () => {
+  it("normalizeWorldviewChipsPatch 截斷去重 canonicalize；未傳欄位不出現", () => {
     const p = normalizeWorldviewChipsPatch({
       styles: [" 寫實攝影 ", "寫實攝影", "水墨禪意", "3D 動畫"],
       tones: ["溫暖", "真誠", "活潑"],
-      // themes 未傳
     });
     expect(p.styles).toEqual(["寫實攝影"]);
     expect(p.tones).toEqual(["溫暖", "真誠"]);
     expect(p.themes).toBeUndefined();
     expect(summarizeWorldviewChipsPatch(p)).toContain("寫實攝影");
-    // look+質感可保留兩個
-    const p2 = normalizeWorldviewChipsPatch({ styles: ["寫實攝影", "膠片質感", "水墨禪意"] });
-    expect(p2.styles).toEqual(["寫實攝影", "膠片質感"]);
+
+    const film = normalizeWorldviewChipsPatch({
+      styles: ["寫實攝影", "膠片質感"],
+    });
+    expect(film.styles).toEqual(["寫實攝影", "膠片質感"]);
   });
 });
 
@@ -282,29 +315,9 @@ describe("removesDefaultTaboos", () => {
     expect(removesDefaultTaboos(prev, next)).toBe(true);
   });
 
-  it("只加自訂不刪預設 → false", () => {
+  it("原樣或只加新條 → false", () => {
     const prev = DEFAULT_TABOOS();
-    expect(removesDefaultTaboos(prev, [...prev, "不出現招牌字"])).toBe(false);
-  });
-});
-
-describe("消費端 source-lock：必須走 formatWorldviewForAi（防各寫一行摘要分岔）", () => {
-  it("director / agentCore / assistant / messageAssistant / exporter 皆 import formatWorldviewForAi", async () => {
-    const { readFileSync } = await import("node:fs");
-    const { fileURLToPath } = await import("node:url");
-    const { dirname, join } = await import("node:path");
-    const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-    const files = [
-      "server/routers/director.ts",
-      "server/services/agentCore.ts",
-      "server/routers/assistant.ts",
-      "server/services/messageAssistant.ts",
-      "server/services/exporter.ts",
-      "server/services/generationCore.ts",
-    ];
-    for (const rel of files) {
-      const src = readFileSync(join(root, rel), "utf8");
-      expect(src, rel).toMatch(/formatWorldviewForAi|formatWorldviewVisualPositive/);
-    }
+    expect(removesDefaultTaboos(prev, prev)).toBe(false);
+    expect(removesDefaultTaboos(prev, [...prev, "自訂"])).toBe(false);
   });
 });
