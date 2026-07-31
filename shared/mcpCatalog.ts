@@ -92,6 +92,8 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "get_note", title: "讀取筆記", access: "read", blurb: "讀一則筆記的全文（會議決議、待辦、匯入的知識）。" },
   { name: "add_note", title: "新增筆記", access: "write", blurb: "為專案新增一則筆記（會議紀錄／整理／交接；與網頁筆記同一套權限）。" },
   { name: "append_note", title: "追加筆記", access: "write", blurb: "在既有筆記末尾追加內容（保留版本快照）；只有作者本人或組長以上可改。" },
+  { name: "get_integrations_status", title: "查外部連接狀態", access: "read", blurb: "查你自己的 Google 雲端／Notion／外部 API 連接狀態（只回顯示資訊，絕不回憑證）。" },
+  { name: "import_drive_file", title: "匯入雲端檔案", access: "write", openWorld: true, blurb: "以你自己的 Google 授權把「指定 fileId」的檔案匯入資料庫文件——不提供整盤瀏覽，一次一檔。" },
   { name: "list_dm_contacts", title: "列出私訊對象", access: "read", blurb: "列出你可以私訊的夥伴（同組夥伴＋開發者）：姓名、Email、共同組別。" },
   { name: "list_dm_threads", title: "列出私訊對話", access: "read", blurb: "列出你的私訊對話串（每位對象的最後一句與未讀數）。" },
   { name: "read_dm", title: "讀取私訊", access: "read", blurb: "讀你與某位夥伴的私訊往來（只讀得到自己參與的對話）。" },

@@ -44,10 +44,10 @@ import {
 import { checkDiskSpace, copyStoredFile, kindFromMime, removeStoredFile, saveBuffer } from "../services/storage";
 import {
   fetchDriveFile,
-  fetchDrivePickedFile,
   fetchDriveWithPublicFallback,
   getNotionToken,
 } from "../services/integrations";
+import { importDrivePickedFileToTable } from "../services/driveImportCore";
 
 /**
  * 自訂資料庫（個人→組→團隊→全站）：表結構 CRUD＋列資料 CRUD＋文件層＋連接（CSV/專案/排程）。
@@ -661,42 +661,8 @@ export const databasesRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { table, access } = await getTableChecked(ctx.auth, input.tableId);
       if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
-      const picked = await fetchDrivePickedFile(ctx.auth.user.id, input.fileId);
-      if (!picked.ok) {
-        // 沿用 private import 錯誤文案（帳戶無權限含 email 與分享指引、授權失效含重連指引）
-        throw new TRPCError({ code: "BAD_REQUEST", message: picked.message });
-      }
-      const quotaErr = await quotaGuardError(ctx.auth.user.id, picked.buf.length);
-      if (quotaErr) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaErr });
-      const name = (input.name?.trim() || picked.name || "匯入文件").slice(0, 120);
-
-      // 網頁類（雲端裡的 .html 檔）：與 importUrl 同口徑——不落地原檔，直接抽文字
-      if (picked.mime === "text/html") {
-        const text = htmlToText(picked.buf.toString("utf8")).slice(0, MAX_TEXT_CHARS);
-        if (!text) throw new TRPCError({ code: "BAD_REQUEST", message: "這份檔案抓不到可讀文字" });
-        const sizeBytes = Buffer.byteLength(text, "utf8");
-        const [row] = await db.insert(schema.dataFiles).values({
-          tableId: table.id, name, mime: "text/plain", sizeBytes,
-          sourceUrl: picked.sourceUrl, textContent: text, uploadedBy: ctx.auth.user.id,
-        }).returning();
-        return { id: row.id, name, readableChars: text.length };
-      }
-
-      // 其他格式（Google 文件匯出 txt/csv、pdf/docx/txt…）：原檔落地＋抽文字
-      const disk = await checkDiskSpace(picked.buf.length);
-      if (disk) throw new TRPCError({ code: "PRECONDITION_FAILED", message: disk });
-      const text = await extractTextFromBuffer(picked.mime, name, picked.buf);
-      const saved = await saveBuffer(picked.buf, picked.mime);
-      try {
-        const [row] = await db.insert(schema.dataFiles).values({
-          tableId: table.id, name, mime: picked.mime, sizeBytes: saved.sizeBytes,
-          storagePath: saved.storagePath, sourceUrl: picked.sourceUrl, textContent: text, uploadedBy: ctx.auth.user.id,
-        }).returning();
-        return { id: row.id, name, readableChars: text?.length ?? 0 };
-      } catch (dbErr) {
-        await removeStoredFile(saved.storagePath); // DB 失敗清孤兒檔
-        throw dbErr;
-      }
+      // 抓取＋配額＋抽文字＋落地共用 driveImportCore（MCP import_drive_file 同一條路徑）
+      return importDrivePickedFileToTable(ctx.auth, table.id, { fileId: input.fileId, name: input.name });
     }),
 
   /**

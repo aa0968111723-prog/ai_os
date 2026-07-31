@@ -59,6 +59,8 @@ import {
 } from "./agentCore";
 import { addScheduleItemCore, listScheduleForGroup, updateScheduleItemCore } from "./scheduleCore";
 import { addNoteCore, appendNoteCore } from "./notesCore";
+import { listIntegrations } from "./integrations";
+import { importDrivePickedFileToTable } from "./driveImportCore";
 import {
   addProjectTaskCore,
   completeProjectTaskCore,
@@ -510,6 +512,25 @@ export const TOOLS = [
         content: { type: "string", description: "要追加的內容（以空行接在原文之後）" },
       },
       required: ["noteId", "content"],
+    },
+  },
+  // ── M5 外部連接（E5）：狀態唯讀＋指定 fileId 匯入——刻意不提供「整盤瀏覽」工具 ──
+  {
+    name: "get_integrations_status",
+    description: "查金鑰擁有者本人的外部連接狀態：Google 雲端（是否連結／哪個帳戶）、Notion（workspace）、外部 API 連接數。只回顯示用資訊，絕不回憑證原文。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "import_drive_file",
+    description: "以「金鑰擁有者本人」的 Google 授權，把指定 fileId 的檔案匯入某個資料庫的文件區（Google 文件→txt／試算表→csv／簡報→txt／一般檔直載＋抽文字）。一次一檔、不提供整盤列表——fileId 請由使用者在網頁選檔或自行提供。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tableId: { type: "string", description: "目的資料庫（需 AI 可寫；先用 list_databases 確認）" },
+        fileId: { type: "string", description: "Google 檔案 id（網址中 /d/{fileId}/ 一段）" },
+        name: { type: "string", description: "文件名稱（省略＝用雲端檔名）" },
+      },
+      required: ["tableId", "fileId"],
     },
   },
   // ── 站內私訊（通訊錄 1:1 聊天）：只讀寫「金鑰擁有者本人」參與的對話，別人的私訊碰不到 ──
@@ -999,6 +1020,43 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       note: args.note === undefined ? undefined : String(args.note),
     });
     return { id: row.id, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, note: row.note };
+  }
+
+  // ── M5 外部連接（E5）：狀態唯讀＋指定 fileId 匯入（本人 token；AI 存取等級守門）──
+  if (name === "get_integrations_status") {
+    const status = await listIntegrations(auth.user.id);
+    return {
+      googleDrive: {
+        configured: status.googleDrive.configured,
+        connected: status.googleDrive.connected,
+        email: status.googleDrive.email,
+        status: status.googleDrive.status,
+        lastError: status.googleDrive.lastError,
+      },
+      notion: {
+        connected: status.notion.connected,
+        workspace: status.notion.workspace,
+        status: status.notion.status,
+        siteTokenAvailable: status.notion.siteTokenAvailable,
+      },
+      apis: status.apis.map((a) => ({ id: a.id, name: a.name, status: a.status, lastUsedAt: a.lastUsedAt })),
+      note: "連接 ≠ 授權 AI 讀全雲端——匯入一律指定 fileId、走金鑰擁有者本人的授權。",
+    };
+  }
+
+  if (name === "import_drive_file") {
+    // MCP 走 AI 存取等級（resolveAgentAccess，只會比人更嚴）——agentAccess=none 的庫對代理不可見
+    const readable = await getAgentReadableTable(auth, String(args.tableId ?? ""));
+    if (!readable) throw new Error("找不到這個資料庫，或它未開放 AI 存取");
+    if (!readable.access.canWriteRows) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫未開放 AI 寫入（agentAccess 需為 write）" });
+    }
+    const fileId = String(args.fileId ?? "").trim();
+    if (!/^[\w-]{5,200}$/.test(fileId)) throw new Error("Google 檔案 id 格式不正確（網址中 /d/{fileId}/ 一段）");
+    return importDrivePickedFileToTable(auth, readable.table.id, {
+      fileId,
+      name: args.name === undefined ? undefined : String(args.name),
+    });
   }
 
   // ── 上傳授權狀態（以 grantId；不掛 projectId；只回狀態不回 token 原文）──

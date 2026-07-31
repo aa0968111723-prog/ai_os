@@ -35,6 +35,10 @@ describe("MCP catalog ↔ TOOLS 對齊（D1）", () => {
     expect(mcpToolAnnotations("update_database_row")?.idempotentHint).toBe(true);
     expect(mcpToolAnnotations("submit_generation")?.openWorldHint).toBe(true);
     expect(mcpToolAnnotations("plan_agent")?.openWorldHint).toBe(true);
+    expect(mcpToolAnnotations("import_drive_file")?.openWorldHint).toBe(true);
+    expect(mcpToolAnnotations("get_integrations_status")?.readOnlyHint).toBe(true);
+    expect(mcpToolAnnotations("update_schedule_item")?.idempotentHint).toBe(true);
+    expect(mcpToolAnnotations("complete_task")?.destructiveHint).toBe(false);
     // 一般寫入不得誤標破壞性；站內讀取不得誤標外部網路
     expect(mcpToolAnnotations("add_schedule_item")?.destructiveHint).toBe(false);
     expect(mcpToolAnnotations("list_notes")?.openWorldHint).toBe(false);
