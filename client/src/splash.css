@@ -6,8 +6,8 @@
   display: grid;
   place-items: center;
   background:
-    radial-gradient(ellipse 80% 60% at 50% 42%, rgba(255, 255, 255, 0.92) 0%, transparent 70%),
-    #f0eee8;
+    radial-gradient(ellipse 80% 60% at 50% 42%, rgba(255, 254, 250, 0.92) 0%, transparent 70%),
+    #f3f0e8;
   transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
               visibility 0.4s;
 }
@@ -85,7 +85,7 @@
   width: 112px;
   height: 3px;
   border-radius: 999px;
-  background: #e2ded6;
+  background: #e4dfd3;
   overflow: hidden;
 }
 

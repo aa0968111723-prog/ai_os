@@ -43,21 +43,21 @@
    * AA 必須對照 --muted 而非卡面算（v2 曾在這裡踩過 4.12:1 的洞）。
    * 明度階梯（fg > fg-secondary > muted-fg > soft）維持不變。 */
   --muted-fg: #6b645d;       /* 於 --muted 上 5.07:1 過 AA */
-  --soft: #a49c93;           /* 裝飾線/hover 邊色 only，~3:1 不做文字 */
+  --soft: #a79d90;           /* 裝飾線/hover 邊色 only，~3:1 不做文字 */
 
-  /* ── 表面階梯：明度單調遞增＋彩度往白收斂（logo 的家就是白紙） ── */
-  --surface-sunken: #e6e2db; /* 最深井：按壓態、進度槽底 */
-  --bg:      #f0eee8;        /* 頁底（中性淺灰，微暖不搶色） */
-  --muted:   #f1efea;        /* 卡內凹陷填色：縮圖底、asset-icon、skeleton */
-  --field:   #f5f3ee;        /* 輸入井（凹於卡面） */
-  --card2:   #f6f5f1;        /* 次級/巢狀表面：chip、upload-zone、gen-row、confirm */
-  --card:    #ffffff;        /* 主表面「白紙」：卡片、badge、輸入 focus 態 */
-  --popover: #ffffff;        /* 浮層/選單/彈窗（與卡同白，靠 e3/e4 陰影分層） */
+  /* ── 表面階梯：明度單調遞增＋彩度往白收斂（暖象牙紙：專業但不冷） ── */
+  --surface-sunken: #e9e4d9; /* 最深井：按壓態、進度槽底 */
+  --bg:      #f3f0e8;        /* 頁底（暖象牙，比中性灰暖半步、比 v2 米黃輕兩步） */
+  --muted:   #f4f1ea;        /* 卡內凹陷填色：縮圖底、asset-icon、skeleton */
+  --field:   #f7f5ee;        /* 輸入井（凹於卡面） */
+  --card2:   #f9f7f1;        /* 次級/巢狀表面：chip、upload-zone、gen-row、confirm */
+  --card:    #fffefa;        /* 主表面「暖白紙」：卡片、badge、輸入 focus 態 */
+  --popover: #fffefa;        /* 浮層/選單/彈窗（與卡同白，靠 e3/e4 陰影分層） */
 
   /* ── 三段邊界（髮絲線＝編輯感） ── */
-  --border:        #e2ded6;
-  --border-soft:   #ebe8e1;
-  --border-strong: #cfc9be;
+  --border:        #e4dfd3;
+  --border-soft:   #ede9de;
+  --border-strong: #d2cbbc;
 
   /* ── 主色三分工：品牌相／實心底／淺底文字（logo「A」的紅橘相） ── */
   --primary:              #e05a10; /* 品牌相：focus 環、選取邊、大字 accent（logo 橘，白底 3.3:1 過非文字對比） */
@@ -211,9 +211,9 @@ body {
   margin: 0; background: var(--bg); color: var(--fg);
   font-family: var(--sans); font-size: var(--fs-15); line-height: 1.6; -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  /* 環境光降到耳語級：緞帶兩端的橘與藍綠各在對角落各打一盞極淡的光 */
-  background-image: radial-gradient(120% 80% at 85% -10%, rgba(246, 119, 30, 0.07), transparent 55%),
-    radial-gradient(80% 60% at 5% 5%, rgba(11, 157, 149, 0.06), transparent 52%);
+  /* 環境光降到耳語級：暖端（橘／琥珀）為主，藍綠只在底部一小口氣——專業但不冷 */
+  background-image: radial-gradient(120% 80% at 85% -10%, rgba(246, 119, 30, 0.08), transparent 55%),
+    radial-gradient(80% 60% at 5% 5%, rgba(235, 162, 7, 0.06), transparent 52%);
   /* fixed 在 iOS 捲動時易閃爍／耗電——僅在可 hover 的桌面裝置啟用 */
   background-attachment: scroll;
   /* 100dvh：手機動態工具列不會裁切底部；safe-area 給瀏海／Home 指示條 */
@@ -223,6 +223,27 @@ body {
 }
 @media (hover: hover) and (pointer: fine) {
   body { background-attachment: fixed; }
+}
+/* 淡淡的漸層動態感：一層緞帶色的柔光在頁底極慢地漂移。
+ * 只動 transform（GPU 合成，不觸發重排）；z-index -1 貼在 body 背景之上、內容之下；
+ * 透明度全部壓在耳語級（≤.07），遠看只覺得紙面有呼吸，不會搶內容。 */
+body::before {
+  content: ""; position: fixed; inset: -22%;
+  z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(44% 36% at 80% 2%, rgba(246, 119, 30, 0.07), transparent 70%),
+    radial-gradient(38% 32% at 8% 10%, rgba(235, 162, 7, 0.06), transparent 70%),
+    radial-gradient(42% 34% at 30% 96%, rgba(141, 177, 42, 0.04), transparent 70%),
+    radial-gradient(40% 34% at 86% 100%, rgba(11, 157, 149, 0.045), transparent 70%);
+  animation: brand-ambient-drift 28s ease-in-out infinite alternate;
+  will-change: transform;
+}
+@keyframes brand-ambient-drift {
+  from { transform: translate3d(-1.2%, -0.8%, 0) scale(1); }
+  to   { transform: translate3d(1.2%, 1%, 0) scale(1.05); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body::before { animation: none; transform: none; }
 }
 .app {
   max-width: var(--app-max);
