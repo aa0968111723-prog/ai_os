@@ -432,3 +432,69 @@ describe("健康度與人員阻塞不再自相矛盾（實機曾出現：狀態�
     expect(screen.getByText(/AI 停在那裡等人/)).toBeInTheDocument();
   });
 });
+
+describe("S3：代理產出與計畫疑慮", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  it("列出代理已產出的東西，每一項都連回產生它的那一步", () => {
+    seed({
+      runs: [],
+      insights: {
+        groupResults: [
+          { type: "scene", id: "sc-1", label: "第一鏡：法會全景", runId: "run-7", stepId: "s1", projectId: "p1", projectTitle: "招生短片" },
+          { type: "note", id: "n-1", label: "訪談重點", runId: "run-8", stepId: "s3", projectId: "p2", projectTitle: "社課回顧" },
+        ],
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(screen.getByLabelText("代理產出與計畫疑慮"));
+    expect(box.getByText("2 項")).toBeInTheDocument();
+    expect(box.getByText("分鏡")).toBeInTheDocument();
+    expect(box.getByText("筆記")).toBeInTheDocument();
+    expect(box.getByRole("link", { name: /第一鏡：法會全景/ }))
+      .toHaveAttribute("href", "/p/p1?focus=agent-run-run-7");
+    expect(box.getByRole("link", { name: /訪談重點/ }))
+      .toHaveAttribute("href", "/p/p2?focus=agent-run-run-8");
+  });
+
+  it("待補資訊與風險不再只是兩個數字，講得出去哪份計畫處理", () => {
+    seed({
+      runs: [],
+      insights: {
+        unresolvedInformation: 3, risks: 1,
+        planConcerns: [
+          { runId: "run-2", projectId: "p2", projectTitle: "社課回顧", goal: "補一鏡旁白", missingInformation: 2, risks: 1 },
+          { runId: "run-1", projectId: "p1", projectTitle: "招生短片", goal: "拆分鏡", missingInformation: 1, risks: 0 },
+        ],
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    const box = within(screen.getByLabelText("代理產出與計畫疑慮"));
+    expect(box.getByText(/待補資訊 3・風險 1/)).toBeInTheDocument();
+    expect(box.getByRole("link", { name: /社課回顧｜補一鏡旁白/ }))
+      .toHaveAttribute("href", "/p/p2?focus=agent-run-run-2");
+    expect(box.getByText("待補 2・風險 1")).toBeInTheDocument();
+    expect(box.getByText("待補 1")).toBeInTheDocument();
+  });
+
+  it("沒有產出也沒有疑慮時整段不渲染", () => {
+    seed({ runs: [], insights: {} });
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.queryByLabelText("代理產出與計畫疑慮")).not.toBeInTheDocument();
+  });
+
+  it("產出達顯示上限時要講出來（否則會被當成全部產出）", () => {
+    seed({
+      runs: [],
+      insights: {
+        groupResults: [{ type: "scene", id: "sc-1", label: "第一鏡", runId: "r1", projectId: "p1", projectTitle: "招生短片" }],
+        truncated: { runs: false, tasks: false, results: true, workItems: false },
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(screen.getByLabelText("代理產出與計畫疑慮")).getByText(/已達顯示上限/)).toBeInTheDocument();
+  });
+});

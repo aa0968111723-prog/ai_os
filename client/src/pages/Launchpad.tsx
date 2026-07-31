@@ -6,6 +6,7 @@ import { InstallAppBanner } from "../components/InstallAppBanner";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
+import { agentOutputKindLabel } from "../../../shared/agentOutputs";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
@@ -914,6 +915,12 @@ function TeamAssistantCard({
     () => buildDecisionInbox(runs, pendingDecisions, pendingTasks),
     [runs, pendingDecisions, pendingTasks],
   );
+  // 代理產出與計畫疑慮：兩段都空就不渲染
+  const agentOutput = useMemo(() => {
+    const results = insights.data?.groupResults ?? [];
+    const concerns = insights.data?.planConcerns ?? [];
+    return { show: results.length > 0 || concerns.length > 0, results, concerns };
+  }, [insights.data]);
   // 「誰卡住了」：沒有任何人員任務也沒有阻塞時整段不渲染——空區塊只會佔版面、不傳達資訊
   const stuck = useMemo(() => {
     const d = insights.data;
@@ -1173,6 +1180,66 @@ function TeamAssistantCard({
             )}
           </div>
         )}
+        {/* ── 代理做出了什麼：計畫不是只有狀態，還有產出。
+            沒有這一段，這張卡只回答得了「跑到哪」，回答不了「做出了什麼」。 ── */}
+        {agentOutput.show && (
+          <div className="team-output" aria-label="代理產出與計畫疑慮">
+            {agentOutput.results.length > 0 && (
+              <div>
+                <div className="team-output__head">
+                  <strong>代理已產出</strong>
+                  <Meta>
+                    {agentOutput.results.length} 項
+                    {insights.data?.truncated.results ? "（已達顯示上限）" : ""}
+                  </Meta>
+                </div>
+                <div className="team-output__chips">
+                  {agentOutput.results.map((r) => (
+                    <Link
+                      key={`${r.type}:${r.id}`}
+                      href={`/p/${r.projectId}?focus=agent-run-${r.runId}`}
+                      className="team-output__chip"
+                      title={`在「${r.projectTitle}」由計畫的某一步產出——點開會定位到那一步`}
+                    >
+                      <span className="team-output__kind">{agentOutputKindLabel(r.type)}</span>
+                      {r.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+            {agentOutput.concerns.length > 0 && (
+              <div>
+                <div className="team-output__head">
+                  <strong>計畫還缺什麼</strong>
+                  <Meta>
+                    待補資訊 {insights.data?.unresolvedInformation ?? 0}
+                    ・風險 {insights.data?.risks ?? 0}
+                  </Meta>
+                </div>
+                <ul className="team-stuck__list">
+                  {agentOutput.concerns.map((c) => (
+                    <li key={c.runId}>
+                      <Link
+                        href={`/p/${c.projectId}?focus=agent-run-${c.runId}`}
+                        className="team-stuck__who"
+                        title={c.goal}
+                      >
+                        {c.projectTitle}｜{c.goal}
+                      </Link>
+                      <Meta>
+                        {c.missingInformation > 0 ? `待補 ${c.missingInformation}` : ""}
+                        {c.missingInformation > 0 && c.risks > 0 ? "・" : ""}
+                        {c.risks > 0 ? `風險 ${c.risks}` : ""}
+                      </Meta>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
         {insights.error && (
           <p className="error" role="alert" style={{ margin: "8px 0 0" }}>
             人員阻塞分析載入失敗——

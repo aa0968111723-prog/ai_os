@@ -232,3 +232,71 @@ describe("assembleGroupAgentInsights（組級歸屬）", () => {
     expect(empty.status).toBe("healthy");
   });
 });
+
+/**
+ * S3：代理產出與計畫疑慮。兩者都由既有欄位（collectAgentResults 的輸出與
+ * planSummary）折出來，不新增任何查詢——這裡驗的是歸屬與篩選是否正確。
+ */
+describe("assembleGroupAgentInsights：代理產出與計畫疑慮（S3）", () => {
+  const NOW = Date.parse("2026-07-30T12:00:00Z");
+  const at = (days: number) => new Date(NOW - days * 86_400_000);
+  const titles = new Map([["p1", "招生短片"], ["p2", "社課回顧"]]);
+  const mkRun = (over: Partial<AgentInsightRun>): AgentInsightRun => ({
+    id: "r", projectId: "p1", goal: "目標", status: "running",
+    error: null, updatedAt: at(1), steps: [], planSummary: null, ...over,
+  });
+
+  it("產出帶回專案歸屬，點得回產生它的那一步", () => {
+    const g = assembleGroupAgentInsights(
+      [
+        mkRun({ id: "r1", projectId: "p1", steps: [
+          { id: "s1", title: "拆分鏡", status: "done", outputRefs: [{ type: "scene", id: "sc-1", label: "第一鏡" }] },
+        ] }),
+        mkRun({ id: "r2", projectId: "p2", status: "done", steps: [
+          { id: "s9", title: "寫筆記", status: "done", outputRefs: [{ type: "note", id: "n-1", label: "訪談重點" }] },
+        ] }),
+      ],
+      [],
+      titles,
+      { nowMs: NOW },
+    );
+    expect(g.groupResults).toEqual([
+      { type: "scene", id: "sc-1", label: "第一鏡", runId: "r1", stepId: "s1", projectId: "p1", projectTitle: "招生短片" },
+      { type: "note", id: "n-1", label: "訪談重點", runId: "r2", stepId: "s9", projectId: "p2", projectTitle: "社課回顧" },
+    ]);
+  });
+
+  it("計畫疑慮只看進行中的計畫，且依總數排序", () => {
+    const g = assembleGroupAgentInsights(
+      [
+        mkRun({ id: "r1", projectId: "p1", status: "running", goal: "少一點",
+          planSummary: { goal: "g", missingInformation: ["a"], risks: [] } as never }),
+        mkRun({ id: "r2", projectId: "p2", status: "awaiting_approval", goal: "多一點",
+          planSummary: { goal: "g", missingInformation: ["a", "b"], risks: ["x"] } as never }),
+        // 已完成的計畫即使留著待補資訊也不再是待辦
+        mkRun({ id: "r3", projectId: "p1", status: "done", goal: "已完成",
+          planSummary: { goal: "g", missingInformation: ["c"], risks: ["y"] } as never }),
+        // 沒有疑慮的不列
+        mkRun({ id: "r4", projectId: "p1", status: "running", goal: "很乾淨",
+          planSummary: { goal: "g", missingInformation: [], risks: [] } as never }),
+      ],
+      [],
+      titles,
+      { nowMs: NOW },
+    );
+    expect(g.planConcerns.map((c) => c.runId)).toEqual(["r2", "r1"]);
+    expect(g.planConcerns[0]).toEqual({
+      runId: "r2", projectId: "p2", projectTitle: "社課回顧", goal: "多一點",
+      missingInformation: 2, risks: 1,
+    });
+    // 與基底的兩個數字對得上（都只算進行中的計畫）
+    expect(g.unresolvedInformation).toBe(3);
+    expect(g.risks).toBe(1);
+  });
+
+  it("查不到來源 run 的產出不會憑空生出專案歸屬", () => {
+    const g = assembleGroupAgentInsights([], [], titles, { nowMs: NOW });
+    expect(g.groupResults).toEqual([]);
+    expect(g.planConcerns).toEqual([]);
+  });
+});

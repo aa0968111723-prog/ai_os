@@ -2004,6 +2004,34 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .team-stuck__cols { grid-template-columns: 1fr; }
 }
 
+/* 代理產出與計畫疑慮 */
+.team-output {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md, 10px);
+}
+.team-output__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.team-output__head > strong { font-size: 13px; }
+.team-output__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.team-output__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--card2);
+}
+.team-output__kind { color: var(--fg-secondary); font-size: 10px; font-weight: 650; }
+
 .team-analysis__stats {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

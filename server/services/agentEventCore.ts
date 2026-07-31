@@ -418,13 +418,43 @@ export interface GroupPendingApprovalTask {
   runId: string | null;
 }
 
+/**
+ * 代理產出（帶專案歸屬）。
+ *
+ * ProjectAgentResult 本身沒有 projectId——在專案頁不需要，因為整頁就是那個專案。
+ * 到了組級就必須補上，否則「代理做出了什麼」只能列出一堆沒有去處的標題，
+ * 點不回產生它的那一步。
+ */
+export interface GroupAgentResult extends ProjectAgentResult {
+  projectId: string;
+  projectTitle: string;
+}
+
+/** 有待補資訊或風險的計畫（可反查回 Planner 那一份） */
+export interface GroupPlanConcern {
+  runId: string;
+  projectId: string;
+  projectTitle: string;
+  goal: string;
+  missingInformation: number;
+  risks: number;
+}
+
 export interface GroupAgentInsights extends ProjectAgentInsights {
   byProject: GroupAgentProjectRollup[];
   people: GroupAgentPerson[];
   pendingApprovalTasks: GroupPendingApprovalTask[];
+  /** 代理實際做出來的東西（分鏡、筆記、生成…），可反查回產生它的那一步 */
+  groupResults: GroupAgentResult[];
+  /** 哪幾份計畫還有待補資訊／風險——把兩個數字還原成「去哪裡處理」 */
+  planConcerns: GroupPlanConcern[];
   /** 「誰卡住了」的來源筆數上限有沒有被吃到（提醒畫面不是全貌） */
   peopleTruncated: boolean;
 }
+
+/** 組級畫面一次最多列幾項產出／幾份有疑慮的計畫 */
+const GROUP_RESULTS_LIMIT = 12;
+const GROUP_CONCERNS_LIMIT = 8;
 
 /** 「誰卡住了」一次最多列幾個人；超過就靠排序把最卡的排前面 */
 const GROUP_PEOPLE_LIMIT = 12;
@@ -525,11 +555,42 @@ export function assembleGroupAgentInsights(
       (a.dueAt?.getTime() ?? Number.POSITIVE_INFINITY) - (b.dueAt?.getTime() ?? Number.POSITIVE_INFINITY),
     );
 
+  // ── 代理產出：把 runId 還原成專案，讓每一項都點得回產生它的那一步 ──
+  // 完全重用 base.results（collectAgentResults 的輸出），沒有任何新查詢。
+  const titleOfProject = (projectId: string) =>
+    projectTitles.get(projectId) ?? `專案 ${projectId.slice(0, 8)}`;
+  const groupResults: GroupAgentResult[] = base.results
+    .map((r) => {
+      const projectId = projectOfRun.get(r.runId);
+      return projectId ? { ...r, projectId, projectTitle: titleOfProject(projectId) } : null;
+    })
+    .filter((r): r is GroupAgentResult => r !== null)
+    .slice(0, GROUP_RESULTS_LIMIT);
+
+  // ── 待補資訊／風險：兩個數字還原成「哪幾份計畫、去哪裡處理」 ──
+  // 判準與 assembleAgentInsights 的 planSummaries 相同：只看仍在進行中的計畫，
+  // 已終局的計畫留著待補資訊也不再是待辦。
+  const planConcerns: GroupPlanConcern[] = runs
+    .filter((r) => r.status === "running" || r.status === "waiting" || r.status === "awaiting_approval")
+    .map((r) => ({
+      runId: r.id,
+      projectId: r.projectId,
+      projectTitle: titleOfProject(r.projectId),
+      goal: r.goal,
+      missingInformation: r.planSummary?.missingInformation?.length ?? 0,
+      risks: r.planSummary?.risks?.length ?? 0,
+    }))
+    .filter((c) => c.missingInformation > 0 || c.risks > 0)
+    .sort((a, b) => (b.missingInformation + b.risks) - (a.missingInformation + a.risks))
+    .slice(0, GROUP_CONCERNS_LIMIT);
+
   return {
     ...base,
     byProject,
     people: allPeople.slice(0, GROUP_PEOPLE_LIMIT),
     pendingApprovalTasks,
+    groupResults,
+    planConcerns,
     peopleTruncated: allPeople.length > GROUP_PEOPLE_LIMIT,
   };
 }

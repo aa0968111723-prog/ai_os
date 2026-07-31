@@ -316,4 +316,22 @@ if "__error__" not in str(pi):
 else:
     ok("專案級洞察端點（略過：本 e2e 未涵蓋）", True)
 
+
+# ── 11. 代理產出與計畫疑慮（S3：由既有欄位折出，不新增查詢）──
+gi2 = call("GET", admin, "teamAssistant.groupInsights", {"groupId": gid})
+for field in ("groupResults", "planConcerns"):
+    ok(f"groupInsights.{field} 是陣列", isinstance(gi2.get(field), list))
+# 每項產出都要有專案歸屬，否則點不回產生它的那一步
+for r in gi2.get("groupResults", []):
+    ok(f"產出 {r.get('id','')[:8]} 帶專案歸屬與來源 run",
+       all(k in r and r[k] for k in ("projectId", "projectTitle", "runId", "type")))
+# 疑慮的計畫必須真的有疑慮，且數字與總計對得上
+concern_missing = sum(c.get("missingInformation", 0) for c in gi2.get("planConcerns", []))
+concern_risks = sum(c.get("risks", 0) for c in gi2.get("planConcerns", []))
+for c in gi2.get("planConcerns", []):
+    ok(f"疑慮列 {c['runId'][:8]} 至少有一項待補或風險",
+       c.get("missingInformation", 0) > 0 or c.get("risks", 0) > 0)
+ok("疑慮總和不超過整體待補資訊數", concern_missing <= gi2.get("unresolvedInformation", 0))
+ok("疑慮總和不超過整體風險數", concern_risks <= gi2.get("risks", 0))
+
 print("—— e2e-team-assistant 完成 ——")
