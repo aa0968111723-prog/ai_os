@@ -9,21 +9,20 @@
   },
   "structurallyExempt": {
     "badge": 7,
-    "chip": 23,
+    "chip": 24,
     "hint": 25,
     "skeleton": 4,
     "btn-sm": 8,
     "btn-tonal": 6,
-    "btn": 4
+    "btn": 5,
+    "card": 2
   },
   "totals": {
-    "total": 8,
+    "total": 4,
     "perClass": {
       "empty-state": 2,
-      "card": 3,
-      "hint": 1,
-      "btn": 1,
-      "chip": 1
+      "card": 1,
+      "hint": 1
     }
   },
   "files": {
@@ -35,14 +34,7 @@
     },
     "client/src/pages/AdminPage.tsx": {
       "hint": 1,
-      "btn": 1,
       "empty-state": 1
-    },
-    "client/src/pages/DesktopCompanionPage.tsx": {
-      "chip": 1
-    },
-    "client/src/pages/ModelsPage.tsx": {
-      "card": 2
     }
   }
 }

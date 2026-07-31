@@ -61,7 +61,29 @@ const OWNED_CLASSES = {
  *
  * 加入這裡的門檻很高：必須是「遷移會讓程式碼變差」，不是「遷移比較麻煩」。
  */
+/**
+ * primitives 元件本身。className 傳給它們**代表已經遷移完成**，不是待辦——
+ * 例如 `<Skeleton className="card">` 是「卡片形狀的骨架」，不是一張裸卡。
+ * 掃描器只認 class 字面值，不加這條就會把已完成的遷移重新算成債。
+ */
+const PRIMITIVE_TAGS = ["Button", "Card", "Chip", "Badge", "Pill", "Hint", "Meta", "EmptyState", "Skeleton"];
+
 const STRUCTURAL_EXEMPTIONS = [
+  {
+    tags: PRIMITIVE_TAGS,
+    classes: Object.keys(OWNED_CLASSES),
+    why: "className 傳給 primitive 元件本身＝已完成遷移（如 <Skeleton className=\"card\"> 是卡片形狀的骨架）",
+  },
+  {
+    tags: ["button"],
+    classes: ["hint"],
+    why: "真正的展開／收合觸發鈕；Hint 渲染 p/div/span，換掉會失去 button 語意與鍵盤行為",
+  },
+  {
+    tags: ["label"],
+    classes: ["chip"],
+    why: "包住 radio/checkbox 的 <label>；Chip 渲染 span/div/li，換掉會失去 label 與表單控件的關聯",
+  },
   {
     tags: ["Link"],
     classes: ["chip", "hint", "btn", "btn-sm", "btn-ghost", "btn-tonal", "badge", "pill"],

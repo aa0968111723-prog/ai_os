@@ -1368,7 +1368,8 @@ export function InsightsCard() {
                 })}
               </tbody>
             </table>
-            <Hint style={{ fontSize: 11, marginTop: 6 }}>成功率＝完成 ÷（完成＋失敗）；排隊中／等待核准的生成不列入。點數只計完成的實花（失敗會退點）。</Hint>
+            {/* 定義上方表格「成功率」與「點數」欄的算法——藏起來那些數字就無法正確解讀 */}
+            <Hint layer="always" style={{ fontSize: 11, marginTop: 6 }}>成功率＝完成 ÷（完成＋失敗）；排隊中／等待核准的生成不列入。點數只計完成的實花（失敗會退點）。</Hint>
           </div>
         )
       )}
@@ -1483,7 +1484,9 @@ export function InsightsCard() {
                   })}
                 </tbody>
               </table>
-              <Hint style={{ fontSize: 11, marginTop: 6 }}>
+              {/* 單位是讀懂整張表的前提：新台幣與美元差約 32 倍，且 CSV 兩種都有。
+                  精簡模式收起來，等於讓管理員看一張不知道單位的金額表。 */}
+              <Hint layer="always" style={{ fontSize: 11, marginTop: 6 }}>
                 金額單位為<strong>新台幣（NT$）</strong>：只計<strong>完成</strong>實花點數換算（{usage.data.fx?.note ?? moneyFxNote()}）。
                 失敗多半已退點，不計入。點人名或模型可下鑽提示詞；CSV 含新台幣、美元與匯率說明。
               </Hint>
@@ -1565,7 +1568,8 @@ export function ConsumptionMonitorCard() {
   return (
     <Card data-fb="點數消耗監控卡">
       <h2>點數消耗監控</h2>
-      <Hint>逐日毛消耗（只算扣點、退點不抵銷）；今日暴衝會整行紅字提醒。</Hint>
+      {/* 定義圖表畫的是「毛消耗」而非淨額——不講，管理員會以為退點已經抵銷 */}
+      <Hint layer="always">逐日毛消耗（只算扣點、退點不抵銷）；今日暴衝會整行紅字提醒。</Hint>
       {stats.isLoading ? (
         <div role="status" aria-label="消耗統計載入中">
           <Skeleton style={{ height: 44, marginTop: 10 }} />
