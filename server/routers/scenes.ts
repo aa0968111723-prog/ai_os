@@ -4,10 +4,87 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { executeGenerationCommand } from "../services/generationCommand";
-import { getModel } from "../../shared/models";
+import { getModel, type ModelEntry } from "../../shared/models";
+import {
+  buildSceneVersions,
+  findDuplicateCurrent,
+  isSceneRefineModel,
+  isSceneRegenModel,
+  summarizeSceneVersions,
+  type SceneExternalAsset,
+  type SceneVersionGenerationRow,
+} from "../../shared/sceneVersions";
 import { lockSceneOrder } from "../services/locks";
 import { assertProjectEditable, assertProjectNotArchived } from "../services/projectAcl";
 import { MAX_PROMPT_CHARS } from "./prompts";
+
+/** 單格版本清單一次最多回幾筆（一格反覆修上百次是異常，不必無上限撈） */
+const SCENE_VERSION_LIMIT = 120;
+
+/** 素材 kind → 這一格的哪個現用指標欄；null＝不能當分鏡素材（例如 doc） */
+export function sceneSlotForAssetKind(kind: string): "assetId" | "narrationAssetId" | null {
+  if (kind === "audio") return "narrationAssetId"; // 音訊＝旁白槽（與 advanceGeneration 回填同口徑）
+  if (kind === "image" || kind === "video") return "assetId";
+  return null;
+}
+
+/**
+ * 「以這張為底圖修正」的純規則守門：不合規回中文訊息，合規回 null。
+ *
+ * 抽成純函式是為了讓每一條拒絕理由都測得到——這幾條規則擋的是「扣了點才發現送錯」，
+ * 靠手動點畫面驗不完（模型目錄有 300+ 條，底圖狀態有現用／指定／已回收／非圖片數種）。
+ */
+export function refineRejection(input: {
+  model: Pick<ModelEntry, "label" | "kind" | "needs"> | undefined;
+  prompt: string;
+  /** 解析後的底圖 id（可能來自輸入或這一格現用）；null＝這一格還沒有畫面 */
+  sourceAssetId: string | null;
+  /** 底圖素材列（已濾掉回收桶）；undefined＝查無 */
+  source: { projectId: string; kind: string } | undefined;
+  sceneProjectId: string;
+}): string | null {
+  if (!input.model || !isSceneRefineModel(input.model)) {
+    return "「以這張為底圖修正」需要用吃底圖的圖生圖／圖生影片模型";
+  }
+  if (!input.prompt.trim()) return "請先寫下要改哪裡（例：把天空換成黃昏，其餘不變）";
+  if (!input.sourceAssetId) return "這一格還沒有畫面可以修——請先「生成這一格」，或在版本清單挑一版當底圖";
+  if (!input.source || input.source.projectId !== input.sceneProjectId) {
+    return "找不到底圖，或它不屬於本專案（可能已在回收桶）";
+  }
+  if (input.source.kind !== "image") return "底圖必須是圖片——影片／音訊版本不能拿來修圖";
+  return null;
+}
+
+/** 「生成／重生這一格」的純模型守門：不合規回中文訊息，合規回 null */
+export function regenRejection(model: Pick<ModelEntry, "label" | "kind" | "needs"> | undefined): string | null {
+  if (!model || (model.kind !== "image" && model.kind !== "video")) {
+    return "分鏡就地生成需要用圖像或影片模型";
+  }
+  // 需要底圖的模型走 scenes.refine（那裡才會帶 sourceAssetId）。不擋的話會一路送到
+  // generationCore 才因「此模型需要來源」被拒——使用者按了鈕、等了一下，才拿到一句看不懂的錯。
+  if (!isSceneRegenModel(model)) {
+    return `「${model.label}」需要底圖，請改用單格工作室的「以這張為底圖修正」`;
+  }
+  return null;
+}
+
+/**
+ * 「這一格正在生成畫面嗎」——就地生成／修正共用的伺服器端防抖。
+ * 兩顆鈕都直接扣點、沒有二次確認，快速雙擊或兩人同時按會重複送出、重複扣點。
+ * （catch 常見雙擊；非強一致鎖）
+ */
+async function assertNoPendingVisual(sceneId: string): Promise<void> {
+  const [pendingVisual] = await db
+    .select({ id: schema.generations.id })
+    .from(schema.generations)
+    .where(and(
+      eq(schema.generations.sceneId, sceneId),
+      sql`(${schema.generations.sceneRole} is null or ${schema.generations.sceneRole} = 'visual')`,
+      inArray(schema.generations.status, ["queued", "running"]),
+    ))
+    .limit(1);
+  if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成中，請稍候再生成" });
+}
 
 /**
  * forEdit（需求 2.3 專案級權限）：分鏡的所有「寫入」mutation 走 forEdit=true——
@@ -108,6 +185,17 @@ export const scenesRouter = router({
             prompt: gen.prompt, // 帶入原生成提示詞，讓「加入分鏡」的格子日後也能就地重生
           })
           .returning();
+        // 把來源生成回綁到這一格：否則它不在該格的版本清單裡——使用者切到別版之後就再也切不回
+        // 這張「當初加入分鏡的原圖」（版本必須可逆）。只在生成尚未綁定任何格時綁，
+        // 同一筆成品被加進第二格時不搶走第一格的歷史（第二格仍會以「外部帶入」列出現用素材）。
+        //
+        // role 一律 visual：本 mutation 無論成品是圖/影/音都寫進 assetId（見上），
+        // 角色必須跟著「實際落在哪個槽」，否則音訊會被標成 narration，
+        // 版本清單拿它去比 narrationAssetId（null）就會顯示成「不是現用」——與畫面上看到的相反。
+        await tx
+          .update(schema.generations)
+          .set({ sceneId: scene!.id, sceneRole: "visual" })
+          .where(and(eq(schema.generations.id, gen.id), isNull(schema.generations.sceneId)));
         return scene;
       });
     }),
@@ -148,6 +236,159 @@ export const scenesRouter = router({
           .returning();
         return scene;
       });
+    }),
+
+  /**
+   * 單格版本清單（單格工作室）：同一格歷來的每一次生成 ＋ 現在被引用的素材，
+   * 算成「第 N 版」的清單。畫面與旁白各自編號。
+   *
+   * 為什麼不新開版本表：見 `shared/sceneVersions.ts` 檔頭——`generations` 本來就是逐版紀錄，
+   * `scenes.assetId`／`narrationAssetId` 本來就是「現用是哪一版」的單一真相；再開一張表只會多一個要對帳的真相。
+   *
+   * 讀取權限（不帶 forEdit）：檢視者也能回看版本與成本，只是不能切換。
+   */
+  versions: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    const [scene] = await db
+      .select()
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+    if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
+    await getProjectChecked(ctx, scene.projectId);
+
+    const gens = await db
+      .select({
+        id: schema.generations.id,
+        status: schema.generations.status,
+        sceneRole: schema.generations.sceneRole,
+        modelId: schema.generations.modelId,
+        prompt: schema.generations.prompt,
+        sourceUrl: schema.generations.sourceUrl,
+        error: schema.generations.error,
+        createdAt: schema.generations.createdAt,
+        pointsEst: schema.generations.pointsEst,
+        pointsActual: schema.generations.pointsActual,
+        pointsRefunded: schema.generations.pointsRefunded,
+      })
+      .from(schema.generations)
+      .where(eq(schema.generations.sceneId, scene.id))
+      .orderBy(desc(schema.generations.createdAt))
+      .limit(SCENE_VERSION_LIMIT);
+
+    // 這些生成落地成哪個素材：一次撈完在記憶體對映。
+    // 不用「每列一個 meta->>'generationId' 相關子查詢」——那是 N 次無索引全表掃（meta 沒有 GIN 索引），
+    // 一格改過幾十次就會把分鏡頁拖垮。
+    const genIds = gens.map((g) => g.id);
+    const assetRows = genIds.length
+      ? await db
+          .select({
+            id: schema.assets.id,
+            url: schema.assets.url,
+            kind: schema.assets.kind,
+            createdAt: schema.assets.createdAt,
+            generationId: sql<string | null>`${schema.assets.meta} ->> 'generationId'`,
+          })
+          .from(schema.assets)
+          .where(and(
+            eq(schema.assets.projectId, scene.projectId),
+            isNull(schema.assets.deletedAt),
+            inArray(sql`(${schema.assets.meta} ->> 'generationId')`, genIds),
+          ))
+          .orderBy(asc(schema.assets.createdAt))
+      : [];
+    const assetByGen = new Map<string, (typeof assetRows)[number]>();
+    for (const a of assetRows) if (a.generationId) assetByGen.set(a.generationId, a); // 同筆生成多列時取最新
+
+    const rows: SceneVersionGenerationRow[] = gens.map((g) => {
+      const asset = assetByGen.get(g.id);
+      return {
+        generationId: g.id,
+        status: g.status,
+        sceneRole: g.sceneRole ?? null,
+        modelId: g.modelId,
+        prompt: g.prompt,
+        sourceUrl: g.sourceUrl,
+        error: g.error,
+        createdAt: g.createdAt.toISOString(),
+        pointsEst: g.pointsEst,
+        pointsActual: g.pointsActual,
+        pointsRefunded: g.pointsRefunded,
+        assetId: asset?.id ?? null,
+        assetUrl: asset?.url ?? null,
+        assetKind: asset?.kind ?? null,
+      };
+    });
+
+    // 現在被引用、但不是本格生成產出的素材（例：素材庫直接指派、或舊資料沒回綁的「＋加入分鏡」）。
+    // 沒有這一段，該素材不會出現在版本清單裡，切走之後就再也切不回來。
+    const pointerIds = [scene.assetId, scene.narrationAssetId].filter((id): id is string => !!id);
+    const pointerRows = pointerIds.length
+      ? await db
+          .select({
+            id: schema.assets.id,
+            url: schema.assets.url,
+            kind: schema.assets.kind,
+            title: schema.assets.title,
+            createdAt: schema.assets.createdAt,
+          })
+          .from(schema.assets)
+          .where(and(inArray(schema.assets.id, pointerIds), isNull(schema.assets.deletedAt)))
+      : [];
+    const externals: SceneExternalAsset[] = pointerRows.map((a) => ({
+      assetId: a.id,
+      assetUrl: a.url,
+      assetKind: a.kind,
+      title: a.title,
+      createdAt: a.createdAt.toISOString(),
+    }));
+
+    const versions = buildSceneVersions(rows, { assetId: scene.assetId, narrationAssetId: scene.narrationAssetId }, externals);
+    // 指標欄結構上保證同一 role 只有一個現用；投影出兩個＝查詢寫錯，當場擋下不要讓 UI 顯示兩個「現用」
+    const duplicated = findDuplicateCurrent(versions);
+    if (duplicated.length > 0) {
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `版本投影異常：${duplicated.join("/")} 出現多個現用版本` });
+    }
+    return {
+      sceneId: scene.id,
+      projectId: scene.projectId,
+      title: scene.title,
+      prompt: scene.prompt,
+      voiceover: scene.voiceover,
+      assetId: scene.assetId,
+      narrationAssetId: scene.narrationAssetId,
+      versions,
+      summary: summarizeSceneVersions(versions),
+      /** 已達回傳上限：清單只到最近 N 版，提醒前端別把「共 N 版」講成全部 */
+      truncated: gens.length >= SCENE_VERSION_LIMIT,
+    };
+  }),
+
+  /**
+   * 版本切換（單格工作室）：直接把這一格的現用指標指到某個素材。
+   * 與 setVisualFromGeneration 的差別是它以「素材」為鍵——外部帶入、沒有生成紀錄的版本也切得回去。
+   */
+  setVisualFromAsset: authedProcedure
+    .input(z.object({ sceneId: z.string().uuid(), assetId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
+      await getProjectChecked(ctx, scene.projectId, true);
+      const [asset] = await db
+        .select()
+        .from(schema.assets)
+        .where(and(eq(schema.assets.id, input.assetId), isNull(schema.assets.deletedAt)));
+      // 同專案才准指派（組隔離已由 getProjectChecked 保證；這裡再擋跨專案誤指）
+      if (!asset || asset.projectId !== scene.projectId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "找不到這個素材，或它不屬於本專案（可能已在回收桶）" });
+      }
+      // 音訊＝旁白槽；圖/影＝主畫面槽（與 advanceGeneration 回填、setVisualFromGeneration 同口徑）
+      const slot = sceneSlotForAssetKind(asset.kind);
+      if (!slot) throw new TRPCError({ code: "BAD_REQUEST", message: "只有圖片／影片／音訊可以設為分鏡素材" });
+      const patch = { [slot]: asset.id };
+      const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, scene.id)).returning();
+      return updated;
     }),
 
   /**
@@ -304,23 +545,11 @@ export const scenesRouter = router({
       // kind 守衛（與 generateVoiceover 對稱）：就地生成回填主畫面 assetId，只接受圖像/影片模型。
       // text 模型扣點後不會入素材庫；audio 模型會把音訊寫進 visual 槽造成破圖。
       const model = getModel(input.modelId);
-      if (!model || (model.kind !== "image" && model.kind !== "video")) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "分鏡就地生成需要用圖像或影片模型" });
-      }
+      const modelRejection = regenRejection(model);
+      if (modelRejection) throw new TRPCError({ code: "BAD_REQUEST", message: modelRejection });
       const prompt = input.prompt ?? scene.prompt ?? "";
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
-      // 伺服器端防抖：這一格已有進行中的「畫面」生成就擋下——本鈕直接扣點、無二次確認，快速雙擊會重複送出、
-      // 重複扣點。以「進行中(queued/running)＋同格＋visual 角色」查有無在跑（catch 常見雙擊；非強一致鎖）。
-      const [pendingVisual] = await db
-        .select({ id: schema.generations.id })
-        .from(schema.generations)
-        .where(and(
-          eq(schema.generations.sceneId, scene.id),
-          sql`(${schema.generations.sceneRole} is null or ${schema.generations.sceneRole} = 'visual')`,
-          inArray(schema.generations.status, ["queued", "running"]),
-        ))
-        .limit(1);
-      if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成中，請稍候再生成" });
+      await assertNoPendingVisual(scene.id);
       // TD-02：分鏡就地生成走 Command（政策＋狀態機＋ACL＋扣點）
       const gen = await executeGenerationCommand({
         auth: ctx.auth,
@@ -333,6 +562,76 @@ export const scenesRouter = router({
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
         reasonPrefix: "分鏡生成",
+      });
+      return { generationId: gen.id };
+    }),
+
+  /**
+   * 單格修正（單格工作室的核心）：拿這一格「現在這張」當底圖，只改指定的地方，
+   * 完成後照樣回填本格的 assetId——把單一畫面拉出來反覆修，不牽動其他分鏡。
+   *
+   * 與 generateInto 的差別：
+   * - generateInto＝文生圖，從頭重畫（構圖會整個換掉）
+   * - refine＝圖生圖／圖生影片，以底圖為基準改（保留構圖，換天色／去背／放大／讓它動起來）
+   *
+   * 底圖預設就是這一格的現用素材；也可指定版本清單裡任何一版的素材（sourceAssetId），
+   * 於是「回到第 2 版再從那裡改一次」是可行的。
+   */
+  refine: authedProcedure
+    .input(z.object({
+      sceneId: z.string().uuid(),
+      modelId: z.string(),
+      /** 修改指示（例：「把天空換成黃昏，其餘不變」）；與 generation.submit 同上限 */
+      prompt: z.string().max(MAX_PROMPT_CHARS),
+      /** 底圖素材；不帶＝用這一格目前的畫面 */
+      sourceAssetId: z.string().uuid().optional(),
+      /** 冪等鍵：timeout 重送同鍵回原列，不重複扣點 */
+      clientRequestId: z.string().uuid().optional(),
+      characterIds: z.array(z.string().uuid()).max(6).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(4).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
+      const project = await getProjectChecked(ctx, scene.projectId, true);
+      assertProjectNotArchived(project); // 封存專案不接受付費生成
+      const model = getModel(input.modelId);
+      // 底圖預設＝這一格現用畫面；查詢已濾掉回收桶（不可拿已刪素材當底圖）
+      const sourceAssetId = input.sourceAssetId ?? scene.assetId;
+      const [source] = sourceAssetId
+        ? await db
+            .select()
+            .from(schema.assets)
+            .where(and(eq(schema.assets.id, sourceAssetId), isNull(schema.assets.deletedAt)))
+        : [];
+      // 同專案才准當底圖（generationCore 的 assertGenerationEntityIds 也會擋；這裡先擋是為了給看得懂的訊息）
+      const rejection = refineRejection({
+        model,
+        prompt: input.prompt,
+        sourceAssetId,
+        source,
+        sceneProjectId: scene.projectId,
+      });
+      if (rejection) throw new TRPCError({ code: "BAD_REQUEST", message: rejection });
+      await assertNoPendingVisual(scene.id);
+      // 走與其他生成同一條 Command（政策＋狀態機＋ACL＋估點＋扣點＋失敗退點）；
+      // sourceAssetId 由 generationCore 換成短效簽名網址，fal 才抓得到、外人不可偽造。
+      const gen = await executeGenerationCommand({
+        auth: ctx.auth,
+        source: "web",
+        id: input.clientRequestId,
+        projectId: scene.projectId,
+        modelId: input.modelId,
+        prompt: input.prompt,
+        sourceAssetId: source.id,
+        sceneId: scene.id,
+        sceneRole: "visual",
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
+        reasonPrefix: "分鏡修圖",
       });
       return { generationId: gen.id };
     }),
@@ -358,6 +657,7 @@ export const scenesRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "配音需要用語音（TTS）模型" });
       }
       // 伺服器端防抖：同格已有進行中的「配音」生成就擋下，避免快速雙擊重複送出、重複扣點（本鈕直接扣點無二次確認）
+      // 旁白獨立於畫面，故不共用 assertNoPendingVisual——配音生成中不該擋住畫面重生，反之亦然
       const [pendingVoice] = await db
         .select({ id: schema.generations.id })
         .from(schema.generations)

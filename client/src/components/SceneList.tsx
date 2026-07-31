@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
 import { getModel, MODELS, tierLabel, estimatePoints } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
+import { SceneStudio } from "./SceneStudio";
 import { ExportJobButton } from "./ExportJobButton";
 import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip } from "./interactions";
@@ -197,6 +198,7 @@ function SceneRow({
   meLoading,
   genModelId,
   onUsePrompt,
+  onOpenStudio,
   charIds,
   sceneIds,
   invalidate,
@@ -217,6 +219,9 @@ function SceneRow({
   /** 逐格生成用的文生圖模型（分鏡卡工具列可換；預設 SDXL Lightning） */
   genModelId: string;
   onUsePrompt?: (prompt: string) => void;
+  /** 開這一格的單格工作室。工作室由 SceneList 統一渲染，不掛在列內——`.gen-row` 帶
+   *  content-visibility:auto（paint containment），會成為 fixed 定位的包含區塊，把全螢幕 modal 裁掉。 */
+  onOpenStudio: () => void;
   /** 生成台勾選的角色/場景卡：就地生成也注入同一套錨點——逐鏡出圖與生成台畫風一致 */
   charIds?: string[];
   sceneIds?: string[];
@@ -481,6 +486,16 @@ function SceneRow({
               <Icon name="Download" /> 下載
             </a>
           )}
+          {/* 單格工作室：Adobe 式「把單張拉出來改」——以現用畫面當底圖修、換模型重畫、切回任何一版。
+              檢視者也開得起來（唯讀回看版本與成本），寫入控制由工作室內部依 canEdit 隱藏。 */}
+          <Button
+            size="sm"
+            variant="tonal"
+            title="把這一格拉出來單獨修：以現在這張為底圖改、換模型重畫、回看並切換版本"
+            onClick={onOpenStudio}
+          >
+            <Icon name="SlidersHorizontal" size={13} /> 單格工作室
+          </Button>
         </div>
         {s.prompt && (
           <Meta as="div" style={{ marginTop: 3 }}>模型：{genModel?.label ?? genModelId}（可在上方「逐格生成模型」換）</Meta>
@@ -601,6 +616,9 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
   ];
 
   const [showPreview, setShowPreview] = useState(false);
+  // 單格工作室（全螢幕）：哪一格被拉出來修。與粗剪預覽一樣掛在分鏡卡層級，不掛在分鏡列內
+  // （`.gen-row` 的 content-visibility 會成為 fixed 的包含區塊）。檢視者也能開，內部依 canEdit 唯讀。
+  const [studioScene, setStudioScene] = useState<{ id: string; number: number } | null>(null);
   // 目標剪輯軟體（決定「下載時間軸/字幕」拿哪些檔）；預設剪映——組內主力剪輯軟體；記住上次選擇
   const [editTarget, setEditTargetState] = useState<EditTargetKey>(() => {
     try {
@@ -733,6 +751,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
                   s={s}
                   i={i}
                   total={list.length}
+                  onOpenStudio={() => setStudioScene({ id: s.id, number: i + 1 })}
                   rowClassName={sceneFilter === "all" && visibleIndex >= 4 ? "is-mobile-overflow" : undefined}
                   isLeader={isLeader}
                   canEdit={canEdit}
@@ -829,6 +848,19 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
               {/* 傳 onClose：StoryboardPlayer 是全螢幕 modal，沒接 onClose 的話 ✕鈕與 Esc 都失效→使用者被困需重載 */}
               <StoryboardPlayer scenes={list} onClose={() => setShowPreview(false)} />
             </div>
+          )}
+          {studioScene && (
+            <SceneStudio
+              key={studioScene.id}
+              sceneId={studioScene.id}
+              projectId={projectId}
+              sceneNumber={studioScene.number}
+              canEdit={canEdit}
+              charIds={charIds}
+              sceneIds={sceneIds}
+              onClose={() => setStudioScene(null)}
+              onChanged={invalidate}
+            />
           )}
         </>
       )}

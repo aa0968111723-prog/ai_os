@@ -49,9 +49,9 @@
   width: 100%;
   height: auto;
   max-height: none;
-  /* 銳化邊緣，減少高 DPI 上的柔邊 */
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: high-quality;
+  /* Logo 一律是縮小顯示，交給瀏覽器的高品質降採樣。
+     -webkit-optimize-contrast 會關掉平滑濾波、讓縮圖邊緣出現鋸齒，反而更糊。 */
+  image-rendering: auto;
   /* 輕微陰影，避免過度柔化緞帶邊緣 */
   filter: drop-shadow(0 6px 14px rgba(70, 56, 44, 0.08));
 }
