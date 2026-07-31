@@ -10,7 +10,16 @@ import { Icon } from "../components/Icon";
  * 標題列固定顯示目前連結的 Google 帳戶（帳號透明）。
  */
 
-type PickedFile = { id: string; name: string; mimeType: string; size: number | null; modifiedTime: string | null };
+type PickedFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number | null;
+  modifiedTime: string | null;
+  isFolder: boolean;
+  owner: string | null;
+  ownedByMe: boolean;
+};
 
 const MIME_LABEL: Array<[RegExp, string]> = [
   [/vnd\.google-apps\.document/, "Google 文件"],
@@ -44,7 +53,7 @@ function formatSize(size: number | null): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLabel }: {
+export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLabel, onSaveToKnowledge }: {
   /** 匯入模式：目的資料庫（有 onPick 時可省略） */
   tableId?: string;
   /** 至少一檔匯入成功後呼叫（呼叫端刷新文件清單） */
@@ -57,17 +66,24 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
   onPick?: (files: Array<{ id: string; name: string }>) => void;
   /** 選取模式主按鈕文案（預設「納入本次規劃」） */
   pickLabel?: string;
+  /**
+   * 選取模式的「轉存進知識庫」（PR-E2 預設建議）：提供時多一顆建議按鈕，
+   * 把勾選檔案交給呼叫端轉存（可重複使用、之後規劃自動注入）。
+   */
+  onSaveToKnowledge?: (files: Array<{ id: string; name: string }>) => void;
 }) {
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [pageToken, setPageToken] = useState<string | undefined>(undefined);
+  // PR-E3「可選資料夾」：點資料夾列縮小範圍；folderName 供麵包屑顯示
+  const [folder, setFolder] = useState<{ id: string; name: string } | null>(null);
   const [extraFiles, setExtraFiles] = useState<PickedFile[]>([]); // 「載入更多」累積的後續頁
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
   const [results, setResults] = useState<Array<{ name: string; ok: boolean; message?: string }>>([]);
 
   const list = trpc.integrations.listDriveFiles.useQuery(
-    { query: submittedQuery || undefined, pageToken },
+    { query: submittedQuery || undefined, pageToken, folderId: folder?.id },
     // placeholderData：換頁／搜尋時保留上一批結果，畫面不閃空清單（比照 ModelsPage）
     { staleTime: 30_000, placeholderData: (prev) => prev },
   );
@@ -78,11 +94,18 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
   const firstPage: PickedFile[] = data?.ok ? data.files : [];
   const files = [...extraFiles, ...firstPage.filter((f) => !extraFiles.some((e) => e.id === f.id))];
 
-  const runSearch = () => {
-    setSubmittedQuery(query.trim());
+  const resetPage = () => {
     setPageToken(undefined);
     setExtraFiles([]);
     setSelected(new Set());
+  };
+  const runSearch = () => {
+    setSubmittedQuery(query.trim());
+    resetPage();
+  };
+  const enterFolder = (f: { id: string; name: string }) => {
+    setFolder(f);
+    resetPage();
   };
 
   const loadMore = () => {
@@ -99,6 +122,8 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
       return next;
     });
   };
+
+  const pickedFiles = () => files.filter((f) => selected.has(f.id)).map((f) => ({ id: f.id, name: f.name }));
 
   // 序列化逐檔匯入（不並發打爆後端；與批次上傳同哲學），部分失敗不中止、逐檔回報
   const doImport = async () => {
@@ -177,9 +202,37 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
             <p className="hint" style={{ marginTop: 8 }}>找不到符合的檔案——換個關鍵字，或確認檔案在這個 Google 帳戶的雲端裡。</p>
           )}
 
+          {folder && (
+            <p className="meta" style={{ margin: "6px 0 0" }}>
+              📁 目前資料夾：{folder.name}
+              <button className="btn-sm" style={{ marginLeft: 8 }} onClick={() => { setFolder(null); resetPage(); }}>
+                回全部雲端
+              </button>
+            </p>
+          )}
           {files.length > 0 && (
             <div style={{ maxHeight: 280, overflowY: "auto", marginTop: 8 }}>
               {files.map((f) => {
+                // 資料夾列：點入縮小範圍（PR-E3 可選資料夾），不可勾選匯入
+                if (f.isFolder) {
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => enterFolder({ id: f.id, name: f.name })}
+                      style={{
+                        display: "flex", gap: 8, alignItems: "center", padding: "4px 0", width: "100%",
+                        background: "none", border: 0, borderBottom: "1px solid var(--border-soft, #eee)",
+                        cursor: "pointer", textAlign: "left",
+                      }}
+                      title={`進入資料夾「${f.name}」縮小搜尋範圍`}
+                    >
+                      <span aria-hidden>📁</span>
+                      <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{f.name}</span>
+                      <span className="meta">資料夾——點入</span>
+                    </button>
+                  );
+                }
                 const supported = importable(f.mimeType);
                 return (
                   <label
@@ -200,6 +253,11 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
                     />
                     <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{f.name}</span>
                     <span className="badge">{mimeLabel(f.mimeType)}</span>
+                    {!f.ownedByMe && (
+                      <span className="badge" title="這不是你自己的檔案——由他人共用給此帳戶">
+                        共用{f.owner ? `：${f.owner.slice(0, 12)}` : ""}
+                      </span>
+                    )}
                     <span className="meta">{formatSize(f.size)}{f.modifiedTime ? `・${new Date(f.modifiedTime).toLocaleDateString()}` : ""}</span>
                   </label>
                 );
@@ -208,13 +266,27 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
           )}
 
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+            {onPick && onSaveToKnowledge && (
+              <button
+                className="btn-sm primary"
+                disabled={selected.size === 0 || importing}
+                title="轉存後可重複使用——之後的規劃會自動注入（建議）"
+                onClick={() => {
+                  onSaveToKnowledge(pickedFiles());
+                  setSelected(new Set());
+                  onClose();
+                }}
+              >
+                轉存進知識庫（{selected.size}）
+              </button>
+            )}
             <button
-              className="btn-sm primary"
+              className={`btn-sm${onPick && onSaveToKnowledge ? "" : " primary"}`}
               disabled={selected.size === 0 || importing}
               onClick={() => { void doImport(); }}
             >
               {onPick
-                ? `${pickLabel ?? "納入本次規劃"}（${selected.size}）`
+                ? `${pickLabel ?? "僅本次規劃"}（${selected.size}）`
                 : importing ? `匯入中（${results.length}/${selected.size}）…` : `匯入選取（${selected.size}）`}
             </button>
             {data?.ok && data.nextPageToken && (
@@ -222,7 +294,9 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
             )}
             <span className="meta">
               {onPick
-                ? "只有勾選的檔案會進本次規劃（每檔最多 8,000 字、不會存進站內）；未勾選的搜尋結果 AI 看不到。"
+                ? onSaveToKnowledge
+                  ? "轉存＝進知識庫可重複使用（建議）；僅本次＝這次規劃看完就丟（每檔最多 8,000 字、不落庫）。未勾選的搜尋結果 AI 看不到。"
+                  : "只有勾選的檔案會進本次規劃（每檔最多 8,000 字、不會存進站內）；未勾選的搜尋結果 AI 看不到。"
                 : "只會匯入你勾選的檔案；內容進站後才會被 AI 讀到。"}
             </span>
           </div>

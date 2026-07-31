@@ -16,7 +16,7 @@ vi.mock("../discuss", () => ({
 // vi.mock 會被 hoist 到檔案最頂——工廠引用的值必須用 vi.hoisted 先建立
 const { queryOf, mutationOf } = vi.hoisted(() => ({
   queryOf: (data: unknown) => ({ data, error: null, isLoading: false }),
-  mutationOf: () => ({ mutate: () => {}, isPending: false, error: null }),
+  mutationOf: () => ({ mutate: () => {}, mutateAsync: async () => ({}), isPending: false, error: null }),
 }));
 
 const RUN = {
@@ -76,6 +76,7 @@ vi.mock("../api", () => {
       scenes: { listByProject: { invalidate: vi.fn() } },
       notes: { list: { invalidate: vi.fn() } },
       schedule: { list: { invalidate: vi.fn() } },
+      knowledge: { list: { invalidate: vi.fn() } },
     }),
     auth: { me: { useQuery: () => queryOf({ user: { id: "user-1" } }) } },
     agents: {
@@ -92,6 +93,7 @@ vi.mock("../api", () => {
       complete: { useMutation: mutationOf },
       decideApproval: { useMutation: mutationOf },
     },
+    knowledge: { importDriveFile: { useMutation: mutationOf } },
   };
   return { trpc: api };
 });

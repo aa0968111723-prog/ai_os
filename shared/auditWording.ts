@@ -148,6 +148,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "databases.removeRow": "刪除資料列",
   "databases.importUrl": "從網址匯入資料庫文件",
   "databases.importDriveFile": "從 Google 雲端選檔匯入資料庫文件",
+  "knowledge.importDriveFile": "從 Google 雲端選檔轉存進知識庫",
   "databases.importData": "匯入資料到資料庫（CSV／TSV／JSON）",
   "databases.importCsv": "匯入 CSV 到資料庫", // 歷史動作名（併入 importData 前的日誌仍以此顯示）
   "databases.uploadFile": "上傳資料庫文件",
@@ -199,6 +200,20 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "mcp.get_agent_run": "外部 AI：查代理進度",
   "mcp.list_schedule": "外部 AI：列出行程",
   "mcp.add_schedule_item": "外部 AI：新增行程",
+  // D 波次（#216 總規）：MCP 全面化新工具
+  "mcp.update_schedule_item": "外部 AI：更新行程",
+  "mcp.add_note": "外部 AI：新增筆記",
+  "mcp.append_note": "外部 AI：追加筆記",
+  "mcp.list_tasks": "外部 AI：列出人類任務",
+  "mcp.create_task": "外部 AI：建立人類任務",
+  "mcp.complete_task": "外部 AI：完成任務／裁決核准",
+  "mcp.list_knowledge": "外部 AI：列出知識庫",
+  "mcp.get_knowledge": "外部 AI：讀取知識",
+  "mcp.list_scenes": "外部 AI：列出分鏡",
+  "mcp.get_integrations_status": "外部 AI：查外部連接狀態",
+  "mcp.import_drive_file": "外部 AI：匯入雲端檔案",
+  // 選檔搜尋稽核（query 端點自行補記——記「誰搜了什麼」，不記檔案內容）
+  "integrations.listDriveFiles": "瀏覽 Google 雲端選檔清單",
 };
 
 /** action → 人話；字典沒有的（新端點）retain 原代碼，寧可看得懂大多數也不擋新功能上線 */

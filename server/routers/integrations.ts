@@ -18,6 +18,7 @@ import {
   RateLimitConfigurationError,
   RateLimitUnavailableError,
 } from "../services/rateLimit";
+import { recordAudit } from "../services/audit";
 
 /**
  * 個人整合連接自助管理：Google 雲端（OAuth 進入點與 callback 是瀏覽器重導流程，
@@ -92,6 +93,7 @@ export const integrationsRouter = router({
     .input(z.object({
       query: z.string().trim().max(200).optional(),
       pageToken: z.string().max(500).optional(),
+      folderId: z.string().trim().max(200).optional(),
     }))
     .query(async ({ ctx, input }) => {
       try {
@@ -103,7 +105,11 @@ export const integrationsRouter = router({
         }
         throw err;
       }
-      return listDriveFiles(ctx.auth.user.id, { query: input.query, pageToken: input.pageToken });
+      const result = await listDriveFiles(ctx.auth.user.id, { query: input.query, pageToken: input.pageToken, folderId: input.folderId });
+      // PR-E3 稽核：query 不經 mutation 審計中介層——這裡自行記「誰搜了什麼」
+      //（只記關鍵字／資料夾 id，勿記檔案內容；勾選了哪些 fileId 由 plan/import mutation 審計涵蓋）
+      recordAudit(ctx.auth, "integrations.listDriveFiles", { query: input.query ?? "", folderId: input.folderId ?? "" }, { ok: result.ok });
+      return result;
     }),
 
   /**
