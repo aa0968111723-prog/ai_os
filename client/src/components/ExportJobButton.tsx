@@ -3,6 +3,9 @@ import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { Button, Meta } from "./ui";
 
+/** 打包 job 的 localStorage key 前綴（逐專案）——重整／關頁回來要接回同一個 job。 */
+const EXPORT_JOB_LS_PREFIX = "aios.exportJob.";
+
 function fmtMb(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))}KB`;
   // 多支影片的交付包輕易破 1GB——顯示 2.0GB 而非 2048.0MB（與資料庫頁 formatBytes 同口徑）
@@ -26,7 +29,26 @@ export function ExportJobButton({
   idleLabel?: string;
   triggerClassName?: string;
 }) {
-  const [jobId, setJobId] = useState<string | null>(null);
+  /**
+   * jobId 存 localStorage（QA 2026-08-01 實測）：打包是分鐘級長任務，使用者一定會重整或關頁再回來。
+   * 只放 useState 時，重整後畫面退回「打包下載交付包」，伺服器早就打好的包完全找不到，只能重打一次。
+   */
+  const [jobId, setJobIdState] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(EXPORT_JOB_LS_PREFIX + projectId);
+    } catch {
+      return null;
+    }
+  });
+  const setJobId = (next: string | null) => {
+    setJobIdState(next);
+    try {
+      if (next) localStorage.setItem(EXPORT_JOB_LS_PREFIX + projectId, next);
+      else localStorage.removeItem(EXPORT_JOB_LS_PREFIX + projectId);
+    } catch {
+      /* 存不了只影響「重整後能不能接回進度」，不影響本次打包 */
+    }
+  };
   const create = trpc.exportJobs.create.useMutation({ onSuccess: (d) => setJobId(d.job.id) });
   const job = trpc.exportJobs.get.useQuery(
     { id: jobId ?? "" },
@@ -37,6 +59,13 @@ export function ExportJobButton({
         const s = q.state.data?.status;
         return s === "queued" || s === "running" ? 2000 : false;
       },
+      /**
+       * 背景分頁也要繼續輪詢：實測切到別的分頁等打包，回來時進度條還停在「排隊中…」，
+       * 但伺服器其實兩秒就打完了——React Query 預設在分頁失焦時停掉 interval。
+       */
+      refetchIntervalInBackground: true,
+      // 舊 job 可能已被清掉（404）——別無限重試，讓 UI 直接回到可重新打包的狀態
+      retry: false,
     },
   );
   const cancel = trpc.exportJobs.cancel.useMutation({ onSuccess: () => void job.refetch() });
@@ -71,7 +100,7 @@ export function ExportJobButton({
   if (status === "failed" || status === "cancelled") {
     return (
       <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <button type="button" className={triggerClassName} disabled={create.isPending} onClick={() => create.mutate({ projectId, assetIds })}>
+        <button type="button" className={triggerClassName} disabled={create.isPending} onClick={() => { setJobId(null); create.mutate({ projectId, assetIds }); }}>
           重新打包
         </button>
         {status === "failed" ? (
