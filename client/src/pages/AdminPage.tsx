@@ -51,6 +51,19 @@ function toFullUrl(url: string): string {
   return /^https?:\/\//.test(url) ? url : `${location.origin}${url}`;
 }
 
+/** 系統分享鈕（手機）：navigator.share 直接開分享面板（LINE 轉傳邀請連結最短路徑）；不支援時不顯示 */
+function ShareLinkButton({ url, title }: { url: string; title: string }) {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") return null;
+  return (
+    <button
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 12px", fontSize: "var(--fs-12)", flex: "none" }}
+      onClick={() => { navigator.share({ title, url }).catch(() => { /* 使用者取消分享面板不是錯誤 */ }); }}
+    >
+      <Icon name="Share2" size={12} />分享
+    </button>
+  );
+}
+
 /** 複製鈕：成功顯示「已複製 ✓」約 2 秒（邀請連結、臨時密碼共用） */
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -2286,6 +2299,7 @@ export function AdminPage() {
                   onFocus={(e) => e.target.select()}
                 />
                 <CopyButton text={toFullUrl(invite.data.inviteUrl)} />
+                <ShareLinkButton url={toFullUrl(invite.data.inviteUrl)} title="Aios 邀請連結" />
               </div>
             </div>
           )}

@@ -12,7 +12,7 @@ import {
   revealAssetInFolder,
   suggestedFileName,
 } from "../platform/desktopBridge";
-import { Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
+import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -87,6 +87,7 @@ export function AssetLibrary({
   });
   const setLock = trpc.projects.setAssetLock.useMutation({ onSuccess: () => utils.projects.assets.invalidate({ projectId }) });
   const fileInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadStep, setUploadStep] = useState("");
   const [uploadError, setUploadError] = useState("");
@@ -307,6 +308,18 @@ export function AssetLibrary({
         accept="image/*,video/*,audio/*,.zip,.pdf,.txt,.md"
         onChange={(e) => doUpload(e.target.files)}
       />
+      {/* 手機一鍵開相機（capture 直接喚起相機 App；桌機退化為一般選檔） */}
+      <input
+        ref={cameraInput}
+        type="file"
+        hidden
+        accept="image/*"
+        capture="environment"
+        onChange={(e) => doUpload(e.target.files)}
+      />
+      <Button size="sm" disabled={uploading} style={{ marginTop: 6 }} onClick={() => cameraInput.current?.click()}>
+        <Icon name="Camera" size={13} /> 拍照上傳
+      </Button>
       {uploadError && <p className="error">{uploadError}</p>}
 
       {assets.isLoading ? (

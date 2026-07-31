@@ -76,7 +76,9 @@ export type IconName =
   | "Monitor"
   | "Copy"
   | "Waypoints"
-  | "HardDrive";
+  | "HardDrive"
+  | "Camera"
+  | "Share2";
 
 /**
  * 每個名稱對應一組 Lucide 24x24 stroke 幾何（忠實重現原始路徑）。
@@ -467,6 +469,21 @@ const PATHS: Record<IconName, ReactNode> = {
       <circle cx="12" cy="4" r="2" />
       <circle cx="20" cy="12" r="2" />
       <circle cx="4" cy="12" r="2" />
+    </>
+  ),
+  Camera: (
+    <>
+      <path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z" />
+      <circle cx="12" cy="13" r="3" />
+    </>
+  ),
+  Share2: (
+    <>
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <line x1="8.59" x2="15.42" y1="13.51" y2="17.49" />
+      <line x1="15.41" x2="8.59" y1="6.51" y2="10.49" />
     </>
   ),
 };
