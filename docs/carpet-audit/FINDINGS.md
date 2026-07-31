@@ -223,3 +223,27 @@ Detail: `exit=1`
 
 ---
 
+## 2026-07-31T06:11:38.768Z · `folder.client-components` ✅ pass
+
+**區塊：client/components 目錄** · kind=`folder-scan` · cycle=0 · cursor→24
+
+Detail: `65 entries under client/src/components/`
+
+---
+
+## 2026-07-31T06:12:40.627Z · `folder.client-pages` ✅ pass
+
+**區塊：client/pages 目錄** · kind=`folder-scan` · cycle=0 · cursor→25
+
+Detail: `21 entries under client/src/pages/`
+
+---
+
+## 2026-07-31T06:13:41.693Z · `folder.server-services` ✅ pass
+
+**區塊：server/services 目錄** · kind=`folder-scan` · cycle=0 · cursor→26
+
+Detail: `149 entries under server/services/`
+
+---
+
