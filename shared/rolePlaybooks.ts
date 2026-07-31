@@ -95,9 +95,28 @@ export const ROLE_PLAYBOOKS: readonly RolePlaybook[] = [
       "VLM 自動評分預設不啟用。過片與上架決策不得自動化為無權限步驟。",
     suggestedKinds: ["submit_approval", "request_approval", "wait_for_human", "create_task"],
   },
+  // #133 PR-3：創作代理短版——快速可交付影音／圖文，不是完整專案排程長計畫
+  {
+    id: "playbook.creation.short.v1",
+    roleId: "role.storyboard", // 複用分鏡職能席位；短版靠 playbook id 與 plannerHint 區隔
+    version: "1",
+    title: "創作代理（短版）：腳本→分鏡→定裝生成→可選配音／送審",
+    goalTemplate: "依專案世界觀與現有腳本／分鏡，產出可審的一版影音或圖文",
+    plannerHint:
+      "短版創作：優先 split_script? → create_scene? → generate（必帶定裝／來源）→ voiceover? → submit_approval?。" +
+      "除非使用者明確要求排程／物資／多人分工，否則不要預設 create_schedule 或大量 create_task。" +
+      "缺日期／缺腳本 → missingInformation，禁止臆測。" +
+      "summary.rationale 用 1–3 句說明為何這條短路徑足夠。",
+    suggestedKinds: ["split_script", "create_scene", "generate", "voiceover", "submit_approval"],
+  },
 ] as const;
 
-const PLAYBOOK_BY_ROLE = new Map(ROLE_PLAYBOOKS.map((p) => [p.roleId, p]));
+// roleId 對映保留「第一個」宣告的 playbook（storyboard 主 playbook 不被短版蓋掉）；
+// 短版等追加款以 playbook id 取用。
+const PLAYBOOK_BY_ROLE = new Map<string, RolePlaybook>();
+for (const pb of ROLE_PLAYBOOKS) {
+  if (!PLAYBOOK_BY_ROLE.has(pb.roleId)) PLAYBOOK_BY_ROLE.set(pb.roleId, pb);
+}
 const PLAYBOOK_BY_ID = new Map(ROLE_PLAYBOOKS.map((p) => [p.id, p]));
 
 export function listPlaybooks(): readonly RolePlaybook[] {

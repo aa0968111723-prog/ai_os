@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { GoogleDrivePicker } from "../components/GoogleDrivePicker";
+import { NotionPagePicker } from "../components/NotionPagePicker";
 import { ConfirmButton } from "../components/interactions";
 import {
   type DatabaseDetailTab,
@@ -1200,6 +1201,7 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
   const fileInput = useRef<HTMLInputElement>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [showDrivePicker, setShowDrivePicker] = useState(false);
+  const [showNotionPicker, setShowNotionPicker] = useState(false);
   const [editCatId, setEditCatId] = useState<string | null>(null);
   const [sendToId, setSendToId] = useState<string | null>(null);
   const [sentMsg, setSentMsg] = useState<string | null>(null);
@@ -1313,6 +1315,13 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
           >
             <Icon name="HardDrive" size={13} /> 從 Google 雲端選檔
           </button>
+          <button
+            className="btn-sm"
+            onClick={() => setShowNotionPicker((v) => !v)}
+            title="已設定 Notion token 可直接搜尋並多選匯入分享給整合的頁面，不必貼網址"
+          >
+            <Icon name="FileText" size={13} /> 從 Notion 選頁
+          </button>
         </div>
       )}
       {canWrite && showDrivePicker && (
@@ -1320,6 +1329,13 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
           tableId={table.id}
           onImported={invalidateFiles}
           onClose={() => setShowDrivePicker(false)}
+        />
+      )}
+      {canWrite && showNotionPicker && (
+        <NotionPagePicker
+          tableId={table.id}
+          onImported={invalidateFiles}
+          onClose={() => setShowNotionPicker(false)}
         />
       )}
       {(uploadError || importUrl.error || refresh.error || removeFile.error || classify.error) && (

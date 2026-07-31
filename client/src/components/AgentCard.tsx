@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
+import { flashAnchor } from "../discuss";
 import type { CompletePlanSummary } from "../../../shared/plan";
 import {
   AGENT_PLANNER_OPTIONS,
@@ -15,6 +16,8 @@ import {
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
 import { listAiProjectRoles } from "../../../shared/aiProjectRoles";
+import { getPlaybook } from "../../../shared/rolePlaybooks";
+import { GoogleDrivePicker } from "./GoogleDrivePicker";
 
 /**
  * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
@@ -42,6 +45,8 @@ interface AgentStep {
     | "wait_for_human"
     | "request_approval";
   note: string;
+  /** 決策軌跡（#133 PR-1）：為何需要此步——結構化說明，非模型內部推理 */
+  rationale?: string;
   status: "pending" | "running" | "waiting" | "done" | "failed" | "stopped";
   actorType?: "ai" | "human" | "system";
   dependsOn?: string[];
@@ -131,6 +136,43 @@ function notifyDesktop(title: string, body: string): void {
   }
 }
 
+/**
+ * 步驟產出 chips（#133 PR-2）：outputRefs → 可點深連結。
+ * 筆記／排程走 Planner 的 ?focus= 深連結；任務與生成成果在同頁（工作台／專案頁），
+ * 用 flashAnchor 捲動＋閃爍既有錨點（task-{id}／generation-{id}）；其他類型顯示標籤。
+ */
+function OutputRefChips({ refs }: { refs: Array<{ type: string; id: string; label?: string }> }) {
+  if (!refs.length) return null;
+  return (
+    <>
+      {refs.slice(0, 6).map((ref) => {
+        const label = ref.label?.slice(0, 24) || ref.type;
+        if (ref.type === "note") {
+          return <Link key={`${ref.type}-${ref.id}`} className="chip pick" href={`/planner?focus=note-${ref.id}`}>成果：{label}</Link>;
+        }
+        if (ref.type === "schedule") {
+          return <Link key={`${ref.type}-${ref.id}`} className="chip pick" href={`/planner?focus=schedule-${ref.id}`}>成果：{label}</Link>;
+        }
+        if (ref.type === "task") {
+          return (
+            <button key={`${ref.type}-${ref.id}`} type="button" className="chip pick" onClick={() => flashAnchor(`task-${ref.id}`)}>
+              成果：{label}
+            </button>
+          );
+        }
+        if (ref.type === "generation") {
+          return (
+            <button key={`${ref.type}-${ref.id}`} type="button" className="chip pick" title="捲動到生成成果" onClick={() => flashAnchor(`generation-${ref.id}`)}>
+              成果：{label}
+            </button>
+          );
+        }
+        return <span key={`${ref.type}-${ref.id}`} className="chip">成果：{label}</span>;
+      })}
+    </>
+  );
+}
+
 const GOAL_EXAMPLES = [
   "請分鏡助理：把知識庫腳本拆成分鏡，並為每一鏡生成畫面（帶定裝）",
   "請生成員：做三格開場分鏡——禪堂晨光、點香、遠景，各配一張圖",
@@ -138,6 +180,8 @@ const GOAL_EXAMPLES = [
 ];
 
 const AI_ROLE_ROSTER = listAiProjectRoles();
+/** #133 PR-3：創作短版入口——固定短骨架（拆分鏡→生成→可選配音／送審），與完整多步計畫區隔 */
+const SHORT_CREATION_PLAYBOOK = getPlaybook("playbook.creation.short.v1");
 
 export function AgentCard({
   projectId,
@@ -163,6 +207,9 @@ export function AgentCard({
   // 與 App 同 key 共用快取：核准/停止的授權是「發起人本人或組長以上」，按鈕顯示要跟伺服器規則對齊
   const me = trpc.auth.me.useQuery();
   const [goal, setGoal] = useState(() => (initialGoal ?? "").trim());
+  // PR-E3：搜尋雲端後「勾選」僅本次納入規劃的檔案（內容由後端規劃當下拉取，不落庫）
+  const [driveSources, setDriveSources] = useState<Array<{ id: string; name: string }>>([]);
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
   const [plannerMode, setPlannerMode] = useState<AgentPlannerMode>(readAgentPlannerMode);
   const [expandedRuns, setExpandedRuns] = useState<Record<string, boolean>>({});
   const goalInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -200,7 +247,7 @@ export function AgentCard({
     utils.agents.insights.invalidate({ projectId });
   };
   const plan = trpc.agents.plan.useMutation({
-    onSuccess: () => { setGoal(""); invalidateAll(); },
+    onSuccess: () => { setGoal(""); setDriveSources([]); invalidateAll(); },
   });
   const approve = trpc.agents.approve.useMutation({ onSuccess: invalidateAll });
   const discard = trpc.agents.discard.useMutation({ onSuccess: invalidateAll });
@@ -353,6 +400,20 @@ export function AgentCard({
             placeholder={`例：${GOAL_EXAMPLES[0]}`}
           />
           <div className="creation-skill-picker__row" style={{ marginTop: 6 }}>
+            {SHORT_CREATION_PLAYBOOK && (
+              <button
+                type="button"
+                className="chip pick"
+                style={{ fontWeight: 650 }}
+                title={`${SHORT_CREATION_PLAYBOOK.title}——快速出一版可審的影音／圖文；要排程、物資與多人分工請改用完整多步計畫（直接描述目標即可）`}
+                onClick={() => {
+                  setGoal(SHORT_CREATION_PLAYBOOK.goalTemplate);
+                  goalInputRef.current?.focus();
+                }}
+              >
+                <Icon name="Sparkles" size={12} /> 快速開拍（短版）
+              </button>
+            )}
             {AI_ROLE_ROSTER.slice(0, compactComposer ? 4 : 6).map((role) => (
               <button
                 key={role.id}
@@ -398,13 +459,55 @@ export function AgentCard({
               })}
             </div>
           </details>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+            <button
+              type="button"
+              className="btn-sm"
+              onClick={() => setShowDrivePicker((v) => !v)}
+              title="搜尋你的 Google 雲端並勾選檔案，只給這次規劃參考（不會存進站內；未勾選的 AI 看不到）"
+            >
+              <Icon name="HardDrive" size={12} /> 搜尋雲端（僅本次）
+            </button>
+            {driveSources.map((f) => (
+              <span key={f.id} className="chip" title="僅本次規劃使用，不會存進站內">
+                {f.name.slice(0, 20)}{f.name.length > 20 ? "…" : ""}
+                <button
+                  type="button"
+                  className="chip__x"
+                  aria-label={`移除 ${f.name}`}
+                  style={{ marginLeft: 4, border: 0, background: "none", cursor: "pointer", padding: 0 }}
+                  onClick={() => setDriveSources((prev) => prev.filter((x) => x.id !== f.id))}
+                >
+                  <Icon name="X" size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+          {showDrivePicker && (
+            <GoogleDrivePicker
+              onClose={() => setShowDrivePicker(false)}
+              pickLabel="納入本次規劃"
+              onPick={(files) => {
+                setDriveSources((prev) => {
+                  const merged = [...prev];
+                  for (const f of files) if (!merged.some((x) => x.id === f.id)) merged.push(f);
+                  return merged.slice(0, 5);
+                });
+              }}
+            />
+          )}
           <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <ConfirmButton
               triggerClassName="primary"
               disabled={goal.trim().length < 5 || plan.isPending}
-              message={`會讀專案資料排出步驟與估點。規劃不扣站內點數；你核准後才開始執行與扣點。`}
+              message={`會讀專案資料排出步驟與估點${driveSources.length ? `（含你勾選的 ${driveSources.length} 個雲端檔，僅本次使用）` : ""}。規劃不扣站內點數；你核准後才開始執行與扣點。`}
               confirmLabel="排步驟"
-              onConfirm={() => plan.mutate({ projectId, goal: goal.trim(), plannerMode })}
+              onConfirm={() => plan.mutate({
+                projectId,
+                goal: goal.trim(),
+                plannerMode,
+                driveFileIds: driveSources.length ? driveSources.map((f) => f.id) : undefined,
+              })}
             >
               {plan.isPending ? "排程中…" : "幫我排步驟"}
             </ConfirmButton>
@@ -565,6 +668,18 @@ export function AgentCard({
                 {plannerTelemetry.attemptCount > 1 && (
                   <span className="chip">模型呼叫 {plannerTelemetry.attemptCount} 次</span>
                 )}
+                {plannerTelemetry.knowledgeTruncated && (
+                  <span
+                    className="chip"
+                    style={{ color: "var(--warning-ink, var(--danger-ink))" }}
+                    title="知識與指定來源超過規劃注入預算，尾段未進入本次規劃——長文可拆段或縮小指定來源"
+                  >
+                    知識注入已截斷
+                    {plannerTelemetry.knowledgeIncludedChars != null && plannerTelemetry.knowledgeTotalChars != null
+                      ? `（${plannerTelemetry.knowledgeIncludedChars.toLocaleString()}/${plannerTelemetry.knowledgeTotalChars.toLocaleString()} 字）`
+                      : ""}
+                  </span>
+                )}
               </div>
             )}
             {planSummary && (
@@ -582,6 +697,20 @@ export function AgentCard({
                     <strong>目標</strong>
                     <p className="hint" style={{ margin: "3px 0 0" }}>{planSummary.goal}</p>
                   </section>
+                  {planSummary.rationale && (
+                    <section>
+                      <strong>為何這樣排</strong>
+                      <p className="hint" style={{ margin: "3px 0 0" }}>{planSummary.rationale}</p>
+                    </section>
+                  )}
+                  {(planSummary.contextUsed?.length ?? 0) > 0 && (
+                    <section>
+                      <strong>依據的上下文</strong>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                        {planSummary.contextUsed!.map((item, index) => <span key={index} className="chip">{item}</span>)}
+                      </div>
+                    </section>
+                  )}
                   {planSummary.successCriteria.length > 0 && (
                     <section>
                       <strong>成功條件</strong>
@@ -647,7 +776,7 @@ export function AgentCard({
             )}
             <div style={{ marginTop: 4 }}>
               {steps.map((s, i) => (
-                <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                   <span style={{ display: "inline-flex" }}>
                     <Icon name={STEP_ICON[s.status] ?? "Clock"} size={14} className={s.status === "running" ? "spin" : undefined} />
                   </span>
@@ -669,7 +798,22 @@ export function AgentCard({
                       開啟排程
                     </Link>
                   )}
-                  {s.taskId && <span className="chip">人類任務</span>}
+                  {s.taskId && (
+                    <button type="button" className="chip pick" title="捲動到對應的人類任務" onClick={() => flashAnchor(`task-${s.taskId}`)}>
+                      人類任務
+                    </button>
+                  )}
+                  {s.generationId && !(s.outputRefs ?? []).some((ref) => ref.type === "generation") && (
+                    <button type="button" className="chip pick" title="捲動到生成成果" onClick={() => flashAnchor(`generation-${s.generationId}`)}>
+                      生成成果
+                    </button>
+                  )}
+                  <OutputRefChips refs={s.outputRefs ?? []} />
+                  {s.rationale && (
+                    <span className="meta" style={{ flexBasis: "100%", paddingLeft: 34 }} title={s.rationale}>
+                      理由：{s.rationale.slice(0, 120)}{s.rationale.length > 120 ? "…" : ""}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

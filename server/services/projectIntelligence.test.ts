@@ -32,11 +32,18 @@ describe("project intelligence formatter", () => {
         urgent: 1,
         overdue: 1,
       },
+      planning: {
+        notes: 23,
+        schedules: 6,
+        upcomingSchedules: 2,
+      },
     });
 
     expect(text).toContain("完結成功率 73%");
     expect(text).toContain("Example: fal result 422");
     expect(text).toContain("等待：組長確認旁白");
     expect(text).toContain("緊急 1／逾期 1");
+    // #133 PR-4：規劃器需要與 get_project_status 同級的全貌數字（清單有 20/30 筆上限、量大會低估）
+    expect(text).toContain("排程：共 6（未來 2）；筆記：共 23");
   });
 });

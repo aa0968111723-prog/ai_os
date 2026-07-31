@@ -4,6 +4,7 @@ import {
   drivePickedImportShape,
   encryptSecret,
   escapeDriveQueryTerm,
+  notionPageTitle,
   resolveApiUrl,
   signIntegrationState,
   signIntegrationStateAt,
@@ -135,5 +136,26 @@ describe("drivePickedImportShape（選檔 → 匯入形狀）", () => {
       expect(normalized.kind).toBe(shape!.kind);
       expect(normalized.fileId).toBe("abc_DEF-123");
     }
+  });
+});
+
+describe("notionPageTitle（選頁標題解析）", () => {
+  it("走 title 型 property 的 plain_text 串接", () => {
+    expect(notionPageTitle({
+      properties: {
+        Name: { type: "title", title: [{ plain_text: "劇本" }, { plain_text: "初稿" }] },
+        Status: { type: "select" },
+      },
+    })).toBe("劇本初稿");
+  });
+  it("沒有 title property 或空標題給替代字，不拋錯", () => {
+    expect(notionPageTitle({})).toBe("（未命名頁面）");
+    expect(notionPageTitle({ properties: { Name: { type: "title", title: [] } } })).toBe("（未命名頁面）");
+  });
+  it("超長標題截到 120 字", () => {
+    const title = notionPageTitle({
+      properties: { Name: { type: "title", title: [{ plain_text: "長".repeat(200) }] } },
+    });
+    expect(title.length).toBe(120);
   });
 });

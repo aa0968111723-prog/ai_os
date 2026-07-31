@@ -180,3 +180,53 @@ describe("approval idempotency boundary", () => {
     expect(approvalSource).toContain("if (result.created)");
   });
 });
+
+// ── #133 PR-5：排程／任務重播與負向守門（對齊驗收情境三：Runner 重啟不重複建立） ──
+
+const taskCoreSource = readFileSync(new URL("./taskCore.ts", import.meta.url), "utf8");
+
+describe("schedule/task replay safety (#133 PR-5)", () => {
+  it("create_schedule：固定 effectId 先查再建，重播回既有列；冪等身分不符即停", () => {
+    expectBefore(
+      agentSource,
+      "schema.scheduleItems.id, effectId",
+      "await addScheduleItemCore({",
+    );
+    // 重播撞到「同 id 但不同 run/step」＝跨計畫覆寫，必須 fail-closed
+    expect(agentSource).toContain("行程冪等識別碼碰撞，已停止以避免跨計畫覆寫");
+    expectBefore(
+      agentSource,
+      "schema.scheduleItems.id, effectId",
+      "行程冪等識別碼碰撞",
+    );
+  });
+
+  it("create_task：固定 effectId 先查再建，重播回既有列；冪等身分不符即停", () => {
+    expectBefore(
+      agentSource,
+      "schema.projectTasks.id, effectId",
+      "await addProjectTaskCore({",
+    );
+    expect(agentSource).toContain("任務冪等識別碼碰撞，已停止以避免跨計畫覆寫");
+    expectBefore(
+      agentSource,
+      "schema.projectTasks.id, effectId",
+      "任務冪等識別碼碰撞",
+    );
+  });
+
+  it("wait_for_human 綁既有任務時同樣走固定 effectId 先查再建", () => {
+    // agentRunner 內兩處 projectTasks 固定 id 建立（create_task 與 wait_for_human 衍生任務）
+    expect(agentSource.match(/schema\.projectTasks\.id, effectId/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+
+  it("封存專案負向：排程與任務建立核心都在寫入前擋封存", () => {
+    expectBefore(scheduleSource, "assertProjectNotArchived(project)", ".insert(schema.scheduleItems)");
+    expectBefore(taskCoreSource, "assertProjectNotArchived(project)", ".insert(schema.projectTasks)");
+  });
+
+  it("跨組 assignee 負向：任務負責人必須是本組成員，且在 insert 之前驗", () => {
+    expect(taskCoreSource).toContain("任務負責人必須是本組成員");
+    expectBefore(taskCoreSource, "await memberChecked(input.groupId, input.assigneeId);", ".insert(schema.projectTasks)");
+  });
+});

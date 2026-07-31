@@ -8,6 +8,7 @@ import {
   listIntegrations,
   removeIntegration,
   removeIntegrationByKind,
+  searchNotionPages,
   setNotionIntegration,
 } from "../services/integrations";
 import {
@@ -103,6 +104,25 @@ export const integrationsRouter = router({
         throw err;
       }
       return listDriveFiles(ctx.auth.user.id, { query: input.query, pageToken: input.pageToken });
+    }),
+
+  /**
+   * Notion 選頁器（PR-E4，與 Google 選檔同一心智模型）：搜尋 token 權限內的頁面。
+   * 只回標題／時間等中繼資料，不抓內容——內容等使用者選中、按匯入才透過既有 notion import 抓。
+   */
+  listNotionPages: authedProcedure
+    .input(z.object({ query: z.string().trim().max(200).optional() }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const rate = await consumeRateLimit(RATE_LIMIT_SCOPES.notionList, ctx.auth.user.id, RATE_LIMIT_POLICIES.notionList);
+        if (!rate.allowed) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "瀏覽太頻繁——請一分鐘後再試" });
+      } catch (err) {
+        if (err instanceof RateLimitUnavailableError || err instanceof RateLimitConfigurationError) {
+          throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "選頁安全限流暫時無法使用，請稍後再試" });
+        }
+        throw err;
+      }
+      return searchNotionPages(ctx.auth.user.id, input.query ?? "");
     }),
 
   /** 中斷 Google 雲端連結（撤銷授權＋刪本地紀錄；冪等） */
