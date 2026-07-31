@@ -18,7 +18,7 @@ import { isMockMode } from "./fal";
 import { reserveQuota, refund, checkQuota } from "./points";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { lockAgentApprove } from "./locks";
-import { buildKnowledgeContext } from "../routers/knowledge";
+import { buildKnowledgeContextWithMeta } from "../routers/knowledge";
 import { buildAiModelCheatsheet, selectAiGenerationModel } from "./aiModelPolicy";
 import type { AgentStep } from "./agentRunner";
 import { listVisibleTables, resolveAgentAccess } from "./databaseAcl";
@@ -63,6 +63,90 @@ const PLAN_COST_POINTS = 0;
 const PLAN_KNOWLEDGE_BUDGET = 6000;
 /** 單一計畫的步驟上限（防 LLM 排出巨額計畫；同時是估點總額的天然上限） */
 const MAX_PLAN_STEPS = 30;
+/** PR-E2：一次規劃可指定的來源上限（使用者明確選中才注入——連接 ≠ 授權讀全部） */
+const MAX_PLAN_EXTRA_SOURCES = 10;
+
+/** PR-E2：使用者明確指定的規劃來源（已在站內的知識或資料庫文件） */
+export interface PickedPlannerSource {
+  title: string;
+  content: string;
+  origin: "knowledge" | "file";
+}
+
+/**
+ * PR-E2（純函式，可測）：把使用者選中的來源組成優先注入區塊。
+ * 選中的來源永遠排在知識預算最前（降低截斷誤傷）；標籤供 contextUsed 顯示（≤60 字）。
+ */
+export function buildPickedSourceBlock(
+  sources: PickedPlannerSource[],
+  budgetChars: number,
+): { text: string; labels: string[]; usedChars: number; totalChars: number; truncated: boolean } {
+  const parts: string[] = [];
+  const labels: string[] = [];
+  let budget = Math.max(0, budgetChars);
+  let truncated = false;
+  const totalChars = sources.reduce((sum, s) => sum + s.content.length, 0);
+  for (const source of sources) {
+    labels.push(`來源：${source.title.slice(0, 40)}`);
+    if (budget <= 0) {
+      truncated = true;
+      continue;
+    }
+    const slice = source.content.slice(0, budget);
+    if (slice.length < source.content.length) truncated = true;
+    parts.push(
+      `【${source.origin === "file" ? "指定文件" : "指定知識"}｜${source.title.slice(0, 80)}】\n${slice}${slice.length < source.content.length ? "…(截斷)" : ""}`,
+    );
+    budget -= slice.length;
+  }
+  return {
+    text: parts.join("\n\n"),
+    labels,
+    usedChars: Math.max(0, budgetChars) - budget,
+    totalChars,
+    truncated,
+  };
+}
+
+/**
+ * PR-E2：載入使用者指定的來源。id 先查專案知識（未刪除），再查資料庫文件
+ *（走 resolveAgentAccess——AI 存取等級 none 的庫對代理不可見）。
+ * 任一 id 不存在或無權讀取即整批擋下（fail-fast，不靜默略過使用者點名的來源）。
+ */
+async function loadPickedPlannerSources(
+  auth: AuthState,
+  projectId: string,
+  ids: string[],
+): Promise<PickedPlannerSource[]> {
+  if (ids.length === 0) return [];
+  if (ids.length > MAX_PLAN_EXTRA_SOURCES) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `一次最多指定 ${MAX_PLAN_EXTRA_SOURCES} 個來源` });
+  }
+  const sources: PickedPlannerSource[] = [];
+  for (const id of ids) {
+    assertUuid(id, "來源編號");
+    const [know] = await db
+      .select({ title: schema.knowledge.title, content: schema.knowledge.content })
+      .from(schema.knowledge)
+      .where(and(eq(schema.knowledge.id, id), eq(schema.knowledge.projectId, projectId), isNull(schema.knowledge.deletedAt)));
+    if (know) {
+      sources.push({ title: know.title, content: know.content, origin: "knowledge" });
+      continue;
+    }
+    const [file] = await db
+      .select({ name: schema.dataFiles.name, textContent: schema.dataFiles.textContent, table: schema.dataTables })
+      .from(schema.dataFiles)
+      .innerJoin(schema.dataTables, eq(schema.dataTables.id, schema.dataFiles.tableId))
+      .where(and(eq(schema.dataFiles.id, id), isNull(schema.dataTables.deletedAt)));
+    if (file && resolveAgentAccess(auth, file.table).canRead && file.textContent?.trim()) {
+      sources.push({ title: file.name, content: file.textContent, origin: "file" });
+      continue;
+    }
+    // 同一句話不洩漏存在性（全站慣例）；含「無可讀文字」的文件也走此路
+    throw new TRPCError({ code: "BAD_REQUEST", message: "有指定來源不存在、無權讀取或沒有可讀文字——請重新選擇來源" });
+  }
+  return sources;
+}
 
 // PostgreSQL 滑動視窗：每人每分鐘 4 次規劃；網頁/MCP/所有 replicas 共用同一防線。
 async function overLimit(userId: string): Promise<boolean> {
@@ -353,6 +437,8 @@ export async function planAgentCore(input: {
   projectId: string;
   goal: string;
   plannerMode?: AgentPlannerMode;
+  /** PR-E2：使用者明確選中、要優先注入本次規劃的站內來源（知識或資料庫文件 id） */
+  extraSourceIds?: string[];
 }): Promise<AgentRunRow> {
   const { auth } = input;
   assertUuid(input.projectId, "專案編號");
@@ -419,10 +505,17 @@ export async function planAgentCore(input: {
   const sceneLines = scenes.length
     ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」${STATUS_LABEL[s.status] ?? s.status}｜畫面${s.assetId ? "有" : "無"}｜配音詞${(s.voiceover ?? "").trim() ? "有" : "無"}｜旁白音檔${s.narrationAssetId ? "有" : "無"}`).join("\n")
     : "（尚無分鏡）";
-  const [knowledgeCtx, intelligence] = await Promise.all([
-    buildKnowledgeContext(project.id, PLAN_KNOWLEDGE_BUDGET),
+  // PR-E2：使用者選中的來源永遠排在知識預算最前；剩餘額度才給一般知識庫節錄
+  const pickedSources = await loadPickedPlannerSources(auth, project.id, input.extraSourceIds ?? []);
+  const picked = buildPickedSourceBlock(pickedSources, PLAN_KNOWLEDGE_BUDGET);
+  const [knowledgeMeta, intelligence] = await Promise.all([
+    buildKnowledgeContextWithMeta(project.id, Math.max(0, PLAN_KNOWLEDGE_BUDGET - picked.usedChars)),
     buildProjectIntelligence(project.id),
   ]);
+  const knowledgeCtx = knowledgeMeta.text;
+  const knowledgeTruncated = picked.truncated || knowledgeMeta.truncated;
+  const knowledgeIncludedChars = picked.usedChars + knowledgeMeta.includedChars;
+  const knowledgeTotalChars = picked.totalChars + knowledgeMeta.totalContentChars;
 
   const prompt = `你是專案型 AI 代理的規劃器。你不是聊天導覽員；你要把目標拆成可執行、可等待、可核准、可追蹤成果的完整計畫 JSON。
 現在時間：${new Date().toISOString()}，使用者時區：Asia/Taipei。
@@ -490,7 +583,7 @@ ${buildAiModelCheatsheet()}
 <可寫資料庫>
 ${dbCheatsheet(writableDbs)}
 </可寫資料庫>
-${plannerContext.text}
+${picked.text ? `<使用者指定來源>\n${picked.text}\n</使用者指定來源>\n` : ""}${plannerContext.text}
 <專案現況>
 標題：${project.title}（${project.kind}，${project.format}）
 世界觀｜一句話：${wv.logline || "—"}｜調性：${wv.tones.join("、") || "—"}｜視覺風格：${wv.styles.join("、") || "—"}
@@ -516,6 +609,10 @@ ${knowledgeCtx ? `<專案知識庫節錄>\n${knowledgeCtx}\n</專案知識庫節
     if (plan.steps.length === 0) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "目前資訊不足以建立安全可執行的步驟；請先補齊計畫列出的日期、負責人或來源資料" });
     }
+    // PR-E2：使用者指定的來源以伺服器為準補進 contextUsed（模型漏列也看得到「本次依據」）
+    if (picked.labels.length) {
+      plan.summary.contextUsed = [...new Set([...(plan.summary.contextUsed ?? []), ...picked.labels])].slice(0, 30);
+    }
     const [run] = await db
       .insert(schema.agentRuns)
       .values({
@@ -525,7 +622,13 @@ ${knowledgeCtx ? `<專案知識庫節錄>\n${knowledgeCtx}\n</專案知識庫節
         goal,
         summary: plan.summaryText,
         planSummary: plan.summary,
-        plannerTelemetry: generated.telemetry,
+        // PR-E2：注入量與截斷旗標入遙測（可稽核；不記知識內容）
+        plannerTelemetry: {
+          ...generated.telemetry,
+          knowledgeIncludedChars,
+          knowledgeTotalChars,
+          knowledgeTruncated,
+        },
         steps: plan.steps,
         estPoints: plan.estPoints,
       })

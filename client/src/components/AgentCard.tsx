@@ -605,6 +605,18 @@ export function AgentCard({
                 {plannerTelemetry.attemptCount > 1 && (
                   <span className="chip">模型呼叫 {plannerTelemetry.attemptCount} 次</span>
                 )}
+                {plannerTelemetry.knowledgeTruncated && (
+                  <span
+                    className="chip"
+                    style={{ color: "var(--warning-ink, var(--danger-ink))" }}
+                    title="知識與指定來源超過規劃注入預算，尾段未進入本次規劃——長文可拆段或縮小指定來源"
+                  >
+                    知識注入已截斷
+                    {plannerTelemetry.knowledgeIncludedChars != null && plannerTelemetry.knowledgeTotalChars != null
+                      ? `（${plannerTelemetry.knowledgeIncludedChars.toLocaleString()}/${plannerTelemetry.knowledgeTotalChars.toLocaleString()} 字）`
+                      : ""}
+                  </span>
+                )}
               </div>
             )}
             {planSummary && (

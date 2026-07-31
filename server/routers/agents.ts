@@ -52,12 +52,15 @@ export const agentsRouter = router({
       projectId: z.string().uuid(),
       goal: z.string().min(5, "目標至少 5 個字").max(1000),
       plannerMode: agentPlannerModeSchema.optional(),
+      // PR-E2：使用者明確選中要注入本次規劃的站內來源（知識／資料庫文件 id）——優先於一般知識節錄
+      extraSourceIds: z.array(z.string().uuid()).max(10).optional(),
     }))
     .mutation(({ ctx, input }) => planAgentCore({
       auth: ctx.auth,
       projectId: input.projectId,
       goal: input.goal,
       plannerMode: input.plannerMode,
+      extraSourceIds: input.extraSourceIds,
     })),
 
   /** 核准計畫：這一刻起才開始花執行點數（背景執行器下一個 tick 接手） */
