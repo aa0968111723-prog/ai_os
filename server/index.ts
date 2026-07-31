@@ -1314,6 +1314,11 @@ app.post("/api/assistant/ask", async (req, res) => {
   // 模型檔位：非法值一律忽略而非報錯——寧可用免費的 NIM 回答，也不要因為偏好壞掉就不給答案。
   const parsedMode = agentPlannerModeSchema.safeParse(req.body?.mode);
   const mode = parsedMode.success ? parsedMode.data : undefined;
+  // 工作台勾選的知識篇（最多 20）；非法 id 略過
+  const rawKids = Array.isArray(req.body?.knowledgeIds) ? req.body.knowledgeIds : [];
+  const knowledgeIds = rawKids
+    .filter((x: unknown): x is string => typeof x === "string" && UUID_RE.test(x))
+    .slice(0, 20);
   if (!UUID_RE.test(projectId) || !message || message.length > 1000) {
     return res.status(400).json({ error: "參數不正確（需 projectId 與 1–1000 字的問題）" });
   }
@@ -1343,7 +1348,15 @@ app.post("/api/assistant/ask", async (req, res) => {
   try {
     const { runAssistantAsk } = await import("./routers/assistant");
     const result = await runAssistantAsk(
-      { projectId, message, auth, signal: clientAbort.signal, dedupeKey: nonce, mode },
+      {
+        projectId,
+        message,
+        auth,
+        signal: clientAbort.signal,
+        dedupeKey: nonce,
+        mode,
+        knowledgeIds: knowledgeIds.length ? knowledgeIds : undefined,
+      },
       (e) => sse("step", e),
     );
     sse("done", result);

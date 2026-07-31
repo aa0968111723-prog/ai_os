@@ -25,6 +25,19 @@ describe("coerceActionToolCall（畸形工具呼叫救回）", () => {
     expect(r?.actions?.[0]).toMatchObject({ type: "plan_agent", goal: "把腳本拆成分鏡並逐鏡生成畫面" });
   });
 
+  it("把 apply_worldview_chips 畸形工具呼叫救回", () => {
+    const r = coerceActionToolCall({
+      tool: "apply_worldview_chips",
+      args: { styles: ["水墨禪意"], tones: ["溫暖", "真誠"], themes: ["禪修日常"] },
+    });
+    expect(r?.actions?.[0]).toMatchObject({
+      type: "apply_worldview_chips",
+      styles: ["水墨禪意"],
+      tones: ["溫暖", "真誠"],
+      themes: ["禪修日常"],
+    });
+  });
+
   it("真正的唯讀工具（list_assets）不當動作救回 → 回 null", () => {
     expect(coerceActionToolCall({ tool: "list_assets", args: { kind: "image" } })).toBeNull();
   });

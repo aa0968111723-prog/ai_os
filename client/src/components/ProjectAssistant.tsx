@@ -30,7 +30,9 @@ type Action =
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
   | { type: "split_script"; label: string; script: string }
   // plan_agent：把目標交給 AI 創作助手排計畫；plannerMode 由使用者在確認前選擇
-  | { type: "plan_agent"; label: string; goal: string; plannerMode?: AgentPlannerMode };
+  | { type: "plan_agent"; label: string; goal: string; plannerMode?: AgentPlannerMode }
+  // 套用世界觀 chips（確認後寫入專案基調）
+  | { type: "apply_worldview_chips"; label: string; themes?: string[]; tones?: string[]; styles?: string[] };
 
 /**
  * SSE 串流的安全活動事件：只描述「正在讀哪類資料／執行哪個查詢／完成哪一步」，
@@ -78,6 +80,14 @@ function toPayload(a: Action) {
   if (a.type === "plan_agent") {
     return { type: "plan_agent" as const, goal: a.goal, plannerMode: a.plannerMode };
   }
+  if (a.type === "apply_worldview_chips") {
+    return {
+      type: "apply_worldview_chips" as const,
+      themes: a.themes,
+      tones: a.tones,
+      styles: a.styles,
+    };
+  }
   return { type: "submit_approval" as const, sceneId: a.sceneId };
 }
 
@@ -111,6 +121,7 @@ export function ProjectAssistant({
   onSavePromptSuggestion,
   onSaveSceneDraft,
   askFillRequest = null,
+  knowledgeIds,
 }: {
   projectId: string;
   embedded?: boolean;
@@ -125,6 +136,8 @@ export function ProjectAssistant({
    * nonce bumps so the same message can re-apply.
    */
   askFillRequest?: { nonce: number; message: string } | null;
+  /** 本次問答優先注入的知識 id（工作台勾選） */
+  knowledgeIds?: string[];
 }) {
   const utils = trpc.useUtils();
   const [input, setInput] = useState("");
@@ -196,6 +209,7 @@ export function ProjectAssistant({
       nonce,
       // 使用者在代理卡選的模型檔位；預設 nim＝免費，選 fal 檔位平台才付費
       mode: defaultPlannerMode,
+      knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
       signal,
       handlers: {
         onStep: (event) => {
@@ -254,7 +268,13 @@ export function ProjectAssistant({
     if (!handled && !ctrl.signal.aborted) {
       setFallbackPending(true);
       ask.mutate(
-        { projectId: requestProjectId, message: m, nonce, mode: defaultPlannerMode },
+        {
+          projectId: requestProjectId,
+          message: m,
+          nonce,
+          mode: defaultPlannerMode,
+          knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
+        },
         {
           onSuccess: (result) => {
             if (!requestIsCurrent(requestProjectId, epoch)) return;
@@ -511,7 +531,9 @@ export function ProjectAssistant({
                               ? `執行「${payloadAct.label}」？會呼叫 AI 導演拆分鏡（免費）。`
                               : payloadAct.type === "plan_agent"
                                 ? `把這個目標交給 AI 創作助手，並使用「${plannerOption.shortLabel}」？規劃不扣站內點數；fal.ai 模式依實際 token 計費。這一步只排計畫，你在「AI 執行計畫」核准後才會開始花執行點數。`
-                                : `執行「${payloadAct.label}」？`;
+                                : payloadAct.type === "apply_worldview_chips"
+                                  ? `套用世界觀基調「${payloadAct.label.replace(/^套用基調：/, "")}」？會覆寫你有選到的主軸／調性／風格欄位（未列的欄位不動）。可之後在專案基調區再改。`
+                                  : `執行「${payloadAct.label}」？`;
                       return (
                         <div key={j} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           {/* 換模型（多模態）：只在 generate 動作出現，執行前可改用哪個模型／模態 */}
@@ -609,6 +631,10 @@ export function ProjectAssistant({
                                 utils.quota.invalidate();
                                 if (result.kind === "run_workflow") utils.workflows.invalidate();
                                 if (result.kind === "plan_agent") utils.agents.invalidate();
+                                if (result.kind === "apply_worldview_chips") {
+                                  utils.projects.get.invalidate({ id: actionProjectId });
+                                  utils.projects.list.invalidate();
+                                }
                                 if (!actionIsCurrent()) return;
                                 push({ role: "ai", text: `✓ ${result.message}` });
                                 setExecuted((prev) => new Set(prev).add(actKey));
@@ -634,7 +660,8 @@ export function ProjectAssistant({
                                       : payloadAct.type === "run_workflow" ? "Play"
                                         : payloadAct.type === "split_script" ? "Clapperboard"
                                           : payloadAct.type === "plan_agent" ? "Film"
-                                            : "Pencil"
+                                            : payloadAct.type === "apply_worldview_chips" ? "Palette"
+                                              : "Pencil"
                               }
                               size={13}
                               style={{ verticalAlign: "-2px", marginRight: 4 }}

@@ -97,7 +97,7 @@ export function ConfirmButton({
   confirmLabel?: string;
   cancelLabel?: string;
   mode?: "inline" | "panel";
-  reason?: { label?: string; placeholder?: string; required?: boolean };
+  reason?: { label?: string; placeholder?: string; required?: boolean; presets?: string[] };
   disabled?: boolean;
   triggerClassName?: string;
   triggerStyle?: CSSProperties;
@@ -189,6 +189,25 @@ export function ConfirmButton({
           {reason && (
             <>
               {reason.label && <label htmlFor={reasonId}>{reason.label}</label>}
+              {/* 快捷理由 chips：手機打字成本高，點一下帶入可續編（退回理由等常用句） */}
+              {!!reason.presets?.length && (
+                <span role="group" aria-label="常用理由" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                  {reason.presets.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className="chip"
+                      onClick={() => {
+                        setReasonText(preset);
+                        setReasonError(false);
+                        reasonRef.current?.focus();
+                      }}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </span>
+              )}
               <textarea
                 id={reasonId}
                 ref={reasonRef}

@@ -131,8 +131,22 @@
     {
       "idx": 18,
       "version": "7",
-      "when": 1785475028761,
-      "tag": "0018_group_agent_commander",
+      "when": 1785600000000,
+      "tag": "0018_knowledge_pinned",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785600100000,
+      "tag": "0019_knowledge_summary",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785600200000,
+      "tag": "0020_group_agent_commander",
       "breakpoints": true
     }
   ]

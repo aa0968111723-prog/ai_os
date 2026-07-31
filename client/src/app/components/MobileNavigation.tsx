@@ -36,7 +36,7 @@ const MORE_ITEMS: { href: string; label: string; description: string; icon: Icon
   { href: "/downloads", label: "共用下載", description: "取得團隊共用文件", icon: "Download", match: ["/downloads"] },
 ];
 
-export function MobileNavigation() {
+export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
   const [location] = useLocation();
   const hash = useHash();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -77,7 +77,9 @@ export function MobileNavigation() {
               {MORE_ITEMS.map((item) => (
                 <Link key={item.href} href={item.href} className={item.match.some((prefix) => location.startsWith(prefix)) ? "active" : ""}>
                   <span className="mobile-more-sheet__icon"><Icon name={item.icon} size={19} /></span>
-                  <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                  <span><strong>{item.label}{item.href === "/chat" && dmUnread > 0 && (
+                    <span className="dm-nav-unread" aria-label={`${dmUnread} 則未讀私訊`}>{dmUnread > 99 ? "99+" : dmUnread}</span>
+                  )}</strong><small>{item.description}</small></span>
                   <Icon name="ChevronRight" size={16} />
                 </Link>
               ))}
@@ -114,8 +116,12 @@ export function MobileNavigation() {
           aria-controls="mobile-more-tools"
           onClick={() => setMoreOpen((open) => !open)}
         >
-          <Icon name="Ellipsis" size={20} />
-          <span>更多</span>
+          <span className="mobile-nav__icon-wrap">
+            <Icon name="Ellipsis" size={20} />
+            {/* 私訊未讀紅點：私訊入口在「更多」第二層，錯過推播的人回 App 至少看得到訊號 */}
+            {dmUnread > 0 && <span className="mobile-nav__dot" aria-hidden />}
+          </span>
+          <span>更多{dmUnread > 0 && <span className="sr-only">（有未讀私訊）</span>}</span>
         </button>
       </nav>
     </>

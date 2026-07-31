@@ -8,7 +8,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { trpc } from "./api";
-import { Button, Meta } from "./components/ui";
+import { Button, Hint } from "./components/ui";
+
 export interface CollabPeer {
   userId: string;
   name: string;
@@ -24,13 +25,25 @@ export interface CollabCursor {
    */
   y: number;
   /**
-   * 錨點定位（優先於 x/y）：游標所在最近 [data-fb] 卡片的代號＋卡內相對比例。
-   * 兩端版面不同（手機單欄 vs 桌機雙欄）時，靠「同一張卡」對位比整頁比例準得多；
+   * 錨點定位（優先於 x/y）：`#elementId` 或 data-fb 卡片代號＋卡內相對比例。
+   * 兩端版面不同（手機單欄 vs 桌機雙欄）時，靠「同一張卡／同一列」對位比整頁比例準得多；
    * 對方畫面找不到同名卡片才退回 x/y 整頁比例。
    */
   anchor?: string | null;
   ax?: number;
   ay?: number;
+  /**
+   * 0..1：送出當下，游標在「發送端視窗高度」的比例（高準度鏡像核心）。
+   * 跟隨端把錨點鎖到同一個螢幕高度比例，而不是一律置中。
+   */
+  vy?: number;
+  /** 0..1：發送端視窗寬度比例（橫向捲動／寬頁鎖定） */
+  vx?: number;
+  /**
+   * 0..1：表單欄位內 caret 位置（字元 index / 字串長）。
+   * 對方在 input/textarea 打字時，比滑鼠 ax/ay 更能鎖「在第幾個字」。
+   */
+  ci?: number;
   name: string;
   color: string;
   /** 最後更新時間；4 秒沒動靜自動移除（對方離開/切分頁時游標不要僵在畫面上） */
@@ -46,11 +59,375 @@ export const COLLAB_ZONES = {
   messages: "留言",
 } as const;
 
-const CURSOR_THROTTLE_MS = 80;
+/** 游標上報：≈30fps，貼近伺服器下限，極限跟手 */
+const CURSOR_THROTTLE_MS = 32;
 const CURSOR_TTL_MS = 4000;
 const RETRY_BASE_MS = 2000;
 const RETRY_MAX_MS = 10_000;
 const RETRY_MAX_ATTEMPTS = 30;
+/** 鏡像校正：約一幀一次，雙次量測消殘差 */
+const MIRROR_SCROLL_MIN_MS = 16;
+/** 對齊容差（px）；越小越準，太小會在亞像素抖 */
+const MIRROR_LOCK_EPSILON_PX = 2;
+/** 捲動重送游標間隔 */
+const SCROLL_RESEND_MIN_MS = 48;
+/** 游標點視覺插值時長（ms）——顯示更滑，不影響鎖定精度 */
+const CURSOR_LERP_MS = 50;
+/**
+ * 鏡像預測超前量（ms）：用最近兩包速度外插，抵消網路 RTT 體感延遲。
+ * 太大會「超車」抖動；40ms ≈ 半個常見 RTT，保守且有效。
+ */
+const MIRROR_PREDICT_LEAD_MS = 40;
+/** 預測最多外推幾個封包間隔（防丟包後亂衝） */
+const MIRROR_PREDICT_MAX_K = 1.25;
+
+const clamp01 = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
+
+const STABLE_ID_SELECTOR =
+  "[data-collab-id], [data-fb][id], [id^='scene-'], [id^='asset-'], [id^='generation-'], [id^='sec-'], [id^='char-'], [id^='knowledge-'], [id^='task-'], [id^='agent-run-'], input[id], textarea[id], select[id]";
+
+/**
+ * 極限錨點：優先最深層穩定 id（表單欄位／列表列），再 data-fb 卡片。
+ * `#id` 讓重複 data-fb（分鏡格×N）能對到正確那一列。
+ */
+export function collabAnchorFromElement(el: Element | null | undefined): string | null {
+  if (!el || typeof el.closest !== "function") return null;
+  const byCollab = el.closest("[data-collab-id]");
+  if (byCollab) {
+    const raw = byCollab.getAttribute("data-collab-id")?.trim();
+    if (raw && raw.length > 0 && raw.length <= 80) return raw.startsWith("#") ? raw : `#${raw}`;
+  }
+  const withId = el.closest(STABLE_ID_SELECTOR);
+  if (withId) {
+    const id = typeof withId.id === "string" ? withId.id.trim() : "";
+    if (id && id.length <= 78 && !/[\s"]/.test(id)) return `#${id}`;
+  }
+  const card = el.closest("[data-fb]");
+  if (!card) return null;
+  const id = typeof card.id === "string" ? card.id.trim() : "";
+  if (id && id.length <= 78 && !/[\s"]/.test(id)) return `#${id}`;
+  const name = card.getAttribute("data-fb")?.trim();
+  return name && name.length > 0 ? name : null;
+}
+
+/** 錨點 → 本機元素（#id / data-collab-id / data-fb） */
+export function findCollabAnchorElement(anchor: string | null | undefined): Element | null {
+  if (!anchor) return null;
+  try {
+    if (anchor.startsWith("#")) {
+      const id = anchor.slice(1);
+      if (!id) return null;
+      return document.getElementById(id) ?? document.querySelector(`[data-collab-id="${CSS.escape(id)}"]`);
+    }
+    return (
+      document.querySelector(`[data-collab-id="${CSS.escape(anchor)}"]`) ??
+      document.querySelector(`[data-fb="${CSS.escape(anchor)}"]`)
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** 量 ax/ay 用的元素：與錨點解析同一優先序 */
+export function collabAnchorRectElement(el: Element | null | undefined): Element | null {
+  if (!el || typeof el.closest !== "function") return null;
+  return (
+    el.closest("[data-collab-id]") ??
+    el.closest(STABLE_ID_SELECTOR) ??
+    el.closest("[data-fb]") ??
+    null
+  );
+}
+
+/**
+ * 從 input/textarea 讀 caret 比例 0..1（字元 index / 字串長）。
+ * 沒有 selection 或不支援時回 null。
+ */
+export function caretRatioFromElement(el: Element | null | undefined): number | null {
+  if (!el) return null;
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    const len = el.value?.length ?? 0;
+    if (len <= 0) return 0;
+    const idx = typeof el.selectionStart === "number" ? el.selectionStart : len;
+    return clamp01(idx / len);
+  }
+  return null;
+}
+
+/**
+ * 有 ci 時把欄位內比例調成「字元位置」近似：
+ * - 單行 input：ax ≈ ci
+ * - textarea：依換行粗估行號 → ay，行內字元 → ax
+ * 滑鼠 ax/ay 仍作後備。
+ */
+export function refineAnchorRatiosWithCaret(
+  el: Element | null | undefined,
+  c: Pick<CollabCursor, "ax" | "ay" | "ci">,
+): { ax: number; ay: number } {
+  const baseAx = typeof c.ax === "number" && Number.isFinite(c.ax) ? clamp01(c.ax) : 0.5;
+  const baseAy = typeof c.ay === "number" && Number.isFinite(c.ay) ? clamp01(c.ay) : 0.5;
+  if (typeof c.ci !== "number" || !Number.isFinite(c.ci) || !el) return { ax: baseAx, ay: baseAy };
+  const ci = clamp01(c.ci);
+  if (el instanceof HTMLInputElement) {
+    return { ax: ci, ay: baseAy };
+  }
+  if (el instanceof HTMLTextAreaElement) {
+    const val = el.value ?? "";
+    if (val.length === 0) return { ax: 0, ay: 0 };
+    const idx = Math.min(val.length, Math.round(ci * val.length));
+    const before = val.slice(0, idx);
+    const lines = before.split("\n");
+    const lineIdx = Math.max(0, lines.length - 1);
+    const totalLines = Math.max(1, val.split("\n").length);
+    const lineText = lines[lineIdx] ?? "";
+    const fullLine = val.split("\n")[lineIdx] ?? lineText;
+    const ax = fullLine.length > 0 ? clamp01(lineText.length / fullLine.length) : 0;
+    const ay = clamp01(lineIdx / Math.max(1, totalLines - 1 || 1));
+    // 單行 textarea 仍用 ci 當 ax
+    if (totalLines === 1) return { ax: ci, ay: baseAy };
+    return { ax, ay };
+  }
+  return { ax: baseAx, ay: baseAy };
+}
+
+export type CursorMotionSample = {
+  t: number;
+  ax: number;
+  ay: number;
+  vy: number;
+  vx: number;
+};
+
+/**
+ * 依最近兩包速度外插，抵消網路延遲體感。
+ * leadMs 為超前時間；dt 異常（太短/太長）時不預測以免抖動。
+ */
+export function extrapolateCursorPose(
+  prev: CursorMotionSample | null | undefined,
+  curr: CursorMotionSample,
+  leadMs: number = MIRROR_PREDICT_LEAD_MS,
+): { ax: number; ay: number; vy: number; vx: number } {
+  if (!prev || !(leadMs > 0) || curr.t <= prev.t) {
+    return { ax: curr.ax, ay: curr.ay, vy: curr.vy, vx: curr.vx };
+  }
+  const dt = curr.t - prev.t;
+  if (dt < 12 || dt > 400) {
+    return { ax: curr.ax, ay: curr.ay, vy: curr.vy, vx: curr.vx };
+  }
+  const k = Math.min(leadMs / dt, MIRROR_PREDICT_MAX_K);
+  const step = (a: number, b: number) => clamp01(b + (b - a) * k);
+  return {
+    ax: step(prev.ax, curr.ax),
+    ay: step(prev.ay, curr.ay),
+    vy: step(prev.vy, curr.vy),
+    vx: step(prev.vx, curr.vx),
+  };
+}
+
+/**
+ * 對方游標 → 本機 viewport 座標。
+ * 錨點可解析 → 元素＋ax/ay（可選 ci 精修）；否則容器 x/y。
+ */
+export function cursorViewportPoint(
+  c: Pick<CollabCursor, "x" | "y" | "anchor" | "ax" | "ay" | "ci">,
+  container: Element | null | undefined,
+): { x: number; y: number } | null {
+  const el = findCollabAnchorElement(c.anchor ?? null);
+  if (el) {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      const { ax, ay } = refineAnchorRatiosWithCaret(el, c);
+      return { x: r.left + ax * r.width, y: r.top + ay * r.height };
+    }
+  }
+  if (container) {
+    const r = container.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      return { x: r.left + clamp01(c.x) * r.width, y: r.top + clamp01(c.y) * r.height };
+    }
+  }
+  return null;
+}
+
+/** 沿祖先鏈找可垂直捲動的元素（含 document.scrollingElement） */
+export function listScrollParents(from: Element | null): Element[] {
+  const out: Element[] = [];
+  let node: Element | null = from;
+  while (node) {
+    if (node instanceof HTMLElement) {
+      const st = getComputedStyle(node);
+      const oy = st.overflowY;
+      if ((oy === "auto" || oy === "scroll" || oy === "overlay") && node.scrollHeight > node.clientHeight + 1) {
+        out.push(node);
+      }
+    }
+    node = node.parentElement;
+  }
+  const root = document.scrollingElement;
+  if (root && !out.includes(root)) out.push(root);
+  return out;
+}
+
+/**
+ * 把 deltaY 盡量分配到最近的可捲容器（巢狀 scroll），剩餘再給 window。
+ * 回傳實際捲動量總和。
+ */
+export function applyScrollDeltaY(fromEl: Element | null, deltaY: number): number {
+  if (!Number.isFinite(deltaY) || deltaY === 0) return 0;
+  let remaining = deltaY;
+  let applied = 0;
+  for (const parent of listScrollParents(fromEl)) {
+    if (Math.abs(remaining) < 0.5) break;
+    if (!(parent instanceof HTMLElement) && parent !== document.scrollingElement) continue;
+    const el = parent as HTMLElement;
+    const before = el.scrollTop;
+    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+    const next = Math.min(max, Math.max(0, before + remaining));
+    const moved = next - before;
+    if (moved !== 0) {
+      el.scrollTop = next;
+      remaining -= moved;
+      applied += moved;
+    }
+  }
+  if (Math.abs(remaining) >= 0.5) {
+    // 以「請求量」計入：window.scrollY 在部分環境（測試 mock／平滑捲動）不會同步更新；
+    // 殘差交給 applyMirrorViewportLock 的二次量測消掉。
+    window.scrollBy({ top: remaining, left: 0, behavior: "auto" });
+    applied += remaining;
+    remaining = 0;
+  }
+  return applied;
+}
+
+/**
+ * 跟隨前：打開包住錨點的 <details>（含手機 CtxCollapse），
+ * 並把 aria-hidden / [hidden] 祖先標成可見意圖（派發 collab:expand）。
+ * 回傳是否有展開動作（展開後 layout 可能尚未穩定，呼叫端可再鎖一次）。
+ */
+export function ensureAnchorExpanded(el: Element | null): boolean {
+  if (!el) return false;
+  let changed = false;
+  let d: HTMLDetailsElement | null = el.closest("details:not([open])");
+  let guard = 0;
+  while (d && guard++ < 8) {
+    d.open = true;
+    changed = true;
+    // 讓 React 控管 open 的 details 也能同步 state（ProjectPage CtxCollapse）
+    try {
+      d.dispatchEvent(new Event("toggle", { bubbles: true }));
+    } catch {
+      /* jsdom 舊版可能無 toggle Event */
+    }
+    d = d.parentElement?.closest("details:not([open])") ?? null;
+  }
+  // 可選：資料屬性標記的收合區（非 details 實作時）
+  let node: Element | null = el;
+  guard = 0;
+  while (node && guard++ < 12) {
+    if (node instanceof HTMLElement && node.hasAttribute("data-collab-expand")) {
+      if (node.getAttribute("data-collab-expand") !== "open") {
+        node.setAttribute("data-collab-expand", "open");
+        changed = true;
+        try {
+          node.dispatchEvent(new CustomEvent("collab:expand", { bubbles: true, detail: { el: node } }));
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    node = node.parentElement;
+  }
+  return changed;
+}
+
+/**
+ * 極限 viewport lock：
+ * 1) 展開 details／手機收合區
+ * 2) 把錨點鎖到發送端 vy（與可選 vx）；ci 精修欄位內點
+ * 3) 沿巢狀 scroll parent 分配 delta
+ * 4) 雙次量測消殘差；若剛展開再做第三次（等 layout）
+ */
+export function applyMirrorViewportLock(
+  c: Pick<CollabCursor, "x" | "y" | "anchor" | "ax" | "ay" | "vy" | "ci"> & { vx?: number },
+  container: Element | null | undefined,
+): boolean {
+  const el = findCollabAnchorElement(c.anchor ?? null);
+  const expanded = ensureAnchorExpanded(el);
+  const point = cursorViewportPoint(c, container);
+  if (!point) return false;
+  const vh = window.innerHeight || 0;
+  const vw = window.innerWidth || 0;
+  if (vh <= 0) return false;
+
+  const rawVy = typeof c.vy === "number" && Number.isFinite(c.vy) ? c.vy : 0.42;
+  // 僅輕微夾制：極限模式盡量保留對方真實螢幕位置（頂欄/底欄邊緣也跟）
+  const targetVy = Math.min(0.95, Math.max(0.05, rawVy));
+  const targetClientY = targetVy * vh;
+
+  let deltaY = point.y - targetClientY;
+  let movedAny = false;
+
+  if (Math.abs(deltaY) >= MIRROR_LOCK_EPSILON_PX) {
+    const applied = applyScrollDeltaY(el, deltaY);
+    if (Math.abs(applied) >= 0.5) movedAny = true;
+  }
+
+  // 水平：若有巢狀橫向捲動或頁面可橫捲，用 vx 鎖（可選）
+  if (typeof c.vx === "number" && Number.isFinite(c.vx) && vw > 0 && el) {
+    const rawVx = clamp01(c.vx);
+    const targetClientX = Math.min(0.95, Math.max(0.05, rawVx)) * vw;
+    const point2x = cursorViewportPoint(c, container);
+    if (point2x) {
+      const deltaX = point2x.x - targetClientX;
+      if (Math.abs(deltaX) >= MIRROR_LOCK_EPSILON_PX) {
+        // 優先橫向可捲父層
+        let rem = deltaX;
+        let node: Element | null = el;
+        while (node && Math.abs(rem) >= 0.5) {
+          if (node instanceof HTMLElement) {
+            const st = getComputedStyle(node);
+            if ((st.overflowX === "auto" || st.overflowX === "scroll" || st.overflowX === "overlay") && node.scrollWidth > node.clientWidth + 1) {
+              const before = node.scrollLeft;
+              const max = node.scrollWidth - node.clientWidth;
+              const next = Math.min(max, Math.max(0, before + rem));
+              node.scrollLeft = next;
+              rem -= next - before;
+              if (next !== before) movedAny = true;
+            }
+          }
+          node = node.parentElement;
+        }
+        if (Math.abs(rem) >= 0.5) {
+          window.scrollBy({ left: rem, top: 0, behavior: "auto" });
+          movedAny = true;
+        }
+      }
+    }
+  }
+
+  // 雙次校正：scroll 後 reflow，再消一次殘差（極限精度關鍵）
+  const point2 = cursorViewportPoint(c, container);
+  if (point2) {
+    const residual = point2.y - targetClientY;
+    if (Math.abs(residual) >= MIRROR_LOCK_EPSILON_PX) {
+      const applied = applyScrollDeltaY(el, residual);
+      if (Math.abs(applied) >= 0.5) movedAny = true;
+    }
+  }
+  // 剛展開 details 時高度常在下一幀才穩定——再消一次殘差
+  if (expanded) {
+    const point3 = cursorViewportPoint(c, container);
+    if (point3) {
+      const residual = point3.y - targetClientY;
+      if (Math.abs(residual) >= MIRROR_LOCK_EPSILON_PX) {
+        const applied = applyScrollDeltaY(el, residual);
+        if (Math.abs(applied) >= 0.5) movedAny = true;
+      }
+    }
+  }
+  return movedAny;
+}
 
 export function useCollab(
   projectId: string,
@@ -60,6 +437,11 @@ export function useCollab(
   /** 目前在這個專案裡的所有人（含自己；同人多分頁已去重） */
   peers: CollabPeer[];
   cursors: Map<string, CollabCursor>;
+  /**
+   * 游標即時 ref（WS 一到就寫，不經 React render）。
+   * 鏡像跟隨讀這個，比 state 少 1 幀延遲——極限精度熱路徑。
+   */
+  cursorsLiveRef: RefObject<Map<string, CollabCursor>>;
   /** zone → 正在該區塊編輯的其他人 */
   focusZones: Record<string, CollabPeer[]>;
   self: CollabPeer | null;
@@ -76,6 +458,8 @@ export function useCollab(
   const [self, setSelf] = useState<CollabPeer | null>(null);
   const [connected, setConnected] = useState(false);
   const [cursors, setCursors] = useState<Map<string, CollabCursor>>(() => new Map());
+  /** 熱路徑：WS 訊息先寫這裡，鏡像 rAF 直接讀 */
+  const cursorsLiveRef = useRef<Map<string, CollabCursor>>(new Map());
   const [zoneByUser, setZoneByUser] = useState<Record<string, string>>({});
 
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -122,20 +506,24 @@ export function useCollab(
           setPeers(msg.users ?? []);
         } else if (msg.type === "cursor") {
           if (msg.userId === selfIdRef.current) return;
-          setCursors((prev) => {
-            const next = new Map(prev);
-            next.set(msg.userId, {
-              x: msg.x,
-              y: msg.y,
-              anchor: typeof msg.anchor === "string" ? msg.anchor : null,
-              ax: typeof msg.ax === "number" ? msg.ax : 0,
-              ay: typeof msg.ay === "number" ? msg.ay : 0,
-              name: msg.name,
-              color: msg.color,
-              ts: Date.now(),
-            });
-            return next;
-          });
+          const entry: CollabCursor = {
+            x: msg.x,
+            y: msg.y,
+            anchor: typeof msg.anchor === "string" ? msg.anchor : null,
+            ax: typeof msg.ax === "number" ? msg.ax : 0,
+            ay: typeof msg.ay === "number" ? msg.ay : 0,
+            vy: typeof msg.vy === "number" ? msg.vy : undefined,
+            vx: typeof msg.vx === "number" ? msg.vx : undefined,
+            ci: typeof msg.ci === "number" ? msg.ci : undefined,
+            name: msg.name,
+            color: msg.color,
+            ts: Date.now(),
+          };
+          // 先寫 live ref（鏡像熱路徑），再觸發 React 重繪覆蓋層
+          const live = new Map(cursorsLiveRef.current);
+          live.set(msg.userId, entry);
+          cursorsLiveRef.current = live;
+          setCursors(live);
         } else if (msg.type === "focus") {
           setZoneByUser((prev) => {
             const next = { ...prev };
@@ -159,6 +547,7 @@ export function useCollab(
         setSelf(null);
         setConnected(false);
         setZoneByUser({});
+        cursorsLiveRef.current = new Map();
         setCursors(new Map());
         if (ev.code === 4403) return; // 伺服器重驗判定權限已變更：重連也只會再被踢，直接停
         retryCount += 1;
@@ -194,6 +583,7 @@ export function useCollab(
             changed = true;
           }
         }
+        if (changed) cursorsLiveRef.current = next;
         return changed ? next : prev; // 沒變就回原 Map，避免每秒白白重繪
       });
     }, 1000);
@@ -213,34 +603,178 @@ export function useCollab(
     });
   }, [queryClient]);
 
-  const onPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+  /**
+   * 最近一次指標：client + 文件座標（scrollY/X + client）。
+   * 捲動重送時用 doc 座標回推 client，鎖定「同一文件點」而非「同一螢幕像素」。
+   */
+  const lastPointerRef = useRef<{
+    clientX: number;
+    clientY: number;
+    docX: number;
+    docY: number;
+    target: Element | null;
+    anchor: string | null;
+    ax: number;
+    ay: number;
+  } | null>(null);
+  const lastScrollSendRef = useRef(0);
+
+  const sendCursorAt = useCallback((clientX: number, clientY: number, target: Element | null) => {
     const el = containerRef.current;
     const ws = wsRef.current;
-    if (!el || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!el || !ws || ws.readyState !== WebSocket.OPEN) return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const x = clamp01((clientX - rect.left) / rect.width);
+    const y = clamp01((clientY - rect.top) / rect.height);
+    const vh = window.innerHeight || 1;
+    const vw = window.innerWidth || 1;
+    const vy = clamp01(clientY / vh);
+    const vx = clamp01(clientX / vw);
+    let ax = 0;
+    let ay = 0;
+    const anchor = collabAnchorFromElement(target);
+    const anchorEl = collabAnchorRectElement(target);
+    if (anchorEl) {
+      const ar = anchorEl.getBoundingClientRect();
+      if (ar.width > 0 && ar.height > 0) {
+        ax = clamp01((clientX - ar.left) / ar.width);
+        ay = clamp01((clientY - ar.top) / ar.height);
+      }
+    }
+    // 表單 caret：打字／選取時比滑鼠點更準
+    const field =
+      target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+        ? target
+        : (target?.closest?.("input, textarea") as HTMLInputElement | HTMLTextAreaElement | null);
+    const ci = caretRatioFromElement(field ?? target);
+    const payload: Record<string, unknown> = { type: "cursor", x, y, anchor, ax, ay, vy, vx };
+    if (ci != null) payload.ci = ci;
+    ws.send(JSON.stringify(payload));
+    lastPointerRef.current = {
+      clientX,
+      clientY,
+      docX: window.scrollX + clientX,
+      docY: window.scrollY + clientY,
+      target,
+      anchor,
+      ax,
+      ay,
+    };
+    // 指標所在 collab zone 一併上報（不只鍵盤 focus）
+    const zoneEl = target?.closest?.("[data-collab-zone]");
+    const zone = zoneEl?.getAttribute("data-collab-zone") ?? null;
+    if (zone && zone !== lastZoneRef.current) {
+      lastZoneRef.current = zone;
+      ws.send(JSON.stringify({ type: "focus", zone }));
+    }
+    return true;
+  }, []);
+
+  const onPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     const now = Date.now();
     if (now - lastCursorAtRef.current < CURSOR_THROTTLE_MS) return;
     lastCursorAtRef.current = now;
-    const rect = el.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) return;
-    const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
-    const x = clamp01((e.clientX - rect.left) / rect.width);
-    const y = clamp01((e.clientY - rect.top) / rect.height);
-    // 錨點：游標下最近的 [data-fb] 卡片＋卡內相對位置——對方版面不同（手機/桌機）也能貼到同一張卡上
-    let anchor: string | null = null;
-    let ax = 0;
-    let ay = 0;
-    const anchorEl = (e.target as Element | null)?.closest?.("[data-fb]");
-    if (anchorEl) {
-      const ar = anchorEl.getBoundingClientRect();
-      const name = anchorEl.getAttribute("data-fb");
-      if (name && ar.width > 0 && ar.height > 0) {
-        anchor = name;
-        ax = clamp01((e.clientX - ar.left) / ar.width);
-        ay = clamp01((e.clientY - ar.top) / ar.height);
+    sendCursorAt(e.clientX, e.clientY, e.target as Element | null);
+  }, [sendCursorAt]);
+
+  // 鍵盤 caret／選取變更：對方在輸入框打字時也持續上報（不必移滑鼠）
+  useEffect(() => {
+    if (!enabled) return;
+    const onSel = () => {
+      const now = Date.now();
+      if (now - lastCursorAtRef.current < CURSOR_THROTTLE_MS) return;
+      const ae = document.activeElement;
+      if (!(ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement)) return;
+      if (containerRef.current && !containerRef.current.contains(ae)) return;
+      lastCursorAtRef.current = now;
+      const r = ae.getBoundingClientRect();
+      // 以欄位中心為 client 點；真正精度靠 ci
+      sendCursorAt(r.left + r.width * 0.5, r.top + Math.min(r.height * 0.5, 18), ae);
+    };
+    document.addEventListener("selectionchange", onSel);
+    document.addEventListener("keyup", onSel, true);
+    return () => {
+      document.removeEventListener("selectionchange", onSel);
+      document.removeEventListener("keyup", onSel, true);
+    };
+  }, [enabled, sendCursorAt]);
+
+  // 捲動重送：優先鎖「同一文件點」（docY - scrollY），超出視窗才改採 elementFromPoint
+  useEffect(() => {
+    if (!enabled) return;
+    const onScroll = () => {
+      const now = Date.now();
+      if (now - lastScrollSendRef.current < SCROLL_RESEND_MIN_MS) return;
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      lastScrollSendRef.current = now;
+      lastCursorAtRef.current = now;
+      const last = lastPointerRef.current;
+      const vh = window.innerHeight || 1;
+      const vw = window.innerWidth || 1;
+      let clientX: number;
+      let clientY: number;
+      let target: Element | null = null;
+      if (last) {
+        // 文件座標回推：維持同一 document 點
+        clientX = last.docX - window.scrollX;
+        clientY = last.docY - window.scrollY;
+        const inView =
+          clientY >= 0 && clientY <= vh && clientX >= 0 && clientX <= vw;
+        if (inView) {
+          // 錨點仍在 → 直接用錨點重算更準（版面 reflow 後 doc 可能偏）
+          const aEl = findCollabAnchorElement(last.anchor);
+          if (aEl) {
+            const ar = aEl.getBoundingClientRect();
+            if (ar.width > 0 && ar.height > 0) {
+              clientX = ar.left + last.ax * ar.width;
+              clientY = ar.top + last.ay * ar.height;
+              target = aEl;
+            }
+          }
+          if (!target) {
+            try {
+              target = document.elementFromPoint(
+                Math.min(vw - 1, Math.max(0, clientX)),
+                Math.min(vh - 1, Math.max(0, clientY)),
+              );
+            } catch {
+              target = last.target;
+            }
+          }
+        } else {
+          // 文件點已出視窗：跟隨者會用 vy 對齊；發送端改報視窗中心內容
+          clientX = vw / 2;
+          clientY = vh * 0.42;
+          try {
+            target = document.elementFromPoint(clientX, clientY);
+          } catch {
+            target = null;
+          }
+        }
+      } else {
+        clientX = vw / 2;
+        clientY = vh * 0.42;
+        try {
+          target = document.elementFromPoint(clientX, clientY);
+        } catch {
+          target = null;
+        }
       }
-    }
-    ws.send(JSON.stringify({ type: "cursor", x, y, anchor, ax, ay }));
-  }, []);
+      if (target?.closest?.("[data-collab-cursor-layer]")) {
+        target = last?.target ?? null;
+      }
+      sendCursorAt(clientX, clientY, target);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true, capture: true });
+    // 巢狀容器捲動也要重送
+    document.addEventListener("scroll", onScroll, { passive: true, capture: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      document.removeEventListener("scroll", onScroll, true);
+    };
+  }, [enabled, sendCursorAt]);
 
   const sendFocus = useCallback((zone: string | null) => {
     if (lastZoneRef.current === zone) return; // focus 在區塊內部元素間移動時會反覆觸發，去重後才上行
@@ -260,7 +794,7 @@ export function useCollab(
     return out;
   }, [zoneByUser, peers]);
 
-  return { peers, cursors, focusZones, self, sendFocus, containerRef, onPointerMove, connected };
+  return { peers, cursors, cursorsLiveRef, focusZones, self, sendFocus, containerRef, onPointerMove, connected };
 }
 
 // ─── 鏡像跟隨模式（非螢幕串流：跟隨對方焦點區＋游標錨點，做出「同畫面」感）───
@@ -283,74 +817,118 @@ export function followablePeers(peers: CollabPeer[], selfId: string | null | und
 }
 
 /**
- * 鏡像跟隨：當 mode=mirror 且指定 followUserId 時，
- * - 對方焦點區變更 → 捲到對應 [data-collab-zone]
- * - 對方游標更新 → 捲到其錨點卡片或游標位置附近
- * 不做真正螢幕串流（隱私／頻寬）；兩人版面不同時靠錨點對位。
+ * 極限精準鏡像跟隨：
+ * - 讀 cursorsLiveRef（WS 直寫，零 React 幀延遲）
+ * - 每包 cursor：速度預測外插 → viewport lock（vy/vx/ci）＋巢狀 scroll＋雙／三次校正＋auto-open details
+ * - rAF 迴圈；無游標時才 zone 粗定位
  */
 export function useCollabMirrorFollow(
   mode: CollabViewMode,
   followUserId: string | null,
-  cursors: Map<string, CollabCursor>,
+  /** 優先傳 live ref；也可傳 Map（測試／相容） */
+  cursors: Map<string, CollabCursor> | RefObject<Map<string, CollabCursor>>,
   focusZones: Record<string, CollabPeer[]>,
+  containerRef?: RefObject<HTMLElement | null>,
 ): void {
+  const focusRef = useRef(focusZones);
+  focusRef.current = focusZones;
+  const containerRefStable = containerRef;
   const lastZoneRef = useRef<string | null>(null);
-  const lastCursorTsRef = useRef(0);
+  const prevSampleRef = useRef<CursorMotionSample | null>(null);
+  const mapCursors = (src: typeof cursors): Map<string, CollabCursor> => {
+    if (src && typeof src === "object" && "current" in src) {
+      return src.current ?? new Map();
+    }
+    return src as Map<string, CollabCursor>;
+  };
 
-  // 跟隨焦點區
   useEffect(() => {
     if (mode !== "mirror" || !followUserId) {
       lastZoneRef.current = null;
+      prevSampleRef.current = null;
       return;
     }
     const zone = zoneOfPeer(followUserId, focusZones);
     if (!zone || zone === lastZoneRef.current) return;
     lastZoneRef.current = zone;
+    const cur = mapCursors(cursors).get(followUserId);
+    if (cur && (findCollabAnchorElement(cur.anchor) || cur.vy != null)) return;
     let el: Element | null = null;
     try {
       el = document.querySelector(`[data-collab-zone="${CSS.escape(zone)}"]`);
     } catch {
       el = null;
     }
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [mode, followUserId, focusZones]);
+    if (el) {
+      ensureAnchorExpanded(el);
+      el.scrollIntoView({ behavior: "auto", block: "nearest" });
+    }
+  }, [mode, followUserId, focusZones, cursors]);
 
-  // 跟隨游標（節流：只在對方 cursor ts 變化且距上次跟隨 > 400ms 時捲動）
   useEffect(() => {
     if (mode !== "mirror" || !followUserId) return;
-    const cur = cursors.get(followUserId);
-    if (!cur) return;
-    if (cur.ts === lastCursorTsRef.current) return;
-    // 太密的游標更新不每幀都 scroll（會暈）
-    if (cur.ts - lastCursorTsRef.current < 400 && lastCursorTsRef.current !== 0) {
-      lastCursorTsRef.current = cur.ts;
-      return;
-    }
-    lastCursorTsRef.current = cur.ts;
+    let raf = 0;
+    let lastCursorTs = 0;
+    let lastScrollAt = 0;
+    prevSampleRef.current = null;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const cur = mapCursors(cursors).get(followUserId);
+      if (!cur) return;
+      if (cur.ts === lastCursorTs) return;
+      const now = performance.now();
+      if (now - lastScrollAt < MIRROR_SCROLL_MIN_MS) return;
 
-    let target: Element | null = null;
-    if (cur.anchor) {
-      try {
-        target = document.querySelector(`[data-fb="${CSS.escape(cur.anchor)}"]`);
-      } catch {
-        target = null;
+      // 速度預測：用上一包外插，抵消 RTT 體感延遲
+      const sample: CursorMotionSample = {
+        t: cur.ts,
+        ax: typeof cur.ax === "number" ? cur.ax : 0.5,
+        ay: typeof cur.ay === "number" ? cur.ay : 0.5,
+        vy: typeof cur.vy === "number" ? cur.vy : 0.42,
+        vx: typeof cur.vx === "number" ? cur.vx : 0.5,
+      };
+      const pred = extrapolateCursorPose(prevSampleRef.current, sample, MIRROR_PREDICT_LEAD_MS);
+      prevSampleRef.current = sample;
+      const predicted: CollabCursor = {
+        ...cur,
+        ax: pred.ax,
+        ay: pred.ay,
+        vy: pred.vy,
+        vx: pred.vx,
+      };
+
+      // 先標記已消費，避免同包重入；鎖定失敗仍保留 ts 以免空轉
+      const ok = applyMirrorViewportLock(predicted, containerRefStable?.current ?? null);
+      if (ok) {
+        lastCursorTs = cur.ts;
+        lastScrollAt = now;
+        return;
       }
-    }
-    if (!target) {
-      const zone = zoneOfPeer(followUserId, focusZones);
-      if (zone) {
+      lastCursorTs = cur.ts;
+      if (!findCollabAnchorElement(cur.anchor)) {
+        const zone = zoneOfPeer(followUserId, focusRef.current);
+        if (!zone) return;
+        let el: Element | null = null;
         try {
-          target = document.querySelector(`[data-collab-zone="${CSS.escape(zone)}"]`);
+          el = document.querySelector(`[data-collab-zone="${CSS.escape(zone)}"]`);
         } catch {
-          target = null;
+          el = null;
+        }
+        if (!el) return;
+        ensureAnchorExpanded(el);
+        const r = el.getBoundingClientRect();
+        const mid = r.top + r.height / 2;
+        const vh = window.innerHeight || 1;
+        const delta = mid - vh * 0.42;
+        if (Math.abs(delta) >= MIRROR_LOCK_EPSILON_PX) {
+          applyScrollDeltaY(el, delta);
+          lastScrollAt = now;
         }
       }
-    }
-    if (!target) return;
-    const r = target.getBoundingClientRect();
-    const inView = r.top >= 80 && r.bottom <= window.innerHeight - 40;
-    if (!inView) target.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, [mode, followUserId, cursors, focusZones]);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [mode, followUserId, cursors, containerRefStable]);
 }
 
 /**
@@ -417,7 +995,7 @@ export function CollabModeBar({
         type="button"
         className={`chip${mode === "mirror" ? " on" : ""}`}
         style={{ margin: 0, padding: "2px 10px", fontSize: 12 }}
-        title="鏡像跟隨：畫面捲動跟著選定夥伴的焦點與游標（非螢幕串流）"
+        title="極限精準鏡像：錨點＋螢幕比例鎖定、巢狀捲動雙次校正（非螢幕串流）"
         aria-pressed={mode === "mirror"}
         disabled={others.length === 0}
         onClick={() => onModeChange("mirror")}
@@ -427,7 +1005,7 @@ export function CollabModeBar({
       {mode === "mirror" && (
         <>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 4, margin: 0 }}>
-            <Meta style={{ fontSize: 11 }}>跟著</Meta>
+            <Hint as="span" style={{ fontSize: 11 }}>跟著</Hint>
             <select
               aria-label="選擇要跟隨的夥伴"
               value={followUserId ?? ""}
@@ -442,10 +1020,7 @@ export function CollabModeBar({
               ))}
             </select>
           </label>
-          <Button size="sm"
-            type="button"
-            style={{ padding: "2px 8px", fontSize: 11 }}
-            onClick={() => onModeChange("live")}>
+          <Button size="sm" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => onModeChange("live")}>
             退出鏡像
           </Button>
         </>
@@ -456,41 +1031,78 @@ export function CollabModeBar({
 
 /**
  * 把一枚游標換算成覆蓋層內的座標（px）。
- * 有錨點且本機畫面找得到同名 [data-fb] 卡片 → 用「卡片位置＋卡內比例」（跨版面最準）；
- * 否則退回整頁寬高比例。兩者都與捲動無關（getBoundingClientRect 差值本身已消掉 scroll）。
+ * 有錨點且本機找得到對應元素（#id / data-collab-id / data-fb）→ 元素位置＋卡內比例；
+ * 否則退回整頁寬高比例。
  */
 function cursorPoint(c: CollabCursor, overlayRect: DOMRect): { left: number; top: number } {
-  if (c.anchor) {
-    let el: Element | null = null;
-    try {
-      el = document.querySelector(`[data-fb="${CSS.escape(c.anchor)}"]`);
-    } catch {
-      el = null;
-    }
-    if (el) {
-      const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) {
-        return {
-          left: r.left - overlayRect.left + (c.ax ?? 0) * r.width,
-          top: r.top - overlayRect.top + (c.ay ?? 0) * r.height,
-        };
-      }
+  const el = findCollabAnchorElement(c.anchor);
+  if (el) {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      const ax = typeof c.ax === "number" && Number.isFinite(c.ax) ? c.ax : 0;
+      const ay = typeof c.ay === "number" && Number.isFinite(c.ay) ? c.ay : 0;
+      return {
+        left: r.left - overlayRect.left + ax * r.width,
+        top: r.top - overlayRect.top + ay * r.height,
+      };
     }
   }
   return { left: c.x * overlayRect.width, top: c.y * overlayRect.height };
 }
 
-/** 單枚游標：座標要讀 DOM（錨點卡片位置），用 layout effect 命令式定位，不在 render 期間量測 */
+/** 單枚游標：rAF 插值到最新錨點座標（視覺滑順；鎖定精度不靠這個） */
 function CursorDot({ c, overlayRef }: { c: CollabCursor; overlayRef: RefObject<HTMLDivElement | null> }) {
   const dotRef = useRef<HTMLDivElement | null>(null);
+  const posRef = useRef<{ x: number; y: number } | null>(null);
+  const targetRef = useRef({ x: 0, y: 0 });
+  const rafRef = useRef(0);
+
   useLayoutEffect(() => {
     const overlay = overlayRef.current;
-    const dot = dotRef.current;
-    if (!overlay || !dot) return;
+    if (!overlay) return;
     const p = cursorPoint(c, overlay.getBoundingClientRect());
-    dot.style.left = `${p.left}px`;
-    dot.style.top = `${p.top}px`;
+    targetRef.current = { x: p.left, y: p.top };
+    if (!posRef.current) {
+      posRef.current = { x: p.left, y: p.top };
+      const dot = dotRef.current;
+      if (dot) {
+        dot.style.left = `${p.left}px`;
+        dot.style.top = `${p.top}px`;
+      }
+    }
   }, [c, overlayRef]);
+
+  useEffect(() => {
+    let alive = true;
+    let last = performance.now();
+    const step = (now: number) => {
+      if (!alive) return;
+      rafRef.current = requestAnimationFrame(step);
+      const dot = dotRef.current;
+      const pos = posRef.current;
+      if (!dot || !pos) return;
+      const dt = Math.min(64, now - last);
+      last = now;
+      const t = Math.min(1, dt / CURSOR_LERP_MS);
+      const tx = targetRef.current.x;
+      const ty = targetRef.current.y;
+      pos.x += (tx - pos.x) * t;
+      pos.y += (ty - pos.y) * t;
+      // 貼近目標時直接吸附，避免亞像素殘抖
+      if (Math.abs(tx - pos.x) < 0.4 && Math.abs(ty - pos.y) < 0.4) {
+        pos.x = tx;
+        pos.y = ty;
+      }
+      dot.style.left = `${pos.x}px`;
+      dot.style.top = `${pos.y}px`;
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => {
+      alive = false;
+      cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
+
   return (
     <div
       ref={dotRef}
@@ -498,9 +1110,9 @@ function CursorDot({ c, overlayRef }: { c: CollabCursor; overlayRef: RefObject<H
         position: "absolute",
         left: 0,
         top: 0,
-        transition: "left 0.08s linear, top 0.08s linear",
         display: "flex",
         alignItems: "flex-start",
+        willChange: "left, top",
       }}
     >
       <svg width="14" height="18" viewBox="0 0 14 18" style={{ display: "block", filter: "drop-shadow(0 1px 1px rgba(74,54,32,.28))" }}>
@@ -530,7 +1142,7 @@ export function CursorOverlay({ cursors }: { cursors: Map<string, CollabCursor> 
   const overlayRef = useRef<HTMLDivElement | null>(null);
   if (cursors.size === 0) return null;
   return (
-    <div ref={overlayRef} aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 40, overflow: "hidden" }}>
+    <div ref={overlayRef} data-collab-cursor-layer aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 40, overflow: "hidden" }}>
       {[...cursors.entries()].map(([userId, c]) => (
         <CursorDot key={userId} c={c} overlayRef={overlayRef} />
       ))}

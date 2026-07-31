@@ -15,6 +15,7 @@ export function AskAiMode({
   onSavePromptSuggestion,
   onSaveSceneDraft,
   askFillRequest = null,
+  knowledgeIds,
 }: {
   projectId: string;
   panelId: string;
@@ -25,6 +26,7 @@ export function AskAiMode({
   onSaveSceneDraft?: (text: string) => void;
   /** Fill Ask AI chat input without sending (CreationAction type ask). */
   askFillRequest?: { nonce: number; message: string } | null;
+  knowledgeIds?: string[];
 }) {
   return (
     <div
@@ -43,6 +45,7 @@ export function AskAiMode({
           onSavePromptSuggestion={onSavePromptSuggestion}
           onSaveSceneDraft={onSaveSceneDraft}
           askFillRequest={askFillRequest}
+          knowledgeIds={knowledgeIds}
         />
       </div>
     </div>

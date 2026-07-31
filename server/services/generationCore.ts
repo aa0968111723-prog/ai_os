@@ -22,9 +22,8 @@ import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { failStaleGenerationTx, reserveQuota } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
-import { buildCharacterAnchor } from "../routers/characters";
+import { buildCharacterAnchor, buildSceneAnchor } from "./cardAnchors";
 import { groupLeaderIds, pushToUsers } from "./webPush";
-import { buildSceneAnchor } from "../routers/scenePresets";
 
 export type GenerationRow = typeof schema.generations.$inferSelect;
 
@@ -82,8 +81,8 @@ export interface PromptParts {
 
 /**
  * 世界觀 → 提示詞注入(「懂我們」的核心:上下文自動帶入每次生成)。
- * visual＝formatWorldviewVisualPositive（雙語 tones/styles + 短 logline + message）。
- * LLM＝formatWorldviewForAi(..., "generation-llm")（themes／taboos 正向）。
+ * visual＝formatWorldviewVisualPositive（tones/styles + 短 logline + message；**不含**觀眾／三幕／人物）。
+ * LLM＝formatWorldviewForAi(..., "generation-llm")（themes、短進階觀眾／三幕／人物、taboos 正向）。
  * 禁忌詞（合規句）分流——這是深度優化的關鍵：
  *   - 視覺（圖/影）：走 negative_prompt（見 effectivePromptParts 的 negative）。擴散模型無法靠正向詞
  *     「避免」某物，塞正向反而可能被畫出、甚至把禁忌字當畫面文字渲染——故正向不再放禁忌詞。
@@ -296,8 +295,11 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
 
   const worldview = worldviewSchema.parse(project.worldview ?? {});
   // 世界觀 → 角色定裝 → 場景設定，依序疊加注入（都只撈本專案，且只注入視覺類別）
-  const charAnchor = input.characterIds?.length ? await buildCharacterAnchor(project.id, input.characterIds) : "";
-  const sceneAnchor = input.scenePresetIds?.length ? await buildSceneAnchor(project.id, input.scenePresetIds) : "";
+  // 角色／場景查詢互不相依，並行省一趟 DB RTT
+  const [charAnchor, sceneAnchor] = await Promise.all([
+    input.characterIds?.length ? buildCharacterAnchor(project.id, input.characterIds) : Promise.resolve(""),
+    input.scenePresetIds?.length ? buildSceneAnchor(project.id, input.scenePresetIds) : Promise.resolve(""),
+  ]);
   const promptParts = effectivePromptParts(model, input.prompt, worldview);
   const fullPrompt = withSceneAnchor(
     model,
@@ -365,8 +367,8 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       void groupLeaderIds(project.groupId, input.userId)
         .then((ids) => pushToUsers(ids, {
           title: "生成待核准",
-          body: `${model.label}（${est} 點 ≥ 門檻 ${threshold} 點）——請到生成紀錄核准或駁回`,
-          url: `/p/${project.id}`,
+          body: `【${project.title}】${model.label}（${est} 點 ≥ 門檻 ${threshold} 點）——請到生成紀錄核准或駁回`,
+          url: `/p/${project.id}?focus=generation-${gated.id}`,
           tag: `gen-approve-${project.id}`,
         }))
         .catch((err) => console.warn("[generation] 待核推播失敗：", err instanceof Error ? err.message : err));
@@ -547,7 +549,8 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     void pushToUsers([gen.userId], {
       title: "生成完成",
       body: `${model?.label ?? gen.modelId}：${gen.prompt.slice(0, 60)}`,
-      url: `/p/${gen.projectId}`,
+      // 深連結：直達生成紀錄該筆（ProjectPage focus=generation-* 會開抽屜捲動高亮）
+      url: `/p/${gen.projectId}?focus=generation-${gen.id}`,
       tag: `gen-${gen.projectId}`,
     }).catch((err) => console.warn("[generation] 完成推播失敗：", err instanceof Error ? err.message : err));
     return advanced.updated;
@@ -575,7 +578,7 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     void pushToUsers([gen.userId], {
       title: "生成失敗",
       body: `${model?.label ?? gen.modelId}：${failMsg}${failed.refunded > 0 ? "（點數已退回）" : ""}`,
-      url: `/p/${gen.projectId}`,
+      url: `/p/${gen.projectId}?focus=generation-${gen.id}`,
       tag: `gen-failed-${gen.id}`,
     }).catch((err) => console.warn("[generation] 失敗推播失敗：", err instanceof Error ? err.message : err));
     return updated;

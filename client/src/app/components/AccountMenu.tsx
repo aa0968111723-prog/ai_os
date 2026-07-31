@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
@@ -7,6 +7,7 @@ import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscrib
 import type { MeWithCapabilities } from "../../capabilities";
 import { accountMenuItems, filterNavItems } from "../navigation/navigationItems";
 import { Hint, Meta, Skeleton, useDensity } from "../../components/ui";
+import { MenuSurface } from "./MenuSurface";
 import { writeUiDensity } from "../../lib/densityPreference";
 import { UI_DENSITY_DESCRIPTION, UI_DENSITY_LABEL } from "@shared/uiDensity";
 
@@ -203,44 +204,9 @@ export function AccountMenu({
   userName, me, activeGroupId, isAdmin, activeIsLeader, canSeeOrg, onChangePw, onNotifSettings, onLogout, onLogoutAll, loggingOut,
 }: AccountMenuProps) {
   const [open, setOpen] = useState(false);
-  const wrap = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
-    const menuItems = () => [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? [])];
-    const focusItem = (index: number) => {
-      const items = menuItems();
-      if (!items.length) return;
-      items[(index + items.length) % items.length]?.focus();
-    };
-    // The menu DOM exists when a layout effect runs, so focus synchronously.
-    // requestAnimationFrame made keyboard focus depend on runner/frame timing
-    // and intermittently left focus on the trigger in CI and slower devices.
-    focusItem(0);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-        triggerRef.current?.focus();
-        return;
-      }
-      const items = menuItems();
-      const current = items.indexOf(document.activeElement as HTMLElement);
-      if (e.key === "ArrowDown") { e.preventDefault(); focusItem(current + 1); }
-      if (e.key === "ArrowUp") { e.preventDefault(); focusItem(current - 1); }
-      if (e.key === "Home") { e.preventDefault(); focusItem(0); }
-      if (e.key === "End") { e.preventDefault(); focusItem(items.length - 1); }
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  const close = () => setOpen(false);
+  // 外點／Esc／方向鍵漫遊／手機貼底 sheet 全收在 MenuSurface（見該檔的三個陷阱說明）
+  const close = useCallback(() => setOpen(false), []);
 
   const filterCtx = { isAdmin, activeIsLeader, canSeeOrg, me, activeGroupId };
   const helpItems = filterNavItems(accountMenuItems.filter((i) => i.section === "help"), filterCtx);
@@ -250,14 +216,18 @@ export function AccountMenu({
   const desktop = hasDesktopBridge();
 
   return (
-    <div className="menu-wrap account-menu" ref={wrap}>
+    <div className="menu-wrap account-menu">
       <button ref={triggerRef} className="badge account-menu__trigger" aria-haspopup="menu" aria-expanded={open} title={userName} onClick={() => setOpen((v) => !v)}>
         <Icon name="User" size={14} />
         <span className="account-menu__name">{userName}</span>
         <Icon name="ChevronDown" size={14} className="account-menu__chevron" />
       </button>
-      {open && (
-        <div ref={menuRef} className="menu" role="menu" aria-label="使用者選單">
+      <MenuSurface open={open} onClose={close} label="使用者選單" triggerRef={triggerRef} className="account-menu__menu">
+          {/* 身分標頭：手機 sheet 打開先看到「這是誰的選單」；桌機同樣受益 */}
+          <div className="account-menu__id" role="presentation">
+            <span className="account-menu__avatar" aria-hidden><Icon name="User" size={17} /></span>
+            <strong>{userName}</strong>
+          </div>
           {/* 個人點數摘要：今日／本週用量與剩餘（quota.my）；與頂欄徽章互補 */}
           <PersonalQuotaSummary groupId={activeGroupId} enabled={open} />
           {/* 分組＋分隔線：說明／工作／管理／帳號——扁平長清單太難掃（回饋 W1）。
@@ -329,8 +299,7 @@ export function AccountMenu({
           <button className="menu-item danger" role="menuitem" disabled={loggingOut} onClick={() => { close(); onLogout(); }}>
             <Icon name="Undo2" size={15} />{loggingOut ? "登出中…" : "登出"}
           </button>
-        </div>
-      )}
+      </MenuSurface>
     </div>
   );
 }

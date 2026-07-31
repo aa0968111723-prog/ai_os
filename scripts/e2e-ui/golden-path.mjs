@@ -9,7 +9,7 @@ fs.mkdirSync(DIR, { recursive: true });
 const shot = (page, n) => page.screenshot({ path: `${DIR}/${n}.png`, fullPage: false });
 const log = (...a) => console.log("▸", ...a);
 
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium", headless: true });
+const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM || "/opt/pw-browsers/chromium", headless: true });
 const page = await browser.newPage({ viewport: { width: 1366, height: 900 } });
 
 // 1. 登入

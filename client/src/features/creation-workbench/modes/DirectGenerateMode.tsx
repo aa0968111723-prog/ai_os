@@ -16,7 +16,7 @@ import {
   isUsageBasedPoints,
   shouldShowApprovalThresholdNotice,
 } from "../generationGates";
-import { scrollToSelector } from "../workbenchNav";
+import { revealWorkbenchAnchor, scrollToSelector } from "../workbenchNav";
 import { Button, Card, Chip, Hint, Meta } from "../../../components/ui";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
@@ -141,7 +141,9 @@ export function DirectGenerateMode({
       setPrompt("");
       setConfirming(false);
       setSubmitNotice(
-        data.status === "awaiting_approval" ? "⏳ 已送組長核准——核准後才會開始生成" : "",
+        data.status === "awaiting_approval"
+          ? "⏳ 已送組長核准——核准後才會開始生成"
+          : "✅ 已送出，生成中——完成會推播通知，可先離開這頁",
       );
     },
     onSettled: () => {
@@ -492,8 +494,12 @@ export function DirectGenerateMode({
               {[
                 worldview.logline?.trim() ? "故事錨點" : "",
                 worldview.message?.trim() ? "核心訊息" : "",
-                worldview.tones.length ? `調性（${worldview.tones.join("、")}）` : "",
-                worldview.styles.length ? `風格（${worldview.styles.join("、")}）` : "",
+                worldview.tones.length
+                  ? `調性（${worldview.tones.slice(0, 2).join("、")}${worldview.tones.length > 2 ? "…" : ""}）`
+                  : "",
+                worldview.styles.length
+                  ? `風格主要「${worldview.styles[0]}」${worldview.styles.length > 1 ? `（另 ${worldview.styles.length - 1} 備選不進圖）` : ""}`
+                  : "",
                 worldview.taboos.length ? `禁忌 ${worldview.taboos.length} 條` : "",
               ]
                 .filter(Boolean)
@@ -563,8 +569,9 @@ export function DirectGenerateMode({
       )}
 
       {submitNotice && (
-        <Meta as="p" role="status" style={{ marginTop: 10, color: "var(--gold-ink)" }}>
+        <Meta as="p" role="status" style={{ marginTop: 10, color: "var(--gold-ink)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {submitNotice}
+          <Button size="sm" onClick={() => revealWorkbenchAnchor("#sec-generations", { projectId })}>看進度</Button>
         </Meta>
       )}
       {submit.error && <p className="error">{submit.error.message}</p>}
