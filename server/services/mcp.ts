@@ -313,6 +313,10 @@ export const TOOLS = [
           enum: ["auto", "nim", "fal_economy", "fal_balanced", "fal_quality"],
           description: "規劃模型策略；省略時為 auto（NIM 失敗或格式不合格時備援至 fal.ai）",
         },
+        shortCreation: {
+          type: "boolean",
+          description: "true＝創作短版（playbook.creation.short.v1）：快速可交付影音／圖文，預設不排排程與大量人類任務；省略＝完整規劃",
+        },
       },
       required: ["projectId", "goal"],
     },
@@ -1075,6 +1079,8 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       projectId: String(args.projectId ?? ""),
       goal: String(args.goal ?? ""),
       plannerMode,
+      // D5/M4：短版旗標與工作台「快速開拍（短版）」同一語意——外部模型不必自己拼骨架
+      playbookId: args.shortCreation === true ? "playbook.creation.short.v1" : undefined,
     });
     return {
       runId: run.id,

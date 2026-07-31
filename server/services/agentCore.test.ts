@@ -10,6 +10,7 @@ import {
   DRIVE_PLAN_SOURCE_CHAR_CAP,
   MAX_PLAN_KNOWLEDGE_CHARS,
   plannerKnowledgeBudget,
+  plannerPlaybookDirective,
   toEphemeralPlanSource,
 } from "./agentCore";
 
@@ -141,5 +142,17 @@ describe("PR-E5 plannerKnowledgeBudget（依檔位分級＋硬頂）", () => {
       expect(plannerKnowledgeBudget(mode)).toBeLessThanOrEqual(MAX_PLAN_KNOWLEDGE_CHARS);
       expect(plannerKnowledgeBudget(mode)).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("D5/M4 plannerPlaybookDirective（短版 playbook 旗標）", () => {
+  it("認得創作短版 playbook id，指令含標題與骨架提示", () => {
+    const directive = plannerPlaybookDirective("playbook.creation.short.v1");
+    expect(directive).toContain("創作代理（短版）");
+    expect(directive).toContain("不要預設 create_schedule");
+  });
+  it("不收 roleId 別名與未知 id（呼叫端 fail-fast，不靜默忽略使用者選擇）", () => {
+    expect(plannerPlaybookDirective("role.storyboard")).toBeNull();
+    expect(plannerPlaybookDirective("playbook.nope.v9")).toBeNull();
   });
 });

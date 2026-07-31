@@ -56,6 +56,8 @@ export const agentsRouter = router({
       extraSourceIds: z.array(z.string().uuid()).max(10).optional(),
       // PR-E3：使用者搜尋雲端後「勾選」僅本次納入的 Google 檔案 id（不落庫；每檔 8k 字硬頂）
       driveFileIds: z.array(z.string().regex(/^[\w-]{5,200}$/, "Google 檔案 id 格式不正確")).max(5).optional(),
+      // D5/M4：明確指定 playbook（與 MCP plan_agent 的 shortCreation 同一語意）
+      playbookId: z.string().max(80).optional(),
     }))
     .mutation(({ ctx, input }) => planAgentCore({
       auth: ctx.auth,
@@ -64,6 +66,7 @@ export const agentsRouter = router({
       plannerMode: input.plannerMode,
       extraSourceIds: input.extraSourceIds,
       driveFileIds: input.driveFileIds,
+      playbookId: input.playbookId,
     })),
 
   /** 核准計畫：這一刻起才開始花執行點數（背景執行器下一個 tick 接手） */
