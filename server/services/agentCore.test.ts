@@ -4,7 +4,14 @@
 import { describe, expect, it } from "vitest";
 import { TRPCError } from "@trpc/server";
 import { readFileSync } from "node:fs";
-import { assertUuid, buildPickedSourceBlock, DRIVE_PLAN_SOURCE_CHAR_CAP, toEphemeralPlanSource } from "./agentCore";
+import {
+  assertUuid,
+  buildPickedSourceBlock,
+  DRIVE_PLAN_SOURCE_CHAR_CAP,
+  MAX_PLAN_KNOWLEDGE_CHARS,
+  plannerKnowledgeBudget,
+  toEphemeralPlanSource,
+} from "./agentCore";
 
 describe("assertUuid（MCP / core 入口）", () => {
   it("合法 UUID 不拋錯", () => {
@@ -119,5 +126,20 @@ describe("PR-E3 toEphemeralPlanSource（僅本次雲端來源硬頂）", () => {
   });
   it("空白文字回 null（呼叫端 fail-fast 給人話）", () => {
     expect(toEphemeralPlanSource("空", "   ")).toBeNull();
+  });
+});
+
+describe("PR-E5 plannerKnowledgeBudget（依檔位分級＋硬頂）", () => {
+  it("quality > balanced > auto/nim > economy——高檔位可注入更多", () => {
+    expect(plannerKnowledgeBudget("fal_quality")).toBeGreaterThan(plannerKnowledgeBudget("fal_balanced"));
+    expect(plannerKnowledgeBudget("fal_balanced")).toBeGreaterThan(plannerKnowledgeBudget("fal_economy"));
+    expect(plannerKnowledgeBudget("auto")).toBe(plannerKnowledgeBudget("nim"));
+    expect(plannerKnowledgeBudget("auto")).toBeGreaterThan(plannerKnowledgeBudget("fal_economy"));
+  });
+  it("所有檔位都不可超過產品硬頂（不是把模型窗口自動填滿）", () => {
+    for (const mode of ["auto", "nim", "fal_economy", "fal_balanced", "fal_quality"] as const) {
+      expect(plannerKnowledgeBudget(mode)).toBeLessThanOrEqual(MAX_PLAN_KNOWLEDGE_CHARS);
+      expect(plannerKnowledgeBudget(mode)).toBeGreaterThan(0);
+    }
   });
 });

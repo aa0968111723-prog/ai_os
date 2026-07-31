@@ -62,8 +62,27 @@ export function assertUuid(value: string, label: string): void {
 
 /** 規劃不扣站內點數；Fal 模式仍會依供應商實際 token 用量計費並寫入 plannerTelemetry。 */
 const PLAN_COST_POINTS = 0;
-/** 注入規劃提示詞的知識庫預算：夠 LLM 判斷「有沒有腳本可拆」與題材，不必全文 */
-const PLAN_KNOWLEDGE_BUDGET = 6000;
+/**
+ * PR-E5：規劃知識注入的「產品硬頂」——任何檔位都不可超過。
+ * 預算是產品檔位（成本與品質的取捨），不是把模型窗口自動填滿。
+ */
+export const MAX_PLAN_KNOWLEDGE_CHARS = 24_000;
+
+/**
+ * PR-E5（純函式，可測）：知識注入預算隨規劃模型檔位調整。
+ * economy 省、quality 寬；一律受 MAX_PLAN_KNOWLEDGE_CHARS 硬頂。
+ * 使用者剛選中的來源（PR-E2/E3）仍優先佔額度。
+ */
+export function plannerKnowledgeBudget(mode: AgentPlannerMode): number {
+  const byMode: Record<AgentPlannerMode, number> = {
+    fal_economy: 5_000,
+    auto: 8_000,
+    nim: 8_000,
+    fal_balanced: 10_000,
+    fal_quality: 16_000,
+  };
+  return Math.min(MAX_PLAN_KNOWLEDGE_CHARS, byMode[mode] ?? byMode.auto);
+}
 /** 單一計畫的步驟上限（防 LLM 排出巨額計畫；同時是估點總額的天然上限） */
 const MAX_PLAN_STEPS = 30;
 /** PR-E2：一次規劃可指定的來源上限（使用者明確選中才注入——連接 ≠ 授權讀全部） */
@@ -565,13 +584,15 @@ export async function planAgentCore(input: {
     ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」${STATUS_LABEL[s.status] ?? s.status}｜畫面${s.assetId ? "有" : "無"}｜配音詞${(s.voiceover ?? "").trim() ? "有" : "無"}｜旁白音檔${s.narrationAssetId ? "有" : "無"}`).join("\n")
     : "（尚無分鏡）";
   // PR-E2/E3：使用者選中的來源（站內＋僅本次雲端檔）永遠排在知識預算最前；剩餘額度才給一般知識庫節錄
+  // PR-E5：預算依規劃檔位分級（economy 省、quality 寬），一律受 MAX_PLAN_KNOWLEDGE_CHARS 硬頂
+  const knowledgeBudget = plannerKnowledgeBudget(input.plannerMode ?? "auto");
   const pickedSources = [
     ...(await loadPickedPlannerSources(auth, project.id, input.extraSourceIds ?? [])),
     ...(await loadDriveEphemeralSources(auth.user.id, input.driveFileIds ?? [])),
   ];
-  const picked = buildPickedSourceBlock(pickedSources, PLAN_KNOWLEDGE_BUDGET);
+  const picked = buildPickedSourceBlock(pickedSources, knowledgeBudget);
   const [knowledgeMeta, intelligence] = await Promise.all([
-    buildKnowledgeContextWithMeta(project.id, Math.max(0, PLAN_KNOWLEDGE_BUDGET - picked.usedChars)),
+    buildKnowledgeContextWithMeta(project.id, Math.max(0, knowledgeBudget - picked.usedChars)),
     buildProjectIntelligence(project.id),
   ]);
   const knowledgeCtx = knowledgeMeta.text;
