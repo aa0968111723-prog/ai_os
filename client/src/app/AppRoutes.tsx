@@ -2,6 +2,8 @@ import { lazy } from "react";
 import { Redirect, Route, Switch, Link } from "wouter";
 import { GroupOptionsEditor } from "../components/GroupOptionsEditor";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
+import { EmptyState, Hint } from "../components/ui";
+import { Icon } from "../components/Icon";
 
 // 路由層級 code-splitting（QA-025）：管理、資料庫、排程等重頁面延遲載入，
 // 避免首屏（作業台、專案頁、登入）揹整個 App 的 JS。具名匯出需轉成 lazy 所需的 default export。
@@ -133,13 +135,7 @@ export function UngroupedRoutes() {
       <Route path="/chat/:peerId">{(params) => <ChatPage peerId={params.peerId} />}</Route>
       <Route path="/chat"><ChatPage /></Route>
       <Route>
-        <div className="empty-state" style={{ marginTop: "var(--sp-32)" }}>
-          <h3>你已成功加入 ✓ 還差一步</h3>
-          <p>
-            帳號建立完成，只是還沒被分進任何組別。請聯絡你的組長或管理員把你加入組——加入後重新整理這一頁，就能開始創作。
-          </p>
-          <p className="hint">等待的時候可以先<Link href="/help">看看怎麼用</Link>，了解點數、生成與審核是怎麼運作的。</p>
-        </div>
+        <EmptyState icon={<Icon name="Clock" />} title={<>你已成功加入 ✓ 還差一步</>} description={<>帳號建立完成，只是還沒被分進任何組別。請聯絡你的組長或管理員把你加入組——加入後重新整理這一頁，就能開始創作。</>} action={<><Hint layer="always">等待的時候可以先<Link href="/help">看看怎麼用</Link>，了解點數、生成與審核是怎麼運作的。</Hint></>} style={{ marginTop: "var(--sp-32)" }} />
       </Route>
     </Switch>
   );

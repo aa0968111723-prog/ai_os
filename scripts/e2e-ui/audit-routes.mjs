@@ -38,6 +38,13 @@ const TEST_ROLE = process.env.TEST_ROLE || "unspecified";
 const TEST_PROJECT_ID = process.env.TEST_PROJECT_ID;
 const TEST_PEER_ID = process.env.TEST_PEER_ID;
 
+/**
+ * SPA 是否掛載：`<div className="app">` 在 AppShell 無條件渲染，不等任何 API。
+ * 先前用 header.topbar 當唯一 marker 是錯的——header 被 `{me.data && …}` 閘門
+ * 控制，任何一支慢查詢都會讓它整個不存在，於是「資料層卡住」被誤報成「頁面壞了」。
+ */
+const SHELL_MARKER = "div.app";
+/** 已登入才會出現（保留，但只用來斷言登入狀態，不再兼任「頁面可用」的判準） */
 const AUTHENTICATED_MARKER = 'header.topbar button[aria-haspopup="menu"]';
 const LOGIN_EMAIL = "#login-email";
 const LOGIN_PASSWORD = "#login-pw";
@@ -56,10 +63,44 @@ function requiredEnvironment() {
 }
 
 async function assertAuthenticated(page) {
-  await page.locator(AUTHENTICATED_MARKER).waitFor({ state: "visible", timeout: 15_000 });
-  if (await page.locator(LOGIN_EMAIL).isVisible().catch(() => false)) {
-    throw new Error("仍停留在登入頁，未建立有效工作階段");
+  // 先確認 SPA 真的掛起來了（不依賴任何 API）
+  await page.locator(SHELL_MARKER).waitFor({ state: "attached", timeout: 15_000 });
+
+  // 再等頂欄。順序很重要：登入送出後導向尚未完成時，div.app 已存在而登入表單也還在，
+  // 若先檢查「是否還在登入頁」會誤判成登入失敗（實測踩過）。所以先等頂欄，
+  // 只有等不到時才去分辨成因。
+  try {
+    await page.locator(AUTHENTICATED_MARKER).waitFor({ state: "visible", timeout: 20_000 });
+  } catch {
+    // 分開報錯才能區分「真的沒登入」與「資料層慢到 header 沒渲染」——
+    // 兩者都會讓舊版的單一 marker 逾時，但成因與修法完全不同。
+    if (await page.locator(LOGIN_EMAIL).isVisible().catch(() => false)) {
+      throw new Error("仍停留在登入頁，未建立有效工作階段");
+    }
+    throw new Error("SPA 已掛載但頂欄未出現：auth.me 或與它同批次的查詢逾時（資料層問題，非頁面壞掉）");
   }
+}
+
+/**
+ * 等真實內容，而非等固定秒數。
+ *
+ * 舊版是 `waitForTimeout(700)` 就截圖，結果 /admin 在**所有** viewport 都只截到
+ * Suspense fallback（一顆按鈕都沒渲染）卻標記為 passed——那份 baseline 對這些路由
+ * 其實什麼都沒驗到，比沒驗更危險，因為它給人「已驗證」的錯覺。
+ */
+async function waitForRouteContent(page) {
+  await page.waitForFunction(
+    () => {
+      const main = document.querySelector("#main-content") ?? document.querySelector("main");
+      if (!main) return false;
+      const text = (main.innerText || "").trim();
+      // 只有 Suspense fallback 的「載入中…」不算內容
+      return text.length > 0 && text !== "載入中…" && !/^載入中…?$/.test(text);
+    },
+    { timeout: 20_000 },
+  ).catch(() => {
+    throw new Error("主內容區在 20 秒內仍只有載入中佔位（頁面 chunk 或其資料未就緒）");
+  });
 }
 
 async function login(page) {
@@ -83,10 +124,17 @@ async function inspectViewport(page, vp) {
         return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden";
       })
       .map((element) => {
-        const rect = element.getBoundingClientRect();
+        // 包在 <label> 裡的 checkbox/radio，實際觸控目標是整個 label（點 label 就命中），
+        // 量 13px 的原生小方塊是誤報——WCAG 2.5.5/2.5.8 算的是可點區域，不是控件本體。
+        const type = element.getAttribute("type");
+        const wrapper =
+          element.tagName === "INPUT" && (type === "checkbox" || type === "radio")
+            ? element.closest("label")
+            : null;
+        const rect = (wrapper ?? element).getBoundingClientRect();
         return {
           tag: element.tagName,
-          label: (element.getAttribute("aria-label") || element.textContent || "").trim().slice(0, 60),
+          label: (element.getAttribute("aria-label") || element.textContent || (wrapper?.textContent ?? "")).trim().slice(0, 60),
           width: Math.round(rect.width),
           height: Math.round(rect.height),
         };
@@ -127,12 +175,24 @@ async function run() {
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
-  const page = await context.newPage();
   const consoleErrors = [];
-  page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => consoleErrors.push(error.message));
+  /**
+   * 每個路由開一個新分頁。
+   *
+   * 舊版整輪共用同一個 page：某個路由卡住時，在途請求會拖累後續 iteration——
+   * 實測 `/options` 那個 30 秒 `page.goto` 逾時，其實是被前一個 `/admin` 的停頓
+   * 拖下水的，本身沒問題。分頁隔離讓每個路由的失敗只代表它自己。
+   * 登入狀態存在 context 的 cookie 上，換分頁不需要重新登入。
+   */
+  const newAuditPage = async () => {
+    const p = await context.newPage();
+    p.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    p.on("pageerror", (error) => consoleErrors.push(error.message));
+    return p;
+  };
+  let page = await newAuditPage();
 
   try {
     for (const route of PUBLIC_ROUTES) {
@@ -172,6 +232,11 @@ async function run() {
       const routeName = safeName(route);
       let contentSaved = false;
 
+      // 換新分頁，切斷上一個路由可能還卡著的在途請求
+      const previous = page;
+      page = await newAuditPage();
+      await previous.close().catch(() => {});
+
       for (const vp of VIEWPORTS) {
         const label = `${route} @ ${vp.name}`;
         try {
@@ -179,7 +244,7 @@ async function run() {
           await page.setViewportSize({ width: vp.width, height: vp.height });
           await page.goto(`${TARGET_URL}${route}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
           await assertAuthenticated(page);
-          await page.waitForTimeout(700);
+          await waitForRouteContent(page);
 
           const currentUrl = page.url();
           const actualPath = new URL(currentUrl).pathname;

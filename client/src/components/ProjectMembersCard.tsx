@@ -1,5 +1,5 @@
 import { trpc } from "../api";
-
+import { Card, Hint, Meta, Skeleton } from "./ui";
 /**
  * 專案權限卡（需求 2.3）：預設組內全員可編輯；組長可把個別成員設為「檢視者」（唯讀）。
  * 組長/管理員固定是編輯者（不可降）——裁決與管理不能被自己鎖住。
@@ -22,17 +22,16 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
   if (roles.error) return null; // 讀不到（極端情況）就整卡收起，不擋工作台
   const data = roles.data;
 
-  return (
-    // bare：外層已有收合容器（工作台的 details）自帶標題時，不再包 .card 也不重複大標
-    <div className={bare ? undefined : "card"} data-fb="專案權限卡">
+  const body = (
+    <>
       {!bare && <h2>專案權限</h2>}
-      <p className="hint" style={{ marginTop: 4 }}>
+      <Hint layer="always" style={{ marginTop: 4 }}>
         預設組內全員可編輯；把成員設為「檢視者」後，他在此專案只能瀏覽、留言與下載，不能生成或修改。
-      </p>
+      </Hint>
       {/* 專案負責人：組長以上可轉移（人員異動交接）；一般成員唯讀顯示 */}
       {data && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-          <span className="hint" style={{ margin: 0 }}>負責人</span>
+          <Meta style={{ margin: 0 }}>負責人</Meta>
           {data.canManage ? (
             <select
               aria-label="專案負責人"
@@ -52,28 +51,28 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
           ) : (
             <b style={{ fontSize: 13 }}>{data.owner.name ?? "（已離開的成員）"}</b>
           )}
-          {setOwner.isPending && <span className="hint">轉移中…</span>}
+          {setOwner.isPending && <Meta>轉移中…</Meta>}
           {setOwner.error && <span className="error" style={{ marginTop: 0 }}>{setOwner.error.message}</span>}
         </div>
       )}
       {!data ? (
         <div role="status" aria-label="成員載入中">
-          <div className="skeleton" style={{ height: 32, marginTop: 8 }} />
-          <div className="skeleton" style={{ height: 32, marginTop: 8 }} />
+          <Skeleton style={{ height: 32, marginTop: 8 }} />
+          <Skeleton style={{ height: 32, marginTop: 8 }} />
         </div>
       ) : data.members.length === 0 ? (
         // 防禦性空狀態（正常不會出現：有效成員至少含目前使用者）——留一句話總比整卡靜默空白好
-        <p className="hint" style={{ marginTop: 8 }}>讀不到成員清單——請重新整理；若持續發生請回報管理員。</p>
+        <Hint layer="always" style={{ marginTop: 8 }}>讀不到成員清單——請重新整理；若持續發生請回報管理員。</Hint>
       ) : (
         <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
           {data.members.map((m) => (
             <li key={m.userId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
               <span style={{ flex: "1 1 auto", minWidth: 120 }}>
                 {m.name}
-                {m.groupRole !== "member" && <span className="hint">・{m.groupRole === "leader" ? "組長" : "管理"}</span>}
+                {m.groupRole !== "member" && <Meta>・{m.groupRole === "leader" ? "組長" : "管理"}</Meta>}
               </span>
               {m.groupRole !== "member" ? (
-                <span className="hint">固定編輯者</span>
+                <Meta>固定編輯者</Meta>
               ) : data.canManage ? (
                 <select
                   aria-label={`${m.name} 的專案權限`}
@@ -86,13 +85,21 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
                   <option value="viewer">檢視者（唯讀）</option>
                 </select>
               ) : (
-                <span className="hint">{m.projectRole === "viewer" ? "檢視者（唯讀）" : "編輯者"}</span>
+                <Meta>{m.projectRole === "viewer" ? "檢視者（唯讀）" : "編輯者"}</Meta>
               )}
             </li>
           ))}
         </ul>
       )}
       {setRole.error && <p className="error" role="alert">{setRole.error.message}</p>}
-    </div>
+    </>
+  );
+
+  // bare：外層已有收合容器（工作台的 details）自帶標題時，不再包 .card 也不重複大標。
+  // Card 一定會輸出 .card，所以「有沒有卡面」只能由這裡分岔，不能靠 className 條件式。
+  return bare ? (
+    <div data-fb="專案權限卡">{body}</div>
+  ) : (
+    <Card data-fb="專案權限卡">{body}</Card>
   );
 }

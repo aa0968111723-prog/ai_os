@@ -5,6 +5,7 @@ import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
+import { Button, Card, Chip, EmptyState, Hint, Skeleton } from "../components/ui";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
@@ -278,7 +279,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
       <div style={{ marginBottom: 14 }}><InstallAppBanner /></div>
 
       {/* 精簡建立列（常駐、一行；不再佔右側整欄） */}
-      <section id="new-project-panel" className="card new-project-panel" data-fb="新專案卡" hidden={!createOpen} aria-label="建立新專案">
+      <Card as="section" id="new-project-panel" className="new-project-panel" data-fb="新專案卡" hidden={!createOpen} aria-label="建立新專案">
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div style={{ flex: "3 1 220px" }}>
             <label htmlFor="np-title" style={{ marginTop: 0 }}>新專案名稱</label>
@@ -301,21 +302,23 @@ export function Launchpad({ groupId }: { groupId: string }) {
               ))}
             </select>
           </div>
-          <button className="primary" disabled={!canCreate} onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform })}>
+          <Button variant="primary" disabled={!canCreate} onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform })}>
             {create.isPending ? "建立中…" : "建立專案"}
-          </button>
+          </Button>
         </div>
+        {/* 這一區的說明幾乎都是「為什麼還不能建」＋「怎麼解」，藏起來會讓人卡在原地，
+         * 故多為 layer="always"；只有解釋自動帶入行為的那句屬於引導層。 */}
         {activeGroup && (
-          <p className="hint" style={{ marginTop: 8 }}>將建立在：{activeGroup.teamName}・{activeGroup.groupName}（頂欄可切換組別）</p>
+          <Hint layer="always" style={{ marginTop: 8 }}>將建立在：{activeGroup.teamName}・{activeGroup.groupName}（頂欄可切換組別）</Hint>
         )}
-        {options.isLoading && <p className="hint">選項載入中…</p>}
-        {!options.isLoading && groupId && !kindOptions.length && <p className="hint">這個組還沒有內容類型選項——請組長到「選項」頁新增。</p>}
-        {!options.isLoading && groupId && !platformOptions.length && <p className="hint">這個組還沒有發布平台選項——請組長到「選項」頁新增。</p>}
-        {pickedPlatform?.format && <p className="hint">畫面格式：{pickedPlatform.format}（依平台自動帶入）</p>}
-        {!groupId && <p className="hint">（要先屬於一個組才能建專案）</p>}
-        {groupId && kindOptions.length > 0 && platformOptions.length > 0 && !title.trim() && <p className="hint">先為專案命名，就能建立專案。</p>}
+        {options.isLoading && <Hint layer="always">選項載入中…</Hint>}
+        {!options.isLoading && groupId && !kindOptions.length && <Hint layer="always">這個組還沒有內容類型選項——請組長到「選項」頁新增。</Hint>}
+        {!options.isLoading && groupId && !platformOptions.length && <Hint layer="always">這個組還沒有發布平台選項——請組長到「選項」頁新增。</Hint>}
+        {pickedPlatform?.format && <Hint>畫面格式：{pickedPlatform.format}（依平台自動帶入）</Hint>}
+        {!groupId && <Hint layer="always">（要先屬於一個組才能建專案）</Hint>}
+        {groupId && kindOptions.length > 0 && platformOptions.length > 0 && !title.trim() && <Hint layer="always">先為專案命名，就能建立專案。</Hint>}
         {create.error && <p className="error" role="alert">{create.error.message}</p>}
-      </section>
+      </Card>
 
       <div className={`daily-overview${recentProjects.length ? "" : " daily-overview--solo"}`}>
         <div className="daily-overview__main">
@@ -401,7 +404,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                       <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
                     </span>
                     {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
-                      <span className="chip">{pending.pendingApprovals + pending.awaitingGenerations} 待處理</span>
+                      <Chip>{pending.pendingApprovals + pending.awaitingGenerations} 待處理</Chip>
                     )}
                     <Icon name="ChevronRight" size={17} />
                   </Link>
@@ -426,7 +429,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
       <section id="projects" className="dashboard-section" aria-labelledby="projects-title">
         <div className="section-heading">
           <div><p className="eyebrow">完整清單</p><h2 id="projects-title">所有專案</h2></div>
-          <button type="button" className="btn-sm" onClick={() => setCreateOpen(true)}>建立新專案</button>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>建立新專案</Button>
         </div>
 
       {/* 工具列：搜尋／類型篩選／排序／顯示已封存（有專案或開了已封存才顯示完整工具列；
@@ -466,7 +469,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
             顯示已封存
           </label>
           {all.length > 0 && (
-            <span className="hint" style={{ marginLeft: "auto" }}>{shownList.length} 個專案</span>
+            /* 篩選後的結果數是狀態不是說明——收成「？」只會讓人不知道篩掉了多少 */
+            <Hint as="span" layer="always" style={{ marginLeft: "auto" }}>{shownList.length} 個專案</Hint>
           )}
         </div>
       )}
@@ -474,7 +478,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
       {projects.error && (
         <p className="error" role="alert">
           專案清單暫時載入不了——
-          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => projects.refetch()}>再試一次</button>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => projects.refetch()}>再試一次</Button>
         </p>
       )}
 
@@ -483,34 +487,38 @@ export function Launchpad({ groupId }: { groupId: string }) {
       )}
 
       {all.length === 0 && !projects.isLoading && !projects.error && !showFirstRun && (
-        <div className="empty-state">
-          <h3>{includeArchived ? "還沒有專案（含已封存）" : "還沒有專案"}</h3>
-          <p>
-            {includeArchived
+        <EmptyState icon={<Icon name="Package" />}
+          title={includeArchived ? "還沒有專案（含已封存）" : "還沒有專案"}
+          description={
+            includeArchived
               ? "從上面開一個新專案，或先開個不花點數的範例看看完整長相。"
-              : "從上面開一個新專案，或勾「顯示已封存」找回已封存的專案。也可先開個不花點數的範例看看完整長相。"}
-          </p>
-          <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", marginTop: 12 }}>
-            <button
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-              disabled={!groupId || createSample.isPending}
-              onClick={() => createSample.mutate({ groupId })}
-            >
-              <Icon name="Sparkles" size={15} />
-              {createSample.isPending ? "建立範例中…" : "建立範例專案看看（免費）"}
-            </button>
-            <Link href="/help" style={{ display: "inline-flex", alignItems: "center", gap: 4, alignSelf: "center" }}>
-              <Icon name="HelpCircle" size={14} />看怎麼用
-            </Link>
-          </div>
-          {createSample.error && <p className="error">{createSample.error.message}</p>}
-        </div>
+              : "從上面開一個新專案，或勾「顯示已封存」找回已封存的專案。也可先開個不花點數的範例看看完整長相。"
+          }
+          action={
+            <>
+              <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", marginTop: 12 }}>
+                <Button
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  disabled={!groupId || createSample.isPending}
+                  onClick={() => createSample.mutate({ groupId })}
+                >
+                  <Icon name="Sparkles" size={15} />
+                  {createSample.isPending ? "建立範例中…" : "建立範例專案看看（免費）"}
+                </Button>
+                <Link href="/help" style={{ display: "inline-flex", alignItems: "center", gap: 4, alignSelf: "center" }}>
+                  <Icon name="HelpCircle" size={14} />看怎麼用
+                </Link>
+              </div>
+              {createSample.error && <p className="error">{createSample.error.message}</p>}
+            </>
+          }
+        />
       )}
-      {all.length > 0 && shownList.length === 0 && <p className="hint">沒有符合「{q}」的專案。</p>}
+      {all.length > 0 && shownList.length === 0 && <Hint layer="always">沒有符合「{q}」的專案。</Hint>}
 
       <div className="launch-grid" aria-busy={projects.isLoading}>
         {projects.isLoading &&
-          Array.from({ length: 8 }).map((_, i) => <div key={`sk-${i}`} className="launch-card skeleton" style={{ height: 176 }} aria-hidden />)}
+          Array.from({ length: 8 }).map((_, i) => <Skeleton key={`sk-${i}`} className="launch-card" height={176} />)}
         {shown.map((p) => {
           const isArchived = p.status === "archived";
           const canRestore = isArchived && (isLeader || p.ownerId === myUserId);
@@ -528,12 +536,12 @@ export function Launchpad({ groupId }: { groupId: string }) {
               <div className="launch-body">
                 <h3 className="launch-title">{p.title}</h3>
                 <div className="launch-meta">
-                  <span className="chip" style={{ margin: 0 }}>{kindLabelOf(p.kind)}</span>
+                  <Chip style={{ margin: 0 }}>{kindLabelOf(p.kind)}</Chip>
                   <span>{p.format}</span>
                   {isArchived && (
-                    <span className="chip" style={{ margin: 0, color: "var(--fg-secondary)" }} title="已封存，可還原">
+                    <Chip style={{ margin: 0, color: "var(--fg-secondary)" }} title="已封存，可還原">
                       已封存
-                    </span>
+                    </Chip>
                   )}
                   {/* 待辦角標：分鏡待審（組長裁決）／生成待核（成本門檻攔下）——點卡片進專案就能處理 */}
                   {!isArchived && (() => {
@@ -542,14 +550,14 @@ export function Launchpad({ groupId }: { groupId: string }) {
                     return (
                       <>
                         {pd.pendingApprovals > 0 && (
-                          <span className="chip" style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有分鏡送審等組長裁決">
+                          <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有分鏡送審等組長裁決">
                             待審 {pd.pendingApprovals}
-                          </span>
+                          </Chip>
                         )}
                         {pd.awaitingGenerations > 0 && (
-                          <span className="chip" style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有生成被成本門檻攔下，等組長核准">
+                          <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有生成被成本門檻攔下，等組長核准">
                             待核 {pd.awaitingGenerations}
-                          </span>
+                          </Chip>
                         )}
                       </>
                     );
@@ -558,9 +566,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
                 <div className="launch-meta" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span>更新於 {relTime(p.updatedAt)}</span>
                   {canRestore && (
-                    <button
-                      type="button"
-                      className="btn-sm"
+                    <Button
+                      size="sm"
                       disabled={restoreProject.isPending}
                       title="還原後會重新出現在作業台"
                       onClick={(e) => {
@@ -570,7 +577,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                       }}
                     >
                       {restoreProject.isPending ? "還原中…" : "還原"}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -697,7 +704,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
   const healthMeta = HEALTH_LABEL[summary?.health ?? "healthy"] ?? HEALTH_LABEL.healthy;
 
   return (
-    <section className="card team-ai-card" data-fb="組彙總AI卡">
+    <Card as="section" className="team-ai-card" data-fb="組彙總AI卡">
       {/* ── 團隊分析：全組代理匯總（非聊天） ── */}
       <div className="team-analysis" aria-labelledby="team-analysis-title">
         <div className="team-analysis__head">
@@ -715,11 +722,11 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
             </span>
           )}
         </div>
-        {overview.isLoading && <div className="skeleton" style={{ height: 48, marginTop: 10 }} aria-hidden />}
+        {overview.isLoading && <Skeleton height={48} style={{ marginTop: 10 }} />}
         {overview.error && (
           <p className="error" role="alert" style={{ marginTop: 8 }}>
             代理動態載入失敗——
-            <button type="button" className="btn-ghost btn-sm" onClick={() => overview.refetch()}>再試一次</button>
+            <Button variant="ghost" size="sm" onClick={() => overview.refetch()}>再試一次</Button>
           </p>
         )}
         {summary && !overview.isLoading && (
@@ -741,7 +748,8 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
             </button>
           </div>
         )}
-        <p className="hint" style={{ margin: "8px 0 0" }}>{healthMeta.hint}</p>
+        {/* 健康度徽章旁的解釋：徽章本身已有文字標籤，這句是補充 → 引導層 */}
+        <Hint style={{ margin: "8px 0 0" }}>{healthMeta.hint}</Hint>
       </div>
 
       {/* ── 組執行計畫動態 ── */}
@@ -756,9 +764,10 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
         >
           <Icon name="Sparkles" size={13} />
           <span>組執行計畫動態</span>
-          <span className="hint">
+          {/* 在 <button> 內，必須用 span（<p> 會是無效 HTML）；筆數是狀態不是說明 */}
+          <Hint as="span" layer="always">
             （{runs.length} 筆{activeRuns > 0 ? `・${activeRuns} 進行中` : ""}）
-          </span>
+          </Hint>
           <Icon name={runsCollapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ marginLeft: "auto" }} />
         </button>
         <div id="team-agent-runs" hidden={runsCollapsed}>
@@ -778,15 +787,17 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
             </div>
           )}
           {runs.length === 0 && !overview.isLoading && !overview.error && (
-            <p className="hint" style={{ marginTop: 8 }}>
+            /* 空清單時這句是唯一的下一步指引，收起來就變成一片空白 */
+            <Hint layer="always" style={{ marginTop: 8 }}>
               這個組還沒有 AI 執行計畫。可在下方問組彙總 AI，或到專案頁用「執行計畫」發起。
-            </p>
+            </Hint>
           )}
           {runs.length > 0 && filteredRuns.length === 0 && (
-            <p className="hint" style={{ marginTop: 8 }}>
+            /* 「篩選後沒東西」＋還原辦法，藏起來會讓人以為資料不見了 */
+            <Hint layer="always" style={{ marginTop: 8 }}>
               目前篩選下沒有計畫——
-              <button type="button" className="btn-ghost btn-sm" onClick={() => setRunFilter("all")}>改看全部</button>
-            </p>
+              <Button variant="ghost" size="sm" onClick={() => setRunFilter("all")}>改看全部</Button>
+            </Hint>
           )}
           {filteredRuns.length > 0 && (
             <div className="team-run-list" style={{ marginTop: 8 }}>
@@ -796,7 +807,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
                 const href = `/p/${r.projectId}?focus=agent-run-${r.id}`;
                 return (
                   <div key={r.id} className={`team-run-row is-${r.status}`}>
-                    <span className="chip" style={{ margin: 0, color: st.color, borderColor: st.color }}>{st.label}</span>
+                    <Chip style={{ margin: 0, color: st.color, borderColor: st.color }}>{st.label}</Chip>
                     <span className="team-run-row__copy">
                       <Link href={href} title="開啟專案並定位此計畫">{r.projectTitle}</Link>
                       <span title={r.goal}>{r.goal}</span>
@@ -855,26 +866,27 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
         {msgs.length === 0 && !ask.isPending && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
             {TEAM_QUICK_QS.map((q) => (
-              <button key={q} type="button" className="btn-sm" title="點了帶入輸入框，按「詢問」才送出（免費）" onClick={() => setQuestion(q)}>
+              <Button key={q} size="sm" title="點了帶入輸入框，按「詢問」才送出（免費）" onClick={() => setQuestion(q)}>
                 {q}
-              </button>
+              </Button>
             ))}
           </div>
         )}
 
-        <p className="hint" style={{ marginTop: 8 }}>
+        {/* 「免費・唯讀」是花不花錢的前提，屬於代價資訊 → 兩種模式都要看得到 */}
+        <Hint layer="always" style={{ marginTop: 8 }}>
           免費・唯讀分析整組專案與代理進度{canDispatchHint ? "，並可提議發起 AI 執行計畫（需該專案核准才花點）" : ""}。
           {msgs.length > 0 && (
-            <button
-              type="button"
-              className="btn-ghost btn-sm"
+            <Button
+              variant="ghost"
+              size="sm"
               style={{ marginLeft: 8 }}
               onClick={() => { setMsgs([]); setDispatched({}); ask.reset(); }}
             >
               清除對話
-            </button>
+            </Button>
           )}
-        </p>
+        </Hint>
         {ask.error && <p className="error" role="alert">{ask.error.message}</p>}
 
         {msgs.length > 0 && (
@@ -898,10 +910,11 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
                         return (
                           <div key={key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                             {done ? (
-                              <div className="hint" style={{ color: "var(--success-ink)" }}>
+                              /* 已建立計畫的估點與「去核准」入口——藏起來就找不到要核准什麼 */
+                              <Hint as="div" layer="always" style={{ color: "var(--success-ink)" }}>
                                 ✓ 已在「{d.projectTitle}」建立 AI 執行計畫（估 {done.estPoints} 點）：{done.summary}
                                 <Link href={`/p/${d.projectId}?focus=agent-run-${done.runId}`} style={{ marginLeft: 6 }}>到專案核准 →</Link>
-                              </div>
+                              </Hint>
                             ) : (
                               <ConfirmButton
                                 triggerClassName="btn-tonal btn-sm"
@@ -941,6 +954,6 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
           </div>
         )}
       </div>
-    </section>
+    </Card>
   );
 }

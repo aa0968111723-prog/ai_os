@@ -15,6 +15,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "auth.revokeSession": "撤銷登入裝置",
   "auth.createUploadGrant": "簽發上傳授權",
   "auth.changePassword": "修改密碼",
+  "auth.setUiDensity": "調整介面說明密度",
   "auth.acceptInvite": "接受邀請加入",
   "admin.createTeam": "建立團隊",
   "admin.createGroup": "建立組別",

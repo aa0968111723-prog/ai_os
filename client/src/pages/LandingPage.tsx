@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { BrandLogo } from "../components/BrandLogo";
 import { Icon } from "../components/Icon";
+import { Chip } from "../components/ui";
 
 const CAPABILITIES = [
   { icon: "Lightbulb" as const, title: "先理解，再規劃", body: "AI 先整理目標、缺少資訊、風險與成功條件，再把工作拆成可核准的執行計畫。" },
@@ -44,7 +45,7 @@ export function LandingPage() {
             <div className="landing-preview__head">
               <span className="status-dot running" aria-hidden />
               <span>城市微光・活動準備</span>
-              <span className="chip">執行中</span>
+              <Chip>執行中</Chip>
             </div>
             <div className="landing-plan-step done">
               <Icon name="Check" size={15} /><span><strong>理解企劃資料</strong><small>已整理目標與 6 項議題</small></span>

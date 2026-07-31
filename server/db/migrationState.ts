@@ -95,6 +95,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0013_upload_grants",
   // 0014：純新增 email_step_up_challenges 表＋索引（皆 IF NOT EXISTS），可安全納入 bridge
   "0014_email_step_up",
+  // 0015：users 加 nullable ui_density 欄位（ADD COLUMN IF NOT EXISTS），可安全納入 bridge
+  "0015_ui_density",
 ] as const;
 
 /**

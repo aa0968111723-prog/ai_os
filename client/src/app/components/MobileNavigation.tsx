@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Icon, type IconName } from "../../components/Icon";
+import { Button } from "../../components/ui";
 
 const ITEMS: { href: string; label: string; icon: IconName; match: string[] }[] = [
   { href: "/dashboard", label: "今日", icon: "CheckCircle2", match: ["/dashboard"] },
@@ -48,9 +49,9 @@ export function MobileNavigation() {
                 <strong>更多日常工具</strong>
                 <small>資料、溝通與外部連接都保留在這裡</small>
               </span>
-              <button type="button" className="btn-ghost btn-sm" onClick={() => setMoreOpen(false)} aria-label="關閉更多功能">
+              <Button variant="ghost" size="sm" type="button" onClick={() => setMoreOpen(false)} aria-label="關閉更多功能">
                 <Icon name="X" size={16} />
-              </button>
+              </Button>
             </div>
             <div className="mobile-more-sheet__grid">
               {MORE_ITEMS.map((item) => (

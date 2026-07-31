@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { Icon } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-
+import { Button, Card, Hint, Meta, Skeleton } from "../components/ui";
 /**
  * 資料下載區（需求 #11）：開發筆記／模型資料／UIUX 設計／隱私與法律，集中一頁下載。
  * 清單來自 /api/downloads 的白名單（伺服器逐檔確認存在才列出）；
@@ -69,13 +69,13 @@ export function DownloadsPage() {
       {errMsg && (
         <p className="error" role="alert">
           {errMsg}——
-          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => setReloadKey((k) => k + 1)}>再試一次</button>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => setReloadKey((k) => k + 1)}>再試一次</Button>
         </p>
       )}
       {!data && !errMsg && (
         <div role="status" aria-label="清單載入中">
-          <div className="skeleton" style={{ height: 90, marginTop: 12 }} />
-          <div className="skeleton" style={{ height: 90, marginTop: 12 }} />
+          <Skeleton style={{ height: 90, marginTop: 12 }} />
+          <Skeleton style={{ height: 90, marginTop: 12 }} />
         </div>
       )}
 
@@ -83,11 +83,11 @@ export function DownloadsPage() {
         {data?.categories.map((cat) => {
           const items = data.items.filter((it) => it.category === cat.id);
           return (
-            <section key={cat.id} className="card download-category-card" data-fb={`下載區・${cat.label}`}>
+            <Card as="section" className="download-category-card" key={cat.id} data-fb={`下載區・${cat.label}`}>
               <h2 style={{ marginTop: 0 }}>{cat.label}</h2>
-              <p className="hint" style={{ marginTop: 4 }}>{cat.hint}</p>
+              <Hint style={{ marginTop: 4 }}>{cat.hint}</Hint>
               {items.length === 0 ? (
-                <p className="hint" style={{ margin: "10px 0 2px" }}>（待補——文件備齊後會出現在這裡）</p>
+                <Hint layer="always" style={{ margin: "10px 0 2px" }}>（待補——文件備齊後會出現在這裡）</Hint>
               ) : (
                 <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 0" }}>
                   {items.map((it) => (
@@ -97,9 +97,9 @@ export function DownloadsPage() {
                     >
                       <Icon name="FileText" size={15} style={{ flex: "none" }} />
                       <span style={{ flex: "1 1 auto", minWidth: 160 }}>{it.title}</span>
-                      <span className="hint mono" style={{ flex: "none" }}>
+                      <Meta className="mono" style={{ flex: "none" }}>
                         {fmtSize(it.sizeBytes)}・{new Date(it.updatedAt).toLocaleDateString("zh-TW")}
-                      </span>
+                      </Meta>
                       <a href={`/api/downloads/file?name=${encodeURIComponent(it.file)}`} download>
                         <Icon name="Download" size={14} style={{ verticalAlign: "-2px", marginRight: 4 }} />下載
                       </a>
@@ -107,14 +107,14 @@ export function DownloadsPage() {
                   ))}
                 </ul>
               )}
-            </section>
+            </Card>
           );
         })}
       </div>
 
       <p style={{ marginTop: 24 }}>
         <Link href="/dashboard">回今日工作台</Link>
-        <span className="hint" style={{ margin: "0 10px" }}>·</span>
+        <Meta style={{ margin: "0 10px" }}>·</Meta>
         <Link href="/models">看模型指南</Link>
       </p>
     </div>

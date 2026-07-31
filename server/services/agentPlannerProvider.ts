@@ -19,25 +19,12 @@ const FAL_OPENROUTER_ENDPOINT = "openrouter/router";
 const FAL_POLL_INTERVAL_MS = 750;
 const FAL_PLAN_TIMEOUT_MS = 90_000;
 
-export const FAL_AGENT_PROFILES = {
-  fal_economy: {
-    model: "google/gemini-2.5-flash-lite",
-    maxTokens: 3_000,
-    temperature: 0.1,
-  },
-  fal_balanced: {
-    model: "openai/gpt-5-mini",
-    maxTokens: 5_000,
-    temperature: 0.1,
-  },
-  fal_quality: {
-    model: "anthropic/claude-sonnet-4.5",
-    maxTokens: 8_000,
-    temperature: 0.1,
-  },
-} as const;
-
-type FalAgentMode = keyof typeof FAL_AGENT_PROFILES;
+/**
+ * 模型檔位下沉到共用 LLM 供應層（llmProvider），讓聊天助手與規劃器吃同一份設定——
+ * 兩邊各留一份的話，改價或換模型時必然漂移。此處 re-export 維持既有匯入點不變。
+ */
+export { FAL_AGENT_PROFILES, type FalAgentMode } from "./llmProvider";
+import { FAL_AGENT_PROFILES, type FalAgentMode } from "./llmProvider";
 
 interface PlannerCompletion {
   provider: "nvidia-nim" | "fal-openrouter";

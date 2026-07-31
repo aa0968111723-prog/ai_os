@@ -11,6 +11,7 @@ import { getModel, tierLabel } from "@shared/models";
 import { toCsv } from "@shared/csv";
 import { formatTwd, formatUsd, moneyFxNote } from "@shared/money";
 
+import { Button, Card, Chip, EmptyState, Hint, Meta, Pill, Skeleton } from "../components/ui";
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
   bug: { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" },
@@ -116,9 +117,9 @@ function GroupQuotaRow({ group }: { group: { id: string; name: string } }) {
           }}
         />
       )}
-      <span className="hint">空=跟全域・0=不限</span>
+      <Hint as="span" layer="always">空=跟全域・0=不限</Hint>
       {setGroupQuota.error && <span className="error" style={{ marginTop: 0 }}>{setGroupQuota.error.message}</span>}
-      {saved && <span className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</span>}
+      {saved && <Meta style={{ color: "var(--success-ink)" }}>已儲存 ✓</Meta>}
     </div>
   );
 }
@@ -166,11 +167,11 @@ function GroupBudgetRow({ group }: { group: { id: string; name: string } }) {
         />
       )}
       {/* 累計點數池：給開發者看「這組發了多少、用了多少、組長分下去多少」——空=不限 */}
-      <span className="hint">
+      <Meta>
         {current != null ? `已用 ${used}／${current}・已分給組員 ${allocated}` : "空=不限（累計總量）"}
-      </span>
+      </Meta>
       {setGroupBudget.error && <span className="error" style={{ marginTop: 0 }}>{setGroupBudget.error.message}</span>}
-      {saved && <span className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</span>}
+      {saved && <Meta style={{ color: "var(--success-ink)" }}>已儲存 ✓</Meta>}
     </div>
   );
 }
@@ -199,9 +200,9 @@ const ROLE_BADGE_STYLE: Record<"super" | "leader" | "member", CSSProperties> = {
 };
 function RoleBadge({ kind, children }: { kind: "super" | "leader" | "member"; children: string }) {
   return (
-    <span className="pill" style={{ ...ROLE_BADGE_STYLE[kind], fontSize: 11, padding: "1px 8px", borderRadius: 999, whiteSpace: "nowrap" }}>
+    <Pill style={{ ...ROLE_BADGE_STYLE[kind], fontSize: 11, padding: "1px 8px", borderRadius: 999, whiteSpace: "nowrap" }}>
       {children}
-    </span>
+    </Pill>
   );
 }
 
@@ -286,7 +287,7 @@ function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf 
         {member.isSuperAdmin && <RoleBadge kind="super">超管</RoleBadge>}
         <RoleBadge kind={isLeader ? "leader" : "member"}>{isLeader ? "組長" : "組員"}</RoleBadge>
         {member.disabled && (
-          <span className="pill" style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, color: "var(--danger-ink)", border: "1px solid var(--border-soft)" }}>已停用</span>
+          <Pill style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, color: "var(--danger-ink)", border: "1px solid var(--border-soft)" }}>已停用</Pill>
         )}
         <a className="hint" href={`mailto:${member.email}`} style={{ fontSize: 12, color: "inherit", overflowWrap: "anywhere" }}>{member.email}</a>
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
@@ -315,12 +316,12 @@ function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf 
         </span>
       </div>
       {/* 第二列：活動與點數近況 */}
-      <div className="hint" style={{ fontSize: 11, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <Meta as="div" style={{ fontSize: 11, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
           <Icon name="Clock" size={11} />最近登入 {relTime(member.lastLoginAt)}
         </span>
         <span>本週 {member.weekly.toLocaleString()} 點・累計 {member.total.toLocaleString()} 點{member.budget != null && `（個人預算 ${member.budget.toLocaleString()}）`}</span>
-      </div>
+      </Meta>
       {/* 第三列：就地可調的個人額度（比照組長「選項」頁同一套 quota mutation） */}
       <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
         <MemberNumberField
@@ -353,9 +354,9 @@ function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf 
             可派工 AI 執行計畫
           </label>
         ) : (
-          <span className="hint" style={{ fontSize: 11 }}>組長以上恆可派工 AI 執行計畫</span>
+          <Hint as="span" style={{ fontSize: 11 }}>組長以上恆可派工 AI 執行計畫</Hint>
         )}
-        {isSelf && <span className="hint" style={{ fontSize: 11 }}>（我）</span>}
+        {isSelf && <Meta style={{ fontSize: 11 }}>（我）</Meta>}
       </div>
       {actionError && <p className="error">{actionError.message}</p>}
       {tempPassword && (
@@ -365,9 +366,9 @@ function MemberDetailRow({ groupId, groupName, member, canResetPassword, isSelf 
             <b style={{ fontFamily: "var(--mono)", fontSize: 15, letterSpacing: 1 }}>{tempPassword}</b>
             <CopyButton text={tempPassword} />
           </div>
-          <p className="hint" style={{ marginTop: 4 }}>
+          <Hint layer="always" style={{ marginTop: 4 }}>
             請把密碼傳給 {member.name} 本人；他用這組密碼登入後，可從頂欄「改密碼」換成自己的密碼。
-          </p>
+          </Hint>
         </div>
       )}
     </div>
@@ -407,7 +408,7 @@ const AGENT_ACCESS_LABEL: Record<string, string> = {
 /** 資料庫清單（組資料庫／團隊資料庫共用）：名稱＋列/文件/欄位數＋寫入與 AI 存取設定＋建立者 */
 function DatabaseList({ databases }: { databases: GroupDetail["databases"] }) {
   if (databases.length === 0) {
-    return <p className="hint" style={{ margin: "6px 0 0", fontSize: 12 }}>還沒有這個範圍的資料庫——到「資料庫」頁即可建立。</p>;
+    return <Hint layer="always" style={{ margin: "6px 0 0", fontSize: 12 }}>還沒有這個範圍的資料庫——到「資料庫」頁即可建立。</Hint>;
   }
   return (
     <div style={{ marginTop: 4 }}>
@@ -416,15 +417,15 @@ function DatabaseList({ databases }: { databases: GroupDetail["databases"] }) {
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <Icon name="Database" size={12} />
             <b>{d.name}</b>
-            <span className="hint">{d.rowCount} 列・{d.fileCount} 份文件・{d.fieldCount} 個欄位</span>
-            <span className="hint" style={{ marginLeft: "auto", fontSize: 11 }}>更新 {relTime(d.updatedAt)}</span>
+            <Meta>{d.rowCount} 列・{d.fileCount} 份文件・{d.fieldCount} 個欄位</Meta>
+            <Meta style={{ marginLeft: "auto", fontSize: 11 }}>更新 {relTime(d.updatedAt)}</Meta>
           </div>
-          <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Meta as="div" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
             <span>{d.memberWritable ? "成員可寫" : "僅管理者可寫"}</span>
             <span>{AGENT_ACCESS_LABEL[d.agentAccess] ?? d.agentAccess}</span>
             <span>建立者 {d.creatorName}</span>
             {d.description && <span style={{ overflowWrap: "anywhere" }}>{d.description}</span>}
-          </div>
+          </Meta>
         </div>
       ))}
     </div>
@@ -455,12 +456,12 @@ function ProjectOwnerRow({ groupId, project, members }: {
         <Icon name="FileText" size={12} />
         <b style={{ overflowWrap: "anywhere" }}>{project.title}</b>
         {project.status !== "active" && (
-          <span className="pill" style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, background: "var(--card2)", color: "var(--fg-secondary)", border: "1px solid var(--border-soft)" }}>
+          <Pill style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, background: "var(--card2)", color: "var(--fg-secondary)", border: "1px solid var(--border-soft)" }}>
             {PROJECT_STATUS_LABEL[project.status] ?? project.status}
-          </span>
+          </Pill>
         )}
-        <span className="hint" style={{ fontSize: 11 }}>{project.kind}・{project.platform}</span>
-        <span className="hint" style={{ marginLeft: "auto", fontSize: 11 }}>更新 {relTime(project.updatedAt)}</span>
+        <Meta style={{ fontSize: 11 }}>{project.kind}・{project.platform}</Meta>
+        <Meta style={{ marginLeft: "auto", fontSize: 11 }}>更新 {relTime(project.updatedAt)}</Meta>
       </div>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
         <label className="hint" htmlFor={`project-owner-${project.id}`} style={{ margin: 0, fontSize: 12 }}>負責人</label>
@@ -480,7 +481,7 @@ function ProjectOwnerRow({ groupId, project, members }: {
             <option key={m.userId} value={m.userId}>{m.name}{m.role === "leader" ? "・組長" : ""}</option>
           ))}
         </select>
-        {setOwner.isPending && <span className="hint" style={{ fontSize: 11 }}>轉移中…</span>}
+        {setOwner.isPending && <Meta style={{ fontSize: 11 }}>轉移中…</Meta>}
         {setOwner.error && <span className="error" style={{ marginTop: 0, fontSize: 11 }}>{setOwner.error.message}</span>}
       </div>
     </div>
@@ -494,7 +495,7 @@ function DetailBlock({ title, count, children }: { title: string; count: number;
       <summary style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", listStyle: "none" }}>
         <Icon name="ChevronRight" size={14} className="details-caret" />
         <b>{title}</b>
-        <span className="hint" style={{ fontSize: 12 }}>（{count}）</span>
+        <Meta style={{ fontSize: 12 }}>（{count}）</Meta>
       </summary>
       {children}
     </details>
@@ -517,27 +518,27 @@ function GroupSection({ group, teamAdmins, isSuperAdmin, meId }: {
       <h3 style={{ fontSize: "var(--fs-16)", margin: "0 0 2px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         {group.name}
         {detail.data && (
-          <span className="hint" style={{ fontSize: 12, fontWeight: 400 }}>
+          <Meta style={{ fontSize: 12, fontWeight: 400 }}>
             {detail.data.members.length} 位成員
             {detail.data.members.some((m) => m.role === "leader")
               ? `・組長：${detail.data.members.filter((m) => m.role === "leader").map((m) => m.name).join("、")}`
               : "・尚未指定組長"}
-          </span>
+          </Meta>
         )}
       </h3>
       {detail.isLoading ? (
         <div role="status" aria-label="組詳情載入中">
-          <div className="skeleton" style={{ height: 48, marginTop: 8 }} />
+          <Skeleton style={{ height: 48, marginTop: 8 }} />
         </div>
       ) : detail.error ? (
         <p className="error">
           組詳情載入失敗：{detail.error.message}
-          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => detail.refetch()}>再試一次</button>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => detail.refetch()}>再試一次</Button>
         </p>
       ) : detail.data ? (
         <>
           {detail.data.members.length === 0 ? (
-            <p className="hint" style={{ margin: "4px 0 0" }}>（還沒有成員——用右側「邀請成員」把夥伴加進來）</p>
+            <Hint layer="always" style={{ margin: "4px 0 0" }}>（還沒有成員——用右側「邀請成員」把夥伴加進來）</Hint>
           ) : (
             detail.data.members.map((m) => (
               <MemberDetailRow
@@ -558,10 +559,10 @@ function GroupSection({ group, teamAdmins, isSuperAdmin, meId }: {
           <GroupQuotaRow group={group} />
           <DetailBlock title="專案與負責人" count={detail.data.projects.length}>
             {detail.data.projects.length === 0 ? (
-              <p className="hint" style={{ margin: "6px 0 0", fontSize: 12 }}>這個組還沒有專案。</p>
+              <Meta as="p" style={{ margin: "6px 0 0", fontSize: 12 }}>這個組還沒有專案。</Meta>
             ) : (
               <>
-                <p className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>負責人＝專案的裁決點（可封存/還原）。人員異動時在這裡把專案交接給還在組裡的人。</p>
+                <Hint style={{ margin: "4px 0 0", fontSize: 11 }}>負責人＝專案的裁決點（可封存/還原）。人員異動時在這裡把專案交接給還在組裡的人。</Hint>
                 {detail.data.projects.map((p) => (
                   <ProjectOwnerRow key={p.id} groupId={group.id} project={p} members={detail.data.members} />
                 ))}
@@ -569,9 +570,9 @@ function GroupSection({ group, teamAdmins, isSuperAdmin, meId }: {
             )}
           </DetailBlock>
           <DetailBlock title="組資料庫" count={detail.data.databases.length}>
-            <p className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>
+            <Meta as="p" style={{ margin: "4px 0 0", fontSize: 11 }}>
               這一組自己的資料庫（組範圍）。各成員的「個人資料庫」是私人空間、只有本人看得到，這裡不列。
-            </p>
+            </Meta>
             <DatabaseList databases={detail.data.databases} />
           </DetailBlock>
         </>
@@ -592,20 +593,20 @@ function TeamExtras({ teamId }: { teamId: string }) {
     <>
       {unassigned.length > 0 && (
         <div style={{ marginTop: 8 }}>
-          <p className="hint" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>已入團、尚未分組（{unassigned.length}）</p>
-          <p className="hint" style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用右側「邀請成員」輸入同一個 Email 並選好組別即可入組。</p>
+          <Meta as="p" style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>已入團、尚未分組（{unassigned.length}）</Meta>
+          <Hint layer="always" style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用右側「邀請成員」輸入同一個 Email 並選好組別即可入組。</Hint>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {unassigned.map((m) => (
-              <span key={m.userId} className="chip" style={{ margin: 0, opacity: m.disabled ? 0.6 : 1 }} title={m.email}>
+              <Chip key={m.userId} style={{ margin: 0, opacity: m.disabled ? 0.6 : 1 }} title={m.email}>
                 {m.name}{m.disabled ? "・已停用" : ""}
-              </span>
+              </Chip>
             ))}
           </div>
         </div>
       )}
       {detail.data.databases.length > 0 && (
         <DetailBlock title="團隊資料庫" count={detail.data.databases.length}>
-          <p className="hint" style={{ margin: "4px 0 0", fontSize: 11 }}>團隊範圍的資料庫：整個團隊各組都能讀。</p>
+          <Hint layer="always" style={{ margin: "4px 0 0", fontSize: 11 }}>團隊範圍的資料庫：整個團隊各組都能讀。</Hint>
           <DatabaseList databases={detail.data.databases} />
         </DetailBlock>
       )}
@@ -626,9 +627,9 @@ function TestEmailButton() {
       </button>
       {test.data &&
         (test.data.status === "sent" ? (
-          <span className="hint" style={{ color: "var(--success-ink)" }}>✓ 已寄出——收到即代表信箱機制正常</span>
+          <Meta style={{ color: "var(--success-ink)" }}>✓ 已寄出——收到即代表信箱機制正常</Meta>
         ) : (
-          <span className="hint" style={{ color: "var(--gold-ink)" }}>⚠ {test.data.detail}</span>
+          <Meta style={{ color: "var(--gold-ink)" }}>⚠ {test.data.detail}</Meta>
         ))}
       {test.error && <span className="error" style={{ marginTop: 0 }}>{test.error.message}</span>}
     </div>
@@ -646,7 +647,7 @@ function CreateTeamCard() {
     },
   });
   return (
-    <div className="card">
+    <Card>
       <h2>建立團隊</h2>
       <label htmlFor="new-team-name">團隊名稱</label>
       <input id="new-team-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：影音創作團隊" />
@@ -656,7 +657,7 @@ function CreateTeamCard() {
         </button>
       </div>
       {createTeam.error && <p className="error">{createTeam.error.message}</p>}
-    </div>
+    </Card>
   );
 }
 
@@ -685,9 +686,9 @@ function SelfTestCard() {
     }
   };
   return (
-    <div className="card">
+    <Card>
       <h2>系統自檢</h2>
-      <p className="hint">部署後按一下，全部通過才算就緒（資料庫/模型目錄/點數/邀請/生成/交付）。</p>
+      <Hint>部署後按一下，全部通過才算就緒（資料庫/模型目錄/點數/邀請/生成/交付）。</Hint>
       <button className="primary" disabled={running} onClick={run}>{running ? "檢查中…" : "跑系統自檢"}</button>
       {errMsg && <p className="error" role="alert" style={{ marginTop: 10 }}>{errMsg}</p>}
       {result && (
@@ -698,7 +699,7 @@ function SelfTestCard() {
                 {c.ok ? <Icon name="CheckCircle2" size={14} style={{ color: "var(--success-ink)" }} /> : <Icon name="XCircle" size={14} style={{ color: "var(--danger-ink)" }} />}
               </span>
               <b style={{ minWidth: 110 }}>{c.name}</b>
-              <span className="hint">{c.note}</span>
+              <Meta>{c.note}</Meta>
             </div>
           ))}
           <p style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
@@ -710,7 +711,7 @@ function SelfTestCard() {
           </p>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -775,18 +776,20 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
   const summary = summarizeAuditInput(r.input);
   const details = describeAuditInput(r.input);
   const expandable = details.length > 0 || (repeats?.length ?? 0) > 1;
-  const catStyle = AUDIT_CAT_STYLE[cat.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
+  const catStyle = AUDIT_CAT_STYLE[cat.key] ?? { background: "var(--border-soft)", color: "var(--fg)", border: "1px solid var(--border-soft)" };
   return (
     <div style={{ borderTop: first ? "none" : "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13, marginTop: first ? 8 : 0 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         {/* 成功／失敗：單色 Icon＋語意 ink 色（跨平台渲染一致，不用滿彩 emoji） */}
-        <span aria-label={r.ok ? "成功" : "失敗"} style={{ display: "inline-flex", alignItems: "center" }}>
+        {/* role="img"：純 span 禁掛 aria-label（axe aria-prohibited-attr）；
+            這顆 span 的職責就是「一張代表成敗的圖」，img 角色讓名稱合法且語意準確 */}
+        <span role="img" aria-label={r.ok ? "成功" : "失敗"} style={{ display: "inline-flex", alignItems: "center" }}>
           {r.ok
             ? <Icon name="CheckCircle2" size={14} style={{ color: "var(--success-ink)" }} />
             : <Icon name="XCircle" size={14} style={{ color: "var(--danger-ink)" }} />}
         </span>
         {/* 分類標籤：一眼分辨這筆屬於哪一類（帳號／生成／分鏡…） */}
-        <span className="pill" style={{ ...catStyle, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>{cat.label}</span>
+        <Pill style={{ ...catStyle, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>{cat.label}</Pill>
         {/* 操作者：點名字＝只看這位夥伴做的事（分組員） */}
         <button
           type="button"
@@ -798,26 +801,25 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
         </button>
         {/* 操作者角色：一眼看出是組長還是組員做的（分組員層級） */}
         {r.actorRole && (
-          <span className="hint" style={{ fontSize: 11 }}>（{r.actorRole === "leader" ? "組長" : "組員"}）</span>
+          <Meta style={{ fontSize: 11 }}>（{r.actorRole === "leader" ? "組長" : "組員"}）</Meta>
         )}
         <span>{humanizeAuditAction(r.action)}</span>
         {/* 連續重複合併：同一人短時間重複做同一件事只佔一列，掛上次數徽章 */}
         {repeats && repeats.length > 1 && (
-          <span
-            className="pill"
+          <Pill
             style={{ fontSize: 11, padding: "1px 8px", borderRadius: 999, background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary)" }}
             title={`短時間內連續 ${repeats.length} 次，展開可看每一筆`}
           >
             連續 {repeats.length} 次
-          </span>
+          </Pill>
         )}
         {!r.ok && <span style={{ color: "var(--danger-ink)", fontSize: 11, fontWeight: 600 }}>（失敗）</span>}
-        <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</span>
+        <Meta style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(r.createdAt).toLocaleString("zh-TW")}</Meta>
       </div>
       {/* 歸屬：這筆動到哪個團隊・組別／哪個專案（分團隊組別；非技術夥伴不用去對 uuid）。
           兩者皆可點就地下鑽：點組別＝只看那一組、點專案＝只看那個專案。 */}
       {(r.teamName || r.groupName || r.projectTitle) && (
-        <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Meta as="div" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
           {(r.teamName || r.groupName) && r.groupId && (
             <button
               type="button"
@@ -844,10 +846,10 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
               <Icon name="FileText" size={11} />{r.projectTitle}
             </button>
           )}
-        </div>
+        </Meta>
       )}
       {summary && (
-        <div className="hint" style={{ fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>{summary}</div>
+        <Meta as="div" style={{ fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>{summary}</Meta>
       )}
       {r.error && (
         <div style={{ color: "var(--danger-ink)", fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>
@@ -878,7 +880,7 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
                       .join("・");
                     return (
                       <li key={rep.id} style={{ overflowWrap: "anywhere" }}>
-                        <span className="hint">{new Date(rep.createdAt).toLocaleString("zh-TW")}</span>
+                        <Meta>{new Date(rep.createdAt).toLocaleString("zh-TW")}</Meta>
                         {inline && <span style={{ marginLeft: 8 }}>{inline}</span>}
                       </li>
                     );
@@ -894,9 +896,9 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
                   ))}
                 </dl>
               )}
-              <div className="hint" style={{ marginTop: 2, fontSize: 11 }}>
+              <Meta as="div" style={{ marginTop: 2, fontSize: 11 }}>
                 技術代碼（供工程追查）：<span className="mono">{r.action}</span>
-              </div>
+              </Meta>
             </>
           )}
         </div>
@@ -979,13 +981,13 @@ export function AuditLogCard() {
     cursor: "pointer",
     border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
     background: active ? "var(--primary-tint)" : "transparent",
-    color: active ? "var(--primary-ink)" : "var(--ink)",
+    color: active ? "var(--primary-ink)" : "var(--fg)",
     fontWeight: active ? 600 : 400,
   });
   return (
-    <div className="card" data-fb="操作紀錄卡">
+    <Card data-fb="操作紀錄卡">
       <h2>操作紀錄</h2>
-      <p className="hint">誰在什麼時候做了什麼——用白話寫給每位夥伴看。能看到的範圍已按你的權限過濾（組長看自己組）。</p>
+      <Hint>誰在什麼時候做了什麼——用白話寫給每位夥伴看。能看到的範圍已按你的權限過濾（組長看自己組）。</Hint>
       {/* 分類 chip：白話分類，點一下只看那一類；不必先懂 admin.invite 這種代碼 */}
       <div role="group" aria-label="依分類過濾" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
         <button type="button" style={chip(category === null)} aria-pressed={category === null} onClick={() => setCategory(null)}>全部</button>
@@ -1036,7 +1038,7 @@ export function AuditLogCard() {
       {/* 分組員／分專案：這兩維由逐列「就地下鑽」帶入，選定後在此顯示可清除的膠囊，一眼看出目前縮在誰／哪個專案 */}
       {(actor || project) && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
-          <span className="hint" style={{ fontSize: 11 }}>目前只看：</span>
+          <Meta style={{ fontSize: 11 }}>目前只看：</Meta>
           {actor && (
             <button type="button" onClick={() => setActor(null)} style={activeFilterChip} aria-label={`清除組員過濾（${actor.name}）`}>
               <Icon name="User" size={11} />組員：{actor.name}<Icon name="X" size={11} />
@@ -1058,20 +1060,20 @@ export function AuditLogCard() {
       />
       {audit.isLoading ? (
         <div role="status" aria-label="操作紀錄載入中">
-          <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
-          <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
+          <Skeleton style={{ height: 40, marginTop: 10 }} />
+          <Skeleton style={{ height: 40, marginTop: 10 }} />
         </div>
       ) : audit.error ? (
         // 尚無可見組別（剛建團隊、還沒建組/加人）後端回 FORBIDDEN——對管理員是空狀態而非錯誤
         audit.error.data?.code === "FORBIDDEN" ? (
-          <p className="hint" style={{ marginTop: 10 }}>還沒有你能看到的組別紀錄。先建立組別、把夥伴加進來就會出現。</p>
+          <Hint layer="always" style={{ marginTop: 10 }}>還沒有你能看到的組別紀錄。先建立組別、把夥伴加進來就會出現。</Hint>
         ) : (
           <p className="error">操作紀錄載入失敗：{audit.error.message}</p>
         )
       ) : rows.length === 0 ? (
-        <p className="hint" style={{ marginTop: 10 }}>
+        <Meta as="p" style={{ marginTop: 10 }}>
           {filtering ? "沒有符合這個條件的紀錄。" : "還沒有操作紀錄。"}
-        </p>
+        </Meta>
       ) : (
         <>
           {grouped.map((g, i) => (
@@ -1086,7 +1088,7 @@ export function AuditLogCard() {
           )}
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -1131,9 +1133,9 @@ function PromptRow({ p }: { p: RecentPromptData }) {
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ color: meta.color, fontSize: 11, fontWeight: 600 }}>{meta.label}</span>
         <b>{p.userName}</b>
-        <span className="hint" style={{ fontSize: 11 }}>{model?.label ?? p.modelId}</span>
-        {p.points > 0 && <span className="hint" style={{ fontSize: 11 }}>{p.points} 點</span>}
-        <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(p.createdAt).toLocaleString("zh-TW")}</span>
+        <Meta style={{ fontSize: 11 }}>{model?.label ?? p.modelId}</Meta>
+        {p.points > 0 && <Meta style={{ fontSize: 11 }}>{p.points} 點</Meta>}
+        <Meta style={{ fontSize: 11, marginLeft: "auto" }}>{new Date(p.createdAt).toLocaleString("zh-TW")}</Meta>
       </div>
       <button
         type="button"
@@ -1155,10 +1157,10 @@ function PromptRow({ p }: { p: RecentPromptData }) {
       >
         {p.prompt}
       </button>
-      <div className="hint" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <Meta as="div" style={{ fontSize: 11, marginTop: 2, display: "flex", gap: 8, flexWrap: "wrap" }}>
         {p.projectTitle && <span><Icon name="FileText" size={11} /> {p.projectTitle}</span>}
         {p.error && <span style={{ color: "var(--danger-ink)" }}>{p.error.length > 80 ? `${p.error.slice(0, 80)}…` : p.error}</span>}
-      </div>
+      </Meta>
     </div>
   );
 }
@@ -1215,7 +1217,7 @@ export function InsightsCard() {
     cursor: "pointer",
     border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
     background: active ? "var(--primary-tint)" : "transparent",
-    color: active ? "var(--primary-ink)" : "var(--ink)",
+    color: active ? "var(--primary-ink)" : "var(--fg)",
     fontWeight: active ? 600 : 400,
   });
   const groupOptions = scope.data?.groups ?? [];
@@ -1253,9 +1255,9 @@ export function InsightsCard() {
   }
 
   return (
-    <div className="card" data-fb="操作洞察卡">
+    <Card data-fb="操作洞察卡">
       <h2>操作洞察</h2>
-      <p className="hint">把操作紀錄整理成看得懂的統計：每位夥伴在忙哪一塊、哪個模型好用（成功率＝完成÷已完結）、人×模型用量與估價、大家的提示詞怎麼寫。</p>
+      <Hint>把操作紀錄整理成看得懂的統計：每位夥伴在忙哪一塊、哪個模型好用（成功率＝完成÷已完結）、人×模型用量與估價、大家的提示詞怎麼寫。</Hint>
       {/* 分頁 chips */}
       <div role="group" aria-label="洞察分頁" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
         <button type="button" style={chip(tab === "members")} aria-pressed={tab === "members"} onClick={() => setTab("members")}>人員細節</button>
@@ -1283,11 +1285,11 @@ export function InsightsCard() {
       {/* ── 人員細節 ── */}
       {tab === "members" && (
         members.isLoading ? (
-          <div className="skeleton" style={{ height: 60 }} />
+          <Skeleton style={{ height: 60 }} />
         ) : members.error ? (
           <p className="error">載入失敗：{members.error.message}</p>
         ) : !members.data || members.data.members.length === 0 ? (
-          <p className="hint">這段期間還沒有操作。</p>
+          <Meta as="p">這段期間還沒有操作。</Meta>
         ) : (
           members.data.members.map((m) => (
             <div key={m.userId} style={{ borderTop: "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13 }}>
@@ -1300,18 +1302,18 @@ export function InsightsCard() {
                 >
                   {m.name}
                 </button>
-                <span className="hint" style={{ fontSize: 12 }}>{m.total} 筆操作</span>
+                <Meta style={{ fontSize: 12 }}>{m.total} 筆操作</Meta>
                 {m.fails > 0 && <span style={{ color: "var(--danger-ink)", fontSize: 12 }}>{m.fails} 筆失敗</span>}
-                <span className="hint" style={{ fontSize: 11, marginLeft: "auto" }}>最近 {parseDbTime(m.lastAt).toLocaleString("zh-TW")}</span>
+                <Meta style={{ fontSize: 11, marginLeft: "auto" }}>最近 {parseDbTime(m.lastAt).toLocaleString("zh-TW")}</Meta>
               </div>
               {/* 分類細節：這位夥伴各類操作的次數，多到少 */}
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
                 {m.categories.map((c) => {
-                  const style = AUDIT_CAT_STYLE[c.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
+                  const style = AUDIT_CAT_STYLE[c.key] ?? { background: "var(--border-soft)", color: "var(--fg)", border: "1px solid var(--border-soft)" };
                   return (
-                    <span key={c.key} className="pill" style={{ ...style, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>
+                    <Pill key={c.key} style={{ ...style, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>
                       {c.label} {c.count}
-                    </span>
+                    </Pill>
                   );
                 })}
               </div>
@@ -1323,11 +1325,11 @@ export function InsightsCard() {
       {/* ── 模型比較 ── */}
       {tab === "models" && (
         models.isLoading ? (
-          <div className="skeleton" style={{ height: 60 }} />
+          <Skeleton style={{ height: 60 }} />
         ) : models.error ? (
           <p className="error">載入失敗：{models.error.message}</p>
         ) : !models.data || models.data.models.length === 0 ? (
-          <p className="hint">這段期間還沒有生成。</p>
+          <Meta as="p">這段期間還沒有生成。</Meta>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -1353,10 +1355,10 @@ export function InsightsCard() {
                         >
                           {model?.label ?? m.modelId}
                         </button>
-                        {model && <span className="hint" style={{ fontSize: 11, marginLeft: 6 }}>{tierLabel(model.tier)}</span>}
+                        {model && <Meta style={{ fontSize: 11, marginLeft: 6 }}>{tierLabel(model.tier)}</Meta>}
                       </td>
                       <td style={{ padding: "6px", textAlign: "right" }}>{m.submits}</td>
-                      <td style={{ padding: "6px", textAlign: "right", color: rate == null ? "var(--fg-secondary)" : rate >= 90 ? "var(--success-ink)" : rate < 70 ? "var(--danger-ink)" : "var(--ink)" }}>
+                      <td style={{ padding: "6px", textAlign: "right", color: rate == null ? "var(--fg-secondary)" : rate >= 90 ? "var(--success-ink)" : rate < 70 ? "var(--danger-ink)" : "var(--fg)" }}>
                         {rate == null ? "—" : `${rate}%`}
                       </td>
                       <td style={{ padding: "6px", textAlign: "right", color: m.failed > 0 ? "var(--danger-ink)" : "var(--fg-secondary)" }}>{m.failed}</td>
@@ -1368,7 +1370,8 @@ export function InsightsCard() {
                 })}
               </tbody>
             </table>
-            <p className="hint" style={{ fontSize: 11, marginTop: 6 }}>成功率＝完成 ÷（完成＋失敗）；排隊中／等待核准的生成不列入。點數只計完成的實花（失敗會退點）。</p>
+            {/* 定義上方表格「成功率」與「點數」欄的算法——藏起來那些數字就無法正確解讀 */}
+            <Hint layer="always" style={{ fontSize: 11, marginTop: 6 }}>成功率＝完成 ÷（完成＋失敗）；排隊中／等待核准的生成不列入。點數只計完成的實花（失敗會退點）。</Hint>
           </div>
         )
       )}
@@ -1378,7 +1381,7 @@ export function InsightsCard() {
         <>
           {(modelFilter || actorFilter) && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
-              <span className="hint" style={{ fontSize: 11 }}>目前只看：</span>
+              <Meta style={{ fontSize: 11 }}>目前只看：</Meta>
               {modelFilter && (
                 <button type="button" onClick={() => setModelFilter(null)} style={activeFilterChip} aria-label={`清除模型過濾（${modelFilter.label}）`}>
                   模型：{modelFilter.label}<Icon name="X" size={11} />
@@ -1392,30 +1395,28 @@ export function InsightsCard() {
             </div>
           )}
           {usage.isLoading ? (
-            <div className="skeleton" style={{ height: 60 }} />
+            <Skeleton style={{ height: 60 }} />
           ) : usage.error ? (
             <p className="error">載入失敗：{usage.error.message}</p>
           ) : !usage.data || usage.data.rows.length === 0 ? (
-            <p className="hint">這段期間還沒有生成用量。</p>
+            <Meta as="p">這段期間還沒有生成用量。</Meta>
           ) : (
             <div style={{ overflowX: "auto" }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-                <span className="hint" style={{ fontSize: 12 }}>
+                <Meta style={{ fontSize: 12 }}>
                   合計：{usage.data.totals.userCount} 人・{usage.data.totals.modelCount} 模型・
                   完成 {usage.data.totals.done.toLocaleString("zh-TW")} 次・
                   {usage.data.totals.points.toLocaleString("zh-TW")} 點・
-                  <b style={{ color: "var(--ink)" }}>新台幣 {formatTwd(usage.data.totals.estTwd)}</b>
+                  <b style={{ color: "var(--fg)" }}>新台幣 {formatTwd(usage.data.totals.estTwd)}</b>
                   <span style={{ marginLeft: 6 }}>（≈ {formatUsd(usage.data.totals.estUsd)}）</span>
-                </span>
-                <button
+                </Meta>
+                <Button variant="ghost" className="btn"
                   type="button"
-                  className="btn btn-ghost"
                   style={{ marginLeft: "auto", fontSize: 12, padding: "4px 10px" }}
                   onClick={() => exportUsageCsv(usage.data!.rows, usage.data!.fx?.note ?? moneyFxNote())}
-                  title="匯出人×模型用量 CSV（新台幣＋美元）"
-                >
+                  title="匯出人×模型用量 CSV（新台幣＋美元）">
                   <Icon name="Download" size={12} /> 匯出 CSV（新台幣）
-                </button>
+                </Button>
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
@@ -1462,9 +1463,9 @@ export function InsightsCard() {
                             {model?.label ?? r.modelId}
                           </button>
                           {model && (
-                            <span className="hint" style={{ fontSize: 11, marginLeft: 6 }} title={model.cost}>
+                            <Meta style={{ fontSize: 11, marginLeft: 6 }} title={model.cost}>
                               {tierLabel(model.tier)}・{model.points}點/次
-                            </span>
+                            </Meta>
                           )}
                         </td>
                         <td style={{ padding: "6px", textAlign: "right" }}>{r.submits}</td>
@@ -1485,10 +1486,12 @@ export function InsightsCard() {
                   })}
                 </tbody>
               </table>
-              <p className="hint" style={{ fontSize: 11, marginTop: 6 }}>
+              {/* 單位是讀懂整張表的前提：新台幣與美元差約 32 倍，且 CSV 兩種都有。
+                  精簡模式收起來，等於讓管理員看一張不知道單位的金額表。 */}
+              <Hint layer="always" style={{ fontSize: 11, marginTop: 6 }}>
                 金額單位為<strong>新台幣（NT$）</strong>：只計<strong>完成</strong>實花點數換算（{usage.data.fx?.note ?? moneyFxNote()}）。
                 失敗多半已退點，不計入。點人名或模型可下鑽提示詞；CSV 含新台幣、美元與匯率說明。
-              </p>
+              </Hint>
             </div>
           )}
         </>
@@ -1499,7 +1502,7 @@ export function InsightsCard() {
         <>
           {(modelFilter || actorFilter) && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
-              <span className="hint" style={{ fontSize: 11 }}>目前只看：</span>
+              <Meta style={{ fontSize: 11 }}>目前只看：</Meta>
               {modelFilter && (
                 <button type="button" onClick={() => setModelFilter(null)} style={activeFilterChip} aria-label={`清除模型過濾（${modelFilter.label}）`}>
                   模型：{modelFilter.label}<Icon name="X" size={11} />
@@ -1513,17 +1516,17 @@ export function InsightsCard() {
             </div>
           )}
           {prompts.isLoading ? (
-            <div className="skeleton" style={{ height: 60 }} />
+            <Skeleton style={{ height: 60 }} />
           ) : prompts.error ? (
             <p className="error">載入失敗：{prompts.error.message}</p>
           ) : !prompts.data || prompts.data.items.length === 0 ? (
-            <p className="hint">這段期間還沒有符合條件的生成。</p>
+            <Meta as="p">這段期間還沒有符合條件的生成。</Meta>
           ) : (
             prompts.data.items.map((p) => <PromptRow key={p.id} p={p} />)
           )}
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -1565,19 +1568,20 @@ export function ConsumptionMonitorCard() {
   // 各組長條相對「最燒的組」等比；同樣 max(1, ...) 防除以 0
   const maxGroupPoints = data ? Math.max(1, ...data.byGroup.map((g) => g.weekPoints)) : 1;
   return (
-    <div className="card" data-fb="點數消耗監控卡">
+    <Card data-fb="點數消耗監控卡">
       <h2>點數消耗監控</h2>
-      <p className="hint">逐日毛消耗（只算扣點、退點不抵銷）；今日暴衝會整行紅字提醒。</p>
+      {/* 定義圖表畫的是「毛消耗」而非淨額——不講，管理員會以為退點已經抵銷 */}
+      <Hint layer="always">逐日毛消耗（只算扣點、退點不抵銷）；今日暴衝會整行紅字提醒。</Hint>
       {stats.isLoading ? (
         <div role="status" aria-label="消耗統計載入中">
-          <div className="skeleton" style={{ height: 44, marginTop: 10 }} />
-          <div className="skeleton" style={{ height: 120, marginTop: 10 }} />
+          <Skeleton style={{ height: 44, marginTop: 10 }} />
+          <Skeleton style={{ height: 120, marginTop: 10 }} />
         </div>
       ) : stats.error ? (
         <p className="error">消耗統計載入失敗：{stats.error.message}</p>
       ) : !data || data.perDay.length === 0 ? (
         // 後端對「無可管組」的團隊管理員回空資料——照實說明而不是留一張空圖
-        <p className="hint" style={{ marginTop: 10 }}>沒有可監控的組。</p>
+        <Meta as="p" style={{ marginTop: 10 }}>沒有可監控的組。</Meta>
       ) : (
         <>
           {/* 今日大字：alert 時整行（含警語）吃紅色 */}
@@ -1588,7 +1592,7 @@ export function ConsumptionMonitorCard() {
                 <Icon name="TriangleAlert" size={14} />今日消耗異常（7 日均值 {data.avg7}）
               </div>
             ) : (
-              <span className="hint" style={{ marginLeft: 8 }}>7 日均值 {data.avg7}</span>
+              <Meta style={{ marginLeft: 8 }}>7 日均值 {data.avg7}</Meta>
             )}
           </div>
           {/* 逐日迷你長條：每列「MM/DD 週N ▮▮▮ N」，寬度對齊區間最大值；峰值日整列點亮＋標「峰」 */}
@@ -1597,8 +1601,8 @@ export function ConsumptionMonitorCard() {
               const isPeak = peakPoints > 0 && d.points === peakPoints;
               return (
                 <div key={d.date} style={{ display: "flex", alignItems: "center", gap: 6, padding: "1px 0", fontSize: 12 }}>
-                  <span className="hint" style={{ width: 38, flex: "none", fontFamily: "var(--mono)" }}>{d.date.slice(5).replace("-", "/")}</span>
-                  <span className="hint" style={{ width: 26, flex: "none", fontSize: 11 }}>{weekdayLabel(d.date)}</span>
+                  <Meta style={{ width: 38, flex: "none", fontFamily: "var(--mono)" }}>{d.date.slice(5).replace("-", "/")}</Meta>
+                  <Meta style={{ width: 26, flex: "none", fontSize: 11 }}>{weekdayLabel(d.date)}</Meta>
                   <div style={{ flex: 1, height: 10, background: "var(--card2)", borderRadius: 3, overflow: "hidden" }} aria-hidden>
                     <div style={{ width: `${(d.points / maxPoints) * 100}%`, height: "100%", background: isPeak ? "var(--primary-strong, var(--primary))" : "var(--primary)", borderRadius: 3, opacity: isPeak ? 1 : 0.82 }} />
                   </div>
@@ -1610,9 +1614,9 @@ export function ConsumptionMonitorCard() {
             })}
           </div>
           <h3 style={{ fontSize: "var(--fs-16)", margin: "14px 0 4px" }}>各組近 7 天</h3>
-          <p className="hint" style={{ margin: "0 0 6px", fontSize: 12 }}>點各組展開看「組裡誰在燒點」。</p>
+          <Hint style={{ margin: "0 0 6px", fontSize: 12 }}>點各組展開看「組裡誰在燒點」。</Hint>
           {data.byGroup.length === 0 ? (
-            <p className="hint" style={{ marginTop: 4 }}>近 7 天還沒有消耗紀錄。</p>
+            <Meta as="p" style={{ marginTop: 4 }}>近 7 天還沒有消耗紀錄。</Meta>
           ) : (
             data.byGroup.map((g, i) => (
               <details key={g.groupId} open={data.byGroup.length === 1} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border-soft)", padding: "6px 0" }}>
@@ -1632,18 +1636,18 @@ export function ConsumptionMonitorCard() {
                 </summary>
                 {/* 組內兩個維度的近 7 天毛消耗（各自高到低）：成員＝誰在燒、專案＝哪個案子在燒 */}
                 <div style={{ margin: "6px 0 2px", paddingLeft: 22 }}>
-                  <div className="hint" style={{ fontSize: 11, fontWeight: 600, margin: "2px 0" }}>各成員</div>
+                  <Meta as="div" style={{ fontSize: 11, fontWeight: 600, margin: "2px 0" }}>各成員</Meta>
                   {g.members.length === 0 ? (
-                    <p className="hint" style={{ margin: 0, fontSize: 12 }}>這個組近 7 天沒有可歸戶的消耗。</p>
+                    <Meta as="p" style={{ margin: 0, fontSize: 12 }}>這個組近 7 天沒有可歸戶的消耗。</Meta>
                   ) : (
                     g.members.map((m) => (
                       <BreakdownRow key={m.userId} label={m.name} points={m.weekPoints} max={g.weekPoints} />
                     ))
                   )}
                   {/* 各專案：只計得出生成歸戶的消耗，小計可能少於組總數（手動增減不歸專案） */}
-                  <div className="hint" style={{ fontSize: 11, fontWeight: 600, margin: "8px 0 2px" }}>各專案</div>
+                  <Meta as="div" style={{ fontSize: 11, fontWeight: 600, margin: "8px 0 2px" }}>各專案</Meta>
                   {g.projects.length === 0 ? (
-                    <p className="hint" style={{ margin: 0, fontSize: 12 }}>這個組近 7 天沒有專案生成消耗。</p>
+                    <Meta as="p" style={{ margin: 0, fontSize: 12 }}>這個組近 7 天沒有專案生成消耗。</Meta>
                   ) : (
                     g.projects.map((p) => (
                       <BreakdownRow key={p.projectId} label={p.title} points={p.weekPoints} max={g.projects[0].weekPoints} />
@@ -1655,7 +1659,7 @@ export function ConsumptionMonitorCard() {
           )}
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -1702,27 +1706,25 @@ function ReportRow({ report }: {
           />
         </a>
       ) : (
-        <span
-          className="chip"
-          style={{ margin: 0, ...catStyle, alignSelf: "start" }}
-        >
+        <Chip
+          style={{ margin: 0, ...catStyle, alignSelf: "start" }}>
           {catLabel}
-        </span>
+        </Chip>
       )}
       <div style={{ fontSize: 13 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           {report.screenshotPath && (
-            <span className="chip" style={{ margin: 0, ...catStyle }}>{catLabel}</span>
+            <Chip style={{ margin: 0, ...catStyle }}>{catLabel}</Chip>
           )}
-          {report.targetLabel && <span className="chip" style={{ margin: 0 }}>標定：{report.targetLabel}</span>}
-          <span className="hint" style={{ fontSize: 11 }}>
+          {report.targetLabel && <Chip style={{ margin: 0 }}>標定：{report.targetLabel}</Chip>}
+          <Meta style={{ fontSize: 11 }}>
             {report.userName ?? "（未知）"}
             {report.groupName ? `・${report.groupName}` : ""}
             ・{new Date(report.createdAt).toLocaleString("zh-TW")}
-          </span>
+          </Meta>
         </div>
         {pages.length > 0 && (
-          <div className="hint" style={{ marginTop: 2 }}>涉及頁面：{pages.join("、")}</div>
+          <Meta as="div" style={{ marginTop: 2 }}>涉及頁面：{pages.join("、")}</Meta>
         )}
         {report.note && <div style={{ marginTop: 2 }}>{report.note}</div>}
         {report.agentReviewedAt && (
@@ -1736,26 +1738,26 @@ function ReportRow({ report }: {
             }}
           >
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-              <span className="chip" style={{ margin: 0, fontSize: 11 }}>🤖 回饋代理</span>
+              <Chip style={{ margin: 0, fontSize: 11 }}>🤖 回饋代理</Chip>
               {report.agentSeverity && AGENT_SEVERITY_META[report.agentSeverity] && (
-                <span className="chip" style={{ margin: 0, fontSize: 11, ...AGENT_SEVERITY_META[report.agentSeverity].style }}>
+                <Chip style={{ margin: 0, fontSize: 11, ...AGENT_SEVERITY_META[report.agentSeverity].style }}>
                   嚴重度：{AGENT_SEVERITY_META[report.agentSeverity].label}
-                </span>
+                </Chip>
               )}
               {report.emailStatus && EMAIL_STATUS_LABEL[report.emailStatus] && (
-                <span className="hint" style={{ fontSize: 11 }}>{EMAIL_STATUS_LABEL[report.emailStatus]}</span>
+                <Meta style={{ fontSize: 11 }}>{EMAIL_STATUS_LABEL[report.emailStatus]}</Meta>
               )}
             </div>
             {report.agentSummary && <div style={{ marginTop: 3 }}>{report.agentSummary}</div>}
             {report.agentFix && (
-              <div className="hint" style={{ marginTop: 3 }}>
+              <Meta as="div" style={{ marginTop: 3 }}>
                 <span style={{ fontWeight: 600 }}>建議修復：</span>{report.agentFix}
-              </div>
+              </Meta>
             )}
             {report.agentReply && (
-              <div className="hint" style={{ marginTop: 3 }}>
+              <Meta as="div" style={{ marginTop: 3 }}>
                 <span style={{ fontWeight: 600 }}>已回覆使用者：</span>{report.agentReply}
-              </div>
+              </Meta>
             )}
           </div>
         )}
@@ -1772,7 +1774,7 @@ function ReportRow({ report }: {
               <option key={s} value={s}>{FEEDBACK_STATUS_LABEL[s]}</option>
             ))}
           </select>
-          {updateStatus.isPending && <span className="hint">更新中…</span>}
+          {updateStatus.isPending && <Meta>更新中…</Meta>}
           {updateStatus.error && <span className="error" style={{ marginTop: 0 }}>{updateStatus.error.message}</span>}
         </div>
       </div>
@@ -1785,28 +1787,24 @@ function FeedbackReportsSection() {
   const [statusFilter, setStatusFilter] = useState<"" | "open" | "reviewing" | "done">("");
   const reports = trpc.feedbackReports.listVisible.useQuery({ status: statusFilter || undefined });
   return (
-    <section className="card" style={{ marginTop: 16 }} data-fb="元件回饋審閱">
+    <Card as="section" style={{ marginTop: 16 }} data-fb="元件回饋審閱">
       <h2>元件回饋（{reports.data?.length ?? 0}）</h2>
-      <p className="hint">夥伴在任何頁面用右下角「回饋」浮標標定某個元件送出的意見。</p>
+      <Hint>夥伴在任何頁面用右下角「回饋」浮標標定某個元件送出的意見。</Hint>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
         {FEEDBACK_STATUS_FILTERS.map((f) => (
-          <span
+          <Chip
             key={f.value || "all"}
-            role="button"
-            tabIndex={0}
-            aria-pressed={statusFilter === f.value}
-            className={`chip pick ${statusFilter === f.value ? "on" : ""}`}
+            selected={statusFilter === f.value}
             onClick={() => setStatusFilter(f.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setStatusFilter(f.value); } }}
           >
             {f.label}
-          </span>
+          </Chip>
         ))}
       </div>
       {reports.isLoading ? (
         <div role="status" aria-label="回饋載入中">
-          <div className="skeleton" style={{ height: 72, marginTop: 8 }} />
-          <div className="skeleton" style={{ height: 72, marginTop: 8 }} />
+          <Skeleton style={{ height: 72, marginTop: 8 }} />
+          <Skeleton style={{ height: 72, marginTop: 8 }} />
         </div>
       ) : reports.error ? (
         <div>
@@ -1814,14 +1812,18 @@ function FeedbackReportsSection() {
           <button style={{ marginTop: 8 }} onClick={() => reports.refetch()}>再試一次</button>
         </div>
       ) : !reports.data?.length ? (
-        <div className="empty-state">
-          <h3>{statusFilter ? "這個狀態底下還沒有回饋" : "還沒有元件回饋"}</h3>
-          {!statusFilter && <p>夥伴用右下角「回饋」浮標送出即可。</p>}
-        </div>
+        <EmptyState
+          title={statusFilter ? "這個狀態底下還沒有回饋" : "還沒有元件回饋"}
+          description={
+            statusFilter
+              ? "換個狀態篩選看看，或切回「全部」。" /* 原本篩選分支沒有說明——空狀態要有下一步，這是計畫要求，不是遷移副作用 */
+              : "夥伴用右下角「回饋」浮標送出即可。"
+          }
+        />
       ) : (
         reports.data.map((r) => <ReportRow key={r.id} report={r} />)
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -1852,24 +1854,26 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
-    <div className="card" data-fb="Fal 帳戶卡">
+    <Card data-fb="Fal 帳戶卡">
       <h2>Fal 帳戶</h2>
-      <p className="hint">
+      {/* 方案 C 的擋扣規則是成本／阻斷資訊——精簡模式也必須看得到，故 always。
+          舊文案「不自動換算」已因 #220 失真（現在會換算並做硬上限），採 base 新文案。 */}
+      <Hint layer="always">
         平台在 Fal.ai 的 credits 餘額（單位 <strong>USD</strong>），並以即時匯率換算台幣等值。
         方案 C：<strong>1 點 ＝ NT$1</strong>，站內可花點數的硬上限即時對齊此餘額——
         Fal 沒錢時扣點會被擋下（查不到餘額則不擋，不因上游異常鎖住全站）。
-      </p>
+      </Hint>
       {balance.isLoading ? (
-        <div className="skeleton" style={{ height: 56, marginTop: 8 }} role="status" aria-label="Fal 餘額載入中" />
+        <Skeleton style={{ height: 56, marginTop: 8 }} role="status" aria-label="Fal 餘額載入中" />
       ) : balance.error ? (
         <p className="error" role="alert">
           查詢失敗：{balance.error.message}{" "}
-          <button className="btn-ghost btn-sm" type="button" onClick={() => balance.refetch()}>再試一次</button>
+          <Button variant="ghost" size="sm" type="button" onClick={() => balance.refetch()}>再試一次</Button>
         </p>
       ) : data && data.ok ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 13 }}>
           <div>
-            <span className="hint">Credits 餘額：</span>
+            <Meta>Credits 餘額：</Meta>
             <b className="mono" style={{ fontSize: 22 }}>
               ${fmtUsd(data.balance)} {data.currency || "USD"}
             </b>
@@ -1881,37 +1885,37 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           </div>
           {data.pointsCap != null && (
             <div>
-              <span className="hint">可花點數上限（1 點＝NT$1）：</span>
+              <Meta>可花點數上限（1 點＝NT$1）：</Meta>
               <b className="mono">{data.pointsCap.toLocaleString("zh-TW")} 點</b>
               {data.rate != null && (
-                <span className="hint" style={{ marginLeft: 8, fontSize: 11 }}>
+                <Meta style={{ marginLeft: 8, fontSize: 11 }}>
                   匯率 US$1＝NT${data.rate}
                   {data.rateSource === "fallback" ? "（回退值）" : ""}
-                </span>
+                </Meta>
               )}
             </div>
           )}
           <div>
-            <span className="hint">帳戶：</span>
+            <Meta>帳戶：</Meta>
             <span className="mono">{data.username}</span>
           </div>
-          <div className="hint" style={{ fontSize: 11 }}>
+          <Meta as="div" style={{ fontSize: 11 }}>
             更新於 {new Date(data.fetchedAt).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}
             {data.cached ? "（快取）" : ""}
-          </div>
+          </Meta>
         </div>
       ) : data && !data.ok ? (
         <div role="status" style={{ marginTop: 4 }}>
-          <p className="hint" style={{ color: data.code === "forbidden" || data.code === "not_configured" ? "var(--gold-ink)" : "var(--fg-secondary)" }}>
+          <Meta as="p" style={{ color: data.code === "forbidden" || data.code === "not_configured" ? "var(--gold-ink)" : "var(--fg-secondary)" }}>
             {data.code === "not_configured" && "⚠ "}
             {data.code === "forbidden" && "🔒 "}
             {data.code === "upstream_error" && "⏳ "}
             {data.message}
-          </p>
+          </Meta>
           {data.code === "not_configured" && (
-            <p className="hint" style={{ fontSize: 11, marginTop: 4 }}>
+            <Hint style={{ fontSize: 11, marginTop: 4 }}>
               在部署環境設定 <code>FAL_ADMIN_KEY</code>（Admin scope）後重新整理即可。金鑰僅後端使用。
-            </p>
+            </Hint>
           )}
         </div>
       ) : null}
@@ -1930,13 +1934,13 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
         }}
       >
         <div>
-          <span className="hint">站內總預算剩餘：</span>
+          <Meta>站內總預算剩餘：</Meta>
           <span className="mono">
             {systemPointsRemaining == null ? "不限" : `${systemPointsRemaining.toLocaleString()} 點`}
           </span>
         </div>
         <div>
-          <span className="hint">Fal credits：</span>
+          <Meta>Fal credits：</Meta>
           <span className="mono">
             {data && data.ok ? `$${fmtUsd(data.balance)} ${data.currency || "USD"}` : "—"}
           </span>
@@ -1944,17 +1948,15 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       </div>
 
       <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
-        <button
+        <Button variant="ghost" size="sm"
           type="button"
-          className="btn-ghost btn-sm"
           disabled={balance.isFetching}
           onClick={() => balance.refetch()}
-          title="尊重伺服器 60～120 秒快取；短時間內重按可能仍是快取"
-        >
+          title="尊重伺服器 60～120 秒快取；短時間內重按可能仍是快取">
           {balance.isFetching ? "重新整理中…" : "重新整理"}
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -1973,28 +1975,28 @@ function FeedbackAgentCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   });
   const last = status.data?.lastRun;
   return (
-    <section className="card" style={{ marginTop: 16 }} data-fb="回饋代理卡">
+    <Card as="section" style={{ marginTop: 16 }} data-fb="回饋代理卡">
       <h2>回饋代理</h2>
-      <p className="hint">
+      <Hint>
         每 3 天自動巡一次未處理的元件回饋：AI 分診嚴重度、給工程排修復方向，並寄信回覆回報者。
-      </p>
+      </Hint>
       {status.isLoading ? (
-        <div className="skeleton" style={{ height: 48, marginTop: 8 }} />
+        <Skeleton style={{ height: 48, marginTop: 8 }} />
       ) : status.error ? (
         <p className="error">代理狀態載入失敗：{status.error.message}</p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
           <div>
-            <span className="hint">巡檢週期：</span>每 {status.data?.intervalDays ?? 3} 天一次（伺服器背景）
+            <Meta>巡檢週期：</Meta>每 {status.data?.intervalDays ?? 3} 天一次（伺服器背景）
           </div>
           <div>
-            <span className="hint">信箱回覆機制：</span>
+            <Meta>信箱回覆機制：</Meta>
             {status.data?.emailConfigured
               ? <span style={{ color: "var(--success-ink)", fontWeight: 600 }}>已設定（會實際寄出）</span>
               : <span style={{ color: "var(--gold-ink)" }}>未設定（僅落地回覆草稿，未寄出）</span>}
           </div>
           <div>
-            <span className="hint">最近一次巡檢：</span>
+            <Meta>最近一次巡檢：</Meta>
             {last
               ? `${fmtWhen(last.startedAt)}・${last.status === "done" ? "完成" : last.status === "failed" ? "失敗" : "進行中"}｜分診 ${last.reviewedCount} 筆、寄出 ${last.emailedCount} 封${last.note ? `（${last.note}）` : ""}`
               : "尚未執行過（開機後約 5 分鐘首巡）"}
@@ -2007,18 +2009,18 @@ function FeedbackAgentCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
             {runNow.isPending ? "巡檢中…" : "立即巡檢一次"}
           </button>
           {runNow.data && (
-            <span className="hint">
+            <Meta>
               {runNow.data.status === "skipped"
                 ? "已有一輪巡檢進行中"
                 : runNow.data.status === "failed"
                   ? `失敗：${runNow.data.note}`
                   : `完成：分診 ${runNow.data.reviewedCount} 筆、寄出 ${runNow.data.emailedCount} 封`}
-            </span>
+            </Meta>
           )}
           {runNow.error && <span className="error" style={{ marginTop: 0 }}>{runNow.error.message}</span>}
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -2091,8 +2093,8 @@ export function AdminPage() {
 
   if (overview.isLoading) return (
     <div role="status" aria-label="載入中" style={{ marginTop: 24 }}>
-      <div className="skeleton" style={{ height: 28, width: 200, marginBottom: 16 }} />
-      <div className="skeleton" style={{ height: 180 }} />
+      <Skeleton style={{ height: 28, width: 200, marginBottom: 16 }} />
+      <Skeleton style={{ height: 180 }} />
     </div>
   );
   // 總覽讀取失敗：保留頁標題與人話說明＋重試出口——整頁只剩一行原始錯誤會被當成「系統壞了」，
@@ -2103,7 +2105,7 @@ export function AdminPage() {
         <h1>團隊管理</h1>
         <p className="error" role="alert">
           管理資料暫時載入不了（{overview.error.message}）——
-          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => overview.refetch()}>再試一次</button>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => overview.refetch()}>再試一次</Button>
         </p>
       </div>
     );
@@ -2123,9 +2125,9 @@ export function AdminPage() {
       <div className="cols">
         <div className="stack">
           {teams.map((team) => (
-            <section key={team.id} className="card" data-fb="團隊與成員卡">
+            <Card as="section" key={team.id} data-fb="團隊與成員卡">
               <h2>{team.name}</h2>
-              <p className="hint">管理：{team.admins.map((a) => a?.name).join("、") || "—"}</p>
+              <Meta as="p">管理：{team.admins.map((a) => a?.name).join("、") || "—"}</Meta>
               <TeamExtras teamId={team.id} />
               {team.groups.map((g) => (
                 <GroupSection
@@ -2137,7 +2139,7 @@ export function AdminPage() {
                 />
               ))}
               <CreateGroupRow teamId={team.id} />
-            </section>
+            </Card>
           ))}
         </div>
 
@@ -2148,20 +2150,20 @@ export function AdminPage() {
         <InsightsCard />
         <AuditLogCard />
         {isSuperAdmin && <CreateTeamCard />}
-        <div className="card" data-fb="點數與額度卡">
+        <Card data-fb="點數與額度卡">
           <h2>點數與額度（彈性・隨時可調）</h2>
-          <p className="hint">空白＝不限。總預算限開發者調整。分配樹：總預算 →（左側團隊卡）各組「組預算」由團隊管理員分配 →（組長在「選項」頁）再把組預算分給各組員。週/日上限是另一層速率限制，與累計預算並存。</p>
+          <Hint layer="always">空白＝不限。總預算限開發者調整。分配樹：總預算 →（左側團隊卡）各組「組預算」由團隊管理員分配 →（組長在「選項」頁）再把組預算分給各組員。週/日上限是另一層速率限制，與累計預算並存。</Hint>
           {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值。
               三態：error（明講失敗＋重試）／data（表單）／載入中（骨架）——缺 error 分支時
               失敗會永遠停在骨架上，管理員以為還在載入而空等 */}
           {settings.error ? (
             <p className="error" role="alert">
               設定暫時讀不到——
-              <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => settings.refetch()}>再試一次</button>
+              <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => settings.refetch()}>再試一次</Button>
             </p>
           ) : settings.data ? (
             <>
-              <label htmlFor="settings-total-budget">總預算點數（全系統）{!isSuperAdmin && <span className="hint">・限開發者調整</span>}</label>
+              <label htmlFor="settings-total-budget">總預算點數（全系統）{!isSuperAdmin && <Meta>・限開發者調整</Meta>}</label>
               {/* 非開發者改總預算會被後端擋（FORBIDDEN）——直接 disable 並說明，別讓人白填才報錯 */}
               <input
                 id="settings-total-budget"
@@ -2183,17 +2185,17 @@ export function AdminPage() {
             </>
           ) : (
             <div role="status" aria-label="設定載入中" style={{ marginTop: 12 }}>
-              <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
-              <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
-              <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
+              <Skeleton style={{ height: 40, marginTop: 10 }} />
+              <Skeleton style={{ height: 40, marginTop: 10 }} />
+              <Skeleton style={{ height: 40, marginTop: 10 }} />
             </div>
           )}
           {saveSettings.error && <p className="error">{saveSettings.error.message}</p>}
-          {settingsSaved && <p className="hint" style={{ color: "var(--success-ink)" }}>已儲存 ✓</p>}
-        </div>
+          {settingsSaved && <Meta as="p" style={{ color: "var(--success-ink)" }}>已儲存 ✓</Meta>}
+        </Card>
         {/* Fal 帳戶（USD credits）與站內點數並陳；僅開發者 */}
         <FalAccountCard isSuperAdmin={isSuperAdmin} />
-        <div className="card" data-fb="邀請成員卡">
+        <Card data-fb="邀請成員卡">
           <h2>邀請成員</h2>
           <label htmlFor="invite-email">Email</label>
           <input id="invite-email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="partner@example.com" />
@@ -2218,7 +2220,7 @@ export function AdminPage() {
             <option value="member">成員</option>
             <option value="admin">團隊管理員</option>
           </select>
-          <p className="hint" style={{ margin: "4px 0 0" }}>團隊管理員能管理整個團隊的組別、成員與額度，權限較大，請謹慎授予。</p>
+          <Hint layer="always" style={{ margin: "4px 0 0" }}>團隊管理員能管理整個團隊的組別、成員與額度，權限較大，請謹慎授予。</Hint>
           <label htmlFor="invite-group">組別</label>
           <select
             id="invite-group"
@@ -2239,12 +2241,12 @@ export function AdminPage() {
             <option value="member">組員</option>
             <option value="leader">組長</option>
           </select>
-          {!groupId && <p className="hint" style={{ margin: "4px 0 0" }}>未選組時角色不生效——選了組別才需要設定。</p>}
+          {!groupId && <Hint layer="always" style={{ margin: "4px 0 0" }}>未選組時角色不生效——選了組別才需要設定。</Hint>}
           <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, cursor: "pointer" }}>
             <input type="checkbox" checked={sendEmailInvite} onChange={(e) => setSendEmailInvite(e.target.checked)} style={{ width: "auto" }} />
             <span>同時把邀請連結寄到這個 Email</span>
           </label>
-          <p className="hint" style={{ margin: "4px 0 0" }}>未設定信箱機制時會自動略過寄信，改用下方連結傳給對方即可。</p>
+          <Hint layer="always" style={{ margin: "4px 0 0" }}>未設定信箱機制時會自動略過寄信，改用下方連結傳給對方即可。</Hint>
           <TestEmailButton />
           <div style={{ marginTop: 16 }}>
             <button
@@ -2258,39 +2260,46 @@ export function AdminPage() {
             </button>
           </div>
           {invite.data && invite.data.attached && (
-            <p className="hint" style={{ marginTop: 12 }}>✓ {invite.data.message}</p>
+            <Meta as="p" style={{ marginTop: 12 }}>✓ {invite.data.message}</Meta>
           )}
           {invite.data && !invite.data.attached && invite.data.inviteUrl && (
             <div style={{ marginTop: 12 }}>
               {invite.data.emailStatus === "sent" && (
-                <p className="hint" style={{ color: "var(--success-ink)", fontWeight: 600 }}>✓ 邀請信已寄出到 {email || "對方信箱"}。也可複製下方連結備用：</p>
+                <Meta as="p" style={{ color: "var(--success-ink)", fontWeight: 600 }}>✓ 邀請信已寄出到 {email || "對方信箱"}。也可複製下方連結備用：</Meta>
               )}
               {invite.data.emailStatus === "skipped" && (
-                <p className="hint" style={{ color: "var(--gold-ink)" }}>⚠ 尚未寄信（{invite.data.emailDetail ?? "信箱機制未設定"}）。請複製下方連結傳給對方：</p>
+                <Meta as="p" style={{ color: "var(--gold-ink)" }}>⚠ 尚未寄信（{invite.data.emailDetail ?? "信箱機制未設定"}）。請複製下方連結傳給對方：</Meta>
               )}
               {invite.data.emailStatus === "failed" && (
-                <p className="hint" style={{ color: "var(--gold-ink)" }}>⚠ 寄信失敗（{invite.data.emailDetail ?? "未知原因"}）。請改用下方連結傳給對方：</p>
+                <Meta as="p" style={{ color: "var(--gold-ink)" }}>⚠ 寄信失敗（{invite.data.emailDetail ?? "未知原因"}）。請改用下方連結傳給對方：</Meta>
               )}
               {!invite.data.emailStatus && (
-                <p className="hint">複製這個連結傳給夥伴（{invite.data.expiresInHours} 小時內有效）：</p>
+                <Hint layer="always">複製這個連結傳給夥伴（{invite.data.expiresInHours} 小時內有效）：</Hint>
               )}
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input readOnly value={toFullUrl(invite.data.inviteUrl)} onFocus={(e) => e.target.select()} />
+                {/* 上方的說明句沒有與這個欄位關聯，讀屏聚焦到這裡時只會念出一長串
+                    URL 而不知道它是什麼。補 aria-label 給它一個名字。 */}
+                <input
+                  readOnly
+                  aria-label="邀請連結（唯讀，可複製）"
+                  value={toFullUrl(invite.data.inviteUrl)}
+                  onFocus={(e) => e.target.select()}
+                />
                 <CopyButton text={toFullUrl(invite.data.inviteUrl)} />
               </div>
             </div>
           )}
           {invite.error && <p className="error">{invite.error.message}</p>}
-        </div>
+        </Card>
         </aside>
       </div>
 
-      <section className="card" style={{ marginTop: 16 }}>
+      <Card as="section" style={{ marginTop: 16 }}>
         <h2>回饋彙整（{feedback.data?.length ?? 0}）</h2>
         {feedback.isLoading ? (
           <div role="status" aria-label="回饋載入中">
-            <div className="skeleton" style={{ height: 60, marginTop: 8 }} />
-            <div className="skeleton" style={{ height: 60, marginTop: 8 }} />
+            <Skeleton style={{ height: 60, marginTop: 8 }} />
+            <Skeleton style={{ height: 60, marginTop: 8 }} />
           </div>
         ) : feedback.error ? (
           <div>
@@ -2298,26 +2307,23 @@ export function AdminPage() {
             <button style={{ marginTop: 8 }} onClick={() => feedback.refetch()}>再試一次</button>
           </div>
         ) : !feedback.data?.length ? (
-          <div className="empty-state">
-            <h3>還沒有回饋</h3>
-            <p>夥伴用頂欄「回饋」按鈕填寫。</p>
-          </div>
+          <EmptyState icon={<Icon name="MessageCircle" />} title={<>還沒有回饋</>} description={<>夥伴用頂欄「回饋」按鈕填寫。</>} />
         ) : (
           feedback.data.map((f) => (
             <div key={f.id} className="gen-row" style={{ gridTemplateColumns: "auto 1fr" }}>
-              <span className="chip">{f.userName}</span>
+              <Chip>{f.userName}</Chip>
               <div style={{ fontSize: 13 }}>
                 <span className="mono" style={{ fontSize: 11 }}>
                   {Object.entries((f.scores as Record<string, number>) ?? {}).map(([k, v]) => `${k}:${v}`).join(" ")}
                 </span>
                 {f.best && <div><span style={{ color: "var(--success-ink)", fontWeight: 600 }}>最喜歡：</span>{f.best}</div>}
                 {f.worst && <div><span style={{ color: "var(--gold-ink)", fontWeight: 600 }}>最想改：</span>{f.worst}</div>}
-                {f.note && <div className="hint">{f.note}</div>}
+                {f.note && <Meta as="div">{f.note}</Meta>}
               </div>
             </div>
           ))
         )}
-      </section>
+      </Card>
 
       <FeedbackAgentCard isSuperAdmin={isSuperAdmin} />
 

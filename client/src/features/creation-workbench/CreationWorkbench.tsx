@@ -30,7 +30,7 @@ import {
   composeGoalFromSkills,
   resolveModeFromSkills,
 } from "../../../../shared/agentSkills";
-
+import { Button, Card, Hint, Meta, Pill } from "../../components/ui";
 /**
  * AI 創作工作台（WB-01～WB-06 正式頁面入口）：ProjectPage ② 只掛這一個主卡。
  * 目標輸入、模式 tabs、上下文條、共享草稿、四模式 adapter、CreationResourceDrawer。
@@ -309,41 +309,39 @@ export function CreationWorkbench({
   };
 
   return (
-    <section className="card card--primary" data-fb="AI 創作工作台" id="sec-ai-hub">
+    <Card as="section" variant="primary" data-fb="AI 創作工作台" id="sec-ai-hub">
       <div className="section-heading-row">
         <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
           <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作工作台
         </h2>
         <span className="spacer" />
-        {running > 0 && <span className="pill running">執行中 {running}</span>}
-        {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
-        {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
-        <button
+        {running > 0 && <Pill status="running">執行中 {running}</Pill>}
+        {waiting > 0 && <Pill status="queued">等待人員 {waiting}</Pill>}
+        {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
+        <Button variant="ghost" size="sm"
           type="button"
-          className="btn-ghost btn-sm"
           aria-expanded={!collapsed}
           aria-controls="sec-ai-hub-body"
-          onClick={() => setCollapsed((v) => !v)}
-        >
+          onClick={() => setCollapsed((v) => !v)}>
           <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} />
           {collapsed ? "展開" : "收合"}
-        </button>
+        </Button>
       </div>
 
       {collapsed && (
-        <p className="hint" style={{ margin: "6px 0 0" }}>
+        <Meta as="p" style={{ margin: "6px 0 0" }}>
           AI 創作工作台已收合
           {running + waiting > 0
             ? `；仍有 ${running} 個執行中、${waiting} 個等待人員的計畫`
             : ""}
           。草稿與模式選擇已保留。
-        </p>
+        </Meta>
       )}
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
-        <p className="hint workbench-intro-lede" style={{ marginTop: 6 }}>
+        <Hint className="workbench-intro-lede" style={{ marginTop: 6 }}>
           寫你想完成的畫面或片子，再按 <b>＋ 請誰來幫忙</b>——像請劇組，不必先背四個分頁。
-        </p>
+        </Hint>
 
         <CreationGoalInput
           inputId={goalInputId}
@@ -403,9 +401,9 @@ export function CreationWorkbench({
           ideaBringIn={templateIdeaBringIn}
         />
         {sideNotice ? (
-          <p className="hint" role="status" aria-live="polite" style={{ marginTop: 8 }}>
+          <Meta as="p" role="status" aria-live="polite" style={{ marginTop: 8 }}>
             {sideNotice}
-          </p>
+          </Meta>
         ) : null}
         <PlanMode
           projectId={projectId}
@@ -438,6 +436,6 @@ export function CreationWorkbench({
           }
         />
       </div>
-    </section>
+    </Card>
   );
 }

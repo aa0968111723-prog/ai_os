@@ -123,6 +123,55 @@ describe("requestAssistantStream", () => {
     );
   });
 
+  it("把使用者選的模型檔位送給後端（穿線斷掉會悄悄降回免費模型，答案品質不一致）", async () => {
+    const stream = readerResponse([
+      encoder.encode('event: done\ndata: {"answer":"完成","actions":[],"steps":[],"mock":false,"fallback":false}\n\n'),
+    ]);
+    const fetchImpl = vi.fn(async () => stream.response);
+    await requestAssistantStream({
+      projectId: "project-1",
+      message: "目前進度？",
+      nonce: "nonce-1",
+      mode: "fal_quality",
+      signal: new AbortController().signal,
+      handlers: handlers(),
+      fetchImpl,
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "/api/assistant/ask",
+      expect.objectContaining({
+        body: JSON.stringify({
+          projectId: "project-1",
+          message: "目前進度？",
+          nonce: "nonce-1",
+          mode: "fal_quality",
+        }),
+      }),
+    );
+  });
+
+  it("沒選檔位時不送 mode，讓後端用免費預設（不是送 undefined 字串）", async () => {
+    const stream = readerResponse([
+      encoder.encode('event: done\ndata: {"answer":"完成","actions":[],"steps":[],"mock":false,"fallback":false}\n\n'),
+    ]);
+    const fetchImpl = vi.fn(async () => stream.response);
+    await requestAssistantStream({
+      projectId: "project-1",
+      message: "目前進度？",
+      nonce: "nonce-1",
+      signal: new AbortController().signal,
+      handlers: handlers(),
+      fetchImpl,
+    });
+    // 沒有 mode 鍵——JSON.stringify 會省略 undefined，後端因此走免費預設
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "/api/assistant/ask",
+      expect.objectContaining({
+        body: JSON.stringify({ projectId: "project-1", message: "目前進度？", nonce: "nonce-1" }),
+      }),
+    );
+  });
+
   it("returns false for an unavailable stream so the caller can use one-shot fallback", async () => {
     const streamHandlers = handlers();
     const handled = await requestAssistantStream({

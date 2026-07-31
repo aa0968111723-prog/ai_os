@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Meta, Button, Hint } from "./ui";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
@@ -78,14 +79,14 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
           <span className="meta">目前以 {data.workspace ? `「${data.workspace}」workspace` : "已連接的 Notion 整合"} 瀏覽</span>
         )}
         <span style={{ flex: 1 }} />
-        <button className="btn-sm" onClick={onClose} title="收合"><Icon name="X" size={13} /></button>
+        <Button size="sm" onClick={onClose} title="收合"><Icon name="X" size={13} /></Button>
       </div>
 
       {data && !data.ok && data.reason === "not-connected" && (
-        <p className="hint" style={{ marginTop: 8 }}>
+        <Hint as="p" layer="always" style={{ marginTop: 8 }}>
           還沒設定 Notion。設定後只有「分享給整合」的頁面會出現在這裡，AI 只讀你選中匯入的頁面。
           <Link href="/integrations" className="btn-tonal btn-sm" style={{ marginLeft: 8 }}>前往設定 Notion <Icon name="ArrowRight" size={13} /></Link>
-        </p>
+        </Hint>
       )}
       {data && !data.ok && data.reason === "error" && (
         <p className="error" role="alert" style={{ marginTop: 8 }}>{data.message}</p>
@@ -104,19 +105,19 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
               style={{ flex: "1 1 240px" }}
               maxLength={200}
             />
-            <button
-              className="btn-sm"
+            <Button
+              size="sm"
               onClick={() => { setSubmittedQuery(query.trim()); setSelected(new Set()); }}
               disabled={list.isFetching}
             >
               {list.isFetching ? "搜尋中…" : "搜尋"}
-            </button>
+            </Button>
           </div>
 
           {data?.ok && pages.length === 0 && !list.isFetching && (
-            <p className="hint" style={{ marginTop: 8 }}>
+            <Hint as="p" layer="always" style={{ marginTop: 8 }}>
               找不到頁面——確認頁面已「分享給整合」（頁面右上 ⋯ → 連接 → 選你的 integration），或換個關鍵字。
-            </p>
+            </Hint>
           )}
 
           {pages.length > 0 && (
@@ -141,23 +142,30 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
           )}
 
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-            <button
-              className="btn-sm primary"
+            <Button
+              size="sm"
+              variant="primary"
               disabled={selected.size === 0 || importing}
               onClick={() => { void doImport(); }}
             >
               {importing ? `匯入中（${results.length}/${selected.size}）…` : `匯入選取（${selected.size}）`}
-            </button>
+            </Button>
             <span className="meta">只會匯入你勾選的頁面；內容進站後才會被 AI 讀到。</span>
           </div>
 
           {results.length > 0 && (
             <div style={{ marginTop: 8 }}>
-              {results.map((r, i) => (
-                <p key={i} className={r.ok ? "hint" : "error"} style={{ margin: "2px 0" }} role={r.ok ? undefined : "alert"}>
-                  {r.ok ? <><Icon name="Check" size={12} /> {r.name}：匯入成功</> : <>{r.name}：{r.message}</>}
-                </p>
-              ))}
+              {results.map((r, i) =>
+                r.ok ? (
+                  <Meta key={i} as="p" style={{ margin: "2px 0" }}>
+                    <Icon name="Check" size={12} /> {r.name}：匯入成功
+                  </Meta>
+                ) : (
+                  <p key={i} className="error" style={{ margin: "2px 0" }} role="alert">
+                    {r.name}：{r.message}
+                  </p>
+                ),
+              )}
             </div>
           )}
         </>

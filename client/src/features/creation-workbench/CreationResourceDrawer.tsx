@@ -18,7 +18,7 @@ import {
   requestWorkbenchMode,
   type WorkbenchRevealDetail,
 } from "./workbenchNav";
-
+import { Button, Card, EmptyState, Hint, Meta, Pill } from "../../components/ui";
 export type ResourceDrawerTab = "prompts" | "generations" | "trail" | "templates";
 
 export type ReuseGenerateFn = (
@@ -271,40 +271,38 @@ export function CreationResourceDrawer({
           </h3>
           <span className="spacer" />
           {(running > 0 || waiting > 0 || awaiting > 0) && (
-            <span className="hint" style={{ fontSize: "var(--fs-12)" }}>
+            <Meta style={{ fontSize: "var(--fs-12)" }}>
               {running > 0 ? `執行中 ${running}` : ""}
               {waiting > 0 ? ` 等待 ${waiting}` : ""}
               {awaiting > 0 ? ` 待核 ${awaiting}` : ""}
-            </span>
+            </Meta>
           )}
         </div>
-        <p className="hint" style={{ margin: "0 0 8px" }}>
+        <Hint style={{ margin: "0 0 8px" }}>
           提示詞庫、生成紀錄與執行軌跡收在抽屜裡——手機不必再捲過好幾張長卡。
-        </p>
+        </Hint>
         <div
           style={{ display: "flex", flexWrap: "wrap", gap: 8 }}
           role="group"
           aria-label="開啟資源抽屜"
         >
           {TABS.map((t) => (
-            <button
+            <Button variant="ghost" size="sm"
               key={t.id}
               type="button"
-              className="btn-ghost btn-sm"
               aria-haspopup="dialog"
               aria-expanded={open && tab === t.id}
               data-resource-tab={t.id}
-              onClick={() => openTab(t.id)}
-            >
+              onClick={() => openTab(t.id)}>
               <Icon name={t.icon} size={13} /> {t.label}
-            </button>
+            </Button>
           ))}
         </div>
         {/* Success feedback lives on the entry row so it remains visible after close. */}
         {notice ? (
-          <p className="hint" role="status" aria-live="polite" style={{ margin: "8px 0 0" }}>
+          <Meta as="p" role="status" aria-live="polite" style={{ margin: "8px 0 0" }}>
             {notice}
-          </p>
+          </Meta>
         ) : null}
         {/* Hidden anchors so revealWorkbenchAnchor / scroll still find them */}
         <span id="sec-generations" hidden aria-hidden="true" />
@@ -319,9 +317,8 @@ export function CreationResourceDrawer({
             if (e.target === e.currentTarget) close();
           }}
         >
-          <div
+          <Card className="modal-card creation-resource-drawer"
             ref={dialogRef}
-            className="card modal-card creation-resource-drawer"
             role="dialog"
             aria-modal="true"
             aria-label="資源與結果"
@@ -333,17 +330,16 @@ export function CreationResourceDrawer({
               flexDirection: "column",
               padding: 0,
               overflow: "hidden",
-            }}
-          >
+            }}>
             <header
               className="section-heading-row"
               style={{ padding: "12px 14px 8px", borderBottom: "1px solid var(--border-soft)", flexShrink: 0 }}
             >
               <h2 style={{ margin: 0, fontSize: "var(--fs-16)" }}>資源與結果</h2>
               <span className="spacer" />
-              <button type="button" className="btn-ghost btn-sm" aria-label="關閉資源抽屜" onClick={close}>
+              <Button variant="ghost" size="sm" aria-label="關閉資源抽屜" onClick={close}>
                 <Icon name="X" size={14} /> 關閉
-              </button>
+              </Button>
             </header>
 
             <div
@@ -361,7 +357,7 @@ export function CreationResourceDrawer({
               {TABS.map((t, index) => {
                 const selected = tab === t.id;
                 return (
-                  <button
+                  <Button variant="ghost" size="sm"
                     key={t.id}
                     ref={(el) => {
                       tabRefs.current[index] = el;
@@ -372,17 +368,15 @@ export function CreationResourceDrawer({
                     aria-selected={selected}
                     aria-controls={`${prefix}-panel-${t.id}`}
                     tabIndex={selected ? 0 : -1}
-                    className="btn-ghost btn-sm"
                     onClick={() => setTab(t.id)}
                     onKeyDown={(e) => onDrawerTabKeyDown(e, index)}
                     style={{
                       whiteSpace: "nowrap",
                       border: selected ? "1px solid var(--primary-border)" : "1px solid transparent",
                       background: selected ? "var(--primary-tint)" : undefined,
-                    }}
-                  >
+                    }}>
                     <Icon name={t.icon} size={12} /> {t.label}
-                  </button>
+                  </Button>
                 );
               })}
             </div>
@@ -430,15 +424,12 @@ export function CreationResourceDrawer({
               >
                 {tab === "trail" && (
                   <div data-fb="執行軌跡">
-                    <p className="hint" style={{ marginTop: 0 }}>
+                    <Hint style={{ marginTop: 0 }}>
                       最近的多步開拍摘要。完整步驟、過目與停止請到「多步開拍」模式。
-                    </p>
-                    {runs.isLoading && <p className="hint">載入執行軌跡…</p>}
+                    </Hint>
+                    {runs.isLoading && <Meta as="p">載入執行軌跡…</Meta>}
                     {!runs.isLoading && runList.length === 0 && (
-                      <div className="empty-state" style={{ marginTop: 8 }}>
-                        <h3>還沒有執行軌跡——</h3>
-                        <p>在「多步開拍」或「套用範本」跑一次就會出現在這裡。</p>
-                      </div>
+                      <EmptyState icon={<Icon name="Clock" />} title={<>還沒有執行軌跡——</>} description={<>在「多步開拍」或「套用範本」跑一次就會出現在這裡。</>} style={{ marginTop: 8 }} />
                     )}
                     {runList.length > 0 && (
                       <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0" }}>
@@ -456,9 +447,9 @@ export function CreationResourceDrawer({
                                   {title.slice(0, 100)}
                                   {title.length > 100 ? "…" : ""}
                                 </div>
-                                <div className="hint mono" style={{ fontSize: "var(--fs-11)", marginTop: 2 }}>
-                                  <span
-                                    className={`pill ${
+                                <Meta as="div" className="mono" style={{ fontSize: "var(--fs-11)", marginTop: 2 }}>
+                                  <Pill
+                                    status={
                                       r.status === "running"
                                         ? "running"
                                         : r.status === "failed"
@@ -466,24 +457,24 @@ export function CreationResourceDrawer({
                                           : r.status === "done"
                                             ? "done"
                                             : "queued"
-                                    }`}
+                                    }
                                   >
                                     {status}
-                                  </span>
-                                </div>
+                                  </Pill>
+                                </Meta>
                               </div>
-                              <button type="button" className="btn-sm" onClick={goToPlanMode}>
+                              <Button size="sm" onClick={goToPlanMode}>
                                 開啟計畫
-                              </button>
+                              </Button>
                             </li>
                           );
                         })}
                       </ul>
                     )}
                     <div style={{ marginTop: 12 }}>
-                      <button type="button" className="btn-ghost" onClick={goToPlanMode}>
+                      <Button variant="ghost" onClick={goToPlanMode}>
                         <Icon name="Film" size={13} /> 前往多步開拍模式
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -496,12 +487,8 @@ export function CreationResourceDrawer({
                 hidden={tab !== "templates"}
               >
                 {tab === "templates" && (
-                  <div className="empty-state" style={{ marginTop: 8 }} data-fb="範本收藏">
-                    <h3>範本收藏（即將推出）</h3>
-                    <p>常用範本會收藏在這裡。目前請到「套用範本」挑選與執行。</p>
-                    <button
-                      type="button"
-                      className="btn-ghost"
+                  <EmptyState icon={<Icon name="Star" />} title={<>範本收藏（即將推出）</>} description={<>常用範本會收藏在這裡。目前請到「套用範本」挑選與執行。</>} action={<><Button
+                      variant="ghost"
                       style={{ marginTop: 8 }}
                       onClick={() => {
                         close();
@@ -512,12 +499,11 @@ export function CreationResourceDrawer({
                       }}
                     >
                       <Icon name="Clapperboard" size={13} /> 前往套用範本
-                    </button>
-                  </div>
+                    </Button></>} style={{ marginTop: 8 }} data-fb="範本收藏" />
                 )}
               </div>
             </div>
-          </div>
+          </Card>
         </div>
       )}
 

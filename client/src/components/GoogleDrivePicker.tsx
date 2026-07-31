@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Meta, Badge, Button, Hint } from "./ui";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
@@ -167,14 +168,14 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
           <span className="meta">目前以 {data.email ?? "已連結帳戶"} 瀏覽</span>
         )}
         <span style={{ flex: 1 }} />
-        <button className="btn-sm" onClick={onClose} title="收合"><Icon name="X" size={13} /></button>
+        <Button size="sm" onClick={onClose} title="收合"><Icon name="X" size={13} /></Button>
       </div>
 
       {data && !data.ok && data.reason === "not-connected" && (
-        <p className="hint" style={{ marginTop: 8 }}>
+        <Hint as="p" layer="always" style={{ marginTop: 8 }}>
           還沒連結 Google 雲端。連結後 AI 與匯入只會讀「你選中的檔案」，不是整顆雲端。
           <Link href="/integrations" className="btn-tonal btn-sm" style={{ marginLeft: 8 }}>前往連結 Google <Icon name="ArrowRight" size={13} /></Link>
-        </p>
+        </Hint>
       )}
       {data && !data.ok && data.reason === "error" && (
         <p className="error" role="alert" style={{ marginTop: 8 }}>{data.message}</p>
@@ -193,21 +194,21 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
               style={{ flex: "1 1 240px" }}
               maxLength={200}
             />
-            <button className="btn-sm" onClick={runSearch} disabled={list.isFetching}>
+            <Button size="sm" onClick={runSearch} disabled={list.isFetching}>
               {list.isFetching ? "搜尋中…" : "搜尋"}
-            </button>
+            </Button>
           </div>
 
           {data?.ok && files.length === 0 && !list.isFetching && (
-            <p className="hint" style={{ marginTop: 8 }}>找不到符合的檔案——換個關鍵字，或確認檔案在這個 Google 帳戶的雲端裡。</p>
+            <Hint as="p" layer="always" style={{ marginTop: 8 }}>找不到符合的檔案——換個關鍵字，或確認檔案在這個 Google 帳戶的雲端裡。</Hint>
           )}
 
           {folder && (
             <p className="meta" style={{ margin: "6px 0 0" }}>
               📁 目前資料夾：{folder.name}
-              <button className="btn-sm" style={{ marginLeft: 8 }} onClick={() => { setFolder(null); resetPage(); }}>
+              <Button size="sm" style={{ marginLeft: 8 }} onClick={() => { setFolder(null); resetPage(); }}>
                 回全部雲端
-              </button>
+              </Button>
             </p>
           )}
           {files.length > 0 && (
@@ -252,11 +253,11 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
                       style={{ width: "auto" }}
                     />
                     <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{f.name}</span>
-                    <span className="badge">{mimeLabel(f.mimeType)}</span>
+                    <Badge>{mimeLabel(f.mimeType)}</Badge>
                     {!f.ownedByMe && (
-                      <span className="badge" title="這不是你自己的檔案——由他人共用給此帳戶">
+                      <Badge title="這不是你自己的檔案——由他人共用給此帳戶">
                         共用{f.owner ? `：${f.owner.slice(0, 12)}` : ""}
-                      </span>
+                      </Badge>
                     )}
                     <span className="meta">{formatSize(f.size)}{f.modifiedTime ? `・${new Date(f.modifiedTime).toLocaleDateString()}` : ""}</span>
                   </label>
@@ -267,8 +268,9 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
 
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
             {onPick && onSaveToKnowledge && (
-              <button
-                className="btn-sm primary"
+              <Button
+                size="sm"
+                variant="primary"
                 disabled={selected.size === 0 || importing}
                 title="轉存後可重複使用——之後的規劃會自動注入（建議）"
                 onClick={() => {
@@ -278,19 +280,20 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
                 }}
               >
                 轉存進知識庫（{selected.size}）
-              </button>
+              </Button>
             )}
-            <button
-              className={`btn-sm${onPick && onSaveToKnowledge ? "" : " primary"}`}
+            <Button
+              size="sm"
+              variant={onPick && onSaveToKnowledge ? undefined : "primary"}
               disabled={selected.size === 0 || importing}
               onClick={() => { void doImport(); }}
             >
               {onPick
                 ? `${pickLabel ?? "僅本次規劃"}（${selected.size}）`
                 : importing ? `匯入中（${results.length}/${selected.size}）…` : `匯入選取（${selected.size}）`}
-            </button>
+            </Button>
             {data?.ok && data.nextPageToken && (
-              <button className="btn-sm" onClick={loadMore} disabled={list.isFetching}>載入更多</button>
+              <Button size="sm" onClick={loadMore} disabled={list.isFetching}>載入更多</Button>
             )}
             <span className="meta">
               {onPick
@@ -303,11 +306,17 @@ export function GoogleDrivePicker({ tableId, onImported, onClose, onPick, pickLa
 
           {results.length > 0 && (
             <div style={{ marginTop: 8 }}>
-              {results.map((r, i) => (
-                <p key={i} className={r.ok ? "hint" : "error"} style={{ margin: "2px 0" }} role={r.ok ? undefined : "alert"}>
-                  {r.ok ? <><Icon name="Check" size={12} /> {r.name}：匯入成功</> : <>{r.name}：{r.message}</>}
-                </p>
-              ))}
+              {results.map((r, i) =>
+                r.ok ? (
+                  <Meta key={i} as="p" style={{ margin: "2px 0" }}>
+                    <Icon name="Check" size={12} /> {r.name}：匯入成功
+                  </Meta>
+                ) : (
+                  <p key={i} className="error" style={{ margin: "2px 0" }} role="alert">
+                    {r.name}：{r.message}
+                  </p>
+                ),
+              )}
             </div>
           )}
         </>

@@ -1,3 +1,4 @@
+import type { AgentPlannerMode } from "@shared/agentPlanner";
 import type { AssistantActivityEvent } from "./AssistantTrace";
 
 export type AssistantStreamDone = {
@@ -6,6 +7,11 @@ export type AssistantStreamDone = {
   steps: string[];
   mock: boolean;
   fallback: boolean;
+  /** auto 備援真的花了錢時為 true。伺服器註解明言「供 UI 誠實顯示，不讓付費
+   *  行為隱形」——這三欄若沒人消費，付費事件在產品內就是零痕跡。 */
+  fellBackToPaid?: boolean;
+  provider?: string;
+  model?: string;
 };
 
 export type AssistantStreamHandlers = {
@@ -141,6 +147,7 @@ export async function requestAssistantStream({
   projectId,
   message,
   nonce,
+  mode,
   signal,
   handlers,
   fetchImpl = fetch,
@@ -148,6 +155,8 @@ export async function requestAssistantStream({
   projectId: string;
   message: string;
   nonce: string;
+  /** 使用者選的模型檔位；省略＝後端預設免費的 NIM */
+  mode?: AgentPlannerMode;
   signal: AbortSignal;
   handlers: AssistantStreamHandlers;
   fetchImpl?: FetchLike;
@@ -157,7 +166,7 @@ export async function requestAssistantStream({
     const response = await fetchImpl("/api/assistant/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId, message, nonce }),
+      body: JSON.stringify({ projectId, message, nonce, mode }),
       signal,
     });
     if (!response.ok || !response.body) return false;

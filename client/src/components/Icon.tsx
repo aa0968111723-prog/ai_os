@@ -1,14 +1,20 @@
 import type { CSSProperties, ReactNode } from "react";
 
 /**
- * 本地內嵌 Lucide 圖示（零 npm 依賴、零 CDN）。
+ * 本地內嵌 Lucide 圖示（產品端零依賴、零 CDN）。
  *
- * CSP 為 scriptSrc 'self'，禁止外部 CDN，因此把 Lucide（MIT 授權）的 24x24
+ * CSP 為 scriptSrc 'self'，禁止外部 CDN，因此把 Lucide（**ISC** 授權）的 24x24
  * stroke 路徑資料直接內嵌於此。每個圖示以 `stroke="currentColor"` 繪製，
  * 會繼承父層文字色（--primary / --success / --danger…），並一律
  * `aria-hidden="true"`（圖示只是既有可讀按鈕／標籤的視覺輔助）。
  *
  * 用法：<Icon name="Mic" />、<Icon name="Download" size={20} />
+ *
+ * **新增圖示請用產生器，不要手抄路徑：**
+ *   node scripts/add-icon.mjs Waypoints
+ * 手抄 SVG 路徑錯了不會有任何測試抓得到——只會是一個形狀走樣的圖示送到使用者
+ * 眼前。腳本從 devDependency `lucide-static` 讀原始檔機械轉換，把抄寫拿掉。
+ * lucide-static 只在建置前用到，產品 bundle 不會多出任何一個位元組。
  */
 export type IconName =
   | "Mic"
@@ -69,6 +75,7 @@ export type IconName =
   | "Tablet"
   | "Monitor"
   | "Copy"
+  | "Waypoints"
   | "HardDrive";
 
 /**
@@ -451,7 +458,27 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M3 12A9 3 0 0 0 21 12" />
     </>
   ),
+  Waypoints: (
+    <>
+      <path d="m10.586 5.414-5.172 5.172" />
+      <path d="m18.586 13.414-5.172 5.172" />
+      <path d="M6 12h12" />
+      <circle cx="12" cy="20" r="2" />
+      <circle cx="12" cy="4" r="2" />
+      <circle cx="20" cy="12" r="2" />
+      <circle cx="4" cy="12" r="2" />
+    </>
+  ),
 };
+
+/**
+ * 執行期可列舉的圖示名單（給展示頁與測試用）。
+ *
+ * 直接由 `PATHS` 推導，不另外維護第二份名單——手寫第二份只會多一個
+ * 會跟本體不同步的東西。型別那一側由 `Record<IconName, ReactNode>` 顧著：
+ * 聯集裡有、PATHS 裡漏掉的名稱，tsc 會直接報錯。
+ */
+export const ICON_NAMES = Object.keys(PATHS) as IconName[];
 
 export function Icon({
   name,

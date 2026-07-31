@@ -2,7 +2,7 @@ import { useState } from "react";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
-
+import { Badge, Button, Card, Hint, Meta, Skeleton } from "./ui";
 /** 素材種類 → 圖示（與素材庫一致的視覺語彙） */
 const KIND_ICON: Record<string, IconName> = { image: "Image", video: "Clapperboard", audio: "Volume2", doc: "FileText" };
 /** 知識種類 → 中文標籤 */
@@ -47,17 +47,17 @@ function DeletedRow({
       <Icon name={icon} size={16} style={{ flexShrink: 0, color: "var(--soft)" }} />
       <div style={{ minWidth: 0, flex: "1 1 auto" }}>
         <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
-        <div className="hint" style={{ fontSize: 11 }}>
+        <Meta as="div" style={{ fontSize: 11 }}>
           {sub ? `${sub}・` : ""}刪除於 {fmtWhen(when) || "—"}
-        </div>
+        </Meta>
       </div>
-      <button className="btn-sm" disabled={rowBusy} onClick={onRestore}>
+      <Button size="sm" disabled={rowBusy} onClick={onRestore}>
         {restoring ? (
           <><Icon name="Loader" className="spin" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />還原中…</>
         ) : (
           <><Icon name="Undo2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />還原</>
         )}
-      </button>
+      </Button>
       <ConfirmButton
         triggerClassName="btn-sm"
         triggerStyle={{ color: "var(--danger-ink)" }}
@@ -104,7 +104,7 @@ export function RecycleBin({ projectId }: { projectId: string }) {
   const total = data ? data.assets.length + data.scenes.length + data.knowledge.length : 0;
 
   return (
-    <section className="card" data-fb="回收桶">
+    <Card as="section" data-fb="回收桶">
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <button
           style={{ padding: "6px 12px", fontSize: 14, display: "inline-flex", alignItems: "center", gap: 8 }}
@@ -114,10 +114,10 @@ export function RecycleBin({ projectId }: { projectId: string }) {
           <Icon name={open ? "ChevronUp" : "ChevronDown"} size={16} />
           回收桶
         </button>
-        {data && total > 0 && <span className="badge"><span className="mono">{total}</span> 項可還原</span>}
-        <span className="hint" style={{ flex: "1 1 auto", fontSize: 12 }}>
+        {data && total > 0 && <Badge><span className="mono">{total}</span> 項可還原</Badge>}
+        <Hint as="span" layer="always" style={{ flex: "1 1 auto", fontSize: 12 }}>
           刪除的素材／分鏡／知識暫存於此，可還原（不扣點）
-        </span>
+        </Hint>
       </div>
 
       {open && (
@@ -127,23 +127,23 @@ export function RecycleBin({ projectId }: { projectId: string }) {
             <div aria-hidden="true">
               {[0, 1].map((i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid var(--border-soft)" }}>
-                  <div className="skeleton" style={{ width: 16, height: 16, borderRadius: 4 }} />
-                  <div className="skeleton" style={{ height: 13, flex: "1 1 auto", maxWidth: i === 0 ? 220 : 170 }} />
-                  <div className="skeleton" style={{ height: 26, width: 64, borderRadius: 999 }} />
+                  <Skeleton style={{ width: 16, height: 16, borderRadius: 4 }} />
+                  <Skeleton style={{ height: 13, flex: "1 1 auto", maxWidth: i === 0 ? 220 : 170 }} />
+                  <Skeleton style={{ height: 26, width: 64, borderRadius: 999 }} />
                 </div>
               ))}
             </div>
           ) : deleted.error ? (
             <p className="error">載入回收桶失敗：{deleted.error.message}</p>
           ) : total === 0 ? (
-            <p className="hint">回收桶是空的——刪除的項目會出現在這裡。</p>
+            <Hint layer="always">回收桶是空的——刪除的項目會出現在這裡。</Hint>
           ) : (
             <>
               {err && <p className="error">操作失敗：{err.message}</p>}
 
               {data!.assets.length > 0 && (
                 <div style={{ marginBottom: 10 }}>
-                  <p className="hint" style={{ margin: "4px 0", fontWeight: 600 }}>素材（{data!.assets.length}）</p>
+                  <Meta as="p" style={{ margin: "4px 0", fontWeight: 600 }}>素材（{data!.assets.length}）</Meta>
                   {data!.assets.map((a) => (
                     <DeletedRow
                       key={a.id}
@@ -162,7 +162,7 @@ export function RecycleBin({ projectId }: { projectId: string }) {
 
               {data!.scenes.length > 0 && (
                 <div style={{ marginBottom: 10 }}>
-                  <p className="hint" style={{ margin: "4px 0", fontWeight: 600 }}>分鏡（{data!.scenes.length}）</p>
+                  <Meta as="p" style={{ margin: "4px 0", fontWeight: 600 }}>分鏡（{data!.scenes.length}）</Meta>
                   {data!.scenes.map((s) => (
                     <DeletedRow
                       key={s.id}
@@ -180,7 +180,7 @@ export function RecycleBin({ projectId }: { projectId: string }) {
 
               {data!.knowledge.length > 0 && (
                 <div>
-                  <p className="hint" style={{ margin: "4px 0", fontWeight: 600 }}>知識庫（{data!.knowledge.length}）</p>
+                  <Meta as="p" style={{ margin: "4px 0", fontWeight: 600 }}>知識庫（{data!.knowledge.length}）</Meta>
                   {data!.knowledge.map((k) => (
                     <DeletedRow
                       key={k.id}
@@ -200,6 +200,6 @@ export function RecycleBin({ projectId }: { projectId: string }) {
           )}
         </div>
       )}
-    </section>
+    </Card>
   );
 }

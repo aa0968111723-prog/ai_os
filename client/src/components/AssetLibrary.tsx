@@ -12,6 +12,7 @@ import {
   revealAssetInFolder,
   suggestedFileName,
 } from "../platform/desktopBridge";
+import { Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -274,13 +275,13 @@ export function AssetLibrary({
   const kindRoving = useRovingRadio(visibleKindFilters.map((f) => f.key), kindFilter, setKindFilter);
 
   return (
-    <section className="card">
+    <Card as="section">
       <h2>素材庫（上傳參考素材・生成成品自動入庫）</h2>
       {/* DESK-01：桌面回傳 revision 時顯示於區塊層級（不綁特定卡片） */}
       {desktopStatus?.assetId === "" && desktopStatus.kind === "ok" && (
-        <p className="hint" role="status" aria-live="polite" style={{ color: "var(--success-ink)" }}>
+        <Meta as="p" role="status" aria-live="polite" style={{ color: "var(--success-ink)" }}>
           {desktopStatus.text}
-        </p>
+        </Meta>
       )}
 
       <div
@@ -311,14 +312,11 @@ export function AssetLibrary({
       {assets.isLoading ? (
         <div className="asset-grid">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="asset-cell skeleton" style={{ height: 132 }} />
+            <Skeleton key={i} className="asset-cell" height={132} />
           ))}
         </div>
       ) : !total ? (
-        <div className="empty-state" style={{ marginTop: 10 }}>
-          <h3>還沒有素材——</h3>
-          <p>上傳參考圖、原音檔，或先生成一張。</p>
-        </div>
+        <EmptyState icon={<Icon name="Image" />} title={<>還沒有素材——</>} description={<>上傳參考圖、原音檔，或先生成一張。</>} style={{ marginTop: 10 }} />
       ) : (
         <>
           {/* 工具列：數量統計 · 種類篩選 chips · 搜尋 · 排序 */}
@@ -329,18 +327,19 @@ export function AssetLibrary({
                 const count = f.key === "all" ? total : kindCounts[f.key] ?? 0;
                 const on = kindFilter === f.key;
                 return (
-                  <span
+                  <Chip
                     key={f.key}
+                    selected={on}
+                    onClick={() => setKindFilter(f.key)}
                     role="radio"
                     aria-checked={on}
+                    // 選取態由 role="radio" 的 aria-checked 表達；aria-pressed 只在
+                    // role="button" 合法，Chip 見到自訂 role 就不會再補（見 ui/Chip.tsx）。
                     {...kindRoving.itemProps(idx)}
-                    className={`chip pick ${on ? "on" : ""}`}
-                    onClick={() => setKindFilter(f.key)}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setKindFilter(f.key); } }}
                   >
                     {f.icon && <Icon name={f.icon} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />}
                     {f.label} {count}
-                  </span>
+                  </Chip>
                 );
               })}
             </div>
@@ -367,18 +366,16 @@ export function AssetLibrary({
                 </select>
               </label>
               {onPickSource && (
-                <span
+                <Chip
+                  selected={onlySourceable}
+                  onClick={() => setOnlySourceable((v) => !v)}
                   role="switch"
                   aria-checked={onlySourceable}
-                  tabIndex={0}
-                  className={`chip pick ${onlySourceable ? "on" : ""}`}
                   title="只顯示能當生成來源的圖片與影片"
-                  onClick={() => setOnlySourceable((v) => !v)}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOnlySourceable((v) => !v); } }}
                 >
                   {onlySourceable && <Icon name="Check" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />}
                   只看可當來源的
-                </span>
+                </Chip>
               )}
             </div>
             {/* 多選打包（需求 #8）：勾卡片角落的核取框，這裡出現「打包所選」——沒勾任何時不顯示打包鈕 */}
@@ -393,17 +390,17 @@ export function AssetLibrary({
                   </button>
                   {/* QA-005：多選打包也走非同步 job——進度/取消/完成下載就地顯示 */}
                   <ExportJobButton projectId={projectId} assetIds={[...selected]} idleLabel={`打包所選（${selected.size}）`} triggerClassName="primary btn-sm" />
-                  <span className="hint" style={{ margin: 0, fontSize: 11 }}>已勾 {selected.size} 個</span>
+                  <Meta style={{ margin: 0, fontSize: 11 }}>已勾 {selected.size} 個</Meta>
                 </>
               )}
             </div>
-            <p className="hint" style={{ margin: 0 }}>
+            <Meta as="p" style={{ margin: 0 }}>
               {filterActive ? `顯示 ${shown.length} / 共 ${total} 個素材` : `共 ${total} 個素材`}
-            </p>
+            </Meta>
           </div>
 
           {shown.length === 0 ? (
-            <p className="hint" style={{ marginTop: 10 }}>
+            <Hint layer="always" style={{ marginTop: 10 }}>
               沒有符合條件的素材——換個種類或清掉搜尋字。
               <span
                 role="button"
@@ -414,7 +411,7 @@ export function AssetLibrary({
               >
                 清除篩選
               </span>
-            </p>
+            </Hint>
           ) : (
             <div className="asset-grid">
               {shown.map((a) => {
@@ -484,63 +481,72 @@ export function AssetLibrary({
                           {a.title}
                         </div>
                       )}
-                      <div className="hint" style={{ fontSize: 11 }}>
+                      <Meta as="div" style={{ fontSize: 11 }}>
                         {a.locked ? <><Icon name="Lock" size={11} style={{ verticalAlign: "-1px", marginRight: 4, color: "var(--gold-ink)" }} />鎖定 · </> : ""}
                         {a.isAiGenerated ? "AI 生成" : "上傳"}
                         {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
-                      </div>
+                      </Meta>
                       {/* AUTH-03 lineage：桌面編輯回傳的新素材可追溯來源 */}
                       {(() => {
                         const srcId = (a.meta as { sourceAssetId?: string } | null | undefined)?.sourceAssetId;
                         if (!srcId) return null;
                         const srcTitle = (allAssets ?? []).find((x) => x.id === srcId)?.title;
                         return (
-                          <div className="hint" style={{ fontSize: 11 }} title={srcId}>
+                          <Meta as="div" style={{ fontSize: 11 }} title={srcId}>
                             由「{srcTitle ?? "原始素材"}」編輯而來
-                          </div>
+                          </Meta>
                         );
                       })()}
 
                       {/* 文件「加入知識庫」的就地回饋：進行中轉圈／成功後短暫綠字（2.5 秒自動消失） */}
                       {toKnowledge.isPending && toKnowledge.variables?.assetId === a.id && (
-                        <div className="hint" style={{ fontSize: 11 }}>
+                        <Meta as="div" style={{ fontSize: 11 }}>
                           <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />加入知識庫中…
-                        </div>
+                        </Meta>
                       )}
                       {knowledgeAddedId === a.id && (
-                        <div className="hint" style={{ fontSize: 11, color: "var(--success-ink)" }}>
+                        <Meta as="div" style={{ fontSize: 11, color: "var(--success-ink)" }}>
                           <Icon name="Check" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />已加入知識庫
-                        </div>
+                        </Meta>
                       )}
 
                       {/* AI 描述入知識庫的就地回饋：進行中轉圈／成功後短暫綠字（2.5 秒自動消失） */}
                       {describeImage.isPending && describeImage.variables?.assetId === a.id && (
-                        <div className="hint" style={{ fontSize: 11 }}>
+                        <Meta as="div" style={{ fontSize: 11 }}>
                           <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />AI 描述中…
-                        </div>
+                        </Meta>
                       )}
                       {describedId === a.id && (
-                        <div className="hint" style={{ fontSize: 11, color: "var(--success-ink)" }}>
+                        <Meta as="div" style={{ fontSize: 11, color: "var(--success-ink)" }}>
                           <Icon name="Check" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />已描述入知識庫
-                        </div>
+                        </Meta>
                       )}
 
                       {/* DESK-01：外部編輯就地 busy／錯誤回饋（卡片內，不用 alert） */}
                       {desktopBusyId === a.id && (
-                        <div className="hint" style={{ fontSize: 11 }} role="status" aria-live="polite">
+                        <Meta as="div" style={{ fontSize: 11 }} role="status" aria-live="polite">
                           <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />準備本機交接…
-                        </div>
+                        </Meta>
                       )}
                       {desktopStatus?.assetId === a.id && desktopBusyId !== a.id && (
-                        <div
-                          className={desktopStatus.kind === "err" ? "error" : "hint"}
-                          style={{ fontSize: 11, ...(desktopStatus.kind === "ok" ? { color: "var(--success-ink)" } : undefined) }}
-                          role={desktopStatus.kind === "err" ? "alert" : "status"}
-                          aria-live="polite"
-                        >
-                          {desktopStatus.text}
-                        </div>
+                        // 交接結果是「內容」（狀態／錯誤原文），不是說明，故走 Meta。
+                        // 錯誤那支維持裸 .error：Meta 一定會加上 .hint，而 styles.css 裡
+                        // .hint 排在 .error 之後且同特異度，疊起來會把紅字蓋成灰字。
+                        desktopStatus.kind === "err" ? (
+                          <div className="error" style={{ fontSize: 11 }} role="alert" aria-live="polite">
+                            {desktopStatus.text}
+                          </div>
+                        ) : (
+                          <Meta
+                            as="div"
+                            style={{ fontSize: 11, ...(desktopStatus.kind === "ok" ? { color: "var(--success-ink)" } : undefined) }}
+                            role="status"
+                            aria-live="polite"
+                          >
+                            {desktopStatus.text}
+                          </Meta>
+                        )
                       )}
 
                       {/* 音訊直接在格子裡試聽 */}
@@ -573,8 +579,13 @@ export function AssetLibrary({
                       </div>
 
                       {menuOpen && (
+                        /* 刻意不用 role="menu"：這一區只是幾顆動作按鈕，沒有實作 ARIA menu
+                            要求的方向鍵漫遊／Escape／type-ahead。掛 role="menu" 而子項沒有
+                            role="menuitem" 會違反 aria-required-children（讀屏念成「沒有項目的選單」）；
+                            補上 menuitem 又等於承諾方向鍵導航——在沒實作的情況下只有一個項目
+                            可 Tab，比現在更糟。當成一般按鈕群組是誠實且完全可鍵盤操作的做法。
+                           站內真正的 ARIA menu 是 AccountMenu，那裡有完整的鍵盤實作。 */
                         <div
-                          role="menu"
                           onClick={(e) => e.stopPropagation()}
                           style={{
                             display: "flex", flexDirection: "column", gap: 6, marginTop: 6, paddingTop: 6,
@@ -620,9 +631,9 @@ export function AssetLibrary({
                                   <Icon name="Download" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />下載
                                 </a>
                               )}
-                              <div className="hint" style={{ fontSize: 11, padding: "2px 4px", margin: 0 }}>
+                              <Hint as="div" layer="always" style={{ fontSize: 11, padding: "2px 4px", margin: 0 }}>
                                 下載後本機開啟；Aios 桌面版可自動回傳編輯結果
-                              </div>
+                              </Hint>
                               <div className="menu-sep" />
                             </>
                           )}
@@ -746,6 +757,6 @@ export function AssetLibrary({
           </div>
         </div>
       )}
-    </section>
+    </Card>
   );
 }
