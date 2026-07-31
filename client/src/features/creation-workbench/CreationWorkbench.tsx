@@ -30,8 +30,7 @@ import {
   composeGoalFromSkills,
   resolveModeFromSkills,
 } from "../../../../shared/agentSkills";
-import { Hint, Meta } from "../../components/ui";
-
+import { Hint, Meta, Pill } from "../../components/ui";
 /**
  * AI 創作工作台（WB-01～WB-06 正式頁面入口）：ProjectPage ② 只掛這一個主卡。
  * 目標輸入、模式 tabs、上下文條、共享草稿、四模式 adapter、CreationResourceDrawer。
@@ -316,9 +315,9 @@ export function CreationWorkbench({
           <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作工作台
         </h2>
         <span className="spacer" />
-        {running > 0 && <span className="pill running">執行中 {running}</span>}
-        {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
-        {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
+        {running > 0 && <Pill status="running">執行中 {running}</Pill>}
+        {waiting > 0 && <Pill status="queued">等待人員 {waiting}</Pill>}
+        {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
         <button
           type="button"
           className="btn-ghost btn-sm"

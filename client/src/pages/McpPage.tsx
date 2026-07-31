@@ -6,7 +6,7 @@ import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { MCP_TOOLS } from "../../../shared/mcpCatalog";
 import { humanizeAuditAction, summarizeAuditInput } from "../../../shared/auditWording";
 
-import { Hint, Meta, Pill } from "../components/ui";
+import { Hint, Meta, Pill, Skeleton } from "../components/ui";
 /**
  * MCP 專區（接上外部 AI 的控制中心）：連線設定 → 建立金鑰（可設唯讀／到期）→ 我的金鑰（權限一目了然）
  * → 測試連線（whoami）→ 工具手冊 → 近期活動。
@@ -259,7 +259,7 @@ export function McpPage() {
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Lock" size={18} />我的金鑰（{activeCount} 把使用中）</h2>
       <div className="card">
         {tokens.isLoading ? (
-          <><div className="skeleton" style={{ height: 40 }} /><div className="skeleton" style={{ height: 40, marginTop: 8 }} /></>
+          <><Skeleton style={{ height: 40 }} /><Skeleton style={{ height: 40, marginTop: 8 }} /></>
         ) : tokens.error ? (
           <Meta as="p" style={{ margin: 0, color: "var(--danger-ink)" }}>載入金鑰失敗：{tokens.error.message}</Meta>
         ) : list.length === 0 ? (
@@ -336,7 +336,7 @@ export function McpPage() {
       <Hint layer="always" style={{ marginTop: 0 }}>你透過 MCP 觸發的操作紀錄（依使用者歸屬，非單把金鑰）。看到不認得的呼叫，請撤銷可疑金鑰。</Hint>
       <div className="card">
         {activity.isLoading ? (
-          <div className="skeleton" style={{ height: 36 }} />
+          <Skeleton style={{ height: 36 }} />
         ) : activity.error ? (
           <Meta as="p" style={{ margin: 0, color: "var(--danger-ink)" }}>載入活動失敗：{activity.error.message}</Meta>
         ) : !activity.data || activity.data.length === 0 ? (

@@ -5,8 +5,7 @@ import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Hint, Meta } from "../components/ui";
-
+import { Hint, Meta, Skeleton } from "../components/ui";
 type Member = inferRouterOutputs<AppRouter>["directory"]["list"]["members"][number];
 
 /** 相對時間（比照 Launchpad 的 relTime；通訊錄的「最近活動」用） */
@@ -86,7 +85,7 @@ export function MembersPage() {
       {dir.isLoading ? (
         <div role="status" aria-label="通訊錄載入中" aria-busy="true">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="skeleton" style={{ height: 96, marginBottom: 12, borderRadius: 12 }} />
+            <Skeleton key={i} style={{ height: 96, marginBottom: 12, borderRadius: 12 }} />
           ))}
         </div>
       ) : dir.error ? (

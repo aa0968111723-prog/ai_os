@@ -234,6 +234,26 @@ describe("Hint — 新手／專家分層", () => {
   });
 });
 
+describe("Skeleton — 播報用骨架不能被 aria-hidden 蓋掉", () => {
+  it("預設帶 aria-hidden（純裝飾方塊不該被念出來）", () => {
+    const { container } = render(<Skeleton height={48} />);
+    expect(container.firstElementChild).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("給了 role 就不強加 aria-hidden —— 兩者矛盾會讓讀屏收不到「正在載入」", () => {
+    const { container } = render(<Skeleton height={48} role="status" aria-label="載入中" />);
+    const el = container.firstElementChild!;
+    expect(el).not.toHaveAttribute("aria-hidden");
+    expect(el).toHaveAttribute("role", "status");
+    expect(el).toHaveAttribute("aria-label", "載入中");
+  });
+
+  it("只給 aria-label 也視為要播報", () => {
+    const { container } = render(<Skeleton height={48} aria-label="訊息載入中" />);
+    expect(container.firstElementChild).not.toHaveAttribute("aria-hidden");
+  });
+});
+
 describe("Meta — 內容 vs 說明的分界", () => {
   it("視覺輸出與 hint 完全相同（遷移零變化）", () => {
     const { container } = render(<Meta>步驟 3/7</Meta>);

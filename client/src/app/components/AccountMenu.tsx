@@ -6,7 +6,7 @@ import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
 import type { MeWithCapabilities } from "../../capabilities";
 import { accountMenuItems, filterNavItems } from "../navigation/navigationItems";
-import { Hint, Meta, useDensity } from "../../components/ui";
+import { Hint, Meta, Skeleton, useDensity } from "../../components/ui";
 import { writeUiDensity } from "../../lib/densityPreference";
 import { UI_DENSITY_DESCRIPTION, UI_DENSITY_LABEL } from "@shared/uiDensity";
 
@@ -120,7 +120,7 @@ function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; e
   if (my.isLoading) {
     return (
       <div className="account-menu__quota" role="presentation" style={{ padding: "8px 12px" }}>
-        <div className="skeleton" style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
       </div>
     );
   }

@@ -4,8 +4,7 @@ import { useLocalDraft } from "../useLocalDraft";
 import { Icon } from "./Icon";
 import { CharCount, ConfirmButton } from "./interactions";
 import { VersionHistory } from "./VersionHistory";
-import { Chip, Hint, Meta } from "./ui";
-
+import { Chip, Hint, Meta, Skeleton } from "./ui";
 const KINDS = [
   { id: "transcript", label: "師父開示稿" },
   { id: "testimony", label: "見證故事" },
@@ -161,7 +160,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
         <div style={{ marginTop: 8 }} aria-hidden="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="gen-row">
-              <div className="skeleton" style={{ height: 14 }} />
+              <Skeleton style={{ height: 14 }} />
             </div>
           ))}
         </div>

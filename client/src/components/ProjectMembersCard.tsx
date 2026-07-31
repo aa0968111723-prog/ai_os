@@ -1,6 +1,5 @@
 import { trpc } from "../api";
-import { Hint, Meta } from "./ui";
-
+import { Hint, Meta, Skeleton } from "./ui";
 /**
  * 專案權限卡（需求 2.3）：預設組內全員可編輯；組長可把個別成員設為「檢視者」（唯讀）。
  * 組長/管理員固定是編輯者（不可降）——裁決與管理不能被自己鎖住。
@@ -59,8 +58,8 @@ export function ProjectMembersCard({ projectId, bare = false }: { projectId: str
       )}
       {!data ? (
         <div role="status" aria-label="成員載入中">
-          <div className="skeleton" style={{ height: 32, marginTop: 8 }} />
-          <div className="skeleton" style={{ height: 32, marginTop: 8 }} />
+          <Skeleton style={{ height: 32, marginTop: 8 }} />
+          <Skeleton style={{ height: 32, marginTop: 8 }} />
         </div>
       ) : data.members.length === 0 ? (
         // 防禦性空狀態（正常不會出現：有效成員至少含目前使用者）——留一句話總比整卡靜默空白好

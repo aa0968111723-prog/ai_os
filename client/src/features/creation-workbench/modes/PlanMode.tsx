@@ -3,6 +3,7 @@ import { AgentCard } from "../../../components/AgentCard";
 import { CreationCostSummary } from "../CreationCostSummary";
 import { useAgentRunBadges } from "../useAgentRunBadges";
 
+import { Pill } from "../../../components/ui";
 type PlanSummaryLite = {
   estimatedPoints?: number;
   estimatedDurationMinutes?: number | null;
@@ -91,9 +92,9 @@ export function PlanMode({
             <Icon name="Film" size={14} /> 多步計畫
           </strong>
           <span className="spacer" />
-          {running > 0 && <span className="pill running">執行中 {running}</span>}
-          {waiting > 0 && <span className="pill queued">等你 {waiting}</span>}
-          {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
+          {running > 0 && <Pill status="running">執行中 {running}</Pill>}
+          {waiting > 0 && <Pill status="queued">等你 {waiting}</Pill>}
+          {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
         </div>
         <AgentCard
           projectId={projectId}

@@ -6,8 +6,7 @@ import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { ChatEmptyState, focusChatPartnerPicker } from "../components/ChatEmptyState";
 import { setPlannerFocus } from "../discuss";
-import { Button, Hint, Meta } from "../components/ui";
-
+import { Button, Hint, Meta, Skeleton } from "../components/ui";
 type Thread = inferRouterOutputs<AppRouter>["dm"]["threads"][number];
 type Peer = inferRouterOutputs<AppRouter>["dm"]["peers"][number];
 type HistoryItem = inferRouterOutputs<AppRouter>["dm"]["history"]["items"][number];
@@ -103,7 +102,7 @@ export function ChatPage({ peerId }: { peerId?: string }) {
             />
           </label>
           {threads.isLoading ? (
-            <div className="skeleton" style={{ height: 120, borderRadius: 8 }} role="status" aria-label="載入中" />
+            <Skeleton style={{ height: 120, borderRadius: 8 }} role="status" aria-label="載入中" />
           ) : (
             <>
               {filteredThreads.map((t) => (
@@ -339,7 +338,7 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
           </div>
         )}
         {history.isLoading ? (
-          <div className="skeleton" style={{ height: 160, borderRadius: 8 }} role="status" aria-label="訊息載入中" />
+          <Skeleton style={{ height: 160, borderRadius: 8 }} role="status" aria-label="訊息載入中" />
         ) : items.length === 0 ? (
           <Hint layer="always" style={{ textAlign: "center", marginTop: 24 }}>還沒有訊息——打個招呼吧 🙏</Hint>
         ) : (

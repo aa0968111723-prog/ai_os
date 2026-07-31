@@ -3,8 +3,7 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { PasswordInput } from "../components/PasswordInput";
 import { friendlyAuthError } from "./LoginPage";
-import { Hint, Meta } from "../components/ui";
-
+import { Hint, Meta, Skeleton } from "../components/ui";
 const TEAM_ROLE_LABEL: Record<string, string> = { admin: "團隊管理員", member: "成員" };
 const GROUP_ROLE_LABEL: Record<string, string> = { leader: "組長", member: "組員" };
 
@@ -34,9 +33,9 @@ export function AcceptInvitePage({ token }: { token: string }) {
   if (preview.isLoading)
     return wrap(
       <div role="status" aria-label="確認邀請連結中…" style={{ display: "grid", gap: "var(--sp-12)" }}>
-        <div className="skeleton" style={{ height: 28, width: "55%" }} />
-        <div className="skeleton" style={{ height: 60 }} />
-        <div className="skeleton" style={{ height: 44 }} />
+        <Skeleton style={{ height: 28, width: "55%" }} />
+        <Skeleton style={{ height: 60 }} />
+        <Skeleton style={{ height: 44 }} />
       </div>,
     );
 

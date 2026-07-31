@@ -5,20 +5,20 @@
   "observations": {
     "stylesCssLines": 3692,
     "tsxFiles": 96,
-    "filesUsingPrimitives": 49
+    "filesUsingPrimitives": 50
   },
   "totals": {
-    "total": 419,
+    "total": 347,
     "perClass": {
       "empty-state": 21,
       "hint": 47,
-      "skeleton": 68,
       "badge": 13,
       "btn-ghost": 33,
       "btn-sm": 61,
       "card": 85,
       "chip": 53,
-      "pill": 27,
+      "pill": 14,
+      "skeleton": 9,
       "btn-tonal": 6,
       "btn": 5
     }
@@ -32,7 +32,6 @@
       "hint": 2
     },
     "client/src/app/components/AccountMenu.tsx": {
-      "skeleton": 1,
       "badge": 1
     },
     "client/src/app/components/AppHeader.tsx": {
@@ -59,7 +58,6 @@
     },
     "client/src/components/AiHub.tsx": {
       "card": 1,
-      "pill": 6,
       "btn-ghost": 2,
       "btn-sm": 1,
       "chip": 1
@@ -80,7 +78,6 @@
     },
     "client/src/components/CharacterCards.tsx": {
       "card": 1,
-      "skeleton": 2,
       "btn-ghost": 1,
       "empty-state": 1
     },
@@ -96,7 +93,7 @@
       "hint": 2
     },
     "client/src/components/GenerationList.tsx": {
-      "skeleton": 4,
+      "skeleton": 1,
       "empty-state": 1,
       "chip": 8,
       "pill": 1
@@ -104,7 +101,7 @@
     "client/src/components/GroupOptionsEditor.tsx": {
       "card": 5,
       "hint": 2,
-      "skeleton": 3,
+      "skeleton": 2,
       "btn-sm": 1
     },
     "client/src/components/InstallAppBanner.tsx": {
@@ -117,7 +114,6 @@
     },
     "client/src/components/KnowledgeBase.tsx": {
       "card": 1,
-      "skeleton": 1,
       "empty-state": 1
     },
     "client/src/components/MediaFallback.tsx": {
@@ -157,34 +153,28 @@
       "pill": 1
     },
     "client/src/components/ProjectMembersCard.tsx": {
-      "card": 1,
-      "skeleton": 2
+      "card": 1
     },
     "client/src/components/PromptLibrary.tsx": {
       "empty-state": 1,
       "card": 1
     },
     "client/src/components/RecycleBin.tsx": {
-      "card": 1,
-      "skeleton": 3
+      "card": 1
     },
     "client/src/components/ReferenceImagePicker.tsx": {
       "hint": 3
     },
     "client/src/components/SceneList.tsx": {
-      "pill": 2,
+      "pill": 1,
       "btn-tonal": 4,
       "btn-sm": 1,
-      "skeleton": 4,
+      "skeleton": 1,
       "empty-state": 1
     },
     "client/src/components/ScenePresetCards.tsx": {
       "card": 1,
-      "skeleton": 2,
       "btn-ghost": 1
-    },
-    "client/src/components/VersionHistory.tsx": {
-      "skeleton": 2
     },
     "client/src/components/WorkflowCard.tsx": {
       "chip": 2,
@@ -216,7 +206,6 @@
     },
     "client/src/features/creation-workbench/CreationWorkbench.tsx": {
       "card": 1,
-      "pill": 3,
       "btn-ghost": 1,
       "btn-sm": 1
     },
@@ -224,9 +213,6 @@
       "chip": 1,
       "card": 1,
       "btn-sm": 1
-    },
-    "client/src/features/creation-workbench/modes/PlanMode.tsx": {
-      "pill": 3
     },
     "client/src/features/creation-workbench/modes/TemplateMode.tsx": {
       "hint": 1,
@@ -246,12 +232,11 @@
     },
     "client/src/pages/AcceptInvitePage.tsx": {
       "card": 1,
-      "skeleton": 3,
       "btn-ghost": 1
     },
     "client/src/pages/AdminPage.tsx": {
       "hint": 14,
-      "skeleton": 22,
+      "skeleton": 2,
       "chip": 3,
       "card": 12,
       "pill": 2,
@@ -262,7 +247,6 @@
     },
     "client/src/pages/ChatPage.tsx": {
       "card": 3,
-      "skeleton": 2,
       "btn-sm": 2,
       "chip": 3
     },
@@ -280,11 +264,9 @@
       "chip": 1
     },
     "client/src/pages/DownloadsPage.tsx": {
-      "skeleton": 2,
       "card": 1
     },
     "client/src/pages/FeedbackPage.tsx": {
-      "skeleton": 4,
       "card": 3,
       "chip": 1
     },
@@ -308,11 +290,9 @@
       "hint": 1
     },
     "client/src/pages/McpPage.tsx": {
-      "card": 6,
-      "skeleton": 3
+      "card": 6
     },
     "client/src/pages/MembersPage.tsx": {
-      "skeleton": 1,
       "card": 1,
       "btn-tonal": 1,
       "btn-sm": 1
@@ -328,12 +308,10 @@
       "btn-sm": 3
     },
     "client/src/pages/MyReportsPage.tsx": {
-      "skeleton": 1,
       "card": 2
     },
     "client/src/pages/PlannerPage.tsx": {
       "empty-state": 4,
-      "skeleton": 3,
       "chip": 2,
       "hint": 5,
       "btn-sm": 5,

@@ -4,8 +4,7 @@ import { Icon, type IconName } from "./Icon";
 import { AgentCard } from "./AgentCard";
 import { ProjectAssistant } from "./ProjectAssistant";
 import { flashAnchor } from "../discuss";
-import { Hint, Meta } from "./ui";
-
+import { Hint, Meta, Pill } from "./ui";
 /**
  * @deprecated Legacy shell kept for unit tests only (`AiHub.test.tsx`).
  * Production ProjectPage mounts `CreationWorkbench` exclusively (WB-01～WB-06).
@@ -98,9 +97,9 @@ export function AiHub({
           <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作工作台
         </h2>
         <span className="spacer" />
-        {running > 0 && <span className="pill running">執行中 {running}</span>}
-        {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
-        {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
+        {running > 0 && <Pill status="running">執行中 {running}</Pill>}
+        {waiting > 0 && <Pill status="queued">等待人員 {waiting}</Pill>}
+        {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
         <button
           type="button"
           className="btn-ghost btn-sm"
@@ -184,9 +183,9 @@ export function AiHub({
             }}
           >
             <span><Icon name="Film" size={14} /> 多步開拍</span>
-            {running > 0 && <span className="pill running">執行中 {running}</span>}
-            {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
-            {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
+            {running > 0 && <Pill status="running">執行中 {running}</Pill>}
+            {waiting > 0 && <Pill status="queued">等待人員 {waiting}</Pill>}
+            {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
             {running === 0 && awaiting === 0 && <Meta>目前沒有進行中的計畫</Meta>}
           </summary>
           <Hint layer="always" style={{ margin: "8px 0 0" }}>

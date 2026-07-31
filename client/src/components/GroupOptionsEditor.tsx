@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
-import { Chip, Hint, Meta } from "./ui";
+import { Chip, Hint, Meta, Skeleton } from "./ui";
 import {
   OPTION_TYPES,
   OPTION_TYPE_META,
@@ -241,7 +241,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
           <div aria-hidden="true">
             {[0, 1, 2].map((i) => (
               <div key={i} className="gen-row">
-                <div className="skeleton" style={{ height: 14 }} />
+                <Skeleton style={{ height: 14 }} />
               </div>
             ))}
           </div>

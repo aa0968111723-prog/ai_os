@@ -11,7 +11,7 @@ import { getModel, tierLabel } from "@shared/models";
 import { toCsv } from "@shared/csv";
 import { formatTwd, formatUsd, moneyFxNote } from "@shared/money";
 
-import { Button, Chip, Hint, Meta, Pill } from "../components/ui";
+import { Button, Chip, Hint, Meta, Pill, Skeleton } from "../components/ui";
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
   bug: { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" },
@@ -528,7 +528,7 @@ function GroupSection({ group, teamAdmins, isSuperAdmin, meId }: {
       </h3>
       {detail.isLoading ? (
         <div role="status" aria-label="組詳情載入中">
-          <div className="skeleton" style={{ height: 48, marginTop: 8 }} />
+          <Skeleton style={{ height: 48, marginTop: 8 }} />
         </div>
       ) : detail.error ? (
         <p className="error">
@@ -1059,8 +1059,8 @@ export function AuditLogCard() {
       />
       {audit.isLoading ? (
         <div role="status" aria-label="操作紀錄載入中">
-          <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
-          <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
+          <Skeleton style={{ height: 40, marginTop: 10 }} />
+          <Skeleton style={{ height: 40, marginTop: 10 }} />
         </div>
       ) : audit.error ? (
         // 尚無可見組別（剛建團隊、還沒建組/加人）後端回 FORBIDDEN——對管理員是空狀態而非錯誤
@@ -1284,7 +1284,7 @@ export function InsightsCard() {
       {/* ── 人員細節 ── */}
       {tab === "members" && (
         members.isLoading ? (
-          <div className="skeleton" style={{ height: 60 }} />
+          <Skeleton style={{ height: 60 }} />
         ) : members.error ? (
           <p className="error">載入失敗：{members.error.message}</p>
         ) : !members.data || members.data.members.length === 0 ? (
@@ -1324,7 +1324,7 @@ export function InsightsCard() {
       {/* ── 模型比較 ── */}
       {tab === "models" && (
         models.isLoading ? (
-          <div className="skeleton" style={{ height: 60 }} />
+          <Skeleton style={{ height: 60 }} />
         ) : models.error ? (
           <p className="error">載入失敗：{models.error.message}</p>
         ) : !models.data || models.data.models.length === 0 ? (
@@ -1393,7 +1393,7 @@ export function InsightsCard() {
             </div>
           )}
           {usage.isLoading ? (
-            <div className="skeleton" style={{ height: 60 }} />
+            <Skeleton style={{ height: 60 }} />
           ) : usage.error ? (
             <p className="error">載入失敗：{usage.error.message}</p>
           ) : !usage.data || usage.data.rows.length === 0 ? (
@@ -1514,7 +1514,7 @@ export function InsightsCard() {
             </div>
           )}
           {prompts.isLoading ? (
-            <div className="skeleton" style={{ height: 60 }} />
+            <Skeleton style={{ height: 60 }} />
           ) : prompts.error ? (
             <p className="error">載入失敗：{prompts.error.message}</p>
           ) : !prompts.data || prompts.data.items.length === 0 ? (
@@ -1571,8 +1571,8 @@ export function ConsumptionMonitorCard() {
       <Hint>逐日毛消耗（只算扣點、退點不抵銷）；今日暴衝會整行紅字提醒。</Hint>
       {stats.isLoading ? (
         <div role="status" aria-label="消耗統計載入中">
-          <div className="skeleton" style={{ height: 44, marginTop: 10 }} />
-          <div className="skeleton" style={{ height: 120, marginTop: 10 }} />
+          <Skeleton style={{ height: 44, marginTop: 10 }} />
+          <Skeleton style={{ height: 120, marginTop: 10 }} />
         </div>
       ) : stats.error ? (
         <p className="error">消耗統計載入失敗：{stats.error.message}</p>
@@ -1806,8 +1806,8 @@ function FeedbackReportsSection() {
       </div>
       {reports.isLoading ? (
         <div role="status" aria-label="回饋載入中">
-          <div className="skeleton" style={{ height: 72, marginTop: 8 }} />
-          <div className="skeleton" style={{ height: 72, marginTop: 8 }} />
+          <Skeleton style={{ height: 72, marginTop: 8 }} />
+          <Skeleton style={{ height: 72, marginTop: 8 }} />
         </div>
       ) : reports.error ? (
         <div>
@@ -1860,7 +1860,7 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
         <strong>點數</strong>單位不同，僅供營運對帳，<strong>不自動換算</strong>。
       </Hint>
       {balance.isLoading ? (
-        <div className="skeleton" style={{ height: 56, marginTop: 8 }} role="status" aria-label="Fal 餘額載入中" />
+        <Skeleton style={{ height: 56, marginTop: 8 }} role="status" aria-label="Fal 餘額載入中" />
       ) : balance.error ? (
         <p className="error" role="alert">
           查詢失敗：{balance.error.message}{" "}
@@ -1962,7 +1962,7 @@ function FeedbackAgentCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
         每 3 天自動巡一次未處理的元件回饋：AI 分診嚴重度、給工程排修復方向，並寄信回覆回報者。
       </Hint>
       {status.isLoading ? (
-        <div className="skeleton" style={{ height: 48, marginTop: 8 }} />
+        <Skeleton style={{ height: 48, marginTop: 8 }} />
       ) : status.error ? (
         <p className="error">代理狀態載入失敗：{status.error.message}</p>
       ) : (
@@ -2074,8 +2074,8 @@ export function AdminPage() {
 
   if (overview.isLoading) return (
     <div role="status" aria-label="載入中" style={{ marginTop: 24 }}>
-      <div className="skeleton" style={{ height: 28, width: 200, marginBottom: 16 }} />
-      <div className="skeleton" style={{ height: 180 }} />
+      <Skeleton style={{ height: 28, width: 200, marginBottom: 16 }} />
+      <Skeleton style={{ height: 180 }} />
     </div>
   );
   // 總覽讀取失敗：保留頁標題與人話說明＋重試出口——整頁只剩一行原始錯誤會被當成「系統壞了」，
@@ -2166,9 +2166,9 @@ export function AdminPage() {
             </>
           ) : (
             <div role="status" aria-label="設定載入中" style={{ marginTop: 12 }}>
-              <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
-              <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
-              <div className="skeleton" style={{ height: 40, marginTop: 10 }} />
+              <Skeleton style={{ height: 40, marginTop: 10 }} />
+              <Skeleton style={{ height: 40, marginTop: 10 }} />
+              <Skeleton style={{ height: 40, marginTop: 10 }} />
             </div>
           )}
           {saveSettings.error && <p className="error">{saveSettings.error.message}</p>}
@@ -2272,8 +2272,8 @@ export function AdminPage() {
         <h2>回饋彙整（{feedback.data?.length ?? 0}）</h2>
         {feedback.isLoading ? (
           <div role="status" aria-label="回饋載入中">
-            <div className="skeleton" style={{ height: 60, marginTop: 8 }} />
-            <div className="skeleton" style={{ height: 60, marginTop: 8 }} />
+            <Skeleton style={{ height: 60, marginTop: 8 }} />
+            <Skeleton style={{ height: 60, marginTop: 8 }} />
           </div>
         ) : feedback.error ? (
           <div>

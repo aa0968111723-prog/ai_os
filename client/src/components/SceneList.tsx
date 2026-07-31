@@ -8,7 +8,7 @@ import { ConfirmButton, HelpTip } from "./interactions";
 import { AssetImg, AssetVideo, AssetAudio } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 
-import { Button, Card, Hint, Meta } from "./ui";
+import { Button, Card, Hint, Meta, Pill, Skeleton } from "./ui";
 /** 素材類型的中文標籤（與素材庫/生成紀錄同口徑）——分鏡 meta 列不再直接冒英文 enum */
 const SCENE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
 
@@ -307,7 +307,7 @@ function SceneRow({
           <span className={`pill ${SCENE_STATUS[s.status]?.cls ?? "queued"}`}>
             {SCENE_STATUS[s.status]?.label ?? s.status}
           </span>
-          {isGenerating && <span className="pill running">生成中…</span>}
+          {isGenerating && <Pill status="running">生成中…</Pill>}
           {update.isPending ? (
             <Meta>儲存中…</Meta>
           ) : savedFlash ? (
@@ -712,10 +712,10 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
             <div key={k} className="gen-row">
               <div className="gen-thumb skeleton" />
               <div>
-                <div className="skeleton" style={{ height: 14, width: k === 0 ? "70%" : "58%", marginBottom: 8 }} />
-                <div className="skeleton" style={{ height: 11, width: "42%" }} />
+                <Skeleton style={{ height: 14, width: k === 0 ? "70%" : "58%", marginBottom: 8 }} />
+                <Skeleton style={{ height: 11, width: "42%" }} />
               </div>
-              <div className="skeleton" style={{ height: 28, width: 64, borderRadius: 999 }} />
+              <Skeleton style={{ height: 28, width: 64, borderRadius: 999 }} />
             </div>
           ))}
         </div>

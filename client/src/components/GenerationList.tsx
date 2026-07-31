@@ -8,7 +8,7 @@ import { AssetVideo, AssetAudio, MissingMediaBox } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 import { revealWorkbenchAnchor } from "../features/creation-workbench/workbenchNav";
 
-import { Button, Hint, Meta } from "./ui";
+import { Button, Hint, Meta, Skeleton } from "./ui";
 /** 生成結果縮圖（圖片）：載入失敗顯示「結果已失效」佔位，並拿掉開新分頁連結（點下去只會是 404） */
 function GenResultImgLink({ url, alt }: { url: string; alt: string }) {
   const [failed, setFailed] = useState(false);
@@ -305,10 +305,10 @@ export function GenerationList({
           <div key={k} className="gen-row">
             <div className="gen-thumb skeleton" />
             <div>
-              <div className="skeleton" style={{ height: 14, width: k === 1 ? "55%" : "72%", marginBottom: 8 }} />
-              <div className="skeleton" style={{ height: 11, width: "40%" }} />
+              <Skeleton style={{ height: 14, width: k === 1 ? "55%" : "72%", marginBottom: 8 }} />
+              <Skeleton style={{ height: 11, width: "40%" }} />
             </div>
-            <div className="skeleton" style={{ height: 28, width: 64, borderRadius: 999 }} />
+            <Skeleton style={{ height: 28, width: 64, borderRadius: 999 }} />
           </div>
         ))}
       </div>

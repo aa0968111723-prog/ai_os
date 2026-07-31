@@ -4,8 +4,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
-import { Button, Hint, Meta } from "./ui";
-
+import { Button, Hint, Meta, Skeleton } from "./ui";
 /**
  * 場景設定卡（提案核心「場景一致性」）：
  * 色板/光線設定一次鎖定，生成勾選 → 自動注入錨點，同場景跨鏡光影一致。
@@ -59,8 +58,8 @@ export function ScenePresetCards({
       {list.isLoading ? (
         // 佔位高度對齊載入後的卡片網格（比照 CharacterCards）：不跳版、不被誤讀成「卡住了」
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }} aria-hidden="true">
-          <div className="skeleton" style={{ height: 104 }} />
-          <div className="skeleton" style={{ height: 104 }} />
+          <Skeleton style={{ height: 104 }} />
+          <Skeleton style={{ height: 104 }} />
         </div>
       ) : list.isError ? (
         <p className="error" role="alert" style={{ marginTop: 8 }}>

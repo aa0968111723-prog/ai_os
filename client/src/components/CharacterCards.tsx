@@ -4,8 +4,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
-import { Button, Hint, Meta } from "./ui";
-
+import { Button, Hint, Meta, Skeleton } from "./ui";
 /**
  * 角色定裝卡（提案核心「角色一致性」）：
  * 角色外觀設定一次鎖定，生成時勾選 → 自動注入錨點，跨鏡頭不走樣。
@@ -56,8 +55,8 @@ export function CharacterCards({
 
       {list.isLoading ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
-          <div className="skeleton" style={{ height: 104 }} />
-          <div className="skeleton" style={{ height: 104 }} />
+          <Skeleton style={{ height: 104 }} />
+          <Skeleton style={{ height: 104 }} />
         </div>
       ) : list.isError ? (
         <p className="error" role="alert" style={{ marginTop: 8 }}>

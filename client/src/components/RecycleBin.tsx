@@ -2,8 +2,7 @@ import { useState } from "react";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
-import { Badge, Button, Hint, Meta } from "./ui";
-
+import { Badge, Button, Hint, Meta, Skeleton } from "./ui";
 /** 素材種類 → 圖示（與素材庫一致的視覺語彙） */
 const KIND_ICON: Record<string, IconName> = { image: "Image", video: "Clapperboard", audio: "Volume2", doc: "FileText" };
 /** 知識種類 → 中文標籤 */
@@ -128,9 +127,9 @@ export function RecycleBin({ projectId }: { projectId: string }) {
             <div aria-hidden="true">
               {[0, 1].map((i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid var(--border-soft)" }}>
-                  <div className="skeleton" style={{ width: 16, height: 16, borderRadius: 4 }} />
-                  <div className="skeleton" style={{ height: 13, flex: "1 1 auto", maxWidth: i === 0 ? 220 : 170 }} />
-                  <div className="skeleton" style={{ height: 26, width: 64, borderRadius: 999 }} />
+                  <Skeleton style={{ width: 16, height: 16, borderRadius: 4 }} />
+                  <Skeleton style={{ height: 13, flex: "1 1 auto", maxWidth: i === 0 ? 220 : 170 }} />
+                  <Skeleton style={{ height: 26, width: 64, borderRadius: 999 }} />
                 </div>
               ))}
             </div>

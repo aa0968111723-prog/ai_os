@@ -2,8 +2,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Chip, Hint, Meta } from "../components/ui";
-
+import { Chip, Hint, Meta, Skeleton } from "../components/ui";
 /** 分類 value→中文標籤（追蹤列的分類 chip） */
 const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
   FEEDBACK_CATEGORIES.map((c) => [c.value, c.label]),
@@ -32,7 +31,7 @@ export function MyReportsPage() {
       {mine.isLoading ? (
         <div role="status" aria-label="載入中" aria-busy="true">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="skeleton" style={{ height: 84, marginBottom: 12, borderRadius: 12 }} />
+            <Skeleton key={i} style={{ height: 84, marginBottom: 12, borderRadius: 12 }} />
           ))}
         </div>
       ) : mine.isError ? (

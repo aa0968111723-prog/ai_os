@@ -2,8 +2,7 @@ import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
-import { Badge, Button, Hint, Meta } from "./ui";
-
+import { Badge, Button, Hint, Meta, Skeleton } from "./ui";
 /**
  * 長文版本歷史（#29）：知識庫長文（師父開示逐字稿／見證故事）每次「內容更新」前，
  * 後端會自動存一版快照。這裡把歷史版本由新到舊列出，可一鍵「還原此版本」——
@@ -41,8 +40,8 @@ export function VersionHistory({ knowledgeId, projectId }: { knowledgeId: string
         <div style={{ marginTop: 8 }}>
           {versions.isLoading ? (
             <div aria-hidden="true">
-              <div className="skeleton" style={{ height: 14, maxWidth: 260, marginBottom: 8 }} />
-              <div className="skeleton" style={{ height: 14, maxWidth: 200 }} />
+              <Skeleton style={{ height: 14, maxWidth: 260, marginBottom: 8 }} />
+              <Skeleton style={{ height: 14, maxWidth: 200 }} />
             </div>
           ) : versions.error ? (
             <p className="error">{versions.error.message}</p>

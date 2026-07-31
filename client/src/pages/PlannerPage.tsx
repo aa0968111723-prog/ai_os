@@ -8,7 +8,7 @@ import { useLocalDraft } from "../useLocalDraft";
 import { MentionInput, resolveMentions } from "../components/MentionInput";
 import { flashAnchor, takePlannerFocus } from "../discuss";
 
-import { Button, Chip, Hint, Meta } from "../components/ui";
+import { Button, Chip, Hint, Meta, Skeleton } from "../components/ui";
 /**
  * 筆記排程（需求 #10）：組內共用的「排程表＋會議筆記＋知識地圖」一頁。
  * - 組排程：可掛專案、可直連 Google 日曆自動同步（.ics 匯出保留為後備）；清單／月曆兩種檢視（真實日曆）。
@@ -466,7 +466,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
         <div style={{ marginTop: 12 }} aria-hidden="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="gen-row">
-              <div className="skeleton" style={{ height: 14 }} />
+              <Skeleton style={{ height: 14 }} />
             </div>
           ))}
         </div>
@@ -796,7 +796,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
         <div style={{ marginTop: 8 }} aria-hidden="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="gen-row">
-              <div className="skeleton" style={{ height: 14 }} />
+              <Skeleton style={{ height: 14 }} />
             </div>
           ))}
         </div>
@@ -1450,7 +1450,7 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
       )}
 
       {graphQ.isLoading ? (
-        <div className="skeleton" style={{ height: 320, marginTop: 12, borderRadius: "var(--r-12)" }} aria-hidden="true" />
+        <Skeleton style={{ height: 320, marginTop: 12, borderRadius: "var(--r-12)" }} aria-hidden="true" />
       ) : graphQ.error ? (
         <p className="error">{graphQ.error.message}</p>
       ) : !graph || graph.shownBranches.length === 0 ? (

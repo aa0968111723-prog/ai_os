@@ -3,8 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { useRovingRadio } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Hint } from "../components/ui";
-
+import { Hint, Skeleton } from "../components/ui";
 const ITEMS: Array<{ key: string; label: string }> = [
   { key: "context", label: "AI 懂不懂我們的素材（不用重複解釋）" },
   { key: "cost", label: "額度夠用、花費看得懂" },
@@ -22,13 +21,13 @@ export function FeedbackPage({ groupId }: { groupId?: string }) {
   if (mine.isLoading)
     return (
       <div style={{ maxWidth: 620, margin: "0 auto" }} role="status" aria-busy="true" aria-label="載入中">
-        <div className="skeleton" style={{ height: 34, width: "45%", margin: "24px 0 12px" }} />
-        <div className="skeleton" style={{ height: 16, width: "80%", marginBottom: 24 }} />
+        <Skeleton style={{ height: 34, width: "45%", margin: "24px 0 12px" }} />
+        <Skeleton style={{ height: 16, width: "80%", marginBottom: 24 }} />
         <div className="card">
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} style={{ marginBottom: 16 }}>
-              <div className="skeleton" style={{ height: 14, width: "55%", marginBottom: 8 }} />
-              <div className="skeleton" style={{ height: 26 }} />
+              <Skeleton style={{ height: 14, width: "55%", marginBottom: 8 }} />
+              <Skeleton style={{ height: 26 }} />
             </div>
           ))}
         </div>

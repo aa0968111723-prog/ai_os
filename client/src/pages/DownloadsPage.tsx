@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { Icon } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Button, Hint, Meta } from "../components/ui";
-
+import { Button, Hint, Meta, Skeleton } from "../components/ui";
 /**
  * 資料下載區（需求 #11）：開發筆記／模型資料／UIUX 設計／隱私與法律，集中一頁下載。
  * 清單來自 /api/downloads 的白名單（伺服器逐檔確認存在才列出）；
@@ -75,8 +74,8 @@ export function DownloadsPage() {
       )}
       {!data && !errMsg && (
         <div role="status" aria-label="清單載入中">
-          <div className="skeleton" style={{ height: 90, marginTop: 12 }} />
-          <div className="skeleton" style={{ height: 90, marginTop: 12 }} />
+          <Skeleton style={{ height: 90, marginTop: 12 }} />
+          <Skeleton style={{ height: 90, marginTop: 12 }} />
         </div>
       )}
 
