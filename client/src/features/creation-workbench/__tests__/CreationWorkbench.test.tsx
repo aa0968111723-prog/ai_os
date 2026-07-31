@@ -38,6 +38,12 @@ vi.mock("../../../api", () => ({
         useQuery: () => ({ data: undefined }),
       },
     },
+    // KnowledgeSourceStrip（#251 起掛在生成表單上）會查知識庫清單
+    knowledge: {
+      list: {
+        useQuery: () => ({ data: [] }),
+      },
+    },
     prompts: {
       save: {
         useMutation: () => ({ mutate: promptsSave, isPending: false }),

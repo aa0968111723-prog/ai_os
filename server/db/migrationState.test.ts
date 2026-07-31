@@ -108,6 +108,24 @@ describe("migration manifest validation", () => {
     expect(() => loadMigrationManifest(directory)).toThrow("嚴格遞增");
   });
 
+  /**
+   * 0018 shipped two statements in one chunk because the separator was missing.
+   * Every gate downstream splits on `--> statement-breakpoint`, so the pair was
+   * canonicalized into a single string that no drift plan can ever match — the
+   * legacy bridge then read it as two unexplained drift statements and refused
+   * to adopt. Nothing about that is specific to 0018, so guard the whole folder.
+   */
+  it("keeps every migration to one statement per breakpoint-delimited chunk", () => {
+    const offenders = loadMigrationManifest().entries.flatMap((entry) =>
+      entry.sql
+        .split("--> statement-breakpoint")
+        .map(canonicalMigrationStatement)
+        .filter((statement) => statement.includes(";"))
+        .map((statement) => `${entry.tag}: ${statement.slice(0, 80)}`),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it("never includes a database password in its display target", () => {
     const target = redactDatabaseTarget("postgresql://operator:top-secret@db.internal:5432/product");
     expect(target).toBe("postgresql://operator@db.internal:5432/product");

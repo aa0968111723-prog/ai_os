@@ -124,6 +124,12 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
  * 0004 created its indexes without IF NOT EXISTS. Wherever the original
  * succeeded the indexes did not yet exist, so adding the guard produces the
  * same two indexes by the same definitions.
+ *
+ * 0018 packed two statements into one chunk because the separator was missing.
+ * The correction only inserts `--> statement-breakpoint` between them: the DDL
+ * text, its order and its IF NOT EXISTS guards are untouched, so the original
+ * (both statements in a single exec) and the corrected file (two execs) leave
+ * exactly the same column and index behind.
  */
 export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly string[]>> = {
   "0004_query_indexes": [
@@ -131,6 +137,9 @@ export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly strin
   ],
   "0005_membership_read_uniqueness": [
     "30b344a7e264c48e4b62af11cb689da353b7f4846f6374a0d33f27aa38cc1337",
+  ],
+  "0018_knowledge_pinned": [
+    "cddbd89830cce4850f83515692724cb507a4c52afc28941633fc1f882e907e82",
   ],
 };
 
