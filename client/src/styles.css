@@ -2666,6 +2666,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   position: absolute;
   inset: 0;
   border: 0;
+  /* 這是全螢幕 <button>：全域按鈕的 999px 圓角會把遮罩變成巨大橢圓色塊，須歸零 */
+  border-radius: 0;
   padding: 0;
   margin: 0;
   background: rgba(43, 38, 32, 0.36);
@@ -2705,6 +2707,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   padding: 10px 12px calc(12px + var(--safe-bottom));
   -webkit-overflow-scrolling: touch;
 }
+/* 留言輸入列在窄 sheet 內被擠壓時，「送出」「停止」不可直排斷字（送/出 疊兩行） */
+.project-messages-sheet button.primary,
+.project-messages-sheet button.recording { flex: none; white-space: nowrap; }
 .message-panel--bare {
   border: 0;
   box-shadow: none;
