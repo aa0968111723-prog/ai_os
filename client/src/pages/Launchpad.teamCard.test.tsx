@@ -130,7 +130,7 @@ function seed(opts: {
     h.queryData.set("teamAssistant.groupInsights", {
       status: "healthy", activeRuns: 0, waitingRuns: 0, openTasks: 0, overdueTasks: 0,
       recentFailures: 0, unresolvedInformation: 0, risks: 0,
-      blockers: [], results: [], workItems: [],
+      blockers: [], blockersTotal: 0, results: [], workItems: [],
       truncated: { runs: false, tasks: false, results: false, workItems: false },
       byProject: [], people: [], pendingApprovalTasks: [], peopleTruncated: false,
       ...opts.insights,
@@ -679,5 +679,42 @@ describe("就地裁決的權限與專案頁同一條規則", () => {
     });
     render(<Launchpad groupId={GROUP} />);
     expect(within(inbox()).getByRole("button", { name: "核准" })).toBeInTheDocument();
+  });
+});
+
+describe("阻塞清單截斷時的誠實度", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  it("明細被上限截斷、依專案統計是全量時，要把兩個數字的關係講清楚", () => {
+    seed({
+      runs: [],
+      insights: {
+        openTasks: 60, overdueTasks: 60,
+        blockers: Array.from({ length: 50 }, (_, i) => ({ severity: "warning", type: "overdue_task", label: `逾期 ${i}` })),
+        blockersTotal: 71,
+        people: [{ userId: "u1", name: "阿光", openTasks: 60, overdueTasks: 60, earliestDueAt: daysAgo(30) }],
+        byProject: [{ projectId: "p1", projectTitle: "招生短片", blockers: 71, criticalBlockers: 0, openTasks: 60, overdueTasks: 60, activeRuns: 0 }],
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(screen.getByLabelText("誰卡住了")).getByText(/共 71 項阻塞（明細只列前 50 項/)).toBeInTheDocument();
+  });
+
+  it("沒有截斷時不多嘴", () => {
+    seed({
+      runs: [],
+      insights: {
+        openTasks: 2, overdueTasks: 1,
+        blockers: [{ severity: "warning", type: "overdue_task", label: "逾期 1" }],
+        blockersTotal: 1,
+        people: [{ userId: "u1", name: "阿光", openTasks: 2, overdueTasks: 1, earliestDueAt: daysAgo(2) }],
+        byProject: [{ projectId: "p1", projectTitle: "招生短片", blockers: 1, criticalBlockers: 0, openTasks: 2, overdueTasks: 1, activeRuns: 0 }],
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(within(screen.getByLabelText("誰卡住了")).queryByText(/明細只列前/)).not.toBeInTheDocument();
   });
 });

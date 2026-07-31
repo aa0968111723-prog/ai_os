@@ -1329,6 +1329,12 @@ function TeamAssistantCard({
                 資料量已達分析上限，這裡是抽樣結果——完整清單請到各專案頁看。
               </Meta>
             )}
+            {insights.data && insights.data.blockersTotal > insights.data.blockers.length && (
+              /* 阻塞清單有顯示上限，依專案的統計卻是全量；不講清楚兩個數字看起來會像對不上 */
+              <Meta as="p" style={{ margin: 0 }}>
+                共 {insights.data.blockersTotal} 項阻塞（明細只列前 {insights.data.blockers.length} 項；上方依專案的統計是全部）。
+              </Meta>
+            )}
           </div>
         )}
         {/* ── 代理做出了什麼：計畫不是只有狀態，還有產出。

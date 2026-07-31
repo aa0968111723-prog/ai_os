@@ -298,9 +298,15 @@ for field in ("blockers", "byProject", "people", "pendingApprovalTasks", "workIt
 ok("groupInsights 有 truncated 四旗標",
    isinstance(gi.get("truncated"), dict) and set(gi["truncated"]) == {"runs", "tasks", "results", "workItems"})
 ok("groupInsights 有 peopleTruncated", isinstance(gi.get("peopleTruncated"), bool))
-# 每一項阻塞都要歸得到某個專案：byProject 的阻塞總和不得少於 blockers 筆數
-ok("阻塞都歸得到專案（總和對得上）",
-   sum(p.get("blockers", 0) for p in gi.get("byProject", [])) == len(gi.get("blockers", [])))
+# 歸屬要對「未截斷」的完整清單算——拿 len(blockers) 比是比不出來的（兩邊都截斷過），
+# 所以改用伺服器回報的 blockersTotal 當基數。
+ok("groupInsights 回報未截斷的阻塞總數", isinstance(gi.get("blockersTotal"), int))
+ok("阻塞都歸得到專案（以未截斷總數為基數）",
+   sum(p.get("blockers", 0) for p in gi.get("byProject", [])) == gi.get("blockersTotal"))
+ok("顯示用的阻塞清單不超過總數", len(gi.get("blockers", [])) <= gi.get("blockersTotal", 0))
+# 同一列的阻塞數不得小於逾期數（會渲染成「3 項阻塞・9 逾期」的自相矛盾）
+for _p in gi.get("byProject", []):
+    ok(f"專案 {_p['projectId'][:8]} 阻塞數 ≥ 逾期數", _p.get("blockers", 0) >= _p.get("overdueTasks", 0))
 # 人類核准節點必須帶齊就地裁決需要的欄位
 for t in gi.get("pendingApprovalTasks", []):
     ok(f"核准節點 {t['taskId'][:8]} 欄位齊全",

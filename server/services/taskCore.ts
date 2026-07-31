@@ -93,8 +93,12 @@ export const OPEN_TASK_STATUSES = ["todo", "doing", "waiting", "review"] as cons
  * 全組人類任務（作業台「誰卡住了」與組級代理洞察用）。
  *
  * 為什麼要有這一支：組級畫面原本只看得到 agent_runs，於是「7 項人員任務逾期」
- * 這種最該被看見的阻塞完全不在畫面上。條件走 (group_id, status)，命中既有的
- * project_tasks_group_status_idx，不需要新索引。
+ * 這種最該被看見的阻塞完全不在畫面上。
+ *
+ * **呼叫端幾乎都該傳 openOnly。** 傳了才會把 status 放進 where、真正命中
+ * project_tasks_group_status_idx；不傳的話 where 只有 group_id，索引只用得到前綴，
+ * 而且排序是 due_at ASC——最早到期的必然是早就完成的歷史任務，limit 會被它們吃光。
+ * 只有「真的需要含已完成任務」的情境才該省略。
  */
 export async function listGroupTasks(
   auth: AuthState,
