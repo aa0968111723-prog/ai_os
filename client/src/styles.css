@@ -576,9 +576,16 @@ a:hover { color: var(--primary-solid-hover); }
 
 /* 自製選單（CSP 下無外部庫）——頂欄使用者/更多選單用 */
 .menu-wrap { position: relative; }
+/* 桌機下拉。--menu-avail-h＝觸發器下緣到視窗下緣的實距，開啟時由 MenuSurface 量了寫進來；
+   沒量到就不設限（維持原行為）。少了它，帳號選單那種長清單會直接切在視窗外，
+   而且下拉是 sticky 頂欄的 absolute 後代、捲頁時一起釘住，被切掉的「登出」永遠捲不出來。
+   overscroll-behavior：選單內捲到底時不接著捲整頁。 */
 .menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 184px; z-index: 40;
   background: var(--popover); border: 1px solid var(--border); border-radius: var(--r-12); box-shadow: var(--e3);
-  padding: 8px; display: flex; flex-direction: column; }
+  padding: 8px; display: flex; flex-direction: column;
+  max-height: var(--menu-avail-h, none); overflow-y: auto; overscroll-behavior: contain; }
+/* 捲動容器內的 flex 子項預設可被壓扁（身分標頭、點數摘要都有 padding 會先被吃掉）——一律不縮 */
+.menu > * { flex: none; }
 .menu-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-size: 13px;
   color: var(--fg); background: transparent; border: 0; border-radius: var(--r-8); padding: 8px 10px; cursor: pointer; text-decoration: none; }
 .menu-item:hover { background: var(--card2); }
@@ -3213,7 +3220,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   border-radius: var(--r-12);
   background: var(--card);
   box-shadow: 0 12px 40px color-mix(in srgb, var(--fg) 12%, transparent);
-  max-height: min(70dvh, 480px); overflow: auto;
+  /* 自己的 480px 上限之外，還要吃 MenuSurface 量到的可用高度：
+     這張面板不在頂欄、開啟位置隨頁面捲動，光靠 dvh 一樣會切出視窗 */
+  max-height: min(70dvh, 480px, var(--menu-avail-h, 100dvh)); overflow: auto;
 }
 .creation-skill-menu__head {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px;

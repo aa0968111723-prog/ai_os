@@ -5,6 +5,17 @@ import { useMatchMedia } from "../../lib/useMatchMedia";
 /** 選單改為貼底 sheet 的斷點：與 styles.css 的手機殼層 v2（≤820px）同界線 */
 export const MENU_SHEET_MQ = "(max-width: 820px)";
 
+/** 下拉與觸發器的間距，與 styles.css `.menu { top: calc(100% + 8px) }` 同值 */
+const MENU_ANCHOR_GAP = 8;
+/** 下拉底部與視窗下緣至少留白，讓人看得出「到底了」而不是被裁掉 */
+const MENU_VIEWPORT_GUTTER = 12;
+/**
+ * 桌機下拉的最小高度。觸發器離視窗下緣不到這個距離時就不再壓縮——
+ * 壓成一條 30px 的縫比略微超出更難用。站內三個選單的觸發器都在頂欄或頁面中段，
+ * 實務上碰不到這個下限；它只是防呆。
+ */
+const MENU_MIN_DESKTOP_H = 160;
+
 /**
  * 選單載體：桌機是錨定觸發器的下拉，手機（≤820px）自動變成貼底 bottom sheet。
  *
@@ -18,6 +29,12 @@ export const MENU_SHEET_MQ = "(max-width: 820px)";
  *    會被分頁列蓋住按不到（真機實測）。sheet 用 46／47 蓋過分頁列。
  * 3. **外點關閉**：選單一旦 portal 出去就不再是觸發器的 DOM 後代，只檢查 wrap 的
  *    外點判斷會把「點選單本身」誤判成點外面，選單一按就關。
+ *
+ * 桌機也有一個對稱的陷阱：下拉沒有高度上限。帳號選單有 17 項（每項 ≥44px 的觸控下限），
+ * 展開後約 1100px，1080p 螢幕在頂欄下只剩約 880px，「改密碼／登出全部裝置／登出」整段
+ * 被切在視窗外——而且 `.topbar` 是 sticky、下拉又是它的 absolute 後代，捲頁時兩者一起釘住，
+ * 被切掉的部分永遠捲不出來。因此開啟時量觸發器到視窗下緣的實際距離，寫進 `--menu-avail-h`，
+ * 由 styles.css 的 `.menu` 收成 max-height ＋ 內捲。
  *
  * 鍵盤行為（ARIA menu 契約）一併收在這裡：開啟時聚焦首項、上下鍵漫遊、Home/End、
  * Esc 關閉並把焦點還給觸發器。呼叫端只要保證子項有 `role="menuitem"`。
@@ -71,6 +88,29 @@ export function MenuSurface({
     const items = surfaceRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])');
     items?.[0]?.focus();
   }, [open, roving]);
+  // 桌機下拉的可用高度（見檔頭第四段）。手機 sheet 自己有 max-height，不套這條。
+  // 捲動也要重算：觸發器不在 sticky 頂欄裡時（例如創作台的技能挑選器）會隨頁面移動。
+  useLayoutEffect(() => {
+    if (!open || compact) return;
+    const surface = surfaceRef.current;
+    if (!surface) return;
+    const apply = () => {
+      // 沒有 triggerRef 時退而用選單自己的上緣——同樣是「從這裡到視窗下緣」的距離
+      const anchorBottom = triggerRef?.current
+        ? triggerRef.current.getBoundingClientRect().bottom + MENU_ANCHOR_GAP
+        : surface.getBoundingClientRect().top;
+      const avail = window.innerHeight - anchorBottom - MENU_VIEWPORT_GUTTER;
+      surface.style.setProperty("--menu-avail-h", `${Math.round(Math.max(MENU_MIN_DESKTOP_H, avail))}px`);
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    // capture：內層捲動容器的 scroll 不會冒泡，只有捕獲階段抓得到
+    window.addEventListener("scroll", apply, true);
+    return () => {
+      window.removeEventListener("resize", apply);
+      window.removeEventListener("scroll", apply, true);
+    };
+  }, [open, compact, triggerRef]);
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
