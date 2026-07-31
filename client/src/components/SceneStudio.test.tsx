@@ -74,15 +74,28 @@ function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?:
   };
 }
 
-function mountStudio(over: { canEdit?: boolean } = {}) {
+type DecideProps = {
+  isLeader?: boolean;
+  meLoading?: boolean;
+  sceneStatus?: string;
+  pendingApprovalId?: string;
+  rejectReason?: string | null;
+  approvalsError?: boolean;
+  deciding?: boolean;
+  onDecide?: (decision: "approved" | "needs_work", reason?: string) => void;
+};
+
+function mountStudio(over: { canEdit?: boolean } & DecideProps = {}) {
+  const { canEdit, ...decide } = over;
   return render(
     <SceneStudio
       sceneId="s-1"
       projectId="p-1"
       sceneNumber={3}
-      canEdit={over.canEdit ?? true}
+      canEdit={canEdit ?? true}
       onClose={vi.fn()}
       onChanged={vi.fn()}
+      {...decide}
     />,
   );
 }
@@ -333,5 +346,73 @@ describe("SceneStudio", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/版本讀不到/);
     await user.click(screen.getByRole("button", { name: "再試一次" }));
     expect(refetch).toHaveBeenCalled();
+  });
+});
+
+describe("SceneStudio 就地裁決", () => {
+  const leaderPending = {
+    isLeader: true,
+    sceneStatus: "pending",
+    pendingApprovalId: "ap-1",
+  } as const;
+
+  it("組長看待審的這一鏡：通過與退回都在工作室內", () => {
+    mountStudio({ ...leaderPending, onDecide: vi.fn() });
+    expect(screen.getByRole("button", { name: /通過/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /退回/ })).toBeEnabled();
+  });
+
+  it("按通過直接回報決定，不必先回分鏡列", async () => {
+    const onDecide = vi.fn();
+    const user = userEvent.setup();
+    mountStudio({ ...leaderPending, onDecide });
+    await user.click(screen.getByRole("button", { name: /通過/ }));
+    expect(onDecide).toHaveBeenCalledWith("approved");
+  });
+
+  it("退回必須帶理由，且常用理由可一鍵帶入（手機上不必打字）", async () => {
+    const onDecide = vi.fn();
+    const user = userEvent.setup();
+    mountStudio({ ...leaderPending, onDecide });
+
+    await user.click(screen.getByRole("button", { name: /退回/ }));
+    await user.click(screen.getByRole("button", { name: "人物長相跑掉" }));
+    await user.click(screen.getByRole("button", { name: "退回" }));
+    expect(onDecide).toHaveBeenCalledWith("needs_work", "人物長相跑掉");
+  });
+
+  it("非組長、非待審、或沒有待裁決審批：一律不畫裁決鈕", () => {
+    const cases = [
+      { ...leaderPending, isLeader: false },
+      { ...leaderPending, sceneStatus: "approved" },
+      { ...leaderPending, pendingApprovalId: undefined },
+    ];
+    for (const props of cases) {
+      const { unmount } = mountStudio({ ...props, onDecide: vi.fn() });
+      expect(screen.queryByRole("button", { name: /通過/ })).toBeNull();
+      unmount();
+    }
+  });
+
+  it("auth.me 還沒回來時先不畫，避免按鈕先缺後補的閃爍", () => {
+    mountStudio({ ...leaderPending, meLoading: true, onDecide: vi.fn() });
+    expect(screen.queryByRole("button", { name: /通過/ })).toBeNull();
+  });
+
+  it("審批清單讀不到時說明原因，而不是沉默地少一排按鈕", () => {
+    mountStudio({ isLeader: true, sceneStatus: "pending", approvalsError: true, onDecide: vi.fn() });
+    expect(screen.getByText(/審批狀態讀不到/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /通過/ })).toBeNull();
+  });
+
+  it("被退回的鏡在工作室內就看得到理由", () => {
+    mountStudio({ sceneStatus: "needs_work", rejectReason: "文字有錯字" });
+    expect(screen.getByText(/退回理由：文字有錯字/)).toBeInTheDocument();
+  });
+
+  it("裁決送出中兩顆鈕都鎖住，避免重複送出", () => {
+    mountStudio({ ...leaderPending, deciding: true, onDecide: vi.fn() });
+    expect(screen.getByRole("button", { name: /通過/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /退回/ })).toBeDisabled();
   });
 });
