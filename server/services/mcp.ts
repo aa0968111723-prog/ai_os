@@ -59,6 +59,12 @@ import {
 } from "./agentCore";
 import { addScheduleItemCore, listScheduleForGroup, updateScheduleItemCore } from "./scheduleCore";
 import { addNoteCore, appendNoteCore } from "./notesCore";
+import {
+  addProjectTaskCore,
+  completeProjectTaskCore,
+  decideProjectApprovalCore,
+  listProjectTasks,
+} from "./taskCore";
 import { DM_MAX_BODY, listDmPeers, listDmThreads, listDmHistory, markDmRead, resolveDmPeerRef, sendDm } from "./dmCore";
 import type { AgentStep } from "./agentRunner";
 import {
@@ -353,6 +359,40 @@ export const TOOLS = [
     name: "get_agent_insights",
     description: "取得專案代理健康摘要：阻塞、逾期、待補資訊、AI/人員統一任務清單與成果中心。",
     inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+  },
+  // ── 人類任務（M2）：外部 AI 可列可建可結——完成等待節點的任務會自動恢復代理 ──
+  {
+    name: "list_tasks",
+    description: "列出專案的人員任務與核准請求：標題／類型（task/approval）／狀態／負責人／期限／來源計畫（planRunId）。最多回 100 筆並標註截斷。",
+    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+  },
+  {
+    name: "create_task",
+    description: "為專案建立一件人員任務（出現在網頁任務清單）。assigneeId 需為本組成員（可先用 list_dm_contacts 對照 userId）；dueAt 為 ISO 8601。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        title: { type: "string" },
+        description: { type: "string" },
+        assigneeId: { type: "string", description: "負責人 userId（省略＝待認領）" },
+        dueAt: { type: "string", description: "ISO 8601 期限（可省略）" },
+        priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
+      },
+      required: ["projectId", "title"],
+    },
+  },
+  {
+    name: "complete_task",
+    description: "把一般任務標記完成（decision=complete，預設），或對核准請求裁決（approve／reject）。等待這件任務的代理計畫會自動恢復執行。權限與網頁一致（負責人／發起人／組長）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string" },
+        decision: { type: "string", enum: ["complete", "approve", "reject"], description: "省略＝complete；核准請求用 approve/reject" },
+      },
+      required: ["taskId"],
+    },
   },
   // ── 專案排程（組行事曆／交付死線）：外部 AI 可讀可寫，與專案綁定 ──
   {
@@ -782,6 +822,60 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       projectId: note.projectId,
       chars: note.content.length,
       updatedAt: note.updatedAt,
+    };
+  }
+
+  // ── M2 任務（D3）：重用 taskCore——負責人歸屬、封存、等待節點喚醒與網頁端同一套 ──
+  if (name === "list_tasks") {
+    const tasks = await listProjectTasks(auth, String(args.projectId ?? ""));
+    const rows = tasks.slice(0, 100).map((t) => ({
+      id: t.id,
+      taskType: t.taskType,
+      title: t.title,
+      status: t.status,
+      priority: t.priority,
+      assignee: t.assigneeName,
+      dueAt: t.dueAt,
+      planRunId: t.planRunId,
+      createdAt: t.createdAt,
+    }));
+    return tasks.length > rows.length
+      ? { items: rows, truncated: true, note: `任務超過單頁上限，僅列出前 ${rows.length} 筆` }
+      : rows;
+  }
+
+  if (name === "create_task") {
+    const pid = String(args.projectId ?? "");
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
+    if (!project) throw new Error("找不到專案");
+    requireGroup(auth, project.groupId);
+    const task = await addProjectTaskCore({
+      auth,
+      groupId: project.groupId,
+      projectId: project.id,
+      title: String(args.title ?? ""),
+      description: args.description === undefined ? null : String(args.description),
+      assigneeId: args.assigneeId === undefined ? null : String(args.assigneeId),
+      dueAt: args.dueAt === undefined ? null : String(args.dueAt),
+      priority: args.priority === undefined ? undefined : (String(args.priority) as "low" | "normal" | "high" | "urgent"),
+    });
+    return { id: task.id, title: task.title, status: task.status, assignee: task.assigneeId, dueAt: task.dueAt };
+  }
+
+  if (name === "complete_task") {
+    const taskId = String(args.taskId ?? "");
+    const decision = args.decision === undefined ? "complete" : String(args.decision);
+    if (decision !== "complete" && decision !== "approve" && decision !== "reject") {
+      throw new Error("decision 只能是 complete／approve／reject");
+    }
+    const task = decision === "complete"
+      ? await completeProjectTaskCore(auth, taskId)
+      : await decideProjectApprovalCore(auth, taskId, decision);
+    return {
+      id: task.id,
+      title: task.title,
+      status: task.status,
+      note: task.wakeRunId ? "等待這件任務的代理已恢復執行——用 get_agent_run 追進度。" : undefined,
     };
   }
 
