@@ -38,14 +38,12 @@ vi.mock("../../../api", () => ({
       assets: { useQuery: () => ({ data: [] }) },
     },
     quota: { my: { useQuery: () => ({ data: undefined }) } },
+    // KnowledgeSourceStrip（#251 起掛在生成表單上）會查知識庫清單
+    knowledge: { list: { useQuery: () => ({ data: [] }) } },
     prompts: { save: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     scenes: { addDraft: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     generation: {
       submit: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
-    },
-    // 規劃模式的 KnowledgeSourceStrip 會查知識庫清單；沒有這層 mock 整個工作台 render 就爆
-    knowledge: {
-      list: { useQuery: () => ({ data: [] }) },
     },
   },
 }));
