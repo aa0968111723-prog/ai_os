@@ -1,6 +1,7 @@
-# Aios 維基文稿（倉庫內來源）
+# Wiki 文稿（倉庫內來源）
 
-此目錄是 [GitHub Wiki](https://github.com/aa0968111723-prog/ai_os/wiki) 的**可版本控制來源**。
+此目錄是 [GitHub Wiki](https://github.com/aa0968111723-prog/ai_os/wiki) 的可版本控制來源。  
+公開說明採**中性**產品／工程用語，不綁定特定組織或信仰敘事。
 
 ## 頁面
 
@@ -13,13 +14,7 @@
 
 ## 同步到 GitHub Wiki
 
-Wiki 需先在網頁建立**第一頁**後，才會出現 `ai_os.wiki.git` 遠端。
-
 ```bash
-# 1) 若尚無任何頁面，瀏覽器開啟：
-#    https://github.com/aa0968111723-prog/ai_os/wiki
-#    按 Create the first page → 標題 Home → Save（可先空白）
-
-# 2) 推送本目錄
+# Wiki 需已建立至少一頁（網頁 Create the first page）
 bash scripts/sync-wiki.sh
 ```
