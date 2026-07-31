@@ -209,3 +209,17 @@ Detail: `exit=1`
 
 ---
 
+## 2026-07-31T06:10:41.070Z · `ui.golden` ❌ fail
+
+**UI：黃金路徑全旅程** · kind=`ui-playwright` · cycle=0 · cursor→23
+
+Detail: `exit=1`
+
+---
+
+## 2026-07-31 · `ui.golden` ❌ fail（基建）
+
+**UI：黃金路徑全旅程** · 同 `CARPET-UI-CHROMIUM-SIGTRAP`（chromium-1208 launch → SIGTRAP）。非產品缺陷。
+
+---
+
