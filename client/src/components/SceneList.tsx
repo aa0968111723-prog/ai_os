@@ -437,7 +437,7 @@ function SceneRow({
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
           {!canEdit ? null : s.prompt ? (
             isGenerating || generate.isPending ? (
-              <button className="primary btn-sm" disabled>生成中…</button>
+              <Button size="sm" variant="primary" disabled>生成中…</Button>
             ) : (
               <ConfirmButton
                 triggerClassName="primary btn-sm"

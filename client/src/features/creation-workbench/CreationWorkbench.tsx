@@ -30,7 +30,7 @@ import {
   composeGoalFromSkills,
   resolveModeFromSkills,
 } from "../../../../shared/agentSkills";
-import { Hint, Meta, Pill } from "../../components/ui";
+import { Button, Hint, Meta, Pill } from "../../components/ui";
 /**
  * AI 創作工作台（WB-01～WB-06 正式頁面入口）：ProjectPage ② 只掛這一個主卡。
  * 目標輸入、模式 tabs、上下文條、共享草稿、四模式 adapter、CreationResourceDrawer。
@@ -318,16 +318,14 @@ export function CreationWorkbench({
         {running > 0 && <Pill status="running">執行中 {running}</Pill>}
         {waiting > 0 && <Pill status="queued">等待人員 {waiting}</Pill>}
         {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
-        <button
+        <Button variant="ghost" size="sm"
           type="button"
-          className="btn-ghost btn-sm"
           aria-expanded={!collapsed}
           aria-controls="sec-ai-hub-body"
-          onClick={() => setCollapsed((v) => !v)}
-        >
+          onClick={() => setCollapsed((v) => !v)}>
           <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} />
           {collapsed ? "展開" : "收合"}
-        </button>
+        </Button>
       </div>
 
       {collapsed && (

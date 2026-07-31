@@ -103,15 +103,13 @@ export function CharacterCards({
                     <Button variant="ghost" style={{ marginTop: 4, fontSize: "var(--fs-11)" }} onClick={() => setRefEditId(null)}>收起</Button>
                   </div>
                 ) : (
-                  <button
-                    className="btn-ghost"
+                  <Button variant="ghost"
                     style={{ marginTop: 6, fontSize: "var(--fs-11)" }}
                     title="綁一張定裝參考圖：上傳或從素材庫選，跨鏡比對更有依據"
-                    onClick={() => setRefEditId(c.id)}
-                  >
+                    onClick={() => setRefEditId(c.id)}>
                     <Icon name="Image" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
                     {c.referenceUrl ? "換參考圖" : "設參考圖"}
-                  </button>
+                  </Button>
                 )}
                 <ConfirmButton
                   onConfirm={() => remove.mutate({ id: c.id })}

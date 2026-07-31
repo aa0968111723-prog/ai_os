@@ -1,4 +1,4 @@
-import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from "react";
+import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import { cx } from "./cx";
 
 /**
@@ -28,8 +28,12 @@ interface Own {
   children?: ReactNode;
 }
 
-type AsButton = Own & ButtonHTMLAttributes<HTMLButtonElement> & { as?: "button" };
-type AsAnchor = Own & AnchorHTMLAttributes<HTMLAnchorElement> & { as: "a" };
+/**
+ * React 19 起 `ref` 對函式元件就是一般 prop，不需要 forwardRef——
+ * 但型別得自己宣告，否則呼叫端傳 ref 會被 TS 擋下（站內有數處按鈕需要 ref 做焦點管理）。
+ */
+type AsButton = Own & ButtonHTMLAttributes<HTMLButtonElement> & { as?: "button"; ref?: Ref<HTMLButtonElement> };
+type AsAnchor = Own & AnchorHTMLAttributes<HTMLAnchorElement> & { as: "a"; ref?: Ref<HTMLAnchorElement> };
 
 export function Button(props: AsButton | AsAnchor) {
   const { variant = "neutral", size = "md", className, children } = props;

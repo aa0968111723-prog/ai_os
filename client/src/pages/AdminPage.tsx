@@ -597,9 +597,9 @@ function TeamExtras({ teamId }: { teamId: string }) {
           <Hint layer="always" style={{ margin: "2px 0 4px", fontSize: 11 }}>這些夥伴看不到任何組的專案——用右側「邀請成員」輸入同一個 Email 並選好組別即可入組。</Hint>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {unassigned.map((m) => (
-              <span key={m.userId} className="chip" style={{ margin: 0, opacity: m.disabled ? 0.6 : 1 }} title={m.email}>
+              <Chip key={m.userId} style={{ margin: 0, opacity: m.disabled ? 0.6 : 1 }} title={m.email}>
                 {m.name}{m.disabled ? "・已停用" : ""}
-              </span>
+              </Chip>
             ))}
           </div>
         </div>
@@ -1408,15 +1408,13 @@ export function InsightsCard() {
                   <b style={{ color: "var(--ink)" }}>新台幣 {formatTwd(usage.data.totals.estTwd)}</b>
                   <span style={{ marginLeft: 6 }}>（≈ {formatUsd(usage.data.totals.estUsd)}）</span>
                 </Meta>
-                <button
+                <Button variant="ghost" className="btn"
                   type="button"
-                  className="btn btn-ghost"
                   style={{ marginLeft: "auto", fontSize: 12, padding: "4px 10px" }}
                   onClick={() => exportUsageCsv(usage.data!.rows, usage.data!.fx?.note ?? moneyFxNote())}
-                  title="匯出人×模型用量 CSV（新台幣＋美元）"
-                >
+                  title="匯出人×模型用量 CSV（新台幣＋美元）">
                   <Icon name="Download" size={12} /> 匯出 CSV（新台幣）
-                </button>
+                </Button>
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
@@ -1703,12 +1701,10 @@ function ReportRow({ report }: {
           />
         </a>
       ) : (
-        <span
-          className="chip"
-          style={{ margin: 0, ...catStyle, alignSelf: "start" }}
-        >
+        <Chip
+          style={{ margin: 0, ...catStyle, alignSelf: "start" }}>
           {catLabel}
-        </span>
+        </Chip>
       )}
       <div style={{ fontSize: 13 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -1927,15 +1923,13 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
       </div>
 
       <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
-        <button
+        <Button variant="ghost" size="sm"
           type="button"
-          className="btn-ghost btn-sm"
           disabled={balance.isFetching}
           onClick={() => balance.refetch()}
-          title="尊重伺服器 60～120 秒快取；短時間內重按可能仍是快取"
-        >
+          title="尊重伺服器 60～120 秒快取；短時間內重按可能仍是快取">
           {balance.isFetching ? "重新整理中…" : "重新整理"}
-        </button>
+        </Button>
       </div>
     </div>
   );

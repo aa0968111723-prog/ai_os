@@ -106,15 +106,13 @@ export function ScenePresetCards({
                     <Button variant="ghost" style={{ marginTop: 4, fontSize: 11 }} onClick={() => setRefEditId(null)}>收起</Button>
                   </div>
                 ) : (
-                  <button
-                    className="btn-ghost"
+                  <Button variant="ghost"
                     style={{ marginTop: 6, fontSize: 11 }}
                     title="綁一張場景參考圖：上傳或從素材庫選，色板／光線比對更有依據"
-                    onClick={() => setRefEditId(s.id)}
-                  >
+                    onClick={() => setRefEditId(s.id)}>
                     <Icon name="Image" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
                     {s.referenceUrl ? "換參考圖" : "設參考圖"}
-                  </button>
+                  </Button>
                 ))}
                 {!readOnly && (
                   <ConfirmButton

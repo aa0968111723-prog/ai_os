@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { applyAppUpdate, isAppUpdateReady, subscribeAppUpdate } from "../pwa";
 import { Button, Hint } from "./ui";
-
 /**
  * 新版 Service Worker 已下載完成時提示使用者主動更新。
  * 不自動刷新，避免使用者正在編輯提示詞、筆記或專案內容時被中斷。
@@ -38,9 +37,9 @@ export function AppUpdateBanner() {
         <Button variant="ghost" size="sm" onClick={() => setDismissed(true)}>
           稍後
         </Button>
-        <button type="button" className="primary btn-sm" disabled={updating} onClick={onUpdate}>
+        <Button size="sm" variant="primary" type="button" disabled={updating} onClick={onUpdate}>
           {updating ? "更新中…" : "更新"}
-        </button>
+        </Button>
       </div>
     </aside>
   );

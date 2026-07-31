@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Button, Card, Hint, Meta } from "../components/ui";
+import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   CATEGORIES,
   MODELS,
@@ -211,15 +211,13 @@ export function ModelsPage() {
                     <th key={m.id} scope="col" style={{ ...compareCell, fontWeight: 600, fontSize: "var(--fs-14)" }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
                         {m.label}
-                        <button
-                          className="btn-ghost"
+                        <Button variant="ghost"
                           aria-label={`把 ${m.label} 移出比較`}
                           title="移出比較"
                           style={{ padding: "0 6px", display: "inline-flex", alignItems: "center" }}
-                          onClick={() => toggleCompare(m.id)}
-                        >
+                          onClick={() => toggleCompare(m.id)}>
                           <Icon name="X" size={12} />
-                        </button>
+                        </Button>
                       </span>
                     </th>
                   ))}
@@ -377,12 +375,10 @@ export function ModelsPage() {
                     <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                       <b>{m.label}</b>
                       {m.recommended && (
-                        <span
-                          className="chip"
-                          style={{ margin: 0, background: "var(--primary-tint)", borderColor: "var(--primary-border)", color: "var(--primary-ink)", fontWeight: 600 }}
-                        >
+                        <Chip
+                          style={{ margin: 0, background: "var(--primary-tint)", borderColor: "var(--primary-border)", color: "var(--primary-ink)", fontWeight: 600 }}>
                           推薦
-                        </span>
+                        </Chip>
                       )}
                       <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span>
                       <button
@@ -426,18 +422,16 @@ export function ModelsPage() {
               placeholder="搜尋(例:中文、對嘴、金句)"
             />
             {q && (
-              <button
+              <Button variant="ghost"
                 aria-label="清除搜尋"
-                className="btn-ghost"
                 onClick={() => setQ("")}
                 style={{
                   position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)",
                   display: "flex", alignItems: "center",
                   padding: "0 8px", fontSize: 16, lineHeight: 1,
-                }}
-              >
+                }}>
                 <Icon name="X" size={16} />
-              </button>
+              </Button>
             )}
           </span>
           {q && <Meta>搜尋涵蓋全部類別</Meta>}
@@ -641,14 +635,12 @@ function ModelInline({
       <b style={{ fontSize: "var(--fs-14)" }}>{m.label}</b>
       <span className="pill" style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</span>
       <span className="mono" style={{ fontSize: 11 }}>{m.points} 點</span>
-      <button
-        className="btn-ghost btn-sm"
+      <Button variant="ghost" size="sm"
         title={`複製模型 ID:${m.id}`}
         style={{ display: "inline-flex", alignItems: "center", gap: 3 }}
-        onClick={() => onCopy(m.id)}
-      >
+        onClick={() => onCopy(m.id)}>
         {copiedId === m.id ? <><Icon name="Check" size={12} />已複製</> : "複製 ID"}
-      </button>
+      </Button>
     </span>
   );
 }
@@ -701,13 +693,11 @@ function ScenarioCard({
         </Meta>
       )}
       {primary && (
-        <button
-          className="btn-ghost btn-sm"
+        <Button variant="ghost" size="sm"
           style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 4 }}
-          onClick={() => onJump(primary.category)}
-        >
+          onClick={() => onJump(primary.category)}>
           在目錄看同類<Icon name="ArrowRight" size={12} />
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -729,13 +719,11 @@ function ShowdownCard({
     <div className="card card--std" style={{ padding: "12px 14px" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <b style={{ fontSize: "var(--fs-15)" }}>{showdown.title}</b>
-        <button
-          className="btn-ghost btn-sm"
+        <Button variant="ghost" size="sm"
           style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 4 }}
-          onClick={() => onJump(showdown.category)}
-        >
+          onClick={() => onJump(showdown.category)}>
           在目錄看同類<Icon name="ArrowRight" size={12} />
-        </button>
+        </Button>
       </div>
       <Meta as="p" style={{ margin: "2px 0 0" }}>{showdown.subtitle}</Meta>
       <div style={{ overflowX: "auto", marginTop: 8 }}>

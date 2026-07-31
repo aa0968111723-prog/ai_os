@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "./interactions";
-import { Chip, Hint, Meta } from "./ui";
+import { Button, Chip, Hint, Meta } from "./ui";
 import {
   copyLinkDeviceGuide,
   deviceKind,
@@ -247,9 +247,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
               ——用同一個帳號登入 → 頭像選單 →「連結手機與電腦」→ 再啟用一次
             </li>
           </ol>
-          <button type="button" className="btn-ghost device-link-copy" onClick={() => void copyGuide()} disabled={busy}>
+          <Button variant="ghost" className="device-link-copy" type="button" onClick={() => void copyGuide()} disabled={busy}>
             <Icon name="Copy" size={14} /> 複製給另一台裝置的說明
-          </button>
+          </Button>
         </section>
 
         {/* 本裝置 */}
@@ -338,9 +338,8 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                       </span>
                       <span className="meta">最近同步 {relSeen(d.lastSeenAt)}</span>
                     </span>
-                    <button
+                    <Button variant="ghost"
                       type="button"
-                      className="btn-ghost"
                       disabled={busy}
                       title="移除此裝置（不再收到通知）"
                       aria-label={`移除 ${d.label ?? "裝置"}`}
@@ -350,10 +349,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                           endpoint: d.endpoint,
                           label: d.label ?? "未知裝置",
                         })
-                      }
-                    >
+                      }>
                       <Icon name="Trash2" size={14} />
-                    </button>
+                    </Button>
                   </li>
                 );
               })}
@@ -393,9 +391,8 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                       </span>
                       <span className="meta">最近活動 {relSeen(seen)}</span>
                     </span>
-                    <button
+                    <Button variant="ghost"
                       type="button"
-                      className="btn-ghost"
                       disabled={busy || revokeSession.isPending || logoutAll.isPending}
                       title={s.isCurrent ? "撤銷本裝置（會登出）" : "撤銷此登入"}
                       aria-label={s.isCurrent ? "撤銷本裝置登入" : `撤銷 ${label}`}
@@ -405,10 +402,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                           label,
                           isCurrent: s.isCurrent,
                         })
-                      }
-                    >
+                      }>
                       <Icon name="Trash2" size={14} />
-                    </button>
+                    </Button>
                   </li>
                 );
               })}

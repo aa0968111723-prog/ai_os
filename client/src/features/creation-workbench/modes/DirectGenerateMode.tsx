@@ -17,8 +17,7 @@ import {
   shouldShowApprovalThresholdNotice,
 } from "../generationGates";
 import { scrollToSelector } from "../workbenchNav";
-import { Hint, Meta } from "../../../components/ui";
-
+import { Button, Hint, Meta } from "../../../components/ui";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
   nonce: number;
@@ -391,14 +390,12 @@ export function DirectGenerateMode({
             {sourceAsset ? (
               <Meta as="p">
                 來源：{sourceAsset.title}（素材庫）
-                <button
+                <Button size="sm"
                   type="button"
-                  className="btn-sm"
                   style={{ marginLeft: 8 }}
-                  onClick={() => setSourceAsset(null)}
-                >
+                  onClick={() => setSourceAsset(null)}>
                   改用網址
-                </button>
+                </Button>
               </Meta>
             ) : (
               <>

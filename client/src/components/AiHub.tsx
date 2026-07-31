@@ -4,7 +4,7 @@ import { Icon, type IconName } from "./Icon";
 import { AgentCard } from "./AgentCard";
 import { ProjectAssistant } from "./ProjectAssistant";
 import { flashAnchor } from "../discuss";
-import { Hint, Meta, Pill } from "./ui";
+import { Button, Hint, Meta, Pill } from "./ui";
 /**
  * @deprecated Legacy shell kept for unit tests only (`AiHub.test.tsx`).
  * Production ProjectPage mounts `CreationWorkbench` exclusively (WB-01～WB-06).
@@ -100,16 +100,14 @@ export function AiHub({
         {running > 0 && <Pill status="running">執行中 {running}</Pill>}
         {waiting > 0 && <Pill status="queued">等待人員 {waiting}</Pill>}
         {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
-        <button
+        <Button variant="ghost" size="sm"
           type="button"
-          className="btn-ghost btn-sm"
           aria-expanded={!collapsed}
           aria-controls="sec-ai-hub-body"
-          onClick={() => setCollapsed((v) => !v)}
-        >
+          onClick={() => setCollapsed((v) => !v)}>
           <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} />
           {collapsed ? "展開" : "收合"}
-        </button>
+        </Button>
       </div>
 
       {collapsed && (
@@ -130,10 +128,9 @@ export function AiHub({
           style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: 8, margin: "12px 0" }}
         >
           {routes.map((route) => (
-            <button
+            <Button variant="ghost"
               key={route.target}
               type="button"
-              className="btn-ghost"
               onClick={() => goTo(route.target)}
               style={{
                 display: "flex",
@@ -144,14 +141,13 @@ export function AiHub({
                 textAlign: "left",
                 border: "1px solid var(--border)",
                 borderRadius: "var(--radius-md)",
-              }}
-            >
+              }}>
               <Icon name={route.icon} size={16} style={{ marginTop: 2, flexShrink: 0 }} />
               <span>
                 <b style={{ display: "block" }}>{route.label}</b>
                 <Meta style={{ display: "block", marginTop: 2 }}>{route.description}</Meta>
               </span>
-            </button>
+            </Button>
           ))}
         </div>
 

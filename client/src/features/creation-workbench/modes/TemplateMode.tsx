@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { WorkflowCard } from "../../../components/WorkflowCard";
+import { Button } from "../../../components/ui";
 
 /**
  * WB-04: embed real WorkflowCard (not scroll adapter).
@@ -90,13 +91,11 @@ export function TemplateMode({
               {goal.length > 80 ? "…" : ""}
             </b>
           </span>
-          <button
+          <Button variant="ghost" size="sm"
             type="button"
-            className="btn-ghost btn-sm"
-            onClick={() => pushIdea(goal)}
-          >
+            onClick={() => pushIdea(goal)}>
             帶入想法
-          </button>
+          </Button>
         </p>
       ) : null}
 

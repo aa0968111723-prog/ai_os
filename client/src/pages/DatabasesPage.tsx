@@ -193,9 +193,9 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
         <aside className="database-sidebar card" aria-label="資料庫清單">
           <div className="database-sidebar__head">
             <div><strong>我的資料庫</strong><small>{tables.length} 個空間</small></div>
-            <button aria-label="建立資料庫" className="primary btn-sm" onClick={() => { setCreating(true); setSelectedId(null); }}>
+            <Button size="sm" variant="primary" aria-label="建立資料庫" onClick={() => { setCreating(true); setSelectedId(null); }}>
               <Icon name="Plus" size={14} /> 建立
-            </button>
+            </Button>
           </div>
           <label className="database-search">
             <span className="sr-only">搜尋資料庫</span>
@@ -242,13 +242,11 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
         {/* 右欄：建立表單 or 選中庫的格線 */}
         <section className="database-main" aria-label={creating ? "建立資料庫" : selected?.name ?? "資料庫內容"}>
           {(creating || selected) && (
-            <button
+            <Button variant="ghost" className="database-mobile-back"
               type="button"
-              className="database-mobile-back btn-ghost"
-              onClick={() => { setCreating(false); setSelectedId(null); }}
-            >
+              onClick={() => { setCreating(false); setSelectedId(null); }}>
               <Icon name="Undo2" size={14} /> 返回資料庫清單
-            </button>
+            </Button>
           )}
           {creating ? (
             <CreateTableCard
@@ -420,13 +418,11 @@ function CreateTableCard({
             <Hint layer="always" style={{ color: "var(--danger-ink, #a33)" }}>
               欄位已建好，但尚未收到匯入結果。可用相同安全重試鍵再確認一次，不會重複新增資料。
             </Hint>
-            <button
-              className="btn-sm"
+            <Button size="sm"
               disabled={importData.isPending}
-              onClick={() => void importIntoCreatedTable(finished.id)}
-            >
+              onClick={() => void importIntoCreatedTable(finished.id)}>
               {importData.isPending ? "重新確認中…" : "安全重試匯入"}
-            </button>
+            </Button>
           </>
         ) : null}
         <div style={{ marginTop: 12 }}>
@@ -669,11 +665,11 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0 }}>{table.name}</h2>
         <Badge>{SCOPE_LABEL[table.scope]}</Badge>
-        {!table.memberWritable && <span className="badge" title="只有管理者能寫入"><Icon name="Lock" size={12} /> 唯讀共享</span>}
+        {!table.memberWritable && <Badge title="只有管理者能寫入"><Icon name="Lock" size={12} /> 唯讀共享</Badge>}
         {table.agentAccess !== "write" && (
-          <span className="badge" title={AGENT_ACCESS_OPTIONS.find((o) => o.value === table.agentAccess)?.hint}>
+          <Badge title={AGENT_ACCESS_OPTIONS.find((o) => o.value === table.agentAccess)?.hint}>
             <Icon name="Lock" size={12} /> {table.agentAccess === "none" ? "不開放 AI" : "AI 唯讀"}
-          </span>
+          </Badge>
         )}
         <span className="spacer" />
         {table.access.canManage && (
@@ -771,14 +767,12 @@ function TableDetail({ table, groupId, onDeleted }: { table: TableSummary; group
                     </td>
                   ))}
                   <td style={{ padding: "4px 4px" }}>
-                    <button
-                      className="btn-sm primary"
+                    <Button size="sm" variant="primary"
                       title="新增這一列"
                       disabled={addRow.isPending}
-                      onClick={() => addRow.mutate({ tableId: table.id, data: draft }, { onSuccess: () => setDraft(emptyDraft()) })}
-                    >
+                      onClick={() => addRow.mutate({ tableId: table.id, data: draft }, { onSuccess: () => setDraft(emptyDraft()) })}>
                       <Icon name="Plus" size={13} />
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               )}
@@ -934,13 +928,11 @@ function DataImportPanel({ table, onImported }: { table: TableSummary; onImporte
         </div>
       )}
       <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-        <button
-          className="primary btn-sm"
+        <Button size="sm" variant="primary"
           disabled={!content.trim() || !!parseError || Object.keys(headerMap).length === 0 || importData.isPending}
-          onClick={startImport}
-        >
+          onClick={startImport}>
           {importData.isPending ? "匯入中…" : "開始匯入"}
-        </button>
+        </Button>
       </div>
       {importData.error && <p className="error" role="alert">{importData.error.message}</p>}
       {result && <ImportResultView result={result} />}
@@ -975,18 +967,16 @@ function ExternalFetchRow({ onFetched }: { onFetched: (text: string, fmt?: Tabul
         {apis.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
       </select>
       <input aria-label="抓取路徑" value={path} maxLength={500} placeholder="路徑（選填）如 ?limit=100" style={{ flex: "1 1 160px", maxWidth: 260 }} onChange={(e) => setPath(e.target.value)} />
-      <button
-        className="btn-sm"
+      <Button size="sm"
         disabled={!connId || fetchApi.isPending}
         onClick={() =>
           fetchApi.mutate(
             { id: connId, path: path.trim() || undefined },
             { onSuccess: (r) => onFetched(r.content, mimeToFormat(r.mime)) },
           )
-        }
-      >
+        }>
         {fetchApi.isPending ? "抓取中…" : "抓取"}
-      </button>
+      </Button>
       {fetchApi.error && <span className="meta" style={{ color: "var(--danger-ink, #a33)" }}>{fetchApi.error.message}</span>}
     </div>
   );
@@ -1298,13 +1288,11 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
             style={{ flex: "1 1 320px" }}
           />
           <input aria-label="匯入文件名稱" value={urlName} onChange={(e) => setUrlName(e.target.value)} placeholder="名稱（選填）" style={{ flex: "0 1 140px" }} maxLength={120} />
-          <button
-            className="btn-sm primary"
+          <Button size="sm" variant="primary"
             disabled={!url.trim() || importUrl.isPending}
-            onClick={() => importUrl.mutate({ tableId: table.id, url: url.trim(), name: urlName.trim() || undefined })}
-          >
+            onClick={() => importUrl.mutate({ tableId: table.id, url: url.trim(), name: urlName.trim() || undefined })}>
             {importUrl.isPending ? "匯入中…" : "從網址匯入"}
-          </button>
+          </Button>
         </div>
       )}
       {(uploadError || importUrl.error || refresh.error || removeFile.error || classify.error) && (
@@ -1334,7 +1322,7 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
           <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }} title={f.name}>{f.name}</span>
           <span className="meta">{formatBytes(f.sizeBytes)}・{f.uploaderName}</span>
           {isMedia && <Badge>{kindMeta.label}</Badge>}
-          {f.category && <span className="badge" title="分類">{f.category}</span>}
+          {f.category && <Badge title="分類">{f.category}</Badge>}
           {f.readableChars > 0 ? (
             <button className="badge" style={{ cursor: "pointer" }} title="點開預覽 AI 讀到的純文字" onClick={() => setPreviewId(previewId === f.id ? null : f.id)}>
               AI 可讀 {f.readableChars.toLocaleString()} 字
@@ -1346,18 +1334,16 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
           ) : isMedia ? (
             <button className="badge" style={{ cursor: "pointer" }} title="預覽" onClick={() => setPreviewId(previewId === f.id ? null : f.id)}>預覽</button>
           ) : (
-            <span className="badge" title="此格式暫不支援文字抽取（僅存檔）">僅存檔</span>
+            <Badge title="此格式暫不支援文字抽取（僅存檔）">僅存檔</Badge>
           )}
           <span className="spacer" />
           {canWrite && f.kind === "image" && f.hasFile && (
-            <button
-              className="btn-sm"
+            <Button size="sm"
               title="AI 看圖：產生繁中描述並自動分類（1 點/張；點數走你的額度）"
               disabled={classify.isPending}
-              onClick={() => classify.mutate({ id: f.id })}
-            >
+              onClick={() => classify.mutate({ id: f.id })}>
               <Icon name="Sparkles" size={13} /> {classify.isPending && classify.variables?.id === f.id ? "分類中…" : "AI 分類"}
-            </button>
+            </Button>
           )}
           {canWrite && (editCatId === f.id ? (
             <CategoryEditor fileId={f.id} tableId={table.id} initial={f.category} existing={existingCategories} onDone={() => setEditCatId(null)} />

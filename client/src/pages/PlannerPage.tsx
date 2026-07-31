@@ -497,7 +497,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
                       <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
                         {ev.title}
                         {projTitle && <Chip style={{ margin: "0 0 0 8px" }}>{projTitle}</Chip>}
-                        {ev.mentions?.length ? <span className="chip" style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {ev.mentions.length}</span> : null}
+                        {ev.mentions?.length ? <Chip style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {ev.mentions.length}</Chip> : null}
                       </div>
                       {(ev.note || ev.ownerName) && (
                         <div className="meta">{[ev.ownerName, ev.note].filter(Boolean).join("・")}</div>
@@ -604,9 +604,9 @@ function CalendarView({
         <Button size="sm" onClick={() => goMonth(1)} aria-label="下個月">
           <Icon name="ChevronRight" size={14} />
         </Button>
-        <button className="btn-sm btn-ghost" onClick={() => { setCursor(new Date(today.getFullYear(), today.getMonth(), 1)); setSelectedKey(null); }}>
+        <Button variant="ghost" size="sm" onClick={() => { setCursor(new Date(today.getFullYear(), today.getMonth(), 1)); setSelectedKey(null); }}>
           回本月
-        </button>
+        </Button>
       </div>
       <div className="cal-grid">
         {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
@@ -812,7 +812,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
                   <div style={{ fontSize: "var(--fs-14)", fontWeight: 600 }}>
                     {n.title}
                     {projTitle && <Chip style={{ margin: "0 0 0 8px" }}>{projTitle}</Chip>}
-                    {n.mentions?.length ? <span className="chip" style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {n.mentions.length}</span> : null}
+                    {n.mentions?.length ? <Chip style={{ margin: "0 0 0 6px" }} title="有 @提及夥伴"><Icon name="Bell" size={11} style={{ verticalAlign: "-1px" }} /> {n.mentions.length}</Chip> : null}
                   </div>
                   <div className="meta">{n.excerpt}{n.chars > n.excerpt.length ? "…" : ""}（{n.chars.toLocaleString()} 字）</div>
                   <div className="meta">{fmtDateTime(n.updatedAt)} 更新・{n.creatorName}</div>
@@ -961,16 +961,14 @@ function KnowledgeImport({
 
   if (!open) {
     return (
-      <button
+      <Button size="sm"
         type="button"
-        className="btn-sm"
         style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 6 }}
         disabled={disabled || projects.length === 0}
         title={projects.length === 0 ? "這個組還沒有專案知識庫可匯入" : undefined}
-        onClick={() => setOpen(true)}
-      >
+        onClick={() => setOpen(true)}>
         <Icon name="Sparkles" size={13} />從知識庫匯入
-      </button>
+      </Button>
     );
   }
   return (
@@ -978,7 +976,7 @@ function KnowledgeImport({
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <Icon name="Sparkles" size={13} style={{ color: "var(--primary-ink)" }} />
         <strong style={{ fontSize: "var(--fs-13)" }}>從知識庫匯入</strong>
-        <button type="button" className="btn-sm btn-ghost" style={{ marginLeft: "auto" }} onClick={() => setOpen(false)}>收合</button>
+        <Button variant="ghost" size="sm" type="button" style={{ marginLeft: "auto" }} onClick={() => setOpen(false)}>收合</Button>
       </div>
       <Hint style={{ marginTop: 4 }}>選一個專案的知識（開示稿／見證／腳本…），把全文附加到這則筆記的內容尾端。</Hint>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginTop: 6 }}>
@@ -1000,9 +998,9 @@ function KnowledgeImport({
             ))}
           </select>
         </div>
-        <button type="button" className="primary btn-sm" disabled={!kid || busy || disabled} onClick={doImport}>
+        <Button size="sm" variant="primary" type="button" disabled={!kid || busy || disabled} onClick={doImport}>
           {busy ? "匯入中…" : "匯入到內容"}
-        </button>
+        </Button>
       </div>
       {err && <p className="error">{err}</p>}
     </div>
@@ -1558,7 +1556,7 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
               {navLabel(selected.nav)}
             </Button>
           )}
-          <button className="btn-sm btn-ghost" onClick={() => setSelected(null)} aria-label="關閉詳情">關閉</button>
+          <Button variant="ghost" size="sm" onClick={() => setSelected(null)} aria-label="關閉詳情">關閉</Button>
         </div>
       )}
     </PlannerSection>

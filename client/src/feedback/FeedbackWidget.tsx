@@ -6,7 +6,6 @@ import { captureWithHighlight, pickElement, type PickResult } from "./picker";
 import { Icon } from "../components/Icon";
 import { useRovingRadio } from "../components/interactions";
 import { Button, Hint, Meta } from "../components/ui";
-
 /** 目前路由對應到人看得懂的頁面名（與 FEEDBACK_PAGES 對齊；對不上就回 null） */
 function pageForPath(path: string): string | null {
   if (path === "/") return "作業台（首頁）";
@@ -409,17 +408,15 @@ function ReportForm({
             ) : (
               <div>
                 <Meta as="p" style={{ margin: 0 }}>這次沒能擷取到畫面，送出文字仍會收到。</Meta>
-                <button
+                <Button variant="ghost"
                   type="button"
-                  className="btn-ghost"
                   style={{ marginTop: 6, padding: "4px 8px" }}
                   onClick={() => {
                     setCapturing(true);
                     setCaptureAttempt((attempt) => attempt + 1);
-                  }}
-                >
+                  }}>
                   重新擷取
-                </button>
+                </Button>
               </div>
             )}
           </div>

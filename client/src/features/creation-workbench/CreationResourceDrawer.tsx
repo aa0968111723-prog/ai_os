@@ -19,7 +19,6 @@ import {
   type WorkbenchRevealDetail,
 } from "./workbenchNav";
 import { Button, Hint, Meta } from "../../components/ui";
-
 export type ResourceDrawerTab = "prompts" | "generations" | "trail" | "templates";
 
 export type ReuseGenerateFn = (
@@ -288,17 +287,15 @@ export function CreationResourceDrawer({
           aria-label="開啟資源抽屜"
         >
           {TABS.map((t) => (
-            <button
+            <Button variant="ghost" size="sm"
               key={t.id}
               type="button"
-              className="btn-ghost btn-sm"
               aria-haspopup="dialog"
               aria-expanded={open && tab === t.id}
               data-resource-tab={t.id}
-              onClick={() => openTab(t.id)}
-            >
+              onClick={() => openTab(t.id)}>
               <Icon name={t.icon} size={13} /> {t.label}
-            </button>
+            </Button>
           ))}
         </div>
         {/* Success feedback lives on the entry row so it remains visible after close. */}
@@ -362,7 +359,7 @@ export function CreationResourceDrawer({
               {TABS.map((t, index) => {
                 const selected = tab === t.id;
                 return (
-                  <button
+                  <Button variant="ghost" size="sm"
                     key={t.id}
                     ref={(el) => {
                       tabRefs.current[index] = el;
@@ -373,17 +370,15 @@ export function CreationResourceDrawer({
                     aria-selected={selected}
                     aria-controls={`${prefix}-panel-${t.id}`}
                     tabIndex={selected ? 0 : -1}
-                    className="btn-ghost btn-sm"
                     onClick={() => setTab(t.id)}
                     onKeyDown={(e) => onDrawerTabKeyDown(e, index)}
                     style={{
                       whiteSpace: "nowrap",
                       border: selected ? "1px solid var(--primary-border)" : "1px solid transparent",
                       background: selected ? "var(--primary-tint)" : undefined,
-                    }}
-                  >
+                    }}>
                     <Icon name={t.icon} size={12} /> {t.label}
-                  </button>
+                  </Button>
                 );
               })}
             </div>

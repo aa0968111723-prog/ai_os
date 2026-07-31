@@ -233,8 +233,8 @@ export function WorkflowCard({
       {(charIds.length > 0 || sceneIds.length > 0) && (
         <Meta as="p" style={{ marginTop: 6 }}>
           帶入生成台勾選：
-          {charIds.length > 0 && <span className="chip on" style={{ marginLeft: 4 }}>角色 {charIds.length}</span>}
-          {sceneIds.length > 0 && <span className="chip on" style={{ marginLeft: 4 }}>場景 {sceneIds.length}</span>}
+          {charIds.length > 0 && <Chip selected style={{ marginLeft: 4 }}>角色 {charIds.length}</Chip>}
+          {sceneIds.length > 0 && <Chip selected style={{ marginLeft: 4 }}>場景 {sceneIds.length}</Chip>}
           <span style={{ marginLeft: 4 }}>——視覺步驟都注入同一套錨點</span>
         </Meta>
       )}

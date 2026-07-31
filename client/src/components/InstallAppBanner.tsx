@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { canShowInstallUi, dismissInstallBanner, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../pwa";
+import { Button } from "./ui";
 
 export function InstallAppBanner() {
   const [, bump] = useState(0);
@@ -33,7 +34,7 @@ export function InstallAppBanner() {
       </div>
       <div className="install-app__actions">
         {!ios && <button type="button" className="primary" disabled={busy} onClick={() => void onInstall()}>{busy ? "請稍候…" : "安裝 Aios"}</button>}
-        <button type="button" className="btn-ghost" onClick={() => { dismissInstallBanner(); bump((n) => n + 1); }}>稍後</button>
+        <Button variant="ghost" type="button" onClick={() => { dismissInstallBanner(); bump((n) => n + 1); }}>稍後</Button>
       </div>
     </aside>
   );

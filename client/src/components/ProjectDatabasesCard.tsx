@@ -9,7 +9,6 @@ import {
   type ProjectDataTemplateId,
 } from "@shared/projectDataTemplates";
 import { Button, Hint, Meta } from "./ui";
-
 /**
  * 專案資料卡：
  * - 一眼看出 AI 能否引用本專案依據（知識／素材／已關聯表；尊重 agentAccess）。
@@ -244,16 +243,14 @@ export function ProjectDatabasesCard({
             </Hint>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {PROJECT_DATA_TEMPLATES.map((t) => (
-                <button
+                <Button size="sm" variant="primary"
                   key={t.id}
                   type="button"
-                  className="btn-sm primary"
                   disabled={createBound.isPending}
                   title={t.hint}
-                  onClick={() => onCreateTemplate(t.id)}
-                >
+                  onClick={() => onCreateTemplate(t.id)}>
                   <Icon name="Plus" size={13} /> {t.label}
-                </button>
+                </Button>
               ))}
             </div>
             {createBound.isPending && (
@@ -374,14 +371,12 @@ export function ProjectDatabasesCard({
                         }}
                         style={{ flex: "1 1 160px", minWidth: 120, maxWidth: 320 }}
                       />
-                      <button
+                      <Button size="sm" variant="primary"
                         type="button"
-                        className="btn-sm primary"
                         disabled={addRow.isPending}
-                        onClick={() => onQuickAdd(group.tableId, fields)}
-                      >
+                        onClick={() => onQuickAdd(group.tableId, fields)}>
                         <Icon name="Plus" size={13} /> 加一列
-                      </button>
+                      </Button>
                       {quickError[group.tableId] && (
                         <span className="error" style={{ fontSize: 12 }}>{quickError[group.tableId]}</span>
                       )}

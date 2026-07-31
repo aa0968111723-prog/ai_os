@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { trpc } from "../api";
 import { MODELS } from "@shared/models";
 import { Icon } from "./Icon";
-import { Button, Hint, Meta } from "./ui";
-
+import { Button, Chip, Hint, Meta } from "./ui";
 export interface PickedModel {
   id: string;
   label: string;
@@ -117,7 +116,7 @@ export function ModelPicker({
       )}
       {selected && (
         <Meta as="p" style={{ marginTop: 4 }}>
-          {selected.recommended && <span className="chip on" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}><Icon name="Star" size={12} /> 推薦</span>}
+          {selected.recommended && <Chip selected style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}><Icon name="Star" size={12} /> 推薦</Chip>}
           {selected.strengths}
           {!selected.verified && <span style={{ color: "var(--gold-ink)" }}>(<Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", margin: "0 2px" }} />新模型 ID 待正式模式首跑確認;失敗會自動退點)</span>}
         </Meta>

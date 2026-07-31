@@ -8,7 +8,7 @@ import { AssetVideo, AssetAudio, MissingMediaBox } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 import { revealWorkbenchAnchor } from "../features/creation-workbench/workbenchNav";
 
-import { Button, Hint, Meta, Skeleton } from "./ui";
+import { Button, Chip, Hint, Meta, Skeleton } from "./ui";
 /** 生成結果縮圖（圖片）：載入失敗顯示「結果已失效」佔位，並拿掉開新分頁連結（點下去只會是 404） */
 function GenResultImgLink({ url, alt }: { url: string; alt: string }) {
   const [failed, setFailed] = useState(false);
@@ -545,10 +545,10 @@ export function GenerationList({
               return (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", marginTop: 4 }}>
                   {chars.length > 0 && (
-                    <span className="chip" title={chars.map(charName).join("、")}>角色 {chars.length}</span>
+                    <Chip title={chars.map(charName).join("、")}>角色 {chars.length}</Chip>
                   )}
                   {presets.length > 0 && (
-                    <span className="chip" title={presets.map(presetName).join("、")}>場景 {presets.length}</span>
+                    <Chip title={presets.map(presetName).join("、")}>場景 {presets.length}</Chip>
                   )}
                   {boundScene && (
                     <button

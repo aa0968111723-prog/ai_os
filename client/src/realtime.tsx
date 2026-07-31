@@ -8,8 +8,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { PointerEvent as ReactPointerEvent, ReactNode, RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { trpc } from "./api";
-import { Meta } from "./components/ui";
-
+import { Button, Meta } from "./components/ui";
 export interface CollabPeer {
   userId: string;
   name: string;
@@ -443,14 +442,12 @@ export function CollabModeBar({
               ))}
             </select>
           </label>
-          <button
+          <Button size="sm"
             type="button"
-            className="btn-sm"
             style={{ padding: "2px 8px", fontSize: 11 }}
-            onClick={() => onModeChange("live")}
-          >
+            onClick={() => onModeChange("live")}>
             退出鏡像
-          </button>
+          </Button>
         </>
       )}
     </div>

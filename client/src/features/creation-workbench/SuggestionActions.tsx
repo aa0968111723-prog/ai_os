@@ -1,5 +1,6 @@
 import type { CreationAction } from "./creationActions";
 import { generateBringInAction, planBringInAction } from "./creationActions";
+import { Button } from "../../components/ui";
 
 /**
  * Minimal bring-in buttons for an AI / prompt suggestion (proposal §6.1).
@@ -35,9 +36,8 @@ export function SuggestionActions({
       role="group"
       aria-label="建議帶入工作台"
     >
-      <button
+      <Button size="sm"
         type="button"
-        className="btn-sm"
         disabled={disabled}
         title="填入出圖提示詞並切換模式，不送出、不扣點"
         onClick={() =>
@@ -47,13 +47,11 @@ export function SuggestionActions({
               modelId,
             }),
           )
-        }
-      >
+        }>
         帶入直接出圖
-      </button>
-      <button
+      </Button>
+      <Button size="sm"
         type="button"
-        className="btn-sm"
         disabled={disabled}
         title="帶入多步開拍目標並切換模式，不自動排程"
         onClick={() =>
@@ -63,31 +61,26 @@ export function SuggestionActions({
               modelId,
             }),
           )
-        }
-      >
+        }>
         建立多步開拍
-      </button>
+      </Button>
       {showSideEffects && onSaveSceneDraft && (
-        <button
+        <Button size="sm"
           type="button"
-          className="btn-sm"
           disabled={disabled}
           title="新增一格分鏡草稿（不生成、不扣點）"
-          onClick={() => onSaveSceneDraft(text)}
-        >
+          onClick={() => onSaveSceneDraft(text)}>
           存成分鏡草稿
-        </button>
+        </Button>
       )}
       {showSideEffects && onSavePrompt && (
-        <button
+        <Button size="sm"
           type="button"
-          className="btn-sm"
           disabled={disabled}
           title="存進提示詞庫，之後可再用"
-          onClick={() => onSavePrompt(text, modelId)}
-        >
+          onClick={() => onSavePrompt(text, modelId)}>
           存進提示詞庫
-        </button>
+        </Button>
       )}
     </div>
   );

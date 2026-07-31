@@ -29,13 +29,11 @@ function TodoForm({ defaultTitle, pending, error, onCancel, onSubmit }: {
     <div className="todo-form">
       <input aria-label="待辦標題" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="待辦標題" />
       <input aria-label="截止時間" type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} />
-      <button
-        className="primary btn-sm"
+      <Button size="sm" variant="primary"
         disabled={!title.trim() || !date || pending}
-        onClick={() => onSubmit(title.trim(), new Date(date).toISOString())}
-      >
+        onClick={() => onSubmit(title.trim(), new Date(date).toISOString())}>
         建立待辦
-      </button>
+      </Button>
       <Button size="sm" onClick={onCancel}>取消</Button>
       {error && <span className="error" style={{ flexBasis: "100%" }}>{error}</span>}
     </div>
@@ -57,7 +55,7 @@ function NoteForm({ defaultTitle, defaultContent, pending, error, onCancel, onSu
     <div className="todo-form">
       <input aria-label="筆記標題" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="筆記標題" />
       <textarea aria-label="筆記內容" value={content} maxLength={5000} onChange={(e) => setContent(e.target.value)} rows={2} style={{ flexBasis: "100%" }} placeholder="筆記內容" />
-      <button className="primary btn-sm" disabled={!title.trim() || !content.trim() || pending} onClick={() => onSubmit(title.trim(), content.trim())}>存成筆記</button>
+      <Button size="sm" variant="primary" disabled={!title.trim() || !content.trim() || pending} onClick={() => onSubmit(title.trim(), content.trim())}>存成筆記</Button>
       <Button size="sm" onClick={onCancel}>取消</Button>
       {error && <span className="error" style={{ flexBasis: "100%" }}>{error}</span>}
     </div>
@@ -848,9 +846,9 @@ export function MessagePanel({
                     if (e.key === "Escape") setPhraseEditorOpen(false);
                   }}
                 />
-                <button type="button" className="primary btn-sm" disabled={!newPhrase.trim() || customPhrases.atLimit} onClick={commitNewPhrase}>
+                <Button size="sm" variant="primary" type="button" disabled={!newPhrase.trim() || customPhrases.atLimit} onClick={commitNewPhrase}>
                   加入
-                </button>
+                </Button>
               </div>
               {/* 表情盤:點一下插到輸入框末尾,長輩志工不必切輸入法找符號 */}
               <div className="phrase-emoji-row" role="group" aria-label="插入表情">

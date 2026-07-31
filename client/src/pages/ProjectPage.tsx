@@ -169,7 +169,7 @@ function TokenListEditor({
       <label id={`${id}-label`}>{label}{hint && <HelpTip text={hint} />}</label>
       <div role="group" aria-labelledby={`${id}-label`}>
         {values.map((v) => (
-          <span key={v} className="chip" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <Chip key={v} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             {v}
             {!readOnly && (
               <button
@@ -182,7 +182,7 @@ function TokenListEditor({
                 <Icon name="X" size={12} />
               </button>
             )}
-          </span>
+          </Chip>
         ))}
         {values.length === 0 && readOnly && <Meta>未設定</Meta>}
         {!readOnly && (
@@ -766,14 +766,12 @@ export function ProjectPage({ id }: { id: string }) {
                 onFollowChange={setFollowUserId}
               />
               {mobileCompact && collab.connected && (
-                <button
+                <Button size="sm"
                   type="button"
-                  className="btn-sm"
                   aria-expanded={true}
-                  onClick={() => setPresenceExpanded(false)}
-                >
+                  onClick={() => setPresenceExpanded(false)}>
                   收合
-                </button>
+                </Button>
               )}
             </span>
           )}
@@ -850,14 +848,12 @@ export function ProjectPage({ id }: { id: string }) {
             {completedStepCount}/{onboardSteps.length}
           </span>
           {allStepsDone && <Chip style={{ fontSize: 12 }}>全部完成</Chip>}
-          <button
-            className="btn-sm"
+          <Button size="sm"
             onClick={toggleOnboard}
             aria-expanded={!onboardCollapsed}
-            aria-controls="project-getting-started-steps"
-          >
+            aria-controls="project-getting-started-steps">
             {onboardCollapsed ? "展開" : "收合"}
-          </button>
+          </Button>
         </div>
         {!onboardCollapsed && (
           <div id="project-getting-started-steps">
@@ -1245,14 +1241,12 @@ export function ProjectPage({ id }: { id: string }) {
               >
                 <div className="project-messages-sheet__head">
                   <strong>組內留言</strong>
-                  <button
+                  <Button size="sm"
                     type="button"
-                    className="btn-sm"
                     aria-label="關閉"
-                    onClick={() => setMessagesSheetOpen(false)}
-                  >
+                    onClick={() => setMessagesSheetOpen(false)}>
                     <Icon name="X" size={16} />
-                  </button>
+                  </Button>
                 </div>
                 <div className="project-messages-sheet__body">
                   <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>

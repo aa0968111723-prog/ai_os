@@ -302,7 +302,7 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
   if (history.error) {
     return (
       <section className="dm-thread card">
-        <button className="btn-sm dm-back" onClick={onBack}><Icon name="Undo2" size={13} /> 返回</button>
+        <Button size="sm" className="dm-back" onClick={onBack}><Icon name="Undo2" size={13} /> 返回</Button>
         <p className="error" role="alert" style={{ margin: "auto" }}>{history.error.message}</p>
       </section>
     );
@@ -318,7 +318,7 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
   return (
     <section className="dm-thread card" aria-label={peer ? `與 ${peer.name} 的對話` : "對話"}>
       <header className="dm-head">
-        <button className="btn-sm dm-back" onClick={onBack} aria-label="返回對話清單"><Icon name="Undo2" size={13} /></button>
+        <Button size="sm" className="dm-back" onClick={onBack} aria-label="返回對話清單"><Icon name="Undo2" size={13} /></Button>
         <div style={{ minWidth: 0 }}>
           <b>{peer?.name ?? "…"}</b>
           {peer?.email && <Meta as="div" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{peer.email}</Meta>}

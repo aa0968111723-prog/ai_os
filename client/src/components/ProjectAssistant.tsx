@@ -19,8 +19,7 @@ import {
   readAgentPlannerMode,
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
-import { Hint, Meta } from "./ui";
-
+import { Button, Chip, Hint, Meta } from "./ui";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -366,28 +365,24 @@ export function ProjectAssistant({
           )}
           <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
             {turns.length > 0 && (
-              <button
+              <Button variant="ghost" size="sm"
                 type="button"
-                className="btn-ghost btn-sm"
                 title="清空這段對話，重新開始"
                 onClick={clear}
-                disabled={busy || pendingKey !== null}
-              >
+                disabled={busy || pendingKey !== null}>
                 <Icon name="Trash2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />清除
-              </button>
+              </Button>
             )}
             {showCollapse && (
-              <button
+              <Button variant="ghost" size="sm"
                 type="button"
-                className="btn-ghost btn-sm"
                 aria-expanded={!collapsed}
                 aria-controls="sec-assistant-body"
                 title={collapsed ? "展開助手" : "收起助手（省版面）"}
-                onClick={() => setCollapsed((c) => !c)}
-              >
+                onClick={() => setCollapsed((c) => !c)}>
                 <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
                 {collapsed ? "展開" : "收起"}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -414,15 +409,13 @@ export function ProjectAssistant({
               "把知識庫的腳本拆成分鏡，並為每一鏡生成畫面",
               "幫我推薦適合本專案的生成模型",
             ].map((q) => (
-              <button
+              <Button size="sm"
                 key={q}
                 type="button"
-                className="btn-sm"
                 title="點了帶入輸入框，按「問」才送出（免費）"
-                onClick={() => setInput(q)}
-              >
+                onClick={() => setInput(q)}>
                 {q}
-              </button>
+              </Button>
             ))}
           </div>
         )}
@@ -535,7 +528,7 @@ export function ProjectAssistant({
                           {/* 選定模型的特性一行說明（幫使用者判斷該不該換；含推薦／未驗證標示，與挑選器一致） */}
                           {gen?.info && !isDone && (
                             <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", maxWidth: 320, lineHeight: 1.4 }}>
-                              {gen.info.recommended && <span className="chip on" style={{ marginRight: 4 }}>推薦</span>}
+                              {gen.info.recommended && <Chip selected style={{ marginRight: 4 }}>推薦</Chip>}
                               {gen.info.strengths}
                               {!gen.info.verified && <span style={{ color: "var(--gold-ink)" }}>（新模型 ID，首跑校準；失敗自動退點）</span>}
                             </div>
@@ -640,9 +633,8 @@ export function ProjectAssistant({
                             />
                           )}
                           {onCreationAction && payloadAct.type === "plan_agent" && !isDone && (
-                            <button
+                            <Button size="sm"
                               type="button"
-                              className="btn-sm"
                               disabled={isRunning}
                               title="帶入多步開拍目標並切換模式，不自動排程、不扣點"
                               onClick={() =>
@@ -650,15 +642,13 @@ export function ProjectAssistant({
                                   type: "create_plan",
                                   goal: payloadAct.goal,
                                 })
-                              }
-                            >
+                              }>
                               帶入多步開拍
-                            </button>
+                            </Button>
                           )}
                           {onCreationAction && payloadAct.type === "run_workflow" && !isDone && (
-                            <button
+                            <Button size="sm"
                               type="button"
-                              className="btn-sm"
                               disabled={isRunning}
                               title="帶入套用範本模式，不自動啟動工作流"
                               onClick={() =>
@@ -667,10 +657,9 @@ export function ProjectAssistant({
                                   templateId: payloadAct.presetId,
                                   goal: payloadAct.prompt,
                                 })
-                              }
-                            >
+                              }>
                               帶入套用範本
-                            </button>
+                            </Button>
                           )}
                           {onCreationAction &&
                             payloadAct.type === "create_scene" &&

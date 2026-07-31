@@ -61,6 +61,13 @@ describe("Button — class 契約", () => {
     expect(container.querySelector("a")!.getAttribute("class")).toBe("btn-ghost");
   });
 
+  it("接得住 ref —— 站內有數處按鈕要靠 ref 做焦點管理", () => {
+    const ref = { current: null as HTMLButtonElement | null };
+    render(<Button ref={ref}>送出</Button>);
+    expect(ref.current).toBeInstanceOf(HTMLButtonElement);
+    expect(ref.current).toHaveTextContent("送出");
+  });
+
   it("點擊會觸發 onClick", async () => {
     const onClick = vi.fn();
     render(<Button onClick={onClick}>送出</Button>);

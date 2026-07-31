@@ -1,4 +1,5 @@
 import { Icon, type IconName } from "./Icon";
+import { Button } from "./ui";
 
 /**
  * 可對使用者揭露的 AI 活動事件。
@@ -115,7 +116,7 @@ export function LiveAssistantTrace({
       )}
       <div className="assistant-trace__footer">
         <span>只顯示資料來源與工具步驟，不含模型私密推理。</span>
-        <button type="button" className="btn-ghost btn-sm" onClick={onCancel}>取消</button>
+        <Button variant="ghost" size="sm" type="button" onClick={onCancel}>取消</Button>
       </div>
     </div>
   );

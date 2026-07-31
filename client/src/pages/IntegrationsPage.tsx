@@ -6,7 +6,7 @@ import { ConfirmButton } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 
-import { Button, Hint, Meta } from "../components/ui";
+import { Badge, Button, Hint, Meta } from "../components/ui";
 /**
  * 連接的資料來源（/integrations）：每個人自己連「自己的」外部服務——
  * Google 雲端硬碟（OAuth，只讀）、Notion（個人 integration token）、外部資料庫/API（自帶金鑰）。
@@ -287,7 +287,7 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontWeight: 600 }}>{c.name}</span>
             <span className="meta mono" style={{ wordBreak: "break-all" }}>{c.baseUrl}</span>
-            <span className="badge" title={`認證標頭：${c.authHeader}`}>{c.authHeader}{c.last4 ? `・末四碼 ${c.last4}` : ""}</span>
+            <Badge title={`認證標頭：${c.authHeader}`}>{c.authHeader}{c.last4 ? `・末四碼 ${c.last4}` : ""}</Badge>
             {c.lastError && <span className="meta" style={{ color: "var(--danger-ink, #a33)" }} title={c.lastError}>上次錯誤</span>}
             <span className="spacer" />
             <input
@@ -336,13 +336,11 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
           </div>
           <Hint layer="always" style={{ margin: 0 }}>標頭值原樣送出——需要 Bearer 前綴就一起貼（如「Bearer pat123」）。</Hint>
           <div style={{ display: "flex", gap: 8 }}>
-            <button
-              className="btn-sm primary"
+            <Button size="sm" variant="primary"
               disabled={!name.trim() || !baseUrl.trim() || !secret || addApi.isPending}
-              onClick={() => addApi.mutate({ name: name.trim(), baseUrl: baseUrl.trim(), headerName: headerName.trim() || undefined, secret })}
-            >
+              onClick={() => addApi.mutate({ name: name.trim(), baseUrl: baseUrl.trim(), headerName: headerName.trim() || undefined, secret })}>
               {addApi.isPending ? "建立中…" : "建立連接"}
-            </button>
+            </Button>
             <Button size="sm" onClick={() => setAdding(false)}>取消</Button>
           </div>
           {addApi.error && <p className="error" role="alert">{addApi.error.message}</p>}

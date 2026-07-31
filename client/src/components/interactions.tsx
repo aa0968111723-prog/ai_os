@@ -4,7 +4,6 @@ import {
 } from "react";
 import { Icon } from "./Icon";
 import { Button, Meta } from "./ui";
-
 /**
  * 共用互動基元（第二輪：把原生 window.confirm/prompt/alert 與無漫遊 radiogroup
  * 換成留在 monastic-calm 語言內、可鍵盤操作的就地元件）。CSP 下零外部依賴。
@@ -172,9 +171,9 @@ export function ConfirmButton({
 
   const buttons = (
     <>
-      <button ref={confirmRef} type="button" className="primary btn-sm" onClick={confirm}>
+      <Button size="sm" variant="primary" ref={confirmRef} type="button" onClick={confirm}>
         {confirmLabel}
-      </button>
+      </Button>
       <Button variant="ghost" size="sm" onClick={cancel}>
         {cancelLabel}
       </Button>

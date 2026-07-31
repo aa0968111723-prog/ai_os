@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { PasswordInput } from "../components/PasswordInput";
 import { friendlyAuthError } from "./LoginPage";
-import { Hint, Meta, Skeleton } from "../components/ui";
+import { Button, Hint, Meta, Skeleton } from "../components/ui";
 const TEAM_ROLE_LABEL: Record<string, string> = { admin: "團隊管理員", member: "成員" };
 const GROUP_ROLE_LABEL: Record<string, string> = { leader: "組長", member: "組員" };
 
@@ -74,15 +74,13 @@ export function AcceptInvitePage({ token }: { token: string }) {
           <span style={{ flex: 1 }}>
             你目前已登入為 <b>{me.data.user.name}</b>——完成加入後這個瀏覽器會切換成新帳號
           </span>
-          <button
+          <Button variant="ghost"
             type="button"
-            className="btn-ghost"
             style={{ whiteSpace: "nowrap" }}
             onClick={() => logout.mutate()}
-            disabled={logout.isPending}
-          >
+            disabled={logout.isPending}>
             {logout.isPending ? "登出中…" : "登出"}
-          </button>
+          </Button>
         </Hint>
       )}
       <form

@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
-import { Chip, Hint, Meta, Skeleton } from "./ui";
+import { Button, Chip, Hint, Meta, Skeleton } from "./ui";
 import {
   OPTION_TYPES,
   OPTION_TYPE_META,
@@ -118,16 +118,14 @@ function MemberBudgetRow({ groupId, member }: {
       {isLeader ? (
         <Meta title="組長以上本就有派工權">・可派工</Meta>
       ) : (
-        <button
+        <Button size="sm"
           type="button"
-          className="btn-sm"
           disabled={setDispatch.isPending}
           title={member.canDispatch ? "點一下收回這位組員的團隊代理派工權" : "點一下授權這位組員用組彙總 AI 派工到專案"}
           onClick={() => setDispatch.mutate({ groupId, userId: member.userId, canDispatch: !member.canDispatch })}
-          style={member.canDispatch ? { color: "var(--success-ink)" } : undefined}
-        >
+          style={member.canDispatch ? { color: "var(--success-ink)" } : undefined}>
           派工權：{member.canDispatch ? "已開" : "關"}
-        </button>
+        </Button>
       )}
       {(setMemberBudget.isPending || setDispatch.isPending) && <Meta>儲存中…</Meta>}
       {(setMemberBudget.error || setDispatch.error) && <span className="error" style={{ marginTop: 0 }}>{(setMemberBudget.error ?? setDispatch.error)!.message}</span>}
