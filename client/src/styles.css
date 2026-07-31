@@ -1673,23 +1673,7 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
   .landing-capability { padding: 22px; }
   .landing-trust { margin-bottom: 48px; padding: 26px 20px; }
 
-  .mobile-nav {
-    position: fixed; z-index: 44;
-    left: max(8px, var(--safe-left)); right: max(8px, var(--safe-right));
-    bottom: max(8px, var(--safe-bottom));
-    display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px;
-    min-height: 62px; padding: 5px;
-    border: 1px solid var(--border); border-radius: 18px;
-    background: color-mix(in srgb, var(--popover) 94%, transparent);
-    box-shadow: var(--e4); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  }
-  .mobile-nav a {
-    min-width: 0; min-height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-    color: var(--fg-secondary); text-decoration: none; border-radius: 13px; font-size: 10px; font-weight: 650;
-  }
-  .mobile-nav a.active { color: var(--primary-ink); background: var(--primary-tint); }
-  .fb-fab-root { bottom: calc(max(8px, var(--safe-bottom)) + 70px); }
-  .app { padding-bottom: calc(92px + var(--safe-bottom)); }
+  /* 底部分頁列／更多面板樣式統一收在檔尾「手機 App 殼層 v2」（≤820px）區塊 */
   .daily-dashboard { gap: 18px; padding-top: 4px; }
   .daily-hero { align-items: stretch; flex-direction: column; gap: 16px; padding-top: 20px; }
   .daily-new-project { width: 100%; justify-content: center; min-height: 48px; }
@@ -2728,12 +2712,14 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   padding: 0;
   margin: 0;
 }
-@media (max-width: 560px) {
+@media (max-width: 820px) {
   .project-page--mobile-compact .project-messages-fab {
-    /* 避開系統 mobile-nav 與右下角回饋 FAB */
+    /* 避開系統 mobile-nav 與右下角回饋 FAB（分頁列現於 ≤820px 常駐） */
     right: max(70px, calc(var(--safe-right) + 56px));
     bottom: calc(max(8px, var(--safe-bottom)) + 78px);
   }
+}
+@media (max-width: 560px) {
   .project-messages-sheet {
     width: 100%;
     max-height: calc(100dvh - 72px - var(--safe-top));
@@ -3524,85 +3510,6 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
      那正是觸控目標最該守的場景。改吃 token。 */
   .app-update-banner__actions button { min-height: var(--touch-min); padding: 6px 10px; font-size: var(--fs-12); }
 
-  .mobile-nav a,
-  .mobile-nav button {
-    min-width: 0;
-    min-height: 52px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    padding: 3px;
-    border: 0;
-    border-radius: 13px;
-    background: transparent;
-    color: var(--fg-secondary);
-    box-shadow: none;
-    font-size: 10px;
-    font-weight: 650;
-    text-decoration: none;
-  }
-  .mobile-nav button:hover:not(:disabled) { border-color: transparent; background: transparent; }
-  .mobile-nav a.active,
-  .mobile-nav button.active { color: var(--primary-ink); background: var(--primary-tint); }
-  .mobile-more-scrim {
-    position: fixed;
-    z-index: 42;
-    inset: 0;
-    display: block;
-    width: 100%;
-    height: 100%;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    background: rgba(43, 38, 32, .32);
-  }
-  .mobile-more-sheet {
-    position: fixed;
-    z-index: 43;
-    left: max(8px, var(--safe-left));
-    right: max(8px, var(--safe-right));
-    bottom: calc(max(8px, var(--safe-bottom)) + 70px);
-    display: block;
-    padding: 13px;
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    background: var(--popover);
-    box-shadow: var(--e4);
-    animation: modal-sheet-in 220ms var(--ease-out);
-  }
-  .mobile-more-sheet__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .mobile-more-sheet__head > span { display: grid; }
-  .mobile-more-sheet__head strong { font-size: var(--fs-15); }
-  .mobile-more-sheet__head small { color: var(--fg-secondary); font-size: var(--fs-11); }
-  .mobile-more-sheet__grid { display: grid; gap: 5px; margin-top: 10px; }
-  .mobile-more-sheet__grid a {
-    min-width: 0;
-    min-height: 54px;
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 9px;
-    padding: 7px 8px;
-    border-radius: 12px;
-    color: var(--fg);
-    text-decoration: none;
-  }
-  .mobile-more-sheet__grid a.active { background: var(--primary-tint); color: var(--primary-ink); }
-  .mobile-more-sheet__icon {
-    width: 36px;
-    height: 36px;
-    display: grid;
-    place-items: center;
-    border-radius: 11px;
-    background: var(--card2);
-    color: var(--primary-ink);
-  }
-  .mobile-more-sheet__grid a > span:nth-child(2) { min-width: 0; display: grid; }
-  .mobile-more-sheet__grid strong { font-size: var(--fs-13); }
-  .mobile-more-sheet__grid small { color: var(--fg-secondary); font-size: var(--fs-11); }
-
   .daily-dashboard { gap: 13px; }
   .daily-hero { gap: 10px; padding-top: 7px; }
   .daily-date { margin-bottom: 2px; }
@@ -3620,10 +3527,15 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
     gap: 7px;
     margin: -2px calc(-1 * var(--app-pad-x)) 0;
     padding: 0 var(--app-pad-x) 3px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    /* 滑到哪張卡就吸附哪張，滑起來像原生分頁 */
+    scroll-snap-type: x proximity;
     scrollbar-width: none;
   }
   .daily-quick-links::-webkit-scrollbar { display: none; }
-  .daily-quick-links a { min-height: 44px; padding: 7px 9px; }
+  .daily-quick-links a { min-height: 44px; padding: 7px 9px; scroll-snap-align: start; }
   .daily-quick-links small { display: none; }
   .daily-overview { gap: 9px; }
   .daily-focus-card {
@@ -3980,6 +3892,105 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .scene-studio__media { max-height: 40dvh; }
   .scene-studio__versions { max-height: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 手機 App 殼層 v2（≤820px）：底部分頁列＋貼底「更多」面板，比照原生 tab bar。
+ * 先前分頁列只在 ≤560px 出現、topbar 導覽又在 ≤820px 隱藏，561–820px（直立平板）
+ * 完全沒有主導覽——這裡把整組操作模型統一下放到 820px 斷點，樣式單一出處。
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 觸控手感（全域）：點按不閃灰、雙擊不縮放；分頁列文字不可選取 */
+html { -webkit-tap-highlight-color: transparent; }
+button, a, select, summary, [role="button"] { touch-action: manipulation; }
+.mobile-nav, .mobile-more-sheet__head { user-select: none; -webkit-user-select: none; }
+
+@media (max-width: 820px) {
+  /* 分頁列：貼齊螢幕底、毛玻璃、safe-area 內距——Home 指示條不壓字 */
+  .mobile-nav {
+    position: fixed; z-index: 44; inset-inline: 0; bottom: 0;
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px;
+    padding: 6px max(10px, var(--safe-right)) max(8px, var(--safe-bottom)) max(10px, var(--safe-left));
+    border-top: 1px solid var(--border-soft);
+    background: color-mix(in srgb, var(--popover) 90%, transparent);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  }
+  .mobile-nav a,
+  .mobile-nav button {
+    min-width: 0; min-height: 50px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    padding: 4px; border: 0; border-radius: 13px;
+    background: transparent; color: var(--fg-secondary); box-shadow: none;
+    font-size: 10px; font-weight: 650; text-decoration: none;
+    transition: transform var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+  }
+  .mobile-nav button:hover:not(:disabled) { border-color: transparent; background: transparent; }
+  .mobile-nav a:active,
+  .mobile-nav button:active { transform: scale(.92); }
+  .mobile-nav a.active,
+  .mobile-nav button.active { color: var(--primary-ink); background: var(--primary-tint); }
+
+  /* 內容與浮動元素讓出分頁列高度（列高約 64px + safe-bottom）；
+     未登入（無分頁列）維持原本留白，:has 不支援時多留白也不致遮擋 */
+  .app:has(.mobile-nav) { padding-bottom: calc(88px + var(--safe-bottom)); }
+  /* 回饋 FAB 只在登入後出現（AppShell），一律墊高避開分頁列 */
+  .fb-fab-root { bottom: calc(72px + var(--safe-bottom)); }
+
+  /* 更多面板：貼底 bottom sheet（scrim 蓋住分頁列，面板含拖曳把手與 safe-area 內距） */
+  .mobile-more-scrim {
+    position: fixed; z-index: 46; inset: 0;
+    display: block; width: 100%; height: 100%;
+    padding: 0; border: 0; border-radius: 0;
+    background: rgba(43, 38, 32, .38);
+  }
+  .mobile-more-sheet {
+    position: fixed; z-index: 47; inset-inline: 0; bottom: 0;
+    display: block;
+    padding: 8px max(16px, var(--safe-right)) max(16px, var(--safe-bottom)) max(16px, var(--safe-left));
+    border: 1px solid var(--border-soft); border-bottom: 0;
+    border-radius: 22px 22px 0 0;
+    background: var(--popover);
+    box-shadow: var(--e4);
+    animation: mobile-sheet-up 260ms var(--ease-out);
+    max-height: calc(100dvh - 72px - var(--safe-top));
+    overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+  }
+  .mobile-more-sheet__grip {
+    width: 36px; height: 4px; margin: 2px auto 10px;
+    border-radius: 999px; background: var(--border-strong);
+  }
+  .mobile-more-sheet__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .mobile-more-sheet__head > span { display: grid; }
+  .mobile-more-sheet__head strong { font-size: var(--fs-15); }
+  .mobile-more-sheet__head small { color: var(--fg-secondary); font-size: var(--fs-11); }
+  .mobile-more-sheet__grid { display: grid; gap: 5px; margin-top: 10px; }
+  .mobile-more-sheet__grid a {
+    min-width: 0; min-height: 54px;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center;
+    gap: 9px; padding: 7px 8px; border-radius: 12px;
+    color: var(--fg); text-decoration: none;
+  }
+  .mobile-more-sheet__grid a:active { background: var(--card2); }
+  .mobile-more-sheet__grid a.active { background: var(--primary-tint); color: var(--primary-ink); }
+  .mobile-more-sheet__icon {
+    width: 36px; height: 36px; display: grid; place-items: center;
+    border-radius: 11px; background: var(--card2); color: var(--primary-ink);
+  }
+  .mobile-more-sheet__grid a > span:nth-child(2) { min-width: 0; display: grid; }
+  .mobile-more-sheet__grid strong { font-size: var(--fs-13); }
+  .mobile-more-sheet__grid small { color: var(--fg-secondary); font-size: var(--fs-11); }
+}
+@keyframes mobile-sheet-up {
+  from { transform: translateY(28px); opacity: .78; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mobile-more-sheet { animation: none; }
+  .mobile-nav a:active, .mobile-nav button:active { transform: none; }
+}
+
+/* 今日工作台日期列：與「今日工作台」eyebrow 同行相黏——補間距 */
+.daily-date { margin-right: 12px; }
+
 /* 空組起手式（團隊分析卡第一屏） */
 .team-starters {
   display: grid;
