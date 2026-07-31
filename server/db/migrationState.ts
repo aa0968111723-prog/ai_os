@@ -135,6 +135,15 @@ export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly strin
   "0005_membership_read_uniqueness": [
     "30b344a7e264c48e4b62af11cb689da353b7f4846f6374a0d33f27aa38cc1337",
   ],
+  /**
+   * 0018 把兩句 DDL 寫在同一段、中間沒有 `--> statement-breakpoint`，於是所有以「一句 SQL」為單位
+   * 比對的機制（legacy adoption bridge、drift 對照）都把那兩句當成一個字串，永遠對不上真實的兩項 drift。
+   * 補上分隔標記後，**實際執行的 SQL 一字未改**——那個標記只是切分用的註解，兩句照樣依序執行，
+   * 任何已套用原版的資料庫最終狀態完全相同，所以列在這裡是安全的。
+   */
+  "0018_knowledge_pinned": [
+    "cddbd89830cce4850f83515692724cb507a4c52afc28941633fc1f882e907e82",
+  ],
 };
 
 /** True when `hash` is a retired-but-equivalent content hash for `tag`. */
@@ -167,7 +176,12 @@ export function canonicalMigrationStatement(statement: string): string {
     .replace(/^(CREATE (?:UNIQUE )?INDEX) IF NOT EXISTS /i, "$1 ")
     .replace(/^(CREATE TABLE) IF NOT EXISTS /i, "$1 ")
     .replace(/^(ALTER TABLE "[^"]+" ADD COLUMN) IF NOT EXISTS /i, "$1 ")
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    // 逗號後的空白也一併正規化。drizzle-kit 產生的欄位清單沒有空白（`("a","b")`），
+    // 手寫的 migration 幾乎一定會為了可讀性加上（`("a", "b")`）——只收斂空白「run」的話，
+    // 兩者永遠對不上，於是一句完全等價的 CREATE INDEX 會同時被判成「非預期 drift」與「缺漏」。
+    // 這在識別字之間不是語意差異，正規化掉才不會逼每一份手寫 migration 去猜產生器的排版。
+    .replace(/,\s+/g, ",");
 }
 
 function migrationStatements(entry: MigrationFile): string[] {
