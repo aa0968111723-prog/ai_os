@@ -17,8 +17,20 @@ describe("push deep-link contract", () => {
     expect(matches.length).toBeGreaterThanOrEqual(2); // 送審給組長＋裁決回提交人
   });
 
-  it("@提及推播帶 focus=messages", () => {
-    expect(read("server/routers/messages.ts")).toContain("?focus=messages");
+  it("@提及推播帶 focus=messages 與 mid=<messageId>", () => {
+    const src = read("server/routers/messages.ts");
+    expect(src).toContain("?focus=messages");
+    // mid 是「捲到被提及的那一則」的收端依據；掉了只會退化成打開面板，不會有型別錯誤
+    expect(src).toContain("&mid=${msg.id}");
+  });
+
+  it("mid 深連結三端接得上：收端解析、留言列有錨點、面板收 prop", () => {
+    const page = read("client/src/pages/ProjectPage.tsx");
+    expect(page).toContain('get("mid")');
+    expect(page).toContain("focusMessageId");
+    const panel = read("client/src/components/MessagePanel.tsx");
+    expect(panel).toContain("id={`msg-${m.id}`}"); // 捲動錨點
+    expect(panel).toContain("focusMessageId");
   });
 
   it("ProjectPage 有 focus=messages 與 focus=scene-* 的 handler（收端不再是死參數）", () => {

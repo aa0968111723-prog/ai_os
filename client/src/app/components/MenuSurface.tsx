@@ -30,12 +30,29 @@ export function MenuSurface({
   minWidth,
   className,
   roving = true,
+  surfaceRole = "menu",
+  placement = "anchored",
+  id,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   /** 讀屏用的選單名稱（aria-label） */
   label: string;
+  /**
+   * 載體的 ARIA 角色。`menu` 承諾方向鍵漫遊，子項必須是 role="menuitem"；
+   * 內容其實是表單或一堆卡片時要改 `dialog`（並關掉 roving），
+   * 否則等於對讀屏承諾了沒實作的鍵盤模型。
+   */
+  surfaceRole?: "menu" | "listbox" | "dialog";
+  /**
+   * 桌機幾何。`anchored`＝沿用 .menu 的右對齊下拉；
+   * `stretch`＝與觸發器同寬（卡片牆／表單類面板用，184px 的下拉裝不下）。
+   * 手機一律是滿寬貼底 sheet，此值不影響。
+   */
+  placement?: "anchored" | "stretch";
+  /** 供觸發器 aria-controls 指向 */
+  id?: string;
   /** 觸發器：點它不算外點（否則點第二下會關了又立刻開），Esc 後焦點還給它 */
   triggerRef?: RefObject<HTMLElement | null>;
   /** 桌機下拉的最小寬度；手機 sheet 一律滿寬，此值不套用 */
@@ -97,9 +114,10 @@ export function MenuSurface({
       )}
       <div
         ref={surfaceRef}
-        role="menu"
+        id={id}
+        role={surfaceRole}
         aria-label={label}
-        className={`menu menu-surface${compact ? " is-sheet" : ""}${className ? ` ${className}` : ""}`}
+        className={`menu menu-surface${placement === "stretch" ? " menu-surface--stretch" : ""}${compact ? " is-sheet" : ""}${className ? ` ${className}` : ""}`}
         style={!compact && minWidth ? { minWidth } : undefined}
       >
         {children}

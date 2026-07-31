@@ -4,7 +4,7 @@ import { useLocation } from "wouter";
 import { trpc } from "../api";
 import type { AppRouter } from "../../../server/routers";
 import { Icon } from "./Icon";
-import { DISCUSS_EVENT, jumpToRef, setPlannerFocus, takePendingDiscussRef, type DiscussRef } from "../discuss";
+import { DISCUSS_EVENT, flashAnchor, jumpToRef, setPlannerFocus, takePendingDiscussRef, type DiscussRef } from "../discuss";
 import { escapeRegExp, parseMentionedNames } from "@shared/mentions";
 import { useCustomQuickPhrases, MAX_PHRASE_LEN } from "../useCustomQuickPhrases";
 import { useLocalDraft } from "../useLocalDraft";
@@ -15,6 +15,12 @@ type MessageRowData = inferRouterOutputs<AppRouter>["messages"]["list"]["items"]
 
 /** 留言 @了助手就觸發 AI 回覆——與後端 messageAssistant.ASSISTANT_TRIGGER 同字串 */
 const ASSISTANT_TRIGGER = "@助手";
+
+/**
+ * ?focus=messages&mid= 往回翻找該則的頁數上限（每頁 50 則）。
+ * 有上限才不會在「留言已刪」或「mid 屬於別專案」時無限往回翻整條歷史。
+ */
+const FOCUS_MAX_PAGES = 4;
 
 /** 轉待辦行內表單:標題預填留言內容、選截止日 → schedule.add */
 function TodoForm({ defaultTitle, pending, error, onCancel, onSubmit }: {
@@ -189,7 +195,8 @@ const MessageRow = memo(function MessageRow({
   const mentionedMe = !!myId && (m.mentions ?? []).includes(myId);
   const mentionNames = (m.mentions ?? []).map((uid) => nameById.get(uid)).filter((n): n is string => !!n);
   return (
-    <div className={`msg-block${mentionedMe ? " mentioned-me" : ""}${isAssistant ? " assistant" : ""}`}>
+    /* id 供 ?focus=messages&mid=<id> 深連結捲動定位＋高亮（見 discuss.ts flashAnchor） */
+    <div id={`msg-${m.id}`} className={`msg-block${mentionedMe ? " mentioned-me" : ""}${isAssistant ? " assistant" : ""}`}>
       <div className="msg">
         <span className="who">
           {isAssistant ? (
@@ -357,6 +364,8 @@ export function MessagePanel({
   isLeader,
   canEdit,
   bare = false,
+  focusMessageId,
+  onFocusHandled,
 }: {
   projectId: string;
   groupId: string;
@@ -364,6 +373,10 @@ export function MessagePanel({
   canEdit: boolean;
   /** sheet／抽屜內嵌：去掉外層 card 與重複 h2（外層已有標題列） */
   bare?: boolean;
+  /** ?focus=messages&mid=<id>：要捲到並高亮的那一則（@提及推播用） */
+  focusMessageId?: string;
+  /** 定位完成（成功或放棄）時通知呼叫端清掉，否則關掉再開會重閃同一則 */
+  onFocusHandled?: () => void;
 }) {
   const utils = trpc.useUtils();
   const me = trpc.auth.me.useQuery();
@@ -453,6 +466,40 @@ export function MessagePanel({
     const el = listRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
   }, [allMessages]);
+
+  // @提及深連結（?focus=messages&mid=<id>）：捲到該則並高亮。
+  // 三個地雷：
+  //  1. 上面那條「自動置底」effect 每 8 秒輪詢帶進新留言就會把畫面拉回底部，
+  //     看起來像捲過去又被彈開——定位前必須先關掉 stickToBottom。
+  //  2. 首頁只有最近 50 則（server MESSAGE_PAGE），較舊的提及不在裡面，
+  //     得往回翻；但留言被刪或 mid 屬於別專案時會無限翻，所以設頁數上限。
+  //  3. 找到就 rAF 一格再捲——該列剛 render 完才有高度可捲。
+  const focusHandledRef = useRef<string | null>(null);
+  const focusPagesRef = useRef(0);
+  useEffect(() => {
+    if (!focusMessageId || focusHandledRef.current === focusMessageId) return;
+    if (!allMessages.length) return;
+    if (allMessages.some((m) => m.id === focusMessageId)) {
+      focusHandledRef.current = focusMessageId;
+      stickToBottom.current = false;
+      requestAnimationFrame(() => {
+        flashAnchor(`msg-${focusMessageId}`);
+        onFocusHandled?.();
+      });
+      return;
+    }
+    // 不在已載入的範圍：往回翻，最多 FOCUS_MAX_PAGES 頁就放棄（面板仍是開的）
+    if (!olderHasMore || focusPagesRef.current >= FOCUS_MAX_PAGES || loadingOlder) {
+      if (!olderHasMore || focusPagesRef.current >= FOCUS_MAX_PAGES) {
+        focusHandledRef.current = focusMessageId;
+        onFocusHandled?.();
+      }
+      return;
+    }
+    focusPagesRef.current += 1;
+    stickToBottom.current = false;
+    void loadOlder();
+  }, [focusMessageId, allMessages, olderHasMore, loadingOlder]);
 
   // 錄音中卸載：停掉 MediaRecorder 與麥克風軌（防切頁後麥克風常開）；
   // 清掉 onstop 再 stop，避免 unmount 後仍走 uploadVoice 造成 setState on unmounted / 幽靈留言。
