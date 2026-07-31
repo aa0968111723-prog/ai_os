@@ -6,6 +6,7 @@ import { App } from "./App";
 import { DensityGate } from "./app/DensityGate";
 import { bootstrapPwa } from "./pwa";
 import { bootstrapTauriDesktop } from "./platform/tauriDesktop";
+import { installKeyboardInset } from "./lib/keyboardInset";
 import "./styles.css";
 import "./styles.mobile-fab-01.css";
 import "./splash.css";
@@ -15,6 +16,8 @@ import { Icon } from "./components/Icon";
 // 先安裝桌面橋接，讓第一個 React render 就能辨識「Aios 桌面版」與已安裝剪輯軟體。
 bootstrapTauriDesktop();
 bootstrapPwa();
+// 貼底面板要讓開虛擬鍵盤：整個 App 生命週期都要追蹤，故不綁在任何元件上
+installKeyboardInset();
 
 /** 全站錯誤邊界：任何 render 錯誤都落在設計語言內的空狀態，而非空白白畫面。 */
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {

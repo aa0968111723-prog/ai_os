@@ -1276,6 +1276,8 @@ audio.dm-attach-media { height: 36px; }
 .modal-scrim {
   position: fixed;
   inset: 0;
+  /* 讓開虛擬鍵盤：≤560px 對話框改貼底抽屜，鍵盤會直接蓋住表單欄位與確認鈕 */
+  bottom: var(--kb-inset, 0px);
   z-index: 50;
   display: grid;
   place-items: center;
@@ -1701,10 +1703,10 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
   .points-badge__cadence, .account-menu__name, .account-menu__chevron { display: none; }
   .topbar .points-badge { max-width: 86px; padding-inline: 9px; }
   .topbar .account-menu__trigger { width: 44px; padding: 8px; justify-content: center; }
-  .topbar .menu {
-    position: fixed; top: calc(60px + var(--safe-top)); right: max(8px, var(--safe-right));
-    left: max(8px, var(--safe-left)); max-height: calc(100dvh - 82px - var(--safe-bottom)); overflow-y: auto;
-  }
+  /* 這裡曾有 `.topbar .menu { position: fixed; top: 60px }`——已移除，別加回來。
+     `.topbar` 帶 backdrop-filter，會成為 fixed 後代的包含區塊，那條規則實際是把選單
+     釘在「頂欄下緣往下 60px」而非視窗，且 z-index 40 低於分頁列 44 會被蓋住。
+     頂欄選單一律走 MenuSurface：≤820px portal 到 body 變貼底 sheet。 */
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2664,6 +2666,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   align-items: flex-end;
   justify-content: center;
   pointer-events: none;
+  /* 讓開虛擬鍵盤：底緣抬到鍵盤上方，留言輸入列與送出鈕才不會被蓋住。
+     桌機與「版面視窗會自己縮」的 Android 上 --kb-inset 為 0，行為不變。 */
+  bottom: var(--kb-inset, 0px);
 }
 .project-messages-sheet-backdrop {
   position: absolute;
@@ -2681,7 +2686,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   position: relative;
   z-index: 1;
   width: min(100%, 560px);
-  max-height: min(85vh, 720px);
+  /* dvh 而非 vh：鍵盤／網址列改變可用高度時，sheet 要跟著縮而不是把輸入列推到畫面外 */
+  max-height: min(85dvh, 720px);
   display: flex;
   flex-direction: column;
   margin: 0;
@@ -3912,8 +3918,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .db-field-row > input:first-child { min-width: 0; }
 .db-field-row__options { grid-column: 1 / -1; min-width: 0; }
 
-/* 帳號選單：桌機不需要 scrim（下拉模式）；身分標頭全尺寸共用 */
-.account-menu__scrim { display: none; }
+/* 選單載體（MenuSurface）：桌機是下拉，不需要 scrim；身分標頭全尺寸共用 */
+.menu-surface__scrim { display: none; }
 .account-menu__id {
   display: flex; align-items: center; gap: 9px;
   padding: 10px 12px 8px;
@@ -3997,18 +4003,18 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     background: var(--danger, #c44); box-shadow: 0 0 0 2px var(--popover);
   }
 
-  /* 帳號選單手機化：從「頂欄下拉長清單」改成貼底 bottom sheet（與更多面板同語彙）。
+  /* 選單手機化（MenuSurface）：從「頂欄下拉長清單」改成貼底 bottom sheet（與更多面板同語彙）。
      真機實測下拉版「登出」會被分頁列蓋住按不到；sheet 版拇指區直達、含拖曳把手與 scrim。 */
   /* 加 :hover 併列是為了壓過 (hover:none) 區塊的 button:hover 重置——
      指標停在全幅 scrim 上時，重置會把遮罩塗回實色象牙紙 */
-  .account-menu__scrim,
-  button.account-menu__scrim:hover {
+  .menu-surface__scrim,
+  button.menu-surface__scrim:hover {
     position: fixed; z-index: 46; inset: 0;
     display: block; width: 100%; height: 100%;
     padding: 0; border: 0; border-radius: 0;
     background: rgba(43, 38, 32, .38);
   }
-  .account-menu__menu.is-sheet {
+  .menu-surface.is-sheet {
     position: fixed; z-index: 47; inset-inline: 0; top: auto; bottom: 0;
     left: 0; right: 0; max-width: none;
     border: 1px solid var(--border-soft); border-bottom: 0;
@@ -4019,12 +4025,14 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
     padding-bottom: max(16px, var(--safe-bottom));
     animation: mobile-sheet-up 260ms var(--ease-out);
   }
-  .account-menu__menu.is-sheet::before {
+  .menu-surface.is-sheet::before {
     content: ""; display: block;
     width: 36px; height: 4px; margin: 8px auto 6px;
     border-radius: 999px; background: var(--border-strong);
   }
-  .account-menu__menu.is-sheet .menu-item { min-height: 48px; }
+  .menu-surface.is-sheet .menu-item { min-height: 48px; }
+  /* sheet 內的多行項目（例如待辦通知逐案列）撐開後仍要留住 48px 的觸控高度 */
+  .menu-surface.is-sheet .menu-item { padding-block: 10px; }
 
   /* 內容與浮動元素讓出分頁列高度（列高約 64px + safe-bottom）；
      未登入（無分頁列）維持原本留白，:has 不支援時多留白也不致遮擋 */

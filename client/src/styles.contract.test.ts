@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const styles = readFileSync(resolve(process.cwd(), "client/src/styles.css"), "utf8");
+/** 只看真的會套用的宣告：註解裡引述「不可復活的舊規則」不該把守衛自己絆倒 */
+const declarations = styles.replace(/\/\*[\s\S]*?\*\//g, "");
 
 describe("global stylesheet contract", () => {
   it("retains the complete application layout instead of only theme tokens", () => {
@@ -11,6 +13,22 @@ describe("global stylesheet contract", () => {
     expect(styles).toContain(".topbar {");
     expect(styles).toContain(".launch-grid {");
     expect(styles).toContain(".dm-layout {");
+  });
+
+  // 頂欄有 backdrop-filter，會成為 position:fixed 後代的包含區塊：在 .topbar 底下
+  // 用 fixed 定位選單，實際是相對頂欄而不是視窗，且 z-index 40 會被分頁列（44）蓋住。
+  // 手機選單一律走 MenuSurface（portal 到 body 變貼底 sheet），這條規則不可復活。
+  it("never positions topbar menus as fixed inside the backdrop-filtered topbar", () => {
+    expect(declarations).not.toMatch(/\.topbar\s+\.menu\s*\{[^}]*position:\s*fixed/);
+  });
+
+  // scrim 是 <button>，全域 button 規則會餵它 var(--card) 實色底；
+  // 更關鍵的是 @media (hover:none) 的 button:hover 重置特異性 (0,2,1) 高於單一 class (0,1,0)，
+  // 觸控裝置上指標停在遮罩就整片塗成象牙紙。兩個 scrim 都必須併列 button.x:hover 同分。
+  it("keeps sheet scrims translucent against the touch hover reset", () => {
+    for (const cls of ["menu-surface__scrim", "mobile-more-scrim"]) {
+      expect(declarations).toContain(`button.${cls}:hover`);
+    }
   });
 
   // 收合的 Hint 只有靠這條規則才看得出是按鈕（先前用 btn-ghost：透明底＋透明框，
