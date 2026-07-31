@@ -10,6 +10,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import type { AuthState } from "./auth";
 import { listVisibleTables, resolveTableAccess } from "./databaseAcl";
+import { listPresence } from "./presence";
 import { pushToUsers } from "./webPush";
 
 /** 單則私訊長度上限（與專案留言一致） */
@@ -141,6 +142,28 @@ export async function listDmPeers(auth: AuthState): Promise<DmPeer[]> {
     }))
     // 同組的排前面（最常聊），其次姓名——開發者若無共同組排在後段
     .sort((a, b) => (b.sharedGroups.length > 0 ? 1 : 0) - (a.sharedGroups.length > 0 ? 1 : 0) || a.name.localeCompare(b.name, "zh-Hant"));
+}
+
+export interface DmPeerPresence {
+  userId: string;
+  /**
+   * 最後活躍時刻——只有「剛離開窗」內才有值，更久以前一律 null（線上指示，不是行蹤紀錄）。
+   * 只送時刻、不送判好的狀態字：三態由 shared/presence 在畫面上算，判定規則永遠只有一份。
+   */
+  lastActiveAt: Date | null;
+}
+
+/**
+ * 可私訊對象的線上狀態（聊天頁輪詢用）。
+ *
+ * 界＝listDmPeers 的同一份可訊界，不另寫一套判定：看得到誰在線上，等於看得到誰可以私訊，
+ * 不會因為多了這個指示就把「他組有誰、誰在上班」外流給無關的人。
+ * 回「全部可訊對象」而不是只回在線的人——前端才分得出「離線」與「不在可訊界（不顯示指示）」。
+ */
+export async function listDmPresence(auth: AuthState, now: Date = new Date()): Promise<DmPeerPresence[]> {
+  const peers = await listDmPeers(auth);
+  const seen = await listPresence(peers.map((p) => p.userId), now);
+  return peers.map((p) => ({ userId: p.userId, lastActiveAt: seen.get(p.userId) ?? null }));
 }
 
 /** 是否可與某對象互訊（不拋錯版；供歷史讀取的寬鬆界用） */

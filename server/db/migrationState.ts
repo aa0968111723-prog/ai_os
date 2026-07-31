@@ -108,6 +108,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   // 0020：純新增 group_agent_runs／group_agent_events 表＋索引，與 group_members 一個 nullable
   //       欄位（皆 IF NOT EXISTS），不動任何既有資料，可安全納入 bridge
   "0020_group_agent_commander",
+  // 0021：純新增 user_presence 表（CREATE TABLE IF NOT EXISTS），不動任何既有資料，可安全納入 bridge
+  "0021_user_presence",
 ] as const;
 
 /**

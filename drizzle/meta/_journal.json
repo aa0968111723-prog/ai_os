@@ -148,6 +148,13 @@
       "when": 1785600200000,
       "tag": "0020_group_agent_commander",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1785600300000,
+      "tag": "0021_user_presence",
+      "breakpoints": true
     }
   ]
 }

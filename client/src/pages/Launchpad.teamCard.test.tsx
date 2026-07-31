@@ -8,7 +8,7 @@
  */
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type React from "react";
 import {
   buildDecisionInbox,
@@ -129,6 +129,22 @@ vi.mock("../components/InstallAppBanner", () => ({ InstallAppBanner: () => null 
 const GROUP = "11111111-1111-4111-8111-111111111111";
 const NOW = Date.parse("2026-07-30T12:00:00Z");
 const daysAgo = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
+
+/**
+ * 把時鐘也釘在 NOW 上。
+ *
+ * 資料是相對 NOW 造的，但「卡了 N 天」是元件在 render 當下用真實時間算的——兩個基準一分開，
+ * 這些斷言就只在 NOW 之後那 24 小時內成立，之後每過一天所有天數就整體 +1（實測 daysAgo(4)
+ * 被算成「卡了 5 天」）。這不是偶發的 flake，是會定時引爆、之後永遠紅著的測試。
+ * 只假造 Date、不碰計時器：userEvent 與 React 仍需要真的 setTimeout 才能正常運作。
+ */
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 
 const run = (over: Partial<Record<string, unknown>> = {}) => ({
   id: "run-1", projectId: "p1", projectTitle: "招生短片", goal: "把腳本拆成分鏡",

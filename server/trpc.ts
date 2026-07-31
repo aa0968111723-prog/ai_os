@@ -10,6 +10,7 @@ import { db, schema } from "./db";
 import { eq } from "drizzle-orm";
 import { SEED_ADMIN_EMAIL } from "./services/seed";
 import { sessionGate } from "./services/sessionPolicy";
+import { touchPresence } from "./services/presence";
 
 export interface Context {
   auth: AuthState | null;
@@ -89,6 +90,9 @@ export const authedProcedure = t.procedure.use(async ({ ctx, path, type, next, g
     throw new TRPCError({ code: "FORBIDDEN", message: "管理員重設了你的密碼——請先在頁面上設定新密碼再繼續使用" });
   }
   const auth = ctx.auth;
+  // 線上狀態心跳（私訊「誰在線上」）：任何登入後的呼叫都代表「人還在」，不必為此另開一支 API。
+  // 服務層自帶每人 45 秒節流，且不 await——線上指示壞掉不該讓任何一支 API 變慢或失敗。
+  touchPresence(auth.user.id);
   const result = await next({ ctx: { ...ctx, auth } });
   // 審計（需求 2.2）：所有登入後 mutation 集中記錄——成功與失敗都記（失敗含錯誤訊息）。
   // 放在 next() 之後：只記「真的執行過」的呼叫；query 不記（唯讀且量大）。
