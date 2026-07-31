@@ -776,7 +776,7 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
   const summary = summarizeAuditInput(r.input);
   const details = describeAuditInput(r.input);
   const expandable = details.length > 0 || (repeats?.length ?? 0) > 1;
-  const catStyle = AUDIT_CAT_STYLE[cat.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
+  const catStyle = AUDIT_CAT_STYLE[cat.key] ?? { background: "var(--border-soft)", color: "var(--fg)", border: "1px solid var(--border-soft)" };
   return (
     <div style={{ borderTop: first ? "none" : "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13, marginTop: first ? 8 : 0 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -979,7 +979,7 @@ export function AuditLogCard() {
     cursor: "pointer",
     border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
     background: active ? "var(--primary-tint)" : "transparent",
-    color: active ? "var(--primary-ink)" : "var(--ink)",
+    color: active ? "var(--primary-ink)" : "var(--fg)",
     fontWeight: active ? 600 : 400,
   });
   return (
@@ -1215,7 +1215,7 @@ export function InsightsCard() {
     cursor: "pointer",
     border: active ? "1px solid var(--primary)" : "1px solid var(--border-soft)",
     background: active ? "var(--primary-tint)" : "transparent",
-    color: active ? "var(--primary-ink)" : "var(--ink)",
+    color: active ? "var(--primary-ink)" : "var(--fg)",
     fontWeight: active ? 600 : 400,
   });
   const groupOptions = scope.data?.groups ?? [];
@@ -1307,7 +1307,7 @@ export function InsightsCard() {
               {/* 分類細節：這位夥伴各類操作的次數，多到少 */}
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
                 {m.categories.map((c) => {
-                  const style = AUDIT_CAT_STYLE[c.key] ?? { background: "var(--border-soft)", color: "var(--ink)", border: "1px solid var(--border-soft)" };
+                  const style = AUDIT_CAT_STYLE[c.key] ?? { background: "var(--border-soft)", color: "var(--fg)", border: "1px solid var(--border-soft)" };
                   return (
                     <Pill key={c.key} style={{ ...style, fontSize: 11, padding: "1px 8px", borderRadius: 999 }}>
                       {c.label} {c.count}
@@ -1356,7 +1356,7 @@ export function InsightsCard() {
                         {model && <Meta style={{ fontSize: 11, marginLeft: 6 }}>{tierLabel(model.tier)}</Meta>}
                       </td>
                       <td style={{ padding: "6px", textAlign: "right" }}>{m.submits}</td>
-                      <td style={{ padding: "6px", textAlign: "right", color: rate == null ? "var(--fg-secondary)" : rate >= 90 ? "var(--success-ink)" : rate < 70 ? "var(--danger-ink)" : "var(--ink)" }}>
+                      <td style={{ padding: "6px", textAlign: "right", color: rate == null ? "var(--fg-secondary)" : rate >= 90 ? "var(--success-ink)" : rate < 70 ? "var(--danger-ink)" : "var(--fg)" }}>
                         {rate == null ? "—" : `${rate}%`}
                       </td>
                       <td style={{ padding: "6px", textAlign: "right", color: m.failed > 0 ? "var(--danger-ink)" : "var(--fg-secondary)" }}>{m.failed}</td>
@@ -1405,7 +1405,7 @@ export function InsightsCard() {
                   合計：{usage.data.totals.userCount} 人・{usage.data.totals.modelCount} 模型・
                   完成 {usage.data.totals.done.toLocaleString("zh-TW")} 次・
                   {usage.data.totals.points.toLocaleString("zh-TW")} 點・
-                  <b style={{ color: "var(--ink)" }}>新台幣 {formatTwd(usage.data.totals.estTwd)}</b>
+                  <b style={{ color: "var(--fg)" }}>新台幣 {formatTwd(usage.data.totals.estTwd)}</b>
                   <span style={{ marginLeft: 6 }}>（≈ {formatUsd(usage.data.totals.estUsd)}）</span>
                 </Meta>
                 <Button variant="ghost" className="btn"
