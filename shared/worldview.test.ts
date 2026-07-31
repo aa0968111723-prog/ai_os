@@ -33,6 +33,10 @@ import {
   worldviewChipGuidanceForAi,
   normalizeWorldviewChipsPatch,
   summarizeWorldviewChipsPatch,
+  isDefaultTaboosOnly,
+  worldviewAdvancedExampleForKind,
+  parsePersonTokenForCharacter,
+  applyWorldviewAdvancedExample,
 } from "./worldview";
 
 describe("bilingualChips（視覺注入的英文錨點）", () => {
@@ -325,7 +329,7 @@ describe("chips 優先序、家族與軟警告", () => {
   });
 });
 
-describe("removesDefaultTaboos", () => {
+describe("removesDefaultTaboos / isDefaultTaboosOnly", () => {
   it("刪掉預設禁語其中一條 → true", () => {
     const prev = DEFAULT_TABOOS();
     const next = prev.slice(1);
@@ -336,5 +340,51 @@ describe("removesDefaultTaboos", () => {
     const prev = DEFAULT_TABOOS();
     expect(removesDefaultTaboos(prev, prev)).toBe(false);
     expect(removesDefaultTaboos(prev, [...prev, "自訂"])).toBe(false);
+  });
+
+  it("isDefaultTaboosOnly 辨識預設集合", () => {
+    expect(isDefaultTaboosOnly(DEFAULT_TABOOS())).toBe(true);
+    expect(isDefaultTaboosOnly([...DEFAULT_TABOOS(), "自訂"])).toBe(false);
+    expect(isDefaultTaboosOnly([])).toBe(false);
+  });
+});
+
+describe("進階範例與敘事人物→定裝", () => {
+  it("worldviewAdvancedExampleForKind 依 kind 有差異", () => {
+    const w = worldviewAdvancedExampleForKind("witness");
+    const t = worldviewAdvancedExampleForKind("teaching");
+    const d = worldviewAdvancedExampleForKind("unknown-kind");
+    expect(w.audience).toBeTruthy();
+    expect(t.acts.hook).toBeTruthy();
+    expect(w.audience).not.toBe(t.audience);
+    expect(d.people.length).toBeGreaterThan(0);
+  });
+
+  it("parsePersonTokenForCharacter 拆名與外觀", () => {
+    expect(parsePersonTokenForCharacter("安倢＝紅傘、米白外套")).toMatchObject({
+      name: "安倢",
+      appearance: "紅傘、米白外套",
+    });
+    expect(parsePersonTokenForCharacter("講者: 白衣")).toMatchObject({ name: "講者", appearance: "白衣" });
+    const solo = parsePersonTokenForCharacter("訪客");
+    expect(solo.name).toBe("訪客");
+    expect(solo.appearance).toContain("待補外觀");
+  });
+
+  it("applyWorldviewAdvancedExample onlyEmpty 不覆蓋已填", () => {
+    const cur = worldviewSchema.parse({
+      audience: "已有觀眾",
+      acts: { hook: "已有鉤子", turn: "", cta: "" },
+      people: ["已有人"],
+    });
+    const patch = applyWorldviewAdvancedExample(cur, "short", true);
+    expect(patch.audience).toBeUndefined();
+    expect(patch.acts).toBeUndefined(); // hasActs true
+    expect(patch.people).toBeUndefined();
+    const empty = worldviewSchema.parse({});
+    const fullPatch = applyWorldviewAdvancedExample(empty, "short", true);
+    expect(fullPatch.audience).toBeTruthy();
+    expect(fullPatch.acts?.hook).toBeTruthy();
+    expect(fullPatch.people?.length).toBeGreaterThan(0);
   });
 });

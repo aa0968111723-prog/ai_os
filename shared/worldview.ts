@@ -653,6 +653,126 @@ export function removesDefaultTaboos(prev: string[], next: string[]): boolean {
   return defaults.some((d) => prev.includes(d) && !nextSet.has(d));
 }
 
+/** 禁忌是否仍全等於預設合規句（可摺疊成「合規保護已開啟」） */
+export function isDefaultTaboosOnly(taboos: string[]): boolean {
+  const defaults = DEFAULT_TABOOS();
+  if (taboos.length !== defaults.length) return false;
+  const set = new Set(taboos);
+  return defaults.every((d) => set.has(d));
+}
+
+/** 進階設定一鍵範例（依專案 kind；中性可改寫） */
+export type WorldviewAdvancedExample = {
+  audience: string;
+  acts: { hook: string; turn: string; cta: string };
+  people: string[];
+};
+
+const ADVANCED_EXAMPLE_DEFAULT: WorldviewAdvancedExample = {
+  audience: "想在忙碌生活裡找片刻安定的年輕人與家庭",
+  acts: {
+    hook: "清晨安靜的室內，一位訪客放慢腳步，光線從窗邊柔柔灑落",
+    turn: "在整理與等待之間，紛亂的念頭漸漸被安放，呼吸變得平穩",
+    cta: "留下一句可帶走的提醒，畫面留白給觀眾自己的心",
+  },
+  people: ["主角：安靜的訪客，淺色外套", "引導者：溫和語氣，不多話"],
+};
+
+const ADVANCED_EXAMPLES_BY_KIND: Record<string, WorldviewAdvancedExample> = {
+  witness: {
+    audience: "正在經歷低谷、需要真實故事陪伴的朋友",
+    acts: {
+      hook: "故事主角在最難的時刻現身，現場氛圍先讓人願意聽下去",
+      turn: "轉折出現：一次選擇或一句話，心開始鬆動、方向改變",
+      cta: "把希望留給觀眾：你可以不孤單，下一步可以很小",
+    },
+    people: ["見證主角：經歷轉變的人", "陪伴者：傾聽、不多評價"],
+  },
+  teaching: {
+    audience: "初次接觸、想把概念聽懂的聽眾",
+    acts: {
+      hook: "用生活場景開場，讓抽象觀念先有畫面",
+      turn: "一句關鍵提醒對上日常困境，聽眾對上號",
+      cta: "給一個今天就能做的小練習或記住的一句話",
+    },
+    people: ["講者：語氣穩、節奏慢", "聽眾代表：帶著問題進來的人"],
+  },
+  short: {
+    audience: "滑手機 3 秒內要被抓住的社群觀眾",
+    acts: {
+      hook: "第一秒就有強畫面或一句疑問，停得住拇指",
+      turn: "中段給反差或小驚喜，資訊只留一個重點",
+      cta: "結尾字幕或口白重複那一個重點，方便分享",
+    },
+    people: ["出鏡者：表情清楚、動作乾淨"],
+  },
+  promo: {
+    audience: "可能參加活動、但還在猶豫的人",
+    acts: {
+      hook: "活動最有感的一刻或最美畫面先出現",
+      turn: "說清楚為誰、有什麼、為什麼現在",
+      cta: "明確行動：報名、轉傳、或記下時間地點",
+    },
+    people: ["主持人／講者", "參與者代表：真實的現場感受"],
+  },
+  recap: {
+    audience: "參加過想回味、或錯過想補課的人",
+    acts: {
+      hook: "用最有溫度的現場片段開場",
+      turn: "串起當天主軸：人、時刻、一句共同記憶",
+      cta: "邀請下次見面，或連到完整內容／相簿",
+    },
+    people: ["現場主角們：短描述即可"],
+  },
+};
+
+/** 依專案 kind 取進階範例；未知 kind 用中性預設 */
+export function worldviewAdvancedExampleForKind(kind?: string | null): WorldviewAdvancedExample {
+  if (kind && ADVANCED_EXAMPLES_BY_KIND[kind]) return ADVANCED_EXAMPLES_BY_KIND[kind]!;
+  return ADVANCED_EXAMPLE_DEFAULT;
+}
+
+/**
+ * 把敘事人物 token 拆成定裝卡欄位。
+ * 支援「名＝外觀」「名: 外觀」「名：外觀」「名 - 外觀」；否則整段當名、外觀待補。
+ */
+export function parsePersonTokenForCharacter(token: string): {
+  name: string;
+  appearance: string;
+  notes: string;
+} {
+  const raw = token.trim().slice(0, 100);
+  // 含全形 ＝／： 與常見分隔符（使用者常從中文輸入法打出）
+  const m = raw.match(/^(.{1,40}?)\s*[=＝:：\-–—]\s*(.+)$/);
+  if (m) {
+    const name = m[1]!.trim().slice(0, 40) || "未命名";
+    const appearance = m[2]!.trim().slice(0, 1000) || "待補外觀描述（髮型、服裝、標誌道具）";
+    return { name, appearance, notes: "由敘事人物建立，可再補定裝細節" };
+  }
+  const name = raw.slice(0, 40) || "未命名";
+  return {
+    name,
+    appearance: "待補外觀描述（髮型、服裝、標誌道具）",
+    notes: "由敘事人物建立，可再補定裝細節",
+  };
+}
+
+/**
+ * 套用進階範例：onlyEmpty 時只填空白欄；否則覆寫觀眾／三幕／人物（禁忌與參考不動）。
+ */
+export function applyWorldviewAdvancedExample(
+  current: Worldview,
+  kind?: string | null,
+  onlyEmpty = true,
+): Partial<Pick<Worldview, "audience" | "acts" | "people">> {
+  const ex = worldviewAdvancedExampleForKind(kind);
+  const patch: Partial<Pick<Worldview, "audience" | "acts" | "people">> = {};
+  if (!onlyEmpty || !current.audience.trim()) patch.audience = ex.audience;
+  if (!onlyEmpty || !hasActs(current)) patch.acts = { ...ex.acts };
+  if (!onlyEmpty || current.people.length === 0) patch.people = [...ex.people];
+  return patch;
+}
+
 /**
  * 助手／API 套用 chips 前正規化：trim、去重；風格 canonicalize（look+質感）；調性／主軸截到上限。
  * 只回傳「有傳入」的欄位（未傳＝不改）；空陣列＝清空該欄。
