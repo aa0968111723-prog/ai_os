@@ -41,7 +41,12 @@ import {
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, resolveUploadMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT, mimeFromPath,
+  assessStoragePersistence, verifyVolumeIdentity, statStored,
 } from "./services/storage";
+// 儲存層降級旗標（storageHealth 零專案相依，比照 errlog 直接 import 不會循環）：
+// 卷指紋不符／不持久／不可寫時，嚴格模式（ASSET_STRICT=1）要在收檔前就把寫入擋下來，
+// 別再往一個「等下就會消失」的磁碟寫東西。
+import { setStorageDegraded, storageDegradeState, storageWriteBlockReason } from "./services/storageHealth";
 import { markBootDraining, markBootReady, isBootReady } from "./services/boot";
 import { recordError, listErrors, errorCountSince } from "./services/errlog";
 import { normalizeRequestId, withRequestContext } from "./services/requestContext";
@@ -54,7 +59,10 @@ import { startGroupCampaignRunner, recoverInterruptedCampaigns, sweepStaleCampai
 import { startExportRunner } from "./services/exportRunner";
 import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+// 備份紀錄表直接從 schema 模組取（不經 schema/index 的再匯出）：備份端點與自檢的
+// 「素材備份新鮮度」都靠這張表判斷「上一次真的把檔案抓出去是什麼時候」。
+import { backupRuns } from "./db/schema/storage";
+import { and, asc, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { assertRateLimitConfiguration } from "./services/rateLimit";
 import {
   backgroundTaskCount,
@@ -210,15 +218,17 @@ app.get("/api/ready", async (_req, res) => {
 
   // 儲存層：實際寫入＋讀回＋刪除探針，而不是只看目錄存在；
   // 正式環境落到本機 .data fallback（Volume 沒掛上）視為未就緒——重啟即遺失素材，不能算綠燈。
+  // ★ 持久性判定改問 assessStoragePersistence()：舊寫法（STORAGE_ROOT === "/data" || ASSET_DIR）在
+  //   Dockerfile 於映像層 mkdir /data 之後恆為真——這道守門結構上永遠不會觸發，是假綠燈而非保護。
   try {
     const { saveBuffer, removeStoredFile } = await import("./services/storage");
     const probe = await saveBuffer(Buffer.from("ready-probe"), "text/plain");
     await removeStoredFile(probe.storagePath);
-    const usingVolume = STORAGE_ROOT === "/data" || !!process.env.ASSET_DIR;
-    if (isProd && !usingVolume) {
-      components.storage = { ok: false, note: "fallback（正式環境未掛持久 Volume，素材重啟即遺失）——請掛 /data 或設 ASSET_DIR" };
+    const persistence = assessStoragePersistence();
+    if (isProd && !persistence.persistent) {
+      components.storage = { ok: false, note: persistence.note };
     } else {
-      components.storage = { ok: true, note: usingVolume ? "ok（持久 Volume 可寫讀）" : "ok（本機模式可寫讀）" };
+      components.storage = { ok: true, note: `ok（可寫讀｜${persistence.note}）` };
     }
   } catch (err) {
     console.error("[ready] 儲存層探針失敗：", err instanceof Error ? err.message : err);
@@ -363,7 +373,13 @@ app.get("/api/export/jobs/:jobId/download", async (req, res) => {
     }
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(job.zipName ?? "交付包.zip")}`);
-    sendStoredFile(res, absPathOf(job.storagePath), {}, "交付包檔案遺失（可能是伺服器重啟前的舊檔，請重新打包）");
+    await sendStoredFile(
+      res,
+      absPathOf(job.storagePath),
+      {},
+      "交付包檔案遺失（可能是伺服器重啟前的舊檔，請重新打包）",
+      { entity: "exportJob", id: job.id, rel: job.storagePath },
+    );
   } catch (err) {
     console.error("[export-job:download]", err);
     recordError("export-job:download", err);
@@ -464,6 +480,11 @@ async function requireAuthBeforeUpload(req: express.Request, res: express.Respon
 app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (req, res) => {
   const cleanup = async () => { if (req.file) await unlink(req.file.path).catch(() => {}); };
   try {
+    // 儲存層降級守門：卷指紋不符／磁碟不持久時，嚴格模式一律拒收——
+    // 收下去只是把使用者的檔案寫進一個「等下就會消失」的地方，比當場說不能傳更傷。
+    // 預設（未設 ASSET_STRICT）永遠回 null＝只警告不擋，避免誤判把全站上傳弄停。
+    const blocked = storageWriteBlockReason();
+    if (blocked) { await cleanup(); return res.status(503).json({ error: blocked }); }
     const resolved = await resolveUploadRequestAuth(req);
     const auth = resolved?.auth ?? null;
     const grant: UploadGrantRecord | null = resolved?.grant ?? null;
@@ -601,19 +622,42 @@ app.use("/api/upload", (err: unknown, _req: express.Request, res: express.Respon
  * 不讓 res.sendFile 的 ENOENT 冒泡到全域 500。「檔案不見」不是伺服器故障，且回 500 會讓前端／瀏覽器
  * 誤以為「稍後再試」而一直重打同一張破圖。（self-healing：舊素材遺失時優雅降級，不再整批噴 500）
  */
-function sendStoredFile(
+/**
+ * ctx（第五參數）＝這個檔案在資料庫裡的身分。缺檔以前只是安靜地回一個 404，沒有任何地方留下紀錄——
+ * 全站破圖時「近期錯誤」照樣顯示「無」，等於系統結構上看不見自己最嚴重的故障。
+ * 現在缺檔／大小不符都會 recordError，讓系統自檢在第一個使用者回報之前就亮紅。
+ * sizeBytes：資料庫記載的大小（有記才比對）——半截檔比明講「檔案壞了」更糟，
+ * 使用者會把不完整的成品當成正常結果帶去交件。
+ */
+async function sendStoredFile(
   res: express.Response,
   absPath: string,
   options: Parameters<express.Response["sendFile"]>[1] = {},
   notFoundMsg = "檔案遺失（可能是伺服器重啟前的舊檔，已無法取得）",
-): void {
+  ctx?: { entity: "asset" | "dbFile" | "dmAttachment" | "exportJob" | "feedback"; id: string; rel: string; sizeBytes?: number | null },
+): Promise<void> {
+  const where = ctx ? `${ctx.entity}=${ctx.id} rel=${ctx.rel}` : absPath;
+  // 送出前先比對大小：DB 有記 sizeBytes 且與磁碟實際不符＝檔案被截斷／寫壞，一律當缺檔處理。
+  if (ctx && typeof ctx.sizeBytes === "number" && ctx.sizeBytes > 0) {
+    const stat = await statStored(ctx.rel).catch(() => null);
+    if (stat && stat.sizeBytes !== ctx.sizeBytes) {
+      recordError("storage:corrupt", new Error(`${where} db=${ctx.sizeBytes}B disk=${stat.sizeBytes}B`));
+      if (!res.headersSent) {
+        res.removeHeader("Content-Disposition"); // 別讓錯誤 JSON 被當成原檔存下來
+        res.status(404).json({ error: "這個檔案在伺服器上不完整（大小與紀錄不符），已停止提供以免你拿到半截檔——請通知管理員從素材備份還原" });
+      }
+      return;
+    }
+  }
   res.sendFile(absPath, options, (err) => {
     if (!err || res.headersSent) return; // 成功（err 為空）或已開始送內容：不改狀態碼
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "ENOTDIR") {
+      if (ctx) recordError("storage:missing", new Error(`${ctx.entity}=${ctx.id} rel=${ctx.rel}`));
       res.status(404).json({ error: notFoundMsg });
     } else {
       console.error("[sendStoredFile]", err);
+      recordError("storage:read", new Error(`${where}: ${err instanceof Error ? err.message : String(err)}`));
       res.status(500).json({ error: "讀取檔案失敗" });
     }
   });
@@ -645,7 +689,13 @@ app.get("/api/assets/:id/file", async (req, res) => {
     // 避免瀏覽器內嵌渲染帶來的 XSS/內容嗅探風險（#19）
     if (shouldForceAttachment(mime)) res.setHeader("Content-Disposition", "attachment");
     // sendFile 內建 Range 支援（影片/音訊拖進度條需要）
-    sendStoredFile(res, absPathOf(asset.storagePath), { headers: { "Content-Type": mime } }, "素材檔案遺失（可能是伺服器重啟前的舊素材，已無法取得）");
+    await sendStoredFile(
+      res,
+      absPathOf(asset.storagePath),
+      { headers: { "Content-Type": mime } },
+      "素材檔案遺失（可能是伺服器重啟前的舊素材，已無法取得）",
+      { entity: "asset", id: asset.id, rel: asset.storagePath, sizeBytes: asset.sizeBytes },
+    );
   } catch (err) {
     console.error("[assets:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取素材失敗" });
@@ -740,7 +790,13 @@ app.get("/api/dm/attachments/:id/file", async (req, res) => {
     const mime = att.mime ?? "application/octet-stream";
     // 圖片/影音維持 inline（縮圖與播放需要）；doc/pdf/txt 與 SVG 強制下載，擋內嵌渲染的 XSS/嗅探
     if (shouldForceAttachment(mime)) res.setHeader("Content-Disposition", "attachment");
-    sendStoredFile(res, absPathOf(att.storagePath), { headers: { "Content-Type": mime } }, "附件檔案遺失（可能是伺服器重啟前的舊檔）");
+    await sendStoredFile(
+      res,
+      absPathOf(att.storagePath),
+      { headers: { "Content-Type": mime } },
+      "附件檔案遺失（可能是伺服器重啟前的舊檔）",
+      { entity: "dmAttachment", id: att.id, rel: att.storagePath, sizeBytes: att.sizeBytes },
+    );
   } catch (err) {
     console.error("[dm:attachment:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取附件失敗" });
@@ -861,7 +917,13 @@ app.get("/api/databases/files/:id/file", async (req, res) => {
     }
     res.setHeader("X-Content-Type-Options", "nosniff");
     if (shouldForceAttachment(file.mime)) res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
-    sendStoredFile(res, absPathOf(file.storagePath), { headers: { "Content-Type": file.mime } }, "文件檔案遺失（可能是伺服器重啟前的舊檔）");
+    await sendStoredFile(
+      res,
+      absPathOf(file.storagePath),
+      { headers: { "Content-Type": file.mime } },
+      "文件檔案遺失（可能是伺服器重啟前的舊檔）",
+      { entity: "dbFile", id: file.id, rel: file.storagePath, sizeBytes: file.sizeBytes },
+    );
   } catch (err) {
     console.error("[databases:file]", err);
     if (!res.headersSent) res.status(500).json({ error: "讀取文件失敗" });
@@ -1265,14 +1327,73 @@ app.get("/api/selftest", async (req, res) => {
     if (guard) throw new Error(guard);
     const probe = await saveBuffer(Buffer.from("selftest"), "text/plain");
     await removeStoredFile(probe.storagePath);
-    // 持久性判定：掛 Volume 到 /data 或明設 ASSET_DIR 才算持久；否則落在容器本地磁碟，重新部署即遺失舊素材。
-    // 正式環境用非持久磁碟＝定時炸彈（重啟後圖/旁白/成片全 404），自檢直接亮紅並給可執行修法。
-    const persistent = !!process.env.ASSET_DIR || STORAGE_ROOT === "/data";
-    if (!persistent && process.env.NODE_ENV === "production") {
-      throw new Error(`素材存在容器本地磁碟（${STORAGE_ROOT}）非持久——重新部署會遺失所有舊素材（圖/旁白/成片）。請到 Zeabur 掛載 Volume 到 /data，或設環境變數 ASSET_DIR 指向持久磁碟`);
+    // 持久性判定改問 assessStoragePersistence()：舊寫法只比對「STORAGE_ROOT 是不是 /data」，
+    // 而 Dockerfile 在映像層就 mkdir /data——沒掛 Volume 時它照樣存在、判定照樣「持久」。
+    // 那道守門結構上永遠不會亮紅，等於沒有；真正的判準是「這個目錄是不是獨立掛載點」。
+    const persistence = assessStoragePersistence();
+    if (!persistence.persistent && process.env.NODE_ENV === "production") {
+      throw new Error(persistence.note);
     }
-    const volume = STORAGE_ROOT === "/data" ? "Volume /data" : process.env.ASSET_DIR ? `ASSET_DIR ${STORAGE_ROOT}` : `本機 ${STORAGE_ROOT}（非持久，僅供開發）`;
-    return `${volume} 可讀寫`;
+    const degraded = storageDegradeState();
+    if (degraded.degraded) throw new Error(`儲存層目前為降級狀態：${degraded.note}`);
+    return `${persistence.note}（可讀寫）`;
+  });
+  await run("素材備份新鮮度", async () => {
+    // 備份是「素材遺失」唯一真正的還原手段——沒有備份時，前面所有守門都只是提早知道壞消息而已。
+    const [last] = await db
+      .select({ finishedAt: backupRuns.finishedAt, fileCount: backupRuns.fileCount, totalBytes: backupRuns.totalBytes })
+      .from(backupRuns)
+      .where(and(eq(backupRuns.ok, true), isNotNull(backupRuns.finishedAt)))
+      .orderBy(desc(backupRuns.finishedAt))
+      .limit(1);
+    if (!last?.finishedAt) {
+      throw new Error("從未成功備份過素材——請到團隊管理按「立即下載素材備份」把檔案存到本機或雲端硬碟，或設定每日排程自動抓取 /api/admin/backup/assets.tar.gz");
+    }
+    const ageMs = Date.now() - last.finishedAt.getTime();
+    const ageHours = Math.floor(ageMs / 3_600_000);
+    if (ageMs > 48 * 3_600_000) {
+      throw new Error(`最近一次成功備份是 ${ageHours} 小時前（超過 48 小時）——請到團隊管理按「立即下載素材備份」，或檢查每日排程是否已停止`);
+    }
+    return `${ageHours} 小時前（${last.fileCount ?? 0} 個檔案／${Math.round(Number(last.totalBytes ?? 0) / 1048576)}MB）`;
+  });
+  await run("素材檔抽樣完整性", async () => {
+    // DB 說有、磁碟上卻沒有＝使用者眼中的破圖。抽樣 30 筆（不寫入紀錄，純檢查）足以偵測整批遺失。
+    const { reconcileAssets } = await import("./services/storageAudit");
+    const result = await reconcileAssets({ mode: "sample", sampleSize: 30, record: false });
+    if (result.missing > 0 || result.corrupt > 0) {
+      const sample = result.sample[0];
+      const where = sample ? `（例：${sample.entity}=${sample.id} 路徑 ${sample.rel}，原因：${sample.reason === "missing" ? "檔案不存在" : "大小與資料庫不符"}）` : "";
+      throw new Error(`抽查 ${result.checked} 筆，缺檔 ${result.missing} 筆、毀損 ${result.corrupt} 筆${where}——請先確認 Volume 是否被換過，再用素材備份還原`);
+    }
+    return `抽查 ${result.checked} 筆全部對得上`;
+  });
+  await run("未落地素材", async () => {
+    // 未落地＝成品還只存在於 fal 的暫時網址上，那個網址會過期；過期後這筆素材就永久沒了。
+    const stats = (await db.execute(sql`
+      select land_state as state, count(*)::int as n, min(created_at) as oldest
+      from assets
+      where deleted_at is null
+      group by land_state
+    `)) as unknown as { rows: Array<{ state: string | null; n: number; oldest: Date | string | null }> };
+    let pending = 0;
+    let failed = 0;
+    let oldestPending: Date | null = null;
+    for (const row of stats.rows ?? []) {
+      if (row.state === "pending") {
+        pending = row.n;
+        oldestPending = row.oldest ? new Date(row.oldest) : null;
+      } else if (row.state === "failed") {
+        failed = row.n;
+      }
+    }
+    if (failed > 0) {
+      throw new Error(`有 ${failed} 筆素材落地失敗（land_state=failed）——這些成品只剩會過期的外部網址，請到素材庫檢查並重新生成或重新上傳`);
+    }
+    if (pending > 0 && oldestPending && Date.now() - oldestPending.getTime() > 3_600_000) {
+      const mins = Math.floor((Date.now() - oldestPending.getTime()) / 60_000);
+      throw new Error(`有 ${pending} 筆素材等待落地，最舊的已等 ${mins} 分鐘（超過 1 小時）——補抓佇列可能沒在跑，請確認 worker 實例是否存活`);
+    }
+    return pending > 0 ? `待落地 ${pending} 筆（都在 1 小時內，補抓中）` : "全部已落地";
   });
   await run("近期錯誤", async () => {
     // 錯誤環形緩衝（services/errlog）：記憶體態、重啟歸零——外接 Sentry 前的最低限度觀測。
@@ -1425,11 +1546,12 @@ app.get("/api/feedback/:id/shot", async (req, res) => {
     // 修 R3-STOR2-04：依實際副檔名給正確 Content-Type，別硬編 image/png——jpeg/webp 截圖配 nosniff 會破圖。
     // 合並並行 PR #105：沿用其 sendStoredFile（檔案遺失優雅處理），但 Content-Type 用動態嗅探（本修復）。
     const shotMime = mimeFromPath(report.screenshotPath);
-    sendStoredFile(
+    await sendStoredFile(
       res,
       absPathOf(report.screenshotPath),
       { headers: { "Content-Type": shotMime.startsWith("image/") ? shotMime : "image/png" } },
       "截圖檔案遺失",
+      { entity: "feedback", id: report.id, rel: report.screenshotPath },
     );
   } catch (err) {
     console.error("[feedback:shot]", err);

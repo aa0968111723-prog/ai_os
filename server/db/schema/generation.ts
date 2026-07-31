@@ -108,6 +108,30 @@ export const assets = pgTable("assets", {
   storagePath: text("storage_path"),
   mime: text("mime"),
   sizeBytes: integer("size_bytes"),
+  /** 落地檔內容雜湊：DB↔磁碟對帳時用來判斷「檔案還在但內容被截斷／覆寫」，光看大小抓不到 */
+  sha256: text("sha256"),
+  /**
+   * 外部來源原始網址（fal 等）。落地成功後「不」抹除，這點是刻意的：
+   * 舊版把 url 覆寫成本地路徑，等於在檔案還在的時候親手關掉唯一的補救來源——
+   * 真的掉檔時連「原網址還沒過期就再抓一次」都做不到。留著它，補抓才有東西可抓。
+   */
+  originUrl: text("origin_url"),
+  /**
+   * 落地狀態：pending＝還沒落地（等補抓）、landed＝已在 Volume、failed＝重試到放棄、skipped＝本來就不需落地。
+   * 預設 landed 是刻意的：既有列絕大多數早已落地，預設 pending 會讓整張表被誤判成待補抓，
+   * 真正沒落地的少數列改由 migration 最後一句精準改回 pending。
+   */
+  landState: text("land_state", { enum: ["pending", "landed", "failed", "skipped"] }).notNull().default("landed"),
+  /** 已嘗試補抓次數：退避間隔與「幾次之後放棄」都靠它，死列才不會永遠佔著佇列名額 */
+  landAttempts: integer("land_attempts").notNull().default(0),
+  /** 最近一次補抓失敗原因（人看的）：分辨「來源 404 永遠救不回」與「暫時逾時可再試」 */
+  landLastError: text("land_last_error"),
+  /** 最近一次嘗試時間——排查「到底有沒有在跑」的第一個依據 */
+  landLastTriedAt: timestamp("land_last_tried_at"),
+  /** 下次可嘗試時間（退避後的排程點）：佇列以它排序，避免剛失敗的列立刻被重抓、把名額吃光 */
+  landNextTryAt: timestamp("land_next_try_at"),
+  /** 被某個 worker 取走的時間：多實例／多 tick 併發時避免同一筆被重複下載；逾時未完成即可回收 */
+  landClaimedAt: timestamp("land_claimed_at"),
   /** 手動上傳者（AI 生成的為 null） */
   uploadedBy: uuid("uploaded_by"),
   /** 固定素材模式（簡報 slide 19）：師父原音／開示文字／配樂設「鎖定·不可更動」，
@@ -120,6 +144,10 @@ export const assets = pgTable("assets", {
 }, (t) => ({
   // 素材庫列表／來源下拉每次以 project_id 撈（生成完成也會即時 invalidate 重打）；補索引避免全表掃。
   projectCreatedIdx: index("assets_project_created_idx").on(t.projectId, t.createdAt),
+  // 補抓佇列的取件查詢（WHERE land_state='pending' AND land_next_try_at <= now() ORDER BY land_next_try_at）
+  // 每個 tick 都跑一次。用部分索引而非整表索引：待補抓的永遠只佔素材總量極小一部分，
+  // 索引只收那幾列，體積小、掃得快，也不會讓每次上傳素材都去維護一個幾乎全是 landed 的大索引。
+  landQueueIdx: index("assets_land_queue_idx").on(t.landNextTryAt).where(sql`land_state = 'pending'`),
 }));
 
 /** 工作流執行紀錄：後端執行器逐步推進（關頁不中斷）；steps 為每步狀態快照 */

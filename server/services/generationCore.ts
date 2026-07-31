@@ -6,7 +6,7 @@
  * 防護（孤兒列刪除、CAS 推進、退點）——邏輯若複製兩份，防護遲早分岔。
  * 錯誤沿用 TRPCError：tRPC 端原樣拋出；伺服器內部呼叫端只讀 message（都是人話訊息）。
  */
-import { and, eq, inArray, isNull, like } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
@@ -21,9 +21,10 @@ import {
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { failStaleGenerationTx, reserveQuota } from "./points";
-import { persistRemote, signAssetUrl } from "./storage";
+import { persistRemote, removeStoredFile, signAssetUrl, type PersistResult } from "./storage";
 import { buildCharacterAnchor, buildSceneAnchor } from "./cardAnchors";
 import { groupLeaderIds, pushToUsers } from "./webPush";
+import { recordError } from "./errlog";
 
 export type GenerationRow = typeof schema.generations.$inferSelect;
 
@@ -52,24 +53,34 @@ export function humanizeGenerationError(raw: string | undefined | null): string 
   return msg;
 }
 
+/** 剛入庫、準備第一次落地的成品素材（persistGenerationResult 需要的最小欄位） */
+interface FreshGeneratedAsset {
+  id: string;
+  projectId: string;
+  title: string;
+  createdAt: Date;
+}
+
 /**
  * 成品落地（背景）：fal 的 CDN 網址會過期，完成後盡快抓回 Volume 永久保存。
- * 失敗不影響主流程（外部網址短期內仍可用），之後輪詢會再看到未落地素材可重試。
+ * 失敗不影響主流程（外部網址短期內仍可用）——素材維持 landState="pending"，
+ * 由 sweepUnlandedAssets 依退避時間補抓；originUrl 從入庫起就保留，落地成功也不抹除，
+ * 所以就算 url 已被改寫成本地網址，補救來源永遠還在（舊版覆寫掉 url ＝ 主動關掉唯一的補救來源）。
  */
-function persistGenerationResult(assetId: string, generationId: string, remoteUrl: string): void {
+function persistGenerationResult(asset: FreshGeneratedAsset, generationId: string, remoteUrl: string): void {
   void (async () => {
-    const persisted = await persistRemote(remoteUrl);
-    if (!persisted) return;
-    const localUrl = `/api/assets/${assetId}/file`;
-    await db
-      .update(schema.assets)
-      .set({ storagePath: persisted.storagePath, mime: persisted.mime, sizeBytes: persisted.sizeBytes, url: localUrl })
-      .where(eq(schema.assets.id, assetId));
-    await db
-      .update(schema.generations)
-      .set({ resultUrl: localUrl, updatedAt: new Date() })
-      .where(eq(schema.generations.id, generationId));
-    console.log(`[storage] 成品已落地：asset=${assetId}（${persisted.sizeBytes}B ${persisted.mime}）`);
+    const persisted = await persistRemoteSafe(remoteUrl);
+    if (!persisted.ok) {
+      // 退場判斷（重試 or 放棄＋通知）統一交給同一套狀態機，不在兩處分岔
+      await recordLandFailure(
+        { id: asset.id, projectId: asset.projectId, title: asset.title, createdAt: asset.createdAt, attempts: 0, generationId },
+        persisted,
+      );
+      return;
+    }
+    const landed = await commitLandedAsset(asset.id, generationId, persisted);
+    if (!landed) return;
+    console.log(`[storage] 成品已落地：asset=${asset.id}（${persisted.sizeBytes}B ${persisted.mime}）`);
   })().catch((err) => console.warn("[storage] 成品落地背景作業失敗：", err instanceof Error ? err.message : err));
 }
 
@@ -494,8 +505,8 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         })
         .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
         .returning();
-      if (rows.length === 0) return { updated: null, assetId: null as string | null };
-      let assetId: string | null = null;
+      if (rows.length === 0) return { updated: null, asset: null as FreshGeneratedAsset | null };
+      let newAsset: FreshGeneratedAsset | null = null;
       // 媒體成品自動入素材庫(AI 生成標記);文字輸出留在生成紀錄。
       if (mediaUrl && mediaKind) {
         const [asset] = await tx
@@ -506,11 +517,18 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
             kind: mediaKind,
             title: gen.prompt.slice(0, 40),
             url: mediaUrl,
+            // 外部來源原始網址：落地成功也不抹除。fal CDN 網址雖會過期，但「還沒過期前」它是
+            // 唯一能把成品抓回來的來源——舊版落地時直接把 url 覆寫掉，等於主動關掉補救來源。
+            originUrl: mediaUrl,
+            // 先記 pending：落地是 commit 後才啟動的背景 IO，這一刻還沒有 Volume 檔。
+            // landNextTryAt 給「現在」，背景落地若失敗，補抓佇列下一輪就能立刻接手。
+            landState: "pending",
+            landNextTryAt: new Date(),
             isAiGenerated: true,
             meta: { generationId: gen.id, modelId: gen.modelId },
           })
           .returning();
-        assetId = asset.id;
+        newAsset = { id: asset.id, projectId: asset.projectId, title: asset.title, createdAt: asset.createdAt };
         // 綁定分鏡的就地生成：把成品回填該分鏡格（拆分鏡草稿→出圖 一條線）。
         // 冪等：CAS 已保證此段每筆只跑一次；同交易失敗一起 rollback。
         if (gen.sceneId) {
@@ -519,7 +537,7 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
           await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, gen.sceneId));
         }
       }
-      return { updated: rows[0], assetId };
+      return { updated: rows[0], asset: newAsset };
     });
     if (!advanced.updated) {
       const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
@@ -542,8 +560,8 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
       );
     }
     // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）——
-    // 網路 IO 不進交易，commit 後才啟動；失敗由 sweepUnlandedAssets 定期補抓。
-    if (advanced.assetId && mediaUrl) persistGenerationResult(advanced.assetId, gen.id, mediaUrl);
+    // 網路 IO 不進交易，commit 後才啟動；失敗由 sweepUnlandedAssets 依退避時間補抓。
+    if (advanced.asset && mediaUrl) persistGenerationResult(advanced.asset, gen.id, mediaUrl);
     // 跨裝置推播給發起人（CAS 保證同筆只推一次）；tag 以專案聚合——工作流連跑多鏡時
     // 後到的覆蓋先到的，手機不被逐筆洗版（頁內 GenerationList 已有逐筆彙總通知）
     void pushToUsers([gen.userId], {

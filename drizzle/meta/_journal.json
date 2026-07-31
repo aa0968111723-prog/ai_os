@@ -155,6 +155,13 @@
       "when": 1785600300000,
       "tag": "0021_user_presence",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785600400000,
+      "tag": "0022_asset_durability",
+      "breakpoints": true
     }
   ]
 }
