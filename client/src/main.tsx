@@ -10,6 +10,7 @@ import "./styles.css";
 import "./styles.mobile-fab-01.css";
 import "./splash.css";
 import { EmptyState } from "./components/ui";
+import { Icon } from "./components/Icon";
 
 // 先安裝桌面橋接，讓第一個 React render 就能辨識「Aios 桌面版」與已安裝剪輯軟體。
 bootstrapTauriDesktop();
@@ -25,7 +26,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
     if (this.state.error) {
       return (
         <div className="app">
-          <EmptyState title={<>畫面出了點狀況</>} description={<>頁面載入時發生非預期錯誤——重新整理通常就能恢復。若持續發生，請回報給管理員。</>} action={<><div style={{ marginTop: "var(--sp-16)" }}>
+          <EmptyState icon={<Icon name="TriangleAlert" />} title={<>畫面出了點狀況</>} description={<>頁面載入時發生非預期錯誤——重新整理通常就能恢復。若持續發生，請回報給管理員。</>} action={<><div style={{ marginTop: "var(--sp-16)" }}>
               <button className="primary" onClick={() => window.location.reload()}>重新整理</button>
             </div></>} style={{ marginTop: "var(--sp-48)" }} />
         </div>

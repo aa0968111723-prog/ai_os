@@ -2281,7 +2281,7 @@ export function AdminPage() {
             <button style={{ marginTop: 8 }} onClick={() => feedback.refetch()}>再試一次</button>
           </div>
         ) : !feedback.data?.length ? (
-          <EmptyState title={<>還沒有回饋</>} description={<>夥伴用頂欄「回饋」按鈕填寫。</>} />
+          <EmptyState icon={<Icon name="MessageCircle" />} title={<>還沒有回饋</>} description={<>夥伴用頂欄「回饋」按鈕填寫。</>} />
         ) : (
           feedback.data.map((f) => (
             <div key={f.id} className="gen-row" style={{ gridTemplateColumns: "auto 1fr" }}>

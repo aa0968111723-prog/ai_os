@@ -3,6 +3,7 @@ import { trpc } from "../api";
 import { getModel } from "@shared/models";
 import { ConfirmButton } from "./interactions";
 import { Card, Chip, EmptyState, Hint, Meta } from "./ui";
+import { Icon } from "./Icon";
 
 /** 「再用」帶回生成台的完整設定（與伺服器 prompts 列的新欄位同形狀） */
 export interface PromptReuseSettings {
@@ -67,7 +68,7 @@ export function PromptLibrary({
   }
   if (empty && showEmpty) {
     return (
-      <EmptyState title={<>還沒有提示詞——</>} description={<>成功生成後，咒語會自動存進這裡，方便一鍵帶入目前模式。</>} style={{ marginTop: embedded ? 0 : 12 }} data-fb="提示詞庫" />
+      <EmptyState icon={<Icon name="Lightbulb" />} title={<>還沒有提示詞——</>} description={<>成功生成後，咒語會自動存進這裡，方便一鍵帶入目前模式。</>} style={{ marginTop: embedded ? 0 : 12 }} data-fb="提示詞庫" />
     );
   }
   if (!list.data?.length) return null;

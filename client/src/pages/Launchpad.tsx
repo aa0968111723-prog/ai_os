@@ -487,7 +487,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
       )}
 
       {all.length === 0 && !projects.isLoading && !projects.error && !showFirstRun && (
-        <EmptyState
+        <EmptyState icon={<Icon name="Package" />}
           title={includeArchived ? "還沒有專案（含已封存）" : "還沒有專案"}
           description={
             includeArchived

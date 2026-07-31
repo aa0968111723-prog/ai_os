@@ -522,7 +522,7 @@ export function ModelsPage() {
             </button>
           )}
           {!models.isLoading && !models.isError && !models.data?.length && (
-            <EmptyState title={<>沒有符合的模型</>} description={<>{debouncedQ
+            <EmptyState icon={<Icon name="Search" />} title={<>沒有符合的模型</>} description={<>{debouncedQ
                   ? `沒有符合「${debouncedQ}」的模型——換個關鍵字試試。`
                   : tier
                     ? "這個組合暫無模型——試試取消檔次篩選。"

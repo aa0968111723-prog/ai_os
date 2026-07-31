@@ -171,7 +171,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
           ))}
         </div>
       ) : (
-        <EmptyState title={<>還沒有素材知識</>} description={<>加一份開示稿或腳本，讓 AI 真的懂這支片。</>} style={{ marginTop: 8 }} />
+        <EmptyState icon={<Icon name="FileText" />} title={<>還沒有素材知識</>} description={<>加一份開示稿或腳本，讓 AI 真的懂這支片。</>} style={{ marginTop: 8 }} />
       )}
 
       {readOnly ? (

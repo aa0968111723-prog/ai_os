@@ -232,7 +232,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
             <Meta as="p" className="database-search-empty">找不到「{databaseQuery.trim()}」</Meta>
           )}
           {list.data && tables.length === 0 && !creating && (
-            <EmptyState title={<>還沒有資料庫</>} description={<>先建一個試試：比如「拍攝器材借用表」或你自己的待辦清單。</>} style={{ marginTop: 16 }} />
+            <EmptyState icon={<Icon name="Database" />} title={<>還沒有資料庫</>} description={<>先建一個試試：比如「拍攝器材借用表」或你自己的待辦清單。</>} style={{ marginTop: 16 }} />
           )}
         </Card>
 

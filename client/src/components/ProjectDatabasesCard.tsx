@@ -277,7 +277,7 @@ export function ProjectDatabasesCard({
         )}
 
         {!linked.isLoading && !linked.error && groups.length === 0 && (
-          <EmptyState title={<>還沒有資料表關聯到這個專案</>} description={<>{canEdit
+          <EmptyState icon={<Icon name="Database" />} title={<>還沒有資料表關聯到這個專案</>} description={<>{canEdit
                 ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，勾選「關聯此專案」。"
                 : "請有編輯權限的成員建立或關聯資料表。"}</>} style={{ marginTop: 0 }} />
         )}

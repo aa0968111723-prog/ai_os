@@ -13,6 +13,7 @@ import {
   type Density,
 } from "./components/ui";
 import "./styles.css";
+import { Icon } from "./components/Icon";
 
 /**
  * Primitives 展示頁（**開發用，不進正式包**）。
@@ -180,7 +181,7 @@ function Gallery() {
       </Group>
 
       <Group title="EmptyState — 必須有下一步">
-        <EmptyState
+        <EmptyState icon={<Icon name="Package" />}
           title="還沒有專案"
           description="建立第一個專案，或請組長邀請你加入既有專案。"
           action={<Button variant="primary">建立專案</Button>}

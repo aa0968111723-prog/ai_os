@@ -724,7 +724,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
       ) : (
         <>
           {filteredSceneEntries.length === 0 ? (
-            <EmptyState title={<>這個狀態目前沒有分鏡</>} description={<>切回「全部」查看完整順序，或選其他狀態繼續處理。</>} className="scene-filter-empty" />
+            <EmptyState icon={<Icon name="Film" />} title={<>這個狀態目前沒有分鏡</>} description={<>切回「全部」查看完整順序，或選其他狀態繼續處理。</>} className="scene-filter-empty" />
           ) : (
             <div className={`scene-list-rows${sceneListExpanded || sceneFilter !== "all" ? " is-expanded" : ""}`}>
               {filteredSceneEntries.map(({ scene: s, index: i }, visibleIndex) => (

@@ -125,7 +125,7 @@ export function DesktopCompanionPage() {
     return (
       <Card as="section" style={{ maxWidth: 760, margin: "0 auto" }}>
         <h2>桌面剪輯連接</h2>
-        <EmptyState title={<>這項功能需要 Aios 桌面版</>} description={<>一般瀏覽器與 PWA 不會取得啟動本機剪輯軟體或監看檔案的權限。你仍可從素材庫下載後手動開啟。</>} />
+        <EmptyState icon={<Icon name="Monitor" />} title={<>這項功能需要 Aios 桌面版</>} description={<>一般瀏覽器與 PWA 不會取得啟動本機剪輯軟體或監看檔案的權限。你仍可從素材庫下載後手動開啟。</>} />
       </Card>
     );
   }

@@ -315,7 +315,7 @@ export function GenerationList({
     );
   if (!list.data?.length)
     return (
-      <EmptyState title={<>還沒有生成紀錄——</>} description={<>上面試一次吧。</>} style={{ marginTop: 12 }} />
+      <EmptyState icon={<Icon name="Sparkles" />} title={<>還沒有生成紀錄——</>} description={<>上面試一次吧。</>} style={{ marginTop: 12 }} />
     );
 
   const activeFilterCount =

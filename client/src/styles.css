@@ -524,6 +524,11 @@ a:hover { color: var(--primary-solid-hover); }
     radial-gradient(circle at 50% 82%, rgb(var(--gold-rgb) / 0.08), transparent 62%); }
 .empty-state h3 { font-family: var(--serif); font-size: 18px; margin: 0 0 8px; }
 .empty-state p { color: var(--fg-secondary); }
+/* 空狀態的圖示槽。尺寸與顏色集中在這一條規則，呼叫端只需寫 <Icon name="…" />；
+   否則同一個決定會散在二十幾個呼叫點各打一次 size 與 inline color。
+   用 display:block 而非預設的 inline：inline 元素的 margin-bottom 不會撐開行高，
+   圖示會直接黏在標題上。margin-inline:auto 讓它不依賴父層的 text-align 置中。 */
+.empty-state > svg { display: block; width: 32px; height: 32px; margin: 0 auto var(--sp-8); color: var(--fg-secondary); }
 
 /* 鍵盤焦點可見（無障礙） */
 .chip:focus-visible, [role="button"]:focus-visible, [role="radio"]:focus-visible {

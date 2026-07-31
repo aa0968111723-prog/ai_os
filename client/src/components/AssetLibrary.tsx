@@ -316,7 +316,7 @@ export function AssetLibrary({
           ))}
         </div>
       ) : !total ? (
-        <EmptyState title={<>還沒有素材——</>} description={<>上傳參考圖、原音檔，或先生成一張。</>} style={{ marginTop: 10 }} />
+        <EmptyState icon={<Icon name="Image" />} title={<>還沒有素材——</>} description={<>上傳參考圖、原音檔，或先生成一張。</>} style={{ marginTop: 10 }} />
       ) : (
         <>
           {/* 工具列：數量統計 · 種類篩選 chips · 搜尋 · 排序 */}

@@ -137,7 +137,7 @@ export function PlannerPage({ groupId }: { groupId: string }) {
           <p className="eyebrow">日常協作</p>
           <h1>筆記與排程</h1>
         </header>
-        <EmptyState title={<>請先選擇組別</>} description={<>用頂欄的組別選單選一個組，就能看到這個組的排程與會議筆記。</>} style={{ marginTop: "var(--sp-32)" }} />
+        <EmptyState icon={<Icon name="User" />} title={<>請先選擇組別</>} description={<>用頂欄的組別選單選一個組，就能看到這個組的排程與會議筆記。</>} style={{ marginTop: "var(--sp-32)" }} />
       </div>
     );
   }
@@ -472,7 +472,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
       ) : view === "calendar" ? (
         <CalendarView items={items} projectTitleOf={projectTitleOf} onDelete={(id) => remove.mutate({ id })} removing={remove.isPending} />
       ) : groups.length === 0 ? (
-        <EmptyState title={<>{includePast ? "還沒有任何行程" : "接下來沒有排程"}</>} description={<>用上面的欄位加第一筆——開會、拍攝、上片都行。</>} style={{ marginTop: 12 }} />
+        <EmptyState icon={<Icon name="CalendarPlus" />} title={<>{includePast ? "還沒有任何行程" : "接下來沒有排程"}</>} description={<>用上面的欄位加第一筆——開會、拍攝、上片都行。</>} style={{ marginTop: 12 }} />
       ) : (
         <div style={{ marginTop: 8 }}>
           {groups.map((g) => (
@@ -838,7 +838,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
           })}
         </div>
       ) : (
-        <EmptyState title={<>還沒有筆記</>} description={<>開完會記一份，決議和待辦全組都看得到。</>} style={{ marginTop: 8 }} />
+        <EmptyState icon={<Icon name="FileText" />} title={<>還沒有筆記</>} description={<>開完會記一份，決議和待辦全組都看得到。</>} style={{ marginTop: 8 }} />
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
 
