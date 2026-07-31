@@ -1916,9 +1916,15 @@ export function ProjectPage({ id }: { id: string }) {
 
         {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度） */}
         {!mobileCompact && (
-          <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-            <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
-          </CollabZone>
+          /* id 是 @提及推播深連結的捲動錨點（?focus=messages → scrollToSelector("#project-messages")）。
+             CollabZone 不轉發 id，所以錨點要留在外層——手機化重構把原本帶 id 的外層換成 CollabZone
+             時整個掉了，深連結因此變成「會開頁但不會捲到留言」的無聲失效。
+             approvals.deeplink.test.ts 就是為了擋這種事而存在的（同一個錨點掉過一次）。 */
+          <div id="project-messages">
+            <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
+              <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+            </CollabZone>
+          </div>
         )}
       </div>
       </div>

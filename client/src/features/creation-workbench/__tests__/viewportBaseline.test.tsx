@@ -43,6 +43,11 @@ vi.mock("../../../api", () => ({
     generation: {
       submit: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
     },
+    // 與 CreationWorkbench.test.tsx 同一個理由：KnowledgeSourceStrip 在 render 階段就會讀
+    // trpc.knowledge.list，少了樁會讓整個 shell 掛掉，presence smoke 全紅。
+    knowledge: {
+      list: { useQuery: () => ({ data: [], isLoading: false }) },
+    },
   },
 }));
 

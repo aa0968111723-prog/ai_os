@@ -53,6 +53,14 @@ vi.mock("../../../api", () => ({
         useMutation: () => ({ mutate: generationSubmit, isPending: false, error: null }),
       },
     },
+    // KnowledgeSourceStrip 會無條件呼叫 knowledge.list.useQuery（enabled 只控制要不要真的送出，
+    // 不影響這一行有沒有被執行）。少了這個樁，整個工作台在 render 階段就會炸在
+    // 「Cannot read properties of undefined (reading 'list')」，34 個 case 一起紅。
+    knowledge: {
+      list: {
+        useQuery: () => ({ data: [], isLoading: false }),
+      },
+    },
   },
 }));
 
