@@ -288,3 +288,15 @@ Detail: `exit=1`
 
 ---
 
+## 2026-07-31 · `e2e.models` ✅ pass（DB reset 後）
+
+**E2E：模型目錄／多模態生成（mock）** · **22/22**
+
+### 基建備註
+
+- 本輪注入 `CARPET_E2E_RESET_DB` 後 `run-next` 在 migrate/重啟等待卡住（>10min）；手動 `CARPET_E2E_RESET_DB=0` 跑 `e2e-models.py` 全綠。
+- 工作區曾切到他分支致 carpet 腳本暫時消失，已回到 `audit/carpet-loop-wave0`。
+- **建議**：reset 後重啟 server 的 shell 指令需改非阻塞、並預設 `CARPET_E2E_RESET_DB=0` 或縮短 timeout。
+
+---
+
