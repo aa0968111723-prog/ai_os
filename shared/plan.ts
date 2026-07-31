@@ -46,6 +46,8 @@ export const planStepSchema = z.object({
   kind: planStepKindSchema,
   title: z.string().trim().min(1).max(160),
   note: z.string().max(2_000).optional(),
+  /** 決策軌跡：為何需要此步（給使用者看的結構化說明，非模型內部推理） */
+  rationale: z.string().trim().min(1).max(300).optional(),
   status: planStepStatusSchema,
   actorType: z.enum(["ai", "human", "system"]),
   assigneeId: z.string().uuid().optional(),
@@ -108,6 +110,10 @@ export const planMilestoneSchema = z.object({
 
 export const completePlanSummarySchema = z.object({
   goal: z.string().trim().min(1).max(1_000),
+  /** 決策軌跡：1–3 句說明為何這樣排計畫（結構化結論，不是 chain-of-thought） */
+  rationale: z.string().trim().min(1).max(500).optional(),
+  /** 決策軌跡：本次規劃實際依據的上下文區塊標籤（如「專案世界觀」「筆記摘要」） */
+  contextUsed: z.array(z.string().trim().min(1).max(60)).max(30).optional(),
   successCriteria: z.array(z.string().trim().min(1).max(500)).max(50),
   assumptions: z.array(z.string().trim().min(1).max(500)).max(50),
   missingInformation: z.array(z.string().trim().min(1).max(500)).max(50),
