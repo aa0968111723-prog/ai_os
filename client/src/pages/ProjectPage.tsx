@@ -352,6 +352,36 @@ export function ProjectPage({ id }: { id: string }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [messagesSheetOpen]);
+
+  // 通知深連結（#225 契約補完）：@提及推播帶 ?focus=messages（開留言），
+  // 送審／裁決推播帶 ?focus=scene-<id>（捲到該分鏡格）。分鏡列表是非同步載入，
+  // 目標元素可能還沒在 DOM——輪詢重試幾秒，出現即捲、逾時放棄（仍停留在專案頁，不算失敗）。
+  useEffect(() => {
+    const focus = new URLSearchParams(window.location.search).get("focus");
+    if (!focus) return;
+    if (focus === "messages") {
+      if (mobileCompact) setMessagesSheetOpen(true);
+      else scrollToSelector("#project-messages");
+      return;
+    }
+    if (/^scene-[0-9a-f-]+$/i.test(focus)) {
+      let tries = 0;
+      const timer = window.setInterval(() => {
+        const el = document.getElementById(focus);
+        tries += 1;
+        if (el) {
+          window.clearInterval(timer);
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        } else if (tries >= 25) {
+          window.clearInterval(timer);
+        }
+      }, 200);
+      return () => window.clearInterval(timer);
+    }
+    // focus=agent-run-* 由 CreationWorkbench／AiHub 自行處理（既有契約）
+    // 掛載時讀一次網址即可；mobileCompact 變化不該重觸發深連結
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   const me = trpc.auth.me.useQuery();
   // 世界觀三組 chips（主軸／調性／視覺風格）由本專案所屬組的自訂選項供給（組長可就地新增，或到「選項」頁整理）
   const options = trpc.options.byGroup.useQuery(
@@ -1215,10 +1245,13 @@ export function ProjectPage({ id }: { id: string }) {
           </CollabZone>
         </div>
 
-        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度） */}
+        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。
+            id 供 ?focus=messages 通知深連結捲動定位 */}
         {!mobileCompact && (
           <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-            <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+            <div id="project-messages">
+              <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+            </div>
           </CollabZone>
         )}
       </div>

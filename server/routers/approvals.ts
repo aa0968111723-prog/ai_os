@@ -101,7 +101,8 @@ export async function submitApprovalCore(
       .then((ids) => pushToUsers(ids, {
         title: "分鏡送審",
         body: `「${scene.title}」已送審（v${approval.version}）——請裁決`,
-        url: `/p/${project.id}`,
+        // 深連結（#225 契約）：帶 focus=scene-<id>，專案頁會捲到該分鏡格
+        url: `/p/${project.id}?focus=scene-${scene.id}`,
         tag: `approval-${scene.id}`,
       }))
       .catch((err) => console.warn("[approvals] 送審推播失敗：", err instanceof Error ? err.message : err));
@@ -183,7 +184,7 @@ export const approvalsRouter = router({
             body: input.decision === "approved"
               ? `「${scene.title}」v${approval.version} 已通過 ✅`
               : `「${scene.title}」v${approval.version} 需修改：${input.reason?.trim() ?? ""}`,
-            url: `/p/${project.id}`,
+            url: `/p/${project.id}?focus=scene-${scene.id}`,
             tag: `approval-${scene.id}`,
           }) : undefined))
           .catch((err) => console.warn("[approvals] 裁決推播失敗：", err instanceof Error ? err.message : err));
