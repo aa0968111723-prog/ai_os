@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
@@ -84,6 +84,68 @@ export async function listProjectTasks(
     .leftJoin(schema.users, eq(schema.users.id, schema.projectTasks.assigneeId))
     .where(eq(schema.projectTasks.projectId, projectId))
     .orderBy(asc(schema.projectTasks.dueAt), asc(schema.projectTasks.createdAt));
+}
+
+/** 未結任務的狀態集合（done／cancelled 以外）；與 assembleAgentInsights 的判準一致 */
+export const OPEN_TASK_STATUSES = ["todo", "doing", "waiting", "review"] as const;
+
+/**
+ * 全組人類任務（作業台「誰卡住了」與組級代理洞察用）。
+ *
+ * 為什麼要有這一支：組級畫面原本只看得到 agent_runs，於是「7 項人員任務逾期」
+ * 這種最該被看見的阻塞完全不在畫面上。
+ *
+ * **呼叫端幾乎都該傳 openOnly。** 傳了才會把 status 放進 where、真正命中
+ * project_tasks_group_status_idx；不傳的話 where 只有 group_id，索引只用得到前綴，
+ * 而且排序是 due_at ASC——最早到期的必然是早就完成的歷史任務，limit 會被它們吃光。
+ * 只有「真的需要含已完成任務」的情境才該省略。
+ */
+export async function listGroupTasks(
+  auth: AuthState,
+  groupId: string,
+  options?: { limit?: number; openOnly?: boolean },
+): Promise<Array<ProjectTaskRow & { assigneeName: string | null; projectTitle: string }>> {
+  requireGroup(auth, groupId);
+  const limit = Math.max(1, Math.min(1_000, options?.limit ?? 300));
+  const conditions = [eq(schema.projectTasks.groupId, groupId)];
+  if (options?.openOnly) {
+    conditions.push(inArray(schema.projectTasks.status, [...OPEN_TASK_STATUSES]));
+  }
+  // 排除封存專案：作業台預設不列封存案，計入會變成「找不到入口的幽靈待辦」（比照 pendingSummary）
+  return db
+    .select({
+      id: schema.projectTasks.id,
+      groupId: schema.projectTasks.groupId,
+      projectId: schema.projectTasks.projectId,
+      planRunId: schema.projectTasks.planRunId,
+      planStepId: schema.projectTasks.planStepId,
+      wakeRunId: schema.projectTasks.wakeRunId,
+      wakeStepId: schema.projectTasks.wakeStepId,
+      taskType: schema.projectTasks.taskType,
+      title: schema.projectTasks.title,
+      description: schema.projectTasks.description,
+      assigneeId: schema.projectTasks.assigneeId,
+      approverRole: schema.projectTasks.approverRole,
+      status: schema.projectTasks.status,
+      priority: schema.projectTasks.priority,
+      startsAt: schema.projectTasks.startsAt,
+      dueAt: schema.projectTasks.dueAt,
+      createdBy: schema.projectTasks.createdBy,
+      completedBy: schema.projectTasks.completedBy,
+      completedAt: schema.projectTasks.completedAt,
+      sourceMessageId: schema.projectTasks.sourceMessageId,
+      mentions: schema.projectTasks.mentions,
+      createdAt: schema.projectTasks.createdAt,
+      updatedAt: schema.projectTasks.updatedAt,
+      assigneeName: schema.users.name,
+      projectTitle: schema.projects.title,
+    })
+    .from(schema.projectTasks)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.projectTasks.projectId))
+    .leftJoin(schema.users, eq(schema.users.id, schema.projectTasks.assigneeId))
+    .where(and(...conditions, ne(schema.projects.status, "archived")))
+    .orderBy(asc(schema.projectTasks.dueAt), asc(schema.projectTasks.createdAt))
+    .limit(limit);
 }
 
 export async function addProjectTaskCore(input: {

@@ -9,6 +9,10 @@ import { nimComplete, NimServiceError } from "../services/nvidia-nim";
 import { reserveQuota, refund } from "../services/points";
 import { searchCatalogText, rowLine } from "./assistant";
 import { planAgentCore } from "../services/agentCore";
+import { getGroupAgentInsights, recordAgentEventSafely } from "../services/agentEventCore";
+import { listGroupTasks } from "../services/taskCore";
+import { buildProjectIntelligence } from "../services/projectIntelligence";
+import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { searchAssistantDatabaseRows } from "../services/databaseRowSearch";
 import type { AuthState } from "../services/auth";
 import type { DataField } from "../../shared/databaseFields";
@@ -99,8 +103,15 @@ export function currentStepNote(steps: unknown): string | null {
   return text.length > 80 ? `${text.slice(0, 80)}…` : text;
 }
 
-/** 組代理匯總健康度（作業台「AI 工作與團隊分析」） */
-export type GroupAgentHealth = "healthy" | "attention" | "blocked";
+/**
+ * 組代理匯總健康度（作業台「AI 工作與團隊分析」）。
+ *
+ * `idle` 與 `healthy` 必須分開：舊版把「這個組從沒發起過任何 AI 計畫」和「跑過一輪、
+ * 現在一切正常」都折成 healthy「狀態穩定」，於是全新的組打開作業台看到的是五個 0 加一句
+ * 「目前沒有需要立刻處理的代理阻塞」——它把「沒東西可分析」講成「分析結果良好」，
+ * 使用者因此覺得這張卡沒有內容。分成兩種語意後，前端才能對 idle 給起手式而非安慰句。
+ */
+export type GroupAgentHealth = "idle" | "healthy" | "attention" | "blocked";
 
 export interface GroupAgentRunStatsInput {
   status: string;
@@ -114,9 +125,49 @@ export interface GroupAgentSummary {
   awaitingApproval: number;
   failedRecent: number;
   doneRecent: number;
+  /** 近期被人停止的計畫：舊版沒有這個分支，於是 stopped 消失在五個數字之間（總和對不上清單筆數） */
+  stoppedRecent: number;
   active: number;
   activeProjects: number;
+  /** 這個組是否曾經有過任何非丟棄的計畫——區分「從沒用過」與「用過但目前靜止」 */
+  hasRuns: boolean;
   health: GroupAgentHealth;
+}
+
+/** 組級摘要的原始計數（可來自 SQL 聚合，也可來自逐列統計） */
+export interface GroupAgentCounts {
+  running: number;
+  waiting: number;
+  awaitingApproval: number;
+  failedRecent: number;
+  doneRecent: number;
+  stoppedRecent: number;
+  /** 全組非丟棄計畫總數（不受近期窗與清單 limit 影響） */
+  totalRuns: number;
+  activeProjects: number;
+}
+
+/** 計數 → 摘要（健康度規則的唯一出處；SQL 聚合與逐列統計都走這裡，兩條路不會分岔） */
+export function groupSummaryFromCounts(c: GroupAgentCounts): GroupAgentSummary {
+  const active = c.running + c.waiting + c.awaitingApproval;
+  // idle：這組從沒有過計畫；blocked：有失敗且尚有等待／待核；attention：有活動或近期失敗；否則 healthy
+  let health: GroupAgentHealth;
+  if (c.totalRuns === 0) health = "idle";
+  else if (c.failedRecent > 0 && (c.waiting > 0 || c.awaitingApproval > 0)) health = "blocked";
+  else if (active > 0 || c.failedRecent > 0) health = "attention";
+  else health = "healthy";
+  return {
+    running: c.running,
+    waiting: c.waiting,
+    awaitingApproval: c.awaitingApproval,
+    failedRecent: c.failedRecent,
+    doneRecent: c.doneRecent,
+    stoppedRecent: c.stoppedRecent,
+    active,
+    activeProjects: c.activeProjects,
+    hasRuns: c.totalRuns > 0,
+    health,
+  };
 }
 
 /** 由 run 列統計組級摘要（純函式；limit 內的列表也可呼叫，前端可重算） */
@@ -131,6 +182,7 @@ export function summarizeGroupAgentRuns(
   let awaitingApproval = 0;
   let failedRecent = 0;
   let doneRecent = 0;
+  let stoppedRecent = 0;
   const activeProjectIds = new Set<string>();
   for (const r of runs) {
     const t = new Date(r.updatedAt).getTime();
@@ -147,23 +199,59 @@ export function summarizeGroupAgentRuns(
       failedRecent += 1;
     } else if (r.status === "done" && t >= recentCutoff) {
       doneRecent += 1;
+    } else if (r.status === "stopped" && t >= recentCutoff) {
+      stoppedRecent += 1;
     }
   }
-  const active = running + waiting + awaitingApproval;
-  // blocked：有失敗且尚有等待／待核；attention：有活動或近期失敗；否則 healthy
-  let health: GroupAgentHealth = "healthy";
-  if (failedRecent > 0 && (waiting > 0 || awaitingApproval > 0)) health = "blocked";
-  else if (active > 0 || failedRecent > 0) health = "attention";
-  return {
+  return groupSummaryFromCounts({
     running,
     waiting,
     awaitingApproval,
     failedRecent,
     doneRecent,
-    active,
+    stoppedRecent,
+    totalRuns: runs.length,
     activeProjects: activeProjectIds.size,
-    health,
+  });
+}
+
+/** 組級「近期」窗：failedRecent／doneRecent／stoppedRecent 的認定範圍（與純函式預設一致） */
+export const GROUP_AGENT_RECENT_MS = 7 * 24 * 60 * 60 * 1000;
+/** agentOverview 清單上限：多專案組也看得到近期活躍＋失敗，仍防灌爆（計數不受此限，見 foldGroupStatusAggregate） */
+export const GROUP_AGENT_LIST_LIMIT = 30;
+
+/** SQL `group by status` 聚合的一列（n＝全部、nRecent＝近期窗內） */
+export interface GroupAgentStatusAggRow {
+  status: string;
+  n: number | string;
+  nRecent: number | string;
+}
+
+/**
+ * 聚合列 → 計數（純函式，便於測；count 經 node-postgres 回來是字串，一律 Number()）。
+ *
+ * 為什麼計數不能沿用清單：清單有 `limit 30`，一個活躍的組很容易讓近七日完成／失敗被擠出視窗，
+ * 於是「近七日完成 0」其實是「第 31 筆之後才有」。計數改由整組聚合算，清單只負責顯示前 30 筆。
+ */
+export function foldGroupStatusAggregate(rows: GroupAgentStatusAggRow[], activeProjects: number): GroupAgentCounts {
+  const counts: GroupAgentCounts = {
+    running: 0, waiting: 0, awaitingApproval: 0,
+    failedRecent: 0, doneRecent: 0, stoppedRecent: 0,
+    totalRuns: 0, activeProjects,
   };
+  for (const row of rows) {
+    const all = Number(row.n);
+    const recent = Number(row.nRecent);
+    counts.totalRuns += all;
+    // 進行中的三態看「當下」（不套近期窗）；終局三態看「近期窗內」
+    if (row.status === "running") counts.running += all;
+    else if (row.status === "waiting") counts.waiting += all;
+    else if (row.status === "awaiting_approval") counts.awaitingApproval += all;
+    else if (row.status === "failed") counts.failedRecent += recent;
+    else if (row.status === "done") counts.doneRecent += recent;
+    else if (row.status === "stopped") counts.stoppedRecent += recent;
+  }
+  return counts;
 }
 
 /** 給 LLM／工具結果看的代理執行一行摘要（狀態轉中文、目標截斷防灌爆提示詞） */
@@ -211,7 +299,12 @@ export async function memberCanDispatch(auth: AuthState, groupId: string, role: 
 
 /** LLM 的工具呼叫格式（與最終回答的 {"answer":...} 互斥，以 tool 鍵區分）；ref＝專案代號 p1…pN、dbRef＝資料庫代號 db1…dbN */
 const teamToolSchema = z.object({
-  tool: z.enum(["project_detail", "read_scene", "list_generations", "find_model", "query_database", "list_agent_runs"]),
+  tool: z.enum([
+    "project_detail", "read_scene", "list_generations", "find_model", "query_database", "list_agent_runs",
+    // S5：ask 原本看不到人的事——阻塞、人類任務、專案營運快照全在畫面上有、在提示詞裡沒有。
+    // 於是它答得出「哪個代理在跑」，答不出「誰卡住了」。
+    "group_blockers", "list_tasks", "project_intelligence",
+  ]),
   args: z
     .object({
       ref: z.string().max(8).optional(),
@@ -223,6 +316,98 @@ const teamToolSchema = z.object({
     .optional(),
 });
 
+/* ── S5：組級阻塞摘要（純函式，供提示詞與工具共用；export 供單元測試） ── */
+
+export interface GroupBlockerDigestInput {
+  status: string;
+  openTasks: number;
+  overdueTasks: number;
+  blockers: Array<{ severity: string; type: string; label: string }>;
+  people: Array<{ name: string | null; userId: string | null; openTasks: number; overdueTasks: number }>;
+  byProject: Array<{ projectTitle: string; blockers: number; criticalBlockers: number; overdueTasks: number }>;
+}
+
+/** 阻塞清單一次最多注入幾條（提示詞預算：這段是重點，但不能吃掉專案現況） */
+const BLOCKER_PROMPT_LIMIT = 8;
+const PEOPLE_PROMPT_LIMIT = 5;
+const PROJECT_BLOCKER_PROMPT_LIMIT = 5;
+
+/**
+ * 組級阻塞 → 提示詞區塊。
+ *
+ * 為什麼要有這段：ask 的上下文原本只有專案現況與資料庫快照，於是它看得到「有幾個代理在跑」，
+ * 卻看不到「AI 正停在某個人類關卡等人」「誰手上有三件逾期」。使用者問「哪個案子卡住了」時，
+ * 它只能從 run 狀態猜——而真正的答案在人類任務裡。
+ *
+ * 刻意只給結構化結論（數字與標籤），不塞原始列：這段是要讓它答得準，不是讓它有更多可幻覺的素材。
+ */
+export function formatGroupBlockerDigest(insight: GroupBlockerDigestInput): string {
+  const severityLabel = (s: string) => (s === "critical" ? "嚴重" : "注意");
+  const lines: string[] = [
+    `整體：${insight.status === "blocked" ? "有阻塞" : insight.status === "attention" ? "需要關注" : "無明顯阻塞"}`
+    + `｜未結人員任務 ${insight.openTasks}（逾期 ${insight.overdueTasks}）`,
+  ];
+  if (insight.blockers.length) {
+    lines.push(`阻塞（前 ${Math.min(insight.blockers.length, BLOCKER_PROMPT_LIMIT)} 項）：`);
+    for (const b of insight.blockers.slice(0, BLOCKER_PROMPT_LIMIT)) {
+      lines.push(`  - [${severityLabel(b.severity)}] ${b.label}`);
+    }
+    if (insight.blockers.length > BLOCKER_PROMPT_LIMIT) {
+      lines.push(`  （另有 ${insight.blockers.length - BLOCKER_PROMPT_LIMIT} 項未列）`);
+    }
+  } else {
+    lines.push("阻塞：無");
+  }
+  const people = insight.people.filter((p) => p.openTasks > 0).slice(0, PEOPLE_PROMPT_LIMIT);
+  if (people.length) {
+    lines.push("人員負荷：" + people
+      .map((p) => `${p.userId ? (p.name ?? "未命名成員") : "尚未指派"} ${p.openTasks} 件${p.overdueTasks > 0 ? `（逾期 ${p.overdueTasks}）` : ""}`)
+      .join("、"));
+  }
+  const projects = insight.byProject.filter((p) => p.blockers > 0).slice(0, PROJECT_BLOCKER_PROMPT_LIMIT);
+  if (projects.length) {
+    lines.push("依專案：" + projects
+      .map((p) => `「${p.projectTitle}」${p.blockers} 項${p.criticalBlockers > 0 ? `（嚴重 ${p.criticalBlockers}）` : ""}`)
+      .join("、"));
+  }
+  return lines.join("\n");
+}
+
+/**
+ * ask 回傳的「依據了哪些上下文」標籤白名單。
+ *
+ * 為什麼要白名單：這個欄位的用途是讓使用者看得出答案的依據，不是讓模型自由發揮。
+ * 不設限的話它會編出看起來很專業、實際上根本沒讀過的來源名稱——那比不顯示更糟，
+ * 因為使用者會據此相信答案。只認得這幾個標籤，其餘一律丟掉。
+ */
+export const TEAM_CONTEXT_LABELS = [
+  "專案現況", "組花費", "資料庫快照", "阻塞與人員負荷",
+  "分鏡明細", "生成紀錄", "模型目錄", "資料庫搜尋", "代理動態", "人員任務", "專案營運快照",
+] as const;
+const TEAM_CONTEXT_LABEL_SET = new Set<string>(TEAM_CONTEXT_LABELS);
+
+/** 過濾模型回報的 contextUsed：只留白名單內、去重、最多 8 個 */
+export function sanitizeContextUsed(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") continue;
+    const label = item.trim();
+    if (!TEAM_CONTEXT_LABEL_SET.has(label) || out.includes(label)) continue;
+    out.push(label);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+/** 過濾模型回報的 rationale：1–3 句的結構化結論，不是 chain-of-thought；超長就截斷 */
+export function sanitizeRationale(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const text = raw.trim().replace(/\s+/g, " ");
+  if (!text) return undefined;
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
+}
+
 type ProjRow = typeof schema.projects.$inferSelect;
 /** 工具可鑽查的資料庫（代號 db1…dbN → 真實表）＝ask 注入上下文的那批可見庫（已過 agentAccess≠none 的濾網） */
 interface TeamDb { ref: string; id: string; name: string; fields: DataField[]; rowCount: number }
@@ -233,7 +418,56 @@ async function runTeamTool(
   dbByRef: Map<string, TeamDb>,
   groupId: string,
   call: z.infer<typeof teamToolSchema>,
+  // S5 的三支新工具需要 auth 才能走既有 core 的組隔離（不自己另寫一條查詢）
+  auth?: AuthState,
 ): Promise<{ step: string; text: string }> {
+  // ── S5：組級阻塞（誰卡住了）──
+  if (call.tool === "group_blockers") {
+    if (!auth) return { step: "查組阻塞(不可用)", text: "目前無法讀取組級阻塞資料" };
+    const insight = await getGroupAgentInsights(auth, groupId);
+    return {
+      step: `查了全組阻塞(${insight.blockers.length} 項)`,
+      text: formatGroupBlockerDigest(insight),
+    };
+  }
+
+  // ── S5：人類任務（ask 原本完全看不到人的事）──
+  if (call.tool === "list_tasks") {
+    if (!auth) return { step: "查人員任務(不可用)", text: "目前無法讀取人員任務" };
+    const ref = call.args?.ref?.trim();
+    const refProject = ref ? projByRef.get(ref) : undefined;
+    if (ref && !refProject) {
+      return { step: `查人員任務(${ref}不存在)`, text: `找不到代號 ${ref} 的專案——用現況清單的 p1…p${projByRef.size} 代號，或省略 ref 查全組` };
+    }
+    // 走既有 core（含 requireGroup 與封存專案過濾），只在本層依 ref 收斂
+    const all = await listGroupTasks(auth, groupId, { openOnly: true, limit: 60 });
+    const tasks = refProject ? all.filter((t) => t.projectId === refProject.id) : all;
+    const now = Date.now();
+    const text = tasks.length
+      ? tasks.slice(0, 20).map((t, i) => {
+          const due = t.dueAt
+            ? (t.dueAt.getTime() < now ? `逾期 ${Math.floor((now - t.dueAt.getTime()) / 86_400_000)} 天` : `${Math.max(0, Math.round((t.dueAt.getTime() - now) / 86_400_000))} 天後到期`)
+            : "無期限";
+          return `${i + 1}. 「${t.projectTitle}」${t.taskType === "approval" ? "[待核准]" : ""}${t.title}｜${t.assigneeName ?? "未指派"}｜${t.status}｜${due}`;
+        }).join("\n") + (tasks.length > 20 ? `\n（另有 ${tasks.length - 20} 件未列）` : "")
+      : refProject
+        ? `「${refProject.title}」目前沒有未結的人員任務`
+        : "本組目前沒有未結的人員任務";
+    return { step: refProject ? `查了「${refProject.title}」的人員任務(${tasks.length})` : `查了全組人員任務(${tasks.length})`, text };
+  }
+
+  // ── S5：單一專案的營運快照（素材／生成成功率／排程／筆記）──
+  if (call.tool === "project_intelligence") {
+    const ref = call.args?.ref?.trim() ?? "";
+    const target = projByRef.get(ref);
+    if (!target) {
+      return { step: `查專案快照(${ref || "未填"}不存在)`, text: `用現況清單的 p1…p${projByRef.size} 代號指定專案` };
+    }
+    // 專案必屬本組（projByRef 只裝本組專案），再讀既有的營運快照
+    const snapshot = await buildProjectIntelligence(target.id);
+    return { step: `查了「${target.title}」的營運快照`, text: snapshot.text };
+  }
+
   if (call.tool === "find_model") {
     const kw = call.args?.keyword?.trim();
     return { step: `查了模型目錄(${kw || "全部"})`, text: searchCatalogText(kw, call.args?.category?.trim()) };
@@ -350,6 +584,10 @@ async function runTeamTool(
 const dispatchProposalSchema = z.object({ projectRef: z.string().max(8), goal: z.string().min(5).max(1000) });
 const teamReplySchema = z.object({
   answer: z.string().min(1).max(4000),
+  // S5 決策軌跡：結構化結論＋依據的上下文標籤。刻意不收「思考過程」——
+  // 兩者都會再過 sanitize（rationale 截長、contextUsed 走白名單），模型講什麼不等於前端顯示什麼。
+  rationale: z.string().max(1000).optional(),
+  contextUsed: z.array(z.string().max(40)).max(20).optional(),
   dispatches: z.array(dispatchProposalSchema).max(4).optional(),
 });
 
@@ -628,10 +866,26 @@ export const teamAssistantRouter = router({
         ].join("\n"));
       }
 
+      // ── S5：阻塞與人員負荷。畫面上「誰卡住了」看得到、提示詞裡卻沒有，
+      // 於是被問「哪個案子卡住了」時它只能從 run 狀態猜——真正的答案在人類任務裡。
+      // 讀失敗不讓整次提問掛掉，改標記 degraded 並在提示詞裡誠實說「這段沒讀到」。
+      let blockerBlock = "";
+      let degraded = false;
+      try {
+        const insight = await getGroupAgentInsights(ctx.auth, input.groupId);
+        blockerBlock = formatGroupBlockerDigest(insight);
+      } catch (err) {
+        degraded = true;
+        console.warn("[teamAssistant] 組級阻塞讀取失敗（改以降級模式回答）：", err instanceof Error ? err.message : err);
+      }
+
       const context = [
         `各專案現況（每行一案、前綴代號 pN；active 優先、依最後更新排序${hidden > 0 ? `；另有 ${hidden} 案未列` : ""}）：`,
         lines.length ? lines.join("\n") : "（本組目前沒有專案）",
         `組總計：專案 ${totalProjects} 個｜本週組花費 ${weekSpent} 點（近 7 天帳本淨額）`,
+        "",
+        "阻塞與人員負荷（含人類任務——問「誰卡住了／哪個案子卡住了」以這段為準）：",
+        degraded ? "（本次讀取失敗，這段資料不可用；回答時要說明沒能確認阻塞狀況）" : blockerBlock,
         ...(dbSections.length ? ["", "組可見的自訂資料庫（前綴代號 dbN；工作台「資料庫」頁維護；快照僅最近幾列，全量搜尋用 query_database 工具）：", ...dbSections] : []),
       ].join("\n");
 
@@ -639,7 +893,10 @@ export const teamAssistantRouter = router({
       if (isMockMode()) {
         const preview = lines.slice(0, 3).join("\n");
         const answer = `（測試模式）本組共 ${totalProjects} 個專案${lines.length ? `：\n${preview}${lines.length > 3 ? "\n…" : ""}` : "。"}\n你的問題：「${input.message}」——正式模式會由 LLM 彙總分析${canDispatch ? "，並可提議在某專案發起代理計畫" : ""}。`;
-        return { answer, dispatches: [] as ResolvedDispatch[], steps: [] as string[], canDispatch, mock: true };
+        return {
+          answer, dispatches: [] as ResolvedDispatch[], steps: [] as string[], canDispatch, mock: true,
+          rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
+        };
       }
 
       const quotaError = await reserveQuota(ctx.auth.user.id, input.groupId, ASK_COST_POINTS, "團隊彙總助手");
@@ -666,9 +923,14 @@ ${forceFinal
 - {"tool":"find_model","args":{"keyword":"中文","category":"text-to-image"}}：依需求查模型目錄（兩參數皆可省略）
 - {"tool":"query_database","args":{"dbRef":"db1","keyword":"某人名"}}：鑽進某個自訂資料庫做全量關鍵字搜尋（上下文快照只有最近幾列；keyword 可省略＝最新 20 列）
 - {"tool":"list_agent_runs","args":{"ref":"p2"}}：查 AI 代理計畫/執行動態（ref 可省略＝全組）——答「有哪些代理在跑、進度如何、卡在哪」用這個
+- {"tool":"group_blockers"}：全組阻塞明細與人員負荷（比 <組現況> 的摘要更完整）
+- {"tool":"list_tasks","args":{"ref":"p2"}}：未結的人員任務（ref 可省略＝全組）——答「誰手上有什麼、誰逾期」用這個
+- {"tool":"project_intelligence","args":{"ref":"p2"}}：某專案的營運快照（素材量、生成成功率與最近失敗、排程與筆記量）——答「為什麼這案一直失敗／素材夠不夠」用這個
 能從 <組現況> 直接回答就不要查——每次查詢都有成本。`}
 ${dispatchBlock}
-最終回答只回 JSON：{"answer":"回答文字"${canDispatch ? `,"dispatches":[...]（沒有要派工就省略或給 []）` : ""}}。
+最終回答只回 JSON：{"answer":"回答文字","rationale":"1–3 句說明這個結論依據什麼","contextUsed":["用到的資料區塊標籤"]${canDispatch ? `,"dispatches":[...]（沒有要派工就省略或給 []）` : ""}}。
+rationale 只寫「結構化的結論依據」（例如「依阻塞清單，兩件逾期都集中在同一案」），不要寫思考過程、不要逐步推理、不要重述提示詞。
+contextUsed 只能從這份清單挑：${TEAM_CONTEXT_LABELS.join("、")}。沒用到的不要列，不在清單上的一律不要寫。
 <組現況>
 ${context}
 </組現況>
@@ -693,7 +955,7 @@ ${historyBlock}使用者的問題：${input.message}`;
           if (json && !forceFinal) {
             const toolCall = teamToolSchema.safeParse(json);
             if (toolCall.success) {
-              const r = await runTeamTool(projByRef, dbByRef, input.groupId, toolCall.data);
+              const r = await runTeamTool(projByRef, dbByRef, input.groupId, toolCall.data, ctx.auth);
               steps.push(r.step);
               toolBlocks += `\n<工具結果 tool="${toolCall.data.tool}" 第${round + 1}輪>\n${r.text}\n</工具結果>`;
               continue;
@@ -703,15 +965,28 @@ ${historyBlock}使用者的問題：${input.message}`;
           // 解析失敗：LLM 已計費不退點（0 點），至少把純文字當回答（不提議派工）
           if (!parsed?.success) {
             const fallbackText = raw.replace(/\{[\s\S]*\}/, "").trim() || raw.trim() || "我不太確定，可以換個問法再問一次。";
-            return { answer: fallbackText.slice(0, 4000), dispatches: [] as ResolvedDispatch[], steps, canDispatch, mock: false };
+            return {
+              answer: fallbackText.slice(0, 4000), dispatches: [] as ResolvedDispatch[], steps, canDispatch, mock: false,
+              rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
+            };
           }
-          return { answer: parsed.data.answer, dispatches: resolveDispatches(projByRef, parsed.data.dispatches ?? [], canDispatch), steps, canDispatch, mock: false };
+          return {
+            answer: parsed.data.answer,
+            dispatches: resolveDispatches(projByRef, parsed.data.dispatches ?? [], canDispatch),
+            steps, canDispatch, mock: false,
+            rationale: sanitizeRationale(parsed.data.rationale),
+            contextUsed: sanitizeContextUsed(parsed.data.contextUsed),
+            degraded,
+          };
         }
       } catch (err) {
         await refund(ctx.auth.user.id, input.groupId, ASK_COST_POINTS, "團隊彙總助手失敗退回");
         // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
         const answer = err instanceof NimServiceError ? err.message : "AI 彙總助手暫時沒回應，請稍後再問一次。";
-        return { answer, dispatches: [] as ResolvedDispatch[], steps, canDispatch, mock: false };
+        return {
+          answer, dispatches: [] as ResolvedDispatch[], steps, canDispatch, mock: false,
+          rationale: undefined as string | undefined, contextUsed: [] as string[], degraded,
+        };
       }
     }),
 
@@ -724,19 +999,42 @@ ${historyBlock}使用者的問題：${input.message}`;
     .input(z.object({ groupId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       requireGroup(ctx.auth, input.groupId);
-      // 上限 30：多專案組也能看到近期活躍＋失敗，仍防灌爆
-      const rows = await db
-        .select({
-          run: schema.agentRuns,
-          projectTitle: schema.projects.title,
-          userName: schema.users.name,
-        })
-        .from(schema.agentRuns)
-        .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
-        .leftJoin(schema.users, eq(schema.agentRuns.userId, schema.users.id))
-        .where(and(eq(schema.agentRuns.groupId, input.groupId), ne(schema.agentRuns.status, "discarded")))
-        .orderBy(sql`case when ${schema.agentRuns.status} in ('running','waiting','awaiting_approval') then 0 else 1 end`, desc(schema.agentRuns.updatedAt))
-        .limit(30);
+      const recentCutoff = new Date(Date.now() - GROUP_AGENT_RECENT_MS);
+      const notDiscarded = and(eq(schema.agentRuns.groupId, input.groupId), ne(schema.agentRuns.status, "discarded"));
+      const [rows, statusAgg, activeProjectsAgg] = await Promise.all([
+        // 清單上限 30：多專案組也能看到近期活躍＋失敗，仍防灌爆（計數走下面的整組聚合，不受此限）
+        db
+          .select({
+            run: schema.agentRuns,
+            projectTitle: schema.projects.title,
+            userName: schema.users.name,
+          })
+          .from(schema.agentRuns)
+          .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
+          .leftJoin(schema.users, eq(schema.agentRuns.userId, schema.users.id))
+          .where(notDiscarded)
+          .orderBy(sql`case when ${schema.agentRuns.status} in ('running','waiting','awaiting_approval') then 0 else 1 end`, desc(schema.agentRuns.updatedAt))
+          .limit(GROUP_AGENT_LIST_LIMIT),
+        // 整組計數：innerJoin projects 與清單同條件（專案沒了的孤兒列不該只在計數裡出現）
+        db
+          .select({
+            status: schema.agentRuns.status,
+            n: sql<string>`count(*)`,
+            nRecent: sql<string>`count(*) filter (where ${schema.agentRuns.updatedAt} >= ${recentCutoff})`,
+          })
+          .from(schema.agentRuns)
+          .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
+          .where(notDiscarded)
+          .groupBy(schema.agentRuns.status),
+        db
+          .select({ n: sql<string>`count(distinct ${schema.agentRuns.projectId})` })
+          .from(schema.agentRuns)
+          .innerJoin(schema.projects, eq(schema.agentRuns.projectId, schema.projects.id))
+          .where(and(
+            eq(schema.agentRuns.groupId, input.groupId),
+            inArray(schema.agentRuns.status, ["running", "waiting", "awaiting_approval"]),
+          )),
+      ]);
       const runs = rows.map(({ run, projectTitle, userName }) => ({
         id: run.id,
         projectId: run.projectId,
@@ -752,11 +1050,20 @@ ${historyBlock}使用者的問題：${input.message}`;
         error: run.error ? run.error.slice(0, 160) : null,
         currentStepNote: currentStepNote(run.steps),
       }));
-      const summary = summarizeGroupAgentRuns(
-        runs.map((r) => ({ status: r.status, projectId: r.projectId, updatedAt: r.updatedAt })),
-      );
-      return { summary, runs };
+      const counts = foldGroupStatusAggregate(statusAgg, Number(activeProjectsAgg[0]?.n ?? 0));
+      const summary = groupSummaryFromCounts(counts);
+      // totalRuns／listLimit：前端才能誠實說「顯示最近 30 筆（共 N 筆）」而不是把 30 當全部
+      return { summary, runs, totalRuns: counts.totalRuns, listLimit: GROUP_AGENT_LIST_LIMIT };
     }),
+
+  /**
+   * 全組代理洞察（作業台「誰卡住了」）：把阻塞歸到專案、把未結人類任務歸到人。
+   * 唯讀、組隔離；判斷規則與專案頁的過程面板共用同一支純函式（assembleAgentInsights），
+   * 不另立第二套「什麼算阻塞」的定義。
+   */
+  groupInsights: authedProcedure
+    .input(z.object({ groupId: z.string().uuid() }))
+    .query(({ ctx, input }) => getGroupAgentInsights(ctx.auth, input.groupId)),
 
   /**
    * 派工：把「使用者已確認」的目標交給某專案的 AI 代理規劃執行。
@@ -765,7 +1072,18 @@ ${historyBlock}使用者的問題：${input.message}`;
    * 派工權、與「專案必須屬於這個組」（防拿別組的 projectId 借道跨組派工）。
    */
   dispatch: authedProcedure
-    .input(z.object({ groupId: z.string().uuid(), projectId: z.string().uuid(), goal: z.string().min(5, "目標至少 5 個字").max(1000) }))
+    .input(z.object({
+      groupId: z.string().uuid(),
+      projectId: z.string().uuid(),
+      goal: z.string().min(5, "目標至少 5 個字").max(1000),
+      // 這四個參數專案頁的「執行計畫」本來就有，派工時卻被丟掉——同一句目標從團隊卡送出
+      // 會得到一份沒有 playbook、沒有指定來源、模式也不同的計畫。全部原樣轉交給
+      // planAgentCore，守門（ACL／額度／節流／併發鎖）一個都不繞過。
+      plannerMode: agentPlannerModeSchema.optional(),
+      extraSourceIds: z.array(z.string().uuid()).max(10).optional(),
+      driveFileIds: z.array(z.string().min(1).max(200)).max(5).optional(),
+      playbookId: z.string().max(80).optional(),
+    }))
     .mutation(async ({ ctx, input }) => {
       const role = requireGroup(ctx.auth, input.groupId);
       if (!(await memberCanDispatch(ctx.auth, input.groupId, role))) {
@@ -776,8 +1094,37 @@ ${historyBlock}使用者的問題：${input.message}`;
       if (!project || project.groupId !== input.groupId) {
         throw new TRPCError({ code: "NOT_FOUND", message: "找不到這個組的專案" });
       }
-      // 交給既有專案代理規劃核心（再驗 assertProjectEditable／封存／額度／規劃節流）
-      const run = await planAgentCore({ auth: ctx.auth, projectId: input.projectId, goal: input.goal });
+      // 交給既有專案代理規劃核心（再驗 assertProjectEditable／封存／額度／規劃節流）。
+      // 刻意不另加一層 teamDispatch 節流：planAgentCore 已套 agentPlan 滑動視窗（每人每分鐘 4 次），
+      // 再疊一層只是讓同一個人被兩套規則擋、錯誤訊息還不一致。
+      const run = await planAgentCore({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        goal: input.goal,
+        plannerMode: input.plannerMode,
+        extraSourceIds: input.extraSourceIds,
+        driveFileIds: input.driveFileIds,
+        playbookId: input.playbookId,
+      });
+      // 出處要留痕：同一份計畫從專案頁發起與從團隊卡派工，事後追查責任時是不同的故事。
+      // 走 recordAgentEventSafely（失敗不影響派工本身），事件內容只有可驗證的事實。
+      await recordAgentEventSafely({
+        runId: run.id,
+        groupId: run.groupId,
+        projectId: run.projectId,
+        eventKey: "run:dispatched-from-team",
+        eventType: "observation",
+        actorType: "human",
+        actorId: ctx.auth.user.id,
+        summary: `由作業台團隊分析卡派工${input.playbookId ? `（playbook：${input.playbookId}）` : ""}`,
+        data: {
+          origin: "team_card",
+          plannerMode: input.plannerMode ?? null,
+          playbookId: input.playbookId ?? null,
+          pickedSources: input.extraSourceIds?.length ?? 0,
+          driveFiles: input.driveFileIds?.length ?? 0,
+        },
+      });
       return {
         runId: run.id,
         projectId: run.projectId,
@@ -785,6 +1132,8 @@ ${historyBlock}使用者的問題：${input.message}`;
         planSummary: run.planSummary,
         estPoints: run.estPoints,
         status: run.status,
+        // 規劃遙測：讓派工的人看得到「這份計畫是誰、用什麼模式排的」，而不是黑盒
+        plannerTelemetry: run.plannerTelemetry,
       };
     }),
 });

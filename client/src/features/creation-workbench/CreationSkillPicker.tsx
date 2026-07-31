@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Icon, type IconName } from "../../components/Icon";
+import { Hint } from "../../components/ui";
 import {
   getAgentSkill,
   listModeSkills,
@@ -107,7 +108,8 @@ export function CreationSkillPicker({
         >
           <header className="creation-skill-menu__head">
             <strong>請誰來幫忙</strong>
-            <span className="hint">點卡面掛上；多步開拍前仍會請你過目</span>
+            {/* 怎麼操作這張選單的說明；熟手不需要 → guide 層，精簡模式收成「？」 */}
+            <Hint as="span">點卡面掛上；多步開拍前仍會請你過目</Hint>
           </header>
 
           <section className="creation-skill-menu__section">

@@ -88,6 +88,10 @@ export const agentPlannerTelemetrySchema = agentPlannerUsageSchema.extend({
   attemptCount: z.number().int().positive().max(10),
   fallbackFrom: agentPlannerProviderSchema.optional(),
   fallbackReason: z.enum(["provider_error", "invalid_output"]).optional(),
+  // PR-E2 知識注入透明化：只記字數與截斷旗標（可稽核），不記知識內容本身
+  knowledgeIncludedChars: z.number().int().nonnegative().optional(),
+  knowledgeTotalChars: z.number().int().nonnegative().optional(),
+  knowledgeTruncated: z.boolean().optional(),
 });
 
 export type AgentPlannerTelemetry = z.infer<typeof agentPlannerTelemetrySchema>;

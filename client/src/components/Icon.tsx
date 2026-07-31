@@ -1,14 +1,20 @@
 import type { CSSProperties, ReactNode } from "react";
 
 /**
- * 本地內嵌 Lucide 圖示（零 npm 依賴、零 CDN）。
+ * 本地內嵌 Lucide 圖示（產品端零依賴、零 CDN）。
  *
- * CSP 為 scriptSrc 'self'，禁止外部 CDN，因此把 Lucide（MIT 授權）的 24x24
+ * CSP 為 scriptSrc 'self'，禁止外部 CDN，因此把 Lucide（**ISC** 授權）的 24x24
  * stroke 路徑資料直接內嵌於此。每個圖示以 `stroke="currentColor"` 繪製，
  * 會繼承父層文字色（--primary / --success / --danger…），並一律
  * `aria-hidden="true"`（圖示只是既有可讀按鈕／標籤的視覺輔助）。
  *
  * 用法：<Icon name="Mic" />、<Icon name="Download" size={20} />
+ *
+ * **新增圖示請用產生器，不要手抄路徑：**
+ *   node scripts/add-icon.mjs Waypoints
+ * 手抄 SVG 路徑錯了不會有任何測試抓得到——只會是一個形狀走樣的圖示送到使用者
+ * 眼前。腳本從 devDependency `lucide-static` 讀原始檔機械轉換，把抄寫拿掉。
+ * lucide-static 只在建置前用到，產品 bundle 不會多出任何一個位元組。
  */
 export type IconName =
   | "Mic"
@@ -68,7 +74,11 @@ export type IconName =
   | "Smartphone"
   | "Tablet"
   | "Monitor"
-  | "Copy";
+  | "Copy"
+  | "Waypoints"
+  | "HardDrive"
+  | "Camera"
+  | "Share2";
 
 /**
  * 每個名稱對應一組 Lucide 24x24 stroke 幾何（忠實重現原始路徑）。
@@ -110,6 +120,14 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
       <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </>
+  ),
+  HardDrive: (
+    <>
+      <line x1="22" x2="2" y1="12" y2="12" />
+      <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+      <line x1="6" x2="6.01" y1="16" y2="16" />
+      <line x1="10" x2="10.01" y1="16" y2="16" />
     </>
   ),
   Mic: (
@@ -442,7 +460,42 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M3 12A9 3 0 0 0 21 12" />
     </>
   ),
+  Waypoints: (
+    <>
+      <path d="m10.586 5.414-5.172 5.172" />
+      <path d="m18.586 13.414-5.172 5.172" />
+      <path d="M6 12h12" />
+      <circle cx="12" cy="20" r="2" />
+      <circle cx="12" cy="4" r="2" />
+      <circle cx="20" cy="12" r="2" />
+      <circle cx="4" cy="12" r="2" />
+    </>
+  ),
+  Camera: (
+    <>
+      <path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z" />
+      <circle cx="12" cy="13" r="3" />
+    </>
+  ),
+  Share2: (
+    <>
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <line x1="8.59" x2="15.42" y1="13.51" y2="17.49" />
+      <line x1="15.41" x2="8.59" y1="6.51" y2="10.49" />
+    </>
+  ),
 };
+
+/**
+ * 執行期可列舉的圖示名單（給展示頁與測試用）。
+ *
+ * 直接由 `PATHS` 推導，不另外維護第二份名單——手寫第二份只會多一個
+ * 會跟本體不同步的東西。型別那一側由 `Record<IconName, ReactNode>` 顧著：
+ * 聯集裡有、PATHS 裡漏掉的名稱，tsc 會直接報錯。
+ */
+export const ICON_NAMES = Object.keys(PATHS) as IconName[];
 
 export function Icon({
   name,

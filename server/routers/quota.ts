@@ -6,6 +6,7 @@ import type { AuthState } from "../services/auth";
 import { db, schema } from "../db";
 import { getSettings, updateSettings, usedTotal, usedThisWeek, usedToday, effectiveDailyQuota, groupUsage, usedByGroup, usedByMember, loadQuotaConfig } from "../services/points";
 import { getFalAccountBalance } from "../services/falBilling";
+import { getFalPointsCeiling } from "../services/falCeiling";
 
 /** 團隊管理權檢查（組預算是由上往下分配的，只有團隊管理員以上能調）：開發者或該組所屬團隊的 admin */
 async function assertGroupTeamAdmin(auth: { user: { isSuperAdmin: boolean }; adminTeamIds: string[] }, groupId: string): Promise<void> {
@@ -65,10 +66,22 @@ export const quotaRouter = router({
     // 分配樹（累計上限）：個人預算 → 組預算——只給本組成員看自己的剩餘
     const memberBudgetRemaining = cfg?.memberBudget != null ? Math.max(0, cfg.memberBudget - memberUsed) : null;
     const groupBudgetRemaining = cfg?.groupBudget != null ? Math.max(0, cfg.groupBudget - groupUsed) : null;
+    // 方案 C（#220）：可花點數硬上限對齊 Fal 台幣等值餘額。查不到（未設定／上游異常）→ null＝不套用
+    //（fail-open，與 points.ts 的 falCeilingReason 同口徑；billing 與 FX 皆有快取，不打爆熱路徑）
+    const ceiling = await getFalPointsCeiling();
+    const falPointsCap = ceiling.ok ? ceiling.pointsCap : null;
+    const budgetRemaining = settings.totalBudgetPoints != null && settings.totalBudgetPoints > 0
+      ? Math.max(0, settings.totalBudgetPoints - total)
+      : null;
     return {
       totalBudget: settings.totalBudgetPoints, // null＝不限
       totalUsed: total,
-      totalRemaining: settings.totalBudgetPoints != null && settings.totalBudgetPoints > 0 ? Math.max(0, settings.totalBudgetPoints - total) : null,
+      /** 站內預算剩餘與 Fal 台幣等值上限取小；兩者皆 null＝不限 */
+      totalRemaining: budgetRemaining != null && falPointsCap != null
+        ? Math.min(budgetRemaining, falPointsCap)
+        : budgetRemaining ?? falPointsCap,
+      /** null＝Fal 未設定或查詢失敗（不套硬上限） */
+      falPointsCap,
       weeklyQuota: quota, // null＝不限
       weeklyUsed: weekly,
       dailyQuota: effectiveDailyQuota(settings), // null＝不限
@@ -107,7 +120,18 @@ export const quotaRouter = router({
       if (!ctx.auth.user.isSuperAdmin) {
         throw new TRPCError({ code: "FORBIDDEN", message: "只有開發者能查看平台 Fal 帳戶餘額" });
       }
-      return getFalAccountBalance({ force: input?.force === true });
+      const force = input?.force === true;
+      const billing = await getFalAccountBalance({ force });
+      if (!billing.ok) return billing;
+      // 方案 C（#220）：USD 之外並陳台幣等值與可花點數上限（1 點＝NT$1）
+      const ceiling = await getFalPointsCeiling({ force });
+      return {
+        ...billing,
+        balanceTwd: ceiling.ok ? Math.round(billing.balance * ceiling.rate) : null,
+        rate: ceiling.ok ? ceiling.rate : null,
+        rateSource: ceiling.ok ? ceiling.rateSource : null,
+        pointsCap: ceiling.ok ? ceiling.pointsCap : null,
+      };
     }),
 
   /** 組週額度（團隊管理/組長可調；0 或空＝不限） */

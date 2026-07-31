@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { trpc } from "../api";
 import { MODELS } from "@shared/models";
 import { Icon } from "./Icon";
-
+import { Button, Chip, Hint, Meta } from "./ui";
 export interface PickedModel {
   id: string;
   label: string;
@@ -87,7 +87,7 @@ export function ModelPicker({
           <option key={c.id} value={c.id}>{c.label}</option>
         ))}
       </select>
-      {cat && <p className="hint" style={{ marginTop: 4 }}>{cat.hint}</p>}
+      {cat && <Hint style={{ marginTop: 4 }}>{cat.hint}</Hint>}
 
       <label htmlFor="mp-model">模型(點數透明)</label>
       <select id="mp-model" value={selected?.id ?? ""} disabled={loading} onChange={(e) => setModelId(e.target.value)}>
@@ -105,21 +105,21 @@ export function ModelPicker({
           );
         })}
       </select>
-      {loading && <p className="hint" style={{ marginTop: 4 }}>模型載入中…</p>}
+      {loading && <Meta as="p" style={{ marginTop: 4 }}>模型載入中…</Meta>}
       {loadError && (
         <p className="error">
           模型清單載入失敗：{loadError.message}
-          <button className="btn-sm" style={{ marginLeft: 8 }} onClick={() => { categories.refetch(); models.refetch(); }}>
+          <Button size="sm" style={{ marginLeft: 8 }} onClick={() => { categories.refetch(); models.refetch(); }}>
             重試
-          </button>
+          </Button>
         </p>
       )}
       {selected && (
-        <p className="hint" style={{ marginTop: 4 }}>
-          {selected.recommended && <span className="chip on" style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}><Icon name="Star" size={12} /> 推薦</span>}
+        <Meta as="p" style={{ marginTop: 4 }}>
+          {selected.recommended && <Chip selected style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}><Icon name="Star" size={12} /> 推薦</Chip>}
           {selected.strengths}
           {!selected.verified && <span style={{ color: "var(--gold-ink)" }}>(<Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", margin: "0 2px" }} />新模型 ID 待正式模式首跑確認;失敗會自動退點)</span>}
-        </p>
+        </Meta>
       )}
     </div>
   );

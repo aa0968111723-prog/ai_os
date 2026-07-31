@@ -8,6 +8,7 @@ import { AssetVideo, AssetAudio, MissingMediaBox } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 import { revealWorkbenchAnchor } from "../features/creation-workbench/workbenchNav";
 
+import { Button, Chip, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus } from "./ui";
 /** 生成結果縮圖（圖片）：載入失敗顯示「結果已失效」佔位，並拿掉開新分頁連結（點下去只會是 404） */
 function GenResultImgLink({ url, alt }: { url: string; alt: string }) {
   const [failed, setFailed] = useState(false);
@@ -78,8 +79,8 @@ const STATUS_LABEL: Record<string, string> = {
   rejected: "已駁回",
 };
 
-/** 成本審核的兩個新狀態沒有專屬 .pill 配色——借語意最近的既有 class（待核准＝queued 金、已駁回＝failed 紅） */
-const STATUS_PILL_CLASS: Record<string, string> = { awaiting_approval: "queued", rejected: "failed" };
+/** 成本審核的兩個新狀態沒有專屬 pill 配色——借語意最近的既有狀態（待核准＝queued 金、已駁回＝failed 紅） */
+const STATUS_PILL_CLASS: Record<string, PillStatus> = { awaiting_approval: "queued", rejected: "failed" };
 
 /** 「再用此設定」帶回生成台的完整設定（與 ProjectPage.applyPrompt 的 settings 同形狀） */
 export interface ReuseSettings {
@@ -302,22 +303,19 @@ export function GenerationList({
       <div style={{ marginTop: 14 }} aria-hidden="true">
         {[0, 1, 2].map((k) => (
           <div key={k} className="gen-row">
-            <div className="gen-thumb skeleton" />
+            <Skeleton className="gen-thumb" />
             <div>
-              <div className="skeleton" style={{ height: 14, width: k === 1 ? "55%" : "72%", marginBottom: 8 }} />
-              <div className="skeleton" style={{ height: 11, width: "40%" }} />
+              <Skeleton style={{ height: 14, width: k === 1 ? "55%" : "72%", marginBottom: 8 }} />
+              <Skeleton style={{ height: 11, width: "40%" }} />
             </div>
-            <div className="skeleton" style={{ height: 28, width: 64, borderRadius: 999 }} />
+            <Skeleton style={{ height: 28, width: 64, borderRadius: 999 }} />
           </div>
         ))}
       </div>
     );
   if (!list.data?.length)
     return (
-      <div className="empty-state" style={{ marginTop: 12 }}>
-        <h3>還沒有生成紀錄——</h3>
-        <p>上面試一次吧。</p>
-      </div>
+      <EmptyState icon={<Icon name="Sparkles" />} title={<>還沒有生成紀錄——</>} description={<>上面試一次吧。</>} style={{ marginTop: 12 }} />
     );
 
   const activeFilterCount =
@@ -333,7 +331,7 @@ export function GenerationList({
       <div className="sr-only" role="status" aria-live="polite">{liveMsg}</div>
       {addSceneError && <p className="error">加入分鏡失敗：{addSceneError}</p>}
       {addedId && !addSceneError && (
-        <p className="hint" style={{ color: "var(--success-ink)" }}>已加入分鏡 ✓（在下方分鏡・交付區）</p>
+        <Meta as="p" style={{ color: "var(--success-ink)" }}>已加入分鏡 ✓（在下方分鏡・交付區）</Meta>
       )}
       {retry.error && <p className="error">重試失敗：{retry.error.message}</p>}
       {decideCost.error && <p className="error">核准／駁回失敗：{decideCost.error.message}</p>}
@@ -341,7 +339,7 @@ export function GenerationList({
       <details className="generation-filter-panel">
         <summary>
           <span><Icon name="SlidersHorizontal" size={13} /> 篩選與搜尋</span>
-          <span className="hint">{activeFilterCount > 0 ? `已套用 ${activeFilterCount} 項` : "依狀態、類型、分鏡或提示詞尋找"}</span>
+          <Meta>{activeFilterCount > 0 ? `已套用 ${activeFilterCount} 項` : "依狀態、類型、分鏡或提示詞尋找"}</Meta>
         </summary>
         <div
           className="gen-filters"
@@ -424,12 +422,12 @@ export function GenerationList({
       {browsing && paged.isError && (
         <p className="error" role="alert" style={{ marginTop: 12 }}>
           生成紀錄暫時載入不了（不是資料不見了）——
-          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => paged.refetch()}>再試一次</button>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => paged.refetch()}>再試一次</Button>
         </p>
       )}
-      {browsing && paged.isLoading && rows.length === 0 && <p className="hint" style={{ marginTop: 12 }}>載入中…</p>}
+      {browsing && paged.isLoading && rows.length === 0 && <Meta as="p" style={{ marginTop: 12 }}>載入中…</Meta>}
       {browsing && !paged.isLoading && !paged.isError && rows.length === 0 && (
-        <p className="hint" style={{ marginTop: 12 }}>沒有符合條件的生成紀錄。</p>
+        <Meta as="p" style={{ marginTop: 12 }}>沒有符合條件的生成紀錄。</Meta>
       )}
       {rows.map((g) => (
         <div key={g.id} className="gen-row" id={`generation-${g.id}`}>
@@ -457,7 +455,7 @@ export function GenerationList({
                 aria-label="在留言中討論這筆生成"
                 title="把這筆生成帶進組內留言討論"
                 onClick={() => discussInMessages({ refType: "generation", refId: g.id, title: g.name || g.prompt.slice(0, 40) })}
-                style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
+                style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
               >
                 <Icon name="MessageCircle" size={15} />
               </button>
@@ -468,7 +466,7 @@ export function GenerationList({
                   aria-pressed={!!g.favorite}
                   disabled={toggleFavorite.isPending}
                   onClick={() => toggleFavorite.mutate({ generationId: g.id, favorite: !g.favorite })}
-                  style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: g.favorite ? "var(--gold)" : "var(--muted-fg)" }}
+                  style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 2, background: "none", border: "none", cursor: "pointer", color: g.favorite ? "var(--gold)" : "var(--muted-fg)" }}
                 >
                   <Icon name="Star" size={16} style={g.favorite ? { fill: "currentColor" } : undefined} />
                 </button>
@@ -495,7 +493,7 @@ export function GenerationList({
                     onClick={() => submitRename(g.id)}
                     disabled={rename.isPending}
                     aria-label="儲存名稱"
-                    style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--success)" }}
+                    style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--success)" }}
                   >
                     <Icon name="Check" size={15} />
                   </button>
@@ -503,7 +501,7 @@ export function GenerationList({
                     type="button"
                     onClick={() => setRenamingId(null)}
                     aria-label="取消命名"
-                    style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
+                    style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
                   >
                     <Icon name="X" size={15} />
                   </button>
@@ -519,7 +517,7 @@ export function GenerationList({
                         setRenamingId(g.id);
                         setRenameDraft(g.name ?? "");
                       }}
-                      style={{ display: "inline-flex", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
+                      style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 2, background: "none", border: "none", cursor: "pointer", color: "var(--muted-fg)" }}
                     >
                       <Icon name="Pencil" size={14} />
                     </button>
@@ -544,10 +542,10 @@ export function GenerationList({
               return (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", marginTop: 4 }}>
                   {chars.length > 0 && (
-                    <span className="chip" title={chars.map(charName).join("、")}>角色 {chars.length}</span>
+                    <Chip title={chars.map(charName).join("、")}>角色 {chars.length}</Chip>
                   )}
                   {presets.length > 0 && (
-                    <span className="chip" title={presets.map(presetName).join("、")}>場景 {presets.length}</span>
+                    <Chip title={presets.map(presetName).join("、")}>場景 {presets.length}</Chip>
                   )}
                   {boundScene && (
                     <button
@@ -582,7 +580,7 @@ export function GenerationList({
                   {/* 注入透明化：世界觀/角色/場景錨點注入後「實際送給模型」的完整提示詞 */}
                   {injectedPrompt && (
                     <details style={{ flexBasis: "100%" }}>
-                      <summary className="hint" style={{ cursor: "pointer", fontSize: 12 }}>完整注入提示詞</summary>
+                      <Meta as="summary" style={{ cursor: "pointer", fontSize: 12 }}>完整注入提示詞</Meta>
                       <div className="mono" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 12, marginTop: 4, padding: "6px 8px", background: "var(--surface-2, rgba(0,0,0,0.04))", borderRadius: 6 }}>
                         {injectedPrompt}
                         <div style={{ marginTop: 4 }}>
@@ -610,12 +608,12 @@ export function GenerationList({
             {g.error && <div className="error">{g.status === "rejected" ? "駁回理由：" : "生成失敗："}{g.error}</div>}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-            <span className={`pill ${STATUS_PILL_CLASS[g.status] ?? g.status}`}>{STATUS_LABEL[g.status] ?? g.status}</span>
+            <Pill status={STATUS_PILL_CLASS[g.status] ?? (g.status as PillStatus)}>{STATUS_LABEL[g.status] ?? g.status}</Pill>
             {/* MOB-03：進行中列提示可離開（背景 runner 推進） */}
             {(g.status === "queued" || g.status === "running") && (
-              <span className="hint" style={{ fontSize: 11, textAlign: "right", maxWidth: 140 }}>
+              <Meta style={{ fontSize: 11, textAlign: "right", maxWidth: 140 }}>
                 背景執行中，可離開
-              </span>
+              </Meta>
             )}
             {canEdit && g.status === "done" && g.kind !== "text" && (
               inScenes(g.id) ? (

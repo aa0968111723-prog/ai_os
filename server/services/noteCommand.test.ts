@@ -81,7 +81,7 @@ function auth(role: "admin" | "leader" | "member" = "member"): AuthState {
       name: "測試",
       email: "t@example.com",
       isSuperAdmin: false,
-      mustChangePassword: false,
+      mustChangePassword: false, uiDensity: null,
     },
     groups: [
       { groupId: "group-1", groupName: "組", teamId: "team-1", teamName: "隊", role },

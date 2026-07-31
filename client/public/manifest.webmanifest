@@ -16,11 +16,26 @@
   "prefer_related_applications": false,
   "launch_handler": { "client_mode": ["navigate-existing", "auto"] },
   "handle_links": "preferred",
+  "share_target": {
+    "action": "/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        { "name": "media", "accept": ["image/*", "video/*", "audio/*", "application/pdf"] }
+      ]
+    }
+  },
   "icons": [
     { "src": "/icons/icon-v2-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-v2-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-v2-1024.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-v2-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-    { "src": "/icons/icon-v2-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "/icons/icon-v2-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icons/icon-v2-1024-maskable.png", "sizes": "1024x1024", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
     { "name": "作業台", "short_name": "作業台", "description": "回到專案作業台", "url": "/?source=pwa-shortcut", "icons": [{ "src": "/icons/icon-v2-96.png", "sizes": "96x96", "type": "image/png" }] },

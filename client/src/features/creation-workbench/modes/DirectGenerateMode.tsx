@@ -17,7 +17,7 @@ import {
   shouldShowApprovalThresholdNotice,
 } from "../generationGates";
 import { scrollToSelector } from "../workbenchNav";
-
+import { Button, Card, Chip, Hint, Meta } from "../../../components/ui";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
   nonce: number;
@@ -68,7 +68,13 @@ export function DirectGenerateMode({
   canEdit: boolean;
   myRole: string | null | undefined;
   projectFormat: string;
-  worldview: { tones: string[]; styles: string[]; taboos: string[] };
+  worldview: {
+    logline?: string;
+    message?: string;
+    tones: string[];
+    styles: string[];
+    taboos: string[];
+  };
   wvReady: boolean;
   characterIds: string[];
   scenePresetIds: string[];
@@ -281,33 +287,28 @@ export function DirectGenerateMode({
           .join("・")
       : undefined;
 
+  // `on` 是「這項上下文已備妥」的視覺標示，不是切換態——點下去只是捲到該區塊。
+  // 所以走 className 給 .on，不傳 selected：否則會輸出 aria-pressed，把一次性動作
+  // 講成「未按下的切換鈕」，對讀屏使用者謊報元件性質。
   const summaryChip = (label: string, target: string, on = false) => (
-    <span
-      role="button"
-      tabIndex={0}
-      className={`chip pick ${on ? "on" : ""}`}
+    <Chip
+      className={on ? "on" : undefined}
       onClick={() => scrollToSelector(target)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          scrollToSelector(target);
-        }
-      }}
     >
       {label}
-    </span>
+    </Chip>
   );
 
   const form = (
     <div data-fb="生成台" id="sec-studio">
       {goal ? (
-        <p className="hint" style={{ marginTop: 4 }}>
+        <Meta as="p" style={{ marginTop: 4 }}>
           目前目標：
           <b>
             {goal.slice(0, 80)}
             {goal.length > 80 ? "…" : ""}
           </b>
-        </p>
+        </Meta>
       ) : null}
 
       <ModelPicker onChange={setModel} pickRequest={pickReq} />
@@ -334,27 +335,25 @@ export function DirectGenerateMode({
       {(characterIds.length > 0 || scenePresetIds.length > 0) &&
         fullModel &&
         !supportsCardAnchors(fullModel.category) && (
-          <p className="hint" role="alert" style={{ color: "var(--gold-ink)", marginTop: 6 }}>
+          <Hint layer="always" role="alert" style={{ color: "var(--gold-ink)", marginTop: 6 }}>
             ⚠ 此模型（{CATEGORIES.find((c) => c.id === fullModel.category)?.label ?? fullModel.category}
             ）不會使用角色卡／場景卡——已勾選的卡片不影響本次生成
-          </p>
+          </Hint>
         )}
       {(characterIds.length > 0 || scenePresetIds.length > 0) &&
         fullModel &&
         supportsCardAnchors(fullModel.category) && (
-          <p className="hint" style={{ marginTop: 6, fontSize: 12 }}>
+          <Hint style={{ marginTop: 6, fontSize: 12 }}>
             角色卡／場景卡以「文字描述」注入提示詞；定裝參考圖不會直接送入模型（僅供人工比對成品）
-          </p>
+          </Hint>
         )}
 
       {/* Progressive disclosure (4.4): source under 進階設定 — only when model needs source */}
       {model?.needs && (
-        <details
-          className="card card--quiet"
+        <Card as="details" variant="quiet"
           style={{ marginTop: 10, padding: "8px 10px" }}
           open={advancedOpen}
-          onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
-        >
+          onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}>
           <summary style={{ cursor: "pointer", fontWeight: 600 }}>
             <Icon name="SlidersHorizontal" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
             進階設定
@@ -388,17 +387,15 @@ export function DirectGenerateMode({
               </select>
             )}
             {sourceAsset ? (
-              <p className="hint">
+              <Meta as="p">
                 來源：{sourceAsset.title}（素材庫）
-                <button
+                <Button size="sm"
                   type="button"
-                  className="btn-sm"
                   style={{ marginLeft: 8 }}
-                  onClick={() => setSourceAsset(null)}
-                >
+                  onClick={() => setSourceAsset(null)}>
                   改用網址
-                </button>
-              </p>
+                </Button>
+              </Meta>
             ) : (
               <>
                 <label htmlFor="gen-source-url">來源網址</label>
@@ -432,7 +429,7 @@ export function DirectGenerateMode({
               </>
             )}
           </div>
-        </details>
+        </Card>
       )}
 
       <CreationCostSummary
@@ -464,7 +461,7 @@ export function DirectGenerateMode({
         >
           {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${estPoints} 點）`}
         </button>
-        <span className="hint">{disableReason ?? "失敗自動退點・額度由管理員調整"}</span>
+        <Hint as="span" layer="always">{disableReason ?? "失敗自動退點・額度由管理員調整"}</Hint>
       </div>
 
       {confirming && model && (
@@ -488,28 +485,31 @@ export function DirectGenerateMode({
           </p>
           {(worldview.tones.length > 0 ||
             worldview.styles.length > 0 ||
-            worldview.taboos.length > 0) && (
-            <p className="hint" style={{ margin: "4px 0", fontSize: 12 }}>
+            worldview.taboos.length > 0 ||
+            !!(worldview.logline?.trim() || worldview.message?.trim())) && (
+            <Meta as="p" style={{ margin: "4px 0", fontSize: 12 }}>
               自動注入：
               {[
+                worldview.logline?.trim() ? "故事錨點" : "",
+                worldview.message?.trim() ? "核心訊息" : "",
                 worldview.tones.length ? `調性（${worldview.tones.join("、")}）` : "",
                 worldview.styles.length ? `風格（${worldview.styles.join("、")}）` : "",
                 worldview.taboos.length ? `禁忌 ${worldview.taboos.length} 條` : "",
               ]
                 .filter(Boolean)
                 .join("・")}
-            </p>
+            </Meta>
           )}
           <p style={{ margin: "8px 0" }}>
             預估{" "}
             <b style={{ color: "var(--primary-ink)", fontSize: 18 }}>約 {estPoints} 點</b>
             {isUsageBasedPoints(model.id) && (
-              <span className="hint" style={{ marginLeft: 6, fontSize: 12 }}>
+              <Hint as="span" layer="always" style={{ marginLeft: 6, fontSize: 12 }}>
                 （依文字長度即時計費）
-              </span>
+              </Hint>
             )}
             {quota.data && (
-              <span className="hint" style={{ marginLeft: 8 }}>
+              <Meta style={{ marginLeft: 8 }}>
                 {quota.data.totalRemaining != null
                   ? `目前剩 ${quota.data.totalRemaining.toLocaleString()} 點`
                   : "額度不限"}
@@ -519,7 +519,7 @@ export function DirectGenerateMode({
                 {quota.data.dailyQuota != null
                   ? `・今日 ${quota.data.dailyUsed}/${quota.data.dailyQuota}`
                   : ""}
-              </span>
+              </Meta>
             )}
           </p>
           {approvalNeeded && (
@@ -527,11 +527,11 @@ export function DirectGenerateMode({
               {approvalThresholdNotice(estPoints, quota.data!.approvalThreshold!)}
             </p>
           )}
-          <p className="hint" style={{ fontSize: 12 }}>失敗全額退點。正式模式會實際呼叫 AI 生成。</p>
+          <Hint layer="always" style={{ fontSize: 12 }}>失敗全額退點。正式模式會實際呼叫 AI 生成。</Hint>
           {/* MOB-03：長任務可離開——背景 runner 不綁 cookie；完成會推播到已連結裝置 */}
-          <p className="hint" style={{ fontSize: 12, marginTop: 6 }}>
+          <Hint style={{ fontSize: 12, marginTop: 6 }}>
             可關閉此頁，完成會推播到已連結裝置。
-          </p>
+          </Hint>
           <div className="confirm-actions" style={{ display: "flex", gap: 10, marginTop: 10 }}>
             <button
               type="button"
@@ -563,16 +563,16 @@ export function DirectGenerateMode({
       )}
 
       {submitNotice && (
-        <p className="hint" role="status" style={{ marginTop: 10, color: "var(--gold-ink)" }}>
+        <Meta as="p" role="status" style={{ marginTop: 10, color: "var(--gold-ink)" }}>
           {submitNotice}
-        </p>
+        </Meta>
       )}
       {submit.error && <p className="error">{submit.error.message}</p>}
 
       {/* GenerationList lives in CreationResourceDrawer (WB-05) — avoid duplicate long card here. */}
-      <p className="hint" style={{ marginTop: 12 }}>
+      <Hint layer="always" style={{ marginTop: 12 }}>
         生成紀錄與「再用此設定」已移到下方「資源與結果」抽屜。
-      </p>
+      </Hint>
     </div>
   );
 

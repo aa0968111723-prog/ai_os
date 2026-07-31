@@ -2,7 +2,7 @@ import { useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
-
+import { Badge, Button, Hint, Meta, Skeleton } from "./ui";
 /**
  * 長文版本歷史（#29）：知識庫長文（師父開示逐字稿／見證故事）每次「內容更新」前，
  * 後端會自動存一版快照。這裡把歷史版本由新到舊列出，可一鍵「還原此版本」——
@@ -25,8 +25,8 @@ export function VersionHistory({ knowledgeId, projectId }: { knowledgeId: string
 
   return (
     <div style={{ marginTop: 10 }}>
-      <button
-        className="btn-sm"
+      <Button
+        size="sm"
         style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
@@ -34,24 +34,24 @@ export function VersionHistory({ knowledgeId, projectId }: { knowledgeId: string
         <Icon name="Clock" size={14} />
         版本歷史
         <Icon name={open ? "ChevronUp" : "ChevronDown"} size={14} />
-      </button>
+      </Button>
 
       {open && (
         <div style={{ marginTop: 8 }}>
           {versions.isLoading ? (
             <div aria-hidden="true">
-              <div className="skeleton" style={{ height: 14, maxWidth: 260, marginBottom: 8 }} />
-              <div className="skeleton" style={{ height: 14, maxWidth: 200 }} />
+              <Skeleton style={{ height: 14, maxWidth: 260, marginBottom: 8 }} />
+              <Skeleton style={{ height: 14, maxWidth: 200 }} />
             </div>
           ) : versions.error ? (
             <p className="error">{versions.error.message}</p>
           ) : !versions.data || versions.data.length === 0 ? (
-            <p className="hint">還沒有歷史版本——這筆長文「更新內容」後，更新前的舊版會存到這裡。</p>
+            <Hint layer="always">還沒有歷史版本——這筆長文「更新內容」後，更新前的舊版會存到這裡。</Hint>
           ) : (
             <div>
-              <p className="hint" style={{ marginBottom: 6 }}>
+              <Meta as="p" style={{ marginBottom: 6 }}>
                 共 {versions.data.length} 個歷史版本（最新在上，最多保留 20 版）。
-              </p>
+              </Meta>
               {versions.data.map((v) => {
                 const firstLine = v.preview.split("\n")[0]?.trim() || "（空白開頭）";
                 return (
@@ -67,7 +67,7 @@ export function VersionHistory({ knowledgeId, projectId }: { knowledgeId: string
                   >
                     <div style={{ minWidth: 0, flex: "1 1 auto" }}>
                       <div style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                        <span className="badge">{new Date(v.createdAt).toLocaleString("zh-Hant")}</span>
+                        <Badge>{new Date(v.createdAt).toLocaleString("zh-Hant")}</Badge>
                         {v.title && <span style={{ fontWeight: 600 }}>{v.title}</span>}
                         <span className="meta">{v.chars.toLocaleString()} 字</span>
                       </div>

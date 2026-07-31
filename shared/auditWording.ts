@@ -15,6 +15,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "auth.revokeSession": "撤銷登入裝置",
   "auth.createUploadGrant": "簽發上傳授權",
   "auth.changePassword": "修改密碼",
+  "auth.setUiDensity": "調整介面說明密度",
   "auth.acceptInvite": "接受邀請加入",
   "admin.createTeam": "建立團隊",
   "admin.createGroup": "建立組別",
@@ -55,6 +56,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "scenes.addDraft": "新增分鏡草稿",
   "scenes.addFromGeneration": "把成品加入分鏡",
   "scenes.setVisualFromGeneration": "設定分鏡畫面",
+  "scenes.setVisualFromAsset": "切換分鏡版本",
+  "scenes.refine": "以底圖修正分鏡畫面",
   "scenes.update": "更新分鏡",
   "scenes.move": "移動分鏡",
   "scenes.reorder": "重排分鏡順序",
@@ -147,6 +150,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "databases.updateRow": "更新資料列",
   "databases.removeRow": "刪除資料列",
   "databases.importUrl": "從網址匯入資料庫文件",
+  "databases.importDriveFile": "從 Google 雲端選檔匯入資料庫文件",
+  "knowledge.importDriveFile": "從 Google 雲端選檔轉存進知識庫",
   "databases.importData": "匯入資料到資料庫（CSV／TSV／JSON）",
   "databases.importCsv": "匯入 CSV 到資料庫", // 歷史動作名（併入 importData 前的日誌仍以此顯示）
   "databases.uploadFile": "上傳資料庫文件",
@@ -167,6 +172,11 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "integrations.remove": "刪除外部資料庫／API 連接",
   "integrations.removeGoogleDrive": "中斷 Google 雲端連結",
   "integrations.googleDriveConnect": "連結 Google 雲端硬碟", // Express OAuth callback 手動補記
+  // Adobe 帳號（修圖／剪輯）
+  "adobe.connect": "連結 Adobe 帳號", // Express OAuth callback 手動補記
+  "adobe.disconnect": "中斷 Adobe 連結",
+  "adobe.editPhoto": "在 Adobe 帳號內修圖",
+  "adobe.renderTimeline": "在 Adobe 帳號內算圖剪輯",
   // 跨裝置通知（subscribe/sync 實務上審計豁免——高頻例行回報＋含裝置金鑰，列入字典保底）
   "push.subscribe": "連結通知裝置",
   "push.sync": "同步通知裝置",
@@ -198,6 +208,20 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "mcp.get_agent_run": "外部 AI：查代理進度",
   "mcp.list_schedule": "外部 AI：列出行程",
   "mcp.add_schedule_item": "外部 AI：新增行程",
+  // D 波次（#216 總規）：MCP 全面化新工具
+  "mcp.update_schedule_item": "外部 AI：更新行程",
+  "mcp.add_note": "外部 AI：新增筆記",
+  "mcp.append_note": "外部 AI：追加筆記",
+  "mcp.list_tasks": "外部 AI：列出人類任務",
+  "mcp.create_task": "外部 AI：建立人類任務",
+  "mcp.complete_task": "外部 AI：完成任務／裁決核准",
+  "mcp.list_knowledge": "外部 AI：列出知識庫",
+  "mcp.get_knowledge": "外部 AI：讀取知識",
+  "mcp.list_scenes": "外部 AI：列出分鏡",
+  "mcp.get_integrations_status": "外部 AI：查外部連接狀態",
+  "mcp.import_drive_file": "外部 AI：匯入雲端檔案",
+  // 選檔搜尋稽核（query 端點自行補記——記「誰搜了什麼」，不記檔案內容）
+  "integrations.listDriveFiles": "瀏覽 Google 雲端選檔清單",
 };
 
 /** action → 人話；字典沒有的（新端點）retain 原代碼，寧可看得懂大多數也不擋新功能上線 */
@@ -222,7 +246,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },
   { key: "database", label: "自訂資料庫", prefixes: ["databases"] },
-  { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["mcpTokens", "mcp", "integrations"] },
+  { key: "external", label: "外部 AI 連線（MCP／整合）", prefixes: ["mcpTokens", "mcp", "integrations", "adobe"] },
 ];
 
 const OTHER_CATEGORY = { key: "other", label: "其他" } as const;

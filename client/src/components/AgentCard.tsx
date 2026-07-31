@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
+import { flashAnchor } from "../discuss";
 import type { CompletePlanSummary } from "../../../shared/plan";
 import {
   AGENT_PLANNER_OPTIONS,
@@ -15,6 +16,9 @@ import {
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
 import { listAiProjectRoles } from "../../../shared/aiProjectRoles";
+import { Button, Card, Chip, Hint, Meta, Pill, type PillStatus } from "./ui";
+import { getPlaybook } from "../../../shared/rolePlaybooks";
+import { GoogleDrivePicker } from "./GoogleDrivePicker";
 
 /**
  * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
@@ -42,6 +46,8 @@ interface AgentStep {
     | "wait_for_human"
     | "request_approval";
   note: string;
+  /** 決策軌跡（#133 PR-1）：為何需要此步——結構化說明，非模型內部推理 */
+  rationale?: string;
   status: "pending" | "running" | "waiting" | "done" | "failed" | "stopped";
   actorType?: "ai" | "human" | "system";
   dependsOn?: string[];
@@ -77,7 +83,7 @@ const KIND_ICON: Record<AgentStep["kind"], IconName> = {
   request_approval: "Check",
 };
 /** 創作者語：少代碼狀態名，多「場記／過目／開拍」感 */
-const RUN_STATUS: Record<string, { label: string; cls: string }> = {
+const RUN_STATUS: Record<string, { label: string; cls: PillStatus }> = {
   awaiting_approval: { label: "待你過目", cls: "queued" },
   running: { label: "開拍中", cls: "running" },
   waiting: { label: "等你回覆", cls: "queued" },
@@ -131,6 +137,43 @@ function notifyDesktop(title: string, body: string): void {
   }
 }
 
+/**
+ * 步驟產出 chips（#133 PR-2）：outputRefs → 可點深連結。
+ * 筆記／排程走 Planner 的 ?focus= 深連結；任務與生成成果在同頁（工作台／專案頁），
+ * 用 flashAnchor 捲動＋閃爍既有錨點（task-{id}／generation-{id}）；其他類型顯示標籤。
+ */
+function OutputRefChips({ refs }: { refs: Array<{ type: string; id: string; label?: string }> }) {
+  if (!refs.length) return null;
+  return (
+    <>
+      {refs.slice(0, 6).map((ref) => {
+        const label = ref.label?.slice(0, 24) || ref.type;
+        if (ref.type === "note") {
+          return <Link key={`${ref.type}-${ref.id}`} className="chip pick" href={`/planner?focus=note-${ref.id}`}>成果：{label}</Link>;
+        }
+        if (ref.type === "schedule") {
+          return <Link key={`${ref.type}-${ref.id}`} className="chip pick" href={`/planner?focus=schedule-${ref.id}`}>成果：{label}</Link>;
+        }
+        if (ref.type === "task") {
+          return (
+            <button key={`${ref.type}-${ref.id}`} type="button" className="chip pick" onClick={() => flashAnchor(`task-${ref.id}`)}>
+              成果：{label}
+            </button>
+          );
+        }
+        if (ref.type === "generation") {
+          return (
+            <button key={`${ref.type}-${ref.id}`} type="button" className="chip pick" title="捲動到生成成果" onClick={() => flashAnchor(`generation-${ref.id}`)}>
+              成果：{label}
+            </button>
+          );
+        }
+        return <Chip key={`${ref.type}-${ref.id}`}>成果：{label}</Chip>;
+      })}
+    </>
+  );
+}
+
 const GOAL_EXAMPLES = [
   "請分鏡助理：把知識庫腳本拆成分鏡，並為每一鏡生成畫面（帶定裝）",
   "請生成員：做三格開場分鏡——禪堂晨光、點香、遠景，各配一張圖",
@@ -138,6 +181,8 @@ const GOAL_EXAMPLES = [
 ];
 
 const AI_ROLE_ROSTER = listAiProjectRoles();
+/** #133 PR-3：創作短版入口——固定短骨架（拆分鏡→生成→可選配音／送審），與完整多步計畫區隔 */
+const SHORT_CREATION_PLAYBOOK = getPlaybook("playbook.creation.short.v1");
 
 export function AgentCard({
   projectId,
@@ -163,6 +208,12 @@ export function AgentCard({
   // 與 App 同 key 共用快取：核准/停止的授權是「發起人本人或組長以上」，按鈕顯示要跟伺服器規則對齊
   const me = trpc.auth.me.useQuery();
   const [goal, setGoal] = useState(() => (initialGoal ?? "").trim());
+  // PR-E3：搜尋雲端後「勾選」僅本次納入規劃的檔案（內容由後端規劃當下拉取，不落庫）
+  const [driveSources, setDriveSources] = useState<Array<{ id: string; name: string }>>([]);
+  // PR-E2：轉存進知識庫的來源（站內知識 id）——優先注入本次與之後的規劃
+  const [knowledgeSources, setKnowledgeSources] = useState<Array<{ id: string; title: string }>>([]);
+  const [saveToKnowledgeError, setSaveToKnowledgeError] = useState<string | null>(null);
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
   const [plannerMode, setPlannerMode] = useState<AgentPlannerMode>(readAgentPlannerMode);
   const [expandedRuns, setExpandedRuns] = useState<Record<string, boolean>>({});
   const goalInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -200,8 +251,24 @@ export function AgentCard({
     utils.agents.insights.invalidate({ projectId });
   };
   const plan = trpc.agents.plan.useMutation({
-    onSuccess: () => { setGoal(""); invalidateAll(); },
+    onSuccess: () => { setGoal(""); setDriveSources([]); setKnowledgeSources([]); invalidateAll(); },
   });
+  const importToKnowledge = trpc.knowledge.importDriveFile.useMutation();
+  // PR-E2「轉存進知識庫」：逐檔轉存（序列化）→ 成為站內知識來源 chips → 規劃帶 extraSourceIds 優先注入
+  const saveDriveFilesToKnowledge = async (files: Array<{ id: string; name: string }>) => {
+    setSaveToKnowledgeError(null);
+    const errors: string[] = [];
+    for (const f of files) {
+      try {
+        const row = await importToKnowledge.mutateAsync({ projectId, fileId: f.id, kind: "note" });
+        setKnowledgeSources((prev) => (prev.some((k) => k.id === row.id) ? prev : [...prev, { id: row.id, title: row.title }].slice(0, 10)));
+      } catch (err) {
+        errors.push(`${f.name}：${err instanceof Error ? err.message : "轉存失敗"}`);
+      }
+    }
+    utils.knowledge.list.invalidate({ projectId });
+    if (errors.length) setSaveToKnowledgeError(errors.slice(0, 3).join("；"));
+  };
   const approve = trpc.agents.approve.useMutation({ onSuccess: invalidateAll });
   const discard = trpc.agents.discard.useMutation({ onSuccess: invalidateAll });
   const stop = trpc.agents.stop.useMutation({ onSuccess: invalidateAll });
@@ -286,7 +353,7 @@ export function AgentCard({
             <div className="agent-crew-live__head">
               <Icon name="Sparkles" size={14} />
               <strong>劇組開拍中</strong>
-              <span className="hint">關頁也會繼續 · {flying.length} 條支線</span>
+              <Meta>關頁也會繼續 · {flying.length} 條支線</Meta>
             </div>
             <div className="agent-crew-live__row">
               {flying.slice(0, 6).map((f, i) => (
@@ -312,9 +379,9 @@ export function AgentCard({
                 <div style={{ fontWeight: 650 }}>
                   可以開拍 · 約 {r.estPoints} 點
                 </div>
-                <div className="hint" style={{ marginTop: 2 }}>
+                <Meta as="div" style={{ marginTop: 2 }}>
                   {r.goal.slice(0, 80)}{r.goal.length > 80 ? "…" : ""}
-                </div>
+                </Meta>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <ConfirmButton
@@ -326,9 +393,9 @@ export function AgentCard({
                 >
                   {approve.isPending ? "開拍中…" : `開拍（約 −${r.estPoints} 點）`}
                 </ConfirmButton>
-                <button type="button" className="btn-sm" disabled={busy} onClick={() => discard.mutate({ runId: r.id })}>
+                <Button size="sm" disabled={busy} onClick={() => discard.mutate({ runId: r.id })}>
                   先不要
-                </button>
+                </Button>
               </div>
             </div>
           ))}
@@ -338,9 +405,9 @@ export function AgentCard({
       {!hideComposer && canEdit ? (
         <>
           {!compactComposer && (
-            <p className="hint" style={{ marginTop: embedded ? 0 : -4 }}>
+            <Hint style={{ marginTop: embedded ? 0 : -4 }}>
               寫目標 → 排步驟 → 你核准才扣點；關頁也會繼續跑。
-            </p>
+            </Hint>
           )}
           <label htmlFor={`agent-goal-${projectId}`}>目標</label>
           <textarea
@@ -353,6 +420,20 @@ export function AgentCard({
             placeholder={`例：${GOAL_EXAMPLES[0]}`}
           />
           <div className="creation-skill-picker__row" style={{ marginTop: 6 }}>
+            {SHORT_CREATION_PLAYBOOK && (
+              <button
+                type="button"
+                className="chip pick"
+                style={{ fontWeight: 650 }}
+                title={`${SHORT_CREATION_PLAYBOOK.title}——快速出一版可審的影音／圖文；要排程、物資與多人分工請改用完整多步計畫（直接描述目標即可）`}
+                onClick={() => {
+                  setGoal(SHORT_CREATION_PLAYBOOK.goalTemplate);
+                  goalInputRef.current?.focus();
+                }}
+              >
+                <Icon name="Sparkles" size={12} /> 快速開拍（短版）
+              </button>
+            )}
             {AI_ROLE_ROSTER.slice(0, compactComposer ? 4 : 6).map((role) => (
               <button
                 key={role.id}
@@ -371,16 +452,16 @@ export function AgentCard({
           <details style={{ margin: "8px 0 0" }} open={!compactComposer}>
             <summary style={{ cursor: "pointer", fontWeight: 600 }}>
               規劃模型
-              <span className="hint" style={{ marginLeft: 8 }}>{plannerOption.shortLabel}</span>
+              <Meta style={{ marginLeft: 8 }}>{plannerOption.shortLabel}</Meta>
             </summary>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 6, marginTop: 6 }}>
               {AGENT_PLANNER_OPTIONS.map((option) => {
                 const selected = option.value === plannerMode;
                 return (
-                  <button
+                  <Button
                     key={option.value}
-                    type="button"
-                    className={`btn-sm${selected ? " primary" : ""}`}
+                    size="sm"
+                    variant={selected ? "primary" : "neutral"}
                     aria-pressed={selected}
                     title={option.description}
                     onClick={() => {
@@ -393,53 +474,112 @@ export function AgentCard({
                     <span style={{ display: "block", fontSize: "var(--fs-11)", opacity: 0.82, marginTop: 2 }}>
                       {option.usageLabel}
                     </span>
-                  </button>
+                  </Button>
                 );
               })}
             </div>
           </details>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+            <Button
+              size="sm"
+              onClick={() => setShowDrivePicker((v) => !v)}
+              title="搜尋你的 Google 雲端並勾選檔案，只給這次規劃參考（不會存進站內；未勾選的 AI 看不到）"
+            >
+              <Icon name="HardDrive" size={12} /> 搜尋雲端（僅本次）
+            </Button>
+            {knowledgeSources.map((k) => (
+              <Chip key={k.id} title="已轉存進知識庫（可重複使用）——本次規劃優先注入">
+                知識：{k.title.slice(0, 16)}{k.title.length > 16 ? "…" : ""}
+                <button
+                  type="button"
+                  className="chip__x"
+                  aria-label={`本次不注入 ${k.title}`}
+                  style={{ marginLeft: 4, border: 0, background: "none", cursor: "pointer", padding: 0 }}
+                  onClick={() => setKnowledgeSources((prev) => prev.filter((x) => x.id !== k.id))}
+                >
+                  <Icon name="X" size={10} />
+                </button>
+              </Chip>
+            ))}
+            {driveSources.map((f) => (
+              <Chip key={f.id} title="僅本次規劃使用，不會存進站內">
+                僅本次：{f.name.slice(0, 16)}{f.name.length > 16 ? "…" : ""}
+                <button
+                  type="button"
+                  className="chip__x"
+                  aria-label={`移除 ${f.name}`}
+                  style={{ marginLeft: 4, border: 0, background: "none", cursor: "pointer", padding: 0 }}
+                  onClick={() => setDriveSources((prev) => prev.filter((x) => x.id !== f.id))}
+                >
+                  <Icon name="X" size={10} />
+                </button>
+              </Chip>
+            ))}
+          </div>
+          {saveToKnowledgeError && <p className="error" role="alert">{saveToKnowledgeError}</p>}
+          {importToKnowledge.isPending && <Meta as="p" role="status">轉存進知識庫中…</Meta>}
+          {showDrivePicker && (
+            <GoogleDrivePicker
+              onClose={() => setShowDrivePicker(false)}
+              pickLabel="僅本次規劃"
+              onSaveToKnowledge={(files) => { void saveDriveFilesToKnowledge(files); }}
+              onPick={(files) => {
+                setDriveSources((prev) => {
+                  const merged = [...prev];
+                  for (const f of files) if (!merged.some((x) => x.id === f.id)) merged.push(f);
+                  return merged.slice(0, 5);
+                });
+              }}
+            />
+          )}
           <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <ConfirmButton
               triggerClassName="primary"
               disabled={goal.trim().length < 5 || plan.isPending}
-              message={`會讀專案資料排出步驟與估點。規劃不扣站內點數；你核准後才開始執行與扣點。`}
+              message={`會讀專案資料排出步驟與估點${knowledgeSources.length || driveSources.length ? `（優先注入你選的來源：知識 ${knowledgeSources.length}、僅本次雲端檔 ${driveSources.length}）` : ""}。規劃不扣站內點數；你核准後才開始執行與扣點。`}
               confirmLabel="排步驟"
-              onConfirm={() => plan.mutate({ projectId, goal: goal.trim(), plannerMode })}
+              onConfirm={() => plan.mutate({
+                projectId,
+                goal: goal.trim(),
+                plannerMode,
+                extraSourceIds: knowledgeSources.length ? knowledgeSources.map((k) => k.id) : undefined,
+                driveFileIds: driveSources.length ? driveSources.map((f) => f.id) : undefined,
+              })}
             >
               {plan.isPending ? "排程中…" : "幫我排步驟"}
             </ConfirmButton>
             {!plan.isPending && goal.trim().length > 0 && goal.trim().length < 5 && (
-              <span className="hint">目標至少 5 個字</span>
+              <Hint as="span" layer="always">目標至少 5 個字</Hint>
             )}
           </div>
           {plan.error && <p className="error" role="alert">{plan.error.message}</p>}
         </>
       ) : hideComposer ? (
         !runs.isLoading && !runs.error && runList.length === 0 && (
-          <p className="hint" role="status">還沒有計畫——在上方寫目標並掛技能，或切到「執行計畫」直接排步驟。</p>
+          <Hint layer="always" role="status">還沒有計畫——在上方寫目標並掛技能，或切到「執行計畫」直接排步驟。</Hint>
         )
       ) : (
-        <p className="hint">你在此專案是檢視者（唯讀）——可以看進度，不能發起或核准。</p>
+        <Hint layer="always">你在此專案是檢視者（唯讀）——可以看進度，不能發起或核准。</Hint>
       )}
 
       {actionError && <p className="error" role="alert">{actionError.message}</p>}
-      {runs.isLoading && <p className="hint" role="status">載入計畫…</p>}
+      {runs.isLoading && <Meta as="p" role="status">載入計畫…</Meta>}
       {!runs.isLoading && !runs.error && runList.length === 0 && !hideComposer && canEdit && (
-        <p className="hint" role="status">
+        <Meta as="p" role="status">
           還沒有計畫——寫好目標後按「幫我排步驟」；核准前不會扣執行點數。
-        </p>
+        </Meta>
       )}
 
       {insights.data && (
         <details className="agent-run" style={{ marginTop: 10 }}>
           <summary>
-            <span className={`pill ${insights.data.status === "healthy" ? "done" : insights.data.status === "blocked" ? "failed" : "queued"}`}>
+            <Pill status={insights.data.status === "healthy" ? "done" : insights.data.status === "blocked" ? "failed" : "queued"}>
               {insights.data.status === "healthy" ? "健康" : insights.data.status === "blocked" ? "有阻塞" : "需注意"}
-            </span>
+            </Pill>
             <strong>AI 職能健康</strong>
-            <span className="hint">
+            <Meta>
               執行中 {insights.data.activeRuns}・待辦 {insights.data.openTasks}・成果 {insights.data.results.length}
-            </span>
+            </Meta>
           </summary>
           <div className="agent-run__body" style={{ display: "grid", gap: 10 }}>
             <div className="meta">
@@ -447,20 +587,20 @@ export function AgentCard({
               ・待補資訊 {insights.data.unresolvedInformation}・風險 {insights.data.risks}
             </div>
             {Object.values(insights.data.truncated).some(Boolean) && (
-              <p className="hint" style={{ margin: 0 }}>
+              <Hint layer="always" style={{ margin: 0 }}>
                 資料量超過單頁上限；此處顯示最近項目，完整歷史可透過代理事件分頁查詢。
-              </p>
+              </Hint>
             )}
             {insights.data.blockers.length > 0 && (
               <section>
                 <strong>阻塞與提醒</strong>
-                <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                <Meta as="ul" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
                   {insights.data.blockers.map((blocker, index) => (
                     <li key={`${blocker.type}-${blocker.taskId ?? blocker.runId ?? index}`} style={{ color: blocker.severity === "critical" ? "var(--danger-ink)" : undefined }}>
                       {blocker.label}
                     </li>
                   ))}
-                </ul>
+                </Meta>
               </section>
             )}
             {insights.data.workItems.length > 0 && (
@@ -471,11 +611,11 @@ export function AgentCard({
                 <div style={{ display: "grid", gap: 5, marginTop: 6 }}>
                   {insights.data.workItems.map((item) => (
                     <div key={item.id} className="gen-row" style={{ gridTemplateColumns: "auto 1fr auto", alignItems: "center" }}>
-                      <span className="chip">{item.kind === "ai" ? "AI" : "人員"}</span>
+                      <Chip>{item.kind === "ai" ? "AI" : "人員"}</Chip>
                       <span>{item.title}</span>
-                      <span className="hint">
+                      <Meta>
                         {item.status}{item.dueAt ? `・${new Date(item.dueAt).toLocaleString("zh-TW", { hour12: false })}` : ""}
-                      </span>
+                      </Meta>
                     </div>
                   ))}
                 </div>
@@ -493,7 +633,7 @@ export function AgentCard({
                         : null;
                     return href
                       ? <Link key={`${result.type}-${result.id}`} className="chip pick" href={href}>{result.label}</Link>
-                      : <span key={`${result.type}-${result.id}`} className="chip">{result.type}：{result.label}</span>;
+                      : <Chip key={`${result.type}-${result.id}`}>{result.type}：{result.label}</Chip>;
                   })}
                 </div>
               </details>
@@ -504,7 +644,7 @@ export function AgentCard({
 
       {sortedRuns.map((r) => {
         const steps = r.steps as AgentStep[];
-        const st = RUN_STATUS[r.status] ?? { label: r.status, cls: "queued" };
+        const st: { label: string; cls: PillStatus } = RUN_STATUS[r.status] ?? { label: r.status, cls: "queued" };
         const defaultOpen =
           r.status === "running" ||
           r.status === "waiting" ||
@@ -534,36 +674,47 @@ export function AgentCard({
           >
             <summary>
               <span className="agent-run__goal">目標：{r.goal.slice(0, 60)}{r.goal.length > 60 ? "…" : ""}</span>
-              <span className={`pill ${st.cls}`}>{st.label}</span>
-              <span className="hint">步驟 {doneSteps}/{steps.length}</span>
-              <span className="hint">{new Date(r.createdAt).toLocaleString("zh-TW", { hour12: false })}</span>
+              <Pill status={st.cls}>{st.label}</Pill>
+              <Meta>步驟 {doneSteps}/{steps.length}</Meta>
+              <Meta>{new Date(r.createdAt).toLocaleString("zh-TW", { hour12: false })}</Meta>
               <Icon name={runOpen ? "ChevronUp" : "ChevronDown"} size={13} />
             </summary>
             <div className="agent-run__body">
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               {(r.status === "running" || r.status === "waiting") && canControl && (
-                <button className="btn-sm" disabled={stop.isPending} onClick={() => stop.mutate({ runId: r.id })}>
+                <Button size="sm" disabled={stop.isPending} onClick={() => stop.mutate({ runId: r.id })}>
                   {stop.isPending ? "停止中…" : "停止後續步驟"}
-                </button>
+                </Button>
               )}
               </div>
-            {r.summary && <p className="hint" style={{ margin: "4px 0" }}>{r.summary}</p>}
+            {r.summary && <Meta as="p" style={{ margin: "4px 0" }}>{r.summary}</Meta>}
             {plannerTelemetry && plannerTelemetry.provider !== "mock" && (
               <div className="meta" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                <span className="chip">
+                <Chip>
                   規劃模型：{plannerTelemetry.provider === "nvidia-nim" ? "NVIDIA NIM" : "fal.ai"}・{plannerTelemetry.model}
-                </span>
+                </Chip>
                 {plannerTelemetry.totalTokens != null && (
-                  <span className="chip">總用量 {plannerTelemetry.totalTokens.toLocaleString()} tokens</span>
+                  <Chip>總用量 {plannerTelemetry.totalTokens.toLocaleString()} tokens</Chip>
                 )}
                 {plannerTelemetry.costUsd != null && (
-                  <span className="chip">Fal 費用 US${plannerTelemetry.costUsd.toFixed(plannerTelemetry.costUsd < 0.01 ? 6 : 4)}</span>
+                  <Chip>Fal 費用 US${plannerTelemetry.costUsd.toFixed(plannerTelemetry.costUsd < 0.01 ? 6 : 4)}</Chip>
                 )}
                 {plannerTelemetry.fallbackFrom && (
-                  <span className="chip">已自動備援</span>
+                  <Chip>已自動備援</Chip>
                 )}
                 {plannerTelemetry.attemptCount > 1 && (
-                  <span className="chip">模型呼叫 {plannerTelemetry.attemptCount} 次</span>
+                  <Chip>模型呼叫 {plannerTelemetry.attemptCount} 次</Chip>
+                )}
+                {plannerTelemetry.knowledgeTruncated && (
+                  <Chip
+                    style={{ color: "var(--warning-ink, var(--danger-ink))" }}
+                    title="知識與指定來源超過規劃注入預算，尾段未進入本次規劃——長文可拆段或縮小指定來源"
+                  >
+                    知識注入已截斷
+                    {plannerTelemetry.knowledgeIncludedChars != null && plannerTelemetry.knowledgeTotalChars != null
+                      ? `（${plannerTelemetry.knowledgeIncludedChars.toLocaleString()}/${plannerTelemetry.knowledgeTotalChars.toLocaleString()} 字）`
+                      : ""}
+                  </Chip>
                 )}
               </div>
             )}
@@ -571,71 +722,85 @@ export function AgentCard({
               <details style={{ margin: "8px 0" }}>
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>
                   完整計畫
-                  <span className="hint" style={{ marginLeft: 8 }}>
+                  <Meta style={{ marginLeft: 8 }}>
                     {planSummary.successCriteria.length} 項成功條件
                     {planSummary.missingInformation.length ? `・${planSummary.missingInformation.length} 項待補資訊` : ""}
                     {planSummary.risks.length ? `・${planSummary.risks.length} 項風險` : ""}
-                  </span>
+                  </Meta>
                 </summary>
                 <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
                   <section>
                     <strong>目標</strong>
-                    <p className="hint" style={{ margin: "3px 0 0" }}>{planSummary.goal}</p>
+                    <Meta as="p" style={{ margin: "3px 0 0" }}>{planSummary.goal}</Meta>
                   </section>
+                  {planSummary.rationale && (
+                    <section>
+                      <strong>為何這樣排</strong>
+                      <Meta as="p" style={{ margin: "3px 0 0" }}>{planSummary.rationale}</Meta>
+                    </section>
+                  )}
+                  {(planSummary.contextUsed?.length ?? 0) > 0 && (
+                    <section>
+                      <strong>依據的上下文</strong>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                        {planSummary.contextUsed!.map((item, index) => <Chip key={index}>{item}</Chip>)}
+                      </div>
+                    </section>
+                  )}
                   {planSummary.successCriteria.length > 0 && (
                     <section>
                       <strong>成功條件</strong>
-                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                      <Meta as="ul" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
                         {planSummary.successCriteria.map((item, index) => <li key={index}>{item}</li>)}
-                      </ul>
+                      </Meta>
                     </section>
                   )}
                   {planSummary.expectedOutputs.length > 0 && (
                     <section>
                       <strong>預期成果</strong>
-                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                      <Meta as="ul" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
                         {planSummary.expectedOutputs.map((item, index) => <li key={index}>{item}</li>)}
-                      </ul>
+                      </Meta>
                     </section>
                   )}
                   {planSummary.missingInformation.length > 0 && (
                     <section>
                       <strong style={{ color: "var(--warning-ink, var(--danger-ink))" }}>執行前待補資訊</strong>
-                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                      <Meta as="ul" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
                         {planSummary.missingInformation.map((item, index) => <li key={index}>{item}</li>)}
-                      </ul>
+                      </Meta>
                     </section>
                   )}
                   {planSummary.milestones.length > 0 && (
                     <section>
                       <strong>里程碑</strong>
-                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                      <Meta as="ul" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
                         {planSummary.milestones.map((item) => (
                           <li key={item.id}>
                             {item.title}{item.dueAt ? `（${new Date(item.dueAt).toLocaleString("zh-TW", { hour12: false })}）` : ""}
                           </li>
                         ))}
-                      </ul>
+                      </Meta>
                     </section>
                   )}
                   {planSummary.risks.length > 0 && (
                     <section>
                       <strong>風險與因應</strong>
-                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                      <Meta as="ul" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
                         {planSummary.risks.map((risk, index) => (
                           <li key={index}>
                             {risk.title}：{risk.impact}{risk.mitigation ? `；因應：${risk.mitigation}` : ""}
                           </li>
                         ))}
-                      </ul>
+                      </Meta>
                     </section>
                   )}
                   {planSummary.assumptions.length > 0 && (
                     <section>
                       <strong>假設</strong>
-                      <ul className="hint" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
+                      <Meta as="ul" style={{ margin: "4px 0 0", paddingLeft: 20 }}>
                         {planSummary.assumptions.map((item, index) => <li key={index}>{item}</li>)}
-                      </ul>
+                      </Meta>
                     </section>
                   )}
                   <div className="meta">
@@ -647,15 +812,15 @@ export function AgentCard({
             )}
             <div style={{ marginTop: 4 }}>
               {steps.map((s, i) => (
-                <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                <Meta key={i} as="div" style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                   <span style={{ display: "inline-flex" }}>
                     <Icon name={STEP_ICON[s.status] ?? "Clock"} size={14} className={s.status === "running" ? "spin" : undefined} />
                   </span>
                   <span style={{ display: "inline-flex" }}><Icon name={KIND_ICON[s.kind] ?? "Sparkles"} size={12} /></span>
                   <span>{s.note}</span>
-                  {s.actorType && <span className="chip">{s.actorType === "human" ? "人員" : s.actorType === "system" ? "系統" : "AI"}</span>}
-                  {(s.dependsOn?.length ?? 0) > 0 && <span className="chip">前置 {s.dependsOn!.length}</span>}
-                  {s.estimatedMinutes != null && <span className="chip">約 {s.estimatedMinutes} 分</span>}
+                  {s.actorType && <Chip>{s.actorType === "human" ? "人員" : s.actorType === "system" ? "系統" : "AI"}</Chip>}
+                  {(s.dependsOn?.length ?? 0) > 0 && <Chip>前置 {s.dependsOn!.length}</Chip>}
+                  {s.estimatedMinutes != null && <Chip>約 {s.estimatedMinutes} 分</Chip>}
                   {s.points ? <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>約 {s.points} 點</span> : null}
                   {s.status === "pending" && r.status === "running" && <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>排隊中</span>}
                   {s.detail && <span className="mono" style={{ fontSize: "var(--fs-11)", opacity: 0.8 }}>{s.detail.slice(0, 60)}</span>}
@@ -669,8 +834,23 @@ export function AgentCard({
                       開啟排程
                     </Link>
                   )}
-                  {s.taskId && <span className="chip">人類任務</span>}
-                </div>
+                  {s.taskId && (
+                    <button type="button" className="chip pick" title="捲動到對應的人類任務" onClick={() => flashAnchor(`task-${s.taskId}`)}>
+                      人類任務
+                    </button>
+                  )}
+                  {s.generationId && !(s.outputRefs ?? []).some((ref) => ref.type === "generation") && (
+                    <button type="button" className="chip pick" title="捲動到生成成果" onClick={() => flashAnchor(`generation-${s.generationId}`)}>
+                      生成成果
+                    </button>
+                  )}
+                  <OutputRefChips refs={s.outputRefs ?? []} />
+                  {s.rationale && (
+                    <span className="meta" style={{ flexBasis: "100%", paddingLeft: 34 }} title={s.rationale}>
+                      理由：{s.rationale.slice(0, 120)}{s.rationale.length > 120 ? "…" : ""}
+                    </span>
+                  )}
+                </Meta>
               ))}
             </div>
             {runTasks.length > 0 && (
@@ -681,9 +861,9 @@ export function AgentCard({
                       <div style={{ fontWeight: 600 }}>
                         <Icon name={task.taskType === "approval" ? "Check" : "User"} size={12} />{" "}
                         {task.title}
-                        <span className="chip" style={{ marginLeft: 6 }}>
+                        <Chip style={{ marginLeft: 6 }}>
                           {task.status === "done" ? "完成" : task.status === "cancelled" ? "未通過／取消" : task.taskType === "approval" ? "待核准" : "待完成"}
-                        </span>
+                        </Chip>
                       </div>
                       <div className="meta">
                         {[task.assigneeName ? `負責人：${task.assigneeName}` : "尚未指派", task.dueAt ? `期限：${new Date(task.dueAt).toLocaleString("zh-TW", { hour12: false })}` : null]
@@ -695,11 +875,11 @@ export function AgentCard({
                       <div style={{ display: "flex", gap: 6 }}>
                         {task.taskType === "approval" ? (
                           <>
-                            <button className="btn-sm primary" disabled={busy} onClick={() => decideApproval.mutate({ id: task.id, decision: "approve" })}>核准</button>
-                            <button className="btn-sm" disabled={busy} onClick={() => decideApproval.mutate({ id: task.id, decision: "reject" })}>不核准</button>
+                            <Button size="sm" variant="primary" disabled={busy} onClick={() => decideApproval.mutate({ id: task.id, decision: "approve" })}>核准</Button>
+                            <Button size="sm" disabled={busy} onClick={() => decideApproval.mutate({ id: task.id, decision: "reject" })}>不核准</Button>
                           </>
                         ) : (
-                          <button className="btn-sm primary" disabled={busy} onClick={() => completeTask.mutate({ id: task.id })}>標記完成</button>
+                          <Button size="sm" variant="primary" disabled={busy} onClick={() => completeTask.mutate({ id: task.id })}>標記完成</Button>
                         )}
                       </div>
                     )}
@@ -711,14 +891,17 @@ export function AgentCard({
               <details style={{ marginTop: 10 }}>
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>
                   可稽核執行軌跡（{runEvents.length}）
-                  <span className="hint" style={{ marginLeft: 8 }}>顯示來源、動作、等待與結果，不顯示私密思考</span>
+                  {/* 這句是 <summary> 可及名稱的一部分（內容，非說明）。用 Hint 會在精簡模式
+                      塞一顆「？」按鈕進 <summary> 裡——按鈕點擊會冒泡去開合 details，
+                      說明永遠展不開，且 summary 本身就是互動元素，巢狀按鈕直接壞掉。 */}
+                  <Meta style={{ marginLeft: 8 }}>顯示來源、動作、等待與結果，不顯示私密思考</Meta>
                 </summary>
                 <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
                   {runEvents.map((event) => (
                     <div key={event.id} className="gen-row" style={{ gridTemplateColumns: "auto 1fr", alignItems: "start" }}>
-                      <span className={`pill ${event.eventType.includes("failed") || event.eventType === "approval_rejected" ? "failed" : event.eventType.includes("completed") || event.eventType === "human_resumed" ? "done" : "queued"}`}>
+                      <Pill status={event.eventType.includes("failed") || event.eventType === "approval_rejected" ? "failed" : event.eventType.includes("completed") || event.eventType === "human_resumed" ? "done" : "queued"}>
                         {EVENT_LABEL[event.eventType] ?? event.eventType}
-                      </span>
+                      </Pill>
                       <div>
                         <div>{event.summary}</div>
                         <div className="meta">
@@ -746,19 +929,19 @@ export function AgentCard({
                     </ConfirmButton>
                 )}
                 {canControl && (
-                    <button className="btn-sm" disabled={busy} onClick={() => discard.mutate({ runId: r.id })}>
+                    <Button size="sm" disabled={busy} onClick={() => discard.mutate({ runId: r.id })}>
                       先不要
-                    </button>
+                    </Button>
                 )}
                 {!canApprove && !canControl && (
-                  <span className="hint">等發起人或組長過目</span>
+                  <Meta>等發起人或組長過目</Meta>
                 )}
-                <span className="hint">過目前不扣點</span>
+                <Hint as="span" layer="always">過目前不扣點</Hint>
               </div>
             )}
-            {r.status === "failed" && r.error && <p className="hint" style={{ marginTop: 4, color: "var(--danger-ink)" }}>原因：{r.error}</p>}
-            {r.status === "stopped" && <p className="hint" style={{ marginTop: 4 }}>已停止（已完成與正在生成的步驟不受影響）。</p>}
-            {r.status === "done" && <p className="hint" style={{ marginTop: 4, color: "var(--success-ink)" }}>全部完成——各步驟可開啟實際筆記、排程、任務與生成成果。</p>}
+            {r.status === "failed" && r.error && <Meta as="p" style={{ marginTop: 4, color: "var(--danger-ink)" }}>原因：{r.error}</Meta>}
+            {r.status === "stopped" && <Meta as="p" style={{ marginTop: 4 }}>已停止（已完成與正在生成的步驟不受影響）。</Meta>}
+            {r.status === "done" && <Meta as="p" style={{ marginTop: 4, color: "var(--success-ink)" }}>全部完成——各步驟可開啟實際筆記、排程、任務與生成成果。</Meta>}
             </div>
           </details>
         );
@@ -768,8 +951,8 @@ export function AgentCard({
 
   if (embedded) return <div data-fb="AI 助手卡">{body}</div>;
   return (
-    <section className="card card--primary" data-fb="AI 助手卡" id="sec-agent">
+    <Card as="section" variant="primary" data-fb="AI 助手卡" id="sec-agent">
       {body}
-    </section>
+    </Card>
   );
 }

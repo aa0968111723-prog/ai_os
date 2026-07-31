@@ -6,6 +6,7 @@ import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { MCP_TOOLS } from "../../../shared/mcpCatalog";
 import { humanizeAuditAction, summarizeAuditInput } from "../../../shared/auditWording";
 
+import { Card, Hint, Meta, Pill, Skeleton } from "../components/ui";
 /**
  * MCP 專區（接上外部 AI 的控制中心）：連線設定 → 建立金鑰（可設唯讀／到期）→ 我的金鑰（權限一目了然）
  * → 測試連線（whoami）→ 工具手冊 → 近期活動。
@@ -156,7 +157,7 @@ export function McpPage() {
       />
 
       {/* 安全提醒 */}
-      <div className="card" style={{ borderLeft: "3px solid var(--gold-ink)", background: "var(--card2)" }}>
+      <Card style={{ borderLeft: "3px solid var(--gold-ink)", background: "var(--card2)" }}>
         <div style={{ display: "flex", gap: 8 }}>
           <Icon name="TriangleAlert" size={18} style={{ color: "var(--gold-ink)", flex: "none", marginTop: 2 }} />
           <div style={{ fontSize: "var(--fs-14)", lineHeight: 1.8 }}>
@@ -164,21 +165,21 @@ export function McpPage() {
             把權限縮到最小；任何一把都能隨時撤銷。
           </div>
         </div>
-      </div>
+      </Card>
 
       {/* 連線資訊 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="ArrowRight" size={18} />連線位置</h2>
-      <div className="card">
+      <Card>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: "var(--fs-14)" }}>
           <span>端點：<code>POST {endpoint}</code></span>
           <CopyButton text={endpoint} />
         </div>
         <div style={{ marginTop: 6, fontSize: "var(--fs-14)" }}>驗證：HTTP 標頭 <code>x-api-key: 你的金鑰</code></div>
-      </div>
+      </Card>
 
       {/* 建立金鑰 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Plus" size={18} />建立金鑰</h2>
-      <div className="card">
+      <Card>
         <form onSubmit={submit} className="stack" style={{ gap: 12 }}>
           <div>
             <label htmlFor="mcp-label" style={{ fontSize: "var(--fs-13)", fontWeight: 600 }}>用途名稱</label>
@@ -224,9 +225,9 @@ export function McpPage() {
             <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
               <Icon name="Lock" size={15} />「{fresh.label}」已建立{fresh.readOnly ? "（唯讀）" : ""}
             </div>
-            <p className="hint" style={{ margin: "6px 0 8px", color: "var(--gold-ink)" }}>
+            <Hint layer="always" style={{ margin: "6px 0 8px", color: "var(--gold-ink)" }}>
               ⚠️ 金鑰只顯示這一次，請立刻複製收好；關掉後就再也拿不回（只能撤銷後重建）。
-            </p>
+            </Hint>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <code style={{ flex: "1 1 260px", wordBreak: "break-all", fontSize: "var(--fs-13)" }}>{fresh.token}</code>
               <CopyButton text={fresh.token} label="複製金鑰" />
@@ -252,17 +253,17 @@ export function McpPage() {
             </div>
           </div>
         )}
-      </div>
+      </Card>
 
       {/* 我的金鑰 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Lock" size={18} />我的金鑰（{activeCount} 把使用中）</h2>
-      <div className="card">
+      <Card>
         {tokens.isLoading ? (
-          <><div className="skeleton" style={{ height: 40 }} /><div className="skeleton" style={{ height: 40, marginTop: 8 }} /></>
+          <><Skeleton style={{ height: 40 }} /><Skeleton style={{ height: 40, marginTop: 8 }} /></>
         ) : tokens.error ? (
-          <p className="hint" style={{ margin: 0, color: "var(--danger-ink)" }}>載入金鑰失敗：{tokens.error.message}</p>
+          <Meta as="p" style={{ margin: 0, color: "var(--danger-ink)" }}>載入金鑰失敗：{tokens.error.message}</Meta>
         ) : list.length === 0 ? (
-          <p className="hint" style={{ margin: 0 }}>還沒有金鑰。在上面建立一把即可開始連線。</p>
+          <Hint layer="always" style={{ margin: 0 }}>還沒有金鑰。在上面建立一把即可開始連線。</Hint>
         ) : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {list.map((t) => {
@@ -273,17 +274,17 @@ export function McpPage() {
                   <div style={{ flex: "1 1 auto", minWidth: 160 }}>
                     <b style={{ textDecoration: t.revokedAt ? "line-through" : undefined }}>{t.label}</b>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "4px 0" }}>
-                      <span className="pill" style={{ background: t.readOnly ? "var(--card2)" : undefined }}>{t.readOnly ? "唯讀" : "可讀可寫"}</span>
-                      <span className="pill" style={{ color: exp.expired ? "var(--danger-ink)" : undefined }}>{exp.text}</span>
+                      <Pill style={{ background: t.readOnly ? "var(--card2)" : undefined }}>{t.readOnly ? "唯讀" : "可讀可寫"}</Pill>
+                      <Pill style={{ color: exp.expired ? "var(--danger-ink)" : undefined }}>{exp.text}</Pill>
                     </div>
-                    <span className="hint" style={{ fontSize: 12 }}>
+                    <Meta style={{ fontSize: 12 }}>
                       建立 {fmtDate(t.createdAt)}
                       {t.lastUsedAt ? `・最近使用 ${relTime(t.lastUsedAt)}` : "・尚未使用"}
                       {t.revokedAt ? `・已撤銷 ${fmtDate(t.revokedAt)}` : ""}
-                    </span>
+                    </Meta>
                   </div>
                   {t.revokedAt ? (
-                    <span className="hint" style={{ flex: "none" }}>已撤銷</span>
+                    <Meta style={{ flex: "none" }}>已撤銷</Meta>
                   ) : (
                     <button
                       type="button"
@@ -300,46 +301,46 @@ export function McpPage() {
           </ul>
         )}
         {revoke.error && <p className="error" role="alert">{revoke.error.message}</p>}
-      </div>
+      </Card>
 
       {/* 工具手冊 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Info" size={18} />可用工具</h2>
-      <p className="hint" style={{ marginTop: 0 }}>
+      <Hint layer="always" style={{ marginTop: 0 }}>
         連進來的 AI 可呼叫以下工具。<b>讀取</b>類唯讀金鑰也能用；<b>寫入</b>類會扣點／留痕，唯讀金鑰一律擋下。
-      </p>
-      <ul className="hint" style={{ marginTop: 0, paddingLeft: 20, lineHeight: 1.9 }}>
+      </Hint>
+      <Hint as="ul" style={{ marginTop: 0, paddingLeft: 20, lineHeight: 1.9 }}>
         <li>先讀全貌：<code>get_project_status</code>（分鏡／生成／代理／排程／待辦一次到位）。</li>
         <li>自己生成：<code>find_model → submit_generation → get_generation（輪詢到完成）→ list_assets（取回成品）</code>。</li>
         <li>交給 AI 執行計畫：<code>plan_agent → approve_agent → get_agent_run（追進度）</code>——一句目標讓內建助手背景跑完多步製作。</li>
         <li>排時程：<code>list_schedule／add_schedule_item</code> 把交付死線與會議掛到專案與組行事曆。</li>
-      </ul>
-      <div className="card">
+      </Hint>
+      <Card>
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {MCP_TOOLS.map((tool) => (
             <li key={tool.name} style={{ display: "flex", gap: 10, padding: "9px 0", borderTop: "1px solid var(--border)", alignItems: "baseline" }}>
-              <span className="pill" style={{ flex: "none", minWidth: 44, textAlign: "center", color: tool.access === "write" ? "var(--gold-ink)" : undefined }}>
+              <Pill style={{ flex: "none", minWidth: 44, textAlign: "center", color: tool.access === "write" ? "var(--gold-ink)" : undefined }}>
                 {tool.access === "write" ? "寫入" : "讀取"}
-              </span>
+              </Pill>
               <div style={{ flex: "1 1 auto" }}>
                 <code style={{ fontSize: "var(--fs-13)" }}>{tool.name}</code>
                 <span style={{ marginLeft: 8, color: "var(--fg-secondary)" }}>{tool.title}</span>
-                <div className="hint" style={{ fontSize: 12, marginTop: 2 }}>{tool.blurb}</div>
+                <Meta as="div" style={{ fontSize: 12, marginTop: 2 }}>{tool.blurb}</Meta>
               </div>
             </li>
           ))}
         </ul>
-      </div>
+      </Card>
 
       {/* 近期活動 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Clock" size={18} />近期 MCP 活動</h2>
-      <p className="hint" style={{ marginTop: 0 }}>你透過 MCP 觸發的操作紀錄（依使用者歸屬，非單把金鑰）。看到不認得的呼叫，請撤銷可疑金鑰。</p>
-      <div className="card">
+      <Hint layer="always" style={{ marginTop: 0 }}>你透過 MCP 觸發的操作紀錄（依使用者歸屬，非單把金鑰）。看到不認得的呼叫，請撤銷可疑金鑰。</Hint>
+      <Card>
         {activity.isLoading ? (
-          <div className="skeleton" style={{ height: 36 }} />
+          <Skeleton style={{ height: 36 }} />
         ) : activity.error ? (
-          <p className="hint" style={{ margin: 0, color: "var(--danger-ink)" }}>載入活動失敗：{activity.error.message}</p>
+          <Meta as="p" style={{ margin: 0, color: "var(--danger-ink)" }}>載入活動失敗：{activity.error.message}</Meta>
         ) : !activity.data || activity.data.length === 0 ? (
-          <p className="hint" style={{ margin: 0 }}>還沒有 MCP 活動。連上外部 AI 並呼叫工具後，這裡會列出紀錄。</p>
+          <Hint style={{ margin: 0 }}>還沒有 MCP 活動。連上外部 AI 並呼叫工具後，這裡會列出紀錄。</Hint>
         ) : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {activity.data.map((r) => {
@@ -349,20 +350,20 @@ export function McpPage() {
                   <Icon name={r.ok ? "CheckCircle2" : "XCircle"} size={14} style={{ color: r.ok ? "var(--success-ink)" : "var(--danger-ink)", flex: "none", alignSelf: "center" }} />
                   <span style={{ flex: "1 1 auto", minWidth: 160 }}>
                     <b style={{ fontSize: "var(--fs-14)" }}>{humanizeAuditAction(r.action)}</b>
-                    {summary && <span className="hint" style={{ marginLeft: 6, fontSize: 12 }}>{summary}</span>}
-                    {!r.ok && r.error && <div className="hint" style={{ fontSize: 12, color: "var(--danger-ink)" }}>{r.error}</div>}
+                    {summary && <Meta style={{ marginLeft: 6, fontSize: 12 }}>{summary}</Meta>}
+                    {!r.ok && r.error && <Meta as="div" style={{ fontSize: 12, color: "var(--danger-ink)" }}>{r.error}</Meta>}
                   </span>
-                  <span className="hint" style={{ fontSize: 12, flex: "none" }}>{relTime(r.createdAt)}</span>
+                  <Meta style={{ fontSize: 12, flex: "none" }}>{relTime(r.createdAt)}</Meta>
                 </li>
               );
             })}
           </ul>
         )}
-      </div>
+      </Card>
 
       <p style={{ marginTop: 24 }}>
         <Link href="/help">回怎麼用</Link>
-        <span className="hint" style={{ margin: "0 10px" }}>·</span>
+        <Meta style={{ margin: "0 10px" }}>·</Meta>
         <Link href="/dashboard">回今日工作台</Link>
       </p>
     </div>

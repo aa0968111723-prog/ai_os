@@ -6,6 +6,47 @@ import { hasDesktopBridge } from "../../platform/desktopBridge";
 import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
 import type { MeWithCapabilities } from "../../capabilities";
 import { accountMenuItems, filterNavItems } from "../navigation/navigationItems";
+import { Hint, Meta, Skeleton, useDensity } from "../../components/ui";
+import { writeUiDensity } from "../../lib/densityPreference";
+import { UI_DENSITY_DESCRIPTION, UI_DENSITY_LABEL } from "@shared/uiDensity";
+
+/**
+ * 介面密度切換（引導／精簡）。
+ *
+ * 全站 `hint` 說明小字實測 505 處，佔所有帶樣式元素四分之一以上；對熟手是雜訊，
+ * 對第一次上手的夥伴卻是生命線。這個開關讓兩種人共用同一套介面而不必犧牲任一方。
+ *
+ * 標籤同時說明「現在是哪種」與「按下去會變成哪種」——選單項目若只顯示狀態，
+ * 使用者無從得知它可以按。
+ */
+function DensityMenuItem({ onDone }: { onDone: () => void }) {
+  const density = useDensity();
+  const next = density === "guide" ? "concise" : "guide";
+  const utils = trpc.useUtils();
+  // 上行同步（P1c）：本機 localStorage 仍是即時來源——先寫本機讓畫面立刻切，
+  // 再 best-effort 帶到帳號。失敗只記 log 不打斷：單機行為與同步前完全一樣，
+  // 下次成功的切換自然會把最新值帶上去。
+  const setUiDensity = trpc.auth.setUiDensity.useMutation({
+    onSuccess: () => utils.auth.me.invalidate(),
+    onError: (err) => console.warn("[density] 偏好同步到帳號失敗（本機已生效）：", err.message),
+  });
+  return (
+    <button
+      type="button"
+      className="menu-item"
+      role="menuitem"
+      title={UI_DENSITY_DESCRIPTION[next]}
+      onClick={() => {
+        onDone();
+        writeUiDensity(next);
+        setUiDensity.mutate({ density: next });
+      }}
+    >
+      <Icon name="HelpCircle" size={15} />
+      介面說明：{UI_DENSITY_LABEL[density]}（改用{UI_DENSITY_LABEL[next]}）
+    </button>
+  );
+}
 
 function InstallAppMenuItem({ onDone }: { onDone: () => void }) {
   const [, bump] = useState(0);
@@ -37,7 +78,7 @@ function QuotaBar({
   return (
     <div style={{ marginTop: 6 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11 }}>
-        <span className="hint">{label}</span>
+        <Meta>{label}</Meta>
         <span className="mono" style={{ fontSize: 11 }}>
           {used.toLocaleString()}
           {limited ? ` / ${quota.toLocaleString()}` : "（不限）"}
@@ -81,21 +122,21 @@ function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; e
   if (!groupId) {
     return (
       <div className="account-menu__quota" role="presentation" style={{ padding: "8px 12px", fontSize: 12 }}>
-        <div className="hint">選好作用組別後可看個人點數用量</div>
+        <Hint as="div" layer="always">選好作用組別後可看個人點數用量</Hint>
       </div>
     );
   }
   if (my.isLoading) {
     return (
       <div className="account-menu__quota" role="presentation" style={{ padding: "8px 12px" }}>
-        <div className="skeleton" style={{ height: 48 }} />
+        <Skeleton style={{ height: 48 }} />
       </div>
     );
   }
   if (my.error || !my.data) {
     return (
       <div className="account-menu__quota" role="presentation" style={{ padding: "8px 12px", fontSize: 12 }}>
-        <span className="hint">點數暫時讀不到</span>
+        <Meta>點數暫時讀不到</Meta>
       </div>
     );
   }
@@ -124,18 +165,18 @@ function PersonalQuotaSummary({ groupId, enabled }: { groupId?: string | null; e
       <QuotaBar label="今日已用" used={d.dailyUsed} quota={d.dailyQuota} />
       <QuotaBar label="本週已用" used={d.weeklyUsed} quota={d.weeklyQuota} />
       {(d.memberBudgetRemaining != null || d.groupBudgetRemaining != null) && (
-        <div className="hint" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.4 }}>
+        <Meta as="div" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.4 }}>
           {d.memberBudgetRemaining != null && (
             <div>個人預算剩 {d.memberBudgetRemaining.toLocaleString()} 點</div>
           )}
           {d.groupBudgetRemaining != null && (
             <div>本組預算剩 {d.groupBudgetRemaining.toLocaleString()} 點</div>
           )}
-        </div>
+        </Meta>
       )}
-      <div className="hint" style={{ marginTop: 4, fontSize: 10 }}>
+      <Hint as="div" layer="always" style={{ marginTop: 4, fontSize: 10 }}>
         單位為站內點數（非 Fal USD）
-      </div>
+      </Hint>
     </div>
   );
 }
@@ -257,6 +298,7 @@ export function AccountMenu({
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">帳號</div>
           <InstallAppMenuItem onDone={close} />
+          <DensityMenuItem onDone={close} />
           {accountLinkItems.map((item) => (
             <Link key={item.key} href={item.href} className="menu-item" role="menuitem" onClick={close}>
               {item.icon && <Icon name={item.icon} size={15} />}{item.label}

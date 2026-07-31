@@ -24,6 +24,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run audit:high
       - run: npm run typecheck
+      - run: npm run check:ui-primitives
       - run: npm test
       - run: npm run test:client:coverage
       - run: npm run build

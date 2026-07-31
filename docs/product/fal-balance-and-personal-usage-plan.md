@@ -1,23 +1,23 @@
 # 計畫：Fal 帳戶餘額顯示 + 個人使用量與餘額顯示
 
-> 狀態：Implemented（Phase A：falBilling + quota.falAccountBalance + 管理／個人 UI；Phase B 待 Admin Key 部署驗收）  
-> 相關：點數帳本 `quota.my` / `quota.consumptionStats`、Fal Platform Billing API  
-> 原則：Key 不進前端、Admin 與個人視圖分離、缺 Admin Key 時可降級  
+> 狀態：Implemented + 方案 C（即時 TWD 對齊硬上限）  
+> 相關：點數帳本 `quota.my` / `quota.consumptionStats`、Fal Platform Billing API、`fxRate` / `falCeiling`  
+> 原則：Key 不進前端、Admin 與個人視圖分離、缺 Admin Key 時可降級（fail-open）  
 >
-> **進度備註（2026-07-30）：** Phase A 實作於 [#195](https://github.com/aa0968111723-prog/ai_os/pull/195)（`server/services/falBilling.ts`、`quota.falAccountBalance`、管理／個人 UI）。Phase B：部署 `FAL_ADMIN_KEY` 並對照 fal dashboard。
+> **進度備註（2026-07-31）：** Phase A 於 [#195](https://github.com/aa0968111723-prog/ai_os/pull/195)。**方案 C**：點數可花上限即時對齊 `floor(Fal USD × 即時 USD→TWD)`（1 點 = NT$1）；顯示層並顯 USD + NT$ + 點數上限；守門在 `checkQuota` / `reserveQuota`；不改寫歷史 `cost_ledger`。
 
 ## 1. 目標
 
-1. **平台級**：在管理介面顯示 Fal.ai 帳戶真實 credits 餘額（USD）。
+1. **平台級**：在管理介面顯示 Fal.ai 帳戶真實 credits 餘額（USD）＋即時台幣等值＋可花點數上限。
 2. **個人級**：每位登入使用者可清楚看到自己的點數剩餘、今日／本週使用量與額度上限。
-3. 兩層數字**並陳但不混用**：系統內點數（1 點 ≈ NT$1 政策）≠ Fal USD credits。
+3. **方案 C**：系統內點數採 **1 點 = NT$1**；可花上限即時對齊 Fal 台幣等值（硬上限，fail-open）。
 
 ## 2. 非目標（本計畫不做）
 
-- 不把 Fal USD 自動換算成站內點數並寫入帳本。
+- **不**把匯率換算結果寫入歷史 `cost_ledger`（只在守門當下讀快取餘額）。
 - 不在前端暴露任何 `FAL_KEY` / `FAL_ADMIN_KEY`。
-- 不改動扣點／退點商業邏輯（僅讀取與展示）。
-- 不一次重構 `points.ts`（可後續技術債 PR）。
+- 扣／退點商業邏輯不變；僅新增 Fal 台幣等值硬上限層。
+- 上游 Fal／匯率查詢失敗 → **fail-open**（不擋生成，只靠既有總預算／週額度）。
 
 ## 3. 現況
 
@@ -59,28 +59,9 @@
 
 | Procedure | 權限 | 說明 |
 |-----------|------|------|
-| `quota.falAccountBalance` | `adminProcedure`（建議僅 `isSuperAdmin`） | 回傳平台 Fal 餘額或結構化錯誤 |
-| `quota.my` | 既有 `authedProcedure` | 不改契約；前端強化展示 |
+| `quota.falAccountBalance` | `adminProcedure`（建議僅 `isSuperAdmin`） | 回傳平台 Fal 餘額（USD + TWD + pointsCap）或結構化錯誤 |
+| `quota.my` | 既有 `authedProcedure` | 增 `falPointsCap`；`totalRemaining` 與之取 min |
 | `quota.consumptionStats` | 既有 | 管理儀表沿用 |
-
-回傳建議（falAccountBalance）：
-
-```ts
-type FalAccountBalanceResult =
-  | {
-      ok: true;
-      username: string;
-      balance: number;
-      currency: string; // "USD"
-      fetchedAt: string; // ISO
-      cached: boolean;
-    }
-  | {
-      ok: false;
-      code: "not_configured" | "forbidden" | "upstream_error";
-      message: string; // 使用者可讀、不含 secret
-    };
-```
 
 ### 4.3 環境變數
 
@@ -100,11 +81,12 @@ Zeabur／部署：僅後端環境注入，永不下發 client。
 
 位置：現有「點數與額度」區塊旁新增卡片 **「Fal 帳戶」**：
 
-- 餘額：`$24.50 USD`（或錯誤狀態文案）
+- 餘額：`$24.50 USD` + `約合 NT$…` + `可花點數上限 … 點`（或錯誤狀態文案）
+- 匯率來源標示（live／備援）
 - 帳戶：`username`
 - 更新時間 +「重新整理」按鈕（尊重快取）
-- 並排對照：**系統總預算剩餘（點）** vs **Fal credits（USD）**
-- 短說明：兩者單位不同，僅供營運對帳，不自動換算
+- 並排對照：**系統總預算剩餘（已含 Fal 上限取 min）** vs **Fal 可花上限** vs **Fal credits（USD≈NT$）**
+- 短說明：1 點 = NT$1；硬上限即時對齊，不改寫歷史帳本
 
 ### 5.2 個人使用量與餘額（全體登入使用者）
 
@@ -140,11 +122,11 @@ Zeabur／部署：僅後端環境注入，永不下發 client。
 |------|------|
 | `server/services/falBilling.ts` | 新增 |
 | `server/services/falBilling.test.ts` | 新增 |
-| `server/routers/quota.ts` | 新增 `falAccountBalance` |
-| `client/src/pages/AdminPage.tsx`（或點數區塊元件） | Fal 卡片 |
-| `client/src/app/components/AccountMenu.tsx` 或頂欄 | 個人用量摘要 |
+| `server/services/fxRate.ts` / `falCeiling.ts` | 方案 C 匯率與硬上限 |
+| `server/routers/quota.ts` | `falAccountBalance` + `my.falPointsCap` |
+| `client/src/pages/AdminPage.tsx` | Fal 卡片（USD + NT$ + 點數上限） |
 | `.env.example` | `FAL_ADMIN_KEY` |
-| 本文件 | 完成後改狀態為 Implemented |
+| 本文件 | 方案 C 政策 |
 
 ## 8. 驗收條件
 
@@ -155,6 +137,7 @@ Zeabur／部署：僅後端環境注入，永不下發 client。
 - [x] 登入使用者可在個人 UI 看到：今日已用、本週已用、相關剩餘（來自 `quota.my`）
 - [x] 前端 bundle／網路面板無任何 Fal secret
 - [x] typecheck + 既有 quota／points 相關測試通過
+- [x] 方案 C：`checkQuota`／`reserveQuota` 在 Fal 餘額不足時拒絕；上游失敗 fail-open
 
 ## 9. 風險與回滾
 
@@ -162,12 +145,25 @@ Zeabur／部署：僅後端環境注入，永不下發 client。
 |------|------|
 | 誤用一般 Key 打 billing | 錯誤碼 `forbidden` + 文件要求 Admin Key |
 | 管理頁輪詢過密 | 服務端快取 + 前端手動重新整理為主 |
-| 使用者混淆「點」與「USD」 | UI 明確標示單位與「不自動換算」 |
-| 上游 Fal 短暫故障 | `upstream_error`，保留上次快取可選（若實作） |
+| 使用者混淆「點」與「USD」 | UI 明確標示 USD／NT$／點數上限與匯率來源 |
+| 上游 Fal 短暫故障 | `upstream_error`，fail-open 不擋生成 |
 
 回滾：還原本功能相關 commit 即可；不涉及 migration。
 
-## 10. 後續可選
+## 10. 方案 C：即時 TWD 對齊硬上限（2026-07-31）
+
+| 元件 | 職責 |
+|------|------|
+| `server/services/fxRate.ts` | USD→TWD 即時匯率（frankfurter／ECB；失敗回退 31；快取 30 分） |
+| `server/services/falCeiling.ts` | `getFalPointsCeiling` / `falCeilingReason`：`pointsCap = floor(usd × rate)` |
+| `server/services/points.ts` | `checkQuota` / `reserveQuota` 交易外呼叫 `falCeilingReason`（fail-open） |
+| `quota.my` | 回傳 `falPointsCap`；`totalRemaining` 與之取 min（有總預算時） |
+| `quota.falAccountBalance` | 回傳 `balance` / `balanceTwd` / `rate` / `pointsCap` |
+| 管理頁 Fal 卡 | 並顯 USD + NT$ + 點數上限 |
+
+**政策摘要：** 1 點 = NT$1；單次扣點若超過 Fal 台幣等值上限 → 拒絕並提示儲值；不改寫歷史帳本列。
+
+## 11. 後續可選
 
 - 低餘額告警（Fal balance < 閾值 → 管理通知）
 - FOCUS usage report（需更高權限與排程）

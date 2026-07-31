@@ -5,7 +5,7 @@ import { FEEDBACK_CATEGORIES, FEEDBACK_PAGES, type FeedbackCategory } from "@sha
 import { captureWithHighlight, pickElement, type PickResult } from "./picker";
 import { Icon } from "../components/Icon";
 import { useRovingRadio } from "../components/interactions";
-
+import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 /** 目前路由對應到人看得懂的頁面名（與 FEEDBACK_PAGES 對齊；對不上就回 null） */
 function pageForPath(path: string): string | null {
   if (path === "/") return "作業台（首頁）";
@@ -90,8 +90,7 @@ export function FeedbackWidget() {
   return (
     <div data-fb-widget="root" className="fb-fab-root">
       {mode === "menu" && (
-        <div
-          className="card"
+        <Card
           role="group"
           aria-label="回饋選項"
           onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); close(); } }}
@@ -99,13 +98,13 @@ export function FeedbackWidget() {
         >
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
             <strong style={{ fontSize: 15 }}>想回報什麼？</strong>
-            <button className="btn-ghost" onClick={close} aria-label="關閉">
+            <Button variant="ghost" onClick={close} aria-label="關閉">
               <Icon name="X" size={14} />
-            </button>
+            </Button>
           </div>
-          <p className="hint" style={{ margin: "6px 0 12px" }}>
+          <Hint style={{ margin: "6px 0 12px" }}>
             指出畫面上某個地方，或只針對這一頁說幾句。
-          </p>
+          </Hint>
           <button
             className="primary"
             style={{ width: "100%", marginBottom: 8 }}
@@ -116,7 +115,7 @@ export function FeedbackWidget() {
           <button style={{ width: "100%" }} onClick={openPageOnly}>
             <Icon name="FileText" size={15} style={{ verticalAlign: "-2px", marginRight: 6 }} />只回報這一頁
           </button>
-        </div>
+        </Card>
       )}
 
       {mode === "form" && (
@@ -277,18 +276,16 @@ function ReportForm({
 
   if (justSent) {
     return (
-      <div
-        className="card"
+      <Card
         role="status"
         aria-live="polite"
-        style={{ width: 300, marginBottom: 12, padding: 20, textAlign: "center" }}
-      >
+        style={{ width: 300, marginBottom: 12, padding: 20, textAlign: "center" }}>
         <strong style={{ fontSize: 15 }}>收到了，感恩</strong>
-        <p className="hint" style={{ margin: "6px 0 0" }}>你說的會直接影響下一版怎麼改。</p>
+        <Hint style={{ margin: "6px 0 0" }}>你說的會直接影響下一版怎麼改。</Hint>
         <Link href="/my-reports" onClick={onClose} style={{ display: "inline-block", marginTop: 10, fontSize: 13 }}>
           查看我的回報
         </Link>
-      </div>
+      </Card>
     );
   }
 
@@ -296,8 +293,8 @@ function ReportForm({
   const guide = GUIDE[category] ?? GUIDE.other;
 
   return (
-    <div
-      className="card fb-report-form"
+    <Card
+      className="fb-report-form"
       role="dialog"
       aria-label="填寫回饋"
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
@@ -305,18 +302,18 @@ function ReportForm({
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
         <strong style={{ fontSize: 15 }}>填寫回饋</strong>
-        <button className="btn-ghost" onClick={onClose} aria-label="關閉">
+        <Button variant="ghost" onClick={onClose} aria-label="關閉">
           <Icon name="X" size={14} />
-        </button>
+        </Button>
       </div>
 
       {target && (
-        <p className="hint" style={{ margin: "8px 0 0" }}>
+        <Meta as="p" style={{ margin: "8px 0 0" }}>
           標定：<strong style={{ color: "var(--primary-ink)" }}>{target.targetLabel}</strong>{" "}
           <span role="button" tabIndex={0} onClick={onRepick} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onRepick(); } }} style={{ color: "var(--primary-ink)", cursor: "pointer", textDecoration: "underline" }}>
             重選
           </span>
-        </p>
+        </Meta>
       )}
 
       <label style={{ margin: "12px 0 4px" }}>① 這是什麼樣的回饋？</label>
@@ -324,23 +321,24 @@ function ReportForm({
         {FEEDBACK_CATEGORIES.map((c, i) => {
           const on = category === c.value;
           return (
-            <span
+            <Chip
               key={c.value}
+              selected={on}
+              onClick={() => setCategory(c.value)}
               role="radio"
               aria-checked={on}
+              // 選取態由 role="radio" 的 aria-checked 表達；aria-pressed 只在 role="button"
+              // 合法，Chip 見到自訂 role 就不會再補（見 ui/Chip.tsx）。
               {...catRoving.itemProps(i)}
               title={c.hint}
-              className={`chip pick ${on ? "on" : ""}`}
-              onClick={() => setCategory(c.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setCategory(c.value); } }}
             >
               {c.label}
-            </span>
+            </Chip>
           );
         })}
       </div>
       {categoryHint && (
-        <p className="hint" style={{ margin: "6px 0 0" }}>{categoryHint}</p>
+        <Hint style={{ margin: "6px 0 0" }}>{categoryHint}</Hint>
       )}
 
       <label style={{ margin: "12px 0 4px" }}>涉及哪些頁面？（可複選）</label>
@@ -348,18 +346,16 @@ function ReportForm({
         {FEEDBACK_PAGES.map((p) => {
           const on = pages.has(p);
           return (
-            <span
+            <Chip
               key={p}
+              selected={on}
+              onClick={() => togglePage(p)}
               role="checkbox"
               aria-checked={on}
-              tabIndex={0}
-              className={`chip pick ${on ? "on" : ""}`}
-              onClick={() => togglePage(p)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePage(p); } }}
             >
               {p}
               {p === currentPage ? "・目前" : ""}
-            </span>
+            </Chip>
           );
         })}
       </div>
@@ -375,7 +371,7 @@ function ReportForm({
         autoFocus
       />
 
-      <label htmlFor="fb-expected" style={{ margin: "12px 0 4px" }}>③ 希望怎麼改？<span className="hint">（選填）</span></label>
+      <label htmlFor="fb-expected" style={{ margin: "12px 0 4px" }}>③ 希望怎麼改？<Meta>（選填）</Meta></label>
       <textarea
         id="fb-expected"
         value={expected}
@@ -398,7 +394,7 @@ function ReportForm({
         {!noShot && (
           <div style={{ marginTop: 8 }}>
             {capturing ? (
-              <p className="hint" style={{ margin: 0 }}>正在擷取畫面…</p>
+              <Meta as="p" style={{ margin: 0 }}>正在擷取畫面…</Meta>
             ) : shotUrl ? (
               <img
                 src={shotUrl}
@@ -407,18 +403,16 @@ function ReportForm({
               />
             ) : (
               <div>
-                <p className="hint" style={{ margin: 0 }}>這次沒能擷取到畫面，送出文字仍會收到。</p>
-                <button
+                <Meta as="p" style={{ margin: 0 }}>這次沒能擷取到畫面，送出文字仍會收到。</Meta>
+                <Button variant="ghost"
                   type="button"
-                  className="btn-ghost"
                   style={{ marginTop: 6, padding: "4px 8px" }}
                   onClick={() => {
                     setCapturing(true);
                     setCaptureAttempt((attempt) => attempt + 1);
-                  }}
-                >
+                  }}>
                   重新擷取
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -429,13 +423,13 @@ function ReportForm({
         <button className="primary" disabled={!canSubmit} onClick={doSubmit}>
           {submitting ? "送出中…" : "送出"}
         </button>
-        <span className="hint">{problem.trim().length === 0 ? "第 ② 題至少寫一句" : ""}</span>
+        <Hint as="span" layer="always">{problem.trim().length === 0 ? "第 ② 題至少寫一句" : ""}</Hint>
       </div>
       {submit.error && (
         <p className="error" role="alert">
           送出失敗，請稍後再試
         </p>
       )}
-    </div>
+    </Card>
   );
 }

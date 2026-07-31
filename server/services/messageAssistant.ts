@@ -6,7 +6,7 @@
  */
 import { desc, eq } from "drizzle-orm";
 import { db, schema } from "../db";
-import { worldviewSchema } from "../../shared/worldview";
+import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
 import { nimComplete, NimServiceError } from "./nvidia-nim";
 import { reserveQuota, refund } from "./points";
@@ -88,8 +88,7 @@ export async function replyAsAssistant(opts: {
   const sys = `你是這支影片專案的 AI 助手，正在「組內留言」對話串裡回答夥伴。用繁體中文、口語、簡短(3-5 句內)回覆，就事論事回答關於進度／分鏡／素材／內容的問題；不要提議需要確認的動作、不要輸出 JSON，直接講話。
 <專案>
 標題：${project.title}
-一句話：${wv.logline ?? ""}
-關鍵訊息：${wv.message ?? ""}
+世界觀｜${formatWorldviewForAi(wv, "brief")}
 </專案>
 <近期對話>
 ${convo}

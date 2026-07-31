@@ -15,6 +15,9 @@ export const users = pgTable("users", {
   status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
   /** 管理員重設密碼後為 true：首次登入強制改密碼（changePassword 成功即清除） */
   mustChangePassword: boolean("must_change_password").notNull().default(false),
+  /** 介面密度偏好（P1c 跨裝置同步）。null＝未設定過，前端用預設 guide；
+   *  值域與 shared/uiDensity.ts 的 uiDensitySchema 一致，寫入端一律先過 zod。 */
+  uiDensity: text("ui_density", { enum: ["guide", "concise"] }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -210,3 +213,24 @@ export const uploadGrants = pgTable("upload_grants", {
   expiresIdx: index("upload_grants_expires_idx").on(t.expiresAt),
 }));
 
+
+/**
+ * 方案 B 敏感操作信箱 step-up 挑戰（#218）：request → 信箱 6 碼 → 敏感 API 帶 challengeId+code。
+ * 只存驗證碼的 SHA-256（非原文）；欄位對齊 drizzle/0014_email_step_up.sql。
+ */
+export const emailStepUpChallenges = pgTable("email_step_up_challenges", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  /** change_password／invite_member（語意由 services/emailStepUp 的 STEP_UP_PURPOSES 定義） */
+  purpose: text("purpose").notNull(),
+  /** SHA-256（非原文）——驗證碼外洩不可還原 */
+  codeHash: text("code_hash").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  /** 用掉即標記；同一挑戰不可重放 */
+  consumedAt: timestamp("consumed_at"),
+  attemptCount: integer("attempt_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  userIdx: index("email_step_up_challenges_user_idx").on(t.userId),
+  expiresIdx: index("email_step_up_challenges_expires_idx").on(t.expiresAt),
+}));

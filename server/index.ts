@@ -66,8 +66,32 @@ import {
 import { readProcessRole, shouldRunWorkers } from "./services/processRole";
 import { httpSurfaceForRole } from "./bootstrap/httpSurface";
 import { evaluateRunnerReadiness } from "./bootstrap/runnerReadiness";
+import compression from "compression";
+import { agentPlannerModeSchema } from "../shared/agentPlanner";
 
 const app = express();
+
+/**
+ * HTTP 壓縮。部署站實測**完全沒有 Content-Encoding**——首屏資產以未壓縮狀態傳輸：
+ *   index.js 267KB、vendor-react 185KB、vendor-data 165KB、index.css 120KB
+ *   合計約 737KB，gzip 後約 202KB（省 73%）。
+ *
+ * 必須掛在 express.static 之前，否則靜態檔會先被送出、壓縮中介層根本碰不到。
+ *
+ * SSE 端點要排除：壓縮會做緩衝，串流事件會卡在緩衝區裡直到湊滿一個 chunk 才送出，
+ * AI 助手的「思考中／正在查…」逐筆推送就會變成一次全到，失去串流的意義。
+ * 站內的 SSE 是 /api/assistant/ask（text/event-stream）。
+ */
+app.use(
+  compression({
+    filter: (req, res) => {
+      const type = String(res.getHeader("Content-Type") ?? "");
+      if (type.includes("text/event-stream")) return false;
+      return compression.filter(req, res);
+    },
+  }),
+);
+
 const port = Number(process.env.PORT ?? 3000);
 const isProd = process.env.NODE_ENV === "production";
 // TD-07 / TD-07b：Web／Worker 邊界（預設 all；worker 仍 listen HTTP 但不掛 SPA）
@@ -953,6 +977,45 @@ app.get("/api/integrations/google-drive/callback", async (req, res) => {
   }
 });
 
+// ── Adobe 帳號連結（#224 PR2）──瀏覽器重導，走 Express；API 見 routers/adobe ──
+// mock 模式下 /start 直接導回自家 callback（不出網），讓連結／撤銷／狀態在沒有 Adobe 憑證時也能完整驗證。
+app.get("/api/integrations/adobe/start", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
+    const { isAdobeConfigured, buildAdobeAuthUrl } = await import("./services/adobe/oauth");
+    if (!isAdobeConfigured()) return res.status(503).json({ error: "站方尚未設定 Adobe 整合（ADOBE_CLIENT_ID/SECRET）" });
+    res.redirect(buildAdobeAuthUrl(auth.user.id));
+  } catch (err) {
+    console.error("[integrations:adobe:start]", err);
+    recordError("integrations:adobe:start", err);
+    if (!res.headersSent) res.status(500).json({ error: "啟動授權失敗，請稍後再試" });
+  }
+});
+app.get("/api/integrations/adobe/callback", async (req, res) => {
+  try {
+    const auth = await resolveSession(req);
+    if (!requireUsableSession(auth, res)) return;
+    const { verifyAdobeState } = await import("./services/adobe/oauth");
+    // state 驗簽＋比對登入者：防 CSRF、也防把授權綁到別人帳上
+    const state = verifyAdobeState(String(req.query.state ?? ""));
+    if (!state || state.userId !== auth.user.id) return res.redirect("/integrations?adobe=state_mismatch");
+    if (req.query.error) return res.redirect("/integrations?adobe=denied"); // 使用者在 Adobe 畫面按了取消
+    const code = String(req.query.code ?? "");
+    if (!code) return res.redirect("/integrations?adobe=denied");
+    const { completeAdobeConnection } = await import("./services/adobe");
+    const { email } = await completeAdobeConnection(auth.user.id, code);
+    // Express callback 繞過 tRPC 審計中介層——比照 Google 雲端 callback 手動補記（fire-and-forget）
+    const { recordAudit } = await import("./services/audit");
+    recordAudit(auth, "adobe.connect", { email }, { ok: true });
+    res.redirect("/integrations?adobe=connected");
+  } catch (err) {
+    console.error("[integrations:adobe:callback]", err);
+    recordError("integrations:adobe:callback", err);
+    if (!res.headersSent) res.redirect("/integrations?adobe=failed");
+  }
+});
+
 // 組排程 .ics 匯出（需求 10 保留為後備）：登入＋組隔離；沒連結 Google 的人仍可手動匯入
 app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
   try {
@@ -1247,6 +1310,9 @@ app.post("/api/assistant/ask", async (req, res) => {
   const projectId = String(req.body?.projectId ?? "");
   const message = String(req.body?.message ?? "").trim();
   const nonce = typeof req.body?.nonce === "string" ? req.body.nonce.slice(0, 64) : undefined;
+  // 模型檔位：非法值一律忽略而非報錯——寧可用免費的 NIM 回答，也不要因為偏好壞掉就不給答案。
+  const parsedMode = agentPlannerModeSchema.safeParse(req.body?.mode);
+  const mode = parsedMode.success ? parsedMode.data : undefined;
   if (!UUID_RE.test(projectId) || !message || message.length > 1000) {
     return res.status(400).json({ error: "參數不正確（需 projectId 與 1–1000 字的問題）" });
   }
@@ -1276,7 +1342,7 @@ app.post("/api/assistant/ask", async (req, res) => {
   try {
     const { runAssistantAsk } = await import("./routers/assistant");
     const result = await runAssistantAsk(
-      { projectId, message, auth, signal: clientAbort.signal, dedupeKey: nonce },
+      { projectId, message, auth, signal: clientAbort.signal, dedupeKey: nonce, mode },
       (e) => sse("step", e),
     );
     sse("done", result);

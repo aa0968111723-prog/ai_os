@@ -4,7 +4,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
-
+import { Button, Card, Hint, Meta, Skeleton } from "./ui";
 /**
  * 場景設定卡（提案核心「場景一致性」）：
  * 色板/光線設定一次鎖定，生成勾選 → 自動注入錨點，同場景跨鏡光影一致。
@@ -51,22 +51,22 @@ export function ScenePresetCards({
   const [refEditId, setRefEditId] = useState<string | null>(null);
 
   return (
-    <section className="card" data-fb="場景設定卡">
+    <Card as="section" data-fb="場景設定卡">
       <h2>場景設定卡（色板・光線一致）</h2>
-      <p className="hint">設定場景色板/光線一次鎖定；生成時勾選，AI 自動帶入，同場景跨鏡光影不跳。可上傳場景參考圖，或從素材庫綁定。</p>
+      <Hint>設定場景色板/光線一次鎖定；生成時勾選，AI 自動帶入，同場景跨鏡光影不跳。可上傳場景參考圖，或從素材庫綁定。</Hint>
 
       {list.isLoading ? (
         // 佔位高度對齊載入後的卡片網格（比照 CharacterCards）：不跳版、不被誤讀成「卡住了」
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }} aria-hidden="true">
-          <div className="skeleton" style={{ height: 104 }} />
-          <div className="skeleton" style={{ height: 104 }} />
+          <Skeleton style={{ height: 104 }} />
+          <Skeleton style={{ height: 104 }} />
         </div>
       ) : list.isError ? (
         <p className="error" role="alert" style={{ marginTop: 8 }}>
           場景清單暫時載入不了（不是資料不見了）——
-          <button type="button" className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => list.refetch()}>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => list.refetch()}>
             再試一次
-          </button>
+          </Button>
         </p>
       ) : list.data && list.data.length > 0 ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
@@ -93,8 +93,8 @@ export function ScenePresetCards({
                     fallbackStyle={{ marginTop: 6 }}
                   />
                 )}
-                <div className="hint" style={{ fontSize: 12, marginTop: 4 }}><Icon name="Palette" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.palette}</div>
-                {s.lighting && <div className="hint" style={{ fontSize: 11, marginTop: 3 }}><Icon name="Lightbulb" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.lighting}</div>}
+                <Meta as="div" style={{ fontSize: 12, marginTop: 4 }}><Icon name="Palette" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.palette}</Meta>
+                {s.lighting && <Meta as="div" style={{ fontSize: 11, marginTop: 3 }}><Icon name="Lightbulb" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{s.lighting}</Meta>}
                 {!readOnly && (refEditId === s.id ? (
                   <div style={{ marginTop: 6 }}>
                     <ReferenceImagePicker
@@ -103,18 +103,16 @@ export function ScenePresetCards({
                       onChange={(next) => update.mutate({ id: s.id, referenceAssetId: next?.id ?? null })}
                       disabled={update.isPending}
                     />
-                    <button className="btn-ghost" style={{ marginTop: 4, fontSize: 11 }} onClick={() => setRefEditId(null)}>收起</button>
+                    <Button variant="ghost" style={{ marginTop: 4, fontSize: 11 }} onClick={() => setRefEditId(null)}>收起</Button>
                   </div>
                 ) : (
-                  <button
-                    className="btn-ghost"
+                  <Button variant="ghost"
                     style={{ marginTop: 6, fontSize: 11 }}
                     title="綁一張場景參考圖：上傳或從素材庫選，色板／光線比對更有依據"
-                    onClick={() => setRefEditId(s.id)}
-                  >
+                    onClick={() => setRefEditId(s.id)}>
                     <Icon name="Image" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
                     {s.referenceUrl ? "換參考圖" : "設參考圖"}
-                  </button>
+                  </Button>
                 ))}
                 {!readOnly && (
                   <ConfirmButton
@@ -132,7 +130,7 @@ export function ScenePresetCards({
           })}
         </div>
       ) : (
-        <p className="hint" style={{ marginTop: 8 }}>還沒有場景——加一張（例：城市清晨＝暖色調、35mm 淺景深、柔和晨光斜射）。</p>
+        <Hint layer="always" style={{ marginTop: 8 }}>還沒有場景——加一張（例：城市清晨＝暖色調、35mm 淺景深、柔和晨光斜射）。</Hint>
       )}
 
       {!readOnly && (open ? (
@@ -158,6 +156,6 @@ export function ScenePresetCards({
       ))}
       {remove.error && <p className="error" role="alert">{remove.error.message}</p>}
       {update.error && <p className="error" role="alert">參考圖更新失敗：{update.error.message}</p>}
-    </section>
+    </Card>
   );
 }

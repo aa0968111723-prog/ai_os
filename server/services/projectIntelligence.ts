@@ -27,6 +27,12 @@ export interface ProjectIntelligence {
     urgent: number;
     overdue: number;
   };
+  /** #133 PR-4：與 MCP get_project_status 同級的全貌數字——排程與筆記量（規劃器與助手共用） */
+  planning: {
+    notes: number;
+    schedules: number;
+    upcomingSchedules: number;
+  };
   text: string;
 }
 
@@ -62,6 +68,7 @@ export function formatProjectIntelligence(
     `最近生成失敗：${failures}`,
     `代理：執行中 ${snapshot.agents.active}／等待 ${snapshot.agents.waiting}／失敗 ${snapshot.agents.failed}；阻塞：${blockers}`,
     `人員任務：未結 ${snapshot.tasks.open}／緊急 ${snapshot.tasks.urgent}／逾期 ${snapshot.tasks.overdue}`,
+    `排程：共 ${snapshot.planning.schedules}（未來 ${snapshot.planning.upcomingSchedules}）；筆記：共 ${snapshot.planning.notes}`,
   ].join("\n");
 }
 
@@ -79,6 +86,8 @@ export async function buildProjectIntelligence(projectId: string): Promise<Proje
     agentStatsRows,
     blockerRuns,
     taskStatsRows,
+    noteStatsRows,
+    scheduleStatsRows,
   ] = await Promise.all([
     db
       .select({
@@ -141,6 +150,18 @@ export async function buildProjectIntelligence(projectId: string): Promise<Proje
         eq(schema.projectTasks.projectId, projectId),
         notInArray(schema.projectTasks.status, ["done", "cancelled"]),
       )),
+    // #133 PR-4：筆記／排程「數量」——規劃器需要全貌（清單另有 20/30 筆上限，量大時光看清單會低估）
+    db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(schema.notes)
+      .where(eq(schema.notes.projectId, projectId)),
+    db
+      .select({
+        total: sql<number>`count(*)::int`,
+        upcoming: sql<number>`count(*) filter (where ${schema.scheduleItems.startsAt} >= ${now})::int`,
+      })
+      .from(schema.scheduleItems)
+      .where(eq(schema.scheduleItems.projectId, projectId)),
   ]);
 
   const byKind: Record<string, number> = {};
@@ -201,6 +222,11 @@ export async function buildProjectIntelligence(projectId: string): Promise<Proje
       open: taskStats.open,
       urgent: taskStats.urgent,
       overdue: taskStats.overdue,
+    },
+    planning: {
+      notes: noteStatsRows[0]?.total ?? 0,
+      schedules: scheduleStatsRows[0]?.total ?? 0,
+      upcomingSchedules: scheduleStatsRows[0]?.upcoming ?? 0,
     },
   };
   return { ...snapshot, text: formatProjectIntelligence(snapshot) };

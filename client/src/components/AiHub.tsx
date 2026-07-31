@@ -4,7 +4,7 @@ import { Icon, type IconName } from "./Icon";
 import { AgentCard } from "./AgentCard";
 import { ProjectAssistant } from "./ProjectAssistant";
 import { flashAnchor } from "../discuss";
-
+import { Button, Card, Hint, Meta, Pill } from "./ui";
 /**
  * @deprecated Legacy shell kept for unit tests only (`AiHub.test.tsx`).
  * Production ProjectPage mounts `CreationWorkbench` exclusively (WB-01～WB-06).
@@ -91,38 +91,36 @@ export function AiHub({
   ];
 
   return (
-    <section className="card card--primary" data-fb="AI 創作工作台" id="sec-ai-hub">
+    <Card as="section" variant="primary" data-fb="AI 創作工作台" id="sec-ai-hub">
       <div className="section-heading-row">
         <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
           <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作工作台
         </h2>
         <span className="spacer" />
-        {running > 0 && <span className="pill running">執行中 {running}</span>}
-        {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
-        {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
-        <button
+        {running > 0 && <Pill status="running">執行中 {running}</Pill>}
+        {waiting > 0 && <Pill status="queued">等待人員 {waiting}</Pill>}
+        {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
+        <Button variant="ghost" size="sm"
           type="button"
-          className="btn-ghost btn-sm"
           aria-expanded={!collapsed}
           aria-controls="sec-ai-hub-body"
-          onClick={() => setCollapsed((v) => !v)}
-        >
+          onClick={() => setCollapsed((v) => !v)}>
           <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} />
           {collapsed ? "展開" : "收合"}
-        </button>
+        </Button>
       </div>
 
       {collapsed && (
-        <p className="hint" style={{ margin: "6px 0 0" }}>
+        <Meta as="p" style={{ margin: "6px 0 0" }}>
           AI 創作工作台已收合{running + waiting > 0 ? `；仍有 ${running} 個執行中、${waiting} 個等待人員的計畫` : ""}。
-        </p>
+        </Meta>
       )}
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
-        <p className="hint" style={{ marginTop: 6 }}>
+        <Hint style={{ marginTop: 6 }}>
           寫你想完成的畫面，或直接選一起想、出圖、範本與多步開拍。
           所有能力沿用目前專案的知識、資料、素材、分鏡、權限、點數與核准規則。
-        </p>
+        </Hint>
 
         <div
           role="navigation"
@@ -130,10 +128,9 @@ export function AiHub({
           style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))", gap: 8, margin: "12px 0" }}
         >
           {routes.map((route) => (
-            <button
+            <Button variant="ghost"
               key={route.target}
               type="button"
-              className="btn-ghost"
               onClick={() => goTo(route.target)}
               style={{
                 display: "flex",
@@ -144,14 +141,13 @@ export function AiHub({
                 textAlign: "left",
                 border: "1px solid var(--border)",
                 borderRadius: "var(--radius-md)",
-              }}
-            >
+              }}>
               <Icon name={route.icon} size={16} style={{ marginTop: 2, flexShrink: 0 }} />
               <span>
                 <b style={{ display: "block" }}>{route.label}</b>
-                <span className="hint" style={{ display: "block", marginTop: 2 }}>{route.description}</span>
+                <Meta style={{ display: "block", marginTop: 2 }}>{route.description}</Meta>
               </span>
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -183,17 +179,17 @@ export function AiHub({
             }}
           >
             <span><Icon name="Film" size={14} /> 多步開拍</span>
-            {running > 0 && <span className="pill running">執行中 {running}</span>}
-            {waiting > 0 && <span className="pill queued">等待人員 {waiting}</span>}
-            {awaiting > 0 && <span className="pill queued">待核准 {awaiting}</span>}
-            {running === 0 && awaiting === 0 && <span className="hint">目前沒有進行中的計畫</span>}
+            {running > 0 && <Pill status="running">執行中 {running}</Pill>}
+            {waiting > 0 && <Pill status="queued">等待人員 {waiting}</Pill>}
+            {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
+            {running === 0 && awaiting === 0 && <Meta>目前沒有進行中的計畫</Meta>}
           </summary>
-          <p className="hint" style={{ margin: "8px 0 0" }}>
+          <Hint layer="always" style={{ margin: "8px 0 0" }}>
             AI 會把多步驟目標整理成可檢查的計畫；核准後由伺服器背景逐步執行，關閉頁面也不會中斷，實際扣點仍經過既有守門。
-          </p>
+          </Hint>
           <AgentCard projectId={projectId} canEdit={canEdit} isLeader={isLeader} embedded hideComposer />
         </details>
       </div>
-    </section>
+    </Card>
   );
 }

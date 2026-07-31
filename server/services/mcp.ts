@@ -11,17 +11,22 @@
  *     生成取回：list_generations / get_generation / list_assets（成品簽成免登入短效網址）
  *     上傳授權：request_upload_grant / get_upload_grant_status（MCP 不傳二進位；簽 aidup_ 後走 POST /api/upload）
  *     自訂資料庫：list_databases / query_database / add_database_row / add_database_rows / update_database_row / list_database_files / read_database_file / get_database_stats
- *     AI 代理（重用 agentCore）：plan_agent / approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
- *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item
- *     筆記・會議紀錄（組共用、可匯入知識庫）：list_notes / get_note
+ *     AI 代理（重用 agentCore）：plan_agent（含 shortCreation 短版旗標）/ approve_agent / stop_agent / discard_agent / list_agent_runs / get_agent_run
+ *     專案排程（重用 scheduleCore）：list_schedule / add_schedule_item / update_schedule_item
+ *     筆記・會議紀錄（重用 notesCore）：list_notes / get_note / add_note / append_note
+ *     人類任務（重用 taskCore；完成等待節點會喚醒代理）：list_tasks / create_task / complete_task
+ *     知識庫與分鏡（唯讀＋截斷）：list_knowledge / get_knowledge / list_scenes
+ *     外部連接（E5/M5；本人 token、指定 fileId、不提供整盤瀏覽）：get_integrations_status / import_drive_file
  *     站內私訊（只碰本人參與的對話）：list_dm_contacts / list_dm_threads / read_dm / send_dm
  *     統整：get_project_status（一次回分鏡＋生成＋代理＋排程＋待辦）
+ *     tools/list 附 shared/mcpCatalog 推導的 annotations（readOnly/destructive/idempotent/openWorld）
  */
 import type { Request, Response } from "express";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
+import { mcpToolAnnotations } from "../../shared/mcpCatalog";
 import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
 import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { sanitizeAuditInput } from "./audit";
@@ -56,7 +61,16 @@ import {
   planAgentCore, approveAgentCore, discardAgentCore, stopAgentCore,
   listAgentRunsForProject, getAgentRunChecked,
 } from "./agentCore";
-import { addScheduleItemCore, listScheduleForGroup } from "./scheduleCore";
+import { addScheduleItemCore, listScheduleForGroup, updateScheduleItemCore } from "./scheduleCore";
+import { addNoteCore, appendNoteCore } from "./notesCore";
+import { listIntegrations } from "./integrations";
+import { importDrivePickedFileToTable } from "./driveImportCore";
+import {
+  addProjectTaskCore,
+  completeProjectTaskCore,
+  decideProjectApprovalCore,
+  listProjectTasks,
+} from "./taskCore";
 import { DM_MAX_BODY, listDmPeers, listDmThreads, listDmHistory, markDmRead, resolveDmPeerRef, sendDm } from "./dmCore";
 import type { AgentStep } from "./agentRunner";
 import {
@@ -83,7 +97,7 @@ import type { DataField } from "../../shared/databaseFields";
 
 const PROTOCOL_VERSION = "2024-11-05";
 
-const TOOLS = [
+export const TOOLS = [
   {
     name: "whoami",
     description: "確認這把金鑰的身分與權限：回你的名稱、所屬組別與角色、以及此金鑰是否唯讀。可用來測試連線是否成功。",
@@ -305,6 +319,10 @@ const TOOLS = [
           enum: ["auto", "nim", "fal_economy", "fal_balanced", "fal_quality"],
           description: "規劃模型策略；省略時為 auto（NIM 失敗或格式不合格時備援至 fal.ai）",
         },
+        shortCreation: {
+          type: "boolean",
+          description: "true＝創作短版（playbook.creation.short.v1）：快速可交付影音／圖文，預設不排排程與大量人類任務；省略＝完整規劃",
+        },
       },
       required: ["projectId", "goal"],
     },
@@ -352,6 +370,70 @@ const TOOLS = [
     description: "取得專案代理健康摘要：阻塞、逾期、待補資訊、AI/人員統一任務清單與成果中心。",
     inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
   },
+  // ── 知識庫與分鏡（M3）：唯讀摘要＋分段全文——外部 AI 規劃前的素材視角 ──
+  {
+    name: "list_knowledge",
+    description: "列出專案知識庫條目（腳本／師父開示稿／見證／筆記）：id／類型／標題／字數／前 160 字摘要。全文用 get_knowledge 分段讀；limit 上限 50。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        limit: { type: "number", description: "最多回幾筆（預設 20，上限 50）" },
+      },
+      required: ["projectId"],
+    },
+  },
+  {
+    name: "get_knowledge",
+    description: "讀一筆知識的全文（每次最多 20000 字；totalChars 超過時用 offset 續讀，避免一次撐爆上下文）。先用 list_knowledge 找 knowledgeId。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        knowledgeId: { type: "string" },
+        offset: { type: "number", description: "從第幾個字開始讀（預設 0）" },
+      },
+      required: ["knowledgeId"],
+    },
+  },
+  {
+    name: "list_scenes",
+    description: "列出專案分鏡（唯讀摘要）：順序、標題、狀態、有無畫面／配音詞／旁白音檔。規劃拆鏡或補生成前先看這個。",
+    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+  },
+  // ── 人類任務（M2）：外部 AI 可列可建可結——完成等待節點的任務會自動恢復代理 ──
+  {
+    name: "list_tasks",
+    description: "列出專案的人員任務與核准請求：標題／類型（task/approval）／狀態／負責人／期限／來源計畫（planRunId）。最多回 100 筆並標註截斷。",
+    inputSchema: { type: "object", properties: { projectId: { type: "string" } }, required: ["projectId"] },
+  },
+  {
+    name: "create_task",
+    description: "為專案建立一件人員任務（出現在網頁任務清單）。assigneeId 需為本組成員（可先用 list_dm_contacts 對照 userId）；dueAt 為 ISO 8601。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        title: { type: "string" },
+        description: { type: "string" },
+        assigneeId: { type: "string", description: "負責人 userId（省略＝待認領）" },
+        dueAt: { type: "string", description: "ISO 8601 期限（可省略）" },
+        priority: { type: "string", enum: ["low", "normal", "high", "urgent"] },
+      },
+      required: ["projectId", "title"],
+    },
+  },
+  {
+    name: "complete_task",
+    description: "把一般任務標記完成（decision=complete，預設），或對核准請求裁決（approve／reject）。等待這件任務的代理計畫會自動恢復執行。權限與網頁一致（負責人／發起人／組長）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string" },
+        decision: { type: "string", enum: ["complete", "approve", "reject"], description: "省略＝complete；核准請求用 approve/reject" },
+      },
+      required: ["taskId"],
+    },
+  },
   // ── 專案排程（組行事曆／交付死線）：外部 AI 可讀可寫，與專案綁定 ──
   {
     name: "list_schedule",
@@ -377,6 +459,21 @@ const TOOLS = [
       required: ["projectId", "title", "startsAt"],
     },
   },
+  {
+    name: "update_schedule_item",
+    description: "更新一筆既有行程（標題／時間／備註；整筆語意、同輸入重呼叫結果一致）。只有建立者本人或組長以上可改；先用 list_schedule 找 scheduleItemId。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scheduleItemId: { type: "string" },
+        title: { type: "string" },
+        startsAt: { type: "string", description: "ISO 8601（省略＝不變）" },
+        endsAt: { type: "string", description: "ISO 8601（省略＝不變；須晚於 startsAt）" },
+        note: { type: "string" },
+      },
+      required: ["scheduleItemId"],
+    },
+  },
   // ── 筆記・會議紀錄（組共用的知識筆記，可匯入知識庫）：外部 AI 可讀，閉合「知識地圖」迴路 ──
   {
     name: "list_notes",
@@ -395,6 +492,50 @@ const TOOLS = [
     name: "get_note",
     description: "讀一則筆記的全文（會議決議、待辦、由知識庫匯入的內容）。先用 list_notes 找 noteId。",
     inputSchema: { type: "object", properties: { noteId: { type: "string" } }, required: ["noteId"] },
+  },
+  {
+    name: "add_note",
+    description: "為專案新增一則筆記（會議紀錄／整理／交接）。與網頁筆記同一套權限與版本行為；title 最長 120、content 最長 80000 字。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        title: { type: "string" },
+        content: { type: "string" },
+      },
+      required: ["projectId", "title", "content"],
+    },
+  },
+  {
+    name: "append_note",
+    description: "在既有筆記末尾追加內容（自動保留更新前版本快照）。只有作者本人或組長以上可改；先用 list_notes 找 noteId。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        noteId: { type: "string" },
+        content: { type: "string", description: "要追加的內容（以空行接在原文之後）" },
+      },
+      required: ["noteId", "content"],
+    },
+  },
+  // ── M5 外部連接（E5）：狀態唯讀＋指定 fileId 匯入——刻意不提供「整盤瀏覽」工具 ──
+  {
+    name: "get_integrations_status",
+    description: "查金鑰擁有者本人的外部連接狀態：Google 雲端（是否連結／哪個帳戶）、Notion（workspace）、外部 API 連接數。只回顯示用資訊，絕不回憑證原文。",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "import_drive_file",
+    description: "以「金鑰擁有者本人」的 Google 授權，把指定 fileId 的檔案匯入某個資料庫的文件區（Google 文件→txt／試算表→csv／簡報→txt／一般檔直載＋抽文字）。一次一檔、不提供整盤列表——fileId 請由使用者在網頁選檔或自行提供。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tableId: { type: "string", description: "目的資料庫（需 AI 可寫；先用 list_databases 確認）" },
+        fileId: { type: "string", description: "Google 檔案 id（網址中 /d/{fileId}/ 一段）" },
+        name: { type: "string", description: "文件名稱（省略＝用雲端檔名）" },
+      },
+      required: ["tableId", "fileId"],
+    },
   },
   // ── 站內私訊（通訊錄 1:1 聊天）：只讀寫「金鑰擁有者本人」參與的對話，別人的私訊碰不到 ──
   {
@@ -743,6 +884,185 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
     };
   }
 
+  // ── M3 知識庫與分鏡（D4）：唯讀＋截斷——組隔離同網頁；軟刪除（回收桶）一律不列不讀 ──
+  if (name === "list_knowledge") {
+    const pid = String(args.projectId ?? "");
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
+    if (!project) throw new Error("找不到專案");
+    requireGroup(auth, project.groupId);
+    const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+    // 與 knowledge.list router 同口徑：SQL 層取 length/left，不載全文
+    const rows = await db
+      .select({
+        id: schema.knowledge.id,
+        kind: schema.knowledge.kind,
+        title: schema.knowledge.title,
+        chars: sql<number>`length(${schema.knowledge.content})`.mapWith(Number),
+        excerpt: sql<string>`left(${schema.knowledge.content}, 160)`,
+        createdAt: schema.knowledge.createdAt,
+      })
+      .from(schema.knowledge)
+      .where(and(eq(schema.knowledge.projectId, project.id), isNull(schema.knowledge.deletedAt)))
+      .orderBy(desc(schema.knowledge.createdAt))
+      .limit(limit);
+    return rows;
+  }
+
+  if (name === "get_knowledge") {
+    const kid = String(args.knowledgeId ?? "");
+    const [row] = await db
+      .select()
+      .from(schema.knowledge)
+      .where(and(eq(schema.knowledge.id, kid), isNull(schema.knowledge.deletedAt)));
+    if (!row) throw new Error("找不到這筆知識（可能已在回收桶）");
+    requireGroup(auth, row.groupId);
+    const offset = Math.max(0, Math.trunc(Number(args.offset) || 0));
+    const CHUNK = 20_000;
+    return {
+      id: row.id,
+      kind: row.kind,
+      title: row.title,
+      totalChars: row.content.length,
+      offset,
+      text: row.content.slice(offset, offset + CHUNK),
+      truncated: offset + CHUNK < row.content.length,
+    };
+  }
+
+  if (name === "list_scenes") {
+    const pid = String(args.projectId ?? "");
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
+    if (!project) throw new Error("找不到專案");
+    requireGroup(auth, project.groupId);
+    const scenes = await db
+      .select()
+      .from(schema.scenes)
+      .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+      .orderBy(schema.scenes.orderIndex);
+    return scenes.map((s, index) => ({
+      sceneNo: index + 1,
+      sceneId: s.id,
+      title: s.title,
+      status: s.status,
+      hasVisual: !!s.assetId,
+      hasVoiceover: !!(s.voiceover ?? "").trim(),
+      hasNarrationAudio: !!s.narrationAssetId,
+    }));
+  }
+
+  // ── M2 任務（D3）：重用 taskCore——負責人歸屬、封存、等待節點喚醒與網頁端同一套 ──
+  if (name === "list_tasks") {
+    const tasks = await listProjectTasks(auth, String(args.projectId ?? ""));
+    const rows = tasks.slice(0, 100).map((t) => ({
+      id: t.id,
+      taskType: t.taskType,
+      title: t.title,
+      status: t.status,
+      priority: t.priority,
+      assignee: t.assigneeName,
+      dueAt: t.dueAt,
+      planRunId: t.planRunId,
+      createdAt: t.createdAt,
+    }));
+    return tasks.length > rows.length
+      ? { items: rows, truncated: true, note: `任務超過單頁上限，僅列出前 ${rows.length} 筆` }
+      : rows;
+  }
+
+  if (name === "create_task") {
+    const pid = String(args.projectId ?? "");
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
+    if (!project) throw new Error("找不到專案");
+    requireGroup(auth, project.groupId);
+    const task = await addProjectTaskCore({
+      auth,
+      groupId: project.groupId,
+      projectId: project.id,
+      title: String(args.title ?? ""),
+      description: args.description === undefined ? null : String(args.description),
+      assigneeId: args.assigneeId === undefined ? null : String(args.assigneeId),
+      dueAt: args.dueAt === undefined ? null : String(args.dueAt),
+      priority: args.priority === undefined ? undefined : (String(args.priority) as "low" | "normal" | "high" | "urgent"),
+    });
+    return { id: task.id, title: task.title, status: task.status, assignee: task.assigneeId, dueAt: task.dueAt };
+  }
+
+  if (name === "complete_task") {
+    const taskId = String(args.taskId ?? "");
+    const decision = args.decision === undefined ? "complete" : String(args.decision);
+    if (decision !== "complete" && decision !== "approve" && decision !== "reject") {
+      throw new Error("decision 只能是 complete／approve／reject");
+    }
+    const task = decision === "complete"
+      ? await completeProjectTaskCore(auth, taskId)
+      : await decideProjectApprovalCore(auth, taskId, decision);
+    return {
+      id: task.id,
+      title: task.title,
+      status: task.status,
+      note: task.wakeRunId ? "等待這件任務的代理已恢復執行——用 get_agent_run 追進度。" : undefined,
+    };
+  }
+
+  // ── M1 寫入（D2）：重用 notesCore／scheduleCore——與網頁端同一套守衛（作者/組長、封存、版本快照）──
+  if (name === "append_note") {
+    const row = await appendNoteCore({
+      auth,
+      id: String(args.noteId ?? ""),
+      content: String(args.content ?? ""),
+    });
+    return { id: row.id, title: row.title, chars: row.content.length, updatedAt: row.updatedAt };
+  }
+
+  if (name === "update_schedule_item") {
+    const row = await updateScheduleItemCore({
+      auth,
+      id: String(args.scheduleItemId ?? ""),
+      title: args.title === undefined ? undefined : String(args.title),
+      startsAt: args.startsAt === undefined ? undefined : String(args.startsAt),
+      endsAt: args.endsAt === undefined ? undefined : String(args.endsAt),
+      note: args.note === undefined ? undefined : String(args.note),
+    });
+    return { id: row.id, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt, note: row.note };
+  }
+
+  // ── M5 外部連接（E5）：狀態唯讀＋指定 fileId 匯入（本人 token；AI 存取等級守門）──
+  if (name === "get_integrations_status") {
+    const status = await listIntegrations(auth.user.id);
+    return {
+      googleDrive: {
+        configured: status.googleDrive.configured,
+        connected: status.googleDrive.connected,
+        email: status.googleDrive.email,
+        status: status.googleDrive.status,
+        lastError: status.googleDrive.lastError,
+      },
+      notion: {
+        connected: status.notion.connected,
+        workspace: status.notion.workspace,
+        status: status.notion.status,
+        siteTokenAvailable: status.notion.siteTokenAvailable,
+      },
+      apis: status.apis.map((a) => ({ id: a.id, name: a.name, status: a.status, lastUsedAt: a.lastUsedAt })),
+      note: "連接 ≠ 授權 AI 讀全雲端——匯入一律指定 fileId、走金鑰擁有者本人的授權。",
+    };
+  }
+
+  if (name === "import_drive_file") {
+    // MCP 走 AI 存取等級（resolveAgentAccess，只會比人更嚴）——agentAccess=none 的庫對代理不可見
+    const readable = await getAgentReadableTable(auth, String(args.tableId ?? ""));
+    if (!readable) throw new Error("找不到這個資料庫，或它未開放 AI 存取");
+    if (!readable.access.canWriteRows) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫未開放 AI 寫入（agentAccess 需為 write）" });
+    }
+    const fileId = String(args.fileId ?? "").trim();
+    if (!/^[\w-]{5,200}$/.test(fileId)) throw new Error("Google 檔案 id 格式不正確（網址中 /d/{fileId}/ 一段）");
+    return importDrivePickedFileToTable(auth, readable.table.id, {
+      fileId,
+      name: args.name === undefined ? undefined : String(args.name),
+    });
+  }
+
   // ── 上傳授權狀態（以 grantId；不掛 projectId；只回狀態不回 token 原文）──
   if (name === "get_upload_grant_status") {
     return handleGetUploadGrantStatus(auth, args);
@@ -821,6 +1141,8 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
       projectId: String(args.projectId ?? ""),
       goal: String(args.goal ?? ""),
       plannerMode,
+      // D5/M4：短版旗標與工作台「快速開拍（短版）」同一語意——外部模型不必自己拼骨架
+      playbookId: args.shortCreation === true ? "playbook.creation.short.v1" : undefined,
     });
     return {
       runId: run.id,
@@ -910,7 +1232,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   }
 
   // ── 排程／筆記與統整快照（以 projectId 為鍵，先解析專案的組再套組隔離）──
-  if (name === "list_schedule" || name === "add_schedule_item" || name === "list_notes" || name === "get_project_status") {
+  if (name === "list_schedule" || name === "add_schedule_item" || name === "list_notes" || name === "add_note" || name === "get_project_status") {
     const pid = String(args.projectId ?? "");
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, pid));
     if (!project) throw new Error("找不到專案");
@@ -965,6 +1287,18 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         note: args.note ? String(args.note) : null,
       });
       return { id: row.id, title: row.title, startsAt: row.startsAt, endsAt: row.endsAt };
+    }
+
+    if (name === "add_note") {
+      // notesCore 內部再驗一次專案歸屬與封存（requireActive）；標題／內容長度守門也在 core
+      const row = await addNoteCore({
+        auth,
+        groupId: project.groupId,
+        projectId: project.id,
+        title: String(args.title ?? ""),
+        content: String(args.content ?? ""),
+      });
+      return { id: row.id, title: row.title, chars: row.content.length, createdAt: row.createdAt };
     }
 
     // get_project_status：把各子系統一次統整給外部 AI（細部連結分鏡／生成／代理／排程／待辦）
@@ -1182,7 +1516,14 @@ export async function handleMcp(req: Request, res: Response): Promise<void> {
       case "ping":
         return reply({});
       case "tools/list":
-        return reply({ tools: TOOLS });
+        // D1：附上 catalog 推導的 annotations（read/write 分類同源；四個 hint 顯式輸出，
+        // 因協議層預設偏保守——未給 destructive/openWorld 會被視為 true）
+        return reply({
+          tools: TOOLS.map((tool) => {
+            const annotations = mcpToolAnnotations(tool.name);
+            return annotations ? { ...tool, annotations } : tool;
+          }),
+        });
       case "tools/call": {
         const { name, arguments: args } = (body.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
         const result = await callTool(auth, identity.scope, String(name), args ?? {});

@@ -3,12 +3,13 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
-import { worldviewSchema } from "../../shared/worldview";
+import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { CATEGORIES, WORKFLOW_PRESETS, getWorkflow, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
-import { agentPlannerModeSchema } from "../../shared/agentPlanner";
+import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
 import { scenarioPlaybookText } from "../../shared/scenarioPlaybook";
 import { isMockMode } from "../services/fal";
-import { nimComplete, NimServiceError } from "../services/nvidia-nim";
+import { NimServiceError } from "../services/nvidia-nim";
+import { completeText, LlmServiceError, type LlmProvider } from "../services/llmProvider";
 import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { submitGenerationCore } from "../services/generationCore";
@@ -330,9 +331,20 @@ async function runLookupTool(
   return { step: `查了模型目錄(${kw || "全部"})`, text: searchCatalogText(kw, call.args?.category?.trim()) };
 }
 
-/** 呼叫 NVIDIA NIM 一次,回原始輸出（工具迴圈與最終回答共用）；signal 讓用戶端斷線時中止在途呼叫 */
-async function callLlm(prompt: string, signal?: AbortSignal): Promise<string> {
-  return nimComplete(prompt, { timeoutMs: 60_000, signal });
+/**
+ * 呼叫 LLM 一次,回原始輸出與實際供應商（工具迴圈與最終回答共用）；
+ * signal 讓用戶端斷線時中止在途呼叫。
+ *
+ * 模式預設 "nim"——維持既有行為與 ASK_COST_POINTS = 0 的成本不變式。
+ * 使用者明確改選 fal 檔位時才會花到平台的錢，回傳值帶出實際供應商供 UI 誠實標示。
+ */
+async function callLlm(
+  prompt: string,
+  signal?: AbortSignal,
+  mode: AgentPlannerMode = "nim",
+): Promise<{ text: string; provider: LlmProvider; model: string; fellBack: boolean }> {
+  const result = await completeText({ prompt, mode, timeoutMs: 60_000, signal });
+  return { text: result.text, provider: result.provider, model: result.model, fellBack: !!result.fellBack };
 }
 
 /** 類別鍵 → 中文標籤（挑模型器分組用；找不到退回類別鍵本身） */
@@ -380,6 +392,11 @@ export interface AskCoreInput {
   signal?: AbortSignal;
   /** 串流與退回 tRPC 共用的請求關聯鍵；不提供限流免計，避免惡意並行重送 */
   dedupeKey?: string;
+  /**
+   * 使用者選的模型檔位。預設 "nim"＝NVIDIA NIM 免費額度（站內 0 點、平台 0 成本）。
+   * 選 fal 檔位品質較好，但平台實付 USD——故預設絕不自動升級。
+   */
+  mode?: AgentPlannerMode;
 }
 export interface AskCoreResult {
   answer: string;
@@ -387,6 +404,11 @@ export interface AskCoreResult {
   steps: string[];
   mock: boolean;
   fallback: boolean;
+  /** 這次實際由誰回答（auto 可能中途轉備援）；供 UI 誠實顯示，不讓付費行為隱形 */
+  provider?: LlmProvider;
+  model?: string;
+  /** auto 模式下 NIM 失敗轉付費 fal 時為 true */
+  fellBackToPaid?: boolean;
 }
 /** 查詢工具 → 給使用者看的中文名（串流「正在查素材庫…」用） */
 const LOOKUP_LABEL: Record<string, string> = {
@@ -441,7 +463,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       // 連結全專案×資料庫：AI 可讀的自訂資料庫（代號速查進提示詞；細列用 query_database 工具按需查）
       const readableDbs = await listAssistantReadableDbs(input.auth);
       const context = `標題：${project.title}（${project.kind}，${project.format}）
-世界觀｜一句話：${wv.logline || "—"}｜調性：${wv.tones.join("、") || "—"}｜核心訊息：${wv.message || "—"}｜視覺風格：${wv.styles.join("、") || "—"}
+世界觀｜${formatWorldviewForAi(wv, "brief")}
 分鏡（共 ${scenes.length}）：
 ${sceneLines}
 生成：完成 ${genDone}／生成中 ${genRunning}／失敗 ${genFailed}｜待審分鏡：${pendingCount}`;
@@ -559,8 +581,12 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
 
       // 多步工具迴圈：每輪 LLM 回「工具呼叫」就執行並把結果附進下一輪；回「最終回答」就結束。
       // NIM 免費額度：全程 0 點（ASK_COST_POINTS=0，reserveQuota/refund 皆直接放行）。
+      // 若使用者選了 fal 檔位，站內點數仍是 0，但平台會實付 USD——故回傳實際供應商讓 UI 標示。
       const steps: string[] = [];
       let toolBlocks = "";
+      let usedProvider: LlmProvider = "nvidia-nim";
+      let usedModel = "";
+      let fellBackToPaid = false;
       try {
         for (let round = 0; ; round++) {
           // 用戶端已斷線（SSE close）：不再發起下一次 LLM 呼叫，提早收工不白燒免費額度。
@@ -568,7 +594,12 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           if (input.signal?.aborted) return { answer: "", actions: [], steps, mock: false, fallback: true };
           emit("thinking", round === 0 ? "思考中…" : "整理查到的資料，繼續思考…");
           const forceFinal = round >= MAX_TOOL_ROUNDS;
-          const raw = await callLlm(buildPrompt(toolBlocks, forceFinal), input.signal);
+          const completion = await callLlm(buildPrompt(toolBlocks, forceFinal), input.signal, input.mode);
+          // 記下最後一次實際用到的供應商——auto 模式可能中途轉備援，UI 要能誠實顯示
+          usedProvider = completion.provider;
+          usedModel = completion.model;
+          fellBackToPaid = fellBackToPaid || completion.fellBack;
+          const raw = completion.text;
           const match = raw.match(/\{[\s\S]*\}/);
           let json: unknown = null;
           try {
@@ -591,24 +622,26 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           emit("thinking", "整理回答…");
           const parsed = json ? replySchema.safeParse(json) : null;
           if (parsed?.success) {
-            return { answer: parsed.data.answer, actions: resolve(parsed.data.actions ?? []), steps, mock: false, fallback: false };
+            return { answer: parsed.data.answer, actions: resolve(parsed.data.actions ?? []), steps, mock: false, fallback: false, provider: usedProvider, model: usedModel, fellBackToPaid };
           }
           // LLM 常把「提議動作」誤用唯讀工具格式（如 {"tool":"split_script",…}）——救回成正規動作提議，
           // 不讓它掉進下方 fallback 把原始 JSON 洩漏給使用者（C2 self-healing）
           const coerced = coerceActionToolCall(json);
           if (coerced) {
-            return { answer: coerced.answer, actions: resolve(coerced.actions ?? []), steps, mock: false, fallback: false };
+            return { answer: coerced.answer, actions: resolve(coerced.actions ?? []), steps, mock: false, fallback: false, provider: usedProvider, model: usedModel, fellBackToPaid };
           }
           // 真的解析失敗：把回答裡所有 JSON 區塊一律移除（絕不把原始 JSON／工具呼叫洩漏給使用者），
           // 剩純文字才用，否則給具體引導語。LLM 已計費不退點，但前端不會拿到壞資料。
           const stripped = raw.replace(/\{[\s\S]*\}/g, "").trim();
           const fallbackText = stripped || "我不太確定要怎麼幫你——可以把想做的事講得更具體嗎？例如「把這段腳本拆成分鏡」或「為第 3 鏡生成畫面」。";
-          return { answer: fallbackText.slice(0, 4000), actions: [] as ResolvedAction[], steps, mock: false, fallback: true };
+          return { answer: fallbackText.slice(0, 4000), actions: [] as ResolvedAction[], steps, mock: false, fallback: true, provider: usedProvider, model: usedModel, fellBackToPaid };
         }
       } catch (err) {
         await refund(input.auth.user.id, project.groupId, ASK_COST_POINTS, "AI 專案助手失敗退回");
         // NIM 限制錯誤（免費層流量/點數上限）給人話原因，使用者/管理員才知道怎麼辦
-        const answer = err instanceof NimServiceError ? err.message : "AI 助手暫時沒回應，請稍後再問一次。";
+        const answer = err instanceof NimServiceError || err instanceof LlmServiceError
+          ? err.message
+          : "AI 助手暫時沒回應，請稍後再問一次。";
         return { answer, actions: [] as ResolvedAction[], steps, mock: false, fallback: true };
       }
   }
@@ -621,13 +654,20 @@ export const assistantRouter = router({
   /** 問答：讀專案現況回答，並可提議動作（僅提議，不執行）。核心與 SSE 串流路由共用 runAssistantAsk。 */
   ask: authedProcedure
     // nonce 僅關聯串流與 fallback；每次外部呼叫仍各自計入限流。
-    .input(z.object({ projectId: z.string().uuid(), message: z.string().min(1).max(1000), nonce: z.string().max(64).optional() }))
+    .input(z.object({
+      projectId: z.string().uuid(),
+      message: z.string().min(1).max(1000),
+      nonce: z.string().max(64).optional(),
+      /** 使用者選的模型檔位；預設 nim＝免費。選 fal 檔位時平台實付 USD。 */
+      mode: agentPlannerModeSchema.optional(),
+    }))
     .mutation(({ ctx, input }) =>
       runAssistantAsk({
         projectId: input.projectId,
         message: input.message,
         auth: ctx.auth,
         dedupeKey: input.nonce,
+        mode: input.mode,
       }),
     ),
 

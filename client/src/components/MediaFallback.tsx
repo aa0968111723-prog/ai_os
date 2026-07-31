@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties, ImgHTMLAttributes, VideoHTMLAttributes, AudioHTMLAttributes } from "react";
 import { Icon } from "./Icon";
+import { Meta } from "./ui";
 
 /** 遺失佔位方塊：icon＋一句話，尺寸交由呼叫端配合原媒體的版位 */
 export function MissingMediaBox({
@@ -42,7 +43,7 @@ export function MissingMediaBox({
       }}
     >
       <Icon name="XCircle" size={iconSize} />
-      <span className="hint" style={{ fontSize: 11 }}>{label}</span>
+      <Meta style={{ fontSize: 11 }}>{label}</Meta>
     </div>
   );
 }
@@ -74,9 +75,9 @@ export function AssetAudio(props: AudioHTMLAttributes<HTMLAudioElement> & { fall
   useEffect(() => { setFailed(false); }, [audio.src]);
   if (failed) {
     return (
-      <div className="hint" style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+      <Meta as="div" style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
         <Icon name="XCircle" size={11} />{fallbackLabel ?? "音檔遺失（可能是伺服器重啟前的舊檔）"}
-      </div>
+      </Meta>
     );
   }
   return <audio {...audio} onError={() => setFailed(true)} />;

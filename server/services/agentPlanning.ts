@@ -20,6 +20,7 @@ const stepBase = z.object({
   id: z.string().trim().min(1).max(100),
   title: z.string().trim().min(1).max(160),
   note: z.string().trim().max(2_000).optional(),
+  rationale: z.string().trim().min(1).max(300).optional(),
   dependsOn: z.array(z.string().trim().min(1).max(100)).max(30).optional(),
   milestoneId: z.string().trim().min(1).max(100).optional(),
   estimatedMinutes: z.number().int().min(0).max(525_600).optional(),
@@ -36,6 +37,8 @@ const humanFields = {
 export const completePlanDraftSchema = z.object({
   summary: z.object({
     goal: z.string().trim().min(1).max(1_000),
+    rationale: z.string().trim().min(1).max(500).optional(),
+    contextUsed: z.array(z.string().trim().min(1).max(60)).max(30).optional(),
     successCriteria: z.array(z.string().trim().min(1).max(500)).min(1).max(30),
     assumptions: z.array(z.string().trim().min(1).max(500)).max(30).default([]),
     missingInformation: z.array(z.string().trim().min(1).max(500)).max(30).default([]),
@@ -341,6 +344,7 @@ export function resolveCompletePlanDraft(
       kind: source.kind,
       title: source.title,
       note: source.note?.trim() || source.title,
+      rationale: source.rationale,
       status: "pending",
       actorType: actorFor(source.kind),
       dependsOn: source.dependsOn,
@@ -562,8 +566,11 @@ export function resolveCompletePlanDraft(
   }
 
   const estPoints = steps.reduce((sum, step) => sum + (step.points ?? 0), 0);
+  const contextUsed = unique(draft.summary.contextUsed ?? []);
   const summary: CompletePlanSummary = {
     goal: draft.summary.goal,
+    rationale: draft.summary.rationale,
+    contextUsed: contextUsed.length ? contextUsed : undefined,
     successCriteria: unique(draft.summary.successCriteria),
     assumptions: unique(draft.summary.assumptions),
     missingInformation: unique(missingInformation),

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { AssetImg } from "./MediaFallback";
+import { Hint, Meta } from "./ui";
 
 export interface ReferenceImage {
   id: string;
@@ -77,10 +78,10 @@ export function ReferenceImagePicker({
             fallbackStyle={{ width: 56, flex: "0 0 56px" }}
           />
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="hint" style={{ fontSize: 11, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <Meta as="div" style={{ fontSize: 11, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               <Icon name="Image" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />
               {value.title}
-            </div>
+            </Meta>
           </div>
           <button type="button" style={smallBtn} disabled={disabled} onClick={() => onChange(null)}>
             <Icon name="X" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />移除
@@ -109,11 +110,12 @@ export function ReferenceImagePicker({
 
       {libraryOpen && (
         assets.isLoading ? (
-          <p className="hint" style={{ margin: 0, fontSize: 11 }}>
+          <Meta as="p" style={{ margin: 0, fontSize: 11 }}>
             <Icon name="Loader" className="spin" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />載入素材庫…
-          </p>
+          </Meta>
         ) : images.length === 0 ? (
-          <p className="hint" style={{ margin: 0, fontSize: 11 }}>素材庫還沒有圖片——用上面的「上傳參考圖」直接傳一張。</p>
+          // 空狀態＋下一步：收掉會讓人卡在空面板前不知道能做什麼，所以兩種模式都顯示
+          <Hint as="p" layer="always" style={{ margin: 0, fontSize: 11 }}>素材庫還沒有圖片——用上面的「上傳參考圖」直接傳一張。</Hint>
         ) : (
           <div
             role="listbox"

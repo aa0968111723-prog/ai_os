@@ -4,7 +4,13 @@ import {
   countDoneSteps,
   currentStepNote,
   dispatchAllowed,
+  foldGroupStatusAggregate,
+  formatGroupBlockerDigest,
+  sanitizeContextUsed,
+  sanitizeRationale,
+  TEAM_CONTEXT_LABELS,
   formatAgentRunLine,
+  groupSummaryFromCounts,
   resolveDispatches,
   summarizeGroupAgentRuns,
 } from "./teamAssistant";
@@ -249,7 +255,7 @@ describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
   const recent = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
   const old = new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString();
 
-  it("空陣列 → healthy、全 0（對應 UI 空狀態）", () => {
+  it("空陣列 → idle（不是 healthy）：沒東西可分析 ≠ 分析結果良好", () => {
     const s = summarizeGroupAgentRuns([], now);
     expect(s).toEqual({
       running: 0,
@@ -257,10 +263,18 @@ describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
       awaitingApproval: 0,
       failedRecent: 0,
       doneRecent: 0,
+      stoppedRecent: 0,
       active: 0,
       activeProjects: 0,
-      health: "healthy",
+      hasRuns: false,
+      health: "idle",
     });
+  });
+
+  it("有計畫但全部靜止 → healthy、hasRuns=true（與 idle 區分開）", () => {
+    const s = summarizeGroupAgentRuns([{ status: "done", projectId: "p1", updatedAt: old }], now);
+    expect(s.hasRuns).toBe(true);
+    expect(s.health).toBe("healthy");
   });
 
   it("統計 active 與 activeProjects 去重", () => {
@@ -343,7 +357,7 @@ describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
     expect(s.health).toBe("healthy");
   });
 
-  it("discarded / stopped 不進 active 計數", () => {
+  it("discarded / stopped 不進 active 計數；stopped 進 stoppedRecent", () => {
     const s = summarizeGroupAgentRuns(
       [
         { status: "discarded", projectId: "p1", updatedAt: recent },
@@ -352,6 +366,164 @@ describe("summarizeGroupAgentRuns（組級健康／計數）", () => {
       now,
     );
     expect(s.active).toBe(0);
+    expect(s.stoppedRecent).toBe(1);
     expect(s.health).toBe("healthy");
+  });
+
+  it("過舊 stopped 不計 stoppedRecent（與 failed／done 同一條近期窗）", () => {
+    const s = summarizeGroupAgentRuns([{ status: "stopped", projectId: "p1", updatedAt: old }], now);
+    expect(s.stoppedRecent).toBe(0);
+    expect(s.hasRuns).toBe(true);
+  });
+
+  it("近期窗邊界：剛好落在 cutoff 上算近期，早一毫秒不算", () => {
+    const recentMs = 7 * 24 * 60 * 60 * 1000;
+    const onCutoff = new Date(now - recentMs).toISOString();
+    const justBefore = new Date(now - recentMs - 1).toISOString();
+    expect(summarizeGroupAgentRuns([{ status: "done", projectId: "p1", updatedAt: onCutoff }], now).doneRecent).toBe(1);
+    expect(summarizeGroupAgentRuns([{ status: "done", projectId: "p1", updatedAt: justBefore }], now).doneRecent).toBe(0);
+  });
+
+  it("近期窗內時，五個狀態計數的總和等於非 discarded 的筆數（不再有計畫消失在數字之間）", () => {
+    const runs = [
+      { status: "running", projectId: "p1", updatedAt: recent },
+      { status: "waiting", projectId: "p1", updatedAt: recent },
+      { status: "awaiting_approval", projectId: "p2", updatedAt: recent },
+      { status: "failed", projectId: "p2", updatedAt: recent },
+      { status: "done", projectId: "p3", updatedAt: recent },
+      { status: "stopped", projectId: "p3", updatedAt: recent },
+      { status: "discarded", projectId: "p4", updatedAt: recent },
+    ];
+    const s = summarizeGroupAgentRuns(runs, now);
+    const sum = s.running + s.waiting + s.awaitingApproval + s.failedRecent + s.doneRecent + s.stoppedRecent;
+    expect(sum).toBe(runs.filter((r) => r.status !== "discarded").length);
+  });
+});
+
+describe("foldGroupStatusAggregate（整組計數，不受清單 limit 影響）", () => {
+  it("count 回字串也要正確累加；進行中看全部、終局看近期窗", () => {
+    const counts = foldGroupStatusAggregate(
+      [
+        { status: "running", n: "2", nRecent: "1" },
+        { status: "waiting", n: "1", nRecent: "0" },
+        { status: "awaiting_approval", n: "3", nRecent: "3" },
+        { status: "failed", n: "9", nRecent: "2" },
+        { status: "done", n: "120", nRecent: "7" },
+        { status: "stopped", n: "4", nRecent: "1" },
+      ],
+      2,
+    );
+    // running/waiting/awaiting_approval 是「當下」狀態，不套近期窗
+    expect(counts.running).toBe(2);
+    expect(counts.waiting).toBe(1);
+    expect(counts.awaitingApproval).toBe(3);
+    // failed/done/stopped 只認近期窗內的
+    expect(counts.failedRecent).toBe(2);
+    expect(counts.doneRecent).toBe(7);
+    expect(counts.stoppedRecent).toBe(1);
+    // totalRuns 算全部（含窗外），用來判斷 idle
+    expect(counts.totalRuns).toBe(2 + 1 + 3 + 9 + 120 + 4);
+    expect(counts.activeProjects).toBe(2);
+  });
+
+  it("空聚合 → totalRuns 0，摘要為 idle", () => {
+    const counts = foldGroupStatusAggregate([], 0);
+    expect(counts.totalRuns).toBe(0);
+    expect(groupSummaryFromCounts(counts).health).toBe("idle");
+  });
+
+  it("整組有 200 筆完成、清單只看得到 30 筆時，doneRecent 仍回整組的數字", () => {
+    // 這正是改成 SQL 聚合的理由：舊版把 limit 30 的視窗當成全組樣本
+    const counts = foldGroupStatusAggregate([{ status: "done", n: "200", nRecent: "45" }], 0);
+    expect(counts.doneRecent).toBe(45);
+    expect(groupSummaryFromCounts(counts).hasRuns).toBe(true);
+  });
+
+  it("未知狀態不計入任何桶，但仍計入 totalRuns（不謊報 idle）", () => {
+    const counts = foldGroupStatusAggregate([{ status: "some_future_status", n: "5", nRecent: "5" }], 0);
+    expect(counts.running + counts.waiting + counts.awaitingApproval).toBe(0);
+    expect(counts.totalRuns).toBe(5);
+    expect(groupSummaryFromCounts(counts).health).toBe("healthy");
+  });
+});
+
+describe("formatGroupBlockerDigest（S5：ask 的阻塞上下文）", () => {
+  const base = {
+    status: "blocked",
+    openTasks: 5,
+    overdueTasks: 2,
+    blockers: [
+      { severity: "critical", type: "overdue_task", label: "任務逾期：補齊角色定裝卡" },
+      { severity: "warning", type: "waiting_human", label: "等待核准：確認旁白稿" },
+    ],
+    people: [
+      { name: "阿光", userId: "u1", openTasks: 3, overdueTasks: 2 },
+      { name: null, userId: null, openTasks: 2, overdueTasks: 0 },
+    ],
+    byProject: [
+      { projectTitle: "招生短片", blockers: 2, criticalBlockers: 1, overdueTasks: 2 },
+    ],
+  };
+
+  it("把阻塞、人員負荷與專案歸屬寫成結構化結論（不塞原始列）", () => {
+    const text = formatGroupBlockerDigest(base);
+    expect(text).toContain("有阻塞");
+    expect(text).toContain("未結人員任務 5（逾期 2）");
+    expect(text).toContain("[嚴重] 任務逾期：補齊角色定裝卡");
+    expect(text).toContain("[注意] 等待核准：確認旁白稿");
+    expect(text).toContain("阿光 3 件（逾期 2）");
+    expect(text).toContain("尚未指派 2 件");
+    expect(text).toContain("「招生短片」2 項（嚴重 1）");
+  });
+
+  it("沒有阻塞時明說「無」，不要留白讓模型自己想像", () => {
+    const text = formatGroupBlockerDigest({ ...base, status: "healthy", blockers: [], people: [], byProject: [] });
+    expect(text).toContain("無明顯阻塞");
+    expect(text).toContain("阻塞：無");
+  });
+
+  it("阻塞過多時截斷並誠實說還有幾項", () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ severity: "warning", type: "overdue_task", label: `第 ${i + 1} 項` }));
+    const text = formatGroupBlockerDigest({ ...base, blockers: many });
+    expect(text).toContain("（另有 4 項未列）");
+    expect(text).not.toContain("第 9 項");
+  });
+
+  it("沒有任務在身的人不列（避免整組人名洗版提示詞）", () => {
+    const text = formatGroupBlockerDigest({
+      ...base,
+      people: [{ name: "閒著", userId: "u9", openTasks: 0, overdueTasks: 0 }],
+    });
+    expect(text).not.toContain("閒著");
+  });
+});
+
+describe("sanitizeContextUsed／sanitizeRationale（S5：決策軌跡的守門）", () => {
+  it("只留白名單內的標籤，去重且限量", () => {
+    expect(sanitizeContextUsed(["專案現況", "阻塞與人員負荷", "專案現況"]))
+      .toEqual(["專案現況", "阻塞與人員負荷"]);
+  });
+
+  it("編造的來源一律丟掉——不設限的話它會編出看起來很專業卻沒讀過的名稱", () => {
+    expect(sanitizeContextUsed(["財務報表", "使用者訪談紀錄", "專案現況"])).toEqual(["專案現況"]);
+    expect(sanitizeContextUsed(["完全不存在的東西"])).toEqual([]);
+  });
+
+  it("非陣列／非字串一律回空，不會炸", () => {
+    expect(sanitizeContextUsed(undefined)).toEqual([]);
+    expect(sanitizeContextUsed("專案現況")).toEqual([]);
+    expect(sanitizeContextUsed([1, null, {}, "組花費"])).toEqual(["組花費"]);
+  });
+
+  it("最多八個（提示詞回來再多也不全收）", () => {
+    expect(sanitizeContextUsed([...TEAM_CONTEXT_LABELS]).length).toBe(8);
+  });
+
+  it("rationale 壓成單行並截到 300 字", () => {
+    expect(sanitizeRationale("  依據阻塞清單，\n\n兩件逾期集中在同一案  ")).toBe("依據阻塞清單， 兩件逾期集中在同一案");
+    expect(sanitizeRationale("字".repeat(400))!.length).toBe(301); // 300 + 省略號
+    expect(sanitizeRationale("   ")).toBeUndefined();
+    expect(sanitizeRationale(undefined)).toBeUndefined();
+    expect(sanitizeRationale(123)).toBeUndefined();
   });
 });

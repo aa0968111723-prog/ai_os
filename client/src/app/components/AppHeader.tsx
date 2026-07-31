@@ -6,6 +6,7 @@ import { Icon } from "../../components/Icon";
 import { AccountMenu } from "./AccountMenu";
 import { PendingApprovalsBadge } from "./PendingApprovalsBadge";
 import { PrimaryNavigation } from "./PrimaryNavigation";
+import { Badge } from "../../components/ui";
 
 /** 彈性點數徽章：剩餘 or 不限（管理員可在團隊管理調整）
  *  強化展示：週／日已用與額度寫入 title；無週額時仍顯示本週已用（站內點，非 Fal USD）。 */
@@ -131,7 +132,7 @@ export function AppHeader({
       <span className="spacer" />
       <div className="topbar-actions">
       {/* 只在 E2E_MOCK=1（自動化測試）下出現；正式部署一律真實模式，不會再看到這顆徽章 */}
-      {signedIn && mockMode && <span className="badge mock">測試模式</span>}
+      {signedIn && mockMode && <Badge tone="mock">測試模式</Badge>}
       {signedIn && <PrimaryNavigation />}
       {signedIn && <PendingApprovalsBadge groupId={activeGroupId} />}
       {signedIn && <PointsBadge groupId={activeGroupId} />}

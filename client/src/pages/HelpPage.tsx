@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 import { Link } from "wouter";
 import { Icon, type IconName } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
+import { Card, Chip, Hint, Meta } from "../components/ui";
 
 /**
  * 怎麼用 / 常見問題：純靜態白話說明頁（無資料查詢、無新依賴）。
@@ -14,8 +15,8 @@ import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 /** 六步路線圖的一格：大編號＋圖示＋標題＋白話一句。橫向排、窄螢幕自動換行。 */
 function Step({ n, icon, title, children }: { n: number; icon: IconName; title: string; children: ReactNode }) {
   return (
-    <li
-      className="card"
+    <Card
+      as="li"
       style={{
         flex: "1 1 150px",
         minWidth: 150,
@@ -49,10 +50,10 @@ function Step({ n, icon, title, children }: { n: number; icon: IconName; title: 
         <Icon name={icon} size={15} />
         <b style={{ fontSize: "var(--fs-14)" }}>{title}</b>
       </div>
-      <div className="hint" style={{ fontSize: 13, lineHeight: 1.65 }}>
+      <Meta as="div" style={{ fontSize: 13, lineHeight: 1.65 }}>
         {children}
-      </div>
-    </li>
+      </Meta>
+    </Card>
   );
 }
 
@@ -78,11 +79,11 @@ function Spot({ icon, name, where, children }: { icon: IconName; name: string; w
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <b style={{ fontSize: "var(--fs-14)" }}>{name}</b>
-          <span className="chip" style={{ fontSize: 11 }}>{where}</span>
+          <Chip style={{ fontSize: 11 }}>{where}</Chip>
         </div>
-        <div className="hint" style={{ fontSize: 13, lineHeight: 1.7, marginTop: 2 }}>
+        <Meta as="div" style={{ fontSize: 13, lineHeight: 1.7, marginTop: 2 }}>
           {children}
-        </div>
+        </Meta>
       </div>
     </div>
   );
@@ -91,20 +92,20 @@ function Spot({ icon, name, where, children }: { icon: IconName; name: string; w
 /** 全站地圖的一組：小標題＋若干 Spot。 */
 function MapGroup({ title, icon, children }: { title: string; icon: IconName; children: ReactNode }) {
   return (
-    <div className="card" style={{ padding: "6px 16px 12px" }}>
+    <Card style={{ padding: "6px 16px 12px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0 2px" }}>
         <Icon name={icon} size={16} />
         <b style={{ fontSize: "var(--fs-15)" }}>{title}</b>
       </div>
       {children}
-    </div>
+    </Card>
   );
 }
 
 /** 單則問答：折疊卡片，標題即 summary（可鍵盤展開）；defaultOpen 讓第一則預設展開。 */
 function Faq({ q, defaultOpen = false, children }: { q: string; defaultOpen?: boolean; children: ReactNode }) {
   return (
-    <details className="card" open={defaultOpen} style={{ padding: 0, overflow: "hidden" }}>
+    <Card as="details" open={defaultOpen} style={{ padding: 0, overflow: "hidden" }}>
       <summary
         style={{
           minHeight: 44,
@@ -127,7 +128,7 @@ function Faq({ q, defaultOpen = false, children }: { q: string; defaultOpen?: bo
       >
         {children}
       </div>
-    </details>
+    </Card>
   );
 }
 
@@ -136,9 +137,9 @@ function Term({ word, children }: { word: string; children: ReactNode }) {
   return (
     <div style={{ marginBottom: 12 }}>
       <b>{word}</b>
-      <div className="hint" style={{ fontSize: "var(--fs-14)", lineHeight: 1.75, marginTop: 2 }}>
+      <Meta as="div" style={{ fontSize: "var(--fs-14)", lineHeight: 1.75, marginTop: 2 }}>
         {children}
-      </div>
+      </Meta>
     </div>
   );
 }
@@ -171,22 +172,22 @@ export function HelpPage() {
       </nav>
 
       {/* ── 一句話總覽：先給最大的那張圖，之後的一切都掛在這句上 ── */}
-      <div className="card card--primary help-summary-card">
+      <Card variant="primary" className="help-summary-card">
         <p style={{ margin: 0, fontSize: "var(--fs-16)", lineHeight: 1.85 }}>
           <b>一句話：</b>這個網站把「一份腳本」變成「一包可以直接拖進剪映或 Premiere 的素材」。
           你不用自己找圖、配音、對字幕；AI 會記住這支片的<b>世界觀</b>（背景、語氣、畫風），每次生成自動帶入。
           你主要做的事只有三件：<b>設定世界觀 → 逐格生成畫面／配音 → 排好順序送審、打包下載</b>。
         </p>
-      </div>
+      </Card>
 
       {/* ── 六步路線圖：把主線流程視覺化，一眼看見全貌 ── */}
       <H2 id="help-route" icon="Clapperboard">整條路線（六步）</H2>
-      <p className="hint" style={{ marginTop: 0, fontSize: 13 }}>
+      <Meta as="p" style={{ marginTop: 0, fontSize: 13 }}>
         每個專案都走這條路。專案頁上方有「從這裡開始」清單，做到哪一步會自動打勾。
-      </p>
+      </Meta>
       <ol style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: 0, margin: 0 }}>
         <Step n={1} icon="Palette" title="設世界觀">
-          一句話故事、關鍵訊息、調性、畫風。填一次，之後每次生成自動帶入。
+          一句話故事（或關鍵訊息）＋至少一項調性或畫風。填一次，生成與 AI 助手自動帶入；進階的觀眾／三幕／人物給導演用。
         </Step>
         <Step n={2} icon="Sparkles" title="AI 拆分鏡">
           在「AI 創作工作台」的問 AI 模式貼腳本，自動切成一格一格的分鏡草稿。
@@ -207,9 +208,9 @@ export function HelpPage() {
 
       {/* ── 全站地圖：這頁的重點——把每個看得到的地方講白話 ── */}
       <H2 id="help-map" icon="MousePointer2">這個網站有哪些地方？</H2>
-      <p className="hint" style={{ marginTop: 0, fontSize: 13 }}>
+      <Hint layer="always" style={{ marginTop: 0, fontSize: 13 }}>
         照你會遇到的順序列出來。<b>不是每個人都看得到全部</b>——管理相關的地方只有組長／管理員會出現。
-      </p>
+      </Hint>
       <div className="stack">
         <MapGroup title="最上面那一排（頂欄・隨時都在）" icon="MousePointer2">
           <Spot icon="Gem" name="剩餘點數" where="頂欄">
@@ -358,9 +359,9 @@ export function HelpPage() {
               打到限制時畫面會直接告訴你原因：「流量達上限」等一分鐘就好；「試用點數用完」請管理員到
               build.nvidia.com 檢查帳號、換新金鑰或申請加值——不影響圖片／影片生成與已有的成品。
             </li>
-            <li className="hint" style={{ fontSize: 12 }}>
+            <Meta as="li" style={{ fontSize: 12 }}>
               提醒：這些功能會把世界觀與知識庫節錄送到 NVIDIA 雲端運算——請避免在知識庫放不宜外流的個資。
-            </li>
+            </Meta>
           </ul>
         </Faq>
 
@@ -378,10 +379,10 @@ export function HelpPage() {
             <li><b>交付</b>——時間軸與字幕檔：時間軸.fcpxml（Final Cut Pro／DaVinci Resolve／剪映專業版）、
               Premiere時間軸.xml、字幕.srt、剪輯表.edl</li>
           </ul>
-          <p className="hint" style={{ margin: "0 0 8px", fontSize: 13 }}>
+          <Meta as="p" style={{ margin: "0 0 8px", fontSize: 13 }}>
             若專案有<b>鎖定素材</b>，會多一個 00_鎖定原素材（原封不動的原音／開示／配樂）；
             另附 README.txt 說明資料夾結構與各軟體匯入步驟。
-          </p>
+          </Meta>
           <p style={{ margin: "0 0 8px" }}>
             <b>最快的組片方式</b>：解壓後直接把「交付/」裡對應你剪輯軟體的時間軸檔匯入
             （Premiere 用 .xml、Final Cut Pro／Resolve／剪映專業版用 .fcpxml）——
@@ -408,9 +409,9 @@ export function HelpPage() {
 
       {/* ── 名詞小辭典 ── */}
       <H2 id="help-terms" icon="FileText">名詞小辭典</H2>
-      <div className="card">
+      <Card>
         <Term word="世界觀">
-          這支片的固定設定（一句話故事、關鍵訊息、調性、視覺風格、禁忌）。填一次，之後每次生成自動帶入，不用重講背景。
+          這支片的固定設定。調性／風格／訊息／禁忌會在每次生成自動帶入；目標觀眾、三幕結構、敘事人物會給 AI 導演建議與拆分鏡用。畫面外觀一致請另建「角色定裝卡」。
         </Term>
         <Term word="分鏡">把片子切成一格一格的鏡頭；每一格有秒數、畫面，可配旁白與字幕。</Term>
         <Term word="逐鏡配音">
@@ -434,13 +435,13 @@ export function HelpPage() {
           管理該組的人，可審核分鏡、調整組的「選項」（自訂內容類型／平台／世界觀選項）。
         </Term>
         <Term word="開發者／管理員">系統最高權限，管理所有團隊與帳號、設定點數額度。</Term>
-      </div>
+      </Card>
 
       <p style={{ marginTop: 24 }}>
         <Link href="/dashboard">回今日工作台</Link>
-        <span className="hint" style={{ margin: "0 10px" }}>·</span>
+        <Meta style={{ margin: "0 10px" }}>·</Meta>
         <Link href="/models">看模型指南</Link>
-        <span className="hint" style={{ margin: "0 10px" }}>·</span>
+        <Meta style={{ margin: "0 10px" }}>·</Meta>
         <Link href="/mcp">接上外部 AI</Link>
       </p>
     </div>

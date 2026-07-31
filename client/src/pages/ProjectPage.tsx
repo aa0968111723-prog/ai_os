@@ -2,9 +2,16 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "wouter";
 import { trpc } from "../api";
+import { useMatchMedia } from "../lib/useMatchMedia";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip } from "../components/interactions";
-import { worldviewSchema, type Worldview } from "@shared/worldview";
+import {
+  worldviewSchema,
+  isWorldviewReady,
+  hasActs,
+  removesDefaultTaboos,
+  type Worldview,
+} from "@shared/worldview";
 import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
 import { AssetLibrary } from "../components/AssetLibrary";
@@ -23,6 +30,7 @@ import { revealWorkbenchAnchor, scrollToSelector } from "../features/creation-wo
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
+import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   useCollab,
   CursorOverlay,
@@ -37,21 +45,6 @@ import {
 /** 與 styles.css 單欄／平板界線對齊：≤820px 為手機減負模式 */
 const PROJECT_MOBILE_MQ = "(max-width: 820px)";
 
-function useMatchMedia(query: string): boolean {
-  const [matches, setMatches] = useState(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return false;
-    return window.matchMedia(query).matches;
-  });
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia(query);
-    const onChange = () => setMatches(mq.matches);
-    onChange();
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, [query]);
-  return matches;
-}
 
 type CtxSectionKey = "characters" | "scenes" | "knowledge" | "databases" | "assets" | "recycle";
 
@@ -77,19 +70,17 @@ function CtxCollapse({
     return <div id={sectionId}>{children}</div>;
   }
   return (
-    <details
+    <Card as="details" variant="quiet" className="project-ctx-collapse"
       id={sectionId}
-      className="card card--quiet project-ctx-collapse"
       open={open}
-      onToggle={(e) => onOpenChange((e.currentTarget as HTMLDetailsElement).open)}
-    >
+      onToggle={(e) => onOpenChange((e.currentTarget as HTMLDetailsElement).open)}>
       <summary>
         <span className="project-ctx-collapse__title">{title}</span>
         {meta != null && meta !== "" && <span className="meta project-ctx-collapse__meta">{meta}</span>}
         <Icon name="ChevronDown" size={14} className="details-caret" style={{ marginLeft: "auto" }} />
       </summary>
       <div className="project-ctx-collapse__body">{children}</div>
-    </details>
+    </Card>
   );
 }
 
@@ -119,7 +110,7 @@ function StageHead({ id, num, title, desc, accent, hint }: {
       <span className="group-title">{title}</span>
       {desc && <span className="group-desc">{desc}</span>}
       <span className="group-rule" />
-      {hint && <span className="hint" style={{ whiteSpace: "nowrap" }}>{hint}</span>}
+      {hint && <Meta style={{ whiteSpace: "nowrap" }}>{hint}</Meta>}
     </div>
   );
 }
@@ -127,10 +118,10 @@ function StageHead({ id, num, title, desc, accent, hint }: {
 /** 幕與幕之間的銜接語：告訴使用者上一幕的東西怎麼流進下一幕（環環相扣的敘事線） */
 function StageLink({ text }: { text: string }) {
   return (
-    <p className="hint" aria-hidden style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 0 2px" }}>
+    <Meta as="p" aria-hidden style={{ display: "flex", alignItems: "center", gap: 6, margin: "4px 0 0 2px" }}>
       <Icon name="ChevronDown" size={14} style={{ flexShrink: 0 }} />
       {text}
-    </p>
+    </Meta>
   );
 }
 
@@ -168,22 +159,22 @@ function TokenListEditor({
       <label id={`${id}-label`}>{label}{hint && <HelpTip text={hint} />}</label>
       <div role="group" aria-labelledby={`${id}-label`}>
         {values.map((v) => (
-          <span key={v} className="chip" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <Chip key={v} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             {v}
             {!readOnly && (
               <button
                 type="button"
+                className="tag-remove"
                 aria-label={`移除「${v}」`}
                 title="移除"
                 onClick={() => onChange(values.filter((x) => x !== v))}
-                style={{ padding: 0, border: "none", background: "none", boxShadow: "none", display: "inline-flex", cursor: "pointer", color: "inherit" }}
               >
                 <Icon name="X" size={12} />
               </button>
             )}
-          </span>
+          </Chip>
         ))}
-        {values.length === 0 && readOnly && <span className="hint">未設定</span>}
+        {values.length === 0 && readOnly && <Meta>未設定</Meta>}
         {!readOnly && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: "4px 6px 4px 0" }}>
             <input
@@ -260,16 +251,13 @@ function AddOptionChip({
   };
   if (!open) {
     return (
-      <span
-        role="button"
-        tabIndex={0}
-        className="chip pick"
+      // 這顆是「打開輸入框」的動作、不是切換態，所以蓋掉 Chip 預設補的 aria-pressed
+      <Chip
         title="新增一個選項（全組共用；加完自動幫本專案勾上）"
         onClick={() => setOpen(true)}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(true); } }}
       >
         <Icon name="Plus" size={12} style={{ verticalAlign: "-2px" }} /> 新增
-      </span>
+      </Chip>
     );
   }
   return (
@@ -288,12 +276,12 @@ function AddOptionChip({
         }}
         style={{ width: 160, fontSize: "var(--fs-13)", padding: "4px 10px" }}
       />
-      <button className="btn-sm primary" disabled={!label.trim() || add.isPending} onClick={submit}>
+      <Button size="sm" variant="primary" disabled={!label.trim() || add.isPending} onClick={submit}>
         {add.isPending ? "新增中…" : "加入"}
-      </button>
-      <button className="btn-sm" disabled={add.isPending} onClick={() => { setOpen(false); setLabel(""); }}>
+      </Button>
+      <Button size="sm" disabled={add.isPending} onClick={() => { setOpen(false); setLabel(""); }}>
         取消
-      </button>
+      </Button>
       {add.error && <span className="error" style={{ marginTop: 0 }}>{add.error.message}</span>}
     </span>
   );
@@ -350,6 +338,36 @@ export function ProjectPage({ id }: { id: string }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [messagesSheetOpen]);
+
+  // 通知深連結（#225 契約補完）：@提及推播帶 ?focus=messages（開留言），
+  // 送審／裁決推播帶 ?focus=scene-<id>（捲到該分鏡格）。分鏡列表是非同步載入，
+  // 目標元素可能還沒在 DOM——輪詢重試幾秒，出現即捲、逾時放棄（仍停留在專案頁，不算失敗）。
+  useEffect(() => {
+    const focus = new URLSearchParams(window.location.search).get("focus");
+    if (!focus) return;
+    if (focus === "messages") {
+      if (mobileCompact) setMessagesSheetOpen(true);
+      else scrollToSelector("#project-messages");
+      return;
+    }
+    if (/^scene-[0-9a-f-]+$/i.test(focus)) {
+      let tries = 0;
+      const timer = window.setInterval(() => {
+        const el = document.getElementById(focus);
+        tries += 1;
+        if (el) {
+          window.clearInterval(timer);
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        } else if (tries >= 25) {
+          window.clearInterval(timer);
+        }
+      }, 200);
+      return () => window.clearInterval(timer);
+    }
+    // focus=agent-run-* 由 CreationWorkbench／AiHub 自行處理（既有契約）
+    // 掛載時讀一次網址即可；mobileCompact 變化不該重觸發深連結
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   const me = trpc.auth.me.useQuery();
   // 世界觀三組 chips（主軸／調性／視覺風格）由本專案所屬組的自訂選項供給（組長可就地新增，或到「選項」頁整理）
   const options = trpc.options.byGroup.useQuery(
@@ -443,7 +461,7 @@ export function ProjectPage({ id }: { id: string }) {
     onSuccess: () => { utils.projects.get.invalidate({ id }); utils.projects.list.invalidate(); },
   });
 
-  if (project.isLoading) return <p className="hint">載入中…</p>;
+  if (project.isLoading) return <Meta as="p">載入中…</Meta>;
   if (project.error || !project.data) {
     const code = project.error?.data?.code;
     const msg =
@@ -532,7 +550,12 @@ export function ProjectPage({ id }: { id: string }) {
   // 「從這裡開始」四步：用實際 state 判定完成打勾
   const sceneCount = scenes.data?.length ?? 0;
   const onboardSteps = [
-    { label: "設世界觀", done: !!(wv.logline.trim() || wv.message.trim()), target: "#onboard-worldview", hint: "填一句故事或關鍵訊息" },
+    {
+      label: "設世界觀",
+      done: isWorldviewReady(wv),
+      target: "#onboard-worldview",
+      hint: "填一句故事（或關鍵訊息）＋至少一項調性或視覺風格",
+    },
     { label: "生成一鏡", done: !!generations.data?.some((g) => g.status === "done"), target: "#gen-prompt", hint: "在 AI 創作工作台的「直接生成」做出第一張成品" },
     { label: "加入分鏡", done: sceneCount > 0, target: "#onboard-delivery", hint: "把成品排進分鏡" },
     // 第4步用「有分鏡通過審核」當完成訊號，才不會一有分鏡就跟第3步一起打勾（誤導已交付）
@@ -555,7 +578,7 @@ export function ProjectPage({ id }: { id: string }) {
   const charCount = characters.data?.length;
   const presetCount = scenePresets.data?.length;
   const assetCount = assets.data?.length;
-  const wvReady = !!(wv.logline.trim() || wv.message.trim());
+  const wvReady = isWorldviewReady(wv);
 
   const toggle = (field: "tones" | "themes" | "styles", value: string) => {
     if (!canEdit) return; // 檢視者：chips 不可切換（樂觀更新會先亮再彈回，比不動更誤導）
@@ -576,31 +599,22 @@ export function ProjectPage({ id }: { id: string }) {
   /** 世界觀 chips 群組（主軸／調性／風格共用）：既有選項＋孤兒值＋組長就地「＋新增」 */
   const chipGroup = (field: "themes" | "tones" | "styles", opts: string[], optType: "theme" | "tone" | "style", labelledBy: string) => (
     <div role="group" aria-labelledby={labelledBy}>
-      {options.isLoading && !opts.length && <span className="hint">載入中…</span>}
+      {options.isLoading && !opts.length && <Meta>載入中…</Meta>}
       {opts.map((t) => {
         const on = wv[field].includes(t);
         return (
-          <span
-            key={t}
-            role="button"
-            tabIndex={0}
-            aria-pressed={on}
-            className={`chip pick ${on ? "on" : ""}`}
-            onClick={() => toggle(field, t)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(field, t); } }}
-          >
+          <Chip key={t} selected={on} onClick={() => toggle(field, t)}>
             {t}
-          </span>
+          </Chip>
         );
       })}
       {orphansOf(field, opts).map((t) => (
-        <span key={t} role="button" tabIndex={0} aria-pressed
-          className="chip pick on" style={{ borderStyle: "dashed", opacity: 0.75 }}
+        <Chip key={t} selected
+          style={{ borderStyle: "dashed", opacity: 0.75 }}
           title="這個選項已被移出清單，點一下可從本專案移除"
-          onClick={() => toggle(field, t)}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(field, t); } }}>
+          onClick={() => toggle(field, t)}>
           {t} <Icon name="Info" size={12} style={{ verticalAlign: "-2px" }} />
-        </span>
+        </Chip>
       ))}
       {/* 選項就地新增：組長直接在工作台加，不必繞去「選項」選單頁（加完自動勾上） */}
       {isLeader && canEdit && (
@@ -628,16 +642,13 @@ export function ProjectPage({ id }: { id: string }) {
   };
 
   /** 上下文摘要條的一顆 chip：顯示計數、點了捲到對應卡（手機一併展開） */
+  // `on` 是「那一區已有內容」的視覺標示，不是按下狀態——點下去只會捲動，不會切換任何東西。
+  // 所以走 className 給 .on，不傳 selected：後者會輸出 aria-pressed，把一次性動作
+  // 講成「未按下的切換鈕」，對讀屏使用者謊報元件性質。
   const summaryChip = (label: string, target: string, on = false) => (
-    <span
-      role="button"
-      tabIndex={0}
-      className={`chip pick ${on ? "on" : ""}`}
-      onClick={() => jumpToContext(target)}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jumpToContext(target); } }}
-    >
+    <Chip className={on ? "on" : undefined} onClick={() => jumpToContext(target)}>
       {label}
-    </span>
+    </Chip>
   );
 
   const unreadCount = unread.data?.count ?? 0;
@@ -670,7 +681,7 @@ export function ProjectPage({ id }: { id: string }) {
       </p>
       <header className="project-hero">
       <div className="project-hero__heading">
-        <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <span className="chip" style={{ marginLeft: 10 }}>已封存</span>}</h1>
+        <h1 style={{ flex: "1 1 auto" }}>{p.title}{p.status === "archived" && <Chip style={{ marginLeft: 10 }}>已封存</Chip>}</h1>
         {/* 即時協作：連線狀態＋誰在場＋一般／鏡像跟隨模式切換
             手機預設收成「N 人在線」chip，點開才看名單／鏡像（不拿掉 WebSocket） */}
         <span
@@ -693,16 +704,15 @@ export function ProjectPage({ id }: { id: string }) {
           {showPresenceDetails && (
             <span id="project-presence-details" className="project-presence__details" style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               {!collab.connected && (
-                <span
-                  className="hint"
+                <Meta
                   title="WebSocket 未連上時，留言與生成仍會每數秒自動刷新，只是看不到即時游標與「誰在場」"
                   style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, border: "1px dashed var(--border-strong)" }}
                 >
                   即時同步連線中…
-                </span>
+                </Meta>
               )}
               {collab.connected && collab.peers.length === 0 && (
-                <span className="hint" style={{ fontSize: 12 }}>即時同步已連線</span>
+                <Meta style={{ fontSize: 12 }}>即時同步已連線</Meta>
               )}
               {collab.peers.map((peer) => {
                 const isMe = peer.userId === collab.self?.userId;
@@ -766,29 +776,27 @@ export function ProjectPage({ id }: { id: string }) {
                 onFollowChange={setFollowUserId}
               />
               {mobileCompact && collab.connected && (
-                <button
+                <Button size="sm"
                   type="button"
-                  className="btn-sm"
                   aria-expanded={true}
-                  onClick={() => setPresenceExpanded(false)}
-                >
+                  onClick={() => setPresenceExpanded(false)}>
                   收合
-                </button>
+                </Button>
               )}
             </span>
           )}
         </span>
         {collabMode === "mirror" && followUserId && (
-          <p className="hint" style={{ flexBasis: "100%", margin: "4px 0 0" }}>
+          <Hint layer="always" style={{ flexBasis: "100%", margin: "4px 0 0" }}>
             鏡像跟隨中：畫面會跟著對方的焦點區與游標捲動（不是螢幕串流；雙方版面不同時以卡片錨點對位）。
             可點「退出鏡像」或再點對方名字取消。
-          </p>
+          </Hint>
         )}
         {canArchive && (
           p.status === "archived" ? (
-            <button className="btn-sm" disabled={archiveProject.isPending} onClick={() => archiveProject.mutate({ id, archived: false })}>
+            <Button size="sm" disabled={archiveProject.isPending} onClick={() => archiveProject.mutate({ id, archived: false })}>
               還原專案
-            </button>
+            </Button>
           ) : (
             <ConfirmButton
               triggerClassName="btn-sm"
@@ -824,21 +832,19 @@ export function ProjectPage({ id }: { id: string }) {
 
       {/* 2.3 唯讀橫幅：檢視者第一眼就知道自己是唯讀＋能做什麼＋找誰解鎖（不是「系統一直壞」） */}
       {!canEdit && (
-        <div
-          className="card"
+        <Card
           role="status"
           data-fb="唯讀橫幅"
-          style={{ padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
-        >
+          style={{ padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <Icon name="Lock" size={15} style={{ flexShrink: 0, color: "var(--primary-ink)" }} />
           <span style={{ fontSize: 13 }}>
             你在此專案是<b>檢視者（唯讀）</b>——可以瀏覽、留言、下載交付；要編輯或生成，請組長到「① 專案上下文」底部的成員權限把你改成編輯者。
           </span>
-        </div>
+        </Card>
       )}
 
       {/* #9 「從這裡開始」步驟列：用實際 state 判定完成打勾，點某步捲到對應區塊 */}
-      <section className="card project-guide" data-fb="從這裡開始">
+      <Card as="section" className="project-guide" data-fb="從這裡開始">
         <div className="project-guide__head">
           <h2 style={{ margin: 0 }}>從這裡開始</h2>
           <HelpTip text="這是製作一支片的四個步驟。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
@@ -849,15 +855,13 @@ export function ProjectPage({ id }: { id: string }) {
             </span>
             {completedStepCount}/{onboardSteps.length}
           </span>
-          {allStepsDone && <span className="chip" style={{ fontSize: 12 }}>全部完成</span>}
-          <button
-            className="btn-sm"
+          {allStepsDone && <Chip style={{ fontSize: 12 }}>全部完成</Chip>}
+          <Button size="sm"
             onClick={toggleOnboard}
             aria-expanded={!onboardCollapsed}
-            aria-controls="project-getting-started-steps"
-          >
+            aria-controls="project-getting-started-steps">
             {onboardCollapsed ? "展開" : "收合"}
-          </button>
+          </Button>
         </div>
         {!onboardCollapsed && (
           <div id="project-getting-started-steps">
@@ -889,7 +893,7 @@ export function ProjectPage({ id }: { id: string }) {
             下一步：<b>{onboardSteps[nextOnboardIndex]?.label}</b>・{onboardSteps[nextOnboardIndex]?.hint}
           </p>
         )}
-      </section>
+      </Card>
 
       {/* #28 章節導覽：三幕錨點（上下文 → 工作台 → 交付）；② 只跳 #stage-create，不列各模式。
           ③ 帶留言未讀徽章（@N 表示有人提及）。 */}
@@ -921,31 +925,33 @@ export function ProjectPage({ id }: { id: string }) {
           <div className="ctx-summary" role="group" aria-label="AI 全程共用的上下文一覽">
             AI 全程共用：
             {summaryChip(`專案基調${wvReady ? " ✓" : "（待設定）"}`, "#onboard-worldview", wvReady)}
+            {hasActs(wv) && summaryChip("三幕已設", "#onboard-worldview", true)}
+            {wv.people.length > 0 && summaryChip(`敘事人物 ${wv.people.length}`, "#onboard-worldview", true)}
+            {wv.audience.trim() && summaryChip("觀眾已設", "#onboard-worldview", true)}
             {summaryChip(`角色 ${charCount ?? "…"}・場景 ${presetCount ?? "…"}`, "#sec-characters")}
             {summaryChip(`知識 ${knowledgeCount ?? "…"} 份`, "#sec-knowledge")}
             {summaryChip(`素材 ${assetCount ?? "…"}`, "#sec-assets")}
           </div>
           {/* 世界觀（快速層） */}
           <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
-          <section className="card" data-fb="世界觀卡" id="onboard-worldview">
+          <Card as="section" data-fb="世界觀卡" id="onboard-worldview">
             <h2>
               專案基調與世界觀
               <HelpTip text="這支片的固定設定，填一次，之後每次生成 AI 自動記得，不用重講背景。" />
               {updateWv.isPending ? (
-                <span className="hint" style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</span>
+                <Meta style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</Meta>
               ) : wvSaved !== "idle" ? (
-                <span
-                  className="hint"
+                <Meta
                   style={{
                     marginLeft: 8, fontSize: 13, fontWeight: 400, color: "var(--primary-ink)",
                     opacity: wvSaved === "fading" ? 0 : 1, transition: "opacity var(--dur-slow)",
                   }}
                 >
                   已儲存 <Icon name="Check" size={13} />
-                </span>
+                </Meta>
               ) : null}
             </h2>
-            {!canEdit && <p className="hint" style={{ margin: "4px 0 0" }}>檢視者唯讀——世界觀可瀏覽、不能修改（打的字不會被儲存）。</p>}
+            {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——世界觀可瀏覽、不能修改（打的字不會被儲存）。</Hint>}
             <label htmlFor="wv-logline">一句話故事（logline）</label>
             {/* key 綁伺服器值：協作者改動（WS invalidate 重抓）時強制重掛吃進新值——
                 非受控 defaultValue 否則永遠停在舊字，focus+blur 還會把舊值回寫、蓋掉別人的修改。
@@ -976,16 +982,16 @@ export function ProjectPage({ id }: { id: string }) {
             <label id="wv-styles">視覺風格（畫面一致的關鍵，生成時自動注入）<HelpTip text="語氣與畫風，會自動加進每次生成的提示詞。" /></label>
             {chipGroup("styles", styleOpts, "style", "wv-styles")}
             {isLeader && (
-              <p className="hint" style={{ marginTop: 8, fontSize: 12 }}>
+              <Hint style={{ marginTop: 8, fontSize: 12 }}>
                 選項可直接按各列的「＋新增」加；改名／停用／排序在 <Link href="/options">選項整理頁</Link>。
-              </p>
+              </Hint>
             )}
             {/* 進階層全面可編輯（深度優化：後端 updateWorldview 早支援 partial patch，前端不再唯讀）——
                 目標觀眾/三幕結構供 AI 導演參考；禁忌事項會自動注入每次生成 */}
             <details style={{ marginTop: 10 }}>
               <summary style={{ cursor: "pointer", fontSize: 13 }}>進階設定（目標觀眾・三幕結構・人物・參考・禁忌）</summary>
               <div style={{ marginTop: 6 }}>
-                <label htmlFor="wv-audience">目標觀眾（供 AI 導演參考）</label>
+                <label htmlFor="wv-audience">目標觀眾（AI 導演建議／拆分鏡會讀）</label>
                 <input
                   key={`audience-${wv.audience}`}
                   id="wv-audience"
@@ -995,7 +1001,7 @@ export function ProjectPage({ id }: { id: string }) {
                   placeholder="例：初次接觸禪修、想在忙碌生活裡找安定的年輕人與家庭"
                   onBlur={(e) => canEdit && e.target.value !== wv.audience && updateWv.mutate({ id, worldview: { audience: e.target.value } })}
                 />
-                <label>三幕結構（鉤子 → 轉折 → 行動呼籲）<HelpTip text="片子的敘事骨架：開場怎麼抓住人、中段怎麼轉、結尾請觀眾做什麼。供 AI 導演發想分鏡時參考。" /></label>
+                <label>三幕結構（鉤子 → 轉折 → 行動呼籲）<HelpTip text="敘事骨架：開場怎麼抓住人、中段怎麼轉、結尾請觀眾做什麼。會寫進 AI 導演建議與拆分鏡。" /></label>
                 {([
                   ["hook", "鉤子", "例：清晨禪堂前庭，安倢撐著紅傘走進柔和晨光"],
                   ["turn", "轉折", "例：慕恩在書架旁翻閱善本，浮躁被慢慢安放"],
@@ -1018,15 +1024,20 @@ export function ProjectPage({ id }: { id: string }) {
                 ))}
                 <TokenListEditor
                   id="wv-people"
-                  label="人物（供 AI 導演參考）"
+                  label="敘事人物（導演／拆分鏡會讀）"
+                  hint="自由文字人物表，AI 導演發想會參考。畫面外觀一致請另建「角色定裝卡」並在生成時勾選——兩套用途不同。"
                   values={wv.people}
                   placeholder="例：安倢＝紅傘、米白外套（Enter 加入）"
                   readOnly={!canEdit}
                   onChange={(next) => updateWv.mutate({ id, worldview: { people: next } })}
                 />
+                <Hint style={{ margin: "4px 0 8px", fontSize: 12 }}>
+                  敘事人物 ≠ 畫面定裝。要畫得像，請到下方「角色定裝」建卡並勾選後生成。
+                </Hint>
                 <TokenListEditor
                   id="wv-references"
-                  label="參考連結"
+                  label="參考連結（僅交付備註，不進 AI）"
+                  hint="剪輯／企劃交接用；不會注入生成或導演模型（URL 對模型幫助有限）。"
                   values={wv.references}
                   placeholder="貼上參考影片/文章網址（Enter 加入）"
                   readOnly={!canEdit}
@@ -1035,19 +1046,28 @@ export function ProjectPage({ id }: { id: string }) {
                 <TokenListEditor
                   id="wv-taboos"
                   label="禁忌事項（自動注入每次生成）"
-                  hint="這裡的每一條都會加進生成提示詞，要求 AI 避開；刪除前請與組長確認。"
+                  hint="每一條會進生成提示詞（圖／影走負向、文字走「避免」）。刪除預設弘法禁語前會再確認。"
                   values={wv.taboos}
                   placeholder="例：不得出現可讀文字、招牌一律後製（Enter 加入）"
                   readOnly={!canEdit}
-                  onChange={(next) => updateWv.mutate({ id, worldview: { taboos: next } })}
+                  onChange={(next) => {
+                    if (removesDefaultTaboos(wv.taboos, next)) {
+                      const ok = window.confirm(
+                        "你正在移除預設的弘法禁語（醫療宣稱／影射真人／開示須審核）。確定要關閉這層合規保護嗎？",
+                      );
+                      if (!ok) return;
+                    }
+                    updateWv.mutate({ id, worldview: { taboos: next } });
+                  }}
                 />
-                <p className="hint" style={{ marginTop: 8, fontSize: 12 }}>
-                  視覺風格與禁忌事項會自動注入每次生成的提示詞；其他欄位供 AI 導演與團隊參考。
-                </p>
+                <Hint style={{ marginTop: 8, fontSize: 12 }}>
+                  <strong>會進 AI：</strong>調性／風格／訊息／禁忌 → 每次生成；觀眾／三幕／敘事人物／主軸 → 導演建議與拆分鏡；代理與助手讀摘要（含訊息與禁忌）。
+                  <strong> 僅備註：</strong>參考連結（寫進交付鏡頭表，不進模型）。
+                </Hint>
               </div>
             </details>
             {updateWv.error && <p className="error">世界觀儲存失敗：{updateWv.error.message}</p>}
-          </section>
+          </Card>
           </CollabZone>
 
           {/* 角色定裝卡：勾選後生成自動注入外觀錨點。
@@ -1134,7 +1154,7 @@ export function ProjectPage({ id }: { id: string }) {
           </CtxCollapse>
 
           {/* 專案權限（需求 2.3）：誰可編輯、誰唯讀——屬專案設定的一環，但非日常操作，收合呈現不佔主視線 */}
-          <details className="card card--quiet" data-fb="專案權限收合卡" id="sec-members">
+          <Card as="details" variant="quiet" data-fb="專案權限收合卡" id="sec-members">
             <summary>
               <Icon name="Lock" size={14} />成員權限（預設全員可編輯；可設個別成員唯讀）
               <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
@@ -1142,7 +1162,7 @@ export function ProjectPage({ id }: { id: string }) {
             <div style={{ marginTop: 10 }}>
               <ProjectMembersCard projectId={id} bare />
             </div>
-          </details>
+          </Card>
 
           <StageLink text="以上設定會自動注入下方每一次生成——AI 全程記得，不必重講背景" />
 
@@ -1162,7 +1182,13 @@ export function ProjectPage({ id }: { id: string }) {
             groupId={p.groupId}
             myRole={myRole}
             projectFormat={p.format}
-            worldview={{ tones: wv.tones, styles: wv.styles, taboos: wv.taboos }}
+            worldview={{
+              logline: wv.logline,
+              message: wv.message,
+              tones: wv.tones,
+              styles: wv.styles,
+              taboos: wv.taboos,
+            }}
             wvReady={wvReady}
             characterIds={charIds}
             scenePresetIds={sceneIds}
@@ -1205,10 +1231,13 @@ export function ProjectPage({ id }: { id: string }) {
           </CollabZone>
         </div>
 
-        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度） */}
+        {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。
+            id 供 ?focus=messages 通知深連結捲動定位 */}
         {!mobileCompact && (
           <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
-            <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+            <div id="project-messages">
+              <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+            </div>
           </CollabZone>
         )}
       </div>
@@ -1246,14 +1275,12 @@ export function ProjectPage({ id }: { id: string }) {
               >
                 <div className="project-messages-sheet__head">
                   <strong>組內留言</strong>
-                  <button
+                  <Button size="sm"
                     type="button"
-                    className="btn-sm"
                     aria-label="關閉"
-                    onClick={() => setMessagesSheetOpen(false)}
-                  >
+                    onClick={() => setMessagesSheetOpen(false)}>
                     <Icon name="X" size={16} />
-                  </button>
+                  </Button>
                 </div>
                 <div className="project-messages-sheet__body">
                   <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>

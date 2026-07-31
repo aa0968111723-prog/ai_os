@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Icon } from "./Icon";
+import { Card } from "./ui";
 
 export function plannerInitialSections(focusTarget: string | null): {
   schedule: boolean;
@@ -34,13 +35,11 @@ export function PlannerSection({
   children: ReactNode;
 }) {
   return (
-    <details
+    <Card as="details" className="planner-section"
       id={contentId.replace(/-content$/, "")}
-      className="card planner-section"
       open={open}
       onToggle={(event) => onOpenChange(event.currentTarget.open)}
-      data-fb={analyticsLabel}
-    >
+      data-fb={analyticsLabel}>
       <summary className="planner-section-summary" aria-controls={contentId}>
         <span className="planner-section-heading">
           <span className="planner-section-title">
@@ -55,6 +54,6 @@ export function PlannerSection({
       <div className="planner-section-body" id={contentId}>
         {children}
       </div>
-    </details>
+    </Card>
   );
 }

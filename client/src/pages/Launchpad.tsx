@@ -5,6 +5,8 @@ import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
+import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
+import { agentOutputKindLabel } from "../../../shared/agentOutputs";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
@@ -192,6 +194,16 @@ export function Launchpad({ groupId }: { groupId: string }) {
     day: "numeric",
     weekday: "long",
   }).format(new Date());
+  // 「待我裁決」用的組級待辦：把 pendingSummary 的 per-project 計數配上專案標題。
+  // 兩份資料都是這一頁本來就查過的（專案卡角標與頂欄計數共用），不多發任何查詢。
+  const pendingDecisions = useMemo<PendingDecisionSource[]>(() => {
+    const titleOf = new Map((projects.data ?? []).map((p) => [p.id, p.title] as const));
+    return (pendingSummary.data?.projects ?? []).map((p) => ({
+      ...p,
+      // 查不到標題不能整列丟掉（會靜靜吃掉一件待辦）；用專案 id 前綴當可辨識的替代
+      projectTitle: titleOf.get(p.projectId) ?? `專案 ${p.projectId.slice(0, 8)}`,
+    }));
+  }, [pendingSummary.data, projects.data]);
   const focusProject = recentProjects[0] ?? null;
   const focusState = pendingTotal > 0
     ? {
@@ -278,7 +290,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
       <div style={{ marginBottom: 14 }}><InstallAppBanner /></div>
 
       {/* 精簡建立列（常駐、一行；不再佔右側整欄） */}
-      <section id="new-project-panel" className="card new-project-panel" data-fb="新專案卡" hidden={!createOpen} aria-label="建立新專案">
+      <Card as="section" id="new-project-panel" className="new-project-panel" data-fb="新專案卡" hidden={!createOpen} aria-label="建立新專案">
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div style={{ flex: "3 1 220px" }}>
             <label htmlFor="np-title" style={{ marginTop: 0 }}>新專案名稱</label>
@@ -301,21 +313,23 @@ export function Launchpad({ groupId }: { groupId: string }) {
               ))}
             </select>
           </div>
-          <button className="primary" disabled={!canCreate} onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform })}>
+          <Button variant="primary" disabled={!canCreate} onClick={() => create.mutate({ groupId, title: title.trim(), kind, platform })}>
             {create.isPending ? "建立中…" : "建立專案"}
-          </button>
+          </Button>
         </div>
+        {/* 這一區的說明幾乎都是「為什麼還不能建」＋「怎麼解」，藏起來會讓人卡在原地，
+         * 故多為 layer="always"；只有解釋自動帶入行為的那句屬於引導層。 */}
         {activeGroup && (
-          <p className="hint" style={{ marginTop: 8 }}>將建立在：{activeGroup.teamName}・{activeGroup.groupName}（頂欄可切換組別）</p>
+          <Hint layer="always" style={{ marginTop: 8 }}>將建立在：{activeGroup.teamName}・{activeGroup.groupName}（頂欄可切換組別）</Hint>
         )}
-        {options.isLoading && <p className="hint">選項載入中…</p>}
-        {!options.isLoading && groupId && !kindOptions.length && <p className="hint">這個組還沒有內容類型選項——請組長到「選項」頁新增。</p>}
-        {!options.isLoading && groupId && !platformOptions.length && <p className="hint">這個組還沒有發布平台選項——請組長到「選項」頁新增。</p>}
-        {pickedPlatform?.format && <p className="hint">畫面格式：{pickedPlatform.format}（依平台自動帶入）</p>}
-        {!groupId && <p className="hint">（要先屬於一個組才能建專案）</p>}
-        {groupId && kindOptions.length > 0 && platformOptions.length > 0 && !title.trim() && <p className="hint">先為專案命名，就能建立專案。</p>}
+        {options.isLoading && <Hint layer="always">選項載入中…</Hint>}
+        {!options.isLoading && groupId && !kindOptions.length && <Hint layer="always">這個組還沒有內容類型選項——請組長到「選項」頁新增。</Hint>}
+        {!options.isLoading && groupId && !platformOptions.length && <Hint layer="always">這個組還沒有發布平台選項——請組長到「選項」頁新增。</Hint>}
+        {pickedPlatform?.format && <Hint>畫面格式：{pickedPlatform.format}（依平台自動帶入）</Hint>}
+        {!groupId && <Hint layer="always">（要先屬於一個組才能建專案）</Hint>}
+        {groupId && kindOptions.length > 0 && platformOptions.length > 0 && !title.trim() && <Hint layer="always">先為專案命名，就能建立專案。</Hint>}
         {create.error && <p className="error" role="alert">{create.error.message}</p>}
-      </section>
+      </Card>
 
       <div className={`daily-overview${recentProjects.length ? "" : " daily-overview--solo"}`}>
         <div className="daily-overview__main">
@@ -401,7 +415,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                       <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
                     </span>
                     {!!pending && pending.pendingApprovals + pending.awaitingGenerations > 0 && (
-                      <span className="chip">{pending.pendingApprovals + pending.awaitingGenerations} 待處理</span>
+                      <Chip>{pending.pendingApprovals + pending.awaitingGenerations} 待處理</Chip>
                     )}
                     <Icon name="ChevronRight" size={17} />
                   </Link>
@@ -420,13 +434,24 @@ export function Launchpad({ groupId }: { groupId: string }) {
           <div><p className="eyebrow">協作代理</p><h2 id="ai-work-title">AI 工作與團隊分析</h2></div>
           <p>看清查證步驟、執行狀態與需要人員決定的節點。</p>
         </div>
-        {groupId && <TeamAssistantCard key={groupId} groupId={groupId} />}
+        {groupId && (
+          <TeamAssistantCard
+            key={groupId}
+            groupId={groupId}
+            pendingDecisions={pendingDecisions}
+            pendingLoading={pendingSummary.isLoading}
+            pendingFailed={!!pendingSummary.error}
+            starterProjects={all}
+            isLeader={isLeader}
+            myUserId={myUserId}
+          />
+        )}
       </section>
 
       <section id="projects" className="dashboard-section" aria-labelledby="projects-title">
         <div className="section-heading">
           <div><p className="eyebrow">完整清單</p><h2 id="projects-title">所有專案</h2></div>
-          <button type="button" className="btn-sm" onClick={() => setCreateOpen(true)}>建立新專案</button>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>建立新專案</Button>
         </div>
 
       {/* 工具列：搜尋／類型篩選／排序／顯示已封存（有專案或開了已封存才顯示完整工具列；
@@ -466,7 +491,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
             顯示已封存
           </label>
           {all.length > 0 && (
-            <span className="hint" style={{ marginLeft: "auto" }}>{shownList.length} 個專案</span>
+            /* 篩選後的結果數是狀態不是說明——收成「？」只會讓人不知道篩掉了多少 */
+            <Hint as="span" layer="always" style={{ marginLeft: "auto" }}>{shownList.length} 個專案</Hint>
           )}
         </div>
       )}
@@ -474,7 +500,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
       {projects.error && (
         <p className="error" role="alert">
           專案清單暫時載入不了——
-          <button className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => projects.refetch()}>再試一次</button>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => projects.refetch()}>再試一次</Button>
         </p>
       )}
 
@@ -483,34 +509,38 @@ export function Launchpad({ groupId }: { groupId: string }) {
       )}
 
       {all.length === 0 && !projects.isLoading && !projects.error && !showFirstRun && (
-        <div className="empty-state">
-          <h3>{includeArchived ? "還沒有專案（含已封存）" : "還沒有專案"}</h3>
-          <p>
-            {includeArchived
+        <EmptyState icon={<Icon name="Package" />}
+          title={includeArchived ? "還沒有專案（含已封存）" : "還沒有專案"}
+          description={
+            includeArchived
               ? "從上面開一個新專案，或先開個不花點數的範例看看完整長相。"
-              : "從上面開一個新專案，或勾「顯示已封存」找回已封存的專案。也可先開個不花點數的範例看看完整長相。"}
-          </p>
-          <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", marginTop: 12 }}>
-            <button
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-              disabled={!groupId || createSample.isPending}
-              onClick={() => createSample.mutate({ groupId })}
-            >
-              <Icon name="Sparkles" size={15} />
-              {createSample.isPending ? "建立範例中…" : "建立範例專案看看（免費）"}
-            </button>
-            <Link href="/help" style={{ display: "inline-flex", alignItems: "center", gap: 4, alignSelf: "center" }}>
-              <Icon name="HelpCircle" size={14} />看怎麼用
-            </Link>
-          </div>
-          {createSample.error && <p className="error">{createSample.error.message}</p>}
-        </div>
+              : "從上面開一個新專案，或勾「顯示已封存」找回已封存的專案。也可先開個不花點數的範例看看完整長相。"
+          }
+          action={
+            <>
+              <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", marginTop: 12 }}>
+                <Button
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  disabled={!groupId || createSample.isPending}
+                  onClick={() => createSample.mutate({ groupId })}
+                >
+                  <Icon name="Sparkles" size={15} />
+                  {createSample.isPending ? "建立範例中…" : "建立範例專案看看（免費）"}
+                </Button>
+                <Link href="/help" style={{ display: "inline-flex", alignItems: "center", gap: 4, alignSelf: "center" }}>
+                  <Icon name="HelpCircle" size={14} />看怎麼用
+                </Link>
+              </div>
+              {createSample.error && <p className="error">{createSample.error.message}</p>}
+            </>
+          }
+        />
       )}
-      {all.length > 0 && shownList.length === 0 && <p className="hint">沒有符合「{q}」的專案。</p>}
+      {all.length > 0 && shownList.length === 0 && <Hint layer="always">沒有符合「{q}」的專案。</Hint>}
 
       <div className="launch-grid" aria-busy={projects.isLoading}>
         {projects.isLoading &&
-          Array.from({ length: 8 }).map((_, i) => <div key={`sk-${i}`} className="launch-card skeleton" style={{ height: 176 }} aria-hidden />)}
+          Array.from({ length: 8 }).map((_, i) => <Skeleton key={`sk-${i}`} className="launch-card" height={176} />)}
         {shown.map((p) => {
           const isArchived = p.status === "archived";
           const canRestore = isArchived && (isLeader || p.ownerId === myUserId);
@@ -528,12 +558,12 @@ export function Launchpad({ groupId }: { groupId: string }) {
               <div className="launch-body">
                 <h3 className="launch-title">{p.title}</h3>
                 <div className="launch-meta">
-                  <span className="chip" style={{ margin: 0 }}>{kindLabelOf(p.kind)}</span>
+                  <Chip style={{ margin: 0 }}>{kindLabelOf(p.kind)}</Chip>
                   <span>{p.format}</span>
                   {isArchived && (
-                    <span className="chip" style={{ margin: 0, color: "var(--fg-secondary)" }} title="已封存，可還原">
+                    <Chip style={{ margin: 0, color: "var(--fg-secondary)" }} title="已封存，可還原">
                       已封存
-                    </span>
+                    </Chip>
                   )}
                   {/* 待辦角標：分鏡待審（組長裁決）／生成待核（成本門檻攔下）——點卡片進專案就能處理 */}
                   {!isArchived && (() => {
@@ -542,14 +572,14 @@ export function Launchpad({ groupId }: { groupId: string }) {
                     return (
                       <>
                         {pd.pendingApprovals > 0 && (
-                          <span className="chip" style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有分鏡送審等組長裁決">
+                          <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有分鏡送審等組長裁決">
                             待審 {pd.pendingApprovals}
-                          </span>
+                          </Chip>
                         )}
                         {pd.awaitingGenerations > 0 && (
-                          <span className="chip" style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有生成被成本門檻攔下，等組長核准">
+                          <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有生成被成本門檻攔下，等組長核准">
                             待核 {pd.awaitingGenerations}
-                          </span>
+                          </Chip>
                         )}
                       </>
                     );
@@ -558,9 +588,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
                 <div className="launch-meta" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span>更新於 {relTime(p.updatedAt)}</span>
                   {canRestore && (
-                    <button
-                      type="button"
-                      className="btn-sm"
+                    <Button
+                      size="sm"
                       disabled={restoreProject.isPending}
                       title="還原後會重新出現在作業台"
                       onClick={(e) => {
@@ -570,7 +599,7 @@ export function Launchpad({ groupId }: { groupId: string }) {
                       }}
                     >
                       {restoreProject.isPending ? "還原中…" : "還原"}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -594,15 +623,139 @@ type Dispatch = { projectId: string; projectTitle: string; goal: string; label: 
 /** 派工結果：在某專案建立了一份待核准的 AI 執行計畫 */
 type DispatchResult = { runId: string; projectId: string; summary: string; estPoints: number };
 
-const TEAM_QUICK_QS = [
-  "哪個案子卡住了？這週花了多少點？",
-  "哪些專案有分鏡在等審核？",
-  "為什麼有專案特別燒點？",
-  "依目前狀況，哪個專案該優先推進？",
+/**
+ * 兜底的引導問句：這個組安靜到沒東西可指的時候才用。
+ *
+ * 刻意**不**放「哪個案子卡住了」「哪些專案有分鏡在等審核」這類——那些的答案就在
+ * 這個輸入框正上方的「誰卡住了」與「待我裁決」裡。問了只會得到一段重述你剛看過的話，
+ * 這正是這個對話框讓人覺得「不知道要拿來幹嘛」的原因：它被廣告的工作，儀表板已經接手。
+ * 對話層真正的價值在儀表板結構上做不到的事——鑽進內容、解釋異常、跨來源權衡。
+ */
+const TEAM_FALLBACK_QS = [
+  "以現在的人力負荷與進度，這週該優先推進哪個案子、哪個可以先放？",
+  "各專案的素材與生成成功率如何？有沒有哪個案子一直在重試？",
+  "資料庫裡有哪些內容可以拿來當下一支片的題材？",
 ];
 
+/** 一則依現況生成的建議問句 */
+export type TeamQuestionSuggestion = {
+  /** 去重與 React key 用 */
+  id: string;
+  /** 帶進輸入框的問句 */
+  text: string;
+  /** 這句是被畫面上哪個事實觸發的（顯示在 tooltip，讓人看得出它讀了自己的資料） */
+  why: string;
+};
+
+/** 一次最多給幾句：再多就變成另一種「選項牆」，跟原本的問題同一個病 */
+const MAX_QUESTION_SUGGESTIONS = 4;
+
+/**
+ * 依這個組的真實狀態生成建議問句（純函式；資料全部來自畫面已查到的東西，零新查詢）。
+ *
+ * 每一句都必須是**卡片答不出來**的：卡片給的是數字與清單，這裡問的是那些數字背後的內容
+ * 與原因——要鑽進分鏡全文、生成紀錄、人員任務或資料庫才答得出來。
+ * 依急迫性排序：失敗 → 逾期的人 → 待核成本 → 計畫缺資訊 → 待審內容。
+ */
+export function buildTeamQuestionSuggestions(input: {
+  runs: Array<{ projectId: string; projectTitle: string; status: string; error: string | null; goal: string }>;
+  people: Array<{ userId: string | null; name: string | null; openTasks: number; overdueTasks: number }>;
+  planConcerns: Array<{ projectTitle: string; missingInformation: number; risks: number }>;
+  pending: Array<{ projectTitle: string; pendingApprovals: number; awaitingGenerations: number }>;
+}): TeamQuestionSuggestion[] {
+  const out: TeamQuestionSuggestion[] = [];
+  const push = (id: string, text: string, why: string) => {
+    if (out.length < MAX_QUESTION_SUGGESTIONS && !out.some((s) => s.id === id)) out.push({ id, text, why });
+  };
+
+  // ① 失敗：卡片只顯示「近七日失敗 N」與一行錯誤，答不出「為什麼會失敗、要怎麼避免」
+  const failed = input.runs.find((r) => r.status === "failed");
+  if (failed) {
+    push(
+      `failed:${failed.projectId}`,
+      `「${failed.projectTitle}」的代理為什麼失敗？要改什麼才不會再失敗？`,
+      `因為「${failed.projectTitle}」有一份失敗的計畫${failed.error ? `：${failed.error.slice(0, 40)}` : ""}`,
+    );
+  }
+
+  // ② 逾期的人：卡片顯示「阿光 3 件・2 逾期」，答不出「那幾件是什麼、卡在哪一步」
+  const stuckPerson = input.people.find((p) => p.overdueTasks > 0);
+  if (stuckPerson) {
+    const who = stuckPerson.userId ? (stuckPerson.name ?? "這位成員") : "沒人認領的任務";
+    push(
+      `person:${stuckPerson.userId ?? "unassigned"}`,
+      `${who}手上那 ${stuckPerson.overdueTasks} 件逾期的是什麼？分別卡在哪一步？`,
+      `因為${who}有 ${stuckPerson.overdueTasks} 件逾期`,
+    );
+  }
+
+  // ③ 待核生成：卡片顯示筆數，答不出「這幾筆各要花多少點、值不值得核」
+  const costly = input.pending.find((p) => p.awaitingGenerations > 0);
+  if (costly) {
+    push(
+      `gen:${costly.projectTitle}`,
+      `「${costly.projectTitle}」那 ${costly.awaitingGenerations} 筆待核生成分別用什麼模型、要花多少點？值得核准嗎？`,
+      `因為「${costly.projectTitle}」有 ${costly.awaitingGenerations} 筆生成卡在成本門檻`,
+    );
+  }
+
+  // ④ 計畫缺資訊：卡片顯示「待補 2」，答不出「缺的是哪些、我該補什麼給它」
+  const concern = input.planConcerns.find((c) => c.missingInformation > 0);
+  if (concern) {
+    push(
+      `concern:${concern.projectTitle}`,
+      `「${concern.projectTitle}」的計畫還缺哪些資訊？我需要補什麼它才跑得下去？`,
+      `因為「${concern.projectTitle}」的計畫有 ${concern.missingInformation} 項待補資訊`,
+    );
+  }
+
+  // ⑤ 待審分鏡：卡片顯示「3 個分鏡等你裁決」，答不出「那三鏡各寫了什麼、該注意什麼」
+  const toReview = input.pending.find((p) => p.pendingApprovals > 0);
+  if (toReview) {
+    push(
+      `scene:${toReview.projectTitle}`,
+      `「${toReview.projectTitle}」那 ${toReview.pendingApprovals} 鏡的畫面與配音詞各寫了什麼？裁決前我該注意什麼？`,
+      `因為「${toReview.projectTitle}」有 ${toReview.pendingApprovals} 鏡送審中`,
+    );
+  }
+
+  // ⑥ 有在跑的計畫：問它實際做了什麼，而不是看進度條
+  const running = input.runs.find((r) => r.status === "running" || r.status === "waiting");
+  if (running) {
+    push(
+      `running:${running.projectId}`,
+      `「${running.projectTitle}」的代理現在實際做到哪、已經產出什麼了？`,
+      `因為「${running.projectTitle}」有計畫正在執行`,
+    );
+  }
+
+  // 補到滿：兜底問句同樣是卡片答不出來的那類。
+  // why 不能寫死成「這個組沒有異常」——它多半是在異常已被前幾句用掉後補位的，
+  // 那樣講會與同一排的第一句自相矛盾。
+  const hadSpecific = out.length > 0;
+  for (const text of TEAM_FALLBACK_QS) {
+    push(
+      `fallback:${text}`,
+      text,
+      hadSpecific ? "通用的深入問題（上面幾句才是針對這個組現在的狀況）" : "這個組目前沒有需要追問的異常，這是通用的深入問題",
+    );
+  }
+  return out;
+}
+
 /** 對話訊息（前端狀態；assistant 訊息帶當輪的查證步驟與派工提議） */
-type ChatMsg = { role: "user" | "assistant"; text: string; steps?: string[]; dispatches?: Dispatch[] };
+type ChatMsg = {
+  role: "user" | "assistant";
+  text: string;
+  steps?: string[];
+  dispatches?: Dispatch[];
+  /** 決策軌跡：1–3 句結構化結論（不是 chain-of-thought） */
+  rationale?: string;
+  /** 這輪實際依據了哪些上下文區塊（後端已過白名單） */
+  contextUsed?: string[];
+  /** 阻塞資料讀取失敗 → 回答是在資訊不全的情況下給的，要講出來 */
+  degraded?: boolean;
+};
 
 /** 代理狀態 → 中文標籤與強調色（與後端 AGENT_RUN_STATUS_LABEL 對齊） */
 const RUN_STATUS: Record<string, { label: string; color?: string }> = {
@@ -615,10 +768,194 @@ const RUN_STATUS: Record<string, { label: string; color?: string }> = {
 };
 
 const HEALTH_LABEL: Record<string, { label: string; hint: string }> = {
+  // idle 與 healthy 必須分開講：舊版把「從沒發起過計畫」也講成「狀態穩定・沒有阻塞」，
+  // 於是新組看到的是五個 0 加一句安慰話——把「沒東西可分析」講成「分析結果良好」。
+  idle: { label: "尚未啟用", hint: "這個組還沒有 AI 執行計畫——可到專案頁用「執行計畫」發起，或在下方問組彙總 AI" },
   healthy: { label: "狀態穩定", hint: "目前沒有需要立刻處理的代理阻塞" },
   attention: { label: "需要關注", hint: "有進行中的計畫、待核或近期失敗——先掃一眼下方清單" },
   blocked: { label: "有阻塞", hint: "近期失敗且仍有等待／待核——優先到對應專案處理" },
 };
+
+/** 人員阻塞把健康度往上推時要換一句話——否則畫面會說「狀態穩定」旁邊卻列著兩項逾期 */
+const PEOPLE_HEALTH_HINT: Record<string, string> = {
+  attention: "有人員任務在等或即將到期——見下方「誰卡住了」",
+  blocked: "有人員任務逾期或關卡卡住，AI 停在那裡等人——先處理下方「誰卡住了」",
+};
+
+type TeamHealth = "idle" | "healthy" | "attention" | "blocked";
+const HEALTH_SEVERITY: Record<TeamHealth, number> = { idle: 0, healthy: 1, attention: 2, blocked: 3 };
+
+/**
+ * 代理健康度 ＋ 人員阻塞健康度 → 這張卡真正該顯示的健康度。
+ *
+ * 為什麼要合：run 狀態與人類任務是兩個資料源，只看前者就會出現「狀態穩定」旁邊
+ * 列著兩項逾期任務的自相矛盾畫面——而那兩項逾期正是 AI 停下來等的東西。
+ * 取兩者中較嚴重的；`idle`（從沒發起過計畫）只有在人員面也沒事時才保留，
+ * 因為「沒用過 AI」不代表「沒有事情卡住」。
+ */
+export function mergeTeamHealth(
+  runHealth: TeamHealth | undefined,
+  peopleStatus: "healthy" | "attention" | "blocked" | undefined,
+): { health: TeamHealth; fromPeople: boolean } {
+  const run = runHealth ?? "healthy";
+  // 只有 attention／blocked 算「人員面有事」。people=healthy 不能當成升級訊號，
+  // 否則它的嚴重度（1）會蓋掉 idle（0），讓空組又變回「狀態穩定」。
+  if (
+    (peopleStatus === "attention" || peopleStatus === "blocked")
+    && HEALTH_SEVERITY[peopleStatus] > HEALTH_SEVERITY[run]
+  ) {
+    return { health: peopleStatus, fromPeople: true };
+  }
+  return { health: run, fromPeople: false };
+}
+
+/** 一件「等人裁決」的事：四種來源合流成同一份收件匣 */
+type DecisionKind = "agent" | "task" | "scene" | "generation";
+type PendingDecisionSource = {
+  projectId: string;
+  projectTitle: string;
+  pendingApprovals: number;
+  awaitingGenerations: number;
+  oldestPendingApprovalAt?: Date | string | null;
+  oldestAwaitingGenerationAt?: Date | string | null;
+};
+/** 組級洞察裡的一項人類核准節點（來自 teamAssistant.groupInsights 的 workItems） */
+type PendingTaskSource = {
+  taskId: string;
+  projectId: string;
+  projectTitle: string;
+  title: string;
+  dueAt?: Date | string | null;
+};
+type DecisionItem = {
+  key: string;
+  kind: DecisionKind;
+  projectId: string;
+  projectTitle: string;
+  /** 這件事是什麼（代理＝目標原文，其餘＝件數描述） */
+  what: string;
+  /** 最久的那一件是什麼時候進待辦的（用來排「卡最久的排前面」）；查不到就排最後 */
+  since: Date | null;
+  /** 只有代理計畫有：可在這張卡就地核准／放棄（走既有 agents.approve／discard，不另開扣點路徑） */
+  runId?: string;
+  estPoints?: number;
+  /** 只有人類核准節點有：走既有 tasks.decideApproval */
+  taskId?: string;
+  /** 代理計畫的發起人（用來比照專案頁判斷能不能就地核准） */
+  ownerId?: string | null;
+};
+
+const DECISION_META: Record<DecisionKind, { label: string; hint: string }> = {
+  agent: { label: "計畫待核", hint: "核准後才開始執行、才開始花點" },
+  task: { label: "人員核准", hint: "代理計畫卡在這個人類關卡，核准或退回都會喚醒後續步驟" },
+  scene: { label: "分鏡送審", hint: "要看過內容才能裁決，到專案頁決定" },
+  generation: { label: "生成待核", hint: "達組內成本門檻的生成，核准才會送出" },
+};
+
+/**
+ * 空組起手式用的三個 playbook。
+ *
+ * 刻意只挑三個而不是全部列出：起手式的作用是「降低第一步的門檻」，
+ * 給七個選項等於把選擇成本原封不動還給使用者。這三個涵蓋最常見的起點——
+ * 從腳本拆分鏡、直接出媒體、先把計畫講清楚。
+ */
+const STARTER_PLAYBOOK_IDS = ["playbook.storyboard.v1", "playbook.creation.short.v1", "playbook.director.v1"] as const;
+
+/** 收件匣一次最多列幾件：再多就是清單而不是「先做這幾件」 */
+const DECISION_INBOX_MAX = 6;
+
+/**
+ * 能不能就地裁決這份代理計畫。
+ *
+ * 與 approveAgentCore 的守門同一條規則（組員只能裁自己發起的），也與專案頁
+ * AgentCard 的 canControl 一致。不比照的話，一般組員會看到別人計畫上的「核准」鈕，
+ * 按下去必定吃 FORBIDDEN——畫面對能力說謊。看得到但不能裁的，一律導去專案頁。
+ */
+export function canDecideRun(
+  item: { ownerId?: string | null },
+  isLeader: boolean,
+  myUserId?: string,
+): boolean {
+  if (isLeader) return true;
+  return Boolean(myUserId) && item.ownerId === myUserId;
+}
+
+/** 卡了幾天（未滿一天回 0；沒有時間戳回 null，呼叫端不顯示） */
+function daysStuck(since: Date | null, nowMs: number): number | null {
+  if (!since) return null;
+  return Math.max(0, Math.floor((nowMs - since.getTime()) / 86_400_000));
+}
+
+/**
+ * 到期日的人話（未來／過去都要對）。
+ *
+ * 不能直接套 relTime：它只算「過去多久」，未來的日期會被算成負數再夾到 1 分鐘，
+ * 於是「三天後到期」顯示成「1 分鐘前」——最該提醒的那種欄位反而在說謊。
+ */
+export function dueLabel(due: Date | string | null | undefined, nowMs: number = Date.now()): string | null {
+  if (!due) return null;
+  const t = due instanceof Date ? due.getTime() : new Date(due).getTime();
+  if (Number.isNaN(t)) return null;
+  const days = Math.round((t - nowMs) / 86_400_000);
+  if (days < 0) return `逾期 ${-days} 天`;
+  if (days === 0) return "今天到期";
+  return `${days} 天後到期`;
+}
+
+/**
+ * 三種待裁決來源 → 一份排序好的收件匣（純函式，便於測）。
+ *
+ * 排序＝卡最久的排前面（沒有時間戳的排最後），因為這張卡的問題從來不是「有沒有資料」，
+ * 而是「我現在該先處理哪一件」。同時間才用類別穩定排序，避免每次輪詢跳動。
+ */
+export function buildDecisionInbox(
+  runs: Array<{ id: string; projectId: string; projectTitle: string; goal: string; status: string; estPoints: number; updatedAt: Date | string; userId?: string | null }>,
+  pending: PendingDecisionSource[],
+  tasks: PendingTaskSource[] = [],
+): DecisionItem[] {
+  const toDate = (v: Date | string | null | undefined): Date | null => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const items: DecisionItem[] = [];
+  for (const r of runs) {
+    if (r.status !== "awaiting_approval") continue;
+    items.push({
+      key: `agent-${r.id}`, kind: "agent", projectId: r.projectId, projectTitle: r.projectTitle,
+      what: r.goal, since: toDate(r.updatedAt), runId: r.id, estPoints: r.estPoints,
+      ownerId: r.userId ?? null,
+    });
+  }
+  for (const t of tasks) {
+    items.push({
+      key: `task-${t.taskId}`, kind: "task", projectId: t.projectId, projectTitle: t.projectTitle,
+      // 到期日就是「該在什麼時候之前決定」，拿它當卡住基準比建立時間更貼近使用者感受
+      what: t.title, since: toDate(t.dueAt), taskId: t.taskId,
+    });
+  }
+  for (const p of pending) {
+    if (p.pendingApprovals > 0) {
+      items.push({
+        key: `scene-${p.projectId}`, kind: "scene", projectId: p.projectId, projectTitle: p.projectTitle,
+        what: `${p.pendingApprovals} 個分鏡等你裁決`, since: toDate(p.oldestPendingApprovalAt),
+      });
+    }
+    if (p.awaitingGenerations > 0) {
+      items.push({
+        key: `generation-${p.projectId}`, kind: "generation", projectId: p.projectId, projectTitle: p.projectTitle,
+        what: `${p.awaitingGenerations} 筆生成等你核准`, since: toDate(p.oldestAwaitingGenerationAt),
+      });
+    }
+  }
+  const ORDER: DecisionKind[] = ["agent", "task", "scene", "generation"];
+  return items.sort((a, b) => {
+    const ta = a.since?.getTime() ?? Number.POSITIVE_INFINITY;
+    const tb = b.since?.getTime() ?? Number.POSITIVE_INFINITY;
+    if (ta !== tb) return ta - tb;
+    return ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind);
+  });
+}
 
 type RunFilter = "all" | "active" | "awaiting_approval" | "waiting" | "running" | "failed" | "done";
 
@@ -642,20 +979,52 @@ function matchesRunFilter(status: string, filter: RunFilter): boolean {
  * 組彙總 AI 卡：① 團隊分析（全組代理健康／篩選清單）② 可追問的組彙總對話 ③ 派工。
  * 對話只存前端狀態（重整即清空）；唯讀彙總本身不改資料。
  */
-function TeamAssistantCard({ groupId }: { groupId: string }) {
+function TeamAssistantCard({
+  groupId,
+  pendingDecisions,
+  pendingLoading,
+  pendingFailed,
+  starterProjects,
+  isLeader,
+  myUserId,
+}: {
+  groupId: string;
+  /** 組內「分鏡送審／生成待核」的 per-project 計數（由 Launchpad 已查到的 pendingSummary 傳入） */
+  pendingDecisions: PendingDecisionSource[];
+  pendingLoading: boolean;
+  pendingFailed: boolean;
+  /** 起手式的「在哪個專案發起」下拉；沿用這一頁已查到的專案清單，不另發查詢 */
+  starterProjects: Array<{ id: string; title: string; status: string }>;
+  /** 與專案頁同一條規則：組長以上、或自己發起的計畫，才可就地核准 */
+  isLeader: boolean;
+  myUserId?: string;
+}) {
   const utils = trpc.useUtils();
   const [question, setQuestion] = useState("");
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const ask = trpc.teamAssistant.ask.useMutation();
   const dispatch = trpc.teamAssistant.dispatch.useMutation();
+  // 就地裁決代理計畫：沿用專案頁同一組 mutation（守門／額度／併發鎖全在 approveAgentCore 裡，
+  // 這裡只是換一個入口，沒有第二條扣點路徑）
+  const approveRun = trpc.agents.approve.useMutation();
+  const discardRun = trpc.agents.discard.useMutation();
+  const decideTask = trpc.tasks.decideApproval.useMutation();
+  // 組級洞察：人類任務阻塞與「誰卡住了」。與 agentOverview 分開查——一條是狀態計數、
+  // 一條是判斷結果，合成一支會讓計數也被 100/300 的洞察上限綁住。
+  const insights = trpc.teamAssistant.groupInsights.useQuery(
+    { groupId },
+    { refetchInterval: (q) => ((q.state.data?.activeRuns ?? 0) > 0 ? 30_000 : false) },
+  );
   const overview = trpc.teamAssistant.agentOverview.useQuery(
     { groupId },
     {
       refetchInterval: (q) => ((q.state.data?.summary?.active ?? 0) > 0 ? 8000 : false),
     },
   );
+  const roles = trpc.agents.listRoles.useQuery(undefined, { staleTime: 10 * 60_000 });
   const [dispatched, setDispatched] = useState<Record<string, DispatchResult>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [starterProjectId, setStarterProjectId] = useState("");
   const [runsCollapsed, setRunsCollapsed] = useState(false);
   const [runFilter, setRunFilter] = useState<RunFilter>("active");
   useEffect(() => {
@@ -679,7 +1048,10 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
       { groupId, message: q, history },
       {
         onSuccess: (d) => {
-          setMsgs((prev) => [...prev, { role: "assistant", text: d.answer, steps: d.steps, dispatches: d.dispatches as Dispatch[] }]);
+          setMsgs((prev) => [...prev, {
+            role: "assistant", text: d.answer, steps: d.steps, dispatches: d.dispatches as Dispatch[],
+            rationale: d.rationale ?? undefined, contextUsed: d.contextUsed ?? [], degraded: d.degraded ?? false,
+          }]);
           if ((d.dispatches?.length ?? 0) > 0) overview.refetch();
         },
       },
@@ -688,16 +1060,95 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
   const canDispatchHint = ask.data?.canDispatch ?? false;
   const summary = overview.data?.summary;
   const runs = overview.data?.runs ?? [];
+  const totalRuns = overview.data?.totalRuns ?? runs.length;
+  const listLimit = overview.data?.listLimit ?? runs.length;
   const activeRuns = summary?.active ?? 0;
   const filteredRuns = useMemo(
     () => runs.filter((r) => matchesRunFilter(r.status, runFilter)),
     [runs, runFilter],
   );
   // 預設「進行中」若為空且列表有其他狀態，自動提示可切全部
-  const healthMeta = HEALTH_LABEL[summary?.health ?? "healthy"] ?? HEALTH_LABEL.healthy;
+  const merged = mergeTeamHealth(summary?.health, insights.data?.status);
+  const healthMeta = {
+    ...(HEALTH_LABEL[merged.health] ?? HEALTH_LABEL.healthy),
+    // 被人員阻塞推上去時要換一句話，否則會出現「狀態穩定」旁邊列著兩項逾期
+    hint: merged.fromPeople
+      ? (PEOPLE_HEALTH_HINT[merged.health] ?? HEALTH_LABEL[merged.health].hint)
+      : (HEALTH_LABEL[merged.health] ?? HEALTH_LABEL.healthy).hint,
+  };
+  // 人類核准節點由伺服器明列（pendingApprovalTasks），不從 blockers 的文案反推——
+  // 靠標籤前綴猜「這是不是核准節點」會在文案一改就默默漏件。
+  const pendingTasks = insights.data?.pendingApprovalTasks ?? [];
+  const inbox = useMemo(
+    () => buildDecisionInbox(runs, pendingDecisions, pendingTasks),
+    [runs, pendingDecisions, pendingTasks],
+  );
+  // 起手式：只在「這個組還沒用過代理」時出現，用完就消失（不長期佔第一屏）。
+  // 目標文字直接取自 playbook 模板——與專案頁的「執行計畫」同一組敘事，不另編一套。
+  const starters = useMemo(() => {
+    const projects = (starterProjects ?? []).filter((p) => p.status !== "archived");
+    const playbooks = roles.data?.playbooks ?? [];
+    const items = STARTER_PLAYBOOK_IDS
+      .map((id) => playbooks.find((p) => p.id === id))
+      .filter((p): p is NonNullable<typeof p> => Boolean(p))
+      .map((p) => ({ id: p.id, playbookId: p.id, title: p.title, goal: p.goalTemplate }));
+    return {
+      // 沒有專案可派、或這組已經用過代理，就不佔版面
+      show: !overview.isLoading && summary?.hasRuns === false && projects.length > 0 && items.length > 0,
+      projects,
+      items,
+    };
+  }, [starterProjects, roles.data, overview.isLoading, summary?.hasRuns]);
+  useEffect(() => {
+    if (starters.projects.length && !starters.projects.some((p) => p.id === starterProjectId)) {
+      setStarterProjectId(starters.projects[0].id);
+    }
+  }, [starters.projects, starterProjectId]);
+
+  // 建議問句：依這個組的真實狀態即時生成，而不是四句寫死的話。
+  // 資料全部來自這張卡已經查到的東西——零新查詢。
+  const questionSuggestions = useMemo(
+    () => buildTeamQuestionSuggestions({
+      runs,
+      people: insights.data?.people ?? [],
+      planConcerns: insights.data?.planConcerns ?? [],
+      pending: pendingDecisions,
+    }),
+    [runs, insights.data, pendingDecisions],
+  );
+
+  // 代理產出與計畫疑慮：兩段都空就不渲染
+  const agentOutput = useMemo(() => {
+    const results = insights.data?.groupResults ?? [];
+    const concerns = insights.data?.planConcerns ?? [];
+    return { show: results.length > 0 || concerns.length > 0, results, concerns };
+  }, [insights.data]);
+  // 「誰卡住了」：沒有任何人員任務也沒有阻塞時整段不渲染——空區塊只會佔版面、不傳達資訊
+  const stuck = useMemo(() => {
+    const d = insights.data;
+    const people = d?.people ?? [];
+    const projects = (d?.byProject ?? []).filter((p) => p.blockers > 0 || p.overdueTasks > 0);
+    return {
+      show: !!d && (people.length > 0 || projects.length > 0),
+      people, projects,
+      openTasks: d?.openTasks ?? 0,
+      overdueTasks: d?.overdueTasks ?? 0,
+    };
+  }, [insights.data]);
+  // 每次 render 取一次「現在」：同一畫面上的「卡了 N 天」不該用到兩個不同的基準時間
+  const nowMs = Date.now();
+  const [decidingKey, setDecidingKey] = useState<string | null>(null);
+  const decideError = approveRun.error ?? discardRun.error ?? decideTask.error;
+  /** 就地裁決後：代理清單、組級洞察、跨專案待辦、專案卡角標都要跟上（四處看的是同一件事） */
+  const afterDecide = () => {
+    overview.refetch();
+    insights.refetch();
+    utils.approvals.pendingSummary.invalidate();
+    utils.projects.invalidate();
+  };
 
   return (
-    <section className="card team-ai-card" data-fb="組彙總AI卡">
+    <Card as="section" className="team-ai-card" data-fb="組彙總AI卡">
       {/* ── 團隊分析：全組代理匯總（非聊天） ── */}
       <div className="team-analysis" aria-labelledby="team-analysis-title">
         <div className="team-analysis__head">
@@ -707,7 +1158,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
           </div>
           {summary && (
             <span
-              className={`team-analysis__health is-${summary.health}`}
+              className={`team-analysis__health is-${merged.health}`}
               title={healthMeta.hint}
             >
               {healthMeta.label}
@@ -715,33 +1166,371 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
             </span>
           )}
         </div>
-        {overview.isLoading && <div className="skeleton" style={{ height: 48, marginTop: 10 }} aria-hidden />}
+        {overview.isLoading && <Skeleton height={48} style={{ marginTop: 10 }} />}
         {overview.error && (
           <p className="error" role="alert" style={{ marginTop: 8 }}>
             代理動態載入失敗——
-            <button type="button" className="btn-ghost btn-sm" onClick={() => overview.refetch()}>再試一次</button>
+            <Button variant="ghost" size="sm" onClick={() => overview.refetch()}>再試一次</Button>
           </p>
         )}
-        {summary && !overview.isLoading && (
-          <div className="team-analysis__stats" role="group" aria-label="代理狀態計數">
-            <button type="button" className={`team-stat${runFilter === "running" ? " is-on" : ""}`} onClick={() => { setRunFilter("running"); setRunsCollapsed(false); }}>
-              <strong>{summary.running}</strong><small>執行中</small>
-            </button>
-            <button type="button" className={`team-stat${runFilter === "waiting" ? " is-on" : ""}`} onClick={() => { setRunFilter("waiting"); setRunsCollapsed(false); }}>
-              <strong>{summary.waiting}</strong><small>等待人員</small>
-            </button>
-            <button type="button" className={`team-stat${runFilter === "awaiting_approval" ? " is-on" : ""}`} onClick={() => { setRunFilter("awaiting_approval"); setRunsCollapsed(false); }}>
-              <strong>{summary.awaitingApproval}</strong><small>待核准</small>
-            </button>
-            <button type="button" className={`team-stat${runFilter === "failed" ? " is-on" : ""}`} onClick={() => { setRunFilter("failed"); setRunsCollapsed(false); }}>
-              <strong>{summary.failedRecent}</strong><small>近七日失敗</small>
-            </button>
-            <button type="button" className={`team-stat${runFilter === "done" ? " is-on" : ""}`} onClick={() => { setRunFilter("done"); setRunsCollapsed(false); }}>
-              <strong>{summary.doneRecent}</strong><small>近七日完成</small>
-            </button>
+
+        {/* ── 待我裁決：這張卡的第一屏。
+            原本第一屏是五個計數＋一句「目前不需要立即處理」，但同一頁其實已經查到
+            分鏡送審／生成待核的筆數——組內有東西卡著，這張叫「團隊分析」的卡照樣顯示全 0。
+            現在三種「等人決定」的來源合流成一份收件匣，卡最久的排前面；計數降到第二屏。 ── */}
+        {!overview.isLoading && (
+          <div className="team-inbox" aria-label="待我裁決">
+            <div className="team-inbox__head">
+              <strong>待我裁決</strong>
+              <Meta>
+                {pendingLoading && inbox.length === 0 ? "統計中…" : `${inbox.length} 件`}
+                {pendingFailed ? "・跨專案待辦載入失敗，可能少列" : ""}
+              </Meta>
+            </div>
+            {inbox.length === 0 ? (
+              <Hint layer="always" style={{ margin: 0 }}>
+                {pendingFailed
+                  ? "跨專案待辦載入失敗，暫時無法確認有沒有待裁決事項。"
+                  : summary?.hasRuns
+                    ? "沒有等你決定的事項——代理計畫、分鏡送審、生成核准都清空了。"
+                    : "這個組還沒開始用 AI 代理。下面挑一個起手式就能發起第一份計畫（建立計畫免費，核准後才花點）。"}
+              </Hint>
+            ) : (
+              <div className="team-inbox__list">
+                {inbox.slice(0, DECISION_INBOX_MAX).map((d) => {
+                  const meta = DECISION_META[d.kind];
+                  const stuck = daysStuck(d.since, nowMs);
+                  const busy = decidingKey === d.key;
+                  return (
+                    <div key={d.key} className={`team-inbox__row is-${d.kind}`}>
+                      <Chip style={{ margin: 0 }} title={meta.hint}>{meta.label}</Chip>
+                      <span className="team-inbox__copy">
+                        <Link href={`/p/${d.projectId}`} title="開啟這個專案">{d.projectTitle}</Link>
+                        <span title={d.what}>{d.what}</span>
+                      </span>
+                      <Meta className="team-inbox__age">
+                        {stuck === null ? "—" : stuck === 0 ? "今天" : `卡了 ${stuck} 天`}
+                        {d.kind === "agent" && d.estPoints != null ? `・估 ${d.estPoints} 點` : ""}
+                      </Meta>
+                      <span className="team-inbox__act">
+                        {d.kind === "agent" && d.runId && canDecideRun(d, isLeader, myUserId) ? (
+                          <>
+                            {/* 就地核准／放棄：走專案頁同一支 mutation。核准這一刻起才開始花點，
+                                所以一定要二次確認並把估點寫在確認訊息裡。 */}
+                            <ConfirmButton
+                              triggerClassName="btn-tonal btn-sm"
+                              disabled={busy}
+                              title="核准後代理才開始執行、才開始花點"
+                              message={`核准「${d.projectTitle}」的執行計畫？\n${d.what}\n核准後背景執行器會接手，估 ${d.estPoints ?? 0} 點。`}
+                              confirmLabel="核准並開始"
+                              onConfirm={async () => {
+                                setDecidingKey(d.key);
+                                try {
+                                  await approveRun.mutateAsync({ runId: d.runId! });
+                                  afterDecide();
+                                } catch {
+                                  /* approveRun.error 已顯示 */
+                                } finally {
+                                  setDecidingKey((k) => (k === d.key ? null : k));
+                                }
+                              }}
+                            >
+                              核准
+                            </ConfirmButton>
+                            <ConfirmButton
+                              triggerClassName="btn-ghost btn-sm"
+                              disabled={busy}
+                              title="放棄這份還沒核准的計畫（不花點）"
+                              message={`放棄「${d.projectTitle}」的執行計畫？\n${d.what}\n計畫會被丟棄，不會花點；要再做得重新規劃。`}
+                              confirmLabel="放棄計畫"
+                              onConfirm={async () => {
+                                setDecidingKey(d.key);
+                                try {
+                                  await discardRun.mutateAsync({ runId: d.runId! });
+                                  afterDecide();
+                                } catch {
+                                  /* discardRun.error 已顯示 */
+                                } finally {
+                                  setDecidingKey((k) => (k === d.key ? null : k));
+                                }
+                              }}
+                            >
+                              放棄
+                            </ConfirmButton>
+                          </>
+                        ) : d.kind === "task" && d.taskId ? (
+                          <>
+                            {/* 人類核准節點：要決定的內容就是任務標題本身（不像分鏡要看圖），
+                                所以可以就地裁決；走 tasks.decideApproval，喚醒邏輯留在 core 裡 */}
+                            <ConfirmButton
+                              triggerClassName="btn-tonal btn-sm"
+                              disabled={busy}
+                              title="核准這個人類關卡，讓計畫的後續步驟繼續"
+                              message={`核准「${d.projectTitle}」的人員關卡？\n${d.what}\n核准後計畫的後續步驟會被喚醒繼續執行。`}
+                              confirmLabel="核准並繼續"
+                              onConfirm={async () => {
+                                setDecidingKey(d.key);
+                                try {
+                                  await decideTask.mutateAsync({ id: d.taskId!, decision: "approve" });
+                                  afterDecide();
+                                } catch {
+                                  /* decideTask.error 已顯示 */
+                                } finally {
+                                  setDecidingKey((k) => (k === d.key ? null : k));
+                                }
+                              }}
+                            >
+                              核准
+                            </ConfirmButton>
+                            <ConfirmButton
+                              triggerClassName="btn-ghost btn-sm"
+                              disabled={busy}
+                              title="退回這個關卡（計畫不會繼續往下走）"
+                              message={`退回「${d.projectTitle}」的人員關卡？\n${d.what}\n計畫不會繼續往下走，需要重新處理後再送一次。`}
+                              confirmLabel="退回"
+                              onConfirm={async () => {
+                                setDecidingKey(d.key);
+                                try {
+                                  await decideTask.mutateAsync({ id: d.taskId!, decision: "reject" });
+                                  afterDecide();
+                                } catch {
+                                  /* decideTask.error 已顯示 */
+                                } finally {
+                                  setDecidingKey((k) => (k === d.key ? null : k));
+                                }
+                              }}
+                            >
+                              退回
+                            </ConfirmButton>
+                          </>
+                        ) : (
+                          /* 分鏡／生成刻意不就地裁決：不看內容就按核准等於盲簽 */
+                          <Link href={`/p/${d.projectId}`} title={meta.hint}>前往處理 →</Link>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+                {inbox.length > DECISION_INBOX_MAX && (
+                  <Meta as="p" style={{ margin: 0 }}>
+                    還有 {inbox.length - DECISION_INBOX_MAX} 件——先處理上面卡最久的幾件。
+                  </Meta>
+                )}
+              </div>
+            )}
+            {decideError && <p className="error" role="alert" style={{ margin: 0 }}>{decideError.message}</p>}
           </div>
         )}
-        <p className="hint" style={{ margin: "8px 0 0" }}>{healthMeta.hint}</p>
+
+        {/* ── 起手式：空組的第一屏不能只有一句「沒有東西」。
+            用既有的 playbook 目標模板當三個起點，選一個專案就能發起——
+            所有守門仍在 planAgentCore 裡，這裡只是把入口搬到看得到的地方。 ── */}
+        {starters.show && (
+          <div className="team-starters" aria-label="起手式">
+            <div className="team-starters__head">
+              <strong>從這裡開始</strong>
+              <Meta>建立計畫免費，核准後才開始花點</Meta>
+            </div>
+            <label htmlFor="ta-starter-project" style={{ marginTop: 0 }}>要在哪個專案發起</label>
+            <select
+              id="ta-starter-project"
+              value={starterProjectId}
+              onChange={(e) => setStarterProjectId(e.target.value)}
+              style={{ width: "auto", maxWidth: "100%" }}
+            >
+              {starters.projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.title}</option>
+              ))}
+            </select>
+            <div className="team-starters__list">
+              {starters.items.map((s) => {
+                const key = `starter-${s.id}`;
+                const done = dispatched[key];
+                const target = starters.projects.find((p) => p.id === starterProjectId);
+                return done ? (
+                  <Hint key={key} as="div" layer="always" style={{ color: "var(--success-ink)" }}>
+                    ✓ 已建立「{s.title}」的執行計畫（估 {done.estPoints} 點）：{done.summary}
+                    <Link href={`/p/${done.projectId}?focus=agent-run-${done.runId}`} style={{ marginLeft: 6 }}>到專案核准 →</Link>
+                  </Hint>
+                ) : (
+                  <ConfirmButton
+                    key={key}
+                    triggerClassName="btn-tonal btn-sm"
+                    disabled={!target || pendingKey === key}
+                    title={s.goal}
+                    message={`在「${target?.title ?? ""}」發起 AI 執行計畫：${s.goal}？\n會建立一份待核准計畫，仍需到該專案核准才會開始執行、花點。`}
+                    confirmLabel="發起計畫"
+                    onConfirm={async () => {
+                      if (!target) return;
+                      setPendingKey(key);
+                      try {
+                        const r = await dispatch.mutateAsync({
+                          groupId,
+                          projectId: target.id,
+                          goal: s.goal,
+                          // playbook 一併帶上：同一句目標帶不帶 playbook 排出來的步驟骨架不同
+                          playbookId: s.playbookId,
+                        });
+                        setDispatched((prev) => ({ ...prev, [key]: r }));
+                        utils.projects.invalidate();
+                        overview.refetch();
+                        insights.refetch();
+                        setRunFilter("awaiting_approval");
+                        setRunsCollapsed(false);
+                      } catch {
+                        /* dispatch.error 已顯示 */
+                      } finally {
+                        setPendingKey((k) => (k === key ? null : k));
+                      }
+                    }}
+                  >
+                    <Icon name="Play" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                    {s.title}
+                  </ConfirmButton>
+                );
+              })}
+            </div>
+            {dispatch.error && <p className="error" role="alert" style={{ margin: 0 }}>{dispatch.error.message}</p>}
+          </div>
+        )}
+
+        {/* ── 誰卡住了：把未結人類任務歸到人與專案。
+            這張卡原本只看得到 agent_runs，於是「7 項人員任務逾期」這種最該被看見的
+            阻塞完全不在畫面上——AI 停著等人，畫面卻說一切正常。 ── */}
+        {stuck.show && (
+          <div className="team-stuck" aria-label="誰卡住了">
+            <div className="team-stuck__head">
+              <strong>誰卡住了</strong>
+              <Meta>
+                {stuck.openTasks} 項人員任務進行中
+                {stuck.overdueTasks > 0 ? `・${stuck.overdueTasks} 項逾期` : ""}
+              </Meta>
+            </div>
+            <div className="team-stuck__cols">
+              <div>
+                <Meta as="p" style={{ margin: "0 0 4px" }}>依人員</Meta>
+                {stuck.people.length === 0 ? (
+                  <Hint layer="always" style={{ margin: 0 }}>沒有進行中的人員任務。</Hint>
+                ) : (
+                  <ul className="team-stuck__list">
+                    {stuck.people.map((p) => (
+                      <li key={p.userId ?? "unassigned"}>
+                        <span className="team-stuck__who">{p.userId ? (p.name ?? "（未命名成員）") : "尚未指派"}</span>
+                        <Meta>
+                          {p.openTasks} 項
+                          {p.overdueTasks > 0 ? `・${p.overdueTasks} 逾期` : ""}
+                          {dueLabel(p.earliestDueAt, nowMs) ? `・最近一件：${dueLabel(p.earliestDueAt, nowMs)}` : ""}
+                        </Meta>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {insights.data?.peopleTruncated && (
+                  <Meta as="p" style={{ margin: "4px 0 0" }}>人數較多，只列最卡的前幾位。</Meta>
+                )}
+              </div>
+              <div>
+                <Meta as="p" style={{ margin: "0 0 4px" }}>依專案</Meta>
+                {stuck.projects.length === 0 ? (
+                  <Hint layer="always" style={{ margin: 0 }}>沒有專案有阻塞。</Hint>
+                ) : (
+                  <ul className="team-stuck__list">
+                    {stuck.projects.map((p) => (
+                      <li key={p.projectId}>
+                        <Link href={`/p/${p.projectId}`} className="team-stuck__who">{p.projectTitle}</Link>
+                        <Meta>
+                          {p.criticalBlockers > 0 ? `${p.criticalBlockers} 項嚴重・` : ""}
+                          {p.blockers} 項阻塞
+                          {p.overdueTasks > 0 ? `・${p.overdueTasks} 逾期` : ""}
+                        </Meta>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+            {insights.data && (insights.data.truncated.runs || insights.data.truncated.tasks) && (
+              <Meta as="p" style={{ margin: 0 }}>
+                資料量已達分析上限，這裡是抽樣結果——完整清單請到各專案頁看。
+              </Meta>
+            )}
+            {insights.data && insights.data.blockersTotal > insights.data.blockers.length && (
+              /* 阻塞清單有顯示上限，依專案的統計卻是全量；不講清楚兩個數字看起來會像對不上 */
+              <Meta as="p" style={{ margin: 0 }}>
+                共 {insights.data.blockersTotal} 項阻塞（明細只列前 {insights.data.blockers.length} 項；上方依專案的統計是全部）。
+              </Meta>
+            )}
+          </div>
+        )}
+        {/* ── 代理做出了什麼：計畫不是只有狀態，還有產出。
+            沒有這一段，這張卡只回答得了「跑到哪」，回答不了「做出了什麼」。 ── */}
+        {agentOutput.show && (
+          <div className="team-output" aria-label="代理產出與計畫疑慮">
+            {agentOutput.results.length > 0 && (
+              <div>
+                <div className="team-output__head">
+                  <strong>代理已產出</strong>
+                  <Meta>
+                    {agentOutput.results.length} 項
+                    {insights.data?.truncated.results ? "（已達顯示上限）" : ""}
+                  </Meta>
+                </div>
+                <div className="team-output__chips">
+                  {agentOutput.results.map((r) => (
+                    <Link
+                      key={`${r.type}:${r.id}`}
+                      href={`/p/${r.projectId}?focus=agent-run-${r.runId}`}
+                      className="team-output__chip"
+                      title={`在「${r.projectTitle}」由計畫的某一步產出——點開會定位到那一步`}
+                    >
+                      <span className="team-output__kind">{agentOutputKindLabel(r.type)}</span>
+                      {r.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+            {agentOutput.concerns.length > 0 && (
+              <div>
+                <div className="team-output__head">
+                  <strong>計畫還缺什麼</strong>
+                  <Meta>
+                    待補資訊 {insights.data?.unresolvedInformation ?? 0}
+                    ・風險 {insights.data?.risks ?? 0}
+                  </Meta>
+                </div>
+                <ul className="team-stuck__list">
+                  {agentOutput.concerns.map((c) => (
+                    <li key={c.runId}>
+                      <Link
+                        href={`/p/${c.projectId}?focus=agent-run-${c.runId}`}
+                        className="team-stuck__who"
+                        title={c.goal}
+                      >
+                        {c.projectTitle}｜{c.goal}
+                      </Link>
+                      <Meta>
+                        {c.missingInformation > 0 ? `待補 ${c.missingInformation}` : ""}
+                        {c.missingInformation > 0 && c.risks > 0 ? "・" : ""}
+                        {c.risks > 0 ? `風險 ${c.risks}` : ""}
+                      </Meta>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {insights.error && (
+          <p className="error" role="alert" style={{ margin: "8px 0 0" }}>
+            人員阻塞分析載入失敗——
+            <Button variant="ghost" size="sm" onClick={() => insights.refetch()}>再試一次</Button>
+          </p>
+        )}
+
+        {/* 健康度徽章旁的解釋：徽章本身已有文字標籤，這句是補充 → 引導層 */}
+        <Hint style={{ margin: "8px 0 0" }}>{healthMeta.hint}</Hint>
       </div>
 
       {/* ── 組執行計畫動態 ── */}
@@ -756,12 +1545,38 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
         >
           <Icon name="Sparkles" size={13} />
           <span>組執行計畫動態</span>
-          <span className="hint">
-            （{runs.length} 筆{activeRuns > 0 ? `・${activeRuns} 進行中` : ""}）
-          </span>
+          {/* 在 <button> 內，必須用 span（<p> 會是無效 HTML）；筆數是狀態不是說明。
+              載入中／失敗要講出來——空手顯示「（0 筆）」會被讀成「這組沒有計畫」。 */}
+          <Meta>
+            （{overview.isLoading
+              ? "載入中…"
+              : overview.error
+                ? "載入失敗"
+                : `${totalRuns} 筆${activeRuns > 0 ? `・${activeRuns} 進行中` : ""}`}）
+          </Meta>
           <Icon name={runsCollapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ marginLeft: "auto" }} />
         </button>
         <div id="team-agent-runs" hidden={runsCollapsed}>
+          {/* 計數降到第二屏：它們回答「整體狀況如何」，而第一屏要回答的是「我現在該做什麼」 */}
+          {summary && !overview.isLoading && (
+            <div className="team-analysis__stats" role="group" aria-label="代理狀態計數">
+              <button type="button" className={`team-stat${runFilter === "running" ? " is-on" : ""}`} onClick={() => setRunFilter("running")}>
+                <strong>{summary.running}</strong><small>執行中</small>
+              </button>
+              <button type="button" className={`team-stat${runFilter === "waiting" ? " is-on" : ""}`} onClick={() => setRunFilter("waiting")}>
+                <strong>{summary.waiting}</strong><small>等待人員</small>
+              </button>
+              <button type="button" className={`team-stat${runFilter === "awaiting_approval" ? " is-on" : ""}`} onClick={() => setRunFilter("awaiting_approval")}>
+                <strong>{summary.awaitingApproval}</strong><small>待核准</small>
+              </button>
+              <button type="button" className={`team-stat${runFilter === "failed" ? " is-on" : ""}`} onClick={() => setRunFilter("failed")}>
+                <strong>{summary.failedRecent}</strong><small>近七日失敗</small>
+              </button>
+              <button type="button" className={`team-stat${runFilter === "done" ? " is-on" : ""}`} onClick={() => setRunFilter("done")}>
+                <strong>{summary.doneRecent}</strong><small>近七日完成</small>
+              </button>
+            </div>
+          )}
           {runs.length > 0 && (
             <div className="team-run-filters" role="toolbar" aria-label="依狀態篩選代理">
               {RUN_FILTERS.map((f) => (
@@ -778,15 +1593,17 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
             </div>
           )}
           {runs.length === 0 && !overview.isLoading && !overview.error && (
-            <p className="hint" style={{ marginTop: 8 }}>
-              這個組還沒有 AI 執行計畫。可在下方問組彙總 AI，或到專案頁用「執行計畫」發起。
-            </p>
+            /* 空清單時這句是唯一的下一步指引，收起來就變成一片空白 */
+            <Hint layer="always" style={{ marginTop: 8 }}>
+              還沒有計畫可顯示。到專案頁用「執行計畫」發起後，這裡會列出全組進度。
+            </Hint>
           )}
           {runs.length > 0 && filteredRuns.length === 0 && (
-            <p className="hint" style={{ marginTop: 8 }}>
+            /* 「篩選後沒東西」＋還原辦法，藏起來會讓人以為資料不見了 */
+            <Hint layer="always" style={{ marginTop: 8 }}>
               目前篩選下沒有計畫——
-              <button type="button" className="btn-ghost btn-sm" onClick={() => setRunFilter("all")}>改看全部</button>
-            </p>
+              <Button variant="ghost" size="sm" onClick={() => setRunFilter("all")}>改看全部</Button>
+            </Hint>
           )}
           {filteredRuns.length > 0 && (
             <div className="team-run-list" style={{ marginTop: 8 }}>
@@ -796,7 +1613,7 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
                 const href = `/p/${r.projectId}?focus=agent-run-${r.id}`;
                 return (
                   <div key={r.id} className={`team-run-row is-${r.status}`}>
-                    <span className="chip" style={{ margin: 0, color: st.color, borderColor: st.color }}>{st.label}</span>
+                    <Chip style={{ margin: 0, color: st.color, borderColor: st.color }}>{st.label}</Chip>
                     <span className="team-run-row__copy">
                       <Link href={href} title="開啟專案並定位此計畫">{r.projectTitle}</Link>
                       <span title={r.goal}>{r.goal}</span>
@@ -823,6 +1640,16 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
               })}
             </div>
           )}
+          {/* 清單有上限而計數沒有：不講清楚，使用者會把「30 筆」當成全組總量 */}
+          {totalRuns > listLimit && (
+            <Meta as="p" style={{ margin: "8px 0 0" }}>
+              清單只顯示最近 {listLimit} 筆（全組共 {totalRuns} 筆）；上方計數統計的是全部。
+              {summary && summary.stoppedRecent > 0 ? `近七日另有 ${summary.stoppedRecent} 筆被停止。` : ""}
+            </Meta>
+          )}
+          {totalRuns <= listLimit && summary && summary.stoppedRecent > 0 && (
+            <Meta as="p" style={{ margin: "8px 0 0" }}>近七日另有 {summary.stoppedRecent} 筆被停止。</Meta>
+          )}
         </div>
       </div>
 
@@ -830,13 +1657,13 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
       <div className="team-chat-block">
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 260px" }}>
-            <label htmlFor="ta-question" style={{ marginTop: 0 }}>組彙總 AI</label>
+            <label htmlFor="ta-question" style={{ marginTop: 0 }}>問卡片答不出來的事</label>
             <input
               id="ta-question"
               value={question}
               maxLength={500}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder={msgs.length ? "接著追問…（記得上下文）" : "問問整組狀況：哪個案子卡住了？這週花了多少點？"}
+              placeholder={msgs.length ? "接著追問…（記得上下文）" : "例：「招生短片」那 3 鏡的配音詞各寫了什麼？"}
               onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
             />
           </div>
@@ -854,27 +1681,36 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
 
         {msgs.length === 0 && !ask.isPending && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-            {TEAM_QUICK_QS.map((q) => (
-              <button key={q} type="button" className="btn-sm" title="點了帶入輸入框，按「詢問」才送出（免費）" onClick={() => setQuestion(q)}>
-                {q}
-              </button>
+            {questionSuggestions.map((s) => (
+              <Button
+                key={s.id}
+                size="sm"
+                /* tooltip 講出「這句是被什麼觸發的」——讓人看得出它讀了自己的資料，
+                   而不是四句對誰都一樣的罐頭問句 */
+                title={`${s.why}。點了帶入輸入框，按「詢問」才送出（免費）`}
+                onClick={() => setQuestion(s.text)}
+              >
+                {s.text}
+              </Button>
             ))}
           </div>
         )}
 
-        <p className="hint" style={{ marginTop: 8 }}>
-          免費・唯讀分析整組專案與代理進度{canDispatchHint ? "，並可提議發起 AI 執行計畫（需該專案核准才花點）" : ""}。
+        {/* 「免費・唯讀」是花不花錢的前提，屬於代價資訊 → 兩種模式都要看得到 */}
+        <Hint layer="always" style={{ marginTop: 8 }}>
+          免費・唯讀。上面的卡片給你數字，這裡給你數字背後的東西——它會鑽進分鏡全文、生成紀錄、
+          人員任務與資料庫查證後再回答{canDispatchHint ? "，也可提議發起 AI 執行計畫（需該專案核准才花點）" : ""}。
           {msgs.length > 0 && (
-            <button
-              type="button"
-              className="btn-ghost btn-sm"
+            <Button
+              variant="ghost"
+              size="sm"
               style={{ marginLeft: 8 }}
               onClick={() => { setMsgs([]); setDispatched({}); ask.reset(); }}
             >
               清除對話
-            </button>
+            </Button>
           )}
-        </p>
+        </Hint>
         {ask.error && <p className="error" role="alert">{ask.error.message}</p>}
 
         {msgs.length > 0 && (
@@ -890,6 +1726,22 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
                     </div>
                   )}
                   <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{m.text}</p>
+                  {m.degraded && (
+                    /* 資訊不全時一定要講：不講的話這個回答看起來與完整資料下的回答沒有兩樣 */
+                    <Meta as="p" style={{ margin: "4px 0 0", color: "var(--danger-ink)" }}>
+                      ⚠ 這次沒能讀到阻塞與人員任務資料，以上回答可能漏掉卡住的事項。
+                    </Meta>
+                  )}
+                  {m.rationale && (
+                    <Meta as="p" style={{ margin: "4px 0 0" }}>依據：{m.rationale}</Meta>
+                  )}
+                  {(m.contextUsed?.length ?? 0) > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                      {m.contextUsed!.map((c) => (
+                        <Chip key={c} style={{ margin: 0 }} title="這輪回答實際用到的資料區塊">{c}</Chip>
+                      ))}
+                    </div>
+                  )}
                   {(m.dispatches?.length ?? 0) > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
                       {m.dispatches!.map((d, i) => {
@@ -898,10 +1750,11 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
                         return (
                           <div key={key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                             {done ? (
-                              <div className="hint" style={{ color: "var(--success-ink)" }}>
+                              /* 已建立計畫的估點與「去核准」入口——藏起來就找不到要核准什麼 */
+                              <Hint as="div" layer="always" style={{ color: "var(--success-ink)" }}>
                                 ✓ 已在「{d.projectTitle}」建立 AI 執行計畫（估 {done.estPoints} 點）：{done.summary}
                                 <Link href={`/p/${d.projectId}?focus=agent-run-${done.runId}`} style={{ marginLeft: 6 }}>到專案核准 →</Link>
-                              </div>
+                              </Hint>
                             ) : (
                               <ConfirmButton
                                 triggerClassName="btn-tonal btn-sm"
@@ -941,6 +1794,6 @@ function TeamAssistantCard({ groupId }: { groupId: string }) {
           </div>
         )}
       </div>
-    </section>
+    </Card>
   );
 }

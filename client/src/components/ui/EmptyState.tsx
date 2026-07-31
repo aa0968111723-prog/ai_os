@@ -1,0 +1,40 @@
+import type { HTMLAttributes, ReactNode } from "react";
+import { cx } from "./cx";
+
+/**
+ * 空狀態。計畫要求「空狀態要有意義＋下一步指引」，所以 `title` 與 `description` 都是必填，
+ * `action` 強烈建議帶——一個沒有下一步的空狀態等於死路。
+ *
+ * 說明用純 `<p>`（`.empty-state p` 已定義 fg-secondary），刻意**不**包成 `<Hint>`：
+ * 1. 與站內原本就用純 `<p>` 的空狀態 DOM 逐字相同，那些遷移零視覺變化。
+ *    **例外：ChatEmptyState**——它原本是 `<p class="hint">`（12px），遷移後升到
+ *    15px，是刻意的升級而非等價轉換：空狀態的唯一內容不該是最小的字。
+ *    截圖基準在聊天室這一頁預期會 diff，屬預期內。
+ * 2. 空狀態的說明本來就是「唯一的內容」，精簡模式把它收成「？」只會留下一片空白，
+ *    那是把問題變嚴重而不是變簡單——所以它根本不該進分層機制。
+ *
+ * `icon` 收 ReactNode（而非 IconName）以維持 ui/ 對其他元件零依賴。
+ */
+export function EmptyState({
+  icon,
+  title,
+  description,
+  action,
+  className,
+  ...rest
+}: {
+  icon?: ReactNode;
+  title: ReactNode;
+  description: ReactNode;
+  action?: ReactNode;
+  className?: string;
+} & Omit<HTMLAttributes<HTMLDivElement>, "title" | "className">) {
+  return (
+    <div className={cx("empty-state", className)} {...rest}>
+      {icon}
+      <h3>{title}</h3>
+      <p>{description}</p>
+      {action}
+    </div>
+  );
+}

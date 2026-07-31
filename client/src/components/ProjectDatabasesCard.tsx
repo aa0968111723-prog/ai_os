@@ -8,7 +8,7 @@ import {
   projectDataAiHint,
   type ProjectDataTemplateId,
 } from "@shared/projectDataTemplates";
-
+import { Button, Card, EmptyState, Hint, Meta, Pill } from "./ui";
 /**
  * 專案資料卡：
  * - 一眼看出 AI 能否引用本專案依據（知識／素材／已關聯表；尊重 agentAccess）。
@@ -155,8 +155,7 @@ export function ProjectDatabasesCard({
   const open = controlled ? openProp : uncontrolledOpen;
 
   return (
-    <details
-      className="card card--quiet"
+    <Card as="details" variant="quiet"
       data-fb="專案資料"
       id="sec-databases"
       open={open}
@@ -164,8 +163,7 @@ export function ProjectDatabasesCard({
         const next = (e.currentTarget as HTMLDetailsElement).open;
         if (controlled) onOpenChange?.(next);
         else setUncontrolledOpen(next);
-      }}
-    >
+      }}>
       <summary>
         <Icon name="Database" size={14} /> 專案資料
         <span className="meta" style={{ marginLeft: 8 }}>
@@ -195,7 +193,7 @@ export function ProjectDatabasesCard({
               {aiHint.tone === "empty" && <Icon name="Info" size={14} style={{ marginRight: 6, verticalAlign: -2 }} />}
               {aiHint.label}
             </p>
-            <p className="hint" style={{ margin: "4px 0 0" }}>{aiHint.detail}</p>
+            <Meta as="p" style={{ margin: "4px 0 0" }}>{aiHint.detail}</Meta>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
               <span className="meta">文字知識 {knowledgeCount}</span>
               <span className="meta">素材 {assetCount}</span>
@@ -205,23 +203,23 @@ export function ProjectDatabasesCard({
           </div>
         )}
         {!showStatus && (
-          <p className="hint" style={{ margin: 0 }}>正在判斷專案資料狀態…</p>
+          <Meta as="p" style={{ margin: 0 }}>正在判斷專案資料狀態…</Meta>
         )}
 
         <div>
-          <p className="hint" style={{ margin: "0 0 8px" }}>
+          <Hint style={{ margin: "0 0 8px" }}>
             剪輯、社群、動畫、外出採集都能把依據放這裡。貼文字、上傳檔案，或一鍵建表；外部帳號連上後還要匯入或關聯專案，AI 才會使用。
-          </p>
+          </Hint>
           <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
-            <button type="button" className="btn-sm" onClick={() => scrollTo("sec-knowledge")}>
+            <Button size="sm" onClick={() => scrollTo("sec-knowledge")}>
               <Icon name="FileText" size={13} /> 貼上文字
-            </button>
-            <button type="button" className="btn-sm" onClick={() => scrollTo("sec-assets")}>
+            </Button>
+            <Button size="sm" onClick={() => scrollTo("sec-assets")}>
               <Icon name="Image" size={13} /> 上傳圖片、影片
-            </button>
-            <button type="button" className="btn-sm" onClick={() => scrollTo("sec-ai-hub")}>
+            </Button>
+            <Button size="sm" onClick={() => scrollTo("sec-ai-hub")}>
               <Icon name="Sparkles" size={13} /> 問 AI 助手
-            </button>
+            </Button>
             <Link href="/integrations" className="btn-sm" style={{ textDecoration: "none" }}>
               <Icon name="Package" size={13} /> Google／Notion／API
             </Link>
@@ -238,31 +236,29 @@ export function ProjectDatabasesCard({
         {canEdit && (
           <div data-testid="project-data-templates">
             <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>一鍵建立資料表</h3>
-            <p className="hint" style={{ margin: "0 0 8px" }}>
+            <Hint layer="always" style={{ margin: "0 0 8px" }}>
               範本只是起點，之後可自由改欄位與名稱。自動含「關聯專案」、已連本專案，預設 AI 可讀寫。
-            </p>
+            </Hint>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {PROJECT_DATA_TEMPLATES.map((t) => (
-                <button
+                <Button size="sm" variant="primary"
                   key={t.id}
                   type="button"
-                  className="btn-sm primary"
                   disabled={createBound.isPending}
                   title={t.hint}
-                  onClick={() => onCreateTemplate(t.id)}
-                >
+                  onClick={() => onCreateTemplate(t.id)}>
                   <Icon name="Plus" size={13} /> {t.label}
-                </button>
+                </Button>
               ))}
             </div>
             {createBound.isPending && (
-              <p className="hint" style={{ margin: "8px 0 0" }}>正在建立資料表…</p>
+              <Meta as="p" style={{ margin: "8px 0 0" }}>正在建立資料表…</Meta>
             )}
             {createError && (
               <p className="error" style={{ margin: "8px 0 0" }}>{createError}</p>
             )}
             {lastCreated && !createBound.isPending && (
-              <p className="hint" style={{ margin: "8px 0 0" }}>
+              <Meta as="p" style={{ margin: "8px 0 0" }}>
                 已建立「{lastCreated.tableName}」。
                 <Link
                   href={`/databases?open=${encodeURIComponent(lastCreated.tableId)}&projectId=${encodeURIComponent(projectId)}&from=project`}
@@ -270,25 +266,20 @@ export function ProjectDatabasesCard({
                 >
                   開啟編輯 →
                 </Link>
-              </p>
+              </Meta>
             )}
           </div>
         )}
 
-        {linked.isLoading && <p className="hint" style={{ margin: 0 }}>正在讀取已關聯的資料…</p>}
+        {linked.isLoading && <Meta as="p" style={{ margin: 0 }}>正在讀取已關聯的資料…</Meta>}
         {linked.error && (
           <p className="error" style={{ margin: 0 }}>關聯資料載入失敗：{linked.error.message}</p>
         )}
 
         {!linked.isLoading && !linked.error && groups.length === 0 && (
-          <div className="empty-state" style={{ marginTop: 0 }}>
-            <h3>還沒有資料表關聯到這個專案</h3>
-            <p>
-              {canEdit
+          <EmptyState icon={<Icon name="Database" />} title={<>還沒有資料表關聯到這個專案</>} description={<>{canEdit
                 ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，勾選「關聯此專案」。"
-                : "請有編輯權限的成員建立或關聯資料表。"}
-            </p>
-          </div>
+                : "請有編輯權限的成員建立或關聯資料表。"}</>} style={{ marginTop: 0 }} />
         )}
 
         {groups.length > 0 && (
@@ -308,9 +299,9 @@ export function ProjectDatabasesCard({
                       {group.tableName}
                     </Link>
                     <span>（{group.rows.length} 列）</span>
-                    <span className="pill" title="此表對 AI 的存取設定" style={{ fontWeight: 500, fontSize: 12 }}>
+                    <Pill title="此表對 AI 的存取設定" style={{ fontWeight: 500, fontSize: 12 }}>
                       {agentAccessLabel(access)}
-                    </span>
+                    </Pill>
                   </p>
                   <div style={{ overflowX: "auto" }}>
                     <table className="data-grid" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -373,33 +364,31 @@ export function ProjectDatabasesCard({
                         }}
                         style={{ flex: "1 1 160px", minWidth: 120, maxWidth: 320 }}
                       />
-                      <button
+                      <Button size="sm" variant="primary"
                         type="button"
-                        className="btn-sm primary"
                         disabled={addRow.isPending}
-                        onClick={() => onQuickAdd(group.tableId, fields)}
-                      >
+                        onClick={() => onQuickAdd(group.tableId, fields)}>
                         <Icon name="Plus" size={13} /> 加一列
-                      </button>
+                      </Button>
                       {quickError[group.tableId] && (
                         <span className="error" style={{ fontSize: 12 }}>{quickError[group.tableId]}</span>
                       )}
                       {quickOk[group.tableId] && !quickError[group.tableId] && (
-                        <span className="hint" style={{ fontSize: 12 }}>{quickOk[group.tableId]}</span>
+                        <Meta style={{ fontSize: 12 }}>{quickOk[group.tableId]}</Meta>
                       )}
                     </div>
                   )}
                 </div>
               );
             })}
-            <p className="hint" style={{ margin: 0 }}>
+            <Hint style={{ margin: 0 }}>
               要改欄位或大量編輯，請到
               <Link href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}>知識與資料</Link>
               。資料表需有「關聯專案」欄並指向本專案，才會列在這裡。
-            </p>
+            </Hint>
           </div>
         )}
       </div>
-    </details>
+    </Card>
   );
 }

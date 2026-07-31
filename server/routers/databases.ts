@@ -47,6 +47,7 @@ import {
   fetchDriveWithPublicFallback,
   getNotionToken,
 } from "../services/integrations";
+import { importDrivePickedFileToTable } from "../services/driveImportCore";
 
 /**
  * 自訂資料庫（個人→組→團隊→全站）：表結構 CRUD＋列資料 CRUD＋文件層＋連接（CSV/專案/排程）。
@@ -643,6 +644,25 @@ export const databasesRouter = router({
         await removeStoredFile(saved.storagePath); // DB 失敗清孤兒檔
         throw dbErr;
       }
+    }),
+
+  /**
+   * 選檔匯入（PR-E1）：Google 選檔器挑中的檔案直接匯入——不必貼網址。
+   * 走「使用者自己的」Drive 授權抓內容（無公開退回：檔案就是從此帳戶清單挑的），
+   * 落地與抽文字管線與 importUrl 完全同一套；sourceUrl 寫成 normalizeImportUrl
+   * 認得的形狀，之後「重新整理」沿用既有 Google 路徑。
+   */
+  importDriveFile: authedProcedure
+    .input(z.object({
+      tableId: z.string().uuid(),
+      fileId: z.string().regex(/^[\w-]{5,200}$/, "Google 檔案 id 格式不正確"),
+      name: z.string().max(120).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { table, access } = await getTableChecked(ctx.auth, input.tableId);
+      if (!access.canWriteRows) throw new TRPCError({ code: "FORBIDDEN", message: "這個資料庫目前只開放管理者寫入" });
+      // 抓取＋配額＋抽文字＋落地共用 driveImportCore（MCP import_drive_file 同一條路徑）
+      return importDrivePickedFileToTable(ctx.auth, table.id, { fileId: input.fileId, name: input.name });
     }),
 
   /**

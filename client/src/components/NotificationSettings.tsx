@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "./interactions";
+import { Button, Card, Chip, Hint, Meta } from "./ui";
 import {
   copyLinkDeviceGuide,
   deviceKind,
@@ -193,20 +194,18 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
 
   return (
     <div className="modal-scrim" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div
+      <Card className="modal-card device-link-dialog"
         ref={dialogRef}
-        className="card modal-card device-link-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="連結手機與電腦"
-      >
+        aria-label="連結手機與電腦">
         <header className="device-link-head">
           <h2>
             <Icon name="Bell" size={18} style={{ verticalAlign: "-3px" }} /> 連結手機與電腦
           </h2>
-          <p className="hint">
+          <Hint>
             把通知送到你的手機和電腦——關掉網頁、關掉瀏覽器也收得到審批、私訊、@提及與生成完成。
-          </p>
+          </Hint>
         </header>
 
         {/* 狀態總覽 */}
@@ -246,9 +245,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
               ——用同一個帳號登入 → 頭像選單 →「連結手機與電腦」→ 再啟用一次
             </li>
           </ol>
-          <button type="button" className="btn-ghost device-link-copy" onClick={() => void copyGuide()} disabled={busy}>
+          <Button variant="ghost" className="device-link-copy" type="button" onClick={() => void copyGuide()} disabled={busy}>
             <Icon name="Copy" size={14} /> 複製給另一台裝置的說明
-          </button>
+          </Button>
         </section>
 
         {/* 本裝置 */}
@@ -260,9 +259,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
               <div>
                 {isIOS() && !isStandalone() ? (
                   <>
-                    <p className="hint" style={{ margin: 0 }}>
+                    <Hint layer="always" style={{ margin: 0 }}>
                       iPhone／iPad 必須先<strong>加入主畫面</strong>才能收通知（需 iOS 16.4+）：
-                    </p>
+                    </Hint>
                     <ol className="device-link-ios">
                       <li>用 <strong>Safari</strong> 開啟本站</li>
                       <li>點底部分享 → <strong>加入主畫面</strong></li>
@@ -271,17 +270,17 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                     </ol>
                   </>
                 ) : (
-                  <p className="hint" style={{ margin: 0 }}>
+                  <Hint layer="always" style={{ margin: 0 }}>
                     這個瀏覽器不支援推播——請改用較新的 Chrome、Edge、Firefox 或 Safari。
-                  </p>
+                  </Hint>
                 )}
               </div>
             </div>
           ) : thisEndpoint ? (
             <div className="device-link-actions">
-              <span className="chip" style={{ color: "var(--success-ink)" }}>
+              <Chip style={{ color: "var(--success-ink)" }}>
                 <Icon name="CheckCircle2" size={13} style={{ verticalAlign: "-2px" }} /> 已啟用
-              </span>
+              </Chip>
               <button type="button" className="primary" onClick={() => void sendTest()} disabled={busy}>
                 {busy ? "處理中…" : "發送測試通知"}
               </button>
@@ -300,12 +299,12 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                 {busy ? "連結中…" : "在本裝置啟用通知"}
               </button>
               {publicKey.error && (
-                <span className="hint">通知金鑰暫時讀不到——稍後重開此視窗再試</span>
+                <Meta>通知金鑰暫時讀不到——稍後重開此視窗再試</Meta>
               )}
               {perm === "denied" && (
-                <span className="hint" role="status">
+                <Hint as="span" layer="always" role="status">
                   通知權限被封鎖——請到瀏覽器網站設定把「通知」改為允許
-                </span>
+                </Hint>
               )}
             </div>
           )}
@@ -315,11 +314,11 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
         <section aria-label="已連結裝置">
           <h3 style={{ marginTop: "var(--sp-16)" }}>已連結裝置</h3>
           {devices.isLoading ? (
-            <p className="hint">載入中…</p>
+            <Meta as="p">載入中…</Meta>
           ) : deviceRows.length === 0 ? (
-            <p className="hint">
+            <Hint layer="always">
               還沒有任何裝置——先啟用本裝置，再到手機或另一台電腦用同一帳號重複一次。
-            </p>
+            </Hint>
           ) : (
             <ul className="device-link-list">
               {deviceRows.map((d) => {
@@ -333,13 +332,12 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                     <span className="device-link-meta">
                       <span className="device-link-name">
                         {d.label ?? "未知裝置"}
-                        {isThis && <span className="chip">本裝置</span>}
+                        {isThis && <Chip>本裝置</Chip>}
                       </span>
                       <span className="meta">最近同步 {relSeen(d.lastSeenAt)}</span>
                     </span>
-                    <button
+                    <Button variant="ghost"
                       type="button"
-                      className="btn-ghost"
                       disabled={busy}
                       title="移除此裝置（不再收到通知）"
                       aria-label={`移除 ${d.label ?? "裝置"}`}
@@ -349,32 +347,31 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                           endpoint: d.endpoint,
                           label: d.label ?? "未知裝置",
                         })
-                      }
-                    >
+                      }>
                       <Icon name="Trash2" size={14} />
-                    </button>
+                    </Button>
                   </li>
                 );
               })}
             </ul>
           )}
           {otherDevices.length === 0 && thisEndpoint && (
-            <p className="hint" style={{ marginTop: 8 }}>
+            <Hint style={{ marginTop: 8 }}>
               目前只有這台——再到手機或另一台電腦啟用一次，兩邊就都能收通知。
-            </p>
+            </Hint>
           )}
         </section>
 
         {/* AUTH-02：登入工作階段（與推播裝置分開——推播是訂閱，這是 cookie session） */}
         <section aria-label="登入裝置">
           <h3 style={{ marginTop: "var(--sp-16)" }}>登入裝置</h3>
-          <p className="hint" style={{ marginTop: 0 }}>
+          <Hint style={{ marginTop: 0 }}>
             這裡列出目前有效的登入工作階段。遺失的手機／共用電腦可單筆撤銷，或一次登出全部。
-          </p>
+          </Hint>
           {sessions.isLoading ? (
-            <p className="hint">載入中…</p>
+            <Meta as="p">載入中…</Meta>
           ) : (sessions.data ?? []).length === 0 ? (
-            <p className="hint">目前沒有有效工作階段。</p>
+            <Meta as="p">目前沒有有效工作階段。</Meta>
           ) : (
             <ul className="device-link-list">
               {(sessions.data ?? []).map((s) => {
@@ -388,13 +385,12 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                     <span className="device-link-meta">
                       <span className="device-link-name">
                         {label}
-                        {s.isCurrent && <span className="chip">本裝置</span>}
+                        {s.isCurrent && <Chip>本裝置</Chip>}
                       </span>
                       <span className="meta">最近活動 {relSeen(seen)}</span>
                     </span>
-                    <button
+                    <Button variant="ghost"
                       type="button"
-                      className="btn-ghost"
                       disabled={busy || revokeSession.isPending || logoutAll.isPending}
                       title={s.isCurrent ? "撤銷本裝置（會登出）" : "撤銷此登入"}
                       aria-label={s.isCurrent ? "撤銷本裝置登入" : `撤銷 ${label}`}
@@ -404,19 +400,18 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
                           label,
                           isCurrent: s.isCurrent,
                         })
-                      }
-                    >
+                      }>
                       <Icon name="Trash2" size={14} />
-                    </button>
+                    </Button>
                   </li>
                 );
               })}
             </ul>
           )}
           <div className="device-link-actions" style={{ marginTop: 8 }}>
-            <button
+            <Button
+              variant="ghost"
               type="button"
-              className="btn-ghost"
               disabled={busy || logoutAll.isPending || (sessions.data ?? []).length === 0}
               onClick={() => {
                 if (
@@ -441,7 +436,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
             >
               <Icon name="Smartphone" size={14} />
               {logoutAll.isPending ? "處理中…" : "登出全部裝置"}
-            </button>
+            </Button>
           </div>
         </section>
 
@@ -512,9 +507,9 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
           </p>
         )}
         {notice && (
-          <p className="hint" style={{ color: "var(--success-ink)" }} role="status">
+          <Meta as="p" style={{ color: "var(--success-ink)" }} role="status">
             {notice}
-          </p>
+          </Meta>
         )}
 
         <div style={{ marginTop: "var(--sp-16)" }}>
@@ -522,7 +517,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
             關閉
           </button>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

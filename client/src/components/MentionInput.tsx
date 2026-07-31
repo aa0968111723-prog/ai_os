@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
+import { Meta } from "./ui";
 
 /**
  * @提及輸入框(留言／筆記／排程共用):打 @ 浮出同組成員名單,選了插入「@名字 」。
@@ -97,7 +98,7 @@ export function MentionInput({
           {candidates.map((m) => (
             <button key={m.userId} type="button" role="option" aria-selected="false" onClick={() => insert(m.name)}>
               @{m.name}
-              <span className="hint" style={{ marginLeft: 6 }}>{m.groupRole === "leader" ? "組長" : ""}</span>
+              <Meta style={{ marginLeft: 6 }}>{m.groupRole === "leader" ? "組長" : ""}</Meta>
             </button>
           ))}
         </div>

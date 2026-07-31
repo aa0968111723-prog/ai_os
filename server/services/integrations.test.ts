@@ -1,13 +1,17 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   decryptSecret,
+  drivePickedImportShape,
   encryptSecret,
+  escapeDriveQueryTerm,
+  notionPageTitle,
   resolveApiUrl,
   signIntegrationState,
   signIntegrationStateAt,
   validateApiConnectionInput,
   verifyIntegrationState,
 } from "./integrations";
+import { normalizeImportUrl } from "./databaseFiles";
 
 // 金鑰種子固定走環境變數：測試不落 Volume 金鑰檔
 beforeAll(() => { process.env.INTEGRATION_TOKEN_SECRET = "test-secret-for-vitest"; });
@@ -90,5 +94,68 @@ describe("resolveApiUrl（憑證固定同源）", () => {
   });
   it("跨埠／換協定視為不同源", () => {
     expect(() => resolveApiUrl(base, "https://api.airtable.com:8443/x")).toThrow(/基底網址/);
+  });
+});
+
+describe("escapeDriveQueryTerm（選檔搜尋跳脫）", () => {
+  it("跳脫單引號與反斜線，其他字元原樣", () => {
+    expect(escapeDriveQueryTerm("週報 'draft'")).toBe("週報 \\'draft\\'");
+    expect(escapeDriveQueryTerm("a\\b")).toBe("a\\\\b");
+    expect(escapeDriveQueryTerm("普通檔名")).toBe("普通檔名");
+  });
+  it("搜尋詞無法注入 Drive 查詢語法（不存在未跳脫的引號）", () => {
+    const escaped = escapeDriveQueryTerm("x' or name contains 'y");
+    expect(escaped).not.toMatch(/(^|[^\\])'/);
+  });
+});
+
+describe("drivePickedImportShape（選檔 → 匯入形狀）", () => {
+  it("Google 原生文件／試算表／簡報對映匯出類型", () => {
+    expect(drivePickedImportShape("f1", "application/vnd.google-apps.document")?.kind).toBe("google-doc");
+    expect(drivePickedImportShape("f1", "application/vnd.google-apps.spreadsheet")?.kind).toBe("google-sheet");
+    expect(drivePickedImportShape("f1", "application/vnd.google-apps.presentation")?.kind).toBe("google-slides");
+  });
+  it("一般檔案（pdf/txt/圖片）走 google-drive 直載", () => {
+    expect(drivePickedImportShape("f1", "application/pdf")?.kind).toBe("google-drive");
+    expect(drivePickedImportShape("f1", "text/plain")?.kind).toBe("google-drive");
+  });
+  it("其餘 Google 原生類型（資料夾／表單）不可匯入", () => {
+    expect(drivePickedImportShape("f1", "application/vnd.google-apps.folder")).toBeNull();
+    expect(drivePickedImportShape("f1", "application/vnd.google-apps.form")).toBeNull();
+  });
+  it("sourceUrl 能被 normalizeImportUrl 解回同一 kind 與 fileId——重新整理沿用既有 Google 路徑", () => {
+    for (const mime of [
+      "application/vnd.google-apps.document",
+      "application/vnd.google-apps.spreadsheet",
+      "application/vnd.google-apps.presentation",
+      "application/pdf",
+    ]) {
+      const shape = drivePickedImportShape("abc_DEF-123", mime);
+      expect(shape).not.toBeNull();
+      const normalized = normalizeImportUrl(shape!.sourceUrl);
+      expect(normalized.kind).toBe(shape!.kind);
+      expect(normalized.fileId).toBe("abc_DEF-123");
+    }
+  });
+});
+
+describe("notionPageTitle（選頁標題解析）", () => {
+  it("走 title 型 property 的 plain_text 串接", () => {
+    expect(notionPageTitle({
+      properties: {
+        Name: { type: "title", title: [{ plain_text: "劇本" }, { plain_text: "初稿" }] },
+        Status: { type: "select" },
+      },
+    })).toBe("劇本初稿");
+  });
+  it("沒有 title property 或空標題給替代字，不拋錯", () => {
+    expect(notionPageTitle({})).toBe("（未命名頁面）");
+    expect(notionPageTitle({ properties: { Name: { type: "title", title: [] } } })).toBe("（未命名頁面）");
+  });
+  it("超長標題截到 120 字", () => {
+    const title = notionPageTitle({
+      properties: { Name: { type: "title", title: [{ plain_text: "長".repeat(200) }] } },
+    });
+    expect(title.length).toBe(120);
   });
 });

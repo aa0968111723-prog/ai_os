@@ -2,16 +2,18 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
 import { getModel, MODELS, tierLabel, estimatePoints } from "@shared/models";
 import { StoryboardPlayer } from "./StoryboardPlayer";
+import { SceneStudio } from "./SceneStudio";
 import { ExportJobButton } from "./ExportJobButton";
 import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip } from "./interactions";
 import { AssetImg, AssetVideo, AssetAudio } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 
+import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus } from "./ui";
 /** 素材類型的中文標籤（與素材庫/生成紀錄同口徑）——分鏡 meta 列不再直接冒英文 enum */
 const SCENE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
 
-const SCENE_STATUS: Record<string, { label: string; cls: string }> = {
+const SCENE_STATUS: Record<string, { label: string; cls: PillStatus }> = {
   todo: { label: "草稿", cls: "queued" },
   review: { label: "草稿", cls: "queued" },
   pending: { label: "待審", cls: "running" },
@@ -196,6 +198,7 @@ function SceneRow({
   meLoading,
   genModelId,
   onUsePrompt,
+  onOpenStudio,
   charIds,
   sceneIds,
   invalidate,
@@ -216,6 +219,9 @@ function SceneRow({
   /** 逐格生成用的文生圖模型（分鏡卡工具列可換；預設 SDXL Lightning） */
   genModelId: string;
   onUsePrompt?: (prompt: string) => void;
+  /** 開這一格的單格工作室。工作室由 SceneList 統一渲染，不掛在列內——`.gen-row` 帶
+   *  content-visibility:auto（paint containment），會成為 fixed 定位的包含區塊，把全螢幕 modal 裁掉。 */
+  onOpenStudio: () => void;
   /** 生成台勾選的角色/場景卡：就地生成也注入同一套錨點——逐鏡出圖與生成台畫風一致 */
   charIds?: string[];
   sceneIds?: string[];
@@ -303,21 +309,21 @@ function SceneRow({
             秒
           </label>
           <span>・{s.assetKind ? (SCENE_KIND_LABEL[s.assetKind] ?? s.assetKind) : "無素材"}</span>
-          <span className={`pill ${SCENE_STATUS[s.status]?.cls ?? "queued"}`}>
+          <Pill status={SCENE_STATUS[s.status]?.cls ?? "queued"}>
             {SCENE_STATUS[s.status]?.label ?? s.status}
-          </span>
-          {isGenerating && <span className="pill running">生成中…</span>}
+          </Pill>
+          {isGenerating && <Pill status="running">生成中…</Pill>}
           {update.isPending ? (
-            <span className="hint">儲存中…</span>
+            <Meta>儲存中…</Meta>
           ) : savedFlash ? (
-            <span className="hint" role="status" style={{ color: "var(--success-ink)" }}>
+            <Meta role="status" style={{ color: "var(--success-ink)" }}>
               已儲存 <Icon name="Check" size={12} style={{ verticalAlign: "-1px" }} />
-            </span>
+            </Meta>
           ) : null}
         </div>
         {s.status === "needs_work" && rejectReason && (
-          <p
-            className="hint"
+          <Meta
+            as="p"
             role="status"
             style={{
               margin: "6px 0 0",
@@ -330,7 +336,7 @@ function SceneRow({
             }}
           >
             <b>退回理由：</b>{rejectReason}
-          </p>
+          </Meta>
         )}
 
         {/* 配音詞：每格皆可編輯（含空白格補詞），失焦即存 */}
@@ -350,7 +356,7 @@ function SceneRow({
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
               {hasVoiceover ? (
                 isVoicing || generateVoiceover.isPending ? (
-                  <button className="btn-sm" disabled>配音生成中…</button>
+                  <Button size="sm" disabled>配音生成中…</Button>
                 ) : (
                   <ConfirmButton
                     triggerClassName="btn-sm"
@@ -371,7 +377,7 @@ function SceneRow({
                   </ConfirmButton>
                 )
               ) : (
-                <span className="hint">先填配音詞才能生成旁白</span>
+                <Hint as="span" layer="always">先填配音詞才能生成旁白</Hint>
               )}
             </div>
           )}
@@ -403,11 +409,11 @@ function SceneRow({
         {/* 提示詞：可獨立編輯——有/無素材都可改，失焦即存；重生這一格會用新 prompt（#187） */}
         {canEdit ? (
           <div style={{ marginTop: 6 }}>
-            <div className="hint" style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4, fontSize: "var(--fs-12)" }}>
+            <Meta as="div" style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4, fontSize: "var(--fs-12)" }}>
               <Icon name="Clapperboard" size={13} />
               <span>提示詞（可直接改，再按重生——只影響這一格）</span>
               <HelpTip text="獨立針對這一格修改提示詞。失焦即存；之後「生成／重生這一格」會用新提示詞，不影響其他分鏡。" />
-            </div>
+            </Meta>
             <InlineEdit
               value={s.prompt ?? ""}
               kind="textarea"
@@ -436,7 +442,7 @@ function SceneRow({
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
           {!canEdit ? null : s.prompt ? (
             isGenerating || generate.isPending ? (
-              <button className="primary btn-sm" disabled>生成中…</button>
+              <Button size="sm" variant="primary" disabled>生成中…</Button>
             ) : (
               <ConfirmButton
                 triggerClassName="primary btn-sm"
@@ -466,7 +472,7 @@ function SceneRow({
               </ConfirmButton>
             )
           ) : (
-            !s.assetId && <span className="hint">先請上方「AI 創作助手」拆分鏡或發想，給這格提示詞就能就地生成</span>
+            !s.assetId && <Hint as="span" layer="always">先請上方「AI 創作助手」拆分鏡或發想，給這格提示詞就能就地生成</Hint>
           )}
           {s.assetUrl && (
             <a
@@ -480,9 +486,19 @@ function SceneRow({
               <Icon name="Download" /> 下載
             </a>
           )}
+          {/* 單格工作室：Adobe 式「把單張拉出來改」——以現用畫面當底圖修、換模型重畫、切回任何一版。
+              檢視者也開得起來（唯讀回看版本與成本），寫入控制由工作室內部依 canEdit 隱藏。 */}
+          <Button
+            size="sm"
+            variant="tonal"
+            title="把這一格拉出來單獨修：以現在這張為底圖改、換模型重畫、回看並切換版本"
+            onClick={onOpenStudio}
+          >
+            <Icon name="SlidersHorizontal" size={13} /> 單格工作室
+          </Button>
         </div>
         {s.prompt && (
-          <div className="hint" style={{ marginTop: 3 }}>模型：{genModel?.label ?? genModelId}（可在上方「逐格生成模型」換）</div>
+          <Meta as="div" style={{ marginTop: 3 }}>模型：{genModel?.label ?? genModelId}（可在上方「逐格生成模型」換）</Meta>
         )}
 
         {!meLoading && (
@@ -600,6 +616,9 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
   ];
 
   const [showPreview, setShowPreview] = useState(false);
+  // 單格工作室（全螢幕）：哪一格被拉出來修。與粗剪預覽一樣掛在分鏡卡層級，不掛在分鏡列內
+  // （`.gen-row` 的 content-visibility 會成為 fixed 的包含區塊）。檢視者也能開，內部依 canEdit 唯讀。
+  const [studioScene, setStudioScene] = useState<{ id: string; number: number } | null>(null);
   // 目標剪輯軟體（決定「下載時間軸/字幕」拿哪些檔）；預設剪映——組內主力剪輯軟體；記住上次選擇
   const [editTarget, setEditTargetState] = useState<EditTargetKey>(() => {
     try {
@@ -629,7 +648,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
   };
 
   return (
-    <section className="card" data-fb="分鏡與交付">
+    <Card as="section" data-fb="分鏡與交付">
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0 }}>分鏡・交付<HelpTip text="把成品排成一支片的順序，可送審與打包交付。" /></h2>
         {list.length > 0 && (
@@ -641,17 +660,17 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
       {scenes.isError && (
         <p className="error" role="alert" style={{ marginTop: 8 }}>
           分鏡清單暫時載入不了（不是資料不見了）——
-          <button type="button" className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => scenes.refetch()}>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => scenes.refetch()}>
             再試一次
-          </button>
+          </Button>
         </p>
       )}
       {approvals.isError && (
         <p className="error" role="alert" style={{ marginTop: 8 }}>
           審批狀態暫時載入不了（通過／退回鈕可能暫時看不到）——
-          <button type="button" className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => approvals.refetch()}>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => approvals.refetch()}>
             再試一次
-          </button>
+          </Button>
         </p>
       )}
       {/* 逐格生成模型（深度優化）：分鏡卡就地換文生圖模型，每格「生成這一格/重生」都用它；預估點數即時跟著變 */}
@@ -709,24 +728,21 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
         <div aria-hidden="true">
           {[0, 1].map((k) => (
             <div key={k} className="gen-row">
-              <div className="gen-thumb skeleton" />
+              <Skeleton className="gen-thumb" />
               <div>
-                <div className="skeleton" style={{ height: 14, width: k === 0 ? "70%" : "58%", marginBottom: 8 }} />
-                <div className="skeleton" style={{ height: 11, width: "42%" }} />
+                <Skeleton style={{ height: 14, width: k === 0 ? "70%" : "58%", marginBottom: 8 }} />
+                <Skeleton style={{ height: 11, width: "42%" }} />
               </div>
-              <div className="skeleton" style={{ height: 28, width: 64, borderRadius: 999 }} />
+              <Skeleton style={{ height: 28, width: 64, borderRadius: 999 }} />
             </div>
           ))}
         </div>
       ) : scenes.isError ? null : list.length === 0 ? (
-        <p className="hint">還沒有分鏡——生成完成後按「＋加入分鏡」，排好順序就能打包交付。</p>
+        <Hint layer="always">還沒有分鏡——生成完成後按「＋加入分鏡」，排好順序就能打包交付。</Hint>
       ) : (
         <>
           {filteredSceneEntries.length === 0 ? (
-            <div className="empty-state scene-filter-empty">
-              <h3>這個狀態目前沒有分鏡</h3>
-              <p>切回「全部」查看完整順序，或選其他狀態繼續處理。</p>
-            </div>
+            <EmptyState icon={<Icon name="Film" />} title={<>這個狀態目前沒有分鏡</>} description={<>切回「全部」查看完整順序，或選其他狀態繼續處理。</>} className="scene-filter-empty" />
           ) : (
             <div className={`scene-list-rows${sceneListExpanded || sceneFilter !== "all" ? " is-expanded" : ""}`}>
               {filteredSceneEntries.map(({ scene: s, index: i }, visibleIndex) => (
@@ -735,6 +751,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
                   s={s}
                   i={i}
                   total={list.length}
+                  onOpenStudio={() => setStudioScene({ id: s.id, number: i + 1 })}
                   rowClassName={sceneFilter === "all" && visibleIndex >= 4 ? "is-mobile-overflow" : undefined}
                   isLeader={isLeader}
                   canEdit={canEdit}
@@ -821,19 +838,32 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
                 </span>
               )}
             </button>
-            <span className="hint">共 {list.length} 鏡・約 {totalSec} 秒｜含素材＋腳本鏡頭表，直接進剪映/Premiere；大專案打包需要一點時間</span>
+            <Meta>共 {list.length} 鏡・約 {totalSec} 秒｜含素材＋腳本鏡頭表，直接進剪映/Premiere；大專案打包需要一點時間</Meta>
           </div>
-          <p className="hint" style={{ margin: "6px 0 0" }}>
+          <Hint style={{ margin: "6px 0 0" }}>
             zip 交付包內附「媒體連結版」時間軸（交付/時間軸.fcpxml・Premiere時間軸.xml）——解壓後匯入一個檔，粗剪含旁白自動排好；另附字幕.srt 與剪輯表.edl
-          </p>
+          </Hint>
           {showPreview && (
             <div style={{ marginTop: 14 }}>
               {/* 傳 onClose：StoryboardPlayer 是全螢幕 modal，沒接 onClose 的話 ✕鈕與 Esc 都失效→使用者被困需重載 */}
               <StoryboardPlayer scenes={list} onClose={() => setShowPreview(false)} />
             </div>
           )}
+          {studioScene && (
+            <SceneStudio
+              key={studioScene.id}
+              sceneId={studioScene.id}
+              projectId={projectId}
+              sceneNumber={studioScene.number}
+              canEdit={canEdit}
+              charIds={charIds}
+              sceneIds={sceneIds}
+              onClose={() => setStudioScene(null)}
+              onChanged={invalidate}
+            />
+          )}
         </>
       )}
-    </section>
+    </Card>
   );
 }

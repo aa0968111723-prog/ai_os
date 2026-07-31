@@ -4,7 +4,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
-
+import { Button, Card, EmptyState, Hint, Meta, Skeleton } from "./ui";
 /**
  * 角色定裝卡（提案核心「角色一致性」）：
  * 角色外觀設定一次鎖定，生成時勾選 → 自動注入錨點，跨鏡頭不走樣。
@@ -49,21 +49,21 @@ export function CharacterCards({
   const [refEditId, setRefEditId] = useState<string | null>(null);
 
   return (
-    <section className="card" data-fb="角色定裝卡">
+    <Card as="section" data-fb="角色定裝卡">
       <h2>角色定裝卡（跨鏡一致）</h2>
-      <p className="hint">設定角色外觀一次鎖定；生成時勾選角色，AI 自動帶入外觀，跨鏡頭不走樣。可上傳定裝參考圖，或從素材庫綁定。</p>
+      <Hint>設定角色外觀一次鎖定；生成時勾選角色，AI 自動帶入外觀，跨鏡頭不走樣。可上傳定裝參考圖，或從素材庫綁定。</Hint>
 
       {list.isLoading ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
-          <div className="skeleton" style={{ height: 104 }} />
-          <div className="skeleton" style={{ height: 104 }} />
+          <Skeleton style={{ height: 104 }} />
+          <Skeleton style={{ height: 104 }} />
         </div>
       ) : list.isError ? (
         <p className="error" role="alert" style={{ marginTop: 8 }}>
           角色清單暫時載入不了（不是資料不見了）——
-          <button type="button" className="btn-ghost btn-sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => list.refetch()}>
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => list.refetch()}>
             再試一次
-          </button>
+          </Button>
         </p>
       ) : list.data && list.data.length > 0 ? (
         <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
@@ -90,8 +90,8 @@ export function CharacterCards({
                     fallbackStyle={{ marginTop: 6 }}
                   />
                 )}
-                <div className="hint" style={{ fontSize: "var(--fs-12)", marginTop: "var(--sp-4)" }}><Icon name="User" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{c.appearance}</div>
-                {c.notes && <div className="hint" style={{ fontSize: "var(--fs-11)", marginTop: 3 }}><Icon name="FileText" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{c.notes}</div>}
+                <Meta as="div" style={{ fontSize: "var(--fs-12)", marginTop: "var(--sp-4)" }}><Icon name="User" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />{c.appearance}</Meta>
+                {c.notes && <Meta as="div" style={{ fontSize: "var(--fs-11)", marginTop: 3 }}><Icon name="FileText" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />{c.notes}</Meta>}
                 {refEditId === c.id ? (
                   <div style={{ marginTop: 6 }}>
                     <ReferenceImagePicker
@@ -100,18 +100,16 @@ export function CharacterCards({
                       onChange={(next) => update.mutate({ id: c.id, referenceAssetId: next?.id ?? null })}
                       disabled={update.isPending}
                     />
-                    <button className="btn-ghost" style={{ marginTop: 4, fontSize: "var(--fs-11)" }} onClick={() => setRefEditId(null)}>收起</button>
+                    <Button variant="ghost" style={{ marginTop: 4, fontSize: "var(--fs-11)" }} onClick={() => setRefEditId(null)}>收起</Button>
                   </div>
                 ) : (
-                  <button
-                    className="btn-ghost"
+                  <Button variant="ghost"
                     style={{ marginTop: 6, fontSize: "var(--fs-11)" }}
                     title="綁一張定裝參考圖：上傳或從素材庫選，跨鏡比對更有依據"
-                    onClick={() => setRefEditId(c.id)}
-                  >
+                    onClick={() => setRefEditId(c.id)}>
                     <Icon name="Image" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
                     {c.referenceUrl ? "換參考圖" : "設參考圖"}
-                  </button>
+                  </Button>
                 )}
                 <ConfirmButton
                   onConfirm={() => remove.mutate({ id: c.id })}
@@ -127,9 +125,10 @@ export function CharacterCards({
           })}
         </div>
       ) : (
-        <div className="empty-state">
-          <p>還沒有角色——加一張定裝卡（例：安倢＝紅傘、米白外套、帆布包、溫柔回望）。</p>
-        </div>
+        <EmptyState
+          title="還沒有角色"
+          description="加一張定裝卡（例：安倢＝紅傘、米白外套、帆布包、溫柔回望）。"
+        />
       )}
 
       {open ? (
@@ -157,6 +156,6 @@ export function CharacterCards({
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
       {update.error && <p className="error" role="alert">參考圖更新失敗：{update.error.message}</p>}
-    </section>
+    </Card>
   );
 }

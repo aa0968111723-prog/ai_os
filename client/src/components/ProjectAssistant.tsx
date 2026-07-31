@@ -19,7 +19,7 @@ import {
   readAgentPlannerMode,
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
-
+import { Badge, Button, Card, Chip, Hint, Meta } from "./ui";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -47,6 +47,10 @@ type Turn = {
   activity?: ThinkEvent[];
   elapsedMs?: number;
   fallback?: boolean;
+  /** 這一則回答動用了付費備援（auto 模式 NIM 失敗）。不標出來，
+   *  「花到基金會的錢」這件事在畫面上就與免費回答毫無差別。 */
+  paid?: boolean;
+  paidModel?: string;
 };
 
 /** assistant.generateModels 的一筆（助手可代操、免來源的多模態生成模型） */
@@ -190,6 +194,8 @@ export function ProjectAssistant({
       projectId: requestProjectId,
       message,
       nonce,
+      // 使用者在代理卡選的模型檔位；預設 nim＝免費，選 fal 檔位平台才付費
+      mode: defaultPlannerMode,
       signal,
       handlers: {
         onStep: (event) => {
@@ -208,6 +214,8 @@ export function ProjectAssistant({
             activity: [...traceRef.current],
             elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
             fallback: result.fallback,
+            paid: result.fellBackToPaid === true,
+            paidModel: result.model,
           });
         },
         onError: (message) => {
@@ -246,7 +254,7 @@ export function ProjectAssistant({
     if (!handled && !ctrl.signal.aborted) {
       setFallbackPending(true);
       ask.mutate(
-        { projectId: requestProjectId, message: m, nonce },
+        { projectId: requestProjectId, message: m, nonce, mode: defaultPlannerMode },
         {
           onSuccess: (result) => {
             if (!requestIsCurrent(requestProjectId, epoch)) return;
@@ -259,6 +267,8 @@ export function ProjectAssistant({
               activity: traceRef.current.length > 0 ? [...traceRef.current] : fallbackActivity,
               elapsedMs: requestStartedAtRef.current ? Date.now() - requestStartedAtRef.current : undefined,
               fallback: true,
+              paid: result.fellBackToPaid === true,
+              paidModel: result.model,
             });
           },
           onError: (error) => {
@@ -363,28 +373,24 @@ export function ProjectAssistant({
           )}
           <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
             {turns.length > 0 && (
-              <button
+              <Button variant="ghost" size="sm"
                 type="button"
-                className="btn-ghost btn-sm"
                 title="清空這段對話，重新開始"
                 onClick={clear}
-                disabled={busy || pendingKey !== null}
-              >
+                disabled={busy || pendingKey !== null}>
                 <Icon name="Trash2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />清除
-              </button>
+              </Button>
             )}
             {showCollapse && (
-              <button
+              <Button variant="ghost" size="sm"
                 type="button"
-                className="btn-ghost btn-sm"
                 aria-expanded={!collapsed}
                 aria-controls="sec-assistant-body"
                 title={collapsed ? "展開助手" : "收起助手（省版面）"}
-                onClick={() => setCollapsed((c) => !c)}
-              >
+                onClick={() => setCollapsed((c) => !c)}>
                 <Icon name={collapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
                 {collapsed ? "展開" : "收起"}
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -392,15 +398,15 @@ export function ProjectAssistant({
 
       {/* 收起時顯示提示；本體恆掛在 DOM（用 hidden 切換）——aria-controls 不懸空，執行中/展開中的動作狀態也不會被卸載清掉 */}
       {showCollapse && collapsed && (
-        <p className="hint" style={{ marginTop: 8 }}>
+        <Meta as="p" style={{ marginTop: 8 }}>
           助手已收起{turns.length > 0 ? `（保留 ${turns.length} 則對話）` : ""}{busy ? "・仍在思考中" : ""}。點「展開」繼續。
-        </p>
+        </Meta>
       )}
 
       <div id="sec-assistant-body" hidden={collapsed}>
-        <p className="hint" style={{ marginTop: 4 }}>
+        <Hint style={{ marginTop: 4 }}>
           一個對話統包：<b>問</b>（進度、還沒審的分鏡、該用哪個模型…，我會<b>邊想邊查</b>素材庫／分鏡／生成紀錄／模型目錄／<b>資料庫</b>，唯讀）、<b>發想</b>（要分鏡 idea 我直接給，並可一鍵存成草稿）、<b>拆分鏡</b>（貼腳本進來）、<b>下目標</b>（多步驟目標我會交給代理排計畫，你核准估點後由伺服器背景逐步執行）。任何花點數或改資料的動作都要你按確認；提問本身由 NVIDIA NIM 免費額度驅動，不扣點。
-        </p>
+        </Hint>
 
         {/* 快速開場：問答／發想／下目標都從同一個入口——點一顆帶入輸入框，按「問」才送出 */}
         {turns.length === 0 && !thinking.active && (
@@ -411,15 +417,13 @@ export function ProjectAssistant({
               "把知識庫的腳本拆成分鏡，並為每一鏡生成畫面",
               "幫我推薦適合本專案的生成模型",
             ].map((q) => (
-              <button
+              <Button size="sm"
                 key={q}
                 type="button"
-                className="btn-sm"
                 title="點了帶入輸入框，按「問」才送出（免費）"
-                onClick={() => setInput(q)}
-              >
+                onClick={() => setInput(q)}>
                 {q}
-              </button>
+              </Button>
             ))}
           </div>
         )}
@@ -443,6 +447,16 @@ export function ProjectAssistant({
               <div key={i} style={{ alignSelf: t.role === "you" ? "flex-end" : "flex-start", maxWidth: "90%" }}>
                 <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", marginBottom: 2, textAlign: t.role === "you" ? "right" : "left" }}>
                   {t.role === "you" ? "你" : "助手"}
+                  {/* 付費備援標示：送出前的靜態提示只說「可能」，這裡標的是「真的發生了」。
+                      成本透明是站方不變式（伺服器端特意送出 fellBackToPaid 就是為了這裡）。 */}
+                  {t.role === "ai" && t.paid && (
+                    <Badge
+                      style={{ marginLeft: 6 }}
+                      title={t.paidModel ? `NIM 無回應，這一題已自動改用付費模型 ${t.paidModel}` : "NIM 無回應，這一題已自動改用付費模型"}
+                    >
+                      已用付費備援{t.paidModel ? ` · ${t.paidModel.split("/").pop()}` : ""}
+                    </Badge>
+                  )}
                 </div>
                 {/* 回答完成後保留安全的活動軌跡，預設收合以免長對話把工作台撐爆。 */}
                 {t.role === "ai" && (
@@ -532,15 +546,17 @@ export function ProjectAssistant({
                           {/* 選定模型的特性一行說明（幫使用者判斷該不該換；含推薦／未驗證標示，與挑選器一致） */}
                           {gen?.info && !isDone && (
                             <div style={{ fontSize: "var(--fs-11)", color: "var(--fg-secondary)", maxWidth: 320, lineHeight: 1.4 }}>
-                              {gen.info.recommended && <span className="chip on" style={{ marginRight: 4 }}>推薦</span>}
+                              {gen.info.recommended && <Chip selected style={{ marginRight: 4 }}>推薦</Chip>}
                               {gen.info.strengths}
                               {!gen.info.verified && <span style={{ color: "var(--gold-ink)" }}>（新模型 ID，首跑校準；失敗自動退點）</span>}
                             </div>
                           )}
                           {payloadAct.type === "plan_agent" && !isDone && (
                             <label style={{ display: "grid", gap: 3, fontSize: "var(--fs-11)", color: "var(--fg-secondary)", maxWidth: 360 }}>
+                              {/* 這個選擇同時決定「問答」與「代理規劃」用哪個模型——
+                                * 兩者共用同一個偏好鍵。標籤要講清楚，否則使用者以為只在調規劃。 */}
                               <span>
-                                <Icon name="SlidersHorizontal" size={12} /> 規劃模型與用量
+                                <Icon name="SlidersHorizontal" size={12} /> 規劃模型與用量（也會套用到問答）
                               </span>
                               <select
                                 aria-label="選擇代理規劃模型與用量"
@@ -637,9 +653,8 @@ export function ProjectAssistant({
                             />
                           )}
                           {onCreationAction && payloadAct.type === "plan_agent" && !isDone && (
-                            <button
+                            <Button size="sm"
                               type="button"
-                              className="btn-sm"
                               disabled={isRunning}
                               title="帶入多步開拍目標並切換模式，不自動排程、不扣點"
                               onClick={() =>
@@ -647,15 +662,13 @@ export function ProjectAssistant({
                                   type: "create_plan",
                                   goal: payloadAct.goal,
                                 })
-                              }
-                            >
+                              }>
                               帶入多步開拍
-                            </button>
+                            </Button>
                           )}
                           {onCreationAction && payloadAct.type === "run_workflow" && !isDone && (
-                            <button
+                            <Button size="sm"
                               type="button"
-                              className="btn-sm"
                               disabled={isRunning}
                               title="帶入套用範本模式，不自動啟動工作流"
                               onClick={() =>
@@ -664,10 +677,9 @@ export function ProjectAssistant({
                                   templateId: payloadAct.presetId,
                                   goal: payloadAct.prompt,
                                 })
-                              }
-                            >
+                              }>
                               帶入套用範本
-                            </button>
+                            </Button>
                           )}
                           {onCreationAction &&
                             payloadAct.type === "create_scene" &&
@@ -714,9 +726,43 @@ export function ProjectAssistant({
             disabled={busy}
             style={{ flex: 1 }}
           />
-          <button className="primary" onClick={() => void send()} disabled={busy || !input.trim()}>
+          <Button variant="primary" onClick={() => void send()} disabled={busy || !input.trim()}>
             {busy ? "思考中…" : "問"}
-          </button>
+          </Button>
+        </div>
+
+        {/* 回答模型選擇：先前只有「確認 plan_agent 動作」時才選得到，一般問答沒得選。
+         * 這裡把它提到輸入框旁邊，並且明講代價——NIM 走免費額度，fal 是平台實付 USD，
+         * 使用者有權在按下「問」之前就知道這一次會不會花到基金會的錢。 */}
+        <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, margin: 0, fontSize: "var(--fs-11)" }}>
+            <Icon name="SlidersHorizontal" size={12} />
+            回答模型
+            <select
+              aria-label="選擇回答這則提問的模型"
+              value={defaultPlannerMode}
+              disabled={busy}
+              onChange={(event) => {
+                const mode = event.target.value as AgentPlannerMode;
+                setDefaultPlannerMode(mode);
+                writeAgentPlannerMode(mode);
+              }}
+              style={{ fontSize: "var(--fs-12)", padding: "2px 6px", width: "auto" }}
+            >
+              {AGENT_PLANNER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.shortLabel}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Hint as="span" layer="always">
+            {defaultPlannerMode === "nim"
+              ? "NVIDIA NIM 免費額度，站內 0 點、平台 0 成本。"
+              : defaultPlannerMode === "auto"
+                ? "先用免費的 NIM；它沒回應時才改用 fal.ai（那次平台會付費）。"
+                : "走 fal.ai：站內仍是 0 點，但平台會實付 USD。專案內容也會傳給 fal.ai。"}
+          </Hint>
         </div>
       </div>
     </>
@@ -724,8 +770,8 @@ export function ProjectAssistant({
 
   if (embedded) return <div data-fb="AI 助手">{body}</div>;
   return (
-    <section className="card" data-fb="AI 助手" id="sec-assistant">
+    <Card as="section" data-fb="AI 助手" id="sec-assistant">
       {body}
-    </section>
+    </Card>
   );
 }

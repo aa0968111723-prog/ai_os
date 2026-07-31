@@ -308,7 +308,7 @@ export function getSessionToken(req: Request): string | undefined {
 /* ── 目前使用者＋成員關係（每請求重查 → 移出即失效） ── */
 export interface AuthState {
   /** mustChangePassword：管理員重設密碼後為 true，前端據此強制顯示改密碼對話框 */
-  user: { id: string; name: string; email: string; isSuperAdmin: boolean; mustChangePassword: boolean };
+  user: { id: string; name: string; email: string; isSuperAdmin: boolean; mustChangePassword: boolean; uiDensity: "guide" | "concise" | null };
   /** 可用組（含角色）：直接組員＋團隊管理展開＋開發者展開全部 */
   groups: Array<{ groupId: string; groupName: string; teamId: string; teamName: string; role: "admin" | "leader" | "member" }>;
   /** 有團隊管理權的團隊 id */
@@ -343,7 +343,7 @@ export async function loadAuthState(userId: string): Promise<AuthState | null> {
   }
 
   return {
-    user: { id: user.id, name: user.name, email: user.email, isSuperAdmin: user.isSuperAdmin, mustChangePassword: user.mustChangePassword },
+    user: { id: user.id, name: user.name, email: user.email, isSuperAdmin: user.isSuperAdmin, mustChangePassword: user.mustChangePassword, uiDensity: user.uiDensity },
     groups: [...map.values()],
     adminTeamIds,
   };

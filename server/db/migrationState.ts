@@ -93,6 +93,14 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0012_session_device_meta",
   // 0013：純新增 upload_grants 表＋索引（皆 IF NOT EXISTS），可安全納入 bridge
   "0013_upload_grants",
+  // 0014：純新增 email_step_up_challenges 表＋索引（皆 IF NOT EXISTS），可安全納入 bridge
+  "0014_email_step_up",
+  // 0015：users 加 nullable ui_density 欄位（ADD COLUMN IF NOT EXISTS），可安全納入 bridge
+  "0015_ui_density",
+  // 0016：純新增 external_accounts 表＋唯一索引（皆 IF NOT EXISTS），可安全納入 bridge
+  "0016_external_accounts",
+  // 0017：純新增 agent_runs 索引（CREATE INDEX IF NOT EXISTS），可安全納入 bridge
+  "0017_group_agent_overview_idx",
 ] as const;
 
 /**
