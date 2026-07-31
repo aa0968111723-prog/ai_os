@@ -58,8 +58,10 @@ type Scene = {
   generationId: string | null;
   // 平行後端補上：該格若有進行中的就地生成，回 queued/running；無則 null。
   pendingGenStatus?: string | null;
-  // 旁白配音（後端補上）：已落地旁白音檔的 asset id／可播 url，與進行中配音生成狀態。
-  narrationAssetId?: string | null;
+  // 旁白配音（後端補上）：可播 url 與進行中配音生成狀態。
+  // 這裡刻意「不」宣告 narrationAssetId——scenes.listByProject 的投影沒有這個欄位，
+  // 宣告成 optional 只會讓誤用安靜地永遠判為 falsy（曾讓流程條永遠卡在「配音」）。
+  // 要判斷旁白好了沒，一律看 narrationUrl。
   narrationUrl?: string | null;
   pendingVoiceStatus?: string | null;
 };
@@ -232,7 +234,7 @@ function SceneRow({
   });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
-  // 配音生成中：後端背景 runner 完成後會回填 narrationAssetId，10 秒輪詢自動刷新
+  // 配音生成中：後端背景 runner 完成後會回填旁白音檔，10 秒輪詢自動刷新
   const isVoicing = s.pendingVoiceStatus === "queued" || s.pendingVoiceStatus === "running";
   const hasVoiceover = (s.voiceover ?? "").trim() !== "";
   const hasPrompt = (s.prompt ?? "").trim() !== "";
@@ -303,7 +305,7 @@ function SceneRow({
             <Meta style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
               <Icon name="Mic" size={11} /> 配音生成中…
             </Meta>
-          ) : s.narrationAssetId ? (
+          ) : s.narrationUrl ? (
             <Meta style={{ color: "var(--success-ink)", display: "inline-flex", alignItems: "center", gap: 3 }}>
               <Icon name="Mic" size={11} /> 旁白 ✓
             </Meta>
@@ -551,7 +553,10 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
   ];
 
   // ── C 流程引導：五階段，算出「現在卡在哪一步」與下一步提示 ──
-  const voicePending = list.filter((s) => (s.voiceover ?? "").trim() !== "" && !s.narrationAssetId).length;
+  // 判斷「這格旁白生成好了沒」一律看 narrationUrl，不要看 narrationAssetId：
+  // scenes.listByProject 的投影只有 narrationUrl（narrationAssets join 已濾軟刪），沒有 narrationAssetId。
+  // 型別上它是 optional 所以不會被 tsc 擋下，錯用只會安靜地永遠判為「沒有旁白」。
+  const voicePending = list.filter((s) => (s.voiceover ?? "").trim() !== "" && !s.narrationUrl).length;
   const unapproved = statusCounts.draft + statusCounts.needs_work;
   const allApproved = list.length > 0 && statusCounts.approved === list.length;
   const currentStage: StageKey =

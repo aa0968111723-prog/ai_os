@@ -63,7 +63,9 @@ type SceneOver = {
   hasAsset?: boolean;
   prompt?: string | null;
   voiceover?: string | null;
-  narrationAssetId?: string | null;
+  /** 旁白音檔網址。刻意只用 narrationUrl——scenes.listByProject 的投影就只有它，
+   *  mock 若多餵一個 narrationAssetId，測試會綠但實機永遠判為「沒有旁白」。 */
+  narrationUrl?: string | null;
 };
 
 function scene(over: SceneOver) {
@@ -81,8 +83,7 @@ function scene(over: SceneOver) {
     assetKind: hasAsset ? "image" : null,
     generationId: null,
     pendingGenStatus: null,
-    narrationAssetId: over.narrationAssetId ?? null,
-    narrationUrl: null,
+    narrationUrl: over.narrationUrl ?? null,
     pendingVoiceStatus: null,
   };
 }
@@ -137,7 +138,7 @@ describe("SceneList 流程引導（C）", () => {
 
   it("全部通過：流程條到「打包交付」，交付中心亮綠", () => {
     scenesQuery.mockReturnValue({
-      data: [scene({ id: "s1", status: "approved" }), scene({ id: "s2", status: "approved", voiceover: "好", narrationAssetId: "n-1" })],
+      data: [scene({ id: "s1", status: "approved" }), scene({ id: "s2", status: "approved", voiceover: "好", narrationUrl: "https://example.test/n1.mp3" })],
       isLoading: false, isError: false, refetch: vi.fn(),
     });
     mount();
