@@ -88,14 +88,18 @@ describe("isWorldviewReady / hasActs", () => {
 });
 
 describe("formatWorldviewForAi：跨消費端契約", () => {
-  it("brief 必含 message 與 taboos（代理／助手防偏離）", () => {
+  it("brief 必含 message、taboos、進階（觀眾／三幕／人物）；不含參考 URL", () => {
     const s = formatWorldviewForAi(full, "brief");
     expect(s).toContain(full.message);
     expect(s).toContain(full.logline);
     expect(s).toContain("溫暖");
     expect(s).toContain("禁忌");
     expect(s).toContain("醫療");
-    expect(s).not.toContain("三幕");
+    expect(s).toContain("目標觀眾：忙碌的都會上班族");
+    expect(s).toContain("三幕：");
+    expect(s).toContain("鉤子：晨光前庭");
+    expect(s).toContain("敘事人物：");
+    expect(s).toContain("安倢：紅傘");
     expect(s).not.toContain("example.com");
   });
 
@@ -117,7 +121,7 @@ describe("formatWorldviewForAi：跨消費端契約", () => {
     expect(s).toContain("參考連結");
   });
 
-  it("generation-llm 含 themes 與截斷 logline", () => {
+  it("generation-llm 含 themes、進階短欄與截斷 logline", () => {
     const long = worldviewSchema.parse({
       ...full,
       logline: "字".repeat(LOGLINE_INJECT_MAX + 20),
@@ -127,7 +131,20 @@ describe("formatWorldviewForAi：跨消費端契約", () => {
     expect(s).toContain("訊息主軸:禪修日常");
     expect(s).toContain("故事錨點:");
     expect(s).toContain("…");
-    expect(s.length).toBeLessThan(long.logline.length + 200);
+    expect(s).toContain("目標觀眾:");
+    expect(s).toContain("三幕:");
+    expect(s).toContain("敘事人物:");
+    expect(s).not.toContain("example.com");
+    expect(s.length).toBeLessThan(long.logline.length + 400);
+  });
+
+  it("圖影正向仍不含觀眾／三幕／人物／禁忌句", () => {
+    const s = formatWorldviewVisualPositive(full);
+    expect(s).not.toContain("忙碌的都會上班族");
+    expect(s).not.toContain("晨光前庭");
+    expect(s).not.toContain("安倢");
+    expect(s).not.toContain("醫療");
+    expect(s).toContain("Chinese ink wash");
   });
 });
 

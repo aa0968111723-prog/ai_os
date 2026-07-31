@@ -400,15 +400,79 @@ export function formatChipsPrimarySecondary(values: string[], max?: number): str
 
 /**
  * AI 消費端格式模式（單一真相，避免 agent/director/assistant 各寫一行摘要而分岔）：
- * - brief：單行摘要（代理規劃／專案助手／留言助手）
- * - director：導演建議與拆分鏡（含觀眾、三幕、敘事人物）
- * - export：交付鏡頭表人話段落
- * - generation-llm：生成台 LLM 正向附加（themes 進敘事；logline 截斷）
+ * - brief：單行摘要（代理／專案助手／留言助手）——含進階：觀眾／三幕／人物（截斷）
+ * - director：導演建議與拆分鏡（進階全文）
+ * - export：交付鏡頭表人話段落（含參考連結）
+ * - generation-llm：生成台 LLM 正向附加（themes＋短進階；logline 截斷）
+ * 圖影正向仍只走 formatWorldviewVisualPositive（不塞觀眾／三幕／人物長敘事）。
  */
 export type WorldviewFormatMode = "brief" | "director" | "export" | "generation-llm";
 
 /** 視覺生成注入 logline 上限（全長塞每鏡會爆 token；截斷後加省略） */
 export const LOGLINE_INJECT_MAX = 80;
+
+/**
+ * 進階欄位進 brief／LLM 的截斷（導演／export 仍用全文）。
+ * 避免助手／每格 LLM 被長三幕與人物表撐爆。
+ */
+export const ADVANCED_INJECT_MAX = {
+  audience: 120,
+  actsLine: 220,
+  peopleBrief: 5,
+  peopleLlm: 3,
+} as const;
+
+/** UI／文件共用：欄位被哪些消費端讀到（標籤用） */
+export type WorldviewConsumerId = "visual" | "llm" | "brief" | "director" | "export";
+
+export const WORLDVIEW_CONSUMER_LABEL: Record<WorldviewConsumerId, string> = {
+  visual: "圖影",
+  llm: "文字生成",
+  brief: "助手／代理",
+  director: "導演",
+  export: "匯出",
+};
+
+/**
+ * 進階（與快速層關鍵欄）誰會讀——ProjectPage 徽章與 wiki 單一真相。
+ * visual＝圖影正向；禁忌圖影另走 negative（見 generationCore）。
+ */
+export const WORLDVIEW_FIELD_READERS: Record<
+  string,
+  { readers: WorldviewConsumerId[]; note?: string }
+> = {
+  logline: { readers: ["visual", "llm", "brief", "director", "export"] },
+  message: { readers: ["visual", "llm", "brief", "director", "export"] },
+  themes: { readers: ["llm", "brief", "director", "export"], note: "圖影不注入主軸" },
+  tones: { readers: ["visual", "llm", "brief", "director", "export"] },
+  styles: { readers: ["visual", "llm", "brief", "director", "export"] },
+  audience: { readers: ["llm", "brief", "director", "export"], note: "圖影不注入" },
+  acts: { readers: ["llm", "brief", "director", "export"], note: "圖影不注入" },
+  people: {
+    readers: ["llm", "brief", "director", "export"],
+    note: "圖影請用角色定裝卡",
+  },
+  taboos: {
+    readers: ["visual", "llm", "brief", "director", "export"],
+    note: "圖影走負向；部分模型才支援",
+  },
+  references: { readers: ["export"], note: "僅交付備註，不進模型" },
+};
+
+function clipInject(text: string, max: number): string {
+  const t = text.trim();
+  if (!t) return "";
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+/** 敘事人物注入字串（截斷項數） */
+export function formatPeopleInject(people: string[], max: number): string {
+  const clean = people.map((p) => p.trim()).filter(Boolean);
+  if (!clean.length) return "";
+  const slice = clean.slice(0, max);
+  const more = clean.length > max ? `…(+${clean.length - max})` : "";
+  return `${slice.join("；")}${more}`;
+}
 
 /** 三幕有任一欄非空才算「已設」 */
 export function hasActs(wv: Pick<Worldview, "acts">): boolean {
@@ -450,7 +514,10 @@ function joinPipe(parts: string[]): string {
   return parts.filter(Boolean).join("｜");
 }
 
-/** 代理／助手：必含 message 與 taboos；chips 標主要／備選並附軟警告摘要 */
+/**
+ * 代理／助手：必含 message 與 taboos；進階含觀眾／三幕／人物（截斷）；
+ * chips 標主要／備選並附軟警告。references 不進 brief。
+ */
 function formatWorldviewBrief(wv: Worldview): string {
   const styleLine = wv.styles.length
     ? `視覺風格：${formatWorldviewStylesLabel(wv.styles)}`
@@ -461,6 +528,10 @@ function formatWorldviewBrief(wv: Worldview): string {
   const themeLine = wv.themes.length
     ? `訊息主軸：${formatChipsPrimarySecondary(wv.themes)}`
     : "";
+  const audience = clipInject(wv.audience, ADVANCED_INJECT_MAX.audience);
+  const actsRaw = formatActsLine(wv.acts);
+  const acts = actsRaw ? clipInject(actsRaw, ADVANCED_INJECT_MAX.actsLine) : "";
+  const people = formatPeopleInject(wv.people, ADVANCED_INJECT_MAX.peopleBrief);
   const soft = chipSoftWarnings(wv);
   return joinPipe([
     `一句話：${wv.logline.trim() || "—"}`,
@@ -468,6 +539,9 @@ function formatWorldviewBrief(wv: Worldview): string {
     themeLine,
     toneLine,
     styleLine,
+    audience ? `目標觀眾：${audience}` : "",
+    acts ? `三幕：${acts}` : "",
+    people ? `敘事人物：${people}` : "",
     wv.taboos.length ? `禁忌：${wv.taboos.join("；")}` : "",
     soft.length ? `選項提示：${soft.join("；")}` : "",
   ]);
@@ -502,7 +576,11 @@ function formatWorldviewDirector(wv: Worldview): string {
   return lines.join("\n");
 }
 
-/** LLM 生成附加片段（接在 [專案背景] 內；themes 只對文字模型有意義；硬截斷） */
+/**
+ * LLM 生成附加片段（接在 [專案背景] 內）。
+ * 含 themes、短進階（觀眾／三幕／人物）；硬截斷控 token。
+ * 圖影不走此函式——敘事進階對擴散是雜訊。
+ */
 function formatWorldviewGenerationLlm(wv: Worldview): string {
   const parts: string[] = [];
   const log = wv.logline.trim();
@@ -517,6 +595,13 @@ function formatWorldviewGenerationLlm(wv: Worldview): string {
   if (wv.message.trim()) parts.push(`核心訊息:${wv.message.trim()}`);
   const themes = wv.themes.slice(0, LLM_INJECT_MAX.themes);
   if (themes.length) parts.push(`訊息主軸:${themes.join("、")}`);
+  const audience = clipInject(wv.audience, ADVANCED_INJECT_MAX.audience);
+  if (audience) parts.push(`目標觀眾:${audience}`);
+  const actsRaw = formatActsLine(wv.acts);
+  const acts = actsRaw ? clipInject(actsRaw, ADVANCED_INJECT_MAX.actsLine) : "";
+  if (acts) parts.push(`三幕:${acts}`);
+  const people = formatPeopleInject(wv.people, ADVANCED_INJECT_MAX.peopleLlm);
+  if (people) parts.push(`敘事人物:${people}`);
   if (wv.taboos.length) parts.push(`避免:${wv.taboos.join(";")}`);
   return parts.join("|");
 }

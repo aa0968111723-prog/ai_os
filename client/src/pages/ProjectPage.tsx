@@ -25,8 +25,11 @@ import {
   looksForFamily,
   texturesForFamily,
   CHIP_SOFT_MAX,
+  WORLDVIEW_FIELD_READERS,
+  WORLDVIEW_CONSUMER_LABEL,
   type StyleMediaFamily,
   type Worldview,
+  type WorldviewConsumerId,
 } from "@shared/worldview";
 import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
@@ -140,6 +143,18 @@ function StageLink({ text }: { text: string }) {
   );
 }
 
+/** 世界觀欄位「誰會讀」徽章（與 shared WORLDVIEW_FIELD_READERS 對齊） */
+function FieldReaders({ field }: { field: string }) {
+  const meta = WORLDVIEW_FIELD_READERS[field];
+  if (!meta) return null;
+  return (
+    <Meta as="span" style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, opacity: 0.88 }}>
+      {meta.readers.map((r: WorldviewConsumerId) => WORLDVIEW_CONSUMER_LABEL[r]).join(" · ")}
+      {meta.note ? `（${meta.note}）` : ""}
+    </Meta>
+  );
+}
+
 /**
  * 陣列欄位的就地編輯器（世界觀進階層：人物／參考連結／禁忌事項）：
  * chips 呈現現值（點 ✕ 移除）＋行內輸入新增（Enter 送出）。
@@ -152,6 +167,7 @@ function TokenListEditor({
   placeholder,
   readOnly,
   hint,
+  fieldKey,
   onChange,
 }: {
   id: string;
@@ -160,6 +176,8 @@ function TokenListEditor({
   placeholder: string;
   readOnly: boolean;
   hint?: string;
+  /** 對應 WORLDVIEW_FIELD_READERS 的鍵，顯示誰會讀 */
+  fieldKey?: string;
   onChange: (next: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -171,7 +189,11 @@ function TokenListEditor({
   };
   return (
     <>
-      <label id={`${id}-label`}>{label}{hint && <HelpTip text={hint} />}</label>
+      <label id={`${id}-label`}>
+        {label}
+        {fieldKey && <FieldReaders field={fieldKey} />}
+        {hint && <HelpTip text={hint} />}
+      </label>
       <div role="group" aria-labelledby={`${id}-label`}>
         {values.map((v) => (
           <Chip key={v} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -1300,12 +1322,22 @@ export function ProjectPage({ id }: { id: string }) {
                 視覺風格＝媒材家族＋主風格（＋可選質感）；調性／主軸可複選。圖影注入主風格與同家族質感、前兩個調性。
               </Hint>
             )}
-            {/* 進階層全面可編輯（深度優化：後端 updateWorldview 早支援 partial patch，前端不再唯讀）——
-                目標觀眾/三幕結構供 AI 導演參考；禁忌事項會自動注入每次生成 */}
-            <details style={{ marginTop: 10 }}>
+            {/* 進階層：觀眾／三幕／人物進助手 brief、文字生成、導演；圖影不塞長敘事。禁忌圖影走負向。 */}
+            <details style={{ marginTop: 10 }} open={hasActs(wv) || !!wv.audience.trim() || wv.people.length > 0}>
               <summary style={{ cursor: "pointer", fontSize: 13 }}>進階設定（目標觀眾・三幕結構・人物・參考・禁忌）</summary>
               <div style={{ marginTop: 6 }}>
-                <label htmlFor="wv-audience">目標觀眾（AI 導演建議／拆分鏡會讀）</label>
+                <Hint layer="always" style={{ marginBottom: 10, fontSize: 12 }}>
+                  <strong>誰會讀：</strong>
+                  觀眾／三幕／人物 → 助手・代理・文字生成・導演・匯出（
+                  <strong>直接出圖不吃</strong>，避免擴散模型當雜訊）。
+                  禁忌 → 圖影負向＋文字「避免」；參考連結 → 僅匯出備註。
+                  欄位旁標籤與程式注入表一致。
+                </Hint>
+                <label htmlFor="wv-audience">
+                  目標觀眾
+                  <FieldReaders field="audience" />
+                  <HelpTip text="給誰看。會進助手／代理摘要、文字生成、AI 導演與拆分鏡；不會塞進圖影正向 prompt。" />
+                </label>
                 <input
                   key={`audience-${wv.audience}`}
                   id="wv-audience"
@@ -1315,7 +1347,11 @@ export function ProjectPage({ id }: { id: string }) {
                   placeholder="例：初次接觸禪修、想在忙碌生活裡找安定的年輕人與家庭"
                   onBlur={(e) => canEdit && e.target.value !== wv.audience && updateWv.mutate({ id, worldview: { audience: e.target.value } })}
                 />
-                <label>三幕結構（鉤子 → 轉折 → 行動呼籲）<HelpTip text="敘事骨架：開場怎麼抓住人、中段怎麼轉、結尾請觀眾做什麼。會寫進 AI 導演建議與拆分鏡。" /></label>
+                <label>
+                  三幕結構（鉤子 → 轉折 → 行動呼籲）
+                  <FieldReaders field="acts" />
+                  <HelpTip text="敘事骨架：開場怎麼抓住人、中段怎麼轉、結尾請觀眾做什麼。進助手／文字生成／導演；不進圖影。" />
+                </label>
                 {([
                   ["hook", "鉤子", "例：清晨禪堂前庭，安倢撐著紅傘走進柔和晨光"],
                   ["turn", "轉折", "例：慕恩在書架旁翻閱善本，浮躁被慢慢安放"],
@@ -1338,8 +1374,9 @@ export function ProjectPage({ id }: { id: string }) {
                 ))}
                 <TokenListEditor
                   id="wv-people"
-                  label="敘事人物（導演／拆分鏡會讀）"
-                  hint="自由文字人物表，AI 導演發想會參考。畫面外觀一致請另建「角色定裝卡」並在生成時勾選——兩套用途不同。"
+                  label="敘事人物"
+                  fieldKey="people"
+                  hint="故事裡有誰（文字）。助手／文字生成／導演會讀。畫面外觀一致請另建「角色定裝卡」並在生成時勾選。"
                   values={wv.people}
                   placeholder="例：安倢＝紅傘、米白外套（Enter 加入）"
                   readOnly={!canEdit}
@@ -1350,8 +1387,9 @@ export function ProjectPage({ id }: { id: string }) {
                 </Hint>
                 <TokenListEditor
                   id="wv-references"
-                  label="參考連結（僅交付備註，不進 AI）"
-                  hint="剪輯／企劃交接用；不會注入生成或導演模型（URL 對模型幫助有限）。"
+                  label="參考連結"
+                  fieldKey="references"
+                  hint="剪輯／企劃交接用；只寫進交付鏡頭表，不進任何生成或導演模型。"
                   values={wv.references}
                   placeholder="貼上參考影片/文章網址（Enter 加入）"
                   readOnly={!canEdit}
@@ -1359,8 +1397,9 @@ export function ProjectPage({ id }: { id: string }) {
                 />
                 <TokenListEditor
                   id="wv-taboos"
-                  label="禁忌事項（自動注入每次生成）"
-                  hint="每一條會進生成提示詞（圖／影走負向、文字走「避免」）。刪除預設弘法禁語前會再確認。"
+                  label="禁忌事項"
+                  fieldKey="taboos"
+                  hint="圖影走 negative_prompt（模型需支援才生效）；文字生成與助手走「避免」。刪除預設弘法禁語前會再確認。"
                   values={wv.taboos}
                   placeholder="例：不得出現可讀文字、招牌一律後製（Enter 加入）"
                   readOnly={!canEdit}
@@ -1375,8 +1414,9 @@ export function ProjectPage({ id }: { id: string }) {
                   }}
                 />
                 <Hint style={{ marginTop: 8, fontSize: 12 }}>
-                  <strong>會進 AI：</strong>調性（最多前 2）／風格（主風格＋可選同家族質感）／訊息／禁忌 → 圖影與文字生成；觀眾／三幕／敘事人物／主軸 → 導演建議與拆分鏡；代理與助手讀摘要（含訊息、禁忌與選項提示）。
-                  <strong> 僅備註：</strong>參考連結（寫進交付鏡頭表，不進模型）。
+                  <strong>快速層（上方）圖影也吃：</strong>調性、風格、短一句話、訊息、禁忌（負向）。
+                  <strong> 進階敘事：</strong>觀眾／三幕／人物 → 問 AI、文字生成、導演；
+                  <strong> 僅備註：</strong>參考連結。
                 </Hint>
               </div>
             </details>
