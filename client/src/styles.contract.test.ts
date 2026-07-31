@@ -31,6 +31,16 @@ describe("global stylesheet contract", () => {
     }
   });
 
+  // 桌機下拉沒有高度上限時，帳號選單（17 項×44px 觸控下限）會切在視窗下緣，
+  // 且它是 sticky 頂欄的 absolute 後代，被切掉的「登出」捲不出來。上限值由 MenuSurface
+  // 量測後寫進 --menu-avail-h；jsdom 讀不到樣式表，只能在這裡守住這兩條宣告。
+  it("caps desktop dropdowns to the measured space below the trigger and scrolls inside", () => {
+    const start = declarations.indexOf(".menu {");
+    const rule = declarations.slice(start, declarations.indexOf("}", start));
+    expect(rule).toContain("max-height: var(--menu-avail-h, none)");
+    expect(rule).toContain("overflow-y: auto");
+  });
+
   // 收合的 Hint 只有靠這條規則才看得出是按鈕（先前用 btn-ghost：透明底＋透明框，
   // 畫面上只剩一個孤零零的「？」）。觸控下限也寫在這裡，jsdom 測不到樣式表。
   it("keeps the collapsed-hint toggle visible as a control with a 44px touch target", () => {

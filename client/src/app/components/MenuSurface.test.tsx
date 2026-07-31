@@ -106,6 +106,60 @@ describe("MenuSurface", () => {
   });
 });
 
+/** 假的觸發器矩形：只有 bottom 會被 MenuSurface 讀到 */
+function rectWithBottom(bottom: number): DOMRect {
+  return { x: 0, y: bottom - 40, top: bottom - 40, bottom, left: 0, right: 100, width: 100, height: 40, toJSON: () => ({}) };
+}
+
+/** 桌機下拉的高度上限：長清單被切在視窗外、又因 sticky 頂欄捲不出來（見 MenuSurface 檔頭） */
+describe("MenuSurface 桌機高度上限", () => {
+  const originalInnerHeight = window.innerHeight;
+  function setViewportHeight(px: number) {
+    Object.defineProperty(window, "innerHeight", { configurable: true, writable: true, value: px });
+  }
+  afterEach(() => setViewportHeight(originalInnerHeight));
+
+  async function openWithTriggerBottom(bottom: number) {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "開選單" });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(rectWithBottom(bottom));
+    await user.click(trigger);
+    return screen.getByRole("menu", { name: "測試選單" });
+  }
+
+  it("依觸發器到視窗下緣的實距寫入 --menu-avail-h", async () => {
+    restore = stubMatchMedia(false);
+    setViewportHeight(800);
+    const menu = await openWithTriggerBottom(120);
+    // 800 −（120 觸發器下緣 + 8 間距）− 12 視窗下緣留白
+    expect(menu.style.getPropertyValue("--menu-avail-h")).toBe("660px");
+  });
+
+  it("觸發器貼近視窗下緣時不再壓縮，守住 160px 下限", async () => {
+    restore = stubMatchMedia(false);
+    setViewportHeight(800);
+    const menu = await openWithTriggerBottom(780);
+    expect(menu.style.getPropertyValue("--menu-avail-h")).toBe("160px");
+  });
+
+  it("縮視窗會重算——開著選單改變視窗高度，上限要跟著變", async () => {
+    restore = stubMatchMedia(false);
+    setViewportHeight(800);
+    const menu = await openWithTriggerBottom(120);
+    setViewportHeight(600);
+    window.dispatchEvent(new Event("resize"));
+    expect(menu.style.getPropertyValue("--menu-avail-h")).toBe("460px");
+  });
+
+  it("手機貼底 sheet 不套這條——高度由 .is-sheet 的 max-height 決定", async () => {
+    restore = stubMatchMedia(true);
+    setViewportHeight(800);
+    const menu = await openWithTriggerBottom(120);
+    expect(menu.style.getPropertyValue("--menu-avail-h")).toBe("");
+  });
+});
+
 describe("MenuSurface 角色與桌機幾何", () => {
   function Dialogish() {
     const [open, setOpen] = useState(false);
