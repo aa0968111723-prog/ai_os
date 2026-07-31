@@ -188,9 +188,13 @@ export const scenesRouter = router({
         // 把來源生成回綁到這一格：否則它不在該格的版本清單裡——使用者切到別版之後就再也切不回
         // 這張「當初加入分鏡的原圖」（版本必須可逆）。只在生成尚未綁定任何格時綁，
         // 同一筆成品被加進第二格時不搶走第一格的歷史（第二格仍會以「外部帶入」列出現用素材）。
+        //
+        // role 一律 visual：本 mutation 無論成品是圖/影/音都寫進 assetId（見上），
+        // 角色必須跟著「實際落在哪個槽」，否則音訊會被標成 narration，
+        // 版本清單拿它去比 narrationAssetId（null）就會顯示成「不是現用」——與畫面上看到的相反。
         await tx
           .update(schema.generations)
-          .set({ sceneId: scene!.id, sceneRole: asset?.kind === "audio" ? "narration" : "visual" })
+          .set({ sceneId: scene!.id, sceneRole: "visual" })
           .where(and(eq(schema.generations.id, gen.id), isNull(schema.generations.sceneId)));
         return scene;
       });
