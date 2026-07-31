@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assembleKnowledgeContext,
+  extractKnowledgeSummary,
   rankKnowledgeRows,
   KIND_BUDGET_WEIGHTS,
   type KnowledgeRowForInject,
@@ -98,6 +99,36 @@ describe("assembleKnowledgeContext", () => {
     const r = assembleKnowledgeContext(rows, "", labelOf, { budgetChars: 100, mode: "flat" });
     expect(r.truncated).toBe(true);
     expect(r.items[0]!.status).toBe("partial");
-    expect(r.includedChars).toBe(100);
+    // 約 18% 預算預留給其他篇摘要，故單篇不會吃滿 100
+    expect(r.includedChars).toBeGreaterThan(0);
+    expect(r.includedChars).toBeLessThanOrEqual(100);
+  });
+
+  it("extractKnowledgeSummary 壓空白並截斷", () => {
+    const s = extractKnowledgeSummary("第一句。".repeat(80), 40);
+    expect(s.length).toBeLessThanOrEqual(42);
+    expect(s).toContain("第一句");
+  });
+
+  it("預算緊時 skipped 篇可用 summary 補上", () => {
+    const rows = [
+      row({
+        id: "big",
+        kind: "script",
+        title: "長腳本",
+        content: "S".repeat(500),
+        createdAt: new Date("2026-02-01"),
+      }),
+      row({
+        id: "side",
+        kind: "note",
+        title: "側記",
+        content: "完整側記內容不進預算",
+        summary: "側記摘要重點",
+        createdAt: new Date("2026-01-01"),
+      }),
+    ];
+    const r = assembleKnowledgeContext(rows, "", labelOf, { budgetChars: 200, mode: "flat" });
+    expect(r.text).toContain("側記摘要重點");
   });
 });

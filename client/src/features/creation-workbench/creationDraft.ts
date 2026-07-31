@@ -168,6 +168,7 @@ export function updateDraft(projectId: string, patch: DraftPatch): CreationDraft
   if (patch.sourceAssetIds) next.sourceAssetIds = patch.sourceAssetIds;
   if (patch.characterIds) next.characterIds = patch.characterIds;
   if (patch.scenePresetIds) next.scenePresetIds = patch.scenePresetIds;
+  if (patch.knowledgeIds) next.knowledgeIds = patch.knowledgeIds;
   saveDraft(projectId, next);
   return next;
 }
@@ -239,6 +240,7 @@ export function useCreationDraft(projectId: string): {
           sourceAssetIds: patch.sourceAssetIds ?? prev.sourceAssetIds,
           characterIds: patch.characterIds ?? prev.characterIds,
           scenePresetIds: patch.scenePresetIds ?? prev.scenePresetIds,
+          knowledgeIds: patch.knowledgeIds ?? prev.knowledgeIds,
         };
         scheduleSave(projectRef.current, next);
         return next;

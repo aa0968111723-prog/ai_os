@@ -347,41 +347,43 @@ export function assembleKnowledgeContext(
     cardsIncluded = true;
   }
 
-  // 指定來源先完整佔預算（與代理 pick 行為一致）
-  const preferFill = fillKnowledgeBudget(preferred, budget, labelOf);
-  parts.push(...preferFill.parts);
-  budget = Math.max(0, budget - preferFill.includedChars);
+  // 預留一部分預算給「未全文納入篇」的摘要補丁（避免長文吃光後無法覆蓋其他篇）
+  const summaryReserve = Math.min(400, Math.floor(budget * 0.18));
+  let mainBudget = Math.max(0, budget - summaryReserve);
 
-  const body = assembleKnowledgeBody(rankedRest, budget, mode, labelOf);
+  // 指定來源先完整佔預算（與代理 pick 行為一致；prefer 可用 main+reserve）
+  const preferFill = fillKnowledgeBudget(preferred, mainBudget + summaryReserve, labelOf);
+  parts.push(...preferFill.parts);
+  const afterPrefer = Math.max(0, mainBudget + summaryReserve - preferFill.includedChars);
+  // 摘要預留：prefer 吃完後若仍 > summaryReserve，其餘給 body
+  mainBudget = Math.max(0, afterPrefer - summaryReserve);
+  let summaryBudget = Math.min(summaryReserve, afterPrefer);
+
+  const body = assembleKnowledgeBody(rankedRest, mainBudget, mode, labelOf);
   parts.push(...body.parts);
-  budget = Math.max(0, budget - body.includedChars);
+  // body 沒用完的加回摘要預算
+  summaryBudget += Math.max(0, mainBudget - body.includedChars);
+  let budgetForSummary = summaryBudget;
 
   // 合併 report：prefer + rest
   const items = [...preferFill.items, ...body.items];
   let includedChars = preferFill.includedChars + body.includedChars;
 
-  // 預算剩餘：對「未全文納入」且有 summary 的篇目塞摘要（覆蓋更多篇、少空白浪費）
+  // 摘要補丁：只給「完全沒進」的篇目（partial 已有正文開頭，不再塞摘要搶預算）
   const rowMap = new Map(working.map((r) => [r.id, r]));
   for (const rep of items) {
-    if (budget <= 0) break;
-    if (rep.status === "full") continue;
+    if (budgetForSummary <= 0) break;
+    if (rep.status !== "skipped") continue;
     const row = rowMap.get(rep.id);
     const summary = row?.summary?.trim() || (row ? extractKnowledgeSummary(row.content) : "");
     if (!summary) continue;
-    // 已 partial 且 included 已超過摘要長度則不重複塞
-    if (rep.status === "partial" && rep.includedChars >= summary.length) continue;
-    const slice = summary.slice(0, budget);
+    const slice = summary.slice(0, budgetForSummary);
     const block = `【摘要｜${rep.title}】\n${slice}${summary.length > slice.length ? "…(截斷)" : ""}`;
     parts.push(block);
-    budget -= slice.length;
+    budgetForSummary -= slice.length;
     includedChars += slice.length;
-    // 狀態：若原本 skipped 變 partial（至少有摘要）；partial 維持 partial
-    if (rep.status === "skipped") {
-      rep.status = "partial";
-      rep.includedChars = slice.length;
-    } else {
-      rep.includedChars += slice.length;
-    }
+    rep.status = "partial";
+    rep.includedChars = slice.length;
   }
 
   const truncated =

@@ -49,7 +49,13 @@ function readFileText(file: File): Promise<string> {
  */
 export function KnowledgeBase({ projectId, readOnly = false }: { projectId: string; readOnly?: boolean }) {
   const utils = trpc.useUtils();
-  const list = trpc.knowledge.list.useQuery({ projectId });
+  const [searchQ, setSearchQ] = useState("");
+  const [filterKind, setFilterKind] = useState<"" | (typeof KINDS)[number]["id"]>("");
+  const list = trpc.knowledge.list.useQuery({
+    projectId,
+    q: searchQ.trim() || undefined,
+    kind: filterKind || undefined,
+  });
   // 新增表單的標題／內容改用本地草稿：邊打邊存 localStorage，重整／當機也不掉逐字稿。
   const [title, setTitle, clearTitleDraft] = useLocalDraft(`knowledge-new-title-${projectId}`, "");
   const [content, setContent, clearContentDraft] = useLocalDraft(`knowledge-new-content-${projectId}`, "");
@@ -169,6 +175,28 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
         <strong> 釘選</strong>的篇目注入優先（不會被新筆記擠掉）。
         {list.data && list.data.length > 0 && ` 目前 ${list.data.length} 份・約 ${totalChars.toLocaleString()} 字。`}
       </Hint>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, alignItems: "center" }}>
+        <input
+          type="search"
+          placeholder="搜尋標題／內容／摘要…"
+          value={searchQ}
+          onChange={(e) => setSearchQ(e.target.value)}
+          style={{ flex: "1 1 160px", minWidth: 140, fontSize: 13 }}
+          aria-label="搜尋知識庫"
+        />
+        <select
+          value={filterKind}
+          onChange={(e) => setFilterKind(e.target.value as typeof filterKind)}
+          aria-label="篩選類型"
+          style={{ fontSize: 13 }}
+        >
+          <option value="">全部類型</option>
+          {KINDS.map((k) => (
+            <option key={k.id} value={k.id}>{k.label}</option>
+          ))}
+        </select>
+      </div>
 
       {list.isLoading ? (
         <div style={{ marginTop: 8 }} aria-hidden="true">

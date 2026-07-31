@@ -19,6 +19,7 @@ import {
 } from "./modes/DirectGenerateMode";
 import { PlanMode } from "./modes/PlanMode";
 import { TemplateMode } from "./modes/TemplateMode";
+import { KnowledgeSourceStrip } from "./KnowledgeSourceStrip";
 import { useAgentRunBadges } from "./useAgentRunBadges";
 import {
   modeForAnchor,
@@ -362,6 +363,15 @@ export function CreationWorkbench({
 
         <CreationContextBar onNavigate={goTo} />
 
+        {(mode === "ask" || mode === "plan") && (
+          <KnowledgeSourceStrip
+            projectId={projectId}
+            selectedIds={draft.knowledgeIds ?? []}
+            disabled={!canEdit}
+            onChange={(knowledgeIds) => setDraft({ knowledgeIds })}
+          />
+        )}
+
         {/* Only one mode panel visible; all stay mounted so draft/assistant state survives switches. */}
         <AskAiMode
           projectId={projectId}
@@ -372,6 +382,7 @@ export function CreationWorkbench({
           onSavePromptSuggestion={canEdit ? handleSavePromptSuggestion : undefined}
           onSaveSceneDraft={canEdit ? handleSaveSceneDraft : undefined}
           askFillRequest={askFillRequest}
+          knowledgeIds={draft.knowledgeIds}
         />
         <DirectGenerateMode
           projectId={projectId}
@@ -421,6 +432,7 @@ export function CreationWorkbench({
           forceOpen={planForceOpen}
           onForceOpenConsumed={clearPlanForceOpen}
           goal={draft.goal}
+          knowledgeIds={draft.knowledgeIds}
         />
 
         <CreationResourceDrawer

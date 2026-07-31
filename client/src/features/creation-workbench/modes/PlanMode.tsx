@@ -25,6 +25,7 @@ export function PlanMode({
   forceOpen: _forceOpen = false,
   onForceOpenConsumed: _onForceOpenConsumed,
   goal,
+  knowledgeIds,
 }: {
   projectId: string;
   canEdit: boolean;
@@ -36,6 +37,8 @@ export function PlanMode({
   forceOpen?: boolean;
   onForceOpenConsumed?: () => void;
   goal?: string;
+  /** 工作台勾選的知識優先來源 → 規劃 extraSourceIds */
+  knowledgeIds?: string[];
 }) {
   const { runs, awaiting, running, waiting, hasActiveRun } = useAgentRunBadges(projectId);
 
@@ -103,6 +106,7 @@ export function PlanMode({
           embedded
           initialGoal={goal}
           compactComposer
+          initialKnowledgeIds={knowledgeIds}
         />
       </div>
     </div>
