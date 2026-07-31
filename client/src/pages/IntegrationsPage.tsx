@@ -189,7 +189,8 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
       <p className="hint" style={{ marginTop: 4 }}>
         到 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">notion.so/my-integrations</a> 建立整合、
         複製 Internal Integration Secret 貼進來，並在 Notion 把要匯入的頁面「連結」給該整合（頁面右上 ⋯ → Connections）。
-        完成後到「知識與資料」貼上 Notion 頁面連結，即可選擇要加入系統與專案的內容。
+        完成後到「知識與資料」用「從 Notion 選頁」搜尋並多選匯入（也可照舊貼頁面連結）。
+        AI 只會讀「你選中並匯入」的頁面——連接整合不等於把整個 workspace 交給 AI。
         {data?.siteTokenAvailable && !data.connected ? "（站方已設共用 token，你也可以不設、直接用共用的）" : ""}
       </p>
       {!data ? (

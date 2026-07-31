@@ -619,6 +619,81 @@ export async function getNotionToken(userId: string): Promise<string | null> {
   return decryptOrMarkError(row);
 }
 
+/* ────────────────────────── Notion 選頁器（PR-E4：與 Google 同一心智模型） ────────────────────────── */
+
+export interface NotionListedPage {
+  id: string;
+  title: string;
+  lastEdited: string | null;
+}
+
+export type NotionSearchResult =
+  | { ok: true; workspace: string | null; pages: NotionListedPage[] }
+  | { ok: false; reason: "not-connected" | "error"; message: string };
+
+/** Notion 頁面物件 → 標題（純函式，可測）：走 title 型 property 的 plain_text，取不到給替代字 */
+export function notionPageTitle(page: {
+  properties?: Record<string, { type?: string; title?: Array<{ plain_text?: string }> }>;
+}): string {
+  for (const prop of Object.values(page.properties ?? {})) {
+    if (prop?.type === "title" && Array.isArray(prop.title)) {
+      const text = prop.title.map((t) => t.plain_text ?? "").join("").trim();
+      if (text) return text.slice(0, 120);
+    }
+  }
+  return "（未命名頁面）";
+}
+
+/**
+ * 搜尋使用者 token 權限內的 Notion 頁面（連接 ≠ 授權讀全 workspace——
+ * 只有分享給該整合的頁面會出現；內容要等使用者選中、按匯入才抓）。
+ * token 優先序與 fetchNotionText 一致：個人 → 站方 NOTION_TOKEN。
+ */
+export async function searchNotionPages(userId: string, query: string): Promise<NotionSearchResult> {
+  const row = await findIntegration(userId, "notion");
+  const personal = row && row.status === "active" ? await decryptOrMarkError(row) : null;
+  const token = personal || process.env.NOTION_TOKEN;
+  if (!token) {
+    return { ok: false, reason: "not-connected", message: "尚未設定 Notion token——請到「連接的資料來源」貼上你的 integration token" };
+  }
+  try {
+    const res = await proxyFetch("https://api.notion.com/v1/search", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Notion-Version": "2022-06-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: query.slice(0, 200),
+        filter: { property: "object", value: "page" },
+        sort: { direction: "descending", timestamp: "last_edited_time" },
+        page_size: 30,
+      }),
+      timeoutMs: 15_000,
+    });
+    if (res.status === 401) {
+      return { ok: false, reason: "error", message: "Notion 不認得這個 token——請到「連接的資料來源」重新設定" };
+    }
+    if (res.status === 429) return { ok: false, reason: "error", message: "Notion 請求過於頻繁，請稍後再試" };
+    if (!res.ok) return { ok: false, reason: "error", message: `Notion 搜尋失敗（HTTP ${res.status}）——請稍後再試` };
+    const json = (await res.json().catch(() => ({}))) as {
+      results?: Array<{ id?: string; last_edited_time?: string; properties?: Record<string, { type?: string; title?: Array<{ plain_text?: string }> }> }>;
+    };
+    const pages: NotionListedPage[] = (json.results ?? [])
+      .filter((p): p is { id: string } & typeof p => !!p.id)
+      .map((p) => ({
+        id: p.id,
+        title: notionPageTitle(p),
+        lastEdited: p.last_edited_time ?? null,
+      }));
+    const workspace = typeof row?.meta?.workspace === "string" ? row.meta.workspace : null;
+    return { ok: true, workspace, pages };
+  } catch (err) {
+    return { ok: false, reason: "error", message: err instanceof Error ? err.message : "Notion 搜尋失敗" };
+  }
+}
+
 /* ────────────────────────── 外部資料庫/API 連接 ────────────────────────── */
 
 const HEADER_NAME_RE = /^[A-Za-z0-9-]{1,64}$/;
