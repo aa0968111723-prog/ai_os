@@ -10,7 +10,7 @@ import { Readable, Transform, type Writable } from "node:stream";
 import { proxyFetch } from "./http";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
-import { worldviewSchema } from "../../shared/worldview";
+import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { resolutionForFormat } from "../../shared/options";
 import { absPathOf, extFromMime } from "./storage";
 
@@ -706,15 +706,12 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
   const reportProgress = () => opts?.onProgress?.({ done: doneEntries, total: totalEntries, bytes: archive.pointer() });
   reportProgress();
 
-  // 05_文件／腳本與鏡頭表.md（一定有）
+  // 05_文件／腳本與鏡頭表.md（一定有）——世界觀用 formatWorldviewForAi("export") 含風格／三幕／人物
   const lines: string[] = [
     `# ${project.title} · 腳本與鏡頭表`,
     "",
     `- 格式：${project.format}（${project.platform}）`,
-    `- 一句話故事：${worldview.logline || "—"}`,
-    `- 關鍵訊息：${worldview.message || "—"}`,
-    `- 調性：${worldview.tones.join("、") || "—"}`,
-    `- 禁忌事項：${worldview.taboos.join("；") || "—"}`,
+    formatWorldviewForAi(worldview, "export"),
     "",
     "| 鏡號 | 場次 | 秒數 | 類型 | 檔名 | 旁白音檔 | 進出點時間碼 | 提示詞 | 模型 |",
     "|---|---|---|---|---|---|---|---|---|",

@@ -14,9 +14,11 @@ import { MODELS, getModel, type ModelEntry } from "../../shared/models";
 import { worldviewSchema } from "../../shared/worldview";
 
 const wv = worldviewSchema.parse({
+  logline: "一位訪客在晨光禪堂點香",
   tones: ["溫暖"],
   styles: ["水墨禪意"],
   message: "一片一訊息",
+  themes: ["禪修日常"],
   taboos: ["不得使用「治癒/治療/療效」等醫療宣稱字眼", "不影射真實人物形象"],
 });
 
@@ -33,14 +35,18 @@ describe("effectivePromptParts：視覺類別禁忌詞走負向、正向不再�
     expect(parts.positive).not.toContain("避免");
     expect(parts.positive).toContain("清晨禪堂");
     expect(parts.positive).toContain("視覺風格"); // tones/styles/message 仍在正向
+    expect(parts.positive).toContain("故事錨點"); // 短 logline 進視覺
+    expect(parts.positive).toContain("Chinese ink wash"); // 雙語風格
     expect(parts.negative).toBe("不得使用「治癒/治療/療效」等醫療宣稱字眼, 不影射真實人物形象");
   });
 });
 
 describe("effectivePromptParts：LLM 維持正向文字指引", () => {
-  it("llm：正向含「避免:」、negative 為空", () => {
+  it("llm：正向含「避免:」、themes、negative 為空", () => {
     const parts = effectivePromptParts(llm, "寫一段旁白", wv);
     expect(parts.positive).toContain("避免:");
+    expect(parts.positive).toContain("訊息主軸:禪修日常");
+    expect(parts.positive).toContain("故事錨點");
     expect(parts.negative).toBe("");
   });
 });

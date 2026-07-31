@@ -16,7 +16,7 @@ import { z } from "zod";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
-import { worldviewSchema } from "../../shared/worldview";
+import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { isMockMode } from "./fal";
 import { reserveQuota, refund, checkQuota } from "./points";
 import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
@@ -691,7 +691,7 @@ ${dbCheatsheet(writableDbs)}
 ${picked.text ? `<使用者指定來源>\n${picked.text}\n</使用者指定來源>\n` : ""}${plannerContext.text}
 <專案現況>
 標題：${project.title}（${project.kind}，${project.format}）
-世界觀｜一句話：${wv.logline || "—"}｜調性：${wv.tones.join("、") || "—"}｜視覺風格：${wv.styles.join("、") || "—"}
+世界觀｜${formatWorldviewForAi(wv, "brief")}
 分鏡（共 ${scenes.length}）：
 ${sceneLines}
 </專案現況>

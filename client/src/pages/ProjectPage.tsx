@@ -4,7 +4,13 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip } from "../components/interactions";
-import { worldviewSchema, type Worldview } from "@shared/worldview";
+import {
+  worldviewSchema,
+  isWorldviewReady,
+  hasActs,
+  removesDefaultTaboos,
+  type Worldview,
+} from "@shared/worldview";
 import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
 import { AssetLibrary } from "../components/AssetLibrary";
@@ -528,7 +534,12 @@ export function ProjectPage({ id }: { id: string }) {
   // 「從這裡開始」四步：用實際 state 判定完成打勾
   const sceneCount = scenes.data?.length ?? 0;
   const onboardSteps = [
-    { label: "設世界觀", done: !!(wv.logline.trim() || wv.message.trim()), target: "#onboard-worldview", hint: "填一句故事或關鍵訊息" },
+    {
+      label: "設世界觀",
+      done: isWorldviewReady(wv),
+      target: "#onboard-worldview",
+      hint: "填一句故事（或關鍵訊息）＋至少一項調性或視覺風格",
+    },
     { label: "生成一鏡", done: !!generations.data?.some((g) => g.status === "done"), target: "#gen-prompt", hint: "在 AI 創作工作台的「直接生成」做出第一張成品" },
     { label: "加入分鏡", done: sceneCount > 0, target: "#onboard-delivery", hint: "把成品排進分鏡" },
     // 第4步用「有分鏡通過審核」當完成訊號，才不會一有分鏡就跟第3步一起打勾（誤導已交付）
@@ -551,7 +562,7 @@ export function ProjectPage({ id }: { id: string }) {
   const charCount = characters.data?.length;
   const presetCount = scenePresets.data?.length;
   const assetCount = assets.data?.length;
-  const wvReady = !!(wv.logline.trim() || wv.message.trim());
+  const wvReady = isWorldviewReady(wv);
 
   const toggle = (field: "tones" | "themes" | "styles", value: string) => {
     if (!canEdit) return; // 檢視者：chips 不可切換（樂觀更新會先亮再彈回，比不動更誤導）
@@ -898,6 +909,9 @@ export function ProjectPage({ id }: { id: string }) {
           <div className="ctx-summary" role="group" aria-label="AI 全程共用的上下文一覽">
             AI 全程共用：
             {summaryChip(`專案基調${wvReady ? " ✓" : "（待設定）"}`, "#onboard-worldview", wvReady)}
+            {hasActs(wv) && summaryChip("三幕已設", "#onboard-worldview", true)}
+            {wv.people.length > 0 && summaryChip(`敘事人物 ${wv.people.length}`, "#onboard-worldview", true)}
+            {wv.audience.trim() && summaryChip("觀眾已設", "#onboard-worldview", true)}
             {summaryChip(`角色 ${charCount ?? "…"}・場景 ${presetCount ?? "…"}`, "#sec-characters")}
             {summaryChip(`知識 ${knowledgeCount ?? "…"} 份`, "#sec-knowledge")}
             {summaryChip(`素材 ${assetCount ?? "…"}`, "#sec-assets")}
@@ -961,7 +975,7 @@ export function ProjectPage({ id }: { id: string }) {
             <details style={{ marginTop: 10 }}>
               <summary style={{ cursor: "pointer", fontSize: 13 }}>進階設定（目標觀眾・三幕結構・人物・參考・禁忌）</summary>
               <div style={{ marginTop: 6 }}>
-                <label htmlFor="wv-audience">目標觀眾（供 AI 導演參考）</label>
+                <label htmlFor="wv-audience">目標觀眾（AI 導演建議／拆分鏡會讀）</label>
                 <input
                   key={`audience-${wv.audience}`}
                   id="wv-audience"
@@ -971,7 +985,7 @@ export function ProjectPage({ id }: { id: string }) {
                   placeholder="例：初次接觸禪修、想在忙碌生活裡找安定的年輕人與家庭"
                   onBlur={(e) => canEdit && e.target.value !== wv.audience && updateWv.mutate({ id, worldview: { audience: e.target.value } })}
                 />
-                <label>三幕結構（鉤子 → 轉折 → 行動呼籲）<HelpTip text="片子的敘事骨架：開場怎麼抓住人、中段怎麼轉、結尾請觀眾做什麼。供 AI 導演發想分鏡時參考。" /></label>
+                <label>三幕結構（鉤子 → 轉折 → 行動呼籲）<HelpTip text="敘事骨架：開場怎麼抓住人、中段怎麼轉、結尾請觀眾做什麼。會寫進 AI 導演建議與拆分鏡。" /></label>
                 {([
                   ["hook", "鉤子", "例：清晨禪堂前庭，安倢撐著紅傘走進柔和晨光"],
                   ["turn", "轉折", "例：慕恩在書架旁翻閱善本，浮躁被慢慢安放"],
@@ -994,15 +1008,20 @@ export function ProjectPage({ id }: { id: string }) {
                 ))}
                 <TokenListEditor
                   id="wv-people"
-                  label="人物（供 AI 導演參考）"
+                  label="敘事人物（導演／拆分鏡會讀）"
+                  hint="自由文字人物表，AI 導演發想會參考。畫面外觀一致請另建「角色定裝卡」並在生成時勾選——兩套用途不同。"
                   values={wv.people}
                   placeholder="例：安倢＝紅傘、米白外套（Enter 加入）"
                   readOnly={!canEdit}
                   onChange={(next) => updateWv.mutate({ id, worldview: { people: next } })}
                 />
+                <Hint style={{ margin: "4px 0 8px", fontSize: 12 }}>
+                  敘事人物 ≠ 畫面定裝。要畫得像，請到下方「角色定裝」建卡並勾選後生成。
+                </Hint>
                 <TokenListEditor
                   id="wv-references"
-                  label="參考連結"
+                  label="參考連結（僅交付備註，不進 AI）"
+                  hint="剪輯／企劃交接用；不會注入生成或導演模型（URL 對模型幫助有限）。"
                   values={wv.references}
                   placeholder="貼上參考影片/文章網址（Enter 加入）"
                   readOnly={!canEdit}
@@ -1011,14 +1030,23 @@ export function ProjectPage({ id }: { id: string }) {
                 <TokenListEditor
                   id="wv-taboos"
                   label="禁忌事項（自動注入每次生成）"
-                  hint="這裡的每一條都會加進生成提示詞，要求 AI 避開；刪除前請與組長確認。"
+                  hint="每一條會進生成提示詞（圖／影走負向、文字走「避免」）。刪除預設弘法禁語前會再確認。"
                   values={wv.taboos}
                   placeholder="例：不得出現可讀文字、招牌一律後製（Enter 加入）"
                   readOnly={!canEdit}
-                  onChange={(next) => updateWv.mutate({ id, worldview: { taboos: next } })}
+                  onChange={(next) => {
+                    if (removesDefaultTaboos(wv.taboos, next)) {
+                      const ok = window.confirm(
+                        "你正在移除預設的弘法禁語（醫療宣稱／影射真人／開示須審核）。確定要關閉這層合規保護嗎？",
+                      );
+                      if (!ok) return;
+                    }
+                    updateWv.mutate({ id, worldview: { taboos: next } });
+                  }}
                 />
                 <Hint style={{ marginTop: 8, fontSize: 12 }}>
-                  視覺風格與禁忌事項會自動注入每次生成的提示詞；其他欄位供 AI 導演與團隊參考。
+                  <strong>會進 AI：</strong>調性／風格／訊息／禁忌 → 每次生成；觀眾／三幕／敘事人物／主軸 → 導演建議與拆分鏡；代理與助手讀摘要（含訊息與禁忌）。
+                  <strong> 僅備註：</strong>參考連結（寫進交付鏡頭表，不進模型）。
                 </Hint>
               </div>
             </details>
@@ -1138,7 +1166,13 @@ export function ProjectPage({ id }: { id: string }) {
             groupId={p.groupId}
             myRole={myRole}
             projectFormat={p.format}
-            worldview={{ tones: wv.tones, styles: wv.styles, taboos: wv.taboos }}
+            worldview={{
+              logline: wv.logline,
+              message: wv.message,
+              tones: wv.tones,
+              styles: wv.styles,
+              taboos: wv.taboos,
+            }}
             wvReady={wvReady}
             characterIds={charIds}
             scenePresetIds={sceneIds}
