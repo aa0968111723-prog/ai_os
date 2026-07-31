@@ -90,7 +90,11 @@ export async function getFalAccountBalance(opts?: { force?: boolean }): Promise<
         Authorization: `Key ${key}`,
         Accept: "application/json",
       },
-      timeoutMs: 20_000,
+      // 原為 20 秒。這是「頁面載入時順手抓的餘額徽章」，20 秒的上游逾時會讓
+      // 整個 /admin 卡住（部署站巡覽實測：超過稽核 15 秒門檻，頂欄直接消失）。
+      // 5 秒足夠正常回應；逾時就走下方既有的降級形狀顯示「暫時讀不到」，
+      // 遠優於讓一個徽章拖垮整頁。
+      timeoutMs: 5_000,
     });
 
     if (res.status === 401 || res.status === 403) {
