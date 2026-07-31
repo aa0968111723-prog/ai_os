@@ -8,7 +8,7 @@ import { ConfirmButton, HelpTip } from "./interactions";
 import { AssetImg, AssetVideo, AssetAudio } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 
-import { Button, Card, Hint, Meta, Pill, Skeleton } from "./ui";
+import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton } from "./ui";
 /** 素材類型的中文標籤（與素材庫/生成紀錄同口徑）——分鏡 meta 列不再直接冒英文 enum */
 const SCENE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影片", audio: "音訊", doc: "文件" };
 
@@ -724,10 +724,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, onUsePrompt, ch
       ) : (
         <>
           {filteredSceneEntries.length === 0 ? (
-            <div className="empty-state scene-filter-empty">
-              <h3>這個狀態目前沒有分鏡</h3>
-              <p>切回「全部」查看完整順序，或選其他狀態繼續處理。</p>
-            </div>
+            <EmptyState title={<>這個狀態目前沒有分鏡</>} description={<>切回「全部」查看完整順序，或選其他狀態繼續處理。</>} className="scene-filter-empty" />
           ) : (
             <div className={`scene-list-rows${sceneListExpanded || sceneFilter !== "all" ? " is-expanded" : ""}`}>
               {filteredSceneEntries.map(({ scene: s, index: i }, visibleIndex) => (

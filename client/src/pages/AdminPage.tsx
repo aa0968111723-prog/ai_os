@@ -11,7 +11,7 @@ import { getModel, tierLabel } from "@shared/models";
 import { toCsv } from "@shared/csv";
 import { formatTwd, formatUsd, moneyFxNote } from "@shared/money";
 
-import { Button, Card, Chip, Hint, Meta, Pill, Skeleton } from "../components/ui";
+import { Button, Card, Chip, EmptyState, Hint, Meta, Pill, Skeleton } from "../components/ui";
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
   bug: { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" },
@@ -2275,10 +2275,7 @@ export function AdminPage() {
             <button style={{ marginTop: 8 }} onClick={() => feedback.refetch()}>再試一次</button>
           </div>
         ) : !feedback.data?.length ? (
-          <div className="empty-state">
-            <h3>還沒有回饋</h3>
-            <p>夥伴用頂欄「回饋」按鈕填寫。</p>
-          </div>
+          <EmptyState title={<>還沒有回饋</>} description={<>夥伴用頂欄「回饋」按鈕填寫。</>} />
         ) : (
           feedback.data.map((f) => (
             <div key={f.id} className="gen-row" style={{ gridTemplateColumns: "auto 1fr" }}>

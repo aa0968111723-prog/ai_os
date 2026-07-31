@@ -12,7 +12,7 @@ import {
   revealAssetInFolder,
   suggestedFileName,
 } from "../platform/desktopBridge";
-import { Card, Hint, Meta } from "./ui";
+import { Card, EmptyState, Hint, Meta } from "./ui";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -316,10 +316,7 @@ export function AssetLibrary({
           ))}
         </div>
       ) : !total ? (
-        <div className="empty-state" style={{ marginTop: 10 }}>
-          <h3>還沒有素材——</h3>
-          <p>上傳參考圖、原音檔，或先生成一張。</p>
-        </div>
+        <EmptyState title={<>還沒有素材——</>} description={<>上傳參考圖、原音檔，或先生成一張。</>} style={{ marginTop: 10 }} />
       ) : (
         <>
           {/* 工具列：數量統計 · 種類篩選 chips · 搜尋 · 排序 */}

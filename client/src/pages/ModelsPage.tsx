@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Button, Card, Chip, Hint, Meta } from "../components/ui";
+import { Button, Card, Chip, EmptyState, Hint, Meta } from "../components/ui";
 import {
   CATEGORIES,
   MODELS,
@@ -540,16 +540,11 @@ export function ModelsPage() {
             </button>
           )}
           {!models.isLoading && !models.isError && !models.data?.length && (
-            <div className="empty-state">
-              <h3>沒有符合的模型</h3>
-              <p>
-                {debouncedQ
+            <EmptyState title={<>沒有符合的模型</>} description={<>{debouncedQ
                   ? `沒有符合「${debouncedQ}」的模型——換個關鍵字試試。`
                   : tier
                     ? "這個組合暫無模型——試試取消檔次篩選。"
-                    : "這個類別暫無模型。"}
-              </p>
-            </div>
+                    : "這個類別暫無模型。"}</>} />
           )}
         </div>
       </div>

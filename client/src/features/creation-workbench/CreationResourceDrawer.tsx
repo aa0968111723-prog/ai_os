@@ -18,7 +18,7 @@ import {
   requestWorkbenchMode,
   type WorkbenchRevealDetail,
 } from "./workbenchNav";
-import { Button, Card, Hint, Meta } from "../../components/ui";
+import { Button, Card, EmptyState, Hint, Meta } from "../../components/ui";
 export type ResourceDrawerTab = "prompts" | "generations" | "trail" | "templates";
 
 export type ReuseGenerateFn = (
@@ -429,10 +429,7 @@ export function CreationResourceDrawer({
                     </Hint>
                     {runs.isLoading && <Meta as="p">載入執行軌跡…</Meta>}
                     {!runs.isLoading && runList.length === 0 && (
-                      <div className="empty-state" style={{ marginTop: 8 }}>
-                        <h3>還沒有執行軌跡——</h3>
-                        <p>在「多步開拍」或「套用範本」跑一次就會出現在這裡。</p>
-                      </div>
+                      <EmptyState title={<>還沒有執行軌跡——</>} description={<>在「多步開拍」或「套用範本」跑一次就會出現在這裡。</>} style={{ marginTop: 8 }} />
                     )}
                     {runList.length > 0 && (
                       <ul style={{ listStyle: "none", padding: 0, margin: "8px 0 0" }}>
@@ -490,10 +487,7 @@ export function CreationResourceDrawer({
                 hidden={tab !== "templates"}
               >
                 {tab === "templates" && (
-                  <div className="empty-state" style={{ marginTop: 8 }} data-fb="範本收藏">
-                    <h3>範本收藏（即將推出）</h3>
-                    <p>常用範本會收藏在這裡。目前請到「套用範本」挑選與執行。</p>
-                    <button
+                  <EmptyState title={<>範本收藏（即將推出）</>} description={<>常用範本會收藏在這裡。目前請到「套用範本」挑選與執行。</>} action={<><button
                       type="button"
                       className="btn-ghost"
                       style={{ marginTop: 8 }}
@@ -506,8 +500,7 @@ export function CreationResourceDrawer({
                       }}
                     >
                       <Icon name="Clapperboard" size={13} /> 前往套用範本
-                    </button>
-                  </div>
+                    </button></>} style={{ marginTop: 8 }} data-fb="範本收藏" />
                 )}
               </div>
             </div>

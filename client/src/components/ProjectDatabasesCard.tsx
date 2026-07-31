@@ -8,7 +8,7 @@ import {
   projectDataAiHint,
   type ProjectDataTemplateId,
 } from "@shared/projectDataTemplates";
-import { Button, Card, Hint, Meta } from "./ui";
+import { Button, Card, EmptyState, Hint, Meta } from "./ui";
 /**
  * 專案資料卡：
  * - 一眼看出 AI 能否引用本專案依據（知識／素材／已關聯表；尊重 agentAccess）。
@@ -277,14 +277,9 @@ export function ProjectDatabasesCard({
         )}
 
         {!linked.isLoading && !linked.error && groups.length === 0 && (
-          <div className="empty-state" style={{ marginTop: 0 }}>
-            <h3>還沒有資料表關聯到這個專案</h3>
-            <p>
-              {canEdit
+          <EmptyState title={<>還沒有資料表關聯到這個專案</>} description={<>{canEdit
                 ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，勾選「關聯此專案」。"
-                : "請有編輯權限的成員建立或關聯資料表。"}
-            </p>
-          </div>
+                : "請有編輯權限的成員建立或關聯資料表。"}</>} style={{ marginTop: 0 }} />
         )}
 
         {groups.length > 0 && (

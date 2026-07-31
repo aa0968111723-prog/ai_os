@@ -15,7 +15,7 @@ import {
 import { FIELD_TYPES, FILE_CATEGORY_SUGGESTIONS, MAX_FILE_CATEGORY, newFieldKey, type DataField, type DataRowData, type DataRowValue } from "@shared/databaseFields";
 import { detectFormat, inferFields, parseTabular, TABULAR_ACCEPT, TABULAR_FORMATS, type TabularFormat } from "@shared/tabular";
 
-import { Badge, Button, Card, Hint, Meta } from "../components/ui";
+import { Badge, Button, Card, EmptyState, Hint, Meta } from "../components/ui";
 /** 匯入結果外形（importData mutation 回傳；建庫與詳頁匯入共用顯示） */
 type ImportResult = {
   imported: number;
@@ -232,10 +232,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
             <Meta as="p" className="database-search-empty">找不到「{databaseQuery.trim()}」</Meta>
           )}
           {list.data && tables.length === 0 && !creating && (
-            <div className="empty-state" style={{ marginTop: 16 }}>
-              <h3>還沒有資料庫</h3>
-              <p>先建一個試試：比如「拍攝器材借用表」或你自己的待辦清單。</p>
-            </div>
+            <EmptyState title={<>還沒有資料庫</>} description={<>先建一個試試：比如「拍攝器材借用表」或你自己的待辦清單。</>} style={{ marginTop: 16 }} />
           )}
         </Card>
 

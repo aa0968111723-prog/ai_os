@@ -4,7 +4,7 @@ import { useLocalDraft } from "../useLocalDraft";
 import { Icon } from "./Icon";
 import { CharCount, ConfirmButton } from "./interactions";
 import { VersionHistory } from "./VersionHistory";
-import { Card, Chip, Hint, Meta, Skeleton } from "./ui";
+import { Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
 const KINDS = [
   { id: "transcript", label: "師父開示稿" },
   { id: "testimony", label: "見證故事" },
@@ -171,10 +171,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
           ))}
         </div>
       ) : (
-        <div className="empty-state" style={{ marginTop: 8 }}>
-          <h3>還沒有素材知識</h3>
-          <p>加一份開示稿或腳本，讓 AI 真的懂這支片。</p>
-        </div>
+        <EmptyState title={<>還沒有素材知識</>} description={<>加一份開示稿或腳本，讓 AI 真的懂這支片。</>} style={{ marginTop: 8 }} />
       )}
 
       {readOnly ? (

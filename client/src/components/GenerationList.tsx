@@ -8,7 +8,7 @@ import { AssetVideo, AssetAudio, MissingMediaBox } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 import { revealWorkbenchAnchor } from "../features/creation-workbench/workbenchNav";
 
-import { Button, Chip, Hint, Meta, Skeleton } from "./ui";
+import { Button, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
 /** 生成結果縮圖（圖片）：載入失敗顯示「結果已失效」佔位，並拿掉開新分頁連結（點下去只會是 404） */
 function GenResultImgLink({ url, alt }: { url: string; alt: string }) {
   const [failed, setFailed] = useState(false);
@@ -315,10 +315,7 @@ export function GenerationList({
     );
   if (!list.data?.length)
     return (
-      <div className="empty-state" style={{ marginTop: 12 }}>
-        <h3>還沒有生成紀錄——</h3>
-        <p>上面試一次吧。</p>
-      </div>
+      <EmptyState title={<>還沒有生成紀錄——</>} description={<>上面試一次吧。</>} style={{ marginTop: 12 }} />
     );
 
   const activeFilterCount =

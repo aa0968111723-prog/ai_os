@@ -8,7 +8,7 @@ import { useLocalDraft } from "../useLocalDraft";
 import { MentionInput, resolveMentions } from "../components/MentionInput";
 import { flashAnchor, takePlannerFocus } from "../discuss";
 
-import { Button, Chip, Hint, Meta, Skeleton } from "../components/ui";
+import { Button, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
 /**
  * 筆記排程（需求 #10）：組內共用的「排程表＋會議筆記＋知識地圖」一頁。
  * - 組排程：可掛專案、可直連 Google 日曆自動同步（.ics 匯出保留為後備）；清單／月曆兩種檢視（真實日曆）。
@@ -137,10 +137,7 @@ export function PlannerPage({ groupId }: { groupId: string }) {
           <p className="eyebrow">日常協作</p>
           <h1>筆記與排程</h1>
         </header>
-        <div className="empty-state" style={{ marginTop: "var(--sp-32)" }}>
-          <h3>請先選擇組別</h3>
-          <p>用頂欄的組別選單選一個組，就能看到這個組的排程與會議筆記。</p>
-        </div>
+        <EmptyState title={<>請先選擇組別</>} description={<>用頂欄的組別選單選一個組，就能看到這個組的排程與會議筆記。</>} style={{ marginTop: "var(--sp-32)" }} />
       </div>
     );
   }
@@ -475,10 +472,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
       ) : view === "calendar" ? (
         <CalendarView items={items} projectTitleOf={projectTitleOf} onDelete={(id) => remove.mutate({ id })} removing={remove.isPending} />
       ) : groups.length === 0 ? (
-        <div className="empty-state" style={{ marginTop: 12 }}>
-          <h3>{includePast ? "還沒有任何行程" : "接下來沒有排程"}</h3>
-          <p>用上面的欄位加第一筆——開會、拍攝、上片都行。</p>
-        </div>
+        <EmptyState title={<>{includePast ? "還沒有任何行程" : "接下來沒有排程"}</>} description={<>用上面的欄位加第一筆——開會、拍攝、上片都行。</>} style={{ marginTop: 12 }} />
       ) : (
         <div style={{ marginTop: 8 }}>
           {groups.map((g) => (
@@ -844,10 +838,7 @@ function NotesCard({ groupId, initiallyOpen }: { groupId: string; initiallyOpen:
           })}
         </div>
       ) : (
-        <div className="empty-state" style={{ marginTop: 8 }}>
-          <h3>還沒有筆記</h3>
-          <p>開完會記一份，決議和待辦全組都看得到。</p>
-        </div>
+        <EmptyState title={<>還沒有筆記</>} description={<>開完會記一份，決議和待辦全組都看得到。</>} style={{ marginTop: 8 }} />
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
 
@@ -1452,13 +1443,8 @@ function KnowledgeMapCard({ groupId, initiallyOpen }: { groupId: string; initial
       ) : graphQ.error ? (
         <p className="error">{graphQ.error.message}</p>
       ) : !graph || graph.shownBranches.length === 0 ? (
-        <div className="empty-state" style={{ marginTop: 12 }}>
-          <h3>這張地圖還是空的</h3>
-          <p>
-            先在上面加幾筆行程或筆記（可掛專案），或在專案裡累積知識庫、跑 AI 執行計畫、建資料庫，這裡就會長出對應的族譜節點。
-            {lens !== "all" && "或把鏡頭切回「全組」。"}
-          </p>
-        </div>
+        <EmptyState title={<>這張地圖還是空的</>} description={<>先在上面加幾筆行程或筆記（可掛專案），或在專案裡累積知識庫、跑 AI 執行計畫、建資料庫，這裡就會長出對應的族譜節點。
+            {lens !== "all" && "或把鏡頭切回「全組」。"}</>} style={{ marginTop: 12 }} />
       ) : (
         <div className="map-wrap" style={{ marginTop: 12 }}>
           {/* 畫布工具：縮放與重設（浮在右上角）；佈局被拖過才出現「重設佈局」 */}

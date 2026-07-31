@@ -5,7 +5,7 @@
   "observations": {
     "stylesCssLines": 3692,
     "tsxFiles": 96,
-    "filesUsingPrimitives": 60
+    "filesUsingPrimitives": 62
   },
   "structurallyExempt": {
     "badge": 7,
@@ -17,14 +17,14 @@
     "btn": 4
   },
   "totals": {
-    "total": 95,
+    "total": 77,
     "perClass": {
-      "empty-state": 21,
       "hint": 22,
       "btn-sm": 3,
       "pill": 14,
       "skeleton": 5,
       "chip": 18,
+      "empty-state": 3,
       "card": 7,
       "btn-ghost": 4,
       "btn": 1
@@ -32,7 +32,6 @@
   },
   "files": {
     "client/src/app/AppRoutes.tsx": {
-      "empty-state": 1,
       "hint": 1
     },
     "client/src/app/AppShell.tsx": {
@@ -47,7 +46,6 @@
     },
     "client/src/components/AssetLibrary.tsx": {
       "skeleton": 1,
-      "empty-state": 1,
       "chip": 2,
       "hint": 1
     },
@@ -63,14 +61,10 @@
     },
     "client/src/components/GenerationList.tsx": {
       "skeleton": 1,
-      "empty-state": 1,
       "pill": 1
     },
     "client/src/components/InstallAppBanner.tsx": {
       "hint": 1
-    },
-    "client/src/components/KnowledgeBase.tsx": {
-      "empty-state": 1
     },
     "client/src/components/MediaFallback.tsx": {
       "hint": 2
@@ -89,22 +83,17 @@
       "btn-ghost": 1
     },
     "client/src/components/ProjectDatabasesCard.tsx": {
-      "empty-state": 1,
       "pill": 1
     },
     "client/src/components/ProjectMembersCard.tsx": {
       "card": 1
-    },
-    "client/src/components/PromptLibrary.tsx": {
-      "empty-state": 1
     },
     "client/src/components/ReferenceImagePicker.tsx": {
       "hint": 3
     },
     "client/src/components/SceneList.tsx": {
       "pill": 1,
-      "skeleton": 1,
-      "empty-state": 1
+      "skeleton": 1
     },
     "client/src/components/WorkflowCard.tsx": {
       "pill": 1,
@@ -121,7 +110,6 @@
       "hint": 1
     },
     "client/src/features/creation-workbench/CreationResourceDrawer.tsx": {
-      "empty-state": 2,
       "pill": 1,
       "btn-ghost": 1
     },
@@ -138,22 +126,17 @@
       "card": 2,
       "chip": 2
     },
-    "client/src/main.tsx": {
-      "empty-state": 1
-    },
     "client/src/pages/AdminPage.tsx": {
       "pill": 2,
       "hint": 1,
       "btn": 1,
       "chip": 1,
-      "empty-state": 2
+      "empty-state": 1
     },
     "client/src/pages/DatabasesPage.tsx": {
-      "empty-state": 1,
       "btn-sm": 1
     },
     "client/src/pages/DesktopCompanionPage.tsx": {
-      "empty-state": 1,
       "chip": 1
     },
     "client/src/pages/FeedbackPage.tsx": {
@@ -169,11 +152,7 @@
       "pill": 4,
       "chip": 5,
       "card": 2,
-      "skeleton": 2,
-      "empty-state": 1
-    },
-    "client/src/pages/PlannerPage.tsx": {
-      "empty-state": 4
+      "skeleton": 2
     },
     "client/src/pages/ProjectPage.tsx": {
       "chip": 4
