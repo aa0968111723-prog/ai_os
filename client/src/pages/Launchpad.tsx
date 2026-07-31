@@ -623,12 +623,125 @@ type Dispatch = { projectId: string; projectTitle: string; goal: string; label: 
 /** 派工結果：在某專案建立了一份待核准的 AI 執行計畫 */
 type DispatchResult = { runId: string; projectId: string; summary: string; estPoints: number };
 
-const TEAM_QUICK_QS = [
-  "哪個案子卡住了？這週花了多少點？",
-  "哪些專案有分鏡在等審核？",
-  "為什麼有專案特別燒點？",
-  "依目前狀況，哪個專案該優先推進？",
+/**
+ * 兜底的引導問句：這個組安靜到沒東西可指的時候才用。
+ *
+ * 刻意**不**放「哪個案子卡住了」「哪些專案有分鏡在等審核」這類——那些的答案就在
+ * 這個輸入框正上方的「誰卡住了」與「待我裁決」裡。問了只會得到一段重述你剛看過的話，
+ * 這正是這個對話框讓人覺得「不知道要拿來幹嘛」的原因：它被廣告的工作，儀表板已經接手。
+ * 對話層真正的價值在儀表板結構上做不到的事——鑽進內容、解釋異常、跨來源權衡。
+ */
+const TEAM_FALLBACK_QS = [
+  "以現在的人力負荷與進度，這週該優先推進哪個案子、哪個可以先放？",
+  "各專案的素材與生成成功率如何？有沒有哪個案子一直在重試？",
+  "資料庫裡有哪些內容可以拿來當下一支片的題材？",
 ];
+
+/** 一則依現況生成的建議問句 */
+export type TeamQuestionSuggestion = {
+  /** 去重與 React key 用 */
+  id: string;
+  /** 帶進輸入框的問句 */
+  text: string;
+  /** 這句是被畫面上哪個事實觸發的（顯示在 tooltip，讓人看得出它讀了自己的資料） */
+  why: string;
+};
+
+/** 一次最多給幾句：再多就變成另一種「選項牆」，跟原本的問題同一個病 */
+const MAX_QUESTION_SUGGESTIONS = 4;
+
+/**
+ * 依這個組的真實狀態生成建議問句（純函式；資料全部來自畫面已查到的東西，零新查詢）。
+ *
+ * 每一句都必須是**卡片答不出來**的：卡片給的是數字與清單，這裡問的是那些數字背後的內容
+ * 與原因——要鑽進分鏡全文、生成紀錄、人員任務或資料庫才答得出來。
+ * 依急迫性排序：失敗 → 逾期的人 → 待核成本 → 計畫缺資訊 → 待審內容。
+ */
+export function buildTeamQuestionSuggestions(input: {
+  runs: Array<{ projectId: string; projectTitle: string; status: string; error: string | null; goal: string }>;
+  people: Array<{ userId: string | null; name: string | null; openTasks: number; overdueTasks: number }>;
+  planConcerns: Array<{ projectTitle: string; missingInformation: number; risks: number }>;
+  pending: Array<{ projectTitle: string; pendingApprovals: number; awaitingGenerations: number }>;
+}): TeamQuestionSuggestion[] {
+  const out: TeamQuestionSuggestion[] = [];
+  const push = (id: string, text: string, why: string) => {
+    if (out.length < MAX_QUESTION_SUGGESTIONS && !out.some((s) => s.id === id)) out.push({ id, text, why });
+  };
+
+  // ① 失敗：卡片只顯示「近七日失敗 N」與一行錯誤，答不出「為什麼會失敗、要怎麼避免」
+  const failed = input.runs.find((r) => r.status === "failed");
+  if (failed) {
+    push(
+      `failed:${failed.projectId}`,
+      `「${failed.projectTitle}」的代理為什麼失敗？要改什麼才不會再失敗？`,
+      `因為「${failed.projectTitle}」有一份失敗的計畫${failed.error ? `：${failed.error.slice(0, 40)}` : ""}`,
+    );
+  }
+
+  // ② 逾期的人：卡片顯示「阿光 3 件・2 逾期」，答不出「那幾件是什麼、卡在哪一步」
+  const stuckPerson = input.people.find((p) => p.overdueTasks > 0);
+  if (stuckPerson) {
+    const who = stuckPerson.userId ? (stuckPerson.name ?? "這位成員") : "沒人認領的任務";
+    push(
+      `person:${stuckPerson.userId ?? "unassigned"}`,
+      `${who}手上那 ${stuckPerson.overdueTasks} 件逾期的是什麼？分別卡在哪一步？`,
+      `因為${who}有 ${stuckPerson.overdueTasks} 件逾期`,
+    );
+  }
+
+  // ③ 待核生成：卡片顯示筆數，答不出「這幾筆各要花多少點、值不值得核」
+  const costly = input.pending.find((p) => p.awaitingGenerations > 0);
+  if (costly) {
+    push(
+      `gen:${costly.projectTitle}`,
+      `「${costly.projectTitle}」那 ${costly.awaitingGenerations} 筆待核生成分別用什麼模型、要花多少點？值得核准嗎？`,
+      `因為「${costly.projectTitle}」有 ${costly.awaitingGenerations} 筆生成卡在成本門檻`,
+    );
+  }
+
+  // ④ 計畫缺資訊：卡片顯示「待補 2」，答不出「缺的是哪些、我該補什麼給它」
+  const concern = input.planConcerns.find((c) => c.missingInformation > 0);
+  if (concern) {
+    push(
+      `concern:${concern.projectTitle}`,
+      `「${concern.projectTitle}」的計畫還缺哪些資訊？我需要補什麼它才跑得下去？`,
+      `因為「${concern.projectTitle}」的計畫有 ${concern.missingInformation} 項待補資訊`,
+    );
+  }
+
+  // ⑤ 待審分鏡：卡片顯示「3 個分鏡等你裁決」，答不出「那三鏡各寫了什麼、該注意什麼」
+  const toReview = input.pending.find((p) => p.pendingApprovals > 0);
+  if (toReview) {
+    push(
+      `scene:${toReview.projectTitle}`,
+      `「${toReview.projectTitle}」那 ${toReview.pendingApprovals} 鏡的畫面與配音詞各寫了什麼？裁決前我該注意什麼？`,
+      `因為「${toReview.projectTitle}」有 ${toReview.pendingApprovals} 鏡送審中`,
+    );
+  }
+
+  // ⑥ 有在跑的計畫：問它實際做了什麼，而不是看進度條
+  const running = input.runs.find((r) => r.status === "running" || r.status === "waiting");
+  if (running) {
+    push(
+      `running:${running.projectId}`,
+      `「${running.projectTitle}」的代理現在實際做到哪、已經產出什麼了？`,
+      `因為「${running.projectTitle}」有計畫正在執行`,
+    );
+  }
+
+  // 補到滿：兜底問句同樣是卡片答不出來的那類。
+  // why 不能寫死成「這個組沒有異常」——它多半是在異常已被前幾句用掉後補位的，
+  // 那樣講會與同一排的第一句自相矛盾。
+  const hadSpecific = out.length > 0;
+  for (const text of TEAM_FALLBACK_QS) {
+    push(
+      `fallback:${text}`,
+      text,
+      hadSpecific ? "通用的深入問題（上面幾句才是針對這個組現在的狀況）" : "這個組目前沒有需要追問的異常，這是通用的深入問題",
+    );
+  }
+  return out;
+}
 
 /** 對話訊息（前端狀態；assistant 訊息帶當輪的查證步驟與派工提議） */
 type ChatMsg = {
@@ -991,6 +1104,18 @@ function TeamAssistantCard({
       setStarterProjectId(starters.projects[0].id);
     }
   }, [starters.projects, starterProjectId]);
+
+  // 建議問句：依這個組的真實狀態即時生成，而不是四句寫死的話。
+  // 資料全部來自這張卡已經查到的東西——零新查詢。
+  const questionSuggestions = useMemo(
+    () => buildTeamQuestionSuggestions({
+      runs,
+      people: insights.data?.people ?? [],
+      planConcerns: insights.data?.planConcerns ?? [],
+      pending: pendingDecisions,
+    }),
+    [runs, insights.data, pendingDecisions],
+  );
 
   // 代理產出與計畫疑慮：兩段都空就不渲染
   const agentOutput = useMemo(() => {
@@ -1532,13 +1657,13 @@ function TeamAssistantCard({
       <div className="team-chat-block">
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 260px" }}>
-            <label htmlFor="ta-question" style={{ marginTop: 0 }}>組彙總 AI</label>
+            <label htmlFor="ta-question" style={{ marginTop: 0 }}>問卡片答不出來的事</label>
             <input
               id="ta-question"
               value={question}
               maxLength={500}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder={msgs.length ? "接著追問…（記得上下文）" : "問問整組狀況：哪個案子卡住了？這週花了多少點？"}
+              placeholder={msgs.length ? "接著追問…（記得上下文）" : "例：「招生短片」那 3 鏡的配音詞各寫了什麼？"}
               onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
             />
           </div>
@@ -1556,9 +1681,16 @@ function TeamAssistantCard({
 
         {msgs.length === 0 && !ask.isPending && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-            {TEAM_QUICK_QS.map((q) => (
-              <Button key={q} size="sm" title="點了帶入輸入框，按「詢問」才送出（免費）" onClick={() => setQuestion(q)}>
-                {q}
+            {questionSuggestions.map((s) => (
+              <Button
+                key={s.id}
+                size="sm"
+                /* tooltip 講出「這句是被什麼觸發的」——讓人看得出它讀了自己的資料，
+                   而不是四句對誰都一樣的罐頭問句 */
+                title={`${s.why}。點了帶入輸入框，按「詢問」才送出（免費）`}
+                onClick={() => setQuestion(s.text)}
+              >
+                {s.text}
               </Button>
             ))}
           </div>
@@ -1566,7 +1698,8 @@ function TeamAssistantCard({
 
         {/* 「免費・唯讀」是花不花錢的前提，屬於代價資訊 → 兩種模式都要看得到 */}
         <Hint layer="always" style={{ marginTop: 8 }}>
-          免費・唯讀分析整組專案與代理進度{canDispatchHint ? "，並可提議發起 AI 執行計畫（需該專案核准才花點）" : ""}。
+          免費・唯讀。上面的卡片給你數字，這裡給你數字背後的東西——它會鑽進分鏡全文、生成紀錄、
+          人員任務與資料庫查證後再回答{canDispatchHint ? "，也可提議發起 AI 執行計畫（需該專案核准才花點）" : ""}。
           {msgs.length > 0 && (
             <Button
               variant="ghost"
