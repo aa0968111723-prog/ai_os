@@ -16,6 +16,7 @@ import {
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
 import { listAiProjectRoles } from "../../../shared/aiProjectRoles";
+import { getPlaybook } from "../../../shared/rolePlaybooks";
 
 /**
  * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
@@ -178,6 +179,8 @@ const GOAL_EXAMPLES = [
 ];
 
 const AI_ROLE_ROSTER = listAiProjectRoles();
+/** #133 PR-3：創作短版入口——固定短骨架（拆分鏡→生成→可選配音／送審），與完整多步計畫區隔 */
+const SHORT_CREATION_PLAYBOOK = getPlaybook("playbook.creation.short.v1");
 
 export function AgentCard({
   projectId,
@@ -393,6 +396,20 @@ export function AgentCard({
             placeholder={`例：${GOAL_EXAMPLES[0]}`}
           />
           <div className="creation-skill-picker__row" style={{ marginTop: 6 }}>
+            {SHORT_CREATION_PLAYBOOK && (
+              <button
+                type="button"
+                className="chip pick"
+                style={{ fontWeight: 650 }}
+                title={`${SHORT_CREATION_PLAYBOOK.title}——快速出一版可審的影音／圖文；要排程、物資與多人分工請改用完整多步計畫（直接描述目標即可）`}
+                onClick={() => {
+                  setGoal(SHORT_CREATION_PLAYBOOK.goalTemplate);
+                  goalInputRef.current?.focus();
+                }}
+              >
+                <Icon name="Sparkles" size={12} /> 快速開拍（短版）
+              </button>
+            )}
             {AI_ROLE_ROSTER.slice(0, compactComposer ? 4 : 6).map((role) => (
               <button
                 key={role.id}
