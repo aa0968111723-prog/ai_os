@@ -19,6 +19,7 @@ import {
 } from "../services/rateLimit";
 import {
   assembleKnowledgeContext,
+  extractKnowledgeSummary,
   KNOWLEDGE_INJECT_BUDGET_DEFAULT,
   type KnowledgeInjectMode,
   type KnowledgeInjectOptions,
@@ -93,6 +94,7 @@ export async function buildKnowledgeContextWithMeta(
         title: schema.knowledge.title,
         content: schema.knowledge.content,
         pinned: schema.knowledge.pinned,
+        summary: schema.knowledge.summary,
         createdAt: schema.knowledge.createdAt,
       })
       .from(schema.knowledge)
@@ -118,6 +120,7 @@ export async function buildKnowledgeContextWithMeta(
     title: r.title,
     content: r.content,
     pinned: r.pinned,
+    summary: r.summary,
     createdAt: r.createdAt,
   }));
 
@@ -228,12 +231,31 @@ async function describeOverLimit(userId: string): Promise<boolean> {
 
 export const knowledgeRouter = router({
   /** 列出專案知識庫（不回傳全文，只回摘要與長度，省流量） */
-  list: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {
+  list: authedProcedure
+    .input(
+      z.object({
+        projectId: z.string().uuid(),
+        /** 關鍵字：標題／內容／抽取摘要 ILIKE（可選） */
+        q: z.string().trim().max(80).optional(),
+        kind: z.enum(["transcript", "testimony", "script", "note"]).optional(),
+        pinnedOnly: z.boolean().optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
     const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
     if (!project) throw new TRPCError({ code: "NOT_FOUND" });
     requireGroup(ctx.auth, project.groupId);
     // 回收桶裡的知識不列在正式清單（另走 projects.listDeleted）
     // SQL 層取 length／left——清單只要 120 字摘要，勿 SELECT 全文再 slice（長逐字稿會撐爆記憶體／頻寬）
+    const filters = [eq(schema.knowledge.projectId, input.projectId), isNull(schema.knowledge.deletedAt)];
+    if (input.kind) filters.push(eq(schema.knowledge.kind, input.kind));
+    if (input.pinnedOnly) filters.push(eq(schema.knowledge.pinned, true));
+    if (input.q) {
+      const pat = `%${input.q.replace(/[%_\\]/g, "\\$&")}%`;
+      filters.push(
+        sql`(${schema.knowledge.title} ILIKE ${pat} OR ${schema.knowledge.content} ILIKE ${pat} OR COALESCE(${schema.knowledge.summary}, '') ILIKE ${pat})`,
+      );
+    }
     const rows = await db
       .select({
         id: schema.knowledge.id,
@@ -241,12 +263,13 @@ export const knowledgeRouter = router({
         title: schema.knowledge.title,
         chars: sql<number>`length(${schema.knowledge.content})`.mapWith(Number),
         excerpt: sql<string>`left(${schema.knowledge.content}, 120)`,
+        summary: schema.knowledge.summary,
         sourceAssetId: schema.knowledge.sourceAssetId,
         pinned: schema.knowledge.pinned,
         createdAt: schema.knowledge.createdAt,
       })
       .from(schema.knowledge)
-      .where(and(eq(schema.knowledge.projectId, input.projectId), isNull(schema.knowledge.deletedAt)))
+      .where(and(...filters))
       // 釘選在前，再依建立時間新→舊（與注入 rank 一致，方便使用者掃清單）
       .orderBy(desc(schema.knowledge.pinned), desc(schema.knowledge.createdAt));
     return rows;
@@ -323,6 +346,7 @@ export const knowledgeRouter = router({
         if (!srcAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到來源素材" });
         if (srcAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "來源素材不屬於此專案的組" });
       }
+      const summary = extractKnowledgeSummary(input.content);
       const [row] = await db
         .insert(schema.knowledge)
         .values({
@@ -331,6 +355,7 @@ export const knowledgeRouter = router({
           kind: input.kind,
           title: input.title.trim(),
           content: input.content,
+          summary: summary || null,
           sourceAssetId: input.sourceAssetId,
           createdBy: ctx.auth.user.id,
         })
@@ -363,13 +388,16 @@ export const knowledgeRouter = router({
       // 只在內容『真的改變』時存（只改標題／重存相同內容不灌版本），避免雜訊。
       const contentChanges = input.content !== undefined && input.content !== row.content;
       if (contentChanges) await snapshotKnowledge(row, ctx.auth.user.id);
+      const nextContent = input.content ?? row.content;
+      const summary = contentChanges ? extractKnowledgeSummary(nextContent) || null : row.summary;
       const [updated] = await db
         .update(schema.knowledge)
         .set({
           kind: input.kind ?? row.kind,
           title: input.title?.trim() ?? row.title,
-          content: input.content ?? row.content,
+          content: nextContent,
           pinned: input.pinned ?? row.pinned,
+          summary,
         })
         .where(eq(schema.knowledge.id, input.id))
         .returning();
@@ -512,6 +540,7 @@ export const knowledgeRouter = router({
           kind: input.kind,
           title: picked.name.slice(0, 120),
           content,
+          summary: extractKnowledgeSummary(content) || null,
           createdBy: ctx.auth.user.id,
         })
         .returning();
@@ -575,6 +604,7 @@ export const knowledgeRouter = router({
           kind: "note",
           title: asset.title.slice(0, 120),
           content,
+          summary: extractKnowledgeSummary(content) || null,
           sourceAssetId: asset.id,
           createdBy: ctx.auth.user.id,
         })
@@ -685,6 +715,7 @@ export const knowledgeRouter = router({
             kind: "note",
             title,
             content,
+            summary: extractKnowledgeSummary(content) || null,
             sourceAssetId: asset.id,
             createdBy: ctx.auth.user.id,
           })
