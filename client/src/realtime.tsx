@@ -1005,7 +1005,9 @@ export function CollabModeBar({
       {mode === "mirror" && (
         <>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 4, margin: 0 }}>
-            <Hint as="span" style={{ fontSize: 11 }}>跟著</Hint>
+            {/* layer="always"：這是 select 的標籤文字，不是可收的說明。
+                預設的 guide 層在精簡密度會收合成一顆「說明」鈕，label 就只剩問號配下拉，語意壞掉 */}
+            <Hint as="span" layer="always" style={{ fontSize: 11 }}>跟著</Hint>
             <select
               aria-label="選擇要跟隨的夥伴"
               value={followUserId ?? ""}

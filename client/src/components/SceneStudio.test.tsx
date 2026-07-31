@@ -13,6 +13,7 @@ const versionsQuery = vi.fn();
 const updateMutate = vi.fn();
 const regenMutate = vi.fn();
 const refineMutate = vi.fn();
+const voiceMutate = vi.fn();
 const setCurrentMutate = vi.fn();
 const invalidate = vi.fn();
 
@@ -24,6 +25,7 @@ vi.mock("../api", () => ({
       update: { useMutation: () => ({ mutate: updateMutate, isPending: false, isSuccess: false, error: null }) },
       generateInto: { useMutation: () => ({ mutate: regenMutate, isPending: false, error: null }) },
       refine: { useMutation: () => ({ mutate: refineMutate, isPending: false, error: null }) },
+      generateVoiceover: { useMutation: () => ({ mutate: voiceMutate, isPending: false, error: null }) },
       setVisualFromAsset: { useMutation: () => ({ mutate: setCurrentMutate, isPending: false, error: null }) },
     },
   },
@@ -48,7 +50,7 @@ function genRow(over: Partial<SceneVersionGenerationRow> & { generationId: strin
 }
 
 /** 伺服器回傳的形狀（scenes.versions）——用真的 buildSceneVersions 產生，避免 mock 與正式投影分岔 */
-function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?: string | null; prompt?: string | null } = {}) {
+function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?: string | null; prompt?: string | null; voiceover?: string | null } = {}) {
   const rows = opts.rows ?? [genRow({ generationId: "g1", createdAt: "2026-07-01T00:00:00.000Z" })];
   const currentAssetId = opts.currentAssetId === undefined ? "asset-g1" : opts.currentAssetId;
   const versions = buildSceneVersions(rows, { assetId: currentAssetId, narrationAssetId: null });
@@ -57,7 +59,7 @@ function serverData(opts: { rows?: SceneVersionGenerationRow[]; currentAssetId?:
     projectId: "p-1",
     title: "海邊遠景",
     prompt: opts.prompt === undefined ? "黃昏的海邊" : opts.prompt,
-    voiceover: null,
+    voiceover: opts.voiceover ?? null,
     assetId: currentAssetId,
     narrationAssetId: null,
     versions,
@@ -282,6 +284,47 @@ describe("SceneStudio", () => {
     await user.click(screen.getByRole("tab", { name: /版本/ }));
     expect(screen.getByText(/供應商逾時（已退點）/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /設為現用/ })).not.toBeInTheDocument();
+  });
+
+  it("配音頁：還沒填配音詞→生成鈕鎖住並指路；填了要先儲存", async () => {
+    const user = userEvent.setup();
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /配音/ }));
+    expect(screen.getByText(/先填配音詞並儲存/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^生成配音/ })).toBeDisabled();
+    // 打了字＝尚未儲存：儲存鈕亮起、生成仍鎖（後端唸的是已儲存的稿）
+    await user.type(screen.getByRole("textbox", { name: /這一格的配音詞/ }), "各位同學大家好");
+    expect(screen.getByRole("button", { name: /儲存配音詞/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /^生成配音/ })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /儲存配音詞/ }));
+    expect(updateMutate).toHaveBeenCalledWith({ sceneId: "s-1", voiceover: "各位同學大家好" });
+  });
+
+  it("配音詞已儲存：生成配音帶冪等鍵送出（重試不重複扣點）", async () => {
+    const user = userEvent.setup();
+    versionsQuery.mockReturnValue({
+      data: serverData({ voiceover: "各位同學大家好" }),
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+    mountStudio();
+    await user.click(screen.getByRole("tab", { name: /配音/ }));
+    await user.click(screen.getByRole("button", { name: /^生成配音/ }));
+    await user.click(screen.getByRole("button", { name: "確認生成" }));
+    expect(voiceMutate).toHaveBeenCalledTimes(1);
+    const arg = voiceMutate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.sceneId).toBe("s-1");
+    expect(typeof arg.clientRequestId).toBe("string");
+  });
+
+  it("檢視者的配音頁：唯讀，沒有編輯與生成鈕", async () => {
+    const user = userEvent.setup();
+    mountStudio({ canEdit: false });
+    await user.click(screen.getByRole("tab", { name: /配音/ }));
+    expect(screen.getByText(/只能試聽旁白/)).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /這一格的配音詞/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^生成配音/ })).not.toBeInTheDocument();
   });
 
   it("檢視者：看得到版本與成本，但沒有任何寫入鈕（2.3 唯讀）", async () => {

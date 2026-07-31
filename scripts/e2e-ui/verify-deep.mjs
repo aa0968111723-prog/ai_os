@@ -76,18 +76,22 @@ ok("對話有 AI 回覆", (await page.locator('#sec-assistant [role="log"] >> te
 ok("回覆帶可執行提議（確認才執行）", (await page.locator('#sec-assistant button:has-text("讓 AI 代理排計畫")').count()) >= 1);
 await page.screenshot({ path: SHOT("2-director"), fullPage: false });
 
-// ── 5. 逐格生成模型選擇 ──
+// ── 5. 逐格模型選擇（深度優化後收進單格工作室「重畫這格」，分鏡列不再放選單）──
 await page.locator("#onboard-delivery").scrollIntoViewIfNeeded();
-const modelSel = page.locator(`#scene-gen-model-${PROJ}`);
-ok("分鏡卡有逐格生成模型選單", (await modelSel.count()) === 1);
-await modelSel.selectOption({ label: await modelSel.locator("option").nth(1).textContent().then((t) => t.trim()) }).catch(async () => {
-  const v = await modelSel.locator("option").nth(1).getAttribute("value");
-  await modelSel.selectOption(v);
-});
+await page.locator('#onboard-delivery button:has-text("單格工作室")').first().click();
+await page.locator('[role="tab"]:has-text("重畫這格")').click();
+const modelSel = page.locator('[id^="studio-regen-model-"]');
+ok("單格工作室有重畫模型選單", (await modelSel.count()) === 1);
+const modelVal = await modelSel.locator("option").nth(1).getAttribute("value");
+await modelSel.selectOption(modelVal);
 const chosen = await modelSel.inputValue();
+await page.locator('[aria-label="關閉單格工作室"]').click();
 await page.reload();
-await page.waitForSelector(`#scene-gen-model-${PROJ}`, { timeout: 20000 });
-ok("模型選擇重整後仍記住", (await page.locator(`#scene-gen-model-${PROJ}`).inputValue()) === chosen);
+await page.waitForSelector('#onboard-delivery button:has-text("單格工作室")', { timeout: 20000 });
+await page.locator('#onboard-delivery button:has-text("單格工作室")').first().click();
+await page.locator('[role="tab"]:has-text("重畫這格")').click();
+ok("模型選擇重整後仍記住", (await page.locator('[id^="studio-regen-model-"]').inputValue()) === chosen);
+await page.keyboard.press("Escape");
 await page.screenshot({ path: SHOT("3-scenemodel"), fullPage: false });
 
 // ── 6. 生成確認彈窗注入透明化 ──

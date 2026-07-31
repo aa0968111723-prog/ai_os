@@ -1915,7 +1915,7 @@ export function ProjectPage({ id }: { id: string }) {
             {/* 錨點 id 掛外層 div、不再加外層 <h2>（SceneList 卡片自帶同名標題，白話提示移進去了） */}
             <div data-fb="打包下載" id="onboard-delivery">
               {/* charIds/sceneIds：逐鏡就地生成也注入生成台勾選的角色/場景錨點——逐鏡出圖與生成台出圖同一套畫風 */}
-              <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} onUsePrompt={applyPrompt} charIds={charIds} sceneIds={sceneIds} />
+              <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} projectTitle={project.data?.title} />
             </div>
           </CollabZone>
         </div>

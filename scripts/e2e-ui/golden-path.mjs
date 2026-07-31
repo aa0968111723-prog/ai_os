@@ -78,14 +78,18 @@ for (let i = 0; i < 25; i++) {
   if ((await page.locator("#onboard-delivery img.gen-thumb").count()) >= 1) { gotThumb = true; break; }
 }
 log("逐格生成回填縮圖：", gotThumb);
-await page.locator('button:has-text("生成配音")').first().click();
+// 配音深改收進單格工作室（分鏡列只留「旁白 ✓／未生成」狀態）：開工作室 → 配音分頁 → 生成
+await page.locator('#onboard-delivery button:has-text("單格工作室")').first().click();
+await page.locator('[role="tab"]:has-text("配音")').click();
+await page.locator('button:has-text("生成配音")').click();
 await page.locator('button:has-text("確認生成")').first().click();
+await page.locator('[aria-label="關閉單格工作室"]').click();
 let gotAudio = false;
 for (let i = 0; i < 25; i++) {
   await page.waitForTimeout(3000);
-  if ((await page.locator("#onboard-delivery audio").count()) >= 1) { gotAudio = true; break; }
+  if ((await page.locator('#onboard-delivery :text("旁白 ✓")').count()) >= 1) { gotAudio = true; break; }
 }
-log("旁白音檔出現：", gotAudio);
+log("旁白生成完成（分鏡列標旁白 ✓）：", gotAudio);
 await page.locator("#onboard-delivery").scrollIntoViewIfNeeded();
 await shot(page, "07-scene-generated");
 
