@@ -8,7 +8,7 @@
  */
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type React from "react";
 import {
   buildDecisionInbox,
@@ -129,6 +129,27 @@ vi.mock("../components/InstallAppBanner", () => ({ InstallAppBanner: () => null 
 const GROUP = "11111111-1111-4111-8111-111111111111";
 const NOW = Date.parse("2026-07-30T12:00:00Z");
 const daysAgo = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
+
+/**
+ * 系統時間要跟 fixture 用同一個基準，否則這個檔會隨日子過去自己壞掉。
+ *
+ * 這裡的時間戳全是從 NOW 往回推的，但畫面上的「卡了 N 天」是元件用 Date.now()
+ * 現算的（Launchpad.tsx 的 nowMs）。不凍結的話兩邊基準會差上「今天離 NOW 幾天」，
+ * 於是 daysAgo(8) 在隔天被顯示成「卡了 9 天」——這個檔曾經就是這樣從寫好的隔天
+ * 起永久紅，而且愈晚跑差愈多。修法是把時鐘釘在 NOW，不是把期望值改成當下日期。
+ *
+ * shouldAdvanceTime 是必要的：假時鐘若完全停住，userEvent 與 findBy* 內部排的
+ * setTimeout 永遠不會觸發，整個檔的互動測試會卡到逾時。它讓假時鐘照真實時間推進，
+ * 只漂移幾毫秒，對「天」為單位的斷言沒有影響。
+ */
+beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.setSystemTime(NOW);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const run = (over: Partial<Record<string, unknown>> = {}) => ({
   id: "run-1", projectId: "p1", projectTitle: "招生短片", goal: "把腳本拆成分鏡",
