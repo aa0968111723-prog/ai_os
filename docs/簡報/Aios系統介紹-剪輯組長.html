@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Aios · AI 創作作業系統 — 給剪輯組長的系統介紹</title>
+<meta name="hz:slide-selector" content=".slide" />
+<meta name="hz:canvas-width" content="1920" />
+<meta name="hz:canvas-height" content="1080" />
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@600;700&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #ded5c4;
+  padding: 40px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+}
+
+/* ── 畫布 ───────────────────────────────────────────── */
+.slide {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: #f2ece0;
+  color: #2b2620;
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-weight: 400;
+}
+.slide.dark { background: #2f2620; color: #f6efe3; }
+
+/* ── 文字角色樣式（全 deck 共用） ─────────────────────── */
+.display {
+  font-family: "Noto Serif TC", "Songti TC", serif;
+  font-weight: 700;
+  font-size: 116px;
+  line-height: 1.14;
+  letter-spacing: 2px;
+  color: #f6efe3;
+}
+.heading {
+  font-family: "Noto Serif TC", "Songti TC", serif;
+  font-weight: 700;
+  font-size: 68px;
+  line-height: 1.2;
+  letter-spacing: 1px;
+  color: #2b2620;
+}
+.dark .heading { color: #f6efe3; }
+.subheading {
+  font-family: "Noto Sans TC", sans-serif;
+  font-weight: 700;
+  font-size: 34px;
+  line-height: 1.35;
+  color: #2b2620;
+}
+.body {
+  font-family: "Noto Sans TC", sans-serif;
+  font-weight: 400;
+  font-size: 26px;
+  line-height: 1.62;
+  color: #4a4034;
+}
+.dark .body { color: #d9cfbf; }
+.label {
+  font-family: "Noto Sans TC", sans-serif;
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 5px;
+  color: #a44b27;
+}
+.caption {
+  font-family: "Noto Sans TC", sans-serif;
+  font-weight: 400;
+  font-size: 21px;
+  line-height: 1.5;
+  color: #6f6355;
+}
+.dark .caption { color: #b7a992; }
+.mono {
+  font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-weight: 400;
+  letter-spacing: 0.3px;
+}
+
+/* ── 版面骨架 ─────────────────────────────────────────── */
+.head { position: absolute; left: 112px; top: 84px; width: 1696px; }
+.head .label { display: block; margin-bottom: 18px; }
+.rule { width: 88px; height: 6px; background: #b0542f; border-radius: 3px; margin-top: 26px; }
+.lede { margin-top: 26px; max-width: 1180px; }
+.stage { position: absolute; left: 112px; top: 306px; width: 1696px; }
+.stage.low { top: 376px; }
+
+.foot {
+  position: absolute; left: 112px; right: 112px; bottom: 52px;
+  display: flex; justify-content: space-between; align-items: center;
+  font-family: "Noto Sans TC", sans-serif; font-size: 19px; color: #8b7d6b;
+  border-top: 1px solid #e3d7c2; padding-top: 16px;
+}
+.dark .foot { color: #8d8171; border-top-color: #4a3f34; }
+.foot b { font-weight: 700; color: #6f6355; letter-spacing: 2px; }
+.dark .foot b { color: #b7a992; }
+
+/* ── 元件 ─────────────────────────────────────────────── */
+.card {
+  background: #fdfbf6;
+  border: 1px solid #e3d7c2;
+  border-radius: 20px;
+  padding: 36px 38px;
+  box-shadow: 0 2px 4px -1px rgba(74,54,32,.07);
+}
+.card .t { font-family: "Noto Sans TC", sans-serif; font-weight: 700; font-size: 32px; color: #2b2620; margin-bottom: 14px; }
+.card .d { font-family: "Noto Sans TC", sans-serif; font-weight: 400; font-size: 23px; line-height: 1.58; color: #5d5245; }
+.card .tag {
+  display: inline-block; font-family: "Noto Sans TC", sans-serif; font-weight: 700; font-size: 18px;
+  letter-spacing: 2px; color: #a44b27; background: #f6e7de; border: 1px solid #e7c6b4;
+  border-radius: 999px; padding: 5px 16px; margin-bottom: 16px;
+}
+.card.accent { border-color: #e7c6b4; background: #fdf6f1; }
+
+.grid { display: grid; gap: 26px; }
+.g2 { grid-template-columns: 1fr 1fr; }
+.g3 { grid-template-columns: repeat(3, 1fr); }
+.g4 { grid-template-columns: repeat(4, 1fr); }
+
+.stat { text-align: left; }
+.stat .n {
+  font-family: "Noto Serif TC", serif; font-weight: 700; font-size: 82px; line-height: 1;
+  color: #b0542f; letter-spacing: -1px;
+}
+.stat .u { font-family: "Noto Sans TC", sans-serif; font-weight: 700; font-size: 28px; color: #b0542f; }
+.stat .k { font-family: "Noto Sans TC", sans-serif; font-weight: 500; font-size: 23px; color: #5d5245; margin-top: 10px; }
+
+.chip {
+  display: inline-block; font-family: "Noto Sans TC", sans-serif; font-weight: 500; font-size: 22px;
+  color: #4a4034; background: #f6efe3; border: 1px solid #e3d7c2;
+  border-radius: 12px; padding: 10px 20px; margin: 0 10px 12px 0;
+}
+
+.flowrow { display: flex; align-items: stretch; gap: 0; }
+.step {
+  flex: 1; background: #fdfbf6; border: 1px solid #e3d7c2; border-radius: 18px;
+  padding: 28px 22px; text-align: center;
+}
+.step .i {
+  font-family: "Noto Serif TC", serif; font-weight: 700; font-size: 26px; color: #b0542f;
+  display: block; margin-bottom: 12px;
+}
+.step .s { font-family: "Noto Sans TC", sans-serif; font-weight: 700; font-size: 27px; color: #2b2620; }
+.step .m { font-family: "Noto Sans TC", sans-serif; font-size: 19px; color: #7a6d5d; margin-top: 8px; line-height: 1.45; }
+.step.hot { background: #fdf1ea; border-color: #e0b49c; }
+.arrow { display: flex; align-items: center; padding: 0 14px; color: #c0ae94; font-size: 30px; font-weight: 700; }
+
+.list { list-style: none; }
+.list li {
+  position: relative; padding-left: 34px; margin-bottom: 18px;
+  font-family: "Noto Sans TC", sans-serif; font-size: 25px; line-height: 1.55; color: #4a4034;
+}
+.list li::before {
+  content: ""; position: absolute; left: 0; top: 13px;
+  width: 12px; height: 12px; border-radius: 3px; background: #c2613f;
+}
+.dark .list li { color: #d9cfbf; }
+.list li b { font-weight: 700; color: #2b2620; }
+.dark .list li b { color: #f6efe3; }
+
+.tree {
+  background: #fdfbf6; border: 1px solid #e3d7c2; border-radius: 20px; padding: 34px 40px;
+  font-size: 25px; line-height: 1.95; color: #4a4034;
+}
+.tree .dir { color: #a44b27; font-weight: 700; }
+.tree .note { color: #8b7d6b; font-size: 21px; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: "Noto Sans TC", sans-serif; font-weight: 700; font-size: 24px;
+  border-radius: 999px; padding: 10px 24px;
+}
+.badge.wait { background: #f3ead6; color: #856118; border: 1px solid #ddc99b; }
+.badge.pass { background: #e7eee1; color: #47623d; border: 1px solid #b9cdad; }
+.badge.back { background: #f6e2de; color: #b23a2c; border: 1px solid #e3b3aa; }
+
+.kv { display: flex; justify-content: space-between; align-items: baseline; padding: 15px 0; border-bottom: 1px dashed #ddd0b8; }
+.kv:last-child { border-bottom: 0; }
+.kv .k { font-family: "Noto Sans TC", sans-serif; font-size: 24px; color: #4a4034; }
+.kv .v { font-family: "Noto Sans TC", sans-serif; font-weight: 700; font-size: 24px; color: #a44b27; }
+
+.hl { color: #a44b27; font-weight: 700; }
+.dark .hl { color: #e6a583; }
+
+/* ── 列印／匯出 PDF（每張投影片一頁） ─────────────────── */
+@page { size: 1920px 1080px; margin: 0; }
+@media print {
+  body { background: #fff; padding: 0; gap: 0; display: block; }
+  .slide { break-after: page; page-break-after: always; }
+  .slide:last-child { break-after: auto; page-break-after: auto; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ 1 · 封面 ═══════════════════════════════════════ -->
+<div class="slide dark" data-canvas-width="1920" data-canvas-height="1080">
+  <div style="position:absolute;left:0;top:0;width:1920px;height:1080px;background:linear-gradient(135deg,#2f2620 0%,#3d2f24 58%,#5a3722 100%);"></div>
+  <div style="position:absolute;right:-160px;top:-160px;width:820px;height:820px;border-radius:50%;background:rgba(194,97,63,.14);"></div>
+  <div style="position:absolute;right:60px;bottom:-260px;width:560px;height:560px;border-radius:50%;background:rgba(181,138,62,.10);"></div>
+
+  <div style="position:absolute;left:130px;top:250px;width:1300px;">
+    <span class="label" style="color:#e6a583;display:block;margin-bottom:34px;">釋迦牟尼佛救世基金會 · 內部工具</span>
+    <h1 class="display">Aios<br/>AI 創作作業系統</h1>
+    <div style="width:120px;height:7px;background:#c2613f;border-radius:4px;margin:44px 0 34px;"></div>
+    <p class="body" style="font-size:32px;color:#e0d5c4;max-width:1120px;">
+      一套「懂我們素材」的團隊 AI ——<br/>
+      讓夥伴做影片不必反覆餵資料，在受控成本下生成、協作、審批，<br/>
+      最後<span class="hl">一鍵打包成可以直接匯入剪輯軟體的專案</span>。
+    </p>
+  </div>
+
+  <div style="position:absolute;left:130px;bottom:120px;">
+    <span class="caption" style="font-size:24px;letter-spacing:3px;">簡報對象 · 剪輯組長</span>
+  </div>
+  <div style="position:absolute;right:130px;bottom:120px;text-align:right;">
+    <span class="caption" style="font-size:24px;">系統總覽 · 2026</span>
+  </div>
+</div>
+
+<!-- ═══ 2 · 30 秒版 ════════════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">三十秒讀懂</span>
+    <h2 class="heading">這個系統在解決什麼問題</h2>
+    <div class="rule"></div>
+  </div>
+
+  <div class="stage" style="top:300px;">
+    <div class="grid g2" style="gap:34px;">
+      <div class="card" style="background:#f6e2de;border-color:#e3b3aa;">
+        <div class="tag" style="color:#b23a2c;background:#fff;border-color:#e3b3aa;">現在的痛</div>
+        <div class="t" style="color:#8f2f24;">每做一支片，都要從零解釋一次</div>
+        <div class="d" style="color:#6b3a33;">
+          AI 工具不知道我們的調性與禁語，每次都得重貼背景；<br/>
+          素材散在各處，命名沒規則；<br/>
+          成本無法預估，做完才知道花了多少；<br/>
+          交到剪輯手上還要自己重新對照腳本排時間軸。
+        </div>
+      </div>
+      <div class="card accent">
+        <div class="tag">Aios 的做法</div>
+        <div class="t">背景設定一次，之後每次生成自動帶入</div>
+        <div class="d">
+          專案的「世界觀」自動注入每一次提示詞；<br/>
+          成品自動入素材庫、依分鏡順序命名；<br/>
+          先扣預估點數、失敗全額退回，帳本可查；<br/>
+          交付包內附<span class="hl">時間軸檔</span>，匯入即見粗剪。
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g4" style="margin-top:44px;">
+      <div class="card"><div class="stat"><div class="n">70<span class="u"> 模型</span></div><div class="k">11 大創作類別，另含 7 條工作流</div></div></div>
+      <div class="card"><div class="stat"><div class="n">4<span class="u"> 種輸出</span></div><div class="k">圖像 · 影片 · 音訊 · 文字</div></div></div>
+      <div class="card"><div class="stat"><div class="n">3<span class="u"> 種時間軸</span></div><div class="k">FCPXML · Premiere XML · 剪映草稿</div></div></div>
+      <div class="card"><div class="stat"><div class="n">1<span class="u"> 個網址</span></div><div class="k">網頁 · API · 下載 · MCP 同一服務</div></div></div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>02</span></div>
+</div>
+
+<!-- ═══ 3 · 全景流程 ═══════════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">全景流程</span>
+    <h2 class="heading">從一句話，到可以開剪的專案</h2>
+    <div class="rule"></div>
+    <p class="body lede">每一步都在同一個網站裡完成，資料不落地、不轉手；灰底是組員的事，<span class="hl">紅底兩步是組長的事</span>。</p>
+  </div>
+
+  <div class="stage" style="top:420px;">
+    <div class="flowrow">
+      <div class="step"><span class="i">01</span><div class="s">建立專案</div><div class="m">選平台，格式自動帶</div></div>
+      <div class="arrow">›</div>
+      <div class="step"><span class="i">02</span><div class="s">設世界觀</div><div class="m">故事一句話・關鍵訊息・調性</div></div>
+      <div class="arrow">›</div>
+      <div class="step"><span class="i">03</span><div class="s">生成台</div><div class="m">選類別與模型，自動帶背景</div></div>
+      <div class="arrow">›</div>
+      <div class="step"><span class="i">04</span><div class="s">加入分鏡</div><div class="m">滿意的成品排順序</div></div>
+      <div class="arrow">›</div>
+      <div class="step hot"><span class="i">05</span><div class="s">組長審批</div><div class="m">通過／退回附理由</div></div>
+      <div class="arrow">›</div>
+      <div class="step hot"><span class="i">06</span><div class="s">交付素材包</div><div class="m">zip＋時間軸檔</div></div>
+      <div class="arrow">›</div>
+      <div class="step"><span class="i">07</span><div class="s">進剪輯軟體</div><div class="m">匯入即見粗剪</div></div>
+    </div>
+
+    <div class="grid g3" style="margin-top:56px;">
+      <div class="card">
+        <div class="t">組員日常</div>
+        <div class="d">建專案 → 填世界觀三題（可請 AI 導演給 idea）→ 生成 → 加入分鏡 → 排順序 → 送審</div>
+      </div>
+      <div class="card accent">
+        <div class="t">組長日常</div>
+        <div class="d">分鏡出現「待審」→ 通過或退回（附一句理由，自動通知）；隨時調整每人每週點數額度</div>
+      </div>
+      <div class="card">
+        <div class="t">所有人</div>
+        <div class="d">站內留言討論、私訊帶附件與卡片、頂欄「回饋」兩分鐘填七項評分</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>03</span></div>
+</div>
+
+<!-- ═══ 4 · 架構 ═══════════════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">系統架構</span>
+    <h2 class="heading">整站只有三個角色在運作</h2>
+    <div class="rule"></div>
+  </div>
+
+  <div class="stage" style="top:340px;">
+    <div style="display:flex;align-items:center;gap:0;">
+      <div class="card" style="flex:1;text-align:center;padding:44px 30px;">
+        <div class="t" style="font-size:34px;">瀏覽器</div>
+        <div class="d" style="font-size:22px;">React 前端<br/>桌面優先，手機可用</div>
+      </div>
+      <div class="arrow" style="font-size:26px;padding:0 22px;">HTTPS ›</div>
+      <div class="card accent" style="flex:1.25;text-align:center;padding:44px 30px;">
+        <div class="t" style="font-size:34px;">Railway App</div>
+        <div class="d" style="font-size:22px;">Express + tRPC + Drizzle<br/>網頁・API・下載・MCP 同一服務</div>
+      </div>
+      <div class="arrow" style="font-size:26px;padding:0 22px;">›</div>
+      <div class="card" style="flex:1;text-align:center;padding:44px 30px;">
+        <div class="t" style="font-size:34px;">Postgres</div>
+        <div class="d" style="font-size:22px;">所有資料<br/>每筆掛組，跨組看不到</div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:center;margin-top:26px;">
+      <div class="card" style="width:640px;text-align:center;background:#e1eff1;border-color:#a9cdd3;">
+        <div class="t" style="font-size:30px;color:#275c65;">Fal.ai — 唯一 AI 供應商</div>
+        <div class="d" style="font-size:22px;color:#2f5b62;">圖像 / 影片 / 音訊 / 文字 / AI 建議，全部走同一條金流與帳本</div>
+      </div>
+    </div>
+
+    <div class="grid g3" style="margin-top:48px;">
+      <div class="card"><div class="t" style="font-size:28px;">假生成模式</div><div class="d">沒填 FAL_KEY 時照樣能用，回測試圖不花錢——先讓夥伴熟悉整條流程，之後填金鑰即切真實生成</div></div>
+      <div class="card"><div class="t" style="font-size:28px;">多組隔離</div><div class="d">每筆資料掛組，別組永遠看不到；34 項自動測試專門攻擊這條防線</div></div>
+      <div class="card"><div class="t" style="font-size:28px;">系統自檢</div><div class="d"><span class="mono">/api/ready</span> 看資料庫是否接通、管理頁一鍵驗證七大子系統</div></div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>04</span></div>
+</div>
+
+<!-- ═══ 5 · 專案與世界觀 ═══════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">核心機制 一</span>
+    <h2 class="heading">世界觀：只解釋一次的背景設定</h2>
+    <div class="rule"></div>
+    <p class="body lede">建專案時填三題，之後<span class="hl">每一次生成都自動接進提示詞</span>——不必再貼一次，調性也不會跑掉。</p>
+  </div>
+
+  <div class="stage" style="top:344px;">
+    <div class="grid g2" style="gap:34px;">
+      <div>
+        <div class="card" style="margin-bottom:24px;">
+          <div class="tag">填什麼</div>
+          <ul class="list" style="margin-top:6px;">
+            <li><b>Logline</b>　一句話說完這支片在講什麼</li>
+            <li><b>關鍵訊息</b>　最想讓觀眾記得的一句</li>
+            <li><b>主軸與調性</b>　溫暖／莊嚴／輕快…</li>
+            <li><b>內建禁語</b>　醫療宣稱等預設避免清單，自動加進每次生成的「避免」欄</li>
+          </ul>
+        </div>
+        <div class="card accent">
+          <div class="t" style="font-size:28px;">想不到怎麼填？</div>
+          <div class="d">按「AI 導演建議」——依世界觀給 3 個分鏡 idea、一鍵帶入提示詞。<br/>建議僅供參考，成品一律仍須組長審核。</div>
+        </div>
+      </div>
+
+      <div class="card" style="background:#fdf6f1;border-color:#e7c6b4;">
+        <div class="tag">效果</div>
+        <div class="t">同一個專案裡，第 1 次生成和第 50 次生成，講的是同一個故事</div>
+        <div class="d" style="margin-top:20px;">
+          專案建立時選平台（例如 Shorts），畫面比例自動帶直式，不必每次重設。<br/><br/>
+          生成的每一件成品自動進素材庫，並記錄：使用模型、提示詞、耗用點數、所屬專案與分鏡位置。<br/><br/>
+          <span class="hl">對剪輯的意義：</span>拿到素材時，每個檔案都能回溯它是哪一鏡、為什麼這樣拍。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>05</span></div>
+</div>
+
+<!-- ═══ 6 · 生成台與模型目錄 ═══════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">核心機制 二</span>
+    <h2 class="heading">生成台：先選類別，再選模型</h2>
+    <div class="rule"></div>
+    <p class="body lede">模型目錄 v2 共 <span class="hl">11 類 × 70 個模型＋7 條工作流</span>，每類都備妥 🏆 旗艦 3／⚖️ 經濟 3／💡 最低成本 1，不必自己比規格。</p>
+  </div>
+
+  <div class="stage low">
+    <div class="card" style="padding:32px 36px;">
+      <div class="tag">十一大創作類別</div>
+      <div style="margin-top:8px;">
+        <span class="chip">文生圖</span><span class="chip">圖生圖</span><span class="chip">文生影片</span><span class="chip">影片轉影片</span><span class="chip">LLM</span><span class="chip">圖轉文</span><span class="chip">語音轉文字</span><span class="chip">文字轉語音</span><span class="chip">文字轉音頻</span><span class="chip">訓練</span><span class="chip">工作流</span>
+      </div>
+    </div>
+
+    <div class="grid g3" style="margin-top:30px;">
+      <div class="card">
+        <div class="t">四種輸出、可接來源</div>
+        <div class="d">圖像／影片／音訊／文字都在同一個台面產出；來源可挑素材庫既有成品，或直接貼網址。</div>
+      </div>
+      <div class="card accent">
+        <div class="t">工作流一鍵串鏈</div>
+        <div class="d">LLM → 圖 → 影 → 音 自動接力，中間不用人工搬檔；假生成模式覆蓋全部模態，可先空跑驗流程。</div>
+      </div>
+      <div class="card">
+        <div class="t">不知道選哪個？</div>
+        <div class="d">頂欄「模型指南」頁，或問站內 AI／外部代理的 <span class="mono">find_model</span>，直接推薦符合預算的那一顆。</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:30px;background:#f3ead6;border-color:#ddc99b;">
+      <div class="d" style="color:#5c4a20;font-size:24px;">
+        <b style="font-weight:700;">生成中不必守著畫面：</b>任務送出後走佇列與輪詢，可以離開去做別的事；完成後成品自動落進素材庫並通知。
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>06</span></div>
+</div>
+
+<!-- ═══ 7 · 分鏡與素材庫 ═══════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">核心機制 三</span>
+    <h2 class="heading">分鏡：素材在網站上就排好順序</h2>
+    <div class="rule"></div>
+  </div>
+
+  <div class="stage" style="top:320px;">
+    <div class="grid g2" style="gap:34px;align-items:start;">
+      <div>
+        <ul class="list" style="font-size:27px;">
+          <li>生成滿意 → 按 <b>＋加入分鏡</b> → 用 <b>▲▼</b> 排順序</li>
+          <li>每一鏡帶：標題、秒數、旁白文字、對應素材</li>
+          <li>順序就是最後<b>檔名的編號</b>與<b>時間軸上的先後</b></li>
+          <li>沒被加入分鏡的生成品仍留在素材庫，不會消失也不會混進交付包</li>
+        </ul>
+
+        <div class="card accent" style="margin-top:12px;">
+          <div class="t" style="font-size:28px;">為什麼這件事對剪輯最重要</div>
+          <div class="d">分鏡表就是後面 <span class="hl">FCPXML／Premiere XML／剪映草稿</span> 的來源。網站上排好一次，剪輯端就不必再對照腳本重排。</div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:30px 34px;">
+        <div class="tag">分鏡示意</div>
+        <div style="margin-top:10px;">
+          <div class="kv"><span class="k"><b style="color:#a44b27;">01</b>　開場　<span style="color:#8b7d6b;font-size:21px;">5 秒 · 影片</span></span><span class="v">已通過</span></div>
+          <div class="kv"><span class="k"><b style="color:#a44b27;">02</b>　轉場　<span style="color:#8b7d6b;font-size:21px;">4 秒 · 圖像＋旁白</span></span><span class="v">已通過</span></div>
+          <div class="kv"><span class="k"><b style="color:#a44b27;">03</b>　主述　<span style="color:#8b7d6b;font-size:21px;">8 秒 · 影片＋旁白</span></span><span class="v" style="color:#856118;">待審</span></div>
+          <div class="kv"><span class="k"><b style="color:#a44b27;">04</b>　收尾　<span style="color:#8b7d6b;font-size:21px;">3 秒 · 旁白</span></span><span class="v" style="color:#8b7d6b;">草稿</span></div>
+        </div>
+        <div class="d" style="margin-top:22px;color:#6f6355;font-size:21px;">
+          交付時，每一鏡的素材會依這個編號輸出成 <span class="mono">01_開場.mp4</span>、<span class="mono">02_轉場.jpg</span>…
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>07</span></div>
+</div>
+
+<!-- ═══ 8 · 審批三態機 ═════════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">組長專章 一</span>
+    <h2 class="heading">審批三態機：把關就在同一頁</h2>
+    <div class="rule"></div>
+    <p class="body lede">AI 出來的東西不會直接變成成品。所有分鏡都要經過組長這一關，<span class="hl">退回一定要附理由</span>，理由會自動貼進組內留言。</p>
+  </div>
+
+  <div class="stage low">
+    <div style="display:flex;align-items:center;gap:0;">
+      <div class="card" style="flex:1;text-align:center;padding:40px 26px;">
+        <span class="badge wait">待審</span>
+        <div class="d" style="margin-top:20px;">組員按下「送審」，分鏡進入你的待審清單</div>
+      </div>
+      <div class="arrow">›</div>
+      <div class="card" style="flex:1;text-align:center;padding:40px 26px;background:#e7eee1;border-color:#b9cdad;">
+        <span class="badge pass">✓ 通過</span>
+        <div class="d" style="margin-top:20px;color:#3f5636;">可打包進交付包，版本定案</div>
+      </div>
+      <div class="arrow">或</div>
+      <div class="card" style="flex:1;text-align:center;padding:40px 26px;background:#f6e2de;border-color:#e3b3aa;">
+        <span class="badge back">↩ 退回</span>
+        <div class="d" style="margin-top:20px;color:#7a3a30;">附一句理由 → 自動通知 → 修改後版本號遞增</div>
+      </div>
+    </div>
+
+    <div class="grid g3" style="margin-top:44px;">
+      <div class="card">
+        <div class="t" style="font-size:28px;">留痕</div>
+        <div class="d">每次送審、通過、退回都是一個事件，自動進組內留言，誰在什麼時候決定了什麼一目了然。</div>
+      </div>
+      <div class="card">
+        <div class="t" style="font-size:28px;">版本遞增</div>
+        <div class="d">退回後重做不會覆蓋舊版；版本往上加，先前的判斷仍可回溯比對。</div>
+      </div>
+      <div class="card accent">
+        <div class="t" style="font-size:28px;">內容分寸防線</div>
+        <div class="d">世界觀內建禁語自動注入每次生成；<b>開示引用僅作建議</b>，一律須組長審核，避免斷章取義。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>08</span></div>
+</div>
+
+<!-- ═══ 9 · 交付素材包 ═════════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">組長專章 二</span>
+    <h2 class="heading">交付素材包：一個 zip 就是一份工作檔</h2>
+    <div class="rule"></div>
+    <p class="body lede">按「打包下載交付包」，拿到的是<span class="hl">已經整理好、命名好、排好序</span>的資料夾——不是一堆亂序檔案。</p>
+  </div>
+
+  <div class="stage low">
+    <div class="grid g2" style="gap:34px;align-items:start;">
+      <div class="tree">
+        <div><span class="dir">01_視頻素材/</span>　　<span class="note">依分鏡編號的影片</span></div>
+        <div style="padding-left:36px;color:#6f6355;">01_開場.mp4　02_主述.mp4</div>
+        <div><span class="dir">02_旁白音檔/</span>　　<span class="note">每鏡旁白</span></div>
+        <div><span class="dir">02_音訊/</span>　　　　<span class="note">配樂・現場音</span></div>
+        <div><span class="dir">03_圖像/</span>　　　　<span class="note">靜態畫面</span></div>
+        <div><span class="dir">05_文件/</span>　　　　<span class="note">腳本鏡頭表</span></div>
+        <div><span class="dir">交付/</span>　　　　　<span class="note">時間軸檔（見下一頁）</span></div>
+      </div>
+
+      <div>
+        <div class="card" style="margin-bottom:24px;">
+          <div class="t" style="font-size:28px;">命名規則就是分鏡順序</div>
+          <div class="d">檔名前綴的編號＝網站上排好的鏡次。就算完全不看時間軸檔，照編號拉進軌道也是對的順序。</div>
+        </div>
+        <div class="card" style="margin-bottom:24px;">
+          <div class="t" style="font-size:28px;">腳本鏡頭表一起附上</div>
+          <div class="d">05_文件內含每一鏡的標題、秒數、旁白逐字，剪輯時不必回網站查。</div>
+        </div>
+        <div class="card accent">
+          <div class="t" style="font-size:28px;">下載方式</div>
+          <div class="d">網頁上按「打包下載交付包」；也可以直接用網址 <span class="mono">/api/export/:專案編號</span>（給腳本或自動化用）。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>09</span></div>
+</div>
+
+<!-- ═══ 10 · 剪輯軟體直連 ══════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">組長專章 三 · 本系統最關鍵的一頁</span>
+    <h2 class="heading">匯入一個檔，粗剪含旁白自動排好</h2>
+    <div class="rule"></div>
+    <p class="body lede">交付包內附「媒體連結版」時間軸——不是空殼專案，<span class="hl">素材路徑已對好，開檔即見畫面與旁白在軌道上</span>。</p>
+  </div>
+
+  <div class="stage low">
+    <div class="grid g3">
+      <div class="card accent" style="padding:34px 32px;">
+        <div class="tag">交付／時間軸.fcpxml</div>
+        <div class="t" style="font-size:30px;">Final Cut Pro<br/>DaVinci Resolve<br/>剪映專業版</div>
+        <div class="d" style="margin-top:16px;">三套都吃 FCPXML。匯入後每一鏡依秒數落位，旁白自成一軌。</div>
+      </div>
+      <div class="card accent" style="padding:34px 32px;">
+        <div class="tag">交付／Premiere時間軸.xml</div>
+        <div class="t" style="font-size:30px;">Adobe<br/>Premiere Pro</div>
+        <div class="d" style="margin-top:16px;">XMEML 格式，影片、圖像、音訊各自對應正確的媒體路徑。</div>
+      </div>
+      <div class="card" style="padding:34px 32px;background:#f3ead6;border-color:#ddc99b;">
+        <div class="tag" style="color:#856118;background:#fff;border-color:#ddc99b;">實驗功能</div>
+        <div class="t" style="font-size:30px;">剪映 / CapCut<br/>草稿包</div>
+        <div class="d" style="margin-top:16px;">解壓到草稿目錄，開剪映即見<b>畫面／旁白／字幕</b>三軌排好的專案。<br/><span class="mono" style="font-size:19px;">/api/export/:id/jianying</span></div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:34px;">
+      <div class="card">
+        <div class="t" style="font-size:28px;">另附 EDL</div>
+        <div class="d">需要走傳統套底或交給外部剪輯時，EDL 保留鏡次名稱與來源檔路徑。</div>
+      </div>
+      <div class="card">
+        <div class="t" style="font-size:28px;">剪輯端要做的事</div>
+        <div class="d">解壓 → 匯入時間軸檔 →（必要時指向解壓後的資料夾）→ 直接開始精修。素材與順序都已就位。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>10</span></div>
+</div>
+
+<!-- ═══ 11 · 點數制 ════════════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">成本控管</span>
+    <h2 class="heading">點數制：花費看得見，額度你來調</h2>
+    <div class="rule"></div>
+    <p class="body lede">1 點 ≈ NT$1 的參考值。<span class="hl">先扣預估、失敗全額退回</span>，每一筆都進帳本可查。</p>
+  </div>
+
+  <div class="stage low">
+    <div class="grid g2" style="gap:34px;align-items:start;">
+      <div class="card">
+        <div class="tag">大致費率</div>
+        <div class="kv"><span class="k">圖像生成</span><span class="v">1–2 點</span></div>
+        <div class="kv"><span class="k">影片生成（5 秒）</span><span class="v">8–12 點</span></div>
+        <div class="kv"><span class="k">初始總預算</span><span class="v">5,000 點</span></div>
+        <div class="kv"><span class="k">初始每人每週</span><span class="v">300 點</span></div>
+        <div class="d" style="margin-top:20px;color:#6f6355;font-size:21px;">以上都只是<b>初始值</b>——不鎖死，隨時在「團隊管理 → 點數與額度」改。</div>
+      </div>
+
+      <div>
+        <div class="card accent" style="margin-bottom:24px;">
+          <div class="t" style="font-size:28px;">三層額度，空白＝不限</div>
+          <div class="d">個人覆寫 → 組設定 → 全域預設，由上往下套用。<br/>組長可以直接針對某位組員開特例，不必動到全組。</div>
+        </div>
+        <div class="card">
+          <div class="t" style="font-size:28px;">失敗不吃點數</div>
+          <div class="d">送出時先扣預估值卡住額度；生成失敗全額退回。不會出現「錢花了但沒東西」。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>11</span></div>
+</div>
+
+<!-- ═══ 12 · 團隊與權限 ════════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">組織與權限</span>
+    <h2 class="heading">兩層組織，四種角色，跨組看不到</h2>
+    <div class="rule"></div>
+  </div>
+
+  <div class="stage" style="top:320px;">
+    <div class="grid g4">
+      <div class="card"><div class="tag">角色</div><div class="t" style="font-size:28px;">開發者</div><div class="d">系統維運與全站設定</div></div>
+      <div class="card"><div class="tag">角色</div><div class="t" style="font-size:28px;">團隊管理</div><div class="d">建組、調全團隊預算</div></div>
+      <div class="card accent"><div class="tag">角色</div><div class="t" style="font-size:28px;">組長</div><div class="d">審批分鏡、邀請組員、調組內額度</div></div>
+      <div class="card"><div class="tag">角色</div><div class="t" style="font-size:28px;">組員</div><div class="d">建專案、生成、送審</div></div>
+    </div>
+
+    <div class="grid g2" style="margin-top:34px;gap:34px;">
+      <div class="card">
+        <div class="t">邀請制加入</div>
+        <div class="d">組長在「團隊管理」產生邀請連結，用 LINE 傳給組員即可；不需要另外開帳號、不必記帳號規則。密碼以 bcrypt 加密儲存。</div>
+      </div>
+      <div class="card">
+        <div class="t">多組隔離守衛</div>
+        <div class="d">團隊 → 組別兩層結構，每筆資料掛組。<b>34 項端到端測試</b>包含跨組偷看的攻擊情境，全數擋下。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>12</span></div>
+</div>
+
+<!-- ═══ 13 · 資料庫與文件層 ════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">延伸能力 一</span>
+    <h2 class="heading">自訂資料庫：把團隊的雜事也收進來</h2>
+    <div class="rule"></div>
+    <p class="body lede">欄位自己定的輕量資料表（九種型別），四層範圍：<span class="hl">個人 → 組 → 團隊 → 全站</span>。權限沿用組織模型，不另開一套。</p>
+  </div>
+
+  <div class="stage low">
+    <div class="grid g3">
+      <div class="card">
+        <div class="t">格線編輯</div>
+        <div class="d">工作台「資料庫」頁像試算表一樣直接改；欄位可連到專案與排程，反向在專案頁彙整。</div>
+      </div>
+      <div class="card accent">
+        <div class="t">文件層（AI 可讀）</div>
+        <div class="d">上傳 txt／md／csv／json／html／字幕／PDF／DOCX 自動抽純文字；可從 Google 文件・試算表・簡報・雲端硬碟公開連結與 Notion 匯入並重新整理。每人 5GB。</div>
+      </div>
+      <div class="card">
+        <div class="t">每庫 AI 存取等級</div>
+        <div class="d">不開放／唯讀／可寫三選一。團隊助手自動讀取組內可見的庫，敏感資料可單獨關掉。</div>
+      </div>
+    </div>
+
+    <div class="grid g3" style="margin-top:30px;">
+      <div class="card"><div class="t" style="font-size:26px;">CSV 匯入匯出</div><div class="d">接得上 Excel 或其他既有資料庫。</div></div>
+      <div class="card"><div class="t" style="font-size:26px;">REST API v1</div><div class="d">本機腳本或手機 App 用個人金鑰即可存取。</div></div>
+      <div class="card"><div class="t" style="font-size:26px;">訂閱成行事曆</div><div class="d">有日期欄位的庫可訂成 .ics，直接進手機行事曆。</div></div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>13</span></div>
+</div>
+
+<!-- ═══ 14 · AI 代理・私訊・MCP ════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">延伸能力 二</span>
+    <h2 class="heading">AI 代理、站內私訊、接上外部 AI</h2>
+    <div class="rule"></div>
+  </div>
+
+  <div class="stage" style="top:320px;">
+    <div class="grid g3" style="gap:30px;">
+      <div class="card accent">
+        <div class="tag">完整專案 AI 代理</div>
+        <div class="d">同一份計畫整合成功條件、里程碑、AI 與人員任務、筆記、排程、等待核准、成本與成果。<br/><br/>用 DAG 排程，等人回覆的同時其他分支繼續跑；每一步都有可稽核事件，專案健康與成果中心可收合查看。</div>
+      </div>
+      <div class="card">
+        <div class="tag">站內私訊 2.0</div>
+        <div class="d">1:1 私訊可傳圖／影片／檔案（貼上截圖即附上），能標注專案・資料庫・排程・筆記並點卡片跳原件。<br/><br/>可在對話裡 <b>@助手</b> 直接問 AI，回覆收發雙方都看得到；附件走獨立端點，維持「只有雙方看得到」。</div>
+      </div>
+      <div class="card">
+        <div class="tag">MCP · 接上外部 AI</div>
+        <div class="d">每位成員自建<b>個人連線金鑰</b>，可設唯讀、可設到期、可隨時撤銷。連進來就是「他本人」的身分與權限。<br/><br/>共 <b>23 個工具</b>：查專案狀態、送生成、排代理計畫、查寫資料庫、排程待辦——全程走你自己的額度與審批門檻。</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:34px;background:#e1eff1;border-color:#a9cdd3;">
+      <div class="d" style="color:#275c65;font-size:24px;">
+        <b style="font-weight:700;">實際用起來像這樣：</b>在外部 AI 說「看看《走出低谷》現在的狀況，把知識庫腳本拆成分鏡並逐鏡出圖，順便排一個下週五的交付死線」——它會依序查狀態、排計畫、送審、建排程，而權限與扣點完全比照你在網站上操作。
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>14</span></div>
+</div>
+
+<!-- ═══ 15 · 品質保證與現況 ════════════════════════════ -->
+<div class="slide" data-canvas-width="1920" data-canvas-height="1080">
+  <div class="head">
+    <span class="label">目前狀態</span>
+    <h2 class="heading">哪些已經穩了，哪些還沒做</h2>
+    <div class="rule"></div>
+  </div>
+
+  <div class="stage" style="top:310px;">
+    <div class="grid g4" style="margin-bottom:36px;">
+      <div class="card"><div class="stat"><div class="n">34<span class="u"> 項</span></div><div class="k">權限與流程端到端測試全過</div></div></div>
+      <div class="card"><div class="stat"><div class="n">20<span class="u"> 項</span></div><div class="k">多模態生成測試全過</div></div></div>
+      <div class="card"><div class="stat"><div class="n">11<span class="u"> 步</span></div><div class="k">真瀏覽器旅程測試全過</div></div></div>
+      <div class="card"><div class="stat"><div class="n">7<span class="u"> 大項</span></div><div class="k">管理頁一鍵系統自檢</div></div></div>
+    </div>
+
+    <div class="grid g2" style="gap:34px;align-items:start;">
+      <div class="card" style="background:#e7eee1;border-color:#b9cdad;">
+        <div class="t" style="color:#3f5636;">已完成可用</div>
+        <div class="d" style="color:#42583a;">
+          登入・團隊・組別／專案與世界觀／生成台與模型目錄 v2／分鏡與素材庫／審批三態機／交付包與剪輯直連／彈性點數制／站內留言與私訊／自訂資料庫與文件層／AI 代理／MCP 介面／回饋系統
+        </div>
+      </div>
+      <div class="card" style="background:#f3ead6;border-color:#ddc99b;">
+        <div class="t" style="color:#5c4a20;">誠實清單 · 還沒做</div>
+        <div class="d" style="color:#5c4a20;">
+          素材知識庫（逐字稿 RAG 檢索）——等逐字稿來源就緒<br/>
+          影片模型真實測試——假模式已全通，待金鑰跑一輪<br/>
+          配音（TTS）——視測試回饋決定<br/>
+          資料庫層第二道隔離（RLS）——應用層已擋，上線穩定後補<br/>
+          手機版最佳化——桌面優先，審批頁會先做
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>15</span></div>
+</div>
+
+<!-- ═══ 16 · 給組長的三個動作 ══════════════════════════ -->
+<div class="slide dark" data-canvas-width="1920" data-canvas-height="1080">
+  <div style="position:absolute;left:0;top:0;width:1920px;height:1080px;background:linear-gradient(135deg,#2f2620 0%,#3d2f24 60%,#5a3722 100%);"></div>
+  <div style="position:absolute;left:-180px;bottom:-240px;width:760px;height:760px;border-radius:50%;background:rgba(194,97,63,.13);"></div>
+
+  <div class="head" style="top:120px;">
+    <span class="label" style="color:#e6a583;">下一步</span>
+    <h2 class="heading" style="font-size:76px;">組長上手，只要三個動作</h2>
+    <div class="rule" style="background:#c2613f;"></div>
+  </div>
+
+  <div class="stage" style="top:400px;">
+    <div class="grid g3" style="gap:30px;">
+      <div class="card" style="background:rgba(255,255,255,.07);border-color:rgba(230,165,131,.4);">
+        <div class="stat"><div class="n" style="color:#e6a583;">01</div></div>
+        <div class="t" style="color:#f6efe3;margin-top:14px;">收下邀請連結，登入</div>
+        <div class="d" style="color:#d9cfbf;">開發者會用 LINE 傳邀請連結給你（剪輯組 · 組長）。登入後第一件事：改密碼。</div>
+      </div>
+      <div class="card" style="background:rgba(255,255,255,.07);border-color:rgba(230,165,131,.4);">
+        <div class="stat"><div class="n" style="color:#e6a583;">02</div></div>
+        <div class="t" style="color:#f6efe3;margin-top:14px;">邀請自己的組員</div>
+        <div class="d" style="color:#d9cfbf;">團隊管理 → 產生邀請連結 → 傳出去。順手把每人每週點數額度設成你要的值（空白＝不限）。</div>
+      </div>
+      <div class="card" style="background:rgba(255,255,255,.07);border-color:rgba(230,165,131,.4);">
+        <div class="stat"><div class="n" style="color:#e6a583;">03</div></div>
+        <div class="t" style="color:#f6efe3;margin-top:14px;">跑一次完整流程</div>
+        <div class="d" style="color:#d9cfbf;">請組員做一支測試片送審，你審過 → 下載交付包 → 匯入剪映或 Premiere 驗一次時間軸，確認合你的工作習慣。</div>
+      </div>
+    </div>
+
+    <div style="margin-top:56px;text-align:center;">
+      <p class="body" style="font-size:30px;color:#e0d5c4;">
+        有任何「這樣剪不順」的地方，請直接用頂欄「回饋」按鈕填——<br/>
+        七項評分兩分鐘填完，會直接進管理頁彙整，是接下來優先修的依據。
+      </p>
+    </div>
+  </div>
+
+  <div class="foot"><b>AIOS</b><span>16</span></div>
+</div>
+
+</body>
+</html>
