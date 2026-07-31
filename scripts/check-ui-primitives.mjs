@@ -148,7 +148,17 @@ function extractClassTokens(source) {
   while ((m = attr.exec(source)) !== null) {
     // 往回找這個 className 屬於哪個標籤——結構性豁免是依「標籤 × class」判定的，
     // 只看 class 無法分辨 <span className="chip"> 與 <Link className="chip">。
-    const before = source.slice(Math.max(0, m.index - 400), m.index);
+    //
+    // 先把回看窗裡的大括號區塊（含巢狀）剝成空白再比對：屬性表達式常含
+    // `onClick={() => …}` 這種箭頭，`=>` 的 `>` 會讓「屬性區不得含 <>」的
+    // 比對失敗、標籤變 "?"，明明該吃結構豁免的用法就被誤計成待遷移
+    // （實例：AdminPage 的展開／收合 <button className="hint">）。
+    // 剝除是平衡式的由內而外，不會吃掉真正的標籤界線。
+    let before = source.slice(Math.max(0, m.index - 400), m.index);
+    for (let prev = null; prev !== before; ) {
+      prev = before;
+      before = before.replace(/\{[^{}]*\}/g, (s) => " ".repeat(s.length));
+    }
     const openTag = before.match(/<([A-Za-z][\w.]*)(?:\s[^<>]*)?$/);
     const tag = openTag ? openTag[1] : "?";
     let i = attr.lastIndex;

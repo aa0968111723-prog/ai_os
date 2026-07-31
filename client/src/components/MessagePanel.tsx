@@ -8,7 +8,7 @@ import { DISCUSS_EVENT, jumpToRef, setPlannerFocus, type DiscussRef } from "../d
 import { escapeRegExp, parseMentionedNames } from "@shared/mentions";
 import { useCustomQuickPhrases, MAX_PHRASE_LEN } from "../useCustomQuickPhrases";
 
-import { Button, Chip, Hint, Meta } from "./ui";
+import { Button, Card, Chip, Hint, Meta } from "./ui";
 /** 單則留言(含回覆摘要／表情彙總／引用卡）——由 messages.list 推得,列元件與父層共用同一形狀 */
 type MessageRowData = inferRouterOutputs<AppRouter>["messages"]["list"]["items"][number];
 
@@ -698,13 +698,12 @@ export function MessagePanel({
     [navigate],
   );
 
-  return (
-    <aside
-      className={bare ? "message-panel message-panel--bare" : "card message-panel"}
-      data-fb="組內留言"
-      ref={panelRef}
-    >
-      {!bare && <h2>組內留言</h2>}
+  // 內容與外框分離：bare（嵌在創作工作台）與一般（獨立卡片）共用同一份內容，
+  // 只有外框不同——一般模式用 <Card as="aside">，bare 模式本來就不是卡片、
+  // 不穿卡皮。之前的三元 className 把「card」留在 primitive 之外，也讓
+  // 「這裡是不是一張卡」這個決定藏在字串裡而不是結構裡。
+  const panelBody = (
+    <>
 
       {/* 📌 釘選列:組長固定的決議,不被日常對話洗掉 */}
       {pinnedMsgs.length > 0 && (
@@ -991,6 +990,16 @@ export function MessagePanel({
       {post.error && <p className="error">留言送出失敗：{post.error.message}</p>}
       {react.error && <p className="error">表情回應失敗：{react.error.message}</p>}
       {setPinned.error && <p className="error">釘選失敗：{setPinned.error.message}</p>}
+    </>
+  );
+  return bare ? (
+    <aside className="message-panel message-panel--bare" data-fb="組內留言" ref={panelRef}>
+      {panelBody}
     </aside>
+  ) : (
+    <Card as="aside" className="message-panel" data-fb="組內留言" ref={panelRef}>
+      <h2>組內留言</h2>
+      {panelBody}
+    </Card>
   );
 }

@@ -1810,10 +1810,14 @@ function FeedbackReportsSection() {
           <button style={{ marginTop: 8 }} onClick={() => reports.refetch()}>再試一次</button>
         </div>
       ) : !reports.data?.length ? (
-        <div className="empty-state">
-          <h3>{statusFilter ? "這個狀態底下還沒有回饋" : "還沒有元件回饋"}</h3>
-          {!statusFilter && <p>夥伴用右下角「回饋」浮標送出即可。</p>}
-        </div>
+        <EmptyState
+          title={statusFilter ? "這個狀態底下還沒有回饋" : "還沒有元件回饋"}
+          description={
+            statusFilter
+              ? "換個狀態篩選看看，或切回「全部」。" /* 原本篩選分支沒有說明——空狀態要有下一步，這是計畫要求，不是遷移副作用 */
+              : "夥伴用右下角「回饋」浮標送出即可。"
+          }
+        />
       ) : (
         reports.data.map((r) => <ReportRow key={r.id} report={r} />)
       )}

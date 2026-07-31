@@ -3,14 +3,14 @@
   "note": "單向棘輪基準線。任何檔案的裸 class 用量不得超過此處數字；新檔案視為 0。遷移完一批後執行 `node scripts/check-ui-primitives.mjs --write-baseline` 收緊。",
   "generatedFrom": "scripts/check-ui-primitives.mjs",
   "observations": {
-    "stylesCssLines": 3701,
+    "stylesCssLines": 3752,
     "tsxFiles": 96,
     "filesUsingPrimitives": 72
   },
   "structurallyExempt": {
     "badge": 7,
     "chip": 24,
-    "hint": 25,
+    "hint": 26,
     "skeleton": 4,
     "btn-sm": 8,
     "btn-tonal": 6,
@@ -18,23 +18,8 @@
     "card": 2
   },
   "totals": {
-    "total": 4,
-    "perClass": {
-      "empty-state": 2,
-      "card": 1,
-      "hint": 1
-    }
+    "total": 0,
+    "perClass": {}
   },
-  "files": {
-    "client/src/components/CharacterCards.tsx": {
-      "empty-state": 1
-    },
-    "client/src/components/MessagePanel.tsx": {
-      "card": 1
-    },
-    "client/src/pages/AdminPage.tsx": {
-      "hint": 1,
-      "empty-state": 1
-    }
-  }
+  "files": {}
 }

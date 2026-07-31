@@ -4,7 +4,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
-import { Button, Card, Hint, Meta, Skeleton } from "./ui";
+import { Button, Card, EmptyState, Hint, Meta, Skeleton } from "./ui";
 /**
  * 角色定裝卡（提案核心「角色一致性」）：
  * 角色外觀設定一次鎖定，生成時勾選 → 自動注入錨點，跨鏡頭不走樣。
@@ -125,9 +125,10 @@ export function CharacterCards({
           })}
         </div>
       ) : (
-        <div className="empty-state">
-          <p>還沒有角色——加一張定裝卡（例：安倢＝紅傘、米白外套、帆布包、溫柔回望）。</p>
-        </div>
+        <EmptyState
+          title="還沒有角色"
+          description="加一張定裝卡（例：安倢＝紅傘、米白外套、帆布包、溫柔回望）。"
+        />
       )}
 
       {open ? (

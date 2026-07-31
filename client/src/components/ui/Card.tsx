@@ -40,11 +40,12 @@ type CardBlock = CardOwn &
   Omit<HTMLAttributes<HTMLElement>, "children" | "className"> & {
     as?: "div" | "section" | "article" | "aside" | "li";
     /**
-     * 型別鎖在 HTMLDivElement 而非 HTMLElement：ref 的變異方向讓寬型別反而收不下
-     * 呼叫端的 `RefObject<HTMLDivElement>`。目前所有用 ref 的卡片都是預設的 div
-     * （對話框焦點管理），若日後真的需要 section/aside 的 ref 再改成泛型。
+     * 聯集而非單一寬型別：`Ref<HTMLElement>` 會因回呼 ref 的參數反變性收不下
+     * 既有的 `(el: HTMLDivElement) => void` 呼叫端；`Ref<HTMLDivElement>` 又對
+     * as="aside"/"section" 謊報元素型別（MessagePanel 的 aside ref 就撞上了）。
+     * 兩個都放進聯集，兩種呼叫端都收，且不改任何執行期行為。
      */
-    ref?: Ref<HTMLDivElement>;
+    ref?: Ref<HTMLDivElement> | Ref<HTMLElement>;
   };
 
 export function Card(props: CardDetails | CardBlock) {
