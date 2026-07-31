@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
+import { flashAnchor } from "../discuss";
 import type { CompletePlanSummary } from "../../../shared/plan";
 import {
   AGENT_PLANNER_OPTIONS,
@@ -42,6 +43,8 @@ interface AgentStep {
     | "wait_for_human"
     | "request_approval";
   note: string;
+  /** 決策軌跡（#133 PR-1）：為何需要此步——結構化說明，非模型內部推理 */
+  rationale?: string;
   status: "pending" | "running" | "waiting" | "done" | "failed" | "stopped";
   actorType?: "ai" | "human" | "system";
   dependsOn?: string[];
@@ -129,6 +132,43 @@ function notifyDesktop(title: string, body: string): void {
   } else {
     fire();
   }
+}
+
+/**
+ * 步驟產出 chips（#133 PR-2）：outputRefs → 可點深連結。
+ * 筆記／排程走 Planner 的 ?focus= 深連結；任務與生成成果在同頁（工作台／專案頁），
+ * 用 flashAnchor 捲動＋閃爍既有錨點（task-{id}／generation-{id}）；其他類型顯示標籤。
+ */
+function OutputRefChips({ refs }: { refs: Array<{ type: string; id: string; label?: string }> }) {
+  if (!refs.length) return null;
+  return (
+    <>
+      {refs.slice(0, 6).map((ref) => {
+        const label = ref.label?.slice(0, 24) || ref.type;
+        if (ref.type === "note") {
+          return <Link key={`${ref.type}-${ref.id}`} className="chip pick" href={`/planner?focus=note-${ref.id}`}>成果：{label}</Link>;
+        }
+        if (ref.type === "schedule") {
+          return <Link key={`${ref.type}-${ref.id}`} className="chip pick" href={`/planner?focus=schedule-${ref.id}`}>成果：{label}</Link>;
+        }
+        if (ref.type === "task") {
+          return (
+            <button key={`${ref.type}-${ref.id}`} type="button" className="chip pick" onClick={() => flashAnchor(`task-${ref.id}`)}>
+              成果：{label}
+            </button>
+          );
+        }
+        if (ref.type === "generation") {
+          return (
+            <button key={`${ref.type}-${ref.id}`} type="button" className="chip pick" title="捲動到生成成果" onClick={() => flashAnchor(`generation-${ref.id}`)}>
+              成果：{label}
+            </button>
+          );
+        }
+        return <span key={`${ref.type}-${ref.id}`} className="chip">成果：{label}</span>;
+      })}
+    </>
+  );
 }
 
 const GOAL_EXAMPLES = [
@@ -582,6 +622,20 @@ export function AgentCard({
                     <strong>目標</strong>
                     <p className="hint" style={{ margin: "3px 0 0" }}>{planSummary.goal}</p>
                   </section>
+                  {planSummary.rationale && (
+                    <section>
+                      <strong>為何這樣排</strong>
+                      <p className="hint" style={{ margin: "3px 0 0" }}>{planSummary.rationale}</p>
+                    </section>
+                  )}
+                  {(planSummary.contextUsed?.length ?? 0) > 0 && (
+                    <section>
+                      <strong>依據的上下文</strong>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                        {planSummary.contextUsed!.map((item, index) => <span key={index} className="chip">{item}</span>)}
+                      </div>
+                    </section>
+                  )}
                   {planSummary.successCriteria.length > 0 && (
                     <section>
                       <strong>成功條件</strong>
@@ -647,7 +701,7 @@ export function AgentCard({
             )}
             <div style={{ marginTop: 4 }}>
               {steps.map((s, i) => (
-                <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                <div key={i} className="hint" style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                   <span style={{ display: "inline-flex" }}>
                     <Icon name={STEP_ICON[s.status] ?? "Clock"} size={14} className={s.status === "running" ? "spin" : undefined} />
                   </span>
@@ -669,7 +723,22 @@ export function AgentCard({
                       開啟排程
                     </Link>
                   )}
-                  {s.taskId && <span className="chip">人類任務</span>}
+                  {s.taskId && (
+                    <button type="button" className="chip pick" title="捲動到對應的人類任務" onClick={() => flashAnchor(`task-${s.taskId}`)}>
+                      人類任務
+                    </button>
+                  )}
+                  {s.generationId && !(s.outputRefs ?? []).some((ref) => ref.type === "generation") && (
+                    <button type="button" className="chip pick" title="捲動到生成成果" onClick={() => flashAnchor(`generation-${s.generationId}`)}>
+                      生成成果
+                    </button>
+                  )}
+                  <OutputRefChips refs={s.outputRefs ?? []} />
+                  {s.rationale && (
+                    <span className="meta" style={{ flexBasis: "100%", paddingLeft: 34 }} title={s.rationale}>
+                      理由：{s.rationale.slice(0, 120)}{s.rationale.length > 120 ? "…" : ""}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
