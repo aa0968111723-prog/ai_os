@@ -7,6 +7,15 @@ import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
 import { agentOutputKindLabel } from "../../../shared/agentOutputs";
+import {
+  GROUP_RUN_STATUS_LABEL,
+  GROUP_STEP_KIND_LABEL,
+  campaignProgress,
+  levelAtLeast,
+  type GroupCampaignStep,
+  type GroupCommand,
+  type GroupCommandLevel,
+} from "../../../shared/groupAgent";
 
 /** 新手導覽「略過／看過」記憶鍵：一旦略過或建過範例就記住，之後不再自動彈出 */
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
@@ -743,12 +752,22 @@ export function buildTeamQuestionSuggestions(input: {
   return out;
 }
 
-/** 對話訊息（前端狀態；assistant 訊息帶當輪的查證步驟與派工提議） */
+/**
+ * 指令提議（與 teamAssistant.ask 回傳的 actions 對齊）：確認後送 teamAssistant.command。
+ *
+ * 與派工的差別是「開新工 vs 收拾現況」：派工會建立新的待核計畫，指令是對既有的計畫與任務動手
+ * （核准、停止、重跑、改派）。command 的形狀由後端 zod 決定，前端只負責原樣轉交——
+ * 在這裡重新拆解成欄位只會讓兩邊的形狀有機會分岔。
+ */
+type TeamAction = { command: GroupCommand; label: string; reason?: string };
+
+/** 對話訊息（前端狀態；assistant 訊息帶當輪的查證步驟與派工／指令提議） */
 type ChatMsg = {
   role: "user" | "assistant";
   text: string;
   steps?: string[];
   dispatches?: Dispatch[];
+  actions?: TeamAction[];
   /** 決策軌跡：1–3 句結構化結論（不是 chain-of-thought） */
   rationale?: string;
   /** 這輪實際依據了哪些上下文區塊（後端已過白名單） */
@@ -979,6 +998,178 @@ function matchesRunFilter(status: string, filter: RunFilter): boolean {
  * 組彙總 AI 卡：① 團隊分析（全組代理健康／篩選清單）② 可追問的組彙總對話 ③ 派工。
  * 對話只存前端狀態（重整即清空）；唯讀彙總本身不改資料。
  */
+/**
+ * 組代理總指揮：組代理自己的跨專案調度計畫（campaign）。
+ *
+ * 為什麼獨立成一塊、而不是塞進上面的計畫清單：那份清單是「各專案的代理在做什麼」，
+ * 這裡是「組代理在指揮什麼」——同一畫面上混在一起，使用者分不出哪一份是誰派的、
+ * 停掉一份會連帶影響什麼。兩者的父子關係在步驟明細裡才講得清楚。
+ */
+function TeamCommanderBlock({ groupId, level }: { groupId: string; level: GroupCommandLevel }) {
+  const utils = trpc.useUtils();
+  const [goal, setGoal] = useState("");
+  const [budget, setBudget] = useState(0);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [addBudget, setAddBudget] = useState(0);
+  const canCommand = levelAtLeast(level, "command");
+  const campaigns = trpc.teamAssistant.campaigns.useQuery(
+    { groupId },
+    // 有計畫在跑時才輪詢：靜止的組不該每 10 秒打一次 API
+    { refetchInterval: (q) => (q.state.data?.some((c) => c.status === "running") ? 10_000 : false) },
+  );
+  const plan = trpc.teamAssistant.planCampaign.useMutation();
+  const approve = trpc.teamAssistant.approveCampaign.useMutation();
+  const stop = trpc.teamAssistant.stopCampaign.useMutation();
+  const discard = trpc.teamAssistant.discardCampaign.useMutation();
+  const resume = trpc.teamAssistant.resumeCampaign.useMutation();
+  const refresh = () => {
+    utils.teamAssistant.campaigns.invalidate();
+    utils.teamAssistant.agentOverview.invalidate();
+  };
+  const list = campaigns.data ?? [];
+  // 沒有計畫、又沒有權限發起的人不該看到一塊空框——那只會佔版面又沒有下一步
+  if (!canCommand && list.length === 0) return null;
+
+  return (
+    <div className="team-commander" aria-label="組代理總指揮">
+      <div className="team-stuck__head">
+        <strong>組代理總指揮</strong>
+        <Meta>跨專案調度：派工、盯著子計畫、在授權內補救</Meta>
+      </div>
+
+      {canCommand && (
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginTop: 8 }}>
+          <div style={{ flex: "1 1 260px" }}>
+            <label htmlFor="tc-goal" style={{ marginTop: 0 }}>要組代理達成什麼</label>
+            <input
+              id="tc-goal"
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="例：把三個待審的案子推到可交付，人力不夠就找人"
+              maxLength={1000}
+            />
+          </div>
+          <div style={{ flex: "0 1 190px" }}>
+            <label htmlFor="tc-budget" style={{ marginTop: 0 }}>自動核准授權（點）</label>
+            <input
+              id="tc-budget"
+              type="number"
+              min={0}
+              max={100000}
+              value={budget}
+              onChange={(e) => setBudget(Math.max(0, Number(e.target.value) || 0))}
+            />
+          </div>
+          <Button
+            disabled={goal.trim().length < 5 || plan.isPending}
+            onClick={async () => {
+              try {
+                await plan.mutateAsync({ groupId, goal: goal.trim(), budgetPoints: budget });
+                setGoal("");
+                refresh();
+              } catch { /* plan.error 已顯示 */ }
+            }}
+          >
+            {plan.isPending ? "規劃中…" : "排調度計畫"}
+          </Button>
+          <Hint layer="always" style={{ flexBasis: "100%", margin: 0 }}>
+            授權 0 點＝組代理每派出一份子計畫都會停下來等你核准。填了額度它才會在額度內自己核准；
+            超過的一律停手問你，不會先做了再說。
+          </Hint>
+        </div>
+      )}
+      {plan.error && <p className="error" role="alert">{plan.error.message}</p>}
+
+      {list.length === 0 ? (
+        <Hint layer="always" style={{ marginTop: 8 }}>
+          還沒有組代理調度計畫。上面填一句目標，它會排出「派工到哪幾個案子、怎麼盯、卡住找誰」的計畫給你核准。
+        </Hint>
+      ) : (
+        <div className="team-run-list" style={{ marginTop: 8 }}>
+          {list.map((c) => {
+            const steps = (c.steps ?? []) as GroupCampaignStep[];
+            const progress = campaignProgress(steps);
+            const open = openId === c.id;
+            return (
+              <div key={c.id} className={`team-run-row is-${c.status}`}>
+                <Chip style={{ margin: 0 }}>{GROUP_RUN_STATUS_LABEL[c.status] ?? c.status}</Chip>
+                <span className="team-run-row__copy">
+                  <button type="button" className="hint" onClick={() => setOpenId(open ? null : c.id)}>
+                    {c.goal}
+                  </button>
+                  <span title={c.summary}>{c.summary}</span>
+                  {c.error && <span className="team-run-row__err" title={c.error}>{c.error}</span>}
+                  {open && (
+                    <span className="team-commander__steps">
+                      {steps.map((s) => (
+                        <span key={s.id} className={`team-commander__step is-${s.status}`}>
+                          {GROUP_STEP_KIND_LABEL[s.kind] ?? s.kind}｜{s.title}
+                          {s.result ? `——${s.result}` : ""}
+                          {s.error ? `——${s.error}` : ""}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </span>
+                <span className="team-run-row__meta">
+                  {progress.done}/{progress.total} 步・已自動核准 {c.spentPoints}/{c.budgetPoints} 點
+                  <span style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+                    {c.status === "awaiting_approval" && canCommand && (
+                      <>
+                        <ConfirmButton
+                          triggerClassName="btn-tonal btn-sm"
+                          title="核准後組代理才會開始下令"
+                          message={`核准這份調度計畫？\n組代理會依計畫派工，並在 ${c.budgetPoints} 點授權內自動核准子計畫。`}
+                          confirmLabel="核准"
+                          onConfirm={async () => { await approve.mutateAsync({ runId: c.id }); refresh(); }}
+                        >核准</ConfirmButton>
+                        <Button variant="ghost" size="sm" onClick={async () => { await discard.mutateAsync({ runId: c.id }); refresh(); }}>放棄</Button>
+                      </>
+                    )}
+                    {(c.status === "running" || c.status === "waiting") && (
+                      <ConfirmButton
+                        triggerClassName="btn-ghost btn-sm"
+                        title="組代理不再下新指令；已派出的子計畫不受影響"
+                        message={"停止這份調度計畫？\n組代理不會再下新指令。已經派出去、已經核准的子計畫不會被一併停掉——要停那些請到各專案停。"}
+                        confirmLabel="停止"
+                        onConfirm={async () => { await stop.mutateAsync({ runId: c.id }); refresh(); }}
+                      >停止</ConfirmButton>
+                    )}
+                    {c.status === "waiting" && canCommand && (
+                      <>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100000}
+                          value={addBudget}
+                          aria-label="加多少自動核准授權"
+                          style={{ width: 84 }}
+                          onChange={(e) => setAddBudget(Math.max(0, Number(e.target.value) || 0))}
+                        />
+                        <Button
+                          size="sm"
+                          onClick={async () => { await resume.mutateAsync({ runId: c.id, addBudgetPoints: addBudget }); setAddBudget(0); refresh(); }}
+                        >
+                          繼續{addBudget > 0 ? `（+${addBudget} 點）` : ""}
+                        </Button>
+                      </>
+                    )}
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {(approve.error || stop.error || discard.error || resume.error) && (
+        <p className="error" role="alert">
+          {(approve.error ?? stop.error ?? discard.error ?? resume.error)!.message}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function TeamAssistantCard({
   groupId,
   pendingDecisions,
@@ -1004,6 +1195,10 @@ function TeamAssistantCard({
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const ask = trpc.teamAssistant.ask.useMutation();
   const dispatch = trpc.teamAssistant.dispatch.useMutation();
+  // L1/L2 指令：核准／停止／重跑子計畫、改派人員任務。授權、組隔離與落地全在後端的
+  // runGroupCommand，前端只負責把提議原樣送回去——不在這裡重新拆解成欄位。
+  const command = trpc.teamAssistant.command.useMutation();
+  const commandLevel = trpc.teamAssistant.commandLevel.useQuery({ groupId }, { staleTime: 5 * 60_000 });
   // 就地裁決代理計畫：沿用專案頁同一組 mutation（守門／額度／併發鎖全在 approveAgentCore 裡，
   // 這裡只是換一個入口，沒有第二條扣點路徑）
   const approveRun = trpc.agents.approve.useMutation();
@@ -1023,6 +1218,8 @@ function TeamAssistantCard({
   );
   const roles = trpc.agents.listRoles.useQuery(undefined, { staleTime: 10 * 60_000 });
   const [dispatched, setDispatched] = useState<Record<string, DispatchResult>>({});
+  /** 已執行過的指令（key → 後端回的人話結果）：按過的按鈕換成結果，免得重複按 */
+  const [actioned, setActioned] = useState<Record<string, string>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [starterProjectId, setStarterProjectId] = useState("");
   const [runsCollapsed, setRunsCollapsed] = useState(false);
@@ -1050,6 +1247,7 @@ function TeamAssistantCard({
         onSuccess: (d) => {
           setMsgs((prev) => [...prev, {
             role: "assistant", text: d.answer, steps: d.steps, dispatches: d.dispatches as Dispatch[],
+            actions: (d.actions ?? []) as TeamAction[],
             rationale: d.rationale ?? undefined, contextUsed: d.contextUsed ?? [], degraded: d.degraded ?? false,
           }]);
           if ((d.dispatches?.length ?? 0) > 0) overview.refetch();
@@ -1653,6 +1851,8 @@ function TeamAssistantCard({
         </div>
       </div>
 
+      <TeamCommanderBlock groupId={groupId} level={(commandLevel.data ?? "none") as GroupCommandLevel} />
+
       {/* ── 組彙總對話 ── */}
       <div className="team-chat-block">
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -1742,6 +1942,43 @@ function TeamAssistantCard({
                       ))}
                     </div>
                   )}
+                  {(m.actions?.length ?? 0) > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                      {m.actions!.map((a, i) => {
+                        const key = `act-${mi}-${i}`;
+                        const done = actioned[key];
+                        return done ? (
+                          <Hint key={key} as="div" layer="always" style={{ color: "var(--success-ink)" }}>✓ {done}</Hint>
+                        ) : (
+                          <ConfirmButton
+                            key={key}
+                            triggerClassName="btn-tonal btn-sm"
+                            disabled={pendingKey === key}
+                            title={a.reason ?? "對既有的計畫或任務下指令"}
+                            message={`${a.label}？${a.reason ? `\n理由：${a.reason}` : ""}${a.command.kind === "approve_run" ? "\n核准後這份子計畫就會開始執行、開始花點。" : ""}`}
+                            confirmLabel="執行"
+                            onConfirm={async () => {
+                              setPendingKey(key);
+                              try {
+                                const r = await command.mutateAsync({ groupId, command: a.command });
+                                setActioned((prev) => ({ ...prev, [key]: r.message }));
+                                utils.projects.invalidate();
+                                utils.teamAssistant.groupInsights.invalidate();
+                                overview.refetch();
+                              } catch {
+                                /* command.error 已顯示 */
+                              } finally {
+                                setPendingKey((k) => (k === key ? null : k));
+                              }
+                            }}
+                          >
+                            <Icon name="Waypoints" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                            {a.label}
+                          </ConfirmButton>
+                        );
+                      })}
+                    </div>
+                  )}
                   {(m.dispatches?.length ?? 0) > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
                       {m.dispatches!.map((d, i) => {
@@ -1791,6 +2028,7 @@ function TeamAssistantCard({
               ),
             )}
             {dispatch.error && <p className="error" role="alert" style={{ marginBottom: 0 }}>{dispatch.error.message}</p>}
+            {command.error && <p className="error" role="alert" style={{ marginBottom: 0 }}>{command.error.message}</p>}
           </div>
         )}
       </div>

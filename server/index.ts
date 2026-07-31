@@ -50,6 +50,7 @@ import { attachRealtime } from "./services/realtime";
 import { startWorkflowRunner } from "./services/workflowRunner";
 import { startGenerationRunner, runnerHeartbeat } from "./services/generationRunner";
 import { startAgentRunner } from "./services/agentRunner";
+import { startGroupCampaignRunner, sweepStaleCampaigns } from "./services/groupCampaignRunner";
 import { startExportRunner } from "./services/exportRunner";
 import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
@@ -1565,6 +1566,8 @@ const httpServer = app.listen(port, () => {
           startWorkflowRunner();
           startGenerationRunner(); // A：單張生成也改由伺服器背景推進，關頁不再卡「生成中」
           startAgentRunner(); // AI 代理：核准後的計畫由伺服器背景逐步執行
+          startGroupCampaignRunner(); // 組代理總指揮：跨專案調度計畫（派工／盯進度／授權內補救）
+          void sweepStaleCampaigns().catch((err) => console.warn("[groupAgent] 啟動陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err));
           startExportRunner(); // 交付包匯出 job（QA-005）：背景打包＋進度＋過期清理
           scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
           startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者

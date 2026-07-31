@@ -127,6 +127,13 @@
       "when": 1785474968761,
       "tag": "0017_group_agent_overview_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785475028761,
+      "tag": "0018_group_agent_commander",
+      "breakpoints": true
     }
   ]
 }

@@ -101,6 +101,9 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0016_external_accounts",
   // 0017：純新增 agent_runs 索引（CREATE INDEX IF NOT EXISTS），可安全納入 bridge
   "0017_group_agent_overview_idx",
+  // 0018：純新增 group_agent_runs／group_agent_events 表＋索引，與 group_members 一個 nullable
+  //       欄位（皆 IF NOT EXISTS），不動任何既有資料，可安全納入 bridge
+  "0018_group_agent_commander",
 ] as const;
 
 /**

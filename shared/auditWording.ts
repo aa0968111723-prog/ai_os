@@ -95,6 +95,13 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "tasks.decideApproval": "人類任務：核准裁決",
   "teamAssistant.ask": "詢問團隊 AI 助手",
   "teamAssistant.dispatch": "團隊代理派工到專案",
+  "teamAssistant.command": "組代理下指令",
+  "teamAssistant.commandBatch": "組代理批次下指令",
+  "teamAssistant.planCampaign": "組代理規劃調度計畫",
+  "teamAssistant.approveCampaign": "核准組代理調度計畫",
+  "teamAssistant.stopCampaign": "停止組代理調度計畫",
+  "teamAssistant.discardCampaign": "放棄組代理調度計畫",
+  "teamAssistant.resumeCampaign": "讓組代理調度計畫繼續",
   "workflows.start": "啟動工作流",
   "workflows.stop": "停止工作流",
   // 知識庫與角色卡

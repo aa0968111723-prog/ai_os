@@ -562,6 +562,65 @@ async function settleTask(input: {
   return settled;
 }
 
+/**
+ * 調整一件既有人類任務的負責人／期限／優先序（組代理 L2 調度權的落地點）。
+ *
+ * 為什麼是新的一支而不是沿用 addProjectTaskCore：任務原本只有「建立」與「完成」兩個動作，
+ * 於是組代理看得到「阿光 2 件逾期」卻什麼都做不了——它能做的最多是再開一件新任務，
+ * 那只會讓逾期數字變成 3。改派與改期才是實際的處置。
+ *
+ * 守門與建立時同一套：組隔離、專案可編輯、非封存、負責人必須是本組成員；
+ * 另加「只有負責人、建立者或組長以上可調整」，與 completeProjectTaskCore 的行為者規則同口徑。
+ * 已終局（done/cancelled）的任務不接受調整——改期一件已完成的任務只會讓歷史失真。
+ */
+export async function updateProjectTaskCore(input: {
+  auth: AuthState;
+  id: string;
+  assigneeId?: string | null;
+  dueAt?: string | null;
+  priority?: "low" | "normal" | "high" | "urgent";
+}): Promise<ProjectTaskRow> {
+  const task = await getProjectTaskChecked(input.auth, input.id);
+  const role = requireGroup(input.auth, task.groupId);
+  if (
+    input.auth.user.id !== task.assigneeId
+    && input.auth.user.id !== task.createdBy
+    && role === "member"
+  ) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "只有負責人、建立者或組長以上可以調整任務" });
+  }
+  if (task.status === "done" || task.status === "cancelled") {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "這件任務已經結束，不能再調整" });
+  }
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, task.projectId));
+  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+  await assertProjectEditable(input.auth, project);
+  assertProjectNotArchived(project);
+
+  const patch: Partial<typeof schema.projectTasks.$inferInsert> = { updatedAt: new Date() };
+  if (input.assigneeId !== undefined) {
+    await memberChecked(task.groupId, input.assigneeId);
+    patch.assigneeId = input.assigneeId;
+  }
+  if (input.dueAt !== undefined) {
+    const dueAt = parseOptionalDate(input.dueAt, "期限") ?? null;
+    if (dueAt && task.startsAt && dueAt < task.startsAt) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "期限不可早於開始時間" });
+    }
+    patch.dueAt = dueAt;
+  }
+  if (input.priority !== undefined) patch.priority = input.priority;
+  // 只有 updatedAt 代表呼叫端什麼都沒要改——不要靜默寫一次讓 updatedAt 跳動
+  if (Object.keys(patch).length === 1) return task;
+
+  const [updated] = await db
+    .update(schema.projectTasks)
+    .set(patch)
+    .where(eq(schema.projectTasks.id, task.id))
+    .returning();
+  return updated ?? task;
+}
+
 export function completeProjectTaskCore(auth: AuthState, id: string): Promise<ProjectTaskRow> {
   return settleTask({ auth, id, decision: "complete" });
 }

@@ -68,6 +68,16 @@ export const groupMembers = pgTable("group_members", {
    *  planAgentCore（沿用該專案的 ACL/扣點/併發守門）。派工預設只開放組長以上；組長/管理員可對
    *  個別組員把此欄設 true 授權其派工。組長以上永遠可派、不受此欄影響。null＝未授權（nullable migration） */
   canDispatchAgent: boolean("can_dispatch_agent"),
+  /**
+   * 組代理指揮權等級（none/dispatch/supervise/command）——取代單一布林的分級授權。
+   *
+   * 為什麼不繼續用 canDispatchAgent：那個布林只回答「能不能生出一份待核計畫」，
+   * 但「能不能替別人核准並開始花點」「能不能讓組代理在無人盯著時自己補救」是完全不同量級的
+   * 授權，折在同一個布林裡等於把最貴的權限偷偷送出去。
+   * null＝沒設過，退回讀舊布林（見 shared/groupAgent 的 resolveCommandLevel），既有授權不會
+   * 在 migration 當下無聲失效。組長以上不看此欄（恆為 command）。
+   */
+  agentCommandLevel: text("agent_command_level", { enum: ["none", "dispatch", "supervise", "command"] }),
 }, (t) => ({
   groupUserUq: uniqueIndex("group_members_group_user_uq").on(t.groupId, t.userId),
 }));
