@@ -35,6 +35,7 @@ export const RATE_LIMIT_POLICIES = {
   apiFetch: { limit: 20, windowMs: 60_000 },
   driveList: { limit: 30, windowMs: 60_000 },
   notionList: { limit: 30, windowMs: 60_000 },
+  adobeJob: { limit: 12, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitPolicy | FailureRateLimitPolicy>;
 
 export const RATE_LIMIT_SCOPES = {
@@ -51,6 +52,7 @@ export const RATE_LIMIT_SCOPES = {
   apiFetch: "integrations:api-fetch",
   driveList: "integrations:drive-list",
   notionList: "integrations:notion-list",
+  adobeJob: "integrations:adobe-job",
 } as const;
 
 export interface RateLimitPolicy {
