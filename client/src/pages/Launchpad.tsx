@@ -629,7 +629,18 @@ const TEAM_QUICK_QS = [
 ];
 
 /** 對話訊息（前端狀態；assistant 訊息帶當輪的查證步驟與派工提議） */
-type ChatMsg = { role: "user" | "assistant"; text: string; steps?: string[]; dispatches?: Dispatch[] };
+type ChatMsg = {
+  role: "user" | "assistant";
+  text: string;
+  steps?: string[];
+  dispatches?: Dispatch[];
+  /** 決策軌跡：1–3 句結構化結論（不是 chain-of-thought） */
+  rationale?: string;
+  /** 這輪實際依據了哪些上下文區塊（後端已過白名單） */
+  contextUsed?: string[];
+  /** 阻塞資料讀取失敗 → 回答是在資訊不全的情況下給的，要講出來 */
+  degraded?: boolean;
+};
 
 /** 代理狀態 → 中文標籤與強調色（與後端 AGENT_RUN_STATUS_LABEL 對齊） */
 const RUN_STATUS: Record<string, { label: string; color?: string }> = {
@@ -898,7 +909,10 @@ function TeamAssistantCard({
       { groupId, message: q, history },
       {
         onSuccess: (d) => {
-          setMsgs((prev) => [...prev, { role: "assistant", text: d.answer, steps: d.steps, dispatches: d.dispatches as Dispatch[] }]);
+          setMsgs((prev) => [...prev, {
+            role: "assistant", text: d.answer, steps: d.steps, dispatches: d.dispatches as Dispatch[],
+            rationale: d.rationale ?? undefined, contextUsed: d.contextUsed ?? [], degraded: d.degraded ?? false,
+          }]);
           if ((d.dispatches?.length ?? 0) > 0) overview.refetch();
         },
       },
@@ -1547,6 +1561,22 @@ function TeamAssistantCard({
                     </div>
                   )}
                   <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", margin: 0 }}>{m.text}</p>
+                  {m.degraded && (
+                    /* 資訊不全時一定要講：不講的話這個回答看起來與完整資料下的回答沒有兩樣 */
+                    <Meta as="p" style={{ margin: "4px 0 0", color: "var(--danger-ink)" }}>
+                      ⚠ 這次沒能讀到阻塞與人員任務資料，以上回答可能漏掉卡住的事項。
+                    </Meta>
+                  )}
+                  {m.rationale && (
+                    <Meta as="p" style={{ margin: "4px 0 0" }}>依據：{m.rationale}</Meta>
+                  )}
+                  {(m.contextUsed?.length ?? 0) > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                      {m.contextUsed!.map((c) => (
+                        <Chip key={c} style={{ margin: 0 }} title="這輪回答實際用到的資料區塊">{c}</Chip>
+                      ))}
+                    </div>
+                  )}
                   {(m.dispatches?.length ?? 0) > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
                       {m.dispatches!.map((d, i) => {

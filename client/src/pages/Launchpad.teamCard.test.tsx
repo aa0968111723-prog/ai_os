@@ -14,8 +14,10 @@ import { buildDecisionInbox, dueLabel, Launchpad, mergeTeamHealth } from "./Laun
 
 /** 泛用 trpc 樁：任何 `trpc.a.b.useQuery()` 都回 queryData 裡以路徑登記的值 */
 const h = vi.hoisted(() => {
-  const queryData = new Map<string, unknown>();
-  const mutations: Array<{ path: string; input: unknown }> = [];
+  const bag: { queryData: Map<string, unknown>; mutations: Array<{ path: string; input: unknown }>; root: Record<string, unknown>; askReply: Record<string, unknown> } =
+    { queryData: new Map(), mutations: [], root: {}, askReply: {} };
+  const queryData = bag.queryData;
+  const mutations = bag.mutations;
   let root: Record<string, unknown>;
   const makeNode = (path: string): Record<string, unknown> => {
     const base: Record<string, unknown> = {
@@ -26,8 +28,13 @@ const h = vi.hoisted(() => {
         error: null,
         refetch: () => {},
       }),
-      useMutation: () => ({
-        mutate: (input: unknown) => { mutations.push({ path, input }); },
+      useMutation: (opts?: { onSuccess?: (d: unknown) => void }) => ({
+        mutate: (input: unknown, callOpts?: { onSuccess?: (d: unknown) => void }) => {
+          mutations.push({ path, input });
+          const reply = path === "teamAssistant.ask" ? bag.askReply : {};
+          void opts?.onSuccess?.(reply);
+          void callOpts?.onSuccess?.(reply);
+        },
         mutateAsync: async (input: unknown) => { mutations.push({ path, input }); return {}; },
         isPending: false,
         error: null,
@@ -50,7 +57,8 @@ const h = vi.hoisted(() => {
     }) as Record<string, unknown>;
   };
   root = makeNode("");
-  return { queryData, mutations, root };
+  Object.assign(bag, { queryData, mutations, root });
+  return bag;
 });
 
 vi.mock("../api", () => ({ trpc: h.root }));
@@ -572,5 +580,60 @@ describe("S4：空組起手式與派工參數", () => {
     h.queryData.set("projects.list", []);
     render(<Launchpad groupId={GROUP} />);
     expect(screen.queryByLabelText("起手式")).not.toBeInTheDocument();
+  });
+});
+
+describe("S5：組彙總 AI 的決策軌跡", () => {
+  beforeEach(() => {
+    h.queryData.clear();
+    h.mutations.length = 0;
+  });
+
+  /** ask 是 mutation：讓它回一個固定答案，驗畫面怎麼呈現 */
+  const askReturning = (reply: Record<string, unknown>) => {
+    h.askReply = reply;
+  };
+
+  it("顯示依據與用到的上下文標籤（不是 chain-of-thought）", async () => {
+    seed({ runs: [], pending: [] });
+    askReturning({
+      answer: "「招生短片」卡最久。",
+      steps: ["查了全組阻塞(2 項)"],
+      dispatches: [],
+      canDispatch: true,
+      rationale: "依阻塞清單，兩件逾期都集中在同一案。",
+      contextUsed: ["阻塞與人員負荷", "專案現況"],
+      degraded: false,
+    });
+    render(<Launchpad groupId={GROUP} />);
+    await userEvent.type(screen.getByLabelText("組彙總 AI"), "哪個案子卡住了？");
+    await userEvent.click(screen.getByRole("button", { name: "詢問" }));
+    expect(await screen.findByText(/依據：依阻塞清單/)).toBeInTheDocument();
+    expect(screen.getByText("阻塞與人員負荷")).toBeInTheDocument();
+    expect(screen.getByText("專案現況")).toBeInTheDocument();
+  });
+
+  it("阻塞資料讀不到時明確警示——不講的話這個回答看起來與完整資料下的沒有兩樣", async () => {
+    seed({ runs: [], pending: [] });
+    askReturning({
+      answer: "目前看起來還好。",
+      steps: [], dispatches: [], canDispatch: false,
+      rationale: undefined, contextUsed: ["專案現況"], degraded: true,
+    });
+    render(<Launchpad groupId={GROUP} />);
+    await userEvent.type(screen.getByLabelText("組彙總 AI"), "有人卡住嗎？");
+    await userEvent.click(screen.getByRole("button", { name: "詢問" }));
+    expect(await screen.findByText(/沒能讀到阻塞與人員任務資料/)).toBeInTheDocument();
+  });
+
+  it("沒有 rationale／contextUsed 時不渲染空殼", async () => {
+    seed({ runs: [], pending: [] });
+    askReturning({ answer: "簡短回答。", steps: [], dispatches: [], canDispatch: false, contextUsed: [], degraded: false });
+    render(<Launchpad groupId={GROUP} />);
+    await userEvent.type(screen.getByLabelText("組彙總 AI"), "隨便問問");
+    await userEvent.click(screen.getByRole("button", { name: "詢問" }));
+    expect(await screen.findByText("簡短回答。")).toBeInTheDocument();
+    expect(screen.queryByText(/^依據：/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/沒能讀到阻塞/)).not.toBeInTheDocument();
   });
 });

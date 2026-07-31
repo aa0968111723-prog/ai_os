@@ -379,4 +379,22 @@ if "runId" in disp_full:
     ok("派工在事件流留下出處",
        any(e.get("runId") == disp_full["runId"] and e.get("eventKey") == "run:dispatched-from-team" for e in items))
 
+
+# ── 13. ask 的上下文與決策軌跡（S5）──
+ask_s5 = call("POST", admin, "teamAssistant.ask", {"groupId": gid, "message": "誰卡住了？有什麼阻塞？"})
+ok("ask 回傳 contextUsed 陣列", isinstance(ask_s5.get("contextUsed"), list))
+ok("ask 回傳 degraded 旗標", isinstance(ask_s5.get("degraded"), bool))
+ok("正常情況不是降級模式", ask_s5.get("degraded") is False)
+# contextUsed 必須全在白名單內——這個欄位存在的意義就是「不能讓模型自由發揮」
+ALLOWED = {"專案現況", "組花費", "資料庫快照", "阻塞與人員負荷",
+           "分鏡明細", "生成紀錄", "模型目錄", "資料庫搜尋", "代理動態", "人員任務", "專案營運快照"}
+ok("contextUsed 全在白名單內", set(ask_s5.get("contextUsed", [])) <= ALLOWED)
+ok("rationale 不是 chain-of-thought（長度受限）",
+   ask_s5.get("rationale") is None or len(ask_s5["rationale"]) <= 301)
+
+# 組員也拿得到同一組欄位（唯讀彙總不需組長權限）
+mem_s5 = call("POST", member, "teamAssistant.ask", {"groupId": gid, "message": "有什麼阻塞？"})
+ok("組員 ask 也有 contextUsed", isinstance(mem_s5.get("contextUsed"), list))
+ok("組員 ask 仍無派工權", mem_s5.get("canDispatch") is False)
+
 print("—— e2e-team-assistant 完成 ——")
