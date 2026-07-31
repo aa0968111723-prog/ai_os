@@ -28,9 +28,11 @@
     vertical-align: middle;
   }
 
+  /* 鍵盤彈出時 dvh 在 iOS 不會縮（dvh 只追網址列這類工具列），
+     所以除了 70dvh 還要顯式扣掉 --kb-inset，否則面板頂端會被推出畫面外 */
   .fb-fab-root .card[role="dialog"],
   .fb-fab-root .card[role="group"] {
-    max-height: min(70dvh, 520px);
+    max-height: min(70dvh, 520px, calc(100dvh - var(--kb-inset, 0px) - 96px));
   }
 
   .workbench-intro-lede,

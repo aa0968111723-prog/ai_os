@@ -1,6 +1,7 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { Icon, type IconName } from "../../components/Icon";
 import { Hint } from "../../components/ui";
+import { MenuSurface } from "../../app/components/MenuSurface";
 import {
   getAgentSkill,
   listModeSkills,
@@ -23,24 +24,10 @@ export function CreationSkillPicker({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  // 外點／Esc／手機貼底 sheet 都收在 MenuSurface（見該檔的三個陷阱說明）
+  const close = useCallback(() => setOpen(false), []);
 
   const toggle = (id: AgentSkillId) => {
     if (selectedIds.includes(id)) {
@@ -64,9 +51,10 @@ export function CreationSkillPicker({
     .filter(Boolean) as AgentSkill[];
 
   return (
-    <div className="creation-skill-picker" ref={rootRef}>
+    <div className="creation-skill-picker">
       <div className="creation-skill-picker__row">
         <button
+          ref={triggerRef}
           type="button"
           className="creation-skill-add"
           disabled={disabled}
@@ -99,13 +87,20 @@ export function CreationSkillPicker({
         ))}
       </div>
 
-      {open && (
-        <div
-          id={menuId}
-          role="dialog"
-          aria-label="請誰來幫忙"
-          className="creation-skill-menu"
-        >
+      {/* dialog 而非 menu：內容是一牆可勾選的卡片，不是 menuitem 清單，
+          所以 roving 關掉、role 用 dialog（承諾了方向鍵漫遊卻沒實作反而更糟）。
+          stretch：184px 的窄下拉裝不下卡片牆。手機自動變貼底 sheet。 */}
+      <MenuSurface
+        open={open}
+        onClose={close}
+        label="請誰來幫忙"
+        triggerRef={triggerRef}
+        surfaceRole="dialog"
+        placement="stretch"
+        roving={false}
+        id={menuId}
+        className="creation-skill-menu"
+      >
           <header className="creation-skill-menu__head">
             <strong>請誰來幫忙</strong>
             {/* 怎麼操作這張選單的說明；熟手不需要 → guide 層，精簡模式收成「？」 */}
@@ -139,8 +134,7 @@ export function CreationSkillPicker({
               ))}
             </div>
           </section>
-        </div>
-      )}
+      </MenuSurface>
     </div>
   );
 }
