@@ -30,7 +30,7 @@ import {
   composeGoalFromSkills,
   resolveModeFromSkills,
 } from "../../../../shared/agentSkills";
-import { Button, Hint, Meta, Pill } from "../../components/ui";
+import { Button, Card, Hint, Meta, Pill } from "../../components/ui";
 /**
  * AI 創作工作台（WB-01～WB-06 正式頁面入口）：ProjectPage ② 只掛這一個主卡。
  * 目標輸入、模式 tabs、上下文條、共享草稿、四模式 adapter、CreationResourceDrawer。
@@ -309,7 +309,7 @@ export function CreationWorkbench({
   };
 
   return (
-    <section className="card card--primary" data-fb="AI 創作工作台" id="sec-ai-hub">
+    <Card as="section" variant="primary" data-fb="AI 創作工作台" id="sec-ai-hub">
       <div className="section-heading-row">
         <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
           <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作工作台
@@ -436,6 +436,6 @@ export function CreationWorkbench({
           }
         />
       </div>
-    </section>
+    </Card>
   );
 }

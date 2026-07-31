@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { useFocusTrap } from "./interactions";
-import { Button, Chip, Hint, Meta } from "./ui";
+import { Button, Card, Chip, Hint, Meta } from "./ui";
 import {
   copyLinkDeviceGuide,
   deviceKind,
@@ -194,13 +194,11 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
 
   return (
     <div className="modal-scrim" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div
+      <Card className="modal-card device-link-dialog"
         ref={dialogRef}
-        className="card modal-card device-link-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="連結手機與電腦"
-      >
+        aria-label="連結手機與電腦">
         <header className="device-link-head">
           <h2>
             <Icon name="Bell" size={18} style={{ verticalAlign: "-3px" }} /> 連結手機與電腦
@@ -519,7 +517,7 @@ export function NotificationSettingsDialog({ onClose }: { onClose: () => void })
             關閉
           </button>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

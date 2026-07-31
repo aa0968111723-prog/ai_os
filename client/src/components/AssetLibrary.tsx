@@ -12,7 +12,7 @@ import {
   revealAssetInFolder,
   suggestedFileName,
 } from "../platform/desktopBridge";
-import { Hint, Meta } from "./ui";
+import { Card, Hint, Meta } from "./ui";
 
 function fmtSize(bytes?: number | null): string {
   if (!bytes) return "";
@@ -275,7 +275,7 @@ export function AssetLibrary({
   const kindRoving = useRovingRadio(visibleKindFilters.map((f) => f.key), kindFilter, setKindFilter);
 
   return (
-    <section className="card">
+    <Card as="section">
       <h2>素材庫（上傳參考素材・生成成品自動入庫）</h2>
       {/* DESK-01：桌面回傳 revision 時顯示於區塊層級（不綁特定卡片） */}
       {desktopStatus?.assetId === "" && desktopStatus.kind === "ok" && (
@@ -747,6 +747,6 @@ export function AssetLibrary({
           </div>
         </div>
       )}
-    </section>
+    </Card>
   );
 }

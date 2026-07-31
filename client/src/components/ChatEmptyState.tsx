@@ -1,4 +1,5 @@
 import { Icon } from "./Icon";
+import { Card } from "./ui";
 
 export function focusChatPartnerPicker(input: HTMLInputElement | null): void {
   if (!input) return;
@@ -8,7 +9,7 @@ export function focusChatPartnerPicker(input: HTMLInputElement | null): void {
 
 export function ChatEmptyState({ onStart }: { onStart: () => void }) {
   return (
-    <section className="dm-thread card dm-empty">
+    <Card as="section" className="dm-thread dm-empty">
       <div className="empty-state" style={{ margin: "auto" }}>
         <Icon name="MessageCircle" size={32} style={{ color: "var(--fg-secondary)" }} />
         <h3>選一位夥伴開始聊</h3>
@@ -22,6 +23,6 @@ export function ChatEmptyState({ onStart }: { onStart: () => void }) {
           <Icon name="Plus" size={15} />發起新對話
         </button>
       </div>
-    </section>
+    </Card>
   );
 }

@@ -12,7 +12,7 @@ import {
   type DetectedDesktopEditor,
 } from "../platform/desktopBridge";
 import type { DesktopHandoffStatusEvent, DesktopRevisionEvent } from "../platform/tauriDesktop";
-import { Button, Hint, Meta } from "../components/ui";
+import { Button, Card, Hint, Meta } from "../components/ui";
 
 export function DesktopCompanionPage() {
   const desktopAvailable = hasDesktopBridge();
@@ -123,26 +123,26 @@ export function DesktopCompanionPage() {
 
   if (!desktopAvailable) {
     return (
-      <section className="card" style={{ maxWidth: 760, margin: "0 auto" }}>
+      <Card as="section" style={{ maxWidth: 760, margin: "0 auto" }}>
         <h2>桌面剪輯連接</h2>
         <div className="empty-state">
           <h3>這項功能需要 Aios 桌面版</h3>
           <p>一般瀏覽器與 PWA 不會取得啟動本機剪輯軟體或監看檔案的權限。你仍可從素材庫下載後手動開啟。</p>
         </div>
-      </section>
+      </Card>
     );
   }
 
   return (
     <section className="stack" style={{ maxWidth: 900, margin: "0 auto" }}>
-      <div className="card">
+      <Card>
         <h2>桌面剪輯連接</h2>
         <Hint layer="always">
           選擇專案素材與電腦中已安裝的軟體。Aios 只會把素材下載到自己的本機快取；儲存修改後會上傳成新素材，不覆寫原檔。
         </Hint>
-      </div>
+      </Card>
 
-      <div className="card stack">
+      <Card className="stack">
         <label>
           專案
           <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setAssetId(""); setActiveHandoffId(""); }}>
@@ -194,14 +194,14 @@ export function DesktopCompanionPage() {
 
         {message && <Meta as="p" role="status" aria-live="polite">{message}</Meta>}
         {error && <p className="error" role="alert">{error}</p>}
-      </div>
+      </Card>
 
-      <div className="card">
+      <Card>
         <h3>目前偵測到的桌面程式</h3>
         <ul>
           {editors.map((editor) => <li key={editor.id}>{editor.name}（{editor.kind}）</li>)}
         </ul>
-      </div>
+      </Card>
     </section>
   );
 }

@@ -6,6 +6,7 @@ import { BrandReveal } from "../components/BrandReveal";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { PasswordInput } from "../components/PasswordInput";
 import { Icon } from "../components/Icon";
+import { Card } from "../components/ui";
 
 /**
  * zod 驗證失敗時 tRPC 預設把整包 issues JSON 塞進 error.message（伺服器端 errorFormatter
@@ -69,7 +70,7 @@ export function LoginPage() {
         padding: "max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom))",
       }}
     >
-      <div className="card login-card">
+      <Card className="login-card">
         <BrandReveal mode="fade-rise" onceKey="login" durationMs={720}>
           <div className="login-brand">
             <BrandLogo variant="full" size="hero" showTagline priority />
@@ -124,7 +125,7 @@ export function LoginPage() {
         <div style={{ marginTop: "var(--sp-16)", textAlign: "left" }}>
           <InstallAppBanner />
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

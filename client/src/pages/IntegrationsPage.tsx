@@ -6,7 +6,7 @@ import { ConfirmButton } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 
-import { Badge, Button, Hint, Meta } from "../components/ui";
+import { Badge, Button, Card, Hint, Meta } from "../components/ui";
 /**
  * 連接的資料來源（/integrations）：每個人自己連「自己的」外部服務——
  * Google 雲端硬碟（OAuth，只讀）、Notion（個人 integration token）、外部資料庫/API（自帶金鑰）。
@@ -107,16 +107,16 @@ export function IntegrationsPage() {
         </a>
       </section>
 
-      <section className="card integration-flow-card" data-fb="資料來源使用方式">
+      <Card as="section" className="integration-flow-card" data-fb="資料來源使用方式">
         <div className="integration-flow-card__head">
           <div><p className="eyebrow">資料流</p><h2><Icon name="ArrowRight" size={18} /> 連接之後怎麼用？</h2></div>
           <Link href="/databases" className="btn-tonal btn-sm">前往知識與資料 <Icon name="ArrowRight" size={13} /></Link>
         </div>
         <VisualJourney steps={integrationJourney} ariaLabel="外部資料使用流程" />
-      </section>
+      </Card>
 
       {/* ── Google 雲端硬碟 ── */}
-      <section id="integration-google" className="card" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
+      <Card as="section" id="integration-google" style={{ marginTop: 12 }} data-fb="資料來源-Google雲端卡">
         <h2><Icon name="CalendarPlus" size={18} /> Google 雲端硬碟</h2>
         <Hint style={{ marginTop: 4 }}>
           連結後，到「知識與資料」貼上你私人雲端裡的文件、試算表、簡報或檔案連結即可匯入，不必再把檔案設成公開。
@@ -147,7 +147,7 @@ export function IntegrationsPage() {
             <GoogleRemoveButton onRemoved={() => utils.integrations.list.invalidate()} />
           </div>
         )}
-      </section>
+      </Card>
 
       {/* ── Notion ── */}
       <NotionCard data={d?.notion ?? null} />
@@ -185,7 +185,7 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
   const removeNotion = trpc.integrations.removeNotion.useMutation({ onSuccess: () => utils.integrations.list.invalidate() });
 
   return (
-    <section id="integration-notion" className="card" style={{ marginTop: 12 }} data-fb="資料來源-Notion卡">
+    <Card as="section" id="integration-notion" style={{ marginTop: 12 }} data-fb="資料來源-Notion卡">
       <h2><Icon name="FileText" size={18} /> Notion</h2>
       <Hint style={{ marginTop: 4 }}>
         到 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">notion.so/my-integrations</a> 建立整合、
@@ -236,7 +236,7 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
       {setNotion.error && <p className="error" role="alert">{setNotion.error.message}</p>}
       {removeNotion.error && <p className="error" role="alert">{removeNotion.error.message}</p>}
       <Hint layer="always" style={{ marginTop: 6 }}><Icon name="Lock" size={12} /> token 送出後即加密存放，不會再顯示——之後只看得到末四碼。</Hint>
-    </section>
+    </Card>
   );
 }
 
@@ -274,7 +274,7 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
   };
 
   return (
-    <section id="integration-api" className="card" style={{ marginTop: 12 }} data-fb="資料來源-外部API卡">
+    <Card as="section" id="integration-api" style={{ marginTop: 12 }} data-fb="資料來源-外部API卡">
       <h2><Icon name="Package" size={18} /> 外部資料來源／API</h2>
       <Hint layer="always" style={{ marginTop: 4 }}>
         把 Airtable、Supabase、自建服務或任何回傳 JSON／CSV 的端點接進來。這裡只保存「基底網址＋認證標頭」；
@@ -350,6 +350,6 @@ function ApiConnectionsCard({ apis, onRemove, removingId }: {
           <Icon name="Plus" size={13} /> 新增連接
         </Button>
       )}
-    </section>
+    </Card>
   );
 }

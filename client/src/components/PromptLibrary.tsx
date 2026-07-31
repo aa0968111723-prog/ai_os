@@ -2,7 +2,7 @@ import { useState } from "react";
 import { trpc } from "../api";
 import { getModel } from "@shared/models";
 import { ConfirmButton } from "./interactions";
-import { Chip, Hint, Meta } from "./ui";
+import { Card, Chip, Hint, Meta } from "./ui";
 
 /** 「再用」帶回生成台的完整設定（與伺服器 prompts 列的新欄位同形狀） */
 export interface PromptReuseSettings {
@@ -159,8 +159,8 @@ export function PromptLibrary({
   }
 
   return (
-    <section className="card" data-fb="提示詞庫">
+    <Card as="section" data-fb="提示詞庫">
       {body}
-    </section>
+    </Card>
   );
 }

@@ -3,7 +3,7 @@ import { trpc } from "../../api";
 import { PasswordInput } from "../../components/PasswordInput";
 import { Icon } from "../../components/Icon";
 import { useFocusTrap } from "../../components/interactions";
-import { Hint, Meta } from "../../components/ui";
+import { Card, Hint, Meta } from "../../components/ui";
 
 /**
  * 自助改密碼（拿到管理員的臨時密碼後，從這裡換成自己的）：成功後其他裝置全部登出。
@@ -33,7 +33,7 @@ export function ChangePasswordDialog({ onClose, forced = false }: { onClose: () 
       className="modal-scrim"
       onClick={(e) => { if (!forced && e.target === e.currentTarget) onClose(); }}
     >
-      <div ref={dialogRef} className="card modal-card" role="dialog" aria-modal="true" aria-label="改密碼">
+      <Card className="modal-card" ref={dialogRef} role="dialog" aria-modal="true" aria-label="改密碼">
         <h2 style={{ marginTop: 0 }}>改密碼</h2>
         {forced && <Hint layer="always">管理員重設了你的密碼——請先設定一組自己的新密碼再繼續使用</Hint>}
         <form onSubmit={(e) => { e.preventDefault(); if (canSubmit) change.mutate({ oldPassword: oldPw, newPassword: newPw }); }}>
@@ -49,7 +49,7 @@ export function ChangePasswordDialog({ onClose, forced = false }: { onClose: () 
         </form>
         {change.error && <p className="error" role="alert">{change.error.message}</p>}
         {change.isSuccess && <Meta as="p" style={{ color: "var(--success-ink)" }} role="status"><Icon name="Check" size={14} style={{ verticalAlign: "-2px" }} /> 已更新——其他裝置已登出，本裝置不受影響</Meta>}
-      </div>
+      </Card>
     </div>
   );
 }

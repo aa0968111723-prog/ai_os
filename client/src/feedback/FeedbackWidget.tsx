@@ -5,7 +5,7 @@ import { FEEDBACK_CATEGORIES, FEEDBACK_PAGES, type FeedbackCategory } from "@sha
 import { captureWithHighlight, pickElement, type PickResult } from "./picker";
 import { Icon } from "../components/Icon";
 import { useRovingRadio } from "../components/interactions";
-import { Button, Hint, Meta } from "../components/ui";
+import { Button, Card, Hint, Meta } from "../components/ui";
 /** 目前路由對應到人看得懂的頁面名（與 FEEDBACK_PAGES 對齊；對不上就回 null） */
 function pageForPath(path: string): string | null {
   if (path === "/") return "作業台（首頁）";
@@ -277,18 +277,16 @@ function ReportForm({
 
   if (justSent) {
     return (
-      <div
-        className="card"
+      <Card
         role="status"
         aria-live="polite"
-        style={{ width: 300, marginBottom: 12, padding: 20, textAlign: "center" }}
-      >
+        style={{ width: 300, marginBottom: 12, padding: 20, textAlign: "center" }}>
         <strong style={{ fontSize: 15 }}>收到了，感恩</strong>
         <Hint style={{ margin: "6px 0 0" }}>你說的會直接影響下一版怎麼改。</Hint>
         <Link href="/my-reports" onClick={onClose} style={{ display: "inline-block", marginTop: 10, fontSize: 13 }}>
           查看我的回報
         </Link>
-      </div>
+      </Card>
     );
   }
 

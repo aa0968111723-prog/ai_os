@@ -4,7 +4,7 @@ import { useLocalDraft } from "../useLocalDraft";
 import { Icon } from "./Icon";
 import { CharCount, ConfirmButton } from "./interactions";
 import { VersionHistory } from "./VersionHistory";
-import { Chip, Hint, Meta, Skeleton } from "./ui";
+import { Card, Chip, Hint, Meta, Skeleton } from "./ui";
 const KINDS = [
   { id: "transcript", label: "師父開示稿" },
   { id: "testimony", label: "見證故事" },
@@ -149,7 +149,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
   const totalChars = (list.data ?? []).reduce((s, r) => s + r.chars, 0);
 
   return (
-    <section className="card" data-fb="專案知識庫">
+    <Card as="section" data-fb="專案知識庫">
       <h2>專案知識庫（AI 讀得懂你的素材）</h2>
       <Hint>
         貼上師父開示稿、見證故事、腳本——AI 導演發想時會自動讀取，你不必每次重講背景。
@@ -273,7 +273,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
         </button>
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
-    </section>
+    </Card>
   );
 }
 

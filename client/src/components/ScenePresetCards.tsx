@@ -4,7 +4,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
-import { Button, Hint, Meta, Skeleton } from "./ui";
+import { Button, Card, Hint, Meta, Skeleton } from "./ui";
 /**
  * 場景設定卡（提案核心「場景一致性」）：
  * 色板/光線設定一次鎖定，生成勾選 → 自動注入錨點，同場景跨鏡光影一致。
@@ -51,7 +51,7 @@ export function ScenePresetCards({
   const [refEditId, setRefEditId] = useState<string | null>(null);
 
   return (
-    <section className="card" data-fb="場景設定卡">
+    <Card as="section" data-fb="場景設定卡">
       <h2>場景設定卡（色板・光線一致）</h2>
       <Hint>設定場景色板/光線一次鎖定；生成時勾選，AI 自動帶入，同場景跨鏡光影不跳。可上傳場景參考圖，或從素材庫綁定。</Hint>
 
@@ -156,6 +156,6 @@ export function ScenePresetCards({
       ))}
       {remove.error && <p className="error" role="alert">{remove.error.message}</p>}
       {update.error && <p className="error" role="alert">參考圖更新失敗：{update.error.message}</p>}
-    </section>
+    </Card>
   );
 }

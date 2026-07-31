@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { BrandLogo } from "./BrandLogo";
 import { Icon } from "./Icon";
-import { Badge, Hint, Meta } from "./ui";
+import { Badge, Card, Hint, Meta } from "./ui";
 
 /** 流程六步（設計規格）：建專案 → 世界觀 → 拆分鏡 → 逐格生成 → 送審 → 交付 */
 const STEPS: Array<{ n: string; label: string; hint: string }> = [
@@ -47,7 +47,7 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
   });
 
   return (
-    <div className="card card--primary" data-fb="新手導覽卡" style={{ marginBottom: "var(--sp-20)" }}>
+    <Card variant="primary" data-fb="新手導覽卡" style={{ marginBottom: "var(--sp-20)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <BrandLogo variant="mark" size="sm" decorative />
         <h2 style={{ margin: 0 }}>歡迎加入 · 先看一個完整範例</h2>
@@ -91,6 +91,6 @@ export function FirstRunGuide({ groupId, onDismiss }: { groupId: string; onDismi
       </div>
 
       {createSample.error && <p className="error">{createSample.error.message}</p>}
-    </div>
+    </Card>
   );
 }

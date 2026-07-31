@@ -95,6 +95,40 @@ describe("Card — class 契約", () => {
     );
     expect(container.querySelector("details")!.getAttribute("class")).toBe("card card--quiet");
   });
+
+  it("as=details 收得下 open／onToggle（<details> 專屬屬性）", () => {
+    const { container } = render(
+      <Card as="details" variant="quiet" open>
+        <summary>更多</summary>
+      </Card>,
+    );
+    expect(container.querySelector("details")).toHaveAttribute("open");
+  });
+
+  it("as=aside 可用（側欄卡片）", () => {
+    const { container } = render(<Card as="aside">側欄</Card>);
+    expect(container.querySelector("aside")!.getAttribute("class")).toBe("card");
+  });
+
+  it("接得住 ref —— 站內數處把卡片當對話框並用 ref 管焦點", () => {
+    const ref = { current: null as HTMLDivElement | null };
+    render(
+      <Card ref={ref} role="dialog" aria-label="改密碼">
+        內容
+      </Card>,
+    );
+    expect(ref.current).toBeInstanceOf(HTMLDivElement);
+    expect(ref.current).toHaveAttribute("role", "dialog");
+  });
+
+  it("呼叫端額外的 class 保留在變體之後", () => {
+    const { container } = render(
+      <Card as="section" variant="primary" className="team-ai-card">
+        內容
+      </Card>,
+    );
+    expect(container.querySelector("section")!.getAttribute("class")).toBe("card card--primary team-ai-card");
+  });
 });
 
 describe("Chip — 展示 vs 可互動", () => {

@@ -2,7 +2,7 @@ import { type ReactNode } from "react";
 import { Link } from "wouter";
 import { Icon, type IconName } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Chip, Hint, Meta } from "../components/ui";
+import { Card, Chip, Hint, Meta } from "../components/ui";
 
 /**
  * 怎麼用 / 常見問題：純靜態白話說明頁（無資料查詢、無新依賴）。
@@ -92,20 +92,20 @@ function Spot({ icon, name, where, children }: { icon: IconName; name: string; w
 /** 全站地圖的一組：小標題＋若干 Spot。 */
 function MapGroup({ title, icon, children }: { title: string; icon: IconName; children: ReactNode }) {
   return (
-    <div className="card" style={{ padding: "6px 16px 12px" }}>
+    <Card style={{ padding: "6px 16px 12px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 0 2px" }}>
         <Icon name={icon} size={16} />
         <b style={{ fontSize: "var(--fs-15)" }}>{title}</b>
       </div>
       {children}
-    </div>
+    </Card>
   );
 }
 
 /** 單則問答：折疊卡片，標題即 summary（可鍵盤展開）；defaultOpen 讓第一則預設展開。 */
 function Faq({ q, defaultOpen = false, children }: { q: string; defaultOpen?: boolean; children: ReactNode }) {
   return (
-    <details className="card" open={defaultOpen} style={{ padding: 0, overflow: "hidden" }}>
+    <Card as="details" open={defaultOpen} style={{ padding: 0, overflow: "hidden" }}>
       <summary
         style={{
           minHeight: 44,
@@ -128,7 +128,7 @@ function Faq({ q, defaultOpen = false, children }: { q: string; defaultOpen?: bo
       >
         {children}
       </div>
-    </details>
+    </Card>
   );
 }
 
@@ -172,13 +172,13 @@ export function HelpPage() {
       </nav>
 
       {/* ── 一句話總覽：先給最大的那張圖，之後的一切都掛在這句上 ── */}
-      <div className="card card--primary help-summary-card">
+      <Card variant="primary" className="help-summary-card">
         <p style={{ margin: 0, fontSize: "var(--fs-16)", lineHeight: 1.85 }}>
           <b>一句話：</b>這個網站把「一份腳本」變成「一包可以直接拖進剪映或 Premiere 的素材」。
           你不用自己找圖、配音、對字幕；AI 會記住這支片的<b>世界觀</b>（背景、語氣、畫風），每次生成自動帶入。
           你主要做的事只有三件：<b>設定世界觀 → 逐格生成畫面／配音 → 排好順序送審、打包下載</b>。
         </p>
-      </div>
+      </Card>
 
       {/* ── 六步路線圖：把主線流程視覺化，一眼看見全貌 ── */}
       <H2 id="help-route" icon="Clapperboard">整條路線（六步）</H2>
@@ -409,7 +409,7 @@ export function HelpPage() {
 
       {/* ── 名詞小辭典 ── */}
       <H2 id="help-terms" icon="FileText">名詞小辭典</H2>
-      <div className="card">
+      <Card>
         <Term word="世界觀">
           這支片的固定設定（一句話故事、關鍵訊息、調性、視覺風格、禁忌）。填一次，之後每次生成自動帶入，不用重講背景。
         </Term>
@@ -435,7 +435,7 @@ export function HelpPage() {
           管理該組的人，可審核分鏡、調整組的「選項」（自訂內容類型／平台／世界觀選項）。
         </Term>
         <Term word="開發者／管理員">系統最高權限，管理所有團隊與帳號、設定點數額度。</Term>
-      </div>
+      </Card>
 
       <p style={{ marginTop: 24 }}>
         <Link href="/dashboard">回今日工作台</Link>

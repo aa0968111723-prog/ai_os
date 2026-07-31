@@ -1,4 +1,4 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import type { DetailsHTMLAttributes, HTMLAttributes, ReactNode, Ref } from "react";
 import { cx } from "./cx";
 
 /**
@@ -10,6 +10,9 @@ import { cx } from "./cx";
  * - `quiet`   → `card card--quiet`：透明底髮絲框；配 `as="details"` 就是可收合區
  *
  * class 輸出與遷移前逐字相同。
+ *
+ * 型別用判別聯集而非「把 open 塞給所有標籤」：`open`／`onToggle` 只有 `<details>`
+ * 有意義，混在一起會讓 `<div open="">` 這種無效 DOM 通過型別檢查。
  */
 export type CardVariant = "default" | "primary" | "std" | "quiet";
 
@@ -20,20 +23,39 @@ const VARIANT_CLASS: Record<CardVariant, string> = {
   quiet: "card--quiet",
 };
 
-export function Card({
-  variant = "default",
-  as: Tag = "div",
-  className,
-  children,
-  ...rest
-}: {
+interface CardOwn {
   variant?: CardVariant;
-  as?: "div" | "section" | "article" | "details" | "li";
   className?: string;
   children?: ReactNode;
-} & Omit<HTMLAttributes<HTMLElement>, "children" | "className">) {
+}
+
+/** 站內數處把卡片當對話框（role="dialog"）並用 ref 管焦點，故需宣告 ref。 */
+type CardDetails = CardOwn &
+  Omit<DetailsHTMLAttributes<HTMLDetailsElement>, "children" | "className"> & {
+    as: "details";
+    ref?: Ref<HTMLDetailsElement>;
+  };
+
+type CardBlock = CardOwn &
+  Omit<HTMLAttributes<HTMLElement>, "children" | "className"> & {
+    as?: "div" | "section" | "article" | "aside" | "li";
+    /**
+     * 型別鎖在 HTMLDivElement 而非 HTMLElement：ref 的變異方向讓寬型別反而收不下
+     * 呼叫端的 `RefObject<HTMLDivElement>`。目前所有用 ref 的卡片都是預設的 div
+     * （對話框焦點管理），若日後真的需要 section/aside 的 ref 再改成泛型。
+     */
+    ref?: Ref<HTMLDivElement>;
+  };
+
+export function Card(props: CardDetails | CardBlock) {
+  const { variant = "default", className, children } = props;
+  const { as: Tag = "div", variant: _v, className: _c, children: _ch, ...rest } = props as CardBlock;
+  // Tag 是多型的，TS 無法同時滿足 div/li/details 各自的 ref 與屬性型別。
+  // 這個轉型侷限在元件內部——對外的 CardDetails/CardBlock 聯集仍然嚴格，
+  // 呼叫端拿到的型別檢查不受影響（例如 <Card open> 沒帶 as="details" 仍會被擋）。
+  const domProps = rest as Record<string, unknown>;
   return (
-    <Tag className={cx("card", VARIANT_CLASS[variant], className)} {...rest}>
+    <Tag className={cx("card", VARIANT_CLASS[variant], className)} {...domProps}>
       {children}
     </Tag>
   );

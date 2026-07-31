@@ -190,11 +190,9 @@ export function ModelsPage() {
         </Hint>
       )}
       {compareList.length >= 2 && (
-        <section
-          className="card"
+        <Card as="section"
           data-fb="模型並排比較"
-          style={{ position: "sticky", top: "var(--sp-8)", zIndex: 30, marginBottom: "var(--sp-16)", padding: "14px 18px", boxShadow: "var(--e3)" }}
-        >
+          style={{ position: "sticky", top: "var(--sp-8)", zIndex: 30, marginBottom: "var(--sp-16)", padding: "14px 18px", boxShadow: "var(--e3)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <Icon name="Scale" size={16} />
             <b>並排比較({compareList.length}/{COMPARE_MAX})</b>
@@ -235,7 +233,7 @@ export function ModelsPage() {
               </tbody>
             </table>
           </div>
-        </section>
+        </Card>
       )}
 
       {/* ── 深度優化:決策中心——三種模式回答「怎麼選模型」 ── */}
@@ -492,7 +490,7 @@ export function ModelsPage() {
             </p>
           )}
           {visibleCatalogItems.map((m) => (
-            <section key={m.id} className="card" style={{ padding: "14px 18px" }}>
+            <Card as="section" key={m.id} style={{ padding: "14px 18px" }}>
               <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                 <b>{m.label}</b>
                 <span className="pill" style={TIER_STYLE[m.tier]}>{m.tierLabel}</span>
@@ -528,7 +526,7 @@ export function ModelsPage() {
                   {copiedId === m.id ? <><Icon name="Check" size={12} />已複製</> : "複製"}
                 </button>
               </Meta>
-            </section>
+            </Card>
           ))}
           {catalogNeedsDisclosure && (
             <button
@@ -576,7 +574,7 @@ export function ModelsPage() {
           )}
           <div className="stack">
             {matchedWorkflows.map((w) => (
-              <section key={w.id} className="card" style={{ padding: "14px 18px" }}>
+              <Card as="section" key={w.id} style={{ padding: "14px 18px" }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                   <b>{w.label}</b>
                   <span className="pill" style={TIER_STYLE[w.tier]}>{w.tierLabel}</span>
@@ -586,7 +584,7 @@ export function ModelsPage() {
                 <Meta as="p" style={{ margin: 0 }}>
                   適合:{w.bestFor}|步驟:{w.steps.map((s) => s.note).join(" → ")}
                 </Meta>
-              </section>
+              </Card>
             ))}
           </div>
         </>
@@ -660,7 +658,7 @@ function ScenarioCard({
   const primary = MODEL_BY_ID.get(recipe.pickIds[0]);
   const alts = recipe.pickIds.slice(1).map((id) => MODEL_BY_ID.get(id)).filter((m): m is ModelEntry => !!m);
   return (
-    <div className="card card--std" style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+    <Card variant="std" style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
       <div>
         <b style={{ fontSize: "var(--fs-15)" }}>{recipe.scene}</b>
         <Meta as="p" style={{ margin: "2px 0 0" }}>{recipe.intent}</Meta>
@@ -699,7 +697,7 @@ function ScenarioCard({
           在目錄看同類<Icon name="ArrowRight" size={12} />
         </Button>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -716,7 +714,7 @@ function ShowdownCard({
   onJump: (cat: ModelCategory) => void;
 }) {
   return (
-    <div className="card card--std" style={{ padding: "12px 14px" }}>
+    <Card variant="std" style={{ padding: "12px 14px" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <b style={{ fontSize: "var(--fs-15)" }}>{showdown.title}</b>
         <Button variant="ghost" size="sm"
@@ -757,6 +755,6 @@ function ShowdownCard({
           </tbody>
         </table>
       </div>
-    </div>
+    </Card>
   );
 }

@@ -6,7 +6,7 @@ import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { MCP_TOOLS } from "../../../shared/mcpCatalog";
 import { humanizeAuditAction, summarizeAuditInput } from "../../../shared/auditWording";
 
-import { Hint, Meta, Pill, Skeleton } from "../components/ui";
+import { Card, Hint, Meta, Pill, Skeleton } from "../components/ui";
 /**
  * MCP 專區（接上外部 AI 的控制中心）：連線設定 → 建立金鑰（可設唯讀／到期）→ 我的金鑰（權限一目了然）
  * → 測試連線（whoami）→ 工具手冊 → 近期活動。
@@ -157,7 +157,7 @@ export function McpPage() {
       />
 
       {/* 安全提醒 */}
-      <div className="card" style={{ borderLeft: "3px solid var(--gold-ink)", background: "var(--card2)" }}>
+      <Card style={{ borderLeft: "3px solid var(--gold-ink)", background: "var(--card2)" }}>
         <div style={{ display: "flex", gap: 8 }}>
           <Icon name="TriangleAlert" size={18} style={{ color: "var(--gold-ink)", flex: "none", marginTop: 2 }} />
           <div style={{ fontSize: "var(--fs-14)", lineHeight: 1.8 }}>
@@ -165,21 +165,21 @@ export function McpPage() {
             把權限縮到最小；任何一把都能隨時撤銷。
           </div>
         </div>
-      </div>
+      </Card>
 
       {/* 連線資訊 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="ArrowRight" size={18} />連線位置</h2>
-      <div className="card">
+      <Card>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: "var(--fs-14)" }}>
           <span>端點：<code>POST {endpoint}</code></span>
           <CopyButton text={endpoint} />
         </div>
         <div style={{ marginTop: 6, fontSize: "var(--fs-14)" }}>驗證：HTTP 標頭 <code>x-api-key: 你的金鑰</code></div>
-      </div>
+      </Card>
 
       {/* 建立金鑰 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Plus" size={18} />建立金鑰</h2>
-      <div className="card">
+      <Card>
         <form onSubmit={submit} className="stack" style={{ gap: 12 }}>
           <div>
             <label htmlFor="mcp-label" style={{ fontSize: "var(--fs-13)", fontWeight: 600 }}>用途名稱</label>
@@ -253,11 +253,11 @@ export function McpPage() {
             </div>
           </div>
         )}
-      </div>
+      </Card>
 
       {/* 我的金鑰 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Lock" size={18} />我的金鑰（{activeCount} 把使用中）</h2>
-      <div className="card">
+      <Card>
         {tokens.isLoading ? (
           <><Skeleton style={{ height: 40 }} /><Skeleton style={{ height: 40, marginTop: 8 }} /></>
         ) : tokens.error ? (
@@ -301,7 +301,7 @@ export function McpPage() {
           </ul>
         )}
         {revoke.error && <p className="error" role="alert">{revoke.error.message}</p>}
-      </div>
+      </Card>
 
       {/* 工具手冊 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Info" size={18} />可用工具</h2>
@@ -314,7 +314,7 @@ export function McpPage() {
         <li>交給 AI 執行計畫：<code>plan_agent → approve_agent → get_agent_run（追進度）</code>——一句目標讓內建助手背景跑完多步製作。</li>
         <li>排時程：<code>list_schedule／add_schedule_item</code> 把交付死線與會議掛到專案與組行事曆。</li>
       </Hint>
-      <div className="card">
+      <Card>
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {MCP_TOOLS.map((tool) => (
             <li key={tool.name} style={{ display: "flex", gap: 10, padding: "9px 0", borderTop: "1px solid var(--border)", alignItems: "baseline" }}>
@@ -329,12 +329,12 @@ export function McpPage() {
             </li>
           ))}
         </ul>
-      </div>
+      </Card>
 
       {/* 近期活動 */}
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="Clock" size={18} />近期 MCP 活動</h2>
       <Hint layer="always" style={{ marginTop: 0 }}>你透過 MCP 觸發的操作紀錄（依使用者歸屬，非單把金鑰）。看到不認得的呼叫，請撤銷可疑金鑰。</Hint>
-      <div className="card">
+      <Card>
         {activity.isLoading ? (
           <Skeleton style={{ height: 36 }} />
         ) : activity.error ? (
@@ -359,7 +359,7 @@ export function McpPage() {
             })}
           </ul>
         )}
-      </div>
+      </Card>
 
       <p style={{ marginTop: 24 }}>
         <Link href="/help">回怎麼用</Link>

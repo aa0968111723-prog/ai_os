@@ -11,7 +11,7 @@ import { getModel, tierLabel } from "@shared/models";
 import { toCsv } from "@shared/csv";
 import { formatTwd, formatUsd, moneyFxNote } from "@shared/money";
 
-import { Button, Chip, Hint, Meta, Pill, Skeleton } from "../components/ui";
+import { Button, Card, Chip, Hint, Meta, Pill, Skeleton } from "../components/ui";
 /** 分類配色：對應設計系統既有 accent tokens（-soft/-tint 底＋-ink 字＋對應邊，比照 .pill 安靜標籤，不搶戲、過 AA） */
 const FEEDBACK_CATEGORY_STYLE: Record<string, { background: string; color: string; border: string }> = {
   bug: { background: "var(--primary-tint)", color: "var(--primary-ink)", border: "1px solid var(--primary-border)" },
@@ -647,7 +647,7 @@ function CreateTeamCard() {
     },
   });
   return (
-    <div className="card">
+    <Card>
       <h2>建立團隊</h2>
       <label htmlFor="new-team-name">團隊名稱</label>
       <input id="new-team-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="例：影音創作團隊" />
@@ -657,7 +657,7 @@ function CreateTeamCard() {
         </button>
       </div>
       {createTeam.error && <p className="error">{createTeam.error.message}</p>}
-    </div>
+    </Card>
   );
 }
 
@@ -686,7 +686,7 @@ function SelfTestCard() {
     }
   };
   return (
-    <div className="card">
+    <Card>
       <h2>系統自檢</h2>
       <Hint>部署後按一下，全部通過才算就緒（資料庫/模型目錄/點數/邀請/生成/交付）。</Hint>
       <button className="primary" disabled={running} onClick={run}>{running ? "檢查中…" : "跑系統自檢"}</button>
@@ -711,7 +711,7 @@ function SelfTestCard() {
           </p>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -984,7 +984,7 @@ export function AuditLogCard() {
     fontWeight: active ? 600 : 400,
   });
   return (
-    <div className="card" data-fb="操作紀錄卡">
+    <Card data-fb="操作紀錄卡">
       <h2>操作紀錄</h2>
       <Hint>誰在什麼時候做了什麼——用白話寫給每位夥伴看。能看到的範圍已按你的權限過濾（組長看自己組）。</Hint>
       {/* 分類 chip：白話分類，點一下只看那一類；不必先懂 admin.invite 這種代碼 */}
@@ -1087,7 +1087,7 @@ export function AuditLogCard() {
           )}
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -1254,7 +1254,7 @@ export function InsightsCard() {
   }
 
   return (
-    <div className="card" data-fb="操作洞察卡">
+    <Card data-fb="操作洞察卡">
       <h2>操作洞察</h2>
       <Hint>把操作紀錄整理成看得懂的統計：每位夥伴在忙哪一塊、哪個模型好用（成功率＝完成÷已完結）、人×模型用量與估價、大家的提示詞怎麼寫。</Hint>
       {/* 分頁 chips */}
@@ -1522,7 +1522,7 @@ export function InsightsCard() {
           )}
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -1564,7 +1564,7 @@ export function ConsumptionMonitorCard() {
   // 各組長條相對「最燒的組」等比；同樣 max(1, ...) 防除以 0
   const maxGroupPoints = data ? Math.max(1, ...data.byGroup.map((g) => g.weekPoints)) : 1;
   return (
-    <div className="card" data-fb="點數消耗監控卡">
+    <Card data-fb="點數消耗監控卡">
       <h2>點數消耗監控</h2>
       <Hint>逐日毛消耗（只算扣點、退點不抵銷）；今日暴衝會整行紅字提醒。</Hint>
       {stats.isLoading ? (
@@ -1654,7 +1654,7 @@ export function ConsumptionMonitorCard() {
           )}
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -1782,7 +1782,7 @@ function FeedbackReportsSection() {
   const [statusFilter, setStatusFilter] = useState<"" | "open" | "reviewing" | "done">("");
   const reports = trpc.feedbackReports.listVisible.useQuery({ status: statusFilter || undefined });
   return (
-    <section className="card" style={{ marginTop: 16 }} data-fb="元件回饋審閱">
+    <Card as="section" style={{ marginTop: 16 }} data-fb="元件回饋審閱">
       <h2>元件回饋（{reports.data?.length ?? 0}）</h2>
       <Hint>夥伴在任何頁面用右下角「回饋」浮標標定某個元件送出的意見。</Hint>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
@@ -1818,7 +1818,7 @@ function FeedbackReportsSection() {
       ) : (
         reports.data.map((r) => <ReportRow key={r.id} report={r} />)
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -1849,7 +1849,7 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
     n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
-    <div className="card" data-fb="Fal 帳戶卡">
+    <Card data-fb="Fal 帳戶卡">
       <h2>Fal 帳戶</h2>
       <Hint layer="always">
         平台在 Fal.ai 的 credits 餘額（單位 <strong>USD</strong>）。與站內
@@ -1931,7 +1931,7 @@ function FalAccountCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           {balance.isFetching ? "重新整理中…" : "重新整理"}
         </Button>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -1950,7 +1950,7 @@ function FeedbackAgentCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
   });
   const last = status.data?.lastRun;
   return (
-    <section className="card" style={{ marginTop: 16 }} data-fb="回饋代理卡">
+    <Card as="section" style={{ marginTop: 16 }} data-fb="回饋代理卡">
       <h2>回饋代理</h2>
       <Hint>
         每 3 天自動巡一次未處理的元件回饋：AI 分診嚴重度、給工程排修復方向，並寄信回覆回報者。
@@ -1995,7 +1995,7 @@ function FeedbackAgentCard({ isSuperAdmin }: { isSuperAdmin: boolean }) {
           {runNow.error && <span className="error" style={{ marginTop: 0 }}>{runNow.error.message}</span>}
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -2100,7 +2100,7 @@ export function AdminPage() {
       <div className="cols">
         <div className="stack">
           {teams.map((team) => (
-            <section key={team.id} className="card" data-fb="團隊與成員卡">
+            <Card as="section" key={team.id} data-fb="團隊與成員卡">
               <h2>{team.name}</h2>
               <Meta as="p">管理：{team.admins.map((a) => a?.name).join("、") || "—"}</Meta>
               <TeamExtras teamId={team.id} />
@@ -2114,7 +2114,7 @@ export function AdminPage() {
                 />
               ))}
               <CreateGroupRow teamId={team.id} />
-            </section>
+            </Card>
           ))}
         </div>
 
@@ -2125,7 +2125,7 @@ export function AdminPage() {
         <InsightsCard />
         <AuditLogCard />
         {isSuperAdmin && <CreateTeamCard />}
-        <div className="card" data-fb="點數與額度卡">
+        <Card data-fb="點數與額度卡">
           <h2>點數與額度（彈性・隨時可調）</h2>
           <Hint layer="always">空白＝不限。總預算限開發者調整。分配樹：總預算 →（左側團隊卡）各組「組預算」由團隊管理員分配 →（組長在「選項」頁）再把組預算分給各組員。週/日上限是另一層速率限制，與累計預算並存。</Hint>
           {/* 載入完成才掛載輸入框：defaultValue 只在掛載時生效，先掛空欄會永遠顯示不出現值。
@@ -2167,10 +2167,10 @@ export function AdminPage() {
           )}
           {saveSettings.error && <p className="error">{saveSettings.error.message}</p>}
           {settingsSaved && <Meta as="p" style={{ color: "var(--success-ink)" }}>已儲存 ✓</Meta>}
-        </div>
+        </Card>
         {/* Fal 帳戶（USD credits）與站內點數並陳；僅開發者 */}
         <FalAccountCard isSuperAdmin={isSuperAdmin} />
-        <div className="card" data-fb="邀請成員卡">
+        <Card data-fb="邀請成員卡">
           <h2>邀請成員</h2>
           <label htmlFor="invite-email">Email</label>
           <input id="invite-email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="partner@example.com" />
@@ -2258,11 +2258,11 @@ export function AdminPage() {
             </div>
           )}
           {invite.error && <p className="error">{invite.error.message}</p>}
-        </div>
+        </Card>
         </aside>
       </div>
 
-      <section className="card" style={{ marginTop: 16 }}>
+      <Card as="section" style={{ marginTop: 16 }}>
         <h2>回饋彙整（{feedback.data?.length ?? 0}）</h2>
         {feedback.isLoading ? (
           <div role="status" aria-label="回饋載入中">
@@ -2294,7 +2294,7 @@ export function AdminPage() {
             </div>
           ))
         )}
-      </section>
+      </Card>
 
       <FeedbackAgentCard isSuperAdmin={isSuperAdmin} />
 

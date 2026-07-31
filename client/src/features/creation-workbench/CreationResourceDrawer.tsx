@@ -18,7 +18,7 @@ import {
   requestWorkbenchMode,
   type WorkbenchRevealDetail,
 } from "./workbenchNav";
-import { Button, Hint, Meta } from "../../components/ui";
+import { Button, Card, Hint, Meta } from "../../components/ui";
 export type ResourceDrawerTab = "prompts" | "generations" | "trail" | "templates";
 
 export type ReuseGenerateFn = (
@@ -317,9 +317,8 @@ export function CreationResourceDrawer({
             if (e.target === e.currentTarget) close();
           }}
         >
-          <div
+          <Card className="modal-card creation-resource-drawer"
             ref={dialogRef}
-            className="card modal-card creation-resource-drawer"
             role="dialog"
             aria-modal="true"
             aria-label="資源與結果"
@@ -331,8 +330,7 @@ export function CreationResourceDrawer({
               flexDirection: "column",
               padding: 0,
               overflow: "hidden",
-            }}
-          >
+            }}>
             <header
               className="section-heading-row"
               style={{ padding: "12px 14px 8px", borderBottom: "1px solid var(--border-soft)", flexShrink: 0 }}
@@ -513,7 +511,7 @@ export function CreationResourceDrawer({
                 )}
               </div>
             </div>
-          </div>
+          </Card>
         </div>
       )}
 

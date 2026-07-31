@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { trpc } from "../api";
 import { PasswordInput } from "../components/PasswordInput";
 import { friendlyAuthError } from "./LoginPage";
-import { Button, Hint, Meta, Skeleton } from "../components/ui";
+import { Button, Card, Hint, Meta, Skeleton } from "../components/ui";
 const TEAM_ROLE_LABEL: Record<string, string> = { admin: "團隊管理員", member: "成員" };
 const GROUP_ROLE_LABEL: Record<string, string> = { leader: "組長", member: "組員" };
 
@@ -26,7 +26,7 @@ export function AcceptInvitePage({ token }: { token: string }) {
 
   const wrap = (inner: React.ReactNode) => (
     <div style={{ minHeight: "70vh", display: "grid", placeItems: "center" }}>
-      <div className="card" style={{ width: 420, maxWidth: "92vw" }}>{inner}</div>
+      <Card style={{ width: 420, maxWidth: "92vw" }}>{inner}</Card>
     </div>
   );
 

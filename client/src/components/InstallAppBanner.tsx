@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { canShowInstallUi, dismissInstallBanner, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../pwa";
-import { Button } from "./ui";
+import { Button, Card } from "./ui";
 
 export function InstallAppBanner() {
   const [, bump] = useState(0);
@@ -14,7 +14,7 @@ export function InstallAppBanner() {
     try { await promptInstall(); } finally { setBusy(false); bump((n) => n + 1); }
   };
   return (
-    <aside className="install-app card" role="region" aria-label="安裝 Aios 應用程式">
+    <Card as="aside" className="install-app" role="region" aria-label="安裝 Aios 應用程式">
       <div className="install-app__row">
         <img src="/icons/icon-192.png" alt="" width={48} height={48} className="install-app__icon" />
         <div className="install-app__body">
@@ -36,6 +36,6 @@ export function InstallAppBanner() {
         {!ios && <button type="button" className="primary" disabled={busy} onClick={() => void onInstall()}>{busy ? "請稍候…" : "安裝 Aios"}</button>}
         <Button variant="ghost" type="button" onClick={() => { dismissInstallBanner(); bump((n) => n + 1); }}>稍後</Button>
       </div>
-    </aside>
+    </Card>
   );
 }

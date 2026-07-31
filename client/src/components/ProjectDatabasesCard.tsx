@@ -8,7 +8,7 @@ import {
   projectDataAiHint,
   type ProjectDataTemplateId,
 } from "@shared/projectDataTemplates";
-import { Button, Hint, Meta } from "./ui";
+import { Button, Card, Hint, Meta } from "./ui";
 /**
  * 專案資料卡：
  * - 一眼看出 AI 能否引用本專案依據（知識／素材／已關聯表；尊重 agentAccess）。
@@ -155,8 +155,7 @@ export function ProjectDatabasesCard({
   const open = controlled ? openProp : uncontrolledOpen;
 
   return (
-    <details
-      className="card card--quiet"
+    <Card as="details" variant="quiet"
       data-fb="專案資料"
       id="sec-databases"
       open={open}
@@ -164,8 +163,7 @@ export function ProjectDatabasesCard({
         const next = (e.currentTarget as HTMLDetailsElement).open;
         if (controlled) onOpenChange?.(next);
         else setUncontrolledOpen(next);
-      }}
-    >
+      }}>
       <summary>
         <Icon name="Database" size={14} /> 專案資料
         <span className="meta" style={{ marginLeft: 8 }}>
@@ -396,6 +394,6 @@ export function ProjectDatabasesCard({
           </div>
         )}
       </div>
-    </details>
+    </Card>
   );
 }

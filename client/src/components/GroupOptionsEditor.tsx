@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
-import { Button, Chip, Hint, Meta, Skeleton } from "./ui";
+import { Button, Card, Chip, Hint, Meta, Skeleton } from "./ui";
 import {
   OPTION_TYPES,
   OPTION_TYPE_META,
@@ -33,7 +33,7 @@ function ApprovalThresholdCard({ groupId }: { groupId: string }) {
   });
   const current = usage.data?.approvalThreshold ?? null;
   return (
-    <section className="card" data-fb="成本審核門檻卡" style={{ marginBottom: 16 }}>
+    <Card as="section" data-fb="成本審核門檻卡" style={{ marginBottom: 16 }}>
       <h2>成本審核門檻</h2>
       <Hint layer="always">組員單筆生成達此點數需組長核准才會送出；空白或 0＝不啟用。</Hint>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
@@ -63,7 +63,7 @@ function ApprovalThresholdCard({ groupId }: { groupId: string }) {
         {setThreshold.error && <span className="error" style={{ marginTop: 0 }}>{setThreshold.error.message}</span>}
         {saved && <Meta style={{ color: "var(--success-ink)" }}>已儲存 ✓</Meta>}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -146,7 +146,7 @@ function PointsAllocationCard({ groupId }: { groupId: string }) {
   const allocated = data?.allocated ?? 0;
   const unallocated = groupBudget != null ? groupBudget - allocated : null;
   return (
-    <section className="card" data-fb="點數分配卡" style={{ marginBottom: 16 }}>
+    <Card as="section" data-fb="點數分配卡" style={{ marginBottom: 16 }}>
       <h2>點數分配</h2>
       <Hint layer="always">把「組預算」分給各組員（累計上限，非每週重置）；空白＝不限。組預算由團隊管理員分配給你這個組。</Hint>
       {usage.isLoading ? (
@@ -181,7 +181,7 @@ function PointsAllocationCard({ groupId }: { groupId: string }) {
           )}
         </>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -235,7 +235,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
       <>
         <ApprovalThresholdCard groupId={groupId} />
         <PointsAllocationCard groupId={groupId} />
-        <section className="card" data-fb="組選項編輯器">
+        <Card as="section" data-fb="組選項編輯器">
           <div aria-hidden="true">
             {[0, 1, 2].map((i) => (
               <div key={i} className="gen-row">
@@ -243,7 +243,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
               </div>
             ))}
           </div>
-        </section>
+        </Card>
       </>
     );
   }
@@ -252,14 +252,14 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
       <>
         <ApprovalThresholdCard groupId={groupId} />
         <PointsAllocationCard groupId={groupId} />
-        <section className="card" data-fb="組選項編輯器">
+        <Card as="section" data-fb="組選項編輯器">
           <p className="error">
             選項載入失敗：{list.error.message}
             <button style={{ marginLeft: 8, padding: "3px 12px", fontSize: "var(--fs-12)" }} onClick={() => list.refetch()}>
               重試
             </button>
           </p>
-        </section>
+        </Card>
       </>
     );
   }
@@ -268,7 +268,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
     <>
     <ApprovalThresholdCard groupId={groupId} />
     <PointsAllocationCard groupId={groupId} />
-    <section className="card" data-fb="組選項編輯器">
+    <Card as="section" data-fb="組選項編輯器">
       <h2>這一組的選項</h2>
       <Hint>
         這裡調整的是「你這個組」建專案與生成時能挑的選項；只有組長或管理員進得來，改完全組立即生效。
@@ -372,7 +372,7 @@ export function GroupOptionsEditor({ groupId }: { groupId: string }) {
       })}
 
       {actionError && <p className="error">動作沒完成：{actionError.message}</p>}
-    </section>
+    </Card>
     </>
   );
 }

@@ -19,7 +19,7 @@ import {
   readAgentPlannerMode,
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
-import { Button, Chip, Hint, Meta } from "./ui";
+import { Button, Card, Chip, Hint, Meta } from "./ui";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -716,8 +716,8 @@ export function ProjectAssistant({
 
   if (embedded) return <div data-fb="AI 助手">{body}</div>;
   return (
-    <section className="card" data-fb="AI 助手" id="sec-assistant">
+    <Card as="section" data-fb="AI 助手" id="sec-assistant">
       {body}
-    </section>
+    </Card>
   );
 }

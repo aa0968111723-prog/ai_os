@@ -5,7 +5,7 @@ import type { AppRouter } from "../../../server/routers";
 import { trpc } from "../api";
 import { Icon } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Hint, Meta, Skeleton } from "../components/ui";
+import { Card, Hint, Meta, Skeleton } from "../components/ui";
 type Member = inferRouterOutputs<AppRouter>["directory"]["list"]["members"][number];
 
 /** 相對時間（比照 Launchpad 的 relTime；通訊錄的「最近活動」用） */
@@ -112,7 +112,7 @@ export function MembersPage() {
 function MemberCard({ m, isSelf }: { m: Member; isSelf: boolean }) {
   const isLeaderSomewhere = m.memberships.some((x) => x.role === "leader");
   return (
-    <section className="card" style={{ marginBottom: 12, opacity: m.disabled ? 0.6 : 1 }}>
+    <Card as="section" style={{ marginBottom: 12, opacity: m.disabled ? 0.6 : 1 }}>
       {/* 標頭：姓名＋角色徽章；右端「私訊」直達站內聊天（停用帳號收不到訊息，不給入口） */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <b style={{ fontSize: "var(--fs-16)" }}>{m.name}</b>
@@ -165,6 +165,6 @@ function MemberCard({ m, isSelf }: { m: Member; isSelf: boolean }) {
           {m.lastActionLabel ? `最後操作「${m.lastActionLabel}」${relTime(m.lastActionAt)}` : "尚無操作紀錄"}
         </span>
       </Meta>
-    </section>
+    </Card>
   );
 }

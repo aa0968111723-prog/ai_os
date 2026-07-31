@@ -6,7 +6,7 @@ import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
 import { ChatEmptyState, focusChatPartnerPicker } from "../components/ChatEmptyState";
 import { setPlannerFocus } from "../discuss";
-import { Button, Hint, Meta, Skeleton } from "../components/ui";
+import { Button, Card, Hint, Meta, Skeleton } from "../components/ui";
 type Thread = inferRouterOutputs<AppRouter>["dm"]["threads"][number];
 type Peer = inferRouterOutputs<AppRouter>["dm"]["peers"][number];
 type HistoryItem = inferRouterOutputs<AppRouter>["dm"]["history"]["items"][number];
@@ -89,7 +89,7 @@ export function ChatPage({ peerId }: { peerId?: string }) {
         </div>
       </header>
       <div className={`dm-layout ${peerId ? "has-peer" : ""}`}>
-        <aside className="dm-list card" id="dm-partner-picker" aria-label="對話與夥伴選擇器">
+        <Card as="aside" className="dm-list" id="dm-partner-picker" aria-label="對話與夥伴選擇器">
           <label className="dm-search">
             <Icon name="Search" size={15} />
             <input
@@ -134,7 +134,7 @@ export function ChatPage({ peerId }: { peerId?: string }) {
               )}
             </>
           )}
-        </aside>
+        </Card>
         {peerId ? (
           // key=peerId：換對象時強制重建對話視窗，翻頁游標／草稿不殘留到別人身上
           <Conversation key={peerId} peerId={peerId} onBack={() => navigate("/chat")} />
@@ -301,10 +301,10 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
 
   if (history.error) {
     return (
-      <section className="dm-thread card">
+      <Card as="section" className="dm-thread">
         <Button size="sm" className="dm-back" onClick={onBack}><Icon name="Undo2" size={13} /> 返回</Button>
         <p className="error" role="alert" style={{ margin: "auto" }}>{history.error.message}</p>
-      </section>
+      </Card>
     );
   }
 
@@ -316,7 +316,7 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
     : (mentionables.data?.notes ?? []);
   let lastDay = "";
   return (
-    <section className="dm-thread card" aria-label={peer ? `與 ${peer.name} 的對話` : "對話"}>
+    <Card as="section" className="dm-thread" aria-label={peer ? `與 ${peer.name} 的對話` : "對話"}>
       <header className="dm-head">
         <Button size="sm" className="dm-back" onClick={onBack} aria-label="返回對話清單"><Icon name="Undo2" size={13} /></Button>
         <div style={{ minWidth: 0 }}>
@@ -491,7 +491,7 @@ function Conversation({ peerId, onBack }: { peerId: string; onBack: () => void }
       </div>
       {uploadErr && <p className="error" role="alert" style={{ margin: "4px 12px 8px" }}>{uploadErr}</p>}
       {send.error && <p className="error" role="alert" style={{ margin: "4px 12px 8px" }}>{send.error.message}</p>}
-    </section>
+    </Card>
   );
 }
 

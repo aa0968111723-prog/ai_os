@@ -2,7 +2,7 @@ import { useState } from "react";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 import { ConfirmButton } from "./interactions";
-import { Badge, Button, Hint, Meta, Skeleton } from "./ui";
+import { Badge, Button, Card, Hint, Meta, Skeleton } from "./ui";
 /** 素材種類 → 圖示（與素材庫一致的視覺語彙） */
 const KIND_ICON: Record<string, IconName> = { image: "Image", video: "Clapperboard", audio: "Volume2", doc: "FileText" };
 /** 知識種類 → 中文標籤 */
@@ -104,7 +104,7 @@ export function RecycleBin({ projectId }: { projectId: string }) {
   const total = data ? data.assets.length + data.scenes.length + data.knowledge.length : 0;
 
   return (
-    <section className="card" data-fb="回收桶">
+    <Card as="section" data-fb="回收桶">
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <button
           style={{ padding: "6px 12px", fontSize: 14, display: "inline-flex", alignItems: "center", gap: 8 }}
@@ -200,6 +200,6 @@ export function RecycleBin({ projectId }: { projectId: string }) {
           )}
         </div>
       )}
-    </section>
+    </Card>
   );
 }

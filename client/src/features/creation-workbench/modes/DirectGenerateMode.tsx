@@ -17,7 +17,7 @@ import {
   shouldShowApprovalThresholdNotice,
 } from "../generationGates";
 import { scrollToSelector } from "../workbenchNav";
-import { Button, Hint, Meta } from "../../../components/ui";
+import { Button, Card, Hint, Meta } from "../../../components/ui";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
   nonce: number;
@@ -349,12 +349,10 @@ export function DirectGenerateMode({
 
       {/* Progressive disclosure (4.4): source under 進階設定 — only when model needs source */}
       {model?.needs && (
-        <details
-          className="card card--quiet"
+        <Card as="details" variant="quiet"
           style={{ marginTop: 10, padding: "8px 10px" }}
           open={advancedOpen}
-          onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
-        >
+          onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}>
           <summary style={{ cursor: "pointer", fontWeight: 600 }}>
             <Icon name="SlidersHorizontal" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
             進階設定
@@ -430,7 +428,7 @@ export function DirectGenerateMode({
               </>
             )}
           </div>
-        </details>
+        </Card>
       )}
 
       <CreationCostSummary

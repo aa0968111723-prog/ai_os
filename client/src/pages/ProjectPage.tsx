@@ -78,19 +78,17 @@ function CtxCollapse({
     return <div id={sectionId}>{children}</div>;
   }
   return (
-    <details
+    <Card as="details" variant="quiet" className="project-ctx-collapse"
       id={sectionId}
-      className="card card--quiet project-ctx-collapse"
       open={open}
-      onToggle={(e) => onOpenChange((e.currentTarget as HTMLDetailsElement).open)}
-    >
+      onToggle={(e) => onOpenChange((e.currentTarget as HTMLDetailsElement).open)}>
       <summary>
         <span className="project-ctx-collapse__title">{title}</span>
         {meta != null && meta !== "" && <span className="meta project-ctx-collapse__meta">{meta}</span>}
         <Icon name="ChevronDown" size={14} className="details-caret" style={{ marginLeft: "auto" }} />
       </summary>
       <div className="project-ctx-collapse__body">{children}</div>
-    </details>
+    </Card>
   );
 }
 
@@ -822,21 +820,19 @@ export function ProjectPage({ id }: { id: string }) {
 
       {/* 2.3 唯讀橫幅：檢視者第一眼就知道自己是唯讀＋能做什麼＋找誰解鎖（不是「系統一直壞」） */}
       {!canEdit && (
-        <div
-          className="card"
+        <Card
           role="status"
           data-fb="唯讀橫幅"
-          style={{ padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
-        >
+          style={{ padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <Icon name="Lock" size={15} style={{ flexShrink: 0, color: "var(--primary-ink)" }} />
           <span style={{ fontSize: 13 }}>
             你在此專案是<b>檢視者（唯讀）</b>——可以瀏覽、留言、下載交付；要編輯或生成，請組長到「① 專案上下文」底部的成員權限把你改成編輯者。
           </span>
-        </div>
+        </Card>
       )}
 
       {/* #9 「從這裡開始」步驟列：用實際 state 判定完成打勾，點某步捲到對應區塊 */}
-      <section className="card project-guide" data-fb="從這裡開始">
+      <Card as="section" className="project-guide" data-fb="從這裡開始">
         <div className="project-guide__head">
           <h2 style={{ margin: 0 }}>從這裡開始</h2>
           <HelpTip text="這是製作一支片的四個步驟。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
@@ -885,7 +881,7 @@ export function ProjectPage({ id }: { id: string }) {
             下一步：<b>{onboardSteps[nextOnboardIndex]?.label}</b>・{onboardSteps[nextOnboardIndex]?.hint}
           </p>
         )}
-      </section>
+      </Card>
 
       {/* #28 章節導覽：三幕錨點（上下文 → 工作台 → 交付）；② 只跳 #stage-create，不列各模式。
           ③ 帶留言未讀徽章（@N 表示有人提及）。 */}
@@ -1129,7 +1125,7 @@ export function ProjectPage({ id }: { id: string }) {
           </CtxCollapse>
 
           {/* 專案權限（需求 2.3）：誰可編輯、誰唯讀——屬專案設定的一環，但非日常操作，收合呈現不佔主視線 */}
-          <details className="card card--quiet" data-fb="專案權限收合卡" id="sec-members">
+          <Card as="details" variant="quiet" data-fb="專案權限收合卡" id="sec-members">
             <summary>
               <Icon name="Lock" size={14} />成員權限（預設全員可編輯；可設個別成員唯讀）
               <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
@@ -1137,7 +1133,7 @@ export function ProjectPage({ id }: { id: string }) {
             <div style={{ marginTop: 10 }}>
               <ProjectMembersCard projectId={id} bare />
             </div>
-          </details>
+          </Card>
 
           <StageLink text="以上設定會自動注入下方每一次生成——AI 全程記得，不必重講背景" />
 

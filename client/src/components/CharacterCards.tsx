@@ -4,7 +4,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
-import { Button, Hint, Meta, Skeleton } from "./ui";
+import { Button, Card, Hint, Meta, Skeleton } from "./ui";
 /**
  * 角色定裝卡（提案核心「角色一致性」）：
  * 角色外觀設定一次鎖定，生成時勾選 → 自動注入錨點，跨鏡頭不走樣。
@@ -49,7 +49,7 @@ export function CharacterCards({
   const [refEditId, setRefEditId] = useState<string | null>(null);
 
   return (
-    <section className="card" data-fb="角色定裝卡">
+    <Card as="section" data-fb="角色定裝卡">
       <h2>角色定裝卡（跨鏡一致）</h2>
       <Hint>設定角色外觀一次鎖定；生成時勾選角色，AI 自動帶入外觀，跨鏡頭不走樣。可上傳定裝參考圖，或從素材庫綁定。</Hint>
 
@@ -155,6 +155,6 @@ export function CharacterCards({
       )}
       {remove.error && <p className="error">{remove.error.message}</p>}
       {update.error && <p className="error" role="alert">參考圖更新失敗：{update.error.message}</p>}
-    </section>
+    </Card>
   );
 }

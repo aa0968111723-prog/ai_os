@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { useRovingRadio } from "../components/interactions";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Hint, Skeleton } from "../components/ui";
+import { Card, Hint, Skeleton } from "../components/ui";
 const ITEMS: Array<{ key: string; label: string }> = [
   { key: "context", label: "AI 懂不懂我們的素材（不用重複解釋）" },
   { key: "cost", label: "額度夠用、花費看得懂" },
@@ -23,14 +23,14 @@ export function FeedbackPage({ groupId }: { groupId?: string }) {
       <div style={{ maxWidth: 620, margin: "0 auto" }} role="status" aria-busy="true" aria-label="載入中">
         <Skeleton style={{ height: 34, width: "45%", margin: "24px 0 12px" }} />
         <Skeleton style={{ height: 16, width: "80%", marginBottom: 24 }} />
-        <div className="card">
+        <Card>
           {[0, 1, 2, 3, 4].map((i) => (
             <div key={i} style={{ marginBottom: 16 }}>
               <Skeleton style={{ height: 14, width: "55%", marginBottom: 8 }} />
               <Skeleton style={{ height: 26 }} />
             </div>
           ))}
-        </div>
+        </Card>
       </div>
     );
   // 載入失敗不能退回空白表單：看不到既有內容就送出，upsert 會把舊回饋整份覆寫掉
@@ -75,14 +75,14 @@ function FeedbackForm({
 
   if (submit.isSuccess && justSent) {
     return (
-      <div className="card" style={{ maxWidth: 520, margin: "40px auto", textAlign: "center" }} role="status" aria-live="polite">
+      <Card style={{ maxWidth: 520, margin: "40px auto", textAlign: "center" }} role="status" aria-live="polite">
         <h2>收到了，感恩</h2>
         <p className="sub">你的回饋會直接影響下一版怎麼改。</p>
         <div style={{ marginTop: 12, display: "flex", gap: 16, justifyContent: "center", alignItems: "center" }}>
           <button onClick={backToForm}>再修改</button>
           <Link href="/dashboard">回今日工作台</Link>
         </div>
-      </div>
+      </Card>
     );
   }
 
@@ -106,7 +106,7 @@ function FeedbackForm({
         description={<>依直覺選 1 到 5 分；沒用到的功能可以留空，再點同一分數即可取消。</>}
       />
       {hasExisting && <Hint layer="always">你之前填過——直接修改後重新送出即可。</Hint>}
-      <div className="card">
+      <Card>
         {ITEMS.map((item) => (
           <RatingRow key={item.key} item={item} value={scores[item.key]} onSet={setScore} />
         ))}
@@ -132,7 +132,7 @@ function FeedbackForm({
           <Hint as="span" layer="always">{rated === 0 ? "至少評 1 題就能送出" : "沒用到的功能可以留空"}</Hint>
         </div>
         {submit.error && <p className="error" role="alert">送出失敗，請稍後再試</p>}
-      </div>
+      </Card>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { Icon, type IconName } from "./Icon";
 import { AgentCard } from "./AgentCard";
 import { ProjectAssistant } from "./ProjectAssistant";
 import { flashAnchor } from "../discuss";
-import { Button, Hint, Meta, Pill } from "./ui";
+import { Button, Card, Hint, Meta, Pill } from "./ui";
 /**
  * @deprecated Legacy shell kept for unit tests only (`AiHub.test.tsx`).
  * Production ProjectPage mounts `CreationWorkbench` exclusively (WB-01～WB-06).
@@ -91,7 +91,7 @@ export function AiHub({
   ];
 
   return (
-    <section className="card card--primary" data-fb="AI 創作工作台" id="sec-ai-hub">
+    <Card as="section" variant="primary" data-fb="AI 創作工作台" id="sec-ai-hub">
       <div className="section-heading-row">
         <h2 style={{ display: "flex", alignItems: "center", gap: 8, margin: 0 }}>
           <Icon name="Sparkles" size={18} style={{ color: "var(--primary-ink)" }} /> AI 創作工作台
@@ -190,6 +190,6 @@ export function AiHub({
           <AgentCard projectId={projectId} canEdit={canEdit} isLeader={isLeader} embedded hideComposer />
         </details>
       </div>
-    </section>
+    </Card>
   );
 }

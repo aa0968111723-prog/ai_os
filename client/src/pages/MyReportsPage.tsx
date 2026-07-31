@@ -2,7 +2,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { FEEDBACK_CATEGORIES, FEEDBACK_STATUS_LABEL } from "@shared/options";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
-import { Chip, Hint, Meta, Skeleton } from "../components/ui";
+import { Card, Chip, Hint, Meta, Skeleton } from "../components/ui";
 /** 分類 value→中文標籤（追蹤列的分類 chip） */
 const CATEGORY_LABEL: Record<string, string> = Object.fromEntries(
   FEEDBACK_CATEGORIES.map((c) => [c.value, c.label]),
@@ -40,13 +40,13 @@ export function MyReportsPage() {
           <button onClick={() => mine.refetch()}>重試</button>
         </p>
       ) : !mine.data?.length ? (
-        <div className="card" style={{ textAlign: "center", padding: 32 }}>
+        <Card style={{ textAlign: "center", padding: 32 }}>
           <h3>你還沒有送過回報</h3>
           <Hint layer="always">
             在任何頁面用右下角「回饋」浮標標定某個元件、或只針對這一頁說幾句就會出現在這裡。
           </Hint>
           <Link href="/dashboard">回今日工作台</Link>
-        </div>
+        </Card>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {mine.data.map((r) => (
@@ -77,7 +77,7 @@ function ReportCard({ report }: { report: MineReport }) {
   const pages = Array.isArray(report.pages) ? (report.pages as string[]) : [];
   const statusLabel = FEEDBACK_STATUS_LABEL[report.status] ?? report.status;
   return (
-    <div className="card" style={{ padding: 16 }}>
+    <Card style={{ padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <Chip style={{ margin: 0 }}>{CATEGORY_LABEL[report.category] ?? report.category}</Chip>
         <Chip style={{ margin: 0 }}>{statusLabel}</Chip>
@@ -120,6 +120,6 @@ function ReportCard({ report }: { report: MineReport }) {
           已收到,等候查看與回覆——通常很快,最長每 3 天會巡一輪。
         </Hint>
       )}
-    </div>
+    </Card>
   );
 }

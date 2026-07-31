@@ -190,7 +190,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
       )}
       <div className={`database-layout${selected || creating ? " has-detail" : ""}${list.data && tables.length === 0 ? " is-empty" : ""}`}>
         {/* 左欄：清單＋建立 */}
-        <aside className="database-sidebar card" aria-label="資料庫清單">
+        <Card as="aside" className="database-sidebar" aria-label="資料庫清單">
           <div className="database-sidebar__head">
             <div><strong>我的資料庫</strong><small>{tables.length} 個空間</small></div>
             <Button size="sm" variant="primary" aria-label="建立資料庫" onClick={() => { setCreating(true); setSelectedId(null); }}>
@@ -237,7 +237,7 @@ export function DatabasesPage({ groupId }: { groupId: string }) {
               <p>先建一個試試：比如「拍攝器材借用表」或你自己的待辦清單。</p>
             </div>
           )}
-        </aside>
+        </Card>
 
         {/* 右欄：建立表單 or 選中庫的格線 */}
         <section className="database-main" aria-label={creating ? "建立資料庫" : selected?.name ?? "資料庫內容"}>
@@ -557,7 +557,7 @@ function ImportToCreate({ onApply }: { onApply: (args: { fields: DataField[]; na
   };
 
   return (
-    <details className="card card--quiet" style={{ margin: "4px 0 12px" }} data-fb="從檔案建立資料庫">
+    <Card as="details" variant="quiet" style={{ margin: "4px 0 12px" }} data-fb="從檔案建立資料庫">
       <summary>
         <Icon name="Package" size={14} /> 從檔案匯入建立（CSV／TSV／JSON，自動判讀欄位）
         <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
@@ -595,7 +595,7 @@ function ImportToCreate({ onApply }: { onApply: (args: { fields: DataField[]; na
           )}
         </div>
       </div>
-    </details>
+    </Card>
   );
 }
 
@@ -997,7 +997,7 @@ function ConnectPanel({ table }: { table: TableSummary }) {
   const icsUrl = `${origin}/api/databases/${table.id}/calendar.ics?key=你的金鑰`;
 
   return (
-    <details className="card card--quiet" style={{ marginTop: 16 }} data-fb="資料庫連接面板">
+    <Card as="details" variant="quiet" style={{ marginTop: 16 }} data-fb="資料庫連接面板">
       <summary>
         <Icon name="Info" size={14} /> 連接本機／手機／其他系統
         <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
@@ -1041,7 +1041,7 @@ curl -X POST -H "x-api-key: 你的金鑰" \\
           )}
         </div>
       </div>
-    </details>
+    </Card>
   );
 }
 
