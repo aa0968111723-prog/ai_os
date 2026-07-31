@@ -3,9 +3,11 @@
  * - 全域設定存 DB（settings 單列），管理員隨時改；null/0＝不限。
  * - 額度層級：個人覆寫 → 組設定 → 全域預設；一律空＝不限。
  * - 扣退模式不變：先扣預估、失敗全額退回（帳本可查）。
+ * - 方案 C：Fal 台幣等值硬上限（即時動態，見 falCeiling.ts）。
  */
 import { and, eq, gt, gte, inArray, sql } from "drizzle-orm";
 import { db, schema } from "../db";
+import { falCeilingReason } from "./falCeiling";
 
 export interface PointsSettings {
   totalBudgetPoints: number | null;
@@ -240,6 +242,9 @@ export async function checkQuota(userId: string, groupId: string, points: number
     const today = await usedToday(userId);
     if (today + points > daily) return `今天的額度用完了（已用 ${today}／${daily} 點）——明天會重置`;
   }
+  // 方案 C：Fal 台幣等值硬上限（即時動態對應 fal.ai 餘額；fail-open）
+  const falReason = await falCeilingReason(points);
+  if (falReason) return falReason;
   return null;
 }
 
@@ -275,6 +280,10 @@ export async function reserveQuota(
   const budgetCapped = !noLimit(settings.totalBudgetPoints);
   const gBudget = cfg.groupBudget;
   const mBudget = cfg.memberBudget;
+
+  // 方案 C：交易外先查 Fal 上限（外部 API 不可進交易；fail-open）
+  const falReason = await falCeilingReason(points);
+  if (falReason) return falReason;
 
   return db.transaction(async (tx) => {
     // 鎖取得順序固定為 user → group → 全域總預算，全體呼叫端一致 → 無交錯死鎖。
