@@ -462,6 +462,15 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
 };
 
+/**
+ * 執行期可列舉的圖示名單（給展示頁與測試用）。
+ *
+ * 直接由 `PATHS` 推導，不另外維護第二份名單——手寫第二份只會多一個
+ * 會跟本體不同步的東西。型別那一側由 `Record<IconName, ReactNode>` 顧著：
+ * 聯集裡有、PATHS 裡漏掉的名稱，tsc 會直接報錯。
+ */
+export const ICON_NAMES = Object.keys(PATHS) as IconName[];
+
 export function Icon({
   name,
   size = 16,

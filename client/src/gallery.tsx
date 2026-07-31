@@ -13,7 +13,7 @@ import {
   type Density,
 } from "./components/ui";
 import "./styles.css";
-import { Icon } from "./components/Icon";
+import { Icon, ICON_NAMES } from "./components/Icon";
 
 /**
  * Primitives 展示頁（**開發用，不進正式包**）。
@@ -215,11 +215,88 @@ function DensityColumn({ density, label }: { density: Density; label: string }) 
   );
 }
 
-createRoot(document.getElementById("gallery-root")!).render(
+/**
+ * 圖示目錄。放在密度雙欄**之外**只渲染一次——圖示不隨密度變化，
+ * 並排兩份只是雜訊。
+ *
+ * 存在理由：58 個圖示原本埋在一個 480 行的 Icon.tsx 裡，要用的人不知道
+ * 有哪些可選，於是不是重複內嵌 SVG，就是退回用 emoji。名單由 ICON_NAMES
+ * 執行期推導，新增圖示會自動出現在這裡，不需要有人記得回來補。
+ */
+function IconCatalogue() {
+  const names = [...ICON_NAMES].sort((a, b) => a.localeCompare(b));
+  return (
+    <div className="app" style={{ paddingTop: 8, paddingBottom: 80 }}>
+      <div className="group-head">
+        <span className="eyebrow cjk">Icon — 可用圖示 {names.length} 個</span>
+      </div>
+      <Hint layer="always">
+        寫 <code style={{ fontFamily: "var(--mono)" }}>&lt;Icon name="Search" /&gt;</code>。
+        要新增請跑 <code style={{ fontFamily: "var(--mono)" }}>npm run icons:add -- Waypoints</code>，
+        不要手抄 SVG 路徑——抄錯不會有測試抓得到。
+      </Hint>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+          gap: 4,
+          marginTop: 12,
+        }}
+      >
+        {names.map((name) => (
+          <div
+            key={name}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 10px",
+              borderRadius: "var(--r-8)",
+              border: "1px solid var(--border)",
+              minWidth: 0,
+            }}
+          >
+            <Icon name={name} size={18} />
+            <code
+              style={{
+                fontFamily: "var(--mono)",
+                fontSize: 11,
+                color: "var(--fg-secondary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {name}
+            </code>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 讓這個模組重複執行也安全。
+ *
+ * 目前 Vite 對本檔的更新是整頁重載（本檔沒有匯出元件，Fast Refresh 會放棄），
+ * 所以現況不會踩到——**這是防禦，不是在修一個正在發生的 bug**。但只要有人替
+ * 本檔加上 `import.meta.hot.accept`，或 Fast Refresh 的判定改變，模組就會在
+ * 同一個 window 裡重跑；那時對同一容器再 createRoot 會被 React 判為錯誤，
+ * 而 console 正是這頁用來抓問題的地方，被洗版就等於沒有。
+ */
+const container = document.getElementById("gallery-root")!;
+const holder = window as unknown as { __aiosGalleryRoot?: ReturnType<typeof createRoot> };
+holder.__aiosGalleryRoot ??= createRoot(container);
+
+holder.__aiosGalleryRoot.render(
   <StrictMode>
     <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap", padding: "0 16px" }}>
       <DensityColumn density="guide" label="引導模式 guide（新手預設）" />
       <DensityColumn density="concise" label="精簡模式 concise（熟手）" />
+    </div>
+    <div style={{ padding: "0 16px" }}>
+      <IconCatalogue />
     </div>
   </StrictMode>,
 );

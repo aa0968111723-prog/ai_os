@@ -1,31 +1,20 @@
 import { render } from "@testing-library/react";
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { Icon, type IconName } from "./Icon";
+import { Icon, ICON_NAMES } from "./Icon";
 
 /**
- * 圖示的路徑資料是內嵌的原始碼，沒有任何型別能保證它「畫得出東西」：
- * `PATHS` 少一筆、或某一筆是空 fragment，TypeScript 都不會抱怨
- * （Record<IconName, ReactNode> 收得下 null 與 undefined），
+ * 圖示的路徑資料是內嵌的原始碼，**沒有任何型別能保證它「畫得出東西」**：
+ * 某一筆寫成空 fragment，TypeScript 完全不會抱怨（ReactNode 收得下），
  * 結果就是一個看不見的圖示悄悄上線。這裡把每個名稱都真的渲染一次。
  *
- * 名單直接從原始碼的聯集抓，不另外維護一份——維護第二份名單，
- * 只會多一個會跟本體不同步的東西。
+ * （聯集裡有、PATHS 裡漏掉的名稱由 tsc 擋，不需要測試重覆守。）
  */
-const NAMES = (() => {
-  // 用 cwd 相對路徑而非 import.meta.url：vitest 的瀏覽器環境下 import.meta.url
-  // 是 http scheme，readFileSync 會直接拒收。
-  const src = readFileSync("client/src/components/Icon.tsx", "utf8");
-  const union = src.slice(src.indexOf("export type IconName ="), src.indexOf("const PATHS"));
-  return [...union.matchAll(/\|\s*"(\w+)"/g)].map((m) => m[1] as IconName);
-})();
-
 describe("Icon — 每個名稱都要畫得出幾何", () => {
-  it("聯集解析得到合理數量的名稱（解析失敗時整組測試會假綠）", () => {
-    expect(NAMES.length).toBeGreaterThan(50);
+  it("名單數量合理（ICON_NAMES 若意外變空，整組 it.each 會靜悄悄地零測試通過）", () => {
+    expect(ICON_NAMES.length).toBeGreaterThan(50);
   });
 
-  it.each(NAMES)("%s 有非空的繪圖元素", (name) => {
+  it.each(ICON_NAMES)("%s 有非空的繪圖元素", (name) => {
     const { container } = render(<Icon name={name} />);
     const svg = container.querySelector("svg")!;
     expect(svg).toBeTruthy();
