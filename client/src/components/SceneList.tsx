@@ -530,7 +530,12 @@ function SceneRow({
                   triggerStyle={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 12px", fontSize: 12, color: "var(--danger-ink)", borderColor: "var(--danger)" }}
                   disabled={decide.isPending}
                   title="退回這一鏡"
-                  reason={{ label: "退回理由（會通知提交人）", placeholder: "說明需要修改的地方…", required: true }}
+                  reason={{
+                    label: "退回理由（會通知提交人）",
+                    placeholder: "說明需要修改的地方…",
+                    required: true,
+                    presets: ["畫面與腳本不符", "人物長相跑掉", "文字有錯字", "風格不一致", "請再修一版"],
+                  }}
                   confirmLabel="退回"
                   onConfirm={(reason) => decide.mutate({ approvalId: pending.id, decision: "needs_work", reason })}
                 >
