@@ -124,10 +124,17 @@ async function inspectViewport(page, vp) {
         return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden";
       })
       .map((element) => {
-        const rect = element.getBoundingClientRect();
+        // 包在 <label> 裡的 checkbox/radio，實際觸控目標是整個 label（點 label 就命中），
+        // 量 13px 的原生小方塊是誤報——WCAG 2.5.5/2.5.8 算的是可點區域，不是控件本體。
+        const type = element.getAttribute("type");
+        const wrapper =
+          element.tagName === "INPUT" && (type === "checkbox" || type === "radio")
+            ? element.closest("label")
+            : null;
+        const rect = (wrapper ?? element).getBoundingClientRect();
         return {
           tag: element.tagName,
-          label: (element.getAttribute("aria-label") || element.textContent || "").trim().slice(0, 60),
+          label: (element.getAttribute("aria-label") || element.textContent || (wrapper?.textContent ?? "")).trim().slice(0, 60),
           width: Math.round(rect.width),
           height: Math.round(rect.height),
         };

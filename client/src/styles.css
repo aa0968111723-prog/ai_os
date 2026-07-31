@@ -1545,7 +1545,9 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
   position: relative; min-height: 250px; padding: 28px;
   border: 1px solid var(--border); border-radius: 18px; background: var(--card); box-shadow: var(--e1);
 }
-.landing-capability__number { position: absolute; right: 22px; top: 18px; color: var(--border-strong); font: 20px var(--serif); }
+/* 序號用 fg-secondary 而非 border-strong：邊框 token 當文字只有 ~1.7:1，
+   20px 未達 WCAG「大字」門檻（24px+），一樣要過 4.5:1（fg-secondary 4.6:1）。 */
+.landing-capability__number { position: absolute; right: 22px; top: 18px; color: var(--fg-secondary); font: 20px var(--serif); }
 .landing-capability > svg { color: var(--primary-ink); margin-top: 30px; }
 .landing-capability h3 { margin: 18px 0 8px; font-size: 19px; }
 .landing-capability p { margin: 0; color: var(--fg-secondary); }

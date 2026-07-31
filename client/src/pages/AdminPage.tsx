@@ -781,7 +781,9 @@ function AuditLogRow({ r, first, drill, repeats }: { r: AuditRowData; first: boo
     <div style={{ borderTop: first ? "none" : "1px solid var(--border-soft)", padding: "8px 0", fontSize: 13, marginTop: first ? 8 : 0 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         {/* 成功／失敗：單色 Icon＋語意 ink 色（跨平台渲染一致，不用滿彩 emoji） */}
-        <span aria-label={r.ok ? "成功" : "失敗"} style={{ display: "inline-flex", alignItems: "center" }}>
+        {/* role="img"：純 span 禁掛 aria-label（axe aria-prohibited-attr）；
+            這顆 span 的職責就是「一張代表成敗的圖」，img 角色讓名稱合法且語意準確 */}
+        <span role="img" aria-label={r.ok ? "成功" : "失敗"} style={{ display: "inline-flex", alignItems: "center" }}>
           {r.ok
             ? <Icon name="CheckCircle2" size={14} style={{ color: "var(--success-ink)" }} />
             : <Icon name="XCircle" size={14} style={{ color: "var(--danger-ink)" }} />}
