@@ -83,20 +83,35 @@ describe("assessStoragePersistence", () => {
     expect(health.storageDegradeState().degraded).toBe(false);
   });
 
-  it("container-layer：device id 相同（目錄只是映像層資料夾）→ 不持久，note 含修法，並標記降級", async () => {
+  it("container-layer：device id 相同（目錄只是映像層資料夾）→ 不持久，note 含修法；正式環境並標記降級", async () => {
     setPlatform("linux");
-    statSyncMock.mockImplementation(() => ({ dev: 1 })); // /data 與 / 同一顆 device＝沒掛 Volume
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production"; // 降級旗標只該在正式環境豎起（見下一案例的反面）
+    try {
+      statSyncMock.mockImplementation(() => ({ dev: 1 })); // /data 與 / 同一顆 device＝沒掛 Volume
+      const { storage, health } = await loadStorage();
+      const result = storage.assessStoragePersistence();
+      expect(result.mode).toBe("container-layer");
+      expect(result.persistent).toBe(false);
+      // note 必須是「照著做就能修好」的指引，不是只丟一句請掛 Volume
+      expect(result.note).toContain("Zeabur");
+      expect(result.note).toContain("/data");
+      // 副作用：判定為不持久的當下就要標記降級——這正是舊版「偵測到了但沒人接手」的補洞
+      const degrade = health.storageDegradeState();
+      expect(degrade.degraded).toBe(true);
+      expect(degrade.reason).toBe("not-persistent");
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+    }
+  });
+
+  it("container-layer 在開發／測試環境不標降級：CI 與本機本來就沒掛卷，那是常態不是事故", async () => {
+    setPlatform("linux");
+    statSyncMock.mockImplementation(() => ({ dev: 1 }));
     const { storage, health } = await loadStorage();
     const result = storage.assessStoragePersistence();
-    expect(result.mode).toBe("container-layer");
-    expect(result.persistent).toBe(false);
-    // note 必須是「照著做就能修好」的指引，不是只丟一句請掛 Volume
-    expect(result.note).toContain("Zeabur");
-    expect(result.note).toContain("/data");
-    // 副作用：判定為不持久的當下就要標記降級——這正是舊版「偵測到了但沒人接手」的補洞
-    const degrade = health.storageDegradeState();
-    expect(degrade.degraded).toBe(true);
-    expect(degrade.reason).toBe("not-persistent");
+    expect(result.persistent).toBe(false); // 判定照實回報不持久
+    expect(health.storageDegradeState().degraded).toBe(false); // 但不豎降級旗（自檢/橫幅不誤報）
   });
 
   it("unknown：非 Linux 開發機（Windows/macOS）→ 不宣稱持久", async () => {
@@ -153,25 +168,39 @@ describe("assessStoragePersistence", () => {
 });
 
 describe("storageWriteBlockReason（嚴格模式守門）", () => {
+  // 「不持久 → 降級」只在正式環境成立（開發/CI 沒掛卷是常態），所以嚴格模式
+  // 這兩個「已降級」案例都要在 NODE_ENV=production 下驗，才符合線上真實情境。
   it("ASSET_STRICT=1 且降級（container-layer）→ 回可直接顯示的中文拒收訊息", async () => {
     setPlatform("linux");
     process.env.ASSET_STRICT = "1";
-    statSyncMock.mockImplementation(() => ({ dev: 1 }));
-    const { storage, health } = await loadStorage();
-    storage.assessStoragePersistence(); // 觸發降級標記
-    const reason = health.storageWriteBlockReason();
-    expect(reason).not.toBeNull();
-    expect(reason).toContain("暫時停止接收新素材");
-    expect(reason).toContain("管理員"); // 要講清楚下一步找誰、做什麼
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      statSyncMock.mockImplementation(() => ({ dev: 1 }));
+      const { storage, health } = await loadStorage();
+      storage.assessStoragePersistence(); // 觸發降級標記
+      const reason = health.storageWriteBlockReason();
+      expect(reason).not.toBeNull();
+      expect(reason).toContain("暫時停止接收新素材");
+      expect(reason).toContain("管理員"); // 要講清楚下一步找誰、做什麼
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+    }
   });
 
   it("未設 ASSET_STRICT → 即使降級也不擋（照常收檔）", async () => {
     setPlatform("linux");
-    statSyncMock.mockImplementation(() => ({ dev: 1 }));
-    const { storage, health } = await loadStorage();
-    storage.assessStoragePersistence();
-    expect(health.storageDegradeState().degraded).toBe(true);
-    expect(health.storageWriteBlockReason()).toBeNull();
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      statSyncMock.mockImplementation(() => ({ dev: 1 }));
+      const { storage, health } = await loadStorage();
+      storage.assessStoragePersistence();
+      expect(health.storageDegradeState().degraded).toBe(true);
+      expect(health.storageWriteBlockReason()).toBeNull();
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+    }
   });
 
   it("ASSET_STRICT=1 但儲存層健康 → 不擋", async () => {

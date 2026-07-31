@@ -1357,12 +1357,17 @@ app.get("/api/selftest", async (req, res) => {
       .where(and(eq(backupRuns.ok, true), isNotNull(backupRuns.finishedAt)))
       .orderBy(desc(backupRuns.finishedAt))
       .limit(1);
+    // 備份新鮮度只在正式環境當紅燈：開發機與 e2e 都是全新環境、必然「從未備份」，
+    // 亮紅只會把整個自檢拉成 500、讓自動化測試誤判服務故障（CI 的 e2e-models 就是打自檢驗全綠）。
+    // 正式站不受影響：NODE_ENV=production 時照樣紅到有人按下第一次備份為止。
     if (!last?.finishedAt) {
+      if (!isProd) return "尚未備份過（開發／測試環境不強制；正式環境此項會亮紅）";
       throw new Error("從未成功備份過素材——請到團隊管理按「立即下載素材備份」把檔案存到本機或雲端硬碟，或設定每日排程自動抓取 /api/admin/backup/assets.tar.gz");
     }
     const ageMs = Date.now() - last.finishedAt.getTime();
     const ageHours = Math.floor(ageMs / 3_600_000);
     if (ageMs > 48 * 3_600_000) {
+      if (!isProd) return `上次備份 ${ageHours} 小時前（開發／測試環境不強制新鮮度）`;
       throw new Error(`最近一次成功備份是 ${ageHours} 小時前（超過 48 小時）——請到團隊管理按「立即下載素材備份」，或檢查每日排程是否已停止`);
     }
     return `${ageHours} 小時前（${last.fileCount ?? 0} 個檔案／${Math.round(Number(last.totalBytes ?? 0) / 1048576)}MB）`;

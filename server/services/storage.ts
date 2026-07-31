@@ -181,7 +181,10 @@ export function assessStoragePersistence(): StoragePersistence {
   const result = computePersistence();
   persistenceCache = result;
   try {
-    if (!result.persistent && !storageDegradeState().degraded) {
+    // 「非持久」只在正式環境標成降級：開發機（win32 判不出掛載點）與 CI（容器層）本來就
+    // 不持久，那是常態不是事故——若也標降級，自檢會 500、全站橫幅會在開發機常駐、
+    // e2e 會誤判服務故障。正式站則必須降級：這正是歷史上素材全滅的前置狀態。
+    if (!result.persistent && process.env.NODE_ENV === "production" && !storageDegradeState().degraded) {
       setStorageDegraded("not-persistent", result.note);
     }
   } catch {
@@ -314,10 +317,13 @@ export async function resetVolumeIdentity(): Promise<string> {
     );
   }
   clearStorageDegraded();
-  // 解除警示後別忘了「磁碟本身持不持久」是另一個問題：不持久就該立刻重新標記，
+  // 解除警示後別忘了「磁碟本身持不持久」是另一個問題：不持久就該立刻重新標記
+  // （與 assessStoragePersistence 同口徑：只在正式環境算降級，開發/CI 屬常態），
   // 否則會把「換卷已確認」誤讀成「儲存層全綠」。
   const persistence = assessStoragePersistence();
-  if (!persistence.persistent) setStorageDegraded("not-persistent", persistence.note);
+  if (!persistence.persistent && process.env.NODE_ENV === "production") {
+    setStorageDegraded("not-persistent", persistence.note);
+  }
   return id;
 }
 
