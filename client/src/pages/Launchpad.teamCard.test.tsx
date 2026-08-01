@@ -1,5 +1,5 @@
 /**
- * 作業台「AI 工作與團隊分析」卡（S1：待我裁決收件匣＋健康度語意）。
+ * 作業台「組代理總指揮」卡（S1：待我裁決收件匣＋健康度語意）。
  *
  * 這張卡原本的第一屏是五個計數加一句「目前不需要立即處理的代理阻塞」，
  * 於是新組打開只看得到五個 0——而同一頁其實已經查到分鏡送審／生成待核的筆數。
@@ -258,7 +258,7 @@ describe("buildDecisionInbox（三來源合流純函式）", () => {
   });
 });
 
-describe("團隊分析卡：待我裁決收件匣", () => {
+describe("組代理總指揮：待我裁決收件匣", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -337,7 +337,7 @@ describe("團隊分析卡：待我裁決收件匣", () => {
   });
 });
 
-describe("團隊分析卡：健康度語意與筆數誠實度", () => {
+describe("組代理總指揮：健康度語意與筆數誠實度", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -367,7 +367,8 @@ describe("團隊分析卡：健康度語意與筆數誠實度", () => {
       summary: { doneRecent: 45, hasRuns: true, health: "healthy" },
     });
     render(<Launchpad groupId={GROUP} />);
-    expect(screen.getByText(/（214 筆）/)).toBeInTheDocument();
+    // 收合列摘要用「N 筆計畫」；展開後的說明仍講清清單上限
+    expect(screen.getByText(/214 筆計畫/)).toBeInTheDocument();
     expect(screen.getByText(/清單只顯示最近 30 筆（全組共 214 筆）/)).toBeInTheDocument();
   });
 
@@ -653,7 +654,7 @@ describe("S4：空組起手式與派工參數", () => {
   });
 });
 
-describe("S5：組彙總 AI 的決策軌跡", () => {
+describe("S5：組代理總指揮的決策軌跡", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -676,7 +677,7 @@ describe("S5：組彙總 AI 的決策軌跡", () => {
       degraded: false,
     });
     render(<Launchpad groupId={GROUP} />);
-    await userEvent.type(screen.getByLabelText("問卡片答不出來的事"), "哪個案子卡住了？");
+    await userEvent.type(screen.getByLabelText("問總指揮"), "哪個案子卡住了？");
     await userEvent.click(screen.getByRole("button", { name: "詢問" }));
     expect(await screen.findByText(/依據：依阻塞清單/)).toBeInTheDocument();
     expect(screen.getByText("阻塞與人員負荷")).toBeInTheDocument();
@@ -691,7 +692,7 @@ describe("S5：組彙總 AI 的決策軌跡", () => {
       rationale: undefined, contextUsed: ["專案現況"], degraded: true,
     });
     render(<Launchpad groupId={GROUP} />);
-    await userEvent.type(screen.getByLabelText("問卡片答不出來的事"), "有人卡住嗎？");
+    await userEvent.type(screen.getByLabelText("問總指揮"), "有人卡住嗎？");
     await userEvent.click(screen.getByRole("button", { name: "詢問" }));
     expect(await screen.findByText(/沒能讀到阻塞與人員任務資料/)).toBeInTheDocument();
   });
@@ -700,7 +701,7 @@ describe("S5：組彙總 AI 的決策軌跡", () => {
     seed({ runs: [], pending: [] });
     askReturning({ answer: "簡短回答。", steps: [], dispatches: [], canDispatch: false, contextUsed: [], degraded: false });
     render(<Launchpad groupId={GROUP} />);
-    await userEvent.type(screen.getByLabelText("問卡片答不出來的事"), "隨便問問");
+    await userEvent.type(screen.getByLabelText("問總指揮"), "隨便問問");
     await userEvent.click(screen.getByRole("button", { name: "詢問" }));
     expect(await screen.findByText("簡短回答。")).toBeInTheDocument();
     expect(screen.queryByText(/^依據：/)).not.toBeInTheDocument();
@@ -789,7 +790,7 @@ describe("阻塞清單截斷時的誠實度", () => {
   });
 });
 
-describe("建議問句：問卡片答不出來的事", () => {
+describe("建議問句：問總指揮", () => {
   const S = buildTeamQuestionSuggestions;
   const empty = { runs: [], people: [], planConcerns: [], pending: [] };
   const mkRun = (o: Partial<{ projectId: string; projectTitle: string; status: string; error: string | null; goal: string }>) =>
@@ -869,18 +870,46 @@ describe("建議問句：問卡片答不出來的事", () => {
   });
 });
 
-describe("組彙總 AI 入口的重新定位", () => {
+describe("組代理總指揮入口一體化", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
   });
 
+  it("外層叫「組代理總指揮」，不再嵌「團隊分析／全組代理」第二套標題", () => {
+    seed({ runs: [], pending: [] });
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.getByRole("heading", { name: "組代理總指揮" })).toBeInTheDocument();
+    expect(document.querySelector('[data-fb="組代理總指揮"]')).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "團隊分析" })).not.toBeInTheDocument();
+    expect(screen.queryByText("全組代理")).not.toBeInTheDocument();
+    expect(screen.getByText(/裁決待辦、看誰卡住、跨專案調度、派工與追問/)).toBeInTheDocument();
+  });
+
   it("標籤與說明講清楚它的職責是「鑽進去查」，不是覆述儀表板", () => {
     seed({ runs: [], pending: [] });
     render(<Launchpad groupId={GROUP} />);
-    expect(screen.getByLabelText("問卡片答不出來的事")).toBeInTheDocument();
-    expect(screen.getByText(/上面的卡片給你數字，這裡給你數字背後的東西/)).toBeInTheDocument();
-    expect(screen.getByText(/鑽進分鏡全文、生成紀錄/)).toBeInTheDocument();
+    expect(screen.getByLabelText("問總指揮")).toBeInTheDocument();
+    expect(screen.getByText(/現況看數字；這裡鑽進分鏡全文、生成紀錄/)).toBeInTheDocument();
+  });
+
+  it("誰卡住／執行計畫合在「全組現況」同一個收合區", () => {
+    seed({
+      runs: [run({ status: "running" })],
+      summary: { running: 1, active: 1, hasRuns: true, health: "attention" },
+      insights: {
+        openTasks: 2, overdueTasks: 1,
+        people: [{ userId: "u1", name: "阿光", openTasks: 2, overdueTasks: 1, earliestDueAt: daysAgo(2) }],
+        byProject: [{ projectId: "p1", projectTitle: "招生短片", blockers: 1, criticalBlockers: 0, openTasks: 2, overdueTasks: 1, activeRuns: 1 }],
+        blockers: [{ severity: "warning", type: "overdue_task", label: "逾期 1" }],
+        blockersTotal: 1,
+      },
+    });
+    render(<Launchpad groupId={GROUP} />);
+    expect(screen.getByRole("button", { name: /全組現況/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("誰卡住了")).toBeInTheDocument();
+    expect(screen.getByLabelText("執行計畫")).toBeInTheDocument();
+    expect(screen.queryByText("組執行計畫動態")).not.toBeInTheDocument();
   });
 
   it("建議問句會指名真實的專案（證明它讀了這個組的資料）", () => {
@@ -901,14 +930,14 @@ describe("組彙總 AI 入口的重新定位", () => {
     });
     render(<Launchpad groupId={GROUP} />);
     await userEvent.click(screen.getByRole("button", { name: /為什麼失敗/ }));
-    expect(screen.getByLabelText("問卡片答不出來的事"))
+    expect(screen.getByLabelText("問總指揮"))
       .toHaveValue("「招生短片」的代理為什麼失敗？要改什麼才不會再失敗？");
     expect(h.mutations.filter((m) => m.path === "teamAssistant.ask")).toHaveLength(0);
   });
 });
 
 /* ────────────────────────────────────────────────────────────────
-   L3 組代理總指揮（TeamCommanderBlock）
+   L3 跨專案調度（TeamCommanderBlock）
 
    這一區與卡片其他區塊的差別是它會「自己下令」：核准子計畫、花點、改人員任務。
    所以測的重點不是版面好不好看，而是三件會出事的事——
@@ -916,7 +945,7 @@ describe("組彙總 AI 入口的重新定位", () => {
    ──────────────────────────────────────────────────────────────── */
 
 /** 總指揮區塊（用 aria-label 定位，不依賴版面結構） */
-const commander = () => screen.getByLabelText("組代理總指揮");
+const commander = () => screen.getByLabelText("跨專案調度");
 
 /** 一份典型的組級調度計畫：四步、已完成一步、等在人工關卡 */
 const campaign = (over: Partial<Record<string, unknown>> = {}) => ({
@@ -974,7 +1003,7 @@ function seedCommander(opts: {
   if (opts.campaignsState) h.queryState.set("teamAssistant.campaigns", opts.campaignsState);
 }
 
-describe("L3 組代理總指揮：誰看得到、什麼狀態給什麼鈕", () => {
+describe("L3 跨專案調度：誰看得到、什麼狀態給什麼鈕", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -986,7 +1015,7 @@ describe("L3 組代理總指揮：誰看得到、什麼狀態給什麼鈕", () =
     (level) => {
       seedCommander({ level });
       render(<Launchpad groupId={GROUP} />);
-      expect(screen.queryByLabelText("組代理總指揮")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("跨專案調度")).not.toBeInTheDocument();
     },
   );
 
@@ -1121,7 +1150,7 @@ describe("L3 組代理總指揮：誰看得到、什麼狀態給什麼鈕", () =
    這一整組測的都是同一件事——當程式其實不知道答案時，畫面有沒有假裝知道。
    每一條後面都跟著一筆真的會發生的損失（雙倍派工、授權加錯份、按了必失敗的鈕）。
    ──────────────────────────────────────────────────────────────── */
-describe("L3 組代理總指揮：載入中與載入失敗不能長成「還沒有計畫」", () => {
+describe("L3 跨專案調度：載入中與載入失敗不能長成「還沒有計畫」", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -1177,11 +1206,11 @@ describe("L3 組代理總指揮：載入中與載入失敗不能長成「還沒�
   it("兩者都載完、確實沒權限也沒計畫 → 才可以整塊收掉", () => {
     seedCommander({ level: "none", campaigns: [] });
     render(<Launchpad groupId={GROUP} />);
-    expect(screen.queryByLabelText("組代理總指揮")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("跨專案調度")).not.toBeInTheDocument();
   });
 });
 
-describe("L3 組代理總指揮：加授權輸入框以計畫為單位（跨列共用會把點數加到別份計畫上）", () => {
+describe("L3 跨專案調度：加授權輸入框以計畫為單位（跨列共用會把點數加到別份計畫上）", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -1232,7 +1261,7 @@ describe("L3 組代理總指揮：加授權輸入框以計畫為單位（跨列�
   });
 });
 
-describe("L3 組代理總指揮：停止／放棄照後端「發起人或組長以上」露出", () => {
+describe("L3 跨專案調度：停止／放棄照後端「發起人或組長以上」露出", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -1298,7 +1327,7 @@ describe("L3 組代理總指揮：停止／放棄照後端「發起人或組長�
   });
 });
 
-describe("L3 組代理總指揮：waiting 要講清楚在等什麼、下一步是什麼", () => {
+describe("L3 跨專案調度：waiting 要講清楚在等什麼、下一步是什麼", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -1358,7 +1387,7 @@ describe("L3 組代理總指揮：waiting 要講清楚在等什麼、下一步�
   });
 });
 
-describe("L3 組代理總指揮：文案誠實度", () => {
+describe("L3 跨專案調度：文案誠實度", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -1403,7 +1432,7 @@ describe("L3 組代理總指揮：文案誠實度", () => {
    前者是主控台一路噴 unhandled rejection（開發環境還會被 overlay 蓋住整頁），
    後者是橫幅指著一顆使用者這一輪根本沒按的鈕。
    ──────────────────────────────────────────────────────────────── */
-describe("L3 組代理總指揮：動作失敗的收尾", () => {
+describe("L3 跨專案調度：動作失敗的收尾", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -1480,7 +1509,7 @@ describe("L3 組代理總指揮：動作失敗的收尾", () => {
   });
 });
 
-describe("L3 組代理總指揮：展開步驟的鈕要說得出自己是開還是關", () => {
+describe("L3 跨專案調度：展開步驟的鈕要說得出自己是開還是關", () => {
   beforeEach(() => {
     h.queryData.clear();
     h.mutations.length = 0;
@@ -1542,7 +1571,7 @@ describe("組彙總 AI 的指令提議（ask 的 actions）", () => {
   };
 
   const askNow = async (q: string) => {
-    await userEvent.type(screen.getByLabelText("問卡片答不出來的事"), q);
+    await userEvent.type(screen.getByLabelText("問總指揮"), q);
     await userEvent.click(screen.getByRole("button", { name: "詢問" }));
   };
 

@@ -23,8 +23,10 @@ import {
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
 /** 最近開啟：點卡片時記下 id，置頂顯示（純前端 localStorage） */
 const RECENT_KEY = "aios.recentProjects";
-/** 「組執行計畫動態」收合偏好記憶鍵（per 組；純前端 localStorage，收起省版面） */
-const RUNS_COLLAPSE_KEY = (gid: string) => `aios.teamRuns.collapsed.${gid}`;
+/** 「全組現況」收合偏好記憶鍵（per 組；純前端 localStorage，收起省版面）
+ *  舊鍵 aios.teamRuns.collapsed.* 一併讀寫，避免升級後收合偏好被重置。 */
+const STATUS_COLLAPSE_KEY = (gid: string) => `aios.teamStatus.collapsed.${gid}`;
+const LEGACY_RUNS_COLLAPSE_KEY = (gid: string) => `aios.teamRuns.collapsed.${gid}`;
 
 function relTime(d: Date | string): string {
   const t = new Date(d).getTime();
@@ -442,13 +444,13 @@ export function Launchpad({ groupId }: { groupId: string }) {
         )}
       </div>
 
-      {/* 組彙總 AI（需求 12 v1）：問整組狀況的唯讀彙總——沒選組就不渲染。
+      {/* 組代理總指揮（需求 12）：裁決／現況／跨專案調度／派工／追問合為同一入口——沒選組就不渲染。
           key 綁組：換組即整卡重掛，否則 A 組的問答殘留在畫面上、
           「追問」還會把 A 組對話歷史連同新 groupId 送去 B 組（跨組脈絡外溢） */}
       <section id="ai-work" className="dashboard-section" aria-labelledby="ai-work-title">
         <div className="section-heading">
-          <div><p className="eyebrow">協作代理</p><h2 id="ai-work-title">AI 工作與團隊分析</h2></div>
-          <p>看清查證步驟、執行狀態與需要人員決定的節點。</p>
+          <div><p className="eyebrow">AI 工作</p><h2 id="ai-work-title">組代理總指揮</h2></div>
+          <p>裁決待辦、看誰卡住、跨專案調度、派工與追問——全組代理同一個入口。</p>
         </div>
         {groupId && (
           <TeamAssistantCard
@@ -796,16 +798,16 @@ const RUN_STATUS: Record<string, { label: string; color?: string }> = {
 const HEALTH_LABEL: Record<string, { label: string; hint: string }> = {
   // idle 與 healthy 必須分開講：舊版把「從沒發起過計畫」也講成「狀態穩定・沒有阻塞」，
   // 於是新組看到的是五個 0 加一句安慰話——把「沒東西可分析」講成「分析結果良好」。
-  idle: { label: "尚未啟用", hint: "這個組還沒有 AI 執行計畫——可到專案頁用「執行計畫」發起，或在下方問組彙總 AI" },
+  idle: { label: "尚未啟用", hint: "這個組還沒有 AI 執行計畫——用下方起手式發起，或直接問總指揮" },
   healthy: { label: "狀態穩定", hint: "目前沒有需要立刻處理的代理阻塞" },
-  attention: { label: "需要關注", hint: "有進行中的計畫、待核或近期失敗——先掃一眼下方清單" },
-  blocked: { label: "有阻塞", hint: "近期失敗且仍有等待／待核——優先到對應專案處理" },
+  attention: { label: "需要關注", hint: "有進行中的計畫、待核或近期失敗——先看待裁決與全組現況" },
+  blocked: { label: "有阻塞", hint: "近期失敗且仍有等待／待核——優先處理待裁決與卡住的事項" },
 };
 
 /** 人員阻塞把健康度往上推時要換一句話——否則畫面會說「狀態穩定」旁邊卻列著兩項逾期 */
 const PEOPLE_HEALTH_HINT: Record<string, string> = {
-  attention: "有人員任務在等或即將到期——見下方「誰卡住了」",
-  blocked: "有人員任務逾期或關卡卡住，AI 停在那裡等人——先處理下方「誰卡住了」",
+  attention: "有人員任務在等或即將到期——見全組現況裡的「誰卡住了」",
+  blocked: "有人員任務逾期或關卡卡住，AI 停在那裡等人——先處理全組現況裡卡住的事項",
 };
 
 type TeamHealth = "idle" | "healthy" | "attention" | "blocked";
@@ -1002,10 +1004,6 @@ function matchesRunFilter(status: string, filter: RunFilter): boolean {
 }
 
 /**
- * 組彙總 AI 卡：① 團隊分析（全組代理健康／篩選清單）② 可追問的組彙總對話 ③ 派工。
- * 對話只存前端狀態（重整即清空）；唯讀彙總本身不改資料。
- */
-/**
  * 調度計畫清單的輪詢間隔（false＝不輪詢）。
  *
  * running 要輪詢是顯然的；**waiting 才是最需要盯的狀態**——那一刻整份計畫停在
@@ -1034,15 +1032,13 @@ function campaignShortGoal(goal: string): string {
 }
 
 /**
- * 組代理總指揮：組代理自己的跨專案調度計畫（campaign）。
+ * 跨專案調度：組代理自己的調度計畫（campaign）。
  *
- * 為什麼獨立成一塊、而不是塞進上面的計畫清單：那份清單是「各專案的代理在做什麼」，
- * 這裡是「組代理在指揮什麼」——同一畫面上混在一起，使用者分不出哪一份是誰派的、
- * 停掉一份會連帶影響什麼。兩者的父子關係在步驟明細裡才講得清楚。
+ * 外層產品名是「組代理總指揮」；這一塊是它底下的調度能力，不再另掛一套品牌名。
+ * 為什麼仍獨立成一塊、而不是塞進「各專案執行計畫」清單：那份清單是「各專案的代理在做什麼」，
+ * 這裡是「組代理在指揮什麼」——混在一起，使用者分不出哪一份是誰派的、停掉一份會連帶影響什麼。
  *
  * 這一區的用詞刻意只有兩個：組代理自己的那份叫**調度計畫**，它派到各專案去的叫**子計畫**。
- * 之前同一畫面上「調度計畫／子計畫／計畫／代理計畫」四種叫法混用，
- * 於是後端回的錯誤訊息對不上使用者剛按的那顆鈕——人會以為自己按到了別的東西。
  */
 function TeamCommanderBlock({
   groupId,
@@ -1146,10 +1142,10 @@ function TeamCommanderBlock({
   };
 
   return (
-    <div className="team-commander" aria-label="組代理總指揮">
+    <div className="team-commander" aria-label="跨專案調度">
       <div className="team-stuck__head">
-        <strong>組代理總指揮</strong>
-        <Meta>跨專案調度：派工、盯著子計畫、在授權內補救</Meta>
+        <strong>跨專案調度</strong>
+        <Meta>派工、盯著子計畫、在授權內補救</Meta>
       </div>
 
       {/* 指揮權讀不到 ≠ 沒有指揮權。講成後者的話，有權限的人會停下來不做事。 */}
@@ -1212,7 +1208,7 @@ function TeamCommanderBlock({
           實際會發生的事：查詢逾時，畫面說「還沒有」，但其實有一份 running 的調度計畫
           正在派工；組長據此重排第二份，兩份同時對同一批專案派工又各自在授權內自動核准，
           點數就是雙倍支出，而且沒有任何一個畫面顯示過那份看不見的計畫。
-          語彙照同一張卡的「組執行計畫動態」：載入中…／載入失敗＋再試一次。 */}
+          語彙照同一張卡的「全組現況」：載入中…／載入失敗＋再試一次。 */}
       {listLoading ? (
         <>
           <Skeleton height={44} style={{ marginTop: 8 }} />
@@ -1249,7 +1245,7 @@ function TeamCommanderBlock({
                   {/* 這顆鈕是展開／收合步驟清單的開關，但看起來只是一行目標文字。
                       不給 aria-expanded／aria-controls 的話，讀螢幕的人按完只聽到同一句目標，
                       不知道步驟到底展開了沒——只好反覆按，把剛展開的清單又收回去。
-                      屬性照同一張卡的「組執行計畫動態」切換鈕（見下方 team-runs-toggle）。 */}
+                      屬性照同一張卡的「全組現況」切換鈕（見下方 team-runs-toggle）。 */}
                   <button
                     type="button"
                     className="hint"
@@ -1412,6 +1408,11 @@ function TeamCommanderBlock({
   );
 }
 
+/**
+ * 組代理總指揮卡：① 待裁決 ② 全組現況 ③ 跨專案調度 ④ 問與派工。
+ * 對話只存前端狀態（重整即清空）；唯讀彙總本身不改資料。
+ * 刻意不再拆「團隊分析／全組代理／問卡片…」多套品牌——使用者只需認得一個入口。
+ */
 function TeamAssistantCard({
   groupId,
   pendingDecisions,
@@ -1464,17 +1465,24 @@ function TeamAssistantCard({
   const [actioned, setActioned] = useState<Record<string, string>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [starterProjectId, setStarterProjectId] = useState("");
-  const [runsCollapsed, setRunsCollapsed] = useState(false);
+  /** 全組現況（誰卡住／產出／執行計畫）收合——舊版只收合「組執行計畫動態」 */
+  const [statusCollapsed, setStatusCollapsed] = useState(false);
   const [runFilter, setRunFilter] = useState<RunFilter>("active");
   useEffect(() => {
-    try { setRunsCollapsed(localStorage.getItem(RUNS_COLLAPSE_KEY(groupId)) === "1"); }
-    catch { /* 無痕模式：讀不到就當展開 */ }
+    try {
+      const cur = localStorage.getItem(STATUS_COLLAPSE_KEY(groupId));
+      const legacy = localStorage.getItem(LEGACY_RUNS_COLLAPSE_KEY(groupId));
+      setStatusCollapsed((cur ?? legacy) === "1");
+    } catch { /* 無痕模式：讀不到就當展開 */ }
     setRunFilter("active");
   }, [groupId]);
-  const toggleRuns = () => {
-    const next = !runsCollapsed;
-    setRunsCollapsed(next);
-    try { localStorage.setItem(RUNS_COLLAPSE_KEY(groupId), next ? "1" : "0"); } catch { /* 無痕模式 */ }
+  const toggleStatus = () => {
+    const next = !statusCollapsed;
+    setStatusCollapsed(next);
+    try {
+      localStorage.setItem(STATUS_COLLAPSE_KEY(groupId), next ? "1" : "0");
+      localStorage.setItem(LEGACY_RUNS_COLLAPSE_KEY(groupId), next ? "1" : "0");
+    } catch { /* 無痕模式 */ }
   };
   const canAsk = !!question.trim() && !ask.isPending;
   const submit = () => {
@@ -1587,39 +1595,45 @@ function TeamAssistantCard({
     utils.projects.invalidate();
   };
 
-  return (
-    <Card as="section" className="team-ai-card" data-fb="組彙總AI卡">
-      {/* ── 團隊分析：全組代理匯總（非聊天） ── */}
-      <div className="team-analysis" aria-labelledby="team-analysis-title">
-        <div className="team-analysis__head">
-          <div>
-            <p className="eyebrow" style={{ margin: 0 }}>全組代理</p>
-            <h3 id="team-analysis-title" style={{ margin: "2px 0 0", fontSize: "1.05rem" }}>團隊分析</h3>
-          </div>
-          {summary && (
-            <span
-              className={`team-analysis__health is-${merged.health}`}
-              title={healthMeta.hint}
-            >
-              {healthMeta.label}
-              {summary.activeProjects > 0 ? `・${summary.activeProjects} 專案活動` : ""}
-            </span>
-          )}
-        </div>
-        {overview.isLoading && <Skeleton height={48} style={{ marginTop: 10 }} />}
-        {overview.error && (
-          <p className="error" role="alert" style={{ marginTop: 8 }}>
-            代理動態載入失敗——
-            <Button variant="ghost" size="sm" onClick={() => overview.refetch()}>再試一次</Button>
-          </p>
-        )}
+  // 全組現況摘要列：讓收合狀態下仍看得出「有沒有事」
+  const statusSummaryBits: string[] = [];
+  if (overview.isLoading) statusSummaryBits.push("載入中…");
+  else if (overview.error) statusSummaryBits.push("載入失敗");
+  else {
+    if (totalRuns > 0) statusSummaryBits.push(`${totalRuns} 筆計畫`);
+    if (activeRuns > 0) statusSummaryBits.push(`${activeRuns} 進行中`);
+    if (stuck.openTasks > 0) statusSummaryBits.push(`${stuck.openTasks} 項人員任務`);
+    if (stuck.overdueTasks > 0) statusSummaryBits.push(`${stuck.overdueTasks} 逾期`);
+    if (statusSummaryBits.length === 0) statusSummaryBits.push(summary?.hasRuns ? "目前平靜" : "尚無計畫");
+  }
 
-        {/* ── 待我裁決：這張卡的第一屏。
-            原本第一屏是五個計數＋一句「目前不需要立即處理」，但同一頁其實已經查到
-            分鏡送審／生成待核的筆數——組內有東西卡著，這張叫「團隊分析」的卡照樣顯示全 0。
-            現在三種「等人決定」的來源合流成一份收件匣，卡最久的排前面；計數降到第二屏。 ── */}
-        {!overview.isLoading && (
-          <div className="team-inbox" aria-label="待我裁決">
+  return (
+    <Card as="section" className="team-ai-card" data-fb="組代理總指揮">
+      {/* ── ① 頂列：健康度（外層 section 已是「組代理總指揮」，卡內不再嵌第二套標題） ── */}
+      <div className="team-ai-card__head">
+        {summary && (
+          <span
+            className={`team-analysis__health is-${merged.health}`}
+            title={healthMeta.hint}
+          >
+            {healthMeta.label}
+            {summary.activeProjects > 0 ? `・${summary.activeProjects} 專案活動` : ""}
+          </span>
+        )}
+        <Hint style={{ margin: 0, flex: "1 1 160px" }}>{healthMeta.hint}</Hint>
+      </div>
+      {overview.isLoading && <Skeleton height={48} />}
+      {overview.error && (
+        <p className="error" role="alert" style={{ margin: 0 }}>
+          代理動態載入失敗——
+          <Button variant="ghost" size="sm" onClick={() => overview.refetch()}>再試一次</Button>
+        </p>
+      )}
+
+      {/* ── ② 待我裁決：這張卡的第一動作。
+          三種「等人決定」的來源合流成一份收件匣，卡最久的排前面；計數與清單在「全組現況」。 ── */}
+      {!overview.isLoading && (
+        <div className="team-inbox" aria-label="待我裁決">
             <div className="team-inbox__head">
               <strong>待我裁決</strong>
               <Meta>
@@ -1816,7 +1830,7 @@ function TeamAssistantCard({
                         overview.refetch();
                         insights.refetch();
                         setRunFilter("awaiting_approval");
-                        setRunsCollapsed(false);
+                        setStatusCollapsed(false);
                       } catch {
                         /* dispatch.error 已顯示 */
                       } finally {
@@ -1834,9 +1848,23 @@ function TeamAssistantCard({
           </div>
         )}
 
-        {/* ── 誰卡住了：把未結人類任務歸到人與專案。
-            這張卡原本只看得到 agent_runs，於是「7 項人員任務逾期」這種最該被看見的
-            阻塞完全不在畫面上——AI 停著等人，畫面卻說一切正常。 ── */}
+      {/* ── ③ 全組現況：誰卡住／產出／執行計畫合在同一個可收合區 ── */}
+      <div className="team-status-block">
+        <button
+          type="button"
+          className="team-runs-toggle"
+          onClick={toggleStatus}
+          aria-expanded={!statusCollapsed}
+          aria-controls="team-status-panel"
+          title={statusCollapsed ? "展開全組現況" : "收合全組現況"}
+        >
+          <Icon name="Sparkles" size={13} />
+          <span>全組現況</span>
+          <Meta>（{statusSummaryBits.join("・")}）</Meta>
+          <Icon name={statusCollapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ marginLeft: "auto" }} />
+        </button>
+        <div id="team-status-panel" hidden={statusCollapsed}>
+        {/* 誰卡住了：把未結人類任務歸到人與專案。 */}
         {stuck.show && (
           <div className="team-stuck" aria-label="誰卡住了">
             <div className="team-stuck__head">
@@ -1969,35 +1997,8 @@ function TeamAssistantCard({
           </p>
         )}
 
-        {/* 健康度徽章旁的解釋：徽章本身已有文字標籤，這句是補充 → 引導層 */}
-        <Hint style={{ margin: "8px 0 0" }}>{healthMeta.hint}</Hint>
-      </div>
-
-      {/* ── 組執行計畫動態 ── */}
-      <div className="team-runs-block">
-        <button
-          type="button"
-          className="team-runs-toggle"
-          onClick={toggleRuns}
-          aria-expanded={!runsCollapsed}
-          aria-controls="team-agent-runs"
-          title={runsCollapsed ? "展開組執行計畫動態" : "收合組執行計畫動態"}
-        >
-          <Icon name="Sparkles" size={13} />
-          <span>組執行計畫動態</span>
-          {/* 在 <button> 內，必須用 span（<p> 會是無效 HTML）；筆數是狀態不是說明。
-              載入中／失敗要講出來——空手顯示「（0 筆）」會被讀成「這組沒有計畫」。 */}
-          <Meta>
-            （{overview.isLoading
-              ? "載入中…"
-              : overview.error
-                ? "載入失敗"
-                : `${totalRuns} 筆${activeRuns > 0 ? `・${activeRuns} 進行中` : ""}`}）
-          </Meta>
-          <Icon name={runsCollapsed ? "ChevronDown" : "ChevronUp"} size={13} style={{ marginLeft: "auto" }} />
-        </button>
-        <div id="team-agent-runs" hidden={runsCollapsed}>
-          {/* 計數降到第二屏：它們回答「整體狀況如何」，而第一屏要回答的是「我現在該做什麼」 */}
+          {/* 執行計畫計數與清單：回答「整體狀況如何」；待裁決已在第一屏 */}
+          <div className="team-runs-block" aria-label="執行計畫">
           {summary && !overview.isLoading && (
             <div className="team-analysis__stats" role="group" aria-label="代理狀態計數">
               <button type="button" className={`team-stat${runFilter === "running" ? " is-on" : ""}`} onClick={() => setRunFilter("running")}>
@@ -2035,7 +2036,7 @@ function TeamAssistantCard({
           {runs.length === 0 && !overview.isLoading && !overview.error && (
             /* 空清單時這句是唯一的下一步指引，收起來就變成一片空白 */
             <Hint layer="always" style={{ marginTop: 8 }}>
-              還沒有計畫可顯示。到專案頁用「執行計畫」發起後，這裡會列出全組進度。
+              還沒有計畫可顯示。用上方起手式或到專案頁「執行計畫」發起後，這裡會列出全組進度。
             </Hint>
           )}
           {runs.length > 0 && filteredRuns.length === 0 && (
@@ -2090,11 +2091,11 @@ function TeamAssistantCard({
           {totalRuns <= listLimit && summary && summary.stoppedRecent > 0 && (
             <Meta as="p" style={{ margin: "8px 0 0" }}>近七日另有 {summary.stoppedRecent} 筆被停止。</Meta>
           )}
+          </div>
         </div>
       </div>
 
-      {/* level 在載入／失敗時都會退成 "none"，所以那兩個狀態必須另外傳下去分開講——
-          否則整塊會在查詢還沒回來時無聲消失，組長讀到的是「這功能沒開給我」。 */}
+      {/* ── ④ 跨專案調度（campaign）：level 載入／失敗須分開講，否則會長成「功能沒開」 ── */}
       <TeamCommanderBlock
         groupId={groupId}
         level={(commandLevel.data ?? "none") as GroupCommandLevel}
@@ -2105,11 +2106,11 @@ function TeamAssistantCard({
         myUserId={myUserId}
       />
 
-      {/* ── 組彙總對話 ── */}
+      {/* ── ⑤ 問總指揮：深入查證與派工 ── */}
       <div className="team-chat-block">
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div style={{ flex: "1 1 260px" }}>
-            <label htmlFor="ta-question" style={{ marginTop: 0 }}>問卡片答不出來的事</label>
+            <label htmlFor="ta-question" style={{ marginTop: 0 }}>問總指揮</label>
             <input
               id="ta-question"
               value={question}
@@ -2150,8 +2151,8 @@ function TeamAssistantCard({
 
         {/* 「免費・唯讀」是花不花錢的前提，屬於代價資訊 → 兩種模式都要看得到 */}
         <Hint layer="always" style={{ marginTop: 8 }}>
-          免費・唯讀。上面的卡片給你數字，這裡給你數字背後的東西——它會鑽進分鏡全文、生成紀錄、
-          人員任務與資料庫查證後再回答{canDispatchHint ? "，也可提議發起 AI 執行計畫（需該專案核准才花點）" : ""}。
+          免費・唯讀。現況看數字；這裡鑽進分鏡全文、生成紀錄、人員任務與資料庫再回答
+          {canDispatchHint ? "，也可提議發起 AI 執行計畫（需該專案核准才花點）" : ""}。
           {msgs.length > 0 && (
             <Button
               variant="ghost"
@@ -2262,7 +2263,7 @@ function TeamAssistantCard({
                                     utils.projects.invalidate();
                                     overview.refetch();
                                     setRunFilter("awaiting_approval");
-                                    setRunsCollapsed(false);
+                                    setStatusCollapsed(false);
                                   } catch {
                                     /* dispatch.error 已顯示 */
                                   } finally {

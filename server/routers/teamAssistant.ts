@@ -131,7 +131,7 @@ export function currentStepNote(steps: unknown): string | null {
 }
 
 /**
- * 組代理匯總健康度（作業台「AI 工作與團隊分析」）。
+ * 組代理匯總健康度（作業台「組代理總指揮」）。
  *
  * `idle` 與 `healthy` 必須分開：舊版把「這個組從沒發起過任何 AI 計畫」和「跑過一輪、
  * 現在一切正常」都折成 healthy「狀態穩定」，於是全新的組打開作業台看到的是五個 0 加一句
@@ -1207,7 +1207,7 @@ ${historyBlock}使用者的問題：${input.message}`;
 
   /**
    * 組代理動態總覽（一體化儀表）：全組各專案的 AI 代理計畫／執行狀態一站看——進行中的排前面。
-   * 回傳 { summary, runs }：summary 供作業台「今日摘要／團隊分析」；runs 含發起人、當前步驟、錯誤摘要。
+   * 回傳 { summary, runs }：summary 供作業台「今日摘要／組代理總指揮」；runs 含發起人、當前步驟、錯誤摘要。
    * 唯讀、組隔離；核准／停止仍到各專案頁做（守門不搬家）。
    */
   agentOverview: authedProcedure
@@ -1433,7 +1433,7 @@ ${historyBlock}使用者的問題：${input.message}`;
         eventType: "observation",
         actorType: "human",
         actorId: ctx.auth.user.id,
-        summary: `由作業台團隊分析卡派工${input.playbookId ? `（playbook：${input.playbookId}）` : ""}`,
+        summary: `由作業台組代理總指揮派工${input.playbookId ? `（playbook：${input.playbookId}）` : ""}`,
         data: {
           origin: "team_card",
           plannerMode: input.plannerMode ?? null,
