@@ -146,7 +146,7 @@ describe("legacy migration adoption bridge", () => {
       .filter(Boolean),
   );
   // Schema drift only ever reports DDL; the row de-duplication that precedes a
-  // new unique index and 0022's reviewed landing-state backfill change rows,
+  // new unique index and 0023's reviewed landing-state backfill change rows,
   // so they never appear in a drift plan.
   const expectedStatements = pendingStatements.filter(
     (statement) => !isRowDeduplicationStatement(statement) && !isReviewedLandingBackfillStatement(statement),
@@ -169,8 +169,8 @@ describe("legacy migration adoption bridge", () => {
     expect(isRowDeduplicationStatement('DELETE FROM "team_members"')).toBe(false);
   });
 
-  it("recognizes the landing backfill only in its reviewed 0022 shape", () => {
-    // 0022 實際出貨的語句（canonical 形式）必須被放行
+  it("recognizes the landing backfill only in its reviewed 0023 shape", () => {
+    // 0023 實際出貨的語句（canonical 形式）必須被放行
     const shipped = pendingStatements.find((statement) => /^UPDATE assets /i.test(statement));
     expect(shipped).toBeDefined();
     expect(isReviewedLandingBackfillStatement(shipped!)).toBe(true);
