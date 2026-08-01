@@ -285,11 +285,11 @@ function StorageAlertBannerInner() {
   if (!viewer.isAdmin) {
     return (
       <div style={BANNER_WRAP}>
-        <aside style={BANNER} role="alert" data-fb="素材儲存警示橫幅">
+        <aside className="storage-alert-banner" style={BANNER} role="alert" data-fb="素材儲存警示橫幅">
           <span style={BANNER_SIGNAL} aria-hidden>
             <Icon name="TriangleAlert" size={18} />
           </span>
-          <div style={{ minWidth: 0, flex: 1, lineHeight: 1.45 }}>
+          <div className="storage-alert-banner__detail" style={{ minWidth: 0, flex: 1, lineHeight: 1.45 }}>
             <strong style={{ fontSize: "var(--fs-13)" }}>素材儲存目前異常</strong>
             <div style={{ fontSize: "var(--fs-12)", marginTop: 2 }}>
               建議暫時保留你本機的原始檔（先別刪、先別清相簿），並通知管理員。
@@ -305,11 +305,11 @@ function StorageAlertBannerInner() {
   const canAcknowledge = viewer.isDeveloper && reason === "volume-changed";
   return (
     <div style={BANNER_WRAP}>
-      <aside style={BANNER} role="alert" data-fb="素材儲存警示橫幅">
+      <aside className="storage-alert-banner" style={BANNER} role="alert" data-fb="素材儲存警示橫幅">
         <span style={BANNER_SIGNAL} aria-hidden>
           <Icon name="TriangleAlert" size={18} />
         </span>
-        <div style={{ minWidth: 0, flex: 1, lineHeight: 1.45 }}>
+        <div className="storage-alert-banner__detail" style={{ minWidth: 0, flex: 1, lineHeight: 1.45 }}>
           <strong style={{ fontSize: "var(--fs-13)" }}>素材儲存沒有保護，隨時可能整批遺失</strong>
           <div style={{ fontSize: "var(--fs-12)", marginTop: 3 }}>
             <b>發生什麼：</b>
