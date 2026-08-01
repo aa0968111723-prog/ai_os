@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { hasDesktopBridge } from "../../platform/desktopBridge";
-import { canShowInstallUi, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
+import { canOfferInstall, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../../pwa";
 import type { MeWithCapabilities } from "../../capabilities";
 import { accountMenuItems, filterNavItems } from "../navigation/navigationItems";
 import { Hint, Meta, Skeleton, useDensity } from "../../components/ui";
@@ -52,11 +52,16 @@ function DensityMenuItem({ onDone }: { onDone: () => void }) {
 function InstallAppMenuItem({ onDone }: { onDone: () => void }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeInstallUi(() => bump((n) => n + 1)), []);
-  if (isStandaloneApp() || !canShowInstallUi()) return null;
+  // 用 canOfferInstall：關掉橫幅後選單仍要看得到入口
+  if (isStandaloneApp() || !canOfferInstall()) return null;
   return (
     <button type="button" className="menu-item" role="menuitem" onClick={() => {
       onDone();
-      if (isIosDevice()) { window.alert("iPhone／iPad：請用 Safari 點分享 →「加入主畫面」，再從主畫面圖示開啟。"); return; }
+      if (isIosDevice()) {
+        // iOS 無法程式觸發安裝；導去說明頁完整步驟（含推播）
+        window.location.assign("/help#help-install");
+        return;
+      }
       void promptInstall();
     }}>
       <Icon name="Download" size={15} />安裝成 App
