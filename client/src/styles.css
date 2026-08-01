@@ -2010,16 +2010,16 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .daily-overview .continue-card__mark { width: 42px; height: 42px; font-size: 20px; }
 .daily-overview .continue-card__body strong { font-size: var(--fs-13); }
 .daily-overview .continue-card__body small { font-size: var(--fs-11); }
-/* 作業台「AI 工作與團隊分析」 */
+/* 作業台「組代理總指揮」（裁決／現況／跨專案調度／問答同一入口） */
 .team-ai-card {
   padding: 14px 16px;
   margin-bottom: 16px;
   display: grid;
   gap: 14px;
 }
-.team-analysis__head {
+.team-ai-card__head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
@@ -2049,11 +2049,11 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   color: var(--success-ink);
   border-color: transparent;
 }
-/* 待我裁決收件匣：團隊分析卡的第一屏（計數降到第二屏） */
+/* 待我裁決收件匣：總指揮卡的第一屏（計數與清單在「全組現況」） */
 .team-inbox {
   display: grid;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 0;
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
   border-radius: var(--r-md, 10px);
@@ -2082,11 +2082,26 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .team-inbox__age, .team-inbox__act { grid-column: 2; }
 }
 
+/* 全組現況：誰卡住／產出／執行計畫的可收合容器 */
+.team-status-block {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+#team-status-panel {
+  display: grid;
+  gap: 10px;
+}
+#team-status-panel[hidden] {
+  display: none;
+}
+
 /* 誰卡住了：人員／專案兩欄的阻塞歸屬 */
 .team-stuck {
   display: grid;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 0;
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
   border-radius: var(--r-md, 10px);
@@ -2105,7 +2120,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .team-output {
   display: grid;
   gap: 10px;
-  margin-top: 10px;
+  margin-top: 0;
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
   border-radius: var(--r-md, 10px);
@@ -2155,8 +2170,9 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .team-stat strong { font: 22px/1 var(--serif); }
 .team-stat small { color: var(--fg-secondary); font-size: 11px; font-weight: 650; }
 .team-runs-block {
-  border-top: 1px solid var(--border-soft);
-  padding-top: 10px;
+  /* 包在 team-status-block 內時不再重複頂線 */
+  border-top: 0;
+  padding-top: 0;
 }
 .team-runs-toggle {
   display: flex;
@@ -2241,7 +2257,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .team-run-row.is-failed .team-run-row__track > span { background: var(--danger); }
 .team-run-row__meta { color: var(--fg-secondary); font-family: var(--mono); font-size: 10px; white-space: nowrap; }
 
-/* ── 組代理總指揮（L3 常駐調度計畫）──
+/* ── 跨專案調度／campaign（組代理總指揮卡內 L3 區塊）──
    外框刻意與「誰卡住了」「代理產出與計畫疑慮」同一套（軟框＋10/12 內距＋圓角）：
    這三段在同一張卡裡是平行的區塊，外觀一分岔就會被讀成「這一塊是別的東西」。
    不用 grid + gap：裡面的表單列與清單各自帶著 marginTop，兩套間距會疊加，
@@ -4434,11 +4450,11 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 /* 今日工作台日期列：與「今日工作台」eyebrow 同行相黏——補間距 */
 .daily-date { margin-right: 12px; }
 
-/* 空組起手式（團隊分析卡第一屏） */
+/* 空組起手式（組代理總指揮卡） */
 .team-starters {
   display: grid;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 0;
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
   border-radius: var(--r-md, 10px);
