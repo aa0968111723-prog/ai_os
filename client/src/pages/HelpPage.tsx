@@ -165,20 +165,38 @@ export function HelpPage() {
         description={<>從第一份腳本到交付素材，先看完整路線，再依你卡住的地方往下找答案。</>}
       />
       <nav className="support-topic-nav" aria-label="說明主題">
+        <a href="#help-value"><Icon name="Sparkles" size={14} />能幫你什麼</a>
         <a href="#help-route"><Icon name="Clapperboard" size={14} />六步路線</a>
         <a href="#help-map"><Icon name="MousePointer2" size={14} />功能地圖</a>
         <a href="#help-faq"><Icon name="Gem" size={14} />常見問題</a>
+        <a href="#help-install"><Icon name="Download" size={14} />安裝 App</a>
         <a href="#help-terms"><Icon name="FileText" size={14} />名詞辭典</a>
       </nav>
 
-      {/* ── 一句話總覽：先給最大的那張圖，之後的一切都掛在這句上 ── */}
+      {/* ── 價值：先講「為什麼用」，再講按鈕在哪 ── */}
+      <H2 id="help-value" icon="Sparkles">這個網站能幫你什麼？</H2>
       <Card variant="primary" className="help-summary-card">
-        <p style={{ margin: 0, fontSize: "var(--fs-16)", lineHeight: 1.85 }}>
-          <b>一句話：</b>這個網站把「一份腳本」變成「一包可以直接拖進剪映或 Premiere 的素材」。
-          你不用自己找圖、配音、對字幕；AI 會記住這支片的<b>世界觀</b>（背景、語氣、畫風），每次生成自動帶入。
-          你主要做的事只有三件：<b>設定世界觀 → 逐格生成畫面／配音 → 排好順序送審、打包下載</b>。
+        <p style={{ margin: "0 0 12px", fontSize: "var(--fs-16)", lineHeight: 1.85 }}>
+          <b>一句話：</b>把「一份腳本」變成「一包可直接拖進剪映／Premiere 的素材」，
+          並讓 AI 與團隊共用同一份專案記憶——你不必每格重打背景，組長也看得到誰卡住。
         </p>
+        <ul style={{ margin: 0, paddingLeft: 22, lineHeight: 1.85, fontSize: "var(--fs-14)" }}>
+          <li><b>少重做</b>：世界觀、角色定裝、禁忌填一次，生成與問 AI 自動帶入。</li>
+          <li><b>少卡關</b>：待審、待核准、人員任務集中在作業台；頂欄看誰在線、私訊對位。</li>
+          <li><b>少燒點</b>：拆分鏡／問答多半免費；出圖前先對齊結構與風格，失敗多半自動退點。</li>
+          <li><b>好交付</b>：打包依鏡號分資料夾，字幕與時間軸骨架可進剪輯軟體。</li>
+        </ul>
+        <Meta as="p" style={{ margin: "12px 0 0", fontSize: 13 }}>
+          你主要做三件事：<b>定盤（故事／調性／角色）→ 決策（哪格過關、是否送審）→ 下載交付</b>。
+          其餘拆、生、排、審進度，系統與 AI 分擔。
+        </Meta>
       </Card>
+      <Hint layer="always" style={{ marginTop: 8 }}>
+        新專案可用「簡易模式」四步走完一支片；要定裝、知識庫、多步計畫再切完整版。
+        卡住時先看下方「常見問題」，或作業台「組代理總指揮」問整組進度（免費）。
+      </Hint>
+
+      {/* ── 六步路線圖：把主線流程視覺化，一眼看見全貌 ── */}
 
       {/* ── 六步路線圖：把主線流程視覺化，一眼看見全貌 ── */}
       <H2 id="help-route" icon="Clapperboard">整條路線（六步）</H2>
