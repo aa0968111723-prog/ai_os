@@ -49,4 +49,14 @@ describe("global stylesheet contract", () => {
     expect(rule).toContain("min-width: 44px");
     expect(rule).toContain("min-height: 44px");
   });
+
+  // 響應式底部留白契約：一律走 --chrome-bottom，禁止再寫死 88/140 互踩幽靈。
+  // 有 .mobile-nav 時 styles.css 設 100px；≤560 由 mobile-fab-01 升到 140px。
+  it("uses --chrome-bottom for .app bottom padding instead of hard-coded 88/140 clash", () => {
+    expect(styles).toContain("--chrome-bottom: 48px");
+    expect(declarations).toContain("calc(var(--chrome-bottom) + var(--safe-bottom))");
+    expect(declarations).toContain(".app:has(.mobile-nav) { --chrome-bottom: 100px; }");
+    // 舊的寫死 padding-bottom: calc(88px …) 不可復活（會蓋掉手機 140px）
+    expect(declarations).not.toMatch(/\.app:has\(\.mobile-nav\)\s*\{\s*padding-bottom:\s*calc\(88px/);
+  });
 });
