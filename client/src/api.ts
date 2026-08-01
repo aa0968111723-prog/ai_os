@@ -6,7 +6,7 @@ import type { AppRouter } from "../../server/routers";
 export const trpc = createTRPCReact<AppRouter>();
 
 /**
- * `auth.*` 走獨立的非批次連結，其餘照舊批次。
+ * 會同步外呼或必須獨立的 procedure 走非批次 `httpLink`；其餘仍用 `httpBatchLink`。
  *
  * 為什麼要拆：`AppShell` 用 `{me.data && <AppHeader/>}` 硬閘門控制整個頂欄——
  * `auth.me` 沒回來，header 連 DOM 都不存在。而單一 `httpBatchLink` 會把同一個 tick
@@ -14,19 +14,27 @@ export const trpc = createTRPCReact<AppRouter>();
  *
  * 實際後果（部署站巡覽實測）：`/admin` 掛載的 `quota.falAccountBalance` 對
  * api.fal.ai 有 20 秒逾時外呼，於是整個頂欄消失 20 秒——不是變慢，是從 DOM 裡不見。
- * 稽核腳本等 `header.topbar` 逾時 15 秒的那四項失敗就是這樣來的。
  *
- * `auth.me` 實測 205ms，多一個 HTTP 往返的代價可忽略；換來的是**頂欄不再跟任何
- * 頁面查詢共命運**。
+ * 2026-08-01 卡頓診斷：`generation.status` 若仍呼叫 `advanceGeneration` → fal HTTP（最多 30s），
+ * 會把同批的 `messages.list` / `scenes.listByProject` 一起拖死，症狀是「整片畫面凍住再一起回來」。
+ * 因此 `generation.status` 與 `quota.*` 比照 `auth.*` 拆出批次。
+ *
+ * `auth.me` 實測約 200ms，多一個 HTTP 往返可忽略；換來的是**頂欄與主內容不再跟慢外呼共命運**。
  */
-const AUTH_PREFIX = "auth.";
+function shouldUseStandaloneLink(path: string): boolean {
+  return (
+    path.startsWith("auth.") ||
+    path.startsWith("generation.status") ||
+    path.startsWith("quota.")
+  );
+}
 
 export function createTrpcClient() {
   const url = "/api/trpc";
   return trpc.createClient({
     links: [
       splitLink({
-        condition: (op) => op.path.startsWith(AUTH_PREFIX),
+        condition: (op) => shouldUseStandaloneLink(op.path),
         true: httpLink({ url, transformer: superjson }),
         false: httpBatchLink({ url, transformer: superjson }),
       }),
