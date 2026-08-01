@@ -282,7 +282,7 @@ export function AccountMenu({
           {/* 個人資料匯出（端點 /api/me/export 由後端提供）：a 標籤直下載，不經前端路由。
            * 文案／圖示刻意與「工作」組的「共用文件下載」明確區隔——前者是團隊共用文件、後者是「你自己的」個資可讀複本，
            * 舊版兩者都叫「資料下載／下載我的資料」又都像下載，非技術創作者分不清（使用者回饋）。 */}
-          <a href="/api/me/export" download className="menu-item" role="menuitem" title="下載你的可讀資料備份：帳號、組別、相關專案（世界觀／分鏡／知識／角色／場景）、生成、留言、筆記、排程；不含密碼與媒體二進位檔" onClick={close}><Icon name="Download" size={15} />匯出我的個人資料</a>
+          <a href="/api/me/export" download className="menu-item" role="menuitem" title="更深備份：帳號偏好、專案（世界觀／分鏡綁定／知識全文／角色場景／素材標籤）、生成錨點、帳本用量、專案＋組代理、任務、版本歷史、個人資料庫、整合狀態（無密鑰）、私訊交付工作流等；不含密碼／token／媒體檔" onClick={close}><Icon name="Download" size={15} />匯出我的個人資料</a>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onNotifSettings(); }}><Icon name="Bell" size={15} />連結手機與電腦</button>
           <button className="menu-item" role="menuitem" onClick={() => { close(); onChangePw(); }}><Icon name="Lock" size={15} />改密碼</button>
           {onLogoutAll && (

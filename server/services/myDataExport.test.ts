@@ -174,24 +174,171 @@ describe("renderMyDataHtml", () => {
 
   it("生成／留言帶專案名欄", () => {
     expect(html).toContain("<th>專案</th>");
-    // 生成表與留言表都應出現專案名
     expect(html.match(/晨光開示/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 
-  it("summarizeWorldview 只抽安全摘要並截斷", () => {
+  it("深度區塊：帳本／代理／私訊／咒語／任務／資料庫導覽存在", () => {
+    expect(html).toContain('id="ledger"');
+    expect(html).toContain('id="agents"');
+    expect(html).toContain('id="dm"');
+    expect(html).toContain('id="prompts"');
+    expect(html).toContain('id="tasks"');
+    expect(html).toContain('id="databases"');
+    expect(html).toContain('id="integrations"');
+    expect(html).toContain("更深一層個人資料複本");
+  });
+
+  it("summarizeWorldview 含進階層並忽略未知鍵", () => {
     const s = summarizeWorldview({
       logline: "短故事",
       message: "主張",
+      audience: "年輕觀眾",
       tones: ["溫暖", "沉靜"],
       styles: ["寫實"],
+      taboos: ["不醫療宣稱"],
+      acts: { hook: "開場鉤", turn: "轉折", cta: "行動" },
       ghost: { nested: true },
     });
-    expect(s).toEqual({
-      logline: "短故事",
-      message: "主張",
-      tones: ["溫暖", "沉靜"],
-      styles: ["寫實"],
+    expect(s.logline).toBe("短故事");
+    expect(s.audience).toBe("年輕觀眾");
+    expect(s.taboos).toEqual(["不醫療宣稱"]);
+    expect(s.acts).toEqual({ hook: "開場鉤", turn: "轉折", cta: "行動" });
+    expect((s as { ghost?: unknown }).ghost).toBeUndefined();
+  });
+
+  it("深度 payload：帳本扣退點、代理步驟、私訊方向可渲染", () => {
+    const deep = renderMyDataHtml({
+      ...basePayload,
+      usageSummary: {
+        pointsCharged: 5,
+        pointsRefunded: 5,
+        pointsNet: 0,
+        generationsByStatus: { done: 1 },
+        generationsByKind: { image: 1 },
+      },
+      costLedger: [
+        { id: "c1", groupId: "g1", groupName: "剪輯組", delta: -5, reason: "生成 FLUX", createdAt: "2026-07-15T10:00:00.000Z" },
+        { id: "c2", groupId: "g1", groupName: "剪輯組", delta: 5, reason: "失敗退回", createdAt: "2026-07-15T11:00:00.000Z" },
+      ],
+      agentRuns: [
+        {
+          id: "ar1",
+          projectId: "p1",
+          projectTitle: "晨光開示",
+          goal: "拆分鏡並出圖",
+          summary: "先拆再生成",
+          status: "done",
+          estPoints: 12,
+          steps: [{ note: "拆分鏡", status: "done", kind: "split_script" }],
+          planHighlights: ["成功條件：分鏡齊全"],
+          createdAt: "2026-07-14T10:00:00.000Z",
+          updatedAt: "2026-07-14T12:00:00.000Z",
+        },
+      ],
+      groupAgentRuns: [
+        {
+          id: "gar1",
+          groupId: "g1",
+          groupName: "剪輯組",
+          goal: "本週三案推交付",
+          summary: "派工盯進度",
+          status: "running",
+          budgetPoints: 50,
+          spentPoints: 12,
+          steps: [{ note: "派工", status: "done", kind: "dispatch" }],
+          createdAt: "2026-07-14T10:00:00.000Z",
+          updatedAt: "2026-07-14T12:00:00.000Z",
+        },
+      ],
+      projectTasks: [
+        {
+          id: "tk1",
+          projectId: "p1",
+          projectTitle: "晨光開示",
+          title: "補旁白",
+          description: "第二鏡",
+          status: "todo",
+          priority: "high",
+          taskType: "task",
+          relation: "assignee",
+          dueAt: "2026-07-22T02:00:00.000Z",
+          createdAt: "2026-07-16T10:00:00.000Z",
+        },
+      ],
+      personalDatabases: [
+        {
+          id: "db1",
+          name: "靈感清單",
+          description: "個人用",
+          fieldLabels: ["標題", "狀態"],
+          rowCount: 2,
+          fileCount: 0,
+          agentAccess: "read",
+          sampleRows: [{ 標題: "晨光", 狀態: "草稿" }],
+          createdAt: "2026-07-01T10:00:00.000Z",
+          updatedAt: "2026-07-10T10:00:00.000Z",
+        },
+      ],
+      integrations: [
+        {
+          kind: "notion",
+          name: "",
+          status: "active",
+          lastUsedAt: "2026-07-12T10:00:00.000Z",
+          createdAt: "2026-07-01T10:00:00.000Z",
+        },
+      ],
+      googleCalendar: { connected: true, googleEmail: "me@gmail.com", status: "active" },
+      dmMessages: [
+        {
+          id: "d1",
+          direction: "out",
+          peerId: "u2",
+          peerName: "阿光",
+          body: "請幫我看分鏡",
+          kind: "text",
+          createdAt: "2026-07-16T09:00:00.000Z",
+        },
+      ],
+      prompts: [
+        {
+          id: "pr1",
+          projectId: "p1",
+          projectTitle: "晨光開示",
+          text: "溫暖晨光室內",
+          modelId: "fal-ai/flux-2/pro",
+          useCount: 3,
+          characterCount: 1,
+          createdAt: "2026-07-10T10:00:00.000Z",
+          updatedAt: "2026-07-12T10:00:00.000Z",
+        },
+      ],
+      textVersions: [
+        {
+          id: "tv1",
+          projectId: "p1",
+          projectTitle: "晨光開示",
+          kind: "knowledge",
+          title: "開示稿 v1",
+          contentPreview: "舊版開頭",
+          contentTruncated: false,
+          createdAt: "2026-07-05T10:00:00.000Z",
+        },
+      ],
     });
+    expect(deep).toContain("點數帳本");
+    expect(deep).toContain("生成 FLUX");
+    expect(deep).toContain("失敗退回");
+    expect(deep).toContain("拆分鏡並出圖");
+    expect(deep).toContain("本週三案推交付");
+    expect(deep).toContain("補旁白");
+    expect(deep).toContain("靈感清單");
+    expect(deep).toContain("me@gmail.com");
+    expect(deep).toContain("阿光");
+    expect(deep).toContain("溫暖晨光室內");
+    expect(deep).toContain("用量摘要");
+    expect(deep).toContain("開示稿 v1");
+    expect(deep).toContain("計畫重點");
   });
 
   it("回饋 scores 的英文問卷代碼對照回白話題目", () => {
