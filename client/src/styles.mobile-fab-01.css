@@ -3,6 +3,7 @@
  * - 底部留白涵蓋 mobile-nav（~62–70）+ FAB（~48）+ 呼吸
  * - FAB 改 icon-only（.fb-fab-label 隱藏）；aria-label 仍在 button
  * - 常駐說明文案在手機隱藏，桌機不變
+ * - 母版系列「開新的一集」展開時再加高留白，避免欄位／送出鈕被裁切
  */
 @media (max-width: 560px) {
   .app {
@@ -10,6 +11,18 @@
   }
   html.is-standalone .app {
     padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* 表單展開：在既有 140px 之外再多留一段，讓「開這一集」捲得到、不被 nav 蓋住 */
+  .app:has(.series-form-open) {
+    padding-bottom: calc(200px + var(--safe-bottom));
+  }
+  html.is-standalone .app:has(.series-form-open) {
+    padding-bottom: calc(200px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .series-form-open .series-form-actions {
+    padding-bottom: 12px;
   }
 
   .fb-fab-root .fb-fab-label {
@@ -38,5 +51,12 @@
   .workbench-intro-lede,
   .creation-goal-persist-hint {
     display: none;
+  }
+}
+
+/* 平板窄寬（≤820px、>560px）：分頁列已常駐，表單展開時同樣加高 */
+@media (max-width: 820px) and (min-width: 561px) {
+  .app:has(.series-form-open) {
+    padding-bottom: calc(120px + var(--safe-bottom));
   }
 }
