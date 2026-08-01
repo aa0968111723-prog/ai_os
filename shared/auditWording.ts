@@ -1,5 +1,6 @@
 /**
- * 稽核紀錄的人類可讀標籤。
+ * 把後端 audit log 的 action code 翻成使用者看得懂的中文。
+ * 新增端點時記得同步補這裡，否則系統自檢「audit 字典覆蓋率」會亮黃。
  * 字典漏了新端點時 fallback 顯示原始代碼，不會壞、只是不夠白話（測試會提醒補字典）。
  */
 
@@ -75,28 +76,43 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   // AI 導演與助手
   "director.suggest": "請 AI 導演給建議",
   "director.splitScript": "AI 拆分鏡",
+  "assistant.chat": "與助手對話",
+  "assistant.apply": "套用助手建議",
+  // 知識庫
+  "knowledge.create": "新增知識",
+  "knowledge.update": "更新知識",
+  "knowledge.remove": "刪除知識",
+  "knowledge.pin": "釘選／取消釘選知識",
+  // 系統
+  "system.runSelfCheck": "執行系統自檢",
+  "system.acknowledgeVolumeChange": "確認儲存卷更換並重設指紋",
 };
 
 export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefixes: readonly string[] }> = [
-  { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options", "system"] },
   { key: "auth", label: "帳號與登入", prefixes: ["auth"] },
   { key: "admin", label: "團隊管理", prefixes: ["admin"] },
   { key: "projects", label: "專案與素材", prefixes: ["projects"] },
-  { key: "generation", label: "生成與點數", prefixes: ["generation", "quota", "models"] },
+  { key: "generation", label: "生成與點數", prefixes: ["generation", "models", "quota"] },
   { key: "scenes", label: "分鏡與審批", prefixes: ["scenes", "approvals"] },
-  { key: "director", label: "AI 導演", prefixes: ["director"] },
+  { key: "ai", label: "AI 導演與助手", prefixes: ["director", "assistant"] },
+  { key: "knowledge", label: "知識庫", prefixes: ["knowledge"] },
+  { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options", "system"] },
 ];
 
-export function labelForAction(action: string): string {
+export function auditActionLabel(action: string): string {
   return AUDIT_ACTION_LABELS[action] ?? action;
 }
 
-export function categoryForAction(action: string): string {
+export function auditCategoryFor(action: string): string {
   const prefix = action.split(".")[0] ?? "";
   const cat = AUDIT_CATEGORIES.find((c) => c.prefixes.includes(prefix));
   return cat?.key ?? "other";
 }
 
-export function prefixesForCategory(key: string): readonly string[] {
+export function auditCategoryLabel(key: string): string {
+  return AUDIT_CATEGORIES.find((c) => c.key === key)?.label ?? key;
+}
+
+export function auditPrefixesForCategory(key: string): readonly string[] {
   return AUDIT_CATEGORIES.find((c) => c.key === key)?.prefixes ?? [];
 }

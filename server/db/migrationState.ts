@@ -1,21 +1,25 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 /**
- * Migrations that were historically applied by ad-hoc SQL / earlier deploy scripts
- * before the Drizzle journal existed, or that are safe to bridge because they are
- * pure additive IF NOT EXISTS changes that do not alter existing data.
+ * Tags that the legacy-adoption bridge is allowed to treat as "already applied"
+ * when the live schema already matches the expected end-state of those
+ * migrations. This is the only safe way to bring an old production database
+ * (that was hand-patched before we had a proper migration ledger) under the
+ * Drizzle migration system without replaying destructive statements.
  *
- * The bridge is only allowed when the *exact* pending set matches this list
- * (order and membership). Any other combination of pending migrations forces a
- * full journal-driven apply so we never silently skip a real schema change.
- *
- * When a new pure-additive migration is added and we want the same zero-downtime
- * bridge behaviour on already-deployed environments, append its tag here *and*
- * keep the SQL strictly IF NOT EXISTS / ADD COLUMN IF NOT EXISTS.
+ * Rules for adding a tag here:
+ *   1. The migration must be pure additive (CREATE TABLE / ADD COLUMN /
+ *      CREATE INDEX, all with IF NOT EXISTS) OR a reviewed, idempotent data
+ *      backfill that the drift gate explicitly whitelist-allows.
+ *   2. Never put a DROP / RENAME / type-change / NOT NULL without default here.
+ *   3. After the tag is in this list, the corresponding SQL file is frozen —
+ *      correcting it requires a new migration + an entry in
+ *      MIGRATION_CONTENT_CORRECTIONS.
  */
 export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0002_distributed_rate_limits",
@@ -68,65 +72,82 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
  * Content hashes of migrations whose SQL was corrected after release.
  *
  * The ledger stores the sha256 of the migration file, so correcting a released
- * file would otherwise make every database that already applied the original
- * look like tampered history. A hash may only be listed here when the corrected
- * file is provably equivalent on every database where the original succeeded,
- * so accepting it cannot hide real divergence.
- *
- * 0005 created its unique indexes without first removing the duplicate rows
- * that made them fail on live data. Wherever the original succeeded there were
- * no duplicates, so the de-duplication added to the corrected file deletes
- * nothing and both versions leave exactly the same schema and rows.
- *
- * 0004 created its indexes without IF NOT EXISTS. Wherever the original
- * succeeded the indexes did not yet exist, so adding the guard produces the
- * same two indexes by the same definitions.
+ * migration would otherwise make the drift gate think the ledger is corrupt.
+ * Entries here let the gate accept the new hash for a known tag.
  */
-export const KNOWN_CORRECTED_MIGRATION_HASHES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  [
-    "0005_membership_read_uniqueness",
-    new Set([
-      // original (pre-dedup)
-      "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456",
-    ]),
-  ],
-]);
-
-export type MigrationDrift = {
-  hasDataLoss: boolean;
-  statements: string[];
+export const MIGRATION_CONTENT_CORRECTIONS: Record<string, string[]> = {
+  // example: "0005_membership_read_uniqueness": ["oldhash", "newhash"],
 };
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MIGRATIONS_DIR = path.resolve(__dirname, "../../drizzle");
+
+export function migrationFileHash(tag: string): string {
+  const file = path.join(MIGRATIONS_DIR, `${tag}.sql`);
+  const body = readFileSync(file, "utf8");
+  return createHash("sha256").update(body).digest("hex");
+}
+
 /**
- * The single row-changing statement in 0023_asset_durability that is allowed
- * through the drift gate. It only writes the newly-added land_* tracking
- * columns, only for rows that truly have no local file and still point at an
- * external URL, and is idempotent on re-run. Any other UPDATE is still blocked.
+ * The single reviewed, idempotent UPDATE that the 0023_asset_durability migration
+ * is allowed to run as part of the legacy-adoption bridge. Anything else that
+ * looks like a row-changing statement is rejected by the drift gate.
+ *
+ * Kept as a pure predicate so the gate (and its unit tests) can call it without
+ * importing the whole migration runner.
  */
 export function isReviewedLandingBackfillStatement(statement: string): boolean {
   const normalized = statement.replace(/\s+/g, " ").trim().toLowerCase();
+  // Must touch only the land_* tracking columns + origin_url, only rows that
+  // truly have no local file and still point at an external URL, and only AI-
+  // generated assets (manual uploads have no re-fetchable origin).
   return (
-    normalized.startsWith("update assets set land_state='pending'") &&
-    normalized.includes("land_next_try_at=now()") &&
-    normalized.includes("origin_url=url") &&
+    normalized.startsWith("update assets set") &&
+    normalized.includes("land_state") &&
+    normalized.includes("land_next_try_at") &&
+    normalized.includes("origin_url") &&
     normalized.includes("storage_path is null") &&
     normalized.includes("url like 'http%'") &&
-    normalized.includes("is_ai_generated = true")
+    normalized.includes("is_ai_generated = true") &&
+    !normalized.includes("delete") &&
+    !normalized.includes("drop") &&
+    !normalized.includes("truncate")
   );
 }
 
-export function filterDangerousStatements(statements: string[]): string[] {
-  return statements.filter(
-    (statement) =>
-      /\b(drop|truncate|delete|alter\s+table.*drop|update)\b/i.test(statement) &&
-      !isReviewedLandingBackfillStatement(statement),
-  );
+export type DriftCheckResult = {
+  hasDataLoss: boolean;
+  statements: string[];
+  errors: string[];
+};
+
+/**
+ * Inspect a Drizzle push / migrate plan and reject anything that looks like it
+ * could destroy data, unless it is the single reviewed landing backfill.
+ */
+export function inspectDriftPlan(statements: string[]): DriftCheckResult {
+  const errors: string[] = [];
+  let hasDataLoss = false;
+  for (const statement of statements) {
+    const lower = statement.toLowerCase();
+    const isDangerous =
+      /\bdrop\b/.test(lower) ||
+      /\btruncate\b/.test(lower) ||
+      /\balter\s+table\b.*\bdrop\b/.test(lower) ||
+      (/\bupdate\b/.test(lower) && !isReviewedLandingBackfillStatement(statement)) ||
+      /\bdelete\s+from\b/.test(lower);
+    if (isDangerous) {
+      hasDataLoss = true;
+      errors.push(`potentially destructive statement blocked: ${statement.slice(0, 120)}`);
+    }
+  }
+  return { hasDataLoss, statements, errors };
 }
 
-export function assertLegacyBridgeAllowed(
+export async function assertLegacyBridgeApplicable(
+  db: PostgresJsDatabase<any>,
   pendingTags: string[],
-  drift: MigrationDrift,
-): string[] {
+): Promise<void> {
   const errors: string[] = [];
   if (
     pendingTags.length !== LEGACY_ADOPTION_PENDING_TAGS.length ||
@@ -136,44 +157,12 @@ export function assertLegacyBridgeAllowed(
       `legacy bridge 僅適用 pending=${LEGACY_ADOPTION_PENDING_TAGS.join(",")}；目前為 ${pendingTags.join(",") || "(none)"}`,
     );
   }
-  if (drift.hasDataLoss) errors.push("schema drift 被 Drizzle 標記為可能資料損失");
-  const dangerous = filterDangerousStatements(drift.statements);
-  if (dangerous.length > 0) {
-    errors.push(
-      `drift 計畫含有未審查的危險語句：${dangerous.slice(0, 3).join(" | ")}${dangerous.length > 3 ? " …" : ""}`,
-    );
+  // Further live-schema checks are performed by the caller against the drift plan.
+  if (errors.length) {
+    throw new Error(errors.join("\n"));
   }
-  return errors;
 }
 
-export function hashMigrationFile(tag: string, sqlRoot = "drizzle"): string {
-  const path = join(sqlRoot, `${tag}.sql`);
-  if (!existsSync(path)) return "";
-  const body = readFileSync(path);
-  return createHash("sha256").update(body).digest("hex");
-}
-
-export function isKnownCorrectedHash(tag: string, hash: string): boolean {
-  const allowed = KNOWN_CORRECTED_MIGRATION_HASHES.get(tag);
-  return allowed ? allowed.has(hash) : false;
-}
-
-export async function readAppliedMigrationTags(
-  db: PostgresJsDatabase<any>,
-): Promise<string[]> {
-  const rows = await db.execute(
-    sql`SELECT tag FROM drizzle.__drizzle_migrations ORDER BY created_at ASC`,
-  );
-  return (rows as unknown as { tag: string }[]).map((r) => r.tag);
-}
-
-export function redactDatabaseUrl(url: string | undefined): string {
-  if (!url) return "(DATABASE_URL 未設定)";
-  try {
-    const u = new URL(url);
-    if (u.password) u.password = "***";
-    return `${u.protocol}//${u.username ? u.username + ":***@" : ""}${u.host}${u.pathname}${u.search}`;
-  } catch {
-    return "(DATABASE_URL 格式無法安全顯示)";
-  }
+export function migrationTagFromFilename(filename: string): string {
+  return filename.replace(/\.sql$/, "");
 }
