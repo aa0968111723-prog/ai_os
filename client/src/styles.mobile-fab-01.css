@@ -1,27 +1,26 @@
-/* MOB-FAB-01：手機（≤560px）回饋 FAB 清位 + 工作台密度
- * 獨立檔案：不改動 styles.css 主體契約；僅 ≤560px 生效。
- * - 底部留白涵蓋 mobile-nav（~62–70）+ FAB（~48）+ 呼吸
- * - FAB 改 icon-only（.fb-fab-label 隱藏）；aria-label 仍在 button
- * - 常駐說明文案在手機隱藏，桌機不變
- * - 母版系列「開新的一集」展開時再加高留白，避免欄位／送出鈕被裁切
+/* MOB-FAB-01：手機／窄屏底部 chrome 契約 + 回饋 FAB 清位 + 工作台密度
+ *
+ * 與 styles.css 的 --chrome-bottom 變數對齊：
+ * - ≤820 有 .mobile-nav → 100px（styles.css）
+ * - ≤560 有 .mobile-nav → 140px（本檔，特異性同為 .app:has(.mobile-nav)，後載入勝出）
+ * - 表單展開 .series-form-open / .form-dock-open → 再加高，避免送出鈕被 nav 蓋住
+ *
+ * 其餘：FAB icon-only、鍵盤 inset 面板高度、工作台說明文案隱藏。
  */
 @media (max-width: 560px) {
-  .app {
-    padding-bottom: calc(140px + var(--safe-bottom));
-  }
-  html.is-standalone .app {
-    padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+  /* 有分頁列時：nav(~64) + FAB(~48) + 呼吸 ≈ 140 */
+  .app:has(.mobile-nav) {
+    --chrome-bottom: 140px;
   }
 
-  /* 表單展開：在既有 140px 之外再多留一段，讓「開這一集」捲得到、不被 nav 蓋住 */
-  .app:has(.series-form-open) {
-    padding-bottom: calc(200px + var(--safe-bottom));
-  }
-  html.is-standalone .app:has(.series-form-open) {
-    padding-bottom: calc(200px + env(safe-area-inset-bottom, 0px));
+  /* 長表單／展開表單：再加高，讓最底部欄位與送出鈕捲得到 */
+  .app:has(.series-form-open),
+  .app:has(.form-dock-open) {
+    --chrome-bottom: 200px;
   }
 
-  .series-form-open .series-form-actions {
+  .series-form-open .series-form-actions,
+  .form-dock-open .form-dock-actions {
     padding-bottom: 12px;
   }
 
@@ -52,11 +51,22 @@
   .creation-goal-persist-hint {
     display: none;
   }
+
+  /* 儲存警示橫幅：小屏收緊，避免再吃掉首屏高度 */
+  .storage-alert-banner {
+    margin-top: 6px !important;
+    padding: 8px 10px !important;
+    gap: 8px !important;
+  }
+  .storage-alert-banner__detail {
+    display: none;
+  }
 }
 
 /* 平板窄寬（≤820px、>560px）：分頁列已常駐，表單展開時同樣加高 */
 @media (max-width: 820px) and (min-width: 561px) {
-  .app:has(.series-form-open) {
-    padding-bottom: calc(120px + var(--safe-bottom));
+  .app:has(.series-form-open),
+  .app:has(.form-dock-open) {
+    --chrome-bottom: 160px;
   }
 }
