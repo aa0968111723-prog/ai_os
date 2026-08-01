@@ -42,6 +42,22 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
     expect(source).toContain("listInFlightGenerationSteps");
     expect(source).toContain("listRunnableDagSteps");
   });
+
+  it("clears ghost generationId on INTERNAL_SERVER_ERROR and NOT_FOUND (no permanent stuck running)", () => {
+    expect(source).toContain("clearGhostGenerationId");
+    expect(source).toMatch(/INTERNAL_SERVER_ERROR[\s\S]*clearGhostGenerationId/);
+    expect(source).toMatch(/NOT_FOUND[\s\S]*clearGhostGenerationId|生成列遺失/);
+  });
+
+  it("parallel authz failure failRun (not silent return)", () => {
+    // 並行開拍路徑必須 failRun，不可 if (authzError) return
+    expect(source).toMatch(/startParallelGenerateBranches[\s\S]*authzError[\s\S]*failRun/);
+    expect(source).not.toMatch(/const authzError = await checkRunAuthority\(run\);\s*if \(authzError\) return;/);
+  });
+
+  it("tick continues failed runs that still have running steps (settle siblings)", () => {
+    expect(source).toMatch(/status, "failed"[\s\S]*status":"running"/);
+  });
 });
 
 describe("formatAgentRunMessage（代理終局系統訊息）", () => {

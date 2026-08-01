@@ -212,7 +212,8 @@ export function startAgentRunner(): void {
 }
 
 async function tick(): Promise<void> {
-  // stopped 的 run 也要撈「仍有 running/pending 步驟」的：按停時正在生成的那步讓它自然完成收尾
+  // stopped：仍有 running/pending 步驟 → 收尾（按停時在途生成自然完成）
+  // failed：仍有 running 步驟 → 並行支線一支失敗後，其餘已送出的生成仍須 settle（否則永遠卡 running）
   const runs = await db
     .select()
     .from(schema.agentRuns)
@@ -222,6 +223,10 @@ async function tick(): Promise<void> {
         and(
           eq(schema.agentRuns.status, "stopped"),
           sql`(${schema.agentRuns.steps} @> '[{"status":"running"}]'::jsonb or ${schema.agentRuns.steps} @> '[{"status":"pending"}]'::jsonb)`,
+        ),
+        and(
+          eq(schema.agentRuns.status, "failed"),
+          sql`${schema.agentRuns.steps} @> '[{"status":"running"}]'::jsonb`,
         ),
       ),
     )
@@ -741,7 +746,15 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
   if (budget <= 0) return;
 
   const authzError = await checkRunAuthority(run);
-  if (authzError) return;
+  if (authzError) {
+    // 與串行路徑同口徑：權限失效必須 failRun，不可靜默 return（否則 run 空轉到陳屍）
+    const failIdx =
+      listRunnableDagSteps(steps)[0] ??
+      listInFlightGenerationSteps(steps)[0] ??
+      steps.findIndex((s) => s.status === "running" || s.status === "pending");
+    await failRun(run, steps, failIdx >= 0 ? failIdx : 0, authzError);
+    return;
+  }
 
   for (const idx of listRunnableDagSteps(steps)) {
     if (budget <= 0) break;
@@ -836,7 +849,10 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
       budget -= 1;
     } catch (err) {
       if (err instanceof TRPCError && err.code === "INTERNAL_SERVER_ERROR") {
+        // 幽靈 generationId：列可能從未建立——清掉佔位讓下輪重試，否則 advanceGeneration NOT_FOUND 永遠卡 running
         console.warn(`[agent] 並行送出暫時失敗（下輪重試）：run=${run.id} step=${idx}`, err.message);
+        clearGhostGenerationId(step, "送出暫時失敗，將重試");
+        await saveRun(run.id, { steps });
         return;
       }
       await failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
@@ -845,13 +861,22 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
   }
 }
 
+/** 送出失敗後清掉佔位 generationId，避免幽靈 id 卡死步驟 */
+function clearGhostGenerationId(step: AgentStep, detail: string): void {
+  delete step.generationId;
+  if (step.status === "running") step.status = "pending";
+  step.detail = detail;
+}
+
 /** 推進單一 run：長任務可多支線 in-flight；同輪可並行送出獨立 generate（多代理開拍） */
 async function advanceRun(run: RunRow): Promise<void> {
   const steps = run.steps as AgentStep[];
 
-  // ── 多代理長跑：先結算所有已送出的生成（供應商並發，我們輪詢收斂） ──
+  // ── 多代理長跑：先結算「所有」已送出的生成（供應商並發，我們輪詢收斂） ──
+  // 一支 failed 不可中斷迴圈：其餘支線仍須 settle，否則永遠卡 running（run 已 failed 也不再被 tick 撈到舊邏輯）
   const inFlight = listInFlightGenerationSteps(steps);
   let terminalSettled = false;
+  let ghostCleared = false;
   for (const gIdx of inFlight) {
     const gStep = steps[gIdx]!;
     let gen: GenerationRow | null = null;
@@ -860,12 +885,23 @@ async function advanceRun(run: RunRow): Promise<void> {
     } catch (err) {
       if (!(err instanceof TRPCError && err.code === "NOT_FOUND")) throw err;
     }
-    if (gen) {
-      await settleGeneration(run, steps, gIdx, gStep, gen);
-      if (gStep.status === "failed") return; // fail-closed 已停後續
-      if (gStep.status === "done") terminalSettled = true;
+    if (!gen) {
+      // 佔位 id 無列：run 仍 running 則清幽靈重試；已 failed/stopped 則只清 id 避免無限心跳
+      if (run.status === "running") {
+        clearGhostGenerationId(gStep, "生成列遺失，將重試送出");
+      } else {
+        delete gStep.generationId;
+        if (gStep.status === "running") gStep.status = "stopped";
+        gStep.detail = gStep.detail || "生成列遺失（已略過）";
+      }
+      ghostCleared = true;
+      continue;
     }
+    await settleGeneration(run, steps, gIdx, gStep, gen);
+    if (gStep.status === "done") terminalSettled = true;
+    // 不在此 return：同一 tick 繼續結算其它 in-flight
   }
+  if (ghostCleared) await saveRun(run.id, { steps });
 
   // 使用者已按停：沒有新生成要送時收停 pending
   {
@@ -1507,7 +1543,10 @@ async function advanceRun(run: RunRow): Promise<void> {
     });
   } catch (err) {
     if (err instanceof TRPCError && err.code === "INTERNAL_SERVER_ERROR") {
+      // 幽靈 generationId：清佔位後下輪可重試（與並行路徑同口徑）
       console.warn(`[agent] 步驟送出暫時失敗（下輪重試）：run=${run.id} step=${idx}`, err.message);
+      clearGhostGenerationId(step, "送出暫時失敗，將重試");
+      await saveRun(run.id, { steps });
       return;
     }
     return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
