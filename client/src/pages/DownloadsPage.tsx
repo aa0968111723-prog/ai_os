@@ -100,7 +100,7 @@ export function DownloadsPage() {
                 </Button>
                 <Button
                   as="a"
-                  variant="secondary"
+                  variant="tonal"
                   href={DESKTOP_WINDOWS_MSI_URL}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -110,7 +110,7 @@ export function DownloadsPage() {
                 </Button>
                 <Button
                   as="a"
-                  variant="secondary"
+                  variant="tonal"
                   href={DESKTOP_MAC_DMG_URL}
                   target="_blank"
                   rel="noopener noreferrer"
