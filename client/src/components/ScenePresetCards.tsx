@@ -177,6 +177,12 @@ export function ScenePresetCards({
                     name={s.name}
                     palette={s.palette}
                     lighting={s.lighting ?? ""}
+                    projectId={projectId}
+                    reference={
+                      s.referenceAssetId && s.referenceUrl
+                        ? { id: s.referenceAssetId, url: s.referenceUrl, title: "場景參考圖" }
+                        : null
+                    }
                     pending={update.isPending}
                     error={update.error?.message}
                     onCancel={() => {
@@ -189,6 +195,7 @@ export function ScenePresetCards({
                         name: next.name,
                         palette: next.palette,
                         lighting: next.lighting || null,
+                        referenceAssetId: next.referenceAssetId,
                       })
                     }
                   />
@@ -395,6 +402,8 @@ function SceneTextEditor({
   name,
   palette,
   lighting,
+  projectId,
+  reference,
   pending,
   error,
   onSave,
@@ -403,14 +412,20 @@ function SceneTextEditor({
   name: string;
   palette: string;
   lighting: string;
+  /** 參考圖挑選器要用（上傳／從本專案素材庫挑） */
+  projectId: string;
+  /** 目前綁定的參考圖；null＝還沒綁 */
+  reference: ReferenceImage | null;
   pending: boolean;
   error?: string;
-  onSave: (next: { name: string; palette: string; lighting: string }) => void;
+  onSave: (next: { name: string; palette: string; lighting: string; referenceAssetId: string | null }) => void;
   onCancel: () => void;
 }) {
   const [n, setN] = useState(name);
   const [p, setP] = useState(palette);
   const [l, setL] = useState(lighting);
+  /** 與角色卡同理（QA 2026-08-01 回報）：編輯表單先前沒有參考圖欄，看起來像這張卡不能配素材。 */
+  const [ref, setRef] = useState<ReferenceImage | null>(reference);
   const firstRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -428,12 +443,16 @@ function SceneTextEditor({
       <CharCount value={p} max={SCENE_PALETTE_MAX} />
       <label style={editLabel}>光線（選填）</label>
       <textarea value={l} maxLength={SCENE_LIGHTING_MAX} disabled={pending} rows={2} onChange={(e) => setL(e.target.value)} />
+      <label style={editLabel}>場景參考圖（選填：上傳或從素材庫選）</label>
+      <ReferenceImagePicker projectId={projectId} value={ref} onChange={setRef} disabled={pending} />
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button
           type="button"
           className="primary"
           disabled={!canSave}
-          onClick={() => onSave({ name: n.trim(), palette: p.trim(), lighting: l.trim() })}
+          onClick={() =>
+            onSave({ name: n.trim(), palette: p.trim(), lighting: l.trim(), referenceAssetId: ref?.id ?? null })
+          }
         >
           {pending ? "儲存中…" : "儲存"}
         </button>
