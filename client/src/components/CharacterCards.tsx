@@ -190,6 +190,12 @@ export function CharacterCards({
                     name={c.name}
                     appearance={c.appearance}
                     notes={c.notes ?? ""}
+                    projectId={projectId}
+                    reference={
+                      c.referenceAssetId && c.referenceUrl
+                        ? { id: c.referenceAssetId, url: c.referenceUrl, title: "定裝參考圖" }
+                        : null
+                    }
                     pending={update.isPending}
                     error={update.error?.message}
                     onCancel={() => {
@@ -202,6 +208,7 @@ export function CharacterCards({
                         name: next.name,
                         appearance: next.appearance,
                         notes: next.notes || null,
+                        referenceAssetId: next.referenceAssetId,
                       })
                     }
                   />
@@ -410,6 +417,8 @@ function CardTextEditor({
   name,
   appearance,
   notes,
+  projectId,
+  reference,
   pending,
   error,
   onSave,
@@ -418,14 +427,24 @@ function CardTextEditor({
   name: string;
   appearance: string;
   notes: string;
+  /** 參考圖挑選器要用（上傳／從本專案素材庫挑） */
+  projectId: string;
+  /** 目前綁定的參考圖；null＝還沒綁 */
+  reference: ReferenceImage | null;
   pending: boolean;
   error?: string;
-  onSave: (next: { name: string; appearance: string; notes: string }) => void;
+  onSave: (next: { name: string; appearance: string; notes: string; referenceAssetId: string | null }) => void;
   onCancel: () => void;
 }) {
   const [n, setN] = useState(name);
   const [a, setA] = useState(appearance);
   const [note, setNote] = useState(notes);
+  /**
+   * 參考圖在編輯表單裡就能改（QA 2026-08-01 回報）：先前這張表單只有三個文字欄位，
+   * 使用者以為這張卡不能配素材——參考圖得先取消編輯、再去按另一顆「設參考圖」才找得到。
+   * 新增卡片的表單本來就有這一欄，兩邊不一致本身就是誤導。
+   */
+  const [ref, setRef] = useState<ReferenceImage | null>(reference);
   const firstRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -443,12 +462,16 @@ function CardTextEditor({
       <CharCount value={a} max={CHAR_APPEARANCE_MAX} />
       <label style={editLabel}>個性・備註（選填）</label>
       <textarea value={note} maxLength={CHAR_NOTES_MAX} disabled={pending} rows={2} onChange={(e) => setNote(e.target.value)} />
+      <label style={editLabel}>定裝參考圖（選填：上傳或從素材庫選）</label>
+      <ReferenceImagePicker projectId={projectId} value={ref} onChange={setRef} disabled={pending} />
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button
           type="button"
           className="primary"
           disabled={!canSave}
-          onClick={() => onSave({ name: n.trim(), appearance: a.trim(), notes: note.trim() })}
+          onClick={() =>
+            onSave({ name: n.trim(), appearance: a.trim(), notes: note.trim(), referenceAssetId: ref?.id ?? null })
+          }
         >
           {pending ? "儲存中…" : "儲存"}
         </button>
