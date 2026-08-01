@@ -8,7 +8,7 @@ import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import { validateMentions } from "./mentions";
-import { assertProjectNotArchived } from "./projectAcl";
+import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { executeAgentEffectOnce } from "./agentEffectCore";
 
 export const NOTE_TITLE_MAX = 120;
@@ -55,6 +55,8 @@ async function projectChecked(
   groupId: string,
   projectId: string,
   requireActive: boolean,
+  /** 寫入路徑預設與 requireActive 同開：封存擋 + 專案檢視者（viewer）擋 */
+  requireEditable: boolean = requireActive,
 ): Promise<typeof schema.projects.$inferSelect> {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project || project.groupId !== groupId) {
@@ -62,6 +64,8 @@ async function projectChecked(
   }
   requireGroup(auth, project.groupId);
   if (requireActive) assertProjectNotArchived(project);
+  // 2.3：專案綁定筆記的寫入（新增／改／刪／追加）檢視者不可改——僅作者身分不夠
+  if (requireEditable) await assertProjectEditable(auth, project);
   return project;
 }
 
@@ -299,6 +303,7 @@ export async function appendNoteOnceCore(input: {
         throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
       }
       assertProjectNotArchived(project);
+      await assertProjectEditable(input.auth, project);
     }
     const content = contentChecked(`${row.content}${separator}${addition}`);
     await tx.insert(schema.textVersions).values({
@@ -343,6 +348,7 @@ export async function appendNoteOnceCore(input: {
 export async function removeNoteCore(auth: AuthState, id: string): Promise<{ ok: true }> {
   const row = await getNoteChecked(auth, id);
   assertCanWriteNote(auth, row, "刪除");
+  if (row.projectId) await projectChecked(auth, row.groupId, row.projectId, true);
   await db.transaction(async (tx) => {
     await tx.delete(schema.textVersions).where(and(
       eq(schema.textVersions.kind, "note"),
