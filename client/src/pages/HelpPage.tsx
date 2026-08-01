@@ -168,6 +168,7 @@ export function HelpPage() {
         <a href="#help-value"><Icon name="Sparkles" size={14} />能幫你什麼</a>
         <a href="#help-route"><Icon name="Clapperboard" size={14} />六步路線</a>
         <a href="#help-map"><Icon name="MousePointer2" size={14} />功能地圖</a>
+        <a href="#help-export"><Icon name="Package" size={14} />交付下載</a>
         <a href="#help-faq"><Icon name="Gem" size={14} />常見問題</a>
         <a href="#help-install"><Icon name="Download" size={14} />安裝 App</a>
         <a href="#help-terms"><Icon name="FileText" size={14} />名詞辭典</a>
@@ -324,12 +325,69 @@ export function HelpPage() {
             建金鑰讓 Claude 等外部 AI 用<b>你的身分</b>直接操作專案（MCP）。可設唯讀、會到期的金鑰。
           </Spot>
           <Spot icon="Download" name="資料下載" where="選單・工作">
-            交付過的 zip 都留在這，隨時回頭重新下載。
+            站內說明／政策等白名單檔（<b>不是</b>你的片子 zip）。片子請到專案「交付」區打包。
           </Spot>
           <Spot icon="MessageCircle" name="我的回報／回饋" where="選單・帳號＋右下浮標">
             右下角浮標隨時能提意見或回報問題；「我的回報」看管理員的回覆。
           </Spot>
         </MapGroup>
+      </div>
+
+      {/* ── 交付與下載：剪輯師最在意的一節 ── */}
+      <H2 id="help-export" icon="Package">交付與下載（給剪輯的那一包）</H2>
+      <Hint layer="always" style={{ marginTop: 0, fontSize: 13 }}>
+        目標：一鍵拿到<b>依鏡號排好的媒體＋字幕＋可選時間軸</b>。大檔建議用電腦下載。
+      </Hint>
+      <Card style={{ marginBottom: 12 }}>
+        <p style={{ marginTop: 0, lineHeight: 1.8 }}>
+          <b>在哪打包：</b>專案 → <b>分鏡・交付</b> → 下方「交付」→ <b>打包下載交付包（.zip）</b>。
+          會顯示排隊／打包進度（N/M 檔・大小）；完成後再按下載。可關分頁，回來通常能接回同一個打包任務。
+          內容更新後要再給剪輯，按「重新打包」。
+        </p>
+        <p style={{ margin: "0 0 8px", fontWeight: 600 }}>Zip 裡常見資料夾（沒內容的不會出現）：</p>
+        <ul style={{ margin: "0 0 8px", paddingLeft: 22, lineHeight: 1.75 }}>
+          <li><b>00_鎖定原素材</b>——不可改的原音／開示／配樂（有鎖定才出現）</li>
+          <li><b>01_視頻素材</b>——影片成品，依鏡號</li>
+          <li><b>02_旁白音檔</b>——逐鏡旁白，檔名對鏡號</li>
+          <li><b>03_圖像</b>——圖片成品</li>
+          <li><b>04_字幕</b>——字幕.srt（剪映／Premiere／YouTube）</li>
+          <li><b>05_文件</b>——腳本與鏡頭表（秒數、檔名、提示詞、模型）</li>
+          <li><b>交付/</b>——時間軸檔（見下表）＋ README</li>
+        </ul>
+        <p style={{ margin: "0 0 8px", fontWeight: 600 }}>我的軟體該開哪個檔？</p>
+        <ul style={{ margin: 0, paddingLeft: 22, lineHeight: 1.75 }}>
+          <li><b>Premiere</b>→ 交付／Premiere時間軸.xml → 匯入後若媒體離線，relink 到解壓後的 01_／02_ 資料夾</li>
+          <li><b>Final Cut／Resolve／剪映專業版</b>→ 交付／時間軸.fcpxml</li>
+          <li><b>剪映／CapCut 消費版</b>→ 交付區「進階」→ 剪映草稿包（實驗），或把媒體拖進時間軸再匯入 srt</li>
+          <li><b>只要字幕</b>→ 04_字幕 或交付裡的 srt</li>
+        </ul>
+      </Card>
+      <div className="stack">
+        <Faq q="打包一直顯示排隊中／重整後找不到進度？">
+          <p style={{ marginTop: 0 }}>
+            打包是分鐘級長任務（多支影片時更大）。請先等進度從「排隊中」變成「打包中 N/M」。
+            重整後應能接回同一個任務；若 job 已失效，再按一次打包即可。
+            完成後畫面會出現「下載交付包」——在完成前不會有可下的檔。
+          </p>
+        </Faq>
+        <Faq q="時間軸匯入後媒體全是離線／灰色？">
+          <p style={{ marginTop: 0 }}>
+            時間軸用相對路徑指向 zip 裡的媒體資料夾。請保持解壓後的資料夾結構完整，
+            不要只複製 xml／fcpxml。在剪輯軟體裡「重新連結媒體」到 01_視頻素材、02_旁白音檔 即可。
+          </p>
+        </Faq>
+        <Faq q="「資料下載」和專案交付包有何不同？">
+          <p style={{ marginTop: 0 }}>
+            <b>專案交付 zip</b>＝這一支片的成品（在專案「交付」區）。
+            帳號選單的<b>資料下載</b>＝站內說明、政策等白名單文件，<b>不是</b>你的片子。
+            單張圖／音檔也可在「素材庫」或生成紀錄個別下載。
+          </p>
+        </Faq>
+        <Faq q="手機上能打包嗎？">
+          <p style={{ marginTop: 0 }}>
+            可以排程打包與看進度，但大 zip 建議在<b>電腦下載</b>較穩。手機可先完成送審，回桌面再下載給剪輯。
+          </p>
+        </Faq>
       </div>
 
       {/* ── 常見問題：保留原本準確的答覆，聚焦錢/失敗/真假/免費 ── */}
@@ -392,8 +450,8 @@ export function HelpPage() {
 
         <Faq q="做好後怎麼交付？zip 裡面長怎樣？">
           <p style={{ marginTop: 0 }}>
-            分鏡送審通過後，在<b>「分鏡・交付」最下方的「交付」區</b>一鍵打包下載一包 zip。資料夾用業界通用的編號命名、
-            依鏡號排好（有內容的資料夾才會出現）：
+            詳見上方 <a href="#help-export">交付與下載</a>。摘要：分鏡送審通過後，在<b>「分鏡・交付」最下方的「交付」區</b>一鍵打包 zip。
+            資料夾用業界通用的編號命名、依鏡號排好（有內容的資料夾才會出現）：
           </p>
           <ul style={{ margin: "0 0 8px", paddingLeft: 22 }}>
             <li><b>01_視頻素材</b>——影片類成品，依鏡號排序</li>
