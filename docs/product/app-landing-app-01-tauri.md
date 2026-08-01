@@ -94,7 +94,7 @@ Windows 掃描限制在 `Program Files`、`Program Files (x86)` 與 `LOCALAPPDAT
 
 相同內容不重複上傳；失敗時保留本機檔並重試；使用者可停止監看。單檔下載／回傳上限目前為 200MB。
 
-現有 `/api/upload` 尚未持久保存 `sourceAssetId`、`handoffId`、`editorId`，因此目前是「新增編輯素材」，不是完整版本樹。後續需建立正式 asset revision／lineage 資料模型。
+`/api/upload` 已把 `sourceAssetId`／`desktopHandoffId`／`editorId` 寫入 `assets.meta`（新增素材、不覆寫原檔）。素材庫以 `shared/assetLineage` 顯示血緣與「N 個編輯版本」篩選。正式 `asset_revisions` 表／版本樹 UI 仍可後續加。
 
 ## 桌面操作頁
 
