@@ -61,6 +61,7 @@ export function CreationWorkbench({
   wvReady = false,
   characterIds = [],
   scenePresetIds = [],
+  propIds = [],
   generateApplyRequest = null,
   workflowPromptRequest = null,
   onReuseGenerate,
@@ -83,6 +84,7 @@ export function CreationWorkbench({
   wvReady?: boolean;
   characterIds?: string[];
   scenePresetIds?: string[];
+  propIds?: string[];
   generateApplyRequest?: DirectGenerateApplyRequest | null;
   /** PromptLibrary「用於製作範本」→ WorkflowCard idea box (nonce-driven) */
   workflowPromptRequest?: { text: string; nonce: number } | null;
@@ -290,13 +292,15 @@ export function CreationWorkbench({
   useEffect(() => {
     const same =
       characterIds.length === draft.characterIds.length &&
+      propIds.length === draft.propIds.length &&
+      propIds.every((id, i) => id === draft.propIds[i]) &&
       scenePresetIds.length === draft.scenePresetIds.length &&
       characterIds.every((id, i) => id === draft.characterIds[i]) &&
       scenePresetIds.every((id, i) => id === draft.scenePresetIds[i]);
     if (same) return;
-    setDraft({ characterIds, scenePresetIds });
+    setDraft({ characterIds, scenePresetIds, propIds });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [characterIds, scenePresetIds]);
+  }, [characterIds, scenePresetIds, propIds]);
 
   const mode = draft.mode;
 
@@ -438,6 +442,7 @@ export function CreationWorkbench({
           wvReady={wvReady}
           characterIds={characterIds}
           scenePresetIds={scenePresetIds}
+          propIds={propIds}
           panelId={modePanelId(tabPrefix, "generate")}
           labelledBy={modeTabId(tabPrefix, "generate")}
           active={mode === "generate"}

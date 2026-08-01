@@ -1,5 +1,5 @@
 /**
- * 角色定裝卡／場景設定卡——前後端共用上限（單一真相）。
+ * 角色定裝卡／場景設定卡／物件道具卡——前後端共用上限（單一真相）。
  *
  * 生成帶入上限必須與 generation / scenes / prompts / workflows / plan 的 zod .max 一致；
  * 每專案張數上限避免 list 全量渲染被灌爆。
@@ -9,6 +9,9 @@
 export const MAX_GENERATE_CHARACTERS = 6;
 /** 單次生成最多帶入的場景設定卡數 */
 export const MAX_GENERATE_SCENE_PRESETS = 4;
+
+/** 單次生成最多帶入的物件／道具卡數 */
+export const MAX_GENERATE_PROPS = 4;
 
 /** 每專案角色定裝卡硬上限 */
 export const MAX_PROJECT_CHARACTERS = 50;
@@ -21,6 +24,16 @@ export const CHAR_NAME_MAX = 40;
 export const CHAR_APPEARANCE_MAX = 1000;
 /** 角色個性／備註 */
 export const CHAR_NOTES_MAX = 1000;
+
+/** 每專案物件／道具卡硬上限 */
+export const MAX_PROJECT_PROPS = 50;
+
+/** 物件名 */
+export const PROP_NAME_MAX = 40;
+/** 物件外觀（入庫上限；視覺注入另有 cardAnchors 截短） */
+export const PROP_APPEARANCE_MAX = 1000;
+/** 物件用途／備註 */
+export const PROP_NOTES_MAX = 1000;
 
 /** 場景名 */
 export const SCENE_NAME_MAX = 40;

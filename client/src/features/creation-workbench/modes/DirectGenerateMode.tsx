@@ -53,6 +53,7 @@ export function DirectGenerateMode({
   wvReady,
   characterIds,
   scenePresetIds,
+  propIds = [],
   panelId,
   labelledBy,
   active,
@@ -79,6 +80,8 @@ export function DirectGenerateMode({
   wvReady: boolean;
   characterIds: string[];
   scenePresetIds: string[];
+  /** 勾選的物件／道具卡（外觀錨點注入；QA 2026-08-01 新增的第三種卡） */
+  propIds?: string[];
   panelId: string;
   labelledBy: string;
   active: boolean;
@@ -333,10 +336,11 @@ export function DirectGenerateMode({
         帶入：
         {summaryChip(`世界觀${wvReady ? " ✓" : "（未定盤）"}`, "#onboard-worldview", wvReady)}
         {summaryChip(`角色 ${characterIds.length}`, "#sec-characters", characterIds.length > 0)}
+        {summaryChip(`物件 ${propIds.length}`, "#sec-props", propIds.length > 0)}
         {summaryChip(`場景 ${scenePresetIds.length}`, "#sec-scenes", scenePresetIds.length > 0)}
       </div>
 
-      {(characterIds.length > 0 || scenePresetIds.length > 0) &&
+      {(characterIds.length > 0 || propIds.length > 0 || scenePresetIds.length > 0) &&
         fullModel &&
         !supportsCardAnchors(fullModel.category) && (
           <Hint layer="always" role="alert" style={{ color: "var(--gold-ink)", marginTop: 6 }}>
@@ -344,7 +348,7 @@ export function DirectGenerateMode({
             ）不會使用角色卡／場景卡——已勾選的卡片不影響本次生成
           </Hint>
         )}
-      {(characterIds.length > 0 || scenePresetIds.length > 0) &&
+      {(characterIds.length > 0 || propIds.length > 0 || scenePresetIds.length > 0) &&
         fullModel &&
         supportsCardAnchors(fullModel.category) && (
           <Hint style={{ marginTop: 6, fontSize: 12 }}>
@@ -477,9 +481,10 @@ export function DirectGenerateMode({
           <p style={{ margin: "4px 0" }}>
             <b>{model.label}</b>・{projectFormat}
             {characterIds.length > 0 && <>・帶入 {characterIds.length} 個角色定裝</>}
+            {propIds.length > 0 && <>・{propIds.length} 個物件道具</>}
             {scenePresetIds.length > 0 && <>・{scenePresetIds.length} 個場景設定</>}
           </p>
-          {(characterIds.length > 0 || scenePresetIds.length > 0) &&
+          {(characterIds.length > 0 || propIds.length > 0 || scenePresetIds.length > 0) &&
             fullModel &&
             !supportsCardAnchors(fullModel.category) && (
               <p role="alert" style={{ margin: "4px 0", fontSize: 13, color: "var(--gold-ink)" }}>
@@ -559,6 +564,7 @@ export function DirectGenerateMode({
                     sourceUrl,
                     characterIds,
                     scenePresetIds,
+                    propIds,
                     clientRequestId: submitRequestId.current,
                   }),
                 )

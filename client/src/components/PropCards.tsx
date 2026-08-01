@@ -1,0 +1,494 @@
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  PROP_APPEARANCE_MAX,
+  PROP_NAME_MAX,
+  PROP_NOTES_MAX,
+  MAX_GENERATE_PROPS,
+  MAX_PROJECT_PROPS,
+} from "@shared/cardLimits";
+import { trpc } from "../api";
+import { Icon } from "./Icon";
+import { CharCount, ConfirmButton } from "./interactions";
+import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
+import { AssetImg } from "./MediaFallback";
+import { Button, Card, EmptyState, Hint, Meta, Skeleton } from "./ui";
+
+export { MAX_GENERATE_PROPS };
+
+/**
+ * 物件／道具卡（QA 2026-08-01 使用者要求）：紅傘、帆布包、法器、產品、logo 這類「東西」
+ * 的外觀設定一次鎖定，生成時勾選 → 自動注入錨點，跨鏡頭不走樣。
+ *
+ * 為什麼不塞進角色外觀：道具常常跨角色、跨場景出現，寫進某個角色，換個角色入鏡它就不見了。
+ * 版面與互動刻意與物件／道具卡一致——三張卡在使用者眼裡是同一類東西。
+ * readOnly（檢視者）：隱藏新增／刪除／編輯／設參考圖。
+ */
+export function PropCards({
+  projectId,
+  selectedIds,
+  onToggle,
+  readOnly = false,
+  maxSelect = MAX_GENERATE_PROPS,
+  onCreated,
+}: {
+  projectId: string;
+  selectedIds: string[];
+  onToggle: (id: string) => void;
+  readOnly?: boolean;
+  /** 生成時最多帶入幾張（與後端 max 對齊） */
+  maxSelect?: number;
+  /** 新建成功回呼（父層可自動勾選） */
+  onCreated?: (id: string) => void;
+}) {
+  const utils = trpc.useUtils();
+  const list = trpc.props.list.useQuery({ projectId });
+  // 冪等鍵（QA-003）：同一張「還沒建成功」的卡重試沿用同鍵——timeout 後再按不會建出重複卡
+  const requestId = useRef<string>(crypto.randomUUID());
+  const add = trpc.props.add.useMutation({
+    onSuccess: (row) => {
+      requestId.current = crypto.randomUUID();
+      utils.props.list.invalidate({ projectId });
+      setName("");
+      setAppearance("");
+      setNotes("");
+      setRefImg(null);
+      setOpen(false);
+      if (row?.id) onCreated?.(row.id);
+    },
+  });
+  const remove = trpc.props.remove.useMutation({
+    onSuccess: () => utils.props.list.invalidate({ projectId }),
+  });
+  const update = trpc.props.update.useMutation({
+    onSuccess: () => {
+      utils.props.list.invalidate({ projectId });
+      setRefEditId(null);
+      setTextEditId(null);
+    },
+  });
+
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [appearance, setAppearance] = useState("");
+  const [notes, setNotes] = useState("");
+  const [refImg, setRefImg] = useState<ReferenceImage | null>(null);
+  const [refEditId, setRefEditId] = useState<string | null>(null);
+  /** 正在就地編輯文字欄的卡 id */
+  const [textEditId, setTextEditId] = useState<string | null>(null);
+  const atSelectMax = selectedIds.length >= maxSelect;
+  const cardCount = list.data?.length ?? 0;
+  const atProjectMax = cardCount >= MAX_PROJECT_PROPS;
+
+  return (
+    <Card as="section" data-fb="物件／道具卡">
+      <h2>物件／道具卡（跨鏡一致）</h2>
+      <Hint>
+        設定物件外觀一次鎖定；生成時勾選，AI 自動帶入外觀，跨鏡頭不走樣。可綁物件參考圖。
+        外觀前段會注入畫面生成（過長會自動截短）；備註只給導演／助手，不會畫進畫面。
+        {list.data && list.data.length > 0 && (
+          <>
+            {" "}
+            · 已選 {selectedIds.length}/{maxSelect}
+            {atSelectMax ? "（已達上限）" : ""}
+            {" · "}共 {cardCount}/{MAX_PROJECT_PROPS} 張
+          </>
+        )}
+      </Hint>
+
+      {list.isLoading ? (
+        <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+          <Skeleton style={{ height: 104 }} />
+          <Skeleton style={{ height: 104 }} />
+        </div>
+      ) : list.isError ? (
+        <p className="error" role="alert" style={{ marginTop: 8 }}>
+          物件卡清單暫時載入不了（不是資料不見了）——
+          <Button variant="ghost" size="sm" style={{ marginLeft: "var(--sp-4)" }} onClick={() => list.refetch()}>
+            再試一次
+          </Button>
+        </p>
+      ) : list.data && list.data.length > 0 ? (
+        <div className="asset-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+          {list.data.map((c) => {
+            const on = selectedIds.includes(c.id);
+            const selectDisabled = !on && atSelectMax;
+            const refTrashed = Boolean(c.referenceAssetId && !c.referenceUrl);
+            const editingText = textEditId === c.id;
+            return (
+              <div
+                key={c.id}
+                className="asset-cell"
+                style={{
+                  padding: "var(--sp-12)",
+                  boxShadow: on ? "inset 0 0 0 2px var(--primary)" : undefined,
+                  transition: "box-shadow var(--dur-fast)",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.name}>
+                    {c.name}
+                  </strong>
+                  <label
+                    style={{
+                      fontSize: "var(--fs-12)",
+                      display: "flex",
+                      gap: 4,
+                      alignItems: "center",
+                      flexShrink: 0,
+                      cursor: selectDisabled ? "not-allowed" : "pointer",
+                      opacity: selectDisabled ? 0.55 : 1,
+                    }}
+                    title={selectDisabled ? `最多帶入 ${maxSelect} 個物件——先取消其他勾選` : undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={selectDisabled}
+                      onChange={() => {
+                        if (selectDisabled) return;
+                        onToggle(c.id);
+                      }}
+                    />{" "}
+                    生成時帶入
+                  </label>
+                </div>
+
+                {c.referenceUrl && (
+                  <AssetImg
+                    src={c.referenceUrl}
+                    alt={`${c.name} 的物件參考圖`}
+                    loading="lazy"
+                    style={{
+                      width: "100%",
+                      height: 96,
+                      objectFit: "cover",
+                      borderRadius: 8,
+                      marginTop: 6,
+                      border: "1px solid var(--border-soft)",
+                    }}
+                    fallbackLabel="參考圖遺失——可重新綁定"
+                    fallbackHeight={96}
+                    fallbackStyle={{ marginTop: 6 }}
+                  />
+                )}
+                {refTrashed && (
+                  <Meta as="div" role="status" style={{ fontSize: "var(--fs-11)", marginTop: 6, color: "var(--danger-ink)" }}>
+                    參考圖已在回收桶（綁定仍在）——可清除綁定，或先還原素材
+                    {!readOnly && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        style={{ marginLeft: 6, fontSize: "var(--fs-11)" }}
+                        disabled={update.isPending}
+                        onClick={() => update.mutate({ id: c.id, referenceAssetId: null })}
+                      >
+                        清除綁定
+                      </Button>
+                    )}
+                  </Meta>
+                )}
+
+                {editingText && !readOnly ? (
+                  <CardTextEditor
+                    name={c.name}
+                    appearance={c.appearance}
+                    notes={c.notes ?? ""}
+                    projectId={projectId}
+                    reference={
+                      c.referenceAssetId && c.referenceUrl
+                        ? { id: c.referenceAssetId, url: c.referenceUrl, title: "物件參考圖" }
+                        : null
+                    }
+                    pending={update.isPending}
+                    error={update.error?.message}
+                    onCancel={() => {
+                      setTextEditId(null);
+                      update.reset();
+                    }}
+                    onSave={(next) =>
+                      update.mutate({
+                        id: c.id,
+                        name: next.name,
+                        appearance: next.appearance,
+                        notes: next.notes || null,
+                        referenceAssetId: next.referenceAssetId,
+                      })
+                    }
+                  />
+                ) : (
+                  <>
+                    <Meta
+                      as="div"
+                      title={c.appearance}
+                      style={{
+                        fontSize: "var(--fs-12)",
+                        marginTop: "var(--sp-4)",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <Icon name="User" size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                      {c.appearance}
+                    </Meta>
+                    {c.notes && (
+                      <Meta
+                        as="div"
+                        title={c.notes}
+                        style={{
+                          fontSize: "var(--fs-11)",
+                          marginTop: 3,
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <Icon name="FileText" size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                        {c.notes}
+                      </Meta>
+                    )}
+                  </>
+                )}
+
+                {!readOnly && !editingText && (
+                  <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    <Button
+                      variant="ghost"
+                      style={{ fontSize: "var(--fs-11)" }}
+                      onClick={() => {
+                        setTextEditId(c.id);
+                        setRefEditId(null);
+                      }}
+                    >
+                      <Icon name="Pencil" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                      編輯
+                    </Button>
+                    {refEditId === c.id ? (
+                      <div style={{ flexBasis: "100%" }}>
+                        <ReferenceImagePicker
+                          projectId={projectId}
+                          value={
+                            c.referenceAssetId && c.referenceUrl
+                              ? { id: c.referenceAssetId, url: c.referenceUrl, title: "物件參考圖" }
+                              : null
+                          }
+                          onChange={(next) => update.mutate({ id: c.id, referenceAssetId: next?.id ?? null })}
+                          disabled={update.isPending}
+                        />
+                        <Button variant="ghost" style={{ marginTop: 4, fontSize: "var(--fs-11)" }} onClick={() => setRefEditId(null)}>
+                          收起
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        style={{ fontSize: "var(--fs-11)" }}
+                        title="綁一張物件參考圖：上傳或從素材庫選。跨鏡比對有依據；選「圖生圖／參考圖」類模型又沒挑來源時，會自動拿它當來源圖"
+                        onClick={() => {
+                          setRefEditId(c.id);
+                          setTextEditId(null);
+                        }}
+                      >
+                        <Icon name="Image" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                        {c.referenceUrl ? "換參考圖" : refTrashed ? "重設參考圖" : "設參考圖"}
+                      </Button>
+                    )}
+                    <ConfirmButton
+                      onConfirm={() => remove.mutate({ id: c.id })}
+                      message={`刪除物件「${c.name}」？刪後生成勾選會自動清掉。`}
+                      triggerClassName="btn-ghost"
+                      triggerStyle={{ color: "var(--danger-ink)", fontSize: "var(--fs-11)" }}
+                      disabled={remove.isPending}
+                    >
+                      刪除
+                    </ConfirmButton>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState
+          title="還沒有物件卡"
+          description="加一張物件卡（例：紅傘＝鮮紅長柄傘、木質握把、傘面微舊）——跨鏡要一致的道具、產品、logo 都適合。"
+        />
+      )}
+
+      {!readOnly &&
+        (open ? (
+          <div style={{ marginTop: "var(--sp-12)", borderTop: "1px solid var(--border-soft)", paddingTop: "var(--sp-12)" }}>
+            <label htmlFor="char-name">物件名</label>
+            <input
+              id="char-name"
+              value={name}
+              maxLength={PROP_NAME_MAX}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="例：紅傘"
+              autoComplete="off"
+            />
+            <CharCount value={name} max={PROP_NAME_MAX} />
+            <label htmlFor="char-appearance">外觀（會注入生成，越具體越一致）</label>
+            <textarea
+              id="char-appearance"
+              value={appearance}
+              maxLength={PROP_APPEARANCE_MAX}
+              onChange={(e) => setAppearance(e.target.value)}
+              rows={3}
+              placeholder="例：鮮紅長柄傘、木質握把、傘面略舊、邊緣有磨痕"
+            />
+            <CharCount value={appearance} max={PROP_APPEARANCE_MAX} />
+            <label htmlFor="char-notes">用途・出現時機（選填，供 AI 導演參考，不畫進畫面）</label>
+            <textarea
+              id="char-notes"
+              value={notes}
+              maxLength={PROP_NOTES_MAX}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              placeholder="例：只在雨中場景出現；不可換成折傘"
+            />
+            <CharCount value={notes} max={PROP_NOTES_MAX} />
+            <label style={{ marginTop: 8 }}>物件參考圖（選填：上傳或從素材庫選）</label>
+            <ReferenceImagePicker projectId={projectId} value={refImg} onChange={setRefImg} disabled={add.isPending} />
+            <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                className="primary"
+                disabled={!name.trim() || !appearance.trim() || add.isPending || atProjectMax}
+                onClick={() =>
+                  add.mutate({
+                    projectId,
+                    name: name.trim(),
+                    appearance: appearance.trim(),
+                    notes: notes.trim() || undefined,
+                    referenceAssetId: refImg?.id,
+                    clientRequestId: requestId.current,
+                  })
+                }
+              >
+                {add.isPending ? "建立中…" : "建立物件卡"}
+              </button>
+              <button type="button" onClick={() => setOpen(false)}>
+                取消
+              </button>
+            </div>
+            {add.error && (
+              <p className="error" role="alert">
+                {add.error.message}
+              </p>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            style={{
+              marginTop: "var(--sp-12)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              opacity: atProjectMax ? 0.55 : 1,
+              cursor: atProjectMax ? "not-allowed" : undefined,
+            }}
+            disabled={atProjectMax}
+            title={atProjectMax ? `已達每專案 ${MAX_PROJECT_PROPS} 張上限` : undefined}
+            onClick={() => {
+              if (atProjectMax) return;
+              setOpen(true);
+            }}
+          >
+            <Icon name="Plus" size={14} />
+            {atProjectMax ? `已達上限（${MAX_PROJECT_PROPS}）` : "新增物件／道具"}
+          </button>
+        ))}
+      {remove.error && (
+        <p className="error" role="alert">
+          {remove.error.message}
+        </p>
+      )}
+      {update.error && !textEditId && (
+        <p className="error" role="alert">
+          更新失敗：{update.error.message}
+        </p>
+      )}
+    </Card>
+  );
+}
+
+/** 就地編輯：名稱／外觀／個性，失焦不自動存——明確按儲存，避免半打字就送出 */
+function CardTextEditor({
+  name,
+  appearance,
+  notes,
+  projectId,
+  reference,
+  pending,
+  error,
+  onSave,
+  onCancel,
+}: {
+  name: string;
+  appearance: string;
+  notes: string;
+  /** 參考圖挑選器要用（上傳／從本專案素材庫挑） */
+  projectId: string;
+  /** 目前綁定的參考圖；null＝還沒綁 */
+  reference: ReferenceImage | null;
+  pending: boolean;
+  error?: string;
+  onSave: (next: { name: string; appearance: string; notes: string; referenceAssetId: string | null }) => void;
+  onCancel: () => void;
+}) {
+  const [n, setN] = useState(name);
+  const [a, setA] = useState(appearance);
+  const [note, setNote] = useState(notes);
+  /**
+   * 參考圖在編輯表單裡就能改（QA 2026-08-01 回報）：先前這張表單只有三個文字欄位，
+   * 使用者以為這張卡不能配素材——參考圖得先取消編輯、再去按另一顆「設參考圖」才找得到。
+   * 新增卡片的表單本來就有這一欄，兩邊不一致本身就是誤導。
+   */
+  const [ref, setRef] = useState<ReferenceImage | null>(reference);
+  const firstRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    firstRef.current?.focus();
+  }, []);
+
+  const canSave = n.trim().length > 0 && a.trim().length > 0 && !pending;
+
+  return (
+    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+      <label style={editLabel}>物件名</label>
+      <input ref={firstRef} value={n} maxLength={PROP_NAME_MAX} disabled={pending} onChange={(e) => setN(e.target.value)} />
+      <label style={editLabel}>外觀</label>
+      <textarea value={a} maxLength={PROP_APPEARANCE_MAX} disabled={pending} rows={3} onChange={(e) => setA(e.target.value)} />
+      <CharCount value={a} max={PROP_APPEARANCE_MAX} />
+      <label style={editLabel}>用途・備註（選填）</label>
+      <textarea value={note} maxLength={PROP_NOTES_MAX} disabled={pending} rows={2} onChange={(e) => setNote(e.target.value)} />
+      <label style={editLabel}>物件參考圖（選填：上傳或從素材庫選）</label>
+      <ReferenceImagePicker projectId={projectId} value={ref} onChange={setRef} disabled={pending} />
+      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+        <button
+          type="button"
+          className="primary"
+          disabled={!canSave}
+          onClick={() =>
+            onSave({ name: n.trim(), appearance: a.trim(), notes: note.trim(), referenceAssetId: ref?.id ?? null })
+          }
+        >
+          {pending ? "儲存中…" : "儲存"}
+        </button>
+        <button type="button" disabled={pending} onClick={onCancel}>
+          取消
+        </button>
+      </div>
+      {error && (
+        <p className="error" role="alert" style={{ margin: 0 }}>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+const editLabel: CSSProperties = { fontSize: "var(--fs-11)", margin: 0 };

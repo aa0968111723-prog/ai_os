@@ -35,7 +35,7 @@ import {
   type Worldview,
   type WorldviewConsumerId,
 } from "@shared/worldview";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
 import { AssetLibrary } from "../components/AssetLibrary";
@@ -43,6 +43,7 @@ import { RecycleBin } from "../components/RecycleBin";
 import { KnowledgeBase } from "../components/KnowledgeBase";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
+import { PropCards } from "../components/PropCards";
 import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
@@ -71,7 +72,7 @@ import {
 /** 與 styles.css 單欄／平板界線對齊：≤820px 為手機減負模式 */
 const PROJECT_MOBILE_MQ = "(max-width: 820px)";
 
-type CtxSectionKey = "characters" | "scenes" | "knowledge" | "databases" | "assets" | "recycle";
+type CtxSectionKey = "characters" | "props" | "scenes" | "knowledge" | "databases" | "assets" | "recycle";
 
 /** 手機上下文卡：details 收合；桌機直接渲染 children（版面不變） */
 function CtxCollapse({
@@ -399,6 +400,7 @@ export function ProjectPage({ id }: { id: string }) {
   const [focusMessageId, setFocusMessageId] = useState<string | undefined>(undefined);
   const [ctxOpen, setCtxOpen] = useState<Record<CtxSectionKey, boolean>>({
     characters: false,
+    props: false,
     scenes: false,
     knowledge: false,
     databases: false,
@@ -524,6 +526,20 @@ export function ProjectPage({ id }: { id: string }) {
       if (prev.includes(cid) || prev.length >= MAX_GENERATE_CHARACTERS) return prev;
       return [...prev, cid];
     });
+  /** 生成時要帶入的物件／道具卡（跨鏡同一件東西不走樣）——持久化，重整不歸零 */
+  const [propIds, setPropIds] = usePersistedIds(`aios.pick.props.${id}`);
+  const toggleProp = (pid: string) =>
+    setPropIds((prev) => {
+      if (prev.includes(pid)) return prev.filter((x) => x !== pid);
+      if (prev.length >= MAX_GENERATE_PROPS) return prev; // PropCards 已禁用多勾；此處雙保險
+      return [...prev, pid];
+    });
+  /** 新建物件卡：未滿生成上限時自動勾選，立刻能帶進下一筆生成 */
+  const onPropCreated = (pid: string) =>
+    setPropIds((prev) => {
+      if (prev.includes(pid) || prev.length >= MAX_GENERATE_PROPS) return prev;
+      return [...prev, pid];
+    });
   /** 生成時要帶入的場景設定卡（色板/光線一致）——持久化，重整不歸零 */
   const [sceneIds, setSceneIds] = usePersistedIds(`aios.pick.scenes.${id}`);
   const toggleScene = (sid: string) =>
@@ -547,6 +563,7 @@ export function ProjectPage({ id }: { id: string }) {
   const knowledge = trpc.knowledge.list.useQuery({ projectId: id });
   const characters = trpc.characters.list.useQuery({ projectId: id });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId: id });
+  const propCards = trpc.props.list.useQuery({ projectId: id });
   /** 敘事人物 → 一鍵建角色定裝（外觀錨點）；成功後勾選並捲到定裝區 */
   const addCharFromPerson = trpc.characters.add.useMutation({
     onSuccess: (row) => {
@@ -737,6 +754,7 @@ export function ProjectPage({ id }: { id: string }) {
   const knowledgeCount = knowledge.data?.length;
   const charCount = characters.data?.length;
   const presetCount = scenePresets.data?.length;
+  const propCount = propCards.data?.length;
   const assetCount = assets.data?.length;
   const wvReady = isWorldviewReady(wv);
 
@@ -1823,6 +1841,24 @@ export function ProjectPage({ id }: { id: string }) {
             />
           </CtxCollapse>
 
+          {/* 物件／道具卡：勾選後生成自動注入外觀錨點（紅傘、產品、logo…跨鏡不走樣） */}
+          <CtxCollapse
+            compact={mobileCompact}
+            sectionId="sec-props"
+            title="物件・道具"
+            meta={propCount != null ? `${propCount} 張` : undefined}
+            open={ctxOpen.props}
+            onOpenChange={(o) => setCtxSectionOpen("props", o)}
+          >
+            <PropCards
+              projectId={id}
+              selectedIds={propIds}
+              onToggle={toggleProp}
+              onCreated={onPropCreated}
+              readOnly={!canEdit}
+            />
+          </CtxCollapse>
+
           {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
           <CtxCollapse
             compact={mobileCompact}
@@ -1938,6 +1974,7 @@ export function ProjectPage({ id }: { id: string }) {
             wvReady={wvReady}
             characterIds={charIds}
             scenePresetIds={sceneIds}
+            propIds={propIds}
             generateApplyRequest={generateApply}
             onReuseGenerate={applyPrompt}
             onGenerateSourceChange={setSourceHighlightId}

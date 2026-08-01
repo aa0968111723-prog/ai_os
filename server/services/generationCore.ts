@@ -22,7 +22,7 @@ import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { failStaleGenerationTx, reserveQuota } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
-import { buildCharacterAnchor, buildSceneAnchor, resolveCardReferenceSource } from "./cardAnchors";
+import { buildCharacterAnchor, buildPropAnchor, buildSceneAnchor, resolveCardReferenceSource } from "./cardAnchors";
 import { groupLeaderIds, pushToUsers } from "./webPush";
 
 export type GenerationRow = typeof schema.generations.$inferSelect;
@@ -138,6 +138,14 @@ export function withCharacterAnchor(model: ModelEntry, prompt: string, anchor: s
   return `${prompt}\n\n[角色定裝] ${anchor}`;
 }
 
+/** 物件／道具錨點：同樣只注入視覺類別（跨鏡同一件東西不走樣） */
+export function withPropAnchor(model: ModelEntry, prompt: string, anchor: string): string {
+  if (!anchor || !CHARACTER_CATEGORIES.has(model.category)) return prompt;
+  return `${prompt}
+
+[物件道具] ${anchor}`;
+}
+
 /** 場景設定錨點（色板/光線）：同樣只注入視覺類別 */
 export function withSceneAnchor(model: ModelEntry, prompt: string, anchor: string): string {
   if (!anchor || !CHARACTER_CATEGORIES.has(model.category)) return prompt;
@@ -159,6 +167,8 @@ export interface SubmitCoreInput {
   characterIds?: string[];
   /** 選定的場景設定卡：色板/光線錨點注入,同場景光影一致 */
   scenePresetIds?: string[];
+  /** 選定的物件／道具卡：外觀錨點注入,跨鏡同一件東西不走樣 */
+  propIds?: string[];
   /** 帳本理由前綴（預設「生成」；工作流帶「工作流生成」以便帳本可辨識來源） */
   reasonPrefix?: string;
   /** 綁定的分鏡格：草稿分鏡「就地生成」時帶入，完成後把成品回填該格（沒有＝不綁定，不影響既有呼叫） */
@@ -191,6 +201,7 @@ export async function assertGenerationEntityIds(
   opts: {
     characterIds?: string[];
     scenePresetIds?: string[];
+    propIds?: string[];
     sourceAssetId?: string;
   },
 ): Promise<void> {
@@ -212,6 +223,16 @@ export async function assertGenerationEntityIds(
       .where(and(eq(schema.scenePresets.projectId, projectId), inArray(schema.scenePresets.id, ids)));
     if (rows.length !== ids.length) {
       throw new TRPCError({ code: "BAD_REQUEST", message: "場景設定卡不屬於本專案或不存在" });
+    }
+  }
+  if (opts.propIds?.length) {
+    const ids = [...new Set(opts.propIds)];
+    const rows = await db
+      .select({ id: schema.propCards.id })
+      .from(schema.propCards)
+      .where(and(eq(schema.propCards.projectId, projectId), inArray(schema.propCards.id, ids)));
+    if (rows.length !== ids.length) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "物件／道具卡不屬於本專案或不存在" });
     }
   }
   if (opts.sourceAssetId) {
@@ -240,7 +261,8 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "未知模型(不在註冊表或即時目錄)" });
   // needs 的最終檢查移到「自動採用定裝／場景參考圖」之後（見下方 resolveCardReferenceSource）：
   // 沒帶來源但有勾卡片時，卡片上的參考圖就是最合理的來源，先補了再判斷。
-  const mayFillFromCards = model.needs === "image" && !!(input.characterIds?.length || input.scenePresetIds?.length);
+  const mayFillFromCards =
+    model.needs === "image" && !!(input.characterIds?.length || input.propIds?.length || input.scenePresetIds?.length);
   if (model.needs && !input.sourceUrl && !input.sourceAssetId && !mayFillFromCards) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
   }
@@ -262,6 +284,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   await assertGenerationEntityIds(project.id, {
     characterIds: input.characterIds,
     scenePresetIds: input.scenePresetIds,
+    propIds: input.propIds,
     sourceAssetId: input.sourceAssetId,
   });
 
@@ -277,10 +300,11 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
    * assertGenerationEntityIds 的專案歸屬檢查——同組檢查由下方 srcAsset.groupId 那關把守。
    */
   let effectiveSourceAssetId = input.sourceAssetId;
-  let usedCardReference: "character" | "scene" | null = null;
+  let usedCardReference: "character" | "prop" | "scene" | null = null;
   if (mayFillFromCards && !input.sourceUrl && !effectiveSourceAssetId) {
     const ref = await resolveCardReferenceSource(project.id, {
       characterIds: input.characterIds,
+      propIds: input.propIds,
       scenePresetIds: input.scenePresetIds,
     });
     if (ref) {
@@ -336,16 +360,17 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   }
 
   const worldview = worldviewSchema.parse(project.worldview ?? {});
-  // 世界觀 → 角色定裝 → 場景設定，依序疊加注入（都只撈本專案，且只注入視覺類別）
-  // 角色／場景查詢互不相依，並行省一趟 DB RTT
-  const [charAnchor, sceneAnchor] = await Promise.all([
+  // 世界觀 → 角色定裝 → 物件道具 → 場景設定，依序疊加注入（都只撈本專案，且只注入視覺類別）
+  // 三種卡片查詢互不相依，並行省 DB RTT
+  const [charAnchor, propAnchor, sceneAnchor] = await Promise.all([
     input.characterIds?.length ? buildCharacterAnchor(project.id, input.characterIds) : Promise.resolve(""),
+    input.propIds?.length ? buildPropAnchor(project.id, input.propIds) : Promise.resolve(""),
     input.scenePresetIds?.length ? buildSceneAnchor(project.id, input.scenePresetIds) : Promise.resolve(""),
   ]);
   const promptParts = effectivePromptParts(model, input.prompt, worldview);
   const fullPrompt = withSceneAnchor(
     model,
-    withCharacterAnchor(model, promptParts.positive, charAnchor),
+    withPropAnchor(model, withCharacterAnchor(model, promptParts.positive, charAnchor), propAnchor),
     sceneAnchor,
   );
   const falInput = model.input(fullPrompt, project.format as ProjectFormat, sourceUrl) as Record<string, unknown>;
@@ -378,6 +403,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
             sceneRole: input.sceneRole ?? null,
             characterIds: input.characterIds?.length ? input.characterIds : null,
             scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
+            propIds: input.propIds?.length ? input.propIds : null,
             workflowRunId: input.workflowRunId ?? null,
             agentRunId: input.agentRunId ?? null,
             sourceUrl,
@@ -434,6 +460,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         sceneRole: input.sceneRole ?? null, // 回填角色（沒有＝null，視為 visual）
         characterIds: input.characterIds?.length ? input.characterIds : null, // 帶入的定裝卡——重試/再用可還原
         scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
+        propIds: input.propIds?.length ? input.propIds : null,
         workflowRunId: input.workflowRunId ?? null, // 來源工作流/代理（沒有＝手動生成）
         agentRunId: input.agentRunId ?? null,
         sourceUrl,

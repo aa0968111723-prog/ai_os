@@ -83,6 +83,7 @@ export const prompts = pgTable("prompts", {
   modelId: text("model_id"),
   characterIds: jsonb("character_ids").$type<string[]>(),
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
+  propIds: jsonb("prop_ids").$type<string[]>(),
   useCount: integer("use_count").notNull().default(1),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -112,6 +113,34 @@ export const characters = pgTable("characters", {
  * 場景設定卡（提案六大核心#3「角色·場景一致性」的「場景」面）：
  * 色板・光線建成設定庫，生成勾選時自動注入錨點——同一場景跨鏡光影一致（暖色清晨光…）。
  */
+/**
+ * 物件／道具卡（QA 2026-08-01 使用者要求）：角色定裝卡、場景設定卡之外的第三種一致性錨點。
+ *
+ * 為什麼道具要獨立成卡而不是塞進角色外觀：紅傘、帆布包、法器、產品、logo 這類東西常常
+ * 「跨角色、跨場景」出現——寫進某個角色的外觀，換一個角色入鏡它就消失了；寫進世界觀又會
+ * 每一鏡都硬塞。獨立一張卡才能「這幾鏡有、那幾鏡沒有」地逐次勾選。
+ *
+ * 欄位刻意與角色卡對稱（name／appearance／notes／referenceAssetId），注入規則也一樣：
+ * appearance 進畫面生成，notes 只給導演與助手。
+ */
+export const propCards = pgTable("prop_cards", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  name: text("name").notNull(),
+  /** 外觀錨點：材質／顏色／形狀／關鍵細節——這段會直接注入生成提示詞 */
+  appearance: text("appearance").notNull(),
+  /** 用途・出現時機・注意事項（供 AI 導演與腳本參考；不注入視覺生成） */
+  notes: text("notes"),
+  /** 物件參考圖（可選；圖生圖可當底圖） */
+  referenceAssetId: uuid("reference_asset_id"),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  // 卡片列表以 project_id 撈（專案頁一進來就打）——補索引避免全表掃，與 0023 migration 同名
+  projectIdx: index("prop_cards_project_idx").on(t.projectId, t.createdAt),
+}));
+
 export const scenePresets = pgTable("scene_presets", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull(),

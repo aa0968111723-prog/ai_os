@@ -63,6 +63,19 @@ export function formatCharacterAnchor(rows: CharacterAnchorRow[], selectedIds: s
   return ordered.map((c) => `${c.name}：${clipCardField(c.appearance)}`).join("；");
 }
 
+/**
+ * 物件／道具卡列（欄位與角色卡相同，語意不同：這是「東西」不是「人」）。
+ * 共用同一個 row 形狀，錨點格式才不會分岔——差別只在標題前綴。
+ */
+export type PropAnchorRow = CharacterAnchorRow;
+
+/** 視覺生成：物件／道具錨點（名稱＋外觀） */
+export function formatPropAnchor(rows: PropAnchorRow[], selectedIds: string[]): string {
+  const ordered = orderRowsByIds(rows, selectedIds);
+  if (ordered.length === 0) return "";
+  return ordered.map((p) => `${p.name}：${clipCardField(p.appearance)}`).join("；");
+}
+
 /** 視覺生成：場景設定錨點（色板＋可選光線） */
 export function formatSceneAnchor(rows: SceneAnchorRow[], selectedIds: string[]): string {
   const ordered = orderRowsByIds(rows, selectedIds);
@@ -149,6 +162,22 @@ export async function buildSceneAnchor(projectId: string, presetIds: string[]): 
  * 取用順序＝呼叫端勾選的順序（角色優先於場景）：第一張綁得到的參考圖就是來源。
  * 這裡只回 assetId，同組／軟刪／型別相容仍由 submitGenerationCore 既有那幾關把守。
  */
+/** DB：選定物件／道具 → 視覺錨點（順序＝selectedIds） */
+export async function buildPropAnchor(projectId: string, propIds: string[]): Promise<string> {
+  if (propIds.length === 0) return "";
+  const ids = [...new Set(propIds)];
+  const rows = await db
+    .select({
+      id: schema.propCards.id,
+      name: schema.propCards.name,
+      appearance: schema.propCards.appearance,
+      notes: schema.propCards.notes,
+    })
+    .from(schema.propCards)
+    .where(and(eq(schema.propCards.projectId, projectId), inArray(schema.propCards.id, ids)));
+  return formatPropAnchor(rows, propIds);
+}
+
 /**
  * 從一批卡片列中挑出「第一張綁得到的參考圖」，順序＝使用者勾選的順序（DB inArray 不保證順序）。
  * 抽成純函式才測得到這條順序規則——它決定同時勾多張卡時用誰的圖。
@@ -167,8 +196,8 @@ export function pickFirstReference(
 
 export async function resolveCardReferenceSource(
   projectId: string,
-  selected: { characterIds?: string[]; scenePresetIds?: string[] },
-): Promise<{ assetId: string; from: "character" | "scene" } | null> {
+  selected: { characterIds?: string[]; scenePresetIds?: string[]; propIds?: string[] },
+): Promise<{ assetId: string; from: "character" | "prop" | "scene" } | null> {
   const charIds = selected.characterIds ?? [];
   if (charIds.length > 0) {
     const rows = await db
@@ -177,6 +206,15 @@ export async function resolveCardReferenceSource(
       .where(and(eq(schema.characters.projectId, projectId), inArray(schema.characters.id, [...new Set(charIds)])));
     const ref = pickFirstReference(rows, charIds);
     if (ref) return { assetId: ref, from: "character" };
+  }
+  const propIds = selected.propIds ?? [];
+  if (propIds.length > 0) {
+    const rows = await db
+      .select({ id: schema.propCards.id, referenceAssetId: schema.propCards.referenceAssetId })
+      .from(schema.propCards)
+      .where(and(eq(schema.propCards.projectId, projectId), inArray(schema.propCards.id, [...new Set(propIds)])));
+    const ref = pickFirstReference(rows, propIds);
+    if (ref) return { assetId: ref, from: "prop" };
   }
   const sceneIds = selected.scenePresetIds ?? [];
   if (sceneIds.length > 0) {

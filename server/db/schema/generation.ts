@@ -31,6 +31,8 @@ export const generations = pgTable("generations", {
   characterIds: jsonb("character_ids").$type<string[]>(),
   /** 送出時帶入的場景設定卡 id（null＝沒帶） */
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
+  /** 這次帶入的物件／道具卡（與 character_ids 同語意，供追溯與「再用此設定」） */
+  propIds: jsonb("prop_ids").$type<string[]>(),
   /** 來源工作流執行（null＝非工作流產物）：生成紀錄可回看「這筆是哪條工作流跑出來的」 */
   workflowRunId: uuid("workflow_run_id"),
   /** 來源 AI 代理執行（null＝非代理產物） */

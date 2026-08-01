@@ -10,7 +10,7 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { signAssetUrl } from "../services/storage";
 import { assertProjectEditable } from "../services/projectAcl";
 import { getModel, endpointOf } from "../../shared/models";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import {
   DEFAULT_CLOUD_MOCK_MODEL_ID,
   submitCloudMockGeneration,
@@ -84,6 +84,7 @@ export const generationRouter = router({
         characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
         /** 選定的場景設定卡：色板/光線錨點注入,同場景光影一致 */
         scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+        propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
         /** 冪等鍵（client 產生的 UUID）：timeout 後重送同鍵回原生成列，不重複扣點 */
         clientRequestId: z.string().uuid().optional(),
       }),
@@ -101,13 +102,14 @@ export const generationRouter = router({
         sourceAssetId: input.sourceAssetId,
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
+        propIds: input.propIds,
       }),
     ),
 
   /**
    * 以相同設定重試（伺服器端完整版）：舊做法由前端拿 prompt/model/來源重組 submit，
    * 會默默丟失角色定裝/場景設定錨點與分鏡綁定——重試出的圖跨鏡就走樣、成品也不回填分鏡。
-   * 這裡從失敗列原樣還原全部連結：characterIds/scenePresetIds/sceneId/sceneRole，
+   * 這裡從失敗列原樣還原全部連結：characterIds/scenePresetIds/propIds/sceneId/sceneRole，
    * 素材庫來源從網址取回 assetId 重新簽名（過期網址原樣重送必敗），世界觀以「重試當下」重新注入。
    */
   retry: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
@@ -131,6 +133,7 @@ export const generationRouter = router({
       sourceUrl: assetId ? undefined : gen.sourceUrl ?? undefined,
       characterIds: (gen.characterIds as string[] | null) ?? undefined,
       scenePresetIds: (gen.scenePresetIds as string[] | null) ?? undefined,
+      propIds: (gen.propIds as string[] | null) ?? undefined,
       sceneId: gen.sceneId ?? undefined,
       sceneRole: gen.sceneRole ?? undefined,
       // 保留出處：工作流/代理步驟失敗後的重試仍能回溯原本那條 run（來源 chip 不消失）

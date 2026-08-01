@@ -124,6 +124,9 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "characters.add": "新增角色卡",
   "characters.update": "更新角色卡",
   "characters.remove": "刪除角色卡",
+  "props.add": "新增物件／道具卡",
+  "props.update": "更新物件／道具卡",
+  "props.remove": "刪除物件／道具卡",
   // 留言、筆記與其他
   "messages.post": "發佈留言",
   "messages.postVoice": "發佈語音留言",
@@ -256,7 +259,7 @@ export const AUDIT_CATEGORIES: ReadonlyArray<{ key: string; label: string; prefi
   { key: "generation", label: "生成與點數", prefixes: ["generation", "quota", "models"] },
   { key: "storyboard", label: "分鏡與審批", prefixes: ["scenes", "approvals"] },
   { key: "ai", label: "AI 助手與代理", prefixes: ["director", "assistant", "agents", "teamAssistant", "workflows"] },
-  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters"] },
+  { key: "knowledge", label: "知識庫與角色", prefixes: ["knowledge", "characters", "props"] },
   { key: "collab", label: "留言與協作", prefixes: ["messages", "notes", "schedule", "tasks", "dm", "googleCalendar", "push"] },
   { key: "settings", label: "設定與選項", prefixes: ["prompts", "scenePresets", "options"] },
   { key: "feedback", label: "問題回饋", prefixes: ["feedback", "feedbackReports"] },

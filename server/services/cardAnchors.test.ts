@@ -13,6 +13,7 @@ import {
   formatSceneKnowledgeBlock,
   orderRowsByIds,
   pickFirstReference,
+  formatPropAnchor,
 } from "./cardAnchors";
 
 const S_ZEN = { id: "s1", name: "禪堂", palette: "米金、木色", lighting: "柔側光、晨曦" };
@@ -119,5 +120,26 @@ describe("pickFirstReference（卡片參考圖 → 生成來源）", () => {
     expect(pickFirstReference(rows, [])).toBeNull();
     // 勾了不存在的卡（stale 畫面）也不能爆
     expect(pickFirstReference(rows, ["ghost"])).toBeNull();
+  });
+});
+
+describe("formatPropAnchor（視覺生成・物件道具）", () => {
+  const UMBRELLA = { id: "p1", name: "紅傘", appearance: "鮮紅長柄傘、木質握把、傘面略舊" };
+  const BAG = { id: "p2", name: "帆布包", appearance: "米白帆布、皮革背帶" };
+
+  it("依勾選順序串接名稱與外觀（DB 回傳順序不算數）", () => {
+    expect(formatPropAnchor([UMBRELLA, BAG], ["p2", "p1"])).toBe(
+      "帆布包：米白帆布、皮革背帶；紅傘：鮮紅長柄傘、木質握把、傘面略舊",
+    );
+  });
+
+  it("沒勾任何物件時回空字串（不產生空的 [物件道具] 區塊）", () => {
+    expect(formatPropAnchor([UMBRELLA], [])).toBe("");
+  });
+
+  it("外觀過長時截短（與角色卡同一把尺，避免多卡撐爆圖像 prompt）", () => {
+    const long = { id: "p3", name: "長物件", appearance: "細".repeat(CARD_FIELD_MAX + 40) };
+    const out = formatPropAnchor([long], ["p3"]);
+    expect(out.length).toBeLessThan(CARD_FIELD_MAX + 20);
   });
 });

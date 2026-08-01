@@ -5,7 +5,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { getModel, type ModelEntry } from "../../shared/models";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import {
   buildSceneVersions,
   findDuplicateCurrent,
@@ -534,6 +534,7 @@ export const scenesRouter = router({
       /** 生成台勾選的角色/場景卡：就地生成也注入同一套錨點——否則逐鏡出圖與生成台出圖畫風/角色不一致 */
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -562,6 +563,7 @@ export const scenesRouter = router({
         sceneId: scene.id,
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
+        propIds: input.propIds,
         reasonPrefix: "分鏡生成",
       });
       return { generationId: gen.id };
@@ -590,6 +592,7 @@ export const scenesRouter = router({
       clientRequestId: z.string().uuid().optional(),
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -632,6 +635,7 @@ export const scenesRouter = router({
         sceneRole: "visual",
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
+        propIds: input.propIds,
         reasonPrefix: "分鏡修圖",
       });
       return { generationId: gen.id };
