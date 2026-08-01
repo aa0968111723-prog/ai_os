@@ -4,6 +4,7 @@ import type { MeWithCapabilities } from "../../capabilities";
 import { BrandLogo } from "../../components/BrandLogo";
 import { Icon } from "../../components/Icon";
 import { AccountMenu } from "./AccountMenu";
+import { OnlinePresenceMenu } from "./OnlinePresenceMenu";
 import { PendingApprovalsBadge } from "./PendingApprovalsBadge";
 import { PrimaryNavigation } from "./PrimaryNavigation";
 import { Badge } from "../../components/ui";
@@ -133,6 +134,8 @@ export function AppHeader({
       <div className="topbar-actions">
       {/* 只在 E2E_MOCK=1（自動化測試）下出現；正式部署一律真實模式，不會再看到這顆徽章 */}
       {signedIn && mockMode && <Badge tone="mock">測試模式</Badge>}
+      {/* 誰在線：常駐頂欄，不必進私訊；與私訊入口分開，避免「要聊天才看得到人在不在」 */}
+      {signedIn && <OnlinePresenceMenu />}
       {signedIn && <PrimaryNavigation />}
       {signedIn && <PendingApprovalsBadge groupId={activeGroupId} />}
       {signedIn && <PointsBadge groupId={activeGroupId} />}

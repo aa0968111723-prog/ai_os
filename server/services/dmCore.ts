@@ -146,6 +146,8 @@ export async function listDmPeers(auth: AuthState): Promise<DmPeer[]> {
 
 export interface DmPeerPresence {
   userId: string;
+  /** 顯示名——頂欄「誰在線」不必再打 peers 才能念得出名字 */
+  name: string;
   /**
    * 最後活躍時刻——只有「剛離開窗」內才有值，更久以前一律 null（線上指示，不是行蹤紀錄）。
    * 只送時刻、不送判好的狀態字：三態由 shared/presence 在畫面上算，判定規則永遠只有一份。
@@ -154,16 +156,21 @@ export interface DmPeerPresence {
 }
 
 /**
- * 可私訊對象的線上狀態（聊天頁輪詢用）。
+ * 可私訊對象的線上狀態（聊天頁與頂欄「誰在線」輪詢用）。
  *
  * 界＝listDmPeers 的同一份可訊界，不另寫一套判定：看得到誰在線上，等於看得到誰可以私訊，
  * 不會因為多了這個指示就把「他組有誰、誰在上班」外流給無關的人。
  * 回「全部可訊對象」而不是只回在線的人——前端才分得出「離線」與「不在可訊界（不顯示指示）」。
+ * name 一併帶回：頂欄清單不必再為了顯示名打 peers。
  */
 export async function listDmPresence(auth: AuthState, now: Date = new Date()): Promise<DmPeerPresence[]> {
   const peers = await listDmPeers(auth);
   const seen = await listPresence(peers.map((p) => p.userId), now);
-  return peers.map((p) => ({ userId: p.userId, lastActiveAt: seen.get(p.userId) ?? null }));
+  return peers.map((p) => ({
+    userId: p.userId,
+    name: p.name,
+    lastActiveAt: seen.get(p.userId) ?? null,
+  }));
 }
 
 /** 是否可與某對象互訊（不拋錯版；供歷史讀取的寬鬆界用） */
