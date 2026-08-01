@@ -248,6 +248,12 @@ peers = call("GET", a, "dm.peers")
 ok("上線清單的界＝可私訊對象(不會多報任何人)", set(pres_by) == {p["userId"] for p in peers})
 ok("清單只列對象、不列自己", a_id not in pres_by)
 ok("同組夥伴帶著最後活躍時刻(=上線中)", isinstance(pres_by.get(b_id, {}).get("lastActiveAt"), str))
-ok("只回 userId 與 lastActiveAt(不順手外洩其他個資)", all(set(p) == {"userId", "lastActiveAt"} for p in pres))
+# name 是頂欄「誰在線」顯示名（#301）；仍禁止 email 等個資欄
+ok(
+    "只回 userId／name／lastActiveAt（不外洩 email 等個資）",
+    all(set(p) <= {"userId", "name", "lastActiveAt"} and "userId" in p and "lastActiveAt" in p for p in pres)
+    and all("email" not in p for p in pres),
+)
+ok("上線清單帶顯示名（頂欄不必再打 peers）", all(isinstance(p.get("name"), str) and p["name"] for p in pres))
 
 print("—— e2e-messages 完成 ——")

@@ -16,6 +16,7 @@ import {
   isUsageBasedPoints,
   shouldShowApprovalThresholdNotice,
 } from "../generationGates";
+import { focusAndReveal } from "../../../lib/scrollIntoViewForChrome";
 import { revealWorkbenchAnchor, scrollToSelector } from "../workbenchNav";
 import { Button, Card, Chip, Hint, Meta } from "../../../components/ui";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
@@ -324,6 +325,7 @@ export function DirectGenerateMode({
         id="gen-prompt"
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
+        onFocus={(e) => focusAndReveal(e.currentTarget)}
         placeholder="例：清晨禪堂，柔和光線灑落，一炷香的靜謐"
       />
 

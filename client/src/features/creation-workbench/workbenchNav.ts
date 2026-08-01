@@ -1,3 +1,4 @@
+import { scrollIntoViewForChrome } from "../../lib/scrollIntoViewForChrome";
 import { updateDraft, type CreationMode } from "./creationDraft";
 
 /**
@@ -55,12 +56,21 @@ function scrollBehavior(): ScrollBehavior {
   return "smooth";
 }
 
-/** Single reduced-motion-aware scroll helper (one rAF). */
+/** Single reduced-motion-aware scroll helper (one rAF)；預留底欄（M2）。 */
 export function scrollToSelector(selector: string): void {
   const id = selector.startsWith("#") ? selector.slice(1) : selector;
   requestAnimationFrame(() => {
     const el = document.getElementById(id) ?? document.querySelector(selector);
-    el?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
+    if (!el) return;
+    // 有底欄時用 chrome-aware 捲動，否則仍用原生 block:start（桌面）
+    const chrome = typeof window !== "undefined"
+      ? Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--chrome-bottom")) || 0
+      : 0;
+    if (chrome > 48) {
+      scrollIntoViewForChrome(el, { behavior: scrollBehavior() });
+    } else {
+      el.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
+    }
   });
 }
 
@@ -97,7 +107,7 @@ export function revealWorkbenchAnchor(
   if (scroll) {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        document.getElementById(id)?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
+        scrollToSelector(`#${id}`);
       });
     });
   }
