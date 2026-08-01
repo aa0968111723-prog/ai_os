@@ -4,7 +4,13 @@ import { Icon } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { Button, Card, Hint, Meta, Skeleton } from "../components/ui";
 import { hasDesktopBridge } from "../platform/desktopBridge";
-import { DESKTOP_INSTALL_HINT, DESKTOP_RELEASES_URL } from "../platform/desktopInstall";
+import {
+  DESKTOP_INSTALL_HINT,
+  DESKTOP_MAC_DMG_URL,
+  DESKTOP_RELEASES_URL,
+  DESKTOP_WINDOWS_MSI_URL,
+  DESKTOP_WINDOWS_SETUP_URL,
+} from "../platform/desktopInstall";
 /**
  * 資料下載區（需求 #11）：開發筆記／模型資料／UIUX 設計／隱私與法律，集中一頁下載。
  * 另含「電腦版應用程式」安裝包入口（GitHub Releases）。
@@ -85,14 +91,38 @@ export function DownloadsPage() {
                 <Button
                   as="a"
                   variant="primary"
-                  href={DESKTOP_RELEASES_URL}
+                  href={DESKTOP_WINDOWS_SETUP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download
+                >
+                  <Icon name="Download" size={15} /> Windows 安裝檔（.exe）
+                </Button>
+                <Button
+                  as="a"
+                  variant="secondary"
+                  href={DESKTOP_WINDOWS_MSI_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  download
+                >
+                  Windows MSI
+                </Button>
+                <Button
+                  as="a"
+                  variant="secondary"
+                  href={DESKTOP_MAC_DMG_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  <Icon name="Download" size={15} /> 下載 Windows／Mac 安裝包
+                  Mac（.dmg 建置中）
                 </Button>
-                <Meta style={{ fontSize: 12 }}>
-                  開 GitHub Releases → 選最新一版 → 下載 .exe（Windows）或 .dmg（Mac）
+                <Meta style={{ fontSize: 12, flex: "1 1 100%" }}>
+                  點按鈕會直接下載；若瀏覽器擋下，可改開{" "}
+                  <a href={DESKTOP_RELEASES_URL} target="_blank" rel="noopener noreferrer">
+                    GitHub Releases
+                  </a>
+                  。Windows 若出現 SmartScreen，選「仍要執行」。
                 </Meta>
               </div>
             )}
