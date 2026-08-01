@@ -6,12 +6,15 @@ import { ConfirmButton, useRovingRadio, useFocusTrap } from "./interactions";
 import { AssetImg, AssetVideo, AssetAudio } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
 import {
+  detectDesktopEditors,
   editorKindForAsset,
   hasDesktopBridge,
   openAssetInExternalEditor,
   revealAssetInFolder,
   suggestedFileName,
+  type DetectedDesktopEditor,
 } from "../platform/desktopBridge";
+import type { DesktopHandoffStatusEvent } from "../platform/tauriDesktop";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
 
 function fmtSize(bytes?: number | null): string {
@@ -115,11 +118,19 @@ export function AssetLibrary({
   // DESK-01：桌面橋接可用才顯示「用外部軟體開啟／在資料夾顯示」；Web 只給下載路徑與提示，不承諾自動回傳
   const desktopAvailable = hasDesktopBridge();
   const [desktopBusyId, setDesktopBusyId] = useState<string | null>(null);
+  const [desktopEditors, setDesktopEditors] = useState<DetectedDesktopEditor[]>([]);
+  /** 用途 → 使用者選的 editorId（空字串＝讓原生挑該用途第一個） */
+  const [desktopEditorByKind, setDesktopEditorByKind] = useState<Record<string, string>>({});
   const [desktopStatus, setDesktopStatus] = useState<{
     assetId: string;
     kind: "ok" | "err";
     text: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (!desktopAvailable) return;
+    void detectDesktopEditors().then(setDesktopEditors).catch(() => setDesktopEditors([]));
+  }, [desktopAvailable]);
 
   useEffect(() => {
     if (!desktopAvailable) return;
@@ -133,9 +144,30 @@ export function AssetLibrary({
         text: `已回傳新素材${detail?.title ? `「${detail.title}」` : ""}，原始素材仍保留。`,
       });
     };
+    const onHandoff = (event: Event) => {
+      const detail = (event as CustomEvent<DesktopHandoffStatusEvent>).detail;
+      if (!detail) return;
+      if (detail.projectId && detail.projectId !== projectId) return;
+      const assetId = detail.sourceAssetId ?? "";
+      if (detail.phase === "error") {
+        setDesktopStatus({ assetId, kind: "err", text: detail.message });
+        return;
+      }
+      const pct = typeof detail.percent === "number" ? `（${detail.percent}%）` : "";
+      setDesktopStatus({ assetId, kind: "ok", text: `${detail.message}${pct}` });
+    };
     window.addEventListener("aios:asset-revision-uploaded", onRevision);
-    return () => window.removeEventListener("aios:asset-revision-uploaded", onRevision);
+    window.addEventListener("aios:desktop-handoff-status", onHandoff);
+    return () => {
+      window.removeEventListener("aios:asset-revision-uploaded", onRevision);
+      window.removeEventListener("aios:desktop-handoff-status", onHandoff);
+    };
   }, [desktopAvailable, projectId, utils.projects.assets]);
+
+  const editorsForKind = (kind: string) => {
+    const needed = editorKindForAsset(kind);
+    return desktopEditors.filter((e) => e.kind === needed || e.kind === "system-default");
+  };
 
   const openInExternalEditor = async (asset: {
     id: string;
@@ -147,10 +179,16 @@ export function AssetLibrary({
     setDesktopBusyId(asset.id);
     setDesktopStatus({ assetId: asset.id, kind: "ok", text: "正在準備本機交接…" });
     try {
+      const needed = editorKindForAsset(asset.kind);
+      const pick =
+        desktopEditorByKind[needed]?.trim() ||
+        editorsForKind(asset.kind)[0]?.id ||
+        undefined;
       const result = await openAssetInExternalEditor({
         assetId: asset.id,
         projectId,
-        editorKind: editorKindForAsset(asset.kind),
+        editorKind: needed,
+        editorId: pick,
         suggestedName: suggestedFileName(asset),
         returnPath: `/p/${projectId}?tab=assets`,
       });
@@ -608,6 +646,32 @@ export function AssetLibrary({
                           {/* DESK-01：有桌面橋才顯示可作用的外部開啟；Web 只給下載與提示，不假扮可自動回傳 */}
                           {desktopAvailable ? (
                             <>
+                              {(() => {
+                                const needed = editorKindForAsset(a.kind);
+                                const opts = editorsForKind(a.kind);
+                                if (opts.length === 0) return null;
+                                return (
+                                  <label
+                                    className="menu-item"
+                                    style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 4, cursor: "default" }}
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <span style={{ fontSize: 11, color: "var(--fg-secondary)" }}>開啟用軟體</span>
+                                    <select
+                                      aria-label={`「${a.title}」開啟用軟體`}
+                                      value={desktopEditorByKind[needed] ?? opts[0]?.id ?? ""}
+                                      onChange={(e) =>
+                                        setDesktopEditorByKind((prev) => ({ ...prev, [needed]: e.target.value }))
+                                      }
+                                      style={{ fontSize: 12, minHeight: 36 }}
+                                    >
+                                      {opts.map((ed) => (
+                                        <option key={ed.id} value={ed.id}>{ed.name}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                );
+                              })()}
                               <button
                                 type="button"
                                 className="menu-item"

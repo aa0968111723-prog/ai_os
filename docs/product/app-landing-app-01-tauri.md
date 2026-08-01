@@ -100,6 +100,20 @@ Windows 掃描限制在 `Program Files`、`Program Files (x86)` 與 `LOCALAPPDAT
 
 新增 `/desktop`，只在 Tauri 桌面環境的帳號選單顯示。使用者可選專案、素材與已安裝編輯器，啟動交接、查看狀態、在 Finder／檔案總管定位及停止自動回傳。一般瀏覽器進入時只顯示需要桌面版，不會取得本機能力。
 
+### 交接進度事件（前端可畫進度條）
+
+原生以 `aios:desktop-handoff-status` 推送（camelCase），欄位：
+
+| 欄位 | 說明 |
+|------|------|
+| `handoffId` | 本次交接 id |
+| `projectId` / `sourceAssetId` | 可選 |
+| `phase` | `downloading`／`downloaded`／`launched`／`watching`／`uploading`／`uploaded`／`error`／`stopped` |
+| `message` | 白話狀態 |
+| `percent` | 可選 0–100（下載開始 0、完成 100；上傳開始 0、完成 100） |
+
+前端 `normalizeHandoffStatusEvent` 容錯後再 `CustomEvent` 給 Companion／素材庫。素材庫在有 bridge 時可選編輯器 id 再開啟（與 Companion 對齊）。
+
 ## 深度連結
 
 桌面版註冊：
