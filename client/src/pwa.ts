@@ -52,9 +52,27 @@ export function dismissInstallBanner(): void {
   notifyInstall();
 }
 
-export function canShowInstallUi(): boolean {
+/**
+ * 安裝橫幅用：尊重「稍後」14 天隱藏。
+ * 不要拿來控帳號選單——使用者關掉橫幅後仍應能從選單主動安裝。
+ */
+export function canShowInstallBanner(): boolean {
   if (typeof window === "undefined" || isStandaloneApp() || isInstallDismissed()) return false;
   return isIosDevice() || deferredInstall != null;
+}
+
+/**
+ * 帳號選單／說明頁用：只要尚未以 standalone 開啟、且環境可裝就顯示。
+ * 不吃 dismiss（「稍後」只關橫幅，不關入口）。
+ */
+export function canOfferInstall(): boolean {
+  if (typeof window === "undefined" || isStandaloneApp()) return false;
+  return isIosDevice() || deferredInstall != null;
+}
+
+/** @deprecated 請改用 canShowInstallBanner；保留給尚未改完的呼叫端 */
+export function canShowInstallUi(): boolean {
+  return canShowInstallBanner();
 }
 
 export function subscribeInstallUi(fn: () => void): () => void {

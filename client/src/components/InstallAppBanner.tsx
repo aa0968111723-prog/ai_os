@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { Icon } from "./Icon";
-import { canShowInstallUi, dismissInstallBanner, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../pwa";
+import { Link } from "wouter";
+import { canShowInstallBanner, dismissInstallBanner, isIosDevice, isStandaloneApp, promptInstall, subscribeInstallUi } from "../pwa";
 import { Button, Card, Hint } from "./ui";
 
 export function InstallAppBanner() {
   const [, bump] = useState(0);
   const [busy, setBusy] = useState(false);
   useEffect(() => subscribeInstallUi(() => bump((n) => n + 1)), []);
-  if (isStandaloneApp() || !canShowInstallUi()) return null;
+  if (isStandaloneApp() || !canShowInstallBanner()) return null;
   const ios = isIosDevice();
   const onInstall = async () => {
     setBusy(true);
@@ -23,12 +24,17 @@ export function InstallAppBanner() {
             {ios ? "加入主畫面後可全螢幕使用，並在 iOS 上啟用推播通知。" : "安裝後從桌面／開始選單開啟，獨立視窗、更快進入工作。"}
           </Hint>
           {ios && (
-            <ol className="install-app__ios">
-              <li>用 Safari 開啟本站</li>
-              <li>點底部分享按鈕</li>
-              <li>選擇「加入主畫面」</li>
-              <li>從主畫面圖示開啟 Aios</li>
-            </ol>
+            <>
+              <ol className="install-app__ios">
+                <li>用 Safari 開啟本站</li>
+                <li>點底部分享按鈕</li>
+                <li>選擇「加入主畫面」</li>
+                <li>從主畫面圖示開啟 Aios</li>
+              </ol>
+              <Hint style={{ margin: "6px 0 0" }}>
+                <Link href="/help#help-install">看完整安裝與推播說明</Link>
+              </Hint>
+            </>
           )}
         </div>
       </div>
