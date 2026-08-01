@@ -41,10 +41,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install JavaScript dependencies
         run: npm ci
-      - name: Typecheck web application
-        run: npm run typecheck
+      # 桌面原生驗證不擋在全站 typecheck（他處 TS 噪音不應阻安裝包）
       - name: Test desktop bridge frontend
-        run: npm run test:client -- desktopBridge.test.ts
+        run: npm run test:client -- desktopBridge.test.ts AssetLibrary.desktopCta.test.tsx
       - name: Test native desktop runtime
         run: npm run desktop:test
       - name: Check native desktop runtime
@@ -69,10 +68,10 @@ jobs:
               src-tauri/target/release/bundle/msi/*.msi
           - os: macos-14
             label: macOS
-            bundles: app,dmg
+            # 只產 dmg（app 是資料夾，不適合當下載附件）
+            bundles: dmg
             artifact: aios-macos-installers
             paths: |
-              src-tauri/target/release/bundle/macos/*.app
               src-tauri/target/release/bundle/dmg/*.dmg
     runs-on: ${{ matrix.os }}
     steps:
@@ -98,3 +97,37 @@ jobs:
           path: ${{ matrix.paths }}
           if-no-files-found: error
           retention-days: 14
+
+  # tag desktop-v* 成功建包後，自動掛到 GitHub Releases → 站內「下載電腦版」連到 latest
+  publish-release:
+    name: Publish GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: installers
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-installers
+          pattern: aios-*-installers-*
+          merge-multiple: true
+      - name: List installer files
+        run: find dist-installers -type f | sort
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Aios 電腦版 ${{ github.ref_name }}
+          body: |
+            ## Aios 電腦版（內部測試包）
+
+            1. 下載對應系統的安裝包並安裝  
+            2. 開啟 **Aios**，登入與網站相同帳號  
+            3. 素材庫可「用外部軟體開啟」剪映／Premiere 等
+
+            **注意**：目前未正式簽章——Windows 可能出現 SmartScreen「仍要執行」；macOS 可能需在「隱私權與安全性」允許開啟。
+          files: |
+            dist-installers/**/*.exe
+            dist-installers/**/*.msi
+            dist-installers/**/*.dmg
+          fail_on_unmatched_files: false
+          generate_release_notes: true

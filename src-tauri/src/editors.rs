@@ -2,6 +2,7 @@ use crate::models::{DetectedEditor, EditorLaunch, ExternalEditorKind};
 use std::{env, path::{Path, PathBuf}, process::Command};
 #[cfg(target_os = "macos")]
 use std::fs;
+#[cfg(target_os = "windows")]
 use walkdir::WalkDir;
 
 fn editor(
