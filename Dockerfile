@@ -1,12 +1,12 @@
 # AI Director OS — 容器建置（node:22-alpine 多段建置；平台中立，Zeabur/Railway 皆可直接用）
-FROM node:22-alpine AS builder
+FROM node:25-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-FROM node:22-alpine AS runner
+FROM node:25-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 # 建置追溯（/api/health 的 build 欄位）：平台建置時傳入 --build-arg BUILD_SHA=$(git rev-parse HEAD) 等；
