@@ -184,10 +184,10 @@ export function SimpleProjectMode({
   const allApproved = scenes.length > 0 && approvedCount === scenes.length;
 
   return (
-    <div data-fb="簡易模式" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className="simple-project" data-fb="簡易模式">
       {/* 進行中任務常駐條：重整後照樣算得出來（狀態來自 scenes 查詢，不是前端變數） */}
       {running > 0 && (
-        <Card role="status" data-fb="進行中任務" style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+        <Card role="status" className="simple-project__running" data-fb="進行中任務">
           <Icon name="Loader" className="spin" size={15} />
           <span style={{ fontSize: 13 }}>
             <b>{running}</b> 格畫面生成中——可以關掉這頁，完成會推播通知。
@@ -195,8 +195,8 @@ export function SimpleProjectMode({
         </Card>
       )}
 
-      <Card as="section" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <Card as="section" className="simple-project__journey">
+        <div className="simple-project__journey-head">
           <h2 style={{ margin: 0, fontSize: 18 }}>做一支片，四步就好</h2>
           <span style={{ flex: "1 1 auto" }} />
           <Button size="sm" onClick={onSwitchToPro} data-fb="切到專業模式">
@@ -206,8 +206,9 @@ export function SimpleProjectMode({
         <VisualJourney steps={journeySteps} ariaLabel="簡易模式進度" compact />
       </Card>
 
+      <div className="simple-project__steps">
       {/* 第 1 步 */}
-      <Card as="section" data-fb="簡易-故事">
+      <Card as="section" className="simple-step" data-fb="簡易-故事">
         <h3 style={{ marginTop: 0 }}>1・這支片在講什麼？</h3>
         <textarea
           aria-label="一句話故事"
@@ -243,7 +244,7 @@ export function SimpleProjectMode({
       </Card>
 
       {/* 第 2 步 */}
-      <Card as="section" data-fb="簡易-拆分鏡">
+      <Card as="section" className="simple-step" data-fb="簡易-拆分鏡">
         <h3 style={{ marginTop: 0 }}>2・拆成一格一格</h3>
         {scenes.length > 0 ? (
           <Meta>已經有 {scenes.length} 個分鏡了。要重拆可以到完整版調整。</Meta>
@@ -275,42 +276,31 @@ export function SimpleProjectMode({
       </Card>
 
       {/* 第 3 步 */}
-      <Card as="section" data-fb="簡易-生成畫面">
+      <Card as="section" className="simple-step simple-step--visuals" data-fb="簡易-生成畫面">
         <h3 style={{ marginTop: 0 }}>3・一鍵生成畫面</h3>
         {scenes.length === 0 ? (
           <Meta>先完成上一步，這裡就會出現一鍵出圖。</Meta>
         ) : (
           <>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+            <div className="simple-scene-thumbs">
               {scenes.map((s, i) => (
-                <div key={s.id} style={{ width: 88, textAlign: "center" }}>
-                  <div
-                    style={{
-                      width: 88,
-                      height: 88,
-                      borderRadius: "var(--radius-sm, 8px)",
-                      background: "var(--surface-2, #eee)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      overflow: "hidden",
-                    }}
-                  >
+                <div key={s.id} className="simple-scene-thumb">
+                  <div className="simple-scene-thumb__frame">
                     {s.assetUrl ? (
-                      <img src={s.assetUrl} alt={`第 ${i + 1} 鏡`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <img src={s.assetUrl} alt={`第 ${i + 1} 鏡`} />
                     ) : s.pendingGenStatus ? (
                       <Icon name="Loader" className="spin" size={18} />
                     ) : (
                       <Meta style={{ fontSize: 11 }}>待生成</Meta>
                     )}
                   </div>
-                  <Meta style={{ fontSize: 11, display: "block", marginTop: 4 }}>
+                  <Meta className="simple-scene-thumb__cap">
                     {i + 1}・{s.status === "approved" ? "已通過" : s.status === "pending" ? "待審" : "草稿"}
                   </Meta>
                 </div>
               ))}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div className="simple-step__actions">
               <Button
                 variant="primary"
                 disabled={!canEdit || batchBusy || pendingScenes.length === 0 || !defaultModelId}
@@ -326,7 +316,7 @@ export function SimpleProjectMode({
       </Card>
 
       {/* 第 4 步 */}
-      <Card as="section" data-fb="簡易-交付">
+      <Card as="section" className="simple-step simple-step--deliver" data-fb="簡易-交付">
         <h3 style={{ marginTop: 0 }}>4・送審與打包</h3>
         {scenes.length === 0 ? (
           <Meta>還沒有分鏡。</Meta>
@@ -335,7 +325,7 @@ export function SimpleProjectMode({
             <Meta style={{ display: "block", marginBottom: 8 }}>
               已通過 {approvedCount}／{scenes.length} 格
             </Meta>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div className="simple-step__actions">
               <Button
                 disabled={!canEdit || submitBusy || readyToSubmit.length === 0}
                 onClick={() => void submitAll()}
@@ -349,6 +339,7 @@ export function SimpleProjectMode({
           </>
         )}
       </Card>
+      </div>
     </div>
   );
 }

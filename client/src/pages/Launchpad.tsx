@@ -7,6 +7,7 @@ import { SeriesTemplatePanel } from "../components/SeriesTemplatePanel";
 import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
+import { useMatchMedia } from "../lib/useMatchMedia";
 import { agentOutputKindLabel } from "../../../shared/agentOutputs";
 import {
   GROUP_RUN_STATUS_LABEL,
@@ -23,6 +24,26 @@ import {
 const FIRST_RUN_KEY = "aios.firstRunDismissed";
 /** 最近開啟：點卡片時記下 id，置頂顯示（純前端 localStorage） */
 const RECENT_KEY = "aios.recentProjects";
+/** 作業台專案列表版面：grid 卡片／list 列表（僅桌面 ≥821 顯示切換） */
+export const LAUNCH_LAYOUT_KEY = "aios.launchpad.layout";
+export type LaunchLayout = "grid" | "list";
+
+export function loadLaunchLayout(): LaunchLayout {
+  try {
+    const v = localStorage.getItem(LAUNCH_LAYOUT_KEY);
+    return v === "list" ? "list" : "grid";
+  } catch {
+    return "grid";
+  }
+}
+
+export function saveLaunchLayout(layout: LaunchLayout): void {
+  try {
+    localStorage.setItem(LAUNCH_LAYOUT_KEY, layout);
+  } catch {
+    /* 偏好加分項 */
+  }
+}
 /** 「全組現況」收合偏好記憶鍵（per 組；純前端 localStorage，收起省版面）
  *  舊鍵 aios.teamRuns.collapsed.* 一併讀寫，避免升級後收合偏好被重置。 */
 const STATUS_COLLAPSE_KEY = (gid: string) => `aios.teamStatus.collapsed.${gid}`;
@@ -79,6 +100,13 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const [sort, setSort] = useState<"recent" | "title">("recent");
   const [includeArchived, setIncludeArchived] = useState(false);
   const [limit, setLimit] = useState(24);
+  /** 桌面列表／卡片；手機強制卡片（CSS + 不顯示切換） */
+  const isDesktop = useMatchMedia("(min-width: 821px)");
+  const [layout, setLayout] = useState<LaunchLayout>(() => loadLaunchLayout());
+  const setLaunchLayout = (next: LaunchLayout) => {
+    setLayout(next);
+    saveLaunchLayout(next);
+  };
   const projects = trpc.projects.list.useQuery(
     { groupId: groupId || undefined, includeArchived: includeArchived || undefined },
     { enabled: !!groupId },
@@ -513,6 +541,28 @@ export function Launchpad({ groupId }: { groupId: string }) {
                 <option value="recent">最近</option>
                 <option value="title">名稱</option>
               </select>
+              {isDesktop && (
+                <div className="launch-layout-toggle" role="group" aria-label="專案檢視方式">
+                  <button
+                    type="button"
+                    className={layout === "grid" ? "is-selected" : undefined}
+                    aria-pressed={layout === "grid"}
+                    title="卡片檢視"
+                    onClick={() => setLaunchLayout("grid")}
+                  >
+                    <Icon name="Clapperboard" size={14} /> 卡片
+                  </button>
+                  <button
+                    type="button"
+                    className={layout === "list" ? "is-selected" : undefined}
+                    aria-pressed={layout === "list"}
+                    title="列表檢視（較密，適合掃狀態）"
+                    onClick={() => setLaunchLayout("list")}
+                  >
+                    <Icon name="FileText" size={14} /> 列表
+                  </button>
+                </div>
+              )}
             </>
           )}
           <label
@@ -574,12 +624,69 @@ export function Launchpad({ groupId }: { groupId: string }) {
       )}
       {all.length > 0 && shownList.length === 0 && <Hint layer="always">沒有符合「{q}」的專案。</Hint>}
 
-      <div className="launch-grid" aria-busy={projects.isLoading}>
+      <div
+        className={isDesktop && layout === "list" ? "launch-list" : "launch-grid"}
+        aria-busy={projects.isLoading}
+        data-layout={isDesktop ? layout : "grid"}
+      >
         {projects.isLoading &&
-          Array.from({ length: 8 }).map((_, i) => <Skeleton key={`sk-${i}`} className="launch-card" height={176} />)}
+          Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton
+              key={`sk-${i}`}
+              className={isDesktop && layout === "list" ? "launch-list-row" : "launch-card"}
+              height={isDesktop && layout === "list" ? 52 : 176}
+            />
+          ))}
         {shown.map((p) => {
           const isArchived = p.status === "archived";
           const canRestore = isArchived && (isLeader || p.ownerId === myUserId);
+          const pd = !isArchived ? pendingOf(p.id) : null;
+          const listMode = isDesktop && layout === "list";
+
+          if (listMode) {
+            return (
+              <div key={p.id} className="launch-list-row" style={{ opacity: isArchived ? 0.85 : undefined }}>
+                <Link
+                  href={`/p/${p.id}`}
+                  className="launch-list-row__main"
+                  onClick={() => recordRecent(p.id)}
+                >
+                  <span className="launch-list-row__mark" style={{ background: coverOf(p.id) }} aria-hidden>
+                    {p.title.trim().charAt(0) || "○"}
+                  </span>
+                  <span className="launch-list-row__title">{p.title}</span>
+                  <span className="launch-list-row__kind">{kindLabelOf(p.kind)}</span>
+                  <span className="launch-list-row__format">{p.format}</span>
+                  <span className="launch-list-row__time">更新 {relTime(p.updatedAt)}</span>
+                  <span className="launch-list-row__badges">
+                    {isArchived && <Chip style={{ margin: 0 }}>已封存</Chip>}
+                    {pd && pd.pendingApprovals > 0 && (
+                      <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="分鏡待審">
+                        待審 {pd.pendingApprovals}
+                      </Chip>
+                    )}
+                    {pd && pd.awaitingGenerations > 0 && (
+                      <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="生成待核">
+                        待核 {pd.awaitingGenerations}
+                      </Chip>
+                    )}
+                  </span>
+                </Link>
+                {canRestore && (
+                  <Button
+                    size="sm"
+                    className="launch-list-row__restore"
+                    disabled={restoreProject.isPending}
+                    title="還原後會重新出現在作業台"
+                    onClick={() => restoreProject.mutate({ id: p.id, archived: false })}
+                  >
+                    {restoreProject.isPending ? "還原中…" : "還原"}
+                  </Button>
+                )}
+              </div>
+            );
+          }
+
           return (
             <Link
               key={p.id}
@@ -602,24 +709,16 @@ export function Launchpad({ groupId }: { groupId: string }) {
                     </Chip>
                   )}
                   {/* 待辦角標：分鏡待審（組長裁決）／生成待核（成本門檻攔下）——點卡片進專案就能處理 */}
-                  {!isArchived && (() => {
-                    const pd = pendingOf(p.id);
-                    if (!pd) return null;
-                    return (
-                      <>
-                        {pd.pendingApprovals > 0 && (
-                          <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有分鏡送審等組長裁決">
-                            待審 {pd.pendingApprovals}
-                          </Chip>
-                        )}
-                        {pd.awaitingGenerations > 0 && (
-                          <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有生成被成本門檻攔下，等組長核准">
-                            待核 {pd.awaitingGenerations}
-                          </Chip>
-                        )}
-                      </>
-                    );
-                  })()}
+                  {pd && pd.pendingApprovals > 0 && (
+                    <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有分鏡送審等組長裁決">
+                      待審 {pd.pendingApprovals}
+                    </Chip>
+                  )}
+                  {pd && pd.awaitingGenerations > 0 && (
+                    <Chip style={{ margin: 0, color: "var(--gold-ink)", borderColor: "var(--gold-ink)" }} title="有生成被成本門檻攔下，等組長核准">
+                      待核 {pd.awaitingGenerations}
+                    </Chip>
+                  )}
                 </div>
                 <div className="launch-meta" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span>更新於 {relTime(p.updatedAt)}</span>
