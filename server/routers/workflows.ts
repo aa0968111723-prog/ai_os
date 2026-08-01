@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { getWorkflow } from "../../shared/models";
@@ -21,9 +21,10 @@ export interface StartWorkflowCoreInput {
   projectId: string;
   presetId: string;
   prompt: string;
-  /** 沿用生成台勾選的角色定裝/場景設定卡：落庫在 run 上，runner 每步視覺生成都注入同一套錨點（跨步一致） */
+  /** 沿用生成台勾選的角色定裝/場景設定/素材設定卡：落庫在 run 上，runner 每步視覺生成都注入同一套錨點（跨步一致） */
   characterIds?: string[];
   scenePresetIds?: string[];
+  propIds?: string[];
   assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
 }
 
@@ -67,6 +68,7 @@ export async function startWorkflowCore(input: StartWorkflowCoreInput) {
         prompt: input.prompt.trim(),
         characterIds: input.characterIds?.length ? input.characterIds : null,
         scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
+        propIds: input.propIds?.length ? input.propIds : null,
         steps,
       })
       .returning();
@@ -77,6 +79,7 @@ export async function startWorkflowCore(input: StartWorkflowCoreInput) {
     await savePromptCore({ id: run.projectId, groupId: run.groupId }, input.userId, run.prompt, {
       characterIds: input.characterIds,
       scenePresetIds: input.scenePresetIds,
+      propIds: input.propIds,
     }).catch((err) =>
       console.warn("[workflow] 想法入提示詞庫失敗（不影響執行）：", err instanceof Error ? err.message : err),
     );
@@ -93,9 +96,10 @@ export const workflowsRouter = router({
         presetId: z.string(),
         // 先 trim 再驗非空／上限：擋純空白；max 與 assistant run_workflow 同口徑（2000）
         prompt: z.string().trim().min(1, "請填想法").max(2000, "想法過長（上限 2000 字）"),
-        /** 生成台勾選的角色/場景卡：整條工作流的視覺步驟都注入同一套錨點（上限與 generation.submit 同口徑） */
+        /** 生成台勾選的角色/場景/素材卡：整條工作流的視覺步驟都注入同一套錨點（上限與 generation.submit 同口徑） */
         characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
         scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+        propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) =>
@@ -106,6 +110,7 @@ export const workflowsRouter = router({
         prompt: input.prompt,
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
+        propIds: input.propIds,
         assertAccess: async (p) => {
           requireGroup(ctx.auth, p.groupId);
           // 2.3：專案檢視者不能啟動工作流（一次多步生成＝內容寫入）

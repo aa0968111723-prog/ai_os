@@ -35,7 +35,7 @@ import {
   type Worldview,
   type WorldviewConsumerId,
 } from "@shared/worldview";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
 import { AssetLibrary } from "../components/AssetLibrary";
@@ -43,6 +43,7 @@ import { RecycleBin } from "../components/RecycleBin";
 import { KnowledgeBase } from "../components/KnowledgeBase";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
+import { PropCards } from "../components/PropCards";
 import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
@@ -71,7 +72,7 @@ import {
 /** 與 styles.css 單欄／平板界線對齊：≤820px 為手機減負模式 */
 const PROJECT_MOBILE_MQ = "(max-width: 820px)";
 
-type CtxSectionKey = "characters" | "scenes" | "knowledge" | "databases" | "assets" | "recycle";
+type CtxSectionKey = "characters" | "scenes" | "props" | "knowledge" | "databases" | "assets" | "recycle";
 
 /** 手機上下文卡：details 收合；桌機直接渲染 children（版面不變） */
 function CtxCollapse({
@@ -400,6 +401,7 @@ export function ProjectPage({ id }: { id: string }) {
   const [ctxOpen, setCtxOpen] = useState<Record<CtxSectionKey, boolean>>({
     characters: false,
     scenes: false,
+    props: false,
     knowledge: false,
     databases: false,
     assets: false,
@@ -537,6 +539,19 @@ export function ProjectPage({ id }: { id: string }) {
       if (prev.includes(sid) || prev.length >= MAX_GENERATE_SCENE_PRESETS) return prev;
       return [...prev, sid];
     });
+  /** 生成時要帶入的素材設定卡（道具外觀一致）——持久化，重整不歸零 */
+  const [propIds, setPropIds] = usePersistedIds(`aios.pick.props.${id}`);
+  const toggleProp = (pid: string) =>
+    setPropIds((prev) => {
+      if (prev.includes(pid)) return prev.filter((x) => x !== pid);
+      if (prev.length >= MAX_GENERATE_PROPS) return prev;
+      return [...prev, pid];
+    });
+  const onPropCreated = (pid: string) =>
+    setPropIds((prev) => {
+      if (prev.includes(pid) || prev.length >= MAX_GENERATE_PROPS) return prev;
+      return [...prev, pid];
+    });
   const assets = trpc.projects.assets.useQuery({ projectId: id });
   // 留言未讀數（餵 TocNav ③分鏡・交付 徽章）：15 秒輪詢已夠即時，同房夥伴留言另有 WS invalidate 立即刷新
   const unread = trpc.messages.unread.useQuery({ projectId: id }, { refetchInterval: 15000 });
@@ -547,6 +562,7 @@ export function ProjectPage({ id }: { id: string }) {
   const knowledge = trpc.knowledge.list.useQuery({ projectId: id });
   const characters = trpc.characters.list.useQuery({ projectId: id });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId: id });
+  const propCards = trpc.props.list.useQuery({ projectId: id });
   /** 敘事人物 → 一鍵建角色定裝（外觀錨點）；成功後勾選並捲到定裝區 */
   const addCharFromPerson = trpc.characters.add.useMutation({
     onSuccess: (row) => {
@@ -582,6 +598,15 @@ export function ProjectPage({ id }: { id: string }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scenePresets.data]);
+  useEffect(() => {
+    const list = propCards.data;
+    if (!list) return;
+    setPropIds((prev) => {
+      const next = prev.filter((pid) => list.some((p) => p.id === pid)).slice(0, MAX_GENERATE_PROPS);
+      return next.length === prev.length && next.every((id, i) => id === prev[i]) ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propCards.data]);
   /** 素材庫選中來源的高亮 id（實際來源 state 在 DirectGenerateMode） */
   const [sourceHighlightId, setSourceHighlightId] = useState<string | null>(null);
   /** 把提示詞庫／生成紀錄／分鏡／素材庫的設定送進 DirectGenerateMode（nonce 觸發） */
@@ -664,7 +689,13 @@ export function ProjectPage({ id }: { id: string }) {
    */
   const applyPrompt = (
     text: string,
-    settings?: { modelId?: string | null; characterIds?: string[] | null; scenePresetIds?: string[] | null; sourceAssetId?: string | null },
+    settings?: {
+      modelId?: string | null;
+      characterIds?: string[] | null;
+      scenePresetIds?: string[] | null;
+      propIds?: string[] | null;
+      sourceAssetId?: string | null;
+    },
   ): boolean => {
     // 現值：優先 DOM（工作台內表單），再退回 draft storage（可能有 debounce 延遲）
     const live = (document.getElementById("gen-prompt") as HTMLTextAreaElement | null)?.value;
@@ -682,6 +713,11 @@ export function ProjectPage({ id }: { id: string }) {
         const list = scenePresets.data;
         const next = list ? settings.scenePresetIds.filter((sid) => list.some((s) => s.id === sid)) : settings.scenePresetIds;
         setSceneIds(() => next);
+      }
+      if (settings.propIds) {
+        const list = propCards.data;
+        const next = list ? settings.propIds.filter((pid) => list.some((p) => p.id === pid)) : settings.propIds;
+        setPropIds(() => next);
       }
       if (settings.sourceAssetId) {
         const src = assets.data?.find((a) => a.id === settings.sourceAssetId);
@@ -737,6 +773,7 @@ export function ProjectPage({ id }: { id: string }) {
   const knowledgeCount = knowledge.data?.length;
   const charCount = characters.data?.length;
   const presetCount = scenePresets.data?.length;
+  const propCount = propCards.data?.length;
   const assetCount = assets.data?.length;
   const wvReady = isWorldviewReady(wv);
 
@@ -1066,6 +1103,7 @@ export function ProjectPage({ id }: { id: string }) {
   const targetToCtxKey = (target: string): CtxSectionKey | null => {
     if (target === "#sec-characters") return "characters";
     if (target === "#sec-scenes") return "scenes";
+    if (target === "#sec-props") return "props";
     if (target === "#sec-knowledge") return "knowledge";
     if (target === "#sec-databases") return "databases";
     if (target === "#sec-assets") return "assets";
@@ -1411,6 +1449,7 @@ export function ProjectPage({ id }: { id: string }) {
             {wv.people.length > 0 && summaryChip(`敘事人物 ${wv.people.length}`, "#onboard-worldview", true)}
             {wv.audience.trim() && summaryChip("觀眾已設", "#onboard-worldview", true)}
             {summaryChip(`角色 ${charCount ?? "…"}・場景 ${presetCount ?? "…"}`, "#sec-characters")}
+            {summaryChip(`素材設定 ${propCount ?? "…"}`, "#sec-props", (propCount ?? 0) > 0)}
             {summaryChip(`知識 ${knowledgeCount ?? "…"} 份`, "#sec-knowledge")}
             {summaryChip(`素材 ${assetCount ?? "…"}`, "#sec-assets")}
           </div>
@@ -1841,6 +1880,24 @@ export function ProjectPage({ id }: { id: string }) {
             />
           </CtxCollapse>
 
+          {/* 素材設定卡：反覆出現的道具／物件外觀材質，勾選後生成自動注入錨點 */}
+          <CtxCollapse
+            compact={mobileCompact}
+            sectionId="sec-props"
+            title="素材設定"
+            meta={propCount != null ? `${propCount} 張` : undefined}
+            open={ctxOpen.props}
+            onOpenChange={(o) => setCtxSectionOpen("props", o)}
+          >
+            <PropCards
+              projectId={id}
+              selectedIds={propIds}
+              onToggle={toggleProp}
+              onCreated={onPropCreated}
+              readOnly={!canEdit}
+            />
+          </CtxCollapse>
+
           {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}
           <CtxCollapse
             compact={mobileCompact}
@@ -1938,6 +1995,7 @@ export function ProjectPage({ id }: { id: string }) {
             wvReady={wvReady}
             characterIds={charIds}
             scenePresetIds={sceneIds}
+            propIds={propIds}
             generateApplyRequest={generateApply}
             onReuseGenerate={applyPrompt}
             onGenerateSourceChange={setSourceHighlightId}

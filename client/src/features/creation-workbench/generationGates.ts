@@ -138,6 +138,7 @@ export type GenerationSubmitInput = {
   sourceUrl?: string;
   characterIds?: string[];
   scenePresetIds?: string[];
+  propIds?: string[];
   clientRequestId: string;
 };
 
@@ -150,10 +151,20 @@ export function buildGenerationSubmitInput(input: {
   sourceUrl: string;
   characterIds: string[];
   scenePresetIds: string[];
+  propIds?: string[];
   clientRequestId: string;
 }): GenerationSubmitInput {
-  const { projectId, model, prompt, sourceAsset, sourceUrl, characterIds, scenePresetIds, clientRequestId } =
-    input;
+  const {
+    projectId,
+    model,
+    prompt,
+    sourceAsset,
+    sourceUrl,
+    characterIds,
+    scenePresetIds,
+    propIds = [],
+    clientRequestId,
+  } = input;
   return {
     projectId,
     modelId: model.id,
@@ -162,6 +173,7 @@ export function buildGenerationSubmitInput(input: {
     sourceUrl: model.needs && !sourceAsset && sourceUrl.trim() ? sourceUrl.trim() : undefined,
     characterIds: characterIds.length ? characterIds : undefined,
     scenePresetIds: scenePresetIds.length ? scenePresetIds : undefined,
+    propIds: propIds.length ? propIds : undefined,
     clientRequestId,
   };
 }

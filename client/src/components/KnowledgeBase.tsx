@@ -232,7 +232,7 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
                       已納入 {preview.data.includedChars.toLocaleString()}／庫內全文{" "}
                       {preview.data.totalContentChars.toLocaleString()} 字
                       {preview.data.truncated ? " · 有截斷" : " · 未截斷"}
-                      {preview.data.cardsIncluded ? " · 含角色／場景卡" : ""}
+                      {preview.data.cardsIncluded ? " · 含角色／場景／素材卡" : ""}
                     </Hint>
                     <ul style={{ margin: "0 0 10px", paddingLeft: 18 }}>
                       {preview.data.items.map((it) => (

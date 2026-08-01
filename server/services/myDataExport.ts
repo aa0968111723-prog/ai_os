@@ -51,6 +51,7 @@ export interface MyDataProjectExport {
     knowledge: number;
     characters: number;
     scenePresets: number;
+    props: number;
     assets: number;
     myGenerations: number;
   };
@@ -62,6 +63,7 @@ export interface MyDataProjectExport {
   characters: Array<{ name: string }>;
   /** 場景設定名稱 */
   scenePresets: Array<{ name: string }>;
+  props: Array<{ name: string }>;
   /** 你上傳的素材標題（非全專案資產） */
   myAssets: Array<{ title: string; kind: string; createdAt: string | Date }>;
 }
@@ -301,6 +303,7 @@ function renderProjectsHtml(projects: MyDataProjectExport[]): string {
         .join("");
       const charList = p.characters.map((c) => esc(c.name)).join("、") || "—";
       const presetList = p.scenePresets.map((c) => esc(c.name)).join("、") || "—";
+      const propList = p.props.map((c) => esc(c.name)).join("、") || "—";
       const assetRows = p.myAssets
         .map(
           (a) =>
@@ -318,7 +321,7 @@ function renderProjectsHtml(projects: MyDataProjectExport[]): string {
         </div>
         <div class="proj-counts">
           分鏡 ${p.counts.scenes}　·　知識 ${p.counts.knowledge}　·　角色 ${p.counts.characters}　·　
-          場景卡 ${p.counts.scenePresets}　·　素材 ${p.counts.assets}　·　我的生成 ${p.counts.myGenerations}
+          場景卡 ${p.counts.scenePresets}　·　素材卡 ${p.counts.props}　·　素材 ${p.counts.assets}　·　我的生成 ${p.counts.myGenerations}
         </div>
         ${wvBits ? `<div class="proj-wv"><b>世界觀摘要</b><br>${wvBits}</div>` : ""}
         ${
@@ -335,6 +338,7 @@ function renderProjectsHtml(projects: MyDataProjectExport[]): string {
         }
         <p class="note">角色定裝：${charList}</p>
         <p class="note">場景設定：${presetList}</p>
+        <p class="note">素材設定：${propList}</p>
         ${
           p.myAssets.length
             ? `<p class="note">我上傳的素材</p>

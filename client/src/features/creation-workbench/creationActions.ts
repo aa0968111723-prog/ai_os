@@ -23,6 +23,7 @@ export type CreationAction =
       modelId?: string | null;
       characterIds?: string[] | null;
       scenePresetIds?: string[] | null;
+      propIds?: string[] | null;
     };
 
 /** Result of applyCreationAction — always no-charge / no-submit for bring-in. */
@@ -63,6 +64,9 @@ function pickOptionalBringInFields(source: Partial<CreationDraft>): DraftPatch {
   }
   if (Array.isArray(source.scenePresetIds) && source.scenePresetIds.length > 0) {
     patch.scenePresetIds = source.scenePresetIds;
+  }
+  if (Array.isArray(source.propIds) && source.propIds.length > 0) {
+    patch.propIds = source.propIds;
   }
   if (Array.isArray(source.sourceAssetIds) && source.sourceAssetIds.length > 0) {
     patch.sourceAssetIds = source.sourceAssetIds;
@@ -122,6 +126,9 @@ export function applyCreationAction(
       }
       if (Array.isArray(d.scenePresetIds) && d.scenePresetIds.length > 0) {
         patch.scenePresetIds = d.scenePresetIds;
+      }
+      if (Array.isArray(d.propIds) && d.propIds.length > 0) {
+        patch.propIds = d.propIds;
       }
       if (Array.isArray(d.sourceAssetIds) && d.sourceAssetIds.length > 0) {
         patch.sourceAssetIds = d.sourceAssetIds;
@@ -183,6 +190,9 @@ export function applyCreationAction(
       if (Array.isArray(action.scenePresetIds) && action.scenePresetIds.length > 0) {
         patch.scenePresetIds = action.scenePresetIds;
       }
+      if (Array.isArray(action.propIds) && action.propIds.length > 0) {
+        patch.propIds = action.propIds;
+      }
       ctx.setDraft(patch);
       if (action.targetMode === "ask" && action.promptText) {
         ctx.setAskInput?.(action.promptText);
@@ -220,6 +230,7 @@ export function generateBringInAction(opts: {
   modelId?: string;
   characterIds?: string[];
   scenePresetIds?: string[];
+  propIds?: string[];
   sourceAssetIds?: string[];
   goal?: string;
 }): CreationAction {
@@ -229,6 +240,7 @@ export function generateBringInAction(opts: {
   if (opts.goal) draft.goal = opts.goal;
   if (opts.characterIds?.length) draft.characterIds = opts.characterIds;
   if (opts.scenePresetIds?.length) draft.scenePresetIds = opts.scenePresetIds;
+  if (opts.propIds?.length) draft.propIds = opts.propIds;
   if (opts.sourceAssetIds?.length) draft.sourceAssetIds = opts.sourceAssetIds;
   return { type: "generate", draft };
 }

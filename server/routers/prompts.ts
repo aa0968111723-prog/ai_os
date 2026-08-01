@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { assertProjectEditable } from "../services/projectAcl";
@@ -17,10 +17,16 @@ export interface PromptSettings {
   modelId?: string;
   characterIds?: string[];
   scenePresetIds?: string[];
+  propIds?: string[];
 }
 
 /** 落庫時要更新的欄位子集 */
-type PromptPatch = Partial<{ modelId: string | null; characterIds: string[] | null; scenePresetIds: string[] | null }>;
+type PromptPatch = Partial<{
+  modelId: string | null;
+  characterIds: string[] | null;
+  scenePresetIds: string[] | null;
+  propIds: string[] | null;
+}>;
 
 /**
  * 三態卡片語義 → DB patch（純函式，供 savePromptCore 使用並可單測）：
@@ -34,6 +40,7 @@ export function buildPromptPatch(settings: PromptSettings): PromptPatch {
   if (settings.modelId !== undefined) patch.modelId = settings.modelId || null; // 空字串一併收斂成 null（避免 getModel("") 空 chip）
   if (settings.characterIds !== undefined) patch.characterIds = settings.characterIds;
   if (settings.scenePresetIds !== undefined) patch.scenePresetIds = settings.scenePresetIds;
+  if (settings.propIds !== undefined) patch.propIds = settings.propIds;
   return patch;
 }
 
@@ -93,7 +100,7 @@ export const promptsRouter = router({
   }),
 
   /** 存/去重：同專案同文字已存在則使用次數 +1（自動存的入口，前端在生成成功後呼叫）。
-   *  三合一：連同模型/角色/場景設定一起存——「再用」還原完整設定，不只文字。 */
+   *  三合一：連同模型/角色/場景/素材設定一起存——「再用」還原完整設定，不只文字。 */
   save: authedProcedure
     .input(
       z.object({
@@ -103,6 +110,7 @@ export const promptsRouter = router({
         modelId: z.string().max(200).optional(),
         characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
         scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+        propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -114,6 +122,7 @@ export const promptsRouter = router({
         modelId: input.modelId,
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
+        propIds: input.propIds,
       });
     }),
 

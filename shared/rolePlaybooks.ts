@@ -32,7 +32,7 @@ export const ROLE_PLAYBOOKS: readonly RolePlaybook[] = [
     plannerHint:
       "分鏡職能建議骨架（依現況裁剪，勿硬湊）：" +
       "① split_script（有腳本時）→ ② create_scene（或沿用現有分鏡）→ " +
-      "③ generate：needs 模型務必 sourceAssetRef／sourceUrl；跨鏡同角請帶 characterRefs（charN）與必要時 scenePresetRefs；" +
+      "③ generate：needs 模型務必 sourceAssetRef／sourceUrl；跨鏡同角請帶 characterRefs（charN）、必要時 scenePresetRefs（presetN）與 propRefs（propN，反覆出現的道具）；" +
       "④ 可選 voiceover（分鏡已有配音詞時）。人員選鏡／擋禁忌用 create_task + wait_for_human 或 request_approval。",
     suggestedKinds: ["split_script", "create_scene", "generate", "voiceover"],
   },
@@ -81,7 +81,7 @@ export const ROLE_PLAYBOOKS: readonly RolePlaybook[] = [
     goalTemplate: "確保分鏡生成綁定角色定裝與場景預設",
     plannerHint:
       "定裝職能：任何 generate 涉及固定角色時，characterRefs 必須使用上下文 charN；" +
-      "場景一致用 scenePresetRefs（presetN）。缺定裝資料 → missingInformation，不要幻覺 UUID。" +
+      "場景一致用 scenePresetRefs（presetN）、道具一致用 propRefs（propN）。缺定裝資料 → missingInformation，不要幻覺 UUID。" +
       "升版 bible／改設定由人完成（create_task）。",
     suggestedKinds: ["generate", "create_task", "wait_for_human"],
   },

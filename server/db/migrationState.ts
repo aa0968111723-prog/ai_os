@@ -123,6 +123,9 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0023_asset_durability",
   // 0024：純新增 asset_revisions 表＋索引（皆 IF NOT EXISTS），不動任何既有資料，可安全納入 bridge
   "0024_asset_revisions",
+  // 0025：純新增 props 表＋索引，與 generations／prompts 各一個 nullable jsonb 欄位
+  //       （皆 IF NOT EXISTS），不動任何既有資料，可安全納入 bridge
+  "0025_project_props",
 ] as const;
 
 /**

@@ -79,10 +79,11 @@ export const prompts = pgTable("prompts", {
   projectId: uuid("project_id").notNull(),
   groupId: uuid("group_id").notNull(),
   text: text("text").notNull(),
-  /** 最後一次用這則咒語生成時的模型/角色/場景卡（null＝純文字舊列）——「再用」還原完整設定，不只文字 */
+  /** 最後一次用這則咒語生成時的模型/角色/場景/素材卡（null＝純文字舊列）——「再用」還原完整設定，不只文字 */
   modelId: text("model_id"),
   characterIds: jsonb("character_ids").$type<string[]>(),
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
+  propIds: jsonb("prop_ids").$type<string[]>(),
   useCount: integer("use_count").notNull().default(1),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -126,6 +127,31 @@ export const scenePresets = pgTable("scene_presets", {
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+/**
+ * 素材設定卡（角色·場景一致性的「物件」面）：
+ * 反覆出現的道具／標誌物件（紅傘、佛珠、活動主視覺牌）外觀材質一次鎖定，
+ * 生成勾選時注入錨點——同一把傘不會這鏡是紅的、下鏡變酒紅格紋。
+ *
+ * 與「素材庫（assets）」不同：assets 是已經存在的檔案，這裡是還沒被畫出來的物件設定。
+ */
+export const props = pgTable("props", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  name: text("name").notNull(),
+  /** 外觀・材質・顏色・尺寸——這段會直接注入生成提示詞 */
+  appearance: text("appearance").notNull(),
+  /** 用途・出現場合・Do/Don't（供 AI 導演與腳本參考；不注入視覺生成，避免被畫成文字） */
+  notes: text("notes"),
+  /** 素材參考圖（可選；上傳或從素材庫綁定，之後圖生圖可用作底） */
+  referenceAssetId: uuid("reference_asset_id"),
+  createdBy: uuid("created_by").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  // list 走 WHERE project_id ORDER BY created_at；建表當下就補索引，不等它慢了才修
+  projectCreatedIdx: index("props_project_created_idx").on(t.projectId, t.createdAt),
+}));
 
 export const scenes = pgTable("scenes", {
   id: uuid("id").primaryKey().defaultRandom(),

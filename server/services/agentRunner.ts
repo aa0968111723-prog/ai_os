@@ -122,6 +122,8 @@ export interface AgentStep {
   characterIds?: string[];
   /** CA-01：場景設定卡 id（最多 4） */
   scenePresetIds?: string[];
+  /** 素材設定卡 id（最多 4）：道具外觀／材質錨點 */
+  propIds?: string[];
   /** CA-01：素材庫來源（圖生圖／i2v 等 needs 模型） */
   sourceAssetId?: string;
   /** CA-01：外部來源網址（僅無 sourceAssetId 時；仍走 generationCore SSRF／needs） */
@@ -841,6 +843,7 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
         sceneRole,
         characterIds: step.characterIds,
         scenePresetIds: step.scenePresetIds,
+        propIds: step.propIds,
         sourceAssetId: step.sourceAssetId,
         sourceUrl: step.sourceUrl,
         agentRunId: run.id,
@@ -1533,9 +1536,10 @@ async function advanceRun(run: RunRow): Promise<void> {
       prompt,
       sceneId,
       sceneRole,
-      // CA-01：與 workflowRunner／直接生成對齊——定裝／場景／來源素材
+      // CA-01：與 workflowRunner／直接生成對齊——定裝／場景／素材／來源素材
       characterIds: step.characterIds,
       scenePresetIds: step.scenePresetIds,
+      propIds: step.propIds,
       sourceAssetId: step.sourceAssetId,
       sourceUrl: step.sourceUrl,
       agentRunId: run.id, // 生成列回連本次代理執行——生成紀錄可回看「這筆是代理跑出來的」

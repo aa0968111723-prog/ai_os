@@ -1,10 +1,10 @@
 /**
- * 角色定裝／場景設定卡片錨點（生成 prompt + 知識庫注入共用）。
+ * 角色定裝／場景設定／素材設定卡片錨點（生成 prompt + 知識庫注入共用）。
  *
  * 從 routers 下沉到 services（ADR-009）：generationCore 不再 import routers。
  *
  * 契約：
- * - 視覺錨點：角色只放外觀；場景放色板＋光線（不放長文）
+ * - 視覺錨點：角色只放外觀；場景放色板＋光線；素材只放外觀材質（都不放長文備註）
  * - 依呼叫端選定 id 順序組裝（DB inArray 不保證順序）
  * - 欄位截短，避免多卡撐爆圖像 prompt／知識 budget
  * - 知識庫卡片段落完整注入（有界截短後），不被 budget 腰斬半張卡
@@ -22,6 +22,8 @@ export const CARD_LIGHTING_MAX = 120;
 export const CHAR_KNOWLEDGE_INJECT_MAX = 20;
 /** 知識庫最多注入幾張場景卡 */
 export const PRESET_KNOWLEDGE_INJECT_MAX = 12;
+/** 知識庫最多注入幾張素材卡 */
+export const PROP_KNOWLEDGE_INJECT_MAX = 12;
 
 export type CharacterAnchorRow = {
   id: string;
@@ -35,6 +37,13 @@ export type SceneAnchorRow = {
   name: string;
   palette: string;
   lighting?: string | null;
+};
+
+export type PropAnchorRow = {
+  id: string;
+  name: string;
+  appearance: string;
+  notes?: string | null;
 };
 
 /** 依 selectedIds 順序去重挑列；未知 id 略過 */
@@ -76,6 +85,13 @@ export function formatSceneAnchor(rows: SceneAnchorRow[], selectedIds: string[])
     .join("；");
 }
 
+/** 視覺生成：素材設定錨點（只外觀材質；備註不進畫面） */
+export function formatPropAnchor(rows: PropAnchorRow[], selectedIds: string[]): string {
+  const ordered = orderRowsByIds(rows, selectedIds);
+  if (ordered.length === 0) return "";
+  return ordered.map((p) => `${p.name}：${clipCardField(p.appearance)}`).join("；");
+}
+
 /** 知識庫／導演：【角色定裝卡】（可含個性） */
 export function formatCharacterKnowledgeBlock(chars: CharacterAnchorRow[]): string {
   if (chars.length === 0) return "";
@@ -106,6 +122,22 @@ export function formatSceneKnowledgeBlock(presets: SceneAnchorRow[]): string {
       ? `\n…另有 ${presets.length - PRESET_KNOWLEDGE_INJECT_MAX} 張場景卡未注入`
       : "";
   return `【場景設定卡】\n${lines.join("\n")}${more}`;
+}
+
+/** 知識庫／導演：【素材設定卡】（可含用途備註） */
+export function formatPropKnowledgeBlock(props: PropAnchorRow[]): string {
+  if (props.length === 0) return "";
+  const shown = props.slice(0, PROP_KNOWLEDGE_INJECT_MAX);
+  const lines = shown.map((p) => {
+    const appearance = clipCardField(p.appearance);
+    const notes = p.notes?.trim() ? `｜用途：${clipCardField(p.notes, CARD_NOTES_MAX)}` : "";
+    return `- ${p.name}：${appearance}${notes}`;
+  });
+  const more =
+    props.length > PROP_KNOWLEDGE_INJECT_MAX
+      ? `\n…另有 ${props.length - PROP_KNOWLEDGE_INJECT_MAX} 張素材卡未注入`
+      : "";
+  return `【素材設定卡】\n${lines.join("\n")}${more}`;
 }
 
 /** DB：選定角色 → 視覺錨點 */
@@ -140,6 +172,22 @@ export async function buildSceneAnchor(projectId: string, presetIds: string[]): 
   return formatSceneAnchor(rows, presetIds);
 }
 
+/** DB：選定素材 → 視覺錨點（順序＝selectedIds） */
+export async function buildPropAnchor(projectId: string, propIds: string[]): Promise<string> {
+  if (propIds.length === 0) return "";
+  const ids = [...new Set(propIds)];
+  const rows = await db
+    .select({
+      id: schema.props.id,
+      name: schema.props.name,
+      appearance: schema.props.appearance,
+      notes: schema.props.notes,
+    })
+    .from(schema.props)
+    .where(and(eq(schema.props.projectId, projectId), inArray(schema.props.id, ids)));
+  return formatPropAnchor(rows, propIds);
+}
+
 /**
  * 卡片參考圖 → 生成來源（QA 2026-08-01）。
  *
@@ -167,8 +215,8 @@ export function pickFirstReference(
 
 export async function resolveCardReferenceSource(
   projectId: string,
-  selected: { characterIds?: string[]; scenePresetIds?: string[] },
-): Promise<{ assetId: string; from: "character" | "scene" } | null> {
+  selected: { characterIds?: string[]; scenePresetIds?: string[]; propIds?: string[] },
+): Promise<{ assetId: string; from: "character" | "scene" | "prop" } | null> {
   const charIds = selected.characterIds ?? [];
   if (charIds.length > 0) {
     const rows = await db
@@ -186,6 +234,16 @@ export async function resolveCardReferenceSource(
       .where(and(eq(schema.scenePresets.projectId, projectId), inArray(schema.scenePresets.id, [...new Set(sceneIds)])));
     const ref = pickFirstReference(rows, sceneIds);
     if (ref) return { assetId: ref, from: "scene" };
+  }
+  // 素材卡排最後：道具是配角，有角色／場景參考圖時該以它們為底
+  const propIds = selected.propIds ?? [];
+  if (propIds.length > 0) {
+    const rows = await db
+      .select({ id: schema.props.id, referenceAssetId: schema.props.referenceAssetId })
+      .from(schema.props)
+      .where(and(eq(schema.props.projectId, projectId), inArray(schema.props.id, [...new Set(propIds)])));
+    const ref = pickFirstReference(rows, propIds);
+    if (ref) return { assetId: ref, from: "prop" };
   }
   return null;
 }

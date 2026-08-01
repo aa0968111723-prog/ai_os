@@ -61,6 +61,7 @@ export function CreationWorkbench({
   wvReady = false,
   characterIds = [],
   scenePresetIds = [],
+  propIds = [],
   generateApplyRequest = null,
   workflowPromptRequest = null,
   onReuseGenerate,
@@ -83,6 +84,7 @@ export function CreationWorkbench({
   wvReady?: boolean;
   characterIds?: string[];
   scenePresetIds?: string[];
+  propIds?: string[];
   generateApplyRequest?: DirectGenerateApplyRequest | null;
   /** PromptLibrary「用於製作範本」→ WorkflowCard idea box (nonce-driven) */
   workflowPromptRequest?: { text: string; nonce: number } | null;
@@ -96,6 +98,7 @@ export function CreationWorkbench({
       modelId?: string | null;
       characterIds?: string[] | null;
       scenePresetIds?: string[] | null;
+      propIds?: string[] | null;
       sourceAssetId?: string | null;
     },
   ) => boolean | void;
@@ -226,9 +229,10 @@ export function CreationWorkbench({
         modelId: modelId || undefined,
         characterIds: draft.characterIds,
         scenePresetIds: draft.scenePresetIds,
+        propIds: draft.propIds,
       });
     },
-    [canEdit, draft.characterIds, draft.scenePresetIds, projectId, savePrompt],
+    [canEdit, draft.characterIds, draft.propIds, draft.scenePresetIds, projectId, savePrompt],
   );
 
   const handleSaveSceneDraft = useCallback(
@@ -285,18 +289,20 @@ export function CreationWorkbench({
     return () => window.removeEventListener(WORKBENCH_REVEAL_EVENT, onReveal);
   }, [projectId, setDraft]);
 
-  // Keep char/scene picks mirrored into draft for cross-mode persistence.
+  // Keep char/scene/prop picks mirrored into draft for cross-mode persistence.
   // Compare by content so default `[]` props (new ref each render) do not loop.
   useEffect(() => {
     const same =
       characterIds.length === draft.characterIds.length &&
       scenePresetIds.length === draft.scenePresetIds.length &&
+      propIds.length === draft.propIds.length &&
       characterIds.every((id, i) => id === draft.characterIds[i]) &&
-      scenePresetIds.every((id, i) => id === draft.scenePresetIds[i]);
+      scenePresetIds.every((id, i) => id === draft.scenePresetIds[i]) &&
+      propIds.every((id, i) => id === draft.propIds[i]);
     if (same) return;
-    setDraft({ characterIds, scenePresetIds });
+    setDraft({ characterIds, scenePresetIds, propIds });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [characterIds, scenePresetIds]);
+  }, [characterIds, scenePresetIds, propIds]);
 
   const mode = draft.mode;
 
@@ -438,6 +444,7 @@ export function CreationWorkbench({
           wvReady={wvReady}
           characterIds={characterIds}
           scenePresetIds={scenePresetIds}
+          propIds={propIds}
           panelId={modePanelId(tabPrefix, "generate")}
           labelledBy={modeTabId(tabPrefix, "generate")}
           active={mode === "generate"}
@@ -453,6 +460,7 @@ export function CreationWorkbench({
           projectId={projectId}
           charIds={characterIds}
           sceneIds={scenePresetIds}
+          propIds={propIds}
           panelId={modePanelId(tabPrefix, "template")}
           labelledBy={modeTabId(tabPrefix, "template")}
           active={mode === "template"}

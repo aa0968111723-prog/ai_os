@@ -1145,9 +1145,9 @@ app.get("/api/me/export", async (req, res) => {
       new Map(rows.map((r) => [r.projectId, r.n]));
 
     const emptyCounts = () => new Map<string, number>();
-    const [sceneCounts, knowledgeCounts, characterCounts, presetCounts, assetCounts, myGenCounts] =
+    const [sceneCounts, knowledgeCounts, characterCounts, presetCounts, propCounts, assetCounts, myGenCounts] =
       projectIds.length === 0
-        ? [emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts()]
+        ? [emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts()]
         : await Promise.all([
             db
               .select({ projectId: schema.scenes.projectId, n: sql<number>`count(*)::int` })
@@ -1174,6 +1174,12 @@ app.get("/api/me/export", async (req, res) => {
               .groupBy(schema.scenePresets.projectId)
               .then(toCountMap),
             db
+              .select({ projectId: schema.props.projectId, n: sql<number>`count(*)::int` })
+              .from(schema.props)
+              .where(inArray(schema.props.projectId, projectIds))
+              .groupBy(schema.props.projectId)
+              .then(toCountMap),
+            db
               .select({ projectId: schema.assets.projectId, n: sql<number>`count(*)::int` })
               .from(schema.assets)
               .where(and(inArray(schema.assets.projectId, projectIds), isNull(schema.assets.deletedAt)))
@@ -1191,10 +1197,11 @@ app.get("/api/me/export", async (req, res) => {
     const knowledgeByProject = new Map<string, MyDataProjectExport["knowledge"]>();
     const charactersByProject = new Map<string, MyDataProjectExport["characters"]>();
     const presetsByProject = new Map<string, MyDataProjectExport["scenePresets"]>();
+    const propsByProject = new Map<string, MyDataProjectExport["props"]>();
     const myAssetsByProject = new Map<string, MyDataProjectExport["myAssets"]>();
 
     if (projectIds.length > 0) {
-      const [sceneRows, knowledgeRows, characterRows, presetRows, myAssetRows] = await Promise.all([
+      const [sceneRows, knowledgeRows, characterRows, presetRows, propRows, myAssetRows] = await Promise.all([
         db
           .select({
             projectId: schema.scenes.projectId,
@@ -1235,6 +1242,14 @@ app.get("/api/me/export", async (req, res) => {
           })
           .from(schema.scenePresets)
           .where(inArray(schema.scenePresets.projectId, projectIds))
+          .limit(500),
+        db
+          .select({
+            projectId: schema.props.projectId,
+            name: schema.props.name,
+          })
+          .from(schema.props)
+          .where(inArray(schema.props.projectId, projectIds))
           .limit(500),
         db
           .select({
@@ -1281,6 +1296,9 @@ app.get("/api/me/export", async (req, res) => {
       for (const c of presetRows) {
         pushCap(presetsByProject, c.projectId, { name: c.name }, 30);
       }
+      for (const c of propRows) {
+        pushCap(propsByProject, c.projectId, { name: c.name }, 30);
+      }
       for (const a of myAssetRows) {
         pushCap(myAssetsByProject, a.projectId, {
           title: a.title,
@@ -1320,6 +1338,7 @@ app.get("/api/me/export", async (req, res) => {
             knowledge: knowledgeCounts.get(p.id) ?? 0,
             characters: characterCounts.get(p.id) ?? 0,
             scenePresets: presetCounts.get(p.id) ?? 0,
+            props: propCounts.get(p.id) ?? 0,
             assets: assetCounts.get(p.id) ?? 0,
             myGenerations: myGenCounts.get(p.id) ?? 0,
           },
@@ -1327,6 +1346,7 @@ app.get("/api/me/export", async (req, res) => {
           knowledge: knowledgeByProject.get(p.id) ?? [],
           characters: charactersByProject.get(p.id) ?? [],
           scenePresets: presetsByProject.get(p.id) ?? [],
+          props: propsByProject.get(p.id) ?? [],
           myAssets: myAssetsByProject.get(p.id) ?? [],
         };
       });

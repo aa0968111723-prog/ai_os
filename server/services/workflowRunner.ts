@@ -351,9 +351,10 @@ async function advanceRun(run: RunRow): Promise<void> {
       modelId: presetStep.modelId,
       prompt: stepPrompt,
       sourceUrl: presetStep.usePrevAsSource && prevUrl ? prevUrl : undefined,
-      // 啟動時勾選的角色/場景卡貫穿每一步：視覺步驟注入同一套錨點（LLM/TTS 步驟由核心自行略過）
+      // 啟動時勾選的角色/場景/素材卡貫穿每一步：視覺步驟注入同一套錨點（LLM/TTS 步驟由核心自行略過）
       characterIds: (run.characterIds as string[] | null) ?? undefined,
       scenePresetIds: (run.scenePresetIds as string[] | null) ?? undefined,
+      propIds: (run.propIds as string[] | null) ?? undefined,
       workflowRunId: run.id, // 生成列回連本條 run——生成紀錄可回看來源
       reasonPrefix: "工作流生成",
     });

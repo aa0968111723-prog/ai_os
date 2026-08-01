@@ -25,7 +25,7 @@ const basePayload: MyDataExportPayload = {
       worldview: { logline: "在都市喧囂中找回平靜", tones: ["溫暖"], styles: ["寫實"] },
       createdAt: "2026-07-01T10:00:00.000Z",
       updatedAt: "2026-07-15T10:00:00.000Z",
-      counts: { scenes: 2, knowledge: 1, characters: 1, scenePresets: 0, assets: 3, myGenerations: 1 },
+      counts: { scenes: 2, knowledge: 1, characters: 1, scenePresets: 0, props: 1, assets: 3, myGenerations: 1 },
       scenes: [
         { orderIndex: 0, title: "開場", status: "approved", durationSec: 5, prompt: "清晨窗邊" },
         { orderIndex: 1, title: "結尾", status: "pending", durationSec: 4, prompt: null },
@@ -33,6 +33,7 @@ const basePayload: MyDataExportPayload = {
       knowledge: [{ title: "開示稿", kind: "transcript", pinned: true }],
       characters: [{ name: "阿明" }],
       scenePresets: [],
+      props: [{ name: "紅傘" }],
       myAssets: [{ title: "封面圖", kind: "image", createdAt: "2026-07-10T10:00:00.000Z" }],
     },
   ],

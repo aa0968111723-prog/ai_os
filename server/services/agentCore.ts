@@ -359,7 +359,7 @@ async function recordPlannedEvent(run: AgentRunRow): Promise<void> {
 
 async function buildPlannerContext(groupId: string, projectId: string, writableDbs: WritableDb[]): Promise<PlannerContext> {
   // CA-01：並行載入成員／筆記／排程／任務＋角色定裝／場景設定／素材庫（短代號供 generate 引用）
-  const [memberRows, noteRows, scheduleRows, taskRows, characterRows, presetRows, assetRows] = await Promise.all([
+  const [memberRows, noteRows, scheduleRows, taskRows, characterRows, presetRows, propRows, assetRows] = await Promise.all([
     db
       .select({ id: schema.users.id, name: schema.users.name, role: schema.groupMembers.role })
       .from(schema.groupMembers)
@@ -410,6 +410,13 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
       .where(eq(schema.scenePresets.projectId, projectId))
       .orderBy(asc(schema.scenePresets.createdAt))
       .limit(20),
+    // 素材設定卡：道具外觀／材質（prop1…）
+    db
+      .select({ id: schema.props.id, name: schema.props.name, appearance: schema.props.appearance })
+      .from(schema.props)
+      .where(eq(schema.props.projectId, projectId))
+      .orderBy(asc(schema.props.createdAt))
+      .limit(20),
     // 素材庫：needs 模型（圖生圖／i2v）來源（asset1…）；排除回收桶
     db
       .select({ id: schema.assets.id, title: schema.assets.title, kind: schema.assets.kind })
@@ -446,6 +453,11 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
   }));
   const scenePresets = presetRows.map((row, index) => ({
     ref: `preset${index + 1}`,
+    id: row.id,
+    label: row.name,
+  }));
+  const props = propRows.map((row, index) => ({
+    ref: `prop${index + 1}`,
     id: row.id,
     label: row.name,
   }));
@@ -500,6 +512,13 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
       }).join("\n")
       : "（尚無場景設定）",
     "</場景設定代號>",
+    "<素材設定代號>",
+    propRows.length
+      ? propRows.map((row, index) =>
+        `prop${index + 1}=「${row.name}」${row.appearance.replace(/\s+/g, " ").slice(0, 160)}`,
+      ).join("\n")
+      : "（尚無素材設定）",
+    "</素材設定代號>",
     "<素材庫代號>",
     assetRows.length
       ? assetRows.map((row, index) => `asset${index + 1}=「${row.title}」（${row.kind}）`).join("\n")
@@ -514,6 +533,7 @@ async function buildPlannerContext(groupId: string, projectId: string, writableD
     databases: writableDbs,
     characters,
     scenePresets,
+    props,
     assets,
     text,
   };
@@ -658,7 +678,7 @@ export async function planAgentCore(input: {
 可用步驟與專屬欄位（不得發明其他 kind）：
 - split_script：script 可省略，從知識庫腳本拆分鏡。
 - create_scene：sceneTitle、voiceover?、durationSec?、prompt?。
-- generate：prompt、sceneNo?、modelId?、characterRefs?、scenePresetRefs?、sourceAssetRef?、sourceUrl?；生成會花點數。needs 模型（圖生圖／i2v 等）必須指定 sourceAssetRef（素材庫代號）或 sourceUrl（https）。characterRefs／scenePresetRefs 用上下文 charN／presetN 代號。
+- generate：prompt、sceneNo?、modelId?、characterRefs?、scenePresetRefs?、propRefs?、sourceAssetRef?、sourceUrl?；生成會花點數。needs 模型（圖生圖／i2v 等）必須指定 sourceAssetRef（素材庫代號）或 sourceUrl（https）。characterRefs／scenePresetRefs／propRefs 用上下文 charN／presetN／propN 代號。
 - voiceover：sceneNo；生成會花點數。
 - submit_approval：sceneNo。
 - record_to_database：dbRef、data；只能使用可寫資料庫代號與欄位 key。

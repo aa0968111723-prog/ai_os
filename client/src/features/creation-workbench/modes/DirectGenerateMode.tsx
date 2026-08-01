@@ -53,6 +53,7 @@ export function DirectGenerateMode({
   wvReady,
   characterIds,
   scenePresetIds,
+  propIds = [],
   panelId,
   labelledBy,
   active,
@@ -79,6 +80,8 @@ export function DirectGenerateMode({
   wvReady: boolean;
   characterIds: string[];
   scenePresetIds: string[];
+  /** 素材設定卡（道具）勾選；預設空陣列讓既有呼叫端不必改 */
+  propIds?: string[];
   panelId: string;
   labelledBy: string;
   active: boolean;
@@ -97,6 +100,7 @@ export function DirectGenerateMode({
       modelId?: string | null;
       characterIds?: string[] | null;
       scenePresetIds?: string[] | null;
+      propIds?: string[] | null;
       sourceAssetId?: string | null;
     },
   ) => void;
@@ -119,6 +123,8 @@ export function DirectGenerateMode({
 
   const prompt = draft.prompt ?? "";
   const setPrompt = (next: string) => setDraft({ prompt: next });
+  /** 有勾任何一種一致性卡片（角色／場景／素材）——決定要不要提醒此模型吃不吃卡片 */
+  const cardsPicked = characterIds.length > 0 || scenePresetIds.length > 0 || propIds.length > 0;
 
   const assets = trpc.projects.assets.useQuery({ projectId });
   const quota = trpc.quota.my.useQuery({ groupId }, { enabled: confirming && !!groupId });
@@ -137,6 +143,7 @@ export function DirectGenerateMode({
           modelId: vars.modelId,
           characterIds: vars.characterIds ?? [],
           scenePresetIds: vars.scenePresetIds ?? [],
+          propIds: vars.propIds ?? [],
         });
       }
       setPrompt("");
@@ -334,24 +341,25 @@ export function DirectGenerateMode({
         {summaryChip(`世界觀${wvReady ? " ✓" : "（未定盤）"}`, "#onboard-worldview", wvReady)}
         {summaryChip(`角色 ${characterIds.length}`, "#sec-characters", characterIds.length > 0)}
         {summaryChip(`場景 ${scenePresetIds.length}`, "#sec-scenes", scenePresetIds.length > 0)}
+        {summaryChip(`素材 ${propIds.length}`, "#sec-props", propIds.length > 0)}
       </div>
 
-      {(characterIds.length > 0 || scenePresetIds.length > 0) &&
+      {cardsPicked &&
         fullModel &&
         !supportsCardAnchors(fullModel.category) && (
           <Hint layer="always" role="alert" style={{ color: "var(--gold-ink)", marginTop: 6 }}>
             ⚠ 此模型（{CATEGORIES.find((c) => c.id === fullModel.category)?.label ?? fullModel.category}
-            ）不會使用角色卡／場景卡——已勾選的卡片不影響本次生成
+            ）不會使用角色卡／場景卡／素材卡——已勾選的卡片不影響本次生成
           </Hint>
         )}
-      {(characterIds.length > 0 || scenePresetIds.length > 0) &&
+      {cardsPicked &&
         fullModel &&
         supportsCardAnchors(fullModel.category) && (
           <Hint style={{ marginTop: 6, fontSize: 12 }}>
             {needs === "image"
               ? // QA 2026-08-01：這類模型要一張來源圖，沒挑就用卡片上的參考圖——先前綁了圖卻不生效
-                "角色卡／場景卡以「文字描述」注入提示詞；沒有另外挑來源圖時，會自動用卡片上的參考圖當來源（角色優先）"
-              : "角色卡／場景卡以「文字描述」注入提示詞；參考圖只在「圖生圖／參考圖」這類模型才會當來源"}
+                "角色卡／場景卡／素材卡以「文字描述」注入提示詞；沒有另外挑來源圖時，會自動用卡片上的參考圖當來源（角色 → 場景 → 素材）"
+              : "角色卡／場景卡／素材卡以「文字描述」注入提示詞；參考圖只在「圖生圖／參考圖」這類模型才會當來源"}
           </Hint>
         )}
 
@@ -478,12 +486,13 @@ export function DirectGenerateMode({
             <b>{model.label}</b>・{projectFormat}
             {characterIds.length > 0 && <>・帶入 {characterIds.length} 個角色定裝</>}
             {scenePresetIds.length > 0 && <>・{scenePresetIds.length} 個場景設定</>}
+            {propIds.length > 0 && <>・{propIds.length} 個素材設定</>}
           </p>
-          {(characterIds.length > 0 || scenePresetIds.length > 0) &&
+          {cardsPicked &&
             fullModel &&
             !supportsCardAnchors(fullModel.category) && (
               <p role="alert" style={{ margin: "4px 0", fontSize: 13, color: "var(--gold-ink)" }}>
-                ⚠ 此模型不會使用角色卡／場景卡——期待角色/場景一致請改用文生圖、圖生圖或影片類模型
+                ⚠ 此模型不會使用角色卡／場景卡／素材卡——期待角色/場景/道具一致請改用文生圖、圖生圖或影片類模型
               </p>
             )}
           <p style={{ margin: "4px 0", fontSize: 13 }}>
@@ -559,6 +568,7 @@ export function DirectGenerateMode({
                     sourceUrl,
                     characterIds,
                     scenePresetIds,
+                    propIds,
                     clientRequestId: submitRequestId.current,
                   }),
                 )

@@ -10,6 +10,7 @@ export interface PromptReuseSettings {
   modelId?: string | null;
   characterIds?: string[] | null;
   scenePresetIds?: string[] | null;
+  propIds?: string[] | null;
   /** Prompt row id for apply_prompt tracking (optional). */
   promptId?: string;
 }
@@ -106,13 +107,14 @@ export function PromptLibrary({
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <button
                   style={{ padding: "3px 12px", fontSize: "var(--fs-12)" }}
-                  title={modelLabel ? "帶入目前模式，並還原模型與角色/場景勾選" : "帶入目前模式"}
+                  title={modelLabel ? "帶入目前模式，並還原模型與角色/場景/素材勾選" : "帶入目前模式"}
                   onClick={() =>
                     onUse(p.text, {
                       promptId: p.id,
                       modelId: p.modelId,
                       characterIds: p.characterIds as string[] | null,
                       scenePresetIds: p.scenePresetIds as string[] | null,
+                      propIds: p.propIds as string[] | null,
                     })
                   }
                 >

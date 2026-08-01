@@ -13,6 +13,7 @@ import { modelsRouter } from "./models";
 import { knowledgeRouter } from "./knowledge";
 import { charactersRouter } from "./characters";
 import { scenePresetsRouter } from "./scenePresets";
+import { propsRouter } from "./props";
 import { promptsRouter } from "./prompts";
 import { optionsRouter } from "./options";
 import { feedbackReportsRouter } from "./feedbackReports";
@@ -52,6 +53,7 @@ export const appRouter = router({
   knowledge: knowledgeRouter,
   characters: charactersRouter,
   scenePresets: scenePresetsRouter,
+  props: propsRouter,
   prompts: promptsRouter,
   workflows: workflowsRouter,
   options: optionsRouter,

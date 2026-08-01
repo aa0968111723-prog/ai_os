@@ -16,6 +16,8 @@ export interface CreationDraft {
   sourceAssetIds: string[];
   characterIds: string[];
   scenePresetIds: string[];
+  /** 生成帶入的素材設定卡 id（道具外觀一致） */
+  propIds: string[];
   /** 問 AI／多步開拍：優先注入的知識庫篇目 id（≤20） */
   knowledgeIds: string[];
   worldviewEnabled: boolean;
@@ -49,6 +51,7 @@ export function emptyDraft(mode: CreationMode = "ask"): CreationDraft {
     sourceAssetIds: [],
     characterIds: [],
     scenePresetIds: [],
+    propIds: [],
     knowledgeIds: [],
     worldviewEnabled: true,
     skillIds: [],
@@ -82,6 +85,9 @@ function normalizeDraft(raw: unknown, fallbackMode: CreationMode = "ask"): Creat
     scenePresetIds: Array.isArray(o.scenePresetIds)
       ? o.scenePresetIds.filter((x): x is string => typeof x === "string")
       : base.scenePresetIds,
+    propIds: Array.isArray(o.propIds)
+      ? o.propIds.filter((x): x is string => typeof x === "string")
+      : base.propIds,
     knowledgeIds: Array.isArray(o.knowledgeIds)
       ? o.knowledgeIds.filter((x): x is string => typeof x === "string").slice(0, 20)
       : base.knowledgeIds,
@@ -168,6 +174,7 @@ export function updateDraft(projectId: string, patch: DraftPatch): CreationDraft
   if (patch.sourceAssetIds) next.sourceAssetIds = patch.sourceAssetIds;
   if (patch.characterIds) next.characterIds = patch.characterIds;
   if (patch.scenePresetIds) next.scenePresetIds = patch.scenePresetIds;
+  if (patch.propIds) next.propIds = patch.propIds;
   if (patch.knowledgeIds) next.knowledgeIds = patch.knowledgeIds;
   saveDraft(projectId, next);
   return next;
@@ -240,6 +247,7 @@ export function useCreationDraft(projectId: string): {
           sourceAssetIds: patch.sourceAssetIds ?? prev.sourceAssetIds,
           characterIds: patch.characterIds ?? prev.characterIds,
           scenePresetIds: patch.scenePresetIds ?? prev.scenePresetIds,
+          propIds: patch.propIds ?? prev.propIds,
           knowledgeIds: patch.knowledgeIds ?? prev.knowledgeIds,
         };
         scheduleSave(projectRef.current, next);

@@ -27,6 +27,7 @@ export type ReuseGenerateFn = (
     modelId?: string | null;
     characterIds?: string[] | null;
     scenePresetIds?: string[] | null;
+    propIds?: string[] | null;
     sourceAssetId?: string | null;
   },
 ) => boolean | void;
@@ -214,6 +215,7 @@ export function CreationResourceDrawer({
             modelId: settings?.modelId,
             characterIds: settings?.characterIds,
             scenePresetIds: settings?.scenePresetIds,
+            propIds: settings?.propIds,
           }),
         );
         if (!ok) return; // user cancelled overwrite — keep drawer open, no success toast
@@ -229,6 +231,7 @@ export function CreationResourceDrawer({
         modelId: settings?.modelId,
         characterIds: settings?.characterIds,
         scenePresetIds: settings?.scenePresetIds,
+        propIds: settings?.propIds,
       });
 
       // Template: also fill idea box (goal alone does not auto-start or fill idea).

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { getModel } from "@shared/models";
 import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
@@ -51,7 +51,7 @@ function modelLabel(modelId: string): string {
 }
 
 /** 製作範本（底層仍為 workflow）：一鍵串多個模型，由伺服器背景逐步執行，關掉頁面也會繼續跑。
- *  charIds/sceneIds＝生成台勾選的角色/場景卡（二合一）：啟動時一併帶入，整條串鏈的視覺步驟注入同一套錨點；
+ *  charIds/sceneIds/propIds＝生成台勾選的角色/場景/素材卡：啟動時一併帶入，整條串鏈的視覺步驟注入同一套錨點；
  *  promptRequest＝提示詞庫「用於製作範本」的咒語（nonce 遞增才套用一次）；
  *  pickRequest＝跨模式帶入的 templateId 預選（nonce 遞增才套用一次）；
  *  embedded＝嵌在工作台 TemplateMode 內時不包外層 card */
@@ -59,6 +59,7 @@ export function WorkflowCard({
   projectId,
   charIds = [],
   sceneIds = [],
+  propIds = [],
   promptRequest,
   pickRequest,
   embedded = false,
@@ -66,6 +67,7 @@ export function WorkflowCard({
   projectId: string;
   charIds?: string[];
   sceneIds?: string[];
+  propIds?: string[];
   promptRequest?: { text: string; nonce: number } | null;
   /** Pre-select workflow preset from draft.templateId / run_template bring-in */
   pickRequest?: { templateId: string; nonce: number } | null;
@@ -232,12 +234,13 @@ export function WorkflowCard({
         這次想完成什麼？（一句話）
       </label>
       <textarea id="wf-idea" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂中一炷香緩緩升起，傳達放下與新生" />
-      {/* 二合一回看線：啟動會沿用生成台勾選的角色/場景卡，整條串鏈畫風一致（沒勾就不帶） */}
-      {(charIds.length > 0 || sceneIds.length > 0) && (
+      {/* 回看線：啟動會沿用生成台勾選的角色/場景/素材卡，整條串鏈畫風一致（沒勾就不帶） */}
+      {(charIds.length > 0 || sceneIds.length > 0 || propIds.length > 0) && (
         <Meta as="p" style={{ marginTop: 6 }}>
           帶入生成台勾選：
           {charIds.length > 0 && <Chip selected style={{ marginLeft: 4 }}>角色 {charIds.length}</Chip>}
           {sceneIds.length > 0 && <Chip selected style={{ marginLeft: 4 }}>場景 {sceneIds.length}</Chip>}
+          {propIds.length > 0 && <Chip selected style={{ marginLeft: 4 }}>素材 {propIds.length}</Chip>}
           <span style={{ marginLeft: 4 }}>——視覺步驟都注入同一套錨點</span>
         </Meta>
       )}
@@ -255,6 +258,7 @@ export function WorkflowCard({
               // 「沿用勾選」是順手帶入，不因超勾讓整條製作範本啟動失敗
               characterIds: charIds.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
               scenePresetIds: sceneIds.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
+              propIds: propIds.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
             })
           }
         >
