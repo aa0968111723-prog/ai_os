@@ -92,7 +92,8 @@ export const integrationsRouter = router({
   listDriveFiles: authedProcedure
     .input(z.object({
       query: z.string().trim().max(200).optional(),
-      pageToken: z.string().max(500).optional(),
+      // Google pageToken 常為 opaque base64，實測可 >600 字；500 會擋第二頁分頁
+      pageToken: z.string().min(1).max(8192).optional(),
       folderId: z.string().trim().max(200).optional(),
     }))
     .query(async ({ ctx, input }) => {

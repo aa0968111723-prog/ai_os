@@ -24,7 +24,7 @@ const FAL_PLAN_TIMEOUT_MS = 90_000;
  * 兩邊各留一份的話，改價或換模型時必然漂移。此處 re-export 維持既有匯入點不變。
  */
 export { FAL_AGENT_PROFILES, type FalAgentMode } from "./llmProvider";
-import { FAL_AGENT_PROFILES, type FalAgentMode } from "./llmProvider";
+import { FAL_AGENT_PROFILES, FAL_OPENROUTER_REASONING, type FalAgentMode } from "./llmProvider";
 
 interface PlannerCompletion {
   provider: "nvidia-nim" | "fal-openrouter";
@@ -109,7 +109,8 @@ async function completeFal(prompt: string, mode: FalAgentMode): Promise<PlannerC
     prompt,
     system_prompt: "你是正式產品的 AI 代理規劃器。只輸出一個符合指定結構的 JSON 物件，不要輸出 markdown、解說、reasoning 或 chain-of-thought。",
     model: profile.model,
-    reasoning: false,
+    // 見 llmProvider.FAL_OPENROUTER_REASONING：部分模型禁止 reasoning:false
+    reasoning: FAL_OPENROUTER_REASONING,
     temperature: profile.temperature,
     max_tokens: profile.maxTokens,
   });

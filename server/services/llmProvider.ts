@@ -140,13 +140,21 @@ async function completeNim(params: CompleteTextParams): Promise<LlmCompletion> {
   };
 }
 
+/**
+ * fal OpenRouter 部分模型強制 reasoning，設 false 會 400：
+ * 「Reasoning is mandatory for this endpoint and cannot be disabled.」
+ * 產品仍只取 content／resultText，不把 chain-of-thought 回給前端。
+ * 與 agentPlannerProvider 共用此常數，避免兩邊漂移。
+ */
+export const FAL_OPENROUTER_REASONING = true;
+
 async function completeFal(params: CompleteTextParams, mode: FalAgentMode): Promise<LlmCompletion> {
   const profile = FAL_AGENT_PROFILES[mode];
   const submitted = await falSubmit(FAL_OPENROUTER_ENDPOINT, "text", {
     prompt: params.prompt,
     system_prompt: params.systemPrompt ?? NEUTRAL_SYSTEM_PROMPT,
     model: profile.model,
-    reasoning: false,
+    reasoning: FAL_OPENROUTER_REASONING,
     temperature: params.temperature ?? profile.temperature,
     max_tokens: params.maxTokens ?? profile.maxTokens,
   });
