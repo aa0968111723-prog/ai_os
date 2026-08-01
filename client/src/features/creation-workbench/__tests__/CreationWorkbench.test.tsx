@@ -69,11 +69,13 @@ vi.mock("../../../discuss", () => ({
 /** Captures onCreationAction from AskAiMode → ProjectAssistant for bring-in tests. */
 let lastAssistantProps: {
   onCreationAction?: (action: import("../creationActions").CreationAction) => void;
+  askFillRequest?: { nonce: number; message: string; autoSend?: boolean } | null;
 } = {};
 
 vi.mock("../../../components/ProjectAssistant", () => ({
   ProjectAssistant: (props: {
     onCreationAction?: (action: import("../creationActions").CreationAction) => void;
+    askFillRequest?: { nonce: number; message: string; autoSend?: boolean } | null;
   }) => {
     lastAssistantProps = props;
     return <div data-testid="assistant">assistant</div>;
@@ -196,6 +198,55 @@ describe("CreationWorkbench", () => {
     expect(document.getElementById("sec-ai-hub")).toBeTruthy();
     expect(document.getElementById("sec-assistant")).toBeTruthy();
     expect(document.getElementById("sec-agent")).toBeTruthy();
+  });
+
+  /**
+   * QA 2026-08-01：頂部「你想完成什麼畫面？」先前只把字鏡射到下面的模式面板，本身沒有送出行為，
+   * 使用者回報「上面那個框不能用」。以下四個案例釘住「每個模式按下去各自會做什麼」。
+   */
+  it("目標框送出：一起想＝直接問 AI（免費，autoSend）", async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    await user.type(screen.getByLabelText("你想完成什麼畫面？"), "幫我想三個開場鏡頭");
+    await user.click(screen.getByRole("button", { name: "問 AI" }));
+
+    await waitFor(() => {
+      expect(lastAssistantProps.askFillRequest?.message).toBe("幫我想三個開場鏡頭");
+    });
+    expect(lastAssistantProps.askFillRequest?.autoSend).toBe(true);
+  });
+
+  it("目標框送出：直接出圖＝只帶入提示詞，不自動生成（會扣點的動作要使用者自己按）", async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    await user.type(screen.getByLabelText("你想完成什麼畫面？"), "清晨公園長椅靜坐");
+    await user.click(screen.getByRole("tab", { name: /直接出圖/ }));
+    await user.click(screen.getByRole("button", { name: "帶入提示詞" }));
+
+    await waitFor(() => {
+      expect(loadDraft(projectId).prompt).toBe("清晨公園長椅靜坐");
+    });
+    expect(generationSubmit).not.toHaveBeenCalled();
+  });
+
+  it("目標框送出：套用範本＝帶入想法欄，不自動執行", async () => {
+    const user = userEvent.setup();
+    renderWorkbench();
+
+    await user.type(screen.getByLabelText("你想完成什麼畫面？"), "做一張金句卡");
+    await user.click(screen.getByRole("tab", { name: /套用範本/ }));
+    await user.click(screen.getByRole("button", { name: "帶入範本" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("workflow-card")).toHaveAttribute("data-prompt", "做一張金句卡");
+    });
+  });
+
+  it("目標框：沒打字時送出鈕不可按（不會送出空目標）", () => {
+    renderWorkbench();
+    expect(screen.getByRole("button", { name: "問 AI" })).toBeDisabled();
   });
 
   it("shows only the active mode panel", async () => {

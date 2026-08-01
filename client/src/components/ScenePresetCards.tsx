@@ -262,7 +262,7 @@ export function ScenePresetCards({
                       <Button
                         variant="ghost"
                         style={{ fontSize: 11 }}
-                        title="綁一張場景參考圖：上傳或從素材庫選"
+                        title="綁一張場景參考圖：上傳或從素材庫選。選「圖生圖／參考圖」類模型又沒挑來源時，會自動拿它當來源圖（角色卡優先）"
                         onClick={() => {
                           setRefEditId(s.id);
                           setTextEditId(null);

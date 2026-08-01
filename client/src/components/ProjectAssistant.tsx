@@ -135,7 +135,7 @@ export function ProjectAssistant({
    * Workbench CreationAction type:"ask" / apply_prompt→ask: fill chat input without sending.
    * nonce bumps so the same message can re-apply.
    */
-  askFillRequest?: { nonce: number; message: string } | null;
+  askFillRequest?: { nonce: number; message: string; autoSend?: boolean } | null;
   /** 本次問答優先注入的知識 id（工作台勾選） */
   knowledgeIds?: string[];
 }) {
@@ -245,8 +245,12 @@ export function ProjectAssistant({
     });
   }
 
-  const send = async () => {
-    const m = input.trim();
+  /**
+   * override＝從工作台「目標」框直接送出（QA 2026-08-01：那個框先前只鏡射不能送，看起來像壞的）。
+   * 不吃 input state 是因為呼叫端剛 setInput，state 這一輪還沒更新。
+   */
+  const send = async (override?: string) => {
+    const m = (override ?? input).trim();
     if (!m || busy) return;
     abortRef.current?.abort(); // 保險：中止任何殘留串流（busy 守門通常已擋住並行）
     const requestProjectId = projectId;
@@ -355,6 +359,9 @@ export function ProjectAssistant({
     if (!askFillRequest) return;
     setInput(askFillRequest.message);
     setCollapsed(false);
+    // autoSend＝使用者在工作台按了「送出」；提問本身免費，不需要再確認一次
+    if (askFillRequest.autoSend) void send(askFillRequest.message);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askFillRequest]);
 
   // 一鍵清除：清對話與所有連帶暫存（已執行標記、換模型選擇），回到冷啟動可再問

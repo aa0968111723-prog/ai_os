@@ -22,7 +22,7 @@ import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { failStaleGenerationTx, reserveQuota } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
-import { buildCharacterAnchor, buildSceneAnchor } from "./cardAnchors";
+import { buildCharacterAnchor, buildSceneAnchor, resolveCardReferenceSource } from "./cardAnchors";
 import { groupLeaderIds, pushToUsers } from "./webPush";
 
 export type GenerationRow = typeof schema.generations.$inferSelect;
@@ -238,7 +238,10 @@ export async function assertGenerationEntityIds(
 export async function submitGenerationCore(input: SubmitCoreInput): Promise<GenerationRow> {
   const model = resolveModel(input.modelId) ?? getModel(input.modelId);
   if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "未知模型(不在註冊表或即時目錄)" });
-  if (model.needs && !input.sourceUrl && !input.sourceAssetId) {
+  // needs 的最終檢查移到「自動採用定裝／場景參考圖」之後（見下方 resolveCardReferenceSource）：
+  // 沒帶來源但有勾卡片時，卡片上的參考圖就是最合理的來源，先補了再判斷。
+  const mayFillFromCards = model.needs === "image" && !!(input.characterIds?.length || input.scenePresetIds?.length);
+  if (model.needs && !input.sourceUrl && !input.sourceAssetId && !mayFillFromCards) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
   }
 
@@ -262,16 +265,55 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     sourceAssetId: input.sourceAssetId,
   });
 
+  /**
+   * 定裝／場景參考圖自動當來源（QA 2026-08-01）。
+   *
+   * 在此之前，卡片上綁的參考圖只是給人比對用的縮圖——選了「圖生圖／參考圖」這類模型又沒挑來源，
+   * 只會吃一個「此模型需要來源:image」然後什麼都沒發生，使用者完全不知道自己明明已經綁了圖。
+   *
+   * 只在「模型要圖、使用者沒給來源、但有勾角色／場景卡」時補（角色優先，其次場景）：
+   * 原本這條路一定失敗，補進來只會把失敗變成成功，不影響任何既有的成功路徑。
+   * 參考圖可能綁在同組的別的專案素材上（characters.upsert 只驗同組），所以這裡不過
+   * assertGenerationEntityIds 的專案歸屬檢查——同組檢查由下方 srcAsset.groupId 那關把守。
+   */
+  let effectiveSourceAssetId = input.sourceAssetId;
+  let usedCardReference: "character" | "scene" | null = null;
+  if (mayFillFromCards && !input.sourceUrl && !effectiveSourceAssetId) {
+    const ref = await resolveCardReferenceSource(project.id, {
+      characterIds: input.characterIds,
+      scenePresetIds: input.scenePresetIds,
+    });
+    if (ref) {
+      effectiveSourceAssetId = ref.assetId;
+      usedCardReference = ref.from;
+    }
+  }
+  if (model.needs && !input.sourceUrl && !effectiveSourceAssetId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: mayFillFromCards
+        ? "此模型需要來源圖——勾選的角色／場景卡都還沒設參考圖，請先在卡片上「設參考圖」，或直接從素材庫挑一張來源"
+        : `此模型需要來源:${model.sourceHint ?? model.needs}`,
+    });
+  }
+
   // 素材庫來源 → 簽名網址（同組檢查；本地檔或外部網址都可）
   let sourceUrl = input.sourceUrl;
-  if (input.sourceAssetId) {
+  if (effectiveSourceAssetId) {
     // 回收桶素材不得當付費生成來源：素材庫挑選 UI 已濾 deletedAt，但 stale 畫面／直呼 tRPC
     // 可帶入已軟刪的 id——不擋的話會扣點且讓「已刪」內容回流到新成品
     const [srcAsset] = await db
       .select()
       .from(schema.assets)
-      .where(and(eq(schema.assets.id, input.sourceAssetId), isNull(schema.assets.deletedAt)));
-    if (!srcAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到來源素材（可能已在回收桶——先還原才能當來源）" });
+      .where(and(eq(schema.assets.id, effectiveSourceAssetId), isNull(schema.assets.deletedAt)));
+    if (!srcAsset) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: usedCardReference
+          ? "卡片上的參考圖已被刪除（在回收桶裡）——請還原它，或替卡片重設一張參考圖"
+          : "找不到來源素材（可能已在回收桶——先還原才能當來源）",
+      });
+    }
     if (srcAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "來源素材不屬於此專案的組" });
     // 明顯不相容的來源直接擋下，省一次白白失敗的生成
     if (model.needs && (SOURCE_INCOMPAT[model.needs] ?? []).includes(srcAsset.kind)) {

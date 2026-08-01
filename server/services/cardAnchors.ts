@@ -139,3 +139,53 @@ export async function buildSceneAnchor(projectId: string, presetIds: string[]): 
     .where(and(eq(schema.scenePresets.projectId, projectId), inArray(schema.scenePresets.id, ids)));
   return formatSceneAnchor(rows, presetIds);
 }
+
+/**
+ * 卡片參考圖 → 生成來源（QA 2026-08-01）。
+ *
+ * 「圖生圖／參考圖」這類模型需要一張來源圖。使用者在角色定裝卡／場景設定卡上綁的參考圖，
+ * 語意上就是那張圖——先前卻只當縮圖用，選了這類模型又沒另外挑素材就直接失敗。
+ *
+ * 取用順序＝呼叫端勾選的順序（角色優先於場景）：第一張綁得到的參考圖就是來源。
+ * 這裡只回 assetId，同組／軟刪／型別相容仍由 submitGenerationCore 既有那幾關把守。
+ */
+/**
+ * 從一批卡片列中挑出「第一張綁得到的參考圖」，順序＝使用者勾選的順序（DB inArray 不保證順序）。
+ * 抽成純函式才測得到這條順序規則——它決定同時勾多張卡時用誰的圖。
+ */
+export function pickFirstReference(
+  rows: Array<{ id: string; referenceAssetId: string | null }>,
+  orderedIds: string[],
+): string | null {
+  const byId = new Map(rows.map((r) => [r.id, r.referenceAssetId]));
+  for (const id of orderedIds) {
+    const ref = byId.get(id);
+    if (ref) return ref;
+  }
+  return null;
+}
+
+export async function resolveCardReferenceSource(
+  projectId: string,
+  selected: { characterIds?: string[]; scenePresetIds?: string[] },
+): Promise<{ assetId: string; from: "character" | "scene" } | null> {
+  const charIds = selected.characterIds ?? [];
+  if (charIds.length > 0) {
+    const rows = await db
+      .select({ id: schema.characters.id, referenceAssetId: schema.characters.referenceAssetId })
+      .from(schema.characters)
+      .where(and(eq(schema.characters.projectId, projectId), inArray(schema.characters.id, [...new Set(charIds)])));
+    const ref = pickFirstReference(rows, charIds);
+    if (ref) return { assetId: ref, from: "character" };
+  }
+  const sceneIds = selected.scenePresetIds ?? [];
+  if (sceneIds.length > 0) {
+    const rows = await db
+      .select({ id: schema.scenePresets.id, referenceAssetId: schema.scenePresets.referenceAssetId })
+      .from(schema.scenePresets)
+      .where(and(eq(schema.scenePresets.projectId, projectId), inArray(schema.scenePresets.id, [...new Set(sceneIds)])));
+    const ref = pickFirstReference(rows, sceneIds);
+    if (ref) return { assetId: ref, from: "scene" };
+  }
+  return null;
+}

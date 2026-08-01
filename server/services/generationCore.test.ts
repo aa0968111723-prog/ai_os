@@ -109,9 +109,14 @@ describe("generationCore CA-01 assertGenerationEntityIds (source-lock)", () => {
     // 必須在 assertProjectAllows 之後、素材簽名／建列之前
     const projectAllowsIdx = source.indexOf('assertProjectAllows(project, "generate")');
     const assertEntityIdx = source.indexOf("await assertGenerationEntityIds(project.id");
-    const sourceAssetResolveIdx = source.indexOf("if (input.sourceAssetId)", assertEntityIdx);
+    // 來源解析改用 effectiveSourceAssetId（QA 2026-08-01：沒挑來源時可回退到卡片參考圖）
+    const sourceAssetResolveIdx = source.indexOf("if (effectiveSourceAssetId) {", assertEntityIdx);
     expect(projectAllowsIdx).toBeGreaterThan(-1);
     expect(assertEntityIdx).toBeGreaterThan(projectAllowsIdx);
     expect(sourceAssetResolveIdx).toBeGreaterThan(assertEntityIdx);
+    // 卡片參考圖回退必須排在 fail-closed 檢查之後——否則等於給了一條繞過專案歸屬檢查的來源通道
+    const cardFallbackIdx = source.indexOf("resolveCardReferenceSource(project.id", assertEntityIdx);
+    expect(cardFallbackIdx).toBeGreaterThan(assertEntityIdx);
+    expect(cardFallbackIdx).toBeLessThan(sourceAssetResolveIdx);
   });
 });
