@@ -10,6 +10,7 @@
   "platforms": ["macOS", "windows", "linux"],
   "permissions": [
     "core:default",
-    "allow-desktop-bridge"
+    "allow-desktop-bridge",
+    "window-state:default"
   ]
 }
