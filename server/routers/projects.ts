@@ -547,6 +547,57 @@ export const projectsRouter = router({
     }),
 
   /**
+   * 素材版本血緣：某來源的直接子版本（asset_revisions 表）。
+   * 桌面交接上傳會寫列；舊資料若只有 meta 可仍靠前端 assetLineage 解析。
+   */
+  listAssetRevisions: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      sourceAssetId: z.string().uuid(),
+      limit: z.number().int().min(1).max(200).optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, project.groupId);
+      const revs = await db
+        .select()
+        .from(schema.assetRevisions)
+        .where(and(
+          eq(schema.assetRevisions.projectId, input.projectId),
+          eq(schema.assetRevisions.sourceAssetId, input.sourceAssetId),
+        ))
+        .orderBy(desc(schema.assetRevisions.createdAt))
+        .limit(input.limit ?? 100);
+      if (revs.length === 0) return [];
+      const ids = revs.map((r) => r.assetId);
+      const rows = await db
+        .select()
+        .from(schema.assets)
+        .where(and(
+          eq(schema.assets.projectId, input.projectId),
+          isNull(schema.assets.deletedAt),
+          inArray(schema.assets.id, ids),
+        ));
+      const byId = new Map(rows.map((a) => [a.id, a]));
+      return revs
+        .map((r) => {
+          const asset = byId.get(r.assetId);
+          if (!asset) return null;
+          return {
+            revisionId: r.id,
+            assetId: r.assetId,
+            sourceAssetId: r.sourceAssetId,
+            desktopHandoffId: r.desktopHandoffId,
+            editorId: r.editorId,
+            createdAt: r.createdAt,
+            asset,
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x != null);
+    }),
+
+  /**
    * 刪除素材＝軟刪除（丟進回收桶，可還原）。上傳者本人或組長以上可操作。
    * ★ 金錢安全：點數＝真金——軟刪除「絕不」退點；也不刪 Volume 檔（還原要拿得回檔）。
    * 不清 scenes.assetId／narrationAssetId：保留引用，還原後分鏡自動重新接上原素材。
