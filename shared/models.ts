@@ -8,6 +8,8 @@
  * 待 needs 陣列化)與完整 LoRA 資產機制依產品建議 #2/#14/#15 另案,未收錄。
  * 啟動時同步進 model_catalog 資料表供代理查詢。
  * 定案:只接 Fal.ai;1 點 ≈ NT$1(USD×31 估);cost 為官方約略價,實際帳單以 fal 計價頁為準。
+ * 實價計點(2026-08-01):fal 模型的 points 一律由 cost 的 USD 實價機械換算(realPricePoints),
+ * 手填值只當「無法機械換算」的後備;改價改 cost 字串即可,點數自動跟上。
  * verified=true 表示模型頁面於 2026-07 逐一查證過;false 為合理推測 ID,真實模式首跑需確認
  * (失敗會自動退點並顯示錯誤,不會白扣)。
  */
@@ -46,7 +48,8 @@ export interface ModelEntry {
   kind: OutputKind;
   /** 需要來源輸入時標注(UI 會顯示來源欄位) */
   needs?: SourceKind;
-  /** 每次生成扣點(1 點 ≈ NT$1;訓練類為每次訓練) */
+  /** 每次生成扣點(1 點 ≈ NT$1;訓練類為每次訓練)。fal 模型在模組載入時由 cost 官方 USD
+   *  實價 × USD_TO_TWD 自動覆寫(見 realPricePoints);字面手填值僅在不可機械換算時生效 */
   points: number;
   /** 特性(研究摘要) */
   strengths: string;
@@ -2937,6 +2940,87 @@ export function getModel(id: string): ModelEntry | undefined {
 
 /** 匯率假設（與 scripts/audit-model-pricing.ts 一致）：1 點 ≈ NT$1、USD×31——校準與動態估點同一基準 */
 export const USD_TO_TWD = 31;
+
+/* ── 實價點數（2026-08-01 定案）：fal 模型全面以官方 USD 實價 × USD_TO_TWD 直接計點 ──
+   cost 字串是價格單一真相；能機械換算的（$ 金額＋可辨識單位）一律在模組載入時覆寫手填 points，
+   讓「顯示＝扣點＝退點」都等於實價台幣（1 點 = NT$1）。無 $ 金額（NIM 免費檔）或單位不可
+   機械換算（千字／tokens／算力秒／訓練步數）保留人工校準值——誠實原則：換算不了就不硬給。
+   單位用量假設與 scripts/audit-model-pricing.ts 同一套（該腳本改 import 本處函式，不再各自維護）。 */
+
+/** 影片單鏡假設秒數（與 money.ts DEFAULT_VIDEO_SECONDS_FOR_POINTS、modelLiveSync 對齊） */
+export const PRICE_VIDEO_SECONDS = 5;
+/** 轉錄單檔假設分鐘 */
+export const PRICE_AUDIO_MINUTES = 10;
+/** 配樂單首假設分鐘 */
+export const PRICE_MUSIC_MINUTES = 3;
+/** 對嘴／影片處理單支假設分鐘 */
+export const PRICE_V2V_MINUTES = 1;
+
+/** 「/分」的典型用量因類別而異：轉錄整檔開示、配樂一首、對嘴一支短片，長度天差地遠 */
+function priceMinutesFor(category: ModelCategory): number {
+  if (category === "speech-to-text") return PRICE_AUDIO_MINUTES;
+  if (category === "text-to-audio") return PRICE_MUSIC_MINUTES;
+  if (category === "video-to-video") return PRICE_V2V_MINUTES;
+  return 1;
+}
+
+export interface ParsedRealCost {
+  /** 解析出的 USD 中值（範圍取中點）；null＝無 $ 金額 */
+  usdMid: number | null;
+  /** 單次生成的用量倍數；null＝單位不可機械換算 */
+  multiplier: number | null;
+  unitNote: string;
+}
+
+/** 從 "$0.06–0.16/張(依解析度)" 這類 cost 字串解析 USD 中值與單次用量倍數 */
+export function parseRealCost(cost: string, category: ModelCategory): ParsedRealCost {
+  // 金額：$a 或 $a–b（同時容忍 - 與 ~ 當範圍號）
+  const m = cost.match(/\$\s*([0-9]+(?:\.[0-9]+)?)(?:\s*[–\-~]\s*([0-9]+(?:\.[0-9]+)?))?/);
+  if (!m) return { usdMid: null, multiplier: null, unitNote: "無 $ 金額" };
+  const lo = Number(m[1]);
+  const hi = m[2] !== undefined ? Number(m[2]) : lo;
+  const usdMid = (lo + hi) / 2;
+
+  const unitMatch = cost.match(/\/\s*([^\s（(]+)/);
+  if (!unitMatch) return { usdMid, multiplier: 1, unitNote: "×1（未標單位，視為每次）" };
+  const unit = unitMatch[1];
+  const isVideoCat = category === "text-to-video" || category === "image-to-video" || category === "video-to-video";
+  if (/^(張|圖|次|支|首|段|call)/i.test(unit)) return { usdMid, multiplier: 1, unitNote: "×1（每次一件）" };
+  if (/^(MP|百萬像素)/i.test(unit)) {
+    // 影片的「百萬像素」＝寬×高×幀數（一支 6 秒 1080p 30fps ≈ 373MP），1MP 假設會嚴重低收 → 需人工
+    if (isVideoCat) return { usdMid, multiplier: null, unitNote: "影片按總像素×幀數計費，需人工換算" };
+    return { usdMid, multiplier: 1, unitNote: "×1MP（16:9 標準輸出 ≈ 1MP）" };
+  }
+  if (/^秒/.test(unit)) {
+    // 配樂／音效的「/秒」：單曲長度依模型預設（90–180 秒），5 秒單鏡假設會嚴重低收 → 需人工
+    if (category === "text-to-audio") return { usdMid, multiplier: null, unitNote: "單曲秒數依模型預設，需人工換算" };
+    return { usdMid, multiplier: PRICE_VIDEO_SECONDS, unitNote: `×${PRICE_VIDEO_SECONDS} 秒（單鏡假設）` };
+  }
+  // 「/5秒」「/6秒」＝單支 N 秒短片的固定價 → 一次生成就是一支，×1
+  if (/^[0-9]+(?:\.[0-9]+)?\s*秒/.test(unit)) {
+    return { usdMid, multiplier: 1, unitNote: `×1（單支 ${unit.match(/^[0-9.]+/)?.[0]} 秒固定價）` };
+  }
+  if (/^分(鐘)?/.test(unit)) {
+    const mul = priceMinutesFor(category);
+    return { usdMid, multiplier: mul, unitNote: `×${mul} 分鐘（類別典型用量）` };
+  }
+  return { usdMid, multiplier: null, unitNote: `單位「/${unit}」需人工換算` };
+}
+
+/** 官方實價 → 單次點數（NT$ 四捨五入、下限 1 點）；null＝不可機械換算（呼叫端保留手動校準值） */
+export function realPricePoints(m: Pick<ModelEntry, "cost" | "category">): number | null {
+  const p = parseRealCost(m.cost, m.category);
+  if (p.usdMid === null || p.multiplier === null) return null;
+  return Math.max(1, Math.round(p.usdMid * p.multiplier * USD_TO_TWD));
+}
+
+/* fal 模型全面覆寫為實價點數。nvidia-nim 走 NVIDIA 免費額度、cost 無 $ 金額，自然跳過（雙保險仍明列）。
+   必須在 MODELS/LEGACY_MODELS 之後、下方 WORKFLOW_PRESETS 合計重算之前執行——工作流總點數吃覆寫後單價。 */
+for (const m of [...MODELS, ...LEGACY_MODELS]) {
+  if (m.endpoint === "nvidia-nim") continue;
+  const pts = realPricePoints(m);
+  if (pts !== null) m.points = pts;
+}
 
 /**
  * 「按字計費」文字轉語音模型的每千字點數率（僅 text-to-speech 且「首個」報價單位為千字者）。
