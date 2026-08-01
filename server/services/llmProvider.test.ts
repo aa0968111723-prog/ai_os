@@ -119,6 +119,12 @@ describe("fal 檔位 — 使用者明確選擇才付費", () => {
     expect(falSubmit.mock.calls[0][2].system_prompt).toContain("中文 AI 助手");
   });
 
+  it("fal openrouter 送 reasoning:true（部分模型禁止 false，否則 400）", async () => {
+    falOk();
+    await completeText({ prompt: "你好", mode: "fal_balanced" });
+    expect(falSubmit.mock.calls[0][2].reasoning).toBe(true);
+  });
+
   it("明確選 fal 時失敗就報錯，不退回免費模型假裝成功", async () => {
     falSubmit.mockRejectedValue(new Error("fal 500"));
     nimOk();

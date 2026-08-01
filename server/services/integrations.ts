@@ -678,9 +678,23 @@ export function notionPageTitle(page: {
  */
 export async function searchNotionPages(userId: string, query: string): Promise<NotionSearchResult> {
   const row = await findIntegration(userId, "notion");
-  const personal = row && row.status === "active" ? await decryptOrMarkError(row) : null;
+  // active 才嘗試解密；error 狀態多半是金鑰輪替後舊密文——直接回 lastError，勿誤報「尚未設定」
+  let personal: string | null = null;
+  if (row?.status === "active") {
+    personal = await decryptOrMarkError(row);
+  }
   const token = personal || process.env.NOTION_TOKEN;
   if (!token) {
+    if (row?.status === "error" && row.lastError) {
+      return { ok: false, reason: "error", message: row.lastError };
+    }
+    if (row) {
+      return {
+        ok: false,
+        reason: "error",
+        message: row.lastError || "Notion 連線異常——請到「連接的資料來源」重新貼上 integration token",
+      };
+    }
     return { ok: false, reason: "not-connected", message: "尚未設定 Notion token——請到「連接的資料來源」貼上你的 integration token" };
   }
   try {
