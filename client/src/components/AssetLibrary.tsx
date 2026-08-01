@@ -14,6 +14,7 @@ import {
   suggestedFileName,
   type DetectedDesktopEditor,
 } from "../platform/desktopBridge";
+import type { DesktopHandoffStatusEvent } from "../platform/tauriDesktop";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
 
 function fmtSize(bytes?: number | null): string {
@@ -143,8 +144,24 @@ export function AssetLibrary({
         text: `已回傳新素材${detail?.title ? `「${detail.title}」` : ""}，原始素材仍保留。`,
       });
     };
+    const onHandoff = (event: Event) => {
+      const detail = (event as CustomEvent<DesktopHandoffStatusEvent>).detail;
+      if (!detail) return;
+      if (detail.projectId && detail.projectId !== projectId) return;
+      const assetId = detail.sourceAssetId ?? "";
+      if (detail.phase === "error") {
+        setDesktopStatus({ assetId, kind: "err", text: detail.message });
+        return;
+      }
+      const pct = typeof detail.percent === "number" ? `（${detail.percent}%）` : "";
+      setDesktopStatus({ assetId, kind: "ok", text: `${detail.message}${pct}` });
+    };
     window.addEventListener("aios:asset-revision-uploaded", onRevision);
-    return () => window.removeEventListener("aios:asset-revision-uploaded", onRevision);
+    window.addEventListener("aios:desktop-handoff-status", onHandoff);
+    return () => {
+      window.removeEventListener("aios:asset-revision-uploaded", onRevision);
+      window.removeEventListener("aios:desktop-handoff-status", onHandoff);
+    };
   }, [desktopAvailable, projectId, utils.projects.assets]);
 
   const editorsForKind = (kind: string) => {

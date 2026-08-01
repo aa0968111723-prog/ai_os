@@ -223,4 +223,29 @@ describe("AssetLibrary DESK-01 desktop CTA", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("找不到可用的剪輯軟體");
     });
   });
+
+  it("passes the selected editorId from the desktop picker", async () => {
+    hasDesktopBridge.mockReturnValue(true);
+    detectDesktopEditors.mockResolvedValue([
+      { id: "davinci-resolve", name: "DaVinci Resolve", kind: "video-editor", installed: true },
+      { id: "capcut", name: "CapCut", kind: "video-editor", installed: true },
+      { id: "system-default", name: "系統預設", kind: "system-default", installed: true, systemDefault: true },
+    ]);
+    openAssetInExternalEditor.mockResolvedValue({ ok: true, handoffId: "handoff-2" });
+
+    const user = await openMoreMenu();
+    const picker = await screen.findByLabelText(/開啟用軟體/);
+    await user.selectOptions(picker, "capcut");
+    await user.click(screen.getByRole("button", { name: /用外部軟體開啟/ }));
+
+    await waitFor(() => {
+      expect(openAssetInExternalEditor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          assetId: ASSET_ID,
+          editorKind: "video-editor",
+          editorId: "capcut",
+        }),
+      );
+    });
+  });
 });
