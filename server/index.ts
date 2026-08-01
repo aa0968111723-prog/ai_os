@@ -42,7 +42,9 @@ import {
 import {
   ensureStorageDirs, tmpDir, adoptTmpFile, adoptFeedbackShot, isFeedbackShotPath, absPathOf, checkDiskSpace, verifyAssetSig,
   isAllowedUploadMime, kindFromMime, resolveUploadMime, shouldForceAttachment, MAX_FILE_BYTES, STORAGE_ROOT, mimeFromPath,
+  assessStoragePersistence, verifyVolumeIdentity,
 } from "./services/storage";
+import { setStorageDegraded } from "./services/storageHealth";
 import { markBootDraining, markBootReady, isBootReady } from "./services/boot";
 import { recordError, listErrors, errorCountSince } from "./services/errlog";
 import { normalizeRequestId, withRequestContext } from "./services/requestContext";
@@ -1553,6 +1555,19 @@ const httpServer = app.listen(port, () => {
   try {
     ensureStorageDirs();
     console.log(`[server] 儲存層：${STORAGE_ROOT}${STORAGE_ROOT === "/data" ? "（持久 Volume）" : "（本機模式）"}`);
+    // 素材保全：先判「這個路徑到底持不持久」（不是看目錄在不在——映像層裡本來就有 /data，
+    // 那正是過去假綠燈的來源），再核對磁碟與資料庫兩側的卷指紋抓「換卷」。
+    const persistence = assessStoragePersistence();
+    if (!persistence.persistent) {
+      setStorageDegraded("not-persistent", persistence.note);
+      console.warn(`[server] ⚠ 儲存層不持久：${persistence.note}`);
+    }
+    // 卷指紋要讀資料庫，不能擋住 listen 回呼；失敗只記錄，下次開機再判。
+    void verifyVolumeIdentity()
+      .then((v) => {
+        if (v.changed) console.warn(`[server] ⚠ 偵測到儲存磁碟更換（disk=${v.diskId} db=${v.dbId}）——舊素材可能已不在`);
+      })
+      .catch((err) => console.warn("[server] 儲存卷身分核對失敗（下次開機再試）：", err instanceof Error ? err.message : err));
   } catch (err) {
     console.warn("[server] 儲存目錄建立失敗（上傳/落地將不可用）：", err instanceof Error ? err.message : err);
   }

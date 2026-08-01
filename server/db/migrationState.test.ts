@@ -6,6 +6,7 @@ import {
   canonicalMigrationStatement,
   classifyMigrationState,
   isReRunnableCreateStatement,
+  isReviewedLandingBackfillStatement,
   isRowDeduplicationStatement,
   LEGACY_ADOPTION_PENDING_TAGS,
   LEGACY_ADOPTION_THROUGH_TAG,
@@ -144,10 +145,11 @@ describe("legacy migration adoption bridge", () => {
       .map(canonicalMigrationStatement)
       .filter(Boolean),
   );
-  // Schema drift only ever reports DDL; the row de-duplication that precedes a
-  // new unique index changes rows, so it never appears in a drift plan.
+  // Schema drift only ever reports DDL, so the reviewed row-changing statements
+  // never appear in a drift plan: the de-duplication that precedes a new unique
+  // index (0005), and 0023's landing-state backfill.
   const expectedStatements = pendingStatements.filter(
-    (statement) => !isRowDeduplicationStatement(statement),
+    (statement) => !isRowDeduplicationStatement(statement) && !isReviewedLandingBackfillStatement(statement),
   );
 
   it("recognizes de-duplication only as a keyed self-join delete", () => {
