@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { Button, Hint } from "../../components/ui";
+import { focusAndReveal } from "../../lib/scrollIntoViewForChrome";
 import { CreationSkillPicker } from "./CreationSkillPicker";
 
 export function CreationGoalInput({
@@ -45,6 +46,7 @@ export function CreationGoalInput({
         disabled={disabled}
         placeholder="例如：把腳本拆成 6 鏡，每鏡出一張定裝一致的圖"
         onChange={(e) => onGoalChange(e.target.value)}
+        onFocus={(e) => focusAndReveal(e.currentTarget)}
         onKeyDown={(e) => {
           // Ctrl/⌘+Enter 送出：長目標常要換行，所以不用單獨 Enter
           if (onSubmit && (e.metaKey || e.ctrlKey) && e.key === "Enter" && goal.trim() && !disabled) {

@@ -730,10 +730,11 @@ button:focus-visible { border-radius: 999px; }
 @media (max-width: 560px) {
   :root { --app-pad-x: 12px; }
   .app {
+    /* 底部一律走 --chrome-bottom（M2／#294 契約）；禁止再寫死 36+56 與 100 互踩 */
     padding:
       0
       max(var(--app-pad-x), var(--safe-right))
-      calc(36px + var(--safe-bottom) + 56px) /* 底部留白給回饋浮鈕 */
+      calc(var(--chrome-bottom) + var(--safe-bottom))
       max(var(--app-pad-x), var(--safe-left));
   }
   /* 頂欄空間吃緊：說明與高頻工具入口都收成純圖示（title/aria 仍在） */

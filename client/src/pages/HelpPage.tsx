@@ -226,8 +226,13 @@ export function HelpPage() {
             你自己的表格與資料集（例：器材借用表、拍攝清單）。可上傳文件給 AI 讀。
           </Spot>
           <Spot icon="User" name="你的名字（選單）" where="頂欄右上">
-            點開有：模型指南、接上外部 AI、資料下載、我的回報、通知設定、改密碼、登出。
+            點開有：模型指南、接上外部 AI、資料下載、我的回報、通知設定、
+            <b>安裝成 App</b>（橫幅按「稍後」後仍在這裡）、改密碼、登出。
             組長／管理員還會多出<b>管理</b>那一組。多個組的話，左邊還有切換組別的選單。
+          </Spot>
+          <Spot icon="Download" name="安裝成 App" where="橫幅或帳號選單">
+            加到主畫面／桌面，像真正 App 一樣開。完整步驟見下方
+            <a href="#help-install">「把 Aios 裝到手機或電腦」</a>。
           </Spot>
           <Spot icon="Bell" name="通知設定" where="你的名字選單裡">
             把手機和電腦連結進來，分鏡審批、私訊、@提及、生成完成會直接推到裝置上——
@@ -406,6 +411,56 @@ export function HelpPage() {
           <p style={{ margin: 0 }}>
             到 <Link href="/mcp"><b>「接上外部 AI」專區</b></Link> 建立金鑰、複製客戶端設定、測試連線，
             並看可用工具與近期活動。也能建「唯讀」或「會到期」的金鑰交給自動化。
+          </p>
+        </Faq>
+      </div>
+
+      {/* ── 安裝成 App（橫幅／帳號選單／深鏈 #help-install 同源；Mobile-First M0-3／M4） ── */}
+      <H2 id="help-install" icon="Download">把 Aios 裝到手機或電腦</H2>
+      <Hint layer="always" style={{ marginTop: 0, fontSize: 13 }}>
+        裝成 App 後可從主畫面一鍵開啟、推播較穩、全螢幕較好用。
+        頂欄橫幅按「稍後」只是暫時不煩你——<b>帳號選單裡的「安裝成 App」隨時都在</b>。
+      </Hint>
+      <div className="stack">
+        <Faq q="Android／Chrome：怎麼安裝？" defaultOpen>
+          <ol style={{ margin: 0, paddingLeft: 22 }}>
+            <li>用 <b>Chrome</b> 打開本站並登入。</li>
+            <li>若出現「安裝 Aios」橫幅，按 <b>安裝</b>。</li>
+            <li>沒看到橫幅：點瀏覽器選單 <b>⋮</b> → <b>安裝應用程式</b>／「加到主畫面」。</li>
+            <li>或打開頂欄右上<b>你的名字</b> → <b>安裝成 App</b>。</li>
+          </ol>
+          <Meta as="p" style={{ margin: "10px 0 0", fontSize: 13 }}>
+            安裝後主畫面會有圖示；之後建議從圖示開啟（standalone），推播與全螢幕體驗較完整。
+          </Meta>
+        </Faq>
+        <Faq q="iPhone／iPad（Safari）：怎麼加入主畫面？">
+          <ol style={{ margin: 0, paddingLeft: 22 }}>
+            <li>必須用 <b>Safari</b>（Chrome 在 iOS 無法完整安裝 PWA）。</li>
+            <li>打開本站並登入。</li>
+            <li>點底部分享鈕 <b>□↑</b> → 往下捲 → <b>加入主畫面</b> → 新增。</li>
+            <li>之後從主畫面圖示開啟；再進帳號選單開「通知設定」才能收推播。</li>
+          </ol>
+          <Meta as="p" style={{ margin: "10px 0 0", fontSize: 13 }}>
+            iOS 不支援程式直接跳出「安裝」提示，所以橫幅會導來本段說明；帳號選單同一入口。
+          </Meta>
+        </Faq>
+        <Faq q="電腦（Chrome／Edge）怎麼裝？">
+          <ol style={{ margin: 0, paddingLeft: 22 }}>
+            <li>用 Chrome 或 Edge 打開本站。</li>
+            <li>網址列右側若有安裝圖示，點它；或選單 → 安裝 Aios。</li>
+            <li>也可從帳號選單「安裝成 App」。</li>
+          </ol>
+        </Faq>
+        <Faq q="按了「稍後」還找得到安裝入口嗎？">
+          <p style={{ marginTop: 0 }}>
+            找得到。<b>「稍後」只隱藏頂部橫幅約 14 天</b>，不會關掉安裝能力。
+            要裝時：頂欄右上你的名字 → <b>安裝成 App</b>，或回到本段照步驟做。
+          </p>
+        </Faq>
+        <Faq q="裝好後要怎麼開推播？">
+          <p style={{ marginTop: 0 }}>
+            帳號選單 → <b>通知設定</b> → 在這台裝置啟用。
+            手機與電腦要各啟用一次；分鏡審批、私訊、生成完成才會推到裝置（關掉分頁也收得到）。
           </p>
         </Faq>
       </div>

@@ -172,7 +172,19 @@ export function ConfirmButton({
     if (!armed) return;
     (reason ? reasonRef.current : confirmRef.current)?.focus();
     const onDoc = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) cancel();
+      const t = e.target as Node | null;
+      if (!wrapRef.current || (t && wrapRef.current.contains(t))) return;
+      // 點另一顆 ConfirmButton 時不關自己（體檢 P1-5）：
+      // 連按「存成分鏡草稿」若 mousedown 先關上一顆再 arm 下一顆，前一顆確認會靜默消失，只剩最後一鏡。
+      // 允許多顆同時 armed；使用者可逐一按「執行」，或點空白處一次清掉。
+      // inline 模式沒有 .confirm-panel，以 role=alertdialog 辨識確認區。
+      if (
+        t instanceof Element
+        && t.closest("[data-confirm-trigger], .confirm-panel, [role='alertdialog']")
+      ) {
+        return;
+      }
+      cancel();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") cancel();
@@ -195,6 +207,7 @@ export function ConfirmButton({
         style={triggerStyle}
         title={triggerTitle}
         aria-label={triggerAriaLabel}
+        data-confirm-trigger=""
         disabled={disabled}
         onClick={() => setArmed(true)}
       >

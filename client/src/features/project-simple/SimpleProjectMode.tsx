@@ -4,6 +4,7 @@ import { Icon } from "../../components/Icon";
 import { Button, Card, Chip, Hint, Meta } from "../../components/ui";
 import { ExportJobButton } from "../../components/ExportJobButton";
 import { VisualJourney, type VisualJourneyStep } from "../../components/VisualJourney";
+import { focusAndReveal } from "../../lib/scrollIntoViewForChrome";
 import { worldviewSchema, isWorldviewReady, type Worldview } from "@shared/worldview";
 import {
   computeSimpleSteps,
@@ -212,6 +213,7 @@ export function SimpleProjectMode({
           aria-label="一句話故事"
           value={logline}
           disabled={!canEdit}
+          onFocus={(e) => focusAndReveal(e.currentTarget)}
           maxLength={500}
           rows={2}
           placeholder="例：阿明在都市喧囂中靠每日十分鐘靜坐找回內心平靜"
@@ -254,6 +256,7 @@ export function SimpleProjectMode({
               rows={6}
               placeholder="貼上腳本，或寫下你想拍什麼（一鏡一段最好）"
               onChange={(e) => setScript(e.target.value)}
+              onFocus={(e) => focusAndReveal(e.currentTarget)}
               style={{ width: "100%" }}
             />
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
