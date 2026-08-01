@@ -61,10 +61,14 @@ export function focusAndReveal(
   opts?: { preventScroll?: boolean; behavior?: ScrollBehavior },
 ): void {
   if (!el) return;
-  try {
-    el.focus({ preventScroll: opts?.preventScroll ?? true });
-  } catch {
-    el.focus();
+  // 已聚焦就不要再 focus：userEvent 打字中途若 onFocus 回呼又 focus，
+  // 在 type=date 等控件會把輸入半途打斷（SeriesTemplatePanel 實測：4 格填不齊）。
+  if (typeof document !== "undefined" && document.activeElement !== el) {
+    try {
+      el.focus({ preventScroll: opts?.preventScroll ?? true });
+    } catch {
+      el.focus();
+    }
   }
   requestAnimationFrame(() => {
     scrollIntoViewForChrome(el, { behavior: opts?.behavior ?? "smooth" });

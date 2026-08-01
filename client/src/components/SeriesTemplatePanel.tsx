@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { Button, Card, Chip, Hint, Meta } from "./ui";
-import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
+import { scrollIntoViewForChrome } from "../lib/scrollIntoViewForChrome";
 import {
   buildEpisodeTitle,
   episodeVariablesSchema,
@@ -33,9 +33,10 @@ const EMPTY: Record<EpisodeVariableKey, string> = {
 /** 手機鍵盤彈出後，把聚焦欄位捲到可視區中央，避免被底部導覽／FAB 裁切 */
 function scrollFieldIntoView(e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) {
   const el = e.currentTarget;
-  // 等鍵盤動畫／visualViewport 穩定再捲，並預留 --chrome-bottom（M2）
+  // 等鍵盤動畫／visualViewport 穩定再捲，並預留 --chrome-bottom（M2）。
+  // 只用 scroll、不再 focus：type=date 上重 focus 會讓 userEvent／實機輸入半途失效。
   window.setTimeout(() => {
-    focusAndReveal(el);
+    scrollIntoViewForChrome(el);
   }, 120);
 }
 
