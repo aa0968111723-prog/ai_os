@@ -1,21 +1,21 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../trpc";
-import { assessStoragePersistence } from "../services/storage";
-import { getStorageHealth, acknowledgeVolumeChange } from "../services/storageHealth";
+import { assessStoragePersistence, getStorageHealthSummary } from "../services/storageHealth";
+import { acknowledgeVolumeChange } from "../services/storage";
 import { runStorageAudit } from "../services/storageAudit";
-import { audit } from "../services/audit";
+import { getLastBackupAgeHours } from "../services/storageAudit";
 
 export const systemRouter = router({
-  storageHealth: protectedProcedure.query(async () => {
-    return getStorageHealth();
+  health: protectedProcedure.query(async () => {
+    return { ok: true };
   }),
-
+  storageHealth: adminProcedure.query(async () => {
+    return getStorageHealthSummary();
+  }),
   acknowledgeVolumeChange: adminProcedure.mutation(async ({ ctx }) => {
-    await acknowledgeVolumeChange();
-    await audit(ctx, "system.acknowledgeVolumeChange", {});
-    return { ok: true as const };
+    await acknowledgeVolumeChange(ctx.user.id);
+    return { ok: true };
   }),
-
   runStorageAudit: adminProcedure
     .input(z.object({ mode: z.enum(["sample", "full"]).default("sample") }).optional())
     .mutation(async ({ input }) => {
