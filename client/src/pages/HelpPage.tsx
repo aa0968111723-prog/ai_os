@@ -324,7 +324,8 @@ export function HelpPage() {
             建金鑰讓 Claude 等外部 AI 用<b>你的身分</b>操作專案（MCP）。可設唯讀、會到期。
           </Spot>
           <Spot icon="Download" name="資料下載／匯出我的資料" where="選單・工作／帳號">
-            交付過的 zip 可再下；帳號選單可匯出個人資料備份（不含密碼）。
+            交付過的 zip 可再下；帳號選單「匯出我的個人資料」含帳號、組別、
+            <b>相關專案</b>（世界觀／分鏡／知識／角色／場景摘要）、生成、留言、筆記、排程（不含密碼與媒體檔）。
           </Spot>
           <Spot icon="Monitor" name="桌面 Companion" where="選單・工作">
             給本機剪輯／桌面橋接用：交接進度、外部編輯器開啟素材（需桌面端）。
