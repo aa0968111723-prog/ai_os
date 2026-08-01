@@ -19,6 +19,8 @@
     "db:adopt": "tsx scripts/db/adopt.ts",
     "db:adopt:dry-run": "tsx scripts/db/adopt.ts --dry-run",
     "report:orphans": "tsx scripts/report-schema-orphans.ts",
+    "assets:verify": "tsx scripts/verify-asset-integrity.ts",
+    "assets:backup": "bash scripts/backup-assets.sh",
     "test": "vitest run",
     "test:client": "vitest run --config vitest.client.config.ts",
     "test:client:coverage": "vitest run --config vitest.client.config.ts --coverage",

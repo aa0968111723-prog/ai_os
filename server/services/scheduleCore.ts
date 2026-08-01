@@ -8,10 +8,24 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
-import { assertProjectNotArchived } from "./projectAcl";
+import { assertProjectEditable, assertProjectNotArchived } from "./projectAcl";
 import { validateMentions } from "./mentions";
 import { queueGroupSync } from "./googleCalendar";
 import { executeAgentEffectOnce } from "./agentEffectCore";
+
+/** 專案綁定行程：封存擋 + 檢視者（viewer）擋（與筆記／生成同口徑 2.3） */
+async function assertProjectScheduleWritable(
+  auth: AuthState,
+  groupId: string,
+  projectId: string,
+): Promise<void> {
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+  if (!project || project.groupId !== groupId) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
+  }
+  assertProjectNotArchived(project);
+  await assertProjectEditable(auth, project);
+}
 
 export type ScheduleRow = typeof schema.scheduleItems.$inferSelect;
 
@@ -130,9 +144,7 @@ export async function addScheduleItemCore(input: {
   if (note && note.length > 500) throw new TRPCError({ code: "BAD_REQUEST", message: "備註太長（最多 500 字）" });
 
   if (input.projectId) {
-    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
-    if (!project || project.groupId !== input.groupId) throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
-    assertProjectNotArchived(project); // 封存專案不接受新排程（MCP 舊 projectId 亦擋）
+    await assertProjectScheduleWritable(auth, input.groupId, input.projectId);
   }
   if (input.sourceMessageId) {
     const [m] = await db.select({ groupId: schema.messages.groupId }).from(schema.messages).where(eq(schema.messages.id, input.sourceMessageId));
@@ -193,11 +205,7 @@ export async function updateScheduleItemCore(input: {
     throw new TRPCError({ code: "FORBIDDEN", message: "只有建立者本人或組長以上可以修改行程" });
   }
   if (row.projectId) {
-    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, row.projectId));
-    if (!project || project.groupId !== row.groupId) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
-    }
-    assertProjectNotArchived(project);
+    await assertProjectScheduleWritable(input.auth, row.groupId, row.projectId);
   }
   const patch: Partial<typeof schema.scheduleItems.$inferInsert> = {};
   if (input.title !== undefined) {
@@ -286,6 +294,7 @@ export async function updateScheduleItemOnceCore(input: {
         throw new TRPCError({ code: "BAD_REQUEST", message: "專案不存在或不屬於此組" });
       }
       assertProjectNotArchived(project);
+      await assertProjectEditable(input.auth, project);
     }
     const patch: Partial<typeof schema.scheduleItems.$inferInsert> = {
       planRunId: input.runId,

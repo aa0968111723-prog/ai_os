@@ -20,7 +20,8 @@ import { resolveSession, type AuthState } from "./services/auth";
 import {
   buildUploadLineageMeta,
   looksLikeUuid,
-  markUploadGrantUsed,
+  tryConsumeUploadGrant,
+  releaseUploadGrant,
   resolveUploadRequestAuth,
   type UploadGrantRecord,
 } from "./services/uploadGrants";
@@ -527,14 +528,28 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
       ?? grant?.sourceAssetId
       ?? null;
     if (sourceAssetId) {
-      const [src] = await db.select().from(schema.assets).where(eq(schema.assets.id, sourceAssetId));
+      // 回收桶素材不得當 lineage 來源（與生成來源同口徑）
+      const [src] = await db
+        .select()
+        .from(schema.assets)
+        .where(and(eq(schema.assets.id, sourceAssetId), isNull(schema.assets.deletedAt)));
       if (!src || src.projectId !== project.id) {
         await cleanup();
-        return res.status(400).json({ error: "來源素材不在此專案，無法建立版本關聯" });
+        return res.status(400).json({ error: "來源素材不在此專案（或已在回收桶），無法建立版本關聯" });
       }
     }
     const desktopHandoffId = bodyHandoff || grant?.handoffId || null;
     const editorId = bodyEditor || null;
+
+    // CAS 佔用 grant：驗證通過後、落地前搶佔——並發第二請求拿不到，避免單次 token 多檔
+    let grantClaimed = false;
+    if (grant) {
+      grantClaimed = await tryConsumeUploadGrant(grant.id);
+      if (!grantClaimed) {
+        await cleanup();
+        return res.status(409).json({ error: "此上傳授權已使用或失效——請重新取得授權後再傳" });
+      }
+    }
 
     // adoptTmpFile 已把暫存檔「移到」Volume 正式位置——之後若 DB 寫入失敗，
     // 要刪的是這個已落地的檔（storagePath），不是原暫存路徑（已不存在）；
@@ -568,14 +583,12 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
         .set({ url: `/api/assets/${asset.id}/file` })
         .where(eq(schema.assets.id, asset.id))
         .returning();
-      // 成功入庫後才標記 grant 已用（失敗不標記 → 允許重試）
-      if (grant) {
-        await markUploadGrantUsed(grant.id);
-      }
       res.json({ ok: true, asset: updated });
     } catch (dbErr) {
       const { removeStoredFile } = await import("./services/storage");
       await removeStoredFile(storagePath); // DB 失敗 → 清掉已落地的孤兒檔
+      // 釋放 grant 允許同一 token 重試（並發第二請求已在 CAS 被擋）
+      if (grantClaimed && grant) await releaseUploadGrant(grant.id).catch(() => {});
       throw dbErr;
     }
   } catch (err) {

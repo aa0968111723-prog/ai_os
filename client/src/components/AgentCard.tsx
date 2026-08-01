@@ -116,7 +116,9 @@ function isActive(r: { status: string; steps: unknown }): boolean {
     r.status === "running" ||
     r.status === "waiting" ||
     r.status === "awaiting_approval" ||
-    (r.status === "stopped" && steps.some((s) => s.status === "running" || s.status === "pending"))
+    (r.status === "stopped" && steps.some((s) => s.status === "running" || s.status === "pending")) ||
+    // 一支失敗後 run=failed，但並行支線可能仍 running——繼續輪詢直到 runner settle 完
+    (r.status === "failed" && steps.some((s) => s.status === "running"))
   );
 }
 
@@ -192,6 +194,7 @@ export function AgentCard({
   hideComposer = false,
   initialGoal,
   compactComposer = false,
+  initialKnowledgeIds,
 }: {
   projectId: string;
   canEdit: boolean;

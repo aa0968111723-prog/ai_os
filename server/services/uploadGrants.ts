@@ -148,6 +148,30 @@ export async function markUploadGrantUsed(grantId: string, now: Date = new Date(
 }
 
 /**
+ * CAS 佔用單次 grant：只有 usedAt 仍為 null 時寫入 now 並回 true。
+ * 並發兩請求只有一個成功——解決 findValid→markUsed 非原子窗口可重複上傳。
+ */
+export async function tryConsumeUploadGrant(grantId: string, now: Date = new Date()): Promise<boolean> {
+  const rows = await db
+    .update(schema.uploadGrants)
+    .set({ usedAt: now })
+    .where(and(eq(schema.uploadGrants.id, grantId), isNull(schema.uploadGrants.usedAt)))
+    .returning({ id: schema.uploadGrants.id });
+  return rows.length > 0;
+}
+
+/**
+ * 上傳失敗後釋放 grant（僅當 usedAt 等於我們剛佔用的時間窗時由呼叫端保證）。
+ * 允許同一 token 在「驗證後 DB 失敗」時重試，同時並發第二請求在 CAS 時已被擋。
+ */
+export async function releaseUploadGrant(grantId: string): Promise<void> {
+  await db
+    .update(schema.uploadGrants)
+    .set({ usedAt: null })
+    .where(eq(schema.uploadGrants.id, grantId));
+}
+
+/**
  * Resolve upload auth: Bearer aidup_ grant → load user session state for that user,
  * else fall back to cookie session.
  */

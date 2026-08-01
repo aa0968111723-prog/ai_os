@@ -8,6 +8,9 @@ import {
   buildUploadLineageMeta,
   hashUploadGrantToken,
   looksLikeUuid,
+  tryConsumeUploadGrant,
+  releaseUploadGrant,
+  markUploadGrantUsed,
 } from "./uploadGrants";
 
 describe("uploadGrants pure helpers", () => {
@@ -45,5 +48,11 @@ describe("uploadGrants pure helpers", () => {
   it("TTL caps are documented constants", () => {
     expect(UPLOAD_GRANT_MAX_TTL_SEC).toBe(7 * 86_400);
     expect(UPLOAD_GRANT_TOKEN_PREFIX).toBe("aidup_");
+  });
+
+  it("exports CAS consume/release helpers for single-use grant race fix", () => {
+    expect(typeof tryConsumeUploadGrant).toBe("function");
+    expect(typeof releaseUploadGrant).toBe("function");
+    expect(typeof markUploadGrantUsed).toBe("function");
   });
 });

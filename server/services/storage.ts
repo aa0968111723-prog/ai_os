@@ -16,10 +16,22 @@ export const STORAGE_ROOT = process.env.ASSET_DIR ?? (existsSync("/data") ? "/da
 const ASSETS_DIR = path.join(STORAGE_ROOT, "assets");
 const TMP_DIR = path.join(STORAGE_ROOT, "tmp");
 
-/** 單檔上限：預設 200MB（Volume 1GB 時保守）；擴 Volume 後設環境變數 ASSET_MAX_MB（如 2000）即可放寬，免改碼 */
+/** 單檔上傳上限：預設 200MB（Volume 1GB 時保守）；擴 Volume 後設 ASSET_MAX_MB（如 2000）即可放寬，免改碼 */
 export const MAX_FILE_BYTES = (Number(process.env.ASSET_MAX_MB) || 200) * 1024 * 1024;
+/**
+ * AI 成品落地上限（fal 長片常 >200MB）：預設 2000MB，可用 ASSET_AI_MAX_MB 覆寫。
+ * 與上傳上限分離——使用者上傳仍受 ASSET_MAX_MB 約束；付費生成成品盡量收進 Volume，避免 CDN 過期死連結。
+ */
+export const MAX_AI_RESULT_BYTES = (Number(process.env.ASSET_AI_MAX_MB) || 2000) * 1024 * 1024;
 /** 磁碟保留水位：低於此可用空間就拒收新檔，避免整站因滿碟故障 */
 const MIN_FREE_BYTES = 64 * 1024 * 1024;
+
+/** 對外公開 base URL（簽名網址／假素材用）：APP_URL → PUBLIC_DOMAIN → RAILWAY_PUBLIC_DOMAIN → localhost */
+export function publicBaseUrl(): string {
+  const platformDomain = process.env.PUBLIC_DOMAIN || process.env.RAILWAY_PUBLIC_DOMAIN;
+  const fallback = platformDomain ? `https://${platformDomain}` : "";
+  return process.env.APP_URL?.replace(/\/$/, "") || fallback || `http://localhost:${process.env.PORT ?? 3000}`;
+}
 
 export function ensureStorageDirs(): void {
   for (const dir of [ASSETS_DIR, TMP_DIR]) mkdirSync(dir, { recursive: true });
@@ -382,12 +394,14 @@ export async function persistRemote(url: string): Promise<{ storagePath: string;
     }
     const mime = (res.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim();
     const lenHeader = Number(res.headers.get("content-length") ?? 0);
-    if (lenHeader > MAX_FILE_BYTES) {
-      console.warn(`[storage] 成品超過單檔上限（Content-Length ${lenHeader}B）——沿用外部網址`);
+    // AI 成品用較高上限（MAX_AI_RESULT_BYTES）；上傳仍走 MAX_FILE_BYTES
+    if (lenHeader > MAX_AI_RESULT_BYTES) {
+      console.warn(`[storage] 成品超過 AI 落地上限（Content-Length ${lenHeader}B > ${MAX_AI_RESULT_BYTES}B）——沿用外部網址；可設 ASSET_AI_MAX_MB`);
       void res.body?.cancel().catch(() => {});
       return null;
     }
-    const guard = await checkDiskSpace(lenHeader || 8 * 1024 * 1024);
+    // checkDiskSpace 用上傳上限語意；大檔只查「寫入後仍留 MIN_FREE」——傳 alreadyWritten=false 與預估大小
+    const guard = await checkDiskSpaceForPersist(lenHeader || 8 * 1024 * 1024);
     if (guard) {
       console.warn(`[storage] ${guard}——成品未落地，沿用外部網址：${url}`);
       void res.body?.cancel().catch(() => {});
@@ -402,9 +416,9 @@ export async function persistRemote(url: string): Promise<{ storagePath: string;
         const { done, value } = await reader.read();
         if (done) break;
         total += value.byteLength;
-        if (total > MAX_FILE_BYTES) {
+        if (total > MAX_AI_RESULT_BYTES) {
           await reader.cancel().catch(() => {});
-          console.warn(`[storage] 成品下載中超過單檔上限（>${MAX_FILE_BYTES}B）——中止並沿用外部網址`);
+          console.warn(`[storage] 成品下載中超過 AI 落地上限（>${MAX_AI_RESULT_BYTES}B）——中止並沿用外部網址`);
           return null;
         }
         chunks.push(Buffer.from(value));
@@ -417,6 +431,18 @@ export async function persistRemote(url: string): Promise<{ storagePath: string;
     console.warn("[storage] 成品落地失敗（沿用外部網址）：", err instanceof Error ? err.message : err);
     return null;
   }
+}
+
+/** AI 落地專用磁碟守門：只拒「空間不足」，不套用上傳 ASSET_MAX_MB（成品上限見 MAX_AI_RESULT_BYTES） */
+async function checkDiskSpaceForPersist(incomingBytes: number): Promise<string | null> {
+  if (incomingBytes > MAX_AI_RESULT_BYTES) {
+    return `成品太大（AI 落地上限 ${Math.round(MAX_AI_RESULT_BYTES / 1024 / 1024)}MB）——請設 ASSET_AI_MAX_MB 或擴 Volume`;
+  }
+  const free = await freeBytes();
+  if (free !== null && free - incomingBytes < MIN_FREE_BYTES) {
+    return "儲存空間不足——請通知管理員擴大 Volume 容量（或設 ASSET_DIR 指到更大的磁碟）";
+  }
+  return null;
 }
 
 /* ── 簽名網址（給 fal 抓「來源輸入」用：短效、無需登入、外人不可偽造） ── */
@@ -436,8 +462,7 @@ function signSecret(): string {
 export function signAssetUrl(assetId: string, ttlSeconds = 3600): string {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
   const sig = createHmac("sha256", signSecret()).update(`${assetId}.${exp}`).digest("hex");
-  const base = process.env.APP_URL?.replace(/\/$/, "") || `http://localhost:${process.env.PORT ?? 3000}`;
-  return `${base}/api/assets/${assetId}/file?exp=${exp}&sig=${sig}`;
+  return `${publicBaseUrl()}/api/assets/${assetId}/file?exp=${exp}&sig=${sig}`;
 }
 
 export function verifyAssetSig(assetId: string, exp: string | undefined, sig: string | undefined): boolean {
@@ -454,8 +479,7 @@ export function verifyAssetSig(assetId: string, exp: string | undefined, sig: st
 export function signDbFileUrl(fileId: string, ttlSeconds = 3600): string {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
   const sig = createHmac("sha256", signSecret()).update(`dbfile.${fileId}.${exp}`).digest("hex");
-  const base = process.env.APP_URL?.replace(/\/$/, "") || `http://localhost:${process.env.PORT ?? 3000}`;
-  return `${base}/api/databases/files/${fileId}/file?exp=${exp}&sig=${sig}`;
+  return `${publicBaseUrl()}/api/databases/files/${fileId}/file?exp=${exp}&sig=${sig}`;
 }
 
 export function verifyDbFileSig(fileId: string, exp: string | undefined, sig: string | undefined): boolean {
