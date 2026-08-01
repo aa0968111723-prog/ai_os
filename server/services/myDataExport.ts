@@ -12,13 +12,71 @@
  */
 import { getModel } from "../../shared/models";
 
+/** 專案匯出：世界觀只取創作者可讀摘要，不塞整包 jsonb */
+export interface MyDataProjectWorldview {
+  logline?: string;
+  message?: string;
+  tones?: string[];
+  styles?: string[];
+  themes?: string[];
+}
+
+export interface MyDataProjectScene {
+  orderIndex: number;
+  title: string;
+  status: string;
+  durationSec: number;
+  prompt?: string | null;
+  voiceover?: string | null;
+}
+
+export interface MyDataProjectExport {
+  id: string;
+  title: string;
+  kind: string;
+  platform: string;
+  format: string;
+  status: string;
+  groupId: string;
+  groupName: string;
+  /** 與專案的關係：owner＝擁有者；member＝專案權限列；contributor＝有生成貢獻 */
+  relation: "owner" | "member" | "contributor";
+  /** 專案級角色（project_members）；擁有者視為 editor */
+  myProjectRole: "editor" | "viewer" | "owner" | null;
+  worldview: MyDataProjectWorldview;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+  counts: {
+    scenes: number;
+    knowledge: number;
+    characters: number;
+    scenePresets: number;
+    assets: number;
+    myGenerations: number;
+  };
+  /** 分鏡摘要（未刪；上限見匯出端） */
+  scenes: MyDataProjectScene[];
+  /** 知識庫標題（未刪） */
+  knowledge: Array<{ title: string; kind: string; pinned: boolean }>;
+  /** 角色定裝名稱 */
+  characters: Array<{ name: string }>;
+  /** 場景設定名稱 */
+  scenePresets: Array<{ name: string }>;
+  /** 你上傳的素材標題（非全專案資產） */
+  myAssets: Array<{ title: string; kind: string; createdAt: string | Date }>;
+}
+
 /** 匯出資料的形狀（與 server/index.ts 組出的 payload 對齊；日期允許字串或 Date） */
 export interface MyDataExportPayload {
   exportedAt: string | Date;
   user: { id: string; name: string; email: string; createdAt: string | Date | null };
   groups: Array<{ groupId: string; groupName: string; teamId: string; teamName: string; role: string }>;
+  /** 與你有關的專案（擁有／權限列／有生成貢獻） */
+  projects?: MyDataProjectExport[];
   generations: Array<{
     id: string;
+    projectId?: string | null;
+    projectTitle?: string | null;
     modelId: string;
     kind: string;
     prompt: string;
@@ -27,7 +85,13 @@ export interface MyDataExportPayload {
     pointsActual: number | null;
     createdAt: string | Date;
   }>;
-  messages: Array<{ id: string; projectId: string | null; body: string; createdAt: string | Date }>;
+  messages: Array<{
+    id: string;
+    projectId: string | null;
+    projectTitle?: string | null;
+    body: string;
+    createdAt: string | Date;
+  }>;
   feedback: Array<{
     id: string;
     scores: unknown;
@@ -37,15 +101,45 @@ export interface MyDataExportPayload {
     createdAt: string | Date;
     updatedAt: string | Date;
   }>;
-  notes: Array<{ id: string; title: string; content: string; updatedAt: string | Date }>;
+  notes: Array<{
+    id: string;
+    title: string;
+    content: string;
+    projectId?: string | null;
+    projectTitle?: string | null;
+    updatedAt: string | Date;
+  }>;
   scheduleItems: Array<{
     id: string;
     title: string;
     startsAt: string | Date;
     endsAt: string | Date | null;
     note: string | null;
+    projectId?: string | null;
+    projectTitle?: string | null;
     createdAt: string | Date;
   }>;
+}
+
+/** 從 projects.worldview jsonb 抽出安全摘要（避免匯出巨大／未知結構） */
+export function summarizeWorldview(raw: unknown): MyDataProjectWorldview {
+  if (!raw || typeof raw !== "object") return {};
+  const w = raw as Record<string, unknown>;
+  const str = (k: string) => (typeof w[k] === "string" ? (w[k] as string).slice(0, 500) : undefined);
+  const arr = (k: string) =>
+    Array.isArray(w[k]) ? (w[k] as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 12) : undefined;
+  const out: MyDataProjectWorldview = {};
+  const logline = str("logline");
+  const message = str("message");
+  const tones = arr("tones") ?? arr("tone");
+  const styles = arr("styles") ?? arr("style");
+  const themes = arr("themes") ?? arr("theme");
+  if (logline) out.logline = logline;
+  if (message) out.message = message;
+  if (tones?.length) out.tones = tones;
+  if (styles?.length) out.styles = styles;
+  if (themes?.length) out.themes = themes;
+  return out;
 }
 
 /** HTML 特殊字元跳脫（&<>"'）——所有使用者內容進 HTML 前一律經此，防 HTML/標籤注入 */
@@ -73,6 +167,30 @@ const GEN_KIND_LABEL: Record<string, string> = {
   video: "影片",
   text: "文字",
   audio: "聲音／配音",
+};
+const PROJECT_STATUS_LABEL: Record<string, string> = {
+  active: "進行中",
+  archived: "已封存",
+  paused: "暫停",
+};
+const SCENE_STATUS_LABEL: Record<string, string> = {
+  todo: "待做",
+  drafting: "草稿",
+  pending: "待審",
+  approved: "已通過",
+  needs_work: "需修改",
+  done: "完成",
+};
+const RELATION_LABEL: Record<string, string> = {
+  owner: "擁有者",
+  member: "專案成員",
+  contributor: "有生成貢獻",
+};
+const KNOWLEDGE_KIND_LABEL: Record<string, string> = {
+  transcript: "開示稿",
+  testimony: "見證",
+  script: "腳本",
+  note: "筆記",
 };
 
 function label(map: Record<string, string>, key: string): string {
@@ -149,12 +267,94 @@ function multiline(text: string): string {
  * 產生「我的資料」可讀 HTML（單一自我包含檔案）。純函式、可單元測試：
  * 相同輸入 → 相同輸出（唯一變動來源是 payload.exportedAt，由呼叫端決定）。
  */
+function renderProjectsHtml(projects: MyDataProjectExport[]): string {
+  if (projects.length === 0) return "";
+  const blocks = projects
+    .map((p) => {
+      const wv = p.worldview;
+      const wvBits = [
+        wv.logline ? `故事：${esc(wv.logline)}` : "",
+        wv.message ? `訊息：${esc(wv.message)}` : "",
+        wv.tones?.length ? `調性：${esc(wv.tones.join("、"))}` : "",
+        wv.styles?.length ? `風格：${esc(wv.styles.join("、"))}` : "",
+        wv.themes?.length ? `主軸：${esc(wv.themes.join("、"))}` : "",
+      ]
+        .filter(Boolean)
+        .join("<br>");
+      const sceneRows = p.scenes
+        .map(
+          (s) =>
+            `<tr>
+              <td class="num">${s.orderIndex + 1}</td>
+              <td>${esc(s.title)}</td>
+              <td>${esc(label(SCENE_STATUS_LABEL, s.status))}</td>
+              <td class="num">${s.durationSec}s</td>
+              <td class="prompt">${s.prompt ? esc(s.prompt.slice(0, 200)) : "—"}</td>
+            </tr>`,
+        )
+        .join("");
+      const knRows = p.knowledge
+        .map(
+          (k) =>
+            `<tr><td>${esc(k.title)}</td><td>${esc(label(KNOWLEDGE_KIND_LABEL, k.kind))}</td><td>${k.pinned ? "置頂" : "—"}</td></tr>`,
+        )
+        .join("");
+      const charList = p.characters.map((c) => esc(c.name)).join("、") || "—";
+      const presetList = p.scenePresets.map((c) => esc(c.name)).join("、") || "—";
+      const assetRows = p.myAssets
+        .map(
+          (a) =>
+            `<tr><td class="nowrap">${esc(fmtDateTime(a.createdAt))}</td><td>${esc(label(GEN_KIND_LABEL, a.kind))}</td><td>${esc(a.title)}</td></tr>`,
+        )
+        .join("");
+      return `<div class="proj">
+        <h3>${esc(p.title)}</h3>
+        <div class="proj-meta">
+          ${esc(p.groupName)}　·　${esc(label(PROJECT_STATUS_LABEL, p.status))}　·　
+          ${esc(label(RELATION_LABEL, p.relation))}
+          ${p.myProjectRole ? `（專案角色：${esc(p.myProjectRole === "owner" ? "擁有者" : p.myProjectRole === "viewer" ? "檢視者" : "編輯者")}）` : ""}
+          <br>類型 ${esc(p.kind)}　·　平台 ${esc(p.platform)}　·　畫幅 ${esc(p.format)}
+          <br>建立 ${esc(fmtDateTime(p.createdAt))}　·　更新 ${esc(fmtDateTime(p.updatedAt))}
+        </div>
+        <div class="proj-counts">
+          分鏡 ${p.counts.scenes}　·　知識 ${p.counts.knowledge}　·　角色 ${p.counts.characters}　·　
+          場景卡 ${p.counts.scenePresets}　·　素材 ${p.counts.assets}　·　我的生成 ${p.counts.myGenerations}
+        </div>
+        ${wvBits ? `<div class="proj-wv"><b>世界觀摘要</b><br>${wvBits}</div>` : ""}
+        ${
+          p.scenes.length
+            ? `<p class="note">分鏡（前 ${p.scenes.length} 格）</p>
+          <div class="scroll"><table><thead><tr><th>#</th><th>標題</th><th>狀態</th><th>秒數</th><th>提示詞</th></tr></thead><tbody>${sceneRows}</tbody></table></div>`
+            : ""
+        }
+        ${
+          p.knowledge.length
+            ? `<p class="note">知識庫條目</p>
+          <div class="scroll"><table><thead><tr><th>標題</th><th>種類</th><th>置頂</th></tr></thead><tbody>${knRows}</tbody></table></div>`
+            : ""
+        }
+        <p class="note">角色定裝：${charList}</p>
+        <p class="note">場景設定：${presetList}</p>
+        ${
+          p.myAssets.length
+            ? `<p class="note">我上傳的素材</p>
+          <div class="scroll"><table><thead><tr><th>時間</th><th>類型</th><th>標題</th></tr></thead><tbody>${assetRows}</tbody></table></div>`
+            : ""
+        }
+      </div>`;
+    })
+    .join("");
+  return `<p class="note">含你擁有、被指定專案權限，或你曾在其中生成過的專案。分鏡／知識為摘要；完整媒體檔請用專案交付包或素材備份。</p>${blocks}`;
+}
+
 export function renderMyDataHtml(payload: MyDataExportPayload): string {
   const { user, groups, generations, messages, feedback, notes, scheduleItems } = payload;
+  const projects = payload.projects ?? [];
 
   // 概覽數字（讓創作者一眼看到自己有多少資料）
   const stats: Array<[string, number]> = [
     ["所屬組別", groups.length],
+    ["相關專案", projects.length],
     ["生成紀錄", generations.length],
     ["留言", messages.length],
     ["意見回饋", feedback.length],
@@ -178,6 +378,7 @@ export function renderMyDataHtml(payload: MyDataExportPayload): string {
       (g) =>
         `<tr>
           <td class="nowrap">${esc(fmtDateTime(g.createdAt))}</td>
+          <td>${esc(g.projectTitle || "—")}</td>
           <td>${esc(label(GEN_KIND_LABEL, g.kind))}</td>
           <td><span class="status s-${esc(g.status)}">${esc(label(GEN_STATUS_LABEL, g.status))}</span></td>
           <td class="prompt">${esc(g.prompt)}</td>
@@ -187,12 +388,15 @@ export function renderMyDataHtml(payload: MyDataExportPayload): string {
     )
     .join("");
   const genTable = `<p class="note">「我用 AI 生成過的內容」紀錄。點數欄為實際扣點；尚未完成者顯示預估點數。</p>
-    <div class="scroll"><table><thead><tr><th>時間</th><th>類型</th><th>狀態</th><th>我下的指令（提示詞）</th><th>使用的模型</th><th>點數</th></tr></thead><tbody>${genRows}</tbody></table></div>`;
+    <div class="scroll"><table><thead><tr><th>時間</th><th>專案</th><th>類型</th><th>狀態</th><th>我下的指令（提示詞）</th><th>使用的模型</th><th>點數</th></tr></thead><tbody>${genRows}</tbody></table></div>`;
 
   const msgRows = messages
-    .map((m) => `<tr><td class="nowrap">${esc(fmtDateTime(m.createdAt))}</td><td class="prompt">${multiline(m.body)}</td></tr>`)
+    .map(
+      (m) =>
+        `<tr><td class="nowrap">${esc(fmtDateTime(m.createdAt))}</td><td>${esc(m.projectTitle || "—")}</td><td class="prompt">${multiline(m.body)}</td></tr>`,
+    )
     .join("");
-  const msgTable = `<div class="scroll"><table><thead><tr><th>時間</th><th>內容</th></tr></thead><tbody>${msgRows}</tbody></table></div>`;
+  const msgTable = `<div class="scroll"><table><thead><tr><th>時間</th><th>專案</th><th>內容</th></tr></thead><tbody>${msgRows}</tbody></table></div>`;
 
   const fbBlocks = feedback
     .map(
@@ -214,7 +418,7 @@ export function renderMyDataHtml(payload: MyDataExportPayload): string {
       (n) =>
         `<div class="note-item">
           <h3>${esc(n.title || "（未命名筆記）")}</h3>
-          <div class="note-when">最後更新：${esc(fmtDateTime(n.updatedAt))}</div>
+          <div class="note-when">最後更新：${esc(fmtDateTime(n.updatedAt))}${n.projectTitle ? `　·　專案：${esc(n.projectTitle)}` : ""}</div>
           <div class="note-body">${multiline(n.content)}</div>
         </div>`,
     )
@@ -225,13 +429,14 @@ export function renderMyDataHtml(payload: MyDataExportPayload): string {
       (s) =>
         `<tr>
           <td>${esc(s.title)}</td>
+          <td>${esc(s.projectTitle || "—")}</td>
           <td class="nowrap">${esc(fmtDateTime(s.startsAt))}</td>
           <td class="nowrap">${esc(fmtDateTime(s.endsAt))}</td>
           <td>${s.note ? multiline(s.note) : "—"}</td>
         </tr>`,
     )
     .join("");
-  const schedTable = `<div class="scroll"><table><thead><tr><th>項目</th><th>開始</th><th>結束</th><th>備註</th></tr></thead><tbody>${schedRows}</tbody></table></div>`;
+  const schedTable = `<div class="scroll"><table><thead><tr><th>項目</th><th>專案</th><th>開始</th><th>結束</th><th>備註</th></tr></thead><tbody>${schedRows}</tbody></table></div>`;
 
   const exportedAtStr = esc(fmtDateTime(payload.exportedAt));
 
@@ -300,6 +505,10 @@ export function renderMyDataHtml(payload: MyDataExportPayload): string {
   .note-item h3{margin:.1em 0 .1em;font-size:16px}
   .note-when{color:var(--muted);font-size:13px;margin-bottom:6px}
   .note-body{white-space:normal}
+  .proj{border-bottom:1px solid var(--line);padding:10px 0 16px;margin-bottom:8px}
+  .proj h3{margin:.1em 0 .25em;font-size:17px}
+  .proj-meta,.proj-counts{color:var(--muted);font-size:13px;margin-bottom:6px;line-height:1.6}
+  .proj-wv{background:var(--accent-soft);border-radius:10px;padding:10px 12px;margin:8px 0;font-size:13.5px;line-height:1.65}
   footer{color:var(--muted);font-size:13px;margin-top:26px;text-align:center;line-height:1.8}
   a{color:var(--accent)}
   @media (max-width:520px){
@@ -323,10 +532,10 @@ export function renderMyDataHtml(payload: MyDataExportPayload): string {
   </header>
 
   <div class="intro">
-    這份檔案是你在系統裡「屬於你自己的」資料整理成的可讀報告——包含帳號、你所屬的組別，以及你做過的
-    生成、留言、回饋、筆記與排程。<b>只有你本人的資料</b>，不含別人的內容，也不含密碼。
-    直接用瀏覽器打開就能看；想印出來或存 PDF，用瀏覽器「列印」即可。
-    需要給工程或系統匯入用的原始檔，可在網址結尾加上 <b>?format=json</b>。
+    這份檔案是你在系統裡「屬於你自己的」資料整理成的可讀報告——包含帳號、組別、
+    <b>相關專案</b>（世界觀摘要、分鏡、知識／角色／場景、你上傳的素材），以及生成、留言、回饋、筆記與排程。
+    <b>只有你本人有關的資料</b>，不含別人的私訊或密碼。媒體二進位檔請用專案「交付包」或管理員素材備份。
+    直接用瀏覽器打開就能看；列印可存 PDF。原始結構化檔加 <b>?format=json</b>。
   </div>
 
   <div class="stats">${statCards}</div>
@@ -334,6 +543,7 @@ export function renderMyDataHtml(payload: MyDataExportPayload): string {
   <nav class="toc">
     <a href="#account">帳號</a>
     <a href="#groups">組別</a>
+    <a href="#projects">專案</a>
     <a href="#generations">生成紀錄</a>
     <a href="#messages">留言</a>
     <a href="#feedback">意見回饋</a>
@@ -351,6 +561,7 @@ export function renderMyDataHtml(payload: MyDataExportPayload): string {
   </section>
 
   ${section("groups", "所屬組別", groups.length, groupsTable)}
+  ${section("projects", "相關專案", projects.length, renderProjectsHtml(projects))}
   ${section("generations", "AI 生成紀錄", generations.length, genTable)}
   ${section("messages", "我的留言", messages.length, msgTable)}
   ${section("feedback", "我的意見回饋", feedback.length, fbBlocks)}

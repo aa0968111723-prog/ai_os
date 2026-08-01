@@ -29,7 +29,7 @@ import {
 import { buildEdl, buildFcpxml, buildSrt, buildXmeml, exportProjectZip, exportZipName } from "./services/exporter";
 import { resolutionForFormat } from "../shared/options";
 import { exportJianyingDraftZip } from "./services/jianying";
-import { renderMyDataHtml } from "./services/myDataExport";
+import { renderMyDataHtml, summarizeWorldview, type MyDataProjectExport } from "./services/myDataExport";
 import { handleMcp } from "./services/mcp";
 import { isMcpEnabled } from "./services/mcpAuth";
 import {
@@ -58,7 +58,7 @@ import { startGroupCampaignRunner, recoverInterruptedCampaigns, sweepStaleCampai
 import { startExportRunner } from "./services/exportRunner";
 import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { assertRateLimitConfiguration } from "./services/rateLimit";
 import {
   backgroundTaskCount,
@@ -1080,20 +1080,261 @@ app.get("/api/schedule/:groupId/calendar.ics", async (req, res) => {
 });
 
 // ── 個資自助匯出 v1（個資法「查詢／請求複本」權）：登入者一鍵下載「自己的」資料。
-// 預設交付「創作者看得懂」的可讀 HTML（中文欄位／中文化列舉／在地化日期／表格化）；
-// ?format=json 仍提供原始 JSON（結構化、機器可讀，供資料可攜與系統匯入）。
-// 範圍嚴格限本人：帳號基本資料（絕不含 passwordHash）、所屬組、自己的生成紀錄／留言／回饋／筆記／排程。
-// 帳號「刪除」仍需管理員操作（見維運手冊）——本端點只解決自助「攜出」，不做自助刪除。
+// 預設交付「創作者看得懂」的可讀 HTML；?format=json 仍提供原始 JSON。
+// 範圍：帳號、組別、相關專案（世界觀摘要／分鏡／知識／角色／場景／我上傳素材）、
+// 生成／留言／回饋／筆記／排程。絕不含 passwordHash、他人私訊。
+// 帳號「刪除」仍需管理員操作——本端點只解決自助「攜出」。
 app.get("/api/me/export", async (req, res) => {
   try {
     const auth = await resolveSession(req);
     if (!requireUsableSession(auth, res)) return;
     const uid = auth.user.id;
-    // AuthState 沒帶 createdAt，補查一次 users（只取安全欄位，密碼雜湊絕不進 payload）
+    const groupNameById = new Map(auth.groups.map((g) => [g.groupId, g.groupName]));
+
     const [me] = await db.select().from(schema.users).where(eq(schema.users.id, uid));
+
+    // ── 專案範圍：擁有者 ∪ 專案權限列 ∪ 曾在該專案生成 ──
+    const ownedProjects = await db
+      .select()
+      .from(schema.projects)
+      .where(eq(schema.projects.ownerId, uid))
+      .orderBy(desc(schema.projects.updatedAt))
+      .limit(200);
+    const membershipRows = await db
+      .select({
+        projectId: schema.projectMembers.projectId,
+        role: schema.projectMembers.role,
+      })
+      .from(schema.projectMembers)
+      .where(eq(schema.projectMembers.userId, uid));
+    const memberProjectIds = membershipRows.map((r) => r.projectId);
+    const memberRoleByProject = new Map(membershipRows.map((r) => [r.projectId, r.role as "editor" | "viewer"]));
+
+    const contributedIds = await db
+      .selectDistinct({ projectId: schema.generations.projectId })
+      .from(schema.generations)
+      .where(eq(schema.generations.userId, uid))
+      .limit(300);
+
+    const projectIdSet = new Set<string>([
+      ...ownedProjects.map((p) => p.id),
+      ...memberProjectIds,
+      ...contributedIds.map((r) => r.projectId),
+    ]);
+
+    // 補撈「權限列／貢獻」但非 owner 的專案列
+    const needFetch = [...projectIdSet].filter((id) => !ownedProjects.some((p) => p.id === id));
+    const extraProjects =
+      needFetch.length > 0
+        ? await db
+            .select()
+            .from(schema.projects)
+            .where(inArray(schema.projects.id, needFetch.slice(0, 200)))
+        : [];
+    const allProjectRows = [...ownedProjects, ...extraProjects];
+    // 去重（owner 與 member 可能重疊）
+    const projectById = new Map(allProjectRows.map((p) => [p.id, p]));
+    const projectIds = [...projectById.keys()].slice(0, 200);
+
+    const titleByProjectId = new Map(
+      [...projectById.values()].map((p) => [p.id, p.title] as const),
+    );
+
+    // 批次統計（避免 N+1）
+    const toCountMap = (rows: Array<{ projectId: string; n: number }>) =>
+      new Map(rows.map((r) => [r.projectId, r.n]));
+
+    const emptyCounts = () => new Map<string, number>();
+    const [sceneCounts, knowledgeCounts, characterCounts, presetCounts, assetCounts, myGenCounts] =
+      projectIds.length === 0
+        ? [emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts(), emptyCounts()]
+        : await Promise.all([
+            db
+              .select({ projectId: schema.scenes.projectId, n: sql<number>`count(*)::int` })
+              .from(schema.scenes)
+              .where(and(inArray(schema.scenes.projectId, projectIds), isNull(schema.scenes.deletedAt)))
+              .groupBy(schema.scenes.projectId)
+              .then(toCountMap),
+            db
+              .select({ projectId: schema.knowledge.projectId, n: sql<number>`count(*)::int` })
+              .from(schema.knowledge)
+              .where(and(inArray(schema.knowledge.projectId, projectIds), isNull(schema.knowledge.deletedAt)))
+              .groupBy(schema.knowledge.projectId)
+              .then(toCountMap),
+            db
+              .select({ projectId: schema.characters.projectId, n: sql<number>`count(*)::int` })
+              .from(schema.characters)
+              .where(inArray(schema.characters.projectId, projectIds))
+              .groupBy(schema.characters.projectId)
+              .then(toCountMap),
+            db
+              .select({ projectId: schema.scenePresets.projectId, n: sql<number>`count(*)::int` })
+              .from(schema.scenePresets)
+              .where(inArray(schema.scenePresets.projectId, projectIds))
+              .groupBy(schema.scenePresets.projectId)
+              .then(toCountMap),
+            db
+              .select({ projectId: schema.assets.projectId, n: sql<number>`count(*)::int` })
+              .from(schema.assets)
+              .where(and(inArray(schema.assets.projectId, projectIds), isNull(schema.assets.deletedAt)))
+              .groupBy(schema.assets.projectId)
+              .then(toCountMap),
+            db
+              .select({ projectId: schema.generations.projectId, n: sql<number>`count(*)::int` })
+              .from(schema.generations)
+              .where(and(eq(schema.generations.userId, uid), inArray(schema.generations.projectId, projectIds)))
+              .groupBy(schema.generations.projectId)
+              .then(toCountMap),
+          ]);
+
+    const scenesByProject = new Map<string, MyDataProjectExport["scenes"]>();
+    const knowledgeByProject = new Map<string, MyDataProjectExport["knowledge"]>();
+    const charactersByProject = new Map<string, MyDataProjectExport["characters"]>();
+    const presetsByProject = new Map<string, MyDataProjectExport["scenePresets"]>();
+    const myAssetsByProject = new Map<string, MyDataProjectExport["myAssets"]>();
+
+    if (projectIds.length > 0) {
+      const [sceneRows, knowledgeRows, characterRows, presetRows, myAssetRows] = await Promise.all([
+        db
+          .select({
+            projectId: schema.scenes.projectId,
+            orderIndex: schema.scenes.orderIndex,
+            title: schema.scenes.title,
+            status: schema.scenes.status,
+            durationSec: schema.scenes.durationSec,
+            prompt: schema.scenes.prompt,
+            voiceover: schema.scenes.voiceover,
+          })
+          .from(schema.scenes)
+          .where(and(inArray(schema.scenes.projectId, projectIds), isNull(schema.scenes.deletedAt)))
+          .orderBy(asc(schema.scenes.orderIndex))
+          .limit(2000),
+        db
+          .select({
+            projectId: schema.knowledge.projectId,
+            title: schema.knowledge.title,
+            kind: schema.knowledge.kind,
+            pinned: schema.knowledge.pinned,
+          })
+          .from(schema.knowledge)
+          .where(and(inArray(schema.knowledge.projectId, projectIds), isNull(schema.knowledge.deletedAt)))
+          .orderBy(desc(schema.knowledge.pinned), desc(schema.knowledge.createdAt))
+          .limit(1000),
+        db
+          .select({
+            projectId: schema.characters.projectId,
+            name: schema.characters.name,
+          })
+          .from(schema.characters)
+          .where(inArray(schema.characters.projectId, projectIds))
+          .limit(500),
+        db
+          .select({
+            projectId: schema.scenePresets.projectId,
+            name: schema.scenePresets.name,
+          })
+          .from(schema.scenePresets)
+          .where(inArray(schema.scenePresets.projectId, projectIds))
+          .limit(500),
+        db
+          .select({
+            projectId: schema.assets.projectId,
+            title: schema.assets.title,
+            kind: schema.assets.kind,
+            createdAt: schema.assets.createdAt,
+          })
+          .from(schema.assets)
+          .where(
+            and(
+              eq(schema.assets.uploadedBy, uid),
+              inArray(schema.assets.projectId, projectIds),
+              isNull(schema.assets.deletedAt),
+            ),
+          )
+          .orderBy(desc(schema.assets.createdAt))
+          .limit(500),
+      ]);
+
+      const pushCap = <T>(map: Map<string, T[]>, projectId: string, item: T, cap: number) => {
+        const list = map.get(projectId) ?? [];
+        if (list.length < cap) {
+          list.push(item);
+          map.set(projectId, list);
+        }
+      };
+      for (const s of sceneRows) {
+        pushCap(scenesByProject, s.projectId, {
+          orderIndex: s.orderIndex,
+          title: s.title,
+          status: s.status,
+          durationSec: s.durationSec,
+          prompt: s.prompt,
+          voiceover: s.voiceover,
+        }, 80);
+      }
+      for (const k of knowledgeRows) {
+        pushCap(knowledgeByProject, k.projectId, { title: k.title, kind: k.kind, pinned: k.pinned }, 40);
+      }
+      for (const c of characterRows) {
+        pushCap(charactersByProject, c.projectId, { name: c.name }, 30);
+      }
+      for (const c of presetRows) {
+        pushCap(presetsByProject, c.projectId, { name: c.name }, 30);
+      }
+      for (const a of myAssetRows) {
+        pushCap(myAssetsByProject, a.projectId, {
+          title: a.title,
+          kind: a.kind,
+          createdAt: a.createdAt,
+        }, 40);
+      }
+    }
+
+    const ownedSet = new Set(ownedProjects.map((p) => p.id));
+    const memberSet = new Set(memberProjectIds);
+    const projectsExport: MyDataProjectExport[] = [...projectById.values()]
+      .sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt))
+      .map((p) => {
+        let relation: MyDataProjectExport["relation"] = "contributor";
+        if (ownedSet.has(p.id)) relation = "owner";
+        else if (memberSet.has(p.id)) relation = "member";
+        const myProjectRole: MyDataProjectExport["myProjectRole"] = ownedSet.has(p.id)
+          ? "owner"
+          : memberRoleByProject.get(p.id) ?? null;
+        return {
+          id: p.id,
+          title: p.title,
+          kind: p.kind,
+          platform: p.platform,
+          format: p.format,
+          status: p.status,
+          groupId: p.groupId,
+          groupName: groupNameById.get(p.groupId) ?? p.groupId,
+          relation,
+          myProjectRole,
+          worldview: summarizeWorldview(p.worldview),
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+          counts: {
+            scenes: sceneCounts.get(p.id) ?? 0,
+            knowledge: knowledgeCounts.get(p.id) ?? 0,
+            characters: characterCounts.get(p.id) ?? 0,
+            scenePresets: presetCounts.get(p.id) ?? 0,
+            assets: assetCounts.get(p.id) ?? 0,
+            myGenerations: myGenCounts.get(p.id) ?? 0,
+          },
+          scenes: scenesByProject.get(p.id) ?? [],
+          knowledge: knowledgeByProject.get(p.id) ?? [],
+          characters: charactersByProject.get(p.id) ?? [],
+          scenePresets: presetsByProject.get(p.id) ?? [],
+          myAssets: myAssetsByProject.get(p.id) ?? [],
+        };
+      });
+
     const generations = await db
       .select({
         id: schema.generations.id,
+        projectId: schema.generations.projectId,
         modelId: schema.generations.modelId,
         kind: schema.generations.kind,
         prompt: schema.generations.prompt,
@@ -1105,7 +1346,7 @@ app.get("/api/me/export", async (req, res) => {
       .from(schema.generations)
       .where(eq(schema.generations.userId, uid))
       .orderBy(desc(schema.generations.createdAt))
-      .limit(1000); // 新到舊；上限防單人海量生成把回應撐爆
+      .limit(1000);
     const myMessages = await db
       .select({
         id: schema.messages.id,
@@ -1128,6 +1369,7 @@ app.get("/api/me/export", async (req, res) => {
         id: schema.notes.id,
         title: schema.notes.title,
         content: schema.notes.content,
+        projectId: schema.notes.projectId,
         updatedAt: schema.notes.updatedAt,
       })
       .from(schema.notes)
@@ -1135,25 +1377,39 @@ app.get("/api/me/export", async (req, res) => {
       .orderBy(desc(schema.notes.updatedAt))
       .limit(200);
     const mySchedule = await db
-      .select()
+      .select({
+        id: schema.scheduleItems.id,
+        title: schema.scheduleItems.title,
+        startsAt: schema.scheduleItems.startsAt,
+        endsAt: schema.scheduleItems.endsAt,
+        note: schema.scheduleItems.note,
+        projectId: schema.scheduleItems.projectId,
+        createdAt: schema.scheduleItems.createdAt,
+      })
       .from(schema.scheduleItems)
       .where(eq(schema.scheduleItems.createdBy, uid))
       .orderBy(desc(schema.scheduleItems.createdAt))
       .limit(200);
+
+    const withProjectTitle = <T extends { projectId?: string | null }>(rows: T[]) =>
+      rows.map((r) => ({
+        ...r,
+        projectTitle: r.projectId ? titleByProjectId.get(r.projectId) ?? null : null,
+      }));
+
     const payload = {
       exportedAt: new Date().toISOString(),
       user: { id: uid, name: auth.user.name, email: auth.user.email, createdAt: me?.createdAt ?? null },
       groups: auth.groups,
-      generations,
-      messages: myMessages,
+      projects: projectsExport,
+      generations: withProjectTitle(generations),
+      messages: withProjectTitle(myMessages),
       feedback: myFeedback,
-      notes: myNotes,
-      scheduleItems: mySchedule,
+      notes: withProjectTitle(myNotes),
+      scheduleItems: withProjectTitle(mySchedule),
     };
-    // 預設交付「創作者看得懂」的可讀 HTML；?format=json 仍給原始 JSON（資料可攜／系統匯入用）。
-    // 兩者皆以 attachment 下載、不在應用網域內渲染；HTML 版所有使用者欄位已於 renderMyDataHtml 內逐字跳脫。
     if (req.query.format === "json") {
-      res.attachment("我的資料.json"); // RFC 5987 中文檔名下載安全
+      res.attachment("我的資料.json");
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.send(JSON.stringify(payload, null, 2));
     } else {

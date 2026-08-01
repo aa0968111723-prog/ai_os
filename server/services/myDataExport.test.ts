@@ -4,15 +4,43 @@
  * 自我包含（零外部資源／零 script）、以及 ?format=json 提示存在。
  */
 import { describe, expect, it } from "vitest";
-import { esc, fmtDateTime, renderMyDataHtml, type MyDataExportPayload } from "./myDataExport";
+import { esc, fmtDateTime, renderMyDataHtml, summarizeWorldview, type MyDataExportPayload } from "./myDataExport";
 
 const basePayload: MyDataExportPayload = {
   exportedAt: "2026-07-17T16:00:00.000Z",
   user: { id: "u1", name: "王小明", email: "ming@example.com", createdAt: "2026-01-02T03:04:05.000Z" },
   groups: [{ groupId: "g1", groupName: "剪輯組", teamId: "t1", teamName: "北區工作組", role: "admin" }],
+  projects: [
+    {
+      id: "p1",
+      title: "晨光開示",
+      kind: "shorts",
+      platform: "yt",
+      format: "9:16",
+      status: "active",
+      groupId: "g1",
+      groupName: "剪輯組",
+      relation: "owner",
+      myProjectRole: "owner",
+      worldview: { logline: "在都市喧囂中找回平靜", tones: ["溫暖"], styles: ["寫實"] },
+      createdAt: "2026-07-01T10:00:00.000Z",
+      updatedAt: "2026-07-15T10:00:00.000Z",
+      counts: { scenes: 2, knowledge: 1, characters: 1, scenePresets: 0, assets: 3, myGenerations: 1 },
+      scenes: [
+        { orderIndex: 0, title: "開場", status: "approved", durationSec: 5, prompt: "清晨窗邊" },
+        { orderIndex: 1, title: "結尾", status: "pending", durationSec: 4, prompt: null },
+      ],
+      knowledge: [{ title: "開示稿", kind: "transcript", pinned: true }],
+      characters: [{ name: "阿明" }],
+      scenePresets: [],
+      myAssets: [{ title: "封面圖", kind: "image", createdAt: "2026-07-10T10:00:00.000Z" }],
+    },
+  ],
   generations: [
     {
       id: "gen1",
+      projectId: "p1",
+      projectTitle: "晨光開示",
       modelId: "fal-ai/flux",
       kind: "image",
       prompt: "晨光中的老師父",
@@ -22,7 +50,7 @@ const basePayload: MyDataExportPayload = {
       createdAt: "2026-07-15T10:00:00.000Z",
     },
   ],
-  messages: [{ id: "m1", projectId: "p1", body: "第一行\n第二行", createdAt: "2026-07-16T10:00:00.000Z" }],
+  messages: [{ id: "m1", projectId: "p1", projectTitle: "晨光開示", body: "第一行\n第二行", createdAt: "2026-07-16T10:00:00.000Z" }],
   feedback: [
     {
       id: "f1",
@@ -34,7 +62,7 @@ const basePayload: MyDataExportPayload = {
       updatedAt: "2026-07-11T10:00:00.000Z",
     },
   ],
-  notes: [{ id: "n1", title: "拍攝重點", content: "注意收音", updatedAt: "2026-07-14T10:00:00.000Z" }],
+  notes: [{ id: "n1", title: "拍攝重點", content: "注意收音", projectId: "p1", projectTitle: "晨光開示", updatedAt: "2026-07-14T10:00:00.000Z" }],
   scheduleItems: [
     {
       id: "s1",
@@ -42,6 +70,8 @@ const basePayload: MyDataExportPayload = {
       startsAt: "2026-07-20T02:00:00.000Z",
       endsAt: null,
       note: "附字幕",
+      projectId: "p1",
+      projectTitle: "晨光開示",
       createdAt: "2026-07-16T10:00:00.000Z",
     },
   ],
@@ -119,6 +149,7 @@ describe("renderMyDataHtml", () => {
   it("空資料區塊顯示柔性空狀態，不留只有標題的空殼", () => {
     const empty = renderMyDataHtml({
       ...basePayload,
+      projects: [],
       generations: [],
       messages: [],
       feedback: [],
@@ -128,6 +159,39 @@ describe("renderMyDataHtml", () => {
     expect(empty).toContain("目前沒有這類資料");
     // 概覽數字歸零
     expect(empty).toContain('<div class="n">0</div>');
+  });
+
+  it("專案區塊含標題、世界觀摘要、分鏡與知識", () => {
+    expect(html).toContain("晨光開示");
+    expect(html).toContain("相關專案");
+    expect(html).toContain("在都市喧囂中找回平靜");
+    expect(html).toContain("開場");
+    expect(html).toContain("已通過");
+    expect(html).toContain("開示稿");
+    expect(html).toContain("阿明");
+    expect(html).toContain("擁有者");
+  });
+
+  it("生成／留言帶專案名欄", () => {
+    expect(html).toContain("<th>專案</th>");
+    // 生成表與留言表都應出現專案名
+    expect(html.match(/晨光開示/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+
+  it("summarizeWorldview 只抽安全摘要並截斷", () => {
+    const s = summarizeWorldview({
+      logline: "短故事",
+      message: "主張",
+      tones: ["溫暖", "沉靜"],
+      styles: ["寫實"],
+      ghost: { nested: true },
+    });
+    expect(s).toEqual({
+      logline: "短故事",
+      message: "主張",
+      tones: ["溫暖", "沉靜"],
+      styles: ["寫實"],
+    });
   });
 
   it("回饋 scores 的英文問卷代碼對照回白話題目", () => {
