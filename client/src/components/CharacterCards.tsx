@@ -275,7 +275,7 @@ export function CharacterCards({
                       <Button
                         variant="ghost"
                         style={{ fontSize: "var(--fs-11)" }}
-                        title="綁一張定裝參考圖：上傳或從素材庫選，跨鏡比對更有依據"
+                        title="綁一張定裝參考圖：上傳或從素材庫選。跨鏡比對有依據；選「圖生圖／參考圖」類模型又沒挑來源時，會自動拿它當來源圖"
                         onClick={() => {
                           setRefEditId(c.id);
                           setTextEditId(null);

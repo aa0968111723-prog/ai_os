@@ -33,6 +33,17 @@ import {
 } from "../../../../shared/agentSkills";
 import { Button, Card, Hint, Meta, Pill } from "../../components/ui";
 /**
+ * 目標框送出按鈕的文案：**按鈕上就寫清楚會發生什麼**，免得使用者不敢按（或按了才發現要扣點）。
+ * 與 handleGoalSubmit 的分派一一對應。
+ */
+const GOAL_SUBMIT: Record<CreationMode, { label: string; hint: string }> = {
+  ask: { label: "問 AI", hint: "免費，直接送出" },
+  generate: { label: "帶入提示詞", hint: "只填進下面的提示詞欄，要不要生成由你按" },
+  template: { label: "帶入範本", hint: "只填進「這次想完成什麼」，執行仍要你按" },
+  plan: { label: "帶去排步驟", hint: "排計畫不扣點，核准後才會執行" },
+};
+
+/**
  * AI 創作工作台（WB-01～WB-06 正式頁面入口）：ProjectPage ② 只掛這一個主卡。
  * 目標輸入、模式 tabs、上下文條、共享草稿、四模式 adapter、CreationResourceDrawer。
  *
@@ -98,7 +109,7 @@ export function CreationWorkbench({
   const { draft, setDraft } = useCreationDraft(projectId);
   const [collapsed, setCollapsed] = useState(false);
   const [planForceOpen, setPlanForceOpen] = useState(false);
-  const [askFillRequest, setAskFillRequest] = useState<{ nonce: number; message: string } | null>(
+  const [askFillRequest, setAskFillRequest] = useState<{ nonce: number; message: string; autoSend?: boolean } | null>(
     null,
   );
   /** Discrete idea fill for TemplateMode (run_template) — not sticky goal keystrokes */
@@ -294,6 +305,36 @@ export function CreationWorkbench({
     setPlanForceOpen(next === "plan");
   };
 
+  /**
+   * 「你想完成什麼畫面？」的送出（QA 2026-08-01 修：這個框先前只鏡射、沒有任何送出行為）。
+   *
+   * 分派原則——**免費的直接做，會扣點的只帶入**：
+   * - 一起想：提問免費，直接送出。
+   * - 多步開拍：排計畫本身不扣點，但要人核准才執行，所以帶到目標欄讓使用者按「幫我排步驟」。
+   * - 直接出圖／套用範本：按下去就是錢，只把目標帶進提示詞／想法欄並聚焦，執行仍要使用者自己按。
+   */
+  const handleGoalSubmit = () => {
+    const goal = draft.goal.trim();
+    if (!goal) return;
+    setCollapsed(false);
+    if (mode === "ask") {
+      setAskFillRequest((prev) => ({ nonce: (prev?.nonce ?? 0) + 1, message: goal, autoSend: true }));
+      return;
+    }
+    if (mode === "generate") {
+      setDraft({ prompt: goal });
+      goTo("#gen-prompt");
+      return;
+    }
+    if (mode === "template") {
+      setTemplateIdeaBringIn((prev) => ({ text: goal, nonce: (prev?.nonce ?? 0) + 1 }));
+      goTo("#sec-workflow");
+      return;
+    }
+    setPlanForceOpen(true);
+    goTo("#sec-agent");
+  };
+
   /** ＋ 技能：切 mode、必要時補 goal 提示（不扣點） */
   const onSkillIdsChange = (skillIds: string[]) => {
     const mode = resolveModeFromSkills(skillIds) ?? draft.mode;
@@ -357,6 +398,9 @@ export function CreationWorkbench({
           skillIds={draft.skillIds ?? []}
           onSkillIdsChange={canEdit ? onSkillIdsChange : undefined}
           disabled={!canEdit}
+          onSubmit={canEdit ? handleGoalSubmit : undefined}
+          submitLabel={GOAL_SUBMIT[mode].label}
+          submitHint={GOAL_SUBMIT[mode].hint}
         />
 
         <CreationModeTabs mode={mode} onModeChange={onModeChange} tabPanelIdPrefix={tabPrefix} />

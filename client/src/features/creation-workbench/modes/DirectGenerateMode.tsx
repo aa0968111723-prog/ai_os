@@ -346,7 +346,10 @@ export function DirectGenerateMode({
         fullModel &&
         supportsCardAnchors(fullModel.category) && (
           <Hint style={{ marginTop: 6, fontSize: 12 }}>
-            角色卡／場景卡以「文字描述」注入提示詞；定裝參考圖不會直接送入模型（僅供人工比對成品）
+            {needs === "image"
+              ? // QA 2026-08-01：這類模型要一張來源圖，沒挑就用卡片上的參考圖——先前綁了圖卻不生效
+                "角色卡／場景卡以「文字描述」注入提示詞；沒有另外挑來源圖時，會自動用卡片上的參考圖當來源（角色優先）"
+              : "角色卡／場景卡以「文字描述」注入提示詞；參考圖只在「圖生圖／參考圖」這類模型才會當來源"}
           </Hint>
         )}
 

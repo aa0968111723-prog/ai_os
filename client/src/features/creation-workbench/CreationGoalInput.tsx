@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { Hint } from "../../components/ui";
+import { Button, Hint } from "../../components/ui";
 import { CreationSkillPicker } from "./CreationSkillPicker";
 
 export function CreationGoalInput({
@@ -9,6 +9,9 @@ export function CreationGoalInput({
   onSkillIdsChange,
   disabled = false,
   inputId,
+  onSubmit,
+  submitLabel,
+  submitHint,
 }: {
   goal: string;
   onGoalChange: (goal: string) => void;
@@ -18,6 +21,14 @@ export function CreationGoalInput({
   disabled?: boolean;
   /** Optional stable id from parent; defaults to useId() for multi-instance safety */
   inputId?: string;
+  /**
+   * 送出（QA 2026-08-01）：這個框先前只把字鏡射到下面的模式面板，本身沒有任何送出行為——
+   * 使用者打完字找不到按鈕，回報「上面那個框不能用」。給它一顆會做事的按鈕。
+   */
+  onSubmit?: () => void;
+  submitLabel?: string;
+  /** 按下去會發生什麼（免費提問／只帶入不扣點…），按鈕旁一句話講清楚 */
+  submitHint?: string;
 }) {
   const autoId = useId();
   const id = inputId ?? `creation-goal-${autoId.replace(/:/g, "")}`;
@@ -34,8 +45,23 @@ export function CreationGoalInput({
         disabled={disabled}
         placeholder="例如：把腳本拆成 6 鏡，每鏡出一張定裝一致的圖"
         onChange={(e) => onGoalChange(e.target.value)}
+        onKeyDown={(e) => {
+          // Ctrl/⌘+Enter 送出：長目標常要換行，所以不用單獨 Enter
+          if (onSubmit && (e.metaKey || e.ctrlKey) && e.key === "Enter" && goal.trim() && !disabled) {
+            e.preventDefault();
+            onSubmit();
+          }
+        }}
         style={{ width: "100%", resize: "vertical", minHeight: 64 }}
       />
+      {onSubmit && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+          <Button variant="primary" size="sm" disabled={disabled || !goal.trim()} onClick={onSubmit}>
+            {submitLabel ?? "送出"}
+          </Button>
+          {submitHint && <Hint style={{ margin: 0 }}>{submitHint}</Hint>}
+        </div>
+      )}
       {onSkillIdsChange && (
         <CreationSkillPicker
           selectedIds={skillIds}

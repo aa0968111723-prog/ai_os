@@ -25,7 +25,7 @@ export function AskAiMode({
   onSavePromptSuggestion?: (text: string, modelId?: string) => void;
   onSaveSceneDraft?: (text: string) => void;
   /** Fill Ask AI chat input without sending (CreationAction type ask). */
-  askFillRequest?: { nonce: number; message: string } | null;
+  askFillRequest?: { nonce: number; message: string; autoSend?: boolean } | null;
   knowledgeIds?: string[];
 }) {
   return (

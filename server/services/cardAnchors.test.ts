@@ -12,6 +12,7 @@ import {
   formatSceneAnchor,
   formatSceneKnowledgeBlock,
   orderRowsByIds,
+  pickFirstReference,
 } from "./cardAnchors";
 
 const S_ZEN = { id: "s1", name: "禪堂", palette: "米金、木色", lighting: "柔側光、晨曦" };
@@ -94,5 +95,29 @@ describe("orderRowsByIds / clipCardField", () => {
   it("順序與截短", () => {
     expect(orderRowsByIds([S_RAIN, S_ZEN], ["s1", "s2"])).toEqual([S_ZEN, S_RAIN]);
     expect(clipCardField("  a\n\nb  ")).toBe("a b");
+  });
+});
+
+describe("pickFirstReference（卡片參考圖 → 生成來源）", () => {
+  const rows = [
+    { id: "c1", referenceAssetId: null },
+    { id: "c2", referenceAssetId: "asset-2" },
+    { id: "c3", referenceAssetId: "asset-3" },
+  ];
+
+  it("依勾選順序取第一張綁得到的圖（DB 回傳順序不算數）", () => {
+    expect(pickFirstReference(rows, ["c3", "c2"])).toBe("asset-3");
+    expect(pickFirstReference(rows, ["c2", "c3"])).toBe("asset-2");
+  });
+
+  it("跳過沒綁圖的卡，而不是直接放棄", () => {
+    expect(pickFirstReference(rows, ["c1", "c3"])).toBe("asset-3");
+  });
+
+  it("都沒綁圖時回 null（呼叫端才好退回原本的「請挑來源」訊息）", () => {
+    expect(pickFirstReference([{ id: "c1", referenceAssetId: null }], ["c1"])).toBeNull();
+    expect(pickFirstReference(rows, [])).toBeNull();
+    // 勾了不存在的卡（stale 畫面）也不能爆
+    expect(pickFirstReference(rows, ["ghost"])).toBeNull();
   });
 });
