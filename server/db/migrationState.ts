@@ -110,12 +110,17 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0020_group_agent_commander",
   // 0021：純新增 user_presence 表（CREATE TABLE IF NOT EXISTS），不動任何既有資料，可安全納入 bridge
   "0021_user_presence",
-  // 0022：素材保全——三張新表＋assets 八個 nullable/有 default 欄位＋部分索引（皆 IF NOT EXISTS），
+  // 0022：純新增 user_devices／device_challenges 兩張表＋索引，與 sessions／users 各一個
+  //       nullable 欄位（皆 IF NOT EXISTS），不動任何既有資料，可安全納入 bridge。
+  //       所有欄位都寫在 CREATE TABLE 裡、不在同一批 pending 內用 ALTER 補欄位——
+  //       否則 bridge 比對的整表 DDL（含全部欄位的單一 CREATE TABLE）會對不起來。
+  "0022_device_trust",
+  // 0023：素材保全——三張新表＋assets 八個 nullable/有 default 欄位＋部分索引（皆 IF NOT EXISTS），
   //       外加一句經審查的落地狀態回填 UPDATE（只寫新加入的 land_* 追蹤欄位、只挑「本地無檔、
   //       url 仍是外部網址、AI 生成」的列；不碰 url/storage_path/使用者內容，重跑冪等）。
   //       row-changing 語句不會出現在 drift 計畫中，比照 0005 的去重前例以 idiom 白名單放行
   //      （見 isReviewedLandingBackfillStatement），其餘 UPDATE 仍一律擋下要求人工審查。
-  "0022_asset_durability",
+  "0023_asset_durability",
 ] as const;
 
 /**
@@ -253,7 +258,7 @@ export function isRowDeduplicationStatement(statement: string): boolean {
 }
 
 /**
- * Matches only the reviewed landing-state backfill shipped in 0022: an UPDATE
+ * Matches only the reviewed landing-state backfill shipped in 0023: an UPDATE
  * on assets that stamps the freshly added land_* tracking columns (and copies
  * url into origin_url) for rows that were never persisted locally. It touches
  * rows, not schema, so it never appears in a drift plan; the WHERE clause is
