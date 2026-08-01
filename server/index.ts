@@ -1209,6 +1209,24 @@ app.post("/api/v1/databases/:id/rows/batch", handleV1AddRowsBatch);
 app.get("/api/databases/:id/rows.csv", handleCsvExport);
 app.get("/api/databases/:id/calendar.ics", handleDatabaseIcs);
 
+// 素材全站備份（UI：團隊管理「立即下載素材備份」；排程：Bearer ADMIN_BACKUP_TOKEN）
+// 串流 tar.gz（內含 assets/），並寫 backup_runs → system.storageStatus.lastBackupAt
+app.get("/api/admin/backup/assets.tar.gz", async (req, res) => {
+  try {
+    const { authorizeAssetBackup, streamAssetsTarGz } = await import("./services/assetBackup");
+    const gate = await authorizeAssetBackup(req);
+    if (!gate.ok) {
+      res.status(gate.status).json({ error: gate.error });
+      return;
+    }
+    await streamAssetsTarGz(res, gate.triggeredBy);
+  } catch (err) {
+    console.error("[backup:assets]", err);
+    recordError("backup:assets", err);
+    if (!res.headersSent) res.status(500).json({ error: "素材備份失敗" });
+  }
+});
+
 // 系統自檢（開發者登入後用瀏覽器開，或管理頁按鈕）——部署後一鍵驗證所有子系統
 app.get("/api/selftest", async (req, res) => {
   const auth = await resolveSession(req);
