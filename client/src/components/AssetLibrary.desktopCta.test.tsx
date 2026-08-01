@@ -12,6 +12,7 @@ const meQuery = vi.fn();
 const openAssetInExternalEditor = vi.fn();
 const revealAssetInFolder = vi.fn();
 const hasDesktopBridge = vi.fn();
+const detectDesktopEditors = vi.fn();
 
 vi.mock("../api", () => ({
   trpc: {
@@ -49,6 +50,7 @@ vi.mock("../platform/desktopBridge", async () => {
     hasDesktopBridge: () => hasDesktopBridge(),
     openAssetInExternalEditor: (...args: unknown[]) => openAssetInExternalEditor(...args),
     revealAssetInFolder: (...args: unknown[]) => revealAssetInFolder(...args),
+    detectDesktopEditors: (...args: unknown[]) => detectDesktopEditors(...args),
   };
 });
 
@@ -113,6 +115,7 @@ describe("AssetLibrary DESK-01 desktop CTA", () => {
     openAssetInExternalEditor.mockReset();
     revealAssetInFolder.mockReset();
     hasDesktopBridge.mockReset();
+    detectDesktopEditors.mockReset();
     delete window.__AIOS_DESKTOP__;
 
     meQuery.mockReturnValue({
@@ -127,6 +130,10 @@ describe("AssetLibrary DESK-01 desktop CTA", () => {
       isFetching: false,
       error: null,
     });
+    detectDesktopEditors.mockResolvedValue([
+      { id: "capcut", name: "CapCut", kind: "video-editor", installed: true },
+      { id: "system-default", name: "系統預設", kind: "system-default", installed: true, systemDefault: true },
+    ]);
   });
 
   afterEach(() => {
@@ -152,6 +159,11 @@ describe("AssetLibrary DESK-01 desktop CTA", () => {
     expect(screen.queryByText(/下載後本機開啟/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /下載/ })).not.toBeInTheDocument();
 
+    // 有 bridge 時可選軟體；預設第一個 video-editor
+    await waitFor(() => {
+      expect(screen.getByLabelText(/開啟用軟體/)).toBeInTheDocument();
+    });
+
     await user.click(screen.getByRole("button", { name: /用外部軟體開啟/ }));
 
     await waitFor(() => {
@@ -159,6 +171,7 @@ describe("AssetLibrary DESK-01 desktop CTA", () => {
         assetId: ASSET_ID,
         projectId: PROJECT_ID,
         editorKind: "video-editor",
+        editorId: "capcut",
         suggestedName: "scene-cut.mp4",
         returnPath: `/p/${PROJECT_ID}?tab=assets`,
       });

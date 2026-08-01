@@ -32,13 +32,58 @@ export type DesktopRevisionEvent = {
   title?: string;
 };
 
+/** 與 Rust HandoffStatusEvent 同形（camelCase）；percent 0–100 可選。 */
 export type DesktopHandoffStatusEvent = {
   handoffId: string;
   projectId?: string;
   sourceAssetId?: string;
-  phase: "downloaded" | "launched" | "watching" | "uploading" | "uploaded" | "error" | "stopped";
+  phase:
+    | "downloading"
+    | "downloaded"
+    | "launched"
+    | "watching"
+    | "uploading"
+    | "uploaded"
+    | "error"
+    | "stopped";
   message: string;
+  /** 0–100；未知階段省略 */
+  percent?: number;
 };
+
+/** 正規化原生／測試注入的交接狀態（容錯缺欄、舊 phase 別名）。 */
+export function normalizeHandoffStatusEvent(raw: unknown): DesktopHandoffStatusEvent | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const handoffId = typeof o.handoffId === "string" ? o.handoffId : null;
+  const message = typeof o.message === "string" ? o.message : null;
+  let phase = typeof o.phase === "string" ? o.phase : null;
+  if (!handoffId || !message || !phase) return null;
+  // 舊版只有 downloaded 當「下載中」語意——保留字面值，前端 UI 自行解讀
+  const known = new Set([
+    "downloading",
+    "downloaded",
+    "launched",
+    "watching",
+    "uploading",
+    "uploaded",
+    "error",
+    "stopped",
+  ]);
+  if (!known.has(phase)) phase = "watching";
+  let percent: number | undefined;
+  if (typeof o.percent === "number" && Number.isFinite(o.percent)) {
+    percent = Math.max(0, Math.min(100, Math.round(o.percent)));
+  }
+  return {
+    handoffId,
+    projectId: typeof o.projectId === "string" ? o.projectId : undefined,
+    sourceAssetId: typeof o.sourceAssetId === "string" ? o.sourceAssetId : undefined,
+    phase: phase as DesktopHandoffStatusEvent["phase"],
+    message,
+    percent,
+  };
+}
 
 function tauri(): Required<Pick<TauriGlobal, "core">> & TauriGlobal | null {
   const candidate = window.__TAURI__;
@@ -94,7 +139,9 @@ export function bootstrapTauriDesktop(): void {
   void api.event.listen<DesktopRevisionEvent>("aios:asset-revision-uploaded", (event) => {
     window.dispatchEvent(new CustomEvent<DesktopRevisionEvent>("aios:asset-revision-uploaded", { detail: event.payload }));
   });
-  void api.event.listen<DesktopHandoffStatusEvent>("aios:desktop-handoff-status", (event) => {
-    window.dispatchEvent(new CustomEvent<DesktopHandoffStatusEvent>("aios:desktop-handoff-status", { detail: event.payload }));
+  void api.event.listen<unknown>("aios:desktop-handoff-status", (event) => {
+    const detail = normalizeHandoffStatusEvent(event.payload);
+    if (!detail) return;
+    window.dispatchEvent(new CustomEvent<DesktopHandoffStatusEvent>("aios:desktop-handoff-status", { detail }));
   });
 }

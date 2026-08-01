@@ -138,15 +138,26 @@ fn emit_status(
     phase: &str,
     message: impl Into<String>,
 ) {
+    emit_status_pct(app, record, phase, message, None);
+}
+
+fn emit_status_pct(
+    app: &tauri::AppHandle,
+    record: &HandoffRecord,
+    phase: &str,
+    message: impl Into<String>,
+    percent: Option<u8>,
+) {
     let _ = app.emit(
         "aios:desktop-handoff-status",
-        HandoffStatusEvent {
-            handoff_id: record.handoff_id.clone(),
-            project_id: record.project_id.clone(),
-            source_asset_id: Some(record.asset_id.clone()),
-            phase: phase.to_string(),
-            message: message.into(),
-        },
+        HandoffStatusEvent::new(
+            record.handoff_id.clone(),
+            record.project_id.clone(),
+            Some(record.asset_id.clone()),
+            phase,
+            message,
+            percent,
+        ),
     );
 }
 
@@ -310,17 +321,24 @@ fn start_watcher(app: tauri::AppHandle, record: HandoffRecord, initial_hash: Str
                 continue;
             }
 
-            emit_status(
+            emit_status_pct(
                 &app,
                 &record,
                 "uploading",
                 "偵測到已儲存的修改，正在上傳為新素材版本…",
+                Some(0),
             );
             match upload_revision(&app, &record).await {
                 Ok(asset) => {
                     uploaded_hash = current_hash;
                     candidate = None;
-                    emit_status(&app, &record, "uploaded", "已回傳 Aios，原始素材仍保留");
+                    emit_status_pct(
+                        &app,
+                        &record,
+                        "uploaded",
+                        "已回傳 Aios，原始素材仍保留",
+                        Some(100),
+                    );
                     if let Some(project_id) = record.project_id.clone() {
                         let _ = app.emit(
                             "aios:asset-revision-uploaded",
@@ -401,19 +419,43 @@ pub async fn open_asset(
         stopped: Arc::new(AtomicBool::new(false)),
     };
 
-    emit_status(&app, &record, "downloaded", "正在下載素材到 Aios 管理的本機快取…");
+    emit_status_pct(
+        &app,
+        &record,
+        "downloading",
+        "正在下載素材到 Aios 管理的本機快取…",
+        Some(0),
+    );
     if let Err(message) = download_asset(&window, &request.asset_id, &local_path).await {
+        emit_status_pct(&app, &record, "error", message.clone(), None);
         return DesktopBridgeResult::failure("download-failed", message);
     }
+    emit_status_pct(
+        &app,
+        &record,
+        "downloaded",
+        "素材已寫入本機快取，正在啟動軟體…",
+        Some(100),
+    );
     let initial_hash = match sha256_file(&local_path).await {
         Ok(hash) => hash,
-        Err(message) => return DesktopBridgeResult::failure("download-failed", message),
+        Err(message) => {
+            emit_status_pct(&app, &record, "error", message.clone(), None);
+            return DesktopBridgeResult::failure("download-failed", message);
+        }
     };
     if let Err(message) = launch_editor(&editor, &local_path) {
+        emit_status_pct(&app, &record, "error", message.clone(), None);
         return DesktopBridgeResult::failure("launch-failed", message);
     }
 
-    emit_status(&app, &record, "launched", format!("已用 {} 開啟", editor.name));
+    emit_status_pct(
+        &app,
+        &record,
+        "launched",
+        format!("已用 {} 開啟", editor.name),
+        Some(100),
+    );
     app.state::<HandoffState>()
         .records
         .write()

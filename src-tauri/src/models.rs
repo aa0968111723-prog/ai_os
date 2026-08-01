@@ -93,6 +93,29 @@ pub struct HandoffStatusEvent {
     pub source_asset_id: Option<String>,
     pub phase: String,
     pub message: String,
+    /// 0–100；未知階段省略（前端用 phase 文案即可）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub percent: Option<u8>,
+}
+
+impl HandoffStatusEvent {
+    pub fn new(
+        handoff_id: impl Into<String>,
+        project_id: Option<String>,
+        source_asset_id: Option<String>,
+        phase: impl Into<String>,
+        message: impl Into<String>,
+        percent: Option<u8>,
+    ) -> Self {
+        Self {
+            handoff_id: handoff_id.into(),
+            project_id,
+            source_asset_id,
+            phase: phase.into(),
+            message: message.into(),
+            percent,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,5 +155,32 @@ mod tests {
         assert_eq!(value["ok"], false);
         assert_eq!(value["reason"], "editor-not-found");
         assert_eq!(value["message"], "找不到剪輯軟體");
+    }
+
+    #[test]
+    fn handoff_status_includes_optional_percent_camel_case() {
+        let with_pct = serde_json::to_value(HandoffStatusEvent::new(
+            "h1",
+            Some("p1".into()),
+            Some("a1".into()),
+            "downloading",
+            "下載中",
+            Some(40),
+        ))
+        .unwrap();
+        assert_eq!(with_pct["handoffId"], "h1");
+        assert_eq!(with_pct["percent"], 40);
+        assert!(with_pct.get("handoff_id").is_none());
+
+        let no_pct = serde_json::to_value(HandoffStatusEvent::new(
+            "h2",
+            None,
+            None,
+            "watching",
+            "監看中",
+            None,
+        ))
+        .unwrap();
+        assert!(no_pct.get("percent").is_none());
     }
 }
