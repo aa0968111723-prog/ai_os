@@ -585,7 +585,9 @@ pub fn resume_active_handoffs(app: tauri::AppHandle) {
                 continue;
             }
             {
-                let mut map = app.state::<HandoffState>().records.write().await;
+                // 必須先綁 state，否則 write() 借到的 temporary 會在敘述結束就釋放（E0716）
+                let state = app.state::<HandoffState>();
+                let mut map = state.records.write().await;
                 map.insert(record.handoff_id.clone(), record.clone());
             }
             still_active.push(PersistedHandoff {

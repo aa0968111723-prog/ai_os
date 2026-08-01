@@ -246,9 +246,13 @@ export function AccountMenu({
           ))}
           <div className="menu-sep" />
           <div className="menu-label" role="presentation">工作</div>
-          {desktop && (
+          {desktop ? (
             <Link href="/desktop" className="menu-item" role="menuitem" onClick={close}>
               <Icon name="Monitor" size={15} />桌面剪輯連接
+            </Link>
+          ) : (
+            <Link href="/downloads#desktop-app" className="menu-item" role="menuitem" onClick={close}>
+              <Icon name="Download" size={15} />下載電腦版應用程式
             </Link>
           )}
           {workItems.map((item) => (

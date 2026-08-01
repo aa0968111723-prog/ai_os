@@ -3,8 +3,11 @@ import { Link } from "wouter";
 import { Icon } from "../components/Icon";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { Button, Card, Hint, Meta, Skeleton } from "../components/ui";
+import { hasDesktopBridge } from "../platform/desktopBridge";
+import { DESKTOP_INSTALL_HINT, DESKTOP_RELEASES_URL } from "../platform/desktopInstall";
 /**
  * 資料下載區（需求 #11）：開發筆記／模型資料／UIUX 設計／隱私與法律，集中一頁下載。
+ * 另含「電腦版應用程式」安裝包入口（GitHub Releases）。
  * 清單來自 /api/downloads 的白名單（伺服器逐檔確認存在才列出）；
  * 內容尚未備齊的分類（設計稿、法律文件）以「待補」空狀態呈現，先把位置立起來。
  */
@@ -65,6 +68,42 @@ export function DownloadsPage() {
         badge={data ? `${data.items.length} 份可下載文件` : "自動保持最新版"}
         description={<>開發筆記、模型資料、設計與法律文件集中在這裡；想匯出個人資料，請使用帳號選單的專用功能。</>}
       />
+
+      {/* 電腦版安裝包：使用者要「當應用程式用」的入口——不跟文件白名單混在一起 */}
+      <Card as="section" id="desktop-app" className="download-desktop-card" data-fb="下載電腦版" style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <Icon name="Monitor" size={28} style={{ color: "var(--primary-ink)", flex: "none" }} />
+          <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+            <h2 style={{ margin: 0, fontSize: "var(--fs-18)" }}>電腦版應用程式</h2>
+            <Hint layer="always" style={{ marginTop: 6 }}>
+              {hasDesktopBridge()
+                ? "你已經在 Aios 電腦版裡——不需再下載。素材庫可用「用外部軟體開啟」。"
+                : DESKTOP_INSTALL_HINT}
+            </Hint>
+            {!hasDesktopBridge() && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14, alignItems: "center" }}>
+                <Button
+                  as="a"
+                  variant="primary"
+                  href={DESKTOP_RELEASES_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <Icon name="Download" size={15} /> 下載 Windows／Mac 安裝包
+                </Button>
+                <Meta style={{ fontSize: 12 }}>
+                  開 GitHub Releases → 選最新一版 → 下載 .exe（Windows）或 .dmg（Mac）
+                </Meta>
+              </div>
+            )}
+            {!hasDesktopBridge() && (
+              <Hint style={{ marginTop: 10, fontSize: 12 }}>
+                安裝後從開始選單／應用程式資料夾開啟「Aios」，登入與網站相同帳號即可。
+              </Hint>
+            )}
+          </div>
+        </div>
+      </Card>
 
       {errMsg && (
         <p className="error" role="alert">

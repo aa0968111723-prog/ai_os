@@ -28,7 +28,20 @@
 
 ---
 
-## 2. 部署與本機指令
+## 2. 使用者怎麼下載安裝包（最簡）
+
+1. 登入網站 → 帳號選單 **「下載電腦版應用程式」**（或開 `/downloads#desktop-app`）  
+2. 按 **「下載 Windows／Mac 安裝包」** → 進 GitHub Releases 最新一版  
+3. 下載：
+   - **Windows**：`.exe`（建議）或 `.msi`  
+   - **Mac**：`.dmg`  
+4. 安裝後開啟 **Aios**，用與網站相同帳號登入  
+
+若 Releases 尚無檔案：請管理員在 repo 打 tag `desktop-v0.1.0`（或更新號）並等 **Desktop Native** workflow 完成；或 Actions 手動 `workflow_dispatch` 建 artifact。
+
+站內連結預設：`https://github.com/aa0968111723-prog/ai_os/releases/latest`（可用 `VITE_DESKTOP_RELEASES_URL` 覆寫）。
+
+## 3. 部署與本機指令
 
 ```bash
 # 資料庫（含 0024 asset_revisions）
@@ -47,7 +60,8 @@ npm run desktop:build   # 本機產安裝包
 
 CI：`.github/workflows/desktop-native.yml`  
 - PR 觸及 `src-tauri/**` 或 desktop 前端路徑 → verify + 內部安裝包 artifact  
-- Tag `desktop-v*` → 同流程  
+- Tag `desktop-v*` → 建包並 **發布到 GitHub Releases**（站內下載連這裡）  
+- 手動：Actions → Desktop Native → Run workflow
 
 ---
 
