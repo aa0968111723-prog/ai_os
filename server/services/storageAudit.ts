@@ -16,7 +16,6 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
 import { assets } from "../db/schema";
 import { storageAuditRuns } from "../db/schema/storage";
-import { log } from "../log";
 import { statStored } from "./storage";
 import { enqueueLanding } from "./generationCore";
 
@@ -112,7 +111,7 @@ export async function reconcileAssets(mode: AuditMode = "sample"): Promise<Audit
             await enqueueLanding(row.id);
             recoveredQueued += 1;
           } catch (e) {
-            log.warn("reconcileAssets enqueue failed", { assetId: row.id, err: String(e) });
+            console.warn(`[storageAudit] 補抓排隊失敗（下輪對帳再試）：asset=${row.id}`, e instanceof Error ? e.message : e);
           }
         }
         continue;

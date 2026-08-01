@@ -117,9 +117,24 @@ export const assets = pgTable("assets", {
    *  所有「列出／匯出／注入」查詢都以 isNull(deletedAt) 過濾，還原＝清回 null。 */
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  /** 落地檔案的 sha256（對帳時比對用；null＝尚未算過） */
+  sha256: text("sha256"),
+  /** 原始外部來源（fal 之類會過期的 CDN 網址）：補抓的唯一線索，落地後仍保留 */
+  originUrl: text("origin_url"),
+  /** 落地狀態：landed＝本地有檔、pending＝排隊補抓、failed＝重試到放棄、structural_fail＝來源本身救不回 */
+  landState: text("land_state").notNull().default("landed"),
+  landAttempts: integer("land_attempts").notNull().default(0),
+  landLastError: text("land_last_error"),
+  landLastTriedAt: timestamp("land_last_tried_at"),
+  /** 下次補抓時間（指數退避）；補抓佇列的部分索引就建在這一欄上 */
+  landNextTryAt: timestamp("land_next_try_at"),
+  /** 已被某個 worker 認領的時間（防同一列被多個實例重複抓） */
+  landClaimedAt: timestamp("land_claimed_at"),
 }, (t) => ({
   // 素材庫列表／來源下拉每次以 project_id 撈（生成完成也會即時 invalidate 重打）；補索引避免全表掃。
   projectCreatedIdx: index("assets_project_created_idx").on(t.projectId, t.createdAt),
+  // 補抓佇列只看「待補抓」那一小撮：部分索引讓輪詢不必掃整張 assets。
+  landQueueIdx: index("assets_land_queue_idx").on(t.landNextTryAt).where(sql`${t.landState} = 'pending'`),
 }));
 
 /** 工作流執行紀錄：後端執行器逐步推進（關頁不中斷）；steps 為每步狀態快照 */

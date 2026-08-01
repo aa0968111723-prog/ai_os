@@ -587,6 +587,42 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
 }
 
 /**
+ * 把一筆素材排回補抓佇列（對帳發現「資料庫說有檔、磁碟上卻沒有」時呼叫）。
+ *
+ * 關鍵是要把 storagePath 清掉並把 url 指回外部來源：檔案既然不在了，那個本地路徑
+ * 就是一個謊——留著它，素材頁會繼續給使用者一個永遠 404 的連結，sweepUnlandedAssets
+ * 也永遠撈不到這一列（它只找 storagePath 為空的）。清掉之後這筆就回到「只剩外部網址」
+ * 的狀態，既有的 sweep tick 會自然把它重新抓回來。
+ *
+ * 沒有可再抓一次的來源時（手動上傳、來源不是 http）標成 structural_fail 而不是 pending——
+ * 抓不回來的列留在佇列裡只會把佇列塞滿、讓真的救得回的那些排不進來。
+ */
+export async function enqueueLanding(assetId: string): Promise<boolean> {
+  const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, assetId)).limit(1);
+  if (!asset) return false;
+  const source = asset.originUrl ?? (asset.url.startsWith("http") ? asset.url : null);
+  if (!source || !asset.isAiGenerated) {
+    await db
+      .update(schema.assets)
+      .set({ landState: "structural_fail", landLastError: "沒有可重新抓取的外部來源", landLastTriedAt: new Date() })
+      .where(eq(schema.assets.id, assetId));
+    return false;
+  }
+  await db
+    .update(schema.assets)
+    .set({
+      storagePath: null,
+      url: source,
+      originUrl: source,
+      landState: "pending",
+      landNextTryAt: new Date(),
+      landClaimedAt: null,
+    })
+    .where(eq(schema.assets.id, assetId));
+  return true;
+}
+
+/**
  * 落地補抓（修：persistGenerationResult 是「射後不理」的背景作業，一次網路抖動失敗後，
  * 素材的 url 就永久停在 fal CDN 外部網址、storagePath 為空——fal CDN 網址是短效的，
  * 過期後成品變永久死連結且無源可重抓，是慢性資料流失）。
