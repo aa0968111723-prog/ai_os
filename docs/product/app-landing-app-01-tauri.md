@@ -110,9 +110,16 @@ Windows 掃描限制在 `Program Files`、`Program Files (x86)` 與 `LOCALAPPDAT
 | `projectId` / `sourceAssetId` | 可選 |
 | `phase` | `downloading`／`downloaded`／`launched`／`watching`／`uploading`／`uploaded`／`error`／`stopped` |
 | `message` | 白話狀態 |
-| `percent` | 可選 0–100（下載開始 0、完成 100；上傳開始 0、完成 100） |
+| `percent` | 可選 0–100（下載串流約每 5% 更新；完成 100） |
 
 前端 `normalizeHandoffStatusEvent` 容錯後再 `CustomEvent` 給 Companion／素材庫。素材庫在有 bridge 時可選編輯器 id 再開啟（與 Companion 對齊）。
+
+### 交接持久化與串流下載
+
+- 進行中的監看交接寫入 `app_local_data_dir/handoffs/active.json`（只存 id 與相對路徑，不寫可執行檔路徑）。
+- App 啟動時 `resume_active_handoffs`：本機檔仍在且有 `projectId` 則恢復 watcher。
+- 停止交接會從索引移除；檔案仍保留在 cache。
+- 下載改串流寫盤＋進度；SHA-256 串流讀檔（避免大檔整包進 RAM）。上傳仍受 200MB 上限。
 
 ## 深度連結
 

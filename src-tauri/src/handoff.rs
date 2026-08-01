@@ -5,13 +5,14 @@ use crate::{
         RevisionUploadedEvent,
     },
 };
+use futures_util::StreamExt;
 use reqwest::{
     header::{CONTENT_LENGTH, COOKIE},
     multipart,
     redirect::Policy,
     Client,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
@@ -23,7 +24,12 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{Emitter, Manager, WebviewWindow};
-use tokio::{fs, sync::RwLock, time::sleep};
+use tokio::{
+    fs,
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::RwLock,
+    time::sleep,
+};
 use url::Url;
 use uuid::Uuid;
 
@@ -31,6 +37,8 @@ const APP_ORIGIN: &str = "https://ai-os-app.zeabur.app";
 const MAX_ASSET_BYTES: u64 = 200 * 1024 * 1024;
 const WATCH_INTERVAL: Duration = Duration::from_secs(2);
 const STABLE_FOR: Duration = Duration::from_secs(4);
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+const INDEX_FILE: &str = "active.json";
 
 #[derive(Clone)]
 struct HandoffRecord {
@@ -40,6 +48,20 @@ struct HandoffRecord {
     editor_id: String,
     local_path: PathBuf,
     stopped: Arc<AtomicBool>,
+}
+
+/// 寫入 disk 的交接索引（重啟後恢復監看用）。路徑只允許 app handoffs 目錄下。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct PersistedHandoff {
+    handoff_id: String,
+    asset_id: String,
+    project_id: Option<String>,
+    editor_id: String,
+    /// 相對於 handoffs 根：`{handoffId}/{fileName}`
+    rel_path: String,
+    /// 上次已上傳（或初始下載）的內容 hash；恢復監看用
+    last_hash: Option<String>,
 }
 
 #[derive(Default)]
@@ -98,6 +120,114 @@ fn safe_filename(raw: Option<&str>, asset_id: &str) -> String {
     trimmed.to_string()
 }
 
+/// 只允許 `handoffId/fileName`（無 `..`、無絕對路徑）
+fn sanitize_rel_path(rel: &str) -> Option<String> {
+    let rel = rel.replace('\\', "/");
+    if rel.is_empty() || rel.starts_with('/') || rel.contains("..") {
+        return None;
+    }
+    let mut parts = rel.split('/');
+    let id = parts.next()?;
+    let name = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    if !valid_id(id) {
+        return None;
+    }
+    if name.is_empty()
+        || name.len() > 180
+        || name.chars().any(|c| {
+            c.is_control() || matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+        })
+    {
+        return None;
+    }
+    Some(format!("{id}/{name}"))
+}
+
+fn handoffs_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_local_data_dir()
+        .map(|p| p.join("handoffs"))
+        .map_err(|error| format!("找不到桌面資料目錄：{error}"))
+}
+
+fn index_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(handoffs_root(app)?.join(INDEX_FILE))
+}
+
+async fn load_persisted(app: &tauri::AppHandle) -> Vec<PersistedHandoff> {
+    let Ok(path) = index_path(app) else {
+        return Vec::new();
+    };
+    let Ok(bytes) = fs::read(&path).await else {
+        return Vec::new();
+    };
+    serde_json::from_slice::<Vec<PersistedHandoff>>(&bytes)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|entry| {
+            let rel = sanitize_rel_path(&entry.rel_path)?;
+            if !valid_id(&entry.handoff_id) || !valid_id(&entry.asset_id) {
+                return None;
+            }
+            if !valid_editor_id(Some(&entry.editor_id)) {
+                return None;
+            }
+            if !optional_valid_id(entry.project_id.as_deref()) {
+                return None;
+            }
+            Some(PersistedHandoff {
+                rel_path: rel,
+                ..entry
+            })
+        })
+        .collect()
+}
+
+async fn save_persisted(app: &tauri::AppHandle, entries: &[PersistedHandoff]) {
+    let Ok(path) = index_path(app) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent).await;
+    }
+    if let Ok(bytes) = serde_json::to_vec_pretty(entries) {
+        let _ = fs::write(path, bytes).await;
+    }
+}
+
+async fn upsert_persisted(app: &tauri::AppHandle, entry: PersistedHandoff) {
+    let mut list = load_persisted(app).await;
+    list.retain(|e| e.handoff_id != entry.handoff_id);
+    list.push(entry);
+    save_persisted(app, &list).await;
+}
+
+async fn remove_persisted(app: &tauri::AppHandle, handoff_id: &str) {
+    let mut list = load_persisted(app).await;
+    let before = list.len();
+    list.retain(|e| e.handoff_id != handoff_id);
+    if list.len() != before {
+        save_persisted(app, &list).await;
+    }
+}
+
+fn record_to_persisted(record: &HandoffRecord, last_hash: Option<String>) -> Option<PersistedHandoff> {
+    let file_name = record.local_path.file_name()?.to_str()?;
+    let rel = format!("{}/{}", record.handoff_id, file_name);
+    let rel = sanitize_rel_path(&rel)?;
+    Some(PersistedHandoff {
+        handoff_id: record.handoff_id.clone(),
+        asset_id: record.asset_id.clone(),
+        project_id: record.project_id.clone(),
+        editor_id: record.editor_id.clone(),
+        rel_path: rel,
+        last_hash,
+    })
+}
+
 async fn cookie_header(window: &WebviewWindow) -> Result<String, String> {
     // cookies_for_url 會包含 HttpOnly session。只從 async command／背景 task 呼叫，
     // 避免 Tauri 文件所述的 Windows 同步 handler deadlock。
@@ -119,17 +249,30 @@ async fn cookie_header(window: &WebviewWindow) -> Result<String, String> {
 fn http_client() -> Result<Client, String> {
     Client::builder()
         .redirect(Policy::limited(2))
-        .timeout(Duration::from_secs(90))
+        .timeout(DOWNLOAD_TIMEOUT)
         .user_agent("AiosDesktop/0.1")
         .build()
         .map_err(|error| format!("無法初始化桌面連線：{error}"))
 }
 
+/// 串流讀檔算 hash，避免大檔整包進記憶體。
 async fn sha256_file(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path)
+    let mut file = fs::File::open(path)
         .await
         .map_err(|error| format!("讀取本機檔案失敗：{error}"))?;
-    Ok(format!("{:x}", Sha256::digest(bytes)))
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = file
+            .read(&mut buf)
+            .await
+            .map_err(|error| format!("讀取本機檔案失敗：{error}"))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn emit_status(
@@ -161,8 +304,11 @@ fn emit_status_pct(
     );
 }
 
+/// 串流下載到磁碟，並依 Content-Length 回報 percent（0–99，完成由呼叫端發 100）。
 async fn download_asset(
+    app: &tauri::AppHandle,
     window: &WebviewWindow,
+    record: &HandoffRecord,
     asset_id: &str,
     target: &Path,
 ) -> Result<(), String> {
@@ -181,32 +327,55 @@ async fn download_asset(
     if !response.status().is_success() {
         return Err(format!("下載素材失敗（HTTP {}）", response.status()));
     }
-    let too_large = response
+    let total = response
         .headers()
         .get(CONTENT_LENGTH)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<u64>().ok())
-        .map(|size| size > MAX_ASSET_BYTES)
-        .unwrap_or(false);
-    if too_large {
+        .and_then(|value| value.parse::<u64>().ok());
+    if total.is_some_and(|size| size > MAX_ASSET_BYTES) {
         return Err("素材超過桌面交接上限 200MB".into());
     }
 
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| format!("讀取素材內容失敗：{error}"))?;
-    if bytes.len() as u64 > MAX_ASSET_BYTES {
-        return Err("素材超過桌面交接上限 200MB".into());
-    }
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)
             .await
             .map_err(|error| format!("建立本機快取資料夾失敗：{error}"))?;
     }
-    fs::write(target, bytes)
+    let mut file = fs::File::create(target)
         .await
-        .map_err(|error| format!("寫入本機快取失敗：{error}"))
+        .map_err(|error| format!("寫入本機快取失敗：{error}"))?;
+
+    let mut stream = response.bytes_stream();
+    let mut written: u64 = 0;
+    let mut last_pct: u8 = 0;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("讀取素材內容失敗：{error}"))?;
+        written = written.saturating_add(chunk.len() as u64);
+        if written > MAX_ASSET_BYTES {
+            let _ = fs::remove_file(target).await;
+            return Err("素材超過桌面交接上限 200MB".into());
+        }
+        file.write_all(&chunk)
+            .await
+            .map_err(|error| format!("寫入本機快取失敗：{error}"))?;
+        if let Some(total) = total.filter(|t| *t > 0) {
+            let pct = ((written.saturating_mul(100)) / total).min(99) as u8;
+            if pct >= last_pct.saturating_add(5) || pct == 99 {
+                last_pct = pct;
+                emit_status_pct(
+                    app,
+                    record,
+                    "downloading",
+                    format!("下載中… {pct}%"),
+                    Some(pct),
+                );
+            }
+        }
+    }
+    file.flush()
+        .await
+        .map_err(|error| format!("寫入本機快取失敗：{error}"))?;
+    Ok(())
 }
 
 async fn upload_revision(
@@ -227,6 +396,7 @@ async fn upload_revision(
         return Err("編輯後檔案超過回傳上限 200MB，請改用手動上傳或輸出較小版本".into());
     }
 
+    // 仍一次讀入（上限 200MB）；hash 已改串流。multipart 需要完整 body。
     let bytes = fs::read(&record.local_path)
         .await
         .map_err(|error| format!("讀取編輯後檔案失敗：{error}"))?;
@@ -250,7 +420,6 @@ async fn upload_revision(
         .file_name(file_name)
         .mime_str(&mime)
         .map_err(|error| format!("建立上傳檔案失敗：{error}"))?;
-    // 現有 /api/upload 會忽略額外欄位；保留它們以便後續 revision schema 接上。
     let form = multipart::Form::new()
         .text("projectId", project_id.to_string())
         .text("title", title)
@@ -258,6 +427,14 @@ async fn upload_revision(
         .text("desktopHandoffId", record.handoff_id.clone())
         .text("editorId", record.editor_id.clone())
         .part("file", file_part);
+
+    emit_status_pct(
+        app,
+        record,
+        "uploading",
+        "正在上傳為新素材版本…",
+        Some(30),
+    );
 
     let response = http_client()?
         .post(format!("{APP_ORIGIN}/api/upload"))
@@ -295,6 +472,7 @@ fn start_watcher(app: tauri::AppHandle, record: HandoffRecord, initial_hash: Str
             sleep(WATCH_INTERVAL).await;
             if record.stopped.load(Ordering::Relaxed) {
                 emit_status(&app, &record, "stopped", "已停止監看這次桌面交接");
+                remove_persisted(&app, &record.handoff_id).await;
                 break;
             }
 
@@ -330,8 +508,11 @@ fn start_watcher(app: tauri::AppHandle, record: HandoffRecord, initial_hash: Str
             );
             match upload_revision(&app, &record).await {
                 Ok(asset) => {
-                    uploaded_hash = current_hash;
+                    uploaded_hash = current_hash.clone();
                     candidate = None;
+                    if let Some(entry) = record_to_persisted(&record, Some(current_hash.clone())) {
+                        upsert_persisted(&app, entry).await;
+                    }
                     emit_status_pct(
                         &app,
                         &record,
@@ -364,6 +545,62 @@ fn start_watcher(app: tauri::AppHandle, record: HandoffRecord, initial_hash: Str
                 }
             }
         }
+    });
+}
+
+/// 啟動時從 disk 恢復仍在監看的交接（本機檔還在才恢復）。
+pub fn resume_active_handoffs(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let root = match handoffs_root(&app) {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let entries = load_persisted(&app).await;
+        if entries.is_empty() {
+            return;
+        }
+        let mut still_active = Vec::new();
+        for entry in entries {
+            let local_path = root.join(&entry.rel_path);
+            if !local_path.is_file() {
+                continue;
+            }
+            let hash = match entry.last_hash.clone() {
+                Some(h) if !h.is_empty() => h,
+                _ => match sha256_file(&local_path).await {
+                    Ok(h) => h,
+                    Err(_) => continue,
+                },
+            };
+            let record = HandoffRecord {
+                handoff_id: entry.handoff_id.clone(),
+                asset_id: entry.asset_id.clone(),
+                project_id: entry.project_id.clone(),
+                editor_id: entry.editor_id.clone(),
+                local_path: local_path.clone(),
+                stopped: Arc::new(AtomicBool::new(false)),
+            };
+            if record.project_id.is_none() {
+                still_active.push(entry);
+                continue;
+            }
+            {
+                let mut map = app.state::<HandoffState>().records.write().await;
+                map.insert(record.handoff_id.clone(), record.clone());
+            }
+            still_active.push(PersistedHandoff {
+                last_hash: Some(hash.clone()),
+                ..entry
+            });
+            emit_status(
+                &app,
+                &record,
+                "watching",
+                "已恢復上次桌面交接監看（重啟後繼續）",
+            );
+            start_watcher(app.clone(), record, hash);
+        }
+        save_persisted(&app, &still_active).await;
     });
 }
 
@@ -400,16 +637,11 @@ pub async fn open_asset(
 
     let handoff_id = Uuid::new_v4().to_string();
     let file_name = safe_filename(request.suggested_name.as_deref(), &request.asset_id);
-    let root = match app.path().app_local_data_dir() {
-        Ok(path) => path.join("handoffs").join(&handoff_id),
-        Err(error) => {
-            return DesktopBridgeResult::failure(
-                "download-failed",
-                format!("找不到桌面資料目錄：{error}"),
-            )
-        }
+    let root = match handoffs_root(&app) {
+        Ok(path) => path.join(&handoff_id),
+        Err(message) => return DesktopBridgeResult::failure("download-failed", message),
     };
-    let local_path = root.join(file_name);
+    let local_path = root.join(&file_name);
     let record = HandoffRecord {
         handoff_id: handoff_id.clone(),
         asset_id: request.asset_id.clone(),
@@ -426,7 +658,9 @@ pub async fn open_asset(
         "正在下載素材到 Aios 管理的本機快取…",
         Some(0),
     );
-    if let Err(message) = download_asset(&window, &request.asset_id, &local_path).await {
+    if let Err(message) =
+        download_asset(&app, &window, &record, &request.asset_id, &local_path).await
+    {
         emit_status_pct(&app, &record, "error", message.clone(), None);
         return DesktopBridgeResult::failure("download-failed", message);
     }
@@ -461,6 +695,11 @@ pub async fn open_asset(
         .write()
         .await
         .insert(handoff_id.clone(), record.clone());
+
+    if let Some(entry) = record_to_persisted(&record, Some(initial_hash.clone())) {
+        upsert_persisted(&app, entry).await;
+    }
+
     if record.project_id.is_some() {
         start_watcher(app, record, initial_hash);
     }
@@ -486,28 +725,53 @@ pub async fn reveal_asset(
         );
     }
     let state = app.state::<HandoffState>();
-    let records = state.records.read().await;
-    let record = records.values().find(|record| {
-        let project_matches = request
-            .project_id
-            .as_deref()
-            .map(|project_id| record.project_id.as_deref() == Some(project_id))
-            .unwrap_or(true);
-        record.asset_id == request.asset_id && project_matches
-    });
-    let Some(record) = record else {
-        return DesktopBridgeResult::failure(
-            "download-failed",
-            "這個素材尚未交接到本機；請先選擇剪輯軟體開啟",
-        );
+    let mem = {
+        let records = state.records.read().await;
+        records.values().find(|record| {
+            let project_matches = request
+                .project_id
+                .as_deref()
+                .map(|project_id| record.project_id.as_deref() == Some(project_id))
+                .unwrap_or(true);
+            record.asset_id == request.asset_id && project_matches
+        }).map(|r| (r.handoff_id.clone(), r.local_path.clone()))
     };
 
-    match reveal_in_folder(&record.local_path) {
+    // 記憶體沒有時查 disk 索引（重啟後尚未恢復或僅下載未監看）
+    let (handoff_id, path) = if let Some(pair) = mem {
+        pair
+    } else {
+        let root = handoffs_root(&app).ok();
+        let entries = load_persisted(&app).await;
+        let found = entries.into_iter().find_map(|e| {
+            let project_matches = request
+                .project_id
+                .as_deref()
+                .map(|project_id| e.project_id.as_deref() == Some(project_id))
+                .unwrap_or(true);
+            if e.asset_id == request.asset_id && project_matches {
+                let path = root.as_ref()?.join(&e.rel_path);
+                if path.is_file() {
+                    return Some((e.handoff_id, path));
+                }
+            }
+            None
+        });
+        match found {
+            Some(pair) => pair,
+            None => {
+                return DesktopBridgeResult::failure(
+                    "download-failed",
+                    "這個素材尚未交接到本機；請先選擇剪輯軟體開啟",
+                );
+            }
+        }
+    };
+
+    match reveal_in_folder(&path) {
         Ok(()) => DesktopBridgeResult::success(
-            Some(record.handoff_id.clone()),
-            record
-                .local_path
-                .file_name()
+            Some(handoff_id),
+            path.file_name()
                 .and_then(|name| name.to_str())
                 .map(str::to_string),
         ),
@@ -528,10 +792,11 @@ pub async fn stop_handoff(
     }
     let state = app.state::<HandoffState>();
     let mut records = state.records.write().await;
-    let Some(record) = records.remove(&handoff_id) else {
-        return DesktopBridgeResult::failure("invalid-request", "找不到這次桌面交接");
-    };
-    record.stopped.store(true, Ordering::Relaxed);
+    if let Some(record) = records.remove(&handoff_id) {
+        record.stopped.store(true, Ordering::Relaxed);
+    }
+    drop(records);
+    remove_persisted(&app, &handoff_id).await;
     DesktopBridgeResult::success(Some(handoff_id), None)
 }
 
@@ -553,5 +818,31 @@ mod tests {
         assert!(valid_id("01234567-89ab-cdef-0123-456789abcdef"));
         assert!(!valid_id("../secret"));
         assert!(!valid_id("tiny"));
+    }
+
+    #[test]
+    fn rel_path_rejects_traversal() {
+        assert!(sanitize_rel_path("abc12345/clip.mp4").is_some());
+        assert!(sanitize_rel_path("../etc/passwd").is_none());
+        assert!(sanitize_rel_path("abc12345/../../x").is_none());
+        assert!(sanitize_rel_path("/abs/path.mp4").is_none());
+        assert!(sanitize_rel_path("short/x.mp4").is_none()); // id too short
+    }
+
+    #[test]
+    fn persisted_json_round_trip() {
+        let entry = PersistedHandoff {
+            handoff_id: "01234567-89ab-cdef-0123-456789abcdef".into(),
+            asset_id: "fedcba98-7654-3210-fedc-ba9876543210".into(),
+            project_id: Some("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee".into()),
+            editor_id: "capcut".into(),
+            rel_path: "01234567-89ab-cdef-0123-456789abcdef/clip.mp4".into(),
+            last_hash: Some("abc".into()),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("handoffId"));
+        assert!(json.contains("relPath"));
+        let back: PersistedHandoff = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, entry);
     }
 }

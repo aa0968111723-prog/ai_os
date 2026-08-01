@@ -2,7 +2,9 @@ mod editors;
 mod handoff;
 mod models;
 
-use handoff::{detect_editors, open_asset, reveal_asset, stop_handoff, HandoffState};
+use handoff::{
+    detect_editors, open_asset, resume_active_handoffs, reveal_asset, stop_handoff, HandoffState,
+};
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -58,6 +60,9 @@ pub fn run() {
                     emit_deep_link(&handle, url.as_str());
                 }
             });
+
+            // 重啟後恢復仍在監看的交接（本機快取還在才恢復）
+            resume_active_handoffs(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())
