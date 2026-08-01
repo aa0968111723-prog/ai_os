@@ -1,7 +1,7 @@
 /**
  * Generation domain schema（生成、點數帳本、素材、工作流、匯出）
  */
-import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export const generations = pgTable("generations", {
@@ -135,6 +135,26 @@ export const assets = pgTable("assets", {
   projectCreatedIdx: index("assets_project_created_idx").on(t.projectId, t.createdAt),
   // 補抓佇列只看「待補抓」那一小撮：部分索引讓輪詢不必掃整張 assets。
   landQueueIdx: index("assets_land_queue_idx").on(t.landNextTryAt).where(sql`${t.landState} = 'pending'`),
+}));
+
+/**
+ * 素材版本血緣：asset_id＝新版本（子），source_asset_id＝來源（父）。
+ * 桌面交接／手動上傳帶 sourceAssetId 時寫入；meta 仍保留同源欄位（雙寫過渡）。
+ */
+export const assetRevisions = pgTable("asset_revisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  assetId: uuid("asset_id").notNull(),
+  sourceAssetId: uuid("source_asset_id").notNull(),
+  projectId: uuid("project_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  desktopHandoffId: text("desktop_handoff_id"),
+  editorId: text("editor_id"),
+  createdBy: uuid("created_by"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  assetUidx: uniqueIndex("asset_revisions_asset_id_uidx").on(t.assetId),
+  sourceCreatedIdx: index("asset_revisions_source_created_idx").on(t.sourceAssetId, t.createdAt),
+  projectSourceIdx: index("asset_revisions_project_source_idx").on(t.projectId, t.sourceAssetId),
 }));
 
 /** 工作流執行紀錄：後端執行器逐步推進（關頁不中斷）；steps 為每步狀態快照 */

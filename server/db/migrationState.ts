@@ -121,6 +121,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   //       row-changing 語句不會出現在 drift 計畫中，比照 0005 的去重前例以 idiom 白名單放行
   //      （見 isReviewedLandingBackfillStatement），其餘 UPDATE 仍一律擋下要求人工審查。
   "0023_asset_durability",
+  // 0024：純新增 asset_revisions 表＋索引（皆 IF NOT EXISTS），不動任何既有資料，可安全納入 bridge
+  "0024_asset_revisions",
 ] as const;
 
 /**

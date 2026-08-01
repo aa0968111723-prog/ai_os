@@ -587,6 +587,25 @@ app.post("/api/upload", requireAuthBeforeUpload, upload.single("file"), async (r
         .set({ url: `/api/assets/${asset.id}/file` })
         .where(eq(schema.assets.id, asset.id))
         .returning();
+      // 正式版本表：與 meta 雙寫；失敗不擋上傳回應（meta 已可追溯）
+      if (sourceAssetId) {
+        try {
+          await db
+            .insert(schema.assetRevisions)
+            .values({
+              assetId: asset.id,
+              sourceAssetId,
+              projectId: project.id,
+              groupId: project.groupId,
+              desktopHandoffId: desktopHandoffId || null,
+              editorId: editorId || null,
+              createdBy: auth.user.id,
+            })
+            .onConflictDoNothing();
+        } catch (revErr) {
+          console.warn("[upload] asset_revisions insert skipped:", revErr);
+        }
+      }
       res.json({ ok: true, asset: updated });
     } catch (dbErr) {
       const { removeStoredFile } = await import("./services/storage");

@@ -15,6 +15,11 @@ import {
   type DetectedDesktopEditor,
 } from "../platform/desktopBridge";
 import type { DesktopHandoffStatusEvent } from "../platform/tauriDesktop";
+import {
+  formatLineageSummary,
+  listDirectRevisions,
+  parseAssetLineageMeta,
+} from "@shared/assetLineage";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "./ui";
 
 function fmtSize(bytes?: number | null): string {
@@ -101,6 +106,8 @@ export function AssetLibrary({
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"recent" | "name">("recent");
   const [onlySourceable, setOnlySourceable] = useState(false);
+  /** 只顯示某素材的直接編輯版本（meta／asset_revisions 血緣） */
+  const [revisionOfId, setRevisionOfId] = useState<string | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -271,13 +278,14 @@ export function AssetLibrary({
   // 篩選＋搜尋＋排序組合。資料本身已是 createdAt desc（最新在前），故「最新」= 原陣列順序。
   const shown = useMemo(() => {
     let list = allAssets ?? [];
+    if (revisionOfId) list = listDirectRevisions(list, revisionOfId);
     if (kindFilter !== "all") list = list.filter((a) => a.kind === kindFilter);
     if (onlySourceable) list = list.filter((a) => isSourceable(a.kind));
     const q = search.trim().toLowerCase();
     if (q) list = list.filter((a) => a.title.toLowerCase().includes(q));
     if (sortBy === "name") list = [...list].sort((a, b) => a.title.localeCompare(b.title, "zh-Hant"));
     return list;
-  }, [allAssets, kindFilter, onlySourceable, search, sortBy]);
+  }, [allAssets, kindFilter, onlySourceable, search, sortBy, revisionOfId]);
 
   // 大圖遮罩：完整焦點管理（進場聚焦、Tab 環繞、鎖背景捲動、Esc 關閉、關閉歸還焦點）——
   // 之前只掛 Esc 監聽，aria-modal 宣告了「背景不可及」但 Tab 仍會跑到遮罩背後的按鈕
@@ -305,7 +313,11 @@ export function AssetLibrary({
   };
 
   const total = allAssets?.length ?? 0;
-  const filterActive = kindFilter !== "all" || onlySourceable || search.trim() !== "";
+  const filterActive =
+    kindFilter !== "all" || onlySourceable || search.trim() !== "" || !!revisionOfId;
+  const revisionParentTitle = revisionOfId
+    ? (allAssets ?? []).find((a) => a.id === revisionOfId)?.title
+    : undefined;
   const smallBtn = { padding: "2px 10px", fontSize: 11 } as const;
 
   // radiogroup 的正規鍵盤模式（roving tabindex）：方向鍵在群組內漫遊、只有選中項進 Tab 序——
@@ -372,6 +384,28 @@ export function AssetLibrary({
         <>
           {/* 工具列：數量統計 · 種類篩選 chips · 搜尋 · 排序 */}
           <div data-fb="素材工具列" style={{ margin: "12px 0 4px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {revisionOfId && (
+              <Hint layer="always" role="status" style={{ margin: 0, fontSize: 13 }}>
+                只顯示「{revisionParentTitle ?? "此素材"}」的直接編輯版本
+                <button
+                  type="button"
+                  className="linkish"
+                  style={{
+                    border: 0,
+                    background: "none",
+                    cursor: "pointer",
+                    color: "var(--primary-ink)",
+                    textDecoration: "underline",
+                    fontSize: 13,
+                    marginLeft: 8,
+                    padding: 0,
+                  }}
+                  onClick={() => setRevisionOfId(null)}
+                >
+                  清除篩選
+                </button>
+              </Hint>
+            )}
             <div role="radiogroup" aria-label="依種類篩選素材" {...kindRoving.groupProps} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
               {/* 全部一定顯示；其餘只在該類有素材時才出現（visibleKindFilters 已過濾），避免點了空空的 */}
               {visibleKindFilters.map((f, idx) => {
@@ -538,15 +572,67 @@ export function AssetLibrary({
                         {a.storagePath ? "・已永久保存" : a.isAiGenerated ? "・保存中…" : ""}
                         {a.sizeBytes ? `・${fmtSize(a.sizeBytes)}` : ""}
                       </Meta>
-                      {/* AUTH-03 lineage：桌面編輯回傳的新素材可追溯來源 */}
+                      {/* AUTH-03／asset_revisions：來源 + 編輯器；可篩子版本 */}
                       {(() => {
-                        const srcId = (a.meta as { sourceAssetId?: string } | null | undefined)?.sourceAssetId;
-                        if (!srcId) return null;
-                        const srcTitle = (allAssets ?? []).find((x) => x.id === srcId)?.title;
+                        const lineage = formatLineageSummary(a.meta, (id) =>
+                          (allAssets ?? []).find((x) => x.id === id)?.title,
+                        );
+                        const m = parseAssetLineageMeta(a.meta);
+                        const childCount = listDirectRevisions(allAssets ?? [], a.id).length;
+                        if (!lineage && childCount === 0) return null;
                         return (
-                          <Meta as="div" style={{ fontSize: 11 }} title={srcId}>
-                            由「{srcTitle ?? "原始素材"}」編輯而來
-                          </Meta>
+                          <div className="asset-lineage" style={{ marginTop: 4 }}>
+                            {lineage && (
+                              <Meta as="div" style={{ fontSize: 11 }} title={m.sourceAssetId}>
+                                {lineage}
+                                {m.sourceAssetId && (
+                                  <button
+                                    type="button"
+                                    className="linkish"
+                                    style={{
+                                      border: 0,
+                                      background: "none",
+                                      cursor: "pointer",
+                                      color: "var(--primary-ink)",
+                                      textDecoration: "underline",
+                                      fontSize: 11,
+                                      marginLeft: 6,
+                                      padding: 0,
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setRevisionOfId(m.sourceAssetId!);
+                                    }}
+                                  >
+                                    只看此來源的版本
+                                  </button>
+                                )}
+                              </Meta>
+                            )}
+                            {childCount > 0 && (
+                              <Meta as="div" style={{ fontSize: 11, marginTop: 2 }}>
+                                <button
+                                  type="button"
+                                  className="linkish"
+                                  style={{
+                                    border: 0,
+                                    background: "none",
+                                    cursor: "pointer",
+                                    color: "var(--primary-ink)",
+                                    textDecoration: "underline",
+                                    fontSize: 11,
+                                    padding: 0,
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setRevisionOfId(a.id);
+                                  }}
+                                >
+                                  {childCount} 個編輯版本
+                                </button>
+                              </Meta>
+                            )}
+                          </div>
                         );
                       })()}
 

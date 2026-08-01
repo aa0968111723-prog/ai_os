@@ -169,6 +169,13 @@
       "when": 1785600600000,
       "tag": "0023_asset_durability",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785600700000,
+      "tag": "0024_asset_revisions",
+      "breakpoints": true
     }
   ]
 }
