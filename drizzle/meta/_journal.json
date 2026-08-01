@@ -162,6 +162,13 @@
       "when": 1785600500000,
       "tag": "0022_device_trust",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1785600600000,
+      "tag": "0023_asset_durability",
+      "breakpoints": true
     }
   ]
 }
