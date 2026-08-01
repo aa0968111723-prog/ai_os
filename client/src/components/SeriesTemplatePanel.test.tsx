@@ -6,10 +6,17 @@
  *   2. 4 格沒填齊不能送出；送出的專案名必須是 `系列｜日期｜主題`。
  * 以及退回標籤：只能選固定 5 種，「其他」一定要另寫一句說明。
  */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type React from "react";
+
+/** type=date 在 jsdom 不吃 userEvent.type；用相對未來日避免寫死日期過期 */
+function futureDueDate(daysAhead = 14): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + daysAhead);
+  return d.toISOString().slice(0, 10);
+}
 
 const h = vi.hoisted(() => {
   const bag: { queryData: Map<string, unknown>; mutations: Array<{ path: string; input: unknown }>; root: Record<string, unknown> } =
@@ -99,12 +106,14 @@ describe("母版系列面板", () => {
     expect(screen.getByRole("button", { name: "開這一集" })).toHaveProperty("disabled", true);
 
     await userEvent.type(screen.getByLabelText("本集禁忌"), "無");
-    await userEvent.type(screen.getByLabelText("截止日期"), "2026-08-05");
+    const dueDate = futureDueDate(14);
+    // jsdom 的 type=date 不會被 userEvent.type 寫入 value——用 change 事件
+    fireEvent.change(screen.getByLabelText("截止日期"), { target: { value: dueDate } });
 
     const ready = screen.getByRole("button", { name: "開這一集" });
     expect(ready).toHaveProperty("disabled", false);
     // 專案名照 SOP 命名規則預告，使用者按下去前就知道會叫什麼
-    expect(screen.getByText(/專案會叫：週更開示60秒｜2026-08-05｜留一點空隙/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(`專案會叫：週更開示60秒｜${dueDate}｜留一點空隙`))).toBeTruthy();
 
     await userEvent.click(ready);
     expect(h.mutations).toEqual([
@@ -113,16 +122,17 @@ describe("母版系列面板", () => {
         input: {
           groupId: GROUP,
           templateId: "weekly-dharma-60",
-          variables: { topic: "留一點空隙", sourceQuote: "無", taboo: "無", dueDate: "2026-08-05" },
+          variables: { topic: "留一點空隙", sourceQuote: "無", taboo: "無", dueDate },
         },
       },
     ]);
   });
 
   it("已開的集數會列出來，點得回去", async () => {
+    const dueDate = futureDueDate(14);
     h.queryData.set("projects.seriesOverview", {
       master: { id: "m1", title: "【母版】週更開示60秒" },
-      episodes: [{ id: "e1", title: "週更開示60秒｜2026-08-05｜留一點空隙", dueDate: "2026-08-05", topic: "留一點空隙", updatedAt: new Date().toISOString() }],
+      episodes: [{ id: "e1", title: `週更開示60秒｜${dueDate}｜留一點空隙`, dueDate, topic: "留一點空隙", updatedAt: new Date().toISOString() }],
     });
     render(<SeriesTemplatePanel groupId={GROUP} isLeader={false} />);
     expect(screen.getByText("已開 1 集")).toBeTruthy();
