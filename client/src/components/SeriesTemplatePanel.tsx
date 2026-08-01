@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { Button, Card, Chip, Hint, Meta } from "./ui";
+import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 import {
   buildEpisodeTitle,
   episodeVariablesSchema,
@@ -30,11 +31,11 @@ const EMPTY: Record<EpisodeVariableKey, string> = {
 };
 
 /** 手機鍵盤彈出後，把聚焦欄位捲到可視區中央，避免被底部導覽／FAB 裁切 */
-function scrollFieldIntoView(e: FocusEvent<HTMLInputElement>) {
+function scrollFieldIntoView(e: FocusEvent<HTMLInputElement | HTMLTextAreaElement>) {
   const el = e.currentTarget;
-  // 等鍵盤動畫／visualViewport 穩定再捲，否則 iOS 會捲錯位置
+  // 等鍵盤動畫／visualViewport 穩定再捲，並預留 --chrome-bottom（M2）
   window.setTimeout(() => {
-    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    focusAndReveal(el);
   }, 120);
 }
 

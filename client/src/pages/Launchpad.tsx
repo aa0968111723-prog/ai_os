@@ -285,7 +285,19 @@ export function Launchpad({ groupId }: { groupId: string }) {
           className="primary daily-new-project"
           aria-expanded={createOpen}
           aria-controls="new-project-panel"
-          onClick={() => setCreateOpen((open) => !open)}
+          onClick={() => {
+            // 體檢 P1-6：表單在下方，只 toggle 不捲 = 像壞掉。展開後捲到表單；收合不捲。
+            setCreateOpen((open) => {
+              const next = !open;
+              if (next) {
+                requestAnimationFrame(() => {
+                  document.getElementById("new-project-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  document.getElementById("np-title")?.focus({ preventScroll: true });
+                });
+              }
+              return next;
+            });
+          }}
         >
           <Icon name={createOpen ? "X" : "Plus"} size={16} />
           {createOpen ? "收起建立表單" : "建立新專案"}
@@ -469,7 +481,13 @@ export function Launchpad({ groupId }: { groupId: string }) {
       <section id="projects" className="dashboard-section" aria-labelledby="projects-title">
         <div className="section-heading">
           <div><p className="eyebrow">完整清單</p><h2 id="projects-title">所有專案</h2></div>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>建立新專案</Button>
+          <Button size="sm" onClick={() => {
+            setCreateOpen(true);
+            requestAnimationFrame(() => {
+              document.getElementById("new-project-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+              document.getElementById("np-title")?.focus({ preventScroll: true });
+            });
+          }}>建立新專案</Button>
         </div>
 
       {/* 工具列：搜尋／類型篩選／排序／顯示已封存（有專案或開了已封存才顯示完整工具列；

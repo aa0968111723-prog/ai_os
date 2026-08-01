@@ -1289,11 +1289,28 @@ export function ProjectPage({ id }: { id: string }) {
         </>
       ) : (
       <>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-        <Button size="sm" onClick={() => setProjectModeAndPersist("simple")} data-fb="切到簡易模式">
-          切成簡易模式（四步做完一支片）
+      {/* 手機完整版：簡易入口要極明顯（M1-1）——不是藏在角落一顆 ghost 鈕 */}
+      <Card
+        as="div"
+        data-fb="切到簡易模式"
+        style={{
+          marginBottom: 12,
+          padding: "10px 14px",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
+          borderColor: "var(--primary-border, var(--border))",
+          background: "var(--primary-tint)",
+        }}
+      >
+        <span style={{ flex: "1 1 160px", fontSize: 13, lineHeight: 1.45 }}>
+          <b>想快一點？</b>用簡易模式四步做完一支片（故事→分鏡→出圖→送審），完整工具隨時可切回來。
+        </span>
+        <Button size="sm" variant="primary" onClick={() => setProjectModeAndPersist("simple")}>
+          切成簡易模式
         </Button>
-      </div>
+      </Card>
 
       {/* 2.3 唯讀橫幅：檢視者第一眼就知道自己是唯讀＋能做什麼＋找誰解鎖（不是「系統一直壞」） */}
       {!canEdit && (

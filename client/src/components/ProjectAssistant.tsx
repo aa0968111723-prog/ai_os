@@ -10,6 +10,7 @@ import {
   type AssistantActivityEvent,
 } from "./AssistantTrace";
 import { requestAssistantStream } from "./assistantStream";
+import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 import {
   AGENT_PLANNER_OPTIONS,
   getAgentPlannerOption,
@@ -755,6 +756,7 @@ export function ProjectAssistant({
             aria-label="問 AI 專案助手"
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onFocus={(e) => focusAndReveal(e.currentTarget)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void send(); } }}
             placeholder="問進度、要 idea、貼腳本、下目標…例：把腳本拆成分鏡並逐鏡出圖"
             disabled={busy}

@@ -9,6 +9,7 @@ import { escapeRegExp, parseMentionedNames } from "@shared/mentions";
 import { useCustomQuickPhrases, MAX_PHRASE_LEN } from "../useCustomQuickPhrases";
 import { useLocalDraft } from "../useLocalDraft";
 
+import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 import { Button, Card, Chip, Hint, Meta } from "./ui";
 /** 單則留言(含回覆摘要／表情彙總／引用卡）——由 messages.list 推得,列元件與父層共用同一形狀 */
 type MessageRowData = inferRouterOutputs<AppRouter>["messages"]["list"]["items"][number];
@@ -995,6 +996,7 @@ export function MessagePanel({
             setBody(e.target.value);
             detectMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
           }}
+          onFocus={(e) => focusAndReveal(e.currentTarget)}
           placeholder={pendingRef ? "說說你對這個作品的想法…" : "留言給同組夥伴…（輸入 @ 可提及）"}
           onKeyDown={(e) => {
             // 注音/拼音選字中的 Enter 是「選字」不是「送出」(isComposing 需排除);
