@@ -59,7 +59,7 @@ ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "land_next_try_at" timestamp;--> s
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "land_claimed_at" timestamp;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "storage_audit_runs_finished_idx" ON "storage_audit_runs" USING btree ("finished_at");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "backup_runs_ok_finished_idx" ON "backup_runs" USING btree ("ok","finished_at");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "assets_land_queue_idx" ON "assets" USING btree ("land_next_try_at") WHERE land_state = 'pending';--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "assets_land_queue_idx" ON "assets" USING btree ("land_next_try_at") WHERE "assets"."land_state" = 'pending';--> statement-breakpoint
 -- 唯一會動到既有資料的一句：把「成品只剩外部網址、本地根本沒檔」的 AI 生成素材排進補抓佇列。
 -- 這些正是使用者最容易遺失的一批——fal 之類的 CDN 網址會過期，過期之後就真的沒有任何來源了。
 -- 手動上傳的素材（is_ai_generated = false）不在此列：它們沒有可再抓一次的外部來源，
