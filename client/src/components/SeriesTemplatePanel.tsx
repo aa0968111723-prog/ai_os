@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type FocusEvent } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
@@ -28,6 +28,15 @@ const EMPTY: Record<EpisodeVariableKey, string> = {
   taboo: "",
   dueDate: "",
 };
+
+/** 手機鍵盤彈出後，把聚焦欄位捲到可視區中央，避免被底部導覽／FAB 裁切 */
+function scrollFieldIntoView(e: FocusEvent<HTMLInputElement>) {
+  const el = e.currentTarget;
+  // 等鍵盤動畫／visualViewport 穩定再捲，否則 iOS 會捲錯位置
+  window.setTimeout(() => {
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, 120);
+}
 
 export function SeriesTemplatePanel({ groupId, isLeader }: { groupId: string; isLeader: boolean }) {
   const utils = trpc.useUtils();
@@ -60,7 +69,12 @@ export function SeriesTemplatePanel({ groupId, isLeader }: { groupId: string; is
   const previewTitle = parsed.success ? buildEpisodeTitle(template, parsed.data as EpisodeVariables) : null;
 
   return (
-    <Card as="section" aria-label="母版系列" style={{ marginBottom: 14 }}>
+    <Card
+      as="section"
+      aria-label="母版系列"
+      className={openForm ? "series-form-open" : undefined}
+      style={{ marginBottom: 14 }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <Icon name="Clapperboard" size={16} />
         <strong>母版系列 · {template.seriesName}</strong>
@@ -109,7 +123,7 @@ export function SeriesTemplatePanel({ groupId, isLeader }: { groupId: string; is
           </div>
 
           {openForm && (
-            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+            <div className="series-episode-form" style={{ marginTop: 10, display: "grid", gap: 8 }}>
               {template.variables.map((v) => (
                 <div key={v.key}>
                   <label htmlFor={`sv-${v.key}`} style={{ marginTop: 0 }}>{v.label}</label>
@@ -119,6 +133,7 @@ export function SeriesTemplatePanel({ groupId, isLeader }: { groupId: string; is
                       type="date"
                       value={vars.dueDate}
                       onChange={(e) => setVars((p) => ({ ...p, dueDate: e.target.value }))}
+                      onFocus={scrollFieldIntoView}
                     />
                   ) : (
                     <input
@@ -126,6 +141,7 @@ export function SeriesTemplatePanel({ groupId, isLeader }: { groupId: string; is
                       value={vars[v.key]}
                       placeholder={v.hint}
                       onChange={(e) => setVars((p) => ({ ...p, [v.key]: e.target.value }))}
+                      onFocus={scrollFieldIntoView}
                     />
                   )}
                 </div>
@@ -136,7 +152,7 @@ export function SeriesTemplatePanel({ groupId, isLeader }: { groupId: string; is
               </Hint>
               {previewTitle && <Meta as="p">專案會叫：{previewTitle}</Meta>}
               {touched && firstError && <p className="error" role="alert">{firstError}</p>}
-              <div>
+              <div className="series-form-actions">
                 <Button
                   variant="primary"
                   disabled={!parsed.success || createEpisode.isPending}
