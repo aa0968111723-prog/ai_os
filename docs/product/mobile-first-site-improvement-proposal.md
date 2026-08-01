@@ -308,11 +308,11 @@ First implementation target after docs land: M0 alignment + M1 project page mobi
 
 | Wave | 狀態 | PR | 第二輪重測日 | 備註 |
 |------|------|-----|--------------|------|
-| M0 | PR 審查 | （本 PR） | 2026-08-01 | #294 已合；Help `#help-install`；安裝入口契約複驗 |
-| M1 | PR 審查 | （本 PR） | 2026-08-01 | 建案 scrollIntoView；ConfirmButton 連按不丟單；簡易 focus 捲動；目標框送出既有 |
-| M2 | PR 審查 | （本 PR） | 2026-08-01 | `scrollIntoViewForChrome`；560px 走 `--chrome-bottom`；16px 防縮放既有 |
-| M3 | PR 審查 | （本 PR） | 2026-08-01 | 頂欄／生成確認同源 `quota.my.totalRemaining`（既有，複驗） |
-| M4 | PR 審查 | （本 PR） | 2026-08-01 | Help 安裝／推播；`canOfferInstall` 與 dismiss 分離；更新橫幅不強制重整 |
+| M0 | PR 審查 | #302 | 2026-08-01 | #294 已合；Help `#help-install`；安裝入口契約複驗 |
+| M1 | PR 審查 | #302 | 2026-08-01 | 建案 scrollIntoView；ConfirmButton 連按不丟單；簡易 focus 捲動；目標框送出既有 |
+| M2 | PR 審查 | #302 | 2026-08-01 | `scrollIntoViewForChrome`；560px 走 `--chrome-bottom`；16px 防縮放既有 |
+| M3 | PR 審查 | #302 | 2026-08-01 | 頂欄／生成確認同源 `quota.my.totalRemaining`（既有，複驗） |
+| M4 | PR 審查 | #302 | 2026-08-01 | Help 安裝／推播；`canOfferInstall` 與 dismiss 分離；更新橫幅不強制重整 |
 
 狀態僅允許：`未開始` → `進行中` → `PR 審查` → `已合入`；合入後將對應列更新為 `已合入` 並填 PR 編號。
 
