@@ -150,27 +150,28 @@ CI 可產生：
 - macOS `.app`
 - macOS `.dmg`
 
-目前只屬內部測試包，尚未設定 Windows Code Signing Certificate、Apple Developer ID、macOS notarization 與 **updater signing key**（自動更新留待簽章就緒後再接 `tauri-plugin-updater`）。未簽章 Windows 包可能觸發 SmartScreen；macOS ad-hoc 包不可視為公開發布版本。
+目前只屬內部測試包，尚未設定 Windows Code Signing Certificate、Apple Developer ID、macOS notarization 與 **updater signing key**。未簽章 Windows 包可能觸發 SmartScreen；macOS ad-hoc 包不可視為公開發布版本。
+
+**完成總覽與簽章／更新 secrets 清單**見 [desktop-complete-runbook.md](./desktop-complete-runbook.md)（波 1–6 已合入）。
 
 ## 驗收
 
-- [ ] TypeScript typecheck
-- [ ] 前端 desktop bridge 測試
-- [ ] Windows cargo test／check
-- [ ] macOS cargo test／check
-- [ ] Windows NSIS／MSI Artifact
-- [ ] macOS app／DMG Artifact
+- [x] TypeScript／desktop bridge 測試（CI）
+- [x] Windows／macOS cargo test／check（desktop-native workflow）
+- [x] Windows NSIS／MSI、macOS app／DMG 內部 artifact（未簽章）
 - [ ] 實機偵測剪輯軟體
 - [ ] 實機下載有權限素材
 - [ ] 實機啟動第三方軟體
-- [ ] 儲存後自動新增 Aios 素材
+- [ ] 儲存後自動新增 Aios 素材（meta + asset_revisions）
 - [ ] 原始素材未被覆寫
 - [ ] `aios://` 回到指定專案
+- [ ] 重啟後 handoff 監看恢復
+- [ ] 原生選單／視窗位置
 
-## 後續
+## 後續（營運／憑證，非阻塞內部使用）
 
-1. 正式 `asset_revisions`／lineage schema與版本樹。
-2. 大檔 Range、串流與續傳，避免一次讀入記憶體。
-3. App 重啟後恢復未完成 handoff。
+1. 公開發布：Authenticode + Developer ID + notarization（secrets 見 runbook §3）
+2. `tauri-plugin-updater` + 簽章更新通道（有 TAURI_SIGNING_* 後再開 PR）
+3. 上傳 multipart 大檔真正串流（目前仍 200MB 上限整檔讀入上傳）
 4. Windows／macOS 正式簽章、notarization與自動更新。
 5. 經實機驗證的 EDL、FCPXML、OTIO 等剪輯專案交換。
