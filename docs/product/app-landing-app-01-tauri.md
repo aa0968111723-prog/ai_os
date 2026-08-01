@@ -124,6 +124,16 @@ aios://open?path=%2Fp%2F<project-id>%3Ftab%3Dassets
 
 Windows／Linux 以 single-instance 把第二次啟動的 URL 交給既有視窗；macOS處理冷啟動與執行中的 URL 事件。前端再次驗證路由，不接受外站或敏感 Token。
 
+## 原生殼體驗（選單／視窗）
+
+- **視窗狀態**：`tauri-plugin-window-state` 記住主視窗大小與位置（寫入 app 資料目錄，不經 WebView）。
+- **原生選單**（`src-tauri/src/menu.rs`，不新增 invoke）：
+  - 檔案 → 桌面剪輯連接…（`Cmd/Ctrl+Shift+D` → `aios://open?path=%2Fdesktop`）
+  - 檔案 → 開啟本機交接快取資料夾（只開 `app_local_data_dir/handoffs`）
+  - 檔案 → 結束 Aios
+  - 說明 → 關於 Aios（系統 About）
+- **不**在 remote capability 掛 `opener:default`，避免正式站 WebView 取得任意開路徑能力。
+
 ## 原生安裝包
 
 CI 可產生：
@@ -133,7 +143,7 @@ CI 可產生：
 - macOS `.app`
 - macOS `.dmg`
 
-目前只屬內部測試包，尚未設定 Windows Code Signing Certificate、Apple Developer ID、macOS notarization 與 updater signing key。未簽章 Windows 包可能觸發 SmartScreen；macOS ad-hoc 包不可視為公開發布版本。
+目前只屬內部測試包，尚未設定 Windows Code Signing Certificate、Apple Developer ID、macOS notarization 與 **updater signing key**（自動更新留待簽章就緒後再接 `tauri-plugin-updater`）。未簽章 Windows 包可能觸發 SmartScreen；macOS ad-hoc 包不可視為公開發布版本。
 
 ## 驗收
 

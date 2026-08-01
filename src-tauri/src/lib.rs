@@ -1,5 +1,6 @@
 mod editors;
 mod handoff;
+mod menu;
 mod models;
 
 use handoff::{detect_editors, open_asset, reveal_asset, stop_handoff, HandoffState};
@@ -32,6 +33,8 @@ pub fn run() {
                 emit_deep_link(app, &arg);
             }
         }));
+        // 記住主視窗大小／位置（寫入 app 資料目錄，不經 WebView）
+        builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
     }
 
     builder
@@ -45,6 +48,15 @@ pub fn run() {
             stop_handoff
         ])
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                let menu = menu::build_menu(app)?;
+                app.set_menu(menu)?;
+                app.on_menu_event(|app, event| {
+                    menu::handle_menu_event(app, event.id().as_ref());
+                });
+            }
+
             // macOS 及冷啟動：讀取已交給目前程序的 URL。
             if let Some(urls) = app.deep_link().get_current()? {
                 for url in urls {
