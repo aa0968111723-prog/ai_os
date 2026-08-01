@@ -148,6 +148,13 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
  * and `("a", "b")` and `("a","b")` are the same index to PostgreSQL. The
  * correction only lets the bridge compare the file against a generated drift
  * plan, which emits neither the separator nor the spaces.
+ *
+ * 0023 wrote its partial index predicate with a bare column name
+ * (`WHERE land_state = 'pending'`) while every other partial index in the tree
+ * qualifies it (`WHERE "assets"."land_state" = 'pending'`, as 0001 does and as
+ * the generated drift plan emits). PostgreSQL resolves both to the same
+ * predicate on the same index — the correction only lets the bridge match the
+ * file against the drift plan textually.
  */
 export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly string[]>> = {
   "0004_query_indexes": [
@@ -158,6 +165,9 @@ export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly strin
   ],
   "0018_knowledge_pinned": [
     "cddbd89830cce4850f83515692724cb507a4c52afc28941633fc1f882e907e82",
+  ],
+  "0023_asset_durability": [
+    "150e3024f1830ef05f65469164b99e3b5f33199408802ff7df125faef71679e5",
   ],
 };
 

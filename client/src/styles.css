@@ -245,13 +245,19 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   body::before { animation: none; transform: none; }
 }
+/* 底部留白契約：所有「底部有東西擋住內容」的情境一律調 --chrome-bottom，
+ * 不再各自寫死 padding-bottom——過去 88px 與 140px 兩條規則互相蓋來蓋去，
+ * 結果是手機上最後一列內容被分頁列或浮鈕吃掉。各級距的值：
+ * 桌機 48px（此處）、≤820 有分頁列 100px（下方）、≤560 再升到 140px
+ *（styles.mobile-fab-01.css，特異性相同、後載入勝出）。 */
 .app {
+  --chrome-bottom: 48px;
   max-width: var(--app-max);
   margin: 0 auto;
   padding:
     0
     max(var(--app-pad-x), var(--safe-right))
-    calc(48px + var(--safe-bottom))
+    calc(var(--chrome-bottom) + var(--safe-bottom))
     max(var(--app-pad-x), var(--safe-left));
 }
 
@@ -4301,6 +4307,9 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .mobile-nav, .mobile-more-sheet__head { user-select: none; -webkit-user-select: none; }
 
 @media (max-width: 820px) {
+  /* 分頁列常駐時，底部留白要讓得出 nav 的高度（≈64px）＋呼吸空間 */
+  .app:has(.mobile-nav) { --chrome-bottom: 100px; }
+
   /* 分頁列：貼齊螢幕底、毛玻璃、safe-area 內距——Home 指示條不壓字 */
   .mobile-nav {
     position: fixed; z-index: 44; inset-inline: 0; bottom: 0;
@@ -4362,9 +4371,9 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   /* sheet 內的多行項目（例如待辦通知逐案列）撐開後仍要留住 48px 的觸控高度 */
   .menu-surface.is-sheet .menu-item { padding-block: 10px; }
 
-  /* 內容與浮動元素讓出分頁列高度（列高約 64px + safe-bottom）；
-     未登入（無分頁列）維持原本留白，:has 不支援時多留白也不致遮擋 */
-  .app:has(.mobile-nav) { padding-bottom: calc(88px + var(--safe-bottom)); }
+  /* 內容與浮動元素讓出分頁列高度：見本區塊開頭的 --chrome-bottom: 100px。
+     這裡原本另外寫死 padding-bottom: calc(88px + safe-bottom)，特異性 (0,2,0) 高於
+     .app 的 (0,1,0)，把 ≤560 想升到 140px 的留白整個蓋掉——契約統一走變數後不可復活。 */
   /* 回饋 FAB 只在登入後出現（AppShell），一律墊高避開分頁列；鍵盤彈出時再往上讓 */
   .fb-fab-root { bottom: calc(72px + var(--safe-bottom) + var(--kb-inset, 0px)); }
 

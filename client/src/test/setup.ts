@@ -34,6 +34,14 @@ Object.defineProperty(globalThis, "sessionStorage", {
   value: testSessionStorage,
 });
 
+// jsdom 沒有實作 Element.prototype.scrollIntoView（沒有版面配置就沒有捲動）。
+// 元件在 setTimeout 裡呼叫它時，例外會落在測試的斷言之外——測試全綠、vitest 卻
+// 以「unhandled error」非零退出，CI 紅掉但看不出哪個測試壞了。補一個 no-op 樁，
+// 讓「捲到可視範圍」這種純視覺副作用在 jsdom 下安靜略過。
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = function scrollIntoView() {};
+}
+
 afterEach(() => {
   cleanup();
   testLocalStorage.clear();
