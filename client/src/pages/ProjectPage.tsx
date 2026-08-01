@@ -51,6 +51,8 @@ import {
 } from "../features/creation-workbench/modes/DirectGenerateMode";
 import { projectCanEdit } from "../features/creation-workbench/generationGates";
 import { revealWorkbenchAnchor, scrollToSelector } from "../features/creation-workbench/workbenchNav";
+import { SimpleProjectMode } from "../features/project-simple/SimpleProjectMode";
+import { resolveProjectMode, saveProjectMode, type ProjectMode } from "../features/project-simple/simpleMode";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
@@ -483,6 +485,8 @@ export function ProjectPage({ id }: { id: string }) {
   );
   /** 世界觀儲存回饋：成功後短暫顯示「已儲存 ✓」再淡出 */
   const [wvSaved, setWvSaved] = useState<"idle" | "shown" | "fading">("idle");
+  /** 使用者本次手動切換的模式（null＝沿用 localStorage／預設判定） */
+  const [projectModeOverride, setProjectModeOverride] = useState<ProjectMode | null>(null);
   /** 視覺風格：媒材家族分頁（未選時跟 styles 推斷） */
   const [styleFamilyTab, setStyleFamilyTab] = useState<StyleMediaFamily | null>(null);
   const wvTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
@@ -635,6 +639,16 @@ export function ProjectPage({ id }: { id: string }) {
 
   const isOwner = me.data?.user.id === p.ownerId;
   const canArchive = isOwner || isLeader;
+  // 簡易／完整版：偏好存 localStorage（每個專案各自記），沒存過時看專案有沒有開始做（見 simpleMode.ts）
+  const projectMode = projectModeOverride ?? resolveProjectMode(id, {
+    sceneCount: scenes.data?.length ?? 0,
+    generationCount: generations.data?.length ?? 0,
+  });
+  const setProjectModeAndPersist = (mode: ProjectMode) => {
+    saveProjectMode(id, mode);
+    setProjectModeOverride(mode);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   // 2.3 前端唯讀可見性：後端守衛已全面擋 viewer，這裡讓寫入控制「事前」禁用＋常駐唯讀橫幅，
   // 不再讓檢視者「按了才失敗」（走完看價確認流程最後一步才被擋是最傷的版本）
   const canEdit = projectCanEdit(p.myProjectRole);
@@ -1254,6 +1268,32 @@ export function ProjectPage({ id }: { id: string }) {
       )}
       </header>
       {archiveProject.error && <p className="error">{archiveProject.error.message}</p>}
+
+      {/*
+        簡易／完整版切換（QA 2026-08-01）：整頁 20+ 區塊對新手是路障，但對熟手是工具。
+        用切換而不是刪功能——簡易模式只是換一組畫面，底下呼叫的仍是同一批 procedure。
+        還沒開始做的專案預設簡易；已有分鏡或生成紀錄的專案維持完整版（不打擾進行中的工作）。
+      */}
+      {projectMode === "simple" ? (
+        <>
+          <SimpleProjectMode
+            projectId={id}
+            groupId={p.groupId}
+            canEdit={canEdit}
+            worldview={wv}
+            onSwitchToPro={() => setProjectModeAndPersist("pro")}
+          />
+          <div style={{ marginTop: 24 }}>
+            <MessagePanel projectId={id} groupId={p.groupId} isLeader={isLeader} canEdit={canEdit} />
+          </div>
+        </>
+      ) : (
+      <>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <Button size="sm" onClick={() => setProjectModeAndPersist("simple")} data-fb="切到簡易模式">
+          切成簡易模式（四步做完一支片）
+        </Button>
+      </div>
 
       {/* 2.3 唯讀橫幅：檢視者第一眼就知道自己是唯讀＋能做什麼＋找誰解鎖（不是「系統一直壞」） */}
       {!canEdit && (
@@ -1997,6 +2037,8 @@ export function ProjectPage({ id }: { id: string }) {
             document.body,
           )}
         </>
+      )}
+      </>
       )}
     </div>
   );
