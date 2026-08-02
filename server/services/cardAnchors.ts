@@ -65,14 +65,14 @@ export function clipCardField(text: string, max: number = CARD_FIELD_MAX): strin
   return text.replace(/\s+/g, " ").trim().slice(0, max);
 }
 
-/** 視覺生成：角色定裝錨點（只外觀） */
+/** 視覺生成：角色定裝錨點（只外觀；「外觀鎖定」指令提高擴散模型對身份的注意力） */
 export function formatCharacterAnchor(rows: CharacterAnchorRow[], selectedIds: string[]): string {
   const ordered = orderRowsByIds(rows, selectedIds);
   if (ordered.length === 0) return "";
-  return ordered.map((c) => `${c.name}：${clipCardField(c.appearance)}`).join("；");
+  return ordered.map((c) => `外觀鎖定 ${c.name}：${clipCardField(c.appearance)}`).join("；");
 }
 
-/** 視覺生成：場景設定錨點（色板＋可選光線） */
+/** 視覺生成：場景設定錨點（色板＋可選光線；「光影鎖定」指令提高跨鏡光影一致性） */
 export function formatSceneAnchor(rows: SceneAnchorRow[], selectedIds: string[]): string {
   const ordered = orderRowsByIds(rows, selectedIds);
   if (ordered.length === 0) return "";
@@ -80,16 +80,18 @@ export function formatSceneAnchor(rows: SceneAnchorRow[], selectedIds: string[])
     .map((s) => {
       const palette = clipCardField(s.palette);
       const lighting = s.lighting?.trim() ? clipCardField(s.lighting, CARD_LIGHTING_MAX) : "";
-      return lighting ? `${s.name}：色板 ${palette}、光線 ${lighting}` : `${s.name}：色板 ${palette}`;
+      return lighting
+        ? `光影鎖定 ${s.name}：色板 ${palette}、光線 ${lighting}`
+        : `光影鎖定 ${s.name}：色板 ${palette}`;
     })
     .join("；");
 }
 
-/** 視覺生成：素材設定錨點（只外觀材質；備註不進畫面） */
+/** 視覺生成：素材設定錨點（只外觀材質；「材質鎖定」指令提高道具跨鏡一致性；備註不進畫面） */
 export function formatPropAnchor(rows: PropAnchorRow[], selectedIds: string[]): string {
   const ordered = orderRowsByIds(rows, selectedIds);
   if (ordered.length === 0) return "";
-  return ordered.map((p) => `${p.name}：${clipCardField(p.appearance)}`).join("；");
+  return ordered.map((p) => `材質鎖定 ${p.name}：${clipCardField(p.appearance)}`).join("；");
 }
 
 /** 知識庫／導演：【角色定裝卡】（可含個性） */
