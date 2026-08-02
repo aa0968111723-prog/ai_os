@@ -1311,9 +1311,9 @@ function FilesSection({ table, groupId }: { table: TableSummary; groupId: string
           <Button
             size="sm"
             onClick={() => setShowNotionPicker((v) => !v)}
-            title="已設定 Notion token 可直接搜尋並多選匯入分享給整合的頁面，不必貼網址"
+            title="已設定 Notion token 可直接搜尋並多選匯入分享給整合的頁面與資料庫，不必貼網址"
           >
-            <Icon name="FileText" size={13} /> 從 Notion 選頁
+            <Icon name="FileText" size={13} /> 從 Notion 選頁／資料庫
           </Button>
         </div>
       )}

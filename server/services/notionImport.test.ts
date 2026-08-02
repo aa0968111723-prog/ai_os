@@ -11,9 +11,11 @@ vi.mock("node:dns/promises", () => ({
 }));
 import {
   fetchImport,
+  fetchNotionText,
   isNotionHost,
   normalizeImportUrl,
   notionPageIdFromUrl,
+  notionPropertyText,
 } from "./databaseFiles";
 
 const PAGE_ID = "01234567-89ab-cdef-0123-456789abcdef";
@@ -109,5 +111,114 @@ describe("fetchImport（Notion 防回退）", () => {
       "https://example.com/notion-short-link",
       expect.objectContaining({ redirect: "manual" }),
     );
+  });
+});
+
+describe("notionPropertyText（資料庫欄位值 → 文字）", () => {
+  it.each([
+    [{ type: "title", title: [{ plain_text: "第一集" }] }, "第一集"],
+    [{ type: "rich_text", rich_text: [{ plain_text: "備註" }] }, "備註"],
+    [{ type: "number", number: 0 }, "0"],
+    [{ type: "select", select: { name: "拍攝中" } }, "拍攝中"],
+    [{ type: "status", status: { name: "完成" } }, "完成"],
+    [{ type: "multi_select", multi_select: [{ name: "禪" }, { name: "剪輯" }] }, "禪、剪輯"],
+    [{ type: "date", date: { start: "2026-01-01", end: "2026-01-05" } }, "2026-01-01 ~ 2026-01-05"],
+    [{ type: "checkbox", checkbox: true }, "是"],
+    [{ type: "checkbox", checkbox: false }, "否"],
+    [{ type: "url", url: "https://example.com" }, "https://example.com"],
+    [{ type: "people", people: [{ name: "小明" }] }, "小明"],
+    [{ type: "unique_id", unique_id: { prefix: "VID", number: 7 } }, "VID-7"],
+    [{ type: "formula", formula: { type: "string", string: "算出來的" } }, "算出來的"],
+    [{ type: "formula", formula: { type: "number", number: 12 } }, "12"],
+    [{ type: "rollup", rollup: { type: "array", array: [{ type: "number", number: 1 }, { type: "number", number: 2 }] } }, "1、2"],
+    [{ type: "relation", relation: [{ id: "a" }, { id: "b" }] }, "2 筆關聯"],
+  ])("轉出各型別的可讀值：%o", (prop, expected) => {
+    expect(notionPropertyText(prop)).toBe(expected);
+  });
+
+  it("空值與未知型別回空字串，不拋錯", () => {
+    expect(notionPropertyText(undefined)).toBe("");
+    expect(notionPropertyText({ type: "number", number: null })).toBe("");
+    expect(notionPropertyText({ type: "select", select: null })).toBe("");
+    expect(notionPropertyText({ type: "沒看過的型別" })).toBe("");
+  });
+});
+
+/**
+ * 迴歸：Notion 資料庫不是一般頁面——blocks/{id}/children 讀不到任何一列。
+ * 舊版只走 blocks 路徑，選了資料庫就只會拿到「Notion API 錯誤（400）」或「頁面未授權」。
+ */
+describe("fetchNotionText（資料庫走 databases query）", () => {
+  const DB_META = {
+    title: [{ plain_text: "影片進度表" }],
+    properties: {
+      Name: { name: "名稱", type: "title" },
+      Status: { name: "狀態", type: "select" },
+    },
+  };
+  const DB_ROWS = {
+    results: [
+      {
+        properties: {
+          Name: { type: "title", title: [{ plain_text: "第一集" }] },
+          Status: { type: "select", select: { name: "拍攝中" } },
+        },
+      },
+    ],
+    has_more: false,
+  };
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+  beforeEach(() => {
+    proxyFetchMock.mockReset();
+    delete process.env.NOTION_TOKEN;
+  });
+
+  it("blocks 回 400（id 是資料庫）時改走 databases query，抽出表格文字", async () => {
+    proxyFetchMock
+      .mockResolvedValueOnce(json({ message: "not a block" }, 400)) // blocks/{id}/children
+      .mockResolvedValueOnce(json(DB_META))                        // databases/{id}
+      .mockResolvedValueOnce(json(DB_ROWS));                       // databases/{id}/query
+
+    const text = await fetchNotionText(PAGE_ID, "secret_user");
+
+    expect(text).toBe("# 影片進度表\n名稱 | 狀態\n第一集 | 拍攝中");
+    expect(proxyFetchMock.mock.calls[2][0]).toBe(`https://api.notion.com/v1/databases/${PAGE_ID}/query`);
+    expect(proxyFetchMock.mock.calls[2][1]).toMatchObject({ method: "POST" });
+  });
+
+  it("blocks 回 200 空陣列時也要試資料庫路徑（Notion 對資料庫 id 不一定回錯）", async () => {
+    proxyFetchMock
+      .mockResolvedValueOnce(json({ results: [], has_more: false }))
+      .mockResolvedValueOnce(json(DB_META))
+      .mockResolvedValueOnce(json(DB_ROWS));
+
+    await expect(fetchNotionText(PAGE_ID, "secret_user")).resolves.toContain("第一集 | 拍攝中");
+  });
+
+  it("一般頁面有內容時不會多打資料庫端點", async () => {
+    proxyFetchMock.mockResolvedValueOnce(json({
+      results: [{ id: "b1", type: "paragraph", paragraph: { rich_text: [{ plain_text: "一般段落" }] } }],
+      has_more: false,
+    }));
+
+    await expect(fetchNotionText(PAGE_ID, "secret_user")).resolves.toBe("一般段落");
+    expect(proxyFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("兩條路徑都 404：維持「請到 Connections 授權」的可操作訊息", async () => {
+    proxyFetchMock
+      .mockResolvedValueOnce(json({ message: "not found" }, 404))
+      .mockResolvedValueOnce(json({ message: "not found" }, 404));
+
+    await expect(fetchNotionText(PAGE_ID, "secret_user")).rejects.toThrow("Connections");
+  });
+
+  it("401 不浪費一次資料庫請求，直接回 token 失效", async () => {
+    proxyFetchMock.mockResolvedValueOnce(json({ message: "unauthorized" }, 401));
+
+    await expect(fetchNotionText(PAGE_ID, "secret_user")).rejects.toThrow("Token 已失效");
+    expect(proxyFetchMock).toHaveBeenCalledTimes(1);
   });
 });

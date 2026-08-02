@@ -2,8 +2,8 @@
  * 資料庫文件層（AI 可讀檔案的核心服務）：
  * - 文字抽取：txt/md/csv/json/html/srt/vtt 純解析；PDF（pdf-parse）；DOCX（mammoth）——
  *   抽出的純文字存 data_files.text_content，AI（MCP 工具與團隊助手）讀這裡，不再各自解析原檔。
- * - 網址匯入：Google 文件/試算表/簡報/雲端硬碟公開連結自動轉匯出網址；Notion 頁面走官方 API
- *   （需 NOTION_TOKEN 且頁面已分享給整合）；一般網頁抓 HTML 轉純文字。
+ * - 網址匯入：Google 文件/試算表/簡報/雲端硬碟公開連結自動轉匯出網址；Notion 頁面與資料庫走官方 API
+ *   （需 NOTION_TOKEN 且頁面/資料庫已分享給整合）；一般網頁抓 HTML 轉純文字。
  * - 安全：SSRF 防護（協定白名單＋私有位址阻擋）、抓取逾時與大小上限、配額守門。
  * - 配額：每人（上傳者計）預設 5GB，settings.fileQuotaGb 可調（0＝不限）。
  */
@@ -369,7 +369,74 @@ function notionRichText(rt: unknown): string {
 }
 
 /**
- * 走 Notion 官方 API 抓頁面純文字（頁面需「分享給整合」）。
+ * Notion 資料庫欄位值 → 純文字（純函式，可測）。
+ * 資料庫的內容全在每一列的 properties 裡（不像頁面在 blocks），沒有這層轉換就只會抽到空白列。
+ */
+export function notionPropertyText(prop: unknown): string {
+  if (!prop || typeof prop !== "object") return "";
+  const p = prop as Record<string, any>;
+  const names = (arr: unknown): string =>
+    Array.isArray(arr) ? arr.map((o) => (o as { name?: string })?.name ?? "").filter(Boolean).join("、") : "";
+  switch (p.type) {
+    case "title":
+    case "rich_text":
+      return notionRichText(p[p.type]);
+    case "number":
+      return p.number == null ? "" : String(p.number);
+    case "select":
+      return p.select?.name ?? "";
+    case "status":
+      return p.status?.name ?? "";
+    case "multi_select":
+      return names(p.multi_select);
+    case "people":
+      return names(p.people);
+    case "files":
+      return names(p.files);
+    case "date":
+      return [p.date?.start, p.date?.end].filter(Boolean).join(" ~ ");
+    case "checkbox":
+      return p.checkbox ? "是" : "否";
+    case "url":
+      return p.url ?? "";
+    case "email":
+      return p.email ?? "";
+    case "phone_number":
+      return p.phone_number ?? "";
+    case "created_time":
+      return p.created_time ?? "";
+    case "last_edited_time":
+      return p.last_edited_time ?? "";
+    case "created_by":
+      return p.created_by?.name ?? "";
+    case "last_edited_by":
+      return p.last_edited_by?.name ?? "";
+    case "unique_id":
+      return p.unique_id == null ? "" : [p.unique_id.prefix, p.unique_id.number].filter((v) => v != null && v !== "").join("-");
+    // relation 只回 id，抓標題要逐列再打 API——列出筆數就好，別為了展開把匯入變成 N+1
+    case "relation":
+      return Array.isArray(p.relation) && p.relation.length ? `${p.relation.length} 筆關聯` : "";
+    // formula／rollup 的實際值包在自己的 type 裡，再走一次同一套轉換
+    case "formula":
+      return notionPropertyText(p.formula);
+    case "rollup":
+      return p.rollup?.type === "array"
+        ? (p.rollup.array ?? []).map((v: unknown) => notionPropertyText(v)).filter(Boolean).join("、")
+        : notionPropertyText(p.rollup);
+    // formula/rollup 內層的裸值型別（沒有 type 巢狀，直接看欄位）
+    case "string":
+      return p.string ?? "";
+    case "boolean":
+      return p.boolean == null ? "" : p.boolean ? "是" : "否";
+    default:
+      return "";
+  }
+}
+
+/**
+ * 走 Notion 官方 API 抓純文字（頁面需「分享給整合」）。
+ * 同一個 id 可能是「一般頁面」或「資料庫（表格）」，兩者的讀法完全不同：
+ * 頁面走 blocks 樹、資料庫走 databases query——這裡自動判斷，呼叫端不必先知道是哪一種。
  * token 優先序：呼叫端傳入的「個人 token」（整合連接頁自助設定）→ 站方 NOTION_TOKEN；
  * 個人 token 對此頁無權（404）且站方另有共用 token 時自動退回站方再試一次——
  * 與 Google「個人授權失敗退回公開路徑」同口徑，設了個人 token 不會弄壞原本靠站方 token 的頁面。
@@ -398,8 +465,29 @@ export async function fetchNotionText(pageId: string, userToken?: string | null)
 /** Notion 頁面對此 token 不可見（HTTP 404）：專屬型別，讓「退回站方 token」的判斷不綁錯誤訊息字串 */
 export class NotionPageNotFoundError extends Error {}
 
-async function fetchNotionTextWithToken(pageId: string, token: string): Promise<string> {
-  const headers = { Authorization: `Bearer ${token}`, "Notion-Version": "2022-06-28" };
+/**
+ * blocks/{id}/children 回 400：這個 id 多半根本不是一般頁面（最常見就是資料庫）。
+ * 專屬型別讓呼叫端知道「還有資料庫路徑可試」，而不是把 400 直接當成致命錯誤丟給使用者。
+ */
+class NotionNotAPageError extends Error {}
+
+/** Notion HTTP 狀態 → 人話（頁面與資料庫兩條路徑共用，訊息不會各自漂移） */
+function notionApiError(status: number): Error {
+  if (status === 401) return new Error("Notion Token 已失效或格式錯誤——請到「連接的資料來源」重新設定 Integration Secret。");
+  if (status === 403) return new Error("Notion 整合沒有讀取內容的權限——請確認整合已開啟 Read content capability。");
+  if (status === 404) return new NotionPageNotFoundError("頁面未授權：請在 Notion 頁面（或資料庫）右上角點擊 ⋯ → Connections，連結給 Aios 整合。");
+  if (status === 429) return new Error("Notion API 請求過於頻繁，請稍後再試。");
+  if (status >= 500) return new Error("Notion 服務暫時無法使用，請稍後再試。");
+  return new Error(`Notion API 錯誤（${status}）`);
+}
+
+/** 單次匯入最多讀幾列資料庫：夠涵蓋常見專案表，又擋得住上萬列的表把匯入拖垮 */
+const MAX_NOTION_DB_ROWS = 500;
+
+/**
+ * 一般頁面 → 純文字（走 blocks 樹）。回空字串＝頁面沒有可讀文字，由呼叫端決定要不要改試資料庫。
+ */
+async function fetchNotionPageText(pageId: string, headers: Record<string, string>): Promise<string> {
   const lines: string[] = [];
   let blockCount = 0;
 
@@ -410,22 +498,8 @@ async function fetchNotionTextWithToken(pageId: string, token: string): Promise<
       const qs = cursor ? `?start_cursor=${cursor}&page_size=100` : "?page_size=100";
       const res = await proxyFetch(`https://api.notion.com/v1/blocks/${blockId}/children${qs}`, { headers, timeoutMs: 20_000 });
       if (!res.ok) {
-        if (res.status === 401) {
-          throw new Error("Notion Token 已失效或格式錯誤——請到「連接的資料來源」重新設定 Integration Secret。");
-        }
-        if (res.status === 403) {
-          throw new Error("Notion 整合沒有讀取內容的權限——請確認整合已開啟 Read content capability。");
-        }
-        if (res.status === 404) {
-          throw new NotionPageNotFoundError("頁面未授權：請在 Notion 頁面右上角點擊 ⋯ → Connections，將頁面連結給 Aios 整合。");
-        }
-        if (res.status === 429) {
-          throw new Error("Notion API 請求過於頻繁，請稍後再試。");
-        }
-        if (res.status >= 500) {
-          throw new Error("Notion 服務暫時無法使用，請稍後再試。");
-        }
-        throw new Error(`Notion API 錯誤（${res.status}）`);
+        if (res.status === 400) throw new NotionNotAPageError(`Notion API 錯誤（400）`);
+        throw notionApiError(res.status);
       }
       const data = (await res.json()) as { results?: Array<Record<string, unknown>>; has_more?: boolean; next_cursor?: string };
       for (const block of data.results ?? []) {
@@ -448,9 +522,93 @@ async function fetchNotionTextWithToken(pageId: string, token: string): Promise<
   }
 
   await walk(pageId, 0);
-  const text = lines.join("\n").trim();
-  if (!text) throw new Error("這個 Notion 頁面沒有可讀的文字內容");
-  return text.slice(0, MAX_TEXT_CHARS);
+  return lines.join("\n").trim();
+}
+
+/**
+ * 資料庫（表格）→ 純文字表格。Notion 的資料庫不是一般頁面：blocks/{id}/children 讀不到任何一列，
+ * 必須走 databases/{id}/query，欄位值也在每列的 properties 而不是 blocks——
+ * 這正是「選了 Notion 資料庫卻抓不到內容」的原因。
+ * 回 found:false＝這個 id 不是資料庫（或此 token 看不到），呼叫端沿用原本的頁面錯誤與站方 token 退回。
+ */
+async function fetchNotionDatabaseText(
+  databaseId: string,
+  headers: Record<string, string>,
+): Promise<{ found: false } | { found: true; text: string }> {
+  const metaRes = await proxyFetch(`https://api.notion.com/v1/databases/${databaseId}`, { headers, timeoutMs: 20_000 });
+  // 400＝id 不是資料庫；404＝此 token 看不到——兩者都讓呼叫端回到原本的頁面錯誤路徑
+  if (metaRes.status === 400 || metaRes.status === 404) return { found: false };
+  if (!metaRes.ok) throw notionApiError(metaRes.status);
+  const meta = (await metaRes.json().catch(() => ({}))) as {
+    title?: unknown;
+    properties?: Record<string, { name?: string; type?: string }>;
+  };
+
+  // 欄位順序：properties 是物件、順序無保證。title 欄固定排頭、其餘依名稱排序，
+  // 同一張表每次匯入的欄位順序才會一致（重新匯入不會整份 diff）。
+  const columns = Object.entries(meta.properties ?? {})
+    .map(([key, def]) => ({ key, name: def?.name || key, type: def?.type ?? "" }))
+    .sort((a, b) => {
+      if (a.type === "title" && b.type !== "title") return -1;
+      if (b.type === "title" && a.type !== "title") return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+  const lines: string[] = [];
+  const title = notionRichText(meta.title);
+  if (title) lines.push(`# ${title}`);
+  if (columns.length) lines.push(columns.map((c) => c.name).join(" | "));
+
+  let cursor: string | undefined;
+  let rows = 0;
+  do {
+    const res = await proxyFetch(`https://api.notion.com/v1/databases/${databaseId}/query`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(cursor ? { page_size: 100, start_cursor: cursor } : { page_size: 100 }),
+      timeoutMs: 20_000,
+    });
+    if (!res.ok) throw notionApiError(res.status);
+    const data = (await res.json().catch(() => ({}))) as {
+      results?: Array<{ properties?: Record<string, unknown> }>;
+      has_more?: boolean;
+      next_cursor?: string;
+    };
+    for (const row of data.results ?? []) {
+      rows += 1;
+      // 欄位值裡的換行會把一列拆成多列、毀掉表格對齊——壓成單行空白
+      const cells = columns.map((c) => notionPropertyText(row.properties?.[c.key]).replace(/\s+/g, " ").trim());
+      if (cells.some(Boolean)) lines.push(cells.join(" | "));
+    }
+    cursor = data.has_more ? data.next_cursor : undefined;
+  } while (cursor && rows < MAX_NOTION_DB_ROWS && lines.join("\n").length < MAX_TEXT_CHARS);
+
+  return { found: true, text: lines.join("\n").trim() };
+}
+
+async function fetchNotionTextWithToken(pageId: string, token: string): Promise<string> {
+  const headers = { Authorization: `Bearer ${token}`, "Notion-Version": "2022-06-28" };
+  let pageError: Error | null = null;
+  let text = "";
+  try {
+    text = await fetchNotionPageText(pageId, headers);
+  } catch (err) {
+    // 400（不是頁面）與 404（此 token 看不到頁面）都可能只是「這個 id 其實是資料庫」——
+    // 先試資料庫路徑再決定要不要報錯。401/403/429/5xx 是真的錯，直接往上丟。
+    if (!(err instanceof NotionNotAPageError) && !(err instanceof NotionPageNotFoundError)) throw err;
+    pageError = err;
+  }
+  if (text) return text.slice(0, MAX_TEXT_CHARS);
+
+  // 沒錯誤但也沒抓到字一樣要試：Notion 對資料庫 id 的 blocks/children 有時回 200 空陣列而非錯誤
+  const database = await fetchNotionDatabaseText(pageId, headers);
+  if (database.found) {
+    if (!database.text) throw new Error("這個 Notion 資料庫沒有可讀的內容");
+    return database.text.slice(0, MAX_TEXT_CHARS);
+  }
+
+  if (pageError) throw pageError;
+  throw new Error("這個 Notion 頁面沒有可讀的文字內容");
 }
 
 /**
