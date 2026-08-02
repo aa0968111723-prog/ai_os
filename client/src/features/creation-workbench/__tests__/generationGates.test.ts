@@ -38,6 +38,13 @@ const audioNeeds: GenerationGateModel = {
   needs: "audio",
 };
 
+const lipSync: GenerationGateModel = {
+  id: "fal-ai/sync-lipsync/v2/pro",
+  points: 155,
+  needs: "video",
+  secondaryNeeds: "audio",
+};
+
 const emptySource = {
   sourceAsset: null as null,
   sourceUrl: "",
@@ -98,7 +105,7 @@ describe("getGenerationDisableReason", () => {
         prompt: "把這張圖改成水墨風",
         ...emptySource,
       }),
-    ).toBe("這個模型需要來源素材——從素材庫選一個，或貼上網址");
+    ).toBe("這個模型需要來源素材——請上傳本機檔、從素材庫選一個，或貼上雲端網址");
   });
 
   it("locks incompatible source kinds with clear messages (audio → 音訊, image → 圖片)", () => {
@@ -126,7 +133,7 @@ describe("getGenerationDisableReason", () => {
       }),
     ).toBe("選到的素材是圖片，這個模型不能用它——請換一個來源");
 
-    // doc is not in SOURCE_INCOMPAT for image needs → not blocked (寬鬆原則)
+    // 文件／壓縮檔不是圖片來源，送出前即攔下，避免 Fal 422。
     expect(
       getGenerationDisableReason({
         canEdit: true,
@@ -136,7 +143,7 @@ describe("getGenerationDisableReason", () => {
         sourceUrl: "",
         sourceUrlError: "",
       }),
-    ).toBeNull();
+    ).toBe("選到的素材是文件／壓縮檔，這個模型不能用它——請換一個來源");
   });
 
   it("locks bad source URLs", () => {
@@ -150,6 +157,27 @@ describe("getGenerationDisableReason", () => {
         sourceUrlError: "需以 https:// 開頭",
       }),
     ).toBe("網址格式不對，需以 https:// 開頭");
+  });
+
+  it("requires a separate audio source for lip-sync instead of treating prompt as an URL", () => {
+    expect(getGenerationDisableReason({
+      canEdit: true,
+      model: lipSync,
+      prompt: "中文配音版",
+      sourceAsset: { id: "video-1", title: "人物影片", kind: "video" },
+      sourceUrl: "",
+      sourceUrlError: "",
+    })).toBe("這個模型還需要第二個來源檔——請上傳、從素材庫選取或貼上雲端網址");
+
+    expect(getGenerationDisableReason({
+      canEdit: true,
+      model: lipSync,
+      prompt: "中文配音版",
+      sourceAsset: { id: "video-1", title: "人物影片", kind: "video" },
+      sourceUrl: "",
+      sourceUrlError: "",
+      secondarySourceAsset: { id: "audio-1", title: "配音", kind: "audio" },
+    })).toBeNull();
   });
 
   it("allows editor with prompt and no-source model", () => {
@@ -201,9 +229,10 @@ describe("SOURCE_INCOMPAT + filterCompatibleSources", () => {
   it("re-exports the shared client/server incompat table (no dual-copy drift)", () => {
     // shared/sourceIncompat.ts is the single source; server generationCore imports the same module.
     expect(SOURCE_INCOMPAT).toBe(SHARED_SOURCE_INCOMPAT);
-    expect([...SOURCE_INCOMPAT.image]).toEqual(["audio"]);
-    expect([...SOURCE_INCOMPAT.audio]).toEqual(["image"]);
-    expect([...SOURCE_INCOMPAT.video]).toEqual(["audio"]);
+    expect([...SOURCE_INCOMPAT.image]).toEqual(["audio", "video", "doc"]);
+    expect([...SOURCE_INCOMPAT.audio]).toEqual(["image", "doc"]);
+    expect([...SOURCE_INCOMPAT.video]).toEqual(["audio", "image", "doc"]);
+    expect([...SOURCE_INCOMPAT.zip]).toEqual(["audio", "image", "video"]);
   });
 
   it("filters out obviously incompatible assets but keeps the selected one", () => {
@@ -212,9 +241,9 @@ describe("SOURCE_INCOMPAT + filterCompatibleSources", () => {
       { id: "2", kind: "audio" },
       { id: "3", kind: "video" },
     ];
-    expect(filterCompatibleSources(assets, "image").map((a) => a.id)).toEqual(["1", "3"]);
+    expect(filterCompatibleSources(assets, "image").map((a) => a.id)).toEqual(["1"]);
     // selected audio still listed so <select value> never goes blank
-    expect(filterCompatibleSources(assets, "image", "2").map((a) => a.id)).toEqual(["1", "2", "3"]);
+    expect(filterCompatibleSources(assets, "image", "2").map((a) => a.id)).toEqual(["1", "2"]);
   });
 });
 
@@ -273,6 +302,25 @@ describe("approval threshold notice (confirm panel)", () => {
 });
 
 describe("buildGenerationSubmitInput (confirm 生成 payload)", () => {
+  it("sends lip-sync video and audio as two real source assets", () => {
+    const payload = buildGenerationSubmitInput({
+      projectId: "project-1",
+      model: lipSync,
+      prompt: "中文配音版",
+      sourceAsset: { id: "video-1", title: "人物影片", kind: "video" },
+      sourceUrl: "",
+      secondarySourceAsset: { id: "audio-1", title: "配音", kind: "audio" },
+      secondarySourceUrl: "",
+      characterIds: [],
+      scenePresetIds: [],
+      clientRequestId: "req-1",
+    });
+    expect(payload.sourceAssetId).toBe("video-1");
+    expect(payload.secondarySourceAssetId).toBe("audio-1");
+    expect(payload.sourceUrl).toBeUndefined();
+    expect(payload.secondarySourceUrl).toBeUndefined();
+  });
+
   it("builds the generation.submit payload with source and card optional fields", () => {
     expect(
       buildGenerationSubmitInput({

@@ -8,6 +8,7 @@ import { failStaleGenerationTx, refund, reserveQuota } from "../services/points"
 import { advanceGeneration, prepareGenerationRequest } from "../services/generationCore";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { signAssetUrl } from "../services/storage";
+import { splitGenerationSourceMeta, storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
 import { assertProjectEditable } from "../services/projectAcl";
 import { getModel, endpointOf } from "../../shared/models";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
@@ -15,6 +16,14 @@ import {
   DEFAULT_CLOUD_MOCK_MODEL_ID,
   submitCloudMockGeneration,
 } from "../services/cloudInference/freeGeneration";
+
+const publicHttpsUrl = z.string().url().refine((value) => new URL(value).protocol === "https:", {
+  message: "來源網址需以 https:// 開頭",
+});
+
+function signedAssetId(url: string | null | undefined): string | undefined {
+  return url?.match(/\/api\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/file/i)?.[1];
+}
 import { MAX_PROMPT_CHARS } from "./prompts";
 import { creativePromptOverrideSchema } from "../../shared/aiTrace";
 import {
@@ -82,8 +91,10 @@ export const generationRouter = router({
       projectId: z.string().uuid(),
       modelId: z.string(),
       prompt: z.string().min(1).max(MAX_PROMPT_CHARS),
-      sourceUrl: z.string().url().optional(),
+      sourceUrl: publicHttpsUrl.optional(),
       sourceAssetId: z.string().uuid().optional(),
+      secondarySourceUrl: publicHttpsUrl.optional(),
+      secondarySourceAssetId: z.string().uuid().optional(),
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
@@ -134,9 +145,11 @@ export const generationRouter = router({
         // 與 prompts.save 同口徑（MAX_PROMPT_CHARS）——生成成功的咒語必能自動入庫
         prompt: z.string().min(1, "請填提示詞").max(MAX_PROMPT_CHARS, `提示詞過長（上限 ${MAX_PROMPT_CHARS} 字）`),
         /** 來源輸入(圖生圖底圖/音訊/影片/訓練 zip 的網址;外部 URL) */
-        sourceUrl: z.string().url().optional(),
+        sourceUrl: publicHttpsUrl.optional(),
         /** 素材庫來源(優先)：伺服器換成簽名短效網址,fal 才抓得到、外人不可偽造 */
         sourceAssetId: z.string().uuid().optional(),
+        secondarySourceUrl: publicHttpsUrl.optional(),
+        secondarySourceAssetId: z.string().uuid().optional(),
         /** 選定的角色定裝卡：外觀錨點自動注入視覺生成,跨鏡一致 */
         characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
         /** 選定的場景設定卡：色板/光線錨點注入,同場景光影一致 */
@@ -179,6 +192,8 @@ export const generationRouter = router({
         prompt: input.prompt,
         sourceUrl: input.sourceUrl,
         sourceAssetId: input.sourceAssetId,
+        secondarySourceUrl: input.secondarySourceUrl,
+        secondarySourceAssetId: input.secondarySourceAssetId,
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
@@ -206,9 +221,9 @@ export const generationRouter = router({
     // 素材庫來源存的是短效簽名網址——取回 assetId 走 sourceAssetId 讓核心重新簽名（順帶重過相容性守門）。
     // 嚴格 UUID 形（8-4-4-4-12）：外部網址可能剛好含 /api/assets/<36字>/file，寬鬆比對抓到
     // 非 UUID 會讓 pg 的 uuid cast 直接 500——非 UUID 一律走 sourceUrl 原樣透傳
-    const assetId = gen.sourceUrl?.match(
-      /\/api\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/file/i,
-    )?.[1];
+    const assetId = signedAssetId(gen.sourceUrl);
+    const { meta } = splitGenerationSourceMeta(gen.params);
+    const secondaryAssetId = signedAssetId(meta.secondarySourceUrl);
     return executeGenerationCommand({
       auth: ctx.auth,
       source: "web",
@@ -217,6 +232,8 @@ export const generationRouter = router({
       prompt: gen.prompt,
       sourceAssetId: assetId,
       sourceUrl: assetId ? undefined : gen.sourceUrl ?? undefined,
+      secondarySourceAssetId: secondaryAssetId,
+      secondarySourceUrl: secondaryAssetId ? undefined : meta.secondarySourceUrl,
       characterIds: (gen.characterIds as string[] | null) ?? undefined,
       scenePresetIds: (gen.scenePresetIds as string[] | null) ?? undefined,
       propIds: (gen.propIds as string[] | null) ?? undefined,
@@ -458,7 +475,9 @@ export const generationRouter = router({
       // 重簽來源網址(修:送審當下對「素材庫來源」簽的網址 TTL 僅 1 小時,組長隔一小時以上才核准
       // 圖生圖/影音等需來源的生成,fal 抓來源時網址已過期→必失敗白繞一圈。核准送出前用新 TTL 重簽,
       // 並把 params 內任何等於舊簽名網址的值替換掉——model.input 把來源塞在模型專屬鍵,替換整串最穩)。
-      let submitParams = gen.params as Record<string, unknown>;
+      const splitParams = splitGenerationSourceMeta(gen.params);
+      let submitParams = splitParams.providerParams;
+      let refreshedSecondaryUrl = splitParams.meta.secondarySourceUrl;
       if (gen.sourceUrl) {
         const m = gen.sourceUrl.match(/\/api\/assets\/([0-9a-f-]{36})\/file\?/i);
         if (m) {
@@ -467,6 +486,16 @@ export const generationRouter = router({
           await db.update(schema.generations).set({ sourceUrl: fresh }).where(eq(schema.generations.id, gen.id));
         }
       }
+      const secondaryAssetId = signedAssetId(refreshedSecondaryUrl);
+      if (secondaryAssetId && refreshedSecondaryUrl) {
+        const fresh = signAssetUrl(secondaryAssetId);
+        submitParams = JSON.parse(JSON.stringify(submitParams).split(refreshedSecondaryUrl).join(fresh)) as Record<string, unknown>;
+        refreshedSecondaryUrl = fresh;
+      }
+      await db
+        .update(schema.generations)
+        .set({ params: storeGenerationSourceMeta(submitParams, { secondarySourceUrl: refreshedSecondaryUrl }) })
+        .where(eq(schema.generations.id, gen.id));
 
       try {
         // params 存的是送審當下注入完成的 fal 輸入(來源網址已於上方重簽)——核准即送出

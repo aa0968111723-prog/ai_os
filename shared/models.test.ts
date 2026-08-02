@@ -52,6 +52,24 @@ describe("Fal catalog contract", () => {
       expect(removed.has(endpointOf(model)), model.id).toBe(false);
     }
   });
+
+  it("multi-source lip-sync models expose separate video and audio inputs", () => {
+    const multi = MODELS.filter((model) => model.secondaryNeeds);
+    expect(multi.length).toBeGreaterThanOrEqual(7);
+    for (const model of multi) {
+      expect(model.needs, model.id).toBe("video");
+      expect(model.secondaryNeeds, model.id).toBe("audio");
+      const input = model.input(
+        "中文配音版",
+        "16:9",
+        "https://example.test/person.mp4",
+        "https://example.test/dub.wav",
+      );
+      expect(JSON.stringify(input), model.id).toContain("person.mp4");
+      expect(JSON.stringify(input), model.id).toContain("dub.wav");
+      expect(JSON.stringify(input), model.id).not.toContain("中文配音版");
+    }
+  });
 });
 
 const v3 = getModel("fal-ai/elevenlabs/tts/eleven-v3")!; // $0.10/千字 → 3.1 點/千字

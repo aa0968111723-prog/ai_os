@@ -1,25 +1,14 @@
 import { z } from "zod";
 import { router, authedProcedure, adminProcedure } from "../trpc";
-import { CATEGORIES, WORKFLOW_PRESETS, tierLabel, type ModelTier } from "../../shared/models";
-import { listResolvableModels, liveCacheMeta, resolveModel } from "../services/modelResolve";
+import { CATEGORIES, WORKFLOW_PRESETS, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
+import { estimatePointsFor, listResolvableModels, liveCacheMeta, resolveModel } from "../services/modelResolve";
 import { liveCatalogStatus, syncLiveModelCatalog } from "../services/modelLiveSync";
-import { pointsToTwd, pointsToUsd, moneyFxNote, USD_TO_TWD } from "../../shared/money";
+import { pointsToTwd, POINTS_TO_TWD } from "../../shared/money";
+import { getUsdToTwd } from "../services/fxRate";
 
-const publicEntry = (m: {
-  id: string;
-  label: string;
-  category: string;
-  tier: ModelTier;
-  kind: string;
-  needs?: string | null;
-  sourceHint?: string | null;
-  points: number;
-  strengths: string;
-  bestFor: string;
-  cost: string;
-  verified: boolean;
-  recommended?: boolean;
-}) => ({
+const publicEntry = (m: ModelEntry, usdToTwdRate: number) => {
+  const points = estimatePointsFor(m, { usdToTwdRate });
+  return {
   id: m.id,
   label: m.label,
   category: m.category,
@@ -28,33 +17,44 @@ const publicEntry = (m: {
   kind: m.kind,
   needs: m.needs ?? null,
   sourceHint: m.sourceHint ?? null,
-  points: m.points,
+  secondaryNeeds: m.secondaryNeeds ?? null,
+  secondarySourceHint: m.secondarySourceHint ?? null,
+  points,
   /** 帳面新台幣（1 點 ≈ NT$1） */
-  estTwd: pointsToTwd(m.points),
+  estTwd: pointsToTwd(points),
   /** 帳面美元（對照 Fal） */
-  estUsd: pointsToUsd(m.points),
+  estUsd: Math.round((points / usdToTwdRate) * 10000) / 10000,
+  usdToTwdRate,
   strengths: m.strengths,
   bestFor: m.bestFor,
   cost: m.cost,
   verified: m.verified,
   recommended: m.recommended ?? false,
-});
+  };
+};
 
 /** 模型目錄查詢:給前端挑選器、模型指南頁與代理使用（含即時價／新發現） */
 export const modelsRouter = router({
   categories: authedProcedure.query(() => CATEGORIES),
 
   /** 匯率與估價說明（挑選器／指南頁顯示新台幣用） */
-  moneyMeta: authedProcedure.query(() => ({
-    usdToTwd: USD_TO_TWD,
-    fxNote: moneyFxNote(),
-    live: liveCacheMeta(),
-  })),
+  moneyMeta: authedProcedure.query(async () => {
+    const fx = await getUsdToTwd();
+    return {
+      usdToTwd: fx.rate,
+      pointToTwd: POINTS_TO_TWD,
+      fxSource: fx.source,
+      fetchedAt: fx.fetchedAt,
+      fxNote: `1 點＝NT$${POINTS_TO_TWD}；US$1＝NT$${fx.rate}（${fx.source === "live" ? "即時匯率" : "後備匯率"}）`,
+      live: liveCacheMeta(),
+    };
+  }),
 
   /** 依類別列出：已驗證／推薦優先，再依旗艦→經濟→最低；資料源＝live 快取∪靜態 */
   byCategory: authedProcedure
     .input(z.object({ category: z.string() }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
+      const fx = await getUsdToTwd();
       const order: ModelTier[] = ["flagship", "economy", "budget"];
       return listResolvableModels({ category: input.category })
         .sort((a, b) => {
@@ -65,14 +65,15 @@ export const modelsRouter = router({
           if (a.points !== b.points) return a.points - b.points;
           return a.id.localeCompare(b.id);
         })
-        .map(publicEntry);
+        .map((m) => publicEntry(m, fx.rate));
     }),
 
   /** 關鍵字/條件搜尋(代理建構時快速找模型) */
   search: authedProcedure
     .input(z.object({ q: z.string().optional(), category: z.string().optional(), tier: z.enum(["flagship", "economy", "budget"]).optional() }))
-    .query(({ input }) =>
-      listResolvableModels({
+    .query(async ({ input }) => {
+      const fx = await getUsdToTwd();
+      return listResolvableModels({
         q: input.q,
         category: input.category,
         tier: input.tier,
@@ -83,15 +84,16 @@ export const modelsRouter = router({
           if (a.points !== b.points) return a.points - b.points;
           return a.id.localeCompare(b.id);
         })
-        .map(publicEntry),
-    ),
+        .map((m) => publicEntry(m, fx.rate));
+    }),
 
   /** 單筆（含 live 點數） */
   get: authedProcedure
     .input(z.object({ id: z.string().min(1).max(300) }))
-    .query(({ input }) => {
+    .query(async ({ input }) => {
+      const fx = await getUsdToTwd();
       const m = resolveModel(input.id);
-      return m ? publicEntry(m) : null;
+      return m ? publicEntry(m, fx.rate) : null;
     }),
 
   workflows: authedProcedure.query(() =>

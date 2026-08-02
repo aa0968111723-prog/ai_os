@@ -15,6 +15,7 @@ import {
   type SourceKind,
   MODELS,
 } from "../../shared/models";
+import { usdUnitToPoints } from "../../shared/money";
 
 type LiveRow = typeof schema.modelLiveCatalog.$inferSelect;
 
@@ -27,14 +28,17 @@ function genericInput(kind: OutputKind, category: string): ModelEntry["input"] {
     const aspect = format === "9:16" ? "9:16" : format === "1:1" ? "1:1" : "16:9";
     if (kind === "video") {
       const body: Record<string, unknown> = { prompt, aspect_ratio: aspect };
-      if (sourceUrl) body.image_url = sourceUrl;
+      if (sourceUrl) body[category === "video-to-video" ? "video_url" : "image_url"] = sourceUrl;
       return body;
     }
     if (kind === "audio") {
       return sourceUrl ? { prompt, audio_url: sourceUrl } : { prompt, text: prompt };
     }
     if (kind === "text") {
-      return sourceUrl ? { prompt, image_url: sourceUrl } : { prompt };
+      if (!sourceUrl) return { prompt };
+      if (category === "speech-to-text") return { prompt, audio_url: sourceUrl };
+      if (category === "training") return { prompt, images_data_url: sourceUrl };
+      return { prompt, image_url: sourceUrl };
     }
     // image
     const body: Record<string, unknown> = { prompt, aspect_ratio: aspect };
@@ -54,6 +58,8 @@ function liveToEntry(row: LiveRow): ModelEntry {
       verified: row.verified,
       recommended: row.recommended || staticM.recommended,
       label: row.label || staticM.label,
+      priceUsd: row.costUsd ?? undefined,
+      priceUnit: row.costUnit ?? undefined,
     };
   }
   const kind = row.kind as OutputKind;
@@ -70,6 +76,8 @@ function liveToEntry(row: LiveRow): ModelEntry {
     strengths: row.strengths || row.label,
     bestFor: row.bestFor || "",
     cost: row.cost,
+    priceUsd: row.costUsd ?? undefined,
+    priceUnit: row.costUnit ?? undefined,
     verified: row.verified,
     recommended: row.recommended || undefined,
     input: genericInput(kind, category),
@@ -130,11 +138,13 @@ export function listResolvableModels(filter?: {
 
 /** 估點：與 estimatePoints 相同，但 model 可為 live 覆寫後的 points */
 export function estimatePointsFor(model: ModelEntry, ctx?: EstimateContext): number {
-  // TTS 動態估點仍走 shared（依 cost 字串解析每千字）；live 覆寫後若 cost 變成即時價字串可能失去 TTS 動態——
-  // 對 TTS 優先用靜態 model 的 estimate 邏輯：若靜態存在且為 tts，用靜態 entry 估。
-  const staticM = getStaticModel(model.id);
-  if (staticM && staticM.category === "text-to-speech") {
-    return estimateStaticPoints(staticM, ctx);
+  // 即時單價優先；character 單位會依本次朗讀字數換算，避免 TTS 又退回可能已過期的靜態價。
+  if (model.priceUsd != null && model.priceUnit) {
+    return usdUnitToPoints(model.priceUsd, model.priceUnit, {
+      kindHint: model.kind,
+      promptChars: ctx?.promptChars,
+      usdToTwdRate: ctx?.usdToTwdRate,
+    });
   }
   return estimateStaticPoints(model, ctx);
 }

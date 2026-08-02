@@ -11,6 +11,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
+import { storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import {
   worldviewSchema,
@@ -169,6 +170,9 @@ export interface SubmitCoreInput {
   sourceUrl?: string;
   /** 素材庫來源(優先)：伺服器換成簽名短效網址,fal 才抓得到、外人不可偽造 */
   sourceAssetId?: string;
+  /** 多來源模型的第二來源（例如對嘴模型的配音音訊）。 */
+  secondarySourceUrl?: string;
+  secondarySourceAssetId?: string;
   /** 選定的角色定裝卡：外觀錨點自動注入視覺生成,跨鏡一致 */
   characterIds?: string[];
   /** 選定的場景設定卡：色板/光線錨點注入,同場景光影一致 */
@@ -201,6 +205,7 @@ export interface PreparedGenerationRequest {
   accessRole: "admin" | "leader" | "member" | void;
   estimatedPoints: number;
   sourceUrl?: string;
+  secondarySourceUrl?: string;
   effectiveSourceAssetId?: string;
   usedCardReference: "character" | "scene" | "prop" | null;
   userPrompt: string;
@@ -222,6 +227,9 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   if (model.needs && !input.sourceUrl && !input.sourceAssetId && !mayFillFromCards) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
   }
+  if (model.secondaryNeeds && !input.secondarySourceUrl && !input.secondarySourceAssetId) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `此模型還需要第二來源:${model.secondarySourceHint ?? model.secondaryNeeds}` });
+  }
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   const accessRole = await input.assertAccess?.(project);
@@ -232,6 +240,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     scenePresetIds: input.scenePresetIds,
     propIds: input.propIds,
     sourceAssetId: input.sourceAssetId,
+    secondarySourceAssetId: input.secondarySourceAssetId,
   });
 
   let effectiveSourceAssetId = input.sourceAssetId;
@@ -285,6 +294,25 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     });
   }
 
+  let secondarySourceUrl = input.secondarySourceUrl;
+  if (input.secondarySourceAssetId) {
+    const [secondaryAsset] = await db.select().from(schema.assets)
+      .where(and(eq(schema.assets.id, input.secondarySourceAssetId), isNull(schema.assets.deletedAt)));
+    if (!secondaryAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到第二來源素材（可能已在回收桶）" });
+    if (secondaryAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "第二來源素材不屬於此專案的組" });
+    if (model.secondaryNeeds && (SOURCE_INCOMPAT[model.secondaryNeeds] ?? []).includes(secondaryAsset.kind)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `第二來源需要${SOURCE_KIND_LABEL[model.secondaryNeeds] ?? model.secondaryNeeds}，選到的是${SOURCE_KIND_LABEL[secondaryAsset.kind] ?? secondaryAsset.kind}——請換一個相容素材`,
+      });
+    }
+    secondarySourceUrl = secondaryAsset.storagePath ? signAssetUrl(secondaryAsset.id) : secondaryAsset.url;
+    if (!secondarySourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "第二來源素材沒有可用檔案" });
+  }
+  if (model.secondaryNeeds && secondarySourceUrl && !isMockMode() && isUnusableRealModeSourceUrl(secondarySourceUrl)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "第二來源是測試佔位素材，正式生成無法使用——請上傳真實檔案" });
+  }
+
   const worldview = worldviewSchema.parse(project.worldview ?? {});
   const [character, scene, prop] = await Promise.all([
     input.characterIds?.length ? buildCharacterAnchor(project.id, input.characterIds) : Promise.resolve(""),
@@ -296,8 +324,18 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const positivePrompt = input.promptOverride?.positive?.trim() || autoPositive;
   const negativePrompt = input.promptOverride?.negative !== undefined ? input.promptOverride.negative.trim() : parts.negative;
   // Cost approval, quota reservation and persisted charge must all use the prompt actually sent.
-  const estimatedPoints = estimatePointsFor(model, { promptChars: positivePrompt.length });
-  const providerInput = model.input(positivePrompt, project.format as ProjectFormat, sourceUrl) as Record<string, unknown>;
+  const { getUsdToTwd } = await import("./fxRate");
+  const fx = await getUsdToTwd();
+  const estimatedPoints = estimatePointsFor(model, {
+    promptChars: positivePrompt.length,
+    usdToTwdRate: fx.rate,
+  });
+  const providerInput = model.input(
+    positivePrompt,
+    project.format as ProjectFormat,
+    sourceUrl,
+    secondarySourceUrl,
+  ) as Record<string, unknown>;
   if (negativePrompt && supportsNegativePrompt(model)) providerInput.negative_prompt = negativePrompt;
 
   const warnings: PreparedGenerationRequest["warnings"] = [];
@@ -335,6 +373,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     accessRole,
     estimatedPoints,
     sourceUrl: sourceUrl ?? undefined,
+    secondarySourceUrl: secondarySourceUrl ?? undefined,
     effectiveSourceAssetId,
     usedCardReference,
     userPrompt: input.prompt,
@@ -364,6 +403,7 @@ export async function assertGenerationEntityIds(
     scenePresetIds?: string[];
     propIds?: string[];
     sourceAssetId?: string;
+    secondarySourceAssetId?: string;
   },
 ): Promise<void> {
   if (opts.characterIds?.length) {
@@ -414,6 +454,24 @@ export async function assertGenerationEntityIds(
       });
     }
   }
+  if (opts.secondarySourceAssetId) {
+    const [row] = await db
+      .select({ id: schema.assets.id })
+      .from(schema.assets)
+      .where(
+        and(
+          eq(schema.assets.id, opts.secondarySourceAssetId),
+          eq(schema.assets.projectId, projectId),
+          isNull(schema.assets.deletedAt),
+        ),
+      );
+    if (!row) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "第二來源素材不屬於本專案或不存在（可能已在回收桶）",
+      });
+    }
+  }
 }
 
 /** 送出生成（守護齊全：孤兒列刪除、原子守門扣點、fal 失敗退點＋標 failed） */
@@ -425,6 +483,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     accessRole,
     estimatedPoints: est,
     sourceUrl,
+    secondarySourceUrl,
     providerInput: falInput,
   } = prepared;
   if (input.traceSessionId) {
@@ -448,6 +507,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       },
     });
   }
+  const storedParams = storeGenerationSourceMeta(falInput, { secondarySourceUrl });
 
   // 成本審核門檻（需求 2.1）：組員（member）單筆估點 ≥ 組門檻 → 先落一筆 awaiting_approval，
   // 不扣點、不送 fal，等組長在生成紀錄核准（generation.decideCost）才走扣點＋送出。
@@ -476,7 +536,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
             workflowRunId: input.workflowRunId ?? null,
             agentRunId: input.agentRunId ?? null,
             sourceUrl,
-            params: falInput, // 注入完成的 fal 輸入原樣保存——核准時直接送出，不重組（世界觀/卡片以送審當下為準）
+            params: storedParams, // 供應商輸入＋內部第二來源 metadata；送 Fal 前會移除內部欄位
             pointsEst: est,
             status: "awaiting_approval",
           })
@@ -543,7 +603,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         workflowRunId: input.workflowRunId ?? null, // 來源工作流/代理（沒有＝手動生成）
         agentRunId: input.agentRunId ?? null,
         sourceUrl,
-        params: falInput,
+        params: storedParams,
         pointsEst: est,
       })
       .returning();

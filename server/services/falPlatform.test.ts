@@ -6,6 +6,8 @@ describe("falPlatform pricing parse", () => {
   it("normalizes units", () => {
     expect(normalizePriceUnit("per second")).toBe("second");
     expect(normalizePriceUnit("megapixel")).toBe("megapixel");
+    expect(normalizePriceUnit("output character")).toBe("character");
+    expect(normalizePriceUnit("per 1000 characters")).toBe("1000characters");
   });
   it("parses flat unit_price", () => {
     const p = parsePricingPayload("fal-ai/flux/dev", { unit_price: 0.025, unit: "megapixel" });
@@ -22,5 +24,6 @@ describe("usdUnitToPoints", () => {
   it("image and video", () => {
     expect(usdUnitToPoints(0.04, "image")).toBe(1);
     expect(usdUnitToPoints(0.07, "second", { videoSeconds: 5, kindHint: "video" })).toBe(11);
+    expect(usdUnitToPoints(0.0003, "character", { promptChars: 2000, usdToTwdRate: 32.5 })).toBe(20);
   });
 });

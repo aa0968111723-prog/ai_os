@@ -19,6 +19,7 @@ import {
   type ModelEntry,
   type ModelTier,
   type OutputKind,
+  type SourceKind,
 } from "../../shared/models";
 import { pointsToTwd, usdUnitToPoints } from "../../shared/money";
 import { fetchFalModels, fetchFalPricing, type FalPricingUnit } from "./falPlatform";
@@ -57,25 +58,31 @@ function mapFalCategory(raw: string | null, tags: string[], endpointId: string):
   category: ModelCategory | "workflow";
   kind: OutputKind;
   tier: ModelTier;
+  needs: SourceKind | null;
 } {
   const blob = `${raw ?? ""} ${tags.join(" ")} ${endpointId}`.toLowerCase();
   let category: ModelCategory = "text-to-image";
   let kind: OutputKind = "image";
-  if (/image-to-video|i2v|img2vid/.test(blob)) {
+  let needs: SourceKind | null = null;
+  if (/video-to-video|v2v|lipsync|upscale.*video|restyle/.test(blob)) {
+    category = "video-to-video";
+    kind = "video";
+    needs = "video";
+  } else if (/image-to-video|i2v|img2vid/.test(blob)) {
     category = "image-to-video";
     kind = "video";
+    needs = "image";
   } else if (/text-to-video|t2v|video/.test(blob) && !/image/.test(blob)) {
     category = "text-to-video";
-    kind = "video";
-  } else if (/video-to-video|v2v|lipsync|upscale.*video|restyle/.test(blob)) {
-    category = "video-to-video";
     kind = "video";
   } else if (/image-to-image|i2i|edit|inpaint|kontext/.test(blob)) {
     category = "image-to-image";
     kind = "image";
+    needs = "image";
   } else if (/speech-to-text|whisper|transcri|asr/.test(blob)) {
     category = "speech-to-text";
     kind = "text";
+    needs = "audio";
   } else if (/text-to-speech|tts|voice/.test(blob)) {
     category = "text-to-speech";
     kind = "audio";
@@ -88,15 +95,17 @@ function mapFalCategory(raw: string | null, tags: string[], endpointId: string):
   } else if (/vision|describe|caption/.test(blob)) {
     category = "vision";
     kind = "text";
+    needs = "image";
   } else if (/train|lora|finetun/.test(blob)) {
     category = "training";
     kind = "text";
+    needs = "zip";
   } else if (/text-to-image|t2i|flux|sdxl|imagen|seedream|ideogram/.test(blob)) {
     category = "text-to-image";
     kind = "image";
   }
   // 新發現預設經濟；高單價稍後由 pricing 改 tier
-  return { category, kind, tier: "economy" };
+  return { category, kind, tier: "economy", needs };
 }
 
 function tierFromPoints(points: number): ModelTier {
@@ -330,7 +339,7 @@ export async function syncLiveModelCatalog(opts: { discoverPages?: number } = {}
           category: mapped.category,
           tier,
           kind: mapped.kind,
-          needs: null,
+          needs: mapped.needs,
           source: "fal_discovered",
           points,
           pointsStatic: null,

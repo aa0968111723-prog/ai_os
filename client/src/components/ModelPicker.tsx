@@ -9,9 +9,16 @@ export interface PickedModel {
   points: number;
   needs: string | null;
   sourceHint: string | null;
+  secondaryNeeds?: string | null;
+  secondarySourceHint?: string | null;
   kind: string;
   tierLabel: string;
   strengths: string;
+  bestFor?: string;
+  cost?: string;
+  estTwd?: number;
+  estUsd?: number;
+  usdToTwdRate?: number;
   verified: boolean;
   recommended: boolean;
 }
@@ -115,11 +122,21 @@ export function ModelPicker({
         </p>
       )}
       {selected && (
-        <Meta as="p" style={{ marginTop: 4 }}>
-          {selected.recommended && <Chip selected style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}><Icon name="Star" size={12} /> 推薦</Chip>}
-          {selected.strengths}
-          {!selected.verified && <span style={{ color: "var(--gold-ink)" }}>(<Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", margin: "0 2px" }} />新模型 ID 待正式模式首跑確認;失敗會自動退點)</span>}
-        </Meta>
+        <div style={{ marginTop: 6, display: "grid", gap: 3 }}>
+          <Meta as="p" style={{ margin: 0 }}>
+            {selected.recommended && <Chip selected style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}><Icon name="Star" size={12} /> 推薦</Chip>}
+            <strong>能力：</strong>{selected.strengths}
+          </Meta>
+          {selected.bestFor && <Meta as="p" style={{ margin: 0 }}><strong>適合用在專案：</strong>{selected.bestFor}</Meta>}
+          <Meta as="p" style={{ margin: 0 }}>
+            <strong>Fal 成本：</strong>{selected.cost || "依 Fal 即時目錄"} × US$1＝NT${selected.usdToTwdRate ?? 31} → 約 NT${selected.estTwd ?? selected.points}＝{selected.points} 點（1 點＝NT$1）
+            {selected.usdToTwdRate && (
+              <> · <a href="https://www.exchangerate-api.com" target="_blank" rel="noreferrer">Rates by Exchange Rate API</a></>
+            )}
+          </Meta>
+          {selected.needs && <Meta as="p" style={{ margin: 0 }}><strong>要準備：</strong>{selected.sourceHint || selected.needs}{selected.secondaryNeeds ? `＋${selected.secondarySourceHint || selected.secondaryNeeds}` : ""}；每個來源都可上傳本機檔、選素材庫或填雲端網址</Meta>}
+          {!selected.verified && <Meta as="p" style={{ color: "var(--gold-ink)", margin: 0 }}>(<Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", margin: "0 2px" }} />新模型 ID 待正式模式首跑確認；失敗會自動退點)</Meta>}
+        </div>
       )}
     </div>
   );

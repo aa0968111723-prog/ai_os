@@ -48,6 +48,8 @@ export interface ModelEntry {
   kind: OutputKind;
   /** 需要來源輸入時標注(UI 會顯示來源欄位) */
   needs?: SourceKind;
+  /** 同時需要第二個來源檔（例如對嘴＝人物影片＋配音音訊）。 */
+  secondaryNeeds?: SourceKind;
   /** 每次生成扣點(1 點 ≈ NT$1;訓練類為每次訓練)。fal 模型在模組載入時由 cost 官方 USD
    *  實價 × USD_TO_TWD 自動覆寫(見 realPricePoints);字面手填值僅在不可機械換算時生效 */
   points: number;
@@ -57,12 +59,16 @@ export interface ModelEntry {
   bestFor: string;
   /** 官方約略價 */
   cost: string;
+  /** Fal 即時目錄回傳的原始美元單價／單位；靜態目錄可不填。 */
+  priceUsd?: number;
+  priceUnit?: string;
   verified: boolean;
   /** 推薦預設:每個類別恰一個「已驗證、經濟」的日常主力;挑選器預設選它、UI 標「推薦」 */
   recommended?: boolean;
   /** 來源輸入欄位的提示文字 */
   sourceHint?: string;
-  input: (prompt: string, format: ProjectFormat, sourceUrl?: string) => Record<string, unknown>;
+  secondarySourceHint?: string;
+  input: (prompt: string, format: ProjectFormat, sourceUrl?: string, secondarySourceUrl?: string) => Record<string, unknown>;
 }
 
 /**
@@ -1435,8 +1441,8 @@ export const MODELS: ModelEntry[] = [
     needs: "video", points: 155, cost: "$5/分;按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高", verified: true,
     strengths: "最新一代對嘴;把配音精準貼合人物口型",
     bestFor: "虛擬主持人、配音替換",
-    sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
-    input: (p, _f, s) => ({ video_url: s, audio_url: p.trim() }),
+    sourceHint: "要對嘴的人物影片", secondaryNeeds: "audio", secondarySourceHint: "要套用的配音音訊",
+    input: (_p, _f, s, s2) => ({ video_url: s, audio_url: s2 }),
   },
   {
     // 現值更新(W2 打磨):研究表為 ≈$0.10/秒(720p 2x、1080p 4x),原標 $0.5–1/支 查無佐證
@@ -1460,8 +1466,8 @@ export const MODELS: ModelEntry[] = [
     needs: "video", points: 22, cost: "$0.7/分;按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高", verified: true,
     strengths: "成熟穩定的對嘴;成本較低",
     bestFor: "一般對嘴需求",
-    sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
-    input: (p, _f, s) => ({ video_url: s, audio_url: p.trim() }),
+    sourceHint: "要對嘴的人物影片", secondaryNeeds: "audio", secondarySourceHint: "要套用的配音音訊",
+    input: (_p, _f, s, s2) => ({ video_url: s, audio_url: s2 }),
   },
   {
     id: "fal-ai/video-upscaler", label: "影片升頻(輕量)", category: "video-to-video", tier: "economy", kind: "video",
@@ -1496,16 +1502,16 @@ export const MODELS: ModelEntry[] = [
     needs: "video", points: 155, cost: "約$5+/分(略高於 v2,以 fal 現場為準);按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高", verified: false,
     strengths: "sync.so 最新一代;對嘴自然度天花板",
     bestFor: "對外正式的多語開示對嘴",
-    sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
-    input: (p, _f, s) => ({ video_url: s, audio_url: p.trim() }),
+    sourceHint: "要對嘴的人物影片", secondaryNeeds: "audio", secondarySourceHint: "要套用的配音音訊",
+    input: (_p, _f, s, s2) => ({ video_url: s, audio_url: s2 }),
   },
   {
     id: "fal-ai/sync-lipsync/v2", label: "Lipsync v2 對嘴(標準)", category: "video-to-video", tier: "flagship", kind: "video",
     needs: "video", points: 93, cost: "$3/分;按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高", verified: false,
     strengths: "新一代對嘴標準版;品質接近 Pro 省 4 成",
     bestFor: "多語版開示的日常出片",
-    sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
-    input: (p, _f, s) => ({ video_url: s, audio_url: p.trim() }),
+    sourceHint: "要對嘴的人物影片", secondaryNeeds: "audio", secondarySourceHint: "要套用的配音音訊",
+    input: (_p, _f, s, s2) => ({ video_url: s, audio_url: s2 }),
   },
   {
     // 價格未定(依時長計費、長片分段);暫依 Lucy Edit 級距 ≈$0.1/秒估點
@@ -1538,8 +1544,8 @@ export const MODELS: ModelEntry[] = [
     needs: "video", points: 12, cost: "$0.4/分;按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高", verified: false,
     strengths: "商用對嘴,便宜穩定;1.9 與 Sync 標準間的性價比",
     bestFor: "量大時的中階對嘴",
-    sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
-    input: (p, _f, s) => ({ video_url: s, audio_url: p.trim() }),
+    sourceHint: "要對嘴的人物影片", secondaryNeeds: "audio", secondarySourceHint: "要套用的配音音訊",
+    input: (_p, _f, s, s2) => ({ video_url: s, audio_url: s2 }),
   },
   {
     // 現值更新(W2 打磨):採研究「去背/分割」表的精確價($0.015–0.0225/30幀),與 fast/綠幕姊妹條目同基準
@@ -1573,8 +1579,8 @@ export const MODELS: ModelEntry[] = [
     needs: "video", points: 6, cost: "$0.20/≤40秒,之後 $0.005/秒;長片實際費用高於扣點", verified: false,
     strengths: "極低成本對嘴;真人與動畫皆可",
     bestFor: "大量草稿對嘴、內部預覽",
-    sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
-    input: (p, _f, s) => ({ video_url: s, audio_url: p.trim() }),
+    sourceHint: "要對嘴的人物影片", secondaryNeeds: "audio", secondarySourceHint: "要套用的配音音訊",
+    input: (_p, _f, s, s2) => ({ video_url: s, audio_url: s2 }),
   },
   {
     // 價格推估(fal生態研究:端點已查證、單價 ≈$0.10–0.20/次為推估)
@@ -1582,8 +1588,8 @@ export const MODELS: ModelEntry[] = [
     needs: "video", points: 5, cost: "≈$0.10–0.20/次(推估)", verified: false,
     strengths: "只改嘴部區域、不重繪全臉;失真風險低",
     bestFor: "師父影像不能失真的保守對嘴",
-    sourceHint: "人物影片網址(提示詞欄貼音訊網址)",
-    input: (p, _f, s) => ({ video_url: s, audio_url: p.trim() }),
+    sourceHint: "要對嘴的人物影片", secondaryNeeds: "audio", secondarySourceHint: "要套用的配音音訊",
+    input: (_p, _f, s, s2) => ({ video_url: s, audio_url: s2 }),
   },
   /* ── W2 全量擴充:去背/字幕/去物(fal生態研究 §506–539、§613–648) ── */
   {
@@ -3035,10 +3041,13 @@ export function parseRealCost(cost: string, category: ModelCategory): ParsedReal
 }
 
 /** 官方實價 → 單次點數（NT$ 四捨五入、下限 1 點）；null＝不可機械換算（呼叫端保留手動校準值） */
-export function realPricePoints(m: Pick<ModelEntry, "cost" | "category">): number | null {
+export function realPricePoints(
+  m: Pick<ModelEntry, "cost" | "category">,
+  usdToTwdRate = USD_TO_TWD,
+): number | null {
   const p = parseRealCost(m.cost, m.category);
   if (p.usdMid === null || p.multiplier === null) return null;
-  return Math.max(1, Math.round(p.usdMid * p.multiplier * USD_TO_TWD));
+  return Math.max(1, Math.round(p.usdMid * p.multiplier * usdToTwdRate));
 }
 
 /* fal 模型全面覆寫為實價點數。nvidia-nim 走 NVIDIA 免費額度、cost 無 $ 金額，自然跳過（雙保險仍明列）。
@@ -3056,12 +3065,12 @@ for (const m of [...MODELS, ...LEGACY_MODELS]) {
  * 只認「首個」報價：voice-clone 的「$1.50/次＋預覽音 $0.30/千字」首報價為 /次 → 判為 flat，不誤入動態。
  * 模組載入時建一次快取（純衍生自 cost 字串，零額外資料源）。
  */
-const ttsPointsPerKChar: Map<string, number> = (() => {
+const ttsUsdPerKChar: Map<string, number> = (() => {
   const map = new Map<string, number>();
   for (const m of MODELS) {
     if (m.category !== "text-to-speech") continue;
     const first = m.cost.match(/\$\s*([0-9]+(?:\.[0-9]+)?)\s*\/\s*([^\s;,、(（]+)/); // 首個 $價/單位
-    if (first && first[2].startsWith("千字")) map.set(m.id, Number(first[1]) * USD_TO_TWD);
+    if (first && first[2].startsWith("千字")) map.set(m.id, Number(first[1]));
   }
   return map;
 })();
@@ -3070,6 +3079,8 @@ const ttsPointsPerKChar: Map<string, number> = (() => {
 export interface EstimateContext {
   /** 待計費文字字元數（TTS：即 prompt 長度＝朗讀文字量） */
   promptChars?: number;
+  /** 與 Fal 餘額硬上限共用的即時 USD/TWD；未傳時使用安全後備常數。 */
+  usdToTwdRate?: number;
 }
 
 /**
@@ -3078,11 +3089,15 @@ export interface EstimateContext {
  * 確保顯示＝扣點＝退點三者永遠一致（reserve/refund 對稱）。無 promptChars 時退回扁平值（等同舊行為）。
  */
 export function estimatePoints(model: ModelEntry, ctx?: EstimateContext): number {
-  const perK = ttsPointsPerKChar.get(model.id);
-  if (perK != null && ctx?.promptChars != null && ctx.promptChars > 0) {
-    return Math.max(1, Math.round((perK * ctx.promptChars) / 1000));
+  const rate = ctx?.usdToTwdRate ?? USD_TO_TWD;
+  const usdPerK = ttsUsdPerKChar.get(model.id);
+  if (usdPerK != null && ctx?.promptChars != null && ctx.promptChars > 0) {
+    return Math.max(1, Math.round((usdPerK * rate * ctx.promptChars) / 1000));
   }
-  return model.points;
+  const dynamic = realPricePoints(model, rate);
+  if (dynamic != null) return dynamic;
+  // 無法從 cost 機械解析的人工校準價仍隨同一匯率等比例調整。
+  return Math.max(1, Math.round(model.points * (rate / USD_TO_TWD)));
 }
 
 /* 為什麼:工作流合計點數曾多條與單步實扣不符(UI 顯示夠用、中途才被額度擋下的斷鏈),
@@ -3096,8 +3111,7 @@ for (const w of WORKFLOW_PRESETS) {
   w.points = w.steps.reduce((sum, st) => {
     const m = getModel(st.modelId);
     if (!m) return sum;
-    const perStep = ttsPointsPerKChar.has(m.id) ? estimatePoints(m, { promptChars: WORKFLOW_MAX_PROMPT_CHARS }) : m.points;
-    return sum + perStep;
+    return sum + estimatePoints(m, { promptChars: WORKFLOW_MAX_PROMPT_CHARS });
   }, 0);
 }
 
