@@ -3778,6 +3778,61 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 }
 .creation-goal-input label { margin-top: 0 !important; }
 
+/* ── 模型事實區：選完模型後的能力／適用／點數換算 ──
+ * 手機實測這一區會連吃六到八行（換算式自己就佔三行），是「AI 創作中心」
+ * 最大的密度來源。這裡不刪任何一句話，只做兩件事：
+ *   1. 徽章抽成獨立一列，讓句子佔滿整寬、不再被膠囊擠出孤字行
+ *   2. 換算式收進具名 <details>，精簡模式預設收起（收起時金額仍在 summary 上）
+ */
+.model-facts { margin-top: 6px; display: grid; gap: 3px; }
+.model-facts__badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 2px; }
+.model-facts__badges .chip { display: inline-flex; align-items: center; gap: 4px; }
+.model-facts__row { margin: 0; }
+.model-facts__cost { margin: 0; }
+.model-facts__cost > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: var(--sp-4) 0;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  list-style: none;
+}
+.model-facts__cost > summary::-webkit-details-marker { display: none; }
+/* 自畫三角形：原生 marker 在 flex summary 下各家瀏覽器位置不一 */
+.model-facts__cost > summary::before {
+  content: "▸";
+  font-size: 10px;
+  line-height: 1;
+  color: var(--fg-secondary);
+  transition: transform 120ms ease;
+}
+.model-facts__cost[open] > summary::before { transform: rotate(90deg); }
+.model-facts__cost > summary:hover { color: var(--fg); }
+.model-facts__cost-peek {
+  padding: 1px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--card2);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.model-facts__cost > .hint { margin: 2px 0 0; }
+
+/* ── 這次生成的成本摘要：橫向流動而非每項一列 ── */
+.creation-cost-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  /* 間距就是分隔——刻意不放「·」：換行時分隔符會掉到下一行行首，
+     看起來像多打了一個字。每一項本來就自帶「本次模式：」這樣的標籤。 */
+  gap: 2px 16px;
+}
+.creation-cost-summary__item { display: inline-flex; align-items: baseline; }
+.creation-cost-summary__points { color: var(--primary-ink); font-variant-numeric: tabular-nums; }
+
 /* ── ＋ 請誰來幫忙：創作者向技能／劇組（畫面卡，非代碼列表） ── */
 .creation-skill-picker { margin-top: 10px; position: relative; }
 .creation-skill-picker__row {
@@ -4678,6 +4733,14 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
     scrollbar-width: none;
   }
   .ctx-summary::-webkit-scrollbar { display: none; }
+  /* 生成表單的「帶入：」列不橫捲——捲軸是藏起來的，最後一顆 chip 被切在畫面
+   * 右緣看起來是壞掉而不是「還有更多」，而這四項正是「這次會送出什麼」的確認，
+   * 漏看任何一項就會生錯圖。總覽卡（.ctx-overview）是純導覽，維持原本的橫捲。 */
+  .ctx-summary--wrap {
+    flex-wrap: wrap;
+    white-space: normal;
+    overflow-x: visible;
+  }
   .ctx-summary .chip { flex: none; }
   .ctx-group { margin-bottom: 10px; }
   .ctx-group__head { margin-bottom: 8px; }
