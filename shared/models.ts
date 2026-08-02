@@ -88,10 +88,13 @@ export function supportsCardAnchors(category: ModelCategory): boolean {
  * 有頂層 negative_prompt 欄位的模型 id（保守 allowlist）：世界觀禁忌詞對視覺類別要走 negative_prompt——
  * 擴散模型無法靠正向提示詞「避免」某物（塞正向反而可能被畫出來，甚至把禁忌字當畫面文字渲染）。
  * 只收「fal schema 明確有 negative_prompt」的 id（預設不在＝不送，安全）：
- *   - 圖像：SD 系（SDXL/Kolors/Sana/Playground/AuraFlow/LoRA）——經典 negative_prompt 模型，零風險。
+ *   - 圖像：SD 系（SDXL/Kolors/Sana/Playground/LoRA）——經典 negative_prompt 模型，零風險。
+ *   - 圖像：Qwen Image 2 / Pro / Max（fal llms.txt 有 negative_prompt；中文字卡主力應吃世界觀禁忌）。
+ *   - 圖像：fal-ai/flux-lora（fal 頁列有 negative_prompt；純 FLUX.1/2 主端點仍不收）。
  *   - 影片：wan / kling / hunyuan-video / ltx-video / pixverse / mochi / cogvideox 族——fal 文件皆有 negative_prompt。
- * 刻意不收：FLUX/FLUX.2/Kontext、GPT-Image、Nano-Banana、Seedream、Ideogram、Recraft、Imagen4、Luma、Veo、Sora
- *   （這些新式模型無 negative_prompt 欄位，誤送恐 422；未列＝禁忌詞單純移出正向不再污染，仍是淨改善）。
+ * 刻意不收：FLUX/FLUX.2/Kontext 主端點、GPT-Image、Nano-Banana、Seedream、Ideogram、Recraft、Imagen4、Luma、Veo、Sora、AuraFlow
+ *   （AuraFlow v0.3 官方 schema 無 negative_prompt，誤送恐 422；未列＝禁忌詞單純移出正向不再污染，仍是淨改善）。
+ * 研究依據：docs/模型底層邏輯與運作流程.md + docs/research/model-deep-dive-2026-08/
  */
 export const NEGATIVE_PROMPT_SUPPORTED: ReadonlySet<string> = new Set<string>([
   // 圖像（SD 系，高信心）
@@ -101,7 +104,12 @@ export const NEGATIVE_PROMPT_SUPPORTED: ReadonlySet<string> = new Set<string>([
   "fal-ai/kolors",
   "fal-ai/sana",
   "fal-ai/playground-v25",
-  "fal-ai/aura-flow",
+  // 圖像（Qwen 統一生成-編輯；2026-08 fal schema 確認有 negative_prompt）
+  "fal-ai/qwen-image-2/text-to-image",
+  "fal-ai/qwen-image-2/pro/text-to-image",
+  "fal-ai/qwen-image-max/text-to-image",
+  // 圖像（FLUX.1 LoRA 端點；主端點 flux/dev 仍不收）
+  "fal-ai/flux-lora",
   // 影片 text-to-video
   "fal-ai/wan-t2v",
   "fal-ai/wan/v2.2-a14b/text-to-video",
