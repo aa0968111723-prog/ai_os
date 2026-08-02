@@ -25,6 +25,8 @@ export function PlanMode({
   forceOpen: _forceOpen = false,
   onForceOpenConsumed: _onForceOpenConsumed,
   goal,
+  onGoalChange,
+  goalInputId,
   knowledgeIds,
 }: {
   projectId: string;
@@ -37,6 +39,10 @@ export function PlanMode({
   forceOpen?: boolean;
   onForceOpenConsumed?: () => void;
   goal?: string;
+  /** 傳了就把代理卡的目標欄合併掉：全頁只剩工作台上面那一格輸入框 */
+  onGoalChange?: (goal: string) => void;
+  /** 工作台那格 textarea 的 DOM id（職能 chip 寫入後把焦點送回去） */
+  goalInputId?: string;
   /** 工作台勾選的知識優先來源 → 規劃 extraSourceIds */
   knowledgeIds?: string[];
 }) {
@@ -105,6 +111,9 @@ export function PlanMode({
           isLeader={isLeader}
           embedded
           initialGoal={goal}
+          goal={goal}
+          onGoalChange={onGoalChange}
+          goalInputId={goalInputId}
           compactComposer
           initialKnowledgeIds={knowledgeIds}
         />

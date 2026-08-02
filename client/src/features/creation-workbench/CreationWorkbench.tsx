@@ -484,6 +484,8 @@ export function CreationWorkbench({
           forceOpen={planForceOpen}
           onForceOpenConsumed={clearPlanForceOpen}
           goal={draft.goal}
+          onGoalChange={canEdit ? (goal) => setDraft({ goal }) : undefined}
+          goalInputId={goalInputId}
           knowledgeIds={draft.knowledgeIds}
         />
 

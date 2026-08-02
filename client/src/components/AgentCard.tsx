@@ -19,6 +19,7 @@ import { listAiProjectRoles } from "../../../shared/aiProjectRoles";
 import { Button, Card, Chip, Hint, Meta, Pill, type PillStatus } from "./ui";
 import { getPlaybook } from "../../../shared/rolePlaybooks";
 import { GoogleDrivePicker } from "./GoogleDrivePicker";
+import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
 
 /**
  * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
@@ -195,6 +196,9 @@ export function AgentCard({
   initialGoal,
   compactComposer = false,
   initialKnowledgeIds,
+  goal: controlledGoalValue,
+  onGoalChange,
+  goalInputId,
 }: {
   projectId: string;
   canEdit: boolean;
@@ -208,11 +212,26 @@ export function AgentCard({
   compactComposer?: boolean;
   /** 工作台知識優先勾選（id 列表）→ 規劃 extraSourceIds */
   initialKnowledgeIds?: string[];
+  /**
+   * 受控目標（QA 2026-08-02）：工作台與這裡原本各有一個目標框，字不互通——
+   * 使用者得打兩次還不知道排步驟送的是哪一份。傳 onGoalChange 就進「單一輸入框」模式：
+   * 本卡不再自帶 textarea，值與寫入都回到上層那一格。
+   */
+  goal?: string;
+  onGoalChange?: (goal: string) => void;
+  /** 上層那格 textarea 的 DOM id——職能 chip 寫入後把焦點送回去 */
+  goalInputId?: string;
 }) {
   const utils = trpc.useUtils();
   // 與 App 同 key 共用快取：核准/停止的授權是「發起人本人或組長以上」，按鈕顯示要跟伺服器規則對齊
   const me = trpc.auth.me.useQuery();
-  const [goal, setGoal] = useState(() => (initialGoal ?? "").trim());
+  const controlledGoal = typeof onGoalChange === "function";
+  const [localGoal, setLocalGoal] = useState(() => (initialGoal ?? "").trim());
+  const goal = controlledGoal ? (controlledGoalValue ?? "") : localGoal;
+  const setGoal = (next: string) => {
+    if (controlledGoal) onGoalChange!(next);
+    else setLocalGoal(next);
+  };
   // PR-E3：搜尋雲端後「勾選」僅本次納入規劃的檔案（內容由後端規劃當下拉取，不落庫）
   const [driveSources, setDriveSources] = useState<Array<{ id: string; name: string }>>([]);
   // PR-E2：轉存進知識庫的來源（站內知識 id）——優先注入本次與之後的規劃
@@ -224,11 +243,21 @@ export function AgentCard({
   const goalInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // 工作台 goal 變更時同步（使用者已在本地輸入較長內容則不覆蓋）
+  // 受控模式沒有本地副本可鏡射——值本來就是上層那一格，跳過。
   useEffect(() => {
+    if (controlledGoal) return;
     const next = (initialGoal ?? "").trim();
     if (!next) return;
-    setGoal((prev) => (prev.trim().length >= 5 ? prev : next));
-  }, [initialGoal]);
+    setLocalGoal((prev) => (prev.trim().length >= 5 ? prev : next));
+  }, [initialGoal, controlledGoal]);
+
+  /** 職能 chip 寫入目標後把焦點帶回輸入框（受控時是上層工作台那一格） */
+  const focusGoalInput = () => {
+    const el = goalInputId
+      ? (document.getElementById(goalInputId) as HTMLElement | null)
+      : goalInputRef.current;
+    focusAndReveal(el);
+  };
 
   // 工作台「本次知識優先」→ 合併進 knowledgeSources（標題稍後由 list 補；先用 id）
   useEffect(() => {
@@ -428,16 +457,32 @@ export function AgentCard({
               寫目標 → 排步驟 → 你核准才扣點；關頁也會繼續跑。
             </Hint>
           )}
-          <label htmlFor={`agent-goal-${projectId}`}>目標</label>
-          <textarea
-            ref={goalInputRef}
-            id={`agent-goal-${projectId}`}
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
-            rows={compactComposer ? 2 : 2}
-            maxLength={1000}
-            placeholder={`例：${GOAL_EXAMPLES[0]}`}
-          />
+          {controlledGoal ? (
+            // 單一輸入框：這裡只回顯上面那格的目標（不是第二個輸入框），要改字回上面改。
+            <div className="agent-goal-echo" style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+              <Meta as="p" style={{ margin: 0, flex: "1 1 200px", minWidth: 0 }}>
+                {goal.trim()
+                  ? `目標：${goal.trim().slice(0, 60)}${goal.trim().length > 60 ? "…" : ""}`
+                  : "還沒寫目標——先在上面「你想完成什麼畫面？」寫一句。"}
+              </Meta>
+              <Button variant="ghost" size="sm" type="button" onClick={focusGoalInput}>
+                {goal.trim() ? "改目標" : "去寫目標"}
+              </Button>
+            </div>
+          ) : (
+            <>
+              <label htmlFor={`agent-goal-${projectId}`}>目標</label>
+              <textarea
+                ref={goalInputRef}
+                id={`agent-goal-${projectId}`}
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                rows={2}
+                maxLength={1000}
+                placeholder={`例：${GOAL_EXAMPLES[0]}`}
+              />
+            </>
+          )}
           <div className="creation-skill-picker__row" style={{ marginTop: 6 }}>
             {SHORT_CREATION_PLAYBOOK && (
               <button
@@ -447,7 +492,7 @@ export function AgentCard({
                 title={`${SHORT_CREATION_PLAYBOOK.title}——快速出一版可審的影音／圖文；要排程、物資與多人分工請改用完整多步計畫（直接描述目標即可）`}
                 onClick={() => {
                   setGoal(SHORT_CREATION_PLAYBOOK.goalTemplate);
-                  goalInputRef.current?.focus();
+                  focusGoalInput();
                 }}
               >
                 <Icon name="Sparkles" size={12} /> 快速開拍（短版）
@@ -461,7 +506,7 @@ export function AgentCard({
                 title={role.summary}
                 onClick={() => {
                   setGoal(role.defaultGoalHint);
-                  goalInputRef.current?.focus();
+                  focusGoalInput();
                 }}
               >
                 {role.title}
