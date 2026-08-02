@@ -44,19 +44,22 @@ export function CreationCostSummary({
         background: "var(--card2)",
       }}
     >
-      <div>
+      {/* 每項各佔一列時，手機上這張卡就吃掉四到五行；改成同一行流動換行後
+          常見情境（模式＋點數＋規格）壓成一到兩行，資訊一項都沒少。
+          分隔點由 CSS 的 ::before 產生，不寫進文字節點——讀屏不會念出「間隔號」。 */}
+      <span className="creation-cost-summary__item">
         本次模式：{modeLabel}
         {freeNote ? ` · ${freeNote}` : ""}
-      </div>
-      <div>
-        預估消耗：{estimateLabel}
+      </span>
+      <span className="creation-cost-summary__item">
+        預估消耗：<b className="creation-cost-summary__points">{estimateLabel}</b>
         {usageBasedNote ? (
-          <span style={{ marginLeft: 6, fontSize: 12 }}>{usageBasedNote}</span>
+          <span style={{ marginLeft: 4 }}>{usageBasedNote}</span>
         ) : null}
-      </div>
-      {outputSpec ? <div>輸出規格：{outputSpec}</div> : null}
-      {remainingLabel ? <div>{remainingLabel}</div> : null}
-      {approvalLabel ? <div>是否需要核准：{approvalLabel}</div> : null}
+      </span>
+      {outputSpec ? <span className="creation-cost-summary__item">輸出規格：{outputSpec}</span> : null}
+      {remainingLabel ? <span className="creation-cost-summary__item">{remainingLabel}</span> : null}
+      {approvalLabel ? <span className="creation-cost-summary__item">是否需要核准：{approvalLabel}</span> : null}
     </Meta>
   );
 }

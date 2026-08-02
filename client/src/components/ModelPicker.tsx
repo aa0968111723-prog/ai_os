@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { trpc } from "../api";
 import { MODELS } from "@shared/models";
 import { Icon } from "./Icon";
-import { Button, Chip, Hint, Meta } from "./ui";
+import { Button, Chip, Hint, Meta, useDensity } from "./ui";
 export interface PickedModel {
   id: string;
   label: string;
@@ -86,6 +86,14 @@ export function ModelPicker({
   const loading = categories.isLoading || models.isLoading;
   const loadError = categories.error ?? models.error;
 
+  // 匯率換算式（$0.03/image × US$1＝NT$32.308 → 約 NT$1＝1 點）在手機上佔三行，
+  // 是這一區最大的視覺負擔，但它是「點數怎麼來的」的透明度依據，不能刪。
+  // 所以收進具名的 <details>：精簡模式預設收起、引導模式預設展開。
+  // 這裡不用 <Hint>——同一畫面已經有兩顆通稱的「說明」小鈕，再加一顆會分不出誰是誰。
+  const density = useDensity();
+  const [costOpen, setCostOpen] = useState(density === "guide");
+  useEffect(() => setCostOpen(density === "guide"), [density]);
+
   return (
     <div data-fb="模型挑選">
       <label htmlFor="mp-category">創作類別</label>
@@ -122,20 +130,34 @@ export function ModelPicker({
         </p>
       )}
       {selected && (
-        <div style={{ marginTop: 6, display: "grid", gap: 3 }}>
-          <Meta as="p" style={{ margin: 0 }}>
-            {selected.recommended && <Chip selected style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}><Icon name="Star" size={12} /> 推薦</Chip>}
-            <strong>能力：</strong>{selected.strengths}
-          </Meta>
-          {selected.bestFor && <Meta as="p" style={{ margin: 0 }}><strong>適合用在專案：</strong>{selected.bestFor}</Meta>}
-          <Meta as="p" style={{ margin: 0 }}>
-            <strong>Fal 成本：</strong>{selected.cost || "依 Fal 即時目錄"} × US$1＝NT${selected.usdToTwdRate ?? 31} → 約 NT${selected.estTwd ?? selected.points}＝{selected.points} 點（1 點＝NT$1）
-            {selected.usdToTwdRate && (
-              <> · <a href="https://www.exchangerate-api.com" target="_blank" rel="noreferrer">Rates by Exchange Rate API</a></>
-            )}
-          </Meta>
-          {selected.needs && <Meta as="p" style={{ margin: 0 }}><strong>要準備：</strong>{selected.sourceHint || selected.needs}{selected.secondaryNeeds ? `＋${selected.secondarySourceHint || selected.secondaryNeeds}` : ""}；每個來源都可上傳本機檔、選素材庫或填雲端網址</Meta>}
-          {!selected.verified && <Meta as="p" style={{ color: "var(--gold-ink)", margin: 0 }}>(<Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", margin: "0 2px" }} />新模型 ID 待正式模式首跑確認；失敗會自動退點)</Meta>}
+        <div className="model-facts">
+          {/* 徽章自成一列：先前「推薦」膠囊夾在「能力：」句首，把整段擠成三行，
+              最後一個字（「證」）孤零零掉到自己一行。抽出來後句子能佔滿整寬。 */}
+          {selected.recommended && (
+            <div className="model-facts__badges">
+              <Chip selected><Icon name="Star" size={12} /> 推薦</Chip>
+            </div>
+          )}
+          <Meta as="p" className="model-facts__row"><strong>能力：</strong>{selected.strengths}</Meta>
+          {selected.bestFor && <Meta as="p" className="model-facts__row"><strong>適合用在專案：</strong>{selected.bestFor}</Meta>}
+          {selected.needs && <Meta as="p" className="model-facts__row"><strong>要準備：</strong>{selected.sourceHint || selected.needs}{selected.secondaryNeeds ? `＋${selected.secondarySourceHint || selected.secondaryNeeds}` : ""}；每個來源都可上傳本機檔、選素材庫或填雲端網址</Meta>}
+          <details
+            className="model-facts__cost"
+            open={costOpen}
+            onToggle={(e) => setCostOpen((e.target as HTMLDetailsElement).open)}
+          >
+            {/* summary 先講結論（這次幾點），展開才是換算式——收起時仍看得到金額 */}
+            <summary>
+              點數怎麼算<span className="model-facts__cost-peek">約 {selected.points} 點</span>
+            </summary>
+            <Meta as="p" className="model-facts__row">
+              <strong>Fal 成本：</strong>{selected.cost || "依 Fal 即時目錄"} × US$1＝NT${selected.usdToTwdRate ?? 31} → 約 NT${selected.estTwd ?? selected.points}＝{selected.points} 點（1 點＝NT$1）
+              {selected.usdToTwdRate && (
+                <> · <a href="https://www.exchangerate-api.com" target="_blank" rel="noreferrer">Rates by Exchange Rate API</a></>
+              )}
+            </Meta>
+          </details>
+          {!selected.verified && <Meta as="p" className="model-facts__row" style={{ color: "var(--gold-ink)" }}>(<Icon name="TriangleAlert" size={12} style={{ verticalAlign: "-1px", margin: "0 2px" }} />新模型 ID 待正式模式首跑確認；失敗會自動退點)</Meta>}
         </div>
       )}
     </div>

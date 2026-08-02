@@ -367,7 +367,7 @@ export function DirectGenerateMode({
         placeholder={model?.secondaryNeeds ? "例：中文配音版，保留原人物表情" : "例：清晨禪堂，柔和光線灑落，一炷香的靜謐"}
       />
 
-      <div className="ctx-summary" style={{ marginTop: 8 }} role="group" aria-label="這次生成會帶入的上下文">
+      <div className="ctx-summary ctx-summary--wrap" style={{ marginTop: 8 }} role="group" aria-label="這次生成會帶入的上下文">
         帶入：
         {summaryChip(`設定${wvReady ? " ✓" : "（待設）"}`, "#onboard-worldview", wvReady)}
         {summaryChip(`角色 ${characterIds.length}`, "#sec-characters", characterIds.length > 0)}
