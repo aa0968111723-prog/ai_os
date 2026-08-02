@@ -31,6 +31,14 @@
 | [專案知識庫](專案知識庫) | 長文素材、釘選優先、本次知識優先、注入預覽與配額 |
 | [協作與鏡像跟隨](協作與鏡像跟隨) | 雙人 presence、游標、鏡像精準度、誰在線 |
 
+## 路線圖與維運（工程）
+
+| 文件（repo `docs/`） | 說明 |
+|------|------|
+| [RAG 知識庫路線圖](https://github.com/aa0968111723-prog/ai_os/blob/docs/rag-and-asset-backup-drills/docs/product/rag-knowledge-base-roadmap.md) | 現行知識注入 vs 向量 RAG；啟動條件與 MVP 邊界 |
+| [素材備份與還原演練](https://github.com/aa0968111723-prog/ai_os/blob/docs/rag-and-asset-backup-drills/docs/%E7%B4%A0%E6%9D%90%E5%82%99%E4%BB%BD%E8%88%87%E9%82%84%E5%8E%9F%E6%BC%94%E7%B7%B4.md) | 每週／每月／每季 checklist（成對備份） |
+| [維運手冊](https://github.com/aa0968111723-prog/ai_os/blob/docs/rag-and-asset-backup-drills/docs/%E7%B6%AD%E9%81%8B%E6%89%8B%E5%86%8A.md) | 遷移、備份、應變、環境變數總冊 |
+
 ## 程式碼對應（給工程）
 
 - 世界觀 schema／格式化：`shared/worldview.ts`
