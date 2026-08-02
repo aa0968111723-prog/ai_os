@@ -171,4 +171,12 @@ describe("supportsNegativePrompt（負向提示詞能力旗標）", () => {
     expect(supportsNegativePrompt(getModel("fal-ai/qwen-image-max/text-to-image")!)).toBe(true);
     expect(supportsNegativePrompt(getModel("fal-ai/flux-lora")!)).toBe(true);
   });
+
+  it("圖生圖／超分：Qwen Edit 系、PuLID、Clarity 有 negative_prompt", () => {
+    expect(supportsNegativePrompt(getModel("fal-ai/qwen-image-edit")!)).toBe(true);
+    expect(supportsNegativePrompt(getModel("fal-ai/qwen-image-edit-plus")!)).toBe(true);
+    expect(supportsNegativePrompt(getModel("fal-ai/qwen-image-2/edit")!)).toBe(true);
+    expect(supportsNegativePrompt(getModel("fal-ai/flux-pulid")!)).toBe(true);
+    expect(supportsNegativePrompt(getModel("fal-ai/clarity-upscaler")!)).toBe(true);
+  });
 })

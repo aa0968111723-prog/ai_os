@@ -110,6 +110,12 @@ export const NEGATIVE_PROMPT_SUPPORTED: ReadonlySet<string> = new Set<string>([
   "fal-ai/qwen-image-max/text-to-image",
   // 圖像（FLUX.1 LoRA 端點；主端點 flux/dev 仍不收）
   "fal-ai/flux-lora",
+  // 圖像編輯／超分（2026-08 圖生圖研究：fal schema 確認有 negative_prompt）
+  "fal-ai/qwen-image-edit",
+  "fal-ai/qwen-image-edit-plus",
+  "fal-ai/qwen-image-2/edit",
+  "fal-ai/flux-pulid",
+  "fal-ai/clarity-upscaler",
   // 影片 text-to-video
   "fal-ai/wan-t2v",
   "fal-ai/wan/v2.2-a14b/text-to-video",
@@ -865,7 +871,7 @@ export const MODELS: ModelEntry[] = [
     strengths: "FLUX 底免訓練人臉鎖定;一張臉照+提示詞進任何場景",
     bestFor: "把授權過的講者臉放進生成場景(提示詞英文)",
     sourceHint: "人臉清晰照(需本人授權)",
-    input: (p, _f, s) => ({ prompt: p, image_url: s }),
+    input: (p, _f, s) => ({ prompt: p, reference_image_url: s }),
   },
   {
     // 端點存在為推定(🔸),價格未查到,首跑確認
