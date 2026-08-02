@@ -87,13 +87,13 @@ await page.waitForTimeout(900);
 const kbBox = await page.locator("#sec-knowledge").boundingBox();
 ok("摘要條 chip 點了捲到知識庫", !!kbBox && kbBox.y > -50 && kbBox.y < 400);
 
-// 銜接語（指向工作台／資源抽屜，非舊「生成卡」）
+// 銜接語（指向工作台／資源抽屜，非舊「生成卡」）——文案已精簡
 ok(
   "幕間銜接語 ×2",
   (await page.locator("text=自動注入下方每一次生成").count()) === 1
-    && (await page.locator("text=成品會自動存入素材庫").count()) === 1,
+    && (await page.locator("text=成品進素材庫").count()) === 1,
 );
-ok("② 標頭文案對齊統一工作台", (await page.locator("#stage-create >> text=同一工作台切換").count()) >= 1);
+ok("② 標頭文案對齊統一工作台", (await page.locator("#stage-create >> text=同一入口").count()) >= 1);
 
 await page.screenshot({ path: SHOT("4-full"), fullPage: true });
 await browser.close();
