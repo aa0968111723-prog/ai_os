@@ -5,7 +5,7 @@ import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { falSubmit, isMockMode, billingBypassed } from "../services/fal";
 import { failStaleGenerationTx, refund, reserveQuota } from "../services/points";
-import { advanceGeneration } from "../services/generationCore";
+import { advanceGeneration, prepareGenerationRequest } from "../services/generationCore";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { signAssetUrl } from "../services/storage";
 import { assertProjectEditable } from "../services/projectAcl";
@@ -16,6 +16,14 @@ import {
   submitCloudMockGeneration,
 } from "../services/cloudInference/freeGeneration";
 import { MAX_PROMPT_CHARS } from "./prompts";
+import { creativePromptOverrideSchema } from "../../shared/aiTrace";
+import {
+  createAiTraceSession,
+  findAiTraceSessionBySource,
+  recordAiTraceEventSafely,
+  sanitizeAiTracePayload,
+  updateAiTraceSession,
+} from "../services/aiTrace";
 
 // 注入判斷的單一來源已抽到 services/generationCore（工作流執行器共用）；
 // 這裡 re-export 讓既有引用點（services/mcp.ts）不必改路徑
@@ -69,6 +77,55 @@ async function sweepStaleGenerations(projectId: string): Promise<void> {
 }
 
 export const generationRouter = router({
+  preview: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      modelId: z.string(),
+      prompt: z.string().min(1).max(MAX_PROMPT_CHARS),
+      sourceUrl: z.string().url().optional(),
+      sourceAssetId: z.string().uuid().optional(),
+      characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      promptOverride: creativePromptOverrideSchema.optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const prepared = await prepareGenerationRequest({
+        ...input,
+        userId: ctx.auth.user.id,
+        assertAccess: async (project) => {
+          const role = requireGroup(ctx.auth, project.groupId);
+          await assertProjectEditable(ctx.auth, project);
+          return role;
+        },
+      });
+      const safe = sanitizeAiTracePayload({
+        positivePrompt: prepared.positivePrompt,
+        negativePrompt: prepared.negativePrompt,
+        providerInput: prepared.providerInput,
+        sourceAssetId: prepared.effectiveSourceAssetId,
+        usedCardReference: prepared.usedCardReference,
+      });
+      return {
+        mode: "generate" as const,
+        title: "這次生成，AI 會怎麼理解",
+        provider: prepared.model.id.startsWith("nvidia-nim#") ? "nvidia-nim" : "fal.ai",
+        model: prepared.model.label,
+        endpoint: endpointOf(prepared.model),
+        context: [
+          { type: "worldview", label: "專案世界觀", included: prepared.positivePrompt !== prepared.userPrompt },
+          { type: "character", label: `角色定裝 ${input.characterIds?.length ?? 0}`, included: !!prepared.anchors.character, chars: prepared.anchors.character.length },
+          { type: "scene", label: `場景設定 ${input.scenePresetIds?.length ?? 0}`, included: !!prepared.anchors.scene, chars: prepared.anchors.scene.length },
+          { type: "prop", label: `素材設定 ${input.propIds?.length ?? 0}`, included: !!prepared.anchors.prop, chars: prepared.anchors.prop.length },
+          { type: "source", label: prepared.sourceUrl ? "來源素材已送入" : "沒有來源素材", included: !!prepared.sourceUrl, note: prepared.usedCardReference ? `自動採用 ${prepared.usedCardReference} 卡片參考圖` : undefined },
+        ],
+        request: safe.payload,
+        warnings: prepared.warnings,
+        estimatedPoints: prepared.estimatedPoints,
+        canOverrideCreativePrompt: true,
+      };
+    }),
+
   submit: authedProcedure
     .input(
       z.object({
@@ -88,11 +145,32 @@ export const generationRouter = router({
         propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
         /** 冪等鍵（client 產生的 UUID）：timeout 後重送同鍵回原生成列，不重複扣點 */
         clientRequestId: z.string().uuid().optional(),
+        promptOverride: creativePromptOverrideSchema.optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) =>
+    .mutation(async ({ ctx, input }) => {
+      // 先做同一組組裝／硬守門，成功才建立永久 trace，避免壞輸入灌滿追蹤表。
+      const prepared = await prepareGenerationRequest({
+        ...input,
+        userId: ctx.auth.user.id,
+        assertAccess: async (project) => {
+          const role = requireGroup(ctx.auth, project.groupId);
+          await assertProjectEditable(ctx.auth, project);
+          return role;
+        },
+      });
+      const trace = await createAiTraceSession({
+        groupId: prepared.project.groupId,
+        projectId: prepared.project.id,
+        userId: ctx.auth.user.id,
+        mode: "generate",
+        title: `生成：${input.prompt.trim().slice(0, 80)}`,
+        provider: prepared.model.id.startsWith("nvidia-nim#") ? "nvidia-nim" : "fal.ai",
+        model: prepared.model.id,
+      });
+      try {
       // TD-02：人類直呼 tRPC 走 Command（政策＋狀態機＋ACL＋submitGenerationCore）
-      executeGenerationCommand({
+      const generation = await executeGenerationCommand({
         auth: ctx.auth,
         source: "web",
         id: input.clientRequestId,
@@ -104,8 +182,15 @@ export const generationRouter = router({
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
-      }),
-    ),
+        promptOverride: input.promptOverride,
+        traceSessionId: trace.id,
+      });
+      return { ...generation, traceSessionId: trace.id };
+      } catch (error) {
+        await updateAiTraceSession(trace.id, { status: "failed", summary: error instanceof Error ? error.message : "送出失敗" }).catch(() => undefined);
+        throw error;
+      }
+    }),
 
   /**
    * 以相同設定重試（伺服器端完整版）：舊做法由前端拿 prompt/model/來源重組 submit，
@@ -320,6 +405,12 @@ export const generationRouter = router({
           .where(and(eq(schema.generations.id, gen.id), eq(schema.generations.status, "awaiting_approval")))
           .returning();
         if (!updated) throw new TRPCError({ code: "BAD_REQUEST", message: "這筆生成已被其他人處理" });
+        const trace = await findAiTraceSessionBySource("generation", gen.id).catch(() => null);
+        if (trace) {
+          await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "validation", summary: "成本審核已駁回", payload: { decision: "rejected", reason } });
+          await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "completed", summary: "本次生成於送出 provider 前結束", payload: { generationId: gen.id, status: "rejected" } });
+          await updateAiTraceSession(trace.id, { status: "completed", summary: "成本審核已駁回，未送出 provider" }).catch(() => undefined);
+        }
         await postSystemMessage(`⛔ 待核生成已駁回（${model?.label ?? gen.modelId}，${gen.pointsEst} 點）${reason ? `：${reason}` : ""}`);
         return updated;
       }
@@ -379,7 +470,15 @@ export const generationRouter = router({
 
       try {
         // params 存的是送審當下注入完成的 fal 輸入(來源網址已於上方重簽)——核准即送出
+        const trace = await findAiTraceSessionBySource("generation", gen.id).catch(() => null);
+        if (trace) {
+          await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "validation", summary: "成本審核已核准", payload: { decision: "approved", approvedBy: ctx.auth.user.id } });
+          await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "provider_request", summary: `核准後送出 ${model.label}`, payload: { endpoint: endpointOf(model), input: submitParams } });
+          await updateAiTraceSession(trace.id, { status: "running", summary: "已核准並送出 provider" }).catch(() => undefined);
+        }
+        const startedAt = Date.now();
         const { requestId } = await falSubmit(endpointOf(model), model.kind, submitParams);
+        if (trace) await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "provider_response", summary: "Provider 已接受核准後的工作", latencyMs: Date.now() - startedAt, payload: { requestId, status: "running" } });
         const [updated] = await db
           .update(schema.generations)
           .set({ requestId, status: "running", updatedAt: new Date() })
@@ -395,6 +494,11 @@ export const generationRouter = router({
           .update(schema.generations)
           .set({ status: "failed", error: String(err), pointsRefunded: gen.pointsEst, updatedAt: new Date() })
           .where(eq(schema.generations.id, gen.id));
+        const trace = await findAiTraceSessionBySource("generation", gen.id).catch(() => null);
+        if (trace) {
+          await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "failed", summary: "核准後送出 provider 失敗", payload: { error: err instanceof Error ? err.message : String(err) } });
+          await updateAiTraceSession(trace.id, { status: "failed", summary: "核准後送出失敗" }).catch(() => undefined);
+        }
         throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "核准後送出失敗，點數已退回，請稍後重試" });
       }
     }),

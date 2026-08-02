@@ -18,6 +18,7 @@ export function TemplateMode({
   panelId,
   labelledBy,
   active,
+  canEdit,
   goal,
   templateId,
   promptRequest,
@@ -30,6 +31,7 @@ export function TemplateMode({
   panelId: string;
   labelledBy: string;
   active: boolean;
+  canEdit: boolean;
   /** Shared draft goal — display hint only; not auto-written into idea box */
   goal?: string;
   /** Stored on shared draft by run_template bring-in */
@@ -112,6 +114,7 @@ export function TemplateMode({
           embedded
           pickRequest={pickRequest}
           promptRequest={ideaRequest}
+          canInspectAi={canEdit}
         />
       </div>
     </div>

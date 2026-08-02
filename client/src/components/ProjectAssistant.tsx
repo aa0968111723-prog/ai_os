@@ -21,6 +21,7 @@ import {
   writeAgentPlannerMode,
 } from "../lib/agentPlannerPreference";
 import { Badge, Button, Card, Chip, Hint, Meta } from "./ui";
+import { AiUnderstandingPanel } from "../features/creation-workbench/AiUnderstandingPanel";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -123,6 +124,7 @@ export function ProjectAssistant({
   onSaveSceneDraft,
   askFillRequest = null,
   knowledgeIds,
+  canInspectAi = false,
 }: {
   projectId: string;
   embedded?: boolean;
@@ -139,6 +141,8 @@ export function ProjectAssistant({
   askFillRequest?: { nonce: number; message: string; autoSend?: boolean } | null;
   /** 本次問答優先注入的知識 id（工作台勾選） */
   knowledgeIds?: string[];
+  /** Full prompt/trace inspection is editor-only. */
+  canInspectAi?: boolean;
 }) {
   const utils = trpc.useUtils();
   const [input, setInput] = useState("");
@@ -156,6 +160,7 @@ export function ProjectAssistant({
   // 代理規劃供應商／用量策略；保留使用者上次選擇，個別提議仍可覆蓋。
   const [defaultPlannerMode, setDefaultPlannerMode] = useState<AgentPlannerMode>(readAgentPlannerMode);
   const [plannerModeOverride, setPlannerModeOverride] = useState<Record<string, AgentPlannerMode>>({});
+  const [traceSessionId, setTraceSessionId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const push = (t: Turn) => {
     setTurns((prev) => [...prev, t]);
@@ -193,6 +198,12 @@ export function ProjectAssistant({
   // tRPC 一次性問答：串流不可用時的退路。每次呼叫使用帶 request epoch 的局部 callback，
   // mutation 本身不能取消時也能丟棄過期答案。
   const ask = trpc.assistant.ask.useMutation();
+  const preview = trpc.assistant.preview?.useMutation?.() ?? {
+    data: undefined,
+    error: null,
+    isPending: false,
+    mutate: (_input: unknown) => undefined,
+  };
 
   const busy = thinking.active || fallbackPending;
 
@@ -221,6 +232,7 @@ export function ProjectAssistant({
         },
         onDone: (result) => {
           if (!requestIsCurrent(requestProjectId, epoch)) return;
+          setTraceSessionId(result.traceSessionId ?? null);
           push({
             role: "ai",
             text: result.answer,
@@ -283,6 +295,7 @@ export function ProjectAssistant({
         {
           onSuccess: (result) => {
             if (!requestIsCurrent(requestProjectId, epoch)) return;
+            setTraceSessionId(result.traceSessionId ?? null);
             const fallbackActivity = result.steps.map((text) => ({ phase: "step" as const, text }));
             push({
               role: "ai",
@@ -349,6 +362,7 @@ export function ProjectAssistant({
     setPlannerModeOverride({});
     setPendingKey(null);
     setInput("");
+    setTraceSessionId(null);
     traceRef.current = [];
     requestStartedAtRef.current = 0;
     setLiveTraceOpen(true);
@@ -766,6 +780,23 @@ export function ProjectAssistant({
             {busy ? "思考中…" : "問"}
           </Button>
         </div>
+
+        {canInspectAi ? <AiUnderstandingPanel
+          projectId={projectId}
+          preview={preview.data}
+          previewPending={preview.isPending}
+          previewError={preview.error?.message ?? (!input.trim() ? "請先輸入想問的內容。" : undefined)}
+          onPreview={() => {
+            if (!input.trim()) return;
+            preview.mutate({
+              projectId,
+              message: input.trim(),
+              mode: defaultPlannerMode,
+              knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
+            });
+          }}
+          traceSessionId={traceSessionId}
+        /> : null}
 
         {/* 回答模型選擇：先前只有「確認 plan_agent 動作」時才選得到，一般問答沒得選。
          * 這裡把它提到輸入框旁邊，並且明講代價——NIM 走免費額度，fal 是平台實付 USD，

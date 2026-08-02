@@ -5,6 +5,7 @@ import { trpc } from "../api";
 import { Icon, type IconName } from "./Icon";
 
 import { Button, Card, Chip, Hint, Meta, Pill, type PillStatus } from "./ui";
+import { AiUnderstandingPanel } from "../features/creation-workbench/AiUnderstandingPanel";
 /**
  * #0 桌面通知：首次徵求授權，已授權才發。某些瀏覽器（未授權/背景分頁）建構子會丟例外，包 try 忽略。
  * 純附加通知——不影響任何既有輪詢與顯示邏輯。
@@ -63,6 +64,7 @@ export function WorkflowCard({
   promptRequest,
   pickRequest,
   embedded = false,
+  canInspectAi = false,
 }: {
   projectId: string;
   charIds?: string[];
@@ -73,6 +75,8 @@ export function WorkflowCard({
   pickRequest?: { templateId: string; nonce: number } | null;
   /** When true, render without outer card chrome (lives inside workbench) */
   embedded?: boolean;
+  /** Full prompts/traces are restricted to project editors. */
+  canInspectAi?: boolean;
 }) {
   const workflows = trpc.models.workflows.useQuery();
   const utils = trpc.useUtils();
@@ -80,6 +84,8 @@ export function WorkflowCard({
   const [prompt, setPrompt] = useState("");
   /** Set when pickRequest.templateId is not in the loaded list (after data arrives) */
   const [pickMissId, setPickMissId] = useState<string | null>(null);
+  const [stepPromptOverrides, setStepPromptOverrides] = useState<Record<string, string>>({});
+  const [traceSessionId, setTraceSessionId] = useState<string | null>(null);
 
   // 提示詞庫／工作台帶入：把咒語填進想法框（已手打內容時先問，不默默覆蓋——與生成台 applyPrompt 同禮節）
   useEffect(() => {
@@ -140,6 +146,12 @@ export function WorkflowCard({
   const hasActive = runs.data?.some(isActiveRun) ?? false;
   // 自己發起的活躍 run：伺服器端 start 也會擋（同人同專案一次一條），這裡先把按鈕鎖起來少一次白打
   const hasMyActive = (runs.data ?? []).some((r) => isActiveRun(r) && r.userId === me.data?.user.id);
+  const nonemptyStepPromptOverrides = Object.fromEntries(
+    Object.entries(stepPromptOverrides).filter(([, value]) => value.trim()),
+  );
+  const submittedStepPromptOverrides = Object.keys(nonemptyStepPromptOverrides).length
+    ? nonemptyStepPromptOverrides
+    : undefined;
 
   // 執行中每步的成品/扣點會陸續落庫——生成紀錄與點數跟著刷;結束時再刷最後一次(收最後一步的成品)
   useEffect(() => {
@@ -157,9 +169,17 @@ export function WorkflowCard({
     };
   }, [hasActive, projectId, utils]);
 
+  const preview = trpc.workflows.preview?.useMutation?.() ?? {
+    data: undefined,
+    error: null,
+    isPending: false,
+    mutate: (_input: unknown) => undefined,
+  };
   const start = trpc.workflows.start.useMutation({
-    onSuccess: () => {
+    onSuccess: (data) => {
+      setTraceSessionId(data?.traceSessionId ?? null);
       setPrompt("");
+      setStepPromptOverrides({});
       runs.refetch();
       // 啟動時伺服器把「想法」存進提示詞庫（三合一）——本分頁的庫要立刻看得到
       utils.prompts.list.invalidate({ projectId });
@@ -234,6 +254,42 @@ export function WorkflowCard({
         這次想完成什麼？（一句話）
       </label>
       <textarea id="wf-idea" value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="例：清晨禪堂中一炷香緩緩升起，傳達放下與新生" />
+      {wf ? (
+        <details style={{ marginTop: 8 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>進階：逐步調整創作提示</summary>
+          <Hint style={{ marginTop: 6 }}>只改這一次執行，不會修改共用範本；系統規則、權限與來源限制不受影響。</Hint>
+          {wf.steps.map((step, index) => (
+            <div key={index} style={{ marginTop: 8 }}>
+              <label htmlFor={`wf-step-override-${index}`}>步驟 {index + 1}：{step.note}</label>
+              <textarea
+                id={`wf-step-override-${index}`}
+                value={stepPromptOverrides[String(index)] ?? ""}
+                onChange={(event) => setStepPromptOverrides((current) => ({ ...current, [String(index)]: event.target.value }))}
+                placeholder={step.promptTemplate}
+              />
+            </div>
+          ))}
+        </details>
+      ) : null}
+      {canInspectAi ? <AiUnderstandingPanel
+        projectId={projectId}
+        preview={preview.data}
+        previewPending={preview.isPending}
+        previewError={preview.error?.message ?? (!wf ? "請先選擇製作範本。" : !prompt.trim() ? "請先填寫這次的想法。" : undefined)}
+        onPreview={() => {
+          if (!wf || !prompt.trim()) return;
+          preview.mutate({
+            projectId,
+            presetId: wf.id,
+            prompt: prompt.trim(),
+            characterIds: charIds.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
+            scenePresetIds: sceneIds.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
+            propIds: propIds.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
+            stepPromptOverrides: submittedStepPromptOverrides,
+          });
+        }}
+        traceSessionId={traceSessionId}
+      /> : null}
       {/* 回看線：啟動會沿用生成台勾選的角色/場景/素材卡，整條串鏈畫風一致（沒勾就不帶） */}
       {(charIds.length > 0 || sceneIds.length > 0 || propIds.length > 0) && (
         <Meta as="p" style={{ marginTop: 6 }}>
@@ -258,7 +314,8 @@ export function WorkflowCard({
               // 「沿用勾選」是順手帶入，不因超勾讓整條製作範本啟動失敗
               characterIds: charIds.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
               scenePresetIds: sceneIds.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
-              propIds: propIds.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
+              ...(propIds.length ? { propIds: propIds.slice(0, MAX_GENERATE_PROPS) } : {}),
+              ...(submittedStepPromptOverrides ? { stepPromptOverrides: submittedStepPromptOverrides } : {}),
             })
           }
         >

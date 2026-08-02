@@ -70,6 +70,8 @@ export interface FalStatusResult {
   resultUrl?: string;
   resultText?: string;
   usage?: FalUsage;
+  /** 供內部可稽核 trace 保存；回前端前會經 aiTrace sanitizer 移除秘密／私密推理。 */
+  rawResponse?: Record<string, unknown>;
   error?: string;
 }
 
@@ -187,6 +189,7 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
     resultUrl: extracted.url,
     resultText: extracted.text,
     usage: extractFalUsage(result),
+    rawResponse: result,
   };
 }
 

@@ -171,6 +171,9 @@ export const workflowRuns = pgTable("workflow_runs", {
   characterIds: jsonb("character_ids").$type<string[]>(),
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   propIds: jsonb("prop_ids").$type<string[]>(),
+  /** 單次執行的步驟 prompt 模板覆寫，key 為步驟索引字串；不改全域 preset。 */
+  stepPromptOverrides: jsonb("step_prompt_overrides").$type<Record<string, string>>(),
+  traceSessionId: uuid("trace_session_id"),
   status: text("status", { enum: ["running", "done", "failed", "stopped"] }).notNull().default("running"),
   currentStep: integer("current_step").notNull().default(0),
   /** 每步：{ note, status: "pending"|"running"|"done"|"failed"|"stopped", generationId?, detail? } */

@@ -37,6 +37,7 @@ import { pushRouter } from "./push";
 import { exportJobsRouter } from "./exportJobs";
 import { tasksRouter } from "./tasks";
 import { systemRouter } from "./system";
+import { aiTraceRouter } from "./aiTrace";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -77,6 +78,7 @@ export const appRouter = router({
   exportJobs: exportJobsRouter,
   tasks: tasksRouter,
   system: systemRouter,
+  aiTrace: aiTraceRouter,
 });
 
 export type AppRouter = typeof appRouter;

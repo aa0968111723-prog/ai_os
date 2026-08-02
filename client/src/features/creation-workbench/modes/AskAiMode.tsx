@@ -11,6 +11,7 @@ export function AskAiMode({
   panelId,
   labelledBy,
   active,
+  canEdit,
   onCreationAction,
   onSavePromptSuggestion,
   onSaveSceneDraft,
@@ -21,6 +22,7 @@ export function AskAiMode({
   panelId: string;
   labelledBy: string;
   active: boolean;
+  canEdit: boolean;
   onCreationAction?: (action: CreationAction) => void;
   onSavePromptSuggestion?: (text: string, modelId?: string) => void;
   onSaveSceneDraft?: (text: string) => void;
@@ -46,6 +48,7 @@ export function AskAiMode({
           onSaveSceneDraft={onSaveSceneDraft}
           askFillRequest={askFillRequest}
           knowledgeIds={knowledgeIds}
+          canInspectAi={canEdit}
         />
       </div>
     </div>

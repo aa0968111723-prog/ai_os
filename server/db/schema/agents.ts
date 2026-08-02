@@ -23,6 +23,7 @@ export const agentRuns = pgTable("agent_runs", {
   planSummary: jsonb("plan_summary").$type<CompletePlanSummary>(),
   /** 規劃供應商／模型／實際 token 與費用；不保存提示詞、原始輸出或 chain-of-thought。 */
   plannerTelemetry: jsonb("planner_telemetry").$type<AgentPlannerTelemetry>(),
+  traceSessionId: uuid("trace_session_id"),
   status: text("status", { enum: ["awaiting_approval", "running", "waiting", "done", "failed", "stopped", "discarded"] })
     .notNull()
     .default("awaiting_approval"),
