@@ -54,6 +54,16 @@ def upload(opener, project_id, filename, content, content_type):
 
 from e2e_lib import ok  # 共用斷言:計數+結束碼(有 ❌ 即非零退出,CI 據此判紅綠)
 
+from datetime import datetime, timedelta, timezone
+
+def in_days(n):
+    """相對現在的未來時刻。
+
+    schedule.list 的 includePast 預設 false,寫死日期的待辦一過期就從清單消失
+    ——2026-08-01 那筆在 2026-08-02 整套 CI 就開始紅。日期一律相對現在算。
+    """
+    return (datetime.now(timezone.utc) + timedelta(days=n)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
 # ── 建置:管理員+兩位組員(甲=留言主角、乙=之後降為檢視者),一個專案、一個分鏡 ──
 admin = client(); a = client(); b = client()
 call("POST", admin, "auth.login", {"email": "admin@aidirector.local", "password": "test-admin-123"})
@@ -194,7 +204,7 @@ ok("@助手 觸發 AI 回覆(kind=assistant)", assistant_reply is not None)
 ok("助手回覆有內容", bool((assistant_reply or {}).get("body", "").strip()))
 
 # ── 留言轉待辦:前端把某句留言 → schedule.add(組內成員可加) ──
-todo = call("POST", a, "schedule.add", {"groupId": gid, "projectId": pid, "title": "週五前交件(由留言轉待辦)", "startsAt": "2026-08-01T10:00:00.000Z"})
+todo = call("POST", a, "schedule.add", {"groupId": gid, "projectId": pid, "title": "週五前交件(由留言轉待辦)", "startsAt": in_days(3)})
 ok("留言可轉排程待辦", bool(todo.get("id")))
 sched = call("GET", a, "schedule.list", {"groupId": gid})
 items = sched if isinstance(sched, list) else sched.get("items", [])
@@ -210,7 +220,7 @@ nrow = next((x for x in notes if x["id"] == note["id"]), None)
 ok("筆記清單帶 sourceMessageId 回連", nrow and nrow.get("sourceMessageId") == src["id"])
 
 # 轉待辦也帶 sourceMessageId
-todo2 = call("POST", a, "schedule.add", {"groupId": gid, "projectId": pid, "title": "剪輯交件", "startsAt": "2026-08-08T10:00:00.000Z", "sourceMessageId": src["id"]})
+todo2 = call("POST", a, "schedule.add", {"groupId": gid, "projectId": pid, "title": "剪輯交件", "startsAt": in_days(10), "sourceMessageId": src["id"]})
 ok("轉待辦帶來源留言回連", todo2.get("sourceMessageId") == src["id"])
 
 # @引用筆記/排程進留言(refType note/schedule)
@@ -234,7 +244,7 @@ gm = call("GET", a, "projects.groupMembers", {"groupId": gid})
 ok("組成員清單可讀(供 Planner @人)", isinstance(gm, list) and any(m["userId"] == b_id for m in gm))
 nmention = call("POST", a, "notes.add", {"groupId": gid, "title": "@留言乙 請看", "content": "內文", "mentions": [b_id]})
 ok("筆記可 @提及同組夥伴", b_id in (nmention.get("mentions") or []))
-smention = call("POST", a, "schedule.add", {"groupId": gid, "title": "@留言乙 週會", "startsAt": "2026-08-09T10:00:00.000Z", "mentions": [b_id]})
+smention = call("POST", a, "schedule.add", {"groupId": gid, "title": "@留言乙 週會", "startsAt": in_days(11), "mentions": [b_id]})
 ok("排程可 @提及同組夥伴", b_id in (smention.get("mentions") or []))
 bad_m = call("POST", a, "notes.add", {"groupId": gid, "title": "壞提及", "content": "x", "mentions": ["00000000-0000-4000-8000-000000000000"]})
 ok("🔒 筆記不能提及組外的人", "同組" in bad_m.get("__error__", ""))

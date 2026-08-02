@@ -44,6 +44,8 @@ export function CreationGoalInput({
         rows={2}
         value={goal}
         disabled={disabled}
+        /* 與 server/routers/agents.ts 的 goal 上限同源（合併後這格也是排步驟的目標） */
+        maxLength={1000}
         placeholder="例如：把腳本拆成 6 鏡，每鏡出一張定裝一致的圖"
         onChange={(e) => onGoalChange(e.target.value)}
         onFocus={(e) => focusAndReveal(e.currentTarget)}
