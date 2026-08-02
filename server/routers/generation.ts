@@ -27,6 +27,7 @@ function signedAssetId(url: string | null | undefined): string | undefined {
 import { MAX_PROMPT_CHARS } from "./prompts";
 import { creativePromptOverrideSchema } from "../../shared/aiTrace";
 import { continuitySnapshotSchema } from "../../shared/continuity";
+import { applyContinuityReferences, resolveContinuityReferenceUrls } from "../services/continuity";
 import {
   createAiTraceSession,
   findAiTraceSessionBySource,
@@ -238,6 +239,7 @@ export const generationRouter = router({
     const { meta } = splitGenerationSourceMeta(gen.params);
     const secondaryAssetId = signedAssetId(meta.secondarySourceUrl);
     const parsedSnapshot = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
+    const lockedSnapshot = parsedSnapshot.success && parsedSnapshot.data.locked ? parsedSnapshot.data : undefined;
     return executeGenerationCommand({
       auth: ctx.auth,
       source: "web",
@@ -252,7 +254,7 @@ export const generationRouter = router({
       scenePresetIds: (gen.scenePresetIds as string[] | null) ?? undefined,
       propIds: (gen.propIds as string[] | null) ?? undefined,
       continuityMode: parsedSnapshot.success ? parsedSnapshot.data.locked : undefined,
-      continuitySnapshot: parsedSnapshot.success ? parsedSnapshot.data : undefined,
+      continuitySnapshot: lockedSnapshot,
       sceneId: gen.sceneId ?? undefined,
       sceneRole: gen.sceneRole ?? undefined,
       // 保留出處：工作流/代理步驟失敗後的重試仍能回溯原本那條 run（來源 chip 不消失）
@@ -493,12 +495,14 @@ export const generationRouter = router({
       // 並把 params 內任何等於舊簽名網址的值替換掉——model.input 把來源塞在模型專屬鍵,替換整串最穩)。
       const splitParams = splitGenerationSourceMeta(gen.params);
       let submitParams = splitParams.providerParams;
+      let refreshedPrimaryUrl = gen.sourceUrl ?? undefined;
       let refreshedSecondaryUrl = splitParams.meta.secondarySourceUrl;
       if (gen.sourceUrl) {
         const m = gen.sourceUrl.match(/\/api\/assets\/([0-9a-f-]{36})\/file\?/i);
         if (m) {
           const fresh = signAssetUrl(m[1]);
           submitParams = JSON.parse(JSON.stringify(submitParams).split(gen.sourceUrl).join(fresh)) as Record<string, unknown>;
+          refreshedPrimaryUrl = fresh;
           await db.update(schema.generations).set({ sourceUrl: fresh }).where(eq(schema.generations.id, gen.id));
         }
       }
@@ -507,6 +511,16 @@ export const generationRouter = router({
         const fresh = signAssetUrl(secondaryAssetId);
         submitParams = JSON.parse(JSON.stringify(submitParams).split(refreshedSecondaryUrl).join(fresh)) as Record<string, unknown>;
         refreshedSecondaryUrl = fresh;
+      }
+      const parsedContinuity = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
+      if (parsedContinuity.success && parsedContinuity.data.locked) {
+        const primaryAssetId = signedAssetId(refreshedPrimaryUrl);
+        const freshReferences = await resolveContinuityReferenceUrls(
+          parsedContinuity.data,
+          gen.groupId,
+          primaryAssetId,
+        );
+        applyContinuityReferences(submitParams, refreshedPrimaryUrl, freshReferences);
       }
       await db
         .update(schema.generations)

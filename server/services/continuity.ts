@@ -97,24 +97,34 @@ export async function buildContinuitySnapshot(
 export async function resolveContinuityReferenceUrls(
   snapshot: ContinuitySnapshot | null,
   groupId: string,
+  excludedAssetId?: string,
 ): Promise<string[]> {
-  if (!snapshot?.referenceAssetIds.length) return [];
+  const referenceAssetIds = continuityReferenceAssetIds(snapshot, excludedAssetId);
+  if (!referenceAssetIds.length) return [];
   const rows = await db.select({
     id: schema.assets.id,
     url: schema.assets.url,
     storagePath: schema.assets.storagePath,
   }).from(schema.assets).where(and(
-    inArray(schema.assets.id, snapshot.referenceAssetIds),
+    inArray(schema.assets.id, referenceAssetIds),
     eq(schema.assets.groupId, groupId),
     eq(schema.assets.kind, "image"),
     isNull(schema.assets.deletedAt),
   ));
   const byId = new Map(rows.map((row) => [row.id, row]));
-  return snapshot.referenceAssetIds.flatMap((id) => {
+  return referenceAssetIds.flatMap((id) => {
     const row = byId.get(id);
     if (!row) return [];
     return [row.storagePath ? signAssetUrl(row.id) : row.url].filter(Boolean);
   });
+}
+
+/** 以資產身分排除 primary，避免同一張本地圖因兩次簽名不同而重複佔位。 */
+export function continuityReferenceAssetIds(
+  snapshot: ContinuitySnapshot | null,
+  excludedAssetId?: string,
+): string[] {
+  return (snapshot?.referenceAssetIds ?? []).filter((id) => id !== excludedAssetId);
 }
 
 export type ContinuityReferenceResult = {

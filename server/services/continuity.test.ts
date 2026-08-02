@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyContinuityReferences, assembleContinuitySnapshot } from "./continuity";
+import { applyContinuityReferences, assembleContinuitySnapshot, continuityReferenceAssetIds } from "./continuity";
 
 const c1 = "00000000-0000-4000-8000-000000000001";
 const c2 = "00000000-0000-4000-8000-000000000002";
@@ -24,6 +24,7 @@ describe("assembleContinuitySnapshot", () => {
     expect(first.referenceAssetIds).toEqual([ref1, ref2]);
     expect(first.fingerprint).toBe(second.fingerprint);
     expect(first.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(continuityReferenceAssetIds(first, ref1)).toEqual([ref2]);
   });
 });
 

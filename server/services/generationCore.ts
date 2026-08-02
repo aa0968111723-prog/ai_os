@@ -363,7 +363,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   ) as Record<string, unknown>;
   if (negativePrompt && supportsNegativePrompt(model)) providerInput.negative_prompt = negativePrompt;
   const referenceUrls = continuitySnapshot?.locked
-    ? await resolveContinuityReferenceUrls(continuitySnapshot, project.groupId)
+    ? await resolveContinuityReferenceUrls(continuitySnapshot, project.groupId, effectiveSourceAssetId)
     : [];
   const continuityReferences = applyContinuityReferences(providerInput, sourceUrl, referenceUrls);
 
