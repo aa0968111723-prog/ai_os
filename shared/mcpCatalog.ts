@@ -98,6 +98,13 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "list_dm_threads", title: "列出私訊對話", access: "read", blurb: "列出你的私訊對話串（每位對象的最後一句與未讀數）。" },
   { name: "read_dm", title: "讀取私訊", access: "read", blurb: "讀你與某位夥伴的私訊往來（只讀得到自己參與的對話）。" },
   { name: "send_dm", title: "發送私訊", access: "write", blurb: "以你的身分私訊一位同組夥伴或開發者（對方在網站「私訊」頁看到）。" },
+  // Adobe 帳號（修圖／時間軸）——PR6：外部 AI 可查狀態、送修圖、匯出時間軸
+  { name: "adobe_status", title: "查 Adobe 連結狀態", access: "read", blurb: "查你自己的 Adobe 連結狀態、模式（模擬／正式）與可用能力（修圖／素材瀏覽／時間軸算圖）。" },
+  { name: "adobe_list_assets", title: "列 Adobe 素材", access: "read", blurb: "列出你已連結的 Adobe 帳號內的素材（中繼資料；mock 模式回模擬清單）。" },
+  { name: "adobe_edit_photo", title: "送出 Adobe 修圖", access: "write", openWorld: true, blurb: "在你已連結的 Adobe 帳號內送出修圖工作（去背／調色等），回 jobId；用 adobe_job 輪詢到完成。不扣站內點數。" },
+  { name: "adobe_job", title: "查 Adobe 工作狀態", access: "read", blurb: "查一筆 Adobe 非同步工作的最新狀態與進度（queued／running／succeeded／failed）。" },
+  { name: "adobe_export_timeline", title: "匯出時間軸檔", access: "write", blurb: "把時間軸契約轉成 FCPXML／Premiere XML／EDL（純本機，不需 Adobe 連結、不扣點）。" },
+  { name: "adobe_render_timeline", title: "送 Adobe 時間軸算圖", access: "write", openWorld: true, blurb: "送出時間軸算圖工作（mock 可跑；real 模式目前尚未開放時會回明確錯誤）。" },
 ];
 
 /** 寫入類工具名集合（唯讀金鑰一律擋）——由目錄推導，單一來源不分岔。 */
