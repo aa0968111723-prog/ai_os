@@ -567,7 +567,7 @@ ${sceneLines}
               label: a.prompt ? `存成分鏡草稿「${a.title}」（帶畫面提示詞）` : `新增分鏡「${a.title}」`,
             });
           } else if (a.type === "plan_agent") {
-            out.push({ type: "plan_agent", goal: a.goal, label: `讓 AI 代理排計畫：「${a.goal.slice(0, 30)}${a.goal.length > 30 ? "…" : ""}」（規劃站內 0 點，執行前再核准）` });
+            out.push({ type: "plan_agent", goal: a.goal, label: `讓 AI 代理排計畫：「${a.goal.slice(0, 30)}${a.goal.length > 30 ? "…" : ""}」（規劃依實際 token 扣點，執行前再核准）` });
           } else if (a.type === "apply_worldview_chips") {
             // 落地前先正規化（截到建議上限）；至少要有一個欄位，否則略過空提議
             const patch = normalizeWorldviewChipsPatch({
@@ -610,7 +610,7 @@ ${sceneLines}
         emit("thinking", "（測試模式）整理專案現況…");
         const goal = input.message.trim();
         const mockActions: ResolvedAction[] = goal.length >= 5
-          ? [{ type: "plan_agent", goal: goal.slice(0, 1000), label: `讓 AI 代理排計畫：「${goal.slice(0, 30)}${goal.length > 30 ? "…" : ""}」（規劃站內 0 點，執行前再核准）` }]
+          ? [{ type: "plan_agent", goal: goal.slice(0, 1000), label: `讓 AI 代理排計畫：「${goal.slice(0, 30)}${goal.length > 30 ? "…" : ""}」（規劃依實際 token 扣點，執行前再核准）` }]
           : [];
         const answer = `（測試模式）目前有 ${scenes.length} 個分鏡，其中待審 ${pendingCount} 個；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${readableDbs.length} 個。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
         await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "測試模式回答完成", payload: { answer, actions: mockActions } });
@@ -640,7 +640,7 @@ ${forceFinal
 - create_scene：在片尾新增一個分鏡（title 必填 80 字內；可選 voiceover 旁白、durationSec 秒數 1–60、prompt 建議畫面提示詞 2000 字內）
 - run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
 - split_script：把腳本拆成一幕幕的分鏡草稿（script＝腳本全文，從使用者訊息原樣抄錄，至少 20 字；只在使用者貼了完整腳本／逐字稿、想把它變成分鏡時才提議；免費）
-- plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→送審」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫不扣站內點數（Fal 模式依 token 計費），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
+- plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→送審」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫本身會依實際 token 扣點（預設走高品質模型），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
 - apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用內建詞（調性：莊嚴/溫暖/真誠/療癒/活潑/簡約；風格主風格：日系水彩/寫實攝影/3D 動畫/手繪插畫/極簡線條/水墨禪意；質感：膠片質感；主軸：苦→修行→轉變→感恩/禪修日常/佛法入門/活動紀實/感恩分享）或組內已有選項。
 分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
 分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍須組長審核。

@@ -9,6 +9,8 @@ import { ConfirmButton } from "../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
 import { useMatchMedia } from "../lib/useMatchMedia";
 import { agentOutputKindLabel } from "../../../shared/agentOutputs";
+import { DEFAULT_AGENT_PLANNER_MODE } from "../../../shared/agentPlanner";
+import { plannerCostLabel } from "../../../shared/llmPricing";
 import {
   GROUP_RUN_STATUS_LABEL,
   GROUP_STEP_KIND_LABEL,
@@ -1316,6 +1318,7 @@ function TeamCommanderBlock({
           <Hint layer="always" style={{ flexBasis: "100%", margin: 0 }}>
             授權 0 點＝組代理每派出一份子計畫都會停下來等你核准。填了額度它才會在額度內自己核准；
             超過的一律停手問你，不會先做了再說。
+            排這份調度計畫本身會用高品質模型、{plannerCostLabel(DEFAULT_AGENT_PLANNER_MODE)}（與上面的執行授權分開算）。
           </Hint>
         </div>
       )}
