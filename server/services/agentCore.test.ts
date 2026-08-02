@@ -10,9 +10,12 @@ import {
   DRIVE_PLAN_SOURCE_CHAR_CAP,
   MAX_PLAN_KNOWLEDGE_CHARS,
   plannerKnowledgeBudget,
+  plannerOutputTokenCeiling,
   plannerPlaybookDirective,
   toEphemeralPlanSource,
 } from "./agentCore";
+import { FAL_AGENT_PROFILES } from "./llmProvider";
+import { estimatePlannerPoints } from "../../shared/llmPricing";
 
 describe("assertUuid（MCP / core 入口）", () => {
   it("合法 UUID 不拋錯", () => {
@@ -154,5 +157,26 @@ describe("D5/M4 plannerPlaybookDirective（短版 playbook 旗標）", () => {
   it("不收 roleId 別名與未知 id（呼叫端 fail-fast，不靜默忽略使用者選擇）", () => {
     expect(plannerPlaybookDirective("role.storyboard")).toBeNull();
     expect(plannerPlaybookDirective("playbook.nope.v9")).toBeNull();
+  });
+});
+
+describe("規劃估點的輸出上限（預留點數的最壞情況）", () => {
+  it("付費檔以「真的會送給供應商的 max_tokens」計，不是隨手填的數字", () => {
+    for (const mode of ["fal_economy", "fal_balanced", "fal_quality"] as const) {
+      expect(plannerOutputTokenCeiling(mode)).toBe(FAL_AGENT_PROFILES[mode].maxTokens);
+    }
+  });
+
+  it("nim 免費檔為 0；auto 以備援會用到的均衡檔計——備援那一次不能無帳可查", () => {
+    expect(plannerOutputTokenCeiling("nim")).toBe(0);
+    expect(plannerOutputTokenCeiling("auto")).toBe(FAL_AGENT_PROFILES.fal_balanced.maxTokens);
+  });
+
+  it("免費檔預留 0 點、付費檔預留 > 0（額度守門只擋真的要花的錢）", () => {
+    const promptChars = 18_000;
+    expect(estimatePlannerPoints("nim", { promptChars, maxOutputTokens: plannerOutputTokenCeiling("nim") })).toBe(0);
+    expect(
+      estimatePlannerPoints("fal_quality", { promptChars, maxOutputTokens: plannerOutputTokenCeiling("fal_quality") }),
+    ).toBeGreaterThan(0);
   });
 });

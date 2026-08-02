@@ -1,4 +1,5 @@
 import type { AgentPlannerMode, AgentPlannerUsage } from "../../shared/agentPlanner";
+import { AGENT_LLM_MODEL_IDS } from "../../shared/llmPricing";
 import { chatCompletion, NIM_DEFAULT_MODEL, NimServiceError } from "./nvidia-nim";
 import { falStatus, falSubmit } from "./fal";
 
@@ -9,25 +10,31 @@ import { falStatus, falSubmit } from "./fal";
  * 聊天助手（assistant.ts）寫死呼叫 NVIDIA NIM 免費 llama —— 好模型已經在門口，
  * 只是沒接到主對話。這一層把供應商路由抽出來，讓助手與規劃器共用同一套選擇。
  *
- * **成本不變式**：NIM 走免費額度，站內問答收 0 點；fal 則是平台實付 USD。
- * 因此預設一律是 NIM，fal 必須由使用者明確選擇——絕不因為「品質比較好」
- * 就在使用者不知情的情況下開始花基金會的錢。
+ * **成本不變式**：NIM 走免費額度收 0 點；fal 則是平台實付 USD，一律換成站內點數扣在
+ * 發起人身上（見 shared/llmPricing），受同一套額度守門。
+ * 兩條路的預設因此不同，且都不是「偷偷花錢」：
+ * - 聊天助手預設 NIM 免費，要好模型由使用者自己選。
+ * - 代理規劃預設高品質（DEFAULT_AGENT_PLANNER_MODE）——因為規劃品質直接決定後面
+ *   執行要燒多少點；花費逐次進帳本、額度不足會被擋下，使用者事前看得到估點。
  */
 
-/** fal 上可選的模型檔位。改價或換模型只改這裡。 */
+/**
+ * fal 上可選的模型檔位。模型 id 取自 shared/llmPricing（與價目表同一份），
+ * 換模型只改那裡——在這裡另寫一份字串的話，「跑的模型」與「扣的點」遲早對不上。
+ */
 export const FAL_AGENT_PROFILES = {
   fal_economy: {
-    model: "google/gemini-2.5-flash-lite",
+    model: AGENT_LLM_MODEL_IDS.fal_economy,
     maxTokens: 3_000,
     temperature: 0.1,
   },
   fal_balanced: {
-    model: "openai/gpt-5-mini",
+    model: AGENT_LLM_MODEL_IDS.fal_balanced,
     maxTokens: 5_000,
     temperature: 0.1,
   },
   fal_quality: {
-    model: "anthropic/claude-sonnet-4.5",
+    model: AGENT_LLM_MODEL_IDS.fal_quality,
     maxTokens: 8_000,
     temperature: 0.1,
   },

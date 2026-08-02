@@ -14,6 +14,7 @@ import {
   NIM_DEFAULT_MODEL,
   NimServiceError,
 } from "./nvidia-nim";
+import type { LlmUsageEntry } from "../../shared/llmPricing";
 
 const FAL_OPENROUTER_ENDPOINT = "openrouter/router";
 const FAL_POLL_INTERVAL_MS = 750;
@@ -41,12 +42,28 @@ export interface AgentPlannerProviderDependencies {
 export interface AgentPlanProviderResult {
   draft: CompletePlanDraft;
   telemetry: AgentPlannerTelemetry;
+  /**
+   * 這次規劃真正燒掉的用量，逐個模型分開記。
+   *
+   * 不能只看 telemetry 的「最後模型＋總 token」：auto 模式會先跑免費 NIM 再備援 fal，
+   * 兩段 token 疊在一起，用 fal 單價乘總量就是把免費那段也收使用者的錢。
+   */
+  billing: LlmUsageEntry[];
 }
 
 export class AgentPlannerServiceError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
+  /**
+   * 失敗當下已經累積的用量。
+   *
+   * 「兩次都輸出不合規格」是**呼叫成功、內容不合格**——供應商照樣收錢。少了這個欄位，
+   * 呼叫端只能整筆退回預留，於是「餵一個會讓模型吐壞 JSON 的目標」就成了免費燒平台額度的門路。
+   */
+  readonly billing: LlmUsageEntry[];
+
+  constructor(message: string, options?: { cause?: unknown; billing?: LlmUsageEntry[] }) {
     super(message, options);
     this.name = "AgentPlannerServiceError";
+    this.billing = options?.billing ?? [];
   }
 }
 
@@ -57,22 +74,26 @@ function parseDraft(text: string): CompletePlanDraft | null {
   return parsed.success ? parsed.data : null;
 }
 
-function sanitizeProviderError(error: unknown, provider: "nvidia-nim" | "fal-openrouter"): AgentPlannerServiceError {
+function sanitizeProviderError(
+  error: unknown,
+  provider: "nvidia-nim" | "fal-openrouter",
+  billing: LlmUsageEntry[] = [],
+): AgentPlannerServiceError {
   if (error instanceof AgentPlannerServiceError) return error;
   if (provider === "nvidia-nim" && error instanceof NimServiceError) {
-    return new AgentPlannerServiceError(error.message, { cause: error });
+    return new AgentPlannerServiceError(error.message, { cause: error, billing });
   }
   const message = error instanceof Error ? error.message : String(error);
   if (provider === "fal-openrouter") {
     if (message.includes("FAL_KEY 未設定")) {
-      return new AgentPlannerServiceError("fal.ai 代理規劃尚未設定金鑰，請管理員設定 FAL_KEY 後重新部署", { cause: error });
+      return new AgentPlannerServiceError("fal.ai 代理規劃尚未設定金鑰，請管理員設定 FAL_KEY 後重新部署", { cause: error, billing });
     }
     if (/\b429\b/.test(message)) {
-      return new AgentPlannerServiceError("fal.ai 目前流量繁忙，請稍後再試或改用 NVIDIA NIM", { cause: error });
+      return new AgentPlannerServiceError("fal.ai 目前流量繁忙，請稍後再試或改用 NVIDIA NIM", { cause: error, billing });
     }
-    return new AgentPlannerServiceError("fal.ai 代理規劃暫時沒有回應，請稍後再試或改用 NVIDIA NIM", { cause: error });
+    return new AgentPlannerServiceError("fal.ai 代理規劃暫時沒有回應，請稍後再試或改用 NVIDIA NIM", { cause: error, billing });
   }
-  return new AgentPlannerServiceError("NVIDIA NIM 代理規劃暫時沒有回應，請改用自動備援或 fal.ai 模型", { cause: error });
+  return new AgentPlannerServiceError("NVIDIA NIM 代理規劃暫時沒有回應，請改用自動備援或 fal.ai 模型", { cause: error, billing });
 }
 
 async function completeNim(prompt: string): Promise<PlannerCompletion> {
@@ -181,6 +202,8 @@ export async function generateAgentPlanDraft(
   let attemptCount = 0;
   let fallbackReason: AgentPlannerTelemetry["fallbackReason"];
   let fallbackFrom: AgentPlannerTelemetry["fallbackFrom"];
+  // 逐次呼叫的用量（含最後失敗的那些）：每一筆都綁自己的模型，計價才不會把免費段當付費算
+  const billing: LlmUsageEntry[] = [];
 
   const invoke = async (
     provider: "nvidia-nim" | "fal-openrouter",
@@ -193,9 +216,11 @@ export async function generateAgentPlanDraft(
         ? await dependencies.completeNim(content)
         : await dependencies.completeFal(content, falMode);
       usage = addUsage(usage, completion.usage);
+      billing.push({ model: completion.model, usage: completion.usage });
       return completion;
     } catch (error) {
-      throw sanitizeProviderError(error, provider);
+      // 呼叫失敗本身沒有用量，但**先前成功的那幾次有**——帶著走，呼叫端才結算得出來
+      throw sanitizeProviderError(error, provider, billing);
     }
   };
 
@@ -210,6 +235,7 @@ export async function generateAgentPlanDraft(
       fallbackReason,
       ...usage,
     },
+    billing,
   });
 
   if (requestedMode === "auto") {
@@ -228,7 +254,11 @@ export async function generateAgentPlanDraft(
     const repaired = await invoke("fal-openrouter", repairPrompt(prompt, fal.text), "fal_balanced");
     const repairedDraft = parseDraft(repaired.text);
     if (repairedDraft) return finish(repairedDraft, repaired);
-    throw new AgentPlannerServiceError("AI 兩次都沒有產生符合安全規格的完整計畫，請把目標、日期或交付成果說得更具體後再試");
+    // 呼叫成功、只是內容不合規格——供應商照樣收錢，用量要帶回去結算，不能整筆退掉
+    throw new AgentPlannerServiceError(
+      "AI 兩次都沒有產生符合安全規格的完整計畫，請把目標、日期或交付成果說得更具體後再試",
+      { billing },
+    );
   }
 
   const provider = requestedMode === "nim" ? "nvidia-nim" : "fal-openrouter";
@@ -239,5 +269,8 @@ export async function generateAgentPlanDraft(
   const repaired = await invoke(provider, repairPrompt(prompt, first.text), falMode);
   const repairedDraft = parseDraft(repaired.text);
   if (repairedDraft) return finish(repairedDraft, repaired);
-  throw new AgentPlannerServiceError("AI 兩次都沒有產生符合安全規格的完整計畫，請把目標、日期或交付成果說得更具體後再試");
+  throw new AgentPlannerServiceError(
+    "AI 兩次都沒有產生符合安全規格的完整計畫，請把目標、日期或交付成果說得更具體後再試",
+    { billing },
+  );
 }

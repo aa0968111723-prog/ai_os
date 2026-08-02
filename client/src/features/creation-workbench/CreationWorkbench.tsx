@@ -41,7 +41,7 @@ const GOAL_SUBMIT: Record<CreationMode, { label: string; hint: string }> = {
   ask: { label: "問 AI", hint: "免費，直接送出" },
   generate: { label: "帶入提示詞", hint: "只填進下面的提示詞欄，要不要生成由你按" },
   template: { label: "帶入範本", hint: "只填進「這次想完成什麼」，執行仍要你按" },
-  plan: { label: "帶去排步驟", hint: "排計畫不扣點，核准後才會執行" },
+  plan: { label: "帶去排步驟", hint: "排計畫用高品質模型、依 token 計點；執行點數核准後才花" },
 };
 
 /**
@@ -317,7 +317,7 @@ export function CreationWorkbench({
    *
    * 分派原則——**免費的直接做，會扣點的只帶入**：
    * - 一起想：提問免費，直接送出。
-   * - 多步開拍：排計畫本身不扣點，但要人核准才執行，所以帶到目標欄讓使用者按「幫我排步驟」。
+   * - 多步開拍：排計畫本身要扣點（高品質模型依 token 計），執行更要人核准，所以帶到目標欄讓使用者按「幫我排步驟」。
    * - 直接出圖／套用範本：按下去就是錢，只把目標帶進提示詞／想法欄並聚焦，執行仍要使用者自己按。
    */
   const handleGoalSubmit = () => {

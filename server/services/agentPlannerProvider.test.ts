@@ -113,6 +113,39 @@ describe("generateAgentPlanDraft", () => {
     });
   });
 
+  it("回傳逐次呼叫的用量（各自綁模型）——auto 備援時免費段不能用付費單價收錢", async () => {
+    const providers = deps({
+      completeNim: vi.fn().mockResolvedValue(completion("nvidia-nim", "不是 JSON", { totalTokens: 25 })),
+    });
+    const result = await generateAgentPlanDraft("PROMPT", "auto", providers);
+
+    expect(result.billing).toEqual([
+      { model: "nim/test", usage: { totalTokens: 25 } },
+      { model: "openai/gpt-5-mini", usage: { totalTokens: 120, costUsd: 0.002 } },
+    ]);
+  });
+
+  it("兩次都吐不出合規格計畫時，錯誤仍帶著已發生的用量——呼叫成功就是要付錢", async () => {
+    const completeFal = vi.fn()
+      .mockResolvedValueOnce(completion("fal-openrouter", "bad", { totalTokens: 40, costUsd: 0.001 }))
+      .mockResolvedValueOnce(completion("fal-openrouter", "still bad", { totalTokens: 50, costUsd: 0.002 }));
+    const providers = deps({ completeFal });
+
+    await expect(generateAgentPlanDraft("PROMPT", "fal_quality", providers)).rejects.toMatchObject({
+      name: "AgentPlannerServiceError",
+      billing: [
+        { model: "openai/gpt-5-mini", usage: { totalTokens: 40, costUsd: 0.001 } },
+        { model: "openai/gpt-5-mini", usage: { totalTokens: 50, costUsd: 0.002 } },
+      ],
+    });
+  });
+
+  it("供應商連呼叫都失敗時 billing 為空（沒有用量可收，呼叫端才會全額退回）", async () => {
+    const providers = deps({ completeNim: vi.fn().mockRejectedValue(new Error("offline")) });
+
+    await expect(generateAgentPlanDraft("PROMPT", "nim", providers)).rejects.toMatchObject({ billing: [] });
+  });
+
   it("只用 NIM 時不會暗中切換 Fal", async () => {
     const completeNim = vi.fn().mockRejectedValue(new Error("offline"));
     const providers = deps({ completeNim });

@@ -317,7 +317,7 @@ export const TOOLS = [
         plannerMode: {
           type: "string",
           enum: ["auto", "nim", "fal_economy", "fal_balanced", "fal_quality"],
-          description: "規劃模型策略；省略時為 auto（NIM 失敗或格式不合格時備援至 fal.ai）",
+          description: "規劃模型策略；省略時為高品質檔（fal_quality），規劃本身依實際 token 扣發起人的點數（一次約數點，額度不足會回 PRECONDITION_FAILED）。要免費請明確指定 nim（僅 NVIDIA NIM，0 點）或 auto（NIM 優先，備援至 fal.ai 才計點）",
         },
         shortCreation: {
           type: "boolean",
@@ -1162,7 +1162,7 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
         sourceRefs: s.sourceRefs ?? [],
         points: s.points ?? 0,
       })),
-      note: "計畫已排好但尚未執行——用 approve_agent 核准後才會開始扣點執行，或用 discard_agent 放棄。",
+      note: "計畫已排好但尚未執行——用 approve_agent 核准後才會開始扣「執行」點數，或用 discard_agent 放棄。規劃本身已依實際 token 扣過點（見 plannerTelemetry.pointsActual；nim 檔為 0 點）。",
     };
   }
   if (name === "approve_agent") {
