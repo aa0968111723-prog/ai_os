@@ -31,12 +31,12 @@ describe("formatSceneAnchor（視覺生成・場景設定）", () => {
   it("依選取順序串接色板＋光線", () => {
     // DB 可能以 s1 在前；使用者先勾雨巷
     expect(formatSceneAnchor([S_ZEN, S_RAIN], ["s2", "s1"])).toBe(
-      "雨巷：色板 青灰；禪堂：色板 米金、木色、光線 柔側光、晨曦",
+      "光影鎖定 雨巷：色板 青灰；光影鎖定 禪堂：色板 米金、木色、光線 柔側光、晨曦",
     );
   });
 
   it("無光線時只出色板", () => {
-    expect(formatSceneAnchor([S_RAIN], ["s2"])).toBe("雨巷：色板 青灰");
+    expect(formatSceneAnchor([S_RAIN], ["s2"])).toBe("光影鎖定 雨巷：色板 青灰");
   });
 
   it("色板／光線超過上限被截短", () => {
@@ -55,7 +55,7 @@ describe("formatSceneAnchor（視覺生成・場景設定）", () => {
 
   it("重複 id 去重且保序", () => {
     expect(formatSceneAnchor([S_ZEN, S_RAIN], ["s1", "s1", "s2"])).toBe(
-      "禪堂：色板 米金、木色、光線 柔側光、晨曦；雨巷：色板 青灰",
+      "光影鎖定 禪堂：色板 米金、木色、光線 柔側光、晨曦；光影鎖定 雨巷：色板 青灰",
     );
   });
 });
@@ -89,7 +89,7 @@ describe("formatSceneKnowledgeBlock（導演／助手・場景設定）", () => 
 describe("formatCharacterAnchor 仍可用（與場景並存）", () => {
   it("只拼外觀不拼個性", () => {
     const c = { id: "c1", name: "安倢", appearance: "紅傘", notes: "溫柔" };
-    expect(formatCharacterAnchor([c], ["c1"])).toBe("安倢：紅傘");
+    expect(formatCharacterAnchor([c], ["c1"])).toBe("外觀鎖定 安倢：紅傘");
     expect(formatCharacterKnowledgeBlock([c])).toContain("個性：溫柔");
   });
 });
@@ -131,14 +131,14 @@ const P_BEADS = { id: "p2", name: "佛珠", appearance: "深褐木珠、108 顆"
 describe("formatPropAnchor（視覺生成・素材設定）", () => {
   it("依選取順序串接外觀，備註不進畫面", () => {
     expect(formatPropAnchor([P_UMBRELLA, P_BEADS], ["p2", "p1"])).toBe(
-      "佛珠：深褐木珠、108 顆；紅傘：正紅長柄傘、霧面傘布、木質握把",
+      "材質鎖定 佛珠：深褐木珠、108 顆；材質鎖定 紅傘：正紅長柄傘、霧面傘布、木質握把",
     );
   });
 
   it("外觀超過上限被截短（不加省略號，避免被畫成文字）", () => {
     const long = { id: "p3", name: "長傘", appearance: "傘".repeat(CARD_FIELD_MAX + 40) };
     const out = formatPropAnchor([long], ["p3"]);
-    expect(out).toBe(`長傘：${"傘".repeat(CARD_FIELD_MAX)}`);
+    expect(out).toBe(`材質鎖定 長傘：${"傘".repeat(CARD_FIELD_MAX)}`);
     expect(out).not.toContain("…");
   });
 
