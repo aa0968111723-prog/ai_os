@@ -2115,7 +2115,7 @@ export function ProjectPage({ id }: { id: string }) {
             id="stage-create"
             num="②"
             title="AI 創作中心"
-            desc="問 AI・直接生成・製作範本・執行計畫——同一工作台切換"
+            desc="問 AI・生成・範本・計畫 — 同一入口"
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
           />
@@ -2143,7 +2143,7 @@ export function ProjectPage({ id }: { id: string }) {
             studioCollab={zoneProps(COLLAB_ZONES.studio)}
           />
 
-          <StageLink text="成品會自動存入素材庫；在工作台資源抽屜的生成紀錄按「＋加入分鏡」，就會排進下方分鏡列" />
+          <StageLink text="成品進素材庫；生成紀錄可「＋加入分鏡」" />
 
           {/* ③ 分鏡・時間軸・交付：排片、粗剪預覽、送審與打包（SceneList 一體卡全含） */}
           <StageHead
