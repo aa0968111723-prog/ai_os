@@ -652,28 +652,40 @@ export interface NotionListedPage {
   id: string;
   title: string;
   lastEdited: string | null;
+  /** 'database'＝Notion 資料庫（表格）：匯入時走 databases query 取整張表，不是讀 blocks */
+  type: "page" | "database";
 }
 
 export type NotionSearchResult =
   | { ok: true; workspace: string | null; pages: NotionListedPage[] }
   | { ok: false; reason: "not-connected" | "error"; message: string };
 
-/** Notion 頁面物件 → 標題（純函式，可測）：走 title 型 property 的 plain_text，取不到給替代字 */
+/**
+ * Notion 頁面／資料庫物件 → 標題（純函式，可測）。
+ * 兩者放標題的位置不同：頁面在 properties 的 title 型欄位、資料庫在頂層 title 陣列
+ *（資料庫的 properties 是欄位「定義」，title 欄的值是 {} 而非陣列——只看 properties 會全部變成未命名）。
+ */
 export function notionPageTitle(page: {
+  object?: string;
+  title?: Array<{ plain_text?: string }>;
   properties?: Record<string, { type?: string; title?: Array<{ plain_text?: string }> }>;
 }): string {
+  if (Array.isArray(page.title)) {
+    const text = page.title.map((t) => t?.plain_text ?? "").join("").trim();
+    if (text) return text.slice(0, 120);
+  }
   for (const prop of Object.values(page.properties ?? {})) {
     if (prop?.type === "title" && Array.isArray(prop.title)) {
       const text = prop.title.map((t) => t.plain_text ?? "").join("").trim();
       if (text) return text.slice(0, 120);
     }
   }
-  return "（未命名頁面）";
+  return page.object === "database" ? "（未命名資料庫）" : "（未命名頁面）";
 }
 
 /**
- * 搜尋使用者 token 權限內的 Notion 頁面（連接 ≠ 授權讀全 workspace——
- * 只有分享給該整合的頁面會出現；內容要等使用者選中、按匯入才抓）。
+ * 搜尋使用者 token 權限內的 Notion 頁面與資料庫（連接 ≠ 授權讀全 workspace——
+ * 只有分享給該整合的頁面／資料庫會出現；內容要等使用者選中、按匯入才抓）。
  * token 優先序與 fetchNotionText 一致：個人 → 站方 NOTION_TOKEN。
  */
 export async function searchNotionPages(userId: string, query: string): Promise<NotionSearchResult> {
@@ -706,10 +718,11 @@ export async function searchNotionPages(userId: string, query: string): Promise<
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        // 不加 object filter：filter=page 會把「資料庫（表格）」整類濾掉，
+        // 使用者把資料庫分享給整合後在選頁器裡永遠找不到它。頁面與資料庫都列出來，型別交給前端標示。
         query: query.slice(0, 200),
-        filter: { property: "object", value: "page" },
         sort: { direction: "descending", timestamp: "last_edited_time" },
-        page_size: 30,
+        page_size: 50,
       }),
       timeoutMs: 15_000,
     });
@@ -719,7 +732,13 @@ export async function searchNotionPages(userId: string, query: string): Promise<
     if (res.status === 429) return { ok: false, reason: "error", message: "Notion 請求過於頻繁，請稍後再試" };
     if (!res.ok) return { ok: false, reason: "error", message: `Notion 搜尋失敗（HTTP ${res.status}）——請稍後再試` };
     const json = (await res.json().catch(() => ({}))) as {
-      results?: Array<{ id?: string; last_edited_time?: string; properties?: Record<string, { type?: string; title?: Array<{ plain_text?: string }> }> }>;
+      results?: Array<{
+        id?: string;
+        object?: string;
+        last_edited_time?: string;
+        title?: Array<{ plain_text?: string }>;
+        properties?: Record<string, { type?: string; title?: Array<{ plain_text?: string }> }>;
+      }>;
     };
     const pages: NotionListedPage[] = (json.results ?? [])
       .filter((p): p is { id: string } & typeof p => !!p.id)
@@ -727,6 +746,7 @@ export async function searchNotionPages(userId: string, query: string): Promise<
         id: p.id,
         title: notionPageTitle(p),
         lastEdited: p.last_edited_time ?? null,
+        type: p.object === "database" ? "database" : "page",
       }));
     const workspace = typeof row?.meta?.workspace === "string" ? row.meta.workspace : null;
     return { ok: true, workspace, pages };

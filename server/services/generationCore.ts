@@ -28,6 +28,11 @@ import { failStaleGenerationTx, reserveQuota } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
 import { buildCharacterAnchor, buildPropAnchor, buildSceneAnchor, resolveCardReferenceSource } from "./cardAnchors";
 import { groupLeaderIds, pushToUsers } from "./webPush";
+import {
+  findAiTraceSessionBySource,
+  recordAiTraceEventSafely,
+  updateAiTraceSession,
+} from "./aiTrace";
 
 export type GenerationRow = typeof schema.generations.$inferSelect;
 
@@ -165,7 +170,7 @@ export interface SubmitCoreInput {
   sourceUrl?: string;
   /** 素材庫來源(優先)：伺服器換成簽名短效網址,fal 才抓得到、外人不可偽造 */
   sourceAssetId?: string;
-  /** 多來源模型的第二來源（對嘴：配音音訊）。 */
+  /** 多來源模型的第二來源（例如對嘴模型的配音音訊）。 */
   secondarySourceUrl?: string;
   secondarySourceAssetId?: string;
   /** 選定的角色定裝卡：外觀錨點自動注入視覺生成,跨鏡一致 */
@@ -184,10 +189,194 @@ export interface SubmitCoreInput {
   workflowRunId?: string;
   /** 來源 AI 代理執行 id：agentRunner 帶入，同上 */
   agentRunId?: string;
+  /** 進階使用者明確覆寫最終創作 prompt；系統權限與 provider schema 仍不可覆寫。 */
+  promptOverride?: { positive?: string; negative?: string };
+  /** 可稽核 AI 運作 session；背景／web 呼叫建立後一路帶到 provider。 */
+  traceSessionId?: string;
   /** 存取檢查掛點：tRPC 端帶 requireGroup（多組隔離；可再疊 2.3 專案級 ACL，故允許 async）；
    *  伺服器內部（runner）呼叫時已在建 run 時把過關,可省略。
    *  回傳角色（requireGroup 本來就回）供成本審核門檻判斷組員；回 void 的舊呼叫端不受影響（不觸發門檻）。 */
   assertAccess?: (project: typeof schema.projects.$inferSelect) => "admin" | "leader" | "member" | void | Promise<"admin" | "leader" | "member" | void>;
+}
+
+export interface PreparedGenerationRequest {
+  project: typeof schema.projects.$inferSelect;
+  model: ModelEntry;
+  accessRole: "admin" | "leader" | "member" | void;
+  estimatedPoints: number;
+  sourceUrl?: string;
+  secondarySourceUrl?: string;
+  effectiveSourceAssetId?: string;
+  usedCardReference: "character" | "scene" | "prop" | null;
+  userPrompt: string;
+  positivePrompt: string;
+  negativePrompt: string;
+  providerInput: Record<string, unknown>;
+  anchors: { character: string; scene: string; prop: string };
+  warnings: Array<{ code: string; severity: "info" | "warning"; title: string; detail: string; suggestion?: string }>;
+}
+
+/**
+ * 生成預覽與真正送出共用的唯一組裝器。此函式只讀資料、不建 generation、不扣點、不呼叫 provider。
+ * 呼叫者不可把前端預覽 payload 原樣送回；真正送出一定再次從專案資料重建。
+ */
+export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<PreparedGenerationRequest> {
+  const model = resolveModel(input.modelId) ?? getModel(input.modelId);
+  if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "未知模型(不在註冊表或即時目錄)" });
+  const mayFillFromCards = model.needs === "image" && !!(input.characterIds?.length || input.scenePresetIds?.length || input.propIds?.length);
+  if (model.needs && !input.sourceUrl && !input.sourceAssetId && !mayFillFromCards) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
+  }
+  if (model.secondaryNeeds && !input.secondarySourceUrl && !input.secondarySourceAssetId) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: `此模型還需要第二來源:${model.secondarySourceHint ?? model.secondaryNeeds}` });
+  }
+  const { getUsdToTwd } = await import("./fxRate");
+  const fx = await getUsdToTwd();
+  const estimatedPoints = estimatePointsFor(model, {
+    promptChars: input.prompt.length,
+    usdToTwdRate: fx.rate,
+  });
+  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+  const accessRole = await input.assertAccess?.(project);
+  const { assertProjectAllows } = await import("./projectState");
+  assertProjectAllows(project, "generate");
+  await assertGenerationEntityIds(project.id, {
+    characterIds: input.characterIds,
+    scenePresetIds: input.scenePresetIds,
+    propIds: input.propIds,
+    sourceAssetId: input.sourceAssetId,
+    secondarySourceAssetId: input.secondarySourceAssetId,
+  });
+
+  let effectiveSourceAssetId = input.sourceAssetId;
+  let usedCardReference: "character" | "scene" | "prop" | null = null;
+  if (mayFillFromCards && !input.sourceUrl && !effectiveSourceAssetId) {
+    const ref = await resolveCardReferenceSource(project.id, {
+      characterIds: input.characterIds,
+      scenePresetIds: input.scenePresetIds,
+      propIds: input.propIds,
+    });
+    if (ref) {
+      effectiveSourceAssetId = ref.assetId;
+      usedCardReference = ref.from;
+    }
+  }
+  if (model.needs && !input.sourceUrl && !effectiveSourceAssetId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: mayFillFromCards
+        ? "此模型需要來源圖——勾選的角色／場景／素材卡都還沒設參考圖，請先在卡片上「設參考圖」，或直接從素材庫挑一張來源"
+        : `此模型需要來源:${model.sourceHint ?? model.needs}`,
+    });
+  }
+
+  let sourceUrl = input.sourceUrl;
+  if (effectiveSourceAssetId) {
+    const [srcAsset] = await db.select().from(schema.assets)
+      .where(and(eq(schema.assets.id, effectiveSourceAssetId), isNull(schema.assets.deletedAt)));
+    if (!srcAsset) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: usedCardReference
+          ? "卡片上的參考圖已被刪除（在回收桶裡）——請還原它，或替卡片重設一張參考圖"
+          : "找不到來源素材（可能已在回收桶——先還原才能當來源）",
+      });
+    }
+    if (srcAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "來源素材不屬於此專案的組" });
+    if (model.needs && (SOURCE_INCOMPAT[model.needs] ?? []).includes(srcAsset.kind)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `這個模型需要${SOURCE_KIND_LABEL[model.needs] ?? model.needs}來源，選到的素材是${SOURCE_KIND_LABEL[srcAsset.kind] ?? srcAsset.kind}——請換一個相容的素材`,
+      });
+    }
+    sourceUrl = srcAsset.storagePath ? signAssetUrl(srcAsset.id) : srcAsset.url;
+    if (!sourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "此素材沒有可用檔案" });
+  }
+  if (model.needs && sourceUrl && !isMockMode() && isUnusableRealModeSourceUrl(sourceUrl)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "來源圖是測試佔位圖（/api/mock-asset），正式生成無法使用——請改從素材庫選真實圖片，或貼上可公開抓取的圖片網址",
+    });
+  }
+
+  let secondarySourceUrl = input.secondarySourceUrl;
+  if (input.secondarySourceAssetId) {
+    const [secondaryAsset] = await db.select().from(schema.assets)
+      .where(and(eq(schema.assets.id, input.secondarySourceAssetId), isNull(schema.assets.deletedAt)));
+    if (!secondaryAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到第二來源素材（可能已在回收桶）" });
+    if (secondaryAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "第二來源素材不屬於此專案的組" });
+    if (model.secondaryNeeds && (SOURCE_INCOMPAT[model.secondaryNeeds] ?? []).includes(secondaryAsset.kind)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `第二來源需要${SOURCE_KIND_LABEL[model.secondaryNeeds] ?? model.secondaryNeeds}，選到的是${SOURCE_KIND_LABEL[secondaryAsset.kind] ?? secondaryAsset.kind}——請換一個相容素材`,
+      });
+    }
+    secondarySourceUrl = secondaryAsset.storagePath ? signAssetUrl(secondaryAsset.id) : secondaryAsset.url;
+    if (!secondarySourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "第二來源素材沒有可用檔案" });
+  }
+  if (model.secondaryNeeds && secondarySourceUrl && !isMockMode() && isUnusableRealModeSourceUrl(secondarySourceUrl)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "第二來源是測試佔位素材，正式生成無法使用——請上傳真實檔案" });
+  }
+
+  const worldview = worldviewSchema.parse(project.worldview ?? {});
+  const [character, scene, prop] = await Promise.all([
+    input.characterIds?.length ? buildCharacterAnchor(project.id, input.characterIds) : Promise.resolve(""),
+    input.scenePresetIds?.length ? buildSceneAnchor(project.id, input.scenePresetIds) : Promise.resolve(""),
+    input.propIds?.length ? buildPropAnchor(project.id, input.propIds) : Promise.resolve(""),
+  ]);
+  const parts = effectivePromptParts(model, input.prompt, worldview);
+  const autoPositive = withPropAnchor(model, withSceneAnchor(model, withCharacterAnchor(model, parts.positive, character), scene), prop);
+  const positivePrompt = input.promptOverride?.positive?.trim() || autoPositive;
+  const negativePrompt = input.promptOverride?.negative !== undefined ? input.promptOverride.negative.trim() : parts.negative;
+  const providerInput = model.input(positivePrompt, project.format as ProjectFormat, sourceUrl, secondarySourceUrl) as Record<string, unknown>;
+  if (negativePrompt && supportsNegativePrompt(model)) providerInput.negative_prompt = negativePrompt;
+
+  const warnings: PreparedGenerationRequest["warnings"] = [];
+  const selectedCards = (input.characterIds?.length ?? 0) + (input.scenePresetIds?.length ?? 0) + (input.propIds?.length ?? 0);
+  if (selectedCards > 0 && !CARD_ANCHOR_CATEGORIES.has(model.category)) warnings.push({
+    code: "cards_ignored",
+    severity: "warning",
+    title: "這個模型不會使用設定卡",
+    detail: `已選 ${selectedCards} 張卡片，但 ${model.category} 不會注入角色、場景或素材錨點。`,
+    suggestion: "改用支援視覺提示詞的圖像／影片模型，或取消無效卡片。",
+  });
+  if (selectedCards > 0 && CARD_ANCHOR_CATEGORIES.has(model.category) && !sourceUrl) warnings.push({
+    code: "card_images_not_sent",
+    severity: "warning",
+    title: "卡片參考圖沒有直接送給模型",
+    detail: "本次只有卡片文字錨點進入 prompt；模型沒有來源圖欄位或尚未選定來源圖。",
+    suggestion: "角色身份一致性要求高時，改用需要來源圖的模型並選定裝參考圖。",
+  });
+  if (negativePrompt && !supportsNegativePrompt(model)) warnings.push({
+    code: "negative_prompt_unsupported",
+    severity: "warning",
+    title: "此模型不接收負向提示詞",
+    detail: "專案禁忌已從正向 prompt 移除，但 provider schema 沒有 negative_prompt 欄位。",
+  });
+  if (input.promptOverride?.positive != null) warnings.push({
+    code: "manual_override",
+    severity: "info",
+    title: "已啟用最終提示詞覆寫",
+    detail: "本次將送出你覆寫的創作 prompt；自動世界觀與卡片文字不會再次疊加。",
+  });
+
+  return {
+    project,
+    model,
+    accessRole,
+    estimatedPoints,
+    sourceUrl: sourceUrl ?? undefined,
+    secondarySourceUrl: secondarySourceUrl ?? undefined,
+    effectiveSourceAssetId,
+    usedCardReference,
+    userPrompt: input.prompt,
+    positivePrompt,
+    negativePrompt,
+    providerInput,
+    anchors: { character, scene, prop },
+    warnings,
+  };
 }
 
 /** pg 唯一鍵衝突（23505）：驅動可能把原始錯誤包在 cause，兩層 code 與訊息都檢查 */
@@ -281,158 +470,36 @@ export async function assertGenerationEntityIds(
 
 /** 送出生成（守護齊全：孤兒列刪除、原子守門扣點、fal 失敗退點＋標 failed） */
 export async function submitGenerationCore(input: SubmitCoreInput): Promise<GenerationRow> {
-  const model = resolveModel(input.modelId) ?? getModel(input.modelId);
-  if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "未知模型(不在註冊表或即時目錄)" });
-  // needs 的最終檢查移到「自動採用定裝／場景參考圖」之後（見下方 resolveCardReferenceSource）：
-  // 沒帶來源但有勾卡片時，卡片上的參考圖就是最合理的來源，先補了再判斷。
-  const mayFillFromCards =
-    model.needs === "image" &&
-    !!(input.characterIds?.length || input.scenePresetIds?.length || input.propIds?.length);
-  if (model.needs && !input.sourceUrl && !input.sourceAssetId && !mayFillFromCards) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
-  }
-  if (model.secondaryNeeds && !input.secondarySourceUrl && !input.secondarySourceAssetId) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: `此模型還需要第二來源:${model.secondarySourceHint ?? model.secondaryNeeds}` });
-  }
-
-  // 逐次估點：按字計費的 TTS 依實際朗讀文字長度算真實成本；其餘＝扁平 model.points（行為不變）。
-  // 一次算好貫穿下面所有站（審核門檻／pointsEst／扣點／送出失敗退點），確保三者永遠一致。
-  // TTS 不注入世界觀（見 effectivePrompt），故 input.prompt 即送 fal 的計費文字。
-  const { getUsdToTwd } = await import("./fxRate");
-  const fx = await getUsdToTwd();
-  const est = estimatePointsFor(model, {
-    promptChars: input.prompt.length,
-    usdToTwdRate: fx.rate,
-  });
-
-  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
-  if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
-  const accessRole = await input.assertAccess?.(project); // 多組隔離（可含專案級 ACL）；回傳角色供成本審核門檻用
-  // 封存／暫停專案凍結生成（TD-03 狀態機）：拿舊 projectId 對已封存專案會照樣扣點（滲透實測）。
-  // 與 scheduleCore／agentCore／Command 同口徑。
-  const { assertProjectAllows } = await import("./projectState");
-  assertProjectAllows(project, "generate");
-
-  // CA-01／KD-12：專案歸屬 fail-closed——在簽名／建列／扣點之前擋下外鍵 UUID
-  await assertGenerationEntityIds(project.id, {
-    characterIds: input.characterIds,
-    scenePresetIds: input.scenePresetIds,
-    propIds: input.propIds,
-    sourceAssetId: input.sourceAssetId,
-    secondarySourceAssetId: input.secondarySourceAssetId,
-  });
-
-  /**
-   * 定裝／場景參考圖自動當來源（QA 2026-08-01）。
-   *
-   * 在此之前，卡片上綁的參考圖只是給人比對用的縮圖——選了「圖生圖／參考圖」這類模型又沒挑來源，
-   * 只會吃一個「此模型需要來源:image」然後什麼都沒發生，使用者完全不知道自己明明已經綁了圖。
-   *
-   * 只在「模型要圖、使用者沒給來源、但有勾角色／場景卡」時補（角色優先，其次場景）：
-   * 原本這條路一定失敗，補進來只會把失敗變成成功，不影響任何既有的成功路徑。
-   * 參考圖可能綁在同組的別的專案素材上（characters.upsert 只驗同組），所以這裡不過
-   * assertGenerationEntityIds 的專案歸屬檢查——同組檢查由下方 srcAsset.groupId 那關把守。
-   */
-  let effectiveSourceAssetId = input.sourceAssetId;
-  let usedCardReference: "character" | "scene" | "prop" | null = null;
-  if (mayFillFromCards && !input.sourceUrl && !effectiveSourceAssetId) {
-    const ref = await resolveCardReferenceSource(project.id, {
-      characterIds: input.characterIds,
-      scenePresetIds: input.scenePresetIds,
-      propIds: input.propIds,
-    });
-    if (ref) {
-      effectiveSourceAssetId = ref.assetId;
-      usedCardReference = ref.from;
-    }
-  }
-  if (model.needs && !input.sourceUrl && !effectiveSourceAssetId) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: mayFillFromCards
-        ? "此模型需要來源圖——勾選的角色／場景／素材卡都還沒設參考圖，請先在卡片上「設參考圖」，或直接從素材庫挑一張來源"
-        : `此模型需要來源:${model.sourceHint ?? model.needs}`,
-    });
-  }
-
-  // 素材庫來源 → 簽名網址（同組檢查；本地檔或外部網址都可）
-  let sourceUrl = input.sourceUrl;
-  if (effectiveSourceAssetId) {
-    // 回收桶素材不得當付費生成來源：素材庫挑選 UI 已濾 deletedAt，但 stale 畫面／直呼 tRPC
-    // 可帶入已軟刪的 id——不擋的話會扣點且讓「已刪」內容回流到新成品
-    const [srcAsset] = await db
-      .select()
-      .from(schema.assets)
-      .where(and(eq(schema.assets.id, effectiveSourceAssetId), isNull(schema.assets.deletedAt)));
-    if (!srcAsset) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: usedCardReference
-          ? "卡片上的參考圖已被刪除（在回收桶裡）——請還原它，或替卡片重設一張參考圖"
-          : "找不到來源素材（可能已在回收桶——先還原才能當來源）",
-      });
-    }
-    if (srcAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "來源素材不屬於此專案的組" });
-    // 明顯不相容的來源直接擋下，省一次白白失敗的生成
-    if (model.needs && (SOURCE_INCOMPAT[model.needs] ?? []).includes(srcAsset.kind)) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: `這個模型需要${SOURCE_KIND_LABEL[model.needs] ?? model.needs}來源，選到的素材是${SOURCE_KIND_LABEL[srcAsset.kind] ?? srcAsset.kind}——請換一個相容的素材`,
-      });
-    }
-    sourceUrl = srcAsset.storagePath ? signAssetUrl(srcAsset.id) : srcAsset.url;
-    if (!sourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "此素材沒有可用檔案" });
-  }
-
-  let secondarySourceUrl = input.secondarySourceUrl;
-  if (input.secondarySourceAssetId) {
-    const [secondaryAsset] = await db
-      .select()
-      .from(schema.assets)
-      .where(and(eq(schema.assets.id, input.secondarySourceAssetId), isNull(schema.assets.deletedAt)));
-    if (!secondaryAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到第二來源素材（可能已在回收桶）" });
-    if (secondaryAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "第二來源素材不屬於此專案的組" });
-    if (model.secondaryNeeds && (SOURCE_INCOMPAT[model.secondaryNeeds] ?? []).includes(secondaryAsset.kind)) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: `第二來源需要${SOURCE_KIND_LABEL[model.secondaryNeeds] ?? model.secondaryNeeds}，選到的是${SOURCE_KIND_LABEL[secondaryAsset.kind] ?? secondaryAsset.kind}——請換一個相容素材`,
-      });
-    }
-    secondarySourceUrl = secondaryAsset.storagePath ? signAssetUrl(secondaryAsset.id) : secondaryAsset.url;
-    if (!secondarySourceUrl) throw new TRPCError({ code: "BAD_REQUEST", message: "第二來源素材沒有可用檔案" });
-  }
-
-  // 正式模式：擋下 mock 佔位來源（線上曾出現 sourceUrl=…/api/mock-asset/image → fal 422）
-  if (model.needs && sourceUrl && !isMockMode() && isUnusableRealModeSourceUrl(sourceUrl)) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message:
-        "來源圖是測試佔位圖（/api/mock-asset），正式生成無法使用——請改從素材庫選真實圖片，或貼上可公開抓取的圖片網址",
-    });
-  }
-  if (model.secondaryNeeds && secondarySourceUrl && !isMockMode() && isUnusableRealModeSourceUrl(secondarySourceUrl)) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "第二來源是測試佔位素材，正式生成無法使用——請上傳真實檔案" });
-  }
-
-  const worldview = worldviewSchema.parse(project.worldview ?? {});
-  // 世界觀 → 角色定裝 → 場景設定 → 素材設定，依序疊加注入（都只撈本專案，且只注入視覺類別）
-  // 三種卡片查詢互不相依，並行省 DB RTT
-  const [charAnchor, sceneAnchor, propAnchor] = await Promise.all([
-    input.characterIds?.length ? buildCharacterAnchor(project.id, input.characterIds) : Promise.resolve(""),
-    input.scenePresetIds?.length ? buildSceneAnchor(project.id, input.scenePresetIds) : Promise.resolve(""),
-    input.propIds?.length ? buildPropAnchor(project.id, input.propIds) : Promise.resolve(""),
-  ]);
-  const promptParts = effectivePromptParts(model, input.prompt, worldview);
-  const fullPrompt = withPropAnchor(
+  const prepared = await prepareGenerationRequest(input);
+  const {
+    project,
     model,
-    withSceneAnchor(model, withCharacterAnchor(model, promptParts.positive, charAnchor), sceneAnchor),
-    propAnchor,
-  );
-  const falInput = model.input(fullPrompt, project.format as ProjectFormat, sourceUrl, secondarySourceUrl) as Record<string, unknown>;
-  // 禁忌詞負向注入（深度優化）：視覺類別的禁忌詞走 negative_prompt，且只送給 schema 明確支援的模型
-  // （見 supportsNegativePrompt）——存進 params 後，核准重送（decideCost）原樣沿用，不必另改。
-  if (promptParts.negative && supportsNegativePrompt(model)) {
-    falInput.negative_prompt = promptParts.negative;
+    accessRole,
+    estimatedPoints: est,
+    sourceUrl,
+    secondarySourceUrl,
+    providerInput: falInput,
+  } = prepared;
+  if (input.traceSessionId) {
+    await recordAiTraceEventSafely({
+      sessionId: input.traceSessionId,
+      eventType: "prepared",
+      summary: "已依專案現況組裝實際生成輸入",
+      payload: {
+        provider: isNimModel(model) ? "nvidia-nim" : "fal.ai",
+        model: model.id,
+        endpoint: endpointOf(model),
+        userPrompt: prepared.userPrompt,
+        positivePrompt: prepared.positivePrompt,
+        negativePrompt: prepared.negativePrompt,
+        providerInput: prepared.providerInput,
+        sourceAssetId: prepared.effectiveSourceAssetId,
+        usedCardReference: prepared.usedCardReference,
+        anchors: prepared.anchors,
+        warnings: prepared.warnings,
+        estimatedPoints: prepared.estimatedPoints,
+      },
+    });
   }
   const storedParams = storeGenerationSourceMeta(falInput, { secondarySourceUrl });
 
@@ -475,6 +542,16 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
           if (existing) return existing;
         }
         throw err;
+      }
+      if (input.traceSessionId) {
+        await updateAiTraceSession(input.traceSessionId, {
+          status: "prepared",
+          provider: isNimModel(model) ? "nvidia-nim" : "fal.ai",
+          model: model.id,
+          sourceType: "generation",
+          sourceId: gated.id,
+          summary: "等待成本核准，尚未送出 provider",
+        }).catch(() => undefined);
       }
       // 系統訊息通知組內（比照審批三態機）；失敗不擋主流程
       await db
@@ -534,6 +611,17 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     throw err;
   }
 
+  if (input.traceSessionId) {
+    await updateAiTraceSession(input.traceSessionId, {
+      status: "running",
+      provider: isNimModel(model) ? "nvidia-nim" : "fal.ai",
+      model: model.id,
+      sourceType: "generation",
+      sourceId: gen.id,
+      summary: "生成輸入已準備完成",
+    }).catch(() => undefined);
+  }
+
   // 原子守門＋扣點（同一交易＋per-user 鎖，杜絕併發雙重扣款/繞過額度）
   // reserveQuota「拋例外」（連線池耗盡/逾時/序列化失敗）時也要刪掉剛建的 queued 列，
   // 否則會留下「從未扣點」的孤兒，30 分鐘後被陳屍清掃憑空退點、灌鬆總預算閘。
@@ -557,9 +645,27 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   try {
     // LLM 文字類分流走 NVIDIA NIM(媒體維持 fal);mock 模式一律交給 falSubmit 的假佇列——
     // 假生成/扣點行為與其他類別完全同口徑,不因供應商分流而多一套 mock
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "provider_request",
+        summary: `送出 ${model.label}`,
+        payload: { endpoint: endpointOf(model), input: falInput },
+      });
+    }
+    const startedAt = Date.now();
     const { requestId } = isNimModel(model) && !isMockMode()
       ? nimSubmit(falInput)
       : await falSubmit(endpointOf(model), model.kind, falInput);
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "provider_response",
+        summary: "Provider 已接受工作",
+        payload: { requestId, status: "running" },
+        latencyMs: Date.now() - startedAt,
+      });
+    }
     const [updated] = await db
       .update(schema.generations)
       .set({ requestId, status: "running", updatedAt: new Date() })
@@ -575,6 +681,15 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       humanizeGenerationError(err instanceof Error ? err.message : String(err)),
       "生成送出失敗退回",
     );
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "failed",
+        summary: "生成送出失敗",
+        payload: { error: err instanceof Error ? err.message : String(err) },
+      });
+      await updateAiTraceSession(input.traceSessionId, { status: "failed", summary: "生成送出失敗" }).catch(() => undefined);
+    }
     throw new TRPCError({
       code: "INTERNAL_SERVER_ERROR",
       message: failed.refunded > 0 ? "生成送出失敗，點數已退回，請重試" : "生成送出失敗，請重試",
@@ -669,6 +784,27 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     // 背景落地到 Volume（fal 網址會過期,永久保存靠這步;失敗沿用外部網址不擋流程）——
     // 網路 IO 不進交易，commit 後才啟動；失敗由 sweepUnlandedAssets 定期補抓。
     if (advanced.assetId && mediaUrl) persistGenerationResult(advanced.assetId, gen.id, mediaUrl);
+    const trace = await findAiTraceSessionBySource("generation", gen.id).catch(() => null);
+    if (trace) {
+      await recordAiTraceEventSafely({
+        sessionId: trace.id,
+        eventType: "provider_response",
+        summary: "Provider 回傳生成結果",
+        payload: result.rawResponse ?? {
+          status: result.status,
+          resultUrl: result.resultUrl,
+          resultText: result.resultText,
+          usage: result.usage,
+        },
+      });
+      await recordAiTraceEventSafely({
+        sessionId: trace.id,
+        eventType: "completed",
+        summary: "生成完成並寫入系統",
+        payload: { generationId: gen.id, assetId: advanced.assetId, usage: result.usage },
+      });
+      await updateAiTraceSession(trace.id, { status: "completed", summary: "生成完成" }).catch(() => undefined);
+    }
     // 跨裝置推播給發起人（CAS 保證同筆只推一次）；tag 以專案聚合——工作流連跑多鏡時
     // 後到的覆蓋先到的，手機不被逐筆洗版（頁內 GenerationList 已有逐筆彙總通知）
     void pushToUsers([gen.userId], {
@@ -700,6 +836,16 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     if (!updated) return gen;
     // 失敗推播（CAS 保證同筆只推一次）：tag 獨立不與「生成完成」互蓋——失敗訊號不能被後到的成功淹掉
     const failMsg = humanizeGenerationError(result.error);
+    const trace = await findAiTraceSessionBySource("generation", gen.id).catch(() => null);
+    if (trace) {
+      await recordAiTraceEventSafely({
+        sessionId: trace.id,
+        eventType: "failed",
+        summary: "Provider 生成失敗",
+        payload: result.rawResponse ?? { status: result.status, error: result.error, usage: result.usage },
+      });
+      await updateAiTraceSession(trace.id, { status: "failed", summary: failMsg }).catch(() => undefined);
+    }
     void pushToUsers([gen.userId], {
       title: "生成失敗",
       body: `${model?.label ?? gen.modelId}：${failMsg}${failed.refunded > 0 ? "（點數已退回）" : ""}`,

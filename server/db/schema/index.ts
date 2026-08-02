@@ -14,3 +14,4 @@ export * from "./messaging";
 export * from "./integrations";
 export * from "./catalog";
 export * from "./storage";
+export * from "./aiTrace";
