@@ -72,7 +72,8 @@ import {
 /** 與 styles.css 單欄／平板界線對齊：≤820px 為手機減負模式 */
 const PROJECT_MOBILE_MQ = "(max-width: 820px)";
 
-type CtxSectionKey = "characters" | "scenes" | "props" | "knowledge" | "databases" | "assets" | "recycle";
+type CtxSectionKey = "worldview" | "characters" | "scenes" | "props" | "knowledge" | "databases" | "assets" | "recycle";
+type CtxGroupKey = "world" | "sources" | "manage";
 
 /** 手機上下文卡：details 收合；桌機直接渲染 children（版面不變） */
 function CtxCollapse({
@@ -106,6 +107,64 @@ function CtxCollapse({
         <Icon name="ChevronDown" size={14} className="details-caret" style={{ marginLeft: "auto" }} />
       </summary>
       <div className="project-ctx-collapse__body">{children}</div>
+    </Card>
+  );
+}
+
+/**
+ * 專案上下文分組：把同層級多卡收成「世界與角色／依據與素材」兩大塊。
+ * 手機：details 受控收合；桌機：固定區塊標題 + 內容全展開（內層卡仍各自獨立）。
+ */
+function CtxGroup({
+  groupId,
+  title,
+  lede,
+  meta,
+  compact,
+  open,
+  onOpenChange,
+  children,
+}: {
+  groupId: string;
+  title: string;
+  lede?: string;
+  meta?: string;
+  compact: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  if (!compact) {
+    return (
+      <section className="ctx-group" id={groupId} data-fb={title}>
+        <header className="ctx-group__head">
+          <div className="ctx-group__heading">
+            <h3 className="ctx-group__title">{title}</h3>
+            {lede ? <p className="ctx-group__lede">{lede}</p> : null}
+          </div>
+          {meta != null && meta !== "" ? <span className="meta ctx-group__meta">{meta}</span> : null}
+        </header>
+        <div className="ctx-group__body stack">{children}</div>
+      </section>
+    );
+  }
+  return (
+    <Card
+      as="details"
+      variant="quiet"
+      className="ctx-group ctx-group--collapse"
+      id={groupId}
+      open={open}
+      onToggle={(e) => onOpenChange((e.currentTarget as HTMLDetailsElement).open)}
+      data-fb={title}
+    >
+      <summary className="ctx-group__summary">
+        <span className="ctx-group__title">{title}</span>
+        {meta != null && meta !== "" ? <span className="meta ctx-group__meta">{meta}</span> : null}
+        <Icon name="ChevronDown" size={14} className="details-caret" style={{ marginLeft: "auto" }} />
+      </summary>
+      {lede ? <p className="ctx-group__lede ctx-group__lede--in">{lede}</p> : null}
+      <div className="ctx-group__body stack">{children}</div>
     </Card>
   );
 }
@@ -399,6 +458,7 @@ export function ProjectPage({ id }: { id: string }) {
   /** ?focus=messages&mid=<id> 要捲到的那一則；MessagePanel 定位完成後清掉，避免重開時重閃 */
   const [focusMessageId, setFocusMessageId] = useState<string | undefined>(undefined);
   const [ctxOpen, setCtxOpen] = useState<Record<CtxSectionKey, boolean>>({
+    worldview: true,
     characters: false,
     scenes: false,
     props: false,
@@ -407,8 +467,16 @@ export function ProjectPage({ id }: { id: string }) {
     assets: false,
     recycle: false,
   });
+  /** 兩大分組 + 管理：手機預設只開「世界與角色」，其餘收合降低同層資訊量 */
+  const [ctxGroupOpen, setCtxGroupOpen] = useState<Record<CtxGroupKey, boolean>>({
+    world: true,
+    sources: false,
+    manage: false,
+  });
   const setCtxSectionOpen = (key: CtxSectionKey, open: boolean) =>
     setCtxOpen((prev) => (prev[key] === open ? prev : { ...prev, [key]: open }));
+  const setCtxGroupSectionOpen = (key: CtxGroupKey, open: boolean) =>
+    setCtxGroupOpen((prev) => (prev[key] === open ? prev : { ...prev, [key]: open }));
   // Escape 關閉留言 sheet
   useEffect(() => {
     if (!messagesSheetOpen) return;
@@ -1099,8 +1167,9 @@ export function ProjectPage({ id }: { id: string }) {
 
   const wvChipWarnings = chipSoftWarnings(wv);
 
-  /** 摘要 chip → 目標 section：手機時先展開收合卡再捲動 */
+  /** 摘要 chip → 目標 section：手機時先展開所屬分組與收合卡再捲動 */
   const targetToCtxKey = (target: string): CtxSectionKey | null => {
+    if (target === "#onboard-worldview") return "worldview";
     if (target === "#sec-characters") return "characters";
     if (target === "#sec-scenes") return "scenes";
     if (target === "#sec-props") return "props";
@@ -1110,9 +1179,25 @@ export function ProjectPage({ id }: { id: string }) {
     if (target === "#sec-recyclebin") return "recycle";
     return null;
   };
+  const sectionToGroup = (key: CtxSectionKey): CtxGroupKey => {
+    if (key === "knowledge" || key === "databases" || key === "assets") return "sources";
+    if (key === "recycle") return "manage";
+    return "world";
+  };
   const jumpToContext = (target: string) => {
-    const key = targetToCtxKey(target);
-    if (mobileCompact && key) setCtxSectionOpen(key, true);
+    if (mobileCompact) {
+      if (target === "#ctx-group-world" || target === "#ctx-group-sources" || target === "#ctx-group-manage") {
+        setCtxGroupSectionOpen(target.replace("#ctx-group-", "") as CtxGroupKey, true);
+      } else if (target === "#sec-members") {
+        setCtxGroupSectionOpen("manage", true);
+      } else {
+        const key = targetToCtxKey(target);
+        if (key) {
+          setCtxGroupSectionOpen(sectionToGroup(key), true);
+          setCtxSectionOpen(key, true);
+        }
+      }
+    }
     requestAnimationFrame(() => {
       requestAnimationFrame(() => scrollToSelector(target));
     });
@@ -1437,25 +1522,57 @@ export function ProjectPage({ id }: { id: string }) {
             id="stage-context"
             num="①"
             title="專案上下文"
-            desc="世界觀・定裝・素材・知識庫——AI 的共同大腦"
+            desc="一整個共同大腦——基調、定裝、知識與素材分兩區管理"
             accent="group-1"
             hint={wvReady ? "已設定" : "待設定"}
           />
-          {/* 上下文摘要條：一眼看見 AI 全程共用哪些設定；點 chip 直達對應卡 */}
-          <div className="ctx-summary" role="group" aria-label="AI 全程共用的上下文一覽">
-            AI 全程共用：
-            {summaryChip(`專案基調${wvReady ? " ✓" : "（待設定）"}`, "#onboard-worldview", wvReady)}
-            {hasActs(wv) && summaryChip("三幕已設", "#onboard-worldview", true)}
-            {wv.people.length > 0 && summaryChip(`敘事人物 ${wv.people.length}`, "#onboard-worldview", true)}
-            {wv.audience.trim() && summaryChip("觀眾已設", "#onboard-worldview", true)}
-            {summaryChip(`角色 ${charCount ?? "…"}・場景 ${presetCount ?? "…"}`, "#sec-characters")}
-            {summaryChip(`素材設定 ${propCount ?? "…"}`, "#sec-props", (propCount ?? 0) > 0)}
-            {summaryChip(`知識 ${knowledgeCount ?? "…"} 份`, "#sec-knowledge")}
-            {summaryChip(`素材 ${assetCount ?? "…"}`, "#sec-assets")}
+          {/* 總覽卡：狀態一句話 + chip 直達；底下只剩兩大分組，不再平鋪一長串 */}
+          <div className="ctx-overview" role="region" aria-label="專案上下文一覽">
+            <div className="ctx-overview__head">
+              <strong className="ctx-overview__title">專案大腦一覽</strong>
+              <Meta>
+                {wvReady
+                  ? "基調已就緒——下方兩區會自動注入每次生成"
+                  : "先補「世界與角色」的專案基調，後面生成才穩"}
+              </Meta>
+            </div>
+            <div className="ctx-summary" role="group" aria-label="AI 全程共用的上下文一覽">
+              {summaryChip(`基調${wvReady ? " ✓" : "（待設）"}`, "#onboard-worldview", wvReady)}
+              {hasActs(wv) && summaryChip("三幕", "#onboard-worldview", true)}
+              {wv.people.length > 0 && summaryChip(`人物 ${wv.people.length}`, "#onboard-worldview", true)}
+              {summaryChip(`角色 ${charCount ?? "…"}`, "#sec-characters", (charCount ?? 0) > 0)}
+              {summaryChip(`場景 ${presetCount ?? "…"}`, "#sec-scenes", (presetCount ?? 0) > 0)}
+              {summaryChip(`道具 ${propCount ?? "…"}`, "#sec-props", (propCount ?? 0) > 0)}
+              {summaryChip(`知識 ${knowledgeCount ?? "…"}`, "#sec-knowledge", (knowledgeCount ?? 0) > 0)}
+              {summaryChip(`素材 ${assetCount ?? "…"}`, "#sec-assets", (assetCount ?? 0) > 0)}
+            </div>
           </div>
-          {/* 世界觀（快速層） */}
+
+          {/* ── 分組 A：世界與角色（基調 + 定裝三卡） ── */}
+          <CtxGroup
+            groupId="ctx-group-world"
+            title="世界與角色"
+            lede="專案基調、角色／場景／道具定裝——決定 AI 畫出來長什麼樣"
+            meta={[
+              wvReady ? "基調✓" : "基調待設",
+              ...(charCount != null ? [`角${charCount}`] : []),
+              ...(presetCount != null ? [`景${presetCount}`] : []),
+              ...(propCount != null ? [`道${propCount}`] : []),
+            ].join(" · ")}
+            compact={mobileCompact}
+            open={ctxGroupOpen.world}
+            onOpenChange={(o) => setCtxGroupSectionOpen("world", o)}
+          >
           <CollabZone {...zoneProps(COLLAB_ZONES.worldview)}>
-          <Card as="section" data-fb="世界觀卡" id="onboard-worldview">
+          <CtxCollapse
+            compact={mobileCompact}
+            sectionId="onboard-worldview"
+            title="專案基調與世界觀"
+            meta={wvReady ? "已就緒" : "待設定"}
+            open={ctxOpen.worldview}
+            onOpenChange={(o) => setCtxSectionOpen("worldview", o)}
+          >
+          <Card as="section" data-fb="世界觀卡" id="onboard-worldview-card">
             <h2>
               專案基調與世界觀
               <HelpTip text="這支片的固定設定，填一次，之後每次生成 AI 自動記得，不用重講背景。" />
@@ -1841,6 +1958,7 @@ export function ProjectPage({ id }: { id: string }) {
 
             {updateWv.error && <p className="error">世界觀儲存失敗：{updateWv.error.message}</p>}
           </Card>
+          </CtxCollapse>
           </CollabZone>
 
           {/* 角色定裝卡：勾選後生成自動注入外觀錨點。
@@ -1897,7 +2015,21 @@ export function ProjectPage({ id }: { id: string }) {
               readOnly={!canEdit}
             />
           </CtxCollapse>
+          </CtxGroup>
 
+          {/* ── 分組 B：依據與素材（知識庫／資料表／素材庫） ── */}
+          <CtxGroup
+            groupId="ctx-group-sources"
+            title="依據與素材"
+            lede="知識庫、專案資料表、上傳素材——給 AI 可引用的事實與來源"
+            meta={[
+              ...(knowledgeCount != null ? [`知${knowledgeCount}`] : []),
+              ...(assetCount != null ? [`材${assetCount}`] : []),
+            ].join(" · ") || undefined}
+            compact={mobileCompact}
+            open={ctxGroupOpen.sources}
+            onOpenChange={(o) => setCtxGroupSectionOpen("sources", o)}
+          >
           {/* 專案知識庫：AI 讀得懂上傳的開示/見證/腳本（願景核心「真的懂我們」） */}
           <CtxCollapse
             compact={mobileCompact}
@@ -1944,8 +2076,17 @@ export function ProjectPage({ id }: { id: string }) {
               </CtxCollapse>
             </div>
           </CollabZone>
+          </CtxGroup>
 
-          {/* 回收桶：元件本身預設收合；手機再包一層摘要列，桌機維持原樣 */}
+          {/* ── 分組 C：管理（回收桶／權限）——降級到最底，預設收合 ── */}
+          <CtxGroup
+            groupId="ctx-group-manage"
+            title="管理"
+            lede="回收桶與成員權限——非日常創作流程，需要時再開"
+            compact={mobileCompact}
+            open={ctxGroupOpen.manage}
+            onOpenChange={(o) => setCtxGroupSectionOpen("manage", o)}
+          >
           <CtxCollapse
             compact={mobileCompact}
             sectionId="sec-recyclebin"
@@ -1956,8 +2097,7 @@ export function ProjectPage({ id }: { id: string }) {
             <RecycleBin projectId={id} />
           </CtxCollapse>
 
-          {/* 專案權限（需求 2.3）：誰可編輯、誰唯讀——屬專案設定的一環，但非日常操作，收合呈現不佔主視線 */}
-          <Card as="details" variant="quiet" data-fb="專案權限收合卡" id="sec-members">
+          <Card as="details" variant="quiet" className="ctx-manage" data-fb="專案權限收合卡" id="sec-members">
             <summary>
               <Icon name="Lock" size={14} />成員權限（預設全員可編輯；可設個別成員唯讀）
               <Icon name="ChevronDown" size={14} style={{ marginLeft: "auto" }} />
@@ -1966,8 +2106,9 @@ export function ProjectPage({ id }: { id: string }) {
               <ProjectMembersCard projectId={id} bare />
             </div>
           </Card>
+          </CtxGroup>
 
-          <StageLink text="以上設定會自動注入下方每一次生成——AI 全程記得，不必重講背景" />
+          <StageLink text="以上兩區會自動注入下方每一次生成——AI 全程記得，不必重講背景" />
 
           {/* ② 唯一 AI 創作入口：CreationWorkbench（四模式 tabs + 資源抽屜）；不掛平行整頁卡 */}
           <StageHead

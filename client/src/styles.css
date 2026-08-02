@@ -1314,7 +1314,7 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
 .toc-toggle:focus-visible, .toc-link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--r-8); }
 
 /* 捲動落點留白：桌面錨點避開 sticky 頂欄 */
-#onboard-worldview, #sec-knowledge, #sec-ai-hub, #sec-characters,
+#onboard-worldview, #ctx-group-world, #ctx-group-sources, #ctx-group-manage, #sec-knowledge, #sec-ai-hub, #sec-characters,
 #sec-scenes, #sec-assets, #sec-recyclebin, #gen-prompt, #sec-prompts,
 #sec-generations, #sec-trail, #sec-templates-fav, #sec-workflow, #onboard-delivery,
 #stage-context, #stage-create, #stage-deliver {
@@ -1463,7 +1463,7 @@ details[open] > *:not(summary) { animation: fade-rise var(--dur-base) var(--ease
     overflow: visible;
     margin-bottom: var(--sp-16);
   }
-  #onboard-worldview, #sec-knowledge, #sec-ai-hub, #sec-characters,
+  #onboard-worldview, #ctx-group-world, #ctx-group-sources, #ctx-group-manage, #sec-knowledge, #sec-ai-hub, #sec-characters,
   #sec-scenes, #sec-assets, #sec-recyclebin, #gen-prompt, #sec-prompts,
   #sec-workflow, #onboard-delivery {
     scroll-margin-top: calc(96px + var(--safe-top));
@@ -1576,9 +1576,105 @@ button.recording { display: inline-flex; align-items: center; gap: 4px; color: #
 .todo-form input[type="datetime-local"] { flex: 0 1 auto; }
 .todo-form input:not([type]) { flex: 1 1 140px; min-width: 120px; }
 
-/* ── 工作台一體化：上下文摘要條——一眼看見 AI 全程共用哪些設定；chip 點了捲到對應卡 ── */
-.ctx-summary { display: flex; align-items: center; gap: 4px 6px; flex-wrap: wrap;
-  font-size: var(--fs-12); color: var(--fg-secondary); margin: -4px 0 0; }
+/* ── 工作台一體化：上下文總覽卡 + 摘要 chip——一眼看見 AI 全程共用哪些設定 ── */
+.ctx-overview {
+  margin: -2px 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: var(--r-12, 12px);
+  background: var(--card2);
+}
+.ctx-overview__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.ctx-overview__title {
+  font-size: var(--fs-13);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.ctx-summary {
+  display: flex;
+  align-items: center;
+  gap: 4px 6px;
+  flex-wrap: wrap;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  margin: 0;
+}
+
+/* ── 專案上下文分組：世界與角色 / 依據與素材 / 管理 ── */
+.ctx-group {
+  margin: 0 0 14px;
+}
+.ctx-group__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 2px 2px 0;
+}
+.ctx-group__heading { min-width: 0; }
+.ctx-group__title {
+  margin: 0;
+  font-size: var(--fs-15);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  line-height: 1.3;
+}
+.ctx-group__lede {
+  margin: 3px 0 0;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  line-height: 1.45;
+}
+.ctx-group__meta {
+  flex: none;
+  margin-top: 2px;
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+.ctx-group__body.stack {
+  gap: 12px;
+}
+/* 手機：分組本身可收合，內層 CtxCollapse 再細拆 */
+.ctx-group--collapse > summary.ctx-group__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  cursor: pointer;
+  list-style: none;
+}
+.ctx-group--collapse > summary.ctx-group__summary::-webkit-details-marker { display: none; }
+.ctx-group--collapse .ctx-group__title { font-size: var(--fs-14); }
+.ctx-group--collapse .ctx-group__lede--in {
+  margin: 0 0 10px;
+  padding: 0 2px;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  line-height: 1.4;
+}
+.ctx-group--collapse .ctx-group__body {
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft, var(--border));
+  gap: 10px;
+}
+.ctx-manage > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+}
+.ctx-manage > summary::-webkit-details-marker { display: none; }
 
 /* ── 筆記排程：清單／月曆切換 段落鈕（seg）＋ 真實月曆網格 ＋ 知識地圖心智圖 ── */
 .planner-section { margin-top: var(--sp-16); padding: 0; overflow: hidden; }
@@ -4568,16 +4664,23 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .project-stage-head .group-desc { grid-column: 2 / -1; font-size: var(--fs-11); }
   .project-stage-head .group-rule { display: none; }
   .project-stage-head > .hint { grid-column: 3; grid-row: 1; }
+  .ctx-overview {
+    margin-bottom: 10px;
+    padding: 10px 12px;
+  }
+  .ctx-overview__title { font-size: var(--fs-12); }
   .ctx-summary {
     flex-wrap: nowrap;
-    margin-inline: calc(-1 * var(--app-pad-x));
-    padding: 0 var(--app-pad-x) 4px;
+    margin-inline: 0;
+    padding: 0 0 2px;
     overflow-x: auto;
     white-space: nowrap;
     scrollbar-width: none;
   }
   .ctx-summary::-webkit-scrollbar { display: none; }
   .ctx-summary .chip { flex: none; }
+  .ctx-group { margin-bottom: 10px; }
+  .ctx-group__head { margin-bottom: 8px; }
   .card--primary { padding: 14px; }
   /* MOB-03：S 手機強制 2×2 工作台模式格（拇指可點，min-height ≥64） */
   .creation-mode-tabs {
