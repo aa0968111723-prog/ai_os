@@ -33,6 +33,7 @@ export default defineConfig({
         "client/src/components/DatabaseDetailTabs.tsx",
         "client/src/components/WorldviewPreview.tsx",
         "client/src/components/WorldviewGuide.tsx",
+        "client/src/components/WorldviewExampleCard.tsx",
       ],
       thresholds: {
         lines: 85,

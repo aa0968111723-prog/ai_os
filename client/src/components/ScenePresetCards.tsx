@@ -11,7 +11,7 @@ import { Icon } from "./Icon";
 import { CharCount, ConfirmButton } from "./interactions";
 import { ReferenceImagePicker, type ReferenceImage } from "./ReferenceImagePicker";
 import { AssetImg } from "./MediaFallback";
-import { Button, Card, Hint, Meta, Skeleton } from "./ui";
+import { Button, Card, EmptyState, Hint, Meta, Skeleton } from "./ui";
 
 export { MAX_GENERATE_SCENE_PRESETS };
 
@@ -295,9 +295,31 @@ export function ScenePresetCards({
           })}
         </div>
       ) : (
-        <Hint layer="always" style={{ marginTop: 8 }}>
-          還沒有場景——加一張（例：城市清晨＝暖色調、35mm 淺景深、柔和晨光斜射）。
-        </Hint>
+        /* 原本是裸 Hint：與角色卡／道具卡不一致，也沒有下一步可按。
+           改用 EmptyState 並補上一鍵建範例卡，三張卡的空狀態才是同一套。 */
+        <EmptyState
+          title="還沒有場景"
+          description="加一張場景卡（例：城市清晨＝暖色調、35mm 淺景深、柔和晨光斜射）。"
+          action={
+            readOnly ? undefined : (
+              <Button
+                variant="tonal"
+                disabled={add.isPending || atProjectMax}
+                onClick={() =>
+                  add.mutate({
+                    projectId,
+                    name: "城市清晨",
+                    palette: "暖色調、低飽和",
+                    lighting: "35mm 淺景深、柔和晨光斜射",
+                    clientRequestId: requestId.current,
+                  })
+                }
+              >
+                {add.isPending ? "建立中…" : "帶入這張範例卡"}
+              </Button>
+            )
+          }
+        />
       )}
 
       {!readOnly &&

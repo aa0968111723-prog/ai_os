@@ -862,6 +862,110 @@ const ADVANCED_EXAMPLES_BY_KIND: Record<string, WorldviewAdvancedExample> = {
   },
 };
 
+/**
+ * 快速層一鍵範例（依專案 kind）。
+ *
+ * 進階層早就有「空白欄帶入範例／整段換成範例」，但**最需要範例的快速層反而沒有**——
+ * 空專案只有 placeholder，要自己從零想「一句話故事」「調性」「畫風」該填什麼。
+ *
+ * 硬性規則（由 worldview.test.ts 強制，違反會讓一鍵帶入當場產生孤兒 chip 或軟警告）：
+ * - tones／themes／styles 的值必須落在既有 TONE_OPTIONS／THEME_OPTIONS／STYLE_OPTIONS 內
+ * - styles 經 canonicalizeWorldviewStyles 後不變（同家族的 look＋質感，不跨家族）
+ * - tones／themes 不超過 CHIP_SOFT_MAX
+ */
+export type WorldviewQuickExample = {
+  logline: string;
+  message: string;
+  themes: string[];
+  tones: string[];
+  styles: string[];
+};
+
+const QUICK_EXAMPLE_DEFAULT: WorldviewQuickExample = {
+  logline: "一位訪客走進晨光禪堂，把浮躁的心慢慢放回原位",
+  message: "把心安住，日子就有了呼吸",
+  themes: ["禪修日常"],
+  tones: ["溫暖", "真誠"],
+  styles: ["日系水彩"],
+};
+
+const QUICK_EXAMPLES_BY_KIND: Record<string, WorldviewQuickExample> = {
+  witness: {
+    logline: "陳師姐從憂鬱低谷，靠著每天一次靜坐，慢慢把自己接回來",
+    message: "低谷不是終點，是轉彎的地方",
+    themes: ["苦→修行→轉變→感恩"],
+    tones: ["溫暖", "真誠"],
+    styles: ["寫實攝影", "膠片質感"],
+  },
+  teaching: {
+    logline: "一句聽過很多次的話，在某個早晨忽然聽懂了",
+    message: "道理不難，難在願意今天就試一次",
+    themes: ["佛法入門"],
+    tones: ["莊嚴", "溫暖"],
+    styles: ["水墨禪意"],
+  },
+  short: {
+    logline: "三十秒裡，一個人從坐不住到坐得住",
+    message: "安靜一分鐘，比滑手機一小時有用",
+    themes: ["禪修日常"],
+    tones: ["活潑", "簡約"],
+    styles: ["極簡線條"],
+  },
+  promo: {
+    logline: "禪堂的門推開，這個週末有一場為你留的位子",
+    message: "來坐一下，位子一直都在",
+    themes: ["活動紀實"],
+    tones: ["溫暖", "活潑"],
+    styles: ["日系水彩"],
+  },
+  recap: {
+    logline: "那天的光、那些人、那一段一起安靜下來的時間",
+    message: "一起走過的路，值得記得",
+    themes: ["感恩分享"],
+    tones: ["溫暖", "療癒"],
+    styles: ["寫實攝影"],
+  },
+};
+
+/** 依專案 kind 取快速層範例；未知 kind 用中性預設 */
+export function worldviewQuickExampleForKind(kind?: string | null): WorldviewQuickExample {
+  if (kind && QUICK_EXAMPLES_BY_KIND[kind]) return QUICK_EXAMPLES_BY_KIND[kind]!;
+  return QUICK_EXAMPLE_DEFAULT;
+}
+
+/** 套用快速層範例：onlyEmpty 時只填空白欄（與 applyWorldviewAdvancedExample 同語義） */
+export function applyWorldviewQuickExample(
+  current: Worldview,
+  kind?: string | null,
+  onlyEmpty = true,
+): Partial<Pick<Worldview, "logline" | "message" | "themes" | "tones" | "styles">> {
+  const ex = worldviewQuickExampleForKind(kind);
+  const patch: Partial<Pick<Worldview, "logline" | "message" | "themes" | "tones" | "styles">> = {};
+  if (!onlyEmpty || !current.logline.trim()) patch.logline = ex.logline;
+  if (!onlyEmpty || !current.message.trim()) patch.message = ex.message;
+  if (!onlyEmpty || current.themes.length === 0) patch.themes = [...ex.themes];
+  if (!onlyEmpty || current.tones.length === 0) patch.tones = [...ex.tones];
+  if (!onlyEmpty || current.styles.length === 0) patch.styles = [...ex.styles];
+  return patch;
+}
+
+/**
+ * 「整份抄這個」：快速層＋進階層合成單一 patch。
+ * 必須是一個 patch 一次 mutate——連發多個 mutate 會讓前端的樂觀合併在同一 tick 互相 race。
+ */
+export function applyWorldviewFullExample(
+  current: Worldview,
+  kind?: string | null,
+  onlyEmpty = true,
+): Partial<
+  Pick<Worldview, "logline" | "message" | "themes" | "tones" | "styles" | "audience" | "acts" | "people">
+> {
+  return {
+    ...applyWorldviewQuickExample(current, kind, onlyEmpty),
+    ...applyWorldviewAdvancedExample(current, kind, onlyEmpty),
+  };
+}
+
 /** 依專案 kind 取進階範例；未知 kind 用中性預設 */
 export function worldviewAdvancedExampleForKind(kind?: string | null): WorldviewAdvancedExample {
   if (kind && ADVANCED_EXAMPLES_BY_KIND[kind]) return ADVANCED_EXAMPLES_BY_KIND[kind]!;

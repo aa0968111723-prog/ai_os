@@ -46,6 +46,10 @@ import {
   worldviewGuideSteps,
   nextWorldviewStep,
   worldviewFieldReaderSummary,
+  THEME_OPTIONS,
+  worldviewQuickExampleForKind,
+  applyWorldviewQuickExample,
+  applyWorldviewFullExample,
 } from "./worldview";
 
 describe("bilingualChips（視覺注入的英文錨點）", () => {
@@ -536,5 +540,87 @@ describe("worldviewFieldReaderSummary（欄位徽章去密度）", () => {
 
     // 參考連結完全不進模型
     expect(worldviewFieldReaderSummary("references")!.detail).toContain("不進模型");
+  });
+});
+
+describe("快速層一鍵範例", () => {
+  const KINDS = ["witness", "teaching", "short", "promo", "recap"];
+
+  it("PROJECT_KINDS 五種都有專屬範例，未知 kind 掉回中性預設", () => {
+    const seen = new Set(KINDS.map((k) => worldviewQuickExampleForKind(k).logline));
+    expect(seen.size).toBe(KINDS.length); // 五種各不相同，沒有人偷懶共用
+    const fallback = worldviewQuickExampleForKind("不存在的類型");
+    expect(fallback).toEqual(worldviewQuickExampleForKind(null));
+    expect(seen.has(fallback.logline)).toBe(false);
+  });
+
+  /**
+   * 這條是「一鍵帶入不能立刻扣分」的保證：
+   * 範例若用了清單外的值就會變孤兒 chip，若跨家族或超標就會馬上跳軟警告——
+   * 使用者按下「照著填」的第一秒就看到錯誤，比沒有範例更糟。
+   */
+  it.each([...KINDS, "不存在的類型"])("「%s」的範例乾淨：值在清單內、風格已收斂、不觸發軟警告", (kind) => {
+    const ex = worldviewQuickExampleForKind(kind);
+    for (const t of ex.tones) expect(TONE_OPTIONS, `調性 ${t} 不在清單`).toContain(t);
+    for (const t of ex.themes) expect(THEME_OPTIONS, `主軸 ${t} 不在清單`).toContain(t);
+    for (const s of ex.styles) expect(STYLE_OPTIONS, `風格 ${s} 不在清單`).toContain(s);
+    expect(ex.tones.length).toBeLessThanOrEqual(CHIP_SOFT_MAX.tones);
+    expect(ex.themes.length).toBeLessThanOrEqual(CHIP_SOFT_MAX.themes);
+    expect(canonicalizeWorldviewStyles(ex.styles)).toEqual(ex.styles);
+    const parsed = worldviewSchema.parse(ex);
+    expect(chipSoftWarnings(parsed)).toEqual([]);
+    expect(isWorldviewReady(parsed)).toBe(true);
+  });
+
+  it("applyWorldviewQuickExample onlyEmpty 不覆蓋已填欄位", () => {
+    const cur = worldviewSchema.parse({ logline: "我自己寫的", tones: ["莊嚴"] });
+    const patch = applyWorldviewQuickExample(cur, "witness", true);
+    expect(patch.logline).toBeUndefined();
+    expect(patch.tones).toBeUndefined();
+    expect(patch.message).toBeTruthy(); // 空的才補
+    expect(patch.styles?.length).toBeGreaterThan(0);
+  });
+
+  it("onlyEmpty=false 整份覆寫", () => {
+    const cur = worldviewSchema.parse({ logline: "我自己寫的", tones: ["莊嚴"] });
+    const patch = applyWorldviewQuickExample(cur, "witness", false);
+    expect(patch.logline).toBe(worldviewQuickExampleForKind("witness").logline);
+    expect(patch.tones).toEqual(worldviewQuickExampleForKind("witness").tones);
+  });
+
+  it("回傳的是複本——改動 patch 不會污染下一次呼叫", () => {
+    const empty = worldviewSchema.parse({});
+    const first = applyWorldviewQuickExample(empty, "witness", false);
+    first.tones!.push("被污染");
+    first.styles!.length = 0;
+    const second = applyWorldviewQuickExample(empty, "witness", false);
+    expect(second.tones).not.toContain("被污染");
+    expect(second.styles!.length).toBeGreaterThan(0);
+  });
+
+  it("applyWorldviewFullExample 一個 patch 同時帶快速層與進階層", () => {
+    const empty = worldviewSchema.parse({});
+    const patch = applyWorldviewFullExample(empty, "witness", true);
+    // 快速層
+    expect(patch.logline).toBeTruthy();
+    expect(patch.tones?.length).toBeGreaterThan(0);
+    expect(patch.styles?.length).toBeGreaterThan(0);
+    // 進階層
+    expect(patch.audience).toBeTruthy();
+    expect(patch.acts?.hook).toBeTruthy();
+    expect(patch.people?.length).toBeGreaterThan(0);
+    // 併起來仍是合法世界觀，且套完就是就緒狀態
+    const merged = worldviewSchema.parse({ ...empty, ...patch });
+    expect(isWorldviewReady(merged)).toBe(true);
+    expect(chipSoftWarnings(merged)).toEqual([]);
+  });
+
+  it("整份範例套下去，注入預覽不再是空的", () => {
+    const empty = worldviewSchema.parse({});
+    const merged = worldviewSchema.parse({ ...empty, ...applyWorldviewFullExample(empty, "witness", false) });
+    const preview = buildWorldviewInjectPreview(merged);
+    expect(preview.empty).toBe(false);
+    expect(preview.visual.positive).toContain("視覺風格");
+    expect(preview.llm.positive).toContain("故事錨點");
   });
 });

@@ -5107,3 +5107,22 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 /* ── 世界觀快速層引導鋪軌 ── */
 .wv-guide { margin: 8px 0 12px; }
 .wv-guide__milestone { font-size: 12px; margin: 4px 0 0; }
+
+/* ── 世界觀空狀態範例卡：讓人在套用前就看到後果 ── */
+.wv-example { margin: 8px 0 12px; }
+.wv-example__actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.wv-example__fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+.wv-example__fields dt { font-weight: 600; color: var(--fg-secondary); white-space: nowrap; }
+.wv-example__fields dd { margin: 0; }
+.wv-example__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.wv-example__lead { font-size: 12px; margin: 12px 0 0; }
+@media (max-width: 480px) {
+  .wv-example__fields { grid-template-columns: 1fr; gap: 2px; }
+  .wv-example__fields dd { margin-bottom: 6px; }
+}

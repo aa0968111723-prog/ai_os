@@ -59,6 +59,7 @@ import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 import { WorldviewPreview } from "../components/WorldviewPreview";
 import { WorldviewGuide } from "../components/WorldviewGuide";
+import { WorldviewExampleCard } from "../components/WorldviewExampleCard";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   useCollab,
@@ -704,6 +705,19 @@ export function ProjectPage({ id }: { id: string }) {
       return next;
     });
   };
+  /** 世界觀範例卡「我自己填」的關閉旗標（per 專案，沿用引導列同一套 localStorage 手法） */
+  const wvExampleStorageKey = `aios.wvExample.dismissed.${id}`;
+  const [wvExampleDismissed, setWvExampleDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(wvExampleStorageKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const dismissWvExample = () => {
+    setWvExampleDismissed(true);
+    try { localStorage.setItem(wvExampleStorageKey, "1"); } catch { /* 偏好儲存失敗不影響操作 */ }
+  };
   const archiveProject = trpc.projects.setArchived.useMutation({
     onSuccess: () => { utils.projects.get.invalidate({ id }); utils.projects.list.invalidate(); },
   });
@@ -849,6 +863,8 @@ export function ProjectPage({ id }: { id: string }) {
   const propCount = propCards.data?.length;
   const assetCount = assets.data?.length;
   const wvReady = isWorldviewReady(wv);
+  /** 快速層四項全空＝這個專案還沒起手，值得先給一份可照抄的範例 */
+  const wvBlank = !wv.logline.trim() && !wv.message.trim() && !wv.tones.length && !wv.styles.length;
 
   const toggle = (field: "tones" | "themes" | "styles", value: string) => {
     if (!canEdit) return; // 檢視者：chips 不可切換（樂觀更新會先亮再彈回，比不動更誤導）
@@ -1595,6 +1611,17 @@ export function ProjectPage({ id }: { id: string }) {
               ) : null}
             </h2>
             {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——世界觀可瀏覽、不能修改（打的字不會被儲存）。</Hint>}
+            {/* 全空的專案：先給一份可以照抄的範例（含「套下去 AI 會收到什麼」的預覽）。
+                唯讀成員也看得到範例本身，只是沒有套用按鈕。 */}
+            {wvBlank && !wvExampleDismissed && (
+              <WorldviewExampleCard
+                wv={wv}
+                kind={p.kind}
+                canEdit={canEdit}
+                onApply={(patch) => updateWv.mutate({ id, worldview: patch })}
+                onDismiss={dismissWvExample}
+              />
+            )}
             {/* 引導鋪軌：只讀 wv、不持有任何欄位值——它若緩衝草稿就會撞爛下面的
                 key 重掛 + onBlur 部分 patch（協作靠那組機制才不會互相覆蓋）。 */}
             <WorldviewGuide

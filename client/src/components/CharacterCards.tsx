@@ -311,6 +311,27 @@ export function CharacterCards({
         <EmptyState
           title="還沒有角色"
           description="加一張定裝卡（例：安倢＝紅傘、米白外套、帆布包、溫柔回望）。"
+          /* 範例本來只寫在說明裡、要自己打一次。EmptyState 收 action 就是為了
+             「不要死路」——直接建出這張範例卡，建完再改比從零想快得多。 */
+          action={
+            readOnly ? undefined : (
+              <Button
+                variant="tonal"
+                disabled={add.isPending || atProjectMax}
+                onClick={() =>
+                  add.mutate({
+                    projectId,
+                    name: "安倢",
+                    appearance: "紅色雨傘、米白外套、帆布包、無眼鏡、溫柔回望",
+                    notes: "由範例建立，可再改",
+                    clientRequestId: requestId.current,
+                  })
+                }
+              >
+                {add.isPending ? "建立中…" : "帶入這張範例卡"}
+              </Button>
+            )
+          }
         />
       )}
 
