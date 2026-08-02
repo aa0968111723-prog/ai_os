@@ -195,6 +195,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "adobe.disconnect": "中斷 Adobe 連結",
   "adobe.editPhoto": "在 Adobe 帳號內修圖",
   "adobe.renderTimeline": "在 Adobe 帳號內算圖剪輯",
+  "adobe.exportTimelineFormats": "匯出 Adobe 時間軸（FCP／Premiere／EDL）",
   // 跨裝置通知（subscribe/sync 實務上審計豁免——高頻例行回報＋含裝置金鑰，列入字典保底）
   "push.subscribe": "連結通知裝置",
   "push.sync": "同步通知裝置",
