@@ -106,7 +106,9 @@ with urllib.request.urlopen(req) as r:
 ok("音訊可下載且為 WAV", wav[:4] == b"RIFF")
 
 # ── 語音轉文字(需要音訊來源) ──
-g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/wizper", "prompt": "轉錄", "sourceUrl": audio_url})
+audio_assets = [a for a in call("GET", admin, "projects.assets", {"projectId": pid}) if a.get("kind") == "audio"]
+ok("TTS 成品已進素材庫", len(audio_assets) >= 1)
+g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/wizper", "prompt": "轉錄", "sourceAssetId": audio_assets[0]["id"]})
 g = wait_done(admin, g["id"])
 ok("語音轉文字 → 文字", g.get("status") == "done" and bool(g.get("resultText")))
 
