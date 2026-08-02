@@ -1,4 +1,1 @@
-// Adobe PR5: adobe_photo_edit / adobe_export_timeline / adobe_timeline_render draft + resolve
-// See artifacts/pr5/agentPlanning.ts for full content if this push is truncated.
-// TEMPORARY - full restore in progress by team.
-export {};
+PLACEHOLDER_TOO_LARGE - full content in artifacts/pr5/agentPlanning.ts - restoring via alternative
