@@ -78,6 +78,20 @@ describe("parseRealCost 單位規則", () => {
   });
 });
 
+describe("即時匯率與 Fal 餘額上限同口徑", () => {
+  it("相同美元單價會隨傳入的 USD/TWD 匯率重算點數", () => {
+    const priced = { cost: "$1/次", category: "text-to-image" as const };
+    expect(realPricePoints(priced, 29.5)).toBe(30);
+    expect(realPricePoints(priced, 33.2)).toBe(33);
+  });
+
+  it("按千字 TTS 也使用同一即時匯率", () => {
+    const model = getModel("fal-ai/elevenlabs/tts/eleven-v3")!;
+    expect(estimatePoints(model, { promptChars: 10_000, usdToTwdRate: 29 })).toBe(29);
+    expect(estimatePoints(model, { promptChars: 10_000, usdToTwdRate: 34 })).toBe(34);
+  });
+});
+
 describe("全目錄實價不變量（防覆寫迴圈被移位或繞過）", () => {
   it("凡可機械換算的 fal 模型，points ≡ 官方 USD 實價 × USD_TO_TWD", () => {
     for (const m of [...MODELS, ...LEGACY_MODELS]) {

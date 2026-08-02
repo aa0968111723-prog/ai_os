@@ -29,6 +29,9 @@ export function normalizePriceUnit(raw: string): string {
   if (u.includes("minute") || u === "min") return "minute";
   if (u.includes("image") || u.includes("img")) return "image";
   if (u.includes("video") && !u.includes("second")) return "video";
+  if (u.includes("character") || u.includes("char")) {
+    return u.includes("1000") || u.includes("1k") || u.includes("thousand") ? "1000characters" : "character";
+  }
   if (u.includes("token")) return "token";
   return u || "unit";
 }

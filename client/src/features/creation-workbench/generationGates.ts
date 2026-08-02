@@ -19,6 +19,7 @@ export type GenerationGateModel = {
   id: string;
   points: number;
   needs: string | null;
+  secondaryNeeds?: string | null;
 };
 
 export type GenerationGateSource = {
@@ -34,6 +35,9 @@ export type GenerationGateInput = {
   sourceAsset: GenerationGateSource | null;
   sourceUrl: string;
   sourceUrlError: string;
+  secondarySourceAsset?: GenerationGateSource | null;
+  secondarySourceUrl?: string;
+  secondarySourceUrlError?: string;
 };
 
 /**
@@ -41,13 +45,21 @@ export type GenerationGateInput = {
  * null = 可送出（仍可能因 submit.isPending 被鎖）。
  */
 export function getGenerationDisableReason(input: GenerationGateInput): string | null {
-  const { canEdit, model, prompt, sourceAsset, sourceUrl, sourceUrlError } = input;
+  const {
+    canEdit, model, prompt, sourceAsset, sourceUrl, sourceUrlError,
+    secondarySourceAsset = null, secondarySourceUrl = "", secondarySourceUrlError = "",
+  } = input;
   const needs = model?.needs;
   const missingSource = model != null && needs != null && !sourceAsset && !sourceUrl.trim();
   const badSourceUrl =
     model != null && needs != null && !sourceAsset && sourceUrl.trim() !== "" && sourceUrlError !== "";
   const incompatSource =
     !!needs && !!sourceAsset && (SOURCE_INCOMPAT[needs] ?? []).includes(sourceAsset.kind);
+  const secondaryNeeds = model?.secondaryNeeds;
+  const missingSecondary = !!secondaryNeeds && !secondarySourceAsset && !secondarySourceUrl.trim();
+  const incompatSecondary =
+    !!secondaryNeeds && !!secondarySourceAsset && (SOURCE_INCOMPAT[secondaryNeeds] ?? []).includes(secondarySourceAsset.kind);
+  const badSecondaryUrl = !!secondaryNeeds && !secondarySourceAsset && !!secondarySourceUrl.trim() && !!secondarySourceUrlError;
 
   return !canEdit
     ? "你在此專案是檢視者（唯讀），不能生成——需要編輯請組長到「成員權限」調整"
@@ -56,11 +68,17 @@ export function getGenerationDisableReason(input: GenerationGateInput): string |
       : !prompt.trim()
         ? "先填一句提示詞，描述想要的畫面"
         : missingSource
-          ? "這個模型需要來源素材——從素材庫選一個，或貼上網址"
+          ? "這個模型需要來源素材——請上傳本機檔、從素材庫選一個，或貼上雲端網址"
+          : missingSecondary
+            ? "這個模型還需要第二個來源檔——請上傳、從素材庫選取或貼上雲端網址"
           : incompatSource
-            ? `選到的素材是${sourceAsset!.kind === "audio" ? "音訊" : sourceAsset!.kind === "image" ? "圖片" : sourceAsset!.kind}，這個模型不能用它——請換一個來源`
+            ? `選到的素材是${sourceAsset!.kind === "audio" ? "音訊" : sourceAsset!.kind === "image" ? "圖片" : sourceAsset!.kind === "video" ? "影片" : sourceAsset!.kind === "doc" ? "文件／壓縮檔" : sourceAsset!.kind}，這個模型不能用它——請換一個來源`
+            : incompatSecondary
+              ? "第二來源檔案類型不相容——請換一個符合模型需求的檔案"
             : badSourceUrl
               ? "網址格式不對，需以 https:// 開頭"
+              : badSecondaryUrl
+                ? "第二來源網址格式不對，需以 https:// 開頭"
               : null;
 }
 
@@ -91,10 +109,16 @@ export function estimateGenerationPoints(
   model: GenerationGateModel | null | undefined,
   promptChars: number,
   resolveFull: (id: string) => ModelEntry | undefined = getModel,
+  usdToTwdRate?: number,
 ): number {
   if (!model) return 0;
   const full = resolveFull(model.id);
-  return full ? estimatePoints(full, { promptChars }) : model.points;
+  if (!full) return model.points;
+  const usageBased =
+    estimatePoints(full, { promptChars: 2000, usdToTwdRate }) !==
+    estimatePoints(full, { promptChars: 1, usdToTwdRate });
+  // Fal 即時目錄的扁平價已由伺服器按同一即時匯率算好；只有按字計費模型需在前端再依本次字數換算。
+  return usageBased ? estimatePoints(full, { promptChars, usdToTwdRate }) : model.points;
 }
 
 /** 是否顯示「依文字長度即時計費」提示（確認框用） */
@@ -136,6 +160,8 @@ export type GenerationSubmitInput = {
   prompt: string;
   sourceAssetId?: string;
   sourceUrl?: string;
+  secondarySourceAssetId?: string;
+  secondarySourceUrl?: string;
   characterIds?: string[];
   scenePresetIds?: string[];
   propIds?: string[];
@@ -149,6 +175,8 @@ export function buildGenerationSubmitInput(input: {
   prompt: string;
   sourceAsset: GenerationGateSource | null;
   sourceUrl: string;
+  secondarySourceAsset?: GenerationGateSource | null;
+  secondarySourceUrl?: string;
   characterIds: string[];
   scenePresetIds: string[];
   propIds?: string[];
@@ -160,6 +188,8 @@ export function buildGenerationSubmitInput(input: {
     prompt,
     sourceAsset,
     sourceUrl,
+    secondarySourceAsset = null,
+    secondarySourceUrl = "",
     characterIds,
     scenePresetIds,
     propIds = [],
@@ -171,6 +201,8 @@ export function buildGenerationSubmitInput(input: {
     prompt: prompt.trim(),
     sourceAssetId: model.needs && sourceAsset ? sourceAsset.id : undefined,
     sourceUrl: model.needs && !sourceAsset && sourceUrl.trim() ? sourceUrl.trim() : undefined,
+    secondarySourceAssetId: model.secondaryNeeds && secondarySourceAsset ? secondarySourceAsset.id : undefined,
+    secondarySourceUrl: model.secondaryNeeds && !secondarySourceAsset && secondarySourceUrl.trim() ? secondarySourceUrl.trim() : undefined,
     characterIds: characterIds.length ? characterIds : undefined,
     scenePresetIds: scenePresetIds.length ? scenePresetIds : undefined,
     propIds: propIds.length ? propIds : undefined,

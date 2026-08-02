@@ -1,6 +1,6 @@
 /**
  * USD → TWD 即時匯率（點數 1 點 = NT$1 政策下，Fal USD 餘額換算成可花點數的來源）。
- * - 優先：frankfurter.app（ECB 公開中間價，免金鑰）
+ * - 優先：ExchangeRate-API Open Access（免金鑰、涵蓋 TWD）
  * - 失敗：退回 shared/models 的 USD_TO_TWD（目錄校準常數 31）
  * - 快取 30 分鐘，避免每次扣點打外部
  */
@@ -36,13 +36,19 @@ function clampRate(n: number): number | null {
 
 async function fetchLiveUsdTwd(): Promise<number | null> {
   try {
-    // frankfurter：ECB 中間價；TWD 若缺則試 exchangerate.host 相容路徑
-    const res = await proxyFetch("https://api.frankfurter.app/latest?from=USD&to=TWD", {
+    // 官方 Open Access endpoint；每日更新，依服務條款快取，且回應明確包含 base_code/result。
+    // https://www.exchangerate-api.com/docs/free
+    const res = await proxyFetch("https://open.er-api.com/v6/latest/USD", {
       headers: { Accept: "application/json" },
       timeoutMs: 8_000,
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { rates?: { TWD?: number } };
+    const data = (await res.json()) as {
+      result?: string;
+      base_code?: string;
+      rates?: { TWD?: number };
+    };
+    if (data.result !== "success" || data.base_code !== "USD") return null;
     const rate = data?.rates?.TWD;
     return typeof rate === "number" ? clampRate(rate) : null;
   } catch (err) {

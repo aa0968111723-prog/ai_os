@@ -16,5 +16,6 @@ describe("money TWD", () => {
   it("usdUnitToPoints", () => {
     expect(usdUnitToPoints(0.04, "image")).toBe(1);
     expect(usdUnitToPoints(0.07, "second", { videoSeconds: 5, kindHint: "video" })).toBe(11);
+    expect(usdUnitToPoints(0.3, "1000characters", { promptChars: 2000, usdToTwdRate: 32.5 })).toBe(20);
   });
 });

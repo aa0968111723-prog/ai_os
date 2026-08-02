@@ -19,6 +19,7 @@ import {
 import { focusAndReveal } from "../../../lib/scrollIntoViewForChrome";
 import { revealWorkbenchAnchor, scrollToSelector } from "../workbenchNav";
 import { Button, Card, Chip, Hint, Meta } from "../../../components/ui";
+import { GenerationSourcePicker } from "../GenerationSourcePicker";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
   nonce: number;
@@ -116,6 +117,9 @@ export function DirectGenerateMode({
   );
   const [sourceUrl, setSourceUrl] = useState("");
   const [sourceUrlError, setSourceUrlError] = useState("");
+  const [secondarySourceAsset, setSecondarySourceAsset] = useState<{ id: string; title: string; kind: string } | null>(null);
+  const [secondarySourceUrl, setSecondarySourceUrl] = useState("");
+  const [secondarySourceUrlError, setSecondarySourceUrlError] = useState("");
   const [pickReq, setPickReq] = useState<{ modelId: string; nonce: number } | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [submitNotice, setSubmitNotice] = useState("");
@@ -262,8 +266,9 @@ export function DirectGenerateMode({
   }, [assets.data]);
 
   const needs = model?.needs;
+  const secondaryNeeds = model?.secondaryNeeds;
   const fullModel = model ? getModel(model.id) : undefined;
-  const estPoints = estimateGenerationPoints(model, prompt.length);
+  const estPoints = estimateGenerationPoints(model, prompt.length, getModel, model?.usdToTwdRate);
   const disableReason = getGenerationDisableReason({
     canEdit,
     model,
@@ -271,8 +276,19 @@ export function DirectGenerateMode({
     sourceAsset,
     sourceUrl,
     sourceUrlError,
+    secondarySourceAsset,
+    secondarySourceUrl,
+    secondarySourceUrlError,
   });
   const sourceOptions = filterCompatibleSources(assets.data ?? [], needs, sourceAsset?.id);
+  const secondarySourceOptions = filterCompatibleSources(assets.data ?? [], secondaryNeeds, secondarySourceAsset?.id);
+
+  useEffect(() => {
+    if (secondaryNeeds) return;
+    setSecondarySourceAsset(null);
+    setSecondarySourceUrl("");
+    setSecondarySourceUrlError("");
+  }, [secondaryNeeds]);
 
   const approvalNeeded = shouldShowApprovalThresholdNotice({
     myRole,
@@ -324,7 +340,9 @@ export function DirectGenerateMode({
       <ModelPicker onChange={setModel} pickRequest={pickReq} />
 
       <label htmlFor="gen-prompt">
-        {model?.kind === "audio" && model.needs == null
+        {model?.secondaryNeeds
+          ? "處理說明（例如：中文配音版；兩個來源檔請在下方選）"
+          : model?.kind === "audio" && model.needs == null
           ? "要唸的文字/音樂描述"
           : "提示詞（這支片的固定設定會自動帶，不用重講）"}
       </label>
@@ -333,7 +351,7 @@ export function DirectGenerateMode({
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         onFocus={(e) => focusAndReveal(e.currentTarget)}
-        placeholder="例：清晨禪堂，柔和光線灑落，一炷香的靜謐"
+        placeholder={model?.secondaryNeeds ? "例：中文配音版，保留原人物表情" : "例：清晨禪堂，柔和光線灑落，一炷香的靜謐"}
       />
 
       <div className="ctx-summary" style={{ marginTop: 8 }} role="group" aria-label="這次生成會帶入的上下文">
@@ -372,76 +390,40 @@ export function DirectGenerateMode({
           <summary style={{ cursor: "pointer", fontWeight: 600 }}>
             <Icon name="SlidersHorizontal" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
             進階設定
-            {sourceAsset || sourceUrl.trim()
-              ? "（已設來源）"
+            {(sourceAsset || sourceUrl.trim()) && (!model.secondaryNeeds || secondarySourceAsset || secondarySourceUrl.trim())
+              ? `（已設${model.secondaryNeeds ? "兩個" : ""}來源）`
               : `（${model.sourceHint ?? "來源素材"}）`}
           </summary>
           <div style={{ marginTop: 8 }}>
-            <label htmlFor="gen-source">{model.sourceHint ?? "來源素材"}</label>
-            {sourceOptions.length > 0 && (
-              <select
-                id="gen-source"
-                value={sourceAsset?.id ?? ""}
-                onChange={(e) => {
-                  const picked = sourceOptions.find((a) => a.id === e.target.value);
-                  setSourceAsset(
-                    picked ? { id: picked.id, title: picked.title, kind: picked.kind } : null,
-                  );
-                  if (picked) {
-                    setSourceUrl("");
-                    setSourceUrlError("");
-                  }
-                }}
-              >
-                <option value="">從本專案素材庫選…</option>
-                {sourceOptions.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    [{a.kind}] {a.title}
-                  </option>
-                ))}
-              </select>
-            )}
-            {sourceAsset ? (
-              <Meta as="p">
-                來源：{sourceAsset.title}（素材庫）
-                <Button size="sm"
-                  type="button"
-                  style={{ marginLeft: 8 }}
-                  onClick={() => setSourceAsset(null)}>
-                  改用網址
-                </Button>
-              </Meta>
-            ) : (
-              <>
-                <label htmlFor="gen-source-url">來源網址</label>
-                <input
-                  id="gen-source-url"
-                  value={sourceUrl}
-                  onChange={(e) => {
-                    setSourceUrl(e.target.value);
-                    setSourceUrlError("");
-                  }}
-                  onBlur={(e) => {
-                    const v = e.target.value.trim();
-                    if (!v) {
-                      setSourceUrlError("");
-                      return;
-                    }
-                    try {
-                      const u = new URL(v);
-                      setSourceUrlError(
-                        u.protocol === "http:" || u.protocol === "https:"
-                          ? ""
-                          : "網址格式不對，需以 https:// 開頭",
-                      );
-                    } catch {
-                      setSourceUrlError("網址格式不對，需以 https:// 開頭");
-                    }
-                  }}
-                  placeholder="https://…（或從上方素材庫選）"
+            <GenerationSourcePicker
+              projectId={projectId}
+              needs={model.needs}
+              sourceHint={model.sourceHint}
+              options={sourceOptions}
+              value={sourceAsset}
+              sourceUrl={sourceUrl}
+              sourceUrlError={sourceUrlError}
+              onChange={setSourceAsset}
+              onSourceUrlChange={setSourceUrl}
+              onSourceUrlError={setSourceUrlError}
+              idPrefix="gen-source-primary"
+            />
+            {model.secondaryNeeds && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-soft)" }}>
+                <GenerationSourcePicker
+                  projectId={projectId}
+                  needs={model.secondaryNeeds}
+                  sourceHint={model.secondarySourceHint}
+                  options={secondarySourceOptions}
+                  value={secondarySourceAsset}
+                  sourceUrl={secondarySourceUrl}
+                  sourceUrlError={secondarySourceUrlError}
+                  onChange={setSecondarySourceAsset}
+                  onSourceUrlChange={setSecondarySourceUrl}
+                  onSourceUrlError={setSecondarySourceUrlError}
+                  idPrefix="gen-source-secondary"
                 />
-                {sourceUrlError && <p className="error">{sourceUrlError}</p>}
-              </>
+              </div>
             )}
           </div>
         </Card>
@@ -566,6 +548,8 @@ export function DirectGenerateMode({
                     prompt,
                     sourceAsset,
                     sourceUrl,
+                    secondarySourceAsset,
+                    secondarySourceUrl,
                     characterIds,
                     scenePresetIds,
                     propIds,

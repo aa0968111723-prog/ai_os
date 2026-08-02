@@ -33,7 +33,13 @@ export function moneyFxNote(): string {
 export function usdUnitToPoints(
   priceUsd: number,
   unit: string,
-  opts?: { videoSeconds?: number; v2vMinutes?: number; kindHint?: string },
+  opts?: {
+    videoSeconds?: number;
+    v2vMinutes?: number;
+    promptChars?: number;
+    kindHint?: string;
+    usdToTwdRate?: number;
+  },
 ): number {
   if (!Number.isFinite(priceUsd) || priceUsd < 0) return 1;
   const videoSeconds = opts?.videoSeconds ?? DEFAULT_VIDEO_SECONDS_FOR_POINTS;
@@ -43,6 +49,9 @@ export function usdUnitToPoints(
   if (u === "second" || u === "sec" || u === "s") mul = videoSeconds;
   else if (u === "minute" || u === "min") {
     mul = (opts?.kindHint ?? "").includes("video") ? v2vMinutes : 1;
-  } else if (u === "token") mul = 1000;
-  return Math.max(1, Math.round(priceUsd * mul * USD_TO_TWD));
+  } else if (u === "character") mul = opts?.promptChars ?? 1000;
+  else if (u === "1000characters") mul = (opts?.promptChars ?? 1000) / 1000;
+  else if (u === "token") mul = 1000;
+  const rate = opts?.usdToTwdRate ?? USD_TO_TWD;
+  return Math.max(1, Math.round(priceUsd * mul * rate));
 }

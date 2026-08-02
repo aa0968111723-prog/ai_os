@@ -226,6 +226,7 @@ const MIME_EXT: Record<string, string> = {
   "audio/webm": ".webm", // MediaRecorder 手機/桌面錄音的預設容器（語音留言）
   "audio/mp3": ".mp3",
   "application/zip": ".zip",
+  "application/x-safetensors": ".safetensors",
   "text/plain": ".txt",
   "text/markdown": ".md",
   "application/pdf": ".pdf",

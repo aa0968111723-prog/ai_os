@@ -4,7 +4,7 @@
  * 依內容校正（.jpg 內容其實是 WebP）或拒絕（宣稱圖片但簽名辨識不出）。
  */
 import { describe, expect, it } from "vitest";
-import { resolveUploadMime, sniffMime } from "./storage";
+import { isAllowedUploadMime, mimeFromPath, resolveUploadMime, sniffMime } from "./storage";
 
 const pad = (b: number[]) => Buffer.concat([Buffer.from(b), Buffer.alloc(16)]);
 
@@ -61,6 +61,13 @@ describe("sniffMime", () => {
     expect(resolveUploadMime("image/heic", heic)).toEqual({ mime: "image/heic", corrected: false });
     // SVG：XML 文字無簽名，宣稱 image/svg+xml 應放行（強制下載）
     expect(resolveUploadMime("image/svg+xml", TEXT)).toEqual({ mime: "image/svg+xml", corrected: false });
+  });
+});
+
+describe("Fal LoRA upload MIME", () => {
+  it("allows .safetensors as a persisted project asset", () => {
+    expect(mimeFromPath("portrait-style.safetensors")).toBe("application/x-safetensors");
+    expect(isAllowedUploadMime("application/x-safetensors")).toBe(true);
   });
 });
 
