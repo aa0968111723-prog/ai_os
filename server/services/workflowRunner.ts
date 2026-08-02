@@ -9,6 +9,7 @@ import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getWorkflow } from "../../shared/models";
+import { continuitySnapshotSchema } from "../../shared/continuity";
 import { advanceGeneration, type GenerationRow } from "./generationCore";
 import { executeGenerationCommand } from "./generationCommand";
 import { finalizeAiTraceSession, recordAiTraceEventSafely } from "./aiTrace";
@@ -362,6 +363,10 @@ async function advanceRun(run: RunRow): Promise<void> {
   const stepPrompt = stepTemplate
     .replaceAll("{prompt}", run.prompt)
     .replaceAll("{prev}", prevText || run.prompt);
+  const parsedContinuitySnapshot = continuitySnapshotSchema.safeParse(run.continuitySnapshot);
+  const continuitySnapshot = parsedContinuitySnapshot.success && parsedContinuitySnapshot.data.locked
+    ? parsedContinuitySnapshot.data
+    : undefined;
 
   // 送出前再讀一次狀態：撈列到這裡有數秒空窗，使用者若剛按停就不要再扣點送出
   const [fresh] = await db.select().from(schema.workflowRuns).where(eq(schema.workflowRuns.id, run.id));
@@ -386,6 +391,7 @@ async function advanceRun(run: RunRow): Promise<void> {
           promptTemplate: stepTemplate,
           resolvedPrompt: stepPrompt,
           sourceFromPreviousStep: !!(presetStep.usePrevAsSource && prevUrl),
+          continuityFingerprint: continuitySnapshot?.fingerprint,
         },
       });
     }
@@ -406,6 +412,8 @@ async function advanceRun(run: RunRow): Promise<void> {
       characterIds: (run.characterIds as string[] | null) ?? undefined,
       scenePresetIds: (run.scenePresetIds as string[] | null) ?? undefined,
       propIds: (run.propIds as string[] | null) ?? undefined,
+      continuityMode: continuitySnapshot?.locked,
+      continuitySnapshot,
       workflowRunId: run.id, // 生成列回連本條 run——生成紀錄可回看來源
       reasonPrefix: "工作流生成",
     });

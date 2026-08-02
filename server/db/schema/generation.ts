@@ -174,6 +174,8 @@ export const workflowRuns = pgTable("workflow_runs", {
   characterIds: jsonb("character_ids").$type<string[]>(),
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   propIds: jsonb("prop_ids").$type<string[]>(),
+  /** 啟動時凍結的設定卡版本；整條工作流與每次重試都沿用，避免中途修改卡片造成跨鏡漂移。 */
+  continuitySnapshot: jsonb("continuity_snapshot").$type<ContinuitySnapshot>(),
   /** 單次執行的步驟 prompt 模板覆寫，key 為步驟索引字串；不改全域 preset。 */
   stepPromptOverrides: jsonb("step_prompt_overrides").$type<Record<string, string>>(),
   traceSessionId: uuid("trace_session_id"),

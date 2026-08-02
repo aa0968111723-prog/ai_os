@@ -30,9 +30,11 @@ import { formatCharacterAnchor, formatPropAnchor, formatSceneAnchor } from "./ca
 import type { ContinuitySnapshot } from "../../shared/continuity";
 import {
   applyContinuityReferences,
+  analyzeContinuitySnapshot,
   buildContinuitySnapshot,
   resolveContinuityReferenceUrls,
   type ContinuityReferenceResult,
+  type ContinuityCoverage,
 } from "./continuity";
 import { groupLeaderIds, pushToUsers } from "./webPush";
 import {
@@ -226,6 +228,7 @@ export interface PreparedGenerationRequest {
   anchors: { character: string; scene: string; prop: string };
   continuitySnapshot: ContinuitySnapshot | null;
   continuityReferences: ContinuityReferenceResult;
+  continuityCoverage: ContinuityCoverage;
   warnings: Array<{ code: string; severity: "info" | "warning"; title: string; detail: string; suggestion?: string }>;
 }
 
@@ -366,6 +369,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     ? await resolveContinuityReferenceUrls(continuitySnapshot, project.groupId, effectiveSourceAssetId)
     : [];
   const continuityReferences = applyContinuityReferences(providerInput, sourceUrl, referenceUrls);
+  const continuityCoverage = analyzeContinuitySnapshot(continuitySnapshot);
 
   const warnings: PreparedGenerationRequest["warnings"] = [];
   const selectedCards = (input.characterIds?.length ?? 0) + (input.scenePresetIds?.length ?? 0) + (input.propIds?.length ?? 0);
@@ -383,12 +387,26 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     detail: "本次只有卡片文字錨點進入 prompt；模型沒有來源圖欄位或尚未選定來源圖。",
     suggestion: "角色身份一致性要求高時，改用需要來源圖的模型並選定裝參考圖。",
   });
-  if (continuitySnapshot?.locked && continuitySnapshot.referenceAssetIds.length === 0) warnings.push({
+  if (continuitySnapshot?.locked && continuityCoverage.totalCards > 0 && continuityCoverage.cardsWithReference === 0) warnings.push({
     code: "continuity_text_only",
     severity: "warning",
     title: "一致性已鎖定，但目前只有文字設定",
     detail: "設定版本會固定供跨鏡重試使用；卡片尚未綁定參考圖，因此模型只能依文字維持外觀。",
     suggestion: "替主要角色、常用場景與關鍵道具各綁一張清楚的參考圖。",
+  });
+  if (continuitySnapshot?.locked && continuityCoverage.cardsWithReference > 0 && continuityCoverage.coveragePercent < 100) warnings.push({
+    code: "continuity_partial_references",
+    severity: "warning",
+    title: `一致性參考圖覆蓋 ${continuityCoverage.coveragePercent}%`,
+    detail: `已選 ${continuityCoverage.totalCards} 張設定卡，只有 ${continuityCoverage.cardsWithReference} 張有參考圖；缺少：${continuityCoverage.missingReferences.map((row) => row.name).join("、")}。`,
+    suggestion: "多鏡頭製作前先替缺少的主要角色、場景或道具補參考圖。",
+  });
+  if (continuityCoverage.duplicateNames.length > 0) warnings.push({
+    code: "continuity_ambiguous_names",
+    severity: "warning",
+    title: "設定卡名稱可能讓模型混淆",
+    detail: `同一次生成有重名設定：${continuityCoverage.duplicateNames.map((row) => row.name).join("、")}。`,
+    suggestion: "替角色、場景與道具使用可區分的名稱，並在提示詞寫出完整名稱。",
   });
   if (continuitySnapshot?.locked && continuityReferences.available > 0 && !continuityReferences.supported) warnings.push({
     code: "multi_reference_unsupported",
@@ -432,6 +450,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     anchors: { character, scene, prop },
     continuitySnapshot,
     continuityReferences,
+    continuityCoverage,
     warnings,
   };
 }

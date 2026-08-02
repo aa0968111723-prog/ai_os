@@ -7,6 +7,8 @@ import { db, schema } from "../db";
 import { getModel, getWorkflow } from "../../shared/models";
 import { savePromptCore } from "./prompts";
 import { createAiTraceSession, finalizeAiTraceSession, recordAiTraceEventSafely, sanitizeAiTracePayload, updateAiTraceSession } from "../services/aiTrace";
+import { assertGenerationEntityIds } from "../services/generationCore";
+import { analyzeContinuitySnapshot, buildContinuitySnapshot } from "../services/continuity";
 
 /** 與 services/workflowRunner 的 RunStep 同形狀（jsonb 落庫的每步快照） */
 interface RunStep {
@@ -31,6 +33,14 @@ export interface StartWorkflowCoreInput {
   assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
 }
 
+type WorkflowContinuitySelection = Pick<StartWorkflowCoreInput, "characterIds" | "scenePresetIds" | "propIds">;
+
+async function prepareWorkflowContinuity(projectId: string, selection: WorkflowContinuitySelection) {
+  await assertGenerationEntityIds(projectId, selection);
+  const snapshot = await buildContinuitySnapshot(projectId, selection, true);
+  return { snapshot, coverage: analyzeContinuitySnapshot(snapshot) };
+}
+
 /**
  * 啟動一條工作流（自 start mutation 原樣抽出，行為不變）：
  * presetId 白名單 → 專案存在＋組隔離 → 同人同專案單併發守門 → 建 run（實際送出由 runner 下一個 tick 接手）。
@@ -43,6 +53,7 @@ export async function startWorkflowCore(input: StartWorkflowCoreInput) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   await input.assertAccess(project); // 多組隔離（可含 2.3 專案級 ACL）
+  const { snapshot: continuitySnapshot } = await prepareWorkflowContinuity(project.id, input);
   // 併發守門：同人同專案一次只跑一條。以 advisory xact lock（classifier 3，與 points=0/approvals=1/
   // 拆分鏡=2 不撞）序列化「檢查有無在跑＋建 run」，徹底關掉 check-then-insert 的競態窗口——避免並發
   // 雙擊建出兩條 run、雙重扣點（原本只靠 runner 端冪等兜底，這裡從源頭擋掉）。
@@ -72,6 +83,7 @@ export async function startWorkflowCore(input: StartWorkflowCoreInput) {
         characterIds: input.characterIds?.length ? input.characterIds : null,
         scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
         propIds: input.propIds?.length ? input.propIds : null,
+        continuitySnapshot,
         stepPromptOverrides: input.stepPromptOverrides ?? null,
         traceSessionId: input.traceSessionId ?? null,
         steps,
@@ -112,6 +124,7 @@ export const workflowsRouter = router({
       requireGroup(ctx.auth, project.groupId);
       const { assertProjectEditable } = await import("../services/projectAcl");
       await assertProjectEditable(ctx.auth, project);
+      const { snapshot: continuitySnapshot, coverage: continuityCoverage } = await prepareWorkflowContinuity(project.id, input);
       const steps = preset.steps.map((step, index) => {
         const template = input.stepPromptOverrides?.[String(index)] ?? step.promptTemplate;
         const knownPrompt = template.replaceAll("{prompt}", input.prompt);
@@ -126,13 +139,35 @@ export const workflowsRouter = router({
           usePrevAsSource: !!step.usePrevAsSource,
         };
       });
-      const warnings = steps.filter((step) => step.dynamic).map((step) => ({
+      const warnings: Array<{ code: string; severity: "info" | "warning"; title: string; detail: string; suggestion?: string }> = steps.filter((step) => step.dynamic).map((step) => ({
         code: `workflow_dynamic_${step.index}`,
         severity: "info" as const,
         title: `步驟 ${step.index + 1} 需等前一步完成`,
         detail: "{prev} 會在執行時替換成上一個實際文字或媒體結果；送出前無法偽造確定值。",
       }));
-      const safe = sanitizeAiTracePayload({ presetId: preset.id, prompt: input.prompt, steps });
+      if (continuityCoverage.totalCards > 0 && continuityCoverage.coveragePercent < 100) warnings.push({
+        code: "workflow_continuity_partial_references",
+        severity: "warning",
+        title: `多鏡參考圖覆蓋 ${continuityCoverage.coveragePercent}%`,
+        detail: `已選 ${continuityCoverage.totalCards} 張設定卡，缺少參考圖：${continuityCoverage.missingReferences.map((row) => row.name).join("、")}。`,
+        suggestion: "為主要角色、常用場景與關鍵道具各綁定一張清楚參考圖，再開始多鏡工作流。",
+      });
+      if (continuityCoverage.duplicateNames.length > 0) warnings.push({
+        code: "workflow_continuity_ambiguous_names",
+        severity: "warning",
+        title: "設定卡名稱有歧義",
+        detail: `同一次工作流有重名設定：${continuityCoverage.duplicateNames.map((row) => row.name).join("、")}。`,
+        suggestion: "替角色、場景與素材使用可區分的名稱，避免提示詞指向錯誤。",
+      });
+      const continuitySummary = continuitySnapshot ? {
+        fingerprint: continuitySnapshot.fingerprint,
+        locked: continuitySnapshot.locked,
+        characters: continuitySnapshot.characters.length,
+        scenes: continuitySnapshot.scenes.length,
+        props: continuitySnapshot.props.length,
+        referenceCoverage: continuityCoverage,
+      } : null;
+      const safe = sanitizeAiTracePayload({ presetId: preset.id, prompt: input.prompt, steps, continuity: continuitySummary });
       return {
         mode: "workflow" as const,
         title: `範本「${preset.label}」，AI 會怎麼理解`,
@@ -141,6 +176,12 @@ export const workflowsRouter = router({
           { type: "character", label: `角色定裝 ${input.characterIds?.length ?? 0}`, included: !!input.characterIds?.length },
           { type: "scene", label: `場景設定 ${input.scenePresetIds?.length ?? 0}`, included: !!input.scenePresetIds?.length },
           { type: "prop", label: `素材設定 ${input.propIds?.length ?? 0}`, included: !!input.propIds?.length },
+          {
+            type: "continuity",
+            label: continuitySnapshot?.locked ? "整條工作流的一致性版本已鎖定" : "未選設定卡，沒有一致性快照",
+            included: !!continuitySnapshot?.locked,
+            note: continuitySnapshot ? `版本 ${continuitySnapshot.fingerprint.slice(0, 8)}・參考圖 ${continuityCoverage.cardsWithReference}/${continuityCoverage.totalCards}` : undefined,
+          },
         ],
         request: safe.payload,
         warnings,
@@ -202,6 +243,21 @@ export const workflowsRouter = router({
           await assertProjectEditable(ctx.auth, p);
         },
       });
+      if (run.continuitySnapshot) {
+        const coverage = analyzeContinuitySnapshot(run.continuitySnapshot);
+        await recordAiTraceEventSafely({
+          sessionId: trace.id,
+          eventType: "prepared",
+          summary: "已鎖定整條工作流的一致性版本",
+          payload: {
+            fingerprint: run.continuitySnapshot.fingerprint,
+            characters: run.continuitySnapshot.characters.length,
+            scenes: run.continuitySnapshot.scenes.length,
+            props: run.continuitySnapshot.props.length,
+            referenceCoverage: coverage,
+          },
+        });
+      }
       await updateAiTraceSession(trace.id, { status: "running", sourceType: "workflow", sourceId: run.id, summary: "工作流執行中" }).catch(() => undefined);
       return { ...run, traceSessionId: trace.id };
       } catch (error) {

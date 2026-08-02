@@ -11,6 +11,15 @@ export type ContinuitySelection = {
   propIds?: string[];
 };
 
+export type ContinuityEntityKind = "character" | "scene" | "prop";
+export type ContinuityCoverage = {
+  totalCards: number;
+  cardsWithReference: number;
+  coveragePercent: number;
+  missingReferences: Array<{ kind: ContinuityEntityKind; id: string; name: string }>;
+  duplicateNames: Array<{ name: string; entities: Array<{ kind: ContinuityEntityKind; id: string }> }>;
+};
+
 function stableFingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
@@ -117,6 +126,48 @@ export async function resolveContinuityReferenceUrls(
     if (!row) return [];
     return [row.storagePath ? signAssetUrl(row.id) : row.url].filter(Boolean);
   });
+}
+
+const normalizedEntityName = (name: string): string =>
+  name.normalize("NFKC").replace(/\s+/g, "").trim().toLocaleLowerCase("zh-Hant");
+
+/** 精確描述參考圖覆蓋率與同名歧義，不用主觀 AI 分數冒充準確率。 */
+export function analyzeContinuitySnapshot(snapshot: ContinuitySnapshot | null): ContinuityCoverage {
+  if (!snapshot) return {
+    totalCards: 0,
+    cardsWithReference: 0,
+    coveragePercent: 100,
+    missingReferences: [],
+    duplicateNames: [],
+  };
+  const entities = [
+    ...snapshot.characters.map((row) => ({ kind: "character" as const, ...row })),
+    ...snapshot.scenes.map((row) => ({ kind: "scene" as const, ...row })),
+    ...snapshot.props.map((row) => ({ kind: "prop" as const, ...row })),
+  ];
+  const missingReferences = entities
+    .filter((row) => !row.referenceAssetId)
+    .map(({ kind, id, name }) => ({ kind, id, name }));
+  const byName = new Map<string, Array<{ kind: ContinuityEntityKind; id: string; name: string }>>();
+  for (const row of entities) {
+    const key = normalizedEntityName(row.name);
+    if (!key) continue;
+    const group = byName.get(key) ?? [];
+    group.push({ kind: row.kind, id: row.id, name: row.name });
+    byName.set(key, group);
+  }
+  const duplicateNames = [...byName.values()]
+    .filter((rows) => rows.length > 1)
+    .map((rows) => ({ name: rows[0].name, entities: rows.map(({ kind, id }) => ({ kind, id })) }));
+  const totalCards = entities.length;
+  const cardsWithReference = totalCards - missingReferences.length;
+  return {
+    totalCards,
+    cardsWithReference,
+    coveragePercent: totalCards ? Math.round((cardsWithReference / totalCards) * 100) : 100,
+    missingReferences,
+    duplicateNames,
+  };
 }
 
 /** 以資產身分排除 primary，避免同一張本地圖因兩次簽名不同而重複佔位。 */
