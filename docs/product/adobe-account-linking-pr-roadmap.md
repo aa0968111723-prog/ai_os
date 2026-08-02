@@ -11,7 +11,7 @@
 | PR2 | OAuth 流程 + 前端連結 UI | 連結／撤銷／狀態（Mock 可跑） | ✅ 已實作 |
 | PR3 | Adobe 服務層（修圖 + 剪輯工具） | Client + Mock + 工具 | ✅ 已實作（real 模式部分能力待憑證） |
 | PR4 | 強化既有剪輯交付管線 | AdobeTimeline → FCPXML / Premiere XML / EDL | ✅ 已實作 |
-| PR5 | AI 代理 DAG 接入 | 新步驟種類 + 執行器 | ⬜ 待辦 |
+| PR5 | AI 代理 DAG 接入 | 新步驟種類 + 執行器 | ✅ 已實作 |
 | PR6 | 端到端整合與 UI 完善 | 完整流程 + 文件 + 測試 | ⬜ 待辦 |
 | PR7（可選） | Tauri 本機深度控制 | 真正控制本機 PS / Premiere | ⬜ 待辦 |
 
@@ -56,7 +56,7 @@ TOKEN_ENCRYPTION_KEY=
 ## 與現有系統接點
 
 - 現有 MCP Server (`/api/mcp`) 可未來暴露 Adobe 工具
-- `server/services/jianying.ts`、exporter 相關加強引用 Adobe 資產
+- `server/services/jianying.ts`、bundle 相關加強引用 Adobe 資產
 - `shared/plan.ts` + agentRunner 新增步驟
 - 點數、ACL、審批機制沿用
 
@@ -108,15 +108,30 @@ server/services/adobe/timelineExport.test.ts      空檔填補、轉場備註、
 server/routers/adobe.ts → exportTimelineFormats   純本機 mutation（不打 Adobe、不需限流）
 ```
 
-- **不依賴 Adobe 雲端算圖**：把時間軸契約轉成既有 `exporter.buildFcpxml`／`buildXmeml`／`buildEdl`。
+- **不依賴 Adobe 雲端算圖**：把時間軸契約轉成既有 `bundle.buildFcpxml`／`buildXmeml`／`buildEdl`。
 - **空檔填補**：片段之間的空隙自動補「空檔」列，匯入 NLE 後節奏與 `startSec` 一致。
 - **可選 mediaPathByAssetId**：素材已在交付包內時直接掛相對路徑；否則離線佔位，剪輯軟體內 relink。
 - **剪映草稿**：仍需本機二進位媒體檔才能組包；本 PR 先打通 FCP／Premiere／Resolve 通用格式，剪映草稿銜接留在 PR6（UI 打包）或後續。
 
-### 尚未進行（PR5–PR7）
+### PR5 實作結果
 
-代理 DAG 新步驟與執行器（PR5）、端到端 UI／MCP 工具曝露（PR6）、Tauri 本機控制（PR7）。
-PR5 才動 `shared/plan.ts` 與 agentRunner——步驟種類與副作用要一起上。
+```
+shared/plan.ts                                 +adobe_photo_edit / adobe_export_timeline / adobe_timeline_render
+shared/auditWording.ts                         agents.step.adobe_*
+server/services/agentDag.ts                    adobeJobId + listInFlightAdobeSteps
+server/services/agentPlanning.ts               draft schema + resolve mapping
+server/services/agentRunner.ts                 settleAdobeJob + 三步驟執行區塊
+server/services/agentCore.ts                   規劃 prompt 可用步驟
+```
+
+- **adobe_photo_edit**：`startAdobePhotoEdit` → `adobeJobId` 心跳 → `getAdobeJob` 結算（語意比照 generationId）。
+- **adobe_export_timeline**：純本機 `exportAdobeTimelineFormats`，同步完成，不需 Adobe 連結。
+- **adobe_timeline_render**：`startAdobeTimelineRender` 非同步；real 模式尚未支援時回明確錯誤。
+- 不扣站內點數（使用使用者自己的 Adobe 配額／本機轉換）。
+
+### 尚未進行（PR6–PR7）
+
+端到端 UI／MCP 工具曝露（PR6）、Tauri 本機控制（PR7）。
 
 ---
 此文件由 AI 協作規劃，作為實作依據。

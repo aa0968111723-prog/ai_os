@@ -5,6 +5,8 @@ export interface AgentDagStep {
   dependsOn?: string[];
   executionMode?: "dag";
   generationId?: string;
+  /** Adobe 非同步工作 id（修圖／時間軸算圖）；與 generationId 同語義：有 id 表示已送出、供應商在跑 */
+  adobeJobId?: string;
 }
 
 export type AgentDagStatus = "running" | "waiting" | "done" | "failed";
@@ -72,6 +74,16 @@ export function listInFlightGenerationSteps(steps: AgentDagStep[]): number[] {
   return out;
 }
 
+/** 已送出、Adobe 仍在跑的修圖／時間軸算圖步驟索引 */
+export function listInFlightAdobeSteps(steps: AgentDagStep[]): number[] {
+  const out: number[] = [];
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
+    if (step?.status === "running" && step.adobeJobId) out.push(index);
+  }
+  return out;
+}
+
 export function evaluateAgentDag(steps: AgentDagStep[]): AgentDagProgress {
   if (steps.length === 0 || steps.every((step) => step.status === "done")) {
     return { status: "done", nextIndex: steps.length };
@@ -113,6 +125,7 @@ export function evaluateAgentDag(steps: AgentDagStep[]): AgentDagProgress {
 export function stopPendingDagSteps(steps: AgentDagStep[]): void {
   for (const step of steps) {
     if (step.status === "pending" || step.status === "waiting") step.status = "stopped";
-    if (step.status === "running" && !step.generationId) step.status = "stopped";
+    // 已送出的生成／Adobe 工作允許自然結算；沒有外部工作 id 的 running 才立即收停
+    if (step.status === "running" && !step.generationId && !step.adobeJobId) step.status = "stopped";
   }
 }
