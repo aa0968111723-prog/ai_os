@@ -44,6 +44,11 @@ import {
 } from "../services/aiModelPolicy";
 import { resolveModel } from "../services/modelResolve";
 import { buildProjectIntelligence } from "../services/projectIntelligence";
+import {
+  createAiTraceSession,
+  recordAiTraceEventSafely,
+  updateAiTraceSession,
+} from "../services/aiTrace";
 
 /**
  * 專案 AI 代理系統（統一入口）：一個對話統包「問答、發想、拆分鏡、排計畫執行、查資料庫」——
@@ -436,6 +441,7 @@ export interface AskCoreInput {
   mode?: AgentPlannerMode;
   /** 工作台勾選的知識篇：注入時 preferIds 優先（與代理 extraSourceIds 同語意） */
   knowledgeIds?: string[];
+  traceSessionId?: string;
 }
 export interface AskCoreResult {
   answer: string;
@@ -448,6 +454,7 @@ export interface AskCoreResult {
   model?: string;
   /** auto 模式下 NIM 失敗轉付費 fal 時為 true */
   fellBackToPaid?: boolean;
+  traceSessionId?: string;
 }
 /** 查詢工具 → 給使用者看的中文名（串流「正在查素材庫…」用） */
 const LOOKUP_LABEL: Record<string, string> = {
@@ -460,6 +467,7 @@ const LOOKUP_LABEL: Record<string, string> = {
  * 不帶 onEvent 時行為與原本 ask 完全一致（只在結束回 steps 摘要）。所有花點數/改資料仍只在 runAction，經使用者確認。
  */
 export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStreamEvent) => void): Promise<AskCoreResult> {
+  let traceSessionId = input.traceSessionId;
   const emit = (phase: AskStreamEvent["phase"], text: string) => {
     try { onEvent?.({ phase, text }); } catch { /* 串流端斷線不影響問答本身 */ }
   };
@@ -477,6 +485,28 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND" });
       if (!input.auth.groups.some((g) => g.groupId === project.groupId)) throw new TRPCError({ code: "FORBIDDEN", message: "你不屬於這個組" });
+      if (!traceSessionId) {
+        const trace = await createAiTraceSession({
+          groupId: project.groupId,
+          projectId: project.id,
+          userId: input.auth.user.id,
+          mode: "ask",
+          title: input.message.slice(0, 160),
+          summary: "專案助手問答",
+        });
+        traceSessionId = trace.id;
+      }
+      await recordAiTraceEventSafely({
+        sessionId: traceSessionId,
+        eventType: "prepared",
+        summary: "已整理使用者問題與專案存取範圍",
+        payload: {
+          message: input.message,
+          requestedMode: input.mode ?? "nim",
+          knowledgeIds: input.knowledgeIds ?? [],
+          projectId: project.id,
+        },
+      });
       emit("thinking", "讀取專案現況與知識庫…");
       const wv = worldviewSchema.parse(project.worldview ?? {});
 
@@ -583,7 +613,9 @@ ${sceneLines}
           ? [{ type: "plan_agent", goal: goal.slice(0, 1000), label: `讓 AI 代理排計畫：「${goal.slice(0, 30)}${goal.length > 30 ? "…" : ""}」（規劃依實際 token 扣點，執行前再核准）` }]
           : [];
         const answer = `（測試模式）目前有 ${scenes.length} 個分鏡，其中待審 ${pendingCount} 個；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${readableDbs.length} 個。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
-        return { answer, actions: mockActions, steps: [] as string[], mock: true, fallback: false };
+        await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "測試模式回答完成", payload: { answer, actions: mockActions } });
+        await updateAiTraceSession(traceSessionId, { status: "completed", provider: "mock", model: "mock" }).catch(() => undefined);
+        return { answer, actions: mockActions, steps: [] as string[], mock: true, fallback: false, traceSessionId };
       }
 
       const quotaError = await reserveQuota(input.auth.user.id, project.groupId, ASK_COST_POINTS, "AI 專案助手");
@@ -653,10 +685,25 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         for (let round = 0; ; round++) {
           // 用戶端已斷線（SSE close）：不再發起下一次 LLM 呼叫，提早收工不白燒免費額度。
           // 回傳值不會被寫回（sse 對已關閉連線是 no-op），僅用來乾淨結束迴圈。
-          if (input.signal?.aborted) return { answer: "", actions: [], steps, mock: false, fallback: true };
+          if (input.signal?.aborted) return { answer: "", actions: [], steps, mock: false, fallback: true, traceSessionId };
           emit("thinking", round === 0 ? "思考中…" : "整理查到的資料，繼續思考…");
           const forceFinal = round >= MAX_TOOL_ROUNDS;
-          const completion = await callLlm(buildPrompt(toolBlocks, forceFinal), input.signal, input.mode);
+          const providerPrompt = buildPrompt(toolBlocks, forceFinal);
+          const startedAt = Date.now();
+          await recordAiTraceEventSafely({
+            sessionId: traceSessionId,
+            eventType: "provider_request",
+            summary: `送出第 ${round + 1} 輪模型請求`,
+            payload: { prompt: providerPrompt, mode: input.mode ?? "nim", forceFinal },
+          });
+          const completion = await callLlm(providerPrompt, input.signal, input.mode);
+          await recordAiTraceEventSafely({
+            sessionId: traceSessionId,
+            eventType: "provider_response",
+            summary: `收到第 ${round + 1} 輪模型回應`,
+            latencyMs: Date.now() - startedAt,
+            payload: completion,
+          });
           // 記下最後一次實際用到的供應商——auto 模式可能中途轉備援，UI 要能誠實顯示
           usedProvider = completion.provider;
           usedModel = completion.model;
@@ -673,8 +720,10 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           if (json && !forceFinal) {
             const toolCall = toolCallSchema.safeParse(json);
             if (toolCall.success) {
+              await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "tool_call", summary: `呼叫 ${toolCall.data.tool}`, payload: toolCall.data });
               emit("lookup", `正在查${LOOKUP_LABEL[toolCall.data.tool] ?? "資料"}…`);
               const r = await runLookupTool(project, scenes, readableDbs, toolCall.data);
+              await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "tool_result", summary: r.step, payload: { tool: toolCall.data.tool, result: r.text } });
               steps.push(r.step);
               emit("step", r.step);
               toolBlocks += `\n<工具結果 tool="${toolCall.data.tool}" 第${round + 1}輪>\n${r.text}\n</工具結果>`;
@@ -684,19 +733,28 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
           emit("thinking", "整理回答…");
           const parsed = json ? replySchema.safeParse(json) : null;
           if (parsed?.success) {
-            return { answer: parsed.data.answer, actions: resolve(parsed.data.actions ?? []), steps, mock: false, fallback: false, provider: usedProvider, model: usedModel, fellBackToPaid };
+            const actions = resolve(parsed.data.actions ?? []);
+            await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "回答與建議動作已整理完成", payload: { answer: parsed.data.answer, actions, steps } });
+            await updateAiTraceSession(traceSessionId, { status: "completed", provider: usedProvider, model: usedModel }).catch(() => undefined);
+            return { answer: parsed.data.answer, actions, steps, mock: false, fallback: false, provider: usedProvider, model: usedModel, fellBackToPaid, traceSessionId };
           }
           // LLM 常把「提議動作」誤用唯讀工具格式（如 {"tool":"split_script",…}）——救回成正規動作提議，
           // 不讓它掉進下方 fallback 把原始 JSON 洩漏給使用者（C2 self-healing）
           const coerced = coerceActionToolCall(json);
           if (coerced) {
-            return { answer: coerced.answer, actions: resolve(coerced.actions ?? []), steps, mock: false, fallback: false, provider: usedProvider, model: usedModel, fellBackToPaid };
+            const actions = resolve(coerced.actions ?? []);
+            await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "已修正模型格式並完成回答", payload: { answer: coerced.answer, actions, steps } });
+            await updateAiTraceSession(traceSessionId, { status: "completed", provider: usedProvider, model: usedModel }).catch(() => undefined);
+            return { answer: coerced.answer, actions, steps, mock: false, fallback: false, provider: usedProvider, model: usedModel, fellBackToPaid, traceSessionId };
           }
           // 真的解析失敗：把回答裡所有 JSON 區塊一律移除（絕不把原始 JSON／工具呼叫洩漏給使用者），
           // 剩純文字才用，否則給具體引導語。LLM 已計費不退點，但前端不會拿到壞資料。
           const stripped = raw.replace(/\{[\s\S]*\}/g, "").trim();
           const fallbackText = stripped || "我不太確定要怎麼幫你——可以把想做的事講得更具體嗎？例如「把這段腳本拆成分鏡」或「為第 3 鏡生成畫面」。";
-          return { answer: fallbackText.slice(0, 4000), actions: [] as ResolvedAction[], steps, mock: false, fallback: true, provider: usedProvider, model: usedModel, fellBackToPaid };
+          const answer = fallbackText.slice(0, 4000);
+          await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "以安全的純文字備援完成回答", payload: { answer, steps } });
+          await updateAiTraceSession(traceSessionId, { status: "completed", provider: usedProvider, model: usedModel }).catch(() => undefined);
+          return { answer, actions: [] as ResolvedAction[], steps, mock: false, fallback: true, provider: usedProvider, model: usedModel, fellBackToPaid, traceSessionId };
         }
       } catch (err) {
         await refund(input.auth.user.id, project.groupId, ASK_COST_POINTS, "AI 專案助手失敗退回");
@@ -704,7 +762,9 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
         const answer = err instanceof NimServiceError || err instanceof LlmServiceError
           ? err.message
           : "AI 助手暫時沒回應，請稍後再問一次。";
-        return { answer, actions: [] as ResolvedAction[], steps, mock: false, fallback: true };
+        await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "failed", summary: "專案助手呼叫失敗", payload: { error: err instanceof Error ? err.message : String(err) } });
+        await updateAiTraceSession(traceSessionId, { status: "failed" }).catch(() => undefined);
+        return { answer, actions: [] as ResolvedAction[], steps, mock: false, fallback: true, traceSessionId };
       }
   }
 }
@@ -712,6 +772,42 @@ ${knowledgeCtx ? `<專案知識庫>\n${knowledgeCtx}\n</專案知識庫>\n` : ""
 export const assistantRouter = router({
   /** 助手可代操的多模態生成模型（供前端「換模型」下拉；與 pickGenerateModel 白名單同源） */
   generateModels: authedProcedure.query(() => listAssistantGenerateModels()),
+
+  preview: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      message: z.string().min(1).max(1000),
+      mode: agentPlannerModeSchema.optional(),
+      knowledgeIds: z.array(z.string().uuid()).max(20).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project);
+      return {
+        mode: "ask" as const,
+        title: "專案助手會讀到什麼",
+        dynamicNotice: "工具查詢結果與完整模型請求會在實際執行時才產生，完成後可在「查看實際運作」逐步核對。",
+        provider: input.mode?.startsWith("fal_") ? "fal-openrouter" : "nvidia-nim",
+        context: [
+          { type: "project", label: project.title, id: project.id, included: true },
+          { type: "knowledge", label: `優先知識 ${input.knowledgeIds?.length ?? 0} 筆`, included: true },
+          { type: "tools", label: "素材、分鏡、生成紀錄、模型目錄、可讀資料庫", included: true },
+        ],
+        request: {
+          message: input.message,
+          requestedMode: input.mode ?? "nim",
+          preferredKnowledgeIds: input.knowledgeIds ?? [],
+          responseContract: { answer: "string", actions: "proposed actions[]" },
+        },
+        warnings: input.knowledgeIds?.length
+          ? []
+          : [{ code: "NO_PREFERRED_KNOWLEDGE", severity: "info" as const, title: "未指定優先知識", detail: "系統仍會讀取專案現況與自動選入的知識，但沒有固定優先條目。" }],
+        estimatedPoints: 0,
+        canOverrideCreativePrompt: false,
+      };
+    }),
 
   /** 問答：讀專案現況回答，並可提議動作（僅提議，不執行）。核心與 SSE 串流路由共用 runAssistantAsk。 */
   ask: authedProcedure

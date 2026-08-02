@@ -13,7 +13,7 @@ import { Badge, Button, Card, Hint, Meta } from "../components/ui";
 /**
  * 連接的資料來源（/integrations）：每個人自己連「自己的」外部服務——
  * Google 雲端硬碟（OAuth，只讀）、Notion（個人 integration token）、外部資料庫/API（自帶金鑰）。
- * 連上後在「知識與資料」的匯入入口直接生效：私有 Google 檔、自己的 Notion 頁、
+ * 連上後在「知識與資料」的匯入入口直接生效：私有 Google 檔、自己的 Notion 頁與資料庫、
  * 自家系統的 API 都抓得到。憑證加密存放、永不回顯；權限只及本人，隨時可移除。
  */
 export function IntegrationsPage() {
@@ -230,9 +230,10 @@ function NotionCard({ data }: { data: { connected: boolean; workspace: string | 
       <h2><Icon name="FileText" size={18} /> Notion</h2>
       <Hint style={{ marginTop: 4 }}>
         到 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noreferrer">notion.so/my-integrations</a> 建立整合、
-        複製 Internal Integration Secret 貼進來，並在 Notion 把要匯入的頁面「連結」給該整合（頁面右上 ⋯ → Connections）。
-        完成後到「知識與資料」用「從 Notion 選頁」搜尋並多選匯入（也可照舊貼頁面連結）。
-        AI 只會讀「你選中並匯入」的頁面——連接整合不等於把整個 workspace 交給 AI。
+        複製 Internal Integration Secret 貼進來，並在 Notion 把要匯入的頁面或資料庫「連結」給該整合（右上 ⋯ → Connections；
+        資料庫要在資料庫本身那一頁操作，不是在單一列的頁面）。
+        完成後到「知識與資料」用「從 Notion 選頁／資料庫」搜尋並多選匯入（也可照舊貼連結）。
+        AI 只會讀「你選中並匯入」的內容——連接整合不等於把整個 workspace 交給 AI。
         {data?.siteTokenAvailable && !data.connected ? "（站方已設共用 token，你也可以不設、直接用共用的）" : ""}
       </Hint>
       {!data ? (

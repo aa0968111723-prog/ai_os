@@ -19,6 +19,8 @@ import {
 import { focusAndReveal } from "../../../lib/scrollIntoViewForChrome";
 import { revealWorkbenchAnchor, scrollToSelector } from "../workbenchNav";
 import { Button, Card, Chip, Hint, Meta } from "../../../components/ui";
+import type { CreativePromptOverride } from "@shared/aiTrace";
+import { AiUnderstandingPanel } from "../AiUnderstandingPanel";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
   nonce: number;
@@ -120,6 +122,8 @@ export function DirectGenerateMode({
   const [confirming, setConfirming] = useState(false);
   const [submitNotice, setSubmitNotice] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [promptOverride, setPromptOverride] = useState<CreativePromptOverride>({});
+  const [traceSessionId, setTraceSessionId] = useState<string | null>(null);
 
   const prompt = draft.prompt ?? "";
   const setPrompt = (next: string) => setDraft({ prompt: next });
@@ -131,10 +135,17 @@ export function DirectGenerateMode({
   const savePrompt = trpc.prompts.save.useMutation({
     onSuccess: () => utils.prompts.list.invalidate({ projectId }),
   });
+  const preview = trpc.generation.preview?.useMutation?.() ?? {
+    data: undefined,
+    error: null,
+    isPending: false,
+    mutate: (_input: unknown) => undefined,
+  };
 
   const submitRequestId = useRef<string>(crypto.randomUUID());
   const submit = trpc.generation.submit.useMutation({
     onSuccess: (data, vars) => {
+      setTraceSessionId(data.traceSessionId);
       submitRequestId.current = crypto.randomUUID();
       if (data.status !== "awaiting_approval" && data.status !== "rejected") {
         savePrompt.mutate({
@@ -147,6 +158,7 @@ export function DirectGenerateMode({
         });
       }
       setPrompt("");
+      setPromptOverride({});
       setConfirming(false);
       setSubmitNotice(
         data.status === "awaiting_approval"
@@ -463,6 +475,31 @@ export function DirectGenerateMode({
         remainingLabel={remainingLabel}
       />
 
+      {canEdit ? <AiUnderstandingPanel
+        projectId={projectId}
+        preview={preview.data}
+        previewPending={preview.isPending}
+        previewError={preview.error?.message ?? (!model ? "請先選擇模型。" : !prompt.trim() ? "請先填寫提示詞。" : undefined)}
+        onPreview={() => {
+          if (!model || !prompt.trim()) return;
+          const base = buildGenerationSubmitInput({
+            projectId,
+            model,
+            prompt,
+            sourceAsset,
+            sourceUrl,
+            characterIds,
+            scenePresetIds,
+            propIds,
+            clientRequestId: submitRequestId.current,
+          });
+          preview.mutate({ ...base, promptOverride: Object.values(promptOverride).some(Boolean) ? promptOverride : undefined });
+        }}
+        traceSessionId={traceSessionId}
+        override={promptOverride}
+        onOverrideChange={setPromptOverride}
+      /> : null}
+
       <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
         <button
           type="button"
@@ -559,8 +596,8 @@ export function DirectGenerateMode({
               disabled={submit.isPending}
               onClick={() =>
                 model &&
-                submit.mutate(
-                  buildGenerationSubmitInput({
+                submit.mutate({
+                  ...buildGenerationSubmitInput({
                     projectId,
                     model,
                     prompt,
@@ -571,7 +608,8 @@ export function DirectGenerateMode({
                     propIds,
                     clientRequestId: submitRequestId.current,
                   }),
-                )
+                  promptOverride: Object.values(promptOverride).some(Boolean) ? promptOverride : undefined,
+                })
               }
             >
               {submit.isPending ? "生成中…" : "確認生成"}

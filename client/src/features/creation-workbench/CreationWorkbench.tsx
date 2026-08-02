@@ -5,6 +5,7 @@ import { flashAnchor } from "../../discuss";
 import { CreationContextBar } from "./CreationContextBar";
 import { CreationGoalInput } from "./CreationGoalInput";
 import { CreationModeTabs, modePanelId, modeTabId } from "./CreationModeTabs";
+import { AiTraceHistory } from "./AiTraceHistory";
 import { CreationResourceDrawer } from "./CreationResourceDrawer";
 import {
   applyCreationAction,
@@ -372,6 +373,7 @@ export function CreationWorkbench({
         {running > 0 && <Pill status="running">執行中 {running}</Pill>}
         {waiting > 0 && <Pill status="queued">等待人員 {waiting}</Pill>}
         {awaiting > 0 && <Pill status="queued">待核准 {awaiting}</Pill>}
+        {canEdit ? <AiTraceHistory projectId={projectId} /> : null}
         <Button variant="ghost" size="sm"
           type="button"
           aria-expanded={!collapsed}
@@ -428,6 +430,7 @@ export function CreationWorkbench({
           panelId={modePanelId(tabPrefix, "ask")}
           labelledBy={modeTabId(tabPrefix, "ask")}
           active={mode === "ask"}
+          canEdit={canEdit}
           onCreationAction={handleCreationAction}
           onSavePromptSuggestion={canEdit ? handleSavePromptSuggestion : undefined}
           onSaveSceneDraft={canEdit ? handleSaveSceneDraft : undefined}
@@ -464,6 +467,7 @@ export function CreationWorkbench({
           panelId={modePanelId(tabPrefix, "template")}
           labelledBy={modeTabId(tabPrefix, "template")}
           active={mode === "template"}
+          canEdit={canEdit}
           goal={draft.goal}
           templateId={draft.templateId}
           promptRequest={workflowPromptRequest}

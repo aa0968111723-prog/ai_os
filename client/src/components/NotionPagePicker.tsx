@@ -6,8 +6,9 @@ import { Icon } from "../components/Icon";
 
 /**
  * Notion 選頁器（PR-E4）：與 Google 選檔同一心智模型——連接 → 搜尋 → 勾選 → 匯入。
- * 只列 token 權限內（分享給整合）的頁面中繼資料；內容等按匯入才走既有 notion import
- *（databases.importUrl 以頁面 id 組回 notion.so 網址，SSRF／大小守衛全沿用）。
+ * 只列 token 權限內（分享給整合）的頁面／資料庫中繼資料；內容等按匯入才走既有 notion import
+ *（databases.importUrl 以 id 組回 notion.so 網址，SSRF／大小守衛全沿用；
+ * 伺服器端自動分辨頁面走 blocks、資料庫走 databases query）。
  */
 
 export function NotionPagePicker({ tableId, onImported, onClose }: {
@@ -50,7 +51,7 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
     let okCount = 0;
     for (const p of picked) {
       try {
-        // 頁面 id → notion.so 網址；normalizeImportUrl 解析回同一頁，走官方 API 抽文字
+        // 頁面／資料庫 id → notion.so 網址；normalizeImportUrl 解析回同一個 id，走官方 API 抽文字
         await importUrl.mutateAsync({
           tableId,
           url: `https://www.notion.so/${p.id.replace(/-/g, "")}`,
@@ -74,7 +75,7 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
   return (
     <div style={{ border: "1px solid var(--border-soft, #eee)", borderRadius: 8, padding: 12, marginTop: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <strong><Icon name="FileText" size={14} /> 從 Notion 選頁</strong>
+        <strong><Icon name="FileText" size={14} /> 從 Notion 選頁／資料庫</strong>
         {data?.ok && (
           <span className="meta">目前以 {data.workspace ? `「${data.workspace}」workspace` : "已連接的 Notion 整合"} 瀏覽</span>
         )}
@@ -84,7 +85,7 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
 
       {data && !data.ok && data.reason === "not-connected" && (
         <Hint as="p" layer="always" style={{ marginTop: 8 }}>
-          還沒設定 Notion。設定後只有「分享給整合」的頁面會出現在這裡，AI 只讀你選中匯入的頁面。
+          還沒設定 Notion。設定後只有「分享給整合」的頁面／資料庫會出現在這裡，AI 只讀你選中匯入的內容。
           <Link href="/integrations" className="btn-tonal btn-sm" style={{ marginLeft: 8 }}>前往設定 Notion <Icon name="ArrowRight" size={13} /></Link>
         </Hint>
       )}
@@ -101,7 +102,7 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { setSubmittedQuery(query.trim()); setSelected(new Set()); } }}
-              placeholder="搜尋頁面標題（留空＝最近編輯）"
+              placeholder="搜尋頁面／資料庫標題（留空＝最近編輯）"
               style={{ flex: "1 1 240px" }}
               maxLength={200}
             />
@@ -116,7 +117,8 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
 
           {data?.ok && pages.length === 0 && !list.isFetching && (
             <Hint as="p" layer="always" style={{ marginTop: 8 }}>
-              找不到頁面——確認頁面已「分享給整合」（頁面右上 ⋯ → 連接 → 選你的 integration），或換個關鍵字。
+              找不到頁面或資料庫——確認它已「分享給整合」（右上 ⋯ → 連接 → 選你的 integration；
+              資料庫要在資料庫本身那一頁操作，不是在單一列的頁面），或換個關鍵字。
             </Hint>
           )}
 
@@ -134,7 +136,9 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
                     onChange={() => toggle(p.id)}
                     style={{ width: "auto" }}
                   />
+                  <Icon name={p.type === "database" ? "Database" : "FileText"} size={13} />
                   <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 300 }}>{p.title}</span>
+                  {p.type === "database" && <span className="meta">資料庫</span>}
                   <span className="meta">{p.lastEdited ? new Date(p.lastEdited).toLocaleDateString() : ""}</span>
                 </label>
               ))}
@@ -150,7 +154,7 @@ export function NotionPagePicker({ tableId, onImported, onClose }: {
             >
               {importing ? `匯入中（${results.length}/${selected.size}）…` : `匯入選取（${selected.size}）`}
             </Button>
-            <span className="meta">只會匯入你勾選的頁面；內容進站後才會被 AI 讀到。</span>
+            <span className="meta">只會匯入你勾選的頁面／資料庫；資料庫會抓成一張純文字表格，內容進站後才會被 AI 讀到。</span>
           </div>
 
           {results.length > 0 && (

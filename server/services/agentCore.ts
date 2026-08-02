@@ -47,6 +47,7 @@ import {
 import { buildProjectIntelligence } from "./projectIntelligence";
 import { stopPendingDagSteps } from "./agentDag";
 import { recordAgentEventSafely } from "./agentEventCore";
+import { recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
 import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
@@ -576,6 +577,7 @@ export async function planAgentCore(input: {
   driveFileIds?: string[];
   /** D5/M4：明確指定 playbook（如 playbook.creation.short.v1 創作短版）——與工作台入口同一語意 */
   playbookId?: string;
+  traceSessionId?: string;
 }): Promise<AgentRunRow> {
   const { auth } = input;
   // 沒指定就用高品質檔（DEFAULT_AGENT_PLANNER_MODE）：規劃品質決定後面執行要燒多少點，
@@ -634,11 +636,21 @@ export async function planAgentCore(input: {
         summary: plan.summary,
         planSummary: plan.planSummary,
         plannerTelemetry,
+        traceSessionId: input.traceSessionId ?? null,
         steps: plan.steps,
         estPoints: plan.estPoints,
       })
       .returning();
     await recordPlannedEvent(run);
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "completed",
+        summary: "測試模式已建立固定代理計畫",
+        payload: { goal, plan },
+      });
+      await updateAiTraceSession(input.traceSessionId, { status: "completed", sourceType: "agent_run", sourceId: run.id, summary: "代理計畫已建立" }).catch(() => undefined);
+    }
     return run;
   }
 
@@ -765,12 +777,51 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
   );
   if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
 
+  if (input.traceSessionId) {
+    await recordAiTraceEventSafely({
+      sessionId: input.traceSessionId,
+      eventType: "provider_request",
+      summary: "送出代理規劃請求",
+      payload: {
+        plannerMode,
+        // 預留點數也進軌跡：「這次規劃打算花多少」與「實際花多少」要能對得起來
+        pointsReserved: reservedPoints,
+        prompt,
+        contextManifest: {
+          scenes: scenes.length,
+          members: plannerContext.members.length,
+          notes: plannerContext.notes.length,
+          schedules: plannerContext.schedules.length,
+          tasks: plannerContext.tasks.length,
+          characters: plannerContext.characters.length,
+          scenePresets: plannerContext.scenePresets.length,
+          props: plannerContext.props.length,
+          assets: plannerContext.assets.length,
+          knowledgeIncludedChars,
+          knowledgeTotalChars,
+          knowledgeTruncated,
+        },
+      },
+    });
+  }
+
   let generated: Awaited<ReturnType<typeof generateAgentPlanDraft>>;
   try {
     generated = await generateAgentPlanDraft(prompt, plannerMode);
   } catch (err) {
     // 供應商整段失敗＝沒有產生用量，預留全額退回
     await refund(auth.user.id, project.groupId, reservedPoints, "AI 代理規劃失敗退回");
+    // 軌跡也要收尾：規劃在「模型呼叫」這一段就死掉時，session 不留 failed 會永遠停在進行中
+    if (input.traceSessionId) {
+      const message = err instanceof Error ? err.message : String(err);
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "failed",
+        summary: "規劃模型沒有回應（預留點數已退回）",
+        payload: { error: message, pointsRefunded: reservedPoints },
+      });
+      await updateAiTraceSession(input.traceSessionId, { status: "failed", summary: message }).catch(() => undefined);
+    }
     if (err instanceof AgentPlannerServiceError) {
       throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: err.message });
     }
@@ -787,6 +838,15 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
     actual: usagePoints ?? reservedPoints,
     reason: `AI 代理規劃（${plannerLabel}）`,
   });
+
+  if (input.traceSessionId) {
+    await recordAiTraceEventSafely({
+      sessionId: input.traceSessionId,
+      eventType: "provider_response",
+      summary: `規劃模型回傳結構化草稿（實扣 ${actualPoints} 點）`,
+      payload: { draft: generated.draft, telemetry: generated.telemetry, pointsActual: actualPoints },
+    });
+  }
 
   try {
     let plan;
@@ -822,13 +882,45 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
           pointsReserved: reservedPoints,
           pointsActual: actualPoints,
         },
+        traceSessionId: input.traceSessionId ?? null,
         steps: plan.steps,
         estPoints: plan.estPoints,
       })
       .returning();
     await recordPlannedEvent(run);
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "validation",
+        summary: "計畫通過 schema、引用與依賴驗證",
+        payload: { planSummary: plan.summary, steps: plan.steps, estimatedPoints: plan.estPoints },
+      });
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "completed",
+        summary: "代理計畫已建立，等待使用者核准",
+        payload: { runId: run.id },
+      });
+      await updateAiTraceSession(input.traceSessionId, {
+        status: "completed",
+        provider: generated.telemetry.provider,
+        model: generated.telemetry.model,
+        sourceType: "agent_run",
+        sourceId: run.id,
+        summary: "代理計畫已建立",
+      }).catch(() => undefined);
+    }
     return run;
   } catch (err) {
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "failed",
+        summary: "代理規劃失敗",
+        payload: { error: err instanceof Error ? err.message : String(err) },
+      });
+      await updateAiTraceSession(input.traceSessionId, { status: "failed", summary: err instanceof Error ? err.message : "代理規劃失敗" }).catch(() => undefined);
+    }
     if (err instanceof TRPCError) throw err;
     throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AI 代理暫時沒回應，請稍後再試" });
   }

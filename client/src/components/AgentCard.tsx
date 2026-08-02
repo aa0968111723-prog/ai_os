@@ -21,6 +21,7 @@ import { Button, Card, Chip, Hint, Meta, Pill, type PillStatus } from "./ui";
 import { getPlaybook } from "../../../shared/rolePlaybooks";
 import { GoogleDrivePicker } from "./GoogleDrivePicker";
 import { focusAndReveal } from "../lib/scrollIntoViewForChrome";
+import { AiUnderstandingPanel } from "../features/creation-workbench/AiUnderstandingPanel";
 
 /**
  * AI 職能／創作助手卡：一句目標 →（心智上請 分鏡助理／生成員 等 AI 職能）→ 規劃供應商／用量 →
@@ -241,6 +242,7 @@ export function AgentCard({
   const [showDrivePicker, setShowDrivePicker] = useState(false);
   const [plannerMode, setPlannerMode] = useState<AgentPlannerMode>(readAgentPlannerMode);
   const [expandedRuns, setExpandedRuns] = useState<Record<string, boolean>>({});
+  const [traceSessionId, setTraceSessionId] = useState<string | null>(null);
   const goalInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // 工作台 goal 變更時同步（使用者已在本地輸入較長內容則不覆蓋）
@@ -299,8 +301,14 @@ export function AgentCard({
     utils.agents.eventsByProject.invalidate({ projectId });
     utils.agents.insights.invalidate({ projectId });
   };
+  const preview = trpc.agents.preview?.useMutation?.() ?? {
+    data: undefined,
+    error: null,
+    isPending: false,
+    mutate: (_input: unknown) => undefined,
+  };
   const plan = trpc.agents.plan.useMutation({
-    onSuccess: () => { setGoal(""); setDriveSources([]); setKnowledgeSources([]); invalidateAll(); },
+    onSuccess: (data) => { setTraceSessionId(data.traceSessionId); setGoal(""); setDriveSources([]); setKnowledgeSources([]); invalidateAll(); },
   });
   const importToKnowledge = trpc.knowledge.importDriveFile.useMutation();
   // PR-E2「轉存進知識庫」：逐檔轉存（序列化）→ 成為站內知識來源 chips → 規劃帶 extraSourceIds 優先注入
@@ -600,6 +608,23 @@ export function AgentCard({
               }}
             />
           )}
+          <AiUnderstandingPanel
+            projectId={projectId}
+            preview={preview.data}
+            previewPending={preview.isPending}
+            previewError={preview.error?.message ?? (goal.trim().length < 5 ? "目標至少需要 5 個字。" : undefined)}
+            onPreview={() => {
+              if (goal.trim().length < 5) return;
+              preview.mutate({
+                projectId,
+                goal: goal.trim(),
+                plannerMode,
+                extraSourceIds: knowledgeSources.length ? knowledgeSources.map((item) => item.id) : undefined,
+                driveFileIds: driveSources.length ? driveSources.map((item) => item.id) : undefined,
+              });
+            }}
+            traceSessionId={traceSessionId}
+          />
           <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <ConfirmButton
               triggerClassName="primary"

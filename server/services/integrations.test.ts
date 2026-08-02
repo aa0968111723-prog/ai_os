@@ -158,4 +158,18 @@ describe("notionPageTitle（選頁標題解析）", () => {
     });
     expect(title.length).toBe(120);
   });
+
+  // 迴歸：資料庫標題在頂層 title 陣列，properties 的 title 欄只是「欄位定義」（值是 {}）——
+  // 只掃 properties 會讓每一個資料庫都變成「未命名」
+  it("資料庫走頂層 title 陣列，不會被欄位定義騙成未命名", () => {
+    expect(notionPageTitle({
+      object: "database",
+      title: [{ plain_text: "影片" }, { plain_text: "進度表" }],
+      properties: { Name: { type: "title" } },
+    })).toBe("影片進度表");
+  });
+
+  it("沒有標題的資料庫給資料庫專屬替代字", () => {
+    expect(notionPageTitle({ object: "database", title: [] })).toBe("（未命名資料庫）");
+  });
 });

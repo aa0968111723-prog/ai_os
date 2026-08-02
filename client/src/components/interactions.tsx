@@ -1,5 +1,5 @@
 import {
-  useEffect, useId, useRef, useState,
+  useEffect, useId, useLayoutEffect, useRef, useState,
   type ReactNode, type CSSProperties, type RefObject, type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { Icon } from "./Icon";
@@ -323,6 +323,28 @@ export function ConfirmButton({
 export function HelpTip({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement>(null);
+  const tipRef = useRef<HTMLSpanElement>(null);
+  // 泡泡預設以觸發鈕置中；靠近視窗左右緣時（手機最常見）會有一半跑到畫面外把字切掉，
+  // 所以量完實際位置再水平推回可視範圍內，shift 就是這段補償量。
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    if (!open) { setShift(0); return; }
+    const clamp = () => {
+      const el = tipRef.current;
+      if (!el) return;
+      const M = 8; // 與視窗邊緣至少留 8px
+      const r = el.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth;
+      let delta = 0;
+      if (r.left < M) delta = M - r.left;
+      else if (r.right > vw - M) delta = Math.max(vw - M - r.right, M - r.left);
+      if (Math.abs(delta) < 0.5) return;
+      setShift((s) => s + delta);
+    };
+    clamp();
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, [open, shift, text]);
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
@@ -350,10 +372,12 @@ export function HelpTip({ text }: { text: string }) {
       </button>
       {open && (
         <span
+          ref={tipRef}
           role="status"
           style={{
-            position: "absolute", top: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)",
-            zIndex: 45, width: "max-content", maxWidth: "min(280px, 78vw)",
+            position: "absolute", top: "calc(100% + 6px)", left: "50%",
+            transform: `translateX(calc(-50% + ${shift}px))`,
+            zIndex: 45, width: "max-content", maxWidth: "min(280px, calc(100vw - 16px))",
             background: "var(--popover)", border: "1px solid var(--border)", borderRadius: "var(--r-8)",
             boxShadow: "var(--e3)", padding: "8px 12px",
             fontSize: "var(--fs-13)", fontWeight: 400, lineHeight: 1.6, color: "var(--fg)",
