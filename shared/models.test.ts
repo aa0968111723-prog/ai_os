@@ -161,5 +161,14 @@ describe("supportsNegativePrompt（負向提示詞能力旗標）", () => {
   it("新式無 negative_prompt 欄位的模型＝false（避免誤送 422）", () => {
     expect(supportsNegativePrompt(getModel("fal-ai/flux/schnell")!)).toBe(false);
     expect(supportsNegativePrompt(getModel("fal-ai/flux/dev")!)).toBe(false);
+    // AuraFlow 官方 schema 無 negative_prompt（2026-08 研究）
+    expect(supportsNegativePrompt(getModel("fal-ai/aura-flow")!)).toBe(false);
+  });
+
+  it("Qwen Image 系與 flux-lora＝true（中文字卡／LoRA 吃禁忌詞負向）", () => {
+    expect(supportsNegativePrompt(getModel("fal-ai/qwen-image-2/text-to-image")!)).toBe(true);
+    expect(supportsNegativePrompt(getModel("fal-ai/qwen-image-2/pro/text-to-image")!)).toBe(true);
+    expect(supportsNegativePrompt(getModel("fal-ai/qwen-image-max/text-to-image")!)).toBe(true);
+    expect(supportsNegativePrompt(getModel("fal-ai/flux-lora")!)).toBe(true);
   });
 })
