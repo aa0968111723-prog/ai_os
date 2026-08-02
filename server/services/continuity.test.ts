@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { analyzeContinuitySnapshot, applyContinuityReferences, assembleContinuitySnapshot, continuityReferenceAssetIds } from "./continuity";
+import {
+  analyzeContinuitySnapshot,
+  applyContinuityReferences,
+  assembleContinuitySnapshot,
+  continuityReferenceAssetIds,
+  sanitizeContinuityReferences,
+} from "./continuity";
 
 const c1 = "00000000-0000-4000-8000-000000000001";
 const c2 = "00000000-0000-4000-8000-000000000002";
@@ -7,6 +13,17 @@ const ref1 = "00000000-0000-4000-8000-000000000011";
 const ref2 = "00000000-0000-4000-8000-000000000012";
 
 describe("assembleContinuitySnapshot", () => {
+  it("removes unusable reference ids before coverage is calculated", () => {
+    const rows = [
+      { id: c1, referenceAssetId: ref1 },
+      { id: c2, referenceAssetId: ref2 },
+    ];
+    expect(sanitizeContinuityReferences(rows, new Set([ref1]))).toEqual([
+      { id: c1, referenceAssetId: ref1 },
+      { id: c2, referenceAssetId: null },
+    ]);
+  });
+
   it("preserves selection order, deduplicates references and fingerprints content rather than capture time", () => {
     const base = {
       characterRows: [

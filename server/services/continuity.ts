@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import type { ContinuitySnapshot } from "../../shared/continuity";
+import { continuitySnapshotSchema, type ContinuitySnapshot } from "../../shared/continuity";
 import { db, schema } from "../db";
 import { orderRowsByIds } from "./cardAnchors";
 import { signAssetUrl } from "./storage";
@@ -26,6 +26,18 @@ function stableFingerprint(value: unknown): string {
 
 function uniquePresent(values: Array<string | null>): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+export function sanitizeContinuityReferences<T extends { referenceAssetId: string | null }>(
+  rows: T[],
+  usableReferenceAssetIds: ReadonlySet<string>,
+): T[] {
+  return rows.map((row) => ({
+    ...row,
+    referenceAssetId: row.referenceAssetId && usableReferenceAssetIds.has(row.referenceAssetId)
+      ? row.referenceAssetId
+      : null,
+  }));
 }
 
 export function assembleContinuitySnapshot(input: {
@@ -93,10 +105,25 @@ export async function buildContinuitySnapshot(
       : Promise.resolve([]),
   ]);
 
+  const requestedReferenceAssetIds = uniquePresent([
+    ...characterRows.map((row) => row.referenceAssetId),
+    ...sceneRows.map((row) => row.referenceAssetId),
+    ...propRows.map((row) => row.referenceAssetId),
+  ]);
+  const usableReferenceRows = requestedReferenceAssetIds.length
+    ? await db.select({ id: schema.assets.id }).from(schema.assets).where(and(
+        inArray(schema.assets.id, requestedReferenceAssetIds),
+        eq(schema.assets.projectId, projectId),
+        eq(schema.assets.kind, "image"),
+        isNull(schema.assets.deletedAt),
+      ))
+    : [];
+  const usableReferenceAssetIds = new Set(usableReferenceRows.map((row) => row.id));
+
   return assembleContinuitySnapshot({
-    characterRows,
-    sceneRows,
-    propRows,
+    characterRows: sanitizeContinuityReferences(characterRows, usableReferenceAssetIds),
+    sceneRows: sanitizeContinuityReferences(sceneRows, usableReferenceAssetIds),
+    propRows: sanitizeContinuityReferences(propRows, usableReferenceAssetIds),
     selected,
     locked,
   });
@@ -125,6 +152,26 @@ export async function resolveContinuityReferenceUrls(
     const row = byId.get(id);
     if (!row) return [];
     return [row.storagePath ? signAssetUrl(row.id) : row.url].filter(Boolean);
+  });
+}
+
+/** 執行中的鎖定工作流仍需要參考圖時，素材不得刪除或清除。 */
+export async function findRunningWorkflowUsingReferenceAsset(
+  projectId: string,
+  assetId: string,
+): Promise<{ id: string } | undefined> {
+  const rows = await db.select({
+    id: schema.workflowRuns.id,
+    continuitySnapshot: schema.workflowRuns.continuitySnapshot,
+  }).from(schema.workflowRuns).where(and(
+    eq(schema.workflowRuns.projectId, projectId),
+    eq(schema.workflowRuns.status, "running"),
+  ));
+  return rows.find((row) => {
+    const parsed = continuitySnapshotSchema.safeParse(row.continuitySnapshot);
+    return parsed.success
+      && parsed.data.locked
+      && parsed.data.referenceAssetIds.includes(assetId);
   });
 }
 

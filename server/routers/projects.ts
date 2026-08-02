@@ -20,6 +20,7 @@ import {
 import { removeStoredFile } from "../services/storage";
 import { getGroupOptions, ensureGroupOptions } from "../services/optionsStore";
 import { assertProjectEditable, getProjectRole } from "../services/projectAcl";
+import { findRunningWorkflowUsingReferenceAsset } from "../services/continuity";
 
 /** 範例專案的穩定標題——同時是「去重鍵」：同組已有這個標題的專案就回傳它，絕不重建（擋連點刷爆） */
 const SAMPLE_PROJECT_TITLE = "範例專案：禪心一炷香";
@@ -619,6 +620,12 @@ export const projectsRouter = router({
         message: "這是鎖定的固定素材（師父原音/開示/配樂），請先解除鎖定再刪除",
       });
     }
+    if (await findRunningWorkflowUsingReferenceAsset(asset.projectId, asset.id)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "這張素材正被執行中的一致性工作流鎖定；請等工作流完成或先停止工作流再刪除",
+      });
+    }
     await db.update(schema.assets).set({ deletedAt: new Date() }).where(eq(schema.assets.id, asset.id));
     return { ok: true };
   }),
@@ -650,6 +657,12 @@ export const projectsRouter = router({
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "這是鎖定的固定素材（師父原音/開示/配樂），請先解除鎖定再刪除",
+      });
+    }
+    if (await findRunningWorkflowUsingReferenceAsset(asset.projectId, asset.id)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "這張素材正被執行中的一致性工作流鎖定；請等工作流完成或先停止工作流再永久刪除",
       });
     }
     await db.delete(schema.assets).where(eq(schema.assets.id, asset.id));

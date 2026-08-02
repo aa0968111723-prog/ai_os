@@ -25,6 +25,7 @@ import {
 } from "../lib/agentPlannerPreference";
 import { Badge, Button, Card, Chip, Hint, Meta } from "./ui";
 import { AiUnderstandingPanel } from "../features/creation-workbench/AiUnderstandingPanel";
+import { ProactiveModelConverter } from "../features/creation-workbench/ProactiveModelConverter";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
 type Action =
   // sceneNo/sceneTitle 只給前端顯示用（換模型後重建「為第 N 鏡「標題」」），toPayload 會丟掉
@@ -454,6 +455,8 @@ export function ProjectAssistant({
         <Hint style={{ marginTop: 4 }}>
           一個對話統包：<b>問</b>（進度、還沒審的分鏡、該用哪個模型…，我會<b>邊想邊查</b>素材庫／分鏡／生成紀錄／模型目錄／<b>資料庫</b>，唯讀）、<b>發想</b>（要分鏡 idea 我直接給，並可一鍵存成草稿）、<b>拆分鏡</b>（貼腳本進來）、<b>下目標</b>（多步驟目標我會交給代理排計畫，你核准估點後由伺服器背景逐步執行）。任何花點數或改資料的動作都要你按確認；提問本身預設由 NVIDIA NIM 免費額度驅動、不扣點（交給代理排計畫則走高品質模型，依實際 token 扣點）。
         </Hint>
+
+        <ProactiveModelConverter intent={input} onCreationAction={onCreationAction} />
 
         {/* 快速開場：問答／發想／下目標都從同一個入口——點一顆帶入輸入框，按「問」才送出 */}
         {turns.length === 0 && !thinking.active && (

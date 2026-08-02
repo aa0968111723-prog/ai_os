@@ -119,7 +119,7 @@ export function AiUnderstandingPanel({
 
               <div style={{ marginTop: 10 }}>
                 <Button type="button" size="sm" disabled={review.isPending} onClick={() => review.mutate({ projectId, preview })}>
-                  {review.isPending ? "檢查中…" : "用 AI 檢查準確性（0 點）"}
+                  {review.isPending ? "檢查中…" : "再用 AI 加強檢查（可選・0 點）"}
                 </Button>
               </div>
               {review.data ? (
@@ -156,7 +156,11 @@ export function AiUnderstandingPanel({
                   ) : null}
                 </Card>
               ) : null}
-              {review.error ? <p className="error">{review.error.message}</p> : null}
+              {review.error ? (
+                <Hint as="p" layer="always" style={{ color: "var(--gold-ink)" }}>
+                  雲端 AI 檢查目前無法連線；上方由系統組裝的模型、提示詞與參數仍可直接使用，不必重新提問。
+                </Hint>
+              ) : null}
             </>
           ) : null}
 
