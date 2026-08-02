@@ -11,6 +11,7 @@ import { db, schema } from "../db";
 import { getWorkflow } from "../../shared/models";
 import { advanceGeneration, type GenerationRow } from "./generationCore";
 import { executeGenerationCommand } from "./generationCommand";
+import { recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
 import { loadAuthState } from "./auth";
 import { failStaleGenerationTx } from "./points";
 import { signAssetUrl } from "./storage";
@@ -322,7 +323,8 @@ async function advanceRun(run: RunRow): Promise<void> {
       prevUrl = persisted ? signAssetUrl(persisted[1]) : g.resultUrl;
     }
   }
-  const stepPrompt = presetStep.promptTemplate
+  const stepTemplate = (run.stepPromptOverrides as Record<string, string> | null)?.[String(idx)] ?? presetStep.promptTemplate;
+  const stepPrompt = stepTemplate
     .replaceAll("{prompt}", run.prompt)
     .replaceAll("{prev}", prevText || run.prompt);
 
@@ -338,6 +340,20 @@ async function advanceRun(run: RunRow): Promise<void> {
     await saveRun(run.id, { steps });
   }
   try {
+    if (run.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: run.traceSessionId,
+        eventType: "provider_request",
+        summary: `工作流步驟 ${idx + 1}：${presetStep.note}`,
+        payload: {
+          stepIndex: idx,
+          modelId: presetStep.modelId,
+          promptTemplate: stepTemplate,
+          resolvedPrompt: stepPrompt,
+          sourceFromPreviousStep: !!(presetStep.usePrevAsSource && prevUrl),
+        },
+      });
+    }
     // TD-02：背景工作流走 Command（每步重載 auth，成本門檻／狀態機／ACL 與直呼一致）
     await resolveBackgroundProjectRole(run.userId, run.projectId, "工作流"); // 先擋停用／離組／封存
     const auth = await loadAuthState(run.userId);
@@ -386,8 +402,25 @@ async function settleStep(run: RunRow, steps: RunStep[], idx: number, step: RunS
       return;
     }
     const next = idx + 1;
+    if (run.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: run.traceSessionId,
+        eventType: "provider_response",
+        summary: `工作流步驟 ${idx + 1} 完成`,
+        payload: { generationId: gen.id, resultUrl: gen.resultUrl, resultText: gen.resultText, params: gen.params },
+      });
+    }
     if (next >= steps.length) {
       await saveRun(run.id, { steps, currentStep: next, status: "done" });
+      if (run.traceSessionId) {
+        await recordAiTraceEventSafely({
+          sessionId: run.traceSessionId,
+          eventType: "completed",
+          summary: "工作流全部完成",
+          payload: { runId: run.id, steps },
+        });
+        await updateAiTraceSession(run.traceSessionId, { status: "completed", summary: "工作流完成" }).catch(() => undefined);
+      }
     } else {
       await saveRun(run.id, { steps, currentStep: next });
     }
@@ -399,6 +432,15 @@ async function settleStep(run: RunRow, steps: RunStep[], idx: number, step: RunS
     markRestStopped(steps, idx);
     if (run.status === "running") {
       await saveRun(run.id, { steps, status: "failed", error: `步驟「${step.note}」失敗：${step.detail}` });
+      if (run.traceSessionId) {
+        await recordAiTraceEventSafely({
+          sessionId: run.traceSessionId,
+          eventType: "failed",
+          summary: `工作流步驟 ${idx + 1} 失敗`,
+          payload: { generationId: gen.id, status: gen.status, error: step.detail, params: gen.params },
+        });
+        await updateAiTraceSession(run.traceSessionId, { status: "failed", summary: step.detail }).catch(() => undefined);
+      }
     } else {
       await saveRun(run.id, { steps }); // 已按停的 run 維持 stopped，只記步驟結果
     }

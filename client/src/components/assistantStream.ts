@@ -12,6 +12,7 @@ export type AssistantStreamDone = {
   fellBackToPaid?: boolean;
   provider?: string;
   model?: string;
+  traceSessionId?: string;
 };
 
 export type AssistantStreamHandlers = {

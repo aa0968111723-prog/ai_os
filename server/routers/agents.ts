@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { router, authedProcedure } from "../trpc";
+import { TRPCError } from "@trpc/server";
+import { eq } from "drizzle-orm";
+import { router, authedProcedure, requireGroup } from "../trpc";
+import { db, schema } from "../db";
 import {
   planAgentCore,
   approveAgentCore,
@@ -14,6 +17,8 @@ import {
 import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { listAiProjectRoles } from "../../shared/aiProjectRoles";
 import { listPlaybooks } from "../../shared/rolePlaybooks";
+import { assertProjectEditable } from "../services/projectAcl";
+import { createAiTraceSession, sanitizeAiTracePayload } from "../services/aiTrace";
 
 /**
  * AI 代理（代理系統核心）：一句目標 → LLM 規劃多步計畫（估點）→ 使用者核准 → 背景執行器逐步執行。
@@ -22,6 +27,49 @@ import { listPlaybooks } from "../../shared/rolePlaybooks";
  * 安全設計：規劃固定守門、核准前不扣執行費、核准畫面揭示每步估點、執行期各步走既有守門與退點。
  */
 export const agentsRouter = router({
+  preview: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      goal: z.string().min(5).max(1000),
+      plannerMode: agentPlannerModeSchema.optional(),
+      extraSourceIds: z.array(z.string().uuid()).max(10).optional(),
+      driveFileIds: z.array(z.string()).max(5).optional(),
+      playbookId: z.string().max(80).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project);
+      const context = [
+        { type: "project", label: "專案現況與世界觀", included: true },
+        { type: "scene", label: "分鏡現況", included: true },
+        { type: "team", label: "團隊成員與人類任務", included: true },
+        { type: "knowledge", label: `指定站內來源 ${input.extraSourceIds?.length ?? 0}`, included: !!input.extraSourceIds?.length },
+        { type: "drive", label: `僅本次雲端來源 ${input.driveFileIds?.length ?? 0}`, included: !!input.driveFileIds?.length, note: "內容在真正規劃時抓取並受預算截斷" },
+        { type: "catalog", label: "可用模型、資料庫與工具白名單", included: true },
+      ];
+      const safe = sanitizeAiTracePayload({
+        goal: input.goal,
+        plannerMode: input.plannerMode ?? "auto",
+        playbookId: input.playbookId,
+        extraSourceIds: input.extraSourceIds,
+        driveFileIds: input.driveFileIds,
+        immutableRules: ["只輸出結構化計畫", "不得輸出 chain-of-thought", "只能引用伺服器提供的代號", "核准前不執行"],
+      });
+      return {
+        mode: "agent_plan" as const,
+        title: "多步計畫，AI 會怎麼理解",
+        dynamicNotice: "完整 planner prompt、實際來源字數、模型草稿與驗證結果會在規劃完成後保存於實際運作軌跡。",
+        provider: input.plannerMode === "nim" ? "nvidia-nim" : input.plannerMode?.startsWith("fal_") ? "fal-openrouter" : "NIM 優先／fal 備援",
+        context,
+        request: safe.payload,
+        warnings: [],
+        estimatedPoints: 0,
+        canOverrideCreativePrompt: false,
+      };
+    }),
+
   /**
    * 唯讀：AI 職能目錄＋playbook 摘要（L0/L1 產品敘事用；非真人成員、不建假帳號）。
    * 前端亦可直接 import shared；此 query 供需要經 tRPC 的入口使用。
@@ -59,15 +107,30 @@ export const agentsRouter = router({
       // D5/M4：明確指定 playbook（與 MCP plan_agent 的 shortCreation 同一語意）
       playbookId: z.string().max(80).optional(),
     }))
-    .mutation(({ ctx, input }) => planAgentCore({
-      auth: ctx.auth,
-      projectId: input.projectId,
-      goal: input.goal,
-      plannerMode: input.plannerMode,
-      extraSourceIds: input.extraSourceIds,
-      driveFileIds: input.driveFileIds,
-      playbookId: input.playbookId,
-    })),
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project);
+      const trace = await createAiTraceSession({
+        groupId: project.groupId,
+        projectId: project.id,
+        userId: ctx.auth.user.id,
+        mode: "agent_plan",
+        title: `多步計畫：${input.goal.trim().slice(0, 80)}`,
+      });
+      const run = await planAgentCore({
+        auth: ctx.auth,
+        projectId: input.projectId,
+        goal: input.goal,
+        plannerMode: input.plannerMode,
+        extraSourceIds: input.extraSourceIds,
+        driveFileIds: input.driveFileIds,
+        playbookId: input.playbookId,
+        traceSessionId: trace.id,
+      });
+      return { ...run, traceSessionId: trace.id };
+    }),
 
   /** 核准計畫：這一刻起才開始花執行點數（背景執行器下一個 tick 接手） */
   approve: authedProcedure

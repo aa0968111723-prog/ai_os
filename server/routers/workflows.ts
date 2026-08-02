@@ -4,8 +4,9 @@ import { TRPCError } from "@trpc/server";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
-import { getWorkflow } from "../../shared/models";
+import { getModel, getWorkflow } from "../../shared/models";
 import { savePromptCore } from "./prompts";
+import { createAiTraceSession, recordAiTraceEventSafely, sanitizeAiTracePayload, updateAiTraceSession } from "../services/aiTrace";
 
 /** 與 services/workflowRunner 的 RunStep 同形狀（jsonb 落庫的每步快照） */
 interface RunStep {
@@ -25,6 +26,8 @@ export interface StartWorkflowCoreInput {
   characterIds?: string[];
   scenePresetIds?: string[];
   propIds?: string[];
+  stepPromptOverrides?: Record<string, string>;
+  traceSessionId?: string;
   assertAccess: (project: typeof schema.projects.$inferSelect) => void | Promise<void>;
 }
 
@@ -69,6 +72,8 @@ export async function startWorkflowCore(input: StartWorkflowCoreInput) {
         characterIds: input.characterIds?.length ? input.characterIds : null,
         scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
         propIds: input.propIds?.length ? input.propIds : null,
+        stepPromptOverrides: input.stepPromptOverrides ?? null,
+        traceSessionId: input.traceSessionId ?? null,
         steps,
       })
       .returning();
@@ -89,6 +94,61 @@ export async function startWorkflowCore(input: StartWorkflowCoreInput) {
 
 /** 工作流執行（伺服器背景推進版）：start 只建 run，實際送出由 workflowRunner 的下一個 tick 接手 */
 export const workflowsRouter = router({
+  preview: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      presetId: z.string(),
+      prompt: z.string().trim().min(1).max(2000),
+      characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      stepPromptOverrides: z.record(z.string().regex(/^\d+$/), z.string().max(8000)).refine((v) => Object.keys(v).length <= 20).optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const preset = getWorkflow(input.presetId);
+      if (!preset) throw new TRPCError({ code: "BAD_REQUEST", message: "未知的工作流" });
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      const { assertProjectEditable } = await import("../services/projectAcl");
+      await assertProjectEditable(ctx.auth, project);
+      const steps = preset.steps.map((step, index) => {
+        const template = input.stepPromptOverrides?.[String(index)] ?? step.promptTemplate;
+        const knownPrompt = template.replaceAll("{prompt}", input.prompt);
+        return {
+          index,
+          note: step.note,
+          modelId: step.modelId,
+          model: getModel(step.modelId)?.label ?? step.modelId,
+          promptTemplate: template,
+          previewPrompt: knownPrompt,
+          dynamic: knownPrompt.includes("{prev}"),
+          usePrevAsSource: !!step.usePrevAsSource,
+        };
+      });
+      const warnings = steps.filter((step) => step.dynamic).map((step) => ({
+        code: `workflow_dynamic_${step.index}`,
+        severity: "info" as const,
+        title: `步驟 ${step.index + 1} 需等前一步完成`,
+        detail: "{prev} 會在執行時替換成上一個實際文字或媒體結果；送出前無法偽造確定值。",
+      }));
+      const safe = sanitizeAiTracePayload({ presetId: preset.id, prompt: input.prompt, steps });
+      return {
+        mode: "workflow" as const,
+        title: `範本「${preset.label}」，AI 會怎麼理解`,
+        dynamicNotice: steps.some((step) => step.dynamic) ? "後續步驟包含執行期資料，完成後才顯示實際值。" : undefined,
+        context: [
+          { type: "character", label: `角色定裝 ${input.characterIds?.length ?? 0}`, included: !!input.characterIds?.length },
+          { type: "scene", label: `場景設定 ${input.scenePresetIds?.length ?? 0}`, included: !!input.scenePresetIds?.length },
+          { type: "prop", label: `素材設定 ${input.propIds?.length ?? 0}`, included: !!input.propIds?.length },
+        ],
+        request: safe.payload,
+        warnings,
+        estimatedPoints: preset.points,
+        canOverrideCreativePrompt: true,
+      };
+    }),
+
   start: authedProcedure
     .input(
       z.object({
@@ -100,10 +160,32 @@ export const workflowsRouter = router({
         characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
         scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
         propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+        stepPromptOverrides: z.record(z.string().regex(/^\d+$/), z.string().max(8000)).refine((v) => Object.keys(v).length <= 20).optional(),
       }),
     )
-    .mutation(async ({ ctx, input }) =>
-      startWorkflowCore({
+    .mutation(async ({ ctx, input }) => {
+      const preset = getWorkflow(input.presetId);
+      if (!preset) throw new TRPCError({ code: "BAD_REQUEST", message: "未知的工作流" });
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      const { assertProjectEditable } = await import("../services/projectAcl");
+      await assertProjectEditable(ctx.auth, project);
+      const trace = await createAiTraceSession({
+        groupId: project.groupId,
+        projectId: project.id,
+        userId: ctx.auth.user.id,
+        mode: "workflow",
+        title: `範本：${preset.label}`,
+      });
+      await recordAiTraceEventSafely({
+        sessionId: trace.id,
+        eventType: "prepared",
+        summary: "已保存工作流模板與本次覆寫",
+        payload: { presetId: preset.id, prompt: input.prompt, stepPromptOverrides: input.stepPromptOverrides, steps: preset.steps },
+      });
+      try {
+      const run = await startWorkflowCore({
         userId: ctx.auth.user.id,
         projectId: input.projectId,
         presetId: input.presetId,
@@ -111,14 +193,22 @@ export const workflowsRouter = router({
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
+        stepPromptOverrides: input.stepPromptOverrides,
+        traceSessionId: trace.id,
         assertAccess: async (p) => {
           requireGroup(ctx.auth, p.groupId);
           // 2.3：專案檢視者不能啟動工作流（一次多步生成＝內容寫入）
           const { assertProjectEditable } = await import("../services/projectAcl");
           await assertProjectEditable(ctx.auth, p);
         },
-      }),
-    ),
+      });
+      await updateAiTraceSession(trace.id, { status: "running", sourceType: "workflow", sourceId: run.id, summary: "工作流執行中" }).catch(() => undefined);
+      return { ...run, traceSessionId: trace.id };
+      } catch (error) {
+        await updateAiTraceSession(trace.id, { status: "failed", summary: error instanceof Error ? error.message : "啟動失敗" }).catch(() => undefined);
+        throw error;
+      }
+    }),
 
   /** 全部 running ＋ 最近 5 筆終局（各自新到舊）：running 永遠可見可停，不會被新的終局擠出清單 */
   listByProject: authedProcedure.input(z.object({ projectId: z.string().uuid() })).query(async ({ ctx, input }) => {

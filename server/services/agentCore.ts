@@ -40,6 +40,7 @@ import {
 import { buildProjectIntelligence } from "./projectIntelligence";
 import { stopPendingDagSteps } from "./agentDag";
 import { recordAgentEventSafely } from "./agentEventCore";
+import { recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
 import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
@@ -551,6 +552,7 @@ export async function planAgentCore(input: {
   driveFileIds?: string[];
   /** D5/M4：明確指定 playbook（如 playbook.creation.short.v1 創作短版）——與工作台入口同一語意 */
   playbookId?: string;
+  traceSessionId?: string;
 }): Promise<AgentRunRow> {
   const { auth } = input;
   assertUuid(input.projectId, "專案編號");
@@ -604,11 +606,21 @@ export async function planAgentCore(input: {
         summary: plan.summary,
         planSummary: plan.planSummary,
         plannerTelemetry,
+        traceSessionId: input.traceSessionId ?? null,
         steps: plan.steps,
         estPoints: plan.estPoints,
       })
       .returning();
     await recordPlannedEvent(run);
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "completed",
+        summary: "測試模式已建立固定代理計畫",
+        payload: { goal, plan },
+      });
+      await updateAiTraceSession(input.traceSessionId, { status: "completed", sourceType: "agent_run", sourceId: run.id, summary: "代理計畫已建立" }).catch(() => undefined);
+    }
     return run;
   }
 
@@ -723,7 +735,40 @@ ${knowledgeCtx ? `<專案知識庫節錄>\n${knowledgeCtx}\n</專案知識庫節
 ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}`;
 
   try {
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "provider_request",
+        summary: "送出代理規劃請求",
+        payload: {
+          plannerMode: input.plannerMode ?? "auto",
+          prompt,
+          contextManifest: {
+            scenes: scenes.length,
+            members: plannerContext.members.length,
+            notes: plannerContext.notes.length,
+            schedules: plannerContext.schedules.length,
+            tasks: plannerContext.tasks.length,
+            characters: plannerContext.characters.length,
+            scenePresets: plannerContext.scenePresets.length,
+            props: plannerContext.props.length,
+            assets: plannerContext.assets.length,
+            knowledgeIncludedChars,
+            knowledgeTotalChars,
+            knowledgeTruncated,
+          },
+        },
+      });
+    }
     const generated = await generateAgentPlanDraft(prompt, input.plannerMode ?? "auto");
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "provider_response",
+        summary: "規劃模型回傳結構化草稿",
+        payload: { draft: generated.draft, telemetry: generated.telemetry },
+      });
+    }
     let plan;
     try {
       plan = resolveCompletePlanDraft(generated.draft, plannerContext);
@@ -755,13 +800,45 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
           knowledgeTotalChars,
           knowledgeTruncated,
         },
+        traceSessionId: input.traceSessionId ?? null,
         steps: plan.steps,
         estPoints: plan.estPoints,
       })
       .returning();
     await recordPlannedEvent(run);
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "validation",
+        summary: "計畫通過 schema、引用與依賴驗證",
+        payload: { planSummary: plan.summary, steps: plan.steps, estimatedPoints: plan.estPoints },
+      });
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "completed",
+        summary: "代理計畫已建立，等待使用者核准",
+        payload: { runId: run.id },
+      });
+      await updateAiTraceSession(input.traceSessionId, {
+        status: "completed",
+        provider: generated.telemetry.provider,
+        model: generated.telemetry.model,
+        sourceType: "agent_run",
+        sourceId: run.id,
+        summary: "代理計畫已建立",
+      }).catch(() => undefined);
+    }
     return run;
   } catch (err) {
+    if (input.traceSessionId) {
+      await recordAiTraceEventSafely({
+        sessionId: input.traceSessionId,
+        eventType: "failed",
+        summary: "代理規劃失敗",
+        payload: { error: err instanceof Error ? err.message : String(err) },
+      });
+      await updateAiTraceSession(input.traceSessionId, { status: "failed", summary: err instanceof Error ? err.message : "代理規劃失敗" }).catch(() => undefined);
+    }
     if (err instanceof TRPCError) throw err;
     await refund(auth.user.id, project.groupId, PLAN_COST_POINTS, "AI 代理規劃失敗退回");
     if (err instanceof AgentPlannerServiceError) {
