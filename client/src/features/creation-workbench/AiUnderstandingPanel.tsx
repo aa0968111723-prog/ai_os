@@ -11,6 +11,109 @@ function JsonBlock({ value }: { value: unknown }) {
   );
 }
 
+const PROMPT_FIELDS = new Set(["prompt", "positive_prompt", "negative_prompt"]);
+const PARAMETER_LABELS: Record<string, string> = {
+  aspect_ratio: "畫面比例",
+  duration: "影片秒數",
+  duration_seconds: "影片秒數",
+  fps: "影格率",
+  guidance_scale: "提示詞引導強度",
+  image_size: "輸出尺寸",
+  num_frames: "影格數",
+  num_images: "生成張數",
+  num_inference_steps: "推理步數",
+  resolution: "解析度",
+  seed: "隨機種子",
+  strength: "修改強度",
+};
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function readableParameter(value: unknown): string | undefined {
+  if (typeof value === "string") return value.length <= 100 && !/^https?:\/\//i.test(value) ? value : undefined;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return `${value.length} 項`;
+  return undefined;
+}
+
+export function friendlyPreviewError(error?: string): string | undefined {
+  if (!error) return undefined;
+  if (/failed to fetch|networkerror|network request failed|load failed/i.test(error)) {
+    return "預覽服務目前無法連線；模型配對與本機組裝的提示詞仍可直接使用，不必重新提問。";
+  }
+  return error;
+}
+
+export function presentAiRequest(request: Record<string, unknown>) {
+  const providerInput = objectValue(request.providerInput) ?? {};
+  const positivePrompt = typeof request.positivePrompt === "string"
+    ? request.positivePrompt
+    : typeof providerInput.prompt === "string"
+      ? providerInput.prompt
+      : "";
+  const negativePrompt = typeof request.negativePrompt === "string"
+    ? request.negativePrompt
+    : typeof providerInput.negative_prompt === "string"
+      ? providerInput.negative_prompt
+      : "";
+  const parameters = Object.entries(providerInput).flatMap(([key, value]) => {
+    if (PROMPT_FIELDS.has(key) || /(?:^|_)(?:url|urls)$/.test(key)) return [];
+    const readable = readableParameter(value);
+    return readable == null ? [] : [{ key, label: PARAMETER_LABELS[key] ?? key, value: readable }];
+  });
+  return { positivePrompt, negativePrompt, parameters };
+}
+
+function RequestPreview({ request }: { request: Record<string, unknown> }) {
+  const { positivePrompt, negativePrompt, parameters } = presentAiRequest(request);
+  return (
+    <>
+      <h4 style={{ margin: "12px 0 6px" }}>實際使用的創作提示詞</h4>
+      <div
+        data-testid="readable-positive-prompt"
+        style={{ padding: 10, maxHeight: 260, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", borderRadius: 8, background: "var(--card2)", fontSize: 13, lineHeight: 1.65 }}
+      >
+        {positivePrompt || "這次請求沒有創作提示詞。"}
+      </div>
+
+      {negativePrompt ? (
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>限制與避免內容</summary>
+          <div
+            data-testid="readable-negative-prompt"
+            style={{ marginTop: 6, padding: 10, maxHeight: 200, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", borderRadius: 8, background: "var(--card2)", fontSize: 13, lineHeight: 1.65 }}
+          >
+            {negativePrompt}
+          </div>
+        </details>
+      ) : null}
+
+      {parameters.length ? (
+        <div style={{ marginTop: 10 }}>
+          <strong style={{ fontSize: 13 }}>模型參數</strong>
+          <dl style={{ display: "grid", gridTemplateColumns: "minmax(7em, auto) 1fr", gap: "4px 10px", margin: "6px 0 0", fontSize: 13 }}>
+            {parameters.map((parameter) => (
+              <div key={parameter.key} style={{ display: "contents" }}>
+                <dt style={{ color: "var(--muted)" }}>{parameter.label}</dt>
+                <dd style={{ margin: 0, overflowWrap: "anywhere" }}>{parameter.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+
+      <details style={{ marginTop: 12 }}>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>開發者資料：完整請求 JSON</summary>
+        <div style={{ marginTop: 6 }}><JsonBlock value={request} /></div>
+      </details>
+    </>
+  );
+}
+
 /**
  * Shows application-layer context, provider envelopes and trace events.
  * It deliberately does not claim to expose model chain-of-thought or attention weights.
@@ -46,6 +149,7 @@ export function AiUnderstandingPanel({
     { projectId, sessionId: traceSessionId ?? "00000000-0000-0000-0000-000000000000" },
     { enabled: Boolean(traceSessionId && showTrace) },
   ) ?? { data: undefined, error: null, isLoading: false };
+  const displayedPreviewError = friendlyPreviewError(previewError);
 
   const openPreview = () => {
     setOpen(true);
@@ -77,7 +181,7 @@ export function AiUnderstandingPanel({
           </Hint>
 
           {previewPending ? <Meta as="p">正在整理預覽…</Meta> : null}
-          {previewError ? <p className="error">{previewError}</p> : null}
+          {displayedPreviewError ? <Hint as="p" layer="always">{displayedPreviewError}</Hint> : null}
           {preview ? (
             <>
               <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -103,8 +207,7 @@ export function AiUnderstandingPanel({
                   ))}
                 </div>
               ) : null}
-              <h4 style={{ margin: "12px 0 6px" }}>組裝後請求</h4>
-              <JsonBlock value={preview.request} />
+              <RequestPreview request={preview.request} />
 
               {preview.canOverrideCreativePrompt && onOverrideChange ? (
                 <details style={{ marginTop: 10 }}>
