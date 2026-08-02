@@ -212,3 +212,23 @@ describe("I2V schema alignment (P0: start_image_url + allowlist)", () => {
     });
   });
 });
+
+describe("V2V schema alignment (P0: MuseTalk source_video_url)", () => {
+  const src = "https://example.test/source.mp4";
+
+  it("MuseTalk emits source_video_url (official schema, not video_url)", () => {
+    const muse = getModel("fal-ai/musetalk")!;
+    expect(muse.input("https://example.test/audio.mp3", "16:9", src)).toEqual({
+      source_video_url: src,
+      audio_url: "https://example.test/audio.mp3",
+    });
+  });
+
+  it("LatentSync still uses video_url (schema-correct)", () => {
+    const latent = getModel("fal-ai/latentsync")!;
+    expect(latent.input("https://example.test/audio.mp3", "16:9", src)).toEqual({
+      video_url: src,
+      audio_url: "https://example.test/audio.mp3",
+    });
+  });
+});
