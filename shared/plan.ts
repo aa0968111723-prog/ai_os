@@ -6,6 +6,10 @@
  */
 import { z } from "zod";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "./cardLimits";
+import {
+  adobePhotoOperationSchema,
+  adobeTimelineSchema,
+} from "./adobe";
 
 export const planStepKindSchema = z.enum([
   "split_script",
@@ -23,6 +27,10 @@ export const planStepKindSchema = z.enum([
   "request_approval",
   "notify",
   "checkpoint",
+  // Adobe PR5：代理可直接在使用者已連結的 Adobe 帳號內修圖／匯出時間軸
+  "adobe_photo_edit",
+  "adobe_export_timeline",
+  "adobe_timeline_render",
 ]);
 
 export const planStepStatusSchema = z.enum([
@@ -96,6 +104,17 @@ export const planStepSchema = z.object({
   propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
   sourceAssetId: z.string().uuid().optional(),
   sourceUrl: z.string().max(2_000).optional(),
+  // Adobe PR5：修圖／時間軸步驟 payload 與執行期工作 id
+  adobeAssetId: z.string().trim().min(1).max(200).optional(),
+  adobeOperations: z.array(adobePhotoOperationSchema).min(1).max(8).optional(),
+  adobeOutputFormat: z.enum(["png", "jpeg", "webp"]).optional(),
+  adobeOutputName: z.string().trim().min(1).max(160).optional(),
+  adobeTimeline: adobeTimelineSchema.optional(),
+  adobeMediaPathByAssetId: z.record(z.string().trim().min(1).max(200)).optional(),
+  adobeMediaKindByAssetId: z.record(z.enum(["video", "image", "audio"])).optional(),
+  adobePathPrefix: z.string().max(20).optional(),
+  /** 執行期：Adobe 非同步工作 id（修圖／時間軸算圖）；輪詢結算用 */
+  adobeJobId: z.string().trim().min(1).max(500).optional(),
 });
 
 export const planRiskSchema = z.object({
