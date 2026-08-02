@@ -179,4 +179,36 @@ describe("supportsNegativePrompt（負向提示詞能力旗標）", () => {
     expect(supportsNegativePrompt(getModel("fal-ai/flux-pulid")!)).toBe(true);
     expect(supportsNegativePrompt(getModel("fal-ai/clarity-upscaler")!)).toBe(true);
   });
-})
+});
+
+describe("I2V schema alignment (P0: start_image_url + allowlist)", () => {
+  const src = "https://example.test/source.png";
+
+  it("Kling 2.6 Pro / v3 Pro image-to-video emit start_image_url (not image_url)", () => {
+    const k26 = getModel("fal-ai/kling-video/v2.6/pro/image-to-video")!;
+    const kv3 = getModel("fal-ai/kling-video/v3/pro/image-to-video")!;
+    expect(k26.input("probe", "16:9", src)).toEqual({
+      prompt: "probe",
+      start_image_url: src,
+    });
+    expect(kv3.input("probe", "16:9", src)).toEqual({
+      prompt: "probe",
+      start_image_url: src,
+    });
+  });
+
+  it("veo3.1/image-to-video + framepack are in NEGATIVE_PROMPT_SUPPORTED and supportsNegativePrompt returns true", () => {
+    expect(NEGATIVE_PROMPT_SUPPORTED.has("fal-ai/veo3.1/image-to-video")).toBe(true);
+    expect(NEGATIVE_PROMPT_SUPPORTED.has("fal-ai/framepack")).toBe(true);
+    expect(supportsNegativePrompt(getModel("fal-ai/veo3.1/image-to-video")!)).toBe(true);
+    expect(supportsNegativePrompt(getModel("fal-ai/framepack")!)).toBe(true);
+  });
+
+  it("Kling 2.5 Turbo i2v still uses image_url (schema-correct)", () => {
+    const k25 = getModel("fal-ai/kling-video/v2.5-turbo/pro/image-to-video")!;
+    expect(k25.input("probe", "16:9", src)).toEqual({
+      prompt: "probe",
+      image_url: src,
+    });
+  });
+});
