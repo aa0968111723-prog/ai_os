@@ -34,3 +34,21 @@ describe("workflowRunner sweepZombies placeholder generationId", () => {
   });
 });
 
+describe("workflow trace terminal states", () => {
+  const routerSource = readFileSync(new URL("../routers/workflows.ts", import.meta.url), "utf8");
+
+  it("closes the trace when a user stop wins the run CAS", () => {
+    const stopSource = routerSource.slice(routerSource.indexOf("stop: authedProcedure"));
+    expect(stopSource).toContain("await finalizeAiTraceSession({");
+    expect(stopSource).toContain('status: "stopped"');
+    expect(stopSource.indexOf("updated.length === 0")).toBeLessThan(stopSource.indexOf("await finalizeAiTraceSession({"));
+  });
+
+  it("re-reads the workflow terminal state before finalizing completion or failure", () => {
+    expect(source).toContain("async function finalizeWorkflowTraceFromRun");
+    expect(source).toContain('current.status !== "done" && current.status !== "failed" && current.status !== "stopped"');
+    expect(source).toContain("await finalizeWorkflowTraceFromRun(fresh.id, fresh.traceSessionId");
+    expect(source).not.toContain("await updateAiTraceSession(run.traceSessionId");
+  });
+});
+

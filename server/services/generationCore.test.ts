@@ -151,3 +151,15 @@ describe("generationCore CA-01 assertGenerationEntityIds (source-lock)", () => {
     expect(cardFallbackIdx).toBeLessThan(sourceAssetResolveIdx);
   });
 });
+
+describe("generationCore creative override billing", () => {
+  const source = readFileSync(new URL("./generationCore.ts", import.meta.url), "utf8");
+
+  it("estimates approval and quota from the effective prompt sent to the provider", () => {
+    const effectivePromptIdx = source.indexOf("const positivePrompt =");
+    const estimateIdx = source.indexOf("promptChars: positivePrompt.length");
+    expect(effectivePromptIdx).toBeGreaterThan(-1);
+    expect(estimateIdx).toBeGreaterThan(effectivePromptIdx);
+    expect(source).not.toContain("promptChars: input.prompt.length");
+  });
+});

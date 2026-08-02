@@ -230,12 +230,6 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   if (model.secondaryNeeds && !input.secondarySourceUrl && !input.secondarySourceAssetId) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `此模型還需要第二來源:${model.secondarySourceHint ?? model.secondaryNeeds}` });
   }
-  const { getUsdToTwd } = await import("./fxRate");
-  const fx = await getUsdToTwd();
-  const estimatedPoints = estimatePointsFor(model, {
-    promptChars: input.prompt.length,
-    usdToTwdRate: fx.rate,
-  });
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   const accessRole = await input.assertAccess?.(project);
@@ -329,7 +323,19 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const autoPositive = withPropAnchor(model, withSceneAnchor(model, withCharacterAnchor(model, parts.positive, character), scene), prop);
   const positivePrompt = input.promptOverride?.positive?.trim() || autoPositive;
   const negativePrompt = input.promptOverride?.negative !== undefined ? input.promptOverride.negative.trim() : parts.negative;
-  const providerInput = model.input(positivePrompt, project.format as ProjectFormat, sourceUrl, secondarySourceUrl) as Record<string, unknown>;
+  // Cost approval, quota reservation and persisted charge must all use the prompt actually sent.
+  const { getUsdToTwd } = await import("./fxRate");
+  const fx = await getUsdToTwd();
+  const estimatedPoints = estimatePointsFor(model, {
+    promptChars: positivePrompt.length,
+    usdToTwdRate: fx.rate,
+  });
+  const providerInput = model.input(
+    positivePrompt,
+    project.format as ProjectFormat,
+    sourceUrl,
+    secondarySourceUrl,
+  ) as Record<string, unknown>;
   if (negativePrompt && supportsNegativePrompt(model)) providerInput.negative_prompt = negativePrompt;
 
   const warnings: PreparedGenerationRequest["warnings"] = [];

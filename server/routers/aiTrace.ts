@@ -28,14 +28,14 @@ export const aiTraceRouter = router({
     .input(z.object({ projectId: z.string().uuid(), limit: z.number().int().min(1).max(100).optional() }))
     .query(async ({ ctx, input }) => {
       await requireEditor(ctx.auth, input.projectId);
-      return listAiTraceSessions(input.projectId, input.limit);
+      return listAiTraceSessions(input.projectId, ctx.auth.user.id, input.limit);
     }),
 
   get: authedProcedure
     .input(z.object({ projectId: z.string().uuid(), sessionId: z.string().uuid() }))
     .query(async ({ ctx, input }) => {
       await requireEditor(ctx.auth, input.projectId);
-      const trace = await getAiTraceSession(input.projectId, input.sessionId);
+      const trace = await getAiTraceSession(input.projectId, input.sessionId, ctx.auth.user.id);
       if (!trace) throw new TRPCError({ code: "NOT_FOUND", message: "找不到這筆 AI 運作紀錄" });
       return trace;
     }),
