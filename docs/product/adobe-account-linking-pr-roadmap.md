@@ -10,7 +10,7 @@
 | PR1 | 資料庫基礎與加密 token | Schema + TokenService | ✅ 已實作 |
 | PR2 | OAuth 流程 + 前端連結 UI | 連結／撤銷／狀態（Mock 可跑） | ✅ 已實作 |
 | PR3 | Adobe 服務層（修圖 + 剪輯工具） | Client + Mock + 工具 | ✅ 已實作（real 模式部分能力待憑證） |
-| PR4 | 強化既有剪輯交付管線 | FCPXML / Premiere XML / 剪映草稿支援 Adobe 資產 | ⬜ 待辦 |
+| PR4 | 強化既有剪輯交付管線 | AdobeTimeline → FCPXML / Premiere XML / EDL | ✅ 已實作 |
 | PR5 | AI 代理 DAG 接入 | 新步驟種類 + 執行器 | ⬜ 待辦 |
 | PR6 | 端到端整合與 UI 完善 | 完整流程 + 文件 + 測試 | ⬜ 待辦 |
 | PR7（可選） | Tauri 本機深度控制 | 真正控制本機 PS / Premiere | ⬜ 待辦 |
@@ -25,6 +25,7 @@ server/services/adobe/
   adobeClient.ts
   mockAdobeClient.ts
   types.ts
+  timelineExport.ts          ← PR4：時間軸 → NLE 格式
 server/routers/adobe.ts
 client/src/hooks/useAdobeConnection.ts
 client/src/components/settings/AdobeConnectButton.tsx
@@ -45,7 +46,7 @@ TOKEN_ENCRYPTION_KEY=
 
 1. PR1 + PR2 → 前端可完整模擬連結流程
 2. PR3 → 工具可呼叫（Mock）
-3. PR4 → 交付品質提升
+3. PR4 → 交付品質提升 ✅
 4. PR5 → AI 會自己修圖與組時間軸
 5. PR6 → 完善上線準備
 6. 之後申請 Adobe 憑證，切換 real 模式
@@ -59,7 +60,7 @@ TOKEN_ENCRYPTION_KEY=
 - `shared/plan.ts` + agentRunner 新增步驟
 - 點數、ACL、審批機制沿用
 
-## PR1–PR3 實作結果（本次）
+## PR1–PR3 實作結果
 
 ### 實際落點（與規劃的差異都在這裡說明）
 
@@ -68,7 +69,7 @@ shared/adobe.ts                                   契約：修圖操作／時間
 server/db/schema/integrations.ts → externalAccounts   OAuth 雙 token 表（drizzle/0016_external_accounts.sql）
 server/services/adobe/types.ts                    Client 介面與錯誤型別
 server/services/adobe/tokenService.ts             加解密、到期判定、落庫與失效標記
-server/services/adobe/oauth.ts                    （新增）state 簽章、授權入口、token 交換／刷新／撤銷
+server/services/adobe/oauth.ts                    state 簽章、授權入口、token 交換／刷新／撤銷
 server/services/adobe/mockAdobeClient.ts          不出網的完整模擬（含非同步工作生命週期）
 server/services/adobe/adobeClient.ts              real 模式：Adobe 非同步工作模式
 server/services/adobe/index.ts                    服務層門面（token 解析 → 呼叫 → 使用紀錄）
@@ -97,13 +98,25 @@ client/src/components/settings/AdobeConnectionStatus.tsx   狀態與能力顯示
 **去背**與**自動調色**兩個端點形狀已確定的操作；裁切／縮放／微調、素材瀏覽、時間軸算圖
 一律回明確的「尚未支援」而不是送出猜測的請求（猜錯會動到使用者自己的雲端資產）。
 `adobe.status` 的 `capabilities` 誠實回報這些差異，前端據此不顯示做不到的按鈕。
-時間軸算圖 Adobe 本就無公開 API——正解是 PR4 的 FCPXML／Premiere XML／剪映草稿交付。
+時間軸算圖 Adobe 本就無公開 API——正解是 PR4 的 FCPXML／Premiere XML／EDL 交付。
 
-### 尚未進行（PR4–PR7）
+## PR4 實作結果
 
-交付管線接 Adobe 資產（PR4）、代理 DAG 新步驟與執行器（PR5）、端到端 UI／MCP 工具曝露（PR6）、
-Tauri 本機控制（PR7）。本次不動 `shared/plan.ts` 與 agentRunner——步驟種類與副作用要一起上，
-拆開會留下「能規劃但跑不動」的步驟。
+```
+server/services/adobe/timelineExport.ts           AdobeTimeline → TimelineScene[] → FCPXML/xmeml/EDL
+server/services/adobe/timelineExport.test.ts      空檔填補、轉場備註、解析度、media-rep
+server/routers/adobe.ts → exportTimelineFormats   純本機 mutation（不打 Adobe、不需限流）
+```
+
+- **不依賴 Adobe 雲端算圖**：把時間軸契約轉成既有 `exporter.buildFcpxml`／`buildXmeml`／`buildEdl`。
+- **空檔填補**：片段之間的空隙自動補「空檔」列，匯入 NLE 後節奏與 `startSec` 一致。
+- **可選 mediaPathByAssetId**：素材已在交付包內時直接掛相對路徑；否則離線佔位，剪輯軟體內 relink。
+- **剪映草稿**：仍需本機二進位媒體檔才能組包；本 PR 先打通 FCP／Premiere／Resolve 通用格式，剪映草稿銜接留在 PR6（UI 打包）或後續。
+
+### 尚未進行（PR5–PR7）
+
+代理 DAG 新步驟與執行器（PR5）、端到端 UI／MCP 工具曝露（PR6）、Tauri 本機控制（PR7）。
+PR5 才動 `shared/plan.ts` 與 agentRunner——步驟種類與副作用要一起上。
 
 ---
 此文件由 AI 協作規劃，作為實作依據。

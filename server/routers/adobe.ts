@@ -16,6 +16,7 @@ import {
   startAdobePhotoEdit,
   startAdobeTimelineRender,
 } from "../services/adobe";
+import { exportAdobeTimelineFormats } from "../services/adobe/timelineExport";
 import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
@@ -25,7 +26,7 @@ import {
 } from "../services/rateLimit";
 
 /**
- * Adobe 帳號連結與深度修圖／剪輯 API（#224 PR2＋PR3）。
+ * Adobe 帳號連結與深度修圖／剪輯 API（#224 PR2＋PR3＋PR4）。
  *
  * 授權入口與 callback 是瀏覽器重導流程，走 Express（見 server/index.ts 的
  * /api/integrations/adobe/*）；這裡只管登入後的狀態查詢、撤銷與工具呼叫。
@@ -96,6 +97,41 @@ export const adobeRouter = router({
       } catch (err) {
         throw toTrpcError(err);
       }
+    }),
+
+  /**
+   * PR4：把 AdobeTimeline 轉成剪輯軟體可匯入的時間軸檔（純本機、不打 Adobe API）。
+   * 雲端無公開算圖 API 時的正解——匯入 Premiere/FCP/Resolve 後再 relink 素材。
+   * 可選 mediaPathByAssetId：若素材已在交付包內，直接掛相對路徑。
+   */
+  exportTimelineFormats: authedProcedure
+    .input(
+      z.object({
+        timeline: adobeTimelineSchema,
+        pathPrefix: z.string().max(20).optional(),
+        mediaPathByAssetId: z.record(z.string().trim().min(1).max(200)).optional(),
+        mediaKindByAssetId: z
+          .record(z.enum(["video", "image", "audio"]))
+          .optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const bundle = exportAdobeTimelineFormats(input.timeline, {
+        pathPrefix: input.pathPrefix,
+        mediaPathByAssetId: input.mediaPathByAssetId,
+        mediaKindByAssetId: input.mediaKindByAssetId,
+        width: input.timeline.width,
+        height: input.timeline.height,
+      });
+      // 不回 scenes 全量給前端（可能很長）；只要字串檔與摘要
+      return {
+        fcpxml: bundle.fcpxml,
+        xmeml: bundle.xmeml,
+        edl: bundle.edl,
+        durationSec: bundle.durationSec,
+        sceneCount: bundle.sceneCount,
+        name: input.timeline.name,
+      };
     }),
 
   /** 查工作狀態（輪詢用；terminal 狀態後前端就停止輪詢） */
