@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, max, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, max, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import type { AiOperationMode, AiTraceEventType, AiTraceStatus } from "../../shared/aiTrace";
 
@@ -161,21 +161,57 @@ export async function recordAiTraceEventSafely(input: Parameters<typeof recordAi
   }
 }
 
-export async function listAiTraceSessions(projectId: string, limit = 30) {
+/**
+ * Trace payloads may contain source data that was readable only by the initiating user.
+ * Project edit access is therefore not sufficient: every read remains scoped to the owner.
+ */
+export async function listAiTraceSessions(projectId: string, userId: string, limit = 30) {
   return db.select().from(schema.aiTraceSessions)
-    .where(eq(schema.aiTraceSessions.projectId, projectId))
+    .where(and(
+      eq(schema.aiTraceSessions.projectId, projectId),
+      eq(schema.aiTraceSessions.userId, userId),
+    ))
     .orderBy(desc(schema.aiTraceSessions.createdAt))
     .limit(Math.max(1, Math.min(100, limit)));
 }
 
-export async function getAiTraceSession(projectId: string, sessionId: string) {
+export async function getAiTraceSession(projectId: string, sessionId: string, userId: string) {
   const [session] = await db.select().from(schema.aiTraceSessions)
-    .where(and(eq(schema.aiTraceSessions.id, sessionId), eq(schema.aiTraceSessions.projectId, projectId)));
+    .where(and(
+      eq(schema.aiTraceSessions.id, sessionId),
+      eq(schema.aiTraceSessions.projectId, projectId),
+      eq(schema.aiTraceSessions.userId, userId),
+    ));
   if (!session) return null;
   const events = await db.select().from(schema.aiTraceEvents)
     .where(eq(schema.aiTraceEvents.sessionId, sessionId))
     .orderBy(asc(schema.aiTraceEvents.sequence));
   return { session, events };
+}
+
+/** Atomically closes a trace once and records the matching terminal event for the winner. */
+export async function finalizeAiTraceSession(input: {
+  sessionId: string;
+  status: Extract<AiTraceStatus, "completed" | "failed" | "stopped">;
+  summary: string;
+  payload?: unknown;
+}): Promise<boolean> {
+  const [updated] = await db.update(schema.aiTraceSessions).set({
+    status: input.status,
+    summary: input.summary.slice(0, 2_000),
+    updatedAt: new Date(),
+  }).where(and(
+    eq(schema.aiTraceSessions.id, input.sessionId),
+    inArray(schema.aiTraceSessions.status, ["prepared", "running"]),
+  )).returning({ id: schema.aiTraceSessions.id });
+  if (!updated) return false;
+  await recordAiTraceEventSafely({
+    sessionId: input.sessionId,
+    eventType: input.status,
+    summary: input.summary,
+    payload: input.payload ?? {},
+  });
+  return true;
 }
 
 export async function findAiTraceSessionBySource(sourceType: string, sourceId: string) {

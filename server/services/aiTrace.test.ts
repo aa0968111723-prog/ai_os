@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { sanitizeAiTracePayload } from "./aiTrace";
+import { aiTraceEventTypeSchema, aiTraceStatusSchema } from "../../shared/aiTrace";
 
 describe("sanitizeAiTracePayload", () => {
   it("遮蔽密鑰、cookie 與模型私密推理欄位", () => {
@@ -38,5 +40,22 @@ describe("sanitizeAiTracePayload", () => {
     expect(safe.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(safe.truncatedFields).toContain("payload.text");
     expect(JSON.stringify(safe.payload).length).toBeLessThan(520_000);
+  });
+});
+
+describe("AI trace access and terminal contracts", () => {
+  const serviceSource = readFileSync(new URL("./aiTrace.ts", import.meta.url), "utf8");
+  const routerSource = readFileSync(new URL("../routers/aiTrace.ts", import.meta.url), "utf8");
+
+  it("scopes list and detail reads to the initiating user", () => {
+    expect(serviceSource).toContain("eq(schema.aiTraceSessions.userId, userId)");
+    expect(routerSource).toContain("listAiTraceSessions(input.projectId, ctx.auth.user.id, input.limit)");
+    expect(routerSource).toContain("getAiTraceSession(input.projectId, input.sessionId, ctx.auth.user.id)");
+  });
+
+  it("supports an explicit stopped terminal event and status", () => {
+    expect(aiTraceEventTypeSchema.parse("stopped")).toBe("stopped");
+    expect(aiTraceStatusSchema.parse("stopped")).toBe("stopped");
+    expect(serviceSource).toContain("inArray(schema.aiTraceSessions.status, [\"prepared\", \"running\"])");
   });
 });

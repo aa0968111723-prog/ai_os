@@ -222,7 +222,6 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   if (model.needs && !input.sourceUrl && !input.sourceAssetId && !mayFillFromCards) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
   }
-  const estimatedPoints = estimatePointsFor(model, { promptChars: input.prompt.length });
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
   if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
   const accessRole = await input.assertAccess?.(project);
@@ -296,6 +295,8 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const autoPositive = withPropAnchor(model, withSceneAnchor(model, withCharacterAnchor(model, parts.positive, character), scene), prop);
   const positivePrompt = input.promptOverride?.positive?.trim() || autoPositive;
   const negativePrompt = input.promptOverride?.negative !== undefined ? input.promptOverride.negative.trim() : parts.negative;
+  // Cost approval, quota reservation and persisted charge must all use the prompt actually sent.
+  const estimatedPoints = estimatePointsFor(model, { promptChars: positivePrompt.length });
   const providerInput = model.input(positivePrompt, project.format as ProjectFormat, sourceUrl) as Record<string, unknown>;
   if (negativePrompt && supportsNegativePrompt(model)) providerInput.negative_prompt = negativePrompt;
 

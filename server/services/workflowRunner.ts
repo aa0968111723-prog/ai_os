@@ -11,7 +11,7 @@ import { db, schema } from "../db";
 import { getWorkflow } from "../../shared/models";
 import { advanceGeneration, type GenerationRow } from "./generationCore";
 import { executeGenerationCommand } from "./generationCommand";
-import { recordAiTraceEventSafely, updateAiTraceSession } from "./aiTrace";
+import { finalizeAiTraceSession, recordAiTraceEventSafely } from "./aiTrace";
 import { loadAuthState } from "./auth";
 import { failStaleGenerationTx } from "./points";
 import { signAssetUrl } from "./storage";
@@ -209,6 +209,10 @@ async function failStaleRun(run: RunRow): Promise<void> {
   }
   markRestStopped(steps, idx);
   await saveRun(fresh.id, { steps, status: "failed", error: "這條工作流在送出前被系統重啟打斷，已自動停止——請重新啟動一次" });
+  await finalizeWorkflowTraceFromRun(fresh.id, fresh.traceSessionId, {
+    summary: "工作流在送出前被系統重啟打斷",
+    payload: { steps },
+  });
 }
 
 /** 推進一個 run，帶逾時放行：逾時只結束等待、記警告——run 留在 inflight 直到原 promise 結束，防同 run 雙寫 */
@@ -258,6 +262,34 @@ async function saveRun(runId: string, patch: Partial<typeof schema.workflowRuns.
   await db.update(schema.workflowRuns).set({ ...patch, updatedAt: new Date() }).where(eq(schema.workflowRuns.id, runId));
 }
 
+/**
+ * saveRun uses CAS so a concurrent user stop always wins. Re-read the run before closing
+ * its trace, then mirror the database's actual terminal state instead of a stale branch.
+ */
+async function finalizeWorkflowTraceFromRun(
+  runId: string,
+  traceSessionId: string | null,
+  detail?: { summary?: string; payload?: unknown },
+): Promise<void> {
+  if (!traceSessionId) return;
+  const [current] = await db.select({ status: schema.workflowRuns.status })
+    .from(schema.workflowRuns)
+    .where(eq(schema.workflowRuns.id, runId));
+  if (!current || (current.status !== "done" && current.status !== "failed" && current.status !== "stopped")) return;
+  const status = current.status === "done" ? "completed" : current.status;
+  const summary = current.status === "done"
+    ? "工作流完成"
+    : current.status === "stopped"
+      ? "工作流已由使用者停止"
+      : detail?.summary ?? "工作流失敗";
+  await finalizeAiTraceSession({
+    sessionId: traceSessionId,
+    status,
+    summary,
+    payload: { runId, status: current.status, detail: detail?.payload },
+  }).catch(() => undefined);
+}
+
 /** 目前步驟之後仍在排隊的一律標 stopped（run 已到終局，不會再送出） */
 function markRestStopped(steps: RunStep[], fromExclusive: number): void {
   for (let j = fromExclusive + 1; j < steps.length; j++) {
@@ -273,6 +305,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   if (!step) {
     // 防禦：currentStep 越界（不應發生）——收攏成 done 避免每輪空轉
     if (run.status === "running") await saveRun(run.id, { status: "done" });
+    await finalizeWorkflowTraceFromRun(run.id, run.traceSessionId, { payload: { steps } });
     return;
   }
 
@@ -294,6 +327,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     if (step.status === "pending" || step.status === "running") step.status = "stopped";
     markRestStopped(steps, idx);
     await saveRun(run.id, { steps });
+    await finalizeWorkflowTraceFromRun(run.id, run.traceSessionId, { payload: { steps } });
     return;
   }
   const presetStep = getWorkflow(run.presetId)?.steps[idx];
@@ -303,6 +337,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     step.detail = "流程定義已變更";
     markRestStopped(steps, idx);
     await saveRun(run.id, { steps, status: "failed", error: "這條工作流的定義已更新，無法接續原本的執行——請重新啟動一次" });
+    await finalizeWorkflowTraceFromRun(run.id, run.traceSessionId, { summary: "流程定義已變更", payload: { steps } });
     return;
   }
 
@@ -386,6 +421,7 @@ async function advanceRun(run: RunRow): Promise<void> {
     step.detail = msg;
     markRestStopped(steps, idx);
     await saveRun(run.id, { steps, status: "failed", error: `步驟「${step.note}」無法送出：${msg}` });
+    await finalizeWorkflowTraceFromRun(run.id, run.traceSessionId, { summary: msg, payload: { steps, error: msg } });
     return;
   }
 }
@@ -399,6 +435,7 @@ async function settleStep(run: RunRow, steps: RunStep[], idx: number, step: RunS
       // 使用者已按停：這一步只收尾，不再前進（後續 pending 一併標 stopped）
       markRestStopped(steps, idx);
       await saveRun(run.id, { steps });
+      await finalizeWorkflowTraceFromRun(run.id, run.traceSessionId, { payload: { steps } });
       return;
     }
     const next = idx + 1;
@@ -412,15 +449,7 @@ async function settleStep(run: RunRow, steps: RunStep[], idx: number, step: RunS
     }
     if (next >= steps.length) {
       await saveRun(run.id, { steps, currentStep: next, status: "done" });
-      if (run.traceSessionId) {
-        await recordAiTraceEventSafely({
-          sessionId: run.traceSessionId,
-          eventType: "completed",
-          summary: "工作流全部完成",
-          payload: { runId: run.id, steps },
-        });
-        await updateAiTraceSession(run.traceSessionId, { status: "completed", summary: "工作流完成" }).catch(() => undefined);
-      }
+      await finalizeWorkflowTraceFromRun(run.id, run.traceSessionId, { payload: { steps } });
     } else {
       await saveRun(run.id, { steps, currentStep: next });
     }
@@ -432,17 +461,13 @@ async function settleStep(run: RunRow, steps: RunStep[], idx: number, step: RunS
     markRestStopped(steps, idx);
     if (run.status === "running") {
       await saveRun(run.id, { steps, status: "failed", error: `步驟「${step.note}」失敗：${step.detail}` });
-      if (run.traceSessionId) {
-        await recordAiTraceEventSafely({
-          sessionId: run.traceSessionId,
-          eventType: "failed",
-          summary: `工作流步驟 ${idx + 1} 失敗`,
-          payload: { generationId: gen.id, status: gen.status, error: step.detail, params: gen.params },
-        });
-        await updateAiTraceSession(run.traceSessionId, { status: "failed", summary: step.detail }).catch(() => undefined);
-      }
+      await finalizeWorkflowTraceFromRun(run.id, run.traceSessionId, {
+        summary: step.detail,
+        payload: { steps, generationId: gen.id, generationStatus: gen.status, error: step.detail, params: gen.params },
+      });
     } else {
       await saveRun(run.id, { steps }); // 已按停的 run 維持 stopped，只記步驟結果
+      await finalizeWorkflowTraceFromRun(run.id, run.traceSessionId, { payload: { steps } });
     }
     return;
   }
