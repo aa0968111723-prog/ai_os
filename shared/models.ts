@@ -1,1 +1,1 @@
-PLACEHOLDER - will use local file content
+PLACEHOLDER_FOR_FULL_CONTENT
