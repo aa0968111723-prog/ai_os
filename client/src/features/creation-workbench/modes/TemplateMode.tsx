@@ -14,6 +14,7 @@ export function TemplateMode({
   projectId,
   charIds = [],
   sceneIds = [],
+  propIds = [],
   panelId,
   labelledBy,
   active,
@@ -25,6 +26,7 @@ export function TemplateMode({
   projectId: string;
   charIds?: string[];
   sceneIds?: string[];
+  propIds?: string[];
   panelId: string;
   labelledBy: string;
   active: boolean;
@@ -106,6 +108,7 @@ export function TemplateMode({
           projectId={projectId}
           charIds={charIds}
           sceneIds={sceneIds}
+          propIds={propIds}
           embedded
           pickRequest={pickRequest}
           promptRequest={ideaRequest}

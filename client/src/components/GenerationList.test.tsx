@@ -209,6 +209,8 @@ describe("GenerationList canEdit gates (WB-00)", () => {
       modelId: "fal-ai/flux/schnell",
       characterIds: ["c1"],
       scenePresetIds: ["s1"],
+      // 這筆生成沒帶素材卡 → []（如實還原「當時沒帶」，會清掉現有勾選）
+      propIds: [],
       sourceAssetId: null,
     });
   });

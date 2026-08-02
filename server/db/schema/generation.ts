@@ -31,6 +31,8 @@ export const generations = pgTable("generations", {
   characterIds: jsonb("character_ids").$type<string[]>(),
   /** 送出時帶入的場景設定卡 id（null＝沒帶） */
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
+  /** 送出時帶入的素材設定卡 id（null＝沒帶）——道具外觀錨點同樣要能重試還原 */
+  propIds: jsonb("prop_ids").$type<string[]>(),
   /** 來源工作流執行（null＝非工作流產物）：生成紀錄可回看「這筆是哪條工作流跑出來的」 */
   workflowRunId: uuid("workflow_run_id"),
   /** 來源 AI 代理執行（null＝非代理產物） */
@@ -165,9 +167,10 @@ export const workflowRuns = pgTable("workflow_runs", {
   userId: uuid("user_id").notNull(),
   presetId: text("preset_id").notNull(),
   prompt: text("prompt").notNull(),
-  /** 啟動時沿用生成台勾選的角色/場景卡（null＝沒帶）——runner 每 tick 從 run 列重建輸入，必須落庫才能貫穿每一步 */
+  /** 啟動時沿用生成台勾選的角色/場景/素材卡（null＝沒帶）——runner 每 tick 從 run 列重建輸入，必須落庫才能貫穿每一步 */
   characterIds: jsonb("character_ids").$type<string[]>(),
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
+  propIds: jsonb("prop_ids").$type<string[]>(),
   status: text("status", { enum: ["running", "done", "failed", "stopped"] }).notNull().default("running"),
   currentStep: integer("current_step").notNull().default(0),
   /** 每步：{ note, status: "pending"|"running"|"done"|"failed"|"stopped", generationId?, detail? } */

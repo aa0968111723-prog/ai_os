@@ -5,7 +5,7 @@ import {
   type CompletePlanSummary,
   type PlanReference,
 } from "../../shared/plan";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import type { AgentStep } from "./agentRunner";
 import {
   modelIsOperationallyReady,
@@ -76,6 +76,7 @@ export const completePlanDraftSchema = z.object({
       // CA-01：代號（char1／preset1／asset1）— resolve 時轉 UUID，禁止把未解析字串寫入 step
       characterRefs: z.array(z.string().trim().min(1).max(40)).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetRefs: z.array(z.string().trim().min(1).max(40)).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propRefs: z.array(z.string().trim().min(1).max(40)).max(MAX_GENERATE_PROPS).optional(),
       sourceAssetRef: z.string().trim().min(1).max(40).optional(),
       sourceUrl: z.string().trim().max(2_000).optional(),
     }),
@@ -165,6 +166,8 @@ export interface PlannerAliases {
   characters: PlannerAlias[];
   /** CA-01：場景設定卡（preset1…） */
   scenePresets: PlannerAlias[];
+  /** 素材設定卡（prop1…）：道具外觀／材質錨點 */
+  props: PlannerAlias[];
   /** CA-01：素材庫（asset1…）— 供 needs 模型來源 */
   assets: PlannerAlias[];
 }
@@ -239,6 +242,7 @@ function referenceFor(
     ["database", aliases.databases],
     ["character", aliases.characters],
     ["scene_preset", aliases.scenePresets],
+    ["prop", aliases.props],
     ["asset", aliases.assets],
   ];
   for (const [type, rows] of groups) {
@@ -328,6 +332,7 @@ export function resolveCompletePlanDraft(
   const databases = aliasMap(aliases.databases);
   const characters = aliasMap(aliases.characters);
   const scenePresets = aliasMap(aliases.scenePresets);
+  const props = aliasMap(aliases.props);
   const assets = aliasMap(aliases.assets);
   const rawIds = new Set(draft.steps.map((step) => step.id));
   const retainedIds = new Set<string>();
@@ -393,6 +398,15 @@ export function resolveCompletePlanDraft(
         sourceRefs,
         "scene_preset",
       );
+      const propIds = resolveAliasIdList(
+        source.propRefs,
+        props,
+        missingInformation,
+        source.title,
+        "素材設定",
+        sourceRefs,
+        "prop",
+      );
       let sourceAssetId: string | undefined;
       if (source.sourceAssetRef) {
         const asset = assets.get(source.sourceAssetRef);
@@ -434,6 +448,7 @@ export function resolveCompletePlanDraft(
         sceneNo: source.sceneNo,
         characterIds,
         scenePresetIds,
+        propIds,
         sourceAssetId,
         sourceUrl,
         points: model.points,

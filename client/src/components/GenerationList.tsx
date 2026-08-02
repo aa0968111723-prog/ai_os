@@ -87,6 +87,7 @@ export interface ReuseSettings {
   modelId?: string | null;
   characterIds?: string[] | null;
   scenePresetIds?: string[] | null;
+  propIds?: string[] | null;
   sourceAssetId?: string | null;
 }
 
@@ -97,7 +98,7 @@ export function GenerationList({
 }: {
   projectId: string;
   canEdit?: boolean;
-  /** 把某筆生成的完整設定（提示詞＋模型＋角色/場景卡＋來源素材）帶回生成台再生一次 */
+  /** 把某筆生成的完整設定（提示詞＋模型＋角色/場景/素材卡＋來源素材）帶回生成台再生一次 */
   onReuse?: (text: string, settings?: ReuseSettings) => void;
 }) {
   const utils = trpc.useUtils();
@@ -672,17 +673,18 @@ export function GenerationList({
                 以相同設定重試
               </ConfirmButton>
             )}
-            {/* 再用此設定：把這筆的完整用法（提示詞＋模型＋角色/場景卡＋來源素材）帶回生成台再生一次 */}
+            {/* 再用此設定：把這筆的完整用法（提示詞＋模型＋角色/場景/素材卡＋來源素材）帶回生成台再生一次 */}
             {canEdit && g.status === "done" && onReuse && (
               <button
                 style={{ padding: "4px 12px", fontSize: 12 }}
-                title="把這筆的提示詞、模型與角色/場景勾選帶回生成台"
+                title="把這筆的提示詞、模型與角色/場景/素材勾選帶回生成台"
                 onClick={() =>
                   onReuse(g.prompt, {
                     modelId: g.modelId,
                     // ?? []＝「這筆當時沒帶卡」也要如實還原（清掉現勾）——否則混入當前勾選就不是「此設定」了
                     characterIds: (g.characterIds as string[] | null) ?? [],
                     scenePresetIds: (g.scenePresetIds as string[] | null) ?? [],
+                    propIds: (g.propIds as string[] | null) ?? [],
                     sourceAssetId: g.sourceUrl?.match(/\/api\/assets\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/file/i)?.[1] ?? null,
                   })
                 }

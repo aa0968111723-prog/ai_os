@@ -6,9 +6,12 @@ import { describe, expect, it } from "vitest";
 import {
   CARD_FIELD_MAX,
   PRESET_KNOWLEDGE_INJECT_MAX,
+  PROP_KNOWLEDGE_INJECT_MAX,
   clipCardField,
   formatCharacterAnchor,
   formatCharacterKnowledgeBlock,
+  formatPropAnchor,
+  formatPropKnowledgeBlock,
   formatSceneAnchor,
   formatSceneKnowledgeBlock,
   orderRowsByIds,
@@ -119,5 +122,53 @@ describe("pickFirstReference（卡片參考圖 → 生成來源）", () => {
     expect(pickFirstReference(rows, [])).toBeNull();
     // 勾了不存在的卡（stale 畫面）也不能爆
     expect(pickFirstReference(rows, ["ghost"])).toBeNull();
+  });
+});
+
+const P_UMBRELLA = { id: "p1", name: "紅傘", appearance: "正紅長柄傘、霧面傘布、木質握把", notes: "安倢每次出場都帶著" };
+const P_BEADS = { id: "p2", name: "佛珠", appearance: "深褐木珠、108 顆", notes: null as string | null };
+
+describe("formatPropAnchor（視覺生成・素材設定）", () => {
+  it("依選取順序串接外觀，備註不進畫面", () => {
+    expect(formatPropAnchor([P_UMBRELLA, P_BEADS], ["p2", "p1"])).toBe(
+      "佛珠：深褐木珠、108 顆；紅傘：正紅長柄傘、霧面傘布、木質握把",
+    );
+  });
+
+  it("外觀超過上限被截短（不加省略號，避免被畫成文字）", () => {
+    const long = { id: "p3", name: "長傘", appearance: "傘".repeat(CARD_FIELD_MAX + 40) };
+    const out = formatPropAnchor([long], ["p3"]);
+    expect(out).toBe(`長傘：${"傘".repeat(CARD_FIELD_MAX)}`);
+    expect(out).not.toContain("…");
+  });
+
+  it("沒勾任何素材時回空字串（呼叫端據此不注入 [素材設定] 段）", () => {
+    expect(formatPropAnchor([P_UMBRELLA], [])).toBe("");
+    expect(formatPropAnchor([], ["p1"])).toBe("");
+  });
+});
+
+describe("formatPropKnowledgeBlock（知識庫／導演・素材設定卡）", () => {
+  it("含用途備註；沒有備註就只有外觀", () => {
+    expect(formatPropKnowledgeBlock([P_UMBRELLA, P_BEADS])).toBe(
+      "【素材設定卡】\n" +
+        "- 紅傘：正紅長柄傘、霧面傘布、木質握把｜用途：安倢每次出場都帶著\n" +
+        "- 佛珠：深褐木珠、108 顆",
+    );
+  });
+
+  it("超過注入張數上限只列前 N 張並標註其餘", () => {
+    const many = Array.from({ length: PROP_KNOWLEDGE_INJECT_MAX + 3 }, (_, i) => ({
+      id: `p${i}`,
+      name: `道具${i}`,
+      appearance: "外觀",
+    }));
+    const out = formatPropKnowledgeBlock(many);
+    expect(out.split("\n- ")).toHaveLength(PROP_KNOWLEDGE_INJECT_MAX + 1);
+    expect(out).toContain("…另有 3 張素材卡未注入");
+  });
+
+  it("沒有素材卡時回空字串（不塞空標題進知識預算）", () => {
+    expect(formatPropKnowledgeBlock([])).toBe("");
   });
 });

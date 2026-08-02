@@ -176,6 +176,13 @@
       "when": 1785600700000,
       "tag": "0024_asset_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785600800000,
+      "tag": "0025_project_props",
+      "breakpoints": true
     }
   ]
 }

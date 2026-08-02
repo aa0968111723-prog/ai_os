@@ -9,7 +9,11 @@ import { proxyFetch } from "../services/http";
 import { reserveQuota, refund } from "../services/points";
 import { signAssetUrl } from "../services/storage";
 import { assertProjectEditable } from "../services/projectAcl";
-import { formatCharacterKnowledgeBlock, formatSceneKnowledgeBlock } from "../services/cardAnchors";
+import {
+  formatCharacterKnowledgeBlock,
+  formatPropKnowledgeBlock,
+  formatSceneKnowledgeBlock,
+} from "../services/cardAnchors";
 import {
   consumeRateLimit,
   RATE_LIMIT_POLICIES,
@@ -85,8 +89,8 @@ export async function buildKnowledgeContextWithMeta(
   budgetOrOpts: number | KnowledgeContextOptions = INJECT_BUDGET,
 ): Promise<KnowledgeContextMeta> {
   const opts = normalizeInjectArg(budgetOrOpts);
-  // 三個查詢互不相依，並行省 DB 往返（知識照舊過濾軟刪除；卡片兩表沒有回收桶，全量即正確）
-  const [rows, chars, presets] = await Promise.all([
+  // 四個查詢互不相依，並行省 DB 往返（知識照舊過濾軟刪除；卡片三表沒有回收桶，全量即正確）
+  const [rows, chars, presets, propRows] = await Promise.all([
     db
       .select({
         id: schema.knowledge.id,
@@ -103,14 +107,17 @@ export async function buildKnowledgeContextWithMeta(
       .orderBy(desc(schema.knowledge.createdAt)),
     db.select().from(schema.characters).where(eq(schema.characters.projectId, projectId)).orderBy(asc(schema.characters.createdAt)),
     db.select().from(schema.scenePresets).where(eq(schema.scenePresets.projectId, projectId)).orderBy(asc(schema.scenePresets.createdAt)),
+    db.select().from(schema.props).where(eq(schema.props.projectId, projectId)).orderBy(asc(schema.props.createdAt)),
   ]);
 
-  // 卡片段落（6.4）：單一真相在 cardAnchors（角色定裝＋場景設定）——截短與張數上限一致
+  // 卡片段落（6.4）：單一真相在 cardAnchors（角色定裝＋場景設定＋素材設定）——截短與張數上限一致
   const cardParts: string[] = [];
   const charBlock = formatCharacterKnowledgeBlock(chars);
   if (charBlock) cardParts.push(charBlock);
   const sceneBlock = formatSceneKnowledgeBlock(presets);
   if (sceneBlock) cardParts.push(sceneBlock);
+  const propBlock = formatPropKnowledgeBlock(propRows);
+  if (propBlock) cardParts.push(propBlock);
   const cardBlock = cardParts.join("\n");
 
   const labelOf = (k: string) => KNOWLEDGE_KINDS.find((x) => x.id === k)?.label ?? k;

@@ -18,9 +18,10 @@ const aliases: PlannerAliases = {
     label: "成果資料庫",
     fields: [{ key: "title", label: "標題", type: "text" }],
   }],
-  // CA-01：角色／場景／素材代號
+  // CA-01：角色／場景／素材設定／素材庫代號
   characters: [{ ref: "char1", id: "55555555-5555-4555-8555-555555555555", label: "安倢" }],
   scenePresets: [{ ref: "preset1", id: "66666666-6666-4666-8666-666666666666", label: "暖色清晨" }],
+  props: [{ ref: "prop1", id: "88888888-8888-4888-8888-888888888888", label: "紅傘" }],
   assets: [{ ref: "asset1", id: "77777777-7777-4777-8777-777777777777", label: "分鏡首格" }],
 };
 
@@ -262,6 +263,7 @@ describe("complete AI planning safety resolver", () => {
         modelId: NEEDS_IMAGE_MODEL,
         characterRefs: ["char1"],
         scenePresetRefs: ["preset1"],
+        propRefs: ["prop1"],
         sourceAssetRef: "asset1",
       }],
     });
@@ -272,16 +274,19 @@ describe("complete AI planning safety resolver", () => {
     expect(plan.steps).toHaveLength(1);
     expect(step.characterIds).toEqual([aliases.characters[0].id]);
     expect(step.scenePresetIds).toEqual([aliases.scenePresets[0].id]);
+    expect(step.propIds).toEqual([aliases.props[0].id]);
     expect(step.sourceAssetId).toBe(aliases.assets[0].id);
     expect(step.modelId).toBe(NEEDS_IMAGE_MODEL);
 
     const types = (step.sourceRefs ?? []).map((r) => r.type);
     expect(types).toContain("character");
     expect(types).toContain("scene_preset");
+    expect(types).toContain("prop");
     expect(types).toContain("asset");
     expect(step.sourceRefs).toEqual(expect.arrayContaining([
       { type: "character", id: aliases.characters[0].id, label: "安倢" },
       { type: "scene_preset", id: aliases.scenePresets[0].id, label: "暖色清晨" },
+      { type: "prop", id: aliases.props[0].id, label: "紅傘" },
       { type: "asset", id: aliases.assets[0].id, label: "分鏡首格" },
     ]));
     expect(plan.summary.missingInformation).toEqual([]);
