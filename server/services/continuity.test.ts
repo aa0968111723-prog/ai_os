@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyContinuityReferences, assembleContinuitySnapshot, continuityReferenceAssetIds } from "./continuity";
+import { analyzeContinuitySnapshot, applyContinuityReferences, assembleContinuitySnapshot, continuityReferenceAssetIds } from "./continuity";
 
 const c1 = "00000000-0000-4000-8000-000000000001";
 const c2 = "00000000-0000-4000-8000-000000000002";
@@ -25,6 +25,23 @@ describe("assembleContinuitySnapshot", () => {
     expect(first.fingerprint).toBe(second.fingerprint);
     expect(first.fingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(continuityReferenceAssetIds(first, ref1)).toEqual([ref2]);
+  });
+
+  it("reports honest reference coverage and normalized duplicate names", () => {
+    const snapshot = assembleContinuitySnapshot({
+      characterRows: [{ id: c1, name: "安 倢", appearance: "白衣", notes: null, referenceAssetId: ref1 }],
+      sceneRows: [],
+      propRows: [{ id: c2, name: "安倢", appearance: "木雕", notes: null, referenceAssetId: null }],
+      selected: { characterIds: [c1], propIds: [c2] },
+      locked: true,
+    });
+    expect(analyzeContinuitySnapshot(snapshot)).toMatchObject({
+      totalCards: 2,
+      cardsWithReference: 1,
+      coveragePercent: 50,
+      missingReferences: [{ kind: "prop", id: c2, name: "安倢" }],
+      duplicateNames: [{ name: "安 倢" }],
+    });
   });
 });
 

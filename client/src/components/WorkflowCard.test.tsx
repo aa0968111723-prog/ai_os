@@ -214,6 +214,8 @@ describe("WorkflowCard", () => {
           createdAt: new Date("2026-01-15T10:00:00Z").toISOString(),
           characterIds: ["c1"],
           scenePresetIds: null,
+          propIds: ["p1"],
+          continuitySnapshot: { locked: true, fingerprint: "abcdef0123456789" },
           steps: [
             { note: "出圖", status: "done", generationId: "g1" },
             { note: "旁白", status: "running", generationId: "g2" },
@@ -231,6 +233,8 @@ describe("WorkflowCard", () => {
     expect(screen.getByText(/想法：禪堂/)).toBeVisible();
     expect(screen.getByText("出圖")).toBeVisible();
     expect(screen.getByText("旁白")).toBeVisible();
+    expect(screen.getByText("素材 1")).toBeVisible();
+    expect(screen.getByText("一致性 abcdef01")).toHaveAttribute("title", "完整一致性版本：abcdef0123456789");
     // own active run disables start
     expect(screen.getByRole("button", { name: /執行製作範本/ })).toBeDisabled();
     expect(screen.getByText("已有一個製作範本在執行")).toBeVisible();

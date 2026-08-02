@@ -297,7 +297,7 @@ export function WorkflowCard({
           {charIds.length > 0 && <Chip selected style={{ marginLeft: 4 }}>角色 {charIds.length}</Chip>}
           {sceneIds.length > 0 && <Chip selected style={{ marginLeft: 4 }}>場景 {sceneIds.length}</Chip>}
           {propIds.length > 0 && <Chip selected style={{ marginLeft: 4 }}>素材 {propIds.length}</Chip>}
-          <span style={{ marginLeft: 4 }}>——視覺步驟都注入同一套錨點</span>
+          <span style={{ marginLeft: 4 }}>——啟動時鎖定版本，所有視覺步驟與重試共用</span>
         </Meta>
       )}
       <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -329,6 +329,7 @@ export function WorkflowCard({
       {(runs.data ?? []).map((r) => {
         const steps = r.steps as RunStep[];
         const label = workflows.data?.find((w) => w.id === r.presetId)?.label ?? r.presetId;
+        const continuity = r.continuitySnapshot as { locked?: boolean; fingerprint?: string } | null;
         return (
           <div key={r.id} style={{ marginTop: 12, paddingTop: 8, borderTop: "1px solid var(--border-soft)" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -346,6 +347,12 @@ export function WorkflowCard({
               {/* 這條 run 帶了哪些錨點（落庫在 run 上，重整/他人看到的都一致） */}
               {((r.characterIds as string[] | null)?.length ?? 0) > 0 && <Chip style={{ marginLeft: 6 }}>角色 {(r.characterIds as string[]).length}</Chip>}
               {((r.scenePresetIds as string[] | null)?.length ?? 0) > 0 && <Chip style={{ marginLeft: 4 }}>場景 {(r.scenePresetIds as string[]).length}</Chip>}
+              {((r.propIds as string[] | null)?.length ?? 0) > 0 && <Chip style={{ marginLeft: 4 }}>素材 {(r.propIds as string[]).length}</Chip>}
+              {continuity?.locked && continuity.fingerprint ? (
+                <Chip style={{ marginLeft: 4 }} title={`完整一致性版本：${continuity.fingerprint}`}>
+                  一致性 {continuity.fingerprint.slice(0, 8)}
+                </Chip>
+              ) : null}
             </Meta>
             {steps.map((s, i) => (
               <Meta key={i} as="div" style={{ display: "flex", gap: 8, alignItems: "baseline" }}>

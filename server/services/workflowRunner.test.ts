@@ -16,6 +16,14 @@ describe("workflowRunner cost approval boundary", () => {
     expect(source).not.toMatch(/submitGenerationCore\s*\(/);
   });
 
+  it("reuses the workflow's locked continuity snapshot for every generation step", () => {
+    expect(source).toContain("continuitySnapshotSchema.safeParse(run.continuitySnapshot)");
+    expect(source).toContain("parsedContinuitySnapshot.data.locked");
+    expect(source).toContain("continuityFingerprint: continuitySnapshot?.fingerprint");
+    expect(source).toContain("continuitySnapshot,");
+    expect(source).toContain("continuityMode: continuitySnapshot?.locked");
+  });
+
   it("waits for leader approval and handles rejection as terminal", () => {
     expect(source).toContain('gen.status === "awaiting_approval"');
     expect(source).toContain('gen.status === "failed" || gen.status === "rejected"');
@@ -49,6 +57,18 @@ describe("workflow trace terminal states", () => {
     expect(source).toContain('current.status !== "done" && current.status !== "failed" && current.status !== "stopped"');
     expect(source).toContain("await finalizeWorkflowTraceFromRun(fresh.id, fresh.traceSessionId");
     expect(source).not.toContain("await updateAiTraceSession(run.traceSessionId");
+  });
+});
+
+describe("workflow continuity snapshot capture", () => {
+  const routerSource = readFileSync(new URL("../routers/workflows.ts", import.meta.url), "utf8");
+  const schemaSource = readFileSync(new URL("../db/schema/generation.ts", import.meta.url), "utf8");
+
+  it("validates selected cards and persists one snapshot when the run starts", () => {
+    expect(routerSource).toContain("await assertGenerationEntityIds(projectId, selection)");
+    expect(routerSource).toContain("await buildContinuitySnapshot(projectId, selection, true)");
+    expect(routerSource).toContain("continuitySnapshot,");
+    expect(schemaSource).toContain('continuitySnapshot: jsonb("continuity_snapshot")');
   });
 });
 
