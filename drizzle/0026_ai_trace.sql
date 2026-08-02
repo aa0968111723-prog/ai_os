@@ -28,15 +28,15 @@ CREATE TABLE IF NOT EXISTS "ai_trace_events" (
   "created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "ai_trace_sessions_project_created_idx" ON "ai_trace_sessions" ("project_id", "created_at");
+CREATE INDEX IF NOT EXISTS "ai_trace_sessions_project_created_idx" ON "ai_trace_sessions" USING btree ("project_id", "created_at");
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "ai_trace_sessions_group_created_idx" ON "ai_trace_sessions" ("group_id", "created_at");
+CREATE INDEX IF NOT EXISTS "ai_trace_sessions_group_created_idx" ON "ai_trace_sessions" USING btree ("group_id", "created_at");
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "ai_trace_sessions_source_idx" ON "ai_trace_sessions" ("source_type", "source_id");
+CREATE INDEX IF NOT EXISTS "ai_trace_sessions_source_idx" ON "ai_trace_sessions" USING btree ("source_type", "source_id");
 --> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "ai_trace_events_session_sequence_uq" ON "ai_trace_events" ("session_id", "sequence");
+CREATE UNIQUE INDEX IF NOT EXISTS "ai_trace_events_session_sequence_uq" ON "ai_trace_events" USING btree ("session_id", "sequence");
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "ai_trace_events_session_created_idx" ON "ai_trace_events" ("session_id", "created_at");
+CREATE INDEX IF NOT EXISTS "ai_trace_events_session_created_idx" ON "ai_trace_events" USING btree ("session_id", "created_at");
 --> statement-breakpoint
 ALTER TABLE "workflow_runs" ADD COLUMN IF NOT EXISTS "step_prompt_overrides" jsonb;
 --> statement-breakpoint
