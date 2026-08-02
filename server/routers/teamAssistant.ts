@@ -1325,12 +1325,15 @@ ${historyBlock}使用者的問題：${input.message}`;
       goal: z.string().min(5, "目標至少 5 個字").max(1000),
       /** 授權組代理可自動核准的點數上限；0＝每份子計畫都要人按（預設不給，寧可多按幾次） */
       budgetPoints: z.number().int().min(0).max(100_000).default(0),
+      /** 規劃檔位；不給就用高品質預設，規劃本身依實際 token 扣點 */
+      plannerMode: agentPlannerModeSchema.optional(),
     }))
     .mutation(({ ctx, input }) => planGroupCampaign({
       auth: ctx.auth,
       groupId: input.groupId,
       goal: input.goal,
       budgetPoints: input.budgetPoints,
+      plannerMode: input.plannerMode,
     })),
 
   approveCampaign: authedProcedure

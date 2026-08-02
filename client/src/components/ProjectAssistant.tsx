@@ -16,9 +16,12 @@ import {
   getAgentPlannerOption,
   type AgentPlannerMode,
 } from "../../../shared/agentPlanner";
+import { plannerCostLabel } from "../../../shared/llmPricing";
 import {
   readAgentPlannerMode,
+  readAssistantAnswerMode,
   writeAgentPlannerMode,
+  writeAssistantAnswerMode,
 } from "../lib/agentPlannerPreference";
 import { Badge, Button, Card, Chip, Hint, Meta } from "./ui";
 /** 助手提議的動作（與後端 assistant.ask 回傳對齊）：確認後原樣送 runAction 執行 */
@@ -156,6 +159,8 @@ export function ProjectAssistant({
   // 代理規劃供應商／用量策略；保留使用者上次選擇，個別提議仍可覆蓋。
   const [defaultPlannerMode, setDefaultPlannerMode] = useState<AgentPlannerMode>(readAgentPlannerMode);
   const [plannerModeOverride, setPlannerModeOverride] = useState<Record<string, AgentPlannerMode>>({});
+  // 回答這則提問要用的模型：與代理規劃檔位分開存（聊天預設免費，規劃預設高品質＋計點）
+  const [answerMode, setAnswerMode] = useState<AgentPlannerMode>(readAssistantAnswerMode);
   const scrollRef = useRef<HTMLDivElement>(null);
   const push = (t: Turn) => {
     setTurns((prev) => [...prev, t]);
@@ -208,8 +213,8 @@ export function ProjectAssistant({
       projectId: requestProjectId,
       message,
       nonce,
-      // 使用者在代理卡選的模型檔位；預設 nim＝免費，選 fal 檔位平台才付費
-      mode: defaultPlannerMode,
+      // 使用者為「回答模型」選的檔位；預設 nim＝免費，選 fal 檔位平台才付費
+      mode: answerMode,
       knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
       signal,
       handlers: {
@@ -277,7 +282,7 @@ export function ProjectAssistant({
           projectId: requestProjectId,
           message: m,
           nonce,
-          mode: defaultPlannerMode,
+          mode: answerMode,
           knowledgeIds: knowledgeIds?.length ? knowledgeIds : undefined,
         },
         {
@@ -433,7 +438,7 @@ export function ProjectAssistant({
 
       <div id="sec-assistant-body" hidden={collapsed}>
         <Hint style={{ marginTop: 4 }}>
-          一個對話統包：<b>問</b>（進度、還沒審的分鏡、該用哪個模型…，我會<b>邊想邊查</b>素材庫／分鏡／生成紀錄／模型目錄／<b>資料庫</b>，唯讀）、<b>發想</b>（要分鏡 idea 我直接給，並可一鍵存成草稿）、<b>拆分鏡</b>（貼腳本進來）、<b>下目標</b>（多步驟目標我會交給代理排計畫，你核准估點後由伺服器背景逐步執行）。任何花點數或改資料的動作都要你按確認；提問本身由 NVIDIA NIM 免費額度驅動，不扣點。
+          一個對話統包：<b>問</b>（進度、還沒審的分鏡、該用哪個模型…，我會<b>邊想邊查</b>素材庫／分鏡／生成紀錄／模型目錄／<b>資料庫</b>，唯讀）、<b>發想</b>（要分鏡 idea 我直接給，並可一鍵存成草稿）、<b>拆分鏡</b>（貼腳本進來）、<b>下目標</b>（多步驟目標我會交給代理排計畫，你核准估點後由伺服器背景逐步執行）。任何花點數或改資料的動作都要你按確認；提問本身預設由 NVIDIA NIM 免費額度驅動、不扣點（交給代理排計畫則走高品質模型，依實際 token 扣點）。
         </Hint>
 
         {/* 快速開場：問答／發想／下目標都從同一個入口——點一顆帶入輸入框，按「問」才送出 */}
@@ -538,7 +543,7 @@ export function ProjectAssistant({
                             : payloadAct.type === "split_script"
                               ? `執行「${payloadAct.label}」？會呼叫 AI 導演拆分鏡（免費）。`
                               : payloadAct.type === "plan_agent"
-                                ? `把這個目標交給 AI 創作助手，並使用「${plannerOption.shortLabel}」？規劃不扣站內點數；fal.ai 模式依實際 token 計費。這一步只排計畫，你在「AI 執行計畫」核准後才會開始花執行點數。`
+                                ? `把這個目標交給 AI 創作助手，並使用「${plannerOption.shortLabel}」？規劃本身${plannerCostLabel(chosenPlannerMode)}。這一步只排計畫，你在「AI 執行計畫」核准後才會開始花執行點數。`
                                 : payloadAct.type === "apply_worldview_chips"
                                   ? `套用世界觀基調「${payloadAct.label.replace(/^套用基調：/, "")}」？會覆寫你有選到的主軸／調性／風格欄位（未列的欄位不動）。可之後在專案基調區再改。`
                                   : `執行「${payloadAct.label}」？`;
@@ -602,7 +607,7 @@ export function ProjectAssistant({
                               >
                                 {AGENT_PLANNER_OPTIONS.map((option) => (
                                   <option key={option.value} value={option.value}>
-                                    {option.label} — {option.usageLabel}
+                                    {option.label} — {plannerCostLabel(option.value)}
                                   </option>
                                 ))}
                               </select>
@@ -776,12 +781,12 @@ export function ProjectAssistant({
             回答模型
             <select
               aria-label="選擇回答這則提問的模型"
-              value={defaultPlannerMode}
+              value={answerMode}
               disabled={busy}
               onChange={(event) => {
                 const mode = event.target.value as AgentPlannerMode;
-                setDefaultPlannerMode(mode);
-                writeAgentPlannerMode(mode);
+                setAnswerMode(mode);
+                writeAssistantAnswerMode(mode);
               }}
               style={{ fontSize: "var(--fs-12)", padding: "2px 6px", width: "auto" }}
             >
@@ -793,9 +798,9 @@ export function ProjectAssistant({
             </select>
           </label>
           <Hint as="span" layer="always">
-            {defaultPlannerMode === "nim"
+            {answerMode === "nim"
               ? "NVIDIA NIM 免費額度，站內 0 點、平台 0 成本。"
-              : defaultPlannerMode === "auto"
+              : answerMode === "auto"
                 ? "先用免費的 NIM；它沒回應時才改用 fal.ai（那次平台會付費）。"
                 : "走 fal.ai：站內仍是 0 點，但平台會實付 USD。專案內容也會傳給 fal.ai。"}
           </Hint>

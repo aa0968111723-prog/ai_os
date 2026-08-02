@@ -7,6 +7,7 @@
  */
 import { and, eq, gt, gte, inArray, sql } from "drizzle-orm";
 import { db, schema } from "../db";
+import { settlePoints } from "../../shared/llmPricing";
 import { falCeilingReason } from "./falCeiling";
 
 export interface PointsSettings {
@@ -354,6 +355,28 @@ export async function reserveQuota(
     await tx.insert(schema.costLedger).values({ userId, groupId, delta: -points, reason, generationId });
     return null;
   });
+}
+
+/**
+ * 用量型呼叫（LLM 規劃）的結算：預留多了退回、少了補扣，回傳最終實扣點數。
+ *
+ * 生成類是「估點即扣、失敗全退」就夠了——單價在送出前就知道。LLM 不是：計費量是 token，
+ * 跑完才知道。少了這道結算，預留高估＝永久超收使用者、預留低估＝平台白付差額。
+ *
+ * 補扣刻意用 deduct 而非 reserveQuota：呼叫已經跑完、錢已經花掉，這時再去擋額度只會讓
+ * 帳本少一筆該記的支出（額度守門的位置在「預留」那一刻，不是在事後對帳）。
+ */
+export async function settleUsagePoints(input: {
+  userId: string;
+  groupId: string;
+  reserved: number;
+  actual: number;
+  reason: string;
+}): Promise<number> {
+  const { refund: back, extra } = settlePoints(input.reserved, input.actual);
+  if (back > 0) await refund(input.userId, input.groupId, back, `${input.reason}（實際低於預留退回）`);
+  if (extra > 0) await deduct(input.userId, input.groupId, extra, `${input.reason}（實際高於預留補扣）`);
+  return Math.max(0, Math.round(input.actual));
 }
 
 export async function refund(userId: string, groupId: string, points: number, reason: string, generationId?: string): Promise<void> {

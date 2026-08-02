@@ -50,6 +50,21 @@ LLM 看不到可直接寫入的 UUID。提示詞只提供：
 
 伺服器再把代號解析成真實 ID。未知代號、跨專案引用、無效模型、模糊時間、錯誤時序與失效依賴不會直接執行；可安全降級者轉成 `missingInformation`，不可安全降級者拒絕整份計畫。核准前不執行副作用。
 
+## 規劃模型與規劃點數
+
+代理規劃預設走**高品質模型**（`DEFAULT_AGENT_PLANNER_MODE = fal_quality`，目前是 Claude Sonnet 4.5），而不是免費的 NVIDIA NIM。理由不是「好模型比較潮」：規劃這一步決定了後面每一步要燒多少執行點數，一份依賴亂接、步驟漏光的計畫，省下的是規劃的幾點、賠掉的是整份計畫的執行成本。使用者仍可在規劃卡改成均衡／省點數／免費檔。
+
+規劃本身**依實際 token 計點**（`shared/llmPricing.ts` 是換算的單一真相，口徑與模型目錄一致：USD × `USD_TO_TWD`、1 點 ≈ NT$1、付費呼叫最低 1 點）：
+
+1. **預留**：送出前依「提示詞實際字數 × 該檔位輸出上限 × 可能的重試次數」估最壞情況，走 `reserveQuota`——額度不足在這裡就被擋下，不會讓人先花掉供應商的錢才發現點數不夠。
+2. **結算**：供應商回來後以實際用量（優先用它回報的 `usage.cost`）算實扣點數，`settleUsagePoints` 多退少補。供應商沒回用量時保留預留值，不當成免費。
+3. **失敗**：呼叫整段失敗＝沒有產生用量，預留全額退回。但**呼叫成功、計畫卻被判不合格**時照實結算——那筆錢平台真的付了，退成 0 點只是把它藏起來。
+4. 免費檔（`nim`，以及 `auto` 走到 NIM 那一次）實扣 0 點；`reserveQuota` 對 0 點直接放行，不寫雜訊帳本列。
+
+實扣結果寫進 `plannerTelemetry.pointsReserved` / `pointsActual`，規劃卡顯示「規劃扣點 N 點」，`run:planned` 事件也帶得走——「這份計畫是用什麼模型、花幾點排出來的」事後查得到。組代理的調度計畫（`planGroupCampaign`）走同一套，點數記在 `campaign:planned` 事件的 `plannerPoints`。
+
+聊天助手是另一條路：它預設仍是免費 NIM（高頻動作，預設就該免費），偏好各自存（`aios.assistantAnswerMode` vs `aios.agentPlannerMode`）——共用一個鍵的話，把規劃調成高品質會連帶讓每一句閒聊都跑付費模型。
+
 ## DAG 與等待語義
 
 新計畫的步驟帶 `executionMode="dag"`：

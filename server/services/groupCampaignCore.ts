@@ -4,7 +4,8 @@ import { db, schema } from "../db";
 import { requireGroup } from "../trpc";
 import type { AuthState } from "./auth";
 import { isMockMode } from "./fal";
-import { nimComplete, NimServiceError } from "./nvidia-nim";
+import { completeText, FAL_AGENT_PROFILES, LlmServiceError, type FalAgentMode } from "./llmProvider";
+import { reserveQuota, refund, settleUsagePoints } from "./points";
 import { listGroupTasks } from "./taskCore";
 import { getGroupCommandLevel, recordGroupAgentEventSafely } from "./groupCommand";
 import {
@@ -14,6 +15,12 @@ import {
   RateLimitConfigurationError,
   RateLimitUnavailableError,
 } from "./rateLimit";
+import {
+  DEFAULT_AGENT_PLANNER_MODE,
+  getAgentPlannerOption,
+  type AgentPlannerMode,
+} from "../../shared/agentPlanner";
+import { estimatePlannerPoints, llmPointsForUsage } from "../../shared/llmPricing";
 import {
   CAMPAIGN_MIN_LEVEL,
   MAX_CAMPAIGN_STEPS,
@@ -189,6 +196,19 @@ function mockCampaignDraft(goal: string, refs: CampaignRefs): GroupPlanDraft {
 
 const CAMPAIGN_PLAN_TIMEOUT_MS = 60_000;
 
+/** 調度計畫的 JSON 比專案計畫短得多；估點用這個上限，不必照搬檔位的 8k 輸出上限 */
+const CAMPAIGN_MAX_OUTPUT_TOKENS = 3_000;
+
+const CAMPAIGN_SYSTEM_PROMPT =
+  "你是正式產品的組代理總指揮規劃器。只輸出一個符合指定結構的 JSON 物件，不要輸出 markdown、解說、reasoning 或 chain-of-thought。";
+
+/** 預留估點用的輸出上限：取檔位上限與調度計畫實際需要的較小值（免費檔 0＝不收點） */
+function campaignOutputTokenCeiling(mode: AgentPlannerMode): number {
+  if (mode === "nim") return 0;
+  const falMode: FalAgentMode = mode === "auto" ? "fal_balanced" : mode;
+  return Math.min(FAL_AGENT_PROFILES[falMode].maxTokens, CAMPAIGN_MAX_OUTPUT_TOKENS);
+}
+
 /**
  * 規劃一份 campaign（只規劃不執行；核准後才由背景執行器接手）。
  *
@@ -201,8 +221,11 @@ export async function planGroupCampaign(input: {
   groupId: string;
   goal: string;
   budgetPoints: number;
+  /** 規劃檔位；不指定就用高品質預設（總指揮排的是要花別人點數的計畫，值得用好模型） */
+  plannerMode?: AgentPlannerMode;
 }): Promise<GroupCampaignRow> {
   const { auth, groupId } = input;
+  const plannerMode = input.plannerMode ?? DEFAULT_AGENT_PLANNER_MODE;
   requireGroup(auth, groupId);
   // 發起 campaign＝要求組代理在無人盯著時自己下令，所以要最高等級（command）
   await assertCampaignAuthority(auth, groupId);
@@ -234,20 +257,46 @@ export async function planGroupCampaign(input: {
 
   let draft: GroupPlanDraft;
   let rationale: string | undefined;
+  let plannerPoints = 0;
   if (isMockMode()) {
     draft = mockCampaignDraft(goal, refs);
     rationale = draft.rationale;
   } else {
     const prompt = buildCampaignPrompt(goal, refs, budgetPoints);
-    let raw: string;
+    // 高品質模型是平台實付 USD 的呼叫：先依最壞情況預留點數（額度不足就在這裡擋下，
+    // 不會讓人先花掉供應商的錢才發現點數不夠），跑完再依實際 token 多退少補。
+    const plannerLabel = getAgentPlannerOption(plannerMode).shortLabel;
+    const reservedPoints = estimatePlannerPoints(plannerMode, {
+      promptChars: prompt.length,
+      maxOutputTokens: campaignOutputTokenCeiling(plannerMode),
+    });
+    const quotaError = await reserveQuota(auth.user.id, groupId, reservedPoints, `組代理調度規劃（${plannerLabel}）`);
+    if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
+
+    let completion: Awaited<ReturnType<typeof completeText>>;
     try {
-      raw = await nimComplete(prompt, { timeoutMs: CAMPAIGN_PLAN_TIMEOUT_MS });
+      completion = await completeText({
+        prompt,
+        systemPrompt: CAMPAIGN_SYSTEM_PROMPT,
+        mode: plannerMode,
+        timeoutMs: CAMPAIGN_PLAN_TIMEOUT_MS,
+      });
     } catch (err) {
+      await refund(auth.user.id, groupId, reservedPoints, "組代理調度規劃失敗退回");
       throw new TRPCError({
         code: "SERVICE_UNAVAILABLE",
-        message: err instanceof NimServiceError ? err.message : "組代理規劃暫時沒回應，請稍後再試",
+        message: err instanceof LlmServiceError ? err.message : "組代理規劃暫時沒回應，請稍後再試",
       });
     }
+    // 呼叫成功＝token 已經燒掉：即使下面判定計畫不合格也照實結算，不假裝沒花過
+    plannerPoints = await settleUsagePoints({
+      userId: auth.user.id,
+      groupId,
+      reserved: reservedPoints,
+      actual: llmPointsForUsage(completion.model, completion.usage) ?? reservedPoints,
+      reason: `組代理調度規劃（${plannerLabel}）`,
+    });
+    const raw = completion.text;
     const match = raw.match(/\{[\s\S]*\}/);
     let json: unknown = null;
     try {
@@ -291,8 +340,15 @@ export async function planGroupCampaign(input: {
     eventType: "planned",
     actorType: "ai",
     actorId: auth.user.id,
-    summary: `組代理排了一份 ${steps.length} 步的調度計畫`,
-    data: { goal, budgetPoints, dispatches: steps.filter((s) => s.kind === "dispatch").length },
+    summary: `組代理排了一份 ${steps.length} 步的調度計畫${plannerPoints > 0 ? `（規劃花 ${plannerPoints} 點）` : ""}`,
+    // 規劃本身花了幾點、用哪個檔位排的，都要留得下來——這是唯一能事後對帳的地方
+    data: {
+      goal,
+      budgetPoints,
+      dispatches: steps.filter((s) => s.kind === "dispatch").length,
+      plannerMode,
+      plannerPoints,
+    },
   });
   return run;
 }

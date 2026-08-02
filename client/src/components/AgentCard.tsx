@@ -11,6 +11,7 @@ import {
   type AgentPlannerMode,
   type AgentPlannerTelemetry,
 } from "../../../shared/agentPlanner";
+import { plannerCostLabel } from "../../../shared/llmPricing";
 import {
   readAgentPlannerMode,
   writeAgentPlannerMode,
@@ -536,6 +537,9 @@ export function AgentCard({
                   >
                     <strong style={{ display: "block" }}>{option.shortLabel}</strong>
                     <span style={{ display: "block", fontSize: "var(--fs-11)", opacity: 0.82, marginTop: 2 }}>
+                      {plannerCostLabel(option.value)}
+                    </span>
+                    <span style={{ display: "block", fontSize: "var(--fs-11)", opacity: 0.7 }}>
                       {option.usageLabel}
                     </span>
                   </Button>
@@ -600,7 +604,7 @@ export function AgentCard({
             <ConfirmButton
               triggerClassName="primary"
               disabled={goal.trim().length < 5 || plan.isPending}
-              message={`會讀專案資料排出步驟與估點${knowledgeSources.length || driveSources.length ? `（優先注入你選的來源：知識 ${knowledgeSources.length}、僅本次雲端檔 ${driveSources.length}）` : ""}。規劃不扣站內點數；你核准後才開始執行與扣點。`}
+              message={`會用「${plannerOption.shortLabel}」讀專案資料排出步驟與估點${knowledgeSources.length || driveSources.length ? `（優先注入你選的來源：知識 ${knowledgeSources.length}、僅本次雲端檔 ${driveSources.length}）` : ""}。規劃本身${plannerCostLabel(plannerMode)}；執行的點數要你核准後才開始花。`}
               confirmLabel="排步驟"
               onConfirm={() => plan.mutate({
                 projectId,
@@ -759,6 +763,11 @@ export function AgentCard({
                 </Chip>
                 {plannerTelemetry.totalTokens != null && (
                   <Chip>總用量 {plannerTelemetry.totalTokens.toLocaleString()} tokens</Chip>
+                )}
+                {plannerTelemetry.pointsActual != null && (
+                  <Chip title="規劃這份計畫本身花掉的點數（依實際 token 結算，與執行點數分開計）">
+                    規劃扣點 {plannerTelemetry.pointsActual} 點
+                  </Chip>
                 )}
                 {plannerTelemetry.costUsd != null && (
                   <Chip>Fal 費用 US${plannerTelemetry.costUsd.toFixed(plannerTelemetry.costUsd < 0.01 ? 6 : 4)}</Chip>
