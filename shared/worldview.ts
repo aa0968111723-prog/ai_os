@@ -646,6 +646,52 @@ export function formatWorldviewVisualPositive(wv: Worldview): string {
   return parts.join("|");
 }
 
+/**
+ * 生成提示詞裡的世界觀段落標記。
+ * 前端「AI 會收到什麼」預覽與 generationCore 共用同一份——前端若自己再寫一次字串，
+ * 兩邊遲早漂移，預覽就會騙人。
+ */
+export const WORLDVIEW_INJECT_MARKER = "[專案背景]";
+
+/** 定裝卡錨點標記（順序＝伺服器疊加順序：角色→場景→素材） */
+export const CARD_ANCHOR_MARKERS = ["[角色定裝]", "[場景設定]", "[素材設定]"] as const;
+
+/**
+ * 視覺類別的禁忌 → negative_prompt。
+ * 擴散模型無法靠正向提示詞「避免」某物，故禁忌只走負向（見 generationCore 的說明）。
+ */
+export function formatWorldviewVisualNegative(wv: Pick<Worldview, "taboos">): string {
+  return wv.taboos.map((t) => t.trim()).filter(Boolean).join(", ");
+}
+
+/** 使用者提示詞 ＋ 世界觀段落的最終組法（buildPositive 與預覽共用） */
+export function formatWorldviewInjectedPrompt(userPrompt: string, background: string): string {
+  return background ? `${userPrompt}\n\n${WORLDVIEW_INJECT_MARKER} ${background}` : userPrompt;
+}
+
+/** 「AI 會收到什麼」預覽的三段內容（皆由既有 formatter 產生，不另組字串） */
+export type WorldviewInjectPreview = {
+  visual: { positive: string; negative: string };
+  llm: { positive: string };
+  /** 三段皆空＝AI 只會收到使用者當下打的那句話 */
+  empty: boolean;
+};
+
+/**
+ * 產生預覽內容。刻意只呼叫既有的公開 formatter（與 generationCore 同一條路），
+ * 不重組任何字串——這是「預覽不可能說謊」的唯一保證。
+ */
+export function buildWorldviewInjectPreview(wv: Worldview): WorldviewInjectPreview {
+  const visualPositive = formatWorldviewVisualPositive(wv);
+  const visualNegative = formatWorldviewVisualNegative(wv);
+  const llmPositive = formatWorldviewForAi(wv, "generation-llm");
+  return {
+    visual: { positive: visualPositive, negative: visualNegative },
+    llm: { positive: llmPositive },
+    empty: !visualPositive && !visualNegative && !llmPositive,
+  };
+}
+
 /** 是否正要移除預設弘法禁語（清空或刪掉 DEFAULT 其中一條）——UI 確認用 */
 export function removesDefaultTaboos(prev: string[], next: string[]): boolean {
   const defaults = DEFAULT_TABOOS();

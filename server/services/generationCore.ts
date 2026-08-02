@@ -9,13 +9,16 @@
 import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
-import { getModel, endpointOf, isNimModel, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { getModel, endpointOf, isNimModel, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import {
   worldviewSchema,
   formatWorldviewVisualPositive,
+  formatWorldviewVisualNegative,
+  formatWorldviewInjectedPrompt,
   formatWorldviewForAi,
+  CARD_ANCHOR_MARKERS,
   type Worldview,
 } from "../../shared/worldview";
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
@@ -95,7 +98,7 @@ function buildPositive(userPrompt: string, worldview: Worldview, visual: boolean
     : isLlm
       ? formatWorldviewForAi(worldview, "generation-llm")
       : "";
-  return bg ? `${userPrompt}\n\n[專案背景] ${bg}` : userPrompt;
+  return formatWorldviewInjectedPrompt(userPrompt, bg);
 }
 
 /**
@@ -107,7 +110,7 @@ const SOURCE_KIND_LABEL: Record<string, string> = { image: "圖片", video: "影
 /** 哪些類別注入世界觀(TTS 會唸出注入文字、轉錄/視覺/訓練/影片工具不適用 → 不注入) */
 // 修 GEN-202：text-to-audio（配樂/音效）移出注入名單——世界觀的「核心訊息／避免禁忌」是敘事文字，
 // 灌進配樂/音效提示詞只會污染輸出（與 speech-to-text/vision/training 同樣不注入）。
-const INJECT_CATEGORIES = new Set(["text-to-image", "image-to-image", "text-to-video", "image-to-video", "llm"]);
+const INJECT_CATEGORIES = WORLDVIEW_INJECT_CATEGORIES;
 /** 角色/場景錨點只注入「視覺」類別（畫面要一致）；LLM/TTS 不需要外觀。
  *  單一真相來源在 shared/models.ts 的 CARD_ANCHOR_CATEGORIES（QA-002：UI 依同一集合對使用者標示
  *  「此模型是否會用卡片」，前後端判斷不分岔）。 */
@@ -123,7 +126,7 @@ export function effectivePromptParts(model: ModelEntry, userPrompt: string, worl
   const isLlm = model.category === "llm";
   const positive = buildPositive(userPrompt, worldview, visual, isLlm);
   // 視覺類別把禁忌詞收斂成負向提示詞（逐項 trim、去空）；非視覺（llm/audio）無負向
-  const negative = visual ? worldview.taboos.map((t) => t.trim()).filter(Boolean).join(", ") : "";
+  const negative = visual ? formatWorldviewVisualNegative(worldview) : "";
   return { positive, negative };
 }
 
@@ -135,19 +138,19 @@ export function effectivePrompt(model: ModelEntry, userPrompt: string, worldview
 /** 角色定裝錨點：視覺類別才注入，並前綴到（世界觀已注入的）提示詞 */
 export function withCharacterAnchor(model: ModelEntry, prompt: string, anchor: string): string {
   if (!anchor || !CHARACTER_CATEGORIES.has(model.category)) return prompt;
-  return `${prompt}\n\n[角色定裝] ${anchor}`;
+  return `${prompt}\n\n${CARD_ANCHOR_MARKERS[0]} ${anchor}`;
 }
 
 /** 場景設定錨點（色板/光線）：同樣只注入視覺類別 */
 export function withSceneAnchor(model: ModelEntry, prompt: string, anchor: string): string {
   if (!anchor || !CHARACTER_CATEGORIES.has(model.category)) return prompt;
-  return `${prompt}\n\n[場景設定] ${anchor}`;
+  return `${prompt}\n\n${CARD_ANCHOR_MARKERS[1]} ${anchor}`;
 }
 
 /** 素材設定錨點（道具外觀・材質）：同樣只注入視覺類別 */
 export function withPropAnchor(model: ModelEntry, prompt: string, anchor: string): string {
   if (!anchor || !CHARACTER_CATEGORIES.has(model.category)) return prompt;
-  return `${prompt}\n\n[素材設定] ${anchor}`;
+  return `${prompt}\n\n${CARD_ANCHOR_MARKERS[2]} ${anchor}`;
 }
 
 export interface SubmitCoreInput {

@@ -85,6 +85,25 @@ export function supportsCardAnchors(category: ModelCategory): boolean {
 }
 
 /**
+ * 會被注入世界觀（專案基調）的類別——generationCore 的注入判斷與前端「AI 會收到什麼」
+ * 預覽同用此集合，前後端不分岔。
+ * 不在集合內的刻意排除：TTS（會把注入文字唸出來）、配樂/音效（敘事句對音頻是雜訊）、
+ * 轉錄／視覺理解／訓練（不適用）。
+ */
+export const WORLDVIEW_INJECT_CATEGORIES: ReadonlySet<ModelCategory> = new Set<ModelCategory>([
+  "text-to-image",
+  "image-to-image",
+  "text-to-video",
+  "image-to-video",
+  "llm",
+]);
+
+/** 此類別的模型生成時是否會帶上世界觀 */
+export function injectsWorldview(category: ModelCategory): boolean {
+  return WORLDVIEW_INJECT_CATEGORIES.has(category);
+}
+
+/**
  * 有頂層 negative_prompt 欄位的模型 id（保守 allowlist）：世界觀禁忌詞對視覺類別要走 negative_prompt——
  * 擴散模型無法靠正向提示詞「避免」某物（塞正向反而可能被畫出來，甚至把禁忌字當畫面文字渲染）。
  * 只收「fal schema 明確有 negative_prompt」的 id（預設不在＝不送，安全）：

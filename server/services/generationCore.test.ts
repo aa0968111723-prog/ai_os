@@ -11,7 +11,11 @@ import {
   isUnusableRealModeSourceUrl,
 } from "./generationCore";
 import { MODELS, getModel, type ModelEntry } from "../../shared/models";
-import { worldviewSchema } from "../../shared/worldview";
+import {
+  worldviewSchema,
+  buildWorldviewInjectPreview,
+  formatWorldviewInjectedPrompt,
+} from "../../shared/worldview";
 
 const wv = worldviewSchema.parse({
   logline: "一位訪客在晨光禪堂點香",
@@ -62,6 +66,33 @@ describe("effectivePromptParts：音頻/非注入類別不放禁忌詞", () => {
     const parts = effectivePromptParts(tts, "南無阿彌陀佛", wv);
     expect(parts.positive).toBe("南無阿彌陀佛");
     expect(parts.negative).toBe("");
+  });
+});
+
+/**
+ * 防漂移：專案頁的「AI 會收到什麼」預覽拿 buildWorldviewInjectPreview 的輸出直接顯示給使用者。
+ * 這裡斷言它與 effectivePromptParts 實際送出的字**逐字相等**——任何一邊改了組法，
+ * 預覽就會開始騙人，而這條測試會先紅。
+ */
+describe("buildWorldviewInjectPreview：預覽＝實際送出（不得漂移）", () => {
+  it("視覺類別：正向與負向都與 effectivePromptParts 逐字相同", () => {
+    const preview = buildWorldviewInjectPreview(wv);
+    const parts = effectivePromptParts(t2i, "清晨禪堂", wv);
+    expect(parts.positive).toBe(formatWorldviewInjectedPrompt("清晨禪堂", preview.visual.positive));
+    expect(parts.negative).toBe(preview.visual.negative);
+  });
+
+  it("LLM 類別：正向與 effectivePromptParts 逐字相同", () => {
+    const preview = buildWorldviewInjectPreview(wv);
+    const parts = effectivePromptParts(llm, "寫一段旁白", wv);
+    expect(parts.positive).toBe(formatWorldviewInjectedPrompt("寫一段旁白", preview.llm.positive));
+  });
+
+  it("空世界觀：empty 為真，且注入後提示詞原樣不變", () => {
+    const blank = worldviewSchema.parse({ taboos: [] });
+    const preview = buildWorldviewInjectPreview(blank);
+    expect(preview.empty).toBe(true);
+    expect(effectivePromptParts(t2i, "清晨禪堂", blank).positive).toBe("清晨禪堂");
   });
 });
 
