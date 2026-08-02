@@ -57,6 +57,7 @@ import { resolveProjectMode, saveProjectMode, type ProjectMode } from "../featur
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
+import { WorldviewPreview } from "../components/WorldviewPreview";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   useCollab,
@@ -1641,6 +1642,13 @@ export function ProjectPage({ id }: { id: string }) {
                 視覺風格＝媒材家族＋主風格（＋可選質感）；調性／主軸可複選。圖影注入主風格與同家族質感、前兩個調性。
               </Hint>
             )}
+            {/* 注入預覽：必須在進階摺疊層「之上」——摺疊層正是使用者放棄的地方。
+                內容全部來自 shared formatter，與 generationCore 同一條路（見 WorldviewPreview 註解）。 */}
+            <WorldviewPreview
+              wv={wv}
+              cardCounts={{ characters: charIds.length, scenes: sceneIds.length, props: propIds.length }}
+              defaultOpen={!mobileCompact}
+            />
             {/* 進階層：依目的分組 + 一鍵範例 + 人物→定裝；觀眾／三幕／人物進 brief／LLM／導演 */}
             <details style={{ marginTop: 10 }} open={hasActs(wv) || !!wv.audience.trim() || wv.people.length > 0}>
               <summary style={{ cursor: "pointer", fontSize: 13 }}>

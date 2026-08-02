@@ -31,6 +31,7 @@ export default defineConfig({
         "client/src/components/ChatEmptyState.tsx",
         "client/src/components/databaseTabs.ts",
         "client/src/components/DatabaseDetailTabs.tsx",
+        "client/src/components/WorldviewPreview.tsx",
       ],
       thresholds: {
         lines: 85,
