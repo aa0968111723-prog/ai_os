@@ -20,7 +20,7 @@ import {
   getAgentPlannerOption,
   type AgentPlannerMode,
 } from "../../shared/agentPlanner";
-import { estimatePlannerPoints, llmPointsForUsage } from "../../shared/llmPricing";
+import { estimatePlannerPoints, llmPointsForUsageEntries } from "../../shared/llmPricing";
 import {
   CAMPAIGN_MIN_LEVEL,
   MAX_CAMPAIGN_STEPS,
@@ -202,9 +202,14 @@ const CAMPAIGN_MAX_OUTPUT_TOKENS = 3_000;
 const CAMPAIGN_SYSTEM_PROMPT =
   "你是正式產品的組代理總指揮規劃器。只輸出一個符合指定結構的 JSON 物件，不要輸出 markdown、解說、reasoning 或 chain-of-thought。";
 
-/** 預留估點用的輸出上限：取檔位上限與調度計畫實際需要的較小值（免費檔 0＝不收點） */
+/**
+ * 這次呼叫真的送給供應商的輸出上限——**同一個值**也拿去算預留點數。
+ * 兩邊必須是同一個數字：預留照 3k 抓、卻讓模型吐到檔位上限（quality 8k），
+ * 超出的部分只能事後補扣，而事後補扣是不過額度閘的（見 points.settleUsagePoints）。
+ * 免費檔（nim）不影響計點，同樣給這個上限，單純不讓它寫太長。
+ */
 function campaignOutputTokenCeiling(mode: AgentPlannerMode): number {
-  if (mode === "nim") return 0;
+  if (mode === "nim") return CAMPAIGN_MAX_OUTPUT_TOKENS;
   const falMode: FalAgentMode = mode === "auto" ? "fal_balanced" : mode;
   return Math.min(FAL_AGENT_PROFILES[falMode].maxTokens, CAMPAIGN_MAX_OUTPUT_TOKENS);
 }
@@ -279,6 +284,9 @@ export async function planGroupCampaign(input: {
         prompt,
         systemPrompt: CAMPAIGN_SYSTEM_PROMPT,
         mode: plannerMode,
+        // 必須把預留用的上限真的送給供應商：不送的話模型可以吐到檔位上限（quality 8k），
+        // 實扣就會超過剛才守門過的預留，差額走事後補扣＝繞過額度閘。
+        maxTokens: campaignOutputTokenCeiling(plannerMode),
         timeoutMs: CAMPAIGN_PLAN_TIMEOUT_MS,
       });
     } catch (err) {
@@ -293,7 +301,7 @@ export async function planGroupCampaign(input: {
       userId: auth.user.id,
       groupId,
       reserved: reservedPoints,
-      actual: llmPointsForUsage(completion.model, completion.usage) ?? reservedPoints,
+      actual: llmPointsForUsageEntries([{ model: completion.model, usage: completion.usage }]) ?? reservedPoints,
       reason: `組代理調度規劃（${plannerLabel}）`,
     });
     const raw = completion.text;

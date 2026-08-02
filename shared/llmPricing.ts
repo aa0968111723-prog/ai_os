@@ -140,6 +140,36 @@ export function llmPointsForUsage(modelId: string | undefined | null, usage: Llm
   return pointsFromUsd(usd);
 }
 
+/** 一次規劃可能跨多個模型（auto 先 NIM 再備援 fal、JSON 修復重試）——各自的用量要各自計價 */
+export interface LlmUsageEntry {
+  model: string;
+  usage?: LlmTokenUsage;
+}
+
+/**
+ * 多模型用量 → 實扣點數：先各自換算 USD 再一次轉點（不是每筆各自進位）。
+ *
+ * 為什麼不能只用「最後一個模型 × 總 token」：auto 模式下 NIM（免費）與 fal（付費）的 token
+ * 會一起累加，用 fal 單價乘總量等於把免費那段也收錢；反過來（用 NIM 收費）則是平台白付。
+ * 回傳 null＝全程沒有任何可計量的用量（呼叫端保留預留值，不當免費）。
+ */
+export function llmPointsForUsageEntries(entries: LlmUsageEntry[]): number | null {
+  let usd = 0;
+  let measured = false;
+  for (const entry of entries) {
+    if (isFreeLlmModel(entry.model)) {
+      measured = true; // 免費模型有跑過就是「量得到、金額為 0」，不是量不到
+      continue;
+    }
+    const each = llmUsdForUsage(entry.model, entry.usage);
+    if (each == null) continue;
+    usd += each;
+    measured = true;
+  }
+  if (!measured) return null;
+  return pointsFromUsd(usd);
+}
+
 export interface PlannerEstimateInput {
   /** 送進模型的提示詞字數 */
   promptChars: number;

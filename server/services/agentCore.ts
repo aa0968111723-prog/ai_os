@@ -33,7 +33,7 @@ import {
   type AgentPlannerMode,
   type AgentPlannerTelemetry,
 } from "../../shared/agentPlanner";
-import { estimatePlannerPoints, llmPointsForUsage } from "../../shared/llmPricing";
+import { estimatePlannerPoints, llmPointsForUsageEntries } from "../../shared/llmPricing";
 import { FAL_AGENT_PROFILES, type FalAgentMode } from "./llmProvider";
 import { buildPlannerRoleBlock, getPlaybook } from "../../shared/rolePlaybooks";
 import {
@@ -809,16 +809,38 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
   try {
     generated = await generateAgentPlanDraft(prompt, plannerMode);
   } catch (err) {
-    // 供應商整段失敗＝沒有產生用量，預留全額退回
-    await refund(auth.user.id, project.groupId, reservedPoints, "AI 代理規劃失敗退回");
+    // 規劃失敗有兩種，帳完全不同：
+    // - 供應商連呼叫都沒成功（金鑰錯、429、逾時）＝沒有用量 → 預留全額退回。
+    // - 呼叫成功、只是兩次都吐不出合規格的計畫 ＝ 供應商照樣收錢 → 照實際用量結算。
+    //   後者若也全額退，「餵一個會讓模型吐壞 JSON 的目標」就成了免費燒平台額度的門路。
+    const failedBilling = err instanceof AgentPlannerServiceError ? err.billing : [];
+    const burned = llmPointsForUsageEntries(failedBilling);
+    const chargedOnFailure = burned == null
+      ? 0
+      : await settleUsagePoints({
+          userId: auth.user.id,
+          groupId: project.groupId,
+          reserved: reservedPoints,
+          actual: burned,
+          reason: `AI 代理規劃（${plannerLabel}）`,
+        });
+    if (burned == null) {
+      await refund(auth.user.id, project.groupId, reservedPoints, "AI 代理規劃失敗退回");
+    }
     // 軌跡也要收尾：規劃在「模型呼叫」這一段就死掉時，session 不留 failed 會永遠停在進行中
     if (input.traceSessionId) {
       const message = err instanceof Error ? err.message : String(err);
       await recordAiTraceEventSafely({
         sessionId: input.traceSessionId,
         eventType: "failed",
-        summary: "規劃模型沒有回應（預留點數已退回）",
-        payload: { error: message, pointsRefunded: reservedPoints },
+        summary: chargedOnFailure > 0
+          ? `規劃沒有產出可用計畫（已產生用量，實扣 ${chargedOnFailure} 點）`
+          : "規劃模型沒有回應（預留點數已退回）",
+        payload: {
+          error: message,
+          pointsActual: chargedOnFailure,
+          pointsRefunded: burned == null ? reservedPoints : Math.max(0, reservedPoints - chargedOnFailure),
+        },
       });
       await updateAiTraceSession(input.traceSessionId, { status: "failed", summary: message }).catch(() => undefined);
     }
@@ -830,7 +852,8 @@ ${playbookDirective ? `${playbookDirective}\n` : ""}使用者的目標：${goal}
 
   // 呼叫成功＝token 已經燒掉。即使計畫在下面被判不合格而落不了地，也照實際用量結算——
   // 那筆錢平台真的付了，退成 0 點只是把它藏起來。供應商沒回用量時保留預留值（不憑空當免費）。
-  const usagePoints = llmPointsForUsage(generated.telemetry.model, generated.telemetry);
+  // 逐次呼叫各自綁模型計價：auto 先跑免費 NIM 再備援 fal 時，不會把 NIM 的 token 用 fal 單價收錢。
+  const usagePoints = llmPointsForUsageEntries(generated.billing);
   const actualPoints = await settleUsagePoints({
     userId: auth.user.id,
     groupId: project.groupId,

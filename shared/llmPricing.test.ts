@@ -7,6 +7,7 @@ import {
   estimateTokensFromChars,
   isFreeLlmModel,
   llmPointsForUsage,
+  llmPointsForUsageEntries,
   llmUsdForUsage,
   plannerCostLabel,
   plannerModelId,
@@ -85,6 +86,35 @@ describe("llmPricing：實際用量計點", () => {
     expect(llmPointsForUsage("meta/llama-3.3-70b-instruct", { totalTokens: 99_999 })).toBe(0);
     expect(llmPointsForUsage(quality, undefined)).toBeNull();
     expect(llmPointsForUsage(quality, {})).toBeNull();
+  });
+});
+
+describe("llmPricing：多模型用量（auto 備援、JSON 修復重試）", () => {
+  const quality = AGENT_LLM_MODEL_IDS.fal_quality;
+  const free = "meta/llama-3.3-70b-instruct";
+
+  it("免費段不用付費單價收錢——同樣的 token 走 NIM 就是 0 點", () => {
+    const usage = { promptTokens: 100_000, completionTokens: 10_000 };
+    expect(llmPointsForUsageEntries([{ model: free, usage }])).toBe(0);
+    expect(llmPointsForUsageEntries([{ model: quality, usage }])).toBeGreaterThan(0);
+  });
+
+  it("多次呼叫先各自換算再一次進位（不是每筆各自最低 1 點灌上去）", () => {
+    const one = { model: quality, usage: { promptTokens: 1_000, completionTokens: 100 } };
+    const single = llmPointsForUsageEntries([one]) as number;
+    const triple = llmPointsForUsageEntries([one, one, one]) as number;
+    expect(triple).toBeGreaterThanOrEqual(single);
+    expect(triple).toBeLessThanOrEqual(single * 3);
+  });
+
+  it("免費段有跑過就算量得到（0 點）；全程量不到才回 null 讓呼叫端保留預留值", () => {
+    expect(llmPointsForUsageEntries([{ model: free }])).toBe(0);
+    expect(llmPointsForUsageEntries([])).toBeNull();
+    expect(llmPointsForUsageEntries([{ model: quality }])).toBeNull();
+  });
+
+  it("付費呼叫即使極小額也至少 1 點（帳要留得下來）", () => {
+    expect(llmPointsForUsageEntries([{ model: quality, usage: { costUsd: 0.0001 } }])).toBe(1);
   });
 });
 
