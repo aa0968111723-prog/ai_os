@@ -26,6 +26,8 @@ function signedAssetId(url: string | null | undefined): string | undefined {
 }
 import { MAX_PROMPT_CHARS } from "./prompts";
 import { creativePromptOverrideSchema } from "../../shared/aiTrace";
+import { continuitySnapshotSchema } from "../../shared/continuity";
+import { applyContinuityReferences, resolveContinuityReferenceUrls } from "../services/continuity";
 import {
   createAiTraceSession,
   findAiTraceSessionBySource,
@@ -98,6 +100,7 @@ export const generationRouter = router({
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
       propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      continuityMode: z.boolean().optional(),
       promptOverride: creativePromptOverrideSchema.optional(),
     }))
     .mutation(async ({ ctx, input }) => {
@@ -116,6 +119,14 @@ export const generationRouter = router({
         providerInput: prepared.providerInput,
         sourceAssetId: prepared.effectiveSourceAssetId,
         usedCardReference: prepared.usedCardReference,
+        continuity: prepared.continuitySnapshot ? {
+          fingerprint: prepared.continuitySnapshot.fingerprint,
+          locked: prepared.continuitySnapshot.locked,
+          characters: prepared.continuitySnapshot.characters.length,
+          scenes: prepared.continuitySnapshot.scenes.length,
+          props: prepared.continuitySnapshot.props.length,
+          references: prepared.continuityReferences,
+        } : null,
       });
       return {
         mode: "generate" as const,
@@ -128,6 +139,7 @@ export const generationRouter = router({
           { type: "character", label: `角色定裝 ${input.characterIds?.length ?? 0}`, included: !!prepared.anchors.character, chars: prepared.anchors.character.length },
           { type: "scene", label: `場景設定 ${input.scenePresetIds?.length ?? 0}`, included: !!prepared.anchors.scene, chars: prepared.anchors.scene.length },
           { type: "prop", label: `素材設定 ${input.propIds?.length ?? 0}`, included: !!prepared.anchors.prop, chars: prepared.anchors.prop.length },
+          { type: "continuity", label: prepared.continuitySnapshot?.locked ? "一致性快照已鎖定" : "一致性快照未鎖定", included: !!prepared.continuitySnapshot?.locked, note: prepared.continuitySnapshot ? `版本 ${prepared.continuitySnapshot.fingerprint.slice(0, 8)}・參考圖 ${prepared.continuityReferences.attached}/${prepared.continuityReferences.available}` : undefined },
           { type: "source", label: prepared.sourceUrl ? "來源素材已送入" : "沒有來源素材", included: !!prepared.sourceUrl, note: prepared.usedCardReference ? `自動採用 ${prepared.usedCardReference} 卡片參考圖` : undefined },
         ],
         request: safe.payload,
@@ -156,6 +168,7 @@ export const generationRouter = router({
         scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
         /** 選定的素材設定卡：道具外觀/材質錨點注入,同一件道具跨鏡不變樣 */
         propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+        continuityMode: z.boolean().optional(),
         /** 冪等鍵（client 產生的 UUID）：timeout 後重送同鍵回原生成列，不重複扣點 */
         clientRequestId: z.string().uuid().optional(),
         promptOverride: creativePromptOverrideSchema.optional(),
@@ -197,6 +210,7 @@ export const generationRouter = router({
         characterIds: input.characterIds,
         scenePresetIds: input.scenePresetIds,
         propIds: input.propIds,
+        continuityMode: input.continuityMode,
         promptOverride: input.promptOverride,
         traceSessionId: trace.id,
       });
@@ -224,6 +238,8 @@ export const generationRouter = router({
     const assetId = signedAssetId(gen.sourceUrl);
     const { meta } = splitGenerationSourceMeta(gen.params);
     const secondaryAssetId = signedAssetId(meta.secondarySourceUrl);
+    const parsedSnapshot = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
+    const lockedSnapshot = parsedSnapshot.success && parsedSnapshot.data.locked ? parsedSnapshot.data : undefined;
     return executeGenerationCommand({
       auth: ctx.auth,
       source: "web",
@@ -237,6 +253,8 @@ export const generationRouter = router({
       characterIds: (gen.characterIds as string[] | null) ?? undefined,
       scenePresetIds: (gen.scenePresetIds as string[] | null) ?? undefined,
       propIds: (gen.propIds as string[] | null) ?? undefined,
+      continuityMode: parsedSnapshot.success ? parsedSnapshot.data.locked : undefined,
+      continuitySnapshot: lockedSnapshot,
       sceneId: gen.sceneId ?? undefined,
       sceneRole: gen.sceneRole ?? undefined,
       // 保留出處：工作流/代理步驟失敗後的重試仍能回溯原本那條 run（來源 chip 不消失）
@@ -477,12 +495,14 @@ export const generationRouter = router({
       // 並把 params 內任何等於舊簽名網址的值替換掉——model.input 把來源塞在模型專屬鍵,替換整串最穩)。
       const splitParams = splitGenerationSourceMeta(gen.params);
       let submitParams = splitParams.providerParams;
+      let refreshedPrimaryUrl = gen.sourceUrl ?? undefined;
       let refreshedSecondaryUrl = splitParams.meta.secondarySourceUrl;
       if (gen.sourceUrl) {
         const m = gen.sourceUrl.match(/\/api\/assets\/([0-9a-f-]{36})\/file\?/i);
         if (m) {
           const fresh = signAssetUrl(m[1]);
           submitParams = JSON.parse(JSON.stringify(submitParams).split(gen.sourceUrl).join(fresh)) as Record<string, unknown>;
+          refreshedPrimaryUrl = fresh;
           await db.update(schema.generations).set({ sourceUrl: fresh }).where(eq(schema.generations.id, gen.id));
         }
       }
@@ -491,6 +511,16 @@ export const generationRouter = router({
         const fresh = signAssetUrl(secondaryAssetId);
         submitParams = JSON.parse(JSON.stringify(submitParams).split(refreshedSecondaryUrl).join(fresh)) as Record<string, unknown>;
         refreshedSecondaryUrl = fresh;
+      }
+      const parsedContinuity = continuitySnapshotSchema.safeParse(gen.continuitySnapshot);
+      if (parsedContinuity.success && parsedContinuity.data.locked) {
+        const primaryAssetId = signedAssetId(refreshedPrimaryUrl);
+        const freshReferences = await resolveContinuityReferenceUrls(
+          parsedContinuity.data,
+          gen.groupId,
+          primaryAssetId,
+        );
+        applyContinuityReferences(submitParams, refreshedPrimaryUrl, freshReferences);
       }
       await db
         .update(schema.generations)

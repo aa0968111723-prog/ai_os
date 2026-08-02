@@ -26,7 +26,14 @@ import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { failStaleGenerationTx, reserveQuota } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
-import { buildCharacterAnchor, buildPropAnchor, buildSceneAnchor, resolveCardReferenceSource } from "./cardAnchors";
+import { formatCharacterAnchor, formatPropAnchor, formatSceneAnchor } from "./cardAnchors";
+import type { ContinuitySnapshot } from "../../shared/continuity";
+import {
+  applyContinuityReferences,
+  buildContinuitySnapshot,
+  resolveContinuityReferenceUrls,
+  type ContinuityReferenceResult,
+} from "./continuity";
 import { groupLeaderIds, pushToUsers } from "./webPush";
 import {
   findAiTraceSessionBySource,
@@ -191,6 +198,10 @@ export interface SubmitCoreInput {
   agentRunId?: string;
   /** 進階使用者明確覆寫最終創作 prompt；系統權限與 provider schema 仍不可覆寫。 */
   promptOverride?: { positive?: string; negative?: string };
+  /** 預設開啟：凍結設定卡版本，並在 provider 支援時附上多張參考圖。 */
+  continuityMode?: boolean;
+  /** 只供伺服器重試沿用資料庫快照；不得直接暴露成公開 API payload。 */
+  continuitySnapshot?: ContinuitySnapshot | null;
   /** 可稽核 AI 運作 session；背景／web 呼叫建立後一路帶到 provider。 */
   traceSessionId?: string;
   /** 存取檢查掛點：tRPC 端帶 requireGroup（多組隔離；可再疊 2.3 專案級 ACL，故允許 async）；
@@ -213,6 +224,8 @@ export interface PreparedGenerationRequest {
   negativePrompt: string;
   providerInput: Record<string, unknown>;
   anchors: { character: string; scene: string; prop: string };
+  continuitySnapshot: ContinuitySnapshot | null;
+  continuityReferences: ContinuityReferenceResult;
   warnings: Array<{ code: string; severity: "info" | "warning"; title: string; detail: string; suggestion?: string }>;
 }
 
@@ -236,22 +249,30 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const { assertProjectAllows } = await import("./projectState");
   assertProjectAllows(project, "generate");
   await assertGenerationEntityIds(project.id, {
-    characterIds: input.characterIds,
-    scenePresetIds: input.scenePresetIds,
-    propIds: input.propIds,
+    // 伺服器重試已由原 generation 的 ACL 保護；即使卡片後來刪除，也要能用凍結內容重現。
+    characterIds: input.continuitySnapshot ? undefined : input.characterIds,
+    scenePresetIds: input.continuitySnapshot ? undefined : input.scenePresetIds,
+    propIds: input.continuitySnapshot ? undefined : input.propIds,
     sourceAssetId: input.sourceAssetId,
     secondarySourceAssetId: input.secondarySourceAssetId,
   });
 
+  const continuitySnapshot = input.continuitySnapshot ?? await buildContinuitySnapshot(project.id, {
+    characterIds: input.characterIds,
+    scenePresetIds: input.scenePresetIds,
+    propIds: input.propIds,
+  }, input.continuityMode !== false);
+
   let effectiveSourceAssetId = input.sourceAssetId;
   let usedCardReference: "character" | "scene" | "prop" | null = null;
   if (mayFillFromCards && !input.sourceUrl && !effectiveSourceAssetId) {
-    const ref = await resolveCardReferenceSource(project.id, {
-      characterIds: input.characterIds,
-      scenePresetIds: input.scenePresetIds,
-      propIds: input.propIds,
-    });
-    if (ref) {
+    const candidates = [
+      ...(continuitySnapshot?.characters ?? []).map((row) => ({ assetId: row.referenceAssetId, from: "character" as const })),
+      ...(continuitySnapshot?.scenes ?? []).map((row) => ({ assetId: row.referenceAssetId, from: "scene" as const })),
+      ...(continuitySnapshot?.props ?? []).map((row) => ({ assetId: row.referenceAssetId, from: "prop" as const })),
+    ];
+    const ref = candidates.find((candidate) => candidate.assetId);
+    if (ref?.assetId) {
       effectiveSourceAssetId = ref.assetId;
       usedCardReference = ref.from;
     }
@@ -314,11 +335,15 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   }
 
   const worldview = worldviewSchema.parse(project.worldview ?? {});
-  const [character, scene, prop] = await Promise.all([
-    input.characterIds?.length ? buildCharacterAnchor(project.id, input.characterIds) : Promise.resolve(""),
-    input.scenePresetIds?.length ? buildSceneAnchor(project.id, input.scenePresetIds) : Promise.resolve(""),
-    input.propIds?.length ? buildPropAnchor(project.id, input.propIds) : Promise.resolve(""),
-  ]);
+  const character = continuitySnapshot
+    ? formatCharacterAnchor(continuitySnapshot.characters, continuitySnapshot.characters.map((row) => row.id))
+    : "";
+  const scene = continuitySnapshot
+    ? formatSceneAnchor(continuitySnapshot.scenes, continuitySnapshot.scenes.map((row) => row.id))
+    : "";
+  const prop = continuitySnapshot
+    ? formatPropAnchor(continuitySnapshot.props, continuitySnapshot.props.map((row) => row.id))
+    : "";
   const parts = effectivePromptParts(model, input.prompt, worldview);
   const autoPositive = withPropAnchor(model, withSceneAnchor(model, withCharacterAnchor(model, parts.positive, character), scene), prop);
   const positivePrompt = input.promptOverride?.positive?.trim() || autoPositive;
@@ -337,6 +362,10 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     secondarySourceUrl,
   ) as Record<string, unknown>;
   if (negativePrompt && supportsNegativePrompt(model)) providerInput.negative_prompt = negativePrompt;
+  const referenceUrls = continuitySnapshot?.locked
+    ? await resolveContinuityReferenceUrls(continuitySnapshot, project.groupId, effectiveSourceAssetId)
+    : [];
+  const continuityReferences = applyContinuityReferences(providerInput, sourceUrl, referenceUrls);
 
   const warnings: PreparedGenerationRequest["warnings"] = [];
   const selectedCards = (input.characterIds?.length ?? 0) + (input.scenePresetIds?.length ?? 0) + (input.propIds?.length ?? 0);
@@ -353,6 +382,26 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     title: "卡片參考圖沒有直接送給模型",
     detail: "本次只有卡片文字錨點進入 prompt；模型沒有來源圖欄位或尚未選定來源圖。",
     suggestion: "角色身份一致性要求高時，改用需要來源圖的模型並選定裝參考圖。",
+  });
+  if (continuitySnapshot?.locked && continuitySnapshot.referenceAssetIds.length === 0) warnings.push({
+    code: "continuity_text_only",
+    severity: "warning",
+    title: "一致性已鎖定，但目前只有文字設定",
+    detail: "設定版本會固定供跨鏡重試使用；卡片尚未綁定參考圖，因此模型只能依文字維持外觀。",
+    suggestion: "替主要角色、常用場景與關鍵道具各綁一張清楚的參考圖。",
+  });
+  if (continuitySnapshot?.locked && continuityReferences.available > 0 && !continuityReferences.supported) warnings.push({
+    code: "multi_reference_unsupported",
+    severity: "warning",
+    title: "此模型不支援多張一致性參考圖",
+    detail: `找到 ${continuityReferences.available} 張可用圖片，但 provider 沒有宣告 image_urls 欄位，系統未猜測未知欄位以避免請求失敗。`,
+    suggestion: "改用支援多圖編輯的模型；本次仍會保留文字錨點與一致性快照。",
+  });
+  if (continuityReferences.truncated > 0) warnings.push({
+    code: "continuity_references_capped",
+    severity: "info",
+    title: "參考圖已依優先順序取前 4 張",
+    detail: `已送入 ${continuityReferences.attached} 張，另有 ${continuityReferences.truncated} 張未送，避免超過 provider 的保守輸入上限。`,
   });
   if (negativePrompt && !supportsNegativePrompt(model)) warnings.push({
     code: "negative_prompt_unsupported",
@@ -381,6 +430,8 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     negativePrompt,
     providerInput,
     anchors: { character, scene, prop },
+    continuitySnapshot,
+    continuityReferences,
     warnings,
   };
 }
@@ -502,6 +553,14 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         sourceAssetId: prepared.effectiveSourceAssetId,
         usedCardReference: prepared.usedCardReference,
         anchors: prepared.anchors,
+        continuity: prepared.continuitySnapshot ? {
+          fingerprint: prepared.continuitySnapshot.fingerprint,
+          locked: prepared.continuitySnapshot.locked,
+          characters: prepared.continuitySnapshot.characters.length,
+          scenes: prepared.continuitySnapshot.scenes.length,
+          props: prepared.continuitySnapshot.props.length,
+          references: prepared.continuityReferences,
+        } : null,
         warnings: prepared.warnings,
         estimatedPoints: prepared.estimatedPoints,
       },
@@ -533,6 +592,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
             characterIds: input.characterIds?.length ? input.characterIds : null,
             scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
             propIds: input.propIds?.length ? input.propIds : null,
+            continuitySnapshot: prepared.continuitySnapshot,
             workflowRunId: input.workflowRunId ?? null,
             agentRunId: input.agentRunId ?? null,
             sourceUrl,
@@ -600,6 +660,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         characterIds: input.characterIds?.length ? input.characterIds : null, // 帶入的定裝卡——重試/再用可還原
         scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
         propIds: input.propIds?.length ? input.propIds : null,
+        continuitySnapshot: prepared.continuitySnapshot,
         workflowRunId: input.workflowRunId ?? null, // 來源工作流/代理（沒有＝手動生成）
         agentRunId: input.agentRunId ?? null,
         sourceUrl,

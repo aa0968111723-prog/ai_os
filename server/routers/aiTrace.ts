@@ -13,7 +13,8 @@ import {
   updateAiTraceSession,
 } from "../services/aiTrace";
 import { completeText } from "../services/llmProvider";
-import { aiOperationPreviewSchema, aiQualityReviewSchema } from "../../shared/aiTrace";
+import { aiOperationPreviewSchema } from "../../shared/aiTrace";
+import { parseAiQualityReview } from "../services/aiQualityReview";
 
 async function requireEditor(auth: Parameters<typeof assertProjectEditable>[0], projectId: string) {
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
@@ -66,21 +67,9 @@ ${JSON.stringify(safePreview)}`;
         const startedAt = Date.now();
         const completion = await completeText({ prompt, mode: "auto", temperature: 0.1, maxTokens: 2_500 });
         await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "provider_response", summary: "收到品質檢查結果", latencyMs: Date.now() - startedAt, payload: completion });
-        const match = completion.text.match(/\{[\s\S]*\}/);
-        let parsed = null;
-        try {
-          parsed = match ? aiQualityReviewSchema.safeParse(JSON.parse(match[0])) : null;
-        } catch {
-          parsed = null;
-        }
-        const review = parsed?.success
-          ? parsed.data
-          : {
-              summary: "模型已完成檢查，但回傳格式不完整；請先依畫面上的規則型提醒人工確認。",
-              warnings: [{ code: "REVIEW_FORMAT_INVALID", severity: "warning" as const, title: "品質檢查格式不完整", detail: "未能可靠解析模型的結構化檢查結果。", suggestion: "可重新檢查，或先人工核對上下文與最終提示詞。" }],
-              contextUsed: [],
-            };
-        await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "completed", summary: review.summary, payload: review });
+        const parsed = parseAiQualityReview(completion.text);
+        const review = parsed.review;
+        await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "completed", summary: review.summary, payload: { review, parseMode: parsed.parseMode } });
         await updateAiTraceSession(trace.id, { status: "completed", provider: completion.provider, model: completion.model }).catch(() => undefined);
         return {
           review,
@@ -88,6 +77,7 @@ ${JSON.stringify(safePreview)}`;
           model: completion.model,
           usage: completion.usage,
           fellBackToPaid: completion.fellBack ?? false,
+          parseMode: parsed.parseMode,
           traceSessionId: trace.id,
         };
       } catch (error) {

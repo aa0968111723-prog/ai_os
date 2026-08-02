@@ -127,6 +127,7 @@ export function DirectGenerateMode({
   const [submitNotice, setSubmitNotice] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [promptOverride, setPromptOverride] = useState<CreativePromptOverride>({});
+  const [continuityLocked, setContinuityLocked] = useState(true);
   const [traceSessionId, setTraceSessionId] = useState<string | null>(null);
 
   const prompt = draft.prompt ?? "";
@@ -457,6 +458,23 @@ export function DirectGenerateMode({
         remainingLabel={remainingLabel}
       />
 
+      {cardsPicked && fullModel && supportsCardAnchors(fullModel.category) ? (
+        <div style={{ margin: "12px 0", padding: 12, border: "1px solid var(--border)", borderRadius: 12 }}>
+          <button
+            type="button"
+            aria-pressed={continuityLocked}
+            onClick={() => setContinuityLocked((value) => !value)}
+          >
+            一致性鎖定：{continuityLocked ? "開" : "關"}
+          </button>
+          <Hint as="p" layer="always" style={{ margin: "8px 0 0" }}>
+            {continuityLocked
+              ? "會凍結本次角色、場景與素材版本；模型支援時，自動按角色→場景→道具順序送入多張參考圖。"
+              : "仍會注入卡片文字，但不附加多張一致性參考圖；之後重試也不視為鎖定版本。"}
+          </Hint>
+        </div>
+      ) : null}
+
       {canEdit ? <AiUnderstandingPanel
         projectId={projectId}
         preview={preview.data}
@@ -475,6 +493,7 @@ export function DirectGenerateMode({
             characterIds,
             scenePresetIds,
             propIds,
+            continuityMode: continuityLocked,
             clientRequestId: submitRequestId.current,
           });
           preview.mutate({ ...base, promptOverride: Object.values(promptOverride).some(Boolean) ? promptOverride : undefined });
@@ -508,6 +527,7 @@ export function DirectGenerateMode({
             {characterIds.length > 0 && <>・帶入 {characterIds.length} 個角色定裝</>}
             {scenePresetIds.length > 0 && <>・{scenePresetIds.length} 個場景設定</>}
             {propIds.length > 0 && <>・{propIds.length} 個素材設定</>}
+            {cardsPicked && continuityLocked && <>・一致性快照已鎖定</>}
           </p>
           {cardsPicked &&
             fullModel &&
@@ -592,6 +612,7 @@ export function DirectGenerateMode({
                     characterIds,
                     scenePresetIds,
                     propIds,
+                    continuityMode: continuityLocked,
                     clientRequestId: submitRequestId.current,
                   }),
                   promptOverride: Object.values(promptOverride).some(Boolean) ? promptOverride : undefined,

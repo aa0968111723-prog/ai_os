@@ -129,6 +129,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   // 0026：純新增 AI 應用層運作軌跡表與索引，工作流／代理各加 nullable 欄位；
   //       全部使用 IF NOT EXISTS，不改寫既有資料，可安全納入 bridge。
   "0026_ai_trace",
+  // 0027：generations 加一個 nullable jsonb 快照欄位（ADD COLUMN IF NOT EXISTS），不改寫既有資料。
+  "0027_generation_continuity",
 ] as const;
 
 /**

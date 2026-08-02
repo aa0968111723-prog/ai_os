@@ -165,6 +165,7 @@ export type GenerationSubmitInput = {
   characterIds?: string[];
   scenePresetIds?: string[];
   propIds?: string[];
+  continuityMode?: boolean;
   clientRequestId: string;
 };
 
@@ -180,6 +181,7 @@ export function buildGenerationSubmitInput(input: {
   characterIds: string[];
   scenePresetIds: string[];
   propIds?: string[];
+  continuityMode?: boolean;
   clientRequestId: string;
 }): GenerationSubmitInput {
   const {
@@ -193,6 +195,7 @@ export function buildGenerationSubmitInput(input: {
     characterIds,
     scenePresetIds,
     propIds = [],
+    continuityMode,
     clientRequestId,
   } = input;
   return {
@@ -206,6 +209,9 @@ export function buildGenerationSubmitInput(input: {
     characterIds: characterIds.length ? characterIds : undefined,
     scenePresetIds: scenePresetIds.length ? scenePresetIds : undefined,
     propIds: propIds.length ? propIds : undefined,
+    ...(characterIds.length || scenePresetIds.length || propIds.length
+      ? { continuityMode: continuityMode ?? true }
+      : {}),
     clientRequestId,
   };
 }

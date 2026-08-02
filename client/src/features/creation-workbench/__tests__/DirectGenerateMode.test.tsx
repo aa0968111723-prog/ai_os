@@ -245,6 +245,19 @@ describe("DirectGenerateMode", () => {
     expect(typeof payload.clientRequestId).toBe("string");
   });
 
+  it("shows consistency locking for selected cards and submits the user's choice", async () => {
+    const user = userEvent.setup();
+    render(<Harness initialPrompt="清晨禪堂" characterIds={["c1"]} />);
+    const lock = await screen.findByRole("button", { name: "一致性鎖定：開" });
+    expect(lock).toHaveAttribute("aria-pressed", "true");
+    await user.click(lock);
+    expect(screen.getByRole("button", { name: "一致性鎖定：關" })).toHaveAttribute("aria-pressed", "false");
+    await user.click(screen.getByRole("button", { name: /生成（−/ }));
+    await user.click(await screen.findByRole("button", { name: "確認生成" }));
+    await waitFor(() => expect(submitMutate).toHaveBeenCalledTimes(1));
+    expect(submitMutate.mock.calls[0][0]).toMatchObject({ continuityMode: false });
+  });
+
   it("shows ctx-summary chips for worldview / roles / scenes", () => {
     render(<Harness characterIds={["a", "b"]} scenePresetIds={["s1"]} />);
     const group = screen.getByRole("group", { name: "這次生成會帶入的上下文" });
