@@ -290,7 +290,7 @@ describe("CreationWorkbench", () => {
 
     await user.click(screen.getByRole("button", { name: "收合" }));
     expect(document.querySelector("#sec-ai-hub-body")).toHaveAttribute("hidden");
-    expect(screen.getByText(/草稿與模式選擇已保留/)).toBeVisible();
+    expect(screen.getByText(/草稿與模式已保留/)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "展開" }));
     expect(screen.getByLabelText("你想完成什麼畫面？")).toHaveValue("拆分鏡並出圖");
