@@ -22,10 +22,11 @@ export const aiTraceEventTypeSchema = z.enum([
   "validation",
   "completed",
   "failed",
+  "stopped",
 ]);
 export type AiTraceEventType = z.infer<typeof aiTraceEventTypeSchema>;
 
-export const aiTraceStatusSchema = z.enum(["prepared", "running", "completed", "failed"]);
+export const aiTraceStatusSchema = z.enum(["prepared", "running", "completed", "failed", "stopped"]);
 export type AiTraceStatus = z.infer<typeof aiTraceStatusSchema>;
 
 export const aiWarningSchema = z.object({
@@ -77,4 +78,3 @@ export const aiQualityReviewSchema = z.object({
   contextUsed: z.array(z.string().max(120)).max(30).default([]),
 });
 export type AiQualityReview = z.infer<typeof aiQualityReviewSchema>;
-

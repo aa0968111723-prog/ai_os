@@ -6,7 +6,7 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { getModel, getWorkflow } from "../../shared/models";
 import { savePromptCore } from "./prompts";
-import { createAiTraceSession, recordAiTraceEventSafely, sanitizeAiTracePayload, updateAiTraceSession } from "../services/aiTrace";
+import { createAiTraceSession, finalizeAiTraceSession, recordAiTraceEventSafely, sanitizeAiTracePayload, updateAiTraceSession } from "../services/aiTrace";
 
 /** 與 services/workflowRunner 的 RunStep 同形狀（jsonb 落庫的每步快照） */
 interface RunStep {
@@ -205,7 +205,13 @@ export const workflowsRouter = router({
       await updateAiTraceSession(trace.id, { status: "running", sourceType: "workflow", sourceId: run.id, summary: "工作流執行中" }).catch(() => undefined);
       return { ...run, traceSessionId: trace.id };
       } catch (error) {
-        await updateAiTraceSession(trace.id, { status: "failed", summary: error instanceof Error ? error.message : "啟動失敗" }).catch(() => undefined);
+        const summary = error instanceof Error ? error.message : "啟動失敗";
+        await finalizeAiTraceSession({
+          sessionId: trace.id,
+          status: "failed",
+          summary,
+          payload: { stage: "start", error: summary },
+        }).catch(() => undefined);
         throw error;
       }
     }),
@@ -252,6 +258,14 @@ export const workflowsRouter = router({
     if (updated.length === 0) {
       const [current] = await db.select().from(schema.workflowRuns).where(eq(schema.workflowRuns.id, run.id));
       return current;
+    }
+    if (run.traceSessionId) {
+      await finalizeAiTraceSession({
+        sessionId: run.traceSessionId,
+        status: "stopped",
+        summary: "工作流已由使用者停止",
+        payload: { runId: run.id, status: "stopped" },
+      }).catch(() => undefined);
     }
     return updated[0];
   }),
