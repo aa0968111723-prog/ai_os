@@ -24,7 +24,7 @@ describe("場景設定：跨面一致性（專案效益）", () => {
   it("生成錨點與知識卡色板／光線同源", () => {
     const visual = formatSceneAnchor([preset], ["s1"]);
     const knowledge = formatSceneKnowledgeBlock([preset]);
-    expect(visual).toBe("禪堂前庭：色板 米金、木色、白牆、光線 清晨柔側光");
+    expect(visual).toBe("光影鎖定 禪堂前庭：色板 米金、木色、白牆、光線 清晨柔側光");
     expect(knowledge).toContain("禪堂前庭：色板 米金、木色、白牆｜光線 清晨柔側光");
     // 關鍵描述一致 → 導演建議與生成圖不會各說各話
     expect(visual).toContain("米金、木色、白牆");
@@ -41,7 +41,7 @@ describe("場景設定：跨面一致性（專案效益）", () => {
     expect(withSceneAnchor(tts, "南無", anchor)).toBe("南無");
   });
 
-  it("角色＋場景可疊加：先定裝後場景", () => {
+  it("角色＋場景可疊加：先定裝後場景；鎖定指令寫入", () => {
     const t2i = byCategory("text-to-image");
     const char = formatCharacterAnchor(
       [{ id: "c1", name: "安倢", appearance: "紅傘、米白外套" }],
@@ -50,14 +50,14 @@ describe("場景設定：跨面一致性（專案效益）", () => {
     const scene = formatSceneAnchor([preset], ["s1"]);
     const out = withSceneAnchor(t2i, withCharacterAnchor(t2i, "站在前庭", char), scene);
     expect(out.indexOf("[角色定裝]")).toBeLessThan(out.indexOf("[場景設定]"));
-    expect(out).toContain("安倢：紅傘");
-    expect(out).toContain("禪堂前庭：色板");
+    expect(out).toContain("外觀鎖定 安倢：紅傘");
+    expect(out).toContain("光影鎖定 禪堂前庭：色板");
   });
 
   it("勾選順序決定跨鏡光影順序（不因 DB 回傳亂序）", () => {
     const a = { id: "a", name: "A", palette: "暖", lighting: "柔" };
     const b = { id: "b", name: "B", palette: "冷", lighting: "硬" };
-    expect(formatSceneAnchor([a, b], ["b", "a"])).toBe("B：色板 冷、光線 硬；A：色板 暖、光線 柔");
+    expect(formatSceneAnchor([a, b], ["b", "a"])).toBe("光影鎖定 B：色板 冷、光線 硬；光影鎖定 A：色板 暖、光線 柔");
   });
 });
 
