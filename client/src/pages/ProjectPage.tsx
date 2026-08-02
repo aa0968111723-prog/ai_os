@@ -58,6 +58,7 @@ import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
 import { WorldviewPreview } from "../components/WorldviewPreview";
+import { WorldviewGuide } from "../components/WorldviewGuide";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   useCollab,
@@ -468,6 +469,9 @@ export function ProjectPage({ id }: { id: string }) {
     assets: false,
     recycle: false,
   });
+  /** 進階設定摺疊層：引導鋪軌跳到第四步（給誰看／三幕）時要能撐開它。
+      只管開合、不碰任何欄位值——鏡射欄位值的 state 會重新引入協作覆蓋 bug。 */
+  const [wvAdvancedOpen, setWvAdvancedOpen] = useState(false);
   /** 兩大分組 + 管理：手機預設只開「世界與角色」，其餘收合降低同層資訊量 */
   const [ctxGroupOpen, setCtxGroupOpen] = useState<Record<CtxGroupKey, boolean>>({
     world: true,
@@ -1591,6 +1595,16 @@ export function ProjectPage({ id }: { id: string }) {
               ) : null}
             </h2>
             {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——世界觀可瀏覽、不能修改（打的字不會被儲存）。</Hint>}
+            {/* 引導鋪軌：只讀 wv、不持有任何欄位值——它若緩衝草稿就會撞爛下面的
+                key 重掛 + onBlur 部分 patch（協作靠那組機制才不會互相覆蓋）。 */}
+            <WorldviewGuide
+              wv={wv}
+              onJump={(anchor, stepId) => {
+                // 第四步在進階摺疊層裡，捲過去之前得先把它撐開
+                if (stepId === "narrative") setWvAdvancedOpen(true);
+                scrollToSelector(anchor);
+              }}
+            />
             <label htmlFor="wv-logline">一句話故事（logline）</label>
             {/* key 綁伺服器值：協作者改動（WS invalidate 重抓）時強制重掛吃進新值——
                 非受控 defaultValue 否則永遠停在舊字，focus+blur 還會把舊值回寫、蓋掉別人的修改。
@@ -1650,7 +1664,11 @@ export function ProjectPage({ id }: { id: string }) {
               defaultOpen={!mobileCompact}
             />
             {/* 進階層：依目的分組 + 一鍵範例 + 人物→定裝；觀眾／三幕／人物進 brief／LLM／導演 */}
-            <details style={{ marginTop: 10 }} open={hasActs(wv) || !!wv.audience.trim() || wv.people.length > 0}>
+            <details
+              style={{ marginTop: 10 }}
+              open={wvAdvancedOpen || hasActs(wv) || !!wv.audience.trim() || wv.people.length > 0}
+              onToggle={(e) => setWvAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+            >
               <summary style={{ cursor: "pointer", fontSize: 13 }}>
                 進階設定（敘事 AI・合規・交接備註）
               </summary>

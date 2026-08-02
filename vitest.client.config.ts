@@ -32,6 +32,7 @@ export default defineConfig({
         "client/src/components/databaseTabs.ts",
         "client/src/components/DatabaseDetailTabs.tsx",
         "client/src/components/WorldviewPreview.tsx",
+        "client/src/components/WorldviewGuide.tsx",
       ],
       thresholds: {
         lines: 85,

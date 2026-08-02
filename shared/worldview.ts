@@ -490,6 +490,96 @@ export function isWorldviewReady(wv: Pick<Worldview, "logline" | "message" | "to
   return narrative && style;
 }
 
+/**
+ * 快速層引導四步。
+ *
+ * 存在的理由：這一區原本 5 個快速欄 + 進階三大段一次全給，沒有先後、也沒有
+ * 「你現在該填哪一個」。這裡把它排成有序步驟，並標出「填到哪裡就能出圖」。
+ *
+ * 刻意**不另立就緒判定**——前三步（非 optional）全完成必然等價於
+ * `isWorldviewReady`，由測試鎖住這條等價關係。
+ */
+export type WorldviewStepId = "story" | "mood" | "look" | "narrative";
+
+export type WorldviewStep = {
+  id: WorldviewStepId;
+  label: string;
+  hint: string;
+  done: boolean;
+  /** 可略過：不影響「能不能出圖」 */
+  optional: boolean;
+  /** 捲動定位用的錨點選擇器 */
+  anchor: string;
+};
+
+export function worldviewGuideSteps(
+  wv: Pick<Worldview, "logline" | "message" | "tones" | "styles" | "audience" | "acts">,
+): WorldviewStep[] {
+  return [
+    {
+      id: "story",
+      label: "這支片在講什麼",
+      hint: "一句話就好，之後每次生成都會帶上",
+      done: !!(wv.logline.trim() || wv.message.trim()),
+      optional: false,
+      anchor: "#wv-logline",
+    },
+    {
+      id: "mood",
+      label: "想要什麼感覺",
+      hint: "挑 1～2 個合得來的，例如溫暖＋真誠",
+      done: wv.tones.length > 0,
+      optional: false,
+      anchor: "#wv-tones",
+    },
+    {
+      id: "look",
+      label: "畫面長什麼樣",
+      hint: "先選畫法再挑主風格——這一項對出圖最有效",
+      done: stylesForVisualInject(wv.styles).length > 0,
+      optional: false,
+      anchor: "#wv-styles",
+    },
+    {
+      id: "narrative",
+      label: "給誰看、怎麼講",
+      hint: "可略過。填了寫腳本、拆分鏡會更準；出圖不吃這一段",
+      done: !!(wv.audience.trim() || hasActs(wv)),
+      optional: true,
+      anchor: "#wv-audience",
+    },
+  ];
+}
+
+/** 下一個該填的步驟（必填優先；全填完回 null） */
+export function nextWorldviewStep(
+  wv: Pick<Worldview, "logline" | "message" | "tones" | "styles" | "audience" | "acts">,
+): WorldviewStep | null {
+  const steps = worldviewGuideSteps(wv);
+  return steps.find((s) => !s.done && !s.optional) ?? steps.find((s) => !s.done) ?? null;
+}
+
+/**
+ * 欄位「會不會改變我的畫面」的人話摘要（UI 徽章用）。
+ * 完整的消費端清單留在 `detail`，由呼叫端收進 HelpTip——
+ * 逐欄印出整串「圖影 · 文字生成 · 助手／代理 · 導演 · 匯出」讀起來像規格書，
+ * 那是這一區顯得抽象的主因之一。單一真相仍是 WORLDVIEW_FIELD_READERS。
+ */
+export function worldviewFieldReaderSummary(
+  field: string,
+): { affectsVisual: boolean; short: string; detail: string } | null {
+  const meta = WORLDVIEW_FIELD_READERS[field];
+  if (!meta) return null;
+  const affectsVisual = meta.readers.includes("visual");
+  const detail =
+    meta.readers.map((r) => WORLDVIEW_CONSUMER_LABEL[r]).join(" · ") + (meta.note ? `（${meta.note}）` : "");
+  return {
+    affectsVisual,
+    short: affectsVisual ? "會影響出圖" : "出圖不吃，只給文字 AI",
+    detail,
+  };
+}
+
 /** 三幕結構單行（空欄省略） */
 export function formatActsLine(acts: Worldview["acts"]): string {
   const parts: string[] = [];

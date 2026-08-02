@@ -5103,3 +5103,7 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
   overflow-y: auto;
 }
 .wv-preview__note { font-size: 12px; margin: 0; }
+
+/* ── 世界觀快速層引導鋪軌 ── */
+.wv-guide { margin: 8px 0 12px; }
+.wv-guide__milestone { font-size: 12px; margin: 4px 0 0; }

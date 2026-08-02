@@ -37,6 +37,15 @@ import {
   worldviewAdvancedExampleForKind,
   parsePersonTokenForCharacter,
   applyWorldviewAdvancedExample,
+  WORLDVIEW_INJECT_MARKER,
+  CARD_ANCHOR_MARKERS,
+  WORLDVIEW_FIELD_READERS,
+  formatWorldviewVisualNegative,
+  formatWorldviewInjectedPrompt,
+  buildWorldviewInjectPreview,
+  worldviewGuideSteps,
+  nextWorldviewStep,
+  worldviewFieldReaderSummary,
 } from "./worldview";
 
 describe("bilingualChips（視覺注入的英文錨點）", () => {
@@ -386,5 +395,146 @@ describe("進階範例與敘事人物→定裝", () => {
     expect(fullPatch.audience).toBeTruthy();
     expect(fullPatch.acts?.hook).toBeTruthy();
     expect(fullPatch.people?.length).toBeGreaterThan(0);
+  });
+});
+
+describe("注入契約下沉 shared（預覽與 generationCore 共用）", () => {
+  const wv = worldviewSchema.parse({
+    logline: "一位訪客在晨光禪堂點香",
+    message: "把心交給佛",
+    tones: ["溫暖"],
+    styles: ["水墨禪意"],
+    taboos: [" 不影射真實人物形象 ", "", "  "],
+  });
+
+  it("formatWorldviewVisualNegative 逐項 trim、濾空、逗號串接", () => {
+    expect(formatWorldviewVisualNegative(wv)).toBe("不影射真實人物形象");
+    expect(formatWorldviewVisualNegative({ taboos: ["a", "b"] })).toBe("a, b");
+    expect(formatWorldviewVisualNegative({ taboos: [] })).toBe("");
+  });
+
+  it("formatWorldviewInjectedPrompt：無背景原樣、有背景才接標記", () => {
+    expect(formatWorldviewInjectedPrompt("清晨禪堂", "")).toBe("清晨禪堂");
+    expect(formatWorldviewInjectedPrompt("清晨禪堂", "調性:溫暖")).toBe(
+      `清晨禪堂\n\n${WORLDVIEW_INJECT_MARKER} 調性:溫暖`,
+    );
+  });
+
+  it("標記常數是既有字面值（改了會讓所有既有生成紀錄對不上）", () => {
+    expect(WORLDVIEW_INJECT_MARKER).toBe("[專案背景]");
+    expect(CARD_ANCHOR_MARKERS).toEqual(["[角色定裝]", "[場景設定]", "[素材設定]"]);
+  });
+
+  it("buildWorldviewInjectPreview 只轉手既有 formatter，不自組字串", () => {
+    const p = buildWorldviewInjectPreview(wv);
+    expect(p.visual.positive).toBe(formatWorldviewVisualPositive(wv));
+    expect(p.visual.negative).toBe(formatWorldviewVisualNegative(wv));
+    expect(p.llm.positive).toBe(formatWorldviewForAi(wv, "generation-llm"));
+    expect(p.empty).toBe(false);
+  });
+
+  it("三段皆空才算 empty", () => {
+    expect(buildWorldviewInjectPreview(worldviewSchema.parse({ taboos: [] })).empty).toBe(true);
+    // 只有禁忌也不算空——負向仍會送進模型
+    expect(buildWorldviewInjectPreview(worldviewSchema.parse({})).empty).toBe(false);
+  });
+});
+
+describe("快速層引導四步", () => {
+  const blank = worldviewSchema.parse({ taboos: [] });
+
+  it("四步的 id 與錨點固定，只有第四步可略過", () => {
+    const steps = worldviewGuideSteps(blank);
+    expect(steps.map((s) => s.id)).toEqual(["story", "mood", "look", "narrative"]);
+    expect(steps.map((s) => s.anchor)).toEqual(["#wv-logline", "#wv-tones", "#wv-styles", "#wv-audience"]);
+    expect(steps.filter((s) => s.optional).map((s) => s.id)).toEqual(["narrative"]);
+  });
+
+  it("logline 或 message 任一即算第一步完成", () => {
+    expect(worldviewGuideSteps(worldviewSchema.parse({ logline: "x" }))[0]!.done).toBe(true);
+    expect(worldviewGuideSteps(worldviewSchema.parse({ message: "x" }))[0]!.done).toBe(true);
+    expect(worldviewGuideSteps(blank)[0]!.done).toBe(false);
+  });
+
+  it("畫風看的是「真的會被注入的風格」，不是欄位有沒有值", () => {
+    // 空陣列＝沒東西可注入
+    expect(worldviewGuideSteps(worldviewSchema.parse({ styles: [] }))[2]!.done).toBe(false);
+    // 組長自訂風格沒有家族映射，但會原樣注入（不猜翻譯）——算完成
+    const custom = worldviewSchema.parse({ styles: ["賽博龐克霓虹"] });
+    expect(stylesForVisualInject(custom.styles)).toEqual(["賽博龐克霓虹"]);
+    expect(worldviewGuideSteps(custom)[2]!.done).toBe(true);
+    // 跨家族多選只留可解析的主風格，仍算完成
+    const crossFamily = worldviewSchema.parse({ styles: ["寫實攝影", "水墨禪意"] });
+    expect(stylesForVisualInject(crossFamily.styles)).toEqual(["寫實攝影"]);
+    expect(worldviewGuideSteps(crossFamily)[2]!.done).toBe(true);
+  });
+
+  it("第四步：觀眾或三幕任一即完成", () => {
+    expect(worldviewGuideSteps(worldviewSchema.parse({ audience: "誰" }))[3]!.done).toBe(true);
+    expect(
+      worldviewGuideSteps(worldviewSchema.parse({ acts: { hook: "鉤", turn: "", cta: "" } }))[3]!.done,
+    ).toBe(true);
+  });
+
+  /**
+   * 引導與既有就緒判定之間的契約是**單向蘊含**，不是等價：
+   * 非 optional 全完成 ⇒ isWorldviewReady。反向刻意不成立——
+   * isWorldviewReady 只要「調性或風格」其一（最低門檻），引導則兩個都推，
+   * 因為只有調性沒有畫風時出圖仍會飄。畫面上兩者不衝突：里程碑那行讀的是
+   * isWorldviewReady，所以「已可出圖」會先亮，畫風那步仍留著提醒。
+   * 真正禁止的是反過來——引導打勾了卻說還不能出圖，那才是自相矛盾。
+   */
+  it("非 optional 步驟全完成 ⇒ isWorldviewReady（不得出現打勾卻說沒就緒）", () => {
+    const cases = [
+      worldviewSchema.parse({ taboos: [] }),
+      worldviewSchema.parse({ logline: "x" }),
+      worldviewSchema.parse({ logline: "x", tones: ["溫暖"] }),
+      worldviewSchema.parse({ logline: "x", styles: ["手繪插畫"] }),
+      worldviewSchema.parse({ message: "x", tones: ["溫暖"], styles: ["手繪插畫"] }),
+      worldviewSchema.parse({ tones: ["溫暖"], styles: ["手繪插畫"] }),
+    ];
+    for (const wv of cases) {
+      const requiredDone = worldviewGuideSteps(wv).filter((s) => !s.optional).every((s) => s.done);
+      if (requiredDone) expect(isWorldviewReady(wv), `打勾卻沒就緒：${JSON.stringify(wv)}`).toBe(true);
+    }
+  });
+
+  it("引導比最低門檻嚴格：只有調性、沒畫風時已可出圖，但畫風那步仍未打勾", () => {
+    const toneOnly = worldviewSchema.parse({ logline: "x", tones: ["溫暖"] });
+    expect(isWorldviewReady(toneOnly)).toBe(true);
+    expect(worldviewGuideSteps(toneOnly).find((s) => s.id === "look")!.done).toBe(false);
+  });
+
+  it("nextWorldviewStep 必填優先，全填完回 null", () => {
+    expect(nextWorldviewStep(blank)?.id).toBe("story");
+    expect(nextWorldviewStep(worldviewSchema.parse({ logline: "x" }))?.id).toBe("mood");
+    // 必填三步齊了才輪到可略過的第四步
+    const ready = worldviewSchema.parse({ logline: "x", tones: ["溫暖"], styles: ["手繪插畫"] });
+    expect(nextWorldviewStep(ready)?.id).toBe("narrative");
+    expect(nextWorldviewStep(worldviewSchema.parse({ ...ready, audience: "誰" }))).toBeNull();
+  });
+});
+
+describe("worldviewFieldReaderSummary（欄位徽章去密度）", () => {
+  it("WORLDVIEW_FIELD_READERS 每個欄位都有摘要", () => {
+    for (const field of Object.keys(WORLDVIEW_FIELD_READERS)) {
+      expect(worldviewFieldReaderSummary(field), `缺 ${field}`).not.toBeNull();
+    }
+    expect(worldviewFieldReaderSummary("不存在的欄位")).toBeNull();
+  });
+
+  it("影響出圖與否分成兩句人話，完整清單留在 detail", () => {
+    const styles = worldviewFieldReaderSummary("styles")!;
+    expect(styles.affectsVisual).toBe(true);
+    expect(styles.short).toBe("會影響出圖");
+    expect(styles.detail).toContain("圖影");
+
+    const acts = worldviewFieldReaderSummary("acts")!;
+    expect(acts.affectsVisual).toBe(false);
+    expect(acts.short).toBe("出圖不吃，只給文字 AI");
+    expect(acts.detail).toContain("圖影不注入"); // note 保留在 detail
+
+    // 參考連結完全不進模型
+    expect(worldviewFieldReaderSummary("references")!.detail).toContain("不進模型");
   });
 });
