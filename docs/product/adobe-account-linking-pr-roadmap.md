@@ -56,7 +56,7 @@ TOKEN_ENCRYPTION_KEY=
 ## 與現有系統接點
 
 - 現有 MCP Server (`/api/mcp`) 可未來暴露 Adobe 工具
-- `server/services/jianying.ts`、export 相關加強引用 Adobe 資產
+- `server/services/jianying.ts`、bundle 相關加強引用 Adobe 資產
 - `shared/plan.ts` + agentRunner 新增步驟
 - 點數、ACL、審批機制沿用
 
@@ -108,7 +108,7 @@ server/services/adobe/timelineExport.test.ts      空檔填補、轉場備註、
 server/routers/adobe.ts → exportTimelineFormats   純本機 mutation（不打 Adobe、不需限流）
 ```
 
-- **不依賴 Adobe 雲端算圖**：把時間軸契約轉成既有 `export.buildFcpxml`／`buildXmeml`／`buildEdl`。
+- **不依賴 Adobe 雲端算圖**：把時間軸契約轉成既有 `bundle.buildFcpxml`／`buildXmeml`／`buildEdl`。
 - **空檔填補**：片段之間的空隙自動補「空檔」列，匯入 NLE 後節奏與 `startSec` 一致。
 - **可選 mediaPathByAssetId**：素材已在交付包內時直接掛相對路徑；否則離線佔位，剪輯軟體內 relink。
 - **剪映草稿**：仍需本機二進位媒體檔才能組包；本 PR 先打通 FCP／Premiere／Resolve 通用格式，剪映草稿銜接留在 PR6（UI 打包）或後續。
@@ -135,5 +135,3 @@ server/services/agentCore.ts                   規劃 prompt 可用步驟
 
 ---
 此文件由 AI 協作規劃，作為實作依據。
-
-<!-- benjamin-push-20260802-continue -->
