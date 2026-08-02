@@ -490,6 +490,96 @@ export function isWorldviewReady(wv: Pick<Worldview, "logline" | "message" | "to
   return narrative && style;
 }
 
+/**
+ * 快速層引導四步。
+ *
+ * 存在的理由：這一區原本 5 個快速欄 + 進階三大段一次全給，沒有先後、也沒有
+ * 「你現在該填哪一個」。這裡把它排成有序步驟，並標出「填到哪裡就能出圖」。
+ *
+ * 刻意**不另立就緒判定**——前三步（非 optional）全完成必然等價於
+ * `isWorldviewReady`，由測試鎖住這條等價關係。
+ */
+export type WorldviewStepId = "story" | "mood" | "look" | "narrative";
+
+export type WorldviewStep = {
+  id: WorldviewStepId;
+  label: string;
+  hint: string;
+  done: boolean;
+  /** 可略過：不影響「能不能出圖」 */
+  optional: boolean;
+  /** 捲動定位用的錨點選擇器 */
+  anchor: string;
+};
+
+export function worldviewGuideSteps(
+  wv: Pick<Worldview, "logline" | "message" | "tones" | "styles" | "audience" | "acts">,
+): WorldviewStep[] {
+  return [
+    {
+      id: "story",
+      label: "這支片在講什麼",
+      hint: "一句話就好，之後每次生成都會帶上",
+      done: !!(wv.logline.trim() || wv.message.trim()),
+      optional: false,
+      anchor: "#wv-logline",
+    },
+    {
+      id: "mood",
+      label: "想要什麼感覺",
+      hint: "挑 1～2 個合得來的，例如溫暖＋真誠",
+      done: wv.tones.length > 0,
+      optional: false,
+      anchor: "#wv-tones",
+    },
+    {
+      id: "look",
+      label: "畫面長什麼樣",
+      hint: "先選畫法再挑主風格——這一項對出圖最有效",
+      done: stylesForVisualInject(wv.styles).length > 0,
+      optional: false,
+      anchor: "#wv-styles",
+    },
+    {
+      id: "narrative",
+      label: "給誰看、怎麼講",
+      hint: "可略過。填了寫腳本、拆分鏡會更準；出圖不吃這一段",
+      done: !!(wv.audience.trim() || hasActs(wv)),
+      optional: true,
+      anchor: "#wv-audience",
+    },
+  ];
+}
+
+/** 下一個該填的步驟（必填優先；全填完回 null） */
+export function nextWorldviewStep(
+  wv: Pick<Worldview, "logline" | "message" | "tones" | "styles" | "audience" | "acts">,
+): WorldviewStep | null {
+  const steps = worldviewGuideSteps(wv);
+  return steps.find((s) => !s.done && !s.optional) ?? steps.find((s) => !s.done) ?? null;
+}
+
+/**
+ * 欄位「會不會改變我的畫面」的人話摘要（UI 徽章用）。
+ * 完整的消費端清單留在 `detail`，由呼叫端收進 HelpTip——
+ * 逐欄印出整串「圖影 · 文字生成 · 助手／代理 · 導演 · 匯出」讀起來像規格書，
+ * 那是這一區顯得抽象的主因之一。單一真相仍是 WORLDVIEW_FIELD_READERS。
+ */
+export function worldviewFieldReaderSummary(
+  field: string,
+): { affectsVisual: boolean; short: string; detail: string } | null {
+  const meta = WORLDVIEW_FIELD_READERS[field];
+  if (!meta) return null;
+  const affectsVisual = meta.readers.includes("visual");
+  const detail =
+    meta.readers.map((r) => WORLDVIEW_CONSUMER_LABEL[r]).join(" · ") + (meta.note ? `（${meta.note}）` : "");
+  return {
+    affectsVisual,
+    short: affectsVisual ? "會影響出圖" : "出圖不吃，只給文字 AI",
+    detail,
+  };
+}
+
 /** 三幕結構單行（空欄省略） */
 export function formatActsLine(acts: Worldview["acts"]): string {
   const parts: string[] = [];
@@ -646,6 +736,52 @@ export function formatWorldviewVisualPositive(wv: Worldview): string {
   return parts.join("|");
 }
 
+/**
+ * 生成提示詞裡的世界觀段落標記。
+ * 前端「AI 會收到什麼」預覽與 generationCore 共用同一份——前端若自己再寫一次字串，
+ * 兩邊遲早漂移，預覽就會騙人。
+ */
+export const WORLDVIEW_INJECT_MARKER = "[專案背景]";
+
+/** 定裝卡錨點標記（順序＝伺服器疊加順序：角色→場景→素材） */
+export const CARD_ANCHOR_MARKERS = ["[角色定裝]", "[場景設定]", "[素材設定]"] as const;
+
+/**
+ * 視覺類別的禁忌 → negative_prompt。
+ * 擴散模型無法靠正向提示詞「避免」某物，故禁忌只走負向（見 generationCore 的說明）。
+ */
+export function formatWorldviewVisualNegative(wv: Pick<Worldview, "taboos">): string {
+  return wv.taboos.map((t) => t.trim()).filter(Boolean).join(", ");
+}
+
+/** 使用者提示詞 ＋ 世界觀段落的最終組法（buildPositive 與預覽共用） */
+export function formatWorldviewInjectedPrompt(userPrompt: string, background: string): string {
+  return background ? `${userPrompt}\n\n${WORLDVIEW_INJECT_MARKER} ${background}` : userPrompt;
+}
+
+/** 「AI 會收到什麼」預覽的三段內容（皆由既有 formatter 產生，不另組字串） */
+export type WorldviewInjectPreview = {
+  visual: { positive: string; negative: string };
+  llm: { positive: string };
+  /** 三段皆空＝AI 只會收到使用者當下打的那句話 */
+  empty: boolean;
+};
+
+/**
+ * 產生預覽內容。刻意只呼叫既有的公開 formatter（與 generationCore 同一條路），
+ * 不重組任何字串——這是「預覽不可能說謊」的唯一保證。
+ */
+export function buildWorldviewInjectPreview(wv: Worldview): WorldviewInjectPreview {
+  const visualPositive = formatWorldviewVisualPositive(wv);
+  const visualNegative = formatWorldviewVisualNegative(wv);
+  const llmPositive = formatWorldviewForAi(wv, "generation-llm");
+  return {
+    visual: { positive: visualPositive, negative: visualNegative },
+    llm: { positive: llmPositive },
+    empty: !visualPositive && !visualNegative && !llmPositive,
+  };
+}
+
 /** 是否正要移除預設弘法禁語（清空或刪掉 DEFAULT 其中一條）——UI 確認用 */
 export function removesDefaultTaboos(prev: string[], next: string[]): boolean {
   const defaults = DEFAULT_TABOOS();
@@ -725,6 +861,110 @@ const ADVANCED_EXAMPLES_BY_KIND: Record<string, WorldviewAdvancedExample> = {
     people: ["現場主角們：短描述即可"],
   },
 };
+
+/**
+ * 快速層一鍵範例（依專案 kind）。
+ *
+ * 進階層早就有「空白欄帶入範例／整段換成範例」，但**最需要範例的快速層反而沒有**——
+ * 空專案只有 placeholder，要自己從零想「一句話故事」「調性」「畫風」該填什麼。
+ *
+ * 硬性規則（由 worldview.test.ts 強制，違反會讓一鍵帶入當場產生孤兒 chip 或軟警告）：
+ * - tones／themes／styles 的值必須落在既有 TONE_OPTIONS／THEME_OPTIONS／STYLE_OPTIONS 內
+ * - styles 經 canonicalizeWorldviewStyles 後不變（同家族的 look＋質感，不跨家族）
+ * - tones／themes 不超過 CHIP_SOFT_MAX
+ */
+export type WorldviewQuickExample = {
+  logline: string;
+  message: string;
+  themes: string[];
+  tones: string[];
+  styles: string[];
+};
+
+const QUICK_EXAMPLE_DEFAULT: WorldviewQuickExample = {
+  logline: "一位訪客走進晨光禪堂，把浮躁的心慢慢放回原位",
+  message: "把心安住，日子就有了呼吸",
+  themes: ["禪修日常"],
+  tones: ["溫暖", "真誠"],
+  styles: ["日系水彩"],
+};
+
+const QUICK_EXAMPLES_BY_KIND: Record<string, WorldviewQuickExample> = {
+  witness: {
+    logline: "陳師姐從憂鬱低谷，靠著每天一次靜坐，慢慢把自己接回來",
+    message: "低谷不是終點，是轉彎的地方",
+    themes: ["苦→修行→轉變→感恩"],
+    tones: ["溫暖", "真誠"],
+    styles: ["寫實攝影", "膠片質感"],
+  },
+  teaching: {
+    logline: "一句聽過很多次的話，在某個早晨忽然聽懂了",
+    message: "道理不難，難在願意今天就試一次",
+    themes: ["佛法入門"],
+    tones: ["莊嚴", "溫暖"],
+    styles: ["水墨禪意"],
+  },
+  short: {
+    logline: "三十秒裡，一個人從坐不住到坐得住",
+    message: "安靜一分鐘，比滑手機一小時有用",
+    themes: ["禪修日常"],
+    tones: ["活潑", "簡約"],
+    styles: ["極簡線條"],
+  },
+  promo: {
+    logline: "禪堂的門推開，這個週末有一場為你留的位子",
+    message: "來坐一下，位子一直都在",
+    themes: ["活動紀實"],
+    tones: ["溫暖", "活潑"],
+    styles: ["日系水彩"],
+  },
+  recap: {
+    logline: "那天的光、那些人、那一段一起安靜下來的時間",
+    message: "一起走過的路，值得記得",
+    themes: ["感恩分享"],
+    tones: ["溫暖", "療癒"],
+    styles: ["寫實攝影"],
+  },
+};
+
+/** 依專案 kind 取快速層範例；未知 kind 用中性預設 */
+export function worldviewQuickExampleForKind(kind?: string | null): WorldviewQuickExample {
+  if (kind && QUICK_EXAMPLES_BY_KIND[kind]) return QUICK_EXAMPLES_BY_KIND[kind]!;
+  return QUICK_EXAMPLE_DEFAULT;
+}
+
+/** 套用快速層範例：onlyEmpty 時只填空白欄（與 applyWorldviewAdvancedExample 同語義） */
+export function applyWorldviewQuickExample(
+  current: Worldview,
+  kind?: string | null,
+  onlyEmpty = true,
+): Partial<Pick<Worldview, "logline" | "message" | "themes" | "tones" | "styles">> {
+  const ex = worldviewQuickExampleForKind(kind);
+  const patch: Partial<Pick<Worldview, "logline" | "message" | "themes" | "tones" | "styles">> = {};
+  if (!onlyEmpty || !current.logline.trim()) patch.logline = ex.logline;
+  if (!onlyEmpty || !current.message.trim()) patch.message = ex.message;
+  if (!onlyEmpty || current.themes.length === 0) patch.themes = [...ex.themes];
+  if (!onlyEmpty || current.tones.length === 0) patch.tones = [...ex.tones];
+  if (!onlyEmpty || current.styles.length === 0) patch.styles = [...ex.styles];
+  return patch;
+}
+
+/**
+ * 「整份抄這個」：快速層＋進階層合成單一 patch。
+ * 必須是一個 patch 一次 mutate——連發多個 mutate 會讓前端的樂觀合併在同一 tick 互相 race。
+ */
+export function applyWorldviewFullExample(
+  current: Worldview,
+  kind?: string | null,
+  onlyEmpty = true,
+): Partial<
+  Pick<Worldview, "logline" | "message" | "themes" | "tones" | "styles" | "audience" | "acts" | "people">
+> {
+  return {
+    ...applyWorldviewQuickExample(current, kind, onlyEmpty),
+    ...applyWorldviewAdvancedExample(current, kind, onlyEmpty),
+  };
+}
 
 /** 依專案 kind 取進階範例；未知 kind 用中性預設 */
 export function worldviewAdvancedExampleForKind(kind?: string | null): WorldviewAdvancedExample {

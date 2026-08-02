@@ -5055,3 +5055,74 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 .team-starters__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .team-starters__head > strong { font-size: 13px; }
 .team-starters__list { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ── 世界觀注入預覽：把「生成時自動注入」那段隱形文字攤開 ── */
+.wv-preview {
+  margin-top: 12px;
+  background: var(--card2);
+}
+.wv-preview > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  min-height: 44px;
+}
+.wv-preview > summary::-webkit-details-marker { display: none; }
+.wv-preview__title { font-weight: 600; font-size: var(--fs-14); }
+.wv-preview__hint { font-size: 12px; }
+.wv-preview__body { margin-top: 8px; display: grid; gap: 10px; }
+.wv-preview__blank { font-size: 13px; margin: 0; }
+.wv-preview__block { display: grid; gap: 4px; }
+.wv-preview__block-head { display: flex; align-items: baseline; gap: 8px; }
+.wv-preview__label { font-size: 12px; font-weight: 600; }
+.wv-preview__copy {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--primary-ink);
+  text-decoration: underline;
+  font-size: 12px;
+  padding: 0;
+}
+/* 提示詞是要逐字比對的東西：等寬、保留換行、長行自己捲，不撐破卡片 */
+.wv-preview__pre {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm, 8px);
+  background: var(--card);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.wv-preview__note { font-size: 12px; margin: 0; }
+
+/* ── 世界觀快速層引導鋪軌 ── */
+.wv-guide { margin: 8px 0 12px; }
+.wv-guide__milestone { font-size: 12px; margin: 4px 0 0; }
+
+/* ── 世界觀空狀態範例卡：讓人在套用前就看到後果 ── */
+.wv-example { margin: 8px 0 12px; }
+.wv-example__actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.wv-example__fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+.wv-example__fields dt { font-weight: 600; color: var(--fg-secondary); white-space: nowrap; }
+.wv-example__fields dd { margin: 0; }
+.wv-example__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.wv-example__lead { font-size: 12px; margin: 12px 0 0; }
+@media (max-width: 480px) {
+  .wv-example__fields { grid-template-columns: 1fr; gap: 2px; }
+  .wv-example__fields dd { margin-bottom: 6px; }
+}

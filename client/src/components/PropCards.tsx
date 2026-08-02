@@ -314,6 +314,26 @@ export function PropCards({
         <EmptyState
           title="還沒有素材設定"
           description="加一張道具卡（例：紅傘＝正紅色長柄傘、木質握把、傘面微舊）。"
+          /* 與角色卡同理：範例要能一鍵建出來，不要只寫在說明裡讓人自己打 */
+          action={
+            readOnly ? undefined : (
+              <Button
+                variant="tonal"
+                disabled={add.isPending || atProjectMax}
+                onClick={() =>
+                  add.mutate({
+                    projectId,
+                    name: "紅傘",
+                    appearance: "正紅色長柄傘、木質握把、傘面微舊",
+                    notes: "由範例建立，可再改",
+                    clientRequestId: requestId.current,
+                  })
+                }
+              >
+                {add.isPending ? "建立中…" : "帶入這張範例卡"}
+              </Button>
+            )
+          }
         />
       )}
 

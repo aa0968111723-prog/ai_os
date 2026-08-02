@@ -9,6 +9,7 @@ import { ConfirmButton, HelpTip } from "../components/interactions";
 import {
   worldviewSchema,
   isWorldviewReady,
+  worldviewFieldReaderSummary,
   hasActs,
   removesDefaultTaboos,
   toggleWorldviewChip,
@@ -26,14 +27,11 @@ import {
   looksForFamily,
   texturesForFamily,
   CHIP_SOFT_MAX,
-  WORLDVIEW_FIELD_READERS,
-  WORLDVIEW_CONSUMER_LABEL,
   isDefaultTaboosOnly,
   applyWorldviewAdvancedExample,
   parsePersonTokenForCharacter,
   type StyleMediaFamily,
   type Worldview,
-  type WorldviewConsumerId,
 } from "@shared/worldview";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { SceneList } from "../components/SceneList";
@@ -57,6 +55,9 @@ import { resolveProjectMode, saveProjectMode, type ProjectMode } from "../featur
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
 import { ProjectDatabasesCard } from "../components/ProjectDatabasesCard";
 import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourney";
+import { WorldviewPreview } from "../components/WorldviewPreview";
+import { WorldviewGuide } from "../components/WorldviewGuide";
+import { WorldviewExampleCard } from "../components/WorldviewExampleCard";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   useCollab,
@@ -210,14 +211,21 @@ function StageLink({ text }: { text: string }) {
   );
 }
 
-/** 世界觀欄位「誰會讀」徽章（與 shared WORLDVIEW_FIELD_READERS 對齊） */
+/**
+ * 世界觀欄位「會不會改變我的畫面」徽章。
+ *
+ * 原本逐欄印出整串「圖影 · 文字生成 · 助手／代理 · 導演 · 匯出（圖影不注入）」——
+ * 那是給開發者看的注入矩陣，貼在每個欄位標題旁讀起來像規格書，是這一區顯得
+ * 抽象的主因之一。現在只留一句人話，完整清單收進 HelpTip。
+ * 單一真相仍是 shared 的 WORLDVIEW_FIELD_READERS（經 worldviewFieldReaderSummary）。
+ */
 function FieldReaders({ field }: { field: string }) {
-  const meta = WORLDVIEW_FIELD_READERS[field];
-  if (!meta) return null;
+  const summary = worldviewFieldReaderSummary(field);
+  if (!summary) return null;
   return (
     <Meta as="span" style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, opacity: 0.88 }}>
-      {meta.readers.map((r: WorldviewConsumerId) => WORLDVIEW_CONSUMER_LABEL[r]).join(" · ")}
-      {meta.note ? `（${meta.note}）` : ""}
+      {summary.short}
+      <HelpTip text={`完整：${summary.detail}`} />
     </Meta>
   );
 }
@@ -467,6 +475,9 @@ export function ProjectPage({ id }: { id: string }) {
     assets: false,
     recycle: false,
   });
+  /** 進階設定摺疊層：引導鋪軌跳到第四步（給誰看／三幕）時要能撐開它。
+      只管開合、不碰任何欄位值——鏡射欄位值的 state 會重新引入協作覆蓋 bug。 */
+  const [wvAdvancedOpen, setWvAdvancedOpen] = useState(false);
   /** 兩大分組 + 管理：手機預設只開「世界與角色」，其餘收合降低同層資訊量 */
   const [ctxGroupOpen, setCtxGroupOpen] = useState<Record<CtxGroupKey, boolean>>({
     world: true,
@@ -699,6 +710,19 @@ export function ProjectPage({ id }: { id: string }) {
       return next;
     });
   };
+  /** 世界觀範例卡「我自己填」的關閉旗標（per 專案，沿用引導列同一套 localStorage 手法） */
+  const wvExampleStorageKey = `aios.wvExample.dismissed.${id}`;
+  const [wvExampleDismissed, setWvExampleDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(wvExampleStorageKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const dismissWvExample = () => {
+    setWvExampleDismissed(true);
+    try { localStorage.setItem(wvExampleStorageKey, "1"); } catch { /* 偏好儲存失敗不影響操作 */ }
+  };
   const archiveProject = trpc.projects.setArchived.useMutation({
     onSuccess: () => { utils.projects.get.invalidate({ id }); utils.projects.list.invalidate(); },
   });
@@ -814,10 +838,10 @@ export function ProjectPage({ id }: { id: string }) {
   const sceneCount = scenes.data?.length ?? 0;
   const onboardSteps = [
     {
-      label: "設世界觀",
+      label: "定調",
       done: isWorldviewReady(wv),
       target: "#onboard-worldview",
-      hint: "填一句故事（或關鍵訊息）＋至少一項調性或視覺風格",
+      hint: "填一句「這支片在講什麼」＋挑一個氣氛或畫風",
     },
     { label: "生成一鏡", done: !!generations.data?.some((g) => g.status === "done"), target: "#gen-prompt", hint: "在 AI 創作工作台的「直接生成」做出第一張成品" },
     { label: "加入分鏡", done: sceneCount > 0, target: "#onboard-delivery", hint: "把成品排進分鏡" },
@@ -844,6 +868,8 @@ export function ProjectPage({ id }: { id: string }) {
   const propCount = propCards.data?.length;
   const assetCount = assets.data?.length;
   const wvReady = isWorldviewReady(wv);
+  /** 快速層四項全空＝這個專案還沒起手，值得先給一份可照抄的範例 */
+  const wvBlank = !wv.logline.trim() && !wv.message.trim() && !wv.tones.length && !wv.styles.length;
 
   const toggle = (field: "tones" | "themes" | "styles", value: string) => {
     if (!canEdit) return; // 檢視者：chips 不可切換（樂觀更新會先亮再彈回，比不動更誤導）
@@ -1522,7 +1548,7 @@ export function ProjectPage({ id }: { id: string }) {
             id="stage-context"
             num="①"
             title="專案上下文"
-            desc="一整個共同大腦——基調、定裝、知識與素材分兩區管理"
+            desc="一整個共同大腦——基本設定、定裝、知識與素材分兩區管理"
             accent="group-1"
             hint={wvReady ? "已設定" : "待設定"}
           />
@@ -1532,12 +1558,12 @@ export function ProjectPage({ id }: { id: string }) {
               <strong className="ctx-overview__title">專案大腦一覽</strong>
               <Meta>
                 {wvReady
-                  ? "基調已就緒——下方兩區會自動注入每次生成"
-                  : "先補「世界與角色」的專案基調，後面生成才穩"}
+                  ? "基本設定就緒——下方兩區會自動注入每次生成"
+                  : "先補「這支片長什麼樣」的基本設定，後面生成才穩"}
               </Meta>
             </div>
             <div className="ctx-summary" role="group" aria-label="AI 全程共用的上下文一覽">
-              {summaryChip(`基調${wvReady ? " ✓" : "（待設）"}`, "#onboard-worldview", wvReady)}
+              {summaryChip(`設定${wvReady ? " ✓" : "（待設）"}`, "#onboard-worldview", wvReady)}
               {hasActs(wv) && summaryChip("三幕", "#onboard-worldview", true)}
               {wv.people.length > 0 && summaryChip(`人物 ${wv.people.length}`, "#onboard-worldview", true)}
               {summaryChip(`角色 ${charCount ?? "…"}`, "#sec-characters", (charCount ?? 0) > 0)}
@@ -1551,10 +1577,10 @@ export function ProjectPage({ id }: { id: string }) {
           {/* ── 分組 A：世界與角色（基調 + 定裝三卡） ── */}
           <CtxGroup
             groupId="ctx-group-world"
-            title="世界與角色"
-            lede="專案基調、角色／場景／道具定裝——決定 AI 畫出來長什麼樣"
+            title="這支片長什麼樣"
+            lede="先講清楚這支片在說什麼、看起來像什麼，再把角色／場景／道具的樣子定下來——每次生成 AI 都會自動帶上，你不用重講。"
             meta={[
-              wvReady ? "基調✓" : "基調待設",
+              wvReady ? "設定✓" : "設定待補",
               ...(charCount != null ? [`角${charCount}`] : []),
               ...(presetCount != null ? [`景${presetCount}`] : []),
               ...(propCount != null ? [`道${propCount}`] : []),
@@ -1567,15 +1593,15 @@ export function ProjectPage({ id }: { id: string }) {
           <CtxCollapse
             compact={mobileCompact}
             sectionId="onboard-worldview"
-            title="專案基調與世界觀"
-            meta={wvReady ? "已就緒" : "待設定"}
+            title="這支片的固定設定"
+            meta={wvReady ? "可以開始出圖" : "還差一點"}
             open={ctxOpen.worldview}
             onOpenChange={(o) => setCtxSectionOpen("worldview", o)}
           >
           <Card as="section" data-fb="世界觀卡" id="onboard-worldview-card">
             <h2>
-              專案基調與世界觀
-              <HelpTip text="這支片的固定設定，填一次，之後每次生成 AI 自動記得，不用重講背景。" />
+              這支片的固定設定
+              <HelpTip text="填一次就好。下面「AI 會收到什麼」可以直接看到每次生成實際送出去的字。（這一區以前叫「世界觀」）" />
               {updateWv.isPending ? (
                 <Meta style={{ marginLeft: 8, fontSize: 13, fontWeight: 400 }}>儲存中…</Meta>
               ) : wvSaved !== "idle" ? (
@@ -1589,8 +1615,33 @@ export function ProjectPage({ id }: { id: string }) {
                 </Meta>
               ) : null}
             </h2>
-            {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——世界觀可瀏覽、不能修改（打的字不會被儲存）。</Hint>}
-            <label htmlFor="wv-logline">一句話故事（logline）</label>
+            {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——這些設定可以看，不能改（打的字不會被儲存）。</Hint>}
+            {/* 全空的專案：先給一份可以照抄的範例（含「套下去 AI 會收到什麼」的預覽）。
+                唯讀成員也看得到範例本身，只是沒有套用按鈕。 */}
+            {wvBlank && !wvExampleDismissed && (
+              <WorldviewExampleCard
+                wv={wv}
+                kind={p.kind}
+                canEdit={canEdit}
+                onApply={(patch) => updateWv.mutate({ id, worldview: patch })}
+                onDismiss={dismissWvExample}
+              />
+            )}
+            {/* 引導鋪軌：只讀 wv、不持有任何欄位值——它若緩衝草稿就會撞爛下面的
+                key 重掛 + onBlur 部分 patch（協作靠那組機制才不會互相覆蓋）。 */}
+            <WorldviewGuide
+              wv={wv}
+              onJump={(anchor, stepId) => {
+                // 第四步在進階摺疊層裡，捲過去之前得先把它撐開
+                if (stepId === "narrative") setWvAdvancedOpen(true);
+                scrollToSelector(anchor);
+              }}
+            />
+            <label htmlFor="wv-logline">
+              這支片在講什麼？
+              <FieldReaders field="logline" />
+              <HelpTip text="一句話就好。會截成 80 字接在每次出圖的提示詞後面。" />
+            </label>
             {/* key 綁伺服器值：協作者改動（WS invalidate 重抓）時強制重掛吃進新值——
                 非受控 defaultValue 否則永遠停在舊字，focus+blur 還會把舊值回寫、蓋掉別人的修改。
                 maxLength 與後端 worldviewSchema .max(500) 對齊，貼超長不再靜默存失敗。 */}
@@ -1603,7 +1654,11 @@ export function ProjectPage({ id }: { id: string }) {
               placeholder="例：陳師姐從憂鬱低谷透過印心佛法走出重生"
               onBlur={(e) => canEdit && e.target.value !== wv.logline && updateWv.mutate({ id, worldview: { logline: e.target.value } })}
             />
-            <label htmlFor="wv-message">一句關鍵訊息（一片一訊息）</label>
+            <label htmlFor="wv-message">
+              看完要記得哪一句？
+              <FieldReaders field="message" />
+              <HelpTip text="一支片只講一件事。這句會原封不動送進出圖和文字 AI。" />
+            </label>
             <input
               key={`message-${wv.message}`}
               id="wv-message"
@@ -1614,18 +1669,22 @@ export function ProjectPage({ id }: { id: string }) {
               onBlur={(e) => canEdit && e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
             />
             <label id="wv-themes">
-              訊息主軸
-              <HelpTip text="敘事弧或片型標籤。建議 1～2 個；第一個為主。主要給腳本／導演／旁白用，不會直接塞進圖影。" />
+              故事走向
+              <FieldReaders field="themes" />
+              <HelpTip text="可略過。只給寫腳本／拆分鏡的 AI 看，出圖不吃。建議 1～2 個，第一個為主。" />
             </label>
             {chipGroup("themes", themeOpts, "theme", "wv-themes")}
             <label id="wv-tones">
-              調性（生成時自動注入）
-              <HelpTip text="語氣感覺。建議 ≤2 個可並存的（如溫暖+真誠）。第一個為主；出圖只取前 2 個。點「設主要」可改優先序。" />
+              氣氛
+              <FieldReaders field="tones" />
+              <HelpTip text="畫面給人的感覺。挑 1～2 個合得來的（如溫暖＋真誠）。第一個為主；出圖只取前 2 個。點「設主要」可改優先序。" />
             </label>
             {chipGroup("tones", toneOpts, "tone", "wv-tones")}
             <label id="wv-styles">
-              視覺風格（畫面一致的關鍵，生成時自動注入）
-              <HelpTip text="先選媒材（寫實／插畫／3D），再選一個主風格；同家族可加一個質感（如膠片）。跨媒材不會混進同一張圖。" />
+              畫風
+              <FieldReaders field="styles" />
+              <Meta as="span" style={{ marginLeft: 6, fontSize: 12, fontWeight: 400 }}>每張圖看起來像什麼——這一項最有效</Meta>
+              <HelpTip text="先選畫法（寫實／插畫／3D），再選一個主風格；同家族可加一個質感（如膠片）。跨畫法不會混進同一張圖。" />
             </label>
             {stylePicker("wv-styles")}
             {wvChipWarnings.length > 0 && (
@@ -1638,19 +1697,30 @@ export function ProjectPage({ id }: { id: string }) {
             {isLeader && (
               <Hint style={{ marginTop: 8, fontSize: 12 }}>
                 選項可直接按各列的「＋新增」加；改名／停用／排序在 <Link href="/options">選項整理頁</Link>。
-                視覺風格＝媒材家族＋主風格（＋可選質感）；調性／主軸可複選。圖影注入主風格與同家族質感、前兩個調性。
+                實際會注入哪些，上面的「AI 會收到什麼」直接看得到。
               </Hint>
             )}
+            {/* 注入預覽：必須在進階摺疊層「之上」——摺疊層正是使用者放棄的地方。
+                內容全部來自 shared formatter，與 generationCore 同一條路（見 WorldviewPreview 註解）。 */}
+            <WorldviewPreview
+              wv={wv}
+              cardCounts={{ characters: charIds.length, scenes: sceneIds.length, props: propIds.length }}
+              defaultOpen={!mobileCompact}
+            />
             {/* 進階層：依目的分組 + 一鍵範例 + 人物→定裝；觀眾／三幕／人物進 brief／LLM／導演 */}
-            <details style={{ marginTop: 10 }} open={hasActs(wv) || !!wv.audience.trim() || wv.people.length > 0}>
+            <details
+              style={{ marginTop: 10 }}
+              open={wvAdvancedOpen || hasActs(wv) || !!wv.audience.trim() || wv.people.length > 0}
+              onToggle={(e) => setWvAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
+            >
               <summary style={{ cursor: "pointer", fontSize: 13 }}>
-                進階設定（敘事 AI・合規・交接備註）
+                進階：給寫字的 AI、合規、交接備註（可以晚點再填）
               </summary>
               <div style={{ marginTop: 8 }}>
                 <Hint layer="always" style={{ marginBottom: 12, fontSize: 12 }}>
-                  <strong>基調就緒</strong>（上方）= 可以出圖。
-                  <strong> 進階</strong>＝問 AI、文字生成、拆分鏡更穩；
-                  <strong>直接出圖不吃</strong>觀眾／三幕／人物（請用風格＋角色定裝）。
+                  <strong>上面填完就能出圖。</strong>
+                  這裡填了，寫腳本／拆分鏡／問助手會更準；
+                  <strong>直接出圖不吃</strong>觀眾／三幕／人物（畫面請用畫風＋角色定裝卡）。
                 </Hint>
 
                 {/* ① 給敘事 AI */}
@@ -1664,9 +1734,9 @@ export function ProjectPage({ id }: { id: string }) {
                   }}
                 >
                   <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                    ① 給敘事 AI 用
+                    ① 寫腳本、拆分鏡時會用到
                     <Meta as="span" style={{ fontWeight: 400, marginLeft: 6, fontSize: 11, opacity: 0.85 }}>
-                      助手／代理 · 文字生成 · 導演 · 匯出 · 圖影不吃
+                      出圖不吃這一段
                     </Meta>
                   </Meta>
                   {canEdit && (
@@ -1718,7 +1788,7 @@ export function ProjectPage({ id }: { id: string }) {
                   )}
 
                   <label htmlFor="wv-audience">
-                    目標觀眾
+                    這支片給誰看？
                     <FieldReaders field="audience" />
                     <HelpTip text="給誰看。會進助手／代理、文字生成、導演；不會塞進圖影正向 prompt。" />
                   </label>
@@ -1733,14 +1803,14 @@ export function ProjectPage({ id }: { id: string }) {
                   />
 
                   <label style={{ marginTop: 8, display: "block" }}>
-                    三幕結構（鉤子 → 轉折 → 行動呼籲）
+                    故事三段
                     <FieldReaders field="acts" />
                     <HelpTip text="敘事骨架。進助手／文字生成／導演；不進圖影。" />
                   </label>
                   {([
-                    ["hook", "鉤子", "例：第一個抓住人的畫面或處境"],
-                    ["turn", "轉折", "例：心或局面怎麼轉"],
-                    ["cta", "行動呼籲", "例：希望觀眾帶走什麼／做什麼"],
+                    ["hook", "開頭怎麼抓住人", "例：第一個抓住人的畫面或處境"],
+                    ["turn", "中間怎麼轉", "例：心或局面怎麼轉"],
+                    ["cta", "最後希望觀眾做什麼", "例：希望觀眾帶走什麼／做什麼"],
                   ] as const).map(([field, label, ph]) => (
                     <input
                       key={`${field}-${wv.acts[field]}`}
@@ -1758,7 +1828,7 @@ export function ProjectPage({ id }: { id: string }) {
                   ))}
 
                   <label style={{ marginTop: 10, display: "block" }} id="wv-people-label">
-                    敘事人物
+                    故事裡有誰（純文字）
                     <FieldReaders field="people" />
                     <HelpTip text="故事裡有誰（文字）。要畫得像請按「建定裝」→ 角色定裝卡，生成時勾選。" />
                   </label>
@@ -1875,7 +1945,7 @@ export function ProjectPage({ id }: { id: string }) {
                   }}
                 >
                   <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                    ② 合規保護
+                    ② 不能出現的東西
                     <FieldReaders field="taboos" />
                   </Meta>
                   {isDefaultTaboosOnly(wv.taboos) ? (
@@ -1886,7 +1956,7 @@ export function ProjectPage({ id }: { id: string }) {
                       <div style={{ marginTop: 8 }}>
                         <TokenListEditor
                           id="wv-taboos"
-                          label="禁忌事項"
+                          label="不能講、不能出現的"
                           fieldKey="taboos"
                           hint="圖影走負向（模型需支援）；文字與助手走「避免」。刪預設前會確認。"
                           values={wv.taboos}
@@ -1907,7 +1977,7 @@ export function ProjectPage({ id }: { id: string }) {
                   ) : (
                     <TokenListEditor
                       id="wv-taboos"
-                      label="禁忌事項"
+                      label="不能講、不能出現的"
                       fieldKey="taboos"
                       hint="圖影走負向（模型需支援）；文字與助手走「避免」。刪預設前會確認。"
                       values={wv.taboos}
@@ -1936,7 +2006,7 @@ export function ProjectPage({ id }: { id: string }) {
                   }}
                 >
                   <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                    ③ 交接備註（不進 AI）
+                    ③ 給人看的備註（AI 不會讀）
                     <FieldReaders field="references" />
                   </Meta>
                   <Hint style={{ marginBottom: 8, fontSize: 12 }}>
@@ -1956,7 +2026,7 @@ export function ProjectPage({ id }: { id: string }) {
               </div>
             </details>
 
-            {updateWv.error && <p className="error">世界觀儲存失敗：{updateWv.error.message}</p>}
+            {updateWv.error && <p className="error">設定儲存失敗：{updateWv.error.message}</p>}
           </Card>
           </CtxCollapse>
           </CollabZone>

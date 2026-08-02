@@ -326,7 +326,7 @@ export function DirectGenerateMode({
       <label htmlFor="gen-prompt">
         {model?.kind === "audio" && model.needs == null
           ? "要唸的文字/音樂描述"
-          : "提示詞（世界觀會自動帶入，不必重講背景）"}
+          : "提示詞（這支片的固定設定會自動帶，不用重講）"}
       </label>
       <textarea
         id="gen-prompt"
@@ -338,7 +338,7 @@ export function DirectGenerateMode({
 
       <div className="ctx-summary" style={{ marginTop: 8 }} role="group" aria-label="這次生成會帶入的上下文">
         帶入：
-        {summaryChip(`世界觀${wvReady ? " ✓" : "（未定盤）"}`, "#onboard-worldview", wvReady)}
+        {summaryChip(`設定${wvReady ? " ✓" : "（待設）"}`, "#onboard-worldview", wvReady)}
         {summaryChip(`角色 ${characterIds.length}`, "#sec-characters", characterIds.length > 0)}
         {summaryChip(`場景 ${scenePresetIds.length}`, "#sec-scenes", scenePresetIds.length > 0)}
         {summaryChip(`素材 ${propIds.length}`, "#sec-props", propIds.length > 0)}

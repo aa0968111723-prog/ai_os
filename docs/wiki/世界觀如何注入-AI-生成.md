@@ -13,6 +13,27 @@
 
 ---
 
+## 在畫面上直接看（不必再猜）
+
+專案頁「這支片的固定設定」卡片裡有一塊 **「AI 會收到什麼？」**（`#wv-inject-preview`），
+直接顯示下面這幾段字的實際內容，改一個 chip 就即時跟著變。
+
+- 元件：`client/src/components/WorldviewPreview.tsx`
+- 內容一律取自 `buildWorldviewInjectPreview`（`shared/worldview.ts`），
+  它只轉手 `formatWorldviewVisualPositive` / `formatWorldviewVisualNegative` /
+  `formatWorldviewForAi(…, "generation-llm")`——**與 generationCore 同一批函式**。
+- 防漂移測試在 `server/services/generationCore.test.ts`：斷言預覽輸出與
+  `effectivePromptParts` 實際送出的字逐字相等。任一邊改了組法，測試先紅。
+
+定裝卡錨點只印標記與當下勾選張數，**不預組內容**——那三段由伺服器依 DB 組
+（`cardAnchors.ts`），前端沒有等價輸入。
+
+> UI 用語：這一區在畫面上叫「**這支片的固定設定**」（原「專案基調與世界觀」），
+> 欄位叫「這支片在講什麼？／看完要記得哪一句？／故事走向／氣氛／畫風」。
+> 程式與本文件的欄位鍵仍是 `logline` / `message` / `themes` / `tones` / `styles`。
+
+---
+
 ## 實際送出長什麼樣？
 
 使用者只打：`清晨安靜的室內`  
@@ -106,6 +127,10 @@ effectivePromptParts → provider（fal 等）
 ```
 
 - Schema／截斷／格式：`shared/worldview.ts`  
+- **注入標記與負向組法**：`WORLDVIEW_INJECT_MARKER`、`CARD_ANCHOR_MARKERS`、
+  `formatWorldviewVisualNegative`、`formatWorldviewInjectedPrompt`（`shared/worldview.ts`）——
+  前後端共用，前端預覽不得自行拼字串  
+- **注入類別集合**：`WORLDVIEW_INJECT_CATEGORIES`（`shared/models.ts`）  
 - 注入與禁忌分流：`server/services/generationCore.ts`  
 - 導演：`server/routers/director.ts`  
 - 代理 brief：`server/services/agentCore.ts`  
@@ -116,7 +141,8 @@ effectivePromptParts → provider（fal 等）
 
 ## 給非工程的檢查清單
 
-1. 專案頁填好 **一句話故事** + 至少一項 **調性或風格**  
-2. 用文生圖或 LLM 生成一次  
-3. 若開「顯示實際 prompt」或查生成紀錄，應能看到 `[專案背景]` 與 `故事錨點`  
-4. 用 TTS 唸旁白時，**不應**出現世界觀注入句（設計如此）
+1. 專案頁填好 **這支片在講什麼？** + 至少一項 **氣氛或畫風**  
+2. 展開該卡的 **「AI 會收到什麼？」**，先看預覽長什麼樣  
+3. 用文生圖或 LLM 生成一次  
+4. 查生成紀錄的 prompt，應與步驟 2 的預覽**逐字相同**（含 `[專案背景]` 與 `故事錨點`）  
+5. 用 TTS 唸旁白時，**不應**出現世界觀注入句（設計如此）
