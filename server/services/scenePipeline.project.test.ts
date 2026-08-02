@@ -62,10 +62,11 @@ describe("場景設定：跨面一致性（專案效益）", () => {
 });
 
 describe("場景設定：架構 source-lock", () => {
-  it("generationCore 自 cardAnchors 取 buildSceneAnchor（不再 import routers/scenePresets）", () => {
+  it("generationCore 自 continuity 快照取設定，再用 cardAnchors 格式化（不再 import routers/scenePresets）", () => {
     const src = readFileSync(new URL("./generationCore.ts", import.meta.url), "utf8");
     expect(src).toContain('from "./cardAnchors"');
-    expect(src).toContain("buildSceneAnchor");
+    expect(src).toContain("formatSceneAnchor");
+    expect(src).toContain("buildContinuitySnapshot");
     expect(src).toContain("withSceneAnchor");
     expect(src).not.toContain('from "../routers/scenePresets"');
     expect(src).not.toContain('from "../routers/characters"');

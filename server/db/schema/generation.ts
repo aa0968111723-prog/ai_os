@@ -3,6 +3,7 @@
  */
 import { pgTable, uuid, text, integer, bigint, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { ContinuitySnapshot } from "../../../shared/continuity";
 
 export const generations = pgTable("generations", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -33,6 +34,8 @@ export const generations = pgTable("generations", {
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   /** 送出時帶入的素材設定卡 id（null＝沒帶）——道具外觀錨點同樣要能重試還原 */
   propIds: jsonb("prop_ids").$type<string[]>(),
+  /** 生成當下凍結的角色／場景／素材版本，供跨鏡一致性、稽核與重試沿用。 */
+  continuitySnapshot: jsonb("continuity_snapshot").$type<ContinuitySnapshot>(),
   /** 來源工作流執行（null＝非工作流產物）：生成紀錄可回看「這筆是哪條工作流跑出來的」 */
   workflowRunId: uuid("workflow_run_id"),
   /** 來源 AI 代理執行（null＝非代理產物） */

@@ -536,10 +536,12 @@ export function GenerationList({
             {(() => {
               const chars = (g.characterIds as string[] | null) ?? [];
               const presets = (g.scenePresetIds as string[] | null) ?? [];
+              const props = (g.propIds as string[] | null) ?? [];
+              const continuity = g.continuitySnapshot as { locked?: boolean; fingerprint?: string; referenceAssetIds?: string[] } | null;
               const boundScene = g.sceneId ? sceneLabel(g.sceneId) : null;
               const injected = (g.params as { prompt?: unknown } | null)?.prompt;
               const injectedPrompt = typeof injected === "string" && injected.trim() !== g.prompt.trim() ? injected : null;
-              if (!chars.length && !presets.length && !boundScene && !g.workflowRunId && !g.agentRunId && !injectedPrompt) return null;
+              if (!chars.length && !presets.length && !props.length && !continuity?.locked && !boundScene && !g.workflowRunId && !g.agentRunId && !injectedPrompt) return null;
               return (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", marginTop: 4 }}>
                   {chars.length > 0 && (
@@ -547,6 +549,12 @@ export function GenerationList({
                   )}
                   {presets.length > 0 && (
                     <Chip title={presets.map(presetName).join("、")}>場景 {presets.length}</Chip>
+                  )}
+                  {props.length > 0 && <Chip>素材 {props.length}</Chip>}
+                  {continuity?.locked && (
+                    <Chip title={`快照 ${continuity.fingerprint?.slice(0, 8) ?? "—"}・參考圖 ${continuity.referenceAssetIds?.length ?? 0} 張`}>
+                      一致性鎖定
+                    </Chip>
                   )}
                   {boundScene && (
                     <button

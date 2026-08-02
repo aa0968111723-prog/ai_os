@@ -145,8 +145,8 @@ describe("generationCore CA-01 assertGenerationEntityIds (source-lock)", () => {
     expect(projectAllowsIdx).toBeGreaterThan(-1);
     expect(assertEntityIdx).toBeGreaterThan(projectAllowsIdx);
     expect(sourceAssetResolveIdx).toBeGreaterThan(assertEntityIdx);
-    // 卡片參考圖回退必須排在 fail-closed 檢查之後——否則等於給了一條繞過專案歸屬檢查的來源通道
-    const cardFallbackIdx = source.indexOf("resolveCardReferenceSource(project.id", assertEntityIdx);
+    // 卡片參考圖回退必須排在 fail-closed 檢查之後；現在由同次凍結的 continuitySnapshot 選第一張。
+    const cardFallbackIdx = source.indexOf("const candidates = [", assertEntityIdx);
     expect(cardFallbackIdx).toBeGreaterThan(assertEntityIdx);
     expect(cardFallbackIdx).toBeLessThan(sourceAssetResolveIdx);
   });

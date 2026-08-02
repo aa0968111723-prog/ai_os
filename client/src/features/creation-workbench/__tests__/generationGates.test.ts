@@ -341,6 +341,7 @@ describe("buildGenerationSubmitInput (confirm 生成 payload)", () => {
       sourceUrl: undefined,
       characterIds: ["c1"],
       scenePresetIds: undefined,
+      continuityMode: true,
       clientRequestId: "req-1",
     });
   });
@@ -381,5 +382,19 @@ describe("buildGenerationSubmitInput (confirm 生成 payload)", () => {
       sourceAssetId: undefined,
       sourceUrl: undefined,
     });
+  });
+
+  it("lets the user disable multi-reference locking while keeping selected cards", () => {
+    expect(buildGenerationSubmitInput({
+      projectId: "p",
+      model: textToImage,
+      prompt: "禪",
+      sourceAsset: null,
+      sourceUrl: "",
+      characterIds: ["c1"],
+      scenePresetIds: [],
+      continuityMode: false,
+      clientRequestId: "req-4",
+    })).toMatchObject({ characterIds: ["c1"], continuityMode: false });
   });
 });

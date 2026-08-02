@@ -130,8 +130,30 @@ export function AiUnderstandingPanel({
                     {review.data.usage?.totalTokens != null ? `・${review.data.usage.totalTokens} tokens` : ""}
                     {review.data.usage?.costUsd != null ? `・US$${review.data.usage.costUsd.toFixed(6)}` : ""}
                     {review.data.fellBackToPaid ? "・NIM 失敗後已使用付費備援" : ""}
+                    {review.data.parseMode === "repaired" ? "・已自動修復回覆格式" : ""}
+                    {review.data.parseMode === "text_fallback" ? "・已保留文字結論" : ""}
                   </Meta>
-                  {review.data.review.warnings.map((warning) => <p key={warning.code} style={{ margin: "5px 0" }}><b>{warning.title}</b>：{warning.detail}</p>)}
+                  {review.data.review.warnings.map((warning) => (
+                    <p key={warning.code} style={{ margin: "5px 0" }}>
+                      <b>{warning.title}</b>：{warning.detail}
+                      {warning.suggestion ? ` 建議：${warning.suggestion}` : ""}
+                    </p>
+                  ))}
+                  {(review.data.review.suggestedPrompt || review.data.review.suggestedNegativePrompt) && onOverrideChange ? (
+                    <div style={{ marginTop: 8 }}>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => onOverrideChange({
+                          ...override,
+                          positive: review.data?.review.suggestedPrompt ?? override?.positive,
+                          negative: review.data?.review.suggestedNegativePrompt ?? override?.negative,
+                        })}
+                      >
+                        套用 AI 建議提示詞
+                      </Button>
+                    </div>
+                  ) : null}
                 </Card>
               ) : null}
               {review.error ? <p className="error">{review.error.message}</p> : null}
