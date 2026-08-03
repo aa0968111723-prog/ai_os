@@ -49,11 +49,29 @@ export interface ChatCompletionOptions {
   timeoutMs?: number;
   /** 呼叫端中止訊號(如 SSE 用戶端斷線):與 timeoutMs 由 proxyFetch 以 AbortSignal.any 合成,斷線即取消在途 HTTP */
   signal?: AbortSignal;
+  /**
+   * 要求逐 token 對數機率（模型自報的信心值）。
+   * 不是每顆模型都吃這個參數，吃不下會回 400——所以這裡不預設開，
+   * 且 chatCompletion 遇到 400 會自動改用不帶 logprobs 重送一次，
+   * 讓「想看信心值」永遠不會害到本來會成功的請求。
+   */
+  logprobs?: boolean;
 }
 
 export interface ChatCompletionResponse {
-  choices: Array<{ message: { role: string; content: string } }>;
+  choices: Array<{
+    message: {
+      role: string;
+      content: string;
+      /** 推理型模型主動回傳的推理摘要（OpenAI 相容欄位）；沒有就是沒有 */
+      reasoning_content?: string;
+    };
+    /** 只有請求時帶 logprobs 才有：逐 token 的對數機率 */
+    logprobs?: { content?: Array<{ token: string; logprob: number }> };
+  }>;
   usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  /** 供應商不吃 logprobs、已自動改用不帶 logprobs 重送時為 true（非供應商欄位，本層標記） */
+  logprobsUnsupported?: boolean;
 }
 
 /**
@@ -102,12 +120,18 @@ export async function chatCompletion(options: ChatCompletionOptions): Promise<Ch
           messages: options.messages,
           temperature: options.temperature ?? 0.7,
           max_tokens: options.maxTokens ?? 2048,
+          ...(options.logprobs ? { logprobs: true } : {}),
         }),
         timeoutMs: options.timeoutMs ?? 60_000,
         signal: options.signal,
       });
       if (!res.ok) {
         const error = await res.text();
+        // 這顆模型不吃 logprobs：降級重送一次（沒有信心值總比整個請求失敗好）
+        if (res.status === 400 && options.logprobs) {
+          const fallback = await chatCompletion({ ...options, logprobs: false });
+          return { ...fallback, logprobsUnsupported: true };
+        }
         // NIM 免費層的兩種上限＋金鑰問題轉人話（讓使用者/管理員知道怎麼辦）；其他錯誤保留原文供除錯
         if (res.status === 429) {
           throw new NimServiceError("AI 文字服務流量達上限（NIM 免費層約每分鐘 40 次）——等一分鐘再試；常態壅塞請管理員向 NVIDIA 申請提高流量");

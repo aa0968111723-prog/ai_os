@@ -65,7 +65,9 @@ ${JSON.stringify(safePreview)}`;
       await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "provider_request", summary: "送出品質檢查", payload: { prompt, mode: "auto" } });
       try {
         const startedAt = Date.now();
-        const completion = await completeText({ prompt, mode: "auto", temperature: 0.1, maxTokens: 2_500 });
+        // introspect：一併取回供應商揭露的推理摘要與逐 token 信心。
+        // 品質檢查是「請 AI 幫忙覆核」的場景，模型自報的不確定處正是使用者最該親自看的地方。
+        const completion = await completeText({ prompt, mode: "auto", temperature: 0.1, maxTokens: 2_500, introspect: true });
         await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "provider_response", summary: "收到品質檢查結果", latencyMs: Date.now() - startedAt, payload: completion });
         const parsed = parseAiQualityReview(completion.text);
         const review = parsed.review;
@@ -77,6 +79,8 @@ ${JSON.stringify(safePreview)}`;
           model: completion.model,
           usage: completion.usage,
           fellBackToPaid: completion.fellBack ?? false,
+          // 供應商給什麼就顯示什麼；沒給就沒有，站內不生成（見 shared/llmIntrospection）
+          introspection: completion.introspection,
           parseMode: parsed.parseMode,
           traceSessionId: trace.id,
         };

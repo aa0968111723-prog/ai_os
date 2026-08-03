@@ -1,5 +1,4 @@
 import { useState } from "react";
-import type { AiOperationPreview } from "@shared/aiTrace";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { Button, Hint, Meta } from "./ui";
@@ -70,7 +69,7 @@ export function ScenePromptPreview({
               預覽失敗：{preview.error.message}
             </p>
           ) : preview.data ? (
-            <PreviewBody data={preview.data as AiOperationPreview} />
+            <PreviewBody data={preview.data} />
           ) : null}
         </div>
       )}
@@ -78,7 +77,16 @@ export function ScenePromptPreview({
   );
 }
 
-function PreviewBody({ data }: { data: AiOperationPreview }) {
+/** 只取這裡實際會用到的欄位——router 沒宣告 output schema，硬 cast 成 AiOperationPreview 是謊報型別 */
+type PreviewData = {
+  model: string;
+  estimatedPoints?: number | null;
+  context: ReadonlyArray<{ label: string; included: boolean }>;
+  request?: unknown;
+  warnings: ReadonlyArray<{ title: string }>;
+};
+
+function PreviewBody({ data }: { data: PreviewData }) {
   const included = data.context.filter((c) => c.included);
   const missing = data.context.filter((c) => !c.included);
   // request 是 sanitize 過的 provider 輸入；prompt 欄位名依模型而異，取常見的兩個

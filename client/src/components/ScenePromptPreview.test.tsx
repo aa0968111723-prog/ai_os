@@ -67,7 +67,7 @@ describe("ScenePromptPreview", () => {
     await user.click(screen.getByRole("button", { name: /先預覽/ }));
 
     await waitFor(() => expect(previewMutate).toHaveBeenCalled());
-    expect(previewMutate.mock.calls[0][0]).toEqual({
+    expect(previewMutate.mock.calls[0][0]).toStrictEqual({
       projectId: "p1",
       modelId: "m1",
       prompt: "清晨禪堂",

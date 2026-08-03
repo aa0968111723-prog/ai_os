@@ -2,6 +2,8 @@ import { useState } from "react";
 import type { AiOperationPreview, CreativePromptOverride } from "@shared/aiTrace";
 import { trpc } from "../../api";
 import { Button, Card, Chip, Hint, Meta } from "../../components/ui";
+import { AblationPanel, type AblationSubmitInput } from "./AblationPanel";
+import { LlmIntrospectionView } from "./LlmIntrospectionView";
 import { PromptFlowMap } from "./PromptFlowMap";
 
 function JsonBlock({ value }: { value: unknown }) {
@@ -162,6 +164,7 @@ export function AiUnderstandingPanel({
   traceSessionId,
   override,
   onOverrideChange,
+  ablationInput,
 }: {
   projectId: string;
   preview?: AiOperationPreview;
@@ -171,6 +174,11 @@ export function AiUnderstandingPanel({
   traceSessionId?: string | null;
   override?: CreativePromptOverride;
   onOverrideChange?: (next: CreativePromptOverride) => void;
+  /**
+   * 給消融實測用的送出參數（＝這次生成的完整設定）。
+   * 沒給就不顯示實測入口——助手／工作流／代理的預覽沒有可重跑的生成設定。
+   */
+  ablationInput?: AblationSubmitInput;
 }) {
   const [open, setOpen] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
@@ -217,7 +225,8 @@ export function AiUnderstandingPanel({
             <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>收合</Button>
           </div>
           <Hint layer="always" style={{ marginTop: 6 }}>
-            這裡顯示系統真正整理、送出與收到的資料；模型私密思維鏈與未公開的注意力權重不會被保存或假裝呈現。
+            這裡顯示系統真正整理、送出與收到的資料。供應商主動揭露的推理摘要會標明來源原樣呈現；
+            未揭露的私密思維鏈與注意力權重不會被保存，也不會假裝呈現。
           </Hint>
 
           {previewPending ? <Meta as="p">正在整理預覽…</Meta> : null}
@@ -261,6 +270,7 @@ export function AiUnderstandingPanel({
                   parameters={requestParts.parameters}
                   provider={preview.provider}
                   model={preview.model}
+                  modelId={preview.modelId}
                   estimatedPoints={preview.estimatedPoints}
                   warnings={preview.warnings}
                 />
@@ -278,6 +288,14 @@ export function AiUnderstandingPanel({
                   <RequestTextView request={preview.request} />
                 </>
               )}
+
+              {ablationInput && requestParts.positivePrompt ? (
+                <AblationPanel
+                  input={ablationInput}
+                  positivePrompt={requestParts.positivePrompt}
+                  pointsPerRun={preview.estimatedPoints}
+                />
+              ) : null}
 
               <details style={{ marginTop: 12 }}>
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>開發者資料：完整請求 JSON</summary>
@@ -311,6 +329,7 @@ export function AiUnderstandingPanel({
                     {review.data.parseMode === "repaired" ? "・已自動修復回覆格式" : ""}
                     {review.data.parseMode === "text_fallback" ? "・已保留文字結論" : ""}
                   </Meta>
+                  <LlmIntrospectionView introspection={review.data.introspection} />
                   {review.data.review.warnings.map((warning) => (
                     <p key={warning.code} style={{ margin: "5px 0" }}>
                       <b>{warning.title}</b>：{warning.detail}

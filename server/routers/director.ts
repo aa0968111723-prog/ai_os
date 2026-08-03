@@ -51,6 +51,16 @@ const sceneSplitSchema = z
   .min(1)
   .max(12);
 
+/**
+ * 模型輸出專用：**不接受** 已解析的 *Ids。
+ * 若讓模型能直接吐 uuid，freezeCards 會原樣沿用、繞過代號白名單，
+ * 任意 uuid 就會寫進分鏡（專案歸屬只剩生成時那一關才擋）。
+ * 已解析的 id 只有「我們自己凍結後保存的 preparedScenes」才可信。
+ */
+const sceneSplitModelSchema = z.array(
+  sceneSplitSchema.element.omit({ characterIds: true, scenePresetIds: true, propIds: true }),
+).min(1).max(12);
+
 export type SplitSceneDraft = z.infer<typeof sceneSplitSchema>[number];
 
 /** LLM 回傳的執行期驗證：JSON.parse 成功但形狀不對（title 是物件、缺欄位）一樣會弄崩前端，必須 safeParse */
@@ -324,7 +334,7 @@ ${script.slice(0, SCRIPT_MODEL_BUDGET)}
     const match = output.match(/\[[\s\S]*\]/);
     let parsed: ReturnType<typeof sceneSplitSchema.safeParse> | null = null;
     try {
-      parsed = match ? sceneSplitSchema.safeParse(JSON.parse(match[0])) : null;
+      parsed = match ? sceneSplitModelSchema.safeParse(JSON.parse(match[0])) : null;
     } catch {
       parsed = null; // JSON.parse 失敗＝模型輸出壞掉，與逾時/DB 錯誤分開歸類（invalid_model_output）
     }

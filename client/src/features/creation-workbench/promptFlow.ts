@@ -1,5 +1,5 @@
 import type { AiWarning } from "@shared/aiTrace";
-import { CARD_ANCHOR_MARKERS, WORLDVIEW_INJECT_MARKER } from "@shared/worldview";
+import { splitPromptSections, type PromptSectionKey } from "@shared/promptSections";
 
 /**
  * 「AI 會怎麼理解？」的提示詞圖解資料層。
@@ -14,14 +14,7 @@ import { CARD_ANCHOR_MARKERS, WORLDVIEW_INJECT_MARKER } from "@shared/worldview"
  * 前端不自己再寫一次字串——否則兩邊遲早漂移，圖解就會騙人。
  */
 
-export type PromptFlowNodeKey =
-  | "instruction"
-  | "background"
-  | "character"
-  | "scene"
-  | "prop"
-  | "negative"
-  | "model";
+export type PromptFlowNodeKey = "instruction" | PromptSectionKey | "negative" | "model";
 
 export interface PromptFlowField {
   /** 欄位名（例：調性、視覺風格、安捷）。拆不出名稱時不給，整段當內容。 */
@@ -41,47 +34,13 @@ export interface PromptFlowNode {
   fields: PromptFlowField[];
   /** 段落原文（欄位拆不出來時的回退，也供「原文」檢視比對） */
   text: string;
+  /**
+   * 這一段在送出字串裡真正佔的原文，含段落標記本身。
+   * 注意力預算要算的是**模型實際收到的字**，標記（「[專案背景] 」）也吃 token，
+   * 用 text 會低估。
+   */
+  raw: string;
 }
-
-interface SectionDef {
-  key: Extract<PromptFlowNodeKey, "background" | "character" | "scene" | "prop">;
-  marker: string;
-  title: string;
-  role: string;
-  hint: string;
-}
-
-/** 段落定義。marker 一律取自 shared，不在前端重寫字串。 */
-const SECTIONS: readonly SectionDef[] = [
-  {
-    key: "background",
-    marker: WORLDVIEW_INJECT_MARKER,
-    title: "專案背景",
-    role: "自動帶入",
-    hint: "專案世界觀的調性、風格與核心訊息，每次生成都會自動接上。",
-  },
-  {
-    key: "character",
-    marker: CARD_ANCHOR_MARKERS[0],
-    title: "角色定裝",
-    role: "外觀鎖定",
-    hint: "角色卡的外觀錨點，讓同一個人跨鏡頭不變樣。",
-  },
-  {
-    key: "scene",
-    marker: CARD_ANCHOR_MARKERS[1],
-    title: "場景設定",
-    role: "光影鎖定",
-    hint: "場景卡的色板與光線，維持同一場景的光影一致。",
-  },
-  {
-    key: "prop",
-    marker: CARD_ANCHOR_MARKERS[2],
-    title: "素材設定",
-    role: "材質鎖定",
-    hint: "素材卡的外觀材質，讓同一件道具跨鏡頭不變樣。",
-  },
-];
 
 /** 段落內的項目分隔：世界觀用 `|`、定裝卡列表用 `；` */
 const ENTRY_SEPARATOR = /[|｜；]/;
@@ -111,16 +70,11 @@ export function parsePromptFields(text: string): PromptFlowField[] {
 /**
  * 正向提示詞 → 流程節點。
  * 第一個節點永遠是使用者自己打的指令（段落標記之前的部分）；
- * 之後依標記在字串裡的實際出現順序排列——順序照實反映伺服器疊加的結果，
- * 不照前端自己的假設。
+ * 之後依標記在字串裡的實際出現順序排列——切分本身由 shared/promptSections 負責，
+ * 與伺服器組裝、消融實測共用同一份，前端不自己再切一次。
  */
 export function buildPromptFlow(positivePrompt: string): PromptFlowNode[] {
-  const prompt = positivePrompt ?? "";
-  const hits = SECTIONS.map((section) => ({ section, index: prompt.indexOf(section.marker) }))
-    .filter((hit) => hit.index >= 0)
-    .sort((a, b) => a.index - b.index);
-
-  const head = (hits.length ? prompt.slice(0, hits[0].index) : prompt).trim();
+  const { head, sections } = splitPromptSections(positivePrompt);
   const nodes: PromptFlowNode[] = [];
   if (head) {
     nodes.push({
@@ -130,24 +84,20 @@ export function buildPromptFlow(positivePrompt: string): PromptFlowNode[] {
       hint: "你在創作台輸入的內容，是整段提示詞的起點。",
       fields: [],
       text: head,
+      raw: head,
     });
   }
-
-  hits.forEach((hit, index) => {
-    const start = hit.index + hit.section.marker.length;
-    const end = index + 1 < hits.length ? hits[index + 1].index : prompt.length;
-    const text = prompt.slice(start, end).trim();
-    if (!text) return;
+  for (const section of sections) {
     nodes.push({
-      key: hit.section.key,
-      title: hit.section.title,
-      role: hit.section.role,
-      hint: hit.section.hint,
-      fields: parsePromptFields(text),
-      text,
+      key: section.def.key,
+      title: section.def.title,
+      role: section.def.role,
+      hint: section.def.hint,
+      fields: parsePromptFields(section.text),
+      text: section.text,
+      raw: section.raw,
     });
-  });
-
+  }
   return nodes;
 }
 
@@ -188,6 +138,8 @@ const WARNING_NODE: Record<string, PromptFlowNodeKey> = {
   multi_reference_unsupported: "character",
   continuity_references_capped: "character",
   negative_prompt_unsupported: "negative",
+  // 超窗口是整串的問題，不屬於任何單一段落：留在 general，節點上另有 token 徽章
+  
   manual_override: "instruction",
 };
 

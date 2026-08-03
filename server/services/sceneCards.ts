@@ -96,15 +96,19 @@ export function resolveSceneCardRefs(
   };
 }
 
-/** 空陣列存 null（與 generations 同口徑：null＝沒指定，[]會被誤讀成「指定了空的」） */
+/**
+ * 空陣列存 null（與 generations 同口徑：null＝沒指定，[]會被誤讀成「指定了空的」）。
+ * 同時去重：直呼 API 可以送重複 id，存進去會讓同一張卡在 UI 與提示詞裡出現兩次。
+ */
 export function sceneCardColumns(resolved: {
   characterIds: string[];
   scenePresetIds: string[];
   propIds: string[];
 }): { characterIds: string[] | null; scenePresetIds: string[] | null; propIds: string[] | null } {
+  const uniq = (ids: string[]) => [...new Set(ids)];
   return {
-    characterIds: resolved.characterIds.length ? resolved.characterIds : null,
-    scenePresetIds: resolved.scenePresetIds.length ? resolved.scenePresetIds : null,
-    propIds: resolved.propIds.length ? resolved.propIds : null,
+    characterIds: resolved.characterIds.length ? uniq(resolved.characterIds) : null,
+    scenePresetIds: resolved.scenePresetIds.length ? uniq(resolved.scenePresetIds) : null,
+    propIds: resolved.propIds.length ? uniq(resolved.propIds) : null,
   };
 }

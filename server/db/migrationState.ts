@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { MIGRATION_REVISIONS } from "./migrationRevisions";
 import * as schema from "./schema";
 
 export const MIGRATIONS_SCHEMA = "drizzle";
@@ -142,76 +143,18 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
 ] as const;
 
 /**
- * Content hashes of migrations whose SQL was corrected after release.
+ * True when `hash` is a retired-but-equivalent revision of `tag`: a hash the
+ * file carried before a correction that MIGRATION_REVISIONS records as provably
+ * equivalent on every database where the original succeeded.
  *
- * The ledger stores the sha256 of the migration file, so correcting a released
- * file would otherwise make every database that already applied the original
- * look like tampered history. A hash may only be listed here when the corrected
- * file is provably equivalent on every database where the original succeeded,
- * so accepting it cannot hide real divergence.
- *
- * 0005 created its unique indexes without first removing the duplicate rows
- * that made them fail on live data. Wherever the original succeeded there were
- * no duplicates, so the de-duplication added to the corrected file deletes
- * nothing and both versions leave exactly the same schema and rows.
- *
- * 0004 created its indexes without IF NOT EXISTS. Wherever the original
- * succeeded the indexes did not yet exist, so adding the guard produces the
- * same two indexes by the same definitions.
- *
- * 0018 packed two statements into one file without the `--> statement-breakpoint`
- * separator every other multi-statement migration uses, and wrote the index
- * columns with spaces after the commas. Both are purely textual: the runner
- * executes the same ALTER TABLE and CREATE INDEX in the same order either way,
- * and `("a", "b")` and `("a","b")` are the same index to PostgreSQL. The
- * correction only lets the bridge compare the file against a generated drift
- * plan, which emits neither the separator nor the spaces.
- *
- * 0025 created the props table without the owner_kind/owner_id columns, which
- * 0029 then added. Both are in the same bridge batch, and the bridge compares a
- * table created inside that batch against the drift plan's whole-table DDL — so
- * the columns had to move into 0025's CREATE TABLE (the rule 0022 already
- * records). 0029 keeps the guarded ALTERs for databases that applied the
- * original 0025, so both orders converge on the same table; wherever the
- * original succeeded, re-running the corrected file creates the same table with
- * the columns 0029 would have added anyway.
- *
- * 0029 only had its leading comment block rewritten when the owner columns moved
- * into 0025's CREATE TABLE. The executed statements are byte-identical guarded
- * ALTER/CREATE INDEX, so a database that applied the original reaches exactly
- * the same schema; only the file's sha256 changed.
- *
- * 0023 wrote its partial index predicate with a bare column name
- * (`WHERE land_state = 'pending'`) while every other partial index in the tree
- * qualifies it (`WHERE "assets"."land_state" = 'pending'`, as 0001 does and as
- * the generated drift plan emits). PostgreSQL resolves both to the same
- * predicate on the same index — the correction only lets the bridge match the
- * file against the drift plan textually.
+ * Every revision but the last is superseded by definition, so the accepted set
+ * is derived from the same table the invariant tests pin the files against.
+ * Nothing has to be registered by hand at correction time — an omission there is
+ * what left 0029 reading as tampered history and stopped the service booting.
  */
-export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly string[]>> = {
-  "0004_query_indexes": [
-    "8ce681fac43c4f65210542bd0f775ff49b30967b4188953a54795755b9e9f1cf",
-  ],
-  "0005_membership_read_uniqueness": [
-    "30b344a7e264c48e4b62af11cb689da353b7f4846f6374a0d33f27aa38cc1337",
-  ],
-  "0018_knowledge_pinned": [
-    "cddbd89830cce4850f83515692724cb507a4c52afc28941633fc1f882e907e82",
-  ],
-  "0023_asset_durability": [
-    "150e3024f1830ef05f65469164b99e3b5f33199408802ff7df125faef71679e5",
-  ],
-  "0025_project_props": [
-    "d93eaefc4613d71f61a3b31a8cb7620ad4080d4c495c103047486a1cc2d4a01a",
-  ],
-  "0029_prop_ownership": [
-    "ec2496a3bce3cd11dcf1a4d3b9f65af51e52b2695defb38f5ffefe8a88343083",
-  ],
-};
-
-/** True when `hash` is a retired-but-equivalent content hash for `tag`. */
 export function isSupersededMigrationHash(tag: string, hash: string): boolean {
-  return SUPERSEDED_MIGRATION_HASHES[tag]?.includes(hash) ?? false;
+  const revisions = MIGRATION_REVISIONS[tag];
+  return revisions !== undefined && revisions.slice(0, -1).includes(hash);
 }
 
 export interface LegacyAdoptionCheck {

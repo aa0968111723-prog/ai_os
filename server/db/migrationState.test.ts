@@ -8,14 +8,15 @@ import {
   isReRunnableCreateStatement,
   isReviewedLandingBackfillStatement,
   isRowDeduplicationStatement,
+  isSupersededMigrationHash,
   LEGACY_ADOPTION_PENDING_TAGS,
   LEGACY_ADOPTION_THROUGH_TAG,
   loadMigrationManifest,
   redactDatabaseTarget,
-  SUPERSEDED_MIGRATION_HASHES,
   verifyLegacyAdoptionBridge,
   type MigrationLedgerRow,
 } from "./migrationState";
+import { MIGRATION_REVISIONS } from "./migrationRevisions";
 
 const temporaryDirectories: string[] = [];
 
@@ -63,13 +64,13 @@ describe("migration ledger classification", () => {
 
   it("still trusts a database that applied a superseded revision of a migration", () => {
     const { manifest, rows } = ledgerRows();
-    const [tag, hashes] = Object.entries(SUPERSEDED_MIGRATION_HASHES)[0]!;
+    const [tag, revisions] = Object.entries(MIGRATION_REVISIONS).find(([, list]) => list.length > 1)!;
     const entry = manifest.entries.find((candidate) => candidate.tag === tag)!;
     // The corrected file must actually differ, otherwise this guard is vacuous.
-    expect(hashes).not.toContain(entry.hash);
+    expect(revisions[0]).not.toBe(entry.hash);
 
     const superseded = rows.map((row) =>
-      row.created_at === String(entry.createdAt) ? { ...row, hash: hashes[0]! } : row,
+      row.created_at === String(entry.createdAt) ? { ...row, hash: revisions[0]! } : row,
     );
     expect(classifyMigrationState(["users"], true, superseded, manifest).kind).toBe("ready");
 
@@ -77,6 +78,26 @@ describe("migration ledger classification", () => {
       row.created_at === String(entry.createdAt) ? { ...row, hash: "not-a-known-revision" } : row,
     );
     expect(classifyMigrationState(["users"], true, unrelated, manifest).kind).toBe("invalid");
+  });
+
+  /**
+   * The live databases had applied 0029 before 0025's correction rewrote its
+   * comment header, and only the raw file is hashed — so every one of them read
+   * as tampered history and the service refused to boot. Pin the revision that
+   * was actually deployed: the statements never changed, so a ledger carrying it
+   * is trustworthy, and dropping it from the table would break booting again.
+   */
+  it("still trusts the databases that applied 0029 before its comment-only correction", () => {
+    const deployed = "ec2496a3bce3cd11dcf1a4d3b9f65af51e52b2695defb38f5ffefe8a88343083";
+    expect(isSupersededMigrationHash("0029_prop_ownership", deployed)).toBe(true);
+
+    const { manifest, rows } = ledgerRows();
+    const entry = manifest.entries.find((candidate) => candidate.tag === "0029_prop_ownership")!;
+    expect(entry.hash).not.toBe(deployed);
+    const asDeployed = rows.map((row) =>
+      row.created_at === String(entry.createdAt) ? { ...row, hash: deployed } : row,
+    );
+    expect(classifyMigrationState(["users"], true, asDeployed, manifest).kind).toBe("ready");
   });
 });
 
@@ -125,6 +146,42 @@ describe("migration manifest validation", () => {
         .map((statement) => `${entry.tag}: ${statement.slice(0, 80)}`),
     );
     expect(offenders).toEqual([]);
+  });
+
+  /**
+   * Editing a released migration — even by one comment byte, which is how 0029
+   * broke — changes the hash the ledger recorded when it was applied, so every
+   * database that already ran it reads as tampered history and the service stops
+   * booting. Nothing used to notice at review time. Pin each file to the last
+   * revision recorded for it: correcting one now fails here until the new hash is
+   * appended, and appending it is exactly what retires the previous hash, so the
+   * accepted-revision set can never fall behind the files again.
+   */
+  it("pins every released migration to the last revision recorded for it", () => {
+    const manifest = loadMigrationManifest();
+    const drifted = manifest.entries
+      .filter((entry) => MIGRATION_REVISIONS[entry.tag]?.at(-1) !== entry.hash)
+      .map((entry) => `${entry.tag}: 登記 ${MIGRATION_REVISIONS[entry.tag]?.at(-1) ?? "(缺)"}，實際 ${entry.hash}`);
+    expect(drifted).toEqual([]);
+
+    const stale = Object.keys(MIGRATION_REVISIONS).filter(
+      (tag) => !manifest.entries.some((entry) => entry.tag === tag),
+    );
+    expect(stale).toEqual([]);
+  });
+
+  /**
+   * A revision list is read as "oldest first, current last", so a hash appended
+   * in the wrong place would quietly mark the current file as superseded and
+   * accept a ledger that no longer matches anything on disk.
+   */
+  it("records migration revisions oldest first, with no repeats", () => {
+    for (const [tag, revisions] of Object.entries(MIGRATION_REVISIONS)) {
+      expect(revisions.length, tag).toBeGreaterThan(0);
+      expect(new Set(revisions).size, tag).toBe(revisions.length);
+      expect(revisions.every((hash) => /^[0-9a-f]{64}$/.test(hash)), tag).toBe(true);
+      expect(isSupersededMigrationHash(tag, revisions.at(-1)!), tag).toBe(false);
+    }
   });
 
   it("never includes a database password in its display target", () => {
@@ -300,14 +357,6 @@ describe("pending 批次內新建的表，欄位必須寫在 CREATE TABLE 裡", 
       }
     }
     expect(offenders).toEqual([]);
-  });
-
-  it("已釋出的 migration 若改過檔案，舊 hash 必須登記為 superseded", () => {
-    // 0025／0029 都在合併後才修正過內容——沒登記舊 hash，已套用的資料庫會被判成竄改而拒絕啟動
-    const corrected = ["0025_project_props", "0029_prop_ownership"];
-    for (const tag of corrected) {
-      expect(SUPERSEDED_MIGRATION_HASHES[tag]?.length ?? 0, `${tag} 缺少舊 hash`).toBeGreaterThan(0);
-    }
   });
 
   it("認得出這批表確實被掃到（規則沒有因為 regex 失效而空轉）", () => {

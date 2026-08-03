@@ -394,10 +394,17 @@ function SceneRow({
                       sceneId: s.id,
                       modelId: genModel?.id ?? DEFAULT_MODEL,
                       clientRequestId: genRequestId.current,
+                      // 送畫面上顯示的那一份（與預覽同源）；伺服器仍會再解析一次當守門
                       // 上限與 generation.submit 同一份 shared 常數：超勾取前幾張，不讓逐格生成整個被 zod 擋下
-                      characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
-                      scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
-                      propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
+                      characterIds: effectiveCards.characterIds.length
+                        ? effectiveCards.characterIds.slice(0, MAX_GENERATE_CHARACTERS)
+                        : undefined,
+                      scenePresetIds: effectiveCards.scenePresetIds.length
+                        ? effectiveCards.scenePresetIds.slice(0, MAX_GENERATE_SCENE_PRESETS)
+                        : undefined,
+                      propIds: effectiveCards.propIds.length
+                        ? effectiveCards.propIds.slice(0, MAX_GENERATE_PROPS)
+                        : undefined,
                     })
                   }
                 >
@@ -949,6 +956,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
               canEdit={canEdit}
               charIds={charIds}
               sceneIds={sceneIds}
+              propIds={propIds}
               onClose={() => {
                 setStudioScene(null);
                 // 在工作室換過「重畫」模型的話，列表的「生成這一格」跟著用（同一把鑰匙）

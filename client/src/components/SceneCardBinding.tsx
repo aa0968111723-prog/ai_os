@@ -70,7 +70,6 @@ export function SceneCardBinding({
             charIds={charIds}
             sceneIds={sceneIds}
             propIds={propIds}
-            active={open}
           />
         ) : (
           <span title="這一鏡沒指定卡片，出圖時沿用生成台當下的勾選">這一鏡：沿用生成台勾選</span>
@@ -147,19 +146,16 @@ function BoundSummary({
   charIds,
   sceneIds,
   propIds,
-  active,
 }: {
   projectId: string;
   charIds: string[];
   sceneIds: string[];
   propIds: string[];
-  active: boolean;
 }) {
   // 摘要要顯示名字就得讀清單；面板收合時也要（否則只看得到數量）——與專案頁同快取鍵，不額外打 API
   const characters = trpc.characters.list.useQuery({ projectId });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId });
   const props = trpc.props.list.useQuery({ projectId });
-  void active;
   const names = [
     ...charIds.map((id) => characters.data?.find((c) => c.id === id)?.name),
     ...sceneIds.map((id) => scenePresets.data?.find((s) => s.id === id)?.name),
