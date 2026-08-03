@@ -1,6 +1,7 @@
 /**
  * 即時協作 WebSocket（任務 D）：presence、彩色游標、編輯指示、粗粒度「有東西變了」通知。
- * 路徑 /ws?projectId=<uuid>；由 index.ts 呼叫 attachRealtime(httpServer) 掛上。
+ * 路徑 /ws?projectId=<uuid> 或 /ws?groupId=<uuid>；由 index.ts 呼叫 attachRealtime(httpServer) 掛上。
+ * 專案房（p:）保留高精度錨點／游標；組房（g:）讓全組成員在 Launchpad 等頁互相看到 presence 與游標。
  * 協定與 client/src/realtime.tsx 嚴格對應——兩邊要一起改。
  */
 import type { IncomingMessage, Server } from "node:http";
@@ -54,7 +55,7 @@ interface Client {
   lastInvalidateAt: number;
 }
 
-/** 房間：projectId → 連線集合（同一 user 開兩個分頁＝兩個 Client，presence 去重顯示一人） */
+/** 房間：roomKey（p:projectId 或 g:groupId）→ 連線集合（同一 user 開兩個分頁＝兩個 Client，presence 去重顯示一人） */
 const rooms = new Map<string, Set<Client>>();
 
 /** #7 全域連線總數（join +1／close -1）：全域上限檢查 O(1)，不必每次遍歷所有房間累加 */
@@ -106,7 +107,7 @@ function originAllowed(origin: string | undefined): boolean {
     const v = raw?.trim();
     if (!v) return;
     try {
-      allowed.add(new URL(/^https?:\/\//.test(v) ? v : `https://${v}`).hostname);
+      allowed.add(new URL(/^https?:\/\/.test(v) ? v : `https://${v}`).hostname);
     } catch {
       /* 壞值：忽略此一項 */
     }
@@ -145,16 +146,14 @@ function broadcast(room: Set<Client>, msg: unknown, except?: Client): void {
 }
 
 /**
- * upgrade 階段驗證：session cookie → 使用者 → 專案存在且屬於使用者的組（開發者放行）。
+ * upgrade 階段驗證：session cookie → 使用者 → 專案存在且屬於使用者的組（或純 groupId 成員）。
  * 任一步不合法回 null（呼叫端直接 socket.destroy()，不進 WS 握手）。
  */
 async function authorize(
   req: IncomingMessage,
   projectId: string | null,
-): Promise<{ projectId: string; userId: string; name: string; tokenHash: string; groupId: string } | null> {
-  // 先擋非 uuid：避免拿使用者輸入去查 uuid 欄位時 pg 直接丟型別錯誤
-  if (!projectId || !UUID_RE.test(projectId)) return null;
-  // parseCookies 只讀 headers.cookie——upgrade 的 IncomingMessage 有同欄位，型別上以 Request 視之即可
+  groupId: string | null,
+): Promise<{ roomKey: string; userId: string; name: string; tokenHash: string; groupId: string } | null> {
   const token = parseCookies(req as Request)[COOKIE_NAME];
   if (!token) return null;
   const tokenHash = sha256(token);
@@ -165,10 +164,20 @@ async function authorize(
   if (!session) return null;
   const auth = await loadAuthState(session.userId);
   if (sessionGate(auth) !== null || !auth) return null;
-  const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
-  if (!project) return null;
-  if (!auth.user.isSuperAdmin && !auth.groups.some((g) => g.groupId === project.groupId)) return null;
-  return { projectId, userId: auth.user.id, name: auth.user.name, tokenHash, groupId: project.groupId };
+
+  if (projectId) {
+    if (!UUID_RE.test(projectId)) return null;
+    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
+    if (!project) return null;
+    if (!auth.user.isSuperAdmin && !auth.groups.some((g) => g.groupId === project.groupId)) return null;
+    return { roomKey: `p:${projectId}`, userId: auth.user.id, name: auth.user.name, tokenHash, groupId: project.groupId };
+  }
+  if (groupId) {
+    if (!UUID_RE.test(groupId)) return null;
+    if (!auth.user.isSuperAdmin && !auth.groups.some((g) => g.groupId === groupId)) return null;
+    return { roomKey: `g:${groupId}`, userId: auth.user.id, name: auth.user.name, tokenHash, groupId };
+  }
+  return null;
 }
 
 /**
@@ -199,13 +208,13 @@ async function revalidate(c: Client): Promise<void> {
   }
 }
 
-function join(ws: WebSocket, ctx: { projectId: string; userId: string; name: string; tokenHash: string; groupId: string }): void {
+function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: string; tokenHash: string; groupId: string }): void {
   // 提早掛上 no-op error handler：無論是超限提早 close，或後續任何連線錯誤，都不讓它變成 unhandled
   ws.on("error", () => {
     /* close 事件會接手清理 */
   });
 
-  const existing = rooms.get(ctx.projectId);
+  const existing = rooms.get(ctx.roomKey);
   // #7 上限檢查（加入房間前）：全域 → 單房 → 同一 user 單房，任一超限即握手後 close(4429) 不入房。
   let sameUser = 0;
   if (existing) for (const c of existing) if (c.userId === ctx.userId) sameUser++;
@@ -221,7 +230,7 @@ function join(ws: WebSocket, ctx: { projectId: string; userId: string; name: str
   let room = existing;
   if (!room) {
     room = new Set();
-    rooms.set(ctx.projectId, room);
+    rooms.set(ctx.roomKey, room);
   }
   const client: Client = {
     ws,
@@ -307,7 +316,7 @@ function join(ws: WebSocket, ctx: { projectId: string; userId: string; name: str
       userConnCount.set(client.userId, remaining);
     }
     if (theRoom.size === 0) {
-      rooms.delete(ctx.projectId);
+      rooms.delete(ctx.roomKey);
     } else {
       broadcast(theRoom, { type: "presence", users: dedupeUsers(theRoom) });
     }
@@ -353,7 +362,7 @@ export function attachRealtime(server: Server): void {
       socket.destroy();
       return;
     }
-    authorize(req, url.searchParams.get("projectId"))
+    authorize(req, url.searchParams.get("projectId"), url.searchParams.get("groupId"))
       .then((ctx) => {
         if (!ctx || isShuttingDown()) {
           socket.destroy();
