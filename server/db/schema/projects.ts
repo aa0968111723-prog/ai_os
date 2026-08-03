@@ -177,6 +177,14 @@ export const scenes = pgTable("scenes", {
   prompt: text("prompt"),
   /** 這一幕的配音詞／旁白（拆腳本時由 AI 分句；固定素材模式為原音逐句） */
   voiceover: text("voiceover"),
+  /**
+   * 這一鏡要用哪些設定卡（拆分鏡時由 AI 指派，之後可人工改）。
+   * 卡片本身仍是專案層的設定庫，這裡只存「引用哪幾張」——同一張安倢不會被複製 12 份。
+   * 三欄皆空＝這一鏡沒指定，逐鏡生成沿用生成台當下的勾選（見 shared/sceneCards.ts）。
+   */
+  characterIds: jsonb("character_ids").$type<string[]>(),
+  scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
+  propIds: jsonb("prop_ids").$type<string[]>(),
   /** 軟刪除（回收桶）：非 null＝已丟進回收桶（保留使用者手打的 prompt/voiceover，可還原）。
    *  所有分鏡讀取（列表／移動／重排／匯出）都以 isNull(deletedAt) 過濾。 */
   deletedAt: timestamp("deleted_at"),

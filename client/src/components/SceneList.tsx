@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
+import { SceneCardBinding } from "./SceneCardBinding";
+import { ScenePromptPreview } from "./ScenePromptPreview";
+import { resolveSceneCards } from "@shared/sceneCards";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 // tierLabel／estimatePoints 隨「逐格生成模型」選單一起移進單格工作室，這裡不再需要
 import { getModel, MODELS } from "@shared/models";
 import { REWORK_TAGS, parseEpisodeTitle, reworkTagNeedsNote, type ReworkTag } from "@shared/seriesTemplate";
@@ -77,6 +80,10 @@ type Scene = {
   narrationUrl?: string | null;
   /** 該格若有進行中的「配音」生成，回 queued/running；無則 null。 */
   pendingVoiceStatus?: string | null;
+  /** 逐鏡卡片綁定：這一鏡指定要用的設定卡（皆空＝沿用生成台勾選） */
+  characterIds?: string[] | null;
+  scenePresetIds?: string[] | null;
+  propIds?: string[] | null;
 };
 
 /**
@@ -193,8 +200,10 @@ function SceneRow({
   meLoading,
   genModelId,
   onOpenStudio,
+  projectId,
   charIds,
   sceneIds,
+  propIds,
   invalidate,
   move,
   remove,
@@ -216,9 +225,12 @@ function SceneRow({
   /** 開這一格的單格工作室。工作室由 SceneList 統一渲染，不掛在列內——`.gen-row` 帶
    *  content-visibility:auto（paint containment），會成為 fixed 定位的包含區塊，把全螢幕 modal 裁掉。 */
   onOpenStudio: () => void;
-  /** 生成台勾選的角色/場景卡：就地生成也注入同一套錨點——逐鏡出圖與生成台畫風一致 */
+  /** 逐鏡卡片綁定面板要用（讀本專案的卡片清單） */
+  projectId: string;
+  /** 生成台勾選的角色/場景/素材卡：只在「這一鏡沒指定自己的卡片」時當 fallback 用 */
   charIds?: string[];
   sceneIds?: string[];
+  propIds?: string[];
   invalidate: () => void;
   move: ReturnType<typeof trpc.scenes.move.useMutation>;
   remove: ReturnType<typeof trpc.scenes.remove.useMutation>;
@@ -254,6 +266,8 @@ function SceneRow({
   const isVoicing = s.pendingVoiceStatus === "queued" || s.pendingVoiceStatus === "running";
   const hasVoiceover = (s.voiceover ?? "").trim() !== "";
   const hasPrompt = (s.prompt ?? "").trim() !== "";
+  // 這一鏡實際會用的卡片（有綁用它、沒綁沿用生成台勾選）——預覽與出圖看的是同一份
+  const effectiveCards = resolveSceneCards(s, { characterIds: charIds, scenePresetIds: sceneIds, propIds });
   const rowError = update.error ?? generate.error;
   // 快速出圖的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
   const genModel = getModel(genModelId) ?? getModel(DEFAULT_MODEL);
@@ -356,6 +370,9 @@ function SceneRow({
           </Meta>
         )}
 
+        {/* 逐鏡卡片綁定：這一鏡用誰、在哪、拿什麼——沒指定就沿用生成台勾選 */}
+        <SceneCardBinding projectId={projectId} scene={s} canEdit={canEdit} onSaved={invalidate} />
+
         {rowError && <p className="error" role="alert">存檔／生成失敗：{rowError.message}</p>}
 
         {/* 動作列：一顆依狀態決定的主要動作＋固定的次要入口（單格工作室／下載／討論）。
@@ -366,6 +383,7 @@ function SceneRow({
               <Button size="sm" variant="primary" disabled>生成中…</Button>
             ) : !s.assetId ? (
               hasPrompt ? (
+                <>
                 <ConfirmButton
                   triggerClassName="primary btn-sm"
                   triggerTitle="用這一格的提示詞快速出圖，完成後自動回填縮圖；要換模型請開單格工作室"
@@ -376,9 +394,17 @@ function SceneRow({
                       sceneId: s.id,
                       modelId: genModel?.id ?? DEFAULT_MODEL,
                       clientRequestId: genRequestId.current,
+                      // 送畫面上顯示的那一份（與預覽同源）；伺服器仍會再解析一次當守門
                       // 上限與 generation.submit 同一份 shared 常數：超勾取前幾張，不讓逐格生成整個被 zod 擋下
-                      characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
-                      scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
+                      characterIds: effectiveCards.characterIds.length
+                        ? effectiveCards.characterIds.slice(0, MAX_GENERATE_CHARACTERS)
+                        : undefined,
+                      scenePresetIds: effectiveCards.scenePresetIds.length
+                        ? effectiveCards.scenePresetIds.slice(0, MAX_GENERATE_SCENE_PRESETS)
+                        : undefined,
+                      propIds: effectiveCards.propIds.length
+                        ? effectiveCards.propIds.slice(0, MAX_GENERATE_PROPS)
+                        : undefined,
                     })
                   }
                 >
@@ -386,6 +412,16 @@ function SceneRow({
                     <Icon name="Sparkles" /> 生成這一格{genPoints != null ? `（約 −${genPoints} 點）` : ""}
                   </span>
                 </ConfirmButton>
+                {/* 先預覽：出圖前看實際會送出什麼（不扣點）——與送出走同一支組裝器，預覽不會說謊 */}
+                <ScenePromptPreview
+                  projectId={projectId}
+                  modelId={genModel?.id ?? DEFAULT_MODEL}
+                  prompt={s.prompt ?? ""}
+                  characterIds={effectiveCards.characterIds}
+                  scenePresetIds={effectiveCards.scenePresetIds}
+                  propIds={effectiveCards.propIds}
+                />
+                </>
               ) : (
                 <Button size="sm" variant="primary" title="這一格還沒有提示詞——開單格工作室寫提示詞、出第一版畫面" onClick={onOpenStudio}>
                   <Icon name="Sparkles" size={13} /> 寫提示詞出圖
@@ -521,7 +557,7 @@ const PIPELINE_STAGES: Array<{ key: StageKey; label: string }> = [
 /** 分鏡・交付：排順序＋逐格主要動作（A）→ 流程引導（C）→ 交付中心（B）。
  *  深改（提示詞/配音/換模型/版本）集中在單格工作室；審批三態機與打包照舊。
  *  canEdit=false（2.3 檢視者）：隱藏所有寫入控制，瀏覽與下載照常 */
-export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneIds, projectTitle }: { projectId: string; isLeader: boolean; canEdit?: boolean; charIds?: string[]; sceneIds?: string[]; /** 專案標題——只用來判斷「這是不是母版系列的一集」（#255 退回標籤） */ projectTitle?: string }) {
+export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneIds, propIds, projectTitle }: { projectId: string; isLeader: boolean; canEdit?: boolean; charIds?: string[]; sceneIds?: string[]; propIds?: string[]; /** 專案標題——只用來判斷「這是不是母版系列的一集」（#255 退回標籤） */ projectTitle?: string }) {
   const utils = trpc.useUtils();
   // 與 App 端同 key 吃快取：只為了「auth.me 還沒回來前先不畫操作鈕」，避免組長進頁時按鈕先缺後補的閃爍
   const me = trpc.auth.me.useQuery();
@@ -781,8 +817,10 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
                   canEdit={canEdit}
                   meLoading={me.isLoading}
                   genModelId={genModelId}
+                  projectId={projectId}
                   charIds={charIds}
                   sceneIds={sceneIds}
+                  propIds={propIds}
                   invalidate={invalidate}
                   move={move}
                   remove={remove}
@@ -918,6 +956,7 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
               canEdit={canEdit}
               charIds={charIds}
               sceneIds={sceneIds}
+              propIds={propIds}
               onClose={() => {
                 setStudioScene(null);
                 // 在工作室換過「重畫」模型的話，列表的「生成這一格」跟著用（同一把鑰匙）

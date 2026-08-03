@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { trpc } from "../api";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 import { MODELS, estimatePoints, getModel, tierLabel } from "@shared/models";
 import { isSceneRefineModel, isSceneRegenModel, refineGroupOf, type SceneVersion } from "@shared/sceneVersions";
 import { Icon } from "./Icon";
@@ -71,6 +71,7 @@ export function SceneStudio({
   canEdit,
   charIds,
   sceneIds,
+  propIds,
   onClose,
   onChanged,
   isLeader = false,
@@ -90,6 +91,8 @@ export function SceneStudio({
   /** 生成台勾選的角色／場景卡：工作室的重生與修正也注入同一套錨點，畫風不分岔 */
   charIds?: string[];
   sceneIds?: string[];
+  /** 素材設定卡：與角色／場景同口徑，只在這一鏡沒有自己的綁定時當 fallback */
+  propIds?: string[];
   onClose: () => void;
   /** 這一格被改動（存檔／送生成／切版本）時通知外層刷新分鏡列 */
   onChanged: () => void;
@@ -487,6 +490,7 @@ export function SceneStudio({
                               clientRequestId: refineRequestId.current,
                               characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
                               scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
+                              propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                             })
                           }
                         >
@@ -544,6 +548,7 @@ export function SceneStudio({
                               clientRequestId: regenRequestId.current,
                               characterIds: charIds?.length ? charIds.slice(0, MAX_GENERATE_CHARACTERS) : undefined,
                               scenePresetIds: sceneIds?.length ? sceneIds.slice(0, MAX_GENERATE_SCENE_PRESETS) : undefined,
+                              propIds: propIds?.length ? propIds.slice(0, MAX_GENERATE_PROPS) : undefined,
                             })
                           }
                         >

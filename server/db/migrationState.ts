@@ -137,6 +137,9 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   // 0029：props 歸屬索引，外加給「已套用舊版 0025」資料庫補的兩個 nullable 欄位
   //       （皆 IF NOT EXISTS；欄位本體已在 0025 的 CREATE TABLE 內）。
   "0029_prop_ownership",
+  // 0030：scenes 加三個 nullable jsonb 卡片引用欄位（ADD COLUMN IF NOT EXISTS）；
+  //       scenes 是 baseline 既有表，用 ALTER 補欄位正是這裡的正解（不同於 0025 的 props）。
+  "0030_scene_cards",
 ] as const;
 
 /**
