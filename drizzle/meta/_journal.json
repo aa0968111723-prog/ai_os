@@ -232,6 +232,13 @@
       "when": 1786010400000,
       "tag": "0032_community_posts",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786011000000,
+      "tag": "0033_user_avatar",
+      "breakpoints": true
     }
   ]
 }
