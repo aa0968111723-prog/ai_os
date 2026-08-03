@@ -13,13 +13,15 @@ export type GenerationAblationMeta = {
 export type GenerationSourceMeta = {
   secondarySourceUrl?: string;
   ablation?: GenerationAblationMeta;
+  /** BYOK：這次送出用了使用者個人 fal key（輪詢 status 必須用同一把） */
+  usedUserKey?: boolean;
 };
 
 export function storeGenerationSourceMeta(
   providerParams: Record<string, unknown>,
   meta: GenerationSourceMeta,
 ): Record<string, unknown> {
-  if (!meta.secondarySourceUrl && !meta.ablation) return providerParams;
+  if (!meta.secondarySourceUrl && !meta.ablation && !meta.usedUserKey) return providerParams;
   return { ...providerParams, [GENERATION_SOURCE_META_KEY]: meta };
 }
 
@@ -45,5 +47,8 @@ export function splitGenerationSourceMeta(params: unknown): {
   const ablation = rawAblation && typeof rawAblation === "object" && !Array.isArray(rawAblation)
     ? (rawAblation as GenerationAblationMeta)
     : undefined;
-  return { providerParams, meta: { secondarySourceUrl, ablation } };
+  const usedUserKey = rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+    ? (rawMeta as Record<string, unknown>).usedUserKey === true
+    : false;
+  return { providerParams, meta: { secondarySourceUrl, ablation, ...(usedUserKey ? { usedUserKey: true } : {}) } };
 }
