@@ -1,0 +1,2 @@
+mcp-write-expansion restore marker 2026-08-03T15:55Z
+files: mcpWriteExpansion.ts mcp.ts auditWording.ts
