@@ -15,3 +15,4 @@ export * from "./integrations";
 export * from "./catalog";
 export * from "./storage";
 export * from "./aiTrace";
+export * from "./community";
