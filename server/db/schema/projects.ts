@@ -157,9 +157,7 @@ export const props = pgTable("props", {
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
-  // list 走 WHERE project_id ORDER BY created_at；建表當下就補索引，不等它慢了才修
   projectCreatedIdx: index("props_project_created_idx").on(t.projectId, t.createdAt),
-  // 自動帶入要用「這批主人有哪些物件」反查：每次視覺生成都會跑，補索引
   ownerIdx: index("props_owner_idx").on(t.projectId, t.ownerKind, t.ownerId),
 }));
 
@@ -171,27 +169,15 @@ export const scenes = pgTable("scenes", {
   durationSec: integer("duration_sec").notNull().default(5),
   status: text("status").notNull().default("todo"),
   assetId: uuid("asset_id"),
-  /** 這一幕的旁白音檔素材（逐鏡配音；null＝尚未生成配音） */
   narrationAssetId: uuid("narration_asset_id"),
-  /** 導演 AI 拆分鏡填入：這一幕的建議生成提示詞（草稿分鏡用，一鍵帶入生成台） */
   prompt: text("prompt"),
-  /** 這一幕的配音詞／旁白（拆腳本時由 AI 分句；固定素材模式為原音逐句） */
   voiceover: text("voiceover"),
-  /**
-   * 這一鏡要用哪些設定卡（拆分鏡時由 AI 指派，之後可人工改）。
-   * 卡片本身仍是專案層的設定庫，這裡只存「引用哪幾張」——同一張安倢不會被複製 12 份。
-   * 三欄皆空＝這一鏡沒指定，逐鏡生成沿用生成台當下的勾選（見 shared/sceneCards.ts）。
-   */
   characterIds: jsonb("character_ids").$type<string[]>(),
   scenePresetIds: jsonb("scene_preset_ids").$type<string[]>(),
   propIds: jsonb("prop_ids").$type<string[]>(),
-  /** 軟刪除（回收桶）：非 null＝已丟進回收桶（保留使用者手打的 prompt/voiceover，可還原）。
-   *  所有分鏡讀取（列表／移動／重排／匯出）都以 isNull(deletedAt) 過濾。 */
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
-  // 修 R3-SQL-03（與並行 PR #105 相同結論）：listByProject（WHERE project_id ORDER BY order_index）
-  // 每 10 秒輪詢，原本無索引→全表掃＋排序。補複合索引。
   projectOrderIdx: index("scenes_project_order_idx").on(t.projectId, t.orderIndex),
 }));
 
@@ -207,40 +193,25 @@ export const approvals = pgTable("approvals", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   decidedAt: timestamp("decided_at"),
 }, (t) => ({
-  // 修 R3-SQL-03：審批一律「依專案（＋狀態）」查，原本無索引→全表掃描。補複合索引。
   projectStatusIdx: index("approvals_project_status_idx").on(t.projectId, t.status),
 }));
 
-/**
- * 每組自訂選項（R23）：內容類型/發布平台/世界觀(調性·主軸·視覺風格)由各組組長自行增修。
- * 首次讀取時以 shared/options 的預設 lazy-seed；(groupId,type,value) 唯一，讓 seed 冪等。
- * worldview 類（tone/theme/style）value===label（直接是注入生成的字串）；kind/platform 的 value 是穩定 id。
- */
 export const groupOptions = pgTable("group_options", {
   id: uuid("id").primaryKey().defaultRandom(),
   groupId: uuid("group_id").notNull(),
   type: text("type", { enum: ["kind", "platform", "tone", "theme", "style"] }).notNull(),
   value: text("value").notNull(),
   label: text("label").notNull(),
-  /** 僅 platform 用：畫面比例 16:9 / 9:16 / 1:1（生成時帶入） */
   format: text("format"),
   sortOrder: integer("sort_order").notNull().default(0),
-  /** 停用＝不再出現在挑選清單，但既有專案已存的值仍可顯示（不硬刪，保資料完整） */
   active: boolean("active").notNull().default(true),
   createdBy: uuid("created_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
-  // 由可審核 migration 建立；既有資料若重複，必須先走 baseline 前置清理，
-  // 不再在每次應用程式開機時刪資料。
   groupTypeValueUq: uniqueIndex("group_options_group_type_value_uq")
     .on(t.groupId, t.type, t.value),
 }));
 
-/**
- * 專案級權限（需求 2.3 v1）：預設「組內全員可編輯」（無列＝editor，完全向後相容）；
- * 組長可把個別成員明確設為 viewer（唯讀：不能生成/改分鏡/改知識庫，仍可看、留言、下載）。
- * 組長/團隊管理員/開發者永遠可編輯（不受列影響）。新表由正式 migration 建立。
- */
 export const projectMembers = pgTable("project_members", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull(),
@@ -252,23 +223,15 @@ export const projectMembers = pgTable("project_members", {
   projectUserUq: uniqueIndex("project_members_project_user_uq").on(t.projectId, t.userId),
 }));
 
-/**
- * 筆記（需求 10）：會議紀錄等長文。掛組（可選掛專案）；
- * 更新前由 notes router 存 text_versions 快照（kind='note'，refId=note id），與知識庫同一版本機制。
- */
 export const notes = pgTable("notes", {
   id: uuid("id").primaryKey().defaultRandom(),
   groupId: uuid("group_id").notNull(),
-  /** 掛在某專案下（null＝組層級筆記） */
   projectId: uuid("project_id"),
   title: text("title").notNull(),
   content: text("content").notNull(),
   createdBy: uuid("created_by").notNull(),
-  /** 由某則留言「轉筆記」建立時記來源留言 id，供 Planner 反向「來自留言」跳回 */
   sourceMessageId: uuid("source_message_id"),
-  /** @提及同組成員（Planner 也能 @人；與留言 mentions 同語意） */
   mentions: jsonb("mentions").$type<string[]>(),
-  /** 由 AI 執行計畫建立／更新時記錄來源，供 Planner 與工作台雙向跳轉。 */
   planRunId: uuid("plan_run_id"),
   planStepId: text("plan_step_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -278,29 +241,33 @@ export const notes = pgTable("notes", {
   planRunIdx: index("notes_plan_run_idx").on(t.planRunId),
 }));
 
-/**
- * 排程（需求 10）：組行事曆項目（會議、交付死線…）。
- * 不做 Google OAuth 雙向同步——以 /api/schedule/:groupId/calendar.ics 匯出，
- * 使用者自行匯入/訂閱到個人 Google 日曆（零 OAuth 基建達八成價值，見優化評估報告）。
- */
+/** 筆記留言（討論串）— 0034_note_comments */
+export const noteComments = pgTable("note_comments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  noteId: uuid("note_id").notNull(),
+  groupId: uuid("group_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  body: text("body").notNull(),
+  replyToId: uuid("reply_to_id"),
+  mentions: jsonb("mentions").$type<string[]>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  noteCreatedIdx: index("note_comments_note_created_idx").on(t.noteId, t.createdAt),
+  groupIdx: index("note_comments_group_idx").on(t.groupId),
+}));
+
 export const scheduleItems = pgTable("schedule_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   groupId: uuid("group_id").notNull(),
-  /** 關聯專案（null＝組層級行程） */
   projectId: uuid("project_id"),
   title: text("title").notNull(),
   startsAt: timestamp("starts_at").notNull(),
-  /** null＝無明確結束（ics 匯出時以 1 小時計） */
   endsAt: timestamp("ends_at"),
-  /** 負責人（可選） */
   ownerId: uuid("owner_id"),
   note: text("note"),
   createdBy: uuid("created_by").notNull(),
-  /** 由某則留言「轉待辦」建立時記來源留言 id，供 Planner 反向「來自留言」跳回 */
   sourceMessageId: uuid("source_message_id"),
-  /** @提及同組成員（Planner 排程也能 @人） */
   mentions: jsonb("mentions").$type<string[]>(),
-  /** 由 AI 執行計畫建立／更新時記錄來源，供 Planner 與工作台雙向跳轉。 */
   planRunId: uuid("plan_run_id"),
   planStepId: text("plan_step_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
