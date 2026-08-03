@@ -8,6 +8,7 @@ import { Icon } from "../components/Icon";
 import { ConfirmButton } from "../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
 import { useMatchMedia } from "../lib/useMatchMedia";
+import { useCollab, CursorOverlay } from "../realtime";
 import { agentOutputKindLabel } from "../../../shared/agentOutputs";
 import { DEFAULT_AGENT_PLANNER_MODE } from "../../../shared/agentPlanner";
 import { plannerCostLabel } from "../../../shared/llmPricing";
@@ -127,6 +128,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
     },
   );
   const options = trpc.options.byGroup.useQuery({ groupId, includeInactive: true }, { enabled: !!groupId });
+  // 全組協作：presence + 游標（組房 g:${groupId}），讓彼此找得到誰在線、誰在動
+  const collab = useCollab(groupId, !!groupId, "group");
   const kindOptions = (options.data ?? []).filter((o) => o.type === "kind" && o.active);
   const platformOptions = (options.data ?? []).filter((o) => o.type === "platform" && o.active);
   const kindLabelOf = (value: string) => (options.data ?? []).find((o) => o.type === "kind" && o.value === value)?.label ?? value;
@@ -298,7 +301,13 @@ export function Launchpad({ groupId }: { groupId: string }) {
   }, [groupId, projects.data]);
 
   return (
-    <div className="daily-dashboard">
+    <div
+      className="daily-dashboard"
+      ref={collab.containerRef}
+      onPointerMove={collab.onPointerMove}
+      style={{ position: "relative" }}
+    >
+      <CursorOverlay cursors={collab.cursors} />
       <section className="daily-hero" aria-labelledby="daily-title">
         <div className="daily-hero__copy">
           <p className="daily-date"><Icon name="CalendarPlus" size={14} />{todayLabel}</p>
@@ -309,6 +318,36 @@ export function Launchpad({ groupId }: { groupId: string }) {
           <p className="sub">
             {activeGroup ? `這裡整理「${activeGroup.groupName}」需要你處理的事、AI 進度與最近專案。` : "需要你處理的事與 AI 進度都在這裡。"}
           </p>
+          {collab.connected && collab.peers.length > 0 && (
+            <div
+              aria-label="組內在線"
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 6,
+                marginTop: 10,
+                alignItems: "center",
+              }}
+            >
+              <Hint as="span" layer="always" style={{ margin: 0, fontSize: 12 }}>
+                組內在線
+              </Hint>
+              {collab.peers.map((p) => (
+                <Chip
+                  key={p.userId}
+                  style={{
+                    margin: 0,
+                    background: p.color,
+                    color: "#fff",
+                    borderColor: p.color,
+                  }}
+                  title={p.userId === collab.self?.userId ? "你" : p.name}
+                >
+                  {p.userId === collab.self?.userId ? "你" : p.name}
+                </Chip>
+              ))}
+            </div>
+          )}
         </div>
         <button
           type="button"

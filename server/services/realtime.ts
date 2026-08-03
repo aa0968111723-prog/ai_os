@@ -107,7 +107,7 @@ function originAllowed(origin: string | undefined): boolean {
     const v = raw?.trim();
     if (!v) return;
     try {
-      allowed.add(new URL(/^https?:\/\/.test(v) ? v : `https://${v}`).hostname);
+      allowed.add(new URL(/^https?:\/\//.test(v) ? v : `https://${v}`).hostname);
     } catch {
       /* 壞值：忽略此一項 */
     }
