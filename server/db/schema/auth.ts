@@ -19,6 +19,8 @@ export const users = pgTable("users", {
   /** 介面密度偏好（P1c 跨裝置同步）。null＝未設定過，前端用預設 guide；
    *  值域與 shared/uiDensity.ts 的 uiDensitySchema 一致，寫入端一律先過 zod。 */
   uiDensity: text("ui_density", { enum: ["guide", "concise"] }),
+  /** 個人頭像相對路徑（如 avatars/{userId}.jpg）；null＝尚未設定。0033_user_avatar */
+  avatarUrl: text("avatar_url"),
   /**
    * 裝置驗證豁免期限（管理員預先授信）：此時刻前，這個帳號在陌生裝置登入免信箱驗證碼。
    * 用途是救援「同事人在國外／信箱壞掉收不到驗證碼」——否則 enforce 模式下會把人鎖在門外。
