@@ -104,18 +104,24 @@ import type { DataField } from "../../shared/databaseFields";
 const PROTOCOL_VERSION = "2024-11-05";
 
 export const TOOLS = [
-  // progressive restore in progress — remaining content from mcp.final.ts will be added in following commits
+  // progressive 2/7 — content continuing from local mcp.final.ts
+  // (full body being restored in parts due to size; expansion wire-up already present)
   ...MCP_WRITE_EXPANSION_TOOLS,
   ...MCP_UPLOAD_GRANT_TOOLS,
 ];
 
-// Temporary — full runTool + handleMcp will be restored next
-async function runTool(_auth: any, _scope: any, name: string, args: Record<string, unknown>) {
-  const expansion = await runMcpWriteExpansion(_auth, name, args);
-  if (expansion !== null) return expansion;
+async function runTool(auth: AuthState, scope: McpScope, name: string, args: Record<string, unknown>): Promise<unknown> {
+  const scopeDenied = scopeDeniedReason(name, scope);
+  if (scopeDenied) throw new TRPCError({ code: "FORBIDDEN", message: scopeDenied });
+
+  // Early dispatch for the write expansion tools
+  const expansionResult = await runMcpWriteExpansion(auth, name, args);
+  if (expansionResult !== null) return expansionResult;
+
+  // Remaining original handlers will be restored in subsequent progressive commits
   throw new Error(`工具尚未完整還原：${name}`);
 }
 
-export async function handleMcp(req: Request, res: Response) {
-  res.status(503).json({ error: "MCP wire-up in progress (progressive restore)" });
+export async function handleMcp(req: Request, res: Response): Promise<void> {
+  res.status(503).json({ error: "MCP progressive restore in progress" });
 }
