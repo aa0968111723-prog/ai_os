@@ -36,8 +36,10 @@ export function StoryboardScript({
   /** 貼一份原始腳本讓 AI 拆成分鏡——標準模式先前只能繞去知識庫或助手對話 */
   const [rawScript, setRawScript] = useState<string | null>(null);
   const split = trpc.director.splitScript.useMutation({
-    onSuccess: () => {
-      setRawScript(null);
+    onSuccess: (data) => {
+      // 有截斷就把面板留著：尾段沒拆進來這件事只顯示在面板裡，收掉等於沒講。
+      // 原文也留著，好讓人刪掉已拆的前段再拆一次。
+      if (!data?.truncation) setRawScript(null);
       onApplied();
     },
   });
@@ -144,7 +146,8 @@ export function StoryboardScript({
           {split.data?.truncation && (
             <Hint layer="always" role="status" style={{ color: "var(--gold-ink)" }}>
               腳本過長，這次只送了前 {split.data.truncation.sentChars.toLocaleString()} 字
-              （共 {split.data.truncation.totalChars.toLocaleString()} 字）——尾段沒有拆進來，可分批再拆一次。
+              （共 {split.data.truncation.totalChars.toLocaleString()} 字）——尾段沒有拆進來。
+              原文留在上面沒清掉：刪掉已經拆好的前段，再按一次就能接著拆。
             </Hint>
           )}
         </div>

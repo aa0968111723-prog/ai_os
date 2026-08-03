@@ -10,26 +10,46 @@ import { StoryboardScript } from "./StoryboardScript";
 const applyMutate = vi.fn();
 const splitMutate = vi.fn();
 let applyState: { isPending: boolean; error: { message: string } | null } = { isPending: false, error: null };
+/** 拆分鏡成功時伺服器回什麼（truncation 非 null＝尾段沒拆進來） */
+let splitResult: { truncation: { sentChars: number; totalChars: number } | null } = { truncation: null };
 
-vi.mock("../api", () => ({
-  trpc: {
-    director: {
-      splitScript: {
-        useMutation: () => ({ mutate: splitMutate, isPending: false, error: null, data: undefined, reset: vi.fn() }),
+// useMutation 用真的 useState 存 data：截斷提示是在成功「之後」才渲染的，
+// 沒有真實的重新渲染就測不到「提示到底看不看得見」。
+vi.mock("../api", async () => {
+  const { useState } = await vi.importActual<typeof import("react")>("react");
+  return {
+    trpc: {
+      director: {
+        splitScript: {
+          useMutation: (opts?: { onSuccess?: (data: typeof splitResult) => void }) => {
+            const [data, setData] = useState<typeof splitResult | undefined>(undefined);
+            return {
+              mutate: (vars: unknown) => {
+                splitMutate(vars);
+                setData(splitResult);
+                opts?.onSuccess?.(splitResult);
+              },
+              isPending: false,
+              error: null,
+              data,
+              reset: () => setData(undefined),
+            };
+          },
+        },
+      },
+      scenes: {
+        applyScript: {
+          useMutation: () => ({
+            mutate: applyMutate,
+            isPending: applyState.isPending,
+            error: applyState.error,
+            reset: vi.fn(),
+          }),
+        },
       },
     },
-    scenes: {
-      applyScript: {
-        useMutation: () => ({
-          mutate: applyMutate,
-          isPending: applyState.isPending,
-          error: applyState.error,
-          reset: vi.fn(),
-        }),
-      },
-    },
-  },
-}));
+  };
+});
 
 const ROWS = [
   { title: "開場・晨光", durationSec: 5, prompt: "清晨禪堂", voiceover: "那一年", cardNames: ["安倢的紅傘"] },
@@ -41,6 +61,7 @@ describe("StoryboardScript", () => {
     applyMutate.mockReset();
     splitMutate.mockReset();
     applyState = { isPending: false, error: null };
+    splitResult = { truncation: null };
   });
 
   it("展開後可讀到整份腳本（含唯讀的設定卡標注）", async () => {
@@ -135,6 +156,33 @@ describe("StoryboardScript", () => {
 
     await waitFor(() => expect(splitMutate).toHaveBeenCalled());
     expect(splitMutate.mock.calls[0][0]).toEqual({ projectId: "p1", scriptText: undefined });
+  });
+
+  it("腳本被截斷時面板留著，尾段沒拆進來這件事看得到（收掉等於沒講）", async () => {
+    splitResult = { truncation: { sentChars: 12000, totalChars: 20000 } };
+    const user = userEvent.setup();
+    render(<StoryboardScript projectId="p1" rows={ROWS} canEdit onApplied={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /文字腳本/ }));
+    await user.click(screen.getByRole("button", { name: /貼腳本拆分鏡/ }));
+    const box = screen.getByRole("textbox", { name: /貼上原始腳本/ });
+    await user.type(box, "很長的腳本");
+    await user.click(screen.getByRole("button", { name: "AI 拆分鏡" }));
+
+    expect(await screen.findByText(/只送了前 12,000 字/)).toBeVisible();
+    expect(box).toHaveValue("很長的腳本"); // 原文留著，好刪掉已拆的前段再拆一次
+  });
+
+  it("沒被截斷就收掉面板（不留一個沒事做的輸入框）", async () => {
+    const user = userEvent.setup();
+    render(<StoryboardScript projectId="p1" rows={ROWS} canEdit onApplied={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /文字腳本/ }));
+    await user.click(screen.getByRole("button", { name: /貼腳本拆分鏡/ }));
+    await user.type(screen.getByRole("textbox", { name: /貼上原始腳本/ }), "短腳本");
+    await user.click(screen.getByRole("button", { name: "AI 拆分鏡" }));
+
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: /貼上原始腳本/ })).toBeNull());
   });
 
   it("檢視者看不到貼腳本入口", async () => {

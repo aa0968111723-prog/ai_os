@@ -6,6 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { getModel } from "../../shared/models";
+import { SCRIPT_PROMPT_MAX, SCRIPT_TITLE_MAX, SCRIPT_VOICEOVER_MAX } from "../../shared/storyboardScript";
+import { MAX_PROMPT_CHARS } from "./prompts";
 import { refineRejection, regenRejection, sceneSlotForAssetKind } from "./scenes";
 
 const PROJECT = "p-1";
@@ -98,5 +100,19 @@ describe("sceneSlotForAssetKind（版本切回哪個槽）", () => {
   it("文件等其他型態不能當分鏡素材", () => {
     expect(sceneSlotForAssetKind("doc")).toBeNull();
     expect(sceneSlotForAssetKind("")).toBeNull();
+  });
+});
+
+/**
+ * 文字腳本寫回的欄位上限必須與單格編輯（scenes.update）同口徑。
+ * 兩邊各寫一份數字，遲早有一邊被調大——那時寫回就成了繞過護欄的後門，所以用測試釘住。
+ */
+describe("文字腳本寫回的上限與單格編輯同口徑", () => {
+  it("畫面上限＝MAX_PROMPT_CHARS", () => {
+    expect(SCRIPT_PROMPT_MAX).toBe(MAX_PROMPT_CHARS);
+  });
+
+  it("標題與旁白上限是同一組常數（scenes.update 直接吃 shared 的值，不另寫數字）", () => {
+    expect([SCRIPT_TITLE_MAX, SCRIPT_VOICEOVER_MAX]).toEqual([60, 2000]);
   });
 });

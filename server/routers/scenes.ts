@@ -7,7 +7,12 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { getModel, type ModelEntry } from "../../shared/models";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import { resolveSceneCards } from "../../shared/sceneCards";
-import { parseStoryboardScript } from "../../shared/storyboardScript";
+import {
+  SCRIPT_TITLE_MAX,
+  SCRIPT_VOICEOVER_MAX,
+  parseStoryboardScript,
+  resolveScriptTargets,
+} from "../../shared/storyboardScript";
 import { sceneCardColumns } from "../services/sceneCards";
 import { assertGenerationEntityIds } from "../services/generationCore";
 import {
@@ -563,9 +568,10 @@ export const scenesRouter = router({
     .input(
       z.object({
         sceneId: z.string().uuid(),
-        title: z.string().min(1).max(60).optional(),
+        // 上限與文字腳本寫回共用同一組常數——兩邊各寫一份數字，遲早有一邊被調大變成後門
+        title: z.string().min(1).max(SCRIPT_TITLE_MAX).optional(),
         durationSec: z.number().int().min(1).max(60).optional(),
-        voiceover: z.string().max(2000).optional(),
+        voiceover: z.string().max(SCRIPT_VOICEOVER_MAX).optional(),
         // 獨立單格修：允許就地改提示詞，之後「重生這一格」用新 prompt（不影響其他格）
         prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
       }),
@@ -625,13 +631,15 @@ export const scenesRouter = router({
         let created = 0;
         let order = rows.length ? Math.max(...rows.map((r) => r.orderIndex)) : 0;
 
-        for (const [i, scene] of parsed.scenes.entries()) {
-          const row = rows[i];
+        // 鏡次優先於出現順序：中間整段沒寫時，「## 3.」仍指第 3 鏡，不會遞補去蓋掉第 2 鏡
+        const targets = resolveScriptTargets(rows.length, parsed.scenes);
+        for (const { scene, rowIndex } of targets) {
+          const row = rowIndex === null ? null : rows[rowIndex];
           if (!row) {
             await tx.insert(schema.scenes).values({
               projectId: project.id,
               orderIndex: ++order,
-              title: scene.title.slice(0, 60),
+              title: scene.title.slice(0, SCRIPT_TITLE_MAX),
               durationSec: scene.durationSec ?? (project.format === "9:16" ? 4 : 5),
               status: "todo",
               prompt: scene.prompt ?? null,
@@ -642,7 +650,7 @@ export const scenesRouter = router({
           }
           // 只寫「文字裡真的有寫」的欄位——undefined＝沒寫到，維持原值
           const patch: Partial<typeof schema.scenes.$inferInsert> = {};
-          if (scene.title && scene.title !== row.title) patch.title = scene.title.slice(0, 60);
+          if (scene.title && scene.title !== row.title) patch.title = scene.title.slice(0, SCRIPT_TITLE_MAX);
           if (scene.durationSec !== undefined && scene.durationSec !== row.durationSec) {
             patch.durationSec = scene.durationSec;
           }
@@ -660,7 +668,7 @@ export const scenesRouter = router({
         return {
           updated,
           created,
-          keptUntouched: Math.max(0, rows.length - parsed.scenes.length),
+          keptUntouched: Math.max(0, rows.length - targets.filter((t) => t.rowIndex !== null).length),
           warnings: parsed.warnings,
         };
       });
