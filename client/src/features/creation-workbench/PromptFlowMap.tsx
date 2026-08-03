@@ -9,6 +9,7 @@ import {
 } from "@shared/textEncoders";
 import { Card, Chip, Meta } from "../../components/ui";
 import { ModelMechanicsView } from "./ModelMechanicsView";
+import { TokenBudgetStrip } from "./TokenBudgetStrip";
 import {
   buildPromptFlow,
   distributePromptWarnings,
@@ -39,12 +40,20 @@ interface NodeAccent {
   line: string;
 }
 
+/**
+ * 節點識別色。與 TokenBudgetStrip 用同一份——條帶上的色塊要對得回節點，
+ * 兩邊各配一套顏色就對不起來了。
+ *
+ * 色相選擇不是憑感覺：跑過 dataviz 的驗證器，相鄰段落在色盲模擬下的 ΔE 必須過關。
+ * 原本的「場景＝金、素材＝綠」相鄰 ΔE 只有 5.5（protan 幾乎同色），且金／綠在站內
+ * 是警告與成功的狀態色——狀態色不該同時當識別色用。改為萊姆與磚紅後相鄰最差 8.5。
+ */
 const ACCENTS: Record<PromptFlowNodeKey, NodeAccent> = {
-  instruction: { glyph: "你", ink: "var(--primary-ink)", soft: "var(--primary-tint)", line: "var(--primary-border)" },
+  instruction: { glyph: "你", ink: "var(--primary-ink)", soft: "var(--primary-tint)", line: "var(--primary)" },
   background: { glyph: "世", ink: "var(--healing-ink)", soft: "var(--healing-soft)", line: "var(--healing)" },
   character: { glyph: "角", ink: "var(--collab-ink)", soft: "var(--collab-soft)", line: "var(--collab)" },
-  scene: { glyph: "場", ink: "var(--gold-ink)", soft: "var(--gold-soft)", line: "var(--gold)" },
-  prop: { glyph: "物", ink: "var(--success-ink)", soft: "var(--success-soft)", line: "var(--success)" },
+  scene: { glyph: "場", ink: "#4d6113", soft: "#f0f4e2", line: "var(--brand-lime)" },
+  prop: { glyph: "物", ink: "#9c1116", soft: "#fbe9ea", line: "var(--brand-red)" },
   negative: { glyph: "禁", ink: "var(--danger-ink)", soft: "var(--danger-soft)", line: "var(--danger)" },
   model: { glyph: "送", ink: "var(--primary-ink)", soft: "var(--primary-tint)", line: "var(--primary-border)" },
 };
@@ -150,12 +159,14 @@ function BudgetBadge({ budget }: { budget: BudgetSegmentResult<PromptFlowNodeKey
  * 這是「注意力」在 hosted API 下唯一能誠實談的部分——不是內部權重，而是
  * **模型到底讀到了哪幾個字**。窗口未公開時只報用量、不報結論。
  */
-function EncoderWindow({ budget }: { budget: PromptBudget<PromptFlowNodeKey> }) {
+function EncoderWindow({
+  budget,
+  titles,
+}: {
+  budget: PromptBudget<PromptFlowNodeKey>;
+  titles: Partial<Record<PromptFlowNodeKey, string>>;
+}) {
   const { profile, total, overflows } = budget;
-  const limit = profile.limitTokens;
-  // 進度條用保守上界填色（先讓人看到風險），超出的部分夾在 100%
-  const usedPercent = limit ? Math.min(100, Math.round((total.max / limit) * 100)) : 0;
-  const safePercent = limit ? Math.min(100, Math.round((total.min / limit) * 100)) : 0;
 
   return (
     <Card
@@ -169,21 +180,13 @@ function EncoderWindow({ budget }: { budget: PromptBudget<PromptFlowNodeKey> }) 
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 12 }}>
           約 {total.min}–{total.max}
-          {limit ? ` / ${limit}` : ""} token
+          {profile.limitTokens ? ` / ${profile.limitTokens}` : ""} token
         </span>
       </div>
-      {limit ? (
-        <div
-          aria-hidden
-          style={{ position: "relative", height: 6, marginTop: 7, borderRadius: 999, background: "var(--surface-sunken)", overflow: "hidden" }}
-        >
-          <div style={{ position: "absolute", inset: 0, width: `${usedPercent}%`, background: overflows ? "var(--danger-soft)" : "var(--gold-soft)" }} />
-          <div style={{ position: "absolute", inset: 0, width: `${safePercent}%`, background: overflows ? "var(--danger)" : "var(--success)" }} />
-        </div>
-      ) : null}
+      <TokenBudgetStrip budget={budget} titles={titles} />
       <Meta as="p" style={{ margin: "6px 0 0", fontSize: 12 }}>
         {profile.note}
-        {limit ? "　估算為區間；只有連最低估計都超過窗口，才會標成「沒進模型」。" : ""}
+        {profile.limitTokens ? "　實色＝最低估計，半透明＝最高估計；斜線區是模型讀不到的部分。" : ""}
       </Meta>
     </Card>
   );
@@ -314,7 +317,10 @@ export function PromptFlowMap({
 
   return (
     <>
-      <EncoderWindow budget={budget} />
+      <EncoderWindow
+        budget={budget}
+        titles={Object.fromEntries(promptNodes.map((node) => [node.key, node.title]))}
+      />
       <ol data-testid="prompt-flow-map" style={{ listStyle: "none", margin: "8px 0 0", padding: 0 }}>
       {promptNodes.map((node, index) => (
         <FlowNode

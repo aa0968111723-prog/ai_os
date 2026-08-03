@@ -4,6 +4,7 @@ import { SEED_SUPPORTED } from "@shared/models";
 import type { PromptSectionKey } from "@shared/promptSections";
 import { trpc } from "../../api";
 import { Button, Card, Hint, Meta } from "../../components/ui";
+import { AblationResultGrid } from "./AblationResultGrid";
 
 /**
  * 消融偵測（影響力實測）的入口。
@@ -112,13 +113,13 @@ export function AblationPanel({
           <strong style={{ fontSize: 13 }}>已送出 {ablation.data.runs.length} 輪</strong>
           <Meta as="p" style={{ margin: "4px 0 0" }}>
             {ablation.data.seedPinned ? "已固定同一顆 seed" : "未固定 seed（差異含噪聲）"}
-            ・完成後在生成紀錄比對這幾張
+            ・結果會直接並排在下面
           </Meta>
-          <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 13 }}>
-            {ablation.data.runs.map((run) => (
-              <li key={run.id}>{run.title}</li>
-            ))}
-          </ul>
+          <AblationResultGrid
+            projectId={input.projectId}
+            runId={ablation.data.runId}
+            seedPinned={ablation.data.seedPinned}
+          />
           {ablation.data.failed.length ? (
             <Meta as="p" style={{ margin: "6px 0 0", color: "var(--gold-ink)" }}>
               {ablation.data.failed.length} 輪沒送出：{ablation.data.failed.map((row) => `${row.title}（${row.message}）`).join("；")}
