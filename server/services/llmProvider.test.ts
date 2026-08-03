@@ -28,7 +28,7 @@ vi.mock("./fal", () => ({
   falStatus: (...args: unknown[]) => falStatus(...args),
 }));
 
-const { completeText, isFalMode, modeCostsMoney, FAL_AGENT_PROFILES, LlmServiceError } = await import("./llmProvider");
+const { completeText, extractDisclosedReasoning, isFalMode, modeCostsMoney, FAL_AGENT_PROFILES, LlmServiceError } = await import("./llmProvider");
 
 function nimOk(text = "來自 NIM 的回答") {
   chatCompletion.mockResolvedValue({
@@ -188,5 +188,47 @@ describe("fal 輪詢", () => {
     falSubmit.mockResolvedValue({ requestId: "req-1" });
     falStatus.mockResolvedValue({ status: "done", resultText: "   " });
     await expect(completeText({ prompt: "你好", mode: "fal_balanced" })).rejects.toThrow(/沒有回傳內容/);
+  });
+});
+
+
+/**
+ * 供應商揭露的推理與信心值。站內原則仍是「不假裝呈現模型私密思維鏈」——
+ * 這裡鎖住的是：供應商**真的給**才顯示，沒給就沒有，站內不生成。
+ */
+describe("供應商揭露的推理與 token 信心", () => {
+  it("introspect 沒開時不要 logprobs，也不回 introspection", async () => {
+    nimOk();
+    const result = await completeText({ prompt: "你好", mode: "nim" });
+    expect(chatCompletion.mock.calls[0][0].logprobs).toBe(false);
+    expect(result.introspection).toBeUndefined();
+  });
+
+  it("introspect 開啟時把 logprob 換成機率，並帶出供應商的推理欄位", async () => {
+    chatCompletion.mockResolvedValue({
+      choices: [{
+        message: { content: "結論", reasoning_content: "供應商給的推理摘要" },
+        logprobs: { content: [{ token: "結", logprob: -0.05 }, { token: "論", logprob: -1.6 }] },
+      }],
+    });
+    const result = await completeText({ prompt: "你好", mode: "nim", introspect: true });
+    expect(chatCompletion.mock.calls[0][0].logprobs).toBe(true);
+    expect(result.introspection?.disclosedReasoning).toBe("供應商給的推理摘要");
+    expect(result.introspection?.meanConfidence).toBeGreaterThan(0);
+    expect(result.introspection?.lowestConfidence?.[0].token).toBe("論");
+  });
+
+  it("供應商沒回推理欄位時，站內不會生一段出來", async () => {
+    chatCompletion.mockResolvedValue({ choices: [{ message: { content: "結論" } }] });
+    const result = await completeText({ prompt: "你好", mode: "nim", introspect: true });
+    expect(result.introspection?.disclosedReasoning).toBeUndefined();
+  });
+
+  it("extractDisclosedReasoning 只認正式欄位，其他一律回 undefined", () => {
+    expect(extractDisclosedReasoning({ choices: [{ message: { reasoning: "來自 openrouter" } }] })).toBe("來自 openrouter");
+    expect(extractDisclosedReasoning({ reasoning_content: "頂層欄位" })).toBe("頂層欄位");
+    expect(extractDisclosedReasoning({ choices: [{ message: { content: "只有內容" } }] })).toBeUndefined();
+    expect(extractDisclosedReasoning({ choices: [{ message: { reasoning: "   " } }] })).toBeUndefined();
+    expect(extractDisclosedReasoning(null)).toBeUndefined();
   });
 });

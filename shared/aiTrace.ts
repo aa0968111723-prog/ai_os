@@ -2,7 +2,12 @@ import { z } from "zod";
 
 /**
  * 使用者可驗證的 AI 應用層軌跡。這不是模型私密思維鏈；只描述系統真正組裝、送出、
- * 查詢、驗證與收到的資料。所有 provider reasoning/thinking 欄位都會在伺服器端剔除。
+ * 查詢、驗證與收到的資料。provider payload 裡的 reasoning／thinking 原始欄位一律在
+ * 伺服器端剔除（見 services/aiTrace 的遮蔽）。
+ *
+ * 唯一的例外是 `shared/llmIntrospection` 那個明確標示來源的欄位：供應商在正式 API
+ * 欄位裡**主動回傳**的推理摘要，會標明「這是供應商給的、不等於模型真實思考」後原樣顯示。
+ * 站內不生成、不補寫、不改寫。
  */
 export const aiOperationModeSchema = z.enum([
   "ask",
