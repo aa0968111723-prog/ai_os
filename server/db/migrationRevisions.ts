@@ -164,4 +164,8 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
     "e5bd470f34812bc816497130bb141a4612c72f3d186983055701f93ba086ba89",
     "e3e1618e5d97c7e3b0af18939a83bd3b260df26bea65fa961853bcb4e1ea1e9e",
   ],
+  "0032_community_posts": [
+    "ea558827804441655f3c8827770490eb34fbb6d2d597187a8911a45d4d1996c8",
+    "f2c1ea2a71b114dc3ca6f69c63bfe28aadfb83d5dfc0f464cd81ee74ae3936f8",
+  ],
 };
