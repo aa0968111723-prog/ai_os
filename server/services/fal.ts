@@ -4,6 +4,7 @@
  *   FAL_KEY 未設定不再自動退「示範模式」——生成會回明確錯誤(呼叫端自動退點)。
  * - E2E_MOCK=1 是「僅供自動化測試」的假生成旗標(CI 六套 e2e 用,不花錢即可測完整流程);
  *   正式部署絕不設定。舊的 FAL_MOCK 旗標已移除、不再生效。
+ * - BYOK Phase 2：falSubmit / falStatus 可傳 apiKey 覆寫（個人金鑰）；省略則用站方 FAL_KEY。
  */
 import { randomUUID } from "node:crypto";
 import { proxyFetch } from "./http";
@@ -40,19 +41,30 @@ export function billingBypassed(): boolean {
   return MOCK && process.env.MOCK_BILLING !== "1";
 }
 
-export async function falSubmit(endpoint: string, kind: OutputKind, input: Record<string, unknown>): Promise<{ requestId: string }> {
+/** 解析實際要用的 fal 金鑰：明確覆寫 → 站方 FAL_KEY */
+function resolveFalKey(apiKey?: string): string {
+  const key = (apiKey ?? process.env.FAL_KEY)?.trim();
+  if (!key) {
+    throw new Error("FAL_KEY 未設定：請到部署平台的服務 Variables 填入 fal.ai 金鑰後重新部署");
+  }
+  return key;
+}
+
+export async function falSubmit(
+  endpoint: string,
+  kind: OutputKind,
+  input: Record<string, unknown>,
+  opts?: { apiKey?: string },
+): Promise<{ requestId: string }> {
   if (MOCK) {
     const requestId = `mock_${randomUUID()}`;
     mockJobs.set(requestId, { doneAt: Date.now() + MOCK_DELAY_MS, kind, prompt: String(input.prompt ?? input.text ?? "") });
     return { requestId };
   }
-  // 真實模式缺金鑰＝明確失敗（呼叫端自動退點），不再靜默退示範模式
-  if (!process.env.FAL_KEY) {
-    throw new Error("FAL_KEY 未設定：請到部署平台的服務 Variables 填入 fal.ai 金鑰後重新部署");
-  }
+  const key = resolveFalKey(opts?.apiKey);
   const res = await proxyFetch(`https://queue.fal.run/${endpoint}`, {
     method: "POST",
-    headers: { Authorization: `Key ${process.env.FAL_KEY}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify(input),
     // 送出佇列近乎即時；45s 逾時把「連線掛起」轉成明確失敗（呼叫端退點＋請重試），不無限卡住 mutation
     timeoutMs: 45_000,
@@ -118,7 +130,12 @@ export function falRequestBase(endpoint: string, requestId: string): string {
   return `https://queue.fal.run/${queueApp}/requests/${encodeURIComponent(requestId)}`;
 }
 
-export async function falStatus(endpoint: string, kind: OutputKind, requestId: string): Promise<FalStatusResult> {
+export async function falStatus(
+  endpoint: string,
+  kind: OutputKind,
+  requestId: string,
+  opts?: { apiKey?: string },
+): Promise<FalStatusResult> {
   if (requestId.startsWith("mock_")) {
     if (!MOCK) {
       return {
@@ -138,10 +155,11 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
   // 暫時性錯誤（429 限流、5xx、網路例外）→ 回 running 讓輪詢重試，絕不誤判失敗而退點；
   // 只有明確的終局狀態（4xx 非 429、非 COMPLETED、輸出無法解析）才回 failed。
   const isTransient = (code: number): boolean => code === 408 || code === 425 || code === 429 || code >= 500;
+  const key = resolveFalKey(opts?.apiKey);
   const base = falRequestBase(endpoint, requestId);
   let statusRes: Awaited<ReturnType<typeof proxyFetch>>;
   try {
-    statusRes = await proxyFetch(`${base}/status`, { headers: { Authorization: `Key ${process.env.FAL_KEY}` }, timeoutMs: 30_000 });
+    statusRes = await proxyFetch(`${base}/status`, { headers: { Authorization: `Key ${key}` }, timeoutMs: 30_000 });
   } catch (err) {
     console.warn("[fal] status 網路錯誤（暫時，續輪詢）：", err instanceof Error ? err.message : err);
     return { status: "running" };
@@ -159,7 +177,7 @@ export async function falStatus(endpoint: string, kind: OutputKind, requestId: s
   if (s.status !== "COMPLETED") return { status: "failed", error: `fal 狀態 ${s.status}` };
   let resultRes: Awaited<ReturnType<typeof proxyFetch>>;
   try {
-    resultRes = await proxyFetch(base, { headers: { Authorization: `Key ${process.env.FAL_KEY}` }, timeoutMs: 30_000 });
+    resultRes = await proxyFetch(base, { headers: { Authorization: `Key ${key}` }, timeoutMs: 30_000 });
   } catch (err) {
     console.warn("[fal] result 網路錯誤（暫時，續輪詢）：", err instanceof Error ? err.message : err);
     return { status: "running" };
