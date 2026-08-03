@@ -7,6 +7,12 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { getModel, type ModelEntry } from "../../shared/models";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import { resolveSceneCards } from "../../shared/sceneCards";
+import {
+  SCRIPT_TITLE_MAX,
+  SCRIPT_VOICEOVER_MAX,
+  parseStoryboardScript,
+  resolveScriptTargets,
+} from "../../shared/storyboardScript";
 import { sceneCardColumns } from "../services/sceneCards";
 import { assertGenerationEntityIds } from "../services/generationCore";
 import {
@@ -461,6 +467,63 @@ export const scenesRouter = router({
       });
     }),
 
+  /**
+   * 在某一鏡之後插入一格（整理分鏡用）。
+   *
+   * 先前只有「加到最後」＋↑↓ 一路搬——想在第 3 鏡後面補一格，要按十幾次箭頭。
+   * duplicate=true 時複製來源鏡的標題／秒數／提示詞／旁白／卡片綁定；
+   * **不複製成品**（assetId／narrationAssetId）：那是花過點數的產物，複製一份引用
+   * 會讓兩格指向同一素材，刪一格就互相影響。新格一律從 todo 開始。
+   */
+  insertAfter: authedProcedure
+    .input(z.object({ sceneId: z.string().uuid(), duplicate: z.boolean().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      const project = await getProjectChecked(ctx, scene.projectId, true);
+      assertProjectNotArchived(project);
+      return db.transaction(async (tx) => {
+        await lockSceneOrder(tx, project.id);
+        // 鎖內重讀：並發 move／insert 可能已經改過序號
+        const all = await tx
+          .select()
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+          .orderBy(asc(schema.scenes.orderIndex));
+        const idx = all.findIndex((s) => s.id === scene.id);
+        if (idx < 0) throw new TRPCError({ code: "NOT_FOUND", message: "分鏡已被刪除" });
+        const cur = all[idx]!;
+        // 後面每一格 +1 讓出位置（由後往前更新，避免中途撞到同序號）
+        for (const later of all.slice(idx + 1).reverse()) {
+          await tx
+            .update(schema.scenes)
+            .set({ orderIndex: later.orderIndex + 1 })
+            .where(eq(schema.scenes.id, later.id));
+        }
+        const dup = input.duplicate === true;
+        const [created] = await tx
+          .insert(schema.scenes)
+          .values({
+            projectId: project.id,
+            orderIndex: cur.orderIndex + 1,
+            title: dup ? `${cur.title} 複本`.slice(0, 60) : "新分鏡",
+            durationSec: dup ? cur.durationSec : project.format === "9:16" ? 4 : 5,
+            status: "todo",
+            prompt: dup ? cur.prompt : null,
+            voiceover: dup ? cur.voiceover : null,
+            // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期
+            characterIds: dup ? cur.characterIds : null,
+            scenePresetIds: dup ? cur.scenePresetIds : null,
+            propIds: dup ? cur.propIds : null,
+          })
+          .returning();
+        return created;
+      });
+    }),
+
   /** 刪除分鏡＝軟刪除（回收桶）：保留使用者手打的 prompt／voiceover，可從回收桶還原 */
   remove: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [scene] = await db
@@ -505,9 +568,10 @@ export const scenesRouter = router({
     .input(
       z.object({
         sceneId: z.string().uuid(),
-        title: z.string().min(1).max(60).optional(),
+        // 上限與文字腳本寫回共用同一組常數——兩邊各寫一份數字，遲早有一邊被調大變成後門
+        title: z.string().min(1).max(SCRIPT_TITLE_MAX).optional(),
         durationSec: z.number().int().min(1).max(60).optional(),
-        voiceover: z.string().max(2000).optional(),
+        voiceover: z.string().max(SCRIPT_VOICEOVER_MAX).optional(),
         // 獨立單格修：允許就地改提示詞，之後「重生這一格」用新 prompt（不影響其他格）
         prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
       }),
@@ -527,6 +591,87 @@ export const scenesRouter = router({
       if (Object.keys(patch).length === 0) return scene; // 無欄位可更，回原狀
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, input.sceneId)).returning();
       return updated;
+    }),
+
+  /**
+   * 文字分鏡腳本一次寫回：整份文字 → 更新既有鏡、多的新增到末尾。
+   *
+   * 刻意保守，兩條原則：
+   * 1. **永不刪除**——文字裡少寫一鏡，那一格只是「保留不動」。忘了寫不該讓已出圖的格消失。
+   * 2. **省略不等於清空**——只寫標題的那一鏡，畫面／旁白維持原值。
+   * 解析一律在伺服器做（不信任前端送來的結構化結果），前端那份只用於預覽差異。
+   */
+  applyScript: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      // 12 鏡 × 每鏡提示詞上限仍有餘裕；再長多半是整份文件貼錯地方
+      text: z.string().max(60_000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await getProjectChecked(ctx, input.projectId, true);
+      assertProjectNotArchived(project);
+      const parsed = parseStoryboardScript(input.text);
+      if (parsed.errors.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: parsed.errors.join("；") });
+      }
+      if (!parsed.scenes.length) {
+        return { updated: 0, created: 0, keptUntouched: 0, warnings: parsed.warnings };
+      }
+
+      // 與拆分鏡／新增分鏡共用同一把序號鎖：併發寫回不會插出重複 orderIndex
+      return db.transaction(async (tx) => {
+        await lockSceneOrder(tx, project.id);
+        const rows = await tx
+          .select()
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+          .orderBy(asc(schema.scenes.orderIndex));
+
+        let updated = 0;
+        let created = 0;
+        let order = rows.length ? Math.max(...rows.map((r) => r.orderIndex)) : 0;
+
+        // 鏡次優先於出現順序：中間整段沒寫時，「## 3.」仍指第 3 鏡，不會遞補去蓋掉第 2 鏡
+        const targets = resolveScriptTargets(rows.length, parsed.scenes);
+        for (const { scene, rowIndex } of targets) {
+          const row = rowIndex === null ? null : rows[rowIndex];
+          if (!row) {
+            await tx.insert(schema.scenes).values({
+              projectId: project.id,
+              orderIndex: ++order,
+              title: scene.title.slice(0, SCRIPT_TITLE_MAX),
+              durationSec: scene.durationSec ?? (project.format === "9:16" ? 4 : 5),
+              status: "todo",
+              prompt: scene.prompt ?? null,
+              voiceover: scene.voiceover ?? null,
+            });
+            created += 1;
+            continue;
+          }
+          // 只寫「文字裡真的有寫」的欄位——undefined＝沒寫到，維持原值
+          const patch: Partial<typeof schema.scenes.$inferInsert> = {};
+          if (scene.title && scene.title !== row.title) patch.title = scene.title.slice(0, SCRIPT_TITLE_MAX);
+          if (scene.durationSec !== undefined && scene.durationSec !== row.durationSec) {
+            patch.durationSec = scene.durationSec;
+          }
+          if (scene.prompt !== undefined && scene.prompt !== (row.prompt ?? "").trim()) {
+            patch.prompt = scene.prompt;
+          }
+          if (scene.voiceover !== undefined && scene.voiceover !== (row.voiceover ?? "").trim()) {
+            patch.voiceover = scene.voiceover;
+          }
+          if (Object.keys(patch).length === 0) continue;
+          await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, row.id));
+          updated += 1;
+        }
+
+        return {
+          updated,
+          created,
+          keptUntouched: Math.max(0, rows.length - targets.filter((t) => t.rowIndex !== null).length),
+          warnings: parsed.warnings,
+        };
+      });
     }),
 
   /**

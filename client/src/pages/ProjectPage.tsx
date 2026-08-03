@@ -436,7 +436,7 @@ function AddOptionChip({
  * 專案頁（WB-06 頁面組裝）：三幕長頁，不承擔各創作模式的表單／成本／mutation。
  * ① 專案上下文（世界觀・定裝・知識庫・素材庫・成員權限）＝AI 的共同大腦；
  * ② AI 創作中心：單一 CreationWorkbench（問 AI／直接生成／製作範本／執行計畫＋資源抽屜）；
- * ③ 分鏡・時間軸・交付＝成品落地（SceneList）。
+ * ③ 分鏡・編修・交付＝腳本進來、分鏡整理好、成品落地（SceneList）。
  * 頁面只負責：抓專案／權限、組裝三幕、把 projectId／groupId／canEdit／capabilities 傳入工作台、
  * 跨幕捲動與 TocNav。跨幕帶入（再用提示詞、選來源）走 applyPrompt / generateApply 橋接。
  */
@@ -2222,12 +2222,12 @@ export function ProjectPage({ id }: { id: string }) {
 
           <StageLink text="成品進素材庫；生成紀錄可「＋加入分鏡」" />
 
-          {/* ③ 分鏡・時間軸・交付：排片、粗剪預覽、送審與打包（SceneList 一體卡全含） */}
+          {/* ③ 分鏡・編修・交付：貼腳本拆幕、文字腳本整份改、排片、粗剪預覽、送審與打包（SceneList 一體卡全含） */}
           <StageHead
             id="stage-deliver"
             num="③"
-            title="分鏡・時間軸・交付"
-            desc="排片・粗剪預覽・送審・打包"
+            title="分鏡・編修・交付"
+            desc="貼腳本拆分鏡・整份文字改稿・排片・送審・打包"
             accent="group-3"
             hint={pendingSceneCount != null ? `分鏡 ${sceneCount}・待審 ${pendingSceneCount}` : undefined}
           />

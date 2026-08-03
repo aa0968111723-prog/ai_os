@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
 import { SceneCardBinding } from "./SceneCardBinding";
 import { ScenePromptPreview } from "./ScenePromptPreview";
+import { StoryboardScript } from "./StoryboardScript";
 import { resolveSceneCards } from "@shared/sceneCards";
+import { formatPropDisplayName } from "@shared/propOwnership";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 // tierLabel／estimatePoints 隨「逐格生成模型」選單一起移進單格工作室，這裡不再需要
 import { getModel, MODELS } from "@shared/models";
@@ -260,6 +262,8 @@ function SceneRow({
   const generate = trpc.scenes.generateInto.useMutation({
     onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
   });
+  // 整理分鏡：在這一格之後插入／複製一格（先前只能加到最後再一路按↑搬上來）
+  const insertAfter = trpc.scenes.insertAfter.useMutation({ onSuccess: () => invalidate() });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
   // 配音生成中：後端背景 runner 完成後會回填旁白音檔，10 秒輪詢自動刷新
@@ -268,7 +272,7 @@ function SceneRow({
   const hasPrompt = (s.prompt ?? "").trim() !== "";
   // 這一鏡實際會用的卡片（有綁用它、沒綁沿用生成台勾選）——預覽與出圖看的是同一份
   const effectiveCards = resolveSceneCards(s, { characterIds: charIds, scenePresetIds: sceneIds, propIds });
-  const rowError = update.error ?? generate.error;
+  const rowError = update.error ?? generate.error ?? insertAfter.error;
   // 快速出圖的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
   const genModel = getModel(genModelId) ?? getModel(DEFAULT_MODEL);
   const genPoints = genModel?.points;
@@ -529,6 +533,24 @@ function SceneRow({
         <div style={{ display: "flex", gap: 4 }}>
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === 0 || move.isPending} aria-label="上移" onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}><Icon name="ChevronUp" size={16} /></button>
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
+          <button
+            style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }}
+            disabled={insertAfter.isPending}
+            aria-label="在這之後插入一鏡"
+            title="在這一鏡後面插入一格空的（不必加到最後再一路搬上來）"
+            onClick={() => insertAfter.mutate({ sceneId: s.id })}
+          >
+            <Icon name="Plus" size={16} />
+          </button>
+          <button
+            style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }}
+            disabled={insertAfter.isPending}
+            aria-label="複製這一鏡"
+            title="照這一鏡再拍一顆：複製標題／秒數／提示詞／旁白與設定卡綁定（不複製成品）"
+            onClick={() => insertAfter.mutate({ sceneId: s.id, duplicate: true })}
+          >
+            <Icon name="Copy" size={16} />
+          </button>
           <ConfirmButton
             triggerStyle={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger-ink)" }}
             disabled={remove.isPending}
@@ -587,6 +609,18 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
   const actionError = submitApproval.error ?? decide.error ?? move.error ?? remove.error;
 
   const list = (scenes.data ?? []) as Scene[];
+  // 文字腳本的「設定卡」唯讀標注要顯示名字——與專案頁同快取鍵，不會多打 API
+  const characterCards = trpc.characters.list.useQuery({ projectId });
+  const sceneCards = trpc.scenePresets.list.useQuery({ projectId });
+  const propCards = trpc.props.list.useQuery({ projectId });
+  const sceneCardNames = (s: Scene): string[] => [
+    ...(s.characterIds ?? []).map((id) => characterCards.data?.find((c) => c.id === id)?.name),
+    ...(s.scenePresetIds ?? []).map((id) => sceneCards.data?.find((x) => x.id === id)?.name),
+    ...(s.propIds ?? []).map((id) => {
+      const row = propCards.data?.find((p) => p.id === id);
+      return row ? formatPropDisplayName(row.name, row.ownerName) : undefined;
+    }),
+  ].filter((n): n is string => !!n);
   const totalSec = list.reduce((sum, s) => sum + s.durationSec, 0);
   type SceneFilter = "all" | "draft" | "pending" | "needs_work" | "approved" | "missing";
   const [sceneFilter, setSceneFilter] = useState<SceneFilter>("all");
@@ -753,6 +787,21 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
             )}
           </div>
         </div>
+      )}
+      {/* 文字腳本：整份分鏡當一份文件讀／改（一格一格點適合改單鏡，不適合通讀與整份重寫） */}
+      {!scenes.isError && (
+        <StoryboardScript
+          projectId={projectId}
+          rows={list.map((s) => ({
+            title: s.title,
+            durationSec: s.durationSec,
+            prompt: s.prompt,
+            voiceover: s.voiceover,
+            cardNames: sceneCardNames(s),
+          }))}
+          canEdit={canEdit}
+          onApplied={invalidate}
+        />
       )}
       {!scenes.isError && list.length > 0 && (
         <div className="scene-overview" aria-label="分鏡狀態總覽">
