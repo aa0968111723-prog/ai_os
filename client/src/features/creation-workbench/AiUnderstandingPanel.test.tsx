@@ -114,40 +114,60 @@ describe("AiUnderstandingPanel request presentation", () => {
     expect(characterNode).toHaveTextContent("卡片參考圖沒有直接送給模型");
   });
 
-  it("flags the sections a 77-token CLIP window cannot reach", () => {
+  it("shows the measured window, and never a number it could not measure", () => {
     openPanel({
       ...basePreview,
       model: "SDXL Lightning",
       modelId: "fal-ai/fast-lightning-sdxl",
-      request: {
-        positivePrompt: [
-          "一位訪客在晨光禪堂點起一炷香，在陪伴與整理之間，把浮躁的心慢慢交還給平靜",
-          "[專案背景] 調性:療癒|視覺風格:手繪插畫|核心訊息:把心交給佛，日子就有了呼吸的空隙",
-          "[素材設定] 材質鎖定 紅傘：正紅色長柄傘、木質握把、傘面微舊",
-        ].join("\n\n"),
+      request: { positivePrompt: "晨光禪堂點香\n\n[素材設定] 材質鎖定 紅傘：正紅色長柄傘" },
+      // 伺服器實測的結果（server/services/promptTokens）；前端只畫，不自己算
+      promptBudget: {
+        encoder: { label: "雙 CLIP（SDXL）", note: "窗口 77", measured: true, sequenceTokens: 77, contentTokens: 75 },
+        segments: [
+          { key: "instruction", tokens: 60, chars: 6, startToken: 0, status: "inside" },
+          { key: "prop", tokens: 40, chars: 20, startToken: 60, status: "truncated" },
+        ],
+        totalTokens: 100,
+        totalChars: 26,
+        overflows: true,
+        chunks: [
+          { text: "晨光禪堂點香", tokens: 60, startToken: 0, key: "instruction", status: "inside" },
+          { text: "正紅色長柄傘", tokens: 40, startToken: 60, key: "prop", status: "truncated" },
+        ],
       },
     });
 
-    expect(screen.getByTestId("prompt-encoder-window")).toHaveTextContent("雙 CLIP（SDXL）");
-    // 截斷從尾端發生：最後疊上去的素材設定確定有內容進不了模型
-    expect(screen.getByTestId("prompt-flow-node-prop")).toHaveTextContent(/沒進模型/);
-    // 開頭的使用者指令一定在窗口內，不該被標成截斷
-    expect(screen.getByTestId("prompt-flow-node-instruction")).not.toHaveTextContent(/沒進模型/);
+    const window = screen.getByTestId("prompt-encoder-window");
+    expect(window).toHaveTextContent("實測 100 / 75 token");
+    expect(window).toHaveTextContent("不是估算");
+    expect(screen.getByTestId("prompt-flow-node-prop")).toHaveTextContent("後半沒進模型");
+    // 逐詞佔用：模型讀到哪些字，是量出來的
+    expect(screen.getByTestId("prompt-token-map")).toHaveTextContent("正紅色長柄傘");
   });
 
-  it("does not claim truncation for a model whose window is undisclosed", () => {
+  it("reports characters only when the model's tokenizer is not built in", () => {
     openPanel({
       ...basePreview,
-      model: "Ideogram v4",
-      modelId: "fal-ai/ideogram/v4",
-      request: { positivePrompt: `很長的一段中文${"，再加一段描述".repeat(60)}` },
+      model: "FLUX.1 [dev]",
+      modelId: "fal-ai/flux/dev",
+      request: { positivePrompt: "晨光禪堂點香" },
+      promptBudget: {
+        encoder: { label: "T5-XXL（FLUX.1）", note: "窗口 512", measured: false, documentedLimitTokens: 512 },
+        segments: [{ key: "instruction", tokens: null, chars: 6, startToken: null, status: "unmeasured" }],
+        totalTokens: null,
+        totalChars: 6,
+        overflows: false,
+        chunks: [],
+      },
     });
 
     const window = screen.getByTestId("prompt-encoder-window");
-    expect(window).toHaveTextContent("未公開");
-    expect(window).toHaveTextContent("token");
+    expect(window).toHaveTextContent("6 字・token 未量測");
+    expect(window).toHaveTextContent("不假裝算得出來");
+    // 量不到就不畫條帶、不畫逐詞圖、不下截斷判斷
+    expect(screen.queryByTestId("token-budget-strip")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("prompt-token-map")).not.toBeInTheDocument();
     expect(screen.queryByText(/沒進模型/)).not.toBeInTheDocument();
-    expect(screen.queryByText("可能超出窗口")).not.toBeInTheDocument();
   });
 
   it("still shows the verbatim prompt after switching to the text view", () => {

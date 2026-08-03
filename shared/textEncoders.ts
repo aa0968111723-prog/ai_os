@@ -1,5 +1,5 @@
 /**
- * 文字編碼器窗口偵測（「注意力預算」）。
+ * 文字編碼器的公開規格（窗口長度與分詞器家族）。
  *
  * 為什麼需要這個：擴散模型不是把整段 prompt 都讀進去的。文字先過一顆文字編碼器
  * （CLIP／T5／umT5…），那顆編碼器有**固定的序列長度**；超過的 token 會被截掉，
@@ -7,23 +7,15 @@
  * 疊出來的長度很容易超過 CLIP 的 77 —— 於是使用者在預覽裡看到「素材設定」那一段，
  * 以為它生效了，實際上模型根本沒讀到。
  *
- * 這個模組不碰模型內部（hosted API 不回傳 attention），只做兩件可驗證的事：
- * 1. 這顆模型的文字窗口是多少（**只在官方／開源權重有公開時才給數字**）。
- * 2. 這段文字大概佔多少 token（給區間，不給假精確值）。
+ * 這個模組不碰模型內部（hosted API 不回傳 attention），只回答一件可查證的事：
+ * 這顆模型的文字塔是什麼、窗口多長——**只在官方／開源權重有公開時才給數字**。
  *
- * 判定截斷時一律用**樂觀下界**：只有「連最少的估計都超過窗口」才敢說被截掉。
- * 寧可漏報也不誤報——誤報會讓使用者刪掉其實有效的設定。
+ * token 實際數量不在這裡算：那要真的分詞器，見 server/services/promptTokens。
+ * 這裡不做任何估算，站內也不顯示估算值。
  */
 
-/** 分詞器家族：對中文的效率差很多，估算必須分開算 */
+/** 分詞器家族：決定站內量不量得到 token（目前只內建 CLIP 的詞表） */
 export type TokenizerKind = "clip-bpe" | "sentencepiece";
-
-export interface TokenRange {
-  /** 樂觀下界 */
-  min: number;
-  /** 保守上界 */
-  max: number;
-}
 
 export interface TextEncoderProfile {
   /** 家族鍵（測試與 UI 用） */
@@ -97,7 +89,7 @@ const RULES: readonly ProfileRule[] = [
       key: "sdxl",
       ...CLIP_77,
       label: "雙 CLIP（SDXL）",
-      note: "SDXL 兩顆 CLIP 各 77 token，超出的部分直接被截掉，對模型等同不存在。",
+      note: "SDXL 兩顆 CLIP 各 77 格（頭尾兩格是特殊標記，內容實際只放得下 75），超出的部分直接被截掉。",
     },
   },
   {
@@ -163,12 +155,12 @@ const UNDISCLOSED: readonly ProfileRule[] = [
   { match: /kling|veo|luma|minimax|pixverse|pika|runway|seedance/, profile: { key: "video-closed", label: "閉源影片模型（未公開）", tokenizer: "sentencepiece", note: "閉源影片模型，官方未公開文字編碼器與窗口長度。" } },
 ];
 
-/** 完全比對不到家族時的保底：只算 token，不宣稱任何窗口 */
+/** 完全比對不到家族時的保底：只報實際字數，不宣稱任何窗口 */
 const UNKNOWN_PROFILE: TextEncoderProfile = {
   key: "unknown",
   label: "未知文字編碼器",
   tokenizer: "sentencepiece",
-  note: "站內沒有這顆模型的文字窗口資料，只顯示 token 估算，不判定是否截斷。",
+  note: "站內沒有這顆模型的文字窗口資料，也沒有內建它的分詞器，只顯示實際字數。",
 };
 
 export function textEncoderProfileFor(modelId: string | undefined | null): TextEncoderProfile {
@@ -177,109 +169,4 @@ export function textEncoderProfileFor(modelId: string | undefined | null): TextE
     if (rule.match.test(modelId)) return rule.profile;
   }
   return UNKNOWN_PROFILE;
-}
-
-/**
- * 每字元的 token 成本區間。
- *
- * CLIP 走 byte-level BPE：一個中日韓字是 3 個 UTF-8 byte，常被切成 1～3 個 token，
- * 中文因此特別吃窗口。T5／umT5／ChatGLM 走多語 sentencepiece，一個中文字通常 ≤1 token。
- * 這些是估算不是實測——所以回傳區間，並且只在下界都超標時才敢說「被截斷」。
- */
-const CHAR_COST: Record<TokenizerKind, Record<"cjk" | "latin" | "digit" | "other", TokenRange>> = {
-  "clip-bpe": {
-    cjk: { min: 1, max: 3 },
-    latin: { min: 0.2, max: 0.35 },
-    digit: { min: 0.4, max: 1 },
-    other: { min: 0.15, max: 0.6 },
-  },
-  sentencepiece: {
-    cjk: { min: 0.7, max: 1.5 },
-    latin: { min: 0.2, max: 0.35 },
-    digit: { min: 0.3, max: 1 },
-    other: { min: 0.15, max: 0.6 },
-  },
-};
-
-const CJK = /[㐀-䶿一-鿿぀-ヿ가-힣　-〿＀-･]/;
-const LATIN = /[A-Za-z]/;
-const DIGIT = /[0-9]/;
-
-/** 一段文字的 token 估算區間（估算，不是實測分詞） */
-export function estimateTokenRange(text: string, tokenizer: TokenizerKind): TokenRange {
-  const cost = CHAR_COST[tokenizer];
-  let min = 0;
-  let max = 0;
-  for (const char of text ?? "") {
-    const bucket = CJK.test(char) ? "cjk" : LATIN.test(char) ? "latin" : DIGIT.test(char) ? "digit" : "other";
-    min += cost[bucket].min;
-    max += cost[bucket].max;
-  }
-  return { min: Math.round(min), max: Math.round(max) };
-}
-
-/**
- * 一段提示詞在窗口裡的處境。
- * - `inside`：連保守上界都在窗口內 → 確定進得去
- * - `at_risk`：下界在窗口內、上界超出 → 估算跨在邊界上，可能被截
- * - `truncated`：連樂觀下界都超出窗口 → 確定有一部分沒進模型
- * - `dropped`：這一段的起點就已經在窗口之外 → 整段確定沒進模型
- * - `unknown`：模型窗口未公開 → 不判定
- */
-export type BudgetStatus = "inside" | "at_risk" | "truncated" | "dropped" | "unknown";
-
-export interface BudgetSegment<T = string> {
-  /** 呼叫端自己的識別（節點 key 等） */
-  id: T;
-  text: string;
-}
-
-export interface BudgetSegmentResult<T = string> {
-  id: T;
-  tokens: TokenRange;
-  /** 這一段在整串裡的起始位置（樂觀下界累計） */
-  startMin: number;
-  status: BudgetStatus;
-}
-
-export interface PromptBudget<T = string> {
-  profile: TextEncoderProfile;
-  total: TokenRange;
-  segments: BudgetSegmentResult<T>[];
-  /** 樂觀下界都超過窗口＝這次確定有內容沒進模型 */
-  overflows: boolean;
-}
-
-/**
- * 依序（＝實際送出的疊加順序）算出每一段的 token 佔用與處境。
- * 順序很重要：截斷從尾端發生，所以「最後疊上去的素材設定」最先被犧牲。
- */
-export function analyzePromptBudget<T>(
-  segments: readonly BudgetSegment<T>[],
-  profile: TextEncoderProfile,
-): PromptBudget<T> {
-  const limit = profile.limitTokens;
-  let cursorMin = 0;
-  let cursorMax = 0;
-  const results: BudgetSegmentResult<T>[] = segments.map((segment) => {
-    const tokens = estimateTokenRange(segment.text, profile.tokenizer);
-    const startMin = cursorMin;
-    const startMax = cursorMax;
-    cursorMin += tokens.min;
-    cursorMax += tokens.max;
-    let status: BudgetStatus = "unknown";
-    if (limit != null) {
-      if (startMin >= limit) status = "dropped";
-      else if (cursorMin > limit) status = "truncated";
-      else if (startMax + tokens.max > limit) status = "at_risk";
-      else status = "inside";
-    }
-    return { id: segment.id, tokens, startMin, status };
-  });
-  return {
-    profile,
-    total: { min: cursorMin, max: cursorMax },
-    segments: results,
-    overflows: limit != null && cursorMin > limit,
-  };
 }

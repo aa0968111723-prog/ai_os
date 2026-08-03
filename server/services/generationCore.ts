@@ -11,7 +11,8 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { getModel, endpointOf, isNimModel, supportsNegativePrompt, supportsSeed, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
-import { estimateTokenRange, textEncoderProfileFor } from "../../shared/textEncoders";
+import { measurePromptBudget } from "./promptTokens";
+import type { PromptBudgetReport } from "../../shared/promptBudget";
 import { storeGenerationSourceMeta, type GenerationAblationMeta } from "../../shared/generationSourceMeta";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import {
@@ -245,6 +246,8 @@ export interface PreparedGenerationRequest {
   continuityReferences: ContinuityReferenceResult;
   continuityCoverage: ContinuityCoverage;
   warnings: Array<{ code: string; severity: "info" | "warning"; title: string; detail: string; suggestion?: string }>;
+  /** 提示詞 token 實測（見 services/promptTokens）；預覽與警告共用同一份量測 */
+  promptBudget: PromptBudgetReport;
 }
 
 /**
@@ -455,16 +458,19 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     detail: `已送入 ${continuityReferences.attached} 張，另有 ${continuityReferences.truncated} 張未送，避免超過 provider 的保守輸入上限。`,
   });
   // 注意力預算：文字編碼器的窗口是硬上限，超出的字對模型等同不存在。
-  // 只在窗口有公開資料、且**連樂觀下界都超標**時才報——寧可漏報，不可讓人誤刪有效設定。
-  const encoder = textEncoderProfileFor(model.id);
-  const promptTokens = estimateTokenRange(positivePrompt, encoder.tokenizer);
-  if (encoder.limitTokens != null && promptTokens.min > encoder.limitTokens) warnings.push({
-    code: "prompt_exceeds_encoder_window",
-    severity: "warning",
-    title: "提示詞超過這個模型的文字窗口",
-    detail: `${encoder.label} 只讀得下 ${encoder.limitTokens} token，本次組裝後約 ${promptTokens.min}–${promptTokens.max} token；超出的部分會被截掉，對模型等同不存在（截斷從尾端開始，最後疊上的素材設定最先被犧牲）。`,
-    suggestion: "縮短提示詞或減少同時選入的設定卡，也可以改用窗口較長的模型。",
-  });
+  // 這是**實測**（站內內建 CLIP 分詞器），不是估算——量不到的家族不報數字、也不下判斷。
+  const promptBudget = measurePromptBudget(model.id, positivePrompt);
+  if (promptBudget.overflows && promptBudget.totalTokens != null) {
+    const cut = promptBudget.segments.filter((segment) => segment.status !== "inside" && segment.status !== "unmeasured");
+    warnings.push({
+      code: "prompt_exceeds_encoder_window",
+      severity: "warning",
+      title: "提示詞超過這個模型的文字窗口",
+      detail: `${promptBudget.encoder.label} 內容實際只放得下 ${promptBudget.encoder.contentTokens} 個 token，本次實測 ${promptBudget.totalTokens} 個；超出的部分會被截掉，對模型等同不存在。`
+        + (cut.length ? `本次被切到的段落：${cut.map((segment) => segment.key).join("、")}。` : ""),
+      suggestion: "縮短提示詞或減少同時選入的設定卡，也可以改用窗口較長的模型。",
+    });
+  }
   if (negativePrompt && !supportsNegativePrompt(model)) warnings.push({
     code: "negative_prompt_unsupported",
     severity: "warning",
@@ -483,6 +489,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     model,
     accessRole,
     estimatedPoints,
+    promptBudget,
     sourceUrl: sourceUrl ?? undefined,
     secondarySourceUrl: secondarySourceUrl ?? undefined,
     effectiveSourceAssetId,

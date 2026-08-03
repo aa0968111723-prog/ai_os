@@ -148,6 +148,7 @@ export const generationRouter = router({
         request: safe.payload,
         warnings: prepared.warnings,
         estimatedPoints: prepared.estimatedPoints,
+        promptBudget: prepared.promptBudget,
         canOverrideCreativePrompt: true,
       };
     }),

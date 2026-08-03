@@ -46,6 +46,7 @@
     "@types/compression": "^1.8.1",
     "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",
+    "clip-bpe-js": "^0.0.6",
     "compression": "^1.8.1",
     "drizzle-kit": "^0.31.4",
     "drizzle-orm": "^0.45.2",

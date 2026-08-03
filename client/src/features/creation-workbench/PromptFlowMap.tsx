@@ -1,14 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { AiWarning } from "@shared/aiTrace";
-import {
-  analyzePromptBudget,
-  textEncoderProfileFor,
-  type BudgetStatus,
-  type BudgetSegmentResult,
-  type PromptBudget,
-} from "@shared/textEncoders";
+import type { PromptBudgetReport, PromptBudgetSegment } from "@shared/promptBudget";
 import { Card, Chip, Meta } from "../../components/ui";
 import { ModelMechanicsView } from "./ModelMechanicsView";
+import { PromptTokenMap } from "./PromptTokenMap";
 import { TokenBudgetStrip } from "./TokenBudgetStrip";
 import {
   buildPromptFlow,
@@ -125,24 +120,23 @@ function NodeWarnings({ warnings }: { warnings: AiWarning[] }) {
 }
 
 /**
- * 注意力預算狀態 → 給人看的說法。
- * 用詞刻意分「確定」與「可能」：估算跨在邊界上時說「可能」，
- * 只有連樂觀下界都超標才敢說「沒進模型」——誤報會害使用者刪掉其實有效的設定。
+ * 段落處境 → 給人看的說法。
+ * 數字是實測的（伺服器用內建 CLIP 詞表真的分詞），所以這裡沒有「可能」——
+ * 說沒進模型就是真的沒進。量不到分詞器的家族走 unmeasured，不下任何判斷。
  */
-const BUDGET_STATUS: Record<BudgetStatus, { label: string; ink: string; soft: string } | null> = {
+const BUDGET_STATUS: Record<PromptBudgetSegment["status"], { label: string; ink: string; soft: string } | null> = {
   inside: null,
-  at_risk: { label: "可能超出窗口", ink: "var(--gold-ink)", soft: "var(--gold-soft)" },
-  truncated: { label: "有一部分沒進模型", ink: "var(--danger-ink)", soft: "var(--danger-soft)" },
+  truncated: { label: "後半沒進模型", ink: "var(--danger-ink)", soft: "var(--danger-soft)" },
   dropped: { label: "整段沒進模型", ink: "var(--danger-ink)", soft: "var(--danger-soft)" },
-  unknown: null,
+  unmeasured: null,
 };
 
-function BudgetBadge({ budget }: { budget: BudgetSegmentResult<PromptFlowNodeKey> }) {
-  const state = BUDGET_STATUS[budget.status];
+function BudgetBadge({ segment }: { segment: PromptBudgetSegment }) {
+  const state = BUDGET_STATUS[segment.status];
   return (
     <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
       <span style={{ fontSize: 11, color: "var(--fg-secondary)" }}>
-        約 {budget.tokens.min}–{budget.tokens.max} token
+        {segment.tokens != null ? `${segment.tokens} token` : `${segment.chars} 字`}
       </span>
       {state ? (
         <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 999, color: state.ink, background: state.soft }}>
@@ -163,10 +157,10 @@ function EncoderWindow({
   budget,
   titles,
 }: {
-  budget: PromptBudget<PromptFlowNodeKey>;
+  budget: PromptBudgetReport;
   titles: Partial<Record<PromptFlowNodeKey, string>>;
 }) {
-  const { profile, total, overflows } = budget;
+  const { encoder, totalTokens, totalChars, overflows } = budget;
 
   return (
     <Card
@@ -176,17 +170,21 @@ function EncoderWindow({
     >
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
         <strong style={{ fontSize: 13 }}>文字窗口</strong>
-        <span style={{ fontSize: 12, color: "var(--fg-secondary)" }}>{profile.label}</span>
+        <span style={{ fontSize: 12, color: "var(--fg-secondary)" }}>{encoder.label}</span>
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 12 }}>
-          約 {total.min}–{total.max}
-          {profile.limitTokens ? ` / ${profile.limitTokens}` : ""} token
+          {encoder.measured && totalTokens != null
+            ? `實測 ${totalTokens} / ${encoder.contentTokens} token`
+            : `${totalChars} 字・token 未量測`}
         </span>
       </div>
       <TokenBudgetStrip budget={budget} titles={titles} />
+      <PromptTokenMap budget={budget} />
       <Meta as="p" style={{ margin: "6px 0 0", fontSize: 12 }}>
-        {profile.note}
-        {profile.limitTokens ? "　實色＝最低估計，半透明＝最高估計；斜線區是模型讀不到的部分。" : ""}
+        {encoder.note}
+        {encoder.measured
+          ? `　數字為站內用 ${encoder.label} 的詞表實際分詞的結果，不是估算；${encoder.sequenceTokens} 格裡頭尾兩格是特殊標記。`
+          : `　站內沒有內建這顆模型的分詞器，因此不換算 token${encoder.documentedLimitTokens ? `（官方載明窗口 ${encoder.documentedLimitTokens}，僅供參考）` : ""}——只顯示實際字數，不假裝算得出來。`}
       </Meta>
     </Card>
   );
@@ -258,6 +256,7 @@ export function PromptFlowMap({
   provider,
   model,
   modelId,
+  promptBudget,
   estimatedPoints,
   warnings = [],
 }: {
@@ -266,19 +265,16 @@ export function PromptFlowMap({
   parameters: Array<{ key: string; label: string; value: string }>;
   provider?: string;
   model?: string;
-  /** 模型目錄 id：查文字編碼器窗口用（label 查不到，家族比對要吃 id） */
+  /** 模型目錄 id：查文字編碼器規格用（label 查不到，家族比對要吃 id） */
   modelId?: string;
+  /** 伺服器實測的 token 預算；沒有就不畫窗口那一段（絕不在前端補估算） */
+  promptBudget?: PromptBudgetReport;
   estimatedPoints?: number;
   warnings?: AiWarning[];
 }) {
   const promptNodes = buildPromptFlow(positivePrompt);
-  // 注意力預算：依實際疊加順序算，截斷從尾端發生，所以最後疊上去的素材設定最先被犧牲
-  const encoder = textEncoderProfileFor(modelId);
-  const budget = analyzePromptBudget(
-    promptNodes.map((node) => ({ id: node.key, text: node.raw })),
-    encoder,
-  );
-  const budgetByKey = new Map(budget.segments.map((segment) => [segment.id, segment]));
+  // 截斷從尾端發生，所以最後疊上去的素材設定最先被犧牲——順序由伺服器量測時就固定好
+  const budgetByKey = new Map((promptBudget?.segments ?? []).map((segment) => [segment.key, segment]));
   const negativeItems = negativePrompt ? parseNegativeItems(negativePrompt) : [];
   const hasModelNode = Boolean(provider || model || parameters.length || estimatedPoints != null);
 
@@ -317,10 +313,12 @@ export function PromptFlowMap({
 
   return (
     <>
-      <EncoderWindow
-        budget={budget}
-        titles={Object.fromEntries(promptNodes.map((node) => [node.key, node.title]))}
-      />
+      {promptBudget ? (
+        <EncoderWindow
+          budget={promptBudget}
+          titles={Object.fromEntries(promptNodes.map((node) => [node.key, node.title]))}
+        />
+      ) : null}
       <ol data-testid="prompt-flow-map" style={{ listStyle: "none", margin: "8px 0 0", padding: 0 }}>
       {promptNodes.map((node, index) => (
         <FlowNode
@@ -332,8 +330,8 @@ export function PromptFlowMap({
           last={isLast(index)}
           testId={`prompt-flow-node-${node.key}`}
           meta={(() => {
-            const segment = budgetByKey.get(node.key);
-            return segment ? <BudgetBadge budget={segment} /> : null;
+            const segment = budgetByKey.get(node.key as PromptBudgetSegment["key"]);
+            return segment ? <BudgetBadge segment={segment} /> : null;
           })()}
         >
           {nodeBody(node)}
