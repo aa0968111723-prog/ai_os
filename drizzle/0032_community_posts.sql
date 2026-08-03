@@ -1,5 +1,5 @@
 -- Community / 靈感頻道：全站共用提示詞與多模態素材展示（Flow-TV 風格）
--- 發布快照：不污染 prompts/generations/assets 等栲心表；原列改刪後公開卡仍可展示
+-- 發布快照：不污染 prompts/generations/assets 等核心表；原列改刪後公開卡仍可展示
 -- IF NOT EXISTS 沿用 0016/0031 慣例：重複套用不炸
 CREATE TABLE IF NOT EXISTS "community_posts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
