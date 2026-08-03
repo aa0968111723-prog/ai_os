@@ -133,7 +133,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0027_generation_continuity",
   // 0028：workflow_runs 加 nullable jsonb 快照欄位（ADD COLUMN IF NOT EXISTS），舊 run 維持原本逐步解析行為。
   "0028_workflow_continuity_snapshot",
-  // 0029：props 加兩個 nullable 歸屬欄位＋索引（皆 IF NOT EXISTS），既有卡維持獨立物件。
+  // 0029：props 歸屬索引，外加給「已套用舊版 0025」資料庫補的兩個 nullable 欄位
+  //       （皆 IF NOT EXISTS；欄位本體已在 0025 的 CREATE TABLE 內）。
   "0029_prop_ownership",
 ] as const;
 
@@ -163,6 +164,15 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
  * correction only lets the bridge compare the file against a generated drift
  * plan, which emits neither the separator nor the spaces.
  *
+ * 0025 created the props table without the owner_kind/owner_id columns, which
+ * 0029 then added. Both are in the same bridge batch, and the bridge compares a
+ * table created inside that batch against the drift plan's whole-table DDL — so
+ * the columns had to move into 0025's CREATE TABLE (the rule 0022 already
+ * records). 0029 keeps the guarded ALTERs for databases that applied the
+ * original 0025, so both orders converge on the same table; wherever the
+ * original succeeded, re-running the corrected file creates the same table with
+ * the columns 0029 would have added anyway.
+ *
  * 0023 wrote its partial index predicate with a bare column name
  * (`WHERE land_state = 'pending'`) while every other partial index in the tree
  * qualifies it (`WHERE "assets"."land_state" = 'pending'`, as 0001 does and as
@@ -182,6 +192,9 @@ export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly strin
   ],
   "0023_asset_durability": [
     "150e3024f1830ef05f65469164b99e3b5f33199408802ff7df125faef71679e5",
+  ],
+  "0025_project_props": [
+    "d93eaefc4613d71f61a3b31a8cb7620ad4080d4c495c103047486a1cc2d4a01a",
   ],
 };
 

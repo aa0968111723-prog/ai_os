@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS "props" (
 	"appearance" text NOT NULL,
 	"notes" text,
 	"reference_asset_id" uuid,
+	"owner_kind" text,
+	"owner_id" uuid,
 	"created_by" uuid NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL
 );

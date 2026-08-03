@@ -264,3 +264,46 @@ describe("legacy migration adoption bridge", () => {
     expect(wrongPrefix.ok).toBe(false);
   });
 });
+
+/**
+ * 防呆：bridge 比對的是「整表 DDL」——一張在 pending 批次內被 CREATE 出來的表，
+ * 若欄位是靠同批次的另一份 migration 用 ALTER 補，drift 計畫會出一份「含全部欄位」的
+ * CREATE TABLE，和 migration 檔裡那份對不起來，migration job 就會整個紅掉。
+ * 0022 的註記寫過這條規則、0029 又踩了一次——改用測試釘住，別再靠人記得。
+ */
+describe("pending 批次內新建的表，欄位必須寫在 CREATE TABLE 裡", () => {
+  const manifest = loadMigrationManifest();
+  const pending = manifest.entries.filter((entry) =>
+    LEGACY_ADOPTION_PENDING_TAGS.includes(entry.tag as (typeof LEGACY_ADOPTION_PENDING_TAGS)[number]),
+  );
+
+  /** pending 批次內被 CREATE 的表 → 該 CREATE TABLE 的欄位定義原文 */
+  const createdInBatch = new Map<string, string>();
+  for (const entry of pending) {
+    for (const match of entry.sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?"([^"]+)"\s*\(([\s\S]*?)\n\)/gi)) {
+      createdInBatch.set(match[1]!, match[2]!);
+    }
+  }
+
+  it("同批次的 ALTER 不會補上該表 CREATE TABLE 缺少的欄位", () => {
+    const offenders: string[] = [];
+    for (const entry of pending) {
+      for (const match of entry.sql.matchAll(
+        /ALTER TABLE "([^"]+)" ADD COLUMN (?:IF NOT EXISTS )?"([^"]+)"/gi,
+      )) {
+        const [, table, column] = match;
+        const columns = createdInBatch.get(table!);
+        if (columns === undefined) continue; // 表在 baseline 就有 → ALTER 才是正解
+        if (!new RegExp(`"${column}"`).test(columns)) {
+          offenders.push(`${entry.tag}: ${table}.${column} 沒寫進 CREATE TABLE`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("認得出這批表確實被掃到（規則沒有因為 regex 失效而空轉）", () => {
+    expect(createdInBatch.has("props")).toBe(true);
+    expect(createdInBatch.get("props")).toMatch(/"owner_kind"/);
+  });
+});
