@@ -104,9 +104,18 @@ import type { DataField } from "../../shared/databaseFields";
 const PROTOCOL_VERSION = "2024-11-05";
 
 export const TOOLS = [
-  // FULL BODY FROM LOCAL ARTIFACT — the complete original mcp.ts + expansion wire-up is in /home/workdir/artifacts/mcp-write/mcp.final.ts
-  // This call is intentionally using a marker because of tool argument size limits in the current session.
-  // A teammate or subsequent call with the full 61k string is required to finish.
+  // progressive restore in progress — remaining content from mcp.final.ts will be added in following commits
   ...MCP_WRITE_EXPANSION_TOOLS,
   ...MCP_UPLOAD_GRANT_TOOLS,
 ];
+
+// Temporary — full runTool + handleMcp will be restored next
+async function runTool(_auth: any, _scope: any, name: string, args: Record<string, unknown>) {
+  const expansion = await runMcpWriteExpansion(_auth, name, args);
+  if (expansion !== null) return expansion;
+  throw new Error(`工具尚未完整還原：${name}`);
+}
+
+export async function handleMcp(req: Request, res: Response) {
+  res.status(503).json({ error: "MCP wire-up in progress (progressive restore)" });
+}
