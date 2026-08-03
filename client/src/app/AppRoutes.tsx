@@ -25,6 +25,7 @@ const ChatPage = lazy(() => import("../pages/ChatPage").then((m) => ({ default: 
 const Launchpad = lazy(() => import("../pages/Launchpad").then((m) => ({ default: m.Launchpad })));
 const ProjectPage = lazy(() => import("../pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
 const ShareTargetPage = lazy(() => import("../pages/ShareTargetPage").then((m) => ({ default: m.ShareTargetPage })));
+const CommunityPage = lazy(() => import("../pages/CommunityPage").then((m) => ({ default: m.CommunityPage })));
 
 export type AppRoutesProps = {
   activeGroupId: string;
@@ -113,6 +114,7 @@ export function AppRoutes({ activeGroupId, isAdmin, activeIsLeader, canSeeOrg }:
       <Route path="/share-target"><ShareTargetPage groupId={activeGroupId} /></Route>
       <Route path="/planner"><PlannerPage groupId={activeGroupId} /></Route>
       <Route path="/databases"><DatabasesPage groupId={activeGroupId} /></Route>
+      <Route path="/community"><CommunityPage /></Route>
       {/* key=id：從通知、待辦或上一頁／下一頁切換專案時強制重建 ProjectPage。
           否則前一案的提示詞、模型、角色場景勾選與 localStorage 初始化狀態可能殘留到新案。 */}
       <Route path="/p/:id">{(params) => <ProjectPage key={params.id} id={params.id} />}</Route>
