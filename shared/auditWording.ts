@@ -47,6 +47,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "generation.submit": "送出生成",
   "generation.preview": "預覽 AI 如何理解生成請求",
   "generation.retry": "重試失敗的生成",
+  "generation.ablation": "送出影響力實測（基準＋各拿掉一段）",
   "generation.rename": "重新命名成品",
   "generation.toggleFavorite": "收藏／取消收藏成品",
   "generation.decideCost": "核決超額生成",

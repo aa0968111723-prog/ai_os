@@ -1,5 +1,6 @@
 import type { AgentPlannerMode, AgentPlannerUsage } from "../../shared/agentPlanner";
 import { AGENT_LLM_MODEL_IDS } from "../../shared/llmPricing";
+import { summarizeLogprobs, type LlmIntrospection } from "../../shared/llmIntrospection";
 import { chatCompletion, NIM_DEFAULT_MODEL, NimServiceError } from "./nvidia-nim";
 import { falStatus, falSubmit } from "./fal";
 
@@ -51,6 +52,11 @@ export interface LlmCompletion {
   usage?: AgentPlannerUsage;
   /** auto 模式下 NIM 失敗轉 fal 時為 true，供 UI 誠實標示「已自動備援」 */
   fellBack?: boolean;
+  /**
+   * 供應商主動揭露的推理摘要與逐 token 信心（見 shared/llmIntrospection）。
+   * 供應商沒給就是沒有——站內不生成、不補寫、不改寫。
+   */
+  introspection?: LlmIntrospection;
 }
 
 export class LlmServiceError extends Error {
@@ -117,13 +123,35 @@ export interface CompleteTextParams {
   temperature?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /**
+   * 要不要一併取回供應商揭露的推理摘要與逐 token 信心。
+   * 預設關：主線路徑（助手回答、規劃）不需要，開了只是多花 token 與風險。
+   */
+  introspect?: boolean;
 }
 
 /** fal 必須帶 system_prompt；呼叫端沒給時用這句中性預設，不改變回答風格。 */
+/** 供應商正式欄位裡的推理摘要（OpenAI 相容 reasoning_content／openrouter reasoning）。找不到就回 undefined。 */
+export function extractDisclosedReasoning(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const root = payload as Record<string, unknown>;
+  const choice = Array.isArray(root.choices) ? root.choices[0] as Record<string, unknown> | undefined : undefined;
+  const message = choice && typeof choice.message === "object" && choice.message
+    ? choice.message as Record<string, unknown>
+    : undefined;
+  const candidate = message?.reasoning_content ?? message?.reasoning ?? root.reasoning ?? root.reasoning_content;
+  const text = typeof candidate === "string" ? candidate.trim() : "";
+  return text ? text.slice(0, MAX_DISCLOSED_REASONING_CHARS) : undefined;
+}
+
+/** 推理摘要顯示上限：這是給人讀的說明，不是全文存檔 */
+const MAX_DISCLOSED_REASONING_CHARS = 4_000;
+
 const NEUTRAL_SYSTEM_PROMPT = "你是正式產品的中文 AI 助手。依使用者提供的內容作答，不要輸出 reasoning 或 chain-of-thought。";
 
 async function completeNim(params: CompleteTextParams): Promise<LlmCompletion> {
   const response = await chatCompletion({
+    logprobs: params.introspect ?? false,
     messages: [
       ...(params.systemPrompt ? [{ role: "system" as const, content: params.systemPrompt }] : []),
       { role: "user", content: params.prompt },
@@ -133,10 +161,16 @@ async function completeNim(params: CompleteTextParams): Promise<LlmCompletion> {
     timeoutMs: params.timeoutMs ?? 60_000,
     signal: params.signal,
   });
+  const introspection: LlmIntrospection = {
+    disclosedReasoning: extractDisclosedReasoning(response),
+    ...summarizeLogprobs(response.choices[0]?.logprobs?.content ?? []),
+    ...(response.logprobsUnsupported ? { logprobsUnsupported: true } : {}),
+  };
   return {
     provider: "nvidia-nim",
     model: NIM_DEFAULT_MODEL,
     text: response.choices[0]?.message?.content ?? "",
+    ...(Object.values(introspection).some((value) => value !== undefined) ? { introspection } : {}),
     usage: response.usage
       ? {
           promptTokens: response.usage.prompt_tokens,
@@ -171,7 +205,16 @@ async function completeFal(params: CompleteTextParams, mode: FalAgentMode): Prom
     const status = await falStatus(FAL_OPENROUTER_ENDPOINT, "text", submitted.requestId);
     if (status.status === "done") {
       if (!status.resultText?.trim()) throw new LlmServiceError("fal.ai 模型沒有回傳內容");
-      return { provider: "fal-openrouter", model: profile.model, text: status.resultText, usage: status.usage };
+      // fal-openrouter 部分模型強制開 reasoning（見 FAL_OPENROUTER_REASONING）；
+      // 供應商真的把它放在回應欄位裡時才顯示，站內不代為生成。
+      const reasoning = params.introspect ? extractDisclosedReasoning(status.rawResponse) : undefined;
+      return {
+        provider: "fal-openrouter",
+        model: profile.model,
+        text: status.resultText,
+        usage: status.usage,
+        ...(reasoning ? { introspection: { disclosedReasoning: reasoning } } : {}),
+      };
     }
     if (status.status === "failed") throw new LlmServiceError(status.error || "fal.ai 呼叫失敗");
     await sleep(FAL_POLL_INTERVAL_MS, params.signal);

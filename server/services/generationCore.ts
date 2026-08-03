@@ -9,9 +9,10 @@
 import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
-import { getModel, endpointOf, isNimModel, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { getModel, endpointOf, isNimModel, supportsNegativePrompt, supportsSeed, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
-import { storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
+import { estimateTokenRange, textEncoderProfileFor } from "../../shared/textEncoders";
+import { storeGenerationSourceMeta, type GenerationAblationMeta } from "../../shared/generationSourceMeta";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import {
   worldviewSchema,
@@ -202,6 +203,14 @@ export interface SubmitCoreInput {
   agentRunId?: string;
   /** 進階使用者明確覆寫最終創作 prompt；系統權限與 provider schema 仍不可覆寫。 */
   promptOverride?: { positive?: string; negative?: string };
+  /**
+   * 固定隨機噪聲。只有消融實測（影響力量測）會帶：基準與各變體共用同一顆 seed，
+   * 輸出差異才歸因得到「被拿掉的那一段」而不是噪聲。
+   * 只在 supportsSeed 名單內才真的送出——不猜未知欄位（猜錯是整包 400）。
+   */
+  seed?: number;
+  /** 消融實測分組標記：落 params 內部欄位，送 provider 前會被移除 */
+  ablation?: GenerationAblationMeta;
   /** 預設開啟：凍結設定卡版本，並在 provider 支援時附上多張參考圖。 */
   continuityMode?: boolean;
   /** 只供伺服器重試沿用資料庫快照；不得直接暴露成公開 API payload。 */
@@ -388,6 +397,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     secondarySourceUrl,
   ) as Record<string, unknown>;
   if (negativePrompt && supportsNegativePrompt(model)) providerInput.negative_prompt = negativePrompt;
+  if (input.seed != null && supportsSeed(model)) providerInput.seed = input.seed;
   const referenceUrls = continuitySnapshot?.locked
     ? await resolveContinuityReferenceUrls(continuitySnapshot, project.groupId, effectiveSourceAssetId)
     : [];
@@ -443,6 +453,17 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     severity: "info",
     title: "參考圖已依優先順序取前 4 張",
     detail: `已送入 ${continuityReferences.attached} 張，另有 ${continuityReferences.truncated} 張未送，避免超過 provider 的保守輸入上限。`,
+  });
+  // 注意力預算：文字編碼器的窗口是硬上限，超出的字對模型等同不存在。
+  // 只在窗口有公開資料、且**連樂觀下界都超標**時才報——寧可漏報，不可讓人誤刪有效設定。
+  const encoder = textEncoderProfileFor(model.id);
+  const promptTokens = estimateTokenRange(positivePrompt, encoder.tokenizer);
+  if (encoder.limitTokens != null && promptTokens.min > encoder.limitTokens) warnings.push({
+    code: "prompt_exceeds_encoder_window",
+    severity: "warning",
+    title: "提示詞超過這個模型的文字窗口",
+    detail: `${encoder.label} 只讀得下 ${encoder.limitTokens} token，本次組裝後約 ${promptTokens.min}–${promptTokens.max} token；超出的部分會被截掉，對模型等同不存在（截斷從尾端開始，最後疊上的素材設定最先被犧牲）。`,
+    suggestion: "縮短提示詞或減少同時選入的設定卡，也可以改用窗口較長的模型。",
   });
   if (negativePrompt && !supportsNegativePrompt(model)) warnings.push({
     code: "negative_prompt_unsupported",
@@ -611,7 +632,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       },
     });
   }
-  const storedParams = storeGenerationSourceMeta(falInput, { secondarySourceUrl });
+  const storedParams = storeGenerationSourceMeta(falInput, { secondarySourceUrl, ablation: input.ablation });
 
   // 成本審核門檻（需求 2.1）：組員（member）單筆估點 ≥ 組門檻 → 先落一筆 awaiting_approval，
   // 不扣點、不送 fal，等組長在生成紀錄核准（generation.decideCost）才走扣點＋送出。

@@ -1,15 +1,25 @@
 /** DB 的 generations.params 內部欄位；送 Fal 前必須移除。 */
 export const GENERATION_SOURCE_META_KEY = "__aiosSourceMeta" as const;
 
+/** 消融實測（影響力量測）的分組標記：同一次實測的基準與各變體共用 runId */
+export type GenerationAblationMeta = {
+  runId: string;
+  /** 這一輪拿掉了哪一段；"baseline"＝完整版，是比對的基準 */
+  section: "baseline" | "background" | "character" | "scene" | "prop";
+  /** 有固定噪聲時的 seed；沒有＝這顆模型固定不了，差異裡混著噪聲 */
+  seed?: number;
+};
+
 export type GenerationSourceMeta = {
   secondarySourceUrl?: string;
+  ablation?: GenerationAblationMeta;
 };
 
 export function storeGenerationSourceMeta(
   providerParams: Record<string, unknown>,
   meta: GenerationSourceMeta,
 ): Record<string, unknown> {
-  if (!meta.secondarySourceUrl) return providerParams;
+  if (!meta.secondarySourceUrl && !meta.ablation) return providerParams;
   return { ...providerParams, [GENERATION_SOURCE_META_KEY]: meta };
 }
 
@@ -29,5 +39,11 @@ export function splitGenerationSourceMeta(params: unknown): {
       && typeof (rawMeta as Record<string, unknown>).secondarySourceUrl === "string"
       ? (rawMeta as Record<string, string>).secondarySourceUrl
       : undefined;
-  return { providerParams, meta: { secondarySourceUrl } };
+  const rawAblation = rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+    ? (rawMeta as Record<string, unknown>).ablation
+    : undefined;
+  const ablation = rawAblation && typeof rawAblation === "object" && !Array.isArray(rawAblation)
+    ? (rawAblation as GenerationAblationMeta)
+    : undefined;
+  return { providerParams, meta: { secondarySourceUrl, ablation } };
 }

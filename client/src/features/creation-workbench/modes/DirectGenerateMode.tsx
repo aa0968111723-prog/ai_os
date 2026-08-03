@@ -516,6 +516,24 @@ export function DirectGenerateMode({
         traceSessionId={traceSessionId}
         override={promptOverride}
         onOverrideChange={setPromptOverride}
+        // 消融實測要重跑同一組設定；沒有模型或提示詞就沒有可實測的東西
+        ablationInput={model && prompt.trim() ? (() => {
+          const { clientRequestId: _ignored, ...base } = buildGenerationSubmitInput({
+            projectId,
+            model,
+            prompt,
+            sourceAsset,
+            sourceUrl,
+            secondarySourceAsset,
+            secondarySourceUrl,
+            characterIds,
+            scenePresetIds,
+            propIds,
+            continuityMode: continuityLocked,
+            clientRequestId: submitRequestId.current,
+          });
+          return base;
+        })() : undefined}
       /> : null}
 
       <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>

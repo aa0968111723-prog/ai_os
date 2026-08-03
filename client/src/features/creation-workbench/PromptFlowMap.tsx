@@ -1,6 +1,14 @@
 import type { CSSProperties, ReactNode } from "react";
 import type { AiWarning } from "@shared/aiTrace";
+import {
+  analyzePromptBudget,
+  textEncoderProfileFor,
+  type BudgetStatus,
+  type BudgetSegmentResult,
+  type PromptBudget,
+} from "@shared/textEncoders";
 import { Card, Chip, Meta } from "../../components/ui";
+import { ModelMechanicsView } from "./ModelMechanicsView";
 import {
   buildPromptFlow,
   distributePromptWarnings,
@@ -107,6 +115,80 @@ function NodeWarnings({ warnings }: { warnings: AiWarning[] }) {
   );
 }
 
+/**
+ * 注意力預算狀態 → 給人看的說法。
+ * 用詞刻意分「確定」與「可能」：估算跨在邊界上時說「可能」，
+ * 只有連樂觀下界都超標才敢說「沒進模型」——誤報會害使用者刪掉其實有效的設定。
+ */
+const BUDGET_STATUS: Record<BudgetStatus, { label: string; ink: string; soft: string } | null> = {
+  inside: null,
+  at_risk: { label: "可能超出窗口", ink: "var(--gold-ink)", soft: "var(--gold-soft)" },
+  truncated: { label: "有一部分沒進模型", ink: "var(--danger-ink)", soft: "var(--danger-soft)" },
+  dropped: { label: "整段沒進模型", ink: "var(--danger-ink)", soft: "var(--danger-soft)" },
+  unknown: null,
+};
+
+function BudgetBadge({ budget }: { budget: BudgetSegmentResult<PromptFlowNodeKey> }) {
+  const state = BUDGET_STATUS[budget.status];
+  return (
+    <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      <span style={{ fontSize: 11, color: "var(--fg-secondary)" }}>
+        約 {budget.tokens.min}–{budget.tokens.max} token
+      </span>
+      {state ? (
+        <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 999, color: state.ink, background: state.soft }}>
+          {state.label}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * 文字窗口總覽：這顆模型讀得下多少、這次組裝用掉多少。
+ *
+ * 這是「注意力」在 hosted API 下唯一能誠實談的部分——不是內部權重，而是
+ * **模型到底讀到了哪幾個字**。窗口未公開時只報用量、不報結論。
+ */
+function EncoderWindow({ budget }: { budget: PromptBudget<PromptFlowNodeKey> }) {
+  const { profile, total, overflows } = budget;
+  const limit = profile.limitTokens;
+  // 進度條用保守上界填色（先讓人看到風險），超出的部分夾在 100%
+  const usedPercent = limit ? Math.min(100, Math.round((total.max / limit) * 100)) : 0;
+  const safePercent = limit ? Math.min(100, Math.round((total.min / limit) * 100)) : 0;
+
+  return (
+    <Card
+      variant="quiet"
+      data-testid="prompt-encoder-window"
+      style={{ padding: "9px 12px", borderRadius: 12, marginTop: 8, borderLeft: `3px solid ${overflows ? "var(--danger)" : "var(--border-strong)"}` }}
+    >
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+        <strong style={{ fontSize: 13 }}>文字窗口</strong>
+        <span style={{ fontSize: 12, color: "var(--fg-secondary)" }}>{profile.label}</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 12 }}>
+          約 {total.min}–{total.max}
+          {limit ? ` / ${limit}` : ""} token
+        </span>
+      </div>
+      {limit ? (
+        <div
+          aria-hidden
+          style={{ position: "relative", height: 6, marginTop: 7, borderRadius: 999, background: "var(--surface-sunken)", overflow: "hidden" }}
+        >
+          <div style={{ position: "absolute", inset: 0, width: `${usedPercent}%`, background: overflows ? "var(--danger-soft)" : "var(--gold-soft)" }} />
+          <div style={{ position: "absolute", inset: 0, width: `${safePercent}%`, background: overflows ? "var(--danger)" : "var(--success)" }} />
+        </div>
+      ) : null}
+      <Meta as="p" style={{ margin: "6px 0 0", fontSize: 12 }}>
+        {profile.note}
+        {limit ? "　估算為區間；只有連最低估計都超過窗口，才會標成「沒進模型」。" : ""}
+      </Meta>
+    </Card>
+  );
+}
+
 function FlowNode({
   accent,
   title,
@@ -114,6 +196,7 @@ function FlowNode({
   hint,
   last,
   testId,
+  meta,
   children,
 }: {
   accent: NodeAccent;
@@ -123,6 +206,8 @@ function FlowNode({
   hint?: string;
   last: boolean;
   testId: string;
+  /** 標題列右側的附註（注意力預算徽章） */
+  meta?: ReactNode;
   children?: ReactNode;
 }) {
   return (
@@ -154,6 +239,7 @@ function FlowNode({
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <strong style={{ fontSize: 14 }}>{title}</strong>
           {roleLabel ? <span style={{ fontSize: 11, color: accent.ink }}>{roleLabel}</span> : null}
+          {meta ? <><span style={{ flex: 1 }} />{meta}</> : null}
         </div>
         {hint ? <Meta as="p" style={{ margin: "3px 0 0", fontSize: 12 }}>{hint}</Meta> : null}
         {children}
@@ -168,6 +254,7 @@ export function PromptFlowMap({
   parameters,
   provider,
   model,
+  modelId,
   estimatedPoints,
   warnings = [],
 }: {
@@ -176,10 +263,19 @@ export function PromptFlowMap({
   parameters: Array<{ key: string; label: string; value: string }>;
   provider?: string;
   model?: string;
+  /** 模型目錄 id：查文字編碼器窗口用（label 查不到，家族比對要吃 id） */
+  modelId?: string;
   estimatedPoints?: number;
   warnings?: AiWarning[];
 }) {
   const promptNodes = buildPromptFlow(positivePrompt);
+  // 注意力預算：依實際疊加順序算，截斷從尾端發生，所以最後疊上去的素材設定最先被犧牲
+  const encoder = textEncoderProfileFor(modelId);
+  const budget = analyzePromptBudget(
+    promptNodes.map((node) => ({ id: node.key, text: node.raw })),
+    encoder,
+  );
+  const budgetByKey = new Map(budget.segments.map((segment) => [segment.id, segment]));
   const negativeItems = negativePrompt ? parseNegativeItems(negativePrompt) : [];
   const hasModelNode = Boolean(provider || model || parameters.length || estimatedPoints != null);
 
@@ -217,7 +313,9 @@ export function PromptFlowMap({
     );
 
   return (
-    <ol data-testid="prompt-flow-map" style={{ listStyle: "none", margin: "8px 0 0", padding: 0 }}>
+    <>
+      <EncoderWindow budget={budget} />
+      <ol data-testid="prompt-flow-map" style={{ listStyle: "none", margin: "8px 0 0", padding: 0 }}>
       {promptNodes.map((node, index) => (
         <FlowNode
           key={node.key}
@@ -227,6 +325,10 @@ export function PromptFlowMap({
           hint={node.hint}
           last={isLast(index)}
           testId={`prompt-flow-node-${node.key}`}
+          meta={(() => {
+            const segment = budgetByKey.get(node.key);
+            return segment ? <BudgetBadge budget={segment} /> : null;
+          })()}
         >
           {nodeBody(node)}
           <NodeWarnings warnings={distributed.byNode[node.key] ?? []} />
@@ -269,6 +371,7 @@ export function PromptFlowMap({
             />
           ) : null}
           <NodeWarnings warnings={distributed.byNode.model ?? []} />
+          <ModelMechanicsView modelId={modelId} />
         </FlowNode>
       ) : null}
 
@@ -280,6 +383,7 @@ export function PromptFlowMap({
           </div>
         </li>
       ) : null}
-    </ol>
+      </ol>
+    </>
   );
 }
