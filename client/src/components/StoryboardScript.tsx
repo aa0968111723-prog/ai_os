@@ -33,6 +33,14 @@ export function StoryboardScript({
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  /** 貼一份原始腳本讓 AI 拆成分鏡——標準模式先前只能繞去知識庫或助手對話 */
+  const [rawScript, setRawScript] = useState<string | null>(null);
+  const split = trpc.director.splitScript.useMutation({
+    onSuccess: () => {
+      setRawScript(null);
+      onApplied();
+    },
+  });
 
   const current = useMemo(() => formatStoryboardScript(rows), [rows]);
   const editing = draft !== null;
@@ -78,6 +86,18 @@ export function StoryboardScript({
               <Icon name="Copy" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
               {copied ? "已複製" : "複製全文"}
             </Button>
+            {canEdit && !editing && (
+              rawScript === null ? (
+                <Button variant="ghost" size="sm" onClick={() => setRawScript("")}>
+                  <Icon name="Clapperboard" size={12} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                  貼腳本拆分鏡
+                </Button>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => { setRawScript(null); split.reset(); }}>
+                  取消拆分鏡
+                </Button>
+              )
+            )}
             {canEdit &&
               (editing ? (
                 <Button variant="ghost" size="sm" onClick={() => { setDraft(null); apply.reset(); }}>
@@ -93,10 +113,50 @@ export function StoryboardScript({
         )}
       </div>
 
+      {open && rawScript !== null && canEdit && (
+        <div style={{ marginTop: 8 }}>
+          <label htmlFor="storyboard-raw-script">貼上原始腳本（AI 會切成一幕一幕，接在現有分鏡後面）</label>
+          <textarea
+            id="storyboard-raw-script"
+            value={rawScript}
+            onChange={(e) => setRawScript(e.target.value)}
+            rows={8}
+            placeholder="貼上完整腳本或開示稿；空白行分段。留空則改用知識庫裡的腳本。"
+          />
+          <Hint>
+            拆出來的是草稿分鏡（含建議畫面提示詞與旁白），不會動到現有的鏡，也不會自動出圖。
+            拆完可以在下方文字腳本裡整份微調。
+          </Hint>
+          <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={split.isPending}
+              onClick={() => split.mutate({ projectId, scriptText: rawScript.trim() || undefined })}
+            >
+              {split.isPending ? "拆分鏡中…" : "AI 拆分鏡"}
+            </Button>
+            <Meta as="span" style={{ fontSize: "var(--fs-11)" }}>
+              免費（走 NVIDIA NIM 額度，不扣點）
+            </Meta>
+          </div>
+          {split.error && <p className="error" role="alert">拆分鏡失敗：{split.error.message}</p>}
+          {split.data?.truncation && (
+            <Hint layer="always" role="status" style={{ color: "var(--gold-ink)" }}>
+              腳本過長，這次只送了前 {split.data.truncation.sentChars.toLocaleString()} 字
+              （共 {split.data.truncation.totalChars.toLocaleString()} 字）——尾段沒有拆進來，可分批再拆一次。
+            </Hint>
+          )}
+        </div>
+      )}
+
       {open && (
         <div style={{ marginTop: 8 }}>
           {rows.length === 0 && !editing ? (
-            <Hint layer="always">還沒有分鏡——先拆腳本或新增一鏡，這裡就會出現整份可讀的文字腳本。</Hint>
+            <Hint layer="always">
+              還沒有分鏡——上面「貼腳本拆分鏡」把腳本交給 AI 切幕，或到下方分鏡表新增一鏡，
+              這裡就會出現整份可讀的文字腳本。
+            </Hint>
           ) : editing ? (
             <>
               <textarea

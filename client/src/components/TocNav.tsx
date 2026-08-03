@@ -17,7 +17,7 @@ export type TocItem = { id: string; label: string; badge?: string };
 export const DEFAULT_ITEMS: TocItem[] = [
   { id: "stage-context", label: "① 專案上下文" },
   { id: "stage-create", label: "② AI 創作中心" },
-  { id: "stage-deliver", label: "③ 分鏡・交付" },
+  { id: "stage-deliver", label: "③ 分鏡・編修・交付" },
 ];
 
 /** 尊重使用者的減少動效偏好：開啟時退回瞬間捲動 */

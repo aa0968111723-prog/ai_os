@@ -71,6 +71,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "scenes.update": "更新分鏡",
   "scenes.setCards": "設定分鏡要用的設定卡",
   "scenes.applyScript": "用文字腳本寫回分鏡",
+  "scenes.insertAfter": "插入／複製分鏡",
   "scenes.move": "移動分鏡",
   "scenes.reorder": "重排分鏡順序",
   "scenes.remove": "刪除分鏡（進回收桶）",

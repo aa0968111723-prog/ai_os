@@ -262,6 +262,8 @@ function SceneRow({
   const generate = trpc.scenes.generateInto.useMutation({
     onSuccess: () => { genRequestId.current = crypto.randomUUID(); invalidate(); },
   });
+  // 整理分鏡：在這一格之後插入／複製一格（先前只能加到最後再一路按↑搬上來）
+  const insertAfter = trpc.scenes.insertAfter.useMutation({ onSuccess: () => invalidate() });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
   // 配音生成中：後端背景 runner 完成後會回填旁白音檔，10 秒輪詢自動刷新
@@ -270,7 +272,7 @@ function SceneRow({
   const hasPrompt = (s.prompt ?? "").trim() !== "";
   // 這一鏡實際會用的卡片（有綁用它、沒綁沿用生成台勾選）——預覽與出圖看的是同一份
   const effectiveCards = resolveSceneCards(s, { characterIds: charIds, scenePresetIds: sceneIds, propIds });
-  const rowError = update.error ?? generate.error;
+  const rowError = update.error ?? generate.error ?? insertAfter.error;
   // 快速出圖的預估點數（HelpPage 承諾「送出前先看預估點數，點頭才扣」——這裡兌現）
   const genModel = getModel(genModelId) ?? getModel(DEFAULT_MODEL);
   const genPoints = genModel?.points;
@@ -531,6 +533,24 @@ function SceneRow({
         <div style={{ display: "flex", gap: 4 }}>
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === 0 || move.isPending} aria-label="上移" onClick={() => move.mutate({ sceneId: s.id, direction: "up" })}><Icon name="ChevronUp" size={16} /></button>
           <button style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }} disabled={i === total - 1 || move.isPending} aria-label="下移" onClick={() => move.mutate({ sceneId: s.id, direction: "down" })}><Icon name="ChevronDown" size={16} /></button>
+          <button
+            style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }}
+            disabled={insertAfter.isPending}
+            aria-label="在這之後插入一鏡"
+            title="在這一鏡後面插入一格空的（不必加到最後再一路搬上來）"
+            onClick={() => insertAfter.mutate({ sceneId: s.id })}
+          >
+            <Icon name="Plus" size={16} />
+          </button>
+          <button
+            style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px" }}
+            disabled={insertAfter.isPending}
+            aria-label="複製這一鏡"
+            title="照這一鏡再拍一顆：複製標題／秒數／提示詞／旁白與設定卡綁定（不複製成品）"
+            onClick={() => insertAfter.mutate({ sceneId: s.id, duplicate: true })}
+          >
+            <Icon name="Copy" size={16} />
+          </button>
           <ConfirmButton
             triggerStyle={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", color: "var(--danger-ink)" }}
             disabled={remove.isPending}

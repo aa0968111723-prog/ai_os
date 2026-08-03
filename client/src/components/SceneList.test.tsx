@@ -15,6 +15,7 @@ const approvalsQuery = vi.fn();
 const meQuery = vi.fn();
 const updateMutate = vi.fn();
 const generateMutate = vi.fn();
+const insertAfterMutate = vi.fn();
 const moveMutate = vi.fn();
 const removeMutate = vi.fn();
 const submitMutate = vi.fn();
@@ -35,6 +36,7 @@ vi.mock("../api", () => ({
       listByProject: { useQuery: (...args: unknown[]) => scenesQuery(...args) },
       update: { useMutation: () => ({ mutate: updateMutate, isPending: false, error: null }) },
       generateInto: { useMutation: () => ({ mutate: generateMutate, isPending: false, error: null }) },
+      insertAfter: { useMutation: () => ({ mutate: insertAfterMutate, isPending: false, error: null }) },
       move: { useMutation: () => ({ mutate: moveMutate, isPending: false, error: null }) },
       remove: { useMutation: () => ({ mutate: removeMutate, isPending: false, error: null }) },
     },
@@ -297,6 +299,38 @@ describe("SceneList 精簡分鏡格（A）：一顆依狀態決定的主要動�
     mount();
     await user.click(rowOf("s1").getByRole("button", { name: /第 1 鏡縮圖/ }));
     expect(screen.getByRole("dialog", { name: /單格工作室 stub 第 1 鏡/ })).toBeInTheDocument();
+  });
+
+  it("整理分鏡：在這之後插入一鏡（不必加到最後再一路搬上來）", async () => {
+    const user = userEvent.setup();
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" }), scene({ id: "s2" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    await user.click(rowOf("s1").getByRole("button", { name: "在這之後插入一鏡" }));
+    expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1" });
+  });
+
+  it("複製這一鏡：帶 duplicate 旗標（設定跟著走，成品不跟）", async () => {
+    const user = userEvent.setup();
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount();
+    await user.click(rowOf("s1").getByRole("button", { name: "複製這一鏡" }));
+    expect(insertAfterMutate).toHaveBeenCalledWith({ sceneId: "s1", duplicate: true });
+  });
+
+  it("檢視者看不到插入／複製（整理分鏡是寫入動作）", () => {
+    scenesQuery.mockReturnValue({
+      data: [scene({ id: "s1" })],
+      isLoading: false, isError: false, refetch: vi.fn(),
+    });
+    mount({ canEdit: false });
+    expect(screen.queryByRole("button", { name: "在這之後插入一鏡" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "複製這一鏡" })).toBeNull();
   });
 });
 

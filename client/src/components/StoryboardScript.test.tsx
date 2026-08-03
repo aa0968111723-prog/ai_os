@@ -8,10 +8,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StoryboardScript } from "./StoryboardScript";
 
 const applyMutate = vi.fn();
+const splitMutate = vi.fn();
 let applyState: { isPending: boolean; error: { message: string } | null } = { isPending: false, error: null };
 
 vi.mock("../api", () => ({
   trpc: {
+    director: {
+      splitScript: {
+        useMutation: () => ({ mutate: splitMutate, isPending: false, error: null, data: undefined, reset: vi.fn() }),
+      },
+    },
     scenes: {
       applyScript: {
         useMutation: () => ({
@@ -33,6 +39,7 @@ const ROWS = [
 describe("StoryboardScript", () => {
   beforeEach(() => {
     applyMutate.mockReset();
+    splitMutate.mockReset();
     applyState = { isPending: false, error: null };
   });
 
@@ -103,5 +110,37 @@ describe("StoryboardScript", () => {
 
     await user.click(screen.getByRole("button", { name: /文字腳本/ }));
     expect(screen.getByText(/還沒有分鏡/)).toBeVisible();
+  });
+
+  it("貼腳本拆分鏡：原文整份送給 AI 導演（標準模式先前只能繞知識庫）", async () => {
+    const user = userEvent.setup();
+    render(<StoryboardScript projectId="p1" rows={ROWS} canEdit onApplied={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /文字腳本/ }));
+    await user.click(screen.getByRole("button", { name: /貼腳本拆分鏡/ }));
+    await user.type(screen.getByRole("textbox", { name: /貼上原始腳本/ }), "那一年我走進禪堂。");
+    await user.click(screen.getByRole("button", { name: "AI 拆分鏡" }));
+
+    await waitFor(() => expect(splitMutate).toHaveBeenCalled());
+    expect(splitMutate.mock.calls[0][0]).toEqual({ projectId: "p1", scriptText: "那一年我走進禪堂。" });
+  });
+
+  it("留空＝改用知識庫的腳本（送 undefined，不是空字串）", async () => {
+    const user = userEvent.setup();
+    render(<StoryboardScript projectId="p1" rows={ROWS} canEdit onApplied={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /文字腳本/ }));
+    await user.click(screen.getByRole("button", { name: /貼腳本拆分鏡/ }));
+    await user.click(screen.getByRole("button", { name: "AI 拆分鏡" }));
+
+    await waitFor(() => expect(splitMutate).toHaveBeenCalled());
+    expect(splitMutate.mock.calls[0][0]).toEqual({ projectId: "p1", scriptText: undefined });
+  });
+
+  it("檢視者看不到貼腳本入口", async () => {
+    const user = userEvent.setup();
+    render(<StoryboardScript projectId="p1" rows={ROWS} canEdit={false} onApplied={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: /文字腳本/ }));
+    expect(screen.queryByRole("button", { name: /貼腳本拆分鏡/ })).toBeNull();
   });
 });

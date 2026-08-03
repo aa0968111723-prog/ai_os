@@ -462,6 +462,63 @@ export const scenesRouter = router({
       });
     }),
 
+  /**
+   * 在某一鏡之後插入一格（整理分鏡用）。
+   *
+   * 先前只有「加到最後」＋↑↓ 一路搬——想在第 3 鏡後面補一格，要按十幾次箭頭。
+   * duplicate=true 時複製來源鏡的標題／秒數／提示詞／旁白／卡片綁定；
+   * **不複製成品**（assetId／narrationAssetId）：那是花過點數的產物，複製一份引用
+   * 會讓兩格指向同一素材，刪一格就互相影響。新格一律從 todo 開始。
+   */
+  insertAfter: authedProcedure
+    .input(z.object({ sceneId: z.string().uuid(), duplicate: z.boolean().optional() }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      const project = await getProjectChecked(ctx, scene.projectId, true);
+      assertProjectNotArchived(project);
+      return db.transaction(async (tx) => {
+        await lockSceneOrder(tx, project.id);
+        // 鎖內重讀：並發 move／insert 可能已經改過序號
+        const all = await tx
+          .select()
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+          .orderBy(asc(schema.scenes.orderIndex));
+        const idx = all.findIndex((s) => s.id === scene.id);
+        if (idx < 0) throw new TRPCError({ code: "NOT_FOUND", message: "分鏡已被刪除" });
+        const cur = all[idx]!;
+        // 後面每一格 +1 讓出位置（由後往前更新，避免中途撞到同序號）
+        for (const later of all.slice(idx + 1).reverse()) {
+          await tx
+            .update(schema.scenes)
+            .set({ orderIndex: later.orderIndex + 1 })
+            .where(eq(schema.scenes.id, later.id));
+        }
+        const dup = input.duplicate === true;
+        const [created] = await tx
+          .insert(schema.scenes)
+          .values({
+            projectId: project.id,
+            orderIndex: cur.orderIndex + 1,
+            title: dup ? `${cur.title} 複本`.slice(0, 60) : "新分鏡",
+            durationSec: dup ? cur.durationSec : project.format === "9:16" ? 4 : 5,
+            status: "todo",
+            prompt: dup ? cur.prompt : null,
+            voiceover: dup ? cur.voiceover : null,
+            // 卡片綁定是設定不是產物，複製它才符合「照這一鏡再拍一顆」的預期
+            characterIds: dup ? cur.characterIds : null,
+            scenePresetIds: dup ? cur.scenePresetIds : null,
+            propIds: dup ? cur.propIds : null,
+          })
+          .returning();
+        return created;
+      });
+    }),
+
   /** 刪除分鏡＝軟刪除（回收桶）：保留使用者手打的 prompt／voiceover，可從回收桶還原 */
   remove: authedProcedure.input(z.object({ sceneId: z.string().uuid() })).mutation(async ({ ctx, input }) => {
     const [scene] = await db
