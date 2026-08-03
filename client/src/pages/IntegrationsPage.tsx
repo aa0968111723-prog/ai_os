@@ -8,6 +8,7 @@ import { VisualJourney, type VisualJourneyStep } from "../components/VisualJourn
 import { AdobeConnectButton } from "../components/settings/AdobeConnectButton";
 import { AdobeConnectionStatus } from "../components/settings/AdobeConnectionStatus";
 import { useAdobeConnection } from "../hooks/useAdobeConnection";
+import { PersonalAiKeyCard } from "../components/settings/PersonalAiKeyCard";
 
 import { Badge, Button, Card, Hint, Meta } from "../components/ui";
 /**
@@ -82,7 +83,7 @@ export function IntegrationsPage() {
       {remove.error && <p className="error" role="alert">{remove.error.message}</p>}
 
       <section className="integration-status-grid" aria-label="資料來源連線概況">
-        <a href="#integration-google" className={`integration-status-card${d?.googleDrive.connected ? " is-connected" : ""}`}>
+        <a href="#integration-google" className={`integration-status-card${d?.googleDrive.connected ? " is-connected" : ""`}>
           <span className="integration-status-card__icon"><Icon name="CalendarPlus" size={18} /></span>
           <span>
             <strong>Google 雲端</strong>
@@ -92,7 +93,7 @@ export function IntegrationsPage() {
           </span>
           <span className="integration-status-card__signal" aria-hidden />
         </a>
-        <a href="#integration-notion" className={`integration-status-card${d?.notion.connected ? " is-connected" : ""}`}>
+        <a href="#integration-notion" className={`integration-status-card${d?.notion.connected ? " is-connected" : ""`}>
           <span className="integration-status-card__icon notion"><Icon name="FileText" size={18} /></span>
           <span>
             <strong>Notion</strong>
@@ -100,7 +101,7 @@ export function IntegrationsPage() {
           </span>
           <span className="integration-status-card__signal" aria-hidden />
         </a>
-        <a href="#integration-api" className={`integration-status-card${(d?.apis.length ?? 0) > 0 ? " is-connected" : ""}`}>
+        <a href="#integration-api" className={`integration-status-card${(d?.apis.length ?? 0) > 0 ? " is-connected" : ""`}>
           <span className="integration-status-card__icon api"><Icon name="Database" size={18} /></span>
           <span>
             <strong>外部 API</strong>
@@ -158,6 +159,9 @@ export function IntegrationsPage() {
 
       {/* ── Notion ── */}
       <NotionCard data={d?.notion ?? null} />
+
+      {/* ── 個人 AI 金鑰（BYOK fal.ai）── */}
+      <PersonalAiKeyCard />
 
       {/* ── Adobe 帳號（修圖／剪輯）── */}
       <AdobeCard />
