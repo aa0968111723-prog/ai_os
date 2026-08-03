@@ -168,4 +168,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
     "ea558827804441655f3c8827770490eb34fbb6d2d597187a8911a45d4d1996c8",
     "f2c1ea2a71b114dc3ca6f69c63bfe28aadfb83d5dfc0f464cd81ee74ae3936f8",
   ],
+  "0033_user_avatar": [
+    "336a82ba3e08d65d7c80736cabdbe328d09ddadcd024de74b7f7ca23cd42c5db",
+  ],
 };
