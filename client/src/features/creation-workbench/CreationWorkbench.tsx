@@ -63,6 +63,7 @@ export function CreationWorkbench({
   characterIds = [],
   scenePresetIds = [],
   propIds = [],
+  carriedPropIds = [],
   generateApplyRequest = null,
   workflowPromptRequest = null,
   onReuseGenerate,
@@ -86,6 +87,8 @@ export function CreationWorkbench({
   characterIds?: string[];
   scenePresetIds?: string[];
   propIds?: string[];
+  /** 歸屬自動帶入的素材卡 id（專案頁算好；只用於顯示帶入張數） */
+  carriedPropIds?: string[];
   generateApplyRequest?: DirectGenerateApplyRequest | null;
   /** PromptLibrary「用於製作範本」→ WorkflowCard idea box (nonce-driven) */
   workflowPromptRequest?: { text: string; nonce: number } | null;
@@ -448,6 +451,7 @@ export function CreationWorkbench({
           characterIds={characterIds}
           scenePresetIds={scenePresetIds}
           propIds={propIds}
+          carriedPropIds={carriedPropIds}
           panelId={modePanelId(tabPrefix, "generate")}
           labelledBy={modeTabId(tabPrefix, "generate")}
           active={mode === "generate"}

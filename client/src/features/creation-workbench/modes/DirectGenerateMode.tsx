@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getModel, supportsCardAnchors, CATEGORIES } from "@shared/models";
+import { countExtraCarriedProps } from "@shared/propOwnership";
+import { MAX_GENERATE_PROPS } from "@shared/cardLimits";
 import { trpc } from "../../../api";
 import { ModelPicker, type PickedModel } from "../../../components/ModelPicker";
 import { Icon } from "../../../components/Icon";
@@ -57,6 +59,7 @@ export function DirectGenerateMode({
   characterIds,
   scenePresetIds,
   propIds = [],
+  carriedPropIds = [],
   panelId,
   labelledBy,
   active,
@@ -85,6 +88,8 @@ export function DirectGenerateMode({
   scenePresetIds: string[];
   /** 素材設定卡（道具）勾選；預設空陣列讓既有呼叫端不必改 */
   propIds?: string[];
+  /** 因為勾了主人（角色／場景）而會自動帶入的素材卡 id——只用於顯示，實際注入以伺服器為準 */
+  carriedPropIds?: string[];
   panelId: string;
   labelledBy: string;
   active: boolean;
@@ -133,7 +138,13 @@ export function DirectGenerateMode({
   const prompt = draft.prompt ?? "";
   const setPrompt = (next: string) => setDraft({ prompt: next });
   /** 有勾任何一種一致性卡片（角色／場景／素材）——決定要不要提醒此模型吃不吃卡片 */
-  const cardsPicked = characterIds.length > 0 || scenePresetIds.length > 0 || propIds.length > 0;
+  /**
+   * 歸屬自動帶入的預覽：勾了角色／場景，它們名下的素材卡會被伺服器一起帶進生成。
+   * carriedPropIds 由專案頁用共用純函式算好傳下來，畫面數字才和實際注入一致。
+   */
+  const extraCarriedProps = countExtraCarriedProps(propIds, carriedPropIds, MAX_GENERATE_PROPS);
+  const effectivePropCount = Math.min(propIds.length + extraCarriedProps, MAX_GENERATE_PROPS);
+  const cardsPicked = characterIds.length > 0 || scenePresetIds.length > 0 || effectivePropCount > 0;
 
   const assets = trpc.projects.assets.useQuery({ projectId });
   const quota = trpc.quota.my.useQuery({ groupId }, { enabled: confirming && !!groupId });
@@ -372,7 +383,11 @@ export function DirectGenerateMode({
         {summaryChip(`設定${wvReady ? " ✓" : "（待設）"}`, "#onboard-worldview", wvReady)}
         {summaryChip(`角色 ${characterIds.length}`, "#sec-characters", characterIds.length > 0)}
         {summaryChip(`場景 ${scenePresetIds.length}`, "#sec-scenes", scenePresetIds.length > 0)}
-        {summaryChip(`素材 ${propIds.length}`, "#sec-props", propIds.length > 0)}
+        {summaryChip(
+          extraCarriedProps > 0 ? `素材 ${effectivePropCount}（含隨身 ${extraCarriedProps}）` : `素材 ${propIds.length}`,
+          "#sec-props",
+          effectivePropCount > 0,
+        )}
       </div>
 
       {cardsPicked &&
@@ -526,7 +541,12 @@ export function DirectGenerateMode({
             <b>{model.label}</b>・{projectFormat}
             {characterIds.length > 0 && <>・帶入 {characterIds.length} 個角色定裝</>}
             {scenePresetIds.length > 0 && <>・{scenePresetIds.length} 個場景設定</>}
-            {propIds.length > 0 && <>・{propIds.length} 個素材設定</>}
+            {effectivePropCount > 0 && (
+              <>
+                ・{effectivePropCount} 個素材設定
+                {extraCarriedProps > 0 && <>（含勾選角色／場景自動帶入 {extraCarriedProps} 個）</>}
+              </>
+            )}
             {cardsPicked && continuityLocked && <>・一致性快照已鎖定</>}
           </p>
           {cardsPicked &&

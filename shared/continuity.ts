@@ -24,6 +24,10 @@ export const continuityPropSchema = z.object({
   appearance: z.string(),
   notes: nullableText,
   referenceAssetId: z.string().uuid().nullable(),
+  /** 歸屬（v1 之後才有；舊快照沒有這兩欄，維持可解析） */
+  ownerKind: z.enum(["character", "scene"]).nullable().optional(),
+  /** 凍結當下的主人名字——重試時主人被改名／刪掉，錨點仍是當初那句 */
+  ownerName: z.string().nullable().optional(),
 });
 
 /**

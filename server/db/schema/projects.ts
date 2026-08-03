@@ -146,11 +146,21 @@ export const props = pgTable("props", {
   notes: text("notes"),
   /** 素材參考圖（可選；上傳或從素材庫綁定，之後圖生圖可用作底） */
   referenceAssetId: uuid("reference_asset_id"),
+  /**
+   * 歸屬（可選）：這件物件屬於哪張卡——"character"＝某角色的隨身物品、
+   * "scene"＝某場景的場上物件；null＝誰都不屬於的獨立物件。
+   * 勾了主人時，它的物件會自動一起帶入生成（見 shared/propOwnership.ts）。
+   */
+  ownerKind: text("owner_kind", { enum: ["character", "scene"] }),
+  /** 主人的卡片 id（characters.id 或 scene_presets.id；與 ownerKind 同進同出） */
+  ownerId: uuid("owner_id"),
   createdBy: uuid("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   // list 走 WHERE project_id ORDER BY created_at；建表當下就補索引，不等它慢了才修
   projectCreatedIdx: index("props_project_created_idx").on(t.projectId, t.createdAt),
+  // 自動帶入要用「這批主人有哪些物件」反查：每次視覺生成都會跑，補索引
+  ownerIdx: index("props_owner_idx").on(t.projectId, t.ownerKind, t.ownerId),
 }));
 
 export const scenes = pgTable("scenes", {
