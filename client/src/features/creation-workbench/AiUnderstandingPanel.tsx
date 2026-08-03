@@ -261,6 +261,7 @@ export function AiUnderstandingPanel({
                   parameters={requestParts.parameters}
                   provider={preview.provider}
                   model={preview.model}
+                  modelId={preview.modelId}
                   estimatedPoints={preview.estimatedPoints}
                   warnings={preview.warnings}
                 />

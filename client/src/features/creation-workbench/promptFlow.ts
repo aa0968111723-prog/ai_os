@@ -41,6 +41,12 @@ export interface PromptFlowNode {
   fields: PromptFlowField[];
   /** 段落原文（欄位拆不出來時的回退，也供「原文」檢視比對） */
   text: string;
+  /**
+   * 這一段在送出字串裡真正佔的原文，含段落標記本身。
+   * 注意力預算要算的是**模型實際收到的字**，標記（「[專案背景] 」）也吃 token，
+   * 用 text 會低估。
+   */
+  raw: string;
 }
 
 interface SectionDef {
@@ -130,6 +136,7 @@ export function buildPromptFlow(positivePrompt: string): PromptFlowNode[] {
       hint: "你在創作台輸入的內容，是整段提示詞的起點。",
       fields: [],
       text: head,
+      raw: head,
     });
   }
 
@@ -145,6 +152,7 @@ export function buildPromptFlow(positivePrompt: string): PromptFlowNode[] {
       hint: hit.section.hint,
       fields: parsePromptFields(text),
       text,
+      raw: prompt.slice(hit.index, end).trim(),
     });
   });
 
@@ -188,6 +196,8 @@ const WARNING_NODE: Record<string, PromptFlowNodeKey> = {
   multi_reference_unsupported: "character",
   continuity_references_capped: "character",
   negative_prompt_unsupported: "negative",
+  // 超窗口是整串的問題，不屬於任何單一段落：留在 general，節點上另有 token 徽章
+  
   manual_override: "instruction",
 };
 

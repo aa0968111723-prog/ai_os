@@ -133,6 +133,7 @@ export const generationRouter = router({
         title: "這次生成，AI 會怎麼理解",
         provider: prepared.model.id.startsWith("nvidia-nim#") ? "nvidia-nim" : "fal.ai",
         model: prepared.model.label,
+        modelId: prepared.model.id,
         endpoint: endpointOf(prepared.model),
         context: [
           { type: "worldview", label: "專案世界觀", included: prepared.positivePrompt !== prepared.userPrompt },
