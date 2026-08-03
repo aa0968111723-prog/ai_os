@@ -1,5 +1,5 @@
 /**
- * Integrations domain schema（Google 日曆、外部整合、Web Push）
+ * Integrations domain schema（Google 日曆、外部整合、Web Push、BYOK）
  */
 import { pgTable, uuid, text, boolean, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
 
@@ -96,6 +96,37 @@ export const externalAccounts = pgTable("external_accounts", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => ({
   userProviderIdx: uniqueIndex("external_accounts_user_provider_idx").on(t.userId, t.provider),
+}));
+
+/**
+ * BYOK Phase 1：個人 AI 供應商 API Key。
+ * 目前只支援 fal（站內媒體生成的主要閘道）。一人一供應商一條（重新設定＝覆蓋）。
+ * secretEnc 為 AES-256-GCM（iv:tag:cipher hex），金鑰由 services/integrations 同一顆種子
+ * 分域派生 ai-provider-key:——與 Google/Notion/Adobe 密文互不可解。原文永不回前端；
+ * keyLast4 僅供 UI 辨識。preferUserKey=true 時生成管線優先用此金鑰（Phase 2 接線）。
+ * 新表由正式 migration 0031 建立。
+ */
+export const userAiProviderKeys = pgTable("user_ai_provider_keys", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull(),
+  /** 供應商：v1 只有 fal；未來可擴 kling / runway / openai */
+  provider: text("provider", { enum: ["fal"] }).notNull(),
+  /** AES-256-GCM 加密後的 API Key（iv:tag:cipher hex） */
+  secretEnc: text("secret_enc").notNull(),
+  /** 金鑰末四碼（僅供 UI 顯示辨識） */
+  keyLast4: text("key_last4").notNull(),
+  /** active＝可用；error＝探活失敗或解密失敗；unverified＝尚未探活（理論上 setKey 不會留下） */
+  status: text("status", { enum: ["active", "error", "unverified"] }).notNull().default("unverified"),
+  /** true＝生成時優先使用此個人金鑰（略過站方點數）；false＝仍用站方 FAL_KEY */
+  preferUserKey: boolean("prefer_user_key").notNull().default(true),
+  validatedAt: timestamp("validated_at"),
+  lastUsedAt: timestamp("last_used_at"),
+  lastError: text("last_error"),
+  meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  userProviderIdx: uniqueIndex("user_ai_provider_keys_user_provider_idx").on(t.userId, t.provider),
 }));
 
 /** 排程項 ↔ Google 事件對應（每條連線一份），fingerprint 記上次推送內容摘要——沒變就跳過，省 API 配額 */
