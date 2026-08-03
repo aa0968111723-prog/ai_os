@@ -201,11 +201,16 @@ export async function importIcsEvents(input: {
         title: ev.title,
         startsAt: ev.startsAt.toISOString(),
         endsAt: ev.endsAt ? ev.endsAt.toISOString() : null,
-        note: ev.note
-          ? `${ev.note}${ev.uid ? `\n\n[ICS UID: ${ev.uid}]` : ""}`
-          : ev.uid
-            ? `[ICS UID: ${ev.uid}]`
-            : null,
+        note: (() => {
+          // 備註上限 500（與 addScheduleItemCore / router 一致）；UID 附註不可撐破
+          const uidTag = ev.uid ? `[ICS UID: ${ev.uid}]` : "";
+          const body = (ev.note ?? "").trim();
+          if (!body && !uidTag) return null;
+          if (!body) return uidTag.slice(0, 500);
+          if (!uidTag) return body.slice(0, 500);
+          const combined = `${body}\n\n${uidTag}`;
+          return combined.length <= 500 ? combined : body.slice(0, 500);
+        })(),
       });
       result.imported += 1;
       result.items.push(row);
