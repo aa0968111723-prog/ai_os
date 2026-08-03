@@ -10,10 +10,18 @@ import {
   updateNoteCore,
 } from "../services/notesCore";
 import { executeNoteCommand } from "../services/noteCommand";
+import {
+  NOTE_COMMENT_BODY_MAX,
+  NOTE_COMMENT_MENTIONS_MAX,
+  addNoteCommentCore,
+  listNoteCommentsCore,
+  removeNoteCommentCore,
+} from "../services/noteCommentsCore";
 
 /**
  * 筆記傳輸層：輸入外形由 zod 提早回報；ACL、歸屬、封存、提及與版本快照
  * 一律由 notesCore 執行，確保 tRPC／Agent／MCP 未來共用時不會分岔。
+ * 留言（討論串）掛同一 router，核心在 noteCommentsCore。
  */
 export const notesRouter = router({
   list: authedProcedure
@@ -52,4 +60,31 @@ export const notesRouter = router({
   remove: authedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(({ ctx, input }) => removeNoteCore(ctx.auth, input.id)),
+
+  /* ── 筆記留言（討論串） ─────────────────────────────── */
+
+  listComments: authedProcedure
+    .input(z.object({ noteId: z.string().uuid() }))
+    .query(({ ctx, input }) => listNoteCommentsCore(ctx.auth, input.noteId)),
+
+  postComment: authedProcedure
+    .input(z.object({
+      noteId: z.string().uuid(),
+      body: z.string().min(1).max(NOTE_COMMENT_BODY_MAX),
+      replyToId: z.string().uuid().optional(),
+      mentions: z.array(z.string().uuid()).max(NOTE_COMMENT_MENTIONS_MAX).optional(),
+    }))
+    .mutation(({ ctx, input }) =>
+      addNoteCommentCore({
+        auth: ctx.auth,
+        noteId: input.noteId,
+        body: input.body,
+        replyToId: input.replyToId,
+        mentions: input.mentions,
+      }),
+    ),
+
+  removeComment: authedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(({ ctx, input }) => removeNoteCommentCore(ctx.auth, input.id)),
 });
