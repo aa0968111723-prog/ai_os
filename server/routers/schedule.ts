@@ -10,12 +10,14 @@ import {
   updateScheduleItemCore,
 } from "../services/scheduleCore";
 import { executeScheduleCommand } from "../services/scheduleCommand";
-import { queueGroupSync } from "../services/googleCalendar";
+import { importIcsEvents } from "../services/scheduleImport";
+import { voidGroupSync } from "../services/googleCalendar";
 
 /**
  * 排程（需求 10）：組行事曆（會議、交付死線…）。
  * Google 日曆整合＝OAuth 直連同步（services/googleCalendar：增刪改自動推送到已連結成員的
  * 專屬 Google 日曆＋每 15 分鐘對帳）；.ics 匯出（GET /api/schedule/:groupId/calendar.ics）保留為後備。
+ * .ics 匯入（importIcs）供組代理與手動上傳使用。
  */
 
 /** ISO 字串 → Date（zod 驗證過再轉；壞值擋在輸入層） */
@@ -59,6 +61,33 @@ export const scheduleRouter = router({
       executeScheduleCommand({ auth: ctx.auth, source: "web", ...input }),
     ),
 
+  /**
+   * 匯入 .ics 日曆檔內容到組排程。
+   * 供組代理（agents.step.import_calendar）與未來 UI「匯入 .ics」按鈕共用。
+   * 會自動去重（相同標題 + 開始時間 1 分鐘內的既有行程會跳過）。
+   */
+  importIcs: authedProcedure
+    .input(z.object({
+      groupId: z.string().uuid(),
+      icsContent: z.string().min(20, "日曆內容太短").max(2_000_000),
+      defaultProjectId: z.string().uuid().optional(),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      requireGroup(ctx.auth, input.groupId);
+      const result = await importIcsEvents({
+        auth: ctx.auth,
+        groupId: input.groupId,
+        icsContent: input.icsContent,
+        defaultProjectId: input.defaultProjectId,
+        source: "web",
+      });
+      return {
+        imported: result.imported,
+        skipped: result.skipped,
+        errors: result.errors,
+      };
+    }),
+
   update: authedProcedure
     .input(z.object({
       id: z.string().uuid(),
@@ -88,7 +117,7 @@ export const scheduleRouter = router({
       await assertProjectEditable(ctx.auth, project);
     }
     await db.delete(schema.scheduleItems).where(eq(schema.scheduleItems.id, row.id));
-    queueGroupSync(row.groupId);
+    voidGroupSync(row.groupId);
     return { ok: true };
   }),
 });
