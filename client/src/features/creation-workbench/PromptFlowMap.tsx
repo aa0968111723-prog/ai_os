@@ -8,6 +8,7 @@ import {
   type PromptBudget,
 } from "@shared/textEncoders";
 import { Card, Chip, Meta } from "../../components/ui";
+import { ModelMechanicsView } from "./ModelMechanicsView";
 import {
   buildPromptFlow,
   distributePromptWarnings,
@@ -370,6 +371,7 @@ export function PromptFlowMap({
             />
           ) : null}
           <NodeWarnings warnings={distributed.byNode.model ?? []} />
+          <ModelMechanicsView modelId={modelId} />
         </FlowNode>
       ) : null}
 
