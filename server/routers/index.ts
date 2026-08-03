@@ -38,6 +38,7 @@ import { exportJobsRouter } from "./exportJobs";
 import { tasksRouter } from "./tasks";
 import { systemRouter } from "./system";
 import { aiTraceRouter } from "./aiTrace";
+import { userAiKeysRouter } from "./userAiKeys";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -79,6 +80,7 @@ export const appRouter = router({
   tasks: tasksRouter,
   system: systemRouter,
   aiTrace: aiTraceRouter,
+  userAiKeys: userAiKeysRouter,
 });
 
 export type AppRouter = typeof appRouter;
