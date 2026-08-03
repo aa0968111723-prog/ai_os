@@ -172,3 +172,24 @@ describe("formatPropKnowledgeBlock（知識庫／導演・素材設定卡）", (
     expect(formatPropKnowledgeBlock([])).toBe("");
   });
 });
+
+describe("素材歸屬進錨點（把物件綁在對的人／地上）", () => {
+  const OWNED = {
+    id: "p9",
+    name: "紅傘",
+    appearance: "正紅長柄傘、木質握把",
+    ownerKind: "character" as const,
+    ownerName: "安倢",
+  };
+
+  it("有主人時寫成「安倢的紅傘」，沒有主人維持原名", () => {
+    expect(formatPropAnchor([OWNED], ["p9"])).toBe("材質鎖定 安倢的紅傘：正紅長柄傘、木質握把");
+    expect(formatPropAnchor([{ ...OWNED, ownerName: null }], ["p9"])).toBe(
+      "材質鎖定 紅傘：正紅長柄傘、木質握把",
+    );
+  });
+
+  it("知識庫段落同樣帶主人（導演讀得出這把傘是誰的）", () => {
+    expect(formatPropKnowledgeBlock([OWNED])).toBe("【素材設定卡】\n- 安倢的紅傘：正紅長柄傘、木質握把");
+  });
+});

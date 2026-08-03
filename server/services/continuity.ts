@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { continuitySnapshotSchema, type ContinuitySnapshot } from "../../shared/continuity";
 import { db, schema } from "../db";
 import { orderRowsByIds } from "./cardAnchors";
@@ -101,7 +101,20 @@ export async function buildContinuitySnapshot(
           appearance: schema.props.appearance,
           notes: schema.props.notes,
           referenceAssetId: schema.props.referenceAssetId,
-        }).from(schema.props).where(and(eq(schema.props.projectId, projectId), inArray(schema.props.id, propIds)))
+          ownerKind: schema.props.ownerKind,
+          // 主人名字凍進快照：重試時主人被改名或刪掉，這批鏡頭的錨點仍是當初那句
+          ownerName: sql<string | null>`coalesce(${schema.characters.name}, ${schema.scenePresets.name})`,
+        })
+          .from(schema.props)
+          .leftJoin(
+            schema.characters,
+            and(eq(schema.characters.id, schema.props.ownerId), eq(schema.props.ownerKind, "character")),
+          )
+          .leftJoin(
+            schema.scenePresets,
+            and(eq(schema.scenePresets.id, schema.props.ownerId), eq(schema.props.ownerKind, "scene")),
+          )
+          .where(and(eq(schema.props.projectId, projectId), inArray(schema.props.id, propIds)))
       : Promise.resolve([]),
   ]);
 

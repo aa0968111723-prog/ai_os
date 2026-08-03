@@ -133,6 +133,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0027_generation_continuity",
   // 0028：workflow_runs 加 nullable jsonb 快照欄位（ADD COLUMN IF NOT EXISTS），舊 run 維持原本逐步解析行為。
   "0028_workflow_continuity_snapshot",
+  // 0029：props 加兩個 nullable 歸屬欄位＋索引（皆 IF NOT EXISTS），既有卡維持獨立物件。
+  "0029_prop_ownership",
 ] as const;
 
 /**

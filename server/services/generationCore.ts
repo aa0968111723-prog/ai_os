@@ -26,7 +26,9 @@ import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { failStaleGenerationTx, reserveQuota } from "./points";
 import { persistRemote, signAssetUrl } from "./storage";
-import { formatCharacterAnchor, formatPropAnchor, formatSceneAnchor } from "./cardAnchors";
+import { formatCharacterAnchor, formatPropAnchor, formatSceneAnchor, resolveCarriedPropIds } from "./cardAnchors";
+import { mergePropIdsWithCarried } from "../../shared/propOwnership";
+import { MAX_GENERATE_PROPS } from "../../shared/cardLimits";
 import type { ContinuitySnapshot } from "../../shared/continuity";
 import {
   applyContinuityReferences,
@@ -226,6 +228,10 @@ export interface PreparedGenerationRequest {
   negativePrompt: string;
   providerInput: Record<string, unknown>;
   anchors: { character: string; scene: string; prop: string };
+  /** 實際注入／落庫的素材卡 id：明確勾選 ＋ 歸屬自動帶入（去重、截上限）。 */
+  effectivePropIds: string[];
+  /** 其中「因為勾了主人才被帶進來」的那幾張——供 UI 與軌跡說明「多帶了什麼」。 */
+  carriedPropIds: string[];
   continuitySnapshot: ContinuitySnapshot | null;
   continuityReferences: ContinuityReferenceResult;
   continuityCoverage: ContinuityCoverage;
@@ -239,6 +245,7 @@ export interface PreparedGenerationRequest {
 export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<PreparedGenerationRequest> {
   const model = resolveModel(input.modelId) ?? getModel(input.modelId);
   if (!model) throw new TRPCError({ code: "BAD_REQUEST", message: "未知模型(不在註冊表或即時目錄)" });
+  // 自動帶入的物件也算「有卡片」：只掛在角色底下的紅傘也該能當來源圖（展開在下面，這裡先看勾選）
   const mayFillFromCards = model.needs === "image" && !!(input.characterIds?.length || input.scenePresetIds?.length || input.propIds?.length);
   if (model.needs && !input.sourceUrl && !input.sourceAssetId && !mayFillFromCards) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `此模型需要來源:${model.sourceHint ?? model.needs}` });
@@ -251,11 +258,27 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const accessRole = await input.assertAccess?.(project);
   const { assertProjectAllows } = await import("./projectState");
   assertProjectAllows(project, "generate");
+
+  /**
+   * 歸屬自動帶入：勾了角色／場景卡，它們名下的素材卡一起進來——使用者不必記得
+   * 「畫安倢就要順便勾紅傘」。在校驗與快照之前展開，這批 id 才會一路貫穿注入、
+   * 快照、落庫與重試（重試帶 continuitySnapshot，直接沿用當初凍結的那批，不再展開）。
+   */
+  const carriedPropIds = input.continuitySnapshot
+    ? []
+    : await resolveCarriedPropIds(project.id, {
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
+      });
+  const effectivePropIds = input.continuitySnapshot
+    ? input.propIds
+    : mergePropIdsWithCarried(input.propIds ?? [], carriedPropIds, MAX_GENERATE_PROPS);
+
   await assertGenerationEntityIds(project.id, {
     // 伺服器重試已由原 generation 的 ACL 保護；即使卡片後來刪除，也要能用凍結內容重現。
     characterIds: input.continuitySnapshot ? undefined : input.characterIds,
     scenePresetIds: input.continuitySnapshot ? undefined : input.scenePresetIds,
-    propIds: input.continuitySnapshot ? undefined : input.propIds,
+    propIds: input.continuitySnapshot ? undefined : effectivePropIds,
     sourceAssetId: input.sourceAssetId,
     secondarySourceAssetId: input.secondarySourceAssetId,
   });
@@ -263,7 +286,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const continuitySnapshot = input.continuitySnapshot ?? await buildContinuitySnapshot(project.id, {
     characterIds: input.characterIds,
     scenePresetIds: input.scenePresetIds,
-    propIds: input.propIds,
+    propIds: effectivePropIds,
   }, input.continuityMode !== false);
 
   let effectiveSourceAssetId = input.sourceAssetId;
@@ -372,7 +395,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
   const continuityCoverage = analyzeContinuitySnapshot(continuitySnapshot);
 
   const warnings: PreparedGenerationRequest["warnings"] = [];
-  const selectedCards = (input.characterIds?.length ?? 0) + (input.scenePresetIds?.length ?? 0) + (input.propIds?.length ?? 0);
+  const selectedCards = (input.characterIds?.length ?? 0) + (input.scenePresetIds?.length ?? 0) + (effectivePropIds?.length ?? 0);
   if (selectedCards > 0 && !CARD_ANCHOR_CATEGORIES.has(model.category)) warnings.push({
     code: "cards_ignored",
     severity: "warning",
@@ -448,6 +471,8 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     negativePrompt,
     providerInput,
     anchors: { character, scene, prop },
+    effectivePropIds: effectivePropIds ?? [],
+    carriedPropIds: (effectivePropIds ?? []).filter((id) => !(input.propIds ?? []).includes(id)),
     continuitySnapshot,
     continuityReferences,
     continuityCoverage,
@@ -555,6 +580,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     sourceUrl,
     secondarySourceUrl,
     providerInput: falInput,
+    effectivePropIds,
   } = prepared;
   if (input.traceSessionId) {
     await recordAiTraceEventSafely({
@@ -610,7 +636,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
             sceneRole: input.sceneRole ?? null,
             characterIds: input.characterIds?.length ? input.characterIds : null,
             scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
-            propIds: input.propIds?.length ? input.propIds : null,
+            propIds: effectivePropIds.length ? effectivePropIds : null,
             continuitySnapshot: prepared.continuitySnapshot,
             workflowRunId: input.workflowRunId ?? null,
             agentRunId: input.agentRunId ?? null,
@@ -678,7 +704,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
         sceneRole: input.sceneRole ?? null, // 回填角色（沒有＝null，視為 visual）
         characterIds: input.characterIds?.length ? input.characterIds : null, // 帶入的定裝卡——重試/再用可還原
         scenePresetIds: input.scenePresetIds?.length ? input.scenePresetIds : null,
-        propIds: input.propIds?.length ? input.propIds : null,
+        propIds: effectivePropIds.length ? effectivePropIds : null,
         continuitySnapshot: prepared.continuitySnapshot,
         workflowRunId: input.workflowRunId ?? null, // 來源工作流/代理（沒有＝手動生成）
         agentRunId: input.agentRunId ?? null,

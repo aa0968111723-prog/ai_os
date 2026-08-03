@@ -34,6 +34,7 @@ import {
   type Worldview,
 } from "@shared/worldview";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
+import { carriedPropIdsFor } from "@shared/propOwnership";
 import { SceneList } from "../components/SceneList";
 import { MessagePanel } from "../components/MessagePanel";
 import { AssetLibrary } from "../components/AssetLibrary";
@@ -866,6 +867,11 @@ export function ProjectPage({ id }: { id: string }) {
   const charCount = characters.data?.length;
   const presetCount = scenePresets.data?.length;
   const propCount = propCards.data?.length;
+  /** 勾了角色／場景 → 它們名下的素材卡會被自動帶入生成（伺服器同一支純函式，畫面數字不分岔） */
+  const carriedPropIds = carriedPropIdsFor(propCards.data ?? [], {
+    characterIds: charIds,
+    scenePresetIds: sceneIds,
+  });
   const assetCount = assets.data?.length;
   const wvReady = isWorldviewReady(wv);
   /** 快速層四項全空＝這個專案還沒起手，值得先給一份可照抄的範例 */
@@ -2207,6 +2213,7 @@ export function ProjectPage({ id }: { id: string }) {
             characterIds={charIds}
             scenePresetIds={sceneIds}
             propIds={propIds}
+            carriedPropIds={carriedPropIds}
             generateApplyRequest={generateApply}
             onReuseGenerate={applyPrompt}
             onGenerateSourceChange={setSourceHighlightId}

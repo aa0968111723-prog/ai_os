@@ -204,6 +204,13 @@
       "when": 1785686600000,
       "tag": "0028_workflow_continuity_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1785686700000,
+      "tag": "0029_prop_ownership",
+      "breakpoints": true
     }
   ]
 }

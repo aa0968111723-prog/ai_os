@@ -6,6 +6,11 @@ import {
   PROP_NAME_MAX,
   PROP_NOTES_MAX,
 } from "@shared/cardLimits";
+import {
+  PROP_OWNER_LABEL,
+  formatPropDisplayName,
+  type PropOwnerKind,
+} from "@shared/propOwnership";
 import { trpc } from "../api";
 import { Icon } from "./Icon";
 import { CharCount, ConfirmButton } from "./interactions";
@@ -21,6 +26,9 @@ export { MAX_GENERATE_PROPS };
  * 生成時勾選 → 自動注入錨點，同一件東西跨鏡不變樣。
  *
  * 與下方「素材庫」不同：素材庫是已經存在的檔案，這裡是還沒被畫出來的物件設定。
+ *
+ * 歸屬：一張卡可掛在某角色（隨身物品）或某場景（場上物件）底下。掛了主人之後，
+ * 生成時只要勾主人，這件物件會自動一起帶入——不必記得「畫安倢就要順便勾紅傘」。
  * readOnly（檢視者）：隱藏新增／刪除／編輯／設參考圖。
  */
 export function PropCards({
@@ -52,6 +60,7 @@ export function PropCards({
       setAppearance("");
       setNotes("");
       setRefImg(null);
+      setOwner(null);
       setOpen(false);
       if (row?.id) onCreated?.(row.id);
     },
@@ -72,6 +81,7 @@ export function PropCards({
   const [appearance, setAppearance] = useState("");
   const [notes, setNotes] = useState("");
   const [refImg, setRefImg] = useState<ReferenceImage | null>(null);
+  const [owner, setOwner] = useState<OwnerValue>(null);
   const [refEditId, setRefEditId] = useState<string | null>(null);
   /** 正在就地編輯文字欄的卡 id */
   const [textEditId, setTextEditId] = useState<string | null>(null);
@@ -125,7 +135,10 @@ export function PropCards({
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                  <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={p.name}>
+                  <strong
+                    style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                    title={formatPropDisplayName(p.name, p.ownerName)}
+                  >
                     {p.name}
                   </strong>
                   <label
@@ -199,6 +212,7 @@ export function PropCards({
                         ? { id: p.referenceAssetId, url: p.referenceUrl, title: "素材參考圖" }
                         : null
                     }
+                    owner={p.ownerKind && p.ownerId ? { kind: p.ownerKind, id: p.ownerId } : null}
                     pending={update.isPending}
                     error={update.error?.message}
                     onCancel={() => {
@@ -212,11 +226,33 @@ export function PropCards({
                         appearance: next.appearance,
                         notes: next.notes || null,
                         referenceAssetId: next.referenceAssetId,
+                        ownerKind: next.owner?.kind ?? null,
+                        ownerId: next.owner?.id ?? null,
                       })
                     }
                   />
                 ) : (
                   <>
+                    {p.ownerKind && (
+                      <Meta
+                        as="div"
+                        style={{ fontSize: "var(--fs-11)", marginTop: "var(--sp-4)" }}
+                        title={
+                          p.ownerName
+                            ? `勾選「${p.ownerName}」時，這件物件會自動一起帶入生成`
+                            : "主人卡已被刪除——這件物件不會再被自動帶入"
+                        }
+                      >
+                        <Icon
+                          name={p.ownerKind === "character" ? "User" : "Image"}
+                          size={11}
+                          style={{ verticalAlign: "-1px", marginRight: 4 }}
+                        />
+                        {p.ownerName
+                          ? `${PROP_OWNER_LABEL[p.ownerKind]}：${p.ownerName}`
+                          : `${PROP_OWNER_LABEL[p.ownerKind]}：主人卡已刪除`}
+                      </Meta>
+                    )}
                     <Meta
                       as="div"
                       title={p.appearance}
@@ -370,6 +406,7 @@ export function PropCards({
               placeholder="例：安倢每次出場都帶著；雨停後收起夾在臂彎"
             />
             <CharCount value={notes} max={PROP_NOTES_MAX} />
+            <OwnerPicker projectId={projectId} value={owner} onChange={setOwner} disabled={add.isPending} />
             <label style={{ marginTop: 8 }}>素材參考圖（選填：上傳或從素材庫選）</label>
             <ReferenceImagePicker projectId={projectId} value={refImg} onChange={setRefImg} disabled={add.isPending} />
             <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -383,6 +420,8 @@ export function PropCards({
                     appearance: appearance.trim(),
                     notes: notes.trim() || undefined,
                     referenceAssetId: refImg?.id,
+                    ownerKind: owner?.kind ?? null,
+                    ownerId: owner?.id ?? null,
                     clientRequestId: requestId.current,
                   })
                 }
@@ -442,6 +481,7 @@ function PropTextEditor({
   notes,
   projectId,
   reference,
+  owner,
   pending,
   error,
   onSave,
@@ -454,15 +494,24 @@ function PropTextEditor({
   projectId: string;
   /** 目前綁定的參考圖；null＝還沒綁 */
   reference: ReferenceImage | null;
+  /** 目前歸屬；null＝獨立物件 */
+  owner: OwnerValue;
   pending: boolean;
   error?: string;
-  onSave: (next: { name: string; appearance: string; notes: string; referenceAssetId: string | null }) => void;
+  onSave: (next: {
+    name: string;
+    appearance: string;
+    notes: string;
+    referenceAssetId: string | null;
+    owner: OwnerValue;
+  }) => void;
   onCancel: () => void;
 }) {
   const [n, setN] = useState(name);
   const [a, setA] = useState(appearance);
   const [note, setNote] = useState(notes);
   const [ref, setRef] = useState<ReferenceImage | null>(reference);
+  const [own, setOwn] = useState<OwnerValue>(owner);
   const firstRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -480,6 +529,7 @@ function PropTextEditor({
       <CharCount value={a} max={PROP_APPEARANCE_MAX} />
       <label style={editLabel}>用途・備註（選填）</label>
       <textarea value={note} maxLength={PROP_NOTES_MAX} disabled={pending} rows={2} onChange={(e) => setNote(e.target.value)} />
+      <OwnerPicker projectId={projectId} value={own} onChange={setOwn} disabled={pending} labelStyle={editLabel} />
       <label style={editLabel}>素材參考圖（選填：上傳或從素材庫選）</label>
       <ReferenceImagePicker projectId={projectId} value={ref} onChange={setRef} disabled={pending} />
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
@@ -488,7 +538,13 @@ function PropTextEditor({
           className="primary"
           disabled={!canSave}
           onClick={() =>
-            onSave({ name: n.trim(), appearance: a.trim(), notes: note.trim(), referenceAssetId: ref?.id ?? null })
+            onSave({
+              name: n.trim(),
+              appearance: a.trim(),
+              notes: note.trim(),
+              referenceAssetId: ref?.id ?? null,
+              owner: own,
+            })
           }
         >
           {pending ? "儲存中…" : "儲存"}
@@ -507,3 +563,75 @@ function PropTextEditor({
 }
 
 const editLabel: CSSProperties = { fontSize: "var(--fs-11)", margin: 0 };
+
+/** 歸屬值：null＝獨立物件；否則指到一張角色卡或場景卡 */
+export type OwnerValue = { kind: PropOwnerKind; id: string } | null;
+
+const OWNER_NONE = "";
+
+/**
+ * 歸屬選擇器：一個下拉把「獨立物件／某角色／某場景」講完。
+ * 角色與場景清單走既有 list query（與專案頁同快取鍵，不會多打 API）。
+ */
+function OwnerPicker({
+  projectId,
+  value,
+  onChange,
+  disabled,
+  labelStyle,
+}: {
+  projectId: string;
+  value: OwnerValue;
+  onChange: (next: OwnerValue) => void;
+  disabled?: boolean;
+  labelStyle?: CSSProperties;
+}) {
+  const characters = trpc.characters.list.useQuery({ projectId });
+  const scenes = trpc.scenePresets.list.useQuery({ projectId });
+  const selectValue = value ? `${value.kind}:${value.id}` : OWNER_NONE;
+  const hasOwners = (characters.data?.length ?? 0) + (scenes.data?.length ?? 0) > 0;
+
+  return (
+    <>
+      <label htmlFor={`prop-owner-${projectId}`} style={{ marginTop: 8, ...labelStyle }}>
+        歸屬（選填）：這件東西屬於誰
+      </label>
+      <select
+        id={`prop-owner-${projectId}`}
+        value={selectValue}
+        disabled={disabled || !hasOwners}
+        onChange={(e) => {
+          const raw = e.target.value;
+          if (!raw) return onChange(null);
+          const [kind, id] = raw.split(":");
+          onChange(kind && id ? { kind: kind as PropOwnerKind, id } : null);
+        }}
+      >
+        <option value={OWNER_NONE}>獨立物件（不屬於誰）</option>
+        {characters.data && characters.data.length > 0 && (
+          <optgroup label={PROP_OWNER_LABEL.character}>
+            {characters.data.map((c) => (
+              <option key={c.id} value={`character:${c.id}`}>
+                {c.name}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {scenes.data && scenes.data.length > 0 && (
+          <optgroup label={PROP_OWNER_LABEL.scene}>
+            {scenes.data.map((s) => (
+              <option key={s.id} value={`scene:${s.id}`}>
+                {s.name}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+      <Hint>
+        {hasOwners
+          ? "掛上主人後，生成時只要勾這個角色／場景，這件物件會自動一起帶入（仍受單次上限）。"
+          : "還沒有角色定裝卡或場景設定卡可掛——先建一張，這裡就選得到。"}
+      </Hint>
+    </>
+  );
+}

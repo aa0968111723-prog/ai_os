@@ -9,8 +9,9 @@
  * - 欄位截短，避免多卡撐爆圖像 prompt／知識 budget
  * - 知識庫卡片段落完整注入（有界截短後），不被 budget 腰斬半張卡
  */
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "../db";
+import { carriedPropIdsFor, formatPropDisplayName, type PropOwnerKind } from "../../shared/propOwnership";
 
 /** 視覺／知識共用的主欄位截短上限（與 agentCore 別名摘要一致） */
 export const CARD_FIELD_MAX = 160;
@@ -44,6 +45,9 @@ export type PropAnchorRow = {
   name: string;
   appearance: string;
   notes?: string | null;
+  /** 歸屬主人的名字（有就寫成「安倢的紅傘」，讓模型把物件綁在對的人／地上） */
+  ownerName?: string | null;
+  ownerKind?: PropOwnerKind | null;
 };
 
 /** 依 selectedIds 順序去重挑列；未知 id 略過 */
@@ -87,11 +91,16 @@ export function formatSceneAnchor(rows: SceneAnchorRow[], selectedIds: string[])
     .join("；");
 }
 
-/** 視覺生成：素材設定錨點（只外觀材質；「材質鎖定」指令提高道具跨鏡一致性；備註不進畫面） */
+/**
+ * 視覺生成：素材設定錨點（只外觀材質；「材質鎖定」指令提高道具跨鏡一致性；備註不進畫面）。
+ * 有歸屬的物件寫成「安倢的紅傘」——把物件綁在對的人／地上，避免傘飄到別人手裡。
+ */
 export function formatPropAnchor(rows: PropAnchorRow[], selectedIds: string[]): string {
   const ordered = orderRowsByIds(rows, selectedIds);
   if (ordered.length === 0) return "";
-  return ordered.map((p) => `材質鎖定 ${p.name}：${clipCardField(p.appearance)}`).join("；");
+  return ordered
+    .map((p) => `材質鎖定 ${formatPropDisplayName(p.name, p.ownerName)}：${clipCardField(p.appearance)}`)
+    .join("；");
 }
 
 /** 知識庫／導演：【角色定裝卡】（可含個性） */
@@ -133,7 +142,7 @@ export function formatPropKnowledgeBlock(props: PropAnchorRow[]): string {
   const lines = shown.map((p) => {
     const appearance = clipCardField(p.appearance);
     const notes = p.notes?.trim() ? `｜用途：${clipCardField(p.notes, CARD_NOTES_MAX)}` : "";
-    return `- ${p.name}：${appearance}${notes}`;
+    return `- ${formatPropDisplayName(p.name, p.ownerName)}：${appearance}${notes}`;
   });
   const more =
     props.length > PROP_KNOWLEDGE_INJECT_MAX
@@ -184,10 +193,40 @@ export async function buildPropAnchor(projectId: string, propIds: string[]): Pro
       name: schema.props.name,
       appearance: schema.props.appearance,
       notes: schema.props.notes,
+      ownerKind: schema.props.ownerKind,
+      ownerName: sql<string | null>`coalesce(${schema.characters.name}, ${schema.scenePresets.name})`,
     })
     .from(schema.props)
+    .leftJoin(
+      schema.characters,
+      and(eq(schema.characters.id, schema.props.ownerId), eq(schema.props.ownerKind, "character")),
+    )
+    .leftJoin(
+      schema.scenePresets,
+      and(eq(schema.scenePresets.id, schema.props.ownerId), eq(schema.props.ownerKind, "scene")),
+    )
     .where(and(eq(schema.props.projectId, projectId), inArray(schema.props.id, ids)));
   return formatPropAnchor(rows, propIds);
+}
+
+/**
+ * 勾了角色／場景卡 → 它們名下的素材卡自動一起帶入（歸屬的實際效用）。
+ *
+ * 只回 id；與明確勾選的合併、去重、截上限交給 shared/propOwnership 的純函式，
+ * 前端預覽與後端注入才會算出同一份清單。
+ */
+export async function resolveCarriedPropIds(
+  projectId: string,
+  selected: { characterIds?: string[]; scenePresetIds?: string[] },
+): Promise<string[]> {
+  const ownerIds = [...new Set([...(selected.characterIds ?? []), ...(selected.scenePresetIds ?? [])])];
+  if (ownerIds.length === 0) return [];
+  const rows = await db
+    .select({ id: schema.props.id, ownerKind: schema.props.ownerKind, ownerId: schema.props.ownerId })
+    .from(schema.props)
+    .where(and(eq(schema.props.projectId, projectId), inArray(schema.props.ownerId, ownerIds)))
+    .orderBy(asc(schema.props.createdAt));
+  return carriedPropIdsFor(rows, selected);
 }
 
 /**
