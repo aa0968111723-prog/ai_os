@@ -159,4 +159,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0030_scene_cards": [
     "7838aa34020fe29cafddb677ee6d1b6e0b5e94a4ad02adb4687c8190663ee4d1",
   ],
+  "0031_user_ai_provider_keys": [
+    "e5bd470f34812bc816497130bb141a4612c72f3d186983055701f93ba086ba89",
+  ],
 };
