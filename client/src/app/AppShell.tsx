@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { readUiDensity, writeUiDensity } from "../lib/densityPreference";
 import { trpc } from "../api";
 import { FeedbackWidget } from "../feedback/FeedbackWidget";
+import { FloatingDmBubble } from "../components/FloatingDmBubble";
 import { NotificationSettingsDialog, PushSubscriptionSync } from "../components/NotificationSettings";
 import { AppUpdateBanner } from "../components/AppUpdateBanner";
 import { unsubscribeThisDevice } from "../push";
@@ -258,6 +259,9 @@ export function AppShell() {
 
       {/* 元件級回饋浮標：登入後任何路由都掛一次；放在 inert 包裹外、與對話框同層，強制改密碼時不受影響 */}
       {me.data && <FeedbackWidget />}
+
+      {/* 私訊 Messenger 風格小球球（左下角）；偏好可在「連結手機與電腦」關閉 */}
+      {me.data && <FloatingDmBubble />}
     </div>
   );
 }
