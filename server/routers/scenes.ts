@@ -5,7 +5,10 @@ import { router, authedProcedure, requireGroup } from "../trpc";
 import { db, schema } from "../db";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { getModel, type ModelEntry } from "../../shared/models";
-import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
+import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
+import { resolveSceneCards } from "../../shared/sceneCards";
+import { sceneCardColumns } from "../services/sceneCards";
+import { assertGenerationEntityIds } from "../services/generationCore";
 import {
   buildSceneVersions,
   findDuplicateCurrent,
@@ -115,6 +118,10 @@ export const scenesRouter = router({
         assetId: schema.scenes.assetId,
         prompt: schema.scenes.prompt,
         voiceover: schema.scenes.voiceover,
+        // 逐鏡卡片綁定：分鏡表每格顯示「這鏡用誰、在哪、拿什麼」，也決定就地生成注入哪幾張
+        characterIds: schema.scenes.characterIds,
+        scenePresetIds: schema.scenes.scenePresetIds,
+        propIds: schema.scenes.propIds,
         assetUrl: schema.assets.url,
         assetKind: schema.assets.kind,
         // 逐鏡配音音檔網址（該格已生成的旁白）：前端播放用
@@ -522,6 +529,38 @@ export const scenesRouter = router({
       return updated;
     }),
 
+  /**
+   * 逐鏡卡片綁定：這一鏡要用哪些角色／場景／素材卡（拆分鏡時 AI 先填，之後可人工改）。
+   * 卡片本體仍在專案層，這裡只存引用；三欄皆空＝沒指定，逐鏡生成沿用生成台勾選。
+   */
+  setCards: authedProcedure
+    .input(z.object({
+      sceneId: z.string().uuid(),
+      characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS),
+      scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const [scene] = await db
+        .select()
+        .from(schema.scenes)
+        .where(and(eq(schema.scenes.id, input.sceneId), isNull(schema.scenes.deletedAt)));
+      if (!scene) throw new TRPCError({ code: "NOT_FOUND" });
+      await getProjectChecked(ctx, scene.projectId, true);
+      // fail-closed：卡片必須屬於本專案，否則不寫入外鍵 UUID（與 generation 同一關）
+      await assertGenerationEntityIds(scene.projectId, {
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
+        propIds: input.propIds,
+      });
+      const [updated] = await db
+        .update(schema.scenes)
+        .set(sceneCardColumns(input))
+        .where(eq(schema.scenes.id, input.sceneId))
+        .returning();
+      return updated;
+    }),
+
   /** 就地生成：以該分鏡的 prompt 送出生成並綁定該格，完成後由 advanceGeneration 回填 assetId（草稿→出圖一條線） */
   generateInto: authedProcedure
     .input(z.object({
@@ -531,9 +570,13 @@ export const scenesRouter = router({
       prompt: z.string().max(MAX_PROMPT_CHARS).optional(),
       /** 冪等鍵：timeout 重送同鍵回原列，不重複扣點 */
       clientRequestId: z.string().uuid().optional(),
-      /** 生成台勾選的角色/場景卡：就地生成也注入同一套錨點——否則逐鏡出圖與生成台出圖畫風/角色不一致 */
+      /**
+       * 生成台勾選的角色/場景/素材卡——只在「這一鏡沒有自己的綁定」時才用得到（fallback）。
+       * 有綁定就以該鏡為準：第 3 鏡的紅傘特寫不該被全域勾選硬塞一個角色進來。
+       */
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -551,6 +594,12 @@ export const scenesRouter = router({
       const prompt = input.prompt ?? scene.prompt ?? "";
       if (!prompt.trim()) throw new TRPCError({ code: "BAD_REQUEST", message: "這一格還沒有生成提示詞，請先填寫或改用生成台" });
       await assertNoPendingVisual(scene.id);
+      // 這一鏡有綁卡片就整組用它；沒綁才沿用呼叫端（生成台）的勾選
+      const cards = resolveSceneCards(scene, {
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
+        propIds: input.propIds,
+      });
       // TD-02：分鏡就地生成走 Command（政策＋狀態機＋ACL＋扣點）
       const gen = await executeGenerationCommand({
         auth: ctx.auth,
@@ -560,8 +609,9 @@ export const scenesRouter = router({
         modelId: input.modelId,
         prompt,
         sceneId: scene.id,
-        characterIds: input.characterIds,
-        scenePresetIds: input.scenePresetIds,
+        characterIds: cards.characterIds,
+        scenePresetIds: cards.scenePresetIds,
+        propIds: cards.propIds,
         reasonPrefix: "分鏡生成",
       });
       return { generationId: gen.id };

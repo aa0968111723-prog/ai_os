@@ -211,6 +211,13 @@
       "when": 1785686700000,
       "tag": "0029_prop_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1785686800000,
+      "tag": "0030_scene_cards",
+      "breakpoints": true
     }
   ]
 }

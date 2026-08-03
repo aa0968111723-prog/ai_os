@@ -54,6 +54,11 @@ vi.mock("./SceneStudio", () => ({
   SceneStudio: ({ sceneNumber }: { sceneNumber: number }) => <div role="dialog" aria-label={`單格工作室 stub 第 ${sceneNumber} 鏡`} />,
 }));
 vi.mock("./StoryboardPlayer", () => ({ StoryboardPlayer: () => <div aria-label="粗剪預覽 stub" /> }));
+// 逐鏡卡片綁定自帶卡片清單查詢，另有專屬測試（SceneCardBinding.test.tsx）——這裡 stub 掉，
+// 讓本檔專注在分鏡格自己的狀態機
+vi.mock("./SceneCardBinding", () => ({ SceneCardBinding: () => <div aria-label="逐鏡卡片綁定 stub" /> }));
+// 逐鏡預覽自帶 generation.preview mutation，同樣另有專屬測試
+vi.mock("./ScenePromptPreview", () => ({ ScenePromptPreview: () => <div aria-label="逐鏡預覽 stub" /> }));
 vi.mock("../discuss", () => ({ discussInMessages: vi.fn() }));
 
 type SceneOver = {
