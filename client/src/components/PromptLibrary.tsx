@@ -18,7 +18,7 @@ export interface PromptReuseSettings {
 /**
  * 提示詞庫（簡報「打過的咒語一鍵再用」）：
  * 成功生成的提示詞自動入庫，這裡可「再用」（帶入生成台，連同模型/角色/場景設定一起還原）、
- * 「製作範本」（帶入製作範本想法框）、「複製」、「刪除」。
+ * 「製作範本」（帶入製作範本想法框）、「複製」、「發布到靈感頻道」、「刪除」。
  *
  * WB-05: `embedded` 模式供 CreationResourceDrawer 使用（無外層 card／可顯示空狀態／自訂再用文案）。
  */
@@ -44,9 +44,15 @@ export function PromptLibrary({
   const utils = trpc.useUtils();
   const list = trpc.prompts.list.useQuery({ projectId });
   const remove = trpc.prompts.remove.useMutation({ onSuccess: () => utils.prompts.list.invalidate({ projectId }) });
+  const publish = trpc.community.publishFromSource.useMutation();
 
   // 複製給即時回饋：成功閃「已複製」、被瀏覽器擋下閃「複製失敗」，約 1.5 秒後復原。
   const [copyState, setCopyState] = useState<{ id: string; ok: boolean } | null>(null);
+  const [publishState, setPublishState] = useState<{ id: string; ok: boolean; msg?: string } | null>(null);
+  const flashPublish = (id: string, ok: boolean, msg?: string) => {
+    setPublishState({ id, ok, msg });
+    setTimeout(() => setPublishState((s) => (s && s.id === id ? null : s)), 2000);
+  };
   const flashCopy = (id: string, ok: boolean) => {
     setCopyState({ id, ok });
     setTimeout(() => setCopyState((s) => (s && s.id === id ? null : s)), 1500);
@@ -79,7 +85,7 @@ export function PromptLibrary({
       {!embedded && (
         <>
           <h2>提示詞庫（打過的咒語，一鍵再用）</h2>
-          <Hint>成功生成的提示詞會自動存這裡（連同模型與角色/場景設定）；常用的排在前面。</Hint>
+          <Hint>成功生成的提示詞會自動存這裡（連同模型與角色/場景設定）；常用的排在前面。也可「發布」到全站靈感頻道。</Hint>
         </>
       )}
       {embedded && (
@@ -132,6 +138,26 @@ export function PromptLibrary({
                 <button style={{ padding: "3px 10px", fontSize: "var(--fs-12)" }} onClick={() => copy(p.id, p.text)}>
                   {copyState?.id === p.id ? (copyState.ok ? "已複製" : "複製失敗") : "複製"}
                 </button>
+                <button
+                  style={{ padding: "3px 10px", fontSize: "var(--fs-12)" }}
+                  title="發布到全站靈感頻道（Show Prompt + 一鍵再用）"
+                  disabled={publish.isPending}
+                  onClick={() => {
+                    publish.mutate(
+                      { sourceType: "prompt", sourceId: p.id },
+                      {
+                        onSuccess: () => flashPublish(p.id, true),
+                        onError: (e) => flashPublish(p.id, false, e.message),
+                      },
+                    );
+                  }}
+                >
+                  {publishState?.id === p.id
+                    ? publishState.ok
+                      ? "已發布 ✓"
+                      : "發布失敗"
+                    : "發布"}
+                </button>
                 <ConfirmButton
                   onConfirm={() => remove.mutate({ id: p.id })}
                   message="刪除這則提示詞？"
@@ -147,6 +173,9 @@ export function PromptLibrary({
         })}
       </div>
       {remove.error && <p className="error">{remove.error.message}</p>}
+      {publishState && !publishState.ok && publishState.msg && (
+        <p className="error" style={{ fontSize: "var(--fs-12)" }}>{publishState.msg}</p>
+      )}
     </>
   );
 
