@@ -154,7 +154,7 @@ export const scheduleRouter = router({
       await assertProjectEditable(ctx.auth, project);
     }
     await db.delete(schema.scheduleItems).where(eq(schema.scheduleItems.id, row.id));
-    voidGroupSync(row.groupId);
+    queueGroupSync(row.groupId);
     return { ok: true };
   }),
 });
