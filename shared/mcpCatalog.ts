@@ -98,6 +98,31 @@ export const MCP_TOOLS: McpToolInfo[] = [
   { name: "list_dm_threads", title: "列出私訊對話", access: "read", blurb: "列出你的私訊對話串（每位對象的最後一句與未讀數）。" },
   { name: "read_dm", title: "讀取私訊", access: "read", blurb: "讀你與某位夥伴的私訊往來（只讀得到自己參與的對話）。" },
   { name: "send_dm", title: "發送私訊", access: "write", blurb: "以你的身分私訊一位同組夥伴或開發者（對方在網站「私訊」頁看到）。" },
+  // ── MCP 寫入擴充（創作主線）：知識庫／分鏡／世界觀／素材／設定卡／生成後處理 ──
+  { name: "add_knowledge", title: "新增知識", access: "write", blurb: "為專案新增知識庫條目（腳本／逐字稿／見證／筆記）；需專案可編輯權限。" },
+  { name: "update_knowledge", title: "更新知識", access: "write", idempotent: true, blurb: "更新既有知識條目（標題／類型／內容／釘選）；內容變更會留版本快照。" },
+  { name: "add_scene", title: "新增分鏡", access: "write", blurb: "在專案新增一格分鏡草稿（標題／提示詞／旁白／秒數）。" },
+  { name: "update_scene", title: "更新分鏡", access: "write", idempotent: true, blurb: "更新分鏡標題、提示詞、旁白或秒數。" },
+  { name: "set_scene_visual", title: "掛上分鏡畫面", access: "write", blurb: "把生成結果或素材庫項目設為分鏡畫面（二選一：generationId 或 assetId）。" },
+  { name: "generate_into_scene", title: "在分鏡格生成", access: "write", openWorld: true, blurb: "在指定分鏡格送出生成（世界觀自動注入、扣點、走核准門檻）；完成後可再 set_scene_visual。" },
+  { name: "update_worldview", title: "更新世界觀", access: "write", idempotent: true, blurb: "更新專案世界觀（logline／調性／禁語等）；需專案可編輯權限。" },
+  { name: "rename_asset", title: "重新命名素材", access: "write", idempotent: true, blurb: "重新命名專案素材庫中的一筆素材。" },
+  { name: "set_asset_lock", title: "鎖定／解鎖素材", access: "write", idempotent: true, blurb: "鎖定素材避免被誤刪或覆寫；解鎖後可再操作。" },
+  { name: "add_character", title: "新增角色卡", access: "write", blurb: "為專案新增角色定裝卡（名稱／外觀／備註／參考圖）。" },
+  { name: "update_character", title: "更新角色卡", access: "write", idempotent: true, blurb: "更新既有角色定裝卡。" },
+  { name: "add_scene_preset", title: "新增場景設定卡", access: "write", blurb: "為專案新增場景設定卡（名稱／色板／光線／參考圖）。" },
+  { name: "update_scene_preset", title: "更新場景設定卡", access: "write", idempotent: true, blurb: "更新既有場景設定卡。" },
+  { name: "add_prop", title: "新增素材設定卡", access: "write", blurb: "為專案新增道具／素材設定卡（名稱／外觀材質／備註）。" },
+  { name: "update_prop", title: "更新素材設定卡", access: "write", idempotent: true, blurb: "更新既有道具／素材設定卡。" },
+  { name: "rename_generation", title: "重新命名生成", access: "write", idempotent: true, blurb: "重新命名一筆生成成品的顯示標題。" },
+  { name: "retry_generation", title: "重試失敗生成", access: "write", openWorld: true, blurb: "重試一筆失敗的生成（再扣點、走同一模型與提示詞）。" },
+  // Adobe（修圖／時間軸）
+  { name: "adobe_status", title: "查 Adobe 連結狀態", access: "read", blurb: "查你自己的 Adobe 連結狀態、模式與可用能力。" },
+  { name: "adobe_list_assets", title: "列 Adobe 素材", access: "read", blurb: "列出你已連結的 Adobe 帳號內的素材中繼資料。" },
+  { name: "adobe_edit_photo", title: "送出 Adobe 修圖", access: "write", openWorld: true, blurb: "在你已連結的 Adobe 帳號內送出修圖（去背／調色等），回 jobId；不扣站內點數。" },
+  { name: "adobe_job", title: "查 Adobe 工作狀態", access: "read", blurb: "查 Adobe 非同步工作進度（queued／running／succeeded／failed）。" },
+  { name: "adobe_export_timeline", title: "匯出時間軸檔", access: "write", blurb: "把時間軸契約轉成 FCPXML／Premiere XML／EDL（純本機，不需 Adobe 連結）。" },
+  { name: "adobe_render_timeline", title: "送 Adobe 時間軸算圖", access: "write", openWorld: true, blurb: "送出時間軸算圖工作（mock 可跑；real 模式可能尚未開放）。" },
 ];
 
 /** 寫入類工具名集合（唯讀金鑰一律擋）——由目錄推導，單一來源不分岔。 */
