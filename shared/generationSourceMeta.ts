@@ -13,13 +13,19 @@ export type GenerationAblationMeta = {
 export type GenerationSourceMeta = {
   secondarySourceUrl?: string;
   ablation?: GenerationAblationMeta;
+  /**
+   * BYOK Phase 2：此生成使用了使用者個人 fal API Key。
+   * true → 略過平台點數（reserveQuota / refund）；status 輪詢必須用同一把個人 key。
+   * 持久化在 params 裡，重啟後 advance 仍能正確判斷不退點／用哪把 key。
+   */
+  usedUserKey?: boolean;
 };
 
 export function storeGenerationSourceMeta(
   providerParams: Record<string, unknown>,
   meta: GenerationSourceMeta,
 ): Record<string, unknown> {
-  if (!meta.secondarySourceUrl && !meta.ablation) return providerParams;
+  if (!meta.secondarySourceUrl && !meta.ablation && !meta.usedUserKey) return providerParams;
   return { ...providerParams, [GENERATION_SOURCE_META_KEY]: meta };
 }
 
@@ -34,16 +40,19 @@ export function splitGenerationSourceMeta(params: unknown): {
   const rawMeta = source[GENERATION_SOURCE_META_KEY];
   const providerParams = { ...source };
   delete providerParams[GENERATION_SOURCE_META_KEY];
-  const secondarySourceUrl =
+  const metaObj =
     rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
-      && typeof (rawMeta as Record<string, unknown>).secondarySourceUrl === "string"
-      ? (rawMeta as Record<string, string>).secondarySourceUrl
+      ? (rawMeta as Record<string, unknown>)
+      : null;
+  const secondarySourceUrl =
+    metaObj && typeof metaObj.secondarySourceUrl === "string"
+      ? metaObj.secondarySourceUrl
       : undefined;
-  const rawAblation = rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
-    ? (rawMeta as Record<string, unknown>).ablation
-    : undefined;
-  const ablation = rawAblation && typeof rawAblation === "object" && !Array.isArray(rawAblation)
-    ? (rawAblation as GenerationAblationMeta)
-    : undefined;
-  return { providerParams, meta: { secondarySourceUrl, ablation } };
+  const rawAblation = metaObj?.ablation;
+  const ablation =
+    rawAblation && typeof rawAblation === "object" && !Array.isArray(rawAblation)
+      ? (rawAblation as GenerationAblationMeta)
+      : undefined;
+  const usedUserKey = metaObj?.usedUserKey === true ? true : undefined;
+  return { providerParams, meta: { secondarySourceUrl, ablation, usedUserKey } };
 }
