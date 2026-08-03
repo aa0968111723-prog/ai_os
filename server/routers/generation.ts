@@ -8,7 +8,7 @@ import { failStaleGenerationTx, refund, reserveQuota } from "../services/points"
 import { advanceGeneration, prepareGenerationRequest } from "../services/generationCore";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { signAssetUrl } from "../services/storage";
-import { splitGenerationSourceMeta, storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
+import { GENERATION_SOURCE_META_KEY, splitGenerationSourceMeta, storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
 import { assertProjectEditable } from "../services/projectAcl";
 import { getModel, endpointOf, supportsSeed } from "../../shared/models";
 import { buildAblationVariants } from "../../shared/ablation";
@@ -148,6 +148,7 @@ export const generationRouter = router({
         request: safe.payload,
         warnings: prepared.warnings,
         estimatedPoints: prepared.estimatedPoints,
+        promptBudget: prepared.promptBudget,
         canOverrideCreativePrompt: true,
       };
     }),
@@ -318,6 +319,39 @@ export const generationRouter = router({
         runs,
         failed,
       };
+    }),
+
+  /**
+   * 消融實測的結果：把同一個 runId 的基準與各變體撈回來，供 UI 並排比對**實際成品**。
+   *
+   * 影響力量測的結論在圖上，不在文字裡——沒有並排的圖，前面那幾輪點數就白花了。
+   * 分組標記存在 params 的內部欄位（送 provider 前會被移除），這裡用 jsonb 路徑撈。
+   */
+  ablationResult: authedProcedure
+    .input(z.object({ projectId: z.string().uuid(), runId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, project.groupId); // 多組隔離：只看得到自己組的實測
+      const rows = await db
+        .select()
+        .from(schema.generations)
+        .where(and(
+          eq(schema.generations.projectId, input.projectId),
+          sql`${schema.generations.params}->'${sql.raw(GENERATION_SOURCE_META_KEY)}'->'ablation'->>'runId' = ${input.runId}`,
+        ))
+        .orderBy(schema.generations.createdAt);
+      return rows.map((row) => {
+        const { meta } = splitGenerationSourceMeta(row.params);
+        return {
+          id: row.id,
+          section: meta.ablation?.section ?? "baseline",
+          status: row.status,
+          kind: row.kind,
+          resultUrl: row.resultUrl,
+          error: row.error,
+        };
+      });
     }),
 
   /**

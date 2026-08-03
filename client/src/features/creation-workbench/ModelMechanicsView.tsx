@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { modelMechanicsFor } from "@shared/modelMechanics";
 import { Hint, Meta } from "../../components/ui";
+import { MechanicsDiagram } from "./MechanicsDiagram";
 
 /**
  * 模型運作圖解：這顆模型收到提示詞之後，實際上一關一關發生了什麼。
@@ -17,14 +18,16 @@ export function ModelMechanicsView({ modelId, category }: { modelId?: string; ca
     <details data-testid="model-mechanics" style={{ marginTop: 10 }}>
       <summary style={{ cursor: "pointer", fontWeight: 600 }}>這顆模型怎麼運作</summary>
       <Hint layer="always" style={{ marginTop: 6 }}>
-        以下是這類模型的架構說明（整理自公開資料），不是本次生成的實測紀錄。
-        要知道某一段設定這次有沒有真的起作用，請用下方的影響力實測。
+        下圖是這類模型的架構示意（整理自公開資料），不是本次生成的中間結果——
+        模型不回傳中間潛變數。要知道某一段設定這次有沒有真的起作用，請用下方的影響力實測。
       </Hint>
 
       <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap", marginTop: 8 }}>
         <strong style={{ fontSize: 13 }}>{mechanics.label}</strong>
         <Meta>{mechanics.conditioning}</Meta>
       </div>
+
+      <MechanicsDiagram stages={mechanics.stages} activeKey={openStage} onPick={(key) => setOpenStage(openStage === key ? null : key)} />
 
       <ol style={{ listStyle: "none", margin: "8px 0 0", padding: 0, display: "grid", gap: 5 }}>
         {mechanics.stages.map((stage, index) => {

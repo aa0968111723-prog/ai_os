@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { promptBudgetReportSchema } from "./promptBudget";
 
 /**
  * 使用者可驗證的 AI 應用層軌跡。這不是模型私密思維鏈；只描述系統真正組裝、送出、
@@ -66,8 +67,10 @@ export const aiOperationPreviewSchema = z.object({
   dynamicNotice: z.string().max(1_000).optional(),
   provider: z.string().max(120).optional(),
   model: z.string().max(240).optional(),
-  /** 模型目錄 id（不是給人看的 label）：前端據此查文字編碼器窗口，做注意力預算偵測 */
+  /** 模型目錄 id（不是給人看的 label）：前端據此查模型架構資料 */
   modelId: z.string().max(240).optional(),
+  /** 伺服器實測的 token 預算（站內內建 CLIP 詞表；量不到就 measured:false，前端不補估算） */
+  promptBudget: promptBudgetReportSchema.optional(),
   endpoint: z.string().max(300).optional(),
   context: z.array(aiContextItemSchema).max(100),
   request: z.record(z.string(), z.unknown()),

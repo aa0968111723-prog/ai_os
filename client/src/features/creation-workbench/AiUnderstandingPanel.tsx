@@ -271,6 +271,7 @@ export function AiUnderstandingPanel({
                   provider={preview.provider}
                   model={preview.model}
                   modelId={preview.modelId}
+                  promptBudget={preview.promptBudget}
                   estimatedPoints={preview.estimatedPoints}
                   warnings={preview.warnings}
                 />

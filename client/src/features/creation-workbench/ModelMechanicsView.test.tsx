@@ -5,8 +5,15 @@ import { ModelMechanicsView } from "./ModelMechanicsView";
 describe("ModelMechanicsView", () => {
   it("states up front that this is architecture, not a measurement of this run", () => {
     render(<ModelMechanicsView modelId="fal-ai/flux/dev" />);
-    expect(screen.getByText(/不是本次生成的實測紀錄/)).toBeInTheDocument();
+    expect(screen.getByText(/不是本次生成的中間結果/)).toBeInTheDocument();
     expect(screen.getByText("FLUX 雙流 flow transformer（非 U-Net）")).toBeInTheDocument();
+  });
+
+  it("draws the pipeline as a diagram, not only as a list of words", () => {
+    render(<ModelMechanicsView modelId="fal-ai/flux/dev" />);
+    const diagram = screen.getByTestId("mechanics-diagram");
+    // 讀屏也要拿得到管線的順序，不能只有圖形
+    expect(diagram).toHaveAttribute("aria-label", expect.stringContaining("文字塔編碼 → Double-Stream"));
   });
 
   it("expands a stage on demand instead of dumping every explanation at once", () => {
