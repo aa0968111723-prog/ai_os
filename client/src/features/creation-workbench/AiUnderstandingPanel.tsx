@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { AiOperationPreview, CreativePromptOverride } from "@shared/aiTrace";
 import { trpc } from "../../api";
 import { Button, Card, Chip, Hint, Meta } from "../../components/ui";
+import { AblationPanel, type AblationSubmitInput } from "./AblationPanel";
 import { PromptFlowMap } from "./PromptFlowMap";
 
 function JsonBlock({ value }: { value: unknown }) {
@@ -162,6 +163,7 @@ export function AiUnderstandingPanel({
   traceSessionId,
   override,
   onOverrideChange,
+  ablationInput,
 }: {
   projectId: string;
   preview?: AiOperationPreview;
@@ -171,6 +173,11 @@ export function AiUnderstandingPanel({
   traceSessionId?: string | null;
   override?: CreativePromptOverride;
   onOverrideChange?: (next: CreativePromptOverride) => void;
+  /**
+   * 給消融實測用的送出參數（＝這次生成的完整設定）。
+   * 沒給就不顯示實測入口——助手／工作流／代理的預覽沒有可重跑的生成設定。
+   */
+  ablationInput?: AblationSubmitInput;
 }) {
   const [open, setOpen] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
@@ -279,6 +286,14 @@ export function AiUnderstandingPanel({
                   <RequestTextView request={preview.request} />
                 </>
               )}
+
+              {ablationInput && requestParts.positivePrompt ? (
+                <AblationPanel
+                  input={ablationInput}
+                  positivePrompt={requestParts.positivePrompt}
+                  pointsPerRun={preview.estimatedPoints}
+                />
+              ) : null}
 
               <details style={{ marginTop: 12 }}>
                 <summary style={{ cursor: "pointer", fontWeight: 600 }}>開發者資料：完整請求 JSON</summary>

@@ -168,6 +168,44 @@ export function supportsNegativePrompt(model: ModelEntry): boolean {
   return NEGATIVE_PROMPT_SUPPORTED.has(model.id);
 }
 
+/**
+ * 此模型的 fal schema 是否吃頂層 `seed`。
+ *
+ * 只有消融實測（影響力量測）會用到：兩次跑必須共用同一顆隨機噪聲，
+ * 差異才歸因得到「被拿掉的那一段」，否則差的可能只是噪聲。
+ *
+ * 名單刻意保守——與 `NEGATIVE_PROMPT_SUPPORTED` 同一個原則：
+ * **不猜未知欄位**（猜錯是整包請求 400，使用者白等）。不在名單上的模型
+ * 照樣能跑消融，只是 UI 會誠實說「這顆模型固定不了噪聲，結果只能當參考」。
+ */
+export const SEED_SUPPORTED: ReadonlySet<string> = new Set<string>([
+  // SD 系（seed 是這條線的標準欄位）
+  "fal-ai/fast-lightning-sdxl",
+  "fal-ai/lora",
+  "fal-ai/fast-sdxl/image-to-image",
+  "fal-ai/playground-v25",
+  "fal-ai/kolors",
+  "fal-ai/sana",
+  "fal-ai/aura-flow",
+  // FLUX.1 系
+  "fal-ai/flux/dev",
+  "fal-ai/flux/schnell",
+  "fal-ai/flux/dev/image-to-image",
+  "fal-ai/flux-lora",
+  // Qwen-Image（與 negative_prompt 同一批 schema 確認）
+  "fal-ai/qwen-image-2/text-to-image",
+  "fal-ai/qwen-image-2/pro/text-to-image",
+  "fal-ai/qwen-image-max/text-to-image",
+  // Wan 文生影片
+  "fal-ai/wan/v2.2-a14b/text-to-video",
+  "fal-ai/wan/v2.5/text-to-video",
+]);
+
+/** 消融實測能不能固定隨機噪聲（見 SEED_SUPPORTED） */
+export function supportsSeed(model: ModelEntry): boolean {
+  return SEED_SUPPORTED.has(model.id);
+}
+
 export const CATEGORIES: Array<{ id: ModelCategory; label: string; hint: string }> = [
   { id: "text-to-image", label: "文生圖", hint: "打字生成圖像(分鏡、場景、卡片)" },
   { id: "image-to-image", label: "圖生圖・編輯", hint: "用文字修改既有圖像(換風格、局部修改、合成)" },

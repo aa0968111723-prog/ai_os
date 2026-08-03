@@ -9,10 +9,10 @@
 import { and, eq, inArray, isNull, like } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
-import { getModel, endpointOf, isNimModel, supportsNegativePrompt, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
+import { getModel, endpointOf, isNimModel, supportsNegativePrompt, supportsSeed, CARD_ANCHOR_CATEGORIES, WORLDVIEW_INJECT_CATEGORIES, type ProjectFormat, type ModelEntry } from "../../shared/models";
 import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
 import { estimateTokenRange, textEncoderProfileFor } from "../../shared/textEncoders";
-import { storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
+import { storeGenerationSourceMeta, type GenerationAblationMeta } from "../../shared/generationSourceMeta";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import {
   worldviewSchema,
@@ -201,6 +201,14 @@ export interface SubmitCoreInput {
   agentRunId?: string;
   /** 進階使用者明確覆寫最終創作 prompt；系統權限與 provider schema 仍不可覆寫。 */
   promptOverride?: { positive?: string; negative?: string };
+  /**
+   * 固定隨機噪聲。只有消融實測（影響力量測）會帶：基準與各變體共用同一顆 seed，
+   * 輸出差異才歸因得到「被拿掉的那一段」而不是噪聲。
+   * 只在 supportsSeed 名單內才真的送出——不猜未知欄位（猜錯是整包 400）。
+   */
+  seed?: number;
+  /** 消融實測分組標記：落 params 內部欄位，送 provider 前會被移除 */
+  ablation?: GenerationAblationMeta;
   /** 預設開啟：凍結設定卡版本，並在 provider 支援時附上多張參考圖。 */
   continuityMode?: boolean;
   /** 只供伺服器重試沿用資料庫快照；不得直接暴露成公開 API payload。 */
@@ -366,6 +374,7 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     secondarySourceUrl,
   ) as Record<string, unknown>;
   if (negativePrompt && supportsNegativePrompt(model)) providerInput.negative_prompt = negativePrompt;
+  if (input.seed != null && supportsSeed(model)) providerInput.seed = input.seed;
   const referenceUrls = continuitySnapshot?.locked
     ? await resolveContinuityReferenceUrls(continuitySnapshot, project.groupId, effectiveSourceAssetId)
     : [];
@@ -597,7 +606,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       },
     });
   }
-  const storedParams = storeGenerationSourceMeta(falInput, { secondarySourceUrl });
+  const storedParams = storeGenerationSourceMeta(falInput, { secondarySourceUrl, ablation: input.ablation });
 
   // 成本審核門檻（需求 2.1）：組員（member）單筆估點 ≥ 組門檻 → 先落一筆 awaiting_approval，
   // 不扣點、不送 fal，等組長在生成紀錄核准（generation.decideCost）才走扣點＋送出。

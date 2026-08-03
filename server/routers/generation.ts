@@ -10,7 +10,9 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { signAssetUrl } from "../services/storage";
 import { splitGenerationSourceMeta, storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
 import { assertProjectEditable } from "../services/projectAcl";
-import { getModel, endpointOf } from "../../shared/models";
+import { getModel, endpointOf, supportsSeed } from "../../shared/models";
+import { buildAblationVariants } from "../../shared/ablation";
+import type { PromptSectionKey } from "../../shared/promptSections";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import {
   DEFAULT_CLOUD_MOCK_MODEL_ID,
@@ -220,6 +222,102 @@ export const generationRouter = router({
         await updateAiTraceSession(trace.id, { status: "failed", summary: error instanceof Error ? error.message : "送出失敗" }).catch(() => undefined);
         throw error;
       }
+    }),
+
+  /**
+   * 消融偵測（影響力實測）：同一組設定送出「完整版」＋「各拿掉一段」的變體。
+   *
+   * 為什麼要用實測：hosted API 不回傳 attention，拿不到「模型多看重這一段」的內部權重。
+   * 拿不到內部權重時，量測影響力的標準做法就是消融——固定其他條件、只拿掉一段重跑，
+   * 差得多＝這段真的在起作用；幾乎沒差＝它其實沒發揮。
+   *
+   * 誠實前提：兩次跑的隨機噪聲要一樣，差異才歸因得到被拿掉的那一段。
+   * seed 只在 supportsSeed 名單內才送（不猜未知欄位）；固定不了的模型照跑，
+   * 但回傳 seedPinned=false，UI 必須據此說明「差異裡混著噪聲，只能當參考」。
+   *
+   * 每一輪都是一次真的生成，會照常扣點——所以回傳值帶 runs 讓 UI 先講清楚總花費。
+   */
+  ablation: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      modelId: z.string(),
+      prompt: z.string().min(1, "請填提示詞").max(MAX_PROMPT_CHARS),
+      sourceUrl: publicHttpsUrl.optional(),
+      sourceAssetId: z.string().uuid().optional(),
+      secondarySourceUrl: publicHttpsUrl.optional(),
+      secondarySourceAssetId: z.string().uuid().optional(),
+      characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
+      continuityMode: z.boolean().optional(),
+      /** 要拿掉哪幾段（各一輪） */
+      sections: z.array(z.enum(["background", "character", "scene", "prop"])).min(1).max(4),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const prepared = await prepareGenerationRequest({
+        ...input,
+        userId: ctx.auth.user.id,
+        assertAccess: async (project) => {
+          const role = requireGroup(ctx.auth, project.groupId);
+          await assertProjectEditable(ctx.auth, project);
+          return role;
+        },
+      });
+      const wanted = new Set<PromptSectionKey>(input.sections);
+      const variants = buildAblationVariants(prepared.positivePrompt).filter((variant) => wanted.has(variant.section));
+      if (!variants.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "這次組裝裡沒有你選的段落，沒有東西可以拿掉" });
+      }
+
+      const runId = crypto.randomUUID();
+      // seed 固定不了的模型照樣能跑，只是結論要降級成「參考」——由 UI 依 seedPinned 說明
+      const seed = supportsSeed(prepared.model) ? Math.floor(Math.random() * 2_147_483_647) : undefined;
+      // 基準也走 promptOverride：讓所有輪次經過完全相同的路徑，唯一差別就是被拿掉的那一段
+      const plan = [
+        { section: "baseline" as const, title: "完整版（基準）", prompt: prepared.positivePrompt },
+        ...variants.map((variant) => ({ section: variant.section, title: `拿掉「${variant.title}」`, prompt: variant.prompt })),
+      ];
+
+      const runs: Array<{ id: string; section: string; title: string; status: string }> = [];
+      const failed: Array<{ section: string; title: string; message: string }> = [];
+      for (const step of plan) {
+        try {
+          const generation = await executeGenerationCommand({
+            auth: ctx.auth,
+            source: "web",
+            projectId: input.projectId,
+            modelId: input.modelId,
+            prompt: input.prompt,
+            sourceUrl: input.sourceUrl,
+            sourceAssetId: input.sourceAssetId,
+            secondarySourceUrl: input.secondarySourceUrl,
+            secondarySourceAssetId: input.secondarySourceAssetId,
+            characterIds: input.characterIds,
+            scenePresetIds: input.scenePresetIds,
+            propIds: input.propIds,
+            continuityMode: input.continuityMode,
+            promptOverride: { positive: step.prompt },
+            seed,
+            ablation: { runId, section: step.section, seed },
+          });
+          runs.push({ id: generation.id, section: step.section, title: step.title, status: generation.status });
+        } catch (error) {
+          // 點數不足／待核門檻等中途失敗：已送出的輪次仍要回報，否則使用者付了點卻看不到
+          failed.push({ section: step.section, title: step.title, message: error instanceof Error ? error.message : "送出失敗" });
+        }
+      }
+      if (!runs.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: failed[0]?.message ?? "消融實測沒有送出任何一輪" });
+      }
+
+      return {
+        runId,
+        seedPinned: seed != null,
+        model: prepared.model.label,
+        pointsPerRun: prepared.estimatedPoints,
+        runs,
+        failed,
+      };
     }),
 
   /**
