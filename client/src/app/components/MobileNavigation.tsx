@@ -29,6 +29,7 @@ function useHash(): string {
 }
 
 const MORE_ITEMS: { href: string; label: string; description: string; icon: IconName; match: string[] }[] = [
+  { href: "/community", label: "靈感頻道", description: "全站共用提示詞與素材", icon: "Sparkles", match: ["/community"] },
   { href: "/databases", label: "資料庫", description: "清單、文件與批次匯入", icon: "Database", match: ["/databases"] },
   { href: "/chat", label: "私訊", description: "與夥伴和 AI 協作", icon: "MessageCircle", match: ["/chat"] },
   { href: "/help", label: "使用說明", description: "快速找到下一步", icon: "HelpCircle", match: ["/help"] },

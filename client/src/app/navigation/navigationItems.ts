@@ -67,6 +67,14 @@ export const topbarNavItems: NavigationItem[] = [
     title: "資料庫——你的素材與資料集",
   },
   {
+    key: "community",
+    label: "靈感",
+    href: "/community",
+    section: "topbar",
+    icon: "Sparkles",
+    title: "靈感頻道——全站共用提示詞與多模態素材（Flow TV 風格）",
+  },
+  {
     key: "help",
     label: "說明",
     href: "/help",
@@ -82,6 +90,7 @@ export const accountMenuItems: NavigationItem[] = [
   { key: "help", label: "怎麼用", href: "/help", section: "help", icon: "HelpCircle" },
   { key: "models", label: "模型指南", href: "/models", section: "help", icon: "Info" },
   // 工作
+  { key: "community", label: "靈感頻道", href: "/community", section: "work", icon: "Sparkles" },
   { key: "mcp", label: "接上外部 AI", href: "/mcp", section: "work", icon: "Sparkles" },
   { key: "integrations", label: "連接的資料來源", href: "/integrations", section: "work", icon: "Package" },
   { key: "downloads", label: "共用文件下載", href: "/downloads", section: "work", icon: "FileText" },

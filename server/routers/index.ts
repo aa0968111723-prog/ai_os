@@ -39,6 +39,7 @@ import { tasksRouter } from "./tasks";
 import { systemRouter } from "./system";
 import { aiTraceRouter } from "./aiTrace";
 import { userAiKeysRouter } from "./userAiKeys";
+import { communityRouter } from "./community";
 
 export const appRouter = router({
   models: modelsRouter,
@@ -81,6 +82,7 @@ export const appRouter = router({
   system: systemRouter,
   aiTrace: aiTraceRouter,
   userAiKeys: userAiKeysRouter,
+  community: communityRouter,
 });
 
 export type AppRouter = typeof appRouter;
