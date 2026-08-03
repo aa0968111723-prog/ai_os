@@ -11,17 +11,33 @@ import {
 } from "../services/scheduleCore";
 import { executeScheduleCommand } from "../services/scheduleCommand";
 import { importIcsEvents } from "../services/scheduleImport";
-import { voidGroupSync } from "../services/googleCalendar";
+import { queueGroupSync } from "../services/googleCalendar";
 
 /**
  * 排程（需求 10）：組行事曆（會議、交付死線…）。
  * Google 日曆整合＝OAuth 直連同步（services/googleCalendar：增刪改自動推送到已連結成員的
  * 專屬 Google 日曆＋每 15 分鐘對帳）；.ics 匯出（GET /api/schedule/:groupId/calendar.ics）保留為後備。
- * .ics 匯入（importIcs）供組代理與手動上傳使用。
+ * .ics 匯入：schedule.importIcs（組代理與 UI 皆可呼叫）。
+ *
+ * 備註標注代辦（v1）：在 note 前加上「[代辦] 」前綴即可在列表／月曆顯示代辦標籤；
+ * 後續可升格為正式 isTodo 欄位或連結人類任務。
  */
 
 /** ISO 字串 → Date（zod 驗證過再轉；壞值擋在輸入層） */
 const isoDate = z.string().refine((s) => !Number.isNaN(Date.parse(s)), "時間格式不正確");
+
+/** 代辦前綴（備註標注代辦 v1 約定） */
+export const TODO_NOTE_PREFIX = "[代辦] ";
+
+export function isTodoNote(note: string | null | undefined): boolean {
+  return !!note && note.startsWith(TODO_NOTE_PREFIX);
+}
+
+export function withTodoPrefix(note: string | null | undefined, asTodo: boolean): string | null {
+  const body = (note ?? "").replace(/^\[代辦\]\s*/, "").trim();
+  if (asTodo) return body ? `${TODO_NOTE_PREFIX}${body}` : TODO_NOTE_PREFIX.trimEnd();
+  return body || null;
+}
 
 export const scheduleRouter = router({
   /**
@@ -51,42 +67,44 @@ export const scheduleRouter = router({
       startsAt: isoDate,
       endsAt: isoDate.optional(),
       note: z.string().max(500).optional(),
+      /** 標為代辦：在備註前加上 [代辦] 前綴，列表與月曆可顯示代辦標籤 */
+      isTodo: z.boolean().optional(),
       ownerId: z.string().uuid().optional(),
       // 由留言「轉待辦」建立時帶來源留言 id（供 Planner 反向跳回）；@提及同組成員
       sourceMessageId: z.string().uuid().optional(),
       mentions: z.array(z.string().uuid()).max(20).optional(),
     }))
-    .mutation(({ ctx, input }) =>
-      // Command：政策 schedule.create + 專案狀態機 write + addScheduleItemCore
-      executeScheduleCommand({ auth: ctx.auth, source: "web", ...input }),
-    ),
+    .mutation(({ ctx, input }) => {
+      const { isTodo, note, ...rest } = input;
+      const finalNote = withTodoPrefix(note, !!isTodo) ?? undefined;
+      return executeScheduleCommand({
+        auth: ctx.auth,
+        source: "web",
+        ...rest,
+        note: finalNote,
+      });
+    }),
 
   /**
-   * 匯入 .ics 日曆檔內容到組排程。
-   * 供組代理（agents.step.import_calendar）與未來 UI「匯入 .ics」按鈕共用。
-   * 會自動去重（相同標題 + 開始時間 1 分鐘內的既有行程會跳過）。
+   * 匯入 .ics 日曆檔到組排程。
+   * 供 UI「匯入 .ics」按鈕與組代理（agents.step.import_calendar）使用。
+   * 解析 VEVENT → 去重（標題＋開始時間 1 分鐘內）→ 批量寫入。
    */
   importIcs: authedProcedure
     .input(z.object({
       groupId: z.string().uuid(),
-      icsContent: z.string().min(20, "日曆內容太短").max(2_000_000),
+      icsContent: z.string().min(20, "日曆內容太短，請確認是完整的 .ics 檔").max(2_000_000),
       defaultProjectId: z.string().uuid().optional(),
     }))
-    .mutation(async ({ ctx, input }) => {
-      requireGroup(ctx.auth, input.groupId);
-      const result = await importIcsEvents({
+    .mutation(({ ctx, input }) =>
+      importIcsEvents({
         auth: ctx.auth,
         groupId: input.groupId,
         icsContent: input.icsContent,
-        defaultProjectId: input.defaultProjectId,
+        defaultProjectId: input.defaultProjectId ?? null,
         source: "web",
-      });
-      return {
-        imported: result.imported,
-        skipped: result.skipped,
-        errors: result.errors,
-      };
-    }),
+      }),
+    ),
 
   update: authedProcedure
     .input(z.object({
@@ -95,10 +113,29 @@ export const scheduleRouter = router({
       startsAt: isoDate.optional(),
       endsAt: isoDate.nullable().optional(),
       note: z.string().max(500).nullable().optional(),
+      /** 更新時可切換代辦標注 */
+      isTodo: z.boolean().optional(),
       ownerId: z.string().uuid().nullable().optional(),
       mentions: z.array(z.string().uuid()).max(20).optional(),
     }))
-    .mutation(({ ctx, input }) => updateScheduleItemCore({ auth: ctx.auth, ...input })),
+    .mutation(async ({ ctx, input }) => {
+      const { isTodo, note, ...rest } = input;
+      let finalNote = note;
+      if (isTodo !== undefined) {
+        // 若有傳 isTodo，以它為準重新套用前綴；若同時有 note 則用新 note，否則讀現有
+        let base = note;
+        if (base === undefined) {
+          const row = await getScheduleItemChecked(ctx.auth, input.id);
+          base = row.note;
+        }
+        finalNote = withTodoPrefix(base, isTodo);
+      }
+      return updateScheduleItemCore({
+        auth: ctx.auth,
+        ...rest,
+        note: finalNote,
+      });
+    }),
 
   /** 刪除：建立者本人或組長以上；專案綁定行程另擋檢視者／封存 */
   remove: authedProcedure.input(z.object({ id: z.string().uuid() })).mutation(async ({ ctx, input }) => {
@@ -153,7 +190,7 @@ export function foldIcsLine(line: string): string {
 /**
  * .ics（iCalendar）內容產生：供 server/index.ts 的匯出端點使用。
  * 極簡 VCALENDAR/VEVENT：UTC 時間（Z 結尾）、UID=id@aidirector-os、無結束時間以 1 小時計;
- * 文字欄位跳脫（\ ; , 換行）＋ 75-octet 行折疊（RFC 5545）。匯入 Google 日曆/Apple 行事曆皆可讀。
+ * 文字欄位跳脫（\\ ; , 換行）＋ 75-octet 行折疊（RFC 5545）。匯入 Google 日曆/Apple 行事曆皆可讀。
  */
 export function buildIcs(groupName: string, items: Array<{ id: string; title: string; startsAt: Date; endsAt: Date | null; note: string | null; allDayDate?: string }>): string {
   const fmt = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
@@ -165,8 +202,8 @@ export function buildIcs(groupName: string, items: Array<{ id: string; title: st
     d.setUTCDate(d.getUTCDate() + 1);
     return d.toISOString().slice(0, 10).replace(/-/g, "");
   };
-  // 換行一律轉義：CRLF、單獨 CR、單獨 LF 都要處理——單獨 \r 若漏掉，某些 iCalendar 解析器會把它
-  // 當成行邊界，讓欄位值裡的 "\rSUMMARY:..." 被當成偽造屬性注入（ICS injection）。
+  // 換行一律轉義：CRLF、單獨 CR、單獨 LF 都要處理——單獨 \\r 若漏掉，某些 iCalendar 解析器會把它
+  // 當成行邊界，讓欄位值裡的 "\\rSUMMARY:..." 被當成偽造屬性注入（ICS injection）。
   const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
   const lines = [
     "BEGIN:VCALENDAR",
