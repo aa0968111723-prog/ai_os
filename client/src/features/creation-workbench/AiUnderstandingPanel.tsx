@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { AiOperationPreview, CreativePromptOverride } from "@shared/aiTrace";
 import { trpc } from "../../api";
 import { Button, Card, Chip, Hint, Meta } from "../../components/ui";
+import { PromptFlowMap } from "./PromptFlowMap";
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
@@ -68,11 +69,11 @@ export function presentAiRequest(request: Record<string, unknown>) {
   return { positivePrompt, negativePrompt, parameters };
 }
 
-function RequestPreview({ request }: { request: Record<string, unknown> }) {
+/** 原文檢視：圖解拆不動的東西（自訂覆寫、非標準段落）永遠還有一份逐字可看。 */
+function RequestTextView({ request }: { request: Record<string, unknown> }) {
   const { positivePrompt, negativePrompt, parameters } = presentAiRequest(request);
   return (
     <>
-      <h4 style={{ margin: "12px 0 6px" }}>實際使用的創作提示詞</h4>
       <div
         data-testid="readable-positive-prompt"
         style={{ padding: 10, maxHeight: 260, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", borderRadius: 8, background: "var(--card2)", fontSize: 13, lineHeight: 1.65 }}
@@ -105,12 +106,46 @@ function RequestPreview({ request }: { request: Record<string, unknown> }) {
           </dl>
         </div>
       ) : null}
-
-      <details style={{ marginTop: 12 }}>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>開發者資料：完整請求 JSON</summary>
-        <div style={{ marginTop: 6 }}><JsonBlock value={request} /></div>
-      </details>
     </>
+  );
+}
+
+/** 上下文清單：✓／— 的一行行文字改成「帶入／不帶入」標記，狀態一眼可掃。 */
+function ContextList({ items }: { items: AiOperationPreview["context"] }) {
+  return (
+    <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 5 }}>
+      {items.map((item, index) => (
+        <li
+          key={`${item.type}-${item.id ?? index}`}
+          style={{
+            display: "flex",
+            gap: 8,
+            alignItems: "baseline",
+            padding: "5px 9px",
+            borderRadius: 8,
+            border: "1px solid var(--border-soft)",
+            background: item.included ? "var(--card2)" : "transparent",
+          }}
+        >
+          <span
+            style={{
+              flex: "0 0 auto",
+              fontSize: 11,
+              padding: "1px 7px",
+              borderRadius: 999,
+              color: item.included ? "var(--success-ink)" : "var(--fg-secondary)",
+              background: item.included ? "var(--success-soft)" : "var(--muted)",
+            }}
+          >
+            {item.included ? "帶入" : "不帶入"}
+          </span>
+          <span style={{ fontSize: 13, lineHeight: 1.5 }}>
+            {item.label}
+            {item.note ? <Meta>・{item.note}</Meta> : null}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -139,6 +174,9 @@ export function AiUnderstandingPanel({
 }) {
   const [open, setOpen] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
+  // 預設圖解：手機上一整段組裝後的 prompt 只剩「一牆字」，看不出哪段是誰加的。
+  // 原文仍一鍵可切，覆寫或非標準段落時要逐字比對就靠它。
+  const [promptView, setPromptView] = useState<"map" | "text">("map");
   const review = trpc.aiTrace?.review?.useMutation?.() ?? {
     data: undefined,
     error: null,
@@ -150,6 +188,8 @@ export function AiUnderstandingPanel({
     { enabled: Boolean(traceSessionId && showTrace) },
   ) ?? { data: undefined, error: null, isLoading: false };
   const displayedPreviewError = friendlyPreviewError(previewError);
+  // 無條件求值（空物件回空結果），才不必為了型別收斂把整段 JSX 拆成另一個元件
+  const requestParts = presentAiRequest(preview?.request ?? {});
 
   const openPreview = () => {
     setOpen(true);
@@ -184,30 +224,65 @@ export function AiUnderstandingPanel({
           {displayedPreviewError ? <Hint as="p" layer="always">{displayedPreviewError}</Hint> : null}
           {preview ? (
             <>
-              <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {preview.provider ? <Chip>{preview.provider}</Chip> : null}
-                {preview.model ? <Chip>{preview.model}</Chip> : null}
-                {preview.estimatedPoints != null ? <Chip>{preview.estimatedPoints} 點</Chip> : null}
-              </div>
-              {preview.dynamicNotice ? <Meta as="p">{preview.dynamicNotice}</Meta> : null}
-              <h4 style={{ margin: "12px 0 6px" }}>會帶入的上下文</h4>
-              <ul style={{ margin: 0, paddingLeft: 20 }}>
-                {preview.context.map((item, index) => (
-                  <li key={`${item.type}-${item.id ?? index}`}>
-                    {item.included ? "✓" : "—"} {item.label}{item.note ? `：${item.note}` : ""}
-                  </li>
-                ))}
-              </ul>
-              {preview.warnings.length ? (
-                <div role="status" style={{ marginTop: 10 }}>
-                  {preview.warnings.map((warning) => (
-                    <p key={warning.code} style={{ margin: "5px 0", color: warning.severity === "warning" ? "var(--gold-ink)" : undefined }}>
-                      <b>{warning.title}</b>：{warning.detail}{warning.suggestion ? ` ${warning.suggestion}` : ""}
-                    </p>
-                  ))}
+              {/* 圖解檢視把 provider／模型／點數收進流程終點，避免同一組資訊重複兩次 */}
+              {promptView === "text" ? (
+                <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {preview.provider ? <Chip>{preview.provider}</Chip> : null}
+                  {preview.model ? <Chip>{preview.model}</Chip> : null}
+                  {preview.estimatedPoints != null ? <Chip>{preview.estimatedPoints} 點</Chip> : null}
                 </div>
               ) : null}
-              <RequestPreview request={preview.request} />
+              {preview.dynamicNotice ? <Meta as="p">{preview.dynamicNotice}</Meta> : null}
+              {preview.context.length ? (
+                <>
+                  <h4 style={{ margin: "12px 0 6px" }}>會帶入的上下文</h4>
+                  <ContextList items={preview.context} />
+                </>
+              ) : null}
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "14px 0 0" }}>
+                <h4 style={{ margin: 0 }}>這次的提示詞怎麼組出來</h4>
+                <span style={{ flex: 1 }} />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  aria-pressed={promptView === "text"}
+                  onClick={() => setPromptView((current) => (current === "map" ? "text" : "map"))}
+                >
+                  {promptView === "map" ? "看原文" : "看圖解"}
+                </Button>
+              </div>
+
+              {promptView === "map" ? (
+                <PromptFlowMap
+                  positivePrompt={requestParts.positivePrompt}
+                  negativePrompt={requestParts.negativePrompt}
+                  parameters={requestParts.parameters}
+                  provider={preview.provider}
+                  model={preview.model}
+                  estimatedPoints={preview.estimatedPoints}
+                  warnings={preview.warnings}
+                />
+              ) : (
+                <>
+                  {preview.warnings.length ? (
+                    <div role="status" style={{ marginTop: 10 }}>
+                      {preview.warnings.map((warning) => (
+                        <p key={warning.code} style={{ margin: "5px 0", color: warning.severity === "warning" ? "var(--gold-ink)" : undefined }}>
+                          <b>{warning.title}</b>：{warning.detail}{warning.suggestion ? ` ${warning.suggestion}` : ""}
+                        </p>
+                      ))}
+                    </div>
+                  ) : null}
+                  <RequestTextView request={preview.request} />
+                </>
+              )}
+
+              <details style={{ marginTop: 12 }}>
+                <summary style={{ cursor: "pointer", fontWeight: 600 }}>開發者資料：完整請求 JSON</summary>
+                <div style={{ marginTop: 6 }}><JsonBlock value={preview.request} /></div>
+              </details>
 
               {preview.canOverrideCreativePrompt && onOverrideChange ? (
                 <details style={{ marginTop: 10 }}>
