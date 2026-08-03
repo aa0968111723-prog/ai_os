@@ -104,8 +104,8 @@ import type { DataField } from "../../shared/databaseFields";
 const PROTOCOL_VERSION = "2024-11-05";
 
 export const TOOLS = [
-  // progressive 2/7 — content continuing from local mcp.final.ts
-  // (full body being restored in parts due to size; expansion wire-up already present)
+  // progressive restore continuing — full body from local mcp.final.ts
+  // expansion already wired; remaining original handlers being restored
   ...MCP_WRITE_EXPANSION_TOOLS,
   ...MCP_UPLOAD_GRANT_TOOLS,
 ];
@@ -114,14 +114,14 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
   const scopeDenied = scopeDeniedReason(name, scope);
   if (scopeDenied) throw new TRPCError({ code: "FORBIDDEN", message: scopeDenied });
 
-  // Early dispatch for the write expansion tools
+  // Early dispatch for write expansion tools (knowledge / scenes / worldview / assets / cards / generation / Adobe)
   const expansionResult = await runMcpWriteExpansion(auth, name, args);
   if (expansionResult !== null) return expansionResult;
 
-  // Remaining original handlers will be restored in subsequent progressive commits
+  // Original handlers restoring in progressive commits
   throw new Error(`工具尚未完整還原：${name}`);
 }
 
 export async function handleMcp(req: Request, res: Response): Promise<void> {
-  res.status(503).json({ error: "MCP progressive restore in progress" });
+  res.status(503).json({ error: "MCP progressive restore in progress (2/7)" });
 }
