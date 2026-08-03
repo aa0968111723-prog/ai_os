@@ -38,6 +38,10 @@ vi.mock("../api", () => ({
       move: { useMutation: () => ({ mutate: moveMutate, isPending: false, error: null }) },
       remove: { useMutation: () => ({ mutate: removeMutate, isPending: false, error: null }) },
     },
+    // 文字腳本的「設定卡」唯讀標注要讀這三份清單（SceneList 自己查，不能靠 stub 子元件躲掉）
+    characters: { list: { useQuery: () => ({ data: [], isLoading: false }) } },
+    scenePresets: { list: { useQuery: () => ({ data: [], isLoading: false }) } },
+    props: { list: { useQuery: () => ({ data: [], isLoading: false }) } },
     approvals: {
       listByProject: { useQuery: (...args: unknown[]) => approvalsQuery(...args) },
       submit: { useMutation: () => ({ mutate: submitMutate, isPending: false, error: null }) },
@@ -59,6 +63,8 @@ vi.mock("./StoryboardPlayer", () => ({ StoryboardPlayer: () => <div aria-label="
 vi.mock("./SceneCardBinding", () => ({ SceneCardBinding: () => <div aria-label="逐鏡卡片綁定 stub" /> }));
 // 逐鏡預覽自帶 generation.preview mutation，同樣另有專屬測試
 vi.mock("./ScenePromptPreview", () => ({ ScenePromptPreview: () => <div aria-label="逐鏡預覽 stub" /> }));
+// 文字腳本另有專屬測試（StoryboardScript.test.tsx）；本檔專注在分鏡格的狀態機
+vi.mock("./StoryboardScript", () => ({ StoryboardScript: () => <div aria-label="文字腳本 stub" /> }));
 vi.mock("../discuss", () => ({ discussInMessages: vi.fn() }));
 
 type SceneOver = {

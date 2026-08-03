@@ -7,6 +7,7 @@ import { executeGenerationCommand } from "../services/generationCommand";
 import { getModel, type ModelEntry } from "../../shared/models";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "../../shared/cardLimits";
 import { resolveSceneCards } from "../../shared/sceneCards";
+import { parseStoryboardScript } from "../../shared/storyboardScript";
 import { sceneCardColumns } from "../services/sceneCards";
 import { assertGenerationEntityIds } from "../services/generationCore";
 import {
@@ -527,6 +528,85 @@ export const scenesRouter = router({
       if (Object.keys(patch).length === 0) return scene; // 無欄位可更，回原狀
       const [updated] = await db.update(schema.scenes).set(patch).where(eq(schema.scenes.id, input.sceneId)).returning();
       return updated;
+    }),
+
+  /**
+   * 文字分鏡腳本一次寫回：整份文字 → 更新既有鏡、多的新增到末尾。
+   *
+   * 刻意保守，兩條原則：
+   * 1. **永不刪除**——文字裡少寫一鏡，那一格只是「保留不動」。忘了寫不該讓已出圖的格消失。
+   * 2. **省略不等於清空**——只寫標題的那一鏡，畫面／旁白維持原值。
+   * 解析一律在伺服器做（不信任前端送來的結構化結果），前端那份只用於預覽差異。
+   */
+  applyScript: authedProcedure
+    .input(z.object({
+      projectId: z.string().uuid(),
+      // 12 鏡 × 每鏡提示詞上限仍有餘裕；再長多半是整份文件貼錯地方
+      text: z.string().max(60_000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await getProjectChecked(ctx, input.projectId, true);
+      assertProjectNotArchived(project);
+      const parsed = parseStoryboardScript(input.text);
+      if (parsed.errors.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: parsed.errors.join("；") });
+      }
+      if (!parsed.scenes.length) {
+        return { updated: 0, created: 0, keptUntouched: 0, warnings: parsed.warnings };
+      }
+
+      // 與拆分鏡／新增分鏡共用同一把序號鎖：併發寫回不會插出重複 orderIndex
+      return db.transaction(async (tx) => {
+        await lockSceneOrder(tx, project.id);
+        const rows = await tx
+          .select()
+          .from(schema.scenes)
+          .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
+          .orderBy(asc(schema.scenes.orderIndex));
+
+        let updated = 0;
+        let created = 0;
+        let order = rows.length ? Math.max(...rows.map((r) => r.orderIndex)) : 0;
+
+        for (const [i, scene] of parsed.scenes.entries()) {
+          const row = rows[i];
+          if (!row) {
+            await tx.insert(schema.scenes).values({
+              projectId: project.id,
+              orderIndex: ++order,
+              title: scene.title.slice(0, 60),
+              durationSec: scene.durationSec ?? (project.format === "9:16" ? 4 : 5),
+              status: "todo",
+              prompt: scene.prompt ?? null,
+              voiceover: scene.voiceover ?? null,
+            });
+            created += 1;
+            continue;
+          }
+          // 只寫「文字裡真的有寫」的欄位——undefined＝沒寫到，維持原值
+          const patch: Partial<typeof schema.scenes.$inferInsert> = {};
+          if (scene.title && scene.title !== row.title) patch.title = scene.title.slice(0, 60);
+          if (scene.durationSec !== undefined && scene.durationSec !== row.durationSec) {
+            patch.durationSec = scene.durationSec;
+          }
+          if (scene.prompt !== undefined && scene.prompt !== (row.prompt ?? "").trim()) {
+            patch.prompt = scene.prompt;
+          }
+          if (scene.voiceover !== undefined && scene.voiceover !== (row.voiceover ?? "").trim()) {
+            patch.voiceover = scene.voiceover;
+          }
+          if (Object.keys(patch).length === 0) continue;
+          await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, row.id));
+          updated += 1;
+        }
+
+        return {
+          updated,
+          created,
+          keptUntouched: Math.max(0, rows.length - parsed.scenes.length),
+          warnings: parsed.warnings,
+        };
+      });
     }),
 
   /**

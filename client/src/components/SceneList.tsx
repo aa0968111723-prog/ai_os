@@ -2,7 +2,9 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { trpc } from "../api";
 import { SceneCardBinding } from "./SceneCardBinding";
 import { ScenePromptPreview } from "./ScenePromptPreview";
+import { StoryboardScript } from "./StoryboardScript";
 import { resolveSceneCards } from "@shared/sceneCards";
+import { formatPropDisplayName } from "@shared/propOwnership";
 import { MAX_GENERATE_CHARACTERS, MAX_GENERATE_PROPS, MAX_GENERATE_SCENE_PRESETS } from "@shared/cardLimits";
 // tierLabel／estimatePoints 隨「逐格生成模型」選單一起移進單格工作室，這裡不再需要
 import { getModel, MODELS } from "@shared/models";
@@ -587,6 +589,18 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
   const actionError = submitApproval.error ?? decide.error ?? move.error ?? remove.error;
 
   const list = (scenes.data ?? []) as Scene[];
+  // 文字腳本的「設定卡」唯讀標注要顯示名字——與專案頁同快取鍵，不會多打 API
+  const characterCards = trpc.characters.list.useQuery({ projectId });
+  const sceneCards = trpc.scenePresets.list.useQuery({ projectId });
+  const propCards = trpc.props.list.useQuery({ projectId });
+  const sceneCardNames = (s: Scene): string[] => [
+    ...(s.characterIds ?? []).map((id) => characterCards.data?.find((c) => c.id === id)?.name),
+    ...(s.scenePresetIds ?? []).map((id) => sceneCards.data?.find((x) => x.id === id)?.name),
+    ...(s.propIds ?? []).map((id) => {
+      const row = propCards.data?.find((p) => p.id === id);
+      return row ? formatPropDisplayName(row.name, row.ownerName) : undefined;
+    }),
+  ].filter((n): n is string => !!n);
   const totalSec = list.reduce((sum, s) => sum + s.durationSec, 0);
   type SceneFilter = "all" | "draft" | "pending" | "needs_work" | "approved" | "missing";
   const [sceneFilter, setSceneFilter] = useState<SceneFilter>("all");
@@ -753,6 +767,21 @@ export function SceneList({ projectId, isLeader, canEdit = true, charIds, sceneI
             )}
           </div>
         </div>
+      )}
+      {/* 文字腳本：整份分鏡當一份文件讀／改（一格一格點適合改單鏡，不適合通讀與整份重寫） */}
+      {!scenes.isError && (
+        <StoryboardScript
+          projectId={projectId}
+          rows={list.map((s) => ({
+            title: s.title,
+            durationSec: s.durationSec,
+            prompt: s.prompt,
+            voiceover: s.voiceover,
+            cardNames: sceneCardNames(s),
+          }))}
+          canEdit={canEdit}
+          onApplied={invalidate}
+        />
       )}
       {!scenes.isError && list.length > 0 && (
         <div className="scene-overview" aria-label="分鏡狀態總覽">
