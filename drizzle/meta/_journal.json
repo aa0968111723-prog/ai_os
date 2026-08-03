@@ -225,6 +225,13 @@
       "when": 1785800000000,
       "tag": "0031_user_ai_provider_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1785900000000,
+      "tag": "0032_user_avatar",
+      "breakpoints": true
     }
   ]
 }
