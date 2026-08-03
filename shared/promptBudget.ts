@@ -54,6 +54,8 @@ export const promptChunkSchema = z.object({
   key: promptBudgetSegmentSchema.shape.key,
   /** 這個詞有沒有完整進入窗口 */
   status: z.enum(["inside", "truncated", "dropped"]),
+  /** 這個 token 是分詞器的 `<unk>`：有東西，但模型不知道是什麼 */
+  unknown: z.boolean().default(false),
 });
 export type PromptChunk = z.infer<typeof promptChunkSchema>;
 
@@ -69,5 +71,11 @@ export const promptBudgetReportSchema = z.object({
    * 注意力權重拿不到，但每個詞佔窗口幾格、落在第幾格、有沒有被切在線外，都是確定的事實。
    */
   chunks: z.array(promptChunkSchema).max(400).default([]),
+  /**
+   * 落在 `<unk>` 的 token 數。T5 的詞表沒有中日韓字元，中文會整串塌成一個未知符號——
+   * 這時 token 數看起來很小，但那不是「省空間」，是**模型讀不到語意**。
+   * 未量測時為 null。
+   */
+  unknownTokens: z.number().int().nonnegative().nullable().default(null),
 });
 export type PromptBudgetReport = z.infer<typeof promptBudgetReportSchema>;

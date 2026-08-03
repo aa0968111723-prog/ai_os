@@ -14,8 +14,12 @@
  * 這裡不做任何估算，站內也不顯示估算值。
  */
 
-/** 分詞器家族：決定站內量不量得到 token（目前只內建 CLIP 的詞表） */
-export type TokenizerKind = "clip-bpe" | "sentencepiece";
+/**
+ * 分詞器家族：決定站內量不量得到 token。
+ * 內建詞表的只有 `clip-bpe`（SDXL 那條線）與 `t5`（FLUX.1 那條線）；
+ * `sentencepiece` 是「知道它用 sentencepiece 但站內沒有那份詞表」，一律不量。
+ */
+export type TokenizerKind = "clip-bpe" | "t5" | "sentencepiece";
 
 export interface TextEncoderProfile {
   /** 家族鍵（測試與 UI 用） */
@@ -58,8 +62,8 @@ const RULES: readonly ProfileRule[] = [
       key: "flux1-schnell",
       label: "T5-XXL（FLUX.1 [schnell]）",
       limitTokens: 256,
-      tokenizer: "sentencepiece",
-      note: "蒸餾版把 T5 序列壓到 256；另一條 CLIP-L 只取整句 pooled 向量，不逐字對齊。",
+      tokenizer: "t5",
+      note: "蒸餾版把 T5 序列壓到 256（最後一格是結束標記）；另一條 CLIP-L 只取整句 pooled 向量，不逐字對齊。",
     },
   },
   {
@@ -69,8 +73,8 @@ const RULES: readonly ProfileRule[] = [
       key: "flux1",
       label: "T5-XXL（FLUX.1）",
       limitTokens: 512,
-      tokenizer: "sentencepiece",
-      note: "逐字語意走 T5，窗口 512；另一條 CLIP-L 只取整句 pooled 向量，不逐字對齊。",
+      tokenizer: "t5",
+      note: "逐字語意走 T5，窗口 512（最後一格是結束標記）；另一條 CLIP-L 只取整句 pooled 向量，不逐字對齊。",
     },
   },
   {

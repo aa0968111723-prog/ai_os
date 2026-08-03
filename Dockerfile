@@ -23,6 +23,8 @@ COPY --from=builder /app/dist ./dist
 COPY drizzle.config.ts ./
 COPY --from=builder /app/drizzle ./drizzle
 COPY --from=builder /app/server/db ./server/db
+# 分詞器詞表（server/services/t5Tokenizer 於執行期讀取；不帶進來 FLUX 那條線就量不到 token）
+COPY --from=builder /app/server/assets ./server/assets
 COPY --from=builder /app/scripts/db ./scripts/db
 COPY --from=builder /app/scripts/start.sh ./start.sh
 # Windows checkout 也必須產出可由 Alpine /bin/sh 執行的 LF 腳本。
