@@ -38,12 +38,8 @@ export function SceneCardBinding({
   const characters = trpc.characters.list.useQuery({ projectId }, { enabled: open });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId }, { enabled: open });
   const props = trpc.props.list.useQuery({ projectId }, { enabled: open });
-  const setCards = trpc.scenes.setCards.useMutation({
-    onSuccess: () => {
-      onSaved();
-      setOpen(false);
-    },
-  });
+  // 每勾一下就存，但**不關面板**——三排是同一個多選編輯器，關掉會逼使用者重開再等 refetch
+  const setCards = trpc.scenes.setCards.useMutation({ onSuccess: () => onSaved() });
 
   const bound = hasSceneCardBinding(scene);
   const charIds = scene.characterIds ?? [];
@@ -118,17 +114,22 @@ export function SceneCardBinding({
           <Hint style={{ marginTop: 4 }}>
             全部取消＝這一鏡回到「沿用生成台勾選」。掛了歸屬的素材，勾角色／場景時會自動一起帶入。
           </Hint>
-          {bound && (
-            <Button
-              variant="ghost"
-              size="sm"
-              style={{ fontSize: "var(--fs-11)", marginTop: 4 }}
-              disabled={setCards.isPending}
-              onClick={() => save({ characterIds: [], scenePresetIds: [], propIds: [] })}
-            >
-              清除這一鏡的指定
+          <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+            <Button variant="ghost" size="sm" style={{ fontSize: "var(--fs-11)" }} onClick={() => setOpen(false)}>
+              完成
             </Button>
-          )}
+            {bound && (
+              <Button
+                variant="ghost"
+                size="sm"
+                style={{ fontSize: "var(--fs-11)" }}
+                disabled={setCards.isPending}
+                onClick={() => save({ characterIds: [], scenePresetIds: [], propIds: [] })}
+              >
+                清除這一鏡的指定
+              </Button>
+            )}
+          </div>
           {setCards.error && (
             <p className="error" role="alert" style={{ margin: "4px 0 0", fontSize: "var(--fs-11)" }}>
               {setCards.error.message}

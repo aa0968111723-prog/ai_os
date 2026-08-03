@@ -638,8 +638,10 @@ export const scenesRouter = router({
       sourceAssetId: z.string().uuid().optional(),
       /** 冪等鍵：timeout 重送同鍵回原列，不重複扣點 */
       clientRequestId: z.string().uuid().optional(),
+      /** 與 generateInto 同口徑：只在這一鏡沒有自己的綁定時才當 fallback */
       characterIds: z.array(z.string().uuid()).max(MAX_GENERATE_CHARACTERS).optional(),
       scenePresetIds: z.array(z.string().uuid()).max(MAX_GENERATE_SCENE_PRESETS).optional(),
+      propIds: z.array(z.string().uuid()).max(MAX_GENERATE_PROPS).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const [scene] = await db
@@ -668,6 +670,12 @@ export const scenesRouter = router({
       });
       if (rejection) throw new TRPCError({ code: "BAD_REQUEST", message: rejection });
       await assertNoPendingVisual(scene.id);
+      // 修圖與就地生成同一條規則：這一鏡綁了卡片就用它——付費修圖不該注入不相干的全域卡片
+      const cards = resolveSceneCards(scene, {
+        characterIds: input.characterIds,
+        scenePresetIds: input.scenePresetIds,
+        propIds: input.propIds,
+      });
       // 走與其他生成同一條 Command（政策＋狀態機＋ACL＋估點＋扣點＋失敗退點）；
       // sourceAssetId 由 generationCore 換成短效簽名網址，fal 才抓得到、外人不可偽造。
       const gen = await executeGenerationCommand({
@@ -680,8 +688,9 @@ export const scenesRouter = router({
         sourceAssetId: source.id,
         sceneId: scene.id,
         sceneRole: "visual",
-        characterIds: input.characterIds,
-        scenePresetIds: input.scenePresetIds,
+        characterIds: cards.characterIds,
+        scenePresetIds: cards.scenePresetIds,
+        propIds: cards.propIds,
         reasonPrefix: "分鏡修圖",
       });
       return { generationId: gen.id };

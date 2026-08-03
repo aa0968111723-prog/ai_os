@@ -176,6 +176,11 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
  * original succeeded, re-running the corrected file creates the same table with
  * the columns 0029 would have added anyway.
  *
+ * 0029 only had its leading comment block rewritten when the owner columns moved
+ * into 0025's CREATE TABLE. The executed statements are byte-identical guarded
+ * ALTER/CREATE INDEX, so a database that applied the original reaches exactly
+ * the same schema; only the file's sha256 changed.
+ *
  * 0023 wrote its partial index predicate with a bare column name
  * (`WHERE land_state = 'pending'`) while every other partial index in the tree
  * qualifies it (`WHERE "assets"."land_state" = 'pending'`, as 0001 does and as
@@ -198,6 +203,9 @@ export const SUPERSEDED_MIGRATION_HASHES: Readonly<Record<string, readonly strin
   ],
   "0025_project_props": [
     "d93eaefc4613d71f61a3b31a8cb7620ad4080d4c495c103047486a1cc2d4a01a",
+  ],
+  "0029_prop_ownership": [
+    "ec2496a3bce3cd11dcf1a4d3b9f65af51e52b2695defb38f5ffefe8a88343083",
   ],
 };
 

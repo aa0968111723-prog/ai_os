@@ -302,6 +302,14 @@ describe("pending 批次內新建的表，欄位必須寫在 CREATE TABLE 裡", 
     expect(offenders).toEqual([]);
   });
 
+  it("已釋出的 migration 若改過檔案，舊 hash 必須登記為 superseded", () => {
+    // 0025／0029 都在合併後才修正過內容——沒登記舊 hash，已套用的資料庫會被判成竄改而拒絕啟動
+    const corrected = ["0025_project_props", "0029_prop_ownership"];
+    for (const tag of corrected) {
+      expect(SUPERSEDED_MIGRATION_HASHES[tag]?.length ?? 0, `${tag} 缺少舊 hash`).toBeGreaterThan(0);
+    }
+  });
+
   it("認得出這批表確實被掃到（規則沒有因為 regex 失效而空轉）", () => {
     expect(createdInBatch.has("props")).toBe(true);
     expect(createdInBatch.get("props")).toMatch(/"owner_kind"/);

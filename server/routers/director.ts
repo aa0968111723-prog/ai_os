@@ -38,6 +38,14 @@ const sceneSplitSchema = z
       characterRefs: z.array(z.string().max(40)).max(12).optional(),
       scenePresetRefs: z.array(z.string().max(40)).max(12).optional(),
       propRefs: z.array(z.string().max(40)).max(12).optional(),
+      /**
+       * 代號解析後凍結的實際卡片 id。onPrepared 保存的就是這個版本——
+       * 重播時直接沿用，不再拿「現在的」代號表重解一次：卡片是硬刪除，
+       * 兩次之間刪掉一張，char1 會指到另一個人，靜默綁錯角色。
+       */
+      characterIds: z.array(z.string().uuid()).max(12).optional(),
+      scenePresetIds: z.array(z.string().uuid()).max(12).optional(),
+      propIds: z.array(z.string().uuid()).max(12).optional(),
     }),
   )
   .min(1)
@@ -147,6 +155,17 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
   // 卡片代號：拆分鏡時一併指派「這一鏡用誰、在哪、拿什麼」，逐鏡出圖才不必回上面改勾選
   const cardAliases = await loadProjectCardAliases(project.id);
 
+  /**
+   * 代號 → 實際 id，且只解析一次：已帶 id 的（重播的 prepared 結果）原樣沿用。
+   * 凍結後才交給 onPrepared 保存，重播與首次執行必然綁到同一批卡片。
+   */
+  const freezeCards = (list: z.infer<typeof sceneSplitSchema>): z.infer<typeof sceneSplitSchema> =>
+    list.map((s) =>
+      s.characterIds || s.scenePresetIds || s.propIds
+        ? s
+        : { ...s, ...resolveSceneCardRefs(cardAliases, s) },
+    );
+
   const suppliedSceneIds = input.sceneIds ?? [];
   if (suppliedSceneIds.length > 12 || new Set(suppliedSceneIds).size !== suppliedSceneIds.length) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "固定分鏡識別碼重複或超過 12 筆" });
@@ -202,7 +221,11 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
             status: "todo",
             prompt: s.prompt,
             voiceover: s.voiceover,
-            ...sceneCardColumns(resolveSceneCardRefs(cardAliases, s)),
+            ...sceneCardColumns({
+              characterIds: s.characterIds ?? [],
+              scenePresetIds: s.scenePresetIds ?? [],
+              propIds: s.propIds ?? [],
+            }),
           })),
         )
         .returning();
@@ -211,7 +234,7 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
 
   // 已保存結果的恢復路徑不可再碰節流、額度或 provider；固定 id 讓 commit 前後重播都收斂到同一批 rows。
   if (preparedResult?.success) {
-    const rows = await createScenes(preparedResult.data);
+    const rows = await createScenes(freezeCards(preparedResult.data));
     return { scenes: rows, count: rows.length, mock: isMockMode(), truncation: null };
   }
 
@@ -246,8 +269,9 @@ export async function splitScriptCore(input: SplitScriptCoreInput) {
       prompt: `${p.slice(0, 120)}（${wv.tones.join("、") || "溫柔療癒"}調性，${wv.styles.join("、") || "日系水彩"}）`,
       voiceover: p.slice(0, 100),
     }));
-    await input.onPrepared?.(scenesData);
-    const rows = await createScenes(scenesData);
+    const mockScenes = freezeCards(scenesData);
+    await input.onPrepared?.(mockScenes);
+    const rows = await createScenes(mockScenes);
     return { scenes: rows, count: rows.length, mock: true, truncation: null };
   }
 
@@ -308,8 +332,10 @@ ${script.slice(0, SCRIPT_MODEL_BUDGET)}
       // LLM 已計費故不退點，但無法解析就不建垃圾分鏡——回明確錯誤讓使用者重試
       throw new TRPCError({ code: "UNPROCESSABLE_CONTENT", message: "AI 回傳的分鏡格式無法解析（模型輸出問題，非資料庫問題）——請再試一次" });
     }
-    await input.onPrepared?.(parsed.data);
-    const rows = await createScenes(parsed.data);
+    // 先凍結卡片 id 再保存：onPrepared 存下來的就是最終要寫入的那一份
+    const frozen = freezeCards(parsed.data);
+    await input.onPrepared?.(frozen);
+    const rows = await createScenes(frozen);
     return { scenes: rows, count: rows.length, mock: false, truncation };
   } catch (err) {
     if (err instanceof TRPCError) throw err;

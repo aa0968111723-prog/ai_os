@@ -137,7 +137,9 @@ describe("split-script crash recovery", () => {
 
   it("saves provider start and parsed output before the corresponding side effect", () => {
     expectBefore(directorSource, "await input.onProviderStart?.();", "const output = await nimComplete");
-    expectBefore(directorSource, "await input.onPrepared?.(parsed.data);", "const rows = await createScenes(parsed.data)");
+    // 凍結卡片 id 後才保存／建列：保存的那一份必須就是寫進 DB 的那一份
+    expectBefore(directorSource, "const frozen = freezeCards(parsed.data);", "await input.onPrepared?.(frozen);");
+    expectBefore(directorSource, "await input.onPrepared?.(frozen);", "const rows = await createScenes(frozen)");
     expect(directorSource).toContain("preparedResult?.success");
     expect(directorSource).toContain("where(inArray(schema.scenes.id, targetIds))");
   });
