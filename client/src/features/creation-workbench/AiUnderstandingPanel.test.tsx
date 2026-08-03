@@ -130,9 +130,10 @@ describe("AiUnderstandingPanel request presentation", () => {
         totalTokens: 100,
         totalChars: 26,
         overflows: true,
+        unknownTokens: 0,
         chunks: [
-          { text: "晨光禪堂點香", tokens: 60, startToken: 0, key: "instruction", status: "inside" },
-          { text: "正紅色長柄傘", tokens: 40, startToken: 60, key: "prop", status: "truncated" },
+          { text: "晨光禪堂點香", tokens: 60, startToken: 0, key: "instruction", status: "inside", unknown: false },
+          { text: "正紅色長柄傘", tokens: 40, startToken: 60, key: "prop", status: "truncated", unknown: false },
         ],
       },
     });
@@ -148,15 +149,16 @@ describe("AiUnderstandingPanel request presentation", () => {
   it("reports characters only when the model's tokenizer is not built in", () => {
     openPanel({
       ...basePreview,
-      model: "FLUX.1 [dev]",
-      modelId: "fal-ai/flux/dev",
+      model: "Ideogram v4",
+      modelId: "fal-ai/ideogram/v4",
       request: { positivePrompt: "晨光禪堂點香" },
       promptBudget: {
-        encoder: { label: "T5-XXL（FLUX.1）", note: "窗口 512", measured: false, documentedLimitTokens: 512 },
+        encoder: { label: "Ideogram（未公開）", note: "官方未公開窗口", measured: false },
         segments: [{ key: "instruction", tokens: null, chars: 6, startToken: null, status: "unmeasured" }],
         totalTokens: null,
         totalChars: 6,
         overflows: false,
+        unknownTokens: null,
         chunks: [],
       },
     });
@@ -168,6 +170,41 @@ describe("AiUnderstandingPanel request presentation", () => {
     expect(screen.queryByTestId("token-budget-strip")).not.toBeInTheDocument();
     expect(screen.queryByTestId("prompt-token-map")).not.toBeInTheDocument();
     expect(screen.queryByText(/沒進模型/)).not.toBeInTheDocument();
+  });
+
+  it("marks the words the model's vocabulary has no entry for", () => {
+    openPanel({
+      ...basePreview,
+      model: "FLUX.1 [dev]",
+      modelId: "fal-ai/flux/dev",
+      request: { positivePrompt: "紅傘 red umbrella" },
+      promptBudget: {
+        encoder: { label: "T5-XXL（FLUX.1）", note: "窗口 512", measured: true, sequenceTokens: 512, contentTokens: 511 },
+        segments: [{ key: "instruction", tokens: 4, chars: 16, startToken: 0, status: "inside" }],
+        totalTokens: 4,
+        totalChars: 16,
+        overflows: false,
+        unknownTokens: 1,
+        chunks: [
+          { text: "紅傘", tokens: 2, startToken: 0, key: "instruction", status: "inside", unknown: true },
+          { text: "red", tokens: 1, startToken: 2, key: "instruction", status: "inside", unknown: false },
+          { text: "umbrella", tokens: 1, startToken: 3, key: "instruction", status: "inside", unknown: false },
+        ],
+      },
+      warnings: [{
+        code: "prompt_unknown_to_encoder",
+        severity: "warning",
+        title: "這個模型的詞表讀不懂你的部分文字",
+        detail: "本次有 1 個位置變成未知符號。",
+      }],
+    });
+
+    const map = screen.getByTestId("prompt-token-map");
+    expect(map).toHaveTextContent("未知");
+    // 「佔的格數少」不等於「省」——語意全丟這件事要講出來
+    expect(map).toHaveTextContent(/語意是全丟的/);
+    // 警告掛在使用者自己打的那一段旁邊（中文通常都在那裡）
+    expect(screen.getByTestId("prompt-flow-node-instruction")).toHaveTextContent("詞表讀不懂你的部分文字");
   });
 
   it("still shows the verbatim prompt after switching to the text view", () => {

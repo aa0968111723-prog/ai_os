@@ -139,8 +139,8 @@ const WARNING_NODE: Record<string, PromptFlowNodeKey> = {
   continuity_references_capped: "character",
   negative_prompt_unsupported: "negative",
   // 超窗口是整串的問題，不屬於任何單一段落：留在 general，節點上另有 token 徽章
-  
   manual_override: "instruction",
+  prompt_unknown_to_encoder: "instruction",
 };
 
 export interface DistributedWarnings {

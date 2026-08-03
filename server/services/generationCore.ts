@@ -471,6 +471,18 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
       suggestion: "縮短提示詞或減少同時選入的設定卡，也可以改用窗口較長的模型。",
     });
   }
+  // 詞表裡沒有的字＝模型讀到「有東西但不知道是什麼」。T5（FLUX.1 那條線）的詞表
+  // 完全沒有中日韓字元，中文會整串塌成一個 <unk>——token 數看起來很小，但語意全丟。
+  // 這是實測結果（server/services/t5Tokenizer 的測試鎖住詞表），不是推測。
+  if (promptBudget.unknownTokens != null && promptBudget.unknownTokens > 0) {
+    warnings.push({
+      code: "prompt_unknown_to_encoder",
+      severity: "warning",
+      title: "這個模型的詞表讀不懂你的部分文字",
+      detail: `${promptBudget.encoder.label} 的詞表裡沒有這些字，本次有 ${promptBudget.unknownTokens} 個位置變成未知符號；模型只知道「這裡有東西」，不知道是什麼。中文提示詞在這條線上尤其明顯。`,
+      suggestion: "關鍵的外觀與場景描述改用英文，或改用中文效率好的模型（Qwen-Image、Kolors、Seedream 這類）。",
+    });
+  }
   if (negativePrompt && !supportsNegativePrompt(model)) warnings.push({
     code: "negative_prompt_unsupported",
     severity: "warning",

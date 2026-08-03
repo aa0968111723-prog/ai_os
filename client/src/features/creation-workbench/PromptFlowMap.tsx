@@ -121,7 +121,7 @@ function NodeWarnings({ warnings }: { warnings: AiWarning[] }) {
 
 /**
  * 段落處境 → 給人看的說法。
- * 數字是實測的（伺服器用內建 CLIP 詞表真的分詞），所以這裡沒有「可能」——
+ * 數字是實測的（伺服器用內建詞表真的分詞），所以這裡沒有「可能」——
  * 說沒進模型就是真的沒進。量不到分詞器的家族走 unmeasured，不下任何判斷。
  */
 const BUDGET_STATUS: Record<PromptBudgetSegment["status"], { label: string; ink: string; soft: string } | null> = {
@@ -183,7 +183,7 @@ function EncoderWindow({
       <Meta as="p" style={{ margin: "6px 0 0", fontSize: 12 }}>
         {encoder.note}
         {encoder.measured
-          ? `　數字為站內用 ${encoder.label} 的詞表實際分詞的結果，不是估算；${encoder.sequenceTokens} 格裡頭尾兩格是特殊標記。`
+          ? `　數字為站內用 ${encoder.label} 的詞表實際分詞的結果，不是估算；${encoder.sequenceTokens} 格裡有 ${(encoder.sequenceTokens ?? 0) - (encoder.contentTokens ?? 0)} 格是特殊標記。`
           : `　站內沒有內建這顆模型的分詞器，因此不換算 token${encoder.documentedLimitTokens ? `（官方載明窗口 ${encoder.documentedLimitTokens}，僅供參考）` : ""}——只顯示實際字數，不假裝算得出來。`}
       </Meta>
     </Card>

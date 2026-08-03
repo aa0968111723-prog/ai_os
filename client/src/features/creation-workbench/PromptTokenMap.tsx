@@ -30,7 +30,7 @@ function ChunkPill({ chunk, max }: { chunk: PromptChunk; max: number }) {
   const cut = chunk.status !== "inside";
   return (
     <span
-      title={`${chunk.text}：${chunk.tokens} 格（第 ${chunk.startToken + 1} 格起）${cut ? "・在窗口之外" : ""}`}
+      title={`${chunk.text}：${chunk.tokens} 格（第 ${chunk.startToken + 1} 格起）${cut ? "・在窗口之外" : ""}${chunk.unknown ? "・詞表裡沒有這些字，模型讀不到語意" : ""}`}
       style={{
         display: "inline-flex",
         alignItems: "baseline",
@@ -40,13 +40,15 @@ function ChunkPill({ chunk, max }: { chunk: PromptChunk; max: number }) {
         fontSize: 13,
         lineHeight: 1.5,
         color: cut ? "var(--fg-secondary)" : "var(--fg)",
-        // 底色＝段落色，深度＝佔用比重；被切掉的字改成刪除線＋虛線框，一眼看得出「沒進去」
-        background: cut ? "transparent" : fillFor(SECTION_COLORS[chunk.key], chunk.tokens, max),
-        border: cut ? "1px dashed var(--border-strong)" : "1px solid transparent",
+        // 底色＝段落色，深度＝佔用比重；被切掉的字畫刪除線＋虛線框。
+        // 詞表沒有的字另外標：它佔的格數很少，但語意是全丟的——只看格數會誤判成「很省」。
+        background: cut ? "transparent" : chunk.unknown ? "var(--gold-soft)" : fillFor(SECTION_COLORS[chunk.key], chunk.tokens, max),
+        border: cut ? "1px dashed var(--border-strong)" : chunk.unknown ? "1px solid var(--gold)" : "1px solid transparent",
         textDecoration: cut ? "line-through" : undefined,
       }}
     >
       {chunk.text}
+      {chunk.unknown ? <span style={{ fontSize: 10, color: "var(--gold-ink)" }}>未知</span> : null}
       <span style={{ fontSize: 10, color: "var(--fg-secondary)" }}>{chunk.tokens}</span>
     </span>
   );
@@ -74,7 +76,7 @@ export function PromptTokenMap({ budget }: { budget: PromptBudgetReport }) {
 
       <Hint layer="always" style={{ marginTop: 6 }}>
         這是「版面」不是注意力權重：供應商不回傳模型內部的注意力，站內不會畫那種圖。
-        下面每個詞後面的小數字，是它用內建 CLIP 詞表實際佔掉的格數。
+        下面每個詞後面的小數字，是它用 {budget.encoder.label} 的詞表實際佔掉的格數。
       </Hint>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
@@ -84,11 +86,18 @@ export function PromptTokenMap({ budget }: { budget: PromptBudgetReport }) {
       </div>
 
       <Meta as="p" style={{ margin: "8px 0 0" }}>
-        最占版面：{heaviest.map((chunk) => `${chunk.text}（${chunk.tokens} 格）`).join("、")}。
+        {/* 每個詞都只佔一格時（sentencepiece 常見），「最占版面」沒有資訊量，不必寫 */}
+        {max > 1 ? `最占版面：${heaviest.map((chunk) => `${chunk.text}（${chunk.tokens} 格）`).join("、")}。` : ""}
         {cut.length
           ? `窗口 ${budget.encoder.contentTokens} 格已滿，畫刪除線的 ${cut.length} 個詞沒有進入模型。`
           : `全部 ${budget.totalTokens} 格都在窗口 ${budget.encoder.contentTokens} 之內。`}
       </Meta>
+      {budget.unknownTokens ? (
+        <Meta as="p" style={{ margin: "6px 0 0", color: "var(--gold-ink)" }}>
+          標「未知」的 {budget.unknownTokens} 個位置，是這顆模型的詞表裡查無此字——
+          模型只知道那裡有東西，不知道是什麼。這種位置佔的格數很少，但語意是全丟的。
+        </Meta>
+      ) : null}
       <Meta as="p" style={{ margin: "4px 0 0" }}>
         佔得多不等於模型一定照著畫；要證明某一段真的影響成品，用下方的影響力實測比對兩張圖。
       </Meta>

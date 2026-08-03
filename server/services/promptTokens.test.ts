@@ -61,9 +61,42 @@ describe("measurePromptBudget（CLIP 家族＝真的量得到）", () => {
   });
 });
 
+describe("measurePromptBudget（T5＝FLUX.1 那條線）", () => {
+  const budget = measurePromptBudget("fal-ai/flux/dev", PROMPT);
+
+  it("measures with the bundled T5 vocabulary, and reserves the end-of-sequence slot", () => {
+    expect(budget.encoder.measured).toBe(true);
+    expect(budget.encoder.sequenceTokens).toBe(512);
+    expect(budget.encoder.contentTokens).toBe(511);
+    expect(budget.totalTokens).toBeGreaterThan(0);
+  });
+
+  it("exposes the fact that T5 has no Chinese in its vocabulary", () => {
+    // 這是這份量測最重要的發現：中文在 T5 詞表裡沒有對應片段，整串塌成一個 <unk>。
+    // token 數看起來很小，但那不是省空間，是模型讀不到語意。
+    expect(budget.unknownTokens).toBeGreaterThan(0);
+    expect(budget.chunks.some((chunk) => chunk.unknown)).toBe(true);
+    // 中文塌成未知符號 → 總 token 數遠少於同一段文字在 CLIP 上的量
+    const onClip = measurePromptBudget("fal-ai/fast-lightning-sdxl", PROMPT);
+    expect(budget.totalTokens!).toBeLessThan(onClip.totalTokens! / 3);
+  });
+
+  it("still reads English normally", () => {
+    const english = measurePromptBudget("fal-ai/flux/dev", "a red umbrella, hand-drawn illustration");
+    expect(english.unknownTokens).toBe(0);
+    expect(english.totalTokens).toBeGreaterThan(5);
+  });
+
+  it("uses the shorter distilled window for schnell", () => {
+    const schnell = measurePromptBudget("fal-ai/flux/schnell", PROMPT);
+    expect(schnell.encoder.sequenceTokens).toBe(256);
+    expect(schnell.encoder.contentTokens).toBe(255);
+  });
+});
+
 describe("measurePromptBudget（沒有內建分詞器的家族）", () => {
   it("refuses to report token numbers it cannot measure", () => {
-    const budget = measurePromptBudget("fal-ai/flux/dev", PROMPT);
+    const budget = measurePromptBudget("fal-ai/kolors", PROMPT);
     expect(budget.encoder.measured).toBe(false);
     expect(budget.totalTokens).toBeNull();
     expect(budget.overflows).toBe(false);
@@ -71,7 +104,8 @@ describe("measurePromptBudget（沒有內建分詞器的家族）", () => {
     expect(budget.segments.every((segment) => segment.tokens === null)).toBe(true);
     // 字數是真的，所以照給；官方載明的窗口只作參考，不拿來判斷截斷
     expect(budget.totalChars).toBeGreaterThan(0);
-    expect(budget.encoder.documentedLimitTokens).toBe(512);
+    expect(budget.encoder.documentedLimitTokens).toBe(256);
+    expect(budget.unknownTokens).toBeNull();
     expect(budget.segments.every((segment) => segment.status === "unmeasured")).toBe(true);
   });
 
