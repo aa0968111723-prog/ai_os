@@ -399,7 +399,9 @@ export function CreationWorkbench({
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
         <Hint className="workbench-intro-lede" style={{ marginTop: 6 }}>
-          寫你想完成的畫面或片子，再按 <b>＋ 請誰來幫忙</b>——像請劇組，不必先背四個分頁。
+          {mode === "generate"
+            ? "預設直接出圖：選模型、寫提示詞、看點數，再按生成。上方想法可選，不會扣點。"
+            : "寫你想完成的畫面或片子，再按 ＋ 請誰來幫忙——像請劇組，不必先背四個分頁。"}
         </Hint>
 
         <CreationGoalInput
@@ -412,6 +414,7 @@ export function CreationWorkbench({
           onSubmit={canEdit ? handleGoalSubmit : undefined}
           submitLabel={GOAL_SUBMIT[mode].label}
           submitHint={GOAL_SUBMIT[mode].hint}
+          compact={mode === "generate"}
         />
 
         <CreationModeTabs mode={mode} onModeChange={onModeChange} tabPanelIdPrefix={tabPrefix} />

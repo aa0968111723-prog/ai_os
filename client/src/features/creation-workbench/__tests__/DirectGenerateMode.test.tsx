@@ -1,5 +1,6 @@
 /**
  * WB-02: DirectGenerateMode — disable reasons, cost summary points, submit payload shape.
+ * P2: recent generations strip shares listByProject + invalidate on submit.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -11,16 +12,21 @@ import { DirectGenerateMode } from "../modes/DirectGenerateMode";
 
 const submitMutate = vi.fn();
 const saveMutate = vi.fn();
+const listByProject = vi.fn();
+const invalidateListByProject = vi.fn();
+const invalidateListByProjectPaged = vi.fn();
+const invalidateQuota = vi.fn();
+const revealWorkbenchAnchor = vi.fn();
 
 vi.mock("../../../api", () => ({
   trpc: {
     useUtils: () => ({
       prompts: { list: { invalidate: vi.fn() } },
       generation: {
-        listByProject: { invalidate: vi.fn() },
-        listByProjectPaged: { invalidate: vi.fn() },
+        listByProject: { invalidate: (...a: unknown[]) => invalidateListByProject(...a) },
+        listByProjectPaged: { invalidate: (...a: unknown[]) => invalidateListByProjectPaged(...a) },
       },
-      quota: { my: { invalidate: vi.fn() } },
+      quota: { my: { invalidate: (...a: unknown[]) => invalidateQuota(...a) } },
     }),
     projects: {
       assets: {
@@ -52,6 +58,9 @@ vi.mock("../../../api", () => ({
       },
     },
     generation: {
+      listByProject: {
+        useQuery: (...args: unknown[]) => listByProject(...args),
+      },
       submit: {
         useMutation: (opts?: { onSuccess?: Function; onSettled?: Function }) => ({
           mutate: (vars: unknown) => {
@@ -105,6 +114,14 @@ vi.mock("../../../components/GenerationList", () => ({
 vi.mock("../../../realtime", () => ({
   CollabZone: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+
+vi.mock("../workbenchNav", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../workbenchNav")>();
+  return {
+    ...actual,
+    revealWorkbenchAnchor: (...args: unknown[]) => revealWorkbenchAnchor(...args),
+  };
+});
 
 function Harness({
   canEdit = true,
@@ -172,10 +189,47 @@ function Harness({
   );
 }
 
+const SAMPLE_GENERATIONS = [
+  {
+    id: "gen-1",
+    prompt: "清晨禪堂，柔和光線灑落木地板",
+    name: null,
+    status: "running",
+    kind: "image",
+    resultUrl: null,
+  },
+  {
+    id: "gen-2",
+    prompt: "晚鐘迴盪的山門",
+    name: "山門草稿",
+    status: "done",
+    kind: "image",
+    resultUrl: "https://example.com/thumb-2.png",
+  },
+  {
+    id: "gen-3",
+    prompt: "雨後苔石小路",
+    name: null,
+    status: "queued",
+    kind: "image",
+    resultUrl: null,
+  },
+];
+
 describe("DirectGenerateMode", () => {
   beforeEach(() => {
     submitMutate.mockReset();
     saveMutate.mockReset();
+    listByProject.mockReset();
+    invalidateListByProject.mockReset();
+    invalidateListByProjectPaged.mockReset();
+    invalidateQuota.mockReset();
+    revealWorkbenchAnchor.mockReset();
+    listByProject.mockReturnValue({
+      data: SAMPLE_GENERATIONS,
+      isLoading: false,
+      isError: false,
+    });
   });
 
   it("surfaces disable reason when prompt is empty", async () => {
@@ -319,5 +373,52 @@ describe("DirectGenerateMode", () => {
     await waitFor(() => {
       expect(onSourceChange).toHaveBeenCalledWith("asset-aud");
     });
+  });
+
+  it("P2: recent generations strip shows listByProject items (client-sliced)", async () => {
+    render(<Harness initialPrompt="清晨禪堂" />);
+    const strip = await screen.findByTestId("recent-generations-strip");
+    expect(strip).toBeVisible();
+    expect(within(strip).getByText("最近生成")).toBeVisible();
+    // Same query key as GenerationList for cache sharing.
+    expect(listByProject).toHaveBeenCalledWith(
+      { projectId: "proj-1" },
+      expect.objectContaining({ refetchInterval: expect.any(Function) }),
+    );
+    const items = within(strip).getAllByTestId("recent-generation-item");
+    expect(items).toHaveLength(3);
+    expect(within(strip).getByText("生成中…")).toBeVisible();
+    expect(within(strip).getByText("山門草稿")).toBeVisible();
+    expect(within(strip).getByText("排隊中")).toBeVisible();
+    // Done image with resultUrl gets a compact thumb (alt="" is decorative).
+    const thumb = strip.querySelector('img[src="https://example.com/thumb-2.png"]');
+    expect(thumb).toBeTruthy();
+  });
+
+  it("P2: 全部紀錄 opens the generations drawer anchor", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const strip = await screen.findByTestId("recent-generations-strip");
+    await user.click(within(strip).getByRole("button", { name: "全部紀錄" }));
+    expect(revealWorkbenchAnchor).toHaveBeenCalledWith("#sec-generations", {
+      projectId: "proj-1",
+    });
+  });
+
+  it("P2: submit still invalidates listByProject (strip + drawer share cache)", async () => {
+    const user = userEvent.setup();
+    render(<Harness initialPrompt="清晨禪堂，柔和光線" />);
+
+    await user.click(await screen.findByRole("button", { name: /生成（−/ }));
+    await user.click(await screen.findByRole("button", { name: "確認生成" }));
+
+    await waitFor(() => expect(submitMutate).toHaveBeenCalledTimes(1));
+    expect(invalidateListByProject).toHaveBeenCalledWith({ projectId: "proj-1" });
+    expect(invalidateListByProjectPaged).toHaveBeenCalledWith({ projectId: "proj-1" });
+    expect(invalidateQuota).toHaveBeenCalled();
+    // Notice still surfaces near the form (above the strip); cost summary also uses role=status.
+    expect(
+      screen.getAllByRole("status").some((el) => /已送出/.test(el.textContent ?? "")),
+    ).toBe(true);
   });
 });

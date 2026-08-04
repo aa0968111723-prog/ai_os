@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { Button, Hint } from "../../components/ui";
+import { Button, Hint, Meta } from "../../components/ui";
 import { focusAndReveal } from "../../lib/scrollIntoViewForChrome";
 import { CreationSkillPicker } from "./CreationSkillPicker";
 
@@ -13,6 +13,11 @@ export function CreationGoalInput({
   onSubmit,
   submitLabel,
   submitHint,
+  /**
+   * P1 (#400) 選項 A：generate 模式下縮成可選輔助列（單行 + 帶入），
+   * 主輸入改在下方 #gen-prompt，降低「兩個大輸入框不知按哪個」。
+   */
+  compact = false,
 }: {
   goal: string;
   onGoalChange: (goal: string) => void;
@@ -30,9 +35,63 @@ export function CreationGoalInput({
   submitLabel?: string;
   /** 按下去會發生什麼（免費提問／只帶入不扣點…），按鈕旁一句話講清楚 */
   submitHint?: string;
+  compact?: boolean;
 }) {
   const autoId = useId();
   const id = inputId ?? `creation-goal-${autoId.replace(/:/g, "")}`;
+
+  if (compact) {
+    return (
+      <div className="creation-goal-input creation-goal-input--compact" style={{ marginTop: 8 }}>
+        <label htmlFor={id} style={{ display: "block", fontWeight: 600, marginBottom: 4 }}>
+          這次想完成什麼（可選）
+        </label>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          <input
+            id={id}
+            type="text"
+            value={goal}
+            disabled={disabled}
+            maxLength={1000}
+            placeholder="一句話想法，可帶入下方提示詞（不會扣點）"
+            onChange={(e) => onGoalChange(e.target.value)}
+            onFocus={(e) => focusAndReveal(e.currentTarget)}
+            onKeyDown={(e) => {
+              if (onSubmit && e.key === "Enter" && goal.trim() && !disabled) {
+                e.preventDefault();
+                onSubmit();
+              }
+            }}
+            style={{ flex: "1 1 12rem", minWidth: 0 }}
+          />
+          {onSubmit ? (
+            <Button variant="ghost" size="sm" disabled={disabled || !goal.trim()} onClick={onSubmit}>
+              {submitLabel ?? "帶入提示詞"}
+            </Button>
+          ) : null}
+        </div>
+        {submitHint ? (
+          <Meta as="p" style={{ margin: "4px 0 0" }}>
+            {submitHint}
+          </Meta>
+        ) : null}
+        {onSkillIdsChange ? (
+          <CreationSkillPicker
+            selectedIds={skillIds}
+            onChange={onSkillIdsChange}
+            disabled={disabled}
+          />
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="creation-goal-input" style={{ marginTop: 8 }}>

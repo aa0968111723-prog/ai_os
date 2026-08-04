@@ -1,6 +1,6 @@
 # 修復／整理計畫：AI 創作工作台 UX 大整理
 
-> 狀態：**P0 實作中**（計畫已合 #400；`feat/workbench-p0-collapse-advanced`）  
+> 狀態：**P0–P2 完成**（#401 P0 已合 base；#403 含 P1+P2，分支 `feat/workbench-p1-default-generate`）  
 > 分支：`plan/creation-workbench-ux-cleanup` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「AI 創作工作台有點難用想大整理」（2026-08-04）
 
@@ -93,14 +93,14 @@ Anchors（勿無故改壞深連結）：`#sec-ai-hub` `#sec-studio` `#sec-genera
 **檔案：** `CreationWorkbench.tsx`、`CreationGoalInput.tsx`、`CreationModeTabs.tsx`、`creationDraft.ts`（僅文案／預設 mode 若需要）
 
 ```
-[ ] P1.1  預設 mode：新專案／空 draft 改為 `generate`（emptyDraft 預設從 ask → generate）
+[x] P1.1  預設 mode：新專案／空 draft 改為 `generate`（emptyDraft 預設從 ask → generate）
           需確認 deep link / agent-run focus 仍可強制 plan
-[ ] P1.2  目標框定位：
+[x] P1.2  目標框定位：
           - 選項 A（建議）：generate 模式下 goal 改成「可選輔助」——縮成一行 +「帶入提示詞」
           - 或選項 B：保留大框，但 intro 文案改成「這裡不會扣點，只是帶進下面提示詞」
-[ ] P1.3  Tab 文案維持 CREATION_MODES；可把「直接出圖」排第一（陣列順序影響 tab 順序）
-[ ] P1.4  CreationContextBar：改為較弱視覺（或收進「前往設定」），避免與 chip 重複導覽
-[ ] P1.5  測試：viewportBaseline、CreationWorkbench.test、goal submit 分派仍正確
+[x] P1.3  Tab 文案維持 CREATION_MODES；可把「直接出圖」排第一（陣列順序影響 tab 順序）
+[x] P1.4  CreationContextBar：改為較弱視覺（或收進「前往設定」），避免與 chip 重複導覽
+[x] P1.5  測試：viewportBaseline、CreationWorkbench.test、goal submit 分派仍正確
 ```
 
 **驗收 P1：** 首次進入工作台，預設在出圖；使用者不必先理解「一起想」才能生成。
@@ -112,11 +112,11 @@ Anchors（勿無故改壞深連結）：`#sec-ai-hub` `#sec-studio` `#sec-genera
 **檔案：** `DirectGenerateMode.tsx`、`CreationResourceDrawer.tsx`、可能小元件 `RecentGenerationsStrip.tsx`（新建）
 
 ```
-[ ] P2.1  送出成功後：除 submitNotice 外，在 #sec-studio 下方顯示「最近生成」3～5 筆
+[x] P2.1  送出成功後：除 submitNotice 外，在 #sec-studio 下方顯示「最近生成」3～5 筆
           資料來源：既有 generation.listByProject / paged（與抽屜同一 API，勿重複訂閱過多）
-[ ] P2.2  「看進度／全部紀錄」仍可開抽屜 #sec-generations；抽屜改定位為完整歷史
-[ ] P2.3  避免與抽屜內 GenerationList 雙份超長列表搶版面（主區精簡、抽屜完整）
-[ ] P2.4  測試：送出後 notice + 列表 invalidate 行為
+[x] P2.2  「看進度／全部紀錄」仍可開抽屜 #sec-generations；抽屜改定位為完整歷史
+[x] P2.3  避免與抽屜內 GenerationList 雙份超長列表搶版面（主區精簡、抽屜完整）
+[x] P2.4  測試：送出後 notice + 列表 invalidate 行為
 ```
 
 **驗收 P2：** 生成後不必翻到頁面最底抽屜也能看到「進行中／剛完成」。
@@ -146,9 +146,9 @@ Anchors（勿無故改壞深連結）：`#sec-ai-hub` `#sec-studio` `#sec-genera
 
 ## 6. 建議 PR 切法（實作時）
 
-1. `feat/workbench-p0-collapse-advanced` — 只 P0  
-2. `feat/workbench-p1-default-generate` — P1  
-3. `feat/workbench-p2-recent-strip` — P2  
+1. `feat/workbench-p0-collapse-advanced` — 只 P0 → **已合** #401  
+2. `feat/workbench-p1-default-generate` — P1 + P2（#403；含同線 P0 commit，與 #401 重疊已由 merge 消化）  
+3. ~~`feat/workbench-p2-recent-strip`~~ — P2 併入 #403，不再單開  
 
 每段可獨立合併、獨立驗收；避免一顆巨型 PR。
 
@@ -170,6 +170,10 @@ npm run test:client -- DirectGenerateMode CreationWorkbench
 
 | PR | 關係 |
 |----|------|
+| #400 本計畫 docs | 已合 base |
+| #401 P0 減噪 | 已合 base；#403 merge 後不再重複改動 |
+| #402 專案上下文 UX 計畫 | 平行 docs；與本 PR 無程式衝突 |
+| #403 P0–P2 實作 | 本分支；解衝突後合入完成 P1+P2 |
 | #396 BYOK Phase 2 | P3 徽章依賴；不阻塞 P0–P2 |
 | #398 schema introspect 開機 | **無關**；服務起不來時本整理仍可先合進 branch 但無法線上驗證 |
 | SimpleProjectMode | 簡模式若共用元件，P0 收合應對齊，勿只改完整工作台 |

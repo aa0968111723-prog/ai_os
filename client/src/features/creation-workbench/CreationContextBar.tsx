@@ -25,14 +25,19 @@ export function CreationContextBar({
    */
   onNavigate?: (target: string) => void;
 }) {
+  // P1 (#400): weaker than generate form chips — navigation only, not “this run includes…”
   return (
-    <div className="ctx-summary" role="group" aria-label="AI 創作工作台可連動的專案系統">
-      連動目前專案：
+    <div
+      className="ctx-summary creation-context-bar"
+      role="group"
+      aria-label="AI 創作工作台可連動的專案系統"
+    >
+      <span className="creation-context-bar__label">前往設定</span>
       {CREATION_CONTEXT_LINKS.map((item) => (
         <button
           key={item.target}
           type="button"
-          className="chip pick"
+          className="chip pick creation-context-bar__link"
           onClick={() => {
             if (onNavigate) onNavigate(item.target);
             else scrollToSelector(item.target);

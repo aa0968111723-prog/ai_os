@@ -22,6 +22,7 @@ vi.mock("../api", () => ({
         listDeleted: { invalidate: vi.fn() },
       },
       knowledge: { list: { invalidate: vi.fn() } },
+      community: { invalidate: vi.fn() },
     }),
     auth: {
       me: { useQuery: (...args: unknown[]) => meQuery(...args) },
@@ -38,6 +39,12 @@ vi.mock("../api", () => ({
       },
       describeImageAsset: {
         useMutation: () => ({ mutate: vi.fn(), isPending: false, variables: null, error: null }),
+      },
+    },
+    // 靈感頻道「發布」鈕；缺替身會讓元件連渲染都失敗
+    community: {
+      publishFromSource: {
+        useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
       },
     },
   },

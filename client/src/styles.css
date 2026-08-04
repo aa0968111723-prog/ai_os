@@ -3777,6 +3777,39 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   background: color-mix(in srgb, var(--field) 70%, transparent);
 }
 .creation-goal-input label { margin-top: 0 !important; }
+/* P1: generate 模式單行輔助——比完整 textarea 更輕，避免搶 #gen-prompt */
+.creation-goal-input--compact {
+  padding: 8px 10px;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border-soft) 80%, transparent);
+}
+.creation-goal-input--compact input[type="text"] {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-8);
+  background: var(--field);
+  color: var(--fg);
+  font: inherit;
+}
+/* P1: 連動列降級為「前往設定」，弱於生成表單的帶入 chips */
+.creation-context-bar {
+  margin-top: 6px;
+  opacity: 0.88;
+  font-size: var(--fs-11);
+}
+.creation-context-bar__label {
+  color: var(--fg-muted, var(--fg-secondary));
+  margin-right: 2px;
+  flex: none;
+}
+.creation-context-bar__link.chip {
+  font-size: var(--fs-11);
+  padding: 2px 8px;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border-soft) 70%, transparent);
+  color: var(--fg-secondary);
+}
 
 /* ── 模型事實區：選完模型後的能力／適用／點數換算 ──
  * 手機實測這一區會連吃六到八行（換算式自己就佔三行），是「AI 創作中心」
