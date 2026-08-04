@@ -1,9 +1,9 @@
 # 整理計畫：專案上下文 UX + 與創作台／分鏡一體化
 
-> 狀態：**待終端機實作**（本 PR 僅計畫）  
+> 狀態：**C0 實作中**（分支 `feat/context-c0-worldview-collapse`；C1–C3 待做）  
 > 分支：`plan/project-context-ux-cleanup` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「專案上下文也很複雜」「連結不紮實，跟創作工作台與分鏡太不一體成型」（2026-08-04）  
-> 相關：工作台本體減噪見 **#400**（`creation-workbench-ux-cleanup-plan.md`）——本計畫專攻 **① 上下文** 與 **①↔②↔③ 接縫**
+> 相關：工作台本體減噪見 **#400**（`creation-workbench-ux-cleanup-plan.md`，P0–P2 已合 #403）——本計畫專攻 **① 上下文** 與 **①↔②↔③ 接縫**
 
 ---
 
@@ -93,11 +93,12 @@
 **主要檔案：** `ProjectPage.tsx`（世界觀卡）、必要時 `WorldviewGuide` / `WorldviewPreview`
 
 ```
-[ ] C0.1  將「建議必填／會進生成」與「進階」分層
+[x] C0.1  將「建議必填／會進生成」與「進階」分層
           建議必填可視：logline（或 message）、tones、styles、taboos（對齊 isWorldviewReady）
-[ ] C0.2  audience / themes / references / 長說明等進 <details> 或「進階設定」預設關
-[ ] C0.3  頂部保留「世界觀是否就緒」一句 + 未就緒時 CTA（填範例／去填 logline）
-[ ] C0.4  手機既有收合行為回歸測試；桌機首屏不出現超過一屏的世界觀表單
+[x] C0.2  audience / themes / references / 長說明等進 <details> 或「進階設定」預設關
+[x] C0.3  頂部保留「世界觀是否就緒」一句 + 未就緒時 CTA（填範例／去填 logline）
+[x] C0.4  手機既有收合行為回歸測試；桌機首屏不出現超過一屏的世界觀表單
+          （WorldviewPreview 改預設收合；進階預設關，有既有敘事資料才撐開）
 ```
 
 **驗收：** 新使用者開完整版，不展開進階也能看懂「最少要填什麼才能讓 AI 懂這支片」。
