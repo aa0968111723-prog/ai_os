@@ -1,7 +1,6 @@
 # 修復／整理計畫：AI 創作工作台 UX 大整理
 
-> 狀態：**P0–P2 完成（本地）**（P2 recent strip；不推遠端）  
-
+> 狀態：**P0–P2 完成**（分支 `feat/workbench-p1-default-generate`）  
 > 分支：`plan/creation-workbench-ux-cleanup` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「AI 創作工作台有點難用想大整理」（2026-08-04）
 
