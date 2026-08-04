@@ -1,6 +1,6 @@
 # 修復計畫：Zeabur 開機 CrashLoop（schema introspect / DrizzleQueryError）
 
-> 狀態：**待終端機實作**（本 PR 僅計畫）  
+> 狀態：**已實作**（`feat/fix-startup-schema-introspect`：0036 surrogate PK + SchemaDriftInspectError + start.sh 提示）  
 > 分支：`plan/fix-startup-schema-introspect` → base `claude/healing-migration-ai-os-erewp2`  
 > 症狀來源：2026-08-04 Zeabur Runtime log（Deployment 已移驗，分支 healing-migration…）
 

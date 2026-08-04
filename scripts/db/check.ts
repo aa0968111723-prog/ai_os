@@ -2,6 +2,7 @@ import {
   inspectMigrationState,
   inspectSchemaDrift,
   loadMigrationManifest,
+  SchemaDriftInspectError,
 } from "../../server/db/migrationState";
 import {
   connectDatabase,
@@ -31,7 +32,16 @@ void runCli(async () => {
       throw new Error(`尚有 ${state.pending.length} 份 migration 未套用；請執行 npm run db:migrate`);
     }
 
-    const drift = await inspectSchemaDrift(connection.database);
+    let drift;
+    try {
+      drift = await inspectSchemaDrift(connection.database);
+    } catch (error) {
+      if (error instanceof SchemaDriftInspectError) {
+        console.error(`[db] ${error.message}`);
+        throw error;
+      }
+      throw error;
+    }
     printDrift(drift);
     if (state.kind === "legacy-untracked") {
       if (drift.statements.length === 0) {

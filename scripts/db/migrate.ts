@@ -6,6 +6,7 @@ import {
   MIGRATION_LOCK_KEY,
   MIGRATIONS_SCHEMA,
   MIGRATIONS_TABLE,
+  SchemaDriftInspectError,
 } from "../../server/db/migrationState";
 import {
   connectDatabase,
@@ -74,7 +75,16 @@ void runCli(async () => {
     if (finalState.kind !== "ready") {
       throw new Error(`migration 執行後 ledger 仍不是 ready：${finalState.kind}`);
     }
-    const drift = await inspectSchemaDrift(connection.database);
+    let drift;
+    try {
+      drift = await inspectSchemaDrift(connection.database);
+    } catch (error) {
+      if (error instanceof SchemaDriftInspectError) {
+        console.error(`[db] ${error.message}`);
+        throw error;
+      }
+      throw error;
+    }
     printDrift(drift);
     if (drift.statements.length > 0) {
       throw new Error("migration 已提交，但 schema 仍有 drift；保持服務未啟動並人工診斷");
