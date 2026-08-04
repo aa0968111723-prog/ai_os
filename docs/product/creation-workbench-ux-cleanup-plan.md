@@ -1,6 +1,6 @@
 # 修復／整理計畫：AI 創作工作台 UX 大整理
 
-> 狀態：**待終端機實作**（本 PR 僅計畫）  
+> 狀態：**P0 實作中**（計畫已合 #400；`feat/workbench-p0-collapse-advanced`）  
 > 分支：`plan/creation-workbench-ux-cleanup` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「AI 創作工作台有點難用想大整理」（2026-08-04）
 
@@ -74,13 +74,13 @@ Anchors（勿無故改壞深連結）：`#sec-ai-hub` `#sec-studio` `#sec-genera
 **檔案：** 主要 `DirectGenerateMode.tsx`、必要時 `AiUnderstandingPanel.tsx`
 
 ```
-[ ] P0.1  AiUnderstandingPanel（預覽／消融／覆寫）改為 <details> 或同等「預設關閉」
+[x] P0.1  AiUnderstandingPanel（預覽／消融／覆寫）改為 <details> 或同等「預設關閉」
           標題例：AI 怎麼理解（進階）
-[ ] P0.2  一致性鎖定區塊併入「進階設定」details（與來源圖同層），預設關
-[ ] P0.3  生成鈕上方只保留一行 CreationCostSummary（或等價一行字）
+[x] P0.2  一致性鎖定區塊併入「進階設定」details（與來源圖同層），預設關
+[x] P0.3  生成鈕上方只保留一行 CreationCostSummary（或等價一行字）
           不要在確認前重複大段額度說明
-[ ] P0.4  確認面板（confirming）邏輯保留；文案可微調，勿改 submit payload
-[ ] P0.5  更新／補測試：DirectGenerateMode、CreationWorkbench 既有測試不因預設收合紅片
+[x] P0.4  確認面板（confirming）邏輯保留；文案可微調，勿改 submit payload
+[x] P0.5  更新／補測試：DirectGenerateMode、CreationWorkbench 既有測試不因預設收合紅片
           （查 role/label；必要時改成先 expand 再 assert）
 ```
 

@@ -245,9 +245,28 @@ describe("DirectGenerateMode", () => {
     expect(typeof payload.clientRequestId).toBe("string");
   });
 
+  it("keeps advanced and AI understanding collapsed on the main path", async () => {
+    render(<Harness initialPrompt="清晨禪堂" characterIds={["c1"]} />);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /生成（−/ })).toBeInTheDocument();
+    });
+    const advanced = screen.getByTestId("generate-advanced");
+    expect(advanced).not.toHaveAttribute("open");
+    // jsdom still mounts <details> children; assert they are not visible until expanded.
+    expect(within(advanced).getByRole("button", { name: /一致性鎖定/ })).not.toBeVisible();
+    const ai = screen.getByTestId("ai-understanding-details");
+    expect(ai).not.toHaveAttribute("open");
+    expect(within(ai).getByRole("button", { name: "AI 會怎麼理解？" })).not.toBeVisible();
+    // Cost row stays visible without expand.
+    expect(screen.getByRole("status")).toHaveTextContent(/預估消耗：約 \d+ 點/);
+  });
+
   it("shows consistency locking for selected cards and submits the user's choice", async () => {
     const user = userEvent.setup();
     render(<Harness initialPrompt="清晨禪堂" characterIds={["c1"]} />);
+    // P0: expand 進階設定 before interacting with continuity lock.
+    const advanced = await screen.findByTestId("generate-advanced");
+    await user.click(within(advanced).getByText(/進階設定/));
     const lock = await screen.findByRole("button", { name: "一致性鎖定：開" });
     expect(lock).toHaveAttribute("aria-pressed", "true");
     await user.click(lock);

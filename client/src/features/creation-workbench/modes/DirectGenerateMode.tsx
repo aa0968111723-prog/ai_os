@@ -46,7 +46,8 @@ export type StudioCollabProps = {
 /**
  * WB-02: full generate form moved from ProjectPage #sec-studio.
  * Single generation.submit path; gates via generationGates helpers; draft-synced fields.
- * Progressive disclosure: source under「進階設定」when model.needs is set (default collapsed).
+ * P0 UX (#400): main path = model → prompt → chips → cost → generate;
+ * source / continuity / AI understanding stay under details (default collapsed).
  */
 export function DirectGenerateMode({
   projectId,
@@ -307,6 +308,12 @@ export function DirectGenerateMode({
   const sourceOptions = filterCompatibleSources(assets.data ?? [], needs, sourceAsset?.id);
   const secondarySourceOptions = filterCompatibleSources(assets.data ?? [], secondaryNeeds, secondarySourceAsset?.id);
 
+  /** Consistency lock only when cards are picked and the model can use them. */
+  const showContinuityControls =
+    cardsPicked && !!fullModel && supportsCardAnchors(fullModel.category);
+  /** Advanced drawer: source pickers and/or continuity — never force-open on first paint. */
+  const showAdvanced = Boolean(model?.needs) || showContinuityControls;
+
   useEffect(() => {
     if (secondaryNeeds) return;
     setSecondarySourceAsset(null);
@@ -320,6 +327,7 @@ export function DirectGenerateMode({
     estPoints,
   });
 
+  // Remaining quota only after confirm starts (avoids a second large quota block on the main path).
   const remainingLabel =
     confirming && quota.data
       ? [
@@ -336,6 +344,19 @@ export function DirectGenerateMode({
           .filter(Boolean)
           .join("・")
       : undefined;
+
+  const advancedSummarySuffix = (() => {
+    if (!model?.needs) {
+      return showContinuityControls ? "（一致性鎖定）" : "";
+    }
+    const sourceReady =
+      !!(sourceAsset || sourceUrl.trim()) &&
+      (!model.secondaryNeeds || !!(secondarySourceAsset || secondarySourceUrl.trim()));
+    const sourcePart = sourceReady
+      ? `已設${model.secondaryNeeds ? "兩個" : ""}來源`
+      : (model.sourceHint ?? "來源素材");
+    return showContinuityControls ? `（${sourcePart}・一致性）` : `（${sourcePart}）`;
+  })();
 
   // `on` 是「這項上下文已備妥」的視覺標示，不是切換態——點下去只是捲到該區塊。
   // 所以走 className 給 .on，不傳 selected：否則會輸出 aria-pressed，把一次性動作
@@ -409,54 +430,7 @@ export function DirectGenerateMode({
           </Hint>
         )}
 
-      {/* Progressive disclosure (4.4): source under 進階設定 — only when model needs source */}
-      {model?.needs && (
-        <Card as="details" variant="quiet"
-          style={{ marginTop: 10, padding: "8px 10px" }}
-          open={advancedOpen}
-          onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}>
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-            <Icon name="SlidersHorizontal" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
-            進階設定
-            {(sourceAsset || sourceUrl.trim()) && (!model.secondaryNeeds || secondarySourceAsset || secondarySourceUrl.trim())
-              ? `（已設${model.secondaryNeeds ? "兩個" : ""}來源）`
-              : `（${model.sourceHint ?? "來源素材"}）`}
-          </summary>
-          <div style={{ marginTop: 8 }}>
-            <GenerationSourcePicker
-              projectId={projectId}
-              needs={model.needs}
-              sourceHint={model.sourceHint}
-              options={sourceOptions}
-              value={sourceAsset}
-              sourceUrl={sourceUrl}
-              sourceUrlError={sourceUrlError}
-              onChange={setSourceAsset}
-              onSourceUrlChange={setSourceUrl}
-              onSourceUrlError={setSourceUrlError}
-              idPrefix="gen-source-primary"
-            />
-            {model.secondaryNeeds && (
-              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-soft)" }}>
-                <GenerationSourcePicker
-                  projectId={projectId}
-                  needs={model.secondaryNeeds}
-                  sourceHint={model.secondarySourceHint}
-                  options={secondarySourceOptions}
-                  value={secondarySourceAsset}
-                  sourceUrl={secondarySourceUrl}
-                  sourceUrlError={secondarySourceUrlError}
-                  onChange={setSecondarySourceAsset}
-                  onSourceUrlChange={setSecondarySourceUrl}
-                  onSourceUrlError={setSecondarySourceUrlError}
-                  idPrefix="gen-source-secondary"
-                />
-              </div>
-            )}
-          </div>
-        </Card>
-      )}
-
+      {/* Main path: cost row then generate — advanced stays below (default collapsed). */}
       <CreationCostSummary
         modeLabel="直接出圖"
         estimateLabel={model ? `約 ${estPoints} 點` : "依所選模型計算"}
@@ -472,69 +446,6 @@ export function DirectGenerateMode({
         }
         remainingLabel={remainingLabel}
       />
-
-      {cardsPicked && fullModel && supportsCardAnchors(fullModel.category) ? (
-        <div style={{ margin: "12px 0", padding: 12, border: "1px solid var(--border)", borderRadius: 12 }}>
-          <button
-            type="button"
-            aria-pressed={continuityLocked}
-            onClick={() => setContinuityLocked((value) => !value)}
-          >
-            一致性鎖定：{continuityLocked ? "開" : "關"}
-          </button>
-          <Hint as="p" layer="always" style={{ margin: "8px 0 0" }}>
-            {continuityLocked
-              ? "會凍結本次角色、場景與素材版本；模型支援時，自動按角色→場景→道具順序送入多張參考圖。"
-              : "仍會注入卡片文字，但不附加多張一致性參考圖；之後重試也不視為鎖定版本。"}
-          </Hint>
-        </div>
-      ) : null}
-
-      {canEdit ? <AiUnderstandingPanel
-        projectId={projectId}
-        preview={preview.data}
-        previewPending={preview.isPending}
-        previewError={preview.error?.message ?? (!model ? "請先選擇模型。" : !prompt.trim() ? "請先填寫提示詞。" : undefined)}
-        onPreview={() => {
-          if (!model || !prompt.trim()) return;
-          const base = buildGenerationSubmitInput({
-            projectId,
-            model,
-            prompt,
-            sourceAsset,
-            sourceUrl,
-            secondarySourceAsset,
-            secondarySourceUrl,
-            characterIds,
-            scenePresetIds,
-            propIds,
-            continuityMode: continuityLocked,
-            clientRequestId: submitRequestId.current,
-          });
-          preview.mutate({ ...base, promptOverride: Object.values(promptOverride).some(Boolean) ? promptOverride : undefined });
-        }}
-        traceSessionId={traceSessionId}
-        override={promptOverride}
-        onOverrideChange={setPromptOverride}
-        // 消融實測要重跑同一組設定；沒有模型或提示詞就沒有可實測的東西
-        ablationInput={model && prompt.trim() ? (() => {
-          const { clientRequestId: _ignored, ...base } = buildGenerationSubmitInput({
-            projectId,
-            model,
-            prompt,
-            sourceAsset,
-            sourceUrl,
-            secondarySourceAsset,
-            secondarySourceUrl,
-            characterIds,
-            scenePresetIds,
-            propIds,
-            continuityMode: continuityLocked,
-            clientRequestId: submitRequestId.current,
-          });
-          return base;
-        })() : undefined}
-      /> : null}
 
       <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
         <button
@@ -665,6 +576,152 @@ export function DirectGenerateMode({
           </div>
         </div>
       )}
+
+      {/* P0: source + continuity under one advanced drawer (default closed). */}
+      {showAdvanced && (
+        <Card
+          as="details"
+          variant="quiet"
+          data-testid="generate-advanced"
+          style={{ marginTop: 12, padding: "8px 10px" }}
+          open={advancedOpen}
+          onToggle={(e) => setAdvancedOpen((e.target as HTMLDetailsElement).open)}
+        >
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+            <Icon name="SlidersHorizontal" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+            進階設定
+            {advancedSummarySuffix}
+          </summary>
+          <div style={{ marginTop: 8 }}>
+            {model?.needs ? (
+              <>
+                <GenerationSourcePicker
+                  projectId={projectId}
+                  needs={model.needs}
+                  sourceHint={model.sourceHint}
+                  options={sourceOptions}
+                  value={sourceAsset}
+                  sourceUrl={sourceUrl}
+                  sourceUrlError={sourceUrlError}
+                  onChange={setSourceAsset}
+                  onSourceUrlChange={setSourceUrl}
+                  onSourceUrlError={setSourceUrlError}
+                  idPrefix="gen-source-primary"
+                />
+                {model.secondaryNeeds ? (
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border-soft)" }}>
+                    <GenerationSourcePicker
+                      projectId={projectId}
+                      needs={model.secondaryNeeds}
+                      sourceHint={model.secondarySourceHint}
+                      options={secondarySourceOptions}
+                      value={secondarySourceAsset}
+                      sourceUrl={secondarySourceUrl}
+                      sourceUrlError={secondarySourceUrlError}
+                      onChange={setSecondarySourceAsset}
+                      onSourceUrlChange={setSecondarySourceUrl}
+                      onSourceUrlError={setSecondarySourceUrlError}
+                      idPrefix="gen-source-secondary"
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+            {showContinuityControls ? (
+              <div
+                style={{
+                  marginTop: model?.needs ? 12 : 0,
+                  paddingTop: model?.needs ? 12 : 0,
+                  borderTop: model?.needs ? "1px solid var(--border-soft)" : undefined,
+                }}
+              >
+                <button
+                  type="button"
+                  aria-pressed={continuityLocked}
+                  onClick={() => setContinuityLocked((value) => !value)}
+                >
+                  一致性鎖定：{continuityLocked ? "開" : "關"}
+                </button>
+                <Hint as="p" layer="always" style={{ margin: "8px 0 0" }}>
+                  {continuityLocked
+                    ? "會凍結本次角色、場景與素材版本；模型支援時，自動按角色→場景→道具順序送入多張參考圖。"
+                    : "仍會注入卡片文字，但不附加多張一致性參考圖；之後重試也不視為鎖定版本。"}
+                </Hint>
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      )}
+
+      {/* P0: AI preview / override / ablation — closed until user expands. */}
+      {canEdit ? (
+        <Card
+          as="details"
+          variant="quiet"
+          data-testid="ai-understanding-details"
+          style={{ marginTop: 10, padding: "8px 10px" }}
+        >
+          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+            <Icon name="Sparkles" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+            AI 怎麼理解（進階）
+          </summary>
+          <AiUnderstandingPanel
+            projectId={projectId}
+            preview={preview.data}
+            previewPending={preview.isPending}
+            previewError={
+              preview.error?.message ??
+              (!model ? "請先選擇模型。" : !prompt.trim() ? "請先填寫提示詞。" : undefined)
+            }
+            onPreview={() => {
+              if (!model || !prompt.trim()) return;
+              const base = buildGenerationSubmitInput({
+                projectId,
+                model,
+                prompt,
+                sourceAsset,
+                sourceUrl,
+                secondarySourceAsset,
+                secondarySourceUrl,
+                characterIds,
+                scenePresetIds,
+                propIds,
+                continuityMode: continuityLocked,
+                clientRequestId: submitRequestId.current,
+              });
+              preview.mutate({
+                ...base,
+                promptOverride: Object.values(promptOverride).some(Boolean) ? promptOverride : undefined,
+              });
+            }}
+            traceSessionId={traceSessionId}
+            override={promptOverride}
+            onOverrideChange={setPromptOverride}
+            // 消融實測要重跑同一組設定；沒有模型或提示詞就沒有可實測的東西
+            ablationInput={
+              model && prompt.trim()
+                ? (() => {
+                    const { clientRequestId: _ignored, ...base } = buildGenerationSubmitInput({
+                      projectId,
+                      model,
+                      prompt,
+                      sourceAsset,
+                      sourceUrl,
+                      secondarySourceAsset,
+                      secondarySourceUrl,
+                      characterIds,
+                      scenePresetIds,
+                      propIds,
+                      continuityMode: continuityLocked,
+                      clientRequestId: submitRequestId.current,
+                    });
+                    return base;
+                  })()
+                : undefined
+            }
+          />
+        </Card>
+      ) : null}
 
       {submitNotice && (
         <Meta as="p" role="status" style={{ marginTop: 10, color: "var(--gold-ink)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
