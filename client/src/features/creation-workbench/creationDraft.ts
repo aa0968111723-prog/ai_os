@@ -36,15 +36,17 @@ export const CREATION_MODES: ReadonlyArray<{
   label: string;
   description: string;
 }> = [
-  { id: "ask", label: "一起想", description: "發想、拆分鏡、問專案" },
+  // P1 (#400): 直接出圖第一——首次進入主路徑就是生成，不必先理解「一起想」
   { id: "generate", label: "直接出圖", description: "圖、影、聲音" },
+  { id: "ask", label: "一起想", description: "發想、拆分鏡、問專案" },
   { id: "template", label: "套用範本", description: "固定套路一次串" },
   { id: "plan", label: "多步開拍", description: "排步驟、過目再開拍" },
 ] as const;
 
 const STORAGE_PREFIX = "aios.creationDraft.";
 
-export function emptyDraft(mode: CreationMode = "ask"): CreationDraft {
+/** Default mode for brand-new / empty drafts. Existing localStorage drafts keep their own mode. */
+export function emptyDraft(mode: CreationMode = "generate"): CreationDraft {
   return {
     goal: "",
     mode,
@@ -66,7 +68,7 @@ function isMode(value: unknown): value is CreationMode {
   return value === "ask" || value === "generate" || value === "template" || value === "plan";
 }
 
-function normalizeDraft(raw: unknown, fallbackMode: CreationMode = "ask"): CreationDraft {
+function normalizeDraft(raw: unknown, fallbackMode: CreationMode = "generate"): CreationDraft {
   const base = emptyDraft(fallbackMode);
   if (!raw || typeof raw !== "object") return base;
   const o = raw as Record<string, unknown>;
