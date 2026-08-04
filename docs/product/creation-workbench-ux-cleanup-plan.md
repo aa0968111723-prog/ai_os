@@ -1,6 +1,6 @@
 # 修復／整理計畫：AI 創作工作台 UX 大整理
 
-> 狀態：**P0–P2 完成**（分支 `feat/workbench-p1-default-generate`）  
+> 狀態：**P0–P2 完成**（#401 P0 已合 base；#403 含 P1+P2，分支 `feat/workbench-p1-default-generate`）  
 > 分支：`plan/creation-workbench-ux-cleanup` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「AI 創作工作台有點難用想大整理」（2026-08-04）
 
@@ -146,9 +146,9 @@ Anchors（勿無故改壞深連結）：`#sec-ai-hub` `#sec-studio` `#sec-genera
 
 ## 6. 建議 PR 切法（實作時）
 
-1. `feat/workbench-p0-collapse-advanced` — 只 P0  
-2. `feat/workbench-p1-default-generate` — P1  
-3. `feat/workbench-p2-recent-strip` — P2  
+1. `feat/workbench-p0-collapse-advanced` — 只 P0 → **已合** #401  
+2. `feat/workbench-p1-default-generate` — P1 + P2（#403；含同線 P0 commit，與 #401 重疊已由 merge 消化）  
+3. ~~`feat/workbench-p2-recent-strip`~~ — P2 併入 #403，不再單開  
 
 每段可獨立合併、獨立驗收；避免一顆巨型 PR。
 
@@ -170,6 +170,10 @@ npm run test:client -- DirectGenerateMode CreationWorkbench
 
 | PR | 關係 |
 |----|------|
+| #400 本計畫 docs | 已合 base |
+| #401 P0 減噪 | 已合 base；#403 merge 後不再重複改動 |
+| #402 專案上下文 UX 計畫 | 平行 docs；與本 PR 無程式衝突 |
+| #403 P0–P2 實作 | 本分支；解衝突後合入完成 P1+P2 |
 | #396 BYOK Phase 2 | P3 徽章依賴；不阻塞 P0–P2 |
 | #398 schema introspect 開機 | **無關**；服務起不來時本整理仍可先合進 branch 但無法線上驗證 |
 | SimpleProjectMode | 簡模式若共用元件，P0 收合應對齊，勿只改完整工作台 |
