@@ -27,6 +27,7 @@ vi.mock("../api", () => ({
       quota: { my: { invalidate } },
       scenes: { listByProject: { invalidate } },
       projects: { assets: { invalidate } },
+      community: { invalidate },
     }),
     generation: {
       listByProject: {
@@ -49,6 +50,9 @@ vi.mock("../api", () => ({
         useMutation: () => ({ mutate: vi.fn(), isPending: false }),
       },
       decideCost: {
+        useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+      },
+      cancelAwaiting: {
         useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
       },
     },
@@ -83,6 +87,12 @@ vi.mock("../api", () => ({
     auth: {
       me: {
         useQuery: (...args: unknown[]) => meQuery(...args),
+      },
+    },
+    // 靈感頻道「發布」鈕；缺替身會讓元件連渲染都失敗
+    community: {
+      publishFromSource: {
+        useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
       },
     },
   },

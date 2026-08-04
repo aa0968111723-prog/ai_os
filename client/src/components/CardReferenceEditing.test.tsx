@@ -52,6 +52,7 @@ vi.mock("../api", () => ({
       scenePresets: { list: { invalidate: vi.fn() } },
       props: { list: { invalidate: vi.fn() } },
       projects: { assets: { invalidate: vi.fn() } },
+      community: { invalidate: vi.fn() },
     }),
     characters: {
       list: { useQuery: () => ({ data: [CHAR], isLoading: false }) },
@@ -72,6 +73,12 @@ vi.mock("../api", () => ({
       remove: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null, reset: vi.fn() }) },
     },
     projects: { assets: { useQuery: () => ({ data: [] }) } },
+    // 靈感頻道「發布」鈕；缺替身會讓元件連渲染都失敗
+    community: {
+      publishFromSource: {
+        useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+      },
+    },
   },
 }));
 
