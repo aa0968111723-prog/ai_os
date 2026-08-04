@@ -1,2 +1,1 @@
-// TEMP - full GenerationList with publish button will replace this
-export function GenerationList() { return <div>publish button pending</div>; }
+PLACEHOLDER_FULL_CONTENT_FROM_ARTIFACTS_GENERATIONLIST_FINAL_TSX
