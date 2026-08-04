@@ -140,6 +140,18 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   // 0030：scenes 加三個 nullable jsonb 卡片引用欄位（ADD COLUMN IF NOT EXISTS）；
   //       scenes 是 baseline 既有表，用 ALTER 補欄位正是這裡的正解（不同於 0025 的 props）。
   "0030_scene_cards",
+  // 0031：純新增 user_ai_provider_keys 表＋唯一索引（皆 IF NOT EXISTS）。個人 AI 金鑰是新資料，
+  //       不動任何既有表。檔尾另有一句 ADD COLUMN IF NOT EXISTS "updated_at" 補給「套過不完整早期版本」
+  //       的資料庫；欄位本體已寫在 CREATE TABLE 內，所以在乾淨的 bridge 批次裡它必然是 no-op——
+  //       比照 0029 之於 0025 的前例，會落在「預期但 drift 沒有」且可安全重跑的那一類。
+  "0031_user_ai_provider_keys",
+  // 0032：純新增 community_posts 表＋四個索引與一個部分唯一索引（皆 IF NOT EXISTS）。
+  //       發布快照自成一表，不改寫 prompts／generations／assets 任何一列。
+  "0032_community_posts",
+  // 0033：users 加一個 nullable avatar_url（ADD COLUMN IF NOT EXISTS），既有帳號預設無頭像。
+  "0033_user_avatar",
+  // 0034：純新增 note_comments 表＋兩個索引（皆 IF NOT EXISTS），不動 notes 既有資料。
+  "0034_note_comments",
 ] as const;
 
 /**

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -279,14 +279,16 @@ describe("ProjectAssistant WB-03 bring-in (no runAction)", () => {
     await submitQuestion("給我建議");
     await screen.findByText("這裡有幾個建議");
 
-    // Bring-in buttons present
-    expect(screen.getByRole("button", { name: "帶入直接出圖" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "建立多步開拍" })).toBeInTheDocument();
+    // Bring-in buttons present。ProactiveModelConverter 也會為每個模型建議渲染一顆同名的
+    // 「建立多步開拍」，所以這裡鎖定 SuggestionActions 自己的 group，別讓查詢撞到別人的鈕。
+    const bringInGroup = screen.getByRole("group", { name: "建議帶入工作台" });
+    expect(within(bringInGroup).getByRole("button", { name: "帶入直接出圖" })).toBeInTheDocument();
+    expect(within(bringInGroup).getByRole("button", { name: "建立多步開拍" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "帶入多步開拍" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "帶入套用範本" })).toBeInTheDocument();
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "帶入直接出圖" }));
+    await user.click(within(bringInGroup).getByRole("button", { name: "帶入直接出圖" }));
     expect(onCreationAction).toHaveBeenCalled();
     const genCall = onCreationAction.mock.calls.at(-1)![0];
     expect(genCall.type).toBe("generate");

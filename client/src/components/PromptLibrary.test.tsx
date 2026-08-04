@@ -11,6 +11,7 @@ import { PromptLibrary } from "./PromptLibrary";
 const listQuery = vi.fn();
 const removeMutate = vi.fn();
 const invalidate = vi.fn();
+const publishMutate = vi.fn();
 
 vi.mock("../api", () => ({
   trpc: {
@@ -25,6 +26,19 @@ vi.mock("../api", () => ({
         useMutation: (opts?: { onSuccess?: () => void }) => ({
           mutate: (input: unknown) => {
             removeMutate(input);
+            opts?.onSuccess?.();
+          },
+          isPending: false,
+          error: null,
+        }),
+      },
+    },
+    // 靈感頻道「發布」鈕（community feature）也掛在每一列上；沒有這個替身整個元件連渲染都渲染不出來
+    community: {
+      publishFromSource: {
+        useMutation: () => ({
+          mutate: (input: unknown, opts?: { onSuccess?: () => void }) => {
+            publishMutate(input);
             opts?.onSuccess?.();
           },
           isPending: false,

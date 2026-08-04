@@ -22,6 +22,7 @@ import {
   startAdobeTimelineRender,
 } from "./adobe";
 import { exportAdobeTimelineFormats } from "./adobe/timelineExport";
+import { adobeTimelineSchema, type AdobeTimeline } from "../../shared/adobe";
 
 const MAX_KNOWLEDGE = 200_000;
 const MAX_PROMPT = 8_000;
@@ -319,10 +320,29 @@ export const MCP_WRITE_EXPANSION_TOOLS = [
   },
 ] as const;
 
-const EXPANSION_NAMES = new Set(MCP_WRITE_EXPANSION_TOOLS.map((t) => t.name));
+// 明確標成 ReadonlySet<string>：MCP_WRITE_EXPANSION_TOOLS 是 as const，推導出來會是
+// 字面值聯集的 Set，拿執行期傳進來的 string 去 has() 反而編不過。
+const EXPANSION_NAMES: ReadonlySet<string> = new Set(MCP_WRITE_EXPANSION_TOOLS.map((t) => t.name));
 
 export function isMcpWriteExpansionTool(name: string): boolean {
   return EXPANSION_NAMES.has(name);
+}
+
+/**
+ * 時間軸參數一律走 adobeTimelineSchema，與 routers/adobe.ts 同一套驗證。
+ * MCP 這條路以前是手寫 cast，等於讓外部客戶端把未驗證的 clips 直接送進匯出器與 Adobe 算圖——
+ * fps／width／height 的預設值也拿不到（schema 的 .default() 只在 parse 時才會補）。
+ */
+function parseTimelineArg(raw: unknown): AdobeTimeline {
+  const parsed = adobeTimelineSchema.safeParse(raw);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `timeline 格式不正確：${first ? `${first.path.join(".") || "timeline"} ${first.message}` : "需含 name 與 clips[]"}`,
+    });
+  }
+  return parsed.data;
 }
 
 function adobeErr(err: unknown): never {
@@ -821,16 +841,7 @@ export async function runMcpWriteExpansion(
   }
 
   if (name === "adobe_export_timeline") {
-    const timeline = args.timeline as {
-      name: string;
-      fps?: number;
-      width?: number;
-      height?: number;
-      clips: Array<{ assetId: string; startSec: number; durationSec: number }>;
-    };
-    if (!timeline?.name || !Array.isArray(timeline.clips)) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "timeline 需含 name 與 clips[]" });
-    }
+    const timeline = parseTimelineArg(args.timeline);
     const bundle = exportAdobeTimelineFormats(timeline, {
       pathPrefix: typeof args.pathPrefix === "string" ? args.pathPrefix : undefined,
       width: timeline.width,
@@ -848,7 +859,7 @@ export async function runMcpWriteExpansion(
 
   if (name === "adobe_render_timeline") {
     try {
-      const job = await startAdobeTimelineRender(auth.user.id, args.timeline as never);
+      const job = await startAdobeTimelineRender(auth.user.id, parseTimelineArg(args.timeline));
       return { jobId: job.id, status: job.status, note: "用 adobe_job 輪詢。" };
     } catch (err) {
       adobeErr(err);

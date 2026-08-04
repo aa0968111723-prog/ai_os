@@ -78,6 +78,20 @@ vi.mock("../components/DatabaseDetailTabs", () => ({
   DatabaseDetailTabs: () => null,
 }));
 
+// 全組 presence／游標走真的 WebSocket＋react-query client，這支測的是深鏈與建庫表單，
+// 不架 QueryClientProvider；比照 ../api 直接把 realtime 也換成靜態替身。
+vi.mock("../realtime", () => ({
+  useCollab: () => ({
+    connected: false,
+    peers: [],
+    self: null,
+    cursors: [],
+    containerRef: { current: null },
+    onPointerMove: () => {},
+  }),
+  CursorOverlay: () => null,
+}));
+
 describe("DatabasesPage project deep link (user journey)", () => {
   beforeEach(() => {
     listQuery.mockReset();

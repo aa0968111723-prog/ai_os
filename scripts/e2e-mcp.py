@@ -161,7 +161,17 @@ EXPECTED = {"whoami","list_projects","get_project_context","find_model","submit_
     "list_knowledge","get_knowledge","list_scenes",
     "get_integrations_status","import_drive_file",
     "list_dm_contacts","list_dm_threads","read_dm","send_dm",
-    "request_upload_grant","get_upload_grant_status"}
+    "request_upload_grant","get_upload_grant_status",
+    # 寫入擴充（services/mcpWriteExpansion，由 mcp.ts 掛進 TOOLS）：知識庫／分鏡／世界觀／素材卡／Adobe
+    "add_knowledge","update_knowledge",
+    "add_scene","update_scene","set_scene_visual","generate_into_scene","update_worldview",
+    "rename_asset","set_asset_lock",
+    "add_character","update_character",
+    "add_scene_preset","update_scene_preset",
+    "add_prop","update_prop",
+    "rename_generation","retry_generation",
+    "adobe_status","adobe_list_assets","adobe_edit_photo","adobe_job",
+    "adobe_export_timeline","adobe_render_timeline"}
 _missing, _extra = sorted(EXPECTED - names), sorted(names - EXPECTED)
 ok(f"tools/list = {len(EXPECTED)} 且名單完整", names == EXPECTED,
    f"{len(names)} 個"
