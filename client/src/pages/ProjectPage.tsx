@@ -1622,6 +1622,56 @@ export function ProjectPage({ id }: { id: string }) {
               ) : null}
             </h2>
             {!canEdit && <Hint layer="always" style={{ margin: "4px 0 0" }}>檢視者唯讀——這些設定可以看，不能改（打的字不會被儲存）。</Hint>}
+            {/* C0 (#402)：就緒狀態一句話 + 未就緒 CTA——對齊 isWorldviewReady（一句話＋氣氛或畫風） */}
+            <div
+              className="wv-ready-strip"
+              role="status"
+              data-testid="wv-ready-strip"
+              style={{
+                marginTop: 8,
+                padding: "8px 10px",
+                borderRadius: 8,
+                border: `1px solid ${wvReady ? "var(--border, #e5e7eb)" : "var(--warn, #b45309)"}`,
+                background: wvReady ? "var(--surface-2, transparent)" : "color-mix(in srgb, var(--warn, #b45309) 8%, transparent)",
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <Meta as="span" style={{ fontSize: 13, fontWeight: 600 }}>
+                {wvReady ? "基本設定就緒 ✓——每次生成會自動帶上" : "基本設定還沒齊——補一句話，再選氣氛或畫風就能出圖"}
+              </Meta>
+              {!wvReady ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setCtxSectionOpen("worldview", true);
+                    requestAnimationFrame(() => {
+                      const el = document.getElementById("wv-logline") as HTMLInputElement | null;
+                      el?.focus();
+                      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    });
+                  }}
+                >
+                  去填一句話
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    // 就緒後主 CTA：進創作台直接出圖
+                    revealWorkbenchAnchor("#sec-studio", { projectId: id });
+                  }}
+                >
+                  去創作台出圖
+                </Button>
+              )}
+            </div>
             {/* 全空的專案：先給一份可以照抄的範例（含「套下去 AI 會收到什麼」的預覽）。
                 唯讀成員也看得到範例本身，只是沒有套用按鈕。 */}
             {wvBlank && !wvExampleDismissed && (
@@ -1638,11 +1688,12 @@ export function ProjectPage({ id }: { id: string }) {
             <WorldviewGuide
               wv={wv}
               onJump={(anchor, stepId) => {
-                // 第四步在進階摺疊層裡，捲過去之前得先把它撐開
+                // 第四步／故事走向在進階摺疊層裡，捲過去之前得先把它撐開
                 if (stepId === "narrative") setWvAdvancedOpen(true);
                 scrollToSelector(anchor);
               }}
             />
+            {/* C0 主路徑：會進生成的最少欄位——一句話／訊息、氣氛、畫風、禁忌；其餘進 details */}
             <label htmlFor="wv-logline">
               這支片在講什麼？
               <FieldReaders field="logline" />
@@ -1674,12 +1725,6 @@ export function ProjectPage({ id }: { id: string }) {
               placeholder="例：把心交給佛，煩惱就交給了光"
               onBlur={(e) => canEdit && e.target.value !== wv.message && updateWv.mutate({ id, worldview: { message: e.target.value } })}
             />
-            <label id="wv-themes">
-              故事走向
-              <FieldReaders field="themes" />
-              <HelpTip text="可略過。只給寫腳本／拆分鏡的 AI 看，出圖不吃。建議 1～2 個，第一個為主。" />
-            </label>
-            {chipGroup("themes", themeOpts, "theme", "wv-themes")}
             <label id="wv-tones">
               氣氛
               <FieldReaders field="tones" />
@@ -1703,35 +1748,109 @@ export function ProjectPage({ id }: { id: string }) {
             {isLeader && (
               <Hint style={{ marginTop: 8, fontSize: 12 }}>
                 選項可直接按各列的「＋新增」加；改名／停用／排序在 <Link href="/options">選項整理頁</Link>。
-                實際會注入哪些，上面的「AI 會收到什麼」直接看得到。
+                實際會注入哪些，下方「AI 會收到什麼」直接看得到。
               </Hint>
             )}
-            {/* 注入預覽：必須在進階摺疊層「之上」——摺疊層正是使用者放棄的地方。
-                內容全部來自 shared formatter，與 generationCore 同一條路（見 WorldviewPreview 註解）。 */}
+            {/* C0：禁忌會進生成負向／避免——留在主路徑；預設禁語仍可摺疊調整 */}
+            <div
+              style={{
+                marginTop: 12,
+                marginBottom: 4,
+                padding: "10px 12px",
+                borderRadius: 8,
+                border: "1px solid var(--border, #e5e7eb)",
+              }}
+            >
+              <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                不能出現的東西
+                <FieldReaders field="taboos" />
+              </Meta>
+              {isDefaultTaboosOnly(wv.taboos) ? (
+                <details>
+                  <summary style={{ cursor: "pointer", fontSize: 13 }}>
+                    合規保護已開啟 ✓（預設禁語；點此展開調整）
+                  </summary>
+                  <div style={{ marginTop: 8 }}>
+                    <TokenListEditor
+                      id="wv-taboos"
+                      label="不能講、不能出現的"
+                      fieldKey="taboos"
+                      hint="圖影走負向（模型需支援）；文字與助手走「避免」。刪預設前會確認。"
+                      values={wv.taboos}
+                      placeholder="例：不得出現可讀文字（Enter 加入）"
+                      readOnly={!canEdit}
+                      onChange={(next) => {
+                        if (removesDefaultTaboos(wv.taboos, next)) {
+                          const ok = window.confirm(
+                            "你正在移除預設的弘法禁語（醫療宣稱／影射真人／開示須審核）。確定要關閉這層合規保護嗎？",
+                          );
+                          if (!ok) return;
+                        }
+                        updateWv.mutate({ id, worldview: { taboos: next } });
+                      }}
+                    />
+                  </div>
+                </details>
+              ) : (
+                <TokenListEditor
+                  id="wv-taboos"
+                  label="不能講、不能出現的"
+                  fieldKey="taboos"
+                  hint="圖影走負向（模型需支援）；文字與助手走「避免」。刪預設前會確認。"
+                  values={wv.taboos}
+                  placeholder="例：不得出現可讀文字（Enter 加入）"
+                  readOnly={!canEdit}
+                  onChange={(next) => {
+                    if (removesDefaultTaboos(wv.taboos, next)) {
+                      const ok = window.confirm(
+                        "你正在移除預設的弘法禁語（醫療宣稱／影射真人／開示須審核）。確定要關閉這層合規保護嗎？",
+                      );
+                      if (!ok) return;
+                    }
+                    updateWv.mutate({ id, worldview: { taboos: next } });
+                  }}
+                />
+              )}
+            </div>
+            {/* 注入預覽：必須在進階摺疊層「之上」。C0：預設收合，縮短首屏高度。 */}
             <WorldviewPreview
               wv={wv}
               cardCounts={{ characters: charIds.length, scenes: sceneIds.length, props: propIds.length }}
-              defaultOpen={!mobileCompact}
+              defaultOpen={false}
             />
-            {/* 進階層：依目的分組 + 一鍵範例 + 人物→定裝；觀眾／三幕／人物進 brief／LLM／導演 */}
+            {/* 進階層：故事走向 + 敘事 AI + 交接備註（出圖不吃）；禁忌已提升至主路徑 */}
             <details
               style={{ marginTop: 10 }}
-              open={wvAdvancedOpen || hasActs(wv) || !!wv.audience.trim() || wv.people.length > 0}
+              open={
+                wvAdvancedOpen ||
+                hasActs(wv) ||
+                !!wv.audience.trim() ||
+                wv.people.length > 0 ||
+                wv.themes.length > 0
+              }
               onToggle={(e) => setWvAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}
             >
               <summary style={{ cursor: "pointer", fontSize: 13 }}>
-                進階：給寫字的 AI、合規、交接備註（可以晚點再填）
+                進階：故事走向、給寫字的 AI、交接備註（可以晚點再填）
               </summary>
               <div style={{ marginTop: 8 }}>
                 <Hint layer="always" style={{ marginBottom: 12, fontSize: 12 }}>
                   <strong>上面填完就能出圖。</strong>
                   這裡填了，寫腳本／拆分鏡／問助手會更準；
-                  <strong>直接出圖不吃</strong>觀眾／三幕／人物（畫面請用畫風＋角色定裝卡）。
+                  <strong>直接出圖不吃</strong>故事走向／觀眾／三幕／人物（畫面請用畫風＋角色定裝卡）。
                 </Hint>
+
+                <label id="wv-themes">
+                  故事走向
+                  <FieldReaders field="themes" />
+                  <HelpTip text="可略過。只給寫腳本／拆分鏡的 AI 看，出圖不吃。建議 1～2 個，第一個為主。" />
+                </label>
+                {chipGroup("themes", themeOpts, "theme", "wv-themes")}
 
                 {/* ① 給敘事 AI */}
                 <div
                   style={{
+                    marginTop: 12,
                     marginBottom: 14,
                     padding: "10px 12px",
                     borderRadius: 8,
@@ -1941,68 +2060,7 @@ export function ProjectPage({ id }: { id: string }) {
                   </Hint>
                 </div>
 
-                {/* ② 合規 */}
-                <div
-                  style={{
-                    marginBottom: 14,
-                    padding: "10px 12px",
-                    borderRadius: 8,
-                    border: "1px solid var(--border, #e5e7eb)",
-                  }}
-                >
-                  <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                    ② 不能出現的東西
-                    <FieldReaders field="taboos" />
-                  </Meta>
-                  {isDefaultTaboosOnly(wv.taboos) ? (
-                    <details>
-                      <summary style={{ cursor: "pointer", fontSize: 13 }}>
-                        合規保護已開啟 ✓（預設禁語；點此展開調整）
-                      </summary>
-                      <div style={{ marginTop: 8 }}>
-                        <TokenListEditor
-                          id="wv-taboos"
-                          label="不能講、不能出現的"
-                          fieldKey="taboos"
-                          hint="圖影走負向（模型需支援）；文字與助手走「避免」。刪預設前會確認。"
-                          values={wv.taboos}
-                          placeholder="例：不得出現可讀文字（Enter 加入）"
-                          readOnly={!canEdit}
-                          onChange={(next) => {
-                            if (removesDefaultTaboos(wv.taboos, next)) {
-                              const ok = window.confirm(
-                                "你正在移除預設的弘法禁語（醫療宣稱／影射真人／開示須審核）。確定要關閉這層合規保護嗎？",
-                              );
-                              if (!ok) return;
-                            }
-                            updateWv.mutate({ id, worldview: { taboos: next } });
-                          }}
-                        />
-                      </div>
-                    </details>
-                  ) : (
-                    <TokenListEditor
-                      id="wv-taboos"
-                      label="不能講、不能出現的"
-                      fieldKey="taboos"
-                      hint="圖影走負向（模型需支援）；文字與助手走「避免」。刪預設前會確認。"
-                      values={wv.taboos}
-                      placeholder="例：不得出現可讀文字（Enter 加入）"
-                      readOnly={!canEdit}
-                      onChange={(next) => {
-                        if (removesDefaultTaboos(wv.taboos, next)) {
-                          const ok = window.confirm(
-                            "你正在移除預設的弘法禁語（醫療宣稱／影射真人／開示須審核）。確定要關閉這層合規保護嗎？",
-                          );
-                          if (!ok) return;
-                        }
-                        updateWv.mutate({ id, worldview: { taboos: next } });
-                      }}
-                    />
-                  )}
-                </div>
-
-                {/* ③ 交接備註 */}
+                {/* ② 交接備註（禁忌已提升至主路徑） */}
                 <div
                   style={{
                     marginBottom: 8,
@@ -2012,7 +2070,7 @@ export function ProjectPage({ id }: { id: string }) {
                   }}
                 >
                   <Meta style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                    ③ 給人看的備註（AI 不會讀）
+                    ② 給人看的備註（AI 不會讀）
                     <FieldReaders field="references" />
                   </Meta>
                   <Hint style={{ marginBottom: 8, fontSize: 12 }}>

@@ -63,6 +63,22 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/data-fb="世界觀卡"/);
   });
 
+  /**
+   * C0 (#402)：世界觀主路徑減噪——就緒條、禁忌在主路徑、故事走向進進階、
+   * 注入預覽預設關。結構契約，避免回歸成「一次攤開」。
+   */
+  it("C0 worldview essentials: ready strip, taboos on main path, themes in advanced, preview collapsed", () => {
+    expect(src).toMatch(/data-testid="wv-ready-strip"/);
+    expect(src).toMatch(/去填一句話/);
+    expect(src).toMatch(/去創作台出圖/);
+    // themes 必須出現在進階 details 區塊內（summary 文案含「故事走向」）
+    expect(src).toMatch(/進階：故事走向/);
+    expect(src).toMatch(/id="wv-themes"/);
+    expect(src).toMatch(/id="wv-taboos"/);
+    // 注入預覽預設收合（縮短首屏）
+    expect(src).toMatch(/<WorldviewPreview[\s\S]*?defaultOpen=\{false\}/);
+  });
+
   it("TocNav uses shared three-stage defaults (single jump to #stage-create)", () => {
     expect(src).toMatch(/DEFAULT_ITEMS as TOC_DEFAULT_ITEMS/);
     expect(src).toMatch(/id="stage-create"/);
