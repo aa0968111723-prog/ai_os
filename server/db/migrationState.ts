@@ -152,6 +152,8 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
   "0033_user_avatar",
   // 0034：純新增 note_comments 表＋兩個索引（皆 IF NOT EXISTS），不動 notes 既有資料。
   "0034_note_comments",
+  // 0035：純新增 community_likes 表＋兩個索引（皆 IF NOT EXISTS），與 community_posts.like_count 搭配。
+  "0035_community_likes",
 ] as const;
 
 /**

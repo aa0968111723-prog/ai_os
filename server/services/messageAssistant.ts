@@ -40,10 +40,14 @@ export async function replyAsAssistant(opts: {
   question: string;
 }): Promise<void> {
   const { projectId, groupId, askerId, question } = opts;
-  // 限流：超過就靜默丟棄，關掉 NIM 放大／洗版兩條路徑
+  const insertReply = (body: string) =>
+    db.insert(schema.messages).values({ groupId, projectId, userId: askerId, kind: "assistant", body: body.slice(0, 2000) });
+
+  // 限流：超過就落一則輕量回覆（不再靜默），關掉 NIM 放大；同一分鐘內使用者才知「太頻繁」
   try {
     if (await overAssistantLimit(askerId)) {
       console.warn(`[messageAssistant] 觸發過於頻繁，已忽略：asker=${askerId} project=${projectId}`);
+      await insertReply("你問得有點密——請稍等約一分鐘再 @助手。");
       return;
     }
   } catch (error) {
@@ -53,9 +57,6 @@ export async function replyAsAssistant(opts: {
   }
   const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, projectId));
   if (!project) return;
-
-  const insertReply = (body: string) =>
-    db.insert(schema.messages).values({ groupId, projectId, userId: askerId, kind: "assistant", body: body.slice(0, 2000) });
 
   // 近期對話(最多 10 則,舊到新)：讓助手接得上「這一鏡」「剛剛那張」等指涉
   const recent = await db

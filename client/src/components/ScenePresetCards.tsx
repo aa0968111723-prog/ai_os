@@ -37,6 +37,15 @@ export function ScenePresetCards({
 }) {
   const utils = trpc.useUtils();
   const list = trpc.scenePresets.list.useQuery({ projectId });
+  // Phase C：場景卡一鍵發布到靈感頻道
+  const publish = trpc.community.publishFromSource.useMutation({
+    onSuccess: () => utils.community.invalidate(),
+  });
+  const [publishState, setPublishState] = useState<{ id: string; ok: boolean; msg?: string } | null>(null);
+  const flashPublish = (id: string, ok: boolean, msg?: string) => {
+    setPublishState({ id, ok, msg });
+    setTimeout(() => setPublishState((s) => (s && s.id === id ? null : s)), 2000);
+  };
   const requestId = useRef<string>(crypto.randomUUID());
   const add = trpc.scenePresets.add.useMutation({
     onSuccess: (row) => {
@@ -279,6 +288,27 @@ export function ScenePresetCards({
                         {s.referenceUrl ? "換參考圖" : refTrashed ? "重設參考圖" : "設參考圖"}
                       </Button>
                     )}
+                    <Button
+                      variant="ghost"
+                      style={{ fontSize: 11 }}
+                      title="發布到全站靈感頻道"
+                      disabled={publish.isPending}
+                      onClick={() => {
+                        publish.mutate(
+                          { sourceType: "scene_preset", sourceId: s.id },
+                          {
+                            onSuccess: () => flashPublish(s.id, true),
+                            onError: (e) => flashPublish(s.id, false, e.message),
+                          },
+                        );
+                      }}
+                    >
+                      {publishState?.id === s.id
+                        ? publishState.ok
+                          ? "已發布 ✓"
+                          : "發布失敗"
+                        : "發布"}
+                    </Button>
                     <ConfirmButton
                       triggerStyle={{ padding: "2px 10px", fontSize: 11, color: "var(--danger-ink)" }}
                       disabled={remove.isPending}
@@ -414,6 +444,11 @@ export function ScenePresetCards({
       {update.error && !textEditId && (
         <p className="error" role="alert">
           更新失敗：{update.error.message}
+        </p>
+      )}
+      {publishState && !publishState.ok && publishState.msg && (
+        <p className="error" role="alert" style={{ fontSize: "var(--fs-12)" }}>
+          {publishState.msg}
         </p>
       )}
     </Card>

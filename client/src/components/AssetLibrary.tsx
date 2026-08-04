@@ -65,6 +65,15 @@ export function AssetLibrary({
   // QA-013：素材上限不再硬卡 100——預設載 100，「載入更多」逐次加大 limit 取回全部
   const [assetLimit, setAssetLimit] = useState(100);
   const assets = trpc.projects.assets.useQuery({ projectId, limit: assetLimit });
+  // Phase C：素材一鍵發布到靈感頻道
+  const publish = trpc.community.publishFromSource.useMutation({
+    onSuccess: () => utils.community.invalidate(),
+  });
+  const [publishState, setPublishState] = useState<{ id: string; ok: boolean; msg?: string } | null>(null);
+  const flashPublish = (id: string, ok: boolean, msg?: string) => {
+    setPublishState({ id, ok, msg });
+    setTimeout(() => setPublishState((s) => (s && s.id === id ? null : s)), 2000);
+  };
   const del = trpc.projects.deleteAsset.useMutation({
     onSuccess: () => {
       utils.projects.assets.invalidate({ projectId });
@@ -831,6 +840,30 @@ export function AssetLibrary({
                           >
                             <Icon name="MessageCircle" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />在留言中討論
                           </button>
+                          <button
+                            className="menu-item"
+                            title="發布到全站靈感頻道"
+                            disabled={publish.isPending}
+                            onClick={() => {
+                              publish.mutate(
+                                { sourceType: "asset", sourceId: a.id },
+                                {
+                                  onSuccess: () => {
+                                    flashPublish(a.id, true);
+                                    setMenuOpenId(null);
+                                  },
+                                  onError: (e) => flashPublish(a.id, false, e.message),
+                                },
+                              );
+                            }}
+                          >
+                            <Icon name="Share2" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />
+                            {publishState?.id === a.id
+                              ? publishState.ok
+                                ? "已發布 ✓"
+                                : "發布失敗"
+                              : "發布到靈感頻道"}
+                          </button>
                           <button className="menu-item" disabled={rename.isPending} onClick={() => startRename(a.id, a.title)}>
                             <Icon name="Pencil" size={13} style={{ verticalAlign: "-2px", marginRight: 4 }} />改名
                           </button>
@@ -882,6 +915,9 @@ export function AssetLibrary({
       {rename.error && <p className="error">改名失敗：{rename.error.message}</p>}
       {describeImage.error && <p className="error">AI 描述失敗：{describeImage.error.message}</p>}
       {toKnowledge.error && <p className="error" role="alert">加入知識庫失敗：{toKnowledge.error.message}</p>}
+      {publishState && !publishState.ok && publishState.msg && (
+        <p className="error" role="alert">發布失敗：{publishState.msg}</p>
+      )}
 
       {/* 頁內大圖遮罩：點外部或 Esc 關閉 */}
       {lightbox && (

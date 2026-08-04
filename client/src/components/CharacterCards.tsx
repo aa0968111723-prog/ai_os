@@ -39,6 +39,15 @@ export function CharacterCards({
 }) {
   const utils = trpc.useUtils();
   const list = trpc.characters.list.useQuery({ projectId });
+  // Phase C：角色卡一鍵發布到靈感頻道
+  const publish = trpc.community.publishFromSource.useMutation({
+    onSuccess: () => utils.community.invalidate(),
+  });
+  const [publishState, setPublishState] = useState<{ id: string; ok: boolean; msg?: string } | null>(null);
+  const flashPublish = (id: string, ok: boolean, msg?: string) => {
+    setPublishState({ id, ok, msg });
+    setTimeout(() => setPublishState((s) => (s && s.id === id ? null : s)), 2000);
+  };
   // 冪等鍵（QA-003）：同一張「還沒建成功」的卡重試沿用同鍵——timeout 後再按不會建出重複卡
   const requestId = useRef<string>(crypto.randomUUID());
   const add = trpc.characters.add.useMutation({
@@ -292,6 +301,27 @@ export function CharacterCards({
                         {c.referenceUrl ? "換參考圖" : refTrashed ? "重設參考圖" : "設參考圖"}
                       </Button>
                     )}
+                    <Button
+                      variant="ghost"
+                      style={{ fontSize: "var(--fs-11)" }}
+                      title="發布到全站靈感頻道"
+                      disabled={publish.isPending}
+                      onClick={() => {
+                        publish.mutate(
+                          { sourceType: "character", sourceId: c.id },
+                          {
+                            onSuccess: () => flashPublish(c.id, true),
+                            onError: (e) => flashPublish(c.id, false, e.message),
+                          },
+                        );
+                      }}
+                    >
+                      {publishState?.id === c.id
+                        ? publishState.ok
+                          ? "已發布 ✓"
+                          : "發布失敗"
+                        : "發布"}
+                    </Button>
                     <ConfirmButton
                       onConfirm={() => remove.mutate({ id: c.id })}
                       message={`刪除角色「${c.name}」？刪後生成勾選會自動清掉。`}
@@ -427,6 +457,11 @@ export function CharacterCards({
       {update.error && !textEditId && (
         <p className="error" role="alert">
           更新失敗：{update.error.message}
+        </p>
+      )}
+      {publishState && !publishState.ok && publishState.msg && (
+        <p className="error" role="alert" style={{ fontSize: "var(--fs-12)" }}>
+          {publishState.msg}
         </p>
       )}
     </Card>

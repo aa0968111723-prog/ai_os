@@ -210,8 +210,9 @@ export const workflowsRouter = router({
       const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.projectId));
       if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
       requireGroup(ctx.auth, project.groupId);
-      const { assertProjectEditable } = await import("../services/projectAcl");
+      const { assertProjectEditable, assertProjectNotArchived } = await import("../services/projectAcl");
       await assertProjectEditable(ctx.auth, project);
+      assertProjectNotArchived(project); // 封存專案不得啟動工作流（與生成／代理同口徑）
       const trace = await createAiTraceSession({
         groupId: project.groupId,
         projectId: project.id,

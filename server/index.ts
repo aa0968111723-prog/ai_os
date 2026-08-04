@@ -819,9 +819,7 @@ app.post("/api/databases/upload", requireAuthBeforeUpload, upload.single("file")
     mime = verdict.mime;
     const guard = await checkDiskSpace(req.file.size, true);
     if (guard) { await cleanup(); return res.status(507).json({ error: guard }); }
-    const { quotaGuardError, extractTextFromBuffer, MAX_EXTRACT_BYTES } = await import("./services/databaseFiles");
-    const quotaErr = await quotaGuardError(auth.user.id, req.file.size);
-    if (quotaErr) { await cleanup(); return res.status(507).json({ error: quotaErr }); }
+    const { insertDataFileUnderQuota, extractTextFromBuffer, MAX_EXTRACT_BYTES } = await import("./services/databaseFiles");
 
     const originalName = Buffer.from(req.file.originalname, "latin1").toString("utf8");
     const name = (String(req.body?.name ?? "").trim() || originalName || "上傳文件").slice(0, 120);
@@ -834,10 +832,17 @@ app.post("/api/databases/upload", requireAuthBeforeUpload, upload.single("file")
     }
     const { storagePath, sizeBytes } = await adoptTmpFile(req.file.path, mime);
     try {
-      const [file] = await db.insert(schema.dataFiles).values({
+      // B9：配額 check+insert 同交易＋per-user 鎖，防併發超額
+      const inserted = await insertDataFileUnderQuota(auth.user.id, sizeBytes, {
         tableId: table.id, name, mime, sizeBytes, storagePath,
         textContent, uploadedBy: auth.user.id,
-      }).returning();
+      });
+      if (!inserted.ok) {
+        const { removeStoredFile } = await import("./services/storage");
+        await removeStoredFile(storagePath).catch(() => {});
+        return res.status(507).json({ error: inserted.error });
+      }
+      const file = inserted.row;
       // REST 上傳繞過 tRPC 的 mutation 審計中介層——比照 recordMcpAudit 自行落一筆（fire-and-forget）
       void (async () => {
         const { sanitizeAuditInput } = await import("./services/audit");

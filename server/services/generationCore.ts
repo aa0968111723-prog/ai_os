@@ -866,6 +866,27 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
   // 依 requestId 前綴分流:nim_=NVIDIA NIM 記憶體佇列;mock_/其餘=fal(mock 前綴由 falStatus 自行處理)。
   // 用前綴而非模型註冊表判斷——部署切換期間在途的舊 any-llm 生成仍能沿 fal 佇列收尾。
   const result = gen.requestId.startsWith("nim_") ? nimStatus(gen.requestId) : await falStatus(endpoint, kind, gen.requestId);
+  // 供應商回 done 卻無任何輸出：不得永久卡 queued/running 持有預扣點（先前會 fall-through 到 return gen）
+  if (result.status === "done" && !(result.resultUrl || result.resultText)) {
+    const emptyFailed = await failStaleGenerationTx(
+      gen.id,
+      "生成服務回報完成，但沒有可用的成品（無圖／影／音／文字）",
+      "生成無輸出退回",
+    );
+    if (!emptyFailed.updated) {
+      const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
+      return current ?? gen;
+    }
+    const [updated] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
+    if (!updated) return gen;
+    void pushToUsers([gen.userId], {
+      title: "生成失敗",
+      body: `${model?.label ?? gen.modelId}：沒有可用的成品${emptyFailed.refunded > 0 ? "（點數已退回）" : ""}`,
+      url: `/p/${gen.projectId}?focus=generation-${gen.id}`,
+      tag: `gen-failed-${gen.id}`,
+    }).catch((err) => console.warn("[generation] 空輸出失敗推播失敗：", err instanceof Error ? err.message : err));
+    return updated;
+  }
   if (result.status === "done" && (result.resultUrl || result.resultText)) {
     // Compare-and-set：只有把「仍在 queued/running」的列成功推進成 done 的那一次才算數，
     // 併發輪詢/重試不會重複入庫（舊版每次都 update+insert asset → 重複素材、重複計費）。
@@ -907,8 +928,12 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
         // 冪等：CAS 已保證此段每筆只跑一次；同交易失敗一起 rollback。
         if (gen.sceneId) {
           // 角色感知回填：narration→旁白音檔欄位；其餘（visual/null）→主畫面欄位。
+          // 軟刪／回收桶分鏡不回填，避免還原後突然出現意外綁定
           const patch = gen.sceneRole === "narration" ? { narrationAssetId: asset.id } : { assetId: asset.id };
-          await tx.update(schema.scenes).set(patch).where(eq(schema.scenes.id, gen.sceneId));
+          await tx
+            .update(schema.scenes)
+            .set(patch)
+            .where(and(eq(schema.scenes.id, gen.sceneId), isNull(schema.scenes.deletedAt)));
         }
       }
       return { updated: rows[0], assetId };

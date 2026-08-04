@@ -216,6 +216,7 @@ export function startAgentRunner(): void {
 async function tick(): Promise<void> {
   // stopped：仍有 running/pending 步驟 → 收尾（按停時在途生成自然完成）
   // failed：仍有 running 步驟 → 並行支線一支失敗後，其餘已送出的生成仍須 settle（否則永遠卡 running）
+  // waiting：仍有 running 步驟 → 多為超額生成等組長核准；須持續 settle 核准結果（否則永久卡 waiting）
   const runs = await db
     .select()
     .from(schema.agentRuns)
@@ -228,6 +229,10 @@ async function tick(): Promise<void> {
         ),
         and(
           eq(schema.agentRuns.status, "failed"),
+          sql`${schema.agentRuns.steps} @> '[{"status":"running"}]'::jsonb`,
+        ),
+        and(
+          eq(schema.agentRuns.status, "waiting"),
           sql`${schema.agentRuns.steps} @> '[{"status":"running"}]'::jsonb`,
         ),
       ),
@@ -729,11 +734,28 @@ async function failRun(run: RunRow, steps: AgentStep[], idx: number, msg: string
   step.detail = msg;
   auditAgentStep(run, step, idx, false, msg); // 失敗也入審計（可追溯代理在哪一步、為何停）
   markRestStopped(steps, idx);
-  if (run.status === "running") {
-    await saveRun(run.id, { steps, status: "failed", error: `步驟「${step.note}」失敗：${msg}` });
+  const error = `步驟「${step.note}」失敗：${msg}`;
+  if (run.status === "running" || run.status === "waiting") {
+    await saveRun(run.id, { steps, status: "failed", error });
+    // 記憶體狀態必須同步：同 tick 後續邏輯（並行送出、DAG 進度）不可仍把 run 當 running
+    run.status = "failed";
+    run.error = error;
   } else {
     await saveRun(run.id, { steps });
   }
+}
+
+/** 同 sceneNo 是否已有 in-flight 生成（防並行寫入同一鏡互相覆蓋） */
+function hasInFlightSameScene(steps: AgentStep[], idx: number, sceneNo: number | null | undefined): boolean {
+  if (sceneNo == null) return false;
+  return steps.some(
+    (s, i) =>
+      i !== idx &&
+      s.status === "running" &&
+      !!s.generationId &&
+      s.sceneNo != null &&
+      s.sceneNo === sceneNo,
+  );
 }
 
 /**
@@ -763,6 +785,8 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
     const step = steps[idx]!;
     if (step.kind !== "generate") continue;
     if (step.generationId) continue;
+    // 同 sceneNo 已有 in-flight：跳過本支，留給 settle 完成後再送，避免並行覆寫同一鏡
+    if (hasInFlightSameScene(steps, idx, step.sceneNo)) continue;
 
     const model = resolveModel(step.modelId ?? "");
     if (!model || !modelIsOperationallyReady(model)) {
@@ -812,6 +836,16 @@ async function startParallelGenerateBranches(run: RunRow, steps: AgentStep[]): P
     step.status = "running";
     step.generationId = randomUUID();
     await saveRun(run.id, { steps, currentStep: idx });
+
+    // 寫入 generationId 後、送出前再查：stop 競態窗口內若已停，清幽靈佔位並退出
+    {
+      const [recheck] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
+      if (!recheck || recheck.status !== "running") {
+        clearGhostGenerationId(step, "已停止，取消送出");
+        await saveRun(run.id, { steps });
+        return;
+      }
+    }
 
     await recordAgentEventSafely({
       runId: run.id,
@@ -1515,11 +1549,34 @@ async function advanceRun(run: RunRow): Promise<void> {
   const [fresh] = await db.select().from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
   if (!fresh || fresh.status !== "running") return;
 
+  // H1：序列 generate／voiceover 也守 MAX_PARALLEL_GEN_STARTS（並行支線已滿時只心跳，勿再送第 4 筆）
+  if (
+    !step.generationId &&
+    listInFlightGenerationSteps(steps).length >= MAX_PARALLEL_GEN_STARTS
+  ) {
+    await saveRun(run.id, { steps }); // 心跳：避免被誤判陳屍
+    return;
+  }
+  // M3：同 sceneNo 已有 in-flight 時延後本步（防並行覆寫同一鏡）
+  if (!step.generationId && hasInFlightSameScene(steps, idx, step.sceneNo)) {
+    await saveRun(run.id, { steps });
+    return;
+  }
+
   // 冪等佔位：先產 id、寫回 run 落庫，再送出——程序在送出後死亡也不會重複扣點
   if (!step.generationId) {
     step.status = "running";
     step.generationId = randomUUID();
     await saveRun(run.id, { steps, currentStep: idx });
+  }
+  // M1：佔位寫入後、送出前再查——stop 競態窗口內清幽靈並退出
+  {
+    const [recheck] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
+    if (!recheck || recheck.status !== "running") {
+      clearGhostGenerationId(step, "已停止，取消送出");
+      await saveRun(run.id, { steps });
+      return;
+    }
   }
   try {
     // TD-02：代理生成走 Command（成本門檻／狀態機／ACL 與直呼一致）
@@ -1578,17 +1635,41 @@ async function settleGeneration(run: RunRow, steps: AgentStep[], idx: number, st
     step.detail = msg;
     auditAgentStep(run, step, idx, false, msg);
     markRestStopped(steps, idx);
-    if (run.status === "running") {
-      await saveRun(run.id, { steps, status: "failed", error: `步驟「${step.note}」失敗：${msg}` });
+    const error = `步驟「${step.note}」失敗：${msg}`;
+    if (run.status === "running" || run.status === "waiting") {
+      await saveRun(run.id, { steps, status: "failed", error });
+      run.status = "failed";
+      run.error = error;
     } else {
       await saveRun(run.id, { steps });
     }
     return;
   }
-  // 超額生成等組長核准：把狀態寫進 detail 讓前端看得懂為什麼停著（只在變化時寫，避免每輪空寫）
-  if (gen.status === "awaiting_approval" && step.detail !== "等組長核准超額生成中…") {
-    step.detail = "等組長核准超額生成中…";
-    await saveRun(run.id, { steps });
+  // 超額生成等組長核准：寫 detail、把 run 切 waiting（與人類等待同口徑，避免永遠標 running）
+  // 逾 24h 未裁決則 failRun，釋放 per-user 代理併發鎖與陳屍風險（B13）
+  if (gen.status === "awaiting_approval") {
+    const AWAITING_APPROVAL_MAX_MS = 24 * 60 * 60 * 1000;
+    if (Date.now() - new Date(gen.createdAt).getTime() > AWAITING_APPROVAL_MAX_MS) {
+      return failRun(run, steps, idx, "超額生成逾 24 小時未核准，代理已停止——請重新規劃或請組長先裁決待核生成");
+    }
+    const detail = "等組長核准超額生成中…";
+    const needDetail = step.detail !== detail;
+    const needWait = run.status === "running";
+    if (needDetail) step.detail = detail;
+    if (needWait || needDetail) {
+      if (needWait) {
+        run.status = "waiting";
+        await saveRun(run.id, { steps, status: "waiting" });
+      } else {
+        await saveRun(run.id, { steps });
+      }
+    }
+    return;
+  }
+  // 核准後生成開始跑：若先前因超額核准切到 waiting，恢復 running
+  if ((gen.status === "queued" || gen.status === "running") && run.status === "waiting") {
+    run.status = "running";
+    await saveRun(run.id, { steps, status: "running" });
     return;
   }
   // queued/running：這輪不動，下輪再看

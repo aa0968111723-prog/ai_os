@@ -414,14 +414,22 @@ function KnowledgeRow({
   // 全文抓回來後填入編輯框（只填一次，且只填「沒有草稿」的欄位——上次改到一半的字比舊值優先）。
   const seededRef = useRef(false);
   useEffect(() => {
-    if (editing && full.data && !seededRef.current) {
+    if (!editing || seededRef.current) return;
+    if (full.data) {
       seededRef.current = true;
       if (!editTitle) setEditTitle(full.data.title);
       if (!editContent) setEditContent(full.data.content);
+      return;
     }
-    // editTitle/editContent 刻意不入依賴：只在全文剛到時播種一次
+    // C8：全文載入失敗時不得永久卡 Save——以清單摘要／標題兜底，允許使用者改標題或重試
+    if (full.isError) {
+      seededRef.current = true;
+      if (!editTitle) setEditTitle(k.title);
+      if (!editContent) setEditContent(k.excerpt ?? "");
+    }
+    // editTitle/editContent 刻意不入依賴：只在全文剛到／失敗時播種一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, full.data]);
+  }, [editing, full.data, full.isError]);
 
   const openEdit = () => {
     seededRef.current = false;
@@ -485,7 +493,24 @@ function KnowledgeRow({
             </button>
           </div>
           {(update.error || full.error) && (
-            <p className="error">{update.error?.message ?? full.error?.message}</p>
+            <p className="error" role="alert">
+              {update.error?.message ?? full.error?.message}
+              {full.isError && (
+                <>
+                  {" "}
+                  <button
+                    type="button"
+                    style={{ padding: "2px 8px", fontSize: "var(--fs-12)" }}
+                    onClick={() => {
+                      seededRef.current = false;
+                      void full.refetch();
+                    }}
+                  >
+                    重試載入全文
+                  </button>
+                </>
+              )}
+            </p>
           )}
           {/* 長文版本歷史（#29）：編輯這筆時可展開檢視／還原歷次「更新前」的舊版全文 */}
           <VersionHistory knowledgeId={k.id} projectId={projectId} />

@@ -276,12 +276,28 @@ export function GenerationList({
     const role = me.data?.groups.find((g) => g.groupId === groupId)?.role;
     return role != null && role !== "member";
   };
+  // Phase B：完成列一鍵發布到全站靈感頻道（對齊 PromptLibrary）
+  const publish = trpc.community.publishFromSource.useMutation({
+    onSuccess: () => utils.community.invalidate(),
+  });
+  const [publishState, setPublishState] = useState<{ id: string; ok: boolean; msg?: string } | null>(null);
+  const flashPublish = (id: string, ok: boolean, msg?: string) => {
+    setPublishState({ id, ok, msg });
+    setTimeout(() => setPublishState((s) => (s && s.id === id ? null : s)), 2000);
+  };
   // 裁決成本審核（核准→開始生成並扣點；駁回→終局）：成功後刷新生成列表與點數
   const decideCost = trpc.generation.decideCost.useMutation({
     onSuccess: () => {
       utils.generation.listByProject.invalidate({ projectId });
       utils.generation.listByProjectPaged.invalidate({ projectId });
       utils.quota.my.invalidate();
+    },
+  });
+  // 提交者取消自己的待核（未扣點）
+  const cancelAwaiting = trpc.generation.cancelAwaiting.useMutation({
+    onSuccess: () => {
+      utils.generation.listByProject.invalidate({ projectId });
+      utils.generation.listByProjectPaged.invalidate({ projectId });
     },
   });
   // 把某筆成品設為其綁定分鏡的現用畫面（音訊生成則設為旁白）：成功後刷新分鏡列表
@@ -670,6 +686,20 @@ export function GenerationList({
                 </ConfirmButton>
               </>
             )}
+            {/* 提交者可取消自己的待核（未扣點）；組長已有駁回鈕時不必再畫 */}
+            {g.status === "awaiting_approval" &&
+              me.data?.user?.id === g.userId &&
+              !canDecide(g.groupId) && (
+                <ConfirmButton
+                  triggerStyle={{ padding: "4px 12px", fontSize: 12, color: "var(--danger-ink)" }}
+                  disabled={cancelAwaiting.isPending}
+                  message="取消這筆待核生成？尚未扣點，取消後不會送出。"
+                  confirmLabel="取消待核"
+                  onConfirm={() => cancelAwaiting.mutate({ id: g.id })}
+                >
+                  取消待核
+                </ConfirmButton>
+              )}
             {g.status === "failed" && canEdit && (
               <ConfirmButton
                 triggerStyle={{ padding: "4px 12px", fontSize: 12 }}
@@ -700,9 +730,35 @@ export function GenerationList({
                 再用此設定
               </button>
             )}
+            {/* 靈感頻道：完成列發布（sourceType=generation） */}
+            {canEdit && g.status === "done" && (
+              <button
+                style={{ padding: "4px 12px", fontSize: 12 }}
+                title="發布到全站靈感頻道（Show Prompt + 一鍵再用）"
+                disabled={publish.isPending}
+                onClick={() => {
+                  publish.mutate(
+                    { sourceType: "generation", sourceId: g.id },
+                    {
+                      onSuccess: () => flashPublish(g.id, true),
+                      onError: (e) => flashPublish(g.id, false, e.message),
+                    },
+                  );
+                }}
+              >
+                {publishState?.id === g.id
+                  ? publishState.ok
+                    ? "已發布 ✓"
+                    : "發布失敗"
+                  : "發布"}
+              </button>
+            )}
           </div>
         </div>
       ))}
+      {publishState && !publishState.ok && publishState.msg && (
+        <p className="error" style={{ fontSize: 12 }}>{publishState.msg}</p>
+      )}
       {browsing
         ? paged.hasNextPage && (
             <div style={{ textAlign: "center", marginTop: 12 }}>

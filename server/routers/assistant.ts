@@ -122,13 +122,13 @@ const STATUS_LABEL: Record<string, string> = {
 
 /** LLM 提議的動作：一律以「代號」指涉（分鏡編號 sceneNo／註冊表 modelId／預設集 presetId），避免讓 LLM 直接吐 UUID（會幻覺） */
 const proposalSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("generate"), prompt: z.string().min(1).max(2000), sceneNo: z.number().int().positive().optional(), modelId: z.string().optional() }),
+  z.object({ type: z.literal("generate"), prompt: z.string().trim().min(1).max(2000), sceneNo: z.number().int().positive().optional(), modelId: z.string().optional() }),
   z.object({ type: z.literal("update_scene"), sceneNo: z.number().int().positive(), field: z.enum(["title", "voiceover", "durationSec"]), value: z.string().min(1).max(500) }),
   z.object({ type: z.literal("submit_approval"), sceneNo: z.number().int().positive() }),
   // durationSec 不強制整數：LLM 偶爾會回 4.5 這種值，整筆回覆因此解析失敗太傷——落地時再取整
   // prompt＝建議畫面提示詞（發想落地：導演式 idea 直接存成可就地生成的草稿分鏡）
   z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional(), prompt: z.string().max(2000).optional() }),
-  z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().min(1).max(2000) }),
+  z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().trim().min(1).max(2000) }),
   // split_script 的 script＝腳本全文（要求 LLM 從使用者訊息原樣抄錄）；下限 20 擋「拆一句話」的誤提議，上限 8000 收斂成本
   z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
   // plan_agent：把多步驟目標交給 AI 代理排計畫（goal 與 agents.plan 同限 5–1000）；確認後也只排計畫（站內 0 點），執行另核准
@@ -201,11 +201,11 @@ type ResolvedAction =
 
 /** runAction 輸入：前端把已確認的動作原樣送回（型別與 ResolvedAction 對齊） */
 const actionInputSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("generate"), prompt: z.string().min(1).max(2000), modelId: z.string(), sceneId: z.string().uuid().optional() }),
+  z.object({ type: z.literal("generate"), prompt: z.string().trim().min(1).max(2000), modelId: z.string(), sceneId: z.string().uuid().optional() }),
   z.object({ type: z.literal("update_scene"), sceneId: z.string().uuid(), field: z.enum(["title", "voiceover", "durationSec"]), value: z.string().min(1).max(500) }),
   z.object({ type: z.literal("submit_approval"), sceneId: z.string().uuid() }),
   z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional(), prompt: z.string().max(2000).optional() }),
-  z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().min(1).max(2000) }),
+  z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().trim().min(1).max(2000) }),
   z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
   z.object({
     type: z.literal("plan_agent"),

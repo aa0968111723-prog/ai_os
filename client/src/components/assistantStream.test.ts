@@ -267,4 +267,25 @@ describe("requestAssistantStream", () => {
     expect(handled).toBe(true);
     expect(onError).toHaveBeenCalledWith("AI 助手暫時沒回應，請稍後再試");
   });
+
+  it("does not allow one-shot fallback after stream already emitted steps (no terminal done)", async () => {
+    const stream = readerResponse([
+      encoder.encode('event: step\ndata: {"phase":"lookup","text":"查詢中"}\n\n'),
+      // stream ends without done/error
+    ]);
+    const onError = vi.fn();
+    const onStep = vi.fn();
+    const handled = await requestAssistantStream({
+      projectId: "project-1",
+      message: "test",
+      nonce: "nonce-1",
+      signal: new AbortController().signal,
+      handlers: handlers({ onError, onStep }),
+      fetchImpl: vi.fn(async () => stream.response),
+    });
+    // 已接手：禁止 tRPC 重跑；改以錯誤提示
+    expect(handled).toBe(true);
+    expect(onStep).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("不會自動重跑"));
+  });
 });

@@ -14,11 +14,21 @@ import { reserveQuota, refund } from "./points";
 const STT_MODEL_ID = "fal-ai/wizper"; // 便宜快速、中文可用;逐字稿只求「看得懂/可搜尋」,非交付級
 const POLL_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 3_000;
+/** 逾時後保留 job 再開一輪輪詢的最長總時（含首次 120s）；逾此才真失敗退點 */
+const MAX_JOB_WALL_MS = 10 * 60_000;
 
 // 處理中認領（單容器部署，程序內 Set 即足夠，比照 generationRunner 的 inflight 防重）：
 // 一筆轉錄可能耗時 >60s（輪詢逾時 120s），期間該列仍是 pending，下一個掃描 tick 會再撈到同一列，
 // 若不認領就會被重複送 fal＋重複扣點。認領在 sweep 內「同步」加入（任何 await 之前），確保跨 tick 不交錯。
 const inflight = new Set<string>();
+/**
+ * 已送出但本輪輪詢逾時的 fal requestId：列維持 running、不退點，
+ * 下輪繼續 poll（供應商可能仍完成）。程序重啟後 Map 清空，交 15 分陳屍退點。
+ */
+const openJobs = new Map<
+  string,
+  { requestId: string; cost: number; endpoint: string; startedAt: number; userId: string; groupId: string }
+>();
 
 /** 掃一批待轉錄的語音留言並補逐字稿;回傳完成筆數。失敗只標記 failed，不擋其他。 */
 const STALE_RUNNING_MS = 15 * 60 * 1000; // running 陳屍門檻：正常全程 <3 分，逾此即崩潰孤兒
@@ -78,30 +88,102 @@ export async function sweepVoiceTranscripts(limit = 5): Promise<number> {
     .from(schema.messages)
     .where(and(eq(schema.messages.voiceStatus, "pending"), eq(schema.messages.refType, "asset")))
     .limit(limit);
-  if (rows.length === 0) return 0;
   const model = getModel(STT_MODEL_ID);
   if (!model) return 0;
 
+  // 續跑：本程序尚有 openJobs 的 running 列（先前輪詢逾時未退點）
+  const resumeIds = [...openJobs.keys()].filter((id) => !inflight.has(id)).slice(0, limit);
+  const resumeRows =
+    resumeIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(schema.messages)
+          .where(
+            and(
+              inArray(schema.messages.id, resumeIds),
+              eq(schema.messages.voiceStatus, "running"),
+              eq(schema.messages.refType, "asset"),
+            ),
+          );
+
   // 只處理尚未被前一個 tick 認領的列；認領同步完成，避免重複扣點。
   const claimable = rows.filter((m) => !inflight.has(m.id));
-  if (claimable.length === 0) return 0;
-  for (const m of claimable) inflight.add(m.id);
+  const work = [...resumeRows, ...claimable].slice(0, limit);
+  if (work.length === 0) return 0;
+  for (const m of work) inflight.add(m.id);
 
   const results = await Promise.allSettled(
-    claimable.map((m) => transcribeOne(m).finally(() => inflight.delete(m.id))),
+    work.map((m) => transcribeOne(m).finally(() => inflight.delete(m.id))),
   );
   return results.filter((r) => r.status === "fulfilled" && r.value).length;
 }
 
+async function pollUntilDone(
+  endpoint: string,
+  requestId: string,
+  budgetMs: number,
+): Promise<{ status: "done"; text: string } | { status: "failed"; error: string } | { status: "timeout" }> {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    const st = await falStatus(endpoint, "text", requestId);
+    if (st.status === "done") {
+      return { status: "done", text: (st.resultText ?? "").trim() || "（沒有聽出內容）" };
+    }
+    if (st.status === "failed") {
+      return { status: "failed", error: st.error ?? "轉錄失敗" };
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  return { status: "timeout" };
+}
+
 async function transcribeOne(msg: typeof schema.messages.$inferSelect): Promise<boolean> {
   if (!msg.refId) return false;
+  const model = getModel(STT_MODEL_ID)!;
+  const cost = model.points ?? 1;
+  const endpoint = model.endpoint ?? model.id;
+
+  // 續跑既有 fal job：不重扣點、不重送
+  const open = openJobs.get(msg.id);
+  if (open && msg.voiceStatus === "running") {
+    const elapsed = Date.now() - open.startedAt;
+    if (elapsed > MAX_JOB_WALL_MS) {
+      openJobs.delete(msg.id);
+      if (!billingBypassed()) {
+        await refund(open.userId, open.groupId, open.cost, "語音逐字稿失敗退回", msg.id);
+      }
+      await markFailed(msg.id, "轉錄逾時");
+      return false;
+    }
+    const remaining = Math.max(POLL_INTERVAL_MS, MAX_JOB_WALL_MS - elapsed);
+    const polled = await pollUntilDone(open.endpoint, open.requestId, Math.min(POLL_TIMEOUT_MS, remaining));
+    if (polled.status === "done") {
+      openJobs.delete(msg.id);
+      await db
+        .update(schema.messages)
+        .set({ body: polled.text.slice(0, 2000), voiceStatus: "done" })
+        .where(eq(schema.messages.id, msg.id));
+      return true;
+    }
+    if (polled.status === "failed") {
+      openJobs.delete(msg.id);
+      if (!billingBypassed()) {
+        await refund(open.userId, open.groupId, open.cost, "語音逐字稿失敗退回", msg.id);
+      }
+      await markFailed(msg.id, polled.error);
+      return false;
+    }
+    // 仍 timeout：保留 openJobs、維持 running，下輪再試
+    console.warn(`[voice] 轉錄仍在進行，下輪續輪詢：msg=${msg.id}`);
+    return false;
+  }
+
   const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, msg.refId));
   if (!asset) {
     await markFailed(msg.id, "找不到語音檔");
     return false;
   }
-  const model = getModel(STT_MODEL_ID)!;
-  const cost = model.points ?? 1;
   // 崩潰安全的原子認領（CAS）：把 pending→running「先於扣點」落庫，且只有這一列還是 pending 才成立。
   // 沒這道 CAS 時，程序在扣點後、寫 done/failed 前崩潰，重啟後記憶體 inflight 已清空、該列仍是 pending，
   // 下一輪掃描會重撿並「再扣一次」，首次扣點永不退回（退點的 catch 因程序已死不執行）＝孤兒＋雙重扣款。
@@ -131,26 +213,36 @@ async function transcribeOne(msg: typeof schema.messages.$inferSelect): Promise<
     }
   }
   try {
-    const sourceUrl = signAssetUrl(asset.id, POLL_TIMEOUT_MS / 1000 + 60);
+    const sourceUrl = signAssetUrl(asset.id, MAX_JOB_WALL_MS / 1000 + 60);
     // STT 模型的 input 只用 sourceUrl（format 對它無意義）；型別上仍需給一個合法 format 值
     const input = model.input("", "16:9", sourceUrl) as Record<string, unknown>;
-    const { requestId } = await falSubmit(model.endpoint ?? model.id, "text", input);
-    const deadline = Date.now() + POLL_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const st = await falStatus(model.endpoint ?? model.id, "text", requestId);
-      if (st.status === "done") {
-        const text = (st.resultText ?? "").trim() || "（沒有聽出內容）";
-        await db
-          .update(schema.messages)
-          .set({ body: text.slice(0, 2000), voiceStatus: "done" })
-          .where(eq(schema.messages.id, msg.id));
-        return true;
-      }
-      if (st.status === "failed") throw new Error(st.error ?? "轉錄失敗");
-      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    const { requestId } = await falSubmit(endpoint, "text", input);
+    openJobs.set(msg.id, {
+      requestId,
+      cost,
+      endpoint,
+      startedAt: Date.now(),
+      userId: msg.userId,
+      groupId: msg.groupId,
+    });
+    const polled = await pollUntilDone(endpoint, requestId, POLL_TIMEOUT_MS);
+    if (polled.status === "done") {
+      openJobs.delete(msg.id);
+      await db
+        .update(schema.messages)
+        .set({ body: polled.text.slice(0, 2000), voiceStatus: "done" })
+        .where(eq(schema.messages.id, msg.id));
+      return true;
     }
-    throw new Error("轉錄逾時");
+    if (polled.status === "failed") {
+      openJobs.delete(msg.id);
+      throw new Error(polled.error);
+    }
+    // 本輪逾時：不退點、不標 failed——供應商可能仍在跑，下 tick 續 poll
+    console.warn(`[voice] 本輪輪詢逾時，保留 job 下輪續跑：msg=${msg.id}`);
+    return false;
   } catch (err) {
+    openJobs.delete(msg.id);
     if (!billingBypassed()) await refund(msg.userId, msg.groupId, cost, "語音逐字稿失敗退回", msg.id); // 帶 msg.id：冪等、與陳屍回收不重複退
     await markFailed(msg.id, err instanceof Error ? err.message : String(err));
     return false;

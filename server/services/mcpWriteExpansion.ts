@@ -383,6 +383,19 @@ export async function runMcpWriteExpansion(
     const kind = (["transcript", "testimony", "script", "note"].includes(String(args.kind))
       ? String(args.kind)
       : "note") as "transcript" | "testimony" | "script" | "note";
+    let sourceAssetId: string | null = null;
+    if (typeof args.sourceAssetId === "string" && args.sourceAssetId.trim()) {
+      const sid = args.sourceAssetId.trim();
+      const [srcAsset] = await db
+        .select()
+        .from(schema.assets)
+        .where(and(eq(schema.assets.id, sid), isNull(schema.assets.deletedAt)));
+      if (!srcAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到來源素材或已刪除" });
+      if (srcAsset.groupId !== project.groupId) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "來源素材不屬於此專案的組" });
+      }
+      sourceAssetId = sid;
+    }
     const [row] = await db
       .insert(schema.knowledge)
       .values({
@@ -391,7 +404,7 @@ export async function runMcpWriteExpansion(
         kind,
         title: title.slice(0, 120),
         content,
-        sourceAssetId: typeof args.sourceAssetId === "string" ? args.sourceAssetId : null,
+        sourceAssetId,
         createdBy: auth.user.id,
       })
       .returning();

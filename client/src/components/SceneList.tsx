@@ -266,6 +266,7 @@ function SceneRow({
   const insertAfter = trpc.scenes.insertAfter.useMutation({ onSuccess: () => invalidate() });
 
   const isGenerating = s.pendingGenStatus === "queued" || s.pendingGenStatus === "running";
+  const isAwaitingApproval = s.pendingGenStatus === "awaiting_approval";
   // 配音生成中：後端背景 runner 完成後會回填旁白音檔，10 秒輪詢自動刷新
   const isVoicing = s.pendingVoiceStatus === "queued" || s.pendingVoiceStatus === "running";
   const hasVoiceover = (s.voiceover ?? "").trim() !== "";
@@ -334,6 +335,7 @@ function SceneRow({
             {SCENE_STATUS[s.status]?.label ?? s.status}
           </Pill>
           {isGenerating && <Pill status="running">生成中…</Pill>}
+          {isAwaitingApproval && <Pill status="queued">待核准…</Pill>}
           {/* 旁白狀態一眼可見（編輯入口在單格工作室・配音） */}
           {isVoicing ? (
             <Meta style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
@@ -385,6 +387,8 @@ function SceneRow({
           {canEdit && (
             isGenerating || generate.isPending ? (
               <Button size="sm" variant="primary" disabled>生成中…</Button>
+            ) : isAwaitingApproval ? (
+              <Button size="sm" variant="primary" disabled>待核准…</Button>
             ) : !s.assetId ? (
               hasPrompt ? (
                 <>

@@ -184,4 +184,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0034_note_comments": [
     "d2554f1ce2f5d4ab89cc31291ba7b0dc88b2fe5978524945945cacd995bc55a9",
   ],
+  "0035_community_likes": [
+    "0e67b32f2c9fdaa5d3ae9b77575686a532b4f7788090f775a8aef6ec6ad2ff96",
+  ],
 };

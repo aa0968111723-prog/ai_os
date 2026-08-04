@@ -111,9 +111,12 @@ export async function handleRequestUploadGrant(
   if (args.sourceAssetId != null && String(args.sourceAssetId).trim()) {
     const sid = String(args.sourceAssetId).trim();
     if (!looksLikeUuid(sid)) throw new TRPCError({ code: "BAD_REQUEST", message: "來源素材 id 無效" });
-    const [src] = await db.select().from(schema.assets).where(eq(schema.assets.id, sid));
+    const [src] = await db
+      .select()
+      .from(schema.assets)
+      .where(and(eq(schema.assets.id, sid), isNull(schema.assets.deletedAt)));
     if (!src || src.projectId !== project.id) {
-      throw new TRPCError({ code: "BAD_REQUEST", message: "來源素材不在此專案" });
+      throw new TRPCError({ code: "BAD_REQUEST", message: "來源素材不在此專案或已刪除" });
     }
     sourceAssetId = sid;
   }

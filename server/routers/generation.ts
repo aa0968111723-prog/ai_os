@@ -44,6 +44,8 @@ export { effectivePrompt, withCharacterAnchor, withSceneAnchor } from "../servic
 
 /** 陳屍清掃門檻：queued/running 停滯超過 30 分鐘視為孤兒（正常影片生成也遠短於此） */
 const STALE_GENERATION_MS = 30 * 60 * 1000;
+/** 硬性生命週期（與 generationRunner B12 同口徑）：createdAt 逾 6h 即使心跳仍在也回收 */
+const HARD_LIFETIME_MS = 6 * 60 * 60 * 1000;
 
 /**
  * 請求路徑清掃節流（per-project，行程記憶體）：generationRunner 已在背景每 ~60 秒全域掃一遍
@@ -66,6 +68,7 @@ async function sweepStaleGenerations(projectId: string): Promise<void> {
   if (now - (lastSweptAt.get(projectId) ?? 0) < SWEEP_THROTTLE_MS) return;
   lastSweptAt.set(projectId, now);
   const cutoff = new Date(now - STALE_GENERATION_MS);
+  const hardCutoff = new Date(now - HARD_LIFETIME_MS);
   const staleRows = await db
     .select()
     .from(schema.generations)
@@ -73,10 +76,14 @@ async function sweepStaleGenerations(projectId: string): Promise<void> {
       and(
         eq(schema.generations.projectId, projectId),
         inArray(schema.generations.status, ["queued", "running"]),
-        lt(schema.generations.updatedAt, cutoff),
+        or(
+          lt(schema.generations.updatedAt, cutoff),
+          lt(schema.generations.createdAt, hardCutoff),
+        ),
       ),
     );
   for (const gen of staleRows) {
+    const hardExpired = gen.createdAt.getTime() < hardCutoff.getTime();
     // 修 R6-MONEY-02：先讓 advanceGeneration 收斂——重佈後 fal 其實可能已完成，直接退點會把成品丟棄。
     try {
       await advanceGeneration(gen.id);
@@ -85,7 +92,13 @@ async function sweepStaleGenerations(projectId: string): Promise<void> {
     }
     // 原子＋冪等收斂：CAS→failed 與「依帳本淨額退點」同一交易（負淨額＝有扣過才退；0＝從未扣點不退，
     // 免對沒扣過的列憑空加點灌鬆總預算閘）。已被 advanceGeneration 推進成終局者，CAS 自動 no-op。細節見 points.ts。
-    await failStaleGenerationTx(gen.id, "生成停滯逾 30 分鐘，系統自動回收", "生成停滯自動回收退回");
+    await failStaleGenerationTx(
+      gen.id,
+      hardExpired
+        ? "生成超過最長時限（6 小時），系統自動回收"
+        : "生成停滯逾 30 分鐘，系統自動回收",
+      hardExpired ? "生成逾時自動回收退回" : "生成停滯自動回收退回",
+    );
   }
 }
 
@@ -94,7 +107,7 @@ export const generationRouter = router({
     .input(z.object({
       projectId: z.string().uuid(),
       modelId: z.string(),
-      prompt: z.string().min(1).max(MAX_PROMPT_CHARS),
+      prompt: z.string().trim().min(1).max(MAX_PROMPT_CHARS),
       sourceUrl: publicHttpsUrl.optional(),
       sourceAssetId: z.string().uuid().optional(),
       secondarySourceUrl: publicHttpsUrl.optional(),
@@ -159,7 +172,7 @@ export const generationRouter = router({
         projectId: z.string().uuid(),
         modelId: z.string(),
         // 與 prompts.save 同口徑（MAX_PROMPT_CHARS）——生成成功的咒語必能自動入庫
-        prompt: z.string().min(1, "請填提示詞").max(MAX_PROMPT_CHARS, `提示詞過長（上限 ${MAX_PROMPT_CHARS} 字）`),
+        prompt: z.string().trim().min(1, "請填提示詞").max(MAX_PROMPT_CHARS, `提示詞過長（上限 ${MAX_PROMPT_CHARS} 字）`),
         /** 來源輸入(圖生圖底圖/音訊/影片/訓練 zip 的網址;外部 URL) */
         sourceUrl: publicHttpsUrl.optional(),
         /** 素材庫來源(優先)：伺服器換成簽名短效網址,fal 才抓得到、外人不可偽造 */
@@ -242,7 +255,7 @@ export const generationRouter = router({
     .input(z.object({
       projectId: z.string().uuid(),
       modelId: z.string(),
-      prompt: z.string().min(1, "請填提示詞").max(MAX_PROMPT_CHARS),
+      prompt: z.string().trim().min(1, "請填提示詞").max(MAX_PROMPT_CHARS),
       sourceUrl: publicHttpsUrl.optional(),
       sourceAssetId: z.string().uuid().optional(),
       secondarySourceUrl: publicHttpsUrl.optional(),
@@ -549,6 +562,31 @@ export const generationRouter = router({
     }),
 
   /**
+   * 提交者取消自己的超額待核（未扣點）：CAS awaiting_approval → rejected。
+   * 組長駁回仍走 decideCost；24h 自動取消見 generationRunner.sweepExpiredAwaitingApproval。
+   */
+  cancelAwaiting: authedProcedure
+    .input(z.object({ id: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const [gen] = await db.select().from(schema.generations).where(eq(schema.generations.id, input.id));
+      if (!gen) throw new TRPCError({ code: "NOT_FOUND" });
+      requireGroup(ctx.auth, gen.groupId);
+      if (gen.userId !== ctx.auth.user.id) {
+        throw new TRPCError({ code: "FORBIDDEN", message: "只能取消自己送出的待核生成" });
+      }
+      if (gen.status !== "awaiting_approval") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "這筆生成已不在待核狀態" });
+      }
+      const [updated] = await db
+        .update(schema.generations)
+        .set({ status: "rejected", error: "提交者取消待核", updatedAt: new Date() })
+        .where(and(eq(schema.generations.id, gen.id), eq(schema.generations.status, "awaiting_approval")))
+        .returning();
+      if (!updated) throw new TRPCError({ code: "BAD_REQUEST", message: "這筆生成已被其他人處理" });
+      return updated;
+    }),
+
+  /**
    * 成本審核裁決（需求 2.1）：組長對 awaiting_approval 的生成核准或駁回。
    * 核准＝CAS 認領 → 扣點（mock 模式跳過，與 submit 同一原則）→ 送 fal（失敗退點標 failed）。
    * 駁回＝CAS 標 rejected（從未扣點，不需退點）。CAS 防兩位組長同時裁決造成雙扣/雙送。
@@ -711,7 +749,7 @@ export const generationRouter = router({
   submitCloudMock: authedProcedure
     .input(
       z.object({
-        prompt: z.string().min(1, "請填提示詞").max(8000, "提示詞過長（上限 8000 字）"),
+        prompt: z.string().trim().min(1, "請填提示詞").max(8000, "提示詞過長（上限 8000 字）"),
         /** 預設 cloud-mock/concept-image；僅接受 cloud-mock/ 前綴 */
         modelId: z.string().min(1).max(200).optional(),
         projectId: z.string().uuid().optional(),

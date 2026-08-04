@@ -45,6 +45,8 @@ type PostRow = {
   sourceType: string;
   useCount: number;
   likeCount: number;
+  /** Phase D：目前使用者是否已按讚（listPublic／get 回傳） */
+  likedByMe?: boolean;
   publishedAt: string | Date;
   status?: string;
   characterIds?: string[] | null;
@@ -87,6 +89,15 @@ export function CommunityPage() {
   const unpublish = trpc.community.unpublish.useMutation({
     onSuccess: () => {
       utils.community.myPosts.invalidate();
+      utils.community.listPublic.invalidate();
+    },
+  });
+
+  // Phase D：讚／取消讚；樂觀更新 likeCount + likedByMe
+  const [likeFlash, setLikeFlash] = useState<Record<string, { liked: boolean; likeCount: number }>>({});
+  const toggleLike = trpc.community.toggleLike.useMutation({
+    onSuccess: (data, vars) => {
+      setLikeFlash((prev) => ({ ...prev, [vars.postId]: { liked: data.liked, likeCount: data.likeCount } }));
       utils.community.listPublic.invalidate();
     },
   });
@@ -281,7 +292,11 @@ export function CommunityPage() {
                     {[
                       post.modelId ? `模型 ${post.modelId}` : "",
                       post.useCount > 0 ? `再用 ${post.useCount}` : "",
-                      post.likeCount > 0 ? `讚 ${post.likeCount}` : "",
+                      (() => {
+                        const flash = likeFlash[post.id];
+                        const n = flash?.likeCount ?? post.likeCount;
+                        return n > 0 ? `讚 ${n}` : "";
+                      })(),
                       new Date(post.publishedAt).toLocaleDateString(),
                     ]
                       .filter(Boolean)
@@ -308,6 +323,30 @@ export function CommunityPage() {
                   )}
 
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                    {tab === "feed" && !isHidden && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        title={(likeFlash[post.id]?.liked ?? post.likedByMe) ? "取消讚" : "按讚"}
+                        disabled={toggleLike.isPending}
+                        onClick={() => toggleLike.mutate({ postId: post.id })}
+                        style={
+                          (likeFlash[post.id]?.liked ?? post.likedByMe)
+                            ? { color: "var(--gold-ink, #b8860b)", fontWeight: 600 }
+                            : undefined
+                        }
+                      >
+                        <Icon
+                          name="Star"
+                          size={13}
+                          style={{ verticalAlign: "-2px", marginRight: 4 }}
+                        />
+                        {(likeFlash[post.id]?.liked ?? post.likedByMe) ? "已讚" : "讚"}
+                        {((likeFlash[post.id]?.likeCount ?? post.likeCount) > 0) &&
+                          ` ${likeFlash[post.id]?.likeCount ?? post.likeCount}`}
+                      </Button>
+                    )}
                     {hasPrompt && (
                       <Button type="button" size="sm" variant="ghost" onClick={() => onShowPrompt(post.id)}>
                         {expanded ? "收起 Prompt" : "Show Prompt"}

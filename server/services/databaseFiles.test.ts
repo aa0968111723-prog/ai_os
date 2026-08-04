@@ -248,14 +248,24 @@ describe("refreshFile caller guards (databases router source)", () => {
     expect(refreshSource).toContain("expectsExport");
     expect(refreshSource).toContain('fetched.mime === "text/html"');
     expect(refreshSource).toContain("Google 回了登入頁");
-    // 拋錯發生在 db.update 之前（throw new Error，未 set textContent）
-    expect(refreshSource.indexOf("Google 回了登入頁")).toBeLessThan(refreshSource.indexOf("db.update"));
+    // 拋錯發生在寫入（updateDataFileSizeUnderQuota / 舊 db.update）之前，不得覆寫既有 textContent
+    const writeAt = Math.max(
+      refreshSource.indexOf("updateDataFileSizeUnderQuota"),
+      refreshSource.indexOf("db.update"),
+    );
+    expect(writeAt).toBeGreaterThan(0);
+    expect(refreshSource.indexOf("Google 回了登入頁")).toBeLessThan(writeAt);
   });
 
   it("throws on empty extracted HTML text with the same message as importUrl", () => {
     expect(refreshSource).toContain("這個網頁抓不到可讀文字（可能是純前端渲染的頁面）——試試該平台的匯出功能後上傳");
     expect(refreshSource).toMatch(/if \(!text\)[\s\S]*抓不到可讀文字/);
-    expect(refreshSource.indexOf("抓不到可讀文字")).toBeLessThan(refreshSource.indexOf("db.update"));
+    const writeAt = Math.max(
+      refreshSource.indexOf("updateDataFileSizeUnderQuota"),
+      refreshSource.indexOf("db.update"),
+    );
+    expect(writeAt).toBeGreaterThan(0);
+    expect(refreshSource.indexOf("抓不到可讀文字")).toBeLessThan(writeAt);
   });
 });
 

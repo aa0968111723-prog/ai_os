@@ -34,12 +34,34 @@ import {
 import { toCsv } from "../../shared/csv";
 import { buildIcs } from "../routers/schedule";
 import type { DataField, DataRowData } from "../../shared/databaseFields";
+import {
+  clearRateLimit,
+  inspectFailureRateLimit,
+  RATE_LIMIT_POLICIES,
+  RATE_LIMIT_SCOPES,
+  RateLimitConfigurationError,
+  RateLimitUnavailableError,
+  recordRateLimitFailure,
+} from "./rateLimit";
+
+type Requester = { auth: AuthState; viaToken: boolean; readOnly: boolean };
+
+function restClientIp(req: Request): string {
+  // index.ts 已設 trust proxy=1，req.ip 即真實 client IP（與 MCP 同口徑）
+  return req.ip ?? req.socket.remoteAddress ?? "unknown";
+}
 
 /**
  * 解析請求身分：優先個人 MCP 金鑰（x-api-key 標頭或 ?key= 查詢字串），再退回 session cookie。
  * viaToken=true 表示「AI／程式介面」——授權時套 agentAccess 收斂（金鑰不該比網頁看到更多）。
+ *
+ * 金鑰失敗限流與 MCP 共用 mcp:ip／mcpFailures：連續猜錯 10 次／分 → 封鎖 5 分（429）。
+ * 成功驗證清掉該 IP 失敗視窗。
  */
-async function resolveRequester(req: Request): Promise<{ auth: AuthState; viaToken: boolean; readOnly: boolean } | null> {
+async function resolveRequester(
+  req: Request,
+  res: Response,
+): Promise<Requester | null> {
   const headerKey = req.headers["x-api-key"];
   // ?key= 只在 GET 放行：手機日曆訂閱（.ics）／CSV 匯出等唯讀端點無法帶自訂標頭，才需查詢字串金鑰。
   // 「寫入」端點（POST /rows）一律要走 x-api-key 標頭——否則具寫入權的個人金鑰會被寫進反代存取記錄／
@@ -48,22 +70,73 @@ async function resolveRequester(req: Request): Promise<{ auth: AuthState; viaTok
   const fromQuery = !headerKey && !!queryKey; // 純由 ?key= 帶入（非標頭）
   const provided = (typeof headerKey === "string" && headerKey) || queryKey;
   if (provided) {
+    const ip = restClientIp(req);
+    try {
+      const blocked = await inspectFailureRateLimit(
+        RATE_LIMIT_SCOPES.mcpIp,
+        ip,
+        RATE_LIMIT_POLICIES.mcpFailures,
+      );
+      if (blocked.blocked) {
+        res.setHeader("Retry-After", String(Math.max(1, Math.ceil(blocked.retryAfterMs / 1_000))));
+        res.status(429).json({ error: "API 金鑰連續失敗過多（每分鐘 10 次後封鎖 5 分鐘），請稍後再試" });
+        return null;
+      }
+    } catch (error) {
+      if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+        console.error(`[rest] PostgreSQL 限流不可用（拒絕請求）：${error.name}: ${error.message}`);
+        res.status(503).json({ error: "安全檢查暫時無法使用，請稍後再試" });
+        return null;
+      }
+      throw error;
+    }
     const identity = await resolveMcpIdentity(provided);
-    if (!identity) return null;
+    if (!identity) {
+      try {
+        await recordRateLimitFailure(
+          RATE_LIMIT_SCOPES.mcpIp,
+          ip,
+          RATE_LIMIT_POLICIES.mcpFailures,
+        );
+      } catch (error) {
+        if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+          console.error(`[rest] PostgreSQL 限流不可用（拒絕請求）：${error.name}: ${error.message}`);
+          res.status(503).json({ error: "安全檢查暫時無法使用，請稍後再試" });
+          return null;
+        }
+        throw error;
+      }
+      res.status(401).json({ error: "需要認證：帶 x-api-key（個人 MCP 金鑰）或先登入" });
+      return null;
+    }
+    try {
+      await clearRateLimit(RATE_LIMIT_SCOPES.mcpIp, ip);
+    } catch (error) {
+      if (error instanceof RateLimitUnavailableError || error instanceof RateLimitConfigurationError) {
+        console.error(`[rest] PostgreSQL 限流不可用（拒絕請求）：${error.name}: ${error.message}`);
+        res.status(503).json({ error: "安全檢查暫時無法使用，請稍後再試" });
+        return null;
+      }
+      throw error;
+    }
     // 經 ?key= 網址呈現的金鑰一律降為唯讀（緩解 query-key-not-readonly-scoped）：訂閱網址（.ics/.csv）會被
     // 日曆 App／反代存取記錄／瀏覽器歷史保存並反覆重送——即使金鑰本身可寫，從網址帶入時也只授予唯讀，
     // 確保 ?key= 這條路徑永遠碰不到寫入（現有訂閱／匯出端點皆為 GET 唯讀，故不影響功能）。
-    // 註：這無法阻止「金鑰外洩後被改用 x-api-key 標頭重放為寫入」——徹底根治需為訂閱／匯出另發「天生唯讀」
-    //     的作用域金鑰並在 UI 引導使用（後續 UX 工作），此處先做不破壞現況的縱深防禦。
     // readOnly 金鑰範圍必須一路帶到寫入端點——否則唯讀金鑰能繞過 MCP 的 scopeDeniedReason
     // 守衛，改走 REST POST /rows 寫入資料（MCP 擋、REST 卻放行的不一致提權）。
     return { auth: identity.auth, viaToken: true, readOnly: identity.scope.readOnly || fromQuery };
   }
   const auth = await resolveSession(req);
-  if (!auth) return null;
+  if (!auth) {
+    res.status(401).json({ error: "需要認證：帶 x-api-key（個人 MCP 金鑰）或先登入" });
+    return null;
+  }
   // 強制改密碼閘門（修 rest-session-skips-mustchangepassword）：與 tRPC authedProcedure、MCP 金鑰路徑同口徑——
   // 管理員重設密碼後帳號帶 mustChangePassword，未改密碼前不得經 REST/CSV/ICS 讀寫，否則臨時密碼窗口=完整讀寫窗口。
-  if (auth.user.mustChangePassword) return null;
+  if (auth.user.mustChangePassword) {
+    res.status(401).json({ error: "需要認證：帶 x-api-key（個人 MCP 金鑰）或先登入" });
+    return null;
+  }
   // session（純網頁登入）沒有唯讀概念，一律非唯讀
   return { auth, viaToken: false, readOnly: false };
 }
@@ -89,8 +162,8 @@ async function readableTable(auth: AuthState, viaToken: boolean, tableId: string
 
 /** GET /api/v1/databases — 列出可存取的資料庫（含欄位定義與列數） */
 export async function handleV1ListDatabases(req: Request, res: Response): Promise<void> {
-  const who = await resolveRequester(req);
-  if (!who) return void res.status(401).json({ error: "需要認證：帶 x-api-key（個人 MCP 金鑰）或先登入" });
+  const who = await resolveRequester(req, res);
+  if (!who) return; // 401/429/503 已由 resolveRequester 寫入
   const tables = await listVisibleTables(who.auth);
   const out = tables.flatMap((t) => {
     const access = accessFor(who.auth, who.viaToken, t);
@@ -105,8 +178,8 @@ export async function handleV1ListDatabases(req: Request, res: Response): Promis
 
 /** GET /api/v1/databases/:id/rows — 查列（?q= 全文粗篩、?limit=、?offset=） */
 export async function handleV1ListRows(req: Request, res: Response): Promise<void> {
-  const who = await resolveRequester(req);
-  if (!who) return void res.status(401).json({ error: "需要認證：帶 x-api-key（個人 MCP 金鑰）或先登入" });
+  const who = await resolveRequester(req, res);
+  if (!who) return; // 401/429/503 已由 resolveRequester 寫入
   const hit = await readableTable(who.auth, who.viaToken, req.params.id);
   if (!hit) return void res.status(404).json({ error: "找不到這個資料庫" });
   const q = normalizeDatabaseSearchKeyword(
@@ -133,8 +206,8 @@ export async function handleV1ListRows(req: Request, res: Response): Promise<voi
 
 /** POST /api/v1/databases/:id/rows — 新增一列（JSON body: { data: {...} }） */
 export async function handleV1AddRow(req: Request, res: Response): Promise<void> {
-  const who = await resolveRequester(req);
-  if (!who) return void res.status(401).json({ error: "需要認證：帶 x-api-key（個人 MCP 金鑰）或先登入" });
+  const who = await resolveRequester(req, res);
+  if (!who) return; // 401/429/503 已由 resolveRequester 寫入
   const hit = await readableTable(who.auth, who.viaToken, req.params.id);
   if (!hit) return void res.status(404).json({ error: "找不到這個資料庫" });
   // 唯讀金鑰一律擋寫入（與 MCP 工具端 scopeDeniedReason 同口徑）
@@ -163,8 +236,8 @@ export async function handleV1AddRow(req: Request, res: Response): Promise<void>
  * 同一 transaction 提交，資料庫錯誤時整批回滾，不留下半批或 commit gap。
  */
 export async function handleV1AddRowsBatch(req: Request, res: Response): Promise<void> {
-  const who = await resolveRequester(req);
-  if (!who) return void res.status(401).json({ error: "需要認證：帶 x-api-key（個人 MCP 金鑰）或先登入" });
+  const who = await resolveRequester(req, res);
+  if (!who) return; // 401/429/503 已由 resolveRequester 寫入
   const hit = await readableTable(who.auth, who.viaToken, req.params.id);
   if (!hit) return void res.status(404).json({ error: "找不到這個資料庫" });
 
@@ -236,8 +309,8 @@ function rowsToCsvGrid(fields: DataField[], rows: Array<{ data: DataRowData }>):
 
 /** GET /api/databases/:id/rows.csv — 匯出整表 CSV（session 或金鑰皆可） */
 export async function handleCsvExport(req: Request, res: Response): Promise<void> {
-  const who = await resolveRequester(req);
-  if (!who) return void res.status(401).json({ error: "請先登入或帶 x-api-key" });
+  const who = await resolveRequester(req, res);
+  if (!who) return; // 401/429/503 已由 resolveRequester 寫入
   const hit = await readableTable(who.auth, who.viaToken, req.params.id);
   if (!hit) return void res.status(404).json({ error: "找不到這個資料庫" });
   const rows = await db
@@ -262,8 +335,8 @@ export async function handleCsvExport(req: Request, res: Response): Promise<void
  * DESCRIPTION 彙整其餘欄位。手機日曆訂閱不能帶標頭，故金鑰走 ?key= 查詢字串（個人可撤銷金鑰）。
  */
 export async function handleDatabaseIcs(req: Request, res: Response): Promise<void> {
-  const who = await resolveRequester(req);
-  if (!who) return void res.status(401).json({ error: "需要認證：網址帶 ?key=<個人 MCP 金鑰>" });
+  const who = await resolveRequester(req, res);
+  if (!who) return; // 401/429/503 已由 resolveRequester 寫入
   const hit = await readableTable(who.auth, who.viaToken, req.params.id);
   if (!hit) return void res.status(404).json({ error: "找不到這個資料庫" });
   const fields = hit.table.fields as DataField[];
