@@ -34,11 +34,12 @@ import {
   fetchNotionText,
   fileQuotaBytes,
   htmlToText,
+  insertDataFileUnderQuota,
   MAX_TEXT_CHARS,
   normalizeImportUrl,
   notionPageIdFromUrl,
-  quotaGuardError,
   ssrfGuardError,
+  updateDataFileSizeUnderQuota,
   userFileUsage,
 } from "../services/databaseFiles";
 import { checkDiskSpace, copyStoredFile, kindFromMime, removeStoredFile, saveBuffer } from "../services/storage";
@@ -551,9 +552,7 @@ export const databasesRouter = router({
           throw new TRPCError({ code: "BAD_REQUEST", message: err instanceof Error ? err.message : "Notion 匯入失敗" });
         }
         const sizeBytes = Buffer.byteLength(text, "utf8");
-        const quotaErr = await quotaGuardError(ctx.auth.user.id, sizeBytes);
-        if (quotaErr) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaErr });
-        const [row] = await db.insert(schema.dataFiles).values({
+        const inserted = await insertDataFileUnderQuota(ctx.auth.user.id, sizeBytes, {
           tableId: table.id,
           name: (input.name?.trim() || "Notion 頁面").slice(0, 120),
           mime: "text/plain",
@@ -561,8 +560,9 @@ export const databasesRouter = router({
           sourceUrl: input.url,
           textContent: text,
           uploadedBy: ctx.auth.user.id,
-        }).returning();
-        return { id: row.id, readableChars: text.length };
+        });
+        if (!inserted.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: inserted.error });
+        return { id: inserted.row.id, readableChars: text.length };
       }
 
       // Google／一般網址：Google 連結先試「操作者自己的 Google 授權」抓私有檔（整合連接頁連結後生效），
@@ -602,9 +602,6 @@ export const databasesRouter = router({
             : "Google 回了登入頁——把該文件的共用設成「任何人知道連結都能檢視」，或到「整合連接」頁連結你的 Google 帳戶後即可匯入私有檔",
         });
       }
-      const quotaErr = await quotaGuardError(ctx.auth.user.id, fetched.buf.length);
-      if (quotaErr) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaErr });
-
       const rawLastSegment = new URL(normalized.fetchUrl).pathname.split("/").filter(Boolean).pop() ?? "匯入文件";
       // decodeURIComponent 對含裸 % 的路徑會拋 URIError——解不開就用原字串，不讓匯入整個 500
       let fallbackName: string;
@@ -622,26 +619,31 @@ export const databasesRouter = router({
         const text = htmlToText(fetched.buf.toString("utf8")).slice(0, MAX_TEXT_CHARS);
         if (!text) throw new TRPCError({ code: "BAD_REQUEST", message: "這個網頁抓不到可讀文字（可能是純前端渲染的頁面）——試試該平台的匯出功能後上傳" });
         const sizeBytes = Buffer.byteLength(text, "utf8");
-        const [row] = await db.insert(schema.dataFiles).values({
+        const inserted = await insertDataFileUnderQuota(ctx.auth.user.id, sizeBytes, {
           tableId: table.id, name, mime: "text/plain", sizeBytes,
           sourceUrl: input.url, textContent: text, uploadedBy: ctx.auth.user.id,
-        }).returning();
-        return { id: row.id, readableChars: text.length };
+        });
+        if (!inserted.ok) throw new TRPCError({ code: "PRECONDITION_FAILED", message: inserted.error });
+        return { id: inserted.row.id, readableChars: text.length };
       }
 
-      // 其他格式（txt/csv/pdf/docx…）：原檔落地＋抽文字
+      // 其他格式（txt/csv/pdf/docx…）：原檔落地＋抽文字；配額鎖內 insert 防併發超額（B9）
       const disk = await checkDiskSpace(fetched.buf.length);
       if (disk) throw new TRPCError({ code: "PRECONDITION_FAILED", message: disk });
       const text = await extractTextFromBuffer(fetched.mime, name, fetched.buf);
       const saved = await saveBuffer(fetched.buf, fetched.mime);
       try {
-        const [row] = await db.insert(schema.dataFiles).values({
+        const inserted = await insertDataFileUnderQuota(ctx.auth.user.id, saved.sizeBytes, {
           tableId: table.id, name, mime: fetched.mime, sizeBytes: saved.sizeBytes,
           storagePath: saved.storagePath, sourceUrl: input.url, textContent: text, uploadedBy: ctx.auth.user.id,
-        }).returning();
-        return { id: row.id, readableChars: text?.length ?? 0 };
+        });
+        if (!inserted.ok) {
+          await removeStoredFile(saved.storagePath);
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: inserted.error });
+        }
+        return { id: inserted.row.id, readableChars: text?.length ?? 0 };
       } catch (dbErr) {
-        await removeStoredFile(saved.storagePath); // DB 失敗清孤兒檔
+        if (!(dbErr instanceof TRPCError)) await removeStoredFile(saved.storagePath); // DB 失敗清孤兒檔
         throw dbErr;
       }
     }),
@@ -726,16 +728,16 @@ export const databasesRouter = router({
           newStoragePath = saved.storagePath;
         }
       }
-      // 配額以「增量」把關：重抓變大才需要空間
-      const delta = Math.max(0, sizeBytes - file.sizeBytes);
-      const quotaErr = delta > 0 ? await quotaGuardError(ctx.auth.user.id, delta) : null;
-      if (quotaErr) {
+      // 配額以「增量」把關（B9：鎖內更新防併發超額）：重抓變大才需要空間
+      const updated = await updateDataFileSizeUnderQuota(ctx.auth.user.id, file.id, file.sizeBytes, {
+        textContent: text,
+        sizeBytes,
+        ...(newStoragePath !== undefined ? { storagePath: newStoragePath } : {}),
+      });
+      if (!updated.ok) {
         if (typeof newStoragePath === "string") await removeStoredFile(newStoragePath); // 新檔已落地就清掉
-        throw new Error(quotaErr);
+        throw new Error(updated.error);
       }
-      await db.update(schema.dataFiles)
-        .set({ textContent: text, sizeBytes, ...(newStoragePath !== undefined ? { storagePath: newStoragePath } : {}) })
-        .where(eq(schema.dataFiles.id, file.id));
       // 換了新檔才刪舊檔（DB 已指向新檔，舊檔成孤兒）
       if (newStoragePath !== undefined && file.storagePath && file.storagePath !== newStoragePath) {
         await removeStoredFile(file.storagePath);

@@ -30,6 +30,12 @@ function srtTime(totalSec: number): string {
   return `${h}:${m}:${s},${millis}`;
 }
 
+/** Markdown 表格 cell 跳脫：| 與換行會破壞 pipe table（C10） */
+export function mdTableCell(value: string | number | null | undefined): string {
+  const s = value == null || value === "" ? "—" : String(value);
+  return s.replace(/\|/g, "\\|").replace(/\r\n|\r|\n/g, " ");
+}
+
 // 字幕可讀性上限：每塊約 18 個全形字，中文閱讀速度上限約 7 字/秒（過長旁白要切多塊）
 const CUE_MAX_VISUAL = 18;
 
@@ -870,7 +876,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     const narrationFile = narrationNames[i] ?? "（無）";
     const tc = `${srtTime(times[i].in)} → ${srtTime(times[i].out)}`;
     lines.push(
-      `| ${i + 1} | ${scene.title} | ${scene.durationSec}s | ${asset?.kind ?? "—"} | ${file} | ${narrationFile} | ${tc} | ${gen?.prompt ?? "—"} | ${gen?.modelId ?? "—"} |`,
+      `| ${i + 1} | ${mdTableCell(scene.title)} | ${mdTableCell(`${scene.durationSec}s`)} | ${mdTableCell(asset?.kind ?? "—")} | ${mdTableCell(file)} | ${mdTableCell(narrationFile)} | ${mdTableCell(tc)} | ${mdTableCell(gen?.prompt ?? "—")} | ${mdTableCell(gen?.modelId ?? "—")} |`,
     );
   }
 

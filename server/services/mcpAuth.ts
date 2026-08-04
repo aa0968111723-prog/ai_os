@@ -148,18 +148,46 @@ export async function resolveMcpIdentity(provided: string): Promise<McpIdentity 
 
 /* ── 自助管理（供 routers/mcpTokens 呼叫） ── */
 
-/** 建立一把新金鑰：回原文（只此一次）＋列資訊。呼叫端須先擋上限。 */
+/** 建立一把新金鑰：回原文（只此一次）＋列資訊。呼叫端須先擋上限（或走 createMcpTokenUnderCap）。 */
 export async function createMcpToken(
   userId: string,
   label: string,
   opts: { readOnly?: boolean; expiresAt?: Date | null } = {},
+  exec: { insert: typeof db.insert } = db,
 ): Promise<{ id: string; token: string; label: string; readOnly: boolean; expiresAt: Date | null }> {
   const token = newMcpTokenPlaintext();
-  const [row] = await db
+  const [row] = await exec
     .insert(schema.mcpTokens)
     .values({ userId, tokenHash: sha256(token), label, readOnly: opts.readOnly ?? false, expiresAt: opts.expiresAt ?? null })
     .returning();
   return { id: row.id, token, label: row.label, readOnly: row.readOnly, expiresAt: row.expiresAt };
+}
+
+/**
+ * 在 per-user 鎖內完成 count→insert，防併發建立突破 MCP_TOKEN_MAX_PER_USER。
+ * 超限回 null（呼叫端轉 PRECONDITION_FAILED）。
+ */
+export async function createMcpTokenUnderCap(
+  userId: string,
+  label: string,
+  opts: { readOnly?: boolean; expiresAt?: Date | null } = {},
+): Promise<
+  | { ok: true; result: { id: string; token: string; label: string; readOnly: boolean; expiresAt: Date | null } }
+  | { ok: false; error: "at_limit" }
+> {
+  const { lockMcpTokenCap } = await import("./locks");
+  return db.transaction(async (tx) => {
+    await lockMcpTokenCap(tx, userId);
+    const rows = await tx
+      .select({ id: schema.mcpTokens.id })
+      .from(schema.mcpTokens)
+      .where(and(eq(schema.mcpTokens.userId, userId), isNull(schema.mcpTokens.revokedAt)));
+    if (rows.length >= MCP_TOKEN_MAX_PER_USER) {
+      return { ok: false as const, error: "at_limit" as const };
+    }
+    const result = await createMcpToken(userId, label, opts, tx as unknown as { insert: typeof db.insert });
+    return { ok: true as const, result };
+  });
 }
 
 /** 列出某人的金鑰（不含原文與雜湊）——供管理 UI 顯示。 */

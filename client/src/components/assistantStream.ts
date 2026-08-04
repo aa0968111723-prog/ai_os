@@ -141,8 +141,10 @@ type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respo
 /**
  * Request and consume the assistant SSE stream.
  *
- * true means the request reached a terminal SSE event or was deliberately
- * aborted; false means the caller should use its one-shot fallback.
+ * true means the request reached a terminal SSE event, was deliberately
+ * aborted, **or already received stream payload** (step/done/error) so the
+ * caller must NOT re-run one-shot tRPC (would double-charge rate limit / LLM).
+ * false means the stream never really started — safe to use one-shot fallback.
  */
 export async function requestAssistantStream({
   projectId,
@@ -166,6 +168,8 @@ export async function requestAssistantStream({
   fetchImpl?: FetchLike;
 }): Promise<boolean> {
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  /** 已收到 step／done／error：伺服器已開始處理，中斷後不可退回 tRPC 重跑 */
+  let sawPayload = false;
   try {
     const response = await fetchImpl("/api/assistant/ask", {
       method: "POST",
@@ -187,13 +191,27 @@ export async function requestAssistantStream({
       const result = await reader.read();
       const events = result.done ? decoder.finish() : decoder.push(result.value);
       for (const event of events) {
+        if (event.event === "step" || event.event === "done" || event.event === "error") {
+          sawPayload = true;
+        }
         if (dispatchAssistantEvent(event, handlers)) return true;
       }
       if (result.done) break;
     }
+    // 串流開過且吐過事件，但缺 terminal done：當已接手，顯示錯誤、禁止 tRPC 重問
+    if (sawPayload) {
+      handlers.onError("連線中斷，回答可能不完整——請再問一次（不會自動重跑，以免重複扣額度）");
+      return true;
+    }
     return false;
   } catch (error) {
-    return isAbortError(error);
+    if (isAbortError(error)) return true;
+    // 已有 payload 時網路錯誤也當已接手
+    if (sawPayload) {
+      handlers.onError("連線中斷，回答可能不完整——請再問一次（不會自動重跑，以免重複扣額度）");
+      return true;
+    }
+    return false;
   } finally {
     try {
       await reader?.cancel();

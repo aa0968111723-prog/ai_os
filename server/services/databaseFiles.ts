@@ -9,10 +9,11 @@
  */
 import { Worker } from "node:worker_threads";
 import { lookup as dnsLookup } from "node:dns/promises";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { db, schema } from "../db";
 import { getSettings } from "./points";
 import { proxyFetch } from "./http";
+import { lockFileQuota } from "./locks";
 
 /** 抽出文字的長度上限：夠放整本逐字稿，又不會單列灌爆 DB/上下文組裝 */
 export const MAX_TEXT_CHARS = 300_000;
@@ -705,10 +706,18 @@ export async function fileQuotaBytes(): Promise<number | null> {
   return gb <= 0 ? null : gb * 1024 * 1024 * 1024; // 0＝不限
 }
 
-export async function userFileUsage(userId: string): Promise<number> {
+/** 最小 select 執行器（db 或 transaction） */
+type DbLike = {
+  select: typeof db.select;
+  insert: typeof db.insert;
+  update: typeof db.update;
+  execute: typeof db.execute;
+};
+
+export async function userFileUsage(userId: string, executor: DbLike = db): Promise<number> {
   // 只計「資料庫還活著」的文件：庫被軟刪後文件對使用者不可達也不可刪，
   // 再算進配額會把空間永久卡死（審查發現）；磁碟實體用量另有 checkDiskSpace 水位守門
-  const [row] = await db
+  const [row] = await executor
     .select({ used: sql<number>`coalesce(sum(${schema.dataFiles.sizeBytes}), 0)` })
     .from(schema.dataFiles)
     .innerJoin(schema.dataTables, eq(schema.dataTables.id, schema.dataFiles.tableId))
@@ -716,7 +725,7 @@ export async function userFileUsage(userId: string): Promise<number> {
   return Number(row?.used ?? 0);
 }
 
-/** 配額守門：回錯誤訊息（人話）；null＝放行 */
+/** 配額守門：回錯誤訊息（人話）；null＝放行（無鎖；寫入路徑請用 insertDataFileUnderQuota） */
 export async function quotaGuardError(userId: string, incomingBytes: number): Promise<string | null> {
   const quota = await fileQuotaBytes();
   if (quota == null) return null;
@@ -727,9 +736,117 @@ export async function quotaGuardError(userId: string, incomingBytes: number): Pr
   return null;
 }
 
+type DataFileInsert = typeof schema.dataFiles.$inferInsert;
+type DataFileRow = typeof schema.dataFiles.$inferSelect;
+
+/**
+ * B9：在 per-user 配額鎖內完成 check→insert，防併發上傳 TOCTOU 突破配額。
+ * values 必須含 uploadedBy 與 sizeBytes（計入配額）。
+ */
+export async function insertDataFileUnderQuota(
+  userId: string,
+  sizeBytes: number,
+  values: DataFileInsert,
+): Promise<{ ok: true; row: DataFileRow } | { ok: false; error: string }> {
+  return db.transaction(async (tx) => {
+    await lockFileQuota(tx, userId);
+    const quota = await fileQuotaBytes();
+    if (quota != null) {
+      const used = await userFileUsage(userId, tx as unknown as DbLike);
+      if (used + sizeBytes > quota) {
+        return {
+          ok: false as const,
+          error: `你的文件儲存空間已滿（已用 ${formatBytes(used)}／${formatBytes(quota)}）——刪除舊文件釋放空間，或請管理員調高配額`,
+        };
+      }
+    }
+    const [row] = await tx
+      .insert(schema.dataFiles)
+      .values({ ...values, uploadedBy: userId, sizeBytes })
+      .returning();
+    return { ok: true as const, row: row! };
+  });
+}
+
+/**
+ * B9：在配額鎖內更新既有檔（僅當 size 增大時檢查增量），防 refresh 併發超額。
+ */
+export async function updateDataFileSizeUnderQuota(
+  userId: string,
+  fileId: string,
+  previousSizeBytes: number,
+  patch: Partial<DataFileInsert> & { sizeBytes: number },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const delta = Math.max(0, patch.sizeBytes - previousSizeBytes);
+  return db.transaction(async (tx) => {
+    await lockFileQuota(tx, userId);
+    if (delta > 0) {
+      const quota = await fileQuotaBytes();
+      if (quota != null) {
+        const used = await userFileUsage(userId, tx as unknown as DbLike);
+        if (used + delta > quota) {
+          return {
+            ok: false as const,
+            error: `你的文件儲存空間已滿（已用 ${formatBytes(used)}／${formatBytes(quota)}）——刪除舊文件釋放空間，或請管理員調高配額`,
+          };
+        }
+      }
+    }
+    await tx.update(schema.dataFiles).set(patch).where(eq(schema.dataFiles.id, fileId));
+    return { ok: true as const };
+  });
+}
+
 export function formatBytes(n: number): string {
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`;
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
   if (n >= 1024) return `${Math.round(n / 1024)} KB`;
   return `${n} B`;
+}
+
+/** 軟刪資料庫後 Volume 檔 grace window：此期間仍可人工救回表＋檔 */
+const SOFT_DELETE_FILE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * C9：回收「資料庫已軟刪超過 grace」仍佔碟的 data_files 實體檔。
+ * 只清 storagePath、保留列與 textContent（稽核／摘要），避免 soft-delete 後永久吃 Volume。
+ * 回傳本輪成功移除的檔案數。
+ */
+export async function sweepOrphanDatabaseFiles(limit = 40): Promise<number> {
+  const { removeStoredFile } = await import("./storage");
+  const cutoff = new Date(Date.now() - SOFT_DELETE_FILE_GRACE_MS);
+  const rows = await db
+    .select({
+      id: schema.dataFiles.id,
+      storagePath: schema.dataFiles.storagePath,
+    })
+    .from(schema.dataFiles)
+    .innerJoin(schema.dataTables, eq(schema.dataTables.id, schema.dataFiles.tableId))
+    .where(
+      and(
+        isNotNull(schema.dataFiles.storagePath),
+        isNotNull(schema.dataTables.deletedAt),
+        lt(schema.dataTables.deletedAt, cutoff),
+      ),
+    )
+    .limit(limit);
+
+  let removed = 0;
+  for (const row of rows) {
+    if (!row.storagePath) continue;
+    try {
+      await removeStoredFile(row.storagePath);
+      await db
+        .update(schema.dataFiles)
+        .set({ storagePath: null })
+        .where(and(eq(schema.dataFiles.id, row.id), isNotNull(schema.dataFiles.storagePath)));
+      removed += 1;
+    } catch (err) {
+      console.warn(
+        `[databaseFiles] 軟刪庫檔回收略過：file=${row.id}`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return removed;
 }

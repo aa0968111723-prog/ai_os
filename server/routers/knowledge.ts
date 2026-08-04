@@ -349,8 +349,11 @@ export const knowledgeRouter = router({
       await assertProjectEditable(ctx.auth, project); // 2.3：檢視者不能寫知識庫
       // 跨組引用驗證：referenced asset 必須同組，否則能借知識庫把別組素材綁進本專案（與 generationCore 對 sourceAssetId 一致）
       if (input.sourceAssetId) {
-        const [srcAsset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.sourceAssetId));
-        if (!srcAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到來源素材" });
+        const [srcAsset] = await db
+          .select()
+          .from(schema.assets)
+          .where(and(eq(schema.assets.id, input.sourceAssetId), isNull(schema.assets.deletedAt)));
+        if (!srcAsset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到來源素材或已刪除" });
         if (srcAsset.groupId !== project.groupId) throw new TRPCError({ code: "FORBIDDEN", message: "來源素材不屬於此專案的組" });
       }
       const summary = extractKnowledgeSummary(input.content);

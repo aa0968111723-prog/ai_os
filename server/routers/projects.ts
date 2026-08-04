@@ -732,7 +732,7 @@ export const projectsRouter = router({
 
   /** 素材改名（整理雜亂素材用） */
   renameAsset: authedProcedure
-    .input(z.object({ assetId: z.string().uuid(), title: z.string().min(1, "請填名稱").max(80) }))
+    .input(z.object({ assetId: z.string().uuid(), title: z.string().trim().min(1, "請填名稱").max(80) }))
     .mutation(async ({ ctx, input }) => {
       const [asset] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.assetId));
       if (!asset) throw new TRPCError({ code: "NOT_FOUND", message: "找不到素材" });

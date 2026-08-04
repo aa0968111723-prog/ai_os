@@ -90,10 +90,11 @@ async function assertNoPendingVisual(sceneId: string): Promise<void> {
     .where(and(
       eq(schema.generations.sceneId, sceneId),
       sql`(${schema.generations.sceneRole} is null or ${schema.generations.sceneRole} = 'visual')`,
-      inArray(schema.generations.status, ["queued", "running"]),
+      // awaiting_approval：超額待核也算「在途」，防連點堆多筆待核
+      inArray(schema.generations.status, ["queued", "running", "awaiting_approval"]),
     ))
     .limit(1);
-  if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成中，請稍候再生成" });
+  if (pendingVisual) throw new TRPCError({ code: "CONFLICT", message: "這一格正在生成或待核准中，請稍候再生成" });
 }
 
 /**
@@ -137,20 +138,20 @@ export const scenesRouter = router({
         // 該格是否有進行中的就地生成（草稿→出圖進度指示）。用純量子查詢而非 join，避免同格多筆
         // 進行中生成把分鏡列乘開成重複列；兩個子查詢用相同排序取同一筆，pendingGenId 與 status 一致。
         // 只看「畫面(visual)」生成——排除 narration，否則配音生成中會誤把主畫面標成生成中、鎖住重生鈕
-        pendingGenStatus: sql<"queued" | "running" | null>`(
+        pendingGenStatus: sql<"queued" | "running" | "awaiting_approval" | null>`(
           select g.status from ${schema.generations} g
-          where g.scene_id = ${schema.scenes.id} and (g.scene_role is null or g.scene_role = 'visual') and g.status in ('queued', 'running')
+          where g.scene_id = ${schema.scenes.id} and (g.scene_role is null or g.scene_role = 'visual') and g.status in ('queued', 'running', 'awaiting_approval')
           order by g.created_at desc, g.id desc limit 1
         )`,
         pendingGenId: sql<string | null>`(
           select g.id from ${schema.generations} g
-          where g.scene_id = ${schema.scenes.id} and (g.scene_role is null or g.scene_role = 'visual') and g.status in ('queued', 'running')
+          where g.scene_id = ${schema.scenes.id} and (g.scene_role is null or g.scene_role = 'visual') and g.status in ('queued', 'running', 'awaiting_approval')
           order by g.created_at desc, g.id desc limit 1
         )`,
         // 該格是否有進行中的「配音」生成（配音生成中指示）：獨立於主畫面生成，只看 narration 角色。
-        pendingVoiceStatus: sql<"queued" | "running" | null>`(
+        pendingVoiceStatus: sql<"queued" | "running" | "awaiting_approval" | null>`(
           select g.status from ${schema.generations} g
-          where g.scene_id = ${schema.scenes.id} and g.scene_role = 'narration' and g.status in ('queued', 'running')
+          where g.scene_id = ${schema.scenes.id} and g.scene_role = 'narration' and g.status in ('queued', 'running', 'awaiting_approval')
           order by g.created_at desc, g.id desc limit 1
         )`,
       })

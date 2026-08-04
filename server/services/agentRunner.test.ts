@@ -58,6 +58,34 @@ describe("agentRunner CA-01 generate parity (source-lock)", () => {
   it("tick continues failed runs that still have running steps (settle siblings)", () => {
     expect(source).toMatch(/status, "failed"[\s\S]*status":"running"/);
   });
+
+  it("H1: serial generate also respects MAX_PARALLEL_GEN_STARTS", () => {
+    expect(source).toMatch(
+      /listInFlightGenerationSteps\(steps\)\.length >= MAX_PARALLEL_GEN_STARTS/,
+    );
+  });
+
+  it("M2: failRun updates in-memory run.status to failed", () => {
+    expect(source).toMatch(/run\.status = "failed"/);
+    expect(source).toMatch(/run\.error = error/);
+  });
+
+  it("M3: skips parallel start when same sceneNo already in-flight", () => {
+    expect(source).toContain("hasInFlightSameScene");
+    expect(source).toMatch(/hasInFlightSameScene\(steps, idx, step\.sceneNo\)/);
+  });
+
+  it("M1: rechecks status after writing generationId before execute", () => {
+    expect(source).toMatch(/已停止，取消送出/);
+    expect(source).toMatch(/clearGhostGenerationId\(step, "已停止，取消送出"\)/);
+  });
+
+  it("B13: awaiting_approval transitions run to waiting and times out after 24h", () => {
+    expect(source).toMatch(/等組長核准超額生成中/);
+    expect(source).toMatch(/AWAITING_APPROVAL_MAX_MS/);
+    expect(source).toMatch(/status: "waiting"/);
+    expect(source).toMatch(/status, "waiting"[\s\S]*status":"running"/);
+  });
 });
 
 describe("formatAgentRunMessage（代理終局系統訊息）", () => {

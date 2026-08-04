@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, publicProcedure, authedProcedure } from "../trpc";
 import { uiDensitySchema } from "@shared/uiDensity";
@@ -459,9 +459,12 @@ export const authRouter = router({
         if (!looksLikeUuid(input.sourceAssetId)) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "來源素材 id 無效" });
         }
-        const [src] = await db.select().from(schema.assets).where(eq(schema.assets.id, input.sourceAssetId));
+        const [src] = await db
+          .select()
+          .from(schema.assets)
+          .where(and(eq(schema.assets.id, input.sourceAssetId), isNull(schema.assets.deletedAt)));
         if (!src || src.projectId !== project.id) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "來源素材不在此專案" });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "來源素材不在此專案或已刪除" });
         }
       }
       const grant = await createUploadGrant({

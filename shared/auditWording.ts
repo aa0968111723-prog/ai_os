@@ -52,6 +52,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "generation.rename": "重新命名成品",
   "generation.toggleFavorite": "收藏／取消收藏成品",
   "generation.decideCost": "核決超額生成",
+  "generation.cancelAwaiting": "取消自己的待核生成",
   "generation.submitCloudMock": "送出免費雲端模擬生成",
   // 模型即時目錄（Fal 價／新模型上架；開發者手動同步）
   "models.syncLive": "同步即時模型價格與目錄",
@@ -159,6 +160,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "community.publishFromSource": "發布到靈感頻道",
   "community.unpublish": "從靈感頻道下架",
   "community.recordUse": "記錄靈感被引用一次",
+  "community.toggleLike": "按讚／取消按讚靈感貼文",
   // 個人 AI 金鑰（BYOK）：只記動作與供應商，金鑰本身不落審計
   "userAiKeys.set": "設定個人 AI 金鑰",
   "userAiKeys.remove": "移除個人 AI 金鑰",

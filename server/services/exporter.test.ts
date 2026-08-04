@@ -5,7 +5,17 @@
  * 共用規則:durationSec ≤ 0 以 3 秒計;時間軸依序累加;30fps 影格對齊。
  */
 import { describe, expect, it } from "vitest";
-import { buildEdl, buildFcpxml, buildSrt, buildXmeml, type TimelineScene } from "./exporter";
+import { buildEdl, buildFcpxml, buildSrt, buildXmeml, mdTableCell, type TimelineScene } from "./exporter";
+
+describe("mdTableCell (C10)", () => {
+  it("escapes pipe and flattens newlines so markdown tables stay intact", () => {
+    expect(mdTableCell("a|b")).toBe("a\\|b");
+    expect(mdTableCell("line1\nline2")).toBe("line1 line2");
+    expect(mdTableCell("a|b\r\nc")).toBe("a\\|b c");
+    expect(mdTableCell(null)).toBe("—");
+    expect(mdTableCell("")).toBe("—");
+  });
+});
 
 const scenes: TimelineScene[] = [
   { title: "開場", durationSec: 5, voiceover: "你好,歡迎收看" },

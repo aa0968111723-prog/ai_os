@@ -18,6 +18,10 @@
  * - 5:export job 去重 per-(project,assetKey)(本檔 lockExportDedup)——「查進行中 job→無則建」的 check-then-insert,
  *   雙擊/併發下兩者都讀到「無進行中」而各插一筆,產出兩份相同交付包(export-job-dedup-not-atomic);
  *   上鎖後同專案同素材選擇的建 job 全序列化。
+ * - 6:file quota per-user(本檔 lockFileQuota)——「查已用→insert data_files」的 read-modify-write,
+ *   併發上傳可同時讀到「還夠」而雙雙插入、突破每人配額(B9 TOCTOU)。
+ * - 7:MCP token cap per-user(本檔 lockMcpTokenCap)——「count active→insert」check-then-insert,
+ *   併發建立可突破 MCP_TOKEN_MAX_PER_USER。
  * 交易結束自動釋放,呼叫端必須在 db.transaction 內使用。
  */
 import { sql } from "drizzle-orm";
@@ -43,4 +47,14 @@ export async function lockDatabaseRowCap(tx: Executor, tableId: string): Promise
 /** 序列化同專案同素材選擇的匯出 job 建立(exportJobs.create 的「查進行中→無則建」):防雙擊產出兩份相同交付包 */
 export async function lockExportDedup(tx: Executor, projectId: string, assetKey: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`${projectId}:${assetKey}`}), 5)`);
+}
+
+/** 序列化同一使用者的文件配額檢查＋寫入(data_files insert/擴大):防併發上傳突破配額 */
+export async function lockFileQuota(tx: Executor, userId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}), 6)`);
+}
+
+/** 序列化同一使用者的 MCP 金鑰建立(count→insert):防併發突破 MCP_TOKEN_MAX_PER_USER */
+export async function lockMcpTokenCap(tx: Executor, userId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}), 7)`);
 }

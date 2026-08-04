@@ -2,7 +2,8 @@
  * Community / 靈感頻道 router（Flow-TV 風格）
  *
  * PR1：publishFromSource / unpublish / listPublic / get / recordUse / myPosts
- * 之後 PR：like、remixToProject、channel 篩選、完整設定卡 snapshot
+ * Phase D：toggleLike（community_likes + likeCount）
+ * 之後 PR：remixToProject、channel 篩選、完整設定卡 snapshot
  */
 import { z } from "zod";
 import { and, desc, eq, lt, sql, inArray } from "drizzle-orm";
@@ -48,7 +49,7 @@ export const communityRouter = router({
         tag: z.string().max(50).optional(),
       }),
     )
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const conditions = [eq(schema.communityPosts.status, "published")];
       if (input.mediaKind) conditions.push(eq(schema.communityPosts.mediaKind, input.mediaKind));
       if (input.sourceType) conditions.push(eq(schema.communityPosts.sourceType, input.sourceType));
@@ -77,18 +78,47 @@ export const communityRouter = router({
         const next = rows.pop()!;
         nextCursor = next.publishedAt.toISOString();
       }
-      return { items: rows, nextCursor };
+
+      // Phase D：標出目前使用者已按讚的貼（feed 愛心可點亮）
+      const likedIds = new Set<string>();
+      if (rows.length > 0) {
+        const likes = await db
+          .select({ postId: schema.communityLikes.postId })
+          .from(schema.communityLikes)
+          .where(
+            and(
+              eq(schema.communityLikes.userId, ctx.auth.user.id),
+              inArray(
+                schema.communityLikes.postId,
+                rows.map((r) => r.id),
+              ),
+            ),
+          );
+        for (const like of likes) likedIds.add(like.postId);
+      }
+
+      return {
+        items: rows.map((r) => ({ ...r, likedByMe: likedIds.has(r.id) })),
+        nextCursor,
+      };
     }),
 
   get: authedProcedure
     .input(z.object({ id: z.string().uuid() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
       const [row] = await db
         .select()
         .from(schema.communityPosts)
         .where(and(eq(schema.communityPosts.id, input.id), eq(schema.communityPosts.status, "published")));
       if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-      return row;
+      const [liked] = await db
+        .select({ postId: schema.communityLikes.postId })
+        .from(schema.communityLikes)
+        .where(
+          and(eq(schema.communityLikes.postId, input.id), eq(schema.communityLikes.userId, ctx.auth.user.id)),
+        )
+        .limit(1);
+      return { ...row, likedByMe: !!liked };
     }),
 
   /** 作者自己的發布列表（含 hidden） */
@@ -316,5 +346,75 @@ export const communityRouter = router({
         .returning({ id: schema.communityPosts.id, useCount: schema.communityPosts.useCount });
       if (!updated) throw new TRPCError({ code: "NOT_FOUND" });
       return updated;
+    }),
+
+  /**
+   * Phase D：切換讚。有列則刪（unlike）、無列則 insert（like）；
+   * 同交易內以 SQL 增量調整 like_count，並以 RETURNING／ON CONFLICT 吸收雙擊競態。
+   */
+  toggleLike: authedProcedure
+    .input(z.object({ postId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const userId = ctx.auth.user.id;
+      return db.transaction(async (tx) => {
+        const [post] = await tx
+          .select({ id: schema.communityPosts.id, status: schema.communityPosts.status })
+          .from(schema.communityPosts)
+          .where(eq(schema.communityPosts.id, input.postId));
+        if (!post || post.status !== "published") {
+          throw new TRPCError({ code: "NOT_FOUND", message: "找不到這則靈感貼文" });
+        }
+
+        const removed = await tx
+          .delete(schema.communityLikes)
+          .where(
+            and(eq(schema.communityLikes.postId, input.postId), eq(schema.communityLikes.userId, userId)),
+          )
+          .returning({ postId: schema.communityLikes.postId });
+
+        if (removed.length > 0) {
+          const [updated] = await tx
+            .update(schema.communityPosts)
+            .set({
+              likeCount: sql`GREATEST(0, ${schema.communityPosts.likeCount} - 1)`,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.communityPosts.id, input.postId))
+            .returning({ likeCount: schema.communityPosts.likeCount });
+          return { liked: false as const, likeCount: updated?.likeCount ?? 0 };
+        }
+
+        const inserted = await tx
+          .insert(schema.communityLikes)
+          .values({ postId: input.postId, userId })
+          .onConflictDoNothing()
+          .returning({ postId: schema.communityLikes.postId });
+
+        if (inserted.length > 0) {
+          const [updated] = await tx
+            .update(schema.communityPosts)
+            .set({
+              likeCount: sql`${schema.communityPosts.likeCount} + 1`,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.communityPosts.id, input.postId))
+            .returning({ likeCount: schema.communityPosts.likeCount });
+          return { liked: true as const, likeCount: updated?.likeCount ?? 0 };
+        }
+
+        // 競態：刪了又被別人路徑插回／或 insert 撞 PK——回傳現況
+        const [again] = await tx
+          .select({ postId: schema.communityLikes.postId })
+          .from(schema.communityLikes)
+          .where(
+            and(eq(schema.communityLikes.postId, input.postId), eq(schema.communityLikes.userId, userId)),
+          )
+          .limit(1);
+        const [fresh] = await tx
+          .select({ likeCount: schema.communityPosts.likeCount })
+          .from(schema.communityPosts)
+          .where(eq(schema.communityPosts.id, input.postId));
+        return { liked: !!again, likeCount: fresh?.likeCount ?? 0 };
+      });
     }),
 });

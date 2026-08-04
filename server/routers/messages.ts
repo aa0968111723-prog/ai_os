@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
@@ -266,8 +266,14 @@ export const messagesRouter = router({
       const [asset] = await db
         .select()
         .from(schema.assets)
-        .where(and(eq(schema.assets.id, input.assetId), eq(schema.assets.projectId, input.projectId)));
-      if (!asset) throw new TRPCError({ code: "BAD_REQUEST", message: "語音檔不在本專案" });
+        .where(
+          and(
+            eq(schema.assets.id, input.assetId),
+            eq(schema.assets.projectId, input.projectId),
+            isNull(schema.assets.deletedAt), // M6：軟刪／回收桶素材不可當語音來源
+          ),
+        );
+      if (!asset) throw new TRPCError({ code: "BAD_REQUEST", message: "語音檔不在本專案或已刪除" });
       if (asset.kind !== "audio") throw new TRPCError({ code: "BAD_REQUEST", message: "這不是音訊檔" });
       const [msg] = await db
         .insert(schema.messages)

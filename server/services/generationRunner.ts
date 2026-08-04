@@ -6,10 +6,11 @@
  * 推進全部重用 generationCore.advanceGeneration（已 CAS-safe/冪等，與瀏覽器輪詢或工作流執行器
  * 併發呼叫也不會重複扣退點，直接重用不改它）。
  */
-import { and, asc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, or } from "drizzle-orm";
 import { db, schema } from "../db";
 import { advanceGeneration, sweepUnlandedAssets } from "./generationCore";
 import { sweepVoiceTranscripts } from "./voiceTranscribe";
+import { sweepOrphanDatabaseFiles } from "./databaseFiles";
 import { failStaleGenerationTx } from "./points";
 import {
   isShuttingDown,
@@ -24,6 +25,13 @@ const ADVANCE_TIMEOUT_MS = 60_000;
 const BATCH = 50;
 /** 陳屍清掃門檻：queued/running 停滯逾此視為孤兒（與 routers/generation.ts 同口徑，正常生成遠短於此） */
 const STALE_GENERATION_MS = 30 * 60 * 1000;
+/**
+ * 硬性生命週期上限（B12）：即使 fal 心跳持續刷新 updatedAt，createdAt 超過此限也強制回收。
+ * 避免供應商永久 IN_PROGRESS 導致預扣點無限持有。LoRA 等長任務通常 <1h；6h 為安全上限。
+ */
+const HARD_LIFETIME_MS = 6 * 60 * 60 * 1000;
+/** 成本審核待核列逾時：尚未扣點，逾 24h 自動 rejected，減少列表噪音與代理卡 waiting */
+const AWAITING_APPROVAL_MAX_MS = 24 * 60 * 60 * 1000;
 /** 陳屍清掃節流：不必每 6 秒全表掃，約每 60 秒（每 10 個 tick）一次即遠比「開列表才觸發」即時 */
 const SWEEP_EVERY_TICKS = 10;
 
@@ -75,6 +83,13 @@ export function startGenerationRunner(): void {
         } catch (err) {
           console.warn("[generation] 語音逐字稿掃描失敗（下輪再試）：", err instanceof Error ? err.message : err);
         }
+        // C9：軟刪資料庫超過 grace 的 Volume 檔回收
+        try {
+          const purged = await sweepOrphanDatabaseFiles();
+          if (purged > 0) console.log(`[generation] 軟刪庫檔回收本輪 ${purged} 筆`);
+        } catch (err) {
+          console.warn("[generation] 軟刪庫檔回收失敗（下輪再試）：", err instanceof Error ? err.message : err);
+        }
       }
       if (isShuttingDown()) return;
       try {
@@ -120,6 +135,15 @@ async function advanceWithGuard(id: string): Promise<void> {
       // 讓重啟孤兒永遠逃過 30 分陳屍清掃、永卡「生成中」（連帶卡住其工作流/代理 run）。真正在跑的 NIM 60 秒內必 settle，
       // 不需心跳保護；排除後孤兒的 updatedAt 不再被刷新，陳屍清掃與 reapStuckGeneration 即可如 nvidia-nim.ts 註解承諾收斂退點。
       if (g && g.requestId && !g.requestId.startsWith("nim_") && (g.status === "queued" || g.status === "running")) {
+        // B12：超過硬性生命週期不再心跳、直接回收（即使 provider 仍回 running）
+        if (Date.now() - new Date(g.createdAt).getTime() > HARD_LIFETIME_MS) {
+          await failStaleGenerationTx(
+            id,
+            "生成超過最長時限（6 小時），系統自動回收",
+            "生成逾時自動回收退回",
+          );
+          return;
+        }
         if (Date.now() - new Date(g.updatedAt).getTime() > 5 * 60_000) {
           await db
             .update(schema.generations)
@@ -158,26 +182,81 @@ async function advanceWithGuard(id: string): Promise<void> {
  */
 async function sweepStale(): Promise<void> {
   const cutoff = new Date(Date.now() - STALE_GENERATION_MS);
+  const hardCutoff = new Date(Date.now() - HARD_LIFETIME_MS);
+  // 停滯（updatedAt 舊）或硬性壽命（createdAt 舊，即使心跳仍在）都撈
   const staleRows = await db
     .select()
     .from(schema.generations)
-    .where(and(inArray(schema.generations.status, ["queued", "running"]), lt(schema.generations.updatedAt, cutoff)))
+    .where(
+      and(
+        inArray(schema.generations.status, ["queued", "running"]),
+        or(
+          lt(schema.generations.updatedAt, cutoff),
+          lt(schema.generations.createdAt, hardCutoff),
+        ),
+      ),
+    )
     .orderBy(asc(schema.generations.updatedAt))
     .limit(BATCH);
   for (const gen of staleRows) {
     if (inflight.has(gen.id)) continue; // 正在推進的交給正常路徑，避免雙寫
+    const hardExpired = gen.createdAt.getTime() < hardCutoff.getTime();
     try {
       // 修 R6-MONEY-02：先讓 advanceGeneration 有機會收斂——重佈後 fal 其實可能已完成，直接退點會把成品丟棄。
       // advanceGeneration 對已 done/failed 者正常落地/退點；若之後仍 queued/running（真孤兒）才由下方 CAS 收斂。
+      // 硬壽命到期者仍先試一次收斂（可能已完成），失敗才強制 failed。
       try {
         await advanceGeneration(gen.id);
       } catch {
         /* fal 連不上等：交給下方陳屍收斂 */
       }
       // 原子＋冪等收斂：CAS→failed 與退點列同一交易（已被 advanceGeneration 推進成終局者，CAS 自動 no-op）
-      await failStaleGenerationTx(gen.id, "生成停滯逾 30 分鐘，系統自動回收", "生成停滯自動回收退回");
+      await failStaleGenerationTx(
+        gen.id,
+        hardExpired
+          ? "生成超過最長時限（6 小時），系統自動回收"
+          : "生成停滯逾 30 分鐘，系統自動回收",
+        hardExpired ? "生成逾時自動回收退回" : "生成停滯自動回收退回",
+      );
     } catch (err) {
       console.warn(`[generation] 陳屍回收略過（下輪再試）：gen=${gen.id}`, err instanceof Error ? err.message : err);
+    }
+  }
+  // 待核超額生成逾時：未扣點，CAS → rejected（代理人 settle 會 fail 步驟）
+  await sweepExpiredAwaitingApproval();
+}
+
+/** 組員超額待核列逾 24h 未裁決 → 自動 rejected（不扣不退） */
+async function sweepExpiredAwaitingApproval(): Promise<void> {
+  const cutoff = new Date(Date.now() - AWAITING_APPROVAL_MAX_MS);
+  const rows = await db
+    .select({ id: schema.generations.id })
+    .from(schema.generations)
+    .where(
+      and(
+        eq(schema.generations.status, "awaiting_approval"),
+        lt(schema.generations.createdAt, cutoff),
+      ),
+    )
+    .orderBy(asc(schema.generations.createdAt))
+    .limit(BATCH);
+  for (const gen of rows) {
+    try {
+      await db
+        .update(schema.generations)
+        .set({
+          status: "rejected",
+          error: "超額生成逾 24 小時未核准，已自動取消",
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(schema.generations.id, gen.id), eq(schema.generations.status, "awaiting_approval")),
+        );
+    } catch (err) {
+      console.warn(
+        `[generation] 待核逾時回收略過：gen=${gen.id}`,
+        err instanceof Error ? err.message : err,
+      );
     }
   }
 }

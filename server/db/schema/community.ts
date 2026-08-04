@@ -10,7 +10,7 @@
  *   → 原列之後被改或刪，公開卡仍可展示與再用
  * - 署名保留 authorId + 可選 sourceProjectId / sourceGroupId（僅內部追蹤，公開列表可隱藏）
  */
-import { pgTable, uuid, text, integer, timestamp, jsonb, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, uuid, text, integer, timestamp, jsonb, index, uniqueIndex, primaryKey } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /** 靈感頻道貼文來源類型 */
@@ -107,5 +107,23 @@ export const communityPosts = pgTable(
     sourceActiveUq: uniqueIndex("community_posts_source_active_uq")
       .on(t.sourceType, t.sourceId)
       .where(sql`${t.sourceId} is not null and ${t.status} = 'published'`),
+  }),
+);
+
+/**
+ * 靈感頻道讚（Phase D）：一人一帖一列，PK (post_id, user_id)。
+ * like_count 仍 denormalized 在 community_posts，由 toggleLike 原子維護。
+ */
+export const communityLikes = pgTable(
+  "community_likes",
+  {
+    postId: uuid("post_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ name: "community_likes_pk", columns: [t.postId, t.userId] }),
+    userIdx: index("community_likes_user_idx").on(t.userId, t.createdAt),
+    postIdx: index("community_likes_post_idx").on(t.postId),
   }),
 );

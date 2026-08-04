@@ -10,8 +10,7 @@ import { TRPCError } from "@trpc/server";
 import { router, authedProcedure } from "../trpc";
 import { db, schema } from "../db";
 import {
-  activeMcpTokenCount,
-  createMcpToken,
+  createMcpTokenUnderCap,
   listMcpTokens,
   revokeMcpToken,
   MCP_TOKEN_MAX_PER_USER,
@@ -39,15 +38,19 @@ export const mcpTokensRouter = router({
       expiresInDays: z.number().int().min(1).max(MAX_EXPIRE_DAYS).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
-      const count = await activeMcpTokenCount(ctx.auth.user.id);
-      if (count >= MCP_TOKEN_MAX_PER_USER) {
+      const expiresAt = input.expiresInDays != null ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null;
+      // 鎖內 count→insert，防併發建立突破上限
+      const created = await createMcpTokenUnderCap(ctx.auth.user.id, input.label, {
+        readOnly: input.readOnly ?? false,
+        expiresAt,
+      });
+      if (!created.ok) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: `金鑰數已達上限（${MCP_TOKEN_MAX_PER_USER} 把）——請先撤銷用不到的再新增`,
         });
       }
-      const expiresAt = input.expiresInDays != null ? new Date(Date.now() + input.expiresInDays * 86_400_000) : null;
-      return createMcpToken(ctx.auth.user.id, input.label, { readOnly: input.readOnly ?? false, expiresAt });
+      return created.result;
     }),
 
   /** 撤銷自己的一把金鑰（冪等；撤掉後帶它連線立即失效） */
