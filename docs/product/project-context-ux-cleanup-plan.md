@@ -1,6 +1,6 @@
 # 整理計畫：專案上下文 UX + 與創作台／分鏡一體化
 
-> 狀態：**C0 實作中**（分支 `feat/context-c0-worldview-collapse`；C1–C3 待做）  
+> 狀態：**C0–C1 實作中**（`feat/context-c1-costume-tabs` 含 C0+C1；C2–C3 待做）  
 > 分支：`plan/project-context-ux-cleanup` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「專案上下文也很複雜」「連結不紮實，跟創作工作台與分鏡太不一體成型」（2026-08-04）  
 > 相關：工作台本體減噪見 **#400**（`creation-workbench-ux-cleanup-plan.md`，P0–P2 已合 #403）——本計畫專攻 **① 上下文** 與 **①↔②↔③ 接縫**
@@ -110,11 +110,11 @@
 **主要檔案：** `ProjectPage.tsx` 分組 A、`CharacterCards` / `ScenePresetCards` / `PropCards` 的包裹層
 
 ```
-[ ] C1.1  角色／場景／道具改為同一「定裝」容器內的 Tab 或手風琴（一次主開一類）
-[ ] C1.2  容器 id 穩定：如 #sec-characters #sec-scenes #sec-props 仍存在（可掛在 tabpanel）
+[x] C1.1  角色／場景／道具改為同一「定裝」容器內的 Tab 或手風琴（一次主開一類）
+[x] C1.2  容器 id 穩定：如 #sec-characters #sec-scenes #sec-props 仍存在（可掛在 tabpanel）
           以免既有 scrollToSelector / chip 失效
-[ ] C1.3  摘要列顯示三個計數（與工作台 chip 數字一致，同源 props）
-[ ] C1.4  自動帶入（carried props）在定裝區用固定 Hint 說明一次，勿只在生成確認才出現
+[x] C1.3  摘要列顯示三個計數（與工作台 chip 數字一致，同源 props）
+[x] C1.4  自動帶入（carried props）在定裝區用固定 Hint 說明一次，勿只在生成確認才出現
 ```
 
 **驗收：** 首屏定裝區高度明顯下降；深連結捲到角色／場景／道具仍可用。

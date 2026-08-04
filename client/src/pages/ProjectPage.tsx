@@ -43,6 +43,11 @@ import { KnowledgeBase } from "../components/KnowledgeBase";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PropCards } from "../components/PropCards";
+import {
+  CostumePackSection,
+  costumeTabFromTarget,
+  type CostumeTab,
+} from "../components/CostumePackSection";
 import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
@@ -485,8 +490,27 @@ export function ProjectPage({ id }: { id: string }) {
     sources: false,
     manage: false,
   });
-  const setCtxSectionOpen = (key: CtxSectionKey, open: boolean) =>
+  /** C1：定裝三卡改 Tab；jump / 建定裝時同步切到對應 tab */
+  const [costumeTab, setCostumeTab] = useState<CostumeTab>("characters");
+  const setCtxSectionOpen = (key: CtxSectionKey, open: boolean) => {
     setCtxOpen((prev) => (prev[key] === open ? prev : { ...prev, [key]: open }));
+    if (open && (key === "characters" || key === "scenes" || key === "props")) {
+      setCostumeTab(key);
+    }
+  };
+  const setCostumePackOpen = (open: boolean) => {
+    setCtxOpen((prev) => {
+      if (
+        prev.characters === open &&
+        prev.scenes === open &&
+        prev.props === open
+      ) {
+        return prev;
+      }
+      return { ...prev, characters: open, scenes: open, props: open };
+    });
+  };
+  const costumePackOpen = ctxOpen.characters || ctxOpen.scenes || ctxOpen.props;
   const setCtxGroupSectionOpen = (key: CtxGroupKey, open: boolean) =>
     setCtxGroupOpen((prev) => (prev[key] === open ? prev : { ...prev, [key]: open }));
   // Escape 關閉留言 sheet
@@ -1217,6 +1241,8 @@ export function ProjectPage({ id }: { id: string }) {
     return "world";
   };
   const jumpToContext = (target: string) => {
+    const costume = costumeTabFromTarget(target);
+    if (costume) setCostumeTab(costume);
     if (mobileCompact) {
       if (target === "#ctx-group-world" || target === "#ctx-group-sources" || target === "#ctx-group-manage") {
         setCtxGroupSectionOpen(target.replace("#ctx-group-", "") as CtxGroupKey, true);
@@ -1227,8 +1253,15 @@ export function ProjectPage({ id }: { id: string }) {
         if (key) {
           setCtxGroupSectionOpen(sectionToGroup(key), true);
           setCtxSectionOpen(key, true);
+          // 定裝 Tab 在單一 collapse 內：任一角色／場景／道具都要撐開整包
+          if (key === "characters" || key === "scenes" || key === "props") {
+            setCostumePackOpen(true);
+          }
         }
       }
+    } else if (costume) {
+      // 桌機：確保定裝區在視窗內（tab 已切）
+      setCostumePackOpen(true);
     }
     requestAnimationFrame(() => {
       requestAnimationFrame(() => scrollToSelector(target));
@@ -2095,58 +2128,70 @@ export function ProjectPage({ id }: { id: string }) {
           </CtxCollapse>
           </CollabZone>
 
-          {/* 角色定裝卡：勾選後生成自動注入外觀錨點。
-              手機預設收合（CtxCollapse）；桌機維持全展開。錨點 id 掛外層供摘要 chip 捲動。 */}
+          {/* C1：角色／場景／道具合一「定裝」Tab。錨點 #sec-characters|scenes|props 掛 tabpanel。
+              手機：整包 CtxCollapse 預設收合；桌機直接展開。 */}
           <CtxCollapse
             compact={mobileCompact}
-            sectionId="sec-characters"
-            title="角色定裝"
-            meta={charCount != null ? `${charCount} 張` : undefined}
-            open={ctxOpen.characters}
-            onOpenChange={(o) => setCtxSectionOpen("characters", o)}
+            sectionId="sec-costume"
+            title="定裝"
+            meta={[
+              charCount != null ? `角${charCount}` : null,
+              presetCount != null ? `景${presetCount}` : null,
+              propCount != null ? `道${propCount}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined}
+            open={costumePackOpen}
+            onOpenChange={setCostumePackOpen}
           >
-            <CharacterCards
-              projectId={id}
-              selectedIds={charIds}
-              onToggle={toggleChar}
-              onCreated={onCharCreated}
-              readOnly={!canEdit}
-            />
-          </CtxCollapse>
-
-          {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
-          <CtxCollapse
-            compact={mobileCompact}
-            sectionId="sec-scenes"
-            title="場景設定"
-            meta={presetCount != null ? `${presetCount} 張` : undefined}
-            open={ctxOpen.scenes}
-            onOpenChange={(o) => setCtxSectionOpen("scenes", o)}
-          >
-            <ScenePresetCards
-              projectId={id}
-              selectedIds={sceneIds}
-              onToggle={toggleScene}
-              onCreated={onSceneCreated}
-              readOnly={!canEdit}
-            />
-          </CtxCollapse>
-
-          {/* 素材設定卡：反覆出現的道具／物件外觀材質，勾選後生成自動注入錨點 */}
-          <CtxCollapse
-            compact={mobileCompact}
-            sectionId="sec-props"
-            title="素材設定"
-            meta={propCount != null ? `${propCount} 張` : undefined}
-            open={ctxOpen.props}
-            onOpenChange={(o) => setCtxSectionOpen("props", o)}
-          >
-            <PropCards
-              projectId={id}
-              selectedIds={propIds}
-              onToggle={toggleProp}
-              onCreated={onPropCreated}
-              readOnly={!canEdit}
+            <CostumePackSection
+              tab={costumeTab}
+              onTabChange={(t) => {
+                setCostumeTab(t);
+                setCtxSectionOpen(t, true);
+              }}
+              counts={{
+                characters: charCount,
+                scenes: presetCount,
+                props: propCount,
+              }}
+              carriedHint={
+                <>
+                  勾選角色／場景後，歸屬在它們名下的道具會在生成時
+                  <strong>自動帶入</strong>
+                  （與創作台數字同源；手動勾選優先）。目前預覽會多帶{" "}
+                  {carriedPropIds.filter((pid) => !propIds.includes(pid)).length} 件。
+                </>
+              }
+              panels={{
+                characters: (
+                  <CharacterCards
+                    projectId={id}
+                    selectedIds={charIds}
+                    onToggle={toggleChar}
+                    onCreated={onCharCreated}
+                    readOnly={!canEdit}
+                  />
+                ),
+                scenes: (
+                  <ScenePresetCards
+                    projectId={id}
+                    selectedIds={sceneIds}
+                    onToggle={toggleScene}
+                    onCreated={onSceneCreated}
+                    readOnly={!canEdit}
+                  />
+                ),
+                props: (
+                  <PropCards
+                    projectId={id}
+                    selectedIds={propIds}
+                    onToggle={toggleProp}
+                    onCreated={onPropCreated}
+                    readOnly={!canEdit}
+                  />
+                ),
+              }}
             />
           </CtxCollapse>
           </CtxGroup>
