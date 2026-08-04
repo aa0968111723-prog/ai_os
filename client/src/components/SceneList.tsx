@@ -16,6 +16,7 @@ import { Icon } from "./Icon";
 import { ConfirmButton, HelpTip } from "./interactions";
 import { AssetImg, AssetVideo } from "./MediaFallback";
 import { discussInMessages } from "../discuss";
+import { revealProjectContext } from "../features/project-nav/projectContextNav";
 
 import { Button, Card, EmptyState, Hint, Meta, Pill, Skeleton, type PillStatus } from "./ui";
 /** 素材類型的中文標籤（與素材庫/生成紀錄同口徑）——分鏡 meta 列不再直接冒英文 enum */
@@ -378,6 +379,44 @@ function SceneRow({
 
         {/* 逐鏡卡片綁定：這一鏡用誰、在哪、拿什麼——沒指定就沿用生成台勾選 */}
         <SceneCardBinding projectId={projectId} scene={s} canEdit={canEdit} onSaved={invalidate} />
+
+        {/* C2.4：明示與專案定裝同源，可點揭示 ①（避免以為分鏡是另一套設定） */}
+        <Meta
+          as="p"
+          data-testid="scene-costume-line"
+          style={{ margin: "6px 0 0", fontSize: 12 }}
+        >
+          使用專案已勾選定裝（角色 {effectiveCards.characterIds.length} / 場景{" "}
+          {effectiveCards.scenePresetIds.length}
+          {effectiveCards.propIds.length > 0 ? ` / 道具 ${effectiveCards.propIds.length}` : ""}
+          ）
+          {" · "}
+          <button
+            type="button"
+            className="linkish"
+            style={{
+              border: 0,
+              background: "none",
+              cursor: "pointer",
+              color: "var(--primary-ink)",
+              textDecoration: "underline",
+              fontSize: 12,
+              padding: 0,
+            }}
+            onClick={() =>
+              revealProjectContext(
+                effectiveCards.characterIds.length > 0
+                  ? "characters"
+                  : effectiveCards.scenePresetIds.length > 0
+                    ? "scenes"
+                    : "props",
+                { projectId, returnTo: "scenes" },
+              )
+            }
+          >
+            編輯定裝
+          </button>
+        </Meta>
 
         {rowError && <p className="error" role="alert">存檔／生成失敗：{rowError.message}</p>}
 

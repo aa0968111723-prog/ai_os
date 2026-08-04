@@ -334,8 +334,10 @@ describe("DirectGenerateMode", () => {
   it("shows ctx-summary chips for worldview / roles / scenes", () => {
     render(<Harness characterIds={["a", "b"]} scenePresetIds={["s1"]} />);
     const group = screen.getByRole("group", { name: "這次生成會帶入的上下文" });
-    expect(within(group).getByText(/角色 2/)).toBeVisible();
-    expect(within(group).getByText(/場景 1/)).toBeVisible();
+    // C2：摘要句 + chip 都含「角色 2」——用 role=button 鎖定 chip
+    expect(within(group).getByRole("button", { name: /角色 2/ })).toBeVisible();
+    expect(within(group).getByRole("button", { name: /場景 1/ })).toBeVisible();
+    expect(within(group).getByTestId("gen-bring-in-summary")).toHaveTextContent(/角色 2/);
   });
 
   it("resolves applyRequest sourceAssetId and notifies onSourceChange", async () => {

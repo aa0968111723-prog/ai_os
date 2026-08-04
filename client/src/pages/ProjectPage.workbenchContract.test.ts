@@ -94,6 +94,18 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/自動帶入/);
   });
 
+  /**
+   * C2 (#402)：揭示契約監聽 + 回到原處 CTA + 帶入摘要同源。
+   */
+  it("C2 context reveal: listens for project-context-reveal and return bar", () => {
+    expect(src).toMatch(/PROJECT_CONTEXT_REVEAL_EVENT/);
+    expect(src).toMatch(/data-testid="context-return-bar"/);
+    expect(src).toMatch(/回到創作台/);
+    expect(src).toMatch(/回到分鏡/);
+    expect(src).toMatch(/formatBringInSummary/);
+    expect(src).toMatch(/data-testid="ctx-bring-in-summary"/);
+  });
+
   it("TocNav uses shared three-stage defaults (single jump to #stage-create)", () => {
     expect(src).toMatch(/DEFAULT_ITEMS as TOC_DEFAULT_ITEMS/);
     expect(src).toMatch(/id="stage-create"/);
