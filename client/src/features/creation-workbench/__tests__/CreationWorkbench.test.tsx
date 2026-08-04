@@ -55,6 +55,10 @@ vi.mock("../../../api", () => ({
       },
     },
     generation: {
+      // P2 recent strip shares this key with GenerationList
+      listByProject: {
+        useQuery: () => ({ data: [], isLoading: false, isError: false }),
+      },
       submit: {
         useMutation: () => ({ mutate: generationSubmit, isPending: false, error: null }),
       },

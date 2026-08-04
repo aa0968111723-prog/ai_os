@@ -1,6 +1,7 @@
 # 修復／整理計畫：AI 創作工作台 UX 大整理
 
-> 狀態：**P0 完成（本地）· P1 實作中**（`feat/workbench-p1-default-generate`；不推遠端）  
+> 狀態：**P0–P2 完成（本地）**（P2 recent strip；不推遠端）  
+
 > 分支：`plan/creation-workbench-ux-cleanup` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「AI 創作工作台有點難用想大整理」（2026-08-04）
 
@@ -112,11 +113,11 @@ Anchors（勿無故改壞深連結）：`#sec-ai-hub` `#sec-studio` `#sec-genera
 **檔案：** `DirectGenerateMode.tsx`、`CreationResourceDrawer.tsx`、可能小元件 `RecentGenerationsStrip.tsx`（新建）
 
 ```
-[ ] P2.1  送出成功後：除 submitNotice 外，在 #sec-studio 下方顯示「最近生成」3～5 筆
+[x] P2.1  送出成功後：除 submitNotice 外，在 #sec-studio 下方顯示「最近生成」3～5 筆
           資料來源：既有 generation.listByProject / paged（與抽屜同一 API，勿重複訂閱過多）
-[ ] P2.2  「看進度／全部紀錄」仍可開抽屜 #sec-generations；抽屜改定位為完整歷史
-[ ] P2.3  避免與抽屜內 GenerationList 雙份超長列表搶版面（主區精簡、抽屜完整）
-[ ] P2.4  測試：送出後 notice + 列表 invalidate 行為
+[x] P2.2  「看進度／全部紀錄」仍可開抽屜 #sec-generations；抽屜改定位為完整歷史
+[x] P2.3  避免與抽屜內 GenerationList 雙份超長列表搶版面（主區精簡、抽屜完整）
+[x] P2.4  測試：送出後 notice + 列表 invalidate 行為
 ```
 
 **驗收 P2：** 生成後不必翻到頁面最底抽屜也能看到「進行中／剛完成」。

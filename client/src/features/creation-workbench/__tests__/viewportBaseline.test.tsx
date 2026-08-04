@@ -43,6 +43,10 @@ vi.mock("../../../api", () => ({
     prompts: { save: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     scenes: { addDraft: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
     generation: {
+      // P2 recent strip (DirectGenerateMode) shares this key with GenerationList
+      listByProject: {
+        useQuery: () => ({ data: [], isLoading: false, isError: false }),
+      },
       submit: { useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }) },
     },
   },

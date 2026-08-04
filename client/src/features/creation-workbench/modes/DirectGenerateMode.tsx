@@ -24,6 +24,7 @@ import { Button, Card, Chip, Hint, Meta } from "../../../components/ui";
 import { GenerationSourcePicker } from "../GenerationSourcePicker";
 import type { CreativePromptOverride } from "@shared/aiTrace";
 import { AiUnderstandingPanel } from "../AiUnderstandingPanel";
+import { RecentGenerationsStrip } from "../RecentGenerationsStrip";
 /** External fill from PromptLibrary / GenerationList / SceneList / AssetLibrary. */
 export type DirectGenerateApplyRequest = {
   nonce: number;
@@ -730,6 +731,9 @@ export function DirectGenerateMode({
         </Meta>
       )}
       {submit.error && <p className="error">{submit.error.message}</p>}
+
+      {/* P2: recent strip near the action; full GenerationList stays in the drawer only. */}
+      <RecentGenerationsStrip projectId={projectId} />
 
       {/* GenerationList lives in CreationResourceDrawer (WB-05) — avoid duplicate long card here. */}
       <Hint layer="always" style={{ marginTop: 12 }}>
