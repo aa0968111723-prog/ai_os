@@ -63,6 +63,52 @@ export interface SchemaDrift {
   warnings: string[];
 }
 
+/**
+ * drizzle-kit `pushSchema` failed while introspecting the live DB
+ * (before any drift statements are produced). Not a pending-migration or
+ * invalid-ledger condition — callers must not print those generic hints alone.
+ */
+export class SchemaDriftInspectError extends Error {
+  readonly cause: unknown;
+  readonly failedQuery: string | undefined;
+
+  constructor(message: string, options?: { cause?: unknown; failedQuery?: string }) {
+    super(message);
+    this.name = "SchemaDriftInspectError";
+    this.cause = options?.cause;
+    this.failedQuery = options?.failedQuery;
+  }
+}
+
+function extractFailedQuery(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const record = error as { query?: unknown; message?: unknown; cause?: unknown };
+  if (typeof record.query === "string" && record.query.trim()) return record.query.trim();
+  if (typeof record.message === "string") {
+    const match = /Failed query:\s*([\s\S]+?)(?:\nparams:|$)/i.exec(record.message);
+    if (match?.[1]) return match[1].trim();
+  }
+  if (record.cause) return extractFailedQuery(record.cause);
+  return undefined;
+}
+
+function formatSchemaInspectFailure(error: unknown): string {
+  const failedQuery = extractFailedQuery(error);
+  const base =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "unknown error";
+  const lines = [
+    "schema introspect 失敗（drizzle-kit pushSchema / Pulling schema），不是 pending migration 或 invalid ledger。",
+    base,
+  ];
+  if (failedQuery) lines.push(`Failed query: ${failedQuery}`);
+  lines.push("診斷：docs/product/fix-startup-schema-introspect-plan.md（#398）");
+  return lines.join("\n");
+}
+
 export interface MigrationLedgerRow {
   id: number;
   hash: string;
@@ -318,20 +364,26 @@ export function verifyLegacyAdoptionBridge(
   if (throughTag !== LEGACY_ADOPTION_THROUGH_TAG || throughIndex < 0) {
     errors.push(`只允許經審核的 legacy bridge：--through=${LEGACY_ADOPTION_THROUGH_TAG}`);
   }
+  // Remaining journal after --through may continue with post-bridge migrations
+  // (e.g. 0036 PK rewrite) that are NOT pure additive. Those are applied by
+  // normal migrate after adopt records the through-prefix; only the reviewed
+  // LEGACY_ADOPTION_PENDING_TAGS prefix participates in the bridge drift check.
   const pending = throughIndex < 0 ? [] : manifest.entries.slice(throughIndex + 1);
   const pendingTags = pending.map((entry) => entry.tag);
+  const bridgeTagCount = LEGACY_ADOPTION_PENDING_TAGS.length;
   if (
-    pendingTags.length !== LEGACY_ADOPTION_PENDING_TAGS.length
-    || pendingTags.some((tag, index) => tag !== LEGACY_ADOPTION_PENDING_TAGS[index])
+    pendingTags.length < bridgeTagCount
+    || LEGACY_ADOPTION_PENDING_TAGS.some((tag, index) => pendingTags[index] !== tag)
   ) {
     errors.push(
-      `legacy bridge 僅適用 pending=${LEGACY_ADOPTION_PENDING_TAGS.join(",")}；目前為 ${pendingTags.join(",") || "(none)"}`,
+      `legacy bridge 要求 pending 以 ${LEGACY_ADOPTION_PENDING_TAGS.join(",")} 為前綴；目前為 ${pendingTags.join(",") || "(none)"}`,
     );
   }
   if (drift.hasDataLoss) errors.push("schema drift 被 Drizzle 標記為可能資料損失");
   if (drift.warnings.length > 0) errors.push(`schema drift 含 ${drift.warnings.length} 個警告`);
 
-  const pairs = pending.flatMap(migrationStatementPairs);
+  const bridgePending = pending.slice(0, bridgeTagCount);
+  const pairs = bridgePending.flatMap(migrationStatementPairs);
   const expected = pairs.map((pair) => pair.canonical);
   const unsafe = expected.filter((statement) =>
     !isAdditiveSchemaStatement(statement)
@@ -560,10 +612,22 @@ export function classifyMigrationState(
 /**
  * Computes the SQL Drizzle would need to make the live public schema match
  * schema.ts, but deliberately never calls the returned apply() function.
+ *
+ * On introspection failure (drizzle-kit throwing mid-pull), wraps the cause in
+ * {@link SchemaDriftInspectError} so start/migrate logs name the real killer
+ * instead of the generic "pending / invalid ledger" triad.
  */
 export async function inspectSchemaDrift(database: Database): Promise<SchemaDrift> {
   const { pushSchema } = await import("drizzle-kit/api");
-  const plan = await pushSchema(schema as unknown as Record<string, unknown>, database as never);
+  let plan: Awaited<ReturnType<typeof pushSchema>>;
+  try {
+    plan = await pushSchema(schema as unknown as Record<string, unknown>, database as never);
+  } catch (error) {
+    throw new SchemaDriftInspectError(formatSchemaInspectFailure(error), {
+      cause: error,
+      failedQuery: extractFailedQuery(error),
+    });
+  }
   let statements = plan.statementsToExecute ?? [];
 
   // drizzle-kit 0.31 serializes an expression index differently when reading

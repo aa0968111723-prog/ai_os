@@ -67,6 +67,15 @@
  * identical predicate either way — every database that applied the original
  * carries exactly the index the corrected file creates. The correction only
  * lets the bridge match the file against the drift plan textually.
+ *
+ * 0035 originally used a composite primary key on (post_id, user_id). That
+ * shape makes drizzle-kit 0.31's introspect path throw DrizzleQueryError on
+ * `SELECT conname AS primary_key …` (drizzle-kit#5557), which aborted every
+ * boot after ledger ready. The corrected file creates a surrogate uuid PK plus
+ * unique(post_id, user_id). Databases that already applied the original still
+ * carry the composite PK until 0036 rewrites them; accepting the original hash
+ * only prevents a false "tampered history" reading — it does not claim the two
+ * files produce identical schemas on their own.
  */
 export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = {
   "0000_0000_baseline": [
@@ -184,7 +193,18 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0034_note_comments": [
     "d2554f1ce2f5d4ab89cc31291ba7b0dc88b2fe5978524945945cacd995bc55a9",
   ],
+  // 0035：初版為 composite PK (post_id,user_id)。為避開 drizzle-kit#5557 introspection
+  // 崩潰改為 surrogate uuid PK + unique(post_id,user_id)。已套用初版的 DB 由 0036 前向升級；
+  // 初版 hash 仍被 isSupersededMigrationHash 接受，避免 ledger 誤判為被竄改。
   "0035_community_likes": [
     "0e67b32f2c9fdaa5d3ae9b77575686a532b4f7788090f775a8aef6ec6ad2ff96",
+    "f19f584db2351a32c9c3eb5de9d25bd6bba558cee2b49bd2b0b1c0d12efd0acc",
+  ],
+  // 0036：僅服務「已套用舊 0035 composite PK」的 DB；新 0035 上 DROP+ADD pkey 等價重套。
+  // 含 DROP/ADD PRIMARY KEY，不可納入 LEGACY_ADOPTION_PENDING_TAGS。
+  // 初版（#397）無 DROP pkey 步驟；已套用初版者 schema 已是最終形狀。
+  "0036_community_likes_surrogate_pk": [
+    "a4e9cd69527f5daae8c3b78036a5e51c0b3ef6a09f97c69df35e79ab6be470ed",
+    "8677baa3b1c8e65bddb0b2008392713d68c673ff4fc3e922b0809e3bdca845d3",
   ],
 };

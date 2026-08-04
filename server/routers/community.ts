@@ -387,7 +387,11 @@ export const communityRouter = router({
         const inserted = await tx
           .insert(schema.communityLikes)
           .values({ postId: input.postId, userId })
-          .onConflictDoNothing()
+          // 語意唯一鍵是 (post_id, user_id)；surrogate PK 後必須明示 target，
+          // 否則 onConflictDoNothing 只對 primary key 生效，雙擊會插出第二列。
+          .onConflictDoNothing({
+            target: [schema.communityLikes.postId, schema.communityLikes.userId],
+          })
           .returning({ postId: schema.communityLikes.postId });
 
         if (inserted.length > 0) {

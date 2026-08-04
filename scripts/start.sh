@@ -37,7 +37,10 @@ if ! npm run db:migrate; then
   # 因為這段只在 migrate 失敗時才進來，納管完成後變數留著也不會再觸發——但仍建議移除。
   if [ -z "$DB_ADOPT_LEGACY_THROUGH" ]; then
     echo "[start] ⚠ migration 未完成；為避免新程式搭配舊 schema，本服務拒絕啟動"
-    echo "[start]   常見原因與對應處理（詳見 docs/資料庫遷移.md）："
+    echo "[start]   常見原因與對應處理（詳見 docs/資料庫遷移.md；introspect 見 docs/product/fix-startup-schema-introspect-plan.md）："
+    echo "[start]   0) schema introspect 失敗（log 含「Pulling schema」或 SchemaDriftInspectError / DrizzleQueryError）："
+    echo "[start]      → 不是 pending migration，也不是 invalid ledger；ledger 可能已是 ready。"
+    echo "[start]      → 請貼完整 Failed query；常見為某表 composite PK 讓 drizzle-kit 崩潰（#5557）→ 0036 surrogate PK。"
     echo "[start]   1) state=legacy-untracked：既有 DB 還沒納管——先備份，再設 DB_ADOPT_LEGACY_THROUGH=0001_managed_indexes 重新部署"
     echo "[start]   2) Failed query 是 CREATE UNIQUE INDEX：該表有重複列——migration 必須先去重再建索引（0001 / 0005 已含確定性 DELETE）"
     echo "[start]   3) state=invalid +「資料庫含本版程式不認識的 migration：created_at=…」："

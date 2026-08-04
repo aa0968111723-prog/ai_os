@@ -13,6 +13,7 @@ import {
   LEGACY_ADOPTION_THROUGH_TAG,
   loadMigrationManifest,
   redactDatabaseTarget,
+  SchemaDriftInspectError,
   verifyLegacyAdoptionBridge,
   type MigrationLedgerRow,
 } from "./migrationState";
@@ -188,6 +189,22 @@ describe("migration manifest validation", () => {
     const target = redactDatabaseTarget("postgresql://operator:top-secret@db.internal:5432/product");
     expect(target).toBe("postgresql://operator@db.internal:5432/product");
     expect(target).not.toContain("top-secret");
+  });
+
+  it("does not put 0036 (non-additive PK rewrite) into the legacy adoption bridge", () => {
+    // 0036 DROP/ADD PK cannot be re-run as IF NOT EXISTS bridge DDL.
+    expect(LEGACY_ADOPTION_PENDING_TAGS).not.toContain("0036_community_likes_surrogate_pk");
+    const manifest = loadMigrationManifest();
+    expect(manifest.entries.some((e) => e.tag === "0036_community_likes_surrogate_pk")).toBe(true);
+  });
+
+  it("names SchemaDriftInspectError so start logs are not mistaken for invalid ledger", () => {
+    const err = new SchemaDriftInspectError("schema introspect 失敗\nFailed query: SELECT conname AS primary_key", {
+      failedQuery: "SELECT conname AS primary_key",
+    });
+    expect(err.name).toBe("SchemaDriftInspectError");
+    expect(err.message).toContain("schema introspect");
+    expect(err.failedQuery).toContain("conname");
   });
 });
 
