@@ -52,7 +52,8 @@ export function splitGenerationSourceMeta(params: unknown): {
     ? (rawAblation as GenerationAblationMeta)
     : undefined;
   const usedUserKey =
-    rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
-      && (rawMeta as Record<string, unknown>).usedUserKey === true;
+    rawMeta != null && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+      ? (rawMeta as Record<string, unknown>).usedUserKey === true
+      : false;
   return { providerParams, meta: { secondarySourceUrl, ablation, usedUserKey: usedUserKey || undefined } };
 }

@@ -125,6 +125,19 @@ vi.mock("../components/interactions", () => ({
 
 vi.mock("../components/FirstRunGuide", () => ({ FirstRunGuide: () => null }));
 vi.mock("../components/InstallAppBanner", () => ({ InstallAppBanner: () => null }));
+// 全組 presence／游標走真的 WebSocket＋react-query client；這支測的是團隊卡內容，
+// 不架 QueryClientProvider，比照 ../api 直接換成靜態替身。
+vi.mock("../realtime", () => ({
+  useCollab: () => ({
+    connected: false,
+    peers: [],
+    self: null,
+    cursors: [],
+    containerRef: { current: null },
+    onPointerMove: () => {},
+  }),
+  CursorOverlay: () => null,
+}));
 
 const GROUP = "11111111-1111-4111-8111-111111111111";
 /* NOW 必須取真實現在而非寫死日期：元件用 Date.now() 與 Math.floor 算「卡了 N 天」，

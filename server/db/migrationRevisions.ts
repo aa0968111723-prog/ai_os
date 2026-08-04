@@ -58,6 +58,15 @@
  * original did. The hash is taken over the raw file, though, so the deployed
  * databases that had already applied 0029 read as tampered until this revision
  * was recorded.
+ *
+ * 0032 repeated 0023's mistake in one of its five index predicates: the partial
+ * unique index qualified `"community_posts"."status"` but left `source_id` bare
+ * (`WHERE "source_id" is not null and …`), while the generated drift plan
+ * qualifies both. Inside a partial index on community_posts an unqualified
+ * source_id can only resolve to that table's column, so PostgreSQL stores the
+ * identical predicate either way — every database that applied the original
+ * carries exactly the index the corrected file creates. The correction only
+ * lets the bridge match the file against the drift plan textually.
  */
 export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = {
   "0000_0000_baseline": [
@@ -167,6 +176,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   "0032_community_posts": [
     "ea558827804441655f3c8827770490eb34fbb6d2d597187a8911a45d4d1996c8",
     "f2c1ea2a71b114dc3ca6f69c63bfe28aadfb83d5dfc0f464cd81ee74ae3936f8",
+    "72dfa8e1cdca1d2b5be188f41b7af4abafdb504ee2ebfdd0055e1ffff6231796",
   ],
   "0033_user_avatar": [
     "336a82ba3e08d65d7c80736cabdbe328d09ddadcd024de74b7f7ca23cd42c5db",

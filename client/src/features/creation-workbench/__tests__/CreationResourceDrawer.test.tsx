@@ -39,6 +39,12 @@ vi.mock("../../../api", () => ({
         useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
       },
     },
+    // 抽屜內嵌 PromptLibrary，每列都有靈感頻道「發布」鈕；少了這個替身整個抽屜渲染就炸
+    community: {
+      publishFromSource: {
+        useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+      },
+    },
     generation: {
       listByProject: {
         useQuery: (...args: unknown[]) => generationList(...args),

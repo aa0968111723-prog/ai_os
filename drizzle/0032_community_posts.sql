@@ -35,4 +35,4 @@ CREATE INDEX IF NOT EXISTS "community_posts_author_idx" ON "community_posts" USI
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "community_posts_source_type_idx" ON "community_posts" USING btree ("source_type","published_at");
 --> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS "community_posts_source_active_uq" ON "community_posts" USING btree ("source_type","source_id") WHERE "source_id" is not null and "community_posts"."status" = 'published';
+CREATE UNIQUE INDEX IF NOT EXISTS "community_posts_source_active_uq" ON "community_posts" USING btree ("source_type","source_id") WHERE "community_posts"."source_id" is not null and "community_posts"."status" = 'published';
