@@ -129,6 +129,12 @@ export function ProjectAssistant({
   askFillRequest = null,
   knowledgeIds,
   canInspectAi = false,
+  /** G2 共創：覆寫冷啟動快捷句（階段相關） */
+  quickPrompts,
+  /** G2 共創：此 phase 建議主 CTA 的 action.type，UI 標「這一步建議」 */
+  primaryActionTypes,
+  /** G2：Confirm → runAction 成功後回報（phase 推進／invalidate 由上層） */
+  onRunActionSuccess,
 }: {
   projectId: string;
   embedded?: boolean;
@@ -147,6 +153,15 @@ export function ProjectAssistant({
   knowledgeIds?: string[];
   /** Full prompt/trace inspection is editor-only. */
   canInspectAi?: boolean;
+  /** 空對話時的快捷句；未傳則用一般「一起想」預設 */
+  quickPrompts?: readonly string[];
+  /** 標成 phase 主按鈕的 action type 列表 */
+  primaryActionTypes?: readonly string[];
+  onRunActionSuccess?: (info: {
+    actionType: string;
+    kind: string;
+    message: string;
+  }) => void;
 }) {
   const utils = trpc.useUtils();
   const [input, setInput] = useState("");
@@ -458,15 +473,18 @@ export function ProjectAssistant({
 
         <ProactiveModelConverter intent={input} onCreationAction={onCreationAction} />
 
-        {/* 快速開場：問答／發想／下目標都從同一個入口——點一顆帶入輸入框，按「問」才送出 */}
+        {/* 快速開場：點一顆帶入輸入框，按「問」才送出。共創 G2 可覆寫為 phase 快捷句 */}
         {turns.length === 0 && !thinking.active && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-            {[
+          <div
+            style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}
+            data-testid="assistant-quick-prompts"
+          >
+            {(quickPrompts ?? [
               "這個專案進度到哪？",
               "給我 3 個分鏡 idea",
               "把知識庫的腳本拆成分鏡，並為每一鏡生成畫面",
               "幫我推薦適合本專案的生成模型",
-            ].map((q) => (
+            ]).map((q) => (
               <Button size="sm"
                 key={q}
                 type="button"
@@ -552,6 +570,9 @@ export function ProjectAssistant({
                       const chosenInGroups = groups.some((g) => g.items.some((m) => m.id === chosenId));
                       // 生成動作的顯示文字：換模型後由 genLabel 依實際會送的模型＋估點重建（按鈕臉＋確認框同源）
                       const faceLabel = gen ? genLabel(gen.action, gen.info) : payloadAct.label;
+                      const isPhasePrimary =
+                        Boolean(primaryActionTypes?.length) &&
+                        primaryActionTypes!.includes(payloadAct.type);
                       const confirmMsg =
                         payloadAct.type === "generate"
                           ? `執行「${gen ? genLabel(gen.action, gen.info) : payloadAct.label}」？${gen?.info ? "" : "（點數見上方說明）"}`
@@ -565,7 +586,12 @@ export function ProjectAssistant({
                                   ? `套用世界觀基調「${payloadAct.label.replace(/^套用基調：/, "")}」？會覆寫你有選到的主軸／調性／風格欄位（未列的欄位不動）。可之後在專案基調區再改。`
                                   : `執行「${payloadAct.label}」？`;
                       return (
-                        <div key={j} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div
+                          key={j}
+                          style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                          data-phase-primary={isPhasePrimary ? "true" : undefined}
+                          data-testid={isPhasePrimary ? "co-create-primary-action" : undefined}
+                        >
                           {/* 換模型（多模態）：只在 generate 動作出現，執行前可改用哪個模型／模態 */}
                           {gen && !isDone && (
                             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-11)", color: "var(--fg-secondary)" }}>
@@ -636,10 +662,23 @@ export function ProjectAssistant({
                               </span>
                             </label>
                           )}
+                          {isPhasePrimary && !isDone && (
+                            <Meta as="span" style={{ fontSize: 11, margin: 0 }} data-testid="co-create-primary-badge">
+                              這一步建議
+                            </Meta>
+                          )}
                           <ConfirmButton
-                            triggerClassName="btn-tonal btn-sm"
+                            triggerClassName={
+                              isPhasePrimary ? "primary btn-sm" : "btn-tonal btn-sm"
+                            }
                             disabled={isDone || isRunning}
-                            title={isDone ? "此動作已執行" : "確認執行助手提議的動作"}
+                            title={
+                              isDone
+                                ? "此動作已執行"
+                                : isPhasePrimary
+                                  ? "這一步建議動作：確認後才執行（扣點／寫入）"
+                                  : "確認執行助手提議的動作"
+                            }
                             message={confirmMsg}
                             confirmLabel="執行"
                             onConfirm={async () => {
@@ -668,6 +707,11 @@ export function ProjectAssistant({
                                 if (!actionIsCurrent()) return;
                                 push({ role: "ai", text: `✓ ${result.message}` });
                                 setExecuted((prev) => new Set(prev).add(actKey));
+                                onRunActionSuccess?.({
+                                  actionType: payloadAct.type,
+                                  kind: result.kind,
+                                  message: result.message,
+                                });
                               } catch (error) {
                                 if (actionIsCurrent()) {
                                   push({

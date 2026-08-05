@@ -1,6 +1,6 @@
 # 計畫：陪你做完（共創引導 Session）
 
-> 狀態：**G0–G1 實作中**（G0 #416 已合；G1 進度推導＋摘要）  
+> 狀態：**G0–G2**（G0 #416、G1 #419 已合；G2 引導對話 + runAction）  
 > 分支：`plan/co-create-guided-session` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「能不能一邊討論一邊完成作品？有時真的沒什麼靈感」＋後續「釐清與引導使用者創作」（2026-08-04）  
 > 相關：工作台減噪 **#400**、上下文一體化 **#402**、既有「一起想」`ProjectAssistant`、`SimpleProjectMode`
@@ -151,13 +151,13 @@ wrap = 可送審或已打包提示
 ### G2 — 引導對話接 runAction（核心）
 
 ```
-[ ] G2.1  嵌入或包一層 ProjectAssistant：共創模式下預設快捷句改為階段相關
+[x] G2.1  嵌入或包一層 ProjectAssistant：共創模式下預設快捷句改為階段相關
           theme:「給我三個適合弘法短片的主題方向」等（文案可配置）
-[ ] G2.2  確保 AI 回傳 actions 時 UI 清楚標 phase 建議主按鈕（已有 ConfirmButton）
-[ ] G2.3  theme→ 成功 apply worldview / logline 後自動建議進入 structure
-[ ] G2.4  structure→ split_script / create_scene 成功後進 visuals
-[ ] G2.5  visuals→ generate 成功 invalidate scenes；摘要縮圖更新
-[ ] G2.6  wrap→ 提示送審／打包；可只導航不新 API
+[x] G2.2  確保 AI 回傳 actions 時 UI 清楚標 phase 建議主按鈕（已有 ConfirmButton）
+[x] G2.3  theme→ 成功 apply worldview / logline 後自動建議進入 structure
+[x] G2.4  structure→ split_script / create_scene 成功後進 visuals
+[x] G2.5  visuals→ generate 成功 invalidate scenes；摘要縮圖更新
+[x] G2.6  wrap→ 提示送審／打包；可只導航不新 API
 ```
 
 ### G3 — 引導品質（可選後端）

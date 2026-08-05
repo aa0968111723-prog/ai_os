@@ -2,6 +2,14 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { flashAnchor } from "../../discuss";
+import { ProjectAssistant } from "../../components/ProjectAssistant";
+import {
+  coCreateQuickPrompts,
+  phaseAdvanceNotice,
+  primaryActionTypesForPhase,
+  suggestedPhaseAfterAction,
+  wrapNextStepHint,
+} from "../co-create/coCreateActions";
 import { CoCreateShell } from "../co-create/CoCreateShell";
 import type { CoCreatePhaseId } from "../co-create/coCreatePhases";
 import {
@@ -183,6 +191,25 @@ export function CreationWorkbench({
     () => formatCoCreateWorkSummary(coCreateProgress),
     [coCreateProgress],
   );
+  const coCreateQuick = useMemo(
+    () => coCreateQuickPrompts(coCreatePhase),
+    [coCreatePhase],
+  );
+  const coCreatePrimaryActions = useMemo(
+    () => primaryActionTypesForPhase(coCreatePhase),
+    [coCreatePhase],
+  );
+  const coCreateWrapHint = useMemo(
+    () =>
+      coCreatePhase === "wrap"
+        ? wrapNextStepHint({
+            sceneCount: coCreateProgress.sceneCount,
+            scenesWithMedia: coCreateProgress.scenesWithMedia,
+            approvedCount: coCreateProgress.approvedCount,
+          })
+        : null,
+    [coCreatePhase, coCreateProgress],
+  );
   const [collapsed, setCollapsed] = useState(false);
   const [planForceOpen, setPlanForceOpen] = useState(false);
   const [askFillRequest, setAskFillRequest] = useState<{ nonce: number; message: string; autoSend?: boolean } | null>(
@@ -195,6 +222,20 @@ export function CreationWorkbench({
   } | null>(null);
   const [sideNotice, setSideNotice] = useState("");
   const utils = trpc.useUtils();
+  /** G2：Confirm → runAction 成功後建議下一 phase + 刷新摘要 */
+  const onCoCreateRunActionSuccess = useCallback(
+    (info: { actionType: string; kind: string; message: string }) => {
+      void coCreateScenes.refetch();
+      const next = suggestedPhaseAfterAction(info.actionType, coCreatePhase);
+      if (next) {
+        changeCoCreatePhase(next);
+        setSideNotice(phaseAdvanceNotice(coCreatePhase, next));
+      } else if (info.actionType === "submit_approval") {
+        setSideNotice("送審已送出。可退出共創到完整版打包／匯出。");
+      }
+    },
+    [changeCoCreatePhase, coCreatePhase, coCreateScenes],
+  );
 
   // Side-effect mutations for suggestion strip (not generation.submit — no auto-charge).
   const savePrompt = trpc.prompts.save.useMutation({
@@ -527,16 +568,36 @@ export function CreationWorkbench({
             canEdit={canEdit}
             progressStates={coCreateProgressStates}
             workSummary={coCreateWorkSummary}
+            wrapHint={coCreateWrapHint}
             onPickChip={
               canEdit
                 ? (text) => {
-                    // G0：chip 帶入目標；G2 再接 ProjectAssistant runAction
+                    // G2：chip → 助手輸入並送出（提問免費）；寫入／扣點仍 Confirm → runAction
                     setDraft({ goal: text, mode: "ask" });
-                    setSideNotice("已帶入方向；之後可在「一起想」確認執行");
+                    setAskFillRequest((prev) => ({
+                      nonce: (prev?.nonce ?? 0) + 1,
+                      message: text,
+                      autoSend: true,
+                    }));
+                    setSideNotice("已送出方向；若助手提議寫入或生成，請再按確認。");
                   }
                 : undefined
             }
-          />
+          >
+            <ProjectAssistant
+              projectId={projectId}
+              embedded
+              canInspectAi={canEdit}
+              onCreationAction={canEdit ? handleCreationAction : undefined}
+              onSavePromptSuggestion={canEdit ? handleSavePromptSuggestion : undefined}
+              onSaveSceneDraft={canEdit ? handleSaveSceneDraft : undefined}
+              askFillRequest={askFillRequest}
+              knowledgeIds={draft.knowledgeIds}
+              quickPrompts={coCreateQuick}
+              primaryActionTypes={coCreatePrimaryActions}
+              onRunActionSuccess={canEdit ? onCoCreateRunActionSuccess : undefined}
+            />
+          </CoCreateShell>
         ) : (
           <>
             <CreationModeTabs mode={mode} onModeChange={onModeChange} tabPanelIdPrefix={tabPrefix} />
