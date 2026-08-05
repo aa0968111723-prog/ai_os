@@ -54,9 +54,59 @@ const TIER_STYLE: Record<string, { color: string; borderColor: string; backgroun
   economy: { color: "var(--healing-ink)", borderColor: "var(--healing)", background: "var(--healing-soft)" },
   budget: { color: "var(--gold-ink)", borderColor: "var(--gold)", background: "var(--gold-soft)" },
 };
-/** 精靈結果排序分：已驗證優先，再看推薦與來源相容性。 */
-function wizScore(m: ModelEntry, source: "" | "yes" | "no"): number {
-  return (m.verified ? 10 : 0) + (m.recommended ? 2 : 0) + (source === "yes" && m.needs ? 1 : 0);
+
+/** 契約健康（與 shared/modelContract 對齊；指南顯示中文） */
+type HealthKey =
+  | "live_ok"
+  | "live_timeout"
+  | "live_fail"
+  | "openapi_404"
+  | "needs_source"
+  | "nim_no_key"
+  | "never_probed"
+  | "unknown";
+
+const HEALTH_META: Record<
+  HealthKey,
+  { label: string; short: string; hint: string; tone: "ok" | "warn" | "bad" | "mute" | "info" }
+> = {
+  live_ok: { label: "已實測成功", short: "實測✓", hint: "站內曾合法生成並取回成品", tone: "ok" },
+  live_timeout: { label: "曾逾時", short: "逾時", hint: "已送出但輪詢超時（可能已計點，勿連點重跑）", tone: "warn" },
+  live_fail: { label: "實測失敗", short: "失敗", hint: "最近 live 失敗（契約／輸入問題）", tone: "bad" },
+  openapi_404: { label: "端點異常", short: "404", hint: "OpenAPI 端點不存在，建議換同類模型", tone: "bad" },
+  needs_source: { label: "需素材", short: "需素材", hint: "要圖／音／影／zip，無法空提示詞開工", tone: "info" },
+  nim_no_key: { label: "NIM", short: "NIM", hint: "走 NVIDIA NIM，非 fal 佇列", tone: "mute" },
+  never_probed: { label: "未實測", short: "未測", hint: "尚無合法生成紀錄（可能因預算）", tone: "mute" },
+  unknown: { label: "未知", short: "—", hint: "尚無契約快照", tone: "mute" },
+};
+
+const HEALTH_FILTERS: Array<{ id: HealthKey | ""; label: string }> = [
+  { id: "", label: "全部健康" },
+  { id: "live_ok", label: "已實測" },
+  { id: "needs_source", label: "需素材" },
+  { id: "never_probed", label: "未實測" },
+  { id: "live_timeout", label: "曾逾時" },
+  { id: "live_fail", label: "實測失敗" },
+  { id: "openapi_404", label: "端點異常" },
+];
+
+function normalizeHealth(h: string | null | undefined): HealthKey {
+  if (h && h in HEALTH_META) return h as HealthKey;
+  return "unknown";
+}
+
+/** 精靈結果排序：實測成功 > 已驗證 > 推薦 > 來源相容；端點 404 沉底 */
+function wizScore(
+  m: ModelEntry,
+  source: "" | "yes" | "no",
+  health: string | null | undefined,
+): number {
+  const h = normalizeHealth(health);
+  let s = (m.verified ? 10 : 0) + (m.recommended ? 2 : 0) + (source === "yes" && m.needs ? 1 : 0);
+  if (h === "live_ok") s += 8;
+  if (h === "openapi_404") s -= 30;
+  if (h === "live_fail") s -= 5;
+  return s;
 }
 
 /* ── 深度優化:決策中心(看情境/比風格/三題篩選)的共用定義 ── */
@@ -80,9 +130,15 @@ const DECISION_MODES: ReadonlyArray<{ id: DecisionMode; label: string; hint: str
 
 export function ModelsPage() {
   const categories = trpc.models.categories.useQuery();
+  const moneyMeta = trpc.models.moneyMeta.useQuery();
+  const contractSummary = trpc.models.contractSummary.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  const healthById = contractSummary.data?.byId ?? {};
   const [category, setCategory] = useState("text-to-image");
   const [q, setQ] = useState("");
   const [tier, setTier] = useState<Tier | "">("");
+  const [healthFilter, setHealthFilter] = useState<HealthKey | "">("");
   // 250ms 防抖:逐字打字時不必每個字都發一次搜尋請求
   const [debouncedQ, setDebouncedQ] = useState("");
   useEffect(() => {
@@ -91,14 +147,19 @@ export function ModelsPage() {
   }, [q]);
   // keepPreviousData:搜尋逐字打時保留上一批結果,畫面不會每個字閃一次「沒有符合」
   const models = trpc.models.search.useQuery(
-    { q: debouncedQ || undefined, category: debouncedQ ? undefined : category, tier: tier || undefined },
+    {
+      q: debouncedQ || undefined,
+      category: debouncedQ ? undefined : category,
+      tier: tier || undefined,
+      health: healthFilter || undefined,
+    },
     { placeholderData: (prev) => prev },
   );
   const workflows = trpc.models.workflows.useQuery();
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [catalogExpanded, setCatalogExpanded] = useState(false);
-  useEffect(() => setCatalogExpanded(false), [category]);
+  useEffect(() => setCatalogExpanded(false), [category, healthFilter]);
   const copyModelId = (id: string) => {
     navigator.clipboard.writeText(id);
     setCopiedId(id);
@@ -118,10 +179,43 @@ export function ModelsPage() {
   const compareRows: Array<{ label: string; render: (m: ModelEntry) => ReactNode }> = [
     { label: "級別", render: (m) => <Pill style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</Pill> },
     { label: "點數", render: (m) => <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span> },
+    {
+      label: "健康",
+      render: (m) => <HealthBadge health={healthById[m.id]?.health} note={healthById[m.id]?.healthNote} />,
+    },
     { label: "官方約略價", render: (m) => <span className="mono" style={{ fontSize: 11 }}>{m.cost}</span> },
     { label: "特性", render: (m) => m.strengths },
     { label: "擅長", render: (m) => m.bestFor },
     { label: "需要來源", render: (m) => (m.needs ? (m.sourceHint ?? NEEDS_LABEL[m.needs]) : "不用,打字就能開工") },
+    {
+      label: "文字塔",
+      render: (m) => {
+        const c = healthById[m.id];
+        if (!c?.textEncoderLabel) return <Meta>—</Meta>;
+        return (
+          <span style={{ fontSize: 12 }}>
+            {c.textEncoderLabel}
+            {c.textEncoderLimit != null ? ` · ${c.textEncoderLimit} tok` : " · 窗口未公開"}
+          </span>
+        );
+      },
+    },
+    {
+      label: "負向提示",
+      render: (m) => {
+        const v = healthById[m.id]?.supportsNegativePrompt;
+        if (v == null) return <Meta>—</Meta>;
+        return v ? "支援 negative_prompt" : "不送（schema 無欄位）";
+      },
+    },
+    {
+      label: "固定種子",
+      render: (m) => {
+        const v = healthById[m.id]?.supportsSeed;
+        if (v == null) return <Meta>—</Meta>;
+        return v ? "可 seed（消融）" : "無 seed 欄位";
+      },
+    },
     {
       label: "已驗證",
       render: (m) =>
@@ -155,10 +249,16 @@ export function ModelsPage() {
   const [wizSource, setWizSource] = useState<(typeof WIZARD_SOURCES)[number]["id"] | "">("");
   const wizardReady = !!(wizCategory && wizTier && wizSource);
   const wizardAnswered = [wizCategory, wizTier, wizSource].filter(Boolean).length;
-  // category+tier 過濾;「沒有來源」濾掉 needs 有值的模型(沒素材根本跑不動)
+  // category+tier 過濾;「沒有來源」濾掉 needs；端點 404 不進推薦
   const wizardResults = wizardReady
-    ? MODELS.filter((m) => m.category === wizCategory && m.tier === wizTier && !(wizSource === "no" && m.needs)).sort(
-        (a, b) => wizScore(b, wizSource) - wizScore(a, wizSource),
+    ? MODELS.filter((m) => {
+        if (m.category !== wizCategory || m.tier !== wizTier) return false;
+        if (wizSource === "no" && m.needs) return false;
+        if (healthById[m.id]?.health === "openapi_404") return false;
+        return true;
+      }).sort(
+        (a, b) =>
+          wizScore(b, wizSource, healthById[b.id]?.health) - wizScore(a, wizSource, healthById[a.id]?.health),
       )
     : [];
 
@@ -180,8 +280,64 @@ export function ModelsPage() {
         title="模型指南"
         icon="Sparkles"
         badge={`${MODEL_CATEGORY_COUNT} 類・${MODELS.length} 個模型`}
-        description={<>不用先懂所有模型。從你要完成的情境、喜歡的風格或三個簡單問題開始，系統會說明該選哪一個以及原因。</>}
+        description={
+          <>
+            不用先懂所有模型。從情境、風格或三題開始挑選；目錄會標示<strong>實測健康</strong>、素材需求與文字塔能力，和創作台／MCP 同一份契約。
+            {moneyMeta.data?.fxNote ? (
+              <Meta as="span" style={{ display: "block", marginTop: 6 }}>{moneyMeta.data.fxNote}</Meta>
+            ) : null}
+          </>
+        }
       />
+
+      {/* ── 契約健康總覽 ── */}
+      {contractSummary.data && (
+        <Card as="section" className="model-health-overview" data-fb="模型契約健康" style={{ marginBottom: "var(--sp-16)", padding: "12px 16px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <b style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <Icon name="CheckCircle2" size={16} />站內契約健康
+            </b>
+            <Meta>
+              {contractSummary.data.modelCount} 模型 · 更新 {new Date(contractSummary.data.generatedAt).toLocaleString("zh-TW")}
+            </Meta>
+            <span className="spacer" />
+            <Hint as="span" style={{ margin: 0 }}>與 MCP／生成警告同源（不自動 verified）</Hint>
+          </div>
+          <div className="model-health-stats" role="list">
+            {(
+              [
+                "live_ok",
+                "needs_source",
+                "never_probed",
+                "live_timeout",
+                "live_fail",
+                "openapi_404",
+                "nim_no_key",
+              ] as HealthKey[]
+            ).map((key) => {
+              const n = contractSummary.data?.counts?.[key] ?? 0;
+              if (!n) return null;
+              const meta = HEALTH_META[key];
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  role="listitem"
+                  className={`model-health-stat tone-${meta.tone}${healthFilter === key ? " is-selected" : ""}`}
+                  title={meta.hint}
+                  onClick={() => {
+                    setHealthFilter((cur) => (cur === key ? "" : key));
+                    requestAnimationFrame(() => catalogRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                  }}
+                >
+                  <strong>{n}</strong>
+                  <span>{meta.short}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {/* ── 需求 #1:並排比較——勾 2–4 個模型,這張卡置頂(sticky)浮出 ── */}
       {compareList.length === 1 && (
@@ -287,7 +443,14 @@ export function ModelsPage() {
             </div>
             <div className="model-scenario-grid">
               {scenariosInGroup.map((r) => (
-                <ScenarioCard key={r.id} recipe={r} copiedId={copiedId} onCopy={copyModelId} onJump={jumpToCatalog} />
+                <ScenarioCard
+                  key={r.id}
+                  recipe={r}
+                  copiedId={copiedId}
+                  onCopy={copyModelId}
+                  onJump={jumpToCatalog}
+                  healthById={healthById}
+                />
               ))}
             </div>
           </div>
@@ -297,7 +460,14 @@ export function ModelsPage() {
         {decisionMode === "style" && (
           <div className="stack">
             {STYLE_SHOWDOWNS.map((s) => (
-              <ShowdownCard key={s.id} showdown={s} copiedId={copiedId} onCopy={copyModelId} onJump={jumpToCatalog} />
+              <ShowdownCard
+                key={s.id}
+                showdown={s}
+                copiedId={copiedId}
+                onCopy={copyModelId}
+                onJump={jumpToCatalog}
+                healthById={healthById}
+              />
             ))}
           </div>
         )}
@@ -366,6 +536,7 @@ export function ModelsPage() {
                   <div key={m.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--border-soft)" }}>
                     <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                       <b>{m.label}</b>
+                      <HealthBadge health={healthById[m.id]?.health} note={healthById[m.id]?.healthNote} />
                       {m.recommended && (
                         <Chip
                           style={{ margin: 0, background: "var(--primary-tint)", borderColor: "var(--primary-border)", color: "var(--primary-ink)", fontWeight: 600 }}>
@@ -458,6 +629,21 @@ export function ModelsPage() {
               </Chip>
             );
           })}
+          <span className="eyebrow cjk">健康</span>
+          {HEALTH_FILTERS.map((h) => {
+            const on = healthFilter === h.id;
+            return (
+              <Chip
+                key={h.id || "all"}
+                selected={on}
+                title={h.id ? HEALTH_META[h.id].hint : "顯示全部健康狀態"}
+                onClick={() => setHealthFilter(on && h.id ? "" : h.id)}
+                style={{ cursor: "pointer" }}
+              >
+                {h.label}
+              </Chip>
+            );
+          })}
         </div>
 
         <div className="stack">
@@ -471,13 +657,25 @@ export function ModelsPage() {
               <button style={{ padding: "4px 12px", marginLeft: 4 }} onClick={() => models.refetch()}>重試</button>
             </p>
           )}
-          {visibleCatalogItems.map((m) => (
-            <Card as="section" key={m.id} style={{ padding: "14px 18px" }}>
+          {visibleCatalogItems.map((m) => {
+            const health = m.health ?? healthById[m.id]?.health;
+            const healthNote = m.healthNote ?? healthById[m.id]?.healthNote;
+            const enc = m.textEncoderLabel ?? healthById[m.id]?.textEncoderLabel;
+            const encLimit = m.textEncoderLimit ?? healthById[m.id]?.textEncoderLimit;
+            const neg = m.supportsNegativePrompt ?? healthById[m.id]?.supportsNegativePrompt;
+            return (
+            <Card as="section" key={m.id} className="model-catalog-card" style={{ padding: "14px 18px" }}>
               <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                 <b>{m.label}</b>
                 <Pill style={TIER_STYLE[m.tier]}>{m.tierLabel}</Pill>
-                <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span>
+                <HealthBadge health={health} note={healthNote} />
+                <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次{m.estTwd != null ? ` · 約 NT$${m.estTwd}` : ""}</span>
                 <Meta className="mono" style={{ fontSize: 11 }}>{m.cost}</Meta>
+                {m.recommended && (
+                  <Chip style={{ margin: 0, background: "var(--primary-tint)", borderColor: "var(--primary-border)", color: "var(--primary-ink)", fontWeight: 600 }}>
+                    推薦
+                  </Chip>
+                )}
                 {!m.verified && <Meta style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}><Icon name="TriangleAlert" size={12} />待正式模式首跑確認</Meta>}
                 {/* 需求 #1:勾選加入並排比較;滿 4 個時其餘停用 */}
                 <label
@@ -499,6 +697,16 @@ export function ModelsPage() {
               </div>
               <p style={{ margin: "6px 0 2px", fontSize: "var(--fs-14)" }}>{m.strengths}</p>
               <Meta as="p" style={{ margin: 0 }}>適合:{m.bestFor}{m.needs ? `|需要來源:${m.sourceHint ?? m.needs}` : ""}</Meta>
+              {(enc || neg != null) && (
+                <Meta as="p" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  {enc ? `文字塔：${enc}${encLimit != null ? `（${encLimit} tok）` : ""}` : null}
+                  {enc && neg != null ? " · " : null}
+                  {neg != null ? (neg ? "支援負向提示" : "無負向提示欄") : null}
+                </Meta>
+              )}
+              {healthNote && normalizeHealth(health) !== "live_ok" && normalizeHealth(health) !== "unknown" && (
+                <Hint style={{ margin: "6px 0 0" }}>{healthNote}</Hint>
+              )}
               <Meta as="p" className="mono" style={{ margin: "4px 0 0", fontSize: 11, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 {m.id}
                 <button
@@ -507,9 +715,13 @@ export function ModelsPage() {
                 >
                   {copiedId === m.id ? <><Icon name="Check" size={12} />已複製</> : "複製"}
                 </button>
+                <Link href="/dashboard" className="model-use-cta">
+                  到工作台使用 <Icon name="ArrowRight" size={12} />
+                </Link>
               </Meta>
             </Card>
-          ))}
+            );
+          })}
           {catalogNeedsDisclosure && (
             <button
               type="button"
@@ -584,17 +796,46 @@ function WizardChip({ on, label, title, onToggle }: { on: boolean; label: string
   );
 }
 
+/** 契約健康徽章 */
+function HealthBadge({ health, note }: { health?: string | null; note?: string | null }) {
+  const key = normalizeHealth(health);
+  const meta = HEALTH_META[key];
+  const icon: IconName =
+    key === "live_ok"
+      ? "CheckCircle2"
+      : key === "openapi_404" || key === "live_fail"
+        ? "XCircle"
+        : key === "live_timeout"
+          ? "Clock"
+          : key === "needs_source"
+            ? "Package"
+            : "Info";
+  return (
+    <span
+      className={`model-health-badge tone-${meta.tone}`}
+      title={note || meta.hint}
+    >
+      <Icon name={icon} size={12} />
+      {meta.short}
+    </span>
+  );
+}
+
 /** 決策中心共用:把一顆模型渲染成「名稱＋級別＋點數＋複製 ID」的小標籤 */
 function ModelInline({
   id,
   lead,
   copiedId,
   onCopy,
+  health,
+  healthNote,
 }: {
   id: string;
   lead?: string;
   copiedId: string | null;
   onCopy: (id: string) => void;
+  health?: string | null;
+  healthNote?: string | null;
 }) {
   const m = MODEL_BY_ID.get(id);
   if (!m) return null;
@@ -603,6 +844,7 @@ function ModelInline({
       {lead && <span className="eyebrow cjk" style={{ fontWeight: 700, color: "var(--primary-ink)" }}>{lead}</span>}
       <b style={{ fontSize: "var(--fs-14)" }}>{m.label}</b>
       <Pill style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</Pill>
+      {health != null && <HealthBadge health={health} note={healthNote} />}
       <span className="mono" style={{ fontSize: 11 }}>{m.points} 點</span>
       <Button variant="ghost" size="sm"
         title={`複製模型 ID:${m.id}`}
@@ -620,11 +862,13 @@ function ScenarioCard({
   copiedId,
   onCopy,
   onJump,
+  healthById,
 }: {
   recipe: ScenarioRecipe;
   copiedId: string | null;
   onCopy: (id: string) => void;
   onJump: (cat: ModelCategory) => void;
+  healthById: Record<string, { health: string; healthNote: string } | undefined>;
 }) {
   const primary = MODEL_BY_ID.get(recipe.pickIds[0]);
   const alts = recipe.pickIds.slice(1).map((id) => MODEL_BY_ID.get(id)).filter((m): m is ModelEntry => !!m);
@@ -636,7 +880,14 @@ function ScenarioCard({
       </div>
       {primary && (
         <div style={{ borderTop: "1px solid var(--border-soft)", paddingTop: 6 }}>
-          <ModelInline id={primary.id} lead="首選" copiedId={copiedId} onCopy={onCopy} />
+          <ModelInline
+            id={primary.id}
+            lead="首選"
+            copiedId={copiedId}
+            onCopy={onCopy}
+            health={healthById[primary.id]?.health}
+            healthNote={healthById[primary.id]?.healthNote}
+          />
           <Meta as="p" style={{ margin: "3px 0 0" }}>{recipe.why}</Meta>
         </div>
       )}
@@ -673,11 +924,13 @@ function ShowdownCard({
   copiedId,
   onCopy,
   onJump,
+  healthById,
 }: {
   showdown: StyleShowdown;
   copiedId: string | null;
   onCopy: (id: string) => void;
   onJump: (cat: ModelCategory) => void;
+  healthById: Record<string, { health: string; healthNote: string } | undefined>;
 }) {
   return (
     <Card variant="std" style={{ padding: "12px 14px" }}>
@@ -707,11 +960,23 @@ function ShowdownCard({
                   <Meta style={{ display: "block", fontWeight: 400 }}>{a.note}</Meta>
                 </th>
                 <td style={compareCell}>
-                  <ModelInline id={a.winnerId} copiedId={copiedId} onCopy={onCopy} />
+                  <ModelInline
+                    id={a.winnerId}
+                    copiedId={copiedId}
+                    onCopy={onCopy}
+                    health={healthById[a.winnerId]?.health}
+                    healthNote={healthById[a.winnerId]?.healthNote}
+                  />
                 </td>
                 <td style={compareCell}>
                   {a.runnerUpId ? (
-                    <ModelInline id={a.runnerUpId} copiedId={copiedId} onCopy={onCopy} />
+                    <ModelInline
+                      id={a.runnerUpId}
+                      copiedId={copiedId}
+                      onCopy={onCopy}
+                      health={healthById[a.runnerUpId]?.health}
+                      healthNote={healthById[a.runnerUpId]?.healthNote}
+                    />
                   ) : (
                     <Meta>—</Meta>
                   )}

@@ -4125,6 +4125,84 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .secondary-page--narrow { max-width: 660px; }
 .admin-page { max-width: 1280px; }
 .models-page { max-width: 1180px; }
+.model-health-overview { border: 1px solid var(--border-soft); }
+.model-health-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.model-health-stat {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 72px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--card2);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.model-health-stat strong { font-size: var(--fs-16); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.model-health-stat span { font-size: 11px; color: var(--fg-secondary); }
+.model-health-stat:hover { border-color: var(--border-strong); }
+.model-health-stat.is-selected { box-shadow: inset 0 -2px 0 var(--primary); border-color: var(--primary-border); }
+.model-health-stat.tone-ok strong { color: var(--success-ink); }
+.model-health-stat.tone-warn strong { color: var(--gold-ink, var(--warning-ink, #a16207)); }
+.model-health-stat.tone-bad strong { color: var(--danger-ink, var(--error-ink, #b91c1c)); }
+.model-health-stat.tone-info strong { color: var(--healing-ink); }
+.model-health-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  background: var(--card2);
+  color: var(--fg-secondary);
+}
+.model-health-badge.tone-ok {
+  color: var(--success-ink);
+  border-color: color-mix(in srgb, var(--success-ink) 35%, transparent);
+  background: color-mix(in srgb, var(--success-ink) 10%, var(--card));
+}
+.model-health-badge.tone-warn {
+  color: var(--gold-ink, #a16207);
+  border-color: color-mix(in srgb, var(--gold) 40%, transparent);
+  background: var(--gold-soft, #fef9c3);
+}
+.model-health-badge.tone-bad {
+  color: var(--danger-ink, #b91c1c);
+  border-color: color-mix(in srgb, #b91c1c 30%, transparent);
+  background: color-mix(in srgb, #b91c1c 8%, var(--card));
+}
+.model-health-badge.tone-info {
+  color: var(--healing-ink);
+  border-color: var(--healing);
+  background: var(--healing-soft);
+}
+.model-health-badge.tone-mute { opacity: 0.92; }
+.model-catalog-card { transition: border-color 0.15s ease; }
+.model-catalog-card:hover { border-color: var(--border-strong); }
+.model-use-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--sans);
+  font-size: var(--fs-11);
+  color: var(--primary-ink);
+  text-decoration: none;
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+.model-use-cta:hover { background: var(--primary-tint); }
 .model-decision-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
