@@ -1,13 +1,17 @@
-import { ILLUSTRATION, type IllustrationKey } from "../illustrations";
+import { useState } from "react";
+import { illustrationBase, type IllustrationKey } from "../illustrations";
+import "./empty-illustration.css";
 
 /**
  * 空狀態插畫：給 EmptyState 的 icon 槽使用。
- * 裝飾性（alt 空），尺寸由 width/height 控制，預設 160。
+ * 裝飾性（alt 空）。預設 140 — 與 serif 標題比例更穩。
+ * WebP 1x/2x + PNG 後備；缺 160 資產時自動回退 sq-512。
+ * 進場動畫由 .empty-illustration + fade-rise 負責。
  */
 export function EmptyIllustration({
   name,
-  width = 160,
-  height = 160,
+  width = 140,
+  height = 140,
   className = "",
 }: {
   name: IllustrationKey;
@@ -15,16 +19,30 @@ export function EmptyIllustration({
   height?: number;
   className?: string;
 }) {
+  const base = illustrationBase(name);
+  const webp1x = `${base}-160.webp`;
+  const webp2x = `${base}-320.webp`;
+  const png160 = `${base}-160.png`;
+  const legacy = `${base}-sq-512.png`;
+  const [src, setSrc] = useState(png160);
+
   return (
-    <img
-      className={className}
-      src={ILLUSTRATION[name]}
-      width={width}
-      height={height}
-      alt=""
-      decoding="async"
-      loading="lazy"
-      draggable={false}
-    />
+    <picture className={className ? `empty-illustration ${className}` : "empty-illustration"}>
+      {src === png160 && (
+        <source type="image/webp" srcSet={`${webp1x} 1x, ${webp2x} 2x`} />
+      )}
+      <img
+        src={src}
+        width={width}
+        height={height}
+        alt=""
+        decoding="async"
+        loading="lazy"
+        draggable={false}
+        onError={() => {
+          if (src !== legacy) setSrc(legacy);
+        }}
+      />
+    </picture>
   );
 }
