@@ -1,31 +1,31 @@
-import { lazy } from "react";
 import { Redirect, Route, Switch, Link } from "wouter";
 import { GroupOptionsEditor } from "../components/GroupOptionsEditor";
 import { SecondaryPageHeader } from "../components/SecondaryPageHeader";
 import { EmptyState, Hint } from "../components/ui";
 import { Icon } from "../components/Icon";
+import { lazyWithRetry } from "../lib/lazyWithRetry";
 
 // 路由層級 code-splitting（QA-025）：管理、資料庫、排程等重頁面延遲載入，
 // 避免首屏（作業台、專案頁、登入）揹整個 App 的 JS。具名匯出需轉成 lazy 所需的 default export。
-const AdminPage = lazy(() => import("../pages/AdminPage").then((m) => ({ default: m.AdminPage })));
-const AuditLogCard = lazy(() => import("../pages/AdminPage").then((m) => ({ default: m.AuditLogCard })));
-const ConsumptionMonitorCard = lazy(() => import("../pages/AdminPage").then((m) => ({ default: m.ConsumptionMonitorCard })));
-const InsightsCard = lazy(() => import("../pages/AdminPage").then((m) => ({ default: m.InsightsCard })));
-const MembersPage = lazy(() => import("../pages/MembersPage").then((m) => ({ default: m.MembersPage })));
-const FeedbackPage = lazy(() => import("../pages/FeedbackPage").then((m) => ({ default: m.FeedbackPage })));
-const MyReportsPage = lazy(() => import("../pages/MyReportsPage").then((m) => ({ default: m.MyReportsPage })));
-const ModelsPage = lazy(() => import("../pages/ModelsPage").then((m) => ({ default: m.ModelsPage })));
-const HelpPage = lazy(() => import("../pages/HelpPage").then((m) => ({ default: m.HelpPage })));
-const McpPage = lazy(() => import("../pages/McpPage").then((m) => ({ default: m.McpPage })));
-const IntegrationsPage = lazy(() => import("../pages/IntegrationsPage").then((m) => ({ default: m.IntegrationsPage })));
-const DownloadsPage = lazy(() => import("../pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })));
-const PlannerPage = lazy(() => import("../pages/PlannerPage").then((m) => ({ default: m.PlannerPage })));
-const DatabasesPage = lazy(() => import("../pages/DatabasesPage").then((m) => ({ default: m.DatabasesPage })));
-const ChatPage = lazy(() => import("../pages/ChatPage").then((m) => ({ default: m.ChatPage })));
-const Launchpad = lazy(() => import("../pages/Launchpad").then((m) => ({ default: m.Launchpad })));
-const ProjectPage = lazy(() => import("../pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
-const ShareTargetPage = lazy(() => import("../pages/ShareTargetPage").then((m) => ({ default: m.ShareTargetPage })));
-const CommunityPage = lazy(() => import("../pages/CommunityPage").then((m) => ({ default: m.CommunityPage })));
+const AdminPage = lazyWithRetry(() => import("../pages/AdminPage").then((m) => ({ default: m.AdminPage })));
+const AuditLogCard = lazyWithRetry(() => import("../pages/AdminPage").then((m) => ({ default: m.AuditLogCard })));
+const ConsumptionMonitorCard = lazyWithRetry(() => import("../pages/AdminPage").then((m) => ({ default: m.ConsumptionMonitorCard })));
+const InsightsCard = lazyWithRetry(() => import("../pages/AdminPage").then((m) => ({ default: m.InsightsCard })));
+const MembersPage = lazyWithRetry(() => import("../pages/MembersPage").then((m) => ({ default: m.MembersPage })));
+const FeedbackPage = lazyWithRetry(() => import("../pages/FeedbackPage").then((m) => ({ default: m.FeedbackPage })));
+const MyReportsPage = lazyWithRetry(() => import("../pages/MyReportsPage").then((m) => ({ default: m.MyReportsPage })));
+const ModelsPage = lazyWithRetry(() => import("../pages/ModelsPage").then((m) => ({ default: m.ModelsPage })));
+const HelpPage = lazyWithRetry(() => import("../pages/HelpPage").then((m) => ({ default: m.HelpPage })));
+const McpPage = lazyWithRetry(() => import("../pages/McpPage").then((m) => ({ default: m.McpPage })));
+const IntegrationsPage = lazyWithRetry(() => import("../pages/IntegrationsPage").then((m) => ({ default: m.IntegrationsPage })));
+const DownloadsPage = lazyWithRetry(() => import("../pages/DownloadsPage").then((m) => ({ default: m.DownloadsPage })));
+const PlannerPage = lazyWithRetry(() => import("../pages/PlannerPage").then((m) => ({ default: m.PlannerPage })));
+const DatabasesPage = lazyWithRetry(() => import("../pages/DatabasesPage").then((m) => ({ default: m.DatabasesPage })));
+const ChatPage = lazyWithRetry(() => import("../pages/ChatPage").then((m) => ({ default: m.ChatPage })));
+const Launchpad = lazyWithRetry(() => import("../pages/Launchpad").then((m) => ({ default: m.Launchpad })));
+const ProjectPage = lazyWithRetry(() => import("../pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
+const ShareTargetPage = lazyWithRetry(() => import("../pages/ShareTargetPage").then((m) => ({ default: m.ShareTargetPage })));
+const CommunityPage = lazyWithRetry(() => import("../pages/CommunityPage").then((m) => ({ default: m.CommunityPage })));
 
 export type AppRoutesProps = {
   activeGroupId: string;
