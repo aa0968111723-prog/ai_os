@@ -1,10 +1,10 @@
 import {
-  worldviewSchema,
   worldviewQuickExampleForKind,
   applyWorldviewFullExample,
   formatWorldviewStylesLabel,
   type Worldview,
 } from "@shared/worldview";
+import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
 import { PROJECT_KINDS } from "@shared/models";
 import { Button, Card, Chip, EmptyState, Meta } from "./ui";
 import { WorldviewPreview } from "./WorldviewPreview";
@@ -39,7 +39,7 @@ export function WorldviewExampleCard({
 }) {
   const ex = worldviewQuickExampleForKind(kind);
   const patch = applyWorldviewFullExample(wv, kind, false);
-  const hypothetical = worldviewSchema.parse({ ...wv, ...patch });
+  const hypothetical = parseWorldviewSafe({ ...wv, ...patch });
   const kindLabel = PROJECT_KINDS.find((k) => k.id === kind)?.label;
 
   return (
