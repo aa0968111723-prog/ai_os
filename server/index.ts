@@ -56,6 +56,7 @@ import { startGenerationRunner, runnerHeartbeat } from "./services/generationRun
 import { startAgentRunner } from "./services/agentRunner";
 import { startGroupCampaignRunner, recoverInterruptedCampaigns, sweepStaleCampaigns } from "./services/groupCampaignRunner";
 import { startExportRunner } from "./services/exportRunner";
+import { startAssetMaintenanceRunner } from "./services/assetMaintenanceRunner";
 import { startFeedbackAgent } from "./services/feedbackAgent";
 import { db, schema } from "./db";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -242,12 +243,33 @@ app.get("/api/ready", async (_req, res) => {
   // 頂層 db/boot 維持舊版字串形狀：e2e 用 scripts/wait-api-ready.sh 等 ok:true + boot 以 ready 開頭、
   // e2e-phase4 驗頂層 boot 鍵，文件也教管理員看這兩個欄位——分項細節在 components。
   // processRole：讓部署／探針區分 web 與 worker 實例的必要元件期望。
+  // runners / resources：可觀測性（不參與 503 判定，避免 metrics 抖動拖垮就緒）。
+  let runners: unknown = undefined;
+  let resources: unknown = undefined;
+  try {
+    const { listRunnerSnapshots, processResourceSnapshot } = await import("./services/runnerMetrics");
+    runners = listRunnerSnapshots().map((s) => ({
+      name: s.name,
+      started: s.started,
+      lastTickAt: s.lastTickAt,
+      lastTickAgeMs: s.lastTickAt == null ? null : Date.now() - s.lastTickAt,
+      inflight: s.inflight,
+      queueDepth: s.queueDepth,
+      lastWork: s.lastWork,
+      lastSkippedReason: s.lastSkippedReason,
+    }));
+    resources = processResourceSnapshot();
+  } catch {
+    /* metrics 模組不可用時不影響就緒 */
+  }
   res.status(ok ? 200 : 503).json({
     ok,
     processRole,
     db: components.db.ok ? "connected（資料庫已接通）" : "error（資料庫未接通）",
     boot: bootReady ? "ready（初始化完成）" : "initializing（migration/schema 驗證或種子同步中；持續發生請查部署 log）",
     components,
+    runners,
+    resources,
     time: new Date().toISOString(),
   });
 });
@@ -675,6 +697,20 @@ app.get("/api/assets/:id/file", async (req, res) => {
     }
     res.setHeader("Cache-Control", "private, max-age=3600");
     res.setHeader("X-Content-Type-Options", "nosniff");
+    // ?variant=thumb：背景維護補產的 360px JPEG（meta.thumbPath）；無則回原檔
+    const wantThumb = String(req.query.variant ?? "") === "thumb";
+    if (wantThumb) {
+      const thumbPath = (asset.meta as { thumbPath?: string } | null)?.thumbPath;
+      if (thumbPath) {
+        sendStoredFile(
+          res,
+          absPathOf(thumbPath),
+          { headers: { "Content-Type": "image/jpeg" } },
+          "縮圖遺失",
+        );
+        return;
+      }
+    }
     const mime = asset.mime ?? "application/octet-stream";
     // 圖片/影音維持 inline（縮圖與播放需要）；doc/pdf/txt 與 SVG（可含腳本）強制下載，
     // 避免瀏覽器內嵌渲染帶來的 XSS/內容嗅探風險（#19）
@@ -1970,6 +2006,7 @@ const httpServer = app.listen(port, () => {
               .catch((err) => console.warn("[groupAgent] 啟動修復／陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err)),
           );
           startExportRunner(); // 交付包匯出 job（QA-005）：背景打包＋進度＋過期清理
+          startAssetMaintenanceRunner(); // 素材維護：落地強化／sha256／縮圖（有佇列才忙；BG_ASSET_MAINT=0 可關）
           scheduleFeedbackSweep(); // 背景孤兒清理排程（#6）
           startFeedbackAgent(); // 回饋代理：每 3 天分診未處理回饋、排修復、寄信回覆回報者
           const { startGoogleCalendarSweep } = await import("./services/googleCalendar");

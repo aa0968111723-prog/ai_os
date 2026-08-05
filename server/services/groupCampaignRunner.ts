@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { db, schema } from "../db";
 import { loadAuthState, type AuthState } from "./auth";
 import { isShuttingDown, onShutdown, trackBackgroundTask } from "./shutdown";
+import { markRunnerStarted, reportRunnerTick } from "./runnerMetrics";
 import { withRunnerAdvisoryLock } from "./runnerAdvisoryLock";
 import { getGroupCommandLevel, runGroupCommand, recordGroupAgentEventSafely } from "./groupCommand";
 import { saveCampaignSteps, settleCampaign, type GroupCampaignRow } from "./groupCampaignCore";
@@ -43,12 +44,17 @@ let cycleRunning = false;
 export function startGroupCampaignRunner(): void {
   if (started || isShuttingDown()) return;
   started = true;
+  markRunnerStarted("groupCampaign");
   const interval = setInterval(() => {
     if (cycleRunning || isShuttingDown()) return;
     cycleRunning = true;
     void trackBackgroundTask((async () => {
       try {
         await tick();
+        reportRunnerTick("groupCampaign", {
+          started: true,
+          lastTickAt: Date.now(),
+        });
       } catch (err) {
         console.warn("[groupAgent] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err);
       }
@@ -70,6 +76,7 @@ async function tick(): Promise<void> {
     // 使用者看到「執行中」但進度一格都不動，而且沒有任何日誌說得出為什麼。
     .orderBy(asc(schema.groupAgentRuns.updatedAt))
     .limit(BATCH);
+  reportRunnerTick("groupCampaign", { queueDepth: runs.length });
   if (runs.length === BATCH) {
     // 撈滿代表可能還有沒排到的：不講的話「有些計畫這輪沒推」在維運端完全不可見
     console.warn(`[groupAgent] 本輪撈滿 ${BATCH} 份執行中的計畫，可能還有未排到的（下輪會先推最久沒動的）`);

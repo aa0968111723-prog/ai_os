@@ -369,6 +369,29 @@ export const adminRouter = router({
     }),
 
   /**
+   * 背景執行器與本進程資源快照（提高伺服器使用率／可觀測性）。
+   * 純記憶體指標，不打重查；多實例各自回報本進程狀態。
+   */
+  runnerStatus: adminProcedure.query(async () => {
+    const { listRunnerSnapshots, processResourceSnapshot } = await import("../services/runnerMetrics");
+    const now = Date.now();
+    return {
+      runners: listRunnerSnapshots().map((s) => ({
+        name: s.name,
+        started: s.started,
+        lastTickAt: s.lastTickAt,
+        lastTickAgeMs: s.lastTickAt == null ? null : now - s.lastTickAt,
+        inflight: s.inflight,
+        queueDepth: s.queueDepth,
+        lastWork: s.lastWork,
+        lastSkippedReason: s.lastSkippedReason,
+      })),
+      resources: processResourceSnapshot(),
+      time: new Date().toISOString(),
+    };
+  }),
+
+  /**
    * 寄測試信給自己：驗證信箱機制（RESEND_API_KEY／EMAIL_FROM）真的能寄出。
    * 管理員改完環境變數後按一下即可確認，不必再走一次邀請流程才發現金鑰壞掉。
    * 一律回 { status, detail }（人話），不拋例外——與 sendEmail 的優雅降級一致。
