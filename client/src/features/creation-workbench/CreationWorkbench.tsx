@@ -2,6 +2,14 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { flashAnchor } from "../../discuss";
+import { CoCreateShell } from "../co-create/CoCreateShell";
+import type { CoCreatePhaseId } from "../co-create/coCreatePhases";
+import {
+  loadCoCreateOpen,
+  loadCoCreatePhase,
+  saveCoCreateOpen,
+  saveCoCreatePhase,
+} from "../co-create/coCreateSession";
 import { CreationContextBar } from "./CreationContextBar";
 import { CreationGoalInput } from "./CreationGoalInput";
 import { CreationModeTabs, modePanelId, modeTabId } from "./CreationModeTabs";
@@ -118,6 +126,31 @@ export function CreationWorkbench({
   const tabPrefix = `cw-${reactId.replace(/:/g, "")}`;
   const goalInputId = `${tabPrefix}-goal`;
   const { draft, setDraft } = useCreationDraft(projectId);
+
+  // G0「陪你做完」：入口 + 殼（#404）；session 記住開關／phase，退出不刪已寫入資料
+  const [coCreateOpen, setCoCreateOpen] = useState(() => loadCoCreateOpen(projectId));
+  const [coCreatePhase, setCoCreatePhase] = useState<CoCreatePhaseId>(() =>
+    loadCoCreatePhase(projectId),
+  );
+  useEffect(() => {
+    setCoCreateOpen(loadCoCreateOpen(projectId));
+    setCoCreatePhase(loadCoCreatePhase(projectId));
+  }, [projectId]);
+  const enterCoCreate = useCallback(() => {
+    setCoCreateOpen(true);
+    saveCoCreateOpen(projectId, true);
+  }, [projectId]);
+  const exitCoCreate = useCallback(() => {
+    setCoCreateOpen(false);
+    saveCoCreateOpen(projectId, false);
+  }, [projectId]);
+  const changeCoCreatePhase = useCallback(
+    (phase: CoCreatePhaseId) => {
+      setCoCreatePhase(phase);
+      saveCoCreatePhase(projectId, phase);
+    },
+    [projectId],
+  );
   const [collapsed, setCollapsed] = useState(false);
   const [planForceOpen, setPlanForceOpen] = useState(false);
   const [askFillRequest, setAskFillRequest] = useState<{ nonce: number; message: string; autoSend?: boolean } | null>(
@@ -408,125 +441,179 @@ export function CreationWorkbench({
 
       <div id="sec-ai-hub-body" hidden={collapsed}>
         <Hint className="workbench-intro-lede" style={{ marginTop: 6 }}>
-          {mode === "generate"
-            ? "預設直接出圖：選模型、寫提示詞、看點數，再按生成。上方想法可選，不會扣點。"
-            : "寫你想完成的畫面或片子，再按 ＋ 請誰來幫忙——像請劇組，不必先背四個分頁。"}
+          {coCreateOpen
+            ? "共創引導中：先選方向，再一步步定調、分鏡、畫面、收斂。"
+            : mode === "generate"
+              ? "預設直接出圖：選模型、寫提示詞、看點數，再按生成。上方想法可選，不會扣點。"
+              : "寫你想完成的畫面或片子，再按 ＋ 請誰來幫忙——像請劇組，不必先背四個分頁。"}
         </Hint>
+
+        {!coCreateOpen ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+              marginTop: 8,
+            }}
+          >
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={enterCoCreate}
+              data-testid="co-create-entry"
+              disabled={!canEdit}
+            >
+              沒靈感？陪你做完
+            </Button>
+            <Meta as="span" style={{ margin: 0 }}>
+              沒靈感時從這裡走引導，不必先選四個分頁
+            </Meta>
+          </div>
+        ) : null}
 
         <CreationGoalInput
           inputId={goalInputId}
           goal={draft.goal}
           onGoalChange={(goal) => setDraft({ goal })}
           skillIds={draft.skillIds ?? []}
-          onSkillIdsChange={canEdit ? onSkillIdsChange : undefined}
+          onSkillIdsChange={canEdit && !coCreateOpen ? onSkillIdsChange : undefined}
           disabled={!canEdit}
-          onSubmit={canEdit ? handleGoalSubmit : undefined}
+          onSubmit={canEdit && !coCreateOpen ? handleGoalSubmit : undefined}
           submitLabel={GOAL_SUBMIT[mode].label}
           submitHint={GOAL_SUBMIT[mode].hint}
-          compact={mode === "generate"}
+          compact={mode === "generate" || coCreateOpen}
         />
 
-        <CreationModeTabs mode={mode} onModeChange={onModeChange} tabPanelIdPrefix={tabPrefix} />
-
-        <CreationContextBar onNavigate={goTo} />
-
-        {(mode === "ask" || mode === "plan") && (
-          <KnowledgeSourceStrip
-            projectId={projectId}
-            selectedIds={draft.knowledgeIds ?? []}
-            disabled={!canEdit}
-            onChange={(knowledgeIds) => setDraft({ knowledgeIds })}
+        {coCreateOpen ? (
+          <CoCreateShell
+            phase={coCreatePhase}
+            onPhaseChange={changeCoCreatePhase}
+            onExit={exitCoCreate}
+            canEdit={canEdit}
+            onPickChip={
+              canEdit
+                ? (text) => {
+                    // G0：chip 帶入目標；G2 再接 ProjectAssistant runAction
+                    setDraft({ goal: text, mode: "ask" });
+                    setSideNotice("已帶入方向；之後可在「一起想」確認執行");
+                  }
+                : undefined
+            }
           />
+        ) : (
+          <>
+            <CreationModeTabs mode={mode} onModeChange={onModeChange} tabPanelIdPrefix={tabPrefix} />
+
+            <CreationContextBar onNavigate={goTo} />
+
+            {(mode === "ask" || mode === "plan") && (
+              <KnowledgeSourceStrip
+                projectId={projectId}
+                selectedIds={draft.knowledgeIds ?? []}
+                disabled={!canEdit}
+                onChange={(knowledgeIds) => setDraft({ knowledgeIds })}
+              />
+            )}
+
+            {/* Only one mode panel visible; all stay mounted so draft/assistant state survives switches. */}
+            <AskAiMode
+              projectId={projectId}
+              panelId={modePanelId(tabPrefix, "ask")}
+              labelledBy={modeTabId(tabPrefix, "ask")}
+              active={mode === "ask"}
+              canEdit={canEdit}
+              onCreationAction={handleCreationAction}
+              onSavePromptSuggestion={canEdit ? handleSavePromptSuggestion : undefined}
+              onSaveSceneDraft={canEdit ? handleSaveSceneDraft : undefined}
+              askFillRequest={askFillRequest}
+              knowledgeIds={draft.knowledgeIds}
+            />
+            <DirectGenerateMode
+              projectId={projectId}
+              groupId={groupId ?? ""}
+              canEdit={canEdit}
+              myRole={myRole}
+              projectFormat={projectFormat}
+              worldview={worldview}
+              wvReady={wvReady}
+              characterIds={characterIds}
+              scenePresetIds={scenePresetIds}
+              propIds={propIds}
+              carriedPropIds={carriedPropIds}
+              panelId={modePanelId(tabPrefix, "generate")}
+              labelledBy={modeTabId(tabPrefix, "generate")}
+              active={mode === "generate"}
+              goal={draft.goal}
+              draft={draft}
+              setDraft={setDraft}
+              applyRequest={generateApplyRequest}
+              onReuseSettings={onReuseGenerate}
+              onSourceChange={onGenerateSourceChange}
+              collab={studioCollab}
+            />
+            <TemplateMode
+              projectId={projectId}
+              charIds={characterIds}
+              sceneIds={scenePresetIds}
+              propIds={propIds}
+              panelId={modePanelId(tabPrefix, "template")}
+              labelledBy={modeTabId(tabPrefix, "template")}
+              active={mode === "template"}
+              canEdit={canEdit}
+              goal={draft.goal}
+              templateId={draft.templateId}
+              promptRequest={workflowPromptRequest}
+              ideaBringIn={templateIdeaBringIn}
+            />
+            {sideNotice ? (
+              <Meta as="p" role="status" aria-live="polite" style={{ marginTop: 8 }}>
+                {sideNotice}
+              </Meta>
+            ) : null}
+            <PlanMode
+              projectId={projectId}
+              canEdit={canEdit}
+              isLeader={isLeader}
+              panelId={modePanelId(tabPrefix, "plan")}
+              labelledBy={modeTabId(tabPrefix, "plan")}
+              active={mode === "plan"}
+              forceOpen={planForceOpen}
+              onForceOpenConsumed={clearPlanForceOpen}
+              goal={draft.goal}
+              onGoalChange={canEdit ? (goal) => setDraft({ goal }) : undefined}
+              goalInputId={goalInputId}
+              knowledgeIds={draft.knowledgeIds}
+            />
+
+            <CreationResourceDrawer
+              projectId={projectId}
+              canEdit={canEdit}
+              currentMode={mode}
+              onCreationAction={handleCreationAction}
+              onReuseGenerate={onReuseGenerate}
+              onUseForWorkflow={
+                // Surface as discrete idea fill + switch to template (same as ProjectPage path).
+                (text) => {
+                  setTemplateIdeaBringIn((prev) => ({
+                    text,
+                    nonce: (prev?.nonce ?? 0) + 1,
+                  }));
+                  // Prefer parent workflowPromptRequest when provided (legacy sticky channel).
+                  setDraft({ mode: "template" });
+                }
+              }
+            />
+          </>
         )}
 
-        {/* Only one mode panel visible; all stay mounted so draft/assistant state survives switches. */}
-        <AskAiMode
-          projectId={projectId}
-          panelId={modePanelId(tabPrefix, "ask")}
-          labelledBy={modeTabId(tabPrefix, "ask")}
-          active={mode === "ask"}
-          canEdit={canEdit}
-          onCreationAction={handleCreationAction}
-          onSavePromptSuggestion={canEdit ? handleSavePromptSuggestion : undefined}
-          onSaveSceneDraft={canEdit ? handleSaveSceneDraft : undefined}
-          askFillRequest={askFillRequest}
-          knowledgeIds={draft.knowledgeIds}
-        />
-        <DirectGenerateMode
-          projectId={projectId}
-          groupId={groupId ?? ""}
-          canEdit={canEdit}
-          myRole={myRole}
-          projectFormat={projectFormat}
-          worldview={worldview}
-          wvReady={wvReady}
-          characterIds={characterIds}
-          scenePresetIds={scenePresetIds}
-          propIds={propIds}
-          carriedPropIds={carriedPropIds}
-          panelId={modePanelId(tabPrefix, "generate")}
-          labelledBy={modeTabId(tabPrefix, "generate")}
-          active={mode === "generate"}
-          goal={draft.goal}
-          draft={draft}
-          setDraft={setDraft}
-          applyRequest={generateApplyRequest}
-          onReuseSettings={onReuseGenerate}
-          onSourceChange={onGenerateSourceChange}
-          collab={studioCollab}
-        />
-        <TemplateMode
-          projectId={projectId}
-          charIds={characterIds}
-          sceneIds={scenePresetIds}
-          propIds={propIds}
-          panelId={modePanelId(tabPrefix, "template")}
-          labelledBy={modeTabId(tabPrefix, "template")}
-          active={mode === "template"}
-          canEdit={canEdit}
-          goal={draft.goal}
-          templateId={draft.templateId}
-          promptRequest={workflowPromptRequest}
-          ideaBringIn={templateIdeaBringIn}
-        />
-        {sideNotice ? (
+        {coCreateOpen && sideNotice ? (
           <Meta as="p" role="status" aria-live="polite" style={{ marginTop: 8 }}>
             {sideNotice}
           </Meta>
         ) : null}
-        <PlanMode
-          projectId={projectId}
-          canEdit={canEdit}
-          isLeader={isLeader}
-          panelId={modePanelId(tabPrefix, "plan")}
-          labelledBy={modeTabId(tabPrefix, "plan")}
-          active={mode === "plan"}
-          forceOpen={planForceOpen}
-          onForceOpenConsumed={clearPlanForceOpen}
-          goal={draft.goal}
-          onGoalChange={canEdit ? (goal) => setDraft({ goal }) : undefined}
-          goalInputId={goalInputId}
-          knowledgeIds={draft.knowledgeIds}
-        />
-
-        <CreationResourceDrawer
-          projectId={projectId}
-          canEdit={canEdit}
-          currentMode={mode}
-          onCreationAction={handleCreationAction}
-          onReuseGenerate={onReuseGenerate}
-          onUseForWorkflow={
-            // Surface as discrete idea fill + switch to template (same as ProjectPage path).
-            (text) => {
-              setTemplateIdeaBringIn((prev) => ({
-                text,
-                nonce: (prev?.nonce ?? 0) + 1,
-              }));
-              // Prefer parent workflowPromptRequest when provided (legacy sticky channel).
-              setDraft({ mode: "template" });
-            }
-          }
-        />
       </div>
     </Card>
   );
