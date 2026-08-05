@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { trpc } from "../../api";
 import { Icon } from "../../components/Icon";
 import { flashAnchor } from "../../discuss";
 import { CoCreateShell } from "../co-create/CoCreateShell";
 import type { CoCreatePhaseId } from "../co-create/coCreatePhases";
+import {
+  coCreateJourneyStatesWithProgress,
+  countApprovedScenes,
+  countScenesWithMedia,
+  formatCoCreateWorkSummary,
+  type CoCreateProgressInput,
+} from "../co-create/coCreateProgress";
 import {
   loadCoCreateOpen,
   loadCoCreatePhase,
@@ -127,7 +134,7 @@ export function CreationWorkbench({
   const goalInputId = `${tabPrefix}-goal`;
   const { draft, setDraft } = useCreationDraft(projectId);
 
-  // G0「陪你做完」：入口 + 殼（#404）；session 記住開關／phase，退出不刪已寫入資料
+  // G0–G1「陪你做完」：入口 + 殼 + 伺服器進度（#404）；session 記 phase，完成條件讀 API
   const [coCreateOpen, setCoCreateOpen] = useState(() => loadCoCreateOpen(projectId));
   const [coCreatePhase, setCoCreatePhase] = useState<CoCreatePhaseId>(() =>
     loadCoCreatePhase(projectId),
@@ -150,6 +157,31 @@ export function CreationWorkbench({
       saveCoCreatePhase(projectId, phase);
     },
     [projectId],
+  );
+  // G1：分鏡列表供完成條件／作品摘要（僅共創開啟時查，避免閒置流量）
+  const coCreateScenes = trpc.scenes.listByProject.useQuery(
+    { projectId },
+    { enabled: coCreateOpen, staleTime: 15_000 },
+  );
+  const coCreateProgress: CoCreateProgressInput = useMemo(() => {
+    const scenes = coCreateScenes.data ?? [];
+    return {
+      wvReady,
+      logline: worldview.logline,
+      tones: worldview.tones,
+      styles: worldview.styles,
+      sceneCount: scenes.length,
+      scenesWithMedia: countScenesWithMedia(scenes),
+      approvedCount: countApprovedScenes(scenes),
+    };
+  }, [coCreateScenes.data, wvReady, worldview.logline, worldview.tones, worldview.styles]);
+  const coCreateProgressStates = useMemo(
+    () => coCreateJourneyStatesWithProgress(coCreatePhase, coCreateProgress),
+    [coCreatePhase, coCreateProgress],
+  );
+  const coCreateWorkSummary = useMemo(
+    () => formatCoCreateWorkSummary(coCreateProgress),
+    [coCreateProgress],
   );
   const [collapsed, setCollapsed] = useState(false);
   const [planForceOpen, setPlanForceOpen] = useState(false);
@@ -493,6 +525,8 @@ export function CreationWorkbench({
             onPhaseChange={changeCoCreatePhase}
             onExit={exitCoCreate}
             canEdit={canEdit}
+            progressStates={coCreateProgressStates}
+            workSummary={coCreateWorkSummary}
             onPickChip={
               canEdit
                 ? (text) => {

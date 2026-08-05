@@ -1,6 +1,6 @@
 # 計畫：陪你做完（共創引導 Session）
 
-> 狀態：**待終端機實作**（本 PR 僅計畫）  
+> 狀態：**G0–G1 實作中**（G0 #416 已合；G1 進度推導＋摘要）  
 > 分支：`plan/co-create-guided-session` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「能不能一邊討論一邊完成作品？有時真的沒什麼靈感」＋後續「釐清與引導使用者創作」（2026-08-04）  
 > 相關：工作台減噪 **#400**、上下文一體化 **#402**、既有「一起想」`ProjectAssistant`、`SimpleProjectMode`
@@ -134,18 +134,18 @@ wrap = 可送審或已打包提示
 ### G0 — 入口與殼（低風險）
 
 ```
-[ ] G0.1  工作台空狀態或 CreationGoal 區加 CTA「沒靈感？陪你做完」
-[ ] G0.2  進入後展開共創殼（可為 CreationWorkbench 內 mode 或 full-width 子視圖）
-[ ] G0.3  進度條四段，點擊可跳 phase（進階使用者）
-[ ] G0.4  「退出共創」回工作台預設；資料已寫入者保留
+[x] G0.1  工作台空狀態或 CreationGoal 區加 CTA「沒靈感？陪你做完」
+[x] G0.2  進入後展開共創殼（可為 CreationWorkbench 內 mode 或 full-width 子視圖）
+[x] G0.3  進度條四段，點擊可跳 phase（進階使用者）
+[x] G0.4  「退出共創」回工作台預設；資料已寫入者保留
 ```
 
 ### G1 — 狀態機 + 作品摘要（中）
 
 ```
-[ ] G1.1  CoCreateSession 狀態：phase、可選 local flags；完成條件讀 projects/scenes query
-[ ] G1.2  作品摘要：logline／tones、scene 縮圖、缺圖數（複用 scenes.listByProject）
-[ ] G1.3  與 SimpleProjectMode 完成定義對照表寫進註解，避免兩套「做完」定義
+[x] G1.1  CoCreateSession 狀態：phase、可選 local flags；完成條件讀 projects/scenes query
+[x] G1.2  作品摘要：logline／tones、scene 縮圖、缺圖數（複用 scenes.listByProject）
+[x] G1.3  與 SimpleProjectMode 完成定義對照表寫進註解，避免兩套「做完」定義
 ```
 
 ### G2 — 引導對話接 runAction（核心）

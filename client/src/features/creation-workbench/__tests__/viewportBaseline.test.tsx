@@ -41,7 +41,13 @@ vi.mock("../../../api", () => ({
     // KnowledgeSourceStrip（#251 起掛在生成表單上）會查知識庫清單
     knowledge: { list: { useQuery: () => ({ data: [] }) } },
     prompts: { save: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
-    scenes: { addDraft: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) } },
+    scenes: {
+      // G1 共創進度：CreationWorkbench 會 listByProject（enabled 僅共創開）
+      listByProject: {
+        useQuery: () => ({ data: [], isLoading: false, isError: false }),
+      },
+      addDraft: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
+    },
     generation: {
       // P2 recent strip (DirectGenerateMode) shares this key with GenerationList
       listByProject: {
