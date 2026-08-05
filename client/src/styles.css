@@ -4191,6 +4191,38 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .model-health-badge.tone-mute { opacity: 0.92; }
 .model-catalog-card { transition: border-color 0.15s ease; }
 .model-catalog-card:hover { border-color: var(--border-strong); }
+.model-catalog-card__row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.model-catalog-card__body { min-width: 0; flex: 1; }
+.model-thumb {
+  flex: none;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  background: var(--card2);
+  position: relative;
+}
+.model-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.model-thumb.is-placeholder {
+  background:
+    linear-gradient(145deg, var(--primary-tint) 0%, var(--healing-soft) 55%, var(--card2) 100%);
+}
+.model-thumb__fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--primary-ink);
+  opacity: 0.85;
+}
 .model-use-cta {
   display: inline-flex;
   align-items: center;
@@ -4622,6 +4654,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   }
   .model-decision-tabs::-webkit-scrollbar { display: none; }
   .model-decision-tab { min-width: 190px; flex: 0 0 190px; scroll-snap-align: start; }
+  .model-catalog-card__row { gap: 10px; }
+  .model-thumb { border-radius: 10px; }
   .model-scenario-grid { grid-template-columns: 1fr; }
   .team-run-row { grid-template-columns: auto minmax(0, 1fr); }
   .team-run-row__copy { grid-template-columns: 1fr; }

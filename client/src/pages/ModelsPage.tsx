@@ -177,6 +177,17 @@ export function ModelsPage() {
   const compareFull = compareIds.length >= COMPARE_MAX;
   // 比較表的列定義(欄=所選模型)
   const compareRows: Array<{ label: string; render: (m: ModelEntry) => ReactNode }> = [
+    {
+      label: "預覽",
+      render: (m) => (
+        <ModelThumb
+          label={m.label}
+          category={m.category}
+          src={healthById[m.id]?.thumbnailUrl ?? null}
+          size={56}
+        />
+      ),
+    },
     { label: "級別", render: (m) => <Pill style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</Pill> },
     { label: "點數", render: (m) => <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span> },
     {
@@ -533,7 +544,15 @@ export function ModelsPage() {
             ) : (
               <div style={{ marginTop: 12, borderTop: "1px solid var(--border-soft)" }}>
                 {wizardResults.map((m) => (
-                  <div key={m.id} style={{ padding: "10px 0", borderBottom: "1px solid var(--border-soft)" }}>
+                  <div key={m.id} className="model-wizard-result" style={{ padding: "10px 0", borderBottom: "1px solid var(--border-soft)" }}>
+                    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                      <ModelThumb
+                        label={m.label}
+                        category={m.category}
+                        src={healthById[m.id]?.thumbnailUrl}
+                        size={48}
+                      />
+                      <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                       <b>{m.label}</b>
                       <HealthBadge health={healthById[m.id]?.health} note={healthById[m.id]?.healthNote} />
@@ -555,6 +574,8 @@ export function ModelsPage() {
                       {m.strengths}
                       {wizSource === "yes" && m.needs ? `|需要來源:${m.sourceHint ?? NEEDS_LABEL[m.needs]}` : ""}
                     </Meta>
+                      </div>
+                    </div>
                   </div>
                 ))}
                 {wizardResults.length === 0 && (
@@ -665,6 +686,14 @@ export function ModelsPage() {
             const neg = m.supportsNegativePrompt ?? healthById[m.id]?.supportsNegativePrompt;
             return (
             <Card as="section" key={m.id} className="model-catalog-card" style={{ padding: "14px 18px" }}>
+              <div className="model-catalog-card__row">
+                <ModelThumb
+                  label={m.label}
+                  category={m.category}
+                  src={m.thumbnailUrl ?? healthById[m.id]?.thumbnailUrl ?? null}
+                  size={72}
+                />
+                <div className="model-catalog-card__body">
               <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                 <b>{m.label}</b>
                 <Pill style={TIER_STYLE[m.tier]}>{m.tierLabel}</Pill>
@@ -719,6 +748,8 @@ export function ModelsPage() {
                   到工作台使用 <Icon name="ArrowRight" size={12} />
                 </Link>
               </Meta>
+                </div>
+              </div>
             </Card>
             );
           })}
@@ -796,6 +827,60 @@ function WizardChip({ on, label, title, onToggle }: { on: boolean; label: string
   );
 }
 
+/** 類別 → 占位圖示（無 Fal 縮圖時） */
+const CATEGORY_ICON: Partial<Record<ModelCategory, IconName>> = {
+  "text-to-image": "Image",
+  "image-to-image": "Palette",
+  "text-to-video": "Clapperboard",
+  "image-to-video": "Film",
+  "video-to-video": "Film",
+  llm: "MessageCircle",
+  vision: "Camera",
+  "speech-to-text": "Mic",
+  "text-to-speech": "Volume2",
+  "text-to-audio": "Music",
+  training: "Package",
+};
+
+/** 模型縮圖：優先 Fal 官方 thumbnail；失敗／無圖時類別色塊 */
+function ModelThumb({
+  label,
+  category,
+  src,
+  size = 64,
+}: {
+  label: string;
+  category: ModelCategory | string;
+  src?: string | null;
+  size?: number;
+}) {
+  const [broken, setBroken] = useState(false);
+  const showImg = !!src && !broken;
+  const icon = CATEGORY_ICON[category as ModelCategory] ?? "Sparkles";
+  return (
+    <div
+      className={`model-thumb${showImg ? "" : " is-placeholder"}`}
+      style={{ width: size, height: size }}
+      aria-hidden
+    >
+      {showImg ? (
+        <img
+          src={src!}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        <span className="model-thumb__fallback" title={label}>
+          <Icon name={icon} size={Math.round(size * 0.36)} />
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** 契約健康徽章 */
 function HealthBadge({ health, note }: { health?: string | null; note?: string | null }) {
   const key = normalizeHealth(health);
@@ -829,6 +914,7 @@ function ModelInline({
   onCopy,
   health,
   healthNote,
+  thumbnailUrl,
 }: {
   id: string;
   lead?: string;
@@ -836,11 +922,13 @@ function ModelInline({
   onCopy: (id: string) => void;
   health?: string | null;
   healthNote?: string | null;
+  thumbnailUrl?: string | null;
 }) {
   const m = MODEL_BY_ID.get(id);
   if (!m) return null;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", lineHeight: 1.6 }}>
+      <ModelThumb label={m.label} category={m.category} src={thumbnailUrl} size={36} />
       {lead && <span className="eyebrow cjk" style={{ fontWeight: 700, color: "var(--primary-ink)" }}>{lead}</span>}
       <b style={{ fontSize: "var(--fs-14)" }}>{m.label}</b>
       <Pill style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</Pill>
@@ -868,7 +956,7 @@ function ScenarioCard({
   copiedId: string | null;
   onCopy: (id: string) => void;
   onJump: (cat: ModelCategory) => void;
-  healthById: Record<string, { health: string; healthNote: string } | undefined>;
+  healthById: Record<string, { health: string; healthNote: string; thumbnailUrl?: string | null } | undefined>;
 }) {
   const primary = MODEL_BY_ID.get(recipe.pickIds[0]);
   const alts = recipe.pickIds.slice(1).map((id) => MODEL_BY_ID.get(id)).filter((m): m is ModelEntry => !!m);
@@ -887,6 +975,7 @@ function ScenarioCard({
             onCopy={onCopy}
             health={healthById[primary.id]?.health}
             healthNote={healthById[primary.id]?.healthNote}
+            thumbnailUrl={healthById[primary.id]?.thumbnailUrl}
           />
           <Meta as="p" style={{ margin: "3px 0 0" }}>{recipe.why}</Meta>
         </div>
@@ -930,7 +1019,7 @@ function ShowdownCard({
   copiedId: string | null;
   onCopy: (id: string) => void;
   onJump: (cat: ModelCategory) => void;
-  healthById: Record<string, { health: string; healthNote: string } | undefined>;
+  healthById: Record<string, { health: string; healthNote: string; thumbnailUrl?: string | null } | undefined>;
 }) {
   return (
     <Card variant="std" style={{ padding: "12px 14px" }}>
@@ -966,6 +1055,7 @@ function ShowdownCard({
                     onCopy={onCopy}
                     health={healthById[a.winnerId]?.health}
                     healthNote={healthById[a.winnerId]?.healthNote}
+                    thumbnailUrl={healthById[a.winnerId]?.thumbnailUrl}
                   />
                 </td>
                 <td style={compareCell}>
@@ -976,6 +1066,7 @@ function ShowdownCard({
                       onCopy={onCopy}
                       health={healthById[a.runnerUpId]?.health}
                       healthNote={healthById[a.runnerUpId]?.healthNote}
+                      thumbnailUrl={healthById[a.runnerUpId]?.thumbnailUrl}
                     />
                   ) : (
                     <Meta>—</Meta>

@@ -23,6 +23,7 @@
     "assets:backup": "bash scripts/backup-assets.sh",
     "models:contracts": "tsx scripts/sync-model-contracts.ts",
     "models:contracts:openapi": "tsx scripts/sync-model-contracts.ts --openapi",
+    "models:thumbnails": "tsx scripts/sync-model-thumbnails.ts",
     "models:docs": "tsx scripts/gen-model-docs.ts && tsx scripts/verify-models.ts",
     "test": "vitest run",
     "test:client": "vitest run --config vitest.client.config.ts",

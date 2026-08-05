@@ -6,6 +6,7 @@ import { liveCatalogStatus, syncLiveModelCatalog } from "../services/modelLiveSy
 import { pointsToTwd, POINTS_TO_TWD } from "../../shared/money";
 import { getUsdToTwd } from "../services/fxRate";
 import { getModelContract, loadModelContractSnapshot } from "../services/modelContractStore";
+import { getModelThumbnailUrl } from "../services/modelThumbnailStore";
 
 const publicEntry = (m: ModelEntry, usdToTwdRate: number) => {
   const points = estimatePointsFor(m, { usdToTwdRate });
@@ -40,6 +41,8 @@ const publicEntry = (m: ModelEntry, usdToTwdRate: number) => {
   supportsNegativePrompt: contract?.capabilities.supportsNegativePrompt ?? null,
   supportsSeed: contract?.capabilities.supportsSeed ?? null,
   tokenMeasurable: contract?.capabilities.tokenMeasurable ?? null,
+  /** Fal 官方模型縮圖（https）；無則 null，前端用類別占位 */
+  thumbnailUrl: getModelThumbnailUrl(m.id),
   };
 };
 
@@ -134,6 +137,7 @@ export const modelsRouter = router({
       textEncoderLimit: number | null;
       supportsNegativePrompt: boolean;
       supportsSeed: boolean;
+      thumbnailUrl: string | null;
     }> = {};
     for (const m of snap.models) {
       byId[m.id] = {
@@ -143,6 +147,7 @@ export const modelsRouter = router({
         textEncoderLimit: m.capabilities.textEncoderLimit,
         supportsNegativePrompt: m.capabilities.supportsNegativePrompt,
         supportsSeed: m.capabilities.supportsSeed,
+        thumbnailUrl: getModelThumbnailUrl(m.id),
       };
     }
     return {
