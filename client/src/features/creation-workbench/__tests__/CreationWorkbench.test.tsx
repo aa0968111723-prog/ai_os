@@ -595,10 +595,11 @@ describe("CreationWorkbench", () => {
   });
 
   it.each([
-    { label: "知識", anchorId: "sec-knowledge" },
-    { label: "素材", anchorId: "sec-assets" },
-    { label: "分鏡與交付", anchorId: "stage-deliver" },
-  ] as const)("context chip $label scrolls to #$anchorId", async ({ label, anchorId }) => {
+    // C2：① 錨點走 project-context-reveal → flashAnchor；分鏡仍純捲動
+    { label: "知識", anchorId: "sec-knowledge", via: "reveal" as const },
+    { label: "素材", anchorId: "sec-assets", via: "reveal" as const },
+    { label: "分鏡與交付", anchorId: "stage-deliver", via: "scroll" as const },
+  ] as const)("context chip $label navigates to #$anchorId", async ({ label, anchorId, via }) => {
     const user = userEvent.setup();
     renderWorkbench();
     const target = document.createElement("div");
@@ -606,7 +607,11 @@ describe("CreationWorkbench", () => {
     document.body.appendChild(target);
 
     await user.click(screen.getByRole("button", { name: label }));
-    await waitFor(() => expect(target.scrollIntoView).toHaveBeenCalled());
+    if (via === "reveal") {
+      await waitFor(() => expect(flashAnchor).toHaveBeenCalledWith(anchorId));
+    } else {
+      await waitFor(() => expect(target.scrollIntoView).toHaveBeenCalled());
+    }
     target.remove();
   });
 

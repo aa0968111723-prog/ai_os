@@ -43,6 +43,11 @@ import { KnowledgeBase } from "../components/KnowledgeBase";
 import { CharacterCards } from "../components/CharacterCards";
 import { ScenePresetCards } from "../components/ScenePresetCards";
 import { PropCards } from "../components/PropCards";
+import {
+  CostumePackSection,
+  costumeTabFromTarget,
+  type CostumeTab,
+} from "../components/CostumePackSection";
 import { DEFAULT_ITEMS as TOC_DEFAULT_ITEMS, TocNav } from "../components/TocNav";
 import { CreationWorkbench } from "../features/creation-workbench/CreationWorkbench";
 import { loadDraft } from "../features/creation-workbench/creationDraft";
@@ -51,6 +56,15 @@ import {
 } from "../features/creation-workbench/modes/DirectGenerateMode";
 import { projectCanEdit } from "../features/creation-workbench/generationGates";
 import { revealWorkbenchAnchor, scrollToSelector } from "../features/creation-workbench/workbenchNav";
+import {
+  PROJECT_CONTEXT_REVEAL_EVENT,
+  formatBringInSummary,
+  returnFromContext,
+  selectorForContextTarget,
+  type ProjectContextRevealDetail,
+  type ProjectContextReturnTo,
+  type ProjectContextTarget,
+} from "../features/project-nav/projectContextNav";
 import { SimpleProjectMode } from "../features/project-simple/SimpleProjectMode";
 import { resolveProjectMode, saveProjectMode, type ProjectMode } from "../features/project-simple/simpleMode";
 import { ProjectMembersCard } from "../components/ProjectMembersCard";
@@ -485,10 +499,31 @@ export function ProjectPage({ id }: { id: string }) {
     sources: false,
     manage: false,
   });
-  const setCtxSectionOpen = (key: CtxSectionKey, open: boolean) =>
+  /** C1：定裝三卡改 Tab；jump / 建定裝時同步切到對應 tab */
+  const [costumeTab, setCostumeTab] = useState<CostumeTab>("characters");
+  const setCtxSectionOpen = (key: CtxSectionKey, open: boolean) => {
     setCtxOpen((prev) => (prev[key] === open ? prev : { ...prev, [key]: open }));
+    if (open && (key === "characters" || key === "scenes" || key === "props")) {
+      setCostumeTab(key);
+    }
+  };
+  const setCostumePackOpen = (open: boolean) => {
+    setCtxOpen((prev) => {
+      if (
+        prev.characters === open &&
+        prev.scenes === open &&
+        prev.props === open
+      ) {
+        return prev;
+      }
+      return { ...prev, characters: open, scenes: open, props: open };
+    });
+  };
+  const costumePackOpen = ctxOpen.characters || ctxOpen.scenes || ctxOpen.props;
   const setCtxGroupSectionOpen = (key: CtxGroupKey, open: boolean) =>
     setCtxGroupOpen((prev) => (prev[key] === open ? prev : { ...prev, [key]: open }));
+  /** C2：從創作台／分鏡來的 returnTo——定裝區顯示「回到原處」主 CTA */
+  const [contextReturnTo, setContextReturnTo] = useState<ProjectContextReturnTo | null>(null);
   // Escape 關閉留言 sheet
   useEffect(() => {
     if (!messagesSheetOpen) return;
@@ -1216,24 +1251,56 @@ export function ProjectPage({ id }: { id: string }) {
     if (key === "recycle") return "manage";
     return "world";
   };
-  const jumpToContext = (target: string) => {
-    if (mobileCompact) {
-      if (target === "#ctx-group-world" || target === "#ctx-group-sources" || target === "#ctx-group-manage") {
-        setCtxGroupSectionOpen(target.replace("#ctx-group-", "") as CtxGroupKey, true);
-      } else if (target === "#sec-members") {
-        setCtxGroupSectionOpen("manage", true);
-      } else {
-        const key = targetToCtxKey(target);
-        if (key) {
-          setCtxGroupSectionOpen(sectionToGroup(key), true);
-          setCtxSectionOpen(key, true);
-        }
-      }
+  /** 展開 ① 對應分組／定裝 Tab（不捲動；捲動由呼叫端或 reveal 事件負責） */
+  const expandContextForSelector = (target: string) => {
+    const costume = costumeTabFromTarget(target);
+    if (costume) setCostumeTab(costume);
+    if (target === "#ctx-group-world" || target === "#ctx-group-sources" || target === "#ctx-group-manage") {
+      setCtxGroupSectionOpen(target.replace("#ctx-group-", "") as CtxGroupKey, true);
+      return;
     }
+    if (target === "#sec-members") {
+      setCtxGroupSectionOpen("manage", true);
+      return;
+    }
+    if (target === "#stage-context") {
+      setCtxGroupSectionOpen("world", true);
+      return;
+    }
+    const key = targetToCtxKey(target);
+    if (key) {
+      setCtxGroupSectionOpen(sectionToGroup(key), true);
+      setCtxSectionOpen(key, true);
+      if (key === "characters" || key === "scenes" || key === "props") {
+        setCostumePackOpen(true);
+      }
+    } else if (costume) {
+      setCostumePackOpen(true);
+    }
+  };
+
+  const jumpToContext = (target: string) => {
+    expandContextForSelector(target);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => scrollToSelector(target));
     });
   };
+
+  // C2：aios:project-context-reveal —— 展開分組／Tab、記住 returnTo（scroll/flash 由派發端延遲做）
+  useEffect(() => {
+    const onReveal = (ev: Event) => {
+      const detail = (ev as CustomEvent<ProjectContextRevealDetail>).detail;
+      if (!detail?.target) return;
+      if (detail.projectId && detail.projectId !== id) return;
+      const selector = selectorForContextTarget(detail.target as ProjectContextTarget);
+      expandContextForSelector(selector);
+      if (detail.returnTo) setContextReturnTo(detail.returnTo);
+    };
+    window.addEventListener(PROJECT_CONTEXT_REVEAL_EVENT, onReveal);
+    return () => window.removeEventListener(PROJECT_CONTEXT_REVEAL_EVENT, onReveal);
+    // expand helpers close over latest open state setters (stable enough for reveal)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, mobileCompact]);
 
   /** 上下文摘要條的一顆 chip：顯示計數、點了捲到對應卡（手機一併展開） */
   // `on` 是「那一區已有內容」的視覺標示，不是按下狀態——點下去只會捲動，不會切換任何東西。
@@ -1566,6 +1633,15 @@ export function ProjectPage({ id }: { id: string }) {
                 {wvReady
                   ? "基本設定就緒——下方兩區會自動注入每次生成"
                   : "先補「這支片長什麼樣」的基本設定，後面生成才穩"}
+              </Meta>
+              {/* C2.5：與生成台帶入列同源口徑（勾選數，非庫存總數） */}
+              <Meta as="p" data-testid="ctx-bring-in-summary" style={{ margin: "6px 0 0", fontSize: 12 }}>
+                {formatBringInSummary({
+                  wvReady,
+                  characterCount: charIds.length,
+                  sceneCount: sceneIds.length,
+                  propCount: propIds.length,
+                })}
               </Meta>
             </div>
             <div className="ctx-summary" role="group" aria-label="AI 全程共用的上下文一覽">
@@ -2095,59 +2171,116 @@ export function ProjectPage({ id }: { id: string }) {
           </CtxCollapse>
           </CollabZone>
 
-          {/* 角色定裝卡：勾選後生成自動注入外觀錨點。
-              手機預設收合（CtxCollapse）；桌機維持全展開。錨點 id 掛外層供摘要 chip 捲動。 */}
+          {/* C1：角色／場景／道具合一「定裝」Tab。錨點 #sec-characters|scenes|props 掛 tabpanel。
+              手機：整包 CtxCollapse 預設收合；桌機直接展開。 */}
           <CtxCollapse
             compact={mobileCompact}
-            sectionId="sec-characters"
-            title="角色定裝"
-            meta={charCount != null ? `${charCount} 張` : undefined}
-            open={ctxOpen.characters}
-            onOpenChange={(o) => setCtxSectionOpen("characters", o)}
+            sectionId="sec-costume"
+            title="定裝"
+            meta={[
+              charCount != null ? `角${charCount}` : null,
+              presetCount != null ? `景${presetCount}` : null,
+              propCount != null ? `道${propCount}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined}
+            open={costumePackOpen}
+            onOpenChange={setCostumePackOpen}
           >
-            <CharacterCards
-              projectId={id}
-              selectedIds={charIds}
-              onToggle={toggleChar}
-              onCreated={onCharCreated}
-              readOnly={!canEdit}
+            <CostumePackSection
+              tab={costumeTab}
+              onTabChange={(t) => {
+                setCostumeTab(t);
+                setCtxSectionOpen(t, true);
+              }}
+              counts={{
+                characters: charCount,
+                scenes: presetCount,
+                props: propCount,
+              }}
+              carriedHint={
+                <>
+                  勾選角色／場景後，歸屬在它們名下的道具會在生成時
+                  <strong>自動帶入</strong>
+                  （與創作台數字同源；手動勾選優先）。目前預覽會多帶{" "}
+                  {carriedPropIds.filter((pid) => !propIds.includes(pid)).length} 件。
+                </>
+              }
+              panels={{
+                characters: (
+                  <CharacterCards
+                    projectId={id}
+                    selectedIds={charIds}
+                    onToggle={toggleChar}
+                    onCreated={onCharCreated}
+                    readOnly={!canEdit}
+                  />
+                ),
+                scenes: (
+                  <ScenePresetCards
+                    projectId={id}
+                    selectedIds={sceneIds}
+                    onToggle={toggleScene}
+                    onCreated={onSceneCreated}
+                    readOnly={!canEdit}
+                  />
+                ),
+                props: (
+                  <PropCards
+                    projectId={id}
+                    selectedIds={propIds}
+                    onToggle={toggleProp}
+                    onCreated={onPropCreated}
+                    readOnly={!canEdit}
+                  />
+                ),
+              }}
             />
-          </CtxCollapse>
-
-          {/* 場景設定卡：勾選後生成自動注入色板/光線錨點 */}
-          <CtxCollapse
-            compact={mobileCompact}
-            sectionId="sec-scenes"
-            title="場景設定"
-            meta={presetCount != null ? `${presetCount} 張` : undefined}
-            open={ctxOpen.scenes}
-            onOpenChange={(o) => setCtxSectionOpen("scenes", o)}
-          >
-            <ScenePresetCards
-              projectId={id}
-              selectedIds={sceneIds}
-              onToggle={toggleScene}
-              onCreated={onSceneCreated}
-              readOnly={!canEdit}
-            />
-          </CtxCollapse>
-
-          {/* 素材設定卡：反覆出現的道具／物件外觀材質，勾選後生成自動注入錨點 */}
-          <CtxCollapse
-            compact={mobileCompact}
-            sectionId="sec-props"
-            title="素材設定"
-            meta={propCount != null ? `${propCount} 張` : undefined}
-            open={ctxOpen.props}
-            onOpenChange={(o) => setCtxSectionOpen("props", o)}
-          >
-            <PropCards
-              projectId={id}
-              selectedIds={propIds}
-              onToggle={toggleProp}
-              onCreated={onPropCreated}
-              readOnly={!canEdit}
-            />
+            {/* C2.3：回到原處——主 CTA 依 returnTo；無記憶時兩鈕並列次要 */}
+            <div
+              className="context-return-bar"
+              data-testid="context-return-bar"
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                marginTop: 12,
+                paddingTop: 10,
+                borderTop: "1px solid var(--border-soft)",
+                position: "sticky",
+                bottom: 0,
+                background: "var(--card, var(--bg))",
+                zIndex: 1,
+              }}
+            >
+              <Button
+                type="button"
+                size="sm"
+                variant={contextReturnTo === "scenes" ? "ghost" : "primary"}
+                onClick={() => {
+                  returnFromContext("studio", { projectId: id });
+                  setContextReturnTo(null);
+                }}
+              >
+                回到創作台
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={contextReturnTo === "scenes" ? "primary" : "ghost"}
+                onClick={() => {
+                  returnFromContext("scenes", { projectId: id });
+                  setContextReturnTo(null);
+                }}
+              >
+                回到分鏡
+              </Button>
+              {contextReturnTo ? (
+                <Meta as="span" style={{ fontSize: 12, alignSelf: "center" }}>
+                  {contextReturnTo === "studio" ? "從創作台來——改完可回生成" : "從分鏡來——改完可回交付"}
+                </Meta>
+              ) : null}
+            </div>
           </CtxCollapse>
           </CtxGroup>
 

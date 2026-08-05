@@ -1,6 +1,6 @@
 # 整理計畫：專案上下文 UX + 與創作台／分鏡一體化
 
-> 狀態：**C0 實作中**（分支 `feat/context-c0-worldview-collapse`；C1–C3 待做）  
+> 狀態：**C0–C2 實作中**（`feat/context-c2-reveal-return` 含 C0–C2；C3 待做）  
 > 分支：`plan/project-context-ux-cleanup` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「專案上下文也很複雜」「連結不紮實，跟創作工作台與分鏡太不一體成型」（2026-08-04）  
 > 相關：工作台本體減噪見 **#400**（`creation-workbench-ux-cleanup-plan.md`，P0–P2 已合 #403）——本計畫專攻 **① 上下文** 與 **①↔②↔③ 接縫**
@@ -110,11 +110,11 @@
 **主要檔案：** `ProjectPage.tsx` 分組 A、`CharacterCards` / `ScenePresetCards` / `PropCards` 的包裹層
 
 ```
-[ ] C1.1  角色／場景／道具改為同一「定裝」容器內的 Tab 或手風琴（一次主開一類）
-[ ] C1.2  容器 id 穩定：如 #sec-characters #sec-scenes #sec-props 仍存在（可掛在 tabpanel）
+[x] C1.1  角色／場景／道具改為同一「定裝」容器內的 Tab 或手風琴（一次主開一類）
+[x] C1.2  容器 id 穩定：如 #sec-characters #sec-scenes #sec-props 仍存在（可掛在 tabpanel）
           以免既有 scrollToSelector / chip 失效
-[ ] C1.3  摘要列顯示三個計數（與工作台 chip 數字一致，同源 props）
-[ ] C1.4  自動帶入（carried props）在定裝區用固定 Hint 說明一次，勿只在生成確認才出現
+[x] C1.3  摘要列顯示三個計數（與工作台 chip 數字一致，同源 props）
+[x] C1.4  自動帶入（carried props）在定裝區用固定 Hint 說明一次，勿只在生成確認才出現
 ```
 
 **驗收：** 首屏定裝區高度明顯下降；深連結捲到角色／場景／道具仍可用。
@@ -126,18 +126,18 @@
 **主要檔案：** 新建或擴充 `client/src/features/project-nav/`（或擴 `workbenchNav.ts`）、`CreationContextBar`、`ProjectPage`、`DirectGenerateMode` 帶入 chip、`SceneList` 入口
 
 ```
-[ ] C2.1  定義與 workbench 對等的事件，例如：
+[x] C2.1  定義與 workbench 對等的事件，例如：
           - aios:project-context-reveal { projectId, target: characters|scenes|props|worldview|knowledge|assets, returnTo?: studio|scenes }
           行為：展開 ① 對應分組/Tab、高亮、scroll；記住 returnTo
-[ ] C2.2  工作台「帶入」chip / ContextBar 改走揭示事件，不只裸 scroll
+[x] C2.2  工作台「帶入」chip / ContextBar 改走揭示事件，不只裸 scroll
           （若 #400 已改 ContextBar 視覺，此處接行為）
-[ ] C2.3  定裝編輯區出現 sticky 或段尾主按鈕：
+[x] C2.3  定裝編輯區出現 sticky 或段尾主按鈕：
           「回到創作台」→ revealWorkbenchAnchor(#sec-studio)
           「回到分鏡」→ #stage-deliver / SceneList 錨點
           依 returnTo 顯示一個主 CTA、另一個次要
-[ ] C2.4  分鏡側：逐格生成列明示「使用專案已勾選定裝（角色 n / 場景 n）」
+[x] C2.4  分鏡側：逐格生成列明示「使用專案已勾選定裝（角色 n / 場景 n）」
           點了可 reveal 定裝；避免以為分鏡是另一套互不相關設定
-[ ] C2.5  共用摘要元件（可小）：WorldviewReady + counts → ① 頂與 ② 帶入列共用，避免文案分叉
+[x] C2.5  共用摘要元件（可小）：WorldviewReady + counts → ① 頂與 ② 帶入列共用，避免文案分叉
 ```
 
 **驗收：** 從生成台點「角色 2」→ 定裝角色 Tab 開啟並高亮 → 按「回到創作台」→ 工作台 generate 模式展開且捲到 #sec-studio／#gen-prompt。分鏡路徑對稱。

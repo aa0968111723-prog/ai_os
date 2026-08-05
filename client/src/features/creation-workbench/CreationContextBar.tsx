@@ -1,9 +1,10 @@
 import { scrollToSelector } from "./workbenchNav";
+import { revealProjectContextFromSelector } from "../project-nav/projectContextNav";
 
 /**
- * Chips that scroll to existing project sections — same targets as AiHub.
+ * Chips that navigate to existing project sections — same targets as AiHub.
  * Prefer reduced motion: use instant scroll when user prefers reduced motion
- * (handled inside scrollToSelector / goTo).
+ * (handled inside scrollToSelector / reveal).
  */
 
 export const CREATION_CONTEXT_LINKS: ReadonlyArray<{ label: string; target: string }> = [
@@ -18,12 +19,15 @@ export { scrollToSelector };
 
 export function CreationContextBar({
   onNavigate,
+  projectId,
 }: {
   /**
    * When provided, sole click handler (should expand/mode-switch + scroll).
-   * When omitted, bar scrolls to the target itself.
+   * When omitted, bar reveals context (C2) or scrolls to the target itself.
    */
   onNavigate?: (target: string) => void;
+  /** Used for C2 reveal when onNavigate is omitted */
+  projectId?: string;
 }) {
   // P1 (#400): weaker than generate form chips — navigation only, not “this run includes…”
   return (
@@ -40,7 +44,11 @@ export function CreationContextBar({
           className="chip pick creation-context-bar__link"
           onClick={() => {
             if (onNavigate) onNavigate(item.target);
-            else scrollToSelector(item.target);
+            else
+              revealProjectContextFromSelector(item.target, {
+                projectId,
+                returnTo: "studio",
+              });
           }}
         >
           {item.label}

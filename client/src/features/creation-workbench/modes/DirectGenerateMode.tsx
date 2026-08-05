@@ -20,6 +20,10 @@ import {
 } from "../generationGates";
 import { focusAndReveal } from "../../../lib/scrollIntoViewForChrome";
 import { revealWorkbenchAnchor, scrollToSelector } from "../workbenchNav";
+import {
+  formatBringInSummary,
+  revealProjectContextFromSelector,
+} from "../../project-nav/projectContextNav";
 import { Button, Card, Chip, Hint, Meta } from "../../../components/ui";
 import { GenerationSourcePicker } from "../GenerationSourcePicker";
 import type { CreativePromptOverride } from "@shared/aiTrace";
@@ -359,13 +363,18 @@ export function DirectGenerateMode({
     return showContinuityControls ? `（${sourcePart}・一致性）` : `（${sourcePart}）`;
   })();
 
-  // `on` 是「這項上下文已備妥」的視覺標示，不是切換態——點下去只是捲到該區塊。
+  // `on` 是「這項上下文已備妥」的視覺標示，不是切換態——點下去揭示 ① 並記住 returnTo。
   // 所以走 className 給 .on，不傳 selected：否則會輸出 aria-pressed，把一次性動作
   // 講成「未按下的切換鈕」，對讀屏使用者謊報元件性質。
   const summaryChip = (label: string, target: string, on = false) => (
     <Chip
       className={on ? "on" : undefined}
-      onClick={() => scrollToSelector(target)}
+      onClick={() =>
+        revealProjectContextFromSelector(target, {
+          projectId,
+          returnTo: "studio",
+        })
+      }
     >
       {label}
     </Chip>
@@ -401,6 +410,14 @@ export function DirectGenerateMode({
       />
 
       <div className="ctx-summary ctx-summary--wrap" style={{ marginTop: 8 }} role="group" aria-label="這次生成會帶入的上下文">
+        <Meta as="span" data-testid="gen-bring-in-summary" style={{ width: "100%", fontSize: 12, marginBottom: 4 }}>
+          {formatBringInSummary({
+            wvReady,
+            characterCount: characterIds.length,
+            sceneCount: scenePresetIds.length,
+            propCount: effectivePropCount,
+          })}
+        </Meta>
         帶入：
         {summaryChip(`設定${wvReady ? " ✓" : "（待設）"}`, "#onboard-worldview", wvReady)}
         {summaryChip(`角色 ${characterIds.length}`, "#sec-characters", characterIds.length > 0)}

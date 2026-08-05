@@ -79,6 +79,33 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/<WorldviewPreview[\s\S]*?defaultOpen=\{false\}/);
   });
 
+  /**
+   * C1 (#402)：定裝三卡合一 Tab；錨點仍由 CostumePackSection 掛 #sec-characters|scenes|props。
+   */
+  it("C1 costume pack: unified tabs replace three parallel full sections", () => {
+    expect(src).toMatch(/CostumePackSection/);
+    expect(src).toMatch(/sectionId="sec-costume"/);
+    // 仍掛載三卡元件（在 tab panel 內）
+    expect(src).toMatch(/<CharacterCards\b/);
+    expect(src).toMatch(/<ScenePresetCards\b/);
+    expect(src).toMatch(/<PropCards\b/);
+    // 自動帶入說明在定裝區（勿只在生成確認才出現）
+    expect(src).toMatch(/carriedHint/);
+    expect(src).toMatch(/自動帶入/);
+  });
+
+  /**
+   * C2 (#402)：揭示契約監聽 + 回到原處 CTA + 帶入摘要同源。
+   */
+  it("C2 context reveal: listens for project-context-reveal and return bar", () => {
+    expect(src).toMatch(/PROJECT_CONTEXT_REVEAL_EVENT/);
+    expect(src).toMatch(/data-testid="context-return-bar"/);
+    expect(src).toMatch(/回到創作台/);
+    expect(src).toMatch(/回到分鏡/);
+    expect(src).toMatch(/formatBringInSummary/);
+    expect(src).toMatch(/data-testid="ctx-bring-in-summary"/);
+  });
+
   it("TocNav uses shared three-stage defaults (single jump to #stage-create)", () => {
     expect(src).toMatch(/DEFAULT_ITEMS as TOC_DEFAULT_ITEMS/);
     expect(src).toMatch(/id="stage-create"/);

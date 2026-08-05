@@ -29,6 +29,10 @@ import {
   type WorkbenchRevealDetail,
 } from "./workbenchNav";
 import {
+  contextTargetFromSelector,
+  revealProjectContextFromSelector,
+} from "../project-nav/projectContextNav";
+import {
   composeGoalFromSkills,
   resolveModeFromSkills,
 } from "../../../../shared/agentSkills";
@@ -353,7 +357,7 @@ export function CreationWorkbench({
     setPlanForceOpen(mode === "plan");
   };
 
-  /** Single path: mode switch (if workbench anchor) + one reduced-motion scroll. */
+  /** Single path: mode switch (if workbench anchor) + context reveal or scroll. */
   const goTo = (selector: string) => {
     setCollapsed(false);
     const id = selector.replace(/^#/, "");
@@ -363,7 +367,12 @@ export function CreationWorkbench({
       if (nextMode === "plan") setPlanForceOpen(true);
       else setPlanForceOpen(false);
     }
-    scrollToSelector(selector);
+    // C2：ContextBar 連到 ① 時走揭示契約（展開＋returnTo），其餘仍純捲動
+    if (contextTargetFromSelector(selector)) {
+      revealProjectContextFromSelector(selector, { projectId, returnTo: "studio" });
+    } else {
+      scrollToSelector(selector);
+    }
   };
 
   return (
