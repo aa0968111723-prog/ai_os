@@ -1,6 +1,6 @@
 # 計畫：陪你做完（共創引導 Session）
 
-> 狀態：**G0–G2**（G0 #416、G1 #419 已合；G2 引導對話 + runAction）  
+> 狀態：**G0–G2 已合**（G0 #416、G1 #419、G2 #422）；G3 可選後端未開；穩定點可停  
 > 分支：`plan/co-create-guided-session` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「能不能一邊討論一邊完成作品？有時真的沒什麼靈感」＋後續「釐清與引導使用者創作」（2026-08-04）  
 > 相關：工作台減噪 **#400**、上下文一體化 **#402**、既有「一起想」`ProjectAssistant`、`SimpleProjectMode`
@@ -180,10 +180,10 @@ wrap = 可送審或已打包提示
 
 ## 8. 建議 PR 切法
 
-1. `feat/cocreate-g0-shell-entry`  
-2. `feat/cocreate-g1-session-summary`  
-3. `feat/cocreate-g2-guided-actions`  
-4. `feat/cocreate-g3-ask-mode`（可選）  
+1. `feat/cocreate-g0-shell-entry` → **#416 已合**  
+2. `feat/cocreate-g1-session-summary` → **#419 已合**  
+3. `feat/cocreate-g2-guided-actions` → **#422 已合**  
+4. `feat/cocreate-g3-ask-mode`（可選，未開）  
 
 ---
 

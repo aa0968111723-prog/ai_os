@@ -89,7 +89,7 @@
 
 | 選項 | 說明 |
 |------|------|
-| 「陪你做完」G0–G2 | 依 #404 計畫 + #408 反固著 checklist 實作 |
+| 「陪你做完」G0–G2 | **已合** #416/#419/#422；G3 可選未開 |
 | CA-01 Agent generate parity | 代理生成路徑對齊 characters／presets／source／needs；**不**引入 LangGraph |
 | Context C3 | 空專案旅程／階段文案（#407 out of scope） |
 
