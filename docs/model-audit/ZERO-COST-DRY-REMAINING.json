@@ -1,0 +1,78 @@
+{
+  "at": "2026-08-05T07:54:30.904344+00:00",
+  "note": "verify-models --probe without --yes; zero cost",
+  "rows": [
+    {
+      "id": "fal-ai/bytedance/seedream/v5/text-to-image",
+      "points": 2,
+      "health": "openapi_404",
+      "dryExit": 0,
+      "estimateLine": "這會真實呼叫 fal,估 2 點(約 NT$2),確認請加 --yes:",
+      "snippet": "模型:Seedream 5.0 Pro(fal-ai/bytedance/seedream/v5/text-to-image)|類別:text-to-image|端點:fal-ai/bytedance/seedream/v5/text-to-image\n探測輸入:「一盞溫暖的燈,極簡水彩」\n\n這會真實呼叫 fal,估 2 點(約 NT$2),確認請加 --yes:\n  npx tsx scripts/verify-models.ts --probe \"fal-ai/bytedance/seedream/v5/text-to-image\" --yes\n(尚未呼叫 fal,未扣任何費用)\n"
+    },
+    {
+      "id": "fal-ai/veo3.1",
+      "points": 31,
+      "health": "never_probed",
+      "dryExit": 0,
+      "estimateLine": "這會真實呼叫 fal,估 31 點(約 NT$31),確認請加 --yes:",
+      "snippet": "ℹ 注意:Veo 3.1(Google) 已標 verified=true,以下為重新實測。\n模型:Veo 3.1(Google)(fal-ai/veo3.1)|類別:text-to-video|端點:fal-ai/veo3.1\n探測輸入:「一盞溫暖的燈,極簡水彩,鏡頭緩慢推近」\n\n這會真實呼叫 fal,估 31 點(約 NT$31),確認請加 --yes:\n  npx tsx scripts/verify-models.ts --probe \"fal-ai/veo3.1\" --yes\n(尚未呼叫 fal,未扣任何費用)\n"
+    },
+    {
+      "id": "fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
+      "points": 11,
+      "health": "live_fail",
+      "dryExit": 0,
+      "estimateLine": "這會真實呼叫 fal,估 11 點(約 NT$11),確認請加 --yes:",
+      "snippet": "模型:Kling 2.5 Turbo Pro(fal-ai/kling-video/v2.5-turbo/pro/text-to-video)|類別:text-to-video|端點:fal-ai/kling-video/v2.5-turbo/pro/text-to-video\n探測輸入:「一盞溫暖的燈,極簡水彩,鏡頭緩慢推近」\n\n這會真實呼叫 fal,估 11 點(約 NT$11),確認請加 --yes:\n  npx tsx scripts/verify-models.ts --probe \"fal-ai/kling-video/v2.5-turbo/pro/text-to-video\" --yes\n(尚未呼叫 fal,未扣任何費用)\n"
+    },
+    {
+      "id": "fal-ai/veo2",
+      "points": 78,
+      "health": "never_probed",
+      "dryExit": 0,
+      "estimateLine": "這會真實呼叫 fal,估 78 點(約 NT$78),確認請加 --yes:",
+      "snippet": "ℹ 注意:Veo 2(Google) 已標 verified=true,以下為重新實測。\n模型:Veo 2(Google)(fal-ai/veo2)|類別:text-to-video|端點:fal-ai/veo2\n探測輸入:「一盞溫暖的燈,極簡水彩,鏡頭緩慢推近」\n\n這會真實呼叫 fal,估 78 點(約 NT$78),確認請加 --yes:\n  npx tsx scripts/verify-models.ts --probe \"fal-ai/veo2\" --yes\n(尚未呼叫 fal,未扣任何費用)\n"
+    },
+    {
+      "id": "fal-ai/kling-video/o3/pro/text-to-video",
+      "points": 17,
+      "health": "never_probed",
+      "dryExit": 0,
+      "estimateLine": "這會真實呼叫 fal,估 17 點(約 NT$17),確認請加 --yes:",
+      "snippet": "ℹ 注意:Kling 3.0/O3 Pro 已標 verified=true,以下為重新實測。\n模型:Kling 3.0/O3 Pro(fal-ai/kling-video/o3/pro/text-to-video)|類別:text-to-video|端點:fal-ai/kling-video/o3/pro/text-to-video\n探測輸入:「一盞溫暖的燈,極簡水彩,鏡頭緩慢推近」\n\n這會真實呼叫 fal,估 17 點(約 NT$17),確認請加 --yes:\n  npx tsx scripts/verify-models.ts --probe \"fal-ai/kling-video/o3/pro/text-to-video\" --yes\n(尚未呼叫 fal,未扣任何費用)\n"
+    },
+    {
+      "id": "fal-ai/bytedance/seedance/v1/pro/text-to-video",
+      "points": 19,
+      "health": "never_probed",
+      "dryExit": 0,
+      "estimateLine": "這會真實呼叫 fal,估 19 點(約 NT$19),確認請加 --yes:",
+      "snippet": "ℹ 注意:Seedance 1.0 Pro(字節) 已標 verified=true,以下為重新實測。\n模型:Seedance 1.0 Pro(字節)(fal-ai/bytedance/seedance/v1/pro/text-to-video)|類別:text-to-video|端點:fal-ai/bytedance/seedance/v1/pro/text-to-video\n探測輸入:「一盞溫暖的燈,極簡水彩,鏡頭緩慢推近」\n\n這會真實呼叫 fal,估 19 點(約 NT$19),確認請加 --yes:\n  npx tsx scripts/verify-models.ts --probe \"fal-ai/bytedance/seedance/v1/pro/text-to-video\" --yes\n(尚未呼叫 fal,未扣任何費用)\n"
+    },
+    {
+      "id": "bytedance/seedance-2.0/text-to-video",
+      "points": 47,
+      "health": "never_probed",
+      "dryExit": 0,
+      "estimateLine": "這會真實呼叫 fal,估 47 點(約 NT$47),確認請加 --yes:",
+      "snippet": "ℹ 注意:Seedance 2.0(字節) 已標 verified=true,以下為重新實測。\n模型:Seedance 2.0(字節)(bytedance/seedance-2.0/text-to-video)|類別:text-to-video|端點:bytedance/seedance-2.0/text-to-video\n探測輸入:「一盞溫暖的燈,極簡水彩,鏡頭緩慢推近」\n\n這會真實呼叫 fal,估 47 點(約 NT$47),確認請加 --yes:\n  npx tsx scripts/verify-models.ts --probe \"bytedance/seedance-2.0/text-to-video\" --yes\n(尚未呼叫 fal,未扣任何費用)\n"
+    },
+    {
+      "id": "fal-ai/wan/v2.6/text-to-video",
+      "points": 16,
+      "health": "never_probed",
+      "dryExit": 0,
+      "estimateLine": "這會真實呼叫 fal,估 16 點(約 NT$16),確認請加 --yes:",
+      "snippet": "ℹ 注意:Wan 2.6(開源) 已標 verified=true,以下為重新實測。\n模型:Wan 2.6(開源)(fal-ai/wan/v2.6/text-to-video)|類別:text-to-video|端點:wan/v2.6\n探測輸入:「一盞溫暖的燈,極簡水彩,鏡頭緩慢推近」\n\n這會真實呼叫 fal,估 16 點(約 NT$16),確認請加 --yes:\n  npx tsx scripts/verify-models.ts --probe \"fal-ai/wan/v2.6/text-to-video\" --yes\n(尚未呼叫 fal,未扣任何費用)\n"
+    },
+    {
+      "id": "fal-ai/minimax/voice-design",
+      "points": 93,
+      "health": "never_probed",
+      "dryExit": 0,
+      "estimateLine": "這會真實呼叫 fal,估 93 點(約 NT$93),確認請加 --yes:",
+      "snippet": "模型:MiniMax 聲音設計(fal-ai/minimax/voice-design)|類別:text-to-speech|端點:fal-ai/minimax/voice-design\n探測輸入:「測試」\n\n這會真實呼叫 fal,估 93 點(約 NT$93),確認請加 --yes:\n  npx tsx scripts/verify-models.ts --probe \"fal-ai/minimax/voice-design\" --yes\n(尚未呼叫 fal,未扣任何費用)\n"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "lock": "range-r5",
+  "holder": "R5-20s",
+  "token": null,
+  "expiresAt": "2026-08-05T06:16:47Z",
+  "heartbeatAt": "2026-08-05T06:16:47Z",
+  "role": "R5",
+  "lastCompletedIndex": "96",
+  "mode": "static+research",
+  "note": "i2i thin sweep + audio/training complete; L queue empty for !needs<=3"
+}

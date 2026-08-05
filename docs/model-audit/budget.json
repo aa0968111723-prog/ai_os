@@ -1,0 +1,1163 @@
+{
+  "currency": "TWD",
+  "budgetTotal": 1000,
+  "softStop": 500,
+  "usdToTwd": 31,
+  "spentTwd": 496.0,
+  "spentUsd": 0.005,
+  "entries": [
+    {
+      "at": "2026-08-05T03:38:30.447558+00:00",
+      "modelId": "fal-ai/flux/schnell",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "usdEst": 0.003,
+      "requestId": "019fd000-06cb-7df3-a27b-1dbf6b755d8c",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5119d/3OslsWyHPsbjGOHOjq6Bt.jpg"
+    },
+    {
+      "at": "2026-08-05T03:43:16.677734+00:00",
+      "modelId": "fal-ai/sana",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "usdEst": 0.001,
+      "requestId": "019fd004-7d6c-7f71-bbc8-179f4ebe03df",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa511ba/54Mq6xbp8c1PP-ohYpoMi.jpg"
+    },
+    {
+      "at": "2026-08-05T03:47:13.424782+00:00",
+      "modelId": "fal-ai/flux/dev",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "usdEst": 0.025,
+      "status": "success"
+    },
+    {
+      "at": "2026-08-05T03:53:31.369716+00:00",
+      "modelId": "fal-ai/kolors",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "status": "success"
+    },
+    {
+      "at": "2026-08-05T04:14:06.143694+00:00",
+      "modelId": "fal-ai/playground-v25",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "status": "success"
+    },
+    {
+      "at": "2026-08-05T05:25:03.860325+00:00",
+      "modelId": "fal-ai/fast-lightning-sdxl",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "usdEst": 0.001,
+      "requestId": "019fd061-9c39-7d51-8156-1d350c0c02e0",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5141c/9ECHSpftV4zkWKhIDV8qz.jpg"
+    },
+    {
+      "at": "2026-08-05T05:25:45.947482+00:00",
+      "modelId": "fal-ai/flux-2",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd062-41ce-7eb2-ab26-39410152c123",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51431/-cnrMRZTrpuuvHsEUIJw5_kC2rkk56.png"
+    },
+    {
+      "at": "2026-08-05T05:30:49.256520+00:00",
+      "modelId": "fal-ai/imagen4/preview/fast",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd062-e1c7-7e60-b256-efdec8c00984",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51424/ppgsv8NAEzdM3k25lyRgD_5XlE5Rba.png"
+    },
+    {
+      "at": "2026-08-05T05:33:45.788188+00:00",
+      "modelId": "fal-ai/kokoro/mandarin-chinese",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd067-d07e-7c03-9219-bc5ab343483f",
+      "status": "timeout_poll_120s_queue",
+      "note": "may still complete/bill; do not re-probe"
+    },
+    {
+      "at": "2026-08-05T05:36:44.079956+00:00",
+      "modelId": "fal-ai/orpheus-tts",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd069-4f87-7ed1-9c00-dbc084c66f9a",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51461/dG0aDnyAWD8-VsdmSDWKS_output.wav"
+    },
+    {
+      "at": "2026-08-05T05:39:18.037881+00:00",
+      "modelId": "fal-ai/bytedance/seedream/v4.5/text-to-image",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd069-e58a-7263-9f07-2cf221974ad9",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51454/Ux3KwkboKoO74wYsEAZyV_202661e2d2ef42b6bb3257f4f15e5ca5.jpg"
+    },
+    {
+      "at": "2026-08-05T05:40:01.249082+00:00",
+      "modelId": "fal-ai/recraft/v3/text-to-image",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd06f-4127-7983-8415-7b6b9fc8ae51",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51476/NarHTj6UDixn7bbq0BTzD_VURLBDBd.webp"
+    },
+    {
+      "at": "2026-08-05T05:41:04.586325+00:00",
+      "modelId": "fal-ai/aura-flow",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd06e-1bb1-71d1-b09f-29027e1c85f2",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5147c/H2ObCPe8jInMs8v6WWm9m.png"
+    },
+    {
+      "at": "2026-08-05T05:41:30.342230+00:00",
+      "modelId": "fal-ai/luma-photon",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd06f-eabe-7ce2-86db-5201c481a7bc",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5147d/MGs0lNHy1Ab16iVVyoIEF_output.jpg"
+    },
+    {
+      "at": "2026-08-05T05:42:03.484911+00:00",
+      "modelId": "fal-ai/flux-2/pro",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd071-1b44-79a1-ada0-bda562aaf814",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51493/HS_n6syiT40jOa9mYclYN_P8RABnDu.jpg"
+    },
+    {
+      "at": "2026-08-05T05:43:12.979304+00:00",
+      "modelId": "fal-ai/qwen-image-2/text-to-image",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd071-c75f-7202-8b01-ffe1bb52fcf2",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51489/poHiTWOpK8D0pLZOkX3NE_G4nrVw7v.png"
+    },
+    {
+      "at": "2026-08-05T05:43:54.257932+00:00",
+      "modelId": "fal-ai/recraft/v4.1/text-to-image",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd072-de71-7bf3-9df2-e33d2346bf02",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5148e/iXTIkLaGzy90KU7so-r2d_NdZr2G9u.webp"
+    },
+    {
+      "at": "2026-08-05T05:44:08.159263+00:00",
+      "modelId": "fal-ai/chatterbox/text-to-speech",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 0.0,
+      "requestId": "019fd072-e762-7293-9c7e-7cd97d1c697d",
+      "status": "failed_422_ascii_only",
+      "note": "PROBE_PROMPTS text-to-speech「測試」非 ASCII；endpoint 要求 English 或 /multilingual"
+    },
+    {
+      "modelId": "fal-ai/ideogram/v4",
+      "kind": "live_probe",
+      "pointsEst": 0,
+      "twdEst": 0,
+      "requestId": "019fd073-6736-7ed0-a1d4-d2eb84e393be",
+      "status": "fail_404_wrong_path",
+      "note": "fal-ai/ideogram/v4 Path /v4 not found",
+      "at": "2026-08-05T05:46:00.885956+00:00"
+    },
+    {
+      "modelId": "fal-ai/ideogram/v4",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd074-c2db-7de1-8e4c-c092d4ecb3a0",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5149a/MfkpEyWGAKlgVy3sYNwtY_pQYB1hhv.jpg",
+      "at": "2026-08-05T05:46:00.885974+00:00"
+    },
+    {
+      "at": "2026-08-05T05:46:14.894351+00:00",
+      "modelId": "fal-ai/stable-audio",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd074-7be6-7152-bbc2-8475566ddac8",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5149b/kyDtWEWOmaoHfYttfLVF6.wav"
+    },
+    {
+      "modelId": "fal-ai/chatterbox/text-to-speech",
+      "kind": "live_probe",
+      "pointsEst": 0,
+      "twdEst": 0,
+      "requestId": "019fd075-550a-73e0-9325-06c71043d421",
+      "status": "fail_422_ascii_only",
+      "at": "2026-08-05T05:47:21.872619+00:00"
+    },
+    {
+      "modelId": "fal-ai/chatterbox/text-to-speech",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd075-f90f-76c3-a46c-de60d3635861",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514a2/n3Q_tND_Qt-PvMsnn7Xh0.wav",
+      "at": "2026-08-05T05:47:21.872641+00:00"
+    },
+    {
+      "at": "2026-08-05T05:48:01.591024+00:00",
+      "modelId": "fal-ai/qwen-image-2/pro/text-to-image",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd076-9fa7-7e72-ae41-9fc5f75dfbb1",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514b7/Qszm27QIuYpSy4cKk3hvt_fM7ojJio.png"
+    },
+    {
+      "at": "2026-08-05T05:49:47.995085+00:00",
+      "modelId": "fal-ai/nano-banana-2",
+      "kind": "live_probe",
+      "pointsEst": 3,
+      "twdEst": 3.0,
+      "requestId": "019fd077-556c-7b22-8b1a-1439c7d8cc89",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514ac/Sil8c70vJYfSGXC5xrGDv_fuM243UP.png"
+    },
+    {
+      "at": "2026-08-05T05:51:07.627738+00:00",
+      "modelId": "fal-ai/dia-tts",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd076-3752-7333-8de8-a8de30a6f37a",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514b8/CpwNZFtJ_1R0jhHKdJtsL.wav"
+    },
+    {
+      "at": "2026-08-05T05:52:17.113136+00:00",
+      "modelId": "fal-ai/dia-tts",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd078-cdc2-7731-8848-f3c4cfb52f8e",
+      "status": "timeout_poll_120s",
+      "note": "do not re-probe"
+    },
+    {
+      "at": "2026-08-05T05:52:31.381698+00:00",
+      "modelId": "fal-ai/ace-step",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd07a-a13f-7141-8272-9274672439cc",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514c1/AJfDbqLvSZwW6w1oTQlAI_6OY8d6cE.wav"
+    },
+    {
+      "at": "2026-08-05T05:53:24.319742+00:00",
+      "modelId": "fal-ai/ideogram/v3",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd07b-86f7-74b0-b935-0515dd0ca552",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514d8/WqgSasoVRx5EBrzBy30U5_ARluN790.png"
+    },
+    {
+      "at": "2026-08-05T05:53:41.214808+00:00",
+      "modelId": "fal-ai/flux-2-flex",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd07b-e248-7d80-90a7-8c564905bae4",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514da/MiDFqQkvB-UtWLVX7m6UB_QFgr8dlQ.jpg"
+    },
+    {
+      "at": "2026-08-05T05:54:55.521579+00:00",
+      "modelId": "fal-ai/hunyuan-image/v3",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd07c-21b3-7e60-af5f-53926680eefd",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514d0/djLblFW-c1UVq1j6cWjtG.png"
+    },
+    {
+      "at": "2026-08-05T05:55:27.136792+00:00",
+      "modelId": "fal-ai/qwen-image-max/text-to-image",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd07d-40f6-76f1-97c6-867f6c0d89e1",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514e3/7L4E4dUgTqyPnVJCKz_dI_3hDVcFAX.png"
+    },
+    {
+      "at": "2026-08-05T05:55:42.561946+00:00",
+      "modelId": "fal-ai/flux-pro/v1.1-ultra",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd07d-bc2b-7090-8867-4d7b667ff44f",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514d5/sFpa5geFuDZkltgjg2PXe_bd32e75aa26a4df0a51cfd6a5e597542.jpg"
+    },
+    {
+      "at": "2026-08-05T05:55:55.826747+00:00",
+      "modelId": "fal-ai/imagen4/preview/ultra",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd07d-fca1-7f01-bb79-33ae1eaf9240",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514d6/OEkWM0NJUiombGTZ_RHhz_NMGibuLk.png"
+    },
+    {
+      "at": "2026-08-05T05:58:00.291328+00:00",
+      "modelId": "fal-ai/vibevoice",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd07e-2cd1-76a1-a23b-63e4dc4d578f",
+      "status": "timeout_poll_120s",
+      "note": "was mislabeled fail; poll timeout"
+    },
+    {
+      "at": "2026-08-05T05:58:06.697049+00:00",
+      "modelId": "fal-ai/qwen-3-tts/text-to-speech/0.6b",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 0.0,
+      "requestId": "019fd080-14fd-7f61-9f1f-0eac88161006",
+      "status": "fail"
+    },
+    {
+      "at": "2026-08-05T05:58:15.918741+00:00",
+      "modelId": "fal-ai/gemini-tts",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd080-2c58-76e0-a678-eedb966bd7a5",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514f5/e8iUoK_V_hqPk-CAMlD4G_gemini_tts_output.mp3"
+    },
+    {
+      "at": "2026-08-05T06:00:20.404383+00:00",
+      "modelId": "fal-ai/vibevoice/7b",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd080-5071-7ec0-95c3-9334d0ba3f7c",
+      "status": "timeout_poll_120s",
+      "note": "was mislabeled fail; poll timeout"
+    },
+    {
+      "at": "2026-08-05T06:00:40.254839+00:00",
+      "modelId": "fal-ai/vibevoice",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 0.0,
+      "requestId": "019fd07f-6bfe-7310-a96c-020cdc12de51",
+      "status": "failed_422_speakers_mismatch",
+      "note": "input 固定 2 speakers；單句「測試」期望 1 speaker → P0 契約"
+    },
+    {
+      "at": "2026-08-05T06:01:21.029023+00:00",
+      "modelId": "fal-ai/qwen-3-tts/text-to-speech/0.6b",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd082-ff96-7143-bb21-c54eed534358",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514f7/io3c8EAJBNW72K4cS6FJ2_fqjgFmsb.mp3"
+    },
+    {
+      "at": "2026-08-05T06:01:30.301402+00:00",
+      "modelId": "fal-ai/qwen-3-tts/text-to-speech/1.7b",
+      "kind": "live_probe",
+      "pointsEst": 3,
+      "twdEst": 3.0,
+      "requestId": "019fd083-23ce-7bc3-8aa9-631de72262ba",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514f8/3hsRP5LxO5yVM4gvzRGf3_5nY0LyAK.mp3"
+    },
+    {
+      "at": "2026-08-05T06:01:39.152880+00:00",
+      "modelId": "fal-ai/minimax/speech-2.6-hd",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd083-465b-7021-8d0b-9f9a7bfc70c7",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514f9/KwIzn10SzTWdt2X2iTnV4_speech.mp3"
+    },
+    {
+      "at": "2026-08-05T06:01:51.816746+00:00",
+      "modelId": "fal-ai/minimax/speech-02-hd",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd083-6af0-7531-a92f-35a0c5ebfc3b",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514fa/6YKCOrUftk2q-iQ0P-CKE_speech.mp3"
+    },
+    {
+      "at": "2026-08-05T06:01:57.492333+00:00",
+      "modelId": "fal-ai/elevenlabs/tts/turbo-v2.5",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd083-9a72-7823-87fd-c2d80c730fcf",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5150c/-eQqWp7tE80Lp4cq_TS4p_output.mp3"
+    },
+    {
+      "at": "2026-08-05T06:01:58.796997+00:00",
+      "modelId": "fal-ai/zonos",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": null,
+      "status": "exit_1"
+    },
+    {
+      "at": "2026-08-05T06:02:04.499879+00:00",
+      "modelId": "openai/gpt-image-2",
+      "kind": "live_probe",
+      "pointsEst": 5,
+      "twdEst": 0.0,
+      "requestId": "019fd083-b600-7d62-b5f5-dfc4c006791f",
+      "status": "fail"
+    },
+    {
+      "at": "2026-08-05T06:02:29.422342+00:00",
+      "modelId": "fal-ai/nano-banana-pro",
+      "kind": "live_probe",
+      "pointsEst": 5,
+      "twdEst": 5.0,
+      "requestId": "019fd083-cbe5-7701-9e7c-2d3d5fb25459",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514fc/Sj8Z7fWfgTcfiWR6OO0Ha_k31DO3fn.png"
+    },
+    {
+      "at": "2026-08-05T06:02:55.539183+00:00",
+      "modelId": "cassetteai/music-generator",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd084-70ba-7081-ab75-b2dc191119ee",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51512/ABtErgojJvhpIMboKHlOj_generated.wav"
+    },
+    {
+      "at": "2026-08-05T06:03:36.913750+00:00",
+      "modelId": "cassetteai/sound-effects-generator",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd084-9442-76c0-a302-fe5557434749",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51516/4lmOMOVxwYP9Zh93mJ1pn_generated.wav"
+    },
+    {
+      "at": "2026-08-05T06:05:41.275979+00:00",
+      "modelId": "fal-ai/diffrhythm",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd085-35d0-7dc0-b921-02765b404f1c",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:05:47.152464+00:00",
+      "modelId": "fal-ai/elevenlabs/sound-effects/v2",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd087-1bb1-76c0-9169-7d449bfd8ae9",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51523/HUpNl-qCjqxiOt6Vz403L_sound_effect.mp3"
+    },
+    {
+      "at": "2026-08-05T06:05:52.891059+00:00",
+      "modelId": "fal-ai/minimax-music/v2",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 0.0,
+      "requestId": "019fd087-3221-7bb2-ac1a-bcd085e78928",
+      "status": "fail"
+    },
+    {
+      "at": "2026-08-05T06:06:18.058109+00:00",
+      "modelId": "fal-ai/mmaudio-v2/text-to-audio",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd087-48ec-7ae2-b14e-b45e9d5f316f",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51515/FTEYdm3uWILWkwpiL2J_G_BLpM1mWl.mp3"
+    },
+    {
+      "at": "2026-08-05T06:06:26.604961+00:00",
+      "modelId": "fal-ai/minimax-music/v2.6",
+      "kind": "live_probe",
+      "pointsEst": 5,
+      "twdEst": 0.0,
+      "requestId": "019fd087-b5b4-7e50-a21d-93b620808d0e",
+      "status": "fail"
+    },
+    {
+      "at": "2026-08-05T06:06:35.612948+00:00",
+      "modelId": "fal-ai/stable-audio-25/text-to-audio",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd087-cc6d-7130-b530-9de8fa1f64f6",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51517/I1WestUHXdFvIvqXWg5e0_h1fzkG8I.wav"
+    },
+    {
+      "at": "2026-08-05T06:07:00.787259+00:00",
+      "modelId": "sonilo/v1.1/text-to-music",
+      "kind": "live_probe",
+      "pointsEst": 7,
+      "twdEst": 7.0,
+      "requestId": "019fd087-ef99-7611-b02b-8761b8b0f2a0",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51519/gboriEWXG4bRX87IZIMzu_tmprtxdyu3v.m4a"
+    },
+    {
+      "at": "2026-08-05T06:07:25.823734+00:00",
+      "modelId": "fal-ai/elevenlabs/music",
+      "kind": "live_probe",
+      "pointsEst": 74,
+      "twdEst": 74.0,
+      "requestId": "019fd088-51a1-7ee0-a897-59e8737d7375",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5151c/AbAG1G9TKHv_m2MVp41Aa_music_generated.mp3"
+    },
+    {
+      "at": "2026-08-05T06:07:55.712993+00:00",
+      "modelId": "fal-ai/elevenlabs/tts/multilingual-v2",
+      "kind": "live_probe",
+      "pointsEst": 3,
+      "twdEst": 3.0,
+      "requestId": "019fd088-9ce8-7b02-b963-9a46362e5f89",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5151c/CxpEhNLpfLDCyEocb0NgR_output.mp3"
+    },
+    {
+      "at": "2026-08-05T06:07:55.712993+00:00",
+      "modelId": "fal-ai/ltx-video",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd082-fcae-74d0-a77d-f33826d89954",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa514fe/88sNa0cQm9sZxucwUTjjY.mp4",
+      "note": "re-entry after concurrent budget rewrite"
+    },
+    {
+      "at": "2026-08-05T06:08:56.823374+00:00",
+      "modelId": "fal-ai/elevenlabs/tts/eleven-v3",
+      "kind": "live_probe",
+      "pointsEst": 3,
+      "twdEst": 3.0,
+      "requestId": "019fd089-b085-7d61-a02f-7d6c1e5a9839",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51534/bgnAr2kUVnj_rXTD1waOf_output.mp3"
+    },
+    {
+      "at": "2026-08-05T06:11:46.609388+00:00",
+      "modelId": "fal-ai/diffrhythm",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd08a-c896-7231-b04a-fd46f4eaae4b",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:11:52.413388+00:00",
+      "modelId": "fal-ai/kokoro/mandarin-chinese",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd08c-ae46-7ca2-9766-95687fa7f777",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51536/-tuiKKm5vnS1Vs9cazPMl_uaAmEClv.wav"
+    },
+    {
+      "at": "2026-08-05T06:11:58.195484+00:00",
+      "modelId": "fal-ai/minimax-music/v2",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 0.0,
+      "requestId": "019fd08c-c51a-7481-bef2-27a03e55ef2a",
+      "status": "fail",
+      "error": "✗ 探測失敗。錯誤原文:fal result 422：{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"lyrics_prompt\"],\"msg\":\"Field required\",\"input\":{\"prompt\":\"溫暖平靜的鋼琴旋律,慢板\"}}]}——常見原因：來源圖網址無法被生成服務抓取、格式不支援或只是測試佔位圖。請改用素材庫中真實可開啟的圖片"
+    },
+    {
+      "at": "2026-08-05T06:12:48.719307+00:00",
+      "modelId": "fal-ai/vibevoice",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd08c-dbf4-76e0-9325-fdfc8f318a6e",
+      "status": "exit_-15"
+    },
+    {
+      "at": "2026-08-05T06:12:54.762786+00:00",
+      "modelId": "fal-ai/bytedance/seedream/v5/text-to-image",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 0.0,
+      "requestId": "019fd08d-a1b4-73f1-b29d-2951d6ae9630",
+      "status": "fail",
+      "error": "✗ 探測失敗。錯誤原文:fal result 404：{\"detail\":\"Path /seedream/v5/text-to-image not found\"}"
+    },
+    {
+      "at": "2026-08-05T06:13:13.403934+00:00",
+      "modelId": "fal-ai/dia-tts/voice-clone",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 0.0,
+      "requestId": "019fd08d-b885-7563-b269-ab95b8e7feb0",
+      "status": "fail",
+      "error": "✗ 探測失敗。錯誤原文:fal result 422：{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"ref_audio_url\"],\"msg\":\"Field required\",\"input\":{\"text\":\"測試\"}},{\"type\":\"missing\",\"loc\":[\"body\",\"ref_text\"],\"msg\":\"Field required\","
+    },
+    {
+      "at": "2026-08-05T06:13:19.674959+00:00",
+      "modelId": "fal-ai/vibevoice/7b",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd08e-01ad-7091-b767-0d561a44915c",
+      "status": "exit_-9"
+    },
+    {
+      "at": "2026-08-05T06:13:25.309061+00:00",
+      "modelId": "fal-ai/elevenlabs/text-to-dialogue/eleven-v3",
+      "kind": "live_probe",
+      "pointsEst": 3,
+      "twdEst": 3.0,
+      "requestId": "019fd08e-195a-7b11-bf30-5a1544c058c9",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51540/GS-t7d9eo-cCYKosvkbHb_output.mp3"
+    },
+    {
+      "at": "2026-08-05T06:13:26.949769+00:00",
+      "modelId": "fal-ai/dia-tts/voice-clone",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 0.0,
+      "requestId": "019fd08c-d1bc-7c32-b40d-47f5656fbe62",
+      "status": "failed_422_missing_ref",
+      "note": "P0: OpenAPI requires ref_audio_url+ref_text; models.ts !needs + input only text 錯誤"
+    },
+    {
+      "at": "2026-08-05T06:13:56.633337+00:00",
+      "modelId": "fal-ai/bytedance/seedream/v5/text-to-image",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 0.0,
+      "requestId": "019fd08e-3597-7eb0-b733-e7da17e5d341",
+      "status": "failed_404_path",
+      "note": "P0: Path /seedream/v5/text-to-image not found — endpoint dead"
+    },
+    {
+      "at": "2026-08-05T06:13:58.750661+00:00",
+      "modelId": "openai/gpt-image-2",
+      "kind": "live_probe",
+      "pointsEst": 5,
+      "twdEst": 5,
+      "status": "success",
+      "note": "fixed imageSize then L2 ok"
+    },
+    {
+      "at": "2026-08-05T06:14:40.169833+00:00",
+      "modelId": "fal-ai/vibevoice",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 0.0,
+      "requestId": "019fd08e-b36b-7cf1-a019-4f159aa67504",
+      "status": "fail",
+      "error": "✗ 探測失敗。錯誤原文:fal result 422：{\"detail\":[{\"loc\":[\"body\",\"speakers\"],\"msg\":\"2 speakers provided, but expected 1 from script.\",\"type\":\"value_error\"}]}——常見原因：來源圖網址無法被生成服務抓取、格式不支援或只是測試佔位圖。請改用素材庫中真實可開啟的圖片"
+    },
+    {
+      "at": "2026-08-05T06:14:45.759051+00:00",
+      "modelId": "fal-ai/minimax-music/v2",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 0.0,
+      "requestId": "019fd08f-53b1-7cf2-8401-cdffc1ca8f42",
+      "status": "fail",
+      "error": "✗ 探測失敗。錯誤原文:fal result 422：{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"lyrics_prompt\"],\"msg\":\"Field required\",\"input\":{\"prompt\":\"溫暖平靜的鋼琴旋律,慢板\"}}]}——常見原因：來源圖網址無法被生成服務抓取、格式不支援或只是測試佔位圖。請改用素材庫中真實可開啟的圖片"
+    },
+    {
+      "at": "2026-08-05T06:14:51.870604+00:00",
+      "modelId": "fal-ai/diffrhythm",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 0.0,
+      "requestId": "019fd08f-6b25-71e0-83c2-d1a7ef7a1539",
+      "status": "fail",
+      "error": "✗ 探測失敗。錯誤原文:fal result 422：{\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"lyrics\"],\"msg\":\"Field required\",\"input\":{\"prompt\":\"溫暖平靜的鋼琴旋律,慢板\"}}]}——常見原因：來源圖網址無法被生成服務抓取、格式不支援或只是測試佔位圖。請改用素材庫中真實可開啟的圖片"
+    },
+    {
+      "at": "2026-08-05T06:16:53.474681+00:00",
+      "modelId": "fal-ai/vibevoice/7b",
+      "kind": "live_probe",
+      "pointsEst": 2,
+      "twdEst": 2.0,
+      "requestId": "019fd08f-819c-71c2-9896-408fbd625b83",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51555/9wwrpsfNfD2aGjmh5eZDc_Z3OiYv2p.mp3"
+    },
+    {
+      "at": "2026-08-05T06:16:59.159679+00:00",
+      "modelId": "fal-ai/lyria2",
+      "kind": "live_probe",
+      "pointsEst": 3,
+      "twdEst": 0.0,
+      "requestId": "019fd091-5c9e-7ad1-8181-c2dd1f6a041f",
+      "status": "fail",
+      "error": "✗ 探測失敗。錯誤原文:fal result 422：{\"detail\":[{\"loc\":[\"body\",\"prompt\"],\"msg\":\"Unsupported language detected. Please use English.\",\"type\":\"value_error\",\"url\":\"https://docs.fal.ai/errors#value_error\",\"input\":\"溫暖平靜的鋼琴旋律,慢板\"}]}——常見原因：來源圖網址無法被生成服務抓取、格式不"
+    },
+    {
+      "at": "2026-08-05T06:17:04.858060+00:00",
+      "modelId": "fal-ai/minimax-music/v2.6",
+      "kind": "live_probe",
+      "pointsEst": 5,
+      "twdEst": 0.0,
+      "requestId": "019fd091-7303-7302-afd0-02c9b6e2f7f8",
+      "status": "fail",
+      "error": "✗ 探測失敗。錯誤原文:fal result 422：{\"detail\":[{\"loc\":[\"body\"],\"msg\":\"Invalid parameters in input. Please check the prompt length and try again.\",\"type\":\"input_value_error\",\"url\":\"https://docs.fal.ai/errors#input_value_error\",\"input\":{\"prompt\":\"溫暖平靜"
+    },
+    {
+      "at": "2026-08-05T06:19:08.996287+00:00",
+      "modelId": "fal-ai/luma-dream-machine/ray-2-flash",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd091-8923-7362-91ba-be7ac95a6242",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:19:40.322348+00:00",
+      "modelId": "fal-ai/bytedance/seedance/v1/lite/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd093-6d7e-75c1-81fb-b68d38433d3a",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51576/7o9Ze4kZB7Ih1kGAoOISI_video.mp4"
+    },
+    {
+      "at": "2026-08-05T06:20:37.111869+00:00",
+      "modelId": "fal-ai/veo3.1/lite",
+      "kind": "live_probe",
+      "pointsEst": 5,
+      "twdEst": 5.0,
+      "requestId": "019fd093-7b09-77d3-b39e-3237b55ea164",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51568/G-Puh7ltRyoyhpJ12bzOG_a6d18c130b03446097f03c81e205f763.mp4"
+    },
+    {
+      "at": "2026-08-05T06:20:40.540586+00:00",
+      "modelId": "fal-ai/wan-t2v",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd093-e7ac-7ed3-8cab-0e0f0f54e45d",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51567/YaPZcCodmL3MK27LS50Jn_QW2hICKG.mp4"
+    },
+    {
+      "at": "2026-08-05T06:22:44.531266+00:00",
+      "modelId": "fal-ai/cogvideox-5b",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd094-d305-7ae3-ab6e-698084610898",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:24:48.751835+00:00",
+      "modelId": "fal-ai/minimax/hailuo-02/standard/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 7,
+      "twdEst": 7.0,
+      "requestId": "019fd096-b79e-7ab0-9f6b-a388639adcc6",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:25:22.207586+00:00",
+      "modelId": "fal-ai/luma-dream-machine/ray-2-flash",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd095-193e-7c41-a3ad-d17ce77ea855",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51586/ChbLVamieq0jg2QfjQE6q_output.mp4"
+    },
+    {
+      "at": "2026-08-05T06:25:45.772988+00:00",
+      "modelId": "fal-ai/bytedance/seedance/v1.5/pro/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 8,
+      "twdEst": 8.0,
+      "requestId": "019fd098-9c77-7a11-91e5-695e488ec732",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5158a/bwAeAZVXOuXPaqr_lfIIv_video.mp4"
+    },
+    {
+      "at": "2026-08-05T06:26:25.813914+00:00",
+      "modelId": "fal-ai/bytedance/seedance/v1/lite/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd099-7278-7871-bd8a-c1d72260a4e9",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5158d/xa3hVEKlWNsPPO0YMeJYR_video.mp4"
+    },
+    {
+      "at": "2026-08-05T06:27:49.952767+00:00",
+      "modelId": "fal-ai/yue",
+      "kind": "live_probe",
+      "pointsEst": 8,
+      "twdEst": 8.0,
+      "requestId": "019fd099-7c4a-73b1-8adc-69713e1cfbcd",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:28:34.122148+00:00",
+      "modelId": "fal-ai/vibevoice",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 0.0,
+      "requestId": "019fd09b-eab2-7450-b461-f638a7aab8c4",
+      "status": "fail",
+      "error": "✗ 探測失敗。錯誤原文:fal result 422：{\"detail\":[{\"loc\":[\"body\",\"speakers\"],\"msg\":\"2 speakers provided, but expected 1 from script.\",\"type\":\"value_error\"}]}——常見原因：來源圖網址無法被生成服務抓取、格式不支援或只是測試佔位圖。請改用素材庫中真實可開啟的圖片"
+    },
+    {
+      "at": "2026-08-05T06:29:24.813024+00:00",
+      "modelId": "fal-ai/minimax-music/v2",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd09c-0d80-79e3-92a0-6ef0691e2715",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa515a0/8lHhV0IXwl0DANVwm92Xp_output.mp3"
+    },
+    {
+      "at": "2026-08-05T06:31:28.983256+00:00",
+      "modelId": "fal-ai/diffrhythm",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "requestId": "019fd09c-d39b-78d3-9352-6573e53a7535",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:31:34.798960+00:00",
+      "modelId": "fal-ai/minimax-music/v2.6",
+      "kind": "live_probe",
+      "pointsEst": 5,
+      "twdEst": 0.0,
+      "requestId": "019fd09e-b8f5-7ac0-b4dd-46a67802167c",
+      "status": "fail",
+      "error": "✗ 探測失敗。錯誤原文:fal result 422：{\"detail\":[{\"loc\":[\"body\"],\"msg\":\"Invalid parameters in input. Please check the prompt length and try again.\",\"type\":\"input_value_error\",\"url\":\"https://docs.fal.ai/errors#input_value_error\",\"input\":{\"prompt\":\"溫暖平靜"
+    },
+    {
+      "at": "2026-08-05T06:32:18.866539+00:00",
+      "modelId": "fal-ai/pika/v2.2/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd09a-6bb6-7c43-8951-a32630b31d5f",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa515af/xQ07lwlmwfkIhIzAx883O_tmp5le8dakw.mp4"
+    },
+    {
+      "at": "2026-08-05T06:33:38.023621+00:00",
+      "modelId": "fal-ai/wan-t2v",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd09f-cd28-7901-95a9-74277fc605df",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa515b4/mWzIkEkIxaZ621WtIN34w_00RFsOEI.mp4"
+    },
+    {
+      "at": "2026-08-05T06:33:38.763857+00:00",
+      "modelId": "fal-ai/cogvideox-5b",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd09e-ce96-73d3-ac3a-ed1cb78d2471",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:35:42.856027+00:00",
+      "modelId": "fal-ai/minimax/hailuo-02/standard/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 7,
+      "twdEst": 7.0,
+      "requestId": "019fd0a0-b33d-7b81-a13f-5ccdab3d842f",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:37:47.157554+00:00",
+      "modelId": "fal-ai/yue",
+      "kind": "live_probe",
+      "pointsEst": 8,
+      "twdEst": 8.0,
+      "requestId": "019fd0a2-98ec-7d03-9f4b-1272aa0406d8",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:39:51.352748+00:00",
+      "modelId": "fal-ai/minimax/hailuo-2.3/standard/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 9,
+      "twdEst": 9.0,
+      "requestId": "019fd0a4-7e1b-7d43-8555-9d8ffe6932d2",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:40:29.449423+00:00",
+      "modelId": "fal-ai/pixverse/v5.5/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 9,
+      "twdEst": 9.0,
+      "requestId": "019fd0a6-63f0-7de1-b276-cd391dae67fd",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa515f3/NqFwAII96ypZoGIGioYcW_output.mp4"
+    },
+    {
+      "at": "2026-08-05T06:41:02.999398+00:00",
+      "modelId": "fal-ai/cogvideox-5b",
+      "kind": "live_probe",
+      "pointsEst": 6,
+      "twdEst": 6.0,
+      "requestId": "019fd0a1-01f6-7fb1-a408-30b3ec97695d",
+      "status": "timeout_poll_queued",
+      "note": "120s+ extra poll still queued; may complete later; do not re-yes"
+    },
+    {
+      "at": "2026-08-05T06:42:33.840841+00:00",
+      "modelId": "fal-ai/kling-video/v1.6/standard/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 9,
+      "twdEst": 9.0,
+      "requestId": "019fd0a6-f8e2-7d20-bd86-53d45366db07",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:42:55.540203+00:00",
+      "modelId": "fal-ai/kling-video/v2.5-turbo/pro/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 11,
+      "twdEst": 5.0,
+      "requestId": "019fd0a8-de33-7271-a9bc-5837be8033fa",
+      "status": "exit_-9"
+    },
+    {
+      "at": "2026-08-05T06:44:34.924419+00:00",
+      "modelId": "fal-ai/kling-video/v2.6/pro/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 11,
+      "twdEst": 11.0,
+      "requestId": "019fd0a9-33d0-7e23-aa45-eb6e90bcdc5d",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa515fb/iu9V2mXdgqvgI37d3MqJ3_output.mp4"
+    },
+    {
+      "at": "2026-08-05T06:46:01.024354+00:00",
+      "modelId": "fal-ai/wan/v2.2-a14b/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 12,
+      "twdEst": 12.0,
+      "requestId": "019fd0aa-b6e7-73a0-9c05-d9c9eb480d1b",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51603/k9FK3T5V-LX3UnVg-fzFJ_L3iR2QuZ.mp4"
+    },
+    {
+      "at": "2026-08-05T06:47:22.469137+00:00",
+      "modelId": "fal-ai/minimax/hailuo-02/standard/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 7,
+      "twdEst": 7.0,
+      "requestId": "019fd0a7-cf7c-7f70-9dac-729344169677",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5161b/qRxDLo4uaDTVs4vd5y3iF_2IapwPUY.mp4"
+    },
+    {
+      "at": "2026-08-05T06:48:05.465778+00:00",
+      "modelId": "fal-ai/hunyuan-video-v1.5/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 12,
+      "twdEst": 12.0,
+      "requestId": "019fd0ac-088b-7f53-aa6b-679d067c3c2b",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:50:09.653450+00:00",
+      "modelId": "fal-ai/hunyuan-video",
+      "kind": "live_probe",
+      "pointsEst": 12,
+      "twdEst": 12.0,
+      "requestId": "019fd0ad-ed67-7ca3-b8bd-df41d301bd9c",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:52:13.914459+00:00",
+      "modelId": "fal-ai/mochi-v1",
+      "kind": "live_probe",
+      "pointsEst": 12,
+      "twdEst": 12.0,
+      "requestId": "019fd0af-d2af-73d3-a81a-61a69a183cfe",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:53:33.703399+00:00",
+      "modelId": "fal-ai/pixverse/v6/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 14,
+      "twdEst": 14.0,
+      "requestId": "019fd0b1-b7a1-7c02-adaf-3cc92caf00e6",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51631/96XraCC90AW6yqzRwHsQK_output.mp4"
+    },
+    {
+      "at": "2026-08-05T06:55:38.354293+00:00",
+      "modelId": "fal-ai/minimax/hailuo-2.3/pro/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 15,
+      "twdEst": 15.0,
+      "requestId": "019fd0b2-f136-76b1-8bca-6b606d1a4808",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T06:57:04.553895+00:00",
+      "modelId": "fal-ai/sora-2/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 16,
+      "twdEst": 16.0,
+      "requestId": "019fd0b4-d619-76a0-acc7-42e838085353",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51645/9Dtk29dkGeEEzx4VBC-C__Xtrt1ain.mp4"
+    },
+    {
+      "at": "2026-08-05T06:58:33.829859+00:00",
+      "modelId": "fal-ai/veo3.1/fast",
+      "kind": "live_probe",
+      "pointsEst": 16,
+      "twdEst": 16.0,
+      "requestId": "019fd0b6-2681-79a1-adc8-707c0330c725",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5164e/YVR7ksBoIRSgyW8KPLrbD_8282e2c0bb3e4fce817d1315014b5614.mp4"
+    },
+    {
+      "at": "2026-08-05T07:00:38.104432+00:00",
+      "modelId": "fal-ai/luma-dream-machine/ray-2",
+      "kind": "live_probe",
+      "pointsEst": 16,
+      "twdEst": 16.0,
+      "requestId": "019fd0b7-83a2-7333-8101-63d0241c53f9",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T07:02:42.185741+00:00",
+      "modelId": "fal-ai/minimax/video-01-director",
+      "kind": "live_probe",
+      "pointsEst": 16,
+      "twdEst": 16.0,
+      "requestId": "019fd0b9-6875-7c21-92e2-9ad0cbcb20c7",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T07:04:46.719104+00:00",
+      "modelId": "fal-ai/wan/v2.5/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 16,
+      "twdEst": 16.0,
+      "requestId": "019fd0bb-4dbb-7373-a5e8-1df547729f6b",
+      "status": "timeout_poll_120s"
+    },
+    {
+      "at": "2026-08-05T07:05:57.973407+00:00",
+      "modelId": "fal-ai/wan/v2.6/text-to-video",
+      "kind": "live_probe",
+      "pointsEst": 16,
+      "twdEst": 0.0,
+      "status": "aborted_softstop",
+      "error": "user softStop lowered to 500; serial killed mid-probe (may still bill on fal if already queued)"
+    },
+    {
+      "at": "2026-08-05T07:25:14.662562+00:00",
+      "modelId": "fal-ai/vibevoice",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "status": "success",
+      "requestId": "019fd0cf-1708-78a3-99f4-34c44862b6cb",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa516eb/L5bYvRWTudC2MDqOfYibE_vT5Kb10M.mp3"
+    },
+    {
+      "at": "2026-08-05T07:27:31.503109+00:00",
+      "modelId": "fal-ai/minimax-music/v2.6",
+      "kind": "live_probe",
+      "pointsEst": 5,
+      "twdEst": 5.0,
+      "status": "timeout_poll_120s",
+      "requestId": "019fd0cf-f7d9-7991-a577-4907495e5959",
+      "error": "poll 120s still running; is_instrumental fix accepted (no 422)"
+    },
+    {
+      "at": "2026-08-05T07:29:08.361368+00:00",
+      "modelId": "fal-ai/lyria2",
+      "kind": "live_probe",
+      "pointsEst": 3,
+      "twdEst": 3.0,
+      "status": "success",
+      "requestId": "019fd0d2-70c0-7f81-acd6-6fcaf2a2dd15",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa51703/N85LjwacLUtpIK1LKO0Fu_output.wav",
+      "note": "English prompt only; Chinese 422 Unsupported language"
+    }
+  ],
+  "notes": "Only fal live --yes bills counted. NIM/static/md free.",
+  "updatedAt": "2026-08-05T07:29:08.361381+00:00",
+  "note": "softStop=500 user; free live closed; final fixes vibevoice/lyria EN/minimax v2.6"
+}

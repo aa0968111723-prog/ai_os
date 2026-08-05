@@ -13,6 +13,7 @@ import { getModel, endpointOf, isNimModel, supportsNegativePrompt, supportsSeed,
 import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
 import { measurePromptBudget } from "./promptTokens";
 import type { PromptBudgetReport } from "../../shared/promptBudget";
+import { getModelContract } from "./modelContractStore";
 import { storeGenerationSourceMeta, splitGenerationSourceMeta, type GenerationAblationMeta } from "../../shared/generationSourceMeta";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import {
@@ -490,6 +491,33 @@ export async function prepareGenerationRequest(input: SubmitCoreInput): Promise<
     title: "此模型不接收負向提示詞",
     detail: "專案禁忌已從正向 prompt 移除，但 provider schema 沒有 negative_prompt 欄位。",
   });
+  // 契約健康（docs/model-audit/contracts/current.json，由 sync-model-contracts 維護）
+  const contract = getModelContract(model.id);
+  if (contract?.health === "openapi_404") {
+    warnings.push({
+      code: "model_contract_openapi_404",
+      severity: "warning",
+      title: "此模型端點 OpenAPI 回 404",
+      detail: contract.healthNote,
+      suggestion: "換已連通的同類模型，或等運維修正 endpoint slug。",
+    });
+  } else if (contract?.health === "live_fail") {
+    warnings.push({
+      code: "model_contract_live_fail",
+      severity: "info",
+      title: "此模型最近 live 探測失敗",
+      detail: contract.healthNote,
+      suggestion: "可改用 live_ok 或 verified 的備選模型。",
+    });
+  } else if (contract?.health === "live_timeout") {
+    warnings.push({
+      code: "model_contract_live_timeout",
+      severity: "info",
+      title: "此模型最近 live 曾逾時",
+      detail: contract.healthNote,
+      suggestion: "影片／音樂類可能仍成功但較慢；避免連續重送以免重複扣點。",
+    });
+  }
   if (input.promptOverride?.positive != null) warnings.push({
     code: "manual_override",
     severity: "info",

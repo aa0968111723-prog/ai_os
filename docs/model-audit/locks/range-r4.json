@@ -1,0 +1,13 @@
+{
+  "lock": "range-r4",
+  "holder": "R4",
+  "token": null,
+  "expiresAt": "2026-08-05T06:00:00Z",
+  "heartbeatAt": "2026-08-05T05:23:00Z",
+  "role": "R4",
+  "lastCompletedIndex": 203,
+  "lastCompletedId": "fal-ai/wizper#draft",
+  "lastCompletedSlug": "fal-ai__wizper__draft",
+  "mode": "static+research",
+  "note": "DONE #203 proper 9ch; R4 proper-slug COMPLETE 53/53; next: thin→9ch (R5/R3) or P/L with KEY"
+}

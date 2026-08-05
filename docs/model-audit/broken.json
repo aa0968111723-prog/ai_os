@@ -1,0 +1,45 @@
+{
+  "updatedAt": "2026-08-05T07:35:06.823040+00:00",
+  "source": "zero-cost openapi + live history (no --yes)",
+  "openapi404": [
+    {
+      "endpoint": "fal-ai/bria/video/eraser",
+      "modelIds": [
+        "fal-ai/bria/video/eraser"
+      ]
+    },
+    {
+      "endpoint": "fal-ai/bytedance/seedream/v5/text-to-image",
+      "modelIds": [
+        "fal-ai/bytedance/seedream/v5/text-to-image"
+      ]
+    },
+    {
+      "endpoint": "fal-ai/mix-dehaze-net",
+      "modelIds": [
+        "fal-ai/mix-dehaze-net"
+      ]
+    },
+    {
+      "endpoint": "fal-ai/runway-gen3/turbo/image-to-video",
+      "modelIds": [
+        "fal-ai/runway-gen3/turbo/image-to-video"
+      ]
+    }
+  ],
+  "liveKnown": [
+    {
+      "modelId": "fal-ai/bytedance/seedream/v5/text-to-image",
+      "status": "failed_404_path"
+    },
+    {
+      "modelId": "fal-ai/ideogram/v4",
+      "status": "fail_404_wrong_path",
+      "error": "fal-ai/ideogram/v4 Path /v4 not found"
+    }
+  ],
+  "notes": [
+    "OpenAPI 404 不等於 queue 一定 404（seedream/v5 OpenAPI 404 但空 {} 曾 200 ALREADY_COMPLETED——仍勿 live 重試中文合法生成）",
+    "empty {} 連通: 219 OK_VALIDATED + 32 cancel_unconfirmed（ALREADY_COMPLETED）；0 queue 404"
+  ]
+}

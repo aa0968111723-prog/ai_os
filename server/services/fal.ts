@@ -222,22 +222,38 @@ export async function falStatus(
 export function extractResult(result: Record<string, unknown>): { url?: string; text?: string } {
   const urlOf = (v: unknown): string | undefined =>
     v && typeof v === "object" && typeof (v as { url?: unknown }).url === "string" ? (v as { url: string }).url : undefined;
+  // VEED 去背家族等：OpenAPI video 為 File[]（非單一 File）
+  const urlOfMedia = (v: unknown): string | undefined => {
+    if (Array.isArray(v)) return urlOf(v[0]);
+    return urlOf(v);
+  };
 
   const images = result.images as Array<{ url?: string }> | undefined;
   if (images?.[0]?.url) return { url: images[0].url };
   const media =
-    urlOf(result.video)
-    ?? urlOf(result.audio)
-    ?? urlOf(result.audio_file)
-    ?? urlOf(result.image)
-    ?? urlOf(result.file)
-    ?? urlOf(result.model_file);
+    urlOfMedia(result.video)
+    ?? urlOfMedia(result.audio)
+    ?? urlOfMedia(result.audio_file)
+    // F5-TTS 等：OpenAPI audio_url 為 AudioFile 物件（非字串）；字串形仍走下方 typeof 分支
+    ?? urlOfMedia(result.audio_url)
+    ?? urlOfMedia(result.image)
+    ?? urlOfMedia(result.file)
+    ?? urlOfMedia(result.model_file);
   if (media) return { url: media };
   if (typeof result.image_url === "string") return { url: result.image_url };
   if (typeof result.audio_url === "string") return { url: result.audio_url };
   if (typeof result.video_url === "string") return { url: result.video_url };
   const lora = urlOf(result.diffusers_lora_file) ?? urlOf(result.lora_file);
   if (lora) return { text: `訓練完成 ✓ LoRA 模型檔:${lora}\n(在支援 LoRA 的生成模型設定中引用此網址)`, url: undefined };
+
+  // Qwen3 clone-voice：產出 speaker_embedding（safetensors），非 audio — 非端到端 TTS
+  const speakerEmb = urlOf(result.speaker_embedding);
+  if (speakerEmb) {
+    return {
+      text: `聲線 embedding 已建立 ✓（非音檔）\n${speakerEmb}\n請在 Qwen 3 TTS 以 speaker_voice_embedding_file_url 引用此網址合成旁白`,
+      url: undefined,
+    };
+  }
 
   if (typeof result.output === "string" && result.output.trim()) return { text: result.output };
   if (typeof result.text === "string" && result.text.trim()) return { text: result.text };

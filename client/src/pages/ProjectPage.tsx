@@ -764,6 +764,70 @@ export function ProjectPage({ id }: { id: string }) {
     onSuccess: () => { utils.projects.get.invalidate({ id }); utils.projects.list.invalidate(); },
   });
 
+  /** 摘要 chip → 目標 section：手機時先展開所屬分組與收合卡再捲動
+   *  必須定義在 early return 之前：下面的 reveal useEffect 會用到，hooks 不可在條件 return 之後。 */
+  const targetToCtxKey = (target: string): CtxSectionKey | null => {
+    if (target === "#onboard-worldview") return "worldview";
+    if (target === "#sec-characters") return "characters";
+    if (target === "#sec-scenes") return "scenes";
+    if (target === "#sec-props") return "props";
+    if (target === "#sec-knowledge") return "knowledge";
+    if (target === "#sec-databases") return "databases";
+    if (target === "#sec-assets") return "assets";
+    if (target === "#sec-recyclebin") return "recycle";
+    return null;
+  };
+  const sectionToGroup = (key: CtxSectionKey): CtxGroupKey => {
+    if (key === "knowledge" || key === "databases" || key === "assets") return "sources";
+    if (key === "recycle") return "manage";
+    return "world";
+  };
+  /** 展開 ① 對應分組／定裝 Tab（不捲動；捲動由呼叫端或 reveal 事件負責） */
+  const expandContextForSelector = (target: string) => {
+    const costume = costumeTabFromTarget(target);
+    if (costume) setCostumeTab(costume);
+    if (target === "#ctx-group-world" || target === "#ctx-group-sources" || target === "#ctx-group-manage") {
+      setCtxGroupSectionOpen(target.replace("#ctx-group-", "") as CtxGroupKey, true);
+      return;
+    }
+    if (target === "#sec-members") {
+      setCtxGroupSectionOpen("manage", true);
+      return;
+    }
+    if (target === "#stage-context") {
+      setCtxGroupSectionOpen("world", true);
+      return;
+    }
+    const key = targetToCtxKey(target);
+    if (key) {
+      setCtxGroupSectionOpen(sectionToGroup(key), true);
+      setCtxSectionOpen(key, true);
+      if (key === "characters" || key === "scenes" || key === "props") {
+        setCostumePackOpen(true);
+      }
+    } else if (costume) {
+      setCostumePackOpen(true);
+    }
+  };
+
+  // C2：aios:project-context-reveal —— 展開分組／Tab、記住 returnTo（scroll/flash 由派發端延遲做）
+  // ⚠️ 必須在 project.isLoading / error early return 之前：載入成功後多呼叫一個 hook 會白屏
+  // （Rendered more hooks than during the previous render → ErrorBoundary「畫面出了點狀況」）
+  useEffect(() => {
+    const onReveal = (ev: Event) => {
+      const detail = (ev as CustomEvent<ProjectContextRevealDetail>).detail;
+      if (!detail?.target) return;
+      if (detail.projectId && detail.projectId !== id) return;
+      const selector = selectorForContextTarget(detail.target as ProjectContextTarget);
+      expandContextForSelector(selector);
+      if (detail.returnTo) setContextReturnTo(detail.returnTo);
+    };
+    window.addEventListener(PROJECT_CONTEXT_REVEAL_EVENT, onReveal);
+    return () => window.removeEventListener(PROJECT_CONTEXT_REVEAL_EVENT, onReveal);
+    // expand helpers close over latest open state setters (stable enough for reveal)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, mobileCompact]);
+
   if (project.isLoading) return <Meta as="p">載入中…</Meta>;
   if (project.error || !project.data) {
     const code = project.error?.data?.code;
@@ -1245,73 +1309,12 @@ export function ProjectPage({ id }: { id: string }) {
 
   const wvChipWarnings = chipSoftWarnings(wv);
 
-  /** 摘要 chip → 目標 section：手機時先展開所屬分組與收合卡再捲動 */
-  const targetToCtxKey = (target: string): CtxSectionKey | null => {
-    if (target === "#onboard-worldview") return "worldview";
-    if (target === "#sec-characters") return "characters";
-    if (target === "#sec-scenes") return "scenes";
-    if (target === "#sec-props") return "props";
-    if (target === "#sec-knowledge") return "knowledge";
-    if (target === "#sec-databases") return "databases";
-    if (target === "#sec-assets") return "assets";
-    if (target === "#sec-recyclebin") return "recycle";
-    return null;
-  };
-  const sectionToGroup = (key: CtxSectionKey): CtxGroupKey => {
-    if (key === "knowledge" || key === "databases" || key === "assets") return "sources";
-    if (key === "recycle") return "manage";
-    return "world";
-  };
-  /** 展開 ① 對應分組／定裝 Tab（不捲動；捲動由呼叫端或 reveal 事件負責） */
-  const expandContextForSelector = (target: string) => {
-    const costume = costumeTabFromTarget(target);
-    if (costume) setCostumeTab(costume);
-    if (target === "#ctx-group-world" || target === "#ctx-group-sources" || target === "#ctx-group-manage") {
-      setCtxGroupSectionOpen(target.replace("#ctx-group-", "") as CtxGroupKey, true);
-      return;
-    }
-    if (target === "#sec-members") {
-      setCtxGroupSectionOpen("manage", true);
-      return;
-    }
-    if (target === "#stage-context") {
-      setCtxGroupSectionOpen("world", true);
-      return;
-    }
-    const key = targetToCtxKey(target);
-    if (key) {
-      setCtxGroupSectionOpen(sectionToGroup(key), true);
-      setCtxSectionOpen(key, true);
-      if (key === "characters" || key === "scenes" || key === "props") {
-        setCostumePackOpen(true);
-      }
-    } else if (costume) {
-      setCostumePackOpen(true);
-    }
-  };
-
   const jumpToContext = (target: string) => {
     expandContextForSelector(target);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => scrollToSelector(target));
     });
   };
-
-  // C2：aios:project-context-reveal —— 展開分組／Tab、記住 returnTo（scroll/flash 由派發端延遲做）
-  useEffect(() => {
-    const onReveal = (ev: Event) => {
-      const detail = (ev as CustomEvent<ProjectContextRevealDetail>).detail;
-      if (!detail?.target) return;
-      if (detail.projectId && detail.projectId !== id) return;
-      const selector = selectorForContextTarget(detail.target as ProjectContextTarget);
-      expandContextForSelector(selector);
-      if (detail.returnTo) setContextReturnTo(detail.returnTo);
-    };
-    window.addEventListener(PROJECT_CONTEXT_REVEAL_EVENT, onReveal);
-    return () => window.removeEventListener(PROJECT_CONTEXT_REVEAL_EVENT, onReveal);
-    // expand helpers close over latest open state setters (stable enough for reveal)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, mobileCompact]);
 
   /** 上下文摘要條的一顆 chip：顯示計數、點了捲到對應卡（手機一併展開） */
   // `on` 是「那一區已有內容」的視覺標示，不是按下狀態——點下去只會捲動，不會切換任何東西。

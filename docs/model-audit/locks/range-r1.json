@@ -1,0 +1,13 @@
+{
+  "lock": "range-r1",
+  "holder": "R1-main-audit",
+  "token": null,
+  "expiresAt": "2026-08-05T08:15:00Z",
+  "heartbeatAt": "2026-08-05T06:10:30Z",
+  "role": "R1",
+  "lastCompletedIndex": 17,
+  "lastCompletedId": "fal-ai/recraft/v3/text-to-image",
+  "lastCompletedSlug": "fal-ai__recraft__v3__text-to-image",
+  "mode": "static+research",
+  "note": "DONE #17 thick; L2 already success; vector style P1 vs bestFor; next R1 thin #19 nano-banana-pro (#18 already thick)"
+}

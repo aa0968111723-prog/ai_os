@@ -1,0 +1,846 @@
+{
+  "at": "2026-08-05T07:54:08.224Z",
+  "uniqueEndpoints": 251,
+  "statusCounts": {
+    "ok": 247,
+    "http_404": 4
+  },
+  "notFound": [
+    {
+      "endpoint": "fal-ai/bytedance/seedream/v5/text-to-image",
+      "modelIds": [
+        "fal-ai/bytedance/seedream/v5/text-to-image"
+      ]
+    },
+    {
+      "endpoint": "fal-ai/mix-dehaze-net",
+      "modelIds": [
+        "fal-ai/mix-dehaze-net"
+      ]
+    },
+    {
+      "endpoint": "fal-ai/runway-gen3/turbo/image-to-video",
+      "modelIds": [
+        "fal-ai/runway-gen3/turbo/image-to-video"
+      ]
+    },
+    {
+      "endpoint": "fal-ai/bria/video/eraser",
+      "modelIds": [
+        "fal-ai/bria/video/eraser"
+      ]
+    }
+  ],
+  "requiredHints": {
+    "fal-ai/nano-banana-2": [
+      "prompt"
+    ],
+    "fal-ai/flux/schnell": [
+      "prompt"
+    ],
+    "openai/gpt-image-2": [
+      "prompt"
+    ],
+    "fal-ai/qwen-image-2/pro/text-to-image": [
+      "prompt"
+    ],
+    "fal-ai/qwen-image-2/text-to-image": [
+      "prompt"
+    ],
+    "fal-ai/flux-2-pro": [
+      "prompt"
+    ],
+    "fal-ai/flux/dev": [
+      "prompt"
+    ],
+    "fal-ai/bytedance/seedream/v4.5/text-to-image": [
+      "prompt"
+    ],
+    "fal-ai/kolors": [
+      "prompt"
+    ],
+    "fal-ai/ideogram/v3": [
+      "prompt"
+    ],
+    "fal-ai/flux-2-flex": [
+      "prompt"
+    ],
+    "fal-ai/fast-lightning-sdxl": [
+      "prompt"
+    ],
+    "fal-ai/recraft/v4.1/text-to-image": [
+      "prompt"
+    ],
+    "fal-ai/recraft/v3/text-to-image": [
+      "prompt"
+    ],
+    "ideogram/v4": [
+      "prompt"
+    ],
+    "fal-ai/flux-2": [
+      "prompt"
+    ],
+    "fal-ai/flux-pro/v1.1-ultra": [
+      "prompt"
+    ],
+    "fal-ai/imagen4/preview/ultra": [
+      "prompt"
+    ],
+    "fal-ai/nano-banana-pro": [
+      "prompt"
+    ],
+    "fal-ai/qwen-image-max/text-to-image": [
+      "prompt"
+    ],
+    "fal-ai/hunyuan-image/v3/text-to-image": [
+      "prompt"
+    ],
+    "fal-ai/sana": [
+      "prompt"
+    ],
+    "fal-ai/imagen4/preview/fast": [
+      "prompt"
+    ],
+    "fal-ai/luma-photon": [
+      "prompt"
+    ],
+    "fal-ai/aura-flow": [
+      "prompt"
+    ],
+    "fal-ai/flux-lora": [
+      "prompt"
+    ],
+    "fal-ai/playground-v25": [
+      "prompt"
+    ],
+    "fal-ai/nano-banana-2/edit": [
+      "prompt"
+    ],
+    "fal-ai/lora": [
+      "model_name",
+      "prompt"
+    ],
+    "fal-ai/flux-2/lora": [
+      "prompt"
+    ],
+    "fal-ai/flux-2-pro/edit": [
+      "prompt",
+      "image_urls"
+    ],
+    "fal-ai/bytedance/seedream/v4.5/edit": [
+      "prompt",
+      "image_urls"
+    ],
+    "fal-ai/flux-pro/kontext": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/flux-kontext/dev": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/qwen-image-edit-plus": [
+      "prompt",
+      "image_urls"
+    ],
+    "fal-ai/qwen-image-edit": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/flux/dev/image-to-image": [
+      "image_url",
+      "prompt"
+    ],
+    "fal-ai/fast-sdxl/image-to-image": [
+      "image_url",
+      "prompt"
+    ],
+    "fal-ai/nano-banana-pro/edit": [
+      "prompt",
+      "image_urls"
+    ],
+    "fal-ai/flux-pro/kontext/max": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/nano-banana/edit": [
+      "prompt",
+      "image_urls"
+    ],
+    "fal-ai/bytedance/seedream/v4/edit": [
+      "prompt",
+      "image_urls"
+    ],
+    "fal-ai/qwen-image-2/edit": [
+      "prompt",
+      "image_urls"
+    ],
+    "fal-ai/bytedance/seededit/v3/edit-image": [
+      "prompt",
+      "image_url"
+    ],
+    "openai/gpt-image-2/edit": [
+      "prompt",
+      "image_urls"
+    ],
+    "fal-ai/ideogram/v3/remix": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/flux/dev/redux": [
+      "image_url"
+    ],
+    "fal-ai/iclight-v2": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/bria/background/replace": [
+      "image_url"
+    ],
+    "fal-ai/bria/background/remove": [
+      "image_url"
+    ],
+    "fal-ai/bria/expand": [
+      "image_url",
+      "canvas_size"
+    ],
+    "fal-ai/codeformer": [
+      "image_url"
+    ],
+    "fal-ai/bria/product-shot": [
+      "image_url"
+    ],
+    "fal-ai/image-editing/object-removal": [
+      "image_url"
+    ],
+    "fal-ai/image-editing/photo-restoration": [
+      "image_url"
+    ],
+    "fal-ai/image-apps-v2/photo-restoration": [
+      "image_url"
+    ],
+    "fal-ai/esrgan": [
+      "image_url"
+    ],
+    "fal-ai/ddcolor": [
+      "image_url"
+    ],
+    "fal-ai/clarity-upscaler": [
+      "image_url"
+    ],
+    "fal-ai/topaz/upscale/image": [
+      "image_url"
+    ],
+    "fal-ai/aura-sr": [
+      "image_url"
+    ],
+    "fal-ai/supir": [
+      "image_url"
+    ],
+    "fal-ai/ccsr": [
+      "image_url"
+    ],
+    "fal-ai/thera": [
+      "image_url",
+      "backbone"
+    ],
+    "fal-ai/recraft/upscale/crisp": [
+      "image_url"
+    ],
+    "fal-ai/recraft/upscale/creative": [
+      "image_url"
+    ],
+    "fal-ai/seedvr/upscale/image": [
+      "image_url"
+    ],
+    "fal-ai/swin2sr": [
+      "image_url"
+    ],
+    "clarityai/crystal-upscaler": [
+      "image_url"
+    ],
+    "fal-ai/drct-super-resolution": [
+      "image_url"
+    ],
+    "fal-ai/creative-upscaler": [
+      "image_url"
+    ],
+    "fal-ai/birefnet": [
+      "image_url"
+    ],
+    "fal-ai/birefnet/v2": [
+      "image_url"
+    ],
+    "pixelcut/background-removal": [
+      "image_url"
+    ],
+    "fal-ai/imageutils/rembg": [
+      "image_url"
+    ],
+    "fal-ai/ben/v2/image": [
+      "image_url"
+    ],
+    "fal-ai/ideogram/remove-background": [
+      "image_url"
+    ],
+    "smoretalk-ai/rembg-enhance": [
+      "image_url"
+    ],
+    "fal-ai/ideogram/v3/replace-background": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/image-editing/background-change": [
+      "image_url"
+    ],
+    "fal-ai/ideogram/character": [
+      "prompt",
+      "reference_image_urls"
+    ],
+    "fal-ai/instant-character": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/instantid": [
+      "face_image_url",
+      "prompt"
+    ],
+    "fal-ai/photomaker": [
+      "image_archive_url",
+      "prompt"
+    ],
+    "fal-ai/face-to-sticker": [
+      "image_url",
+      "prompt"
+    ],
+    "fal-ai/flux-pulid": [
+      "prompt",
+      "reference_image_url"
+    ],
+    "fal-ai/minimax/image-01/subject-reference": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/qwen-image-edit-plus-lora-gallery/next-scene": [
+      "image_urls"
+    ],
+    "fal-ai/image-editing/expression-change": [
+      "image_url"
+    ],
+    "easel-ai/easel-avatar": [
+      "face_image_0",
+      "gender_0",
+      "prompt"
+    ],
+    "fal-ai/image-apps-v2/headshot-photo": [
+      "image_url"
+    ],
+    "fal-ai/finegrain-eraser": [
+      "image_url",
+      "prompt"
+    ],
+    "fal-ai/recraft/vectorize": [
+      "image_url"
+    ],
+    "fal-ai/image2svg": [
+      "image_url"
+    ],
+    "fal-ai/sora-2/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/veo3.1/fast": [
+      "prompt"
+    ],
+    "fal-ai/veo3.1": [
+      "prompt"
+    ],
+    "fal-ai/minimax/hailuo-2.3/standard/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/kling-video/v2.5-turbo/pro/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/ltx-video": [
+      "prompt"
+    ],
+    "fal-ai/veo2": [
+      "prompt"
+    ],
+    "fal-ai/kling-video/v2.6/pro/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/minimax/hailuo-2.3/pro/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/bytedance/seedance/v1/pro/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/luma-dream-machine/ray-2": [
+      "prompt"
+    ],
+    "fal-ai/wan/v2.2-a14b/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/bytedance/seedance/v1.5/pro/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/veo3.1/lite": [
+      "prompt"
+    ],
+    "fal-ai/minimax/hailuo-02/standard/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/minimax/video-01-director": [
+      "prompt"
+    ],
+    "fal-ai/wan-25/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/pika/v2.2/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/luma-dream-machine/ray-2-flash": [
+      "prompt"
+    ],
+    "fal-ai/hunyuan-video-v1.5/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/bytedance/seedance/v1/lite/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/pixverse/v5.5/text-to-video": [
+      "prompt"
+    ],
+    "bytedance/seedance-2.0/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/pixverse/v6/text-to-video": [
+      "prompt"
+    ],
+    "wan/v2.6": [
+      "prompt"
+    ],
+    "fal-ai/kling-video/v1.6/standard/text-to-video": [
+      "prompt"
+    ],
+    "fal-ai/wan-t2v": [
+      "prompt"
+    ],
+    "fal-ai/hunyuan-video": [
+      "prompt"
+    ],
+    "fal-ai/mochi-v1": [
+      "prompt"
+    ],
+    "fal-ai/cogvideox-5b": [
+      "prompt"
+    ],
+    "fal-ai/kling-video/v2.6/pro/image-to-video": [
+      "prompt",
+      "start_image_url"
+    ],
+    "fal-ai/kling-video/v2.5-turbo/pro/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/kling-video/v3/pro/image-to-video": [
+      "start_image_url"
+    ],
+    "fal-ai/veo2/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/veo3.1/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/wan/v2.2-a14b/text-to-video/lora": [
+      "prompt"
+    ],
+    "fal-ai/minimax/hailuo-2.3/pro/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/luma-dream-machine/ray-2/image-to-video": [
+      "prompt"
+    ],
+    "fal-ai/bytedance/seedance/v1.5/pro/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/minimax/hailuo-2.3/standard/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "wan/v2.6/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/luma-dream-machine/ray-2-flash/image-to-video": [
+      "prompt"
+    ],
+    "fal-ai/minimax/hailuo-2.3-fast/pro/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/bytedance/seedance/v1/lite/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/hunyuan-video-image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/wan/v2.2-a14b/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/minimax/video-01/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/pixverse/v5/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/wan-i2v": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/minimax/video-01-subject-reference": [
+      "prompt",
+      "subject_reference_image_url"
+    ],
+    "fal-ai/ltx-video-v095/image-to-video": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/framepack": [
+      "prompt",
+      "image_url"
+    ],
+    "fal-ai/stable-video": [
+      "image_url"
+    ],
+    "fal-ai/fast-svd-lcm": [
+      "image_url"
+    ],
+    "fal-ai/topaz/upscale/video": [
+      "video_url"
+    ],
+    "fal-ai/sync-lipsync/v2/pro": [
+      "video_url",
+      "audio_url"
+    ],
+    "fal-ai/luma-dream-machine/ray-2/modify": [
+      "video_url"
+    ],
+    "fal-ai/luma-dream-machine/ray-2-flash/modify": [
+      "video_url"
+    ],
+    "fal-ai/sync-lipsync": [
+      "video_url",
+      "audio_url"
+    ],
+    "fal-ai/video-upscaler": [
+      "video_url"
+    ],
+    "fal-ai/sync-lipsync/v3": [
+      "video_url",
+      "audio_url"
+    ],
+    "fal-ai/sync-lipsync/v2": [
+      "video_url",
+      "audio_url"
+    ],
+    "decart/lucy-restyle": [
+      "prompt",
+      "video_url"
+    ],
+    "fal-ai/ben/v2/video": [
+      "video_url"
+    ],
+    "fal-ai/rife/video": [
+      "video_url"
+    ],
+    "bria/video/background-removal": [
+      "video_url"
+    ],
+    "fal-ai/seedvr/upscale/video": [
+      "video_url"
+    ],
+    "decart/lucy-edit/fast": [
+      "prompt",
+      "video_url"
+    ],
+    "veed/lipsync": [
+      "video_url",
+      "audio_url"
+    ],
+    "veed/video-background-removal": [
+      "video_url"
+    ],
+    "fal-ai/wan-vace-14b/outpainting": [
+      "prompt",
+      "video_url"
+    ],
+    "fal-ai/latentsync": [
+      "video_url",
+      "audio_url"
+    ],
+    "veed/video-background-removal/fast": [
+      "video_url"
+    ],
+    "fal-ai/musetalk": [
+      "source_video_url",
+      "audio_url"
+    ],
+    "fal-ai/birefnet/v2/video": [
+      "video_url"
+    ],
+    "veed/video-background-removal/green-screen": [
+      "video_url"
+    ],
+    "bria/video/background-removal/v3": [
+      "video_url"
+    ],
+    "fal-ai/workflow-utilities/auto-subtitle": [
+      "video_url"
+    ],
+    "veed/subtitles": [
+      "video_url",
+      "preset"
+    ],
+    "fal-ai/any-llm/vision": [
+      "prompt"
+    ],
+    "fal-ai/auto-caption": [
+      "video_url"
+    ],
+    "fal-ai/moondream-next": [
+      "image_url",
+      "prompt"
+    ],
+    "fal-ai/florence-2-large/ocr": [
+      "image_url"
+    ],
+    "fal-ai/florence-2-large/more-detailed-caption": [
+      "image_url"
+    ],
+    "fal-ai/moondream2": [
+      "image_url"
+    ],
+    "fal-ai/elevenlabs/speech-to-text": [
+      "audio_url"
+    ],
+    "fal-ai/whisper": [
+      "audio_url"
+    ],
+    "fal-ai/wizper": [
+      "audio_url"
+    ],
+    "fal-ai/elevenlabs/speech-to-text/scribe-v2": [
+      "audio_url"
+    ],
+    "fal-ai/speech-to-text": [
+      "audio_url"
+    ],
+    "fal-ai/speech-to-text/turbo": [
+      "audio_url"
+    ],
+    "fal-ai/speech-to-text/stream": [
+      "audio_url"
+    ],
+    "fal-ai/elevenlabs/tts/eleven-v3": [
+      "text"
+    ],
+    "fal-ai/minimax/speech-02-hd": [
+      "text"
+    ],
+    "fal-ai/elevenlabs/tts/multilingual-v2": [
+      "text"
+    ],
+    "fal-ai/qwen-3-tts/text-to-speech/1.7b": [
+      "text"
+    ],
+    "fal-ai/dia-tts": [
+      "text"
+    ],
+    "fal-ai/chatterbox/text-to-speech/multilingual": [
+      "text"
+    ],
+    "fal-ai/kokoro/mandarin-chinese": [
+      "prompt",
+      "voice"
+    ],
+    "fal-ai/minimax/speech-2.6-hd": [
+      "prompt"
+    ],
+    "fal-ai/elevenlabs/tts/turbo-v2.5": [
+      "text"
+    ],
+    "fal-ai/index-tts-2/text-to-speech": [
+      "audio_url",
+      "prompt"
+    ],
+    "fal-ai/minimax/voice-clone": [
+      "audio_url"
+    ],
+    "fal-ai/qwen-3-tts/text-to-speech/0.6b": [
+      "text"
+    ],
+    "fal-ai/qwen-3-tts/clone-voice/1.7b": [
+      "audio_url"
+    ],
+    "fal-ai/minimax/voice-design": [
+      "prompt",
+      "preview_text"
+    ],
+    "fal-ai/vibevoice": [
+      "script",
+      "speakers"
+    ],
+    "fal-ai/f5-tts": [
+      "gen_text",
+      "ref_audio_url",
+      "model_type"
+    ],
+    "fal-ai/dia-tts/voice-clone": [
+      "text"
+    ],
+    "fal-ai/elevenlabs/text-to-dialogue/eleven-v3": [
+      "inputs"
+    ],
+    "fal-ai/vibevoice/7b": [
+      "script",
+      "speakers"
+    ],
+    "fal-ai/gemini-tts": [
+      "prompt"
+    ],
+    "fal-ai/zonos": [
+      "reference_audio_url",
+      "prompt"
+    ],
+    "fal-ai/orpheus-tts": [
+      "text"
+    ],
+    "fal-ai/lyria2": [
+      "prompt"
+    ],
+    "fal-ai/stable-audio-25/text-to-audio": [
+      "prompt"
+    ],
+    "fal-ai/minimax-music": [
+      "prompt",
+      "reference_audio_url"
+    ],
+    "fal-ai/elevenlabs/sound-effects/v2": [
+      "text"
+    ],
+    "fal-ai/ace-step": [
+      "tags"
+    ],
+    "cassetteai/sound-effects-generator": [
+      "prompt",
+      "duration"
+    ],
+    "fal-ai/minimax-music/v2.6": [
+      "prompt"
+    ],
+    "fal-ai/minimax-music/v2": [
+      "prompt",
+      "lyrics_prompt"
+    ],
+    "sonilo/v1.1/text-to-music": [
+      "prompt"
+    ],
+    "fal-ai/diffrhythm": [
+      "lyrics"
+    ],
+    "cassetteai/music-generator": [
+      "prompt",
+      "duration"
+    ],
+    "fal-ai/mmaudio-v2": [
+      "video_url",
+      "prompt"
+    ],
+    "fal-ai/mmaudio-v2/text-to-audio": [
+      "prompt"
+    ],
+    "fal-ai/yue": [
+      "lyrics",
+      "genres"
+    ],
+    "fal-ai/stable-audio": [
+      "prompt"
+    ],
+    "fal-ai/thinksound": [
+      "video_url"
+    ],
+    "fal-ai/hunyuan-video-foley": [
+      "video_url",
+      "text_prompt"
+    ],
+    "fal-ai/flux-2-trainer": [
+      "image_data_url"
+    ],
+    "fal-ai/flux-2-trainer/edit": [
+      "image_data_url"
+    ],
+    "fal-ai/flux-kontext-trainer": [
+      "image_data_url"
+    ],
+    "fal-ai/flux-lora-portrait-trainer": [
+      "images_data_url"
+    ],
+    "fal-ai/qwen-image-trainer": [
+      "image_data_url"
+    ],
+    "fal-ai/turbo-flux-trainer": [
+      "images_data_url"
+    ],
+    "fal-ai/flux-krea-trainer": [
+      "images_data_url"
+    ],
+    "fal-ai/flux-lora-fast-training": [
+      "images_data_url"
+    ],
+    "fal-ai/krea-2-trainer": [
+      "images_data_url"
+    ],
+    "fal-ai/qwen-image-2512-trainer": [
+      "image_data_url"
+    ],
+    "fal-ai/flux-2-klein-9b-base-trainer": [
+      "image_data_url"
+    ],
+    "fal-ai/qwen-image-edit-trainer": [
+      "image_data_url"
+    ],
+    "fal-ai/z-image-trainer": [
+      "image_data_url"
+    ],
+    "fal-ai/wan-22-image-trainer": [
+      "training_data_url",
+      "trigger_phrase"
+    ],
+    "fal-ai/wan-22-trainer/t2v-a14b": [
+      "training_data_url"
+    ],
+    "fal-ai/wan-22-trainer/i2v-a14b": [
+      "training_data_url"
+    ],
+    "fal-ai/wan-trainer": [
+      "training_data_url"
+    ],
+    "fal-ai/ltx2-video-trainer": [
+      "training_data_url"
+    ],
+    "fal-ai/hunyuan-video-lora-training": [
+      "images_data_url",
+      "steps"
+    ]
+  }
+}

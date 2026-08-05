@@ -41,10 +41,25 @@ describe("extractResult:媒體輸出", () => {
     expect(extractResult({ model_file: { url: "https://x/model.bin" } })).toEqual({ url: "https://x/model.bin" });
   });
 
+  it("video 為 File[]（VEED 去背家族 OpenAPI）→ 取 [0].url", () => {
+    expect(extractResult({ video: [{ url: "https://x/out.webm", content_type: "video/webm" }] })).toEqual({
+      url: "https://x/out.webm",
+    });
+    expect(extractResult({ video: [{ url: "https://x/rgb.mp4" }, { url: "https://x/alpha.mp4" }] })).toEqual({
+      url: "https://x/rgb.mp4",
+    });
+  });
+
   it("image_url / audio_url / video_url(直接字串)", () => {
     expect(extractResult({ image_url: "https://x/i2.png" })).toEqual({ url: "https://x/i2.png" });
     expect(extractResult({ audio_url: "https://x/a2.mp3" })).toEqual({ url: "https://x/a2.mp3" });
     expect(extractResult({ video_url: "https://x/v2.mp4" })).toEqual({ url: "https://x/v2.mp4" });
+  });
+
+  it("audio_url 為 AudioFile 物件（F5-TTS OpenAPI）", () => {
+    expect(extractResult({ audio_url: { url: "https://x/f5.wav", content_type: "audio/wav" } })).toEqual({
+      url: "https://x/f5.wav",
+    });
   });
 
   it("images 陣列存在但無 url → 不搶答,落到後面的文字分支", () => {
@@ -56,6 +71,21 @@ describe("extractResult:媒體輸出", () => {
       extractResult({ images: [{ url: "https://x/img.png" }], video: { url: "https://x/v.mp4" }, text: "不該用到" }),
     ).toEqual({ url: "https://x/img.png" });
     expect(extractResult({ video: { url: "https://x/v.mp4" }, output: "不該用到" })).toEqual({ url: "https://x/v.mp4" });
+  });
+});
+
+describe("extractResult:speaker_embedding（Qwen clone-voice）", () => {
+  it("speaker_embedding.url → 說明文字,非音檔 url", () => {
+    const r = extractResult({
+      speaker_embedding: {
+        url: "https://x/emb.safetensors",
+        content_type: "application/octet-stream",
+        file_name: "emb.safetensors",
+      },
+    });
+    expect(r.url).toBeUndefined();
+    expect(r.text).toContain("https://x/emb.safetensors");
+    expect(r.text).toMatch(/embedding|聲線/i);
   });
 });
 

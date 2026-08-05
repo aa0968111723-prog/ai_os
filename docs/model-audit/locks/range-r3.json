@@ -1,0 +1,13 @@
+{
+  "lock": "range-r3",
+  "holder": "R3-main-audit",
+  "token": null,
+  "expiresAt": "2026-08-05T08:30:00Z",
+  "heartbeatAt": "2026-08-05T06:14:00Z",
+  "role": "R3",
+  "lastCompletedIndex": 129,
+  "lastCompletedId": "fal-ai/kling-video/v2.6/pro/image-to-video",
+  "lastCompletedSlug": "fal-ai__kling-video__v2.6__pro__image-to-video",
+  "mode": "static+research",
+  "note": "DONE #129 thick; P0 FIXED start_image_url + generate_audio false; next R3 thin #130+"
+}

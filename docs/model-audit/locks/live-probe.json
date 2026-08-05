@@ -1,0 +1,8 @@
+{
+  "lock": "live-probe",
+  "holder": null,
+  "token": null,
+  "expiresAt": "2026-08-05T06:47:22Z",
+  "heartbeatAt": "2026-08-05T06:47:22Z",
+  "note": "20s worker mid-cycle release"
+}
