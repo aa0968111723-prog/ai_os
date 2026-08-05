@@ -26,6 +26,7 @@ import {
   onShutdown,
   trackBackgroundTask,
 } from "./shutdown";
+import { markRunnerStarted, reportRunnerTick } from "./runnerMetrics";
 
 type RunRow = typeof schema.workflowRuns.$inferSelect;
 
@@ -64,6 +65,7 @@ const inflight = new Set<string>();
 export function startWorkflowRunner(): void {
   if (started || isShuttingDown()) return;
   started = true;
+  markRunnerStarted("workflow");
   // #8 啟動時先掃一次陳屍：重佈／OOM 打斷後一開機就把凍結的點數與鎖死的 run 收斂，不等使用者觸發
   void trackBackgroundTask(
     sweepZombies().catch((err) =>
@@ -88,6 +90,11 @@ export function startWorkflowRunner(): void {
       if (isShuttingDown()) return;
       try {
         await tick();
+        reportRunnerTick("workflow", {
+          started: true,
+          lastTickAt: Date.now(),
+          inflight: inflight.size,
+        });
       } catch (err) {
         console.warn("[workflow] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err);
       }

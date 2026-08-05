@@ -17,6 +17,7 @@ import {
   onShutdown,
   trackBackgroundTask,
 } from "./shutdown";
+import { markRunnerStarted, reportRunnerTick } from "./runnerMetrics";
 
 const TICK_MS = 6000;
 /** 單筆推進放行門檻：逾時不砍原 promise，只讓本輪 tick 先去顧其他生成 */
@@ -51,6 +52,7 @@ export function runnerHeartbeat(): { started: boolean; lastTickAt: number | null
 export function startGenerationRunner(): void {
   if (started || isShuttingDown()) return;
   started = true;
+  markRunnerStarted("generation");
   // 啟動時先掃一次陳屍：重佈／OOM 打斷後一開機就把凍結的點數收斂，不等使用者打開列表才觸發
   void trackBackgroundTask(
     sweepStale().catch((err) =>
@@ -70,6 +72,7 @@ export function startGenerationRunner(): void {
         }
         // 落地補抓（修：persistGenerationResult 背景落地一次失敗後，素材永久指向會過期的 fal CDN）：
         // 與陳屍掃描同節流（約 60 秒一次），重試把未落地素材抓回 Volume。失敗只記警告不擋 tick。
+        // 注意：assetMaintenanceRunner 也會以更高頻率補抓（BG_LAND_BATCH）；兩邊皆冪等。
         try {
           const landed = await sweepUnlandedAssets();
           if (landed > 0) console.log(`[generation] 落地補抓本輪完成 ${landed} 筆`);
@@ -95,6 +98,11 @@ export function startGenerationRunner(): void {
       try {
         await tick();
         lastTickAt = Date.now();
+        reportRunnerTick("generation", {
+          started: true,
+          lastTickAt,
+          inflight: inflight.size,
+        });
       } catch (err) {
         console.warn("[generation] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err);
       }
@@ -111,6 +119,10 @@ async function tick(): Promise<void> {
     .where(inArray(schema.generations.status, ["queued", "running"]))
     .orderBy(asc(schema.generations.updatedAt))
     .limit(BATCH);
+  reportRunnerTick("generation", {
+    queueDepth: rows.length,
+    inflight: inflight.size,
+  });
   if (isShuttingDown()) return;
   // 同輪並行推進：一筆卡住的生成（fal 慢回）不能擋住其他生成的進度
   await Promise.allSettled(

@@ -19,6 +19,7 @@ import {
   onShutdown,
   trackBackgroundTask,
 } from "./shutdown";
+import { markRunnerStarted, reportRunnerTick } from "./runnerMetrics";
 
 const TICK_MS = 3000;
 /** 同 tick 只打包一件（打包吃磁碟/網路頻寬，序列化避免互相拖慢）；佇列靠下一 tick 消化 */
@@ -44,6 +45,7 @@ let tickCount = 0;
 export function startExportRunner(): void {
   if (started || isShuttingDown()) return;
   started = true;
+  markRunnerStarted("export");
   const interval = setInterval(() => {
     if (isShuttingDown()) return;
     void trackBackgroundTask((async () => {
@@ -57,6 +59,11 @@ export function startExportRunner(): void {
           );
         }
         await claimAndRun();
+        reportRunnerTick("export", {
+          started: true,
+          lastTickAt: Date.now(),
+          inflight: ticking ? 1 : 0,
+        });
       } catch (err) {
         console.warn("[export-job] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err);
       } finally {

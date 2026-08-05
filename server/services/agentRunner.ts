@@ -41,6 +41,7 @@ import {
   onShutdown,
   trackBackgroundTask,
 } from "./shutdown";
+import { markRunnerStarted, reportRunnerTick } from "./runnerMetrics";
 import {
   dagStepId,
   evaluateAgentDag,
@@ -183,6 +184,7 @@ const inflight = new Set<string>();
 export function startAgentRunner(): void {
   if (started || isShuttingDown()) return;
   started = true;
+  markRunnerStarted("agent");
   void trackBackgroundTask(
     Promise.all([sweepZombies(), sweepExpiredAgentPlans()]).catch((err) =>
       console.warn("[agent] 啟動陳屍掃描失敗（下輪再試）：", err instanceof Error ? err.message : err),
@@ -202,6 +204,11 @@ export function startAgentRunner(): void {
       if (isShuttingDown()) return;
       try {
         await tick();
+        reportRunnerTick("agent", {
+          started: true,
+          lastTickAt: Date.now(),
+          inflight: inflight.size,
+        });
       } catch (err) {
         console.warn("[agent] tick 失敗（下輪再試）：", err instanceof Error ? err.message : err);
       }
@@ -239,6 +246,7 @@ async function tick(): Promise<void> {
     )
     .orderBy(asc(schema.agentRuns.createdAt))
     .limit(BATCH);
+  reportRunnerTick("agent", { queueDepth: runs.length, inflight: inflight.size });
   if (isShuttingDown()) return;
   const pending = runs.filter((run) => !inflight.has(run.id));
   for (let i = 0; i < pending.length; i += MAX_CONCURRENT_ADVANCE) {
