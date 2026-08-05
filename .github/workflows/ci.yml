@@ -32,6 +32,10 @@ jobs:
       # 模組邊界（shared/ 不得反向依賴 server/client）：腳本早就在 repo 裡且是綠的，
       # 但從未被任何 workflow 引用，等於白寫。掛進來的邊際成本接近零。
       - run: npm run check:boundaries
+      # 早退之後才呼叫 hook＝React #310，整頁進 ErrorBoundary。這一類本該由
+      # eslint react-hooks/rules-of-hooks 擋掉，但本專案沒裝 ESLint，等於沒有防線；
+      # 專案頁就是這樣壞掉的，先用專用守門擋住最致命的那一種。
+      - run: npm run check:hooks
 
   test:
     runs-on: ubuntu-latest
