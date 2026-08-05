@@ -11,13 +11,14 @@ import { Icon } from "./Icon";
 export type TocItem = { id: string; label: string; badge?: string };
 
 /**
- * 預設三幕（WB-06）：與 ProjectPage StageHead 對齊。
+ * 預設三幕（WB-06 + C3 #402）：與 ProjectPage StageHead 對齊。
+ * 用語固定「定調 → 創作 → 交付」，避免 ① 叫上下文、② 叫創作中心、步驟列又另一套。
  * 特殊頁面可用 items props 覆蓋；勿把 #sec-studio / #sec-workflow 等模式錨點列進目錄。
  */
 export const DEFAULT_ITEMS: TocItem[] = [
-  { id: "stage-context", label: "① 專案上下文" },
-  { id: "stage-create", label: "② AI 創作中心" },
-  { id: "stage-deliver", label: "③ 分鏡・編修・交付" },
+  { id: "stage-context", label: "① 定調" },
+  { id: "stage-create", label: "② 創作" },
+  { id: "stage-deliver", label: "③ 交付" },
 ];
 
 /** 尊重使用者的減少動效偏好：開啟時退回瞬間捲動 */

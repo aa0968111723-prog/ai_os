@@ -104,6 +104,24 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/回到分鏡/);
     expect(src).toMatch(/formatBringInSummary/);
     expect(src).toMatch(/data-testid="ctx-bring-in-summary"/);
+    expect(src).toMatch(/contextReturnTo === "studio" \? "primary" : "ghost"/);
+    expect(src).toMatch(/contextReturnTo === "scenes" \? "primary" : "ghost"/);
+  });
+
+  /**
+   * C3 (#402)：空專案三步＝定調→創作→交付；範例一鍵去創作台；Stage 用語對齊 TocNav。
+   */
+  it("C3 empty journey: three onboard stages, apply-and-studio, stage titles 定調/創作/交付", () => {
+    expect(src).toMatch(/label: "① 定調"/);
+    expect(src).toMatch(/label: "② 創作"/);
+    expect(src).toMatch(/label: "③ 交付"/);
+    // 範例卡一鍵進創作台（文案在 WorldviewExampleCard；頁面接 onApplyAndGoStudio）
+    expect(src).toMatch(/onApplyAndGoStudio/);
+    expect(src).toMatch(/revealWorkbenchAnchor\("#sec-studio"/);
+    // StageHead titles（與 TocNav 定調→創作→交付 同口徑）
+    expect(src).toMatch(/title="定調"/);
+    expect(src).toMatch(/title="創作"/);
+    expect(src).toMatch(/title="交付"/);
   });
 
   it("TocNav uses shared three-stage defaults (single jump to #stage-create)", () => {

@@ -59,6 +59,7 @@ import { revealWorkbenchAnchor, scrollToSelector } from "../features/creation-wo
 import {
   PROJECT_CONTEXT_REVEAL_EVENT,
   formatBringInSummary,
+  revealProjectContext,
   returnFromContext,
   selectorForContextTarget,
   type ProjectContextRevealDetail,
@@ -870,24 +871,32 @@ export function ProjectPage({ id }: { id: string }) {
     return true;
   };
 
-  // 「從這裡開始」四步：用實際 state 判定完成打勾
+  // C3.1：「從這裡開始」三步＝①②③ 同口徑（定調 → 創作 → 交付）
   const sceneCount = scenes.data?.length ?? 0;
   const onboardSteps = [
     {
-      label: "定調",
+      label: "① 定調",
       done: isWorldviewReady(wv),
       target: "#onboard-worldview",
-      hint: "填一句「這支片在講什麼」＋挑一個氣氛或畫風",
+      hint: "填一句「這支片在講什麼」＋挑氣氛或畫風（可抄範例）",
     },
-    { label: "生成一鏡", done: !!generations.data?.some((g) => g.status === "done"), target: "#gen-prompt", hint: "在 AI 創作工作台的「直接生成」做出第一張成品" },
-    { label: "加入分鏡", done: sceneCount > 0, target: "#onboard-delivery", hint: "把成品排進分鏡" },
-    // 第4步用「有分鏡通過審核」當完成訊號，才不會一有分鏡就跟第3步一起打勾（誤導已交付）
-    { label: "送審／打包", done: !!scenes.data?.some((s) => s.status === "approved"), target: "#onboard-delivery", hint: "送審通過後即可打包交付" },
+    {
+      label: "② 創作",
+      done: !!generations.data?.some((g) => g.status === "done"),
+      target: "#gen-prompt",
+      hint: "到創作台「直接生成」做出第一張成品",
+    },
+    {
+      label: "③ 交付",
+      // 有分鏡即算進入交付站；送審通過是加分，不當「必須才打勾」以免卡在空旅程
+      done: sceneCount > 0,
+      target: "#stage-deliver",
+      hint: "把成品排進分鏡，再送審／打包",
+    },
   ];
   const allStepsDone = onboardSteps.every((s) => s.done);
   const completedStepCount = onboardSteps.filter((step) => step.done).length;
   const nextOnboardIndex = onboardSteps.findIndex((step) => !step.done);
-  // id 必須唯一（不可用 target：③④ 都錨到 #onboard-delivery 會撞 React key）
   const projectJourneySteps: VisualJourneyStep[] = onboardSteps.map((step, index) => ({
     id: `onboard-step-${index + 1}`,
     label: step.label,
@@ -1542,7 +1551,7 @@ export function ProjectPage({ id }: { id: string }) {
           style={{ padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <Icon name="Lock" size={15} style={{ flexShrink: 0, color: "var(--primary-ink)" }} />
           <span style={{ fontSize: 13 }}>
-            你在此專案是<b>檢視者（唯讀）</b>——可以瀏覽、留言、下載交付；要編輯或生成，請組長到「① 專案上下文」底部的成員權限把你改成編輯者。
+            你在此專案是<b>檢視者（唯讀）</b>——可以瀏覽、留言、下載交付；要編輯或生成，請組長到「① 定調」底部的成員權限把你改成編輯者。
           </span>
         </Card>
       )}
@@ -1551,7 +1560,7 @@ export function ProjectPage({ id }: { id: string }) {
       <Card as="section" className="project-guide" data-fb="從這裡開始">
         <div className="project-guide__head">
           <h2 style={{ margin: 0 }}>從這裡開始</h2>
-          <HelpTip text="這是製作一支片的四個步驟。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
+          <HelpTip text="三步對齊頁面三幕：定調 → 創作 → 交付。做到哪一步會自動打勾，點步驟可跳到對應區塊。" />
           <span style={{ flex: "1 1 auto" }} />
           <span className="project-guide__progress" aria-label={`已完成 ${completedStepCount}／${onboardSteps.length} 步`}>
             <span className="project-guide__progress-track" aria-hidden>
@@ -1579,6 +1588,9 @@ export function ProjectPage({ id }: { id: string }) {
                 // Workbench anchors (#gen-prompt / #sec-studio / …) must switch mode first.
                 if (step.target === "#gen-prompt" || step.target === "#sec-studio" || step.target === "#sec-agent" || step.target === "#sec-assistant") {
                   revealWorkbenchAnchor(step.target, { projectId: id });
+                } else if (step.target === "#onboard-worldview" || step.target === "#stage-context") {
+                  // C3：展開 ① 再捲，避免只 scroll 到收合區塊
+                  revealProjectContext("worldview", { projectId: id });
                 } else {
                   scrollToSelector(step.target);
                 }
@@ -1616,12 +1628,12 @@ export function ProjectPage({ id }: { id: string }) {
       />
       <div className="cols">
         <div className="stack">
-          {/* ① 專案上下文：定裝・素材・腳本・知識庫一體，AI 的共同大腦 */}
+          {/* ① 定調：世界觀・定裝・知識庫・素材——AI 的共同大腦 */}
           <StageHead
             id="stage-context"
             num="①"
-            title="專案上下文"
-            desc="一整個共同大腦——基本設定、定裝、知識與素材分兩區管理"
+            title="定調"
+            desc="世界觀與定裝——基本設定、角色／場景／道具、知識與素材"
             accent="group-1"
             hint={wvReady ? "已設定" : "待設定"}
           />
@@ -1756,6 +1768,18 @@ export function ProjectPage({ id }: { id: string }) {
                 kind={p.kind}
                 canEdit={canEdit}
                 onApply={(patch) => updateWv.mutate({ id, worldview: patch })}
+                onApplyAndGoStudio={(patch) => {
+                  // C3.2：一鍵套用範例 → 創作台（optimistic 先寫入再 reveal）
+                  updateWv.mutate({ id, worldview: patch });
+                  revealWorkbenchAnchor("#sec-studio", { projectId: id });
+                  requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                      const el = document.getElementById("gen-prompt") as HTMLTextAreaElement | null;
+                      el?.focus({ preventScroll: true });
+                      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    });
+                  });
+                }}
                 onDismiss={dismissWvExample}
               />
             )}
@@ -2256,7 +2280,8 @@ export function ProjectPage({ id }: { id: string }) {
               <Button
                 type="button"
                 size="sm"
-                variant={contextReturnTo === "scenes" ? "ghost" : "primary"}
+                // C2.3：僅在從該站來時 primary；null（直開頁）時兩鈕皆 ghost
+                variant={contextReturnTo === "studio" ? "primary" : "ghost"}
                 onClick={() => {
                   returnFromContext("studio", { projectId: id });
                   setContextReturnTo(null);
@@ -2377,11 +2402,11 @@ export function ProjectPage({ id }: { id: string }) {
 
           <StageLink text="以上兩區會自動注入下方每一次生成——AI 全程記得，不必重講背景" />
 
-          {/* ② 唯一 AI 創作入口：CreationWorkbench（四模式 tabs + 資源抽屜）；不掛平行整頁卡 */}
+          {/* ② 創作：唯一 AI 入口 CreationWorkbench；不掛平行整頁卡 */}
           <StageHead
             id="stage-create"
             num="②"
-            title="AI 創作中心"
+            title="創作"
             desc="問 AI・生成・範本・計畫 — 同一入口"
             accent="group-2"
             hint={doneGenCount != null ? `已完成 ${doneGenCount} 次生成` : undefined}
@@ -2413,12 +2438,12 @@ export function ProjectPage({ id }: { id: string }) {
 
           <StageLink text="成品進素材庫；生成紀錄可「＋加入分鏡」" />
 
-          {/* ③ 分鏡・編修・交付：貼腳本拆幕、文字腳本整份改、排片、粗剪預覽、送審與打包（SceneList 一體卡全含） */}
+          {/* ③ 交付：分鏡・排片・送審・打包（SceneList 一體卡） */}
           <StageHead
             id="stage-deliver"
             num="③"
-            title="分鏡・編修・交付"
-            desc="貼腳本拆分鏡・整份文字改稿・排片・送審・打包"
+            title="交付"
+            desc="分鏡・排片・送審・打包"
             accent="group-3"
             hint={pendingSceneCount != null ? `分鏡 ${sceneCount}・待審 ${pendingSceneCount}` : undefined}
           />
