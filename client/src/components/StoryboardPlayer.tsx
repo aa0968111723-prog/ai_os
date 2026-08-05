@@ -65,6 +65,11 @@ export function StoryboardPlayer({
   const [narrationOn, setNarrationOn] = useState(true);
   // 目前這一鏡已播秒數：驅動時間軸填色與經過時間；暫停保留、換鏡歸零
   const [elapsed, setElapsed] = useState(0);
+  // 素材檔遺失（後端 404）時的優雅降級：記住載入失敗的 URL，改渲染「此鏡素材遺失」佔位，
+  // 讓預覽照常換鏡並明確告知，不再是一張大破圖停留整個 durationSec。
+  // ⚠️ 必須放在「沒有分鏡」那個早退之前——否則 0 鏡→有鏡的轉換會讓 hook 數量改變，
+  // React 直接丟 #310，整個預覽掛掉（與 ProjectPage 曾經的崩潰同一類）。
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -214,9 +219,6 @@ export function StoryboardPlayer({
 
   const kind = scene.assetKind;
   const hasVisual = !!scene.assetUrl && (kind === "image" || kind === "video");
-  // 素材檔遺失（後端 404）時的優雅降級：記住載入失敗的 URL，改渲染「此鏡素材遺失」佔位，
-  // 讓預覽照常換鏡並明確告知，不再是一張大破圖停留整個 durationSec
-  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
   const assetBroken = hasVisual && scene.assetUrl === brokenUrl;
   // 這一鏡要同步播的音：優先逐鏡配音；音訊鏡（配樂/原音）播素材本身
   const audioSrc = scene.narrationUrl ?? (kind === "audio" ? scene.assetUrl : null);
