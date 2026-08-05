@@ -99,7 +99,9 @@ export function LoginPage() {
   }
 
   return (
-    <div
+    <main
+      id="main-content"
+      tabIndex={-1}
       style={{
         // LoginPage 位於 AppHeader 與 .app 底部 padding 之間；不能再佔完整 100dvh，否則頁面必然多出垂直捲軸。
         minHeight: "calc(100dvh - 112px)",
@@ -165,7 +167,7 @@ export function LoginPage() {
           <InstallAppBanner />
         </div>
       </Card>
-    </div>
+    </main>
   );
 }
 
@@ -212,7 +214,9 @@ function DeviceVerifyStep({
   };
 
   return (
-    <div
+    <main
+      id="main-content"
+      tabIndex={-1}
       style={{
         minHeight: "calc(100dvh - 112px)",
         display: "grid",
@@ -280,6 +284,6 @@ function DeviceVerifyStep({
           </Hint>
         </div>
       </Card>
-    </div>
+    </main>
   );
 }

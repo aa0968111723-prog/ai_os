@@ -6,6 +6,7 @@ import { router, adminProcedure } from "../trpc";
 import { db, schema } from "../db";
 import { createInvite, attachExistingUser, hashPassword } from "../services/auth";
 import { revokeAllUserMcpTokens } from "../services/mcpAuth";
+import { revokeAllUserUploadGrants } from "../services/uploadGrants";
 import { sendEmail, isEmailConfigured, type EmailStatus } from "../services/email";
 import { groupUsage } from "../services/points";
 import { canRunCommand, resolveCommandLevel } from "../../shared/groupAgent";
@@ -458,9 +459,17 @@ export const adminRouter = router({
         .set({ passwordHash, mustChangePassword: true })
         .where(eq(schema.users.id, target.id));
       await tx.delete(schema.sessions).where(eq(schema.sessions.userId, target.id));
-      return revokeAllUserMcpTokens(target.id, tx);
+      const mcpN = await revokeAllUserMcpTokens(target.id, tx);
+      // #275：aidup_ upload grants 與 session/MCP 一併撤銷
+      const grantN = await revokeAllUserUploadGrants(target.id, tx);
+      return { mcpN, grantN };
     });
-    if (revokedTokens > 0) console.log(`[audit] resetMemberPassword 一併撤銷 ${revokedTokens} 把 MCP 金鑰：target=${target.id}`);
+    if (revokedTokens.mcpN > 0) {
+      console.log(`[audit] resetMemberPassword 一併撤銷 ${revokedTokens.mcpN} 把 MCP 金鑰：target=${target.id}`);
+    }
+    if (revokedTokens.grantN > 0) {
+      console.log(`[audit] resetMemberPassword 一併撤銷 ${revokedTokens.grantN} 個 upload grant：target=${target.id}`);
+    }
     return { tempPassword };
   }),
 

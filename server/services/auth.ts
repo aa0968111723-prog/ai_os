@@ -316,7 +316,12 @@ export function setSessionCookie(res: Response, token: string): void {
 }
 
 export function clearSessionCookie(res: Response): void {
-  res.append("Set-Cookie", `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`);
+  // #269：production 必須帶 Secure，否則瀏覽器可能保留舊 cookie（與 setSessionCookie 對稱）
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.append(
+    "Set-Cookie",
+    `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`,
+  );
 }
 
 export function getSessionToken(req: Request): string | undefined {

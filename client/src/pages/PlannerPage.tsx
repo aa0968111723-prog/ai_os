@@ -304,7 +304,7 @@ function GoogleCalendarBar({ groupId }: { groupId: string }) {
       <ConfirmButton
         onConfirm={() => disconnect.mutate()}
         title="中斷 Google 日曆連結？"
-        message="會撤銷授權並移除你 Google 帳戶裡的「AI Director OS・組排程」日曆（系統內排程不受影響）。"
+        message="會撤銷授權並移除你 Google 帳戶裡的「Aios・組排程」日曆（系統內排程不受影響）。"
         confirmLabel="中斷連結"
         disabled={disconnect.isPending}
         triggerClassName="btn-sm"

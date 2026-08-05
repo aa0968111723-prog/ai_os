@@ -55,14 +55,15 @@ function shouldShowSplash(): boolean {
 }
 
 function pageTitle(pathname: string): string {
-  if (pathname === "/") return "AI Director OS｜把想法變成可執行的團隊計畫";
-  if (pathname === "/login") return "登入｜AI Director OS";
-  if (pathname === "/dashboard") return "今日工作台｜AI Director OS";
-  if (pathname.startsWith("/p/")) return "專案｜AI Director OS";
-  if (pathname.startsWith("/planner")) return "筆記排程｜AI Director OS";
-  if (pathname.startsWith("/databases")) return "知識資料｜AI Director OS";
-  if (pathname.startsWith("/chat")) return "訊息｜AI Director OS";
-  return "AI Director OS";
+  // #273：與 brand.ts BRAND_NAME 對齊（Aios）
+  if (pathname === "/") return "Aios｜把想法變成可執行的團隊計畫";
+  if (pathname === "/login") return "登入｜Aios";
+  if (pathname === "/dashboard") return "今日工作台｜Aios";
+  if (pathname.startsWith("/p/")) return "專案｜Aios";
+  if (pathname.startsWith("/planner")) return "筆記排程｜Aios";
+  if (pathname.startsWith("/databases")) return "知識資料｜Aios";
+  if (pathname.startsWith("/chat")) return "訊息｜Aios";
+  return "Aios";
 }
 
 /**
@@ -140,7 +141,13 @@ export function AppShell() {
     if (!("serviceWorker" in navigator)) return;
     const onMsg = (event: MessageEvent) => {
       const data = event.data as { type?: string; url?: string } | undefined;
-      if (data?.type === "aios:navigate" && typeof data.url === "string" && data.url.startsWith("/")) {
+      // #274：擋協議相對路徑 //evil.com（startsWith("/") 仍為 true）
+      if (
+        data?.type === "aios:navigate" &&
+        typeof data.url === "string" &&
+        data.url.startsWith("/") &&
+        !data.url.startsWith("//")
+      ) {
         navigate(data.url);
       }
     };

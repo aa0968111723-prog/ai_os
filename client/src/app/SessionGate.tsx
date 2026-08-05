@@ -76,12 +76,19 @@ export function SessionGate({
       <Route>
         {meError && location === "/" ? (
           <LandingPage />
+        ) : meError && location === "/login" ? (
+          // #281：auth.me 失敗時仍允許進登入表單（否則連不上後端時永遠看不到登入頁）
+          <LoginPage />
         ) : meLoading ? (
           <Meta as="p">載入中…</Meta>
         ) : meError ? (
           <p className="error">
             系統暫時連不上（不是你被登出）——請稍候重新整理，或按{" "}
             <Button size="sm" onClick={onRetry}>重試</Button>
+            {" · "}
+            <Button size="sm" variant="ghost" onClick={() => { window.location.href = "/login"; }}>
+              去登入
+            </Button>
           </p>
         ) : !me ? (
           <Switch>

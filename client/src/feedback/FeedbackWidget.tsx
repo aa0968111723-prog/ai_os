@@ -4,11 +4,13 @@ import { trpc } from "../api";
 import { FEEDBACK_CATEGORIES, FEEDBACK_PAGES, type FeedbackCategory } from "@shared/options";
 import { captureWithHighlight, pickElement, type PickResult } from "./picker";
 import { Icon } from "../components/Icon";
-import { useRovingRadio } from "../components/interactions";
+import { useFocusTrap, useRovingRadio } from "../components/interactions";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 /** 目前路由對應到人看得懂的頁面名（與 FEEDBACK_PAGES 對齊；對不上就回 null） */
 function pageForPath(path: string): string | null {
   if (path === "/") return "作業台（首頁）";
+  // #272：今日工作台主入口
+  if (path.startsWith("/dashboard")) return "今日工作台";
   if (path.startsWith("/p/")) return "專案頁";
   if (path.startsWith("/admin")) return "團隊管理";
   if (path.startsWith("/models")) return "模型指南";
@@ -198,6 +200,9 @@ function ReportForm({
   const submit = trpc.feedbackReports.submit.useMutation();
   const categoryHint = FEEDBACK_CATEGORIES.find((c) => c.value === category)?.hint;
   const catRoving = useRovingRadio(FEEDBACK_CATEGORIES.map((c) => c.value), category, (v) => setCategory(v as FeedbackCategory));
+  // #282：表單 dialog 需要 aria-modal + focus trap
+  const formRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(formRef, true, onClose);
   const [shotUrl, setShotUrl] = useState<string | null>(null);
   const [capturing, setCapturing] = useState(true);
   const [captureAttempt, setCaptureAttempt] = useState(0);
@@ -321,9 +326,12 @@ function ReportForm({
 
   return (
     <Card
+      ref={formRef}
       className="fb-report-form"
       role="dialog"
+      aria-modal="true"
       aria-label="填寫回饋"
+      tabIndex={-1}
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } }}
       style={{ width: 320, maxWidth: "92vw", marginBottom: 12, padding: 16, overflowY: "auto" }}
     >

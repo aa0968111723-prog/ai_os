@@ -50,10 +50,15 @@ describe("runnerMetrics", () => {
     expect(r.heapUsedMb).toBeGreaterThan(0);
   });
 
-  it("shouldSkipHeavyBackgroundWork is usually false in test env", () => {
+  it("shouldSkipHeavyBackgroundWork returns a structured gate", () => {
     const g = shouldSkipHeavyBackgroundWork();
-    // In CI / sandbox we expect not overloaded
-    expect(g.skip).toBe(false);
-    expect(g.reason).toBeNull();
+    // 共載環境（codespace / CI 長測）可能 load1 偏高而 skip=true——屬合法防護，
+    // 只驗回傳形狀，不強制 skip 必須 false（避免 flaky，#411 後長跑踩過）。
+    expect(typeof g.skip).toBe("boolean");
+    if (g.skip) {
+      expect(g.reason).toMatch(/rss_high|freemem_low|load1_high/);
+    } else {
+      expect(g.reason).toBeNull();
+    }
   });
 });

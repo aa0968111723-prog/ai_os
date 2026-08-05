@@ -168,10 +168,11 @@ app.use(express.json({ limit: "2mb" }));
 
 // 建置追溯（QA 版本漂移）：部署時由建置流程注入（Dockerfile ARG→ENV），
 // /api/health 露出非敏感的 build 資訊，讓正式環境可對應到唯一 Git commit。
+// #268：Zeabur 可能注入 ZEABUR_GIT_COMMIT 而非 BUILD_SHA——程式側 fallback 避免 health 全 null
 const BUILD_INFO = {
-  sha: process.env.BUILD_SHA || null,
-  branch: process.env.BUILD_BRANCH || null,
-  builtAt: process.env.BUILD_TIME || null,
+  sha: process.env.BUILD_SHA || process.env.ZEABUR_GIT_COMMIT || process.env.COMMIT_SHA || null,
+  branch: process.env.BUILD_BRANCH || process.env.ZEABUR_GIT_BRANCH || null,
+  builtAt: process.env.BUILD_TIME || process.env.ZEABUR_BUILD_TIME || null,
 };
 
 /** Express 非 tRPC 路由共用認證閘門；避免強制改密碼只擋住其中一種傳輸層。 */

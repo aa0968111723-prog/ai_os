@@ -22,7 +22,9 @@ describe("credential rotation transaction regression guards", () => {
     const block = procedureBlock(authRouter, "changePassword", "acceptInvite");
     expect(block).toContain("const revokedTokens = await db.transaction(async (tx) =>");
     expect(block).toContain("await tx.delete(schema.sessions)");
-    expect(block).toContain("return revokeAllUserMcpTokens(user.id, tx)");
+    expect(block).toContain("revokeAllUserMcpTokens(user.id, tx)");
+    // #275：upload grants 必須與 session/MCP 同交易撤銷
+    expect(block).toContain("revokeAllUserUploadGrants(user.id, tx)");
     // bcrypt 是 CPU 密集工作，必須在交易外算完再進交易，否則長時間佔住 DB 連線
     expect(block.indexOf("const passwordHash = await hashPassword(input.newPassword)"))
       .toBeLessThan(block.indexOf("db.transaction(async (tx) =>"));
@@ -31,7 +33,8 @@ describe("credential rotation transaction regression guards", () => {
   it("resets a member password and revokes both session types in one transaction", () => {
     expect(adminRouter).toContain("const revokedTokens = await db.transaction(async (tx) =>");
     expect(adminRouter).toContain("await tx.delete(schema.sessions)");
-    expect(adminRouter).toContain("return revokeAllUserMcpTokens(target.id, tx)");
+    expect(adminRouter).toContain("revokeAllUserMcpTokens(target.id, tx)");
+    expect(adminRouter).toContain("revokeAllUserUploadGrants(target.id, tx)");
     expect(adminRouter.indexOf("const passwordHash = await hashPassword(tempPassword)"))
       .toBeLessThan(adminRouter.indexOf("db.transaction(async (tx) =>"));
   });

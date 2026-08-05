@@ -13,7 +13,7 @@ export function LandingPage() {
   return (
     <div className="public-site">
       <header className="public-header">
-        <Link href="/" className="brand" aria-label="AI Director OS 首頁">
+        <Link href="/" className="brand" aria-label="Aios 首頁">
           <BrandLogo variant="full" size="sm" responsive priority />
         </Link>
         <nav aria-label="公開網站導覽">
@@ -29,7 +29,7 @@ export function LandingPage() {
             <p className="eyebrow">團隊日常的 AI 專案工作台</p>
             <h1 id="landing-title">把想法，變成團隊真正能完成的計畫。</h1>
             <p className="landing-lead">
-              AI Director OS 會理解你的資料、規劃下一步，並協調 AI 與團隊工作。
+              Aios 會理解你的資料、規劃下一步，並協調 AI 與團隊工作。
               你隨時看得到進度、來源、成本與需要你決定的地方。
             </p>
             <div className="landing-actions">
@@ -90,7 +90,7 @@ export function LandingPage() {
 
       <footer className="public-footer">
         <BrandLogo variant="mark" size="xs" decorative />
-        <span>AI Director OS</span><span className="spacer" /><Link href="/login">登入</Link>
+        <span>Aios</span><span className="spacer" /><Link href="/login">登入</Link>
       </footer>
     </div>
   );
