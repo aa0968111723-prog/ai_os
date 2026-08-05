@@ -6,8 +6,8 @@ import { DISCUSS_EVENT, flashAnchor } from "../discuss";
 import { useMatchMedia } from "../lib/useMatchMedia";
 import { Icon } from "../components/Icon";
 import { ConfirmButton, HelpTip } from "../components/interactions";
+import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
 import {
-  worldviewSchema,
   isWorldviewReady,
   worldviewFieldReaderSummary,
   hasActs,
@@ -615,7 +615,7 @@ export function ProjectPage({ id }: { id: string }) {
     onMutate: async ({ worldview }) => {
       await utils.projects.get.cancel({ id });
       utils.projects.get.setData({ id }, (old) =>
-        old ? { ...old, worldview: { ...worldviewSchema.parse(old.worldview ?? {}), ...worldview } } : old,
+        old ? { ...old, worldview: { ...parseWorldviewSafe(old.worldview), ...worldview } } : old,
       );
     },
     // 失敗或成功都以伺服器現值對齊（失敗時等同回滾樂觀值）
@@ -781,7 +781,9 @@ export function ProjectPage({ id }: { id: string }) {
   const p = project.data;
   const myRole = me.data?.groups.find((g) => g.groupId === p.groupId)?.role;
   const isLeader = myRole === "leader" || myRole === "admin";
-  const wv: Worldview = worldviewSchema.parse(p.worldview ?? {});
+  // 唯讀渲染路徑不得用會 throw 的 parse：legacy／畸形 worldview（超長字串、非字串陣列項）
+  // 會讓整頁掉進 ErrorBoundary「畫面出了點狀況」，使用者連專案都打不開。
+  const wv: Worldview = parseWorldviewSafe(p.worldview);
   // 各類型的 active 選項標籤（值＝label 字串，與世界觀寫入邏輯一致）
   const themeOpts = (options.data ?? []).filter((o) => o.type === "theme").map((o) => o.label);
   const toneOpts = (options.data ?? []).filter((o) => o.type === "tone").map((o) => o.label);
