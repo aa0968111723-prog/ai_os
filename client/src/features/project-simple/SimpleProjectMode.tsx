@@ -5,7 +5,8 @@ import { Button, Card, Chip, Hint, Meta } from "../../components/ui";
 import { ExportJobButton } from "../../components/ExportJobButton";
 import { VisualJourney, type VisualJourneyStep } from "../../components/VisualJourney";
 import { focusAndReveal } from "../../lib/scrollIntoViewForChrome";
-import { worldviewSchema, isWorldviewReady, type Worldview } from "@shared/worldview";
+import { isWorldviewReady, type Worldview } from "@shared/worldview";
+import { parseWorldviewSafe } from "@shared/parseWorldviewSafe";
 import {
   computeSimpleSteps,
   currentSimpleStepIndex,
@@ -81,7 +82,7 @@ export function SimpleProjectMode({
   });
   const saveWorldview = (patch: Partial<Worldview>) => {
     if (!canEdit) return;
-    const next = worldviewSchema.parse({ ...worldview, ...patch });
+    const next = parseWorldviewSafe({ ...worldview, ...patch });
     updateWv.mutate({ id: projectId, worldview: next });
   };
 
