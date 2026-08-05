@@ -104,6 +104,9 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).toMatch(/回到分鏡/);
     expect(src).toMatch(/formatBringInSummary/);
     expect(src).toMatch(/data-testid="ctx-bring-in-summary"/);
+    // C2.3：僅有 returnTo 記憶時主 CTA primary；null 時兩鈕皆 ghost
+    expect(src).toMatch(/contextReturnTo === "studio" \? "primary" : "ghost"/);
+    expect(src).toMatch(/contextReturnTo === "scenes" \? "primary" : "ghost"/);
   });
 
   it("TocNav uses shared three-stage defaults (single jump to #stage-create)", () => {

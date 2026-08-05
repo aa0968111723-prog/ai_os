@@ -2256,7 +2256,8 @@ export function ProjectPage({ id }: { id: string }) {
               <Button
                 type="button"
                 size="sm"
-                variant={contextReturnTo === "scenes" ? "ghost" : "primary"}
+                // C2.3：僅在從該站來時 primary；null（直開頁）時兩鈕皆 ghost
+                variant={contextReturnTo === "studio" ? "primary" : "ghost"}
                 onClick={() => {
                   returnFromContext("studio", { projectId: id });
                   setContextReturnTo(null);

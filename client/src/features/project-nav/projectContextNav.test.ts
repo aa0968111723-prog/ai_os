@@ -88,6 +88,11 @@ describe("revealProjectContext", () => {
 });
 
 describe("returnFromContext", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.getElementById("stage-deliver")?.remove();
+  });
+
   it("dispatches workbench reveal for studio return", () => {
     const seen: unknown[] = [];
     const handler = (e: Event) => {
@@ -98,5 +103,22 @@ describe("returnFromContext", () => {
     window.removeEventListener("aios:workbench-reveal", handler);
     expect(seen.length).toBeGreaterThan(0);
     expect(seen[0]).toMatchObject({ projectId: "p1", anchor: "sec-studio" });
+  });
+
+  it("scrolls and flashes #stage-deliver for scenes return", () => {
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    });
+    const el = document.createElement("div");
+    el.id = "stage-deliver";
+    const scrollIntoView = vi.fn();
+    el.scrollIntoView = scrollIntoView;
+    document.body.appendChild(el);
+
+    returnFromContext("scenes", { projectId: "p1" });
+
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(el.classList.contains("flash-target")).toBe(true);
   });
 });

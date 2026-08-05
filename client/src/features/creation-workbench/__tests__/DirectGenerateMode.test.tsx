@@ -340,6 +340,26 @@ describe("DirectGenerateMode", () => {
     expect(within(group).getByTestId("gen-bring-in-summary")).toHaveTextContent(/角色 2/);
   });
 
+  it("C2: chip click dispatches project-context-reveal with returnTo studio", async () => {
+    const user = userEvent.setup();
+    const seen: unknown[] = [];
+    const handler = (e: Event) => {
+      seen.push((e as CustomEvent).detail);
+    };
+    window.addEventListener("aios:project-context-reveal", handler);
+    render(<Harness characterIds={["a", "b"]} />);
+    await user.click(screen.getByRole("button", { name: /角色 2/ }));
+    window.removeEventListener("aios:project-context-reveal", handler);
+    expect(seen).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          target: "characters",
+          returnTo: "studio",
+        }),
+      ]),
+    );
+  });
+
   it("resolves applyRequest sourceAssetId and notifies onSourceChange", async () => {
     const onSourceChange = vi.fn();
     const { rerender } = render(

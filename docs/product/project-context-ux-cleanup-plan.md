@@ -1,6 +1,6 @@
 # 整理計畫：專案上下文 UX + 與創作台／分鏡一體化
 
-> 狀態：**C0–C2 實作中**（`feat/context-c2-reveal-return` 含 C0–C2；C3 待做）  
+> 狀態：**C0–C2 已實作**（#405 C0、#406 C1、#407 C2 全棧；C3 待做）  
 > 分支：`plan/project-context-ux-cleanup` → base `claude/healing-migration-ai-os-erewp2`  
 > 觸發：使用者「專案上下文也很複雜」「連結不紮實，跟創作工作台與分鏡太不一體成型」（2026-08-04）  
 > 相關：工作台本體減噪見 **#400**（`creation-workbench-ux-cleanup-plan.md`，P0–P2 已合 #403）——本計畫專攻 **① 上下文** 與 **①↔②↔③ 接縫**
