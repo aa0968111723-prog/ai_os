@@ -23,36 +23,135 @@
 | **第二波** | 有 Figma W1–W5 後 | 創作／定裝／分鏡／殼／設定插畫；與稿對齊再畫 |
 | **第三波** | 可選 | 模型 12 類、社群牆、後台、紙質紋理、phase 小標 |
 
-**規格硬約束**：主色僅 `--primary` `#e05a10` 與中性象牙底；勿第二套 UI kit；SVG 優先、WebP 次之。
+**規格硬約束（摘要）**  
+1. **不要黑色**（見 §0.0）  
+2. 主色僅 `--primary` `#e05a10` + 暖象牙中性  
+3. 勿第二套 UI kit；SVG 優先、WebP 次之  
+
+---
+
+## 0.0 色與格式總則（必讀）
+
+### 禁止黑色（硬規則）
+
+| 禁止 | 說明 |
+|------|------|
+| **`#000000` / `rgb(0,0,0)` / pure black** | 畫面、描邊、文字、陰影、icon 填色皆 **不准** |
+| **冷灰黑底**（如 `#111`、`#1a1a1a`、深 slate 全屏） | 產品是暖象牙紙感，不是暗色模式稿 |
+| **黑白高反差插畫** | 勿用漫畫黑線條；線條用 **暖石** 或 **主色橘** |
+| **黑色 mono logo** | mono 用暖石 `#292524`，**不是** black |
+
+| 允許的「最深色」 | Hex | CSS token | 用途 |
+|------------------|-----|-----------|------|
+| 正文／最深描邊 | `#292524` | `--fg` | 文字、icon 預設 stroke（暖石，**不是黑**） |
+| 次級文字 | `#67615b` | `--fg-secondary` | meta、hint |
+| 裝飾線 | `#a79d90` | `--soft` | 僅裝飾，不作正文 |
+| 陰影基準 | `rgba(28,25,23, α)` | `--e1`…`--e4` | 半透明暖褐，**不是** black 陰影 |
+
+| 背景／紙面（請用這些，勿用純白大面積冷白或黑底） | Hex | Token |
+|--------------------------------------------------|-----|-------|
+| 頁底 | `#f3f0e8` | `--bg` |
+| 主卡「暖白紙」 | `#fffefa` | `--card` |
+| 巢狀／chip | `#f9f7f1` | `--card2` |
+| 輸入井 | `#f7f5ee` | `--field` |
+| 凹陷 | `#f4f1ea` | `--muted` |
+
+| 品牌主色 | Hex | Token |
+|----------|-----|-------|
+| 品牌橘 | `#e05a10` | `--primary` |
+| 實心鈕 | `#c23a0c` | `--primary-solid` |
+| 淺底字 | `#b23508` | `--primary-ink` |
+| 選取底 | `#fdeee4` | `--primary-tint` |
+| 鈕上淺字 | `#fff6f0` | `--primary-fg`（僅深橘底上，**不是**大面積白底黑字） |
+
+**插畫用色建議（空狀態／hero）**
+
+- 底：透明 **或** `--bg` / `--card`（象牙）  
+- 主點綴：`--primary` `#e05a10` 及其 tint  
+- 線條／陰影形：`--fg` `#292524` 或更淡的 `--fg-secondary` / `--soft`  
+- 可點綴 ribbon 六色（裝飾 only）：`#c5161b` `#f6771e` `#eba207` `#8db12a` `#078f53` `#0b9d95`  
+- **禁止**：純黑填滿、黑白線稿、暗色全幅背景  
+
+### 檔案格式總則
+
+| 類型 | 格式 | 色彩模式 | 透明 | 其他 |
+|------|------|----------|------|------|
+| Logo／icon 向量 | **SVG 1.1** | sRGB；填色寫 hex 或 `currentColor` | 要 | 無外部字型依賴；path 合併；viewBox 必填 |
+| 柵格 logo／icon | **PNG-24** | sRGB | 要（alpha） | 勿 JPEG（會有白邊） |
+| 空狀態插畫 | **WebP**（主）+ PNG 備援可選 | sRGB | **建議透明底** 或象牙底 `--bg` | 勿 JPG 黑底 |
+| Landing／OG | **WebP** 或 PNG | sRGB | hero 可滿版象牙；OG 可滿版 | 勿黑底 |
+| 色票 | **ASE**（AI/PS）+ **PNG 一覽圖** | sRGB | — | 每格標 CSS 變數名 |
+| 紋理 | WebP | sRGB | 可 | 對比極低，不影響文字 AA |
+
+**命名**：小寫、kebab-case、英文 id（見 §0.2 G）。  
+**色空間**：全檔 sRGB；交付前關閉 CMYK。  
+**不要**：AI 連結未轉曲的外字、PSD 當唯一交付、未標 1x/2x 的模糊圖。
+
+### 逐項欄位模板（清單用）
+
+每項交付請填（或對照下表）：
+
+```
+ID / 名稱
+格式：      SVG | PNG | WebP | ASE
+尺寸：      W×H px（或 viewBox）
+@2x：       要 / 不要
+透明底：    要 / 象牙底 #f3f0e8 / 卡面 #fffefa
+主色：      只用 token hex（禁止 #000）
+描邊：      暖石 #292524 或 currentColor；線寬 …
+檔名：      client/public/design/...
+文案對照：  EmptyState title（若有）
+狀態：      新建 | 精修
+```
 
 ---
 
 ## 0.2 完整 Adobe 生成 checklist（含次優先＋既有資產）
 
 > 狀態語意：**精修**＝repo 已有可用檔，要 SVG／統一品質母版；**新建**＝程式只有 icon 文案或破圖，沒有插畫資產。  
-> 建議檔名落點：`client/public/design/`（新）或既有 `client/public/brand/`、`client/public/icons/`。
+> 建議檔名落點：`client/public/design/`（新）或既有 `client/public/brand/`、`client/public/icons/`。  
+> **色：遵守 §0.0，不要黑色。**
 
 ### A. 第一波 — 必交（解鎖 W0 + 主路徑體感）
 
+#### A 清單總表
+
 | ID | 產出 | 狀態 | 既有／對照 | 程式錨點 |
 |----|------|------|------------|----------|
-| **A0-1** | CSS 色票板 ASE/PNG（標 `--fg`/`--bg`/`--card`/`--primary` 等名） | **新建**（對稿用） | hex 在 `styles.css` `:root` | 設計對稿，不進 runtime |
-| **A0-2** | Wordmark **SVG** 全彩 | **精修** | 已有 `logo-aios-color-v2.png`、`logo-aios-color-embedded.svg`（嵌字） | `brand.ts` `BRAND_LOGO_SRC` |
-| **A0-3** | Wordmark **SVG** mono | **精修** | 已有 `logo-aios-mono.png` | `BRAND_LOGO_SRC.monochrome` |
-| **A0-4** | App mark **1024** + **maskable** 母版 | **精修** | 已有 `icon-aios-v2-1024.png`、`icons/icon-v2-*-maskable.png` | PWA / `BRAND_MARK_SRC` |
-| **A0-5** | Favicon / Apple touch 與 mark 對齊一輪 | **精修** | `favicon-v2*`、`apple-touch-icon-v2` | `index.html` |
-| **A0-6** | Icon set **61** 個 24px SVG（1.5–2px stroke、`currentColor`） | **新建套件**（可替換 inline path） | 現為 `Icon.tsx` 內嵌 path | 建議 `public/design/icons/*.svg` |
-| **A1-1** | 空狀態：還沒有素材 | **新建** | 僅 `Icon`+文案 | `AssetLibrary`「還沒有素材——」 |
-| **A1-2** | 空狀態：還沒有資料庫／資料表 | **新建** | 同上 | `DatabasesPage`、`ProjectDatabasesCard` |
-| **A1-3** | 空狀態：還沒有筆記／排程 | **新建** | 同上 | `PlannerPage` |
-| **A1-4** | 空狀態：沒靈感／陪你做完（**主打**） | **新建** | 共創入口 | `co-create` / EmptyState chips |
-| **A1-5** | 空狀態：素材遺失（可與「未生成」區分） | **新建** | `MediaFallback` 破圖文案 | `AssetLibrary` / `MediaFallback` |
-| **A1-6** | 空狀態：還沒有回饋／社群空 | **新建** | 同上 | `AdminPage` 回饋、`CommunityPage` |
-| **A1-7a** | 空狀態：還沒有角色 | **新建** | 同上 | `CharacterCards` |
-| **A1-7b** | 空狀態：還沒有場景 | **新建** | 同上 | `ScenePresetCards` |
-| **A1-7c** | 空狀態：還沒有素材設定（道具） | **新建** | 同上 | `PropCards` |
-| **A2-1** | Landing hero（桌 ~1440、手機 ~390） | **新建** | Landing 現多文案+logo | `LandingPage.tsx` |
-| **A2-2** | OG／社群分享圖（可選） | **新建** | 若無 og:image 則補 | meta／分享 |
+| **A0-1** | CSS 色票板 ASE/PNG | **新建** | `styles.css` `:root` | 對稿用 |
+| **A0-2** | Wordmark SVG 全彩 | **精修** | `logo-aios-color-v2.png` 等 | `brand.ts` |
+| **A0-3** | Wordmark SVG mono（**暖石，非黑**） | **精修** | `logo-aios-mono.png` | monochrome |
+| **A0-4** | App mark 1024 + maskable | **精修** | `icon-aios-v2-1024` 等 | PWA |
+| **A0-5** | Favicon / Apple touch 對齊 | **精修** | favicon-v2* | `index.html` |
+| **A0-6** | Icon 61 × 24px SVG | **新建套件** | `Icon.tsx` paths | `design/icons/` |
+| **A1-1**…**A1-7c** | 空狀態插畫 | **新建** | 僅 icon+文案 | 見詳細格式 |
+| **A2-1** | Landing hero | **新建** | Landing 文案+logo | `LandingPage` |
+| **A2-2** | OG 分享圖（可選） | **新建** | — | meta |
+
+#### A 詳細格式（逐項）
+
+| ID | 名稱 | 格式 | 尺寸 / viewBox | 透明／底 | 用色（禁止 #000） | 檔名建議 |
+|----|------|------|----------------|----------|-------------------|----------|
+| **A0-1** | 色票板 | ASE + PNG 一覽 | PNG 一覽 ≥ 1200px 寬；每色方塊標 token 名 | 淺象牙底 `#f3f0e8` | 只含 token 色；**不放 #000** | `design/swatches/aios-tokens.ase` + `aios-tokens.png` |
+| **A0-2** | Logo 全彩 | **SVG**（主）+ PNG 720×316 可選 | viewBox 對齊現有約 **720×316**；@2x PNG 1440×632 可選 | **透明底** | 品牌橘＋ribbon 點綴；文字／圖形 **勿黑** | `design/brand/logo-aios-color.svg` |
+| **A0-3** | Logo mono | **SVG** | 同 A0-2 比例 | **透明底** | **單色 `#292524`（--fg）**，禁止 black mono | `design/brand/logo-aios-mono.svg` |
+| **A0-4** | App mark | PNG-24 | **1024×1024**；另出 maskable：重要內容在中心 **約 80%** safe zone | 透明或象牙；maskable 可滿版淺底 | 同品牌；**背景不要黑** | `design/brand/mark-aios-1024.png` · `mark-aios-1024-maskable.png` |
+| **A0-5** | Favicon 套 | PNG | 32、16、180（apple）、192、512 與既有 v2 對齊 | 透明 | 同 mark；**不要黑底 favicon** | 可覆寫 `favicon-v2*` 前先出 v3 母版 |
+| **A0-6** | UI Icons | **SVG** ×61 | viewBox **`0 0 24 24`**；視覺對齊 24px grid；stroke **1.5–2** | 透明 | stroke/fill = **`currentColor`**（執行時吃 `--fg` 暖石）；**禁止寫死 #000** | `design/icons/{name}.svg` |
+| **A1-1** | 空·還沒有素材 | WebP（主） | 顯示寬 **320–640** CSS px；出圖 **≥640px** 寬（@1x）；可選 @2x | **透明** 或底 `#f3f0e8` / `#fffefa` | 線與形：`#292524` / `#67615b` / `#e05a10`；**無黑色塊** | `design/empty/no-assets.webp` |
+| **A1-2** | 空·還沒有資料庫 | 同 A1-1 | 同 | 同 | 同 | `design/empty/no-database.webp` |
+| **A1-3** | 空·筆記／排程 | 同 A1-1 | 同 | 同 | 同 | `design/empty/no-planner.webp` |
+| **A1-4** | 空·沒靈感（主打） | 同 A1-1 | 可略大至 **800px** 寬 | 同 | 溫暖引導；**禁止 AI 機器人+黑底** | `design/empty/no-inspiration.webp` |
+| **A1-5** | 空·素材遺失 | 同 A1-1 | 同 | 同 | 與 A1-1 **構圖可區分**（如裂縫／缺角），仍非黑色驚嘆 | `design/empty/media-missing.webp` |
+| **A1-6** | 空·回饋／社群 | 同 A1-1 | 同 | 同 | 同 | `design/empty/no-feedback.webp` |
+| **A1-7a** | 空·還沒有角色 | 同 A1-1 | 同；**三張一組風格統一** | 同 | 同 | `design/empty/no-character.webp` |
+| **A1-7b** | 空·還沒有場景 | 同 | 同 | 同 | 同 | `design/empty/no-scene.webp` |
+| **A1-7c** | 空·還沒有道具 | 同 | 同 | 同 | 同 | `design/empty/no-prop.webp` |
+| **A2-1** | Landing hero | WebP 或 PNG | **桌 1440×810**（約 16:9）· **手機 390×844** 或 390 寬×自高 | 滿版象牙／紙感；**禁止黑全幅** | 主視覺橘＋象牙；字若進圖用 `#292524` | `design/marketing/landing-hero-desktop.webp` · `…-mobile.webp` |
+| **A2-2** | OG 圖（可選） | PNG 或 WebP | **1200×630** | 滿版淺底 | 同品牌；**禁止黑底白字** | `design/marketing/og.png` |
+
+**A0-6 Icon 名單（61）**（檔名 kebab；SVG 內 `currentColor`，**不要黑色**）：  
+`arrow-right, bell, calendar-plus, camera, check, check-circle-2, chevron-down, chevron-right, chevron-up, circle-stop, clapperboard, clock, copy, database, download, ellipsis, file-text, film, gem, hard-drive, help-circle, image, info, lightbulb, loader, lock, message-circle, mic, monitor, mouse-pointer-2, music, package, palette, pause, pencil, play, plus, rotate-ccw, rotate-cw, scale, search, send, share-2, skip-back, skip-forward, sliders-horizontal, smartphone, sparkles, square, star, tablet, tag, trash-2, triangle-alert, trophy, undo-2, unlock, user, volume-2, waypoints, x-circle`
 
 ### B. 第二波 — 創作／殼／定裝／分鏡（有 Figma 後對齊）
 
@@ -75,6 +174,17 @@
 | **B15** | 錯誤邊界「畫面出了點狀況」輕插畫（可選） | 新建 | `main.tsx` ErrorBoundary |
 | **B16** | 金鑰已接上／個人·0 點 小標示（可選） | 新建 | BYOK / Integrations 徽章 |
 
+#### B 詳細格式
+
+| ID | 格式 | 尺寸 | 底／透明 | 用色 | 檔名建議 |
+|----|------|------|----------|------|----------|
+| **B1–B6, B8–B12, B15** | WebP | 同 A1：顯示 320–640、出圖 ≥640 寬 | 透明或 `#f3f0e8` / `#fffefa` | 暖石+橘；**無 #000** | `design/empty/no-project.webp`、`no-group.webp`、`no-generations.webp`、`no-trace.webp`、`no-prompts.webp`、`no-knowledge.webp`、`scene-empty.webp`、`scene-list-empty.webp`、`export-done.webp`、`desktop-connect.webp`、`chat-empty.webp`、`error-boundary.webp` |
+| **B7** | SVG ×4 | viewBox 24×24 或 32×32 | 透明 | `currentColor` 或 `#292524`；**勿黑** | `design/icons/type-image.svg` 等 |
+| **B10** | WebP 可選 | 同空狀態 | 同 | 成功可用 `--success` `#12934f` 點綴，仍非黑 | 見上 |
+| **B13** | PNG/SVG | 與 mark 一致 | 透明 | 同 A0-4 | brand 精修 |
+| **B14** | WebP | 桌 1920 寬可選；極淡 | 象牙系 | 幾乎無對比；**禁止暗色 splash** | `design/marketing/splash-wash.webp` |
+| **B16** | SVG 小標 | 16–20px | 透明 | primary tint + ink | `design/icons/badge-byok.svg` |
+
 ### C. 第三波 — 可選加深
 
 | ID | 產出 | 備註 |
@@ -89,6 +199,17 @@
 | **C8** | 沒有符合的模型（搜尋空） | `ModelsPage`；多半不必插畫 |
 | **C9** | 範本收藏即將推出 | drawer 占位；可延後 |
 | **C10** | 世界觀範例卡裝飾 | `WorldviewExampleCard` |
+
+#### C 詳細格式
+
+| ID | 格式 | 尺寸 | 用色／注意 |
+|----|------|------|------------|
+| **C1** | WebP 或 SVG | 64–128px 顯示 | 12 類一組；淺底；**勿黑卡** |
+| **C2** | 同 A1 | 同 A1 | 同 A1-6 變體 |
+| **C3** | WebP 可 tile | 512×512 tile | 低對比象牙噪點；**不要變灰黑** |
+| **C4** | SVG | 寬 240–480 | 僅 ribbon 六色漸層，無黑 |
+| **C5** | SVG ×4 | 24–32px | 暖石線 + primary 現在步驟 |
+| **C6–C10** | WebP/SVG | 視場景 | 一律遵守 §0.0 禁黑 |
 
 ### D. 程式 EmptyState 文案 ↔ 插畫對照（盤點日）
 
@@ -134,6 +255,7 @@
 
 | 不做 | 原因 |
 |------|------|
+| **任何純黑／#000／黑底白字稿** | 違反 §0.0；產品是暖象牙紙，不是暗色模式 |
 | tRPC／權限／quota／DAG 流程圖 | 工程規格 |
 | 模型價目／供應商目錄圖 | 商業資料常變 |
 | 第二套色系、Tailwind 新 kit | token 單一真相 |
@@ -411,11 +533,18 @@ Adobe 第二波插畫（生成紀錄、軌跡、分鏡格、桌面連線、私�
 
 ## 13. 給設計的一頁摘要（可直接貼 brief）
 
-**產品**：Aios（AI 創作作業系統）— 暖象牙底、赤陶橘 CTA、紙質卡面。  
-**請做**：  
-1）色票對齊 CSS 變數；2）Logo／App icon 精修 SVG；3）61 icon 統一；4）7+ 空狀態插畫；5）Landing hero。  
+**產品**：Aios（AI 創作作業系統）— **暖象牙底**、赤陶橘 CTA、紙質卡面。  
+
+**請做**（詳細格式見 **§0.0 + §0.2 A 詳細格式表**）：  
+1）色票對齊 CSS 變數；2）Logo／App icon 精修 SVG；3）61 icon 統一（`currentColor`）；4）空狀態插畫；5）Landing hero。  
+
+**顏色（最重要）**：  
+- **不要黑色**（不要 `#000`、不要黑底、不要黑白線稿）  
+- 最深只用暖石 **`#292524`**（`--fg`）  
+- 底用 **`#f3f0e8` / `#fffefa`**；主色 **`#e05a10`**  
+
 **請在 Figma**：W0 元件庫 + 主路徑（定調／創作／交付／共創）桌機＋手機。  
-**不要**：改後端流程；另起 Tailwind 色票。
+**不要**：改後端流程；另起 Tailwind 色票；暗色模式全套。
 
 **程式聯絡錨點**：  
 `styles.css` · `brand.ts` · `components/ui/*` · `features/creation-workbench/*` · `features/co-create/*` · `ProjectPage` · `SceneList` · `GenerationList` · `CostumePackSection`。
