@@ -142,6 +142,9 @@ W0 設計系統 → W1 殼 → W2＋W3（創作主路徑）→ W4→W5→W6→W7
 2. 品牌方向一句（既有佛系／影視工具調性是否延續）  
 3. Adobe 素材是否已有（logo、空狀態圖）或需程式先用 placeholder  
 
+**Adobe 逐項生成清單（從程式碼盤點）**：見 [`adobe-handoff-inventory-20260805.md`](./adobe-handoff-inventory-20260805.md)  
+— Pack 0（色票／Logo／icon）→ Pack 1（空狀態插畫）→ Pack 2（Landing hero）。
+
 有 **M0 連結** 後，終端從 W0／W1 開 `feat/design-w0-tokens` 等實作 PR。
 
 ---
