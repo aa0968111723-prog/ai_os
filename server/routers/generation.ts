@@ -8,6 +8,7 @@ import { failStaleGenerationTx, refund, reserveQuota } from "../services/points"
 import { advanceGeneration, prepareGenerationRequest } from "../services/generationCore";
 import { executeGenerationCommand } from "../services/generationCommand";
 import { signAssetUrl } from "../services/storage";
+import { resolveByokFalKey, byokFalOpts } from "../services/byokBilling";
 import { GENERATION_SOURCE_META_KEY, splitGenerationSourceMeta, storeGenerationSourceMeta } from "../../shared/generationSourceMeta";
 import { assertProjectEditable } from "../services/projectAcl";
 import { getModel, endpointOf, supportsSeed } from "../../shared/models";
@@ -648,8 +649,11 @@ export const generationRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "此模型已不在目錄，無法核准送出" });
       }
 
+      // BYOK：核准當下再解析個人 key（與 submit 同口徑）；個人路徑不扣平台點
+      const { userFalKey, usedUserKey } = await resolveByokFalKey(gen.userId, model, gen.params);
+
       // 扣「提交者本人」的額度（不是核准的組長）——與 submit 同一守門；mock 扣點行為同 generationCore（billingBypassed）
-      if (!billingBypassed()) {
+      if (!billingBypassed() && !usedUserKey) {
         let quotaError: string | null;
         try {
           quotaError = await reserveQuota(gen.userId, gen.groupId, gen.pointsEst, `核准生成 ${model.label}`, gen.id);
@@ -699,7 +703,12 @@ export const generationRouter = router({
       }
       await db
         .update(schema.generations)
-        .set({ params: storeGenerationSourceMeta(submitParams, { secondarySourceUrl: refreshedSecondaryUrl }) })
+        .set({
+          params: storeGenerationSourceMeta(submitParams, {
+            secondarySourceUrl: refreshedSecondaryUrl,
+            usedUserKey: usedUserKey || splitParams.meta.usedUserKey || undefined,
+          }),
+        })
         .where(eq(schema.generations.id, gen.id));
 
       try {
@@ -711,29 +720,47 @@ export const generationRouter = router({
           await updateAiTraceSession(trace.id, { status: "running", summary: "已核准並送出 provider" }).catch(() => undefined);
         }
         const startedAt = Date.now();
-        const { requestId } = await falSubmit(endpointOf(model), model.kind, submitParams);
+        const { requestId } = await falSubmit(
+          endpointOf(model),
+          model.kind,
+          submitParams,
+          byokFalOpts(userFalKey, usedUserKey),
+        );
         if (trace) await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "provider_response", summary: "Provider 已接受核准後的工作", latencyMs: Date.now() - startedAt, payload: { requestId, status: "running" } });
         const [updated] = await db
           .update(schema.generations)
           .set({ requestId, status: "running", updatedAt: new Date() })
           .where(eq(schema.generations.id, gen.id))
           .returning();
-        await postSystemMessage(`✅ 待核生成已核准並送出（${model.label}，${gen.pointsEst} 點）`);
+        const costLabel = usedUserKey ? "個人金鑰・0 點" : `${gen.pointsEst} 點`;
+        await postSystemMessage(`✅ 待核生成已核准並送出（${model.label}，${costLabel}）`);
         return updated;
       } catch (err) {
-        // 修 R5-MONEY-002：與扣點側（332）對稱——假生成不扣點就不退點
-        if (!billingBypassed()) await refund(gen.userId, gen.groupId, gen.pointsEst, "核准送出失敗退回", gen.id);
+        // 修 R5-MONEY-002：與扣點側對稱——假生成／BYOK 不扣點就不退點
+        if (!billingBypassed() && !usedUserKey) {
+          await refund(gen.userId, gen.groupId, gen.pointsEst, "核准送出失敗退回", gen.id);
+        }
         console.error("[generation] 核准送出失敗:", err);
         await db
           .update(schema.generations)
-          .set({ status: "failed", error: String(err), pointsRefunded: gen.pointsEst, updatedAt: new Date() })
+          .set({
+            status: "failed",
+            error: String(err),
+            pointsRefunded: usedUserKey || billingBypassed() ? 0 : gen.pointsEst,
+            updatedAt: new Date(),
+          })
           .where(eq(schema.generations.id, gen.id));
         const trace = await findAiTraceSessionBySource("generation", gen.id).catch(() => null);
         if (trace) {
           await recordAiTraceEventSafely({ sessionId: trace.id, eventType: "failed", summary: "核准後送出 provider 失敗", payload: { error: err instanceof Error ? err.message : String(err) } });
           await updateAiTraceSession(trace.id, { status: "failed", summary: "核准後送出失敗" }).catch(() => undefined);
         }
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "核准後送出失敗，點數已退回，請稍後重試" });
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: usedUserKey || billingBypassed()
+            ? "核准後送出失敗，請稍後重試"
+            : "核准後送出失敗，點數已退回，請稍後重試",
+        });
       }
     }),
 

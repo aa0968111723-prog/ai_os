@@ -13,7 +13,7 @@ import { getModel, endpointOf, isNimModel, supportsNegativePrompt, supportsSeed,
 import { SOURCE_INCOMPAT } from "../../shared/sourceIncompat";
 import { measurePromptBudget } from "./promptTokens";
 import type { PromptBudgetReport } from "../../shared/promptBudget";
-import { storeGenerationSourceMeta, type GenerationAblationMeta } from "../../shared/generationSourceMeta";
+import { storeGenerationSourceMeta, splitGenerationSourceMeta, type GenerationAblationMeta } from "../../shared/generationSourceMeta";
 import { resolveModel, estimatePointsFor } from "./modelResolve";
 import {
   worldviewSchema,
@@ -27,6 +27,7 @@ import {
 import { falSubmit, falStatus, billingBypassed, isMockMode } from "./fal";
 import { nimSubmit, nimStatus } from "./nvidia-nim";
 import { failStaleGenerationTx, reserveQuota } from "./points";
+import { resolveByokFalKey, byokFalOpts } from "./byokBilling";
 import { persistRemote, signAssetUrl } from "./storage";
 import { formatCharacterAnchor, formatPropAnchor, formatSceneAnchor, resolveCarriedPropIds } from "./cardAnchors";
 import { mergePropIdsWithCarried } from "../../shared/propOwnership";
@@ -651,12 +652,20 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
       },
     });
   }
-  const storedParams = storeGenerationSourceMeta(falInput, { secondarySourceUrl, ablation: input.ablation });
+  // BYOK Phase 2：個人 fal 金鑰（preferUserKey + active）→ 略過平台點數、用個人 key 送出。
+  // NIM 永不走 fal 個人 key。
+  const { userFalKey, usedUserKey } = await resolveByokFalKey(input.userId, model);
+  const storedParams = storeGenerationSourceMeta(falInput, {
+    secondarySourceUrl,
+    ablation: input.ablation,
+    usedUserKey: usedUserKey || undefined,
+  });
 
   // 成本審核門檻（需求 2.1）：組員（member）單筆估點 ≥ 組門檻 → 先落一筆 awaiting_approval，
   // 不扣點、不送 fal，等組長在生成紀錄核准（generation.decideCost）才走扣點＋送出。
   // 所有可送出生成的路徑（手動、工作流、AI 代理）都必須帶入當下角色；組長/管理員不受限。
-  if (accessRole === "member") {
+  // 個人金鑰路徑不佔平台點數 → 略過組長成本核准門檻。
+  if (accessRole === "member" && !usedUserKey) {
     const [grp] = await db.select().from(schema.groups).where(eq(schema.groups.id, project.groupId));
     const threshold = grp?.approvalThresholdPoints;
     if (threshold != null && threshold > 0 && est >= threshold) {
@@ -779,7 +788,8 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
   // 否則會留下「從未扣點」的孤兒，30 分鐘後被陳屍清掃憑空退點、灌鬆總預算閘。
   // e2e 測試模式（E2E_MOCK=1，僅供自動化測試）預設不扣點：測試不燒真實額度、也不被額度閘擋
   //（正式模式照常守門；MOCK_BILLING=1 時 mock 也走扣點——e2e 驗證額度守門用，見 billingBypassed）
-  if (!billingBypassed()) {
+  // BYOK：個人金鑰路徑不扣平台點數
+  if (!billingBypassed() && !usedUserKey) {
     let quotaError: string | null;
     try {
       quotaError = await reserveQuota(input.userId, project.groupId, est, `${input.reasonPrefix ?? "生成"} ${model.label}`, gen.id);
@@ -808,7 +818,7 @@ export async function submitGenerationCore(input: SubmitCoreInput): Promise<Gene
     const startedAt = Date.now();
     const { requestId } = isNimModel(model) && !isMockMode()
       ? nimSubmit(falInput)
-      : await falSubmit(endpointOf(model), model.kind, falInput);
+      : await falSubmit(endpointOf(model), model.kind, falInput, byokFalOpts(userFalKey, usedUserKey));
     if (input.traceSessionId) {
       await recordAiTraceEventSafely({
         sessionId: input.traceSessionId,
@@ -863,9 +873,36 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
   const endpoint = model ? endpointOf(model) : gen.modelId;
   const kind = (model?.kind ?? gen.kind) as "image" | "video" | "audio" | "text";
 
+  // BYOK：送出時用了個人 key，status 查詢必須同一把；金鑰已移除 → fail（當初沒扣平台點）。
+  const { userFalKey: statusUserKey, usedUserKey: statusUsedUserKey } = await resolveByokFalKey(
+    gen.userId,
+    model,
+    gen.params,
+  );
+  if (
+    statusUsedUserKey &&
+    !statusUserKey &&
+    !gen.requestId.startsWith("nim_") &&
+    !gen.requestId.startsWith("mock_")
+  ) {
+    const failed = await failStaleGenerationTx(
+      gen.id,
+      "個人 fal API Key 已移除或失效，無法查詢生成狀態（未使用平台點數，無需退點）",
+      "個人金鑰失效",
+    );
+    if (!failed.updated) {
+      const [current] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
+      return current ?? gen;
+    }
+    const [updated] = await db.select().from(schema.generations).where(eq(schema.generations.id, gen.id));
+    return updated ?? gen;
+  }
+
   // 依 requestId 前綴分流:nim_=NVIDIA NIM 記憶體佇列;mock_/其餘=fal(mock 前綴由 falStatus 自行處理)。
   // 用前綴而非模型註冊表判斷——部署切換期間在途的舊 any-llm 生成仍能沿 fal 佇列收尾。
-  const result = gen.requestId.startsWith("nim_") ? nimStatus(gen.requestId) : await falStatus(endpoint, kind, gen.requestId);
+  const result = gen.requestId.startsWith("nim_")
+    ? nimStatus(gen.requestId)
+    : await falStatus(endpoint, kind, gen.requestId, byokFalOpts(statusUserKey, statusUsedUserKey));
   // 供應商回 done 卻無任何輸出：不得永久卡 queued/running 持有預扣點（先前會 fall-through 到 return gen）
   if (result.status === "done" && !(result.resultUrl || result.resultText)) {
     const emptyFailed = await failStaleGenerationTx(
@@ -895,6 +932,7 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
     // 包進同交易後全有或全無：asset 寫入失敗整筆 rollback，列留在 queued/running，下次輪詢重試。
     const mediaUrl = result.resultUrl && (kind === "image" || kind === "video" || kind === "audio") ? result.resultUrl : null;
     const mediaKind = kind === "image" || kind === "video" || kind === "audio" ? kind : null;
+    const usedUserKeyDone = splitGenerationSourceMeta(gen.params).meta.usedUserKey === true;
     const advanced = await db.transaction(async (tx) => {
       const rows = await tx
         .update(schema.generations)
@@ -902,7 +940,8 @@ export async function advanceGeneration(genId: string): Promise<GenerationRow> {
           status: "done",
           resultUrl: result.resultUrl,
           resultText: result.resultText,
-          pointsActual: gen.pointsEst,
+          // BYOK：個人金鑰路徑實際平台花費為 0
+          pointsActual: usedUserKeyDone ? 0 : gen.pointsEst,
           updatedAt: new Date(),
         })
         .where(and(eq(schema.generations.id, gen.id), inArray(schema.generations.status, ["queued", "running"])))
