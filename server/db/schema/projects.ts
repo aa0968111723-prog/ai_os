@@ -14,6 +14,12 @@ export const projects = pgTable("projects", {
   platform: text("platform").notNull(),
   format: text("format").notNull(),
   worldview: jsonb("worldview").notNull().default({}),
+  /**
+   * 專案封面圖（可選）：綁一張本專案素材庫的圖片素材，作業台卡片就顯示它而不是首字色塊。
+   * null＝沿用以 id 雜湊出的色塊封面。素材進回收桶時不清綁定（比照角色定裝卡），
+   * 列出時以 isNull(assets.deletedAt) 左接——縮圖自動退回色塊，還原素材後又接回來。
+   */
+  coverAssetId: uuid("cover_asset_id"),
   status: text("status").notNull().default("active"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

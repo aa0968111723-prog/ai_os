@@ -34,6 +34,7 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "projects.createSeriesMaster": "建立母版專案",
   "projects.createSeriesEpisode": "從母版開新的一集",
   "projects.setArchived": "封存／解封專案",
+  "projects.setCover": "更換專案封面圖",
   "projects.updateWorldview": "更新世界觀",
   "projects.setProjectRole": "調整專案成員角色",
   "projects.setOwner": "轉移專案負責人",

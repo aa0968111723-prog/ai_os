@@ -5,6 +5,8 @@ import { FirstRunGuide } from "../components/FirstRunGuide";
 import { InstallAppBanner } from "../components/InstallAppBanner";
 import { SeriesTemplatePanel } from "../components/SeriesTemplatePanel";
 import { Icon } from "../components/Icon";
+import { AssetImg } from "../components/MediaFallback";
+import { ProjectCoverPicker } from "../components/ProjectCoverPicker";
 import { ConfirmButton } from "../components/interactions";
 import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
 import { useMatchMedia } from "../lib/useMatchMedia";
@@ -151,6 +153,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
   const restoreProject = trpc.projects.setArchived.useMutation({
     onSuccess: () => utils.projects.list.invalidate(),
   });
+  /** 正在換封面的專案 id（開對話框用；null＝沒開） */
+  const [coverEditId, setCoverEditId] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState<string>("");
@@ -228,6 +232,9 @@ export function Launchpad({ groupId }: { groupId: string }) {
   }, [all, q, kindFilter, sort]);
   const shown = shownList.slice(0, limit);
   const recentProjects = shownList.filter((project) => project.status !== "archived").slice(0, 3);
+  // 換封面對話框讀 list 的最新那一列（而不是開啟當下的快照）：換完 invalidate 後對話框裡的
+  // 預覽也跟著換，不必關掉重開；專案在期間消失（被別人封存/篩掉）則自動收起對話框
+  const coverEditProject = coverEditId ? all.find((p) => p.id === coverEditId) ?? null : null;
   const agentSummary = agentOverview.data?.summary;
   const runningRuns = agentSummary?.running ?? 0;
   const waitingRuns = (agentSummary?.waiting ?? 0) + (agentSummary?.awaitingApproval ?? 0);
@@ -508,7 +515,22 @@ export function Launchpad({ groupId }: { groupId: string }) {
                 const pending = pendingOf(project.id);
                 return (
                   <Link key={project.id} href={`/p/${project.id}`} className="continue-card" onClick={() => recordRecent(project.id)}>
-                    <span className="continue-card__mark" style={{ background: coverOf(project.id) }}>{project.title.trim().charAt(0) || "○"}</span>
+                    <span className="continue-card__mark" style={{ background: coverOf(project.id) }}>
+                      {project.coverUrl ? (
+                        <AssetImg
+                          className="launch-mark__img"
+                          src={project.coverUrl}
+                          alt=""
+                          loading="lazy"
+                          fallbackLabel="封面圖遺失"
+                          fallbackClassName="launch-mark__fallback"
+                          fallbackHeight="100%"
+                          fallbackIconSize={16}
+                        />
+                      ) : (
+                        project.title.trim().charAt(0) || "○"
+                      )}
+                    </span>
                     <span className="continue-card__body">
                       <strong>{project.title}</strong>
                       <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
@@ -683,6 +705,8 @@ export function Launchpad({ groupId }: { groupId: string }) {
           const canRestore = isArchived && (isLeader || p.ownerId === myUserId);
           const pd = !isArchived ? pendingOf(p.id) : null;
           const listMode = isDesktop && layout === "list";
+          // 換封面＝寫入：檢視者不給（後端 assertProjectEditable 同樣會擋）；已封存的先還原再改
+          const canEditCover = !isArchived && p.myProjectRole !== "viewer";
 
           if (listMode) {
             return (
@@ -693,7 +717,21 @@ export function Launchpad({ groupId }: { groupId: string }) {
                   onClick={() => recordRecent(p.id)}
                 >
                   <span className="launch-list-row__mark" style={{ background: coverOf(p.id) }} aria-hidden>
-                    {p.title.trim().charAt(0) || "○"}
+                    {/* 列表列同樣認封面圖：卡片／列表兩種版面認得出是同一個專案 */}
+                    {p.coverUrl ? (
+                      <AssetImg
+                        className="launch-mark__img"
+                        src={p.coverUrl}
+                        alt=""
+                        loading="lazy"
+                        fallbackLabel="封面圖遺失"
+                        fallbackClassName="launch-mark__fallback"
+                        fallbackHeight="100%"
+                        fallbackIconSize={14}
+                      />
+                    ) : (
+                      p.title.trim().charAt(0) || "○"
+                    )}
                   </span>
                   <span className="launch-list-row__title">{p.title}</span>
                   <span className="launch-list-row__kind">{kindLabelOf(p.kind)}</span>
@@ -737,7 +775,37 @@ export function Launchpad({ groupId }: { groupId: string }) {
               onClick={() => recordRecent(p.id)}
             >
               <div className="launch-cover" style={{ background: coverOf(p.id) }}>
-                <span className="launch-mono">{p.title.trim().charAt(0) || "○"}</span>
+                {/* 有綁封面圖就顯示圖，沒綁（或素材進了回收桶→coverUrl 為 null）退回首字色塊 */}
+                {p.coverUrl ? (
+                  <AssetImg
+                    className="launch-cover__img"
+                    src={p.coverUrl}
+                    alt={`${p.title} 的封面圖`}
+                    loading="lazy"
+                    fallbackLabel="封面圖遺失"
+                    fallbackClassName="launch-cover__fallback"
+                    fallbackHeight="100%"
+                    fallbackIconSize={18}
+                  />
+                ) : (
+                  <span className="launch-mono">{p.title.trim().charAt(0) || "○"}</span>
+                )}
+                {canEditCover && (
+                  <Button
+                    size="sm"
+                    className="launch-cover__swap"
+                    title="換一張封面圖"
+                    onClick={(e) => {
+                      // 卡片本身是連結：不攔的話按「換圖」會直接跳進專案
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setCoverEditId(p.id);
+                    }}
+                  >
+                    <Icon name="Image" size={13} />
+                    {p.coverUrl ? "換圖" : "加圖"}
+                  </Button>
+                )}
               </div>
               <div className="launch-body">
                 <h3 className="launch-title">{p.title}</h3>
@@ -788,6 +856,17 @@ export function Launchpad({ groupId }: { groupId: string }) {
         <div style={{ textAlign: "center", marginTop: 20 }}>
           <button onClick={() => setLimit((n) => n + 48)}>顯示更多（還有 {shownList.length - limit} 個）</button>
         </div>
+      )}
+
+      {/* 換封面對話框：從 list 的最新資料取值，換完 invalidate 後這裡也跟著更新（不必關掉再開） */}
+      {coverEditProject && (
+        <ProjectCoverPicker
+          projectId={coverEditProject.id}
+          projectTitle={coverEditProject.title}
+          coverAssetId={coverEditProject.coverAssetId}
+          coverUrl={coverEditProject.coverUrl}
+          onClose={() => setCoverEditId(null)}
+        />
       )}
       </section>
     </div>

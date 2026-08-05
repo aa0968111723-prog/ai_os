@@ -260,6 +260,13 @@
       "when": 1786200000000,
       "tag": "0036_community_likes_surrogate_pk",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786300000000,
+      "tag": "0037_project_cover",
+      "breakpoints": true
     }
   ]
 }
