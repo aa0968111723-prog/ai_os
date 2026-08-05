@@ -2,17 +2,14 @@ import type { DetailsHTMLAttributes, HTMLAttributes, ReactNode, Ref } from "reac
 import { cx } from "./cx";
 
 /**
- * 卡片表面。四種語意對應 styles.css 既有的三個修飾 class：
+ * 卡片表面（ribbon-light 米白階梯）。四種語意對應 styles.css 既有修飾 class：
  *
- * - `default` → `card`：一般卡面（象牙紙）
- * - `primary` → `card card--primary`：主卡，左緣有主色條、較寬內距
+ * - `default` → `card`：主表面暖白紙
+ * - `primary` → `card card--primary`：主卡，左緣品牌色條、較寬內距
  * - `std`     → `card card--std`：低一階陰影，用於次要區塊
  * - `quiet`   → `card card--quiet`：透明底髮絲框；配 `as="details"` 就是可收合區
  *
- * class 輸出與遷移前逐字相同。
- *
- * 型別用判別聯集而非「把 open 塞給所有標籤」：`open`／`onToggle` 只有 `<details>`
- * 有意義，混在一起會讓 `<div open="">` 這種無效 DOM 通過型別檢查。
+ * class 輸出與遷移前相容；不在此硬編碼色值。
  */
 export type CardVariant = "default" | "primary" | "std" | "quiet";
 
@@ -52,8 +49,7 @@ export function Card(props: CardDetails | CardBlock) {
   const { variant = "default", className, children } = props;
   const { as: Tag = "div", variant: _v, className: _c, children: _ch, ...rest } = props as CardBlock;
   // Tag 是多型的，TS 無法同時滿足 div/li/details 各自的 ref 與屬性型別。
-  // 這個轉型侷限在元件內部——對外的 CardDetails/CardBlock 聯集仍然嚴格，
-  // 呼叫端拿到的型別檢查不受影響（例如 <Card open> 沒帶 as="details" 仍會被擋）。
+  // 這個轉型侷限在元件內部——對外的 CardDetails/CardBlock 聯集仍然嚴格。
   const domProps = rest as Record<string, unknown>;
   return (
     <Tag className={cx("card", VARIANT_CLASS[variant], className)} {...domProps}>
