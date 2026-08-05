@@ -50,6 +50,9 @@ vi.mock("../../../api", () => ({
       },
     },
     scenes: {
+      listByProject: {
+        useQuery: () => ({ data: [], isLoading: false, isError: false }),
+      },
       addDraft: {
         useMutation: () => ({ mutate: scenesAddDraft, isPending: false }),
       },
