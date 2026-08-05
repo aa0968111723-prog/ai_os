@@ -237,3 +237,64 @@ npx tsx scripts/verify-models.ts --probe "<id>" --yes   # 真跑一次
 - 審計 PR 與「調點／改 id」PR 分離  
 - Live 失敗自動退點（站內既有）仍須在報告註明  
 - 官方改價導致校準漂移：每月重跑 L2（維運手冊已有）  
+
+---
+
+## 10. 終端／子代理提示詞（可直接貼上）
+
+> 使用方式：複製下方整段 → 貼給 Cursor／終端代理。  
+> 指派處填：單一 id、號段（1–50）或 category。  
+> 子代理可平行做 L0–L2＋文件；**`--yes` live 只准一個代理排隊執行**。
+
+```text
+你是 ai_os 模型審計代理。單一真相：shared/models.ts 的 MODELS（共 266 筆）。
+計畫：docs/product/model-deep-audit-266-plan.md（PR #420）。
+
+【任務】對指派的每一個模型 id 做深度研究與測試，不可略過任何欄位。產出寫入
+docs/model-audit/<id-slug>.md，並更新 docs/model-audit/_index.md 對應列。
+
+【指派】（由使用者填）
+- 模式：單 id / 號段（如 1–20）/ category（如 text-to-image）
+- 清單：…
+
+【必須覆蓋的維度】
+1. 數值：points、cost、與官方價／假設用量；判定 ≈／偏貴／偏便宜／需人工
+2. 底層邏輯：category、needs、endpointOf、input() 組裝、negative／ratio 等是否與 fal schema 一致
+3. 站內點數：UI 顯示是否＝目錄 points；成功是否走 reserveQuota；失敗是否退點（查 generationCore／quota）
+4. 連通：優先用既有腳本，禁止自寫批次 live
+5. 分詞／輸入：LLM／TTS／圖模必填、長度、缺來源是否正確攔截
+6. 推薦情境：strengths、bestFor、recommended 是否符合真實使用（短片／定裝／分鏡等）
+7. API 文件：https://fal.ai/models/<endpoint> 是否有效；必填欄 vs 我們 input
+8. MCP／使用者：能否在站內選到；MCP 是否同火力；檢視者唯讀
+
+【允許的指令（金錢安全）】
+- 零成本：npx tsx scripts/verify-models.ts
+- 連通（不生成）：npx tsx scripts/probe-fal-endpoints.ts
+  真實：FAL_KEY=… npx tsx scripts/probe-fal-endpoints.ts --yes [--only <category>]
+- 點數：npx tsx scripts/audit-model-pricing.ts
+- Live 生成（一次只能一個，必須先估點）：
+  npx tsx scripts/verify-models.ts --probe "<id>"
+  npx tsx scripts/verify-models.ts --probe "<id>" --yes
+- needs 有值：禁止 --probe；改記「需站內素材實測」
+- NIM：scripts/check-nim.ts
+- 禁止：for 迴圈對多個 id 下 --yes；禁止並行 live 同一批扣費
+
+【每模報告模板】
+## 1 身分（label/category/tier/verified/needs/recommended）
+## 2 數值表（points/cost/官方價/估值/判定）
+## 3 連通與生成（靜態／dry-run／live：未跑|成功|失敗／結論 ready|ready-static-only|broken）
+## 4 底層邏輯與 API 差異
+## 5 站內扣點／退點
+## 6 情境與可用性
+## 7 MCP／文件連結
+## 8 建議動作：維持｜調 points｜修 input/id｜verified true（僅建議，勿擅自改 true）｜下架
+
+【實作原則】
+- 先 L0→L1→L2 全指派範圍做完，再對高優先（recommended 或工作台常用）做 L4
+- 發現 NOT_FOUND 或扣點不一致：在報告標 broken，可另開最小 fix PR
+- 不要改 verified:true，除非使用者明確要求且 live 或文件已確認
+- 用繁體中文寫報告；id 保持原文
+
+【完成】
+回報：完成幾個、broken 列表、建議調點列表、實際是否有 live 及花費摘要。
+```
