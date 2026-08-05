@@ -5,8 +5,8 @@ import "./empty-illustration.css";
 /**
  * 空狀態插畫：給 EmptyState 的 icon 槽使用。
  * 裝飾性（alt 空）。預設 140 — 與 serif 標題比例更穩。
- * WebP 1x/2x + PNG 後備；缺 160 資產時自動回退 sq-512。
- * 進場動畫由 .empty-illustration + fade-rise 負責。
+ * 優先 SVG（向量、可經 git 推送）；缺檔時回退 160.png → sq-512.png。
+ * WebP 仍可選（本機補資產後自動被 picture 使用）。
  */
 export function EmptyIllustration({
   name,
@@ -20,15 +20,18 @@ export function EmptyIllustration({
   className?: string;
 }) {
   const base = illustrationBase(name);
+  const svg = `${base}.svg`;
   const webp1x = `${base}-160.webp`;
   const webp2x = `${base}-320.webp`;
   const png160 = `${base}-160.png`;
   const legacy = `${base}-sq-512.png`;
-  const [src, setSrc] = useState(png160);
+  const [src, setSrc] = useState(svg);
+
+  const showWebp = src === svg || src === png160;
 
   return (
     <picture className={className ? `empty-illustration ${className}` : "empty-illustration"}>
-      {src === png160 && (
+      {showWebp && (
         <source type="image/webp" srcSet={`${webp1x} 1x, ${webp2x} 2x`} />
       )}
       <img
@@ -40,7 +43,8 @@ export function EmptyIllustration({
         loading="lazy"
         draggable={false}
         onError={() => {
-          if (src !== legacy) setSrc(legacy);
+          if (src === svg) setSrc(png160);
+          else if (src === png160) setSrc(legacy);
         }}
       />
     </picture>

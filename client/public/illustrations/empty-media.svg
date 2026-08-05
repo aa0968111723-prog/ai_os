@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" fill="none">
+  <defs>
+    <linearGradient id="e1" x1="40" y1="50" x2="280" y2="270" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F97316"/>
+      <stop offset="30%" stop-color="#F59E0B"/>
+      <stop offset="70%" stop-color="#10B981"/>
+      <stop offset="100%" stop-color="#0D9488"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#F5EDE3" stop-opacity="0.7"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="320" rx="24" fill="#FAF7F2"/>
+  <circle cx="160" cy="160" r="112" fill="#F5EDE3" opacity="0.5"/>
+  <rect x="108" y="88" width="104" height="128" rx="12" fill="#FFF" stroke="#E7E0D6" stroke-width="2" transform="rotate(-8 160 152)"/>
+  <rect x="108" y="92" width="104" height="128" rx="12" fill="#FFF" stroke="#E7E0D6" stroke-width="2" transform="rotate(6 160 156)"/>
+  <rect x="110" y="96" width="100" height="124" rx="12" fill="url(#glass)" stroke="#E7E0D6" stroke-width="2"/>
+  <circle cx="140" cy="130" r="10" fill="#E7E0D6"/>
+  <path d="M118 190l22-28 18 20 14-12 28 28H118z" fill="#EDE6DC"/>
+  <path d="M55 130 C95 90, 130 200, 170 130 C200 85, 240 175, 285 120" stroke="url(#e1)" stroke-width="13" stroke-linecap="round" fill="none" opacity="0.93"/>
+  <path d="M200 96 L200 150 L184 138 L168 150 L168 96 Z" fill="url(#e1)" opacity="0.85"/>
+</svg>

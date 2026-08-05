@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320" viewBox="0 0 320 320" fill="none">
+  <defs>
+    <linearGradient id="rb" x1="40" y1="40" x2="280" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#EF4444"/>
+      <stop offset="25%" stop-color="#F97316"/>
+      <stop offset="50%" stop-color="#FBBF24"/>
+      <stop offset="75%" stop-color="#22C55E"/>
+      <stop offset="100%" stop-color="#14B8A6"/>
+    </linearGradient>
+    <linearGradient id="rb2" x1="280" y1="60" x2="40" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FB7185" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#2DD4BF" stop-opacity="0.7"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="320" height="320" rx="24" fill="#FAF7F2"/>
+  <circle cx="160" cy="160" r="100" fill="#F5EDE3" opacity="0.45"/>
+  <path filter="url(#glow)" d="M80 160 C80 100, 130 80, 160 120 C190 160, 190 160, 160 200 C130 240, 80 220, 80 160 Z" stroke="url(#rb)" stroke-width="16" stroke-linecap="round" fill="none" opacity="0.35"/>
+  <path d="M70 180 C100 100, 160 90, 200 140 C230 175, 250 210, 280 170" stroke="url(#rb)" stroke-width="18" stroke-linecap="round" fill="none"/>
+  <path d="M50 140 C90 200, 140 230, 180 180 C220 130, 260 100, 300 150" stroke="url(#rb2)" stroke-width="8" stroke-linecap="round" fill="none" opacity="0.75"/>
+  <path d="M100 150 C130 120, 170 200, 210 150 C235 120, 255 170, 275 145" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.45"/>
+</svg>
