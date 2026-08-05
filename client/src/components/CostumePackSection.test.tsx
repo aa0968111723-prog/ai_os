@@ -37,7 +37,7 @@ describe("CostumePackSection", () => {
     expect(screen.getByTestId("costume-panel-scenes")).toHaveAttribute("hidden");
     expect(screen.getByTestId("costume-panel-props")).toHaveAttribute("hidden");
 
-    expect(screen.getByText("角色 2 · 場景 1 · 道具 0")).toBeTruthy();
+    expect(screen.getByText("共：角色 2 · 場景 1 · 道具 0")).toBeTruthy();
   });
 
   it("switches tab and calls onTabChange", async () => {
@@ -74,5 +74,6 @@ describe("CostumePackSection", () => {
     charTab.focus();
     await user.keyboard("{ArrowRight}");
     expect(onTabChange).toHaveBeenCalledWith("scenes");
+    expect(screen.getByRole("tab", { name: /場景/ })).toHaveFocus();
   });
 });

@@ -85,7 +85,7 @@ export function CostumePackSection({
       <div className="costume-pack__head">
         <strong className="costume-pack__title">定裝</strong>
         <Meta as="span" className="costume-pack__summary">
-          角色 {countLabel("characters")} · 場景 {countLabel("scenes")} · 道具 {countLabel("props")}
+          共：角色 {countLabel("characters")} · 場景 {countLabel("scenes")} · 道具 {countLabel("props")}
         </Meta>
       </div>
       {carriedHint != null ? (

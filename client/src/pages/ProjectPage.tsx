@@ -1234,16 +1234,17 @@ export function ProjectPage({ id }: { id: string }) {
 
   const wvChipWarnings = chipSoftWarnings(wv);
 
-  /** 摘要 chip → 目標 section：手機時先展開所屬分組與收合卡再捲動 */
+  /** 摘要 chip → 目標 section：手機時先展開所屬分組與收合卡再捲動（# 可有可無） */
   const targetToCtxKey = (target: string): CtxSectionKey | null => {
-    if (target === "#onboard-worldview") return "worldview";
-    if (target === "#sec-characters") return "characters";
-    if (target === "#sec-scenes") return "scenes";
-    if (target === "#sec-props") return "props";
-    if (target === "#sec-knowledge") return "knowledge";
-    if (target === "#sec-databases") return "databases";
-    if (target === "#sec-assets") return "assets";
-    if (target === "#sec-recyclebin") return "recycle";
+    const id = target.replace(/^#/, "");
+    if (id === "onboard-worldview" || id === "onboard-worldview-card") return "worldview";
+    if (id === "sec-characters") return "characters";
+    if (id === "sec-scenes") return "scenes";
+    if (id === "sec-props") return "props";
+    if (id === "sec-knowledge") return "knowledge";
+    if (id === "sec-databases") return "databases";
+    if (id === "sec-assets") return "assets";
+    if (id === "sec-recyclebin") return "recycle";
     return null;
   };
   const sectionToGroup = (key: CtxSectionKey): CtxGroupKey => {
@@ -1274,8 +1275,6 @@ export function ProjectPage({ id }: { id: string }) {
       if (key === "characters" || key === "scenes" || key === "props") {
         setCostumePackOpen(true);
       }
-    } else if (costume) {
-      setCostumePackOpen(true);
     }
   };
 
