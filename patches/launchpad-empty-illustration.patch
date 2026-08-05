@@ -1,0 +1,19 @@
+--- a/client/src/pages/Launchpad.tsx
++++ b/client/src/pages/Launchpad.tsx
+@@ -5,6 +5,7 @@
+ import { InstallAppBanner } from "../components/InstallAppBanner";
+ import { SeriesTemplatePanel } from "../components/SeriesTemplatePanel";
+ import { Icon } from "../components/Icon";
++import { EmptyIllustration } from "../components/EmptyIllustration";
+ import { ConfirmButton } from "../components/interactions";
+ import { Button, Card, Chip, EmptyState, Hint, Meta, Skeleton } from "../components/ui";
+ import { useMatchMedia } from "../lib/useMatchMedia";
+@@ -636,7 +637,7 @@
+       )}
+
+       {all.length === 0 && !projects.isLoading && !projects.error && !showFirstRun && (
+-        <EmptyState icon={<Icon name="Package" />}
++        <EmptyState icon={<EmptyIllustration name="emptyProjects" />}
+           title={includeArchived ? "還沒有專案（含已封存）" : "還沒有專案"}
+           description={
+             includeArchived
