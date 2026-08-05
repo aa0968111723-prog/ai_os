@@ -2,12 +2,12 @@
   "lock": "range-r2",
   "holder": "R2",
   "token": null,
-  "expiresAt": "2026-08-05T04:35:43Z",
-  "heartbeatAt": "2026-08-05T04:25:43Z",
+  "expiresAt": "2026-08-05T04:44:32Z",
+  "heartbeatAt": "2026-08-05T04:34:32Z",
   "role": "R2",
-  "index": 62,
-  "id": "fal-ai/aura-sr",
-  "slug": "fal-ai__aura-sr",
+  "index": 63,
+  "id": "fal-ai/ccsr",
+  "slug": "fal-ai__ccsr",
   "phase": "static+research",
-  "note": "DONE #62 ready-static-only; 建議=維持; points=2算秒需人工; verified=false; needs=image; 固定4×; checkpoint預設v1; sc-text-upscale次選; 禁--yes"
+  "note": "DONE #63 ready-static-only; 建議=維持; points=2價未知人工; verified=false; needs=image; scale預設2/steps=50; seed schema有未暴露; 禁--yes"
 }

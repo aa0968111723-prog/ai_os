@@ -345,3 +345,35 @@ card：`docs/model-audit/cards/fal-ai__wan__v2.5__text-to-video.md`
 
 broken 新增：無（死基底 slug 已映射分檔）  
 下一輪：R 各 #9,#63,#116,#169,#222；P 下一 cat（需 FAL_KEY）；L 經濟 !needs；**仍建議**核 wan/v2.6→wan-26
+
+## R5 unit | #222 f5-tts | 2026-08-05
+
+| 角色 | 結果 |
+|------|------|
+| R5 | `fal-ai/f5-tts` → OpenAPI 200；官方 **$0.05/千字** 已對齊；**已修** input 補 required `model_type:"F5-TTS"`；**已修** extractResult 認 AudioFile 形 `audio_url`；維持 points=2 verified=false needs=audio；ready-static-only；零 live／禁止 --yes |
+
+broken 新增：無（契約 gap 已修）  
+card：`docs/model-audit/cards/fal-ai__f5-tts.md`  
+下一輪：R5 下一 id（#223 起，號段 213–266）
+
+## R4 · #169 · 2026-08-05
+
+| 角色 | 結果 |
+|------|------|
+| R4 | #169 `fal-ai/wan-vace-14b/outpainting` → **P0 修 input**（OpenAPI 200 active；required prompt+video_url✓；**expand_* 預設全 false** 站內不送邊＝可能不外擴；預設 81幀@16fps≈5s 非整片；points=9≈mid $0.06×5s；官方 $0.04/0.06/0.08/秒@16fps；verified=false；零 live／禁止 --yes） |
+
+card：`docs/model-audit/cards/fal-ai__wan-vace-14b__outpainting.md`  
+下一輪：R4 下一 id（#170 起，號段 160–212）
+
+
+## #20 | 階段:研究實測
+
+| 角色 | 結果 |
+|------|------|
+| R | #116 `fal-ai/wan/v2.6/text-to-video` → **已修 endpoint** 404（含 `wan-26`）→ **`wan/v2.6`**（200，`V26Input`）；**P0** 預設 1080p≈23 vs 扁平 16（估點取 720p $0.10）；duration 5/10/**15**；multi_shots 預設 true；points=16／verified 維持 |
+| P | 跳過無 KEY |
+| L | 跳過無 KEY（spentTwd=5） |
+| J | 跳過 |
+
+broken 新增：無（死 path 已映射）  
+下一輪：R 各 #9,#63,#117,#169,#222；P 下一 cat（需 FAL_KEY）；L 經濟 !needs

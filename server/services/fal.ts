@@ -229,6 +229,8 @@ export function extractResult(result: Record<string, unknown>): { url?: string; 
     urlOf(result.video)
     ?? urlOf(result.audio)
     ?? urlOf(result.audio_file)
+    // F5-TTS 等：OpenAPI audio_url 為 AudioFile 物件（非字串）；字串形仍走下方 typeof 分支
+    ?? urlOf(result.audio_url)
     ?? urlOf(result.image)
     ?? urlOf(result.file)
     ?? urlOf(result.model_file);

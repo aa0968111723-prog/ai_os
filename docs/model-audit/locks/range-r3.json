@@ -2,12 +2,12 @@
   "lock": "range-r3",
   "holder": "R3",
   "token": null,
-  "expiresAt": "2026-08-05T04:39:35Z",
-  "heartbeatAt": "2026-08-05T04:29:35Z",
+  "expiresAt": "2026-08-05T04:42:20Z",
+  "heartbeatAt": "2026-08-05T04:32:20Z",
   "role": "R3",
-  "lastCompletedIndex": 115,
-  "lastCompletedId": "fal-ai/wan/v2.5/text-to-video",
-  "lastCompletedSlug": "fal-ai__wan__v2.5__text-to-video",
+  "lastCompletedIndex": 116,
+  "lastCompletedId": "fal-ai/wan/v2.6/text-to-video",
+  "lastCompletedSlug": "fal-ai__wan__v2.6__text-to-video",
   "mode": "static+research",
-  "note": "DONE #115 FIXED endpoint fal-ai/wan-25/text-to-video (was 404 v2.5 path); P0 default 1080p vs points 8@480p; aspect ok; verified true; no live"
+  "note": "DONE #116 FIXED endpoint→wan/v2.6 (not wan-26, not fal-ai path); P0 default 1080p vs pts 16@720p; multi_shots default true; no live"
 }

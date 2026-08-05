@@ -12,7 +12,7 @@
 | 6 | `fal-ai/flux/dev` | text-to-image | 1 | ok | 📄OpenAPI | 歷史OK(本輪未跑) | 維持；recommended+verified；1點≈；字卡勿用 | [card](cards/fal-ai__flux__dev.md) |
 | 7 | `fal-ai/ideogram/v3` | text-to-image | 2 | ⚠input | 📄OpenAPI | 未跑 | 修image_size；points=2≈；verified維持false等L2；中文勿主力 | [card](cards/fal-ai__ideogram__v3.md) |
 | 8 | `fal-ai/flux/schnell` | text-to-image | 1 | ok | 📄OpenAPI | 歷史OK(本輪未跑) | 維持；verified；1點≈；秒級試方向；T5=256 | [card](cards/fal-ai__flux__schnell.md) |
-| 9 | `fal-ai/qwen-image-2/text-to-image` | text-to-image | 1 | ⬜ | ⬜ | 未跑 | — | — |
+| 9 | `fal-ai/qwen-image-2/text-to-image` | text-to-image | 1 | ok | 📄OpenAPI | 未跑 | 維持；L2 後 verified；P1 修 quote-card workflow | [card](cards/fal-ai__qwen-image-2__text-to-image.md) |
 | 10 | `fal-ai/kolors` | text-to-image | 1 | ⬜ | ⬜ | 未跑 | — | — |
 | 11 | `fal-ai/fast-lightning-sdxl` | text-to-image | 1 | ⬜ | ⬜ | 未跑 | — | — |
 | 12 | `fal-ai/flux-2-flex` | text-to-image | 2 | ⬜ | ⬜ | 未跑 | — | — |
@@ -66,7 +66,7 @@
 | 60 | `fal-ai/clarity-upscaler` | image-to-image | 1 | ok | 📄OpenAPI | 未跑(needs) | **建議調 points→4或8**；creativity=0.35✅；4K實價~$0.24 | [card](cards/fal-ai__clarity-upscaler.md) |
 | 61 | `fal-ai/topaz/upscale/image` | image-to-image | 2 | ok | 📄OpenAPI | 未跑(needs) | 維持；ready-static-only；≤24MP $0.08→2≈；高階梯風險 | [card](cards/fal-ai__topaz__upscale__image.md) |
 | 62 | `fal-ai/aura-sr` | image-to-image | 2 | ok | 📄OpenAPI | 未跑(needs) | 維持；image_url✓；4×固定；checkpoint 預設v1；points=2 人工 | [card](cards/fal-ai__aura-sr.md) |
-| 63 | `fal-ai/ccsr` | image-to-image | 2 | ⬜ | ⬜ | 未跑 | — | — |
+| 63 | `fal-ai/ccsr` | image-to-image | 2 | ok | 📄OpenAPI | 未跑(needs) | 維持；ready-static-only；價算秒/MP未鎖；points=2人工；scale預設2；seed未暴露 | [card](cards/fal-ai__ccsr.md) |
 | 64 | `fal-ai/supir` | image-to-image | 3 | ⬜ | ⬜ | 未跑 | — | — |
 | 65 | `fal-ai/thera` | image-to-image | 1 | ⬜ | ⬜ | 未跑 | — | — |
 | 66 | `fal-ai/seedvr/upscale/image` | image-to-image | 1 | ⬜ | ⬜ | 未跑 | — | — |
@@ -119,7 +119,7 @@
 | 113 | `fal-ai/minimax/hailuo-02/standard/text-to-video` | text-to-video | 7 | ok | 📄OpenAPI | 未跑 | 維持；OpenAPI200；P1 default 6s≈8.4 vs 扁平7；aspect 死欄P2；cost 6s文案/估5s；Pro/i2v未收錄 | [card](cards/fal-ai__minimax__hailuo-02__standard__text-to-video.md) |
 | 114 | `fal-ai/minimax/video-01-director` | text-to-video | 16 | ok | 📄OpenAPI | 未跑 | 維持；$0.5/支≈16；運鏡靠 prompt [ ]；aspect 死欄 | [card](cards/fal-ai__minimax__video-01-director.md) |
 | 115 | `fal-ai/wan/v2.5/text-to-video` | text-to-video | 8 | ok | 📄OpenAPI | 未跑 | **已修 endpoint**→`wan-25`；P0 預設1080p≈23 vs 扁平8；aspect三比例健康；原生音待live | [card](cards/fal-ai__wan__v2.5__text-to-video.md) |
-| 116 | `fal-ai/wan/v2.6/text-to-video` | text-to-video | 16 | ⬜ | ⬜ | 未跑 | — | — |
+| 116 | `fal-ai/wan/v2.6/text-to-video` | text-to-video | 16 | ok | 📄OpenAPI | 未跑 | **已修 endpoint**→`wan/v2.6`；P0 預設1080p≈23 vs 扁平16 | [card](cards/fal-ai__wan__v2.6__text-to-video.md) |
 | 117 | `fal-ai/hunyuan-video-v1.5/text-to-video` | text-to-video | 12 | ⬜ | ⬜ | 未跑 | — | — |
 | 118 | `fal-ai/pika/v2.2/text-to-video` | text-to-video | 6 | ⬜ | ⬜ | 未跑 | — | — |
 | 119 | `fal-ai/luma-dream-machine/ray-2-flash` | text-to-video | 6 | ⬜ | ⬜ | 未跑 | — | — |
@@ -171,8 +171,8 @@
 | 165 | `fal-ai/ben/v2/video` | video-to-video | 5 | ✅ | 📄OpenAPI | 未跑 | 維持（5≈6s720p30；預設mp4無alpha；文案勿寫全場最便宜） | [card](cards/fal-ai__ben__v2__video.md) |
 | 166 | `veed/lipsync` | video-to-video | 12 | ✅ | 📄OpenAPI | 未跑 | 維持（$0.4/分＝12 已對齊） | [card](cards/veed__lipsync.md) |
 | 167 | `veed/video-background-removal` | video-to-video | 4 | ✅ | 📄OpenAPI | 未跑 | 修 extractResult（video[]）；4≈6s@上限 refine；ready-static-only | [card](cards/veed__video-background-removal.md) |
-| 168 | `decart/lucy-edit` | video-to-video | 16 | ⚠endpoint | 📄OpenAPI(pro/fast/dev) | 未跑(needs) | **P0 endpoint→pro**；維持 verified=false；points=16 修後人審~23–28 | [card](cards/decart__lucy-edit.md) |
-| 169 | `fal-ai/wan-vace-14b/outpainting` | video-to-video | 9 | ⬜ | ⬜ | 未跑 | — | — |
+| 168 | `decart/lucy-edit` | video-to-video | 16 | ok | 📄OpenAPI(fast/pro) | 未跑(needs) | **已修 endpoint**→`…/fast`；裸id404；P0扁平16 vs 按秒；verified=false | [card](cards/decart__lucy-edit.md) |
+| 169 | `fal-ai/wan-vace-14b/outpainting` | video-to-video | 9 | ✅ | 📄OpenAPI | 未跑(needs) | **P0 修 input**（expand_* 預設 false 不擴邊；幀~5s）；9≈mid×5s；ready-static-only | [card](cards/fal-ai__wan-vace-14b__outpainting.md) |
 | 170 | `fal-ai/latentsync` | video-to-video | 6 | ⬜ | ⬜ | 未跑 | — | — |
 | 171 | `fal-ai/musetalk` | video-to-video | 5 | ⬜ | ⬜ | 未跑 | — | — |
 | 172 | `bria/video/background-removal/v3` | video-to-video | 3 | ⬜ | ⬜ | 未跑 | — | — |
@@ -225,7 +225,7 @@
 | 219 | `fal-ai/minimax/voice-clone` | text-to-speech | 47 | ok | 📄OpenAPI | 未跑(needs) | **維持** points=47 verified=false input ok；ready-static-only；**P0** custom_voice_id 未抽取+TTS未串；預覽加價P2 | [card](cards/fal-ai__minimax__voice-clone.md) |
 | 220 | `fal-ai/qwen-3-tts/clone-voice/1.7b` | text-to-speech | 3 | ok | 📄OpenAPI | 未跑(needs) | **建議調** cost→$0.0008/分 points→1；**P0** speaker_embedding 未抽取+Qwen TTS未串；幽靈text；ready-static-only | [card](cards/fal-ai__qwen-3-tts__clone-voice__1.7b.md) |
 | 221 | `fal-ai/minimax/voice-design` | text-to-speech | 3 | 落差 | 📄OpenAPI | 未跑 | **建議調** cost→$3/次 points=93；**修 input**+preview_text；**P0** custom_voice_id+TTS未串；ready-static-only | [card](cards/fal-ai__minimax__voice-design.md) |
-| 222 | `fal-ai/f5-tts` | text-to-speech | 2 | ⬜ | ⬜ | 未跑 | — | — |
+| 222 | `fal-ai/f5-tts` | text-to-speech | 2 | ok | 📄OpenAPI | 未跑(needs) | **已修** model_type+extract AudioFile；維持 points=2/$0.05/千字/verified=false；ready-static-only | [card](cards/fal-ai__f5-tts.md) |
 | 223 | `fal-ai/vibevoice` | text-to-speech | 1 | ⬜ | ⬜ | 未跑 | — | — |
 | 224 | `fal-ai/vibevoice/7b` | text-to-speech | 2 | ⬜ | ⬜ | 未跑 | — | — |
 | 225 | `fal-ai/dia-tts/voice-clone` | text-to-speech | 2 | ⬜ | ⬜ | 未跑 | — | — |

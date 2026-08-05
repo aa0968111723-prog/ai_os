@@ -2,12 +2,12 @@
   "lock": "range-r5",
   "holder": "R5",
   "token": null,
-  "expiresAt": "2026-08-05T04:35:56Z",
-  "heartbeatAt": "2026-08-05T04:25:56Z",
+  "expiresAt": "2026-08-05T04:43:57Z",
+  "heartbeatAt": "2026-08-05T04:33:57Z",
   "role": "R5",
-  "index": 221,
-  "id": "fal-ai/minimax/voice-design",
-  "slug": "fal-ai__minimax__voice-design",
+  "index": 222,
+  "id": "fal-ai/f5-tts",
+  "slug": "fal-ai__f5-tts",
   "phase": "static+research",
-  "note": "DONE #221; 建議 cost $3/次 points=93; 修 input +preview_text; P0 custom_voice_id extract+MiniMax TTS wire; ready-static-only; no live"
+  "note": "DONE #222; 已修 model_type+extract AudioFile; 維持 points=2/$0.05/kchar/verified=false; ready-static-only; no live"
 }

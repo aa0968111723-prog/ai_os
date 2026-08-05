@@ -1173,8 +1173,11 @@ export const MODELS: ModelEntry[] = [
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
-    // slug 推定(fal生態研究:2026 新版,slug 待確認;2.7 約 $0.10/秒同級)
-    id: "fal-ai/wan/v2.6/text-to-video", label: "Wan 2.6(開源)", category: "text-to-video", tier: "economy", kind: "video",
+    // 審計 #116：目錄 fal-ai/wan/v2.6/text-to-video 與 wan-26 皆 404 → 實端點 **wan/v2.6**（無 fal-ai/ 前綴、無 /text-to-video）
+    // P0：default resolution=1080p（$0.15/秒）vs points 取首價 720p $0.10×5s≈16
+    id: "fal-ai/wan/v2.6/text-to-video",
+    endpoint: "wan/v2.6",
+    label: "Wan 2.6(開源)", category: "text-to-video", tier: "economy", kind: "video",
     points: 16, cost: "$0.10/秒(720p)、$0.15/秒(1080p);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Wan 最新多模態世代;音畫一體、開源質感天花板",
     bestFor: "正式一點又要控成本的敘事片",
@@ -2054,12 +2057,14 @@ export const MODELS: ModelEntry[] = [
     }),
   },
   {
+    // 審計 #222：OpenAPI required=`gen_text`+`ref_audio_url`+`model_type`（enum F5-TTS|E2-TTS，無 default）
+    // 缺 model_type → 422；輸出 audio_url 為 AudioFile 物件（見 fal.extractResult）
     id: "fal-ai/f5-tts", label: "F5-TTS(克隆)", category: "text-to-speech", tier: "economy", kind: "audio",
     needs: "audio", points: 2, cost: "$0.05/千字", verified: false,
     strengths: "參考音克隆式 TTS;中英雙語、可商用、便宜",
     bestFor: "預算型克隆旁白、英文為主稿件",
     sourceHint: "參考樣音網址(mp3/wav)",
-    input: (p, _f, s) => ({ gen_text: p, ref_audio_url: s }),
+    input: (p, _f, s) => ({ gen_text: p, ref_audio_url: s, model_type: "F5-TTS" }),
   },
   {
     id: "fal-ai/vibevoice", label: "VibeVoice 多講者", category: "text-to-speech", tier: "economy", kind: "audio",

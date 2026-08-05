@@ -2,12 +2,12 @@
   "lock": "range-r1",
   "holder": "R1",
   "token": null,
-  "expiresAt": "2026-08-05T04:35:58Z",
-  "heartbeatAt": "2026-08-05T04:25:58Z",
+  "expiresAt": "2026-08-05T04:42:52Z",
+  "heartbeatAt": "2026-08-05T04:32:52Z",
   "role": "R1",
-  "index": 8,
-  "id": "fal-ai/flux/schnell",
-  "slug": "fal-ai__flux__schnell",
+  "index": 9,
+  "id": "fal-ai/qwen-image-2/text-to-image",
+  "slug": "fal-ai__qwen-image-2__text-to-image",
   "phase": "static+research",
-  "note": "DONE #8 ready; verified+live history OK; points=1≈; no --yes; T5=256"
+  "note": "DONE #9 ready-static-only; OpenAPI 200; points=1≈; neg+seed OK; no --yes; P1 quote-card workflow"
 }

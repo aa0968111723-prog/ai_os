@@ -2,12 +2,12 @@
   "lock": "range-r4",
   "holder": "R4",
   "token": null,
-  "expiresAt": "2026-08-05T04:37:49Z",
-  "heartbeatAt": "2026-08-05T04:27:49Z",
+  "expiresAt": "2026-08-05T04:44:05Z",
+  "heartbeatAt": "2026-08-05T04:34:05Z",
   "role": "R4",
-  "index": 168,
-  "id": "decart/lucy-edit",
-  "slug": "decart__lucy-edit",
+  "index": 169,
+  "id": "fal-ai/wan-vace-14b/outpainting",
+  "slug": "fal-ai__wan-vace-14b__outpainting",
   "phase": "static+research",
-  "note": "DONE #168 FIXED endpoint→decart/lucy-edit/fast (base 404); pro also 200; points=16 mid; needs=video; P0 flat vs per-sec; no live"
+  "note": "DONE #169 P0 expand_* all default false (station input no sides) + match frames off ~5s; points=9\u2248mid*$0.06*5s; OpenAPI active; needs=video; no live"
 }
