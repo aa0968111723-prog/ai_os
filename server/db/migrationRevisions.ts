@@ -196,9 +196,15 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
   // 0035：初版為 composite PK (post_id,user_id)。為避開 drizzle-kit#5557 introspection
   // 崩潰改為 surrogate uuid PK + unique(post_id,user_id)。已套用初版的 DB 由 0036 前向升級；
   // 初版 hash 仍被 isSupersededMigrationHash 接受，避免 ledger 誤判為被竄改。
+  // 第三版只把主鍵從 table-level CONSTRAINT 改寫成欄位上的 inline PRIMARY KEY。
+  // PostgreSQL 兩種寫法建出的是同一個約束（inline PK 預設名即 <table>_pkey），所以任何
+  // 套過前兩版的資料庫，schema 都已經是本版會建出的形狀；改寫純粹是為了讓本檔的 DDL
+  // 跟 drizzle-kit 產生的 drift 計畫（只吐 inline 形式）逐字對得上，legacy adoption bridge
+  // 才不會把 community_likes 永遠讀成「非 bridge 預期 drift」。
   "0035_community_likes": [
     "0e67b32f2c9fdaa5d3ae9b77575686a532b4f7788090f775a8aef6ec6ad2ff96",
     "f19f584db2351a32c9c3eb5de9d25bd6bba558cee2b49bd2b0b1c0d12efd0acc",
+    "a85b2ef0805ec5ffc9e9bae2fcfc951f36624513e6f2ef9c8809d4129fdc1bd0",
   ],
   // 0036：僅服務「已套用舊 0035 composite PK」的 DB；新 0035 上 DROP+ADD pkey 等價重套。
   // 含 DROP/ADD PRIMARY KEY，不可納入 LEGACY_ADOPTION_PENDING_TAGS。

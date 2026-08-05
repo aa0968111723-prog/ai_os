@@ -203,6 +203,34 @@ export const LEGACY_ADOPTION_PENDING_TAGS = [
 ] as const;
 
 /**
+ * Purely-additive migrations that land AFTER a non-additive post-bridge one.
+ *
+ * `LEGACY_ADOPTION_PENDING_TAGS` is a contiguous prefix by construction, so it
+ * stops dead at the first migration that is not pure additive DDL — today that
+ * is 0036's primary-key rewrite. But the drift the bridge compares against is
+ * computed from the CURRENT `schema.ts`, which keeps moving: every migration
+ * after 0036 that adds a table, index, or column surfaces as drift the bridge
+ * never predicted, and the adoption gate fails for a reason that has nothing to
+ * do with the legacy database being unreviewed. Without this list the only ways
+ * forward would be to rewrite 0036 or to freeze the schema.
+ *
+ * Entries here are reviewed by exactly the same rule as the prefix: their DDL
+ * joins `expected`, and it still has to pass `isAdditiveSchemaStatement`, so a
+ * destructive statement smuggled into a tail migration trips the same review
+ * gate. What is relaxed is only contiguity — the non-additive migrations they
+ * skip over stay outside `expected` entirely and are applied by normal migrate
+ * after adopt records the through-prefix.
+ *
+ * This list is intentionally closed, like the prefix: adding a migration means
+ * reading it and confirming it is pure additive DDL.
+ *
+ * - 0037：projects 加一個 nullable cover_asset_id（ADD COLUMN IF NOT EXISTS），不改寫既有資料。
+ */
+export const LEGACY_ADOPTION_ADDITIVE_TAIL_TAGS = [
+  "0037_project_cover",
+] as const;
+
+/**
  * True when `hash` is a retired-but-equivalent revision of `tag`: a hash the
  * file carried before a correction that MIGRATION_REVISIONS records as provably
  * equivalent on every database where the original succeeded.
@@ -345,6 +373,12 @@ export function isReviewedLandingBackfillStatement(statement: string): boolean {
  * unique index needs. Those statements change rows rather than schema, so they
  * never surface as drift and are excluded from the comparison; every other
  * statement kind still trips the review gate.
+ *
+ * "Reviewed bridge migrations" means the contiguous prefix in
+ * LEGACY_ADOPTION_PENDING_TAGS plus the explicitly reviewed additive tail in
+ * LEGACY_ADOPTION_ADDITIVE_TAIL_TAGS — the latter exists because drift is
+ * computed from the current schema.ts, so purely-additive migrations landing
+ * after a non-additive one would otherwise read as unreviewed divergence.
  */
 export function verifyLegacyAdoptionBridge(
   manifest: MigrationManifest,
@@ -383,7 +417,18 @@ export function verifyLegacyAdoptionBridge(
   if (drift.warnings.length > 0) errors.push(`schema drift 含 ${drift.warnings.length} 個警告`);
 
   const bridgePending = pending.slice(0, bridgeTagCount);
-  const pairs = bridgePending.flatMap(migrationStatementPairs);
+  // Reviewed additive tail: same rules as the prefix, contiguity aside. Each tag
+  // must actually sit after the prefix — a tag that is missing from the journal
+  // (or that slipped into the prefix) means the list no longer describes this
+  // repository, and silently ignoring it would widen the gate by accident.
+  const tailTags = new Set<string>(LEGACY_ADOPTION_ADDITIVE_TAIL_TAGS);
+  const tailPending = pending.slice(bridgeTagCount).filter((entry) => tailTags.has(entry.tag));
+  if (tailPending.length !== tailTags.size) {
+    const found = new Set(tailPending.map((entry) => entry.tag));
+    const absent = [...tailTags].filter((tag) => !found.has(tag));
+    errors.push(`reviewed additive tail 對不上 journal：${absent.join(",")} 不在 bridge 前綴之後`);
+  }
+  const pairs = [...bridgePending, ...tailPending].flatMap(migrationStatementPairs);
   const expected = pairs.map((pair) => pair.canonical);
   const unsafe = expected.filter((statement) =>
     !isAdditiveSchemaStatement(statement)
@@ -415,10 +460,18 @@ export function verifyLegacyAdoptionBridge(
     const unexpected = actualCanonical.filter((statement) => !expectedSet.has(statement));
     const missing = expectedCanonical.filter((statement) => !actualSet.has(statement));
     const missingUnsafe = missing.filter((statement) => !reRunnable.has(statement));
-    if (unexpected.length > 0) errors.push(`legacy schema 有 ${unexpected.length} 項非 bridge 預期 drift`);
+    // 把肇事的語句本身印出來（只印前幾條，避免 130 條 drift 洗版）：
+    // 只講「有 N 項非 bridge 預期 drift」的話，看到紅燈的人得自己把 0002–0035 的 DDL
+    // 正規化後跟 drift 清單逐條比對才知道是哪一句——實測要繞一整輪 CI 才問得出答案。
+    const preview = (statements: string[]) =>
+      statements.slice(0, 5).map((s) => (s.length > 160 ? `${s.slice(0, 160)}…` : s)).join(" ｜ ")
+      + (statements.length > 5 ? ` ｜ …另 ${statements.length - 5} 項` : "");
+    if (unexpected.length > 0) {
+      errors.push(`legacy schema 有 ${unexpected.length} 項非 bridge 預期 drift：${preview(unexpected)}`);
+    }
     if (missingUnsafe.length > 0) {
       errors.push(
-        `legacy schema 少了 ${missingUnsafe.length} 項 bridge 預期 drift，且該 migration 無法安全重跑`,
+        `legacy schema 少了 ${missingUnsafe.length} 項 bridge 預期 drift，且該 migration 無法安全重跑：${preview(missingUnsafe)}`,
       );
     }
     if (missing.length > missingUnsafe.length) {
