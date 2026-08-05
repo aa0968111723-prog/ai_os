@@ -5,9 +5,12 @@ import { estimatePointsFor, listResolvableModels, liveCacheMeta, resolveModel } 
 import { liveCatalogStatus, syncLiveModelCatalog } from "../services/modelLiveSync";
 import { pointsToTwd, POINTS_TO_TWD } from "../../shared/money";
 import { getUsdToTwd } from "../services/fxRate";
+import { getModelContract, loadModelContractSnapshot } from "../services/modelContractStore";
+import { getModelThumbnailUrl } from "../services/modelThumbnailStore";
 
 const publicEntry = (m: ModelEntry, usdToTwdRate: number) => {
   const points = estimatePointsFor(m, { usdToTwdRate });
+  const contract = getModelContract(m.id);
   return {
   id: m.id,
   label: m.label,
@@ -30,6 +33,16 @@ const publicEntry = (m: ModelEntry, usdToTwdRate: number) => {
   cost: m.cost,
   verified: m.verified,
   recommended: m.recommended ?? false,
+  /** 契約健康（docs/model-audit/contracts；無檔時 null） */
+  health: contract?.health ?? null,
+  healthNote: contract?.healthNote ?? null,
+  textEncoderLabel: contract?.capabilities.textEncoderLabel ?? null,
+  textEncoderLimit: contract?.capabilities.textEncoderLimit ?? null,
+  supportsNegativePrompt: contract?.capabilities.supportsNegativePrompt ?? null,
+  supportsSeed: contract?.capabilities.supportsSeed ?? null,
+  tokenMeasurable: contract?.capabilities.tokenMeasurable ?? null,
+  /** Fal 官方模型縮圖（https）；無則 null，前端用類別占位 */
+  thumbnailUrl: getModelThumbnailUrl(m.id),
   };
 };
 
@@ -57,20 +70,29 @@ export const modelsRouter = router({
       const fx = await getUsdToTwd();
       const order: ModelTier[] = ["flagship", "economy", "budget"];
       return listResolvableModels({ category: input.category })
+        .map((m) => publicEntry(m, fx.rate))
         .sort((a, b) => {
+          const ha = a.health === "live_ok" ? 1 : a.health === "openapi_404" ? -1 : 0;
+          const hb = b.health === "live_ok" ? 1 : b.health === "openapi_404" ? -1 : 0;
+          if (ha !== hb) return hb - ha;
           if (a.verified !== b.verified) return a.verified ? -1 : 1;
           if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
           const tierDiff = order.indexOf(a.tier) - order.indexOf(b.tier);
           if (tierDiff !== 0) return tierDiff;
           if (a.points !== b.points) return a.points - b.points;
           return a.id.localeCompare(b.id);
-        })
-        .map((m) => publicEntry(m, fx.rate));
+        });
     }),
 
   /** 關鍵字/條件搜尋(代理建構時快速找模型) */
   search: authedProcedure
-    .input(z.object({ q: z.string().optional(), category: z.string().optional(), tier: z.enum(["flagship", "economy", "budget"]).optional() }))
+    .input(z.object({
+      q: z.string().optional(),
+      category: z.string().optional(),
+      tier: z.enum(["flagship", "economy", "budget"]).optional(),
+      /** 契約健康篩選（live_ok / needs_source / openapi_404…） */
+      health: z.string().optional(),
+    }))
     .query(async ({ input }) => {
       const fx = await getUsdToTwd();
       return listResolvableModels({
@@ -78,13 +100,18 @@ export const modelsRouter = router({
         category: input.category,
         tier: input.tier,
       })
+        .map((m) => publicEntry(m, fx.rate))
+        .filter((m) => !input.health || m.health === input.health)
         .sort((a, b) => {
+          // 實測成功優先，再 verified／推薦／點數
+          const ha = a.health === "live_ok" ? 1 : a.health === "openapi_404" ? -1 : 0;
+          const hb = b.health === "live_ok" ? 1 : b.health === "openapi_404" ? -1 : 0;
+          if (ha !== hb) return hb - ha;
           if (a.verified !== b.verified) return a.verified ? -1 : 1;
           if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
           if (a.points !== b.points) return a.points - b.points;
           return a.id.localeCompare(b.id);
-        })
-        .map((m) => publicEntry(m, fx.rate));
+        });
     }),
 
   /** 單筆（含 live 點數） */
@@ -95,6 +122,42 @@ export const modelsRouter = router({
       const m = resolveModel(input.id);
       return m ? publicEntry(m, fx.rate) : null;
     }),
+
+  /**
+   * 契約健康總覽（模型指南頂欄）：counts + 每 id 的精簡 health。
+   * 無 contracts/current.json 時回 null（指南降級、不阻斷）。
+   */
+  contractSummary: authedProcedure.query(() => {
+    const snap = loadModelContractSnapshot();
+    if (!snap) return null;
+    const byId: Record<string, {
+      health: string;
+      healthNote: string;
+      textEncoderLabel: string;
+      textEncoderLimit: number | null;
+      supportsNegativePrompt: boolean;
+      supportsSeed: boolean;
+      thumbnailUrl: string | null;
+    }> = {};
+    for (const m of snap.models) {
+      byId[m.id] = {
+        health: m.health,
+        healthNote: m.healthNote,
+        textEncoderLabel: m.capabilities.textEncoderLabel,
+        textEncoderLimit: m.capabilities.textEncoderLimit,
+        supportsNegativePrompt: m.capabilities.supportsNegativePrompt,
+        supportsSeed: m.capabilities.supportsSeed,
+        thumbnailUrl: getModelThumbnailUrl(m.id),
+      };
+    }
+    return {
+      generatedAt: snap.generatedAt,
+      modelCount: snap.modelCount,
+      counts: snap.counts,
+      softStopNote: snap.softStopNote,
+      byId,
+    };
+  }),
 
   workflows: authedProcedure.query(() =>
     WORKFLOW_PRESETS.map((w) => ({
