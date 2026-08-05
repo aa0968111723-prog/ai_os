@@ -25,6 +25,10 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // 讓真實 stack 出現在瀏覽器 console，方便診斷「畫面出了點狀況」
+    console.error("[ErrorBoundary]", error, info.componentStack);
+  }
   render() {
     if (this.state.error) {
       return (
