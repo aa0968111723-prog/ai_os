@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { illustrationBase, type IllustrationKey } from "../illustrations";
+import "./empty-illustration.css";
 
 /**
  * 空狀態插畫：給 EmptyState 的 icon 槽使用。
