@@ -1,0 +1,41 @@
+/* EmptyIllustration 進場與 EmptyState 插畫槽版面（美觀優先）
+ * 與 styles.css 的 .empty-state 柔光背景並存；不改 Lucide svg 規則。 */
+
+.empty-state > .empty-illustration {
+  display: block;
+  margin: 0 auto var(--sp-16, 16px);
+  width: 140px;
+  height: 140px;
+  max-width: 42vw;
+  border-radius: var(--r-12, 12px);
+  animation: fade-rise 0.45s var(--ease-out, ease-out) both;
+}
+
+.empty-state > .empty-illustration img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+}
+
+.empty-state:has(> .empty-illustration) h3 {
+  letter-spacing: 0.01em;
+}
+
+.empty-state:has(> .empty-illustration) p {
+  max-width: 28em;
+  margin-inline: auto;
+  line-height: 1.55;
+  font-size: 15px;
+}
+
+.empty-state:has(> .empty-illustration) > :last-child:not(h3):not(p):not(.empty-illustration) {
+  margin-top: var(--sp-16, 16px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-state > .empty-illustration {
+    animation: none;
+  }
+}
