@@ -107,7 +107,7 @@ export function AppHeader({
 
   return (
     <header className="topbar">
-      <Link href="/dashboard" className="brand" aria-label="AI Director OS 今日工作台">
+      <Link href="/dashboard" className="brand" aria-label="Aios 今日工作台">
         <BrandLogo variant="full" size="sm" responsive priority />
       </Link>
       {signedIn && groups.length > 0 && (

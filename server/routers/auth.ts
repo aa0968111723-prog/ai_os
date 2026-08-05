@@ -30,6 +30,7 @@ import { revokeAllUserMcpTokens } from "../services/mcpAuth";
 import { assertProjectEditable } from "../services/projectAcl";
 import {
   createUploadGrant,
+  revokeAllUserUploadGrants,
   UPLOAD_GRANT_MAX_TTL_SEC,
   looksLikeUuid,
 } from "../services/uploadGrants";
@@ -514,9 +515,17 @@ export const authRouter = router({
           .set({ passwordHash, mustChangePassword: false })
           .where(eq(schema.users.id, user.id));
         await tx.delete(schema.sessions).where(eq(schema.sessions.userId, user.id));
-        return revokeAllUserMcpTokens(user.id, tx);
+        const mcpN = await revokeAllUserMcpTokens(user.id, tx);
+        // #275：aidup_ upload grants 與 session/MCP 一併撤銷
+        const grantN = await revokeAllUserUploadGrants(user.id, tx);
+        return { mcpN, grantN };
       });
-      if (revokedTokens > 0) console.log(`[audit] changePassword 一併撤銷 ${revokedTokens} 把 MCP 金鑰：user=${user.id}`);
+      if (revokedTokens.mcpN > 0) {
+        console.log(`[audit] changePassword 一併撤銷 ${revokedTokens.mcpN} 把 MCP 金鑰：user=${user.id}`);
+      }
+      if (revokedTokens.grantN > 0) {
+        console.log(`[audit] changePassword 一併撤銷 ${revokedTokens.grantN} 個 upload grant：user=${user.id}`);
+      }
       // 新 session 在安全輪替 commit 後建立；若這一步罕見失敗，使用者只會被登出，可用新密碼重登，
       // 不會把舊憑證復活或形成繞過窗口。
       // 沿用裝置歸屬（本裝置本來就已通過驗證，改密碼不需重驗；但要保留 deviceId 才踢得掉）

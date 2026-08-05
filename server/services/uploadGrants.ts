@@ -172,6 +172,30 @@ export async function releaseUploadGrant(grantId: string): Promise<void> {
 }
 
 /**
+ * #275：改密碼／管理員重設密碼時撤銷該使用者所有未使用的 upload grant（aidup_），
+ * 避免憑證輪替後舊 Bearer 仍可上傳。
+ * 支援交易：與 session／MCP 撤銷同交易提交。
+ */
+export async function revokeAllUserUploadGrants(
+  userId: string,
+  exec: { update: typeof db.update } = db,
+  now: Date = new Date(),
+): Promise<number> {
+  const rows = await exec
+    .update(schema.uploadGrants)
+    .set({ revokedAt: now })
+    .where(
+      and(
+        eq(schema.uploadGrants.userId, userId),
+        isNull(schema.uploadGrants.usedAt),
+        isNull(schema.uploadGrants.revokedAt),
+      ),
+    )
+    .returning({ id: schema.uploadGrants.id });
+  return rows.length;
+}
+
+/**
  * Resolve upload auth: Bearer aidup_ grant → load user session state for that user,
  * else fall back to cookie session.
  */
