@@ -1,0 +1,13 @@
+{
+  "lock": "range-r3",
+  "holder": "R3",
+  "token": null,
+  "expiresAt": "2026-08-05T04:21:47Z",
+  "heartbeatAt": "2026-08-05T04:11:47Z",
+  "role": "R3",
+  "lastCompletedIndex": 111,
+  "lastCompletedId": "bytedance/seedance-2.0/text-to-video",
+  "lastCompletedSlug": "bytedance__seedance-2.0__text-to-video",
+  "mode": "static+research",
+  "note": "DONE #111 OpenAPI200; points=47≈5s@720p; P0 duration=auto flat estimate; cost 6s文案債; no live; no --yes"
+}

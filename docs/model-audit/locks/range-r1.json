@@ -1,0 +1,13 @@
+{
+  "lock": "range-r1",
+  "holder": "R1",
+  "token": null,
+  "expiresAt": "2026-08-05T04:22:33Z",
+  "heartbeatAt": "2026-08-05T04:12:33Z",
+  "role": "R1",
+  "index": 5,
+  "id": "fal-ai/nano-banana-2",
+  "slug": "fal-ai__nano-banana-2",
+  "phase": "static+research",
+  "note": "DONE #5 ready; verified stays true; points=3≈; live already OK in budget; no --yes"
+}

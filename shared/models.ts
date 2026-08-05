@@ -2007,11 +2007,13 @@ export const MODELS: ModelEntry[] = [
     input: (p) => ({ text: p }),
   },
   {
+    // 審計 #218：OpenAPI required=`audio_url`+`prompt`（非 text）；零樣本音色來自參考音；缺任一必填 → 422
     id: "fal-ai/index-tts-2/text-to-speech", label: "Index TTS 2.0(中文可控)", category: "text-to-speech", tier: "flagship", kind: "audio",
-    points: 1, cost: "$0.002/秒(≈$0.12/分),按秒計費", verified: false,
+    needs: "audio", points: 1, cost: "$0.002/秒(≈$0.12/分),按秒計費", verified: false,
     strengths: "拼音校正破音字+精準時長控制;WER 最低、咬字最準",
     bestFor: "影片對嘴配音、佛學術語密集稿",
-    input: (p) => ({ text: p }),
+    sourceHint: "參考聲線樣音網址(mp3/wav; zero-shot 音色)",
+    input: (p, _f, s) => ({ prompt: p, audio_url: s }),
   },
   {
     id: "fal-ai/minimax/voice-clone", label: "MiniMax 語音克隆", category: "text-to-speech", tier: "flagship", kind: "audio",

@@ -1,0 +1,13 @@
+{
+  "lock": "range-r2",
+  "holder": "R2",
+  "token": null,
+  "expiresAt": "2026-08-05T04:07:09Z",
+  "heartbeatAt": "2026-08-05T03:57:09Z",
+  "role": "R2",
+  "index": 58,
+  "id": "fal-ai/esrgan",
+  "slug": "fal-ai__esrgan",
+  "phase": "static+research",
+  "note": "DONE #58 ready-static-only; needs=image; verified stays true; face API≠face_enhance; default scale=2; cost/sec dual-source"
+}

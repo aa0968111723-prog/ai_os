@@ -1,0 +1,9 @@
+{
+  "lock": "probe-coord",
+  "holder": null,
+  "token": null,
+  "expiresAt": null,
+  "heartbeatAt": null,
+  "role": "P",
+  "lastCategory": "text-to-image"
+}

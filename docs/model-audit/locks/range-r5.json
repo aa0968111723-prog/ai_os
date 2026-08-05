@@ -1,0 +1,13 @@
+{
+  "lock": "range-r5",
+  "holder": "R5",
+  "token": null,
+  "expiresAt": "2026-08-05T04:22:03Z",
+  "heartbeatAt": "2026-08-05T04:12:03Z",
+  "role": "R5",
+  "index": 218,
+  "id": "fal-ai/index-tts-2/text-to-speech",
+  "slug": "fal-ai__index-tts-2__text-to-speech",
+  "phase": "static+research",
+  "note": "DONE #218; 已修 input prompt+audio_url+needs audio; 維持 points=1 cost $0.002/s verified false; ready-static-only; no live"
+}

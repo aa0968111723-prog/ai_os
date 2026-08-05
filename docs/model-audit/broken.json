@@ -1,0 +1,22 @@
+{
+  "updatedAt": "2026-08-05T03:54:32.622937+00:00",
+  "items": [
+    {
+      "id": "fal-ai/bytedance/seedream/v5/text-to-image",
+      "severity": "P0",
+      "issue": "fal Queue OpenAPI/endpoint 404 — dead or unshipped slug",
+      "evidence": "continuous worker 2026-08-05; OpenAPI 404",
+      "action": "從 SCENARIO_RECIPES pickIds 移除或換有效 slug；勿 verified true",
+      "sources": [
+        "docs/research/model-cards/fal-ai__bytedance__seedream__v5__text-to-image.md"
+      ]
+    },
+    {
+      "id": "fal-ai/ideogram/v4",
+      "severity": "P0-FIXED",
+      "issue": "endpoint 原 fal-ai/ideogram/v4 404；aspect_ratio 應為 image_size",
+      "action": "已設 endpoint=ideogram/v4 + imageSize(f)（2026-08-05）",
+      "evidence": "OpenAPI 200 ideogram/v4 vs 404 fal-ai/ideogram/v4"
+    }
+  ]
+}

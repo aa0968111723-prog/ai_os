@@ -1,0 +1,51 @@
+{
+  "currency": "TWD",
+  "budgetTotal": 1000,
+  "softStop": 900,
+  "usdToTwd": 31,
+  "spentTwd": 4.0,
+  "spentUsd": 0.004,
+  "entries": [
+    {
+      "at": "2026-08-05T03:38:30.447558+00:00",
+      "modelId": "fal-ai/flux/schnell",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "usdEst": 0.003,
+      "requestId": "019fd000-06cb-7df3-a27b-1dbf6b755d8c",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa5119d/3OslsWyHPsbjGOHOjq6Bt.jpg"
+    },
+    {
+      "at": "2026-08-05T03:43:16.677734+00:00",
+      "modelId": "fal-ai/sana",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "usdEst": 0.001,
+      "requestId": "019fd004-7d6c-7f71-bbc8-179f4ebe03df",
+      "status": "success",
+      "artifactUrl": "https://v3b.fal.media/files/b/0aa511ba/54Mq6xbp8c1PP-ohYpoMi.jpg"
+    },
+    {
+      "at": "2026-08-05T03:47:13.424782+00:00",
+      "modelId": "fal-ai/flux/dev",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "usdEst": 0.025,
+      "status": "success"
+    },
+    {
+      "at": "2026-08-05T03:53:31.369716+00:00",
+      "modelId": "fal-ai/kolors",
+      "kind": "live_probe",
+      "pointsEst": 1,
+      "twdEst": 1.0,
+      "status": "success"
+    }
+  ],
+  "notes": "Only fal live --yes bills counted. NIM/static/md free.",
+  "updatedAt": "2026-08-05T03:47:13.424799+00:00"
+}
