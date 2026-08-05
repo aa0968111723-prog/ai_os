@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Button, Card, Chip, Hint, Meta } from "../../components/ui";
 import { VisualJourney, type VisualJourneyStep } from "../../components/VisualJourney";
 import {
@@ -9,9 +9,9 @@ import {
 } from "./coCreatePhases";
 
 /**
- * G0–G1 共創殼：進度四段 + 本步焦點 + 方向 chips + 退出。
- * G1：可選 progressStates／workSummary（伺服器完成條件 + 作品摘要）。
- * 對話／runAction 接線屬 G2。
+ * G0–G2 共創殼：進度四段 + 本步焦點 + 方向 chips + 退出。
+ * G1：progressStates／workSummary（伺服器完成條件 + 作品摘要）。
+ * G2：children 嵌入 ProjectAssistant；wrapHint 收斂提示；chip → 問 AI。
  */
 export function CoCreateShell({
   phase,
@@ -23,15 +23,21 @@ export function CoCreateShell({
   progressStates,
   /** G1：作品摘要一行 */
   workSummary,
+  /** G2：wrap 階段下一步提示（送審／打包，不新 API） */
+  wrapHint,
+  /** G2：嵌入引導對話（ProjectAssistant） */
+  children,
 }: {
   phase: CoCreatePhaseId;
   onPhaseChange: (phase: CoCreatePhaseId) => void;
   onExit: () => void;
-  /** 選 chip → 上層可帶入目標／問 AI（G0 可選；G2 再接 runAction） */
+  /** 選 chip → 上層帶入助手輸入／送出（G2 Confirm → runAction） */
   onPickChip?: (text: string) => void;
   canEdit?: boolean;
   progressStates?: Array<"done" | "current" | "upcoming">;
   workSummary?: string | null;
+  wrapHint?: string | null;
+  children?: ReactNode;
 }) {
   const current = coCreatePhaseById(phase);
   const states = progressStates ?? coCreateJourneyStates(phase);
@@ -126,9 +132,21 @@ export function CoCreateShell({
         ))}
       </div>
 
-      <Meta as="p" style={{ margin: "10px 0 0" }}>
-        選方向會帶入上方目標；完整引導對話與自動推進 phase 接 G2。
-      </Meta>
+      {phase === "wrap" && wrapHint ? (
+        <Hint style={{ margin: "10px 0 0" }} data-testid="co-create-wrap-hint">
+          {wrapHint}
+        </Hint>
+      ) : null}
+
+      {children ? (
+        <div style={{ marginTop: 12 }} data-testid="co-create-assistant">
+          {children}
+        </div>
+      ) : (
+        <Meta as="p" style={{ margin: "10px 0 0" }}>
+          選方向後在下方對話確認執行；扣點動作都會再按一次確認。
+        </Meta>
+      )}
     </Card>
   );
 }

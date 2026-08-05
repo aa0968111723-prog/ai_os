@@ -50,4 +50,20 @@ describe("CoCreateShell", () => {
     await user.click(screen.getAllByTestId("co-create-chip")[0]!);
     expect(onPickChip).toHaveBeenCalled();
   });
+
+  it("embeds assistant children and wrap hint (G2)", () => {
+    render(
+      <CoCreateShell
+        phase="wrap"
+        onPhaseChange={() => undefined}
+        onExit={() => undefined}
+        wrapHint="可退出共創打包"
+      >
+        <div data-testid="fake-assistant">assistant</div>
+      </CoCreateShell>,
+    );
+    expect(screen.getByTestId("co-create-assistant")).toBeInTheDocument();
+    expect(screen.getByTestId("fake-assistant")).toBeInTheDocument();
+    expect(screen.getByTestId("co-create-wrap-hint")).toHaveTextContent("打包");
+  });
 });
