@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "generatedAt": "2026-08-05T07:47:36.844Z",
+  "generatedAt": "2026-08-05T07:55:55.452Z",
   "modelCount": 266,
   "softStopNote": "budget softStop=500 spentTwd=496；契約同步不扣點",
   "counts": {
     "live_ok": 65,
     "openapi_404": 4,
-    "needs_source": 166,
+    "needs_source": 168,
     "never_probed": 7,
-    "live_fail": 3,
+    "live_fail": 1,
     "live_timeout": 14,
     "nim_no_key": 7
   },
@@ -3428,7 +3428,7 @@
       },
       "fingerprint": "edc126f0",
       "health": "never_probed",
-      "healthNote": "OpenAPI 可連；尚未合法生成 live",
+      "healthNote": "OpenAPI 可連；尚未合法生成 live（pts 或 softStop 限制）",
       "lastLiveStatus": null,
       "openapiStatus": "ok",
       "openapiRequired": [
@@ -3673,7 +3673,7 @@
       },
       "fingerprint": "55758d2a",
       "health": "never_probed",
-      "healthNote": "OpenAPI 可連；尚未合法生成 live",
+      "healthNote": "OpenAPI 可連；尚未合法生成 live（pts 或 softStop 限制）",
       "lastLiveStatus": null,
       "openapiStatus": "ok",
       "openapiRequired": [
@@ -3846,7 +3846,7 @@
       },
       "fingerprint": "7384e464",
       "health": "never_probed",
-      "healthNote": "OpenAPI 可連；尚未合法生成 live",
+      "healthNote": "OpenAPI 可連；尚未合法生成 live（pts 或 softStop 限制）",
       "lastLiveStatus": null,
       "openapiStatus": "ok",
       "openapiRequired": [
@@ -3916,7 +3916,7 @@
       },
       "fingerprint": "31b8e88b",
       "health": "never_probed",
-      "healthNote": "OpenAPI 可連；尚未合法生成 live",
+      "healthNote": "OpenAPI 可連；尚未合法生成 live（pts 或 softStop 限制）",
       "lastLiveStatus": null,
       "openapiStatus": "ok",
       "openapiRequired": [
@@ -4091,7 +4091,7 @@
       },
       "fingerprint": "e9cbb71a",
       "health": "never_probed",
-      "healthNote": "OpenAPI 可連；尚未合法生成 live",
+      "healthNote": "OpenAPI 可連；尚未合法生成 live（pts 或 softStop 限制）",
       "lastLiveStatus": "aborted_softstop",
       "openapiStatus": "ok",
       "openapiRequired": [
@@ -5226,8 +5226,11 @@
       "health": "needs_source",
       "healthNote": "需要來源素材 needs=image；禁止空 live",
       "lastLiveStatus": null,
-      "openapiStatus": "unchecked",
-      "openapiRequired": null
+      "openapiStatus": "ok",
+      "openapiRequired": [
+        "prompt",
+        "image_url"
+      ]
     },
     {
       "id": "fal-ai/ltx-video-v095/image-to-video",
@@ -7775,7 +7778,7 @@
       },
       "fingerprint": "e0ad40bd",
       "health": "never_probed",
-      "healthNote": "OpenAPI 可連；尚未合法生成 live",
+      "healthNote": "OpenAPI 可連；尚未合法生成 live（pts 或 softStop 限制）",
       "lastLiveStatus": null,
       "openapiStatus": "ok",
       "openapiRequired": [
@@ -7919,8 +7922,8 @@
         "tokenMeasurable": false
       },
       "fingerprint": "fcbf43ea",
-      "health": "live_fail",
-      "healthNote": "P0: OpenAPI requires ref_audio_url+ref_text; models.ts !needs + input only text 錯誤",
+      "health": "needs_source",
+      "healthNote": "需要來源素材 needs=audio；禁止空 live（歷史 empty live：failed_422_missing_ref）",
       "lastLiveStatus": "failed_422_missing_ref",
       "openapiStatus": "ok",
       "openapiRequired": [
@@ -8024,8 +8027,8 @@
         "tokenMeasurable": false
       },
       "fingerprint": "33235da0",
-      "health": "live_fail",
-      "healthNote": "live 失敗：exit_1",
+      "health": "needs_source",
+      "healthNote": "需要來源素材 needs=audio；禁止空 live（歷史 empty live：exit_1）",
       "lastLiveStatus": "exit_1",
       "openapiStatus": "ok",
       "openapiRequired": [

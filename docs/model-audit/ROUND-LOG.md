@@ -1637,3 +1637,10 @@ spentTwd=**175.0**/900 · soft headroom 725.0
 - probe-fal-endpoints: 251 eps, connect 219, cancel_unconfirmed 32, queue404 0
 - openapi: ok 246, 404 4
 - docs: NIM-SKIP, L2-FREE-REMAINING, broken, COMPLETION, B9
+
+## #58 | zero-cost complete push · 2026-08-05T07:55:54.660205+00:00
+- OpenAPI 251 → ok 247 / 404 4
+- probe-fal-endpoints 251
+- contracts health priority fix (needs not overridden by live_fail)
+- ZERO-COST-DRY-REMAINING.json for 9 free remaining
+- docs regen; ready to push

@@ -164,6 +164,7 @@ export function buildModelContractRow(
     health = "nim_no_key";
     healthNote = "NVIDIA NIM：無 KEY 時本站不 live；生成走 nim 分流";
   } else if (m.needs) {
+    // needs 優先於歷史 live_fail（空 live 本來就不該做）
     health = "needs_source";
     healthNote = `需要來源素材 needs=${m.needs}${m.secondaryNeeds ? `+${m.secondaryNeeds}` : ""}；禁止空 live`;
   }
@@ -173,7 +174,10 @@ export function buildModelContractRow(
     healthNote = "OpenAPI queue 404：端點可能下架或 slug 錯誤";
   }
 
-  if (live?.status) {
+  // live 結果只覆蓋「可空探測」路徑；needs / openapi_404 / nim 不被舊 fail 蓋掉
+  const locked = health === "needs_source" || health === "openapi_404" || health === "nim_no_key";
+
+  if (live?.status && !locked) {
     const st = live.status;
     if (st === "success") {
       health = "live_ok";
@@ -182,21 +186,18 @@ export function buildModelContractRow(
       health = "live_timeout";
       healthNote = live.note || "live 已送出但輪詢逾時（可能已計點，勿重跑）";
     } else if (st.startsWith("fail") || st.includes("404") || st.includes("422") || st.startsWith("exit_")) {
-      // openapi 404 優先保留
-      if (health !== "openapi_404") {
-        health = "live_fail";
-        healthNote = live.note || `live 失敗：${st}`;
-      }
+      health = "live_fail";
+      healthNote = live.note || `live 失敗：${st}`;
     } else if (st === "aborted_softstop") {
-      if (health !== "openapi_404" && health !== "needs_source") {
-        health = "never_probed";
-        healthNote = "因 softStop 中止，未完成 live";
-      }
+      health = "never_probed";
+      healthNote = "因 softStop 中止，未完成 live";
     }
+  } else if (live?.status && health === "needs_source" && live.status !== "success") {
+    healthNote += `（歷史 empty live：${live.status}）`;
   }
 
   if (health === "never_probed" && !m.needs && !m.id.startsWith("nvidia-nim") && openapi?.status === "ok") {
-    healthNote = "OpenAPI 可連；尚未合法生成 live";
+    healthNote = "OpenAPI 可連；尚未合法生成 live（pts 或 softStop 限制）";
   }
 
   return {
