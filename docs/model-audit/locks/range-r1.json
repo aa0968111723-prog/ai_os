@@ -2,12 +2,12 @@
   "lock": "range-r1",
   "holder": "R1",
   "token": null,
-  "expiresAt": "2026-08-05T04:25:51Z",
-  "heartbeatAt": "2026-08-05T04:15:51Z",
+  "expiresAt": "2026-08-05T04:31:13Z",
+  "heartbeatAt": "2026-08-05T04:21:13Z",
   "role": "R1",
-  "index": 6,
-  "id": "fal-ai/flux/dev",
-  "slug": "fal-ai__flux__dev",
+  "index": 7,
+  "id": "fal-ai/ideogram/v3",
+  "slug": "fal-ai__ideogram__v3",
   "phase": "static+research",
-  "note": "DONE #6 ready; verified stays true; recommended stays true; points=1≈; live already OK in budget; no --yes"
+  "note": "DONE #7 ready-static-with-gap; P1 input aspect_ratio→image_size; points=2≈; verified stays false; no --yes"
 }

@@ -2,12 +2,12 @@
   "lock": "range-r3",
   "holder": "R3",
   "token": null,
-  "expiresAt": "2026-08-05T04:27:29Z",
-  "heartbeatAt": "2026-08-05T04:17:29Z",
+  "expiresAt": "2026-08-05T04:31:54Z",
+  "heartbeatAt": "2026-08-05T04:21:54Z",
   "role": "R3",
-  "lastCompletedIndex": 112,
-  "lastCompletedId": "fal-ai/veo3.1/lite",
-  "lastCompletedSlug": "fal-ai__veo3.1__lite",
+  "lastCompletedIndex": 114,
+  "lastCompletedId": "fal-ai/minimax/video-01-director",
+  "lastCompletedSlug": "fal-ai__minimax__video-01-director",
   "mode": "static+research",
-  "note": "DONE #112 OpenAPI200; points=5≈5s@720p無音; P0 default 8s+audio≈12 underest; 1:1 not in enum; cost 6s文案債; no live; no --yes"
+  "note": "DONE #114 OpenAPI200; points=16≈$0.5/支; camera [brackets] in prompt; aspect dead; verified true; no live"
 }

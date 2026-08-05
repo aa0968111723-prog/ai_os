@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-05T03:54:32.622937+00:00",
+  "updatedAt": "2026-08-05T04:22:29.278628+00:00",
   "items": [
     {
       "id": "fal-ai/bytedance/seedream/v5/text-to-image",
@@ -17,6 +17,36 @@
       "issue": "endpoint 原 fal-ai/ideogram/v4 404；aspect_ratio 應為 image_size",
       "action": "已設 endpoint=ideogram/v4 + imageSize(f)（2026-08-05）",
       "evidence": "OpenAPI 200 ideogram/v4 vs 404 fal-ai/ideogram/v4"
+    },
+    {
+      "id": "fal-ai/ideogram/v3",
+      "severity": "P0-FIXED",
+      "issue": "aspect_ratio→image_size",
+      "action": "已改 imageSize(f) 2026-08-05"
+    },
+    {
+      "id": "veed/video-background-removal",
+      "severity": "P0",
+      "issue": "OpenAPI video 為 File[]，extractResult 只吃 {url} 會空",
+      "action": "修 extractResult 支援陣列"
+    },
+    {
+      "id": "fal-ai/qwen-3-tts/clone-voice/1.7b",
+      "severity": "P0",
+      "issue": "產出 speaker_embedding 非 audio；extractResult 不認；cost 錯",
+      "action": "改抽取 embedding + 串 TTS；調 cost/points"
+    },
+    {
+      "id": "fal-ai/clarity-upscaler",
+      "severity": "P1",
+      "issue": "points=1 嚴重低估",
+      "action": "回寫調 points→4 或 8"
+    },
+    {
+      "id": "fal-ai/veo3.1/lite",
+      "severity": "P0",
+      "issue": "預設8s+含音≈12點 vs 扁平5；1:1非法",
+      "action": "固定 duration 或動態估點；禁1:1"
     }
   ]
 }

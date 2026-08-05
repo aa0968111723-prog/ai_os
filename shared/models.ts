@@ -289,7 +289,8 @@ export const MODELS: ModelEntry[] = [
     points: 2, cost: "$0.03–0.09/張", verified: false,
     strengths: "文字排版之王;海報級字型渲染、設計感強",
     bestFor: "金句卡、活動海報、含大量文字的社群圖",
-    input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
+    // 審計 #7：OpenAPI 用 image_size preset，無 aspect_ratio（誤送畫幅死在 square_hd）
+    input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
   },
   {
     id: "fal-ai/flux/schnell", label: "FLUX.1 [schnell]", category: "text-to-image", tier: "economy", kind: "image",
@@ -1138,12 +1139,13 @@ export const MODELS: ModelEntry[] = [
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
-    // 點數以「無音」中價計(0.03+0.05)/2,與 Kling 2.6 等音訊開關型一致;開音訊實際費用較高
+    // 點數以「無音」首價 $0.03×5s 計(realPricePoints);開音訊／更長秒實際費用較高
+    // 審計 #112：OpenAPI aspect_ratio 僅 16:9|9:16（無 1:1）→ 1:1 映射 16:9 防 422；duration 預設 8s+generate_audio true 與扁平 5 點脫鉤見卡 P0
     id: "fal-ai/veo3.1/lite", label: "Veo 3.1 Lite(Google)", category: "text-to-video", tier: "economy", kind: "video",
     points: 5, cost: "720p $0.03/秒(無音)–$0.05(含音)、1080p $0.05–0.08/秒;按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Veo 質感的超低價版;含音只要 $0.05/秒",
     bestFor: "量產日常 B-roll、空鏡、活動預告",
-    input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
+    input: (p, f) => ({ prompt: p, aspect_ratio: f === "9:16" ? "9:16" : "16:9" }),
   },
   {
     id: "fal-ai/minimax/hailuo-02/standard/text-to-video", label: "Hailuo 02 Standard", category: "text-to-video", tier: "economy", kind: "video",
@@ -1993,11 +1995,12 @@ export const MODELS: ModelEntry[] = [
   },
   /* —— W2 全量擴充(fal生態研究):以下 text-to-speech 新增(含克隆/多講者) —— */
   {
+    // 審計 #216：OpenAPI required=`prompt`（非 02-hd 的 `text`）；output_format 預設 hex → 站內 extractResult 需 url
     id: "fal-ai/minimax/speech-2.6-hd", label: "MiniMax Speech 2.6 HD", category: "text-to-speech", tier: "flagship", kind: "audio",
     points: 3, cost: "推估同 02 HD 約 $0.10/千字", verified: false,
     strengths: "MiniMax 最新旗艦;情感/停頓/語氣控制最完整,300+ 聲線",
     bestFor: "見證故事、開示重配的中文旁白首選",
-    input: (p) => ({ text: p }),
+    input: (p) => ({ prompt: p, output_format: "url" }),
   },
   {
     id: "fal-ai/qwen-3-tts/text-to-speech/0.6b", label: "Qwen 3 TTS(輕量)", category: "text-to-speech", tier: "economy", kind: "audio",

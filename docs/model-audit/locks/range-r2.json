@@ -2,12 +2,12 @@
   "lock": "range-r2",
   "holder": "R2",
   "token": null,
-  "expiresAt": "2026-08-05T04:26:39Z",
-  "heartbeatAt": "2026-08-05T04:16:39Z",
+  "expiresAt": "2026-08-05T04:31:26Z",
+  "heartbeatAt": "2026-08-05T04:21:26Z",
   "role": "R2",
-  "index": 60,
-  "id": "fal-ai/clarity-upscaler",
-  "slug": "fal-ai__clarity-upscaler",
+  "index": 61,
+  "id": "fal-ai/topaz/upscale/image",
+  "slug": "fal-ai__topaz__upscale__image",
   "phase": "static+research",
-  "note": "DONE #60 ready-static-only; 建議調 points→4(預設2x~1MP源)或8(4K); creativity=0.35✅; needs=image; 禁--yes"
+  "note": "DONE #61 ready-static-only; 建議=維持; points=2≈(≤24MP $0.08); Standard V2+face default; needs=image; 禁--yes; 高階梯/Bloom倍率風險P2"
 }

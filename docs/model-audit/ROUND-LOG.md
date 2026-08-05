@@ -201,3 +201,82 @@ broken 新增：無（端點存活；產品管線缺口記於 card，非 dead sl
 card：`docs/model-audit/cards/fal-ai__minimax__voice-clone.md`  
 下一輪：R5 下一 id（#220 起，號段 213–266）
 
+
+## #14 | 階段:研究實測
+
+| 角色 | 結果 |
+|------|------|
+| R | #112 `fal-ai/veo3.1/lite` → **已修** aspect `1:1`→`16:9`（enum 僅 16:9\|9:16）；**P0** 預設 duration=8s+generate_audio 實費≈12 vs 扁平5；points=5／verified=true 維持 |
+| P | 跳過無 KEY |
+| L | 跳過無 KEY（spentTwd=5；鎖空閒；5 點可 live 但無 KEY） |
+| J | 跳過 |
+
+broken 新增：無（1:1 422 已修；估點 P0 僅註記）  
+下一輪：R 各 #6,#60,#113,#166,#219；P 下一 cat（需 FAL_KEY）；L 經濟 !needs（需 FAL_KEY）
+
+## #15 | 階段:研究實測
+
+| 角色 | 結果 |
+|------|------|
+| R | #113 `fal-ai/minimax/hailuo-02/standard/text-to-video` → 維持（OpenAPI **200**；points=7≈$0.045×5s；duration 預設 `"6"`；**aspect_ratio 死欄**；verified 既有 true） |
+| P | 跳過無 KEY |
+| L | 跳過無 KEY（spentTwd=5；鎖空閒） |
+| J | 跳過 |
+
+broken 新增：無  
+下一輪：R 各 #7,#61,#114,#167,#220；P 下一 cat（需 FAL_KEY）；L 經濟 !needs（需 FAL_KEY）
+
+## R5 unit | #220 qwen-3-tts/clone-voice/1.7b | 2026-08-05
+
+| 角色 | 結果 |
+|------|------|
+| R5 | `fal-ai/qwen-3-tts/clone-voice/1.7b` → OpenAPI 200；**官方 $0.0008/分**（非 ~$0.09/千字）；output=`speaker_embedding` 站內未抽取；input 幽靈 `text`（應 `reference_text`）；**建議** cost/points→1、P0 串 Qwen TTS；ready-static-only；零 live／禁止 --yes |
+
+broken 新增：無（端點存活；產品管線＋標價記於 card）  
+card：`docs/model-audit/cards/fal-ai__qwen-3-tts__clone-voice__1.7b.md`  
+下一輪：R5 下一 id（#221 起，號段 213–266）
+
+## #7 | 階段:研究實測 | R1 | 2026-08-05
+
+| 角色 | 結果 |
+|------|------|
+| R1 | #7 `fal-ai/ideogram/v3` → **修input優先**（OpenAPI **200**；points=2≈ BALANCED；**P1** 站內 `aspect_ratio` vs 官方 `image_size`；verified 維持 false；零 live／禁止 --yes） |
+| P | 跳過（本輪 R1 只寫卡） |
+| L | 跳過（禁止 --yes；budget 無本 id） |
+| J | 跳過 |
+
+broken 新增：無 404；契約 gap 記 P1 於 card  
+下一輪：R1 下一 id（#8 起）
+
+## R4 unit | #167 veed/video-background-removal | 2026-08-05
+
+| 角色 | 結果 |
+|------|------|
+| R4 | `veed/video-background-removal` → **修 extractResult（video[]）**（points=4≈6s@上限 refine 維持；OpenAPI active commercial；預設 vp9 alpha；**P0** 輸出 `video` 為陣列站內解析空；ready-static-only；零 live／禁止 --yes） |
+
+broken 新增：無（端點存活；extract 契約風險記於 card，非 dead slug）  
+card：`docs/model-audit/cards/veed__video-background-removal.md`  
+下一輪：R4 下一 id（#168 起，號段 160–212）
+
+## #113 | 階段:研究實測 | R3 | 2026-08-05
+
+| 角色 | 結果 |
+|------|------|
+| R3 | #113 `fal-ai/minimax/hailuo-02/standard/text-to-video` → **維持**（OpenAPI **200**；points=7≈5s@$0.045；**P1** 官方 default duration=6 ≈8.4 vs 扁平7；aspect_ratio 死欄 P2；cost「6秒基準」文案債；Pro/i2v fal 存在未收錄；零 live／禁止 --yes） |
+
+broken 新增：無  
+card：`docs/model-audit/cards/fal-ai__minimax__hailuo-02__standard__text-to-video.md`  
+下一輪：R3 下一 id（#114 起）
+
+
+## #16 | 階段:研究實測
+
+| 角色 | 結果 |
+|------|------|
+| R | #114 `fal-ai/minimax/video-01-director` → 維持（OpenAPI **200**；points=16≈$0.5/支；運鏡靠 prompt `[Pan left]`；**aspect 死欄**；verified 既有 true） |
+| P | 跳過無 KEY |
+| L | 跳過無 KEY（spentTwd=5；16 點可 live 但無 KEY／非最經濟） |
+| J | 跳過 |
+
+broken 新增：無  
+下一輪：R 各 #8,#62,#115,#168,#221；P 下一 cat（需 FAL_KEY）；L 經濟 !needs（需 FAL_KEY）
