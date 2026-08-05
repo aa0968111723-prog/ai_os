@@ -73,9 +73,37 @@ function pageTitle(pathname: string): string {
 export function AppShell() {
   const utils = trpc.useUtils();
   const [location, navigate] = useLocation();
-  const me = trpc.auth.me.useQuery();
-  const logout = trpc.auth.logout.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
-  const logoutAll = trpc.auth.logoutAll.useMutation({ onSuccess: () => utils.auth.me.invalidate() });
+  /**
+   * 首屏只打一支 sessionBoot.bootstrap（伺服器聚合 me + 未讀 + mock）。
+   * 裝置不再並行三支 API；輪詢也只打這一支，由伺服器重算未讀。
+   */
+  const boot = trpc.sessionBoot.bootstrap.useQuery(undefined, {
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    refetchInterval: (q) => (q.state.data?.me ? 60_000 : false),
+  });
+  const me = {
+    data: boot.data?.me ?? undefined,
+    isLoading: boot.isLoading,
+    isError: boot.isError,
+    error: boot.error,
+    refetch: boot.refetch,
+  };
+  const info = { data: boot.data ? { mockMode: boot.data.mockMode } : undefined };
+  const dmUnread = { data: boot.data ? { total: boot.data.unreadTotal } : undefined };
+
+  const logout = trpc.auth.logout.useMutation({
+    onSuccess: () => {
+      void utils.sessionBoot.bootstrap.invalidate();
+      void utils.auth.me.invalidate();
+    },
+  });
+  const logoutAll = trpc.auth.logoutAll.useMutation({
+    onSuccess: () => {
+      void utils.sessionBoot.bootstrap.invalidate();
+      void utils.auth.me.invalidate();
+    },
+  });
   const touchSession = trpc.auth.touchSession.useMutation();
   const pushUnsubscribe = trpc.push.unsubscribe.useMutation();
   // 登出＝連推播一起解除本裝置（共用電腦隱私：登出後這台機器不能再跳你的私訊/審批通知）。
@@ -95,9 +123,6 @@ export function AppShell() {
     } catch { /* 推播清理失敗照樣登出全部 */ }
     logoutAll.mutate();
   };
-  const info = trpc.generation.info.useQuery(undefined, { enabled: !!me.data });
-  // 手機底部列的私訊未讀訊號（30 秒輪詢，與頂欄 DmNavBadge 同頻；頂欄在 ≤820px 隱藏）
-  const dmUnread = trpc.dm.unread.useQuery(undefined, { enabled: !!me.data, refetchInterval: 30_000 });
 
   // 密度偏好下行同步（P1c）：登入後「第一次」拿到帳號偏好時，若與本機不同就採用帳號值。
   // 只採用一次（adoptedRef）——之後本機的切換以本機為準（AccountMenu 會同步上行），
