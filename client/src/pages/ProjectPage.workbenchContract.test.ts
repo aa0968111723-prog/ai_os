@@ -133,4 +133,31 @@ describe("ProjectPage workbench contract (WB-06)", () => {
     expect(src).not.toMatch(/id="stage-assets"/);
     expect(src).not.toMatch(/id="stage-review"/);
   });
+
+  /**
+   * Hooks 必須在 project.isLoading / error early return 之前全部呼叫。
+   * C2 曾把 PROJECT_CONTEXT_REVEAL 的 useEffect 放在 return 之後 → 載入成功後多一個 hook
+   * → React「Rendered more hooks…」→ ErrorBoundary 白屏（使用者回報「專案頁沒有畫面」）。
+   */
+  it("all useEffect hooks appear before project.isLoading early return", () => {
+    const earlyIdx = src.search(/if\s*\(\s*project\.isLoading\s*\)/);
+    expect(earlyIdx, "must have project.isLoading early return").toBeGreaterThan(0);
+    // 掃 ProjectPage 函式本體裡的 useEffect（排除檔內其他小元件：從 export function 起算）
+    const fnStart = src.indexOf("export function ProjectPage");
+    expect(fnStart).toBeGreaterThanOrEqual(0);
+    const body = src.slice(fnStart);
+    const earlyInBody = body.search(/if\s*\(\s*project\.isLoading\s*\)/);
+    expect(earlyInBody).toBeGreaterThan(0);
+    const before = body.slice(0, earlyInBody);
+    const after = body.slice(earlyInBody);
+    // early return 之後不可再出現 useEffect / useState / useRef 等 hook 呼叫
+    expect(after).not.toMatch(/\buseEffect\s*\(/);
+    expect(after).not.toMatch(/\buseState\s*\(/);
+    expect(after).not.toMatch(/\buseRef\s*\(/);
+    expect(after).not.toMatch(/\buseMemo\s*\(/);
+    expect(after).not.toMatch(/\buseCallback\s*\(/);
+    // reveal 監聽仍須存在，且在 early return 前
+    expect(before).toMatch(/PROJECT_CONTEXT_REVEAL_EVENT/);
+    expect(before).toMatch(/\buseEffect\s*\(/);
+  });
 });

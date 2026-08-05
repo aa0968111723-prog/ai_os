@@ -30,6 +30,7 @@ import { db, schema } from "../db";
 import { worldviewSchema } from "../../shared/worldview";
 import { mcpToolAnnotations } from "../../shared/mcpCatalog";
 import { MODELS, CATEGORIES, tierLabel, type ModelCategory, type ModelTier } from "../../shared/models";
+import { getModelContract, loadModelContractSnapshot } from "./modelContractStore";
 import { agentPlannerModeSchema } from "../../shared/agentPlanner";
 import { sanitizeAuditInput } from "./audit";
 import { advanceGeneration } from "./generationCore";
@@ -122,14 +123,26 @@ export const TOOLS = [
   },
   {
     name: "find_model",
-    description: `依需求快速找模型(11 類 × 旗艦/經濟/最低成本,共 ${MODELS.length} 個)。類別:${CATEGORIES.map((c) => `${c.id}=${c.label}`).join("、")}`,
+    description: `依需求快速找模型(11 類 × 旗艦/經濟/最低成本,共 ${MODELS.length} 個；附契約 health/capabilities)。類別:${CATEGORIES.map((c) => `${c.id}=${c.label}`).join("、")}`,
     inputSchema: {
       type: "object",
       properties: {
         category: { type: "string", description: "類別 id(如 text-to-image)" },
         tier: { type: "string", enum: ["flagship", "economy", "budget"], description: "旗艦/經濟/最低成本" },
         keyword: { type: "string", description: "關鍵字(比對名稱/特性/擅長領域)" },
+        health: { type: "string", description: "可選：只回此健康狀態(live_ok|needs_source|openapi_404|…)" },
       },
+    },
+  },
+  {
+    name: "get_model_contract",
+    description: "查單一模型契約：health、OpenAPI、分詞器窗口、是否支援 negative_prompt/seed/世界觀注入。資料來自 docs/model-audit/contracts/current.json（sync-model-contracts 維護）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        modelId: { type: "string", description: "模型 id（與 find_model 回傳的 modelId 相同）" },
+      },
+      required: ["modelId"],
     },
   },
   {
@@ -694,23 +707,57 @@ async function runTool(auth: AuthState, scope: McpScope, name: string, args: Rec
 
   if (name === "find_model") {
     const keyword = String(args.keyword ?? "").toLowerCase();
+    const healthFilter = typeof args.health === "string" ? args.health : "";
     const matches = MODELS.filter((m) => {
       if (args.category && m.category !== (args.category as ModelCategory)) return false;
       if (args.tier && m.tier !== (args.tier as ModelTier)) return false;
       if (keyword && ![m.id, m.label, m.strengths, m.bestFor].some((s) => s.toLowerCase().includes(keyword))) return false;
+      if (healthFilter) {
+        const row = getModelContract(m.id);
+        if ((row?.health ?? "unknown") !== healthFilter) return false;
+      }
       return true;
     });
-    return matches.slice(0, 20).map((m) => ({
-      modelId: m.id,
+    return matches.slice(0, 20).map((m) => {
+      const row = getModelContract(m.id);
+      return {
+        modelId: m.id,
+        label: m.label,
+        category: m.category,
+        tier: tierLabel(m.tier),
+        points: m.points,
+        needsSource: m.needs ?? null,
+        strengths: m.strengths,
+        bestFor: m.bestFor,
+        cost: m.cost,
+        verified: m.verified,
+        health: row?.health ?? "unknown",
+        healthNote: row?.healthNote ?? null,
+        capabilities: row?.capabilities ?? null,
+      };
+    });
+  }
+
+  if (name === "get_model_contract") {
+    const modelId = String(args.modelId ?? "").trim();
+    if (!modelId) throw new TRPCError({ code: "BAD_REQUEST", message: "請提供 modelId" });
+    const row = getModelContract(modelId);
+    if (row) return row;
+    // 無快照時仍回靜態目錄摘要
+    const m = MODELS.find((x) => x.id === modelId);
+    if (!m) throw new TRPCError({ code: "NOT_FOUND", message: `找不到模型 ${modelId}` });
+    const snap = loadModelContractSnapshot();
+    return {
+      id: m.id,
       label: m.label,
       category: m.category,
-      tier: tierLabel(m.tier),
       points: m.points,
-      needsSource: m.needs ?? null,
-      strengths: m.strengths,
-      bestFor: m.bestFor,
-      cost: m.cost,
-    }));
+      verified: m.verified,
+      health: "unknown",
+      healthNote: snap
+        ? "契約檔有資料但無此 id"
+        : "尚未產生 contracts/current.json，請跑 npx tsx scripts/sync-model-contracts.ts",
+    };
   }
 
   // ── 自訂資料庫工具（業務層見 databaseMcp；權限 resolveAgentAccess）──

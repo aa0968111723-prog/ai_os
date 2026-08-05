@@ -252,3 +252,12 @@
 - 姊妹卡：`docs/model-audit/cards/fal-ai__minimax__voice-clone.md`（#219）  
 
 **未做：** 任何 `--yes` live、任何改 `verified`／`points`／`input` 寫入 `models.ts`。
+
+## L2 live（2026-08-05）
+
+| 項 | 值 |
+|----|-----|
+| requestId | `019fd08b-9ccf-7893-88c1-16b54cce5baf` |
+| 結果 | **success** · preview mp3 |
+| pointsEst | **93**（誤觸經濟佇列；規則估點應 <80） |
+| verified | **維持 false** |

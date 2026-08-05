@@ -205,4 +205,13 @@ v4.5 像素約束：寬高 1920–4096 或總像素區間（高解析）。
 - [x] MCP／助手／情境  
 - [x] 點數  
 - [x] §8 ≥1  
-- [x] 無 live-probe；無 apply-fixes（無 schema 可修）  
+- [x] 無 live-probe；無 apply-fixes（無 schema 可修）
+
+## L2 live（2026-08-05）
+
+| 項 | 值 |
+|----|-----|
+| requestId | `019fd08e-3597-7eb0-b733-e7da17e5d341` |
+| 結果 | **failed 404** Path `/seedream/v5/text-to-image` not found |
+| **P0** | 端點死 — 下架或改現行 slug |
+| verified | **維持 false** |

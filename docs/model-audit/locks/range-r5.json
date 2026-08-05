@@ -1,13 +1,11 @@
 {
   "lock": "range-r5",
-  "holder": "R5",
+  "holder": "R5-20s",
   "token": null,
-  "expiresAt": "2026-08-05T04:43:57Z",
-  "heartbeatAt": "2026-08-05T04:33:57Z",
+  "expiresAt": "2026-08-05T06:16:47Z",
+  "heartbeatAt": "2026-08-05T06:16:47Z",
   "role": "R5",
-  "index": 222,
-  "id": "fal-ai/f5-tts",
-  "slug": "fal-ai__f5-tts",
-  "phase": "static+research",
-  "note": "DONE #222; 已修 model_type+extract AudioFile; 維持 points=2/$0.05/kchar/verified=false; ready-static-only; no live"
+  "lastCompletedIndex": "96",
+  "mode": "static+research",
+  "note": "i2i thin sweep + audio/training complete; L queue empty for !needs<=3"
 }

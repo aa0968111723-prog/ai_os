@@ -2,12 +2,12 @@
   "lock": "range-r4",
   "holder": "R4",
   "token": null,
-  "expiresAt": "2026-08-05T04:44:05Z",
-  "heartbeatAt": "2026-08-05T04:34:05Z",
+  "expiresAt": "2026-08-05T06:00:00Z",
+  "heartbeatAt": "2026-08-05T05:23:00Z",
   "role": "R4",
-  "index": 169,
-  "id": "fal-ai/wan-vace-14b/outpainting",
-  "slug": "fal-ai__wan-vace-14b__outpainting",
-  "phase": "static+research",
-  "note": "DONE #169 P0 expand_* all default false (station input no sides) + match frames off ~5s; points=9\u2248mid*$0.06*5s; OpenAPI active; needs=video; no live"
+  "lastCompletedIndex": 203,
+  "lastCompletedId": "fal-ai/wizper#draft",
+  "lastCompletedSlug": "fal-ai__wizper__draft",
+  "mode": "static+research",
+  "note": "DONE #203 proper 9ch; R4 proper-slug COMPLETE 53/53; next: thin→9ch (R5/R3) or P/L with KEY"
 }

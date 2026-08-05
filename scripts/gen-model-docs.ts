@@ -2,7 +2,7 @@
  * 從 shared/models.ts(單一真相)生成 docs/模型目錄.md
  * 用法:npx tsx scripts/gen-model-docs.ts
  */
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import {
   CATEGORIES,
   MODELS,
@@ -13,6 +13,7 @@ import {
   getModel,
   tierLabel,
 } from "../shared/models";
+import type { ModelContractSnapshot } from "../shared/modelContract";
 
 /** 決策層用:把模型 id 顯示成「名稱(級別・N 點)」;查無則原樣印出 id 方便抓錯 */
 const refModel = (id: string): string => {
@@ -26,19 +27,52 @@ const lines: string[] = [
   `> ${MODELS.length} 個模型 + ${WORKFLOW_PRESETS.length} 條工作流|${CATEGORIES.filter((c) => c.id !== "workflow").length} 類,每類至少 旗艦3+經濟3+最低成本1`,
   "> 1 點 ≈ NT$1;「成本」為 fal 官方約略價,實際帳單以 fal.ai/pricing 為準。",
   "> ⚠︎ = 模型 ID 依官方資料合理推定,正式模式首跑確認;失敗自動退點。",
+  "> 契約健康見 `docs/model-audit/contracts/current.json`（`npx tsx scripts/sync-model-contracts.ts`）。",
   "",
 ];
+
+/** 契約健康（有檔才填；避免腳本強相依） */
+let healthById = new Map<string, string>();
+try {
+  const cpath = new URL("../docs/model-audit/contracts/current.json", import.meta.url);
+  if (existsSync(cpath)) {
+    const snap = JSON.parse(readFileSync(cpath, "utf8")) as ModelContractSnapshot;
+    healthById = new Map(snap.models.map((m) => [m.id, m.health]));
+    lines.push(
+      "## 契約健康摘要（自動）",
+      "",
+      `> 產生於 ${snap.generatedAt}｜${snap.softStopNote}`,
+      "",
+      "```",
+      JSON.stringify(snap.counts),
+      "```",
+      "",
+      "| 健康 | 意義 |",
+      "|---|---|",
+      "| live_ok | 曾合法生成成功 |",
+      "| live_timeout / live_fail | 曾 live 逾時或失敗 |",
+      "| openapi_404 | OpenAPI 端點不存在 |",
+      "| needs_source | 需素材，禁止空 live |",
+      "| nim_no_key | NIM 分流 |",
+      "| never_probed | 尚未 live |",
+      "",
+    );
+  }
+} catch {
+  /* 無契約檔則略過 */
+}
 
 for (const cat of CATEGORIES) {
   const models = MODELS.filter((m) => m.category === cat.id);
   if (cat.id === "workflow") continue;
   lines.push(`## ${cat.label}(${cat.id})`, "", cat.hint, "");
-  lines.push("| 級別 | 模型 | 點數 | 官方約略價 | 特性 | 擅長 | 來源輸入 |");
-  lines.push("|---|---|---|---|---|---|---|");
+  lines.push("| 級別 | 模型 | 點數 | 健康 | 官方約略價 | 特性 | 擅長 | 來源輸入 |");
+  lines.push("|---|---|---|---|---|---|---|---|");
   const order = { flagship: 0, economy: 1, budget: 2 } as const;
   for (const m of [...models].sort((a, b) => order[a.tier] - order[b.tier])) {
+    const health = healthById.get(m.id) ?? "—";
     lines.push(
-      `| ${tierLabel(m.tier)} | ${m.label}${m.verified ? "" : " ⚠︎"}<br/>\`${m.id}\` | ${m.points} | ${m.cost} | ${m.strengths} | ${m.bestFor} | ${m.sourceHint ?? "—"} |`,
+      `| ${tierLabel(m.tier)} | ${m.label}${m.verified ? "" : " ⚠︎"}<br/>\`${m.id}\` | ${m.points} | ${health} | ${m.cost} | ${m.strengths} | ${m.bestFor} | ${m.sourceHint ?? "—"} |`,
     );
   }
   lines.push("");
@@ -85,7 +119,8 @@ lines.push("## 挑選心法", "",
   "3. **中文字要出現在畫面上** → Qwen Image 2.0(第一主力)/ Seedream 4.5 / Ideogram v3(英文)。",
   "4. **中文旁白** → MiniMax 2.6 HD(頂級)/ Qwen 3 TTS(量產省)/ Kokoro 中文(草稿)。",
   "5. **成本大戶是影片**:Veo 3.1 一支 5 秒 ≈ 32 點;先用 Wan 2.2 或 LTX 驗證腳本。",
-  "6. **代理找模型**:MCP 工具 `find_model`、tRPC `models.search`、或直接查 `model_catalog` 資料表。",
+  "6. **代理找模型**:MCP 工具 `find_model` / `get_model_contract`、tRPC `models.search`、或 `model_catalog` 表。",
+  "7. **怕變動**：改 models 或審計後跑 `npx tsx scripts/sync-model-contracts.ts`，指南／MCP／生成共用 `contracts/current.json`。",
   "");
 
 writeFileSync(new URL("../docs/模型目錄.md", import.meta.url), lines.join("\n"));

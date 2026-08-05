@@ -171,3 +171,13 @@ estimatePoints → realPricePoints(cost) → 0.03×5×31 → 5（扁平）
 
 **L0 結論**：OpenAPI 綠；1:1 422 已修；**P0** 為 default **8s+audio** 對扁平 5 點倒貼。  
 **未做：** live、`--yes`、改 points／verified。
+
+## L2 live（2026-08-05）
+
+| 項 | 值 |
+|----|-----|
+| requestId | `019fd093-7b09-77d3-b39e-3237b55ea164` |
+| 結果 | **success** · mp4 |
+| artifact | https://v3b.fal.media/files/b/0aa51568/G-Puh7ltRyoyhpJ12bzOG_a6d18c130b03446097f03c81e205f763.mp4 |
+| pointsEst | 5（probe 顯示；models.ts 文案 points=9 待對齊 **P2**） |
+| verified | 目錄 true；**本輪不改** |

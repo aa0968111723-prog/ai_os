@@ -177,3 +177,15 @@
 - 站內：`docs/fal生態研究.md`、`docs/點數校準報告.md`  
 
 **未做：** 任何 `--yes` live、任何改 `verified`／points 寫入 `models.ts`。
+
+## L2 live（2026-08-05）
+
+| 項 | 值 |
+|----|-----|
+| 指令 | `verify-models --probe fal-ai/dia-tts --yes` |
+| 輸入 | 「測試」 |
+| requestId | `019fd076-3752-7333-8de8-a8de30a6f37a` |
+| 結果 | **success** · wav ~2.6MB |
+| artifact | https://v3b.fal.media/files/b/0aa514b8/CpwNZFtJ_1R0jhHKdJtsL.wav |
+| pointsEst | 2 · budget 已入帳 |
+| verified | **維持 false**（禁止自動改 true） |

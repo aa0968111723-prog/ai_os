@@ -195,3 +195,15 @@
 - 站內：`docs/fal生態研究.md`、`docs/點數校準報告.md`、`docs/模型目錄.md`  
 
 **未做：** 任何 `--yes` live、任何改 `verified`／points 寫入 `models.ts`。
+
+## L2 live（2026-08-05）
+
+| 項 | 值 |
+|----|-----|
+| 指令 | `verify-models --probe fal-ai/chatterbox/text-to-speech --yes` |
+| 輸入 | 「測試」 |
+| requestId | `019fd072-e762-7293-9c7e-7cd97d1c697d` |
+| 結果 | **failed 422** — Text must contain at least one ASCII character；非 ASCII 不支援；請用 multilingual 端點 |
+| pointsEst | 0（validation） |
+| 建議 | PROBE_PROMPTS TTS 改英文 `test`；或站內標 English-only；產品走 multilingual 姊妹端 |
+| verified | **維持 false** |

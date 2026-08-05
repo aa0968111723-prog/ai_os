@@ -1,13 +1,13 @@
 {
   "lock": "range-r2",
-  "holder": "R2",
+  "holder": "R2-main-audit",
   "token": null,
-  "expiresAt": "2026-08-05T04:44:32Z",
-  "heartbeatAt": "2026-08-05T04:34:32Z",
+  "expiresAt": "2026-08-05T08:20:00Z",
+  "heartbeatAt": "2026-08-05T06:11:50Z",
   "role": "R2",
-  "index": 63,
-  "id": "fal-ai/ccsr",
-  "slug": "fal-ai__ccsr",
-  "phase": "static+research",
-  "note": "DONE #63 ready-static-only; 建議=維持; points=2價未知人工; verified=false; needs=image; scale預設2/steps=50; seed schema有未暴露; 禁--yes"
+  "lastCompletedIndex": 66,
+  "lastCompletedId": "fal-ai/seedvr/upscale/image",
+  "lastCompletedSlug": "fal-ai__seedvr__upscale__image",
+  "mode": "static+research",
+  "note": "DONE #66 thick; needs=image; factor P2; next R2 thin after 66"
 }

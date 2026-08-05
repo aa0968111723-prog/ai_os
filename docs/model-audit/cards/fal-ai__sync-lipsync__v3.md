@@ -12,8 +12,8 @@
 | category | `video-to-video`（影片轉影片） |
 | tier | **flagship** |
 | kind | `video` |
-| points | **155**（目錄；見 §2 與官方 $8/分 落差） |
-| cost | `約$5+/分(略高於 v2,以 fal 現場為準);按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高` |
+| points | **248**（B9：官方 \$8/分×31；原 155 低估） |
+| cost | `$8/分;按影片長度計費,點數以 1 分鐘短片估,較長影片實際費用更高` |
 | verified | **false** |
 | recommended | **false** |
 | needs | **video**（人物影片網址） |
@@ -37,13 +37,13 @@
 
 | 項目 | 值 |
 |------|-----|
-| points（目錄扁平） | **155** |
-| cost 字串 | 約 **$5+/分**（略高於 v2） |
-| 官方價（fal 模型頁摘要） | **$8 per minute**（「Your request will cost $ 8 per minute.」） |
-| 計費性質 | **按處理影片分鐘**（per-minute of video processed）；與影音長度／錯位處理相關 |
-| `parseRealCost` | 解析 cost 得 **usdMid=5**、multiplier=**1**（`PRICE_V2V_MINUTES=1`）→ 期望 **155** 點 |
-| 匯率 | USD×**31** ≈ NT$（與審計／校準同基準） |
-| 校準報告列 | Sync-3 ⚠︎ · 155 · 判定 **≈**（依目錄 $5 中值） |
+| points（目錄扁平） | **248**（B9 已寫入） |
+| cost 字串 | **$8/分**（B9 對齊官方） |
+| 官方價（fal 模型頁摘要） | **$8 per minute** |
+| 計費性質 | **按處理影片分鐘** |
+| `parseRealCost` | usdMid=**8**、multiplier=**1** → **248** 點 |
+| 匯率 | USD×**31** ≈ NT$ |
+| 校準 | B9 已調；長片仍固定 1 分基準（文案已註較長更高） |
 
 ### 2.1 粗估（1 分鐘基準）
 
@@ -61,9 +61,7 @@
 | 2 min | $16 ≈ NT$496 | **嚴重偏低** |
 | 5 min | $40 ≈ NT$1240 | 長片倒掛更劇 |
 
-**結論（L2）：** 目錄 cost「約$5+」與 fal 明文 **$8/分** 不符；points=155 以 $5×31 校準，**應調至約 248**（或 cost 改寫 $8/分後重跑校準）。長片固定扣點仍會低估——文案已寫「較長影片實際費用更高」，產品誠實度部分 OK，但 **1 分鐘基準本身已錯**。
-
-**本回合禁止改 `models.ts` 的 points／verified**；建議 follow-up 人工 PR 調價。
+**結論（B9）：** cost 已改 **$8/分**、points **248**（`realPricePoints` 機械覆寫）。verified 維持 false。長片固定 1 分基準仍可能低估——文案已註。
 
 ---
 

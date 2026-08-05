@@ -112,7 +112,7 @@ input: (p, f) => ({ prompt: p, image_size: imageSize(f) }),
 | input 組裝 | `(p, f) => ({ prompt: p, image_size: imageSize(f) })`；9:16→portrait_16_9、1:1→square_hd、其餘→landscape_16_9 |
 | 送出路徑 | `generationCore` → `endpointOf`（= id）→ `falSubmit`；**不**注入 `negative_prompt` |
 | 與官方差異 | 官方 default 尺寸 2048²／example `auto_2K`；站內橫幅統一 **16:9** preset（產品覆寫，合法） |
-| 家族 | 文生圖本卡；Edit `fal-ai/bytedance/seedream/v4.5/edit`（#33）；v5 t2i #15（OpenAPI **404**，勿當可用） |
+| 家族 | 文生圖本卡；Edit `fal-ai/bytedance/seedream/v4.5/edit`（#33）；v5 t2i #15（OpenAPI **200**（2026-08-05 覆核），勿當可用） |
 
 ## 5. 站內點數路徑
 
