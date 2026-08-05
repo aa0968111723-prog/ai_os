@@ -2,12 +2,12 @@
   "lock": "range-r5",
   "holder": "R5",
   "token": null,
-  "expiresAt": "2026-08-05T04:31:11Z",
-  "heartbeatAt": "2026-08-05T04:21:11Z",
+  "expiresAt": "2026-08-05T04:35:56Z",
+  "heartbeatAt": "2026-08-05T04:25:56Z",
   "role": "R5",
-  "index": 220,
-  "id": "fal-ai/qwen-3-tts/clone-voice/1.7b",
-  "slug": "fal-ai__qwen-3-tts__clone-voice__1.7b",
+  "index": 221,
+  "id": "fal-ai/minimax/voice-design",
+  "slug": "fal-ai__minimax__voice-design",
   "phase": "static+research",
-  "note": "DONE #220; 建議 cost $0.0008/分 points=1; P0 speaker_embedding extract+Qwen TTS wire; ghost text→reference_text; ready-static-only; no live"
+  "note": "DONE #221; 建議 cost $3/次 points=93; 修 input +preview_text; P0 custom_voice_id extract+MiniMax TTS wire; ready-static-only; no live"
 }

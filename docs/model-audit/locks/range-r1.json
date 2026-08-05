@@ -2,12 +2,12 @@
   "lock": "range-r1",
   "holder": "R1",
   "token": null,
-  "expiresAt": "2026-08-05T04:31:13Z",
-  "heartbeatAt": "2026-08-05T04:21:13Z",
+  "expiresAt": "2026-08-05T04:35:58Z",
+  "heartbeatAt": "2026-08-05T04:25:58Z",
   "role": "R1",
-  "index": 7,
-  "id": "fal-ai/ideogram/v3",
-  "slug": "fal-ai__ideogram__v3",
+  "index": 8,
+  "id": "fal-ai/flux/schnell",
+  "slug": "fal-ai__flux__schnell",
   "phase": "static+research",
-  "note": "DONE #7 ready-static-with-gap; P1 input aspect_ratio→image_size; points=2≈; verified stays false; no --yes"
+  "note": "DONE #8 ready; verified+live history OK; points=1≈; no --yes; T5=256"
 }

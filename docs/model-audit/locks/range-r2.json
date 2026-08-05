@@ -2,12 +2,12 @@
   "lock": "range-r2",
   "holder": "R2",
   "token": null,
-  "expiresAt": "2026-08-05T04:31:26Z",
-  "heartbeatAt": "2026-08-05T04:21:26Z",
+  "expiresAt": "2026-08-05T04:35:43Z",
+  "heartbeatAt": "2026-08-05T04:25:43Z",
   "role": "R2",
-  "index": 61,
-  "id": "fal-ai/topaz/upscale/image",
-  "slug": "fal-ai__topaz__upscale__image",
+  "index": 62,
+  "id": "fal-ai/aura-sr",
+  "slug": "fal-ai__aura-sr",
   "phase": "static+research",
-  "note": "DONE #61 ready-static-only; 建議=維持; points=2≈(≤24MP $0.08); Standard V2+face default; needs=image; 禁--yes; 高階梯/Bloom倍率風險P2"
+  "note": "DONE #62 ready-static-only; 建議=維持; points=2算秒需人工; verified=false; needs=image; 固定4×; checkpoint預設v1; sc-text-upscale次選; 禁--yes"
 }

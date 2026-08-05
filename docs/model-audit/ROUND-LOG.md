@@ -280,3 +280,68 @@ card：`docs/model-audit/cards/fal-ai__minimax__hailuo-02__standard__text-to-vid
 
 broken 新增：無  
 下一輪：R 各 #8,#62,#115,#168,#221；P 下一 cat（需 FAL_KEY）；L 經濟 !needs（需 FAL_KEY）
+
+## #17 | 階段:研究實測
+
+| 角色 | 結果 |
+|------|------|
+| R | #62 `fal-ai/aura-sr` → 維持（OpenAPI **200**；`image_url` required✓；4× 固定；checkpoint 預設 v1；points=2 人工／無$；verified=false；needs=image） |
+| P | 跳過無 KEY |
+| L | 跳過無 KEY（needs=image 不可 probe；spentTwd=5） |
+| J | 跳過 |
+
+broken 新增：無  
+下一輪：R 各 #8,#63,#115,#168,#221；P 下一 cat（需 FAL_KEY）；L 經濟 !needs（需 FAL_KEY）
+
+## R5 unit | #221 minimax/voice-design | 2026-08-05
+
+| 角色 | 結果 |
+|------|------|
+| R5 | `fal-ai/minimax/voice-design` → OpenAPI 200；**官方 $3/聲+$0.03/千字預覽**（非「按字同 TTS」）；input 缺 required `preview_text`→422；output `custom_voice_id` 未抽取；**建議** cost/points→93、修 input；ready-static-only；零 live／禁止 --yes |
+
+broken 新增：契約 gap（缺 preview_text）記於 card，端點存活非 dead slug  
+card：`docs/model-audit/cards/fal-ai__minimax__voice-design.md`  
+下一輪：R5 下一 id（#222 起，號段 213–266）
+
+## #18 | 階段:研究實測
+
+| 角色 | 結果 |
+|------|------|
+| R | #115 `fal-ai/wan/v2.5/text-to-video` → **已修 endpoint** `…/v2.5/…` 404 → **`fal-ai/wan-25/text-to-video`**（200）；**P0** 預設 1080p 實費≈23 vs 扁平 8（估點取 480p）；aspect 三比例綠；points=8／verified 維持 |
+| P | 跳過無 KEY |
+| L | 跳過無 KEY（spentTwd=5；修後可 live 但無 KEY） |
+| J | 跳過 |
+
+broken 新增：無（死 slug 已映射；非下架）  
+下一輪：R 各 #8,#63,#116,#168,#221；P 下一 cat（需 FAL_KEY）；L 經濟 !needs（需 FAL_KEY）；**建議**同步核 wan/v2.6 slug
+
+## R4 · #168 · 2026-08-05
+
+| 角色 | 結果 |
+|------|------|
+| R4 | #168 `decart/lucy-edit` → **P0 endpoint 404**（基底不存在；僅 `/pro` active，`/fast` `/dev` deprecated）；input 對齊 video_url+prompt；points=16 維持（Pro@$0.15 人審~23–28）；verified=false；零 live／禁止 --yes |
+
+card：`docs/model-audit/cards/decart__lucy-edit.md`
+
+
+## #115 | 階段:研究實測 | R3 | 2026-08-05
+
+| 角色 | 結果 |
+|------|------|
+| R3 | #115 `fal-ai/wan/v2.5/text-to-video` → **已修 endpoint**（目錄 path OpenAPI **404** → `endpoint: fal-ai/wan-25/text-to-video` **200** `Wan25TextToVideoInput`；points=8≈480p×5s；**P0** default 1080p×5s≈$0.75/~23 vs 扁平8；aspect 16:9/9:16/1:1 健康；`audio_url`≠generate_audio；零 live／禁止 --yes） |
+
+broken 新增：無（死 path 已映射，非下架）  
+card：`docs/model-audit/cards/fal-ai__wan__v2.5__text-to-video.md`  
+下一輪：R3 下一 id（#116 起）
+
+## #19 | 階段:研究實測
+
+| 角色 | 結果 |
+|------|------|
+| R | #168 `decart/lucy-edit` → **已修 endpoint** 裸 id **404** → **`decart/lucy-edit/fast`**（economy）；pro 亦 200；input `prompt+video_url`✓；points=16 中價×5s；**P0** 扁平 vs 按秒；verified=false |
+| P | 跳過無 KEY |
+| L | 跳過無 KEY（needs=video；spentTwd=5） |
+| J | 跳過 |
+
+broken 新增：無（死基底 slug 已映射分檔）  
+下一輪：R 各 #9,#63,#116,#169,#222；P 下一 cat（需 FAL_KEY）；L 經濟 !needs；**仍建議**核 wan/v2.6→wan-26

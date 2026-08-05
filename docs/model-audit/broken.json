@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-05T04:22:29.278628+00:00",
+  "updatedAt": "2026-08-05T04:30:20.699749+00:00",
   "items": [
     {
       "id": "fal-ai/bytedance/seedream/v5/text-to-image",
@@ -47,6 +47,24 @@
       "severity": "P0",
       "issue": "預設8s+含音≈12點 vs 扁平5；1:1非法",
       "action": "固定 duration 或動態估點；禁1:1"
+    },
+    {
+      "id": "fal-ai/minimax/voice-design",
+      "severity": "P0-PARTIAL",
+      "issue": "缺 preview_text 會422；points=3 應≈93；custom_voice_id 未抽取",
+      "action": "input 已補 preview_text；points/抽取待 B9"
+    },
+    {
+      "id": "fal-ai/wan/v2.5/text-to-video",
+      "severity": "P0-PARTIAL",
+      "issue": "endpoint 已改 wan-25；預設1080p 估點仍低估",
+      "action": "endpoint FIXED；估點策略待 B9"
+    },
+    {
+      "id": "decart/lucy-edit",
+      "severity": "P0-PARTIAL",
+      "issue": "endpoint 已映 fast；pro 價更高",
+      "action": "endpoint FIXED to fast；points 人審"
     }
   ]
 }

@@ -1162,8 +1162,11 @@ export const MODELS: ModelEntry[] = [
     input: (p, f) => ({ prompt: p, aspect_ratio: aspect(f) }),
   },
   {
-    // slug 推定(fal生態研究:以 fal 現場 slug 為準),真實模式首跑需確認
-    id: "fal-ai/wan/v2.5/text-to-video", label: "Wan 2.5(開源)", category: "text-to-video", tier: "economy", kind: "video",
+    // 審計 #115：OpenAPI 404 於 fal-ai/wan/v2.5/… → 實端點 fal-ai/wan-25/text-to-video（連字號 25）
+    // P0：官方 default resolution=1080p（$0.15/秒）但 points 機械取首價 480p $0.05×5s≈8——見卡
+    id: "fal-ai/wan/v2.5/text-to-video",
+    endpoint: "fal-ai/wan-25/text-to-video",
+    label: "Wan 2.5(開源)", category: "text-to-video", tier: "economy", kind: "video",
     points: 8, cost: "480p $0.05/秒、720p $0.10/秒、1080p $0.15/秒(預設 1080p);按秒計費,點數為 6 秒基準", verified: true,
     strengths: "Wan 新一代;畫質提升並加入原生音訊,仍親民價",
     bestFor: "開源價又要帶音效的療癒 B-roll",
@@ -1597,8 +1600,11 @@ export const MODELS: ModelEntry[] = [
     input: (_p, _f, s) => ({ video_url: s }),
   },
   {
-    // 端點分 dev/fast/pro 三檔,此為基底 slug;點數取 $0.05–0.15/秒中價
-    id: "decart/lucy-edit", label: "Lucy Edit 文字改影片", category: "video-to-video", tier: "economy", kind: "video",
+    // 審計 #168：基底 `decart/lucy-edit` OpenAPI 404 → 實端點分檔 dev/fast/pro；economy 映射 **fast**
+    // 點數取 $0.05–0.15/秒中價×5s；P0 扁平不隨片長；pro 姊妹見卡
+    id: "decart/lucy-edit",
+    endpoint: "decart/lucy-edit/fast",
+    label: "Lucy Edit 文字改影片", category: "video-to-video", tier: "economy", kind: "video",
     needs: "video", points: 16, cost: "約$0.05–0.15/秒(dev/fast/pro 三檔);按秒計費,點數為 6 秒基準", verified: false,
     strengths: "文字指令換裝/換物/風格;保留身份與動作",
     bestFor: "口語修改:換服裝、換背景成佛堂",
@@ -2036,11 +2042,16 @@ export const MODELS: ModelEntry[] = [
     input: (p, _f, s) => ({ text: p, audio_url: s }),
   },
   {
+    // 審計 #221：OpenAPI required=`prompt`+`preview_text`；官方 $3/次+預覽字費；points 3 嚴重低估→回寫佇列 93
     id: "fal-ai/minimax/voice-design", label: "MiniMax 聲音設計", category: "text-to-speech", tier: "flagship", kind: "audio",
-    points: 3, cost: "推估按字計費(量級同 MiniMax TTS)", verified: false,
+    points: 3, cost: "$3/次+預覽$0.03/千字(點數待調)", verified: false,
     strengths: "文字描述訂做全新聲線(如溫暖沉穩中年男聲)",
     bestFor: "不克隆真人的專屬旁白聲、規避授權",
-    input: (p) => ({ prompt: p }),
+    // preview_text 為必填試念句；主欄 prompt 為聲線描述
+    input: (p) => ({
+      prompt: p,
+      preview_text: "阿彌陀佛。願以此功德，普及於一切。",
+    }),
   },
   {
     id: "fal-ai/f5-tts", label: "F5-TTS(克隆)", category: "text-to-speech", tier: "economy", kind: "audio",

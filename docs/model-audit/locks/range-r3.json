@@ -2,12 +2,12 @@
   "lock": "range-r3",
   "holder": "R3",
   "token": null,
-  "expiresAt": "2026-08-05T04:31:54Z",
-  "heartbeatAt": "2026-08-05T04:21:54Z",
+  "expiresAt": "2026-08-05T04:39:35Z",
+  "heartbeatAt": "2026-08-05T04:29:35Z",
   "role": "R3",
-  "lastCompletedIndex": 114,
-  "lastCompletedId": "fal-ai/minimax/video-01-director",
-  "lastCompletedSlug": "fal-ai__minimax__video-01-director",
+  "lastCompletedIndex": 115,
+  "lastCompletedId": "fal-ai/wan/v2.5/text-to-video",
+  "lastCompletedSlug": "fal-ai__wan__v2.5__text-to-video",
   "mode": "static+research",
-  "note": "DONE #114 OpenAPI200; points=16≈$0.5/支; camera [brackets] in prompt; aspect dead; verified true; no live"
+  "note": "DONE #115 FIXED endpoint fal-ai/wan-25/text-to-video (was 404 v2.5 path); P0 default 1080p vs points 8@480p; aspect ok; verified true; no live"
 }

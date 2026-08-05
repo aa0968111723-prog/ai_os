@@ -2,9 +2,12 @@
   "lock": "range-r4",
   "holder": "R4",
   "token": null,
-  "expiresAt": null,
-  "heartbeatAt": "2026-08-05T04:21:14Z",
+  "expiresAt": "2026-08-05T04:37:49Z",
+  "heartbeatAt": "2026-08-05T04:27:49Z",
   "role": "R4",
-  "slug": "veed__video-background-removal",
-  "index": 167
+  "index": 168,
+  "id": "decart/lucy-edit",
+  "slug": "decart__lucy-edit",
+  "phase": "static+research",
+  "note": "DONE #168 FIXED endpoint→decart/lucy-edit/fast (base 404); pro also 200; points=16 mid; needs=video; P0 flat vs per-sec; no live"
 }

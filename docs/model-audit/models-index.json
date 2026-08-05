@@ -1836,7 +1836,7 @@
       "verified": true,
       "needs": null,
       "recommended": false,
-      "endpoint": "fal-ai/wan/v2.5/text-to-video",
+      "endpoint": "fal-ai/wan-25/text-to-video",
       "strengths": "Wan 新一代;畫質提升並加入原生音訊,仍親民價",
       "bestFor": "開源價又要帶音效的療癒 B-roll",
       "slug": "fal-ai__wan__v2.5__text-to-video"
