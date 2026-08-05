@@ -33,3 +33,33 @@ describe("continuity reference deletion guard", () => {
     expect(source).toContain("正被執行中的一致性工作流鎖定");
   });
 });
+
+describe("setCover（專案封面圖）契約", () => {
+  const source = readFileSync(new URL("./projects.ts", import.meta.url), "utf8");
+  /** 只取 setCover 這一條 procedure 的本文（下一條是 assets），避免比對到隔壁 procedure */
+  const body = source.slice(source.indexOf("setCover: authedProcedure"), source.indexOf("assets: authedProcedure"));
+
+  it("寫入前過組隔離＋可編輯守衛（檢視者不能換封面）", () => {
+    expect(body).toContain("requireGroup(ctx.auth, project.groupId)");
+    expect(body).toContain("assertProjectEditable(ctx.auth, project)");
+  });
+
+  it("綁圖時沿用 assertReferenceImage（同組＋是圖片＋不在回收桶），並限本專案素材", () => {
+    expect(body).toContain("assertReferenceImage(input.assetId, project.groupId)");
+    expect(body).toContain("封面圖要選這個專案素材庫裡的圖片");
+  });
+
+  it("assetId 可為 null（清除封面，退回色塊）", () => {
+    expect(source).toMatch(/setCover:[\s\S]*?assetId:\s*z\.string\(\)\.uuid\(\)\.nullable\(\)/);
+  });
+
+  it("換封面不動 updatedAt——外觀調整不該把專案頂到「最近更新」最前面", () => {
+    expect(body).toContain(".set({ coverAssetId: input.assetId })");
+    expect(body).not.toContain("updatedAt: new Date()");
+  });
+
+  it("list／get 都以 isNull(assets.deletedAt) 左接封面——素材進回收桶時縮圖自動退回色塊", () => {
+    expect(source).toContain("coverUrl: schema.assets.url");
+    expect(source).toMatch(/eq\(schema\.assets\.id,\s*schema\.projects\.coverAssetId\),\s*isNull\(schema\.assets\.deletedAt\)/);
+  });
+});

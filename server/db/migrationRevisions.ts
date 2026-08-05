@@ -207,4 +207,7 @@ export const MIGRATION_REVISIONS: Readonly<Record<string, readonly string[]>> = 
     "a4e9cd69527f5daae8c3b78036a5e51c0b3ef6a09f97c69df35e79ab6be470ed",
     "8677baa3b1c8e65bddb0b2008392713d68c673ff4fc3e922b0809e3bdca845d3",
   ],
+  "0037_project_cover": [
+    "0b5a6642a026bbb0f54e9243baad79a964725e785de53e77e4194a51461d6f88",
+  ],
 };

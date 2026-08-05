@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
+import { assertReferenceImage } from "../services/referenceAsset";
 import { worldviewSchema } from "../../shared/worldview";
 import { PLATFORMS } from "../../shared/models";
 import {
@@ -86,7 +87,34 @@ export const projectsRouter = router({
       const where = input?.includeArchived
         ? inArray(schema.projects.groupId, groupIds as string[])
         : and(inArray(schema.projects.groupId, groupIds as string[]), ne(schema.projects.status, "archived"));
-      return db.select().from(schema.projects).where(where).orderBy(desc(schema.projects.updatedAt));
+      // 封面圖網址（coverUrl）：left join 素材表並過濾回收桶——素材被丟掉時卡片自動退回色塊封面
+      const rows = await db
+        .select({ ...getTableColumns(schema.projects), coverUrl: schema.assets.url })
+        .from(schema.projects)
+        .leftJoin(
+          schema.assets,
+          and(eq(schema.assets.id, schema.projects.coverAssetId), isNull(schema.assets.deletedAt)),
+        )
+        .where(where)
+        .orderBy(desc(schema.projects.updatedAt));
+      if (rows.length === 0) return [];
+      // 2.3 前端唯讀可見性：一次查完「我在哪些專案被設為檢視者」，卡片上的寫入入口（換封面）
+      // 才能事前禁用，而不是按了才被後端擋。組長/管理員永遠 editor（與 getProjectRole 同一規則）。
+      const roleByGroup = new Map(ctx.auth.groups.map((g) => [g.groupId, g.role]));
+      const viewerOf = await db
+        .select({ projectId: schema.projectMembers.projectId, role: schema.projectMembers.role })
+        .from(schema.projectMembers)
+        .where(and(
+          inArray(schema.projectMembers.projectId, rows.map((r) => r.id)),
+          eq(schema.projectMembers.userId, ctx.auth.user.id),
+        ));
+      const viewerIds = new Set(viewerOf.filter((o) => o.role === "viewer").map((o) => o.projectId));
+      return rows.map((r) => ({
+        ...r,
+        myProjectRole: (roleByGroup.get(r.groupId) !== "member" || !viewerIds.has(r.id) ? "editor" : "viewer") as
+          | "editor"
+          | "viewer",
+      }));
     }),
 
   /** 封存/還原專案（軟刪除，可還原）：專案擁有者或組長以上可操作 */
@@ -520,8 +548,50 @@ export const projectsRouter = router({
     // 2.3 前端唯讀可見性的根：呼叫者在此專案的有效角色。後端守衛已全面擋 viewer，
     // 但前端沒這個欄位就只能「按了才失敗」——回傳角色讓寫入控制能事前 disable＋顯示唯讀橫幅
     const myProjectRole = await getProjectRole(ctx.auth, project);
-    return { ...project, myProjectRole };
+    // 封面圖網址：與 list 同口徑（回收桶內的素材當作沒綁，縮圖退回色塊封面）
+    let coverUrl: string | null = null;
+    if (project.coverAssetId) {
+      const [cover] = await db
+        .select({ url: schema.assets.url })
+        .from(schema.assets)
+        .where(and(eq(schema.assets.id, project.coverAssetId), isNull(schema.assets.deletedAt)));
+      coverUrl = cover?.url ?? null;
+    }
+    return { ...project, coverUrl, myProjectRole };
   }),
+
+  /**
+   * 設定／清除專案封面圖：綁一張本專案素材庫的圖片素材，作業台卡片改顯示它。
+   * assetId=null＝清除，退回以 id 雜湊的色塊封面。
+   * 守衛：同組（requireGroup）＋可編輯（檢視者不能改）＋素材同組且是圖片（assertReferenceImage，
+   * 與角色定裝卡／場景設定卡同一把尺，擋跨組把別組的圖綁進來）。
+   * 另加「素材必須屬於本專案」——封面挑選器只列本專案素材庫，同組跨專案綁圖屬非預期用法。
+   */
+  setCover: authedProcedure
+    .input(z.object({ id: z.string().uuid(), assetId: z.string().uuid().nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      const [project] = await db.select().from(schema.projects).where(eq(schema.projects.id, input.id));
+      if (!project) throw new TRPCError({ code: "NOT_FOUND", message: "找不到專案" });
+      requireGroup(ctx.auth, project.groupId);
+      await assertProjectEditable(ctx.auth, project);
+      if (input.assetId) {
+        await assertReferenceImage(input.assetId, project.groupId);
+        const [asset] = await db
+          .select({ projectId: schema.assets.projectId })
+          .from(schema.assets)
+          .where(eq(schema.assets.id, input.assetId));
+        if (asset?.projectId !== project.id) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "封面圖要選這個專案素材庫裡的圖片" });
+        }
+      }
+      // 不動 updatedAt：換封面是外觀調整，不該把專案頂到「最近更新」最前面蓋掉真的有進度的案子
+      const [updated] = await db
+        .update(schema.projects)
+        .set({ coverAssetId: input.assetId })
+        .where(eq(schema.projects.id, project.id))
+        .returning();
+      return updated;
+    }),
 
   /** 專案素材庫(生成成品;供「來源輸入」挑選與素材總覽)。
    *  QA-013：舊版硬上限 100 且無分頁——大量素材的專案第 101 件起永遠不可見。

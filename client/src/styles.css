@@ -606,6 +606,7 @@ h2 { font-family: var(--sans); font-weight: 600; font-size: var(--fs-19); line-h
   width: 36px;
   height: 36px;
   border-radius: 10px;
+  overflow: hidden; /* 內含封面縮圖時要跟著圓角裁切 */
   display: grid;
   place-items: center;
   font-family: var(--serif);
@@ -653,8 +654,31 @@ h2 { font-family: var(--sans); font-weight: 600; font-size: var(--fs-19); line-h
   border: 1px solid var(--border); background: var(--card); border-radius: var(--radius); box-shadow: var(--e2);
   transition: transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out); }
 .launch-card:hover { transform: translateY(-2px); box-shadow: var(--e3); }
-.launch-cover { aspect-ratio: 16 / 10; display: grid; place-items: center; overflow: hidden; }
+.launch-cover { position: relative; aspect-ratio: 16 / 10; display: grid; place-items: center; overflow: hidden; }
 .launch-mono { font-family: var(--serif); font-size: 40px; color: var(--cover-veil); user-select: none; }
+/* 專案封面圖（projects.cover_asset_id）：綁了圖就鋪滿封面區，沒綁沿用首字色塊。
+   place-items:center 會讓格子內容縮成內容尺寸，所以這裡明確 stretch 回整格。 */
+.launch-cover__img, .launch-cover__fallback {
+  grid-area: 1 / 1; align-self: stretch; justify-self: stretch;
+  width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 0;
+}
+/* 換圖鈕：桌面滑過（或鍵盤聚焦）才浮出，不長期壓在封面上；
+   觸控裝置沒有 hover，一律常駐，否則永遠點不到。 */
+.launch-cover__swap {
+  position: absolute; right: 8px; bottom: 8px; z-index: 1;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 9px; font-size: var(--fs-12);
+  opacity: 0; transition: opacity var(--dur-base) var(--ease-out);
+}
+.launch-card:hover .launch-cover__swap,
+.launch-card:focus-within .launch-cover__swap { opacity: 1; }
+@media (hover: none) { .launch-cover__swap { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .launch-cover__swap { transition: none; } }
+/* 列表列／接續進度的小方塊也認封面圖（縮圖版）：兩種版面認得出是同一個專案 */
+.launch-mark__img, .launch-mark__fallback {
+  width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit;
+}
+.launch-mark__fallback { font-size: 0; gap: 0; } /* 36px 的方塊放不下「素材遺失」字樣，只留 icon */
 .launch-body { padding: var(--sp-16); display: flex; flex-direction: column; gap: 6px; }
 .launch-title { font-size: var(--fs-16); font-weight: 600; margin: 0; line-height: 1.35;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -2309,7 +2333,7 @@ html.is-standalone .topbar { top: 0; padding-top: max(10px, env(safe-area-inset-
 .continue-card:hover { color: var(--fg); border-color: var(--border-strong); box-shadow: var(--e2); }
 .continue-card__mark {
   width: 50px; height: 50px; flex: none; display: grid; place-items: center;
-  border-radius: 11px; color: var(--cover-veil); font: 24px var(--serif);
+  border-radius: 11px; overflow: hidden; color: var(--cover-veil); font: 24px var(--serif);
 }
 .continue-card__body { min-width: 0; flex: 1; display: grid; }
 .continue-card__body strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4794,6 +4818,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .launch-card { display: grid; grid-template-columns: 86px minmax(0, 1fr); min-height: 104px; }
   .launch-cover { min-height: 100%; aspect-ratio: auto; }
   .launch-mono { font-size: 30px; }
+  /* 手機版封面只有 86px 寬：換圖鈕改成橫跨封面底緣的小條，右下角浮鈕會被切掉 */
+  .launch-cover__swap { inset: auto 4px 4px; justify-content: center; padding: 2px 4px; font-size: 11px; }
   .launch-body { padding: 12px; }
 
   .planner-jump-grid {
