@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { db, schema } from "../db";
 import { router, authedProcedure, adminProcedure } from "../trpc";
 import { CATEGORIES, WORKFLOW_PRESETS, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
 import { estimatePointsFor, listResolvableModels, liveCacheMeta, resolveModel } from "../services/modelResolve";
@@ -124,8 +126,8 @@ export const modelsRouter = router({
     }),
 
   /**
-   * 契約健康總覽（模型指南頂欄）：counts + 每 id 的精簡 health。
-   * 無 contracts/current.json 時回 null（指南降級、不阻斷）。
+   * 契約健康總覽（站務／管理用）：counts + 每 id 的精簡 health。
+   * 無 contracts/current.json 時回 null。模型指南改顯示 myUsage，不依賴此端點。
    */
   contractSummary: authedProcedure.query(() => {
     const snap = loadModelContractSnapshot();
@@ -158,6 +160,40 @@ export const modelsRouter = router({
       byId,
     };
   }),
+
+  /**
+   * 我的模型使用量（近 N 天）：模型指南頂欄用，取代對一般創作者無意義的契約稽核。
+   * 只回傳自己的聚合，不含他人資料。
+   */
+  myUsage: authedProcedure
+    .input(z.object({ days: z.number().int().min(1).max(90).optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const days = input?.days ?? 30;
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+      const uid = ctx.auth.user.id;
+      const rows = await db
+        .select({
+          modelId: schema.generations.modelId,
+          submits: sql<number>`count(*)::int`,
+          done: sql<number>`sum(case when ${schema.generations.status} = 'done' then 1 else 0 end)::int`,
+          points: sql<number>`sum(case when ${schema.generations.status} = 'done' then coalesce(${schema.generations.pointsActual}, ${schema.generations.pointsEst}) else 0 end)::int`,
+        })
+        .from(schema.generations)
+        .where(and(eq(schema.generations.userId, uid), gte(schema.generations.createdAt, since)))
+        .groupBy(schema.generations.modelId)
+        .orderBy(desc(sql`count(*)`))
+        .limit(12);
+      const totalSubmits = rows.reduce((s, r) => s + r.submits, 0);
+      const totalPoints = rows.reduce((s, r) => s + r.points, 0);
+      const totalDone = rows.reduce((s, r) => s + r.done, 0);
+      return {
+        days,
+        models: rows,
+        totalSubmits,
+        totalDone,
+        totalPoints,
+      };
+    }),
 
   workflows: authedProcedure.query(() =>
     WORKFLOW_PRESETS.map((w) => ({
