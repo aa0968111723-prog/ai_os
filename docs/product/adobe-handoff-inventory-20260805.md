@@ -15,16 +15,156 @@
 **Adobe 產「可匯出的像素／向量素材」**；**Figma 管排版與元件狀態**；**程式已有 React + CSS 變數殼**。  
 下列每一項都標三欄：**Adobe / Figma / 程式錨點**。
 
-### 0.1 必做清單速查（給 Adobe）
+### 0.1 三波交付速查
 
-| 優先 | Pack | 要生成什麼 | 詳細 |
-|------|------|------------|------|
-| **P0** | Pack 0 | 色票板（ASE/PNG）· Logo SVG 全彩+mono · App icon 1024+maskable · **61 個** 24px icon SVG | §10 Pack 0 |
-| **P1** | Pack 1 | **7+ 空狀態插畫**（無素材／無庫／無排程／沒靈感／素材遺失／社群空／定裝三張） | §10 Pack 1 |
-| **P2** | Pack 2 | Landing hero（桌 1440／手機 390）· OG 分享圖可選 | §10 Pack 2 |
-| 次 | Pack 3 | Figma 主導；Adobe 只補缺的點綴素材 | §10 Pack 3 |
+| 波次 | 何時 | 內容 |
+|------|------|------|
+| **第一波** | 週內 | Pack 0 品牌母版 + Pack 1 主路徑空狀態 + Pack 2 Landing |
+| **第二波** | 有 Figma W1–W5 後 | 創作／定裝／分鏡／殼／設定插畫；與稿對齊再畫 |
+| **第三波** | 可選 | 模型 12 類、社群牆、後台、紙質紋理、phase 小標 |
 
 **規格硬約束**：主色僅 `--primary` `#e05a10` 與中性象牙底；勿第二套 UI kit；SVG 優先、WebP 次之。
+
+---
+
+## 0.2 完整 Adobe 生成 checklist（含次優先＋既有資產）
+
+> 狀態語意：**精修**＝repo 已有可用檔，要 SVG／統一品質母版；**新建**＝程式只有 icon 文案或破圖，沒有插畫資產。  
+> 建議檔名落點：`client/public/design/`（新）或既有 `client/public/brand/`、`client/public/icons/`。
+
+### A. 第一波 — 必交（解鎖 W0 + 主路徑體感）
+
+| ID | 產出 | 狀態 | 既有／對照 | 程式錨點 |
+|----|------|------|------------|----------|
+| **A0-1** | CSS 色票板 ASE/PNG（標 `--fg`/`--bg`/`--card`/`--primary` 等名） | **新建**（對稿用） | hex 在 `styles.css` `:root` | 設計對稿，不進 runtime |
+| **A0-2** | Wordmark **SVG** 全彩 | **精修** | 已有 `logo-aios-color-v2.png`、`logo-aios-color-embedded.svg`（嵌字） | `brand.ts` `BRAND_LOGO_SRC` |
+| **A0-3** | Wordmark **SVG** mono | **精修** | 已有 `logo-aios-mono.png` | `BRAND_LOGO_SRC.monochrome` |
+| **A0-4** | App mark **1024** + **maskable** 母版 | **精修** | 已有 `icon-aios-v2-1024.png`、`icons/icon-v2-*-maskable.png` | PWA / `BRAND_MARK_SRC` |
+| **A0-5** | Favicon / Apple touch 與 mark 對齊一輪 | **精修** | `favicon-v2*`、`apple-touch-icon-v2` | `index.html` |
+| **A0-6** | Icon set **61** 個 24px SVG（1.5–2px stroke、`currentColor`） | **新建套件**（可替換 inline path） | 現為 `Icon.tsx` 內嵌 path | 建議 `public/design/icons/*.svg` |
+| **A1-1** | 空狀態：還沒有素材 | **新建** | 僅 `Icon`+文案 | `AssetLibrary`「還沒有素材——」 |
+| **A1-2** | 空狀態：還沒有資料庫／資料表 | **新建** | 同上 | `DatabasesPage`、`ProjectDatabasesCard` |
+| **A1-3** | 空狀態：還沒有筆記／排程 | **新建** | 同上 | `PlannerPage` |
+| **A1-4** | 空狀態：沒靈感／陪你做完（**主打**） | **新建** | 共創入口 | `co-create` / EmptyState chips |
+| **A1-5** | 空狀態：素材遺失（可與「未生成」區分） | **新建** | `MediaFallback` 破圖文案 | `AssetLibrary` / `MediaFallback` |
+| **A1-6** | 空狀態：還沒有回饋／社群空 | **新建** | 同上 | `AdminPage` 回饋、`CommunityPage` |
+| **A1-7a** | 空狀態：還沒有角色 | **新建** | 同上 | `CharacterCards` |
+| **A1-7b** | 空狀態：還沒有場景 | **新建** | 同上 | `ScenePresetCards` |
+| **A1-7c** | 空狀態：還沒有素材設定（道具） | **新建** | 同上 | `PropCards` |
+| **A2-1** | Landing hero（桌 ~1440、手機 ~390） | **新建** | Landing 現多文案+logo | `LandingPage.tsx` |
+| **A2-2** | OG／社群分享圖（可選） | **新建** | 若無 og:image 則補 | meta／分享 |
+
+### B. 第二波 — 創作／殼／定裝／分鏡（有 Figma 後對齊）
+
+| ID | 產出 | 狀態 | 程式錨點／文案 |
+|----|------|------|----------------|
+| **B1** | 今日工作台空（還沒有專案） | 新建 | `FirstRunGuide` / Launchpad 空 |
+| **B2** | 未分組「還差一步」 | 新建 | `AppRoutes` Ungrouped「你已成功加入 ✓ 還差一步」 |
+| **B3** | 還沒有生成紀錄 | 新建 | `GenerationList` |
+| **B4** | 還沒有執行軌跡 | 新建 | `CreationResourceDrawer` |
+| **B5** | 還沒有提示詞 | 新建 | `PromptLibrary` |
+| **B6** | 還沒有素材知識 | 新建 | `KnowledgeBase` |
+| **B7** | 媒體類型 icon 一組（image / video / audio / doc） | 新建 | `ModelPicker` 類別 |
+| **B8** | 分鏡：這一格還沒有畫面／版本 | 新建 | `SceneStudio` |
+| **B9** | 分鏡列表：此狀態無分鏡 | 新建 | `SceneList` |
+| **B10** | 匯出完成輕插畫（可選） | 新建 | `ExportJobButton` |
+| **B11** | 桌面版連接插畫 | 新建 | `DesktopCompanionPage`「需要 Aios 桌面版」 |
+| **B12** | 私訊／聊天空狀態 | 新建 | `ChatEmptyState`「選一位夥伴開始聊」 |
+| **B13** | 頂欄 brand mark 精修（可選） | 精修 | `AppHeader` / `.brand` |
+| **B14** | Splash 極淡背景氛圍（可選） | 新建／精修 | `SplashScreen` · `splash.css` |
+| **B15** | 錯誤邊界「畫面出了點狀況」輕插畫（可選） | 新建 | `main.tsx` ErrorBoundary |
+| **B16** | 金鑰已接上／個人·0 點 小標示（可選） | 新建 | BYOK / Integrations 徽章 |
+
+### C. 第三波 — 可選加深
+
+| ID | 產出 | 備註 |
+|----|------|------|
+| **C1** | 模型指南 ~12 類小插圖 | `ModelsPage`；工作量大、優先低 |
+| **C2** | 社群靈感牆空狀態精修 | 可與 A1-6 共用或變體 |
+| **C3** | 紙質紋理 WebP（低對比，不改可讀對比） | 貼 `--bg`／`--card` |
+| **C4** | Brand ribbon 靜態 SVG 預覽 | `--brand-ribbon` |
+| **C5** | 共創四 phase 小標示 | theme→structure→visuals→wrap |
+| **C6** | 定裝包封面樣式 | CostumePack 可選 |
+| **C7** | 地圖還是空的（Planner 關係圖） | `PlannerPage` |
+| **C8** | 沒有符合的模型（搜尋空） | `ModelsPage`；多半不必插畫 |
+| **C9** | 範本收藏即將推出 | drawer 占位；可延後 |
+| **C10** | 世界觀範例卡裝飾 | `WorldviewExampleCard` |
+
+### D. 程式 EmptyState 文案 ↔ 插畫對照（盤點日）
+
+下列皆為 **EmptyState 元件實際 title**（方便設計對 copy）：
+
+| 文案 | 建議插畫 ID |
+|------|-------------|
+| 還沒有素材—— | A1-1 |
+| 還沒有資料庫 | A1-2 |
+| 還沒有資料表關聯到這個專案 | A1-2 變體 |
+| 還沒有筆記 / 接下來沒有排程 / 還沒有任何行程 | A1-3 |
+| 還沒有角色 / 還沒有場景 / 還沒有素材設定 | A1-7a–c |
+| 還沒有生成紀錄—— | B3 |
+| 還沒有執行軌跡—— | B4 |
+| 還沒有提示詞—— | B5 |
+| 還沒有素材知識 | B6 |
+| 這一格還沒有畫面 / 還沒有版本 | B8 |
+| 這個狀態目前沒有分鏡 | B9 |
+| 選一位夥伴開始聊 | B12 |
+| 這項功能需要 Aios 桌面版 | B11 |
+| 你已成功加入 ✓ 還差一步 | B2 |
+| 還沒有回饋 | A1-6 |
+| 畫面出了點狀況 | B15 |
+| 這張地圖還是空的 | C7 |
+| 沒有符合的模型 | C8 |
+| 範本收藏（即將推出） | C9 |
+| 不知道要填什麼？先抄這一份 | C10（裝飾即可） |
+
+### E. 既有品牌檔（精修時勿丟版本）
+
+| 路徑 | 說明 |
+|------|------|
+| `client/public/brand/logo-aios-color-v2.png` (+@2x) | 現行全彩 wordmark |
+| `client/public/brand/logo-aios-color-embedded.svg` | 已有 SVG 形，需否精修由設計評 |
+| `client/public/brand/logo-aios-mono.png` | 單色 |
+| `client/public/brand/icon-aios-v2-{192,512,1024}.png` | mark 柵格 |
+| `client/public/icons/icon-v2-*-maskable.png` | PWA maskable |
+| `client/public/favicon-v2*` · `apple-touch-icon-v2.png` | 瀏覽器／iOS |
+
+**精修原則**：新檔用 `-v3` 或替換後改 `brand.ts` 路徑；保留一版舊檔直到上線驗證。
+
+### F. 不要交給 Adobe（再強調）
+
+| 不做 | 原因 |
+|------|------|
+| tRPC／權限／quota／DAG 流程圖 | 工程規格 |
+| 模型價目／供應商目錄圖 | 商業資料常變 |
+| 第二套色系、Tailwind 新 kit | token 單一真相 |
+| 重 Lottie／3D 第一期 | 體積與維護 |
+| Adobe OAuth 修圖 UI 重做 | 屬 #224 產品整合，非本 brief |
+
+### G. 建議交付檔名（第一波）
+
+```
+client/public/design/
+  swatches/aios-tokens.ase          # 或 .png 色票板
+  brand/logo-aios-color.svg
+  brand/logo-aios-mono.svg
+  brand/mark-aios-1024.png
+  brand/mark-aios-1024-maskable.png
+  icons/{arrow-right,sparkles,...}.svg   # 61
+  empty/no-assets.webp
+  empty/no-database.webp
+  empty/no-planner.webp
+  empty/no-inspiration.webp
+  empty/media-missing.webp
+  empty/no-feedback.webp
+  empty/no-character.webp
+  empty/no-scene.webp
+  empty/no-prop.webp
+  marketing/landing-hero-desktop.webp
+  marketing/landing-hero-mobile.webp
+  marketing/og.png                    # 可選
+```
+
+第一波完成定義：**A0-\* + A1-\* + A2-1** 可下載；Figma 可先只有 W0 變數綁這些資產。
 
 ---
 
@@ -212,35 +352,39 @@ G1 桌面剪輯連接插畫 · G2 可選「金鑰已接上」小標示。
 
 ## 10. 建議交付順序（給 Adobe／Figma）
 
-### Pack 0 — 週內可交（解鎖 W0）
+> **完整逐項 ID（A0–C10、EmptyState 對照、既有檔、建議檔名）見 §0.2。**  
+> 下表是 Pack 別名，與 §0.2 第一波對齊。
+
+### Pack 0 — 週內可交（解鎖 W0）＝ §0.2 A0-\*
 | ID | Adobe 產出 | 規格 | 程式落點 |
 |----|------------|------|----------|
-| P0-1 | CSS 色票板 | ASE/PNG 標 `--primary` 等名 | 對稿用 |
-| P0-2 | Logo SVG 全彩 + mono | 透明、viewBox | `public/brand/` |
-| P0-3 | App icon 1024 + maskable | safe zone 80% | `public/icons/` |
-| P0-4 | Icon set 24px SVG（上列 61） | 1.5–2px stroke、單色 currentColor | 可替 `Icon.tsx` |
+| P0-1 (=A0-1) | CSS 色票板 | ASE/PNG 標 `--primary` 等名 | 對稿用 |
+| P0-2 (=A0-2/3) | Logo SVG 全彩 + mono | 透明、viewBox | `public/brand/` |
+| P0-3 (=A0-4/5) | App icon 1024 + maskable | safe zone 80% | `public/icons/` |
+| P0-4 (=A0-6) | Icon set 24px SVG（上列 61） | 1.5–2px stroke、單色 currentColor | 可替 `Icon.tsx` |
 
-### Pack 1 — 空狀態插畫（解鎖 W1–W5 體感）
+### Pack 1 — 空狀態插畫（解鎖 W1–W5 體感）＝ §0.2 A1-\*
 | ID | 場景文案（現有 EmptyState） | 建議構圖 |
 |----|---------------------------|----------|
-| P1-1 | 還沒有素材 | 相機／畫板溫和空 |
-| P1-2 | 還沒有資料庫 | 表格輪廓 |
-| P1-3 | 還沒有筆記／排程 | 日曆空白 |
-| P1-4 | 沒靈感／陪你做完 | 溫暖引導，非「AI 機器人」 |
-| P1-5 | 素材遺失 | 與「未生成」可區分 |
-| P1-6 | 還沒有回饋／社群空 | 輕插畫 |
-| P1-7 | 角色／場景／道具空定裝 | 三張一組 |
+| P1-1 (=A1-1) | 還沒有素材 | 相機／畫板溫和空 |
+| P1-2 (=A1-2) | 還沒有資料庫 | 表格輪廓 |
+| P1-3 (=A1-3) | 還沒有筆記／排程 | 日曆空白 |
+| P1-4 (=A1-4) | 沒靈感／陪你做完 | 溫暖引導，非「AI 機器人」 |
+| P1-5 (=A1-5) | 素材遺失 | 與「未生成」可區分 |
+| P1-6 (=A1-6) | 還沒有回饋／社群空 | 輕插畫 |
+| P1-7 (=A1-7a–c) | 角色／場景／道具空定裝 | 三張一組 |
 
 規格：SVG 或 WebP；**主色僅用 `--primary` / 中性**；淺底 `--bg`/`--card`；寬 320–640 CSS px；2x 可選。
 
-### Pack 2 — 行銷／Landing
+### Pack 2 — 行銷／Landing ＝ §0.2 A2-\*
 | ID | 產出 |
 |----|------|
-| P2-1 | Landing hero（桌 1440、手機 390） |
-| P2-2 | OG／分享圖（可選） |
+| P2-1 (=A2-1) | Landing hero（桌 1440、手機 390） |
+| P2-2 (=A2-2) | OG／分享圖（可選） |
 
-### Pack 3 — Figma 優先（Adobe 輔助）
-W0 元件庫 → W1 殼 → W2 工作台 → W3 共創 → W4 定裝 → W5 分鏡 → W6 設定 → W7 手機。
+### Pack 3 — 第二／三波 + Figma ＝ §0.2 B\* / C\* + overall W0–W7
+W0 元件庫 → W1 殼 → W2 工作台 → W3 共創 → W4 定裝 → W5 分鏡 → W6 設定 → W7 手機。  
+Adobe 第二波插畫（生成紀錄、軌跡、分鏡格、桌面連線、私訊…）見 **§0.2 B**；可選加深見 **§0.2 C**。
 
 每幀：**Desktop + Mobile**；空／錯／無權／Confirm 各一（計畫 F6）。
 
