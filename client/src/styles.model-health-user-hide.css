@@ -1,0 +1,8 @@
+/*
+ * 模型指南（一般創作者）不顯示「站內契約健康」稽核卡。
+ * 404／逾時／失敗／NIM 等術語會讓使用者覺得怪；完整統計改放「團隊管理」後台。
+ * Admin 頁不在 .models-page 下，不受影響。
+ */
+.models-page .model-health-overview {
+  display: none !important;
+}
