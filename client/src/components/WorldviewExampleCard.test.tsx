@@ -37,12 +37,36 @@ describe("WorldviewExampleCard：展示範例", () => {
 });
 
 describe("WorldviewExampleCard：套用", () => {
-  it("按「整份填進去」只送一個 patch（連發會讓樂觀合併 race）", async () => {
+  it("無 onApplyAndGoStudio 時主鈕為「整份填進去」，只送一個 patch", async () => {
     const onApply = vi.fn();
     render(<WorldviewExampleCard wv={blank} kind="witness" canEdit onApply={onApply} onDismiss={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: "整份填進去" }));
     expect(onApply).toHaveBeenCalledTimes(1);
     expect(onApply).toHaveBeenCalledWith(applyWorldviewFullExample(blank, "witness", false));
+  });
+
+  it("C3.2：有 onApplyAndGoStudio 時主鈕「套用後去創作台」；次要只套用", async () => {
+    const onApply = vi.fn();
+    const onApplyAndGoStudio = vi.fn();
+    render(
+      <WorldviewExampleCard
+        wv={blank}
+        kind="witness"
+        canEdit
+        onApply={onApply}
+        onApplyAndGoStudio={onApplyAndGoStudio}
+        onDismiss={() => {}}
+      />,
+    );
+    const patch = applyWorldviewFullExample(blank, "witness", false);
+    await userEvent.click(screen.getByTestId("wv-example-apply-studio"));
+    expect(onApplyAndGoStudio).toHaveBeenCalledTimes(1);
+    expect(onApplyAndGoStudio).toHaveBeenCalledWith(patch);
+    expect(onApply).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "只套用、先不生成" }));
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(onApply).toHaveBeenCalledWith(patch);
   });
 
   it("送出的 patch 併回去就是就緒狀態，且不觸發軟警告", async () => {
@@ -64,9 +88,19 @@ describe("WorldviewExampleCard：套用", () => {
 
 describe("WorldviewExampleCard：唯讀", () => {
   it("檢視者看得到範例與預覽，但沒有任何套用按鈕", () => {
-    render(<WorldviewExampleCard wv={blank} kind="witness" canEdit={false} onApply={() => {}} onDismiss={() => {}} />);
+    render(
+      <WorldviewExampleCard
+        wv={blank}
+        kind="witness"
+        canEdit={false}
+        onApply={() => {}}
+        onApplyAndGoStudio={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
     expect(screen.getByText(worldviewQuickExampleForKind("witness").logline)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "整份填進去" })).toBeNull();
+    expect(screen.queryByTestId("wv-example-apply-studio")).toBeNull();
     expect(screen.queryByRole("button", { name: "我自己填" })).toBeNull();
   });
 });

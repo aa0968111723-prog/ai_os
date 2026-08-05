@@ -49,11 +49,11 @@ describe("TocNav (WB-06)", () => {
     }
   });
 
-  it("DEFAULT_ITEMS is three stages: context → create workbench → deliver", () => {
+  it("DEFAULT_ITEMS is three stages: 定調 → 創作 → 交付 (C3)", () => {
     expect(DEFAULT_ITEMS).toEqual([
-      { id: "stage-context", label: "① 專案上下文" },
-      { id: "stage-create", label: "② AI 創作中心" },
-      { id: "stage-deliver", label: "③ 分鏡・編修・交付" },
+      { id: "stage-context", label: "① 定調" },
+      { id: "stage-create", label: "② 創作" },
+      { id: "stage-deliver", label: "③ 交付" },
     ]);
     // Must not list mode anchors as separate page sections
     const ids = DEFAULT_ITEMS.map((i) => i.id);
@@ -70,11 +70,11 @@ describe("TocNav (WB-06)", () => {
     const user = userEvent.setup();
     render(<TocNav />);
 
-    expect(screen.getByRole("button", { name: /① 專案上下文/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /② AI 創作中心/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /③ 分鏡・編修・交付/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /① 定調/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /② 創作/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /③ 交付/ })).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: /② AI 創作中心/ }));
+    await user.click(screen.getByRole("button", { name: /② 創作/ }));
     expect(scrollIntoView).toHaveBeenCalled();
     expect(window.location.hash).toBe("#stage-create");
   });

@@ -22,6 +22,7 @@ export function WorldviewExampleCard({
   kind,
   canEdit,
   onApply,
+  onApplyAndGoStudio,
   onDismiss,
 }: {
   wv: Worldview;
@@ -29,6 +30,11 @@ export function WorldviewExampleCard({
   canEdit: boolean;
   /** 單一 patch 一次送出——連發 mutate 會讓樂觀合併在同一 tick 互相 race */
   onApply: (patch: ReturnType<typeof applyWorldviewFullExample>) => void;
+  /**
+   * C3.2：套用範例後直接進創作台（套用 + reveal studio）。
+   * 未傳時主按鈕退回「整份填進去」。
+   */
+  onApplyAndGoStudio?: (patch: ReturnType<typeof applyWorldviewFullExample>) => void;
   onDismiss: () => void;
 }) {
   const ex = worldviewQuickExampleForKind(kind);
@@ -48,9 +54,24 @@ export function WorldviewExampleCard({
         action={
           canEdit ? (
             <div className="wv-example__actions">
-              <Button variant="primary" onClick={() => onApply(patch)}>
-                整份填進去
-              </Button>
+              {onApplyAndGoStudio ? (
+                <>
+                  <Button
+                    variant="primary"
+                    data-testid="wv-example-apply-studio"
+                    onClick={() => onApplyAndGoStudio(patch)}
+                  >
+                    套用後去創作台
+                  </Button>
+                  <Button variant="ghost" onClick={() => onApply(patch)}>
+                    只套用、先不生成
+                  </Button>
+                </>
+              ) : (
+                <Button variant="primary" onClick={() => onApply(patch)}>
+                  整份填進去
+                </Button>
+              )}
               <Button variant="ghost" onClick={onDismiss}>
                 我自己填
               </Button>
