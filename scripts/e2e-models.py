@@ -99,9 +99,17 @@ ok("LLM → 文字輸出(不入素材庫)", g.get("status") == "done" and bool(g
 g = call("POST", admin, "generation.submit", {"projectId": pid, "modelId": "fal-ai/kokoro/mandarin-chinese", "prompt": "把心安住於當下"})
 g = wait_done(admin, g["id"])
 audio_url = g.get("resultUrl") or ""
-ok("TTS → 音訊 URL", g.get("status") == "done" and "audio" in audio_url)
-req = urllib.request.Request(audio_url)
-with urllib.request.urlopen(req) as r:
+# 完成後可能仍是 mock/外部網址（含 audio），或已落地成相對路徑 /api/assets/:id/file
+ok(
+    "TTS → 音訊 URL",
+    g.get("status") == "done"
+    and bool(audio_url)
+    and ("audio" in audio_url or "/api/assets/" in audio_url),
+)
+fetch_url = audio_url if audio_url.startswith("http") else f"{HOST}{audio_url}"
+req = urllib.request.Request(fetch_url)
+# 落地檔需登入＋組隔離；沿用 admin session cookie
+with admin.open(req) as r:
     wav = r.read()
 ok("音訊可下載且為 WAV", wav[:4] == b"RIFF")
 
