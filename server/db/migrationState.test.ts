@@ -9,6 +9,7 @@ import {
   isReviewedLandingBackfillStatement,
   isRowDeduplicationStatement,
   isSupersededMigrationHash,
+  LEGACY_ADOPTION_ADDITIVE_TAIL_TAGS,
   LEGACY_ADOPTION_PENDING_TAGS,
   LEGACY_ADOPTION_THROUGH_TAG,
   loadMigrationManifest,
@@ -210,9 +211,14 @@ describe("migration manifest validation", () => {
 
 describe("legacy migration adoption bridge", () => {
   const manifest = loadMigrationManifest();
-  const pending = manifest.entries.filter((entry) =>
-    LEGACY_ADOPTION_PENDING_TAGS.includes(entry.tag as (typeof LEGACY_ADOPTION_PENDING_TAGS)[number]),
-  );
+  // The reviewed set is the contiguous prefix PLUS the explicitly reviewed
+  // additive tail — drift is computed from the current schema.ts, so the tail's
+  // columns/tables are part of what a legacy database is expected to be missing.
+  const reviewedTags = [
+    ...LEGACY_ADOPTION_PENDING_TAGS,
+    ...LEGACY_ADOPTION_ADDITIVE_TAIL_TAGS,
+  ] as readonly string[];
+  const pending = manifest.entries.filter((entry) => reviewedTags.includes(entry.tag));
   const pendingStatements = pending.flatMap((entry) =>
     entry.sql
       .split("--> statement-breakpoint")
@@ -313,6 +319,77 @@ describe("legacy migration adoption bridge", () => {
     expect(result.ok).toBe(true);
     expect(result.throughIndex).toBe(1);
     expect(result.adoptionFingerprint).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("counts the reviewed additive tail as expected drift, not unreviewed divergence", () => {
+    // Regression for the gate that stopped every post-0036 schema addition:
+    // the prefix ends at 0035 (0036 rewrites a primary key and can never join
+    // it), so a purely-additive 0037 used to read as "非 bridge 預期 drift".
+    expect(LEGACY_ADOPTION_ADDITIVE_TAIL_TAGS.length).toBeGreaterThan(0);
+    const tailStatements = manifest.entries
+      .filter((entry) => (LEGACY_ADOPTION_ADDITIVE_TAIL_TAGS as readonly string[]).includes(entry.tag))
+      .flatMap((entry) => entry.sql.split("--> statement-breakpoint").map(canonicalMigrationStatement).filter(Boolean));
+    expect(tailStatements.length).toBeGreaterThan(0);
+    // The tail must sit strictly after the prefix, otherwise it is not a tail.
+    const prefixEnd = manifest.entries.findIndex((entry) => entry.tag === LEGACY_ADOPTION_PENDING_TAGS.at(-1));
+    for (const tag of LEGACY_ADOPTION_ADDITIVE_TAIL_TAGS) {
+      expect(manifest.entries.findIndex((entry) => entry.tag === tag)).toBeGreaterThan(prefixEnd);
+    }
+
+    const withTail = verifyLegacyAdoptionBridge(
+      manifest,
+      { hasDataLoss: false, warnings: [], statements: expectedStatements },
+      LEGACY_ADOPTION_THROUGH_TAG,
+    );
+    expect(withTail.errors).toEqual([]);
+    expect(withTail.ok).toBe(true);
+  });
+
+  it("still rejects a destructive statement smuggled into the additive tail", () => {
+    const tailTag = LEGACY_ADOPTION_ADDITIVE_TAIL_TAGS[0]!;
+    const sabotaged = { ...manifest, entries: manifest.entries.map((entry) =>
+      entry.tag === tailTag
+        ? { ...entry, sql: `${entry.sql}\n--> statement-breakpoint\nALTER TABLE "users" DROP COLUMN "email";` }
+        : entry,
+    ) };
+    const result = verifyLegacyAdoptionBridge(
+      sabotaged,
+      { hasDataLoss: false, warnings: [], statements: expectedStatements },
+      LEGACY_ADOPTION_THROUGH_TAG,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/必須重新人工審查/);
+  });
+
+  it("fails closed when a listed tail tag is not actually after the bridge prefix", () => {
+    // A stale list is a silently widened gate: the tag would contribute no
+    // expected DDL while still reading as reviewed. Renaming the journal entry
+    // stands in for "someone removed or reordered the migration".
+    const renamed = { ...manifest, entries: manifest.entries.map((entry) =>
+      entry.tag === LEGACY_ADOPTION_ADDITIVE_TAIL_TAGS[0] ? { ...entry, tag: `${entry.tag}_moved` } : entry,
+    ) };
+    const result = verifyLegacyAdoptionBridge(
+      renamed,
+      { hasDataLoss: false, warnings: [], statements: expectedStatements },
+      LEGACY_ADOPTION_THROUGH_TAG,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/reviewed additive tail 對不上 journal/);
+  });
+
+  it("names the offending statements so a red gate is diagnosable from the log", () => {
+    const result = verifyLegacyAdoptionBridge(
+      manifest,
+      {
+        hasDataLoss: false,
+        warnings: [],
+        statements: [...expectedStatements, 'ALTER TABLE "projects" ADD COLUMN "not_reviewed" uuid;'],
+      },
+      LEGACY_ADOPTION_THROUGH_TAG,
+    );
+    expect(result.ok).toBe(false);
+    // 只講數量的話，看到紅燈的人得自己把 34 支 migration 的 DDL 正規化後逐條比對
+    expect(result.errors.join(" ")).toContain('ALTER TABLE "projects" ADD COLUMN "not_reviewed" uuid');
   });
 
   it("rejects extra drift, warnings, destructive flags, and arbitrary prefixes", () => {
