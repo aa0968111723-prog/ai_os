@@ -13,7 +13,8 @@ describe("generation continuity source-lock", () => {
     const approvalIdx = source.indexOf("const parsedContinuity = continuitySnapshotSchema.safeParse");
     const refreshIdx = source.indexOf("await resolveContinuityReferenceUrls(", approvalIdx);
     const applyIdx = source.indexOf("applyContinuityReferences(submitParams", refreshIdx);
-    const submitIdx = source.indexOf("await falSubmit(endpointOf(model)", applyIdx);
+    // BYOK：falSubmit 改多行並帶 byokFalOpts，只斷言呼叫順序仍在 apply 之後
+    const submitIdx = source.indexOf("await falSubmit(", applyIdx);
     expect(approvalIdx).toBeGreaterThan(-1);
     expect(refreshIdx).toBeGreaterThan(approvalIdx);
     expect(applyIdx).toBeGreaterThan(refreshIdx);

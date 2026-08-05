@@ -546,7 +546,23 @@ export function GenerationList({
               <GenerationPromptCopy text={g.prompt} />
             </div>
             <div className="meta mono" style={{ fontSize: 11 }}>
-              {getModel(g.modelId)?.label ?? g.modelId}・−{g.pointsEst} 點{g.pointsRefunded > 0 && `（已退 +${g.pointsRefunded}）`}
+              {getModel(g.modelId)?.label ?? g.modelId}・
+              {(() => {
+                // BYOK：params.__aiosSourceMeta.usedUserKey → 個人金鑰・0 點
+                const meta = (g.params as { __aiosSourceMeta?: { usedUserKey?: boolean } } | null)?.__aiosSourceMeta;
+                if (meta?.usedUserKey) {
+                  return (
+                    <span title="此筆使用個人 fal 金鑰，未扣平台點數">個人金鑰・0 點</span>
+                  );
+                }
+                const spent = g.status === "done" && g.pointsActual != null ? g.pointsActual : g.pointsEst;
+                return (
+                  <>
+                    平台・{spent} 點
+                    {g.pointsRefunded > 0 && `（已退 +${g.pointsRefunded}）`}
+                  </>
+                );
+              })()}
             </div>
             {/* 細膩連結列：這筆生成「帶了什麼、綁在哪、從哪來」一眼可回看、可點回去 */}
             {(() => {
