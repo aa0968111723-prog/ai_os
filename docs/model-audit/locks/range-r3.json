@@ -2,12 +2,12 @@
   "lock": "range-r3",
   "holder": "R3",
   "token": null,
-  "expiresAt": "2026-08-05T04:21:47Z",
-  "heartbeatAt": "2026-08-05T04:11:47Z",
+  "expiresAt": "2026-08-05T04:27:29Z",
+  "heartbeatAt": "2026-08-05T04:17:29Z",
   "role": "R3",
-  "lastCompletedIndex": 111,
-  "lastCompletedId": "bytedance/seedance-2.0/text-to-video",
-  "lastCompletedSlug": "bytedance__seedance-2.0__text-to-video",
+  "lastCompletedIndex": 112,
+  "lastCompletedId": "fal-ai/veo3.1/lite",
+  "lastCompletedSlug": "fal-ai__veo3.1__lite",
   "mode": "static+research",
-  "note": "DONE #111 OpenAPI200; points=47≈5s@720p; P0 duration=auto flat estimate; cost 6s文案債; no live; no --yes"
+  "note": "DONE #112 OpenAPI200; points=5≈5s@720p無音; P0 default 8s+audio≈12 underest; 1:1 not in enum; cost 6s文案債; no live; no --yes"
 }

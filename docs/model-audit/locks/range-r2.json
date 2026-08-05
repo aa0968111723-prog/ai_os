@@ -2,12 +2,12 @@
   "lock": "range-r2",
   "holder": "R2",
   "token": null,
-  "expiresAt": "2026-08-05T04:07:09Z",
-  "heartbeatAt": "2026-08-05T03:57:09Z",
+  "expiresAt": "2026-08-05T04:26:39Z",
+  "heartbeatAt": "2026-08-05T04:16:39Z",
   "role": "R2",
-  "index": 58,
-  "id": "fal-ai/esrgan",
-  "slug": "fal-ai__esrgan",
+  "index": 60,
+  "id": "fal-ai/clarity-upscaler",
+  "slug": "fal-ai__clarity-upscaler",
   "phase": "static+research",
-  "note": "DONE #58 ready-static-only; needs=image; verified stays true; face API≠face_enhance; default scale=2; cost/sec dual-source"
+  "note": "DONE #60 ready-static-only; 建議調 points→4(預設2x~1MP源)或8(4K); creativity=0.35✅; needs=image; 禁--yes"
 }

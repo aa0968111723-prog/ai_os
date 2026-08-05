@@ -178,3 +178,26 @@ broken 新增：無（契約已修，非 dead endpoint）
 broken 新增：無  
 下一輪：R4 下一 id（#166 起，號段 160–212）
 
+
+## #13 | 階段:研究實測
+
+| 角色 | 結果 |
+|------|------|
+| R | #216 `fal-ai/minimax/speech-2.6-hd` → **已修 input** `text`→`prompt`+`output_format:url`（OpenAPI required=prompt；default hex 會壞 extract）；points=3 維持；verified=false |
+| P | 跳過無 KEY |
+| L | 跳過無 KEY（spentTwd=4；鎖空閒） |
+| J | 跳過 |
+
+broken 新增：無（input 422 已修）  
+下一輪：R 各 #6,#60,#112,#166,#217；P 下一 cat（需 FAL_KEY）；L 經濟 !needs（需 FAL_KEY）
+
+## R5 unit | #219 minimax/voice-clone | 2026-08-05
+
+| 角色 | 結果 |
+|------|------|
+| R5 | `fal-ai/minimax/voice-clone` → **維持** points=47／$1.50/次／verified=false／input `{audio_url,text}` ok；OpenAPI 200；**P0** `custom_voice_id` 未進 extractResult、未串 MiniMax TTS；預覽 $0.30/千字未估點 P2；ready-static-only；零 live／禁止 --yes |
+
+broken 新增：無（端點存活；產品管線缺口記於 card，非 dead slug）  
+card：`docs/model-audit/cards/fal-ai__minimax__voice-clone.md`  
+下一輪：R5 下一 id（#220 起，號段 213–266）
+
