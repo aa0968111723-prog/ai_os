@@ -1,5 +1,6 @@
 import { router } from "../trpc";
 import { authRouter } from "./auth";
+import { sessionBootRouter } from "./sessionBoot";
 import { adminRouter } from "./admin";
 import { projectsRouter } from "./projects";
 import { generationRouter } from "./generation";
@@ -44,6 +45,7 @@ import { communityRouter } from "./community";
 export const appRouter = router({
   models: modelsRouter,
   auth: authRouter,
+  sessionBoot: sessionBootRouter,
   admin: adminRouter,
   projects: projectsRouter,
   generation: generationRouter,
