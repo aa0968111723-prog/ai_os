@@ -5,7 +5,7 @@ import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
 import { assertReferenceImage } from "../services/referenceAsset";
 import { worldviewSchema } from "../../shared/worldview";
-import { PLATFORMS } from "../../shared/models";
+import { PLATFORMS, PROJECT_FORMAT_IDS, type ProjectFormat } from "../../shared/models";
 import {
   buildEpisodeNote,
   buildEpisodeScenes,
@@ -49,7 +49,7 @@ const MASTER_TABOOS = ["不斷章取義", "不戲謔開示", "不使用爭議人
 /**
  * 母版要用的內容類型／發布平台：一律取該組「啟用中」的選項（與 projects.create 同一把尺）。
  * 平台優先挑直式（母版規格寫死 9:16）；該組沒有直式選項時退第一個啟用平台——
- * 寧可先建起來再由組長到「選項」頁補直式，也不要因為選項沒設好就整條流程開不了。
+ * 寧可先建起來再由組長就地補直式，也不要因為選項沒設好就整條流程開不了。
  */
 async function pickSeriesOptions(groupId: string, template: SeriesTemplate) {
   await ensureGroupOptions(groupId);
@@ -146,6 +146,8 @@ export const projectsRouter = router({
         title: z.string().trim().min(1, "請填專案名稱").max(80, "專案名稱太長（最多 80 字）"),
         kind: z.string().min(1),
         platform: z.string().min(1),
+        /** 建立時直接指定畫面尺寸（比例選單）；未給就沿用平台預設比例 */
+        format: z.enum(PROJECT_FORMAT_IDS as [ProjectFormat, ...ProjectFormat[]]).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -156,8 +158,10 @@ export const projectsRouter = router({
       const match = platformOptions.find((o) => o.value === input.platform && o.active);
       // 該組已有 platform 選項（一定有，seed 過）→ 只認啟用中的；停用/刪除的平台一律拒絕，不再退回內建。
       // 僅在極端「該組完全沒有 platform 選項」時才退回 shared/models 內建（理論上 seed 後不會發生）。
-      const format = match?.format ?? (platformOptions.length === 0 ? PLATFORMS.find((p) => p.id === input.platform)?.format : undefined);
-      if (!format) throw new TRPCError({ code: "BAD_REQUEST", message: "這個發布平台已停用或不存在，請重新選一個" });
+      const platformFormat = match?.format ?? (platformOptions.length === 0 ? PLATFORMS.find((p) => p.id === input.platform)?.format : undefined);
+      if (!platformFormat) throw new TRPCError({ code: "BAD_REQUEST", message: "這個發布平台已停用或不存在，請重新選一個" });
+      // 使用者在建立表單挑過尺寸就以它為準（平台仍要合法，只是比例可另選）
+      const format = input.format ?? platformFormat;
       const [project] = await db
         .insert(schema.projects)
         .values({

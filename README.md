@@ -44,11 +44,25 @@ npm run dev                 # server :3000 + client :5173
 ## 結構
 
 ```
-client/   React 前端（設計 tokens／UI）
-server/   Express + tRPC + Drizzle
-shared/   模型註冊表 · 世界觀 schema（前後端共用，零漂移）
-docs/     規劃文件
+client/     React 前端（設計 tokens／UI）
+server/     Express + tRPC + Drizzle
+shared/     模型註冊表 · 世界觀 schema（前後端共用，零漂移）
+docs/       規劃文件
+assets-src/ 圖片原圖（不出貨；壓縮後才進 client/public）
 ```
+
+### 畫風縮圖
+
+`assets-src/styles/` 是七張 1024×1024 的畫風原圖，**不會**隨前端打包出貨。
+改圖或加圖後跑：
+
+```bash
+npm run assets:styles
+```
+
+會在 `client/public/styles/` 產生 400×300 卡片圖（webp＋jpg fallback）與 128×128 縮圖，
+並更新 `client/src/generated/styleImageLqip.ts`（內嵌的模糊佔位圖）。產物有進版控，
+所以正式建置不需要 sharp。直接把原圖放進 `client/public/` 會讓「創作」分頁首屏多背 6MB。
 
 ## 已完成 / 路線圖
 

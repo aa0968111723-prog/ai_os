@@ -79,7 +79,6 @@ describe("filterNavItems (TD-05b)", () => {
       // me omitted → no capabilities
     };
     expect(keysOf(filterNavItems(manageItems, leaderOnly))).toEqual([
-      "options",
       "members",
       "logs",
     ]);
@@ -90,7 +89,6 @@ describe("filterNavItems (TD-05b)", () => {
       canSeeOrg: true,
     };
     expect(keysOf(filterNavItems(manageItems, admin))).toEqual([
-      "options",
       "members",
       "logs",
       "admin",
@@ -113,14 +111,13 @@ describe("filterNavItems (TD-05b)", () => {
       me: meForRoles({ global: FULL_CAPS, groups: { g1: FULL_CAPS } }),
     };
     expect(keysOf(filterNavItems(manageItems, ctx))).toEqual([
-      "options",
       "members",
       "logs",
       "admin",
     ]);
   });
 
-  it("leader on active group sees options + org items, not admin", () => {
+  it("leader on active group sees org items, not admin", () => {
     const ctx: NavFilterContext = {
       isAdmin: false,
       activeIsLeader: true,
@@ -135,14 +132,13 @@ describe("filterNavItems (TD-05b)", () => {
       }),
     };
     expect(keysOf(filterNavItems(manageItems, ctx))).toEqual([
-      "options",
       "members",
       "logs",
     ]);
   });
 
-  it("leader switched to member-only active group hides options but keeps org items", () => {
-    // Regression: options is group-scoped; members/logs are any-group (canSeeOrg)
+  it("leader switched to member-only active group keeps org items", () => {
+    // Regression: members/logs are any-group (canSeeOrg), not scoped to the active group
     const ctx: NavFilterContext = {
       isAdmin: false,
       activeIsLeader: false,
@@ -182,7 +178,6 @@ describe("filterNavItems (TD-05b)", () => {
       }),
     };
     expect(keysOf(filterNavItems(manageItems, ctx))).toContain("admin");
-    expect(keysOf(filterNavItems(manageItems, ctx))).toContain("options");
   });
 
   it("UI-only directory.view falls back to canSeeOrg require flag", () => {
@@ -206,6 +201,12 @@ describe("filterNavItems (TD-05b)", () => {
       me: meForRoles({ global: [], groups: { g1: MEMBER_CAPS } }),
     };
     expect(keysOf(filterNavItems(manageItems, org))).toContain("members");
+  });
+
+  // 選項改成「在需要的地方就地新增」（建立專案表單、世界觀 chips），選單不再有這一項；
+  // /options 本身仍是可用路由，只是不從選單進入。
+  it("no menu entry points at the options page any more", () => {
+    expect(accountMenuItems.some((i) => i.key === "options" || i.href === "/options")).toBe(false);
   });
 
   it("ungated items always pass", () => {

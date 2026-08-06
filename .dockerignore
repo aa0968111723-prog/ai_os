@@ -9,3 +9,6 @@ coverage
 .claude
 *.log
 tmp
+# 畫風原圖（1024×1024，合計 6.4MB）只給 npm run assets:styles 壓縮用，
+# 出貨的是 client/public/styles/ 底下的小尺寸變體——不需要進映像檔。
+assets-src

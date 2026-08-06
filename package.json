@@ -21,6 +21,7 @@
     "db:adopt:dry-run": "tsx scripts/db/adopt.ts --dry-run",
     "report:orphans": "tsx scripts/report-schema-orphans.ts",
     "assets:verify": "tsx scripts/verify-asset-integrity.ts",
+    "assets:styles": "node scripts/optimize-style-images.mjs",
     "assets:backup": "bash scripts/backup-assets.sh",
     "models:contracts": "tsx scripts/sync-model-contracts.ts",
     "models:contracts:openapi": "tsx scripts/sync-model-contracts.ts --openapi",
