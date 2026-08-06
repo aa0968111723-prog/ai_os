@@ -112,7 +112,9 @@
    * generic serif 對 zh-Hant 就是細明體 PMingLiU——正是上面註解說要永遠繞開的東西。
    * 用黑體墊 serif 不理想，但「短暫黑體」遠勝「短暫細明體」。 */
   --serif: "Noto Serif TC Variable", "Noto Serif TC", Georgia, "Songti TC", "Songti SC", "Times New Roman", "PingFang TC", "Microsoft JhengHei", serif;
-  --mono:  "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  /* 尾端補中文字型：IBM Plex Mono 沒有漢字，`.mono` 若包到中文（點／次／模型名）
+   * 就會掉到通用 monospace，Windows 上等於掉回細明體。補上受控的中文備援。 */
+  --mono:  "IBM Plex Mono", ui-monospace, Menlo, "Noto Sans TC Variable", "PingFang TC", "Microsoft JhengHei", monospace;
 
   /* ── 字級刻度 ── */
   --fs-11: 11px; --fs-12: 12px; --fs-13: 13px; --fs-14: 14px; --fs-15: 15px;
@@ -866,6 +868,11 @@ button:focus-visible, a:focus-visible, select:focus-visible, .badge:focus-visibl
   outline: 2px solid var(--primary); outline-offset: 2px;
 }
 button:focus-visible { border-radius: 999px; }
+/* 但自己宣告過圓角的按鈕不該在鍵盤聚焦時「變形成膠囊」——focus 環本來就跟著
+ * border-radius 走，這裡把形狀還給元件（類別選擇器特異性高於元素選擇器）。 */
+.btn-ghost:focus-visible { border-radius: var(--r-8); }
+.model-decision-tab:focus-visible { border-radius: 13px; }
+.model-heatmap__name:focus-visible { border-radius: 8px; }
 
 /* 捲軸細緻化 */
 /* 文字選取：logo 橘的淺暈，選取時也在品牌語彙裡 */
@@ -3094,13 +3101,15 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 
 /* ── 資料庫：桌機固定主從工作區；手機進詳情後只留正在編輯的資料。 ── */
 .database-intro__stats,
-.chat-intro__summary {
+.chat-intro__summary,
+.model-head-stats {
   flex: none;
   display: flex;
   gap: 6px;
 }
 .database-intro__stats > span,
-.chat-intro__summary > span {
+.chat-intro__summary > span,
+.model-head-stats > span {
   min-width: 76px;
   display: grid;
   justify-items: center;
@@ -3111,9 +3120,11 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   box-shadow: var(--e1);
 }
 .database-intro__stats strong,
-.chat-intro__summary strong { font: 22px/1.1 var(--serif); }
+.chat-intro__summary strong,
+.model-head-stats strong { font: 22px/1.1 var(--serif); }
 .database-intro__stats small,
-.chat-intro__summary small { margin-top: 3px; color: var(--fg-secondary); font-size: var(--fs-11); }
+.chat-intro__summary small,
+.model-head-stats small { margin-top: 3px; color: var(--fg-secondary); font-size: var(--fs-11); }
 .database-project-context {
   margin: -8px 0 12px;
   padding: 8px 11px;
@@ -4119,39 +4130,184 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .secondary-page--narrow { max-width: 660px; }
 .admin-page { max-width: 1280px; }
 .models-page { max-width: 1180px; }
-.model-health-overview,
 .model-usage-overview { border: 1px solid var(--border-soft); }
-/* 使用量格子不是篩選鈕：不要 hover 邊框變化，也不要手指游標 */
-.model-usage-overview .model-health-stat { cursor: default; }
-.model-usage-overview .model-health-stat:hover { border-color: var(--border-soft); }
-.model-health-stats {
+
+/* ── 我的使用量：一張卡三種資料，各配一種形 ──────────────────────────
+ * 摘要（單一數字）→ 摘要格；完成率（對上限的比例）→ 計量條；
+ * 類型佔比（部分對全體）→ 堆疊條；模型排名（比大小）→ 橫向長條。
+ * 顏色只在「類型」這一維出現，且跟著類型走不跟著名次走——篩掉一列，
+ * 其他列不會改色。條全部 aria-hidden，數字本身仍是文字。
+ */
+.model-usage-overview { padding: var(--sp-16); margin-bottom: var(--sp-16); }
+.model-usage__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-8);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-12);
+}
+.model-usage__title { display: inline-flex; align-items: center; gap: 6px; }
+.model-usage__cta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+/* 摘要格：沿用 .database-intro__stats／.team-stat 那套襯線數字＋11px 灰標，
+ * 全站的「數字聲音」是襯線體，這張卡不另立一種。 */
+.model-usage__stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-8);
+}
+.model-usage__stats > span {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 10px var(--sp-12) 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12);
+  background: var(--card2);
+}
+.model-usage__stats strong { font: var(--fs-22)/1.1 var(--serif); }
+.model-usage__stats small { color: var(--fg-secondary); font-size: var(--fs-11); }
+/* 完成率：填色用「完成」的語意綠，軌道是同色淺階——同一條上就讀得出狀態 */
+.model-usage__meter {
+  display: block;
+  height: 3px;
+  margin-top: 7px;
+  border-radius: 999px;
+  background: var(--success-soft);
+  overflow: hidden;
+}
+.model-usage__meter > i {
+  display: block;
+  height: 100%;
+  background: var(--success);
+  border-radius: inherit;
+  transform-origin: left center;
+  animation: usage-bar-in var(--dur-slow) var(--ease-out) both;
+}
+/* 動的是 scale 而不是 transform：長條同時要靠 translate 垂直置中，
+ * 兩者寫在同一個 transform 裡會互相蓋掉。 */
+@keyframes usage-bar-in { from { scale: 0 1; } }
+
+/* 類型分佈：段與段之間留 2px 表面色空隙分隔，不畫邊框 */
+.model-usage__mix { margin-top: var(--sp-12); }
+.model-usage__mixbar {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--card2);
+}
+.model-usage__mixbar > i {
+  display: block;
+  min-width: 3px;
+  background: var(--k, var(--fg-secondary));
+  transform-origin: left center;
+  animation: usage-bar-in var(--dur-slow) var(--ease-out) both;
+}
+.model-usage__legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 3px var(--sp-16);
+  margin: var(--sp-8) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
 }
-.model-health-stat {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-width: 72px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
+.model-usage__legend li { display: inline-flex; align-items: center; gap: 5px; }
+.model-usage__legend li > i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--k, var(--fg-secondary));
+}
+.model-usage__legend b { color: var(--fg); font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* 排名：長度＝送出次數，顏色＝產出類型，數字永遠是文字不是提示氣泡 */
+.model-usage__rank {
+  display: grid;
+  gap: 3px;
+  margin: var(--sp-12) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.model-usage__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-8);
+  padding: 7px 10px;
+  border-radius: var(--r-8);
   background: var(--card2);
-  color: var(--fg);
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
+  font-size: var(--fs-13);
+  overflow: hidden;
 }
-.model-health-stat strong { font-size: var(--fs-16); font-variant-numeric: tabular-nums; line-height: 1.1; }
-.model-health-stat span { font-size: 11px; color: var(--fg-secondary); }
-.model-health-stat:hover { border-color: var(--border-strong); }
-.model-health-stat.is-selected { box-shadow: inset 0 -2px 0 var(--primary); border-color: var(--primary-border); }
-.model-health-stat.tone-ok strong { color: var(--success-ink); }
-.model-health-stat.tone-warn strong { color: var(--gold-ink, var(--warning-ink, #a16207)); }
-.model-health-stat.tone-bad strong { color: var(--danger-ink, var(--error-ink, #b91c1c)); }
-.model-health-stat.tone-info strong { color: var(--healing-ink); }
+/* 長條是「標記」不是「整列底色」：上下留白，資料端圓角、基線端方角 */
+.model-usage__bar {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  translate: 0 -50%;
+  height: 24px;
+  background: color-mix(in srgb, var(--k, var(--primary)) 18%, transparent);
+  border-radius: 0 var(--r-4) var(--r-4) 0;
+  transform-origin: left center;
+  animation: usage-bar-in var(--dur-slow) var(--ease-out) both;
+}
+.model-usage__row > :not(.model-usage__bar) { position: relative; }
+.model-usage__no {
+  font-size: var(--fs-11);
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.model-usage__kind { display: inline-flex; color: var(--k, var(--fg-secondary)); }
+.model-usage__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.model-usage__num {
+  font-size: var(--fs-12);
+  color: var(--fg-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.model-usage__more { margin-top: var(--sp-8); }
+.model-usage__foot { margin: var(--sp-8) 0 0; font-size: var(--fs-11); }
+
+/* 四種產出類型的固定色序（+「其他」中性色）。避開 --success／--danger：
+ * 那兩色在站內是狀態語意，借去當分類色會讓人把綠色那條讀成「成功的那條」。 */
+.model-usage-overview .is-image { --k: var(--primary-solid); }
+.model-usage-overview .is-video { --k: var(--healing); }
+.model-usage-overview .is-audio { --k: var(--collab); }
+.model-usage-overview .is-text  { --k: var(--brand-lime); }
+.model-usage-overview .is-other { --k: var(--fg-secondary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .model-usage__meter > i,
+  .model-usage__mixbar > i,
+  .model-usage__bar { animation: none; }
+}
+@media (max-width: 560px) {
+  .model-usage__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .model-usage__stats strong { font-size: var(--fs-20); }
+  .model-usage__row { grid-template-columns: 12px 16px minmax(0, 1fr) auto; gap: 6px; padding: 7px 8px; }
+  .model-usage__bar { height: 22px; }
+  .model-usage__num { font-size: var(--fs-11); }
+  .model-usage__cta { margin-left: 0; }
+}
 .model-health-badge {
   display: inline-flex;
   align-items: center;
@@ -4197,12 +4353,17 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .model-catalog-card__body { min-width: 0; flex: 1; }
 .model-thumb {
   flex: none;
+  /* 尺寸由 --thumb 決定（呼叫端給 size 時才用 inline style 覆寫）：
+   * 手機上目錄卡的縮圖要能一起縮，寫死在 TSX 的 72px 做不到這件事。 */
+  width: var(--thumb, 64px);
+  height: var(--thumb, 64px);
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--border-soft);
   background: var(--card2);
   position: relative;
 }
+.model-catalog-card .model-thumb { --thumb: 72px; }
 .model-thumb img {
   width: 100%;
   height: 100%;
@@ -4274,7 +4435,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
 .model-decision-tab strong,
 .model-decision-tab small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-decision-tab strong { font-size: var(--fs-13); }
-.model-decision-tab small { color: var(--fg-secondary); font-size: 10px; }
+.model-decision-tab small { color: var(--fg-secondary); font-size: var(--fs-11); }
 .model-decision-current {
   display: inline-flex;
   align-items: center;
@@ -4332,7 +4493,7 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.model-base-chip .mono { font-size: 10px; opacity: 0.85; }
+.model-base-chip .mono { font-size: var(--fs-11); opacity: 0.85; }
 .model-base-detail {
   margin-top: 6px;
   padding: 8px 10px;
@@ -4391,6 +4552,13 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
+}
+/* 得獎格：外框比文字尾巴的「· 最快」看得見得多。用 outline 不用 border——
+ * border 會改變盒模型讓那一格比鄰居矮一點，掃讀時反而像沒對齊。 */
+.model-arena-grid > li.is-fastest > .card,
+.model-arena-grid > li.is-cheapest > .card {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 .model-arena-grid__media {
   aspect-ratio: 1 / 1;
@@ -4466,7 +4634,8 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   white-space: nowrap;
 }
 /* 沒有資料＝斜線空格。塗成最淺的顏色會被讀成「分數很低」，那是兩件不同的事。 */
-.model-heatmap__cell.is-empty {
+.model-heatmap__cell.is-empty,
+.model-heatmap__swatch.is-empty {
   color: var(--fg-secondary);
   background: repeating-linear-gradient(
     135deg,
@@ -4488,6 +4657,261 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   height: 14px;
   border: 1px solid var(--border-soft);
   border-radius: 4px;
+}
+
+/* ══ 模型指南的版面骨架：章節、篩選列、比較表、目錄卡 ═════════════════════
+ * 這一段取代原本散在 TSX 裡的 128 個 inline style。同一頁只留一套節奏：
+ * 間距走 --sp-*、字級走 --fs-*、卡片只有兩種內距，章節都長一個樣。 */
+
+/* ── 章節標題：eyebrow ＋ h2 ＋ 髮絲線 ＋ 計數，與 .group-head 同一家族 ── */
+.model-section { scroll-margin-top: calc(var(--topbar-sticky-offset) + var(--sp-8)); }
+.model-section + .model-section,
+.models-page .model-section { margin-top: var(--sp-32); }
+.model-section-head { display: grid; gap: 2px; margin-bottom: var(--sp-12); }
+.model-section-head .eyebrow { margin: 0; }
+.model-section-head__line { display: flex; align-items: center; gap: var(--sp-12); }
+.model-section-head__line h2 { margin: 0; }
+.model-section-head__rule { flex: 1; height: 1px; background: var(--border); }
+.model-section-head__count {
+  flex: none;
+  padding: 2px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--card2);
+  color: var(--fg-secondary);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+.model-section-head__deck { margin: 0; font-size: var(--fs-14); }
+
+/* ── 篩選列：三組條件各自成列，手機上每組是自己的橫向捲軌 ── */
+.model-filter-bar {
+  display: grid;
+  gap: var(--sp-8);
+  padding: var(--sp-12);
+  margin-bottom: var(--sp-16);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-12);
+  background: var(--card2);
+}
+.model-filter-bar__row { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; }
+.model-filter-bar__row > .eyebrow { flex: none; width: 3em; margin: 0; }
+.model-filter-bar__rail {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.model-filter-bar__rail .chip { margin: 0; flex: none; }
+.model-filter-bar__search { position: relative; display: inline-flex; width: 100%; max-width: 280px; }
+.model-filter-bar__search input { padding-right: 34px; }
+.model-filter-bar__clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  translate: 0 -50%;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  line-height: 1;
+}
+/* 目前這批模型的檔次組成：一條堆疊條回答「這一類偏旗艦還是偏經濟」 */
+.model-catalog-mix { display: grid; gap: 5px; margin-top: 2px; }
+.model-catalog-mix__bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--card);
+}
+.model-catalog-mix__bar > i { display: block; min-width: 3px; background: var(--k, var(--fg-secondary)); }
+.model-catalog-mix__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sp-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-11);
+  color: var(--fg-secondary);
+}
+.model-catalog-mix__legend li { display: inline-flex; align-items: center; gap: 5px; }
+.model-catalog-mix__legend li > i { width: 8px; height: 8px; border-radius: 2px; background: var(--k, var(--fg-secondary)); }
+.model-catalog-mix__legend b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.model-catalog-mix__note { margin-left: auto; }
+.model-catalog-mix .is-flagship { --k: var(--primary); }
+.model-catalog-mix .is-economy { --k: var(--healing); }
+.model-catalog-mix .is-budget { --k: var(--gold); }
+
+/* ── 並排比較：卡片吃掉整屏是手機上最常見的 sticky 事故 ── */
+.model-compare-card {
+  position: sticky;
+  top: calc(var(--topbar-sticky-offset) + var(--sp-8));
+  /* 比頂欄(z-index:30)低一階：兩者不該爭同一層，捲動時才不會蓋住導覽 */
+  z-index: 20;
+  margin-bottom: var(--sp-16);
+  padding: var(--sp-16);
+  box-shadow: var(--e3);
+  max-height: 62vh;
+  display: flex;
+  flex-direction: column;
+}
+.model-compare-card__head { display: flex; align-items: center; gap: var(--sp-8); flex-wrap: wrap; }
+.model-compare-card__scroll { overflow: auto; margin-top: var(--sp-8); min-height: 0; }
+.model-compare-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--fs-13);
+  line-height: 1.5;
+}
+.model-compare-table th,
+.model-compare-table td,
+.model-showdown-table th,
+.model-showdown-table td {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 6px var(--sp-12);
+  text-align: left;
+  vertical-align: top;
+}
+.model-compare-table thead th { font-weight: 600; font-size: var(--fs-14); }
+/* 列名凍結在左緣：橫捲四欄時還知道自己在看哪一列 */
+.model-compare-table th[scope="row"],
+.model-compare-table__corner {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 100px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--card);
+}
+.model-compare-table__col { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.model-compare-table__drop { padding: 0 6px; display: inline-flex; align-items: center; }
+.model-showdown-table__lead { width: 150px; font-weight: 600; }
+
+/* ── 目錄清單：桌機兩欄。1180px 寬只放一欄卡，右半邊整片空白，
+ *    掃 266 個模型要捲兩倍長——「桌面優先密度」在這頁就是指這件事。 ── */
+.model-catalog-list {
+  display: grid;
+  /* minmax(0,1fr) 而不是留白：隱式欄位是 auto＝max-content，卡片會被裡面
+   * 最寬的一段（模型 id、徽章列）撐超出容器，手機上右緣直接被切掉。 */
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-16);
+  align-items: start;
+}
+@media (min-width: 821px) {
+  .model-catalog-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .model-catalog-list > .model-catalog-disclosure,
+  .model-catalog-list > .empty-state,
+  .model-catalog-list > .error { grid-column: 1 / -1; }
+}
+
+/* ── 目錄卡：標題列是網格，徽章群統一字級 ── */
+.model-catalog-card { padding: var(--sp-16); }
+.model-catalog-card__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  /* 置中而非靠上：手機上核取方塊被撐成 44px 觸控目標，靠上會讓「比較」掉到標題下面一截 */
+  align-items: center;
+  gap: var(--sp-8);
+}
+.model-catalog-card__head > b { font-size: var(--fs-16); line-height: 1.35; }
+.model-catalog-card__compare {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  color: var(--fg-secondary);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+.model-catalog-card__compare.is-disabled { cursor: not-allowed; opacity: 0.6; }
+.model-catalog-card__badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: var(--fs-11);
+}
+.model-catalog-card__badges .chip { margin: 0; }
+.model-catalog-card__warn { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-11); }
+.model-catalog-card__lead { margin: 8px 0 2px; font-size: var(--fs-14); }
+.model-catalog-card__fit { margin: 0; }
+.model-catalog-card__spec { margin: 4px 0 0; font-size: var(--fs-12); }
+.model-catalog-card__ids {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.model-catalog-card__ids code {
+  font-size: var(--fs-11);
+  color: var(--fg-secondary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chip--recommended {
+  margin: 0;
+  background: var(--primary-tint);
+  border-color: var(--primary-border);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+/* ── 點數：掃讀一整頁時「貴不貴」要用長度看得出來，不能只有一行小字 ── */
+.model-points { display: grid; gap: 4px; margin-top: 8px; }
+.model-points__figure { font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.model-points__track {
+  display: block;
+  height: 4px;
+  max-width: 220px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+.model-points__track > span {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  border-radius: inherit;
+}
+.model-points__cost { font-size: var(--fs-11); }
+
+/* ── 級別 pill：三色一次寫定，TSX 不再自己拼樣式 ── */
+.pill--tier-flagship { color: var(--primary-ink); border-color: var(--primary); background: var(--primary-tint); }
+.pill--tier-economy { color: var(--healing-ink); border-color: var(--healing); background: var(--healing-soft); }
+.pill--tier-budget { color: var(--gold-ink); border-color: var(--gold); background: var(--gold-soft); }
+
+.model-quiz__q { margin: var(--sp-12) 0 2px; font-size: var(--fs-14); font-weight: 600; }
+.model-quiz__q:first-of-type { margin-top: 0; }
+.model-decision-card { margin-bottom: var(--sp-16); scroll-margin-top: calc(var(--topbar-sticky-offset) + var(--sp-8)); }
+.model-workflow-card { padding: var(--sp-16); }
+.model-workflow-card__head { display: flex; gap: var(--sp-8); align-items: center; flex-wrap: wrap; }
+.model-workflow-card__head > b { font-size: var(--fs-16); }
+.model-workflow-card__points { font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 560px) {
+  /* 三組篩選各自橫捲，取代 390px 下六排換行的 chip 牆 */
+  .model-filter-bar { padding: var(--sp-8); }
+  .model-filter-bar__row { align-items: center; }
+  .model-filter-bar__rail {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .model-filter-bar__rail::-webkit-scrollbar { display: none; }
+  .model-filter-bar__rail .chip { scroll-snap-align: start; }
+  .model-filter-bar__search { max-width: none; }
+  .model-catalog-card { padding: var(--sp-12); }
+  .model-catalog-card__row { gap: var(--sp-12); }
+  .model-thumb { --thumb: 56px; }
+  .model-compare-card { max-height: 46vh; padding: var(--sp-12); }
+  .model-catalog-mix__note { margin-left: 0; }
 }
 .secondary-page-header {
   min-width: 0;
@@ -4524,6 +4948,14 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   font-size: var(--fs-14);
   line-height: 1.65;
   text-wrap: pretty;
+}
+/* badge 槽放的是統計條時，外殼不再包一層 pill（否則會是「膠囊裡塞三個格子」） */
+.secondary-page-header__badge:has(.model-head-stats) {
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
 }
 .secondary-page-header__badge {
   flex: none;
@@ -4999,10 +5431,14 @@ button.daily-focus-card { border-radius: 18px; font: inherit; }
   .schedule-create-form__submit { min-height: 46px; }
 
   .database-intro { align-items: center; }
-  .database-intro__stats { gap: 3px; }
-  .database-intro__stats > span { min-width: 55px; padding: 5px 6px; }
-  .database-intro__stats strong { font-size: 18px; }
-  .database-intro__stats small { font-size: 9px; }
+  .database-intro__stats,
+  .model-head-stats { gap: 3px; }
+  .database-intro__stats > span,
+  .model-head-stats > span { min-width: 55px; padding: 5px 6px; }
+  .database-intro__stats strong,
+  .model-head-stats strong { font-size: 18px; }
+  .database-intro__stats small,
+  .model-head-stats small { font-size: 9px; }
   .database-page.has-detail { padding-top: 0; }
   .database-page.has-detail .database-intro { display: none; }
   .database-page.has-detail .database-project-context { margin-top: 4px; }
