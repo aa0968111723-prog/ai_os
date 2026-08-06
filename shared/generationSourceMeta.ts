@@ -10,9 +10,18 @@ export type GenerationAblationMeta = {
   seed?: number;
 };
 
+/**
+ * 同題並跑（模型競技場）的分組標記：同一次比較的每顆模型共用 runId。
+ * 與消融的差別：消融固定模型改提示詞，這裡固定提示詞改模型。
+ */
+export type GenerationBenchMeta = {
+  runId: string;
+};
+
 export type GenerationSourceMeta = {
   secondarySourceUrl?: string;
   ablation?: GenerationAblationMeta;
+  bench?: GenerationBenchMeta;
   /**
    * BYOK Phase 2：本次生成是否使用使用者個人 fal API Key。
    * true → 跳過平台點數扣／退；advanceGeneration 用同一把 key 查 status。
@@ -25,7 +34,7 @@ export function storeGenerationSourceMeta(
   providerParams: Record<string, unknown>,
   meta: GenerationSourceMeta,
 ): Record<string, unknown> {
-  if (!meta.secondarySourceUrl && !meta.ablation && !meta.usedUserKey) return providerParams;
+  if (!meta.secondarySourceUrl && !meta.ablation && !meta.bench && !meta.usedUserKey) return providerParams;
   return { ...providerParams, [GENERATION_SOURCE_META_KEY]: meta };
 }
 
@@ -51,9 +60,15 @@ export function splitGenerationSourceMeta(params: unknown): {
   const ablation = rawAblation && typeof rawAblation === "object" && !Array.isArray(rawAblation)
     ? (rawAblation as GenerationAblationMeta)
     : undefined;
+  const rawBench = rawMeta && typeof rawMeta === "object" && !Array.isArray(rawMeta)
+    ? (rawMeta as Record<string, unknown>).bench
+    : undefined;
+  const bench = rawBench && typeof rawBench === "object" && !Array.isArray(rawBench)
+    ? (rawBench as GenerationBenchMeta)
+    : undefined;
   const usedUserKey =
     rawMeta != null && typeof rawMeta === "object" && !Array.isArray(rawMeta)
       ? (rawMeta as Record<string, unknown>).usedUserKey === true
       : false;
-  return { providerParams, meta: { secondarySourceUrl, ablation, usedUserKey: usedUserKey || undefined } };
+  return { providerParams, meta: { secondarySourceUrl, ablation, bench, usedUserKey: usedUserKey || undefined } };
 }

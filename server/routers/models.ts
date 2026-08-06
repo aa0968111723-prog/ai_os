@@ -195,6 +195,43 @@ export const modelsRouter = router({
       };
     }),
 
+  /**
+   * 熱力圖的實測欄：我在每顆模型上的成功率、平均耗時與用量（近 N 天）。
+   *
+   * 與 myUsage 的差別：myUsage 只回前 12 名給頂欄看，這裡回全部並帶上耗時，
+   * 熱力圖才畫得出「這顆對我來說跑得順不順、快不快」。
+   * 只聚合自己的紀錄——別人的成功率不是這顆模型的性質，混進來就是誤導。
+   */
+  analytics: authedProcedure
+    .input(z.object({ days: z.number().int().min(1).max(180).optional() }).optional())
+    .query(async ({ ctx, input }) => {
+      const days = input?.days ?? 90;
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+      const uid = ctx.auth.user.id;
+      const rows = await db
+        .select({
+          modelId: schema.generations.modelId,
+          submits: sql<number>`count(*)::int`,
+          done: sql<number>`sum(case when ${schema.generations.status} = 'done' then 1 else 0 end)::int`,
+          failed: sql<number>`sum(case when ${schema.generations.status} = 'failed' then 1 else 0 end)::int`,
+          points: sql<number>`sum(case when ${schema.generations.status} = 'done' then coalesce(${schema.generations.pointsActual}, ${schema.generations.pointsEst}) else 0 end)::int`,
+          // 完成列的「送出→落地」秒數平均；沒有完成過的模型回 null（不是 0）
+          avgSeconds: sql<number | null>`avg(case when ${schema.generations.status} = 'done'
+            then extract(epoch from (${schema.generations.updatedAt} - ${schema.generations.createdAt})) end)`,
+          lastUsedAt: sql<string | null>`max(${schema.generations.createdAt})`,
+        })
+        .from(schema.generations)
+        .where(and(eq(schema.generations.userId, uid), gte(schema.generations.createdAt, since)))
+        .groupBy(schema.generations.modelId);
+      return {
+        days,
+        models: rows.map((r) => ({
+          ...r,
+          avgSeconds: r.avgSeconds == null ? null : Math.round(Number(r.avgSeconds)),
+        })),
+      };
+    }),
+
   workflows: authedProcedure.query(() =>
     WORKFLOW_PRESETS.map((w) => ({
       id: w.id,
