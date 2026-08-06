@@ -27,8 +27,9 @@
 
 ## 階段三：Adobe 視覺落地
 - [done] 板資產存取驗證＋視覺語彙萃取（D-003/D-004；耗點 0/200）
-- [todo] 手機 design token（--m-* CSS variables，不覆寫桌機）
-- [todo] 手機端元件重製（Button/Input/Card/BottomSheet/Toast/Tabs/底部導航/Orb…）
+- [done] 手機 design token（--m-* 變數）＋殼層重製第一批（底部導航/sheet/卡片/控件圓角＋Fraunces/Manrope Latin 子集）→ PR #473
+- [todo] 元件重製第二批：Input/Textarea/Select、Toast、Tabs、Badge/Progress/Skeleton、Empty/Error state、Orb（idle/thinking/speaking/error 手機版）
+- [todo] 圖示 SVG sprite 評估（既有 Icon 元件已是 SVG，確認缺口即可）
 
 ## 階段四：PWA 完備（既有：manifest 完整、sw.js、offline.html、share_target）
 - [done] 程式面缺口補齊：P2-44/45/46/47 → PR #472（離線頁 v3、lie-fi 5s 逾時、visibilitychange 更新檢查、部署減重）；安裝引導/iOS 教學既有已達標

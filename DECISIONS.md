@@ -50,6 +50,12 @@
 - Noto Serif TC 只用在 13 處標題/裝飾數字，但每個標題字要在 sans 之外多載一份 serif CJK 分包（均 ~47KB）。改高字重 sans 或場景化載入涉及整體視覺語言，留待 Adobe token/元件重製階段一併決策（board 視覺可能改變標題字族）。
 - 現況已因 PR #468 全部字型 CSS 非阻塞化，重複下載只影響換頁後的字型補載，非首屏瓶頸。
 
+## D-013 手機 token 落地方式（2026-08-07，PR #473）
+- 新檔 styles.mobile-tokens.css 於 main.tsx 最後載入（同特異性靠順序勝出）；契約測試強制「頂層無規則、只准 --m- 前綴」。
+- 文字對比不自創：active/文字色沿用 v3 已過 AA 的宣告，board 色只進 tint/陰影/圓角。
+- 字族落地＝D-012 決策：手機標題 Fraunces（Latin variable 36K）＋內文 Manrope（16K×2），非阻塞載入、中文回退 Noto；P2-42 的 serif 重複下載問題因此不再擴大（手機標題 Latin 走 Fraunces）。
+- fonts.brand.css 獨立於 PR #468 的 fonts.css（兩 PR 互不依賴，可任意順序合併）。
+
 ## D-006 效能基線（2026-08-06 build，gzip）
 - 首屏 JS：index 103.7KB + vendor-react 57.8KB + vendor-data 45.0KB ≈ **206.5KB（超 180KB 門檻）**
 - 全站單一 CSS：408KB raw / **120.9KB gzip**（未拆分、未 purge）
