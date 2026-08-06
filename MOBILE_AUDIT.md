@@ -35,13 +35,13 @@
 - [ ] **P1-01**｜`client/src/app/components/MobileNavigation.tsx:104`｜navigation-full-reload｜所有已登入路由（≤820px 底部分頁列）
   - 問題：底部分頁列「專案」「AI 工作」兩顆用原生 <a> 帶 hash，從 /planner、/p/:id、/chat 等非 /dashboard 路由點擊會觸發整頁重載（重跑 bootstrap、重載所有 chunk），手機弱網下每次切分頁要等數秒。
   - 修法：改用 onClick 攔截：e.preventDefault() 後以 wouter navigate 到 /dashboard 再設 location.hash（或 navigate("/dashboard#projects") 由 wouter pushState），保留 <a> 語義但走 SPA 路由。
-- [ ] **P1-02**｜`client/src/styles.css:966`｜input-zoom｜所有已登入路由（≤560px 頂欄組別切換器）
+- [x] **P1-02** done(PR#463)｜`client/src/styles.css:966`｜input-zoom｜所有已登入路由（≤560px 頂欄組別切換器）
   - 問題：≤560px 把 .group-select 字級降到 14px !important，特異性 (0,1,0) 蓋過同為 !important 的 select 16px 防縮放契約，iPhone Safari 點組別切換器會強制放大整頁且不回彈——違反本檔 936-937 行自己寫明的規則。
   - 修法：≤560 保持 font-size 16px，改用縮 padding-inline 與 max-width 換取頂欄空間。
 - [ ] **P1-03**｜`client/src/pages/Launchpad.tsx:435`｜keyboard/viewport｜/
   - 問題：「建立新專案」Modal 未走站內既有的 .modal-scrim/.modal-card 手機契約：置中卡片 max-height 90vh（vh 非 dvh）、backdrop 未被 --kb-inset 抬高、無 ≤560 貼底 sheet，而 #np-title 又 autoFocus 直接彈鍵盤——iOS 上表單下半（畫面尺寸、立即建立鈕）被鍵盤蓋住且捲不到，得先收鍵盤才按得到。
   - 修法：把 new-project-modal 改用（或比照）.modal-scrim/.modal-card 契約：backdrop 加 bottom: var(--kb-inset,0px) 與 overscroll-behavior:contain，卡片改 max-height:min(86dvh,100%)，≤560 轉貼底 sheet 並 padding-bottom:max(16px,var(--safe-bottom))。
-- [ ] **P1-04**｜`client/src/styles.css:2349`｜hidden-on-mobile｜/
+- [x] **P1-04** done(PR#463)｜`client/src/styles.css:2349`｜hidden-on-mobile｜/
   - 問題：≤560px 用 `.continue-card .chip { display:none }` 把「N 待處理」角標整顆藏掉，而首頁的待核提示卡（focusState attention）只在沒有最近專案時才渲染——手機上有專案的組長在首頁完全看不到任何待核計數，正是程式註解自己點名的「首頁不顯示待核→組長漏核、組員卡住」情境。
   - 修法：手機別整顆藏：改成縮小版（小圓點或純數字 badge，例如 .continue-card .chip { padding:2px 6px; font-size:10px }），或在手機版 bento 頭部補一行「N 件待核」總計連結。
 - [ ] **P1-05**｜`client/src/pages/ProjectPage.tsx:2172`｜fixed-element/底部遮擋｜/projects/:id（① 定調・角色與定裝分頁）
@@ -53,7 +53,7 @@
 - [ ] **P1-07**｜`client/src/pages/ProjectPage.tsx:324`｜橫向溢位｜/projects/:id（① 定調・進階「參考連結」）
   - 問題：TokenListEditor 的 chip 沒有 max-width／overflow-wrap，參考連結是最長 100 字的無空白 URL，360px 下一顆 chip 可寬達 ~600px；html 的 overflow-x:clip 讓頁面不能橫捲，chip 尾端的移除 ✕ 被裁在畫面外，手機上該連結永遠刪不掉。
   - 修法：給 chip 補 max-width:100% 與 overflow-wrap:anywhere（或 URL 顯示截斷＋title 全文），確保 ✕ 留在可視範圍。
-- [ ] **P1-08**｜`client/src/styles.css:2096`｜chrome-bottom 契約破口｜/projects/:id（③ 交付底部；影響所有頁）
+- [x] **P1-08** done(PR#463)｜`client/src/styles.css:2096`｜chrome-bottom 契約破口｜/projects/:id（③ 交付底部；影響所有頁）
   - 問題：安裝為 PWA（html.is-standalone）時 `.app` 的 padding-bottom 被寫死 48px+safe，特異性 (0,2,1) 蓋過 --chrome-bottom 契約的 100px/140px——手機 standalone 下固定分頁列（~64-72px）會壓住頁面最底一截（專案頁＝③ 打包／SceneList 尾端），最後一列內容捲不上來。
   - 修法：standalone 規則改寫 padding-bottom: calc(var(--chrome-bottom) + env(safe-area-inset-bottom, 0px))，回歸變數契約。
 - [ ] **P1-09**｜`client/src/features/creation-workbench/modes/DirectGenerateMode.tsx:474`｜viewport-visibility｜/p/:id（專案頁 ② AI 創作工作台・直接出圖）
@@ -65,19 +65,19 @@
 - [ ] **P1-11**｜`client/src/pages/PlannerPage.tsx:1232`｜觸控目標/可讀性｜/planner
   - 問題：知識地圖 SVG 固定 viewBox 920×560、CSS 只有 width:100% 等比縮放且無任何手機斷點：360px 時整圖縮到約 0.36 倍，葉節點命中區只剩 r=6 的圓（渲染後約 4–5px、文字 pointer-events:none 不算命中），節點文字 11–13px 縮成約 4px，觸控幾乎點不到也讀不到；內建縮放上限 2.5x 仍不足 44px。
   - 修法：≤820 給地圖獨立幾何：加一顆透明命中圓（r≈20）擴大觸控區，並讓 .map-wrap 改成固定較大像素寬＋overflow-x auto（或手機預設 view.s 放大）。
-- [ ] **P1-12**｜`client/src/pages/DatabasesPage.tsx:1433`｜觸控目標｜/databases
+- [x] **P1-12** done(PR#463)｜`client/src/pages/DatabasesPage.tsx:1433`｜觸控目標｜/databases
   - 問題：`<a className="btn-sm">`（檔案列的 icon-only「下載原檔」與工具列「匯出 CSV」）缺 `btn` 基底 class，吃不到全域 44px 觸控下限（該規則只涵蓋 button/.btn/.menu-item），實際命中區約 37×27px，且夾在一排 44px 按鈕之間極易誤觸鄰鈕。
   - 修法：改用 `<Button as="a" size="sm">`（會補上 `btn` 基底）或在 className 加上 `btn`。
 - [x] **P1-13** done(PR#462)｜`client/src/styles.css:5036`｜keyboard｜/chat
   - 問題：私訊輸入列未接 --kb-inset 契約：iOS 鍵盤彈出時 .dm-layout 仍按 100dvh 定高（iOS 的 dvh 不隨鍵盤縮），輸入列與最新訊息被鍵盤蓋住、只靠 Safari 自動捲動勉強補救。
   - 修法：比照 .project-messages-sheet-root，讓 .chat-page.has-peer .dm-layout 高度再扣 var(--kb-inset, 0px)（Android 因 interactive-widget=resizes-content 會算出 0，不重複位移）。
-- [ ] **P1-14**｜`client/src/pages/MembersPage.tsx:292`｜touch-target｜/members
+- [x] **P1-14** done(PR#463)｜`client/src/pages/MembersPage.tsx:292`｜touch-target｜/members
   - 問題：成員卡的「私訊」連結實高約 29px（<44px）：它是 <a class="btn-tonal btn-sm">，不在全域觸控下限選擇器（button/.btn/.menu-item）的涵蓋範圍。
   - 修法：className 加上 btn 基底（"btn btn-tonal btn-sm"），或把 .btn-tonal 納入 styles.css:146 的觸控下限選擇器群。
 - [ ] **P1-15**｜`client/src/pages/ModelsPage.tsx:341`｜sticky-overlap｜/models
   - 問題：並排比較卡 sticky top 8px 未讓出手機 sticky 頂欄（~52px+safe-top）且與其同 z-index 30，DOM 較後者蓋住頂欄；且整張含 16 列比較表的卡在手機上釘住後可佔掉近整個視口，目錄內容被壓在下面難以瀏覽。
   - 修法：≤820px 改 top: calc(52px + var(--safe-top)) 並給卡 max-height（如 40dvh 內部捲動）或手機改為可收合的置頂摘要列。
-- [ ] **P1-16**｜`client/src/styles.css:966`｜ios-zoom｜全站（頂欄組別切換器 .group-select）
+- [x] **P1-16** done(PR#463)｜`client/src/styles.css:966`｜ios-zoom｜全站（頂欄組別切換器 .group-select）
   - 問題：≤560px 對 .group-select 寫 font-size:14px !important，特異性(0,1,0)壓過 938 行 select 的 16px !important 防縮放契約，iPhone Safari 聚焦 <16px 的 select 會放大整頁且不回彈。
   - 修法：刪除 966 行的 font-size 宣告（或改 16px），視覺收斂改用 padding-inline 與 max-width。
 - [ ] **P1-17**｜`client/src/styles.css:6387`｜keyboard-overlap｜作業台 /launchpad 與 /workflows「建立專案」彈窗
@@ -92,25 +92,25 @@
 
 ## P2 — 打磨（49 項）
 
-- [ ] **P2-01**｜`client/src/styles.css:2357`｜horizontal-overflow｜所有已登入路由（≤560px 頂欄，360px 最窄機型）
+- [x] **P2-01** done(PR#463)｜`client/src/styles.css:2357`｜horizontal-overflow｜所有已登入路由（≤560px 頂欄，360px 最窄機型）
   - 問題：≤560px 用 overflow: visible 蓋掉 ≤820 的 overflow-x: auto 橫捲逃生門，但頂欄仍 flex-wrap: nowrap 且徽章皆 flex: none；360px 上「在線＋待核徽章＋點數徽章」同時在場時總寬約 363-370px，超出部分被 html/body 的 overflow-x: clip（205-224 行）直接裁掉、右端帳號鈕被切角且捲不到。
   - 修法：≤560 改回 overflow-x: auto（MenuSurface 已 portal 到 body 不會被裁），或在 ≤400px 再壓縮 points-badge / 待核徽章寬度確保總和 <360。
-- [ ] **P2-02**｜`client/src/pages/AcceptInvitePage.tsx:35`｜viewport-units｜/invite/:token
+- [x] **P2-02** done(PR#463)｜`client/src/pages/AcceptInvitePage.tsx:35`｜viewport-units｜/invite/:token
   - 問題：邀請頁置中容器用 70vh 而非 dvh（全站其他處已統一 dvh），手機瀏覽器網址列在場時實際可視高度小於 vh，卡片垂直位置偏下並多出些微捲動。
   - 修法：改為 minHeight: "70dvh"（或比照 LoginPage 的 calc(100dvh - N)）。
-- [ ] **P2-03**｜`client/src/styles.css:2151`｜touch-target｜/（Landing，561–820px 直立平板）
+- [x] **P2-03** done(PR#463)｜`client/src/styles.css:2151`｜touch-target｜/（Landing，561–820px 直立平板）
   - 問題：公開站頂欄的「運作方式」「安全與掌控」錨點連結沒有 min-height（14px 字高＝點擊面積約 20px 高），561–820px 觸控平板上可見但難點；全域 44px 下限只涵蓋 button/.btn/.menu-item（146-161 行），不含裸 <a>，≤560 才 display:none。
   - 修法：補 `.public-header nav > a:not(.btn) { min-height: 44px; display: inline-flex; align-items: center; }`（比照 2238 行 .public-footer a 的做法）。
 - [ ] **P2-04**｜`client/src/app/components/MobileNavigation.tsx:67`｜sheet-gesture｜所有已登入路由（≤820px 帳號選單 sheet／更多面板）
   - 問題：更多面板與 MenuSurface sheet 都畫了拖曳把手（grip）暗示可下滑關閉，但 app/ 目錄內完全沒有 touch/pointer 手勢處理，實際只能點 scrim、X 或 Esc 關閉——視覺承諾與行為不符。
   - 修法：在 sheet 上加最小 swipe-down dismiss（pointerdown/move 位移超過閾值即 onClose），或移除把手視覺避免誤導。
-- [ ] **P2-05**｜`client/src/styles.css:2141`｜safe-area｜/（Landing，standalone PWA＋瀏海機）
+- [x] **P2-05** done(PR#463)｜`client/src/styles.css:2141`｜safe-area｜/（Landing，standalone PWA＋瀏海機）
   - 問題：登入頂欄 .topbar 在 standalone 有 safe-top 墊高（2098 行），但公開站的 .public-header 同為 sticky top:0 卻沒有對應規則——已安裝 App 內 session 過期落回 Landing 時，捲動後 header 會滑進狀態列／瀏海底下。
   - 修法：補 `html.is-standalone .public-header { padding-top: max(12px, var(--safe-top)); }`。
 - [ ] **P2-06**｜`client/src/pages/Launchpad.tsx:606`｜touch/invalid-nesting｜/
   - 問題：「N 待處理」的 Link 巢在 continue-card 的 Link 裡（a 包 a，HTML 不合法）；點擊事件冒泡到外層 Link 後外層的 navigate 最後執行，`?focus=pending` 深連結被吃掉——在 561-820px 平板（chip 可見）點角標等於點整張卡。
   - 修法：內層改為 onClick={(e)=>e.stopPropagation()} 並移出巢狀（用 span+onClick navigate），或乾脆把角標做成純 Chip、讓整卡連結帶 ?focus=pending。
-- [ ] **P2-07**｜`client/src/pages/Launchpad.tsx:570`｜touch-target｜/
+- [x] **P2-07** done(PR#463)｜`client/src/pages/Launchpad.tsx:570`｜touch-target｜/
   - 問題：「繼續創作」bento 頭部的「全部專案 (N) →」是 12px 純文字 <a>，實際點擊高度約 17px，遠低於全站 --touch-min 44px（<a> 不吃全域 button 下限）。
   - 修法：比照 styles.css:2305，給 .bento-card__head a 補 min-height: var(--touch-min); display:inline-flex; align-items:center。
 - [ ] **P2-08**｜`client/src/pages/Launchpad.tsx:711`｜touch-target｜/
@@ -200,7 +200,7 @@
 - [ ] **P2-36**｜`client/src/styles.css:5036`｜keyboard-overlap｜/chat 私訊（對話輸入列）
   - 問題：dm-layout 高度用 100dvh 減固定常數但沒扣 --kb-inset；iOS 鍵盤不縮 dvh，貼底的 .dm-compose 輸入列與送出鈕會被鍵盤壓住（站內其他貼底面板都有顯式扣除）。
   - 修法：兩處高度式各再減 var(--kb-inset, 0px)。
-- [ ] **P2-37**｜`client/src/styles.css:2357`｜horizontal-overflow｜全站頂欄（≤560）
+- [x] **P2-37** done(PR#463)｜`client/src/styles.css:2357`｜horizontal-overflow｜全站頂欄（≤560）
   - 問題：≤560 把 ≤820 的 topbar overflow-x:auto 改回 overflow:visible，但 flex-wrap 仍是 nowrap 且徽章皆 flex:none——當徽章齊備（mock 徽章＋點數＋在線＋說明/快速圖示＋帳號，各含 44px 下限）總寬可超過 360px，body 的 overflow-x:clip 會直接裁掉尾端動作且無法捲回。
   - 修法：≤560 保留 overflow-x:auto（選單已 portal 到 body，2364 行註解證實不需 visible），或在 360px 實測徽章全開時的總寬。
 - [ ] **P2-38**｜`client/src/styles.css:752`｜text-overflow｜專案頁留言區／生成結果文字
