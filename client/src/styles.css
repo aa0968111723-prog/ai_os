@@ -6791,3 +6791,26 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 
 
 
+
+/* ═══ 手機修正（MOB-H3）：工作台/排程互動 ═══ */
+/* 排程/筆記列欄位模板：原為 TSX 行內樣式，特異性蓋掉 ≤560 的 .gen-row { 1fr } 堆疊——
+ * 改成修飾 class（值與原行內相同、桌機渲染不變），讓媒體查詢接得了手。 */
+.gen-row--schedule { grid-template-columns: auto 1fr auto; }
+.gen-row--note { grid-template-columns: 1fr auto; }
+@media (max-width: 560px) {
+  /* 360px 三欄時標題只剩 ~110px 窄柱：回到堆疊（同 .gen-row 既有手機規則） */
+  .gen-row--schedule, .gen-row--note { grid-template-columns: 1fr; }
+  /* 模型結構圖：SVG 等比縮小後 9.5 單位字約 8px 不可讀；標籤由下方既有的
+     階段清單按鈕承擔（同資料同功能），圖形只留符號 */
+  svg[data-testid="mechanics-diagram"] text { display: none; }
+}
+@media (max-width: 820px) {
+  /* 「實際運作紀錄」浮層：行內 70vh＋z20 會被固定分頁列（z44）蓋住底緣，
+     最後幾列與內部捲動下緣看不見。dvh＋讓開 --chrome-bottom，z 提到分頁列之上、
+     低於 modal-scrim(50)。!important 壓行內樣式。 */
+  .ai-trace-pop {
+    max-height: min(70dvh, calc(100dvh - var(--chrome-bottom, 48px) - var(--safe-top) - 90px)) !important;
+    z-index: 48 !important;
+    overscroll-behavior: contain;
+  }
+}

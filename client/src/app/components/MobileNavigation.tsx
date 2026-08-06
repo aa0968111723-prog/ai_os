@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Link, useLocation } from "wouter";
 import { Icon, type IconName } from "../../components/Icon";
 import { Button } from "../../components/ui";
@@ -41,6 +41,23 @@ export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
   const [location] = useLocation();
   const hash = useHash();
   const [moreOpen, setMoreOpen] = useState(false);
+  // 把手（grip）畫在那裡就是在承諾「可以下滑關閉」——補上最小手勢：
+  // 只在把手／標頭列起手（避免與內容捲動打架），下滑超過閾值即關閉
+  const sheetDragY = useRef<number | null>(null);
+  const sheetDragProps = {
+    onPointerDown: (e: ReactPointerEvent) => {
+      if (e.pointerType === "mouse") return;
+      sheetDragY.current = e.clientY;
+    },
+    onPointerMove: (e: ReactPointerEvent) => {
+      if (sheetDragY.current != null && e.clientY - sheetDragY.current > 48) {
+        sheetDragY.current = null;
+        setMoreOpen(false);
+      }
+    },
+    onPointerUp: () => { sheetDragY.current = null; },
+    onPointerCancel: () => { sheetDragY.current = null; },
+  };
   const moreActive = MORE_ITEMS.some((item) => item.match.some((prefix) => location.startsWith(prefix)));
 
   useEffect(() => setMoreOpen(false), [location]);
@@ -64,8 +81,8 @@ export function MobileNavigation({ dmUnread = 0 }: { dmUnread?: number }) {
             onClick={() => setMoreOpen(false)}
           />
           <aside id="mobile-more-tools" className="mobile-more-sheet" aria-label="更多功能">
-            <div className="mobile-more-sheet__grip" aria-hidden="true" />
-            <div className="mobile-more-sheet__head">
+            <div className="mobile-more-sheet__grip" aria-hidden="true" {...sheetDragProps} />
+            <div className="mobile-more-sheet__head" {...sheetDragProps}>
               <span>
                 <strong>更多日常工具</strong>
                 <small>資料、溝通與外部連接都保留在這裡</small>

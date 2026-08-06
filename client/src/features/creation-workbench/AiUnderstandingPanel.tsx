@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { focusAndReveal } from "../../lib/scrollIntoViewForChrome";
 import type { AiOperationPreview, CreativePromptOverride } from "@shared/aiTrace";
 import { trpc } from "../../api";
 import { Button, Card, Chip, Hint, Meta } from "../../components/ui";
@@ -308,9 +309,9 @@ export function AiUnderstandingPanel({
                   <summary style={{ cursor: "pointer", fontWeight: 600 }}>進階：只覆寫創作提示詞</summary>
                   <Hint style={{ marginTop: 6 }}>只影響正向／負向創作內容，不會覆寫系統規則、工具權限、來源限制或專案權限。</Hint>
                   <label>正向提示覆寫</label>
-                  <textarea value={override?.positive ?? ""} onChange={(event) => onOverrideChange({ ...override, positive: event.target.value || undefined })} placeholder="留空＝使用系統組裝結果" />
+                  <textarea value={override?.positive ?? ""} onFocus={(e) => focusAndReveal(e.currentTarget)} onChange={(event) => onOverrideChange({ ...override, positive: event.target.value || undefined })} placeholder="留空＝使用系統組裝結果" />
                   <label>負向提示覆寫</label>
-                  <textarea value={override?.negative ?? ""} onChange={(event) => onOverrideChange({ ...override, negative: event.target.value || undefined })} placeholder="留空＝使用世界觀禁忌與模型預設" />
+                  <textarea value={override?.negative ?? ""} onFocus={(e) => focusAndReveal(e.currentTarget)} onChange={(event) => onOverrideChange({ ...override, negative: event.target.value || undefined })} placeholder="留空＝使用世界觀禁忌與模型預設" />
                 </details>
               ) : null}
 

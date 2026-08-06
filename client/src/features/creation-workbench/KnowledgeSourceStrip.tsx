@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { trpc } from "../../api";
+import { focusAndReveal } from "../../lib/scrollIntoViewForChrome";
 import { Button, Chip, Hint, Meta } from "../../components/ui";
 
 const KIND_LABEL: Record<string, string> = {
@@ -86,6 +87,7 @@ export function KnowledgeSourceStrip({
             placeholder="搜尋標題／內容…"
             value={q}
             disabled={disabled}
+            onFocus={(e) => focusAndReveal(e.currentTarget)}
             onChange={(e) => setQ(e.target.value)}
             style={{ width: "100%", marginBottom: 8, fontSize: 13 }}
             aria-label="搜尋知識庫"

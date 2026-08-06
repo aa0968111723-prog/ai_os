@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useMatchMedia } from "../../lib/useMatchMedia";
 
@@ -80,6 +80,8 @@ export function MenuSurface({
   children: ReactNode;
 }) {
   const compact = useMatchMedia(MENU_SHEET_MQ);
+  // sheet 下滑關閉手勢的起手 Y（僅 compact 使用；見 surface 的 onPointerDown）
+  const sheetDragY = useRef<number | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   // 開啟當下就要能聚焦首項：DOM 在 layout effect 執行時已存在，
   // 用 rAF 會讓焦點落點取決於畫格時機，CI 與慢裝置上會間歇性留在觸發器上
@@ -159,6 +161,22 @@ export function MenuSurface({
         aria-label={label}
         className={`menu menu-surface${placement === "stretch" ? " menu-surface--stretch" : ""}${compact ? " is-sheet" : ""}${className ? ` ${className}` : ""}`}
         style={!compact && minWidth ? { minWidth } : undefined}
+        // sheet 把手（::before 畫的 grip）承諾「可下滑關閉」——補最小手勢。
+        // 只在 compact、非滑鼠、且於頂端把手帶（32px 內）起手才追蹤，
+        // 不與選單內容自身的捲動打架；桌機路徑（!compact）完全不進來。
+        onPointerDown={(e: ReactPointerEvent<HTMLDivElement>) => {
+          if (!compact || e.pointerType === "mouse") return;
+          if (e.clientY - e.currentTarget.getBoundingClientRect().top > 32) return;
+          sheetDragY.current = e.clientY;
+        }}
+        onPointerMove={(e: ReactPointerEvent<HTMLDivElement>) => {
+          if (sheetDragY.current != null && e.clientY - sheetDragY.current > 48) {
+            sheetDragY.current = null;
+            onClose();
+          }
+        }}
+        onPointerUp={() => { sheetDragY.current = null; }}
+        onPointerCancel={() => { sheetDragY.current = null; }}
       >
         {children}
       </div>
