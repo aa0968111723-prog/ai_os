@@ -579,9 +579,27 @@ export function Launchpad({ groupId }: { groupId: string }) {
                         <small>{kindLabelOf(project.kind)}・更新於 {relTime(project.updatedAt)}</small>
                       </span>
                       {!!pending && pending.awaitingGenerations > 0 && (
-                        <Link href={`/p/${project.id}?focus=pending`} style={{ textDecoration: "none" }}>
+                        /* 不能用 Link：a 包 a 不合法（React validateDOMNesting 會警告），
+                           且點擊冒泡到外層卡片的 navigate 後執行、?focus=pending 深連結被吃掉 */
+                        <span
+                          role="link"
+                          tabIndex={0}
+                          style={{ textDecoration: "none", cursor: "pointer" }}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            navigate(`/p/${project.id}?focus=pending`);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              navigate(`/p/${project.id}?focus=pending`);
+                            }
+                          }}
+                        >
                           <Chip>{pending.awaitingGenerations} 待處理</Chip>
-                        </Link>
+                        </span>
                       )}
                       <Icon name="ChevronRight" size={17} />
                     </Link>
