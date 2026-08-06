@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "wouter";
 import { trpc } from "../api";
 import { Icon, type IconName } from "../components/Icon";
@@ -53,18 +53,12 @@ const WIZARD_SOURCES = [
 const COMPARE_MAX = 4;
 /** needs(來源輸入)的中文說法,比較表與精靈共用 */
 const NEEDS_LABEL: Record<string, string> = { image: "一張圖", audio: "一段音訊", video: "一支影片", zip: "素材包 zip" };
-/** 比較表儲存格共用樣式(頁面原無表格樣式,沿用髮絲線/左對齊的既有視覺) */
-const compareCell: CSSProperties = {
-  borderBottom: "1px solid var(--border-soft)",
-  padding: "6px 10px",
-  textAlign: "left",
-  verticalAlign: "top",
-};
-/** 級別 pill 的三色(旗艦=品牌赤陶/經濟=療癒紫/最低=金);比較表、清單、決策中心共用 */
-const TIER_STYLE: Record<string, { color: string; borderColor: string; background: string }> = {
-  flagship: { color: "var(--primary-ink)", borderColor: "var(--primary)", background: "var(--primary-tint)" },
-  economy: { color: "var(--healing-ink)", borderColor: "var(--healing)", background: "var(--healing-soft)" },
-  budget: { color: "var(--gold-ink)", borderColor: "var(--gold)", background: "var(--gold-soft)" },
+/** 級別 pill 的三色(旗艦=品牌赤陶/經濟=療癒紫/最低=金);比較表、清單、決策中心共用。
+ *  色值寫在 styles.css 的 .pill--tier-* ——顏色是設計語言的一部分,不該散在 TSX 的物件裡。 */
+const TIER_CLASS: Record<string, string> = {
+  flagship: "pill--tier-flagship",
+  economy: "pill--tier-economy",
+  budget: "pill--tier-budget",
 };
 
 /** 契約健康（與 shared/modelContract 對齊；指南顯示中文） */
@@ -202,14 +196,14 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
         />
       ),
     },
-    { label: "級別", render: (m) => <Pill style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</Pill> },
+    { label: "級別", render: (m) => <Pill className={TIER_CLASS[m.tier]}>{tierLabel(m.tier)}</Pill> },
     // 底層模型擺在最上面幾列：兩個端點若是同一顆基座，換過去風格不會變——
     // 這是比較表最該先回答、卻最容易被「特性」那行文案蓋掉的一件事。
     { label: "底層模型", render: (m) => <ModelBaseChip modelId={m.id} category={m.category} size="md" /> },
     { label: "出品方", render: (m) => modelBaseSpecFor(m.id, m.category).developer },
     { label: "骨幹架構", render: (m) => modelBaseSpecFor(m.id, m.category).arch },
     { label: "權重", render: (m) => WEIGHTS_LABEL[modelBaseSpecFor(m.id, m.category).weights] },
-    { label: "點數", render: (m) => <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span> },
+    { label: "點數", render: (m) => <span className="mono model-workflow-card__points">{m.points} 點/次</span> },
     {
       label: "健康",
       render: (m) => <HealthBadge health={healthById[m.id]?.health} note={healthById[m.id]?.healthNote} />,
@@ -307,6 +301,8 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
   const catalogItems = models.data ?? [];
   const catalogNeedsDisclosure = !debouncedQ && !tier && catalogItems.length > 8;
   const visibleCatalogItems = catalogNeedsDisclosure && !catalogExpanded ? catalogItems.slice(0, 8) : catalogItems;
+  /** 點數長條的共同基準:目前這批模型裡最貴的一顆。換一批就換基準——這是同批相對比較,不是絕對評分。 */
+  const maxCatalogPoints = Math.max(1, ...catalogItems.map((m) => m.points));
 
   return (
     <div className="page-shell secondary-page models-page" data-fb="模型指南頁">
@@ -314,7 +310,13 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
         eyebrow="創作決策"
         title="模型指南"
         icon="Sparkles"
-        badge={`${MODEL_CATEGORY_COUNT} 類・${MODELS.length} 個模型`}
+        // 目錄規模是這頁最量化的兩個事實,用全站的統計條(襯線數字)呈現,不是壓成一顆灰色膠囊
+        badge={
+          <div className="model-head-stats" role="group" aria-label="目錄規模">
+            <span><strong>{MODEL_CATEGORY_COUNT}</strong><small>類別</small></span>
+            <span><strong>{MODELS.length}</strong><small>個模型</small></span>
+          </div>
+        }
         description={
           <>
             不用先懂所有模型。從情境、風格或三題開始挑；挑不定就<strong>拿自己的題目讓它們同題並跑</strong>，或用熱力圖把整類攤開比。
@@ -336,10 +338,8 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
         </Hint>
       )}
       {compareList.length >= 2 && (
-        <Card as="section"
-          data-fb="模型並排比較"
-          style={{ position: "sticky", top: "var(--sp-8)", zIndex: 30, marginBottom: "var(--sp-16)", padding: "14px 18px", boxShadow: "var(--e3)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <Card as="section" className="model-compare-card" data-fb="模型並排比較">
+          <div className="model-compare-card__head">
             <Icon name="Scale" size={16} />
             <b>並排比較({compareList.length}/{COMPARE_MAX})</b>
             <span className="spacer" />
@@ -355,20 +355,20 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setCompareIds([])}>清空比較</Button>
           </div>
-          {/* 小螢幕:表格保住最小寬,由外層橫向捲動 */}
-          <div style={{ overflowX: "auto", marginTop: 8 }}>
-            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 100 + compareList.length * 180, fontSize: "var(--fs-13)", lineHeight: 1.5 }}>
+          {/* 小螢幕:表格保住最小寬,由外層雙向捲動;列標題欄凍結在左緣,橫捲時才知道在看哪一列 */}
+          <div className="model-compare-card__scroll">
+            <table className="model-compare-table" style={{ minWidth: 100 + compareList.length * 180 }}>
               <thead>
                 <tr>
-                  <th style={{ ...compareCell, width: 100 }} />
+                  <th className="model-compare-table__corner" />
                   {compareList.map((m) => (
-                    <th key={m.id} scope="col" style={{ ...compareCell, fontWeight: 600, fontSize: "var(--fs-14)" }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                    <th key={m.id} scope="col">
+                      <span className="model-compare-table__col">
                         {m.label}
                         <Button variant="ghost"
+                          className="model-compare-table__drop"
                           aria-label={`把 ${m.label} 移出比較`}
                           title="移出比較"
-                          style={{ padding: "0 6px", display: "inline-flex", alignItems: "center" }}
                           onClick={() => toggleCompare(m.id)}>
                           <Icon name="X" size={12} />
                         </Button>
@@ -380,9 +380,9 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
               <tbody>
                 {compareRows.map((row) => (
                   <tr key={row.label}>
-                    <th scope="row" className="hint" style={{ ...compareCell, fontWeight: 500, whiteSpace: "nowrap" }}>{row.label}</th>
+                    <th scope="row" className="hint">{row.label}</th>
                     {compareList.map((m) => (
-                      <td key={m.id} style={compareCell}>{row.render(m)}</td>
+                      <td key={m.id}>{row.render(m)}</td>
                     ))}
                   </tr>
                 ))}
@@ -393,7 +393,7 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
       )}
 
       {/* ── 決策中心——五種方式回答「怎麼選模型」:看情境／比風格／三題篩選／實測競技場／分析熱力圖 ── */}
-      <Card as="section" ref={decisionRef} variant="primary" data-fb="模型決策中心" style={{ marginBottom: "var(--sp-16)", scrollMarginTop: "var(--sp-16)" }}>
+      <Card as="section" ref={decisionRef} variant="primary" data-fb="模型決策中心" className="model-decision-card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           <h2 style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Icon name="Sparkles" size={18} />怎麼選模型?
@@ -509,7 +509,7 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
               ))}
               <small>{wizardReady ? "完成，以下是適合的模型" : `還有 ${3 - wizardAnswered} 題`}</small>
             </div>
-            <p style={{ margin: "0 0 2px", fontSize: "var(--fs-14)", fontWeight: 600 }}>1. 你要做什麼?</p>
+            <p className="model-quiz__q">1. 你要做什麼?</p>
             <div>
               {WIZARD_CATEGORIES.map((c) => (
                 <WizardChip
@@ -521,7 +521,7 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
                 />
               ))}
             </div>
-            <p style={{ margin: "10px 0 2px", fontSize: "var(--fs-14)", fontWeight: 600 }}>2. 預算傾向?</p>
+            <p className="model-quiz__q">2. 預算傾向?</p>
             <div>
               {TIERS.map((t) => (
                 <WizardChip
@@ -532,7 +532,7 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
                 />
               ))}
             </div>
-            <p style={{ margin: "10px 0 2px", fontSize: "var(--fs-14)", fontWeight: 600 }}>3. 有沒有來源素材?</p>
+            <p className="model-quiz__q">3. 有沒有來源素材?</p>
             <div>
               {WIZARD_SOURCES.map((s) => (
                 <WizardChip
@@ -573,13 +573,10 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
                           推薦
                         </Chip>
                       )}
-                      <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次</span>
-                      <button
-                        style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 12px", fontSize: "var(--fs-11)", fontFamily: "var(--sans)" }}
-                        onClick={() => copyModelId(m.id)}
-                      >
+                      <span className="mono model-workflow-card__points">{m.points} 點/次</span>
+                      <Button variant="ghost" size="sm" onClick={() => copyModelId(m.id)}>
                         {copiedId === m.id ? <><Icon name="Check" size={12} />已複製</> : "複製模型 ID"}
-                      </button>
+                      </Button>
                     </div>
                     <Meta as="p" style={{ margin: "4px 0 0" }}>
                       {m.strengths}
@@ -599,86 +596,101 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
       </Card>
 
       {/* ── 完整目錄:搜尋/類別/檔次篩選＋模型清單(決策中心「在目錄看同類」捲到這) ── */}
-      <div ref={catalogRef} style={{ scrollMarginTop: "var(--sp-16)" }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginTop: 28, marginBottom: "var(--sp-8)" }}>
-          <h2 style={{ margin: 0 }}>完整目錄</h2>
-          <Meta>
-            搜尋、按類別或檔次瀏覽全部 {MODELS.length} 個模型；目前顯示 {visibleCatalogItems.length}/{catalogItems.length}。
+      <div ref={catalogRef} className="model-section">
+        <div className="model-section-head">
+          <p className="eyebrow">目錄</p>
+          <div className="model-section-head__line">
+            <h2>完整目錄</h2>
+            <span className="model-section-head__rule" aria-hidden="true" />
+            <span className="model-section-head__count">{visibleCatalogItems.length}/{catalogItems.length}</span>
+          </div>
+          <Meta as="p" className="model-section-head__deck">
+            搜尋、按類別或檔次瀏覽全部 {MODELS.length} 個模型。
           </Meta>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: "var(--sp-16)" }}>
-          <span style={{ position: "relative", display: "inline-flex", width: "100%", maxWidth: 260 }}>
-            <input
-              aria-label="搜尋模型"
-              style={{ paddingRight: 32 }}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="搜尋(例:中文、對嘴、金句)"
-            />
-            {q && (
-              <Button variant="ghost"
-                aria-label="清除搜尋"
-                onClick={() => setQ("")}
-                style={{
-                  position: "absolute", right: 4, top: "50%", transform: "translateY(-50%)",
-                  display: "flex", alignItems: "center",
-                  padding: "0 8px", fontSize: 16, lineHeight: 1,
-                }}>
-                <Icon name="X" size={16} />
-              </Button>
-            )}
-          </span>
-          {q && <Meta>搜尋涵蓋全部類別</Meta>}
-          {!q && <span className="eyebrow cjk">類別</span>}
-          {!q &&
-            (categories.data ?? []).filter((c) => c.id !== "workflow").map((c) => {
-              const on = category === c.id;
-              return (
-                <Chip
-                  key={c.id}
-                  selected={on}
-                  title={c.hint}
-                  onClick={() => setCategory(c.id)}
-                  style={{ cursor: "pointer" }}
-                >
-                  {c.label}
-                </Chip>
-              );
-            })}
-          <span className="eyebrow cjk">檔次</span>
-          {TIERS.map((t) => {
-            const on = tier === t.id;
-            return (
-              <Chip
-                key={t.id}
-                selected={on}
-                title={`只看${t.label}模型;再按一次取消`}
-                onClick={() => setTier(on ? "" : t.id)}
-                style={{ cursor: "pointer" }}
-              >
-                {t.label}
-              </Chip>
-            );
-          })}
-          <span className="eyebrow cjk">健康</span>
-          {HEALTH_FILTERS.map((h) => {
-            const on = healthFilter === h.id;
-            return (
-              <Chip
-                key={h.id || "all"}
-                selected={on}
-                title={h.id ? HEALTH_META[h.id].hint : "顯示全部健康狀態"}
-                onClick={() => setHealthFilter(on && h.id ? "" : h.id)}
-                style={{ cursor: "pointer" }}
-              >
-                {h.label}
-              </Chip>
-            );
-          })}
+        {/* 篩選列:三組條件各自成列,標籤在左、選項在右。手機上每一組是自己的橫向捲軌,
+            不再讓 21 顆 chip 擠成一坨換行——那會在 390px 吃掉大半屏才看得到第一個模型。 */}
+        <div className="model-filter-bar">
+          <div className="model-filter-bar__row model-filter-bar__row--search">
+            <span className="model-filter-bar__search">
+              <input
+                aria-label="搜尋模型"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="搜尋(例:中文、對嘴、金句)"
+              />
+              {q && (
+                <Button variant="ghost"
+                  className="model-filter-bar__clear"
+                  aria-label="清除搜尋"
+                  onClick={() => setQ("")}>
+                  <Icon name="X" size={16} />
+                </Button>
+              )}
+            </span>
+            {q && <Meta>搜尋涵蓋全部類別</Meta>}
+          </div>
+          {!q && (
+            <div className="model-filter-bar__row">
+              <span className="eyebrow cjk">類別</span>
+              <div className="model-filter-bar__rail" role="group" aria-label="依類別篩選">
+                {(categories.data ?? []).filter((c) => c.id !== "workflow").map((c) => (
+                  <Chip
+                    key={c.id}
+                    selected={category === c.id}
+                    title={c.hint}
+                    onClick={() => setCategory(c.id)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    {c.label}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="model-filter-bar__row">
+            <span className="eyebrow cjk">檔次</span>
+            <div className="model-filter-bar__rail" role="group" aria-label="依檔次篩選">
+              {TIERS.map((t) => {
+                const on = tier === t.id;
+                return (
+                  <Chip
+                    key={t.id}
+                    selected={on}
+                    title={`只看${t.label}模型;再按一次取消`}
+                    onClick={() => setTier(on ? "" : t.id)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    {t.label}
+                  </Chip>
+                );
+              })}
+            </div>
+          </div>
+          <div className="model-filter-bar__row">
+            <span className="eyebrow cjk">健康</span>
+            <div className="model-filter-bar__rail" role="group" aria-label="依實測健康篩選">
+              {HEALTH_FILTERS.map((h) => {
+                const on = healthFilter === h.id;
+                return (
+                  <Chip
+                    key={h.id || "all"}
+                    selected={on}
+                    title={h.id ? HEALTH_META[h.id].hint : "顯示全部健康狀態"}
+                    onClick={() => setHealthFilter(on && h.id ? "" : h.id)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    {h.label}
+                  </Chip>
+                );
+              })}
+            </div>
+          </div>
+          <CatalogTierMix items={catalogItems} />
         </div>
 
-        <div className="stack">
+        <div className="model-catalog-list">
           {models.isLoading &&
             Array.from({ length: 3 }).map((_, i) => (
               <Skeleton key={`sk-${i}`} className="card" height={96} />
@@ -686,7 +698,7 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
           {models.isError && (
             <p className="error">
               模型目錄載入失敗——
-              <button style={{ padding: "4px 12px", marginLeft: 4 }} onClick={() => models.refetch()}>重試</button>
+              <Button size="sm" onClick={() => models.refetch()}>重試</Button>
             </p>
           )}
           {visibleCatalogItems.map((m) => {
@@ -696,77 +708,70 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
             const encLimit = m.textEncoderLimit ?? healthById[m.id]?.textEncoderLimit;
             const neg = m.supportsNegativePrompt ?? healthById[m.id]?.supportsNegativePrompt;
             return (
-            <Card as="section" key={m.id} className="model-catalog-card" style={{ padding: "14px 18px" }}>
+            <Card as="section" key={m.id} className="model-catalog-card">
               <div className="model-catalog-card__row">
                 <ModelThumb
                   label={m.label}
                   category={m.category}
                   src={m.thumbnailUrl ?? healthById[m.id]?.thumbnailUrl ?? null}
-                  size={72}
                 />
                 <div className="model-catalog-card__body">
-              <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-                <b>{m.label}</b>
-                <Pill style={TIER_STYLE[m.tier]}>{m.tierLabel}</Pill>
-                <HealthBadge health={health} note={healthNote} />
-                <span className="mono" style={{ fontSize: 12 }}>{m.points} 點/次{m.estTwd != null ? ` · 約 NT$${m.estTwd}` : ""}</span>
-                <Meta className="mono" style={{ fontSize: 11 }}>{m.cost}</Meta>
-                {m.recommended && (
-                  <Chip style={{ margin: 0, background: "var(--primary-tint)", borderColor: "var(--primary-border)", color: "var(--primary-ink)", fontWeight: 600 }}>
-                    推薦
-                  </Chip>
-                )}
-                {!m.verified && <Meta style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11 }}><Icon name="TriangleAlert" size={12} />待正式模式首跑確認</Meta>}
-                {/* 需求 #1:勾選加入並排比較;滿 4 個時其餘停用 */}
-                <label
-                  className="hint"
-                  title={compareFull && !compareIds.includes(m.id) ? `一次最多比較 ${COMPARE_MAX} 個——先移掉一個再勾` : "勾 2 個以上:頁面頂部浮出並排比較表,也可以直接送進實測競技場同題並跑"}
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: 6, margin: "0 0 0 auto", whiteSpace: "nowrap",
-                    cursor: compareFull && !compareIds.includes(m.id) ? "not-allowed" : "pointer",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={compareIds.includes(m.id)}
-                    disabled={compareFull && !compareIds.includes(m.id)}
-                    onChange={() => toggleCompare(m.id)}
-                  />
-                  比較
-                </label>
-              </div>
-              <p style={{ margin: "6px 0 2px", fontSize: "var(--fs-14)" }}>{m.strengths}</p>
-              <Meta as="p" style={{ margin: 0 }}>適合:{m.bestFor}{m.needs ? `|需要來源:${m.sourceHint ?? m.needs}` : ""}</Meta>
-              {/* 底層模型：同基座的兩個端點換過去風格不會變，這件事清單上就要看得到 */}
-              <details className="model-catalog-card__base">
-                <summary>
-                  <ModelBaseChip modelId={m.id} category={m.category} />
-                  <Meta style={{ fontSize: "var(--fs-11)" }}>看底層</Meta>
-                </summary>
-                <ModelBaseDetail modelId={m.id} category={m.category} />
-              </details>
-              {(enc || neg != null) && (
-                <Meta as="p" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                  {enc ? `文字塔：${enc}${encLimit != null ? `（${encLimit} tok）` : ""}` : null}
-                  {enc && neg != null ? " · " : null}
-                  {neg != null ? (neg ? "支援負向提示" : "無負向提示欄") : null}
-                </Meta>
-              )}
-              {healthNote && normalizeHealth(health) !== "live_ok" && normalizeHealth(health) !== "unknown" && (
-                <Hint style={{ margin: "6px 0 0" }}>{healthNote}</Hint>
-              )}
-              <Meta as="p" className="mono" style={{ margin: "4px 0 0", fontSize: 11, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                {m.id}
-                <button
-                  style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 12px", fontSize: "var(--fs-11)", fontFamily: "var(--sans)" }}
-                  onClick={() => copyModelId(m.id)}
-                >
-                  {copiedId === m.id ? <><Icon name="Check" size={12} />已複製</> : "複製"}
-                </button>
-                <Link href="/dashboard" className="model-use-cta">
-                  到工作台使用 <Icon name="ArrowRight" size={12} />
-                </Link>
-              </Meta>
+                  {/* 標題列是網格不是換行:比較勾選框固定在右上角一格,不會在手機上被擠成孤兒列 */}
+                  <div className="model-catalog-card__head">
+                    <b>{m.label}</b>
+                    {/* 需求 #1:勾選加入並排比較;滿 4 個時其餘停用 */}
+                    <label
+                      className={`model-catalog-card__compare${compareFull && !compareIds.includes(m.id) ? " is-disabled" : ""}`}
+                      title={compareFull && !compareIds.includes(m.id) ? `一次最多比較 ${COMPARE_MAX} 個——先移掉一個再勾` : "勾 2 個以上:頁面頂部浮出並排比較表,也可以直接送進實測競技場同題並跑"}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={compareIds.includes(m.id)}
+                        disabled={compareFull && !compareIds.includes(m.id)}
+                        onChange={() => toggleCompare(m.id)}
+                      />
+                      比較
+                    </label>
+                  </div>
+                  {/* 徽章群:全部同一字級同一基線,不再是五種大小混在一列 */}
+                  <div className="model-catalog-card__badges">
+                    <Pill className={TIER_CLASS[m.tier]}>{m.tierLabel}</Pill>
+                    <HealthBadge health={health} note={healthNote} />
+                    {m.recommended && <Chip className="chip--recommended">推薦</Chip>}
+                    {!m.verified && (
+                      <Meta className="model-catalog-card__warn"><Icon name="TriangleAlert" size={12} />待正式模式首跑確認</Meta>
+                    )}
+                  </div>
+                  <PointsBar points={m.points} max={maxCatalogPoints} estTwd={m.estTwd} cost={m.cost} />
+                  <p className="model-catalog-card__lead">{m.strengths}</p>
+                  <Meta as="p" className="model-catalog-card__fit">適合:{m.bestFor}{m.needs ? `|需要來源:${m.sourceHint ?? m.needs}` : ""}</Meta>
+                  {/* 底層模型：同基座的兩個端點換過去風格不會變，這件事清單上就要看得到 */}
+                  <details className="model-catalog-card__base">
+                    <summary>
+                      <ModelBaseChip modelId={m.id} category={m.category} />
+                      <Meta style={{ fontSize: "var(--fs-11)" }}>看底層</Meta>
+                    </summary>
+                    <ModelBaseDetail modelId={m.id} category={m.category} />
+                  </details>
+                  {(enc || neg != null) && (
+                    <Meta as="p" className="model-catalog-card__spec">
+                      {enc ? `文字塔：${enc}${encLimit != null ? `（${encLimit} tok）` : ""}` : null}
+                      {enc && neg != null ? " · " : null}
+                      {neg != null ? (neg ? "支援負向提示" : "無負向提示欄") : null}
+                    </Meta>
+                  )}
+                  {healthNote && normalizeHealth(health) !== "live_ok" && normalizeHealth(health) !== "unknown" && (
+                    <Hint style={{ margin: "6px 0 0" }}>{healthNote}</Hint>
+                  )}
+                  <div className="model-catalog-card__ids">
+                    <code className="mono">{m.id}</code>
+                    <Button variant="ghost" size="sm" onClick={() => copyModelId(m.id)}>
+                      {copiedId === m.id ? <><Icon name="Check" size={12} />已複製</> : "複製"}
+                    </Button>
+                    <Link href="/dashboard" className="model-use-cta">
+                      到工作台使用 <Icon name="ArrowRight" size={12} />
+                    </Link>
+                  </div>
                 </div>
               </div>
             </Card>
@@ -794,8 +799,15 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
       </div>
 
       {(!debouncedQ || matchedWorkflows.length > 0) && (
-        <>
-          <h2 style={{ marginTop: 28 }}>製作範本(一鍵串鏈)</h2>
+        <div className="model-section">
+          <div className="model-section-head">
+            <p className="eyebrow">串鏈</p>
+            <div className="model-section-head__line">
+              <h2>製作範本(一鍵串鏈)</h2>
+              <span className="model-section-head__rule" aria-hidden="true" />
+              <span className="model-section-head__count">{matchedWorkflows.length}</span>
+            </div>
+          </div>
           {/* 「每步各自扣點」是實際代價：不知道範本逐步計費就可能誤啟動 → 不可收 */}
         <Hint layer="always">在<Link href="/dashboard">今日工作台</Link>開啟專案後,於「製作範本」卡使用;每步各自扣點。</Hint>
           {workflows.isLoading && (
@@ -808,26 +820,80 @@ export function ModelsPage({ groupId = "" }: { groupId?: string }) {
           {workflows.isError && (
             <p className="error">
               製作範本載入失敗——
-              <button style={{ padding: "4px 12px", marginLeft: 4 }} onClick={() => workflows.refetch()}>重試</button>
+              <Button size="sm" onClick={() => workflows.refetch()}>重試</Button>
             </p>
           )}
           <div className="stack">
             {matchedWorkflows.map((w) => (
-              <Card as="section" key={w.id} style={{ padding: "14px 18px" }}>
-                <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+              <Card as="section" key={w.id} className="model-workflow-card">
+                <div className="model-workflow-card__head">
                   <b>{w.label}</b>
-                  <Pill style={TIER_STYLE[w.tier]}>{w.tierLabel}</Pill>
-                  <span className="mono" style={{ fontSize: 12 }}>約 {w.points} 點</span>
+                  <Pill className={TIER_CLASS[w.tier]}>{w.tierLabel}</Pill>
+                  <span className="mono model-workflow-card__points">約 {w.points} 點</span>
                 </div>
-                <p style={{ margin: "6px 0 2px", fontSize: "var(--fs-14)" }}>{w.strengths}</p>
+                <p className="model-catalog-card__lead">{w.strengths}</p>
                 <Meta as="p" style={{ margin: 0 }}>
                   適合:{w.bestFor}|步驟:{w.steps.map((s) => s.note).join(" → ")}
                 </Meta>
               </Card>
             ))}
           </div>
-        </>
+        </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 點數:掃讀一整頁時,「貴不貴」要用長度看得出來,不能只有一行小字。
+ *
+ * 長條的基準是**目前這批**模型裡最貴的一顆(同批相對比較),所以換類別、換篩選,
+ * 長度就會重算——這點必須寫在篩選列的說明裡,免得被當成絕對評分。
+ * 單一色階(主色)因為這裡編碼的是大小不是身分;數字本身仍以文字呈現。
+ */
+function PointsBar({ points, max, estTwd, cost }: { points: number; max: number; estTwd?: number | null; cost?: string }) {
+  const pct = Math.max(2, Math.round((points / Math.max(max, 1)) * 100));
+  return (
+    <div className="model-points" title={cost ? `官方約略價:${cost}` : undefined}>
+      <span className="model-points__figure mono">
+        {points} 點/次{estTwd != null ? ` · 約 NT$${estTwd}` : ""}
+      </span>
+      <span className="model-points__track" aria-hidden="true">
+        <span style={{ width: `${pct}%` }} />
+      </span>
+      {cost ? <Meta className="model-points__cost mono">{cost}</Meta> : null}
+    </div>
+  );
+}
+
+/**
+ * 目前這批模型的檔次組成:一條堆疊條回答「這一類是旗艦多還是經濟多」。
+ * 顏色與檔次 pill 同一套(旗艦=赤陶／經濟=紫／最低=金),文字標籤永遠在旁邊,不靠顏色單獨表意。
+ */
+function CatalogTierMix({ items }: { items: ReadonlyArray<{ tier: string }> }) {
+  const total = items.length;
+  if (total === 0) return null;
+  const counts = TIERS.map((t) => ({ ...t, n: items.filter((m) => m.tier === t.id).length })).filter((t) => t.n > 0);
+  if (counts.length < 2) return null;
+  return (
+    <div className="model-catalog-mix">
+      <span className="model-catalog-mix__bar" aria-hidden="true">
+        {counts.map((t) => (
+          <i key={t.id} className={`is-${t.id}`} style={{ width: `${(t.n / total) * 100}%` }} />
+        ))}
+      </span>
+      <ul className="model-catalog-mix__legend">
+        {counts.map((t) => (
+          <li key={t.id} className={`is-${t.id}`}>
+            <i aria-hidden="true" />
+            {t.label}
+            <b>{t.n}</b>
+          </li>
+        ))}
+        <li className="model-catalog-mix__note">
+          <Meta>長條＝點數在這批裡的相對高低</Meta>
+        </li>
+      </ul>
     </div>
   );
 }
@@ -866,11 +932,12 @@ function ModelThumb({
   label,
   category,
   src,
-  size = 64,
+  size,
 }: {
   label: string;
   category: ModelCategory | string;
   src?: string | null;
+  /** 省略時由 CSS 的 --thumb 決定(目錄卡在手機上會縮到 56px);給了就是固定尺寸 */
   size?: number;
 }) {
   const [broken, setBroken] = useState(false);
@@ -879,7 +946,7 @@ function ModelThumb({
   return (
     <div
       className={`model-thumb${showImg ? "" : " is-placeholder"}`}
-      style={{ width: size, height: size }}
+      style={size ? { width: size, height: size } : undefined}
       aria-hidden
     >
       {showImg ? (
@@ -893,7 +960,8 @@ function ModelThumb({
         />
       ) : (
         <span className="model-thumb__fallback" title={label}>
-          <Icon name={icon} size={Math.round(size * 0.36)} />
+          {/* 佔位圖示跟著格子縮放；沒指定尺寸時用 CSS 的預設格子(64px)推算 */}
+          <Icon name={icon} size={Math.round((size ?? 64) * 0.36)} />
         </span>
       )}
     </div>
@@ -950,7 +1018,7 @@ function ModelInline({
       <ModelThumb label={m.label} category={m.category} src={thumbnailUrl} size={36} />
       {lead && <span className="eyebrow cjk" style={{ fontWeight: 700, color: "var(--primary-ink)" }}>{lead}</span>}
       <b style={{ fontSize: "var(--fs-14)" }}>{m.label}</b>
-      <Pill style={TIER_STYLE[m.tier]}>{tierLabel(m.tier)}</Pill>
+      <Pill className={TIER_CLASS[m.tier]}>{tierLabel(m.tier)}</Pill>
       {health != null && <HealthBadge health={health} note={healthNote} />}
       <span className="mono" style={{ fontSize: 11 }}>{m.points} 點</span>
       <Button variant="ghost" size="sm"
@@ -1055,19 +1123,19 @@ function ShowdownCard({
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 520, fontSize: "var(--fs-13)", lineHeight: 1.5 }}>
           <thead>
             <tr>
-              <th scope="col" className="hint" style={{ ...compareCell, width: 150, fontWeight: 600 }}>風格 / 需求</th>
-              <th scope="col" className="hint" style={{ ...compareCell, fontWeight: 600 }}>首選</th>
-              <th scope="col" className="hint" style={{ ...compareCell, fontWeight: 600 }}>次選</th>
+              <th scope="col" className="hint model-showdown-table__lead">風格 / 需求</th>
+              <th scope="col" className="hint">首選</th>
+              <th scope="col" className="hint">次選</th>
             </tr>
           </thead>
           <tbody>
             {showdown.axes.map((a) => (
               <tr key={a.axis}>
-                <th scope="row" style={{ ...compareCell, fontWeight: 500 }}>
+                <th scope="row">
                   {a.axis}
                   <Meta style={{ display: "block", fontWeight: 400 }}>{a.note}</Meta>
                 </th>
-                <td style={compareCell}>
+                <td>
                   <ModelInline
                     id={a.winnerId}
                     copiedId={copiedId}
@@ -1077,7 +1145,7 @@ function ShowdownCard({
                     thumbnailUrl={healthById[a.winnerId]?.thumbnailUrl}
                   />
                 </td>
-                <td style={compareCell}>
+                <td>
                   {a.runnerUpId ? (
                     <ModelInline
                       id={a.runnerUpId}

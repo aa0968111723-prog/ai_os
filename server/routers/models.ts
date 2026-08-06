@@ -164,6 +164,11 @@ export const modelsRouter = router({
   /**
    * 我的模型使用量（近 N 天）：模型指南頂欄用，取代對一般創作者無意義的契約稽核。
    * 只回傳自己的聚合，不含他人資料。
+   *
+   * **總計必須是全量，不是榜上前幾名的和。** 這裡只把「列出來的」截到前 TOP_N 名，
+   * totals／modelCount 一律以全部分組計算——頂欄那句「N 次・完成 N・N 點」是使用者
+   * 對自己這 30 天的總結，若偷偷只算前 12 名就是報少，而且客戶端無從得知被截斷。
+   * 分組數受限於使用者用過的模型數（上限＝目錄大小），一次掃描即可，不必第二趟查詢。
    */
   myUsage: authedProcedure
     .input(z.object({ days: z.number().int().min(1).max(90).optional() }).optional())
@@ -171,6 +176,8 @@ export const modelsRouter = router({
       const days = input?.days ?? 30;
       const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
       const uid = ctx.auth.user.id;
+      /** 頂欄榜單長度；其餘併成「其他 N 顆」由客戶端顯示 */
+      const TOP_N = 12;
       const rows = await db
         .select({
           modelId: schema.generations.modelId,
@@ -181,14 +188,17 @@ export const modelsRouter = router({
         .from(schema.generations)
         .where(and(eq(schema.generations.userId, uid), gte(schema.generations.createdAt, since)))
         .groupBy(schema.generations.modelId)
-        .orderBy(desc(sql`count(*)`))
-        .limit(12);
+        // 次數相同時再以 id 排序：沒有第二鍵的話，同票模型在兩次 refetch 之間會互換位置
+        .orderBy(desc(sql`count(*)`), schema.generations.modelId);
       const totalSubmits = rows.reduce((s, r) => s + r.submits, 0);
       const totalPoints = rows.reduce((s, r) => s + r.points, 0);
       const totalDone = rows.reduce((s, r) => s + r.done, 0);
       return {
         days,
-        models: rows,
+        /** 榜單（前 TOP_N 名，依送出次數） */
+        models: rows.slice(0, TOP_N),
+        /** 這段期間用過的不同模型數（含未進榜的） */
+        modelCount: rows.length,
         totalSubmits,
         totalDone,
         totalPoints,
