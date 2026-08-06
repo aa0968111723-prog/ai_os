@@ -156,6 +156,9 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
   };
 
   const totalChars = (list.data ?? []).reduce((s, r) => s + r.chars, 0);
+  const hasItems = !!list.data?.length;
+  // 有輸入搜尋字／選了類型時，即使結果為 0 也要留著控制列讓使用者清掉條件
+  const filtering = searchQ.trim() !== "" || filterKind !== "";
 
   const [showPreview, setShowPreview] = useState(false);
   const preview = trpc.knowledge.injectPreview.useQuery(
@@ -176,27 +179,30 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
         {list.data && list.data.length > 0 && ` 目前 ${list.data.length} 份・約 ${totalChars.toLocaleString()} 字。`}
       </Hint>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, alignItems: "center" }}>
-        <input
-          type="search"
-          placeholder="搜尋標題／內容／摘要…"
-          value={searchQ}
-          onChange={(e) => setSearchQ(e.target.value)}
-          style={{ flex: "1 1 160px", minWidth: 140, fontSize: 13 }}
-          aria-label="搜尋知識庫"
-        />
-        <select
-          value={filterKind}
-          onChange={(e) => setFilterKind(e.target.value as typeof filterKind)}
-          aria-label="篩選類型"
-          style={{ fontSize: 13 }}
-        >
-          <option value="">全部類型</option>
-          {KINDS.map((k) => (
-            <option key={k.id} value={k.id}>{k.label}</option>
-          ))}
-        </select>
-      </div>
+      {/* 空庫時不放搜尋／篩選：沒東西可搜的控制列只會讓第一次來的人以為要先「設定」什麼 */}
+      {(hasItems || filtering) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, alignItems: "center" }}>
+          <input
+            type="search"
+            placeholder="搜尋標題／內容／摘要…"
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            style={{ flex: "1 1 160px", minWidth: 140, fontSize: 13 }}
+            aria-label="搜尋知識庫"
+          />
+          <select
+            value={filterKind}
+            onChange={(e) => setFilterKind(e.target.value as typeof filterKind)}
+            aria-label="篩選類型"
+            style={{ fontSize: 13 }}
+          >
+            <option value="">全部類型</option>
+            {KINDS.map((k) => (
+              <option key={k.id} value={k.id}>{k.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {list.isLoading ? (
         <div style={{ marginTop: 8 }} aria-hidden="true">
@@ -264,8 +270,42 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
             )}
           </div>
         </div>
+      ) : filtering ? (
+        <EmptyState
+          icon={<Icon name="Search" />}
+          title={<>沒有符合的結果</>}
+          description={<>換個關鍵字，或清掉搜尋與篩選再找找。</>}
+          action={
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQ("");
+                setFilterKind("");
+              }}
+            >
+              清除搜尋與篩選
+            </button>
+          }
+          style={{ marginTop: 8 }}
+        />
       ) : (
-        <EmptyState icon={<Icon name="FileText" />} title={<>還沒有素材知識</>} description={<>加一份開示稿或腳本，讓 AI 真的懂這支片。</>} style={{ marginTop: 8 }} />
+        <EmptyState
+          icon={<Icon name="FileText" />}
+          title={<>還沒有素材知識</>}
+          description={<>把開示稿、見證或腳本直接貼進來就好——AI 發想、拆分鏡時會自動引用，不用先建資料庫或連外部服務。</>}
+          action={
+            !readOnly && !open ? (
+              <button
+                className="primary"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                onClick={() => setOpen(true)}
+              >
+                <Icon name="Plus" size={14} />加入素材知識
+              </button>
+            ) : undefined
+          }
+          style={{ marginTop: 8 }}
+        />
       )}
 
       {readOnly ? (
@@ -358,11 +398,12 @@ export function KnowledgeBase({ projectId, readOnly = false }: { projectId: stri
             {!importing && importSummary && <Meta as="p" style={{ margin: "6px 0 0" }}>{importSummary}</Meta>}
           </div>
         </div>
-      ) : (
+      ) : hasItems || filtering ? (
+        // 空庫時這顆收進上方空狀態的 action，不重複放兩顆同名鈕
         <button style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setOpen(true)}>
           <Icon name="Plus" size={14} />加入素材知識
         </button>
-      )}
+      ) : null}
       {remove.error && <p className="error">{remove.error.message}</p>}
     </Card>
   );

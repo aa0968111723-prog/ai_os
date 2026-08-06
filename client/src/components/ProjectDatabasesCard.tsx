@@ -206,12 +206,13 @@ export function ProjectDatabasesCard({
           <Meta as="p" style={{ margin: 0 }}>正在判斷專案資料狀態…</Meta>
         )}
 
+        {/* 簡單路徑放前面：多數人「貼文字＋上傳檔案」就夠 AI 用，資料表與外部連結收進下方進階區 */}
         <div>
           <Hint style={{ margin: "0 0 8px" }}>
-            剪輯、社群、動畫、外出採集都能把依據放這裡。貼文字、上傳檔案，或一鍵建表；外部帳號連上後還要匯入或關聯專案，AI 才會使用。
+            給 AI 依據最簡單的方式：貼文字或上傳檔案，AI 就會自動讀取——不用建資料表、也不用連 Notion。
           </Hint>
           <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
-            <Button size="sm" onClick={() => scrollTo("sec-knowledge")}>
+            <Button size="sm" variant="primary" onClick={() => scrollTo("sec-knowledge")}>
               <Icon name="FileText" size={13} /> 貼上文字
             </Button>
             <Button size="sm" onClick={() => scrollTo("sec-assets")}>
@@ -220,66 +221,12 @@ export function ProjectDatabasesCard({
             <Button size="sm" onClick={() => scrollTo("sec-ai-hub")}>
               <Icon name="Sparkles" size={13} /> 問 AI 助手
             </Button>
-            <Link href="/integrations" className="btn-sm" style={{ textDecoration: "none" }}>
-              <Icon name="Package" size={13} /> Google／Notion／API
-            </Link>
-            <Link
-              href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}
-              className="btn-sm"
-              style={{ textDecoration: "none" }}
-            >
-              <Icon name="Database" size={13} /> 管理全部資料表
-            </Link>
           </div>
         </div>
-
-        {canEdit && (
-          <div data-testid="project-data-templates">
-            <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>一鍵建立資料表</h3>
-            <Hint layer="always" style={{ margin: "0 0 8px" }}>
-              範本只是起點，之後可自由改欄位與名稱。自動含「關聯專案」、已連本專案，預設 AI 可讀寫。
-            </Hint>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {PROJECT_DATA_TEMPLATES.map((t) => (
-                <Button size="sm" variant="primary"
-                  key={t.id}
-                  type="button"
-                  disabled={createBound.isPending}
-                  title={t.hint}
-                  onClick={() => onCreateTemplate(t.id)}>
-                  <Icon name="Plus" size={13} /> {t.label}
-                </Button>
-              ))}
-            </div>
-            {createBound.isPending && (
-              <Meta as="p" style={{ margin: "8px 0 0" }}>正在建立資料表…</Meta>
-            )}
-            {createError && (
-              <p className="error" style={{ margin: "8px 0 0" }}>{createError}</p>
-            )}
-            {lastCreated && !createBound.isPending && (
-              <Meta as="p" style={{ margin: "8px 0 0" }}>
-                已建立「{lastCreated.tableName}」。
-                <Link
-                  href={`/databases?open=${encodeURIComponent(lastCreated.tableId)}&projectId=${encodeURIComponent(projectId)}&from=project`}
-                  style={{ marginLeft: 6 }}
-                >
-                  開啟編輯 →
-                </Link>
-              </Meta>
-            )}
-          </div>
-        )}
 
         {linked.isLoading && <Meta as="p" style={{ margin: 0 }}>正在讀取已關聯的資料…</Meta>}
         {linked.error && (
           <p className="error" style={{ margin: 0 }}>關聯資料載入失敗：{linked.error.message}</p>
-        )}
-
-        {!linked.isLoading && !linked.error && groups.length === 0 && (
-          <EmptyState icon={<Icon name="Database" />} title={<>還沒有資料表關聯到這個專案</>} description={<>{canEdit
-                ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，勾選「關聯此專案」。"
-                : "請有編輯權限的成員建立或關聯資料表。"}</>} style={{ marginTop: 0 }} />
         )}
 
         {groups.length > 0 && (
@@ -388,6 +335,81 @@ export function ProjectDatabasesCard({
             </Hint>
           </div>
         )}
+
+        {/* 進階區預設收合：資料表／Notion／Google 對多數人是雜訊，收起來才不會把人嚇跑；
+            已在用表的人上方仍看得到已關聯資料，不受影響 */}
+        <details data-testid="project-data-advanced">
+          <summary
+            className="meta"
+            style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}
+          >
+            <Icon name="ChevronRight" size={13} className="details-caret" />
+            <Icon name="Database" size={13} /> 進階：資料表與外部連結（Notion／Google）——用不到可略過
+          </summary>
+          <div style={{ marginTop: 10, display: "grid", gap: 14 }}>
+            <Hint layer="always" style={{ margin: 0 }}>
+              想用表格管理人員、素材清單或發布排程，或把 Notion／Google 雲端的資料接進來，才需要這區。
+              外部帳號連上後還要匯入或關聯專案，AI 才會使用。
+            </Hint>
+
+            {canEdit && (
+              <div data-testid="project-data-templates">
+                <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>一鍵建立資料表</h3>
+                <Hint layer="always" style={{ margin: "0 0 8px" }}>
+                  範本只是起點，之後可自由改欄位與名稱。自動含「關聯專案」、已連本專案，預設 AI 可讀寫。
+                </Hint>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {PROJECT_DATA_TEMPLATES.map((t) => (
+                    <Button size="sm"
+                      key={t.id}
+                      type="button"
+                      disabled={createBound.isPending}
+                      title={t.hint}
+                      onClick={() => onCreateTemplate(t.id)}>
+                      <Icon name="Plus" size={13} /> {t.label}
+                    </Button>
+                  ))}
+                </div>
+                {createBound.isPending && (
+                  <Meta as="p" style={{ margin: "8px 0 0" }}>正在建立資料表…</Meta>
+                )}
+                {createError && (
+                  <p className="error" style={{ margin: "8px 0 0" }}>{createError}</p>
+                )}
+                {lastCreated && !createBound.isPending && (
+                  <Meta as="p" style={{ margin: "8px 0 0" }}>
+                    已建立「{lastCreated.tableName}」。
+                    <Link
+                      href={`/databases?open=${encodeURIComponent(lastCreated.tableId)}&projectId=${encodeURIComponent(projectId)}&from=project`}
+                      style={{ marginLeft: 6 }}
+                    >
+                      開啟編輯 →
+                    </Link>
+                  </Meta>
+                )}
+              </div>
+            )}
+
+            {!linked.isLoading && !linked.error && groups.length === 0 && (
+              <EmptyState icon={<Icon name="Database" />} title={<>還沒有資料表關聯到這個專案</>} description={<>{canEdit
+                    ? "用上方一鍵範本最快；或到知識與資料匯入 CSV／自己設計欄位後，勾選「關聯此專案」。"
+                    : "請有編輯權限的成員建立或關聯資料表。"}</>} style={{ marginTop: 0 }} />
+            )}
+
+            <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap" }}>
+              <Link href="/integrations" className="btn-sm" style={{ textDecoration: "none" }}>
+                <Icon name="Package" size={13} /> Google／Notion／API
+              </Link>
+              <Link
+                href={`/databases?projectId=${encodeURIComponent(projectId)}&from=project`}
+                className="btn-sm"
+                style={{ textDecoration: "none" }}
+              >
+                <Icon name="Database" size={13} /> 管理全部資料表
+              </Link>
+            </div>
+          </div>
+        </details>
       </div>
     </Card>
   );
