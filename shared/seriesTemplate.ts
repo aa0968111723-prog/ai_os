@@ -10,7 +10,7 @@
  *   沿用同一把尺，前端不必等後端補欄位就能判斷，也不必為此開 migration。
  *
  * ★ 邊界（SOP §5「必須人工」）：本檔不提供任何「自動定稿／自動上架」的路徑。
- *   自動化只到備料；開示合規與成片定稿一律走既有審批三態機（送審→組長 通過／退回）。
+ *   自動化只到備料；開示合規與成片定稿一律由人自行確認後交付。
  */
 
 import { z } from "zod";
@@ -61,7 +61,7 @@ export interface SeriesTemplate {
   spec: ReadonlyArray<{ field: string; value: string }>;
   segments: readonly SeriesSegment[];
   variables: readonly SeriesVariableDef[];
-  /** 送審前自查（組員操作卡 §4） */
+  /** 交付前自查（組員操作卡 §4） */
   preflight: readonly string[];
 }
 
@@ -160,7 +160,7 @@ export function masterTitle(template: SeriesTemplate): string {
   return `${MASTER_TITLE_PREFIX}${template.seriesName}`;
 }
 
-/** 這個標題是不是某條母版本體？（母版不是某一集，不進審批流） */
+/** 這個標題是不是某條母版本體？（母版不是某一集，不直接出片） */
 export function isMasterTitle(title: string): boolean {
   const trimmed = title.trim();
   if (!trimmed.startsWith(MASTER_TITLE_PREFIX)) return false;
@@ -209,7 +209,7 @@ export function buildEpisodeTitle(template: SeriesTemplate, vars: EpisodeVariabl
   return prefix + (topic.length <= room ? topic : topic.slice(0, Math.max(1, room - 1)) + "…");
 }
 
-/** 反解本集標題（前端據此顯示「這是母版系列的一集」與退回標籤） */
+/** 反解本集標題（前端據此顯示「這是母版系列的一集」） */
 export function parseEpisodeTitle(
   title: string,
 ): { template: SeriesTemplate; dueDate: string; topic: string } | null {
@@ -249,8 +249,7 @@ export function buildMasterNote(template: SeriesTemplate): string {
     "1. 從母版開一集 → 標題自動成為 `系列｜日期｜主題`",
     "2. 填 4 變數（會寫進本集筆記）",
     "3. 依 5 段在「AI 工作」產出並排分鏡",
-    "4. 送審（組長 通過／退回）",
-    "5. 通過後交付 → 剪輯軟體精修",
+    "4. 自查完成後交付 → 剪輯軟體精修",
   ].join("\n");
 }
 
@@ -265,7 +264,7 @@ export function buildEpisodeNote(template: SeriesTemplate, vars: EpisodeVariable
     "",
     `> 其餘（${template.totalSec} 秒、${template.aspect}、5 段結構）全部跟母版 ${masterTitle(template)}，不要自己改。`,
     "",
-    "## 送審前自查",
+    "## 交付前自查",
     preflight,
   ].join("\n");
 }
@@ -316,14 +315,13 @@ export const EPISODE_SUCCESS_CRITERIA: readonly string[] = [
   "5 段皆有旁白草稿＋畫面提示",
   "每段至少有一筆可用素材（或明確標「待補」）",
   "分鏡已依 1→5 排序",
-  "已送交組長待審（達成本門檻者必須停在待審）",
 ] as const;
 
 export interface EpisodeAgentStep {
   no: number;
   name: string;
   todo: string;
-  /** true＝這一步要停下來等人（超點數門檻／裁決） */
+  /** true＝這一步要停下來等人（超點數門檻） */
   waitsForHuman: boolean;
 }
 
@@ -334,38 +332,8 @@ export const EPISODE_AGENT_STEPS: readonly EpisodeAgentStep[] = [
   { no: 3, name: "寫分鏡提示", todo: "每段寫畫面描述（直式、簡潔、符合禁忌）", waitsForHuman: false },
   { no: 4, name: "生成素材", todo: "依提示生成圖／短片／旁白（可並行）；先顯示預估點數", waitsForHuman: true },
   { no: 5, name: "排分鏡", todo: "將素材排入 1→5；缺的標「待補」", waitsForHuman: false },
-  { no: 6, name: "送審", todo: "整理摘要（主題、點數、5 段狀態）→ 送組長待審", waitsForHuman: true },
+  { no: 6, name: "整理交付", todo: "整理摘要（主題、點數、5 段狀態）供人工過片", waitsForHuman: true },
 ] as const;
-
-/** 固定退回標籤（創作代理計畫 §退回標籤）——退回只重做被點名的步驟或鏡號，不整案重跑 */
-export const REWORK_TAGS = [
-  { value: "結構跑掉", meaning: "未依母版 5 段" },
-  { value: "出處不符", meaning: "原句被改或斷章取義" },
-  { value: "點數過高", meaning: "需縮規格或分批" },
-  { value: "風格不符", meaning: "畫面／語氣不合母版" },
-  { value: "其他", meaning: "必須另寫一句說明" },
-] as const;
-
-export type ReworkTag = (typeof REWORK_TAGS)[number]["value"];
-
-export const reworkTagSchema = z.enum(["結構跑掉", "出處不符", "點數過高", "風格不符", "其他"]);
-
-/** 「其他」以外的標籤本身已足夠成句；「其他」一定要有補充說明 */
-export function reworkTagNeedsNote(tag: ReworkTag): boolean {
-  return tag === "其他";
-}
-
-/**
- * 把標籤與補充說明合成一句退回理由（存進 approvals.reason，維持既有單欄位契約）。
- * 回傳 null＝這個組合不合法（「其他」沒寫說明），呼叫端據此擋下。
- */
-export function composeReworkReason(tag: ReworkTag, note?: string): string | null {
-  const extra = note?.trim() ?? "";
-  if (reworkTagNeedsNote(tag) && !extra) return null;
-  const meaning = REWORK_TAGS.find((t) => t.value === tag)?.meaning ?? "";
-  const base = `[${tag}] ${extra || meaning}`;
-  return base.slice(0, 500);
-}
 
 /** 注入規劃器的母版備料骨架提示（與 rolePlaybooks 的 plannerHint 同一用途） */
 export function buildSeriesPlannerHint(): string {
@@ -377,7 +345,7 @@ export function buildSeriesPlannerHint(): string {
     steps +
     " 成功條件：" +
     EPISODE_SUCCESS_CRITERIA.join("；") +
-    "。禁止：改母版本體、略過點數預估與待審關卡、未通過就當定稿。" +
+    "。禁止：改母版本體、略過點數預估、未經人工過片就當定稿。" +
     "缺 4 格變數任一格 → missingInformation，不要臆測。"
   );
 }

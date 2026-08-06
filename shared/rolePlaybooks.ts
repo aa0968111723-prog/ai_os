@@ -89,26 +89,26 @@ export const ROLE_PLAYBOOKS: readonly RolePlaybook[] = [
     id: "playbook.qa.v1",
     roleId: "role.qa",
     version: "1",
-    title: "品管：送審與人工過片",
-    goalTemplate: "送審指定分鏡並列出人工確認項",
+    title: "品管：人工過片",
+    goalTemplate: "列出指定分鏡的人工確認項",
     plannerHint:
-      "品管職能以人為主：submit_approval（sceneNo）與 request_approval／wait_for_human；" +
+      "品管職能以人為主：request_approval／wait_for_human；" +
       "VLM 自動評分預設不啟用。過片與上架決策不得自動化為無權限步驟。",
-    suggestedKinds: ["submit_approval", "request_approval", "wait_for_human", "create_task"],
+    suggestedKinds: ["request_approval", "wait_for_human", "create_task"],
   },
   // #133 PR-3：創作代理短版——快速可交付影音／圖文，不是完整專案排程長計畫
   {
     id: "playbook.creation.short.v1",
     roleId: "role.storyboard", // 複用分鏡職能席位；短版靠 playbook id 與 plannerHint 區隔
     version: "1",
-    title: "創作代理（短版）：腳本→分鏡→定裝生成→可選配音／送審",
-    goalTemplate: "依專案世界觀與現有腳本／分鏡，產出可審的一版影音或圖文",
+    title: "創作代理（短版）：腳本→分鏡→定裝生成→可選配音",
+    goalTemplate: "依專案世界觀與現有腳本／分鏡，產出一版影音或圖文",
     plannerHint:
-      "短版創作：優先 split_script? → create_scene? → generate（必帶定裝／來源）→ voiceover? → submit_approval?。" +
+      "短版創作：優先 split_script? → create_scene? → generate（必帶定裝／來源）→ voiceover?。" +
       "除非使用者明確要求排程／物資／多人分工，否則不要預設 create_schedule 或大量 create_task。" +
       "缺日期／缺腳本 → missingInformation，禁止臆測。" +
       "summary.rationale 用 1–3 句說明為何這條短路徑足夠。",
-    suggestedKinds: ["split_script", "create_scene", "generate", "voiceover", "submit_approval"],
+    suggestedKinds: ["split_script", "create_scene", "generate", "voiceover"],
   },
   // #255 第 2 期：短影音母版備料串鏈——本集專案已從母版複製，代理只補料、關卡留在組長
   {
@@ -116,9 +116,9 @@ export const ROLE_PLAYBOOKS: readonly RolePlaybook[] = [
     roleId: "role.storyboard",
     version: "1",
     title: "母版備料：週更短影音 5 段串鏈（第 2 期）",
-    goalTemplate: "依本集 4 格變數與母版 5 段結構，把這一集的旁白、分鏡提示與素材備齊並送組長待審",
+    goalTemplate: "依本集 4 格變數與母版 5 段結構，把這一集的旁白、分鏡提示與素材備齊",
     plannerHint: buildSeriesPlannerHint(),
-    suggestedKinds: ["create_scene", "generate", "voiceover", "submit_approval"],
+    suggestedKinds: ["create_scene", "generate", "voiceover"],
   },
 ] as const;
 

@@ -279,14 +279,14 @@ export function ProgressStepper({
   );
 }
 
-/** 依專案狀態與待審核資料自動推導階段 (1~5) */
+/** 依專案狀態與待核資料自動推導階段 (1~5) */
 export function inferProjectCurrentStep(
   project: { kind?: string; format?: string; status?: string; createdAt?: any; updatedAt?: any },
-  pending?: { pendingApprovals?: number; awaitingGenerations?: number } | null
+  pending?: { awaitingGenerations?: number } | null
 ): number {
   if (project.status === "archived") return 5;
-  if (pending && ((pending.pendingApprovals ?? 0) > 0 || (pending.awaitingGenerations ?? 0) > 0)) {
-    return 3; // 分鏡/生成待審批中
+  if (pending && (pending.awaitingGenerations ?? 0) > 0) {
+    return 3; // 生成待核准中
   }
   // 依據時間戳與專案活動狀態推導預設階段
   return 2; // 預設腳本推進中

@@ -74,7 +74,7 @@ import { WorldviewGuide } from "../components/WorldviewGuide";
 import { WorldviewExampleCard } from "../components/WorldviewExampleCard";
 import { StyleVisualGallery } from "../components/StyleVisualGallery";
 import { ToneVisualPalette } from "../components/ToneVisualPalette";
-import { StoryFlowBlueprint, ThreeActStoryArc } from "../components/StoryFlowVisualizer";
+import { ThreeActStoryArc } from "../components/StoryFlowVisualizer";
 import { Button, Card, Chip, Hint, Meta } from "../components/ui";
 import {
   useCollab,
@@ -542,7 +542,7 @@ export function ProjectPage({ id }: { id: string }) {
   // 通知深連結（#225／#250）：
   // - ?focus=messages：開留言（手機 sheet／桌機捲動）
   // - ?focus=scene-<id>：捲到該分鏡格＋高亮（手機收合列要等可見）
-  // - ?focus=pending：捲到分鏡區（待審彙總）
+  // - ?focus=pending：捲到分鏡區（待處理彙總）
   // - ?focus=generation-<id>：開資源抽屜生成紀錄並高亮該筆
   // 列表非同步載入且手機列可能 display:none——輪詢到可見再捲，逾時放棄。
   useEffect(() => {
@@ -681,6 +681,18 @@ export function ProjectPage({ id }: { id: string }) {
   const characters = trpc.characters.list.useQuery({ projectId: id });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId: id });
   const propCards = trpc.props.list.useQuery({ projectId: id });
+  /**
+   * 用三幕大綱拆分鏡。
+   *
+   * 補的是一個真的斷點：三幕本來只以 formatWorldviewForAi 裡的一行摘要進 prompt，
+   * 拆分鏡的腳本來源只認「貼上的全文」或知識庫——使用者在這裡認真填完三幕，
+   * 到拆分鏡卻仍被要求再貼一份腳本，於是同一個故事被寫兩次。
+   */
+  const splitFromOutline = trpc.director.splitScript.useMutation({
+    onSuccess: () => {
+      utils.scenes.listByProject.invalidate({ projectId: id });
+    },
+  });
   /** 敘事人物 → 一鍵建角色定裝（外觀錨點）；成功後勾選並捲到定裝區 */
   const addCharFromPerson = trpc.characters.add.useMutation({
     onSuccess: (row) => {
@@ -880,8 +892,16 @@ export function ProjectPage({ id }: { id: string }) {
   const styleOpts = (options.data ?? []).filter((o) => o.type === "style").map((o) => o.label);
   // 已勾選但選項已被組長改名/刪除的「孤兒值」：仍在 worldview 裡且會注入生成，
   // 必須補一顆 chip 讓使用者點得掉（否則看不到、按不掉、卻持續注入）。options 尚未載入時不算孤兒。
+  //
+  // 內建畫風例外：畫風藝廊是直接讀 STYLE_OPTIONS 出卡，不看這組的 group_options
+  // （選項只在建組時 seed 一次，之後新增的內建畫風不會回填到既有的組）。
+  // 不排除掉的話，選了新畫風會同時出現在藝廊卡片與「此選項已移出清單」的孤兒提示裡，自相矛盾。
   const orphansOf = (field: "themes" | "tones" | "styles", opts: string[]) =>
-    options.data ? wv[field].filter((v) => !opts.includes(v)) : [];
+    options.data
+      ? wv[field].filter(
+          (v) => !opts.includes(v) && !(field === "styles" && STYLE_MEDIA_FAMILY[v]),
+        )
+      : [];
 
   const isOwner = me.data?.user.id === p.ownerId;
   const canArchive = isOwner || isLeader;
@@ -970,10 +990,10 @@ export function ProjectPage({ id }: { id: string }) {
     },
     {
       label: "③ 交付",
-      // 有分鏡即算進入交付站；送審通過是加分，不當「必須才打勾」以免卡在空旅程
+      // 有分鏡即算進入交付站
       done: sceneCount > 0,
       target: "#stage-deliver",
-      hint: "把成品排進分鏡，再送審／打包",
+      hint: "把成品排進分鏡，再打包",
     },
   ];
   const allStepsDone = onboardSteps.every((s) => s.done);
@@ -1010,7 +1030,6 @@ export function ProjectPage({ id }: { id: string }) {
     );
   };
   const doneGenCount = generations.data?.filter((g) => g.status === "done").length;
-  const pendingSceneCount = scenes.data?.filter((s) => s.status === "pending").length;
   const knowledgeCount = knowledge.data?.length;
   const charCount = characters.data?.length;
   const presetCount = scenePresets.data?.length;
@@ -1672,11 +1691,9 @@ export function ProjectPage({ id }: { id: string }) {
                   scrollToSelector(anchor);
                 }}
               />
-              {/* 故事定盤星視覺藍圖 Strip */}
-              <StoryFlowBlueprint
-                wv={wv}
-                onFocusField={(fieldId) => scrollToSelector(`#${fieldId}`)}
-              />
+              {/* 這裡刻意不再放「故事定盤星視覺藍圖」摘要卡：它顯示的一句話／金句／畫風
+                  就是正下方欄位的原字，同一屏會上下重複一次。摘要留給收合後的區塊標題與
+                  下方「AI 會收到什麼」預覽即可。 */}
               {/* C0 主路徑：會進生成的最少欄位——一句話／訊息、氣氛、畫風、禁忌；其餘進 details */}
               <label htmlFor="wv-logline">
                 這支片在講什麼？
@@ -1928,6 +1945,15 @@ export function ProjectPage({ id }: { id: string }) {
                       onChange={(field, value) => {
                         updateWv.mutate({ id, worldview: { acts: { ...wv.acts, [field]: value } } });
                       }}
+                      sceneCount={scenes.data?.length ?? 0}
+                      onSplitFromOutline={
+                        canEdit
+                          ? () => splitFromOutline.mutate({ projectId: id, fromOutline: true })
+                          : undefined
+                      }
+                      splitting={splitFromOutline.isPending}
+                      splitError={splitFromOutline.error?.message ?? null}
+                      onSeeScenes={() => scrollToSelector("#stage-deliver")}
                     />
 
                     <label style={{ marginTop: 10, display: "block" }} id="wv-people-label">
@@ -2312,14 +2338,14 @@ export function ProjectPage({ id }: { id: string }) {
 
           <StageLink text="成品進素材庫；生成紀錄可「＋加入分鏡」" />
 
-          {/* ③ 交付：分鏡・排片・送審・打包（SceneList 一體卡） */}
+          {/* ③ 交付：分鏡・排片・打包（SceneList 一體卡） */}
           <StageHead
             id="stage-deliver"
             num="③"
             title="交付"
-            desc="分鏡・排片・送審・打包"
+            desc="分鏡・排片・打包"
             accent="group-3"
-            hint={pendingSceneCount != null ? `分鏡 ${sceneCount}・待審 ${pendingSceneCount}` : undefined}
+            hint={sceneCount != null ? `分鏡 ${sceneCount}` : undefined}
           />
           {/* 手機：首屏長句交付導引改放 ③ 區一行，減少首屏噪音 */}
           {mobileCompact && (
@@ -2338,14 +2364,14 @@ export function ProjectPage({ id }: { id: string }) {
             {/* 錨點 id 掛外層 div、不再加外層 <h2>（SceneList 卡片自帶同名標題，白話提示移進去了） */}
             <div data-fb="打包下載" id="onboard-delivery">
               {/* charIds/sceneIds：逐鏡就地生成也注入生成台勾選的角色/場景錨點——逐鏡出圖與生成台出圖同一套畫風 */}
-              <SceneList projectId={id} isLeader={isLeader} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} projectTitle={project.data?.title} />
+              <SceneList projectId={id} canEdit={canEdit} charIds={charIds} sceneIds={sceneIds} propIds={propIds} />
             </div>
           </CollabZone>
         </div>
 
         {/* 組內留言：桌機側欄；手機改 FAB → bottom sheet（不進主長流，避免佔捲動高度）。
             id 供 ?focus=messages 通知深連結捲動定位——這個錨點已被平行 PR 弄丟兩次
-            （#246、#251），approvals.deeplink.test.ts 的守衛就是為此而存在，別再拿掉。 */}
+            （#246、#251），別再拿掉。 */}
         {!mobileCompact && (
           <CollabZone {...zoneProps(COLLAB_ZONES.messages)}>
             <div id="project-messages">

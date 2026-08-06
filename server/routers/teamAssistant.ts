@@ -96,9 +96,6 @@ function fmtTaipei(d: Date): string {
   return `${t.getUTCFullYear()}/${t.getUTCMonth() + 1}/${t.getUTCDate()} ${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}`;
 }
 
-const SCENE_STATUS_LABEL: Record<string, string> = {
-  todo: "草稿", review: "草稿", pending: "待審", approved: "已通過", needs_work: "需修改",
-};
 const GEN_STATUS_LABEL: Record<string, string> = {
   queued: "排隊中", running: "生成中", done: "完成", failed: "失敗", awaiting_approval: "待核准", rejected: "已駁回",
 };
@@ -564,7 +561,7 @@ async function runTeamTool(
       .where(and(eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)))
       .orderBy(asc(schema.scenes.orderIndex));
     const sceneLines = scenes.length
-      ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」${SCENE_STATUS_LABEL[s.status] ?? s.status}｜畫面${s.assetId ? "有" : "無"}｜旁白音檔${s.narrationAssetId ? "有" : "無"}`).join("\n")
+      ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」｜畫面${s.assetId ? "有" : "無"}｜旁白音檔${s.narrationAssetId ? "有" : "無"}`).join("\n")
       : "（尚無分鏡）";
     const text = `專案「${project.title}」（${project.kind}／${project.format}｜${project.status}）分鏡共 ${scenes.length}：\n${sceneLines}`;
     return { step: `讀了「${project.title}」的分鏡(${scenes.length})`, text };
@@ -583,7 +580,7 @@ async function runTeamTool(
       return { step: `讀分鏡(「${project.title}」第 ${no} 鏡不存在)`, text: `「${project.title}」第 ${no} 鏡不存在——該案目前共 ${scenes.length} 個分鏡` };
     }
     const text = [
-      `「${project.title}」第 ${no} 鏡「${scene.title}」｜狀態:${SCENE_STATUS_LABEL[scene.status] ?? scene.status}｜${scene.durationSec} 秒`,
+      `「${project.title}」第 ${no} 鏡「${scene.title}」｜${scene.durationSec} 秒`,
       `畫面素材:${scene.assetId ? "有" : "無"}｜旁白音檔:${scene.narrationAssetId ? "有" : "無"}`,
       `建議提示詞:${scene.prompt || "（未填）"}`,
       `旁白/配音詞:${scene.voiceover || "（未填）"}`,
@@ -826,10 +823,9 @@ export const teamAssistantRouter = router({
       // 沒有專案就全空——空陣列丟給 inArray 會產生無效 SQL（比照 feedbackReports 的守則）
       let sceneAgg: Array<{ projectId: string; status: string; n: number }> = [];
       let genAgg: Array<{ projectId: string; status: string; n: number; last: Date | string | null }> = [];
-      let pendingAgg: Array<{ projectId: string; n: number }> = [];
       let costAgg: Array<{ projectId: string; spent: number }> = [];
       if (projectIds.length) {
-        [sceneAgg, genAgg, pendingAgg, costAgg] = await Promise.all([
+        [sceneAgg, genAgg, costAgg] = await Promise.all([
           // 分鏡按狀態計數（軟刪不算）
           db
             .select({ projectId: schema.scenes.projectId, status: schema.scenes.status, n: sql<number>`count(*)` })
@@ -847,12 +843,6 @@ export const teamAssistantRouter = router({
             .from(schema.generations)
             .where(inArray(schema.generations.projectId, projectIds))
             .groupBy(schema.generations.projectId, schema.generations.status),
-          // 送審待裁決件數（approvals pending）——「待審」以此為準（＝組長待辦）
-          db
-            .select({ projectId: schema.approvals.projectId, n: sql<number>`count(*)` })
-            .from(schema.approvals)
-            .where(and(inArray(schema.approvals.projectId, projectIds), eq(schema.approvals.status, "pending")))
-            .groupBy(schema.approvals.projectId),
           // 每案已花點數：帳本沒有 projectId，join 生成取回專案歸屬（無 generationId 的帳列不歸案，可接受）
           db
             .select({ projectId: schema.generations.projectId, spent: sql<number>`coalesce(-sum(${schema.costLedger.delta}), 0)` })
@@ -864,11 +854,10 @@ export const teamAssistantRouter = router({
       }
 
       // 聚合列 → 每案查表 Map（count 經 node-postgres 回來是字串，一律 Number()）
-      const scenesBy = new Map<string, { total: number; approved: number }>();
+      const scenesBy = new Map<string, { total: number }>();
       for (const r of sceneAgg) {
-        const cur = scenesBy.get(r.projectId) ?? { total: 0, approved: 0 };
+        const cur = scenesBy.get(r.projectId) ?? { total: 0 };
         cur.total += Number(r.n);
-        if (r.status === "approved") cur.approved += Number(r.n);
         scenesBy.set(r.projectId, cur);
       }
       const gensBy = new Map<string, { done: number; running: number; failed: number; awaiting: number; last: Date | null }>();
@@ -883,15 +872,14 @@ export const teamAssistantRouter = router({
         if (t && (!cur.last || t.getTime() > cur.last.getTime())) cur.last = t;
         gensBy.set(r.projectId, cur);
       }
-      const pendingBy = new Map<string, number>(pendingAgg.map((r) => [r.projectId, Number(r.n)]));
       const spentBy = new Map<string, number>(costAgg.map((r) => [r.projectId, Number(r.spent)]));
 
-      // 每案一行（前綴代號 pN）：標題(類型)｜分鏡(待審/通過)｜生成四態｜已花點數｜最後活動
+      // 每案一行（前綴代號 pN）：標題(類型)｜分鏡數｜生成四態｜已花點數｜最後活動
       const lines = projRows.map((p, i) => {
-        const sc = scenesBy.get(p.id) ?? { total: 0, approved: 0 };
+        const sc = scenesBy.get(p.id) ?? { total: 0 };
         const g = gensBy.get(p.id) ?? { done: 0, running: 0, failed: 0, awaiting: 0, last: null as Date | null };
         const lastActive = g.last && g.last.getTime() > new Date(p.updatedAt).getTime() ? g.last : new Date(p.updatedAt);
-        return `[p${i + 1}]「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜分鏡 ${sc.total}(待審 ${pendingBy.get(p.id) ?? 0}/通過 ${sc.approved})｜生成 完成 ${g.done}/進行 ${g.running}/失敗 ${g.failed}/待核 ${g.awaiting}｜已花 ${spentBy.get(p.id) ?? 0} 點｜最後活動 ${fmtTaipei(lastActive)}`;
+        return `[p${i + 1}]「${p.title}」(${p.kind}${p.status === "active" ? "" : `・${p.status}`})｜分鏡 ${sc.total}｜生成 完成 ${g.done}/進行 ${g.running}/失敗 ${g.failed}/待核 ${g.awaiting}｜已花 ${spentBy.get(p.id) ?? 0} 點｜最後活動 ${fmtTaipei(lastActive)}`;
       });
       const hidden = totalProjects - projRows.length;
 
@@ -1128,7 +1116,7 @@ export const teamAssistantRouter = router({
 ${forceFinal
   ? "查詢額度已用完——這一輪你必須直接給最終回答，不得再呼叫工具。"
   : `回答前你可以先用「唯讀查詢工具」鑽進某個專案、資料庫或代理動態查證（本次提問最多 ${MAX_TOOL_ROUNDS} 次）。要用工具時，整個回覆只回一個 JSON 工具呼叫，拿到 <工具結果> 後再決定要不要再查或給最終回答：
-- {"tool":"project_detail","args":{"ref":"p2"}}：讀某專案的完整分鏡清單（哪些鏡缺畫面/旁白/待審）
+- {"tool":"project_detail","args":{"ref":"p2"}}：讀某專案的完整分鏡清單（哪些鏡缺畫面/旁白）
 - {"tool":"read_scene","args":{"ref":"p2","sceneNo":3}}：讀某專案單一分鏡的完整內容（提示詞/配音詞全文）
 - {"tool":"list_generations","args":{"ref":"p2"}}：某專案最近 15 筆生成紀錄（模型/狀態/點數/提示詞）——查「為什麼某案燒點」很有用
 - {"tool":"find_model","args":{"keyword":"中文","category":"text-to-image"}}：依需求查模型目錄（兩參數皆可省略）

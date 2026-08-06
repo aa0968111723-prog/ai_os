@@ -2,7 +2,7 @@
  * AI 代理執行器（代理系統核心）：核准後的計畫由伺服器背景逐步執行——關掉頁面也會繼續跑。
  * 結構與併發語義完全比照 workflowRunner（tick＋inflight 防重入、steps 單一寫者、
  * 冪等佔位防重複扣點、陳屍回收退凍結點數）；差別只在步驟是 LLM 動態規劃的，
- * 且步驟種類除了生成還有建分鏡／拆分鏡／送審（重用各自的 core，守門不分岔）。
+ * 且步驟種類除了生成還有建分鏡／拆分鏡／配音（重用各自的 core，守門不分岔）。
  */
 import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
@@ -15,7 +15,6 @@ import { reapStuckGeneration } from "./workflowRunner";
 import { lockSceneOrder } from "./locks";
 import { pushToUsers } from "./webPush";
 import { splitScriptCore, type SplitSceneDraft } from "../routers/director";
-import { submitApprovalCore } from "../routers/approvals";
 import { sceneFillRole } from "../routers/assistant";
 import { loadAuthState } from "./auth";
 import { resolveAgentAccess } from "./databaseAcl";
@@ -74,7 +73,6 @@ export interface AgentStep {
     | "create_scene"
     | "generate"
     | "voiceover"
-    | "submit_approval"
     | "record_to_database"
     | "create_note"
     | "append_note"
@@ -129,7 +127,7 @@ export interface AgentStep {
   sourceAssetId?: string;
   /** CA-01：外部來源網址（僅無 sourceAssetId 時；仍走 generationCore SSRF／needs） */
   sourceUrl?: string;
-  /** generate（可選）／voiceover／submit_approval 用：首次執行時依當下順序解析（1 起算） */
+  /** generate（可選）／voiceover 用：首次執行時依當下順序解析（1 起算） */
   sceneNo?: number;
   /** 執行期：首次解析 sceneNo 後立即保存；重播只准使用同一分鏡，避免排序變更後打到別格。 */
   targetSceneId?: string;
@@ -617,7 +615,7 @@ async function checkRunAuthority(run: RunRow): Promise<string | null> {
 
 /**
  * 補記一筆代理步驟審計（fire-and-forget）。背景執行器沒有 ctx.auth、繞過 tRPC 的 mutation 審計中介層，
- * 故比照 MCP 的 recordMcpAudit 在這裡手動補記——否則核准後「代理實際做了什麼」（生成／建鏡／送審／
+ * 故比照 MCP 的 recordMcpAudit 在這裡手動補記——否則核准後「代理實際做了什麼」（生成／建鏡／配音／
  * 寫資料庫）完全不進 audit_log，組長只查得到 agents.approve 一列。action 掛在既有 "agents" 前綴下，
  * 自動歸到操作紀錄的「AI 助手與代理」類別。
  */
@@ -993,7 +991,7 @@ async function advanceRun(run: RunRow): Promise<void> {
   void terminalSettled;
 
   // 執行前再讀一次狀態（審查修復：撈列到這裡有數秒空窗）——使用者剛按停就不要再執行任何步驟：
-  // 免費步驟雖不扣點，但「按了停止還在建分鏡/送審」同樣違反使用者預期（生成路徑送出前另有一次復查）
+  // 免費步驟雖不扣點，但「按了停止還在建分鏡」同樣違反使用者預期（生成路徑送出前另有一次復查）
   {
     const [freshNow] = await db.select({ status: schema.agentRuns.status }).from(schema.agentRuns).where(eq(schema.agentRuns.id, run.id));
     if (!freshNow || freshNow.status !== "running") return; // 下一輪由收停分支統一標記
@@ -1457,23 +1455,6 @@ async function advanceRun(run: RunRow): Promise<void> {
       }
       return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
     }
-    return;
-  }
-
-  if (step.kind === "submit_approval") {
-    const scene = await resolvePersistedSceneTarget(run, steps, step);
-    if (!scene) return failRun(run, steps, idx, `找不到第 ${step.sceneNo} 鏡（可能已被刪除）`);
-    try {
-      const effectId = await persistStepEffectId(run, steps, step);
-      await submitApprovalCore(scene.id, run.userId, () => {}, effectId);
-      addOutputRef(step, "approval", effectId, `第 ${step.sceneNo} 鏡審核`);
-    } catch (err) {
-      return failRun(run, steps, idx, err instanceof Error ? err.message : String(err));
-    }
-    step.status = "done";
-    step.detail = `第 ${step.sceneNo} 鏡已送審`;
-    auditAgentStep(run, step, idx, true);
-    await saveDagProgress(run, steps);
     return;
   }
 

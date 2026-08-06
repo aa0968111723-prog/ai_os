@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, getTableColumns, ilike, inArray, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, ilike, inArray, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { router, authedProcedure, requireGroup, requireLeader } from "../trpc";
 import { db, schema } from "../db";
@@ -702,6 +702,49 @@ export const generationRouter = router({
       if (!updated) throw new TRPCError({ code: "BAD_REQUEST", message: "這筆生成已被其他人處理" });
       return updated;
     }),
+
+  /**
+   * 跨專案待辦彙總（UX 高嚴重度：首頁/頂欄完全不顯示待核，多專案組長必然漏核）：
+   * 各專案的「生成待核准」（generations awaiting_approval）計數。
+   * Launchpad 專案卡角標＋頂欄計數共用這一條查詢。
+   */
+  pendingSummary: authedProcedure.input(z.object({ groupId: z.string().uuid() })).query(async ({ ctx, input }) => {
+    requireGroup(ctx.auth, input.groupId);
+    // 排除封存專案：Launchpad 預設不列封存案，計入會讓頂欄出現「找不到入口的幽靈待辦」
+    const rows = await db
+      // oldest：最久沒人核的那一件是哪天送的——作業台「待我裁決」用它排「卡最久的排前面」
+      .select({
+        projectId: schema.generations.projectId,
+        n: sql<number>`count(*)`,
+        oldest: sql<string | null>`min(${schema.generations.createdAt})`,
+      })
+      .from(schema.generations)
+      .innerJoin(schema.projects, eq(schema.generations.projectId, schema.projects.id))
+      .where(
+        and(
+          eq(schema.generations.groupId, input.groupId),
+          ne(schema.projects.status, "archived"),
+          eq(schema.generations.status, "awaiting_approval"),
+        ),
+      )
+      .groupBy(schema.generations.projectId);
+    // min(timestamp) 依驅動設定可能回 Date 或字串，統一轉 Date（無效值當作沒有）
+    const toDate = (v: unknown): Date | null => {
+      if (v == null) return null;
+      const d = v instanceof Date ? v : new Date(String(v));
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    // count 經 node-postgres 回來是字串，一律 Number()（比照 teamAssistant 的守則）
+    const projects = rows.map((r) => ({
+      projectId: r.projectId,
+      awaitingGenerations: Number(r.n),
+      oldestAwaitingGenerationAt: toDate(r.oldest),
+    }));
+    return {
+      projects,
+      totalAwaitingGenerations: projects.reduce((s, p) => s + p.awaitingGenerations, 0),
+    };
+  }),
 
   /**
    * 成本審核裁決（需求 2.1）：組長對 awaiting_approval 的生成核准或駁回。

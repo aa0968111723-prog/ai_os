@@ -26,7 +26,7 @@ import { Button, Hint, Meta } from "./ui";
  * ──────────────────────────────────────────────────────────────── */
 
 export type StorageDegradeReason = "volume-changed" | "not-persistent" | "unwritable";
-export type StoragePersistenceMode = "declared" | "mountpoint" | "container-layer" | "unknown";
+export type StoragePersistenceMode = "declared" | "mountpoint" | "container-layer" | "object-store" | "unknown";
 
 export interface StorageStatus {
   persistence: { root: string; mode: StoragePersistenceMode; persistent: boolean; note: string };
@@ -198,6 +198,7 @@ export const STORAGE_MODE_LABEL: Record<StoragePersistenceMode, string> = {
   declared: "持久磁碟（已宣告）",
   mountpoint: "獨立掛載點（持久）",
   "container-layer": "容器暫存層（重新部署就清空）",
+  "object-store": "物件儲存（S3／MinIO）",
   unknown: "無法判定",
 };
 

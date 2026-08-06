@@ -14,7 +14,7 @@ describe("coCreateActions (G2)", () => {
       expect.arrayContaining(["split_script", "create_scene"]),
     );
     expect(primaryActionTypesForPhase("visuals")).toEqual(["generate"]);
-    expect(primaryActionTypesForPhase("wrap")).toEqual(["submit_approval"]);
+    expect(primaryActionTypesForPhase("wrap")).toEqual([]);
   });
 
   it("coCreateQuickPrompts are phase-scoped and include dharma example on theme", () => {
@@ -34,7 +34,7 @@ describe("coCreateActions (G2)", () => {
     expect(suggestedPhaseAfterAction("split_script", "structure")).toBe("visuals");
     expect(suggestedPhaseAfterAction("create_scene", "structure")).toBe("visuals");
     expect(suggestedPhaseAfterAction("generate", "visuals")).toBe("wrap");
-    expect(suggestedPhaseAfterAction("submit_approval", "wrap")).toBeNull();
+    expect(suggestedPhaseAfterAction("generate", "wrap")).toBeNull();
   });
 
   it("phaseAdvanceNotice is human-readable", () => {
@@ -43,17 +43,8 @@ describe("coCreateActions (G2)", () => {
   });
 
   it("wrapNextStepHint covers empty / missing media / ready", () => {
-    expect(wrapNextStepHint({ sceneCount: 0, scenesWithMedia: 0, approvedCount: 0 })).toMatch(
-      /分鏡/,
-    );
-    expect(
-      wrapNextStepHint({ sceneCount: 4, scenesWithMedia: 1, approvedCount: 0 }),
-    ).toMatch(/缺畫面|生成/);
-    expect(
-      wrapNextStepHint({ sceneCount: 2, scenesWithMedia: 2, approvedCount: 0 }),
-    ).toMatch(/送審|打包/);
-    expect(
-      wrapNextStepHint({ sceneCount: 2, scenesWithMedia: 2, approvedCount: 1 }),
-    ).toMatch(/打包|匯出/);
+    expect(wrapNextStepHint({ sceneCount: 0, scenesWithMedia: 0 })).toMatch(/分鏡/);
+    expect(wrapNextStepHint({ sceneCount: 4, scenesWithMedia: 1 })).toMatch(/缺畫面|生成/);
+    expect(wrapNextStepHint({ sceneCount: 2, scenesWithMedia: 2 })).toMatch(/打包|匯出/);
   });
 });

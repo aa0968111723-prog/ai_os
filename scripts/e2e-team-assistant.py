@@ -96,7 +96,7 @@ pid = proj["id"]
 
 planned = call("POST", admin, "agents.plan", {
     "projectId": pid,
-    "goal": "建立一格主視覺分鏡並送審，供團隊分析儀表測試",
+    "goal": "建立一格主視覺分鏡並生成畫面，供團隊分析儀表測試",
 })
 ok("代理計畫待核准", planned.get("status") == "awaiting_approval")
 run_id = planned["id"]
@@ -277,21 +277,18 @@ ok("放棄後 totalRuns 少 1（計數與清單同條件）",
    after_discard.get("totalRuns", -1) == before_discard_total - 1)
 
 # ── 9. 待我裁決收件匣的資料來源：pendingSummary 要帶「最久那件」的時間戳 ──
-# 作業台把「代理計畫待核／分鏡送審／生成待核」合流成一份收件匣並依卡最久排序，
-# 沒有時間戳就排不出「先做哪一件」。
-pending = call("GET", admin, "approvals.pendingSummary", {"groupId": gid})
+# 作業台把「代理計畫待核／人員核准／生成待核」合流成一份收件匣並依卡最久排序，
+# 沒有時間戳就排不出「先做哪一件」。（分鏡送審已移除，資料源改掛 generation.pendingSummary）
+pending = call("GET", admin, "generation.pendingSummary", {"groupId": gid})
 ok("pendingSummary 有 projects 陣列", isinstance(pending.get("projects"), list))
-ok("pendingSummary 有兩個總數",
-   isinstance(pending.get("totalPendingApprovals"), int) and isinstance(pending.get("totalAwaitingGenerations"), int))
+ok("pendingSummary 有待核生成總數", isinstance(pending.get("totalAwaitingGenerations"), int))
 for row in pending.get("projects", []):
     ok(f"待辦列 {row['projectId'][:8]} 帶 oldest 欄位（可為 null）",
-       "oldestPendingApprovalAt" in row and "oldestAwaitingGenerationAt" in row)
-    if row.get("pendingApprovals", 0) > 0:
-        ok(f"有分鏡待審就必有時間戳 {row['projectId'][:8]}", row.get("oldestPendingApprovalAt") is not None)
+       "oldestAwaitingGenerationAt" in row)
     if row.get("awaitingGenerations", 0) > 0:
         ok(f"有生成待核就必有時間戳 {row['projectId'][:8]}", row.get("oldestAwaitingGenerationAt") is not None)
 ok("pendingSummary 組隔離",
-   "__error__" in call("GET", admin, "approvals.pendingSummary", {"groupId": fake_gid}))
+   "__error__" in call("GET", admin, "generation.pendingSummary", {"groupId": fake_gid}))
 
 # ── 10. 組級代理洞察（「誰卡住了」）──
 # 判斷規則與專案頁的過程面板共用同一支純函式；這裡驗傳輸層的形狀與組隔離。

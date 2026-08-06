@@ -1,6 +1,6 @@
 /**
  * 母版系列契約測試——守住 SOP 的硬規則：
- * 命名可雙向解析、4 格必填（含「無」也要明寫）、5 段骨架不走樣、退回標籤固定。
+ * 命名可雙向解析、4 格必填（含「無」也要明寫）、5 段骨架不走樣。
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -8,13 +8,11 @@ import {
   EPISODE_SUCCESS_CRITERIA,
   MASTER_TITLE_PREFIX,
   PROJECT_TITLE_MAX,
-  REWORK_TAGS,
   buildEpisodeNote,
   buildEpisodeScenes,
   buildEpisodeTitle,
   buildMasterNote,
   buildSeriesPlannerHint,
-  composeReworkReason,
   episodeVariablesSchema,
   getSeriesTemplate,
   isMasterTitle,
@@ -22,7 +20,6 @@ import {
   masterTemplateOfTitle,
   masterTitle,
   parseEpisodeTitle,
-  reworkTagNeedsNote,
 } from "./seriesTemplate";
 
 const template = getSeriesTemplate("weekly-dharma-60")!;
@@ -153,36 +150,10 @@ describe("筆記文本", () => {
     template.segments.forEach((s) => expect(note).toContain(s.title));
   });
 
-  it("本集筆記含 4 格填寫值與送審前自查", () => {
+  it("本集筆記含 4 格填寫值與交付前自查", () => {
     const note = buildEpisodeNote(template, vars);
     template.variables.forEach((v) => expect(note).toContain(vars[v.key]));
     template.preflight.forEach((p) => expect(note).toContain(p));
-  });
-});
-
-describe("退回標籤（固定 5 種）", () => {
-  it("標籤集合與含義固定，不可自由造字", () => {
-    expect(REWORK_TAGS.map((t) => t.value)).toEqual(["結構跑掉", "出處不符", "點數過高", "風格不符", "其他"]);
-  });
-
-  it("一般標籤自己就成句", () => {
-    expect(composeReworkReason("結構跑掉")).toBe("[結構跑掉] 未依母版 5 段");
-    expect(reworkTagNeedsNote("結構跑掉")).toBe(false);
-  });
-
-  it("有補充說明時以說明為準", () => {
-    expect(composeReworkReason("風格不符", "第 3 鏡色調太冷")).toBe("[風格不符] 第 3 鏡色調太冷");
-  });
-
-  it("「其他」沒寫說明就不合法", () => {
-    expect(reworkTagNeedsNote("其他")).toBe(true);
-    expect(composeReworkReason("其他")).toBeNull();
-    expect(composeReworkReason("其他", "   ")).toBeNull();
-    expect(composeReworkReason("其他", "拍攝檔名要重編")).toBe("[其他] 拍攝檔名要重編");
-  });
-
-  it("理由長度不超過 approvals.reason 的 500 字上限", () => {
-    expect(composeReworkReason("其他", "長".repeat(600))!.length).toBeLessThanOrEqual(500);
   });
 });
 
@@ -192,15 +163,15 @@ describe("第 2 期代理計畫", () => {
     expect(EPISODE_AGENT_STEPS.filter((s) => s.waitsForHuman).map((s) => s.no)).toEqual([4, 6]);
   });
 
-  it("成功條件以「停在待審」收尾——自動化不得走完最後一哩", () => {
-    expect(EPISODE_SUCCESS_CRITERIA).toHaveLength(5);
-    expect(EPISODE_SUCCESS_CRITERIA.at(-1)).toContain("待審");
+  it("成功條件收在「備料齊備」——自動化不得走完最後一哩（過片仍是人的事）", () => {
+    expect(EPISODE_SUCCESS_CRITERIA).toHaveLength(4);
+    expect(EPISODE_SUCCESS_CRITERIA.at(-1)).toContain("排序");
   });
 
   it("規劃提示帶著禁令，不只帶步驟", () => {
     const hint = buildSeriesPlannerHint();
-    expect(hint).toContain("待審");
+    expect(hint).toContain("人工過片");
     expect(hint).toContain("禁止");
-    expect(hint).toContain("未通過就當定稿");
+    expect(hint).toContain("未經人工過片就當定稿");
   });
 });

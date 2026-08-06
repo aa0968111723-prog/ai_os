@@ -14,7 +14,6 @@ import { CoCreateShell } from "../co-create/CoCreateShell";
 import type { CoCreatePhaseId } from "../co-create/coCreatePhases";
 import {
   coCreateJourneyStatesWithProgress,
-  countApprovedScenes,
   countScenesWithMedia,
   formatCoCreateWorkSummary,
   type CoCreateProgressInput,
@@ -180,7 +179,6 @@ export function CreationWorkbench({
       styles: worldview.styles,
       sceneCount: scenes.length,
       scenesWithMedia: countScenesWithMedia(scenes),
-      approvedCount: countApprovedScenes(scenes),
     };
   }, [coCreateScenes.data, wvReady, worldview.logline, worldview.tones, worldview.styles]);
   const coCreateProgressStates = useMemo(
@@ -205,7 +203,6 @@ export function CreationWorkbench({
         ? wrapNextStepHint({
             sceneCount: coCreateProgress.sceneCount,
             scenesWithMedia: coCreateProgress.scenesWithMedia,
-            approvedCount: coCreateProgress.approvedCount,
           })
         : null,
     [coCreatePhase, coCreateProgress],
@@ -230,8 +227,6 @@ export function CreationWorkbench({
       if (next) {
         changeCoCreatePhase(next);
         setSideNotice(phaseAdvanceNotice(coCreatePhase, next));
-      } else if (info.actionType === "submit_approval") {
-        setSideNotice("送審已送出。可退出共創到完整版打包／匯出。");
       }
     },
     [changeCoCreatePhase, coCreatePhase, coCreateScenes],

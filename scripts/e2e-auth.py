@@ -132,25 +132,11 @@ try:
 except urllib.error.HTTPError as e:
     ok("🔒 交付包隔離（403）", e.code==403)
 
-# ─── 第三段：審批三態機＋AI 導演＋回饋＋MCP ───
-# 把阿哲升組長來測裁決（開發者操作）
+# ─── 第三段：AI 導演＋回饋＋MCP ───
+# （分鏡送審／裁決機制已移除，這段原本的審批三態機驗證一併拿掉）
+# 把阿哲升組長（開發者操作）——後續 MCP／回饋仍需要組長身分
 call("POST",admin2,"admin.setGroupRole",{"groupId":edit_group["id"],"userId":acc["user"]["id"],"role":"leader"})
 azhe3 = client(); call("POST",azhe3,"auth.login",{"email":"azhe@example.com","password":"azhe-pass-88"})
-
-sub = call("POST",azhe3,"approvals.submit",{"sceneId":s1["id"]})
-ok("送審 v1（分鏡進待審）", sub["version"]==1 and sub["status"]=="pending")
-noreason = call("POST",azhe3,"approvals.decide",{"approvalId":sub["id"],"decision":"needs_work"})
-ok("退回必附理由（被擋）", "理由" in noreason.get("__error__",""))
-dec = call("POST",azhe3,"approvals.decide",{"approvalId":sub["id"],"decision":"needs_work","reason":"光太暗，柔一點"})
-ok("退回 v1（附理由）", dec["status"]=="needs_work")
-sub2 = call("POST",azhe3,"approvals.submit",{"sceneId":s1["id"]})
-ok("重送=v2", sub2["version"]==2)
-dec2 = call("POST",azhe3,"approvals.decide",{"approvalId":sub2["id"],"decision":"approved"})
-ok("v2 通過", dec2["status"]=="approved")
-msgs2 = call("GET",azhe3,"messages.list",{"projectId":proj["id"]})
-msgs2 = msgs2["items"] if isinstance(msgs2, dict) and "items" in msgs2 else msgs2
-sysmsgs = [m for m in msgs2 if m["kind"]=="system"]
-ok("審批事件進留言（系統訊息×4）", len(sysmsgs)>=4 and any("需修改" in m["body"] for m in sysmsgs) and any("已通過" in m["body"] for m in sysmsgs))
 
 sug = call("POST",azhe3,"director.suggest",{"projectId":proj["id"]})
 ok("AI 導演給 3 個 idea（含世界觀）", len(sug["suggestions"])==3 and "陳師姐" in sug["suggestions"][0]["prompt"])

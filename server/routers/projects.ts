@@ -473,7 +473,7 @@ export const projectsRouter = router({
    * 從母版開一集（SOP §2.5／組員操作卡 §1–2）：複製骨架 → 填 4 格變數。
    *
    * 沿用母版的世界觀與規格（kind／platform／format），另外寫入本集筆記與 5 段分鏡空殼。
-   * 同樣是零點數路徑；分鏡一律 todo 草稿，仍須走既有審批三態機才算定稿。
+   * 同樣是零點數路徑；分鏡一律 todo 草稿，成品仍由人自行過片確認。
    */
   createSeriesEpisode: authedProcedure
     .input(

@@ -5,15 +5,14 @@
  * 3) 缺縮圖的 image 補產（sharp；未安裝則跳過）
  *
  * 設計：有佇列才忙；每輪 batch 有上限；可被 env 關閉。
- * 縮圖寫在 Volume assets/thumbs/ 下（relPath 走 absPathOf，與既有素材同隔離）。
+ * 縮圖存在 thumbs/ 下（與既有素材同一套儲存後端與隔離規則）。
  */
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { db, schema } from "../db";
-import { absPathOf } from "./storage";
+import { absPathOf, openStoredReadStream, putStoredBuffer, readStoredFile, storageBackend } from "./storage";
 import { sweepUnlandedAssets } from "./generationCore";
 import { isShuttingDown } from "./shutdown";
 
@@ -89,10 +88,14 @@ export async function countMaintenanceQueues(): Promise<AssetMaintenanceWork["qu
 }
 
 async function hashStoredFile(relPath: string, sizeLimit: number): Promise<string | null> {
-  const abs = absPathOf(relPath);
+  let stream: Awaited<ReturnType<typeof openStoredReadStream>>;
+  try {
+    stream = await openStoredReadStream(relPath);
+  } catch {
+    return null; // 檔案不存在／取不到：與原本的 stream error 分支同語意，交由對帳流程處理
+  }
   return await new Promise((resolve) => {
     const hash = createHash("sha256");
-    const stream = createReadStream(abs, { highWaterMark: 1024 * 1024 });
     let read = 0;
     let aborted = false;
     stream.on("data", (chunk: Buffer | string) => {
@@ -155,14 +158,19 @@ export async function fillMissingSha256(limit = DEFAULT_HASH_BATCH): Promise<num
   return done;
 }
 
-/** sharp 的 callable（default export 或 module 本身） */
+/**
+ * sharp 的 callable（default export 或 module 本身）。
+ * 輸入吃 string（本機後端的檔案路徑）或 Buffer（物件儲存後端整檔讀進來），
+ * 輸出對應 toFile／toBuffer——兩種後端各用一條。
+ */
 type SharpCallable = (
-  input: string,
+  input: string | Buffer,
 ) => {
   rotate: () => {
     resize: (opts: { width: number; withoutEnlargement: boolean }) => {
       jpeg: (opts: { quality: number; mozjpeg: boolean }) => {
         toFile: (path: string) => Promise<unknown>;
+        toBuffer: () => Promise<Buffer>;
       };
     };
   };
@@ -220,16 +228,28 @@ export async function generateMissingThumbs(limit = DEFAULT_THUMB_BATCH): Promis
     }
 
     try {
-      const src = absPathOf(row.storagePath);
-      // 與素材同 ASSETS_DIR 樹，absPathOf 可驗證路徑不跳出
+      // 與素材同一棵路徑樹（本機後端由 absPathOf 驗證不跳出；物件後端由 objectKeyFor 驗證）
       const relThumb = path.posix.join("thumbs", `${row.id}.jpg`);
-      const dest = absPathOf(relThumb);
-      await mkdir(path.dirname(dest), { recursive: true });
-      await sharp(src)
-        .rotate()
-        .resize({ width: THUMB_MAX_WIDTH, withoutEnlargement: true })
-        .jpeg({ quality: 80, mozjpeg: true })
-        .toFile(dest);
+      if (storageBackend() === "object") {
+        // 物件儲存沒有本機檔可餵給 sharp——縮圖來源是圖片且上面已用 MAX_THUMB_SOURCE_BYTES 擋過大檔，
+        // 整檔進記憶體是可接受的（影片不在這條路徑上）。
+        const source = await readStoredFile(row.storagePath);
+        const thumb = await sharp(source)
+          .rotate()
+          .resize({ width: THUMB_MAX_WIDTH, withoutEnlargement: true })
+          .jpeg({ quality: 80, mozjpeg: true })
+          .toBuffer();
+        await putStoredBuffer(relThumb, thumb, "image/jpeg");
+      } else {
+        const src = absPathOf(row.storagePath);
+        const dest = absPathOf(relThumb);
+        await mkdir(path.dirname(dest), { recursive: true });
+        await sharp(src)
+          .rotate()
+          .resize({ width: THUMB_MAX_WIDTH, withoutEnlargement: true })
+          .jpeg({ quality: 80, mozjpeg: true })
+          .toFile(dest);
+      }
 
       const meta = {
         ...(row.meta as Record<string, unknown>),

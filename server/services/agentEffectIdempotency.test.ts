@@ -8,7 +8,6 @@ import {
 
 const agentSource = readFileSync(new URL("./agentRunner.ts", import.meta.url), "utf8");
 const databaseSource = readFileSync(new URL("./databaseCore.ts", import.meta.url), "utf8");
-const approvalSource = readFileSync(new URL("../routers/approvals.ts", import.meta.url), "utf8");
 const directorSource = readFileSync(new URL("../routers/director.ts", import.meta.url), "utf8");
 const effectSource = readFileSync(new URL("./agentEffectCore.ts", import.meta.url), "utf8");
 const notesSource = readFileSync(new URL("./notesCore.ts", import.meta.url), "utf8");
@@ -24,7 +23,7 @@ function expectBefore(source: string, first: string, second: string): void {
 describe("agent crash-replay effect ids", () => {
   it("persists one effect id before every replayable side effect", () => {
     expect(agentSource).toContain("effectId?: string");
-    expect(agentSource.match(/persistStepEffectId\(run, steps, step\)/g)).toHaveLength(10);
+    expect(agentSource.match(/persistStepEffectId\(run, steps, step\)/g)).toHaveLength(9);
     expectBefore(
       agentSource,
       "const effectId = await persistStepEffectId(run, steps, step);",
@@ -32,9 +31,6 @@ describe("agent crash-replay effect ids", () => {
     );
     expect(agentSource).toContain(
       "addDataRowValidated(table, run.userId, step.rowData ?? {}, effectId)",
-    );
-    expect(agentSource).toContain(
-      "submitApprovalCore(scene.id, run.userId, () => {}, effectId)",
     );
   });
 
@@ -69,13 +65,8 @@ describe("agent crash-replay effect ids", () => {
     expect(agentSource.slice(insertAt, insertAt + 180)).toContain("id: effectId,");
   });
 
-  it("persists the scene target before approval or generation can start", () => {
+  it("persists the scene target before generation can start", () => {
     expect(agentSource).toContain("targetSceneId?: string");
-    expectBefore(
-      agentSource,
-      "step.targetSceneId = scene.id;",
-      "await submitApprovalCore(scene.id, run.userId, () => {}, effectId)",
-    );
     expectBefore(
       agentSource,
       "step.targetSceneId = scene.id;",
@@ -162,24 +153,6 @@ describe("database row idempotency boundary", () => {
       "validateRowData(table.fields as DataField[], rawData)",
       "currentRows >= MAX_ROWS_PER_TABLE",
     );
-  });
-});
-
-describe("approval idempotency boundary", () => {
-  it("looks up after the per-scene lock and suppresses repeat messages and pushes", () => {
-    expect(approvalSource).toContain("idempotencyApprovalId?: string");
-    expectBefore(
-      approvalSource,
-      "pg_advisory_xact_lock(hashtext(${scene.id}), 1)",
-      "eq(schema.approvals.id, idempotencyApprovalId)",
-    );
-    expectBefore(
-      approvalSource,
-      "eq(schema.approvals.id, idempotencyApprovalId)",
-      "insert into approvals (id, project_id, scene_id, version, submitted_by)",
-    );
-    expect(approvalSource).toContain("return { approval: existing, created: false }");
-    expect(approvalSource).toContain("if (result.created)");
   });
 });
 

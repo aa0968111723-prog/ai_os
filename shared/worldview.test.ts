@@ -5,6 +5,14 @@ import {
   TONE_EN,
   STYLE_OPTIONS,
   TONE_OPTIONS,
+  STYLE_FAMILY_ORDER,
+  STYLE_FAMILY_META,
+  STYLE_MEDIA_FAMILY,
+  STYLE_LOOK_ROLE,
+  looksForFamily,
+  texturesForFamily,
+  styleFamiliesOf,
+  styleFamilyCheatsheet,
   worldviewSchema,
   formatWorldviewForAi,
   formatWorldviewVisualPositive,
@@ -12,6 +20,8 @@ import {
   formatWorldviewStylesLabel,
   isWorldviewReady,
   hasActs,
+  formatActsLine,
+  formatActsOutline,
   removesDefaultTaboos,
   DEFAULT_TABOOS,
   LOGLINE_INJECT_MAX,
@@ -51,6 +61,70 @@ import {
   applyWorldviewQuickExample,
   applyWorldviewFullExample,
 } from "./worldview";
+
+describe("內建畫風清單（媒材家族 × 主風格 × 質感）", () => {
+  it("每個畫風都有家族與角色，且沒有重複命名", () => {
+    for (const s of STYLE_OPTIONS) {
+      expect(STYLE_MEDIA_FAMILY[s], `${s} 沒有媒材家族——會被當成自訂值處理`).toBeTruthy();
+      expect(STYLE_LOOK_ROLE[s], `${s} 沒有 look/texture 角色`).toBeTruthy();
+    }
+    expect(new Set(STYLE_OPTIONS).size).toBe(STYLE_OPTIONS.length);
+  });
+
+  it("每個家族都挑得到主風格，且預設主風格真的屬於該家族", () => {
+    for (const fam of STYLE_FAMILY_ORDER) {
+      const looks = looksForFamily(fam);
+      expect(looks.length, `${fam} 家族沒有任何主風格`).toBeGreaterThan(0);
+
+      // selectWorldviewStyleFamily 直接回 defaultStyle——它若不是本家族的 look，
+      // 使用者一點家族就會落到別家族／落到質感槽，整組選擇規則跟著錯
+      const def = STYLE_FAMILY_META[fam].defaultStyle;
+      expect(looks, `${fam} 的 defaultStyle「${def}」不是本家族主風格`).toContain(def);
+      expect(selectWorldviewStyleFamily([], fam)).toEqual([def]);
+    }
+  });
+
+  it("同家族 look＋texture 可並存注入；質感一定跟得到主風格", () => {
+    for (const fam of STYLE_FAMILY_ORDER) {
+      const look = looksForFamily(fam)[0]!;
+      for (const texture of texturesForFamily(fam)) {
+        expect(hasStyleFamilyConflict([look, texture])).toBe(false);
+        expect(canonicalizeWorldviewStyles([look, texture])).toEqual([look, texture]);
+        expect(stylesForVisualInject([look, texture])).toEqual([look, texture]);
+        // 只點質感時自動補上該家族預設主風格，不會留下孤立的質感
+        expect(selectWorldviewStyleTexture([], texture)).toEqual([
+          STYLE_FAMILY_META[fam].defaultStyle,
+          texture,
+        ]);
+      }
+    }
+  });
+
+  it("跨家族任兩個主風格都算衝突，收斂後只留第一個", () => {
+    for (let i = 0; i < STYLE_FAMILY_ORDER.length; i++) {
+      for (let j = i + 1; j < STYLE_FAMILY_ORDER.length; j++) {
+        const a = looksForFamily(STYLE_FAMILY_ORDER[i]!)[0]!;
+        const b = looksForFamily(STYLE_FAMILY_ORDER[j]!)[0]!;
+        expect(hasStyleFamilyConflict([a, b])).toBe(true);
+        expect(canonicalizeWorldviewStyles([a, b])).toEqual([a]);
+      }
+    }
+  });
+
+  it("styleFamiliesOf 去重、依家族順序，忽略自訂值", () => {
+    expect(styleFamiliesOf(["水墨禪意", "寫實攝影", "日系水彩", "賽博龐克霓虹"])).toEqual([
+      "photo",
+      "illustrate",
+    ]);
+    expect(styleFamiliesOf(["賽博龐克霓虹"])).toEqual([]);
+  });
+
+  it("給 AI 的風格速查涵蓋每個家族與每個內建詞", () => {
+    const sheet = styleFamilyCheatsheet();
+    for (const fam of STYLE_FAMILY_ORDER) expect(sheet).toContain(STYLE_FAMILY_META[fam].label);
+    for (const s of STYLE_OPTIONS) expect(sheet, `速查漏了 ${s}`).toContain(s);
+  });
+});
 
 describe("bilingualChips（視覺注入的英文錨點）", () => {
   it("內建風格 chips 全部有英文對應（新增內建選項時必須同步補映射）", () => {
@@ -101,6 +175,33 @@ describe("isWorldviewReady / hasActs", () => {
   it("hasActs 任一幕非空", () => {
     expect(hasActs(full)).toBe(true);
     expect(hasActs(worldviewSchema.parse({}))).toBe(false);
+  });
+});
+
+describe("formatActsOutline（三幕當拆分鏡的腳本來源）", () => {
+  const acts = (a: Partial<{ hook: string; turn: string; cta: string }>) =>
+    worldviewSchema.parse({ acts: { hook: "", turn: "", cta: "", ...a } }).acts;
+
+  it("一幕一段、空行分隔——假模式的段落切幕才切得出三幕，不會整份塞成一幕", () => {
+    const out = formatActsOutline(acts({ hook: "深夜獨坐", turn: "一句開示", cta: "晨光釋懷" }));
+    expect(out).toBe("鉤子：深夜獨坐\n\n轉折：一句開示\n\n行動呼籲：晨光釋懷");
+    expect(out.split(/(?:\r?\n){2,}/).filter(Boolean)).toHaveLength(3);
+  });
+
+  it("空欄省略，不留空段", () => {
+    expect(formatActsOutline(acts({ hook: "只有鉤子" }))).toBe("鉤子：只有鉤子");
+    expect(formatActsOutline(acts({ hook: "鉤", cta: "行" }))).toBe("鉤子：鉤\n\n行動呼籲：行");
+  });
+
+  it("三幕全空回空字串——呼叫端據此擋掉「拿空大綱去拆分鏡」", () => {
+    expect(formatActsOutline(acts({}))).toBe("");
+    expect(formatActsOutline(acts({ hook: "   " }))).toBe("");
+  });
+
+  it("與 formatActsLine 用同一組標籤，只差在分隔（單行摘要 vs 可拆的來源）", () => {
+    const a = acts({ hook: "鉤", turn: "轉", cta: "行" });
+    expect(formatActsLine(a)).toBe("鉤子：鉤 → 轉折：轉 → 行動呼籲：行");
+    expect(formatActsOutline(a).replace(/\n\n/g, " → ")).toBe(formatActsLine(a));
   });
 });
 

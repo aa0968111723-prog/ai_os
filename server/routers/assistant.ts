@@ -10,6 +10,9 @@ import {
   normalizeWorldviewChipsPatch,
   summarizeWorldviewChipsPatch,
   CHIP_SOFT_MAX,
+  TONE_OPTIONS,
+  THEME_OPTIONS,
+  styleFamilyCheatsheet,
 } from "../../shared/worldview";
 import { CATEGORIES, WORKFLOW_PRESETS, getWorkflow, tierLabel, type ModelEntry, type ModelTier } from "../../shared/models";
 import { agentPlannerModeSchema, type AgentPlannerMode } from "../../shared/agentPlanner";
@@ -21,7 +24,6 @@ import { reserveQuota, refund } from "../services/points";
 import { lockSceneOrder } from "../services/locks";
 import { submitGenerationCore } from "../services/generationCore";
 import { assertProjectEditable } from "../services/projectAcl";
-import { submitApprovalCore } from "./approvals";
 import { startWorkflowCore } from "./workflows";
 import { splitScriptCore } from "./director";
 import { buildKnowledgeContext } from "./knowledge";
@@ -52,7 +54,7 @@ import {
 
 /**
  * 專案 AI 代理系統（統一入口）：一個對話統包「問答、發想、拆分鏡、排計畫執行、查資料庫」——
- * 讀專案上下文回答，並可「提議」動作（生成／新增分鏡（可帶提示詞＝發想落地）／改分鏡／送審／
+ * 讀專案上下文回答，並可「提議」動作（生成／新增分鏡（可帶提示詞＝發想落地）／改分鏡／
  * 跑工作流／拆分鏡／把目標交給 AI 代理排多步計畫 plan_agent）。
  * 安全設計：助手只「提議」，一切花點數或改資料的動作都由前端讓使用者按確認後、
  * 再走 runAction 以「登入者本人」身分執行（非自動、非開發者）——AI 不會擅自動手。
@@ -116,15 +118,10 @@ export async function overLimit(userId: string, dedupeKey?: string): Promise<boo
   return !decision.allowed;
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  todo: "草稿", review: "草稿", pending: "待審", approved: "已通過", needs_work: "需修改",
-};
-
 /** LLM 提議的動作：一律以「代號」指涉（分鏡編號 sceneNo／註冊表 modelId／預設集 presetId），避免讓 LLM 直接吐 UUID（會幻覺） */
 const proposalSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("generate"), prompt: z.string().trim().min(1).max(2000), sceneNo: z.number().int().positive().optional(), modelId: z.string().optional() }),
   z.object({ type: z.literal("update_scene"), sceneNo: z.number().int().positive(), field: z.enum(["title", "voiceover", "durationSec"]), value: z.string().min(1).max(500) }),
-  z.object({ type: z.literal("submit_approval"), sceneNo: z.number().int().positive() }),
   // durationSec 不強制整數：LLM 偶爾會回 4.5 這種值，整筆回覆因此解析失敗太傷——落地時再取整
   // prompt＝建議畫面提示詞（發想落地：導演式 idea 直接存成可就地生成的草稿分鏡）
   z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional(), prompt: z.string().max(2000).optional() }),
@@ -151,7 +148,6 @@ const replySchema = z.object({ answer: z.string().min(1).max(4000), actions: z.a
 const ACTION_TYPE_NAMES = new Set([
   "generate",
   "update_scene",
-  "submit_approval",
   "create_scene",
   "run_workflow",
   "split_script",
@@ -165,7 +161,6 @@ const COERCED_ACTION_ANSWER: Record<string, string> = {
   create_scene: "我幫你準備了新增分鏡，確認下方就加入。",
   run_workflow: "我幫你準備了一條工作流，確認下方就執行。",
   update_scene: "我幫你準備了分鏡修改，確認下方就套用。",
-  submit_approval: "我幫你準備了送審動作，確認下方就送出。",
   apply_worldview_chips: "我幫你準備了世界觀基調建議（主軸／調性／風格）——確認下方就寫入專案（可再手動微調）。",
 };
 export function coerceActionToolCall(json: unknown): z.infer<typeof replySchema> | null {
@@ -186,7 +181,6 @@ type ResolvedAction =
   // 只給人看，toPayload 會丟掉，不進 runAction
   | { type: "generate"; label: string; prompt: string; modelId: string; sceneId?: string; sceneNo?: number; sceneTitle?: string }
   | { type: "update_scene"; label: string; sceneId: string; field: "title" | "voiceover" | "durationSec"; value: string }
-  | { type: "submit_approval"; label: string; sceneId: string }
   | { type: "create_scene"; label: string; title: string; voiceover?: string; durationSec?: number; prompt?: string }
   | { type: "run_workflow"; label: string; presetId: string; prompt: string }
   | { type: "split_script"; label: string; script: string }
@@ -203,7 +197,6 @@ type ResolvedAction =
 const actionInputSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("generate"), prompt: z.string().trim().min(1).max(2000), modelId: z.string(), sceneId: z.string().uuid().optional() }),
   z.object({ type: z.literal("update_scene"), sceneId: z.string().uuid(), field: z.enum(["title", "voiceover", "durationSec"]), value: z.string().min(1).max(500) }),
-  z.object({ type: z.literal("submit_approval"), sceneId: z.string().uuid() }),
   z.object({ type: z.literal("create_scene"), title: z.string().min(1).max(80), voiceover: z.string().max(500).optional(), durationSec: z.number().min(1).max(60).optional(), prompt: z.string().max(2000).optional() }),
   z.object({ type: z.literal("run_workflow"), presetId: z.string().min(1), prompt: z.string().trim().min(1).max(2000) }),
   z.object({ type: z.literal("split_script"), script: z.string().min(20).max(8000) }),
@@ -344,7 +337,7 @@ async function runLookupTool(
     const scene = scenes[no - 1];
     if (!scene) return { step: `讀分鏡(第 ${no} 鏡不存在)`, text: `第 ${no} 鏡不存在——目前共 ${scenes.length} 個分鏡` };
     const text = [
-      `第 ${no} 鏡「${scene.title}」｜狀態:${STATUS_LABEL[scene.status] ?? scene.status}｜${scene.durationSec} 秒`,
+      `第 ${no} 鏡「${scene.title}」｜${scene.durationSec} 秒`,
       `畫面素材:${scene.assetId ? "有" : "無"}｜旁白音檔:${scene.narrationAssetId ? "有" : "無"}`,
       `建議提示詞:${scene.prompt || "（未填）"}`,
       `旁白/配音詞:${scene.voiceover || "（未填）"}`,
@@ -522,10 +515,9 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
       const genDone = intelligence.generations.done;
       const genRunning = intelligence.generations.active;
       const genFailed = intelligence.generations.failed;
-      const pendingCount = scenes.filter((s) => s.status === "pending").length;
 
       const sceneLines = scenes.length
-        ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」${STATUS_LABEL[s.status] ?? s.status} 畫面${s.assetId ? "有" : "無"} 旁白${s.narrationAssetId ? "有" : "無"}`).join("\n")
+        ? scenes.map((s, i) => `第${i + 1}鏡「${s.title}」 畫面${s.assetId ? "有" : "無"} 旁白${s.narrationAssetId ? "有" : "無"}`).join("\n")
         : "（尚無分鏡）";
       // 6.1 全專案上下文：把知識庫（逐字稿/見證/腳本/筆記）注入助手——與導演共用同一組裝器與軟刪除守門
       const knowledgeCtx = await buildKnowledgeContext(project.id, {
@@ -540,7 +532,7 @@ export async function runAssistantAsk(input: AskCoreInput, onEvent?: (e: AskStre
 世界觀｜${formatWorldviewForAi(wv, "brief")}
 ${chipGuide ? `${chipGuide}\n` : ""}分鏡（共 ${scenes.length}）：
 ${sceneLines}
-生成：完成 ${genDone}／生成中 ${genRunning}／失敗 ${genFailed}｜待審分鏡：${pendingCount}`;
+生成：完成 ${genDone}／生成中 ${genRunning}／失敗 ${genFailed}`;
 
       /** 把 LLM 的代號提議（sceneNo／modelId／presetId）解析成可執行動作；無效代號（幻覺）一律略過或退回預設 */
       const resolve = (actions: z.infer<typeof proposalSchema>[]): ResolvedAction[] => {
@@ -594,11 +586,7 @@ ${sceneLines}
           } else {
             const scene = scenes[a.sceneNo - 1];
             if (!scene) continue;
-            if (a.type === "update_scene") {
-              out.push({ type: "update_scene", sceneId: scene.id, field: a.field, value: a.value, label: `把第 ${a.sceneNo} 鏡的${FIELD_LABEL[a.field]}改為「${a.value.slice(0, 24)}」` });
-            } else {
-              out.push({ type: "submit_approval", sceneId: scene.id, label: `把第 ${a.sceneNo} 鏡「${scene.title}」送審` });
-            }
+            out.push({ type: "update_scene", sceneId: scene.id, field: a.field, value: a.value, label: `把第 ${a.sceneNo} 鏡的${FIELD_LABEL[a.field]}改為「${a.value.slice(0, 24)}」` });
           }
         }
         return out;
@@ -612,7 +600,7 @@ ${sceneLines}
         const mockActions: ResolvedAction[] = goal.length >= 5
           ? [{ type: "plan_agent", goal: goal.slice(0, 1000), label: `讓 AI 代理排計畫：「${goal.slice(0, 30)}${goal.length > 30 ? "…" : ""}」（規劃依實際 token 扣點，執行前再核准）` }]
           : [];
-        const answer = `（測試模式）目前有 ${scenes.length} 個分鏡，其中待審 ${pendingCount} 個；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${readableDbs.length} 個。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
+        const answer = `（測試模式）目前有 ${scenes.length} 個分鏡；生成完成 ${genDone}、生成中 ${genRunning}、失敗 ${genFailed}；知識庫${knowledgeCtx ? `已載入 ${knowledgeCtx.length} 字` : "（空）"}；可讀資料庫 ${readableDbs.length} 個。你的訊息：「${input.message}」——正式模式下我會讀專案內容（素材庫／分鏡／生成紀錄／模型目錄／資料庫）回覆，並在你想動手時提議動作或把目標交給代理排計畫。`;
         await recordAiTraceEventSafely({ sessionId: traceSessionId, eventType: "completed", summary: "測試模式回答完成", payload: { answer, actions: mockActions } });
         await updateAiTraceSession(traceSessionId, { status: "completed", provider: "mock", model: "mock" }).catch(() => undefined);
         return { answer, actions: mockActions, steps: [] as string[], mock: true, fallback: false, traceSessionId };
@@ -622,7 +610,7 @@ ${sceneLines}
       if (quotaError) throw new TRPCError({ code: "PRECONDITION_FAILED", message: quotaError });
 
       /** 組每輪的完整提示詞：基底任務＋工具說明＋速查＋情境手冊＋現況/知識庫/資料庫＋(累積的工具結果)＋問題 */
-      const buildPrompt = (toolBlocks: string, forceFinal: boolean) => `你是這支影片專案的「專案 AI 代理系統」——同一個對話統包問答、分鏡發想、拆分鏡、排計畫執行與資料庫查詢。用繁體中文簡潔回答使用者關於「進度、生成、分鏡、審批、素材內容、細節、挑模型、資料庫」的問題。
+      const buildPrompt = (toolBlocks: string, forceFinal: boolean) => `你是這支影片專案的「專案 AI 代理系統」——同一個對話統包問答、分鏡發想、拆分鏡、排計畫執行與資料庫查詢。用繁體中文簡潔回答使用者關於「進度、生成、分鏡、素材內容、細節、挑模型、資料庫」的問題。
 ${forceFinal
   ? "查詢額度已用完——這一輪你必須直接給最終回答，不得再呼叫工具。"
   : `回答前你可以先用「唯讀查詢工具」看專案的實際內容（本次提問最多 ${MAX_TOOL_ROUNDS} 次）。要用工具時，整個回覆只回一個 JSON 工具呼叫，拿到 <工具結果> 後再決定要不要再查或給最終回答：
@@ -636,17 +624,19 @@ ${forceFinal
 你也可以「提議」動作讓使用者確認後執行（你不能直接執行）。動作一律放進最終回答的 "actions" 陣列（例：{"answer":"…","actions":[{"type":"split_script","script":"…"}]}），絕不要用上面 {"tool":…} 的唯讀工具格式來呼叫動作。可提議的動作：
 - generate：生成素材（prompt＝描述；可選 sceneNo 指定回填某一鏡；可選 modelId 指定模型，未指定就用預設圖像模型）
 - update_scene：改某一鏡欄位（sceneNo＋field: title|voiceover|durationSec＋value）
-- submit_approval：把某一鏡送審（sceneNo）
 - create_scene：在片尾新增一個分鏡（title 必填 80 字內；可選 voiceover 旁白、durationSec 秒數 1–60、prompt 建議畫面提示詞 2000 字內）
 - run_workflow：執行一條多步驟工作流（presetId＋prompt＝想法；各步驟會分別扣點）
 - split_script：把腳本拆成一幕幕的分鏡草稿（script＝腳本全文，從使用者訊息原樣抄錄，至少 20 字；只在使用者貼了完整腳本／逐字稿、想把它變成分鏡時才提議；免費）
-- plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→送審」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫本身會依實際 token 扣點（預設走高品質模型），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
-- apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用內建詞（調性：莊嚴/溫暖/真誠/療癒/活潑/簡約；風格主風格：日系水彩/寫實攝影/3D 動畫/手繪插畫/極簡線條/水墨禪意；質感：膠片質感；主軸：苦→修行→轉變→感恩/禪修日常/佛法入門/活動紀實/感恩分享）或組內已有選項。
+- plan_agent：把「多步驟目標」交給 AI 代理排一份可背景執行的計畫（goal＝目標一句話 5–1000 字）——適用「拆腳本→逐鏡生成→逐鏡配音」「為每一鏡生成畫面」這類要連續動好幾步的目標；排計畫本身會依實際 token 扣點（預設走高品質模型），使用者核准估點後才逐步執行。代理也能把結果寫進「AI 代理可寫」的資料庫。
+- apply_worldview_chips：建議並套用世界觀 chips（themes／tones／styles 皆可選）。**視覺風格＝媒材家族＋主風格（可選同家族質感）**：styles 最多 2 且應同家族（例：["寫實攝影"] 或 ["寫實攝影","膠片質感"]；膠片為質感）。調性／主軸陣列**第一個＝主要**。硬上限落地：styles≤${CHIP_SOFT_MAX.styles}、tones≤${CHIP_SOFT_MAX.tones}、themes≤${CHIP_SOFT_MAX.themes}（落地會 canonicalize）。只填要改的欄位（未填＝不改）。適用：使用者問「該選什麼風格／調性／主軸」、現況有「選項提示」或 chips 過亂、或主動說「幫我定基調」。優先用 <視覺風格速查> 的內建詞（調性：${TONE_OPTIONS.join("/")}；主軸：${THEME_OPTIONS.join("/")}）或組內已有選項。
 分工原則：一兩步能完成的直接提議對應動作（generate/create_scene/apply_worldview_chips/…），要連續多步的才提議 plan_agent——不要為單一動作繞代理，也不要把多步目標拆成一長串零散動作。
-分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍須組長審核。
-世界觀 chips：風格先選媒材家族（寫實／插畫／3D）再選主風格，可選一個同家族質感；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
+分鏡發想（導演職能）：使用者要 idea／發想／「給我幾個分鏡」時，直接在 answer 給 2–3 個具體構想（一句話畫面＋鏡頭感），並各附一個 create_scene 動作（title＋prompt 畫面提示詞＋voiceover 旁白）——確認即存成可就地生成的草稿分鏡。發想僅供參考，成品仍由你自己決定要不要用。
+世界觀 chips：風格先選媒材家族再選主風格，可選一個同家族質感（家族與可選詞見 <視覺風格速查>）；圖影注入 look(+質感)；調性最多前 2。有「選項提示」或使用者問基調時，**優先提議 apply_worldview_chips**（使用者確認才寫入），answer 裡簡短說明為何這樣選；不要只口頭建議卻不給可確認的動作。
 分鏡一律用「編號 sceneNo」指涉（第 3 鏡＝sceneNo:3）。generate 的 modelId 只能填「速查表的 id」或「find_model 查到的免來源模型 id」；presetId 只能抄工作流速查表。不確定就別填 modelId（會用預設圖像模型）。動作要少而精，只在使用者明確想動手時才提議；純詢問時 actions 給 []。
 一次回覆最多提議 6 個動作；每個動作都要使用者按確認才會執行，不要假設前一步已完成，也不要替使用者跳過確認。
+<視覺風格速查>
+${styleFamilyCheatsheet()}
+</視覺風格速查>
 <可用模型速查>
 ${buildAiModelCheatsheet()}
 </可用模型速查>
@@ -1017,23 +1007,6 @@ export const assistantRouter = router({
         };
       }
 
-      // submit_approval：走與網頁「送審」完全相同的核心（版本號原子產生、標分鏡 pending、系統訊息）。
-      // 先比照 generate/update_scene 驗證 sceneId 屬於 input.projectId——否則守衛與審計都綁在
-      // 請求指名的專案上，實際被改動的卻是另一專案的分鏡（2.2 誤歸屬＋2.3 可被繞過）
-      if (a.type !== "submit_approval") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "不支援的助手動作" });
-      }
-      {
-        const [scene] = await db
-          .select({ id: schema.scenes.id })
-          .from(schema.scenes)
-          .where(and(eq(schema.scenes.id, a.sceneId), eq(schema.scenes.projectId, project.id), isNull(schema.scenes.deletedAt)));
-        if (!scene) throw new TRPCError({ code: "NOT_FOUND", message: "找不到分鏡（可能已刪除）" });
-      }
-      await submitApprovalCore(a.sceneId, ctx.auth.user.id, async (p) => {
-        requireGroup(ctx.auth, p.groupId);
-        await assertProjectEditable(ctx.auth, p); // 對分鏡的「真實」專案再驗一次 2.3（防守衛綁錯專案）
-      });
-      return { ok: true, kind: "submit_approval" as const, message: "已送審，等組長裁決" };
+      throw new TRPCError({ code: "BAD_REQUEST", message: "不支援的助手動作" });
     }),
 });

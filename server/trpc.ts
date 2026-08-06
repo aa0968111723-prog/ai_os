@@ -129,7 +129,7 @@ export function requireGroup(auth: AuthState, groupId: string): "admin" | "leade
   return membership.role;
 }
 
-/** 組長以上（審批用） */
+/** 組長以上（核准用） */
 export function requireLeader(auth: AuthState, groupId: string): void {
   const role = requireGroup(auth, groupId);
   if (role === "member") throw new TRPCError({ code: "FORBIDDEN", message: "需要組長權限" });
