@@ -270,7 +270,7 @@ export function CommunityPage() {
 
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                    <strong style={{ fontSize: "var(--fs-14)" }}>{post.title}</strong>
+                    <strong style={{ fontSize: "var(--fs-14)", overflowWrap: "anywhere" }}>{post.title}</strong>
                     <Chip style={{ fontSize: "var(--fs-11)" }}>
                       {SOURCE_LABEL[post.sourceType] ?? post.sourceType}
                     </Chip>
@@ -284,7 +284,7 @@ export function CommunityPage() {
                     )}
                   </div>
                   {post.description && (
-                    <p style={{ margin: "4px 0 0", fontSize: "var(--fs-13)", opacity: 0.85 }}>
+                    <p style={{ margin: "4px 0 0", fontSize: "var(--fs-13)", opacity: 0.85, overflowWrap: "anywhere" }}>
                       {post.description}
                     </p>
                   )}

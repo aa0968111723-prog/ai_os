@@ -945,10 +945,12 @@ function DataImportPanel({ table, onImported }: { table: TableSummary; onImporte
       {headers.length > 0 && (
         <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
           {table.fields.map((f) => (
-            <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            // flexWrap＋maxWidth：CSV 表頭很長時 select 的 min-content 會撐破 360px 容器
+            // （body overflow-x:clip 下選單右半直接被裁掉）；桌機寬度足夠、不觸發換行
+            <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, flexWrap: "wrap" }}>
               <span style={{ minWidth: 100 }}>{f.label}{f.required && " *"}</span>
               <span className="meta">←</span>
-              <select value={mapping[f.key] ?? ""} onChange={(e) => setMapping((m) => ({ ...m, [f.key]: e.target.value }))} style={{ width: "auto" }}>
+              <select value={mapping[f.key] ?? ""} onChange={(e) => setMapping((m) => ({ ...m, [f.key]: e.target.value }))} style={{ width: "auto", maxWidth: "100%", minWidth: 0 }}>
                 <option value="">（不匯入此欄）</option>
                 {headers.map((h) => <option key={h} value={h}>{h}</option>)}
               </select>

@@ -171,7 +171,8 @@ export function McpPage() {
       <h2 style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 8 }}><Icon name="ArrowRight" size={18} />連線位置</h2>
       <Card>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: "var(--fs-14)" }}>
-          <span>端點：<code>POST {endpoint}</code></span>
+          {/* overflowWrap：端點 URL 常 >40 字元，360px 卡內不斷行就被裁掉（金鑰 token 有 break-all、這行先前漏了） */}
+          <span style={{ minWidth: 0, overflowWrap: "anywhere" }}>端點：<code>POST {endpoint}</code></span>
           <CopyButton text={endpoint} />
         </div>
         <div style={{ marginTop: 6, fontSize: "var(--fs-14)" }}>驗證：HTTP 標頭 <code>x-api-key: 你的金鑰</code></div>

@@ -2283,7 +2283,9 @@ export function AdminPage() {
               {!invite.data.emailStatus && (
                 <Hint layer="always">複製這個連結傳給夥伴（{invite.data.expiresInHours} 小時內有效）：</Hint>
               )}
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {/* flexWrap：360px 上 input 最小內容寬＋兩顆 flex:none 按鈕會超出、
+                  分享鈕被 overflow-x:clip 裁掉（比照 McpPage 金鑰列）；桌機不觸發換行 */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 {/* 上方的說明句沒有與這個欄位關聯，讀屏聚焦到這裡時只會念出一長串
                     URL 而不知道它是什麼。補 aria-label 給它一個名字。 */}
                 <input

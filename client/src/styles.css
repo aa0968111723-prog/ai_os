@@ -6791,3 +6791,31 @@ button, a, select, summary, [role="button"] { touch-action: manipulation; }
 
 
 
+
+/* ═══ 手機修正（MOB-H2）：捲動圍堵、長字串斷行、分頁佈局 ═══ */
+@media (max-width: 820px) {
+  /* 巢狀捲動圍堵：捲到頂/底不再鏈到背後整頁（.mobile-more-sheet/.modal-scrim 本就有
+     contain，這幾個捲動區先前漏掉；standalone PWA 還會誤觸下拉刷新） */
+  .project-messages-sheet__body,
+  .dm-scroll,
+  .dm-list,
+  .ai-copilot-chat-feed {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* 留言／生成結果長字串（URL、長英數 token）：body 是 overflow-x:clip，
+     不斷行就是被硬裁掉（比照 .dm-bubble 的 overflow-wrap:anywhere） */
+  .msg { min-width: 0; }
+  .msg, .result-text { overflow-wrap: anywhere; }
+}
+@media (max-width: 560px) {
+  /* 定調中心四顆分頁 360px 總寬 ~500px：橫捲又藏捲軸、無漸層提示，
+     「回收桶」整顆在畫面外看起來像沒這功能——改 2×2（比照 .creation-mode-tabs 的 MOB-03） */
+  .tone-studio-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow-x: visible;
+  }
+  /* AI 創作助理 feed：420px 定高在小手機吃掉過多首屏 */
+  .ai-copilot-chat-feed { max-height: min(420px, 48dvh); }
+}
