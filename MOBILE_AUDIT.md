@@ -101,7 +101,7 @@
 - [x] **P2-03** done(PR#463)｜`client/src/styles.css:2151`｜touch-target｜/（Landing，561–820px 直立平板）
   - 問題：公開站頂欄的「運作方式」「安全與掌控」錨點連結沒有 min-height（14px 字高＝點擊面積約 20px 高），561–820px 觸控平板上可見但難點；全域 44px 下限只涵蓋 button/.btn/.menu-item（146-161 行），不含裸 <a>，≤560 才 display:none。
   - 修法：補 `.public-header nav > a:not(.btn) { min-height: 44px; display: inline-flex; align-items: center; }`（比照 2238 行 .public-footer a 的做法）。
-- [ ] **P2-04**｜`client/src/app/components/MobileNavigation.tsx:67`｜sheet-gesture｜所有已登入路由（≤820px 帳號選單 sheet／更多面板）
+- [x] **P2-04** done(PR#471)｜`client/src/app/components/MobileNavigation.tsx:67`｜sheet-gesture｜所有已登入路由（≤820px 帳號選單 sheet／更多面板）
   - 問題：更多面板與 MenuSurface sheet 都畫了拖曳把手（grip）暗示可下滑關閉，但 app/ 目錄內完全沒有 touch/pointer 手勢處理，實際只能點 scrim、X 或 Esc 關閉——視覺承諾與行為不符。
   - 修法：在 sheet 上加最小 swipe-down dismiss（pointerdown/move 位移超過閾值即 onClose），或移除把手視覺避免誤導。
 - [x] **P2-05** done(PR#463)｜`client/src/styles.css:2141`｜safe-area｜/（Landing，standalone PWA＋瀏海機）
@@ -125,7 +125,7 @@
 - [x] **P2-11** done(PR#469)｜`client/src/pages/ProjectPage.tsx:1309`｜觸控目標｜/projects/:id（hero 協作在場區）
   - 問題：展開後的成員 chip 是 span role="button"（點擊切換鏡像跟隨），inline style 12px 字＋2px 直向 padding 實高僅 ~24px；「N 人在線」chip 也被 .project-presence-chip 壓到 32px——皆為手機專屬控件卻低於 44px 下限。
   - 修法：兩者補 min-height: var(--touch-min) 並用 inline-flex 置中（比照 .chip.pick 的做法）。
-- [ ] **P2-12**｜`client/src/pages/ProjectPage.tsx:1634`｜鍵盤遮擋＋reduced-motion｜/projects/:id（去填一句話／用這個提示詞）
+- [x] **P2-12** done(PR#471)｜`client/src/pages/ProjectPage.tsx:1634`｜鍵盤遮擋＋reduced-motion｜/projects/:id（去填一句話／用這個提示詞）
   - 問題：多處直接 el.focus()＋scrollIntoView({behavior:"smooth", block:"center"})（wv-logline、gen-prompt、sec-characters），繞過專案自建的 focusAndReveal/scrollToSelector：block:center 以 layout viewport 置中，iOS 鍵盤彈出時欄位可能落在鍵盤下；且顯式 smooth 無視 prefers-reduced-motion（CSS scroll-behavior:auto 蓋不掉 JS 顯式參數）。
   - 修法：輸入框聚焦一律改用 focusAndReveal，純捲動改 scrollToSelector（兩者已內建 reduce 與 --chrome-bottom/鍵盤補償）。
 - [x] **P2-13** done(PR#470)｜`client/src/styles.css:3558`｜巢狀捲動｜/projects/:id（留言 bottom sheet）
@@ -137,28 +137,28 @@
 - [x] **P2-15** done(PR#469)｜`client/src/pages/ProjectPage.tsx:2345`｜觸控目標｜/projects/:id（③ 交付一行導引）
   - 問題：手機專屬的「做好可打包 zip 交付」是 <p role="button">，fs-12＋padding 5px 0 實高約 28px，不吃全域 button 44px 規則，低於觸控下限。
   - 修法：補 min-height: var(--touch-min) 與 display:flex 對齊（或改用 Button variant=ghost）。
-- [ ] **P2-16**｜`client/src/features/creation-workbench/AiTraceHistory.tsx:29`｜vh-dvh-overlay｜/p/:id（工作台標題列「實際運作紀錄」浮層）
+- [x] **P2-16** done(PR#471)｜`client/src/features/creation-workbench/AiTraceHistory.tsx:29`｜vh-dvh-overlay｜/p/:id（工作台標題列「實際運作紀錄」浮層）
   - 問題：紀錄浮層用 70vh（非 dvh）且 zIndex 20 低於 .mobile-nav 的 44，手機上面板底緣被固定分頁列蓋住，最後幾列與內部捲動的下緣看不見；也沒有 scrim 或面板內關閉鈕。
   - 修法：maxHeight 改 min(70dvh, calc(100dvh - var(--chrome-bottom)))、zIndex 提到分頁列之上（或 ≤820 改走 MenuSurface 貼底 sheet），並在面板內補關閉鈕。
-- [ ] **P2-17**｜`client/src/features/creation-workbench/GenerationSourcePicker.tsx:158`｜keyboard-inset｜/p/:id（直接出圖・進階設定來源欄）
+- [x] **P2-17** done(PR#471)｜`client/src/features/creation-workbench/GenerationSourcePicker.tsx:158`｜keyboard-inset｜/p/:id（直接出圖・進階設定來源欄）
   - 問題：「雲端／公開網址」input 未接 focusAndReveal，鍵盤契約只覆蓋主路徑輸入；同樣缺席的還有 KnowledgeSourceStrip.tsx:84 的搜尋框與 AiUnderstandingPanel.tsx:311/313 的覆寫 textarea，聚焦時可能停在固定底欄／鍵盤正下方。
   - 修法：這三處輸入補上 onFocus={(e) => focusAndReveal(e.currentTarget)}，與 --chrome-bottom/--kb-inset 契約對齊。
-- [ ] **P2-18**｜`client/src/features/creation-workbench/PromptTokenMap.tsx:33`｜hover-only｜/p/:id（AI 怎麼理解・逐詞佔用圖）
+- [x] **P2-18** 免改（覆核：pill 有格數、Meta 摘要已解釋刪除線/未知語意，title 僅剩補充）｜`client/src/features/creation-workbench/PromptTokenMap.tsx:33`｜hover-only｜/p/:id（AI 怎麼理解・逐詞佔用圖）
   - 問題：ChunkPill 的補充資訊（第幾格起、「在窗口之外」「詞表裡沒有這些字」全文說明）只放在 title 屬性，手機無 hover 完全看不到；刪除線與「未知」小標雖有視覺提示，但語意解釋觸控裝置不可達。
   - 修法：改成點按顯示（popover / 展開列）或把關鍵語句移進下方既有的 Meta 摘要，title 僅留補充。
-- [ ] **P2-19**｜`client/src/features/creation-workbench/MechanicsDiagram.tsx:119`｜svg-legibility｜/p/:id（這顆模型怎麼運作・結構圖）
+- [x] **P2-19** done(PR#471)｜`client/src/features/creation-workbench/MechanicsDiagram.tsx:119`｜svg-legibility｜/p/:id（這顆模型怎麼運作・結構圖）
   - 問題：SVG 以 viewBox 等比縮放，360px 容器下 5 關以上的階段標籤（fontSize 9.5 SVG 單位）縮到約 8px 難以辨識，6 關時可點格子也縮到約 40px（<44）；幸有下方同功能的階段清單按鈕備援，屬打磨項。
   - 修法：≤560 隱藏 SVG 內文字改由下方清單承擔標籤，或改用 clamp 過的 HTML 標籤列＋僅保留圖形符號。
 - [x] **P2-20** done(PR#469)｜`client/src/pages/PlannerPage.tsx:253`｜觸控目標｜/planner
   - 問題：GoogleCalendarBar 的純文字 `<a>` 動作（「匯出 .ics」「連結 Google 日曆（自動同步）」「重新連結」）是 inline-flex 裸連結，高度約 22px，未達 44px 觸控下限，且它們是同步工具列的主要動作而非句中行內連結。
   - 修法：改成 `<Button as="a">`（拿到 .btn 基底與 44px 下限）或補 `btn` class。
-- [ ] **P2-21**｜`client/src/pages/PlannerPage.tsx:556`｜橫向空間/佈局｜/planner
+- [x] **P2-21** done(PR#471)｜`client/src/pages/PlannerPage.tsx:556`｜橫向空間/佈局｜/planner
   - 問題：排程與筆記列用 inline style 寫死 gridTemplateColumns，特異性蓋掉 styles.css 為 ≤560 準備的 `.gen-row { grid-template-columns: 1fr }` 堆疊規則——360px 時排程列仍是「時間｜內容｜刪除」三欄，標題欄只剩約 110px，長標題＋專案 Chip 擠成多行窄柱。
   - 修法：把欄位模板改成修飾 class（如 .gen-row--schedule）由 CSS 定義，讓 ≤560 媒體查詢能接手堆疊。
 - [x] **P2-22** done(PR#470)｜`client/src/pages/DatabasesPage.tsx:948`｜橫向溢位｜/databases
   - 問題：批次匯入的欄位對應列是無 flexWrap 的 flex row，來源表頭 select 寬 auto 且無 max-width/min-width:0——CSV 表頭很長時 select 的 min-content 撐破 360px 容器，被 html 的 overflow-x:clip 直接裁掉、選單右半不可見。
   - 修法：label 加 flexWrap:"wrap"，select 加 maxWidth:"100%"、minWidth:0（或 flex:"1 1 140px"）。
-- [ ] **P2-23**｜`client/src/pages/PlannerPage.tsx:373`｜動效/reduced-motion｜/planner
+- [x] **P2-23** done(PR#471)｜`client/src/pages/PlannerPage.tsx:373`｜動效/reduced-motion｜/planner
   - 問題：prefillFromDay 的 scrollIntoView 無條件 behavior:"smooth"，不尊重 prefers-reduced-motion；同檔 revealPlannerSection 已示範正確寫法，兩處不一致。
   - 修法：沿用 revealPlannerSection 的 reduced-motion 三元判斷。
 - [x] **P2-24** done(PR#469)｜`client/src/pages/CommunityPage.tsx:389`｜touch-target｜/community
@@ -215,10 +215,10 @@
 - [x] **P2-41** done(PR#470)｜`client/src/styles.css:6666`｜nested-scroll｜今日工作台 AI 創作助理（AICreativeCopilot）
   - 問題：對話 feed 是固定 max-height:420px 的巢狀捲動區，沒有 overscroll-behavior:contain，手機捲到底/頂會連動整頁捲動；420px 在小手機也佔掉過多首屏。
   - 修法：加 overscroll-behavior: contain 與 -webkit-overflow-scrolling: touch，≤560 改 max-height: min(420px, 48dvh)。
-- [ ] **P2-42**｜`client/src/styles.css:26`｜字體子集化｜全站首屏標題（h1、empty-state、launch cover、landing 數字）
+- [ ] **P2-42** DEFERRED（標題字族策略需整體視覺決策，記 D-012；與 Adobe token 階段合併評估）｜`client/src/styles.css:26`｜字體子集化｜全站首屏標題（h1、empty-state、launch cover、landing 數字）
   - 問題：Noto Serif TC 可變字型整套全域載入，但實際只用在 13 處標題與裝飾數字——首屏每個標題字都要在 sans 之外再多下載一份 serif 的 CJK 字形分包（單一分包平均 ~47KB），行動網路下是可感的重複成本。
   - 修法：評估標題改用 Noto Sans TC 高字重（650/750 可變軸已支援），或 serif 只保留 landing/login hero 場景載入，減少同字雙字族下載。
-- [ ] **P2-43**｜`client/src/app/AppRoutes.tsx:28`｜route splitting／重依賴｜/project/:id（行動端主要作業頁）
+- [ ] **P2-43** DEFERRED（ProjectPage chunk 拆分見 D-011）｜`client/src/app/AppRoutes.tsx:28`｜route splitting／重依賴｜/project/:id（行動端主要作業頁）
   - 問題：ProjectPage 單一 lazy chunk 476KB（gzip 150KB）是全站最大 JS，手機弱網下載入慢且最容易 chunk 失敗——lazyWithRetry 的註解自己就點名它是最常中招的一支。
   - 修法：把 ProjectPage 內的重分頁（分鏡／生成／審稿等 tab 級區塊）再往下 dynamic import，讓進頁先載骨架與當前 tab。
 - [ ] **P2-44**｜`client/public/manifest.webmanifest:33`｜圖片格式與尺寸｜PWA 安裝流程（manifest icons）＋部署產物

@@ -46,6 +46,10 @@
 ## D-011 ProjectPage chunk 瘦身 DEFERRED
 - ProjectPage chunk gzip 151KB 超 100KB 門檻，但瘦身需把 workbench/modes 拆成巢狀 lazy——動共用結構、迴歸面大（該頁有 hookOrder/workbenchContract 等契約測試防守）。標 DEFERRED，待 P2 掃尾與元件重製完成後獨立 PR 評估。
 
+## D-012 標題字族策略 DEFERRED（P2-42）
+- Noto Serif TC 只用在 13 處標題/裝飾數字，但每個標題字要在 sans 之外多載一份 serif CJK 分包（均 ~47KB）。改高字重 sans 或場景化載入涉及整體視覺語言，留待 Adobe token/元件重製階段一併決策（board 視覺可能改變標題字族）。
+- 現況已因 PR #468 全部字型 CSS 非阻塞化，重複下載只影響換頁後的字型補載，非首屏瓶頸。
+
 ## D-006 效能基線（2026-08-06 build，gzip）
 - 首屏 JS：index 103.7KB + vendor-react 57.8KB + vendor-data 45.0KB ≈ **206.5KB（超 180KB 門檻）**
 - 全站單一 CSS：408KB raw / **120.9KB gzip**（未拆分、未 purge）
