@@ -33,7 +33,8 @@ function usePrefersReducedMotion() {
   );
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!mq) return;
     const on = () => setReduced(mq.matches);
     mq.addEventListener?.("change", on);
     return () => mq.removeEventListener?.("change", on);

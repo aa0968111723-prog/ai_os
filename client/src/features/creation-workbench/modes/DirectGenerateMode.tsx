@@ -484,7 +484,7 @@ export function DirectGenerateMode({
             // 摺線之下——看起來像按了沒反應。等面板掛載完成後捲進可視帶
             //（scrollIntoViewForChrome 讓開 --chrome-bottom；面板已可見時是 no-op）。
             // gate ≤820：桌機行為維持原狀。
-            if (window.matchMedia("(max-width: 820px)").matches) {
+            if (window.matchMedia?.("(max-width: 820px)")?.matches) {
               requestAnimationFrame(() => {
                 scrollIntoViewForChrome(document.querySelector(".confirm-panel"));
               });

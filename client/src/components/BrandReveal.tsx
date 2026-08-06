@@ -17,7 +17,7 @@ const STORAGE_PREFIX = "aios.brandReveal.";
 
 function prefersReducedMotion(): boolean {
   if (typeof window === "undefined" || !window.matchMedia) return false;
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
 }
 
 function alreadyPlayed(onceKey: string | undefined): boolean {

@@ -91,7 +91,7 @@ function revealPlannerSection(id: string): void {
   section.open = true;
   requestAnimationFrame(() => {
     section.scrollIntoView({
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth",
       block: "start",
     });
   });
@@ -373,7 +373,7 @@ function ScheduleCard({ groupId, initiallyOpen }: { groupId: string; initiallyOp
     setCreateOpen(true);
     // 尊重 prefers-reduced-motion（同檔 revealPlannerSection 的既有寫法；顯式 smooth 蓋不掉 CSS 開關）
     formRef.current?.scrollIntoView({
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth",
       block: "center",
     });
     // 表單在手機是收合的，展開要等一次 render；捲動動畫結束後才聚焦，才不會被捲走

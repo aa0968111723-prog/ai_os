@@ -46,7 +46,8 @@ describe("mobile project-page contract (batch E)", () => {
   it("reveals the confirm panel after tapping 生成 on mobile", () => {
     const i = directMode.indexOf("setConfirming(true)");
     const after = directMode.slice(i, i + 700);
-    expect(after).toContain('window.matchMedia("(max-width: 820px)")');
+    // ?. guard：jsdom 沒有 matchMedia，裸呼叫會讓 client coverage job 整支 exit 1
+    expect(after).toContain('window.matchMedia?.("(max-width: 820px)")');
     expect(after).toContain("scrollIntoViewForChrome");
   });
 });

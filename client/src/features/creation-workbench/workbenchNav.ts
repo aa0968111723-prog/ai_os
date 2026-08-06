@@ -49,7 +49,7 @@ export function modeForAnchor(anchorOrSelector: string): CreationMode | null {
 function scrollBehavior(): ScrollBehavior {
   if (typeof window === "undefined") return "auto";
   try {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return "auto";
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return "auto";
   } catch {
     /* ignore */
   }

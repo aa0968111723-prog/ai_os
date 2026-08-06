@@ -132,7 +132,7 @@ export function bootstrapPwa(): void {
   };
   applyStandaloneClass();
   try {
-    window.matchMedia("(display-mode: standalone)").addEventListener("change", applyStandaloneClass);
+    window.matchMedia?.("(display-mode: standalone)")?.addEventListener("change", applyStandaloneClass);
   } catch {}
 
   window.addEventListener("beforeinstallprompt", (e) => {
