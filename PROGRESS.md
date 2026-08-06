@@ -34,5 +34,8 @@
 ## 階段五：側載 APK（PWA 全數完成後）
 - [todo] Capacitor/TWA 包裝＋GitHub Actions 自動 build＋INSTALL.md
 
+## CI 觀察
+- 2026-08-07 00:40：#462/#463 首輪 CI 因 GitHub Actions 基礎設施故障（Service Unavailable，非程式問題）失敗，重試 run 佇列中；下輪喚醒時複查五分支 CI。
+
 ## 驗收清單對照（第 8 節）
 - [todo] 全部（詳見各階段）
