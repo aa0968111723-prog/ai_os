@@ -88,12 +88,16 @@ class ErrorBoundary extends React.Component<
 }
 
 function Root() {
+  /**
+   * 全站 Query 預設：少重試、失敗快露臉。
+   * 預設 retry:3 在 bootstrap／慢查失敗時會讓 SessionGate 長時間「載入中…」，
+   * 症狀就是「除了首頁其他頁都只有載入中」。
+   */
   const [queryClient] = useState(
     () =>
       new QueryClient({
         defaultOptions: {
           queries: {
-            // 掛住的請求不要默默重試三次把 isLoading 拖很久；失敗較快 → SessionGate 可進重試 UI
             retry: 1,
             refetchOnWindowFocus: false,
           },

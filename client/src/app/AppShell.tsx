@@ -12,7 +12,8 @@ import { ChangePasswordDialog } from "./session/ChangePasswordDialog";
 import { SessionGate } from "./SessionGate";
 import { AppHeader } from "./components/AppHeader";
 import { MobileNavigation } from "./components/MobileNavigation";
-import { Button, Meta } from "../components/ui";
+import { RouteFallback } from "../components/RouteFallback";
+import { Button } from "../components/ui";
 import { Icon } from "../components/Icon";
 
 const SPLASH_SESSION_KEY = "aios.splash.seen";
@@ -76,15 +77,21 @@ export function AppShell() {
   /**
    * 首屏只打一支 sessionBoot.bootstrap（伺服器聚合 me + 未讀 + mock）。
    * 裝置不再並行三支 API；輪詢也只打這一支，由伺服器重算未讀。
+   *
+   * retry 只試 1 次：預設 3 次會讓 SessionGate 長時間停在「載入中…」，
+   * 使用者感覺「除了首頁其他頁都壞了」。失敗改由 SessionGate 顯示可點重試。
    */
   const boot = trpc.sessionBoot.bootstrap.useQuery(undefined, {
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+    retry: 1,
     refetchInterval: (q) => (q.state.data?.me ? 60_000 : false),
   });
+  // 有舊資料時不把整站當 loading（背景 refetch 不應擋住路由）
+  const meLoading = boot.isLoading && !boot.data;
   const me = {
     data: boot.data?.me ?? undefined,
-    isLoading: boot.isLoading,
+    isLoading: meLoading,
     isError: boot.isError,
     error: boot.error,
     refetch: boot.refetch,
@@ -244,11 +251,11 @@ export function AppShell() {
         <AppUpdateBanner />
         {me.data && <ShareInboxRescue />}
 
-        {/* lazy 頁面載入中的過場（QA-025 code-splitting）：整個路由樹共用一個 Suspense */}
+        {/* lazy 頁面載入中的過場：RouteFallback 超過門檻可強制重整，避免 chunk 卡住永遠「載入中」 */}
         {me.data ? (
           <>
             <main id="main-content" className="app-main" tabIndex={-1}>
-              <Suspense fallback={<Meta as="p">載入中…</Meta>}>
+              <Suspense fallback={<RouteFallback />}>
                 <SessionGate
                   me={me.data}
                   meLoading={me.isLoading}
@@ -264,7 +271,7 @@ export function AppShell() {
             <MobileNavigation dmUnread={dmUnread.data?.total ?? 0} />
           </>
         ) : (
-          <Suspense fallback={<Meta as="p">載入中…</Meta>}>
+          <Suspense fallback={<RouteFallback />}>
             <SessionGate
               me={me.data}
               meLoading={me.isLoading}
