@@ -12,7 +12,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "../db";
 import { worldviewSchema, formatWorldviewForAi } from "../../shared/worldview";
 import { resolutionForFormat } from "../../shared/options";
-import { absPathOf, extFromMime } from "./storage";
+import { extFromMime, openStoredReadStream } from "./storage";
 
 export function safeName(value: string): string {
   // 控制字元一併置換：進 zip entry 名會讓部分解壓工具出錯，經 escXml 進 XML 則是 1.0 非法字元
@@ -750,11 +750,11 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     // 來源一律以串流進 archive（不整檔進 RAM）；「取得來源」階段的失敗屬單檔容錯：跳過＋註記
     let source: Readable;
     try {
-      // 已落地的素材直接讀 Volume（快、不吃外網、網址過期也不怕）；否則抓外部網址
+      // 已落地的素材直接讀儲存層（快、不吃外網、網址過期也不怕）；否則抓外部網址。
+      // openStoredReadStream 兩種後端通用：開檔／取物件失敗都會拋，走下面既有的單檔跳過路徑，
+      // 而不是 append 後半寫 entry 毀掉整包。
       if (asset.storagePath) {
-        const abs = absPathOf(asset.storagePath);
-        await stat(abs); // 先確認檔案可讀：開檔失敗要走單檔跳過，而不是 append 後半寫 entry 毀掉整包
-        source = createReadStream(abs);
+        source = await openStoredReadStream(asset.storagePath);
       } else if (asset.url && /^https?:\/\//.test(asset.url)) {
         // 30 秒逾時涵蓋連線與串流階段；用戶端斷線也會中止進行中的抓取
         const fileRes = await fetchRemoteAsset(asset.url, abortSignal);
@@ -824,9 +824,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     let source: Readable;
     try {
       if (narr.storagePath) {
-        const abs = absPathOf(narr.storagePath);
-        await stat(abs);
-        source = createReadStream(abs);
+        source = await openStoredReadStream(narr.storagePath);
       } else if (narr.url && /^https?:\/\//.test(narr.url)) {
         const fileRes = await fetchRemoteAsset(narr.url, abortSignal);
         if (!fileRes.ok || !fileRes.body) {
@@ -892,9 +890,7 @@ export async function exportProjectZip(projectId: string, sink: Writable, opts?:
     let source: Readable;
     try {
       if (asset.storagePath) {
-        const abs = absPathOf(asset.storagePath);
-        await stat(abs);
-        source = createReadStream(abs);
+        source = await openStoredReadStream(asset.storagePath);
       } else if (asset.url && /^https?:\/\//.test(asset.url)) {
         const fileRes = await fetchRemoteAsset(asset.url, abortSignal);
         if (!fileRes.ok || !fileRes.body) {

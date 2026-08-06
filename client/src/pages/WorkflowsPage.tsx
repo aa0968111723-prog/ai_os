@@ -38,6 +38,8 @@ export function WorkflowsPage({ groupId, isLeader }: { groupId: string; isLeader
     { groupId: groupId || undefined },
     { enabled: !!groupId },
   );
+  // 封存以 status 表示（專案表沒有 archivedAt 欄位）；原本比對的 p.archivedAt 永遠是 undefined，
+  // 等於這個篩選從來沒有生效過——封存專案照樣列在「選一個專案套用工作流」裡。
   const projects = (projectsQuery.data ?? []).filter((p) => p.status !== "archived");
 
   // 取得短影音母版定義

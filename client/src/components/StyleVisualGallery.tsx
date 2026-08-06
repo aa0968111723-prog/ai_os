@@ -103,7 +103,7 @@ export function StyleVisualGallery({
             title="視覺卡片模式（帶範例縮圖）"
             onClick={() => setViewMode("visual")}
           >
-            <Icon name="Grid" size={13} />
+            <Icon name="LayoutGrid" size={13} />
             <span>卡片</span>
           </button>
           <button

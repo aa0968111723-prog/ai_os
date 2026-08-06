@@ -10,7 +10,10 @@ interface ChatMessage {
   contextUsed?: string[];
 }
 
-const QUICK_PROMPTS: { icon: IconName; label: string; prompt: string }[] = [
+/** 圖示名稱標成 IconName：寫錯的名字在編譯期就擋下來。
+ *  不標的話推論成 string，Icon 收到未知名稱只會畫出一個空的 svg——
+ *  沒有任何錯誤，只有畫面上一塊看不見的空白。 */
+const QUICK_PROMPTS: ReadonlyArray<{ icon: IconName; label: string; prompt: string }> = [
   {
     icon: "Sparkles",
     label: "爆款短片主題",

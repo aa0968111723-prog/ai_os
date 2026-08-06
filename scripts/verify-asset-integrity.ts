@@ -17,6 +17,7 @@ import { access, readdir, stat } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import pg from "pg";
+import { headObject, objectStoreConfig } from "../server/services/objectStore";
 
 const args = new Set(process.argv.slice(2));
 const asJson = args.has("--json");
@@ -59,6 +60,30 @@ interface Report {
     unlandedAi: Array<{ id: string; projectId: string; url: string; deleted: boolean }>;
     orphans: string[];
   };
+}
+
+/** 設了 S3_ENDPOINT 等變數時，素材在物件儲存上，本機那棵目錄樹是空的 */
+const objectStore = objectStoreConfig();
+
+/**
+ * 查一個相對路徑的檔案在不在、多大——兩種儲存後端通用。
+ * 對帳腳本若只會查本機磁碟，切到物件儲存後會把「一切正常」報成「全站素材遺失」。
+ */
+async function probeStored(rel: string, abs: string): Promise<{ exists: boolean; size?: number }> {
+  if (objectStore) {
+    try {
+      const stat = await headObject(rel);
+      return stat.exists ? { exists: true, size: stat.size } : { exists: false };
+    } catch {
+      return { exists: false };
+    }
+  }
+  try {
+    const s = await stat(abs);
+    return { exists: true, size: s.size };
+  } catch {
+    return { exists: false };
+  }
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -104,7 +129,7 @@ async function main(): Promise<void> {
   }
 
   const report: Report = {
-    storageRoot: STORAGE_ROOT,
+    storageRoot: objectStore ? `${objectStore.endpoint}/${objectStore.bucket}` : STORAGE_ROOT,
     assetsDir: ASSETS_DIR,
     assetsDirExists: existsSync(ASSETS_DIR),
     totals: {
@@ -133,7 +158,11 @@ async function main(): Promise<void> {
 
   try {
     log(`[assets:verify] STORAGE_ROOT=${STORAGE_ROOT}`);
-    log(`[assets:verify] assetsDir exists=${report.assetsDirExists}`);
+    log(
+      objectStore
+        ? `[assets:verify] 後端＝物件儲存 ${objectStore.endpoint}/${objectStore.bucket}`
+        : `[assets:verify] assetsDir exists=${report.assetsDirExists}`,
+    );
 
     const { rows } = await pool.query<AssetRow>(`
       SELECT id, project_id, kind, title, storage_path, url, size_bytes, is_ai_generated, deleted_at
@@ -183,7 +212,8 @@ async function main(): Promise<void> {
         continue;
       }
 
-      if (!(await pathExists(abs))) {
+      const probe = await probeStored(row.storage_path, abs);
+      if (!probe.exists) {
         report.totals.missingFiles += 1;
         if (report.samples.missing.length < limitMissing) {
           report.samples.missing.push({
@@ -197,27 +227,23 @@ async function main(): Promise<void> {
         continue;
       }
 
-      if (row.size_bytes != null) {
-        try {
-          const s = await stat(abs);
-          if (s.size !== row.size_bytes) {
-            report.totals.sizeMismatch += 1;
-            if (report.samples.sizeMismatch.length < limitMissing) {
-              report.samples.sizeMismatch.push({
-                id: row.id,
-                path: row.storage_path,
-                dbBytes: row.size_bytes,
-                diskBytes: s.size,
-              });
-            }
-          }
-        } catch {
-          // stat 失敗當 missing 已處理過的路徑罕見；略過
+      if (row.size_bytes != null && probe.size != null && probe.size !== row.size_bytes) {
+        report.totals.sizeMismatch += 1;
+        if (report.samples.sizeMismatch.length < limitMissing) {
+          report.samples.sizeMismatch.push({
+            id: row.id,
+            path: row.storage_path,
+            dbBytes: row.size_bytes,
+            diskBytes: probe.size,
+          });
         }
       }
     }
 
-    if (scanOrphans && report.assetsDirExists) {
+    if (scanOrphans && objectStore) {
+      // 物件儲存模式下沒有本機目錄可掃；孤兒物件請用 mc ls／aws s3 ls 對照本報告的 referenced 清單
+      console.warn("--scan-orphans 在物件儲存模式下不適用（本機沒有素材目錄），已略過");
+    } else if (scanOrphans && report.assetsDirExists) {
       const onDisk = await walkFiles(ASSETS_DIR);
       const orphans = onDisk.filter((rel) => !referenced.has(rel));
       report.totals.orphanFiles = orphans.length;

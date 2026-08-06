@@ -681,6 +681,18 @@ export function ProjectPage({ id }: { id: string }) {
   const characters = trpc.characters.list.useQuery({ projectId: id });
   const scenePresets = trpc.scenePresets.list.useQuery({ projectId: id });
   const propCards = trpc.props.list.useQuery({ projectId: id });
+  /**
+   * 用三幕大綱拆分鏡。
+   *
+   * 補的是一個真的斷點：三幕本來只以 formatWorldviewForAi 裡的一行摘要進 prompt，
+   * 拆分鏡的腳本來源只認「貼上的全文」或知識庫——使用者在這裡認真填完三幕，
+   * 到拆分鏡卻仍被要求再貼一份腳本，於是同一個故事被寫兩次。
+   */
+  const splitFromOutline = trpc.director.splitScript.useMutation({
+    onSuccess: () => {
+      utils.scenes.listByProject.invalidate({ projectId: id });
+    },
+  });
   /** 敘事人物 → 一鍵建角色定裝（外觀錨點）；成功後勾選並捲到定裝區 */
   const addCharFromPerson = trpc.characters.add.useMutation({
     onSuccess: (row) => {
@@ -1925,6 +1937,15 @@ export function ProjectPage({ id }: { id: string }) {
                       onChange={(field, value) => {
                         updateWv.mutate({ id, worldview: { acts: { ...wv.acts, [field]: value } } });
                       }}
+                      sceneCount={scenes.data?.length ?? 0}
+                      onSplitFromOutline={
+                        canEdit
+                          ? () => splitFromOutline.mutate({ projectId: id, fromOutline: true })
+                          : undefined
+                      }
+                      splitting={splitFromOutline.isPending}
+                      splitError={splitFromOutline.error?.message ?? null}
+                      onSeeScenes={() => scrollToSelector("#stage-deliver")}
                     />
 
                     <label style={{ marginTop: 10, display: "block" }} id="wv-people-label">

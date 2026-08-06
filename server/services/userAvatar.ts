@@ -1,12 +1,16 @@
 /**
- * 個人頭像存取：獨立於專案素材池，寫在 STORAGE_ROOT/avatars/{userId}.jpg。
+ * 個人頭像存取：獨立於專案素材池，相對路徑固定為 avatars/{userId}.{ext}。
  * 前端以 canvas 壓成 JPEG（≤256px、≤150KB data URL）後送來；伺服器只驗格式與大小。
+ *
+ * 落地位置跟著全站儲存後端走（本機 Volume 或 S3／MinIO）——頭像若還留在容器本地磁碟，
+ * 就會變成「素材都在、只有大頭貼每次部署消失」的怪現象。
  */
 import { mkdir, writeFile, unlink, access } from "node:fs/promises";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { db, schema } from "../db";
-import { STORAGE_ROOT } from "./storage";
+import { STORAGE_ROOT, storageBackend } from "./storage";
+import { deleteObject, headObject, putObject } from "./objectStore";
 
 const AVATARS_DIR = path.join(STORAGE_ROOT, "avatars");
 /** 解碼後上限（約 150KB data URL ≈ 112KB binary） */
@@ -75,18 +79,17 @@ export async function saveUserAvatar(userId: string, dataUrl: string): Promise<{
 
   const ext = extForMime(parsed.mime);
   const rel = avatarRelPath(userId, ext);
-  await mkdir(AVATARS_DIR, { recursive: true });
-  const abs = avatarAbsPath(rel);
-  await writeFile(abs, parsed.buffer);
+  if (storageBackend() === "object") {
+    await putObject(rel, parsed.buffer, parsed.mime);
+  } else {
+    await mkdir(AVATARS_DIR, { recursive: true });
+    await writeFile(avatarAbsPath(rel), parsed.buffer);
+  }
 
   // 清掉其他副檔名的舊檔（使用者可能從 png 換成 jpg）
   for (const other of [".jpg", ".png", ".webp"] as const) {
     if (other === ext) continue;
-    try {
-      await unlink(avatarAbsPath(avatarRelPath(userId, other)));
-    } catch {
-      /* 不存在就算了 */
-    }
+    await removeAvatarFile(avatarRelPath(userId, other));
   }
 
   await db.update(schema.users).set({ avatarUrl: rel }).where(eq(schema.users.id, userId));
@@ -94,43 +97,55 @@ export async function saveUserAvatar(userId: string, dataUrl: string): Promise<{
   return { avatarUrl: `/api/avatars/${userId}?v=${Date.now()}` };
 }
 
+/** 刪一個頭像檔（兩種後端共用）；不存在不算錯 */
+async function removeAvatarFile(rel: string): Promise<void> {
+  try {
+    if (storageBackend() === "object") await deleteObject(rel);
+    else await unlink(avatarAbsPath(rel));
+  } catch {
+    /* 檔已不在 */
+  }
+}
+
 export async function clearUserAvatar(userId: string): Promise<void> {
   const [user] = await db.select({ avatarUrl: schema.users.avatarUrl }).from(schema.users).where(eq(schema.users.id, userId));
-  if (user?.avatarUrl && isAvatarRelPath(user.avatarUrl)) {
-    try {
-      await unlink(avatarAbsPath(user.avatarUrl));
-    } catch {
-      /* 檔已不在 */
-    }
-  }
+  if (user?.avatarUrl && isAvatarRelPath(user.avatarUrl)) await removeAvatarFile(user.avatarUrl);
   // 保險：清三種副檔名
-  for (const ext of [".jpg", ".png", ".webp"] as const) {
-    try {
-      await unlink(avatarAbsPath(avatarRelPath(userId, ext)));
-    } catch {
-      /* ignore */
-    }
-  }
+  for (const ext of [".jpg", ".png", ".webp"] as const) await removeAvatarFile(avatarRelPath(userId, ext));
   await db.update(schema.users).set({ avatarUrl: null }).where(eq(schema.users.id, userId));
 }
 
-/** 讀取目前頭像絕對路徑；沒有則 null */
-export async function resolveAvatarFile(userId: string): Promise<{ abs: string; mime: string } | null> {
+export function mimeForAvatarPath(rel: string): string {
+  const lower = rel.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  return "image/jpeg";
+}
+
+/**
+ * 讀取目前頭像的位置。
+ * - 本機後端回 `{ kind: "local", abs }`（呼叫端用 res.sendFile）
+ * - 物件儲存後端回 `{ kind: "object", rel }`（呼叫端串流）
+ * 檔案實際不存在時回 null——資料庫記了但檔沒了（換過磁碟）不該回 500。
+ */
+export async function resolveAvatarFile(
+  userId: string,
+): Promise<{ kind: "local"; abs: string; rel: string; mime: string } | { kind: "object"; rel: string; mime: string } | null> {
   const [user] = await db.select({ avatarUrl: schema.users.avatarUrl }).from(schema.users).where(eq(schema.users.id, userId));
   if (!user?.avatarUrl || !isAvatarRelPath(user.avatarUrl)) return null;
-  const abs = avatarAbsPath(user.avatarUrl);
+  const rel = user.avatarUrl;
+  const mime = mimeForAvatarPath(rel);
+  if (storageBackend() === "object") {
+    const stat = await headObject(rel).catch(() => ({ exists: false }));
+    return stat.exists ? { kind: "object", rel, mime } : null;
+  }
+  const abs = avatarAbsPath(rel);
   try {
     await access(abs);
   } catch {
     return null;
   }
-  const lower = user.avatarUrl.toLowerCase();
-  const mime = lower.endsWith(".png")
-    ? "image/png"
-    : lower.endsWith(".webp")
-      ? "image/webp"
-      : "image/jpeg";
-  return { abs, mime };
+  return { kind: "local", abs, rel, mime };
 }
 
 /** AuthState 用的公開 URL（無 cache-bust；前端可自行加） */
