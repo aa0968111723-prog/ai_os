@@ -18,7 +18,7 @@ import {
   isUsageBasedPoints,
   shouldShowApprovalThresholdNotice,
 } from "../generationGates";
-import { focusAndReveal } from "../../../lib/scrollIntoViewForChrome";
+import { focusAndReveal, scrollIntoViewForChrome } from "../../../lib/scrollIntoViewForChrome";
 import { revealWorkbenchAnchor, scrollToSelector } from "../workbenchNav";
 import {
   formatBringInSummary,
@@ -474,6 +474,15 @@ export function DirectGenerateMode({
           onClick={() => {
             setSubmitNotice("");
             setConfirming(true);
+            // 手機上「生成」鈕常位於視窗底部，確認面板 inline 展開會整塊落在
+            // 摺線之下——看起來像按了沒反應。等面板掛載完成後捲進可視帶
+            //（scrollIntoViewForChrome 讓開 --chrome-bottom；面板已可見時是 no-op）。
+            // gate ≤820：桌機行為維持原狀。
+            if (window.matchMedia("(max-width: 820px)").matches) {
+              requestAnimationFrame(() => {
+                scrollIntoViewForChrome(document.querySelector(".confirm-panel"));
+              });
+            }
           }}
         >
           {!model ? "模型載入中…" : submit.isPending ? "送出中…" : `生成（−${estPoints} 點）`}
