@@ -44,6 +44,7 @@ const ENTRIES: DownloadEntry[] = [
   { file: "docs/點數校準報告.md", title: "點數 × 官方成本校準報告", category: "model" },
   { file: "docs/隱私權政策.md", title: "隱私權政策（草稿）", category: "legal" },
   { file: "docs/使用條款.md", title: "使用條款（草稿）", category: "legal" },
+  { file: "docs/物件儲存與Redis.md", title: "物件儲存（MinIO／S3）與 Redis 設定", category: "dev", restricted: true },
 ];
 
 const ROOT = process.cwd();

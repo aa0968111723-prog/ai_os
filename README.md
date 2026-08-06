@@ -41,6 +41,19 @@ npm run dev                 # server :3000 + client :5173
    既有未納管 DB 請先依 [資料庫遷移 Runbook](docs/資料庫遷移.md) 做 dry-run 與明確 baseline。
    容器啟動只做唯讀 drift gate，絕不在 runtime 自動 push DDL。
 
+### 素材儲存：Volume 或物件儲存（二選一）
+
+預設把素材寫在掛載的 Volume（`/data`）。也可以改用 S3 相容物件儲存（MinIO／R2／S3）——
+設 `S3_ENDPOINT`＋`S3_BUCKET`＋金鑰即自動切換，Volume 就不再需要。
+
+⚠ **切換前一定要先搬舊檔**，否則站上所有舊素材會在切換當下變 404。
+完整步驟與注意事項見 [物件儲存與 Redis](docs/物件儲存與Redis.md)。
+
+### Redis（可選）
+
+不設一切照常。設了 `REDIS_URL` 之後：外部查詢的快取跨實例共用，且**開到兩個以上 replica 時
+即時協作才會正確**（否則被分流到不同實例的協作者互相看不見）。連不上會自動退回單機模式。
+
 ## 結構
 
 ```

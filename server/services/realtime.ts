@@ -3,6 +3,10 @@
  * 路徑 /ws?projectId=<uuid> 或 /ws?groupId=<uuid>；由 index.ts 呼叫 attachRealtime(httpServer) 掛上。
  * 專案房（p:）保留高精度錨點／游標；組房（g:）讓全組成員在 Launchpad 等頁互相看到 presence 與游標。
  * 協定與 client/src/realtime.tsx 嚴格對應——兩邊要一起改。
+ *
+ * 多實例：房間是本行程的記憶體，所以設了 REDIS_URL 時會透過 services/realtimeBus 把事件與
+ * 在場名冊同步到其他 replica（否則同一專案的協作者被分流到不同實例就會互相看不見）。
+ * 沒有 Redis 時 bus 全是 no-op，行為與單機時完全相同。
  */
 import type { IncomingMessage, Server } from "node:http";
 import type { Request } from "express";
@@ -12,6 +16,19 @@ import { db, schema } from "../db";
 import { loadAuthState, parseCookies, sha256 } from "./auth";
 import { sessionGate } from "./sessionPolicy";
 import { isShuttingDown, onShutdown } from "./shutdown";
+import {
+  closeRealtimeBus,
+  configureRealtimeBus,
+  isRealtimeBusEnabled,
+  joinRoomBus,
+  leaveRoomBus,
+  mergeRosterFocus,
+  mergeRosterUsers,
+  publishRoomEvent,
+  publishRoster,
+  pruneAllRosters,
+  remoteRosters,
+} from "./realtimeBus";
 
 /** 與 services/auth 的 session cookie 同名（auth 未匯出常數，改名要兩邊同步） */
 const COOKIE_NAME = "aidos_session";
@@ -120,8 +137,8 @@ function originAllowed(origin: string | undefined): boolean {
   return allowed.has(host);
 }
 
-/** presence 用的去重名單（同 user 多連線只列一次） */
-function dedupeUsers(room: Set<Client>): Array<{ userId: string; name: string; color: string }> {
+/** presence 用的去重名單（同 user 多連線只列一次）——僅本機房內 */
+function localUsers(room: Set<Client>): Array<{ userId: string; name: string; color: string }> {
   const byUser = new Map<string, { userId: string; name: string; color: string }>();
   for (const c of room) {
     if (!byUser.has(c.userId)) byUser.set(c.userId, { userId: c.userId, name: c.name, color: c.color });
@@ -129,8 +146,8 @@ function dedupeUsers(room: Set<Client>): Array<{ userId: string; name: string; c
   return [...byUser.values()];
 }
 
-/** 每人目前 zone（同 user 多連線取最後一個非空者） */
-function focusList(room: Set<Client>): Array<{ userId: string; zone: string }> {
+/** 每人目前 zone（同 user 多連線取最後一個非空者）——僅本機房內 */
+function localFocus(room: Set<Client>): Array<{ userId: string; zone: string }> {
   const byUser = new Map<string, string>();
   for (const c of room) {
     if (c.zone) byUser.set(c.userId, c.zone);
@@ -138,12 +155,54 @@ function focusList(room: Set<Client>): Array<{ userId: string; zone: string }> {
   return [...byUser].map(([userId, zone]) => ({ userId, zone }));
 }
 
-function broadcast(room: Set<Client>, msg: unknown, except?: Client): void {
+/** 對外的在場名單＝本機 ∪ 其他實例回報的名冊（單機模式下就等於本機名單） */
+function dedupeUsers(roomKey: string, room: Set<Client>): Array<{ userId: string; name: string; color: string }> {
+  const local = localUsers(room);
+  if (!isRealtimeBusEnabled()) return local;
+  return mergeRosterUsers(local, remoteRosters(roomKey), Date.now());
+}
+
+function focusList(roomKey: string, room: Set<Client>): Array<{ userId: string; zone: string }> {
+  const local = localFocus(room);
+  if (!isRealtimeBusEnabled()) return local;
+  return mergeRosterFocus(local, remoteRosters(roomKey), Date.now());
+}
+
+/** 只送給本機連線（收到跨實例訊息時用：來源連線不在這台機器上，沒有 except 可言） */
+function sendLocal(room: Set<Client>, msg: unknown, except?: Client): void {
   const data = JSON.stringify(msg);
   for (const c of room) {
     if (c !== except && c.ws.readyState === WebSocket.OPEN) c.ws.send(data);
   }
 }
+
+/** 送給本機連線並同步到其他實例 */
+function broadcast(roomKey: string, room: Set<Client>, msg: unknown, except?: Client): void {
+  sendLocal(room, msg, except);
+  publishRoomEvent(roomKey, msg);
+}
+
+/** 在場名單有變：本機重播一次（presence 是完整名單，不能只送差異） */
+function broadcastPresence(roomKey: string, room: Set<Client>, except?: Client): void {
+  sendLocal(room, { type: "presence", users: dedupeUsers(roomKey, room) }, except);
+}
+
+/** 把本機名冊公告出去，讓其他實例把我們這邊的人算進他們的在場名單 */
+function announceRoster(roomKey: string, room: Set<Client>): void {
+  publishRoster(roomKey, localUsers(room), localFocus(room));
+}
+
+// 跨實例訊息的處理：遠端事件轉發給本機同房連線；遠端名冊有變就重算在場名單。
+configureRealtimeBus({
+  onRemoteEvent: (roomKey, message) => {
+    const room = rooms.get(roomKey);
+    if (room) sendLocal(room, message);
+  },
+  onRosterChange: (roomKey) => {
+    const room = rooms.get(roomKey);
+    if (room) broadcastPresence(roomKey, room);
+  },
+});
 
 /**
  * upgrade 階段驗證：session cookie → 使用者 → 專案存在且屬於使用者的組（或純 groupId 成員）。
@@ -249,6 +308,11 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
   totalConnections += 1;
   userConnCount.set(ctx.userId, (userConnCount.get(ctx.userId) ?? 0) + 1);
   const theRoom = room;
+  const roomKey = ctx.roomKey;
+  // 第一個本機連線進房時才訂閱該房的跨實例頻道（沒人在的房間不佔訂閱）。
+  // 訂閱是非同步的，但不擋住 join：訂閱完成前的遠端事件會漏接幾十毫秒，
+  // 而 presence 由名冊週期性重送收斂，不會留下永久不一致。
+  void joinRoomBus(roomKey).then(() => announceRoster(roomKey, theRoom));
 
   ws.on("pong", () => {
     client.missedPongs = 0;
@@ -281,11 +345,7 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
         vx: clamp01(typeof msg.vx === "number" ? msg.vx : 0.5),
       };
       if (typeof msg.ci === "number" && Number.isFinite(msg.ci)) payload.ci = clamp01(msg.ci);
-      broadcast(
-        theRoom,
-        payload,
-        client,
-      );
+      broadcast(roomKey, theRoom, payload, client);
     } else if (msg.type === "focus" && (msg.zone === null || typeof msg.zone === "string")) {
       // zone「改變」（進入新區塊／離開）是有意義的離散事件，一律更新並廣播，不受節流丟棄——否則
       // 快速在兩個編輯區之間移動時，第二個 focus 被節流吃掉，協作者的編輯指示卡在舊區塊或整個消失。
@@ -295,12 +355,14 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
       client.lastFocusAt = now;
       client.zone = msg.zone; // zone 一律更新（供 hello 帶出既有狀態）
       if (!changed && userThrottled(client.userId, "focus", now, MIN_FOCUS_MS)) return;
-      broadcast(theRoom, { type: "focus", userId: client.userId, zone: msg.zone }, client);
+      broadcast(roomKey, theRoom, { type: "focus", userId: client.userId, zone: msg.zone }, client);
+      // zone 也是名冊的一部分（新加入者的 hello 要帶得出既有聚焦），變更時同步給其他實例
+      announceRoster(roomKey, theRoom);
     } else if (msg.type === "invalidate") {
       if (now - client.lastInvalidateAt < MIN_INVALIDATE_MS) return;
       client.lastInvalidateAt = now;
       if (userThrottled(client.userId, "invalidate", now, MIN_INVALIDATE_MS)) return;
-      broadcast(theRoom, { type: "invalidate", userId: client.userId }, client);
+      broadcast(roomKey, theRoom, { type: "invalidate", userId: client.userId }, client);
     }
   });
 
@@ -316,9 +378,14 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
       userConnCount.set(client.userId, remaining);
     }
     if (theRoom.size === 0) {
-      rooms.delete(ctx.roomKey);
+      rooms.delete(roomKey);
+      // 送一份空名冊再退訂：其他實例立刻把我們這邊的人移除，
+      // 不必等 90 秒 TTL 過期才讓幽靈協作者從畫面上消失。
+      announceRoster(roomKey, theRoom);
+      leaveRoomBus(roomKey);
     } else {
-      broadcast(theRoom, { type: "presence", users: dedupeUsers(theRoom) });
+      broadcastPresence(roomKey, theRoom);
+      announceRoster(roomKey, theRoom);
     }
   });
 
@@ -326,11 +393,11 @@ function join(ws: WebSocket, ctx: { roomKey: string; userId: string; name: strin
     JSON.stringify({
       type: "hello",
       self: { userId: client.userId, name: client.name, color: client.color },
-      users: dedupeUsers(theRoom),
-      focus: focusList(theRoom),
+      users: dedupeUsers(roomKey, theRoom),
+      focus: focusList(roomKey, theRoom),
     }),
   );
-  broadcast(theRoom, { type: "presence", users: dedupeUsers(theRoom) }, client);
+  broadcastPresence(roomKey, theRoom, client);
 }
 
 export function attachRealtime(server: Server): void {
@@ -382,7 +449,7 @@ export function attachRealtime(server: Server): void {
   const heartbeat = setInterval(() => {
     round += 1;
     const recheck = round % 2 === 0; // 每兩輪（≒60 秒）附帶重驗權限，縮短撤權空窗
-    for (const room of rooms.values()) {
+    for (const [roomKey, room] of rooms) {
       for (const c of room) {
         if (c.missedPongs >= 2) {
           c.ws.terminate(); // terminate 會觸發 close → 從房間移除並廣播 presence
@@ -392,12 +459,24 @@ export function attachRealtime(server: Server): void {
         c.ws.ping();
         if (recheck) void revalidate(c);
       }
+      // 名冊每輪重送：實例重啟或訂閱短暫斷線後，其他實例最慢 30 秒就重新看到我們的人。
+      announceRoster(roomKey, room);
+    }
+    // 清掉已消失實例的名冊，並把受影響房間的在場名單重播一次，
+    // 否則某個 replica 被砍掉後，畫面上會留著永遠不會離開的幽靈協作者。
+    for (const roomKey of pruneAllRosters()) {
+      const room = rooms.get(roomKey);
+      if (room) broadcastPresence(roomKey, room);
     }
   }, 30_000);
   server.on("close", () => clearInterval(heartbeat));
   onShutdown(() => {
     server.removeListener("upgrade", handleUpgrade);
     clearInterval(heartbeat);
+    // 先送空名冊再退訂：其他實例立刻把本實例的人從在場名單移除，
+    // 不必等 90 秒 TTL——滾動部署時「剛下線那台的人還掛在名單上」很容易被誤讀成系統故障。
+    for (const roomKey of rooms.keys()) publishRoster(roomKey, [], []);
+    closeRealtimeBus();
     return new Promise<void>((resolve) => {
       let settled = false;
       let forceTimer: NodeJS.Timeout | undefined;
